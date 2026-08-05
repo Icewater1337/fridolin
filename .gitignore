@@ -1,0 +1,29 @@
+# ── secrets and live config — never commit ────────────────────────────────
+config.json
+config.json.backup.*
+.env
+*.pem
+*.key
+google_calendar_*.json
+
+# ── runtime state ─────────────────────────────────────────────────────────
+*.db
+*.db-shm
+*.db-wal
+qrcode.png
+media/
+*.log
+conversation-history.jsonl
+claude-stream.log
+
+# ── build output ──────────────────────────────────────────────────────────
+whatsapp-claude-bridge
+/bridge
+dist/
+
+# ── editors and OS ────────────────────────────────────────────────────────
+.DS_Store
+.idea/
+.vscode/
+*.swp
+*~

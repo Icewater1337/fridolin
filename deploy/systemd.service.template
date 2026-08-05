@@ -1,0 +1,30 @@
+# systemd user unit for the WhatsApp-Claude bridge.
+#
+# Replace the {{...}} placeholders, then:
+#     mkdir -p ~/.config/systemd/user
+#     cp whatsapp-claude-bridge.service ~/.config/systemd/user/
+#     systemctl --user daemon-reload
+#     systemctl --user enable --now whatsapp-claude-bridge
+#     journalctl --user -u whatsapp-claude-bridge -f
+#
+# Pair with WhatsApp interactively BEFORE enabling this — the QR scan needs a
+# terminal. To keep the bridge running after you log out:
+#     sudo loginctl enable-linger {{USER}}
+#
+# Note: the sandbox layer is macOS-only. On Linux the assistant runs with
+# whatever access this user has, so run it as a dedicated user.
+
+[Unit]
+Description=WhatsApp-Claude bridge
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory={{WORKDIR}}
+ExecStart={{BINARY}} --config {{CONFIG}}
+Restart=on-failure
+RestartSec=5s
+
+[Install]
+WantedBy=default.target

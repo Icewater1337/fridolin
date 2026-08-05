@@ -1,0 +1,58 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  go:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.25'
+          cache: true
+
+      - name: gofmt
+        run: |
+          unformatted="$(gofmt -l .)"
+          if [ -n "$unformatted" ]; then
+            echo "These files need gofmt:"; echo "$unformatted"; exit 1
+          fi
+
+      - name: go vet
+        run: go vet ./...
+
+      - name: build
+        run: go build ./...
+
+      - name: test
+        run: go test -race -count=1 ./...
+
+  scripts:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: shellcheck
+        run: shellcheck --severity=warning setup.sh
+
+      - name: python syntax
+        run: |
+          python3 -m py_compile tools/*.py
+
+      # Nothing in this repo should contain a real phone number, group JID, or
+      # personal path. Catch it before it is published.
+      - name: no personal data
+        run: |
+          if grep -rnE '[0-9]{15,}@g\.us|/Users/[a-z]|/home/[a-z]' \
+               --exclude-dir=.git --exclude-dir=.github --exclude=go.sum . \
+             | grep -vE '120363000000000000|\{\{|YOUR_'; then
+            echo "Found what looks like real personal data above."; exit 1
+          fi

@@ -1,0 +1,40 @@
+{
+  "_comment": "Copy to config.json and edit, or just run ./setup.sh. Every option is documented in docs/CONFIGURATION.md.",
+
+  "allowed_numbers": ["15551234567"],
+  "allowed_groups": ["120363000000000000@g.us"],
+  "triggers": ["@claude"],
+
+  "claude_path": "claude",
+  "data_dir": "~/.whatsapp-claude-bridge",
+
+  "brain_mode": true,
+  "brain_model": "",
+  "brains": [
+    {
+      "name": "personal",
+      "work_dir": "~/assistant/personal",
+      "handles_dms": true,
+      "groups": []
+    },
+    {
+      "name": "team",
+      "work_dir": "~/assistant/team",
+      "handles_dms": false,
+      "groups": ["120363000000000000@g.us"]
+    }
+  ],
+
+  "sandbox": {
+    "enabled": true,
+    "deny_paths": ["~/clients", "~/work"],
+    "allow_paths": []
+  },
+
+  "dangerously_skip_permissions": true,
+  "otp_guard": true,
+  "viewer": false,
+  "http_listen": "127.0.0.1:8765",
+  "max_chunk_size": 3900,
+  "log_level": "info"
+}
