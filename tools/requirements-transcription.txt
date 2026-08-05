@@ -1,0 +1,19 @@
+# Optional — only for local transcription with tools/transcribe.py.
+#
+# These are large (torch alone is over 1 GB) and the first run downloads the
+# model on top of that. If you would rather not, skip this file entirely and
+# use the Groq engine instead:
+#
+#     pip install groq
+#     export GROQ_API_KEY=...
+#     python3 tools/transcribe.py recording.ogg --engine groq
+#
+# ffmpeg is required either way (macOS: brew install ffmpeg).
+
+torch>=2.1.0
+transformers>=4.40.0
+accelerate>=0.27.0
+
+# Fallback engine — useful alongside the local model too, since `--engine auto`
+# uses it whenever a local run fails.
+groq>=0.11.0

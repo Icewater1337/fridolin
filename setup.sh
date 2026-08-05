@@ -407,7 +407,8 @@ for i in "${!BRAIN_NAMES[@]}"; do
   if [[ -f "$prompt_file" ]]; then
     hint "$name: brain-prompt.md already exists — left untouched"
   else
-    sed "s/{{BRAIN_NAME}}/$name/g" "$REPO_DIR/examples/brain-prompt.example.md" > "$prompt_file"
+    sed "s/{{BRAIN_NAME}}/$name/g; s|<bridge-repo>|$REPO_DIR|g; s|<work_dir>|$dir|g" \
+      "$REPO_DIR/examples/brain-prompt.example.md" > "$prompt_file"
     ok "$name: created $prompt_file"
   fi
 
@@ -423,6 +424,17 @@ numbers. Optional — the bridge works fine without it.
 | --------------- | ------ | ----- |
 EOS
   fi
+
+  # Example skills. Copied rather than symlinked so each brain can diverge;
+  # never overwritten, since the point is that they get edited.
+  mkdir -p "$dir/skills"
+  for skill in "$REPO_DIR"/examples/skills/*.md; do
+    [[ -e "$skill" ]] || continue
+    dest="$dir/skills/$(basename "$skill")"
+    if [[ ! -f "$dest" ]]; then
+      sed "s|<bridge-repo>|$REPO_DIR|g; s|<work_dir>|$dir|g" "$skill" > "$dest"
+    fi
+  done
 done
 
 # ══════════════════════════════════════════════════════════════════════════

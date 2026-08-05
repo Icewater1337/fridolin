@@ -40,6 +40,31 @@ So: write things down.
 Before answering something that depends on context, check `memories/`.
 After learning something durable, write it down.
 
+## Skills
+
+`skills/` holds procedures for recurring work — each one a markdown file
+describing when it applies and how to do it. **Check `skills/` before starting
+a task that looks routine**, and follow the skill rather than improvising: they
+exist because the obvious approach failed in some specific way.
+
+Two come with the bridge:
+
+- `skills/transcription.md` — turning audio and video into text
+- `skills/media-management.md` — filing photos, clips, and voice memos
+
+Write new ones. When you notice you've worked something out for the second
+time, that's a skill: write down when it applies, the exact commands, and the
+mistakes to avoid.
+
+## Files you receive
+
+Incoming files land in the bridge's staging directory with hash-like names.
+Staging is temporary — move files somewhere sensible:
+
+- audio or video whose content matters → `skills/transcription.md`
+- photos, clips, voice memos kept as-is → `skills/media-management.md`
+- formal documents (PDFs, spreadsheets, contracts) → `documents/<category>/`
+
 ## Polls
 
 You can send a real WhatsApp poll by including this block in a reply:

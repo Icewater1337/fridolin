@@ -162,6 +162,7 @@ from files it writes itself:
 <brain work_dir>/
 ├── brain-prompt.md               the system prompt — edit this
 ├── conversation-history.jsonl    every message, appended automatically
+├── skills/                       procedures for recurring work
 └── memories/                     notes the assistant writes for itself
     └── people/
         └── whatsapp-identity-map.md   phone numbers → names
@@ -172,6 +173,43 @@ Anything older than the recent window is searchable:
 ```bash
 python3 tools/history_search.py --brain-dir ~/assistant/personal --since 30d "invoice"
 ```
+
+### Skills
+
+A skill is a markdown file in a brain's `skills/` directory telling the
+assistant when a piece of recurring work applies and exactly how to do it —
+which command, which flags, which mistakes not to make. The assistant reads
+them before starting routine work, and writes new ones as it finds patterns.
+
+Two ship with the bridge and are copied into each brain by `setup.sh`:
+
+- **[transcription](examples/skills/transcription.md)** — audio and video to
+  text, including the reasons not to hand-roll it
+- **[media-management](examples/skills/media-management.md)** — filing photos,
+  clips, and voice memos out of the staging directory
+
+They're starting points. Edit them, and add your own.
+
+### Transcription
+
+`tools/transcribe.py` handles voice notes and recordings of any length: it
+pulls audio out of video, splits long files into chunks, runs a local Whisper
+model or the Groq API, and retries with backoff on rate limits.
+
+```bash
+python3 tools/transcribe.py voice-note.ogg --output-dir ~/assistant/personal/transcripts
+```
+
+Neither engine is installed by default — pick one:
+
+```bash
+pip install -r tools/requirements-transcription.txt   # local: private, ~1.5 GB model
+pip install groq && export GROQ_API_KEY=...           # API: light, needs a key
+```
+
+`ffmpeg` is required either way. `--model` accepts any Whisper-compatible model
+ID, so a fine-tune matching your language or dialect usually beats the default
+by a wide margin.
 
 ### Sending messages from a script
 
