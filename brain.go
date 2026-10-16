@@ -238,6 +238,9 @@ var (
 	errBrainInterrupted = errors.New("brain run interrupted")
 	errBrainRetired     = errors.New("brain was removed")
 	errQueueFull        = errors.New("brain queue is full")
+	// errSandboxUnavailable is what the chat sees. The cause goes to the log
+	// only, because it can name private paths.
+	errSandboxUnavailable = errors.New("the sandbox could not be set up, so this message was not run (details in the bridge log)")
 )
 
 // ID is the brain's stable identifier.
@@ -509,26 +512,30 @@ func claudeArgs(s *brainSettings, prompt string) []string {
 func (br *Brain) invoke(run *brainRun, ctx context.Context, s *brainSettings, m Inbound) RunResult {
 	prompt := br.buildPrompt(s, m)
 
-	br.ensureViewer(s)
-
 	args := claudeArgs(s, prompt)
 
 	// Wrap the spawn in sandbox-exec so prompt injection in an incoming message
 	// cannot reach another brain's tree or cross-session Claude state. The brain
 	// still runs with --dangerously-skip-permissions for tool freedom; the
-	// sandbox enforces the read scope at the OS layer regardless.
+	// sandbox enforces the read scope at the OS layer regardless. That is also
+	// why a sandbox that cannot be set up refuses the run instead of spawning
+	// without it: the fallback would quietly drop the only barrier left.
 	binary := s.claudePath
 	finalArgs := args
 	var sbProfilePath string
 	if br.sandbox != nil && br.sandbox.Enabled() {
-		if profilePath, sbErr := br.sandbox.Write(br.id); sbErr != nil {
-			log.Printf("brain %s: sandbox profile generation failed (%v); falling back to unsandboxed spawn", br.id, sbErr)
-		} else {
-			sbProfilePath = profilePath
-			binary = sandboxExecPath
-			finalArgs = append([]string{"-f", sbProfilePath, s.claudePath}, args...)
+		profilePath, sbErr := br.sandbox.Write(br.id)
+		if sbErr != nil {
+			log.Printf("brain %s: sandbox unavailable, refusing to run: %v", br.id, sbErr)
+			return RunResult{Err: errSandboxUnavailable}
 		}
+		sbProfilePath = profilePath
+		binary = br.sandbox.execPath
+		finalArgs = append([]string{"-f", sbProfilePath, s.claudePath}, args...)
 	}
+
+	// Only once the sandbox is settled: a refused run starts no process.
+	br.ensureViewer(s)
 
 	cmd := exec.CommandContext(ctx, binary, finalArgs...)
 	cmd.Dir = br.workDir

@@ -155,6 +155,7 @@ type Config struct {
 type SandboxConfig struct {
 	// Enabled wraps each brain spawn in sandbox-exec. macOS only; ignored
 	// elsewhere. Strongly recommended when running with skip-permissions.
+	// A run whose sandbox cannot be set up is refused, never run without it.
 	Enabled bool `json:"enabled"`
 
 	// DenyPaths are extra absolute paths (or ~-relative paths) that brains

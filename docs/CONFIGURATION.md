@@ -188,7 +188,10 @@ single-user setup.
 
 When enabled, each Claude run is wrapped in `sandbox-exec` under a generated
 profile. Changes (including added or removed brains) apply to the next run of
-every brain. The profile is allow-by-default with reads denied to:
+every brain. If the profile cannot be built or `/usr/bin/sandbox-exec` is
+missing, the run is refused: the chat gets an error, the bridge log names the
+cause, and Claude never starts unsandboxed. Classic mode (`brain_mode` off) is
+not sandboxed. The profile is allow-by-default with reads denied to:
 
 - every **other brain's** working directory
 - `~/.ssh`, `~/.gnupg`, `~/.aws`, `~/.config/gh`, `~/.config/gcloud`,

@@ -343,7 +343,9 @@ What the bridge does about it:
   denied to SSH keys, cloud credentials, shell history, browser and mail data,
   your Documents/Downloads/Desktop, other Claude sessions' transcripts, the
   bridge's own database — and to every other brain's directory. Add your own
-  paths under `sandbox.deny_paths`.
+  paths under `sandbox.deny_paths`. When the sandbox is on but cannot be set
+  up, the brain refuses the message with an error instead of running
+  without it.
 - **Brain isolation.** Brains have separate directories, sessions, histories,
   and calendar credentials.
 - **A guarded dashboard.** It only listens on localhost, rejects requests
@@ -359,6 +361,7 @@ What it does not do:
 
 - The sandbox is containment, not a jail. It raises the cost of a prompt
   injection; it does not stop code execution.
+- Classic mode (`brain_mode` off) runs Claude without the sandbox.
 - On Linux there is no sandbox layer at all. Run the bridge as a dedicated user.
 - Every file sent to the bridge lands in your data directory, and the assistant
   reads it.
@@ -439,6 +442,10 @@ directory; two bridges on one WhatsApp session knock each other offline.
 
 **Everything times out with the sandbox on** — set `sandbox.enabled` to `false`
 to confirm it's the cause, then add the path it needs to `sandbox.allow_paths`.
+
+**"the sandbox could not be set up"** — the sandbox is on, but the bridge
+could not build the profile or find `/usr/bin/sandbox-exec`, so it did not run
+the message at all. The bridge log names the cause.
 
 ---
 

@@ -51,11 +51,14 @@ type SandboxProfiler struct {
 	// extraDeny and extraAllow come from config.
 	extraDeny  []string
 	extraAllow []string
+
+	// execPath is sandboxExecPath; tests point it at a missing file.
+	execPath string
 }
 
 // NewSandboxProfiler builds a profiler for the configured brains.
 func NewSandboxProfiler(workDirs map[string]string, cfg *Config) *SandboxProfiler {
-	sp := &SandboxProfiler{}
+	sp := &SandboxProfiler{execPath: sandboxExecPath}
 	sp.Update(workDirs, cfg)
 	return sp
 }
@@ -294,8 +297,8 @@ func (sp *SandboxProfiler) Write(brainID string) (string, error) {
 	if runtime.GOOS != "darwin" {
 		return "", fmt.Errorf("sandbox-exec is macOS-only, got %s", runtime.GOOS)
 	}
-	if _, err := os.Stat(sandboxExecPath); err != nil {
-		return "", fmt.Errorf("%s not available: %w", sandboxExecPath, err)
+	if _, err := os.Stat(sp.execPath); err != nil {
+		return "", fmt.Errorf("%s not available: %w", sp.execPath, err)
 	}
 
 	buf := make([]byte, 6)
