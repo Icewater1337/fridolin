@@ -390,3 +390,37 @@ func TestSandboxProfileNeedsAbsolutePaths(t *testing.T) {
 		})
 	}
 }
+
+// TestSandboxConfigRejectsUnusablePaths: deny and allow paths (and the
+// credentials dir) must be absolute after ~ expansion. A relative entry used
+// to load fine and protect nothing.
+func TestSandboxConfigRejectsUnusablePaths(t *testing.T) {
+	cases := []struct {
+		name    string
+		sandbox string
+		wantErr string
+	}{
+		{"home-relative deny", `{"deny_paths": ["~/clients"]}`, ""},
+		{"absolute deny", `{"deny_paths": ["/Volumes/work/clients"]}`, ""},
+		{"relative deny", `{"deny_paths": ["clients"]}`, "sandbox.deny_paths"},
+		{"empty deny", `{"deny_paths": [""]}`, "sandbox.deny_paths"},
+		{"other user's home", `{"deny_paths": ["~you/clients"]}`, "sandbox.deny_paths"},
+		{"deny with a line break", `{"deny_paths": ["/x/a\nb"]}`, "sandbox.deny_paths"},
+		{"relative allow", `{"allow_paths": ["Documents/share"]}`, "sandbox.allow_paths"},
+		{"home-relative allow", `{"allow_paths": ["~/Documents/share"]}`, ""},
+		{"relative credentials dir", `{"credentials_dir": "creds"}`, "sandbox.credentials_dir"},
+		{"home-relative credentials dir", `{"credentials_dir": "~/creds"}`, ""},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Setenv("HOME", t.TempDir())
+			_, err := LoadConfig(writeConfig(t, `{"sandbox": `+tc.sandbox+`}`))
+			switch {
+			case tc.wantErr == "" && err != nil:
+				t.Fatalf("LoadConfig: %v", err)
+			case tc.wantErr != "" && (err == nil || !strings.Contains(err.Error(), tc.wantErr)):
+				t.Fatalf("LoadConfig error = %v, want one naming %s", err, tc.wantErr)
+			}
+		})
+	}
+}

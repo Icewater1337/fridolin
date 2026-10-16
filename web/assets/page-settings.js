@@ -12,6 +12,8 @@ import { googleClientCard } from './calendar.js';
 
 const digits = (v) => (/^\d{6,15}$/.test(v) ? '' : 'Digits only, with country code, no + (e.g. 15551234567)');
 const groupJid = (v) => (/@g\.us$/.test(v) ? '' : 'A group JID ends in @g.us');
+// The bridge refuses a relative sandbox path: as a rule it would match nothing.
+const absPath = (v) => (/^(\/|~(\/|$))/.test(v) ? '' : 'Absolute, or starting with ~/');
 
 const SECTIONS = [
   {
@@ -61,10 +63,10 @@ const SECTIONS = [
     intro: 'macOS only. Every brain run is wrapped in sandbox-exec: brains cannot read other brains’ folders, your keys, mail, messages, browser profiles, Documents, Desktop or Downloads.',
     fields: [
       { key: 'sandbox.enabled', type: 'bool', label: 'Sandbox brains', help: 'Strongly recommended while brains may use tools without asking.' },
-      { key: 'sandbox.deny_paths', type: 'list', mono: true, label: 'Also block', placeholder: '~/clients', addLabel: 'Add folder', help: 'Extra folders brains must not read.' },
-      { key: 'sandbox.allow_paths', type: 'list', mono: true, label: 'Re-allow', placeholder: '~/Documents/assistant-share', addLabel: 'Add folder', help: 'Folders to open again after the built-in blocks. Rarely needed.' },
+      { key: 'sandbox.deny_paths', type: 'list', mono: true, label: 'Also block', placeholder: '~/clients', validate: absPath, addLabel: 'Add folder', help: 'Extra folders brains must not read. Absolute, or starting with ~/.' },
+      { key: 'sandbox.allow_paths', type: 'list', mono: true, label: 'Re-allow', placeholder: '~/Documents/assistant-share', validate: absPath, addLabel: 'Add folder', help: 'Folders to open again after the built-in blocks. Rarely needed. Absolute, or starting with ~/.' },
       { key: 'sandbox.git_config', type: 'select', def: 'read', label: 'Git settings (~/.gitconfig)', options: [['read', 'Readable — brains can commit in their folder'], ['deny', 'Blocked']] },
-      { key: 'sandbox.credentials_dir', type: 'text', mono: true, label: 'Credentials folder', placeholder: 'not set', help: 'A folder of per-brain credential files. Each brain may read only its own calendar credentials there.' },
+      { key: 'sandbox.credentials_dir', type: 'text', mono: true, label: 'Credentials folder', placeholder: 'not set', help: 'A folder of per-brain credential files. Each brain may read only its own calendar credentials there. Absolute, or starting with ~/.' },
     ],
   },
   {

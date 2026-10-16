@@ -208,7 +208,8 @@ not sandboxed. The profile is allow-by-default with reads denied to:
 credentials from the keychain and fails with "Not logged in" without it.
 
 `deny_paths` adds your own. `allow_paths` re-opens something the defaults
-closed (read access).
+closed (read access). Entries must be absolute or start with `~/`; the bridge
+refuses a config with a relative one, which would protect nothing.
 
 The sandbox compares real paths, so every deny covers both the path as
 configured and the path it reaches through symlinks (a home on another
@@ -232,9 +233,10 @@ git configuration entirely. `~/.git-credentials` is denied either way.
 
 ### `sandbox.credentials_dir`
 
-A directory of per-brain credential files kept outside the data directory.
-Brains are denied all of it except their own calendar pair
-(`google_calendar_credentials_<id>.json`, `google_calendar_token_<id>.json`).
+A directory of per-brain credential files kept outside the data directory
+(absolute or starting with `~/`). Brains are denied all of it except their
+own calendar pair (`google_calendar_credentials_<id>.json`,
+`google_calendar_token_<id>.json`).
 
 This is containment, not a jail — it raises the cost of a prompt injection
 rather than eliminating it. Linux has no `sandbox-exec`: the bridge refuses a
