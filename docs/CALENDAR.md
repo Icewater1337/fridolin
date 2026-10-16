@@ -82,8 +82,10 @@ python3 <bridge-repo>/tools/calendar_tool.py create --title "Dentist" \
     --start 2026-01-06T14:00:00 --end 2026-01-06T15:00:00               # into the default
 ```
 
-`--calendar-id` selects one of the chosen calendars; others are refused. The
-tool needs `pip3 install -r tools/requirements.txt`.
+`--calendar-id` selects one of the chosen calendars; others are refused.
+`list` returns at most `--max-results` events (default 100) across all of
+them, and says `"truncated": true` when there were more. The tool needs
+`pip3 install -r tools/requirements.txt`.
 
 The tool never opens a sign-in page by itself. When a brain's sign-in is
 revoked or expires, every command answers with an error asking you to connect

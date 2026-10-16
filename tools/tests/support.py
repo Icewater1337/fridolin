@@ -51,13 +51,15 @@ class FakeCalendar:
     events maps a calendar ID to its events, already in start order; busy
     maps a calendar ID to its freebusy slots. errors maps a method name
     ("list", "insert", "delete", "freebusy", "calendarList") to an exception
-    its request raises on execute().
+    its request raises on execute(). page_size caps the events in one page
+    below maxResults, as Google may.
     """
 
     def __init__(self, events=None, busy=None, calendars=None):
         self.events_by_cal = events or {}
         self.busy = busy or {}
         self.calendar_items = calendars or []
+        self.page_size: int | None = None
         self.errors: dict[str, Exception] = {}
         self.calls: list[tuple[str, dict]] = []
 
@@ -79,7 +81,7 @@ class FakeCalendar:
                 def page():
                     items = fake.events_by_cal.get(kw["calendarId"], [])
                     offset = int(kw.get("pageToken") or 0)
-                    size = kw.get("maxResults", 250)
+                    size = min(kw.get("maxResults", 250), fake.page_size or 2500)
                     resp = {"items": items[offset:offset + size]}
                     if offset + size < len(items):
                         resp["nextPageToken"] = str(offset + size)

@@ -10,7 +10,7 @@ import sys
 import tempfile
 import unittest
 import warnings
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from unittest import mock
 from zoneinfo import ZoneInfo
@@ -241,6 +241,73 @@ class FreeWindowsTest(unittest.TestCase):
             with self.subTest(name):
                 slots = [(at(s), at(e)) for s, e in busy]
                 self.assertEqual(calendar_tool.free_windows(slots, at("08:00"), at("18:00"), 30), want)
+
+
+def events(prefix: str, n: int, day: str = "2026-01-06", minute_offset: int = 0) -> list[dict]:
+    """n events a minute apart, in start order."""
+    out = []
+    for i in range(n):
+        start = at("08:00", day) + timedelta(minutes=2 * i + minute_offset)
+        out.append({"id": f"{prefix}{i}", "summary": f"{prefix} {i}",
+                    "start": {"dateTime": start.isoformat()},
+                    "end": {"dateTime": (start + timedelta(minutes=1)).isoformat()}})
+    return out
+
+
+class ListCommandTest(TokenTestCase):
+    def list(self, *argv: str) -> tuple[int, dict]:
+        self.write_token()
+        code, out, _ = support.run_main(calendar_tool, ["--profile", self.profile, "list", *argv])
+        return code, json.loads(out)
+
+    def test_follows_pages(self):
+        self.google.service.events_by_cal = {"primary": events("a", 60)}
+        self.google.service.page_size = 25
+        code, out = self.list("--from", "2026-01-06")
+        self.assertEqual(code, 0, out)
+        self.assertEqual([e["id"] for e in out["events"]], [f"a{i}" for i in range(60)])
+        self.assertEqual((out["count"], out["truncated"]), (60, False))
+
+    def test_the_limit_is_total_and_reported(self):
+        cases = [
+            # name, events per calendar, --max-results, count, truncated
+            ("one calendar under the limit", {"primary": 40}, "50", 40, False),
+            ("one calendar exactly at the limit", {"primary": 50}, "50", 50, False),
+            ("one calendar over the limit", {"primary": 51}, "50", 50, True),
+            ("several calendars together over the limit", {"me@example.com": 30, "team@example.com": 30},
+             "50", 50, True),
+        ]
+        for name, per_cal, limit, count, truncated in cases:
+            with self.subTest(name):
+                cals = list(per_cal)
+                self.google.service.events_by_cal = {
+                    c: events(c[:2], n, minute_offset=i) for i, (c, n) in enumerate(per_cal.items())}
+                self.google.service.page_size = 20
+                with mock.patch.object(calendar_tool, "ALLOWED", cals):
+                    code, out = self.list("--from", "2026-01-06", "--max-results", limit)
+                self.assertEqual(code, 0, out)
+                self.assertEqual((out["count"], out.get("truncated")), (count, truncated))
+                starts = [e["start"] for e in out["events"]]
+                self.assertEqual(starts, sorted(starts), "merged in start order")
+
+    def test_rejects_a_limit_below_one(self):
+        code, out = self.list("--max-results", "0")
+        self.assertEqual(code, 1)
+        self.assertIn("at least 1", out["error"])
+
+    def test_the_default_day_is_today_in_the_calendar_timezone(self):
+        # 23:30 UTC on 5 January is already 6 January in Kiribati (UTC+14).
+        class FixedNow(datetime):
+            @classmethod
+            def now(cls, tz=None):
+                return datetime(2026, 1, 5, 23, 30, tzinfo=timezone.utc).astimezone(tz)
+
+        with mock.patch.dict(os.environ, {"CALENDAR_TZ": "Pacific/Kiritimati"}), \
+                mock.patch.object(calendar_tool, "datetime", FixedNow):
+            code, out = self.list()
+        self.assertEqual(code, 0, out)
+        (_, kwargs), = self.google.service.calls
+        self.assertEqual(kwargs["timeMin"], "2026-01-06T00:00:00+14:00")
 
 
 class FreeCommandCase(TokenTestCase):

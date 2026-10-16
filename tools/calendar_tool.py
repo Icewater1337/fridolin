@@ -65,7 +65,7 @@ import os
 import re
 import sys
 import traceback
-from datetime import datetime, date, time, timedelta
+from datetime import datetime, time, timedelta
 from pathlib import Path
 from typing import NoReturn
 from zoneinfo import ZoneInfo
@@ -322,7 +322,7 @@ def ensure_timezone(dt_str: str) -> str:
 def cmd_list(args) -> None:
     service = get_service()
 
-    from_date = args.from_date or date.today().isoformat()
+    from_date = args.from_date or datetime.now(tz()).date().isoformat()
     to_date = args.to_date or from_date
 
     # timeMax is the start of the day *after* to_date, so the last day is
@@ -331,24 +331,47 @@ def cmd_list(args) -> None:
     time_max = parse_day(to_date) + timedelta(days=1)
 
     calendars = target_calendars(args.calendar_id, many=True)
-    events = []
+    events, truncated = [], False
     for cal in calendars:
-        result = service.events().list(
-            calendarId=cal,
-            timeMin=time_min.isoformat(),
-            timeMax=time_max.isoformat(),
-            timeZone=str(tz()),
-            singleEvents=True,
-            orderBy="startTime",
-            maxResults=args.max_results,
-        ).execute()
-        for e in result.get("items", []):
+        items, more = fetch_events(service, cal, time_min, time_max, args.max_results)
+        truncated = truncated or more
+        for e in items:
             item = format_event(e)
             if len(calendars) > 1:
                 item["calendar"] = cal
             events.append(item)
     events.sort(key=lambda e: e.get("start") or "")
-    print(json.dumps({"events": events, "count": len(events)}, indent=2))
+    if len(events) > args.max_results:
+        events, truncated = events[:args.max_results], True
+    print(json.dumps({"events": events, "count": len(events), "truncated": truncated}, indent=2))
+
+
+def fetch_events(service, calendar_id: str, time_min: datetime, time_max: datetime,
+                 limit: int) -> tuple[list[dict], bool]:
+    """Return up to limit events of one calendar in start order, and whether it had more.
+
+    Google may return fewer events per page than asked for, even when more
+    match, so follow nextPageToken rather than trusting the first page:
+    stopping early would make a busy day look free.
+    """
+    events = service.events()
+    request = events.list(
+        calendarId=calendar_id,
+        timeMin=time_min.isoformat(),
+        timeMax=time_max.isoformat(),
+        timeZone=str(tz()),
+        singleEvents=True,
+        orderBy="startTime",
+        maxResults=min(limit, 2500),  # the API's largest page
+    )
+    items: list[dict] = []
+    while request is not None:
+        response = request.execute()
+        items.extend(response.get("items", []))
+        if len(items) >= limit:
+            return items[:limit], len(items) > limit or bool(response.get("nextPageToken"))
+        request = events.list_next(request, response)
+    return items, False
 
 
 def cmd_create(args) -> None:
@@ -464,6 +487,16 @@ def free_windows(busy: list[tuple[datetime, datetime]], window_start: datetime,
         if minutes >= min_slot:
             out.append({"start": clock(s), "end": clock(e), "duration_minutes": minutes})
     return out
+
+
+def positive_int(s: str) -> int:
+    try:
+        n = int(s)
+    except ValueError:
+        n = 0
+    if n < 1:
+        raise argparse.ArgumentTypeError(f"must be a whole number of at least 1 (got {s!r})")
+    return n
 
 
 def hhmm(minutes: int) -> str:
@@ -594,7 +627,9 @@ def main() -> None:
     p_list = sub.add_parser("list", help="List events in a date range")
     p_list.add_argument("--from", dest="from_date", help="Start date (YYYY-MM-DD, default: today)")
     p_list.add_argument("--to", dest="to_date", help="End date (YYYY-MM-DD, default: --from)")
-    p_list.add_argument("--max-results", type=int, default=50)
+    p_list.add_argument("--max-results", type=positive_int, default=100,
+                        help="Most events to return across all calendars (default: 100); "
+                             "the output says truncated: true when there were more")
 
     p_create = sub.add_parser("create", help="Create an event")
     p_create.add_argument("--title", required=True)
