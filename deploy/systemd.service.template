@@ -11,8 +11,9 @@
 # (fridolin open). To keep the bridge running after you log out:
 #     sudo loginctl enable-linger {{USER}}
 #
-# Note: the sandbox layer is macOS-only. On Linux the assistant runs with
-# whatever access this user has, so run it as a dedicated user.
+# Note: the sandbox layer is macOS-only (sandbox.enabled must be false here).
+# On Linux the assistant runs with whatever access this user has, so run it
+# as a dedicated user.
 
 [Unit]
 Description=Fridolin

@@ -362,7 +362,8 @@ What it does not do:
 - The sandbox is containment, not a jail. It raises the cost of a prompt
   injection; it does not stop code execution.
 - Classic mode (`brain_mode` off) runs Claude without the sandbox.
-- On Linux there is no sandbox layer at all. Run the bridge as a dedicated user.
+- On Linux there is no sandbox layer at all (the bridge refuses to start with
+  `sandbox.enabled` on). Run the bridge as a dedicated user.
 - Every file sent to the bridge lands in your data directory, and the assistant
   reads it.
 

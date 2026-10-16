@@ -2,6 +2,7 @@ package main
 
 import (
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -89,4 +90,32 @@ func fakeTmux(t *testing.T) string {
 	tmuxPath = script
 	t.Cleanup(func() { tmuxPath = old })
 	return calls
+}
+
+// TestSandboxConfigNeedsMacOS: the sandbox only exists on macOS, and brain
+// runs refuse to start without it, so enabling it elsewhere is rejected when
+// the config loads instead of failing every message.
+func TestSandboxConfigNeedsMacOS(t *testing.T) {
+	cases := []struct {
+		goos    string
+		enabled bool
+		wantErr bool
+	}{
+		{"darwin", true, false},
+		{"darwin", false, false},
+		{"linux", true, true},
+		{"linux", false, false},
+		{"freebsd", true, true},
+	}
+	for _, tc := range cases {
+		t.Run(fmt.Sprintf("%s enabled=%v", tc.goos, tc.enabled), func(t *testing.T) {
+			err := SandboxConfig{Enabled: tc.enabled}.validate(tc.goos)
+			if (err != nil) != tc.wantErr {
+				t.Fatalf("validate = %v, want error %v", err, tc.wantErr)
+			}
+			if err != nil && !strings.Contains(err.Error(), "sandbox.enabled") {
+				t.Errorf("error %q does not name the setting", err)
+			}
+		})
+	}
 }

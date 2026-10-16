@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -304,6 +305,13 @@ func TestLoadConfigEnvOverride(t *testing.T) {
 
 func TestExampleConfigIsValid(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
+	if runtime.GOOS != "darwin" {
+		// The example turns the sandbox on, which only macOS can honour.
+		if _, err := LoadConfig("config.example.json"); err == nil || !strings.Contains(err.Error(), "sandbox.enabled") {
+			t.Fatalf("config.example.json on %s: err = %v, want the sandbox.enabled error", runtime.GOOS, err)
+		}
+		t.Setenv("SANDBOX_ENABLED", "false")
+	}
 	if _, err := LoadConfig("config.example.json"); err != nil {
 		t.Fatalf("config.example.json does not load: %v", err)
 	}

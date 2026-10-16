@@ -227,8 +227,9 @@ Brains are denied all of it except their own calendar pair
 (`google_calendar_credentials_<id>.json`, `google_calendar_token_<id>.json`).
 
 This is containment, not a jail — it raises the cost of a prompt injection
-rather than eliminating it. On Linux it does nothing; run the bridge as a
-dedicated user there.
+rather than eliminating it. Linux has no `sandbox-exec`: the bridge refuses a
+config with `sandbox.enabled` on there (the Linux default is off). Run the
+bridge as a dedicated user instead.
 
 ---
 
