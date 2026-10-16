@@ -1,0 +1,733 @@
+package main
+
+import (
+	"bytes"
+	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"io"
+	"log"
+	"net/http"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"regexp"
+	"sort"
+	"strings"
+	"sync"
+	"time"
+)
+
+// Plaud integration: recordings from a Plaud voice recorder reach a brain as
+// finished transcripts, without anyone forwarding them.
+//
+// Fridolin drives Plaud's official CLI (npm i -g @plaud-ai/cli). "Connect"
+// runs `plaud login`, Plaud's OAuth sign-in in the browser; Fridolin then
+// polls for new recordings, waits until Plaud has transcribed them, writes
+// transcript + Plaud's AI summary to the media inbox and hands the file to the
+// chosen brain like an attachment.
+//
+// The CLI keeps its login in $HOME/.plaud/. By default Fridolin runs it with a
+// private home inside the data folder, which the sandbox denies to brains.
+// With plaud.brain_access the login stays in ~/.plaud/ instead, so brains can
+// run the CLI themselves (search, look up a transcript) — at the cost of
+// being able to read the token.
+
+// PlaudConfig controls the Plaud integration.
+type PlaudConfig struct {
+	// Enabled turns on polling for new recordings.
+	Enabled bool `json:"enabled"`
+	// Brain receives the recordings (default: the brain that handles DMs,
+	// else the default brain).
+	Brain string `json:"brain,omitempty"`
+	// CLIPath overrides the plaud binary (default: found on PATH or in nvm).
+	CLIPath string `json:"cli_path,omitempty"`
+	// IntervalSeconds between polls (default 60, minimum 30).
+	IntervalSeconds int `json:"interval_seconds,omitempty"`
+	// Polished uses Plaud's AI-cleaned transcript instead of the raw one.
+	Polished bool `json:"polished,omitempty"`
+	// Message is sent to the brain with each recording. {name}, {when} and
+	// {duration} are filled in. Empty uses a built-in instruction.
+	Message string `json:"message,omitempty"`
+	// BrainAccess keeps the login in ~/.plaud/ so brains can use the CLI.
+	BrainAccess bool `json:"brain_access,omitempty"`
+}
+
+func (pc PlaudConfig) validate() error {
+	if pc.Brain != "" && !brainIDRe.MatchString(pc.Brain) {
+		return fmt.Errorf("plaud.brain %q is not a brain id", pc.Brain)
+	}
+	if pc.IntervalSeconds != 0 && pc.IntervalSeconds < 30 {
+		return fmt.Errorf("plaud.interval_seconds must be at least 30")
+	}
+	return nil
+}
+
+const defaultPlaudMessage = `[Plaud] New recording "{name}" ({when}, {duration}). The attached .txt is the finished transcript from the Plaud recorder, with Plaud's AI summary when there is one — it is already transcribed, do not transcribe it again. File it as your plaud skill describes (skills/plaud.md); without one: save it under transcripts/ as "DD.MM.YYYY - Short description.txt", note durable facts in memories, and reply with a short summary, key points and action items.`
+
+var (
+	errPlaudAuth    = errors.New("the Plaud login expired")
+	plaudIDRe       = regexp.MustCompile(`\b(of_[0-9a-f]{16,})\b`)
+	ansiRe          = regexp.MustCompile(`\x1b\[[0-9;]*[A-Za-z]`)
+	plaudKVRe       = regexp.MustCompile(`^\s*([a-z_]+):\s*(.*)$`)
+	transcriptRowRe = regexp.MustCompile(`\[\d`)
+)
+
+const (
+	plaudPageSize      = 20
+	plaudSeedPages     = 25
+	plaudPendingMaxAge = 3 * 24 * time.Hour
+	plaudSeenKeep      = 2000
+)
+
+// plaudState is <data_dir>/plaud/state.json.
+type plaudState struct {
+	Seen         []string           `json:"seen"`
+	Pending      map[string]float64 `json:"pending"` // id → unix time first seen
+	AuthNotified float64            `json:"auth_notified"`
+}
+
+// PlaudForward describes the last recording handed to a brain.
+type PlaudForward struct {
+	Name  string    `json:"name"`
+	Brain string    `json:"brain"`
+	At    time.Time `json:"at"`
+}
+
+// PlaudManager runs the CLI, the poller and the connect flow.
+type PlaudManager struct {
+	b *Bridge
+
+	mu            sync.Mutex
+	connect       *connectJob
+	lastPoll      time.Time
+	lastErr       string
+	lastForwarded *PlaudForward
+	busy          bool
+	stop          context.CancelFunc
+
+	// run executes the CLI; tests replace it.
+	run func(ctx context.Context, args ...string) (string, error)
+}
+
+// NewPlaudManager creates the manager.
+func NewPlaudManager(b *Bridge) *PlaudManager {
+	p := &PlaudManager{b: b}
+	p.run = p.runCLI
+	return p
+}
+
+func (p *PlaudManager) cfg() *Config { return p.b.cfgs.Get() }
+
+func (p *PlaudManager) dir() string { return filepath.Join(p.cfg().DataDir, "plaud") }
+
+// cliHome is the HOME the CLI runs with, which decides where its login lives.
+func (p *PlaudManager) cliHome() string {
+	if p.cfg().Plaud.BrainAccess {
+		home, _ := os.UserHomeDir()
+		return home
+	}
+	return filepath.Join(p.dir(), "home")
+}
+
+func (p *PlaudManager) tokenPath() string { return filepath.Join(p.cliHome(), ".plaud", "tokens.json") }
+
+func (p *PlaudManager) connected() bool {
+	_, err := os.Stat(p.tokenPath())
+	return err == nil
+}
+
+// cliPath finds the plaud binary.
+func (p *PlaudManager) cliPath() (string, error) {
+	if c := p.cfg().Plaud.CLIPath; c != "" {
+		if _, err := os.Stat(c); err != nil {
+			return "", fmt.Errorf("plaud.cli_path %s: %w", c, err)
+		}
+		return c, nil
+	}
+	if found, err := exec.LookPath("plaud"); err == nil {
+		return found, nil
+	}
+	home, _ := os.UserHomeDir()
+	candidates, _ := filepath.Glob(filepath.Join(home, ".nvm/versions/node/*/bin/plaud"))
+	sort.Sort(sort.Reverse(sort.StringSlice(candidates)))
+	candidates = append(candidates, "/opt/homebrew/bin/plaud", "/usr/local/bin/plaud")
+	for _, c := range candidates {
+		if _, err := os.Stat(c); err == nil {
+			return c, nil
+		}
+	}
+	return "", errors.New("the Plaud CLI is not installed")
+}
+
+// runCLI runs `plaud args…` with the chosen home, telemetry off, and node
+// (which the CLI needs) on PATH. Exit status 2 means the login expired.
+func (p *PlaudManager) runCLI(ctx context.Context, args ...string) (string, error) {
+	bin, err := p.cliPath()
+	if err != nil {
+		return "", err
+	}
+	home := p.cliHome()
+	if err := os.MkdirAll(home, 0o700); err != nil {
+		return "", err
+	}
+	env := []string{}
+	for _, kv := range os.Environ() {
+		if !strings.HasPrefix(kv, "HOME=") && !strings.HasPrefix(kv, "PATH=") {
+			env = append(env, kv)
+		}
+	}
+	env = append(env, "HOME="+home, "PATH="+filepath.Dir(bin)+":"+os.Getenv("PATH")+":/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin",
+		"DO_NOT_TRACK=1", "PLAUD_TELEMETRY_DISABLED=1", "PLAUD_NO_UPDATE_NOTIFIER=1", "NO_COLOR=1")
+	cmd := exec.CommandContext(ctx, bin, args...)
+	cmd.Env = env
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout, cmd.Stderr = &stdout, &stderr
+	if f, ok := ctx.Value(plaudOutputKey{}).(func([]byte)); ok {
+		w := writerFunc(f)
+		cmd.Stdout, cmd.Stderr = io.MultiWriter(&stdout, w), io.MultiWriter(&stderr, w)
+	}
+	err = cmd.Run()
+	out := ansiRe.ReplaceAllString(stdout.String(), "")
+	var ee *exec.ExitError
+	if errors.As(err, &ee) && ee.ExitCode() == 2 {
+		return out, errPlaudAuth
+	}
+	if err != nil {
+		return out, fmt.Errorf("plaud %s: %v %s", args[0], err, truncate(strings.TrimSpace(ansiRe.ReplaceAllString(stderr.String(), "")), 300))
+	}
+	return out, nil
+}
+
+func (p *PlaudManager) listIDs(ctx context.Context, page int) ([]string, error) {
+	out, err := p.run(ctx, "files", "--page", fmt.Sprint(page), "--page-size", fmt.Sprint(plaudPageSize))
+	if err != nil {
+		return nil, err
+	}
+	var ids []string
+	for _, m := range plaudIDRe.FindAllStringSubmatch(out, -1) {
+		ids = append(ids, m[1])
+	}
+	return ids, nil
+}
+
+func parseKV(out string) map[string]string {
+	d := map[string]string{}
+	for _, line := range strings.Split(out, "\n") {
+		if m := plaudKVRe.FindStringSubmatch(line); m != nil {
+			d[m[1]] = strings.TrimSpace(m[2])
+		}
+	}
+	return d
+}
+
+// account returns the signed-in Plaud user, for the dashboard.
+func (p *PlaudManager) account(ctx context.Context) (string, error) {
+	out, err := p.run(ctx, "me")
+	if err != nil {
+		return "", err
+	}
+	d := parseKV(out)
+	if d["email"] != "" {
+		return d["email"], nil
+	}
+	return d["nickname"], nil
+}
+
+// forward hands one recording to the brain. It reports false while Plaud has
+// not finished the transcript.
+func (p *PlaudManager) forward(ctx context.Context, id string) (bool, error) {
+	cfg := p.cfg()
+	detailsOut, err := p.run(ctx, "file", id)
+	if err != nil {
+		return false, err
+	}
+	d := parseKV(detailsOut)
+	if d["transcript"] != "available" {
+		return false, nil
+	}
+	args := []string{"transcript", id}
+	if cfg.Plaud.Polished {
+		args = append(args, "--polished")
+	}
+	transcript, err := p.run(ctx, args...)
+	if err != nil {
+		return false, err
+	}
+	if i := strings.Index(transcript, "Transcript:"); i >= 0 {
+		transcript = transcript[i:]
+		if nl := strings.Index(transcript, "\n"); nl >= 0 {
+			transcript = transcript[nl+1:] // drop the "Transcript: <name>" header
+		}
+	}
+	if !transcriptRowRe.MatchString(transcript) {
+		return false, nil // the header is there, the segments not yet
+	}
+	summary := ""
+	if d["summary"] == "available" {
+		if s, err := p.run(ctx, "summary", id); err == nil {
+			summary = strings.TrimSpace(s)
+			if i := strings.Index(summary, "Fetching"); i >= 0 {
+				if nl := strings.Index(summary[i:], "\n"); nl >= 0 {
+					summary = strings.TrimSpace(summary[i+nl+1:])
+				}
+			}
+			summary = strings.TrimSpace(strings.TrimPrefix(summary, "Summary:"))
+		} else if errors.Is(err, errPlaudAuth) {
+			return false, err
+		} else {
+			log.Printf("plaud %s: summary: %v", id, err)
+		}
+	}
+
+	name := d["name"]
+	if name == "" {
+		name = id
+	}
+	day, when := time.Now().Format("02.01.2006"), d["start_at"]
+	start := d["start_at"]
+	if start == "" {
+		start = d["created_at"]
+	}
+	// Plaud reports UTC without an offset.
+	for _, layout := range []string{"2006-01-02T15:04:05", "2006-01-02 15:04:05", time.RFC3339} {
+		if t, err := time.ParseInLocation(layout, strings.TrimSuffix(start, "Z"), time.UTC); err == nil {
+			local := t.Local()
+			day, when = local.Format("02.01.2006"), local.Format("02.01.2006 15:04")
+			break
+		}
+	}
+	duration := d["duration"]
+	if duration == "" {
+		duration = "?"
+	}
+
+	dir := filepath.Join(cfg.MediaDir, "plaud")
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return false, err
+	}
+	path := safeMediaPath(dir, day+" - "+safePlaudName(name)+".txt")
+	var body strings.Builder
+	fmt.Fprintf(&body, "Plaud recording: %s\nRecorded: %s\nDuration: %s\nPlaud ID: %s\n\n", name, when, duration, id)
+	if summary != "" {
+		body.WriteString("=== Plaud AI summary ===\n" + summary + "\n\n")
+	}
+	body.WriteString("=== Transcript ===\n" + strings.TrimSpace(transcript) + "\n")
+	if err := os.WriteFile(path, []byte(body.String()), 0o600); err != nil {
+		return false, err
+	}
+
+	br := p.targetBrain()
+	if br == nil {
+		return false, errors.New("no brain to send Plaud recordings to")
+	}
+	jid := p.b.replyChatFor(br, cfg)
+	if jid == "" {
+		return false, fmt.Errorf("brain %s has no chat to reply in — set its reply chat", br.ID())
+	}
+	tpl := cfg.Plaud.Message
+	if strings.TrimSpace(tpl) == "" {
+		tpl = defaultPlaudMessage
+	}
+	text := strings.NewReplacer("{name}", name, "{when}", when, "{duration}", duration).Replace(tpl)
+	p.b.handleInbound(context.Background(), Inbound{JID: jid, Sender: "plaud", Text: text, Media: []string{path}, Source: "ingest", At: time.Now()})
+	p.mu.Lock()
+	p.lastForwarded = &PlaudForward{Name: name, Brain: br.ID(), At: time.Now()}
+	p.mu.Unlock()
+	log.Printf("plaud %s: handed %q to brain %s", id, name, br.ID())
+	return true, nil
+}
+
+func safePlaudName(s string) string {
+	s = strings.TrimSpace(strings.NewReplacer("/", "-", "\\", "-", ":", "-", "\n", " ", "\r", " ", "\t", " ").Replace(s))
+	if len(s) > 120 {
+		s = truncate(s, 120)
+	}
+	if s == "" {
+		s = "Plaud recording"
+	}
+	return s
+}
+
+// targetBrain is the configured brain, else the DM brain, else the default.
+func (p *PlaudManager) targetBrain() *Brain {
+	if id := p.cfg().Plaud.Brain; id != "" {
+		return p.b.brainMgr.Get(id)
+	}
+	return p.b.brainMgr.BrainFor("", false)
+}
+
+func (p *PlaudManager) loadState() (*plaudState, error) {
+	data, err := os.ReadFile(filepath.Join(p.dir(), "state.json"))
+	if errors.Is(err, os.ErrNotExist) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	st := &plaudState{}
+	if err := json.Unmarshal(data, st); err != nil {
+		return nil, err
+	}
+	if st.Pending == nil {
+		st.Pending = map[string]float64{}
+	}
+	return st, nil
+}
+
+func (p *PlaudManager) saveState(st *plaudState) error {
+	if len(st.Seen) > plaudSeenKeep {
+		st.Seen = st.Seen[len(st.Seen)-plaudSeenKeep:]
+	}
+	data, err := json.MarshalIndent(st, "", "  ")
+	if err != nil {
+		return err
+	}
+	return writeFileAtomic(filepath.Join(p.dir(), "state.json"), data, 0o600, false)
+}
+
+// Poll checks for new recordings once. The first poll only remembers what
+// already exists, so connecting never floods a brain with old recordings.
+func (p *PlaudManager) Poll(ctx context.Context) error {
+	p.mu.Lock()
+	if p.busy {
+		p.mu.Unlock()
+		return nil
+	}
+	p.busy = true
+	p.mu.Unlock()
+	defer func() {
+		p.mu.Lock()
+		p.busy = false
+		p.mu.Unlock()
+	}()
+
+	err := p.poll(ctx)
+	p.mu.Lock()
+	p.lastPoll = time.Now()
+	if err != nil {
+		p.lastErr = err.Error()
+	} else {
+		p.lastErr = ""
+	}
+	p.mu.Unlock()
+	if errors.Is(err, errPlaudAuth) {
+		p.notifyAuthExpired()
+	}
+	return err
+}
+
+func (p *PlaudManager) poll(ctx context.Context) error {
+	if err := os.MkdirAll(p.dir(), 0o700); err != nil {
+		return err
+	}
+	st, err := p.loadState()
+	if err != nil {
+		return err
+	}
+	if st == nil {
+		st = &plaudState{Pending: map[string]float64{}}
+		seen := map[string]bool{}
+		for page := 1; page <= plaudSeedPages; page++ {
+			ids, err := p.listIDs(ctx, page)
+			if err != nil {
+				return err
+			}
+			for _, id := range ids {
+				if !seen[id] {
+					seen[id] = true
+					st.Seen = append(st.Seen, id)
+				}
+			}
+			if len(ids) < plaudPageSize {
+				break
+			}
+		}
+		log.Printf("plaud: first sync — %d existing recordings marked as seen", len(st.Seen))
+		return p.saveState(st)
+	}
+
+	seen := map[string]bool{}
+	for _, id := range st.Seen {
+		seen[id] = true
+	}
+	ids, err := p.listIDs(ctx, 1)
+	if err != nil {
+		return err
+	}
+	for _, id := range ids {
+		if _, pending := st.Pending[id]; !seen[id] && !pending {
+			st.Pending[id] = float64(time.Now().Unix())
+			log.Printf("plaud %s: new recording, waiting for the transcript", id)
+		}
+	}
+	pendingIDs := make([]string, 0, len(st.Pending))
+	for id := range st.Pending {
+		pendingIDs = append(pendingIDs, id)
+	}
+	sort.Strings(pendingIDs)
+	for _, id := range pendingIDs {
+		done, err := p.forward(ctx, id)
+		if errors.Is(err, errPlaudAuth) {
+			_ = p.saveState(st)
+			return err
+		}
+		if err != nil {
+			log.Printf("plaud %s: %v (will retry)", id, err)
+		}
+		since := time.Unix(int64(st.Pending[id]), 0)
+		if done || time.Since(since) > plaudPendingMaxAge {
+			if !done {
+				log.Printf("plaud %s: no transcript after %v, giving up", id, plaudPendingMaxAge)
+			}
+			delete(st.Pending, id)
+			st.Seen = append(st.Seen, id)
+		}
+		if err := p.saveState(st); err != nil {
+			return err
+		}
+	}
+	st.AuthNotified = 0
+	return p.saveState(st)
+}
+
+// notifyAuthExpired tells the brain's chat once a day that Plaud needs a new
+// sign-in.
+func (p *PlaudManager) notifyAuthExpired() {
+	st, _ := p.loadState()
+	if st == nil {
+		st = &plaudState{Pending: map[string]float64{}}
+	}
+	if time.Since(time.Unix(int64(st.AuthNotified), 0)) < 24*time.Hour {
+		return
+	}
+	br := p.targetBrain()
+	if br == nil {
+		return
+	}
+	jid := p.b.replyChatFor(br, p.cfg())
+	if jid == "" {
+		return
+	}
+	if err := p.b.wa.SendMessage(context.Background(), jid, "⚠️ Plaud: the login expired, so new recordings are not arriving. Reconnect in the Fridolin dashboard (Integrations → Plaud)."); err != nil {
+		log.Printf("plaud: could not send the expiry notice: %v", err)
+		return
+	}
+	st.AuthNotified = float64(time.Now().Unix())
+	_ = p.saveState(st)
+}
+
+// Start runs the poller.
+func (p *PlaudManager) Start(ctx context.Context) {
+	ctx, cancel := context.WithCancel(ctx)
+	p.mu.Lock()
+	p.stop = cancel
+	p.mu.Unlock()
+	go func() {
+		next := time.Now().Add(15 * time.Second) // let WhatsApp connect first
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-time.After(5 * time.Second):
+			}
+			cfg := p.cfg()
+			if !cfg.Plaud.Enabled || !p.connected() || time.Now().Before(next) {
+				continue
+			}
+			interval := time.Minute
+			if cfg.Plaud.IntervalSeconds > 0 {
+				interval = time.Duration(cfg.Plaud.IntervalSeconds) * time.Second
+			}
+			next = time.Now().Add(interval)
+			pctx, pcancel := context.WithTimeout(ctx, 10*time.Minute)
+			if err := p.Poll(pctx); err != nil && !errors.Is(err, context.Canceled) {
+				log.Printf("plaud: %v", err)
+			}
+			pcancel()
+		}
+	}()
+}
+
+// Stop ends the poller and a running sign-in.
+func (p *PlaudManager) Stop() {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if p.stop != nil {
+		p.stop()
+	}
+	if p.connect != nil && p.connect.cancel != nil {
+		p.connect.cancel()
+	}
+}
+
+// ── API ──────────────────────────────────────────────────────────────────
+
+var plaudURLRe = regexp.MustCompile(`https?://[^\s'"]+`)
+
+// plaudOutputKey carries a func([]byte) in a context; runCLI hands it the
+// CLI's output as it arrives (the login prints its sign-in URL, then waits).
+type plaudOutputKey struct{}
+
+type writerFunc func([]byte)
+
+func (f writerFunc) Write(b []byte) (int, error) { f(b); return len(b), nil }
+
+func (b *Bridge) apiPlaudStatus(w http.ResponseWriter, r *http.Request) {
+	p := b.plaud
+	cfg := b.cfgs.Get()
+	cli := map[string]any{"found": false, "install_hint": "npm install -g @plaud-ai/cli"}
+	if path, err := p.cliPath(); err == nil {
+		cli["found"], cli["path"] = true, path
+	}
+	resp := map[string]any{
+		"cli":       cli,
+		"connected": p.connected(),
+		"settings":  cfg.Plaud,
+		"login_dir": filepath.Dir(p.tokenPath()),
+	}
+	if br := p.targetBrain(); br != nil {
+		resp["target_brain"] = br.ID()
+	}
+	if st, _ := p.loadState(); st != nil {
+		resp["seen"], resp["pending"] = len(st.Seen), len(st.Pending)
+	}
+	p.mu.Lock()
+	if p.connect != nil {
+		job := *p.connect // a copy: the sign-in goroutine keeps writing to the original
+		resp["connect"] = job
+	}
+	if !p.lastPoll.IsZero() {
+		resp["last_poll"] = p.lastPoll
+	}
+	if p.lastErr != "" {
+		resp["last_error"] = p.lastErr
+	}
+	if p.lastForwarded != nil {
+		resp["last_forwarded"] = p.lastForwarded
+	}
+	p.mu.Unlock()
+	if p.connected() && cli["found"] == true && r.URL.Query().Get("account") != "0" {
+		ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
+		if acct, err := p.account(ctx); err == nil {
+			resp["account"] = acct
+		} else if errors.Is(err, errPlaudAuth) {
+			resp["expired"] = true
+		}
+		cancel()
+	}
+	writeJSON(w, http.StatusOK, resp)
+}
+
+func (b *Bridge) apiPlaudConnect(w http.ResponseWriter, r *http.Request) {
+	p := b.plaud
+	if _, err := p.cliPath(); err != nil {
+		writeErr(w, http.StatusPreconditionFailed, "Install Plaud's CLI first: npm install -g @plaud-ai/cli")
+		return
+	}
+	p.mu.Lock()
+	if p.connect != nil && p.connect.State == "running" {
+		p.mu.Unlock()
+		writeErr(w, http.StatusConflict, "already signing in — finish in the browser tab Plaud opened")
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
+	job := &connectJob{State: "running", cancel: cancel}
+	p.connect = job
+	p.mu.Unlock()
+
+	go func() {
+		defer cancel()
+		var seen bytes.Buffer
+		ctx := context.WithValue(ctx, plaudOutputKey{}, func(b []byte) {
+			p.mu.Lock()
+			defer p.mu.Unlock()
+			seen.Write(b)
+			if i := bytes.LastIndexByte(seen.Bytes(), '\n'); i >= 0 && job.AuthURL == "" {
+				job.AuthURL = plaudURLRe.FindString(ansiRe.ReplaceAllString(string(seen.Bytes()[:i]), "")) // whole lines only
+			}
+		})
+		_, err := p.run(ctx, "login")
+		p.mu.Lock()
+		defer p.mu.Unlock()
+		if err != nil || !p.connected() {
+			job.State = "error"
+			if err != nil {
+				job.Error = err.Error()
+			} else {
+				job.Error = "Plaud sign-in did not finish"
+			}
+			log.Printf("plaud: sign-in failed: %s", job.Error)
+			return
+		}
+		job.State = "done"
+		log.Printf("plaud: connected")
+	}()
+	writeJSON(w, http.StatusAccepted, map[string]string{"status": "connecting"})
+}
+
+func (b *Bridge) apiPlaudDisconnect(w http.ResponseWriter, r *http.Request) {
+	p := b.plaud
+	ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
+	defer cancel()
+	if _, err := p.run(ctx, "logout"); err != nil && !errors.Is(err, errPlaudAuth) {
+		log.Printf("plaud: logout: %v", err)
+	}
+	if !b.cfgs.Get().Plaud.BrainAccess {
+		_ = os.Remove(p.tokenPath()) // our private copy; the shared one is the CLI's to manage
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"status": "disconnected"})
+}
+
+func (b *Bridge) apiPlaudSettings(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Enabled     *bool   `json:"enabled"`
+		Brain       *string `json:"brain"`
+		Polished    *bool   `json:"polished"`
+		Message     *string `json:"message"`
+		BrainAccess *bool   `json:"brain_access"`
+	}
+	if err := decodeJSON(r, &req); err != nil {
+		writeErr(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	_, err := b.cfgs.Update("", func(c *Config) error {
+		if req.Enabled != nil {
+			c.Plaud.Enabled = *req.Enabled
+		}
+		if req.Brain != nil {
+			c.Plaud.Brain = *req.Brain
+		}
+		if req.Polished != nil {
+			c.Plaud.Polished = *req.Polished
+		}
+		if req.Message != nil {
+			c.Plaud.Message = *req.Message
+		}
+		if req.BrainAccess != nil {
+			c.Plaud.BrainAccess = *req.BrainAccess
+		}
+		return nil
+	})
+	if err != nil {
+		writeErr(w, http.StatusUnprocessableEntity, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"status": "saved"})
+}
+
+func (b *Bridge) apiPlaudSync(w http.ResponseWriter, r *http.Request) {
+	if !b.plaud.connected() {
+		writeErr(w, http.StatusPreconditionFailed, "Plaud is not connected")
+		return
+	}
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
+		defer cancel()
+		if err := b.plaud.Poll(ctx); err != nil {
+			log.Printf("plaud: %v", err)
+		}
+	}()
+	writeJSON(w, http.StatusAccepted, map[string]string{"status": "syncing"})
+}

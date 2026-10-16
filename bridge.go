@@ -48,6 +48,7 @@ type Bridge struct {
 	token    *DashboardToken
 	backup   *BackupManager
 	google   *GoogleAuth
+	plaud    *PlaudManager
 	started  time.Time
 
 	httpSrv *http.Server
@@ -156,6 +157,7 @@ func NewBridge(cfgs *ConfigStore, opts BridgeOptions) (*Bridge, error) {
 	b.token = tok
 	b.backup = NewBackupManager(cfgs, b.brainMgr)
 	b.google = NewGoogleAuth(cfgs)
+	b.plaud = NewPlaudManager(b)
 	return b, nil
 }
 
@@ -187,6 +189,7 @@ func (b *Bridge) Start(ctx context.Context) error {
 	go b.connectLoop(ctx)
 	go b.runStartupChecks(ctx)
 	b.backup.Start(ctx)
+	b.plaud.Start(ctx)
 
 	log.Println("Bridge started. Waiting for messages…")
 	<-ctx.Done()
@@ -220,6 +223,7 @@ func (b *Bridge) Stop() {
 		cancel()
 	}
 	b.backup.Stop()
+	b.plaud.Stop()
 	b.deb.DropAll()
 	b.brainMgr.Stop()
 	b.wa.Disconnect()

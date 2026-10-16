@@ -52,8 +52,10 @@ The person's data lives in brain folders they choose and in
    - Optional: **Google Calendar** per brain. Needs a one-time Google OAuth
      client (docs/CALENDAR.md walks through it); the person creates it in
      Google Cloud Console and pastes it under Settings → Google sign-in.
+   - Optional: **Integrations → Plaud** for a Plaud recorder (needs
+     `npm install -g @plaud-ai/cli`; see docs/PLAUD.md).
 
-   You cannot scan QR codes or approve Google sign-ins for them.
+   You cannot scan QR codes or approve Google or Plaud sign-ins for them.
 
 4. **Verify:** `curl -s http://127.0.0.1:8765/health` prints `ok`;
    `./fridolin check` shows the brains and routing. Ask the

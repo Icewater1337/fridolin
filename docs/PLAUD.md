@@ -1,0 +1,63 @@
+# Plaud recorder
+
+If you record conversations with a [Plaud](https://www.plaud.ai) recorder,
+Fridolin can hand every new recording to a brain as soon as Plaud has
+transcribed it — with Plaud's AI summary — so the brain files it, keeps what
+matters and tells you the action items.
+
+## Setup
+
+1. Install Plaud's official command-line tool (needs Node.js):
+
+   ```bash
+   npm install -g @plaud-ai/cli
+   ```
+
+2. Dashboard → **Integrations → Plaud → Connect Plaud**. Plaud's sign-in opens
+   in your browser; approve access.
+3. Turn on **Send new recordings to a brain** and pick the brain (by default
+   the one that handles your direct messages).
+
+The first check only remembers the recordings that already exist; from then
+on, each new one is sent once.
+
+## What happens
+
+Every minute (`plaud.interval_seconds`) Fridolin asks Plaud for recent
+recordings. A new one waits until its transcript is ready (up to three days).
+Then Fridolin writes a `.txt` with the details, Plaud's summary and the
+timestamped transcript to `~/.fridolin/media/plaud/`, and gives it to the brain
+like a WhatsApp attachment, with an instruction (`plaud.message`; `{name}`,
+`{when}` and `{duration}` are filled in). The brain answers in its chat — your
+DM for the DM brain, or the brain's `reply_chat`.
+
+New brains get a `skills/plaud.md` that tells them how to file recordings.
+
+If Plaud's login expires, the brain's chat gets one notice a day until you
+connect again.
+
+## Where the login lives
+
+Plaud's tool stores its login in `<home>/.plaud/tokens.json`. By default
+Fridolin runs it with a private home in `~/.fridolin/plaud/home/`, which the
+sandbox denies to brains, and denies brains `~/.plaud/` as well.
+
+**Let brains use the Plaud CLI** (`plaud.brain_access`) keeps the login in
+`~/.plaud/` instead, so brains can run `plaud search`, `plaud transcript` and
+so on themselves. A brain could then also read the token — turn it on only if
+you want brains to look things up in Plaud directly.
+
+Fridolin runs Plaud's tool with its usage statistics turned off
+(`DO_NOT_TRACK`).
+
+## Settings
+
+| `plaud.` | Default | |
+| --- | --- | --- |
+| `enabled` | `false` | check for new recordings |
+| `brain` | DM brain | brain id that receives recordings |
+| `interval_seconds` | `60` | at least 30 |
+| `polished` | `false` | use Plaud's AI-cleaned transcript |
+| `message` | built in | instruction sent with each recording |
+| `brain_access` | `false` | share the login with brains (see above) |
+| `cli_path` | found on PATH | path to `plaud` |

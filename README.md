@@ -230,12 +230,14 @@ assistant when a piece of recurring work applies and exactly how to do it —
 which command, which flags, which mistakes not to make. The assistant reads
 them before starting routine work, and writes new ones as it finds patterns.
 
-Two ship with the bridge and are copied into each new brain:
+Three ship with the bridge and are copied into each new brain:
 
 - **[transcription](examples/skills/transcription.md)** — audio and video to
   text, including the reasons not to hand-roll it
 - **[media-management](examples/skills/media-management.md)** — filing photos,
   clips, and voice memos out of the staging directory
+- **[plaud](examples/skills/plaud.md)** — filing recordings from a Plaud
+  recorder ([docs/PLAUD.md](docs/PLAUD.md))
 
 They're starting points. Edit them, and add your own.
 
@@ -288,6 +290,12 @@ with the account for that brain and tick the calendars it may use. It needs a
 Google OAuth client, which you create once in Google Cloud Console and paste
 under *Settings → Google sign-in*. Step by step:
 [docs/CALENDAR.md](docs/CALENDAR.md).
+
+### Plaud recorder
+
+Record conversations with a Plaud? Dashboard → *Integrations → Plaud* signs in
+with Plaud's own login, and every new recording reaches a brain as a finished
+transcript with Plaud's summary. See [docs/PLAUD.md](docs/PLAUD.md).
 
 ### Backups
 
@@ -379,6 +387,8 @@ checks and scaffolding. **`configstore.go`** — the live configuration.
 API; the page is plain HTML/JS compiled into the binary.
 
 **`backup.go`** — Google Drive backups through rclone.
+
+**`plaud.go`** — the Plaud recorder integration.
 
 **`claude.go`** — the classic single-session runner used when `brain_mode` is
 off: one Claude session per chat, resumed with `--resume`, retried without it

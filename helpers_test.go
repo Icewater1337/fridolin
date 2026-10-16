@@ -15,6 +15,9 @@ import (
 // directory and the new message, after WCB_FAKE_SLEEP_MS. Tests point
 // claude_path at os.Args[0], so no script or real CLI is needed.
 func TestMain(m *testing.M) {
+	if os.Getenv("WCB_FAKE_PLAUD") == "1" && len(os.Args) > 1 && isPlaudCommand(os.Args[1]) {
+		os.Exit(fakePlaud(os.Args[1:]))
+	}
 	if os.Getenv("WCB_FAKE_CLAUDE") == "1" {
 		fakeClaude()
 		return
@@ -77,4 +80,54 @@ func waitFor(t *testing.T, timeout time.Duration, what string, cond func() bool)
 		time.Sleep(10 * time.Millisecond)
 	}
 	t.Fatalf("timed out waiting for %s", what)
+}
+
+func isPlaudCommand(c string) bool {
+	switch c {
+	case "files", "file", "transcript", "summary", "me", "login", "logout":
+		return true
+	}
+	return false
+}
+
+// fakePlaud plays Plaud's CLI from fixture files in WCB_FAKE_PLAUD_DIR:
+// files.txt, file_<id>.txt, transcript_<id>.txt, summary_<id>.txt, and an
+// "expired" file that makes every call exit 2. Each call is logged with HOME.
+func fakePlaud(args []string) int {
+	dir := os.Getenv("WCB_FAKE_PLAUD_DIR")
+	if f, err := os.OpenFile(dir+"/calls.log", os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600); err == nil {
+		fmt.Fprintf(f, "HOME=%s %s\n", os.Getenv("HOME"), strings.Join(args, " "))
+		f.Close()
+	}
+	token := os.Getenv("HOME") + "/.plaud/tokens.json"
+	if _, err := os.Stat(dir + "/expired"); err == nil && args[0] != "login" {
+		fmt.Fprintln(os.Stderr, "login expired")
+		return 2
+	}
+	read := func(name string) string { b, _ := os.ReadFile(dir + "/" + name); return string(b) }
+	switch args[0] {
+	case "login":
+		if _, err := os.Stat(dir + "/login_wait"); err == nil {
+			// Like the real CLI without a browser: print the URL, wait for the approval.
+			fmt.Println("Could not open browser. Open this URL manually: https://example.com/oauth?client=x")
+			for i := 0; i < 200; i++ {
+				if _, err := os.Stat(dir + "/login_go"); err == nil {
+					break
+				}
+				time.Sleep(50 * time.Millisecond)
+			}
+		}
+		_ = os.MkdirAll(os.Getenv("HOME")+"/.plaud", 0o700)
+		_ = os.WriteFile(token, []byte(`{"fake":true}`), 0o600)
+		fmt.Println("Logged in")
+	case "logout":
+		_ = os.Remove(token)
+	case "me":
+		fmt.Print("- Fetching user info...\n\nUser Info:\n\n  id: 1\n  email: you@example.com\n  nickname: You\n")
+	case "files":
+		fmt.Print(read("files.txt"))
+	case "file", "transcript", "summary":
+		fmt.Print(read(args[0] + "_" + args[1] + ".txt"))
+	}
+	return 0
 }

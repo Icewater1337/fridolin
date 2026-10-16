@@ -72,6 +72,12 @@ func (b *Bridge) apiMux() http.Handler {
 	mux.HandleFunc("PUT /api/brains/{id}/calendar", b.apiCalendarSelect)
 	mux.HandleFunc("DELETE /api/brains/{id}/calendar", b.apiCalendarDisconnect)
 
+	mux.HandleFunc("GET /api/plaud/status", b.apiPlaudStatus)
+	mux.HandleFunc("POST /api/plaud/connect", b.apiPlaudConnect)
+	mux.HandleFunc("POST /api/plaud/disconnect", b.apiPlaudDisconnect)
+	mux.HandleFunc("PUT /api/plaud/settings", b.apiPlaudSettings)
+	mux.HandleFunc("POST /api/plaud/sync", b.apiPlaudSync)
+
 	mux.HandleFunc("POST /api/dev/inbound", b.apiDevInbound)
 	mux.HandleFunc("GET /api/dev/outbox", b.apiDevOutbox)
 

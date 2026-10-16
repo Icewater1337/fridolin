@@ -47,10 +47,11 @@ describing when it applies and how to do it. **Check `skills/` before starting
 a task that looks routine**, and follow the skill rather than improvising: they
 exist because the obvious approach failed in some specific way.
 
-Two come with the bridge:
+Three come with the bridge:
 
 - `skills/transcription.md` — turning audio and video into text
 - `skills/media-management.md` — filing photos, clips, and voice memos
+- `skills/plaud.md` — filing recordings from a Plaud recorder
 
 Write new ones. When you notice you've worked something out for the second
 time, that's a skill: write down when it applies, the exact commands, and the
@@ -62,6 +63,7 @@ Incoming files land in the bridge's staging directory with hash-like names.
 Staging is temporary — move files somewhere sensible:
 
 - audio or video whose content matters → `skills/transcription.md`
+- a `[Plaud] New recording` transcript → `skills/plaud.md`
 - photos, clips, voice memos kept as-is → `skills/media-management.md`
 - formal documents (PDFs, spreadsheets, contracts) → `documents/<category>/`
 

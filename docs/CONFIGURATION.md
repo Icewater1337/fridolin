@@ -304,6 +304,10 @@ Google Drive backups; see [BACKUP.md](BACKUP.md).
 | `include_bridge_config` | `true` | also back up `config.json` and the brain list |
 | `rclone_path` | found on PATH | |
 
+### `plaud`
+
+The Plaud recorder integration; see [PLAUD.md](PLAUD.md) for every setting.
+
 ### `dashboard`
 
 `dashboard.disabled` turns the web dashboard off (*restart*).

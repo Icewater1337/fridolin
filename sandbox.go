@@ -45,6 +45,9 @@ type SandboxProfiler struct {
 	// gitConfig is "read" or "deny".
 	gitConfig string
 
+	// plaudShared: the Plaud login in ~/.plaud is meant for brains too.
+	plaudShared bool
+
 	// extraDeny and extraAllow come from config.
 	extraDeny  []string
 	extraAllow []string
@@ -75,6 +78,7 @@ func (sp *SandboxProfiler) Update(workDirs map[string]string, cfg *Config) {
 	}
 	sp.credsDir = cfg.Sandbox.CredentialsDir
 	sp.gitConfig = cfg.Sandbox.GitConfig
+	sp.plaudShared = cfg.Plaud.BrainAccess
 	sp.extraDeny = append([]string(nil), cfg.Sandbox.DenyPaths...)
 	sp.extraAllow = append([]string(nil), cfg.Sandbox.AllowPaths...)
 }
@@ -161,6 +165,11 @@ func (sp *SandboxProfiler) Profile(brainID string) string {
 	}
 	for _, lit := range defaultDenyLiterals {
 		fmt.Fprintf(&b, "(deny file-read* (literal %q))\n", filepath.Join(home, lit))
+	}
+	if !sp.plaudShared {
+		// The Plaud CLI's login, unless plaud.brain_access shares it.
+		fmt.Fprintf(&b, "(deny file-read* (subpath %q))\n", filepath.Join(home, ".plaud"))
+		fmt.Fprintf(&b, "(deny file-write* (subpath %q))\n", filepath.Join(home, ".plaud"))
 	}
 	b.WriteString("\n")
 

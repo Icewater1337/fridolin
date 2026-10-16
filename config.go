@@ -147,6 +147,7 @@ type Config struct {
 	Ingest        IngestConfig        `json:"ingest"`
 	StartupChecks StartupChecksConfig `json:"startup_checks"`
 	Backup        BackupConfig        `json:"backup"`
+	Plaud         PlaudConfig         `json:"plaud"`
 	Dashboard     DashboardConfig     `json:"dashboard"`
 }
 
@@ -473,6 +474,9 @@ func (cfg *Config) validate() error {
 		return fmt.Errorf("http_listen %q must be a loopback address such as 127.0.0.1:8765 — the API and dashboard are for this machine only", cfg.HTTPListen)
 	}
 	if err := cfg.Backup.validate(); err != nil {
+		return err
+	}
+	if err := cfg.Plaud.validate(); err != nil {
 		return err
 	}
 

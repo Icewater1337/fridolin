@@ -15,6 +15,9 @@ policy describes what that copy does with data.
 - **Google Drive**, if you turn on backups: the bridge uploads copies of your
   brain folders to your own Drive, and can only see the files it created there
   (the `drive.file` permission).
+- **Plaud recordings**, if you connect a Plaud account: the name, date and
+  length of new recordings, Plaud's transcript and AI summary. Fridolin fetches
+  them with Plaud's own command-line tool, with its usage statistics turned off.
 
 ## Where it goes
 
@@ -26,6 +29,8 @@ policy describes what that copy does with data.
   and any calendar details the brain looked up — to **Anthropic** to generate
   the reply, under your own Claude account and Anthropic's terms.
 - Backups go to **your own Google Drive**.
+- Plaud transcripts are saved as text files on your computer and handed to the
+  brain you chose, so they reach Anthropic like any message the brain answers.
 - Nothing is sent to the authors of this project or to anyone else.
 
 ## Google user data
@@ -44,6 +49,8 @@ including the Limited Use requirements.
   token at Google and deletes it. You can also remove access at
   [myaccount.google.com/permissions](https://myaccount.google.com/permissions).
 - Disconnect Google Drive on the dashboard's Backup page.
+- Disconnect Plaud under Integrations: Fridolin signs out of Plaud and stops
+  fetching recordings.
 - Deleting a brain folder and `~/.fridolin/` removes everything
   the bridge stored locally.
 
