@@ -3,6 +3,7 @@
 package main
 
 import (
+	"encoding/json"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -59,4 +60,178 @@ func TestSandboxedRunAppliesProfileInline(t *testing.T) {
 	if !strings.Contains(res.Text, "read=denied") {
 		t.Errorf("brain a's run = %q, want it denied brain b's file", res.Text)
 	}
+}
+
+// sandboxLayout is one way to lay out a fake home for the enforcement test.
+type sandboxLayout struct {
+	name string
+	// home returns the HOME to configure; setup may create symlinks in it.
+	home  func(t *testing.T) string
+	setup func(t *testing.T, home string)
+	// otherBrain and denyDir name brain b's folder and the deny_paths entry.
+	otherBrain, denyDir string
+}
+
+// sandboxCheck is one access a brain tries under its profile.
+type sandboxCheck struct {
+	name  string
+	write bool   // write a new file at path instead of reading it
+	path  string // relative to HOME
+	allow bool
+}
+
+// TestSandboxEnforcesProfile builds the effective config, the brain set and
+// the profile through the real code, then runs /bin/cat and /bin/sh under
+// sandbox-exec as brain a. Every check runs through the configured spelling
+// of the path and through the real one, because the sandbox matches real
+// paths and an injected brain can use either.
+func TestSandboxEnforcesProfile(t *testing.T) {
+	requireSandboxExec(t)
+	layouts := []sandboxLayout{
+		{name: "canonical home", home: func(t *testing.T) string { return canonicalDir(t.TempDir()) },
+			otherBrain: "b", denyDir: "clients"},
+	}
+	checks := []sandboxCheck{
+		{"own folder read", false, "assistant/a/notes.md", true},
+		{"own folder write", true, "assistant/a/new.md", true},
+		{"other brain read", false, "assistant/{b}/diary.md", false},
+		{"other brain write", true, "assistant/{b}/planted.md", false},
+		{"data dir token", false, ".fridolin/dashboard.token", false},
+		{"data dir database", false, ".fridolin/bridge.db", false},
+		{"data dir write", true, ".fridolin/planted", false},
+		{"media read", false, ".fridolin/media/photo.jpg", true},
+		{"media write", true, ".fridolin/media/new.jpg", true},
+		{"own calendar token", false, "creds/google_calendar_token_a.json", true},
+		{"other brain's calendar token", false, "creds/google_calendar_token_b.json", false},
+		{"credentials dir write", true, "creds/planted.json", false},
+		{"ssh key", false, ".ssh/id_ed25519", false},
+		{"deny_paths entry", false, "{deny}/contract.txt", false},
+		{"default-denied Documents", false, "Documents/private.txt", false},
+		{"allow_paths entry", false, "Documents/share/ok.txt", true},
+	}
+	for _, l := range layouts {
+		t.Run(l.name, func(t *testing.T) {
+			home := l.home(t)
+			if l.setup != nil {
+				l.setup(t, home)
+			}
+			t.Setenv("HOME", home)
+			sp, ownDir := sandboxFixture(t, home, l.otherBrain, l.denyDir)
+			expand := strings.NewReplacer("{b}", l.otherBrain, "{deny}", l.denyDir)
+			for _, c := range checks {
+				configured := filepath.Join(home, expand.Replace(c.path))
+				spellings := [][2]string{{"configured", configured}}
+				if real := resolvedForTest(t, configured); real != configured {
+					spellings = append(spellings, [2]string{"real", real})
+				}
+				for _, spelling := range spellings {
+					label, p := spelling[0], spelling[1]
+					if c.write {
+						p += "." + label // a fresh file per spelling
+					}
+					t.Run(c.name+"/"+label, func(t *testing.T) {
+						allowed, out := sandboxTry(t, sp, ownDir, c.write, p)
+						if allowed != c.allow {
+							t.Errorf("%s: allowed=%v, want %v (output %q)", p, allowed, c.allow, out)
+						}
+					})
+				}
+			}
+		})
+	}
+}
+
+// sandboxFixture writes a config with brains a and b, a credentials dir,
+// a deny path and an allow path, loads it the way the bridge does, and
+// creates one file for every check. It returns the profiler and a's folder.
+func sandboxFixture(t *testing.T, home, otherBrain, denyDir string) (*SandboxProfiler, string) {
+	t.Helper()
+	cfgJSON, err := json.Marshal(map[string]any{
+		"brain_mode": true,
+		"data_dir":   "~/.fridolin",
+		"sandbox": map[string]any{
+			"enabled":         true,
+			"credentials_dir": "~/creds",
+			"deny_paths":      []string{"~/" + denyDir},
+			"allow_paths":     []string{"~/Documents/share"},
+		},
+		"brains": []map[string]any{
+			{"name": "a", "work_dir": "~/assistant/a", "handles_dms": true},
+			{"name": "b", "work_dir": "~/assistant/" + otherBrain, "groups": []string{"120363000000000000@g.us"}},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := LoadConfig(writeConfig(t, string(cfgJSON)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	mgr := newTestManager(t, cfg)
+	t.Cleanup(mgr.Stop)
+
+	for _, f := range []string{
+		"assistant/a/notes.md",
+		"assistant/" + otherBrain + "/diary.md",
+		".fridolin/dashboard.token",
+		".fridolin/media/photo.jpg",
+		"creds/google_calendar_token_a.json",
+		"creds/google_calendar_token_b.json",
+		".ssh/id_ed25519",
+		denyDir + "/contract.txt",
+		"Documents/private.txt",
+		"Documents/share/ok.txt",
+	} {
+		p := filepath.Join(home, f)
+		if err := os.MkdirAll(filepath.Dir(p), 0o700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(p, []byte("content of "+f), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := os.Stat(cfg.DBPath); err != nil {
+		t.Fatalf("the store did not create %s: %v", cfg.DBPath, err)
+	}
+	return mgr.profiler, mgr.Get("a").Dir()
+}
+
+// sandboxTry reads (cat) or writes (sh) path as brain a under its profile,
+// from a's folder like a real run. Anything other than success or the
+// sandbox's "Operation not permitted" fails the test, so a missing file can
+// never pass as denied, and neither can sandbox-exec failing to apply the
+// profile (its own errors start with "sandbox-exec:").
+func sandboxTry(t *testing.T, sp *SandboxProfiler, dir string, write bool, path string) (bool, string) {
+	t.Helper()
+	prog, args := "/bin/cat", []string{path}
+	if write {
+		prog, args = "/bin/sh", []string{"-c", `printf planted > "$1"`, "sh", path}
+	}
+	bin, argv, err := sp.Command("a", prog, args)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cmd := exec.Command(bin, argv...)
+	cmd.Dir = dir
+	out, err := cmd.CombinedOutput()
+	switch {
+	case err == nil:
+		return true, string(out)
+	case strings.Contains(string(out), "Operation not permitted") && !strings.HasPrefix(string(out), "sandbox-exec:"):
+		return false, string(out)
+	}
+	t.Fatalf("%s %q: %v: %s", prog, args, err, out)
+	return false, ""
+}
+
+// resolvedForTest is the real path of p, resolving symlinks in its existing
+// part (a file a check writes does not exist yet).
+func resolvedForTest(t *testing.T, p string) string {
+	t.Helper()
+	dir, base := filepath.Split(p)
+	real, err := filepath.EvalSymlinks(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return filepath.Join(real, base)
 }
