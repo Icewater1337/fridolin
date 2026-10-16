@@ -64,6 +64,54 @@ func plaudBridge(t *testing.T, extra string) (*testBridge, *fakePlaudFixture) {
 	return tb, fp
 }
 
+// plaudDeliver signs in, runs the first sync, then lets one finished
+// recording arrive and polls once.
+func plaudDeliver(t *testing.T, tb *testBridge, fp *fakePlaudFixture) error {
+	t.Helper()
+	ctx := context.Background()
+	if w := tb.do("POST", "/api/plaud/connect", nil); w.Code != 202 {
+		t.Fatal(w.Body.String())
+	}
+	waitFor(t, 5*time.Second, "login", func() bool { return tb.plaud.connected() })
+	fp.files(plaudOld1)
+	if err := tb.plaud.Poll(ctx); err != nil {
+		t.Fatal(err)
+	}
+	fp.files(plaudNew, plaudOld1)
+	fp.recording(plaudNew, true)
+	return tb.plaud.Poll(ctx)
+}
+
+// The recording runs in the brain picked for Plaud, even when that brain
+// answers in the DM, which belongs to the DM brain.
+func TestPlaudRunsInThePickedBrain(t *testing.T) {
+	const dm = "15551234567@s.whatsapp.net"
+	tb, fp := plaudBridge(t, "")
+	gDir := tb.addFolderBrain(t, BrainManifest{ID: "g", Name: "Recordings", ReplyChat: dm})
+	if w := tb.do("PUT", "/api/plaud/settings", map[string]any{"brain": "g"}); w.Code != 200 {
+		t.Fatalf("settings: %d %s", w.Code, w.Body.String())
+	}
+	if err := plaudDeliver(t, tb, fp); err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, 5*time.Second, "brain reply", func() bool { return len(tb.dev.Outbox()) > 0 })
+	if out := tb.dev.Outbox()[0]; out.JID != dm || !strings.Contains(out.Text, "echo:"+gDir+":plaud says: [Plaud] New recording") {
+		t.Errorf("reply = %+v, want it from %s in the DM", out, gDir)
+	}
+	if hist, _ := os.ReadFile(filepath.Join(tb.home, "p", "conversation-history.jsonl")); strings.Contains(string(hist), "[Plaud]") {
+		t.Errorf("the DM brain got the recording:\n%s", hist)
+	}
+	if hist, _ := os.ReadFile(filepath.Join(gDir, "conversation-history.jsonl")); !strings.Contains(string(hist), "[Plaud]") {
+		t.Errorf("g's history lacks the recording:\n%s", hist)
+	}
+	tb.plaud.mu.Lock()
+	last := tb.plaud.lastForwarded
+	tb.plaud.mu.Unlock()
+	if last == nil || last.Brain != "g" {
+		t.Errorf("last forwarded = %+v, want brain g", last)
+	}
+}
+
 func TestPlaudFirstSyncThenForwardsNewRecordings(t *testing.T) {
 	tb, fp := plaudBridge(t, "")
 	ctx := context.Background()

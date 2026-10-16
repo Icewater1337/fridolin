@@ -346,7 +346,7 @@ func (p *PlaudManager) forward(ctx context.Context, id string) (bool, error) {
 		tpl = defaultPlaudMessage
 	}
 	text := strings.NewReplacer("{name}", name, "{when}", when, "{duration}", duration).Replace(tpl)
-	p.b.handleInbound(context.Background(), Inbound{JID: jid, Sender: "plaud", Text: text, Media: []string{path}, Source: "ingest", At: time.Now()})
+	p.b.handOff(br, jid, "plaud", text, []string{path})
 	p.mu.Lock()
 	p.lastForwarded = &PlaudForward{Name: name, Brain: br.ID(), At: time.Now()}
 	p.mu.Unlock()

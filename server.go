@@ -157,9 +157,17 @@ func (b *Bridge) httpIngest(w http.ResponseWriter, r *http.Request) {
 	if text == "" {
 		text = "New files were uploaded."
 	}
-	m := Inbound{JID: jid, Brain: br.ID(), Sender: sender, Text: text, Media: paths, Source: "ingest", At: time.Now()}
-	go b.handleInbound(context.Background(), m)
+	go b.handOff(br, jid, sender, text, paths)
 	writeJSON(w, http.StatusAccepted, map[string]string{"status": "accepted", "jid": jid})
+}
+
+// handOff feeds files that arrived outside WhatsApp to the brain picked for
+// them, for /ingest and the Plaud integration. The message names the brain,
+// so it runs there even when jid, the chat that gets the answer, belongs to
+// another brain.
+func (b *Bridge) handOff(br *Brain, jid, sender, text string, media []string) {
+	m := Inbound{JID: jid, Brain: br.ID(), Sender: sender, Text: text, Media: media, Source: "ingest", At: time.Now()}
+	b.handleInbound(context.Background(), m)
 }
 
 // replyChatFor picks the chat a brain answers in when a message did not come
