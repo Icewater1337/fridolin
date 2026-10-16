@@ -2,22 +2,22 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
     "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <!--
-  launchd agent for the WhatsApp-Claude bridge.
+  launchd agent for Fridolin.
 
   setup.sh fills in the {{...}} placeholders and installs this to
-  ~/Library/LaunchAgents/com.whatsapp-claude-bridge.plist.
+  ~/Library/LaunchAgents/ai.fridolin.bridge.plist.
 
   To do it by hand, replace the placeholders, save it there, then:
-      launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.whatsapp-claude-bridge.plist
-      launchctl bootout   gui/$(id -u)/com.whatsapp-claude-bridge
+      launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/ai.fridolin.bridge.plist
+      launchctl bootout   gui/$(id -u)/ai.fridolin.bridge
 
   Pair with WhatsApp from the dashboard after it starts
-  (whatsapp-claude-bridge open).
+  (fridolin open).
 -->
 <plist version="1.0">
 <dict>
     <key>Label</key>
-    <string>com.whatsapp-claude-bridge</string>
+    <string>ai.fridolin.bridge</string>
 
     <key>ProgramArguments</key>
     <array>
@@ -40,10 +40,10 @@
     </dict>
 
     <key>StandardOutPath</key>
-    <string>{{HOME}}/Library/Logs/whatsapp-claude-bridge/stdout.log</string>
+    <string>{{HOME}}/Library/Logs/fridolin/stdout.log</string>
 
     <key>StandardErrorPath</key>
-    <string>{{HOME}}/Library/Logs/whatsapp-claude-bridge/stderr.log</string>
+    <string>{{HOME}}/Library/Logs/fridolin/stderr.log</string>
 
     <key>RunAtLoad</key>
     <true/>

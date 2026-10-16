@@ -52,7 +52,7 @@ export default {
             r.detail ? h('div.muted.small', r.detail) : null,
             r.warning ? h('div.warn-text.small', icon('alert'), ' ', r.warning) : null);
         })),
-        rows.some((r) => r.action === 'conflict') ? callout('warn', null, 'Brains with a conflict stay in config.json. Remove or merge the existing brain.json by hand, then try again — or run ', h('code.mono', 'whatsapp-claude-bridge migrate --force'), ' to overwrite it.') : null);
+        rows.some((r) => r.action === 'conflict') ? callout('warn', null, 'Brains with a conflict stay in config.json. Remove or merge the existing brain.json by hand, then try again — or run ', h('code.mono', 'fridolin migrate --force'), ' to overwrite it.') : null);
       const result = await openDialog({
         title: 'Move brains to their folders',
         body,

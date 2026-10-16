@@ -1,21 +1,21 @@
-# systemd user unit for the WhatsApp-Claude bridge.
+# systemd user unit for Fridolin.
 #
 # Replace the {{...}} placeholders, then:
 #     mkdir -p ~/.config/systemd/user
-#     cp whatsapp-claude-bridge.service ~/.config/systemd/user/
+#     cp fridolin.service ~/.config/systemd/user/
 #     systemctl --user daemon-reload
-#     systemctl --user enable --now whatsapp-claude-bridge
-#     journalctl --user -u whatsapp-claude-bridge -f
+#     systemctl --user enable --now fridolin
+#     journalctl --user -u fridolin -f
 #
 # Pair with WhatsApp from the dashboard after it starts
-# (whatsapp-claude-bridge open). To keep the bridge running after you log out:
+# (fridolin open). To keep the bridge running after you log out:
 #     sudo loginctl enable-linger {{USER}}
 #
 # Note: the sandbox layer is macOS-only. On Linux the assistant runs with
 # whatever access this user has, so run it as a dedicated user.
 
 [Unit]
-Description=WhatsApp-Claude bridge
+Description=Fridolin
 After=network-online.target
 Wants=network-online.target
 

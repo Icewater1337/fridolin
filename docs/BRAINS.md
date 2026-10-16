@@ -93,7 +93,7 @@ default brain. The folder is left exactly as it was.
 
 Configs from before brain folders define brains inline in `config.json`
 (`"brains": [{"name": "...", "work_dir": "..."}]`). They keep working.
-`whatsapp-claude-bridge migrate` (or the banner on the Brains page) writes a
+`fridolin migrate` (or the banner on the Brains page) writes a
 `brain.json` into each work dir and moves the entry to `brain_dirs`, keeping
 the same id — sessions and history carry over. Editing an inline brain in the
 dashboard migrates that one brain.

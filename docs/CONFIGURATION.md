@@ -1,9 +1,9 @@
 # Configuration
 
-The dashboard edits all of this for you (`./whatsapp-claude-bridge open`).
+The dashboard edits all of this for you (`./fridolin open`).
 This page is the reference behind it.
 
-The configuration is `~/.whatsapp-claude-bridge/config.json`, or `config.json`
+The configuration is `~/.fridolin/config.json`, or `config.json`
 in the current directory if one exists, or wherever `--config` / `CONFIG_FILE`
 points. On first start a safe starter config is written there. Changes made
 in the dashboard apply immediately; a few runtime settings (marked *restart*)
@@ -12,7 +12,7 @@ need a restart, which the dashboard offers.
 Validate at any time:
 
 ```bash
-./whatsapp-claude-bridge check
+./fridolin check
 ```
 
 Paths may start with `~`, which expands to your home directory.
@@ -139,7 +139,7 @@ dashboard; see [BRAINS.md](BRAINS.md). In `config.json` they appear as:
 ### Inline brains
 
 Older configs list brains inline. They keep working, and
-`whatsapp-claude-bridge migrate` moves them into `brain.json` files:
+`fridolin migrate` moves them into `brain.json` files:
 
 ```json
 "brains": [
@@ -230,7 +230,7 @@ dedicated user there.
 
 Database (including the WhatsApp session), downloaded media, the dashboard
 token, backup state, the bridge's rclone config and calendar credentials.
-Default `~/.whatsapp-claude-bridge`. `db_path` and `media_dir` override
+Default `~/.fridolin`. `db_path` and `media_dir` override
 individually. Brains cannot read it, except the `media/` inbox and their own
 calendar credentials.
 
@@ -298,7 +298,7 @@ Google Drive backups; see [BACKUP.md](BACKUP.md).
 | --- | --- | --- |
 | `enabled` | `false` | run the daily backup |
 | `daily_at` | `"03:30"` | local time, `HH:MM` |
-| `root` | `"whatsapp-claude-bridge-backup"` | folder in Drive |
+| `root` | `"fridolin-backup"` | folder in Drive |
 | `remote` | `"brain-gdrive"` | rclone remote name in the bridge's own rclone config |
 | `keep_versions_days` | `30` | `0` keeps old versions forever |
 | `include_bridge_config` | `true` | also back up `config.json` and the brain list |

@@ -1,4 +1,4 @@
-module whatsapp-claude-bridge
+module fridolin
 
 go 1.25.0
 

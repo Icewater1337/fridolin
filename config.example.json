@@ -1,5 +1,5 @@
 {
-  "_comment": "You normally never edit this: the dashboard (./whatsapp-claude-bridge open) does. Every option: docs/CONFIGURATION.md",
+  "_comment": "You normally never edit this: the dashboard (./fridolin open) does. Every option: docs/CONFIGURATION.md",
 
   "allowed_numbers": ["15551234567"],
   "allow_any_dm": false,
@@ -7,7 +7,7 @@
   "triggers": ["@claude", {"text": "@c", "match": "start"}],
 
   "claude_path": "claude",
-  "data_dir": "~/.whatsapp-claude-bridge",
+  "data_dir": "~/.fridolin",
 
   "brain_mode": true,
   "brain_model": "",

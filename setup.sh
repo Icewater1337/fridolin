@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# Sets up the WhatsApp–Claude bridge on this machine:
+# Sets up Fridolin on this machine:
 #   1. checks prerequisites (Go, a C compiler, the Claude CLI; rclone optional)
 #   2. builds the binary and runs the tests
 #   3. optionally installs a background service (launchd on macOS,
@@ -12,17 +12,21 @@
 #
 #   ./setup.sh                 guided
 #   ./setup.sh --yes           accept every default (installs the service)
-#   ./setup.sh --no-service    build only; run ./whatsapp-claude-bridge yourself
+#   ./setup.sh --no-service    build only; run ./fridolin yourself
 #
 # Safe to re-run: it rebuilds and leaves your configuration and brains alone.
 
 set -euo pipefail
 
 REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-BINARY="$REPO_DIR/whatsapp-claude-bridge"
-DATA_DIR="${DATA_DIR:-$HOME/.whatsapp-claude-bridge}"
+BINARY="$REPO_DIR/fridolin"
+# Installs from before the rename keep their data folder.
+if [ -z "${DATA_DIR:-}" ] && [ ! -d "$HOME/.fridolin" ] && [ -d "$HOME/.whatsapp-claude-bridge" ]; then
+  DATA_DIR="$HOME/.whatsapp-claude-bridge"
+fi
+DATA_DIR="${DATA_DIR:-$HOME/.fridolin}"
 CONFIG_FILE="${CONFIG_FILE:-$DATA_DIR/config.json}"
-LABEL="com.whatsapp-claude-bridge"
+LABEL="ai.fridolin.bridge"
 
 ASSUME_YES=false
 NO_SERVICE=false
@@ -131,13 +135,19 @@ if ! $NO_SERVICE; then
   if [ "$OS" = Darwin ]; then
     if confirm "Start the bridge at login with launchd (recommended)?" y; then
       PLIST="$HOME/Library/LaunchAgents/$LABEL.plist"
-      mkdir -p "$HOME/Library/LaunchAgents" "$HOME/Library/Logs/whatsapp-claude-bridge"
+      mkdir -p "$HOME/Library/LaunchAgents" "$HOME/Library/Logs/fridolin"
       sed -e "s|{{BINARY}}|$BINARY|g" \
           -e "s|{{WORKDIR}}|$DATA_DIR|g" \
           -e "s|{{CONFIG}}|$CONFIG_FILE|g" \
           -e "s|{{HOME}}|$HOME|g" \
           "$REPO_DIR/deploy/launchd.plist.template" > "$PLIST"
       launchctl bootout "gui/$(id -u)/$LABEL" 2>/dev/null || true
+      # The service's name before the rename.
+      OLD_PLIST="$HOME/Library/LaunchAgents/com.whatsapp-claude-bridge.plist"
+      if [ -f "$OLD_PLIST" ]; then
+        launchctl bootout "gui/$(id -u)/com.whatsapp-claude-bridge" 2>/dev/null || true
+        mv "$OLD_PLIST" "$OLD_PLIST.replaced-by-fridolin"
+      fi
       SERVICE=true
       ok "installed $PLIST"
     fi
@@ -149,10 +159,10 @@ if ! $NO_SERVICE; then
           -e "s|{{WORKDIR}}|$DATA_DIR|g" \
           -e "s|{{CONFIG}}|$CONFIG_FILE|g" \
           -e "s|{{USER}}|$(id -un)|g" \
-          "$REPO_DIR/deploy/systemd.service.template" > "$UNIT_DIR/whatsapp-claude-bridge.service"
+          "$REPO_DIR/deploy/systemd.service.template" > "$UNIT_DIR/fridolin.service"
       systemctl --user daemon-reload
       SERVICE=true
-      ok "installed $UNIT_DIR/whatsapp-claude-bridge.service"
+      ok "installed $UNIT_DIR/fridolin.service"
       info "${DIM}To keep it running after you log out: sudo loginctl enable-linger $(id -un)${RESET}"
     fi
   fi
@@ -164,7 +174,7 @@ if $SERVICE; then
   if [ "$OS" = Darwin ]; then
     launchctl bootstrap "gui/$(id -u)" "$HOME/Library/LaunchAgents/$LABEL.plist"
   else
-    systemctl --user enable --now whatsapp-claude-bridge
+    systemctl --user enable --now fridolin
   fi
   for _ in $(seq 1 30); do
     curl -fsS "http://127.0.0.1:8765/health" >/dev/null 2>&1 && break
@@ -175,7 +185,7 @@ if $SERVICE; then
     "$BINARY" open --config "$CONFIG_FILE" || true
   else
     warn "the bridge did not answer yet — check the log:"
-    [ "$OS" = Darwin ] && info "tail -f ~/Library/Logs/whatsapp-claude-bridge/stderr.log" || info "journalctl --user -u whatsapp-claude-bridge -f"
+    [ "$OS" = Darwin ] && info "tail -f ~/Library/Logs/fridolin/stderr.log" || info "journalctl --user -u fridolin -f"
   fi
 fi
 

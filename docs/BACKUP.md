@@ -12,7 +12,7 @@ it — without putting any of it in a git repository.
    the link.)
 
 The bridge drives rclone with its **own** config file,
-`~/.whatsapp-claude-bridge/rclone/rclone.conf`. Your personal rclone setup and
+`~/.fridolin/rclone/rclone.conf`. Your personal rclone setup and
 `RCLONE_*` environment variables are never used or changed.
 
 The link uses Google's `drive.file` scope: rclone can only see files it
@@ -21,7 +21,7 @@ created itself. Your other Drive files stay invisible to it.
 ## What is backed up
 
 ```
-whatsapp-claude-bridge-backup/        (backup.root)
+fridolin-backup/        (backup.root)
 ├── <brain-id>/
 │   ├── current/                      the brain folder as of the last backup
 │   └── versions/<timestamp>/         files that run changed or deleted
@@ -80,5 +80,5 @@ Any rclone remote works. To use one, add a section named like `backup.remote`
 (default `brain-gdrive`) to the bridge's rclone config, e.g.
 
 ```
-rclone --config ~/.whatsapp-claude-bridge/rclone/rclone.conf config
+rclone --config ~/.fridolin/rclone/rclone.conf config
 ```

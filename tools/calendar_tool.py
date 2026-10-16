@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Google Calendar CLI for the WhatsApp–Claude bridge.
+"""Google Calendar CLI for Fridolin.
 
 Every command prints JSON on stdout, so the assistant can parse the result and
 summarise it in plain language.
@@ -68,7 +68,8 @@ SCOPES = ["https://www.googleapis.com/auth/calendar"]
 DATA_DIR = Path(
     os.environ.get("BRIDGE_CREDENTIALS_DIR")
     or os.environ.get("BRIDGE_DATA_DIR")
-    or Path.home() / ".whatsapp-claude-bridge"
+    or next((p for p in (Path.home() / ".fridolin", Path.home() / ".whatsapp-claude-bridge") if p.is_dir()),
+            Path.home() / ".fridolin")
 )
 
 # The calendars the dashboard allowed for this brain (empty: no restriction).
@@ -413,7 +414,7 @@ def cmd_calendars(args) -> None:
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="Google Calendar tool for the WhatsApp–Claude bridge",
+        description="Google Calendar tool for Fridolin",
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     parser.add_argument("--profile", default=os.environ.get("BRIDGE_BRAIN_ID") or None,

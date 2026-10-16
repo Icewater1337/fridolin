@@ -51,7 +51,7 @@ export async function restartBridge() {
   mount(body,
     h('p', 'The bridge has not answered yet.'),
     h('p.muted', 'If you changed the listen address (http_listen), the dashboard has moved: run ',
-      h('code.mono', 'whatsapp-claude-bridge open'), ' in a terminal to open it at the new address. Otherwise check the terminal or service log of the bridge.'));
+      h('code.mono', 'fridolin open'), ' in a terminal to open it at the new address. Otherwise check the terminal or service log of the bridge.'));
   mount(actions, btn('Close', { onClick: () => close() }), btn('Reload page', { kind: 'primary', onClick: () => location.reload() }));
   return false;
 }

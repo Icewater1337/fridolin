@@ -147,7 +147,7 @@ export default {
           h('div.card-title', icon('backup'), h('h2', 'Google Drive')),
           pill('Connected', 'ok')),
         h('div.card-body',
-          h('p', 'Backups go to the folder ', h('strong', s.root || 'whatsapp-claude-bridge-backup'), ' in your Google Drive.'),
+          h('p', 'Backups go to the folder ', h('strong', s.root || 'fridolin-backup'), ' in your Google Drive.'),
           h('dl.kv',
             h('dt', 'Schedule'), h('dd', s.enabled ? `Every day at ${s.daily_at || '03:30'}` : 'Off — only when you click “Back up now”'),
             st.next_run ? [h('dt', 'Next run'), h('dd', timeAgo(st.next_run))] : null,
@@ -213,7 +213,7 @@ export default {
       if (scheduleDirty) return;
       const enabled = toggle({ checked: !!s.enabled, label: 'Back up every day' });
       const time = h('input', { type: 'time', id: nextId('t'), value: s.daily_at || '03:30', step: 60, required: true });
-      const rootIn = textInput({ value: s.root || '', placeholder: 'whatsapp-claude-bridge-backup', class: 'mono' });
+      const rootIn = textInput({ value: s.root || '', placeholder: 'fridolin-backup', class: 'mono' });
       const keep = textInput({ value: String(s.keep_versions_days ?? 30), inputmode: 'numeric', class: 'num' });
       const incSw = toggle({ checked: inc !== false, label: 'Also back up the bridge’s settings' });
       const saveBtn = btn('Save schedule', { kind: 'primary', type: 'submit', icon: 'check' });

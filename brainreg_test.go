@@ -55,7 +55,7 @@ func TestConfinedPathRejectsSymlinkEscape(t *testing.T) {
 func TestCheckBrainPath(t *testing.T) {
 	home := canonicalDir(t.TempDir())
 	t.Setenv("HOME", home)
-	cfg := &Config{DataDir: filepath.Join(home, ".whatsapp-claude-bridge")}
+	cfg := &Config{DataDir: filepath.Join(home, ".fridolin")}
 	others := []string{filepath.Join(home, "brains", "medical")}
 
 	cases := []struct {
@@ -69,7 +69,7 @@ func TestCheckBrainPath(t *testing.T) {
 		{"/var/tmp/x", false},
 		{"~/brains/medical/sub", false}, // inside another brain
 		{"~/brains", false},             // contains another brain
-		{"~/.whatsapp-claude-bridge/x", false},
+		{"~/.fridolin/x", false},
 		{"relative/path", false},
 	}
 	for _, c := range cases {

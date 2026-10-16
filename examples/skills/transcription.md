@@ -93,7 +93,7 @@ Someone sends a voice note. You receive the file path in the message:
 
 ```bash
 python3 <bridge-repo>/tools/transcribe.py \
-  ~/.whatsapp-claude-bridge/media/3EB0A1B2C3.ogg \
+  ~/.fridolin/media/3EB0A1B2C3.ogg \
   --output-dir <work_dir>/transcripts \
   --language en
 ```

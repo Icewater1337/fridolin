@@ -30,7 +30,7 @@ on `http://127.0.0.1:<port>/` without any further setup. A *Web application*
 client also works if you add the bridge's address
 (`http://127.0.0.1:8765/` by default) to its authorised redirect URIs.
 
-The client file is stored in `~/.whatsapp-claude-bridge/google/`, which brains
+The client file is stored in `~/.fridolin/google/`, which brains
 cannot read.
 
 ## Connecting a brain

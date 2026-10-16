@@ -44,7 +44,7 @@ including the Limited Use requirements.
   token at Google and deletes it. You can also remove access at
   [myaccount.google.com/permissions](https://myaccount.google.com/permissions).
 - Disconnect Google Drive on the dashboard's Backup page.
-- Deleting a brain folder and `~/.whatsapp-claude-bridge/` removes everything
+- Deleting a brain folder and `~/.fridolin/` removes everything
   the bridge stored locally.
 
 ## Contact

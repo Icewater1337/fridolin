@@ -178,7 +178,7 @@ func (b *Bridge) Start(ctx context.Context) error {
 			}
 		}()
 		if !cfg.Dashboard.Disabled {
-			log.Printf("Dashboard: http://%s/  (open it with: whatsapp-claude-bridge open)", cfg.HTTPListen)
+			log.Printf("Dashboard: http://%s/  (open it with: fridolin open)", cfg.HTTPListen)
 		}
 	}
 
@@ -307,7 +307,7 @@ func (b *Bridge) handleCommand(ctx context.Context, m Inbound, cfg *Config) bool
 		return true
 
 	case "!help":
-		help := "🤖 *WhatsApp–Claude Bridge*\n\n" +
+		help := "🤖 *Fridolin*\n\n" +
 			"Send a message to talk to Claude. Images, documents, audio, and video are passed along as files.\n\n" +
 			"*Commands:*\n" +
 			"• `!help` — show this help\n" +

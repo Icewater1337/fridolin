@@ -13,7 +13,7 @@ Usage:
 Output is JSON: question, options, total_voters, and per-option votes + voters.
 
 The database location follows BRIDGE_DB_PATH, then BRIDGE_DATA_DIR/bridge.db,
-then ~/.whatsapp-claude-bridge/bridge.db.
+then ~/.fridolin/bridge.db.
 """
 
 import argparse
@@ -27,7 +27,9 @@ from pathlib import Path
 def db_path() -> Path:
     if p := os.environ.get("BRIDGE_DB_PATH"):
         return Path(p)
-    data_dir = Path(os.environ.get("BRIDGE_DATA_DIR", Path.home() / ".whatsapp-claude-bridge"))
+    default = next((p for p in (Path.home() / ".fridolin", Path.home() / ".whatsapp-claude-bridge") if p.is_dir()),
+                   Path.home() / ".fridolin")
+    data_dir = Path(os.environ.get("BRIDGE_DATA_DIR", default))
     return data_dir / "bridge.db"
 
 

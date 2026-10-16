@@ -33,14 +33,14 @@ Everything lives under your working directory:
 ```
 
 The bridge's inbound directory — `media/` inside its `data_dir`, by default
-`~/.whatsapp-claude-bridge/media/` — is **staging only**. Files arrive there
+`~/.fridolin/media/` — is **staging only**. Files arrive there
 with hash-like names and no permanent home. Move them out.
 
 ## Workflow
 
 ### 1. Confirm it's media
 
-It arrived at `~/.whatsapp-claude-bridge/media/<HASH>.<ext>`. Check it's the
+It arrived at `~/.fridolin/media/<HASH>.<ext>`. Check it's the
 artifact itself rather than a document or something worth transcribing. If it's
 audio or video and the user wants the content, switch to the transcription
 skill instead.
@@ -75,7 +75,7 @@ use *that* date, not today's.
 
 ```bash
 mkdir -p "<work_dir>/media/<subfolder>"
-mv ~/.whatsapp-claude-bridge/media/<HASH>.<ext> \
+mv ~/.fridolin/media/<HASH>.<ext> \
    "<work_dir>/media/<subfolder>/YYYY-MM-DD - description.<ext>"
 ```
 

@@ -739,7 +739,7 @@ func (m *BackupManager) backupBridge(ctx context.Context, trigger string) *Backu
 			_ = os.WriteFile(filepath.Join(stage, "brains", ref.Approved.ID+".brain.json"), md, 0o600)
 		}
 	}
-	readme := "Bridge configuration backup.\n\nTo restore on a new machine: put config.json at ~/.whatsapp-claude-bridge/config.json,\n" +
+	readme := "Bridge configuration backup.\n\nTo restore on a new machine: put config.json at ~/.fridolin/config.json,\n" +
 		"restore each brain folder from <brain-id>/current, and pair WhatsApp again from the dashboard.\n" +
 		"The WhatsApp session, .env files and tokens are deliberately not backed up.\n"
 	_ = os.WriteFile(filepath.Join(stage, "README.txt"), []byte(readme), 0o600)

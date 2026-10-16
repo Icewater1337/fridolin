@@ -16,23 +16,23 @@ import (
 	"syscall"
 )
 
-const usage = `whatsapp-claude-bridge — talk to Claude Code over WhatsApp
+const usage = `fridolin — talk to Claude Code over WhatsApp
 
 Usage:
-  whatsapp-claude-bridge [run] [flags]     start the bridge (default)
-  whatsapp-claude-bridge open              open the dashboard in your browser
-  whatsapp-claude-bridge check [--route JID ...]
+  fridolin [run] [flags]     start the bridge (default)
+  fridolin open              open the dashboard in your browser
+  fridolin check [--route JID ...]
                                            validate the configuration and show routing
-  whatsapp-claude-bridge migrate [--dry-run] [--force]
+  fridolin migrate [--dry-run] [--force]
                                            move brains configured inline in config.json
                                            into their folders (brain.json)
-  whatsapp-claude-bridge init [--claude-path PATH]
+  fridolin init [--claude-path PATH]
                                            write a starter config (if there is none)
-  whatsapp-claude-bridge version
+  fridolin version
 
 Common flags:
   --config PATH     config file (default: $CONFIG_FILE, ./config.json if present,
-                    else ~/.whatsapp-claude-bridge/config.json)
+                    else ~/.fridolin/config.json)
 
 Run flags:
   --no-whatsapp     dev mode: dashboard and brains without a WhatsApp connection
@@ -76,7 +76,7 @@ func defaultConfigPath() string {
 		return "config.json"
 	}
 	home, _ := os.UserHomeDir()
-	return filepath.Join(home, ".whatsapp-claude-bridge", "config.json")
+	return filepath.Join(defaultDataDir(home), "config.json")
 }
 
 // starterConfig is written on the very first run, so the bridge can start and
@@ -84,7 +84,7 @@ func defaultConfigPath() string {
 func starterConfig() *Config {
 	f := false
 	return &Config{
-		Comment:                    "Edit this in the dashboard (whatsapp-claude-bridge open). Every option: docs/CONFIGURATION.md",
+		Comment:                    "Edit this in the dashboard (fridolin open). Every option: docs/CONFIGURATION.md",
 		AllowedNumbers:             []string{},
 		AllowAnyDM:                 &f,
 		AllowedGroups:              []string{},

@@ -98,7 +98,8 @@ var defaultDenySubpaths = []string{
 	".config/gh",
 	".config/gcloud",
 	".config/rclone",
-	".config/whatsapp-claude-bridge",
+	".config/fridolin",
+	".config/whatsapp-claude-bridge", // the name before the rename
 	"Documents",
 	"Downloads",
 	"Desktop",
@@ -293,7 +294,7 @@ func (sp *SandboxProfiler) Write(brainID string) (string, error) {
 		return "", fmt.Errorf("rand: %w", err)
 	}
 
-	name := fmt.Sprintf("wcb-brain-%s-%s.sb", brainID, hex.EncodeToString(buf))
+	name := fmt.Sprintf("fridolin-brain-%s-%s.sb", brainID, hex.EncodeToString(buf))
 	path := filepath.Join(os.TempDir(), name)
 	if err := os.WriteFile(path, []byte(sp.Profile(brainID)), 0o600); err != nil {
 		return "", fmt.Errorf("write profile: %w", err)

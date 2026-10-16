@@ -14,7 +14,7 @@ installation — pairing WhatsApp, adding brains, allowing chats, Google Drive
 backups — is done in a local web dashboard.
 
 The person's data lives in brain folders they choose and in
-`~/.whatsapp-claude-bridge/`, never in this repository.
+`~/.fridolin/`, never in this repository.
 
 ## Setup steps
 
@@ -32,11 +32,11 @@ The person's data lives in brain folders they choose and in
    ./setup.sh --yes
    ```
 
-   This builds `./whatsapp-claude-bridge`, runs the tests, writes a starter
-   config to `~/.whatsapp-claude-bridge/config.json`, installs a launchd agent
+   This builds `./fridolin`, runs the tests, writes a starter
+   config to `~/.fridolin/config.json`, installs a launchd agent
    (macOS) or systemd user unit (Linux), starts it, and opens the dashboard.
    Use `./setup.sh --no-service` if the person does not want it to start at
-   login; then run `./whatsapp-claude-bridge --open` yourself (it runs in the
+   login; then run `./fridolin --open` yourself (it runs in the
    foreground — start it in the background or a separate terminal).
 
 3. **Hand over to the dashboard.** Tell the person to:
@@ -56,24 +56,24 @@ The person's data lives in brain folders they choose and in
    You cannot scan QR codes or approve Google sign-ins for them.
 
 4. **Verify:** `curl -s http://127.0.0.1:8765/health` prints `ok`;
-   `./whatsapp-claude-bridge check` shows the brains and routing. Ask the
+   `./fridolin check` shows the brains and routing. Ask the
    person to send the bridge a DM and confirm a reply arrives.
 
-Reopen the dashboard with `./whatsapp-claude-bridge open`.
+Reopen the dashboard with `./fridolin open`.
 
 ## Rules
 
-- **Never delete or recreate `~/.whatsapp-claude-bridge/bridge.db`.** It holds
+- **Never delete or recreate `~/.fridolin/bridge.db`.** It holds
   the WhatsApp pairing; losing it means re-pairing and losing poll history.
   If a repair seems to need it, stop and ask; move it aside rather than delete.
 - **Never run two bridges on one data directory or WhatsApp session.** The
   binary refuses (lock file + port), but do not try to work around it. To
   experiment, use dev mode with a scratch config:
-  `./whatsapp-claude-bridge --no-whatsapp --config /tmp/try/config.json`
+  `./fridolin --no-whatsapp --config /tmp/try/config.json`
   (set a different `http_listen` port and `data_dir` in that config).
-- **Never print or paste** `~/.whatsapp-claude-bridge/dashboard.token`, the
-  rclone config in `~/.whatsapp-claude-bridge/rclone/`, or anything that looks
-  like a credential into chat or logs. `whatsapp-claude-bridge open` passes
+- **Never print or paste** `~/.fridolin/dashboard.token`, the
+  rclone config in `~/.fridolin/rclone/`, or anything that looks
+  like a credential into chat or logs. `fridolin open` passes
   the token to the browser directly.
 - Do not commit the person's data. `config.json`, brain folders, databases,
   media and tokens are not part of this repository.

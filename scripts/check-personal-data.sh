@@ -19,7 +19,7 @@
 #
 # The denylist is read from the first of:
 #   $PERSONAL_DENYLIST
-#   ~/.config/whatsapp-claude-bridge/personal-denylist
+#   ~/.config/fridolin/personal-denylist
 #   .personal-denylist           (gitignored; never commit it)
 # One entry per line, matched case-insensitively. Lines starting with # are
 # comments. Entries made only of digits also match with spaces, dashes, dots
@@ -191,7 +191,7 @@ fi
 # ── personal denylist ──────────────────────────────────────────────────────
 
 denylist=""
-for cand in "${PERSONAL_DENYLIST:-}" "$HOME/.config/whatsapp-claude-bridge/personal-denylist" "$root/.personal-denylist"; do
+for cand in "${PERSONAL_DENYLIST:-}" "$HOME/.config/fridolin/personal-denylist" "$HOME/.config/whatsapp-claude-bridge/personal-denylist" "$root/.personal-denylist"; do
   if [ -n "$cand" ] && [ -f "$cand" ]; then denylist="$cand"; break; fi
 done
 if git ls-files --error-unmatch .personal-denylist >/dev/null 2>&1; then

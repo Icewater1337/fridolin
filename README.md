@@ -1,4 +1,4 @@
-# WhatsApp–Claude Bridge
+# Fridolin
 
 Talk to [Claude Code](https://claude.com/claude-code) over WhatsApp.
 
@@ -124,7 +124,7 @@ Then, in the dashboard:
 Reopen the dashboard any time with:
 
 ```bash
-./whatsapp-claude-bridge open
+./fridolin open
 ```
 
 ### Adding a group
@@ -157,19 +157,19 @@ the dashboard shows the change and waits for you. See
 
 ### Configuring by hand
 
-The dashboard writes `~/.whatsapp-claude-bridge/config.json`; you can edit it
+The dashboard writes `~/.fridolin/config.json`; you can edit it
 too. Every option is documented in [docs/CONFIGURATION.md](docs/CONFIGURATION.md).
 
 ```bash
-./whatsapp-claude-bridge check                         # validate and show the routing
-./whatsapp-claude-bridge check --route 15551234567@s.whatsapp.net
-./whatsapp-claude-bridge migrate                       # move inline brains into brain.json files
+./fridolin check                         # validate and show the routing
+./fridolin check --route 15551234567@s.whatsapp.net
+./fridolin migrate                       # move inline brains into brain.json files
 ```
 
 ### Trying it without WhatsApp
 
 ```bash
-./whatsapp-claude-bridge --no-whatsapp --config /tmp/try/config.json --open
+./fridolin --no-whatsapp --config /tmp/try/config.json --open
 ```
 
 Dev mode runs the dashboard and brains with a simulated chat: inject messages
@@ -269,13 +269,13 @@ curl -X POST http://127.0.0.1:8765/send \
 ```
 
 To hand a brain files that arrived some other way (a web upload, a recorder
-sync), write them under `~/.whatsapp-claude-bridge/media/` and turn on
+sync), write them under `~/.fridolin/media/` and turn on
 `ingest.enabled`:
 
 ```bash
 curl -X POST http://127.0.0.1:8765/ingest \
   -H 'Content-Type: application/json' \
-  -d '{"brain":"personal","paths":["/Users/you/.whatsapp-claude-bridge/media/upload/scan.pdf"],"text":"File this"}'
+  -d '{"brain":"personal","paths":["/Users/you/.fridolin/media/upload/scan.pdf"],"text":"File this"}'
 ```
 
 The brain handles it like a WhatsApp attachment and replies in its chat. Both
@@ -297,7 +297,7 @@ under *Settings → Google sign-in*. Step by step:
 permission, so it can see nothing in your Drive except the files it creates.
 
 Every night (or when you click *Back up now*) each brain folder is synced
-incrementally to `whatsapp-claude-bridge-backup/<brain>/current/`; files that
+incrementally to `fridolin-backup/<brain>/current/`; files that
 changed or were deleted move to `versions/<timestamp>/` and are kept for 30
 days. Exclude patterns per brain keep out what you can rebuild. The WhatsApp
 session, tokens and `.env` files are never uploaded. Restores go into a new
@@ -333,7 +333,7 @@ What the bridge does about it:
   and calendar credentials.
 - **A guarded dashboard.** It only listens on localhost, rejects requests
   from web pages on other sites (and DNS-rebinding tricks), and requires a
-  token from `~/.whatsapp-claude-bridge/dashboard.token` — a file the sandbox
+  token from `~/.fridolin/dashboard.token` — a file the sandbox
   keeps away from brains, so a manipulated brain cannot reconfigure the bridge.
 - **You approve brain settings.** A brain that edits its own `brain.json` to
   claim your DMs or another group changes nothing until you approve it.
@@ -433,7 +433,7 @@ group JIDs, or chat content in bug reports — redact them.
 Run `scripts/install-hooks.sh` once: it blocks commits and pushes that contain
 phone numbers, WhatsApp JIDs, email addresses, home-directory paths or tokens,
 plus anything in your personal denylist
-(`~/.config/whatsapp-claude-bridge/personal-denylist`, one string per line —
+(`~/.config/fridolin/personal-denylist`, one string per line —
 your name, your numbers, your company). CI runs the same check.
 
 ## License

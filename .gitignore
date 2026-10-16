@@ -17,7 +17,8 @@ conversation-history.jsonl
 claude-stream.log
 
 # ── build output ──────────────────────────────────────────────────────────
-whatsapp-claude-bridge
+/fridolin
+/whatsapp-claude-bridge
 /bridge
 dist/
 

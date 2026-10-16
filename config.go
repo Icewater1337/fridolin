@@ -14,7 +14,7 @@ import (
 // BrainConfig describes one brain inline in config.json — the original way to
 // configure brains. New brains live in their own folder with a brain.json
 // manifest (see manifest.go) and are listed in brain_dirs; inline brains keep
-// working and `whatsapp-claude-bridge migrate` converts them.
+// working and `fridolin migrate` converts them.
 type BrainConfig struct {
 	// Name identifies the brain in logs, session keys, and sandbox profiles.
 	// Use a filesystem-safe slug, e.g. "personal", "work", "family".
@@ -232,7 +232,7 @@ const (
 	defaultQuietMS       = 2000
 	defaultMaxWaitMS     = 10000
 	defaultBackupRemote  = "brain-gdrive"
-	defaultBackupRoot    = "whatsapp-claude-bridge-backup"
+	defaultBackupRoot    = "fridolin-backup"
 	defaultBackupDailyAt = "03:30"
 	defaultKeepVersions  = 30
 )
@@ -291,6 +291,19 @@ func loadDotEnv(cfgPath string) {
 	}
 }
 
+// defaultDataDir is ~/.fridolin, or the folder installs used before the
+// project was renamed (~/.whatsapp-claude-bridge) when only that one exists.
+func defaultDataDir(home string) string {
+	current := filepath.Join(home, ".fridolin")
+	legacy := filepath.Join(home, ".whatsapp-claude-bridge")
+	if _, err := os.Stat(current); os.IsNotExist(err) {
+		if st, err := os.Stat(legacy); err == nil && st.IsDir() {
+			return legacy
+		}
+	}
+	return current
+}
+
 // effective derives the running configuration from the on-disk layer:
 // environment overrides, defaults, ~ expansion, validation. It returns the
 // json field names that an environment variable overrode.
@@ -311,7 +324,7 @@ func effective(file *Config) (*Config, map[string]string, error) {
 	}
 	cfg.ClaudePath = expandHome(cfg.ClaudePath, home)
 	if cfg.DataDir == "" {
-		cfg.DataDir = filepath.Join(home, ".whatsapp-claude-bridge")
+		cfg.DataDir = defaultDataDir(home)
 	}
 	cfg.DataDir = expandHome(cfg.DataDir, home)
 	if cfg.DBPath == "" {

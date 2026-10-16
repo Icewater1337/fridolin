@@ -190,7 +190,7 @@ function renderRoute() {
     mount(root, h('div.empty', h('div.empty-title', 'Page not found'), h('p', 'There is nothing at this address.'), btn('Go to the overview', { href: '#/overview', kind: 'primary' })));
     return;
   }
-  document.title = `${typeof page.title === 'function' ? page.title(params) : page.title} · WhatsApp Claude Bridge`;
+  document.title = `${typeof page.title === 'function' ? page.title(params) : page.title} · Fridolin`;
   try {
     page.render(root, ctx);
   } catch (e) {
@@ -247,7 +247,7 @@ function buildShell() {
     h('div.brand-row',
       h('a.brand', { href: '#/overview' },
         h('img.brand-logo', { src: '/favicon.svg', alt: '', width: 28, height: 28 }),
-        h('span.brand-text', h('span.brand-name', 'Bridge'), h('span.brand-sub', 'WhatsApp × Claude'))),
+        h('span.brand-text', h('span.brand-name', 'Fridolin'), h('span.brand-sub', 'WhatsApp × Claude'))),
       h('div.brand-tools', themeButton(), menuBtn)),
     nav,
     h('div.sidebar-foot', waLink, h('div.foot-row', version, themeButton())));
@@ -344,13 +344,13 @@ function showConnect(reason) {
       submitBtn.disabled = false;
     }
   });
-  const cmd = 'whatsapp-claude-bridge open';
+  const cmd = 'fridolin open';
   mount(app, h('div.connect-card.card',
     h('div.connect-head', h('img', { src: '/favicon.svg', alt: '', width: 44, height: 44 }), h('div', h('h1', 'Connect to your bridge'), h('p.muted', 'The dashboard needs your bridge’s access token.'))),
     reason ? h('div.callout.warn', icon('alert', 'callout-icon'), h('div.callout-body', reason)) : null,
     h('ol.steps-list',
       h('li', h('div', 'In a terminal on this computer, run'), h('div.code-line', h('code.mono', cmd), copyButton(cmd)), h('div.muted.small', 'It opens this dashboard with the token filled in.')),
-      h('li', h('div', 'Or paste the token from ', h('code.mono', '~/.whatsapp-claude-bridge/dashboard.token'), ' (in your data folder, if you moved it):'), form, errorEl)),
+      h('li', h('div', 'Or paste the token from ', h('code.mono', '~/.fridolin/dashboard.token'), ' (in your data folder, if you moved it):'), form, errorEl)),
     h('div.connect-foot.muted.small', 'The token keeps programs on this computer — including your brains — from changing the bridge’s settings. It never leaves this machine.')));
   setTimeout(() => input.focus(), 50);
 }

@@ -6,5 +6,5 @@ cd "$(git rev-parse --show-toplevel)"
 git config core.hooksPath .githooks
 chmod +x .githooks/* scripts/*.sh
 echo "Hooks enabled. Put your own names, numbers and emails in"
-echo "  ~/.config/whatsapp-claude-bridge/personal-denylist"
+echo "  ~/.config/fridolin/personal-denylist"
 echo "(one per line) so they can never be committed."
