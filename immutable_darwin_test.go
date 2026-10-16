@@ -47,3 +47,23 @@ func TestNewStoreStartsWhenChmodFails(t *testing.T) {
 		t.Error("the failed chmod was not logged")
 	}
 }
+
+func TestProtectDataDirWarnsWhenChmodFails(t *testing.T) {
+	// The same goes for a data dir the bridge cannot chmod: it is logged,
+	// and protectDataDir has no error for the caller to stop on.
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	data := filepath.Join(home, "data")
+	mkdirMode(t, data, 0o755)
+	makeImmutable(t, data)
+	logs := captureLog(t)
+
+	protectDataDir(&Config{DataDir: data, DBPath: filepath.Join(data, "bridge.db")})
+
+	if got := permOf(t, data); got != 0o755 {
+		t.Errorf("immutable data dir has mode %04o, want 0755 unchanged", got)
+	}
+	if !logContains(logs, "warning: could not make "+data+" private") {
+		t.Error("the failed chmod was not logged")
+	}
+}

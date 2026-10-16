@@ -542,6 +542,13 @@ The database holds the keys of the linked WhatsApp device, so only your user
 may read it: the bridge creates `bridge.db` with mode 0600, and at startup
 takes group and other access away from an existing one (and from leftover
 `-journal`, `-wal` and `-shm` files next to it), logging each file it changes.
+The data dir gets mode 0700 at startup the same way, also when it already
+existed; saving a different folder in the dashboard leaves its mode alone
+until the restart. Three kinds of folder are left as they are, with a warning
+in the log if other users can open them: a data dir that is your home folder
+or one above it (`"~"`, or `"."` when the bridge starts in your home folder),
+a data dir that belongs to another user, and the folder of a `db_path`
+outside the data dir, which you may share on purpose.
 
 ### `http_listen` *(restart)*
 
