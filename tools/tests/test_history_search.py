@@ -56,6 +56,43 @@ class SearchTest(HistorySearchTestCase):
         self.assertEqual(code, 0, err)
         self.assertEqual([h["text"] for h in hits], ["new invoice"])
 
+    def test_since_with_utc_z_timestamps(self):
+        # The bridge's RFC 3339 timestamps end in Z on a host running in UTC.
+        now = datetime.now(timezone.utc).replace(microsecond=0)
+        self.write([
+            {"ts": (now - timedelta(days=10)).strftime("%Y-%m-%dT%H:%M:%SZ"), "type": "in", "text": "old invoice"},
+            {"ts": (now - timedelta(hours=1)).strftime("%Y-%m-%dT%H:%M:%SZ"), "type": "in", "text": "new invoice"},
+        ])
+        code, hits, err = self.search("--since", "7d", "invoice")
+        self.assertEqual(code, 0, err)
+        self.assertEqual([h["text"] for h in hits], ["new invoice"])
+
+    def test_parse_ts(self):
+        utc = timezone.utc
+        cases = [
+            ("Z suffix", "2026-01-15T10:00:00Z", datetime(2026, 1, 15, 10, tzinfo=utc)),
+            ("numeric offset", "2026-01-15T11:00:00+01:00", datetime(2026, 1, 15, 10, tzinfo=utc)),
+            ("garbage", "yesterday", None),
+            ("missing", "", None),
+            ("not a string", 1736935200, None),
+        ]
+        for name, given, want in cases:
+            with self.subTest(name):
+                self.assertEqual(history_search.parse_ts(given), want)
+
+    def test_bad_since_is_a_usage_error(self):
+        self.write([])
+        for given in ("7days", "last week"):
+            with self.subTest(given):
+                code, _, err = self.search("--since", given, "x")
+                self.assertEqual(code, 2)
+                self.assertIn("argument --since: use 30m, 24h, 7d, 2w or an ISO timestamp", err)
+                self.assertNotIn("Traceback", err)
+
+    def test_since_accepts_iso_timestamps(self):
+        self.assertEqual(history_search.parse_since("2026-01-15T10:00:00Z"),
+                         datetime(2026, 1, 15, 10, tzinfo=timezone.utc))
+
     def test_missing_file(self):
         self.assertEqual(self.search("x")[0], 2)
 
