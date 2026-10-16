@@ -70,11 +70,15 @@ GO_MIN="$(sed -nE 's/^go (1\.[0-9]+).*/\1/p' "$REPO_DIR/go.mod")"
 if ! command -v go >/dev/null 2>&1; then
   fail "Go is not installed. Install Go ${GO_MIN}+ (macOS: brew install go; Linux: https://go.dev/dl/), then re-run."
 fi
-GO_MINOR="$(go env GOVERSION | sed -E 's/^go1\.([0-9]+).*/\1/')"
+# Ask from the repo folder, where the build below runs: there go may switch
+# to the release go.mod asks for (GOTOOLCHAIN=auto), so the answer must not
+# depend on where setup.sh was started from.
+GO_VERSION="$(cd "$REPO_DIR" && go env GOVERSION)" || fail "Could not run go in $REPO_DIR (see the error above)."
+GO_MINOR="$(printf '%s\n' "$GO_VERSION" | sed -E 's/^go1\.([0-9]+).*/\1/')"
 if [ "${GO_MINOR:-0}" -lt "${GO_MIN#1.}" ]; then
-  fail "Go $(go env GOVERSION) is too old; the bridge needs Go ${GO_MIN} or newer."
+  fail "Go $GO_VERSION is too old; the bridge needs Go ${GO_MIN} or newer."
 fi
-ok "Go $(go env GOVERSION)"
+ok "Go $GO_VERSION"
 
 if ! command -v cc >/dev/null 2>&1 && ! command -v gcc >/dev/null 2>&1 && ! command -v clang >/dev/null 2>&1; then
   if [ "$OS" = Darwin ]; then
