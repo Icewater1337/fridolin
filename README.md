@@ -64,7 +64,7 @@ messages through the bridge — nightly summaries, alerts, whatever.
 
 - **macOS or Linux.** The sandbox layer is macOS-only; everything else is portable.
 - **[Claude Code](https://claude.com/claude-code)**, installed and logged in.
-- **Go 1.21+** to build.
+- **Go 1.25+** to build.
 - **Python 3.9+** for the helper tools.
 - **A WhatsApp account for the bridge.** Use a second number, not your personal
   one — see below.

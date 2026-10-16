@@ -41,18 +41,27 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: shellcheck
-        run: shellcheck --severity=warning setup.sh
+        run: shellcheck --severity=warning setup.sh scripts/*.sh .githooks/*
 
       - name: python syntax
         run: |
           python3 -m py_compile tools/*.py
 
-      # Nothing in this repo should contain a real phone number, group JID, or
-      # personal path. Catch it before it is published.
-      - name: no personal data
+  personal-data:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      # Nothing published here may contain a real phone number, WhatsApp JID,
+      # email address, home path or token. Contributors run the same check as a
+      # pre-push hook (scripts/install-hooks.sh); this catches anyone who didn't.
+      - name: no personal data in new commits
+        env:
+          BEFORE: ${{ github.event.pull_request.base.sha || github.event.before }}
         run: |
-          if grep -rnE '[0-9]{15,}@g\.us|/Users/[a-z]|/home/[a-z]' \
-               --exclude-dir=.git --exclude-dir=.github --exclude=go.sum . \
-             | grep -vE '120363000000000000|\{\{|YOUR_'; then
-            echo "Found what looks like real personal data above."; exit 1
+          if [ -z "$BEFORE" ] || ! git cat-file -e "$BEFORE" 2>/dev/null || [ "$BEFORE" = 0000000000000000000000000000000000000000 ]; then
+            BEFORE="$(git rev-list --max-parents=0 HEAD | tail -1)"
           fi
+          scripts/check-personal-data.sh --range "$BEFORE..HEAD"

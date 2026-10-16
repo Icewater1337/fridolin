@@ -27,3 +27,8 @@ dist/
 .vscode/
 *.swp
 *~
+
+# ── personal data guard ──────────────────────────────────────────────────
+.personal-denylist
+config.json.bak*
+dashboard.token

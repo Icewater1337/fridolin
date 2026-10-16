@@ -20,7 +20,7 @@ Paths may start with `~`, which expands to your home directory.
 Phone numbers permitted to DM the bridge. Country code, no `+`, no spaces.
 
 ```json
-"allowed_numbers": ["15551234567", "442071234567"]
+"allowed_numbers": ["15551234567", "15559876543"]
 ```
 
 An empty list allows **anyone** who can message the account. Only reasonable

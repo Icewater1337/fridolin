@@ -1,0 +1,3 @@
+#!/usr/bin/env bash
+# Blocks commits that add personal data. See scripts/check-personal-data.sh.
+exec "$(git rev-parse --show-toplevel)/scripts/check-personal-data.sh" --staged

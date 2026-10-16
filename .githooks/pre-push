@@ -1,0 +1,4 @@
+#!/usr/bin/env bash
+# Blocks pushes whose commits contain personal data — the last line of defence
+# before something becomes public. See scripts/check-personal-data.sh.
+exec "$(git rev-parse --show-toplevel)/scripts/check-personal-data.sh" --pre-push
