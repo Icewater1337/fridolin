@@ -202,6 +202,47 @@ func TestChunkMessageProperties(t *testing.T) {
 	}
 }
 
+func FuzzChunkMessage(f *testing.F) {
+	// The seeds are inputs that broke the old implementation plus awkward
+	// separators and characters. Plain `go test` runs just these; `go test
+	// -fuzz=FuzzChunkMessage` explores from them.
+	seeds := []struct {
+		text   string
+		limit  int16
+		repeat uint8
+	}{
+		{"hello", 100, 0},
+		{"", 100, 0},
+		{" \n\t", 100, 9},
+		{strings.Repeat("a", 46) + ".\n\n", 100, 3},
+		{"\U0001F600", 50, 149},
+		{"\u00e9", 47, 99},
+		{"\u0436", 0, 63},
+		{"0000000\u025e00", 10, 0},
+		{"abc ", 5, 99},
+		{"word ", 100, 199},
+		{"e\u0301", 101, 99},
+		{"\U0001F1E9\U0001F1EA", 101, 99},
+		{"\U0001F468\u200d\U0001F469\u200d\U0001F467", 100, 39},
+		{"Is it? Yes. Fine! ", 120, 30},
+		{"line\r\n", 100, 60},
+		{"\u00a0x", 100, 60},
+		{"ab\xffcd ", 100, 40},
+		{"https://example.com/" + strings.Repeat("x", 200) + "\n\nShort. ", 150, 5},
+	}
+	for _, s := range seeds {
+		f.Add(s.text, s.limit, s.repeat)
+	}
+	f.Fuzz(func(t *testing.T, text string, limit int16, repeat uint8) {
+		// Repeating the text makes it long enough to need splitting, and
+		// the limit is folded into a range where splitting happens, still
+		// including zero, negative and too-small limits.
+		text = strings.Repeat(text, 1+int(repeat))
+		maxSize := int(limit) % 400
+		checkChunks(t, text, maxSize, ChunkMessage(text, maxSize))
+	})
+}
+
 // checkChunks asserts what every result of ChunkMessage must satisfy: each
 // chunk is valid UTF-8, within the limit and not blank; several chunks are
 // numbered "[i/N] " in order; the chunks, without their numbering, are the
