@@ -5,6 +5,10 @@ on:
     branches: [main]
   pull_request:
 
+# The jobs only read the repository; nothing here needs to write to it.
+permissions:
+  contents: read
+
 jobs:
   go:
     strategy:
