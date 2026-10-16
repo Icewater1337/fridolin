@@ -447,7 +447,8 @@ to confirm it's the cause, then add the path it needs to `sandbox.allow_paths`.
 
 **"the sandbox could not be set up"** — the sandbox is on, but the bridge
 could not build the profile or find `/usr/bin/sandbox-exec`, so it did not run
-the message at all. The bridge log names the cause.
+the message at all. The bridge log names the cause, and the dashboard's
+Overview shows it too, with the brains it affects.
 
 ---
 

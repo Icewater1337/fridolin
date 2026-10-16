@@ -315,3 +315,59 @@ func resolvedForTest(t *testing.T, p string) string {
 	}
 	return filepath.Join(real, base)
 }
+
+// TestStatusWarnsWhenSandboxDoesNotApply: the dashboard's Sandbox card says
+// "On" from the config alone, so the status warns when runs are refused for
+// a missing sandbox-exec or a profile that cannot be built, and when classic
+// mode ignores the sandbox.
+func TestStatusWarnsWhenSandboxDoesNotApply(t *testing.T) {
+	const on = `, "sandbox": {"enabled": true}`
+	const brains = `, "brains": [
+		{"name": "a", "work_dir": "~/a", "handles_dms": true},
+		{"name": "b", "work_dir": "~/b", "groups": ["120363000000000000@g.us"]}]`
+	cases := []struct {
+		name, extra string
+		breakIt     func(sp *SandboxProfiler)
+		needsExec   bool   // the case expects sandbox-exec to work
+		want        string // "" for no sandbox warning
+	}{
+		{"working sandbox", on + brains, nil, true, ""},
+		{"sandbox-exec missing", on + brains,
+			func(sp *SandboxProfiler) { sp.execPath = "/nonexistent/sandbox-exec" }, false, "cannot run"},
+		// b's folder is in a's profile too, so both brains are refused.
+		{"brain folder the profile cannot hold", on + brains,
+			func(sp *SandboxProfiler) { sp.workDirs["b"] += "\nx" }, true, "line break), so brains a, b refuse every message"},
+		{"classic mode", `, "brain_mode": false` + on, nil, false, "Classic mode does not use the sandbox"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if tc.needsExec {
+				requireSandboxExec(t)
+			}
+			tb := newTestBridge(t, tc.extra)
+			if tc.breakIt != nil {
+				sp := tb.brainMgr.profiler
+				sp.mu.Lock()
+				tc.breakIt(sp)
+				sp.mu.Unlock()
+			}
+			w := tb.do("GET", "/api/status", nil)
+			var st statusResponse
+			if err := json.Unmarshal(w.Body.Bytes(), &st); err != nil {
+				t.Fatal(err)
+			}
+			var got []string
+			for _, warning := range st.Warnings {
+				if strings.Contains(strings.ToLower(warning), "sandbox") {
+					got = append(got, warning)
+				}
+			}
+			switch {
+			case tc.want == "" && len(got) > 0:
+				t.Errorf("unexpected sandbox warnings: %q", got)
+			case tc.want != "" && (len(got) != 1 || !strings.Contains(got[0], tc.want)):
+				t.Errorf("sandbox warnings = %q, want one containing %q", got, tc.want)
+			}
+		})
+	}
+}
