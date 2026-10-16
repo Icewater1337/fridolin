@@ -545,9 +545,10 @@ Off by default.
 `notify`, tells the sender "⏳ Queued (#2)". `mode: "interrupt"` stops the
 current run when a new message arrives. Untagged group chatter waiting in the
 queue is dropped when a newer message from that chat arrives — it is already in
-the history the next run reads. `!stop` stops the current run and clears the
-queue, and also stops files handed to another brain that answers in that chat
-(its `reply_chat`).
+the history the next run reads. `!stop` stops the run for the chat it was sent
+in and drops that chat's waiting messages; other chats keep theirs. It also
+stops files handed to another brain that answers in that chat (its
+`reply_chat`).
 
 ### `debounce`
 

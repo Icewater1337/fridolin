@@ -336,13 +336,15 @@ func (b *Bridge) handleCommand(ctx context.Context, m Inbound, cfg *Config) bool
 		return true
 
 	case "!stop":
+		// Only this chat's work: a brain serves several chats, and one
+		// chat must not cancel what another asked for.
 		chats := chatJIDs(m)
 		for _, jid := range chats {
 			b.deb.Drop(jid)
 		}
-		stopped := false
+		stopped, dropped := false, 0
 		if br := b.brainMgr.BrainFor(m.JID, m.IsGroup()); cfg.BrainMode && br != nil {
-			stopped = br.StopCurrent(true)
+			stopped, dropped = br.StopChat(m.JID)
 		}
 		// A file or recording handed to another brain may answer here too,
 		// and the chat's own brain knows nothing about it.
@@ -351,10 +353,13 @@ func (b *Bridge) handleCommand(ctx context.Context, m Inbound, cfg *Config) bool
 				stopped = true
 			}
 		}
-		if stopped {
-			_ = b.wa.SendMessage(ctx, m.JID, "🛑 Stopped, and cleared anything that was waiting.")
-		} else {
-			_ = b.wa.SendMessage(ctx, m.JID, "Nothing was running.")
+		switch {
+		case stopped:
+			_ = b.wa.SendMessage(ctx, m.JID, "🛑 Stopped, and cleared anything this chat had waiting.")
+		case dropped > 0:
+			_ = b.wa.SendMessage(ctx, m.JID, "🛑 Nothing was running for this chat; cleared what it had waiting.")
+		default:
+			_ = b.wa.SendMessage(ctx, m.JID, "Nothing was running for this chat.")
 		}
 		return true
 
@@ -363,7 +368,7 @@ func (b *Bridge) handleCommand(ctx context.Context, m Inbound, cfg *Config) bool
 			"Send a message to talk to Claude. Images, documents, audio, and video are passed along as files.\n\n" +
 			"*Commands:*\n" +
 			"• `!help` — show this help\n" +
-			"• `!stop` — stop what I'm doing and drop anything queued\n" +
+			"• `!stop` — stop what I'm doing for this chat and drop its queued messages\n" +
 			"• `!reset` — clear the current session and start fresh"
 		if m.IsGroup() {
 			if t := cfg.Triggers.First(); t != "" {
@@ -400,7 +405,13 @@ func (b *Bridge) dispatch(m Inbound) {
 	case errors.Is(err, errQueueFull):
 		log.Printf("brain %s: queue full, rejecting message from %s", br.ID(), m.Sender)
 		if !m.Silent {
-			_ = b.wa.SendMessage(ctx, m.JID, "⏳ I'm still busy with earlier messages and my queue is full. Try again in a bit, or send !stop.")
+			// !stop drops only this chat's work, and in a group it needs the
+			// trigger like any command.
+			stop := "!stop"
+			if t := cfg.Triggers.First(); m.IsGroup() && t != "" {
+				stop = t + " !stop"
+			}
+			_ = b.wa.SendMessage(ctx, m.JID, "⏳ I'm still busy with earlier messages and my queue is full. Try again in a bit, or send `"+stop+"` to drop what this chat has waiting.")
 		}
 	case err != nil:
 		log.Printf("routing message for %s: %v", m.JID, err)

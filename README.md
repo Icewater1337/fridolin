@@ -65,7 +65,7 @@ addressed — by keyword, by @-mention, or when you send it a file.
 **Orderly.** Messages that arrive while the assistant is busy wait their turn
 (or, if you prefer, interrupt the current run). A photo album or a file plus
 "what is this?" sent in quick succession becomes one request. `!stop` stops
-whatever it is doing.
+whatever it is doing for that chat.
 
 **Calendar.** Each brain can sign in to a Google account from the dashboard
 and use the calendars you pick: list events, find free time, create events.
@@ -193,12 +193,16 @@ on the **Dev** page and read the replies there.
 | Command  | Effect |
 | -------- | ------ |
 | `!help`  | Show available commands |
-| `!stop`  | Stop the current run and drop anything queued, including files or recordings another brain is answering in this chat |
+| `!stop`  | Stop the run for this chat and drop its queued messages, including files or recordings another brain is answering here |
 | `!reset` | Forget the current session and start fresh |
 
 A command also works when sent as a reply to a message.
 In a group, address the bridge as for any request (`@claude !stop`): an
-untagged `!stop` is ordinary chatter.
+untagged `!stop` is ordinary chatter. Commands act only on the chat they were
+sent in: one brain often serves several chats, and a `!stop` in a group leaves
+your DM alone. The dashboard's *Stop* buttons act on the whole brain.
+Any member of an allowed group can send an addressed command there; it
+affects only that group's work.
 
 ### Shaping the assistant
 

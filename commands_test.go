@@ -357,3 +357,94 @@ func TestUntaggedStopInGroupIsChatter(t *testing.T) {
 		t.Errorf("the bridge answered untagged chatter: %q", sent)
 	}
 }
+
+// A full queue points to !stop as the chat must send it, and says what it
+// drops: only what that chat has waiting.
+func TestQueueFullReplyNamesTheChatsStop(t *testing.T) {
+	cases := []struct {
+		name string
+		next Inbound
+		want string
+	}{
+		{"in a DM", Inbound{JID: testDMChat, Sender: "15551234567", Text: "dm 3"}, "send `!stop` to drop what this chat has waiting"},
+		{"in a group", Inbound{JID: testGroup, Sender: otherNumber, Text: "group 1"}, "send `@claude !stop` to drop what this chat has waiting"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			tb, br := newMainBridge(t, `, "queue": {"max_pending": 1}`)
+			startLongRun(t, tb, br, Inbound{JID: testDMChat, Sender: "15551234567", Text: "dm 1", Source: "whatsapp"})
+			tb.handleInbound(context.Background(), Inbound{JID: testDMChat, Sender: "15551234567", Text: "dm 2", Source: "whatsapp"})
+			c.next.Source = "whatsapp"
+			tb.handleInbound(context.Background(), c.next)
+
+			var full string
+			for _, s := range tb.sentTo(c.next.JID) {
+				if strings.Contains(s, "queue is full") {
+					full = s
+				}
+			}
+			if !strings.Contains(full, c.want) {
+				t.Errorf("sent %q, want a queue-full reply with %q", tb.sentTo(c.next.JID), c.want)
+			}
+		})
+	}
+}
+
+// queuePreviews lists what waits in the brain's queue.
+func queuePreviews(br *Brain) []string {
+	var out []string
+	for _, q := range br.Snapshot().Queue {
+		out = append(out, q.Preview)
+	}
+	return out
+}
+
+// !stop and !reset act only on the chat that sent them. One brain serves the
+// DM and the group here, so the other chat's run and queue must survive.
+func TestStopAndResetAreScopedToTheChat(t *testing.T) {
+	const otherDM = otherNumber + "@s.whatsapp.net"
+	cases := []struct {
+		name        string
+		chat, cmd   string
+		wantRunning string   // preview of the run going afterwards
+		wantQueue   []string // previews still waiting
+		wantReply   string   // prefix of the answer to the chat
+	}{
+		{"!stop from the running chat", testDMChat, "!stop", "group 1", nil, "🛑 Stopped"},
+		{"!stop from a chat with only a waiting message", testGroup, "!stop", "dm 1", []string{"dm 2"}, "🛑 Nothing was running for this chat; cleared"},
+		{"!stop from a chat with nothing going", otherDM, "!stop", "dm 1", []string{"dm 2", "group 1"}, "Nothing was running for this chat."},
+		{"!reset from another chat", testGroup, "!reset", "dm 1", []string{"dm 2"}, ""},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			tb, br := newMainBridge(t, "")
+			ctx := context.Background()
+			startLongRun(t, tb, br, Inbound{JID: testDMChat, Sender: "15551234567", Text: "dm 1", Source: "whatsapp"})
+			pid := br.Snapshot().Running.PID
+			tb.handleInbound(ctx, Inbound{JID: testDMChat, Sender: "15551234567", Text: "dm 2", Source: "whatsapp"})
+			tb.handleInbound(ctx, Inbound{JID: testGroup, Sender: otherNumber, Text: "group 1", Source: "whatsapp"})
+			if q := queuePreviews(br); len(q) != 2 {
+				t.Fatalf("queue = %q, want dm 2 and group 1 waiting", q)
+			}
+
+			tb.handleInbound(ctx, Inbound{JID: c.chat, Sender: normalizeJID(c.chat), Text: c.cmd, Source: "whatsapp"})
+
+			waitFor(t, 10*time.Second, "the run of "+c.wantRunning, func() bool {
+				r := br.Snapshot().Running
+				return r != nil && r.Preview == c.wantRunning && r.PID > 0
+			})
+			if c.wantRunning == "dm 1" && br.Snapshot().Running.PID != pid {
+				t.Error("the run in flight was restarted")
+			}
+			if q := queuePreviews(br); strings.Join(q, "|") != strings.Join(c.wantQueue, "|") {
+				t.Errorf("queue = %q, want %q", q, c.wantQueue)
+			}
+			if c.wantReply != "" && !tb.sentPrefix(c.chat, c.wantReply) {
+				t.Errorf("sent %q to the chat, want %q", tb.sentTo(c.chat), c.wantReply)
+			}
+			if len(tb.sentTo(c.chat)) == 0 {
+				t.Error("the command got no answer")
+			}
+		})
+	}
+}

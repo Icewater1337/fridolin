@@ -387,8 +387,9 @@ func (br *Brain) recordLast(m Inbound, res RunResult) {
 	br.mu.Unlock()
 }
 
-// StopCurrent kills the run in flight and, with clearQueue, drops everything
-// waiting. It reports whether a run was stopped.
+// StopCurrent kills the run in flight, whichever chat it serves, and, with
+// clearQueue, drops everything waiting. It is for the dashboard and shutdown;
+// a chat's own !stop uses StopChat. It reports whether a run was stopped.
 func (br *Brain) StopCurrent(clearQueue bool) bool {
 	br.mu.Lock()
 	if clearQueue {
@@ -397,6 +398,29 @@ func (br *Brain) StopCurrent(clearQueue bool) bool {
 	cur := br.current
 	br.mu.Unlock()
 	return br.stopRun(cur)
+}
+
+// StopChat stops what the brain does for one chat: the run in flight if it
+// is that chat's, and the chat's waiting messages. One brain serves several
+// chats, so nothing another chat asked for is touched. It reports whether a
+// run was stopped and how many waiting messages were dropped.
+func (br *Brain) StopChat(jid string) (stopped bool, dropped int) {
+	br.mu.Lock()
+	kept := br.pending[:0]
+	for _, p := range br.pending {
+		if p.JID == jid {
+			dropped++
+			continue
+		}
+		kept = append(kept, p)
+	}
+	br.pending = kept
+	cur := br.current
+	if cur != nil && cur.msg.JID != jid {
+		cur = nil
+	}
+	br.mu.Unlock()
+	return br.stopRun(cur), dropped
 }
 
 // StopHandOffs stops the messages handed to this brain (/ingest, Plaud) that
@@ -435,13 +459,12 @@ func (br *Brain) stopRun(run *brainRun) bool {
 	return true
 }
 
-// ResetSession stops the brain and clears its stored session.
-func (br *Brain) ResetSession() error {
-	br.StopCurrent(true)
-	return errors.Join(
-		br.store.DeleteSession(br.storeKey),
-		br.store.DeleteProcessPID(br.storeKey),
-	)
+// ResetSession stops what the brain does for the chat and clears its stored
+// session. The stored process id is left to the run it belongs to, which may
+// be another chat's; a stopped run clears it as it finishes.
+func (br *Brain) ResetSession(jid string) error {
+	br.StopChat(jid)
+	return br.store.DeleteSession(br.storeKey)
 }
 
 // retire stops the brain for good after it was removed from the configuration.
@@ -1583,13 +1606,13 @@ func (bm *BrainManager) Submit(m Inbound) (br *Brain, pos int, busy bool, err er
 	return br, pos, busy, err
 }
 
-// ResetSession clears the stored session for the brain that owns the chat.
+// ResetSession resets the chat on the brain that owns it.
 func (bm *BrainManager) ResetSession(jid string, isGroup bool) error {
 	br := bm.BrainFor(jid, isGroup)
 	if br == nil {
 		return fmt.Errorf("no brain configured for %s", jid)
 	}
-	return br.ResetSession()
+	return br.ResetSession(jid)
 }
 
 // StopHandOffs stops, in every brain, the hand-offs that answer in jid (see
