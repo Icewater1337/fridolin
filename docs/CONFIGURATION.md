@@ -542,13 +542,21 @@ Off by default.
 ```
 
 `mode: "queue"` (default) runs a brain's messages one after another and, with
-`notify`, tells the sender "⏳ Queued (#2)". `mode: "interrupt"` stops the
-current run when a new message arrives. Untagged group chatter waiting in the
-queue is dropped when a newer message from that chat arrives — it is already in
-the history the next run reads. `!stop` stops the run for the chat it was sent
-in and drops that chat's waiting messages; other chats keep theirs. It also
-stops files handed to another brain that answers in that chat (its
-`reply_chat`).
+`notify`, tells the sender "⏳ Queued (#2)". `mode: "interrupt"` lets a newer
+request replace the sender's own: it stops their run in flight in that chat (or
+a run on the chat's untagged chatter) and drops their earlier waiting request.
+The newer request then waits behind what is already queued, so someone who
+keeps correcting themselves cannot push other chats back. Requests from other
+chats, and other people's in a group, still wait their turn (with the same
+notice). Untagged group chatter never interrupts a run, and files sent through
+`/ingest` neither interrupt nor replace one another: each is a job of its own.
+`max_pending` applies in both modes.
+
+Untagged group chatter waiting in the queue is dropped when a newer message
+from that chat arrives — it is already in the history the next run reads.
+`!stop` stops the run for the chat it was sent in and drops that chat's
+waiting messages; other chats keep theirs. It also stops files handed to
+another brain that answers in that chat (its `reply_chat`).
 
 ### `debounce`
 

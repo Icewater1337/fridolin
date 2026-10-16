@@ -425,7 +425,8 @@ func (b *Bridge) dispatch(m Inbound) {
 		}
 	case err != nil:
 		log.Printf("routing message for %s: %v", m.JID, err)
-	case busy && !m.Silent && cfg.QueueNotify() && cfg.Queue.Mode == "queue":
+	case busy && !m.Silent && cfg.QueueNotify():
+		// Interrupt mode queues too: behind other chats and other people.
 		_ = b.wa.SendMessage(ctx, m.JID, fmt.Sprintf("⏳ Queued (#%d) — I'll get to this right after the current task.", pos))
 	}
 }

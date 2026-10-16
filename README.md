@@ -63,9 +63,9 @@ Question: When should we meet?
 addressed — by keyword, by @-mention, or when you send it a file.
 
 **Orderly.** Messages that arrive while the assistant is busy wait their turn
-(or, if you prefer, interrupt the current run). A photo album or a file plus
-"what is this?" sent in quick succession becomes one request. `!stop` stops
-whatever it is doing for that chat.
+(or, if you prefer, a newer request replaces the one you sent before it). A
+photo album or a file plus "what is this?" sent in quick succession becomes
+one request. `!stop` stops whatever it is doing for that chat.
 
 **Calendar.** Each brain can sign in to a Google account from the dashboard
 and use the calendars you pick: list events, find free time, create events.

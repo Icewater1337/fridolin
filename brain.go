@@ -147,7 +147,7 @@ func tailLines(f *os.File, maxBytes int64) []string {
 // A brain does not keep a Claude process alive between messages. Each message
 // spawns a fresh `claude -p` run seeded with the recent chat history. Messages
 // for a brain run one at a time from its queue (or, in interrupt mode, a newer
-// message stops the run in flight).
+// request from the same person in the same chat stops the run in flight).
 type Brain struct {
 	// Fixed for the brain's lifetime. Changing a brain's folder replaces the
 	// Brain; everything else is in settings and changes live.
@@ -276,7 +276,8 @@ func (br *Brain) historyTail(maxBytes int64) []string {
 }
 
 // Submit queues a message for the brain. It returns the message's position in
-// the queue (1 = next) and whether the brain was busy when it arrived.
+// the queue (1 = next) and whether it has to wait for other work; a run it
+// interrupts does not count.
 func (br *Brain) Submit(m Inbound) (pos int, busy bool, err error) {
 	if m.At.IsZero() {
 		m.At = time.Now()
@@ -294,34 +295,42 @@ func (br *Brain) Submit(m Inbound) (pos int, busy bool, err error) {
 	}
 	busy = br.current != nil || len(br.pending) > 0
 
+	// A newer message from the same chat supersedes queued untagged chatter:
+	// it is already in the history the next run reads. In interrupt mode, a
+	// tagged message also replaces its sender's own earlier request in that
+	// chat, waiting or running. Nothing else is touched: other chats, and
+	// other people's requests in a group, keep their place, and untagged
+	// chatter never interrupts a run. Neither do ingested files, nor are they
+	// replaced: each is a job of its own, not a correction of the last one.
+	interrupting := s.queueMode == "interrupt" && !m.Silent && m.Source != "ingest"
+	replaces := func(p Inbound) bool {
+		return p.JID == m.JID && (p.Silent || (interrupting && p.Sender == m.Sender && p.Source != "ingest"))
+	}
+	kept := br.pending[:0]
+	for _, p := range br.pending {
+		if !replaces(p) {
+			kept = append(kept, p)
+		}
+	}
+	br.pending = kept
+	if len(br.pending) >= s.maxPending {
+		dropped := false
+		for i, p := range br.pending {
+			if p.Silent {
+				br.pending = append(br.pending[:i], br.pending[i+1:]...)
+				dropped = true
+				break
+			}
+		}
+		if !dropped {
+			br.mu.Unlock()
+			return 0, busy, errQueueFull
+		}
+	}
 	var interrupt *brainRun
-	if s.queueMode == "interrupt" {
-		br.pending = br.pending[:0]
+	if interrupting && br.current != nil && replaces(br.current.msg) {
 		interrupt = br.current
-	} else {
-		// A newer message from the same chat supersedes queued untagged
-		// chatter: it is already in the history the next run reads.
-		kept := br.pending[:0]
-		for _, p := range br.pending {
-			if !(p.Silent && p.JID == m.JID) {
-				kept = append(kept, p)
-			}
-		}
-		br.pending = kept
-		if len(br.pending) >= s.maxPending {
-			dropped := false
-			for i, p := range br.pending {
-				if p.Silent {
-					br.pending = append(br.pending[:i], br.pending[i+1:]...)
-					dropped = true
-					break
-				}
-			}
-			if !dropped {
-				br.mu.Unlock()
-				return 0, busy, errQueueFull
-			}
-		}
+		busy = len(br.pending) > 0
 	}
 	br.pending = append(br.pending, m)
 	pos = len(br.pending)

@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"errors"
 	"log"
 	"maps"
 	"os"
@@ -210,6 +211,164 @@ func TestInterruptModeSupersedes(t *testing.T) {
 	runs := d.all()
 	if runs[0].res.Err == nil || runs[1].res.Err != nil || !strings.HasSuffix(runs[1].res.Text, "says: new") {
 		t.Errorf("runs = %+v", runs)
+	}
+}
+
+// In interrupt mode only a request from the same person in the same chat
+// replaces the run in flight, and untagged chatter never interrupts a run:
+// chatter has no answer to give, and the request it killed would never be
+// answered either.
+func TestInterruptModeOnlyReplacesTheSendersOwnRun(t *testing.T) {
+	const group = "120363000000000000@g.us" // brain b's group
+	g := func(sender, text string, silent bool) Inbound {
+		return Inbound{JID: group, Sender: sender, Text: text, Silent: silent}
+	}
+	otherDM := Inbound{JID: "15559876543@s.whatsapp.net", Sender: "15559876543", Text: "unrelated"} // also brain a
+	// ingest is a file handed to brain a through /ingest, answered in the DM.
+	ingest := func(sender, text string) Inbound {
+		return Inbound{JID: "15551234567@s.whatsapp.net", Sender: sender, Text: text, Source: "ingest"}
+	}
+	cases := []struct {
+		name          string
+		running, next Inbound
+		waiting       []Inbound // queued before next arrives
+		interrupts    bool
+		queue         []string // what waits afterwards, if not just next
+	}{
+		{"a newer request from the same person", dm("old"), dm("new"), nil, true, nil},
+		{"untagged chatter after a request", g("15551234567", "question", false), g("15559876543", "lol nice", true), nil, false, nil},
+		{"the asker's own chatter", g("15551234567", "question", false), g("15551234567", "brb", true), nil, false, nil},
+		{"a request after untagged chatter", g("15551234567", "chatter", true), g("15559876543", "question", false), nil, true, nil},
+		{"another member's request", g("15551234567", "question", false), g("15559876543", "other question", false), nil, false, nil},
+		{"a request from another chat", dm("old"), otherDM, nil, false, nil},
+		// The newer request replaces the earlier one in the queue; the run
+		// of the other chat is left alone.
+		{"a newer request while the earlier one waits", otherDM, dm("q1 again"), []Inbound{dm("q1")}, false, nil},
+		{"a second ingested file", ingest("plaud", "recording 1"), ingest("plaud", "recording 2"), nil, false, nil},
+		{"a second ingested file while the first waits", otherDM, ingest("plaud", "recording 2"), []Inbound{ingest("plaud", "recording 1")}, false, []string{"recording 1", "recording 2"}},
+		{"a request after a file ingested in the sender's name", ingest("15551234567", "notes"), dm("new"), nil, false, nil},
+		{"a file ingested in the sender's name after their request", dm("question"), ingest("15551234567", "notes"), nil, false, nil},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			mgr, d, _ := queueTestManager(t, 30000, `, "queue": {"mode": "interrupt"}`)
+			br, _, _, _ := mgr.Submit(c.running)
+			waitFor(t, 5*time.Second, "the first run", func() bool { r := br.Snapshot().Running; return r != nil && r.PID > 0 })
+			pid := br.Snapshot().Running.PID
+			t.Setenv("WCB_FAKE_SLEEP_MS", "10")
+			for _, w := range c.waiting {
+				if _, _, _, err := mgr.Submit(w); err != nil {
+					t.Fatal(err)
+				}
+			}
+			_, pos, busy, err := mgr.Submit(c.next)
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			if c.interrupts {
+				if busy {
+					t.Errorf("busy = true at #%d, want the message to take over the run", pos)
+				}
+				waitFor(t, 10*time.Second, "two deliveries", func() bool { return d.count() == 2 })
+				runs := d.all()
+				if !errors.Is(runs[0].res.Err, errBrainInterrupted) || runs[1].res.Err != nil || !strings.HasSuffix(runs[1].res.Text, "says: "+c.next.Text) {
+					t.Errorf("runs = %+v, want the first interrupted and the second answered", runs)
+				}
+				return
+			}
+			want := c.queue
+			if want == nil {
+				want = []string{c.next.Text}
+			}
+			if !busy || pos != len(want) {
+				t.Errorf("busy = %v at #%d, want it waiting at #%d", busy, pos, len(want))
+			}
+			time.Sleep(300 * time.Millisecond)
+			rt := br.Snapshot()
+			if rt.Running == nil || rt.Running.PID != pid || d.count() != 0 {
+				t.Errorf("running = %+v after %d deliveries, want the first run untouched", rt.Running, d.count())
+			}
+			var queued []string
+			for _, q := range rt.Queue {
+				queued = append(queued, q.Preview)
+			}
+			if strings.Join(queued, "|") != strings.Join(want, "|") {
+				t.Errorf("queue = %q, want %q", queued, want)
+			}
+		})
+	}
+}
+
+// A request that interrupts its sender's own run drops only what that sender
+// asked for before and the chat's chatter; other people, and other chats
+// served by the same brain, keep their place.
+func TestInterruptModeKeepsOthersWaiting(t *testing.T) {
+	g := func(sender, text string, silent bool) Inbound {
+		return Inbound{JID: "120363000000000000@g.us", Sender: sender, Text: text, Silent: silent}
+	}
+	otherDM := func(text string) Inbound { // brain a, like dm
+		return Inbound{JID: "15559876543@s.whatsapp.net", Sender: "15559876543", Text: text}
+	}
+	cases := []struct {
+		name    string
+		running Inbound
+		waiting []Inbound
+		next    Inbound
+		want    []string // the answered runs after the interrupted one
+	}{
+		{"another member of the group", g("15551234567", "q1", false),
+			[]Inbound{g("15559876543", "q2", false), g("15559876543", "chatter", true)},
+			g("15551234567", "q1 again", false), []string{"q2", "q1 again"}},
+		{"another chat of the same brain", dm("old"),
+			[]Inbound{otherDM("unrelated")},
+			dm("new"), []string{"unrelated", "new"}},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			mgr, d, _ := queueTestManager(t, 30000, `, "queue": {"mode": "interrupt"}`)
+			br, _, _, _ := mgr.Submit(c.running)
+			waitFor(t, 5*time.Second, "the first run", func() bool { r := br.Snapshot().Running; return r != nil && r.PID > 0 })
+			t.Setenv("WCB_FAKE_SLEEP_MS", "10")
+			for _, w := range c.waiting {
+				_, _, _, _ = mgr.Submit(w)
+			}
+			_, pos, busy, _ := mgr.Submit(c.next)
+			if !busy || pos != 2 {
+				t.Errorf("busy = %v at #%d, want it waiting behind %q at #2", busy, pos, c.want[0])
+			}
+
+			waitFor(t, 10*time.Second, "three deliveries", func() bool { return d.count() == 3 })
+			runs := d.all()
+			if !errors.Is(runs[0].res.Err, errBrainInterrupted) {
+				t.Errorf("%s: %+v, want it interrupted", c.running.Text, runs[0].res)
+			}
+			for i, want := range c.want {
+				if r := runs[i+1]; r.res.Err != nil || !strings.HasSuffix(r.res.Text, "says: "+want) {
+					t.Errorf("run %d = %+v, want %q answered", i+1, r.res, want)
+				}
+			}
+		})
+	}
+}
+
+// max_pending bounds the queue in interrupt mode too: requests from other
+// chats replace nothing, so they can fill it.
+func TestInterruptModeQueueIsBounded(t *testing.T) {
+	mgr, _, _ := queueTestManager(t, 30000, `, "queue": {"mode": "interrupt", "max_pending": 2}`)
+	br := mgr.Get("a")
+	if _, _, err := br.Submit(dm("long task")); err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, 5*time.Second, "the first run", func() bool { r := br.Snapshot().Running; return r != nil && r.PID > 0 })
+	for _, jid := range []string{"120363000000000001@g.us", "120363000000000002@g.us"} {
+		if _, _, err := br.Submit(Inbound{JID: jid, Sender: "15559876543", Text: "question"}); err != nil {
+			t.Fatalf("%s: %v", jid, err)
+		}
+	}
+	_, _, err := br.Submit(Inbound{JID: "120363000000000003@g.us", Sender: "15559876543", Text: "one more"})
+	if !errors.Is(err, errQueueFull) {
+		t.Errorf("err = %v, want the queue full", err)
 	}
 }
 

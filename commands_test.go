@@ -480,3 +480,29 @@ func TestResetReplySaysWhatItDoes(t *testing.T) {
 		})
 	}
 }
+
+// In interrupt mode a request that has to wait for another chat is told so,
+// like in queue mode; one that takes over its sender's own run is not.
+func TestInterruptModeQueuedNotice(t *testing.T) {
+	cases := []struct {
+		name   string
+		next   Inbound
+		notice bool
+	}{
+		{"a request from another chat waits", Inbound{JID: testGroup, Sender: otherNumber, Text: "group question"}, true},
+		{"a newer request replaces the sender's run", Inbound{JID: testDMChat, Sender: "15551234567", Text: "dm 2"}, false},
+		{"untagged chatter is never told", Inbound{JID: testGroup, Sender: otherNumber, Text: "chatter here", Silent: true}, false},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			tb, br := newMainBridge(t, `, "queue": {"mode": "interrupt"}`)
+			startLongRun(t, tb, br, Inbound{JID: testDMChat, Sender: "15551234567", Text: "dm 1", Source: "whatsapp"})
+			t.Setenv("WCB_FAKE_SLEEP_MS", "10")
+			c.next.Source = "whatsapp"
+			tb.handleInbound(context.Background(), c.next)
+			if got := tb.sentPrefix(c.next.JID, "⏳ Queued (#1)"); got != c.notice {
+				t.Errorf("queued notice sent = %v, want %v (sent %q)", got, c.notice, tb.sentTo(c.next.JID))
+			}
+		})
+	}
+}
