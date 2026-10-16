@@ -77,12 +77,13 @@ wiped folder (a brain told to delete everything, an unmounted disk, a botched
 move) would reach Drive in one run, and its files would leave `versions/`
 after `keep_versions_days` without anyone noticing.
 
-Look at the folder first. If the deletion was intended, run a forced backup of
-that brain: `POST /api/backup/run` with `{"brains": ["<id>"], "force": true}`
-(`force` without a `brains` list is rejected, so one request cannot mirror
-every brain's deletions). The files it removes from `current/` move to
-`versions/<timestamp>/` like any other deletion. Scheduled runs never force;
-they keep refusing until you do.
+Look at the folder first. If the deletion was intended, click **Mirror the
+deletion…** next to that brain on the Backup page and confirm. This runs a
+forced backup of that brain (`POST /api/backup/run` with
+`{"brains": ["<id>"], "force": true}`; `force` without a `brains` list is
+rejected, so one request cannot mirror every brain's deletions). The files it
+removes from `current/` move to `versions/<timestamp>/` like any other
+deletion. Scheduled runs never force; they keep refusing until you do.
 
 Only files that are gone count: changed files do not, and neither do excluded
 ones (a sync never deletes those from Drive). As a backstop for files that
