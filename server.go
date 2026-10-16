@@ -164,20 +164,20 @@ func (b *Bridge) httpIngest(w http.ResponseWriter, r *http.Request) {
 
 // replyChatFor picks the chat a brain answers in when a message did not come
 // from a chat: its configured reply_chat, else the first allowed number for
-// the DM brain, else the brain's first group.
+// the brain that gets DMs (the DM brain, or the fallback when there is none),
+// else the brain's first group. The DM comes before any group: files handed
+// in privately must not land in a group because the brain also serves one.
 func (b *Bridge) replyChatFor(br *Brain, cfg *Config) string {
 	m := br.settings.Load().manifest
 	if m.ReplyChat != "" {
 		return m.ReplyChat
 	}
-	if m.Routing.HandlesDMs && len(cfg.AllowedNumbers) > 0 {
+	getsDMs := m.Routing.HandlesDMs || b.brainMgr.BrainFor("", false) == br
+	if getsDMs && len(cfg.AllowedNumbers) > 0 {
 		return cfg.AllowedNumbers[0] + "@s.whatsapp.net"
 	}
 	if len(m.Routing.Groups) > 0 {
 		return m.Routing.Groups[0]
-	}
-	if b.brainMgr.BrainFor("", false) == br && len(cfg.AllowedNumbers) > 0 {
-		return cfg.AllowedNumbers[0] + "@s.whatsapp.net"
 	}
 	return ""
 }

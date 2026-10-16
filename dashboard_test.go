@@ -294,6 +294,38 @@ func TestIngestOTPGuardChecksTheNamedBrain(t *testing.T) {
 	}
 }
 
+func TestReplyChatFor(t *testing.T) {
+	const (
+		dm = "15551234567@s.whatsapp.net"
+		g1 = "120363000000000001@g.us"
+		g2 = "120363000000000002@g.us"
+	)
+	for _, c := range []struct {
+		name  string
+		extra string
+		brain string
+		want  string
+	}{
+		{"DM brain with a group answers in the DM",
+			`, "brains": [{"name": "p", "work_dir": "~/p", "handles_dms": true, "groups": ["` + g1 + `"]}]`, "p", dm},
+		{"fallback brain gets the DMs, so it answers there before its group",
+			`, "brains": [{"name": "f", "work_dir": "~/f", "default": true, "groups": ["` + g1 + `"]}]`, "f", dm},
+		{"group brain answers in its group",
+			`, "brains": [{"name": "p", "work_dir": "~/p", "handles_dms": true}, {"name": "g", "work_dir": "~/g", "groups": ["` + g2 + `"]}]`, "g", g2},
+		{"brain without chats has none",
+			`, "brains": [{"name": "p", "work_dir": "~/p", "handles_dms": true}, {"name": "n", "work_dir": "~/n"}]`, "n", ""},
+		{"no allowed number: the fallback's group",
+			`, "allowed_numbers": [], "brains": [{"name": "f", "work_dir": "~/f", "groups": ["` + g1 + `"]}]`, "f", g1},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			tb := newTestBridge(t, c.extra)
+			if got := tb.replyChatFor(tb.brainMgr.Get(c.brain), tb.cfgs.Get()); got != c.want {
+				t.Errorf("replyChatFor(%s) = %q, want %q", c.brain, got, c.want)
+			}
+		})
+	}
+}
+
 // The dev page can hand a message to a named brain, the way /ingest does, to
 // try out hand-offs without WhatsApp. Like a hand-off it carries no commands:
 // "!help" is text for the named brain, not a command for the chat's owner.
