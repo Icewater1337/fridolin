@@ -97,8 +97,8 @@ phone.
 ## Setup
 
 ```bash
-git clone https://github.com/YOUR_USERNAME/whatsapp-assistant-claude.git
-cd whatsapp-assistant-claude
+git clone https://github.com/YOUR_USERNAME/fridolin.git
+cd fridolin
 ./setup.sh
 ```
 
