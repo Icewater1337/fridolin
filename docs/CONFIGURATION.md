@@ -620,7 +620,7 @@ Google Drive backups; see [BACKUP.md](BACKUP.md).
 | `daily_at` | `"03:30"` | local time, `HH:MM` |
 | `root` | `"fridolin-backup"` | folder in Drive |
 | `remote` | `"brain-gdrive"` | rclone remote name in the bridge's own rclone config |
-| `keep_versions_days` | `30` | `0` keeps old versions forever |
+| `keep_versions_days` | `30` | days a version folder is kept after the run that made it; `0` keeps them forever |
 | `include_bridge_config` | `true` | also back up `config.json` and the brain list |
 | `rclone_path` | found on PATH | |
 

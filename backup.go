@@ -31,7 +31,7 @@ import (
 //	_bridge/current/…                 config.json and the approved manifests
 //
 // Each run is an incremental `rclone sync`, so only changed files upload.
-// Older versions are pruned after keep_versions_days.
+// Version folders are pruned keep_versions_days after the run that made them.
 
 // BackupConfig controls Google Drive backups.
 type BackupConfig struct {
@@ -45,7 +45,8 @@ type BackupConfig struct {
 	DailyAt string `json:"daily_at,omitempty"`
 	// RclonePath overrides the rclone binary (default: found on PATH).
 	RclonePath string `json:"rclone_path,omitempty"`
-	// KeepVersionsDays prunes old versions (default 30; 0 keeps them forever).
+	// KeepVersionsDays is how long a version folder is kept after the run
+	// that made it (default 30; 0 keeps them forever).
 	KeepVersionsDays *int `json:"keep_versions_days,omitempty"`
 	// IncludeBridgeConfig also backs up config.json and the brain list
 	// (default true). Never included: the WhatsApp session, .env, tokens.
@@ -756,10 +757,15 @@ func (m *BackupManager) backupBridge(ctx context.Context, trigger string) *Backu
 	return m.syncDir(ctx, stage, "_bridge", "", trigger)
 }
 
+// versionLayout names a version folder after the local time of its run.
+// The folders already in Drive use it, so keep it: prune and the restore
+// list read the run time back out of the name.
+const versionLayout = "20060102-150405"
+
 // syncDir runs one incremental sync with versioning.
 func (m *BackupManager) syncDir(ctx context.Context, src, id, filterFile, trigger string) *BackupResult {
 	cfg := m.cfgs.Get()
-	res := &BackupResult{Started: time.Now(), Trigger: trigger, Version: time.Now().Format("20060102-150405")}
+	res := &BackupResult{Started: time.Now(), Trigger: trigger, Version: time.Now().Format(versionLayout)}
 	base := cfg.Backup.Remote + ":" + cfg.Backup.Root + "/" + id
 	args := []string{"sync", src + "/", base + "/current",
 		"--backup-dir", base + "/versions/" + res.Version,
@@ -834,7 +840,11 @@ func (j *jsonStats) lastError() string {
 	return truncate(j.errs[len(j.errs)-1], 300)
 }
 
-// prune deletes versions older than keep_versions_days.
+// prune deletes the version folders whose run is older than
+// keep_versions_days. It goes by the run time in the folder name, never by
+// file times: a file moved into versions/ keeps its own modification time,
+// so filtering on that (rclone delete --min-age) would throw away the only
+// copy of a long-unchanged file in the very run that replaced or deleted it.
 func (m *BackupManager) prune(ctx context.Context, targets []*Brain) {
 	cfg := m.cfgs.Get()
 	days := intOr(cfg.Backup.KeepVersionsDays, defaultKeepVersions)
@@ -845,11 +855,94 @@ func (m *BackupManager) prune(ctx context.Context, targets []*Brain) {
 	for _, br := range targets {
 		ids = append(ids, br.ID())
 	}
+	now := time.Now()
 	for _, id := range ids {
+		// One config snapshot for the listing and the purges, so a backup.root
+		// changed mid-run cannot make them point at different folders.
 		versions := cfg.Backup.Remote + ":" + cfg.Backup.Root + "/" + id + "/versions"
-		_, _ = m.runner(ctx, []string{"delete", versions, "--min-age", fmt.Sprintf("%dd", days)}, nil)
-		_, _ = m.runner(ctx, []string{"rmdirs", versions, "--leave-root"}, nil)
+		names, err := m.listVersions(ctx, versions)
+		if ctx.Err() != nil {
+			return // cancelled: stop rather than log a failure for every id
+		}
+		if err != nil {
+			log.Printf("backup %s: listing versions to prune failed: %v", id, err)
+			continue
+		}
+		for _, v := range expiredVersions(names, now, days) {
+			_, err := m.runner(ctx, []string{"purge", versions + "/" + v}, nil)
+			if ctx.Err() != nil {
+				return
+			}
+			if err != nil {
+				log.Printf("backup %s: pruning version %s failed: %v", id, v, err)
+			}
+		}
 	}
+}
+
+// parseVersion reads the run time out of a version folder name.
+func parseVersion(name string) (time.Time, bool) {
+	t, err := time.ParseInLocation(versionLayout, name, time.Local)
+	return t, err == nil
+}
+
+// expiredVersions picks the version folders whose run is more than days
+// before now. A name that is not a version stamp is never picked, so prune
+// only ever deletes folders the bridge made.
+func expiredVersions(names []string, now time.Time, days int) []string {
+	cutoff := now.AddDate(0, 0, -days)
+	var out []string
+	for _, name := range names {
+		if t, ok := parseVersion(name); ok && t.Before(cutoff) {
+			out = append(out, name)
+		}
+	}
+	return out
+}
+
+// sortVersions orders version folder names newest run first; names that
+// are not version stamps go last.
+func sortVersions(names []string) {
+	sort.SliceStable(names, func(i, j int) bool {
+		ti, iok := parseVersion(names[i])
+		tj, jok := parseVersion(names[j])
+		if iok != jok {
+			return iok
+		}
+		if !iok {
+			return names[i] > names[j]
+		}
+		return ti.After(tj)
+	})
+}
+
+// listVersions returns the folder names in one backup's versions/ folder
+// (an rclone path). A missing versions folder (no run has replaced or
+// deleted a file yet) is an empty list, not an error.
+func (m *BackupManager) listVersions(ctx context.Context, versions string) ([]string, error) {
+	var stderr strings.Builder
+	out, err := m.runner(ctx, []string{"lsjson", "--dirs-only", versions}, &lockedWriter{w: &stderr})
+	if err != nil {
+		if strings.Contains(strings.ToLower(stderr.String()), "not found") {
+			return []string{}, nil
+		}
+		msg := truncate(strings.TrimSpace(stderr.String()), 300)
+		if msg == "" {
+			return nil, err
+		}
+		return nil, fmt.Errorf("%w: %s", err, msg)
+	}
+	var entries []struct {
+		Name string `json:"Name"`
+	}
+	if err := json.Unmarshal(out, &entries); err != nil {
+		return nil, fmt.Errorf("reading rclone's list of versions: %w", err)
+	}
+	names := []string{}
+	for _, e := range entries {
+		names = append(names, e.Name)
+	}
+	return names, nil
 }
 
 // ── versions and restore ─────────────────────────────────────────────────
@@ -860,26 +953,15 @@ func (b *Bridge) apiBackupVersions(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, "brain required")
 		return
 	}
-	cfg := b.cfgs.Get()
 	ctx, cancel := context.WithTimeout(r.Context(), 60*time.Second)
 	defer cancel()
-	var stderr strings.Builder
-	out, err := b.backup.runner(ctx, []string{"lsjson", "--dirs-only", cfg.Backup.Remote + ":" + cfg.Backup.Root + "/" + id + "/versions"}, &lockedWriter{w: &stderr})
-	versions := []string{}
-	if err != nil && !strings.Contains(strings.ToLower(stderr.String()), "not found") {
-		writeErr(w, http.StatusBadGateway, "listing versions failed: "+truncate(strings.TrimSpace(stderr.String()+" "+err.Error()), 300))
+	cfg := b.cfgs.Get()
+	versions, err := b.backup.listVersions(ctx, cfg.Backup.Remote+":"+cfg.Backup.Root+"/"+id+"/versions")
+	if err != nil {
+		writeErr(w, http.StatusBadGateway, "listing versions failed: "+err.Error())
 		return
 	}
-	if err == nil {
-		var entries []struct {
-			Name string `json:"Name"`
-		}
-		_ = json.Unmarshal(out, &entries)
-		for _, e := range entries {
-			versions = append(versions, e.Name)
-		}
-		sort.Sort(sort.Reverse(sort.StringSlice(versions)))
-	}
+	sortVersions(versions)
 	writeJSON(w, http.StatusOK, map[string]any{"brain": id, "versions": versions})
 }
 

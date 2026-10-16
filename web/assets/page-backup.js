@@ -222,7 +222,7 @@ export default {
         h('div.field', enabled, h('div.help', 'Runs at the time below while the computer is awake. A run missed while it slept happens as soon as it wakes.')),
         h('div.form-grid',
           field({ label: 'Time of day', control: time, help: '24-hour time on this computer.' }),
-          field({ label: 'Keep old versions for (days)', control: keep, help: '0 keeps them forever.' }),
+          field({ label: 'Keep old versions for (days)', control: keep, help: 'Counted from the backup that replaced or deleted the files. 0 keeps them forever.' }),
           field({ label: 'Folder in Google Drive', control: rootIn, help: 'A plain folder name. Changing it starts a fresh backup in the new folder.' })),
         h('div.field', incSw, h('div.help', 'config.json and the approved brain settings — enough to set up the bridge again on a new computer. Never the WhatsApp session or tokens.')),
         bar);

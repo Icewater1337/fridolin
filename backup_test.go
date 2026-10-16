@@ -219,3 +219,251 @@ func TestBackupRoundTripWithRealRclone(t *testing.T) {
 		return string(data) == "version 2"
 	})
 }
+
+func TestExpiredVersions(t *testing.T) {
+	now := time.Date(2026, 10, 17, 12, 0, 0, 0, time.Local)
+	stamp := func(days int) string { return now.AddDate(0, 0, -days).Format(versionLayout) }
+	cases := []struct {
+		name  string
+		names []string
+		days  int
+		want  []string
+	}{
+		{"older than the window", []string{stamp(31), stamp(29)}, 30, []string{stamp(31)}},
+		{"exactly on the cutoff stays", []string{stamp(30)}, 30, nil},
+		{"one day window", []string{stamp(2), stamp(0)}, 1, []string{stamp(2)}},
+		{"names that are not version stamps stay", []string{"keep-me", "2025", "20250101-0000", stamp(90)}, 30, []string{stamp(90)}},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			got := expiredVersions(c.names, now, c.days)
+			if fmt.Sprint(got) != fmt.Sprint(c.want) {
+				t.Errorf("expiredVersions = %v, want %v", got, c.want)
+			}
+		})
+	}
+}
+
+// TestBackupVersionsNewestFirst lists version folders by the time in their
+// names, with anything else after them.
+func TestBackupVersionsNewestFirst(t *testing.T) {
+	tb := newTestBridge(t, "")
+	tb.backup.runner = func(_ context.Context, args []string, _ io.Writer) ([]byte, error) {
+		return []byte(`[{"Name":"20261001-120000"},{"Name":"manual-copy"},{"Name":"20261015-080000"},{"Name":"20250101-000000"}]`), nil
+	}
+	w := tb.do("GET", "/api/backup/versions?brain=notes", nil)
+	if w.Code != 200 {
+		t.Fatal(w.Body.String())
+	}
+	var resp struct {
+		Versions []string `json:"versions"`
+	}
+	_ = json.Unmarshal(w.Body.Bytes(), &resp)
+	want := []string{"20261015-080000", "20261001-120000", "20250101-000000", "manual-copy"}
+	if fmt.Sprint(resp.Versions) != fmt.Sprint(want) {
+		t.Errorf("versions = %v, want %v", resp.Versions, want)
+	}
+}
+
+// rcloneTestBridge is a bridge whose backup remote is a local folder (an
+// rclone alias remote standing in for Google Drive). It skips the test when
+// rclone is not installed.
+func rcloneTestBridge(t *testing.T, extra string) (*testBridge, string) {
+	t.Helper()
+	if _, err := exec.LookPath("rclone"); err != nil {
+		t.Skip("rclone not installed")
+	}
+	tb := newTestBridge(t, extra)
+	remoteDir := filepath.Join(t.TempDir(), "drive")
+	_ = os.MkdirAll(filepath.Dir(tb.backup.rcloneConf()), 0o700)
+	_ = os.WriteFile(tb.backup.rcloneConf(), []byte("[brain-gdrive]\ntype = alias\nremote = "+remoteDir+"\n"), 0o600)
+	if !tb.backup.connected() {
+		t.Fatal("alias remote not recognised")
+	}
+	return tb, remoteDir
+}
+
+// addBackupBrain adds a brain with backups on and returns its folder.
+func addBackupBrain(t *testing.T, tb *testBridge, id string) string {
+	t.Helper()
+	m := BrainManifest{ID: id, Name: id, Backup: BrainBackup{Enabled: true}}
+	if w := tb.do("POST", "/api/brains", map[string]any{"path": "~/" + id, "manifest": m, "create_dir": true}); w.Code != 200 {
+		t.Fatal(w.Body.String())
+	}
+	return filepath.Join(tb.home, id)
+}
+
+// runBackup starts a backup of one brain, waits for it, and returns its result.
+func runBackup(t *testing.T, tb *testBridge, id string) *BackupResult {
+	t.Helper()
+	if err := tb.backup.StartRun([]string{id}, false, "manual"); err != nil {
+		t.Fatal(err)
+	}
+	return waitBackup(t, tb, id)
+}
+
+func waitBackup(t *testing.T, tb *testBridge, id string) *BackupResult {
+	t.Helper()
+	waitFor(t, 60*time.Second, "backup", func() bool {
+		tb.backup.mu.Lock()
+		defer tb.backup.mu.Unlock()
+		return tb.backup.job == nil
+	})
+	tb.backup.mu.Lock()
+	defer tb.backup.mu.Unlock()
+	res := tb.backup.state.Brains[id]
+	if res == nil {
+		t.Fatalf("no backup result for %s", id)
+	}
+	return res
+}
+
+// TestBackupPruneKeepsVersionsByRunDate is the retention promise: a file
+// replaced or deleted today stays in versions/ for keep_versions_days, however
+// old the file itself is, and whole version folders go once their run is
+// older than that.
+func TestBackupPruneKeepsVersionsByRunDate(t *testing.T) {
+	tb, remoteDir := rcloneTestBridge(t, `, "backup": {"keep_versions_days": 30}`)
+	dir := addBackupBrain(t, tb, "notes")
+	old := time.Now().AddDate(0, 0, -90)
+	for _, rel := range []string{"memories/edited.md", "memories/deleted.md", "memories/kept.md"} {
+		p := filepath.Join(dir, rel)
+		_ = os.MkdirAll(filepath.Dir(p), 0o700)
+		_ = os.WriteFile(p, []byte("v1 "+rel), 0o600)
+		if err := os.Chtimes(p, old, old); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if res := runBackup(t, tb, "notes"); !res.OK {
+		t.Fatalf("first backup = %+v", res)
+	}
+
+	versions := filepath.Join(remoteDir, defaultBackupRoot, "notes", "versions")
+	seed := func(name string) {
+		p := filepath.Join(versions, name, "memories", "older.md")
+		_ = os.MkdirAll(filepath.Dir(p), 0o700)
+		_ = os.WriteFile(p, []byte("older"), 0o600)
+	}
+	expired := time.Now().AddDate(0, 0, -40).Format(versionLayout)
+	recent := time.Now().AddDate(0, 0, -10).Format(versionLayout)
+	seed(expired)
+	seed(recent)
+	seed("not-a-version")
+
+	_ = os.WriteFile(filepath.Join(dir, "memories/edited.md"), []byte("v2"), 0o600)
+	_ = os.Remove(filepath.Join(dir, "memories/deleted.md"))
+	res := runBackup(t, tb, "notes")
+	if !res.OK {
+		t.Fatalf("second backup = %+v", res)
+	}
+
+	for _, rel := range []string{"memories/edited.md", "memories/deleted.md"} {
+		data, err := os.ReadFile(filepath.Join(versions, res.Version, rel))
+		if err != nil || string(data) != "v1 "+rel {
+			t.Errorf("the previous copy of %s must survive in versions/%s: %q %v", rel, res.Version, data, err)
+		}
+	}
+	for name, keep := range map[string]bool{expired: false, recent: true, "not-a-version": true} {
+		_, err := os.Stat(filepath.Join(versions, name))
+		if keep && err != nil {
+			t.Errorf("version folder %s should be kept: %v", name, err)
+		}
+		if !keep && err == nil {
+			t.Errorf("version folder %s is older than 30 days and should be purged", name)
+		}
+	}
+}
+
+// TestPrunePurgesExpiredVersionFolders checks the rclone calls prune makes, for
+// machines without rclone: it purges the expired version folders by name and
+// never filters files by their age.
+func TestPrunePurgesExpiredVersionFolders(t *testing.T) {
+	tb := newTestBridge(t, `, "backup": {"keep_versions_days": 30}`)
+	expired := time.Now().AddDate(0, 0, -31).Format(versionLayout)
+	recent := time.Now().AddDate(0, 0, -29).Format(versionLayout)
+	var mu sync.Mutex
+	var calls [][]string
+	tb.backup.runner = func(_ context.Context, args []string, stderr io.Writer) ([]byte, error) {
+		mu.Lock()
+		calls = append(calls, args)
+		mu.Unlock()
+		if args[0] != "lsjson" {
+			return nil, nil
+		}
+		if strings.HasSuffix(args[len(args)-1], "/_bridge/versions") {
+			fmt.Fprintln(stderr, "ERROR : : error listing: directory not found")
+			return nil, fmt.Errorf("exit status 3")
+		}
+		return []byte(`[{"Name":"` + expired + `"},{"Name":"` + recent + `"},{"Name":"keep-me"}]`), nil
+	}
+	notes := &Brain{id: "notes"}
+	tb.backup.prune(context.Background(), []*Brain{notes})
+	var purged []string
+	for _, c := range calls {
+		switch c[0] {
+		case "purge":
+			purged = append(purged, c[1])
+		case "lsjson":
+		default:
+			t.Errorf("unexpected rclone call %v", c)
+		}
+	}
+	want := []string{"brain-gdrive:" + defaultBackupRoot + "/notes/versions/" + expired}
+	if fmt.Sprint(purged) != fmt.Sprint(want) {
+		t.Errorf("purged %v, want %v", purged, want)
+	}
+}
+
+// TestPruneKeepsItsConfigAndStopsWhenCancelled: the listings and purges of
+// one prune all use the config it started with, and a cancelled job stops
+// it at once instead of trying (and logging) every remaining id.
+func TestPruneKeepsItsConfigAndStopsWhenCancelled(t *testing.T) {
+	listing := []byte(`[{"Name":"` + time.Now().AddDate(0, 0, -31).Format(versionLayout) + `"},` +
+		`{"Name":"` + time.Now().AddDate(0, 0, -60).Format(versionLayout) + `"}]`)
+	brains := []*Brain{{id: "notes"}, {id: "work"}}
+
+	t.Run("backup.root changed mid-run", func(t *testing.T) {
+		tb := newTestBridge(t, `, "backup": {"keep_versions_days": 30}`)
+		var calls [][]string
+		tb.backup.runner = func(_ context.Context, args []string, _ io.Writer) ([]byte, error) {
+			calls = append(calls, args)
+			if len(calls) == 1 {
+				if _, err := tb.cfgs.Update("", func(c *Config) error { c.Backup.Root = "moved"; return nil }); err != nil {
+					t.Error(err)
+				}
+			}
+			if args[0] == "lsjson" {
+				return listing, nil
+			}
+			return nil, nil
+		}
+		tb.backup.prune(context.Background(), brains)
+		if len(calls) != 9 {
+			t.Errorf("%d rclone calls, want a listing and two purges for each of 3 ids: %v", len(calls), calls)
+		}
+		for _, c := range calls {
+			if p := c[len(c)-1]; !strings.HasPrefix(p, "brain-gdrive:"+defaultBackupRoot+"/") {
+				t.Errorf("%s %s is not under the backup.root prune started with", c[0], p)
+			}
+		}
+	})
+
+	t.Run("cancelled", func(t *testing.T) {
+		tb := newTestBridge(t, `, "backup": {"keep_versions_days": 30}`)
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+		var calls [][]string
+		tb.backup.runner = func(ctx context.Context, args []string, _ io.Writer) ([]byte, error) {
+			calls = append(calls, args)
+			if args[0] == "purge" {
+				cancel() // the job is cancelled while rclone purges
+				return nil, ctx.Err()
+			}
+			return listing, nil
+		}
+		tb.backup.prune(ctx, brains)
+		if len(calls) != 2 {
+			t.Errorf("prune went on after the cancel: %v", calls)
+		}
+	})
+}
