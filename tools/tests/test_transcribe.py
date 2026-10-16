@@ -43,7 +43,7 @@ class FakeEngine:
     def __init__(self, text: str = "Okay.", engine: str = "local:fake"):
         self.text, self.engine, self.calls = text, engine, []
 
-    def __call__(self, path, args):
+    def __call__(self, path, args, available=None):
         self.calls.append((path, args))
         return self.text, self.engine
 
@@ -56,7 +56,7 @@ class TranscribeTestCase(TempDirTestCase):
         self.out = self.dir / "transcripts"
         self.engine = FakeEngine()
         for target, value in [("transcribe_chunk", self.engine), ("date", FixedDate),
-                              ("probe_duration", lambda path: 5.0)]:
+                              ("probe_duration", lambda path: 5.0), ("local_available", lambda: True)]:
             patcher = mock.patch.object(transcribe, target, value)
             patcher.start()
             self.addCleanup(patcher.stop)
@@ -240,6 +240,122 @@ class LocalEngineTest(TempDirTestCase):
                 (_, generate_kwargs), = self.pipe.calls
                 self.assertEqual(generate_kwargs["prompt_ids"], [START, *want])
                 self.assertEqual("reads only the last 223" in err, len(prompt) > 223, err)
+
+
+class Counter:
+    """A stand-in function that counts its calls and returns or raises."""
+
+    def __init__(self, result=None, raises=None):
+        self.result, self.raises, self.calls = result, raises, 0
+
+    def __call__(self, *args, **kwargs):
+        self.calls += 1
+        if self.raises is not None:
+            raise self.raises
+        return self.result(*args) if callable(self.result) else self.result
+
+
+class EngineChoiceTest(TempDirTestCase):
+    """Engine selection and fallback over a three-chunk recording."""
+
+    def setUp(self):
+        super().setUp()
+        self.local_available = Counter(True)
+        self.groq_available = Counter(True)
+        self.load = Counter("pipeline")
+        self.local = Counter(lambda path, *rest: f"local {path.stem}")
+        self.groq = Counter(lambda path, *rest: f"groq {path.stem}")
+        self.extract = Counter(lambda path: path)
+        self.chunks = [self.dir / "chunks" / f"chunk-{i:03d}.wav" for i in range(3)]
+        self.write_chunks()
+        for target, value in [
+            ("local_available", self.local_available), ("groq_available", self.groq_available),
+            ("load_local_pipeline", self.load), ("transcribe_local", self.local),
+            ("transcribe_groq", self.groq), ("extract_audio", self.extract),
+            ("probe_duration", lambda path: 1800.0), ("split_audio", lambda path, seconds: list(self.chunks)),
+            ("date", FixedDate),
+        ]:
+            patcher = mock.patch.object(transcribe, target, value)
+            patcher.start()
+            self.addCleanup(patcher.stop)
+        # As if ffmpeg were installed, so the recording is split.
+        patcher = mock.patch.object(transcribe.shutil, "which", lambda name: f"/usr/bin/{name}")
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        self.source = self.dir / "meeting.ogg"
+        self.source.write_bytes(b"audio")
+
+    def write_chunks(self):
+        # main() removes the chunk directory when it is done, as with real chunks.
+        self.chunks[0].parent.mkdir(exist_ok=True)
+        for c in self.chunks:
+            c.write_bytes(b"pcm")
+
+    def run_tool(self, *flags: str) -> tuple[int, dict, str]:
+        code, out, err = support.run_main(transcribe, [str(self.source), "--output-dir",
+                                                       str(self.dir / "out"), *flags])
+        return code, json.loads(out), err
+
+    def test_engines_are_checked_once(self):
+        code, out, err = self.run_tool()
+        self.assertEqual(code, 0, err)
+        self.assertEqual(out["transcript"], "local chunk-000 local chunk-001 local chunk-002")
+        self.assertEqual((self.local_available.calls, self.groq_available.calls), (1, 1))
+
+    def test_a_model_that_fails_to_load_is_not_loaded_again(self):
+        self.load.raises = RuntimeError("out of memory")
+        code, out, err = self.run_tool()
+        self.assertEqual(code, 0, err)
+        self.assertEqual(self.load.calls, 1)
+        self.assertEqual((self.local.calls, self.groq.calls), (0, 3))
+        self.assertEqual(out["engine"], "groq:whisper-large-v3")
+        self.assertEqual(err.count("could not be loaded"), 1)
+
+    def test_one_failed_chunk_falls_back_for_that_chunk_only(self):
+        def flaky(path, *rest):
+            if path.stem == "chunk-001":
+                raise RuntimeError("NaN logits")
+            return f"local {path.stem}"
+
+        self.local.result = flaky
+        code, out, err = self.run_tool()
+        self.assertEqual(code, 0, err)
+        self.assertEqual(out["transcript"], "local chunk-000 groq chunk-001 local chunk-002")
+        self.assertEqual(out["engine"], "groq:whisper-large-v3+local:openai/whisper-large-v3-turbo")
+
+    def test_engine_errors_are_json(self):
+        cases = [
+            ("a Groq error", ["--engine", "groq"], self.groq, RuntimeError("401 bad key"),
+             "Groq transcription failed: 401 bad key"),
+            ("a model that cannot load, without a fallback", ["--engine", "local"], self.load,
+             RuntimeError("no such model"),
+             "The local model could not be loaded and no fallback is configured: no such model"),
+        ]
+        for name, flags, failing, error, want in cases:
+            with self.subTest(name):
+                self.write_chunks()
+                failing.raises = error
+                code, out, err = self.run_tool(*flags)
+                failing.raises = None
+                self.assertEqual(code, 1)
+                self.assertEqual(out["error"], want)
+                self.assertNotIn("Traceback", err)
+                self.assertFalse(any(c.exists() for c in self.chunks), "chunks are cleaned up")
+
+    def test_no_engine_at_all(self):
+        self.local_available.result = self.groq_available.result = False
+        code, out, _ = self.run_tool()
+        self.assertEqual(code, 1)
+        self.assertIn("No transcription engine available", out["error"])
+
+    def test_a_missing_engine_fails_before_extracting_video_audio(self):
+        self.source = self.dir / "clip.mp4"
+        self.source.write_bytes(b"video")
+        self.local_available.result = False
+        code, out, _ = self.run_tool("--engine", "local")
+        self.assertEqual(code, 1)
+        self.assertIn("--engine local, but transformers/torch are not installed", out["error"])
+        self.assertEqual(self.extract.calls, 0)
 
 
 if __name__ == "__main__":

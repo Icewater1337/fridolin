@@ -29,10 +29,10 @@ on one day), the new pair gets "2026-01-15 - Okay (2)", then "(3)", and so on.
 Engines
 -------
 `--engine auto` (the default) uses a local model if `transformers` and `torch`
-are installed, and falls back to Groq per chunk when the local run fails.
-`local` and `groq` force one engine. `--prompt` reaches the model with
-either; keep it to a few sentences, since Whisper reads only the last 223
-tokens of it.
+are installed, and falls back to Groq per chunk when the local run fails (a
+model that cannot be loaded at all is not retried for every chunk). `local`
+and `groq` force one engine. `--prompt` reaches the model with either; keep
+it to a few sentences, since Whisper reads only the last 223 tokens of it.
 
     Local:  pip install -r tools/requirements-transcription.txt
             First run downloads the model (~1.5 GB for large-v3-turbo).
@@ -57,8 +57,10 @@ import subprocess
 import sys
 import tempfile
 import time
+from dataclasses import dataclass
 from datetime import date
 from pathlib import Path
+from typing import NoReturn
 
 DEFAULT_MODEL = os.environ.get("TRANSCRIBE_MODEL", "openai/whisper-large-v3-turbo")
 VIDEO_EXTS = {".mp4", ".mov", ".webm", ".3gp", ".mkv", ".avi", ".m4v"}
@@ -71,7 +73,7 @@ GROQ_MIN_INTERVAL = 6.0      # seconds between Groq calls, to stay under the rat
 PROMPT_TOKENS = 448 // 2 - 1
 
 
-def die(msg: str) -> None:
+def die(msg: str) -> NoReturn:
     print(json.dumps({"error": msg}))
     sys.exit(1)
 
@@ -296,31 +298,53 @@ def transcribe_groq(audio_path: Path, language: str | None, prompt: str | None) 
 
 # ── orchestration ─────────────────────────────────────────────────────────
 
-def transcribe_chunk(path: Path, args) -> tuple[str, str]:
-    """Transcribe one file, returning (text, engine_used)."""
-    use_local = args.engine in ("auto", "local") and local_available()
-    use_groq = args.engine in ("auto", "groq") and groq_available()
+@dataclass
+class Engines:
+    """The engines this run may use, decided once before any work starts."""
+    local: bool
+    groq: bool
 
-    if args.engine == "local" and not use_local:
+
+def choose_engines(engine: str) -> Engines:
+    use_local = engine in ("auto", "local") and local_available()
+    use_groq = engine in ("auto", "groq") and groq_available()
+
+    if engine == "local" and not use_local:
         die("--engine local, but transformers/torch are not installed. "
             "Run: pip install -r tools/requirements-transcription.txt")
-    if args.engine == "groq" and not use_groq:
+    if engine == "groq" and not use_groq:
         die("--engine groq, but GROQ_API_KEY is unset or the groq package is missing. "
             "Run: pip install groq  and export GROQ_API_KEY=...")
     if not use_local and not use_groq:
         die("No transcription engine available. Either install the local model "
             "(pip install -r tools/requirements-transcription.txt) or set "
             "GROQ_API_KEY and install the groq package.")
+    return Engines(local=use_local, groq=use_groq)
 
-    if use_local:
+
+def transcribe_chunk(path: Path, args, available: Engines) -> tuple[str, str]:
+    """Transcribe one file, returning (text, engine_used)."""
+    if available.local:
+        try:
+            load_local_pipeline(args.model)
+        except Exception as e:
+            if not available.groq:
+                die(f"The local model could not be loaded and no fallback is configured: {e}")
+            # Loading again for every chunk would only fail again, slowly.
+            log(f"The local model could not be loaded ({e}); using Groq for the rest")
+            available.local = False
+    if available.local:
         try:
             return transcribe_local(path, args.model, args.language, args.prompt), f"local:{args.model}"
         except Exception as e:
-            if not use_groq:
+            if not available.groq:
                 die(f"Local transcription failed and no fallback is configured: {e}")
             log(f"Local model failed ({e}); falling back to Groq")
 
-    return transcribe_groq(path, args.language, args.prompt), f"groq:{GROQ_MODEL}"
+    try:
+        return transcribe_groq(path, args.language, args.prompt), f"groq:{GROQ_MODEL}"
+    except Exception as e:
+        die(f"Groq transcription failed: {e}")
 
 
 def build_filename(text: str, when: str) -> str:
@@ -413,6 +437,9 @@ def main() -> None:
     output_dir = Path(args.output_dir).expanduser()
     output_dir.mkdir(parents=True, exist_ok=True)
 
+    # Before any slow work, so a missing engine fails fast.
+    available = choose_engines(args.engine)
+
     # Video needs its audio track pulled out first.
     working = source
     tmp_audio = None
@@ -423,7 +450,7 @@ def main() -> None:
         working = tmp_audio
 
     chunk_dir = None
-    engines: set[str] = set()
+    used: set[str] = set()  # the engine labels that produced text
     duration = 0.0
 
     try:
@@ -441,13 +468,13 @@ def main() -> None:
             segments = []
             for i, chunk in enumerate(chunks, 1):
                 log(f"Chunk {i}/{len(chunks)}…")
-                seg_text, engine = transcribe_chunk(chunk, args)
+                seg_text, engine = transcribe_chunk(chunk, args, available)
                 segments.append(seg_text)
-                engines.add(engine)
+                used.add(engine)
             text = " ".join(s for s in segments if s).strip()
         else:
-            text, engine = transcribe_chunk(working, args)
-            engines.add(engine)
+            text, engine = transcribe_chunk(working, args, available)
+            used.add(engine)
     finally:
         if tmp_audio is not None:
             tmp_audio.unlink(missing_ok=True)
@@ -470,7 +497,7 @@ def main() -> None:
         "transcript_file": str(transcript_path),
         "audio_file": str(audio_dest) if audio_dest else None,
         "language": args.language or "auto-detected",
-        "engine": "+".join(sorted(engines)),
+        "engine": "+".join(sorted(used)),
         "duration_seconds": round(duration, 1) if duration else None,
     }, ensure_ascii=False, indent=2))
 
