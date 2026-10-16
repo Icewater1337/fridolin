@@ -438,7 +438,7 @@ your name, your numbers, your company). CI runs the same check.
 
 ## License
 
-MIT — see [LICENSE](LICENSE).
+MIT — see [LICENSE](LICENSE). Privacy: [PRIVACY.md](PRIVACY.md).
 
 Built on [whatsmeow](https://github.com/tulir/whatsmeow). Not affiliated with
 or endorsed by WhatsApp or Meta. Automating a WhatsApp account may conflict
