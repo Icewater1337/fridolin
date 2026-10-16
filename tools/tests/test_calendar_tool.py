@@ -243,13 +243,15 @@ class FreeWindowsTest(unittest.TestCase):
                 self.assertEqual(calendar_tool.free_windows(slots, at("08:00"), at("18:00"), 30), want)
 
 
-class FreeCommandTest(TokenTestCase):
+class FreeCommandCase(TokenTestCase):
     def free(self, *argv: str) -> tuple[int, dict]:
         self.write_token()
-        code, out, err = support.run_main(calendar_tool, ["--profile", self.profile, "free",
-                                                          "--date", "2026-01-06", *argv])
+        code, out, _ = support.run_main(calendar_tool, ["--profile", self.profile, "free",
+                                                        "--date", "2026-01-06", *argv])
         return code, json.loads(out)
 
+
+class FreeCommandTest(FreeCommandCase):
     def test_evening_meeting_does_not_extend_the_day(self):
         # 18:00Z is 19:00 in Berlin in January.
         self.google.service.busy = {"primary": [{"start": "2026-01-06T18:00:00Z", "end": "2026-01-06T19:00:00Z"}]}
@@ -257,6 +259,51 @@ class FreeCommandTest(TokenTestCase):
         self.assertEqual(code, 0, out)
         self.assertEqual(out["busy"], [{"start": "19:00", "end": "20:00"}])
         self.assertEqual(out["free_windows"], [{"start": "08:00", "end": "18:00", "duration_minutes": 600}])
+
+
+class HoursTest(FreeCommandCase):
+    def test_parse_hours(self):
+        cases = [
+            ("08:00-18:00", (480, 1080)),
+            ("8:30-17:15", (510, 1035)),
+            (" 00:00-24:00 ", (0, 1440)),
+        ]
+        for given, want in cases:
+            with self.subTest(given):
+                self.assertEqual(calendar_tool.parse_hours(given), want)
+
+    def test_malformed_hours_are_a_json_error(self):
+        cases = [
+            ("no minutes", "8-18", "use HH:MM-HH:MM"),
+            ("one time", "08:00", "use HH:MM-HH:MM"),
+            ("start after end", "18:00-08:00", "the start must be before the end"),
+            ("empty window", "09:00-09:00", "the start must be before the end"),
+            ("no such hour", "08:00-25:00", "from 00:00 to 24:00"),
+            ("no such minute", "08:60-18:00", "from 00:00 to 24:00"),
+        ]
+        for name, hours, want in cases:
+            with self.subTest(name):
+                self.google.service.calls.clear()
+                code, out = self.free("--hours", hours)
+                self.assertEqual(code, 1)
+                self.assertIn(want, out["error"])
+                self.assertEqual(self.google.service.calls, [], "nothing is asked of Google")
+
+    def test_a_window_to_midnight(self):
+        self.google.service.busy = {"primary": [{"start": "2026-01-06T22:00:00Z", "end": "2026-01-06T22:30:00Z"}]}
+        code, out = self.free("--hours", "00:00-24:00")
+        self.assertEqual(code, 0, out)
+        self.assertEqual(out["hours"], "00:00-24:00")
+        self.assertEqual(out["free_windows"], [
+            {"start": "00:00", "end": "23:00", "duration_minutes": 1380},
+            {"start": "23:30", "end": "24:00", "duration_minutes": 30},
+        ])
+
+    def test_other_usage_errors_are_json_too(self):
+        code, out, err = support.run_main(calendar_tool, ["free"])
+        self.assertEqual(code, 1)
+        self.assertIn("the following arguments are required: --date", json.loads(out)["error"])
+        self.assertIn("usage:", err)
 
 
 class ApiErrorTest(TokenTestCase):

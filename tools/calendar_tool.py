@@ -62,9 +62,10 @@ import argparse
 import contextlib
 import json
 import os
+import re
 import sys
 import traceback
-from datetime import datetime, date, timedelta
+from datetime import datetime, date, time, timedelta
 from pathlib import Path
 from typing import NoReturn
 from zoneinfo import ZoneInfo
@@ -417,9 +418,9 @@ def cmd_free(args) -> None:
     def to_local(iso_str: str) -> datetime:
         return datetime.fromisoformat(iso_str.replace("Z", "+00:00")).astimezone(tz())
 
-    hours_start, hours_end = args.hours.split("-", 1)
-    window_start = datetime.fromisoformat(f"{args.date}T{hours_start}:00").replace(tzinfo=tz())
-    window_end = datetime.fromisoformat(f"{args.date}T{hours_end}:00").replace(tzinfo=tz())
+    first, last = args.hours
+    window_start = day_start + timedelta(minutes=first)
+    window_end = day_start + timedelta(minutes=last)
 
     busy_local = [(to_local(s["start"]), to_local(s["end"])) for s in busy]
     busy_periods = [{"start": s.strftime("%H:%M"), "end": e.strftime("%H:%M")} for s, e in busy_local]
@@ -427,7 +428,7 @@ def cmd_free(args) -> None:
     print(json.dumps({
         "date": args.date,
         "timezone": str(tz()),
-        "hours": args.hours,
+        "hours": f"{hhmm(first)}-{hhmm(last)}",
         "busy": busy_periods,
         "free_windows": free_windows(busy_local, window_start, window_end, args.min_slot),
     }, indent=2))
@@ -453,12 +454,34 @@ def free_windows(busy: list[tuple[datetime, datetime]], window_start: datetime,
     if cursor < window_end:
         windows.append((cursor, window_end))
 
+    def clock(t: datetime) -> str:
+        # A window that runs to midnight ends at 24:00, not at 00:00.
+        return "24:00" if t > window_start and t.time() == time(0) else t.strftime("%H:%M")
+
     out = []
     for s, e in windows:
         minutes = int((e - s).total_seconds() / 60)
         if minutes >= min_slot:
-            out.append({"start": s.strftime("%H:%M"), "end": e.strftime("%H:%M"), "duration_minutes": minutes})
+            out.append({"start": clock(s), "end": clock(e), "duration_minutes": minutes})
     return out
+
+
+def hhmm(minutes: int) -> str:
+    return f"{minutes // 60:02d}:{minutes % 60:02d}"
+
+
+def parse_hours(s: str) -> tuple[int, int]:
+    """Parse --hours HH:MM-HH:MM into minutes after midnight; the end may be 24:00."""
+    m = re.fullmatch(r"(\d{1,2}):(\d{2})-(\d{1,2}):(\d{2})", s.strip())
+    if not m:
+        raise argparse.ArgumentTypeError(f"use HH:MM-HH:MM, e.g. 08:00-18:00 (got {s!r})")
+    h1, m1, h2, m2 = (int(g) for g in m.groups())
+    first, last = h1 * 60 + m1, h2 * 60 + m2
+    if h1 > 23 or m1 > 59 or m2 > 59 or last > 24 * 60:
+        raise argparse.ArgumentTypeError(f"times run from 00:00 to 24:00 (got {s!r})")
+    if first >= last:
+        raise argparse.ArgumentTypeError(f"the start must be before the end (got {s!r})")
+    return first, last
 
 
 def cmd_delete(args) -> None:
@@ -542,10 +565,18 @@ def describe_error(e: Exception) -> str:
     return f"{type(e).__name__}: {e}"
 
 
+class JSONArgumentParser(argparse.ArgumentParser):
+    """Reports usage errors as JSON on stdout, like every other error."""
+
+    def error(self, message: str) -> NoReturn:
+        self.print_usage(sys.stderr)
+        err(f"{self.prog}: {message}")
+
+
 # ── main ──────────────────────────────────────────────────────────────────
 
 def main() -> None:
-    parser = argparse.ArgumentParser(
+    parser = JSONArgumentParser(
         description="Google Calendar tool for Fridolin",
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
@@ -579,8 +610,8 @@ def main() -> None:
 
     p_free = sub.add_parser("free", help="Show busy slots and free windows for a date")
     p_free.add_argument("--date", required=True, help="YYYY-MM-DD")
-    p_free.add_argument("--hours", default="08:00-18:00",
-                        help="Window to search, HH:MM-HH:MM (default: 08:00-18:00)")
+    p_free.add_argument("--hours", type=parse_hours, default="08:00-18:00",
+                        help="Window to search, HH:MM-HH:MM; the end may be 24:00 (default: 08:00-18:00)")
     p_free.add_argument("--min-slot", type=int, default=30,
                         help="Ignore free windows shorter than this many minutes (default: 30)")
 
