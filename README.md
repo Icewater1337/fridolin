@@ -513,6 +513,11 @@ plus anything in your personal denylist
 (`~/.config/fridolin/personal-denylist`, one string per line —
 your name, your numbers, your company). CI runs the same check.
 
+CI also runs [govulncheck](https://go.dev/doc/security/vuln/) on pushes to main,
+every pull request and once a week; it fails when the code reaches a known
+vulnerability. Run it yourself after changing dependencies:
+`go run golang.org/x/vuln/cmd/govulncheck@latest ./...`.
+
 ## License
 
 MIT — see [LICENSE](LICENSE). Privacy: [PRIVACY.md](PRIVACY.md).
