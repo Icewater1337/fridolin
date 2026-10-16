@@ -26,7 +26,8 @@ your working directory:
 ```
 
 The tool produces both, with a shared stem so they stay paired. Nothing to copy
-elsewhere afterwards.
+elsewhere afterwards. It never overwrites an earlier recording: a stem that is
+already taken gets ` (2)`, ` (3)`, … — use the paths the tool prints.
 
 ## Do not improvise
 

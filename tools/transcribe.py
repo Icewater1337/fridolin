@@ -23,6 +23,9 @@ directory under the same stem, so they stay paired:
     2026-01-15 - Notes from the planning call.txt
     2026-01-15 - Notes from the planning call.ogg
 
+Nothing is overwritten: when a stem is already taken (two short "Okay" notes
+on one day), the new pair gets "2026-01-15 - Okay (2)", then "(3)", and so on.
+
 Engines
 -------
 `--engine auto` (the default) uses a local model if `transformers` and `torch`
@@ -314,6 +317,40 @@ def build_filename(text: str, when: str) -> str:
     return f"{when} - {summary}"
 
 
+def media_suffix_of(source: Path) -> str:
+    """The extension for the media copy; never .txt, which is the transcript's."""
+    suffix = source.suffix
+    return suffix if suffix and suffix.lower() != ".txt" else ".audio"
+
+
+def claim_paths(output_dir: Path, stem: str, media_suffix: str | None) -> tuple[Path, Path | None]:
+    """Create the transcript file, and the media copy's, under a stem nothing uses yet.
+
+    Short or near-silent notes from the same day share a stem ("2026-01-15 -
+    Okay"), and writing to a fixed name would replace an earlier recording's
+    transcript and media. Try "stem", then "stem (2)", "stem (3)", …; each
+    file is created with O_EXCL, so checking a name and taking it is one step
+    even when two transcriptions finish at once.
+    """
+    n = 0
+    while True:
+        n += 1
+        candidate = stem if n == 1 else f"{stem} ({n})"
+        transcript = output_dir / f"{candidate}.txt"
+        media = output_dir / f"{candidate}{media_suffix}" if media_suffix else None
+        try:
+            transcript.open("x").close()
+        except FileExistsError:
+            continue
+        if media is not None:
+            try:
+                media.open("xb").close()
+            except FileExistsError:
+                transcript.unlink()
+                continue
+        return transcript, media
+
+
 def main() -> None:
     ap = argparse.ArgumentParser(
         description="Transcribe an audio or video file to text.",
@@ -392,13 +429,11 @@ def main() -> None:
         die("Transcription produced no text")
 
     stem = build_filename(text, date.today().strftime("%Y-%m-%d"))
+    media_suffix = media_suffix_of(source) if args.keep_original else None
+    transcript_path, audio_dest = claim_paths(output_dir, stem, media_suffix)
 
-    transcript_path = output_dir / f"{stem}.txt"
     transcript_path.write_text(text, encoding="utf-8")
-
-    audio_dest = None
-    if args.keep_original:
-        audio_dest = output_dir / f"{stem}{source.suffix or '.audio'}"
+    if audio_dest is not None:
         shutil.copy2(source, audio_dest)
 
     print(json.dumps({
