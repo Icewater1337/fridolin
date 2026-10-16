@@ -743,7 +743,7 @@ func (br *Brain) parseStream(jid string, reader io.Reader) RunResult {
 
 	writeLog("── New invocation ──")
 
-	var finalResult string
+	var finalResult, lastText string
 	questionSent := false
 
 	for scanner.Scan() {
@@ -766,6 +766,7 @@ func (br *Brain) parseStream(jid string, reader io.Reader) RunResult {
 				switch content.Type {
 				case "text":
 					if content.Text != "" {
+						lastText = content.Text
 						writeLog("💬 " + truncate(content.Text, 2000))
 					}
 				case "tool_use":
@@ -783,6 +784,14 @@ func (br *Brain) parseStream(jid string, reader io.Reader) RunResult {
 		case "result":
 			if event.IsError || event.Error != "" {
 				errMsg := event.Error
+				if errMsg == "" {
+					errMsg = event.Result
+				}
+				if errMsg == "" {
+					// The CLI reports some failures (authentication, quota) only
+					// as its last message.
+					errMsg = truncate(lastText, 300)
+				}
 				if errMsg == "" {
 					errMsg = "(claude exited with an error but no message)"
 				}

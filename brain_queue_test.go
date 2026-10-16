@@ -280,3 +280,14 @@ func TestOTPMarkersConfigurable(t *testing.T) {
 		t.Error("a configured marker should arm the guard")
 	}
 }
+
+func TestParseStreamReportsErrorText(t *testing.T) {
+	br := &Brain{id: "a", workDir: t.TempDir()}
+	stream := `{"type":"assistant","message":{"content":[{"type":"text","text":"Failed to authenticate. API Error: 401"}]}}
+{"type":"result","is_error":true}
+`
+	res := br.parseStream("x", strings.NewReader(stream))
+	if res.Err == nil || !strings.Contains(res.Err.Error(), "Failed to authenticate") {
+		t.Errorf("err = %v, want the CLI's own message", res.Err)
+	}
+}
