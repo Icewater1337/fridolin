@@ -327,10 +327,16 @@ func (b *Bridge) handleCommand(ctx context.Context, m Inbound, cfg *Config) bool
 		} else {
 			resetErr = b.store.DeleteSession(m.JID)
 		}
-		if resetErr != nil {
+		switch {
+		case resetErr != nil:
 			log.Printf("error resetting session for %s: %v", m.JID, resetErr)
 			_ = b.wa.SendMessage(ctx, m.JID, "❌ Failed to reset session.")
-		} else {
+		case cfg.BrainMode:
+			// A brain run never resumes a session: each starts from the
+			// recent chat history, which a reset keeps. Say only what
+			// happened.
+			_ = b.wa.SendMessage(ctx, m.JID, "✅ Cleared anything this chat had running or waiting. The recent chat history stays, so the next message still sees it.")
+		default:
 			_ = b.wa.SendMessage(ctx, m.JID, "✅ Session reset. The next message starts a fresh conversation.")
 		}
 		return true
@@ -368,8 +374,12 @@ func (b *Bridge) handleCommand(ctx context.Context, m Inbound, cfg *Config) bool
 			"Send a message to talk to Claude. Images, documents, audio, and video are passed along as files.\n\n" +
 			"*Commands:*\n" +
 			"• `!help` — show this help\n" +
-			"• `!stop` — stop what I'm doing for this chat and drop its queued messages\n" +
-			"• `!reset` — clear the current session and start fresh"
+			"• `!stop` — stop what I'm doing for this chat and drop its queued messages\n"
+		if cfg.BrainMode {
+			help += "• `!reset` — like `!stop`; I still see the recent chat history afterwards"
+		} else {
+			help += "• `!reset` — clear the current session and start fresh"
+		}
 		if m.IsGroup() {
 			if t := cfg.Triggers.First(); t != "" {
 				help += "\n\nIn this group, start your message with `" + t + "` to address me, commands included."

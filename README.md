@@ -194,7 +194,7 @@ on the **Dev** page and read the replies there.
 | -------- | ------ |
 | `!help`  | Show available commands |
 | `!stop`  | Stop the run for this chat and drop its queued messages, including files or recordings another brain is answering here |
-| `!reset` | Forget the current session and start fresh |
+| `!reset` | With brains: like `!stop` — the recent chat history stays, and the next message still sees it. In classic mode: forget the Claude session and start fresh |
 
 A command also works when sent as a reply to a message.
 In a group, address the bridge as for any request (`@claude !stop`): an

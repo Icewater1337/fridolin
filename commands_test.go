@@ -413,7 +413,7 @@ func TestStopAndResetAreScopedToTheChat(t *testing.T) {
 		{"!stop from the running chat", testDMChat, "!stop", "group 1", nil, "🛑 Stopped"},
 		{"!stop from a chat with only a waiting message", testGroup, "!stop", "dm 1", []string{"dm 2"}, "🛑 Nothing was running for this chat; cleared"},
 		{"!stop from a chat with nothing going", otherDM, "!stop", "dm 1", []string{"dm 2", "group 1"}, "Nothing was running for this chat."},
-		{"!reset from another chat", testGroup, "!reset", "dm 1", []string{"dm 2"}, ""},
+		{"!reset from another chat", testGroup, "!reset", "dm 1", []string{"dm 2"}, "✅ Cleared"},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -439,11 +439,43 @@ func TestStopAndResetAreScopedToTheChat(t *testing.T) {
 			if q := queuePreviews(br); strings.Join(q, "|") != strings.Join(c.wantQueue, "|") {
 				t.Errorf("queue = %q, want %q", q, c.wantQueue)
 			}
-			if c.wantReply != "" && !tb.sentPrefix(c.chat, c.wantReply) {
+			if !tb.sentPrefix(c.chat, c.wantReply) {
 				t.Errorf("sent %q to the chat, want %q", tb.sentTo(c.chat), c.wantReply)
 			}
-			if len(tb.sentTo(c.chat)) == 0 {
-				t.Error("the command got no answer")
+		})
+	}
+}
+
+// !reset must not promise a fresh conversation where it cannot give one: a
+// brain's next run still reads the recent chat history.
+func TestResetReplySaysWhatItDoes(t *testing.T) {
+	cases := []struct {
+		name      string
+		extra     string
+		wantFresh bool // the reply may promise a fresh conversation
+	}{
+		{"brain mode", "", false},
+		{"classic mode", `, "brain_mode": false`, true},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			tb, _ := newMainBridge(t, c.extra)
+			ctx := context.Background()
+			for _, cmd := range []string{"!reset", "!help"} {
+				tb.handleInbound(ctx, Inbound{JID: testDMChat, Sender: "15551234567", Text: cmd, Source: "whatsapp"})
+			}
+			sent := tb.sentTo(testDMChat)
+			if len(sent) != 2 {
+				t.Fatalf("sent %q, want a reply to !reset and to !help", sent)
+			}
+			for _, s := range sent {
+				promises := strings.Contains(s, "fresh")
+				if promises != c.wantFresh {
+					t.Errorf("reply %q: promises a fresh start = %v, want %v", s, promises, c.wantFresh)
+				}
+			}
+			if !c.wantFresh && !strings.Contains(sent[0], "history") {
+				t.Errorf("reply %q does not say the chat history stays", sent[0])
 			}
 		})
 	}
