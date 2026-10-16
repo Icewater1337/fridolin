@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="docs/logo.webp" alt="Fridolin: a fox in a headset at a desk, wiring WhatsApp to Claude Code" width="360">
+</p>
+
 # Fridolin
 
 Talk to [Claude Code](https://claude.com/claude-code) over WhatsApp.

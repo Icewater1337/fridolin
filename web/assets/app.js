@@ -249,7 +249,7 @@ function buildShell() {
   const sidebar = h('aside.sidebar',
     h('div.brand-row',
       h('a.brand', { href: '#/overview' },
-        h('img.brand-logo', { src: '/favicon.svg', alt: '', width: 28, height: 28 }),
+        h('img.brand-logo', { src: '/assets/logo-mark.webp', alt: '', width: 34, height: 34 }),
         h('span.brand-text', h('span.brand-name', 'Fridolin'), h('span.brand-sub', 'WhatsApp × Claude'))),
       h('div.brand-tools', themeButton(), menuBtn)),
     nav,
@@ -349,7 +349,7 @@ function showConnect(reason) {
   });
   const cmd = 'fridolin open';
   mount(app, h('div.connect-card.card',
-    h('div.connect-head', h('img', { src: '/favicon.svg', alt: '', width: 44, height: 44 }), h('div', h('h1', 'Connect to your bridge'), h('p.muted', 'The dashboard needs your bridge’s access token.'))),
+    h('div.connect-head', h('img.brand-logo', { src: '/assets/logo-mark.webp', alt: '', width: 56, height: 56 }), h('div', h('h1', 'Connect to your bridge'), h('p.muted', 'The dashboard needs your bridge’s access token.'))),
     reason ? h('div.callout.warn', icon('alert', 'callout-icon'), h('div.callout-body', reason)) : null,
     h('ol.steps-list',
       h('li', h('div', 'In a terminal on this computer, run'), h('div.code-line', h('code.mono', cmd), copyButton(cmd)), h('div.muted.small', 'It opens this dashboard with the token filled in.')),
