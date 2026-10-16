@@ -372,9 +372,8 @@ def main() -> None:
                          "spoken, which measurably improves accuracy")
     ap.add_argument("--chunk-seconds", type=int, default=DEFAULT_CHUNK_SECONDS,
                     help=f"split longer files into chunks of this size (default: {DEFAULT_CHUNK_SECONDS})")
-    ap.add_argument("--keep-original", action="store_true", default=True,
-                    help="copy the source media next to the transcript (default: on)")
-    ap.add_argument("--no-keep-original", dest="keep_original", action="store_false")
+    ap.add_argument("--keep-original", action=argparse.BooleanOptionalAction, default=True,
+                    help="copy the source media next to the transcript")
     args = ap.parse_args()
 
     source = Path(args.file).expanduser()

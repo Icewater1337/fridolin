@@ -135,5 +135,29 @@ class OutputFilesTest(TranscribeTestCase):
         self.assertEqual(Path(out2["audio_file"]).read_bytes(), b"second recording")
 
 
+class KeepOriginalTest(TranscribeTestCase):
+    def test_flag(self):
+        cases = [
+            ("default", [], True),
+            ("--keep-original", ["--keep-original"], True),
+            ("--no-keep-original", ["--no-keep-original"], False),
+            ("the last one wins", ["--no-keep-original", "--keep-original"], True),
+        ]
+        for name, flags, kept in cases:
+            with self.subTest(name):
+                code, out, err = self.transcribe(str(self.media("note.ogg", b"audio")), *flags)
+                self.assertEqual(code, 0, err)
+                self.assertEqual(out["audio_file"] is not None, kept)
+                if kept:
+                    self.assertEqual(Path(out["audio_file"]).read_bytes(), b"audio")
+
+    def test_one_documented_switch(self):
+        # --keep-original used to be a separate store_true flag that defaulted
+        # to on, so passing it did nothing.
+        code, out, _ = support.run_main(transcribe, ["--help"])
+        self.assertEqual(code, 0)
+        self.assertIn("--keep-original, --no-keep-original", out)
+
+
 if __name__ == "__main__":
     unittest.main()
