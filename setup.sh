@@ -65,12 +65,14 @@ OS="$(uname)"
 # ── 1. prerequisites ──────────────────────────────────────────────────────
 step "Checking prerequisites"
 
+# The oldest Go release that builds the bridge is the go directive in go.mod.
+GO_MIN="$(sed -nE 's/^go (1\.[0-9]+).*/\1/p' "$REPO_DIR/go.mod")"
 if ! command -v go >/dev/null 2>&1; then
-  fail "Go is not installed. Install Go 1.25+ (macOS: brew install go; Linux: https://go.dev/dl/), then re-run."
+  fail "Go is not installed. Install Go ${GO_MIN}+ (macOS: brew install go; Linux: https://go.dev/dl/), then re-run."
 fi
 GO_MINOR="$(go env GOVERSION | sed -E 's/^go1\.([0-9]+).*/\1/')"
-if [ "${GO_MINOR:-0}" -lt 25 ]; then
-  fail "Go $(go env GOVERSION) is too old; the bridge needs Go 1.25 or newer."
+if [ "${GO_MINOR:-0}" -lt "${GO_MIN#1.}" ]; then
+  fail "Go $(go env GOVERSION) is too old; the bridge needs Go ${GO_MIN} or newer."
 fi
 ok "Go $(go env GOVERSION)"
 
