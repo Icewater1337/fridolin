@@ -59,27 +59,30 @@ func (f *fakePlaudFixture) calls() string {
 }
 
 func plaudBridge(t *testing.T, extra string) (*testBridge, *fakePlaudFixture) {
+	return plaudBridgeWith(t, `, "brains": [{"name": "p", "work_dir": "~/p", "handles_dms": true}]`, extra)
+}
+
+// plaudBridgeWith takes top-level settings (brains, allowed numbers) and
+// extra plaud settings.
+func plaudBridgeWith(t *testing.T, top, plaud string) (*testBridge, *fakePlaudFixture) {
 	fp := newFakePlaud(t)
-	tb := newTestBridge(t, `, "brains": [{"name": "p", "work_dir": "~/p", "handles_dms": true}], "plaud": {"enabled": true, "cli_path": "`+os.Args[0]+`"`+extra+`}`)
+	tb := newTestBridge(t, top+`, "plaud": {"enabled": true, "cli_path": "`+os.Args[0]+`"`+plaud+`}`)
 	return tb, fp
 }
 
-// plaudDeliver signs in, runs the first sync, then lets one finished
+// plaudDeliver starts from a finished sign-in and first sync (written
+// directly; each fake CLI call is a process), then lets one finished
 // recording arrive and polls once.
 func plaudDeliver(t *testing.T, tb *testBridge, fp *fakePlaudFixture) error {
 	t.Helper()
-	ctx := context.Background()
-	if w := tb.do("POST", "/api/plaud/connect", nil); w.Code != 202 {
-		t.Fatal(w.Body.String())
-	}
-	waitFor(t, 5*time.Second, "login", func() bool { return tb.plaud.connected() })
-	fp.files(plaudOld1)
-	if err := tb.plaud.Poll(ctx); err != nil {
+	_ = os.MkdirAll(filepath.Dir(tb.plaud.tokenPath()), 0o700)
+	_ = os.WriteFile(tb.plaud.tokenPath(), []byte("{}"), 0o600)
+	if err := tb.plaud.saveState(&plaudState{Seen: []string{plaudOld1}, Pending: map[string]float64{}}); err != nil {
 		t.Fatal(err)
 	}
 	fp.files(plaudNew, plaudOld1)
 	fp.recording(plaudNew, true)
-	return tb.plaud.Poll(ctx)
+	return tb.plaud.Poll(context.Background())
 }
 
 // The recording runs in the brain picked for Plaud, even when that brain
@@ -94,7 +97,7 @@ func TestPlaudRunsInThePickedBrain(t *testing.T) {
 	if err := plaudDeliver(t, tb, fp); err != nil {
 		t.Fatal(err)
 	}
-	waitFor(t, 5*time.Second, "brain reply", func() bool { return len(tb.dev.Outbox()) > 0 })
+	waitFor(t, 10*time.Second, "brain reply", func() bool { return len(tb.dev.Outbox()) > 0 })
 	if out := tb.dev.Outbox()[0]; out.JID != dm || !strings.Contains(out.Text, "echo:"+gDir+":plaud says: [Plaud] New recording") {
 		t.Errorf("reply = %+v, want it from %s in the DM", out, gDir)
 	}
@@ -109,6 +112,133 @@ func TestPlaudRunsInThePickedBrain(t *testing.T) {
 	tb.plaud.mu.Unlock()
 	if last == nil || last.Brain != "g" {
 		t.Errorf("last forwarded = %+v, want brain g", last)
+	}
+}
+
+// Recordings are private: the answer goes to the picked brain's reply chat
+// only when that is a direct chat, else to your DM, never to a group — even
+// for a brain that serves one, or whose reply chat is one.
+func TestPlaudSummariesStayOutOfGroups(t *testing.T) {
+	const (
+		dm    = "15551234567@s.whatsapp.net"
+		other = "15559876543@s.whatsapp.net"
+		group = "120363000000000000@g.us"
+	)
+	dmBrain := `{"name": "p", "work_dir": "~/p", "handles_dms": true}`
+	for _, c := range []struct {
+		name  string
+		top   string // brains and other top-level settings
+		plaud string
+		add   *BrainManifest // a folder brain added after start
+		brain string         // brain that must run the recording
+		want  string         // chat that must get the answer
+	}{
+		{name: "group brain without a reply chat answers in your DM",
+			top:   `, "brains": [` + dmBrain + `, {"name": "g", "work_dir": "~/g", "groups": ["` + group + `"]}]`,
+			plaud: `, "brain": "g"`, brain: "g", want: dm},
+		{name: "a group as reply chat is passed over for your DM",
+			top:   `, "brains": [` + dmBrain + `]`,
+			plaud: `, "brain": "g"`, add: &BrainManifest{ID: "g", Name: "G", ReplyChat: group}, brain: "g", want: dm},
+		{name: "a direct reply chat is used",
+			top:   `, "brains": [` + dmBrain + `]`,
+			plaud: `, "brain": "g"`, add: &BrainManifest{ID: "g", Name: "G", ReplyChat: other}, brain: "g", want: other},
+		{name: "automatic: the fallback brain that serves a group answers in your DM",
+			top:   `, "brains": [{"name": "f", "work_dir": "~/f", "groups": ["` + group + `"]}]`,
+			brain: "f", want: dm},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			tb, fp := plaudBridgeWith(t, c.top, c.plaud)
+			dir := filepath.Join(tb.home, c.brain)
+			if c.add != nil {
+				dir = tb.addFolderBrain(t, *c.add)
+			}
+			if err := plaudDeliver(t, tb, fp); err != nil {
+				t.Fatal(err)
+			}
+			waitFor(t, 10*time.Second, "brain reply", func() bool { return len(tb.dev.Outbox()) > 0 })
+			time.Sleep(100 * time.Millisecond)
+			out := tb.dev.Outbox()
+			for _, m := range out {
+				if strings.HasSuffix(m.JID, "@g.us") {
+					t.Fatalf("a recording's answer went to a group: %+v", m)
+				}
+			}
+			if out[0].JID != c.want || !strings.Contains(out[0].Text, "echo:"+dir+":plaud says:") {
+				t.Errorf("reply = %+v, want it from %s in %s", out[0], dir, c.want)
+			}
+		})
+	}
+}
+
+// With no private chat at all, nothing is handed over: the recording waits,
+// nothing is written to the media folder, and the reason shows on the
+// dashboard. Once there is a DM, it arrives.
+func TestPlaudWithoutAPrivateChatWaits(t *testing.T) {
+	tb, fp := plaudBridgeWith(t, `, "allowed_numbers": [], "brains": [{"name": "f", "work_dir": "~/f", "groups": ["120363000000000000@g.us"]}]`, "")
+	err := plaudDeliver(t, tb, fp)
+	if err == nil || !strings.Contains(err.Error(), "no private chat") {
+		t.Fatalf("poll error = %v, want the missing private chat", err)
+	}
+	if st, _ := tb.plaud.loadState(); st.Pending[plaudNew] == 0 || contains(st.Seen, plaudNew) {
+		t.Errorf("state = %+v, want the recording still pending", st)
+	}
+	if files, _ := filepath.Glob(filepath.Join(tb.cfgs.Get().MediaDir, "plaud", "*")); len(files) != 0 {
+		t.Errorf("files written without a destination: %v", files)
+	}
+	var status map[string]any
+	_ = json.Unmarshal(tb.do("GET", "/api/plaud/status?account=0", nil).Body.Bytes(), &status)
+	if e, _ := status["last_error"].(string); !strings.Contains(e, "no private chat") {
+		t.Errorf("status last_error = %q", e)
+	}
+	time.Sleep(100 * time.Millisecond)
+	if out := tb.dev.Outbox(); len(out) != 0 {
+		t.Fatalf("outbox = %+v, want nothing", out)
+	}
+
+	if _, err := tb.cfgs.Update("", func(c *Config) error { c.AllowedNumbers = []string{"15551234567"}; return nil }); err != nil {
+		t.Fatal(err)
+	}
+	if err := tb.plaud.Poll(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, 10*time.Second, "brain reply", func() bool { return len(tb.dev.Outbox()) > 0 })
+	if out := tb.dev.Outbox()[0]; out.JID != "15551234567@s.whatsapp.net" {
+		t.Errorf("reply = %+v, want it in the DM", out)
+	}
+}
+
+// The expiry notice follows the same rule: your DM for a group brain, and
+// nothing at all without a private chat (the dashboard shows the expiry).
+func TestPlaudExpiryNoticeStaysPrivate(t *testing.T) {
+	const group = "120363000000000000@g.us"
+	for _, c := range []struct {
+		name string
+		top  string
+		want []string // chats that get the notice
+	}{
+		{"group brain: your DM",
+			`, "brains": [{"name": "p", "work_dir": "~/p", "handles_dms": true}, {"name": "g", "work_dir": "~/g", "groups": ["` + group + `"]}]`,
+			[]string{"15551234567@s.whatsapp.net"}},
+		{"no private chat: nobody",
+			`, "allowed_numbers": [], "brains": [{"name": "p", "work_dir": "~/p", "handles_dms": true}, {"name": "g", "work_dir": "~/g", "groups": ["` + group + `"]}]`,
+			nil},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			tb, fp := plaudBridgeWith(t, c.top, `, "brain": "g"`)
+			_ = os.MkdirAll(filepath.Dir(tb.plaud.tokenPath()), 0o700)
+			_ = os.WriteFile(tb.plaud.tokenPath(), []byte("{}"), 0o600)
+			fp.write("expired", "")
+			if err := tb.plaud.Poll(context.Background()); err != errPlaudAuth {
+				t.Fatalf("poll: err = %v", err)
+			}
+			var got []string
+			for _, m := range tb.dev.Outbox() {
+				got = append(got, m.JID)
+			}
+			if strings.Join(got, ",") != strings.Join(c.want, ",") {
+				t.Errorf("notice sent to %v, want %v", got, c.want)
+			}
+		})
 	}
 }
 
