@@ -15,12 +15,23 @@ jobs:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, macos-latest]
+        # The two Go releases that still get security fixes: the previous
+        # one and the current one, which release builds use. oldstable is
+        # meant to match the go directive in go.mod. When a new release
+        # moves oldstable on, raise the directive to it: CI no longer tests
+        # the old minimum, and go.mod and setup.sh, which reads it, would
+        # still accept a release without security fixes.
+        go: [oldstable, stable]
     runs-on: ${{ matrix.os }}
+    env:
+      # Test the release setup-go installed. With the default (auto), a go
+      # directive newer than it would quietly download a newer toolchain.
+      GOTOOLCHAIN: local
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
         with:
-          go-version: '1.25'
+          go-version: ${{ matrix.go }}
           cache: true
 
       - name: gofmt
