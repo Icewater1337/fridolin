@@ -68,6 +68,26 @@ func (tb *testBridge) do(method, path string, body any, mutate ...func(*http.Req
 	return w
 }
 
+// ingest posts to /ingest the way a local script does: no dashboard token.
+func (tb *testBridge) ingest(body string) *httptest.ResponseRecorder {
+	r := httptest.NewRequest("POST", "http://127.0.0.1:8765/ingest", strings.NewReader(body))
+	r.Host = "127.0.0.1:8765"
+	r.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	tb.h.ServeHTTP(w, r)
+	return w
+}
+
+// addFolderBrain adds a folder brain through the dashboard API, as the Add
+// brain page does, and returns its folder.
+func (tb *testBridge) addFolderBrain(t *testing.T, m BrainManifest) string {
+	t.Helper()
+	if w := tb.do("POST", "/api/brains", map[string]any{"path": "~/" + m.ID, "manifest": m, "create_dir": true}); w.Code != 200 {
+		t.Fatalf("add brain %s: %d %s", m.ID, w.Code, w.Body.String())
+	}
+	return filepath.Join(tb.home, m.ID)
+}
+
 func TestDashboardGuards(t *testing.T) {
 	tb := newTestBridge(t, "")
 	cases := []struct {
@@ -201,14 +221,7 @@ func TestIngestConfinedToMediaDir(t *testing.T) {
 	link := filepath.Join(cfg.MediaDir, "link.txt")
 	_ = os.Symlink(outside, link)
 
-	ingest := func(body string) *httptest.ResponseRecorder {
-		r := httptest.NewRequest("POST", "http://127.0.0.1:8765/ingest", strings.NewReader(body))
-		r.Host = "127.0.0.1:8765"
-		r.Header.Set("Content-Type", "application/json")
-		w := httptest.NewRecorder()
-		tb.h.ServeHTTP(w, r)
-		return w
-	}
+	ingest := tb.ingest
 	w := ingest(`{"scope":"personal","paths":["` + inside + `"],"text":"file this"}`)
 	if w.Code != 202 || !strings.Contains(w.Body.String(), `"status":"accepted"`) || !strings.Contains(w.Body.String(), "15551234567@s.whatsapp.net") {
 		t.Fatalf("ingest: %d %s", w.Code, w.Body.String())
@@ -227,6 +240,57 @@ func TestIngestConfinedToMediaDir(t *testing.T) {
 	hist, _ := os.ReadFile(filepath.Join(tb.home, "p", "conversation-history.jsonl"))
 	if !strings.Contains(string(hist), "[attachment: "+canonicalDir(inside)+"]") {
 		t.Errorf("history does not record the ingested file:\n%s", hist)
+	}
+}
+
+// A brain without chats of its own (an upload or recorder brain) answers in
+// its reply_chat, here the DM that belongs to another brain. The files must
+// still be handled by the brain the request names: its prompt, memory,
+// sandbox and history.
+func TestIngestRunsInTheNamedBrain(t *testing.T) {
+	const dm = "15551234567@s.whatsapp.net"
+	tb := newTestBridge(t, `, "ingest": {"enabled": true}`)
+	dmDir := tb.addFolderBrain(t, BrainManifest{ID: "dm", Name: "DM", Routing: BrainRouting{HandlesDMs: true}})
+	upDir := tb.addFolderBrain(t, BrainManifest{ID: "up", Name: "Uploads", ReplyChat: dm})
+
+	w := tb.ingest(`{"brain":"up","text":"file this"}`)
+	if w.Code != 202 || !strings.Contains(w.Body.String(), dm) {
+		t.Fatalf("ingest: %d %s", w.Code, w.Body.String())
+	}
+	waitFor(t, 5*time.Second, "ingest reply", func() bool { return len(tb.dev.Outbox()) > 0 })
+	out := tb.dev.Outbox()[0]
+	if out.JID != dm || !strings.Contains(out.Text, "echo:"+upDir+":upload says: file this") {
+		t.Errorf("reply = %+v, want it from %s in %s", out, upDir, dm)
+	}
+	upHist, _ := os.ReadFile(filepath.Join(upDir, "conversation-history.jsonl"))
+	if !strings.Contains(string(upHist), "file this") {
+		t.Errorf("up's history lacks the message:\n%s", upHist)
+	}
+	if dmHist, _ := os.ReadFile(filepath.Join(dmDir, "conversation-history.jsonl")); strings.Contains(string(dmHist), "file this") {
+		t.Errorf("the DM brain saw a message meant for up:\n%s", dmHist)
+	}
+}
+
+// The OTP guard checks the brain the hand-off names, not the brain that owns
+// its reply chat: up asked for the code, so up's guard must catch it.
+func TestIngestOTPGuardChecksTheNamedBrain(t *testing.T) {
+	const dm = "15551234567@s.whatsapp.net"
+	tb := newTestBridge(t, `, "ingest": {"enabled": true}, "otp_guard": true, "otp_markers": ["Examplebank 2FA"]`)
+	tb.addFolderBrain(t, BrainManifest{ID: "dm", Name: "DM", Routing: BrainRouting{HandlesDMs: true}})
+	upDir := tb.addFolderBrain(t, BrainManifest{ID: "up", Name: "Uploads", ReplyChat: dm})
+	tb.brainMgr.Get("up").appendHistory(dm, "up", "Examplebank 2FA: reply with the code", "out")
+
+	if w := tb.ingest(`{"brain":"up","text":"483920"}`); w.Code != 202 {
+		t.Fatalf("ingest: %d %s", w.Code, w.Body.String())
+	}
+	otp := filepath.Join(tb.cfgs.Get().DataDir, "otp", "up.json")
+	waitFor(t, 3*time.Second, "otp file", func() bool { _, err := os.Stat(otp); return err == nil })
+	time.Sleep(200 * time.Millisecond)
+	if hist, _ := os.ReadFile(filepath.Join(upDir, "conversation-history.jsonl")); strings.Contains(string(hist), "483920") {
+		t.Error("the code reached up's history; the guard checked the wrong brain")
+	}
+	if out := tb.dev.Outbox(); len(out) != 0 {
+		t.Errorf("outbox = %+v, want nothing: a caught code must not start a run", out)
 	}
 }
 

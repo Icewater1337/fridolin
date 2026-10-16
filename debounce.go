@@ -30,7 +30,9 @@ func NewDebouncer(quiet, maxWait func() time.Duration, flush func(Inbound)) *Deb
 	return &Debouncer{quiet: quiet, maxWait: maxWait, flush: flush, batches: map[string]*pendingBatch{}}
 }
 
-func batchKey(m Inbound) string { return m.JID + "|" + m.Sender }
+// batchKey includes the target brain: two hand-offs for different brains that
+// answer in the same chat must not merge into one run in one brain.
+func batchKey(m Inbound) string { return m.Brain + "|" + m.JID + "|" + m.Sender }
 
 // Add queues m, merging it into the sender's open batch for the chat.
 func (d *Debouncer) Add(m Inbound) {

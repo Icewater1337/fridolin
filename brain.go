@@ -1527,11 +1527,24 @@ func (bm *BrainManager) Issues() []BrainIssue {
 	return append([]BrainIssue(nil), bm.issues...)
 }
 
+// Route returns the brain that handles m: the brain it names, else the one
+// its chat routes to. A message that names a brain that no longer exists gets
+// nil rather than whichever brain owns its chat.
+func (bm *BrainManager) Route(m Inbound) *Brain {
+	if m.Brain != "" {
+		return bm.Get(m.Brain)
+	}
+	return bm.BrainFor(m.JID, m.IsGroup())
+}
+
 // Submit routes a message to its brain. A message that lands on a brain being
 // removed at that moment is routed again once.
 func (bm *BrainManager) Submit(m Inbound) (br *Brain, pos int, busy bool, err error) {
 	for attempt := 0; attempt < 2; attempt++ {
-		br = bm.BrainFor(m.JID, m.IsGroup())
+		br = bm.Route(m)
+		if br == nil && m.Brain != "" {
+			return nil, 0, false, fmt.Errorf("brain %s is not configured", m.Brain)
+		}
 		if br == nil {
 			return nil, 0, false, fmt.Errorf("no brain configured for %s", m.JID)
 		}

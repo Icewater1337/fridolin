@@ -262,7 +262,13 @@ func (b *Bridge) handleInbound(ctx context.Context, m Inbound) {
 	}
 
 	if cfg.BrainMode {
-		br := b.brainMgr.BrainFor(m.JID, m.IsGroup())
+		// Resolved like the run itself (BrainManager.Submit), so the OTP guard
+		// checks the brain that would read the message.
+		br := b.brainMgr.Route(m)
+		if br == nil && m.Brain != "" {
+			log.Printf("brain %s is not configured; dropping the message for %s", m.Brain, m.JID)
+			return
+		}
 		if br == nil {
 			log.Printf("No brain configured for %s — add one in the dashboard", m.JID)
 			if !m.Silent && m.Source != "ingest" {

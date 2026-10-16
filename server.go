@@ -101,8 +101,9 @@ func (b *Bridge) appendHTTPMessageToHistory(jid, text string) {
 
 // httpIngest handles POST /ingest. It feeds files that arrived outside
 // WhatsApp (a web upload, a recorder sync) through the same pipeline as a
-// WhatsApp attachment, and the brain's reply goes to the brain's chat.
-// Responds 202 at once; processing is asynchronous.
+// WhatsApp attachment. They run in the brain the request names, and the
+// brain's reply goes to its reply chat, even when that chat routes to another
+// brain. Responds 202 at once; processing is asynchronous.
 func (b *Bridge) httpIngest(w http.ResponseWriter, r *http.Request) {
 	cfg := b.cfgs.Get()
 	if !cfg.Ingest.Enabled {
@@ -156,7 +157,7 @@ func (b *Bridge) httpIngest(w http.ResponseWriter, r *http.Request) {
 	if text == "" {
 		text = "New files were uploaded."
 	}
-	m := Inbound{JID: jid, Sender: sender, Text: text, Media: paths, Source: "ingest", At: time.Now()}
+	m := Inbound{JID: jid, Brain: br.ID(), Sender: sender, Text: text, Media: paths, Source: "ingest", At: time.Now()}
 	go b.handleInbound(context.Background(), m)
 	writeJSON(w, http.StatusAccepted, map[string]string{"status": "accepted", "jid": jid})
 }

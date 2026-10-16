@@ -241,7 +241,7 @@ export default {
         h('fieldset.fieldset', h('legend', 'Files and replies'),
           h('div.form-grid',
             field({ label: 'Prompt file', control: promptIn, help: 'The brain’s instructions, relative to its folder.' }),
-            field({ label: 'Reply chat', control: replyIn, help: 'Where replies go for files handed in through /ingest. Default: your first allowed number for the DM brain, else its first group.' }))),
+            field({ label: 'Reply chat', control: replyIn, help: 'Where replies go for files handed in through /ingest. This brain handles the files even when that chat belongs to another brain. Default: your first allowed number for the DM brain, else its first group.' }))),
         h('fieldset.fieldset', h('legend', 'Backup'),
           h('div.field', backupSw),
           field({ label: 'Leave out of backups', control: excludes, help: 'One pattern per line, relative to the brain folder. A trailing / means a folder.' })),

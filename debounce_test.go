@@ -87,6 +87,24 @@ func TestDebounceSeparatesSendersAndChats(t *testing.T) {
 	waitFor(t, time.Second, "three flushes", func() bool { return f.n() == 3 })
 }
 
+// Two hand-offs for different brains that answer in the same chat, from the
+// same default sender, must stay two runs, each in its own brain.
+func TestDebounceKeepsTargetBrainsApart(t *testing.T) {
+	d, f := newTestDebouncer(40*time.Millisecond, time.Second)
+	d.Add(Inbound{JID: "dm", Brain: "up", Sender: "upload", Text: "a"})
+	d.Add(Inbound{JID: "dm", Brain: "notes", Sender: "upload", Text: "b"})
+	waitFor(t, time.Second, "two flushes", func() bool { return f.n() == 2 })
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	got := map[string]string{}
+	for _, m := range f.got {
+		got[m.Brain] = m.Text
+	}
+	if got["up"] != "a" || got["notes"] != "b" {
+		t.Errorf("flushed %+v, want up:a and notes:b", f.got)
+	}
+}
+
 func TestDebounceOffAndDrop(t *testing.T) {
 	d, f := newTestDebouncer(0, 0)
 	d.Add(Inbound{JID: "g", Sender: "1", Text: "now"})
