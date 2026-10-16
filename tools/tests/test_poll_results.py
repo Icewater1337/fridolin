@@ -87,6 +87,23 @@ class TallyTest(PollResultsTestCase):
             {"option": "Tue", "votes": 1, "voters": [BOB]},
         ])
 
+    def test_a_retracted_vote_is_not_counted(self):
+        cases = [
+            ("retracted (stored as JSON null)", "null"),
+            ("empty selection", "[]"),
+            ("not JSON", "garbage"),
+            ("not a list", '{"Mon": true}'),
+        ]
+        for name, stored in cases:
+            with self.subTest(name):
+                self.vote(ALICE, json.dumps(["Mon"]))
+                self.vote(BOB, stored)
+                poll = self.results()
+                self.assertEqual(poll["total_voters"], 1)
+                self.assertEqual(poll["results"][0], {"option": "Mon", "votes": 1, "voters": [ALICE]})
+                # The listing, which tallies every poll, must not break either.
+                self.assertEqual(self.results(["--recent", "5"])["count"], 1)
+
     def test_lists_recent_polls(self):
         self.vote(ALICE, json.dumps(["Tue"]))
         listing = self.results(["--chat", CHAT])

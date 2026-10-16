@@ -11,6 +11,8 @@ Usage:
   poll_results.py --chat CHAT_JID        # only polls in one chat
 
 Output is JSON: question, options, total_voters, and per-option votes + voters.
+total_voters counts people with a current vote; someone who retracted theirs
+is left out.
 
 The database location follows BRIDGE_DB_PATH, then BRIDGE_DATA_DIR/bridge.db,
 then ~/.fridolin/bridge.db.
@@ -44,30 +46,44 @@ def open_db() -> sqlite3.Connection:
     return conn
 
 
+def json_list(text) -> list:
+    """Decode a JSON array column, treating anything else as empty.
+
+    The bridge stores a retracted vote (every option deselected) as JSON
+    null, not as [].
+    """
+    try:
+        value = json.loads(text)
+    except (json.JSONDecodeError, TypeError):
+        return []
+    return value if isinstance(value, list) else []
+
+
 def tally_votes(conn, poll_msg_id, options):
-    """Return per-option counts and voters, plus the number of distinct voters."""
+    """Return per-option counts and voters, plus the number of people who voted.
+
+    Someone who retracted their vote has a row but no selection, and is not
+    counted.
+    """
     tally = {opt: {"count": 0, "voters": []} for opt in options}
     rows = conn.execute(
         "SELECT voter_jid, selected_options FROM poll_votes WHERE poll_msg_id = ?",
         (poll_msg_id,),
     ).fetchall()
+    voters = 0
     for row in rows:
-        try:
-            chosen = json.loads(row["selected_options"])
-        except (json.JSONDecodeError, TypeError):
-            chosen = []
+        chosen = json_list(row["selected_options"])
+        if chosen:
+            voters += 1
         for opt in chosen:
             if opt in tally:
                 tally[opt]["count"] += 1
                 tally[opt]["voters"].append(row["voter_jid"])
-    return tally, len(rows)
+    return tally, voters
 
 
 def format_poll(conn, row) -> dict:
-    try:
-        options = json.loads(row["options"])
-    except (json.JSONDecodeError, TypeError):
-        options = []
+    options = json_list(row["options"])
     tally, total_voters = tally_votes(conn, row["msg_id"], options)
     return {
         "msg_id": row["msg_id"],
