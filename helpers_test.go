@@ -1,7 +1,9 @@
 package main
 
 import (
+	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"os/exec"
 	"strconv"
@@ -12,7 +14,8 @@ import (
 
 // TestMain lets the test binary stand in for the Claude CLI: with
 // WCB_FAKE_CLAUDE=1 it prints a stream-json result echoing its working
-// directory and the new message, after WCB_FAKE_SLEEP_MS. Tests point
+// directory and the new message, after WCB_FAKE_SLEEP_MS. With
+// WCB_FAKE_READ it also reports whether it could read that file. Tests point
 // claude_path at os.Args[0], so no script or real CLI is needed.
 func TestMain(m *testing.M) {
 	if os.Getenv("WCB_FAKE_PLAUD") == "1" && len(os.Args) > 1 && isPlaudCommand(os.Args[1]) {
@@ -56,6 +59,16 @@ func fakeClaude() {
 	}
 	wd, _ := os.Getwd()
 	out := fmt.Sprintf("echo:%s:%s", wd, msg)
+	if p := os.Getenv("WCB_FAKE_READ"); p != "" {
+		switch _, err := os.ReadFile(p); {
+		case err == nil:
+			out += " read=ok"
+		case errors.Is(err, fs.ErrPermission):
+			out += " read=denied"
+		default:
+			out += " read=error: " + err.Error()
+		}
+	}
 	q := strconv.Quote(out)
 	fmt.Printf(`{"type":"assistant","message":{"content":[{"type":"text","text":%s}]}}`+"\n", q)
 	fmt.Printf(`{"type":"result","result":%s}`+"\n", q)

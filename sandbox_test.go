@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -117,5 +119,30 @@ func TestSandboxConfigNeedsMacOS(t *testing.T) {
 				t.Errorf("error %q does not name the setting", err)
 			}
 		})
+	}
+}
+
+// TestSandboxCommandPassesProfileInline: the profile travels as an argument,
+// never through a file in the shared TMPDIR that another brain could swap.
+func TestSandboxCommandPassesProfileInline(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	sp := NewSandboxProfiler(map[string]string{"a": filepath.Join(home, "a"), "b": filepath.Join(home, "b")},
+		&Config{DataDir: filepath.Join(home, "data")})
+	sp.execPath = os.Args[0] // any file that exists
+
+	bin, args, err := sp.Command("a", "/opt/claude", []string{"--verbose", "-p", "hi"})
+	if runtime.GOOS != "darwin" {
+		if err == nil {
+			t.Fatalf("Command succeeded on %s, which has no sandbox-exec", runtime.GOOS)
+		}
+		return
+	}
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := append([]string{"-p", sp.Profile("a"), "/opt/claude"}, "--verbose", "-p", "hi")
+	if bin != sp.execPath || !slices.Equal(args, want) {
+		t.Errorf("Command = %s %q, want %s %q", bin, args, sp.execPath, want)
 	}
 }

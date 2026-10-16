@@ -522,16 +522,13 @@ func (br *Brain) invoke(run *brainRun, ctx context.Context, s *brainSettings, m 
 	// without it: the fallback would quietly drop the only barrier left.
 	binary := s.claudePath
 	finalArgs := args
-	var sbProfilePath string
 	if br.sandbox != nil && br.sandbox.Enabled() {
-		profilePath, sbErr := br.sandbox.Write(br.id)
+		sbBinary, sbArgs, sbErr := br.sandbox.Command(br.id, s.claudePath, args)
 		if sbErr != nil {
 			log.Printf("brain %s: sandbox unavailable, refusing to run: %v", br.id, sbErr)
 			return RunResult{Err: errSandboxUnavailable}
 		}
-		sbProfilePath = profilePath
-		binary = br.sandbox.execPath
-		finalArgs = append([]string{"-f", sbProfilePath, s.claudePath}, args...)
+		binary, finalArgs = sbBinary, sbArgs
 	}
 
 	// Only once the sandbox is settled: a refused run starts no process.
@@ -541,9 +538,6 @@ func (br *Brain) invoke(run *brainRun, ctx context.Context, s *brainSettings, m 
 	cmd.Dir = br.workDir
 	cmd.Env = append(os.Environ(), calendarEnv(br.id, s.manifest, s.credsDir)...)
 	isolateProcessGroup(cmd)
-	if sbProfilePath != "" {
-		defer os.Remove(sbProfilePath)
-	}
 
 	// stdin must be /dev/null or the CLI blocks waiting for input.
 	devNull, err := os.Open(os.DevNull)

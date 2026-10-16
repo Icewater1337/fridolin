@@ -2,8 +2,6 @@ package main
 
 import (
 	"bufio"
-	"crypto/rand"
-	"encoding/hex"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -63,7 +61,7 @@ func NewSandboxProfiler(workDirs map[string]string, cfg *Config) *SandboxProfile
 	return sp
 }
 
-// Update replaces the brain set and settings. Profiles are written per run,
+// Update replaces the brain set and settings. Profiles are built per run,
 // so the next run of every brain picks the change up.
 func (sp *SandboxProfiler) Update(workDirs map[string]string, cfg *Config) {
 	wd := make(map[string]string, len(workDirs))
@@ -291,25 +289,25 @@ func gitConfigChain(home string) []string {
 	return out
 }
 
-// Write renders the profile for a brain into a private temp file and returns
-// its path. The caller unlinks the file once the spawned process exits.
-func (sp *SandboxProfiler) Write(brainID string) (string, error) {
+// Available reports why brain runs cannot be sandboxed on this machine, or
+// nil when they can.
+func (sp *SandboxProfiler) Available() error {
 	if runtime.GOOS != "darwin" {
-		return "", fmt.Errorf("sandbox-exec is macOS-only, got %s", runtime.GOOS)
+		return fmt.Errorf("sandbox-exec is macOS-only, got %s", runtime.GOOS)
 	}
 	if _, err := os.Stat(sp.execPath); err != nil {
-		return "", fmt.Errorf("%s not available: %w", sp.execPath, err)
+		return fmt.Errorf("%s not available: %w", sp.execPath, err)
 	}
+	return nil
+}
 
-	buf := make([]byte, 6)
-	if _, err := rand.Read(buf); err != nil {
-		return "", fmt.Errorf("rand: %w", err)
+// Command returns the program and arguments that run claudePath with args
+// under the brain's profile. The profile goes inline (-p): a profile file in
+// the shared TMPDIR could be swapped by another brain between being written
+// and being read, and a brain that made TMPDIR unwritable broke the sandbox.
+func (sp *SandboxProfiler) Command(brainID, claudePath string, args []string) (string, []string, error) {
+	if err := sp.Available(); err != nil {
+		return "", nil, err
 	}
-
-	name := fmt.Sprintf("fridolin-brain-%s-%s.sb", brainID, hex.EncodeToString(buf))
-	path := filepath.Join(os.TempDir(), name)
-	if err := os.WriteFile(path, []byte(sp.Profile(brainID)), 0o600); err != nil {
-		return "", fmt.Errorf("write profile: %w", err)
-	}
-	return path, nil
+	return sp.execPath, append([]string{"-p", sp.Profile(brainID), claudePath}, args...), nil
 }

@@ -405,7 +405,8 @@ API; the page is plain HTML/JS compiled into the binary.
 off: one Claude session per chat, resumed with `--resume`, retried without it
 if the session has expired.
 
-**`sandbox.go`** — generates a per-brain `sandbox-exec` profile.
+**`sandbox.go`** — generates a per-brain `sandbox-exec` profile, passed to
+`sandbox-exec -p` on each run (never written to a file).
 
 **`store.go`** — SQLite: the whatsmeow device store, session IDs, active PIDs,
 polls, and votes.
