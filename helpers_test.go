@@ -379,3 +379,23 @@ type fatalRecorder struct {
 func (r *fatalRecorder) Fatal(args ...any) { r.fatal = fmt.Sprint(args...) }
 
 func (r *fatalRecorder) Fatalf(format string, args ...any) { r.fatal = fmt.Sprintf(format, args...) }
+
+// logContains reports whether a line captureLog collected contains substr.
+func logContains(logs func() []string, substr string) bool {
+	for _, l := range logs() {
+		if strings.Contains(l, substr) {
+			return true
+		}
+	}
+	return false
+}
+
+// permOf returns the permission bits of path.
+func permOf(t *testing.T, path string) os.FileMode {
+	t.Helper()
+	st, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return st.Mode().Perm()
+}
