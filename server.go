@@ -3,10 +3,11 @@ package main
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"log"
 	"net"
 	"net/http"
+	"os"
+	"path/filepath"
 	"strings"
 	"time"
 )
@@ -17,36 +18,15 @@ type sendRequest struct {
 	Text string `json:"text"`
 }
 
-// startHTTPServer starts the local outbound-send API in a background goroutine.
-//
-// The API has no authentication, so it must stay bound to a loopback address:
-// anything that can reach it can send WhatsApp messages as you. A non-loopback
-// listen address is refused rather than silently exposed.
-func (b *Bridge) startHTTPServer(addr string) {
-	if !isLoopbackAddr(addr) {
-		log.Printf("REFUSING to start HTTP API on %q: the API is unauthenticated and must bind to localhost "+
-			"(use 127.0.0.1:8765, or put a reverse proxy with auth in front of it)", addr)
-		return
-	}
-
-	mux := http.NewServeMux()
-	mux.HandleFunc("/send", b.httpSend)
-	mux.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
-		fmt.Fprintln(w, "ok")
-	})
-
-	srv := &http.Server{
-		Addr:              addr,
-		Handler:           mux,
-		ReadHeaderTimeout: 10 * time.Second,
-	}
-
-	go func() {
-		log.Printf("HTTP API listening on %s", addr)
-		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			log.Printf("HTTP server error: %v", err)
-		}
-	}()
+// ingestRequest is the JSON body expected by POST /ingest. Scope (or Brain)
+// names the brain; Paths are files already written inside the media
+// directory; Text is the message that goes with them.
+type ingestRequest struct {
+	Scope  string   `json:"scope"`
+	Brain  string   `json:"brain"`
+	Paths  []string `json:"paths"`
+	Text   string   `json:"text"`
+	Sender string   `json:"sender"`
 }
 
 // isLoopbackAddr reports whether addr binds to a loopback interface.
@@ -62,17 +42,22 @@ func isLoopbackAddr(addr string) bool {
 	return ip != nil && ip.IsLoopback()
 }
 
-// httpSend handles POST /send {"jid":"…","text":"…"}.
+func writeJSON(w http.ResponseWriter, status int, v any) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+	_ = json.NewEncoder(w).Encode(v)
+}
+
+func writeErr(w http.ResponseWriter, status int, msg string) {
+	writeJSON(w, status, map[string]string{"error": msg})
+}
+
+// httpSend handles POST /send {"jid":"…","text":"…"} for local scripts.
 //
 // The sent message is appended to the owning brain's history so the brain can
 // see what was said on its behalf — for example, so the OTP guard recognises a
 // code request that a script sent out.
 func (b *Bridge) httpSend(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
-
 	var req sendRequest
 	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20)).Decode(&req); err != nil {
 		http.Error(w, "invalid JSON: "+err.Error(), http.StatusBadRequest)
@@ -83,27 +68,112 @@ func (b *Bridge) httpSend(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := b.wa.SendChunked(context.Background(), req.JID, req.Text); err != nil {
+	if err := b.wa.SendChunked(r.Context(), req.JID, req.Text); err != nil {
 		log.Printf("HTTP send error to %s: %v", req.JID, err)
 		http.Error(w, "send failed: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
 
 	b.appendHTTPMessageToHistory(req.JID, req.Text)
-
-	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(map[string]string{"status": "sent"})
+	writeJSON(w, http.StatusOK, map[string]string{"status": "sent"})
 }
 
 // appendHTTPMessageToHistory records an HTTP-sent message in the history of
 // whichever brain owns the target chat. No-op in classic mode.
 func (b *Bridge) appendHTTPMessageToHistory(jid, text string) {
-	if b.brainMgr == nil {
+	if !b.cfgs.Get().BrainMode {
 		return
 	}
 	br := b.brainMgr.BrainFor(jid, strings.HasSuffix(jid, "@g.us"))
 	if br == nil {
 		return
 	}
-	br.appendHistory(jid, br.name, text, "out")
+	br.appendHistory(jid, br.id, text, "out")
+}
+
+// httpIngest handles POST /ingest. It feeds files that arrived outside
+// WhatsApp (a web upload, a recorder sync) through the same pipeline as a
+// WhatsApp attachment, and the brain's reply goes to the brain's chat.
+// Responds 202 at once; processing is asynchronous.
+func (b *Bridge) httpIngest(w http.ResponseWriter, r *http.Request) {
+	cfg := b.cfgs.Get()
+	if !cfg.Ingest.Enabled {
+		http.Error(w, "ingest is disabled (set ingest.enabled in the dashboard)", http.StatusNotFound)
+		return
+	}
+	var req ingestRequest
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20)).Decode(&req); err != nil {
+		http.Error(w, "invalid JSON: "+err.Error(), http.StatusBadRequest)
+		return
+	}
+	if len(req.Paths) == 0 && strings.TrimSpace(req.Text) == "" {
+		http.Error(w, "paths or text required", http.StatusBadRequest)
+		return
+	}
+	id := strings.ToLower(strings.TrimSpace(req.Brain))
+	if id == "" {
+		id = strings.ToLower(strings.TrimSpace(req.Scope))
+	}
+	br := b.brainMgr.Get(id)
+	if br == nil {
+		http.Error(w, "unknown brain "+strconvQuote(id), http.StatusBadRequest)
+		return
+	}
+
+	media := canonicalDir(cfg.MediaDir)
+	var paths []string
+	for _, p := range req.Paths {
+		resolved, err := filepath.EvalSymlinks(p)
+		if !filepath.IsAbs(p) || err != nil || !isWithin(resolved, media) {
+			http.Error(w, "every path must be an existing file inside the media directory", http.StatusBadRequest)
+			return
+		}
+		if st, err := os.Stat(resolved); err != nil || !st.Mode().IsRegular() {
+			http.Error(w, "not a regular file: "+filepath.Base(p), http.StatusBadRequest)
+			return
+		}
+		paths = append(paths, resolved)
+	}
+
+	jid := b.replyChatFor(br, cfg)
+	if jid == "" {
+		http.Error(w, "brain "+br.ID()+" has no chat to reply in — set reply_chat in its settings", http.StatusBadRequest)
+		return
+	}
+	sender := req.Sender
+	if sender == "" {
+		sender = "upload"
+	}
+	text := req.Text
+	if text == "" {
+		text = "New files were uploaded."
+	}
+	m := Inbound{JID: jid, Sender: sender, Text: text, Media: paths, Source: "ingest", At: time.Now()}
+	go b.handleInbound(context.Background(), m)
+	writeJSON(w, http.StatusAccepted, map[string]string{"status": "accepted", "jid": jid})
+}
+
+// replyChatFor picks the chat a brain answers in when a message did not come
+// from a chat: its configured reply_chat, else the first allowed number for
+// the DM brain, else the brain's first group.
+func (b *Bridge) replyChatFor(br *Brain, cfg *Config) string {
+	m := br.settings.Load().manifest
+	if m.ReplyChat != "" {
+		return m.ReplyChat
+	}
+	if m.Routing.HandlesDMs && len(cfg.AllowedNumbers) > 0 {
+		return cfg.AllowedNumbers[0] + "@s.whatsapp.net"
+	}
+	if len(m.Routing.Groups) > 0 {
+		return m.Routing.Groups[0]
+	}
+	if b.brainMgr.BrainFor("", false) == br && len(cfg.AllowedNumbers) > 0 {
+		return cfg.AllowedNumbers[0] + "@s.whatsapp.net"
+	}
+	return ""
+}
+
+func strconvQuote(s string) string {
+	data, _ := json.Marshal(s)
+	return string(data)
 }

@@ -9,7 +9,6 @@ import (
 
 	_ "github.com/mattn/go-sqlite3"
 	"go.mau.fi/whatsmeow/store/sqlstore"
-	waLog "go.mau.fi/whatsmeow/util/log"
 )
 
 // Store manages both the whatsmeow device store and the sessions table.
@@ -23,7 +22,7 @@ type Store struct {
 func NewStore(cfg *Config) (*Store, error) {
 	dbURL := "file:" + cfg.DBPath + "?_foreign_keys=on"
 
-	logger := waLog.Stdout("Store", cfg.LogLevel, true)
+	logger := newWaLogger("Store", cfg.LogLevel)
 
 	container, err := sqlstore.New(context.Background(), "sqlite3", dbURL, logger)
 	if err != nil {
@@ -71,6 +70,19 @@ func (s *Store) migrate() error {
 			selected_options TEXT NOT NULL, -- JSON array of chosen option name strings
 			voted_at         DATETIME NOT NULL,
 			PRIMARY KEY (poll_msg_id, voter_jid)
+		)`,
+		// ignored_chats — chats that wrote but are not allowed, so the
+		// dashboard can offer to allow them. No message content is stored.
+		`CREATE TABLE IF NOT EXISTS ignored_chats (
+			jid        TEXT PRIMARY KEY,
+			kind       TEXT NOT NULL,
+			name       TEXT NOT NULL DEFAULT '',
+			sender     TEXT NOT NULL DEFAULT '',
+			push_name  TEXT NOT NULL DEFAULT '',
+			count      INTEGER NOT NULL DEFAULT 0,
+			first_seen DATETIME NOT NULL,
+			last_seen  DATETIME NOT NULL,
+			dismissed  INTEGER NOT NULL DEFAULT 0
 		)`,
 	}
 	for _, stmt := range stmts {
@@ -194,4 +206,61 @@ func (s *Store) DeleteProcessPID(jid string) error {
 // Close closes the plain DB connection (the whatsmeow container manages its own).
 func (s *Store) Close() error {
 	return s.db.Close()
+}
+
+// IgnoredChat is a chat that messaged the bridge without being allowed.
+type IgnoredChat struct {
+	JID       string    `json:"jid"`
+	Kind      string    `json:"kind"` // dm or group
+	Name      string    `json:"name"`
+	Sender    string    `json:"sender"`
+	PushName  string    `json:"push_name"`
+	Count     int       `json:"count"`
+	FirstSeen time.Time `json:"first_seen"`
+	LastSeen  time.Time `json:"last_seen"`
+}
+
+// RecordIgnored counts a message from a chat that is not allowed. A dismissed
+// chat stays dismissed.
+func (s *Store) RecordIgnored(kind, jid, name, sender, pushName string) error {
+	now := time.Now().UTC()
+	_, err := s.db.Exec(`INSERT INTO ignored_chats (jid, kind, name, sender, push_name, count, first_seen, last_seen)
+		VALUES (?, ?, ?, ?, ?, 1, ?, ?)
+		ON CONFLICT(jid) DO UPDATE SET
+			count = count + 1, last_seen = excluded.last_seen,
+			name = CASE WHEN excluded.name != '' THEN excluded.name ELSE name END,
+			sender = excluded.sender,
+			push_name = CASE WHEN excluded.push_name != '' THEN excluded.push_name ELSE push_name END`,
+		jid, kind, name, sender, pushName, now, now)
+	return err
+}
+
+// ListIgnored returns chats that wrote recently and were not dismissed.
+func (s *Store) ListIgnored() ([]IgnoredChat, error) {
+	rows, err := s.db.Query(`SELECT jid, kind, name, sender, push_name, count, first_seen, last_seen
+		FROM ignored_chats WHERE dismissed = 0 ORDER BY last_seen DESC LIMIT 100`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []IgnoredChat{}
+	for rows.Next() {
+		var c IgnoredChat
+		if err := rows.Scan(&c.JID, &c.Kind, &c.Name, &c.Sender, &c.PushName, &c.Count, &c.FirstSeen, &c.LastSeen); err != nil {
+			return nil, err
+		}
+		out = append(out, c)
+	}
+	return out, rows.Err()
+}
+
+// DismissIgnored hides a chat from the dashboard list (or removes it once it
+// has been allowed).
+func (s *Store) DismissIgnored(jid string, remove bool) error {
+	if remove {
+		_, err := s.db.Exec(`DELETE FROM ignored_chats WHERE jid = ?`, jid)
+		return err
+	}
+	_, err := s.db.Exec(`UPDATE ignored_chats SET dismissed = 1 WHERE jid = ?`, jid)
+	return err
 }

@@ -18,8 +18,8 @@ import (
 type ClaudeRequest struct {
 	JID       string
 	Text      string
-	MediaPath string // optional path to a downloaded attachment
-	WorkDir   string // working directory (empty = cfg.WorkDir)
+	Media     []string // downloaded attachments
+	WorkDir   string   // working directory (empty = cfg.WorkDir)
 	ReplyChan chan ClaudeResult
 }
 
@@ -70,7 +70,7 @@ type askQuestion struct {
 // ClaudeRunner is the classic (non-brain) runner: one resumable Claude session
 // per chat, with a serial queue so a chat never runs two invocations at once.
 type ClaudeRunner struct {
-	cfg   *Config
+	cfg   func() *Config
 	store *Store
 
 	// IntermediateSendFn is called when Claude emits an AskUserQuestion tool
@@ -83,7 +83,7 @@ type ClaudeRunner struct {
 }
 
 // NewClaudeRunner creates a runner.
-func NewClaudeRunner(cfg *Config, store *Store) *ClaudeRunner {
+func NewClaudeRunner(cfg func() *Config, store *Store) *ClaudeRunner {
 	return &ClaudeRunner{
 		cfg:   cfg,
 		store: store,
@@ -147,27 +147,32 @@ func (r *ClaudeRunner) runOnce(ctx context.Context, req ClaudeRequest, skipResum
 		return ClaudeResult{Error: fmt.Errorf("getting session: %w", err)}, false
 	}
 
+	cfg := r.cfg()
 	prompt := req.Text
-	if req.MediaPath != "" {
-		prompt = fmt.Sprintf("A file was shared via WhatsApp and saved to: %s\n\n%s", req.MediaPath, req.Text)
+	switch len(req.Media) {
+	case 0:
+	case 1:
+		prompt = fmt.Sprintf("A file was shared via WhatsApp and saved to: %s\n\n%s", req.Media[0], req.Text)
+	default:
+		prompt = fmt.Sprintf("These files were shared via WhatsApp and saved to:\n- %s\n\n%s", strings.Join(req.Media, "\n- "), req.Text)
 	}
 
 	args := []string{"--output-format", "stream-json", "--verbose"}
-	if r.cfg.DangerouslySkipPermissions {
+	if cfg.DangerouslySkipPermissions {
 		args = append(args, "--dangerously-skip-permissions")
 	}
 	if sessionID != "" && !skipResume {
 		args = append(args, "--resume", sessionID)
 	}
-	if r.cfg.Model != "" {
-		args = append(args, "--model", r.cfg.Model)
+	if cfg.Model != "" {
+		args = append(args, "--model", cfg.Model)
 	}
 	args = append(args, "-p", prompt)
 
-	cmd := exec.CommandContext(ctx, r.cfg.ClaudePath, args...)
+	cmd := exec.CommandContext(ctx, cfg.ClaudePath, args...)
 	cmd.Dir = req.WorkDir
 	if cmd.Dir == "" {
-		cmd.Dir = r.cfg.WorkDir
+		cmd.Dir = cfg.WorkDir
 	}
 
 	// stdin must be /dev/null or the CLI blocks waiting for input.

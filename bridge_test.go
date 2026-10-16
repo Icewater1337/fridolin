@@ -29,7 +29,7 @@ func TestMatchesTrigger(t *testing.T) {
 	}
 
 	for _, c := range cases {
-		if got := matchesTrigger(c.text, triggers); got != c.want {
+		if got := TriggersFromStrings(triggers).Matches(c.text); got != c.want {
 			t.Errorf("matchesTrigger(%q) = %v, want %v", c.text, got, c.want)
 		}
 	}
@@ -37,7 +37,7 @@ func TestMatchesTrigger(t *testing.T) {
 
 func TestMatchesTriggerEmptyTriggerIgnored(t *testing.T) {
 	// An empty trigger would otherwise match every message.
-	if matchesTrigger("anything at all", []string{""}) {
+	if TriggersFromStrings([]string{""}).Matches("anything at all") {
 		t.Error("an empty trigger must not match")
 	}
 }
@@ -56,7 +56,7 @@ func TestStripTriggers(t *testing.T) {
 	}
 
 	for _, c := range cases {
-		if got := stripTriggers(c.in, triggers); got != c.want {
+		if got := TriggersFromStrings(triggers).Strip(c.in); got != c.want {
 			t.Errorf("stripTriggers(%q) = %q, want %q", c.in, got, c.want)
 		}
 	}
@@ -65,7 +65,7 @@ func TestStripTriggers(t *testing.T) {
 func TestStripTriggersTerminates(t *testing.T) {
 	// Repeated occurrences must all be removed without the strip loop spinning.
 	done := make(chan string, 1)
-	go func() { done <- stripTriggers("aaaa", []string{"a"}) }()
+	go func() { done <- TriggersFromStrings([]string{"a"}).Strip("aaaa") }()
 	select {
 	case got := <-done:
 		if got != "" {
@@ -235,7 +235,7 @@ func TestLoadConfigDefaults(t *testing.T) {
 	if cfg.MaxChunkSize != 3900 {
 		t.Errorf("MaxChunkSize = %d", cfg.MaxChunkSize)
 	}
-	if len(cfg.Triggers) != 1 || cfg.Triggers[0] != "@claude" {
+	if len(cfg.Triggers) != 1 || cfg.Triggers[0].Text != "@claude" {
 		t.Errorf("Triggers = %v", cfg.Triggers)
 	}
 }
@@ -267,7 +267,6 @@ func TestLoadConfigRejectsBadBrains(t *testing.T) {
 		"duplicate name":  `{"brain_mode":true,"brains":[{"name":"a","work_dir":"/tmp/a"},{"name":"a","work_dir":"/tmp/b"}]}`,
 		"two dm brains":   `{"brain_mode":true,"brains":[{"name":"a","work_dir":"/tmp/a","handles_dms":true},{"name":"b","work_dir":"/tmp/b","handles_dms":true}]}`,
 		"shared group":    `{"brain_mode":true,"brains":[{"name":"a","work_dir":"/tmp/a","groups":["g@g.us"]},{"name":"b","work_dir":"/tmp/b","groups":["g@g.us"]}]}`,
-		"no brains":       `{"brain_mode":true,"brains":[]}`,
 		"missing workdir": `{"brain_mode":true,"brains":[{"name":"a"}]}`,
 		"name with slash": `{"brain_mode":true,"brains":[{"name":"a/b","work_dir":"/tmp/a"}]}`,
 	}
@@ -276,6 +275,14 @@ func TestLoadConfigRejectsBadBrains(t *testing.T) {
 		if _, err := LoadConfig(writeConfig(t, body)); err == nil {
 			t.Errorf("%s: expected an error, got none", name)
 		}
+	}
+}
+
+func TestLoadConfigAllowsNoBrains(t *testing.T) {
+	// A fresh install starts with no brains and adds them in the dashboard.
+	t.Setenv("HOME", t.TempDir())
+	if _, err := LoadConfig(writeConfig(t, `{"brain_mode":true,"brains":[]}`)); err != nil {
+		t.Fatalf("an empty brain list must load: %v", err)
 	}
 }
 
@@ -290,7 +297,7 @@ func TestLoadConfigEnvOverride(t *testing.T) {
 	if len(cfg.AllowedNumbers) != 3 || cfg.AllowedNumbers[2] != "333" {
 		t.Errorf("AllowedNumbers = %v", cfg.AllowedNumbers)
 	}
-	if len(cfg.Triggers) != 1 || cfg.Triggers[0] != "@bot" {
+	if len(cfg.Triggers) != 1 || cfg.Triggers[0].Text != "@bot" {
 		t.Errorf("Triggers = %v", cfg.Triggers)
 	}
 }
@@ -338,15 +345,15 @@ func TestBrainRouting(t *testing.T) {
 
 	mgr := newTestManager(t, cfg)
 
-	if got := mgr.BrainFor("15551234567@s.whatsapp.net", false); got.name != "personal" {
-		t.Errorf("DM routed to %q, want personal", got.name)
+	if got := mgr.BrainFor("15551234567@s.whatsapp.net", false); got.ID() != "personal" {
+		t.Errorf("DM routed to %q, want personal", got.ID())
 	}
-	if got := mgr.BrainFor("team@g.us", true); got.name != "team" {
-		t.Errorf("team group routed to %q, want team", got.name)
+	if got := mgr.BrainFor("team@g.us", true); got.ID() != "team" {
+		t.Errorf("team group routed to %q, want team", got.ID())
 	}
 	// A group no brain claims falls back to the default brain.
-	if got := mgr.BrainFor("unknown@g.us", true); got.name != "other" {
-		t.Errorf("unknown group routed to %q, want other", got.name)
+	if got := mgr.BrainFor("unknown@g.us", true); got.ID() != "other" {
+		t.Errorf("unknown group routed to %q, want other", got.ID())
 	}
 }
 
@@ -365,8 +372,8 @@ func TestBrainRoutingFallsBackToFirstBrain(t *testing.T) {
 
 	mgr := newTestManager(t, cfg)
 	// No brain sets handles_dms, so DMs land on the fallback.
-	if got := mgr.BrainFor("15551234567@s.whatsapp.net", false); got.name != "only" {
-		t.Errorf("DM routed to %q, want only", got.name)
+	if got := mgr.BrainFor("15551234567@s.whatsapp.net", false); got.ID() != "only" {
+		t.Errorf("DM routed to %q, want only", got.ID())
 	}
 }
 

@@ -9,10 +9,10 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/mdp/qrterminal/v3"
-	qrcode "github.com/skip2/go-qrcode"
 	"go.mau.fi/whatsmeow"
 	"go.mau.fi/whatsmeow/proto/waCommon"
 	"go.mau.fi/whatsmeow/proto/waE2E"
@@ -22,24 +22,62 @@ import (
 	"google.golang.org/protobuf/proto"
 )
 
-// MessageHandler is the callback invoked for each incoming allowed message.
-// mediaPath is non-empty when the message carried a downloaded file.
-// silent=true means the message was untagged in a group: the brain still runs
-// (so it keeps up with the conversation) but no reply is sent.
-type MessageHandler func(ctx context.Context, jid, senderNumber, text string, mediaPath string, silent bool)
+// Messenger is what the bridge needs from a chat network. The real one is
+// WhatsApp; dev mode (--no-whatsapp) swaps in a fake that records outgoing
+// messages, so the dashboard and brains can be tried without pairing a phone.
+type Messenger interface {
+	Connect() error
+	Disconnect()
+	SendMessage(ctx context.Context, jid, text string) error
+	SendChunked(ctx context.Context, jid, text string) error
+	SendPoll(ctx context.Context, jid, question string, options []string, maxSelectable int) (string, error)
+	State() WAState
+	StartPairing() error
+	JoinedGroups(ctx context.Context) ([]GroupInfo, error)
+}
+
+// WAState is the connection state shown on the dashboard.
+type WAState struct {
+	// Mode: disabled, connecting, pairing, qr-expired, connected,
+	// disconnected, logged-out, replaced.
+	Mode      string    `json:"mode"`
+	OwnNumber string    `json:"own_number,omitempty"`
+	Detail    string    `json:"detail,omitempty"`
+	Since     time.Time `json:"since"`
+	QRCode    string    `json:"-"` // current pairing code; served as an image, never as text
+	QRAt      time.Time `json:"-"`
+}
+
+// GroupInfo is a group the bridge account belongs to.
+type GroupInfo struct {
+	JID          string `json:"jid"`
+	Name         string `json:"name"`
+	Participants int    `json:"participants"`
+}
+
+// InboundHandler receives every allowed message.
+type InboundHandler func(ctx context.Context, m Inbound)
+
+// IgnoredHandler is told about chats that wrote but are not allowed, so the
+// dashboard can offer to allow them. It never receives message text.
+type IgnoredHandler func(kind, jid, name, sender, pushName string)
 
 // WhatsAppClient wraps a whatsmeow client.
 type WhatsAppClient struct {
-	client  *whatsmeow.Client
-	cfg     *Config
-	store   *Store
-	handler MessageHandler
-	log     waLog.Logger
+	client    *whatsmeow.Client
+	cfg       func() *Config
+	store     *Store
+	handler   InboundHandler
+	onIgnored IgnoredHandler
+	log       waLog.Logger
+
+	mu    sync.Mutex
+	state WAState
 }
 
 // NewWhatsAppClient creates a client. It does NOT connect — call Connect.
-func NewWhatsAppClient(cfg *Config, store *Store, handler MessageHandler) (*WhatsAppClient, error) {
-	logger := waLog.Stdout("WhatsApp", cfg.LogLevel, true)
+func NewWhatsAppClient(cfg func() *Config, store *Store, handler InboundHandler, onIgnored IgnoredHandler) (*WhatsAppClient, error) {
+	logger := newWaLogger("WhatsApp", cfg().LogLevel)
 
 	deviceStore, err := store.Container.GetFirstDevice(context.Background())
 	if err != nil {
@@ -49,57 +87,105 @@ func NewWhatsAppClient(cfg *Config, store *Store, handler MessageHandler) (*What
 	client := whatsmeow.NewClient(deviceStore, logger)
 
 	wa := &WhatsAppClient{
-		client:  client,
-		cfg:     cfg,
-		store:   store,
-		handler: handler,
-		log:     logger,
+		client:    client,
+		cfg:       cfg,
+		store:     store,
+		handler:   handler,
+		onIgnored: onIgnored,
+		log:       logger,
+		state:     WAState{Mode: "connecting", Since: time.Now()},
 	}
 
 	client.AddEventHandler(wa.eventHandler)
 	return wa, nil
 }
 
-// Connect logs in (QR pairing on first run) and connects to WhatsApp.
+func (wa *WhatsAppClient) setState(mode, detail string) {
+	wa.mu.Lock()
+	defer wa.mu.Unlock()
+	if wa.state.Mode != mode {
+		wa.state.Since = time.Now()
+	}
+	wa.state.Mode, wa.state.Detail = mode, detail
+	if mode != "pairing" {
+		wa.state.QRCode = ""
+	}
+	if id := wa.client.Store.ID; id != nil {
+		wa.state.OwnNumber = id.User
+	}
+}
+
+// State returns the current connection state.
+func (wa *WhatsAppClient) State() WAState {
+	wa.mu.Lock()
+	defer wa.mu.Unlock()
+	return wa.state
+}
+
+// Connect connects with the stored session, or starts QR pairing in the
+// background when there is none. It does not block on pairing: the code is
+// shown on the dashboard (and in the terminal, when there is one).
 func (wa *WhatsAppClient) Connect() error {
 	if wa.client.Store.ID != nil {
+		wa.setState("connecting", "")
 		if err := wa.client.Connect(); err != nil {
 			return fmt.Errorf("connecting: %w", err)
 		}
 		return nil
 	}
+	return wa.StartPairing()
+}
 
-	// No stored session — pair via QR code.
+// StartPairing begins (or restarts) QR pairing for an unpaired bridge.
+func (wa *WhatsAppClient) StartPairing() error {
+	if wa.client.Store.ID != nil {
+		return fmt.Errorf("already paired — this bridge has a stored WhatsApp session")
+	}
+	if wa.client.IsConnected() {
+		wa.client.Disconnect()
+	}
 	qrChan, err := wa.client.GetQRChannel(context.Background())
 	if err != nil {
 		return fmt.Errorf("getting QR channel: %w", err)
 	}
-
 	if err := wa.client.Connect(); err != nil {
 		return fmt.Errorf("connecting: %w", err)
 	}
+	wa.setState("pairing", "Scan the code: WhatsApp → Settings → Linked Devices → Link a Device")
 
-	fmt.Println("Scan the QR code below with WhatsApp on your phone")
-	fmt.Println("(Settings → Linked Devices → Link a Device):")
-	pngPath := filepath.Join(wa.cfg.DataDir, "qrcode.png")
-	for evt := range qrChan {
-		if evt.Event == "code" {
-			qrterminal.GenerateHalfBlock(evt.Code, qrterminal.L, os.Stdout)
-			// Also save a PNG, for when the bridge runs without a terminal.
-			if err := qrcode.WriteFile(evt.Code, qrcode.Medium, 512, pngPath); err != nil {
-				wa.log.Warnf("Failed to write QR PNG to %s: %v", pngPath, err)
-			} else {
-				fmt.Printf("QR code PNG also saved to: %s\n", pngPath)
+	tty := isTerminal(os.Stdout)
+	go func() {
+		for evt := range qrChan {
+			switch evt.Event {
+			case "code":
+				wa.mu.Lock()
+				wa.state.QRCode, wa.state.QRAt = evt.Code, time.Now()
+				wa.mu.Unlock()
+				if tty {
+					fmt.Println("Scan this code with WhatsApp (Settings → Linked Devices → Link a Device),")
+					fmt.Println("or open the dashboard:")
+					qrterminal.GenerateHalfBlock(evt.Code, qrterminal.L, os.Stdout)
+				} else {
+					log.Printf("WhatsApp pairing: new QR code available on the dashboard")
+				}
+			case "success":
+				wa.setState("connected", "Paired")
+			case "timeout":
+				wa.setState("qr-expired", "The pairing code expired — start pairing again from the dashboard")
+			default:
+				log.Printf("WhatsApp pairing: %s", evt.Event)
+				if evt.Error != nil {
+					wa.setState("qr-expired", evt.Error.Error())
+				}
 			}
-		} else {
-			wa.log.Infof("QR channel event: %s", evt.Event)
 		}
-	}
-
-	// Pairing is done; the QR image is no longer useful and is a live
-	// credential until it expires, so don't leave it lying around.
-	_ = os.Remove(pngPath)
+	}()
 	return nil
+}
+
+func isTerminal(f *os.File) bool {
+	st, err := f.Stat()
+	return err == nil && st.Mode()&os.ModeCharDevice != 0
 }
 
 // Disconnect disconnects the client.
@@ -121,7 +207,7 @@ func (wa *WhatsAppClient) SendMessage(ctx context.Context, jid string, text stri
 
 // SendChunked splits text into chunks and sends each as a separate message.
 func (wa *WhatsAppClient) SendChunked(ctx context.Context, jid string, text string) error {
-	chunks := ChunkMessage(text, wa.cfg.MaxChunkSize)
+	chunks := ChunkMessage(text, wa.cfg().MaxChunkSize)
 	for _, chunk := range chunks {
 		if err := wa.SendMessage(ctx, jid, chunk); err != nil {
 			return err
@@ -136,7 +222,7 @@ func (wa *WhatsAppClient) SendChunked(ctx context.Context, jid string, text stri
 
 // SendPoll sends a WhatsApp poll and returns the message ID.
 // maxSelectable is the max options a voter can pick (1 = single choice, 0 = unlimited).
-func (wa *WhatsAppClient) SendPoll(ctx context.Context, jid string, question string, options []string, maxSelectable int) (types.MessageID, error) {
+func (wa *WhatsAppClient) SendPoll(ctx context.Context, jid string, question string, options []string, maxSelectable int) (string, error) {
 	recipient, err := types.ParseJID(jid)
 	if err != nil {
 		return "", fmt.Errorf("parsing JID %q: %w", jid, err)
@@ -146,7 +232,7 @@ func (wa *WhatsAppClient) SendPoll(ctx context.Context, jid string, question str
 	if err != nil {
 		return "", err
 	}
-	return resp.ID, nil
+	return string(resp.ID), nil
 }
 
 // SendReaction sends an emoji reaction to a message.
@@ -168,6 +254,22 @@ func (wa *WhatsAppClient) SendReaction(ctx context.Context, jid string, msgID ty
 	return err
 }
 
+// JoinedGroups lists the groups the bridge account is in.
+func (wa *WhatsAppClient) JoinedGroups(ctx context.Context) ([]GroupInfo, error) {
+	if !wa.client.IsLoggedIn() {
+		return nil, fmt.Errorf("not connected to WhatsApp")
+	}
+	groups, err := wa.client.GetJoinedGroups(ctx)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]GroupInfo, 0, len(groups))
+	for _, g := range groups {
+		out = append(out, GroupInfo{JID: g.JID.String(), Name: g.Name, Participants: len(g.Participants)})
+	}
+	return out, nil
+}
+
 // eventHandler handles all whatsmeow events.
 func (wa *WhatsAppClient) eventHandler(rawEvt interface{}) {
 	switch evt := rawEvt.(type) {
@@ -179,8 +281,18 @@ func (wa *WhatsAppClient) eventHandler(rawEvt interface{}) {
 		}
 	case *events.Connected:
 		wa.log.Infof("Connected to WhatsApp")
+		wa.setState("connected", "")
+	case *events.PairSuccess:
+		wa.log.Infof("Paired with WhatsApp as %s", evt.ID.User)
+		wa.setState("connected", "Paired")
+	case *events.Disconnected:
+		wa.setState("disconnected", "Connection lost — reconnecting automatically")
+	case *events.StreamReplaced:
+		wa.log.Warnf("Another client took over this WhatsApp session")
+		wa.setState("replaced", "Another program is using this WhatsApp session — is a second bridge running?")
 	case *events.LoggedOut:
-		wa.log.Warnf("Logged out from WhatsApp — delete the database and re-pair to reconnect")
+		wa.log.Warnf("Logged out from WhatsApp (reason %v)", evt.Reason)
+		wa.setState("logged-out", "WhatsApp logged this device out. Remove it under Linked Devices on your phone, move bridge.db aside and pair again.")
 	}
 }
 
@@ -256,6 +368,9 @@ func (wa *WhatsAppClient) handleMessage(msg *events.Message) {
 
 	if !wa.isAllowed(senderNumber) {
 		log.Printf("DM from %s: ignored (not in allowed_numbers)", senderNumber)
+		if wa.onIgnored != nil {
+			wa.onIgnored("dm", msg.Info.Chat.String(), "", senderNumber, msg.Info.PushName)
+		}
 		return
 	}
 
@@ -286,7 +401,17 @@ func (wa *WhatsAppClient) handleDMMessage(msg *events.Message, senderNumber stri
 		return
 	}
 
-	go wa.handler(context.Background(), chatJID, senderNumber, text, mediaPath, false)
+	go wa.handler(context.Background(), Inbound{
+		JID: chatJID, Sender: senderNumber, Text: text, Media: mediaList(mediaPath),
+		Source: "whatsapp", At: msg.Info.Timestamp,
+	})
+}
+
+func mediaList(p string) []string {
+	if p == "" {
+		return nil
+	}
+	return []string{p}
 }
 
 // handleGroupMessage processes messages from allowed groups.
@@ -296,6 +421,7 @@ func (wa *WhatsAppClient) handleDMMessage(msg *events.Message, senderNumber stri
 // forwarded. Untagged text still runs through the brain so it stays aware of
 // the conversation, but produces no reply.
 func (wa *WhatsAppClient) handleGroupMessage(msg *events.Message) {
+	cfg := wa.cfg()
 	groupJID := msg.Info.Chat.String()
 	senderNumber := msg.Info.Sender.User
 
@@ -304,10 +430,13 @@ func (wa *WhatsAppClient) handleGroupMessage(msg *events.Message) {
 		groupName = info.Name
 	}
 
-	// Always log unknown groups: this is how you discover a group's JID for
-	// allowed_groups.
+	// Unknown groups are logged and offered on the dashboard: that is how you
+	// find a group's JID to allow it.
 	if !wa.isAllowedGroup(groupJID) {
 		log.Printf("Group message from %s (%q) by %s: ignored (not in allowed_groups)", groupJID, groupName, senderNumber)
+		if wa.onIgnored != nil {
+			wa.onIgnored("group", groupJID, groupName, senderNumber, msg.Info.PushName)
+		}
 		return
 	}
 
@@ -340,8 +469,8 @@ func (wa *WhatsAppClient) handleGroupMessage(msg *events.Message) {
 		}
 	}
 
-	textMatches := matchesTrigger(text, wa.cfg.Triggers)
-	captionMatches := matchesTrigger(attachmentCaption, wa.cfg.Triggers)
+	textMatches := cfg.Triggers.Matches(text)
+	captionMatches := cfg.Triggers.Matches(attachmentCaption)
 	isTagged := hasFile || textMatches || captionMatches || wa.isBotMentioned(msg.Message) || isForwarded
 
 	// Untagged plain text: run the brain, send nothing.
@@ -350,7 +479,7 @@ func (wa *WhatsAppClient) handleGroupMessage(msg *events.Message) {
 	if captionMatches && !textMatches {
 		text = attachmentCaption
 	}
-	text = stripTriggers(text, wa.cfg.Triggers)
+	text = cfg.Triggers.Strip(text)
 
 	if ext := msg.Message.GetExtendedTextMessage(); ext != nil {
 		if replyContext := extractReplyContext(ext.GetContextInfo()); replyContext != "" {
@@ -360,7 +489,7 @@ func (wa *WhatsAppClient) handleGroupMessage(msg *events.Message) {
 
 	mediaPath, caption := wa.downloadAttachment(msg, groupJID)
 	if caption != "" {
-		caption = stripTriggers(caption, wa.cfg.Triggers)
+		caption = cfg.Triggers.Strip(caption)
 		if text == "" {
 			text = caption
 		} else if caption != text {
@@ -373,7 +502,10 @@ func (wa *WhatsAppClient) handleGroupMessage(msg *events.Message) {
 	}
 
 	log.Printf("Group message from %s (%q) by %s: processing (silent=%v)", groupJID, groupName, senderNumber, silent)
-	go wa.handler(context.Background(), groupJID, senderNumber, text, mediaPath, silent)
+	go wa.handler(context.Background(), Inbound{
+		JID: groupJID, Sender: senderNumber, Text: text, Media: mediaList(mediaPath),
+		Silent: silent, Source: "whatsapp", At: msg.Info.Timestamp,
+	})
 }
 
 // downloadAttachment downloads whichever attachment the message carries and
@@ -412,14 +544,32 @@ func (wa *WhatsAppClient) downloadAttachment(msg *events.Message, chatJID string
 }
 
 // mediaPath builds a safe destination path inside MediaDir. The base name is
-// sanitised so a hostile filename cannot escape the media directory.
+// sanitised so a hostile filename cannot escape the media directory. An
+// existing file is never overwritten: two documents called "scan.pdf" both
+// survive.
 func (wa *WhatsAppClient) mediaPath(name string) string {
+	return safeMediaPath(wa.cfg().MediaDir, name)
+}
+
+func safeMediaPath(dir, name string) string {
 	name = filepath.Base(filepath.Clean(name))
 	name = strings.TrimLeft(name, ".")
 	if name == "" || name == "/" {
 		name = "file"
 	}
-	return filepath.Join(wa.cfg.MediaDir, name)
+	p := filepath.Join(dir, name)
+	if _, err := os.Lstat(p); err != nil {
+		return p
+	}
+	ext := filepath.Ext(name)
+	stem := strings.TrimSuffix(name, ext)
+	for i := 2; i < 1000; i++ {
+		alt := filepath.Join(dir, fmt.Sprintf("%s-%d%s", stem, i, ext))
+		if _, err := os.Lstat(alt); err != nil {
+			return alt
+		}
+	}
+	return filepath.Join(dir, fmt.Sprintf("%s-%d%s", stem, time.Now().UnixNano(), ext))
 }
 
 func (wa *WhatsAppClient) downloadImage(img *waE2E.ImageMessage, msgID types.MessageID) (string, error) {
@@ -526,13 +676,16 @@ func (wa *WhatsAppClient) downloadVideo(vid *waE2E.VideoMessage, msgID types.Mes
 	return path, nil
 }
 
-// isAllowed reports whether the phone number is in the DM allowlist.
-// An empty allowlist allows everyone — see the security notes in the README.
+// isAllowed reports whether the phone number may DM the bridge.
 func (wa *WhatsAppClient) isAllowed(number string) bool {
-	if len(wa.cfg.AllowedNumbers) == 0 {
-		return true
+	return numberAllowed(wa.cfg(), number)
+}
+
+func numberAllowed(cfg *Config, number string) bool {
+	if len(cfg.AllowedNumbers) == 0 {
+		return cfg.AllowsAnyDM()
 	}
-	for _, n := range wa.cfg.AllowedNumbers {
+	for _, n := range cfg.AllowedNumbers {
 		if n == number {
 			return true
 		}
@@ -543,49 +696,12 @@ func (wa *WhatsAppClient) isAllowed(number string) bool {
 // isAllowedGroup reports whether the group JID is in allowed_groups.
 // Unlike DMs, groups are deny-by-default: an empty list means no groups.
 func (wa *WhatsAppClient) isAllowedGroup(jid string) bool {
-	for _, g := range wa.cfg.AllowedGroups {
+	for _, g := range wa.cfg().AllowedGroups {
 		if g == jid {
 			return true
 		}
 	}
 	return false
-}
-
-// matchesTrigger reports whether text contains any configured trigger keyword,
-// matched case-insensitively.
-func matchesTrigger(text string, triggers []string) bool {
-	if text == "" {
-		return false
-	}
-	lower := strings.ToLower(text)
-	for _, t := range triggers {
-		if t == "" {
-			continue
-		}
-		if strings.Contains(lower, strings.ToLower(t)) {
-			return true
-		}
-	}
-	return false
-}
-
-// stripTriggers removes every occurrence of every trigger keyword from text,
-// case-insensitively, and trims the result.
-func stripTriggers(text string, triggers []string) string {
-	for _, t := range triggers {
-		if t == "" {
-			continue
-		}
-		lowerT := strings.ToLower(t)
-		for {
-			idx := strings.Index(strings.ToLower(text), lowerT)
-			if idx < 0 {
-				break
-			}
-			text = text[:idx] + text[idx+len(t):]
-		}
-	}
-	return strings.TrimSpace(text)
 }
 
 // isBotMentioned reports whether the bridge's own JID appears in the message's
@@ -699,4 +815,72 @@ func extractText(msg *waE2E.Message) string {
 		return ext.GetText()
 	}
 	return ""
+}
+
+// ── dev mode ─────────────────────────────────────────────────────────────
+
+// devMessenger stands in for WhatsApp in --no-whatsapp mode. Outgoing
+// messages are kept in memory and shown on the dashboard; incoming ones are
+// injected through the dev API.
+type devMessenger struct {
+	cfg    func() *Config
+	mu     sync.Mutex
+	outbox []DevMessage
+}
+
+// DevMessage is one message the bridge "sent" in dev mode.
+type DevMessage struct {
+	TS   time.Time `json:"ts"`
+	JID  string    `json:"jid"`
+	Text string    `json:"text"`
+	Poll []string  `json:"poll,omitempty"`
+}
+
+func (d *devMessenger) Connect() error { return nil }
+func (d *devMessenger) Disconnect()    {}
+func (d *devMessenger) State() WAState {
+	return WAState{Mode: "disabled", Detail: "Dev mode (--no-whatsapp): messages are simulated"}
+}
+func (d *devMessenger) StartPairing() error {
+	return fmt.Errorf("WhatsApp is disabled in dev mode")
+}
+func (d *devMessenger) JoinedGroups(context.Context) ([]GroupInfo, error) { return nil, nil }
+
+func (d *devMessenger) record(m DevMessage) {
+	m.TS = time.Now()
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	d.outbox = append(d.outbox, m)
+	if len(d.outbox) > 200 {
+		d.outbox = d.outbox[len(d.outbox)-200:]
+	}
+	log.Printf("[dev] → %s: %s", m.JID, truncate(m.Text, 200))
+}
+
+func (d *devMessenger) SendMessage(_ context.Context, jid, text string) error {
+	d.record(DevMessage{JID: jid, Text: text})
+	return nil
+}
+
+func (d *devMessenger) SendChunked(ctx context.Context, jid, text string) error {
+	for _, c := range ChunkMessage(text, d.cfg().MaxChunkSize) {
+		d.record(DevMessage{JID: jid, Text: c})
+	}
+	return nil
+}
+
+func (d *devMessenger) SendPoll(_ context.Context, jid, q string, opts []string, _ int) (string, error) {
+	d.record(DevMessage{JID: jid, Text: q, Poll: opts})
+	return fmt.Sprintf("dev-poll-%d", time.Now().UnixNano()), nil
+}
+
+// Outbox returns the recorded messages, newest first.
+func (d *devMessenger) Outbox() []DevMessage {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	out := make([]DevMessage, 0, len(d.outbox))
+	for i := len(d.outbox) - 1; i >= 0; i-- {
+		out = append(out, d.outbox[i])
+	}
+	return out
 }

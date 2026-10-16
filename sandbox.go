@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bufio"
 	"crypto/rand"
 	"encoding/hex"
 	"fmt"
@@ -9,6 +10,7 @@ import (
 	"runtime"
 	"sort"
 	"strings"
+	"sync"
 )
 
 // sandboxExecPath is the macOS sandbox wrapper used for brain spawns.
@@ -26,11 +28,22 @@ const sandboxExecPath = "/usr/bin/sandbox-exec"
 // notes and files. Add anything else that must stay unreadable to
 // sandbox.deny_paths in config.json.
 type SandboxProfiler struct {
-	// workDirs maps brain name → work dir, so each profile can deny the others.
+	mu sync.RWMutex
+
+	enabled bool
+
+	// workDirs maps brain id → work dir, so each profile can deny the others.
 	workDirs map[string]string
 
 	// dataDir is the bridge's runtime dir, denied wholesale except for media.
-	dataDir string
+	dataDir  string
+	mediaDir string
+
+	// credsDir holds per-brain credential files; see SandboxConfig.CredentialsDir.
+	credsDir string
+
+	// gitConfig is "read" or "deny".
+	gitConfig string
 
 	// extraDeny and extraAllow come from config.
 	extraDeny  []string
@@ -39,12 +52,38 @@ type SandboxProfiler struct {
 
 // NewSandboxProfiler builds a profiler for the configured brains.
 func NewSandboxProfiler(workDirs map[string]string, cfg *Config) *SandboxProfiler {
-	return &SandboxProfiler{
-		workDirs:   workDirs,
-		dataDir:    cfg.DataDir,
-		extraDeny:  cfg.Sandbox.DenyPaths,
-		extraAllow: cfg.Sandbox.AllowPaths,
+	sp := &SandboxProfiler{}
+	sp.Update(workDirs, cfg)
+	return sp
+}
+
+// Update replaces the brain set and settings. Profiles are written per run,
+// so the next run of every brain picks the change up.
+func (sp *SandboxProfiler) Update(workDirs map[string]string, cfg *Config) {
+	wd := make(map[string]string, len(workDirs))
+	for k, v := range workDirs {
+		wd[k] = v
 	}
+	sp.mu.Lock()
+	defer sp.mu.Unlock()
+	sp.enabled = cfg.Sandbox.Enabled
+	sp.workDirs = wd
+	sp.dataDir = cfg.DataDir
+	sp.mediaDir = cfg.MediaDir
+	if sp.mediaDir == "" && cfg.DataDir != "" {
+		sp.mediaDir = filepath.Join(cfg.DataDir, "media")
+	}
+	sp.credsDir = cfg.Sandbox.CredentialsDir
+	sp.gitConfig = cfg.Sandbox.GitConfig
+	sp.extraDeny = append([]string(nil), cfg.Sandbox.DenyPaths...)
+	sp.extraAllow = append([]string(nil), cfg.Sandbox.AllowPaths...)
+}
+
+// Enabled reports whether brain spawns should be sandboxed.
+func (sp *SandboxProfiler) Enabled() bool {
+	sp.mu.RLock()
+	defer sp.mu.RUnlock()
+	return sp.enabled
 }
 
 // defaultDenySubpaths are home-relative directories no brain should read.
@@ -58,6 +97,8 @@ var defaultDenySubpaths = []string{
 	".aws",
 	".config/gh",
 	".config/gcloud",
+	".config/rclone",
+	".config/whatsapp-claude-bridge",
 	"Documents",
 	"Downloads",
 	"Desktop",
@@ -80,15 +121,16 @@ var defaultDenySubpaths = []string{
 // defaultDenyLiterals are individual home-relative files to deny.
 var defaultDenyLiterals = []string{
 	".claude/history.jsonl",
-	".gitconfig",
 	".git-credentials",
 	".netrc",
 	".zsh_history",
 	".bash_history",
 }
 
-// Profile returns the sandbox profile source for the named brain.
-func (sp *SandboxProfiler) Profile(brainName string) string {
+// Profile returns the sandbox profile source for the brain with this id.
+func (sp *SandboxProfiler) Profile(brainID string) string {
+	sp.mu.RLock()
+	defer sp.mu.RUnlock()
 	home := os.Getenv("HOME")
 
 	var b strings.Builder
@@ -96,8 +138,8 @@ func (sp *SandboxProfiler) Profile(brainName string) string {
 
 	// ── other brains' working trees ──────────────────────────────────────
 	others := make([]string, 0, len(sp.workDirs))
-	for name, dir := range sp.workDirs {
-		if name != brainName && dir != "" {
+	for id, dir := range sp.workDirs {
+		if id != brainID && dir != "" {
 			others = append(others, dir)
 		}
 	}
@@ -121,25 +163,43 @@ func (sp *SandboxProfiler) Profile(brainName string) string {
 	}
 	b.WriteString("\n")
 
+	// ── git configuration ────────────────────────────────────────────────
+	// Reading git config lets a brain commit in its own folder (name, email,
+	// signing settings). Writing it would let a brain change how *you* use
+	// git, so that stays denied. Credentials stay denied either way.
+	gitFiles := gitConfigChain(home)
+	if sp.gitConfig == "deny" {
+		b.WriteString(";; Git configuration (denied by sandbox.git_config)\n")
+		for _, f := range gitFiles {
+			fmt.Fprintf(&b, "(deny file-read* (literal %q))\n", f)
+		}
+	} else {
+		b.WriteString(";; Git configuration: readable, never writable\n")
+		for _, f := range gitFiles {
+			fmt.Fprintf(&b, "(deny file-write* (literal %q))\n", f)
+		}
+		fmt.Fprintf(&b, "(deny file-write* (subpath %q))\n", filepath.Join(home, ".config", "git"))
+	}
+	b.WriteString("\n")
+
 	// ── bridge runtime dir ───────────────────────────────────────────────
-	// The DB holds every chat's session IDs and poll votes; brains have no
-	// business reading it. Media is the shared inbound staging dir, so it is
-	// re-allowed below.
+	// The DB holds every chat's session IDs and poll votes; the dashboard
+	// token and backup credentials live here too. Media is the shared inbound
+	// staging dir, so it is re-allowed below.
 	if sp.dataDir != "" {
 		b.WriteString(";; Bridge runtime data (media staging re-allowed below)\n")
 		fmt.Fprintf(&b, "(deny file-read* (subpath %q))\n", sp.dataDir)
 		fmt.Fprintf(&b, "(deny file-write* (subpath %q))\n", sp.dataDir)
-		mediaDir := filepath.Join(sp.dataDir, "media")
-		fmt.Fprintf(&b, "(allow file-read* (subpath %q))\n", mediaDir)
-		fmt.Fprintf(&b, "(allow file-write* (subpath %q))\n", mediaDir)
-
-		// Calendar credentials are per brain: <data_dir>/google_calendar_*_<brain>.json.
-		// A brain may read its own pair and write its own token back on refresh.
-		creds := filepath.Join(sp.dataDir, "google_calendar_credentials_"+brainName+".json")
-		token := filepath.Join(sp.dataDir, "google_calendar_token_"+brainName+".json")
-		fmt.Fprintf(&b, "(allow file-read* (literal %q))\n", creds)
-		fmt.Fprintf(&b, "(allow file-read* (literal %q))\n", token)
-		fmt.Fprintf(&b, "(allow file-write* (literal %q))\n", token)
+		fmt.Fprintf(&b, "(allow file-read* (subpath %q))\n", sp.mediaDir)
+		fmt.Fprintf(&b, "(allow file-write* (subpath %q))\n", sp.mediaDir)
+		writeCalendarAllows(&b, sp.dataDir, brainID)
+		b.WriteString("\n")
+	}
+	if sp.credsDir != "" {
+		b.WriteString(";; Shared credentials dir: only this brain's own calendar files\n")
+		fmt.Fprintf(&b, "(deny file-read* (subpath %q))\n", sp.credsDir)
+		fmt.Fprintf(&b, "(deny file-write* (subpath %q))\n", sp.credsDir)
+		writeCalendarAllows(&b, sp.credsDir, brainID)
 		b.WriteString("\n")
 	}
 
@@ -160,12 +220,67 @@ func (sp *SandboxProfiler) Profile(brainName string) string {
 		b.WriteString("\n")
 	}
 
+	// ── the brain's own folder ───────────────────────────────────────────
+	// Last, so it wins over any deny above: a brain always reaches its own
+	// files, even when its folder sits inside a default-denied directory.
+	if own := sp.workDirs[brainID]; own != "" {
+		b.WriteString(";; This brain's own folder\n")
+		fmt.Fprintf(&b, "(allow file-read* (subpath %q))\n", own)
+		fmt.Fprintf(&b, "(allow file-write* (subpath %q))\n", own)
+	}
+
 	return b.String()
+}
+
+// writeCalendarAllows re-allows a brain's own calendar credential pair in dir:
+// read both, and write the token back on refresh.
+func writeCalendarAllows(b *strings.Builder, dir, brainID string) {
+	creds := filepath.Join(dir, "google_calendar_credentials_"+brainID+".json")
+	token := filepath.Join(dir, "google_calendar_token_"+brainID+".json")
+	fmt.Fprintf(b, "(allow file-read* (literal %q))\n", creds)
+	fmt.Fprintf(b, "(allow file-read* (literal %q))\n", token)
+	fmt.Fprintf(b, "(allow file-write* (literal %q))\n", token)
+}
+
+// gitConfigChain returns ~/.gitconfig plus every file it includes
+// ([include] / [includeIf] path = …), one level deep.
+func gitConfigChain(home string) []string {
+	main := filepath.Join(home, ".gitconfig")
+	out := []string{main}
+	f, err := os.Open(main)
+	if err != nil {
+		return out
+	}
+	defer f.Close()
+	inInclude := false
+	sc := bufio.NewScanner(f)
+	for sc.Scan() {
+		line := strings.TrimSpace(sc.Text())
+		if strings.HasPrefix(line, "[") {
+			sec := strings.ToLower(line)
+			inInclude = strings.HasPrefix(sec, "[include]") || strings.HasPrefix(sec, "[includeif")
+			continue
+		}
+		if !inInclude {
+			continue
+		}
+		k, v, ok := strings.Cut(line, "=")
+		if !ok || strings.TrimSpace(strings.ToLower(k)) != "path" {
+			continue
+		}
+		p := strings.Trim(strings.TrimSpace(v), `"`)
+		p = expandHome(p, home)
+		if !filepath.IsAbs(p) {
+			p = filepath.Join(home, p)
+		}
+		out = append(out, p)
+	}
+	return out
 }
 
 // Write renders the profile for a brain into a private temp file and returns
 // its path. The caller unlinks the file once the spawned process exits.
-func (sp *SandboxProfiler) Write(brainName string) (string, error) {
+func (sp *SandboxProfiler) Write(brainID string) (string, error) {
 	if runtime.GOOS != "darwin" {
 		return "", fmt.Errorf("sandbox-exec is macOS-only, got %s", runtime.GOOS)
 	}
@@ -178,9 +293,9 @@ func (sp *SandboxProfiler) Write(brainName string) (string, error) {
 		return "", fmt.Errorf("rand: %w", err)
 	}
 
-	name := fmt.Sprintf("wcb-brain-%s-%s.sb", brainName, hex.EncodeToString(buf))
+	name := fmt.Sprintf("wcb-brain-%s-%s.sb", brainID, hex.EncodeToString(buf))
 	path := filepath.Join(os.TempDir(), name)
-	if err := os.WriteFile(path, []byte(sp.Profile(brainName)), 0o600); err != nil {
+	if err := os.WriteFile(path, []byte(sp.Profile(brainID)), 0o600); err != nil {
 		return "", fmt.Errorf("write profile: %w", err)
 	}
 	return path, nil

@@ -1,0 +1,122 @@
+package main
+
+import (
+	"encoding/json"
+	"errors"
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+)
+
+func TestConfigStoreUpdateWritesAtomicallyAndKeepsTilde(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	path := writeConfig(t, `{"data_dir":"~/data","allowed_numbers":["15551234567"]}`)
+	cs, err := OpenConfigStore(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := filepath.Join(home, "data"); cs.Get().DataDir != want {
+		t.Fatalf("effective DataDir = %q", cs.Get().DataDir)
+	}
+
+	etag := cs.ETag()
+	restart, err := cs.Update(etag, func(c *Config) error {
+		c.AllowedNumbers = append(c.AllowedNumbers, "15559876543")
+		c.LogLevel = "debug"
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(restart) != 1 || restart[0] != "log_level" {
+		t.Errorf("restart = %v, want [log_level]", restart)
+	}
+	data, _ := os.ReadFile(path)
+	if !strings.Contains(string(data), `"~/data"`) {
+		t.Error("the file must keep ~ as written, not the expanded path")
+	}
+	if st, _ := os.Stat(path); st.Mode().Perm() != 0o600 {
+		t.Errorf("config mode = %v, want 0600", st.Mode().Perm())
+	}
+	if _, err := os.Stat(path + ".bak"); err != nil {
+		t.Error("the previous version should be kept as .bak")
+	}
+	if got := cs.Get().AllowedNumbers; len(got) != 2 {
+		t.Errorf("effective config not updated: %v", got)
+	}
+
+	// A stale etag is a conflict and changes nothing.
+	if _, err := cs.Update(etag, func(c *Config) error { c.Model = "x"; return nil }); !errors.Is(err, ErrConfigConflict) {
+		t.Errorf("stale etag: err = %v, want conflict", err)
+	}
+	// An invalid edit is rejected and changes nothing.
+	if _, err := cs.Update("", func(c *Config) error { c.BrainEffort = "extreme"; return nil }); err == nil {
+		t.Error("invalid effort must be rejected")
+	}
+	if cs.Get().BrainEffort != "" {
+		t.Error("a rejected edit must not apply")
+	}
+}
+
+func TestConfigStoreReportsEnvLockedFields(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("ALLOWED_GROUPS", "120363000000000000@g.us")
+	cs, err := OpenConfigStore(writeConfig(t, `{"allowed_groups":[]}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cs.EnvLocked()["allowed_groups"] != "ALLOWED_GROUPS" {
+		t.Errorf("env locked = %v", cs.EnvLocked())
+	}
+	// Saving never writes the environment's value into the file.
+	if _, err := cs.Update("", func(c *Config) error { c.Model = "sonnet"; return nil }); err != nil {
+		t.Fatal(err)
+	}
+	data, _ := os.ReadFile(cs.Path())
+	var raw map[string]any
+	_ = json.Unmarshal(data, &raw)
+	if g, _ := raw["allowed_groups"].([]any); len(g) != 0 {
+		t.Errorf("environment value leaked into the file: %v", raw["allowed_groups"])
+	}
+}
+
+func TestConfigDefaultsAndLoopbackOnly(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	cfg, err := LoadConfig(writeConfig(t, `{}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.HTTPListen != defaultHTTPListen || !cfg.HTTPEnabled() {
+		t.Errorf("http_listen default = %q", cfg.HTTPListen)
+	}
+	if cfg.Queue.Mode != "queue" || cfg.DebounceQuietMS() != defaultQuietMS || !cfg.QueueNotify() || !cfg.DashboardRequiresToken() {
+		t.Error("unexpected defaults")
+	}
+	if !cfg.AllowsAnyDM() {
+		t.Error("without allow_any_dm the original behaviour (empty list = anyone) must stay")
+	}
+	cfg, err = LoadConfig(writeConfig(t, `{"http_listen":"off"}`))
+	if err != nil || cfg.HTTPEnabled() {
+		t.Error(`"off" must disable the HTTP server`)
+	}
+	if _, err := LoadConfig(writeConfig(t, `{"http_listen":"0.0.0.0:8765"}`)); err == nil {
+		t.Error("a non-loopback http_listen must be rejected")
+	}
+}
+
+func TestStarterConfigLoads(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	path := filepath.Join(t.TempDir(), "config.json")
+	if err := ensureConfigFile(path); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := LoadConfig(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !cfg.BrainMode || cfg.AllowsAnyDM() {
+		t.Error("a fresh install must be in brain mode and must not answer strangers")
+	}
+}

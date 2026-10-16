@@ -139,8 +139,9 @@ show() {   # show TITLE < "location<TAB>match" lines
   while IFS=$'\t' read -r loc hit; do report "$loc" "$(mask "$hit")"; done <<<"$out"
 }
 
-# WhatsApp JIDs other than the documented placeholders.
-show 'WhatsApp JIDs' < <(generic '[0-9]{6,}(-[0-9]+)?@(g\.us|s\.whatsapp\.net|lid)' '^(120363000000000000|15551234567|15559876543)@')
+# WhatsApp JIDs other than the documented placeholders (120363000000000000–99,
+# 15551234567, 15559876543).
+show 'WhatsApp JIDs' < <(generic '[0-9]{6,}(-[0-9]+)?@(g\.us|s\.whatsapp\.net|lid)' '^(1203630000000000[0-9][0-9]|15551234567|15559876543)@')
 # Phone numbers: international format, or a long digit run in a JSON string.
 show 'Phone numbers' < <(generic '(\+[1-9][0-9 ]{9,16}[0-9]|"[1-9][0-9]{10,14}")' '^"?\+?1[ -]?555[ -]?(123[ -]?4567|987[ -]?6543)"?$')
 show 'Email addresses' < <(generic '[A-Za-z0-9._%+-]+@[A-Za-z0-9-]+(\.[A-Za-z0-9-]+)*\.[A-Za-z]{2,}' \

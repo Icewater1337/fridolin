@@ -1,0 +1,103 @@
+package main
+
+import (
+	"sync"
+	"testing"
+	"time"
+)
+
+type flushes struct {
+	mu  sync.Mutex
+	got []Inbound
+	at  []time.Time
+}
+
+func (f *flushes) add(m Inbound) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.got = append(f.got, m)
+	f.at = append(f.at, time.Now())
+}
+
+func (f *flushes) n() int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return len(f.got)
+}
+
+func newTestDebouncer(quiet, maxWait time.Duration) (*Debouncer, *flushes) {
+	f := &flushes{}
+	return NewDebouncer(func() time.Duration { return quiet }, func() time.Duration { return maxWait }, f.add), f
+}
+
+func TestDebounceMergesBurstAndKeepsTrigger(t *testing.T) {
+	d, f := newTestDebouncer(80*time.Millisecond, time.Second)
+	base := Inbound{JID: "g@g.us", Sender: "1"}
+	m1 := base
+	m1.Media, m1.Silent = []string{"/m/1.jpg"}, false
+	m2 := base
+	m2.Text, m2.Silent = "untagged chatter", true
+	m3 := base
+	m3.Media = []string{"/m/2.jpg"}
+	d.Add(m1)
+	d.Add(m2)
+	d.Add(m3)
+	waitFor(t, 2*time.Second, "flush", func() bool { return f.n() == 1 })
+	got := f.got[0]
+	if len(got.Media) != 2 || got.Media[0] != "/m/1.jpg" || got.Media[1] != "/m/2.jpg" {
+		t.Errorf("media = %v", got.Media)
+	}
+	if got.Silent {
+		t.Error("a batch with any tagged message must not be silent")
+	}
+	time.Sleep(150 * time.Millisecond)
+	if f.n() != 1 {
+		t.Error("flushed more than once")
+	}
+}
+
+func TestDebounceMaxWaitCapsContinuousInput(t *testing.T) {
+	d, f := newTestDebouncer(50*time.Millisecond, 120*time.Millisecond)
+	start := time.Now()
+	stop := time.After(400 * time.Millisecond)
+loop:
+	for {
+		select {
+		case <-stop:
+			break loop
+		default:
+			d.Add(Inbound{JID: "c", Sender: "1", Text: "x"})
+			time.Sleep(10 * time.Millisecond)
+		}
+	}
+	waitFor(t, time.Second, "flushes", func() bool { return f.n() >= 3 })
+	f.mu.Lock()
+	first := f.at[0].Sub(start)
+	f.mu.Unlock()
+	if first > 200*time.Millisecond {
+		t.Errorf("first flush after %v; max wait is 120ms", first)
+	}
+}
+
+func TestDebounceSeparatesSendersAndChats(t *testing.T) {
+	d, f := newTestDebouncer(40*time.Millisecond, time.Second)
+	d.Add(Inbound{JID: "g", Sender: "1", Text: "a"})
+	d.Add(Inbound{JID: "g", Sender: "2", Text: "b"})
+	d.Add(Inbound{JID: "h", Sender: "1", Text: "c"})
+	waitFor(t, time.Second, "three flushes", func() bool { return f.n() == 3 })
+}
+
+func TestDebounceOffAndDrop(t *testing.T) {
+	d, f := newTestDebouncer(0, 0)
+	d.Add(Inbound{JID: "g", Sender: "1", Text: "now"})
+	if f.n() != 1 {
+		t.Error("quiet 0 must flush immediately")
+	}
+	d2, f2 := newTestDebouncer(50*time.Millisecond, time.Second)
+	d2.Add(Inbound{JID: "g", Sender: "1", Text: "a"})
+	d2.Drop("g")
+	time.Sleep(120 * time.Millisecond)
+	if f2.n() != 0 {
+		t.Error("a dropped batch must not flush")
+	}
+}
