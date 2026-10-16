@@ -181,11 +181,31 @@ def get_service():
             flow = InstalledAppFlow.from_client_secrets_file(str(credentials_file), SCOPES)
             creds = flow.run_local_server(port=0)
 
-        DATA_DIR.mkdir(parents=True, exist_ok=True)
-        token_file.write_text(creds.to_json())
-        token_file.chmod(0o600)
+        save_token(token_file, creds)
 
     return build("calendar", "v3", credentials=creds)
+
+
+def save_token(token_file: Path, creds) -> None:
+    """Write the token back, best effort.
+
+    Inside a brain the sandbox lets this tool write the token file itself and
+    nothing else in its directory: no mkdir (the directory exists, or there
+    would be no token to refresh), no temporary file to rename over it. When
+    the sandbox or the file's mode refuses the write, the old token is left
+    as it was and the next run simply refreshes again, so that is a warning
+    on stderr, and stdout stays the command's one JSON document. (A write
+    that fails halfway, on a full disk say, does lose the token: with no
+    rename allowed, the rewrite cannot be made atomic.)
+    """
+    try:
+        fd = os.open(token_file, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            f.write(creds.to_json())
+        os.chmod(token_file, 0o600)
+    except OSError as e:
+        print(f"warning: could not save the refreshed Google token to {token_file}: {e}. "
+              "The next run refreshes it again.", file=sys.stderr)
 
 
 def target_calendars(requested: str | None, many: bool = False) -> list[str]:
