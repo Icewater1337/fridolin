@@ -24,6 +24,9 @@ func TestSandboxFailsClosed(t *testing.T) {
 		{"sandbox-exec missing", func(sp *SandboxProfiler, home string) {
 			sp.execPath = filepath.Join(home, "no-sandbox-exec")
 		}},
+		{"path that cannot be quoted", func(sp *SandboxProfiler, home string) {
+			sp.extraDeny = append(sp.extraDeny, filepath.Join(home, "two\nlines"))
+		}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -141,8 +144,75 @@ func TestSandboxCommandPassesProfileInline(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := append([]string{"-p", sp.Profile("a"), "/opt/claude"}, "--verbose", "-p", "hi")
+	want := append([]string{"-p", mustProfile(t, sp, "a"), "/opt/claude"}, "--verbose", "-p", "hi")
 	if bin != sp.execPath || !slices.Equal(args, want) {
 		t.Errorf("Command = %s %q, want %s %q", bin, args, sp.execPath, want)
+	}
+}
+
+// mustProfile is sp.Profile(brainID) for profiles that must build.
+func mustProfile(t *testing.T, sp *SandboxProfiler, brainID string) string {
+	t.Helper()
+	profile, err := sp.Profile(brainID)
+	if err != nil {
+		t.Fatalf("Profile(%q): %v", brainID, err)
+	}
+	return profile
+}
+
+// TestSBPLString: paths go into the profile as raw UTF-8 with only backslash
+// and double quote escaped. Go's %q wrote \u00a0 and \u200d escapes the
+// profile reader does not decode, so those rules never matched.
+func TestSBPLString(t *testing.T) {
+	cases := []struct {
+		name, in, want string
+		wantErr        bool
+	}{
+		{"plain", "/Users/you/a", `"/Users/you/a"`, false},
+		{"space", "/Users/you/My Brain", `"/Users/you/My Brain"`, false},
+		{"no-break space", "/Users/you/My\u00a0Brain", "\"/Users/you/My\u00a0Brain\"", false},
+		{"narrow no-break space", "/x/10.00\u202fAM.png", "\"/x/10.00\u202fAM.png\"", false},
+		{"emoji with joiners", "/x/\U0001F468\u200d\U0001F469\u200d\U0001F467", "\"/x/\U0001F468\u200d\U0001F469\u200d\U0001F467\"", false},
+		{"tab", "/x/a\tb", "\"/x/a\tb\"", false},
+		{"double quote", `/x/say "hi"`, `"/x/say \"hi\""`, false},
+		{"backslash", `/x/a\b`, `"/x/a\\b"`, false},
+		{"NUL", "/x/a\x00b", "", true},
+		{"newline", "/x/a\nb", "", true},
+		{"carriage return", "/x/a\rb", "", true},
+		{"invalid UTF-8", "/x/a\xffb", "", true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := sbplString(tc.in)
+			if (err != nil) != tc.wantErr {
+				t.Fatalf("sbplString(%q) error = %v, want error %v", tc.in, err, tc.wantErr)
+			}
+			if got != tc.want {
+				t.Errorf("sbplString(%q) = %s, want %s", tc.in, got, tc.want)
+			}
+		})
+	}
+}
+
+// TestSandboxProfileRefusesUnquotablePaths: a path that cannot be written
+// into the profile fails the whole profile instead of dropping its rule.
+func TestSandboxProfileRefusesUnquotablePaths(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	cases := map[string]func(cfg *Config, dirs map[string]string){
+		"other brain's folder": func(cfg *Config, dirs map[string]string) { dirs["b"] = home + "/b\nc" },
+		"deny path":            func(cfg *Config, dirs map[string]string) { cfg.Sandbox.DenyPaths = []string{home + "/x\x00"} },
+		"allow path":           func(cfg *Config, dirs map[string]string) { cfg.Sandbox.AllowPaths = []string{home + "/x\r"} },
+		"data dir":             func(cfg *Config, dirs map[string]string) { cfg.DataDir = home + "/data\n" },
+	}
+	for name, breakIt := range cases {
+		t.Run(name, func(t *testing.T) {
+			cfg := &Config{DataDir: filepath.Join(home, "data")}
+			dirs := map[string]string{"a": filepath.Join(home, "a"), "b": filepath.Join(home, "b")}
+			breakIt(cfg, dirs)
+			if profile, err := NewSandboxProfiler(dirs, cfg).Profile("a"); err == nil {
+				t.Errorf("Profile succeeded:\n%s", profile)
+			}
+		})
 	}
 }

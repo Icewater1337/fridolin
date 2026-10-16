@@ -90,6 +90,11 @@ func TestSandboxEnforcesProfile(t *testing.T) {
 	layouts := []sandboxLayout{
 		{name: "canonical home", home: func(t *testing.T) string { return canonicalDir(t.TempDir()) },
 			otherBrain: "b", denyDir: "clients"},
+		// No-break spaces, emoji joiners, quotes and backslashes in folder
+		// names. Go's %q quoting broke the first two silently.
+		{name: "unusual characters", home: func(t *testing.T) string { return canonicalDir(t.TempDir()) },
+			otherBrain: "My\u00a0Brain \"q\" \\ \U0001F468\u200d\U0001F469\u200d\U0001F467",
+			denyDir:    "Screenshot 10.00\u202fAM"},
 	}
 	checks := []sandboxCheck{
 		{"own folder read", false, "assistant/a/notes.md", true},

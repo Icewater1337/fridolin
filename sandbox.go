@@ -9,6 +9,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"unicode/utf8"
 )
 
 // sandboxExecPath is the macOS sandbox wrapper used for brain spawns.
@@ -133,13 +134,15 @@ var defaultDenyLiterals = []string{
 	".bash_history",
 }
 
-// Profile returns the sandbox profile source for the brain with this id.
-func (sp *SandboxProfiler) Profile(brainID string) string {
+// Profile returns the sandbox profile source for the brain with this id. It
+// fails when a path cannot be written into the profile: a profile that
+// silently skipped a rule would protect less than the config says.
+func (sp *SandboxProfiler) Profile(brainID string) (string, error) {
 	sp.mu.RLock()
 	defer sp.mu.RUnlock()
 	home := os.Getenv("HOME")
 
-	var b strings.Builder
+	var b profileBuilder
 	b.WriteString("(version 1)\n(allow default)\n\n")
 
 	// ── other brains' working trees ──────────────────────────────────────
@@ -153,8 +156,8 @@ func (sp *SandboxProfiler) Profile(brainID string) string {
 	if len(others) > 0 {
 		b.WriteString(";; Other brains' working trees\n")
 		for _, dir := range others {
-			fmt.Fprintf(&b, "(deny file-read* (subpath %q))\n", dir)
-			fmt.Fprintf(&b, "(deny file-write* (subpath %q))\n", dir)
+			b.add("deny file-read*", "subpath", dir)
+			b.add("deny file-write*", "subpath", dir)
 		}
 		b.WriteString("\n")
 	}
@@ -162,15 +165,15 @@ func (sp *SandboxProfiler) Profile(brainID string) string {
 	// ── home-directory hotspots ──────────────────────────────────────────
 	b.WriteString(";; Cross-session state, credentials, and personal data stores\n")
 	for _, sub := range defaultDenySubpaths {
-		fmt.Fprintf(&b, "(deny file-read* (subpath %q))\n", filepath.Join(home, sub))
+		b.add("deny file-read*", "subpath", filepath.Join(home, sub))
 	}
 	for _, lit := range defaultDenyLiterals {
-		fmt.Fprintf(&b, "(deny file-read* (literal %q))\n", filepath.Join(home, lit))
+		b.add("deny file-read*", "literal", filepath.Join(home, lit))
 	}
 	if !sp.plaudShared {
 		// The Plaud CLI's login, unless plaud.brain_access shares it.
-		fmt.Fprintf(&b, "(deny file-read* (subpath %q))\n", filepath.Join(home, ".plaud"))
-		fmt.Fprintf(&b, "(deny file-write* (subpath %q))\n", filepath.Join(home, ".plaud"))
+		b.add("deny file-read*", "subpath", filepath.Join(home, ".plaud"))
+		b.add("deny file-write*", "subpath", filepath.Join(home, ".plaud"))
 	}
 	b.WriteString("\n")
 
@@ -182,14 +185,14 @@ func (sp *SandboxProfiler) Profile(brainID string) string {
 	if sp.gitConfig == "deny" {
 		b.WriteString(";; Git configuration (denied by sandbox.git_config)\n")
 		for _, f := range gitFiles {
-			fmt.Fprintf(&b, "(deny file-read* (literal %q))\n", f)
+			b.add("deny file-read*", "literal", f)
 		}
 	} else {
 		b.WriteString(";; Git configuration: readable, never writable\n")
 		for _, f := range gitFiles {
-			fmt.Fprintf(&b, "(deny file-write* (literal %q))\n", f)
+			b.add("deny file-write*", "literal", f)
 		}
-		fmt.Fprintf(&b, "(deny file-write* (subpath %q))\n", filepath.Join(home, ".config", "git"))
+		b.add("deny file-write*", "subpath", filepath.Join(home, ".config", "git"))
 	}
 	b.WriteString("\n")
 
@@ -199,18 +202,18 @@ func (sp *SandboxProfiler) Profile(brainID string) string {
 	// staging dir, so it is re-allowed below.
 	if sp.dataDir != "" {
 		b.WriteString(";; Bridge runtime data (media staging re-allowed below)\n")
-		fmt.Fprintf(&b, "(deny file-read* (subpath %q))\n", sp.dataDir)
-		fmt.Fprintf(&b, "(deny file-write* (subpath %q))\n", sp.dataDir)
-		fmt.Fprintf(&b, "(allow file-read* (subpath %q))\n", sp.mediaDir)
-		fmt.Fprintf(&b, "(allow file-write* (subpath %q))\n", sp.mediaDir)
-		writeCalendarAllows(&b, sp.dataDir, brainID)
+		b.add("deny file-read*", "subpath", sp.dataDir)
+		b.add("deny file-write*", "subpath", sp.dataDir)
+		b.add("allow file-read*", "subpath", sp.mediaDir)
+		b.add("allow file-write*", "subpath", sp.mediaDir)
+		b.calendarAllows(sp.dataDir, brainID)
 		b.WriteString("\n")
 	}
 	if sp.credsDir != "" {
 		b.WriteString(";; Shared credentials dir: only this brain's own calendar files\n")
-		fmt.Fprintf(&b, "(deny file-read* (subpath %q))\n", sp.credsDir)
-		fmt.Fprintf(&b, "(deny file-write* (subpath %q))\n", sp.credsDir)
-		writeCalendarAllows(&b, sp.credsDir, brainID)
+		b.add("deny file-read*", "subpath", sp.credsDir)
+		b.add("deny file-write*", "subpath", sp.credsDir)
+		b.calendarAllows(sp.credsDir, brainID)
 		b.WriteString("\n")
 	}
 
@@ -218,15 +221,15 @@ func (sp *SandboxProfiler) Profile(brainID string) string {
 	if len(sp.extraDeny) > 0 {
 		b.WriteString(";; Extra denies from config\n")
 		for _, p := range sp.extraDeny {
-			fmt.Fprintf(&b, "(deny file-read* (subpath %q))\n", p)
-			fmt.Fprintf(&b, "(deny file-write* (subpath %q))\n", p)
+			b.add("deny file-read*", "subpath", p)
+			b.add("deny file-write*", "subpath", p)
 		}
 		b.WriteString("\n")
 	}
 	if len(sp.extraAllow) > 0 {
 		b.WriteString(";; Extra allows from config (override the denies above)\n")
 		for _, p := range sp.extraAllow {
-			fmt.Fprintf(&b, "(allow file-read* (subpath %q))\n", p)
+			b.add("allow file-read*", "subpath", p)
 		}
 		b.WriteString("\n")
 	}
@@ -236,22 +239,64 @@ func (sp *SandboxProfiler) Profile(brainID string) string {
 	// files, even when its folder sits inside a default-denied directory.
 	if own := sp.workDirs[brainID]; own != "" {
 		b.WriteString(";; This brain's own folder\n")
-		fmt.Fprintf(&b, "(allow file-read* (subpath %q))\n", own)
-		fmt.Fprintf(&b, "(allow file-write* (subpath %q))\n", own)
+		b.add("allow file-read*", "subpath", own)
+		b.add("allow file-write*", "subpath", own)
 	}
 
-	return b.String()
+	if b.err != nil {
+		return "", b.err
+	}
+	return b.String(), nil
 }
 
-// writeCalendarAllows re-allows a brain's own calendar credential pair in dir:
+// profileBuilder writes SBPL. Every path goes through add, so each one is
+// quoted the same way; the first path that cannot be quoted is kept in err
+// and fails the whole profile.
+type profileBuilder struct {
+	strings.Builder
+	err error
+}
+
+// add emits "(rule (filter "path"))", e.g. add("deny file-read*", "subpath", dir).
+func (b *profileBuilder) add(rule, filter, path string) {
+	q, err := sbplString(path)
+	if err != nil {
+		if b.err == nil {
+			b.err = err
+		}
+		return
+	}
+	fmt.Fprintf(b, "(%s (%s %s))\n", rule, filter, q)
+}
+
+// calendarAllows re-allows a brain's own calendar credential pair in dir:
 // read both, and write the token back on refresh.
-func writeCalendarAllows(b *strings.Builder, dir, brainID string) {
+func (b *profileBuilder) calendarAllows(dir, brainID string) {
 	creds := filepath.Join(dir, "google_calendar_credentials_"+brainID+".json")
 	token := filepath.Join(dir, "google_calendar_token_"+brainID+".json")
-	fmt.Fprintf(b, "(allow file-read* (literal %q))\n", creds)
-	fmt.Fprintf(b, "(allow file-read* (literal %q))\n", token)
-	fmt.Fprintf(b, "(allow file-write* (literal %q))\n", token)
+	b.add("allow file-read*", "literal", creds)
+	b.add("allow file-read*", "literal", token)
+	b.add("allow file-write*", "literal", token)
 }
+
+// sbplString quotes s as an SBPL string literal. Go's %q is not one: it
+// writes a no-break space as \u00a0 and the joiner inside emoji as \u200d,
+// which the profile reader does not decode, so the rule named a path that
+// does not exist and never matched. Only backslash and double quote need
+// escaping; everything else goes in as UTF-8. A NUL cannot be passed in an
+// argument at all, and line breaks or invalid UTF-8 are refused rather than
+// guessed at.
+func sbplString(s string) (string, error) {
+	if !utf8.ValidString(s) {
+		return "", fmt.Errorf("sandbox path %q is not valid UTF-8", s)
+	}
+	if strings.ContainsAny(s, "\x00\n\r") {
+		return "", fmt.Errorf("sandbox path %q contains a NUL or a line break", s)
+	}
+	return `"` + sbplEscaper.Replace(s) + `"`, nil
+}
+
+var sbplEscaper = strings.NewReplacer(`\`, `\\`, `"`, `\"`)
 
 // gitConfigChain returns ~/.gitconfig plus every file it includes
 // ([include] / [includeIf] path = …), one level deep.
@@ -309,5 +354,9 @@ func (sp *SandboxProfiler) Command(brainID, claudePath string, args []string) (s
 	if err := sp.Available(); err != nil {
 		return "", nil, err
 	}
-	return sp.execPath, append([]string{"-p", sp.Profile(brainID), claudePath}, args...), nil
+	profile, err := sp.Profile(brainID)
+	if err != nil {
+		return "", nil, err
+	}
+	return sp.execPath, append([]string{"-p", profile, claudePath}, args...), nil
 }

@@ -240,7 +240,7 @@ func TestReloadKeepsRunningBrainAndRetiresRemoved(t *testing.T) {
 			}
 		}
 	}
-	if !strings.Contains(mgr.profiler.Profile("a"), filepath.Join(home, "c")) {
+	if !strings.Contains(mustProfile(t, mgr.profiler, "a"), filepath.Join(home, "c")) {
 		t.Error("a's sandbox profile must deny the new brain c")
 	}
 }
