@@ -1,6 +1,6 @@
 module fridolin
 
-go 1.25.0
+go 1.26.0
 
 require (
 	github.com/joho/godotenv v1.5.1
@@ -8,7 +8,7 @@ require (
 	github.com/mdp/qrterminal/v3 v3.2.0
 	github.com/skip2/go-qrcode v0.0.0-20200617195104-da1b6568686e
 	go.mau.fi/whatsmeow v0.0.0-20260730092514-662ad1dc6900
-	golang.org/x/text v0.40.0
+	golang.org/x/text v0.43.0
 	google.golang.org/protobuf v1.36.11
 )
 
@@ -25,11 +25,11 @@ require (
 	github.com/vektah/gqlparser/v2 v2.5.36 // indirect
 	go.mau.fi/libsignal v0.2.2 // indirect
 	go.mau.fi/util v0.9.12-0.20260717235539-f9ffa7eca58d // indirect
-	golang.org/x/crypto v0.54.0 // indirect
+	golang.org/x/crypto v0.58.0 // indirect
 	golang.org/x/exp v0.0.0-20260709172345-9ea1abe57597 // indirect
-	golang.org/x/net v0.57.0 // indirect
-	golang.org/x/sync v0.22.0 // indirect
-	golang.org/x/sys v0.47.0 // indirect
-	golang.org/x/term v0.45.0 // indirect
+	golang.org/x/net v0.61.0 // indirect
+	golang.org/x/sync v0.24.0 // indirect
+	golang.org/x/sys v0.49.0 // indirect
+	golang.org/x/term v0.47.0 // indirect
 	rsc.io/qr v0.2.0 // indirect
 )
