@@ -81,8 +81,10 @@ type Config struct {
 	DBPath   string `json:"db_path,omitempty"`
 	MediaDir string `json:"media_dir,omitempty"`
 
-	// MaxChunkSize is the max characters in one outgoing WhatsApp message
-	// (longer replies are split and numbered). Default 3900.
+	// MaxChunkSize is the most characters (runes) in one outgoing WhatsApp
+	// message, its "[1/3] " numbering included; longer replies are split
+	// and numbered. 0 means the default, 3900; anything else must be at
+	// least minChunkSize.
 	MaxChunkSize int `json:"max_chunk_size,omitempty"`
 
 	// MaxMediaMB is the largest attachment the bridge downloads, in MB.
@@ -386,8 +388,8 @@ func effective(file *Config) (*Config, map[string]string, error) {
 		cfg.WorkDir = home
 	}
 	cfg.WorkDir = expandHome(cfg.WorkDir, home)
-	if cfg.MaxChunkSize <= 0 {
-		cfg.MaxChunkSize = 3900
+	if cfg.MaxChunkSize == 0 {
+		cfg.MaxChunkSize = defaultChunkSize
 	}
 	if cfg.MaxMediaMB == 0 {
 		cfg.MaxMediaMB = defaultMaxMediaMB
@@ -521,6 +523,9 @@ func (cfg *Config) validate() error {
 	}
 	if err := cfg.Sandbox.validate(runtime.GOOS); err != nil {
 		return err
+	}
+	if cfg.MaxChunkSize < minChunkSize {
+		return fmt.Errorf("max_chunk_size %d is too small: use at least %d, or 0 for the default of %d", cfg.MaxChunkSize, minChunkSize, defaultChunkSize)
 	}
 	if cfg.MaxMediaMB < 1 || cfg.MaxMediaMB > maxMaxMediaMB {
 		return fmt.Errorf("max_media_mb must be between 1 and %d, not %d", maxMaxMediaMB, cfg.MaxMediaMB)

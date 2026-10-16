@@ -340,6 +340,45 @@ func TestLoadConfigEnvOverride(t *testing.T) {
 	}
 }
 
+func TestLoadConfigMaxChunkSize(t *testing.T) {
+	// Below 100 the "[i/N] " numbering leaves too little room for text;
+	// such a limit is refused at load time rather than quietly changed.
+	cases := []struct {
+		name, body, env string
+		want            int // 0: the config must be refused
+	}{
+		{"unset means the default", `{}`, "", 3900},
+		{"zero means the default", `{"max_chunk_size":0}`, "", 3900},
+		{"the minimum is allowed", `{"max_chunk_size":100}`, "", 100},
+		{"a larger limit is kept", `{"max_chunk_size":5000}`, "", 5000},
+		{"just below the minimum", `{"max_chunk_size":99}`, "", 0},
+		{"smaller than the numbering", `{"max_chunk_size":5}`, "", 0},
+		{"negative", `{"max_chunk_size":-1}`, "", 0},
+		{"too small from the environment", `{}`, "50", 0},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Setenv("HOME", t.TempDir())
+			if tc.env != "" {
+				t.Setenv("MAX_CHUNK_SIZE", tc.env)
+			}
+			cfg, err := LoadConfig(writeConfig(t, tc.body))
+			if tc.want == 0 {
+				if err == nil || !strings.Contains(err.Error(), "max_chunk_size") {
+					t.Fatalf("expected a max_chunk_size error, got %v", err)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			if cfg.MaxChunkSize != tc.want {
+				t.Errorf("MaxChunkSize = %d, want %d", cfg.MaxChunkSize, tc.want)
+			}
+		})
+	}
+}
+
 func TestExampleConfigIsValid(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 	if runtime.GOOS != "darwin" {

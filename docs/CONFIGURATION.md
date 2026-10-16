@@ -633,8 +633,10 @@ denied to brains by the sandbox. A script that requested a code through
 
 Longest single outgoing message, in characters, the `[1/3] ` numbering
 included. Characters are Unicode code points, so most emoji count as one but
-one with a skin tone or a family emoji counts as several. Default 3900, under
-the 4096 characters commonly given as WhatsApp's limit.
+one with a skin tone or a family emoji counts as several. 0 or unset means the
+default, 3900, which stays under the 4096 characters commonly given as
+WhatsApp's limit. Anything else must be at least 100, so the numbering always
+leaves room for text; the bridge refuses to start with a smaller value.
 
 Longer replies are split and numbered `[1/3]`, `[2/3]`, … They are cut at
 paragraphs first, then lines, sentence ends and spaces, each finer level only

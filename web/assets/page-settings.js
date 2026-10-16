@@ -51,7 +51,7 @@ const SECTIONS = [
       { key: 'queue.notify', type: 'bool', def: true, label: 'Tell people their message is queued', help: 'Sends “⏳ queued” when a tagged message has to wait.' },
       { key: 'debounce.quiet_ms', type: 'int', def: 2000, min: 0, nullable: true, label: 'Gather messages for (ms)', help: 'Messages from the same person within this pause are answered together — several photos plus a question. 0 turns it off.' },
       { key: 'debounce.max_wait_ms', type: 'int', def: 10000, min: 0, nullable: true, label: 'Never gather longer than (ms)' },
-      { key: 'max_chunk_size', type: 'int', def: 3900, min: 100, label: 'Longest single message (characters)', help: 'Longer replies are split and numbered [1/3]. WhatsApp’s limit is about 4096.' },
+      { key: 'max_chunk_size', type: 'int', def: 3900, min: 100, label: 'Longest single message (characters)', help: 'Counted in characters, the [1/3] numbering included; longer replies are split and numbered. At least 100; the default stays under the 4096 commonly given as WhatsApp’s limit.' },
       { key: 'max_media_mb', type: 'int', def: 100, min: 1, max: 2048, label: 'Largest attachment (MB)', help: 'Bigger files are not downloaded, and the sender is told. A download also has two minutes to finish. At most 2048.' },
       { key: 'otp_guard', type: 'bool', label: 'Hold back one-time codes', help: 'After the assistant asked for a code, a message that is only a 4–8 digit number is dropped before the model sees it.' },
       { key: 'otp_markers', type: 'list', label: 'Phrases that ask for a code', placeholder: 'verification code', addLabel: 'Add phrase', help: 'Empty uses the built-in list: 🔐, OTP, 2FA, one-time code, verification code.' },

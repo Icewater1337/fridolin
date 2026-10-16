@@ -120,3 +120,19 @@ func TestStarterConfigLoads(t *testing.T) {
 		t.Error("a fresh install must be in brain mode and must not answer strangers")
 	}
 }
+
+func TestConfigStoreRejectsTooSmallChunkSize(t *testing.T) {
+	// The dashboard asks for at least 100 too, but the server must not rely
+	// on it: a smaller limit would leave no room for the numbering.
+	t.Setenv("HOME", t.TempDir())
+	cs, err := OpenConfigStore(writeConfig(t, `{}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := cs.Update("", func(c *Config) error { c.MaxChunkSize = 50; return nil }); err == nil {
+		t.Fatal("max_chunk_size 50 must be rejected")
+	}
+	if got := cs.Get().MaxChunkSize; got != 3900 {
+		t.Errorf("a rejected edit must not apply: MaxChunkSize = %d", got)
+	}
+}
