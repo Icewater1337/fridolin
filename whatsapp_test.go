@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"sync"
@@ -217,4 +218,60 @@ func TestHandleMessageBroadcastListIsDM(t *testing.T) {
 			t.Errorf("dashboard was offered %v, want the sender's DM chat", tw.ignored)
 		}
 	})
+}
+
+// Every way the messenger sends refuses Status, broadcast lists and
+// channels before it reaches WhatsApp, whatever chat a brain or script
+// names.
+func TestSendRefusesStatusBroadcastAndChannels(t *testing.T) {
+	tw := newTestWhatsApp(t)
+	ctx := context.Background()
+	sends := map[string]func(jid string) error{
+		"SendMessage": func(jid string) error { return tw.SendMessage(ctx, jid, "hello") },
+		"SendChunked": func(jid string) error { return tw.SendChunked(ctx, jid, strings.Repeat("hello ", 2000)) },
+		"SendPoll": func(jid string) error {
+			_, err := tw.SendPoll(ctx, jid, "Lunch?", []string{"Yes", "No"}, 1)
+			return err
+		},
+		"SendReaction": func(jid string) error { return tw.SendReaction(ctx, jid, "3EB0TEST", "👍") },
+	}
+	for _, jid := range []string{"status@broadcast", "status:3@broadcast", "1700000000@broadcast", "broadcast", "120363000000000000@newsletter"} {
+		for name, send := range sends {
+			t.Run(name+" to "+jid, func(t *testing.T) {
+				err := func() (err error) {
+					defer func() {
+						if r := recover(); r != nil {
+							err = fmt.Errorf("reached for WhatsApp: %v", r)
+						}
+					}()
+					return send(jid)
+				}()
+				if !errors.Is(err, errRefusedRecipient) {
+					t.Errorf("err = %v, want a refusal", err)
+				}
+			})
+		}
+	}
+}
+
+func TestCheckRecipient(t *testing.T) {
+	cases := []struct {
+		jid    string
+		refuse bool
+	}{
+		{"status@broadcast", true},
+		{"1700000000@broadcast", true},
+		{"120363000000000000@newsletter", true},
+		{"15551234567@s.whatsapp.net", false},
+		{"15559876543@lid", false},
+		{"120363000000000000@g.us", false},
+	}
+	for _, c := range cases {
+		t.Run(c.jid, func(t *testing.T) {
+			err := checkRecipient(mustJID(t, c.jid))
+			if got := errors.Is(err, errRefusedRecipient); got != c.refuse {
+				t.Errorf("refused = %v (%v), want %v", got, err, c.refuse)
+			}
+		})
+	}
 }

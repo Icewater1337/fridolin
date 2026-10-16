@@ -337,7 +337,8 @@ What the bridge does about it:
 - **DM allowlist.** Only numbers in `allowed_numbers` are answered. Groups are
   deny-by-default: unlisted groups are ignored entirely.
 - **No Status or channels.** WhatsApp Status updates and channels are ignored,
-  so nothing the assistant writes can end up in your public Status.
+  and the bridge refuses to send to Status, broadcast lists or channels, so
+  nothing the assistant writes can end up in your public Status.
 - **Sandbox (macOS).** Each Claude run is wrapped in `sandbox-exec` with reads
   denied to SSH keys, cloud credentials, shell history, browser and mail data,
   your Documents/Downloads/Desktop, other Claude sessions' transcripts, the

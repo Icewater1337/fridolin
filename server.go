@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"log"
 	"net"
 	"net/http"
@@ -65,6 +66,13 @@ func (b *Bridge) httpSend(w http.ResponseWriter, r *http.Request) {
 	}
 	if req.JID == "" || req.Text == "" {
 		http.Error(w, "jid and text are required", http.StatusBadRequest)
+		return
+	}
+	// Refused before sending: a script gets a 400 for its own mistake rather
+	// than a failed send, and dev mode, whose messenger takes any JID,
+	// refuses it too.
+	if _, err := parseRecipient(req.JID); errors.Is(err, errRefusedRecipient) {
+		writeErr(w, http.StatusBadRequest, err.Error())
 		return
 	}
 
