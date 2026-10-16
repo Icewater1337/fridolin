@@ -26,6 +26,12 @@ class CalendarTestCase(unittest.TestCase):
     default = "primary"
 
     def setUp(self):
+        # As if run by hand, unless a test sets the bridge's variables.
+        env = mock.patch.dict(os.environ, {"CALENDAR_TZ": "Europe/Berlin"})
+        env.start()
+        self.addCleanup(env.stop)
+        for name in ("BRIDGE_BRAIN_ID", "BRIDGE_CREDENTIALS_DIR"):
+            os.environ.pop(name, None)
         for name, value in {
             "ALLOWED": list(self.allowed),
             "DEFAULT_CALENDAR": self.default,
@@ -89,6 +95,120 @@ class TokenRefreshTest(TokenTestCase):
         self.assertEqual((code, out, err), (0, "", ""))
         self.assertEqual(self.google.refreshed, 0)
         self.assertEqual(self.token_file.stat().st_mtime_ns, before)
+
+
+class NoInteractiveSignInTest(TokenTestCase):
+    """Commands use the saved token or fail with JSON; they never open a browser."""
+
+    def in_brain(self):
+        patcher = mock.patch.dict(os.environ, {"BRIDGE_BRAIN_ID": self.profile,
+                                               "BRIDGE_CREDENTIALS_DIR": str(self.dir)})
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def assert_json_error(self, *want: str) -> str:
+        code, out, _ = support.run(calendar_tool.get_service)
+        self.assertEqual(code, 1)
+        message = json.loads(out)["error"]
+        for w in want:
+            self.assertIn(w, message)
+        self.assertEqual(self.google.flows, [], "no browser sign-in may start")
+        return message
+
+    def refused(self, error: Exception):
+        self.write_token(expired=True)
+        self.google.refresh_error = error
+
+    def test_failures_in_a_brain_point_to_the_dashboard(self):
+        old_google_auth = self.google.RefreshError("invalid_grant")
+        del old_google_auth.retryable  # releases before the attribute existed
+        cases = {
+            # Disconnect deletes the token but leaves the copied OAuth client.
+            "no token": lambda: None,
+            "revoked or expired sign-in": lambda: self.refused(self.google.RefreshError("invalid_grant")),
+            "a refusal from an older google-auth": lambda: self.refused(old_google_auth),
+            "no refresh token": lambda: self.write_token(expired=True, refresh_token=None),
+            "corrupt token file": lambda: self.token_file.write_text("{not json", encoding="utf-8"),
+        }
+        self.in_brain()
+        for name, arrange in cases.items():
+            with self.subTest(name):
+                self.token_file.unlink(missing_ok=True)
+                self.google.refresh_error = None
+                self.creds_file.write_text("{}", encoding="utf-8")
+                arrange()
+                self.assert_json_error("reconnect the calendar in the dashboard")
+
+    def test_a_refusal_gives_google_s_reason(self):
+        # google-auth raises RefreshError(message, response); only the
+        # message is for people.
+        self.in_brain()
+        self.refused(self.google.RefreshError("invalid_grant: Token has been expired or revoked.",
+                                              {"error": "invalid_grant"}))
+        message = self.assert_json_error("(invalid_grant: Token has been expired or revoked.)")
+        self.assertNotIn("{", message)
+
+    def test_temporary_trouble_is_reported_as_temporary(self):
+        g = self.google
+        cases = [
+            ("a dropped connection", g.TransportError("connection reset"), "Could not reach Google"),
+            # google-auth retries a 5xx or 429 from the token endpoint a few
+            # times, then gives up with a retryable RefreshError.
+            ("a token endpoint outage", g.RefreshError("Service Unavailable", retryable=True),
+             "Google could not refresh the calendar sign-in just now (Service Unavailable)"),
+        ]
+        self.in_brain()
+        for name, error, want in cases:
+            with self.subTest(name):
+                self.refused(error)
+                message = self.assert_json_error(want, "try again")
+                self.assertNotIn("reconnect", message)
+
+    def test_by_hand_it_points_to_auth(self):
+        self.creds_file.write_text("{}", encoding="utf-8")
+        self.assert_json_error("calendar_tool.py --profile work auth")
+
+
+class ReconnectHintTest(CalendarTestCase):
+    def test_names_buttons_the_dashboard_shows(self):
+        # The brain's Calendar card offers "Connect Google Calendar" until it
+        # is connected, and "Sign in again" once Google refuses the sign-in.
+        js = (support.TOOLS_DIR.parent / "web" / "assets" / "calendar.js").read_text(encoding="utf-8")
+        with mock.patch.dict(os.environ, {"BRIDGE_BRAIN_ID": "work"}):
+            hint = calendar_tool.reconnect_hint()
+        for label in ("Sign in again", "Connect Google Calendar"):
+            with self.subTest(label):
+                self.assertIn(label, hint)
+                self.assertIn(f"'{label}'", js, "the dashboard has no such button")
+
+
+class AuthCommandTest(TokenTestCase):
+    def auth(self) -> tuple[int, dict, str]:
+        code, out, err = support.run_main(calendar_tool, ["--profile", self.profile, "auth"])
+        return code, json.loads(out), err
+
+    def test_signs_in_and_saves_a_private_token(self):
+        self.creds_file.write_text("{}", encoding="utf-8")
+        code, out, err = self.auth()
+        self.assertEqual(code, 0, err)
+        self.assertEqual(out, {"authorized": True, "token_file": str(self.token_file)})
+        self.assertEqual(len(self.google.flows), 1)
+        self.assertIn("Please visit this URL", err, "the sign-in prompt goes to stderr")
+        self.assertEqual(json.loads(self.token_file.read_text())["token"], "consented")
+        self.assertEqual(self.token_file.stat().st_mode & 0o777, 0o600)
+
+    def test_refuses_inside_a_brain(self):
+        self.creds_file.write_text("{}", encoding="utf-8")
+        with mock.patch.dict(os.environ, {"BRIDGE_BRAIN_ID": self.profile}):
+            code, out, _ = self.auth()
+        self.assertEqual(code, 1)
+        self.assertIn("dashboard", out["error"])
+        self.assertEqual(self.google.flows, [])
+
+    def test_needs_the_oauth_client(self):
+        code, out, _ = self.auth()
+        self.assertEqual(code, 1)
+        self.assertIn("Credentials file not found", out["error"])
 
 
 def sandbox_exec_works() -> bool:

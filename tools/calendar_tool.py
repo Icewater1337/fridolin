@@ -18,18 +18,28 @@ BRIDGE_CALENDAR_DEFAULT), so inside a brain no flags are needed:
 
 --calendar-id picks one of the allowed calendars; anything else is refused.
 
-Profiles
---------
-A profile is just a name. Each one gets its own OAuth credentials and token in
-the bridge data directory, which keeps separate calendars separate:
+Without the dashboard
+---------------------
+The tool also works on its own, outside a brain. A profile is just a name;
+each one gets its own OAuth client and token in the bridge data directory,
+which keeps separate calendars separate:
 
     <data_dir>/google_calendar_credentials_<profile>.json   (you download this)
-    <data_dir>/google_calendar_token_<profile>.json         (created on first auth)
+    <data_dir>/google_calendar_token_<profile>.json         (written by auth)
 
 Name profiles after your brains ("personal", "work", …) so the sandbox profile
 generated for a brain grants it exactly its own calendar files. With no
 --profile, the unsuffixed google_calendar_credentials.json / _token.json pair
 is used.
+
+    1. console.cloud.google.com → new project → enable the Google Calendar API
+    2. APIs & Services → Credentials → Create OAuth 2.0 Client ID (Desktop app)
+    3. Download the JSON to the credentials path above
+    4. calendar_tool.py --profile personal auth   (a browser opens for consent)
+
+Only auth ever opens a browser, and it refuses to run inside a brain, where
+nobody is at the screen. When a brain's sign-in is revoked or expires, every
+command prints a JSON error saying to reconnect in the dashboard instead.
 
 Usage
 -----
@@ -40,13 +50,6 @@ Usage
     calendar_tool.py --profile personal free --date 2026-01-06
     calendar_tool.py --profile personal delete --event-id EVENT_ID
 
-Setup
------
-    1. console.cloud.google.com → new project → enable the Google Calendar API
-    2. APIs & Services → Credentials → Create OAuth 2.0 Client ID (Desktop app)
-    3. Download the JSON to the credentials path above
-    4. Run any command once — a browser opens for consent and the token is saved
-
 Timezone
 --------
 Defaults to the system timezone. Override per run with --timezone, or globally
@@ -56,11 +59,13 @@ with the CALENDAR_TZ environment variable (e.g. CALENDAR_TZ=Europe/Berlin).
 from __future__ import annotations
 
 import argparse
+import contextlib
 import json
 import os
 import sys
 from datetime import datetime, date, timedelta
 from pathlib import Path
+from typing import NoReturn
 from zoneinfo import ZoneInfo
 
 SCOPES = ["https://www.googleapis.com/auth/calendar"]
@@ -81,7 +86,7 @@ _profile: str | None = None
 _timezone: ZoneInfo | None = None
 
 
-def err(msg: str) -> None:
+def err(msg: str) -> NoReturn:
     print(json.dumps({"error": msg}))
     sys.exit(1)
 
@@ -142,67 +147,108 @@ def credential_paths() -> tuple[Path, Path]:
     )
 
 
+def in_brain() -> bool:
+    """Whether the bridge started this tool for a brain, with no one at a browser."""
+    return bool(os.environ.get("BRIDGE_BRAIN_ID") or os.environ.get("BRIDGE_CREDENTIALS_DIR"))
+
+
+def reconnect_hint() -> str:
+    if in_brain():
+        # A brain whose sign-in Google refused shows "Sign in again"; one
+        # that was never connected, or was disconnected, shows "Connect".
+        return ("Ask the owner to reconnect the calendar in the dashboard: Brains → this brain → "
+                "Calendar → Sign in again (or Connect Google Calendar).")
+    profile = f" --profile {_profile}" if _profile else ""
+    return f"Sign in with: calendar_tool.py{profile} auth"
+
+
+def refresh_failure(e: Exception) -> str:
+    """The error for a RefreshError, which is not always a revoked sign-in.
+
+    When Google's token endpoint keeps answering 5xx or 429, google-auth
+    retries a few times and then raises RefreshError with retryable set
+    (older releases have no such attribute). Sending the owner off to
+    reconnect over an outage would be wrong, so only a refusal gets the hint.
+    """
+    # args[0] is Google's message; str(e) would also print the raw response.
+    reason = e.args[0] if e.args else e
+    if getattr(e, "retryable", False):
+        return (f"Google could not refresh the calendar sign-in just now ({reason}). "
+                "This is usually temporary; try again in a minute.")
+    return (f"Google refused to refresh the calendar sign-in ({reason}): it was revoked or has "
+            f"expired. {reconnect_hint()}")
+
+
+def missing_package(e: ImportError) -> NoReturn:
+    err(
+        f"Missing Python package: {e}. Install the calendar extras with:\n"
+        "  pip3 install -r tools/requirements.txt"
+    )
+
+
 def get_service():
-    """Authenticate and return the Google Calendar API service."""
+    """Return the Google Calendar API service, using the saved token.
+
+    This never starts an interactive sign-in. Inside a brain nobody is at the
+    browser it would open, the sandbox would not let it save the result, and
+    the command would hang until the Bash tool gives up. Every way the token
+    can fail ends in a JSON error that says how to reconnect instead.
+    """
     try:
         from google.oauth2.credentials import Credentials
+        from google.auth.exceptions import RefreshError, TransportError
         from google.auth.transport.requests import Request
-        from google_auth_oauthlib.flow import InstalledAppFlow
         from googleapiclient.discovery import build
     except ImportError as e:
-        err(
-            f"Missing Python package: {e}. Install the calendar extras with:\n"
-            "  pip3 install -r tools/requirements.txt"
-        )
+        missing_package(e)
 
-    credentials_file, token_file = credential_paths()
-
-    creds = None
-    if token_file.exists():
+    _, token_file = credential_paths()
+    if not token_file.exists():
+        err(f"Google Calendar is not connected: there is no token at {token_file}. {reconnect_hint()}")
+    try:
         creds = Credentials.from_authorized_user_file(str(token_file), SCOPES)
+    except (OSError, ValueError) as e:
+        err(f"Cannot read the Google token {token_file}: {e}. {reconnect_hint()}")
 
-    if not creds or not creds.valid:
-        if creds and creds.expired and creds.refresh_token:
-            try:
-                creds.refresh(Request())
-            except Exception:
-                creds = None  # refresh failed; fall through to a fresh consent
-
-        if not creds:
-            if not credentials_file.exists():
-                err(
-                    f"Credentials file not found: {credentials_file}\n"
-                    "Create OAuth credentials in the Google Cloud Console:\n"
-                    "  1. console.cloud.google.com → APIs & Services → Credentials\n"
-                    "  2. Create OAuth 2.0 Client ID (Desktop app)\n"
-                    "  3. Download the JSON and save it to the path above\n"
-                    "  4. Re-run this command to complete the OAuth flow"
-                )
-            flow = InstalledAppFlow.from_client_secrets_file(str(credentials_file), SCOPES)
-            creds = flow.run_local_server(port=0)
-
+    if not creds.valid:
+        if not creds.refresh_token:
+            err(f"The Google token {token_file} has expired and cannot be refreshed. {reconnect_hint()}")
+        try:
+            creds.refresh(Request())
+        except RefreshError as e:
+            err(refresh_failure(e))
+        except TransportError as e:
+            err(f"Could not reach Google to refresh the calendar sign-in ({e}). "
+                "This is usually temporary; try again in a minute.")
         save_token(token_file, creds)
 
     return build("calendar", "v3", credentials=creds)
 
 
-def save_token(token_file: Path, creds) -> None:
-    """Write the token back, best effort.
+def write_token(token_file: Path, creds) -> None:
+    """Write the token, readable by its owner only.
 
     Inside a brain the sandbox lets this tool write the token file itself and
     nothing else in its directory: no mkdir (the directory exists, or there
-    would be no token to refresh), no temporary file to rename over it. When
-    the sandbox or the file's mode refuses the write, the old token is left
-    as it was and the next run simply refreshes again, so that is a warning
-    on stderr, and stdout stays the command's one JSON document. (A write
-    that fails halfway, on a full disk say, does lose the token: with no
-    rename allowed, the rewrite cannot be made atomic.)
+    would be no token to refresh), no temporary file to rename over it.
+    """
+    fd = os.open(token_file, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with os.fdopen(fd, "w", encoding="utf-8") as f:
+        f.write(creds.to_json())
+    os.chmod(token_file, 0o600)
+
+
+def save_token(token_file: Path, creds) -> None:
+    """Write a refreshed token back, best effort.
+
+    When the sandbox or the file's mode refuses the write, the old token is
+    left as it was and the next run simply refreshes again, so that is a
+    warning on stderr, and stdout stays the command's one JSON document. (A
+    write that fails halfway, on a full disk say, does lose the token: with
+    no rename allowed, the rewrite cannot be made atomic.)
     """
     try:
-        fd = os.open(token_file, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
-        with os.fdopen(fd, "w", encoding="utf-8") as f:
-            f.write(creds.to_json())
-        os.chmod(token_file, 0o600)
+        write_token(token_file, creds)
     except OSError as e:
         print(f"warning: could not save the refreshed Google token to {token_file}: {e}. "
               "The next run refreshes it again.", file=sys.stderr)
@@ -430,6 +476,37 @@ def cmd_calendars(args) -> None:
     print(json.dumps({"calendars": out, "restricted": bool(ALLOWED)}, indent=2))
 
 
+def cmd_auth(args) -> None:
+    """Sign in through the browser and save the token. Only ever run by hand."""
+    if in_brain():
+        err(f"Signing in needs someone at a browser, so it cannot run inside a brain. {reconnect_hint()}")
+    try:
+        from google_auth_oauthlib.flow import InstalledAppFlow
+    except ImportError as e:
+        missing_package(e)
+
+    credentials_file, token_file = credential_paths()
+    if not credentials_file.exists():
+        err(
+            f"Credentials file not found: {credentials_file}\n"
+            "Create OAuth credentials in the Google Cloud Console:\n"
+            "  1. console.cloud.google.com → APIs & Services → Credentials\n"
+            "  2. Create OAuth 2.0 Client ID (Desktop app)\n"
+            "  3. Download the JSON and save it to the path above\n"
+            "  4. Run auth again"
+        )
+    flow = InstalledAppFlow.from_client_secrets_file(str(credentials_file), SCOPES)
+    # The flow prints "Please visit this URL…" on stdout, which would break
+    # the one JSON document stdout promises.
+    with contextlib.redirect_stdout(sys.stderr):
+        creds = flow.run_local_server(port=0)
+    try:
+        write_token(token_file, creds)
+    except OSError as e:
+        err(f"Signed in, but could not save the token to {token_file}: {e}")
+    print(json.dumps({"authorized": True, "token_file": str(token_file)}))
+
+
 # ── main ──────────────────────────────────────────────────────────────────
 
 def main() -> None:
@@ -477,6 +554,9 @@ def main() -> None:
 
     sub.add_parser("calendars", help="List the calendars this brain may use")
 
+    sub.add_parser("auth", help="Sign in through the browser and save the token "
+                                "(by hand only; brains connect in the dashboard)")
+
     args = parser.parse_args()
     if not args.command:
         parser.print_help()
@@ -492,6 +572,7 @@ def main() -> None:
         "free": cmd_free,
         "delete": cmd_delete,
         "calendars": cmd_calendars,
+        "auth": cmd_auth,
     }[args.command](args)
 
 

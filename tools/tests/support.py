@@ -126,8 +126,9 @@ class FakeGoogle:
     """Fake google-auth / googleapiclient modules for calendar_tool.py.
 
     A token file is read as JSON; "expired": true marks it as needing a
-    refresh. refresh_error, if set, is raised by Credentials.refresh. Every
-    InstalledAppFlow that is started is recorded in flows.
+    refresh. refresh_error, if set, is raised by Credentials.refresh; the
+    error classes take retryable= like google-auth's. Every InstalledAppFlow
+    that is started is recorded in flows.
     """
 
     def __init__(self, service: FakeCalendar | None = None):
@@ -152,7 +153,11 @@ class FakeGoogle:
         fake = self
 
         class GoogleAuthError(Exception):
-            pass
+            # As in google-auth: a refresh that kept getting 5xx or 429 from
+            # the token endpoint is raised with retryable=True.
+            def __init__(self, *args, retryable=False):
+                super().__init__(*args)
+                self.retryable = retryable
 
         class RefreshError(GoogleAuthError):
             pass
@@ -197,6 +202,8 @@ class FakeGoogle:
                 return flow
 
             def run_local_server(self, **kwargs):
+                # As google_auth_oauthlib does, on stdout.
+                print("Please visit this URL to authorize this application: https://example.com/auth")
                 return Credentials({"token": "consented", "refresh_token": "r"})
 
         class HttpError(Exception):
