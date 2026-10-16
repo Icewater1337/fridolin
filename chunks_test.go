@@ -91,6 +91,64 @@ func TestChunkMessage(t *testing.T) {
 	}
 }
 
+func TestChunkMessageKeepsCharactersWhole(t *testing.T) {
+	// A word longer than a chunk is cut between runes. Where a character
+	// is made of several runes, the cut moves back to its start, so no
+	// message begins with a stray accent or half an emoji. A limit of 101
+	// leaves 95 runes per body, which lands inside a character of two,
+	// three or seven runes.
+	accent := "e\u0301"            // e + combining acute accent
+	vowel := "\u0915\u093e"        // Devanagari KA + the spacing vowel sign AA
+	thumb := "👍\U0001F3FD"         // thumbs up + skin tone
+	keycap := "1\ufe0f\u20e3"      // digit + emoji variation selector + enclosing keycap
+	flag := "\U0001F1E9\U0001F1EA" // two regional indicators
+	// A black flag + the tags "gbsct" + a cancel tag: the flag of Scotland.
+	scotland := "\U0001F3F4\U000E0067\U000E0062\U000E0073\U000E0063\U000E0074\U000E007F"
+	family := "👨\u200d👩\u200d👧" // five runes joined by zero-width joiners
+
+	cases := []struct {
+		name  string
+		text  string
+		limit int
+		want  []string
+	}{
+		{"accents stay on their letter", strings.Repeat(accent, 100), 101, []string{
+			"[1/3] " + strings.Repeat(accent, 47), "[2/3] " + strings.Repeat(accent, 47), "[3/3] " + strings.Repeat(accent, 6)}},
+		{"vowel signs stay on their consonant", strings.Repeat(vowel, 100), 101, []string{
+			"[1/3] " + strings.Repeat(vowel, 47), "[2/3] " + strings.Repeat(vowel, 47), "[3/3] " + strings.Repeat(vowel, 6)}},
+		{"skin tones stay on their emoji", strings.Repeat(thumb, 100), 101, []string{
+			"[1/3] " + strings.Repeat(thumb, 47), "[2/3] " + strings.Repeat(thumb, 47), "[3/3] " + strings.Repeat(thumb, 6)}},
+		// 95 runes end after the variation selector of the 32nd keycap.
+		{"keycaps stay whole", strings.Repeat(keycap, 70), 101, []string{
+			"[1/3] " + strings.Repeat(keycap, 31), "[2/3] " + strings.Repeat(keycap, 31), "[3/3] " + strings.Repeat(keycap, 8)}},
+		{"flags stay in pairs", strings.Repeat(flag, 100), 101, []string{
+			"[1/3] " + strings.Repeat(flag, 47), "[2/3] " + strings.Repeat(flag, 47), "[3/3] " + strings.Repeat(flag, 6)}},
+		// 95 runes end in the middle of the tags of the 14th flag.
+		{"tag flags stay whole", strings.Repeat(scotland, 30), 101, []string{
+			"[1/3] " + strings.Repeat(scotland, 13), "[2/3] " + strings.Repeat(scotland, 13), "[3/3] " + strings.Repeat(scotland, 4)}},
+		{"joined emoji stay joined", strings.Repeat(family, 40), 100, []string{
+			"[1/3] " + strings.Repeat(family, 18), "[2/3] " + strings.Repeat(family, 18), "[3/3] " + strings.Repeat(family, 4)}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := ChunkMessage(tc.text, tc.limit)
+			if !slices.Equal(got, tc.want) {
+				t.Errorf("ChunkMessage(%q, %d)\n got %q\nwant %q", tc.text, tc.limit, got, tc.want)
+			}
+			checkChunks(t, tc.text, tc.limit, got)
+		})
+	}
+
+	t.Run("a run of marks too long to keep whole is cut anyway", func(t *testing.T) {
+		text := "a" + strings.Repeat("\u0301", 300)
+		got := ChunkMessage(text, 100)
+		if len(got) != 4 {
+			t.Errorf("got %d chunks, want 4", len(got))
+		}
+		checkChunks(t, text, 100, got)
+	})
+}
+
 func TestChunkMessageWidensNumberingForTenOrMoreChunks(t *testing.T) {
 	// Twelve chunks need "[10/12] ", two characters more than the first
 	// round reserved; the bodies must shrink to make room, not get cut.

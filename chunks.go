@@ -122,8 +122,9 @@ func splitAfterAny(s string, seps []string) []string {
 	return parts
 }
 
-// hardSplit cuts text into pieces of budget runes, for a word too long to
-// fit in any chunk. It cuts between runes, never inside one.
+// hardSplit cuts text into pieces of at most budget runes, for a word too
+// long to fit in any chunk. It cuts between runes, never inside one, and
+// where it can between whole characters too (see wholeCharacterCut).
 func hardSplit(text string, budget int) []string {
 	var pieces []string
 	for {
@@ -131,10 +132,67 @@ func hardSplit(text string, budget int) []string {
 		if !more {
 			return append(pieces, text)
 		}
+		cut = wholeCharacterCut(text, cut)
 		pieces = append(pieces, text[:cut])
 		text = text[cut:]
 	}
 }
+
+// maxCutBackoff bounds how many runes wholeCharacterCut steps back. A longer
+// run of combining marks is cut where it is.
+const maxCutBackoff = 16
+
+// wholeCharacterCut moves a cut at byte offset cut back to the start of the
+// character it falls in, so that an accent, a skin tone or the rest of a
+// joined emoji is not sent as a message of its own.
+func wholeCharacterCut(text string, cut int) int {
+	c := cut
+	for range maxCutBackoff {
+		if !joinsPrevious(text[:c], text[c:]) {
+			return c
+		}
+		_, w := utf8.DecodeLastRuneInString(text[:c])
+		if c -= w; c == 0 {
+			break
+		}
+	}
+	return cut
+}
+
+// joinsPrevious reports whether the first rune of after belongs to the same
+// visible character as the last rune of before.
+func joinsPrevious(before, after string) bool {
+	const zwj = '\u200d' // joins emoji such as a family into one
+	prev, _ := utf8.DecodeLastRuneInString(before)
+	next, _ := utf8.DecodeRuneInString(after)
+	switch {
+	case prev == zwj || next == zwj:
+		return true
+	case unicode.In(next, unicode.Mn, unicode.Me, unicode.Mc):
+		// Marks: accents, vowel signs, the keycap. Every variation
+		// selector, such as the one asking for an emoji, is an Mn mark.
+		return true
+	case next >= 0x1F3FB && next <= 0x1F3FF: // skin tones
+		return true
+	case next >= 0xE0020 && next <= 0xE007F: // tags, as in the flag of Scotland
+		return true
+	case isRegionalIndicator(prev) && isRegionalIndicator(next):
+		// A flag is a pair of indicators: the cut splits one when an odd
+		// number of them come before it.
+		n := 0
+		for s := before; ; n++ {
+			r, w := utf8.DecodeLastRuneInString(s)
+			if !isRegionalIndicator(r) {
+				break
+			}
+			s = s[:len(s)-w]
+		}
+		return n%2 == 1
+	}
+	return false
+}
+
+func isRegionalIndicator(r rune) bool { return r >= 0x1F1E6 && r <= 0x1F1FF }
 
 // runeOffset returns the byte offset just after the first n runes of s, and
 // whether anything follows it.
