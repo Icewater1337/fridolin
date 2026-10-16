@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import json
+import sys
 import tempfile
+import types
 import unittest
 from datetime import date
 from pathlib import Path
@@ -157,6 +159,87 @@ class KeepOriginalTest(TranscribeTestCase):
         code, out, _ = support.run_main(transcribe, ["--help"])
         self.assertEqual(code, 0)
         self.assertIn("--keep-original, --no-keep-original", out)
+
+
+START = "<|startofprev|>"
+
+
+class FakeProcessor:
+    """One token per word of the prompt, after Whisper's start-of-prompt token."""
+
+    def get_prompt_ids(self, text, return_tensors="np"):
+        self.return_tensors = return_tensors
+        return [START, *text.split()]
+
+
+class FakePipeline:
+    def __init__(self):
+        self.calls = []
+
+    def __call__(self, audio, generate_kwargs=None):
+        self.calls.append((audio, generate_kwargs))
+        return {"text": " Hello there. "}
+
+
+class LocalEngineTest(TempDirTestCase):
+    """The local engine, with a fake pipeline in place of the Whisper model."""
+
+    def setUp(self):
+        super().setUp()
+        self.pipe = FakePipeline()
+        self.processor = FakeProcessor()
+        for target, value in [("_PIPE", self.pipe), ("_PROCESSOR", self.processor),
+                              ("local_available", lambda: True), ("groq_available", lambda: False),
+                              ("probe_duration", lambda path: 5.0), ("date", FixedDate)]:
+            patcher = mock.patch.object(transcribe, target, value)
+            patcher.start()
+            self.addCleanup(patcher.stop)
+        # The fake prompt IDs are a list, so torch.cat joins lists here.
+        fake_torch = types.SimpleNamespace(cat=lambda parts: [t for part in parts for t in part])
+        patcher = mock.patch.dict(sys.modules, {"torch": fake_torch})
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        self.audio = self.dir / "note.ogg"
+        self.audio.write_bytes(b"audio")
+
+    def run_tool(self, *flags: str) -> tuple[int, str, str]:
+        self.pipe.calls.clear()
+        return support.run_main(transcribe, [str(self.audio), "--output-dir", str(self.dir / "out"), *flags])
+
+    def test_prompt_and_language_reach_the_model(self):
+        cases = [
+            ("prompt and language", ["--prompt", "Names: Quoxel", "--language", "de"],
+             {"language": "de", "prompt_ids": [START, "Names:", "Quoxel"]}),
+            ("prompt only", ["--prompt", "Names: Quoxel"],
+             {"prompt_ids": [START, "Names:", "Quoxel"]}),
+            ("neither", [], {}),
+        ]
+        for name, flags, want in cases:
+            with self.subTest(name):
+                code, out, err = self.run_tool(*flags)
+                self.assertEqual(code, 0, err)
+                self.assertEqual(json.loads(out)["transcript"], "Hello there.")
+                (_, generate_kwargs), = self.pipe.calls
+                self.assertEqual(generate_kwargs, want)
+        self.assertEqual(self.processor.return_tensors, "pt", "generate() takes a torch tensor")
+
+    def test_a_long_prompt_keeps_its_end(self):
+        # Whisper's decoder has room for 223 prompt tokens; more fails every
+        # window, or leaves no room for the transcript.
+        words = [f"w{i}" for i in range(300)]
+        cases = [
+            # name, prompt words, the words the model gets
+            ("within the budget", words[:200], words[:200]),
+            ("exactly the budget", words[:223], words[:223]),
+            ("over the budget", words, words[-223:]),
+        ]
+        for name, prompt, want in cases:
+            with self.subTest(name):
+                code, _, err = self.run_tool("--prompt", " ".join(prompt))
+                self.assertEqual(code, 0, err)
+                (_, generate_kwargs), = self.pipe.calls
+                self.assertEqual(generate_kwargs["prompt_ids"], [START, *want])
+                self.assertEqual("reads only the last 223" in err, len(prompt) > 223, err)
 
 
 if __name__ == "__main__":

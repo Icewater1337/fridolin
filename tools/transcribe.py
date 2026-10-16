@@ -30,7 +30,9 @@ Engines
 -------
 `--engine auto` (the default) uses a local model if `transformers` and `torch`
 are installed, and falls back to Groq per chunk when the local run fails.
-`local` and `groq` force one engine.
+`local` and `groq` force one engine. `--prompt` reaches the model with
+either; keep it to a few sentences, since Whisper reads only the last 223
+tokens of it.
 
     Local:  pip install -r tools/requirements-transcription.txt
             First run downloads the model (~1.5 GB for large-v3-turbo).
@@ -63,6 +65,10 @@ VIDEO_EXTS = {".mp4", ".mov", ".webm", ".3gp", ".mkv", ".avi", ".m4v"}
 DEFAULT_CHUNK_SECONDS = 600  # split anything longer than ~10 minutes
 GROQ_MODEL = "whisper-large-v3"
 GROQ_MIN_INTERVAL = 6.0      # seconds between Groq calls, to stay under the rate limit
+# Whisper's decoder holds 448 tokens in all: the prompt, a few start tokens
+# and the text of one 30 s window. Like openai-whisper, give the prompt at
+# most half.
+PROMPT_TOKENS = 448 // 2 - 1
 
 
 def die(msg: str) -> None:
@@ -152,6 +158,7 @@ def split_audio(audio_path: Path, chunk_seconds: int) -> list[Path]:
 # ── local engine ──────────────────────────────────────────────────────────
 
 _PIPE = None
+_PROCESSOR = None  # kept next to _PIPE: it turns --prompt into prompt token IDs
 
 
 def local_available() -> bool:
@@ -165,7 +172,7 @@ def local_available() -> bool:
 
 def load_local_pipeline(model_id: str):
     """Load the local ASR pipeline once and reuse it across chunks."""
-    global _PIPE
+    global _PIPE, _PROCESSOR
     if _PIPE is not None:
         return _PIPE
 
@@ -200,14 +207,36 @@ def load_local_pipeline(model_id: str):
         chunk_length_s=30,
         stride_length_s=5,
     )
+    _PROCESSOR = processor
     return _PIPE
 
 
-def transcribe_local(audio_path: Path, model_id: str, language: str | None) -> str:
+def transcribe_local(audio_path: Path, model_id: str, language: str | None, prompt: str | None) -> str:
     pipe = load_local_pipeline(model_id)
     generate_kwargs = {"language": language} if language else {}
+    if prompt:
+        # Whisper reads the prompt as text that came before the audio, which
+        # steers spelling and vocabulary. Each 30 s window is conditioned on
+        # it, and the pipeline strips it from the output again.
+        generate_kwargs["prompt_ids"] = fit_prompt(_PROCESSOR.get_prompt_ids(prompt, return_tensors="pt"))
     result = pipe(str(audio_path), generate_kwargs=generate_kwargs)
     return result["text"].strip()
+
+
+def fit_prompt(ids):
+    """Cut Whisper prompt IDs to PROMPT_TOKENS, keeping the start-of-prompt token.
+
+    A prompt that fills the decoder fails every window, and --engine auto
+    would then quietly send the whole recording to Groq; one just under the
+    limit leaves no room for the transcript, which comes out as the prompt
+    repeated. Keep the end of the text, as openai-whisper does: it is what
+    the model reads right before the audio.
+    """
+    if len(ids) <= PROMPT_TOKENS + 1:
+        return ids
+    import torch
+    log(f"The prompt is {len(ids) - 1} tokens; Whisper reads only the last {PROMPT_TOKENS}.")
+    return torch.cat([ids[:1], ids[-PROMPT_TOKENS:]])
 
 
 # ── Groq engine ───────────────────────────────────────────────────────────
@@ -285,7 +314,7 @@ def transcribe_chunk(path: Path, args) -> tuple[str, str]:
 
     if use_local:
         try:
-            return transcribe_local(path, args.model, args.language), f"local:{args.model}"
+            return transcribe_local(path, args.model, args.language, args.prompt), f"local:{args.model}"
         except Exception as e:
             if not use_groq:
                 die(f"Local transcription failed and no fallback is configured: {e}")
@@ -369,7 +398,8 @@ def main() -> None:
                     help="ISO language code, e.g. en, de, fr. Omit to auto-detect.")
     ap.add_argument("--prompt", default=None,
                     help="hint passed to the model — names, jargon, or the dialect "
-                         "spoken, which measurably improves accuracy")
+                         "spoken, which measurably improves accuracy. Keep it to a "
+                         f"few sentences: Whisper reads only its last {PROMPT_TOKENS} tokens")
     ap.add_argument("--chunk-seconds", type=int, default=DEFAULT_CHUNK_SECONDS,
                     help=f"split longer files into chunks of this size (default: {DEFAULT_CHUNK_SECONDS})")
     ap.add_argument("--keep-original", action=argparse.BooleanOptionalAction, default=True,
