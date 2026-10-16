@@ -305,13 +305,7 @@ func (b *Bridge) apiBackupStatus(w http.ResponseWriter, r *http.Request) {
 	cfg := b.cfgs.Get()
 	rc := map[string]any{"found": false, "install_hint": rcloneInstallHint()}
 	if p, err := m.rclonePath(); err == nil {
-		rc["found"], rc["path"] = true, p
-		ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
-		out, err := exec.CommandContext(ctx, p, "version").Output()
-		cancel()
-		if err == nil {
-			rc["version"] = strings.SplitN(strings.TrimSpace(string(out)), "\n", 2)[0]
-		}
+		rc["found"], rc["path"], rc["version"] = true, p, rcloneVersion(p)
 	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -347,6 +341,29 @@ func (b *Bridge) apiBackupStatus(w http.ResponseWriter, r *http.Request) {
 		resp["next_run"] = nextRun(cfg.Backup.DailyAt, time.Now())
 	}
 	writeJSON(w, http.StatusOK, resp)
+}
+
+var (
+	rcloneVersionMu    sync.Mutex
+	rcloneVersionCache = map[string]string{}
+)
+
+// rcloneVersion runs `rclone version` once per binary.
+func rcloneVersion(p string) string {
+	rcloneVersionMu.Lock()
+	defer rcloneVersionMu.Unlock()
+	if v, ok := rcloneVersionCache[p]; ok {
+		return v
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	out, err := exec.CommandContext(ctx, p, "version").Output()
+	v := ""
+	if err == nil {
+		v = strings.SplitN(strings.TrimSpace(string(out)), "\n", 2)[0]
+	}
+	rcloneVersionCache[p] = v
+	return v
 }
 
 func rcloneInstallHint() string {
@@ -524,6 +541,9 @@ func (b *Bridge) apiBackupSettings(w http.ResponseWriter, r *http.Request) {
 	}
 	_, err := b.cfgs.Update("", func(c *Config) error {
 		if req.Enabled != nil {
+			if *req.Enabled && !c.Backup.Enabled {
+				b.backup.skipTodayIfPastDue(c.Backup.DailyAt, req.DailyAt)
+			}
 			c.Backup.Enabled = *req.Enabled
 		}
 		if req.DailyAt != nil {
@@ -859,8 +879,13 @@ func (b *Bridge) apiBackupVersions(w http.ResponseWriter, r *http.Request) {
 	cfg := b.cfgs.Get()
 	ctx, cancel := context.WithTimeout(r.Context(), 60*time.Second)
 	defer cancel()
-	out, err := b.backup.runner(ctx, []string{"lsjson", "--dirs-only", cfg.Backup.Remote + ":" + cfg.Backup.Root + "/" + id + "/versions"}, nil)
+	var stderr strings.Builder
+	out, err := b.backup.runner(ctx, []string{"lsjson", "--dirs-only", cfg.Backup.Remote + ":" + cfg.Backup.Root + "/" + id + "/versions"}, &lockedWriter{w: &stderr})
 	versions := []string{}
+	if err != nil && !strings.Contains(strings.ToLower(stderr.String()), "not found") {
+		writeErr(w, http.StatusBadGateway, "listing versions failed: "+truncate(strings.TrimSpace(stderr.String()+" "+err.Error()), 300))
+		return
+	}
 	if err == nil {
 		var entries []struct {
 			Name string `json:"Name"`
@@ -990,6 +1015,42 @@ func (m *BackupManager) tick(now time.Time) {
 	m.state.LastScheduledDay = today
 	m.saveStateLocked()
 	m.mu.Unlock()
+}
+
+// skipTodayIfPastDue makes a schedule switched on after today's time start
+// tomorrow, instead of firing a backup the moment it is enabled.
+func (m *BackupManager) skipTodayIfPastDue(current string, next *string) {
+	at := current
+	if next != nil {
+		at = *next
+	}
+	if at == "" {
+		at = defaultBackupDailyAt
+	}
+	now := time.Now()
+	due, err := time.ParseInLocation("15:04", at, now.Location())
+	if err != nil {
+		return
+	}
+	dueToday := time.Date(now.Year(), now.Month(), now.Day(), due.Hour(), due.Minute(), 0, 0, now.Location())
+	if now.After(dueToday) {
+		m.mu.Lock()
+		m.state.LastScheduledDay = now.Format("2006-01-02")
+		m.saveStateLocked()
+		m.mu.Unlock()
+	}
+}
+
+// lockedWriter makes a writer safe for concurrent writes.
+type lockedWriter struct {
+	mu sync.Mutex
+	w  io.Writer
+}
+
+func (l *lockedWriter) Write(p []byte) (int, error) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return l.w.Write(p)
 }
 
 // Stop ends the scheduler and cancels a running backup.

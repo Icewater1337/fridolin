@@ -284,7 +284,7 @@ func (b *Bridge) apiLogs(w http.ResponseWriter, r *http.Request) {
 	if lines == nil {
 		lines = []LogLine{}
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"lines": lines, "next": next})
+	writeJSON(w, http.StatusOK, map[string]any{"lines": lines, "next": next, "boot": b.started.Unix()})
 }
 
 // ── chats ────────────────────────────────────────────────────────────────
@@ -646,10 +646,10 @@ func (b *Bridge) apiAddBrain(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusConflict, "this folder already has a brain.json — review it and add it with “use existing”")
 		return
 	}
-	m = m.normalized()
 	if req.Manifest.Backup.Exclude == nil && !req.UseExisting {
-		m.Backup = BrainBackup{Enabled: true, Exclude: append([]string{}, DefaultBackupExcludes...)}
+		m.Backup.Exclude = append([]string{}, DefaultBackupExcludes...)
 	}
+	m = m.normalized()
 	if err := m.Validate(); err != nil {
 		writeErr(w, http.StatusUnprocessableEntity, err.Error())
 		return
@@ -787,8 +787,10 @@ func (b *Bridge) apiRemoveBrain(w http.ResponseWriter, r *http.Request) {
 				return nil
 			}
 		}
+		path := r.URL.Query().Get("path")
 		for i, ref := range c.BrainDirs {
-			if ref.Approved != nil && ref.Approved.ID == id {
+			if (ref.Approved != nil && ref.Approved.ID == id) ||
+				(ref.Approved == nil && path != "" && canonicalDir(expandHomeDir(ref.Path)) == canonicalDir(expandHomeDir(path))) {
 				c.BrainDirs = append(c.BrainDirs[:i], c.BrainDirs[i+1:]...)
 				return nil
 			}
@@ -952,7 +954,25 @@ func (b *Bridge) apiDevInbound(w http.ResponseWriter, r *http.Request) {
 	if req.Sender == "" {
 		req.Sender = normalizeJID(req.JID)
 	}
-	go b.handleInbound(context.Background(), Inbound{JID: req.JID, Sender: req.Sender, Text: req.Text, Media: req.Media, Silent: req.Silent, Source: "dev", At: time.Now()})
+	// Apply the same access rules and trigger handling as WhatsApp messages.
+	cfg := b.cfgs.Get()
+	m := Inbound{JID: req.JID, Sender: req.Sender, Text: req.Text, Media: req.Media, Silent: req.Silent, Source: "dev", At: time.Now()}
+	if m.IsGroup() {
+		if !contains(cfg.AllowedGroups, m.JID) {
+			b.recordIgnored("group", m.JID, "", m.Sender, "")
+			writeJSON(w, http.StatusAccepted, map[string]string{"status": "ignored", "reason": "group not allowed"})
+			return
+		}
+		if !cfg.Triggers.Matches(m.Text) && len(m.Media) == 0 {
+			m.Silent = true
+		}
+		m.Text = cfg.Triggers.Strip(m.Text)
+	} else if !numberAllowed(cfg, m.Sender) {
+		b.recordIgnored("dm", m.JID, "", m.Sender, "")
+		writeJSON(w, http.StatusAccepted, map[string]string{"status": "ignored", "reason": "number not allowed"})
+		return
+	}
+	go b.handleInbound(context.Background(), m)
 	writeJSON(w, http.StatusAccepted, map[string]string{"status": "accepted"})
 }
 

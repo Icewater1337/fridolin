@@ -291,3 +291,23 @@ func TestParseStreamReportsErrorText(t *testing.T) {
 		t.Errorf("err = %v, want the CLI's own message", res.Err)
 	}
 }
+
+func TestStopKillsProcessesClaudeStarted(t *testing.T) {
+	// A command Claude started keeps the output pipe open; stopping must kill
+	// the whole process group, not just the CLI, or the stop hangs.
+	mgr, d, _ := queueTestManager(t, 30000, "")
+	t.Setenv("WCB_FAKE_CHILD", "1")
+	_, _, _, _ = mgr.Submit(dm("long task with a child"))
+	br := mgr.Get("a")
+	waitFor(t, 5*time.Second, "run with a pid", func() bool {
+		rt := br.Snapshot()
+		return rt.Running != nil && rt.Running.PID > 0
+	})
+	time.Sleep(200 * time.Millisecond) // let the child start
+	start := time.Now()
+	br.StopCurrent(false)
+	waitFor(t, 4*time.Second, "interrupted delivery", func() bool { return d.count() == 1 })
+	if el := time.Since(start); el > 3*time.Second {
+		t.Errorf("stop took %v — the child kept the run alive", el)
+	}
+}

@@ -344,6 +344,29 @@ func effective(file *Config) (*Config, map[string]string, error) {
 	if cfg.Queue.MaxPending <= 0 {
 		cfg.Queue.MaxPending = defaultQueueMax
 	}
+	// Fill optional settings so the effective config shows real values.
+	t := true
+	if cfg.Queue.Notify == nil {
+		cfg.Queue.Notify = &t
+	}
+	if cfg.Debounce.QuietMS == nil {
+		q := defaultQuietMS
+		cfg.Debounce.QuietMS = &q
+	}
+	if cfg.Debounce.MaxWaitMS == nil {
+		mw := defaultMaxWaitMS
+		cfg.Debounce.MaxWaitMS = &mw
+	}
+	if cfg.AllowAnyDM == nil {
+		// Unset keeps the original meaning: an empty list allows anyone.
+		cfg.AllowAnyDM = &t
+	}
+	if cfg.Dashboard.RequireToken == nil {
+		cfg.Dashboard.RequireToken = &t
+	}
+	if cfg.Backup.IncludeBridgeConfig == nil {
+		cfg.Backup.IncludeBridgeConfig = &t
+	}
 	if cfg.Sandbox.GitConfig == "" {
 		cfg.Sandbox.GitConfig = "read"
 	}

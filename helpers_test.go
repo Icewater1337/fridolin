@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"os"
+	"os/exec"
 	"strconv"
 	"strings"
 	"testing"
@@ -28,6 +29,12 @@ func fakeClaude() {
 		if a == "-p" && i+1 < len(args) {
 			prompt = args[i+1]
 		}
+	}
+	if os.Getenv("WCB_FAKE_CHILD") == "1" {
+		// A grandchild that inherits stdout, like a shell command Claude ran.
+		child := exec.Command("sleep", "30")
+		child.Stdout = os.Stdout
+		_ = child.Start()
 	}
 	if ms, _ := strconv.Atoi(os.Getenv("WCB_FAKE_SLEEP_MS")); ms > 0 {
 		time.Sleep(time.Duration(ms) * time.Millisecond)

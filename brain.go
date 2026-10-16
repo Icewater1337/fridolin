@@ -531,6 +531,7 @@ func (br *Brain) invoke(run *brainRun, ctx context.Context, s *brainSettings, m 
 
 	cmd := exec.CommandContext(ctx, binary, finalArgs...)
 	cmd.Dir = br.workDir
+	isolateProcessGroup(cmd)
 	if sbProfilePath != "" {
 		defer os.Remove(sbProfilePath)
 	}
@@ -594,8 +595,8 @@ func (br *Brain) invoke(run *brainRun, ctx context.Context, s *brainSettings, m 
 			select {
 			case <-exited:
 			case <-time.After(5 * time.Second):
-				if err := cmd.Process.Kill(); err == nil {
-					log.Printf("brain %s: sent SIGKILL to claude process %d", br.id, cmd.Process.Pid)
+				if err := killProcessGroup(cmd.Process.Pid); err == nil {
+					log.Printf("brain %s: killed claude process group %d", br.id, cmd.Process.Pid)
 				}
 			}
 		}()
@@ -870,13 +871,9 @@ func (br *Brain) interruptRun(run *brainRun) {
 	if pid <= 0 {
 		return
 	}
-
-	proc, err := os.FindProcess(pid)
-	if err != nil {
-		return
-	}
-	if err := proc.Kill(); err != nil && !strings.Contains(err.Error(), "process already finished") {
-		log.Printf("brain %s: failed to kill pid %d: %v", br.id, pid, err)
+	// The run's process group: Claude and anything it started.
+	if err := killProcessGroup(pid); err != nil {
+		log.Printf("brain %s: failed to kill process group %d: %v", br.id, pid, err)
 	}
 }
 
