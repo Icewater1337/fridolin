@@ -339,7 +339,24 @@ func (wa *WhatsAppClient) handlePollVote(evt *events.Message) {
 	}
 }
 
+// incomingChat decides, before any other work, whether an incoming message
+// belongs to a chat the bridge handles at all. A contact's Status update
+// arrives in status@broadcast: answering it there would post the reply as
+// this account's own Status, visible to every contact. Newsletters are
+// public channels. Both are dropped.
+func incomingChat(src types.MessageSource) (chat types.JID, ok bool) {
+	if src.Chat.Server == types.NewsletterServer || src.Chat.ToNonAD() == types.StatusBroadcastJID {
+		return types.JID{}, false
+	}
+	return src.Chat, true
+}
+
 func (wa *WhatsAppClient) handleMessage(msg *events.Message) {
+	if _, ok := incomingChat(msg.Info.MessageSource); !ok {
+		wa.log.Debugf("Ignoring message %s in %s (Status updates and channels are not handled)", msg.Info.ID, msg.Info.Chat)
+		return
+	}
+
 	if msg.Info.Chat.Server == "g.us" {
 		// Group messages sent from the operator's own phone are still worth
 		// processing (IsFromMe is true for any device on the account), so the
