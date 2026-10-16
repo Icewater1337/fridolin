@@ -216,3 +216,177 @@ func TestSandboxProfileRefusesUnquotablePaths(t *testing.T) {
 		})
 	}
 }
+
+// TestResolvePath: the sandbox matches real paths, so every profile path is
+// resolved through symlinks, including the parts that do not exist yet.
+func TestResolvePath(t *testing.T) {
+	root := canonicalDir(t.TempDir())
+	for _, d := range []string{"real/sub", "other"} {
+		if err := os.MkdirAll(filepath.Join(root, d), 0o700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for link, target := range map[string]string{
+		"link":       filepath.Join(root, "real"),
+		"deep":       filepath.Join(root, "real", "sub"),
+		"rel":        "real",
+		"real/up":    "../other",
+		"chain":      "link",
+		"dangling":   filepath.Join(root, "nowhere", "sub"),
+		"loop1":      "loop2",
+		"loop2":      "loop1",
+		"other/back": "../link/sub",
+	} {
+		if err := os.Symlink(target, filepath.Join(root, link)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	cases := []struct{ name, in, want string }{
+		{"real path", "real/sub", "real/sub"},
+		{"missing tail", "real/missing/deeper", "real/missing/deeper"},
+		{"symlinked parent", "link/sub", "real/sub"},
+		{"missing tail under a symlink", "link/missing/deeper", "real/missing/deeper"},
+		{"the symlink itself", "link", "real"},
+		{"relative symlink", "rel/sub", "real/sub"},
+		{"relative symlink with ..", "real/up", "other"},
+		{"symlink to a symlink", "chain/sub", "real/sub"},
+		{"dangling symlink", "dangling/f", "nowhere/sub/f"},
+		{".. after a symlink is physical", "deep/../x", "real/x"},
+		{".. inside the missing part", "real/missing/../sub", "real/sub"},
+		{"symlink inside a symlink target", "other/back", "real/sub"},
+		{"symlink loop is left alone", "loop1/x", "loop1/x"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Not filepath.Join: it would apply ".." before resolvePath sees it.
+			if got, want := resolvePath(root+"/"+tc.in), filepath.Join(root, tc.want); got != want {
+				t.Errorf("resolvePath(%s) = %s, want %s", tc.in, got, want)
+			}
+		})
+	}
+	t.Run("temp dir spelling", func(t *testing.T) {
+		// On macOS t.TempDir() is under /var, a symlink to /private/var.
+		dir := t.TempDir()
+		if got, want := resolvePath(dir), canonicalDir(dir); got != want {
+			t.Errorf("resolvePath(%s) = %s, want %s", dir, got, want)
+		}
+	})
+}
+
+// TestSandboxProfileCoversRealPaths: with HOME, the data dir, the
+// credentials dir and a deny path all reached through symlinks, the profile
+// carries each rule for the configured and for the real path.
+func TestSandboxProfileCoversRealPaths(t *testing.T) {
+	root := canonicalDir(t.TempDir())
+	realHome := filepath.Join(root, "home-real")
+	home := filepath.Join(root, "home")
+	for _, d := range []string{"home-real", "elsewhere/data", "elsewhere/creds", "elsewhere/clients", "elsewhere/ssh"} {
+		if err := os.MkdirAll(filepath.Join(root, d), 0o700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for link, target := range map[string]string{
+		home:                                 realHome,
+		filepath.Join(realHome, ".fridolin"): filepath.Join(root, "elsewhere", "data"),
+		filepath.Join(realHome, "creds"):     filepath.Join(root, "elsewhere", "creds"),
+		filepath.Join(realHome, "clients"):   filepath.Join(root, "elsewhere", "clients"),
+		filepath.Join(realHome, ".ssh"):      filepath.Join(root, "elsewhere", "ssh"),
+	} {
+		if err := os.Symlink(target, link); err != nil {
+			t.Fatal(err)
+		}
+	}
+	t.Setenv("HOME", home)
+	cfg := &Config{
+		DataDir: filepath.Join(home, ".fridolin"),
+		Sandbox: SandboxConfig{
+			CredentialsDir: filepath.Join(home, "creds"),
+			DenyPaths:      []string{filepath.Join(home, "clients")},
+		},
+	}
+	profile := mustProfile(t, NewSandboxProfiler(map[string]string{"a": filepath.Join(realHome, "a")}, cfg), "a")
+	for _, want := range []string{
+		`(deny file-read* (subpath "` + filepath.Join(home, ".fridolin") + `"))`,
+		`(deny file-read* (subpath "` + filepath.Join(root, "elsewhere", "data") + `"))`,
+		`(allow file-read* (subpath "` + filepath.Join(root, "elsewhere", "data", "media") + `"))`,
+		`(deny file-read* (subpath "` + filepath.Join(root, "elsewhere", "creds") + `"))`,
+		`(allow file-read* (literal "` + filepath.Join(root, "elsewhere", "creds", "google_calendar_token_a.json") + `"))`,
+		`(deny file-read* (subpath "` + filepath.Join(root, "elsewhere", "clients") + `"))`,
+		`(deny file-read* (subpath "` + filepath.Join(home, ".ssh") + `"))`,
+		`(deny file-read* (subpath "` + filepath.Join(root, "elsewhere", "ssh") + `"))`,
+		`(deny file-read* (subpath "` + filepath.Join(realHome, ".aws") + `"))`, // not there yet
+	} {
+		if !strings.Contains(profile, want) {
+			t.Errorf("profile lacks %s", want)
+		}
+	}
+}
+
+// TestSandboxAllowsDoNotFollowSymlinks: a brain can swap its own folder,
+// the media dir, its calendar token or a writable allow_paths folder for a
+// symlink. Allow rules resolve only HOME and the data and credentials dirs,
+// never such a symlink, or the brain would be allowed into its target.
+func TestSandboxAllowsDoNotFollowSymlinks(t *testing.T) {
+	root := canonicalDir(t.TempDir())
+	home := filepath.Join(root, "home")
+	secret := filepath.Join(root, "secret")
+	for _, d := range []string{"home-real/.fridolin", "home-real/Documents", "secret"} {
+		if err := os.MkdirAll(filepath.Join(root, d), 0o700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for link, target := range map[string]string{
+		home:                                  filepath.Join(root, "home-real"),
+		filepath.Join(root, "home-real", "a"): secret,
+		filepath.Join(root, "home-real", ".fridolin", "media"):                        secret,
+		filepath.Join(root, "home-real", ".fridolin", "google_calendar_token_a.json"): filepath.Join(secret, "token"),
+		filepath.Join(root, "home-real", "Documents", "share"):                        secret,
+	} {
+		if err := os.Symlink(target, link); err != nil {
+			t.Fatal(err)
+		}
+	}
+	t.Setenv("HOME", home)
+	cfg := &Config{
+		DataDir: filepath.Join(home, ".fridolin"),
+		Sandbox: SandboxConfig{AllowPaths: []string{filepath.Join(home, "Documents", "share")}},
+	}
+	profile := mustProfile(t, NewSandboxProfiler(map[string]string{"a": filepath.Join(home, "a")}, cfg), "a")
+	for _, line := range strings.Split(profile, "\n") {
+		if strings.HasPrefix(line, "(allow file-") && strings.Contains(line, secret) {
+			t.Errorf("allow rule follows a symlink into its target: %s", line)
+		}
+	}
+	// The trusted roots still resolve, so the rules match real paths.
+	for _, want := range []string{
+		`(allow file-read* (subpath "` + filepath.Join(root, "home-real", ".fridolin", "media") + `"))`,
+		`(allow file-read* (subpath "` + filepath.Join(root, "home-real", "a") + `"))`,
+	} {
+		if !strings.Contains(profile, want) {
+			t.Errorf("profile lacks %s", want)
+		}
+	}
+}
+
+// TestSandboxProfileNeedsAbsolutePaths: an empty or relative HOME, or an
+// empty path, would turn rules into ones that match nothing (or, made
+// absolute, the bridge's working directory), so the profile fails instead.
+func TestSandboxProfileNeedsAbsolutePaths(t *testing.T) {
+	cases := []struct {
+		name, home string
+		allow      []string
+	}{
+		{"empty HOME", "", nil},
+		{"relative HOME", "home", nil},
+		{"empty allow path", "/Users/you", []string{""}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Setenv("HOME", tc.home)
+			cfg := &Config{DataDir: "/Users/you/.fridolin", Sandbox: SandboxConfig{AllowPaths: tc.allow}}
+			if profile, err := NewSandboxProfiler(map[string]string{"a": "/Users/you/a"}, cfg).Profile("a"); err == nil {
+				t.Errorf("Profile succeeded:\n%s", profile)
+			}
+		})
+	}
+}

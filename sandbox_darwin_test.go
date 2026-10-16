@@ -62,12 +62,59 @@ func TestSandboxedRunAppliesProfileInline(t *testing.T) {
 	}
 }
 
+// TestSandboxIgnoresPlantedSymlinks: a brain may write its own folder, the
+// media dir and its calendar token, so it can swap any of them (or an
+// allow_paths folder inside a writable denied dir) for a symlink to a secret.
+// Allow rules must not follow such a symlink on the next run.
+//
+// It covers runs of the brain set as it was resolved. Resolving the brains
+// again (a config reload or a restart) runs canonicalDir on every folder,
+// which follows a symlink planted in place of a brain's own folder. The
+// profile cannot tell that from a configured folder, so only brain
+// resolution can refuse it.
+func TestSandboxIgnoresPlantedSymlinks(t *testing.T) {
+	requireSandboxExec(t)
+	homes := []struct {
+		name string
+		make func(t *testing.T) string
+	}{
+		{"canonical home", func(t *testing.T) string { return canonicalDir(t.TempDir()) }},
+		{"home under /var", func(t *testing.T) string { return filepath.Join(t.TempDir(), "home") }},
+	}
+	plants := []struct {
+		name, link, target, read string // relative to HOME
+	}{
+		{"own folder", "assistant/a", ".ssh", "assistant/a/id_ed25519"},
+		{"media dir", ".fridolin/media", ".ssh", ".fridolin/media/id_ed25519"},
+		{"own calendar token", "creds/google_calendar_token_a.json", "creds/google_calendar_token_b.json", "creds/google_calendar_token_a.json"},
+		{"allow_paths folder", "Documents/share", ".ssh", "Documents/share/id_ed25519"},
+	}
+	for _, h := range homes {
+		for _, pl := range plants {
+			t.Run(h.name+"/"+pl.name, func(t *testing.T) {
+				home := h.make(t)
+				t.Setenv("HOME", home)
+				sp, _ := sandboxFixture(t, home, "b", "clients")
+				link := filepath.Join(home, pl.link)
+				if err := os.Rename(link, link+".moved"); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.Symlink(filepath.Join(home, pl.target), link); err != nil {
+					t.Fatal(err)
+				}
+				if allowed, out := sandboxTry(t, sp, home, false, filepath.Join(home, pl.read)); allowed {
+					t.Errorf("brain a read the secret through its planted symlink: %q", out)
+				}
+			})
+		}
+	}
+}
+
 // sandboxLayout is one way to lay out a fake home for the enforcement test.
 type sandboxLayout struct {
 	name string
-	// home returns the HOME to configure; setup may create symlinks in it.
-	home  func(t *testing.T) string
-	setup func(t *testing.T, home string)
+	// home creates and returns the HOME to configure.
+	home func(t *testing.T) string
 	// otherBrain and denyDir name brain b's folder and the deny_paths entry.
 	otherBrain, denyDir string
 }
@@ -95,6 +142,12 @@ func TestSandboxEnforcesProfile(t *testing.T) {
 		{name: "unusual characters", home: func(t *testing.T) string { return canonicalDir(t.TempDir()) },
 			otherBrain: "My\u00a0Brain \"q\" \\ \U0001F468\u200d\U0001F469\u200d\U0001F467",
 			denyDir:    "Screenshot 10.00\u202fAM"},
+		// t.TempDir() is under /var, a symlink to /private/var, so HOME and
+		// the data dir are reached through a symlink. Before the profile
+		// resolved its paths, a brain read the data dir via /private/var.
+		{name: "home under /var", home: func(t *testing.T) string { return filepath.Join(t.TempDir(), "home") },
+			otherBrain: "b", denyDir: "clients"},
+		{name: "symlinked home and folders", home: symlinkedHome, otherBrain: "b", denyDir: "clients"},
 	}
 	checks := []sandboxCheck{
 		{"own folder read", false, "assistant/a/notes.md", true},
@@ -117,9 +170,6 @@ func TestSandboxEnforcesProfile(t *testing.T) {
 	for _, l := range layouts {
 		t.Run(l.name, func(t *testing.T) {
 			home := l.home(t)
-			if l.setup != nil {
-				l.setup(t, home)
-			}
 			t.Setenv("HOME", home)
 			sp, ownDir := sandboxFixture(t, home, l.otherBrain, l.denyDir)
 			expand := strings.NewReplacer("{b}", l.otherBrain, "{deny}", l.denyDir)
@@ -144,6 +194,31 @@ func TestSandboxEnforcesProfile(t *testing.T) {
 			}
 		})
 	}
+}
+
+// symlinkedHome makes HOME a symlink, and the data dir, the credentials
+// dir, the deny path, ~/.ssh and the brains' parent folder symlinks out of
+// it, the way a home on another volume or a cloud-synced folder looks.
+func symlinkedHome(t *testing.T) string {
+	t.Helper()
+	root := t.TempDir()
+	realHome := filepath.Join(root, "home-real")
+	if err := os.Mkdir(realHome, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	links := map[string]string{filepath.Join(root, "home"): realHome}
+	for _, d := range []string{".fridolin", "creds", "clients", ".ssh", "assistant"} {
+		links[filepath.Join(realHome, d)] = filepath.Join(root, "elsewhere", strings.TrimPrefix(d, "."))
+	}
+	for link, target := range links {
+		if err := os.MkdirAll(target, 0o700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Symlink(target, link); err != nil {
+			t.Fatal(err)
+		}
+	}
+	return filepath.Join(root, "home")
 }
 
 // sandboxFixture writes a config with brains a and b, a credentials dir,

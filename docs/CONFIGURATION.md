@@ -210,6 +210,16 @@ credentials from the keychain and fails with "Not logged in" without it.
 `deny_paths` adds your own. `allow_paths` re-opens something the defaults
 closed (read access).
 
+The sandbox compares real paths, so every deny covers both the path as
+configured and the path it reaches through symlinks (a home on another
+volume, a cloud-synced folder, `/var` → `/private/var`). Symlinks are
+resolved again on every run, and a folder that does not exist yet is still
+covered once it is created. Re-allowed paths (`allow_paths`, a brain's own
+folder, media, calendar files) are resolved only where your home, data or
+credentials folder itself is a symlink, never through any other symlink,
+because a brain could plant one to reach something else. If an
+`allow_paths` entry is a symlink or goes through one, list its real path.
+
 A brain's own folder is always readable and writable, even inside a denied
 directory. Other tools it runs may still need paths the defaults deny, so
 keeping brains somewhere like `~/assistant/<name>` is simplest.
