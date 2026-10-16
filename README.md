@@ -444,8 +444,8 @@ if the session has expired.
 **`store.go`** — SQLite: the whatsmeow device store, session IDs, active PIDs,
 polls, and votes.
 
-**`chunks.go`** — splits long replies at paragraph, line, then sentence
-boundaries so messages break somewhere readable.
+**`chunks.go`** — splits long replies at paragraph, line, sentence, then word
+boundaries so messages break somewhere readable, and numbers the parts.
 
 **`server.go`** — the localhost `/send` and `/ingest` endpoints.
 

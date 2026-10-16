@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 	"time"
+	"unicode/utf8"
 )
 
 // ── triggers ──────────────────────────────────────────────────────────────
@@ -204,8 +205,8 @@ func TestChunkMessageRespectsMaxSize(t *testing.T) {
 		t.Fatalf("expected multiple chunks, got %d", len(chunks))
 	}
 	for i, c := range chunks {
-		if len(c) > 500 {
-			t.Errorf("chunk %d is %d bytes, over the 500 limit", i, len(c))
+		if n := utf8.RuneCountInString(c); n > 500 {
+			t.Errorf("chunk %d has %d characters, over the 500 limit", i, n)
 		}
 		if !strings.HasPrefix(c, "[") {
 			t.Errorf("chunk %d missing [n/total] prefix: %q", i, c[:20])

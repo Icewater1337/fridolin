@@ -629,9 +629,15 @@ denied to brains by the sandbox. A script that requested a code through
 
 ### `max_chunk_size`
 
-Longest single outgoing message, in characters. Default 3900 (WhatsApp's limit
-is around 4096). Longer replies are split at paragraph, then line, then
-sentence boundaries and numbered `[1/3]`.
+Longest single outgoing message, in characters, the `[1/3] ` numbering
+included. Characters are Unicode code points, so most emoji count as one but
+one with a skin tone or a family emoji counts as several. Default 3900, under
+the 4096 characters commonly given as WhatsApp's limit.
+
+Longer replies are split and numbered `[1/3]`, `[2/3]`, … They are cut at
+paragraphs first, then lines, sentence ends and spaces, each finer level only
+for a part that is still too long; a word longer than a whole message is cut
+between characters. Only the whitespace at a cut is dropped.
 
 ### `max_media_mb`
 
