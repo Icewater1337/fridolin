@@ -8,6 +8,7 @@ import {
   h, mount, icon, btn, callout, field, toggle, select, textInput, listEditor, mono, pageHeader,
   spinner, confirmDialog, toast, runBusy, EFFORTS, nextId, plural, loading,
 } from './ui.js';
+import { googleClientCard } from './calendar.js';
 
 const digits = (v) => (/^\d{6,15}$/.test(v) ? '' : 'Digits only, with country code, no + (e.g. 15551234567)');
 const groupJid = (v) => (/@g\.us$/.test(v) ? '' : 'A group JID ends in @g.us');
@@ -121,6 +122,7 @@ export default {
       btn('Discard', { onClick: () => build(data) }),
       saveBtn);
 
+    const googleCard = googleClientCard();
     mount(root, pageHeader('Settings', null), top, body, saveBar);
     const sub = root.querySelector('.page-heading');
 
@@ -154,7 +156,10 @@ export default {
         b.addEventListener('click', () => el.scrollIntoView({ behavior: 'smooth', block: 'start' }));
         return el;
       });
-      mount(body, nav, sections);
+      const gChip = h('button.chip', { type: 'button' }, 'Google sign-in');
+      gChip.addEventListener('click', () => googleCard.scrollIntoView({ behavior: 'smooth', block: 'start' }));
+      nav.appendChild(gChip);
+      mount(body, nav, sections, googleCard);
       mount(sub.querySelector('.page-sub') || sub.appendChild(h('p.page-sub')), 'Saved to ', mono(d.path, { copy: true }), '. Brains are configured on the Brains page, backups on the Backup page.');
       onChange();
       conflict = false;

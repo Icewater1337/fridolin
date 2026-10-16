@@ -45,6 +45,7 @@ type Bridge struct {
 	activity *Activity
 	token    *DashboardToken
 	backup   *BackupManager
+	google   *GoogleAuth
 	started  time.Time
 
 	httpSrv *http.Server
@@ -152,6 +153,7 @@ func NewBridge(cfgs *ConfigStore, opts BridgeOptions) (*Bridge, error) {
 	}
 	b.token = tok
 	b.backup = NewBackupManager(cfgs, b.brainMgr)
+	b.google = NewGoogleAuth(cfgs)
 	return b, nil
 }
 

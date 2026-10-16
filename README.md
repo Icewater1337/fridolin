@@ -63,8 +63,8 @@ addressed — by keyword, by @-mention, or when you send it a file.
 "what is this?" sent in quick succession becomes one request. `!stop` stops
 whatever it is doing.
 
-**Calendar.** An included tool lists, creates, and finds gaps in Google
-Calendar, with separate credentials per brain.
+**Calendar.** Each brain can sign in to a Google account from the dashboard
+and use the calendars you pick: list events, find free time, create events.
 
 **Scriptable.** Localhost endpoints let your own scripts send messages through
 the bridge — nightly summaries, alerts — or hand a brain files that arrived
@@ -283,22 +283,11 @@ endpoints only listen on localhost and refuse requests a web page sends.
 
 ### Google Calendar
 
-Optional. Install the deps and create OAuth credentials per brain:
-
-```bash
-pip3 install -r tools/requirements.txt
-```
-
-Save the downloaded OAuth JSON as
-`~/.whatsapp-claude-bridge/google_calendar_credentials_<brain>.json`, then
-authorise once:
-
-```bash
-python3 tools/calendar_tool.py --profile personal list
-```
-
-Full instructions are in the header of
-[tools/calendar_tool.py](tools/calendar_tool.py).
+Dashboard → *Brains → brain → Calendar → Connect Google Calendar*: sign in
+with the account for that brain and tick the calendars it may use. It needs a
+Google OAuth client, which you create once in Google Cloud Console and paste
+under *Settings → Google sign-in*. Step by step:
+[docs/CALENDAR.md](docs/CALENDAR.md).
 
 ### Backups
 

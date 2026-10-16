@@ -179,6 +179,13 @@ func (b *Bridge) newHTTPHandler(listen string) http.Handler {
 				http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 				return
 			}
+			// Google sign-in returns here (the redirect URI is the dashboard
+			// itself). The one-time state ties it to a sign-in the dashboard
+			// started, so it needs no token.
+			if r.URL.Path == "/" && isOAuthCallback(r) {
+				b.google.HandleCallback(w, r)
+				return
+			}
 			static.ServeHTTP(w, r)
 		}))
 		mux.Handle("/api/", b.apiGuard(b.apiMux()))

@@ -4,6 +4,7 @@
 import { get, post, put, del, qs } from './api.js';
 import { routingEditor } from './routing-editor.js';
 import { activityItem } from './page-activity.js';
+import { calendarCard } from './calendar.js';
 import {
   h, mount, icon, pill, badge, btn, callout, timeAgo, fmtDuration, mono, chatEl, plural, field,
   textInput, select, toggle, linesArea, linesOf, outcomePill, brainStatusPill, empty, changed,
@@ -35,6 +36,7 @@ export default {
       driftBox,
       h('section.section', h('h2.section-title', 'Now'), liveBox),
       h('section.section', h('h2.section-title', 'Settings'), formBox),
+      h('section.section', h('h2.section-title', 'Calendar'), calendarCard(id)),
       h('section.section',
         h('div.section-head', h('h2.section-title', 'Recent messages'), btn('All of this brain’s activity', { href: `#/activity/${encodeURIComponent(id)}`, small: true, kind: 'ghost', icon: 'right' })),
         actBox),

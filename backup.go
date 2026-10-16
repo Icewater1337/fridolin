@@ -570,27 +570,9 @@ func (b *Bridge) apiBackupSettings(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]string{"status": "saved"})
 }
 
-// updateBrainBackup changes one brain's backup settings in its manifest. An
-// inline brain is moved to its folder first, since only folder brains carry
-// backup settings.
+// updateBrainBackup changes one brain's backup settings in its manifest.
 func updateBrainBackup(c *Config, id string, enabled *bool, exclude []string) error {
-	for i, bc := range c.Brains {
-		if bc.Name == id {
-			m := ManifestFromInline(bc)
-			if err := WriteManifest(expandHomeDir(bc.WorkDir), &m, true); err != nil {
-				return err
-			}
-			c.Brains = append(c.Brains[:i], c.Brains[i+1:]...)
-			c.BrainDirs = append(c.BrainDirs, BrainRef{Path: bc.WorkDir, Approved: &m})
-			break
-		}
-	}
-	for i := range c.BrainDirs {
-		ref := &c.BrainDirs[i]
-		if ref.Approved == nil || ref.Approved.ID != id {
-			continue
-		}
-		m := *ref.Approved
+	return updateManifestIn(c, id, func(m *BrainManifest) error {
 		if enabled != nil {
 			m.Backup.Enabled = *enabled
 		}
@@ -603,16 +585,8 @@ func updateBrainBackup(c *Config, id string, enabled *bool, exclude []string) er
 			}
 			m.Backup.Exclude = clean
 		}
-		if err := m.Validate(); err != nil {
-			return err
-		}
-		if err := WriteManifest(expandHomeDir(ref.Path), &m, true); err != nil {
-			return err
-		}
-		ref.Approved = &m
-		return nil
-	}
-	return fmt.Errorf("no brain %q", id)
+		return m.Validate()
+	})
 }
 
 // ── running backups ──────────────────────────────────────────────────────

@@ -310,3 +310,20 @@ func TestPutConfigKeepsBrainsAndReportsRestart(t *testing.T) {
 		t.Errorf("stale etag: %d, want 409", w.Code)
 	}
 }
+
+func TestAddBrainBackupDefaults(t *testing.T) {
+	tb := newTestBridge(t, "")
+	// No backup settings given: backed up, with the default exclusions.
+	_ = tb.do("POST", "/api/brains", map[string]any{"path": "~/a", "create_dir": true, "manifest": BrainManifest{ID: "a", Name: "A"}})
+	// Explicitly off stays off.
+	off := BrainManifest{ID: "b", Name: "B", Backup: BrainBackup{Enabled: false, Exclude: []string{"*.log"}}}
+	_ = tb.do("POST", "/api/brains", map[string]any{"path": "~/b", "create_dir": true, "manifest": off})
+	a, _ := ReadManifest(filepath.Join(tb.home, "a"))
+	b, _ := ReadManifest(filepath.Join(tb.home, "b"))
+	if !a.Backup.Enabled || len(a.Backup.Exclude) == 0 {
+		t.Errorf("a.backup = %+v, want on with defaults", a.Backup)
+	}
+	if b.Backup.Enabled || len(b.Backup.Exclude) != 1 {
+		t.Errorf("b.backup = %+v, want off as requested", b.Backup)
+	}
+}

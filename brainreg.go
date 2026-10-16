@@ -226,6 +226,52 @@ func isWithin(p, dir string) bool {
 	return rel == "." || (rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)))
 }
 
+// UpdateManifest changes one brain's manifest: brain.json in its folder and
+// the approved copy in the config, together, so the change is not reported
+// as drift. A brain still configured inline is moved to its folder first.
+func (cs *ConfigStore) UpdateManifest(id string, mutate func(m *BrainManifest) error) error {
+	_, err := cs.Update("", func(c *Config) error { return updateManifestIn(c, id, mutate) })
+	return err
+}
+
+func updateManifestIn(c *Config, id string, mutate func(m *BrainManifest) error) error {
+	for i, bc := range c.Brains {
+		if bc.Name == id {
+			home, _ := os.UserHomeDir()
+			eff := bc
+			eff.WorkDir = expandHome(bc.WorkDir, home)
+			if eff.PromptFile == "" {
+				eff.PromptFile = filepath.Join(eff.WorkDir, "brain-prompt.md")
+			}
+			m := ManifestFromInline(eff)
+			c.Brains = append(c.Brains[:i], c.Brains[i+1:]...)
+			c.BrainDirs = append(c.BrainDirs, BrainRef{Path: bc.WorkDir, Approved: &m})
+			break
+		}
+	}
+	for i := range c.BrainDirs {
+		ref := &c.BrainDirs[i]
+		if ref.Approved == nil || ref.Approved.ID != id {
+			continue
+		}
+		m := *ref.Approved
+		if err := mutate(&m); err != nil {
+			return err
+		}
+		if m.ID != id {
+			return fmt.Errorf("a brain's id cannot change")
+		}
+		home, _ := os.UserHomeDir()
+		if err := WriteManifest(expandHome(ref.Path, home), &m, true); err != nil {
+			return err
+		}
+		n := m.normalized()
+		ref.Approved = &n
+		return nil
+	}
+	return fmt.Errorf("no brain %q", id)
+}
+
 // ScaffoldBrain prepares a folder for a new brain: the folder itself, a
 // starter system prompt, the memory layout and brain.json. It never replaces
 // a file that already exists, so adopting a folder with content is safe. It

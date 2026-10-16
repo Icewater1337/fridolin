@@ -38,6 +38,19 @@ type BrainManifest struct {
 	ReplyChat string `json:"reply_chat,omitempty"`
 
 	Backup BrainBackup `json:"backup"`
+
+	// Calendar is the Google account this brain signed in with and the
+	// calendars it may use. Set by "Connect Google Calendar" in the dashboard.
+	Calendar *BrainCalendar `json:"calendar,omitempty"`
+}
+
+// BrainCalendar is a brain's Google Calendar access. Google grants access to
+// a whole account; the calendar tool keeps the brain to the calendars listed
+// here.
+type BrainCalendar struct {
+	Account   string   `json:"account"`
+	Calendars []string `json:"calendars"`
+	Default   string   `json:"default"`
 }
 
 // BrainRouting decides which chats a brain answers.
@@ -82,6 +95,13 @@ func (m *BrainManifest) Validate() error {
 	for _, g := range m.Routing.Groups {
 		if !strings.HasSuffix(g, "@g.us") {
 			return fmt.Errorf("brain %q: %q is not a group JID (…@g.us)", m.ID, g)
+		}
+	}
+	if c := m.Calendar; c != nil {
+		for _, id := range append(append([]string{}, c.Calendars...), c.Account, c.Default) {
+			if strings.ContainsAny(id, "\r\n,") {
+				return fmt.Errorf("brain %q: calendar id %q is not valid", m.ID, id)
+			}
 		}
 	}
 	for _, x := range m.Backup.Exclude {

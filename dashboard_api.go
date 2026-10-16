@@ -64,6 +64,14 @@ func (b *Bridge) apiMux() http.Handler {
 	mux.HandleFunc("GET /api/backup/versions", b.apiBackupVersions)
 	mux.HandleFunc("POST /api/backup/restore", b.apiBackupRestore)
 
+	mux.HandleFunc("GET /api/google/client", b.apiGoogleClient)
+	mux.HandleFunc("PUT /api/google/client", b.apiSetGoogleClient)
+	mux.HandleFunc("DELETE /api/google/client", b.apiDeleteGoogleClient)
+	mux.HandleFunc("GET /api/brains/{id}/calendar", b.apiCalendarStatus)
+	mux.HandleFunc("POST /api/brains/{id}/calendar/connect", b.apiCalendarConnect)
+	mux.HandleFunc("PUT /api/brains/{id}/calendar", b.apiCalendarSelect)
+	mux.HandleFunc("DELETE /api/brains/{id}/calendar", b.apiCalendarDisconnect)
+
 	mux.HandleFunc("POST /api/dev/inbound", b.apiDevInbound)
 	mux.HandleFunc("GET /api/dev/outbox", b.apiDevOutbox)
 
@@ -588,6 +596,11 @@ func (b *Bridge) apiInspectFolder(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, resp)
 }
 
+// manifestHasBackup reports whether the request set any backup option.
+func manifestHasBackup(m BrainManifest) bool {
+	return m.Backup.Enabled || m.Backup.Exclude != nil
+}
+
 func prettyName(s string) string {
 	s = strings.NewReplacer("-", " ", "_", " ").Replace(s)
 	if s == "" {
@@ -646,7 +659,11 @@ func (b *Bridge) apiAddBrain(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusConflict, "this folder already has a brain.json — review it and add it with “use existing”")
 		return
 	}
-	if req.Manifest.Backup.Exclude == nil && !req.UseExisting {
+	if !req.UseExisting && !manifestHasBackup(req.Manifest) {
+		// No backup settings given: new brains are backed up, with the
+		// default exclusions.
+		m.Backup = BrainBackup{Enabled: true, Exclude: append([]string{}, DefaultBackupExcludes...)}
+	} else if !req.UseExisting && m.Backup.Exclude == nil {
 		m.Backup.Exclude = append([]string{}, DefaultBackupExcludes...)
 	}
 	m = m.normalized()

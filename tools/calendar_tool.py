@@ -4,6 +4,20 @@
 Every command prints JSON on stdout, so the assistant can parse the result and
 summarise it in plain language.
 
+Connecting from the dashboard
+-----------------------------
+The easy way: open the bridge dashboard → Brains → <brain> → Calendar →
+"Connect Google Calendar", sign in, and tick the calendars the brain may use.
+When the bridge runs a brain it tells this tool which brain it is and which
+calendars it chose (BRIDGE_BRAIN_ID, BRIDGE_CREDENTIALS_DIR, BRIDGE_CALENDARS,
+BRIDGE_CALENDAR_DEFAULT), so inside a brain no flags are needed:
+
+    calendar_tool.py calendars                 # the calendars this brain may use
+    calendar_tool.py list --from 2026-01-05    # events across all of them
+    calendar_tool.py create --title … --start … --end …   # into the default one
+
+--calendar-id picks one of the allowed calendars; anything else is refused.
+
 Profiles
 --------
 A profile is just a name. Each one gets its own OAuth credentials and token in
@@ -51,7 +65,15 @@ from zoneinfo import ZoneInfo
 
 SCOPES = ["https://www.googleapis.com/auth/calendar"]
 
-DATA_DIR = Path(os.environ.get("BRIDGE_DATA_DIR", Path.home() / ".whatsapp-claude-bridge"))
+DATA_DIR = Path(
+    os.environ.get("BRIDGE_CREDENTIALS_DIR")
+    or os.environ.get("BRIDGE_DATA_DIR")
+    or Path.home() / ".whatsapp-claude-bridge"
+)
+
+# The calendars the dashboard allowed for this brain (empty: no restriction).
+ALLOWED = [c for c in os.environ.get("BRIDGE_CALENDARS", "").split(",") if c]
+DEFAULT_CALENDAR = os.environ.get("BRIDGE_CALENDAR_DEFAULT") or (ALLOWED[0] if ALLOWED else "primary")
 
 # Set from CLI args in main().
 _profile: str | None = None
@@ -165,6 +187,26 @@ def get_service():
     return build("calendar", "v3", credentials=creds)
 
 
+def target_calendars(requested: str | None, many: bool = False) -> list[str]:
+    """Resolve --calendar-id against the brain's allowed calendars.
+
+    With no --calendar-id, read commands (many=True) use every allowed
+    calendar and write commands use the default one.
+    """
+    if requested in (None, ""):
+        if many and ALLOWED:
+            return ALLOWED
+        return [DEFAULT_CALENDAR]
+    if requested == "primary" and ALLOWED:
+        requested = DEFAULT_CALENDAR
+    if ALLOWED and requested not in ALLOWED:
+        err(
+            f"Calendar {requested!r} is not enabled for this brain. "
+            f"Allowed: {', '.join(ALLOWED)}. Change it in the dashboard (Brains → Calendar)."
+        )
+    return [requested]
+
+
 def format_event(e: dict) -> dict:
     """Return a compact, stable dict for one calendar event."""
     start = e.get("start", {})
@@ -219,21 +261,25 @@ def cmd_list(args) -> None:
     time_min = parse_day(from_date)
     time_max = parse_day(to_date) + timedelta(days=1)
 
-    events_result = service.events().list(
-        calendarId=args.calendar_id,
-        timeMin=time_min.isoformat(),
-        timeMax=time_max.isoformat(),
-        timeZone=str(tz()),
-        singleEvents=True,
-        orderBy="startTime",
-        maxResults=args.max_results,
-    ).execute()
-
-    events = events_result.get("items", [])
-    print(json.dumps(
-        {"events": [format_event(e) for e in events], "count": len(events)},
-        indent=2,
-    ))
+    calendars = target_calendars(args.calendar_id, many=True)
+    events = []
+    for cal in calendars:
+        result = service.events().list(
+            calendarId=cal,
+            timeMin=time_min.isoformat(),
+            timeMax=time_max.isoformat(),
+            timeZone=str(tz()),
+            singleEvents=True,
+            orderBy="startTime",
+            maxResults=args.max_results,
+        ).execute()
+        for e in result.get("items", []):
+            item = format_event(e)
+            if len(calendars) > 1:
+                item["calendar"] = cal
+            events.append(item)
+    events.sort(key=lambda e: e.get("start") or "")
+    print(json.dumps({"events": events, "count": len(events)}, indent=2))
 
 
 def cmd_create(args) -> None:
@@ -279,7 +325,7 @@ def cmd_create(args) -> None:
     # sendUpdates="all" emails the invitation to attendees. If you would rather
     # create events quietly, change this to "none".
     event = service.events().insert(
-        calendarId=args.calendar_id, body=body, sendUpdates=args.send_updates
+        calendarId=target_calendars(args.calendar_id)[0], body=body, sendUpdates=args.send_updates
     ).execute()
     print(json.dumps({"created": format_event(event)}, indent=2))
 
@@ -291,13 +337,14 @@ def cmd_free(args) -> None:
     day_start = parse_day(args.date)
     day_end = day_start + timedelta(days=1)
 
+    calendars = target_calendars(args.calendar_id, many=True)
     result = service.freebusy().query(body={
         "timeMin": day_start.isoformat(),
         "timeMax": day_end.isoformat(),
         "timeZone": str(tz()),
-        "items": [{"id": args.calendar_id}],
+        "items": [{"id": c} for c in calendars],
     }).execute()
-    busy = result.get("calendars", {}).get(args.calendar_id, {}).get("busy", [])
+    busy = [slot for c in calendars for slot in result.get("calendars", {}).get(c, {}).get("busy", [])]
 
     def to_local(iso_str: str) -> datetime:
         return datetime.fromisoformat(iso_str.replace("Z", "+00:00")).astimezone(tz())
@@ -340,8 +387,26 @@ def cmd_free(args) -> None:
 
 def cmd_delete(args) -> None:
     service = get_service()
-    service.events().delete(calendarId=args.calendar_id, eventId=args.event_id).execute()
+    service.events().delete(calendarId=target_calendars(args.calendar_id)[0], eventId=args.event_id).execute()
     print(json.dumps({"deleted": args.event_id}))
+
+
+def cmd_calendars(args) -> None:
+    """List the calendars this brain may use (all of the account's, if unrestricted)."""
+    service = get_service()
+    items = service.calendarList().list(maxResults=250).execute().get("items", [])
+    out = []
+    for c in items:
+        if ALLOWED and c["id"] not in ALLOWED:
+            continue
+        out.append({
+            "id": c["id"],
+            "name": c.get("summaryOverride") or c.get("summary"),
+            "primary": c.get("primary", False),
+            "default": c["id"] == DEFAULT_CALENDAR or (DEFAULT_CALENDAR == "primary" and c.get("primary", False)),
+            "access": c.get("accessRole"),
+        })
+    print(json.dumps({"calendars": out, "restricted": bool(ALLOWED)}, indent=2))
 
 
 # ── main ──────────────────────────────────────────────────────────────────
@@ -351,11 +416,12 @@ def main() -> None:
         description="Google Calendar tool for the WhatsApp–Claude bridge",
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
-    parser.add_argument("--profile", default=None,
-                        help="Credential profile name, e.g. the brain's name. "
-                             "Omit to use the unsuffixed credential files.")
-    parser.add_argument("--calendar-id", default="primary",
-                        help="Calendar ID (default: primary)")
+    parser.add_argument("--profile", default=os.environ.get("BRIDGE_BRAIN_ID") or None,
+                        help="Credential profile name, e.g. the brain's name "
+                             "(default: the brain running this tool, else the unsuffixed files).")
+    parser.add_argument("--calendar-id", default=None,
+                        help="Calendar ID (default: all of the brain's calendars for list/free, "
+                             "its default calendar for create/delete; 'primary' without the dashboard)")
     parser.add_argument("--timezone", default=None,
                         help="IANA timezone, e.g. Europe/Berlin (default: CALENDAR_TZ or system)")
 
@@ -388,6 +454,8 @@ def main() -> None:
     p_delete = sub.add_parser("delete", help="Delete an event by ID")
     p_delete.add_argument("--event-id", required=True)
 
+    sub.add_parser("calendars", help="List the calendars this brain may use")
+
     args = parser.parse_args()
     if not args.command:
         parser.print_help()
@@ -402,6 +470,7 @@ def main() -> None:
         "create": cmd_create,
         "free": cmd_free,
         "delete": cmd_delete,
+        "calendars": cmd_calendars,
     }[args.command](args)
 
 

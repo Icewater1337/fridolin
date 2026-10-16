@@ -194,6 +194,7 @@ type brainSettings struct {
 	viewer          bool
 	queueMode       string
 	maxPending      int
+	credsDir        string // where per-brain credential files live
 }
 
 // BrainHooks connect brains to the rest of the bridge.
@@ -531,6 +532,7 @@ func (br *Brain) invoke(run *brainRun, ctx context.Context, s *brainSettings, m 
 
 	cmd := exec.CommandContext(ctx, binary, finalArgs...)
 	cmd.Dir = br.workDir
+	cmd.Env = append(os.Environ(), calendarEnv(br.id, s.manifest, s.credsDir)...)
 	isolateProcessGroup(cmd)
 	if sbProfilePath != "" {
 		defer os.Remove(sbProfilePath)
@@ -1060,7 +1062,16 @@ func settingsFor(cfg *Config, sp BrainSpec) *brainSettings {
 		viewer:          cfg.Viewer,
 		queueMode:       cfg.Queue.Mode,
 		maxPending:      cfg.Queue.MaxPending,
+		credsDir:        credentialsDirOf(cfg),
 	}
+}
+
+// credentialsDirOf is where per-brain credential files live.
+func credentialsDirOf(cfg *Config) string {
+	if cfg.Sandbox.CredentialsDir != "" {
+		return cfg.Sandbox.CredentialsDir
+	}
+	return cfg.DataDir
 }
 
 // BrainFor returns the brain that handles the given chat, or nil.

@@ -49,6 +49,9 @@ The person's data lives in brain folders they choose and in
    - **Allow their own number** (Settings → Access): digits with country
      code, no `+`.
    - Optional: **Backup → Connect Google Drive**.
+   - Optional: **Google Calendar** per brain. Needs a one-time Google OAuth
+     client (docs/CALENDAR.md walks through it); the person creates it in
+     Google Cloud Console and pastes it under Settings → Google sign-in.
 
    You cannot scan QR codes or approve Google sign-ins for them.
 

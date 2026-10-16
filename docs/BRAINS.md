@@ -63,6 +63,7 @@ restart.
 | `prompt_file` | System prompt, relative to the folder. It must stay inside the folder. |
 | `reply_chat` | Where answers go for files handed in through `/ingest`. Default: the first allowed number for the DM brain, else the brain's first group. |
 | `backup` | Google Drive backup for this folder; see [BACKUP.md](BACKUP.md). |
+| `calendar` | The Google account this brain signed in with and the calendars it may use; set by *Connect Google Calendar*, see [CALENDAR.md](CALENDAR.md). |
 
 ## Approval
 
