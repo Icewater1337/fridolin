@@ -25,12 +25,14 @@ func mustJID(t *testing.T, s string) types.JID {
 }
 
 // TestIncomingChat pins which chats reach a brain. Status updates and
-// channels never may: a reply there is published to every contact.
+// channels never may: a reply there is published to every contact. A
+// broadcast list's message belongs in the DM with its sender.
 func TestIncomingChat(t *testing.T) {
 	contact := mustJID(t, "15551234567@s.whatsapp.net")
 	lid := mustJID(t, "15559876543@lid")
 	group := mustJID(t, "120363000000000000@g.us")
 	channel := mustJID(t, "120363000000000000@newsletter")
+	list := mustJID(t, "1700000000@broadcast")
 
 	cases := []struct {
 		name string
@@ -44,6 +46,11 @@ func TestIncomingChat(t *testing.T) {
 		{"direct message", types.MessageSource{Chat: contact, Sender: contact}, "15551234567@s.whatsapp.net"},
 		{"direct message by LID", types.MessageSource{Chat: lid, Sender: lid}, "15559876543@lid"},
 		{"group message", types.MessageSource{Chat: group, Sender: contact, IsGroup: true}, "120363000000000000@g.us"},
+		{"broadcast list from a contact", types.MessageSource{Chat: list, Sender: contact, IsGroup: true}, "15551234567@s.whatsapp.net"},
+		{"broadcast list from a contact's second device", types.MessageSource{Chat: list, Sender: mustJID(t, "15551234567:2@s.whatsapp.net"), IsGroup: true}, "15551234567@s.whatsapp.net"},
+		{"broadcast list from a LID", types.MessageSource{Chat: list, Sender: lid, IsGroup: true}, "15559876543@lid"},
+		{"own broadcast list message", types.MessageSource{Chat: list, Sender: contact, IsGroup: true, IsFromMe: true}, ""},
+		{"broadcast list without a sender", types.MessageSource{Chat: list, IsGroup: true}, ""},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -150,6 +157,7 @@ func TestHandleMessageIgnoresStatusAndChannels(t *testing.T) {
 		{"photo status from an allowed contact", photo},
 		{"status from someone not allowed", textEvent(types.MessageSource{Chat: types.StatusBroadcastJID, Sender: stranger, IsGroup: true}, "Beach day!")},
 		{"channel post", textEvent(types.MessageSource{Chat: channel, Sender: channel}, "Weekly news")},
+		{"own broadcast list message", textEvent(types.MessageSource{Chat: mustJID(t, "1700000000@broadcast"), Sender: contact, IsGroup: true, IsFromMe: true}, "Party on Friday")},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -177,4 +185,36 @@ func TestHandleMessageIgnoresStatusAndChannels(t *testing.T) {
 	if !ok || m.JID != "15551234567@s.whatsapp.net" || m.Text != "hello" {
 		t.Errorf("direct message: got %+v (delivered %v)", m, ok)
 	}
+}
+
+// A contact's broadcast-list message is a DM from them: it is answered in
+// their direct chat, never on the list.
+func TestHandleMessageBroadcastListIsDM(t *testing.T) {
+	list := mustJID(t, "1700000000@broadcast")
+
+	t.Run("allowed sender", func(t *testing.T) {
+		tw := newTestWhatsApp(t)
+		evt := textEvent(types.MessageSource{Chat: list, Sender: mustJID(t, "15551234567:2@s.whatsapp.net"), IsGroup: true}, "Party on Friday")
+		tw.handle(t, evt)
+		m, ok := tw.next(2 * time.Second)
+		if !ok || m.JID != "15551234567@s.whatsapp.net" || m.Sender != "15551234567" || m.Text != "Party on Friday" {
+			t.Errorf("got %+v (delivered %v), want a DM from 15551234567", m, ok)
+		}
+		if evt.Info.Chat != list {
+			t.Errorf("whatsmeow's event was changed: chat is now %s", evt.Info.Chat)
+		}
+	})
+
+	t.Run("sender not allowed", func(t *testing.T) {
+		tw := newTestWhatsApp(t)
+		tw.handle(t, textEvent(types.MessageSource{Chat: list, Sender: mustJID(t, "15559876543@s.whatsapp.net"), IsGroup: true}, "Party on Friday"))
+		if m, ok := tw.next(100 * time.Millisecond); ok {
+			t.Errorf("message reached the brains: %+v", m)
+		}
+		tw.mu.Lock()
+		defer tw.mu.Unlock()
+		if len(tw.ignored) != 1 || tw.ignored[0] != "15559876543@s.whatsapp.net" {
+			t.Errorf("dashboard was offered %v, want the sender's DM chat", tw.ignored)
+		}
+	})
 }

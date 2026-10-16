@@ -38,6 +38,11 @@ Newer WhatsApp clients identify senders by an internal ID rather than a phone
 number; the bridge resolves that back to the number before checking, so plain
 numbers here are correct.
 
+A message someone sends to a broadcast list you are on counts as a DM from
+them and is answered in your direct chat with them, which is where WhatsApp
+shows it. WhatsApp Status updates and channel posts are ignored, whoever
+posts them.
+
 ### `allowed_groups`
 
 Group JIDs the bridge will respond in. Groups are deny-by-default — an empty

@@ -344,17 +344,37 @@ func (wa *WhatsAppClient) handlePollVote(evt *events.Message) {
 // arrives in status@broadcast: answering it there would post the reply as
 // this account's own Status, visible to every contact. Newsletters are
 // public channels. Both are dropped.
+//
+// A message a contact sent to one of their broadcast lists shows up on the
+// phone in the direct chat with that contact, so it is moved there and
+// handled as a DM from the sender. The list itself is never a chat to
+// answer in. Our own broadcast-list messages echoing back are dropped, like
+// any message this account sent.
 func incomingChat(src types.MessageSource) (chat types.JID, ok bool) {
 	if src.Chat.Server == types.NewsletterServer || src.Chat.ToNonAD() == types.StatusBroadcastJID {
 		return types.JID{}, false
+	}
+	if src.Chat.Server == types.BroadcastServer {
+		if src.IsFromMe || src.Sender.IsEmpty() {
+			return types.JID{}, false
+		}
+		return src.Sender.ToNonAD(), true
 	}
 	return src.Chat, true
 }
 
 func (wa *WhatsAppClient) handleMessage(msg *events.Message) {
-	if _, ok := incomingChat(msg.Info.MessageSource); !ok {
-		wa.log.Debugf("Ignoring message %s in %s (Status updates and channels are not handled)", msg.Info.ID, msg.Info.Chat)
+	chat, ok := incomingChat(msg.Info.MessageSource)
+	if !ok {
+		wa.log.Debugf("Ignoring message %s in %s (Status updates, channels and own broadcasts are not handled)", msg.Info.ID, msg.Info.Chat)
 		return
+	}
+	if chat != msg.Info.Chat {
+		// A broadcast-list message, now a DM. Work on a copy: the event
+		// belongs to whatsmeow.
+		dm := *msg
+		dm.Info.Chat, dm.Info.IsGroup = chat, false
+		msg = &dm
 	}
 
 	if msg.Info.Chat.Server == "g.us" {
