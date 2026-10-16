@@ -421,36 +421,44 @@ def cmd_free(args) -> None:
     window_start = datetime.fromisoformat(f"{args.date}T{hours_start}:00").replace(tzinfo=tz())
     window_end = datetime.fromisoformat(f"{args.date}T{hours_end}:00").replace(tzinfo=tz())
 
-    busy_periods = [
-        {"start": to_local(s["start"]).strftime("%H:%M"), "end": to_local(s["end"]).strftime("%H:%M")}
-        for s in busy
-    ]
-
-    free_windows = []
-    cursor = window_start
-    for slot in sorted(busy, key=lambda x: x["start"]):
-        s, e = to_local(slot["start"]), to_local(slot["end"])
-        if s > cursor:
-            free_windows.append({
-                "start": cursor.strftime("%H:%M"),
-                "end": s.strftime("%H:%M"),
-                "duration_minutes": int((s - cursor).total_seconds() / 60),
-            })
-        cursor = max(cursor, e)
-    if cursor < window_end:
-        free_windows.append({
-            "start": cursor.strftime("%H:%M"),
-            "end": window_end.strftime("%H:%M"),
-            "duration_minutes": int((window_end - cursor).total_seconds() / 60),
-        })
+    busy_local = [(to_local(s["start"]), to_local(s["end"])) for s in busy]
+    busy_periods = [{"start": s.strftime("%H:%M"), "end": e.strftime("%H:%M")} for s, e in busy_local]
 
     print(json.dumps({
         "date": args.date,
         "timezone": str(tz()),
         "hours": args.hours,
         "busy": busy_periods,
-        "free_windows": [w for w in free_windows if w["duration_minutes"] >= args.min_slot],
+        "free_windows": free_windows(busy_local, window_start, window_end, args.min_slot),
     }, indent=2))
+
+
+def free_windows(busy: list[tuple[datetime, datetime]], window_start: datetime,
+                 window_end: datetime, min_slot: int) -> list[dict]:
+    """The gaps of at least min_slot minutes between busy slots, inside the window.
+
+    Each busy slot is clipped to the window first. Otherwise a meeting at
+    19:00 would stretch the last free window of an 08:00-18:00 search to
+    19:00, and the assistant would offer a slot outside the hours asked for.
+    """
+    windows = []
+    cursor = window_start
+    for s, e in sorted(busy):
+        s, e = max(s, window_start), min(e, window_end)
+        if s >= e:
+            continue  # entirely outside the window
+        if s > cursor:
+            windows.append((cursor, s))
+        cursor = max(cursor, e)
+    if cursor < window_end:
+        windows.append((cursor, window_end))
+
+    out = []
+    for s, e in windows:
+        minutes = int((e - s).total_seconds() / 60)
+        if minutes >= min_slot:
+            out.append({"start": s.strftime("%H:%M"), "end": e.strftime("%H:%M"), "duration_minutes": minutes})
+    return out
 
 
 def cmd_delete(args) -> None:

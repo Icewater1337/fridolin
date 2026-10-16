@@ -10,6 +10,7 @@ import sys
 import tempfile
 import unittest
 import warnings
+from datetime import datetime
 from pathlib import Path
 from unittest import mock
 from zoneinfo import ZoneInfo
@@ -210,6 +211,52 @@ class AuthCommandTest(TokenTestCase):
         code, out, _ = self.auth()
         self.assertEqual(code, 1)
         self.assertIn("Credentials file not found", out["error"])
+
+
+def at(hhmm: str, day: str = "2026-01-06") -> datetime:
+    return datetime.fromisoformat(f"{day}T{hhmm}").replace(tzinfo=BERLIN)
+
+
+class FreeWindowsTest(unittest.TestCase):
+    def test_cases(self):
+        def w(start, end, minutes):
+            return {"start": start, "end": end, "duration_minutes": minutes}
+
+        cases = [
+            ("no meetings", [], [w("08:00", "18:00", 600)]),
+            ("an evening meeting stays outside the hours",
+             [("19:00", "20:00")], [w("08:00", "18:00", 600)]),
+            ("an early meeting stays outside the hours",
+             [("06:00", "07:00")], [w("08:00", "18:00", 600)]),
+            ("a meeting across the start", [("07:30", "09:00")], [w("09:00", "18:00", 540)]),
+            ("a meeting across the end", [("17:00", "19:00")], [w("08:00", "17:00", 540)]),
+            ("a meeting spanning the hours", [("07:00", "19:00")], []),
+            ("overlapping meetings, given out of order",
+             [("13:00", "14:00"), ("10:00", "12:00"), ("11:00", "12:30")],
+             [w("08:00", "10:00", 120), w("12:30", "13:00", 30), w("14:00", "18:00", 240)]),
+            ("gaps shorter than min_slot are dropped",
+             [("09:00", "10:00"), ("10:20", "17:45")], [w("08:00", "09:00", 60)]),
+        ]
+        for name, busy, want in cases:
+            with self.subTest(name):
+                slots = [(at(s), at(e)) for s, e in busy]
+                self.assertEqual(calendar_tool.free_windows(slots, at("08:00"), at("18:00"), 30), want)
+
+
+class FreeCommandTest(TokenTestCase):
+    def free(self, *argv: str) -> tuple[int, dict]:
+        self.write_token()
+        code, out, err = support.run_main(calendar_tool, ["--profile", self.profile, "free",
+                                                          "--date", "2026-01-06", *argv])
+        return code, json.loads(out)
+
+    def test_evening_meeting_does_not_extend_the_day(self):
+        # 18:00Z is 19:00 in Berlin in January.
+        self.google.service.busy = {"primary": [{"start": "2026-01-06T18:00:00Z", "end": "2026-01-06T19:00:00Z"}]}
+        code, out = self.free("--hours", "08:00-18:00")
+        self.assertEqual(code, 0, out)
+        self.assertEqual(out["busy"], [{"start": "19:00", "end": "20:00"}])
+        self.assertEqual(out["free_windows"], [{"start": "08:00", "end": "18:00", "duration_minutes": 600}])
 
 
 class ApiErrorTest(TokenTestCase):
