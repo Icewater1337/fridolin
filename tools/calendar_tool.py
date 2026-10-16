@@ -63,6 +63,7 @@ import contextlib
 import json
 import os
 import sys
+import traceback
 from datetime import datetime, date, timedelta
 from pathlib import Path
 from typing import NoReturn
@@ -507,6 +508,32 @@ def cmd_auth(args) -> None:
     print(json.dumps({"authorized": True, "token_file": str(token_file)}))
 
 
+def describe_error(e: Exception) -> str:
+    """One line for an error a command raised, for the JSON error."""
+    try:
+        from googleapiclient.errors import HttpError
+    except ImportError:
+        HttpError = ()
+    try:
+        from google.auth.exceptions import RefreshError, TransportError
+    except ImportError:
+        RefreshError = TransportError = ()
+
+    if isinstance(e, HttpError):
+        status = e.resp.status
+        msg = f"Google Calendar {status}: {e.reason}"
+        hint = {401: reconnect_hint(), 404: "Check the event and calendar IDs."}.get(status)
+        return f"{msg.rstrip('.')}. {hint}" if hint else msg
+    if isinstance(e, RefreshError):
+        return refresh_failure(e)
+    if isinstance(e, TransportError):
+        return f"Could not reach Google ({e}). This is usually temporary; try again in a minute."
+    # Not an error the Google client reports: keep the traceback for whoever
+    # debugs it, on stderr.
+    traceback.print_exc()
+    return f"{type(e).__name__}: {e}"
+
+
 # ── main ──────────────────────────────────────────────────────────────────
 
 def main() -> None:
@@ -566,14 +593,20 @@ def main() -> None:
     _profile = args.profile
     _timezone = resolve_timezone(args.timezone)
 
-    {
+    command = {
         "list": cmd_list,
         "create": cmd_create,
         "free": cmd_free,
         "delete": cmd_delete,
         "calendars": cmd_calendars,
         "auth": cmd_auth,
-    }[args.command](args)
+    }[args.command]
+    # The one exception boundary: whatever goes wrong, stdout is a JSON error
+    # the assistant can read, never just a traceback on stderr.
+    try:
+        command(args)
+    except Exception as e:
+        err(describe_error(e))
 
 
 if __name__ == "__main__":

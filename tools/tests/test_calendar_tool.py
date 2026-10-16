@@ -9,6 +9,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+import warnings
 from pathlib import Path
 from unittest import mock
 from zoneinfo import ZoneInfo
@@ -209,6 +210,62 @@ class AuthCommandTest(TokenTestCase):
         code, out, _ = self.auth()
         self.assertEqual(code, 1)
         self.assertIn("Credentials file not found", out["error"])
+
+
+class ApiErrorTest(TokenTestCase):
+    """Errors from Google come back as JSON on stdout, not as a traceback."""
+
+    def test_errors_are_json(self):
+        g = self.google
+        cases = [
+            ("delete of an unknown event", "delete", g.http_error(404, "Not Found"),
+             ["delete", "--event-id", "nope"],
+             "Google Calendar 404: Not Found. Check the event and calendar IDs."),
+            ("a calendar the account cannot read", "list", g.http_error(403, "Forbidden"),
+             ["list", "--from", "2026-01-05"], "Google Calendar 403: Forbidden"),
+            ("an empty range", "insert", g.http_error(400, "The specified time range is empty."),
+             ["create", "--title", "x", "--start", "2026-01-06", "--end", "2026-01-06"],
+             "Google Calendar 400: The specified time range is empty."),
+            ("a sign-in revoked mid-run", "calendarList", g.RefreshError("invalid_grant"),
+             ["calendars"], "calendar_tool.py --profile work auth"),
+            ("a token endpoint outage mid-run", "calendarList",
+             g.RefreshError("Service Unavailable", retryable=True), ["calendars"], "try again"),
+            ("a dropped connection", "freebusy", g.TransportError("reset"),
+             ["free", "--date", "2026-01-06"], "try again"),
+        ]
+        self.write_token()
+        for name, method, error, argv, want in cases:
+            with self.subTest(name):
+                g.service.errors = {method: error}
+                code, out, err = support.run_main(calendar_tool, ["--profile", self.profile, *argv])
+                self.assertEqual(code, 1)
+                self.assertIn(want, json.loads(out)["error"])
+                self.assertNotIn("Traceback", err)
+
+    def test_an_unexpected_error_is_json_with_the_traceback_on_stderr(self):
+        self.write_token()
+        self.google.service.errors = {"delete": RuntimeError("boom")}
+        code, out, err = support.run_main(calendar_tool, ["--profile", self.profile, "delete",
+                                                          "--event-id", "e1"])
+        self.assertEqual(code, 1)
+        self.assertEqual(json.loads(out), {"error": "RuntimeError: boom"})
+        self.assertIn("Traceback", err)
+
+
+class RealHttpErrorTest(CalendarTestCase):
+    def test_describes_googleapiclient_errors(self):
+        # The fake mirrors googleapiclient's HttpError; check against the real
+        # one where it is installed.
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")  # google-auth warns about old Pythons
+            try:
+                import httplib2
+                from googleapiclient.errors import HttpError
+            except ImportError:
+                self.skipTest("googleapiclient is not installed")
+            e = HttpError(httplib2.Response({"status": 404}), b'{"error": {"code": 404, "message": "Not Found"}}')
+            self.assertEqual(calendar_tool.describe_error(e),
+                             "Google Calendar 404: Not Found. Check the event and calendar IDs.")
 
 
 def sandbox_exec_works() -> bool:
