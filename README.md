@@ -329,10 +329,11 @@ permission, so it can see nothing in your Drive except the files it creates.
 Every night (or when you click *Back up now*) each brain folder is synced
 incrementally to `fridolin-backup/<brain>/current/`; files that
 changed or were deleted move to `versions/<timestamp>/` and are kept for 30
-days after that run. Exclude patterns per brain keep out what you can
-rebuild. The WhatsApp session, tokens and `.env` files are never uploaded.
-Restores go into a new folder and never overwrite a brain. Details:
-[docs/BACKUP.md](docs/BACKUP.md).
+days after that run. A run that would mirror a mass deletion (an empty brain
+folder, or more than half of its files gone) is refused until you force it.
+Exclude patterns per brain keep out what you can rebuild. The WhatsApp
+session, tokens and `.env` files are never uploaded. Restores go into a new
+folder and never overwrite a brain. Details: [docs/BACKUP.md](docs/BACKUP.md).
 
 ### Running in the background
 

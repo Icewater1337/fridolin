@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"log"
 	"net/http"
 	"os"
@@ -14,9 +15,12 @@ import (
 	"path/filepath"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
+
+	"golang.org/x/text/unicode/norm"
 )
 
 // Backups go to Google Drive through rclone (https://rclone.org), driven by
@@ -32,6 +36,8 @@ import (
 //
 // Each run is an incremental `rclone sync`, so only changed files upload.
 // Version folders are pruned keep_versions_days after the run that made them.
+// A brain folder that lost most of its files is not mirrored without force
+// (see checkMassDeletion).
 
 // BackupConfig controls Google Drive backups.
 type BackupConfig struct {
@@ -85,6 +91,9 @@ type BackupResult struct {
 	Seconds  float64   `json:"seconds"`
 	Version  string    `json:"version"`
 	Trigger  string    `json:"trigger"` // manual or scheduled
+	// Refused is set when the run would have mirrored a mass deletion and
+	// was stopped; a manual run with force mirrors it anyway.
+	Refused bool `json:"refused,omitempty"`
 }
 
 type backupState struct {
@@ -606,13 +615,22 @@ func (b *Bridge) apiBackupRun(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		Brains        []string `json:"brains"`
 		IncludeBridge *bool    `json:"include_bridge"`
+		// Force mirrors the named brains even when most of their backed-up
+		// files are gone (see checkMassDeletion).
+		Force bool `json:"force"`
 	}
 	if err := decodeJSON(r, &req); err != nil {
 		writeErr(w, http.StatusBadRequest, err.Error())
 		return
 	}
+	// Forcing is a decision about one brain's folder, made after looking at
+	// it; without a list it would mirror every brain's deletions at once.
+	if req.Force && len(req.Brains) == 0 {
+		writeErr(w, http.StatusBadRequest, "force needs a brain: name the brains to mirror in \"brains\"")
+		return
+	}
 	include := boolOr(req.IncludeBridge, boolOr(b.cfgs.Get().Backup.IncludeBridgeConfig, true))
-	if err := b.backup.StartRun(req.Brains, include, "manual"); err != nil {
+	if err := b.backup.StartRun(req.Brains, include, "manual", req.Force); err != nil {
 		writeErr(w, http.StatusConflict, err.Error())
 		return
 	}
@@ -631,7 +649,9 @@ func (b *Bridge) apiBackupCancel(w http.ResponseWriter, r *http.Request) {
 }
 
 // StartRun backs up the given brains (all with backup enabled when empty).
-func (m *BackupManager) StartRun(ids []string, includeBridge bool, trigger string) error {
+// force skips the mass-deletion check, for a manual run that mirrors a
+// deletion the owner meant.
+func (m *BackupManager) StartRun(ids []string, includeBridge bool, trigger string, force bool) error {
 	if !m.connected() {
 		return errors.New("Google Drive is not connected")
 	}
@@ -665,7 +685,7 @@ func (m *BackupManager) StartRun(ids []string, includeBridge bool, trigger strin
 	go func() {
 		defer cancel()
 		for _, br := range targets {
-			m.runOne(ctx, job, br.ID(), func() *BackupResult { return m.backupBrain(ctx, br, trigger) })
+			m.runOne(ctx, job, br.ID(), func() *BackupResult { return m.backupBrain(ctx, br, trigger, force) })
 		}
 		if includeBridge {
 			m.runOne(ctx, job, "_bridge", func() *BackupResult { return m.backupBridge(ctx, trigger) })
@@ -725,13 +745,142 @@ func filterLines(excludes []string) string {
 	return sb.String()
 }
 
-func (m *BackupManager) backupBrain(ctx context.Context, br *Brain, trigger string) *BackupResult {
+func (m *BackupManager) backupBrain(ctx context.Context, br *Brain, trigger string, force bool) *BackupResult {
+	started := time.Now()
+	fail := func(msg string) *BackupResult {
+		now := time.Now()
+		return &BackupResult{Started: started, Finished: now, Seconds: now.Sub(started).Seconds(), Error: msg, Trigger: trigger}
+	}
 	s := br.settings.Load()
 	filter := filepath.Join(m.dir(), "filters-"+br.ID()+".txt")
 	if err := writeFileAtomic(filter, []byte(filterLines(s.manifest.Backup.Exclude)), 0o600, false); err != nil {
-		return &BackupResult{Started: time.Now(), Finished: time.Now(), Error: err.Error(), Trigger: trigger}
+		return fail(err.Error())
 	}
-	return m.syncDir(ctx, br.Dir(), br.ID(), filter, trigger)
+	// One config snapshot for the check and the sync, so a backup.root
+	// changed mid-run cannot count one folder and sync into another.
+	cfg := m.cfgs.Get()
+	base := cfg.Backup.Remote + ":" + cfg.Backup.Root + "/" + br.ID()
+	if force {
+		return m.syncDir(ctx, br.Dir(), base, filter, trigger, -1)
+	}
+	gone, backedUp, err := m.checkMassDeletion(ctx, br.Dir(), base, filter)
+	switch {
+	case ctx.Err() != nil:
+		return fail("cancelled")
+	case errors.Is(err, errListingBrain):
+		// A folder rclone could only partly read cannot be counted, but
+		// skipping its sync would leave its readable new and changed files
+		// out of the backup as well. Sync it with no deletion allowed:
+		// rclone uploads what it can read and fails on the rest.
+		res := m.syncDir(ctx, br.Dir(), base, filter, trigger, 0)
+		if !res.OK && !res.Refused && ctx.Err() == nil {
+			// rclone's own error only says it deleted nothing because of
+			// read errors; the listing's names what it could not read.
+			res.Error = "parts of the brain folder could not be read, so the backup synced the rest and deleted nothing: " + err.Error()
+		}
+		return res
+	case err != nil:
+		return fail("checking the backup before syncing failed: " + err.Error())
+	case gone*2 > backedUp:
+		res := fail(fmt.Sprintf("%s: %d of %d backed-up files are gone from the brain folder, so the backup in Drive was left as it was. "+
+			"If the deletion was intended, mirror it with a forced backup of this brain.", massDeletionError, gone, backedUp))
+		res.Refused = true
+		return res
+	}
+	// The check and the sync are moments apart; --max-delete keeps a brain
+	// that deletes files in between from slipping past the limit.
+	return m.syncDir(ctx, br.Dir(), base, filter, trigger, backedUp/2)
+}
+
+// massDeletionError starts the error of a run that refused to mirror a
+// mass deletion.
+const massDeletionError = "refusing to mirror a mass deletion"
+
+// checkMassDeletion compares a brain folder with its backup under base
+// (remote:root/<brain-id>) before a sync.
+// A folder that suddenly lacks most of its files was more likely wiped (a
+// brain told to rm -rf, an unmounted disk, a botched move) than tidied, and
+// a plain sync would mirror that into current/ and report OK; the copies in
+// versions/ would then expire unnoticed. It returns how many backed-up files
+// the sync would delete and how many are backed up; the caller refuses when
+// more than half would go (an empty brain folder is the extreme case). Both
+// sides are listed with the sync's own filters and symlink handling, so
+// excluded files, which the sync never deletes, do not count.
+func (m *BackupManager) checkMassDeletion(ctx context.Context, src, base, filterFile string) (gone, backedUp int, err error) {
+	// Only a brain folder that is not there at all counts as empty (all of
+	// it gone). One that rclone could only partly read (a subfolder it may
+	// not open, a folder removed while it was listed) is never reported as
+	// wiped: that fails with errListingBrain, and the caller syncs it
+	// without deleting anything.
+	var local []string
+	var localErr error
+	if _, serr := os.Stat(src); !errors.Is(serr, fs.ErrNotExist) {
+		if local, localErr = m.listFiles(ctx, src+"/", filterFile); localErr != nil {
+			localErr = fmt.Errorf("%w: %w", errListingBrain, localErr)
+		}
+	}
+	// No current/ yet is a first backup: nothing to delete. A backup that
+	// cannot be listed fails the check either way; a sync would most likely
+	// fail on it too.
+	remote, err := m.listFiles(ctx, base+"/current", filterFile)
+	if err != nil && !errors.Is(err, errDirNotFound) {
+		return 0, 0, fmt.Errorf("listing the backup: %w", err)
+	}
+	if localErr != nil {
+		return 0, len(remote), localErr
+	}
+	// rclone sync matches names whatever their Unicode normalization (an
+	// "ü" stored decomposed on one side and composed on the other is the
+	// same file), but lsjson returns the bytes as stored; compare the way
+	// the sync does.
+	have := make(map[string]bool, len(local))
+	for _, p := range local {
+		have[norm.NFC.String(p)] = true
+	}
+	for _, p := range remote {
+		if !have[norm.NFC.String(p)] {
+			gone++
+		}
+	}
+	return gone, len(remote), nil
+}
+
+// errDirNotFound is listFiles' error for a folder that does not exist.
+var errDirNotFound = errors.New("directory not found")
+
+// errListingBrain marks checkMassDeletion's error for a brain folder that is
+// there but that rclone could not list in full.
+var errListingBrain = errors.New("listing the brain folder")
+
+// listFiles lists the paths of the files under an rclone path.
+func (m *BackupManager) listFiles(ctx context.Context, path, filterFile string) ([]string, error) {
+	args := []string{"lsjson", "-R", "--files-only", "--no-modtime", "--no-mimetype", "--links", path}
+	if filterFile != "" {
+		args = append(args, "--filter-from", filterFile)
+	}
+	var stderr strings.Builder
+	out, err := m.runner(ctx, args, &lockedWriter{w: &stderr})
+	if err != nil {
+		if strings.Contains(strings.ToLower(stderr.String()), "directory not found") {
+			return nil, errDirNotFound
+		}
+		msg := truncate(strings.TrimSpace(stderr.String()), 300)
+		if msg == "" {
+			return nil, err
+		}
+		return nil, fmt.Errorf("%w: %s", err, msg)
+	}
+	var entries []struct {
+		Path string `json:"Path"`
+	}
+	if err := json.Unmarshal(out, &entries); err != nil {
+		return nil, fmt.Errorf("reading rclone's file list: %w", err)
+	}
+	paths := make([]string, 0, len(entries))
+	for _, e := range entries {
+		paths = append(paths, e.Path)
+	}
+	return paths, nil
 }
 
 // backupBridge stages the bridge's own configuration and syncs it.
@@ -754,7 +903,10 @@ func (m *BackupManager) backupBridge(ctx context.Context, trigger string) *Backu
 		"restore each brain folder from <brain-id>/current, and pair WhatsApp again from the dashboard.\n" +
 		"The WhatsApp session, .env files and tokens are deliberately not backed up.\n"
 	_ = os.WriteFile(filepath.Join(stage, "README.txt"), []byte(readme), 0o600)
-	return m.syncDir(ctx, stage, "_bridge", "", trigger)
+	// No deletion limit: the bridge writes this folder itself, and removing
+	// a brain drops its manifest, a deletion the backup must mirror.
+	cfg := m.cfgs.Get()
+	return m.syncDir(ctx, stage, cfg.Backup.Remote+":"+cfg.Backup.Root+"/_bridge", "", trigger, -1)
 }
 
 // versionLayout names a version folder after the local time of its run.
@@ -762,11 +914,11 @@ func (m *BackupManager) backupBridge(ctx context.Context, trigger string) *Backu
 // list read the run time back out of the name.
 const versionLayout = "20060102-150405"
 
-// syncDir runs one incremental sync with versioning.
-func (m *BackupManager) syncDir(ctx context.Context, src, id, filterFile, trigger string) *BackupResult {
-	cfg := m.cfgs.Get()
+// syncDir runs one incremental sync with versioning into base
+// (remote:root/<id>). With maxDelete >= 0, rclone stops after that many
+// deletions and the run is refused as a mass deletion.
+func (m *BackupManager) syncDir(ctx context.Context, src, base, filterFile, trigger string, maxDelete int) *BackupResult {
 	res := &BackupResult{Started: time.Now(), Trigger: trigger, Version: time.Now().Format(versionLayout)}
-	base := cfg.Backup.Remote + ":" + cfg.Backup.Root + "/" + id
 	args := []string{"sync", src + "/", base + "/current",
 		"--backup-dir", base + "/versions/" + res.Version,
 		"--links", "--use-json-log", "--stats", "15s", "--stats-log-level", "NOTICE", "-v",
@@ -774,6 +926,9 @@ func (m *BackupManager) syncDir(ctx context.Context, src, id, filterFile, trigge
 	}
 	if filterFile != "" {
 		args = append(args, "--filter-from", filterFile)
+	}
+	if maxDelete >= 0 {
+		args = append(args, "--max-delete", strconv.Itoa(maxDelete))
 	}
 	stderr := &jsonStats{}
 	_, err := m.runner(ctx, args, stderr)
@@ -783,6 +938,18 @@ func (m *BackupManager) syncDir(ctx context.Context, src, id, filterFile, trigge
 	switch {
 	case ctx.Err() != nil:
 		res.Error = "cancelled"
+	case err != nil && stderr.hitMaxDelete():
+		// rclone deletes up to the limit before it stops, so unlike the
+		// check before the sync this one has already changed Drive a little.
+		// A limit of 0 (a brain folder that could not be read in full) moved
+		// nothing, and "up to 0 files" would only puzzle the owner.
+		moved := fmt.Sprintf("It stopped at its limit of %d deletion(s), so up to that many files were already moved from current/ to versions/%s.", maxDelete, res.Version)
+		if maxDelete == 0 {
+			moved = "It allowed no deletion and stopped at the first one, so nothing was removed from current/."
+		}
+		res.Error = fmt.Sprintf("%s: files disappeared from the brain folder during the backup. %s "+
+			"If the deletion was intended, mirror it with a forced backup of this brain.", massDeletionError, moved)
+		res.Refused = true
 	case err != nil:
 		res.Error = strings.TrimSpace(err.Error() + " " + stderr.lastError())
 	default:
@@ -793,11 +960,12 @@ func (m *BackupManager) syncDir(ctx context.Context, src, id, filterFile, trigge
 
 // jsonStats reads rclone's JSON log for transfer totals and errors.
 type jsonStats struct {
-	mu    sync.Mutex
-	rest  string
-	bytes int64
-	files int64
-	errs  []string
+	mu        sync.Mutex
+	rest      string
+	bytes     int64
+	files     int64
+	errs      []string
+	maxDelete bool
 }
 
 func (j *jsonStats) Write(p []byte) (int, error) {
@@ -826,9 +994,19 @@ func (j *jsonStats) Write(p []byte) (int, error) {
 			if len(j.errs) > 5 {
 				j.errs = j.errs[1:]
 			}
+			if strings.Contains(e.Msg, "--max-delete threshold reached") {
+				j.maxDelete = true
+			}
 		}
 	}
 	return len(p), nil
+}
+
+// hitMaxDelete reports whether rclone stopped at the --max-delete limit.
+func (j *jsonStats) hitMaxDelete() bool {
+	j.mu.Lock()
+	defer j.mu.Unlock()
+	return j.maxDelete
 }
 
 func (j *jsonStats) lastError() string {
@@ -1073,7 +1251,7 @@ func (m *BackupManager) tick(now time.Time) {
 	if now.Before(dueToday) || last == today || busy {
 		return
 	}
-	if err := m.StartRun(nil, boolOr(cfg.Backup.IncludeBridgeConfig, true), "scheduled"); err != nil {
+	if err := m.StartRun(nil, boolOr(cfg.Backup.IncludeBridgeConfig, true), "scheduled", false); err != nil {
 		log.Printf("scheduled backup: %v", err)
 		return
 	}

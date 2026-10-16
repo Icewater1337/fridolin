@@ -160,7 +160,7 @@ func TestBackupRoundTripWithRealRclone(t *testing.T) {
 
 	run := func() {
 		t.Helper()
-		if err := tb.backup.StartRun(nil, true, "manual"); err != nil {
+		if err := tb.backup.StartRun(nil, true, "manual", false); err != nil {
 			t.Fatal(err)
 		}
 		waitFor(t, 60*time.Second, "backup", func() bool {
@@ -296,7 +296,7 @@ func addBackupBrain(t *testing.T, tb *testBridge, id string) string {
 // runBackup starts a backup of one brain, waits for it, and returns its result.
 func runBackup(t *testing.T, tb *testBridge, id string) *BackupResult {
 	t.Helper()
-	if err := tb.backup.StartRun([]string{id}, false, "manual"); err != nil {
+	if err := tb.backup.StartRun([]string{id}, false, "manual", false); err != nil {
 		t.Fatal(err)
 	}
 	return waitBackup(t, tb, id)
@@ -466,4 +466,539 @@ func TestPruneKeepsItsConfigAndStopsWhenCancelled(t *testing.T) {
 			t.Errorf("prune went on after the cancel: %v", calls)
 		}
 	})
+}
+
+// deletionRunner plays rclone for the mass-deletion check: lsjson lists src
+// for the brain folder and cur for current/ (nil means rclone reports the
+// folder as not found), and sync and lsjson record their arguments.
+type deletionRunner struct {
+	mu      sync.Mutex
+	src     []string
+	cur     []string
+	srcErr  string // set: listing the brain folder fails with this message
+	listErr string // set: listing current/ fails with this message
+	syncErr string // set: the sync fails with this error in rclone's log
+	syncs   [][]string
+	lists   [][]string
+}
+
+func (d *deletionRunner) run(_ context.Context, args []string, stderr io.Writer) ([]byte, error) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	switch args[0] {
+	case "sync":
+		d.syncs = append(d.syncs, args)
+		if d.syncErr != "" {
+			fmt.Fprintf(stderr, "{\"level\":\"error\",\"msg\":%q}\n", d.syncErr)
+			return nil, fmt.Errorf("exit status 1")
+		}
+		return nil, nil
+	case "lsjson":
+		if contains(args, "--dirs-only") {
+			return []byte("[]"), nil
+		}
+		d.lists = append(d.lists, args)
+		files, listErr := d.src, d.srcErr
+		for _, a := range args {
+			if strings.HasPrefix(a, "brain-gdrive:") { // the backup, not the brain folder
+				files, listErr = d.cur, d.listErr
+			}
+		}
+		if listErr != "" {
+			fmt.Fprintln(stderr, listErr)
+			return nil, fmt.Errorf("exit status 1")
+		}
+		if files == nil {
+			fmt.Fprintln(stderr, "ERROR : : error listing: directory not found")
+			return nil, fmt.Errorf("exit status 3")
+		}
+		var out []map[string]any
+		for _, f := range files {
+			out = append(out, map[string]any{"Path": f, "Name": filepath.Base(f), "IsDir": false})
+		}
+		data, _ := json.Marshal(out)
+		return data, nil
+	}
+	return nil, nil
+}
+
+// notesBase is where the default config backs up the brain "notes".
+const notesBase = defaultBackupRemote + ":" + defaultBackupRoot + "/notes"
+
+// flagValue returns the value after an rclone flag, "" when it is not set.
+func flagValue(args []string, flag string) string {
+	for i, a := range args {
+		if a == flag && i+1 < len(args) {
+			return args[i+1]
+		}
+	}
+	return ""
+}
+
+// syncMaxDelete returns a sync's --max-delete value, "" for none.
+func syncMaxDelete(args []string) string { return flagValue(args, "--max-delete") }
+
+// TestBackupRefusesMassDeletion runs the check before a brain's sync: it
+// mirrors ordinary changes, and refuses an empty or missing brain folder or
+// one that lost more than half of its backed-up files, unless forced. A
+// folder rclone can only partly read is synced with no deletion allowed.
+func TestBackupRefusesMassDeletion(t *testing.T) {
+	tb := newTestBridge(t, "")
+	dir := addBackupBrain(t, tb, "notes")
+	br := tb.brainMgr.Get("notes")
+	files := func(names ...string) []string { return append([]string{}, names...) }
+	const unreadable = `ERROR : locked: failed to open directory "locked": open locked: permission denied`
+	cases := []struct {
+		name      string
+		src, cur  []string
+		missing   bool // the brain folder does not exist
+		srcErr    string
+		listErr   string
+		syncErr   string // the sync fails with this; refused and failed then expect it to have run
+		force     bool
+		refused   bool
+		failed    string // the result's error contains this, no sync ran unless syncErr is set
+		maxDelete string // the sync's --max-delete, "" for none
+	}{
+		{name: "unchanged", src: files("a", "b", "c", "d"), cur: files("a", "b", "c", "d"), maxDelete: "2"},
+		{name: "first backup", src: files("a"), cur: nil, maxDelete: "0"},
+		{name: "empty folder, empty backup", src: files(), cur: files(), maxDelete: "0"},
+		{name: "half gone is allowed", src: files("a", "b"), cur: files("a", "b", "c", "d"), maxDelete: "2"},
+		{name: "more than half gone", src: files("a"), cur: files("a", "b", "c", "d"), refused: true},
+		{name: "empty brain folder", src: files(), cur: files("a", "b"), refused: true},
+		{name: "missing brain folder", missing: true, cur: files("a"), refused: true},
+		{name: "new files do not offset deletions", src: files("v", "w", "x", "y", "z"), cur: files("a", "b", "c"), refused: true},
+		{name: "force mirrors anyway", src: files(), cur: files("a", "b"), force: true},
+		{name: "listing the backup fails", src: files("a"), listErr: "ERROR : couldn't connect", failed: "checking the backup before syncing failed"},
+		// The folder is there, so rclone failing to read it is no proof it
+		// is empty, and no reason to leave its readable files out either.
+		{name: "brain folder partly unreadable", srcErr: unreadable, cur: files("a"), syncErr: "not deleting files as there were IO errors",
+			failed: "parts of the brain folder could not be read, so the backup synced the rest and deleted nothing", maxDelete: "0"},
+		{name: "brain folder unreadable for a moment", srcErr: unreadable, cur: files("a"), maxDelete: "0"},
+		{name: "brain folder vanishes while listed", src: nil, cur: files("a"), maxDelete: "0"},
+		{name: "the sync of a partly read folder finds deletions", srcErr: unreadable, cur: files("a"),
+			syncErr: "Got fatal error on delete: --max-delete threshold reached", refused: true, maxDelete: "0"},
+		{name: "brain folder and backup unreadable", srcErr: unreadable, listErr: "ERROR : couldn't connect", failed: "checking the backup before syncing failed"},
+		// rclone sync treats differently normalized names as the same file.
+		{name: "decomposed names in the backup", src: files("Gr\u00fcsse.md", "M\u00e4rz.md"), cur: files("Gru\u0308sse.md", "Ma\u0308rz.md"), maxDelete: "1"},
+		{name: "decomposed names in the folder", src: files("Gru\u0308sse.md", "Ma\u0308rz.md"), cur: files("Gr\u00fcsse.md", "M\u00e4rz.md"), maxDelete: "1"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			if err := os.MkdirAll(dir, 0o700); err != nil {
+				t.Fatal(err)
+			}
+			if c.missing {
+				if err := os.RemoveAll(dir); err != nil {
+					t.Fatal(err)
+				}
+			}
+			d := &deletionRunner{src: c.src, cur: c.cur, srcErr: c.srcErr, listErr: c.listErr, syncErr: c.syncErr}
+			tb.backup.runner = d.run
+			res := tb.backup.backupBrain(context.Background(), br, "manual", c.force)
+			synced := 0
+			if c.syncErr != "" {
+				synced = 1
+			}
+			switch {
+			case c.refused:
+				if res.OK || !res.Refused || !strings.HasPrefix(res.Error, massDeletionError) || len(d.syncs) != synced {
+					t.Errorf("want a refusal after %d syncs, got %+v, syncs %v", synced, res, d.syncs)
+				}
+				if res.Seconds != res.Finished.Sub(res.Started).Seconds() {
+					t.Errorf("seconds = %v, want the time the run took", res.Seconds)
+				}
+			case c.failed != "":
+				if res.OK || res.Refused || !strings.Contains(res.Error, c.failed) || len(d.syncs) != synced {
+					t.Errorf("want a failure %q after %d syncs, got %+v", c.failed, synced, res)
+				}
+			default:
+				if !res.OK || res.Refused || len(d.syncs) != 1 {
+					t.Fatalf("want one sync, got %+v, syncs %v", res, d.syncs)
+				}
+			}
+			if len(d.syncs) == 1 {
+				if got := syncMaxDelete(d.syncs[0]); got != c.maxDelete {
+					t.Errorf("--max-delete = %q, want %q", got, c.maxDelete)
+				}
+			}
+		})
+	}
+}
+
+// TestBackupBrainKeepsItsConfig: the check and the sync of one brain use
+// the config the brain's backup started with, so a backup.root changed in
+// between cannot count one folder in Drive and sync into another.
+func TestBackupBrainKeepsItsConfig(t *testing.T) {
+	tb := newTestBridge(t, "")
+	addBackupBrain(t, tb, "notes")
+	d := &deletionRunner{src: []string{"a"}, cur: []string{"a"}}
+	moved := false
+	tb.backup.runner = func(ctx context.Context, args []string, stderr io.Writer) ([]byte, error) {
+		if args[0] == "lsjson" && !moved {
+			moved = true
+			if _, err := tb.cfgs.Update("", func(c *Config) error { c.Backup.Root = "moved"; return nil }); err != nil {
+				t.Error(err)
+			}
+		}
+		return d.run(ctx, args, stderr)
+	}
+	if res := tb.backup.backupBrain(context.Background(), tb.brainMgr.Get("notes"), "manual", false); !res.OK {
+		t.Fatalf("backup = %+v", res)
+	}
+	if len(d.syncs) != 1 {
+		t.Fatalf("want one sync, got %v", d.syncs)
+	}
+	for _, p := range []string{d.syncs[0][2], flagValue(d.syncs[0], "--backup-dir")} {
+		if !strings.HasPrefix(p, notesBase+"/") {
+			t.Errorf("the sync writes to %s, not under the backup.root the check counted", p)
+		}
+	}
+}
+
+// TestMassDeletionCheckListsLikeTheSync: the check lists both sides with the
+// sync's filter file and symlink handling. Without the brain's excludes,
+// files backed up before they were excluded, which the sync never deletes
+// from Drive, would count as gone on every run; without --links, a symlink
+// the sync backed up as .rclonelink would be missing from the brain folder.
+func TestMassDeletionCheckListsLikeTheSync(t *testing.T) {
+	tb := newTestBridge(t, "")
+	addBackupBrain(t, tb, "notes")
+	br := tb.brainMgr.Get("notes")
+	d := &deletionRunner{src: []string{"a"}, cur: []string{"a"}}
+	tb.backup.runner = d.run
+	if res := tb.backup.backupBrain(context.Background(), br, "manual", false); !res.OK {
+		t.Fatalf("backup = %+v", res)
+	}
+	filter := filepath.Join(tb.backup.dir(), "filters-notes.txt")
+	if len(d.syncs) != 1 || flagValue(d.syncs[0], "--filter-from") != filter || !contains(d.syncs[0], "--links") {
+		t.Fatalf("syncs = %v, want one with --filter-from %s and --links", d.syncs, filter)
+	}
+	for _, side := range []struct{ name, path string }{
+		{"brain folder", br.Dir() + "/"},
+		{"backup", notesBase + "/current"},
+	} {
+		t.Run(side.name, func(t *testing.T) {
+			var args []string
+			for _, l := range d.lists {
+				if contains(l, side.path) {
+					args = l
+				}
+			}
+			if args == nil {
+				t.Fatalf("no listing of %s in %v", side.path, d.lists)
+			}
+			if got := flagValue(args, "--filter-from"); got != filter {
+				t.Errorf("--filter-from = %q, want the sync's %s", got, filter)
+			}
+			if !contains(args, "--links") {
+				t.Errorf("listed without --links: %v", args)
+			}
+		})
+	}
+}
+
+// TestBackupBridgeHasNoDeletionLimit: the bridge's own settings are staged
+// by the bridge, so they get neither the check nor --max-delete; removing a
+// brain drops its manifest from them, and that must reach the backup.
+func TestBackupBridgeHasNoDeletionLimit(t *testing.T) {
+	tb := newTestBridge(t, "")
+	d := &deletionRunner{src: []string{}, cur: []string{"config.json", "brains/a.brain.json", "brains/b.brain.json"}}
+	tb.backup.runner = d.run
+	if res := tb.backup.backupBridge(context.Background(), "manual"); !res.OK {
+		t.Fatalf("bridge backup = %+v", res)
+	}
+	if len(d.lists) != 0 {
+		t.Errorf("the bridge backup listed files for a deletion check: %v", d.lists)
+	}
+	if len(d.syncs) != 1 || syncMaxDelete(d.syncs[0]) != "" {
+		t.Errorf("want one sync without --max-delete, got %v", d.syncs)
+	}
+}
+
+// TestBackupRunForceOverridesRefusal: the API's force field reaches the run,
+// and only for the brains it names.
+func TestBackupRunForceOverridesRefusal(t *testing.T) {
+	tb := newTestBridge(t, "")
+	_ = os.MkdirAll(filepath.Dir(tb.backup.rcloneConf()), 0o700)
+	_ = os.WriteFile(tb.backup.rcloneConf(), []byte("[brain-gdrive]\ntype = alias\nremote = /nowhere\n"), 0o600)
+	addBackupBrain(t, tb, "notes")
+	d := &deletionRunner{src: []string{}, cur: []string{"a", "b"}}
+	tb.backup.runner = d.run
+
+	// Forcing every brain at once is refused: force names its brains.
+	for _, body := range []map[string]any{{"force": true}, {"brains": []string{}, "force": true}} {
+		if w := tb.do("POST", "/api/backup/run", body); w.Code != 400 || !strings.Contains(w.Body.String(), "force needs a brain") {
+			t.Errorf("%v: %d %s, want 400", body, w.Code, w.Body.String())
+		}
+	}
+	tb.backup.mu.Lock()
+	started := tb.backup.job != nil || tb.backup.state.Brains["notes"] != nil
+	tb.backup.mu.Unlock()
+	if started {
+		t.Fatal("a rejected forced run must not start a backup")
+	}
+
+	for _, force := range []bool{false, true} {
+		if w := tb.do("POST", "/api/backup/run", map[string]any{"brains": []string{"notes"}, "include_bridge": false, "force": force}); w.Code != 202 {
+			t.Fatal(w.Body.String())
+		}
+		res := waitBackup(t, tb, "notes")
+		d.mu.Lock()
+		syncs := len(d.syncs)
+		d.mu.Unlock()
+		if !force && (res.OK || !res.Refused || syncs != 0) {
+			t.Errorf("without force: want a refusal, got %+v and %d syncs", res, syncs)
+		}
+		if force && (!res.OK || syncs != 1) {
+			t.Errorf("with force: want the sync, got %+v and %d syncs", res, syncs)
+		}
+	}
+	body := tb.do("GET", "/api/backup/status", nil).Body.String()
+	if strings.Contains(body, `"refused"`) {
+		t.Errorf("a forced run that succeeded must clear the refusal: %s", body)
+	}
+}
+
+// TestScheduledBackupNeverForces: the nightly run keeps refusing a mass
+// deletion, so a wiped brain is never mirrored without the owner.
+func TestScheduledBackupNeverForces(t *testing.T) {
+	tb := newTestBridge(t, `, "backup": {"enabled": true, "daily_at": "03:30", "include_bridge_config": false}`)
+	_ = os.MkdirAll(filepath.Dir(tb.backup.rcloneConf()), 0o700)
+	_ = os.WriteFile(tb.backup.rcloneConf(), []byte("[brain-gdrive]\ntype = alias\nremote = /nowhere\n"), 0o600)
+	addBackupBrain(t, tb, "notes")
+	d := &deletionRunner{src: []string{}, cur: []string{"a", "b"}}
+	tb.backup.runner = d.run
+
+	y, mo, day := time.Now().Date()
+	now := time.Date(y, mo, day, 12, 0, 0, 0, time.Local)
+	tb.backup.tick(now)
+	res := waitBackup(t, tb, "notes")
+	d.mu.Lock()
+	syncs := len(d.syncs)
+	d.mu.Unlock()
+	if res.OK || !res.Refused || res.Trigger != "scheduled" || syncs != 0 {
+		t.Errorf("scheduled run = %+v with %d syncs, want a scheduled refusal and no sync", res, syncs)
+	}
+	tb.backup.mu.Lock()
+	last := tb.backup.state.LastScheduledDay
+	tb.backup.mu.Unlock()
+	if last != now.Format("2006-01-02") {
+		t.Errorf("last scheduled day = %q, want today", last)
+	}
+}
+
+// TestSyncDirReportsMaxDelete: rclone stopping at --max-delete is a refusal,
+// not an unexplained failure.
+func TestSyncDirReportsMaxDelete(t *testing.T) {
+	tb := newTestBridge(t, "")
+	tb.backup.runner = func(_ context.Context, args []string, stderr io.Writer) ([]byte, error) {
+		fmt.Fprintln(stderr, `{"level":"error","msg":"Got fatal error on delete: --max-delete threshold reached","object":"a"}`)
+		fmt.Fprintln(stderr, `{"level":"error","msg":"Fatal error received - not attempting retries"}`)
+		return nil, fmt.Errorf("exit status 7")
+	}
+	cases := []struct {
+		name      string
+		maxDelete int
+		want      func(res *BackupResult) string
+	}{
+		// Unlike the check before the sync, this refusal comes after rclone
+		// moved up to the limit out of current/; the message must say where.
+		{"limit 1", 1, func(res *BackupResult) string {
+			return "up to that many files were already moved from current/ to versions/" + res.Version
+		}},
+		// A partly readable brain folder is synced with no deletion allowed.
+		{"limit 0", 0, func(*BackupResult) string { return "nothing was removed from current/" }},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			res := tb.backup.syncDir(context.Background(), t.TempDir(), notesBase, "", "manual", c.maxDelete)
+			if res.OK || !res.Refused || !strings.HasPrefix(res.Error, massDeletionError) {
+				t.Errorf("result = %+v", res)
+			}
+			if want := c.want(res); !strings.Contains(res.Error, want) {
+				t.Errorf("error = %q, want it to say %q", res.Error, want)
+			}
+		})
+	}
+}
+
+// TestBackupMassDeletionWithRealRclone wipes most of a brain, then all of
+// it: both runs are refused and leave current/ alone, and a forced run from
+// the API mirrors the deletion with the files kept in versions/.
+func TestBackupMassDeletionWithRealRclone(t *testing.T) {
+	tb, remoteDir := rcloneTestBridge(t, "")
+	dir := addBackupBrain(t, tb, "notes")
+	for i := 0; i < 6; i++ {
+		_ = os.WriteFile(filepath.Join(dir, "memories", fmt.Sprintf("m%d.md", i)), []byte("memory"), 0o600)
+	}
+	if res := runBackup(t, tb, "notes"); !res.OK {
+		t.Fatalf("first backup = %+v", res)
+	}
+	cur := filepath.Join(remoteDir, defaultBackupRoot, "notes", "current")
+	count := func(root string) int {
+		n := 0
+		_ = filepath.WalkDir(root, func(_ string, d os.DirEntry, err error) error {
+			if err == nil && !d.IsDir() {
+				n++
+			}
+			return nil
+		})
+		return n
+	}
+	backedUp := count(cur)
+
+	for _, wipe := range []string{"memories", "everything"} {
+		t.Run(wipe, func(t *testing.T) {
+			if wipe == "memories" {
+				_ = os.RemoveAll(filepath.Join(dir, "memories"))
+			} else {
+				entries, _ := os.ReadDir(dir)
+				for _, e := range entries {
+					_ = os.RemoveAll(filepath.Join(dir, e.Name()))
+				}
+			}
+			res := runBackup(t, tb, "notes")
+			if res.OK || !res.Refused || !strings.HasPrefix(res.Error, massDeletionError) {
+				t.Errorf("result = %+v, want a refusal", res)
+			}
+			if n := count(cur); n != backedUp {
+				t.Errorf("current/ has %d files after a refused run, want all %d", n, backedUp)
+			}
+			body := tb.do("GET", "/api/backup/status", nil).Body.String()
+			if !strings.Contains(body, massDeletionError) || !strings.Contains(body, `"refused":true`) {
+				t.Errorf("the refusal is not on the Backup page's status: %s", body)
+			}
+		})
+	}
+
+	if w := tb.do("POST", "/api/backup/run", map[string]any{"brains": []string{"notes"}, "include_bridge": false, "force": true}); w.Code != 202 {
+		t.Fatal(w.Body.String())
+	}
+	res := waitBackup(t, tb, "notes")
+	if !res.OK || res.Refused {
+		t.Fatalf("forced run = %+v", res)
+	}
+	if n := count(cur); n != 0 {
+		t.Errorf("current/ has %d files after mirroring the empty folder, want 0", n)
+	}
+	if n := count(filepath.Join(remoteDir, defaultBackupRoot, "notes", "versions", res.Version)); n != backedUp {
+		t.Errorf("versions/%s holds %d files, want all %d deleted ones", res.Version, n, backedUp)
+	}
+}
+
+// TestBackupExcludedThenDeletedWithRealRclone: files backed up, then
+// excluded, then deleted from the brain folder stay in current/ (a sync never
+// deletes excluded files), so the check must not count them as gone. If it
+// did, the brain would be refused every night, and a forced run could not
+// clear it.
+func TestBackupExcludedThenDeletedWithRealRclone(t *testing.T) {
+	tb, remoteDir := rcloneTestBridge(t, "")
+	dir := addBackupBrain(t, tb, "notes")
+	_ = os.WriteFile(filepath.Join(dir, "memories", "keep.md"), []byte("keep"), 0o600)
+	_ = os.MkdirAll(filepath.Join(dir, "exports"), 0o700)
+	for i := 0; i < 20; i++ {
+		_ = os.WriteFile(filepath.Join(dir, "exports", fmt.Sprintf("e%d.csv", i)), []byte("export"), 0o600)
+	}
+	if err := os.Symlink(filepath.Join("memories", "keep.md"), filepath.Join(dir, "latest.md")); err != nil {
+		t.Fatal(err)
+	}
+	if res := runBackup(t, tb, "notes"); !res.OK {
+		t.Fatalf("first backup = %+v", res)
+	}
+
+	if w := tb.do("PUT", "/api/backup/settings", map[string]any{"brain": "notes", "brain_exclude": []string{"exports/"}}); w.Code != 200 {
+		t.Fatal(w.Body.String())
+	}
+	if err := os.RemoveAll(filepath.Join(dir, "exports")); err != nil {
+		t.Fatal(err)
+	}
+	for run := 1; run <= 2; run++ {
+		if res := runBackup(t, tb, "notes"); !res.OK || res.Refused {
+			t.Fatalf("run %d after excluding and deleting exports/ = %+v, want OK", run, res)
+		}
+	}
+	cur := filepath.Join(remoteDir, defaultBackupRoot, "notes", "current")
+	if entries, _ := os.ReadDir(filepath.Join(cur, "exports")); len(entries) != 20 {
+		t.Errorf("current/exports has %d files, want all 20: the sync leaves excluded files in Drive", len(entries))
+	}
+	if _, err := os.Lstat(filepath.Join(cur, "latest.md")); err != nil {
+		t.Errorf("the symlink is not backed up: %v", err)
+	}
+}
+
+// TestSyncDirMaxDeleteWithRealRclone pins the rclone log line that marks a
+// sync stopped by --max-delete.
+func TestSyncDirMaxDeleteWithRealRclone(t *testing.T) {
+	tb, remoteDir := rcloneTestBridge(t, "")
+	src := t.TempDir()
+	for _, f := range []string{"a", "b", "c"} {
+		_ = os.WriteFile(filepath.Join(src, f), []byte(f), 0o600)
+	}
+	if res := tb.backup.syncDir(context.Background(), src, notesBase, "", "manual", -1); !res.OK {
+		t.Fatalf("first sync = %+v", res)
+	}
+	// Replacing files moves the old copies to versions/ too, but rclone does
+	// not count that as a deletion.
+	for _, f := range []string{"a", "b", "c"} {
+		_ = os.WriteFile(filepath.Join(src, f), []byte(f+" changed"), 0o600)
+	}
+	if res := tb.backup.syncDir(context.Background(), src, notesBase, "", "manual", 0); !res.OK {
+		t.Fatalf("overwriting every file with --max-delete 0 = %+v", res)
+	}
+	_ = os.Remove(filepath.Join(src, "a"))
+	_ = os.Remove(filepath.Join(src, "b"))
+	res := tb.backup.syncDir(context.Background(), src, notesBase, "", "manual", 1)
+	if res.OK || !res.Refused {
+		t.Errorf("result = %+v, want a refusal at the --max-delete limit", res)
+	}
+	entries, _ := os.ReadDir(filepath.Join(remoteDir, defaultBackupRoot, "notes", "current"))
+	if len(entries) < 2 {
+		t.Errorf("current/ has %d files, rclone deleted more than the limit", len(entries))
+	}
+}
+
+// TestBackupPartlyReadableFolderWithRealRclone: a brain folder rclone can
+// only partly read is no wipe, and no reason to skip its backup either. The
+// readable new file reaches current/, nothing is deleted from it, and the
+// run fails with the read error.
+func TestBackupPartlyReadableFolderWithRealRclone(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("root can read a folder with mode 000")
+	}
+	tb, remoteDir := rcloneTestBridge(t, "")
+	dir := addBackupBrain(t, tb, "notes")
+	for _, rel := range []string{"memories/old.md", "locked/secret.md", "deleted.md"} {
+		p := filepath.Join(dir, rel)
+		_ = os.MkdirAll(filepath.Dir(p), 0o700)
+		if err := os.WriteFile(p, []byte(rel), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if res := runBackup(t, tb, "notes"); !res.OK {
+		t.Fatalf("first backup = %+v", res)
+	}
+
+	_ = os.WriteFile(filepath.Join(dir, "memories", "new.md"), []byte("new"), 0o600)
+	_ = os.Remove(filepath.Join(dir, "deleted.md"))
+	locked := filepath.Join(dir, "locked")
+	if err := os.Chmod(locked, 0); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(locked, 0o700) }) // so the temp folder can be removed
+	res := runBackup(t, tb, "notes")
+	if res.OK || res.Refused || !strings.Contains(res.Error, "parts of the brain folder could not be read") || !strings.Contains(res.Error, "locked") {
+		t.Errorf("result = %+v, want a failure that names the unreadable folder", res)
+	}
+	cur := filepath.Join(remoteDir, defaultBackupRoot, "notes", "current")
+	for rel, why := range map[string]string{
+		"memories/new.md":  "the readable new file must be backed up",
+		"memories/old.md":  "an unchanged file must stay",
+		"locked/secret.md": "a file that could not be read must not be deleted",
+		"deleted.md":       "nothing may be deleted while the folder cannot be counted",
+	} {
+		if _, err := os.Stat(filepath.Join(cur, rel)); err != nil {
+			t.Errorf("current/%s: %v; %s", rel, err, why)
+		}
+	}
 }
