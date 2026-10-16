@@ -77,6 +77,13 @@ wiped folder (a brain told to delete everything, an unmounted disk, a botched
 move) would reach Drive in one run, and its files would leave `versions/`
 after `keep_versions_days` without anyone noticing.
 
+When a **scheduled** run refuses, the brain's chat also gets one WhatsApp
+message about it (your DM for the DM brain, or the brain's `reply_chat`, as
+for Plaud). Later refusals of that brain stay quiet until one of its backups
+succeeds again; if the message could not be sent within 30 seconds, the next
+scheduled refusal tries again. A refusal from *Back up now* sends nothing,
+since you are looking at the dashboard.
+
 Look at the folder first. If the deletion was intended, click **Mirror the
 deletion…** next to that brain on the Backup page and confirm. This runs a
 forced backup of that brain (`POST /api/backup/run` with

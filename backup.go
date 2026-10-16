@@ -37,7 +37,8 @@ import (
 // Each run is an incremental `rclone sync`, so only changed files upload.
 // Version folders are pruned keep_versions_days after the run that made them.
 // A brain folder that lost most of its files is not mirrored without force
-// (see checkMassDeletion).
+// (see checkMassDeletion), and a scheduled run that refuses tells the owner
+// on WhatsApp (see noticeRefusal).
 
 // BackupConfig controls Google Drive backups.
 type BackupConfig struct {
@@ -100,6 +101,10 @@ type backupState struct {
 	LastScheduledDay string                   `json:"last_scheduled_day"`
 	Brains           map[string]*BackupResult `json:"brains"`
 	Bridge           *BackupResult            `json:"bridge"`
+	// RefusalNotices holds when the owner was told on WhatsApp that a
+	// brain's scheduled backup refused a mass deletion; an entry stays until
+	// a backup of that brain succeeds, so each refusal streak is told once.
+	RefusalNotices map[string]time.Time `json:"refusal_notices,omitempty"`
 }
 
 type backupJob struct {
@@ -128,7 +133,15 @@ type BackupManager struct {
 	connect *connectJob
 	stop    context.CancelFunc
 	runner  func(ctx context.Context, args []string, stderr io.Writer) ([]byte, error)
+	// notify sends a WhatsApp message about a brain to its owner. The bridge
+	// sets it; nil sends nothing.
+	notify func(ctx context.Context, br *Brain, text string) error
 }
+
+// refusalNoticeTimeout bounds the WhatsApp send of a refusal notice. It runs
+// inside the backup job, so a send that hangs would keep the job running and
+// Back up now disabled.
+var refusalNoticeTimeout = 30 * time.Second
 
 // NewBackupManager loads the saved backup state.
 func NewBackupManager(cfgs *ConfigStore, bm *BrainManager) *BackupManager {
@@ -685,7 +698,9 @@ func (m *BackupManager) StartRun(ids []string, includeBridge bool, trigger strin
 	go func() {
 		defer cancel()
 		for _, br := range targets {
-			m.runOne(ctx, job, br.ID(), func() *BackupResult { return m.backupBrain(ctx, br, trigger, force) })
+			if res := m.runOne(ctx, job, br.ID(), func() *BackupResult { return m.backupBrain(ctx, br, trigger, force) }); res != nil {
+				m.noticeRefusal(ctx, br, res)
+			}
 		}
 		if includeBridge {
 			m.runOne(ctx, job, "_bridge", func() *BackupResult { return m.backupBridge(ctx, trigger) })
@@ -700,7 +715,9 @@ func (m *BackupManager) StartRun(ids []string, includeBridge bool, trigger strin
 	return nil
 }
 
-func (m *BackupManager) runOne(ctx context.Context, job *backupJob, id string, fn func() *BackupResult) {
+// runOne runs and records one backup. It returns its result, or nil when
+// the job was cancelled before it started.
+func (m *BackupManager) runOne(ctx context.Context, job *backupJob, id string, fn func() *BackupResult) *BackupResult {
 	m.mu.Lock()
 	job.current = id
 	if len(job.queue) > 0 {
@@ -708,7 +725,7 @@ func (m *BackupManager) runOne(ctx context.Context, job *backupJob, id string, f
 	}
 	m.mu.Unlock()
 	if ctx.Err() != nil {
-		return
+		return nil
 	}
 	res := fn()
 	m.mu.Lock()
@@ -726,6 +743,64 @@ func (m *BackupManager) runOne(ctx context.Context, job *backupJob, id string, f
 	} else {
 		log.Printf("backup %s: FAILED: %s", id, res.Error)
 	}
+	return res
+}
+
+// noticeRefusal tells the owner on WhatsApp when a scheduled backup refused
+// to mirror a mass deletion. Otherwise the refusal shows only on the
+// dashboard and repeats every night unseen, while the copies of the lost
+// files in versions/ get closer to expiring. It is told once per streak:
+// later refusals stay quiet until a backup of the brain succeeds. A notice
+// that could not be sent is tried again with the next scheduled refusal.
+func (m *BackupManager) noticeRefusal(ctx context.Context, br *Brain, res *BackupResult) {
+	id := br.ID()
+	live := map[string]bool{}
+	for _, b := range m.bm.Brains() {
+		live[b.ID()] = true
+	}
+	m.mu.Lock()
+	changed := false
+	// A removed brain's entry would stay forever, and keep a new brain that
+	// reuses its id from being told about its first refusal.
+	for k := range m.state.RefusalNotices {
+		if !live[k] {
+			delete(m.state.RefusalNotices, k)
+			changed = true
+		}
+	}
+	_, told := m.state.RefusalNotices[id]
+	if res.OK && told {
+		delete(m.state.RefusalNotices, id)
+		changed = true
+	}
+	if changed {
+		m.saveStateLocked()
+	}
+	send := res.Refused && res.Trigger == "scheduled" && !told && m.notify != nil
+	m.mu.Unlock()
+	if !send {
+		return
+	}
+	name := br.settings.Load().name
+	if name == "" {
+		name = id
+	}
+	text := fmt.Sprintf("⚠️ Backup of %s: %s\n\nCheck the brain folder, then the Backup page in the Fridolin dashboard. "+
+		"Scheduled backups of this brain keep refusing until one succeeds; this is the only message about it.", name, res.Error)
+	sctx, cancel := context.WithTimeout(ctx, refusalNoticeTimeout)
+	err := m.notify(sctx, br, text)
+	cancel()
+	if err != nil {
+		log.Printf("backup %s: could not send the refusal notice: %v", id, err)
+		return
+	}
+	m.mu.Lock()
+	if m.state.RefusalNotices == nil {
+		m.state.RefusalNotices = map[string]time.Time{}
+	}
+	m.state.RefusalNotices[id] = time.Now()
+	m.saveStateLocked()
+	m.mu.Unlock()
 }
 
 // filterLines turns exclude globs into an rclone filter file.

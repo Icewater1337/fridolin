@@ -760,20 +760,34 @@ func TestBackupRunForceOverridesRefusal(t *testing.T) {
 	}
 }
 
-// TestScheduledBackupNeverForces: the nightly run keeps refusing a mass
-// deletion, so a wiped brain is never mirrored without the owner.
-func TestScheduledBackupNeverForces(t *testing.T) {
+// scheduledBackupBridge is a bridge with the daily backup on and a brain
+// "notes" whose folder lost every backed-up file, so each run refuses.
+func scheduledBackupBridge(t *testing.T) (*testBridge, *deletionRunner) {
+	t.Helper()
 	tb := newTestBridge(t, `, "backup": {"enabled": true, "daily_at": "03:30", "include_bridge_config": false}`)
 	_ = os.MkdirAll(filepath.Dir(tb.backup.rcloneConf()), 0o700)
 	_ = os.WriteFile(tb.backup.rcloneConf(), []byte("[brain-gdrive]\ntype = alias\nremote = /nowhere\n"), 0o600)
 	addBackupBrain(t, tb, "notes")
 	d := &deletionRunner{src: []string{}, cur: []string{"a", "b"}}
 	tb.backup.runner = d.run
+	return tb, d
+}
 
-	y, mo, day := time.Now().Date()
-	now := time.Date(y, mo, day, 12, 0, 0, 0, time.Local)
-	tb.backup.tick(now)
-	res := waitBackup(t, tb, "notes")
+// scheduledRun lets the scheduler fire on the given day and waits for the
+// backup of "notes".
+func scheduledRun(t *testing.T, tb *testBridge, day int) *BackupResult {
+	t.Helper()
+	y, mo, d := time.Now().Date()
+	tb.backup.tick(time.Date(y, mo, d+day, 12, 0, 0, 0, time.Local))
+	return waitBackup(t, tb, "notes")
+}
+
+// TestScheduledBackupNeverForces: the nightly run keeps refusing a mass
+// deletion, so a wiped brain is never mirrored without the owner.
+func TestScheduledBackupNeverForces(t *testing.T) {
+	tb, d := scheduledBackupBridge(t)
+	now := time.Now()
+	res := scheduledRun(t, tb, 0)
 	d.mu.Lock()
 	syncs := len(d.syncs)
 	d.mu.Unlock()
@@ -785,6 +799,119 @@ func TestScheduledBackupNeverForces(t *testing.T) {
 	tb.backup.mu.Unlock()
 	if last != now.Format("2006-01-02") {
 		t.Errorf("last scheduled day = %q, want today", last)
+	}
+}
+
+// TestScheduledRefusalIsToldOnWhatsApp: a scheduled run that refuses tells
+// the brain's chat once; later refusals stay quiet until a backup of the
+// brain succeeds, manual refusals are never sent (the owner is looking at
+// the dashboard), and a notice that failed to send is tried next time.
+func TestScheduledRefusalIsToldOnWhatsApp(t *testing.T) {
+	tb, _ := scheduledBackupBridge(t)
+	br := tb.brainMgr.Get("notes")
+	jid := tb.replyChatFor(br, tb.cfgs.Get())
+	if jid == "" {
+		t.Fatal("the test brain has no chat")
+	}
+	sent := func() []DevMessage { return tb.dev.Outbox() }
+	told := func() bool {
+		tb.backup.mu.Lock()
+		defer tb.backup.mu.Unlock()
+		_, ok := tb.backup.state.RefusalNotices["notes"]
+		return ok
+	}
+
+	if res := scheduledRun(t, tb, 0); !res.Refused {
+		t.Fatalf("first scheduled run = %+v, want a refusal", res)
+	}
+	out := sent()
+	if len(out) != 1 || out[0].JID != jid || !strings.Contains(out[0].Text, "Backup of notes: "+massDeletionError) ||
+		!strings.Contains(out[0].Text, "2 of 2 backed-up files are gone") {
+		t.Fatalf("want one notice to %s, got %+v", jid, out)
+	}
+	if _, ok := NewBackupManager(tb.cfgs, tb.brainMgr).state.RefusalNotices["notes"]; !ok {
+		t.Error("the notice is not saved, so a restart would send it again")
+	}
+
+	scheduledRun(t, tb, 1)
+	if n := len(sent()); n != 1 {
+		t.Errorf("%d messages after a second scheduled refusal, want still 1", n)
+	}
+
+	// A backup that succeeds ends the streak; the next scheduled refusal is
+	// told again, once it can be sent.
+	if err := tb.backup.StartRun([]string{"notes"}, false, "manual", true); err != nil {
+		t.Fatal(err)
+	}
+	if res := waitBackup(t, tb, "notes"); !res.OK || told() {
+		t.Fatalf("forced run = %+v, told = %v; want OK and the notice cleared", res, told())
+	}
+	if res := runBackup(t, tb, "notes"); !res.Refused || told() || len(sent()) != 1 {
+		t.Errorf("a manual refusal must not be sent: %+v, %d messages", res, len(sent()))
+	}
+	send := tb.backup.notify
+	tb.backup.notify = func(context.Context, *Brain, string) error { return fmt.Errorf("WhatsApp is not connected") }
+	scheduledRun(t, tb, 2)
+	if told() || len(sent()) != 1 {
+		t.Errorf("a notice that failed to send must not count as told")
+	}
+	tb.backup.notify = send
+	scheduledRun(t, tb, 3)
+	if out := sent(); len(out) != 2 || !told() {
+		t.Errorf("want the second streak told once it could be sent, got %+v", out)
+	}
+}
+
+// TestRefusalNoticeGivesUp: the notice is sent from inside the backup job,
+// so a send that hangs must not keep the job (and Back up now) busy. It
+// gives up after refusalNoticeTimeout and counts as not told.
+func TestRefusalNoticeGivesUp(t *testing.T) {
+	tb, _ := scheduledBackupBridge(t)
+	defer func(d time.Duration) { refusalNoticeTimeout = d }(refusalNoticeTimeout)
+	refusalNoticeTimeout = 50 * time.Millisecond
+	tb.backup.notify = func(ctx context.Context, _ *Brain, _ string) error {
+		<-ctx.Done()
+		return ctx.Err()
+	}
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		res := &BackupResult{Refused: true, Trigger: "scheduled", Error: massDeletionError}
+		tb.backup.noticeRefusal(context.Background(), tb.brainMgr.Get("notes"), res)
+	}()
+	select {
+	case <-done:
+	case <-time.After(10 * time.Second):
+		t.Fatal("a send that hangs keeps the backup job busy")
+	}
+	tb.backup.mu.Lock()
+	_, told := tb.backup.state.RefusalNotices["notes"]
+	tb.backup.mu.Unlock()
+	if told {
+		t.Error("a notice that timed out must not count as told")
+	}
+}
+
+// TestRefusalNoticesForgetRemovedBrains: the saved notices drop brains that
+// are gone, so the list does not grow forever and a new brain that reuses an
+// id is still told about its first refusal.
+func TestRefusalNoticesForgetRemovedBrains(t *testing.T) {
+	tb, _ := scheduledBackupBridge(t)
+	tb.backup.mu.Lock()
+	tb.backup.state.RefusalNotices = map[string]time.Time{"removed": time.Now(), "notes": time.Now()}
+	tb.backup.mu.Unlock()
+	if res := scheduledRun(t, tb, 0); !res.Refused {
+		t.Fatalf("scheduled run = %+v, want a refusal", res)
+	}
+	saved := NewBackupManager(tb.cfgs, tb.brainMgr).state.RefusalNotices
+	if _, ok := saved["removed"]; ok {
+		t.Errorf("the notice of a removed brain is still saved: %v", saved)
+	}
+	if _, ok := saved["notes"]; !ok {
+		t.Errorf("the notice of a brain that is still refused was dropped: %v", saved)
+	}
+	if out := tb.dev.Outbox(); len(out) != 0 {
+		t.Errorf("a refusal already told was sent again: %+v", out)
 	}
 }
 

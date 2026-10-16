@@ -183,6 +183,15 @@ func NewBridge(cfgs *ConfigStore, opts BridgeOptions) (_ *Bridge, err error) {
 	}
 	b.token = tok
 	b.backup = NewBackupManager(cfgs, b.brainMgr)
+	// A refused scheduled backup goes to the brain's chat, like Plaud's
+	// expired-login notice: the owner may not open the dashboard for weeks.
+	b.backup.notify = func(ctx context.Context, br *Brain, text string) error {
+		jid := b.replyChatFor(br, b.cfgs.Get())
+		if jid == "" {
+			return fmt.Errorf("brain %s has no chat to send it to — set its reply chat", br.ID())
+		}
+		return b.wa.SendMessage(ctx, jid, text)
+	}
 	b.google = NewGoogleAuth(cfgs)
 	b.plaud = NewPlaudManager(b)
 	return b, nil
