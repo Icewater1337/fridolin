@@ -319,8 +319,13 @@ last 50 outbound messages contains one of `otp_markers` — by default `🔐`,
 name in its code prompt, say); setting the list replaces the defaults, so
 include them if you still want them.
 
-The code is discarded before it is written to history or sent to the model.
-The assistant simply never sees it.
+The code is never written to history or sent to the model — the assistant
+never sees it. It is handed to whatever local script asked for it instead:
+`<data_dir>/otp/<brain>.json` holds the latest caught code
+(`{"code", "chat", "sender", "received"}`), readable only by your user and
+denied to brains by the sandbox. A script that requested a code through
+`/send` (with one of the `otp_markers` in its message) polls that file for a
+`received` time after its request.
 
 ### `max_chunk_size`
 

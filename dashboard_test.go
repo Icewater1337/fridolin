@@ -327,3 +327,34 @@ func TestAddBrainBackupDefaults(t *testing.T) {
 		t.Errorf("b.backup = %+v, want off as requested", b.Backup)
 	}
 }
+
+func TestOTPGuardHandsCodeToLocalScripts(t *testing.T) {
+	tb := newTestBridge(t, `, "otp_guard": true, "otp_markers": ["Examplebank 2FA"], "brains": [{"name": "p", "work_dir": "~/p", "handles_dms": true}]`)
+	// A local script asks for a code through /send...
+	r := httptest.NewRequest("POST", "http://127.0.0.1:8765/send", strings.NewReader(`{"jid":"15551234567@s.whatsapp.net","text":"Examplebank 2FA: reply with the code"}`))
+	r.Host = "127.0.0.1:8765"
+	tb.h.ServeHTTP(httptest.NewRecorder(), r)
+	// ...and the reply arrives.
+	if w := tb.do("POST", "/api/dev/inbound", map[string]any{"jid": "15551234567@s.whatsapp.net", "text": " 483920 "}); w.Code != 202 {
+		t.Fatal(w.Body.String())
+	}
+	otp := filepath.Join(tb.cfgs.Get().DataDir, "otp", "p.json")
+	waitFor(t, 3*time.Second, "otp file", func() bool { _, err := os.Stat(otp); return err == nil })
+	data, _ := os.ReadFile(otp)
+	var got map[string]string
+	_ = json.Unmarshal(data, &got)
+	if got["code"] != "483920" || got["chat"] != "15551234567@s.whatsapp.net" {
+		t.Errorf("otp file = %s", data)
+	}
+	if st, _ := os.Stat(otp); st.Mode().Perm() != 0o600 {
+		t.Errorf("otp file mode %v", st.Mode().Perm())
+	}
+	hist, _ := os.ReadFile(filepath.Join(tb.home, "p", "conversation-history.jsonl"))
+	if strings.Contains(string(hist), "483920") {
+		t.Error("the code must not be written to the conversation history")
+	}
+	time.Sleep(200 * time.Millisecond)
+	if out := tb.dev.Outbox(); len(out) != 1 || !strings.Contains(out[0].Text, "Examplebank 2FA") {
+		t.Errorf("outbox = %+v — only the script's own request may be there; the brain must not run on a caught code", out)
+	}
+}

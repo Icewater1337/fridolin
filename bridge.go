@@ -2,12 +2,14 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log"
 	"net"
 	"net/http"
 	"os"
+	"path/filepath"
 	"regexp"
 	"strconv"
 	"strings"
@@ -266,12 +268,36 @@ func (b *Bridge) handleInbound(ctx context.Context, m Inbound) {
 		// The OTP guard runs before anything is written to history, so a
 		// stray two-factor code is neither logged nor sent to the model.
 		if len(m.Media) == 0 && br.DropsOTP(m.Text) {
-			log.Printf("brain %s: dropping bare numeric code (OTP guard)", br.ID())
+			log.Printf("brain %s: kept a one-time code out of the conversation (OTP guard)", br.ID())
+			b.recordOTP(br, m)
 			return
 		}
 	}
 
 	b.deb.Add(m)
+}
+
+// recordOTP hands a code the OTP guard caught to the local script that asked
+// for it (it sent the request through /send): it is written to
+// <data_dir>/otp/<brain>.json, readable only by this user. Brains cannot read
+// it (the sandbox denies the data folder), and it never reaches the history
+// or the model. Each code replaces the previous one.
+func (b *Bridge) recordOTP(br *Brain, m Inbound) {
+	dir := filepath.Join(b.cfgs.Get().DataDir, "otp")
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		log.Printf("otp: %v", err)
+		return
+	}
+	data, _ := json.Marshal(map[string]string{
+		"brain":    br.ID(),
+		"chat":     m.JID,
+		"sender":   m.Sender,
+		"code":     strings.TrimSpace(m.Text),
+		"received": time.Now().UTC().Format(time.RFC3339),
+	})
+	if err := writeFileAtomic(filepath.Join(dir, br.ID()+".json"), data, 0o600, false); err != nil {
+		log.Printf("otp: %v", err)
+	}
 }
 
 // handleCommand runs !help, !reset and !stop. It reports whether text was one.
