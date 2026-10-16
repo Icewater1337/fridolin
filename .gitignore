@@ -21,6 +21,7 @@ claude-stream.log
 /whatsapp-claude-bridge
 /bridge
 dist/
+__pycache__/
 
 # ── editors and OS ────────────────────────────────────────────────────────
 .DS_Store

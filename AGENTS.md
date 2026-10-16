@@ -89,6 +89,9 @@ Reopen the dashboard with `./fridolin open`.
   the config override variables unset, so they never see a `config.json`
   or `.env` in the checkout or a real data dir; read a repository file
   through `repoDir`.
+- The Python helpers in `tools/` have stdlib-only tests that never touch the
+  network: `python3 -m unittest discover -s tools/tests`. Keep them passing
+  on Python 3.9.
 - The dashboard is plain HTML/CSS/JS in `web/` (no build step), embedded into
   the binary — rebuild after changing it. It runs under a strict CSP: no
   inline scripts or styles.

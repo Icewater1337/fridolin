@@ -36,16 +36,28 @@ jobs:
         run: go test -race -count=1 ./...
 
   scripts:
-    runs-on: ubuntu-latest
+    # Pinned rather than ubuntu-latest: Python 3.9 is past its end of life,
+    # and setup-python only has builds of it for the images that exist now,
+    # so the next ubuntu-latest would break this job with no change here.
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
 
       - name: shellcheck
         run: shellcheck --severity=warning setup.sh scripts/*.sh .githooks/*
 
+      # The oldest Python the README promises (and the one macOS ships as
+      # /usr/bin/python3), so a newer-only feature fails here first.
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.9'
+
       - name: python syntax
         run: |
-          python3 -m py_compile tools/*.py
+          python3 -m py_compile tools/*.py tools/tests/*.py
+
+      - name: python tests
+        run: python3 -m unittest discover -s tools/tests -v
 
   personal-data:
     runs-on: ubuntu-latest
