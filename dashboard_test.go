@@ -294,6 +294,31 @@ func TestIngestOTPGuardChecksTheNamedBrain(t *testing.T) {
 	}
 }
 
+// The dev page can hand a message to a named brain, the way /ingest does, to
+// try out hand-offs without WhatsApp. Like a hand-off it carries no commands:
+// "!help" is text for the named brain, not a command for the chat's owner.
+func TestDevInboundCanNameABrain(t *testing.T) {
+	const dm = "15551234567@s.whatsapp.net"
+	tb := newTestBridge(t, "")
+	tb.addFolderBrain(t, BrainManifest{ID: "dm", Name: "DM", Routing: BrainRouting{HandlesDMs: true}})
+	upDir := tb.addFolderBrain(t, BrainManifest{ID: "up", Name: "Uploads"})
+
+	if w := tb.do("POST", "/api/dev/inbound", map[string]any{"jid": dm, "brain": "nobody", "text": "x"}); w.Code != 400 {
+		t.Errorf("unknown brain: %d, want 400", w.Code)
+	}
+	for i, text := range []string{"hello up", "!help"} {
+		t.Run(text, func(t *testing.T) {
+			if w := tb.do("POST", "/api/dev/inbound", map[string]any{"jid": dm, "brain": " Up ", "text": text}); w.Code != 202 {
+				t.Fatalf("dev inbound: %d %s", w.Code, w.Body.String())
+			}
+			waitFor(t, 5*time.Second, "reply", func() bool { return len(tb.dev.Outbox()) > i })
+			if out := tb.dev.Outbox()[0]; out.JID != dm || !strings.Contains(out.Text, "echo:"+upDir+":") || !strings.Contains(out.Text, text) {
+				t.Errorf("reply = %+v, want an echo of %q from %s", out, text, upDir)
+			}
+		})
+	}
+}
+
 func TestAddBrainAllowChatAndRoute(t *testing.T) {
 	tb := newTestBridge(t, "")
 	dir := filepath.Join(tb.home, "family")

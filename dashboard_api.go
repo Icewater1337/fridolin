@@ -1011,6 +1011,9 @@ func (b *Bridge) apiDevInbound(w http.ResponseWriter, r *http.Request) {
 		Text   string   `json:"text"`
 		Media  []string `json:"media"`
 		Silent bool     `json:"silent"`
+		// Brain runs the message in that brain instead of the chat's own,
+		// the way /ingest and Plaud hand files to a brain.
+		Brain string `json:"brain"`
 	}
 	if err := decodeJSON(r, &req); err != nil {
 		writeErr(w, http.StatusBadRequest, err.Error())
@@ -1020,12 +1023,17 @@ func (b *Bridge) apiDevInbound(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, "jid required")
 		return
 	}
+	req.Brain = strings.ToLower(strings.TrimSpace(req.Brain))
+	if req.Brain != "" && b.brainMgr.Get(req.Brain) == nil {
+		writeErr(w, http.StatusBadRequest, "unknown brain "+strconvQuote(req.Brain))
+		return
+	}
 	if req.Sender == "" {
 		req.Sender = normalizeJID(req.JID)
 	}
 	// Apply the same access rules and trigger handling as WhatsApp messages.
 	cfg := b.cfgs.Get()
-	m := Inbound{JID: req.JID, Sender: req.Sender, Text: req.Text, Media: req.Media, Silent: req.Silent, Source: "dev", At: time.Now()}
+	m := Inbound{JID: req.JID, Brain: req.Brain, Sender: req.Sender, Text: req.Text, Media: req.Media, Silent: req.Silent, Source: "dev", At: time.Now()}
 	if m.IsGroup() {
 		if !contains(cfg.AllowedGroups, m.JID) {
 			b.recordIgnored("group", m.JID, "", m.Sender, "")

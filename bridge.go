@@ -248,7 +248,9 @@ func (b *Bridge) handleInbound(ctx context.Context, m Inbound) {
 	m.Text = strings.TrimSpace(m.Text)
 	cfg := b.cfgs.Get()
 
-	if m.Source != "ingest" && b.handleCommand(ctx, m, cfg) {
+	// Commands come from a chat. A message handed to a brain (/ingest, Plaud,
+	// a dev message that names one) carries none: its text is for that brain.
+	if m.Source != "ingest" && m.Brain == "" && b.handleCommand(ctx, m, cfg) {
 		return
 	}
 	if m.Text == "" && len(m.Media) == 0 {
