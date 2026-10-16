@@ -5,7 +5,7 @@
 import { get, post, put } from './api.js';
 import {
   h, mount, icon, pill, btn, callout, timeAgo, mono, field, toggle, select, pageHeader,
-  confirmDialog, toast, loading, nextId,
+  confirmDialog, toast, loading, nextId, chatEl,
 } from './ui.js';
 
 const every = (sec) => (sec % 60 === 0 ? (sec === 60 ? 'minute' : `${sec / 60} minutes`) : `${sec} seconds`);
@@ -83,16 +83,23 @@ export default {
         },
       });
 
+      // A destination problem only blocks anything while Plaud is on.
+      const blocked = st.enabled && s.summary_error;
       const facts = [];
+      if (s.summary_chat) {
+        facts.push(h('div', 'Summaries go to ', chatEl(s.summary_chat), s.summary_to_you ? ' (your DM)' : '', '.'));
+        if (s.summary_chat_brain) facts.push(h('div.muted.small', `What you write back in that chat goes to the ${s.summary_chat_brain} brain, not to ${s.target_brain}.`));
+      }
       if (s.last_forwarded) facts.push(h('div', 'Last recording: ', h('strong', s.last_forwarded.name), ' → ', s.last_forwarded.brain, ' ', timeAgo(s.last_forwarded.at)));
-      if (s.last_poll) facts.push(h('div.muted', 'Checked ', timeAgo(s.last_poll), s.pending ? ` · ${s.pending} waiting for Plaud’s transcript` : ''));
+      if (s.last_poll) facts.push(h('div.muted', 'Checked ', timeAgo(s.last_poll), s.pending ? ` · ${s.pending} ${blocked ? 'waiting to be delivered' : 'waiting for Plaud’s transcript'}` : ''));
       if (typeof s.seen === 'number') facts.push(h('div.muted.small', s.seen === 1 ? '1 recording known' : `${s.seen} recordings known`));
 
       mount(card,
         head(s.expired ? 'Login expired' : 'Connected', s.expired ? 'bad' : 'ok'),
         s.account ? h('p', 'Signed in as ', h('strong', s.account), '.') : null,
         s.expired ? callout('bad', 'Plaud’s login expired', 'Recordings are not arriving. Connect again — it takes one approval in the browser.') : null,
-        s.last_error && !s.expired ? callout('warn', 'Last check failed', s.last_error) : null,
+        blocked ? callout('bad', 'Recordings cannot be delivered', s.summary_error) : null,
+        s.last_error && !s.expired && s.last_error !== s.summary_error ? callout('warn', 'Last check failed', s.last_error) : null,
         facts.length ? h('div.facts', facts) : null,
         h('div.settings-fields',
           field({ control: enabled, help: `Every ${every(st.interval_seconds || 60)} Fridolin looks for new recordings and waits until Plaud has transcribed them. The first check only remembers what already exists — old recordings are not sent.` }),

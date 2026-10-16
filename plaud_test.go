@@ -207,6 +207,30 @@ func TestPlaudWithoutAPrivateChatWaits(t *testing.T) {
 	}
 }
 
+// With nothing waiting, a missing private chat blocks nothing: the poll must
+// not fail, and log the same error, on every interval. The card still says
+// what is missing, from the status call.
+func TestPlaudWithoutAPrivateChatIsQuietWhileNothingWaits(t *testing.T) {
+	tb, fp := plaudBridgeWith(t, `, "allowed_numbers": [], "brains": [{"name": "f", "work_dir": "~/f", "groups": ["120363000000000000@g.us"]}]`, "")
+	_ = os.MkdirAll(filepath.Dir(tb.plaud.tokenPath()), 0o700)
+	_ = os.WriteFile(tb.plaud.tokenPath(), []byte("{}"), 0o600)
+	if err := tb.plaud.saveState(&plaudState{Seen: []string{plaudOld1}, Pending: map[string]float64{}}); err != nil {
+		t.Fatal(err)
+	}
+	fp.files(plaudOld1)
+	if err := tb.plaud.Poll(context.Background()); err != nil {
+		t.Errorf("poll with nothing waiting = %v, want nil", err)
+	}
+	var status map[string]any
+	_ = json.Unmarshal(tb.do("GET", "/api/plaud/status?account=0", nil).Body.Bytes(), &status)
+	if e, _ := status["summary_error"].(string); !strings.Contains(e, "no private chat") {
+		t.Errorf("status summary_error = %q, want the missing private chat", e)
+	}
+	if e, _ := status["last_error"].(string); e != "" {
+		t.Errorf("status last_error = %q, want none", e)
+	}
+}
+
 // The expiry notice follows the same rule: your DM for a group brain, and
 // nothing at all without a private chat (the dashboard shows the expiry).
 func TestPlaudExpiryNoticeStaysPrivate(t *testing.T) {
@@ -237,6 +261,37 @@ func TestPlaudExpiryNoticeStaysPrivate(t *testing.T) {
 			}
 			if strings.Join(got, ",") != strings.Join(c.want, ",") {
 				t.Errorf("notice sent to %v, want %v", got, c.want)
+			}
+		})
+	}
+}
+
+// The status tells the card where summaries go, and warns when that chat
+// belongs to another brain or when there is no private chat.
+func TestPlaudStatusShowsWhereSummariesGo(t *testing.T) {
+	const dm = "15551234567@s.whatsapp.net"
+	brains := `, "brains": [{"name": "p", "work_dir": "~/p", "handles_dms": true}, {"name": "g", "work_dir": "~/g", "groups": ["120363000000000000@g.us"]}]`
+	for _, c := range []struct {
+		name  string
+		top   string
+		plaud string
+		want  map[string]any
+	}{
+		{"DM brain", brains, "",
+			map[string]any{"summary_chat": dm, "summary_to_you": true, "summary_chat_brain": nil, "summary_error": nil}},
+		{"group brain: your DM, which the DM brain answers", brains, `, "brain": "g"`,
+			map[string]any{"summary_chat": dm, "summary_to_you": true, "summary_chat_brain": "p", "summary_error": nil}},
+		{"no private chat", `, "allowed_numbers": []` + brains, `, "brain": "g"`,
+			map[string]any{"summary_chat": nil, "summary_error": "no private chat for Plaud summaries — add your number under Settings → Access, or set brain g's reply chat to a direct chat"}},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			tb, _ := plaudBridgeWith(t, c.top, c.plaud)
+			var got map[string]any
+			_ = json.Unmarshal(tb.do("GET", "/api/plaud/status?account=0", nil).Body.Bytes(), &got)
+			for k, want := range c.want {
+				if got[k] != want {
+					t.Errorf("%s = %#v, want %#v", k, got[k], want)
+				}
 			}
 		})
 	}

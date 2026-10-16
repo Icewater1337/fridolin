@@ -37,7 +37,8 @@ DM (your first allowed number) — also for a brain that serves a group. When
 that chat belongs to another brain (your DM, for a brain that is not the DM
 brain), what you write back there goes to that other brain. Without any
 private chat (no allowed number and no direct `reply_chat`) recordings are not
-handed over: they wait, and the dashboard says what to set.
+handed over: they wait, and the dashboard says what to set. The Plaud card
+shows where summaries go, and warns when that chat belongs to another brain.
 
 New brains get a `skills/plaud.md` that tells them how to file recordings.
 

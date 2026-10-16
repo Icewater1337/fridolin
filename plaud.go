@@ -506,8 +506,10 @@ func (p *PlaudManager) poll(ctx context.Context) error {
 	}
 	// Resolved before anything is fetched or written: without a brain or a
 	// private chat the recordings wait, and the error shows on the dashboard.
+	// With nothing waiting nothing is blocked, so the poll stays quiet rather
+	// than log the same error every interval; the status call reports it.
 	br, jid, err := p.destination()
-	if err != nil {
+	if err != nil && len(st.Pending) > 0 {
 		if serr := p.saveState(st); serr != nil {
 			return serr
 		}
@@ -636,6 +638,17 @@ func (b *Bridge) apiPlaudStatus(w http.ResponseWriter, r *http.Request) {
 	}
 	if br := p.targetBrain(); br != nil {
 		resp["target_brain"] = br.ID()
+	}
+	// Where summaries go, for the card: a chat that belongs to another brain
+	// gets a warning, since what you write back there goes to that brain.
+	if br, jid, err := p.destination(); err != nil {
+		resp["summary_error"] = err.Error()
+	} else {
+		resp["summary_chat"] = jid
+		resp["summary_to_you"] = len(cfg.AllowedNumbers) > 0 && jid == cfg.AllowedNumbers[0]+"@s.whatsapp.net"
+		if owner := b.brainMgr.BrainFor(jid, false); owner != nil && owner != br {
+			resp["summary_chat_brain"] = owner.ID()
+		}
 	}
 	if st, _ := p.loadState(); st != nil {
 		resp["seen"], resp["pending"] = len(st.Seen), len(st.Pending)
