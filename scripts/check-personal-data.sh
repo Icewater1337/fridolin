@@ -49,7 +49,8 @@ work="$(mktemp -d)"
 trap 'rm -rf "$work"' EXIT
 scan="$work/scan.txt"     # "location<TAB>text" per line to check
 names="$work/names.txt"   # "location<TAB>path" for added files
-: >"$scan"; : >"$names"
+idents="$work/idents.txt" # "commit<TAB>AUTHOR|COMMITTER name <email>"
+: >"$scan"; : >"$names"; : >"$idents"
 
 # ── collect ────────────────────────────────────────────────────────────────
 
@@ -59,8 +60,9 @@ names="$work/names.txt"   # "location<TAB>path" for added files
 collect_log() {
   git log --no-color --no-ext-diff -p -U0 --no-renames \
       --format='%x01COMMIT %h%nAUTHOR %an <%ae>%nCOMMITTER %cn <%ce>%n%B' "$@" -- |
-  awk -v OFS='\t' '
-    /^\001COMMIT / { c = substr($0, 9); file = "(message)"; indiff = 0; next }
+  awk -v OFS='\t' -v idents="$idents" '
+    /^\001COMMIT / { c = substr($0, 9); file = "(message)"; indiff = 0; hdr = 2; next }
+    hdr > 0        { hdr--; print c, $0 > idents; next }
     /^diff --git / { indiff = 1; next }
     !indiff        { print c ":" file, $0; next }
     /^\+\+\+ b\//  { file = substr($0, 7); print c ":" file, "(file name) " file; next }
@@ -148,6 +150,27 @@ show 'Email addresses' < <(generic '[A-Za-z0-9._%+-]+@[A-Za-z0-9-]+(\.[A-Za-z0-9
         '(@example\.(com|org|net)$|@users\.noreply\.github\.com$|^noreply@anthropic\.com$|^git@github\.com$|@(g\.us|s\.whatsapp\.net|lid)$)')
 show 'Home-directory paths' < <(generic '/(Users|home)/[^/[:space:]"'"'"'`)]+' '^/(Users|home)/(you|user|USERNAME|runner|<[^>]*>|\$USER|\$\{USER\})$')
 show 'Tokens and keys' < <(generic '(sk-ant-[A-Za-z0-9_-]{8,}|glpat-[A-Za-z0-9_.-]{8,}|gh[pousr]_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,}|AIza[0-9A-Za-z_-]{30,}|ya29\.[0-9A-Za-z_-]{20,}|AKIA[0-9A-Z]{16}|xox[baprs]-[0-9A-Za-z-]{10,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|"refresh_token" *: *"[^"]{8,})')
+
+# ── commit identities ──────────────────────────────────────────────────────
+
+# Who authored a commit is public on GitHub by design, and you choose it with
+# git config. What must not happen is a commit going out under an identity
+# you did not mean to publish (a work address, a global default). So every
+# author and committer must be this repository's configured identity (or a
+# noreply address). CI has no configured identity and skips this.
+if [ -s "$idents" ] && [ "${GITHUB_ACTIONS:-}" != "true" ]; then
+  me_email="$(git config user.email || true)"
+  me_name="$(git config user.name || true)"
+  bad="$(awk -F'\t' -v e="<$me_email>" -v n="$me_name" '
+    { line = $2; sub(/^(AUTHOR|COMMITTER) /, "", line) }
+    line ~ /<[^>]*@(users\.noreply\.github\.com|example\.(com|org|net))>$/ || line ~ /<noreply@anthropic\.com>$/ { next }
+    e != "<>" && line == n " " e { next }
+    { print $1 "\t" $2 }' "$idents" | sort -u)"
+  if [ -n "$bad" ]; then
+    printf '\nCommit identities other than this repo'"'"'s git config (%s):\n' "${me_email:-none set}"
+    while IFS=$'\t' read -r c who; do report "$c" "${who%% *} $(mask "${who#* }")"; done <<<"$bad"
+  fi
+fi
 
 # ── blocked files ──────────────────────────────────────────────────────────
 
