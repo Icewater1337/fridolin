@@ -300,3 +300,60 @@ func TestQuotedCommandIsRecognised(t *testing.T) {
 		}
 	})
 }
+
+// In a group, only a message addressed to the bridge is a command. The dev
+// endpoint applies the WhatsApp client's trigger rules: the trigger is
+// stripped, and an untagged group message arrives Silent.
+func TestGroupCommandsMustBeAddressed(t *testing.T) {
+	cases := []struct {
+		name    string
+		jid     string
+		text    string
+		command bool
+	}{
+		{"in a DM", testDMChat, "!help", true},
+		{"tagged in a group", testGroup, "@claude !help", true},
+		{"untagged in a group", testGroup, "!help", false},
+		{"untagged in a group, upper case", testGroup, "!HELP", false},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			tb, br := newMainBridge(t, "")
+			if w := tb.do("POST", "/api/dev/inbound", map[string]any{"jid": c.jid, "text": c.text}); w.Code != 202 {
+				t.Fatalf("dev inbound: %d %s", w.Code, w.Body.String())
+			}
+			if c.command {
+				waitFor(t, 5*time.Second, "the help text", func() bool { return tb.sentPrefix(c.jid, "🤖 *Fridolin*") })
+				return
+			}
+			// Ordinary chatter: the brain reads it, nobody gets an answer.
+			waitFor(t, 5*time.Second, "the message in the history", func() bool {
+				h := readHistory(t, br)
+				return len(h) > 0 && h[0].Text == c.text
+			})
+			waitFor(t, 5*time.Second, "the silent run", func() bool { return br.Snapshot().Last != nil })
+			if sent := tb.sentTo(c.jid); len(sent) > 0 {
+				t.Errorf("the bridge answered untagged chatter: %q", sent)
+			}
+		})
+	}
+}
+
+// An untagged "!stop" in a group must not stop the run a member asked for.
+func TestUntaggedStopInGroupIsChatter(t *testing.T) {
+	tb, br := newMainBridge(t, "")
+	startLongRun(t, tb, br, Inbound{JID: testGroup, Sender: "15551234567", Text: "summarise the thread", Source: "whatsapp"})
+
+	tb.handleInbound(context.Background(), Inbound{JID: testGroup, Sender: otherNumber, Text: "!stop", Silent: true, Source: "whatsapp"})
+	time.Sleep(300 * time.Millisecond)
+	rt := br.Snapshot()
+	if rt.Running == nil || rt.Running.Preview != "summarise the thread" {
+		t.Errorf("running = %+v, want the tagged run still going", rt.Running)
+	}
+	if len(rt.Queue) != 1 || !rt.Queue[0].Silent || rt.Queue[0].Preview != "!stop" {
+		t.Errorf("queue = %+v, want the untagged !stop waiting as chatter", rt.Queue)
+	}
+	if sent := tb.sentTo(testGroup); len(sent) > 0 {
+		t.Errorf("the bridge answered untagged chatter: %q", sent)
+	}
+}

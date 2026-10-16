@@ -242,15 +242,18 @@ func (b *Bridge) recordIgnored(kind, jid, name, sender, pushName string) {
 }
 
 // handleInbound is the entry point for every allowed message. Access control
-// already happened: groups against allowed_groups plus the trigger, DMs
-// against allowed_numbers.
+// already happened: groups against allowed_groups, DMs against
+// allowed_numbers. Group messages without the trigger arrive Silent.
 func (b *Bridge) handleInbound(ctx context.Context, m Inbound) {
 	m.Text = strings.TrimSpace(m.Text)
 	cfg := b.cfgs.Get()
 
 	// Commands come from a chat. A message handed to a brain (/ingest, Plaud,
 	// a dev message that names one) carries none: its text is for that brain.
-	if m.Source != "ingest" && m.Brain == "" && b.handleCommand(ctx, m, cfg) {
+	// A command must also be addressed to the bridge. In a group, an untagged
+	// "!stop" is someone talking to the others: it must not stop anything,
+	// and the bridge must not answer it.
+	if m.Source != "ingest" && m.Brain == "" && !m.Silent && b.handleCommand(ctx, m, cfg) {
 		return
 	}
 	if m.Text == "" && len(m.Media) == 0 && m.Quoted == nil {
@@ -364,7 +367,7 @@ func (b *Bridge) handleCommand(ctx context.Context, m Inbound, cfg *Config) bool
 			"• `!reset` — clear the current session and start fresh"
 		if m.IsGroup() {
 			if t := cfg.Triggers.First(); t != "" {
-				help += "\n\nIn this group, start your message with `" + t + "` to address me."
+				help += "\n\nIn this group, start your message with `" + t + "` to address me, commands included."
 			}
 		}
 		_ = b.wa.SendMessage(ctx, m.JID, help)

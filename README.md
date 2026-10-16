@@ -197,6 +197,8 @@ on the **Dev** page and read the replies there.
 | `!reset` | Forget the current session and start fresh |
 
 A command also works when sent as a reply to a message.
+In a group, address the bridge as for any request (`@claude !stop`): an
+untagged `!stop` is ordinary chatter.
 
 ### Shaping the assistant
 

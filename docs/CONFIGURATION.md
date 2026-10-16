@@ -77,7 +77,8 @@ says. So does sending a file, and so does forwarding a message.
 
 Untagged group messages still run through the brain — so it keeps up with the
 conversation — but produce no reply. Very short messages ("ok", "👍") are
-skipped entirely.
+skipped entirely. An untagged message is never a command: in a group, `!stop`
+needs the trigger (`@claude !stop`).
 
 DMs never need a trigger.
 
