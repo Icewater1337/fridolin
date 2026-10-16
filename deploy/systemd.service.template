@@ -7,8 +7,8 @@
 #     systemctl --user enable --now whatsapp-claude-bridge
 #     journalctl --user -u whatsapp-claude-bridge -f
 #
-# Pair with WhatsApp interactively BEFORE enabling this — the QR scan needs a
-# terminal. To keep the bridge running after you log out:
+# Pair with WhatsApp from the dashboard after it starts
+# (whatsapp-claude-bridge open). To keep the bridge running after you log out:
 #     sudo loginctl enable-linger {{USER}}
 #
 # Note: the sandbox layer is macOS-only. On Linux the assistant runs with

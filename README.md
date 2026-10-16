@@ -28,9 +28,18 @@ messages.
 **Conversations that continue.** Each chat keeps its own session. The
 assistant sees the recent history of that chat and can search the full log.
 
-**Brains.** A brain is one isolated assistant: its own directory, prompt,
+**A dashboard.** Everything is set up in a local web page: pair WhatsApp by
+scanning a QR code, add brains, allow chats, watch messages arrive and runs
+finish, change settings, read the log. Nothing to edit by hand.
+
+**Brains.** A brain is one isolated assistant: its own folder, prompt,
 memory, and history. Give your DMs a private brain and a group chat a shared
-one — they can't read each other's files. Add as many as you like.
+one — they can't read each other's files. Add as many as you like, any time:
+pick a folder in the dashboard and it becomes a brain, no restart needed.
+
+**Your data stays yours.** Brains live in ordinary folders on your machine,
+not in this repository. Link Google Drive in the dashboard and each brain is
+backed up incrementally every night, with old versions kept.
 
 **Files.** Photos, PDFs, documents, voice notes, and video are downloaded and
 handed over as file paths. The assistant opens them and does whatever you asked.
@@ -49,14 +58,17 @@ Question: When should we meet?
 **Group awareness.** In a group it reads everything but replies only when
 addressed — by keyword, by @-mention, or when you send it a file.
 
-**Interruptible.** Send a follow-up while it's still thinking and it drops the
-old run and starts on the new message.
+**Orderly.** Messages that arrive while the assistant is busy wait their turn
+(or, if you prefer, interrupt the current run). A photo album or a file plus
+"what is this?" sent in quick succession becomes one request. `!stop` stops
+whatever it is doing.
 
 **Calendar.** An included tool lists, creates, and finds gaps in Google
 Calendar, with separate credentials per brain.
 
-**Scriptable.** An optional localhost HTTP endpoint lets your own scripts send
-messages through the bridge — nightly summaries, alerts, whatever.
+**Scriptable.** Localhost endpoints let your own scripts send messages through
+the bridge — nightly summaries, alerts — or hand a brain files that arrived
+some other way.
 
 ---
 
@@ -64,8 +76,9 @@ messages through the bridge — nightly summaries, alerts, whatever.
 
 - **macOS or Linux.** The sandbox layer is macOS-only; everything else is portable.
 - **[Claude Code](https://claude.com/claude-code)**, installed and logged in.
-- **Go 1.25+** to build.
+- **Go 1.25+** and a C compiler to build (`xcode-select --install` on macOS).
 - **Python 3.9+** for the helper tools.
+- **[rclone](https://rclone.org/install/)** — only for Google Drive backups.
 - **A WhatsApp account for the bridge.** Use a second number, not your personal
   one — see below.
 
@@ -84,49 +97,83 @@ phone.
 ## Setup
 
 ```bash
-git clone https://github.com/YOUR_USERNAME/whatsapp-claude-bridge.git
-cd whatsapp-claude-bridge
+git clone https://github.com/YOUR_USERNAME/whatsapp-assistant-claude.git
+cd whatsapp-assistant-claude
 ./setup.sh
 ```
 
-`setup.sh` checks your prerequisites, finds the Claude CLI, asks who's allowed
-to talk to the bridge, sets up your brains, writes `config.json`, and builds
-the binary. Re-run it any time; it backs up your config first.
+Or open the folder in Claude Code (or any coding assistant) and say *"set this
+up"* — [AGENTS.md](AGENTS.md) tells it exactly what to do.
 
-Then pair with WhatsApp:
+`setup.sh` checks the prerequisites, builds the bridge, runs the tests,
+installs a background service (launchd on macOS, systemd on Linux) and opens
+the dashboard. Re-run it any time; it leaves your configuration and brains
+alone.
+
+Then, in the dashboard:
+
+1. **Pair WhatsApp.** A QR code is shown. On the phone holding the bridge's
+   account: **Settings → Linked Devices → Link a Device**, and scan it. The
+   pairing is stored, so this is a one-time step.
+2. **Add a brain.** Choose a folder (an empty one, or one you already keep
+   notes in). The bridge writes a `brain.json` and a starter prompt into it and
+   never overwrites existing files. Decide whether it answers your DMs.
+3. **Allow your number** under *Settings → Access*, then DM the bridge.
+4. **Optional:** *Backup → Connect Google Drive*.
+
+Reopen the dashboard any time with:
 
 ```bash
-./whatsapp-claude-bridge
+./whatsapp-claude-bridge open
 ```
-
-A QR code appears. On the phone holding the bridge's account:
-**Settings → Linked Devices → Link a Device**. Scan it. The pairing is stored,
-so this is a one-time step.
-
-Send the bridge a DM from an allowed number. It should answer.
 
 ### Adding a group
 
-Group chats are opt-in and the bridge ignores unknown groups, so you need the
-group's JID:
+1. Add the bridge's account to the group and send any message there.
+2. The group appears in the dashboard under **Chats → waiting for access**.
+3. Click **Allow**, pick the brain that should handle it, and say
+   `@claude hello` in the group.
 
-1. Add the bridge's account to the group.
-2. Send any message there.
-3. The bridge logs it:
-   `Group message from 120363000000000000@g.us ("Team") … ignored (not in allowed_groups)`
-4. Put that JID in `allowed_groups` in `config.json`, and in the `groups` list
-   of whichever brain should handle it.
-5. Restart the bridge, and say `@claude hello` in the group.
+### Brain folders
+
+A brain is a folder with a `brain.json`:
+
+```json
+{
+  "version": 1,
+  "id": "family",
+  "name": "Family",
+  "routing": { "handles_dms": false, "default": false, "groups": ["120363000000000000@g.us"] },
+  "effort": "medium",
+  "backup": { "enabled": true, "exclude": ["node_modules/", "*.log"] }
+}
+```
+
+Copy a brain folder to another machine (or restore it from Drive), add it in
+the dashboard, and it comes back with its settings. The bridge runs the
+version you approved in the dashboard: if a brain edits its own `brain.json`,
+the dashboard shows the change and waits for you. See
+[docs/BRAINS.md](docs/BRAINS.md).
 
 ### Configuring by hand
 
-`setup.sh` is a convenience, not a requirement. Copy `config.example.json` to
-`config.json` and edit it. Every option is documented in
-[docs/CONFIGURATION.md](docs/CONFIGURATION.md).
+The dashboard writes `~/.whatsapp-claude-bridge/config.json`; you can edit it
+too. Every option is documented in [docs/CONFIGURATION.md](docs/CONFIGURATION.md).
 
 ```bash
-./whatsapp-claude-bridge --check     # validate config and show the routing
+./whatsapp-claude-bridge check                         # validate and show the routing
+./whatsapp-claude-bridge check --route 15551234567@s.whatsapp.net
+./whatsapp-claude-bridge migrate                       # move inline brains into brain.json files
 ```
+
+### Trying it without WhatsApp
+
+```bash
+./whatsapp-claude-bridge --no-whatsapp --config /tmp/try/config.json --open
+```
+
+Dev mode runs the dashboard and brains with a simulated chat: inject messages
+on the **Dev** page and read the replies there.
 
 ---
 
@@ -142,12 +189,13 @@ group's JID:
 | Command  | Effect |
 | -------- | ------ |
 | `!help`  | Show available commands |
+| `!stop`  | Stop the current run and drop anything queued |
 | `!reset` | Forget the current session and start fresh |
 
 ### Shaping the assistant
 
-Each brain's personality lives in `brain-prompt.md` in its working directory.
-`setup.sh` writes a starting version from
+Each brain's personality lives in `brain-prompt.md` in its folder. Adding a
+brain writes a starting version from
 [examples/brain-prompt.example.md](examples/brain-prompt.example.md). Edit it —
 tell the assistant who you are, how to write, what it looks after. This is the
 file that matters most for how good the thing feels.
@@ -159,7 +207,8 @@ process that gets the recent chat history and nothing else. Continuity comes
 from files it writes itself:
 
 ```
-<brain work_dir>/
+<brain folder>/
+├── brain.json                    routing and settings (managed by the dashboard)
 ├── brain-prompt.md               the system prompt — edit this
 ├── conversation-history.jsonl    every message, appended automatically
 ├── skills/                       procedures for recurring work
@@ -181,7 +230,7 @@ assistant when a piece of recurring work applies and exactly how to do it —
 which command, which flags, which mistakes not to make. The assistant reads
 them before starting routine work, and writes new ones as it finds patterns.
 
-Two ship with the bridge and are copied into each brain by `setup.sh`:
+Two ship with the bridge and are copied into each new brain:
 
 - **[transcription](examples/skills/transcription.md)** — audio and video to
   text, including the reasons not to hand-roll it
@@ -213,15 +262,24 @@ by a wide margin.
 
 ### Sending messages from a script
 
-With `http_listen` enabled:
-
 ```bash
 curl -X POST http://127.0.0.1:8765/send \
   -H 'Content-Type: application/json' \
   -d '{"jid":"120363000000000000@g.us","text":"Deploy finished ✅"}'
 ```
 
-The endpoint is unauthenticated and refuses to bind to anything but localhost.
+To hand a brain files that arrived some other way (a web upload, a recorder
+sync), write them under `~/.whatsapp-claude-bridge/media/` and turn on
+`ingest.enabled`:
+
+```bash
+curl -X POST http://127.0.0.1:8765/ingest \
+  -H 'Content-Type: application/json' \
+  -d '{"brain":"personal","paths":["/Users/you/.whatsapp-claude-bridge/media/upload/scan.pdf"],"text":"File this"}'
+```
+
+The brain handles it like a WhatsApp attachment and replies in its chat. Both
+endpoints only listen on localhost and refuse requests a web page sends.
 
 ### Google Calendar
 
@@ -242,11 +300,25 @@ python3 tools/calendar_tool.py --profile personal list
 Full instructions are in the header of
 [tools/calendar_tool.py](tools/calendar_tool.py).
 
+### Backups
+
+*Backup → Connect Google Drive* links a Drive account through
+[rclone](https://rclone.org). The bridge keeps its own rclone configuration
+(your personal rclone setup is untouched) and asks only for the `drive.file`
+permission, so it can see nothing in your Drive except the files it creates.
+
+Every night (or when you click *Back up now*) each brain folder is synced
+incrementally to `whatsapp-claude-bridge-backup/<brain>/current/`; files that
+changed or were deleted move to `versions/<timestamp>/` and are kept for 30
+days. Exclude patterns per brain keep out what you can rebuild. The WhatsApp
+session, tokens and `.env` files are never uploaded. Restores go into a new
+folder and never overwrite a brain. Details: [docs/BACKUP.md](docs/BACKUP.md).
+
 ### Running in the background
 
-`setup.sh` can install a launchd agent (macOS) or print a systemd unit (Linux).
-Templates are in [deploy/](deploy/). Pair with WhatsApp interactively first —
-the QR scan needs a terminal.
+`setup.sh` installs a launchd agent (macOS) or a systemd user unit (Linux)
+from the templates in [deploy/](deploy/). Pairing happens in the dashboard, so
+the service can be started before WhatsApp is linked.
 
 ---
 
@@ -270,7 +342,12 @@ What the bridge does about it:
   paths under `sandbox.deny_paths`.
 - **Brain isolation.** Brains have separate directories, sessions, histories,
   and calendar credentials.
-- **Loopback-only HTTP API**, which refuses a non-loopback bind address.
+- **A guarded dashboard.** It only listens on localhost, rejects requests
+  from web pages on other sites (and DNS-rebinding tricks), and requires a
+  token from `~/.whatsapp-claude-bridge/dashboard.token` — a file the sandbox
+  keeps away from brains, so a manipulated brain cannot reconfigure the bridge.
+- **You approve brain settings.** A brain that edits its own `brain.json` to
+  claim your DMs or another group changes nothing until you approve it.
 - **OTP guard.** A message that is only a numeric code, arriving right after
   the assistant asked for one, is dropped before it reaches history or the model.
 
@@ -297,11 +374,22 @@ Handles pairing, allowlists, trigger matching, attachment downloads, and poll
 vote decryption (WhatsApp sends SHA-256 hashes of option names, which are
 matched against the stored options).
 
-**`brain.go`** — the multi-brain runner. Each message spawns `claude -p` with
-`--output-format stream-json`, seeded with the system prompt and recent chat
-history. Events are parsed live, so an `AskUserQuestion` reaches WhatsApp
-immediately and a run over 10 seconds gets a "working on it" notice. A newer
-message cancels the run in flight.
+**`debounce.go`** — merges a burst of messages from one person into one run.
+
+**`brain.go`** — the multi-brain runner. Each brain has a queue and one
+worker; each message spawns `claude -p` with `--output-format stream-json`,
+seeded with the system prompt and recent chat history. Events are parsed live,
+so an `AskUserQuestion` reaches WhatsApp immediately and a run over 10 seconds
+gets a "working on it" notice. `BrainManager.Apply` swaps the brain set at
+runtime without touching brains that did not change.
+
+**`manifest.go`, `brainreg.go`** — `brain.json`, the brain registry, path
+checks and scaffolding. **`configstore.go`** — the live configuration.
+
+**`dashboard.go`, `dashboard_api.go`, `web/`** — the dashboard, its guards and
+API; the page is plain HTML/JS compiled into the binary.
+
+**`backup.go`** — Google Drive backups through rclone.
 
 **`claude.go`** — the classic single-session runner used when `brain_mode` is
 off: one Claude session per chat, resumed with `--resume`, retried without it
@@ -315,7 +403,7 @@ polls, and votes.
 **`chunks.go`** — splits long replies at paragraph, line, then sentence
 boundaries so messages break somewhere readable.
 
-**`server.go`** — the localhost send API.
+**`server.go`** — the localhost `/send` and `/ingest` endpoints.
 
 ---
 
@@ -325,17 +413,23 @@ boundaries so messages break somewhere readable.
 On macOS the desktop app keeps it at
 `~/Library/Application Support/Claude/claude-code/<version>/claude.app/Contents/MacOS/claude`.
 
-**No reply in a group** — is the group JID in `allowed_groups`? Is it in a
-brain's `groups`? Did you use a trigger keyword? Check the log.
+**No reply in a group** — look under *Chats* in the dashboard: an unknown group
+shows up there with an *Allow* button. Otherwise check which brain the group
+routes to, and that you used a trigger keyword.
 
-**No reply to a DM** — the sender's number must be in `allowed_numbers`, with
-country code and no `+`.
+**No reply to a DM** — the sender's number must be allowed (*Settings →
+Access*), with country code and no `+`. Blocked senders appear under *Chats*.
 
 **"Not logged in" from the CLI** — run `claude` once in a terminal to
 authenticate. Under launchd, check that `HOME` is set correctly in the plist.
 
-**Logged out of WhatsApp** — delete `bridge.db` from your data directory and
-re-pair. (This also clears sessions and poll history.)
+**Logged out of WhatsApp** — remove the device under *Linked Devices* on the
+phone, stop the bridge, move `bridge.db` out of your data directory (keep it
+until the new pairing works), start the bridge and pair again from the
+dashboard. This also clears sessions and poll history.
+
+**"another bridge is already running"** — only one bridge may use a data
+directory; two bridges on one WhatsApp session knock each other offline.
 
 **Everything times out with the sandbox on** — set `sandbox.enabled` to `false`
 to confirm it's the cause, then add the path it needs to `sandbox.allow_paths`.
@@ -346,6 +440,12 @@ to confirm it's the cause, then add the path it needs to `sandbox.allow_paths`.
 
 Issues and pull requests welcome. Please don't include real phone numbers,
 group JIDs, or chat content in bug reports — redact them.
+
+Run `scripts/install-hooks.sh` once: it blocks commits and pushes that contain
+phone numbers, WhatsApp JIDs, email addresses, home-directory paths or tokens,
+plus anything in your personal denylist
+(`~/.config/whatsapp-claude-bridge/personal-denylist`, one string per line —
+your name, your numbers, your company). CI runs the same check.
 
 ## License
 

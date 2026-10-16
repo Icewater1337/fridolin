@@ -1,35 +1,53 @@
 {
-  "_comment": "Copy to config.json and edit, or just run ./setup.sh. Every option is documented in docs/CONFIGURATION.md.",
+  "_comment": "You normally never edit this: the dashboard (./whatsapp-claude-bridge open) does. Every option: docs/CONFIGURATION.md",
 
   "allowed_numbers": ["15551234567"],
+  "allow_any_dm": false,
   "allowed_groups": ["120363000000000000@g.us"],
-  "triggers": ["@claude"],
+  "triggers": ["@claude", {"text": "@c", "match": "start"}],
 
   "claude_path": "claude",
   "data_dir": "~/.whatsapp-claude-bridge",
 
   "brain_mode": true,
   "brain_model": "",
-  "brains": [
+  "brain_effort": "",
+  "disallowed_tools": [],
+  "brain_dirs": [
     {
-      "name": "personal",
-      "work_dir": "~/assistant/personal",
-      "handles_dms": true,
-      "groups": []
+      "path": "~/assistant/personal",
+      "approved": {
+        "version": 1,
+        "id": "personal",
+        "name": "Personal",
+        "routing": {"handles_dms": true, "default": false, "groups": []},
+        "backup": {"enabled": true, "exclude": ["node_modules/", "*.log"]}
+      }
     },
     {
-      "name": "team",
-      "work_dir": "~/assistant/team",
-      "handles_dms": false,
-      "groups": ["120363000000000000@g.us"]
+      "path": "~/assistant/team",
+      "approved": {
+        "version": 1,
+        "id": "team",
+        "name": "Team",
+        "routing": {"handles_dms": false, "default": true, "groups": ["120363000000000000@g.us"]},
+        "backup": {"enabled": true, "exclude": ["node_modules/", "*.log"]}
+      }
     }
   ],
 
   "sandbox": {
     "enabled": true,
-    "deny_paths": ["~/clients", "~/work"],
-    "allow_paths": []
+    "deny_paths": ["~/clients"],
+    "allow_paths": [],
+    "git_config": "read"
   },
+
+  "queue": {"mode": "queue", "max_pending": 10, "notify": true},
+  "debounce": {"quiet_ms": 2000, "max_wait_ms": 10000},
+  "ingest": {"enabled": false},
+
+  "backup": {"enabled": false, "daily_at": "03:30", "keep_versions_days": 30},
 
   "dangerously_skip_permissions": true,
   "otp_guard": true,

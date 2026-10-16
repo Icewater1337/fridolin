@@ -8,11 +8,11 @@
   ~/Library/LaunchAgents/com.whatsapp-claude-bridge.plist.
 
   To do it by hand, replace the placeholders, save it there, then:
-      launchctl load ~/Library/LaunchAgents/com.whatsapp-claude-bridge.plist
-      launchctl unload ~/Library/LaunchAgents/com.whatsapp-claude-bridge.plist
+      launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.whatsapp-claude-bridge.plist
+      launchctl bootout   gui/$(id -u)/com.whatsapp-claude-bridge
 
-  Pair with WhatsApp interactively BEFORE loading this — the QR scan needs a
-  terminal.
+  Pair with WhatsApp from the dashboard after it starts
+  (whatsapp-claude-bridge open).
 -->
 <plist version="1.0">
 <dict>

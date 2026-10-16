@@ -1,12 +1,18 @@
 # Configuration
 
-Everything lives in `config.json` next to the binary, or wherever `--config`
-points. `./setup.sh --reconfigure` rewrites it interactively.
+The dashboard edits all of this for you (`./whatsapp-claude-bridge open`).
+This page is the reference behind it.
+
+The configuration is `~/.whatsapp-claude-bridge/config.json`, or `config.json`
+in the current directory if one exists, or wherever `--config` / `CONFIG_FILE`
+points. On first start a safe starter config is written there. Changes made
+in the dashboard apply immediately; a few runtime settings (marked *restart*)
+need a restart, which the dashboard offers.
 
 Validate at any time:
 
 ```bash
-./whatsapp-claude-bridge --check
+./whatsapp-claude-bridge check
 ```
 
 Paths may start with `~`, which expands to your home directory.
@@ -23,8 +29,10 @@ Phone numbers permitted to DM the bridge. Country code, no `+`, no spaces.
 "allowed_numbers": ["15551234567", "15559876543"]
 ```
 
-An empty list allows **anyone** who can message the account. Only reasonable
-for a number nobody else knows.
+What an empty list means depends on `allow_any_dm`. New configs set it to
+`false`: nobody may DM until you add a number. Older configs without the
+setting keep the original behaviour — an empty list allows **anyone** who can
+message the account — and the dashboard warns about it.
 
 Newer WhatsApp clients identify senders by an internal ID rather than a phone
 number; the bridge resolves that back to the number before checking, so plain
@@ -39,17 +47,25 @@ list means no groups at all.
 "allowed_groups": ["120363000000000000@g.us"]
 ```
 
-To find a JID: add the bridge to the group, send a message, and read it out of
-the log line that says the group was ignored.
+To find a JID: add the bridge to the group and send a message. The group shows
+up in the dashboard under **Chats → waiting for access**, with an *Allow*
+button that also assigns it to a brain.
 
 ### `triggers`
 
-Keywords that address the bridge in a group. Matched case-insensitively
-anywhere in the message and stripped before the text reaches Claude.
+Keywords that address the bridge in a group. Matched case-insensitively and
+stripped before the text reaches Claude. A plain string matches anywhere in the
+message; an object can restrict it:
 
 ```json
-"triggers": ["@claude", "hey bot"]
+"triggers": ["@claude", {"text": "@c", "match": "start"}, {"text": "bot", "match": "word"}]
 ```
+
+| `match` | Fires when |
+| --- | --- |
+| `anywhere` (default) | the keyword appears anywhere |
+| `start` | the message starts with it — `@c hi` yes, `@carla` no, `hi @c` no |
+| `word` | it appears as a whole word — `hey bot` yes, `robotics` no |
 
 An @-mention of the bridge's own account always counts, whatever this list
 says. So does sending a file, and so does forwarding a message.
@@ -84,6 +100,16 @@ Model to use — `"sonnet"`, `"opus"`, `"haiku"`, or a full model ID. Empty uses
 the CLI default. `model` applies to classic mode, `brain_model` to brains, and
 an individual brain can override it with its own `model` field.
 
+### `brain_effort`
+
+Passed as `--effort`: `low`, `medium`, `high`, `xhigh` or `max`. Empty uses
+the CLI default. Brains can override it.
+
+### `disallowed_tools`
+
+Tools brains may not use, passed as `--disallowed-tools`, e.g.
+`["WebFetch", "WebSearch"]`. Brains can override the list.
+
 ### `dangerously_skip_permissions`
 
 Passes `--dangerously-skip-permissions`, so Claude uses tools without asking.
@@ -98,49 +124,43 @@ Read [Security](../README.md#security) before running with this on.
 
 ## Brains
 
-A brain is one isolated assistant. Set `brain_mode: true` and list them:
+Brains are configured in their own folders (`brain.json`) and added in the
+dashboard; see [BRAINS.md](BRAINS.md). In `config.json` they appear as:
 
 ```json
 "brain_mode": true,
+"brain_dirs": [
+  { "path": "~/assistant/personal", "approved": { "id": "personal", "name": "Personal", "routing": { "handles_dms": true } } }
+]
+```
+
+`approved` is the manifest you accepted — the version that runs.
+
+### Inline brains
+
+Older configs list brains inline. They keep working, and
+`whatsapp-claude-bridge migrate` moves them into `brain.json` files:
+
+```json
 "brains": [
-  {
-    "name": "personal",
-    "work_dir": "~/assistant/personal",
-    "handles_dms": true
-  },
-  {
-    "name": "team",
-    "work_dir": "~/assistant/team",
-    "groups": ["120363000000000000@g.us"],
-    "model": "opus"
-  }
+  { "name": "personal", "work_dir": "~/assistant/personal", "handles_dms": true },
+  { "name": "team", "work_dir": "~/assistant/team", "groups": ["120363000000000000@g.us"], "model": "opus" }
 ]
 ```
 
 | Field | Meaning |
 | ----- | ------- |
-| `name` | Identifier. Used in session keys, log lines, sandbox profiles, and calendar credential filenames. No spaces or slashes. |
-| `work_dir` | Where Claude runs. Holds the prompt, history, and memories. Created if missing. |
+| `name` | Identifier (becomes the brain's id). No spaces or slashes. |
+| `work_dir` | The brain's folder. Created if missing. |
 | `handles_dms` | Routes all direct messages here. At most one brain. |
 | `groups` | Group JIDs routed here. A group may belong to only one brain. |
 | `default` | Fallback for allowed chats no brain claims. Defaults to the first brain. |
 | `prompt_file` | Override the prompt path (default `<work_dir>/brain-prompt.md`). |
-| `model` | Override `brain_model` for this brain. |
+| `model`, `effort` | Override `brain_model` / `brain_effort` for this brain. |
 
-Startup fails on a duplicate name, a group claimed twice, or two brains with
-`handles_dms`.
-
-### What lives in a work_dir
-
-```
-<work_dir>/
-├── brain-prompt.md               system prompt — prepended to every message
-├── conversation-history.jsonl    appended automatically
-├── claude-stream.log             activity log (tool calls, results)
-└── memories/                     files the assistant writes for itself
-    └── people/
-        └── whatsapp-identity-map.md
-```
+A brain whose settings clash with another (same id, a group claimed twice, two
+DM brains, a folder inside another brain's) is left out and reported on the
+dashboard; the others keep running.
 
 ### Classic mode
 
@@ -162,11 +182,13 @@ single-user setup.
 ```
 
 When enabled, each Claude run is wrapped in `sandbox-exec` under a generated
-profile. The profile is allow-by-default with reads denied to:
+profile. Changes (including added or removed brains) apply to the next run of
+every brain. The profile is allow-by-default with reads denied to:
 
 - every **other brain's** working directory
-- `~/.ssh`, `~/.gnupg`, `~/.aws`, `~/.config/gh`, `~/.config/gcloud`
-- `~/.gitconfig`, `~/.git-credentials`, `~/.netrc`, shell history files
+- `~/.ssh`, `~/.gnupg`, `~/.aws`, `~/.config/gh`, `~/.config/gcloud`,
+  `~/.config/rclone`
+- `~/.git-credentials`, `~/.netrc`, shell history files
 - `~/Documents`, `~/Downloads`, `~/Desktop`, `~/Movies`, `~/Music`, `~/Pictures`
 - `~/Library/Mail`, `Messages`, `Calendars`, `Safari`, Chrome and Firefox
   profiles, `Containers`, `Group Containers`, Contacts, Notes
@@ -178,11 +200,23 @@ profile. The profile is allow-by-default with reads denied to:
 credentials from the keychain and fails with "Not logged in" without it.
 
 `deny_paths` adds your own. `allow_paths` re-opens something the defaults
-closed.
+closed (read access).
 
-**Don't put a `work_dir` inside a denied directory.** A brain living in
-`~/Documents/assistant` cannot read its own prompt or memories, and fails in
-confusing ways. Keep brains somewhere like `~/assistant/<name>`.
+A brain's own folder is always readable and writable, even inside a denied
+directory. Other tools it runs may still need paths the defaults deny, so
+keeping brains somewhere like `~/assistant/<name>` is simplest.
+
+### `sandbox.git_config`
+
+`"read"` (default): brains may read `~/.gitconfig` and the files it includes,
+so they can commit in their own folder, but never write them. `"deny"` hides
+git configuration entirely. `~/.git-credentials` is denied either way.
+
+### `sandbox.credentials_dir`
+
+A directory of per-brain credential files kept outside the data directory.
+Brains are denied all of it except their own calendar pair
+(`google_calendar_credentials_<id>.json`, `google_calendar_token_<id>.json`).
 
 This is containment, not a jail — it raises the cost of a prompt injection
 rather than eliminating it. On Linux it does nothing; run the bridge as a
@@ -192,32 +226,98 @@ dedicated user there.
 
 ## Runtime
 
-### `data_dir`
+### `data_dir` *(restart)*
 
-Database, downloaded media, QR code, and calendar credentials. Default
-`~/.whatsapp-claude-bridge`. `db_path` and `media_dir` override individually.
+Database (including the WhatsApp session), downloaded media, the dashboard
+token, backup state, the bridge's rclone config and calendar credentials.
+Default `~/.whatsapp-claude-bridge`. `db_path` and `media_dir` override
+individually. Brains cannot read it, except the `media/` inbox and their own
+calendar credentials.
 
-### `http_listen`
+### `http_listen` *(restart)*
 
-Address for the local send API, e.g. `"127.0.0.1:8765"`. Empty disables it.
+Address of the dashboard and the local APIs. Default `"127.0.0.1:8765"`;
+`"off"` disables all of it. Only loopback addresses are accepted. The bridge
+binds it before connecting to WhatsApp and exits if it is taken — usually a
+sign another bridge is running.
 
-```bash
-curl -X POST http://127.0.0.1:8765/send \
-  -H 'Content-Type: application/json' \
-  -d '{"jid":"120363000000000000@g.us","text":"Hello"}'
+`POST /send {"jid","text"}` sends a message (see the README); it is appended to
+the owning brain's history, so the assistant knows what went out under its
+name. `GET /health` returns `ok`. Both work without the dashboard token but
+refuse requests sent by web pages.
+
+### `ingest.enabled`
+
+Enables `POST /ingest {"brain","paths","text","sender"}` (`scope` is accepted
+as an alias of `brain`). Paths must be files inside the media directory; the
+brain receives them like WhatsApp attachments and answers in its
+`reply_chat`. Off by default.
+
+### `queue`
+
+```json
+"queue": { "mode": "queue", "max_pending": 10, "notify": true }
 ```
 
-There is no authentication, so the bridge refuses to start the server on a
-non-loopback address. `GET /health` returns `ok`.
+`mode: "queue"` (default) runs a brain's messages one after another and, with
+`notify`, tells the sender "⏳ Queued (#2)". `mode: "interrupt"` stops the
+current run when a new message arrives. Untagged group chatter waiting in the
+queue is dropped when a newer message from that chat arrives — it is already in
+the history the next run reads. `!stop` stops the current run and clears the
+queue.
 
-Messages sent this way are appended to the owning brain's history, so the
-assistant knows what went out under its name.
+### `debounce`
 
-### `otp_guard`
+```json
+"debounce": { "quiet_ms": 2000, "max_wait_ms": 10000 }
+```
+
+Messages from the same person in the same chat that arrive less than
+`quiet_ms` apart are merged into one run (an album, a file and its question).
+A batch never waits longer than `max_wait_ms`. `quiet_ms: 0` turns it off.
+
+### `startup_checks`
+
+```json
+"startup_checks": {
+  "required_files": ["~/.config/my-assistant/calendar-credentials.json"],
+  "notify_whatsapp": true,
+  "hint": "Restore them from your password manager."
+}
+```
+
+Files the assistant's tools need. Missing ones are logged loudly, shown on the
+dashboard and, with `notify_whatsapp`, sent to `notify_jid` (default: the
+first allowed number) once WhatsApp is connected.
+
+### `backup`
+
+Google Drive backups; see [BACKUP.md](BACKUP.md).
+
+| Field | Default | Meaning |
+| --- | --- | --- |
+| `enabled` | `false` | run the daily backup |
+| `daily_at` | `"03:30"` | local time, `HH:MM` |
+| `root` | `"whatsapp-claude-bridge-backup"` | folder in Drive |
+| `remote` | `"brain-gdrive"` | rclone remote name in the bridge's own rclone config |
+| `keep_versions_days` | `30` | `0` keeps old versions forever |
+| `include_bridge_config` | `true` | also back up `config.json` and the brain list |
+| `rclone_path` | found on PATH | |
+
+### `dashboard`
+
+`dashboard.disabled` turns the web dashboard off (*restart*).
+`dashboard.require_token` (default `true`) requires the token from
+`<data_dir>/dashboard.token` on every API call. Brains run on this machine and
+could otherwise reach the dashboard with `curl`; leave it on.
+
+### `otp_guard` and `otp_markers`
 
 Drops a message that is only a 4–8 digit number when one of the assistant's
-last 50 outbound messages contains `🔐`, `OTP`, `2FA`, `one-time code`, or
-`verification code`.
+last 50 outbound messages contains one of `otp_markers` — by default `🔐`,
+`OTP`, `2FA`, `one-time code`, `verification code`. Add your own (a bank's
+name in its code prompt, say); setting the list replaces the defaults, so
+include them if you still want them.
 
 The code is discarded before it is written to history or sent to the model.
 The assistant simply never sees it.
@@ -234,7 +334,7 @@ Opens a tmux session per brain, tailing its activity log, in a Terminal window
 (macOS). Off by default. Handy while tuning a prompt; noisy otherwise. Requires
 tmux — without it the bridge logs a warning and carries on.
 
-### `log_level`
+### `log_level` *(restart)*
 
 `debug`, `info`, `warn`, or `error`. `debug` is very verbose — it includes the
 whatsmeow protocol chatter.
@@ -244,7 +344,9 @@ whatsmeow protocol chatter.
 ## Environment variables
 
 Environment variables override `config.json`. A `.env` file next to the config
-is loaded automatically.
+(or in the working directory) is loaded automatically and overrides the
+process environment. The dashboard shows settings an environment variable
+controls as locked — remove the variable to edit them there.
 
 | Variable | Config field |
 | -------- | ------------ |
@@ -258,6 +360,8 @@ is loaded automatically.
 | `MEDIA_DIR` | `media_dir` |
 | `MODEL` | `model` |
 | `BRAIN_MODEL` | `brain_model` |
+| `BRAIN_EFFORT` | `brain_effort` |
+| `DISALLOWED_TOOLS` | `disallowed_tools` (comma-separated) |
 | `BRAIN_MODE` | `brain_mode` |
 | `SANDBOX_ENABLED` | `sandbox.enabled` |
 | `OTP_GUARD` | `otp_guard` |

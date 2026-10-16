@@ -26,6 +26,8 @@ Usage:
   whatsapp-claude-bridge migrate [--dry-run] [--force]
                                            move brains configured inline in config.json
                                            into their folders (brain.json)
+  whatsapp-claude-bridge init [--claude-path PATH]
+                                           write a starter config (if there is none)
   whatsapp-claude-bridge version
 
 Common flags:
@@ -53,6 +55,8 @@ func main() {
 		migrateCmd(args)
 	case "open":
 		openCmd(args)
+	case "init":
+		initCmd(args)
 	case "version":
 		fmt.Println(bridgeVersion())
 	case "help", "-h", "--help":
@@ -94,10 +98,16 @@ func starterConfig() *Config {
 }
 
 func ensureConfigFile(path string) error {
+	return writeStarterConfig(path, "")
+}
+
+func writeStarterConfig(path, claudePath string) error {
 	if _, err := os.Stat(path); err == nil || !os.IsNotExist(err) {
 		return err
 	}
-	data, err := json.MarshalIndent(starterConfig(), "", "  ")
+	cfg := starterConfig()
+	cfg.ClaudePath = claudePath
+	data, err := json.MarshalIndent(cfg, "", "  ")
 	if err != nil {
 		return err
 	}
@@ -170,6 +180,23 @@ func runCmd(args []string) {
 	}
 
 	bridge.Stop()
+}
+
+func initCmd(args []string) {
+	fs := flag.NewFlagSet("init", flag.ExitOnError)
+	cfgPath := fs.String("config", defaultConfigPath(), "path to config.json")
+	claudePath := fs.String("claude-path", "", "path to the Claude Code CLI")
+	_ = fs.Parse(args)
+	if _, err := os.Stat(*cfgPath); err == nil {
+		fmt.Printf("%s already exists — leaving it alone.\n", *cfgPath)
+		return
+	}
+	if err := writeStarterConfig(*cfgPath, *claudePath); err != nil {
+		log.Fatalf("writing %s: %v", *cfgPath, err)
+	}
+	if _, err := LoadConfig(*cfgPath); err != nil {
+		log.Fatalf("the starter config does not load: %v", err)
+	}
 }
 
 func openCmd(args []string) {
