@@ -196,6 +196,8 @@ on the **Dev** page and read the replies there.
 | `!stop`  | Stop the current run and drop anything queued, including files or recordings another brain is answering in this chat |
 | `!reset` | Forget the current session and start fresh |
 
+A command also works when sent as a reply to a message.
+
 ### Shaping the assistant
 
 Each brain's personality lives in `brain-prompt.md` in its folder. Adding a
@@ -370,7 +372,8 @@ What the bridge does about it:
 - **You approve brain settings.** A brain that edits its own `brain.json` to
   claim your DMs or another group changes nothing until you approve it.
 - **OTP guard.** A message that is only a numeric code, arriving right after
-  the assistant asked for one, is dropped before it reaches history or the model.
+  the assistant asked for one, is dropped before it reaches history or the model
+  — also when it is sent as a reply to the request.
 
 What it does not do:
 

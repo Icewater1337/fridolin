@@ -605,7 +605,8 @@ Drops a message that is only a 4–8 digit number when one of the assistant's
 last 50 outbound messages contains one of `otp_markers` — by default `🔐`,
 `OTP`, `2FA`, `one-time code`, `verification code`. Add your own (a bank's
 name in its code prompt, say); setting the list replaces the defaults, so
-include them if you still want them.
+include them if you still want them. Only what was typed counts: a code sent
+as a reply to the request is caught too.
 
 The code is never written to history or sent to the model — the assistant
 never sees it. It is handed to whatever local script asked for it instead:

@@ -285,7 +285,7 @@ func (br *Brain) Submit(m Inbound) (pos int, busy bool, err error) {
 
 	// History first, so the run (and any later run) sees the message even when
 	// it is merged into a queue that is already moving.
-	br.appendHistory(m.JID, m.Sender, historyTextWithMedia(m.Text, m.Media), "in")
+	br.appendHistory(m.JID, m.Sender, historyTextWithMedia(m.textWithQuote(), m.Media), "in")
 
 	br.mu.Lock()
 	if br.retired {
@@ -525,11 +525,11 @@ func (br *Brain) Snapshot() BrainRuntime {
 	br.mu.Lock()
 	defer br.mu.Unlock()
 	if cur := br.current; cur != nil {
-		rt.Running = &RunView{Chat: cur.msg.JID, Sender: cur.msg.Sender, Preview: truncate(cur.msg.Text, 160),
+		rt.Running = &RunView{Chat: cur.msg.JID, Sender: cur.msg.Sender, Preview: truncate(cur.msg.textWithQuote(), 160),
 			Silent: cur.msg.Silent, Started: cur.started, PID: cur.pid}
 	}
 	for _, p := range br.pending {
-		rt.Queue = append(rt.Queue, QueuedView{Chat: p.JID, Sender: p.Sender, Preview: truncate(p.Text, 160), Silent: p.Silent, Queued: p.At})
+		rt.Queue = append(rt.Queue, QueuedView{Chat: p.JID, Sender: p.Sender, Preview: truncate(p.textWithQuote(), 160), Silent: p.Silent, Queued: p.At})
 	}
 	if br.last != nil {
 		l := *br.last
@@ -1131,7 +1131,7 @@ func (br *Brain) buildPrompt(s *brainSettings, m Inbound) string {
 	}
 
 	sb.WriteString("<new_message>\n")
-	sb.WriteString(fmt.Sprintf("%s says: %s\n", m.Sender, m.Text))
+	sb.WriteString(fmt.Sprintf("%s says: %s\n", m.Sender, m.textWithQuote()))
 	sb.WriteString("</new_message>")
 	return sb.String()
 }

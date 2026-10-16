@@ -449,12 +449,7 @@ func (wa *WhatsAppClient) handleMessage(msg *events.Message) {
 func (wa *WhatsAppClient) handleDMMessage(msg *events.Message, senderNumber string) {
 	chatJID := msg.Info.Chat.String()
 	text := extractText(msg.Message)
-
-	if ext := msg.Message.GetExtendedTextMessage(); ext != nil {
-		if replyContext := extractReplyContext(ext.GetContextInfo()); replyContext != "" {
-			text = replyContext + text
-		}
-	}
+	quoted := quoteOf(msg.Message)
 
 	mediaPath, caption := wa.downloadAttachment(msg, chatJID)
 	if caption != "" {
@@ -465,13 +460,13 @@ func (wa *WhatsAppClient) handleDMMessage(msg *events.Message, senderNumber stri
 		}
 	}
 
-	if text == "" && mediaPath == "" {
+	if text == "" && mediaPath == "" && quoted == nil {
 		return
 	}
 
 	go wa.handler(context.Background(), Inbound{
 		JID: chatJID, Sender: senderNumber, Text: text, Media: mediaList(mediaPath),
-		Source: "whatsapp", At: msg.Info.Timestamp,
+		Quoted: quoted, Source: "whatsapp", At: msg.Info.Timestamp,
 	})
 }
 
@@ -548,12 +543,7 @@ func (wa *WhatsAppClient) handleGroupMessage(msg *events.Message) {
 		text = attachmentCaption
 	}
 	text = cfg.Triggers.Strip(text)
-
-	if ext := msg.Message.GetExtendedTextMessage(); ext != nil {
-		if replyContext := extractReplyContext(ext.GetContextInfo()); replyContext != "" {
-			text = replyContext + text
-		}
-	}
+	quoted := quoteOf(msg.Message)
 
 	mediaPath, caption := wa.downloadAttachment(msg, groupJID)
 	if caption != "" {
@@ -565,14 +555,15 @@ func (wa *WhatsAppClient) handleGroupMessage(msg *events.Message) {
 		}
 	}
 
-	if text == "" && mediaPath == "" {
+	// A reply that is only the trigger asks about the quoted message.
+	if text == "" && mediaPath == "" && quoted == nil {
 		return
 	}
 
 	log.Printf("Group message from %s (%q) by %s: processing (silent=%v)", groupJID, groupName, senderNumber, silent)
 	go wa.handler(context.Background(), Inbound{
 		JID: groupJID, Sender: senderNumber, Text: text, Media: mediaList(mediaPath),
-		Silent: silent, Source: "whatsapp", At: msg.Info.Timestamp,
+		Quoted: quoted, Silent: silent, Source: "whatsapp", At: msg.Info.Timestamp,
 	})
 }
 
@@ -843,21 +834,30 @@ func (wa *WhatsAppClient) ownMentionJIDs() []types.JID {
 	return out
 }
 
-// extractReplyContext renders quoted-message context as a short prefix line,
-// so the model can see what a reply is replying to.
-func extractReplyContext(contextInfo *waE2E.ContextInfo) string {
+// quoteOf returns the message a text reply quotes, or nil.
+func quoteOf(msg *waE2E.Message) *Quote {
+	if ext := msg.GetExtendedTextMessage(); ext != nil {
+		return extractQuote(ext.GetContextInfo())
+	}
+	return nil
+}
+
+// extractQuote returns the quoted message of a reply, shortened, so the model
+// can see what a reply is replying to. It is nil when nothing with text was
+// quoted.
+func extractQuote(contextInfo *waE2E.ContextInfo) *Quote {
 	if contextInfo == nil {
-		return ""
+		return nil
 	}
 
 	quotedText := extractText(contextInfo.GetQuotedMessage())
 	if quotedText == "" {
-		return ""
+		return nil
 	}
 
 	senderJID := contextInfo.GetParticipant()
 	if senderJID == "" {
-		return ""
+		return nil
 	}
 	if idx := strings.Index(senderJID, "@"); idx > 0 {
 		senderJID = senderJID[:idx]
@@ -868,7 +868,7 @@ func extractReplyContext(contextInfo *waE2E.ContextInfo) string {
 		quotedText = truncate(quotedText, maxQuoteLen)
 	}
 
-	return fmt.Sprintf("[reply to %s: %q]\n", senderJID, quotedText)
+	return &Quote{From: senderJID, Text: quotedText}
 }
 
 // extractText returns the plain text content of a message.

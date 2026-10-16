@@ -253,7 +253,7 @@ func (b *Bridge) handleInbound(ctx context.Context, m Inbound) {
 	if m.Source != "ingest" && m.Brain == "" && b.handleCommand(ctx, m, cfg) {
 		return
 	}
-	if m.Text == "" && len(m.Media) == 0 {
+	if m.Text == "" && len(m.Media) == 0 && m.Quoted == nil {
 		return
 	}
 
@@ -435,7 +435,7 @@ func (b *Bridge) handleClassicMessage(ctx context.Context, m Inbound) {
 	replyChan := make(chan ClaudeResult, 1)
 	b.claude.Enqueue(ClaudeRequest{
 		JID:       m.JID,
-		Text:      m.Text,
+		Text:      m.textWithQuote(),
 		Media:     m.Media,
 		ReplyChan: replyChan,
 	})
