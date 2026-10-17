@@ -180,13 +180,16 @@ func runCmd(args []string) {
 	bridge.Stop()
 }
 
-// runLog sends the log to console and to a ring the dashboard shows, then
-// picks the config file. In that order: a warning configPath logs, such as
-// the one about CONFIG_FILE, must reach the dashboard's log too, the only
-// one many people read.
+// runLog sends the log to console and to a ring the dashboard shows, logs
+// the version, then picks the config file. In that order: a warning
+// configPath logs, such as the one about CONFIG_FILE, must reach the
+// dashboard's log too, the only one many people read, and the version line
+// comes first even when the bridge then refuses to start (no config, one
+// that does not load, another bridge on the data dir).
 func runLog(console io.Writer, configFlag string) (*LogRing, string) {
 	ring := NewLogRing(2000)
 	log.SetOutput(io.MultiWriter(console, ring))
+	log.Printf("Starting %s", versionLine())
 	return ring, configPath(configFlag)
 }
 
