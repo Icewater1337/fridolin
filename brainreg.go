@@ -275,7 +275,7 @@ func ScaffoldBrain(dir string, m *BrainManifest) ([]string, error) {
 	prompt := starterPrompt(m)
 	files := []struct{ rel, content string }{
 		{m.normalized().PromptFile, prompt},
-		{"memories/people/whatsapp-identity-map.md", identityMapTemplate},
+		{identityMapFile, identityMapTemplate},
 		{"memories/README.md", "# Memories\n\nOne markdown file per topic. The brain reads and updates these between conversations.\n"},
 		{"skills/README.md", "# Skills\n\nReusable how-tos and scripts this brain has written for itself.\n"},
 	}

@@ -57,7 +57,7 @@ const identityMapFile = "memories/people/whatsapp-identity-map.md"
 // parseIdentityMap parses a brain's contact map and returns normalized
 // JID → name.
 //
-// The map is a markdown table at <work_dir>/memories/people/whatsapp-identity-map.md:
+// The map is a markdown table at identityMapFile in the brain's folder:
 //
 //	| WhatsApp Number | Person | Notes |
 //	| --------------- | ------ | ----- |
@@ -1187,8 +1187,8 @@ func (br *Brain) buildPrompt(s *brainSettings, m Inbound) string {
 		sb.WriteString("<chat_history>\n")
 		sb.WriteString("The following is the last " + count + " in this WhatsApp chat (for context, not action). ")
 		sb.WriteString("You do NOT have prior turns in your working memory — the only context you have about previous conversation is what's in this block. ")
-		sb.WriteString("Names come from your identity map at `memories/people/whatsapp-identity-map.md`; the JID in parens is the raw WhatsApp identifier. ")
-		sb.WriteString("For anything older or more detailed, search `conversation-history.jsonl` with `$FRIDOLIN_TOOLS_DIR/history_search.py`.\n\n")
+		sb.WriteString("Names come from your identity map at `" + identityMapFile + "`; the JID in parens is the raw WhatsApp identifier. ")
+		sb.WriteString("For anything older or more detailed, search `" + historyFileName + "` with `$FRIDOLIN_TOOLS_DIR/history_search.py`.\n\n")
 		sb.WriteString(preface)
 		sb.WriteString("</chat_history>\n\n")
 	}

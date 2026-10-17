@@ -699,8 +699,8 @@ func (b *Bridge) apiInspectFolder(w http.ResponseWriter, r *http.Request) {
 		entries, _ := os.ReadDir(abs)
 		resp["entries"] = len(entries)
 		resp["is_git"] = fileExists(filepath.Join(abs, ".git"))
-		resp["has_prompt"] = fileExists(filepath.Join(abs, "brain-prompt.md"))
-		resp["has_history"] = fileExists(filepath.Join(abs, "conversation-history.jsonl"))
+		resp["has_prompt"] = fileExists(filepath.Join(abs, defaultPromptFile))
+		resp["has_history"] = fileExists(filepath.Join(abs, historyFileName))
 		if m, err := ReadManifest(abs); err == nil {
 			resp["manifest"] = m
 		}
