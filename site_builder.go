@@ -387,12 +387,8 @@ func (m *SiteManager) BuilderCheck(ctx context.Context, brainID string) (CheckRe
 	if err := json.Unmarshal([]byte(lines[len(lines)-1]), &res); err != nil {
 		return res, fmt.Errorf("the check printed no report: %s", tail(out, 600))
 	}
-	if res.Mounted == nil {
-		res.Mounted = []string{}
-	}
-	if res.Broken == nil {
-		res.Broken = []BrokenModule{}
-	}
+	res.Mounted = nonNil(res.Mounted)
+	res.Broken = nonNil(res.Broken)
 	res.Review = m.reviewWorkspace(ctx, brainID)
 	return res, nil
 }

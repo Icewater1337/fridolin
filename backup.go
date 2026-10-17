@@ -351,7 +351,7 @@ func (b *Bridge) apiBackupStatus(w http.ResponseWriter, r *http.Request) {
 	for _, br := range b.brainMgr.Brains() {
 		s := br.settings.Load()
 		rows = append(rows, brainRow{ID: br.ID(), Name: s.name, Dir: br.Dir(), Enabled: s.manifest.Backup.Enabled,
-			Exclude: nz(s.manifest.Backup.Exclude), Last: m.state.Brains[br.ID()]})
+			Exclude: nonNil(s.manifest.Backup.Exclude), Last: m.state.Brains[br.ID()]})
 	}
 	var job map[string]any
 	if m.job != nil {

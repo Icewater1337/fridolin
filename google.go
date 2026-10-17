@@ -616,7 +616,7 @@ func (b *Bridge) apiCalendarStatus(w http.ResponseWriter, r *http.Request) {
 		"selected":          []string{},
 	}
 	if m.Calendar != nil {
-		resp["account"], resp["selected"], resp["default"] = m.Calendar.Account, nz(m.Calendar.Calendars), m.Calendar.Default
+		resp["account"], resp["selected"], resp["default"] = m.Calendar.Account, nonNil(m.Calendar.Calendars), m.Calendar.Default
 	}
 	g.mu.Lock()
 	if e := g.lastError[br.ID()]; e != "" {

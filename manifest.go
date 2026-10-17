@@ -121,12 +121,8 @@ func (m BrainManifest) normalized() BrainManifest {
 	if m.PromptFile == "" {
 		m.PromptFile = "brain-prompt.md"
 	}
-	if m.Routing.Groups == nil {
-		m.Routing.Groups = []string{}
-	}
-	if m.Backup.Exclude == nil {
-		m.Backup.Exclude = []string{}
-	}
+	m.Routing.Groups = nonNil(m.Routing.Groups)
+	m.Backup.Exclude = nonNil(m.Backup.Exclude)
 	return m
 }
 

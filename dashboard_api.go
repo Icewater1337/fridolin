@@ -155,22 +155,13 @@ func (b *Bridge) apiStatus(w http.ResponseWriter, r *http.Request) {
 		WhatsApp:   waStatus{WAState: wa, QRAvailable: wa.QRCode != ""},
 		Claude:     claudeInfo(cfg.ClaudePath, cfg.ChildEnvPassthrough),
 		Sandbox:    sandboxStatus{Enabled: cfg.Sandbox.Enabled, Supported: runtime.GOOS == "darwin"},
-		Issues:     b.brainMgr.Issues(),
-		Warnings:   b.Warnings(),
+		Issues:     nonNil(b.brainMgr.Issues()),
+		Warnings:   nonNil(b.Warnings()),
 		Backup:     b.backup.Summary(),
 		Ingest:     cfg.Ingest.Enabled,
 		Pending:    b.deb.Pending(),
 
-		RestartRequired: b.cfgs.RestartRequired(),
-	}
-	if resp.Issues == nil {
-		resp.Issues = []BrainIssue{}
-	}
-	if resp.Warnings == nil {
-		resp.Warnings = []string{}
-	}
-	if resp.RestartRequired == nil {
-		resp.RestartRequired = []string{}
+		RestartRequired: nonNil(b.cfgs.RestartRequired()),
 	}
 	if cfg.AnyoneCanDM() {
 		resp.Warnings = append(resp.Warnings, "allowed_numbers is empty, so anyone who can message this WhatsApp account can use the assistant. Add your number under Chats → Allowed numbers.")
@@ -197,9 +188,7 @@ func (b *Bridge) apiStatus(w http.ResponseWriter, r *http.Request) {
 	for _, br := range b.brainMgr.Brains() {
 		resp.Brains = append(resp.Brains, br.Snapshot())
 	}
-	if resp.Brains == nil {
-		resp.Brains = []BrainRuntime{}
-	}
+	resp.Brains = nonNil(resp.Brains)
 	writeJSON(w, http.StatusOK, resp)
 }
 
@@ -321,10 +310,7 @@ func (b *Bridge) apiLogs(w http.ResponseWriter, r *http.Request) {
 		limit = 500
 	}
 	lines, next := b.logs.Since(after, limit)
-	if lines == nil {
-		lines = []LogLine{}
-	}
-	writeJSON(w, http.StatusOK, map[string]any{"lines": lines, "next": next, "boot": b.started.Unix()})
+	writeJSON(w, http.StatusOK, map[string]any{"lines": nonNil(lines), "next": next, "boot": b.started.Unix()})
 }
 
 // ── chats ────────────────────────────────────────────────────────────────
@@ -614,10 +600,7 @@ func (b *Bridge) apiPutConfig(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusUnprocessableEntity, err.Error())
 		return
 	}
-	if restart == nil {
-		restart = []string{}
-	}
-	writeJSON(w, http.StatusOK, map[string]any{"etag": b.cfgs.ETag(), "restart_required": restart})
+	writeJSON(w, http.StatusOK, map[string]any{"etag": b.cfgs.ETag(), "restart_required": nonNil(restart)})
 }
 
 // apiRestart re-executes the bridge in place (same binary, same arguments).
@@ -677,10 +660,7 @@ func (b *Bridge) brainViews() []brainView {
 		out = append(out, v)
 	}
 	for i := range out {
-		out[i].Issues = byPath[canonicalDir(out[i].Path)]
-		if out[i].Issues == nil {
-			out[i].Issues = []BrainIssue{}
-		}
+		out[i].Issues = nonNil(byPath[canonicalDir(out[i].Path)])
 		for _, is := range out[i].Issues {
 			if out[i].Status == "ok" || is.Kind != "drift" {
 				out[i].Status = is.Kind
@@ -691,10 +671,7 @@ func (b *Bridge) brainViews() []brainView {
 			out[i].Runtime = &rt
 		}
 	}
-	if out == nil {
-		out = []brainView{}
-	}
-	return out
+	return nonNil(out)
 }
 
 func (b *Bridge) apiBrains(w http.ResponseWriter, r *http.Request) {
@@ -720,7 +697,7 @@ func (b *Bridge) apiInspectFolder(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	abs, problems, warnings := CheckBrainPath(req.Path, b.cfgs.Get(), b.otherBrainDirs(""))
-	resp := map[string]any{"abs_path": abs, "problems": nz(problems), "warnings": nz(warnings)}
+	resp := map[string]any{"abs_path": abs, "problems": nonNil(problems), "warnings": nonNil(warnings)}
 	st, err := os.Stat(abs)
 	resp["exists"] = err == nil
 	resp["is_dir"] = err == nil && st.IsDir()
@@ -761,9 +738,11 @@ func prettyName(s string) string {
 	return string(unicode.ToUpper(r)) + s[size:]
 }
 
-func nz(s []string) []string {
+// nonNil returns s, or an empty slice for nil, so that the JSON says []
+// rather than null, which the dashboard would have to check for.
+func nonNil[T any](s []T) []T {
 	if s == nil {
-		return []string{}
+		return []T{}
 	}
 	return s
 }
@@ -846,7 +825,7 @@ func (b *Bridge) apiAddBrain(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	log.Printf("brain %s: added (%s), created %v", m.ID, abs, created)
-	writeJSON(w, http.StatusOK, map[string]any{"id": m.ID, "path": abs, "created": nz(created)})
+	writeJSON(w, http.StatusOK, map[string]any{"id": m.ID, "path": abs, "created": nonNil(created)})
 }
 
 // apiUpdateBrain saves edited settings for a brain.
