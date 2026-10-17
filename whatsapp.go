@@ -1050,12 +1050,9 @@ func extractQuote(contextInfo *waE2E.ContextInfo) *Quote {
 		return nil
 	}
 
-	senderJID := contextInfo.GetParticipant()
+	senderJID := normalizeJID(contextInfo.GetParticipant())
 	if senderJID == "" {
 		return nil
-	}
-	if idx := strings.Index(senderJID, "@"); idx > 0 {
-		senderJID = senderJID[:idx]
 	}
 
 	const maxQuoteLen = 200
