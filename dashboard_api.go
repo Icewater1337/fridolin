@@ -523,8 +523,7 @@ func (b *Bridge) apiRestart(w http.ResponseWriter, r *http.Request) {
 	go func() {
 		time.Sleep(300 * time.Millisecond)
 		log.Printf("Restarting on request from the dashboard…")
-		b.Stop()
-		releaseInstanceLock()
+		b.Stop() // releases the instance lock for the new process
 		if err := syscall.Exec(exe, os.Args, os.Environ()); err != nil {
 			log.Fatalf("restart failed: %v", err)
 		}
