@@ -57,6 +57,8 @@ Older versions treated an unset value as `true`. A config that relied on that
 now refuses every DM: add the numbers, or set `"allow_any_dm": true` on
 purpose. While anyone may DM, the dashboard says so and the bridge logs a
 warning at startup and whenever an edit opens DMs to everyone.
+`./fridolin check` prints who may DM on its `DM allow:` line: the numbers,
+`nobody` or `anyone`.
 
 ### `allowed_groups`
 
