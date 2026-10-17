@@ -211,6 +211,57 @@ func TestPlaudWithoutAPrivateChatWaits(t *testing.T) {
 	}
 }
 
+// A picked brain that went away (removed, renamed, not approved) is
+// reported by name, on the card and as the check's error, and nothing is
+// written or handed over until another one is picked. The settings refuse
+// a brain that is not running, even one the brain list shows (its folder
+// is gone), but still save the rest while the picked one is gone.
+func TestPlaudMissingBrainIsReported(t *testing.T) {
+	tb, fp := plaudBridgeWith(t, `, "brains": [{"name": "p", "work_dir": "~/p", "handles_dms": true}], "brain_dirs": [{"path": "~/gone", "approved": {"id": "gone", "name": "Gone"}}]`, `, "brain": "ghost"`)
+	err := plaudDeliver(t, tb, fp)
+	if err == nil || !strings.Contains(err.Error(), "brain ghost") {
+		t.Fatalf("poll error = %v, want the missing brain named", err)
+	}
+	if st, _ := tb.plaud.loadState(); st.Pending[plaudNew] == 0 {
+		t.Errorf("state = %+v, want the recording still pending", st)
+	}
+	if tb.plaudForwarded() {
+		t.Error("a transcript was written without a brain to give it to")
+	}
+	var status map[string]any
+	_ = json.Unmarshal(tb.do("GET", "/api/plaud/status?account=0", nil).Body.Bytes(), &status)
+	for _, k := range []string{"summary_error", "last_error"} {
+		if e, _ := status[k].(string); !strings.Contains(e, "brain ghost") {
+			t.Errorf("status %s = %q, want the missing brain named", k, e)
+		}
+	}
+	if status["brain_missing"] != true {
+		t.Errorf("status brain_missing = %v, want true", status["brain_missing"])
+	}
+
+	if body := tb.do("GET", "/api/brains", nil).Body.String(); !strings.Contains(body, `"id":"gone"`) {
+		t.Fatalf("the brain list lacks the brain whose folder is gone: %s", body)
+	}
+	for _, c := range []struct {
+		body map[string]any
+		code int
+		want string // in the answer
+	}{
+		{map[string]any{"brain": "nope"}, 422, `there is no approved brain \"nope\"`},
+		{map[string]any{"brain": "gone"}, 422, `there is no approved brain \"gone\"`},
+		{map[string]any{"brain": "ghost", "polished": true}, 200, "saved"},
+		{map[string]any{"brain": "p"}, 200, "saved"},
+		{map[string]any{"brain": ""}, 200, "saved"},
+	} {
+		if w := tb.do("PUT", "/api/plaud/settings", c.body); w.Code != c.code || !strings.Contains(w.Body.String(), c.want) {
+			t.Errorf("PUT %v = %d %s, want %d %s", c.body, w.Code, w.Body.String(), c.code, c.want)
+		}
+	}
+	if pc := tb.cfgs.Get().Plaud; pc.Brain != "" || !pc.Polished {
+		t.Errorf("settings = %+v, want polished saved and the brain back to automatic", pc)
+	}
+}
+
 // With nothing waiting, a missing private chat blocks nothing: the poll must
 // not fail, and log the same error, on every interval. The card still says
 // what is missing, from the status call.

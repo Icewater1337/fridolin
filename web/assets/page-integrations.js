@@ -59,7 +59,13 @@ export default {
       }
 
       const st = s.settings || {};
-      const brainOpts = [['', `Automatic (${s.target_brain || 'the DM brain'})`], ...brains.map((b) => [b.id, b.name || b.id])];
+      // The picked brain is marked when it cannot take recordings: gone,
+      // or listed but not running (not approved, or it has an issue).
+      const missing = (label) => (s.brain_missing ? `${label} (missing)` : label);
+      const brainOpts = [['', `Automatic (${s.target_brain || 'the DM brain'})`], ...brains.map((b) => [b.id, b.id === st.brain ? missing(b.name || b.id) : b.name || b.id])];
+      // The picked brain keeps its option while it is gone (or the list is
+      // still loading), so Save does not quietly switch to Automatic.
+      if (st.brain && !brains.some((b) => b.id === st.brain)) brainOpts.push([st.brain, missing(st.brain)]);
       const enabled = toggle({ checked: !!st.enabled, label: 'Send new recordings to a brain', onChange: () => { formDirty = true; } });
       const brainSel = select(brainOpts, st.brain || '');
       brainSel.addEventListener('change', () => { formDirty = true; });

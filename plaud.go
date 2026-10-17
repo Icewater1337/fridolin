@@ -466,6 +466,9 @@ func isDirectChat(jid string) bool {
 func (p *PlaudManager) destination() (*Brain, string, error) {
 	br := p.targetBrain()
 	if br == nil {
+		if id := p.cfg().Plaud.Brain; id != "" {
+			return nil, "", fmt.Errorf("brain %s, picked for Plaud recordings, was removed or is not approved — pick another one under Integrations → Plaud", id)
+		}
 		return nil, "", errors.New("no brain to send Plaud recordings to")
 	}
 	jid := p.summaryChat(br)
@@ -772,6 +775,8 @@ func (b *Bridge) apiPlaudStatus(w http.ResponseWriter, r *http.Request) {
 	}
 	if br := p.targetBrain(); br != nil {
 		resp["target_brain"] = br.ID()
+	} else if cfg.Plaud.Brain != "" {
+		resp["brain_missing"] = true
 	}
 	// Where summaries go, for the card: a chat that belongs to another brain
 	// gets a warning, since what you write back there goes to that brain.
@@ -884,6 +889,12 @@ func (b *Bridge) apiPlaudSettings(w http.ResponseWriter, r *http.Request) {
 	}
 	if err := decodeJSON(r, &req); err != nil {
 		writeErr(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	// Only a newly picked brain must exist: one that went away since must
+	// not keep the other settings from being saved.
+	if req.Brain != nil && *req.Brain != "" && *req.Brain != b.cfgs.Get().Plaud.Brain && b.brainMgr.Get(*req.Brain) == nil {
+		writeErr(w, http.StatusUnprocessableEntity, fmt.Sprintf("there is no approved brain %q", *req.Brain))
 		return
 	}
 	_, err := b.cfgs.Update("", func(c *Config) error {

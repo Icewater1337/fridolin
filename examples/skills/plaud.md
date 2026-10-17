@@ -55,3 +55,6 @@ plaud summary <of_id>          # Plaud's AI summary
 - Recordings are waiting although Plaud is connected: Fridolin has no private
   chat to send summaries to (no allowed number and no direct reply chat for
   this brain), and the Plaud card says so. They arrive once one is set.
+- Recordings are waiting and the Plaud card names a brain: the brain picked
+  for Plaud was removed or is not approved. They arrive once another one is
+  picked there.
