@@ -64,7 +64,9 @@ func (b *Bridge) httpSend(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "invalid JSON: "+err.Error(), http.StatusBadRequest)
 		return
 	}
-	if req.JID == "" || req.Text == "" {
+	// Blank text would send nothing (ChunkMessage gives no chunks for it),
+	// so refuse it rather than answer "sent" and log a message to history.
+	if req.JID == "" || strings.TrimSpace(req.Text) == "" {
 		http.Error(w, "jid and text are required", http.StatusBadRequest)
 		return
 	}

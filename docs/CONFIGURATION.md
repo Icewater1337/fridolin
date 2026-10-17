@@ -524,9 +524,11 @@ sign another bridge is running.
 
 `POST /send {"jid","text"}` sends a message (see the README); it is appended to
 the owning brain's history, so the assistant knows what went out under its
-name. Status, broadcast-list and channel JIDs (`…@broadcast`, `…@newsletter`)
-are refused with `400 {"error": …}`. `GET /health` returns `ok`. Both work
-without the dashboard token but refuse requests sent by web pages.
+name. Text that is empty or only whitespace is refused with 400, since there
+would be nothing to send. Status, broadcast-list and channel JIDs
+(`…@broadcast`, `…@newsletter`) are refused with `400 {"error": …}`.
+`GET /health` returns `ok`. Both work without the dashboard token but refuse
+requests sent by web pages.
 
 ### `ingest.enabled`
 
@@ -629,9 +631,17 @@ denied to brains by the sandbox. A script that requested a code through
 
 ### `max_chunk_size`
 
-Longest single outgoing message, in characters. Default 3900 (WhatsApp's limit
-is around 4096). Longer replies are split at paragraph, then line, then
-sentence boundaries and numbered `[1/3]`.
+Longest single outgoing message, in characters, the `[1/3] ` numbering
+included. Characters are Unicode code points, so most emoji count as one but
+one with a skin tone or a family emoji counts as several. 0 or unset means the
+default, 3900, which stays under the 4096 characters commonly given as
+WhatsApp's limit. Anything else must be at least 100, so the numbering always
+leaves room for text; the bridge refuses to start with a smaller value.
+
+Longer replies are split and numbered `[1/3]`, `[2/3]`, … They are cut at
+paragraphs first, then lines, sentence ends and spaces, each finer level only
+for a part that is still too long; a word longer than a whole message is cut
+between characters. Only the whitespace at a cut is dropped.
 
 ### `max_media_mb`
 
