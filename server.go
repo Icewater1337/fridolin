@@ -89,11 +89,8 @@ func (b *Bridge) httpSend(w http.ResponseWriter, r *http.Request) {
 }
 
 // appendHTTPMessageToHistory records an HTTP-sent message in the history of
-// whichever brain owns the target chat. No-op in classic mode.
+// whichever brain owns the target chat.
 func (b *Bridge) appendHTTPMessageToHistory(jid, text string) {
-	if !b.cfgs.Get().BrainMode {
-		return
-	}
 	br := b.brainMgr.BrainFor(jid, strings.HasSuffix(jid, "@g.us"))
 	if br == nil {
 		return

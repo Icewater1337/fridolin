@@ -97,7 +97,8 @@ type Config struct {
 	// 2048 (WhatsApp's own limit is 2 GB).
 	MaxMediaMB int `json:"max_media_mb,omitempty"`
 
-	// Model is the Claude model for classic (non-brain) mode, e.g. "sonnet".
+	// Model is the model brains use when brain_model is empty, e.g.
+	// "sonnet". Left from classic mode, which had no brain_model.
 	Model string `json:"model,omitempty"`
 
 	// BrainModel is the model used by brains (falls back to Model when empty).
@@ -135,9 +136,11 @@ type Config struct {
 	// LogLevel: "debug", "info", "warn", "error".
 	LogLevel string `json:"log_level,omitempty"`
 
-	// BrainMode enables the multi-brain runner. When false the bridge runs in
-	// classic mode: one Claude session per chat, resumed with --resume.
-	BrainMode bool `json:"brain_mode"`
+	// BrainMode is the switch classic mode had: brains always run now, and
+	// a config that sets it to false is refused. The key is still written,
+	// as true, so that an older bridge you roll back to runs brains too:
+	// without it, that one falls back to classic mode.
+	BrainMode retiredBrainMode `json:"brain_mode"`
 
 	// Brains are brains configured inline (the original format).
 	Brains []BrainConfig `json:"brains,omitempty"`
@@ -146,9 +149,6 @@ type Config struct {
 	// brain.json manifest; Approved is the version you accepted (a brain
 	// cannot widen its own routing by editing its manifest).
 	BrainDirs []BrainRef `json:"brain_dirs,omitempty"`
-
-	// WorkDir is the working directory for classic mode (default: home dir).
-	WorkDir string `json:"work_dir,omitempty"`
 
 	// Sandbox controls the macOS sandbox-exec wrapper around brain spawns.
 	Sandbox SandboxConfig `json:"sandbox"`
@@ -173,6 +173,33 @@ type Config struct {
 	Backup        BackupConfig        `json:"backup"`
 	Plaud         PlaudConfig         `json:"plaud"`
 	Dashboard     DashboardConfig     `json:"dashboard"`
+}
+
+// retiredBrainMode is the brain_mode key. A missing key, null and true all
+// mean brains.
+type retiredBrainMode struct{}
+
+// MarshalJSON always writes true, whatever the file had.
+func (retiredBrainMode) MarshalJSON() ([]byte, error) { return []byte("true"), nil }
+
+// UnmarshalJSON refuses false: whoever wrote it asked for classic mode, and
+// quietly running brains instead would leave their chats with no brain set
+// up. Dashboard saves are parsed the same way, so none can turn it off.
+func (*retiredBrainMode) UnmarshalJSON(data []byte) error {
+	var on *bool
+	if err := json.Unmarshal(data, &on); err != nil {
+		return fmt.Errorf("brain_mode: %w", err)
+	}
+	if on != nil && !*on {
+		return classicModeRemoved(`"brain_mode": false`, `Set "brain_mode" to true in config.json (an older version you go back to needs it)`)
+	}
+	return nil
+}
+
+// classicModeRemoved is the error for a setting that asks for classic mode:
+// what names it, fix says what to change.
+func classicModeRemoved(what, fix string) error {
+	return fmt.Errorf("%s asks for classic mode, which was removed: every chat now goes to a brain. %s, start the bridge and add a brain in the dashboard under Brains → Add brain (see docs/BRAINS.md)", what, fix)
 }
 
 // SandboxConfig tunes the macOS sandbox profile applied to brain spawns.
@@ -424,10 +451,6 @@ func effective(file *Config, env envLookup) (*Config, map[string]string, error) 
 	}
 	cfg.DBPath = expandHome(cfg.DBPath, home)
 	cfg.MediaDir = expandHome(cfg.MediaDir, home)
-	if cfg.WorkDir == "" {
-		cfg.WorkDir = home
-	}
-	cfg.WorkDir = expandHome(cfg.WorkDir, home)
 	if cfg.MaxChunkSize == 0 {
 		cfg.MaxChunkSize = defaultChunkSize
 	}
@@ -758,7 +781,6 @@ var envOverrides = []envOverride{
 	{"TRIGGERS", "triggers", func(c *Config, v string) { c.Triggers = TriggersFromStrings(splitTrimmed(v)) }},
 	{"CLAUDE_PATH", "claude_path", func(c *Config, v string) { c.ClaudePath = v }},
 	{"DATA_DIR", "data_dir", func(c *Config, v string) { c.DataDir = v }},
-	{"WORK_DIR", "work_dir", func(c *Config, v string) { c.WorkDir = v }},
 	{"DB_PATH", "db_path", func(c *Config, v string) { c.DBPath = v }},
 	{"MEDIA_DIR", "media_dir", func(c *Config, v string) { c.MediaDir = v }},
 	{"MAX_CHUNK_SIZE", "max_chunk_size", func(c *Config, v string) {
@@ -773,7 +795,6 @@ var envOverrides = []envOverride{
 	{"DANGEROUSLY_SKIP_PERMISSIONS", "dangerously_skip_permissions", func(c *Config, v string) { c.DangerouslySkipPermissions = isTruthy(v) }},
 	{"HTTP_LISTEN", "http_listen", func(c *Config, v string) { c.HTTPListen = v }},
 	{"LOG_LEVEL", "log_level", func(c *Config, v string) { c.LogLevel = v }},
-	{"BRAIN_MODE", "brain_mode", func(c *Config, v string) { c.BrainMode = isTruthy(v) }},
 	{"SANDBOX_ENABLED", "sandbox.enabled", func(c *Config, v string) { c.Sandbox.Enabled = isTruthy(v) }},
 	{"OTP_GUARD", "otp_guard", func(c *Config, v string) { c.OTPGuard = isTruthy(v) }},
 	{"VIEWER", "viewer", func(c *Config, v string) { c.Viewer = isTruthy(v) }},

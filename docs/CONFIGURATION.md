@@ -121,10 +121,11 @@ after an update.
 ### `model` and `brain_model`
 
 Model to use — `"sonnet"`, `"opus"`, `"haiku"`, or a full model ID. Empty uses
-the CLI default. `model` applies to classic mode, `brain_model` to brains, and
-an individual brain can override it with its own `model` field. For a brain,
-empty means the `model` in its folder's `.claude/settings.json`, or Claude
-Code's own default, never the one in your `~/.claude/settings.json` (see
+the CLI default. `brain_model` applies to brains, and an individual brain can
+override it with its own `model` field. `model` is left from classic mode:
+brains use it while `brain_model` is empty. For a brain, empty means the
+`model` in its folder's `.claude/settings.json`, or Claude Code's own default,
+never the one in your `~/.claude/settings.json` (see
 [`inherit_claude_user_config`](#inherit_claude_user_config)).
 
 ### `brain_effort`
@@ -256,7 +257,6 @@ Brains are configured in their own folders (`brain.json`) and added in the
 dashboard; see [BRAINS.md](BRAINS.md). In `config.json` they appear as:
 
 ```json
-"brain_mode": true,
 "brain_dirs": [
   { "path": "~/assistant/personal", "approved": { "id": "personal", "name": "Personal", "routing": { "handles_dms": true } } }
 ]
@@ -290,12 +290,18 @@ A brain whose settings clash with another (same id, a group claimed twice, two
 DM brains, a folder inside another brain's) is left out and reported on the
 dashboard; the others keep running.
 
-### Classic mode
+### `brain_mode`
 
-With `brain_mode: false`, the bridge keeps one resumable Claude session per
-chat, all running in `work_dir` (default: your home directory). No isolation,
-no per-chat prompt, no chat-history preface. Simpler, and fine for a
-single-user setup.
+Every chat goes to a brain. Classic mode, one resumable Claude session per
+chat in one shared folder without the sandbox, was removed. The bridge
+refuses to start with `"brain_mode": false`, or with `BRAIN_MODE` set to
+anything but true: set the key to `true` (or unset the variable), start the
+bridge, and add a brain under *Brains → Add brain*. One that handles direct
+messages and is the default answers every allowed chat, as classic mode did.
+
+Keep the key rather than delete it. The bridge itself writes
+`"brain_mode": true` on every save, so that an older version you go back to
+runs brains too: without the key, that one would run classic mode.
 
 ---
 
@@ -313,9 +319,8 @@ When enabled, each Claude run is wrapped in `sandbox-exec` under a generated
 profile. Changes (including added or removed brains) apply to the next run of
 every brain. If the profile cannot be built or `/usr/bin/sandbox-exec` is
 missing, the run is refused: the chat gets an error, the bridge log names the
-cause, and Claude never starts unsandboxed. Classic mode (`brain_mode` off) is
-not sandboxed. The profile is allow-by-default. Brains can neither read nor
-write:
+cause, and Claude never starts unsandboxed. The profile is allow-by-default.
+Brains can neither read nor write:
 
 - every **other brain's** working directory
 - `~/.ssh`, `~/.gnupg`, `~/.aws`, `~/.config/gh`, `~/.config/gcloud`,
@@ -720,13 +725,14 @@ controls as locked — remove the variable to edit them there. The sandbox
 keeps brains from reading the `.env` file.
 
 Only the variables in the table below are read from the `.env`, all but
-`CONFIG_FILE`, which picks the config and with it the `.env`. Any other key
-is ignored, and the bridge names those keys (never their values) in its log
-when it loads the config. Nothing in the `.env` is exported either: the
-Claude CLI, brains, and the scripts and tools they run do not see it, and a
-`PATH` or `HOME` set there changes nothing, not even for the bridge. Whatever
-those programs need belongs in the bridge's process environment instead,
-and from there it reaches every brain:
+`CONFIG_FILE`, which picks the config and with it the `.env`. Besides them,
+`BRAIN_MODE` is read, only to refuse classic mode (see
+[`brain_mode`](#brain_mode)). Any other key is ignored, and the bridge names
+those keys (never their values) in its log when it loads the config. Nothing
+in the `.env` is exported either: the Claude CLI, brains, and the scripts and
+tools they run do not see it, and a `PATH` or `HOME` set there changes
+nothing, not even for the bridge. Whatever those programs need belongs in the
+bridge's process environment instead, and from there it reaches every brain:
 
 - The Claude CLI's own login and network settings, if you set them rather
   than log in once with `claude`: `ANTHROPIC_API_KEY`,
@@ -759,14 +765,12 @@ These are the variables that override `config.json`:
 | `TRIGGERS` | `triggers` (comma-separated) |
 | `CLAUDE_PATH` | `claude_path` |
 | `DATA_DIR` | `data_dir` |
-| `WORK_DIR` | `work_dir` |
 | `DB_PATH` | `db_path` |
 | `MEDIA_DIR` | `media_dir` |
 | `MODEL` | `model` |
 | `BRAIN_MODEL` | `brain_model` |
 | `BRAIN_EFFORT` | `brain_effort` |
 | `DISALLOWED_TOOLS` | `disallowed_tools` (comma-separated) |
-| `BRAIN_MODE` | `brain_mode` |
 | `SANDBOX_ENABLED` | `sandbox.enabled` |
 | `OTP_GUARD` | `otp_guard` |
 | `VIEWER` | `viewer` |

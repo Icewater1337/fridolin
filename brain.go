@@ -142,7 +142,7 @@ func tailLines(f *os.File, maxBytes int64) []string {
 // ── Brain ────────────────────────────────────────────────────────────────
 
 // Brain is one isolated Claude Code context: its own folder, conversation
-// history, prompt file and stored session.
+// history and prompt file.
 //
 // A brain does not keep a Claude process alive between messages. Each message
 // spawns a fresh `claude -p` run seeded with the recent chat history. Messages
@@ -151,9 +151,8 @@ func tailLines(f *os.File, maxBytes int64) []string {
 type Brain struct {
 	// Fixed for the brain's lifetime. Changing a brain's folder replaces the
 	// Brain; everything else is in settings and changes live.
-	id       string
-	workDir  string
-	storeKey string
+	id      string
+	workDir string
 	// root is the brain's folder, opened once when the Brain is made and
 	// closed when it is retired. The bridge reads and writes its files in
 	// the folder through it (see openInFolder), and through this handle
@@ -161,7 +160,6 @@ type Brain struct {
 	root *os.Root
 
 	settings atomic.Pointer[brainSettings]
-	store    *Store
 	sandbox  *SandboxProfiler
 	hooks    *BrainHooks
 
@@ -469,14 +467,6 @@ func (br *Brain) stopRun(run *brainRun) bool {
 		log.Printf("brain %s: run did not stop within 10s", br.id)
 	}
 	return true
-}
-
-// ResetSession stops what the brain does for the chat and clears its stored
-// session. The stored process id is left to the run it belongs to, which may
-// be another chat's; a stopped run clears it as it finishes.
-func (br *Brain) ResetSession(jid string) error {
-	br.StopChat(jid)
-	return br.store.DeleteSession(br.storeKey)
 }
 
 // retire stops the brain for good after it was removed from the configuration.
@@ -990,9 +980,6 @@ func (br *Brain) invoke(run *brainRun, ctx context.Context, s *brainSettings, m 
 		return RunResult{Err: fmt.Errorf("starting claude: %w", err)}
 	}
 	br.setRunPID(run, cmd.Process.Pid)
-	if err := br.store.SaveProcessPID(br.storeKey, cmd.Process.Pid); err != nil {
-		log.Printf("brain %s: failed to save pid %d: %v", br.id, cmd.Process.Pid, err)
-	}
 
 	// Parse the stream in a goroutine so we can race it against the 10s timer.
 	parseDone := make(chan RunResult, 1)
@@ -1298,7 +1285,6 @@ func (br *Brain) finishRun(run *brainRun) {
 	}
 	br.mu.Unlock()
 
-	_ = br.store.DeleteProcessPID(br.storeKey)
 	run.once.Do(func() { close(run.done) })
 }
 
@@ -1373,17 +1359,15 @@ type BrainManager struct {
 	issues   []BrainIssue
 
 	profiler *SandboxProfiler
-	store    *Store
 	hooks    *BrainHooks
 }
 
 // NewBrainManager builds the configured brains.
-func NewBrainManager(cfg *Config, store *Store) (*BrainManager, error) {
+func NewBrainManager(cfg *Config) (*BrainManager, error) {
 	bm := &BrainManager{
 		brains:   map[string]*Brain{},
 		byGroup:  map[string]*Brain{},
 		profiler: NewSandboxProfiler(nil, cfg),
-		store:    store,
 		hooks:    &BrainHooks{},
 	}
 	if err := bm.Apply(cfg); err != nil {
@@ -1452,13 +1436,11 @@ func (bm *BrainManager) reload(specs []BrainSpec, issues []BrainIssue, cfg *Conf
 				continue
 			}
 			br = &Brain{
-				id:       m.ID,
-				workDir:  sp.Dir,
-				storeKey: "brain:" + m.ID,
-				root:     root,
-				store:    bm.store,
-				sandbox:  bm.profiler,
-				hooks:    bm.hooks,
+				id:      m.ID,
+				workDir: sp.Dir,
+				root:    root,
+				sandbox: bm.profiler,
+				hooks:   bm.hooks,
 			}
 			created = append(created, br)
 		}
@@ -1616,15 +1598,6 @@ func (bm *BrainManager) Submit(m Inbound) (br *Brain, pos int, busy bool, err er
 		}
 	}
 	return br, pos, busy, err
-}
-
-// ResetSession resets the chat on the brain that owns it.
-func (bm *BrainManager) ResetSession(jid string, isGroup bool) error {
-	br := bm.BrainFor(jid, isGroup)
-	if br == nil {
-		return fmt.Errorf("no brain configured for %s", jid)
-	}
-	return br.ResetSession(jid)
 }
 
 // StopHandOffs stops, in every brain, the hand-offs that answer in jid (see

@@ -103,7 +103,6 @@ type statusResponse struct {
 	UptimeS    int64          `json:"uptime_s"`
 	ConfigPath string         `json:"config_path"`
 	DataDir    string         `json:"data_dir"`
-	Mode       string         `json:"mode"` // brains or classic
 	DevMode    bool           `json:"dev_mode"`
 	Platform   string         `json:"platform"`
 	WhatsApp   waStatus       `json:"whatsapp"`
@@ -168,7 +167,6 @@ func (b *Bridge) apiStatus(w http.ResponseWriter, r *http.Request) {
 		UptimeS:    int64(time.Since(b.started).Seconds()),
 		ConfigPath: b.cfgs.Path(),
 		DataDir:    cfg.DataDir,
-		Mode:       map[bool]string{true: "brains", false: "classic"}[cfg.BrainMode],
 		DevMode:    b.dev != nil,
 		Platform:   runtime.GOOS,
 		WhatsApp:   waStatus{WAState: wa, QRAvailable: wa.QRCode != ""},
@@ -192,16 +190,14 @@ func (b *Bridge) apiStatus(w http.ResponseWriter, r *http.Request) {
 	if cfg.DangerouslySkipPermissions && !cfg.Sandbox.Enabled && runtime.GOOS == "darwin" {
 		resp.Warnings = append(resp.Warnings, "Brains run with all permissions and the sandbox is off. Turn the sandbox on under Settings → Sandbox.")
 	}
-	if cfg.InheritClaudeUserConfig && cfg.BrainMode {
+	if cfg.InheritClaudeUserConfig {
 		// Set in config.json only, so the dashboard shows it nowhere else.
 		resp.Warnings = append(resp.Warnings, "Brains load your own Claude Code setup (inherit_claude_user_config in config.json): they run your hooks, read your instructions and can use your MCP servers for anyone who may message them.")
 	}
 	if cfg.Sandbox.Enabled {
 		// The Sandbox card shows "On" from the config alone; say when that
 		// does not hold.
-		if !cfg.BrainMode {
-			resp.Warnings = append(resp.Warnings, "Classic mode does not use the sandbox: Claude runs with everything your user account can reach. Brain mode sandboxes every run.")
-		} else if err := b.brainMgr.profiler.Available(); err != nil {
+		if err := b.brainMgr.profiler.Available(); err != nil {
 			resp.Warnings = append(resp.Warnings, fmt.Sprintf("The sandbox is on but cannot run (%v), so brains refuse every message until it can.", err))
 		} else if w := sandboxProfileWarning(b.brainMgr); w != "" {
 			resp.Warnings = append(resp.Warnings, w)

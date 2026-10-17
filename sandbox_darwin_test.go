@@ -963,6 +963,13 @@ func sandboxFixture(t *testing.T, home, otherBrain, denyDir string, extra ...map
 	if err != nil {
 		t.Fatal(err)
 	}
+	// The bridge opens its database before the brains, and the checks need
+	// the real file.
+	store, err := NewStore(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { store.Close() })
 	mgr := newTestManager(t, cfg)
 	t.Cleanup(mgr.Stop)
 
@@ -1040,8 +1047,7 @@ func resolvedForTest(t *testing.T, p string) string {
 
 // TestStatusWarnsWhenSandboxDoesNotApply: the dashboard's Sandbox card says
 // "On" from the config alone, so the status warns when runs are refused for
-// a missing sandbox-exec or a profile that cannot be built, and when classic
-// mode ignores the sandbox.
+// a missing sandbox-exec or a profile that cannot be built.
 func TestStatusWarnsWhenSandboxDoesNotApply(t *testing.T) {
 	const on = `, "sandbox": {"enabled": true}`
 	const brains = `, "brains": [
@@ -1062,7 +1068,6 @@ func TestStatusWarnsWhenSandboxDoesNotApply(t *testing.T) {
 		// config.json accepts a brain at ~, which the dashboard refuses.
 		{"brain folder at the home folder", on + `, "brains": [{"name": "a", "work_dir": "~", "handles_dms": true}]`,
 			nil, true, "is your home folder or holds it"},
-		{"classic mode", `, "brain_mode": false` + on, nil, false, "Classic mode does not use the sandbox"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

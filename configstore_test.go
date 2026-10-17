@@ -120,8 +120,129 @@ func TestStarterConfigLoads(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !cfg.BrainMode || cfg.AllowsAnyDM() {
-		t.Error("a fresh install must be in brain mode and must not answer strangers")
+	if cfg.AllowsAnyDM() {
+		t.Error("a fresh install must not answer strangers")
+	}
+	// An older bridge rolled back to runs classic mode without the key.
+	if raw := readRawConfig(t, path); string(raw["brain_mode"]) != "true" {
+		t.Errorf(`starter config has "brain_mode": %s, want true`, raw["brain_mode"])
+	}
+}
+
+// readRawConfig returns the top-level keys of the config file at path, as
+// they are written.
+func readRawConfig(t *testing.T, path string) map[string]json.RawMessage {
+	t.Helper()
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var raw map[string]json.RawMessage
+	if err := json.Unmarshal(data, &raw); err != nil {
+		t.Fatal(err)
+	}
+	return raw
+}
+
+// Classic mode was removed. A config or environment that asks for it is
+// refused, with what to do instead; quietly running brains would leave the
+// chats with no brain set up. Without the switch, or with it on, it loads.
+// The bridge reads BRAIN_MODE in a .env to refuse it, so the log must not
+// call it ignored.
+func TestConfigRefusesClassicMode(t *testing.T) {
+	cases := []struct {
+		name, config string
+		env          string // BRAIN_MODE in the environment, "" for unset
+		dotenv       string // the .env next to the config, "" for none
+		want         string // part of the error, "" when the config loads
+		fix          string // part of the error that says what to change
+	}{
+		{"no brain_mode", `{}`, "", "", "", ""},
+		{"brain_mode true", `{"brain_mode": true}`, "", "", "", ""},
+		{"brain_mode null", `{"brain_mode": null}`, "", "", "", ""},
+		{"brain_mode false", `{"brain_mode": false}`, "", "", `"brain_mode": false asks for classic mode, which was removed`, `Set "brain_mode" to true in config.json`},
+		{"brain_mode not a bool", `{"brain_mode": "off"}`, "", "", "brain_mode: json: cannot unmarshal", ""},
+		{"BRAIN_MODE=0", `{}`, "0", "", "BRAIN_MODE=0 asks for classic mode, which was removed", "Unset BRAIN_MODE"},
+		{"BRAIN_MODE=false over brain_mode true", `{"brain_mode": true}`, "false", "", "BRAIN_MODE=false asks for classic mode", "Unset BRAIN_MODE"},
+		{"BRAIN_MODE=0 in the .env", `{}`, "", "BRAIN_MODE=0\n", "BRAIN_MODE=0 asks for classic mode", "Unset BRAIN_MODE"},
+		{"BRAIN_MODE=1", `{}`, "1", "", "", ""},
+		{"BRAIN_MODE=1 in the .env", `{}`, "", "BRAIN_MODE=1\n", "", ""},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			t.Setenv("HOME", t.TempDir())
+			clearEnv(t, "BRAIN_MODE")
+			if c.env != "" {
+				t.Setenv("BRAIN_MODE", c.env)
+			}
+			path := writeConfig(t, c.config)
+			if c.dotenv != "" {
+				if err := os.WriteFile(filepath.Join(filepath.Dir(path), ".env"), []byte(c.dotenv), 0o600); err != nil {
+					t.Fatal(err)
+				}
+			}
+			logs := captureLog(t)
+			_, err := LoadConfig(path)
+			for _, l := range logs() {
+				if strings.Contains(l, "ignoring") && strings.Contains(l, "BRAIN_MODE") {
+					t.Errorf("log %q calls BRAIN_MODE ignored", l)
+				}
+			}
+			switch {
+			case c.want == "" && err != nil:
+				t.Fatalf("load: %v, want it to load", err)
+			case c.want == "":
+			case err == nil:
+				t.Fatalf("loaded, want an error containing %q", c.want)
+			case !strings.Contains(err.Error(), c.want):
+				t.Errorf("error %q, want it to contain %q", err, c.want)
+			case !strings.Contains(err.Error(), c.fix):
+				t.Errorf("error %q does not say %q", err, c.fix)
+			case c.fix != "" && !strings.Contains(err.Error(), "add a brain in the dashboard"):
+				t.Errorf("error %q does not say how to switch to a brain", err)
+			}
+		})
+	}
+}
+
+// Every save writes "brain_mode": true, whatever the file had: a bridge
+// rolled back to an older version runs classic mode without it. (Go code
+// cannot set it to false; a dashboard save that tries is refused, see
+// TestPutConfigRefusesClassicMode.)
+func TestConfigSavesKeepBrainModeOn(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	path := writeConfig(t, `{"log_level": "info"}`)
+	cs, err := OpenConfigStore(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := cs.Update("", func(c *Config) error { c.LogLevel = "debug"; return nil }); err != nil {
+		t.Fatal(err)
+	}
+	if raw := readRawConfig(t, path); string(raw["brain_mode"]) != "true" {
+		t.Errorf(`saved "brain_mode": %s, want true`, raw["brain_mode"])
+	}
+	if _, err := LoadConfig(path); err != nil {
+		t.Errorf("the saved config does not load: %v", err)
+	}
+}
+
+// work_dir was the folder classic mode ran in; brains run in their own. So
+// neither the key nor WORK_DIR sets anything any more: a config that still
+// has the key says so in the log, and the variable locks no setting.
+func TestClassicWorkDirIsNoLongerASetting(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("WORK_DIR", "/elsewhere")
+	logs := captureLog(t)
+	cs, err := OpenConfigStore(writeConfig(t, `{"work_dir": "~/classic"}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !logContains(logs, "ignoring unknown settings [work_dir]") {
+		t.Errorf("log %q does not say work_dir is ignored", logs())
+	}
+	if v, ok := cs.EnvLocked()["work_dir"]; ok {
+		t.Errorf("work_dir is locked by %s", v)
 	}
 }
 

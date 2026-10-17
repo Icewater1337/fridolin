@@ -477,7 +477,7 @@ func (sp *SandboxProfiler) Profile(brainID string) (string, error) {
 
 	// ── bridge runtime dir ───────────────────────────────────────────────
 	// The DB holds the WhatsApp session keys (enough to take the account
-	// over from another machine), every chat's session IDs and poll votes;
+	// over from another machine), the polls and their votes;
 	// the dashboard token and backup credentials live in the data dir too.
 	// Media is the shared inbound staging dir, so it is re-allowed below.
 	// This comes after the allow_paths allows, which therefore cannot open

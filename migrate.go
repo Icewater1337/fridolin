@@ -24,7 +24,7 @@ type MigrationResult struct {
 
 // MigrateInlineBrains moves every brain configured inline in config.json to
 // its folder: it writes <work_dir>/brain.json and lists the folder in
-// brain_dirs. Ids stay the same, so sessions and history carry over.
+// brain_dirs. Ids stay the same, so the history carries over.
 //
 // A folder that already has a different brain.json is reported as a conflict
 // and left alone, unless force is set.

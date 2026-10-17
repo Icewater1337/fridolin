@@ -37,7 +37,7 @@ func TestNewStoreCreatesPrivateDB(t *testing.T) {
 	setUmask(t, 0o022)
 	dbPath := filepath.Join(t.TempDir(), "bridge.db")
 	s := openTestStore(t, dbPath)
-	if err := s.SaveSession("a@s.whatsapp.net", "s1"); err != nil {
+	if err := s.SavePoll("m1", "a@s.whatsapp.net", "Lunch?", []string{"yes", "no"}); err != nil {
 		t.Fatal(err)
 	}
 	if got := permOf(t, dbPath); got != 0o600 {
@@ -59,7 +59,7 @@ func TestNewStoreCreatesPrivateDB(t *testing.T) {
 				t.Fatal(err)
 			}
 			defer db.Close()
-			if _, err := db.Exec(`INSERT OR REPLACE INTO sessions (jid, session_id, updated_at) VALUES ('b@s.whatsapp.net', 's2', 0)`); err != nil {
+			if _, err := db.Exec(`INSERT OR REPLACE INTO polls (msg_id, chat_jid, question, options, created_at) VALUES ('m2', 'b@s.whatsapp.net', 'Lunch?', '[]', 0)`); err != nil {
 				t.Fatal(err)
 			}
 			for _, suffix := range tc.suffixes {

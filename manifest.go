@@ -190,7 +190,7 @@ func WriteManifest(dir string, m *BrainManifest, overwrite bool) error {
 }
 
 // ManifestFromInline converts an inline config.json brain to a manifest.
-// The id is the old name, so stored sessions and history carry over.
+// The id is the old name, so the history carries over.
 func ManifestFromInline(b BrainConfig) BrainManifest {
 	m := BrainManifest{
 		Version: manifestVersion,

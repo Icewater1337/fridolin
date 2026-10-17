@@ -45,6 +45,11 @@ func OpenConfigStore(cfgPath string) (*ConfigStore, error) {
 	if err != nil {
 		return nil, err
 	}
+	// BRAIN_MODE switched classic mode on as "brain_mode": false did, and
+	// is refused like it (see retiredBrainMode). True overrides nothing.
+	if v := env("BRAIN_MODE"); v != "" && !isTruthy(v) {
+		return nil, classicModeRemoved("BRAIN_MODE="+v, "Unset BRAIN_MODE (in the environment or the .env next to config.json)")
+	}
 
 	file := &Config{}
 	var raw []byte
@@ -222,8 +227,10 @@ func etagOf(data []byte) string {
 // a key meant for the Claude CLI or a brain's tool (ANTHROPIC_API_KEY,
 // GROQ_API_KEY) reaches neither: without this line the first sign would be
 // brains failing with "Not logged in". Names only, the values may be secrets.
+// BRAIN_MODE is no override any more, but it is read, to refuse classic mode
+// (see OpenConfigStore): calling it ignored would contradict that refusal.
 func warnIgnoredDotEnvKeys(path string, vars map[string]string) {
-	known := map[string]bool{}
+	known := map[string]bool{"BRAIN_MODE": true}
 	for _, o := range envOverrides {
 		known[o.env] = true
 	}

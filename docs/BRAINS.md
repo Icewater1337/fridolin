@@ -53,7 +53,7 @@ restart.
 
 | Field | Meaning |
 | --- | --- |
-| `id` | Stable identifier (lowercase, digits, `-`, `_`). Used for the stored session, history attribution, the sandbox profile and per-brain credential file names. It cannot be changed; remove the brain and add the folder again under a new id instead. |
+| `id` | Stable identifier (lowercase, digits, `-`, `_`). Used for history attribution, the sandbox profile and per-brain credential file names. It cannot be changed; remove the brain and add the folder again under a new id instead. |
 | `name` | Display name. |
 | `routing.handles_dms` | This brain answers direct messages. At most one brain. |
 | `routing.default` | This brain answers allowed groups no brain claims. At most one; without one, the first brain is the fallback. |
@@ -122,7 +122,7 @@ Configs from before brain folders define brains inline in `config.json`
 (`"brains": [{"name": "...", "work_dir": "..."}]`). They keep working.
 `fridolin migrate` (or the banner on the Brains page) writes a
 `brain.json` into each work dir and moves the entry to `brain_dirs`, keeping
-the same id — sessions and history carry over. Editing an inline brain in the
+the same id — the history carries over. Editing an inline brain in the
 dashboard migrates that one brain.
 
 ## What a brain loads
