@@ -116,14 +116,43 @@ it, and starts it afresh in the new folder.
 *Remove* unregisters the brain: its runs stop and its chats fall back to the
 default brain. The folder is left exactly as it was.
 
-## Inline brains (older configs)
+## Configs with inline brains
 
-Configs from before brain folders define brains inline in `config.json`
-(`"brains": [{"name": "...", "work_dir": "..."}]`). They keep working.
-`fridolin migrate` (or the banner on the Brains page) writes a
-`brain.json` into each work dir and moves the entry to `brain_dirs`, keeping
-the same id — the history carries over. Editing an inline brain in the
-dashboard migrates that one brain.
+Configs from before brain folders listed brains inline in `config.json`
+(`"brains": [{"name": "...", "work_dir": "..."}]`). This version no longer
+runs them, and refuses to start while that list has a brain in it; an
+empty list is ignored. Move them into their folders first with
+`fridolin migrate`. Only builds from before inline brains were removed
+have it, and there are no releases yet, so build commit `2592376` from
+your checkout and run its `migrate` on your config
+(`~/.fridolin/config.json` unless you moved it):
+
+```bash
+git worktree add /tmp/fridolin-migrate 2592376
+(cd /tmp/fridolin-migrate && go build -o fridolin .)
+/tmp/fridolin-migrate/fridolin migrate --dry-run --config ~/.fridolin/config.json
+/tmp/fridolin-migrate/fridolin migrate --config ~/.fridolin/config.json
+git worktree remove /tmp/fridolin-migrate
+```
+
+`--dry-run` shows what would change. Without it, `migrate` writes a
+`brain.json` into each work dir and moves the entry to `brain_dirs`,
+keeping the same id, so the history carries over. Before you start this
+version, go through what it printed:
+
+- **conflict**: the folder already has a different `brain.json`, and the
+  brain stays inline. Run `migrate` again with `--force` to overwrite that
+  `brain.json`, or remove the inline entry and add the folder under Brains →
+  Add brain, which offers the `brain.json` it finds.
+- **skipped**: the work dir does not exist. Create it, or remove the entry.
+- **warning: the prompt file is outside the brain folder**: the brain now
+  reads `brain-prompt.md` in its folder, so copy the prompt file there.
+
+Then run `./fridolin check` with this version. It must load the config,
+and a brain whose folder was in `brain_dirs` already may now be listed
+twice, which it reports as two brains with the same id: remove one of the
+two entries from `brain_dirs` in `config.json`. Until you do, the
+dashboard refuses to save any brain's settings.
 
 ## What a brain loads
 

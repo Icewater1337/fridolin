@@ -484,7 +484,7 @@ func TestLoadConfigExpandsHome(t *testing.T) {
 	cfg, err := LoadConfig(writeConfig(t, `{
 		"data_dir": "~/data",
 		"brain_mode": true,
-		"brains": [{"name": "a", "work_dir": "~/brains/a"}]
+		"brain_dirs": [{"path": "~/brains/a", "approved": {"id": "a", "name": "A"}}]
 	}`))
 	if err != nil {
 		t.Fatal(err)
@@ -492,11 +492,8 @@ func TestLoadConfigExpandsHome(t *testing.T) {
 	if want := filepath.Join(home, "data"); cfg.DataDir != want {
 		t.Errorf("DataDir = %q, want %q", cfg.DataDir, want)
 	}
-	if want := filepath.Join(home, "brains", "a"); cfg.Brains[0].WorkDir != want {
-		t.Errorf("brain WorkDir = %q, want %q", cfg.Brains[0].WorkDir, want)
-	}
-	if want := filepath.Join(home, "brains", "a", "brain-prompt.md"); cfg.Brains[0].PromptFile != want {
-		t.Errorf("brain PromptFile = %q, want %q", cfg.Brains[0].PromptFile, want)
+	if want := filepath.Join(home, "brains", "a"); cfg.BrainDirs[0].Path != want {
+		t.Errorf("brain folder = %q, want %q", cfg.BrainDirs[0].Path, want)
 	}
 }
 
@@ -757,26 +754,10 @@ func TestConfigWritesLeaveFolderModesAlone(t *testing.T) {
 	}
 }
 
-func TestLoadConfigRejectsBadBrains(t *testing.T) {
-	cases := map[string]string{
-		"duplicate name":  `{"brain_mode":true,"brains":[{"name":"a","work_dir":"/tmp/a"},{"name":"a","work_dir":"/tmp/b"}]}`,
-		"two dm brains":   `{"brain_mode":true,"brains":[{"name":"a","work_dir":"/tmp/a","handles_dms":true},{"name":"b","work_dir":"/tmp/b","handles_dms":true}]}`,
-		"shared group":    `{"brain_mode":true,"brains":[{"name":"a","work_dir":"/tmp/a","groups":["g@g.us"]},{"name":"b","work_dir":"/tmp/b","groups":["g@g.us"]}]}`,
-		"missing workdir": `{"brain_mode":true,"brains":[{"name":"a"}]}`,
-		"name with slash": `{"brain_mode":true,"brains":[{"name":"a/b","work_dir":"/tmp/a"}]}`,
-	}
-	for name, body := range cases {
-		t.Setenv("HOME", t.TempDir())
-		if _, err := LoadConfig(writeConfig(t, body)); err == nil {
-			t.Errorf("%s: expected an error, got none", name)
-		}
-	}
-}
-
 func TestLoadConfigAllowsNoBrains(t *testing.T) {
 	// A fresh install starts with no brains and adds them in the dashboard.
 	t.Setenv("HOME", t.TempDir())
-	if _, err := LoadConfig(writeConfig(t, `{"brain_mode":true,"brains":[]}`)); err != nil {
+	if _, err := LoadConfig(writeConfig(t, `{"brain_mode":true,"brain_dirs":[]}`)); err != nil {
 		t.Fatalf("an empty brain list must load: %v", err)
 	}
 }
@@ -902,12 +883,11 @@ func TestBrainRouting(t *testing.T) {
 
 	cfg, err := LoadConfig(writeConfig(t, `{
 		"brain_mode": true,
-		"data_dir": "`+home+`/data",
-		"brains": [
-			{"name": "personal", "work_dir": "`+home+`/p", "handles_dms": true},
-			{"name": "team",     "work_dir": "`+home+`/t", "groups": ["team@g.us"]},
-			{"name": "other",    "work_dir": "`+home+`/o", "default": true}
-		]
+		"data_dir": "`+home+`/data"`+brainDirsJSON(t,
+		brainFolder(t, home+"/p", BrainManifest{ID: "personal", Routing: BrainRouting{HandlesDMs: true}}),
+		brainFolder(t, home+"/t", BrainManifest{ID: "team", Routing: BrainRouting{Groups: []string{"team@g.us"}}}),
+		brainFolder(t, home+"/o", BrainManifest{ID: "other", Routing: BrainRouting{Default: true}}),
+	)+`
 	}`))
 	if err != nil {
 		t.Fatal(err)
@@ -934,11 +914,10 @@ func TestRouteHonoursTheNamedBrain(t *testing.T) {
 	t.Setenv("HOME", home)
 	cfg, err := LoadConfig(writeConfig(t, `{
 		"brain_mode": true,
-		"data_dir": "`+home+`/data",
-		"brains": [
-			{"name": "personal", "work_dir": "`+home+`/p", "handles_dms": true},
-			{"name": "team",     "work_dir": "`+home+`/t", "groups": ["team@g.us"]}
-		]
+		"data_dir": "`+home+`/data"`+brainDirsJSON(t,
+		brainFolder(t, home+"/p", BrainManifest{ID: "personal", Routing: BrainRouting{HandlesDMs: true}}),
+		brainFolder(t, home+"/t", BrainManifest{ID: "team", Routing: BrainRouting{Groups: []string{"team@g.us"}}}),
+	)+`
 	}`))
 	if err != nil {
 		t.Fatal(err)
@@ -1002,8 +981,7 @@ func TestBrainRoutingFallsBackToFirstBrain(t *testing.T) {
 
 	cfg, err := LoadConfig(writeConfig(t, `{
 		"brain_mode": true,
-		"data_dir": "`+home+`/data",
-		"brains": [{"name": "only", "work_dir": "`+home+`/o"}]
+		"data_dir": "`+home+`/data"`+brainDirsJSON(t, brainFolder(t, home+"/o", BrainManifest{ID: "only"}))+`
 	}`))
 	if err != nil {
 		t.Fatal(err)
@@ -1016,25 +994,6 @@ func TestBrainRoutingFallsBackToFirstBrain(t *testing.T) {
 	}
 }
 
-func TestNewBrainManagerCreatesWorkDirs(t *testing.T) {
-	home := t.TempDir()
-	t.Setenv("HOME", home)
-
-	cfg, err := LoadConfig(writeConfig(t, `{
-		"brain_mode": true,
-		"data_dir": "`+home+`/data",
-		"brains": [{"name": "a", "work_dir": "`+home+`/brains/a"}]
-	}`))
-	if err != nil {
-		t.Fatal(err)
-	}
-	newTestManager(t, cfg)
-
-	if fi, err := os.Stat(filepath.Join(home, "brains", "a")); err != nil || !fi.IsDir() {
-		t.Errorf("work dir was not created: %v", err)
-	}
-}
-
 // ── sandbox ───────────────────────────────────────────────────────────────
 
 func TestSandboxProfileIsolatesBrains(t *testing.T) {
@@ -1042,9 +1001,9 @@ func TestSandboxProfileIsolatesBrains(t *testing.T) {
 	t.Setenv("HOME", home)
 
 	cfg := &Config{DataDir: filepath.Join(home, "data")}
-	sp := NewSandboxProfiler(map[string]string{
-		"personal": "/opt/brains/personal",
-		"team":     "/opt/brains/team",
+	sp := NewSandboxProfiler(map[string][]string{
+		"personal": {"/opt/brains/personal"},
+		"team":     {"/opt/brains/team"},
 	}, cfg)
 
 	profile := mustProfile(t, sp, "personal")
@@ -1061,7 +1020,7 @@ func TestSandboxProfileDeniesSecretsAndAllowsKeychain(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 
-	sp := NewSandboxProfiler(map[string]string{"a": "/tmp/a"}, &Config{DataDir: filepath.Join(home, "data")})
+	sp := NewSandboxProfiler(map[string][]string{"a": {"/tmp/a"}}, &Config{DataDir: filepath.Join(home, "data")})
 	profile := mustProfile(t, sp, "a")
 
 	for _, secret := range []string{".ssh", ".aws", ".gnupg", "Library/Mail", ".git-credentials"} {
@@ -1080,7 +1039,7 @@ func TestSandboxProfileScopesCalendarCredentials(t *testing.T) {
 	t.Setenv("HOME", home)
 	dataDir := filepath.Join(home, "data")
 
-	sp := NewSandboxProfiler(map[string]string{"a": "/tmp/a", "b": "/tmp/b"}, &Config{DataDir: dataDir})
+	sp := NewSandboxProfiler(map[string][]string{"a": {"/tmp/a"}, "b": {"/tmp/b"}}, &Config{DataDir: dataDir})
 	profile := mustProfile(t, sp, "a")
 
 	if !strings.Contains(profile, filepath.Join(dataDir, "google_calendar_credentials_a.json")) {
@@ -1099,7 +1058,7 @@ func TestSandboxProfileIncludesConfiguredDenies(t *testing.T) {
 		DataDir: filepath.Join(home, "data"),
 		Sandbox: SandboxConfig{DenyPaths: []string{"/private/clients"}},
 	}
-	profile := mustProfile(t, NewSandboxProfiler(map[string]string{"a": "/tmp/a"}, cfg), "a")
+	profile := mustProfile(t, NewSandboxProfiler(map[string][]string{"a": {"/tmp/a"}}, cfg), "a")
 
 	if !strings.Contains(profile, `(deny file-read* (subpath "/private/clients"))`) {
 		t.Error("configured deny path missing from the profile")

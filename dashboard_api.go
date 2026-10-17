@@ -49,7 +49,6 @@ func (b *Bridge) apiMux() http.Handler {
 	mux.HandleFunc("PUT /api/brains/{id}", b.apiUpdateBrain)
 	mux.HandleFunc("POST /api/brains/{id}/approve", b.apiApproveBrain)
 	mux.HandleFunc("DELETE /api/brains/{id}", b.apiRemoveBrain)
-	mux.HandleFunc("POST /api/brains/migrate", b.apiMigrate)
 
 	mux.HandleFunc("GET /api/fs/capabilities", b.apiFSCaps)
 	mux.HandleFunc("POST /api/fs/pick", b.apiFSPick)
@@ -407,39 +406,28 @@ func (b *Bridge) apiAllowChat(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]string{"status": "allowed"})
 }
 
-// assignGroup routes a group to a brain, taking it away from any other brain.
-// Folder brains get it in their manifest (brain.json and the approved copy);
-// inline brains in their groups list.
+// assignGroup routes a group to a brain, taking it away from any other brain,
+// in their manifests (brain.json and the approved copy). The chosen brain
+// goes first, so that one that is not there is refused before the others'
+// brain.json are written.
 func assignGroup(c *Config, jid, brainID string) error {
-	found := false
-	for i := range c.Brains {
-		c.Brains[i].Groups = without(c.Brains[i].Groups, jid)
-		if c.Brains[i].Name == brainID {
-			c.Brains[i].Groups = append(c.Brains[i].Groups, jid)
-			found = true
-		}
-	}
-	for i := range c.BrainDirs {
-		ref := &c.BrainDirs[i]
-		if ref.Approved == nil {
-			continue
-		}
-		m := *ref.Approved
-		had := contains(m.Routing.Groups, jid)
-		m.Routing.Groups = without(m.Routing.Groups, jid)
-		if m.ID == brainID {
+	if err := updateManifestIn(c, brainID, func(m *BrainManifest) error {
+		if !contains(m.Routing.Groups, jid) {
 			m.Routing.Groups = append(m.Routing.Groups, jid)
-			found = true
-		} else if !had {
-			continue
 		}
-		if err := WriteManifest(expandHomeDir(ref.Path), &m, true); err != nil {
-			return err
-		}
-		ref.Approved = &m
+		return nil
+	}); err != nil {
+		return err
 	}
-	if !found {
-		return fmt.Errorf("no brain %q", brainID)
+	for _, ref := range c.BrainDirs {
+		if a := ref.Approved; a != nil && a.ID != brainID && contains(a.Routing.Groups, jid) {
+			if err := updateManifestIn(c, a.ID, func(m *BrainManifest) error {
+				m.Routing.Groups = without(m.Routing.Groups, jid)
+				return nil
+			}); err != nil {
+				return err
+			}
+		}
 	}
 	return nil
 }
@@ -463,9 +451,9 @@ func (b *Bridge) apiDismissChat(w http.ResponseWriter, r *http.Request) {
 
 func (b *Bridge) apiGetConfig(w http.ResponseWriter, r *http.Request) {
 	file := b.cfgs.FileCopy()
-	file.Brains, file.BrainDirs = nil, nil
+	file.BrainDirs = nil
 	eff, _ := b.cfgs.Get().clone()
-	eff.Brains, eff.BrainDirs = nil, nil
+	eff.BrainDirs = nil
 	writeJSON(w, http.StatusOK, map[string]any{
 		"etag":      b.cfgs.ETag(),
 		"path":      b.cfgs.Path(),
@@ -491,7 +479,7 @@ func (b *Bridge) apiPutConfig(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	restart, err := b.cfgs.Update(req.ETag, func(c *Config) error {
-		incoming.Brains, incoming.BrainDirs = c.Brains, c.BrainDirs
+		incoming.BrainDirs = c.BrainDirs
 		*c = incoming
 		return nil
 	})
@@ -533,7 +521,6 @@ type brainView struct {
 	ID       string         `json:"id"`
 	Name     string         `json:"name"`
 	Path     string         `json:"path"`
-	Source   string         `json:"source"`
 	Status   string         `json:"status"` // ok, drift, missing, invalid, unapproved
 	Manifest *BrainManifest `json:"manifest"`
 	Disk     *BrainManifest `json:"disk_manifest,omitempty"`
@@ -556,13 +543,8 @@ func (b *Bridge) brainViews() []brainView {
 		byPath[canonicalDir(is.Path)] = append(byPath[canonicalDir(is.Path)], is)
 	}
 	var out []brainView
-	for _, bc := range cfg.Brains {
-		m := ManifestFromInline(bc)
-		v := brainView{ID: m.ID, Name: m.Name, Path: bc.WorkDir, Source: "inline", Status: "ok", Manifest: &m}
-		out = append(out, v)
-	}
 	for _, ref := range cfg.BrainDirs {
-		v := brainView{Path: ref.Path, Source: "folder", Status: "ok", Manifest: ref.Approved}
+		v := brainView{Path: ref.Path, Status: "ok", Manifest: ref.Approved}
 		if ref.Approved != nil {
 			v.ID, v.Name = ref.Approved.ID, ref.Approved.Name
 		}
@@ -745,8 +727,7 @@ func (b *Bridge) apiAddBrain(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"id": m.ID, "path": abs, "created": nz(created)})
 }
 
-// apiUpdateBrain saves edited settings for a brain. An inline brain is moved
-// to its folder (brain.json) on its first edit.
+// apiUpdateBrain saves edited settings for a brain.
 func (b *Bridge) apiUpdateBrain(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 	var req struct {
@@ -766,34 +747,33 @@ func (b *Bridge) apiUpdateBrain(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	_, err := b.cfgs.Update("", func(c *Config) error {
-		for i, bc := range c.Brains {
-			if bc.Name == id {
-				dir := expandHomeDir(bc.WorkDir)
-				if err := WriteManifest(dir, &m, true); err != nil {
-					return err
-				}
-				c.Brains = append(c.Brains[:i], c.Brains[i+1:]...)
-				c.BrainDirs = append(c.BrainDirs, BrainRef{Path: bc.WorkDir, Approved: &m})
-				return checkSet(c)
-			}
+		// Check the brains with the edit before it is written: a refused
+		// edit must leave brain.json as it was, not show up as drift.
+		if err := checkSet(withApproved(c, id, m)); err != nil {
+			return err
 		}
-		for i := range c.BrainDirs {
-			ref := &c.BrainDirs[i]
-			if ref.Approved != nil && ref.Approved.ID == id {
-				if err := WriteManifest(expandHomeDir(ref.Path), &m, true); err != nil {
-					return err
-				}
-				ref.Approved = &m
-				return checkSet(c)
-			}
-		}
-		return fmt.Errorf("no brain %q", id)
+		return updateManifestIn(c, id, func(cur *BrainManifest) error {
+			*cur = m
+			return nil
+		})
 	})
 	if err != nil {
 		writeErr(w, http.StatusUnprocessableEntity, err.Error())
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]string{"status": "saved"})
+}
+
+// withApproved returns a copy of c in which brain id runs m, for checkSet.
+func withApproved(c *Config, id string, m BrainManifest) *Config {
+	probe := *c
+	probe.BrainDirs = append([]BrainRef(nil), c.BrainDirs...)
+	for i, ref := range probe.BrainDirs {
+		if ref.Approved != nil && ref.Approved.ID == id {
+			probe.BrainDirs[i].Approved = &m
+		}
+	}
+	return &probe
 }
 
 // checkSet rejects an edit that would make two brains clash.
@@ -833,7 +813,7 @@ func (b *Bridge) apiApproveBrain(w http.ResponseWriter, r *http.Request) {
 			ref.Approved = disk
 			return checkSet(c)
 		}
-		return fmt.Errorf("no folder brain %q", id)
+		return fmt.Errorf("no brain %q", id)
 	})
 	if err != nil {
 		writeErr(w, http.StatusUnprocessableEntity, err.Error())
@@ -846,12 +826,6 @@ func (b *Bridge) apiApproveBrain(w http.ResponseWriter, r *http.Request) {
 func (b *Bridge) apiRemoveBrain(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 	_, err := b.cfgs.Update("", func(c *Config) error {
-		for i, bc := range c.Brains {
-			if bc.Name == id {
-				c.Brains = append(c.Brains[:i], c.Brains[i+1:]...)
-				return nil
-			}
-		}
 		path := r.URL.Query().Get("path")
 		for i, ref := range c.BrainDirs {
 			if (ref.Approved != nil && ref.Approved.ID == id) ||
@@ -867,22 +841,6 @@ func (b *Bridge) apiRemoveBrain(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]string{"status": "removed"})
-}
-
-func (b *Bridge) apiMigrate(w http.ResponseWriter, r *http.Request) {
-	var req struct {
-		DryRun bool `json:"dry_run"`
-	}
-	if err := decodeJSON(r, &req); err != nil {
-		writeErr(w, http.StatusBadRequest, err.Error())
-		return
-	}
-	rep, err := MigrateInlineBrains(b.cfgs, req.DryRun, false)
-	if err != nil {
-		writeErr(w, http.StatusUnprocessableEntity, err.Error())
-		return
-	}
-	writeJSON(w, http.StatusOK, rep)
 }
 
 // ── folder picking ───────────────────────────────────────────────────────

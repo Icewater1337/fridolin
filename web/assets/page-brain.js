@@ -80,7 +80,6 @@ export default {
           h('h1', b.name || b.id),
           h('div.head-meta',
             brainStatusPill(b.status),
-            b.source === 'inline' ? badge('config.json', 'neutral', 'Configured inline in config.json') : badge('brain.json', 'neutral', 'Settings live in the folder’s brain.json'),
             h('code.mono.muted', b.id)),
           h('div.path-line', icon('folder'), mono(b.path, { copy: true })))));
     }
@@ -226,7 +225,6 @@ export default {
 
       const form = h('form.card.form.brain-form',
         stale,
-        brain.source === 'inline' ? callout('info', null, 'Saving moves this brain’s settings into ', mono(`${brain.path}/brain.json`), '. From then on the folder carries its own settings.') : null,
         brain.status === 'drift' ? callout('warn', null, 'brain.json on disk differs from the approved version (see above). Saving overwrites it.') : null,
         h('div.form-grid',
           field({ label: 'Name', control: nameIn }),
@@ -267,7 +265,7 @@ export default {
           await put(`/api/brains/${encodeURIComponent(id)}`, { manifest });
           formDirty = false;
           saveBar.hidden = true;
-          toast(brain.source === 'inline' ? 'Saved — settings now live in brain.json' : 'Settings saved', 'ok');
+          toast('Settings saved', 'ok');
           memo.brain = '';
           formBase = '';
           poller.kick();

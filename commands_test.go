@@ -27,12 +27,13 @@ const (
 	otherNumber = "15559876543"
 )
 
-// newMainBridge is a test bridge with one inline brain, "main", that takes
+// newMainBridge is a test bridge with one folder brain, "main", that takes
 // the DMs and, as the only brain, the allowed group too: one brain serving
 // several chats, as in most setups.
 func newMainBridge(t *testing.T, extra string) (*testBridge, *Brain) {
 	t.Helper()
-	tb := newTestBridge(t, `, "otp_guard": true, "brains": [{"name": "main", "work_dir": "~/main", "handles_dms": true}]`+extra)
+	tb := newTestBridge(t, `, "otp_guard": true`+extra)
+	tb.addFolderBrain(t, BrainManifest{ID: "main", Name: "Main", Routing: BrainRouting{HandlesDMs: true}})
 	br := tb.brainMgr.Get("main")
 	if br == nil {
 		t.Fatal("brain main is missing")

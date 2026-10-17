@@ -197,6 +197,54 @@ func TestResolveBrainsSkipsMissingAndClashing(t *testing.T) {
 	}
 }
 
+// TestResolveBrainsLeavesOutBadBrains: a brain that is not valid on its own,
+// or clashes with an earlier one, is left out and reported; the brain before
+// it keeps running.
+func TestResolveBrainsLeavesOutBadBrains(t *testing.T) {
+	const group = "120363000000000000@g.us"
+	cases := []struct {
+		name   string
+		dir    string // the second brain's folder, below home
+		second *BrainManifest
+		kind   string
+		detail string
+	}{
+		{"same id", "b", &BrainManifest{ID: "a", Name: "Other A"}, "invalid", `two brains use the id "a"`},
+		{"second DM brain", "b", &BrainManifest{ID: "b", Name: "B", Routing: BrainRouting{HandlesDMs: true}}, "invalid", "both handle DMs"},
+		{"second default", "b", &BrainManifest{ID: "b", Name: "B", Routing: BrainRouting{Default: true}}, "invalid", "both marked default"},
+		{"group claimed twice", "b", &BrainManifest{ID: "b", Name: "B", Routing: BrainRouting{Groups: []string{group}}}, "invalid", "is claimed by both"},
+		{"folder inside the other brain's", "a/b", &BrainManifest{ID: "b", Name: "B"}, "invalid", "is inside brain folder"},
+		{"the other brain's folder", "a", &BrainManifest{ID: "b", Name: "B"}, "invalid", `brains "a" and "b" use the same folder`},
+		{"id that is not a slug", "b", &BrainManifest{ID: "Work.Brain", Name: "B"}, "invalid", "must be 1–40 lowercase letters"},
+		{"no name", "b", &BrainManifest{ID: "b"}, "invalid", "needs a name"},
+		{"no approved manifest", "b", nil, "unapproved", "re-add this brain"},
+		{"no folder", "gone", &BrainManifest{ID: "b", Name: "B"}, "missing", "folder not found"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			home := canonicalDir(t.TempDir())
+			t.Setenv("HOME", home)
+			first := BrainManifest{ID: "a", Name: "A", Routing: BrainRouting{HandlesDMs: true, Default: true, Groups: []string{group}}}
+			for _, d := range []string{"a", "a/b", "b"} {
+				if err := os.MkdirAll(filepath.Join(home, d), 0o700); err != nil {
+					t.Fatal(err)
+				}
+			}
+			cfg := folderBrainConfig(t, home,
+				BrainRef{Path: filepath.Join(home, "a"), Approved: &first},
+				BrainRef{Path: filepath.Join(home, tc.dir), Approved: tc.second},
+			)
+			specs, issues := ResolveBrains(cfg)
+			if len(specs) != 1 || specs[0].Manifest.ID != "a" {
+				t.Errorf("specs = %+v, want only a", specs)
+			}
+			if len(issues) != 1 || issues[0].Kind != tc.kind || !strings.Contains(issues[0].Detail, tc.detail) {
+				t.Errorf("issues = %+v, want one %s issue saying %q", issues, tc.kind, tc.detail)
+			}
+		})
+	}
+}
+
 func TestReadManifestMissing(t *testing.T) {
 	if _, err := ReadManifest(t.TempDir()); !errors.Is(err, fs.ErrNotExist) {
 		t.Errorf("err = %v, want not-exist", err)
@@ -278,59 +326,4 @@ func FuzzDecodeManifest(f *testing.F) {
 			t.Errorf("encoded %+v, decoded back %+v", *m, *back)
 		}
 	})
-}
-
-func TestMigrateInlineBrains(t *testing.T) {
-	home := canonicalDir(t.TempDir())
-	t.Setenv("HOME", home)
-	path := writeConfig(t, `{
-		"brain_mode": true,
-		"data_dir": "`+home+`/data",
-		"brains": [
-			{"name": "personal", "work_dir": "~/p", "handles_dms": true, "effort": "high"},
-			{"name": "team", "work_dir": "~/t", "groups": ["120363000000000000@g.us"]}
-		]
-	}`)
-	for _, d := range []string{"p", "t"} {
-		_ = os.MkdirAll(filepath.Join(home, d), 0o700)
-	}
-	// team already has a different brain.json: a conflict, left alone.
-	other := testManifest("other")
-	if err := WriteManifest(filepath.Join(home, "t"), &other, false); err != nil {
-		t.Fatal(err)
-	}
-	cs, err := OpenConfigStore(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	rep, err := MigrateInlineBrains(cs, true, false)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := os.Stat(filepath.Join(home, "p", ManifestFile)); err == nil {
-		t.Error("dry run wrote a manifest")
-	}
-	if rep.Brains[0].Action != "written" || rep.Brains[1].Action != "conflict" {
-		t.Errorf("dry run report = %+v", rep.Brains)
-	}
-
-	if _, err := MigrateInlineBrains(cs, false, false); err != nil {
-		t.Fatal(err)
-	}
-	m, err := ReadManifest(filepath.Join(home, "p"))
-	if err != nil || m.ID != "personal" || !m.Routing.HandlesDMs || m.Effort != "high" {
-		t.Fatalf("manifest = %+v, err %v", m, err)
-	}
-	file := cs.FileCopy()
-	if len(file.Brains) != 1 || file.Brains[0].Name != "team" {
-		t.Errorf("inline brains left = %+v, want only the conflicting team", file.Brains)
-	}
-	if len(file.BrainDirs) != 1 || file.BrainDirs[0].Path != "~/p" {
-		t.Errorf("brain_dirs = %+v", file.BrainDirs)
-	}
-	specs, _ := ResolveBrains(cs.Get())
-	if len(specs) != 2 {
-		t.Errorf("after migration %d brains resolve, want 2", len(specs))
-	}
 }

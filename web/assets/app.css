@@ -826,11 +826,6 @@ dialog.dialog::backdrop { background: var(--backdrop); }
 .bc-runtime { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; padding-top: 10px; border-top: 1px solid var(--border); }
 .issue-list { margin: 0; padding-left: 18px; color: var(--bad); font-size: 13px; }
 
-.report { display: flex; flex-direction: column; gap: 8px; }
-.report-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 4px 12px; padding: 10px 12px; border: 1px solid var(--border); border-radius: var(--radius-sm); align-items: center; }
-.report-row > .small { grid-column: 1 / -1; }
-.report-main { display: flex; flex-direction: column; gap: 2px; min-width: 0; align-items: flex-start; }
-
 /* wizard */
 .stepper { display: flex; gap: 8px; list-style: none; padding: 0; margin: 0; flex-wrap: wrap; align-items: center; }
 .stepper li { display: flex; align-items: center; gap: 8px; color: var(--muted); font-weight: 600; font-size: 13.5px; }

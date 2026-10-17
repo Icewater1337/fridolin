@@ -208,26 +208,6 @@ func WriteManifest(dir string, m *BrainManifest, overwrite bool) error {
 	return writeFileAtomic(path, data, 0o600, false)
 }
 
-// ManifestFromInline converts an inline config.json brain to a manifest.
-// The id is the old name, so the history carries over.
-func ManifestFromInline(b BrainConfig) BrainManifest {
-	m := BrainManifest{
-		Version: manifestVersion,
-		ID:      b.Name,
-		Name:    b.Name,
-		Routing: BrainRouting{HandlesDMs: b.HandlesDMs, Default: b.Default, Groups: append([]string{}, b.Groups...)},
-		Model:   b.Model,
-		Effort:  b.Effort,
-		Backup:  BrainBackup{Enabled: true, Exclude: append([]string{}, DefaultBackupExcludes...)},
-	}
-	if b.PromptFile != "" {
-		if rel, err := filepath.Rel(b.WorkDir, b.PromptFile); err == nil && !strings.HasPrefix(rel, "..") {
-			m.PromptFile = rel
-		}
-	}
-	return m.normalized()
-}
-
 // slugify turns a folder or display name into a brain id candidate.
 func slugify(s string) string {
 	var b strings.Builder

@@ -11,41 +11,6 @@ import (
 	"syscall"
 )
 
-// BrainConfig describes one brain inline in config.json — the original way to
-// configure brains. New brains live in their own folder with a brain.json
-// manifest (see manifest.go) and are listed in brain_dirs; inline brains keep
-// working and `fridolin migrate` converts them.
-type BrainConfig struct {
-	// Name identifies the brain in logs, session keys, and sandbox profiles.
-	// Use a filesystem-safe slug, e.g. "personal", "work", "family".
-	Name string `json:"name"`
-
-	// WorkDir is the directory Claude runs from for this brain. It holds the
-	// brain's prompt file, conversation history, memories, and any files the
-	// brain creates.
-	WorkDir string `json:"work_dir"`
-
-	// Groups lists WhatsApp group JIDs (…@g.us) routed to this brain.
-	Groups []string `json:"groups"`
-
-	// HandlesDMs routes all direct messages to this brain. Exactly one brain
-	// should set this; if none does, DMs go to the default brain.
-	HandlesDMs bool `json:"handles_dms"`
-
-	// Default marks the fallback brain for allowed chats that no other brain
-	// claims. If no brain is marked default, the first brain is used.
-	Default bool `json:"default"`
-
-	// PromptFile overrides the system-prompt path (default: <work_dir>/brain-prompt.md).
-	PromptFile string `json:"prompt_file"`
-
-	// Model overrides the global brain model for this brain only.
-	Model string `json:"model"`
-
-	// Effort overrides the global brain effort for this brain only.
-	Effort string `json:"effort,omitempty"`
-}
-
 // Config holds all configuration for the bridge.
 type Config struct {
 	Comment string `json:"_comment,omitempty"`
@@ -137,8 +102,10 @@ type Config struct {
 	// without it, that one falls back to classic mode.
 	BrainMode retiredBrainMode `json:"brain_mode"`
 
-	// Brains are brains configured inline (the original format).
-	Brains []BrainConfig `json:"brains,omitempty"`
+	// InlineBrains is the "brains" key, where brains were configured
+	// before they had folders of their own. A config that still lists any
+	// is refused, see retiredInlineBrains; an empty list is ignored.
+	InlineBrains retiredInlineBrains `json:"brains,omitempty"`
 
 	// BrainDirs are brain folders added through the dashboard. Each holds a
 	// brain.json manifest; Approved is the version you accepted (a brain
@@ -187,6 +154,31 @@ func (*retiredBrainMode) UnmarshalJSON(data []byte) error {
 	}
 	if on != nil && !*on {
 		return classicModeRemoved(`"brain_mode": false`, `Set "brain_mode" to true in config.json (an older version you go back to needs it)`)
+	}
+	return nil
+}
+
+// migrateBuild is a commit of main that still has `fridolin migrate`, which
+// moves inline brains into their folders. It is the one their removal was
+// built on, so it reads the config.json this version reads and its
+// write-back drops no setting.
+const migrateBuild = "2592376"
+
+// retiredInlineBrains is the brains key. Inline brains were removed together
+// with `fridolin migrate`. Nothing sets the key any more, so saves leave it
+// out.
+type retiredInlineBrains []json.RawMessage
+
+// UnmarshalJSON refuses a list with brains in it: running without them
+// would leave their chats unanswered, or answered by whichever brain is the
+// default. Dashboard saves are parsed the same way.
+func (*retiredInlineBrains) UnmarshalJSON(data []byte) error {
+	var brains []json.RawMessage
+	if err := json.Unmarshal(data, &brains); err != nil {
+		return fmt.Errorf("brains: %w", err)
+	}
+	if len(brains) > 0 {
+		return fmt.Errorf(`config.json lists brains inline under "brains", which this version no longer runs. Move them into their folders first: run "fridolin migrate" with a build from before this change (commit %s), then start this version again (see docs/BRAINS.md#configs-with-inline-brains)`, migrateBuild)
 	}
 	return nil
 }
@@ -465,14 +457,6 @@ func effective(file *Config) (*Config, error) {
 	}
 	cfg.Backup.RclonePath = expandHome(cfg.Backup.RclonePath, home)
 
-	for i := range cfg.Brains {
-		b := &cfg.Brains[i]
-		b.WorkDir = expandHome(b.WorkDir, home)
-		if b.PromptFile == "" {
-			b.PromptFile = filepath.Join(b.WorkDir, "brain-prompt.md")
-		}
-		b.PromptFile = expandHome(b.PromptFile, home)
-	}
 	for i := range cfg.BrainDirs {
 		cfg.BrainDirs[i].Path = expandHome(cfg.BrainDirs[i].Path, home)
 	}
@@ -594,9 +578,10 @@ func (c *Config) clone() (*Config, error) {
 
 var validEfforts = map[string]bool{"": true, "low": true, "medium": true, "high": true, "xhigh": true, "max": true}
 
-// validate rejects configurations that would misroute messages or start a
-// brain with no working directory. Zero brains is fine: a fresh install adds
-// its first brain from the dashboard.
+// validate rejects settings the bridge cannot run with. Brains are checked
+// when they are resolved (ResolveBrains), which leaves one that clashes with
+// another out instead of stopping them all. Zero brains is fine: a fresh
+// install adds its first brain from the dashboard.
 func (c *Config) validate() error {
 	if !validEfforts[c.BrainEffort] {
 		return fmt.Errorf("brain_effort %q must be one of low, medium, high, xhigh, max", c.BrainEffort)
@@ -626,48 +611,7 @@ func (c *Config) validate() error {
 	if err := c.Backup.validate(); err != nil {
 		return err
 	}
-	if err := c.Plaud.validate(); err != nil {
-		return err
-	}
-
-	for _, b := range c.Brains {
-		if b.Name == "" {
-			return fmt.Errorf("every brain needs a name")
-		}
-		if strings.ContainsAny(b.Name, `/\ `) {
-			return fmt.Errorf("brain name %q must not contain slashes or spaces", b.Name)
-		}
-		if b.WorkDir == "" {
-			return fmt.Errorf("brain %q needs a work_dir", b.Name)
-		}
-		if !validEfforts[b.Effort] {
-			return fmt.Errorf("brain %q: effort %q is not valid", b.Name, b.Effort)
-		}
-	}
-	// Names, groups and the DM brain must be unique across inline brains.
-	// Manifest brains join this check when the brain set is resolved.
-	seenNames := make(map[string]bool, len(c.Brains))
-	seenGroups := make(map[string]string, len(c.Brains))
-	dmBrain := ""
-	for _, b := range c.Brains {
-		if seenNames[b.Name] {
-			return fmt.Errorf("duplicate brain name %q", b.Name)
-		}
-		seenNames[b.Name] = true
-		for _, g := range b.Groups {
-			if owner, ok := seenGroups[g]; ok {
-				return fmt.Errorf("group %s is claimed by both brain %q and brain %q", g, owner, b.Name)
-			}
-			seenGroups[g] = b.Name
-		}
-		if b.HandlesDMs {
-			if dmBrain != "" {
-				return fmt.Errorf("brains %q and %q both set handles_dms", dmBrain, b.Name)
-			}
-			dmBrain = b.Name
-		}
-	}
-	return nil
+	return c.Plaud.validate()
 }
 
 // validate rejects sandbox settings that goos cannot honour. Brain runs

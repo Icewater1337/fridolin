@@ -168,12 +168,11 @@ func TestBrainWhoseFolderCannotBeOpenedIsLeftOut(t *testing.T) {
 	}
 	home := canonicalDir(t.TempDir())
 	t.Setenv("HOME", home)
+	dirs := brainDirsJSON(t,
+		brainFolder(t, "~/a", BrainManifest{ID: "a", Routing: BrainRouting{HandlesDMs: true, Default: true}}),
+		brainFolder(t, "~/b", BrainManifest{ID: "b", Routing: BrainRouting{Groups: []string{"120363000000000000@g.us"}}}),
+	)
 	locked := filepath.Join(home, "b")
-	for _, d := range []string{filepath.Join(home, "a"), locked} {
-		if err := os.MkdirAll(d, 0o700); err != nil {
-			t.Fatal(err)
-		}
-	}
 	if err := os.Chmod(locked, 0); err != nil {
 		t.Fatal(err)
 	}
@@ -181,11 +180,7 @@ func TestBrainWhoseFolderCannotBeOpenedIsLeftOut(t *testing.T) {
 	cfg, err := LoadConfig(writeConfig(t, `{
 		"brain_mode": true,
 		"data_dir": "`+home+`/data",
-		"claude_path": "`+fakeClaudeEnv(t, 0)+`",
-		"brains": [
-			{"name": "a", "work_dir": "~/a", "handles_dms": true, "default": true},
-			{"name": "b", "work_dir": "~/b", "groups": ["120363000000000000@g.us"]}
-		]
+		"claude_path": "`+fakeClaudeEnv(t, 0)+`"`+dirs+`
 	}`))
 	if err != nil {
 		t.Fatal(err)
@@ -199,9 +194,16 @@ func TestBrainWhoseFolderCannotBeOpenedIsLeftOut(t *testing.T) {
 	if br := mgr.BrainFor("120363000000000000@g.us", true); br != mgr.Get("a") {
 		t.Errorf("b's group went to %v, want the default brain a", br)
 	}
-	issues := mgr.Issues()
-	if len(issues) != 1 || issues[0].ID != "b" || issues[0].Kind != "missing" || !strings.Contains(issues[0].Detail, "the folder cannot be opened") {
-		t.Errorf("issues = %+v, want b's folder reported", issues)
+	// The drift check cannot read b's brain.json either, and says so too.
+	reported := false
+	for _, is := range mgr.Issues() {
+		if is.ID != "b" {
+			t.Errorf("issue %+v, want only b's", is)
+		}
+		reported = reported || is.Kind == "missing" && strings.Contains(is.Detail, "the folder cannot be opened")
+	}
+	if !reported {
+		t.Errorf("issues = %+v, want b's folder reported", mgr.Issues())
 	}
 	if lines := logged(); len(lines) != 1 || !strings.Contains(lines[0], "brain b: leaving it out") {
 		t.Errorf("log = %q, want one line leaving b out", lines)
@@ -329,50 +331,6 @@ func TestReplacedFolderIsOpenedOnReload(t *testing.T) {
 				t.Errorf("log = %q, want one line switching folders", lines)
 			}
 		})
-	}
-}
-
-// TestInlinePromptOutsideTheFolderIsStillRead: an inline brain's
-// prompt_file may be a path you chose outside its folder. It is read as
-// configured until inline brains go away.
-func TestInlinePromptOutsideTheFolderIsStillRead(t *testing.T) {
-	home := canonicalDir(t.TempDir())
-	t.Setenv("HOME", home)
-	shared := filepath.Join(home, "prompts", "shared.md")
-	if err := os.MkdirAll(filepath.Dir(shared), 0o700); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(shared, []byte("SHARED PROMPT\n"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	cfg, err := LoadConfig(writeConfig(t, `{
-		"brain_mode": true,
-		"data_dir": "`+home+`/data",
-		"claude_path": "`+fakeClaudeEnv(t, 0)+`",
-		"brains": [
-			{"name": "out", "work_dir": "~/out", "prompt_file": "~/prompts/shared.md"},
-			{"name": "in", "work_dir": "~/in", "groups": ["120363000000000000@g.us"]}
-		]
-	}`))
-	if err != nil {
-		t.Fatal(err)
-	}
-	mgr := newTestManager(t, cfg)
-	t.Cleanup(mgr.Stop)
-	if err := os.WriteFile(filepath.Join(home, "in", "brain-prompt.md"), []byte("IN PROMPT\n"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	for id, want := range map[string]string{"out": "SHARED PROMPT", "in": "IN PROMPT"} {
-		br := mgr.Get(id)
-		if got := br.buildPrompt(br.settings.Load(), dm("hello")); !strings.HasPrefix(got, want) {
-			t.Errorf("brain %s: prompt = %q, want it to start with %q", id, got, want)
-		}
-	}
-	// The default prompt file, inside the folder, goes through the folder.
-	plant(t, filepath.Join(home, "in", "brain-prompt.md"), shared)
-	br := mgr.Get("in")
-	if got := br.buildPrompt(br.settings.Load(), dm("hello")); strings.Contains(got, "SHARED PROMPT") {
-		t.Errorf("an inline brain's prompt in its folder followed a symlink:\n%s", got)
 	}
 }
 

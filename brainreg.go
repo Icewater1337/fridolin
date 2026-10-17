@@ -21,19 +21,20 @@ type BrainRef struct {
 	Approved *BrainManifest `json:"approved"`
 }
 
-// BrainSpec is a brain ready to run, from either source.
+// BrainSpec is a brain ready to run.
 type BrainSpec struct {
 	Manifest BrainManifest
 	Dir      string // absolute, symlinks resolved
+	// Path is the folder as configured, ~ expanded. The sandbox profiles
+	// cover it as well as Dir, which the brain runs in: a symlink on the
+	// way to the folder, such as ~/assistant on another volume, is one a
+	// brain could swap for its own and so move another brain's folder.
+	Path string
 	// PromptFile is the prompt file relative to Dir. The bridge reads it
 	// through the brain's open folder, which stops a brain from pointing it
 	// at ~/.ssh with a symlink; checking the path here would not, as the
 	// brain can plant one at any time after.
 	PromptFile string
-	// OutsidePrompt is an inline brain's prompt_file when that is outside
-	// its folder, read as configured; PromptFile is "" then.
-	OutsidePrompt string
-	Source        string // "inline" or "folder"
 }
 
 // BrainIssue is a problem with one configured brain, shown on the dashboard.
@@ -47,35 +48,12 @@ type BrainIssue struct {
 	atLoad bool
 }
 
-// ResolveBrains turns the configuration into runnable brains: inline brains
-// first, then brain folders. A folder that is also configured inline is used
-// once (the folder entry wins). Brains with problems are left out and
-// reported, so one broken folder never takes the others down.
+// ResolveBrains turns the brain folders in the configuration into runnable
+// brains. Brains with problems are left out and reported, so one broken
+// folder never takes the others down.
 func ResolveBrains(cfg *Config) ([]BrainSpec, []BrainIssue) {
 	var specs []BrainSpec
 	var issues []BrainIssue
-	seenDir := map[string]int{}
-
-	add := func(s BrainSpec) {
-		if i, ok := seenDir[s.Dir]; ok {
-			specs[i] = s
-			return
-		}
-		seenDir[s.Dir] = len(specs)
-		specs = append(specs, s)
-	}
-
-	for _, b := range cfg.Brains {
-		dir := canonicalDir(b.WorkDir)
-		m := ManifestFromInline(b)
-		s := BrainSpec{Manifest: m, Dir: dir, Source: "inline"}
-		if rel, err := filepath.Rel(b.WorkDir, b.PromptFile); err == nil && filepath.IsLocal(rel) {
-			s.PromptFile = rel
-		} else {
-			s.OutsidePrompt = b.PromptFile
-		}
-		add(s)
-	}
 
 	for _, ref := range cfg.BrainDirs {
 		dir := canonicalDir(ref.Path)
@@ -99,7 +77,7 @@ func ResolveBrains(cfg *Config) ([]BrainSpec, []BrainIssue) {
 		}
 		// Validate kept prompt_file inside the folder; the folder's os.Root
 		// keeps it there when the bridge reads it.
-		add(BrainSpec{Manifest: m, Dir: dir, PromptFile: m.PromptFile, Source: "folder"})
+		specs = append(specs, BrainSpec{Manifest: m, Dir: dir, Path: filepath.Clean(ref.Path), PromptFile: m.PromptFile})
 	}
 
 	// Drop brains that clash with an earlier one rather than refusing to run.
@@ -115,9 +93,9 @@ func ResolveBrains(cfg *Config) ([]BrainSpec, []BrainIssue) {
 }
 
 // ValidateBrainSet checks brains against each other: unique ids, every group
-// owned by one brain, at most one DM brain and one default, no brain folder
-// inside another (sandbox profiles deny other brains' folders, so a nested
-// brain could not read itself).
+// owned by one brain, at most one DM brain and one default, no two brains in
+// one folder and no brain folder inside another (sandbox profiles deny other
+// brains' folders, so a nested brain could not read itself).
 func ValidateBrainSet(specs []BrainSpec) error {
 	ids := map[string]string{}
 	groups := map[string]string{}
@@ -149,7 +127,11 @@ func ValidateBrainSet(specs []BrainSpec) error {
 	}
 	for i, a := range specs {
 		for j, b := range specs {
-			if i != j && isWithin(b.Dir, a.Dir) {
+			switch {
+			case i == j:
+			case a.Dir == b.Dir:
+				return fmt.Errorf("brains %q and %q use the same folder %s", a.Manifest.ID, b.Manifest.ID, a.Dir)
+			case isWithin(b.Dir, a.Dir):
 				return fmt.Errorf("brain folder %s is inside brain folder %s", b.Dir, a.Dir)
 			}
 		}
@@ -219,29 +201,18 @@ func isWithin(p, dir string) bool {
 	return rel == "." || (rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)))
 }
 
-// UpdateManifest changes one brain's manifest: brain.json in its folder and
-// the approved copy in the config, together, so the change is not reported
-// as drift. A brain still configured inline is moved to its folder first.
+// UpdateManifest changes one brain's manifest, see updateManifestIn.
 func (cs *ConfigStore) UpdateManifest(id string, mutate func(m *BrainManifest) error) error {
 	_, err := cs.Update("", func(c *Config) error { return updateManifestIn(c, id, mutate) })
 	return err
 }
 
+// updateManifestIn changes brain id's manifest in c: mutate edits a copy of
+// the approved one, which goes to brain.json in the brain's folder and
+// becomes the approved copy, together, so the change is not reported as
+// drift. It is the one way the bridge changes a manifest; an error from
+// mutate leaves both as they were.
 func updateManifestIn(c *Config, id string, mutate func(m *BrainManifest) error) error {
-	for i, bc := range c.Brains {
-		if bc.Name == id {
-			home, _ := os.UserHomeDir()
-			eff := bc
-			eff.WorkDir = expandHome(bc.WorkDir, home)
-			if eff.PromptFile == "" {
-				eff.PromptFile = filepath.Join(eff.WorkDir, "brain-prompt.md")
-			}
-			m := ManifestFromInline(eff)
-			c.Brains = append(c.Brains[:i], c.Brains[i+1:]...)
-			c.BrainDirs = append(c.BrainDirs, BrainRef{Path: bc.WorkDir, Approved: &m})
-			break
-		}
-	}
 	for i := range c.BrainDirs {
 		ref := &c.BrainDirs[i]
 		if ref.Approved == nil || ref.Approved.ID != id {
