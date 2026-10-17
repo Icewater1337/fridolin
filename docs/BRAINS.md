@@ -110,6 +110,9 @@ sandbox: Claude Code's settings, hooks, `CLAUDE.md`, skills and plugins
 (which every other brain loads too), the `CLAUDE.md` files and `.claude`
 folders above brain folders, Claude Code's auto-memory,
 `~/Library/LaunchAgents`, your shell startup files, and the bridge's own
-binary and the tools it runs. Its own folder is always readable and
+binary and the tools it runs. It can still write most other places your
+user can, including the Claude Code state all brains share;
+[the sandbox section](CONFIGURATION.md#what-the-sandbox-does-not-cover-yet)
+lists what that leaves open. Its own folder is always readable and
 writable, even if it lives somewhere the defaults deny. A run that cannot be
 sandboxed is refused, never run without it.

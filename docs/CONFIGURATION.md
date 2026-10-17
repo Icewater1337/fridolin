@@ -312,6 +312,54 @@ rather than eliminating it. Linux has no `sandbox-exec`: the bridge refuses a
 config with `sandbox.enabled` on there (the Linux default is off). Run the
 bridge as a dedicated user instead.
 
+### What the sandbox does not cover yet
+
+The profile allows everything it does not deny, and writing is denied only
+for the paths listed above. A manipulated brain can therefore still:
+
+- write anywhere else your user can: other projects in your home folder
+  (their `.claude/settings.json`, `.mcp.json`, `CLAUDE.md`, `.git/hooks`),
+  scripts your Claude Code settings run from outside `~/.claude/hooks`,
+  files a protected `CLAUDE.md` imports with `@path`, what your protected
+  shell startup files source or run (such as `~/.nvm/nvm.sh`,
+  `~/.oh-my-zsh`, `~/.p10k.zsh`, or a `ZDOTDIR` like `~/.config/zsh`), the
+  scripts and programs a `claude_path` wrapper script runs or sources
+  (only the wrapper itself is protected, and the bridge runs it outside
+  the sandbox for the dashboard's `claude --version`), a new program in a
+  folder on your `PATH` that shadows another one (other than the names the
+  bridge runs, in folders under your home folder), and programs outside
+  your home folder such as `/opt/homebrew` (user-writable on Apple Silicon)
+  and `/usr/local`, including a `plaud`, `rclone` or `node` there that the
+  bridge would run next, since launchd's `PATH` lists them first
+- leave files in its own folder that run or load when you work there
+  yourself, outside the sandbox: git hooks and settings in `.git/`
+  (`hooks/`, `core.fsmonitor`, `core.hooksPath`), a `.envrc` for direnv,
+  and its own `.claude/settings.json` (hooks), `.mcp.json` and `CLAUDE.md`
+  for a Claude Code session you start there. Check them before you open a
+  shell, git or Claude Code in a brain's folder.
+- change the Claude Code state the CLI writes on every run, which all brains
+  and your own sessions share: `~/.claude.json` (including the MCP servers
+  every session starts), other sessions' transcripts in `~/.claude/projects`
+  (it can add to them, not read or move them), `~/.claude/shell-snapshots`
+  and `~/.claude/session-env` (sourced into running sessions' shell
+  commands), and the small per-process files in `~/.claude/sessions`,
+  which it can also move and then read
+- create a folder in `~/.claude/projects` for a project that has none yet as
+  a symlink into its own folder, which would give that project's sessions
+  an auto-memory the brain wrote
+- create a folder above a denied path that does not exist yet, for example a
+  missing `~/.config`, as a symlink into its own folder, so that what other
+  programs later write there lands with the brain (pinned from the next run)
+- ask launchd (`launchctl`), cron (`crontab`), `at`, LaunchServices
+  (`open`), another app (`osascript`) or a tmux server that runs outside
+  the sandbox (the activity viewer's, or your own) to start a program
+  (`tmux run-shell`), which then runs outside the sandbox
+- see the bridge's whole environment, write to the shared media inbox, and
+  reach the network
+
+Later changes give each brain its own Claude Code state folder and make
+writes deny-by-default.
+
 ---
 
 ## Runtime
@@ -432,7 +480,11 @@ sentence boundaries and numbered `[1/3]`.
 
 Opens a tmux session per brain, tailing its activity log, in a Terminal window
 (macOS). Off by default. Handy while tuning a prompt; noisy otherwise. Requires
-tmux — without it the bridge logs a warning and carries on.
+tmux — without it the bridge logs a warning and carries on. The bridge starts
+these sessions on tmux's default server, outside the sandbox, and any brain can
+send that server commands (`tmux run-shell`), which then run unsandboxed. The
+same goes for a tmux you run yourself; see
+[what the sandbox does not cover yet](#what-the-sandbox-does-not-cover-yet).
 
 ### `log_level` *(restart)*
 

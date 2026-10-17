@@ -365,7 +365,14 @@ What the bridge does about it:
 What it does not do:
 
 - The sandbox is containment, not a jail. It raises the cost of a prompt
-  injection; it does not stop code execution.
+  injection; it does not stop code execution. It denies writing only where
+  listed, so a brain can still write elsewhere in your home folder,
+  including the Claude Code state all brains and your own sessions share
+  (`~/.claude.json` and its MCP servers) and the files your shell startup
+  files load (such as `~/.nvm/nvm.sh`), and it can ask launchd, `crontab`,
+  `at`, `open`, `osascript` or a running tmux server (the activity viewer's,
+  or your own) to start a program outside the sandbox. See
+  [what the sandbox does not cover yet](docs/CONFIGURATION.md#what-the-sandbox-does-not-cover-yet).
 - Classic mode (`brain_mode` off) runs Claude without the sandbox.
 - On Linux there is no sandbox layer at all (the bridge refuses to start with
   `sandbox.enabled` on). Run the bridge as a dedicated user.
