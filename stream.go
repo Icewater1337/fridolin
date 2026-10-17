@@ -40,6 +40,9 @@ type askQuestion struct {
 }
 
 // extractAskQuestion pulls the question text out of an AskUserQuestion input.
+// A question that is blank is left out: once anything is forwarded, the
+// run's final reply is not sent, so a blank one would leave the chat with
+// an empty message and no answer.
 func extractAskQuestion(raw json.RawMessage) string {
 	if len(raw) == 0 {
 		return ""
@@ -50,9 +53,12 @@ func extractAskQuestion(raw json.RawMessage) string {
 	}
 	var parts []string
 	for _, q := range ask.Questions {
-		text := q.Question
-		if q.Header != "" && q.Header != q.Question {
-			text = q.Header + ": " + text
+		text, header := strings.TrimSpace(q.Question), strings.TrimSpace(q.Header)
+		if text == "" {
+			continue
+		}
+		if header != "" && header != text {
+			text = header + ": " + text
 		}
 		parts = append(parts, text)
 	}

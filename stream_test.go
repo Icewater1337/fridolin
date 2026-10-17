@@ -19,6 +19,8 @@ func TestExtractAskQuestion(t *testing.T) {
 		{"header in front", `{"questions":[{"header":"Meeting","question":"Which day suits you?"}]}`, "Meeting: Which day suits you?"},
 		{"header that repeats the question", `{"questions":[{"header":"Which day?","question":"Which day?"}]}`, "Which day?"},
 		{"one line per question", `{"questions":[{"question":"Which day?"},{"header":"Time","question":"Morning or afternoon?"}]}`, "Which day?\nTime: Morning or afternoon?"},
+		{"only blank questions", `{"questions":[{},{"header":"Time","question":" "}]}`, ""},
+		{"blank question left out", `{"questions":[{"question":""},{"header":" ","question":" Which day? "}]}`, "Which day?"},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -44,6 +46,24 @@ func TestParseStreamForwardsAskUserQuestion(t *testing.T) {
 	}
 	if want := []string{"chat Meeting: Which day suits you?"}; strings.Join(sent, "|") != strings.Join(want, "|") {
 		t.Errorf("sent %q mid-run, want %q", sent, want)
+	}
+}
+
+// An AskUserQuestion with nothing to ask sends nothing, and the reply still
+// goes out.
+func TestParseStreamSkipsBlankQuestions(t *testing.T) {
+	br := bareBrain(t)
+	var sent []string
+	br.hooks = &BrainHooks{Intermediate: func(jid, text string) { sent = append(sent, text) }}
+	stream := `{"type":"assistant","message":{"content":[{"type":"tool_use","name":"AskUserQuestion","input":{"questions":[{},{"question":" "}]}}]}}
+{"type":"result","result":"Done."}
+`
+	res := br.parseStream("chat", strings.NewReader(stream))
+	if res.Err != nil || res.AlreadySent || res.Text != "Done." {
+		t.Errorf("result = %+v, want the reply", res)
+	}
+	if len(sent) != 0 {
+		t.Errorf("sent %q mid-run, want nothing", sent)
 	}
 }
 
