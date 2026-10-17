@@ -41,8 +41,11 @@ type SandboxProfiler struct {
 
 	enabled bool
 
-	// workDirs maps brain id → work dir, so each profile can deny the others.
-	workDirs map[string]string
+	// workDirs maps brain id → its folder, by the real path the bridge runs
+	// the brain in and by the path as configured where that differs (see
+	// BrainSpec.Path), so that each profile allows its own folder and
+	// denies the others' both ways.
+	workDirs map[string][]string
 
 	// dataDir is the bridge's runtime dir, denied wholesale except for media.
 	dataDir  string
@@ -85,7 +88,7 @@ type SandboxProfiler struct {
 }
 
 // NewSandboxProfiler builds a profiler for the configured brains.
-func NewSandboxProfiler(workDirs map[string]string, cfg *Config) *SandboxProfiler {
+func NewSandboxProfiler(workDirs map[string][]string, cfg *Config) *SandboxProfiler {
 	sp := &SandboxProfiler{execPath: sandboxExecPath}
 	if exe, err := os.Executable(); err == nil {
 		sp.bridgeExe = exe
@@ -96,10 +99,11 @@ func NewSandboxProfiler(workDirs map[string]string, cfg *Config) *SandboxProfile
 
 // Update replaces the brain set and settings. Profiles are built per run,
 // so the next run of every brain picks the change up.
-func (sp *SandboxProfiler) Update(workDirs map[string]string, cfg *Config) {
-	wd := make(map[string]string, len(workDirs))
+func (sp *SandboxProfiler) Update(workDirs map[string][]string, cfg *Config) {
+	wd := make(map[string][]string, len(workDirs))
 	for k, v := range workDirs {
-		wd[k] = v
+		// Made absolute, "" would be the bridge's working directory.
+		wd[k] = slices.DeleteFunc(slices.Clone(v), func(d string) bool { return d == "" })
 	}
 	sp.mu.Lock()
 	defer sp.mu.Unlock()
@@ -258,8 +262,10 @@ func (sp *SandboxProfiler) Profile(brainID string) (string, error) {
 	}
 	sort.Strings(ids)
 	for _, id := range ids {
-		if dir := sp.workDirs[id]; dir != "" && (isWithin(home, dir) || isWithin(resolvePath(home), resolvePath(dir))) {
-			return "", fmt.Errorf("brain %s: its folder %s is your home folder or holds it, which the sandbox cannot protect; give the brain a folder of its own", id, dir)
+		for _, dir := range sp.workDirs[id] {
+			if isWithin(home, dir) || isWithin(resolvePath(home), resolvePath(dir)) {
+				return "", fmt.Errorf("brain %s: its folder %s is your home folder or holds it, which the sandbox cannot protect; give the brain a folder of its own", id, dir)
+			}
 		}
 	}
 
@@ -434,11 +440,7 @@ func (sp *SandboxProfiler) Profile(brainID string) (string, error) {
 	// them again; inherit_claude_user_config does.
 	if !sp.inheritUser {
 		b.WriteString(";; Your Claude Code instructions above this brain's folder\n")
-		var above []string
-		if own := sp.workDirs[brainID]; own != "" {
-			above = foldersAbove(own)
-		}
-		for _, dir := range above {
+		for _, dir := range foldersAbove(sp.workDirs[brainID]...) {
 			for _, f := range instructionFiles {
 				b.deny("file-read*", "literal", filepath.Join(dir, f))
 				b.deny("file-write*", "literal", filepath.Join(dir, f))
@@ -460,10 +462,10 @@ func (sp *SandboxProfiler) Profile(brainID string) (string, error) {
 	// After the allow_paths allows, like the bridge's data below, so that
 	// an entry covering the folder that holds the brains (~/assistant, say)
 	// cannot open them again.
-	others := make([]string, 0, len(sp.workDirs))
-	for id, dir := range sp.workDirs {
-		if id != brainID && dir != "" {
-			others = append(others, dir)
+	var others []string
+	for id, dirs := range sp.workDirs {
+		if id != brainID {
+			others = append(others, dirs...)
 		}
 	}
 	sort.Strings(others)
@@ -562,18 +564,27 @@ func (sp *SandboxProfiler) Profile(brainID string) (string, error) {
 	// written again after it, in order. A folder that is itself denied,
 	// other than a deny_paths entry, is refused: opening it would give the
 	// brain what it protects.
-	if own := sp.workDirs[brainID]; own != "" {
+	if own := sp.workDirs[brainID]; len(own) > 0 {
 		before := b.rules
 		b.WriteString(";; This brain's own folder\n")
-		owns := b.allow("file-read*", "subpath", own)
-		b.allow("file-write*", "subpath", own)
+		// Both ways: allow follows no symlink, and the brain runs in the
+		// real path, which a folder linked from a default-denied one, such
+		// as ~/assistant → ~/Documents/assistant, would otherwise leave
+		// denied.
+		var owns, pins []string
+		for _, dir := range own {
+			owns = append(owns, b.allow("file-read*", "subpath", dir)...)
+			b.allow("file-write*", "subpath", dir)
+		}
 		// The folder itself stays put, in every spelling. A brain that moved
 		// it aside and left a symlink in its place pointed it at another
 		// brain's folder, whose profile then failed (its folder had become
 		// one this profile denies), or at HOME, which failed every profile;
 		// and the bridge, outside the sandbox, followed the link to read and
 		// write what it keeps there for this brain.
-		pins := b.spellings(own, true)
+		for _, dir := range own {
+			pins = append(pins, b.spellings(dir, true)...)
+		}
 		for _, s := range pins {
 			b.emit(rulePin, "deny file-write*", "literal", s, s)
 		}
@@ -581,7 +592,7 @@ func (sp *SandboxProfiler) Profile(brainID string) (string, error) {
 		for _, r := range before {
 			switch {
 			case r.kind == ruleDeny && slices.Contains(owns, r.path):
-				return "", fmt.Errorf("brain %s: its folder %s is one the sandbox keeps from brains; give the brain a folder of its own", brainID, own)
+				return "", fmt.Errorf("brain %s: its folder %s is one the sandbox keeps from brains; give the brain a folder of its own", brainID, r.path)
 			case r.kind == rulePin && slices.Contains(pins, r.path):
 				// Pinned just above.
 			case withinAny(r.path, owns) && (r.kind == rulePin || !slices.Contains(owns, r.path)):
@@ -605,20 +616,23 @@ func (sp *SandboxProfiler) Profile(brainID string) (string, error) {
 // memoryFolders returns the folders above every brain's folder whose
 // memory files and .claude/ Claude Code loads for the brains below: up to
 // and including HOME (either spelling), or up to / for a folder outside
-// HOME, and HOME itself, which your own sessions load. The brain's own
-// folder is its own to write, so it is left out when it holds another one.
-func memoryFolders(workDirs map[string]string, brainID string, homes []string) []string {
-	own := ""
-	if dir := workDirs[brainID]; dir != "" {
-		own = resolvePath(dir)
+// HOME, and HOME itself, which your own sessions load. They are walked
+// up from each spelling of a brain's folder, as configured and its real
+// path, which differ below a symlink, and each spelling of a folder comes
+// once. The brain's own folder is its own to write, so it is left out
+// when it holds another one.
+func memoryFolders(workDirs map[string][]string, brainID string, homes []string) []string {
+	var own []string
+	for _, dir := range workDirs[brainID] {
+		own = append(own, resolvePath(dir))
 	}
 	seen := map[string]bool{}
 	var out []string
 	walk := func(dir string) {
 		for {
-			if real := resolvePath(dir); !seen[real] {
-				seen[real] = true
-				if real != own {
+			if !seen[dir] {
+				seen[dir] = true
+				if !slices.Contains(own, resolvePath(dir)) {
 					out = append(out, dir)
 				}
 			}
@@ -629,8 +643,8 @@ func memoryFolders(workDirs map[string]string, brainID string, homes []string) [
 		}
 	}
 	walk(homes[0])
-	for _, dir := range workDirs {
-		if dir != "" {
+	for _, dirs := range workDirs {
+		for _, dir := range dirs {
 			walk(filepath.Dir(filepath.Clean(dir)))
 		}
 	}
@@ -638,14 +652,18 @@ func memoryFolders(workDirs map[string]string, brainID string, homes []string) [
 	return out
 }
 
-// foldersAbove returns every folder above dir up to /, along its path as
-// configured and along its real path, each folder once: the CLI walks up
-// from the real path of its working directory, which differs below a
+// foldersAbove returns every folder above each of dirs up to /, along its
+// path as given and along its real path, each folder once: the CLI walks
+// up from the real path of its working directory, which differs below a
 // symlink (a brains folder linked from another volume).
-func foldersAbove(dir string) []string {
+func foldersAbove(dirs ...string) []string {
 	seen := map[string]bool{}
 	var out []string
-	for _, start := range []string{absPath(dir), resolvePath(absPath(dir))} {
+	var starts []string
+	for _, dir := range dirs {
+		starts = append(starts, absPath(dir), resolvePath(absPath(dir)))
+	}
+	for _, start := range starts {
 		for d := filepath.Dir(filepath.Clean(start)); ; d = filepath.Dir(d) {
 			if real := resolvePath(d); !seen[real] {
 				seen[real] = true

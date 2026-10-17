@@ -1042,9 +1042,9 @@ func TestSandboxProfileIsolatesBrains(t *testing.T) {
 	t.Setenv("HOME", home)
 
 	cfg := &Config{DataDir: filepath.Join(home, "data")}
-	sp := NewSandboxProfiler(map[string]string{
-		"personal": "/opt/brains/personal",
-		"team":     "/opt/brains/team",
+	sp := NewSandboxProfiler(map[string][]string{
+		"personal": {"/opt/brains/personal"},
+		"team":     {"/opt/brains/team"},
 	}, cfg)
 
 	profile := mustProfile(t, sp, "personal")
@@ -1061,7 +1061,7 @@ func TestSandboxProfileDeniesSecretsAndAllowsKeychain(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 
-	sp := NewSandboxProfiler(map[string]string{"a": "/tmp/a"}, &Config{DataDir: filepath.Join(home, "data")})
+	sp := NewSandboxProfiler(map[string][]string{"a": {"/tmp/a"}}, &Config{DataDir: filepath.Join(home, "data")})
 	profile := mustProfile(t, sp, "a")
 
 	for _, secret := range []string{".ssh", ".aws", ".gnupg", "Library/Mail", ".git-credentials"} {
@@ -1080,7 +1080,7 @@ func TestSandboxProfileScopesCalendarCredentials(t *testing.T) {
 	t.Setenv("HOME", home)
 	dataDir := filepath.Join(home, "data")
 
-	sp := NewSandboxProfiler(map[string]string{"a": "/tmp/a", "b": "/tmp/b"}, &Config{DataDir: dataDir})
+	sp := NewSandboxProfiler(map[string][]string{"a": {"/tmp/a"}, "b": {"/tmp/b"}}, &Config{DataDir: dataDir})
 	profile := mustProfile(t, sp, "a")
 
 	if !strings.Contains(profile, filepath.Join(dataDir, "google_calendar_credentials_a.json")) {
@@ -1099,7 +1099,7 @@ func TestSandboxProfileIncludesConfiguredDenies(t *testing.T) {
 		DataDir: filepath.Join(home, "data"),
 		Sandbox: SandboxConfig{DenyPaths: []string{"/private/clients"}},
 	}
-	profile := mustProfile(t, NewSandboxProfiler(map[string]string{"a": "/tmp/a"}, cfg), "a")
+	profile := mustProfile(t, NewSandboxProfiler(map[string][]string{"a": {"/tmp/a"}}, cfg), "a")
 
 	if !strings.Contains(profile, `(deny file-read* (subpath "/private/clients"))`) {
 		t.Error("configured deny path missing from the profile")

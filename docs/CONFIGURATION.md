@@ -430,15 +430,17 @@ Code instructions above a brain's folder.
 Entries must be absolute or start with `~/`; the bridge refuses a config with
 a relative one, which would protect nothing.
 
-The sandbox compares real paths, so every deny covers both the path as
-configured and the path it reaches through symlinks (a home on another
-volume, a cloud-synced folder, `/var` → `/private/var`). Symlinks are
-resolved again on every run, and a folder that does not exist yet is still
-covered once it is created. Re-allowed paths (`allow_paths`, a brain's own
-folder, media, calendar files) are resolved only where your home, data or
-credentials folder itself is a symlink, never through any other symlink,
-because a brain could plant one to reach something else. If an
-`allow_paths` entry is a symlink or goes through one, list its real path.
+The sandbox compares real paths, so every deny, brain folders included,
+covers both the path as configured and the path it reaches through
+symlinks (a home on another volume, a cloud-synced folder, `/var` →
+`/private/var`). Symlinks are resolved again on every run, and a folder
+that does not exist yet is still covered once it is created. Re-allowed
+paths (`allow_paths`, media, calendar files) are resolved only where your
+home, data or credentials folder itself is a symlink, never through any
+other symlink, because a brain could plant one to reach something else.
+If an `allow_paths` entry is a symlink or goes through one, list its real
+path. A brain's own folder is allowed as configured and at the real path
+the bridge found when it loaded the brains, the one the brain runs in.
 
 A brain's own folder is always readable and writable, even inside a denied
 directory. The brain cannot rename, delete or replace the folder itself,
