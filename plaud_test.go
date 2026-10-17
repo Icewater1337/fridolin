@@ -874,6 +874,39 @@ func TestPlaudTranscriptPathFindsTheEarlierFile(t *testing.T) {
 	}
 }
 
+// "Check now" hands new recordings to a brain, so with sending turned off
+// it is refused, and a poll asked for anyway does nothing.
+func TestPlaudCheckNowNeedsSendingOn(t *testing.T) {
+	tb, fp := plaudBridge(t, "")
+	plaudSignIn(t, tb)
+	if err := tb.plaud.saveState(&plaudState{Account: "u_1", Seen: []string{plaudOld1}, Pending: map[string]float64{}}); err != nil {
+		t.Fatal(err)
+	}
+	fp.files(plaudNew, plaudOld1)
+	fp.recording(plaudNew, true)
+	if w := tb.do("PUT", "/api/plaud/settings", map[string]any{"enabled": false}); w.Code != 200 {
+		t.Fatalf("settings: %d %s", w.Code, w.Body.String())
+	}
+	if w := tb.do("POST", "/api/plaud/sync", nil); w.Code != 409 {
+		t.Errorf("check now with sending off = %d %s, want 409", w.Code, w.Body.String())
+	}
+	if err := tb.plaud.Poll(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	time.Sleep(200 * time.Millisecond)
+	if calls := fp.calls(); calls != "" || tb.plaudForwarded() {
+		t.Fatalf("Plaud was checked with sending off:\n%s", calls)
+	}
+
+	if w := tb.do("PUT", "/api/plaud/settings", map[string]any{"enabled": true}); w.Code != 200 {
+		t.Fatalf("settings: %d %s", w.Code, w.Body.String())
+	}
+	if w := tb.do("POST", "/api/plaud/sync", nil); w.Code != 202 {
+		t.Fatalf("check now = %d %s, want 202", w.Code, w.Body.String())
+	}
+	waitFor(t, 10*time.Second, "brain reply", func() bool { return len(tb.dev.Outbox()) > 0 })
+}
+
 func TestPlaudBrainAccessSharesTheLogin(t *testing.T) {
 	tb, fp := plaudBridge(t, `, "brain_access": true`)
 	fp.files()

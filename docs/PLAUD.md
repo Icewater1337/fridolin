@@ -25,6 +25,9 @@ so recordings from before you connected are still not sent. Signing in
 with a different Plaud account starts over the same way. Signing in again
 with the same account, after the login expired say, picks up where it left
 off: what you recorded in between still arrives (up to the latest 20).
+Turning **Send new recordings to a brain** off and on again does the same:
+nothing is checked while it is off, so what you recorded meanwhile is sent
+once it is back on (up to the latest 20).
 
 ## What happens
 
@@ -84,7 +87,7 @@ Fridolin runs Plaud's tool with its usage statistics turned off
 
 | `plaud.` | Default | |
 | --- | --- | --- |
-| `enabled` | `false` | check for new recordings |
+| `enabled` | `false` | check for new recordings and hand them over; **Check now** needs it on |
 | `brain` | DM brain | brain id that receives recordings |
 | `interval_seconds` | `60` | at least 30 |
 | `polished` | `false` | use Plaud's AI-cleaned transcript |

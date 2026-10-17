@@ -509,8 +509,12 @@ func (p *PlaudManager) saveState(st *plaudState) error {
 
 // Poll checks for new recordings once. The first poll for an account only
 // remembers what already exists, so connecting never floods a brain with
-// old recordings.
+// old recordings. With "Send new recordings to a brain" off (plaud.enabled)
+// it does nothing, whoever asks.
 func (p *PlaudManager) Poll(ctx context.Context) error {
+	if !p.cfg().Plaud.Enabled {
+		return nil
+	}
 	p.mu.Lock()
 	if p.busy {
 		p.mu.Unlock()
@@ -943,6 +947,10 @@ func (b *Bridge) apiPlaudSettings(w http.ResponseWriter, r *http.Request) {
 func (b *Bridge) apiPlaudSync(w http.ResponseWriter, r *http.Request) {
 	if !b.plaud.connected() {
 		writeErr(w, http.StatusPreconditionFailed, "Plaud is not connected")
+		return
+	}
+	if !b.cfgs.Get().Plaud.Enabled {
+		writeErr(w, http.StatusConflict, "Turn on “Send new recordings to a brain” first: a check hands new recordings to the brain")
 		return
 	}
 	go func() {

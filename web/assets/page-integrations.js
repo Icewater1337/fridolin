@@ -108,14 +108,15 @@ export default {
         s.last_error && !s.expired && s.last_error !== s.summary_error ? callout('warn', 'Last check failed', s.last_error) : null,
         facts.length ? h('div.facts', facts) : null,
         h('div.settings-fields',
-          field({ control: enabled, help: `Every ${every(st.interval_seconds || 60)} Fridolin looks for new recordings and waits until Plaud has transcribed them. The first check — also the first after signing in with another Plaud account — only remembers what already exists, so old recordings are not sent.` }),
+          field({ control: enabled, help: `Every ${every(st.interval_seconds || 60)} Fridolin looks for new recordings and waits until Plaud has transcribed them. The first check — also the first after signing in with another Plaud account — only remembers what already exists, so old recordings are not sent. Recordings made while this is off are sent when you turn it back on (up to the latest 20).` }),
           field({ label: 'Brain', control: brainSel, help: 'Recordings run in this brain. Its answer is private: it goes to the brain’s reply chat when that is a direct chat, otherwise to your DM — never to a group.' }),
           field({ control: polished }),
           field({ control: access, warn: access.input.checked ? 'Brains can read the Plaud login while this is on.' : null, help: h('span', 'On: the login lives in ', mono('~/.plaud/'), ' and brains may run ', mono('plaud search'), ', ', mono('plaud transcript'), ' … themselves. Off: only Fridolin can use it.') }),
           field({ label: 'Instruction sent with each recording', control: msg, wide: true })),
         h('div.actions',
           save,
-          btn('Check now', { icon: 'refresh', onClick: async () => { await post('/api/plaud/sync'); toast('Checking Plaud…', 'ok'); setTimeout(() => poller.kick(), 3000); } }),
+          // A check hands new recordings over, so it is offered only while that is on.
+          st.enabled ? btn('Check now', { icon: 'refresh', onClick: async () => { await post('/api/plaud/sync'); toast('Checking Plaud…', 'ok'); setTimeout(() => poller.kick(), 3000); } }) : null,
           s.expired ? btn('Connect again', { icon: 'external', onClick: async () => { await post('/api/plaud/connect'); poller.kick(); } }) : null,
           btn('Disconnect', {
             kind: 'danger', icon: 'x', small: true,
