@@ -47,21 +47,37 @@ jobs:
           go-version: ${{ matrix.go }}
           cache: true
 
+      # The steps are Makefile targets, so `make check` runs the same.
       - name: gofmt
-        run: |
-          unformatted="$(gofmt -l .)"
-          if [ -n "$unformatted" ]; then
-            echo "These files need gofmt:"; echo "$unformatted"; exit 1
-          fi
+        run: make fmt-check
 
       - name: go vet
-        run: go vet ./...
+        run: make vet
 
       - name: build
-        run: go build ./...
+        run: make build
 
       - name: test
-        run: go test -race -count=1 ./...
+        run: make race
+
+      # Builds the binary with -race in a temp dir, starts it in dev mode on
+      # a scratch config and stops it.
+      - name: smoke test
+        run: make smoke
+
+      # The linters need one Go release, but both systems: some files only
+      # build on one of them.
+      - name: staticcheck
+        if: matrix.go == 'stable'
+        run: make lint-go
+
+      - name: go.mod and go.sum are tidy
+        if: matrix.go == 'stable' && matrix.os == 'ubuntu-latest'
+        run: make tidy-check
+
+      - name: actionlint
+        if: matrix.go == 'stable' && matrix.os == 'ubuntu-latest'
+        run: make lint-actions
 
   fuzz:
     # After a merge only: twenty seconds a target would hold up every pull
@@ -130,7 +146,10 @@ jobs:
           persist-credentials: false
 
       - name: shellcheck
-        run: shellcheck --severity=warning setup.sh scripts/*.sh .githooks/*
+        run: make lint-sh
+
+      - name: personal-data check and Makefile tests
+        run: make test-sh
 
       # The oldest Python the README promises (and the one macOS ships as
       # /usr/bin/python3), so a newer-only feature fails here first.
@@ -138,12 +157,29 @@ jobs:
         with:
           python-version: '3.9'
 
-      - name: python syntax
+      - name: ruff
         run: |
-          python3 -m py_compile tools/*.py tools/tests/*.py
+          python3 -m pip install --disable-pip-version-check -r tools/requirements-dev.txt
+          make lint-py
 
-      - name: python tests
-        run: python3 -m unittest discover -s tools/tests -v
+      - name: python syntax and tests
+        run: make test-py
+
+  web:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: '24'
+
+      # Every dashboard module must parse: one syntax error leaves the whole
+      # dashboard blank. node --test runs web/**/*.test.js once there are any.
+      - name: dashboard modules and unit tests
+        run: make test-web
 
   site:
     # The site process (site/, docs/SITE.md): its own tests, then the Go
@@ -190,6 +226,9 @@ jobs:
         env:
           BEFORE: ${{ github.event.pull_request.base.sha || github.event.before }}
         run: |
+          # Without a usable base, check everything after the root commit.
+          # Not the root commit itself: it predates this check, and what the
+          # check flags in it was removed later (published history stays).
           if [ -z "$BEFORE" ] || ! git cat-file -e "$BEFORE" 2>/dev/null || [ "$BEFORE" = 0000000000000000000000000000000000000000 ]; then
             BEFORE="$(git rev-list --max-parents=0 HEAD | tail -1)"
           fi
