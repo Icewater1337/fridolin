@@ -21,9 +21,9 @@ import { chatEl } from '../components/chat.js';
 import { outcomePill, brainStatusPill } from '../components/brain.js';
 
 export default {
-  title: (params) => `Brain ${params[0] || ''}`,
+  title: (params) => `Brain ${params.id}`,
   render(root, ctx) {
-    const id = ctx.params[0];
+    const id = ctx.params.id;
     const memo = {};
     let brain = null;
     let brains = [];

@@ -15,18 +15,8 @@ import { textInput } from '../components/fields.js';
 import { setChatNames } from '../components/chat.js';
 import { restartBridge } from './restart.js';
 
-import overview from '../pages/overview.js';
-import activity from '../pages/activity.js';
-import brains from '../pages/brains.js';
-import brainDetail from '../pages/brain.js';
-import addBrain from '../pages/add-brain.js';
-import chats from '../pages/chats.js';
-import settings from '../pages/settings.js';
-import backup from '../pages/backup.js';
-import integrations from '../pages/integrations.js';
-import site from '../pages/site.js';
-import logs from '../pages/logs.js';
-import dev from '../pages/dev.js';
+import { ROUTES } from './routes.js';
+import { BRAND, matchRoute, routeHref, activeNav, docTitle } from './router.js';
 
 // ── token from the URL fragment ──────────────────────────────────────────
 
@@ -123,42 +113,6 @@ function resumeAll() {
 
 // ── routing ──────────────────────────────────────────────────────────────
 
-const NAV = [
-  { id: 'overview', label: 'Overview', icon: 'overview' },
-  { id: 'activity', label: 'Activity', icon: 'activity' },
-  { id: 'brains', label: 'Brains', icon: 'brain' },
-  { id: 'chats', label: 'Chats', icon: 'chats' },
-  { id: 'settings', label: 'Settings', icon: 'settings' },
-  { id: 'backup', label: 'Backup', icon: 'backup' },
-  { id: 'integrations', label: 'Integrations', icon: 'inbox' },
-  { id: 'site', label: 'Site', icon: 'external' },
-  { id: 'logs', label: 'Logs', icon: 'terminal' },
-  { id: 'dev', label: 'Dev', icon: 'dev', devOnly: true },
-];
-
-function parseHash() {
-  const raw = location.hash.replace(/^#\/?/, '');
-  const parts = raw.split('/').filter(Boolean).map((p) => { try { return decodeURIComponent(p); } catch { return p; } });
-  return { name: parts[0] || 'overview', params: parts.slice(1) };
-}
-
-function resolvePage(name, params) {
-  switch (name) {
-    case 'overview': return overview;
-    case 'activity': return activity;
-    case 'brains': return params[0] ? brainDetail : brains;
-    case 'add-brain': return addBrain;
-    case 'chats': return chats;
-    case 'settings': return settings;
-    case 'backup': return backup;
-    case 'integrations': return integrations;
-    case 'site': return site;
-    case 'logs': return logs;
-    case 'dev': return dev;
-    default: return null;
-  }
-}
-
 let current = null; // the page context in use
 let shell = null;
 let lastHash = '';
@@ -186,32 +140,42 @@ function makeCtx(params) {
   return ctx;
 }
 
-function renderRoute() {
+async function renderRoute() {
   if (!shell) return;
-  const { name, params } = parseHash();
-  const page = resolvePage(name, params);
+  const match = matchRoute(ROUTES, location.hash);
   if (current) current.destroy();
   closeAllDialogs();
-  const ctx = makeCtx(params);
+  const ctx = makeCtx(match ? match.params : {});
   current = ctx;
-  const root = h('div.page', { 'data-page': name });
+  const root = h('div.page', { 'data-page': match ? match.route.id : 'not-found' });
   mount(shell.page, root);
-  shell.setActive(name === 'add-brain' ? 'brains' : name);
+  shell.setActive(activeNav(match && match.route));
   shell.closeNav();
   window.scrollTo(0, 0);
-  if (!page) {
-    document.title = 'Not found · Bridge';
+  lastHash = location.hash;
+  if (!match) {
+    document.title = docTitle('Not found');
     mount(root, h('div.empty', h('div.empty-title', 'Page not found'), h('p', 'There is nothing at this address.'), btn('Go to the overview', { href: '#/overview', kind: 'primary' })));
     return;
   }
-  document.title = `${typeof page.title === 'function' ? page.title(params) : page.title} · Fridolin`;
+  let page;
+  try {
+    page = (await match.route.load()).default;
+  } catch (e) {
+    if (ctx.dead) return;
+    console.error(e);
+    document.title = docTitle('Error');
+    mount(root, h('div.callout.bad', h('div.callout-body', h('strong', 'This page failed to load'), h('div', e.message || String(e)))));
+    return;
+  }
+  if (ctx.dead) return;
+  document.title = docTitle(typeof page.title === 'function' ? page.title(ctx.params) : page.title);
   try {
     page.render(root, ctx);
   } catch (e) {
     console.error(e);
     mount(root, h('div.callout.bad', h('div.callout-body', h('strong', 'This page failed to load'), h('div', e.message || String(e)))));
   }
-  lastHash = location.hash;
 }
 
 window.addEventListener('hashchange', async () => {
@@ -245,11 +209,12 @@ function buildShell() {
   app.className = 'shell';
   const links = new Map();
   const nav = h('nav.nav', { 'aria-label': 'Main' });
-  for (const item of NAV) {
+  for (const route of ROUTES) {
+    if (!route.nav) continue;
     const badgeEl = h('span.nav-badge', { hidden: true });
-    const a = h('a.nav-link', { href: `#/${item.id}`, hidden: item.devOnly ? true : null }, icon(item.icon), h('span', item.label), badgeEl);
+    const a = h('a.nav-link', { href: routeHref(route), hidden: route.nav.devOnly ? true : null }, icon(route.nav.icon), h('span', route.nav.label), badgeEl);
     a.badgeEl = badgeEl;
-    links.set(item.id, a);
+    links.set(route.id, a);
     nav.appendChild(a);
   }
   const menuBtn = h('button.icon-btn.menu-btn', { type: 'button', 'aria-label': 'Menu', 'aria-expanded': 'false' }, icon('menu'));
@@ -261,7 +226,7 @@ function buildShell() {
     h('div.brand-row',
       h('a.brand', { href: '#/overview' },
         h('img.brand-logo', { src: '/assets/logo-mark.webp', alt: '', width: 34, height: 34 }),
-        h('span.brand-text', h('span.brand-name', 'Fridolin'), h('span.brand-sub', 'WhatsApp × Claude'))),
+        h('span.brand-text', h('span.brand-name', BRAND), h('span.brand-sub', 'WhatsApp × Claude'))),
       h('div.brand-tools', themeButton(), menuBtn)),
     nav,
     h('div.sidebar-foot', waLink, h('div.foot-row', version, themeButton())));

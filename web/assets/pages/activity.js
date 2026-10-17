@@ -12,7 +12,7 @@ export default {
   title: 'Activity',
   render(root, ctx) {
     const memo = {};
-    let brain = ctx.params[0] || '';
+    let brain = ctx.params.brain || '';
     let search = '';
     let items = null;
 
