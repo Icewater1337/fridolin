@@ -923,7 +923,7 @@ func (b *Bridge) apiBackupRun(w http.ResponseWriter, r *http.Request) {
 		// files are gone (see checkMassDeletion).
 		Force bool `json:"force"`
 	}
-	if err := decodeJSON(r, &req); err != nil {
+	if err := decodeOptionalJSON(r, &req); err != nil {
 		writeErr(w, http.StatusBadRequest, err.Error())
 		return
 	}
