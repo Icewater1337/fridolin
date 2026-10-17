@@ -12,7 +12,9 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"runtime"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -37,6 +39,7 @@ func (b *Bridge) apiMux() http.Handler {
 
 	mux.HandleFunc("GET /api/chats/ignored", b.apiIgnored)
 	mux.HandleFunc("POST /api/chats/allow", b.apiAllowChat)
+	mux.HandleFunc("POST /api/chats/revoke", b.apiRevokeChat)
 	mux.HandleFunc("POST /api/chats/dismiss", b.apiDismissChat)
 
 	mux.HandleFunc("GET /api/config", b.apiGetConfig)
@@ -333,62 +336,189 @@ func (b *Bridge) apiIgnored(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, chats)
 }
 
+// The forms allowed_numbers and allowed_groups hold. Every edit of the
+// allow lists goes through allowListNumber and allowListGroup, so the
+// dashboard's add boxes and its Allow buttons agree on what they accept.
+var (
+	phoneNumberRE = regexp.MustCompile(`^[0-9]{6,15}$`)
+	groupJIDRE    = regexp.MustCompile(`^[0-9]+(-[0-9]+)?@g\.us$`)
+)
+
+// allowListNumber is s as allowed_numbers holds it: digits with the country
+// code. It takes the ways people write a number (a +, spaces, dashes,
+// dots, brackets, a WhatsApp JID) and refuses anything else.
+func allowListNumber(s string) (string, error) {
+	n := strings.Map(func(r rune) rune {
+		switch r {
+		case ' ', '\u00a0', '-', '.', '(', ')':
+			return -1
+		}
+		return r
+	}, normalizeJID(s))
+	if !phoneNumberRE.MatchString(n) {
+		return "", fmt.Errorf("%q is not a phone number: use digits with the country code, e.g. 15551234567", strings.TrimSpace(s))
+	}
+	return n, nil
+}
+
+// allowListGroup is s as allowed_groups holds it: a group JID.
+func allowListGroup(s string) (string, error) {
+	g := strings.TrimSpace(s)
+	if !groupJIDRE.MatchString(g) {
+		return "", fmt.Errorf("%q is not a group JID: it looks like 120363000000000000@g.us", g)
+	}
+	return g, nil
+}
+
+// chatRequest is what /api/chats/allow and /api/chats/revoke take.
+type chatRequest struct {
+	JID    string `json:"jid"`
+	Kind   string `json:"kind"`   // group or dm
+	Number string `json:"number"` // for dm; the JID's number when empty
+	Brain  string `json:"brain"`  // allow, group: brain to route it to ("" = default brain)
+}
+
+// sent is the entry as the request writes it, trimmed: the group JID, or
+// for a dm the number (the JID when there is none).
+func (req chatRequest) sent() string {
+	if req.Kind == "dm" && strings.TrimSpace(req.Number) != "" {
+		return strings.TrimSpace(req.Number)
+	}
+	return strings.TrimSpace(req.JID)
+}
+
+// listEntry checks the request and returns the allow list it is about and
+// the entry, in the form the list holds.
+func (req chatRequest) listEntry() (dm bool, entry string, err error) {
+	switch req.Kind {
+	case "group":
+		entry, err = allowListGroup(req.sent())
+		return false, entry, err
+	case "dm":
+		entry, err = allowListNumber(req.sent())
+		return true, entry, err
+	default:
+		return false, "", errors.New("kind must be group or dm")
+	}
+}
+
 // apiAllowChat allows a group or number and, for a group, assigns it to a
 // brain — the dashboard version of copying a JID out of the log.
 func (b *Bridge) apiAllowChat(w http.ResponseWriter, r *http.Request) {
-	var req struct {
-		JID    string `json:"jid"`
-		Kind   string `json:"kind"`   // group or dm
-		Number string `json:"number"` // for dm
-		Brain  string `json:"brain"`  // group: brain to route it to ("" = default brain)
-	}
+	var req chatRequest
 	if err := decodeJSON(r, &req); err != nil {
 		writeErr(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	switch req.Kind {
-	case "group":
-		if !strings.HasSuffix(req.JID, "@g.us") {
-			writeErr(w, http.StatusBadRequest, "not a group JID")
-			return
-		}
-		_, err := b.cfgs.Update("", func(c *Config) error {
-			if !contains(c.AllowedGroups, req.JID) {
-				c.AllowedGroups = append(c.AllowedGroups, req.JID)
-			}
-			if req.Brain == "" {
-				return nil
-			}
-			return assignGroup(c, req.JID, req.Brain)
-		})
-		if err != nil {
-			writeErr(w, http.StatusUnprocessableEntity, err.Error())
-			return
-		}
-	case "dm":
-		num := normalizeJID(req.Number)
-		if num == "" {
-			num = normalizeJID(req.JID)
-		}
-		if num == "" {
-			writeErr(w, http.StatusBadRequest, "number required")
-			return
-		}
-		if _, err := b.cfgs.Update("", func(c *Config) error {
-			if !contains(c.AllowedNumbers, num) {
-				c.AllowedNumbers = append(c.AllowedNumbers, num)
-			}
-			return nil
-		}); err != nil {
-			writeErr(w, http.StatusUnprocessableEntity, err.Error())
-			return
-		}
-	default:
-		writeErr(w, http.StatusBadRequest, "kind must be group or dm")
+	dm, entry, err := req.listEntry()
+	if err != nil {
+		writeErr(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	_ = b.store.DismissIgnored(req.JID, true)
-	writeJSON(w, http.StatusOK, map[string]string{"status": "allowed"})
+	_, err = b.cfgs.Update("", func(c *Config) error {
+		if dm {
+			if !contains(c.AllowedNumbers, entry) {
+				c.AllowedNumbers = append(c.AllowedNumbers, entry)
+			}
+			return nil
+		}
+		if !contains(c.AllowedGroups, entry) {
+			c.AllowedGroups = append(c.AllowedGroups, entry)
+		}
+		if req.Brain == "" {
+			return nil
+		}
+		return assignGroup(c, entry, req.Brain)
+	})
+	if err != nil {
+		writeErr(w, http.StatusUnprocessableEntity, err.Error())
+		return
+	}
+	// The chat no longer waits for access, also when it was typed in.
+	waiting := entry
+	if dm {
+		waiting = req.JID
+		if waiting == "" {
+			waiting = entry + "@s.whatsapp.net"
+		}
+	}
+	_ = b.store.DismissIgnored(waiting, true)
+	writeJSON(w, http.StatusOK, map[string]string{"status": "allowed", "entry": entry})
+}
+
+// errNotListed means the entry to revoke is not on its allow list.
+var errNotListed = errors.New("not on the allow list")
+
+// apiRevokeChat takes a number off allowed_numbers or a group off
+// allowed_groups. A group keeps its place in a brain's routing, so allowing
+// it again sends it to the same brain. Nothing on the list to remove is a
+// 404, also for an entry the checks refuse, so the dashboard neither
+// reports a removal that did not happen nor an error for one that
+// happened elsewhere.
+func (b *Bridge) apiRevokeChat(w http.ResponseWriter, r *http.Request) {
+	var req chatRequest
+	if err := decodeJSON(r, &req); err != nil {
+		writeErr(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	// An entry the bridge would refuse may still be on the list as it is
+	// stored; only an unknown kind or no entry at all is refused at once.
+	dm, entry, invalid := req.listEntry()
+	if (req.Kind != "group" && req.Kind != "dm") || req.sent() == "" {
+		writeErr(w, http.StatusBadRequest, invalid.Error())
+		return
+	}
+	canon, name := allowListGroup, "allowed_groups"
+	if dm {
+		canon, name = allowListNumber, "allowed_numbers"
+	}
+	var removed []string
+	_, err := b.cfgs.Update("", func(c *Config) error {
+		list := &c.AllowedGroups
+		if dm {
+			list = &c.AllowedNumbers
+		}
+		var kept []string
+		kept, removed = revokeEntry(*list, req.sent(), entry, invalid == nil, canon)
+		if len(removed) == 0 {
+			return errNotListed
+		}
+		*list = kept
+		return nil
+	})
+	switch {
+	case errors.Is(err, errNotListed):
+		writeErr(w, http.StatusNotFound, fmt.Sprintf("%s is not in %s", req.sent(), name))
+	case err != nil:
+		writeErr(w, http.StatusUnprocessableEntity, err.Error())
+	default:
+		writeJSON(w, http.StatusOK, map[string]any{"status": "revoked", "removed": removed})
+	}
+}
+
+// revokeEntry splits list into what stays and what revoking sent removes.
+// The entry as it is stored goes first: the dashboard sends what it shows,
+// which may be written by hand in a form the bridge does not take
+// ("+15551234567", a JID with a space). Otherwise every entry that means
+// entry (sent in the list's own form, when it is valid) goes.
+func revokeEntry(list []string, sent, entry string, valid bool, canon func(string) (string, error)) (kept, removed []string) {
+	exact := slices.ContainsFunc(list, func(x string) bool { return strings.TrimSpace(x) == sent })
+	kept = list[:0:0]
+	for _, x := range list {
+		var match bool
+		if exact {
+			match = strings.TrimSpace(x) == sent
+		} else if valid {
+			c, err := canon(x)
+			match = err == nil && c == entry
+		}
+		if match {
+			removed = append(removed, x)
+		} else {
+			kept = append(kept, x)
+		}
+	}
+	return kept, removed
 }
 
 // assignGroup routes a group to a brain, taking it away from any other brain,
