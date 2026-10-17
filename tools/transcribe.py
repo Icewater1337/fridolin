@@ -416,7 +416,8 @@ def main() -> None:
     ap.add_argument("file", help="audio or video file to transcribe")
     ap.add_argument("--output-dir", default="transcripts",
                     help="where to write the transcript and a copy of the media "
-                         "(default: ./transcripts)")
+                         "(default: transcripts in the current folder, which is the "
+                         "brain's own folder when a brain runs this)")
     ap.add_argument("--engine", choices=["auto", "local", "groq"], default="auto",
                     help="auto (default) prefers a local model and falls back to Groq")
     ap.add_argument("--model", default=DEFAULT_MODEL,
