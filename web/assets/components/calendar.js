@@ -13,7 +13,7 @@ import { pill, callout, mono, loading } from './common.js';
 const CONSOLE = 'https://console.cloud.google.com/apis/credentials';
 const ENABLE_API = 'https://console.cloud.google.com/apis/library/calendar-json.googleapis.com';
 
-/** Steps and a paste box for the Google OAuth client. onSaved() runs after a successful save. */
+/** Steps and a paste box for the Google OAuth client. onSaved() runs (and is awaited) after a successful save. */
 export function googleClientSetup({ redirectUri, onSaved, compact = false } = {}) {
   const area = h('textarea.mono', {
     id: nextId('gclient'), rows: compact ? 4 : 6, spellcheck: 'false', autocomplete: 'off',
@@ -33,7 +33,7 @@ export function googleClientSetup({ redirectUri, onSaved, compact = false } = {}
       area.value = '';
       toast('Google client saved', 'ok');
       if (r && r.note) toast(r.note, 'warn', { timeout: 15000 });
-      if (onSaved) onSaved(r);
+      if (onSaved) await onSaved(r);
     },
   });
   return h('div.stack',
@@ -75,7 +75,7 @@ export function googleClientCard({ signal } = {}) {
         });
         if (!ok) return;
         await del('/api/google/client');
-        refresh();
+        await refresh();
       },
     });
     let replacing = false;
@@ -104,6 +104,7 @@ export function calendarCard(brainId, { signal } = {}) {
   let selection = null; // Set of calendar ids being edited
   let dflt = '';
 
+  // Buttons await it, so they stay busy until the card shows the result.
   async function refresh() {
     const s = await get(`/api/brains/${encodeURIComponent(brainId)}/calendar`, { signal });
     render(s);
@@ -169,7 +170,7 @@ export function calendarCard(brainId, { signal } = {}) {
         await put(`/api/brains/${encodeURIComponent(brainId)}/calendar`, { account: s.account, calendars: list, default: dflt });
         toast('Calendars saved', 'ok');
         selection = null;
-        refresh();
+        await refresh();
       },
     });
     const disconnectBtn = btn('Disconnect', {
@@ -183,7 +184,7 @@ export function calendarCard(brainId, { signal } = {}) {
         if (!ok) return;
         await del(`/api/brains/${encodeURIComponent(brainId)}/calendar`);
         selection = null;
-        refresh();
+        await refresh();
       },
     });
     mount(el,

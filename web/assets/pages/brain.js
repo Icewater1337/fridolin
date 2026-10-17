@@ -54,7 +54,13 @@ export default {
 
     ctx.dirty = () => formDirty;
 
-    get('/api/config', { signal: ctx.signal }).then((c) => { cfg = c; if (brain && !formDirty) renderForm(true); }).catch(() => {});
+    // The form shows the inherited model, effort and groups from the config.
+    // Until it loads, the poll retries it (and says why it fails).
+    const cfgPoll = ctx.poll(async (signal) => {
+      cfg = await get('/api/config', { signal });
+      cfgPoll.stop();
+      if (brain && !formDirty) renderForm(true);
+    }, 3000);
 
     const poller = ctx.poll(async (signal) => {
       const list = await get('/api/brains', { signal });

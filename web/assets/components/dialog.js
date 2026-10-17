@@ -5,11 +5,6 @@ import { h, append } from '../lib/dom.js';
 import { icon } from './icons.js';
 import { btn, runBusy } from './buttons.js';
 
-/**
- * openDialog({title, body, actions: [{label, kind, value, onClick}]})
- * resolves with the clicked action's value (or its onClick result), or null
- * when dismissed. onClick may return false to keep the dialog open.
- */
 const openDialogs = new Set();
 
 /** Closes every open dialog (used when the page changes). */
@@ -17,6 +12,13 @@ export function closeAllDialogs() {
   [...openDialogs].forEach((fn) => fn(null));
 }
 
+/**
+ * openDialog({title, body, actions: [{label, kind, value, onClick}]}) resolves
+ * with the clicked action's value (its label if it has none), or null when
+ * dismissed. An action with onClick(dialog) shows a spinner while it runs
+ * and closes the dialog with what it resolves to; when that is false or
+ * undefined, or it throws (shown as a toast), the dialog stays open.
+ */
 export function openDialog({ title, body, actions = [{ label: 'Close', value: null }], wide = false, dismissible = true }) {
   let finishFn = null;
   const promise = new Promise((resolve) => {
