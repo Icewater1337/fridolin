@@ -654,6 +654,132 @@ func TestPlaudExpiredLoginNotifiesOncePerDay(t *testing.T) {
 	}
 }
 
+// plaudRecordLogin records Fridolin's sign-in in st, as a finished sign-in
+// does.
+func plaudRecordLogin(tb *testBridge, st *plaudState) *plaudState {
+	st.Login = &plaudLogin{Dir: tb.plaud.cliHome(), Since: time.Now()}
+	return st
+}
+
+// Plaud's CLI deletes a login that expired. Fridolin remembers it signed
+// in, so the card says the login expired rather than that it never was
+// connected, and the chat keeps getting its daily notice, without any CLI
+// call, until you connect again or disconnect.
+func TestPlaudExpiredLoginKeepsNotifying(t *testing.T) {
+	tb, fp := plaudBridge(t, "")
+	plaudSignIn(t, tb)
+	if err := tb.plaud.saveState(plaudRecordLogin(tb, plaudSeededState("u_1", plaudOld1))); err != nil {
+		t.Fatal(err)
+	}
+	fp.files(plaudOld1)
+	fp.write("expired", "")
+	ctx := context.Background()
+	past := time.Now().Add(-time.Second)
+	notices := func() int {
+		n := 0
+		for _, m := range tb.dev.Outbox() {
+			if strings.Contains(m.Text, "Plaud: the login expired") {
+				n++
+			}
+		}
+		return n
+	}
+	tb.plaud.tick(ctx, past)
+	if s := tb.plaud.Status(ctx, false); !s.Expired || s.Connected || notices() != 1 {
+		t.Fatalf("after the login lapsed: expired=%v connected=%v notices=%d, want expired and one notice", s.Expired, s.Connected, notices())
+	}
+	calls := fp.calls()
+	tb.plaud.tick(ctx, past)
+	if notices() != 1 {
+		t.Errorf("notices = %d within a day, want 1", notices())
+	}
+	if err := tb.plaud.update(func(st *plaudState) error { st.AuthNotified = time.Now().Add(-25 * time.Hour); return nil }); err != nil {
+		t.Fatal(err)
+	}
+	tb.plaud.tick(ctx, past)
+	if notices() != 2 {
+		t.Errorf("notices = %d a day later, want 2", notices())
+	}
+	if fp.calls() != calls {
+		t.Errorf("the CLI ran while the login was gone:\n%s", strings.TrimPrefix(fp.calls(), calls))
+	}
+
+	if w := tb.do("POST", "/api/plaud/disconnect", nil); w.Code != 200 {
+		t.Fatalf("disconnect: %d %s", w.Code, w.Body.String())
+	}
+	if err := tb.plaud.update(func(st *plaudState) error { st.AuthNotified = time.Now().Add(-25 * time.Hour); return nil }); err != nil {
+		t.Fatal(err)
+	}
+	tb.plaud.tick(ctx, past)
+	if s := tb.plaud.Status(ctx, false); s.Expired || s.Connected || notices() != 2 {
+		t.Errorf("after disconnecting: expired=%v connected=%v notices=%d, want neither and no more notices", s.Expired, s.Connected, notices())
+	}
+}
+
+// A login Plaud refuses while its tokens.json stays (revoked on Plaud's
+// side) also shows as expired, until a check works again.
+func TestPlaudRefusedLoginShowsExpired(t *testing.T) {
+	tb, fp := plaudBridge(t, "")
+	plaudSignIn(t, tb)
+	if err := tb.plaud.saveState(plaudRecordLogin(tb, plaudSeededState("u_1", plaudOld1))); err != nil {
+		t.Fatal(err)
+	}
+	fp.files(plaudOld1)
+	fp.write("revoked", "")
+	ctx := context.Background()
+	if err := tb.plaud.Poll(ctx); !errors.Is(err, errPlaudAuth) {
+		t.Fatalf("poll = %v, want the login refused", err)
+	}
+	if s := tb.plaud.Status(ctx, false); !s.Expired || !s.Connected {
+		t.Errorf("expired=%v connected=%v, want both", s.Expired, s.Connected)
+	}
+	_ = os.Remove(filepath.Join(fp.dir, "revoked"))
+	if err := tb.plaud.Poll(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if s := tb.plaud.Status(ctx, false); s.Expired {
+		t.Error("still expired after a check that worked")
+	}
+}
+
+// Changes to the state never get lost to a poll that works through
+// recordings meanwhile: a sign-in that finishes during a poll keeps its
+// record. A login from before sign-ins were recorded gets one with the
+// first check that works.
+func TestPlaudStateChangesDuringAPollStay(t *testing.T) {
+	tb, fp := plaudBridge(t, "")
+	plaudSignIn(t, tb)
+	if err := tb.plaud.saveState(plaudSeededState("u_1", plaudOld1)); err != nil {
+		t.Fatal(err)
+	}
+	fp.files(plaudNew, plaudOld1)
+	fp.recording(plaudNew, true)
+	signedIn := time.Date(2026, 10, 1, 0, 0, 0, 0, time.UTC)
+	run := tb.plaud.run
+	tb.plaud.run = func(ctx context.Context, args ...string) (string, error) {
+		if args[0] == "file" {
+			st, _ := tb.plaud.loadState()
+			if st.Login == nil || st.Login.Dir != tb.plaud.cliHome() {
+				t.Errorf("the old login was not recorded: %+v", st.Login)
+			}
+			if err := tb.plaud.update(func(st *plaudState) error {
+				st.Login = &plaudLogin{Dir: tb.plaud.cliHome(), Since: signedIn}
+				return nil
+			}); err != nil {
+				t.Error(err)
+			}
+		}
+		return run(ctx, args...)
+	}
+	if err := tb.plaud.Poll(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	st, _ := tb.plaud.loadState()
+	if st.Login == nil || !st.Login.Since.Equal(signedIn) || !slices.Contains(st.Seen, plaudNew) {
+		t.Errorf("state = %+v, login %+v: want the sign-in made during the poll, and the recording seen", st, st.Login)
+	}
+}
+
 // However the first sync fails, it does not count as done, so the next
 // check syncs again and still forwards none of the recordings that already
 // exist.

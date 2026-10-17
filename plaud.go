@@ -108,6 +108,18 @@ type plaudState struct {
 	LastForwarded *PlaudForward `json:"last_forwarded,omitempty"`
 	// AuthNotified is when the chat was last told the login expired.
 	AuthNotified time.Time `json:"auth_notified,omitzero"`
+	// Login is the sign-in Fridolin made, kept until Disconnect. Plaud's CLI
+	// deletes a login that expired (its refresh token ran out, or Plaud
+	// refused it), so a login recorded here whose tokens.json is gone has
+	// expired, rather than never been made.
+	Login *plaudLogin `json:"login,omitempty"`
+}
+
+// plaudLogin is a sign-in to Plaud.
+type plaudLogin struct {
+	// Dir is the CLI home it was made in (see cliHome).
+	Dir   string    `json:"dir"`
+	Since time.Time `json:"since"`
 }
 
 // plaudPending is a recording waiting to be handed over.
@@ -194,6 +206,10 @@ type PlaudManager struct {
 	// notify sends text to a chat (the expiry notice).
 	notify func(ctx context.Context, jid, text string) error
 
+	// stMu makes every change to state.json a read, change and write of
+	// its own (see update): the poller, the sign-in and the dashboard all
+	// change it.
+	stMu sync.Mutex
 	// cliMu runs the CLI's commands one at a time, all but the sign-in,
 	// which waits for the browser for minutes. The CLI rewrites tokens.json
 	// when it refreshes the login, without a lock, so two at once could
@@ -205,8 +221,12 @@ type PlaudManager struct {
 	connect  *connectJob
 	lastPoll time.Time
 	lastErr  string
-	busy     bool
-	stop     context.CancelFunc
+	// refused is set while Plaud refuses a login whose tokens.json is still
+	// there (revoked on Plaud's side); the next sign-in or check that works
+	// clears it.
+	refused bool
+	busy    bool
+	stop    context.CancelFunc
 	// life is the poller's context from Start, which Stop cancels; checks
 	// started from the dashboard run on it too.
 	life context.Context
@@ -240,7 +260,36 @@ func (p *PlaudManager) cliHome() string {
 
 func (p *PlaudManager) tokenPath() string { return filepath.Join(p.cliHome(), ".plaud", "tokens.json") }
 
-func (p *PlaudManager) connected() bool { return fileExists(p.tokenPath()) }
+// The states of the Plaud login, as loginStatus reports them.
+const (
+	plaudSignedOut = "signed out"
+	plaudConnected = "connected"
+	plaudExpired   = "expired"
+)
+
+// loginStatus says whether Plaud is connected. A login is there while
+// tokens.json is, and expired when it is gone but Fridolin's sign-in is
+// still on record (the CLI deleted it). A login from before sign-ins were
+// recorded counts while its tokens.json is there.
+func (p *PlaudManager) loginStatus() string {
+	_, err := os.Stat(p.tokenPath())
+	switch {
+	case err == nil:
+		return plaudConnected
+	case p.loginRecorded():
+		return plaudExpired
+	}
+	return plaudSignedOut
+}
+
+func (p *PlaudManager) connected() bool { return p.loginStatus() == plaudConnected }
+
+// loginRecorded reports whether state.json records Fridolin's sign-in for
+// the CLI home in use.
+func (p *PlaudManager) loginRecorded() bool {
+	st, _ := p.loadState()
+	return st != nil && st.Login != nil && st.Login.Dir == p.cliHome()
+}
 
 // loginStamp changes whenever the login file does: a sign-in, a sign-out, a
 // token refresh, or brain_access switching to the other login. "" means
@@ -675,6 +724,30 @@ func (p *PlaudManager) loadState() (*plaudState, error) {
 	return st, nil
 }
 
+// update changes state.json with fn: it reads the file (a new state when
+// there is none), lets fn change it and saves it, all under stMu. Every
+// change goes through it, so the poller, which works through recordings
+// for minutes, never writes back a state another change has moved past.
+// An error from fn saves nothing.
+func (p *PlaudManager) update(fn func(st *plaudState) error) error {
+	p.stMu.Lock()
+	defer p.stMu.Unlock()
+	if err := os.MkdirAll(p.dir(), 0o700); err != nil {
+		return err
+	}
+	st, err := p.loadState()
+	if err != nil {
+		return err
+	}
+	if st == nil {
+		st = newPlaudState()
+	}
+	if err := fn(st); err != nil {
+		return err
+	}
+	return p.saveState(st)
+}
+
 // newPlaudState is the state before the first sync.
 func newPlaudState() *plaudState {
 	return &plaudState{Version: plaudStateVersion, Pending: map[string]*plaudPending{}}
@@ -735,6 +808,8 @@ func (p *PlaudManager) runPoll(ctx context.Context) error {
 	} else {
 		p.lastErr = ""
 	}
+	// Plaud refusing a login it did not delete: revoked on Plaud's side.
+	p.refused = errors.Is(err, errPlaudAuth) && p.loginStatus() == plaudConnected
 	p.mu.Unlock()
 	if errors.Is(err, errPlaudAuth) {
 		p.notifyAuthExpired()
@@ -743,9 +818,6 @@ func (p *PlaudManager) runPoll(ctx context.Context) error {
 }
 
 func (p *PlaudManager) poll(ctx context.Context) error {
-	if err := os.MkdirAll(p.dir(), 0o700); err != nil {
-		return err
-	}
 	st, err := p.loadState()
 	if err != nil {
 		return err
@@ -765,25 +837,23 @@ func (p *PlaudManager) poll(ctx context.Context) error {
 			if st.seededFor("") {
 				log.Printf("plaud: signed in to another Plaud account, starting over")
 			}
-			if err := p.seed(ctx, st, acct); err != nil {
+			if err := p.seed(ctx, acct); err != nil {
 				return err
 			}
 			p.checkedLogin = stamp
 			return nil
 		}
-		if st.Account == "" && acct != "" {
-			st.Account = acct
-			if err := p.saveState(st); err != nil {
-				return err
+		if err := p.update(func(st *plaudState) error {
+			if st.Account == "" {
+				st.Account = acct
 			}
+			return nil
+		}); err != nil {
+			return err
 		}
 		p.checkedLogin = stamp
 	}
 
-	seen := map[string]bool{}
-	for _, id := range st.Seen {
-		seen[id] = true
-	}
 	ids, err := p.listIDs(ctx, 1)
 	if err != nil {
 		return err
@@ -794,11 +864,29 @@ func (p *PlaudManager) poll(ctx context.Context) error {
 	if p.loginStamp() != p.checkedLogin {
 		return nil
 	}
-	for _, id := range ids {
-		if _, pending := st.Pending[id]; !seen[id] && !pending {
-			st.Pending[id] = &plaudPending{FirstSeen: time.Now()}
-			log.Printf("plaud %s: new recording, waiting for the transcript", id)
+	if err := p.update(func(st *plaudState) error {
+		seen := map[string]bool{}
+		for _, id := range st.Seen {
+			seen[id] = true
 		}
+		for _, id := range ids {
+			if _, pending := st.Pending[id]; !seen[id] && !pending {
+				st.Pending[id] = &plaudPending{FirstSeen: time.Now()}
+				log.Printf("plaud %s: new recording, waiting for the transcript", id)
+			}
+		}
+		// A login that works is not expired: the next expiry gets its notice.
+		st.AuthNotified = time.Time{}
+		if st.Login == nil {
+			// A sign-in from before they were recorded.
+			st.Login = &plaudLogin{Dir: p.cliHome(), Since: time.Now()}
+		}
+		return nil
+	}); err != nil {
+		return err
+	}
+	if st, err = p.loadState(); err != nil {
+		return err
 	}
 	// Resolved before anything is fetched or written: without a brain or a
 	// private chat the recordings wait, and the error shows on the dashboard.
@@ -806,28 +894,20 @@ func (p *PlaudManager) poll(ctx context.Context) error {
 	// than log the same error every interval; the status call reports it.
 	br, jid, err := p.destination()
 	if err != nil && len(st.Pending) > 0 {
-		if serr := p.saveState(st); serr != nil {
-			return serr
-		}
 		return err
 	}
-	pendingIDs := st.pendingInOrder()
 	// A recording that fails is retried next time, until it is given up,
 	// and does not hold up the others; its error is the check's, so the card
 	// shows it instead of counting the recording as waiting for Plaud.
 	var failed []error
 	maxAge := fmt.Sprintf("%d days", plaudPendingMaxAge/(24*time.Hour))
-	for _, id := range pendingIDs {
+	for _, id := range st.pendingInOrder() {
 		since := st.Pending[id].FirstSeen
 		fw, err := p.forward(ctx, id, since, br, jid)
-		done := fw != nil
-		if done {
-			st.LastForwarded = fw
-		}
 		if errors.Is(err, errPlaudAuth) {
-			_ = p.saveState(st)
 			return err
 		}
+		done := fw != nil
 		giveUp := !done && time.Since(since) > plaudPendingMaxAge
 		if err != nil {
 			next := "will retry"
@@ -836,38 +916,38 @@ func (p *PlaudManager) poll(ctx context.Context) error {
 			}
 			failed = append(failed, fmt.Errorf("recording %s (%s): %w", id, next, err))
 		}
-		if done || giveUp {
-			// A recording that still fails may well have been transcribed
-			// long ago, so its line does not blame Plaud.
-			switch {
-			case giveUp && err != nil:
-				log.Printf("plaud %s: still failing after %s, giving up", id, maxAge)
-			case giveUp:
-				log.Printf("plaud %s: no transcript after %s, giving up", id, maxAge)
-			}
-			delete(st.Pending, id)
-			st.Seen = append(st.Seen, id)
+		if !done && !giveUp {
+			continue
 		}
-		if err := p.saveState(st); err != nil {
+		// A recording that still fails may well have been transcribed
+		// long ago, so its line does not blame Plaud.
+		switch {
+		case giveUp && err != nil:
+			log.Printf("plaud %s: still failing after %s, giving up", id, maxAge)
+		case giveUp:
+			log.Printf("plaud %s: no transcript after %s, giving up", id, maxAge)
+		}
+		if err := p.update(func(st *plaudState) error {
+			if _, ok := st.Pending[id]; ok {
+				delete(st.Pending, id)
+				st.Seen = append(st.Seen, id)
+			}
+			if fw != nil {
+				st.LastForwarded = fw
+			}
+			return nil
+		}); err != nil {
 			return err
 		}
-	}
-	st.AuthNotified = time.Time{}
-	if err := p.saveState(st); err != nil {
-		return err
 	}
 	return errors.Join(failed...)
 }
 
-// seed starts the state for acct with the recordings it already has, all
-// marked as seen. Of the old state st (nil for none) it keeps only the last
-// recording handed over, for the card.
-func (p *PlaudManager) seed(ctx context.Context, old *plaudState, acct string) error {
-	st := newPlaudState()
-	st.Seeded, st.Account = true, acct
-	if old != nil {
-		st.LastForwarded = old.LastForwarded
-	}
+// seed starts the state over for acct, with the recordings it already
+// has, all marked as seen. What does not belong to an account stays: the
+// sign-in and the last recording handed over, for the card.
+func (p *PlaudManager) seed(ctx context.Context, acct string) error {
+	var listed []string
 	seen := map[string]bool{}
 	for page := 1; page <= plaudSeedPages; page++ {
 		ids, err := p.listIDs(ctx, page)
@@ -877,15 +957,24 @@ func (p *PlaudManager) seed(ctx context.Context, old *plaudState, acct string) e
 		for _, id := range ids {
 			if !seen[id] {
 				seen[id] = true
-				st.Seen = append(st.Seen, id)
+				listed = append(listed, id)
 			}
 		}
 		if len(ids) < plaudPageSize {
 			break
 		}
 	}
-	log.Printf("plaud: first sync — %d existing recordings marked as seen", len(st.Seen))
-	return p.saveState(st)
+	log.Printf("plaud: first sync — %d existing recordings marked as seen", len(listed))
+	return p.update(func(st *plaudState) error {
+		fresh := newPlaudState()
+		fresh.Seeded, fresh.Account, fresh.Seen = true, acct, listed
+		fresh.LastForwarded, fresh.Login = st.LastForwarded, st.Login
+		if fresh.Login == nil {
+			fresh.Login = &plaudLogin{Dir: p.cliHome(), Since: time.Now()}
+		}
+		*st = *fresh
+		return nil
+	})
 }
 
 // notifyAuthExpired tells the private chat Plaud uses once a day that Plaud
@@ -898,10 +987,7 @@ func (p *PlaudManager) notifyAuthExpired() {
 		log.Printf("plaud: %v", err)
 		return
 	}
-	if st == nil {
-		st = newPlaudState()
-	}
-	if time.Since(st.AuthNotified) < 24*time.Hour {
+	if st != nil && time.Since(st.AuthNotified) < 24*time.Hour {
 		return
 	}
 	_, jid, err := p.destination()
@@ -912,8 +998,7 @@ func (p *PlaudManager) notifyAuthExpired() {
 		log.Printf("plaud: could not send the expiry notice: %v", err)
 		return
 	}
-	st.AuthNotified = time.Now()
-	if err := p.saveState(st); err != nil {
+	if err := p.update(func(st *plaudState) error { st.AuthNotified = time.Now(); return nil }); err != nil {
 		log.Printf("plaud: %v", err)
 	}
 }
@@ -932,22 +1017,37 @@ func (p *PlaudManager) Start(ctx context.Context) {
 				return
 			case <-time.After(5 * time.Second):
 			}
-			cfg := p.cfg()
-			if !cfg.Plaud.Enabled || !p.connected() || time.Now().Before(next) {
-				continue
-			}
-			interval := time.Minute
-			if cfg.Plaud.IntervalSeconds > 0 {
-				interval = time.Duration(cfg.Plaud.IntervalSeconds) * time.Second
-			}
-			next = time.Now().Add(interval)
-			pctx, pcancel := context.WithTimeout(ctx, 10*time.Minute)
-			if err := p.Poll(pctx); err != nil && !errors.Is(err, context.Canceled) {
-				log.Printf("plaud: %v", err)
-			}
-			pcancel()
+			next = p.tick(ctx, next)
 		}
 	}()
+}
+
+// tick checks Plaud if a check is due at due, and returns when the next
+// one is. With an expired login there is nothing to check, but the chat
+// still gets its daily notice; signed out, the first check comes as soon
+// as there is a login.
+func (p *PlaudManager) tick(ctx context.Context, due time.Time) time.Time {
+	cfg := p.cfg()
+	if !cfg.Plaud.Enabled || time.Now().Before(due) {
+		return due
+	}
+	switch p.loginStatus() {
+	case plaudConnected:
+		pctx, pcancel := context.WithTimeout(ctx, 10*time.Minute)
+		if err := p.Poll(pctx); err != nil && !errors.Is(err, context.Canceled) {
+			log.Printf("plaud: %v", err)
+		}
+		pcancel()
+	case plaudExpired:
+		p.notifyAuthExpired()
+	default:
+		return due
+	}
+	interval := time.Minute
+	if cfg.Plaud.IntervalSeconds > 0 {
+		interval = time.Duration(cfg.Plaud.IntervalSeconds) * time.Second
+	}
+	return time.Now().Add(interval)
 }
 
 // lifetime is the context a check runs on: Start's, so that Stop ends it,
@@ -1017,7 +1117,8 @@ type PlaudStatus struct {
 	LastPoll      *time.Time    `json:"last_poll,omitempty"`
 	LastError     string        `json:"last_error,omitempty"`
 	LastForwarded *PlaudForward `json:"last_forwarded,omitempty"`
-	// Account is who is signed in; Expired means Plaud refused the login.
+	// Account is who is signed in. Expired means the login lapsed: Plaud's
+	// CLI deleted it, or Plaud refuses it.
 	Account string `json:"account,omitempty"`
 	Expired bool   `json:"expired,omitempty"`
 }
@@ -1026,9 +1127,11 @@ type PlaudStatus struct {
 // is signed in, which also tells whether the login still works.
 func (p *PlaudManager) Status(ctx context.Context, account bool) PlaudStatus {
 	cfg := p.cfg()
+	login := p.loginStatus()
 	s := PlaudStatus{
 		CLI:       PlaudCLI{InstallHint: "npm install -g @plaud-ai/cli"},
-		Connected: p.connected(),
+		Connected: login == plaudConnected,
+		Expired:   login == plaudExpired,
 		Settings:  cfg.Plaud,
 		LoginDir:  filepath.Dir(p.tokenPath()),
 	}
@@ -1068,6 +1171,7 @@ func (p *PlaudManager) Status(ctx context.Context, account bool) PlaudStatus {
 		s.LastPoll = &last
 	}
 	s.LastError = p.lastErr
+	s.Expired = s.Expired || p.refused && s.Connected
 	p.mu.Unlock()
 	if account && s.Connected && s.CLI.Found {
 		ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
@@ -1111,8 +1215,18 @@ func (p *PlaudManager) Connect() error {
 		})
 		// The CLI opens the sign-in page in your browser itself.
 		_, err := p.runCLIOut(withDesktop(ctx), out, "login")
+		if err == nil && p.connected() {
+			err = p.update(func(st *plaudState) error {
+				st.Login = &plaudLogin{Dir: p.cliHome(), Since: time.Now()}
+				st.AuthNotified = time.Time{}
+				return nil
+			})
+		}
 		p.mu.Lock()
 		defer p.mu.Unlock()
+		if err == nil && p.connected() {
+			p.refused = false
+		}
 		if err != nil || !p.connected() {
 			job.State = "error"
 			if err != nil {
@@ -1146,7 +1260,13 @@ func (p *PlaudManager) Disconnect() error {
 	if !p.cfg().Plaud.BrainAccess {
 		_ = os.Remove(p.tokenPath()) // our private copy; the shared one is the CLI's to manage
 	}
-	return nil
+	// Signed out on purpose, not expired. What was seen stays, for the
+	// same account signing in again.
+	err := p.update(func(st *plaudState) error { st.Login = nil; return nil })
+	p.mu.Lock()
+	p.refused = false
+	p.mu.Unlock()
+	return err
 }
 
 // CheckNow starts a check in the background, on the poller's lifetime so

@@ -64,14 +64,18 @@ export default {
       if (!s.connected) {
         if (settings.dirty()) settings.discard(); // nothing to edit until it is connected again
         const connecting = s.connect && s.connect.state === 'running';
-        paint(card, { connect: s.connect || null }, ({ connect }) => [
-          head(connecting ? 'Signing in…' : 'Not connected', connecting ? 'warn' : 'neutral'),
-          h('p', 'Sign in with your Plaud account. New recordings then reach the brain you choose as finished transcripts, with Plaud’s AI summary.'),
+        // Plaud's tool deletes a login that expired; Fridolin remembers it
+        // had one.
+        paint(card, { connect: s.connect || null, expired: !!s.expired && !connecting }, ({ connect, expired }) => [
+          head(connecting ? 'Signing in…' : expired ? 'Login expired' : 'Not connected', connecting ? 'warn' : expired ? 'bad' : 'neutral'),
+          expired
+            ? callout('bad', 'Plaud’s login expired', 'Recordings are not arriving, and the chat gets a reminder once a day. Connect again — it takes one approval in the browser.')
+            : h('p', 'Sign in with your Plaud account. New recordings then reach the brain you choose as finished transcripts, with Plaud’s AI summary.'),
           connecting ? callout('info', 'Approve access in the browser tab Plaud just opened.',
             connect.auth_url ? h('div', 'No tab opened? ', h('a', { href: connect.auth_url, target: '_blank', rel: 'noopener noreferrer' }, 'Open Plaud’s sign-in')) : null) : null,
           connect && connect.state === 'error' ? callout('bad', 'Sign-in did not finish', connect.error) : null,
           h('p.muted.small', 'Fridolin keeps the Plaud login in its own data folder, out of the brains’ reach. Plaud’s tool runs with its usage statistics turned off.'),
-          h('div.actions', btn(connecting ? 'Waiting for Plaud…' : 'Connect Plaud', {
+          h('div.actions', btn(connecting ? 'Waiting for Plaud…' : expired ? 'Connect again' : 'Connect Plaud', {
             kind: 'primary', icon: 'external', disabled: connecting,
             onClick: async () => { await post('/api/plaud/connect'); toast('Plaud’s sign-in opened in your browser', 'ok'); await refresh(); },
           })),

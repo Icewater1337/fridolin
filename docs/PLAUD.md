@@ -59,7 +59,9 @@ summaries go, and warns when that chat belongs to another brain.
 New brains get a `skills/plaud.md` that tells them how to file recordings.
 
 If Plaud's login expires, that private chat gets one notice a day until you
-connect again; without one, only the dashboard shows it.
+connect again (or disconnect); without one, only the dashboard shows it.
+Plaud's tool deletes a login once it has expired. Fridolin remembers that it
+signed in, so the card says **Login expired** rather than *Not connected*.
 
 ## Where the login lives
 
