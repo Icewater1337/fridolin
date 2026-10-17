@@ -17,6 +17,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 )
 
@@ -336,6 +337,9 @@ func (g *GoogleAuth) exchange(ctx context.Context, code, verifier string) (*goog
 
 // saveToken writes the brain's token, plus a copy of the client as its
 // credentials file when there is none (tools fall back to it to sign in again).
+// Neither write follows a symlink: writeFileAtomic renames a new file over
+// the token, replacing whatever is there, and O_EXCL creates the
+// credentials file only where nothing is.
 func (g *GoogleAuth) saveToken(brainID string, tok *googleToken) error {
 	data, err := json.MarshalIndent(tok, "", "  ")
 	if err != nil {
@@ -345,19 +349,48 @@ func (g *GoogleAuth) saveToken(brainID string, tok *googleToken) error {
 		return err
 	}
 	if c := g.Client(); c != nil {
-		if _, err := os.Stat(g.credentialsPath(brainID)); errors.Is(err, os.ErrNotExist) {
-			f, err := os.OpenFile(g.credentialsPath(brainID), os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
-			if err == nil {
-				_, _ = f.Write(c.raw)
-				f.Close()
-			}
+		f, err := os.OpenFile(g.credentialsPath(brainID), os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
+		if err == nil {
+			_, _ = f.Write(c.raw)
+			f.Close()
 		}
 	}
 	return nil
 }
 
+// readCredentialFile reads a brain's file in the credentials dir without
+// following a symlink. Each brain's sandbox lets it write its own token
+// file, so a brain can put a symlink there to another brain's token: the
+// bridge, outside the sandbox, would refresh that token and write it back
+// where this brain reads it, or revoke it on disconnect. The dir itself is
+// not brain-writable, so the last path component is the one to check. A
+// hard link would do the same; the sandbox refuses those, and a file with
+// more than one link is refused here as well. The open does not block, so
+// a FIFO cannot hang the dashboard.
+func readCredentialFile(path string) ([]byte, error) {
+	f, err := os.OpenFile(path, os.O_RDONLY|syscall.O_NOFOLLOW|syscall.O_NONBLOCK, 0)
+	if errors.Is(err, syscall.ELOOP) {
+		return nil, fmt.Errorf("%s: %w", path, errSymlink)
+	}
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+	fi, err := f.Stat()
+	if err != nil {
+		return nil, err
+	}
+	if !fi.Mode().IsRegular() {
+		return nil, fmt.Errorf("%s: not a regular file", path)
+	}
+	if st, ok := fi.Sys().(*syscall.Stat_t); ok && st.Nlink != 1 {
+		return nil, fmt.Errorf("%s: it has more than one link, which the bridge does not trust", path)
+	}
+	return io.ReadAll(f)
+}
+
 func (g *GoogleAuth) loadToken(brainID string) (*googleToken, error) {
-	data, err := os.ReadFile(g.tokenPath(brainID))
+	data, err := readCredentialFile(g.tokenPath(brainID))
 	if err != nil {
 		return nil, err
 	}
@@ -393,6 +426,7 @@ func (g *GoogleAuth) accessToken(ctx context.Context, brainID string) (*googleTo
 	t.Token = tr.AccessToken
 	t.Expiry = time.Now().Add(time.Duration(tr.ExpiresIn) * time.Second).UTC().Format("2006-01-02T15:04:05.000000Z")
 	if data, err := json.MarshalIndent(t, "", "  "); err == nil {
+		// A rename: a symlink planted since the read is replaced, not followed.
 		_ = writeFileAtomic(g.tokenPath(brainID), data, 0o600, false)
 	}
 	return t, nil
@@ -473,7 +507,9 @@ func (g *GoogleAuth) primaryAccount(ctx context.Context, tok *googleToken) (stri
 	return "", errors.New("the account has no primary calendar")
 }
 
-// Disconnect revokes the token at Google and deletes the token file.
+// Disconnect revokes the token at Google and deletes the token file. A
+// token file that is a symlink is not read, so nothing is revoked through
+// it, and the remove takes the symlink away, not what it points to.
 func (g *GoogleAuth) Disconnect(ctx context.Context, brainID string) error {
 	if t, err := g.loadToken(brainID); err == nil && t.RefreshToken != "" {
 		form := url.Values{"token": {t.RefreshToken}}
@@ -575,7 +611,9 @@ func (b *Bridge) apiCalendarStatus(w http.ResponseWriter, r *http.Request) {
 		resp["last_error"] = e
 	}
 	g.mu.Unlock()
-	if _, err := os.Stat(g.tokenPath(br.ID())); err != nil {
+	// Lstat: a symlink there shows as connected, with the reason it is not
+	// used in list_error.
+	if _, err := os.Lstat(g.tokenPath(br.ID())); err != nil {
 		writeJSON(w, http.StatusOK, resp)
 		return
 	}

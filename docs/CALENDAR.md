@@ -50,7 +50,13 @@ work brain the work account), or the same account with different calendars.
 
 The sign-in is saved as the brain's token,
 `google_calendar_token_<brain>.json`, in `sandbox.credentials_dir` (or the
-bridge's data folder). The sandbox lets only that brain read it. The chosen
+bridge's data folder). The sandbox lets only that brain read it, and write
+it, since the calendar tool refreshes it. The bridge reads it too, to list
+the calendars on the brain's page and to revoke it on disconnect, and
+takes only a regular file there: a brain that put a symlink or a hard link
+to another brain's token in its place would otherwise have the bridge
+refresh that token into its own file, or revoke it. The brain's page then
+shows why its calendars cannot be listed; connect it again. The chosen
 calendars are stored in the brain's `brain.json`:
 
 ```json

@@ -9,7 +9,9 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"testing"
+	"time"
 )
 
 const testClientJSON = `{"installed":{"client_id":"123-abc.apps.googleusercontent.com","client_secret":"TEST-CLIENT-SECRET","auth_uri":"https://accounts.google.com/o/oauth2/auth","token_uri":"%s/token","redirect_uris":["http://localhost"]}}`
@@ -230,4 +232,111 @@ func TestCalendarTokenGoesToCredentialsDir(t *testing.T) {
 
 func portOf(tb *testBridge) string {
 	return strings.TrimPrefix(tb.cfgs.Get().HTTPListen, "127.0.0.1:")
+}
+
+// TestCalendarTokenIsNotFollowed: each brain's sandbox lets it write its
+// own token file, so a brain can make it a link to another brain's token
+// in the same folder. The dashboard's status page would then refresh that
+// token and write it, refresh token and all, where the first brain reads
+// it, and Disconnect would revoke it at Google. The bridge refuses such a
+// token file, leaves the other brain's token alone, and removes only the
+// link on disconnect.
+func TestCalendarTokenIsNotFollowed(t *testing.T) {
+	cases := []struct {
+		name string
+		link func(t *testing.T, own, other string)
+		want string // in the status page's list_error
+	}{
+		{"symlink", func(t *testing.T, own, other string) { mustSymlink(t, other, own) }, errSymlink.Error()},
+		{"relative symlink", func(t *testing.T, own, other string) { mustSymlink(t, filepath.Base(other), own) }, errSymlink.Error()},
+		{"hard link", func(t *testing.T, own, other string) {
+			if err := os.Link(other, own); err != nil {
+				t.Fatal(err)
+			}
+		}, "more than one link"},
+		{"FIFO", func(t *testing.T, own, _ string) {
+			if err := syscall.Mkfifo(own, 0o600); err != nil {
+				t.Fatal(err)
+			}
+		}, "not a regular file"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			srv, got := fakeGoogle(t)
+			tb := newTestBridge(t, "")
+			if w := tb.do("PUT", "/api/google/client", map[string]string{"json": fmt.Sprintf(testClientJSON, srv.URL)}); w.Code != 200 {
+				t.Fatal(w.Body.String())
+			}
+			for _, id := range []string{"a", "b"} {
+				if w := tb.do("POST", "/api/brains", map[string]any{"path": "~/" + id, "create_dir": true, "manifest": BrainManifest{ID: id, Name: strings.ToUpper(id)}}); w.Code != 200 {
+					t.Fatal(w.Body.String())
+				}
+			}
+			// Brain b's token has expired, so using it means refreshing it.
+			other := tb.google.tokenPath("b")
+			bTok, _ := json.MarshalIndent(googleToken{
+				Token: "B-ACCESS", RefreshToken: "B-REFRESH", TokenURI: srv.URL + "/token",
+				ClientID: "123-abc.apps.googleusercontent.com", ClientSecret: "TEST-CLIENT-SECRET",
+				Expiry: "2020-01-01T00:00:00.000000Z",
+			}, "", "  ")
+			if err := os.WriteFile(other, bTok, 0o600); err != nil {
+				t.Fatal(err)
+			}
+			own := tb.google.tokenPath("a")
+			tc.link(t, own, other)
+			// A read that opened the FIFO would block until a writer came,
+			// and hang the whole test binary rather than fail.
+			do := func(method, path string) *httptest.ResponseRecorder {
+				t.Helper()
+				done := make(chan *httptest.ResponseRecorder, 1)
+				go func() { done <- tb.do(method, path, nil) }()
+				select {
+				case w := <-done:
+					return w
+				case <-time.After(5 * time.Second):
+					t.Fatalf("%s %s hangs on a's token file", method, path)
+					return nil
+				}
+			}
+
+			var st struct {
+				Connected bool   `json:"connected"`
+				ListError string `json:"list_error"`
+			}
+			_ = json.Unmarshal(do("GET", "/api/brains/a/calendar").Body.Bytes(), &st)
+			if !st.Connected || !strings.Contains(st.ListError, tc.want) {
+				t.Errorf("status = %+v, want a's token refused for %q", st, tc.want)
+			}
+			if (*got)["refresh_token"] != "" {
+				t.Errorf("b's token was refreshed through a's: %v", *got)
+			}
+			// Written back, the refresh would have put b's refresh token in a
+			// file of a's own.
+			otherFi, _ := os.Stat(other)
+			if fi, err := os.Lstat(own); err == nil && fi.Mode().IsRegular() && !os.SameFile(fi, otherFi) {
+				if data, _ := os.ReadFile(own); strings.Contains(string(data), "B-REFRESH") {
+					t.Errorf("b's refresh token was copied to a's token file:\n%s", data)
+				}
+			}
+			if w := do("DELETE", "/api/brains/a/calendar"); w.Code != 200 {
+				t.Fatal(w.Body.String())
+			}
+			if (*got)["revoked"] != "" {
+				t.Errorf("revoked %q through a's token file", (*got)["revoked"])
+			}
+			if data, _ := os.ReadFile(other); string(data) != string(bTok) {
+				t.Errorf("b's token changed:\n%s", data)
+			}
+			if _, err := os.Lstat(own); !os.IsNotExist(err) {
+				t.Errorf("a's token file was not removed (%v)", err)
+			}
+		})
+	}
+}
+
+func mustSymlink(t *testing.T, target, link string) {
+	t.Helper()
+	if err := os.Symlink(target, link); err != nil {
+		t.Fatal(err)
+	}
 }
