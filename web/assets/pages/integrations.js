@@ -47,6 +47,8 @@ export default {
     const head = (state, kind) => h('div.card-head',
       h('div.card-title', icon('inbox'), h('h2', 'Plaud recorder')),
       pill(state, kind));
+    // A CLI version Fridolin does not read, and what to install instead.
+    const cliWarn = (warning) => (warning ? callout('warn', 'Plaud’s CLI version', warning) : null);
 
     // A status known from an earlier visit paints at once, so everything
     // render() uses is defined above.
@@ -72,9 +74,9 @@ export default {
         // had one.
         const signIn = {
           connect: s.connect || null, expired: !!s.expired && !connecting, moved: !!s.login_moved && !connecting,
-          loginDir: s.login_dir || '', access: !!(s.settings || {}).brain_access,
+          loginDir: s.login_dir || '', access: !!(s.settings || {}).brain_access, cliWarning: s.cli.warning || '',
         };
-        paint(card, signIn, ({ connect, expired, moved, loginDir, access }) => [
+        paint(card, signIn, ({ connect, expired, moved, loginDir, access, cliWarning }) => [
           head(connecting ? 'Signing in…' : expired ? 'Login expired' : 'Not connected', connecting ? 'warn' : expired ? 'bad' : 'neutral'),
           expired
             ? callout('bad', 'Plaud’s login expired', 'Recordings are not arriving, and the chat gets a reminder once a day. Connect again — it takes one approval in the browser.')
@@ -82,6 +84,7 @@ export default {
           moved
             ? callout('warn', 'Connect Plaud again', '“Let brains use the Plaud CLI” changed where the login lives, and Fridolin does not take over a login it did not make. Connect again to use the one in ', mono(loginDir), '.')
             : null,
+          cliWarn(cliWarning),
           connecting ? callout('info', 'Approve access in the browser tab Plaud just opened.',
             // The bridge passes on only the link Plaud's tool printed for
             // its sign-in; the host shows where it leads.
@@ -108,15 +111,19 @@ export default {
       ]);
       // A destination problem only blocks anything while Plaud is on.
       const blocked = st.enabled && s.summary_error;
-      paint(alertsBox, { expired: !!s.expired, blocked: blocked || '', lastError: s.last_error && !s.expired && s.last_error !== s.summary_error ? s.last_error : '' }, (a) => [
+      paint(alertsBox, {
+        expired: !!s.expired, blocked: blocked || '', lastError: s.last_error && !s.expired && s.last_error !== s.summary_error ? s.last_error : '',
+        cliWarning: s.cli.warning || '',
+      }, (a) => [
         a.expired ? callout('bad', 'Plaud’s login expired', 'Recordings are not arriving. Connect again — it takes one approval in the browser.') : null,
         a.blocked ? callout('bad', 'Recordings cannot be delivered', a.blocked) : null,
         a.lastError ? callout('warn', 'Last check failed', a.lastError) : null,
+        cliWarn(a.cliWarning),
       ]);
       paint(factsBox, {
         chat: s.summary_chat || '', chatName: chatName(s.summary_chat || ''), toYou: !!s.summary_to_you, chatBrain: s.summary_chat_brain || '', target: s.target_brain || '',
         last: s.last_forwarded || null, givenUp: (s.given_up || []).slice(-3).reverse(), handed: s.handed || 0,
-        poll: s.last_poll || '', pending: s.pending || 0, waiting: !!(blocked || s.last_error), seen: s.seen,
+        poll: s.last_poll || '', pending: s.pending || 0, waiting: !!(blocked || s.last_error), seen: s.seen, cliVersion: s.cli.version || '',
       }, renderFacts);
       // The picked brain is marked when it cannot take recordings: gone,
       // or listed but not running (not approved, or it has an issue).
@@ -150,6 +157,7 @@ export default {
       if (f.handed) facts.push(h('div.muted', f.handed === 1 ? '1 recording with the brain' : `${f.handed} recordings with the brain`));
       if (f.poll) facts.push(h('div.muted', 'Checked ', timeAgo(f.poll), f.pending ? ` · ${f.pending} ${f.waiting ? 'waiting to be delivered' : 'waiting for Plaud’s transcript'}` : ''));
       if (typeof f.seen === 'number') facts.push(h('div.muted.small', f.seen === 1 ? '1 recording known' : `${f.seen} recordings known`));
+      if (f.cliVersion) facts.push(h('div.muted.small', `Plaud CLI ${f.cliVersion}`));
       return facts.length ? h('div.facts', facts) : null;
     }
 

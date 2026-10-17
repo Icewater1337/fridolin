@@ -498,6 +498,51 @@ func brainPlaudPATH(cfg *Config) string {
 // brain's run read too, Claude Code among them.
 var plaudOptOut = []string{"PLAUD_TELEMETRY_DISABLED=1", "PLAUD_NO_UPDATE_NOTIFIER=1"}
 
+// plaudCLITested is the version of @plaud-ai/cli whose output Fridolin
+// reads (testdata/plaud holds what it prints). The CLI is not 1.0 yet, so
+// another 0.x may print otherwise.
+const plaudCLITested = "0.3.15"
+
+// plaudCLIVersion reads the version of the CLI at bin from the package.json
+// of the npm package it belongs to, without running it: `plaud version`
+// asks npm for updates. "" means it cannot tell (a wrapper script, say).
+func plaudCLIVersion(bin string) string {
+	pkg := nodePackage(resolvePath(bin))
+	if pkg == "" {
+		return ""
+	}
+	data, err := os.ReadFile(filepath.Join(pkg, "package.json"))
+	if err != nil {
+		return ""
+	}
+	var m struct {
+		Name    string `json:"name"`
+		Version string `json:"version"`
+	}
+	if json.Unmarshal(data, &m) != nil || m.Name != "@plaud-ai/cli" {
+		return ""
+	}
+	return m.Version
+}
+
+// plaudCLIWarning says what to do about a CLI of version v, or "" when it
+// is the tested version or a later 0.3 one, or the version is unknown.
+func plaudCLIWarning(v string) string {
+	var major, minor, patch int
+	if _, err := fmt.Sscanf(v, "%d.%d.%d", &major, &minor, &patch); err != nil {
+		return ""
+	}
+	var tMajor, tMinor, tPatch int
+	_, _ = fmt.Sscanf(plaudCLITested, "%d.%d.%d", &tMajor, &tMinor, &tPatch)
+	switch {
+	case major == tMajor && minor == tMinor && patch >= tPatch:
+		return ""
+	case major < tMajor || major == tMajor && (minor < tMinor || minor == tMinor && patch < tPatch):
+		return fmt.Sprintf("Plaud's CLI %s is older than %s, the version Fridolin reads; update it: npm install -g @plaud-ai/cli@%s", v, plaudCLITested, plaudCLITested)
+	}
+	return fmt.Sprintf("Plaud's CLI %s is newer than %s, the version Fridolin was tested with, and may print things Fridolin does not read; if recordings stop arriving, install that one: npm install -g @plaud-ai/cli@%s", v, plaudCLITested, plaudCLITested)
+}
+
 // plaudPATH is the PATH the Plaud CLI runs with: its own folder first, so
 // that its #!/usr/bin/env node finds the node it was installed with.
 func plaudPATH(bin string) string {
@@ -1529,10 +1574,13 @@ var (
 	errPlaudSendingOff       = errors.New("sending new recordings to a brain is off")
 )
 
-// PlaudCLI says whether the Plaud CLI is installed, and where.
+// PlaudCLI says whether the Plaud CLI is installed, where, and which
+// version, with a warning when it is not one Fridolin reads.
 type PlaudCLI struct {
 	Found       bool   `json:"found"`
 	Path        string `json:"path,omitempty"`
+	Version     string `json:"version,omitempty"`
+	Warning     string `json:"warning,omitempty"`
 	InstallHint string `json:"install_hint"`
 }
 
@@ -1599,6 +1647,8 @@ func (p *PlaudManager) Status() PlaudStatus {
 	}
 	if path, err := p.cliPath(); err == nil {
 		s.CLI.Found, s.CLI.Path = true, path
+		s.CLI.Version = plaudCLIVersion(path)
+		s.CLI.Warning = plaudCLIWarning(s.CLI.Version)
 	}
 	if br := p.targetBrain(); br != nil {
 		s.TargetBrain = br.ID()
@@ -1659,8 +1709,12 @@ func (p *PlaudManager) Status() PlaudStatus {
 // page in the browser and waits for the approval. Status reports how it
 // goes.
 func (p *PlaudManager) Connect() error {
-	if _, err := p.cliPath(); err != nil {
+	bin, err := p.cliPath()
+	if err != nil {
 		return errPlaudNotInstalled
+	}
+	if w := plaudCLIWarning(plaudCLIVersion(bin)); w != "" {
+		log.Printf("plaud: %s", w)
 	}
 	p.mu.Lock()
 	if p.connect != nil && p.connect.State == "running" {

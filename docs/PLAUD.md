@@ -13,6 +13,11 @@ matters and tells you the action items.
    npm install -g @plaud-ai/cli
    ```
 
+   Fridolin reads what this tool prints, and was tested with version
+   0.3.15. The Plaud card shows the installed version, and warns when it is
+   older or a newer 0.x, which may print things differently; then
+   `npm install -g @plaud-ai/cli@0.3.15` installs the tested one.
+
 2. Dashboard → **Integrations → Plaud → Connect Plaud**. Plaud's sign-in opens
    in your browser; approve access.
 3. Turn on **Send new recordings to a brain** and pick the brain (by default

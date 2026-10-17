@@ -31,9 +31,6 @@ import (
 // token and talks to a server on 127.0.0.1.
 var updatePlaudGolden = flag.Bool("update-plaud-golden", false, "rewrite "+plaudGoldenFile+" from the CLI in FRIDOLIN_PLAUD_CLI")
 
-// plaudCLITested is the CLI version the golden output comes from.
-const plaudCLITested = "0.3.15"
-
 var plaudGoldenFile = filepath.Join("testdata", "plaud", "cli-"+plaudCLITested+".json")
 
 // plaudGoldenRun is one recorded call: the login it ran with, its
@@ -329,6 +326,9 @@ func realPlaudEnv(bin, home string) []string {
 // and what Fridolin reads, still match it.
 func TestPlaudCLIContract(t *testing.T) {
 	bin := realPlaudCLI(t)
+	if v := plaudCLIVersion(bin); v != plaudCLITested && !*updatePlaudGolden {
+		t.Errorf("%s is version %q; the recorded output is from %s", bin, v, plaudCLITested)
+	}
 	list, recs := plaudGoldenRecordings()
 	srv := httptest.NewServer(plaudStubAPI(list, recs))
 	defer srv.Close()

@@ -2238,6 +2238,47 @@ func TestPlaudSignInURL(t *testing.T) {
 	}
 }
 
+// The card says which version of the CLI is installed, read from its npm
+// package without running it, and warns about one Fridolin does not read.
+func TestPlaudCLIVersion(t *testing.T) {
+	for _, c := range []struct {
+		version string
+		warns   string // in the warning; "" for none
+	}{
+		{plaudCLITested, ""},
+		{"0.3.16", ""},
+		{"0.3.14", "older than " + plaudCLITested},
+		{"0.2.9", "older than"},
+		{"0.4.0", "newer than " + plaudCLITested},
+		{"1.0.0", "newer than"},
+	} {
+		t.Run(c.version, func(t *testing.T) {
+			// What npm install -g leaves: bin/plaud, a link into the package.
+			dir := t.TempDir()
+			pkg := filepath.Join(dir, "lib", "node_modules", "@plaud-ai", "cli")
+			if err := os.MkdirAll(filepath.Join(pkg, "dist"), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			_ = os.WriteFile(filepath.Join(pkg, "package.json"), []byte(`{"name": "@plaud-ai/cli", "version": "`+c.version+`"}`), 0o644)
+			_ = os.WriteFile(filepath.Join(pkg, "dist", "index.js"), []byte("#!/usr/bin/env node\n"), 0o755)
+			bin := filepath.Join(dir, "bin", "plaud")
+			_ = os.MkdirAll(filepath.Dir(bin), 0o755)
+			if err := os.Symlink("../lib/node_modules/@plaud-ai/cli/dist/index.js", bin); err != nil {
+				t.Fatal(err)
+			}
+			tb := newTestBridge(t, `, "plaud": {"cli_path": "`+bin+`"}`)
+			cli := tb.plaud.Status().CLI
+			if cli.Version != c.version || (cli.Warning == "") != (c.warns == "") || !strings.Contains(cli.Warning, c.warns) {
+				t.Errorf("cli = %+v, want version %s and a warning saying %q", cli, c.version, c.warns)
+			}
+		})
+	}
+	tb, _ := plaudBridge(t, "")
+	if cli := tb.plaud.Status().CLI; !cli.Found || cli.Version != "" || cli.Warning != "" {
+		t.Errorf("a CLI outside an npm package: %+v, want found, no version and no warning", cli)
+	}
+}
+
 func TestPlaudConfigValidation(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 	for _, bad := range []string{`{"plaud":{"brain":"Not A Slug"}}`, `{"plaud":{"interval_seconds":5}}`} {
