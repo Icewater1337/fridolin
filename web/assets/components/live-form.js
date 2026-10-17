@@ -74,7 +74,7 @@ export function liveForm({ build, edits = (d) => d, onChange = () => {}, staleNo
     report();
   }
 
-  function discard() { rebuild(latest); }
+  function discard() { if (built) rebuild(latest); }
 
   box.addEventListener('input', report);
   box.addEventListener('change', report);
