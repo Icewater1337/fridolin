@@ -618,19 +618,34 @@ func (p *PlaudManager) poll(ctx context.Context) error {
 		pendingIDs = append(pendingIDs, id)
 	}
 	sort.Strings(pendingIDs)
+	// A recording that fails is retried next time, until it is given up,
+	// and does not hold up the others; its error is the check's, so the card
+	// shows it instead of counting the recording as waiting for Plaud.
+	var failed []error
+	maxAge := fmt.Sprintf("%d days", plaudPendingMaxAge/(24*time.Hour))
 	for _, id := range pendingIDs {
 		done, err := p.forward(ctx, id, br, jid)
 		if errors.Is(err, errPlaudAuth) {
 			_ = p.saveState(st)
 			return err
 		}
-		if err != nil {
-			log.Printf("plaud %s: %v (will retry)", id, err)
-		}
 		since := time.Unix(int64(st.Pending[id]), 0)
-		if done || time.Since(since) > plaudPendingMaxAge {
-			if !done {
-				log.Printf("plaud %s: no transcript after %v, giving up", id, plaudPendingMaxAge)
+		giveUp := !done && time.Since(since) > plaudPendingMaxAge
+		if err != nil {
+			next := "will retry"
+			if giveUp {
+				next = "given up after " + maxAge
+			}
+			failed = append(failed, fmt.Errorf("recording %s (%s): %w", id, next, err))
+		}
+		if done || giveUp {
+			// A recording that still fails may well have been transcribed
+			// long ago, so its line does not blame Plaud.
+			switch {
+			case giveUp && err != nil:
+				log.Printf("plaud %s: still failing after %s, giving up", id, maxAge)
+			case giveUp:
+				log.Printf("plaud %s: no transcript after %s, giving up", id, maxAge)
 			}
 			delete(st.Pending, id)
 			st.Seen = append(st.Seen, id)
@@ -640,7 +655,10 @@ func (p *PlaudManager) poll(ctx context.Context) error {
 		}
 	}
 	st.AuthNotified = 0
-	return p.saveState(st)
+	if err := p.saveState(st); err != nil {
+		return err
+	}
+	return errors.Join(failed...)
 }
 
 // seed starts the state for acct with the recordings it already has, all

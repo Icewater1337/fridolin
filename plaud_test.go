@@ -262,6 +262,86 @@ func TestPlaudMissingBrainIsReported(t *testing.T) {
 	}
 }
 
+// A recording that cannot be fetched is not counted as waiting for Plaud:
+// the check fails with its error, which the card shows, and the recording
+// arrives once the problem is gone.
+func TestPlaudDeliveryErrorIsShown(t *testing.T) {
+	for _, fixture := range []string{"fail_file", "fail_transcript"} {
+		t.Run(fixture, func(t *testing.T) {
+			tb, fp := plaudBridge(t, "")
+			fp.write(fixture, "")
+			err := plaudDeliver(t, tb, fp)
+			if err == nil || !strings.Contains(err.Error(), "recording "+plaudNew) {
+				t.Fatalf("poll error = %v, want the recording's error", err)
+			}
+			if st, _ := tb.plaud.loadState(); st.Pending[plaudNew] == 0 {
+				t.Errorf("state = %+v, want the recording still pending", st)
+			}
+			var status map[string]any
+			_ = json.Unmarshal(tb.do("GET", "/api/plaud/status?account=0", nil).Body.Bytes(), &status)
+			if e, _ := status["last_error"].(string); !strings.Contains(e, plaudNew) || !strings.Contains(e, "exit status 1") {
+				t.Errorf("status last_error = %q, want the recording's error", e)
+			}
+
+			_ = os.Remove(filepath.Join(fp.dir, fixture))
+			if err := tb.plaud.Poll(context.Background()); err != nil {
+				t.Fatal(err)
+			}
+			waitFor(t, 10*time.Second, "brain reply", func() bool { return len(tb.dev.Outbox()) > 0 })
+			var after map[string]any
+			_ = json.Unmarshal(tb.do("GET", "/api/plaud/status?account=0", nil).Body.Bytes(), &after)
+			if e, ok := after["last_error"]; ok {
+				t.Errorf("status last_error = %q after it was delivered", e)
+			}
+		})
+	}
+}
+
+// A recording that keeps failing is given up after three days, like one
+// Plaud never transcribes, and its error then says so instead of promising
+// another try. The log blames Plaud only for the one it never transcribed.
+func TestPlaudFailingRecordingIsGivenUpInTime(t *testing.T) {
+	for _, c := range []struct {
+		name    string
+		age     time.Duration // since the recording was first seen
+		ready   bool          // whether Plaud has its transcript
+		fails   bool          // whether fetching it fails
+		says    string        // in the check's error; "" for none
+		logs    string        // in the log; "" for no giving up
+		pending bool          // whether it is tried again
+	}{
+		{"recent", time.Hour, true, true, "(will retry)", "", true},
+		{"failing for over three days", plaudPendingMaxAge + time.Hour, true, true, "(given up after 3 days)", "still failing after 3 days, giving up", false},
+		{"untranscribed for over three days", plaudPendingMaxAge + time.Hour, false, false, "", "no transcript after 3 days, giving up", false},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			tb, fp := plaudBridge(t, "")
+			plaudSignIn(t, tb)
+			first := float64(time.Now().Add(-c.age).Unix())
+			if err := tb.plaud.saveState(&plaudState{Account: "u_1", Seen: []string{plaudOld1}, Pending: map[string]float64{plaudNew: first}}); err != nil {
+				t.Fatal(err)
+			}
+			fp.files(plaudNew, plaudOld1)
+			fp.recording(plaudNew, c.ready)
+			if c.fails {
+				fp.write("fail_file", "")
+			}
+			logs := captureLog(t)
+			err := tb.plaud.Poll(context.Background())
+			if c.says == "" && err != nil || c.says != "" && (err == nil || !strings.Contains(err.Error(), c.says)) {
+				t.Fatalf("poll error = %v, want it to say %q", err, c.says)
+			}
+			if got := strings.Join(logs(), "\n"); strings.Contains(got, "giving up") != (c.logs != "") || !strings.Contains(got, c.logs) {
+				t.Errorf("log = %q, want it to say %q", got, c.logs)
+			}
+			st, _ := tb.plaud.loadState()
+			if _, pending := st.Pending[plaudNew]; pending != c.pending || contains(st.Seen, plaudNew) == c.pending {
+				t.Errorf("state = %+v, want pending=%v", st, c.pending)
+			}
+		})
+	}
+}
+
 // With nothing waiting, a missing private chat blocks nothing: the poll must
 // not fail, and log the same error, on every interval. The card still says
 // what is missing, from the status call.

@@ -97,7 +97,7 @@ export default {
         if (s.summary_chat_brain) facts.push(h('div.muted.small', `What you write back in that chat goes to the ${s.summary_chat_brain} brain, not to ${s.target_brain}.`));
       }
       if (s.last_forwarded) facts.push(h('div', 'Last recording: ', h('strong', s.last_forwarded.name), ' → ', s.last_forwarded.brain, ' ', timeAgo(s.last_forwarded.at)));
-      if (s.last_poll) facts.push(h('div.muted', 'Checked ', timeAgo(s.last_poll), s.pending ? ` · ${s.pending} ${blocked ? 'waiting to be delivered' : 'waiting for Plaud’s transcript'}` : ''));
+      if (s.last_poll) facts.push(h('div.muted', 'Checked ', timeAgo(s.last_poll), s.pending ? ` · ${s.pending} ${blocked || s.last_error ? 'waiting to be delivered' : 'waiting for Plaud’s transcript'}` : ''));
       if (typeof s.seen === 'number') facts.push(h('div.muted.small', s.seen === 1 ? '1 recording known' : `${s.seen} recordings known`));
 
       mount(card,

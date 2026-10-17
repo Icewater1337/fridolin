@@ -58,3 +58,7 @@ plaud summary <of_id>          # Plaud's AI summary
 - Recordings are waiting and the Plaud card names a brain: the brain picked
   for Plaud was removed or is not approved. They arrive once another one is
   picked there.
+- The Plaud card says the last check failed for a recording: it could not be
+  fetched from Plaud (the card shows why). Fridolin tries again on every check
+  for up to three days; one deleted in Plaud meanwhile keeps failing until
+  then.

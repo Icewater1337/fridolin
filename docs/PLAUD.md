@@ -29,9 +29,12 @@ off: what you recorded in between still arrives (up to the latest 20).
 ## What happens
 
 Every minute (`plaud.interval_seconds`) Fridolin asks Plaud for recent
-recordings. A new one waits until its transcript is ready (up to three days).
-Then Fridolin writes a `.txt` with the details, Plaud's summary and the
-timestamped transcript to `~/.fridolin/media/plaud/` (as
+recordings. A new one waits until its transcript is ready (up to three days);
+if fetching it fails, the next check tries again and the Plaud card shows
+the error meanwhile. (A recording deleted in Plaud before its transcript was
+ready keeps failing like this until those three days are up.) Then Fridolin
+writes a `.txt` with the details, Plaud's summary and the timestamped
+transcript to `~/.fridolin/media/plaud/` (as
 `DD.MM.YYYY - <name> - <Plaud ID>.txt`; a recording handed over again
 rewrites its file rather than adding a copy), and gives it to the brain
 like a WhatsApp attachment, with an instruction (`plaud.message`; `{name}`,
