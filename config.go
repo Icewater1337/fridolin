@@ -276,14 +276,22 @@ type SandboxConfig struct {
 // QueueConfig decides what happens when a message arrives while the brain is
 // still busy with the previous one.
 type QueueConfig struct {
-	// Mode "queue" (default) runs messages one after another; "interrupt"
-	// stops the current run and starts on the newest message.
+	// Mode is queueModeQueue (default) or queueModeInterrupt.
 	Mode string `json:"mode,omitempty"`
 	// MaxPending caps the queue per brain (default 10).
 	MaxPending int `json:"max_pending,omitempty"`
 	// Notify sends "⏳ queued" when a tagged message has to wait (default true).
 	Notify *bool `json:"notify,omitempty"`
 }
+
+// The queue modes. The Settings page offers the same two values.
+const (
+	// queueModeQueue runs a brain's messages one after another.
+	queueModeQueue = "queue"
+	// queueModeInterrupt lets a newer request replace its sender's own in
+	// the same chat, waiting or running.
+	queueModeInterrupt = "interrupt"
+)
 
 // DebounceConfig merges messages that arrive in quick succession from the
 // same person in the same chat (several photos, a file plus its question)
@@ -464,7 +472,7 @@ func effective(file *Config) (*Config, error) {
 		cfg.HTTPListen = defaultHTTPListen
 	}
 	if cfg.Queue.Mode == "" {
-		cfg.Queue.Mode = "queue"
+		cfg.Queue.Mode = queueModeQueue
 	}
 	if cfg.Queue.MaxPending <= 0 {
 		cfg.Queue.MaxPending = defaultQueueMax
@@ -642,9 +650,9 @@ func (c *Config) validate() error {
 		return fmt.Errorf("brain_effort %q must be one of low, medium, high, xhigh, max", c.BrainEffort)
 	}
 	switch c.Queue.Mode {
-	case "queue", "interrupt":
+	case queueModeQueue, queueModeInterrupt:
 	default:
-		return fmt.Errorf("queue.mode must be \"queue\" or \"interrupt\", not %q", c.Queue.Mode)
+		return fmt.Errorf("queue.mode must be %q or %q, not %q", queueModeQueue, queueModeInterrupt, c.Queue.Mode)
 	}
 	switch c.Sandbox.GitConfig {
 	case "read", "deny":

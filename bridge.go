@@ -281,7 +281,7 @@ func (b *Bridge) handleInbound(ctx context.Context, m Inbound) {
 	// A command must also be addressed to the bridge. In a group, an untagged
 	// "!stop" is someone talking to the others: it must not stop anything,
 	// and the bridge must not answer it.
-	if m.Source != "ingest" && m.Brain == "" && !m.Silent && b.handleCommand(ctx, m, cfg) {
+	if m.Source != sourceIngest && m.Brain == "" && !m.Silent && b.handleCommand(ctx, m, cfg) {
 		return
 	}
 	if m.Text == "" && len(m.Media) == 0 && m.Quoted == nil {
@@ -303,7 +303,7 @@ func (b *Bridge) handleInbound(ctx context.Context, m Inbound) {
 	}
 	if br == nil {
 		log.Printf("No brain configured for %s — add one in the dashboard", m.JID)
-		if !m.Silent && m.Source != "ingest" {
+		if !m.Silent && m.Source != sourceIngest {
 			_ = b.wa.SendMessage(ctx, m.JID, "🧠 No brain is set up for this chat yet. Open the bridge dashboard and add one.")
 		}
 		return

@@ -59,7 +59,7 @@ func TestSandboxFailsClosed(t *testing.T) {
 			if _, err := os.Stat(tmuxCalls); !os.IsNotExist(err) {
 				t.Error("a refused run started the tmux viewer")
 			}
-			if last := mgr.Get("a").Snapshot().Last; last == nil || last.Outcome != "error" {
+			if last := mgr.Get("a").Snapshot().Last; last == nil || last.Outcome != outcomeError {
 				t.Errorf("last run = %+v, want outcome error", last)
 			}
 

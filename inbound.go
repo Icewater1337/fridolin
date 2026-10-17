@@ -27,9 +27,19 @@ type Inbound struct {
 	// Silent means untagged group chatter: the brain reads it to keep up with
 	// the conversation but sends nothing back.
 	Silent bool
-	Source string // "whatsapp", "ingest" or "dev"
+	Source string // sourceWhatsApp, sourceIngest or sourceDev
 	At     time.Time
 }
+
+// Where a message came from, Inbound.Source.
+const (
+	sourceWhatsApp = "whatsapp"
+	// sourceIngest is files handed in outside WhatsApp, through /ingest or
+	// the Plaud integration: never a command, and never interrupting.
+	sourceIngest = "ingest"
+	// sourceDev is the dashboard's dev page (--no-whatsapp).
+	sourceDev = "dev"
+)
 
 // Quote is the message a reply quotes.
 type Quote struct {

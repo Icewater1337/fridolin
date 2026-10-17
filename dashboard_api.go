@@ -1079,7 +1079,7 @@ func (b *Bridge) apiDevInbound(w http.ResponseWriter, r *http.Request) {
 	}
 	// Apply the same access rules and trigger handling as WhatsApp messages.
 	cfg := b.cfgs.Get()
-	m := Inbound{JID: req.JID, Brain: req.Brain, Sender: req.Sender, Text: req.Text, Media: req.Media, Silent: req.Silent, Source: "dev", At: time.Now()}
+	m := Inbound{JID: req.JID, Brain: req.Brain, Sender: req.Sender, Text: req.Text, Media: req.Media, Silent: req.Silent, Source: sourceDev, At: time.Now()}
 	if m.IsGroup() {
 		if !slices.Contains(cfg.AllowedGroups, m.JID) {
 			b.recordIgnored("group", m.JID, "", m.Sender, "")

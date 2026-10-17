@@ -129,7 +129,7 @@ func (b *Bridge) appendHTTPMessageToHistory(jid, text string) {
 	if br == nil {
 		return
 	}
-	br.appendHistory(jid, br.id, text, "out")
+	br.appendHistory(jid, br.id, text, historyOut)
 }
 
 // httpIngest handles POST /ingest. It feeds files that arrived outside
@@ -200,7 +200,7 @@ func (b *Bridge) httpIngest(w http.ResponseWriter, r *http.Request) {
 // so it runs there even when jid, the chat that gets the answer, belongs to
 // another brain.
 func (b *Bridge) handOff(br *Brain, jid, sender, text string, media []string) {
-	m := Inbound{JID: jid, Brain: br.ID(), Sender: sender, Text: text, Media: media, Source: "ingest", At: time.Now()}
+	m := Inbound{JID: jid, Brain: br.ID(), Sender: sender, Text: text, Media: media, Source: sourceIngest, At: time.Now()}
 	b.handleInbound(context.Background(), m)
 }
 

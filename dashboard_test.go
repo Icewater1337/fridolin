@@ -461,7 +461,7 @@ func TestIngestOTPGuardChecksTheNamedBrain(t *testing.T) {
 	tb := newTestBridge(t, `, "ingest": {"enabled": true}, "otp_guard": true, "otp_markers": ["Examplebank 2FA"]`)
 	tb.addFolderBrain(t, BrainManifest{ID: "dm", Name: "DM", Routing: BrainRouting{HandlesDMs: true}})
 	upDir := tb.addFolderBrain(t, BrainManifest{ID: "up", Name: "Uploads", ReplyChat: dm})
-	tb.brainMgr.Get("up").appendHistory(dm, "up", "Examplebank 2FA: reply with the code", "out")
+	tb.brainMgr.Get("up").appendHistory(dm, "up", "Examplebank 2FA: reply with the code", historyOut)
 
 	if w := tb.ingest(`{"brain":"up","text":"483920"}`); w.Code != 202 {
 		t.Fatalf("ingest: %d %s", w.Code, w.Body.String())
@@ -548,7 +548,7 @@ func TestResetReachesAHandOffInItsReplyChat(t *testing.T) {
 	}
 	waitFor(t, 5*time.Second, "the second file to wait", func() bool { return len(up.Snapshot().Queue) == 1 })
 
-	tb.handleInbound(context.Background(), Inbound{JID: dm, Sender: "15551234567", Text: "!reset", Source: "whatsapp"})
+	tb.handleInbound(context.Background(), Inbound{JID: dm, Sender: "15551234567", Text: "!reset", Source: sourceWhatsApp})
 	if !tb.sentPrefix(dm, "✅ Cleared anything this chat had running or waiting") {
 		t.Errorf("!reset answered %q, want that it cleared the chat", tb.sentTo(dm))
 	}
@@ -571,7 +571,7 @@ func TestStopCountsWaitingHandOffs(t *testing.T) {
 	t.Setenv("WCB_FAKE_SLEEP_MS", "30000")
 	up := tb.brainMgr.Get("up")
 
-	if _, _, _, err := tb.brainMgr.Submit(Inbound{JID: group, Sender: "15551234567", Text: "group work", Source: "whatsapp"}); err != nil {
+	if _, _, _, err := tb.brainMgr.Submit(Inbound{JID: group, Sender: "15551234567", Text: "group work", Source: sourceWhatsApp}); err != nil {
 		t.Fatal(err)
 	}
 	waitFor(t, 5*time.Second, "up's group run", func() bool { r := up.Snapshot().Running; return r != nil && r.PID > 0 })
@@ -580,7 +580,7 @@ func TestStopCountsWaitingHandOffs(t *testing.T) {
 	}
 	waitFor(t, 5*time.Second, "the file to wait", func() bool { return len(up.Snapshot().Queue) == 1 })
 
-	tb.handleInbound(context.Background(), Inbound{JID: dm, Sender: "15551234567", Text: "!stop", Source: "whatsapp"})
+	tb.handleInbound(context.Background(), Inbound{JID: dm, Sender: "15551234567", Text: "!stop", Source: sourceWhatsApp})
 	if !tb.sentPrefix(dm, "🛑 Nothing was running for this chat; cleared") {
 		t.Errorf("!stop answered %q, want that it cleared the waiting file", tb.sentTo(dm))
 	}

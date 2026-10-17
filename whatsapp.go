@@ -467,7 +467,7 @@ func (wa *WhatsAppClient) handleDMMessage(msg *events.Message, senderNumber stri
 
 	go wa.handler(context.Background(), Inbound{
 		JID: chatJID, Sender: senderNumber, Text: text, Media: mediaList(mediaPath),
-		Quoted: quoted, Source: "whatsapp", At: msg.Info.Timestamp,
+		Quoted: quoted, Source: sourceWhatsApp, At: msg.Info.Timestamp,
 	})
 }
 
@@ -577,7 +577,7 @@ func (wa *WhatsAppClient) handleGroupMessage(msg *events.Message) {
 	log.Printf("Group message from %s (%q) by %s: processing (silent=%v)", groupJID, groupName, senderNumber, silent)
 	go wa.handler(context.Background(), Inbound{
 		JID: groupJID, Sender: senderNumber, Text: text, Media: mediaList(mediaPath),
-		Quoted: quoted, Silent: silent, Source: "whatsapp", At: msg.Info.Timestamp,
+		Quoted: quoted, Silent: silent, Source: sourceWhatsApp, At: msg.Info.Timestamp,
 	})
 }
 

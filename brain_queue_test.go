@@ -226,7 +226,7 @@ func TestInterruptModeOnlyReplacesTheSendersOwnRun(t *testing.T) {
 	otherDM := Inbound{JID: "15559876543@s.whatsapp.net", Sender: "15559876543", Text: "unrelated"} // also brain a
 	// ingest is a file handed to brain a through /ingest, answered in the DM.
 	ingest := func(sender, text string) Inbound {
-		return Inbound{JID: "15551234567@s.whatsapp.net", Sender: sender, Text: text, Source: "ingest"}
+		return Inbound{JID: "15551234567@s.whatsapp.net", Sender: sender, Text: text, Source: sourceIngest}
 	}
 	cases := []struct {
 		name          string

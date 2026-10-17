@@ -1104,24 +1104,24 @@ func TestRecentOutboundLooksLikeOTPRequest(t *testing.T) {
 		}
 	}
 
-	write(historyEntry{Type: "out", From: "personal", Text: "🔐 Please send the code"})
+	write(historyEntry{Type: historyOut, From: "personal", Text: "🔐 Please send the code"})
 	if !recentOutboundLooksLikeOTPRequest(tail(), "personal") {
 		t.Error("should detect the OTP request")
 	}
 
 	// An inbound message quoting the marker must not arm the guard.
-	write(historyEntry{Type: "in", From: "15551234567", Text: "what is an OTP?"})
+	write(historyEntry{Type: historyIn, From: "15551234567", Text: "what is an OTP?"})
 	if recentOutboundLooksLikeOTPRequest(tail(), "personal") {
 		t.Error("inbound message must not arm the guard")
 	}
 
 	// Another brain's outbound message must not arm this brain's guard.
-	write(historyEntry{Type: "out", From: "team", Text: "🔐 send the code"})
+	write(historyEntry{Type: historyOut, From: "team", Text: "🔐 send the code"})
 	if recentOutboundLooksLikeOTPRequest(tail(), "personal") {
 		t.Error("another brain's message must not arm the guard")
 	}
 
-	write(historyEntry{Type: "out", From: "personal", Text: "here is your summary"})
+	write(historyEntry{Type: historyOut, From: "personal", Text: "here is your summary"})
 	if recentOutboundLooksLikeOTPRequest(tail(), "personal") {
 		t.Error("ordinary message must not arm the guard")
 	}
@@ -1314,5 +1314,32 @@ func TestIsLoopbackAddr(t *testing.T) {
 		if isLoopbackAddr(a) {
 			t.Errorf("isLoopbackAddr(%q) = true, want false", a)
 		}
+	}
+}
+
+// Some names are read outside Go: the dashboard labels the run outcomes
+// and offers the queue modes, and tools/history_search.py filters history
+// entries by type. Only this test keeps the two sides in step.
+func TestNamesReadOutsideGo(t *testing.T) {
+	cases := []struct {
+		file string
+		want []string
+	}{
+		{"web/assets/components/brain.js", []string{outcomeOK + ": [", outcomeError + ": [", outcomeInterrupted + ": [", outcomeQuestion + ": ["}},
+		{"web/assets/pages/settings.js", []string{"def: '" + queueModeQueue + "'", "['" + queueModeQueue + "', ", "['" + queueModeInterrupt + "', "}},
+		{"tools/history_search.py", []string{`HISTORY_FILENAME = "` + historyFileName + `"`, `row.get("type") != "` + historyIn + `"`}},
+	}
+	for _, c := range cases {
+		t.Run(c.file, func(t *testing.T) {
+			data, err := os.ReadFile(filepath.Join(repoDir, c.file))
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, w := range c.want {
+				if !strings.Contains(string(data), w) {
+					t.Errorf("%s does not have %s", c.file, w)
+				}
+			}
+		})
 	}
 }

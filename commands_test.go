@@ -163,7 +163,7 @@ func TestQuotedReplyReachesModelAndHistory(t *testing.T) {
 		t.Errorf("the model was sent %q, want it to end in %q", got, want)
 	}
 	h := readHistory(t, br)
-	if len(h) == 0 || h[0].Type != "in" || h[0].Text != want {
+	if len(h) == 0 || h[0].Type != historyIn || h[0].Text != want {
 		t.Errorf("history = %+v, want the reply line first", h)
 	}
 }
@@ -172,7 +172,7 @@ func TestQuotedReplyReachesModelAndHistory(t *testing.T) {
 // the code must still be kept out of the history and the model.
 func TestOTPGuardDropsQuotedCode(t *testing.T) {
 	tb, br := newMainBridge(t, "")
-	br.appendHistory(testDMChat, "main", "🔐 Please send me the verification code", "out")
+	br.appendHistory(testDMChat, "main", "🔐 Please send me the verification code", historyOut)
 
 	tb.whatsApp().handleMessage(replyEvent("483920", "🔐 Please send me the verification code"))
 
@@ -213,7 +213,7 @@ func TestJunkFilterIgnoresTheQuote(t *testing.T) {
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			tb, br := newMainBridge(t, "")
-			tb.handleInbound(context.Background(), Inbound{JID: testGroup, Sender: otherNumber, Text: c.text, Quoted: q, Silent: true, Source: "whatsapp"})
+			tb.handleInbound(context.Background(), Inbound{JID: testGroup, Sender: otherNumber, Text: c.text, Quoted: q, Silent: true, Source: sourceWhatsApp})
 			if c.want != "" {
 				waitFor(t, 5*time.Second, "the history line", func() bool { return len(readHistory(t, br)) > 0 })
 			} else {
@@ -248,7 +248,7 @@ func TestTriggerOnlyReplyAsksAboutTheQuote(t *testing.T) {
 		}},
 		{"in a group, handed to the bridge", testGroup, func(tb *testBridge) {
 			tb.handleInbound(context.Background(), Inbound{JID: testGroup, Sender: "15551234567",
-				Quoted: &Quote{From: otherNumber, Text: "Lunch?"}, Source: "whatsapp"})
+				Quoted: &Quote{From: otherNumber, Text: "Lunch?"}, Source: sourceWhatsApp})
 		}},
 	}
 	for _, c := range cases {
@@ -259,7 +259,7 @@ func TestTriggerOnlyReplyAsksAboutTheQuote(t *testing.T) {
 			if got := tb.sentTo(c.chat)[0]; !strings.HasSuffix(got, "says: "+want) {
 				t.Errorf("the model was sent %q, want it to end in %q", got, want)
 			}
-			if h := readHistory(t, br); len(h) == 0 || h[0].Type != "in" || h[0].Text != want {
+			if h := readHistory(t, br); len(h) == 0 || h[0].Type != historyIn || h[0].Text != want {
 				t.Errorf("history = %+v, want the reply line first", h)
 			}
 		})
@@ -311,8 +311,8 @@ func TestPreviewShowsTheQuote(t *testing.T) {
 	tb, br := newMainBridge(t, "")
 	q := &Quote{From: otherNumber, Text: "Lunch?"}
 	line := `[reply to ` + otherNumber + `: "Lunch?"]`
-	startLongRun(t, tb, br, Inbound{JID: testDMChat, Sender: "15551234567", Text: "yes", Quoted: q, Source: "whatsapp"})
-	tb.handleInbound(context.Background(), Inbound{JID: testGroup, Sender: "15551234567", Quoted: q, Source: "whatsapp"})
+	startLongRun(t, tb, br, Inbound{JID: testDMChat, Sender: "15551234567", Text: "yes", Quoted: q, Source: sourceWhatsApp})
+	tb.handleInbound(context.Background(), Inbound{JID: testGroup, Sender: "15551234567", Quoted: q, Source: sourceWhatsApp})
 
 	rt := br.Snapshot()
 	if rt.Running == nil || rt.Running.Preview != line+"\nyes" {
@@ -337,7 +337,7 @@ func TestQuotedCommandIsRecognised(t *testing.T) {
 
 	t.Run("!stop", func(t *testing.T) {
 		tb, br := newMainBridge(t, "")
-		startLongRun(t, tb, br, Inbound{JID: testDMChat, Sender: "15551234567", Text: "write a long report", Source: "whatsapp"})
+		startLongRun(t, tb, br, Inbound{JID: testDMChat, Sender: "15551234567", Text: "write a long report", Source: sourceWhatsApp})
 		tb.whatsApp().handleMessage(replyEvent("!stop", "⏳ Working on it..."))
 		// The confirmation goes out once the run has stopped, so wait for it
 		// rather than for the run: the snapshot clears a moment earlier.
@@ -439,9 +439,9 @@ func TestGroupCommandsMustBeAddressed(t *testing.T) {
 // An untagged "!stop" in a group must not stop the run a member asked for.
 func TestUntaggedStopInGroupIsChatter(t *testing.T) {
 	tb, br := newMainBridge(t, "")
-	startLongRun(t, tb, br, Inbound{JID: testGroup, Sender: "15551234567", Text: "summarise the thread", Source: "whatsapp"})
+	startLongRun(t, tb, br, Inbound{JID: testGroup, Sender: "15551234567", Text: "summarise the thread", Source: sourceWhatsApp})
 
-	tb.handleInbound(context.Background(), Inbound{JID: testGroup, Sender: otherNumber, Text: "!stop", Silent: true, Source: "whatsapp"})
+	tb.handleInbound(context.Background(), Inbound{JID: testGroup, Sender: otherNumber, Text: "!stop", Silent: true, Source: sourceWhatsApp})
 	time.Sleep(300 * time.Millisecond)
 	rt := br.Snapshot()
 	if rt.Running == nil || rt.Running.Preview != "summarise the thread" {
@@ -469,8 +469,8 @@ func TestQueueFullReplyNamesTheChatsStop(t *testing.T) {
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			tb, br := newMainBridge(t, `, "queue": {"max_pending": 1}`)
-			startLongRun(t, tb, br, Inbound{JID: testDMChat, Sender: "15551234567", Text: "dm 1", Source: "whatsapp"})
-			tb.handleInbound(context.Background(), Inbound{JID: testDMChat, Sender: "15551234567", Text: "dm 2", Source: "whatsapp"})
+			startLongRun(t, tb, br, Inbound{JID: testDMChat, Sender: "15551234567", Text: "dm 1", Source: sourceWhatsApp})
+			tb.handleInbound(context.Background(), Inbound{JID: testDMChat, Sender: "15551234567", Text: "dm 2", Source: sourceWhatsApp})
 			c.next.Source = "whatsapp"
 			tb.handleInbound(context.Background(), c.next)
 
@@ -516,15 +516,15 @@ func TestStopAndResetAreScopedToTheChat(t *testing.T) {
 		t.Run(c.name, func(t *testing.T) {
 			tb, br := newMainBridge(t, "")
 			ctx := context.Background()
-			startLongRun(t, tb, br, Inbound{JID: testDMChat, Sender: "15551234567", Text: "dm 1", Source: "whatsapp"})
+			startLongRun(t, tb, br, Inbound{JID: testDMChat, Sender: "15551234567", Text: "dm 1", Source: sourceWhatsApp})
 			pid := br.Snapshot().Running.PID
-			tb.handleInbound(ctx, Inbound{JID: testDMChat, Sender: "15551234567", Text: "dm 2", Source: "whatsapp"})
-			tb.handleInbound(ctx, Inbound{JID: testGroup, Sender: otherNumber, Text: "group 1", Source: "whatsapp"})
+			tb.handleInbound(ctx, Inbound{JID: testDMChat, Sender: "15551234567", Text: "dm 2", Source: sourceWhatsApp})
+			tb.handleInbound(ctx, Inbound{JID: testGroup, Sender: otherNumber, Text: "group 1", Source: sourceWhatsApp})
 			if q := queuePreviews(br); len(q) != 2 {
 				t.Fatalf("queue = %q, want dm 2 and group 1 waiting", q)
 			}
 
-			tb.handleInbound(ctx, Inbound{JID: c.chat, Sender: normalizeJID(c.chat), Text: c.cmd, Source: "whatsapp"})
+			tb.handleInbound(ctx, Inbound{JID: c.chat, Sender: normalizeJID(c.chat), Text: c.cmd, Source: sourceWhatsApp})
 
 			waitFor(t, 10*time.Second, "the run of "+c.wantRunning, func() bool {
 				r := br.Snapshot().Running
@@ -549,7 +549,7 @@ func TestResetReplySaysWhatItDoes(t *testing.T) {
 	tb, _ := newMainBridge(t, "")
 	ctx := context.Background()
 	for _, cmd := range []string{"!reset", "!help"} {
-		tb.handleInbound(ctx, Inbound{JID: testDMChat, Sender: "15551234567", Text: cmd, Source: "whatsapp"})
+		tb.handleInbound(ctx, Inbound{JID: testDMChat, Sender: "15551234567", Text: cmd, Source: sourceWhatsApp})
 	}
 	sent := tb.sentTo(testDMChat)
 	if len(sent) != 2 {
@@ -570,7 +570,7 @@ func TestResetReplySaysWhatItDoes(t *testing.T) {
 // message sees the history.
 func TestResetWithoutABrain(t *testing.T) {
 	tb := newTestBridge(t, "")
-	tb.handleInbound(context.Background(), Inbound{JID: testDMChat, Sender: "15551234567", Text: "!reset", Source: "whatsapp"})
+	tb.handleInbound(context.Background(), Inbound{JID: testDMChat, Sender: "15551234567", Text: "!reset", Source: sourceWhatsApp})
 	sent := tb.sentTo(testDMChat)
 	if len(sent) != 1 || sent[0] != "✅ Cleared anything this chat had running or waiting." {
 		t.Errorf("sent %q, want only that it cleared the chat", sent)
@@ -594,9 +594,9 @@ func TestBrainRunsWriteNoSessionOrProcessRows(t *testing.T) {
 			}
 		}
 	}
-	startLongRun(t, tb, br, Inbound{JID: testDMChat, Sender: "15551234567", Text: "dm 1", Source: "whatsapp"})
+	startLongRun(t, tb, br, Inbound{JID: testDMChat, Sender: "15551234567", Text: "dm 1", Source: sourceWhatsApp})
 	rows("while a brain runs")
-	tb.handleInbound(context.Background(), Inbound{JID: testDMChat, Sender: "15551234567", Text: "!reset", Source: "whatsapp"})
+	tb.handleInbound(context.Background(), Inbound{JID: testDMChat, Sender: "15551234567", Text: "!reset", Source: sourceWhatsApp})
 	waitFor(t, 10*time.Second, "the run to stop", func() bool { return br.Snapshot().Running == nil })
 	rows("after !reset")
 }
@@ -616,7 +616,7 @@ func TestInterruptModeQueuedNotice(t *testing.T) {
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			tb, br := newMainBridge(t, `, "queue": {"mode": "interrupt"}`)
-			startLongRun(t, tb, br, Inbound{JID: testDMChat, Sender: "15551234567", Text: "dm 1", Source: "whatsapp"})
+			startLongRun(t, tb, br, Inbound{JID: testDMChat, Sender: "15551234567", Text: "dm 1", Source: sourceWhatsApp})
 			t.Setenv("WCB_FAKE_SLEEP_MS", "10")
 			c.next.Source = "whatsapp"
 			tb.handleInbound(context.Background(), c.next)
@@ -635,10 +635,10 @@ func TestStopByLIDReachesTheDMsRun(t *testing.T) {
 	const lid = otherNumber + "@lid"
 	tb, br := newMainBridge(t, "")
 	ctx := context.Background()
-	startLongRun(t, tb, br, Inbound{JID: testDMChat, Sender: "15551234567", Text: "dm 1", Source: "whatsapp"})
-	tb.handleInbound(ctx, Inbound{JID: testDMChat, Sender: "15551234567", Text: "dm 2", Source: "whatsapp"})
+	startLongRun(t, tb, br, Inbound{JID: testDMChat, Sender: "15551234567", Text: "dm 1", Source: sourceWhatsApp})
+	tb.handleInbound(ctx, Inbound{JID: testDMChat, Sender: "15551234567", Text: "dm 2", Source: sourceWhatsApp})
 
-	tb.handleInbound(ctx, Inbound{JID: lid, Sender: "15551234567", Text: "!stop", Source: "whatsapp"})
+	tb.handleInbound(ctx, Inbound{JID: lid, Sender: "15551234567", Text: "!stop", Source: sourceWhatsApp})
 	if !tb.sentPrefix(lid, "🛑 Stopped") {
 		t.Errorf("!stop answered %q, want that it stopped the DM's run", tb.sentTo(lid))
 	}

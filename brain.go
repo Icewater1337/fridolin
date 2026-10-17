@@ -28,8 +28,15 @@ type historyEntry struct {
 	From string `json:"from"`
 	Chat string `json:"chat"` // JID of the chat (DM participant or group)
 	Text string `json:"text"`
-	Type string `json:"type"` // "in" or "out"
+	Type string `json:"type"` // historyIn or historyOut
 }
+
+// The history entry types. They are written to every brain's history file,
+// which tools/history_search.py reads, so their values must not change.
+const (
+	historyIn  = "in"  // a message to the brain
+	historyOut = "out" // a message the brain sent, or one sent on its behalf
+)
 
 // normalizeJID strips the WhatsApp server suffix and a leading + from a JID,
 // e.g. "15551234567@s.whatsapp.net" and "+15551234567" both become "15551234567".
@@ -125,7 +132,7 @@ func recentOutboundLooksLikeOTPRequest(lines []string, brainID string, markers .
 		if err := json.Unmarshal([]byte(lines[i]), &entry); err != nil {
 			continue
 		}
-		if entry.Type != "out" || entry.From != brainID {
+		if entry.Type != historyOut || entry.From != brainID {
 			continue
 		}
 		for _, marker := range markers {
@@ -247,9 +254,18 @@ type RunInfo struct {
 	Chat     string    `json:"chat"`
 	Finished time.Time `json:"finished"`
 	Seconds  float64   `json:"seconds"`
-	Outcome  string    `json:"outcome"` // ok, error, interrupted, question
+	Outcome  string    `json:"outcome"` // one of the outcome constants
 	Error    string    `json:"error,omitempty"`
 }
+
+// The outcomes of a run, RunInfo.Outcome. The dashboard labels each one
+// (outcomePill in web/assets/components/brain.js).
+const (
+	outcomeOK          = "ok"
+	outcomeError       = "error"
+	outcomeInterrupted = "interrupted"
+	outcomeQuestion    = "question" // it asked a question and is waiting
+)
 
 type brainRun struct {
 	cancel  context.CancelFunc
@@ -311,7 +327,7 @@ func (br *Brain) Submit(m Inbound) (pos int, busy bool, err error) {
 
 	// History first, so the run (and any later run) sees the message even when
 	// it is merged into a queue that is already moving.
-	br.appendHistory(m.JID, m.Sender, historyTextWithMedia(m.textWithQuote(), m.Media), "in")
+	br.appendHistory(m.JID, m.Sender, historyTextWithMedia(m.textWithQuote(), m.Media), historyIn)
 
 	br.mu.Lock()
 	if br.retired {
@@ -327,9 +343,9 @@ func (br *Brain) Submit(m Inbound) (pos int, busy bool, err error) {
 	// other people's requests in a group, keep their place, and untagged
 	// chatter never interrupts a run. Neither do ingested files, nor are they
 	// replaced: each is a job of its own, not a correction of the last one.
-	interrupting := s.queueMode == "interrupt" && !m.Silent && m.Source != "ingest"
+	interrupting := s.queueMode == queueModeInterrupt && !m.Silent && m.Source != sourceIngest
 	replaces := func(p Inbound) bool {
-		return p.JID == m.JID && (p.Silent || (interrupting && p.Sender == m.Sender && p.Source != "ingest"))
+		return p.JID == m.JID && (p.Silent || (interrupting && p.Sender == m.Sender && p.Source != sourceIngest))
 	}
 	kept := br.pending[:0]
 	for _, p := range br.pending {
@@ -395,7 +411,7 @@ func (br *Brain) worker() {
 		res := br.invoke(run, ctx, s, m)
 		res.Duration = time.Since(run.started)
 		if res.Err == nil && !res.AlreadySent && res.Text != "" {
-			br.appendHistory(m.JID, br.id, res.Text, "out")
+			br.appendHistory(m.JID, br.id, res.Text, historyOut)
 		}
 		br.finishRun(run)
 		br.recordLast(m, res)
@@ -407,14 +423,14 @@ func (br *Brain) worker() {
 }
 
 func (br *Brain) recordLast(m Inbound, res RunResult) {
-	info := &RunInfo{Chat: m.JID, Finished: time.Now(), Seconds: res.Duration.Seconds(), Outcome: "ok"}
+	info := &RunInfo{Chat: m.JID, Finished: time.Now(), Seconds: res.Duration.Seconds(), Outcome: outcomeOK}
 	switch {
 	case errors.Is(res.Err, errBrainInterrupted):
-		info.Outcome = "interrupted"
+		info.Outcome = outcomeInterrupted
 	case res.Err != nil:
-		info.Outcome, info.Error = "error", res.Err.Error()
+		info.Outcome, info.Error = outcomeError, res.Err.Error()
 	case res.AlreadySent:
-		info.Outcome = "question"
+		info.Outcome = outcomeQuestion
 	}
 	br.mu.Lock()
 	br.last = info
@@ -1135,7 +1151,7 @@ func (br *Brain) composePreface(chatJID string, isGroup bool) string {
 		timeStr := ts.Format("15:04")
 
 		var senderDisplay string
-		if entry.Type == "out" {
+		if entry.Type == historyOut {
 			senderDisplay = fmt.Sprintf("You (%s)", br.id)
 		} else if name, found := identities[normalizeJID(entry.From)]; found {
 			senderDisplay = fmt.Sprintf("%s (%s)", name, entry.From)
