@@ -52,6 +52,7 @@ import argparse
 import json
 import os
 import re
+import shlex
 import shutil
 import subprocess
 import sys
@@ -71,6 +72,9 @@ GROQ_MIN_INTERVAL = 6.0      # seconds between Groq calls, to stay under the rat
 # and the text of one 30 s window. Like openai-whisper, give the prompt at
 # most half.
 PROMPT_TOKENS = 448 // 2 - 1
+# Brains run this tool from their own folder, so an install hint names the
+# requirements file next to it rather than a path relative to the repo.
+LOCAL_REQUIREMENTS = Path(__file__).resolve().parent / "requirements-transcription.txt"
 
 
 def die(msg: str) -> NoReturn:
@@ -309,16 +313,15 @@ def choose_engines(engine: str) -> Engines:
     use_local = engine in ("auto", "local") and local_available()
     use_groq = engine in ("auto", "groq") and groq_available()
 
+    install_local = f"pip install -r {shlex.quote(str(LOCAL_REQUIREMENTS))}"
     if engine == "local" and not use_local:
-        die("--engine local, but transformers/torch are not installed. "
-            "Run: pip install -r tools/requirements-transcription.txt")
+        die(f"--engine local, but transformers/torch are not installed. Run: {install_local}")
     if engine == "groq" and not use_groq:
         die("--engine groq, but GROQ_API_KEY is unset or the groq package is missing. "
             "Run: pip install groq  and export GROQ_API_KEY=...")
     if not use_local and not use_groq:
-        die("No transcription engine available. Either install the local model "
-            "(pip install -r tools/requirements-transcription.txt) or set "
-            "GROQ_API_KEY and install the groq package.")
+        die(f"No transcription engine available. Either install the local model "
+            f"({install_local}) or set GROQ_API_KEY and install the groq package.")
     return Engines(local=use_local, groq=use_groq)
 
 

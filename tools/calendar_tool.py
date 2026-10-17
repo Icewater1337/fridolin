@@ -63,6 +63,7 @@ import contextlib
 import json
 import os
 import re
+import shlex
 import sys
 import traceback
 from datetime import datetime, time, timedelta
@@ -72,6 +73,10 @@ from typing import NoReturn
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 SCOPES = ["https://www.googleapis.com/auth/calendar"]
+
+# Brains run this tool from their own folder, so an install hint names the
+# requirements file next to it rather than a path relative to the repo.
+REQUIREMENTS = Path(__file__).resolve().parent / "requirements.txt"
 
 DATA_DIR = Path(
     os.environ.get("BRIDGE_CREDENTIALS_DIR")
@@ -190,7 +195,7 @@ def refresh_failure(e: Exception) -> str:
 def missing_package(e: ImportError) -> NoReturn:
     err(
         f"Missing Python package: {e}. Install the calendar extras with:\n"
-        "  pip3 install -r tools/requirements.txt"
+        f"  pip3 install -r {shlex.quote(str(REQUIREMENTS))}"
     )
 
 

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import shlex
 import shutil
 import subprocess
 import sys
@@ -543,6 +544,16 @@ class EnsureTimezoneTest(CalendarTestCase):
         code, out, _ = support.run(calendar_tool.ensure_timezone, "2026-01-06Tnoon")
         self.assertEqual(code, 1)
         self.assertIn("Cannot parse datetime", json.loads(out)["error"])
+
+
+class InstallHintTest(unittest.TestCase):
+    def test_names_the_requirements_file_itself(self):
+        # Brains run the tool from their own folder, where tools/ is no path.
+        want = support.TOOLS_DIR / "requirements.txt"
+        self.assertTrue(want.is_file())
+        code, out, _ = support.run(calendar_tool.missing_package, ImportError("No module named 'google'"))
+        self.assertEqual(code, 1)
+        self.assertIn(f"pip3 install -r {shlex.quote(str(want))}", json.loads(out)["error"])
 
 
 class ResolveTimezoneTest(CalendarTestCase):
