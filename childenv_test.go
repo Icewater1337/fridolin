@@ -171,8 +171,8 @@ func TestBrainGetsOnlyTheAllowlistedEnvironment(t *testing.T) {
 		"BRIDGE_DATA_DIR":        filepath.Join(home, "data"),
 		"BRIDGE_DB_PATH":         filepath.Join(home, "data", "bridge.db"),
 		// The fake CLI's own (testChildEnv).
-		"WCB_FAKE_CLAUDE":  "1",
-		"WCB_FAKE_ENV_LOG": got["WCB_FAKE_ENV_LOG"],
+		"FRIDOLIN_FAKE_CLAUDE":  "1",
+		"FRIDOLIN_FAKE_ENV_LOG": got["FRIDOLIN_FAKE_ENV_LOG"],
 	})
 	if !maps.Equal(got, want) {
 		for _, k := range slices.Sorted(maps.Keys(want)) {
@@ -314,7 +314,7 @@ func brainRunEnv(t *testing.T, env map[string]string, config string) (map[string
 	home := canonicalDir(t.TempDir())
 	envLog := filepath.Join(t.TempDir(), "brain.env")
 	all := maps.Clone(env)
-	maps.Copy(all, map[string]string{"HOME": home, "WCB_FAKE_CLAUDE": "1", "WCB_FAKE_ENV_LOG": envLog})
+	maps.Copy(all, map[string]string{"HOME": home, "FRIDOLIN_FAKE_CLAUDE": "1", "FRIDOLIN_FAKE_ENV_LOG": envLog})
 	onlyEnv(t, all)
 
 	m := testManifest("a")

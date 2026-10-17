@@ -143,7 +143,7 @@ func groupEvent(msg *waE2E.Message) *events.Message {
 // process is up.
 func startLongRun(t *testing.T, tb *testBridge, br *Brain, m Inbound) {
 	t.Helper()
-	t.Setenv("WCB_FAKE_SLEEP_MS", "30000")
+	t.Setenv("FRIDOLIN_FAKE_SLEEP_MS", "30000")
 	tb.handleInbound(context.Background(), m)
 	waitFor(t, 5*time.Second, "the run for "+m.JID, func() bool {
 		r := br.Snapshot().Running
@@ -617,7 +617,7 @@ func TestInterruptModeQueuedNotice(t *testing.T) {
 		t.Run(c.name, func(t *testing.T) {
 			tb, br := newMainBridge(t, `, "queue": {"mode": "interrupt"}`)
 			startLongRun(t, tb, br, Inbound{JID: testDMChat, Sender: "15551234567", Text: "dm 1", Source: sourceWhatsApp})
-			t.Setenv("WCB_FAKE_SLEEP_MS", "10")
+			t.Setenv("FRIDOLIN_FAKE_SLEEP_MS", "10")
 			c.next.Source = "whatsapp"
 			tb.handleInbound(context.Background(), c.next)
 			if got := tb.sentPrefix(c.next.JID, "⏳ Queued (#1)"); got != c.notice {

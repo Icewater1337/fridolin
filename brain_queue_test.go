@@ -205,7 +205,7 @@ func TestInterruptModeSupersedes(t *testing.T) {
 	mgr, d, _ := queueTestManager(t, 30000, `, "queue": {"mode": "interrupt"}`)
 	_, _, _, _ = mgr.Submit(dm("old"))
 	waitFor(t, 5*time.Second, "old run", func() bool { r := mgr.Get("a").Snapshot().Running; return r != nil && r.PID > 0 })
-	t.Setenv("WCB_FAKE_SLEEP_MS", "10")
+	t.Setenv("FRIDOLIN_FAKE_SLEEP_MS", "10")
 	_, _, _, _ = mgr.Submit(dm("new"))
 	waitFor(t, 10*time.Second, "two deliveries", func() bool { return d.count() == 2 })
 	runs := d.all()
@@ -255,7 +255,7 @@ func TestInterruptModeOnlyReplacesTheSendersOwnRun(t *testing.T) {
 			br, _, _, _ := mgr.Submit(c.running)
 			waitFor(t, 5*time.Second, "the first run", func() bool { r := br.Snapshot().Running; return r != nil && r.PID > 0 })
 			pid := br.Snapshot().Running.PID
-			t.Setenv("WCB_FAKE_SLEEP_MS", "10")
+			t.Setenv("FRIDOLIN_FAKE_SLEEP_MS", "10")
 			for _, w := range c.waiting {
 				if _, _, _, err := mgr.Submit(w); err != nil {
 					t.Fatal(err)
@@ -329,7 +329,7 @@ func TestInterruptModeKeepsOthersWaiting(t *testing.T) {
 			mgr, d, _ := queueTestManager(t, 30000, `, "queue": {"mode": "interrupt"}`)
 			br, _, _, _ := mgr.Submit(c.running)
 			waitFor(t, 5*time.Second, "the first run", func() bool { r := br.Snapshot().Running; return r != nil && r.PID > 0 })
-			t.Setenv("WCB_FAKE_SLEEP_MS", "10")
+			t.Setenv("FRIDOLIN_FAKE_SLEEP_MS", "10")
 			for _, w := range c.waiting {
 				_, _, _, _ = mgr.Submit(w)
 			}
@@ -730,7 +730,7 @@ func TestBrainRunsWithItsOwnClaudeSetup(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			mgr, d, home := queueTestManager(t, 0, tc.extra)
 			argsLog := filepath.Join(home, "args.log")
-			t.Setenv("WCB_FAKE_ARGS_LOG", argsLog)
+			t.Setenv("FRIDOLIN_FAKE_ARGS_LOG", argsLog)
 			mcp := filepath.Join(home, "a", ".mcp.json")
 			if tc.mcp != nil {
 				tc.mcp(t, mcp)
@@ -1072,7 +1072,7 @@ func TestStopKillsProcessesClaudeStarted(t *testing.T) {
 	// A command Claude started keeps the output pipe open; stopping must kill
 	// the whole process group, not just the CLI, or the stop hangs.
 	mgr, d, _ := queueTestManager(t, 30000, "")
-	t.Setenv("WCB_FAKE_CHILD", "1")
+	t.Setenv("FRIDOLIN_FAKE_CHILD", "1")
 	_, _, _, _ = mgr.Submit(dm("long task with a child"))
 	br := mgr.Get("a")
 	waitFor(t, 5*time.Second, "run with a pid", func() bool {
@@ -1096,7 +1096,7 @@ func TestBrainsDoNotSeeTheDotEnv(t *testing.T) {
 	t.Setenv("HOME", home)
 	clearEnv(t, "MODEL", "FRIDOLIN_TEST_DOTENV_ONLY")
 	envLog := filepath.Join(home, "brain.env")
-	t.Setenv("WCB_FAKE_ENV_LOG", envLog)
+	t.Setenv("FRIDOLIN_FAKE_ENV_LOG", envLog)
 	claude := fakeClaudeEnv(t, 0)
 	path := writeConfig(t, `{
 		"brain_mode": true,
@@ -1179,7 +1179,7 @@ func TestBrainsAreToldTheDataDir(t *testing.T) {
 				}
 			}
 			envLog := filepath.Join(home, "brain.env")
-			t.Setenv("WCB_FAKE_ENV_LOG", envLog)
+			t.Setenv("FRIDOLIN_FAKE_ENV_LOG", envLog)
 			claude := fakeClaudeEnv(t, 0)
 			path := writeConfig(t, `{`+c.settings+`
 				"claude_path": "`+claude+`"`+brainDirsJSON(t,

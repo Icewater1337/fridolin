@@ -15,10 +15,10 @@ import (
 )
 
 // TestMain lets the test binary stand in for the Claude CLI: with
-// WCB_FAKE_CLAUDE=1 it prints a stream-json result echoing its working
-// directory and the new message, after WCB_FAKE_SLEEP_MS. With
-// WCB_FAKE_READ it also reports whether it could read that file, and with
-// WCB_FAKE_ENV the value of that environment variable. Asked for
+// FRIDOLIN_FAKE_CLAUDE=1 it prints a stream-json result echoing its working
+// directory and the new message, after FRIDOLIN_FAKE_SLEEP_MS. With
+// FRIDOLIN_FAKE_READ it also reports whether it could read that file, and with
+// FRIDOLIN_FAKE_ENV the value of that environment variable. Asked for
 // --version, it answers testedClaudeVersion. Tests point
 // claude_path at os.Args[0], so no script or real CLI is needed.
 //
@@ -28,10 +28,10 @@ import (
 // useEmptyHome, moves them out of the checkout, see runInEmptyDir, and
 // passes testChildEnv on to the programs the bridge starts.
 func TestMain(m *testing.M) {
-	if os.Getenv("WCB_FAKE_PLAUD") == "1" && len(os.Args) > 1 && isPlaudCommand(os.Args[1]) {
+	if os.Getenv("FRIDOLIN_FAKE_PLAUD") == "1" && len(os.Args) > 1 && isPlaudCommand(os.Args[1]) {
 		os.Exit(fakePlaud(os.Args[1:]))
 	}
-	if os.Getenv("WCB_FAKE_CLAUDE") == "1" {
+	if os.Getenv("FRIDOLIN_FAKE_CLAUDE") == "1" {
 		fakeClaude()
 		return
 	}
@@ -57,11 +57,11 @@ func TestMain(m *testing.M) {
 }
 
 // testChildEnv is what the programs the bridge starts get in tests on top
-// of childEnvAllowlist: the WCB_FAKE_* variables that steer the fakes, this
+// of childEnvAllowlist: the FRIDOLIN_FAKE_* variables that steer the fakes, this
 // binary playing the Claude or Plaud CLI among them, and GORACE, which
 // keeps each run of this binary from waiting a second on exit under -race.
 var testChildEnv = []childEnvVar{
-	{"WCB_FAKE_*", anyChild},
+	{"FRIDOLIN_FAKE_*", anyChild},
 	{"GORACE", anyChild},
 }
 
@@ -152,23 +152,23 @@ func fakeClaude() {
 			prompt = args[i+1]
 		}
 	}
-	if os.Getenv("WCB_FAKE_CHILD") == "1" {
+	if os.Getenv("FRIDOLIN_FAKE_CHILD") == "1" {
 		// A grandchild that inherits stdout, like a shell command Claude ran.
 		child := exec.Command("sleep", "30")
 		child.Stdout = os.Stdout
 		_ = child.Start()
 	}
-	if ms, _ := strconv.Atoi(os.Getenv("WCB_FAKE_SLEEP_MS")); ms > 0 {
+	if ms, _ := strconv.Atoi(os.Getenv("FRIDOLIN_FAKE_SLEEP_MS")); ms > 0 {
 		time.Sleep(time.Duration(ms) * time.Millisecond)
 	}
-	if log := os.Getenv("WCB_FAKE_ARGS_LOG"); log != "" {
+	if log := os.Getenv("FRIDOLIN_FAKE_ARGS_LOG"); log != "" {
 		f, err := os.OpenFile(log, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600)
 		if err == nil {
 			fmt.Fprintln(f, strings.Join(args[:len(args)-1], " "))
 			f.Close()
 		}
 	}
-	if log := os.Getenv("WCB_FAKE_ENV_LOG"); log != "" {
+	if log := os.Getenv("FRIDOLIN_FAKE_ENV_LOG"); log != "" {
 		// What a brain inherits, one VAR=value per line.
 		_ = os.WriteFile(log, []byte(strings.Join(os.Environ(), "\n")+"\n"), 0o600)
 	}
@@ -179,7 +179,7 @@ func fakeClaude() {
 	}
 	wd, _ := os.Getwd()
 	out := fmt.Sprintf("echo:%s:%s", wd, msg)
-	if p := os.Getenv("WCB_FAKE_READ"); p != "" {
+	if p := os.Getenv("FRIDOLIN_FAKE_READ"); p != "" {
 		switch _, err := os.ReadFile(p); {
 		case err == nil:
 			out += " read=ok"
@@ -189,7 +189,7 @@ func fakeClaude() {
 			out += " read=error: " + err.Error()
 		}
 	}
-	if name := os.Getenv("WCB_FAKE_ENV"); name != "" {
+	if name := os.Getenv("FRIDOLIN_FAKE_ENV"); name != "" {
 		if v, ok := os.LookupEnv(name); ok {
 			out += " " + name + "=" + v
 		} else {
@@ -204,8 +204,8 @@ func fakeClaude() {
 // fakeClaudeEnv makes brains in this test spawn the fake CLI.
 func fakeClaudeEnv(t *testing.T, sleepMS int) string {
 	t.Helper()
-	t.Setenv("WCB_FAKE_CLAUDE", "1")
-	t.Setenv("WCB_FAKE_SLEEP_MS", strconv.Itoa(sleepMS))
+	t.Setenv("FRIDOLIN_FAKE_CLAUDE", "1")
+	t.Setenv("FRIDOLIN_FAKE_SLEEP_MS", strconv.Itoa(sleepMS))
 	return os.Args[0]
 }
 
@@ -276,7 +276,7 @@ func isPlaudCommand(c string) bool {
 	return false
 }
 
-// fakePlaud plays Plaud's CLI from fixture files in WCB_FAKE_PLAUD_DIR:
+// fakePlaud plays Plaud's CLI from fixture files in FRIDOLIN_FAKE_PLAUD_DIR:
 // files.txt, file_<id>.txt, transcript_<id>.txt, summary_<id>.txt, and
 // "account" (the id `me` reports). Like @plaud-ai/cli 0.3.15 it prints its
 // spinner line to stderr and exits 2 only when the login is rejected: an
@@ -284,7 +284,7 @@ func isPlaudCommand(c string) bool {
 // (Plaud unreachable), and fail_<command> makes that command exit 1. Each
 // call is logged with HOME, and the last call's environment is in env.log.
 func fakePlaud(args []string) int {
-	dir := os.Getenv("WCB_FAKE_PLAUD_DIR")
+	dir := os.Getenv("FRIDOLIN_FAKE_PLAUD_DIR")
 	if f, err := os.OpenFile(dir+"/calls.log", os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600); err == nil {
 		fmt.Fprintf(f, "HOME=%s %s\n", os.Getenv("HOME"), strings.Join(args, " "))
 		f.Close()

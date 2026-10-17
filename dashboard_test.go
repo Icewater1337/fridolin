@@ -494,7 +494,7 @@ func TestStopReachesAHandOffInItsReplyChat(t *testing.T) {
 			tb := newTestBridge(t, `, "ingest": {"enabled": true}`)
 			tb.addFolderBrain(t, BrainManifest{ID: "dm", Name: "DM", Routing: BrainRouting{HandlesDMs: true}})
 			tb.addFolderBrain(t, BrainManifest{ID: "up", Name: "Uploads", ReplyChat: dm})
-			t.Setenv("WCB_FAKE_SLEEP_MS", "30000")
+			t.Setenv("FRIDOLIN_FAKE_SLEEP_MS", "30000")
 			up := tb.brainMgr.Get("up")
 
 			if w := tb.ingest(`{"brain":"up","text":"file this"}`); w.Code != 202 {
@@ -536,7 +536,7 @@ func TestResetReachesAHandOffInItsReplyChat(t *testing.T) {
 	tb := newTestBridge(t, `, "ingest": {"enabled": true}`)
 	tb.addFolderBrain(t, BrainManifest{ID: "dm", Name: "DM", Routing: BrainRouting{HandlesDMs: true}})
 	tb.addFolderBrain(t, BrainManifest{ID: "up", Name: "Uploads", ReplyChat: dm})
-	t.Setenv("WCB_FAKE_SLEEP_MS", "30000")
+	t.Setenv("FRIDOLIN_FAKE_SLEEP_MS", "30000")
 	up := tb.brainMgr.Get("up")
 
 	if w := tb.ingest(`{"brain":"up","text":"file this"}`); w.Code != 202 {
@@ -568,7 +568,7 @@ func TestStopCountsWaitingHandOffs(t *testing.T) {
 	tb := newTestBridge(t, `, "ingest": {"enabled": true}`)
 	tb.addFolderBrain(t, BrainManifest{ID: "dm", Name: "DM", Routing: BrainRouting{HandlesDMs: true}})
 	tb.addFolderBrain(t, BrainManifest{ID: "up", Name: "Uploads", ReplyChat: dm, Routing: BrainRouting{Groups: []string{group}}})
-	t.Setenv("WCB_FAKE_SLEEP_MS", "30000")
+	t.Setenv("FRIDOLIN_FAKE_SLEEP_MS", "30000")
 	up := tb.brainMgr.Get("up")
 
 	if _, _, _, err := tb.brainMgr.Submit(Inbound{JID: group, Sender: "15551234567", Text: "group work", Source: sourceWhatsApp}); err != nil {

@@ -91,7 +91,7 @@ func TestBrainRunsKnowWhereTheToolsAre(t *testing.T) {
 			useLayout(t, bridgeLayout{Tools: c.tools})
 			t.Setenv("FRIDOLIN_TOOLS_DIR", "")
 			os.Unsetenv("FRIDOLIN_TOOLS_DIR")
-			t.Setenv("WCB_FAKE_ENV", "FRIDOLIN_TOOLS_DIR")
+			t.Setenv("FRIDOLIN_FAKE_ENV", "FRIDOLIN_TOOLS_DIR")
 			cfg, _ := brainASetup(t)
 			mgr := newTestManager(t, cfg)
 			d := &deliveries{}

@@ -33,7 +33,7 @@ func TestSandboxFailsClosed(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			mgr, d, home := queueTestManager(t, 0, `, "viewer": true`)
 			argsLog := filepath.Join(home, "args.log")
-			t.Setenv("WCB_FAKE_ARGS_LOG", argsLog)
+			t.Setenv("FRIDOLIN_FAKE_ARGS_LOG", argsLog)
 			tmuxCalls := fakeTmux(t)
 			sp := mgr.profiler
 			sp.mu.Lock()
@@ -86,9 +86,9 @@ func fakeTmux(t *testing.T) string {
 	t.Helper()
 	dir := t.TempDir()
 	calls := filepath.Join(dir, "calls.log")
-	t.Setenv("WCB_FAKE_TMUX_LOG", calls)
+	t.Setenv("FRIDOLIN_FAKE_TMUX_LOG", calls)
 	script := filepath.Join(dir, "tmux")
-	if err := os.WriteFile(script, []byte("#!/bin/sh\necho \"$@\" >> \"$WCB_FAKE_TMUX_LOG\"\nexit 1\n"), 0o700); err != nil {
+	if err := os.WriteFile(script, []byte("#!/bin/sh\necho \"$@\" >> \"$FRIDOLIN_FAKE_TMUX_LOG\"\nexit 1\n"), 0o700); err != nil {
 		t.Fatal(err)
 	}
 	tmuxOnce.Do(func() {}) // keep findTmux from looking up the real one

@@ -339,7 +339,7 @@ func TestShellBridgeVariablesDoNotReachTests(t *testing.T) {
 	// Runs the test binary again with every variable the bridge reads set,
 	// the way a developer's shell might export them for a real bridge, and
 	// checks from inside that TestMain cleared them before any test ran.
-	if os.Getenv("WCB_CHECK_BRIDGE_VARIABLES_CLEARED") == "1" {
+	if os.Getenv("FRIDOLIN_TEST_CHECK_BRIDGE_VARIABLES_CLEARED") == "1" {
 		for _, k := range bridgeVariables() {
 			if _, ok := os.LookupEnv(k); ok {
 				t.Errorf("%s from the shell reached the tests", k)
@@ -348,7 +348,7 @@ func TestShellBridgeVariablesDoNotReachTests(t *testing.T) {
 		return
 	}
 	cmd := exec.Command(os.Args[0], "-test.run=^TestShellBridgeVariablesDoNotReachTests$", "-test.count=1", "-test.v")
-	cmd.Env = append(os.Environ(), "WCB_CHECK_BRIDGE_VARIABLES_CLEARED=1")
+	cmd.Env = append(os.Environ(), "FRIDOLIN_TEST_CHECK_BRIDGE_VARIABLES_CLEARED=1")
 	notTheTests := filepath.Join(t.TempDir(), "not-the-tests")
 	for _, k := range bridgeVariables() {
 		cmd.Env = append(cmd.Env, k+"="+notTheTests)
