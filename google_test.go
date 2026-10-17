@@ -441,3 +441,41 @@ func TestCalendarTokenRequestsGoToGoogleWithYourClient(t *testing.T) {
 		}
 	})
 }
+
+// TestOversizedCalendarTokenIsRefused: a brain can make its token file as
+// large as it likes. The bridge refuses one larger than maxBrainFile
+// rather than load it, and so neither refreshes it nor revokes it.
+func TestOversizedCalendarTokenIsRefused(t *testing.T) {
+	srv, got := fakeGoogle(t)
+	tb := newTestBridge(t, "")
+	if w := tb.do("PUT", "/api/google/client", map[string]string{"json": fmt.Sprintf(testClientJSON, srv.URL)}); w.Code != 200 {
+		t.Fatal(w.Body.String())
+	}
+	if w := tb.do("POST", "/api/brains", map[string]any{"path": "~/a", "create_dir": true, "manifest": BrainManifest{ID: "a", Name: "A"}}); w.Code != 200 {
+		t.Fatal(w.Body.String())
+	}
+	// Valid JSON, expired, padded past the limit.
+	tok, _ := json.Marshal(googleToken{
+		Token: "OLD", RefreshToken: "A-REFRESH",
+		ClientID: "123-abc.apps.googleusercontent.com", ClientSecret: "TEST-CLIENT-SECRET",
+		Expiry: "2020-01-01T00:00:00.000000Z",
+	})
+	tok = append(tok, strings.Repeat(" ", maxBrainFile)...)
+	if err := os.WriteFile(tb.google.tokenPath("a"), tok, 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	var st struct {
+		ListError string `json:"list_error"`
+	}
+	_ = json.Unmarshal(tb.do("GET", "/api/brains/a/calendar", nil).Body.Bytes(), &st)
+	if !strings.Contains(st.ListError, "larger than 256 KiB") {
+		t.Errorf("list_error = %q, want the token refused as too large", st.ListError)
+	}
+	if w := tb.do("DELETE", "/api/brains/a/calendar", nil); w.Code != 200 {
+		t.Fatal(w.Body.String())
+	}
+	if (*got)["refresh_token"] != "" || (*got)["revoked"] != "" {
+		t.Errorf("the token was used: %v", *got)
+	}
+}

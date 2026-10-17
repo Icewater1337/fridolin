@@ -711,3 +711,53 @@ func TestManifestIsNotFollowedOutOfTheFolder(t *testing.T) {
 		})
 	}
 }
+
+// TestBrainFilesAreReadUpToALimit: a brain can make its prompt and its
+// identity map as large as it likes, and the bridge reads both for every
+// message. It reads up to maxBrainFile and treats a larger file as
+// missing, rather than load it all into memory.
+func TestBrainFilesAreReadUpToALimit(t *testing.T) {
+	cases := []struct {
+		name string
+		size int
+		ok   bool
+	}{
+		{"at the limit", maxBrainFile, true},
+		{"over the limit", maxBrainFile + 1, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			br, home := folderBrain(t)
+			dir := filepath.Join(home, "a")
+			// Each file is tc.size bytes, what to look for first.
+			const prompt, table = "BIG PROMPT\n", "| 15551234567 | Alex | |\n"
+			for name, head := range map[string]string{"brain-prompt.md": prompt, identityMapFile: table} {
+				data := head + strings.Repeat(" ", tc.size-len(head))
+				if err := os.WriteFile(filepath.Join(dir, name), []byte(data), 0o600); err != nil {
+					t.Fatal(err)
+				}
+			}
+			br.appendHistory("15551234567@s.whatsapp.net", "15551234567", "hi", "in")
+			logged := captureLog(t)
+			got := br.buildPrompt(br.settings.Load(), dm("hello"))
+			lines := logged()
+			if tc.ok {
+				if !strings.HasPrefix(got, "BIG PROMPT") || !strings.Contains(got, "Alex (15551234567): hi") || len(lines) > 0 {
+					t.Errorf("prompt starts %.40q, log = %q; want both files read", got, lines)
+				}
+				return
+			}
+			if strings.Contains(got, "BIG PROMPT") || strings.Contains(got, "Alex") {
+				t.Errorf("read a file over the limit; prompt starts %.40q", got)
+			}
+			// The prompt is read first, then the map for the preface.
+			want := []string{
+				"brain a: could not read prompt file brain-prompt.md: larger than 256 KiB",
+				"brain a: could not read identity map " + identityMapFile + ": larger than 256 KiB",
+			}
+			if len(lines) != 2 || !strings.HasSuffix(lines[0], want[0]) || !strings.HasSuffix(lines[1], want[1]) {
+				t.Errorf("log = %q, want %q", lines, want)
+			}
+		})
+	}
+}

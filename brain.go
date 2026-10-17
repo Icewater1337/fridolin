@@ -441,14 +441,15 @@ func (br *Brain) holdsFolder(dir string) bool {
 	return err == nil && os.SameFile(held, at)
 }
 
-// readFile reads the file name in the brain's folder (see openInFolder).
+// readFile reads the file name in the brain's folder (see openInFolder),
+// at most maxBrainFile of it.
 func (br *Brain) readFile(name string) ([]byte, error) {
 	f, err := openInFolder(br.root, name, os.O_RDONLY, 0)
 	if err != nil {
 		return nil, err
 	}
 	defer f.Close()
-	return io.ReadAll(f)
+	return readAtMost(f)
 }
 
 // BrainRuntime is a brain's live state, for the dashboard.
@@ -778,11 +779,25 @@ func jsonObject(data []byte) (map[string]json.RawMessage, error) {
 	return obj, nil
 }
 
-// maxBrainFile bounds what the bridge reads of a brain's .mcp.json and
-// settings: far more than any real one holds, so that a brain cannot make
+// maxBrainFile bounds what the bridge reads of the files a brain can
+// write: its .mcp.json, settings, prompt, identity map and calendar token.
+// That is far more than any real one holds, so that a brain cannot make
 // the bridge load gigabytes into memory on every run, and little enough to
-// pass a .mcp.json on the command line.
+// pass a .mcp.json or the prompt on the command line.
 const maxBrainFile = 256 << 10
+
+// readAtMost reads r to the end, and refuses it when that is more than
+// maxBrainFile.
+func readAtMost(r io.Reader) ([]byte, error) {
+	data, err := io.ReadAll(io.LimitReader(r, maxBrainFile+1))
+	if err != nil {
+		return nil, err
+	}
+	if len(data) > maxBrainFile {
+		return nil, fmt.Errorf("larger than %d KiB", maxBrainFile>>10)
+	}
+	return data, nil
+}
 
 // errSymlink is why the bridge refuses a file that a brain could have
 // replaced with a symlink.
@@ -849,14 +864,7 @@ func readBrainFile(dir, name string) ([]byte, error) {
 		return nil, err
 	}
 	defer f.Close()
-	data, err := io.ReadAll(io.LimitReader(f, maxBrainFile+1))
-	if err != nil {
-		return nil, err
-	}
-	if len(data) > maxBrainFile {
-		return nil, fmt.Errorf("larger than %d KiB", maxBrainFile>>10)
-	}
-	return data, nil
+	return readAtMost(f)
 }
 
 // invoke runs the Claude CLI once for m.

@@ -55,10 +55,12 @@ it, since the calendar tool refreshes it. The bridge reads it too, to list
 the calendars on the brain's page and to revoke it on disconnect, and
 takes only a regular file there: a brain that put a symlink or a hard link
 to another brain's token in its place would otherwise have the bridge
-refresh that token into its own file, or revoke it. The brain's page then
-shows why its calendars cannot be listed; connect it again. Nor does the
-bridge take the `token_uri` or the client in that file: it refreshes at
-Google's token endpoint with the client under Settings → Google sign-in.
+refresh that token into its own file, or revoke it. It refuses a token
+file over 256 KiB too, far more than a real one holds. The brain's page
+then shows why its calendars cannot be listed; connect it again. Nor does
+the bridge take the `token_uri` or the client in that file: it refreshes
+at Google's token endpoint with the client under Settings → Google
+sign-in.
 The chosen calendars are stored in the brain's `brain.json`:
 
 ```json

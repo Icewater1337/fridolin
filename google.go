@@ -365,7 +365,8 @@ func (g *GoogleAuth) saveToken(brainID string, tok *googleToken) error {
 // not brain-writable, so the last path component is the one to check. A
 // hard link would do the same; the sandbox refuses those, and a file with
 // more than one link is refused here as well. The open does not block, so
-// a FIFO cannot hang the dashboard.
+// a FIFO cannot hang the dashboard, and a file larger than maxBrainFile is
+// refused rather than loaded.
 func readCredentialFile(path string) ([]byte, error) {
 	f, err := os.OpenFile(path, os.O_RDONLY|syscall.O_NOFOLLOW|syscall.O_NONBLOCK, 0)
 	if errors.Is(err, syscall.ELOOP) {
@@ -385,7 +386,11 @@ func readCredentialFile(path string) ([]byte, error) {
 	if st, ok := fi.Sys().(*syscall.Stat_t); ok && st.Nlink != 1 {
 		return nil, fmt.Errorf("%s: it has more than one link, which the bridge does not trust", path)
 	}
-	return io.ReadAll(f)
+	data, err := readAtMost(f)
+	if err != nil {
+		return nil, fmt.Errorf("%s: %w", path, err)
+	}
+	return data, nil
 }
 
 func (g *GoogleAuth) loadToken(brainID string) (*googleToken, error) {

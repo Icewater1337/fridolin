@@ -87,8 +87,9 @@ did in `claude-stream.log`. A brain can change any file in its folder, and
 put a symlink to `~/.ssh` or to another brain's history in place of one of
 them, so the bridge never leaves the folder through a symlink, and takes
 only a regular file there: not a symlink at the file itself, even one to
-another file in the folder. It treats such a file as missing and writes
-nothing through it; its log says why, and the dashboard shows a
+another file in the folder. Nor does it take a prompt file, `brain.json`
+or identity map larger than 256 KiB. It treats such a file as missing and
+writes nothing through it; its log says why, and the dashboard shows a
 `brain.json` it cannot read. It opens the folder once when it loads the
 brain and goes through that handle from then on (`brain.json` excepted,
 which it reads for brains that are not running too), so a folder you put
