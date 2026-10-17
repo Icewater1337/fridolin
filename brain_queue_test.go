@@ -469,6 +469,66 @@ func TestReloadKeepsRunningBrainAndRetiresRemoved(t *testing.T) {
 	}
 }
 
+// A reload runs the manifests you approved: brain b that gives itself the
+// DMs in its own brain.json keeps its routing, and the change shows as
+// drift until you approve it.
+func TestReloadRunsTheApprovedManifest(t *testing.T) {
+	const dmChat = "15551234567@s.whatsapp.net"
+	tb := newTestBridge(t, "")
+	tb.addFolderBrain(t, BrainManifest{ID: "a", Name: "A", Routing: BrainRouting{HandlesDMs: true}})
+	dir := tb.addFolderBrain(t, BrainManifest{ID: "b", Name: "B"})
+	grab := BrainManifest{ID: "b", Name: "B", Routing: BrainRouting{HandlesDMs: true}}
+	if err := WriteManifest(dir, &grab, true); err != nil {
+		t.Fatal(err)
+	}
+	if err := tb.brainMgr.Apply(tb.cfgs.Get()); err != nil {
+		t.Fatal(err)
+	}
+	if br := tb.brainMgr.BrainFor(dmChat, false); br == nil || br.ID() != "a" {
+		t.Errorf("DMs go to %v, want a", br)
+	}
+	if b := tb.brainMgr.Get("b"); b == nil || b.Snapshot().Routing.HandlesDMs {
+		t.Errorf("b = %v, want it running without the DMs", b)
+	}
+	drift := false
+	for _, is := range tb.brainMgr.Issues() {
+		drift = drift || is.ID == "b" && is.Kind == "drift"
+	}
+	if !drift {
+		t.Errorf("issues = %+v, want b's drift", tb.brainMgr.Issues())
+	}
+}
+
+// reload refuses a brain set that clashes and leaves the brains as they
+// were. ResolveBrains leaves such brains out, so this guards any other way
+// a set reaches the manager.
+func TestReloadRefusesAClashingSet(t *testing.T) {
+	const group = "120363000000000000@g.us"
+	home := canonicalDir(t.TempDir())
+	t.Setenv("HOME", home)
+	cfg, err := LoadConfig(writeConfig(t, `{"data_dir": "`+home+`/data"`+brainDirsJSON(t,
+		brainFolder(t, "~/a", BrainManifest{ID: "a", Routing: BrainRouting{HandlesDMs: true}}),
+		brainFolder(t, "~/b", BrainManifest{ID: "b", Routing: BrainRouting{Groups: []string{group}}}),
+	)+`}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	mgr := newTestManager(t, cfg)
+	t.Cleanup(mgr.Stop)
+	a, b := mgr.Get("a"), mgr.Get("b")
+	specs, issues := ResolveBrains(cfg)
+	if len(specs) != 2 || len(issues) != 0 {
+		t.Fatalf("specs = %+v, issues = %+v", specs, issues)
+	}
+	specs[1].Manifest.Routing.HandlesDMs = true
+	if err := mgr.reload(specs, issues, cfg); err == nil || !strings.Contains(err.Error(), "both handle DMs") {
+		t.Errorf("reload = %v, want the clash refused", err)
+	}
+	if mgr.Get("a") != a || mgr.Get("b") != b || mgr.BrainFor("15551234567@s.whatsapp.net", false) != a || mgr.BrainFor(group, true) != b {
+		t.Error("a refused reload changed the brains or their routing")
+	}
+}
+
 // TestClaudeArgs: a brain loads only its own folder's Claude Code setup,
 // with the folder's .mcp.json passed explicitly and the instructions above
 // it excluded, unless inherit_claude_user_config asks for the old

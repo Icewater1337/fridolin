@@ -615,6 +615,66 @@ func TestApproveDrift(t *testing.T) {
 	}
 }
 
+// Saving a brain's settings writes its brain.json and the approved copy
+// together, so the edit runs at once and shows no drift. An edit that
+// changes the id, names no brain, is not valid on its own or clashes with
+// another brain is refused and leaves config.json as it was.
+func TestUpdateBrain(t *testing.T) {
+	const group = "120363000000000000@g.us"
+	tb := newTestBridge(t, "")
+	dir := tb.addFolderBrain(t, BrainManifest{ID: "a", Name: "A", Routing: BrainRouting{HandlesDMs: true}})
+	tb.addFolderBrain(t, BrainManifest{ID: "b", Name: "B"})
+
+	edited := BrainManifest{ID: "a", Name: "Assistant", Model: "opus", Routing: BrainRouting{HandlesDMs: true, Groups: []string{group}}}
+	if w := tb.do("PUT", "/api/brains/a", map[string]any{"manifest": edited}); w.Code != 200 {
+		t.Fatalf("save: %d %s", w.Code, w.Body)
+	}
+	disk, err := ReadManifest(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if disk.Name != "Assistant" || disk.Model != "opus" || !contains(disk.Routing.Groups, group) {
+		t.Errorf("brain.json = %+v, want the edit", disk)
+	}
+	var approved *BrainManifest
+	for _, ref := range tb.cfgs.Get().BrainDirs {
+		if ref.Approved != nil && ref.Approved.ID == "a" {
+			approved = ref.Approved
+		}
+	}
+	if approved == nil || !approved.Equal(*disk) {
+		t.Errorf("approved = %+v, want what brain.json has", approved)
+	}
+	if br := tb.brainMgr.BrainFor(group, true); br == nil || br.ID() != "a" || br.Name() != "Assistant" {
+		t.Errorf("the group goes to %v, want the edited brain a", br)
+	}
+	if issues := tb.brainMgr.Issues(); len(issues) != 0 {
+		t.Errorf("issues = %+v, want none", issues)
+	}
+
+	for _, c := range []struct {
+		name, id string
+		m        BrainManifest
+		want     string
+	}{
+		{"id changed", "a", BrainManifest{ID: "x", Name: "X"}, "id cannot change"},
+		{"no such brain", "nobody", BrainManifest{ID: "nobody", Name: "N"}, `no brain \"nobody\"`},
+		{"not valid", "b", BrainManifest{ID: "b", Name: "B", Effort: "huge"}, "effort"},
+		{"second DM brain", "b", BrainManifest{ID: "b", Name: "B", Routing: BrainRouting{HandlesDMs: true}}, "both handle DMs"},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			etag := tb.cfgs.ETag()
+			w := tb.do("PUT", "/api/brains/"+c.id, map[string]any{"manifest": c.m})
+			if w.Code != 422 || !strings.Contains(w.Body.String(), c.want) {
+				t.Errorf("%d %s, want 422 saying %s", w.Code, w.Body, c.want)
+			}
+			if tb.cfgs.ETag() != etag {
+				t.Error("the refused edit changed config.json")
+			}
+		})
+	}
+}
+
 // lockedBuffer collects log output that the bridge's goroutines may write
 // while the test reads it.
 type lockedBuffer struct {
