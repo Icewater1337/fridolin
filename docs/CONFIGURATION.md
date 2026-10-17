@@ -3,11 +3,12 @@
 The dashboard edits all of this for you (`./fridolin open`).
 This page is the reference behind it.
 
-The configuration is `~/.fridolin/config.json`, or `config.json`
-in the current directory if one exists, or wherever `--config` / `CONFIG_FILE`
-points. On first start a safe starter config is written there. Changes made
-in the dashboard apply immediately; a few runtime settings (marked *restart*)
-need a restart, which the dashboard offers.
+The configuration is `~/.fridolin/config.json`, or wherever `--config` or
+the `FRIDOLIN_CONFIG` environment variable points (`--config` wins). A
+`config.json` in the current directory is not used. On first start a safe
+starter config is written there. Changes made in the dashboard apply
+immediately; a few runtime settings (marked *restart*) need a restart, which
+the dashboard offers.
 
 Validate at any time:
 
@@ -728,8 +729,14 @@ The bridge itself reads two variables:
 
 | Variable | What it does |
 | -------- | ------------ |
-| `CONFIG_FILE` | the config file when `--config` is not given |
-| `BRAIN_MODE` | anything but true refuses to start, see [`brain_mode`](#brain_mode) |
+| `FRIDOLIN_CONFIG` | the config file when `--config` is not given; `setup.sh` sets the service up with it |
+| `BRAIN_MODE` | set to anything but `true`, `1`, `yes` or `on`, the bridge refuses to start, see [`brain_mode`](#brain_mode) |
+
+`CONFIG_FILE`, the old name of `FRIDOLIN_CONFIG`, is ignored: the bridge
+logs a warning when it is set, and `setup.sh` stops rather than set the
+service up with another config. If it points at Fridolin's config, re-run
+`setup.sh` with `FRIDOLIN_CONFIG` set to it; if it belongs to other
+software, re-run it as `env -u CONFIG_FILE ./setup.sh`.
 
 The rest of the bridge's process environment reaches the programs it
 starts: the Claude CLI, brains, and the scripts and tools they run. What

@@ -126,9 +126,9 @@ func (sp *SandboxProfiler) Update(workDirs map[string]string, cfg *Config) {
 }
 
 // SetConfigFile names the config.json the bridge runs with. It lives in the
-// data dir by default, but --config or CONFIG_FILE can put it anywhere, so
-// the profile denies it, its .bak, the temp file each save writes, and the
-// .env files older versions read: the one next to it and the one in the
+// data dir by default, but --config or FRIDOLIN_CONFIG can put it anywhere,
+// so the profile denies it, its .bak, the temp file each save writes, and
+// the .env files older versions read: the one next to it and the one in the
 // working directory.
 func (sp *SandboxProfiler) SetConfigFile(path string) {
 	sp.mu.Lock()

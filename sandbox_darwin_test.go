@@ -633,8 +633,8 @@ func TestSandboxDeniesBridgeSecretsWhereverTheyLive(t *testing.T) {
 }
 
 // TestSandboxDeniesTheConfigFile: a config.json outside the data dir, and
-// the .env next to it, are neither readable nor writable under the real
-// sandbox-exec.
+// the .env older versions read next to it, are neither readable nor
+// writable under the real sandbox-exec.
 func TestSandboxDeniesTheConfigFile(t *testing.T) {
 	requireSandboxExec(t)
 	home := canonicalDir(t.TempDir())

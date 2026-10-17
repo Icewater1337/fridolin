@@ -25,7 +25,8 @@ if [ -z "${DATA_DIR:-}" ] && [ ! -d "$HOME/.fridolin" ] && [ -d "$HOME/.whatsapp
   DATA_DIR="$HOME/.whatsapp-claude-bridge"
 fi
 DATA_DIR="${DATA_DIR:-$HOME/.fridolin}"
-CONFIG_FILE="${CONFIG_FILE:-$DATA_DIR/config.json}"
+# The config file the service is given: FRIDOLIN_CONFIG, else the data dir's.
+CONFIG="${FRIDOLIN_CONFIG:-$DATA_DIR/config.json}"
 LABEL="ai.fridolin.bridge"
 
 ASSUME_YES=false
@@ -50,6 +51,14 @@ info() { printf '  %s\n' "$*"; }
 ok()   { printf '  %s✓%s %s\n' "$GREEN" "$RESET" "$*"; }
 warn() { printf '  %s!%s %s\n' "$YELLOW" "$RESET" "$*"; }
 fail() { printf '\n%s✗ %s%s\n\n' "$RED" "$*" "$RESET" >&2; exit 1; }
+
+# CONFIG_FILE was the old name of FRIDOLIN_CONFIG, but other software
+# exports it too. Going on without it would point the service at another
+# config than the one it was set up with, and only the person running this
+# knows which of the two it is, so stop and name both ways on.
+if [ -n "${CONFIG_FILE:-}" ]; then
+  fail "CONFIG_FILE is no longer read. If it points at Fridolin's config, re-run as FRIDOLIN_CONFIG=\"$CONFIG_FILE\" $0 $*; if it belongs to other software, re-run as env -u CONFIG_FILE $0 $*"
+fi
 
 # confirm PROMPT DEFAULT(y|n)
 confirm() {
@@ -129,12 +138,12 @@ step "Configuration"
 # it) and another user's folder alone, which a chmod here would not.
 mkdir -p "$(dirname "$DATA_DIR")"
 [ -d "$DATA_DIR" ] || mkdir -m 700 "$DATA_DIR"
-if [ -f "$CONFIG_FILE" ]; then
-  ok "using $CONFIG_FILE"
+if [ -f "$CONFIG" ]; then
+  ok "using $CONFIG"
 else
   # Seed the CLI path so brains work under launchd/systemd's minimal PATH.
-  "$BINARY" init --config "$CONFIG_FILE" ${CLAUDE_BIN:+--claude-path "$CLAUDE_BIN"}
-  ok "wrote a starter config to $CONFIG_FILE"
+  "$BINARY" init --config "$CONFIG" ${CLAUDE_BIN:+--claude-path "$CLAUDE_BIN"}
+  ok "wrote a starter config to $CONFIG"
 fi
 
 # ── 4. background service ─────────────────────────────────────────────────
@@ -147,7 +156,7 @@ if ! $NO_SERVICE; then
       mkdir -p "$HOME/Library/LaunchAgents" "$HOME/Library/Logs/fridolin"
       sed -e "s|{{BINARY}}|$BINARY|g" \
           -e "s|{{WORKDIR}}|$DATA_DIR|g" \
-          -e "s|{{CONFIG}}|$CONFIG_FILE|g" \
+          -e "s|{{CONFIG}}|$CONFIG|g" \
           -e "s|{{HOME}}|$HOME|g" \
           "$REPO_DIR/deploy/launchd.plist.template" > "$PLIST"
       launchctl bootout "gui/$(id -u)/$LABEL" 2>/dev/null || true
@@ -166,7 +175,7 @@ if ! $NO_SERVICE; then
       mkdir -p "$UNIT_DIR"
       sed -e "s|{{BINARY}}|$BINARY|g" \
           -e "s|{{WORKDIR}}|$DATA_DIR|g" \
-          -e "s|{{CONFIG}}|$CONFIG_FILE|g" \
+          -e "s|{{CONFIG}}|$CONFIG|g" \
           -e "s|{{USER}}|$(id -un)|g" \
           "$REPO_DIR/deploy/systemd.service.template" > "$UNIT_DIR/fridolin.service"
       systemctl --user daemon-reload
@@ -191,7 +200,7 @@ if $SERVICE; then
   done
   if curl -fsS "http://127.0.0.1:8765/health" >/dev/null 2>&1; then
     ok "the bridge is running"
-    "$BINARY" open --config "$CONFIG_FILE" || true
+    "$BINARY" open --config "$CONFIG" || true
   else
     warn "the bridge did not answer yet — check the log:"
     [ "$OS" = Darwin ] && info "tail -f ~/Library/Logs/fridolin/stderr.log" || info "journalctl --user -u fridolin -f"

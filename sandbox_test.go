@@ -1018,10 +1018,11 @@ func TestSandboxProfileDeniesBridgeSecrets(t *testing.T) {
 	}
 }
 
-// TestSandboxProfileDeniesTheConfigFile: --config or CONFIG_FILE can put
-// config.json outside the data dir, and with it the .env loaded next to it.
-// Brains could read both, and rewrite the config without the dashboard
-// token. Inside the data dir the data dir deny covers them already.
+// TestSandboxProfileDeniesTheConfigFile: --config or FRIDOLIN_CONFIG can
+// put config.json outside the data dir, and with it the .env older versions
+// read next to it. Brains could read both, and rewrite the config without
+// the dashboard token. Inside the data dir the data dir deny covers them
+// already.
 func TestSandboxProfileDeniesTheConfigFile(t *testing.T) {
 	home := canonicalDir(t.TempDir())
 	t.Setenv("HOME", home)
