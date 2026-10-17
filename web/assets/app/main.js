@@ -16,18 +16,16 @@ import { createPage } from './page.js';
 import { createShell } from './shell.js';
 import { connectScreen } from './connect.js';
 import { ROUTES } from './routes.js';
-import { matchRoute, activeNav, docTitle } from './router.js';
+import { matchRoute, activeNav, docTitle, tokenFromHash } from './router.js';
 
 // ── token from the URL fragment ──────────────────────────────────────────
 
 function takeTokenFromHash() {
-  if (location.hash.startsWith('#token=')) {
-    const t = decodeURIComponent(location.hash.slice('#token='.length));
-    setToken(t);
-    history.replaceState(null, '', `${location.pathname}${location.search}#/overview`);
-    return true;
-  }
-  return false;
+  const t = tokenFromHash(location.hash);
+  if (t === null) return false;
+  setToken(t);
+  history.replaceState(null, '', `${location.pathname}${location.search}#/overview`);
+  return true;
 }
 takeTokenFromHash();
 
@@ -167,6 +165,8 @@ if (!blocked) {
   showShell();
   renderRoute();
 }
+// Tells theme.js's boot watch that the app started.
+document.documentElement.dataset.ready = '1';
 
 // Surface unexpected script errors instead of failing silently.
 window.addEventListener('unhandledrejection', (e) => {

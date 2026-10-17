@@ -35,6 +35,16 @@ export function matchRoute(routes, hash) {
   return null;
 }
 
+/**
+ * The token in a #token=… fragment, the way `fridolin open` passes it, or
+ * null. A malformed escape is kept as typed: the bridge then refuses it and
+ * the connect screen says so, where throwing would stop the app from starting.
+ */
+export function tokenFromHash(hash) {
+  if (!String(hash || '').startsWith('#token=')) return null;
+  return decode(hash.slice('#token='.length));
+}
+
 /** The link to a route without its parameters, as the sidebar uses it. */
 export function routeHref(route) {
   return `#/${route.path.split('/').filter((s) => !s.startsWith(':')).join('/')}`;
