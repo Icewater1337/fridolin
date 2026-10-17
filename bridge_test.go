@@ -2,9 +2,12 @@ package main
 
 import (
 	"encoding/json"
+	"fmt"
 	"log"
 	"os"
 	"path/filepath"
+	"reflect"
+	"regexp"
 	"runtime"
 	"strings"
 	"syscall"
@@ -189,6 +192,131 @@ func TestExtractPollsNoPoll(t *testing.T) {
 	if remaining != "just a normal reply" {
 		t.Errorf("remaining = %q", remaining)
 	}
+}
+
+// anyPollCloseRe finds the end of a poll block in any letter case, the way
+// pollHeaderRe finds its start.
+var anyPollCloseRe = regexp.MustCompile(`(?i)\[/POLL\]`)
+
+// FuzzExtractPolls feeds extractPolls model output. Whatever the model
+// writes, each poll that comes out has a question, 2 to 12 trimmed
+// options and a max within them, and no complete poll block reaches the
+// chat (see checkPolls). A well-formed block built from the fuzzed
+// question and options, with nothing around it that looks like one, comes
+// back as exactly that poll, and the text around it as it was.
+func FuzzExtractPolls(f *testing.F) {
+	seeds := []struct {
+		before, question, options, after string
+		maxSel                           uint8
+	}{
+		{"Sure, let's vote.\n\n", "When should we meet?", "Monday 2pm\nTuesday 3pm", "\n\nLet me know.", 0},
+		{"", "Which?", "A\nB\nC", "", 2},
+		{"", "Which?", "A\nB", "", 9},
+		{"", "Pick", strings.Repeat("option\n", 20), "", 0},
+		{"", "Only one?", "A", "", 0},
+		{"", "", "A\nB", "", 0},
+		{"[POLL]\nQuestion: unterminated\n- A\n- B", "Q", "a\nb", "", 0},
+		{"[POLL max=3]\nQuestion: Q\n- a\n- b\n[/POLL] and ", "Q", "a\nb", " [POLL]", 1},
+		{"[PO[POLL]", "Q", "a\nb", "LL]", 0},
+		{"İİ ", "Fråga?", "é\n\U0001F600", " \xff", 3},
+	}
+	for _, s := range seeds {
+		f.Add(s.before, s.question, s.options, s.after, s.maxSel)
+	}
+	f.Fuzz(func(t *testing.T, before, question, options, after string, maxSel uint8) {
+		checkPolls(t, before)
+
+		q := strings.TrimSpace(strings.ReplaceAll(question, "\n", " "))
+		var opts []string
+		for _, o := range strings.Split(options, "\n") {
+			if o = strings.TrimSpace(o); o != "" {
+				opts = append(opts, o)
+			}
+		}
+		var block strings.Builder
+		if maxSel > 0 {
+			fmt.Fprintf(&block, "[POLL max=%d]\n", maxSel)
+		} else {
+			block.WriteString("[POLL]\n")
+		}
+		block.WriteString("Question: " + q + "\n")
+		for _, o := range opts {
+			block.WriteString("- " + o + "\n")
+		}
+		block.WriteString("[/POLL]")
+		text := before + block.String() + after
+		polls, remaining := checkPolls(t, text)
+
+		// Another start or end in the text, the fuzzed parts' own included,
+		// makes a different block.
+		if len(pollHeaderRe.FindAllString(text, -1)) != 1 || len(anyPollCloseRe.FindAllString(text, -1)) != 1 {
+			return
+		}
+		if want := strings.TrimSpace(before + after); remaining != want {
+			t.Errorf("remaining text = %q, want %q", remaining, want)
+		}
+		if q == "" || len(opts) < 2 {
+			if len(polls) != 0 {
+				t.Errorf("got %+v from a block without a question or two options", polls)
+			}
+			return
+		}
+		want := pollData{Question: q, Options: opts[:min(len(opts), maxPollOptions)], MaxSelectable: 1}
+		if maxSel > 0 {
+			want.MaxSelectable = int(maxSel)
+		}
+		want.MaxSelectable = min(want.MaxSelectable, len(want.Options))
+		if len(polls) != 1 || !reflect.DeepEqual(polls[0], want) {
+			t.Errorf("got %+v, want [%+v]", polls, want)
+		}
+	})
+}
+
+// checkPolls runs extractPolls on text and checks what holds for any text:
+// each poll has a question and 2 to 12 options, each a trimmed line of its
+// own; there are no more polls than closed blocks; and the remaining text,
+// which goes to the chat, is no longer than the input, still valid UTF-8
+// if the input was, and holds no complete block.
+func checkPolls(t *testing.T, text string) ([]pollData, string) {
+	t.Helper()
+	polls, remaining := extractPolls(text)
+	line := func(s string) bool {
+		return s != "" && s == strings.TrimSpace(s) && !strings.Contains(s, "\n")
+	}
+	for _, p := range polls {
+		if !line(p.Question) {
+			t.Errorf("question %q is not a trimmed line", p.Question)
+		}
+		if n := len(p.Options); n < 2 || n > maxPollOptions {
+			t.Errorf("poll %q has %d options, want 2 to %d", p.Question, n, maxPollOptions)
+		}
+		for _, o := range p.Options {
+			if !line(o) {
+				t.Errorf("option %q is not a trimmed line", o)
+			}
+		}
+		if p.MaxSelectable < 0 || p.MaxSelectable > len(p.Options) {
+			t.Errorf("poll %q: max %d for %d options", p.Question, p.MaxSelectable, len(p.Options))
+		}
+		if utf8.ValidString(text) && !utf8.ValidString(p.Question+strings.Join(p.Options, "")) {
+			t.Errorf("poll %+v is not valid UTF-8", p)
+		}
+	}
+	if closed := len(anyPollCloseRe.FindAllString(text, -1)); len(polls) > closed {
+		t.Errorf("%d polls from %d closed blocks", len(polls), closed)
+	} else if closed == 0 && remaining != strings.TrimSpace(text) {
+		t.Errorf("text without a closed block came back as %q", remaining)
+	}
+	if len(remaining) > len(text) {
+		t.Errorf("remaining text %q is longer than the input", remaining)
+	}
+	if utf8.ValidString(text) && !utf8.ValidString(remaining) {
+		t.Errorf("remaining text %q is not valid UTF-8", remaining)
+	}
+	if loc := pollHeaderRe.FindStringIndex(remaining); loc != nil && anyPollCloseRe.MatchString(remaining[loc[1]:]) {
+		t.Errorf("remaining text %q still holds a poll block", remaining)
+	}
+	return polls, remaining
 }
 
 // ── chunking ──────────────────────────────────────────────────────────────
