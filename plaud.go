@@ -131,6 +131,13 @@ type PlaudManager struct {
 	// notify sends text to a chat (the expiry notice).
 	notify func(ctx context.Context, jid, text string) error
 
+	// cliMu runs the CLI's commands one at a time, all but the sign-in,
+	// which waits for the browser for minutes. The CLI rewrites tokens.json
+	// when it refreshes the login, without a lock, so two at once could
+	// read a half-written login, which reads as signed out, or refresh it
+	// twice.
+	cliMu sync.Mutex
+
 	mu            sync.Mutex
 	connect       *connectJob
 	lastPoll      time.Time
@@ -247,6 +254,10 @@ func (p *PlaudManager) runCLIOut(ctx context.Context, out io.Writer, args ...str
 	bin, err := p.cliPath()
 	if err != nil {
 		return "", err
+	}
+	if args[0] != "login" {
+		p.cliMu.Lock()
+		defer p.cliMu.Unlock()
 	}
 	home := p.cliHome()
 	if err := os.MkdirAll(home, 0o700); err != nil {
@@ -1068,8 +1079,12 @@ type writerFunc func([]byte)
 
 func (f writerFunc) Write(b []byte) (int, error) { f(b); return len(b), nil }
 
-// Disconnect signs out of Plaud.
-func (p *PlaudManager) Disconnect(ctx context.Context) error {
+// Disconnect signs out of Plaud. The sign-out runs to its end even when
+// whoever asked for it goes away: the CLI must not be stopped while it
+// rewrites its login.
+func (p *PlaudManager) Disconnect() error {
+	ctx, cancel := context.WithTimeout(p.lifetime(), 30*time.Second)
+	defer cancel()
 	if _, err := p.run(ctx, "logout"); err != nil && !errors.Is(err, errPlaudAuth) {
 		log.Printf("plaud: logout: %v", err)
 	}
@@ -1120,9 +1135,7 @@ func (b *Bridge) apiPlaudConnect(w http.ResponseWriter, r *http.Request) {
 }
 
 func (b *Bridge) apiPlaudDisconnect(w http.ResponseWriter, r *http.Request) {
-	ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
-	defer cancel()
-	if err := b.plaud.Disconnect(ctx); err != nil {
+	if err := b.plaud.Disconnect(); err != nil {
 		writeErr(w, http.StatusBadGateway, err.Error())
 		return
 	}

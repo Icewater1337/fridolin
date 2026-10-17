@@ -69,6 +69,8 @@ func fakePlaudTranscript(segs ...fakePlaudSegment) string {
 //	hang               the command starts a child that holds its output,
 //	                   writes the child's pid to child.pid, and hangs
 //	flood              the command prints 8 MiB
+//	slow               the command takes 200 ms, and adds a line to
+//	                   overlap.log when another one runs meanwhile
 //
 // Without tokens.json in HOME/.plaud every command but login and logout
 // exits 2, as the real one does. Each call is appended to calls.log with
@@ -151,6 +153,16 @@ func (f fakePlaudCLI) run(args []string) int {
 		}
 		time.Sleep(30 * time.Second)
 		return 0
+	case f.exists("slow") && args[0] != "login":
+		running := filepath.Join(f.dir, "running")
+		if lock, err := os.OpenFile(running, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600); err == nil {
+			lock.Close()
+			defer os.Remove(running)
+		} else if log, err := os.OpenFile(filepath.Join(f.dir, "overlap.log"), os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600); err == nil {
+			fmt.Fprintln(log, strings.Join(args, " "))
+			log.Close()
+		}
+		time.Sleep(200 * time.Millisecond)
 	case f.exists("flood"):
 		line := strings.Repeat("x", 1023) + "\n"
 		for i := 0; i < 8<<10; i++ {

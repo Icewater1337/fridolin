@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/http"
 	"os"
 	"path/filepath"
 	"slices"
@@ -1275,6 +1276,52 @@ func TestPlaudCLIRunsContained(t *testing.T) {
 			t.Errorf("kept %d bytes of the output, want the first %d", len(out), plaudOutputLimit)
 		}
 	})
+}
+
+// Fridolin runs one Plaud command at a time, since the CLI rewrites its
+// login without a lock; only the sign-in, which waits for the browser,
+// runs beside them. Disconnect signs out even when the request that asked
+// for it is gone.
+func TestPlaudRunsOneCommandAtATime(t *testing.T) {
+	tb, fp := plaudBridge(t, "")
+	plaudSignIn(t, tb)
+	fp.files(plaudOld1)
+	fp.write("slow", "")
+	done := make(chan struct{})
+	for _, cmd := range []string{"me", "files", "me", "file"} {
+		go func() {
+			defer func() { done <- struct{}{} }()
+			_, _ = tb.plaud.run(context.Background(), cmd, plaudOld1)
+		}()
+	}
+	for range 4 {
+		<-done
+	}
+	if overlap, _ := os.ReadFile(filepath.Join(fp.dir, "overlap.log")); len(overlap) > 0 {
+		t.Errorf("commands ran at the same time:\n%s", overlap)
+	}
+
+	// A sign-in waiting for the browser holds nothing up.
+	_ = os.Remove(tb.plaud.tokenPath())
+	fp.write("login_wait", "")
+	if err := tb.plaud.Connect(); err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, 5*time.Second, "the sign-in to start", func() bool { return strings.Contains(fp.calls(), " login") })
+	start := time.Now()
+	_, _ = tb.plaud.run(context.Background(), "me")
+	if d := time.Since(start); d > 3*time.Second {
+		t.Errorf("a command waited %v for the sign-in", d)
+	}
+	fp.write("login_go", "")
+	waitFor(t, 10*time.Second, "the sign-in to end", func() bool { return tb.plaud.connected() })
+
+	gone, cancel := context.WithCancel(context.Background())
+	cancel()
+	w := tb.do("POST", "/api/plaud/disconnect", nil, func(r *http.Request) { *r = *r.WithContext(gone) })
+	if w.Code != 200 || !strings.Contains(fp.calls(), " logout\n") {
+		t.Errorf("disconnect = %d %s, calls:\n%s", w.Code, w.Body.String(), fp.calls())
+	}
 }
 
 // A sign-in that fails says why, from the CLI's exit status: a denial is
