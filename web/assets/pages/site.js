@@ -12,6 +12,12 @@ import { confirmDialog, openDialog } from '../components/dialog.js';
 import { field, toggle, select, textInput } from '../components/fields.js';
 import { pill, callout, mono, pageHeader, loading, timeAgo, kv } from '../components/common.js';
 
+// What some requests run on the bridge has limits of its own: 3 minutes for
+// a git or gh call (SiteManager.git), 10 for an npm install. They wait
+// longer than that, so the bridge's own error shows, not "did not answer".
+const GIT_TIMEOUT_MS = 200000; // one git or gh call
+const STEPS_TIMEOUT_MS = 30 * 60000; // several of them in a row, or an npm install
+
 const short = (c) => (c ? c.slice(0, 12) : '');
 const procPill = (p, healthy) => {
   if (!p) return pill('Off', 'neutral');
@@ -106,7 +112,7 @@ export default {
       const keyRow = st.deploy_key
         ? h('div', h('p.small', 'Fridolin’s deploy key for this repository. It needs write access, so Fridolin can push the starter files and, later, approved changes.'),
           h('div.site-key', mono(st.deploy_key), copyButton(st.deploy_key)),
-          st.repo.github && st.runtime.gh ? h('div.actions', btn('Add it to GitHub with gh', { small: true, icon: 'key', onClick: async () => { await post('/api/site/deploy-key/github'); toast('Deploy key added on GitHub', 'ok'); } })) : null)
+          st.repo.github && st.runtime.gh ? h('div.actions', btn('Add it to GitHub with gh', { small: true, icon: 'key', onClick: async () => { await post('/api/site/deploy-key/github', undefined, { timeout: GIT_TIMEOUT_MS }); toast('Deploy key added on GitHub', 'ok'); } })) : null)
         : h('div.actions', btn('Create a deploy key', { icon: 'key', onClick: async () => { await post('/api/site/deploy-key'); await refresh(); } }));
       return h('div.site-block', h('h3', 'Deploy key'), keyRow);
     }
@@ -137,7 +143,7 @@ export default {
         st.runtime.gh ? h('div.site-block', h('h3', 'No repository yet?'),
           h('div.actions', ghName, btn('Create a private GitHub repository', {
             small: true, onClick: async () => {
-              const r = await post('/api/site/github-repo', { name: ghName.value });
+              const r = await post('/api/site/github-repo', { name: ghName.value }, { timeout: GIT_TIMEOUT_MS });
               url.value = r.url; toast(`Created ${r.url}`, 'ok');
             },
           }))) : null,
@@ -148,7 +154,7 @@ export default {
           field({ label: 'Folder inside the repository', control: subdir, help: 'Where modules/ lives, if not at the top.' })),
         h('div.actions', btn('Connect', {
           kind: 'primary', icon: 'check', onClick: async () => {
-            await put('/api/site/repo', { url: url.value, branch: branch.value, subdir: subdir.value });
+            await put('/api/site/repo', { url: url.value, branch: branch.value, subdir: subdir.value }, { timeout: GIT_TIMEOUT_MS });
             toast('Repository connected', 'ok');
             updates = null;
             await refresh();
@@ -159,7 +165,7 @@ export default {
 
     // ── deploys ────────────────────────────────────────────────────────
     async function checkUpdates() {
-      updates = await post('/api/site/fetch');
+      updates = await post('/api/site/fetch', undefined, { timeout: GIT_TIMEOUT_MS });
       renderDeploy();
     }
 
@@ -203,7 +209,7 @@ export default {
       } else if (!updates.head) {
         parts.push(callout('info', 'The repository is empty',
           h('p', 'Add Fridolin’s starter: a welcome page, the files a module needs, and a CLAUDE.md for the site’s conventions. Fridolin commits it and pushes it to the branch.'),
-          h('div.actions', btn('Add the starter files', { kind: 'primary', onClick: async () => { await post('/api/site/repo/starter'); toast('Starter pushed', 'ok'); await checkUpdates(); } }))));
+          h('div.actions', btn('Add the starter files', { kind: 'primary', onClick: async () => { await post('/api/site/repo/starter', undefined, { timeout: GIT_TIMEOUT_MS }); toast('Starter pushed', 'ok'); await checkUpdates(); } }))));
       } else if (updates.head === s.approved) {
         parts.push(h('p', 'The live site is the newest commit of ', mono(s.repo.branch), '.'),
           h('div.actions', btn('Check again', { small: true, icon: 'refresh', onClick: checkUpdates })));
@@ -264,12 +270,12 @@ export default {
             kind: 'primary', icon: 'check', disabled: running, onClick: async () => {
               const sentence = reviewSentence(changes);
               if (!await confirmDialog({ title: `Merge “${p.title}”?`, message: `${sentence ? `${sentence} ` : ''}It is merged into ${st.settings.repo.branch}, pushed and deployed.`, confirm: 'Merge and deploy' })) return;
-              await post(`/api/site/proposals/${encodeURIComponent(p.brain)}/merge`);
+              await post(`/api/site/proposals/${encodeURIComponent(p.brain)}/merge`, undefined, { timeout: STEPS_TIMEOUT_MS });
               toast('Merged — deploying', 'ok'); await refresh();
             },
           }),
           preview ? h('a.btn.small', { href: preview.local, target: '_blank', rel: 'noopener noreferrer' }, icon('external'), h('span.btn-label', 'Open the preview'))
-            : btn('Start a preview', { small: true, icon: 'play', onClick: async () => { const u = await post(`/api/site/previews/${encodeURIComponent(p.brain)}`); window.open(u.local, '_blank', 'noopener'); renderProposals(); } }),
+            : btn('Start a preview', { small: true, icon: 'play', onClick: async () => { const u = await post(`/api/site/previews/${encodeURIComponent(p.brain)}`, undefined, { timeout: STEPS_TIMEOUT_MS }); window.open(u.local, '_blank', 'noopener'); renderProposals(); } }),
           btn('Discard', {
             small: true, icon: 'x', onClick: async () => {
               if (!await confirmDialog({ title: 'Discard this proposal?', message: 'It leaves the list. The brain’s branch and workspace stay as they are.', confirm: 'Discard', danger: true })) return;
@@ -293,7 +299,7 @@ export default {
           onChange: async (on, input) => {
             input.disabled = true;
             try {
-              await put(`/api/site/builders/${encodeURIComponent(br.id)}`, { on });
+              await put(`/api/site/builders/${encodeURIComponent(br.id)}`, { on }, { timeout: STEPS_TIMEOUT_MS });
               toast(on ? `${br.name || br.id} may build the site` : `${br.name || br.id} no longer builds the site`, 'ok');
               await refresh();
             } catch (e) { input.checked = !on; toastError(e); } finally { input.disabled = false; }

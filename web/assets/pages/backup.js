@@ -378,7 +378,8 @@ export default {
         if (!targetIn.dataset.touched) targetIn.value = `~/restored/${id}-${stamp()}`;
         mount(versionsBox, h('div.muted', loading('Asking Google Drive for the versions…')));
         try {
-          const r = await get(`/api/backup/versions${qs({ brain: id })}`, { signal: ctx.signal });
+          // rclone may take up to a minute to list them.
+          const r = await get(`/api/backup/versions${qs({ brain: id })}`, { signal: ctx.signal, timeout: 90000 });
           if (currentId() !== id) return;
           versions = r.versions || [];
           paintVersions();

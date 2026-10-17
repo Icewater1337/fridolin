@@ -29,7 +29,8 @@ export default {
 
     const poller = ctx.poll(async (signal) => {
       if (formDirty) return;
-      const s = await get('/api/plaud/status', { signal });
+      // It asks Plaud for the account, which may take 30 s.
+      const s = await get('/api/plaud/status', { signal, timeout: 60000 });
       render(s);
     }, 4000);
 
@@ -134,7 +135,8 @@ export default {
             onClick: async () => {
               const ok = await confirmDialog({ title: 'Disconnect Plaud?', message: 'Fridolin signs out of Plaud and stops checking for recordings. Your recordings stay in Plaud.', confirm: 'Disconnect', danger: true });
               if (!ok) return;
-              await post('/api/plaud/disconnect');
+              // Plaud's logout may take the bridge's 30 s.
+              await post('/api/plaud/disconnect', undefined, { timeout: 60000 });
               await poller.kick();
             },
           })),

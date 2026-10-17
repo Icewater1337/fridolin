@@ -118,7 +118,8 @@ export default {
         h('p.muted', 'It may be hidden behind other windows. Choose a folder there — or cancel the dialog to come back here.'),
         h('div.actions', stopBtn)));
       try {
-        const r = await post('/api/fs/pick', undefined, { signal: pickAbort.signal });
+        // The dialog waits for a person, so the request has no deadline.
+        const r = await post('/api/fs/pick', undefined, { signal: pickAbort.signal, timeout: 0 });
         if (ctx.dead) return;
         if (r && r.path) {
           picked = { path: r.path, create: false };

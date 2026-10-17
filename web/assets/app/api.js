@@ -1,6 +1,8 @@
 // Talking to the bridge's JSON API. Every call carries the dashboard token;
 // writes also carry X-Bridge-Dashboard, which a cross-site form cannot send.
 
+import { withDeadline } from '../lib/abort.js';
+
 const TOKEN_KEY = 'bridgeToken';
 let token = '';
 try { token = localStorage.getItem(TOKEN_KEY) || ''; } catch { /* storage blocked */ }
@@ -39,14 +41,27 @@ function setReachable(ok) {
   listeners.reachable.forEach((fn) => fn(ok));
 }
 
+// How long a request may take. A handler that never answers would otherwise
+// stall its poll for good, and since the connection stays up the offline
+// banner would never show. The slower calls pass a longer timeout: rclone
+// listing backup versions, Plaud's account check and logout, and the Site
+// page's git, gh and npm calls (connecting the repository, checking it for
+// changes, the starter files, a new GitHub repository, the deploy key,
+// making a brain a builder, its preview, merging its proposal).
+export const DEFAULT_TIMEOUT_MS = 30000;
+
 /**
  * Calls the API. Resolves with the parsed JSON (or null for an empty body),
- * rejects with an ApiError carrying the HTTP status (0 = network failure).
+ * rejects with an ApiError carrying the HTTP status (0 = network failure or
+ * no answer within timeout ms; 0 waits for ever, for a dialog a person
+ * answers), or with what the caller's signal aborted with (an AbortError
+ * unless the caller gave a reason).
  */
-export async function api(method, path, body, { signal } = {}) {
+export async function api(method, path, body, { signal, timeout = DEFAULT_TIMEOUT_MS } = {}) {
+  const deadline = withDeadline(signal, timeout);
   const headers = { Accept: 'application/json' };
   if (token) headers['X-Bridge-Token'] = token;
-  const init = { method, headers, signal, cache: 'no-store', credentials: 'same-origin' };
+  const init = { method, headers, signal: deadline.signal, cache: 'no-store', credentials: 'same-origin' };
   if (method !== 'GET' && method !== 'HEAD') {
     headers['X-Bridge-Dashboard'] = '1';
     if (body !== undefined) {
@@ -55,15 +70,23 @@ export async function api(method, path, body, { signal } = {}) {
     }
   }
   let res;
+  let text;
   try {
     res = await fetch(path, init);
+    setReachable(true);
+    text = await res.text();
   } catch (e) {
-    if (e && e.name === 'AbortError') throw e;
+    if (deadline.expired) {
+      setReachable(false);
+      throw new ApiError(`The bridge did not answer within ${Math.round(timeout / 1000)} s. Is it stuck?`, 0, null);
+    }
+    // The caller gave up, maybe with a reason of its own: not the bridge's fault.
+    if ((signal && signal.aborted) || (e && e.name === 'AbortError')) throw e;
     setReachable(false);
     throw new ApiError('Cannot reach the bridge. Is it still running?', 0, null);
+  } finally {
+    deadline.clear();
   }
-  setReachable(true);
-  const text = await res.text();
   let data = null;
   if (text) {
     try { data = JSON.parse(text); } catch { data = text; }
