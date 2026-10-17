@@ -19,14 +19,27 @@ matters and tells you the action items.
    the one that handles your direct messages).
 
 The first check only remembers the recordings that already exist; from then
-on, each new one is sent once.
+on, each new one is sent once. If that first check fails (Plaud is
+unreachable, or the login has already expired), the next one starts over,
+so recordings from before you connected are still not sent. Signing in
+with a different Plaud account starts over the same way. Signing in again
+with the same account, after the login expired say, picks up where it left
+off: what you recorded in between still arrives (up to the latest 20).
+Turning **Send new recordings to a brain** off and on again does the same:
+nothing is checked while it is off, so what you recorded meanwhile is sent
+once it is back on (up to the latest 20).
 
 ## What happens
 
 Every minute (`plaud.interval_seconds`) Fridolin asks Plaud for recent
-recordings. A new one waits until its transcript is ready (up to three days).
-Then Fridolin writes a `.txt` with the details, Plaud's summary and the
-timestamped transcript to `~/.fridolin/media/plaud/`, and gives it to the brain
+recordings. A new one waits until its transcript is ready (up to three days);
+if fetching it fails, the next check tries again and the Plaud card shows
+the error meanwhile. (A recording deleted in Plaud before its transcript was
+ready keeps failing like this until those three days are up.) Then Fridolin
+writes a `.txt` with the details, Plaud's summary and the timestamped
+transcript to `~/.fridolin/media/plaud/` (as
+`DD.MM.YYYY - <name> - <Plaud ID>.txt`; a recording handed over again
+rewrites its file rather than adding a copy), and gives it to the brain
 like a WhatsApp attachment, with an instruction (`plaud.message`; `{name}`,
 `{when}` and `{duration}` are filled in). It runs in the brain you picked, with
 that brain's memory and history.
@@ -38,8 +51,10 @@ that chat belongs to another brain (your DM, for a brain that is not the DM
 brain), what you write back there goes to that other brain, although `!stop`
 there still stops the picked brain's work on a recording. Without any
 private chat (no allowed number and no direct `reply_chat`) recordings are not
-handed over: they wait, and the dashboard says what to set. The Plaud card
-shows where summaries go, and warns when that chat belongs to another brain.
+handed over: they wait, and the dashboard says what to set. The same goes
+for a picked brain that was removed or is not approved: the card names it,
+and recordings wait until you pick another one. The Plaud card shows where
+summaries go, and warns when that chat belongs to another brain.
 
 New brains get a `skills/plaud.md` that tells them how to file recordings.
 
@@ -72,7 +87,7 @@ Fridolin runs Plaud's tool with its usage statistics turned off
 
 | `plaud.` | Default | |
 | --- | --- | --- |
-| `enabled` | `false` | check for new recordings |
+| `enabled` | `false` | check for new recordings and hand them over; **Check now** needs it on |
 | `brain` | DM brain | brain id that receives recordings |
 | `interval_seconds` | `60` | at least 30 |
 | `polished` | `false` | use Plaud's AI-cleaned transcript |

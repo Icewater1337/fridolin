@@ -59,7 +59,13 @@ export default {
       }
 
       const st = s.settings || {};
-      const brainOpts = [['', `Automatic (${s.target_brain || 'the DM brain'})`], ...brains.map((b) => [b.id, b.name || b.id])];
+      // The picked brain is marked when it cannot take recordings: gone,
+      // or listed but not running (not approved, or it has an issue).
+      const missing = (label) => (s.brain_missing ? `${label} (missing)` : label);
+      const brainOpts = [['', `Automatic (${s.target_brain || 'the DM brain'})`], ...brains.map((b) => [b.id, b.id === st.brain ? missing(b.name || b.id) : b.name || b.id])];
+      // The picked brain keeps its option while it is gone (or the list is
+      // still loading), so Save does not quietly switch to Automatic.
+      if (st.brain && !brains.some((b) => b.id === st.brain)) brainOpts.push([st.brain, missing(st.brain)]);
       const enabled = toggle({ checked: !!st.enabled, label: 'Send new recordings to a brain', onChange: () => { formDirty = true; } });
       const brainSel = select(brainOpts, st.brain || '');
       brainSel.addEventListener('change', () => { formDirty = true; });
@@ -91,7 +97,7 @@ export default {
         if (s.summary_chat_brain) facts.push(h('div.muted.small', `What you write back in that chat goes to the ${s.summary_chat_brain} brain, not to ${s.target_brain}.`));
       }
       if (s.last_forwarded) facts.push(h('div', 'Last recording: ', h('strong', s.last_forwarded.name), ' → ', s.last_forwarded.brain, ' ', timeAgo(s.last_forwarded.at)));
-      if (s.last_poll) facts.push(h('div.muted', 'Checked ', timeAgo(s.last_poll), s.pending ? ` · ${s.pending} ${blocked ? 'waiting to be delivered' : 'waiting for Plaud’s transcript'}` : ''));
+      if (s.last_poll) facts.push(h('div.muted', 'Checked ', timeAgo(s.last_poll), s.pending ? ` · ${s.pending} ${blocked || s.last_error ? 'waiting to be delivered' : 'waiting for Plaud’s transcript'}` : ''));
       if (typeof s.seen === 'number') facts.push(h('div.muted.small', s.seen === 1 ? '1 recording known' : `${s.seen} recordings known`));
 
       mount(card,
@@ -102,14 +108,22 @@ export default {
         s.last_error && !s.expired && s.last_error !== s.summary_error ? callout('warn', 'Last check failed', s.last_error) : null,
         facts.length ? h('div.facts', facts) : null,
         h('div.settings-fields',
-          field({ control: enabled, help: `Every ${every(st.interval_seconds || 60)} Fridolin looks for new recordings and waits until Plaud has transcribed them. The first check only remembers what already exists — old recordings are not sent.` }),
+          field({ control: enabled, help: `Every ${every(st.interval_seconds || 60)} Fridolin looks for new recordings and waits until Plaud has transcribed them. The first check — also the first after signing in with another Plaud account — only remembers what already exists, so old recordings are not sent. Recordings made while this is off are sent when you turn it back on (up to the latest 20).` }),
           field({ label: 'Brain', control: brainSel, help: 'Recordings run in this brain. Its answer is private: it goes to the brain’s reply chat when that is a direct chat, otherwise to your DM — never to a group.' }),
           field({ control: polished }),
           field({ control: access, warn: access.input.checked ? 'Brains can read the Plaud login while this is on.' : null, help: h('span', 'On: the login lives in ', mono('~/.plaud/'), ' and brains may run ', mono('plaud search'), ', ', mono('plaud transcript'), ' … themselves. Off: only Fridolin can use it.') }),
           field({ label: 'Instruction sent with each recording', control: msg, wide: true })),
         h('div.actions',
           save,
-          btn('Check now', { icon: 'refresh', onClick: async () => { await post('/api/plaud/sync'); toast('Checking Plaud…', 'ok'); setTimeout(() => poller.kick(), 3000); } }),
+          // A check hands new recordings over, so it is offered only while that is on.
+          st.enabled ? btn('Check now', {
+            icon: 'refresh',
+            onClick: async () => {
+              const r = await post('/api/plaud/sync');
+              toast(r && r.status === 'already checking' ? 'Already checking Plaud…' : 'Checking Plaud…', 'ok');
+              setTimeout(() => poller.kick(), 3000);
+            },
+          }) : null,
           s.expired ? btn('Connect again', { icon: 'external', onClick: async () => { await post('/api/plaud/connect'); poller.kick(); } }) : null,
           btn('Disconnect', {
             kind: 'danger', icon: 'x', small: true,

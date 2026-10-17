@@ -83,9 +83,28 @@ const (
 
 // plaudState is <data_dir>/plaud/state.json.
 type plaudState struct {
+	// Account is the Plaud account the state was seeded for; its seen list
+	// means nothing for another one.
+	Account      string             `json:"account,omitempty"`
 	Seen         []string           `json:"seen"`
 	Pending      map[string]float64 `json:"pending"` // id → unix time first seen
 	AuthNotified float64            `json:"auth_notified"`
+}
+
+// seededFor reports whether st was seeded for the account acct. A state from
+// before the account was recorded counts for whoever is signed in as long as
+// it remembers any recording; one that remembers none was only written for
+// an expiry notice and never seeded. When the CLI does not say who is signed
+// in (acct is ""), the state is taken as it is.
+func (st *plaudState) seededFor(acct string) bool {
+	switch {
+	case st.Account == "":
+		return len(st.Seen) > 0 || len(st.Pending) > 0
+	case acct == "":
+		return true
+	default:
+		return st.Account == acct
+	}
 }
 
 // PlaudForward describes the last recording handed to a brain.
@@ -106,6 +125,15 @@ type PlaudManager struct {
 	lastForwarded *PlaudForward
 	busy          bool
 	stop          context.CancelFunc
+	// life is the poller's context from Start, which Stop cancels; checks
+	// started from the dashboard run on it too.
+	life context.Context
+	// authNotified is when the expiry notice went out while there was no
+	// state to keep that time in (the login expired before the first sync).
+	authNotified time.Time
+	// checkedLogin is the login (see loginStamp) whose account the state was
+	// last checked against. Only polls use it, one at a time.
+	checkedLogin string
 
 	// run executes the CLI; tests replace it.
 	run func(ctx context.Context, args ...string) (string, error)
@@ -136,6 +164,17 @@ func (p *PlaudManager) tokenPath() string { return filepath.Join(p.cliHome(), ".
 func (p *PlaudManager) connected() bool {
 	_, err := os.Stat(p.tokenPath())
 	return err == nil
+}
+
+// loginStamp changes whenever the login file does: a sign-in, a sign-out, a
+// token refresh, or brain_access switching to the other login. "" means
+// there is none.
+func (p *PlaudManager) loginStamp() string {
+	fi, err := os.Stat(p.tokenPath())
+	if err != nil {
+		return ""
+	}
+	return fmt.Sprintf("%s %d %d", p.tokenPath(), fi.Size(), fi.ModTime().UnixNano())
 }
 
 // cliPath finds the plaud binary.
@@ -237,17 +276,40 @@ func parseKV(out string) map[string]string {
 	return d
 }
 
+// me returns what `plaud me` says about the signed-in user.
+func (p *PlaudManager) me(ctx context.Context) (map[string]string, error) {
+	out, err := p.run(ctx, "me")
+	if err != nil {
+		return nil, err
+	}
+	return parseKV(out), nil
+}
+
 // account returns the signed-in Plaud user, for the dashboard.
 func (p *PlaudManager) account(ctx context.Context) (string, error) {
-	out, err := p.run(ctx, "me")
+	d, err := p.me(ctx)
 	if err != nil {
 		return "", err
 	}
-	d := parseKV(out)
 	if d["email"] != "" {
 		return d["email"], nil
 	}
 	return d["nickname"], nil
+}
+
+// accountID identifies the signed-in Plaud account: its user id, else its
+// email or nickname, else "" when the CLI does not say.
+func (p *PlaudManager) accountID(ctx context.Context) (string, error) {
+	d, err := p.me(ctx)
+	if err != nil {
+		return "", err
+	}
+	for _, k := range []string{"id", "email", "nickname"} {
+		if d[k] != "" {
+			return d[k], nil
+		}
+	}
+	return "", nil
 }
 
 // forward hands one recording to br, whose answer goes to jid. It reports
@@ -322,14 +384,14 @@ func (p *PlaudManager) forward(ctx context.Context, id string, br *Brain, jid st
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return false, err
 	}
-	path := safeMediaPath(dir, day+" - "+safePlaudName(name)+".txt")
+	path := plaudTranscriptPath(dir, day, name, id)
 	var body strings.Builder
 	fmt.Fprintf(&body, "Plaud recording: %s\nRecorded: %s\nDuration: %s\nPlaud ID: %s\n\n", name, when, duration, id)
 	if summary != "" {
 		body.WriteString("=== Plaud AI summary ===\n" + summary + "\n\n")
 	}
 	body.WriteString("=== Transcript ===\n" + strings.TrimSpace(transcript) + "\n")
-	if err := os.WriteFile(path, []byte(body.String()), 0o600); err != nil {
+	if err := writeFileAtomic(path, []byte(body.String()), 0o600, false); err != nil {
 		return false, err
 	}
 
@@ -344,6 +406,22 @@ func (p *PlaudManager) forward(ctx context.Context, id string, br *Brain, jid st
 	p.mu.Unlock()
 	log.Printf("plaud %s: handed %q to brain %s", id, name, br.ID())
 	return true, nil
+}
+
+// plaudTranscriptPath is where the transcript of recording id goes in dir.
+// The name ends in the Plaud id, so a retry finds the file it wrote before,
+// even after the recording was renamed, and rewrites it instead of adding
+// a copy. (Writing it atomically also replaces, rather than follows, a
+// symlink a brain may have put there.) The folder is read rather than
+// globbed, since media_dir may contain '[' or '*'.
+func plaudTranscriptPath(dir, day, name, id string) string {
+	entries, _ := os.ReadDir(dir)
+	for _, e := range entries {
+		if strings.HasSuffix(e.Name(), " - "+id+".txt") {
+			return filepath.Join(dir, e.Name())
+		}
+	}
+	return filepath.Join(dir, day+" - "+safePlaudName(name)+" - "+id+".txt")
 }
 
 func safePlaudName(s string) string {
@@ -391,6 +469,9 @@ func isDirectChat(jid string) bool {
 func (p *PlaudManager) destination() (*Brain, string, error) {
 	br := p.targetBrain()
 	if br == nil {
+		if id := p.cfg().Plaud.Brain; id != "" {
+			return nil, "", fmt.Errorf("brain %s, picked for Plaud recordings, was removed or is not approved — pick another one under Integrations → Plaud", id)
+		}
 		return nil, "", errors.New("no brain to send Plaud recordings to")
 	}
 	jid := p.summaryChat(br)
@@ -429,21 +510,40 @@ func (p *PlaudManager) saveState(st *plaudState) error {
 	return writeFileAtomic(filepath.Join(p.dir(), "state.json"), data, 0o600, false)
 }
 
-// Poll checks for new recordings once. The first poll only remembers what
-// already exists, so connecting never floods a brain with old recordings.
+// Poll checks for new recordings once. The first poll for an account only
+// remembers what already exists, so connecting never floods a brain with
+// old recordings. It does nothing while "Send new recordings to a brain"
+// (plaud.enabled) is off; see runPoll.
 func (p *PlaudManager) Poll(ctx context.Context) error {
-	p.mu.Lock()
-	if p.busy {
-		p.mu.Unlock()
+	if !p.beginPoll() {
 		return nil
 	}
+	return p.runPoll(ctx)
+}
+
+// beginPoll marks a check as running; false means one already is.
+func (p *PlaudManager) beginPoll() bool {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if p.busy {
+		return false
+	}
 	p.busy = true
-	p.mu.Unlock()
+	return true
+}
+
+// runPoll does the check beginPoll started, and ends it. With "Send new
+// recordings to a brain" off (plaud.enabled) it does nothing, whoever asked
+// for it, in case the switch went off while the check was on its way.
+func (p *PlaudManager) runPoll(ctx context.Context) error {
 	defer func() {
 		p.mu.Lock()
 		p.busy = false
 		p.mu.Unlock()
 	}()
+	if !p.cfg().Plaud.Enabled {
+		return nil
+	}
 
 	err := p.poll(ctx)
 	p.mu.Lock()
@@ -452,6 +552,7 @@ func (p *PlaudManager) Poll(ctx context.Context) error {
 		p.lastErr = err.Error()
 	} else {
 		p.lastErr = ""
+		p.authNotified = time.Time{}
 	}
 	p.mu.Unlock()
 	if errors.Is(err, errPlaudAuth) {
@@ -468,26 +569,38 @@ func (p *PlaudManager) poll(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	if st == nil {
-		st = &plaudState{Pending: map[string]float64{}}
-		seen := map[string]bool{}
-		for page := 1; page <= plaudSeedPages; page++ {
-			ids, err := p.listIDs(ctx, page)
-			if err != nil {
+	// The account is looked up when there is no state yet and whenever the
+	// login changed, not on every poll: signing in with another account
+	// must not make its recordings look new. The same account signing in
+	// again keeps its state, so what it recorded in between still arrives.
+	// The login counts as checked as it was before `me` ran: one that
+	// changes while the account is looked up is looked up again.
+	if stamp := p.loginStamp(); st == nil || stamp != p.checkedLogin {
+		acct, err := p.accountID(ctx)
+		if err != nil {
+			return err
+		}
+		if st == nil || !st.seededFor(acct) {
+			if st != nil {
+				why := "signed in to another Plaud account"
+				if st.Account == "" {
+					why = "the state only held an expiry notice and was never seeded"
+				}
+				log.Printf("plaud: %s, starting over", why)
+			}
+			if err := p.seed(ctx, acct); err != nil {
 				return err
 			}
-			for _, id := range ids {
-				if !seen[id] {
-					seen[id] = true
-					st.Seen = append(st.Seen, id)
-				}
-			}
-			if len(ids) < plaudPageSize {
-				break
+			p.checkedLogin = stamp
+			return nil
+		}
+		if st.Account == "" && acct != "" {
+			st.Account = acct
+			if err := p.saveState(st); err != nil {
+				return err
 			}
 		}
-		log.Printf("plaud: first sync — %d existing recordings marked as seen", len(st.Seen))
-		return p.saveState(st)
+		p.checkedLogin = stamp
 	}
 
 	seen := map[string]bool{}
@@ -497,6 +610,12 @@ func (p *PlaudManager) poll(ctx context.Context) error {
 	ids, err := p.listIDs(ctx, 1)
 	if err != nil {
 		return err
+	}
+	// A login that changed since the account was checked may have listed
+	// another account's recordings, which must not count as new. The next
+	// poll checks the account first; a token refresh costs one interval.
+	if p.loginStamp() != p.checkedLogin {
+		return nil
 	}
 	for _, id := range ids {
 		if _, pending := st.Pending[id]; !seen[id] && !pending {
@@ -520,19 +639,34 @@ func (p *PlaudManager) poll(ctx context.Context) error {
 		pendingIDs = append(pendingIDs, id)
 	}
 	sort.Strings(pendingIDs)
+	// A recording that fails is retried next time, until it is given up,
+	// and does not hold up the others; its error is the check's, so the card
+	// shows it instead of counting the recording as waiting for Plaud.
+	var failed []error
+	maxAge := fmt.Sprintf("%d days", plaudPendingMaxAge/(24*time.Hour))
 	for _, id := range pendingIDs {
 		done, err := p.forward(ctx, id, br, jid)
 		if errors.Is(err, errPlaudAuth) {
 			_ = p.saveState(st)
 			return err
 		}
-		if err != nil {
-			log.Printf("plaud %s: %v (will retry)", id, err)
-		}
 		since := time.Unix(int64(st.Pending[id]), 0)
-		if done || time.Since(since) > plaudPendingMaxAge {
-			if !done {
-				log.Printf("plaud %s: no transcript after %v, giving up", id, plaudPendingMaxAge)
+		giveUp := !done && time.Since(since) > plaudPendingMaxAge
+		if err != nil {
+			next := "will retry"
+			if giveUp {
+				next = "given up after " + maxAge
+			}
+			failed = append(failed, fmt.Errorf("recording %s (%s): %w", id, next, err))
+		}
+		if done || giveUp {
+			// A recording that still fails may well have been transcribed
+			// long ago, so its line does not blame Plaud.
+			switch {
+			case giveUp && err != nil:
+				log.Printf("plaud %s: still failing after %s, giving up", id, maxAge)
+			case giveUp:
+				log.Printf("plaud %s: no transcript after %s, giving up", id, maxAge)
 			}
 			delete(st.Pending, id)
 			st.Seen = append(st.Seen, id)
@@ -542,17 +676,52 @@ func (p *PlaudManager) poll(ctx context.Context) error {
 		}
 	}
 	st.AuthNotified = 0
+	if err := p.saveState(st); err != nil {
+		return err
+	}
+	return errors.Join(failed...)
+}
+
+// seed starts the state for acct with the recordings it already has, all
+// marked as seen.
+func (p *PlaudManager) seed(ctx context.Context, acct string) error {
+	st := &plaudState{Account: acct, Pending: map[string]float64{}}
+	seen := map[string]bool{}
+	for page := 1; page <= plaudSeedPages; page++ {
+		ids, err := p.listIDs(ctx, page)
+		if err != nil {
+			return err
+		}
+		for _, id := range ids {
+			if !seen[id] {
+				seen[id] = true
+				st.Seen = append(st.Seen, id)
+			}
+		}
+		if len(ids) < plaudPageSize {
+			break
+		}
+	}
+	log.Printf("plaud: first sync — %d existing recordings marked as seen", len(st.Seen))
 	return p.saveState(st)
 }
 
 // notifyAuthExpired tells the private chat Plaud uses once a day that Plaud
 // needs a new sign-in. Without one only the dashboard shows it.
+//
+// The notice time is kept in the state. Before the first sync there is none,
+// and the notice must not write one: a state is what tells the next check
+// that the existing recordings were already seen, so an empty one would make
+// it forward all of them. Until then the time is kept in memory.
 func (p *PlaudManager) notifyAuthExpired() {
 	st, _ := p.loadState()
-	if st == nil {
-		st = &plaudState{Pending: map[string]float64{}}
+	p.mu.Lock()
+	last := p.authNotified
+	p.mu.Unlock()
+	if st != nil {
+		last = time.Unix(int64(st.AuthNotified), 0)
 	}
-	if time.Since(time.Unix(int64(st.AuthNotified), 0)) < 24*time.Hour {
+	if time.Since(last) < 24*time.Hour {
 		return
 	}
 	_, jid, err := p.destination()
@@ -563,7 +732,14 @@ func (p *PlaudManager) notifyAuthExpired() {
 		log.Printf("plaud: could not send the expiry notice: %v", err)
 		return
 	}
-	st.AuthNotified = float64(time.Now().Unix())
+	now := time.Now()
+	if st == nil {
+		p.mu.Lock()
+		p.authNotified = now
+		p.mu.Unlock()
+		return
+	}
+	st.AuthNotified = float64(now.Unix())
 	_ = p.saveState(st)
 }
 
@@ -571,7 +747,7 @@ func (p *PlaudManager) notifyAuthExpired() {
 func (p *PlaudManager) Start(ctx context.Context) {
 	ctx, cancel := context.WithCancel(ctx)
 	p.mu.Lock()
-	p.stop = cancel
+	p.stop, p.life = cancel, ctx
 	p.mu.Unlock()
 	go func() {
 		next := time.Now().Add(15 * time.Second) // let WhatsApp connect first
@@ -599,7 +775,18 @@ func (p *PlaudManager) Start(ctx context.Context) {
 	}()
 }
 
-// Stop ends the poller and a running sign-in.
+// lifetime is the context a check runs on: Start's, so that Stop ends it,
+// or Background before Start.
+func (p *PlaudManager) lifetime() context.Context {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if p.life != nil {
+		return p.life
+	}
+	return context.Background()
+}
+
+// Stop ends the poller, a running check and a running sign-in.
 func (p *PlaudManager) Stop() {
 	p.mu.Lock()
 	defer p.mu.Unlock()
@@ -638,6 +825,8 @@ func (b *Bridge) apiPlaudStatus(w http.ResponseWriter, r *http.Request) {
 	}
 	if br := p.targetBrain(); br != nil {
 		resp["target_brain"] = br.ID()
+	} else if cfg.Plaud.Brain != "" {
+		resp["brain_missing"] = true
 	}
 	// Where summaries go, for the card: a chat that belongs to another brain
 	// gets a warning, since what you write back there goes to that brain.
@@ -752,6 +941,12 @@ func (b *Bridge) apiPlaudSettings(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, err.Error())
 		return
 	}
+	// Only a newly picked brain must exist: one that went away since must
+	// not keep the other settings from being saved.
+	if req.Brain != nil && *req.Brain != "" && *req.Brain != b.cfgs.Get().Plaud.Brain && b.brainMgr.Get(*req.Brain) == nil {
+		writeErr(w, http.StatusUnprocessableEntity, fmt.Sprintf("there is no approved brain %q", *req.Brain))
+		return
+	}
 	_, err := b.cfgs.Update("", func(c *Config) error {
 		if req.Enabled != nil {
 			c.Plaud.Enabled = *req.Enabled
@@ -782,10 +977,20 @@ func (b *Bridge) apiPlaudSync(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusPreconditionFailed, "Plaud is not connected")
 		return
 	}
+	if !b.cfgs.Get().Plaud.Enabled {
+		writeErr(w, http.StatusConflict, "Turn on “Send new recordings to a brain” first: a check hands new recordings to the brain")
+		return
+	}
+	// A check that is already running covers this one; say so rather than
+	// claim to start one.
+	if !b.plaud.beginPoll() {
+		writeJSON(w, http.StatusOK, map[string]string{"status": "already checking"})
+		return
+	}
 	go func() {
-		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
+		ctx, cancel := context.WithTimeout(b.plaud.lifetime(), 10*time.Minute)
 		defer cancel()
-		if err := b.plaud.Poll(ctx); err != nil {
+		if err := b.plaud.runPoll(ctx); err != nil {
 			log.Printf("plaud: %v", err)
 		}
 	}()
