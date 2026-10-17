@@ -125,10 +125,13 @@ Changing it does not move a login. Fridolin stops checking until you
 connect again, and then uses the login the tool has in its new home: your
 terminal's `plaud` may already be signed in to `~/.plaud/`, maybe with
 another account, and Fridolin does not take that over unasked. Connecting
-with another account starts over, as above. With it on, **Disconnect**
-signs out the login in `~/.plaud/`, which your terminal's `plaud` uses too.
-If a login is still there after signing out, Disconnect says so instead of
-reporting success.
+with another account starts over, as above. Fridolin runs its own Plaud
+commands one at a time, since the tool rewrites its login without a lock
+when it refreshes it; a brain running the tool at the same moment can
+still collide with it, which at worst signs Plaud out (the card then says
+the login expired). With it on, **Disconnect** signs out the login in
+`~/.plaud/`, which your terminal's `plaud` uses too. If a login is still
+there after signing out, Disconnect says so instead of reporting success.
 
 Fridolin runs Plaud's tool with its usage statistics turned off
 (`DO_NOT_TRACK`), and with only a few variables of its own environment,
