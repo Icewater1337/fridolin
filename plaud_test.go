@@ -949,6 +949,33 @@ func TestPlaudCheckNowWhileChecking(t *testing.T) {
 	})
 }
 
+// A check that Check now started ends when Fridolin stops, like the
+// poller's own checks, instead of running on for up to ten minutes.
+func TestPlaudStopEndsCheckNow(t *testing.T) {
+	tb, fp := plaudBridge(t, "")
+	plaudSignIn(t, tb)
+	fp.files(plaudOld1)
+	tb.plaud.Start(context.Background())
+	tb.plaud.Stop()
+	if w := tb.do("POST", "/api/plaud/sync", nil); w.Code != 202 {
+		t.Fatalf("check now = %d %s, want 202", w.Code, w.Body.String())
+	}
+	waitFor(t, 10*time.Second, "the check to end", func() bool {
+		tb.plaud.mu.Lock()
+		defer tb.plaud.mu.Unlock()
+		return !tb.plaud.busy
+	})
+	if calls := fp.calls(); calls != "" {
+		t.Errorf("Plaud was checked after Fridolin stopped:\n%s", calls)
+	}
+	tb.plaud.mu.Lock()
+	lastErr := tb.plaud.lastErr
+	tb.plaud.mu.Unlock()
+	if !strings.Contains(lastErr, context.Canceled.Error()) {
+		t.Errorf("last error = %q, want the check cancelled", lastErr)
+	}
+}
+
 func TestPlaudBrainAccessSharesTheLogin(t *testing.T) {
 	tb, fp := plaudBridge(t, `, "brain_access": true`)
 	fp.files()

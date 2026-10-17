@@ -125,6 +125,9 @@ type PlaudManager struct {
 	lastForwarded *PlaudForward
 	busy          bool
 	stop          context.CancelFunc
+	// life is the poller's context from Start, which Stop cancels; checks
+	// started from the dashboard run on it too.
+	life context.Context
 	// authNotified is when the expiry notice went out while there was no
 	// state to keep that time in (the login expired before the first sync).
 	authNotified time.Time
@@ -744,7 +747,7 @@ func (p *PlaudManager) notifyAuthExpired() {
 func (p *PlaudManager) Start(ctx context.Context) {
 	ctx, cancel := context.WithCancel(ctx)
 	p.mu.Lock()
-	p.stop = cancel
+	p.stop, p.life = cancel, ctx
 	p.mu.Unlock()
 	go func() {
 		next := time.Now().Add(15 * time.Second) // let WhatsApp connect first
@@ -772,7 +775,18 @@ func (p *PlaudManager) Start(ctx context.Context) {
 	}()
 }
 
-// Stop ends the poller and a running sign-in.
+// lifetime is the context a check runs on: Start's, so that Stop ends it,
+// or Background before Start.
+func (p *PlaudManager) lifetime() context.Context {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if p.life != nil {
+		return p.life
+	}
+	return context.Background()
+}
+
+// Stop ends the poller, a running check and a running sign-in.
 func (p *PlaudManager) Stop() {
 	p.mu.Lock()
 	defer p.mu.Unlock()
@@ -974,7 +988,7 @@ func (b *Bridge) apiPlaudSync(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	go func() {
-		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
+		ctx, cancel := context.WithTimeout(b.plaud.lifetime(), 10*time.Minute)
 		defer cancel()
 		if err := b.plaud.runPoll(ctx); err != nil {
 			log.Printf("plaud: %v", err)
