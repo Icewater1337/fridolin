@@ -18,6 +18,10 @@ import (
 // WCB_FAKE_READ it also reports whether it could read that file, and with
 // WCB_FAKE_ENV the value of that environment variable. Tests point
 // claude_path at os.Args[0], so no script or real CLI is needed.
+//
+// Before the tests run it unsets every config override variable: a shell
+// that exports DATA_DIR or CONFIG_FILE for a real bridge would otherwise
+// point the tests at that bridge's data.
 func TestMain(m *testing.M) {
 	if os.Getenv("WCB_FAKE_PLAUD") == "1" && len(os.Args) > 1 && isPlaudCommand(os.Args[1]) {
 		os.Exit(fakePlaud(os.Args[1:]))
@@ -26,7 +30,23 @@ func TestMain(m *testing.M) {
 		fakeClaude()
 		return
 	}
+	for _, k := range overrideVariables() {
+		if err := os.Unsetenv(k); err != nil {
+			fmt.Fprintf(os.Stderr, "unsetting %s: %v\n", k, err)
+			os.Exit(1)
+		}
+	}
 	os.Exit(m.Run())
+}
+
+// overrideVariables are the environment variables that change which config
+// the bridge loads or what it contains.
+func overrideVariables() []string {
+	keys := []string{"CONFIG_FILE"}
+	for _, o := range envOverrides {
+		keys = append(keys, o.env)
+	}
+	return keys
 }
 
 func fakeClaude() {

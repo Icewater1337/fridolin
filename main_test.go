@@ -3,6 +3,8 @@ package main
 import (
 	"io"
 	"os"
+	"os/exec"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -82,4 +84,31 @@ func lineWith(out, s string) string {
 		}
 	}
 	return ""
+}
+
+func TestShellOverridesDoNotReachTests(t *testing.T) {
+	// Runs the test binary again with every override variable set, the way a
+	// developer's shell might export them for a real bridge, and checks from
+	// inside that TestMain cleared them before any test ran.
+	if os.Getenv("WCB_CHECK_OVERRIDES_CLEARED") == "1" {
+		for _, k := range overrideVariables() {
+			if _, ok := os.LookupEnv(k); ok {
+				t.Errorf("%s from the shell reached the tests", k)
+			}
+		}
+		return
+	}
+	cmd := exec.Command(os.Args[0], "-test.run=^TestShellOverridesDoNotReachTests$", "-test.count=1", "-test.v")
+	cmd.Env = append(os.Environ(), "WCB_CHECK_OVERRIDES_CLEARED=1")
+	notTheTests := filepath.Join(t.TempDir(), "not-the-tests")
+	for _, k := range overrideVariables() {
+		cmd.Env = append(cmd.Env, k+"="+notTheTests)
+	}
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("%v\n%s", err, out)
+	}
+	if !strings.Contains(string(out), "--- PASS: TestShellOverridesDoNotReachTests") {
+		t.Fatalf("the check did not run:\n%s", out)
+	}
 }
