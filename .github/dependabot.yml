@@ -1,0 +1,44 @@
+# Weekly update pull requests. Minor and patch releases of an ecosystem come
+# grouped in one pull request; a major release comes on its own, so a
+# breaking change gets reviewed by itself. A release has to be a week old
+# before it is proposed, which keeps a hijacked release that is yanked
+# within days out of the proposals.
+version: 2
+updates:
+  - package-ecosystem: gomod
+    directory: /
+    schedule:
+      interval: weekly
+    cooldown:
+      default-days: 7
+    groups:
+      go-modules:
+        patterns: ["*"]
+        update-types: [minor, patch]
+
+  # The actions the workflows pin by commit SHA.
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    cooldown:
+      default-days: 7
+    groups:
+      github-actions:
+        patterns: ["*"]
+        update-types: [minor, patch]
+
+  # tools/requirements*.txt. Their ">=" floors are deliberate (the oldest
+  # release each feature was checked with), so a floor only moves when a new
+  # release falls outside it; exact pins (ruff) move with every release.
+  - package-ecosystem: pip
+    directory: /tools
+    schedule:
+      interval: weekly
+    versioning-strategy: increase-if-necessary
+    cooldown:
+      default-days: 7
+    groups:
+      python:
+        patterns: ["*"]
+        update-types: [minor, patch]
