@@ -4,7 +4,7 @@ import { get, post, put } from './api.js';
 import { store, loadGroups, rememberName, setIgnoredCount } from './state.js';
 import {
   h, mount, icon, pill, badge, btn, timeAgo, mono, plural, empty, changed, pageHeader, spinner,
-  select, textInput, confirmDialog, toast, phone, callout, runBusy, shortJid, chatName,
+  select, textInput, confirmDialog, toast, phone, runBusy, shortJid, chatName,
 } from './ui.js';
 
 export default {
@@ -176,26 +176,24 @@ export default {
     ctx.poll(async () => {
       const c = await get('/api/config');
       cfg = c;
-      if (!changed(memo, 'cfg', { file: c.config, locked: c.env_locked, eff: c.effective.allowed_numbers, eff2: c.effective.allowed_groups, any: c.effective.allow_any_dm })) return;
+      if (!changed(memo, 'cfg', { file: c.config, any: c.effective.allow_any_dm })) return;
       paintLists();
     }, 5000);
 
     function paintLists() {
       const file = cfg.config || {};
       const eff = cfg.effective || {};
-      const locked = cfg.env_locked || {};
-      const numbers = locked.allowed_numbers ? (eff.allowed_numbers || []) : (file.allowed_numbers || []);
-      const groups = locked.allowed_groups ? (eff.allowed_groups || []) : (file.allowed_groups || []);
+      const numbers = file.allowed_numbers || [];
+      const groups = file.allowed_groups || [];
       // Only an explicit true opens an empty list; unset means nobody.
       const anyDM = eff.allow_any_dm === true;
 
       mount(numbersBox,
-        locked.allowed_numbers ? callout('info', null, `Set by the environment variable ${locked.allowed_numbers} (or the .env next to config.json). Change it there.`) : null,
         numbers.length ? h('ul.plain-list', numbers.map((n) => h('li',
           h('div', mono(phone(n))),
-          locked.allowed_numbers ? null : removeBtn(`Remove ${phone(n)}?`, 'They can no longer message the bridge directly. Messages they already sent are kept.', (c) => { c.allowed_numbers = (c.allowed_numbers || []).filter((x) => x !== n); }))))
+          removeBtn(`Remove ${phone(n)}?`, 'They can no longer message the bridge directly. Messages they already sent are kept.', (c) => { c.allowed_numbers = (c.allowed_numbers || []).filter((x) => x !== n); }))))
           : h('p.muted', anyDM ? 'Empty — so anyone who messages this WhatsApp account can use the assistant. Add your number.' : 'Empty — nobody can send direct messages yet.'),
-        locked.allowed_numbers ? null : addForm({
+        addForm({
           placeholder: '15551234567',
           label: 'Add number',
           help: 'Digits with country code, no + or spaces.',
@@ -205,13 +203,12 @@ export default {
         }));
 
       mount(allowedGroupsBox,
-        locked.allowed_groups ? callout('info', null, `Set by the environment variable ${locked.allowed_groups} (or the .env next to config.json). Change it there.`) : null,
         groups.length ? h('ul.plain-list', groups.map((g) => h('li',
           h('div', chatName(g) ? h('div', h('strong', chatName(g))) : null, h('div.small', mono(g))),
           h('span.muted.small', explicitOwner(g) ? `→ ${explicitOwner(g)}` : '→ default'),
-          locked.allowed_groups ? null : removeBtn('Stop answering in this group?', 'The bridge ignores the group from now on. Its brain keeps the history.', (c) => { c.allowed_groups = (c.allowed_groups || []).filter((x) => x !== g); }))))
+          removeBtn('Stop answering in this group?', 'The bridge ignores the group from now on. Its brain keeps the history.', (c) => { c.allowed_groups = (c.allowed_groups || []).filter((x) => x !== g); }))))
           : h('p.muted', 'No groups allowed. The bridge ignores every group until you allow one.'),
-        locked.allowed_groups ? null : addForm({
+        addForm({
           placeholder: '120363000000000000@g.us',
           label: 'Add group',
           help: 'A group JID ends in @g.us. Easier: allow groups from the lists above.',
