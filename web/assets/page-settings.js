@@ -33,10 +33,9 @@ const SECTIONS = [
     intro: 'How the bridge runs Claude Code.',
     fields: [
       { key: 'claude_path', type: 'text', mono: true, label: 'Claude CLI', help: '“claude” finds it on your PATH. Otherwise the full path to the claude binary.' },
-      { key: 'brain_mode', type: 'bool', label: 'Brain mode', help: 'On: chats go to brains — folders with their own prompt, memory and history. Off: classic mode, one Claude session per chat in one shared folder.' },
       { key: 'brain_model', type: 'text', mono: true, label: 'Brain model', placeholder: 'CLI default', help: 'sonnet, opus, haiku or a full model id. Brains can override it.' },
       { key: 'brain_effort', type: 'select', label: 'Brain effort', options: EFFORTS.map(([v, l]) => [v, v === '' ? 'CLI default' : l]), help: 'How hard the model thinks. Brains can override it.' },
-      { key: 'model', type: 'text', mono: true, label: 'Model in classic mode', placeholder: 'CLI default' },
+      { key: 'model', type: 'text', mono: true, label: 'Fallback model', placeholder: 'CLI default', help: 'Used by brains only while Brain model is empty. Older versions had it for classic mode.' },
       { key: 'disallowed_tools', type: 'list', label: 'Blocked tools', placeholder: 'WebFetch', addLabel: 'Add tool', help: 'Tools brains may not use. A brain can override this list in its own settings.' },
       { key: 'dangerously_skip_permissions', type: 'bool', label: 'Let brains use tools without asking', danger: true, help: 'Nobody sits at the keyboard to approve a tool, so without this every tool call waits forever and brains can only chat. With it, a brain can run commands and edit files on its own — the sandbox (below) is the safety net that keeps it out of everything else.' },
     ],

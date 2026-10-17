@@ -542,38 +542,25 @@ func TestStopAndResetAreScopedToTheChat(t *testing.T) {
 	}
 }
 
-// !reset must not promise a fresh conversation where it cannot give one: a
+// !reset must not promise a fresh conversation, which it cannot give: a
 // brain's next run still reads the recent chat history.
 func TestResetReplySaysWhatItDoes(t *testing.T) {
-	cases := []struct {
-		name      string
-		extra     string
-		wantFresh bool // the reply may promise a fresh conversation
-	}{
-		{"brain mode", "", false},
-		{"classic mode", `, "brain_mode": false`, true},
+	tb, _ := newMainBridge(t, "")
+	ctx := context.Background()
+	for _, cmd := range []string{"!reset", "!help"} {
+		tb.handleInbound(ctx, Inbound{JID: testDMChat, Sender: "15551234567", Text: cmd, Source: "whatsapp"})
 	}
-	for _, c := range cases {
-		t.Run(c.name, func(t *testing.T) {
-			tb, _ := newMainBridge(t, c.extra)
-			ctx := context.Background()
-			for _, cmd := range []string{"!reset", "!help"} {
-				tb.handleInbound(ctx, Inbound{JID: testDMChat, Sender: "15551234567", Text: cmd, Source: "whatsapp"})
-			}
-			sent := tb.sentTo(testDMChat)
-			if len(sent) != 2 {
-				t.Fatalf("sent %q, want a reply to !reset and to !help", sent)
-			}
-			for _, s := range sent {
-				promises := strings.Contains(s, "fresh")
-				if promises != c.wantFresh {
-					t.Errorf("reply %q: promises a fresh start = %v, want %v", s, promises, c.wantFresh)
-				}
-			}
-			if !c.wantFresh && !strings.Contains(sent[0], "history") {
-				t.Errorf("reply %q does not say the chat history stays", sent[0])
-			}
-		})
+	sent := tb.sentTo(testDMChat)
+	if len(sent) != 2 {
+		t.Fatalf("sent %q, want a reply to !reset and to !help", sent)
+	}
+	for _, s := range sent {
+		if strings.Contains(s, "fresh") {
+			t.Errorf("reply %q promises a fresh start", s)
+		}
+	}
+	if !strings.Contains(sent[0], "history") {
+		t.Errorf("reply %q does not say the chat history stays", sent[0])
 	}
 }
 

@@ -29,8 +29,8 @@ messages.
 
 ## What it does
 
-**Conversations that continue.** Each chat keeps its own session. The
-assistant sees the recent history of that chat and can search the full log.
+**Conversations that continue.** Each chat keeps its own history. The
+assistant sees the recent part of it and can search the full log.
 
 **A dashboard.** Everything is set up in a local web page: pair WhatsApp by
 scanning a QR code, add brains, allow chats, watch messages arrive and runs
@@ -196,7 +196,7 @@ on the **Dev** page and read the replies there.
 | -------- | ------ |
 | `!help`  | Show available commands |
 | `!stop`  | Stop the run for this chat and drop its queued messages, including files or recordings another brain is answering here |
-| `!reset` | With brains: like `!stop` — the recent chat history stays, and the next message still sees it. In classic mode: forget the Claude session and start fresh |
+| `!reset` | Like `!stop` — the recent chat history stays, and the next message still sees it |
 
 A command also works when sent as a reply to a message.
 In a group, address the bridge as for any request (`@claude !stop`, or
@@ -406,15 +406,14 @@ What it does not do:
   `at`, `open`, `osascript` or a running tmux server (the activity viewer's,
   or your own) to start a program outside the sandbox. See
   [what the sandbox does not cover yet](docs/CONFIGURATION.md#what-the-sandbox-does-not-cover-yet).
-- Classic mode (`brain_mode` off) runs Claude without the sandbox.
 - On Linux there is no sandbox layer at all (the bridge refuses to start with
   `sandbox.enabled` on). Run the bridge as a dedicated user.
 - Every file sent to the bridge lands in your data directory, and the assistant
   reads it.
 
-Sensible precautions: a dedicated WhatsApp number, a tight allowlist, a work
-directory that is not your home directory, and `sandbox.deny_paths` covering
-anything sensitive.
+Sensible precautions: a dedicated WhatsApp number, a tight allowlist, brain
+folders of their own rather than your home directory, and
+`sandbox.deny_paths` covering anything sensitive.
 
 ---
 
@@ -433,8 +432,9 @@ matched against the stored options).
 worker; each message spawns `claude -p` with `--output-format stream-json`,
 seeded with the brain's prompt file and recent chat history. Events are
 parsed live, so an `AskUserQuestion` reaches WhatsApp immediately and a run
-over 10 seconds gets a "working on it" notice. `BrainManager.Apply` swaps the
-brain set at runtime without touching brains that did not change.
+over 10 seconds gets a "working on it" notice (the event types are in
+`stream.go`). `BrainManager.Apply` swaps the brain set at runtime without
+touching brains that did not change.
 
 **`manifest.go`, `brainreg.go`** — `brain.json`, the brain registry, path
 checks and scaffolding. **`configstore.go`** — the live configuration.
@@ -445,10 +445,6 @@ API; the page is plain HTML/JS compiled into the binary.
 **`backup.go`** — Google Drive backups through rclone.
 
 **`plaud.go`** — the Plaud recorder integration.
-
-**`claude.go`** — the classic single-session runner used when `brain_mode` is
-off: one Claude session per chat, resumed with `--resume`, retried without it
-if the session has expired.
 
 **`sandbox.go`** — generates a per-brain `sandbox-exec` profile, passed to
 `sandbox-exec -p` on each run (never written to a file).

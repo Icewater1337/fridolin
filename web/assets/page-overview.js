@@ -100,13 +100,12 @@ export default {
 
     // ── health header ──
     const renderHealth = (s) => {
-      const key = { v: s.version, dev: s.dev_mode, mode: s.mode, up: Math.floor((s.uptime_s || 0) / 60), plat: s.platform, deb: s.debouncing, ing: s.ingest };
+      const key = { v: s.version, dev: s.dev_mode, up: Math.floor((s.uptime_s || 0) / 60), plat: s.platform, deb: s.debouncing, ing: s.ingest };
       if (!changed(memo, 'health', key)) return;
       mount(header,
         pill('Running', 'ok'),
         h('span.health-item', { title: s.started_at ? `Started ${new Date(s.started_at).toLocaleString()}` : '' }, icon('clock'), `up ${fmtDuration(s.uptime_s || 0)}`),
         s.version ? h('span.health-item.mono', s.version) : null,
-        s.mode === 'classic' ? badge('Classic mode', 'info', 'One Claude session per chat; brains are off') : null,
         s.dev_mode ? badge('Dev mode', 'warn', 'Started with --no-whatsapp') : null,
         s.debouncing ? h('span.health-item', plural(s.debouncing, 'message'), ' gathering') : null);
     };
@@ -114,12 +113,8 @@ export default {
     // ── first run ──
     const renderCTA = (s) => {
       const show = (s.brains || []).length === 0 && (s.issues || []).length === 0;
-      if (!changed(memo, 'cta', { show, mode: s.mode })) return;
+      if (!changed(memo, 'cta', { show })) return;
       if (!show) { mount(cta); return; }
-      if (s.mode === 'classic') {
-        mount(cta, callout('info', 'Classic mode', 'Every chat gets its own Claude session in one shared folder. To give chats separate folders, prompts and memory, turn on brain mode under ', h('a', { href: '#/settings' }, 'Settings → Claude'), '.'));
-        return;
-      }
       mount(cta, h('div.card.hero',
         h('div.hero-icon', icon('sparkle')),
         h('div.hero-body',
@@ -189,7 +184,7 @@ export default {
       const list = s.brains || [];
       if (!changed(memo, 'brains', list)) return;
       if (!list.length) {
-        mount(brainsBox, empty('No brains yet', s.mode === 'classic' ? 'Brain mode is off.' : 'Add a folder as a brain to start answering messages.', s.mode === 'classic' ? null : btn('Add a brain', { href: '#/add-brain', kind: 'primary', icon: 'plus' })));
+        mount(brainsBox, empty('No brains yet', 'Add a folder as a brain to start answering messages.', btn('Add a brain', { href: '#/add-brain', kind: 'primary', icon: 'plus' })));
         return;
       }
       mount(brainsBox, h('div.brain-list', list.map((b) => {

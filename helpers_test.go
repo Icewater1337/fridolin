@@ -107,9 +107,9 @@ func runInEmptyDir(m *testing.M) (int, error) {
 }
 
 // overrideVariables are the environment variables that change which config
-// the bridge loads or what it contains.
+// the bridge loads or what it contains. A false BRAIN_MODE refuses it.
 func overrideVariables() []string {
-	keys := []string{"CONFIG_FILE"}
+	keys := []string{"CONFIG_FILE", "BRAIN_MODE"}
 	for _, o := range envOverrides {
 		keys = append(keys, o.env)
 	}

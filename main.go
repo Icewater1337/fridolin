@@ -89,7 +89,6 @@ func starterConfig() *Config {
 		AllowAnyDM:                 &f,
 		AllowedGroups:              []string{},
 		Triggers:                   TriggersFromStrings([]string{"@claude"}),
-		BrainMode:                  true,
 		DangerouslySkipPermissions: true,
 		HTTPListen:                 defaultHTTPListen,
 		OTPGuard:                   true,
@@ -254,10 +253,6 @@ func checkCmd(args []string) {
 	fmt.Printf("  groups:    %v\n", cfg.AllowedGroups)
 	trig, _ := json.Marshal(cfg.Triggers)
 	fmt.Printf("  triggers:  %s\n", trig)
-	if !cfg.BrainMode {
-		fmt.Printf("  mode:      classic (one session per chat), work dir %s\n", cfg.WorkDir)
-		return
-	}
 	specs, issues := ResolveBrains(cfg)
 	if len(specs) == 0 {
 		fmt.Println("  brains:    none yet — add one in the dashboard")

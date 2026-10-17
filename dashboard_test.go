@@ -141,8 +141,7 @@ func TestDashboardGuards(t *testing.T) {
 }
 
 // TestStatusWarnsWhenBrainsInheritYourClaudeSetup: inherit_claude_user_config
-// has no dashboard field, so the status says when it is on; classic mode
-// runs Claude with your setup whatever it says.
+// has no dashboard field, so the status says when it is on.
 func TestStatusWarnsWhenBrainsInheritYourClaudeSetup(t *testing.T) {
 	cases := []struct {
 		name, extra string
@@ -150,7 +149,6 @@ func TestStatusWarnsWhenBrainsInheritYourClaudeSetup(t *testing.T) {
 	}{
 		{"off", "", false},
 		{"on", `, "inherit_claude_user_config": true`, true},
-		{"on in classic mode", `, "inherit_claude_user_config": true, "brain_mode": false`, false},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -741,6 +739,28 @@ func TestPutConfigKeepsBrainsAndReportsRestart(t *testing.T) {
 	}
 	if w := tb.do("PUT", "/api/config", map[string]any{"etag": got.ETag, "config": c}); w.Code != 409 {
 		t.Errorf("stale etag: %d, want 409", w.Code)
+	}
+}
+
+// The settings page sends brain_mode back as it got it, true. A request
+// that turns it off is refused, not saved: the next start would fail on it.
+func TestPutConfigRefusesClassicMode(t *testing.T) {
+	tb := newTestBridge(t, "")
+	var got struct {
+		ETag   string         `json:"etag"`
+		Config map[string]any `json:"config"`
+	}
+	_ = json.Unmarshal(tb.do("GET", "/api/config", nil).Body.Bytes(), &got)
+	if got.Config["brain_mode"] != true {
+		t.Errorf("GET /api/config: brain_mode = %v, want true", got.Config["brain_mode"])
+	}
+	got.Config["brain_mode"] = false
+	w := tb.do("PUT", "/api/config", map[string]any{"etag": got.ETag, "config": got.Config})
+	if w.Code != http.StatusBadRequest || !strings.Contains(w.Body.String(), "classic mode, which was removed") {
+		t.Errorf("put brain_mode false: %d %s, want 400 saying classic mode was removed", w.Code, w.Body.String())
+	}
+	if tb.cfgs.ETag() != got.ETag {
+		t.Error("the refused request changed config.json")
 	}
 }
 

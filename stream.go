@@ -11,13 +11,12 @@ import (
 // chat) and the final result.
 
 type streamEvent struct {
-	Type      string     `json:"type"`
-	Subtype   string     `json:"subtype"`
-	IsError   bool       `json:"is_error"`
-	Message   *streamMsg `json:"message"`
-	Result    string     `json:"result"`
-	SessionID string     `json:"session_id"`
-	Error     string     `json:"error"`
+	Type    string     `json:"type"`
+	Subtype string     `json:"subtype"`
+	IsError bool       `json:"is_error"`
+	Message *streamMsg `json:"message"`
+	Result  string     `json:"result"`
+	Error   string     `json:"error"`
 }
 
 type streamMsg struct {

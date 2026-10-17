@@ -41,7 +41,6 @@ type Bridge struct {
 	store    *Store
 	wa       Messenger
 	dev      *devMessenger // non-nil in --no-whatsapp mode
-	claude   *ClaudeRunner
 	brainMgr *BrainManager
 	deb      *Debouncer
 	logs     *LogRing
@@ -99,7 +98,6 @@ func NewBridge(cfgs *ConfigStore, opts BridgeOptions) (_ *Bridge, err error) {
 		cfgs:     cfgs,
 		lock:     lock,
 		store:    store,
-		claude:   NewClaudeRunner(cfgs.Get, store),
 		logs:     opts.Logs,
 		activity: NewActivity(500),
 		started:  time.Now(),
@@ -134,20 +132,6 @@ func NewBridge(cfgs *ConfigStore, opts BridgeOptions) (_ *Bridge, err error) {
 			return nil, fmt.Errorf("creating whatsapp client: %w", err)
 		}
 		b.wa = wa
-	}
-
-	// "Still working" notification for the classic runner.
-	globalWorkingNotify = func(jid string) {
-		if err := b.wa.SendMessage(context.Background(), jid, "⏳ Working on it..."); err != nil {
-			log.Printf("failed to send working notification to %s: %v", jid, err)
-		}
-	}
-
-	// Mid-stream question forwarding for the classic runner.
-	b.claude.IntermediateSendFn = func(jid, text string) {
-		if err := b.wa.SendChunked(context.Background(), jid, "❓ "+text); err != nil {
-			log.Printf("failed to send intermediate question to %s: %v", jid, err)
-		}
 	}
 
 	b.brainMgr.SetHooks(BrainHooks{
@@ -303,28 +287,26 @@ func (b *Bridge) handleInbound(ctx context.Context, m Inbound) {
 		return
 	}
 
-	if cfg.BrainMode {
-		// Resolved like the run itself (BrainManager.Submit), so the OTP guard
-		// checks the brain that would read the message.
-		br := b.brainMgr.Route(m)
-		if br == nil && m.Brain != "" {
-			log.Printf("brain %s is not configured; dropping the message for %s", m.Brain, m.JID)
-			return
+	// Resolved like the run itself (BrainManager.Submit), so the OTP guard
+	// checks the brain that would read the message.
+	br := b.brainMgr.Route(m)
+	if br == nil && m.Brain != "" {
+		log.Printf("brain %s is not configured; dropping the message for %s", m.Brain, m.JID)
+		return
+	}
+	if br == nil {
+		log.Printf("No brain configured for %s — add one in the dashboard", m.JID)
+		if !m.Silent && m.Source != "ingest" {
+			_ = b.wa.SendMessage(ctx, m.JID, "🧠 No brain is set up for this chat yet. Open the bridge dashboard and add one.")
 		}
-		if br == nil {
-			log.Printf("No brain configured for %s — add one in the dashboard", m.JID)
-			if !m.Silent && m.Source != "ingest" {
-				_ = b.wa.SendMessage(ctx, m.JID, "🧠 No brain is set up for this chat yet. Open the bridge dashboard and add one.")
-			}
-			return
-		}
-		// The OTP guard runs before anything is written to history, so a
-		// stray two-factor code is neither logged nor sent to the model.
-		if len(m.Media) == 0 && br.DropsOTP(m.Text) {
-			log.Printf("brain %s: kept a one-time code out of the conversation (OTP guard)", br.ID())
-			b.recordOTP(br, m)
-			return
-		}
+		return
+	}
+	// The OTP guard runs before anything is written to history, so a
+	// stray two-factor code is neither logged nor sent to the model.
+	if len(m.Media) == 0 && br.DropsOTP(m.Text) {
+		log.Printf("brain %s: kept a one-time code out of the conversation (OTP guard)", br.ID())
+		b.recordOTP(br, m)
+		return
 	}
 
 	b.deb.Add(m)
@@ -360,29 +342,19 @@ func (b *Bridge) handleCommand(ctx context.Context, m Inbound, cfg *Config) bool
 		// Whatever else it does, a reset stops what !stop stops for the
 		// chat, hand-offs from other brains included: its reply says the
 		// chat has nothing left running or waiting.
-		b.stopChat(m, cfg)
-		var resetErr error
-		if cfg.BrainMode {
-			resetErr = b.brainMgr.ResetSession(m.JID, m.IsGroup())
-		} else {
-			resetErr = b.store.DeleteSession(m.JID)
-		}
-		switch {
-		case resetErr != nil:
-			log.Printf("error resetting session for %s: %v", m.JID, resetErr)
+		b.stopChat(m)
+		if err := b.brainMgr.ResetSession(m.JID, m.IsGroup()); err != nil {
+			log.Printf("error resetting session for %s: %v", m.JID, err)
 			_ = b.wa.SendMessage(ctx, m.JID, "❌ Failed to reset session.")
-		case cfg.BrainMode:
-			// A brain run never resumes a session: each starts from the
-			// recent chat history, which a reset keeps. Say only what
-			// happened.
-			_ = b.wa.SendMessage(ctx, m.JID, "✅ Cleared anything this chat had running or waiting. The recent chat history stays, so the next message still sees it.")
-		default:
-			_ = b.wa.SendMessage(ctx, m.JID, "✅ Session reset. The next message starts a fresh conversation.")
+			return true
 		}
+		// A brain run never resumes a session: each starts from the recent
+		// chat history, which a reset keeps. Say only what happened.
+		_ = b.wa.SendMessage(ctx, m.JID, "✅ Cleared anything this chat had running or waiting. The recent chat history stays, so the next message still sees it.")
 		return true
 
 	case "!stop":
-		stopped, dropped := b.stopChat(m, cfg)
+		stopped, dropped := b.stopChat(m)
 		switch {
 		case stopped:
 			_ = b.wa.SendMessage(ctx, m.JID, "🛑 Stopped, and cleared anything this chat had waiting.")
@@ -398,12 +370,8 @@ func (b *Bridge) handleCommand(ctx context.Context, m Inbound, cfg *Config) bool
 			"Send a message to talk to Claude. Images, documents, audio, and video are passed along as files.\n\n" +
 			"*Commands:*\n" +
 			"• `!help` — show this help\n" +
-			"• `!stop` — stop what I'm doing for this chat and drop its queued messages\n"
-		if cfg.BrainMode {
-			help += "• `!reset` — like `!stop`; I still see the recent chat history afterwards"
-		} else {
-			help += "• `!reset` — clear the current session and start fresh"
-		}
+			"• `!stop` — stop what I'm doing for this chat and drop its queued messages\n" +
+			"• `!reset` — like `!stop`; I still see the recent chat history afterwards"
 		if m.IsGroup() {
 			if t := cfg.Triggers.First(); t != "" {
 				help += "\n\nIn this group, start your message with `" + t + "` to address me, commands included."
@@ -418,16 +386,13 @@ func (b *Bridge) handleCommand(ctx context.Context, m Inbound, cfg *Config) bool
 // stopChat stops what is going on for m's chat, for !stop and !reset. It
 // reports whether a run was stopped and how many waiting messages were
 // dropped.
-func (b *Bridge) stopChat(m Inbound, cfg *Config) (stopped bool, dropped int) {
+func (b *Bridge) stopChat(m Inbound) (stopped bool, dropped int) {
 	// Only this chat's work: a brain serves several chats, and one chat must
 	// not cancel what another asked for. A DM goes by two JIDs (see
 	// chatJIDs), and its run may have come in under either.
 	chats := chatJIDs(m)
 	for _, jid := range chats {
 		b.deb.Drop(jid)
-	}
-	if !cfg.BrainMode {
-		return false, 0
 	}
 	if br := b.brainMgr.BrainFor(m.JID, m.IsGroup()); br != nil {
 		for _, jid := range chats {
@@ -456,14 +421,10 @@ func chatJIDs(m Inbound) []string {
 	return jids
 }
 
-// dispatch hands a (debounced) message to its brain or the classic runner.
+// dispatch hands a (debounced) message to its brain.
 func (b *Bridge) dispatch(m Inbound) {
 	ctx := context.Background()
 	cfg := b.cfgs.Get()
-	if !cfg.BrainMode {
-		b.handleClassicMessage(ctx, m)
-		return
-	}
 	br, pos, busy, err := b.brainMgr.Submit(m)
 	switch {
 	case errors.Is(err, errQueueFull):
@@ -507,33 +468,6 @@ func (b *Bridge) deliver(br *Brain, m Inbound, res RunResult) {
 	}
 	log.Printf("brain %s: sending response (%d chars) to %s after %s", br.ID(), len(res.Text), m.JID, res.Duration.Round(time.Second))
 	b.sendResponse(ctx, m.JID, res.Text)
-}
-
-// handleClassicMessage runs the message through the single-session runner.
-func (b *Bridge) handleClassicMessage(ctx context.Context, m Inbound) {
-	replyChan := make(chan ClaudeResult, 1)
-	b.claude.Enqueue(ClaudeRequest{
-		JID:       m.JID,
-		Text:      m.textWithQuote(),
-		Media:     m.Media,
-		ReplyChan: replyChan,
-	})
-
-	result := <-replyChan
-
-	if result.Error != nil {
-		log.Printf("Claude error for %s: %v", m.JID, result.Error)
-		_ = b.wa.SendMessage(ctx, m.JID, fmt.Sprintf("❌ Error: %v", result.Error))
-		return
-	}
-
-	// AlreadySent means a question went out mid-stream; the final text would
-	// just repeat it.
-	if result.AlreadySent || m.Silent {
-		return
-	}
-
-	b.sendResponse(ctx, m.JID, result.Text)
 }
 
 // sendResponse parses Claude's response for [POLL]…[/POLL] blocks, sends each
