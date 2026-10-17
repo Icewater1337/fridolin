@@ -7,7 +7,8 @@ import (
 )
 
 // version is set at build time with -ldflags "-X main.version=v1.2.3":
-// setup.sh passes `git describe --tags --always --dirty`.
+// setup.sh passes `git describe --tags --always --dirty`, release builds
+// the tag (scripts/build-release.sh).
 var version = "dev"
 
 // bridgeVersion returns the release version, or the git commit for a local build.

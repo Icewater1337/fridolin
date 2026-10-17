@@ -400,6 +400,29 @@ their values); on Linux keep them in a drop-in: see
 macOS log is in `~/Library/Logs/fridolin/`; on Linux,
 `journalctl --user -u fridolin -f`.
 
+### Releases
+
+Each version tag (`v1.2.3`) builds archives for macOS (arm64, amd64) and Linux
+(amd64, arm64) on the project's GitHub releases page, with a `SHA256SUMS`
+file. To run one without building it yourself, download the archive for your
+machine and `SHA256SUMS`, then:
+
+```bash
+shasum -a 256 -c SHA256SUMS --ignore-missing     # Linux: sha256sum -c --ignore-missing SHA256SUMS
+tar -xzf fridolin_v1.2.3_darwin_arm64.tar.gz && cd fridolin_v1.2.3_darwin_arm64
+./fridolin init                                   # a starter config, if you have none
+./fridolin service install                        # installs the binary and tools/ next to it
+```
+
+The macOS archives are not signed or notarized, so Gatekeeper blocks a
+`./fridolin` from an archive your browser downloaded: download with `curl -LO`,
+or run `xattr -d com.apple.quarantine fridolin` after unpacking. The Linux
+archives are built on Ubuntu 22.04 and need its glibc (2.35) or newer: Ubuntu
+22.04, Debian 12 and later run them; on an older system, build from source.
+
+`scripts/build-release.sh` builds the same archive locally. A maintainer
+releases by pushing a tag: `git tag v1.2.3 && git push origin v1.2.3`.
+
 ---
 
 ## Security
