@@ -25,6 +25,11 @@ type BrainRef struct {
 type BrainSpec struct {
 	Manifest BrainManifest
 	Dir      string // absolute, symlinks resolved
+	// Path is the folder as configured, ~ expanded. The sandbox profiles
+	// cover it as well as Dir, which the brain runs in: a symlink on the
+	// way to the folder, such as ~/assistant on another volume, is one a
+	// brain could swap for its own and so move another brain's folder.
+	Path string
 	// PromptFile is the prompt file relative to Dir. The bridge reads it
 	// through the brain's open folder, which stops a brain from pointing it
 	// at ~/.ssh with a symlink; checking the path here would not, as the
@@ -68,7 +73,7 @@ func ResolveBrains(cfg *Config) ([]BrainSpec, []BrainIssue) {
 	for _, b := range cfg.Brains {
 		dir := canonicalDir(b.WorkDir)
 		m := ManifestFromInline(b)
-		s := BrainSpec{Manifest: m, Dir: dir, Source: "inline"}
+		s := BrainSpec{Manifest: m, Dir: dir, Path: filepath.Clean(b.WorkDir), Source: "inline"}
 		if rel, err := filepath.Rel(b.WorkDir, b.PromptFile); err == nil && filepath.IsLocal(rel) {
 			s.PromptFile = rel
 		} else {
@@ -99,7 +104,7 @@ func ResolveBrains(cfg *Config) ([]BrainSpec, []BrainIssue) {
 		}
 		// Validate kept prompt_file inside the folder; the folder's os.Root
 		// keeps it there when the bridge reads it.
-		add(BrainSpec{Manifest: m, Dir: dir, PromptFile: m.PromptFile, Source: "folder"})
+		add(BrainSpec{Manifest: m, Dir: dir, Path: filepath.Clean(ref.Path), PromptFile: m.PromptFile, Source: "folder"})
 	}
 
 	// Drop brains that clash with an earlier one rather than refusing to run.

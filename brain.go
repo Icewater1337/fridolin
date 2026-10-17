@@ -1421,7 +1421,7 @@ func (bm *BrainManager) reload(specs []BrainSpec, issues []BrainIssue, cfg *Conf
 	order := make([]*Brain, 0, len(specs))
 	byGroup := map[string]*Brain{}
 	var dm, def *Brain
-	workDirs := map[string]string{}
+	workDirs := map[string][]string{}
 
 	// The folders opened for new brains, closed again unless they run.
 	var created []*Brain
@@ -1442,7 +1442,11 @@ func (bm *BrainManager) reload(specs []BrainSpec, issues []BrainIssue, cfg *Conf
 		}
 		m := sp.Manifest
 		// Even a brain left out below keeps its folder denied to the others.
-		workDirs[m.ID] = sp.Dir
+		// The profiles get the folder as configured too, see BrainSpec.Path.
+		workDirs[m.ID] = []string{sp.Dir}
+		if sp.Path != "" && sp.Path != sp.Dir {
+			workDirs[m.ID] = []string{sp.Path, sp.Dir}
+		}
 		s := settingsFor(cfg, sp)
 		br, ok := old[m.ID]
 		if !ok || br.workDir != sp.Dir || !br.holdsFolder(sp.Dir) {
