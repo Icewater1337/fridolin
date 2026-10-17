@@ -262,6 +262,76 @@ func TestLeftOutBrainShowsWhyOnItsPage(t *testing.T) {
 	}
 }
 
+// TestReplacedFolderIsOpenedOnReload: the bridge goes through the folder
+// it opened, not the path. When you move a brain's folder aside and put
+// another at its path, a restored copy say, the next reload switches the
+// brain to the new folder; with the folder unchanged, the brain runs on.
+func TestReplacedFolderIsOpenedOnReload(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		replace bool
+	}{{"folder unchanged", false}, {"folder replaced", true}} {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg, home := brainASetup(t)
+			mgr := newTestManager(t, cfg)
+			t.Cleanup(mgr.Stop)
+			before := mgr.Get("a")
+			dir := filepath.Join(home, "a")
+			want := "OLD FOLDER"
+			if err := os.WriteFile(filepath.Join(dir, "brain-prompt.md"), []byte(want+"\n"), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			if tc.replace {
+				want = "NEW FOLDER"
+				if err := os.Rename(dir, dir+".old"); err != nil {
+					t.Fatal(err)
+				}
+				manifest, err := os.ReadFile(filepath.Join(dir+".old", ManifestFile))
+				if err != nil {
+					t.Fatal(err)
+				}
+				if err := os.Mkdir(dir, 0o700); err != nil {
+					t.Fatal(err)
+				}
+				for name, data := range map[string]string{ManifestFile: string(manifest), "brain-prompt.md": want + "\n"} {
+					if err := os.WriteFile(filepath.Join(dir, name), []byte(data), 0o600); err != nil {
+						t.Fatal(err)
+					}
+				}
+			}
+			logged := captureLog(t)
+			if err := mgr.Apply(cfg); err != nil {
+				t.Fatal(err)
+			}
+
+			br := mgr.Get("a")
+			if br == nil || (br != before) != tc.replace {
+				t.Fatalf("brain a made anew: %v, want %v", br != before, tc.replace)
+			}
+			if got := br.buildPrompt(br.settings.Load(), dm("hello")); !strings.HasPrefix(got, want) {
+				t.Errorf("prompt = %q, want it to start with %q", got, want)
+			}
+			br.appendHistory("15551234567@s.whatsapp.net", "15551234567", "AFTER-RELOAD", "in")
+			if data, _ := os.ReadFile(filepath.Join(dir, historyFileName)); !strings.Contains(string(data), "AFTER-RELOAD") {
+				t.Errorf("history at %s = %q, want the message", dir, data)
+			}
+			lines := logged()
+			if !tc.replace {
+				if len(lines) > 0 {
+					t.Errorf("unexpected log %q", lines)
+				}
+				return
+			}
+			if data, _ := os.ReadFile(filepath.Join(dir+".old", historyFileName)); strings.Contains(string(data), "AFTER-RELOAD") {
+				t.Errorf("the message went to the folder moved aside: %q", data)
+			}
+			if len(lines) != 1 || !strings.Contains(lines[0], "brain a: now in the folder at "+dir+"; stopping it in the old one") {
+				t.Errorf("log = %q, want one line switching folders", lines)
+			}
+		})
+	}
+}
+
 // TestInlinePromptOutsideTheFolderIsStillRead: an inline brain's
 // prompt_file may be a path you chose outside its folder. It is read as
 // configured until inline brains go away.

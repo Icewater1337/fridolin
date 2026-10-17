@@ -91,8 +91,9 @@ another file in the folder. It treats such a file as missing and writes
 nothing through it; its log says why, and the dashboard shows a
 `brain.json` it cannot read. It opens the folder once when it loads the
 brain and goes through that handle from then on (`brain.json` excepted,
-which it reads for brains that are not running too). Copy a file into the
-folder rather than link it.
+which it reads for brains that are not running too), so a folder you put
+in a brain's place takes a reload; see [Moving a brain](#moving-a-brain).
+Copy a file into the folder rather than link it.
 
 ## Moving a brain
 
@@ -100,6 +101,14 @@ Brain folders are portable. To move one to another machine: copy the folder
 (or restore it from a Drive backup), then *Add brain* on the new machine — the
 dashboard offers to use the `brain.json` it finds. Keep the same `id` so
 history and credentials still match.
+
+To swap a brain's folder for another at the same path, a restored backup
+say, move the old one aside, put the new one in its place, then restart the
+bridge or save a setting in the dashboard. Until it loads its brains again,
+the bridge goes on reading the prompt and writing the history in the folder
+it opened, the one you moved aside, while runs start in the new one. The
+reload stops the brain's run in progress, drops the messages waiting for
+it, and starts it afresh in the new folder.
 
 ## Removing a brain
 

@@ -428,6 +428,19 @@ func (br *Brain) retire() {
 	br.root.Close()
 }
 
+// holdsFolder reports whether the folder the brain opened is still the one
+// at dir. When you move it aside and put another folder there, a restored
+// copy say, the next reload makes the brain anew in that one, as for a new
+// path. A brain cannot do this to its own folder: the sandbox pins it.
+func (br *Brain) holdsFolder(dir string) bool {
+	held, err := br.root.Stat(".")
+	if err != nil {
+		return false
+	}
+	at, err := os.Stat(dir)
+	return err == nil && os.SameFile(held, at)
+}
+
 // readFile reads the file name in the brain's folder (see openInFolder).
 func (br *Brain) readFile(name string) ([]byte, error) {
 	f, err := openInFolder(br.root, name, os.O_RDONLY, 0)
@@ -1361,7 +1374,7 @@ func (bm *BrainManager) reload(specs []BrainSpec, issues []BrainIssue, cfg *Conf
 		workDirs[m.ID] = sp.Dir
 		s := settingsFor(cfg, sp)
 		br, ok := old[m.ID]
-		if !ok || br.workDir != sp.Dir {
+		if !ok || br.workDir != sp.Dir || !br.holdsFolder(sp.Dir) {
 			root, err := os.OpenRoot(sp.Dir)
 			if err != nil {
 				log.Printf("brain %s: leaving it out: %v", m.ID, err)
@@ -1412,7 +1425,11 @@ func (bm *BrainManager) reload(specs []BrainSpec, issues []BrainIssue, cfg *Conf
 	applied = true
 
 	for _, br := range removed {
-		log.Printf("brain %s: removed from configuration; stopping it", br.id)
+		if nb, ok := next[br.id]; ok {
+			log.Printf("brain %s: now in the folder at %s; stopping it in the old one", br.id, nb.workDir)
+		} else {
+			log.Printf("brain %s: removed from configuration; stopping it", br.id)
+		}
 		go br.retire()
 	}
 	return nil

@@ -68,7 +68,8 @@ immediately; one brain or all.
 Backup → Restore: choose a brain, `current` or a version, and a **new, empty**
 folder. The bridge never restores over an existing brain. Inspect the result,
 then add it as a brain (the dashboard picks up its `brain.json`) or swap
-folders yourself.
+folders yourself, which the bridge picks up when it restarts or you next
+save a setting (see [Moving a brain](BRAINS.md#moving-a-brain)).
 
 On a new machine: install the bridge, connect Drive, restore each brain into a
 new folder, add them, and pair WhatsApp again. `_bridge/current/config.json`
