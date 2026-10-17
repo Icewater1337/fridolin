@@ -132,6 +132,31 @@ func TestSendKeepsScriptContractButBlocksBrowsers(t *testing.T) {
 	}
 }
 
+// POST /send refuses Status, broadcast lists and channels with a JSON
+// error: a script must not be able to post a Status in the bridge's name.
+func TestHTTPSendRefusesStatusBroadcastAndChannels(t *testing.T) {
+	tb := newTestBridge(t, "")
+	for _, jid := range []string{"status@broadcast", "1700000000@broadcast", "120363000000000000@newsletter"} {
+		t.Run(jid, func(t *testing.T) {
+			body, _ := json.Marshal(sendRequest{JID: jid, Text: "hello"})
+			r := httptest.NewRequest("POST", "http://127.0.0.1:8765/send", bytes.NewReader(body))
+			r.Host = "127.0.0.1:8765"
+			r.Header.Set("Content-Type", "application/json")
+			w := httptest.NewRecorder()
+			tb.h.ServeHTTP(w, r)
+
+			var resp map[string]string
+			if w.Code != http.StatusBadRequest || w.Header().Get("Content-Type") != "application/json" ||
+				json.Unmarshal(w.Body.Bytes(), &resp) != nil || !strings.Contains(resp["error"], "refusing to send") {
+				t.Errorf("status %d, %s %q; want 400 with a JSON error", w.Code, w.Header().Get("Content-Type"), w.Body.String())
+			}
+		})
+	}
+	if out := tb.dev.Outbox(); len(out) != 0 {
+		t.Errorf("sent anyway: %+v", out)
+	}
+}
+
 func TestIngestConfinedToMediaDir(t *testing.T) {
 	tb := newTestBridge(t, `, "ingest": {"enabled": true}, "brains": [{"name": "personal", "work_dir": "~/p", "handles_dms": true}]`)
 	cfg := tb.cfgs.Get()

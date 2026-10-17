@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/sha256"
+	"errors"
 	"fmt"
 	"log"
 	"os"
@@ -193,11 +194,41 @@ func (wa *WhatsAppClient) Disconnect() {
 	wa.client.Disconnect()
 }
 
-// SendMessage sends a plain-text WhatsApp message to the given JID.
-func (wa *WhatsAppClient) SendMessage(ctx context.Context, jid string, text string) error {
+// errRefusedRecipient marks a send the bridge refuses because of where it
+// would go.
+var errRefusedRecipient = errors.New("refusing to send to a Status, broadcast list or channel")
+
+// checkRecipient refuses Status, broadcast-list and channel addresses. A send
+// to status@broadcast posts this account's own Status to every contact, and
+// one to a newsletter posts in a public channel the account runs. whatsmeow
+// cannot send to other broadcast lists yet; once it can, a send would reach
+// every member. Nothing the bridge says belongs there, whoever asked for it:
+// a brain's reply, its reply_chat, or a script calling /send.
+func checkRecipient(jid types.JID) error {
+	if jid.Server == types.BroadcastServer || jid.Server == types.NewsletterServer {
+		return fmt.Errorf("%w: %s", errRefusedRecipient, jid)
+	}
+	return nil
+}
+
+// parseRecipient parses the JID of a chat to send to and refuses the ones
+// checkRecipient refuses.
+func parseRecipient(jid string) (types.JID, error) {
 	recipient, err := types.ParseJID(jid)
 	if err != nil {
-		return fmt.Errorf("parsing JID %q: %w", jid, err)
+		return types.JID{}, fmt.Errorf("parsing JID %q: %w", jid, err)
+	}
+	if err := checkRecipient(recipient); err != nil {
+		return types.JID{}, err
+	}
+	return recipient, nil
+}
+
+// SendMessage sends a plain-text WhatsApp message to the given JID.
+func (wa *WhatsAppClient) SendMessage(ctx context.Context, jid string, text string) error {
+	recipient, err := parseRecipient(jid)
+	if err != nil {
+		return err
 	}
 	_, err = wa.client.SendMessage(ctx, recipient, &waE2E.Message{
 		Conversation: proto.String(text),
@@ -223,9 +254,9 @@ func (wa *WhatsAppClient) SendChunked(ctx context.Context, jid string, text stri
 // SendPoll sends a WhatsApp poll and returns the message ID.
 // maxSelectable is the max options a voter can pick (1 = single choice, 0 = unlimited).
 func (wa *WhatsAppClient) SendPoll(ctx context.Context, jid string, question string, options []string, maxSelectable int) (string, error) {
-	recipient, err := types.ParseJID(jid)
+	recipient, err := parseRecipient(jid)
 	if err != nil {
-		return "", fmt.Errorf("parsing JID %q: %w", jid, err)
+		return "", err
 	}
 	msg := wa.client.BuildPollCreation(question, options, maxSelectable)
 	resp, err := wa.client.SendMessage(ctx, recipient, msg)
@@ -237,9 +268,9 @@ func (wa *WhatsAppClient) SendPoll(ctx context.Context, jid string, question str
 
 // SendReaction sends an emoji reaction to a message.
 func (wa *WhatsAppClient) SendReaction(ctx context.Context, jid string, msgID types.MessageID, emoji string) error {
-	recipient, err := types.ParseJID(jid)
+	recipient, err := parseRecipient(jid)
 	if err != nil {
-		return fmt.Errorf("parsing JID %q: %w", jid, err)
+		return err
 	}
 	_, err = wa.client.SendMessage(ctx, recipient, &waE2E.Message{
 		ReactionMessage: &waE2E.ReactionMessage{
@@ -339,7 +370,44 @@ func (wa *WhatsAppClient) handlePollVote(evt *events.Message) {
 	}
 }
 
+// incomingChat decides, before any other work, whether an incoming message
+// belongs to a chat the bridge handles at all. A contact's Status update
+// arrives in status@broadcast: answering it there would post the reply as
+// this account's own Status, visible to every contact. Newsletters are
+// public channels. Both are dropped.
+//
+// A message a contact sent to one of their broadcast lists shows up on the
+// phone in the direct chat with that contact, so it is moved there and
+// handled as a DM from the sender. The list itself is never a chat to
+// answer in. Our own broadcast-list messages echoing back are dropped, like
+// any message this account sent.
+func incomingChat(src types.MessageSource) (chat types.JID, ok bool) {
+	if src.Chat.Server == types.NewsletterServer || src.Chat.ToNonAD() == types.StatusBroadcastJID {
+		return types.JID{}, false
+	}
+	if src.Chat.Server == types.BroadcastServer {
+		if src.IsFromMe || src.Sender.IsEmpty() {
+			return types.JID{}, false
+		}
+		return src.Sender.ToNonAD(), true
+	}
+	return src.Chat, true
+}
+
 func (wa *WhatsAppClient) handleMessage(msg *events.Message) {
+	chat, ok := incomingChat(msg.Info.MessageSource)
+	if !ok {
+		wa.log.Debugf("Ignoring message %s in %s (Status updates, channels and own broadcasts are not handled)", msg.Info.ID, msg.Info.Chat)
+		return
+	}
+	if chat != msg.Info.Chat {
+		// A broadcast-list message, now a DM. Work on a copy: the event
+		// belongs to whatsmeow.
+		dm := *msg
+		dm.Info.Chat, dm.Info.IsGroup = chat, false
+		msg = &dm
+	}
+
 	if msg.Info.Chat.Server == "g.us" {
 		// Group messages sent from the operator's own phone are still worth
 		// processing (IsFromMe is true for any device on the account), so the
