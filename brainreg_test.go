@@ -105,6 +105,40 @@ func TestScaffoldBrainNeverOverwrites(t *testing.T) {
 	}
 }
 
+// TestScaffoldedPromptSaysWhatItIs: a new brain's prompt is sent ahead of
+// each message, but it is not the brain's whole system prompt: Claude Code
+// adds its own and loads the folder's CLAUDE.md and .claude/. A brain told
+// otherwise looks for its instructions in the wrong place.
+func TestScaffoldedPromptSaysWhatItIs(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "brain")
+	m := testManifest("fam")
+	if _, err := ScaffoldBrain(dir, &m); err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(filepath.Join(dir, "brain-prompt.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	prompt := strings.Join(strings.Fields(string(data)), " ")
+	cases := []struct {
+		phrase string
+		want   bool
+	}{
+		{"This file is your system prompt", false},
+		{"so everything you need to know", false},
+		{"sent ahead of every message you receive, so most of what you need to know", true},
+		{"not your whole system prompt: Claude Code adds its own", true},
+		{"loads the `CLAUDE.md` and the `.claude/` folder in this directory", true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.phrase, func(t *testing.T) {
+			if got := strings.Contains(prompt, tc.phrase); got != tc.want {
+				t.Errorf("starter prompt has %q: %v, want %v", tc.phrase, got, tc.want)
+			}
+		})
+	}
+}
+
 func folderBrainConfig(t *testing.T, home string, refs ...BrainRef) *Config {
 	t.Helper()
 	cfg := &Config{DataDir: filepath.Join(home, "data"), BrainMode: true, BrainDirs: refs}

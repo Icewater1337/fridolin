@@ -149,7 +149,7 @@ func tailLines(path string, maxBytes int64) []string {
 // ── Brain ────────────────────────────────────────────────────────────────
 
 // Brain is one isolated Claude Code context: its own folder, conversation
-// history, system prompt and stored session.
+// history, prompt file and stored session.
 //
 // A brain does not keep a Claude process alive between messages. Each message
 // spawns a fresh `claude -p` run seeded with the recent chat history. Messages
@@ -942,8 +942,8 @@ func (br *Brain) composePreface(chatJID string, isGroup bool) string {
 	return sb.String()
 }
 
-// buildPrompt constructs the -p prompt: system prompt, chat-history preface,
-// attachments, then the new message.
+// buildPrompt constructs the -p prompt: the prompt file, chat-history
+// preface, attachments, then the new message.
 func (br *Brain) buildPrompt(s *brainSettings, m Inbound) string {
 	var sb strings.Builder
 	isGroup := m.IsGroup()

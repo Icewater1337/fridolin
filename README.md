@@ -213,7 +213,7 @@ from files it writes itself:
 ```
 <brain folder>/
 ├── brain.json                    routing and settings (managed by the dashboard)
-├── brain-prompt.md               the system prompt — edit this
+├── brain-prompt.md               sent ahead of every message — edit this
 ├── conversation-history.jsonl    every message, appended automatically
 ├── skills/                       procedures for recurring work
 └── memories/                     notes the assistant writes for itself
@@ -405,10 +405,10 @@ matched against the stored options).
 
 **`brain.go`** — the multi-brain runner. Each brain has a queue and one
 worker; each message spawns `claude -p` with `--output-format stream-json`,
-seeded with the system prompt and recent chat history. Events are parsed live,
-so an `AskUserQuestion` reaches WhatsApp immediately and a run over 10 seconds
-gets a "working on it" notice. `BrainManager.Apply` swaps the brain set at
-runtime without touching brains that did not change.
+seeded with the brain's prompt file and recent chat history. Events are
+parsed live, so an `AskUserQuestion` reaches WhatsApp immediately and a run
+over 10 seconds gets a "working on it" notice. `BrainManager.Apply` swaps the
+brain set at runtime without touching brains that did not change.
 
 **`manifest.go`, `brainreg.go`** — `brain.json`, the brain registry, path
 checks and scaffolding. **`configstore.go`** — the live configuration.

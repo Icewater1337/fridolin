@@ -1,8 +1,8 @@
 # Brains
 
-A brain is one isolated assistant: a folder with its own system prompt,
-memories, skills and conversation history. Every chat the bridge answers is
-routed to exactly one brain.
+A brain is one isolated assistant: a folder with its own prompt, memories,
+skills and conversation history. Every chat the bridge answers is routed to
+exactly one brain.
 
 ## Adding a brain
 
@@ -19,7 +19,7 @@ then writes what is missing:
 ```
 <folder>/
 ├── brain.json                       this brain's settings
-├── brain-prompt.md                  starter system prompt — make it yours
+├── brain-prompt.md                  sent ahead of each message — make it yours
 ├── memories/
 │   ├── README.md
 │   └── people/whatsapp-identity-map.md
@@ -60,7 +60,7 @@ restart.
 | `routing.groups` | Group JIDs this brain answers. The group must also be allowed in the global settings. |
 | `model`, `effort` | Override the global `brain_model` / `brain_effort`. |
 | `disallowed_tools` | Override the global list; omit to inherit, `[]` to allow every tool. |
-| `prompt_file` | System prompt, relative to the folder. It must stay inside the folder. |
+| `prompt_file` | The prompt sent ahead of every message, relative to the folder. It must stay inside the folder. |
 | `reply_chat` | Where answers go for files handed in through `/ingest`. Default: the first allowed number for the DM brain, else the brain's first group. |
 | `backup` | Google Drive backup for this folder; see [BACKUP.md](BACKUP.md). |
 | `calendar` | The Google account this brain signed in with and the calendars it may use; set by *Connect Google Calendar*, see [CALENDAR.md](CALENDAR.md). |
