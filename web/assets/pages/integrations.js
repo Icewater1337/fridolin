@@ -83,7 +83,11 @@ export default {
             ? callout('warn', 'Connect Plaud again', '“Let brains use the Plaud CLI” changed where the login lives, and Fridolin does not take over a login it did not make. Connect again to use the one in ', mono(loginDir), '.')
             : null,
           connecting ? callout('info', 'Approve access in the browser tab Plaud just opened.',
-            connect.auth_url ? h('div', 'No tab opened? ', h('a', { href: connect.auth_url, target: '_blank', rel: 'noopener noreferrer' }, 'Open Plaud’s sign-in')) : null) : null,
+            // The bridge passes on only the link Plaud's tool printed for
+            // its sign-in; the host shows where it leads.
+            connect.auth_url
+              ? h('div', 'No tab opened? ', h('a', { href: connect.auth_url, target: '_blank', rel: 'noopener noreferrer' }, 'Open Plaud’s sign-in'), ` (${new URL(connect.auth_url).host})`)
+              : h('div', 'Use the tab Plaud’s tool opened in your browser.')) : null,
           connect && connect.state === 'error' ? callout('bad', 'Sign-in did not finish', connect.error) : null,
           h('p.muted.small', access
             ? 'The login goes to ~/.plaud/, where brains can use it (“Let brains use the Plaud CLI” is on). Plaud’s tool runs with its usage statistics turned off.'

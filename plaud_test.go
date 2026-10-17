@@ -2212,6 +2212,32 @@ func TestPlaudSignInSaysWhyItFailed(t *testing.T) {
 	}
 }
 
+// The card offers the sign-in link the CLI prints when it cannot open a
+// browser, and no other: not a link from a line before it, not one that is
+// not https (or http to this machine), and not one still arriving.
+func TestPlaudSignInURL(t *testing.T) {
+	const link = "https://web.plaud.ai/platform/oauth?client_id=x&state=y"
+	for _, c := range []struct {
+		name, out, want string
+	}{
+		{"as the CLI prints it", "\nOpening browser for authentication...\n\nCould not open browser. Open this URL manually:\n  " + link + "\n", link},
+		{"on the same line", "Could not open browser. Open this URL manually: " + link + "\n", link},
+		{"after another link", "See https://docs.example.com/help first.\nCould not open browser. Open this URL manually:\n  " + link + "\n", link},
+		{"another link only", "See https://docs.example.com/help first.\n", ""},
+		{"plain http elsewhere", "Open this URL manually:\n  http://web.plaud.ai/platform/oauth\n", ""},
+		{"http to this machine", "Open this URL manually:\n  http://127.0.0.1:8199/auth/callback?code=1\n", "http://127.0.0.1:8199/auth/callback?code=1"},
+		{"not a web link", "Open this URL manually:\n  javascript:alert(1)\n", ""},
+		{"still arriving", "Open this URL manually:\n  " + link, ""},
+		{"in colour", "\x1b[33mCould not open browser. Open this URL manually:\n  " + link + "\x1b[39m\n", link},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			if got := plaudSignInURL(c.out); got != c.want {
+				t.Errorf("plaudSignInURL(%q) = %q, want %q", c.out, got, c.want)
+			}
+		})
+	}
+}
+
 func TestPlaudConfigValidation(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 	for _, bad := range []string{`{"plaud":{"brain":"Not A Slug"}}`, `{"plaud":{"interval_seconds":5}}`} {

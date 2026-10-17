@@ -9,7 +9,9 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -1479,7 +1481,42 @@ func (p *PlaudManager) Stop() {
 
 // ── API ──────────────────────────────────────────────────────────────────
 
-var plaudURLRe = regexp.MustCompile(`https?://[^\s'"]+`)
+// plaudSignInURL returns the sign-in link `plaud login` prints when it
+// cannot open a browser itself:
+//
+//	Could not open browser. Open this URL manually:
+//	  https://web.plaud.ai/platform/oauth?client_id=…
+//
+// Only complete lines count, and only the link on that line or the next:
+// not one from a notice or an error before it. It must be https, or http
+// to this machine (a sign-in's callback), so the card never offers a
+// plain-http page elsewhere as Plaud's sign-in. "" means there is none.
+func plaudSignInURL(out string) string {
+	lines := strings.Split(ansiRe.ReplaceAllString(out, ""), "\n")
+	lines = lines[:len(lines)-1] // the last one may still be arriving
+	for i, l := range lines {
+		_, after, ok := strings.Cut(l, "Open this URL manually:")
+		if !ok {
+			continue
+		}
+		link := strings.TrimSpace(after)
+		if link == "" && i+1 < len(lines) {
+			link = strings.TrimSpace(lines[i+1])
+		}
+		u, err := url.Parse(link)
+		if err != nil || u.Host == "" || strings.ContainsAny(link, " \t") {
+			return ""
+		}
+		switch host := u.Hostname(); {
+		case u.Scheme == "https":
+			return link
+		case u.Scheme == "http" && (host == "localhost" || net.ParseIP(host).IsLoopback()):
+			return link
+		}
+		return ""
+	}
+	return ""
+}
 
 // What the dashboard's Plaud actions refuse, and why; the handlers word
 // them for the card.
@@ -1642,8 +1679,8 @@ func (p *PlaudManager) Connect() error {
 			p.mu.Lock()
 			defer p.mu.Unlock()
 			seen.Write(b)
-			if i := bytes.LastIndexByte(seen.Bytes(), '\n'); i >= 0 && job.AuthURL == "" {
-				job.AuthURL = plaudURLRe.FindString(ansiRe.ReplaceAllString(string(seen.Bytes()[:i]), "")) // whole lines only
+			if job.AuthURL == "" {
+				job.AuthURL = plaudSignInURL(seen.String())
 			}
 		})
 		// The CLI opens the sign-in page in your browser itself.
