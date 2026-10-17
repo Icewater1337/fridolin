@@ -42,10 +42,18 @@ func TestLayoutOf(t *testing.T) {
 	makeFiles(t, root,
 		"src/fridolin/go.mod", "src/fridolin/tools/poll_results.py", "src/fridolin/fridolin", "src/fridolin/bin/fridolin",
 		"lib/fridolin/fridolin", "lib/fridolin/tools/poll_results.py",
+		"installed/fridolin", "installed/tools/poll_results.py",
+		"bare/fridolin", "bare/fridolin.prev", "bare/tools.prev/poll_results.py",
+		"stale/fridolin", "stale/tools/poll_results.py",
 		"other/bin/fridolin", "other/go.mod",
 		"alone/fridolin",
 	)
 	src, lib := root+"/src/fridolin", root+"/lib/fridolin"
+	for dir, source := range map[string]string{"installed": src, "bare": src, "stale": root + "/other"} {
+		if err := writeManifest(root+"/"+dir, source, false); err != nil {
+			t.Fatal(err)
+		}
+	}
 	cases := []struct {
 		name string
 		exe  string
@@ -54,6 +62,9 @@ func TestLayoutOf(t *testing.T) {
 		{"built in the checkout's root", src + "/fridolin", bridgeLayout{Dir: src, Tools: src + "/tools", Source: src}},
 		{"dev build in the checkout's bin/", src + "/bin/fridolin", bridgeLayout{Dir: src, Tools: src + "/tools", Source: src}},
 		{"tools next to the binary, no checkout", lib + "/fridolin", bridgeLayout{Dir: lib, Tools: lib + "/tools"}},
+		{"installed from a checkout", root + "/installed/fridolin", bridgeLayout{Dir: root + "/installed", Tools: root + "/installed/tools", Source: src}},
+		{"installed without tools", root + "/bare/fridolin", bridgeLayout{Dir: root + "/bare", Source: src}},
+		{"installed from a folder that is no checkout now", root + "/stale/fridolin", bridgeLayout{Dir: root + "/stale", Tools: root + "/stale/tools"}},
 		{"bin/ of a folder without tools", root + "/other/bin/fridolin", bridgeLayout{}},
 		{"a binary on its own", root + "/alone/fridolin", bridgeLayout{}},
 	}
@@ -169,9 +180,16 @@ func TestSandboxProfileProtectsTheBridgesOwnFiles(t *testing.T) {
 	makeFiles(t, home,
 		"src/fridolin/go.mod", "src/fridolin/tools/poll_results.py", "src/fridolin/fridolin", "src/fridolin/bin/fridolin",
 		"lib/fridolin/fridolin", "lib/fridolin/tools/poll_results.py",
+		"installed/fridolin", "installed/tools/poll_results.py",
+		"bare/fridolin", "bare/fridolin.prev", "bare/tools.prev/poll_results.py",
 		"alone/fridolin", "a/notes.md",
 	)
 	src, lib := home+"/src/fridolin", home+"/lib/fridolin"
+	for _, dir := range []string{"installed", "bare"} {
+		if err := writeManifest(home+"/"+dir, src, false); err != nil {
+			t.Fatal(err)
+		}
+	}
 	cases := []struct {
 		name string
 		exe  string
@@ -180,6 +198,10 @@ func TestSandboxProfileProtectsTheBridgesOwnFiles(t *testing.T) {
 		{"built in the checkout's root", src + "/fridolin", []string{src}},
 		{"dev build in the checkout's bin/", src + "/bin/fridolin", []string{src}},
 		{"tools next to the binary", lib + "/fridolin", []string{lib}},
+		{"installed from a checkout", home + "/installed/fridolin", []string{home + "/installed", src}},
+		// Else a brain could plant a fridolin.prev that `service
+		// rollback` starts outside any sandbox.
+		{"installed without tools", home + "/bare/fridolin", []string{home + "/bare", src}},
 		{"a binary on its own", home + "/alone/fridolin", nil},
 	}
 	for _, c := range cases {
@@ -190,7 +212,7 @@ func TestSandboxProfileProtectsTheBridgesOwnFiles(t *testing.T) {
 			if !strings.Contains(profile, `(deny file-write* (literal "`+c.exe+`"))`) {
 				t.Errorf("the binary itself is writable")
 			}
-			for _, dir := range []string{src, lib, home + "/alone"} {
+			for _, dir := range []string{src, lib, home + "/installed", home + "/bare", home + "/alone"} {
 				rule := `(deny file-write* (subpath "` + dir + `"))`
 				want := 0
 				if slices.Contains(c.want, dir) {

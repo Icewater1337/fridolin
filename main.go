@@ -25,6 +25,10 @@ Usage:
                                            validate the configuration and show routing
   fridolin init [--claude-path PATH]
                                            write a starter config (if there is none)
+  fridolin service install|rollback|restart|status|uninstall
+                                           run the bridge in the background (launchd or
+                                           systemd) from a copy outside the checkout;
+                                           fridolin service --help for more
   fridolin version
 
 Common flags:
@@ -54,6 +58,8 @@ func main() {
 		initCmd(args)
 	case "mcp-site":
 		mcpSiteCmd()
+	case "service":
+		serviceCmd(args)
 	case "version":
 		fmt.Println(bridgeVersion())
 	case "help", "-h", "--help":

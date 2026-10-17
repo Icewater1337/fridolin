@@ -385,10 +385,11 @@ What the bridge does about it:
   unless `inherit_claude_user_config` is on. Files that run outside the
   sandbox — Claude Code's settings and hooks (and the `CLAUDE.md` files
   above brain folders), its auto-memory, `~/Library/LaunchAgents`, shell
-  startup files, the bridge's own binary and checkout, the Claude CLI and
-  the other tools the bridge runs — are never writable. Add your own paths
-  under `sandbox.deny_paths`. When the sandbox is on but cannot be set up,
-  the brain refuses the message with an error instead of running without it.
+  startup files, the bridge's own binary, install folder and checkout, the
+  Claude CLI and the other tools the bridge runs — are never writable. Add
+  your own paths under `sandbox.deny_paths`. When the sandbox is on but
+  cannot be set up, the brain refuses the message with an error instead of
+  running without it.
 - **An explicit environment.** Brains are handed only the variables of the
   bridge's environment they need to run, such as the Claude CLI's login,
   not every key in the service file or the shell that started it. That is
