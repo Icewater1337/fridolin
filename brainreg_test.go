@@ -1,10 +1,12 @@
 package main
 
 import (
+	"encoding/json"
 	"errors"
 	"io/fs"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 )
@@ -199,6 +201,83 @@ func TestReadManifestMissing(t *testing.T) {
 	if _, err := ReadManifest(t.TempDir()); !errors.Is(err, fs.ErrNotExist) {
 		t.Errorf("err = %v, want not-exist", err)
 	}
+}
+
+// FuzzDecodeManifest: the brain can write its own brain.json, so it can
+// hold anything. What decodes is normalised, and what also validates is
+// safe to use: the id is a plain file name, the prompt file stays in the
+// folder, the backup excludes become nothing but exclude rules for rclone,
+// and the calendar tool gets exactly the calendars listed. It survives
+// being written and read back unchanged; what does not validate is not
+// written. (ReadManifest and WriteManifest add only the file around these.)
+func FuzzDecodeManifest(f *testing.F) {
+	full := testManifest("work")
+	full.Routing = BrainRouting{HandlesDMs: true, Groups: []string{"120363000000000000@g.us"}}
+	full.Effort, full.Model, full.PromptFile, full.ReplyChat = "high", "opus", "prompts/main.md", "120363000000000000@g.us"
+	full.DisallowedTools = &[]string{}
+	full.Calendar = &BrainCalendar{Account: "you@example.com", Calendars: []string{"primary", "team"}, Default: "primary"}
+	data, err := json.Marshal(full)
+	if err != nil {
+		f.Fatal(err)
+	}
+	for _, s := range []string{
+		string(data),
+		`{"id":"a","name":"A"}`,
+		`{"version":7,"id":"a","name":"A","prompt_file":".","backup":{"exclude":["- x/","+ y","a\nb","",null]},"calendar":{"calendars":[]}}`,
+		`{"id":"a","name":"A","prompt_file":"../x","routing":{"groups":["15551234567@s.whatsapp.net"]}}`,
+		`{"id":"Work","name":" "}`,
+		`{"id":"a","name":"A","calendar":{"calendars":["a,b"]}}`,
+		`{"id":"a","name":"A","disallowed_tools":null,"calendar":null}`,
+		`{}`, `null`, `[]`, `{"version":1.5}`, `{"id":"a\u0000","name":"\ud800"}`,
+	} {
+		f.Add([]byte(s))
+	}
+	f.Fuzz(func(t *testing.T, data []byte) {
+		m, err := decodeManifest(data)
+		if err != nil {
+			return
+		}
+		if n := m.normalized(); !reflect.DeepEqual(n, *m) {
+			t.Errorf("decoded %+v, normalised %+v", *m, n)
+		}
+		out, err := encodeManifest(m)
+		if m.Validate() != nil {
+			if err == nil {
+				t.Errorf("encoded %+v, which does not validate", *m)
+			}
+			return
+		}
+		if err != nil {
+			t.Fatalf("encoding %+v: %v", *m, err)
+		}
+
+		if len(m.ID) > 40 || filepath.Base(m.ID) != m.ID || m.ID == "." || m.ID == ".." || strings.ContainsAny(m.ID, "\x00\\") {
+			t.Errorf("id %q is not a plain file name", m.ID)
+		}
+		if !filepath.IsLocal(m.PromptFile) {
+			t.Errorf("prompt file %q is not inside the folder", m.PromptFile)
+		}
+		for _, line := range strings.SplitAfter(filterLines(m.Backup.Exclude), "\n") {
+			if line != "" && (!strings.HasPrefix(line, "- ") || !strings.HasSuffix(line, "\n")) {
+				t.Errorf("excludes %q gave the filter line %q", m.Backup.Exclude, line)
+			}
+		}
+		if c := m.Calendar; c != nil && len(c.Calendars) > 0 {
+			for _, kv := range calendarEnv(m.ID, *m, "/creds") {
+				if v, ok := strings.CutPrefix(kv, "BRIDGE_CALENDARS="); ok && !reflect.DeepEqual(strings.Split(v, ","), c.Calendars) {
+					t.Errorf("calendars %q reach the tool as %q", c.Calendars, v)
+				}
+			}
+		}
+
+		back, err := decodeManifest(out)
+		if err != nil {
+			t.Fatalf("decoding %s again: %v", out, err)
+		}
+		if !reflect.DeepEqual(*back, *m) || !back.Equal(*m) {
+			t.Errorf("encoded %+v, decoded back %+v", *m, *back)
+		}
+	})
 }
 
 func TestMigrateInlineBrains(t *testing.T) {
