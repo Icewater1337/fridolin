@@ -1,20 +1,20 @@
 // Activity: messages across brains, newest first.
 
-import { get, qs } from '../app/api.js';
+import { qs } from '../app/api.js';
 import { store, chatName } from '../app/store.js';
-import { h, mount } from '../lib/dom.js';
-import { changed } from '../lib/memo.js';
+import { resource } from '../app/resources.js';
+import { h, mount, paint, syncOptions } from '../lib/dom.js';
 import { select, textInput } from '../components/fields.js';
 import { empty, pageHeader, spinner } from '../components/common.js';
-import { activityItem } from '../components/activity-item.js';
+import { showActivity } from '../components/activity-item.js';
 
 export default {
   title: 'Activity',
   render(root, ctx) {
-    const memo = {};
     let brain = ctx.params.brain || '';
     let search = '';
     let items = null;
+    let unfollow = () => {};
 
     const brainSel = select([['', 'All brains']], brain, { 'aria-label': 'Filter by brain' });
     const searchIn = textInput({ type: 'search', placeholder: 'Search messages', 'aria-label': 'Search messages' });
@@ -24,48 +24,52 @@ export default {
     const fillBrains = (s) => {
       const opts = [['', 'All brains'], ...(s.brains || []).map((b) => [b.id, b.name && b.name !== b.id ? `${b.name} (${b.id})` : b.id])];
       if (brain && !opts.some(([v]) => v === brain)) opts.push([brain, brain]);
-      if (!changed(memo, 'opts', opts)) return;
-      mount(brainSel, opts.map(([v, l]) => h('option', { value: v, selected: v === brain }, l)));
-      brainSel.value = brain;
+      syncOptions(brainSel, opts, brain);
     };
     ctx.watch(store, (s) => s.status, (s) => { if (s) fillBrains(s); });
 
-    const paint = () => {
+    const paintList = () => {
       if (!items) return;
       const q = search.toLowerCase();
       const shown = q ? items.filter((e) => `${e.text} ${e.from} ${e.chat} ${e.brain} ${chatName(e.chat)}`.toLowerCase().includes(q)) : items;
       count.textContent = items.length ? `${shown.length} of ${items.length} messages` : '';
+      // The empty states and the messages share the card.
       if (!shown.length) {
-        mount(list, items.length
+        paint(list, { searching: items.length > 0, brain }, ({ searching }) => (searching
           ? empty('No matches', 'No message matches your search.')
-          : empty('No messages yet', brain ? 'This brain has not received or sent anything recently.' : 'Messages your brains receive and send show up here. The feed keeps the latest few hundred, newest first.'));
+          : empty('No messages yet', brain ? 'This brain has not received or sent anything recently.' : 'Messages your brains receive and send show up here. The feed keeps the latest few hundred, newest first.')));
         return;
       }
-      mount(list, shown.map((e) => activityItem(e, { showBrain: !brain })));
+      paint(list, 'messages', () => null);
+      showActivity(list, shown, { showBrain: !brain });
     };
     // Chat labels and the search use group names once the groups have loaded.
-    ctx.watch(store, (s) => s.names, () => paint());
+    ctx.watch(store, (s) => s.names, () => paintList());
+
+    // One feed per brain filter; the page follows the one it shows.
+    const follow = () => {
+      unfollow();
+      const feed = resource(`/api/activity${qs({ limit: 200, brain })}`);
+      unfollow = feed.follow((data) => {
+        items = data || [];
+        paintList();
+      }, 3000);
+    };
+    ctx.onCleanup(() => unfollow());
 
     brainSel.addEventListener('change', () => {
       brain = brainSel.value;
       ctx.replaceHash(brain ? `#/activity/${encodeURIComponent(brain)}` : '#/activity');
       items = null;
-      memo.items = '';
-      mount(list, spinner());
-      poller.kick();
+      paint(list, 'loading', () => spinner());
+      follow();
     });
-    searchIn.addEventListener('input', ctx.debounce(() => { search = searchIn.value.trim(); paint(); }, 150));
+    searchIn.addEventListener('input', ctx.debounce(() => { search = searchIn.value.trim(); paintList(); }, 150));
 
     mount(root,
       pageHeader('Activity', 'Messages across all brains, newest first. Long messages are folded.'),
       h('div.toolbar', h('div.toolbar-group', brainSel, searchIn), count),
       list);
-
-    const poller = ctx.poll(async (signal) => {
-      const data = await get(`/api/activity${qs({ limit: 200, brain })}`, { signal });
-      if (!changed(memo, 'items', data)) return;
-      items = data || [];
-      paint();
-    }, 3000);
+    follow();
   },
 };

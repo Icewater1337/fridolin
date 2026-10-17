@@ -1,9 +1,8 @@
 // Brains: a card per brain with its routing, live state and issues.
 
 import { brainsResource } from '../app/resources.js';
-import { h, mount } from '../lib/dom.js';
+import { h, mount, paint, reconcile } from '../lib/dom.js';
 import { routingSummary } from '../lib/brain.js';
-import { changed } from '../lib/memo.js';
 import { icon } from '../components/icons.js';
 import { btn } from '../components/buttons.js';
 import { pill, badge, timeAgo, mono, pageHeader, spinner } from '../components/common.js';
@@ -12,22 +11,17 @@ import { outcomePill, brainStatusPill } from '../components/brain.js';
 export default {
   title: 'Brains',
   render(root, ctx) {
-    const memo = {};
-    const list = h('div.brain-cards', spinner());
+    const box = h('div', spinner());
+    const cards = h('div.brain-cards');
 
     mount(root,
       pageHeader('Brains', 'Each brain is a folder with its own instructions, memory and history. Messages are routed to a brain by chat.',
         btn('Add brain', { href: '#/add-brain', kind: 'primary', icon: 'plus' })),
-      list);
+      box);
 
     ctx.follow(brainsResource, (brains) => {
-      if (!changed(memo, 'brains', brains)) return;
-      renderList(brains);
-    }, 3000);
-
-    function renderList(brains) {
       if (!brains.length) {
-        mount(list, h('div.card.hero',
+        paint(box, 'none', () => h('div.card.hero',
           h('div.hero-icon', icon('sparkle')),
           h('div.hero-body',
             h('h2', 'No brains yet'),
@@ -35,8 +29,10 @@ export default {
             h('div.actions', btn('Add your first brain', { href: '#/add-brain', kind: 'primary', icon: 'plus' })))));
         return;
       }
-      mount(list, brains.map(brainCard));
-    }
+      paint(box, 'list', () => cards);
+      // An entry without an id (no approved brain.json) is known by its folder.
+      reconcile(cards, brains, (b) => b.id || `path:${b.path}`, brainCard);
+    }, 3000);
   },
 };
 

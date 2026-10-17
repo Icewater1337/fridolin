@@ -1,13 +1,13 @@
 // One brain: live run and queue, settings (brain.json), on-disk changes
 // waiting for approval, recent messages, and removal.
 
-import { get, post, put, del, qs } from '../app/api.js';
+import { post, put, del, qs } from '../app/api.js';
 import { store } from '../app/store.js';
-import { brainsResource, configResource } from '../app/resources.js';
+import { brainsResource, configResource, resource } from '../app/resources.js';
 import { routingEditor } from '../components/routing-editor.js';
-import { activityItem } from '../components/activity-item.js';
+import { showActivity } from '../components/activity-item.js';
 import { calendarCard } from '../components/calendar.js';
-import { h, mount } from '../lib/dom.js';
+import { h, mount, paint } from '../lib/dom.js';
 import { fmtDuration, plural, prettyJSON } from '../lib/format.js';
 import { phoneish, isGroupJid } from '../lib/jid.js';
 import { EFFORTS } from '../lib/brain.js';
@@ -86,12 +86,15 @@ export default {
     let items = null;
     const paintActivity = () => {
       if (!items) return;
-      mount(actBox, items.length ? items.map((e) => activityItem(e, { compact: true, showBrain: false })) : empty('No messages yet', 'Messages this brain receives and sends show up here.'));
+      if (!items.length) {
+        paint(actBox, 'none', () => empty('No messages yet', 'Messages this brain receives and sends show up here.'));
+        return;
+      }
+      paint(actBox, 'messages', () => null);
+      showActivity(actBox, items, { compact: true, showBrain: false });
     };
-    ctx.poll(async (signal) => {
-      const data = await get(`/api/activity${qs({ limit: 30, brain: id })}`, { signal });
-      if (!changed(memo, 'act', data)) return;
-      items = data;
+    ctx.follow(resource(`/api/activity${qs({ limit: 30, brain: id })}`), (data) => {
+      items = data || [];
       paintActivity();
     }, 3000);
     // Chat labels show group names once the groups have loaded.
