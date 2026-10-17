@@ -89,9 +89,10 @@ Reopen the dashboard with `./fridolin open`.
   shellcheck, ruff, actionlint, the action-pin check, the Python, web,
   personal-data-check, action-pin-check and Makefile tests and a dev-mode
   smoke test (`make help` lists the targets).
-  CI also runs govulncheck, CodeQL and the personal-data scan of the pushed
-  commits. `make check` never rewrites `./fridolin`, which the installed
-  service runs; `make build` and `make install` do. While iterating,
+  CI also runs the site's tests and the fuzz targets (both below),
+  govulncheck, CodeQL and the personal-data scan of the pushed commits.
+  `make check` never rewrites `./fridolin`, which the installed service
+  runs; `make build` and `make install` do. While iterating,
   `go vet ./... && go test -race ./...` is enough; `gofmt` everything.
   The tests run in an empty temp directory, with an empty temp `HOME` and
   the variables the bridge reads (`FRIDOLIN_CONFIG`, `BRAIN_MODE`) unset,
@@ -103,8 +104,9 @@ Reopen the dashboard with `./fridolin open`.
   with `go test -run='^$' -fuzz='^FuzzExtractPolls$' -fuzztime=30s .`;
   a failing input is saved under the package's `testdata/fuzz/` (make
   `testdata` first in a package that has none), where plain `go test`
-  runs it from then on, so commit it with the fix. CI fuzzes every target
-  for 20 seconds on each push to main.
+  runs it from then on, so commit it with the fix. `make fuzz-short` runs
+  every target for 10 seconds (set `FUZZTIME`); CI fuzzes every target for
+  20 seconds on each push to main.
 - The Python helpers in `tools/` have stdlib-only tests that never touch the
   network: `python3 -m unittest discover -s tools/tests` (`make test-py`).
   Keep them passing on Python 3.9. `make lint-py` runs ruff

@@ -530,16 +530,20 @@ whatever is there on its next restart. `make build` writes it, and
 `make install` also copies it to `~/.local/bin` (set `PREFIX` or `BINDIR` to
 change that).
 
-CI also runs [govulncheck](https://go.dev/doc/security/vuln/) on pushes to main,
-every pull request and once a week; it fails when the code reaches a known
-vulnerability. Run it yourself after changing dependencies:
+CI also installs the site's npm packages and runs its own tests
+(`cd site && npm install && npm test`; [docs/SITE.md](docs/SITE.md));
+`make check` does not, and without those packages its Go tests of the site
+skip. It runs [govulncheck](https://go.dev/doc/security/vuln/) on pushes to
+main, every pull request and once a week; it fails when the code reaches a
+known vulnerability. Run it yourself after changing dependencies:
 `go run golang.org/x/vuln/cmd/govulncheck@latest ./...`. CodeQL scans the
 Go code, the dashboard JavaScript, the Python tools and the workflows on the
 same schedule; its findings go to the repository's code scanning alerts.
 
 On pushes to main, CI also fuzzes the parsers of untrusted input (WhatsApp
 messages, model output, files a brain writes) for 20 seconds each;
-[AGENTS.md](AGENTS.md) says how to run a fuzz target yourself.
+[AGENTS.md](AGENTS.md) says how to run a fuzz target yourself, and
+`make fuzz-short` runs them all for 10 seconds each.
 
 ## License
 

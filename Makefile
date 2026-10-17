@@ -1,7 +1,9 @@
 # Build, test and lint Fridolin. CI's build, lint and test jobs run these
 # same targets, so a passing `make check` here should mean those pass in CI
-# too (on this OS). CI also runs govulncheck, CodeQL and the personal-data
-# scan of the pushed commits; make check does not.
+# too (on this OS). CI also runs the site's tests (site/, which need its
+# npm packages), the fuzz targets on pushes to main (fuzz-short runs them
+# here), govulncheck, CodeQL and the personal-data scan of the pushed
+# commits; make check does not.
 #
 #   make build        ./fridolin
 #   make check        what CI's build, lint and test jobs run
