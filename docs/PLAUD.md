@@ -84,6 +84,13 @@ summaries go, and warns when that chat belongs to another brain.
 
 New brains get a `skills/plaud.md` that tells them how to file recordings.
 
+The transcript sits in the media inbox (`<media_dir>/plaud/`, by default
+`~/.fridolin/media/plaud/`) until the brain files it; under the sandbox every
+brain may read the inbox. **Disconnect** signs out and stops the checks; the
+transcripts already written, the brains' filed copies and the list of
+recordings Fridolin has seen (`~/.fridolin/plaud/state.json`) stay, so
+connecting the same account again sends nothing twice.
+
 If Plaud's login expires, that private chat gets one notice a day until you
 connect again (or disconnect); without one, only the dashboard shows it.
 Plaud's tool deletes a login once it has expired. Fridolin remembers that it
@@ -137,7 +144,7 @@ for updates either; `plaud` in your own terminal follows your own settings.
 | `plaud.` | Default | |
 | --- | --- | --- |
 | `enabled` | `false` | check for new recordings and hand them over; **Check now** needs it on |
-| `brain` | DM brain | brain id that receives recordings |
+| `brain` | the DM brain, else the default brain | brain id that receives recordings |
 | `interval_seconds` | `60` | at least 30 |
 | `polished` | `false` | use Plaud's AI-cleaned transcript; when Plaud has none an hour after the recording showed up, the raw one is sent, with a note saying so |
 | `message` | follow `skills/plaud.md` | instruction sent with each recording, after the fixed first line |
