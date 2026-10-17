@@ -89,13 +89,12 @@ var bareCodeRe = regexp.MustCompile(`^\s*\d{4,8}\s*$`)
 var defaultOTPMarkers = []string{"🔐", "OTP", "one-time code", "2FA", "verification code"}
 
 // recentOutboundLooksLikeOTPRequest reports whether any of the brain's last 50
-// outbound messages asked for a one-time code. With no markers given it uses
-// the built-in list.
-func recentOutboundLooksLikeOTPRequest(historyFile, brainID string, markers ...string) bool {
+// outbound messages in lines, the tail of its history, asked for a one-time
+// code. With no markers given it uses the built-in list.
+func recentOutboundLooksLikeOTPRequest(lines []string, brainID string, markers ...string) bool {
 	if len(markers) == 0 {
 		markers = defaultOTPMarkers
 	}
-	lines := tailLines(historyFile, 256*1024)
 	start := len(lines) - 50
 	if start < 0 {
 		start = 0
@@ -117,13 +116,8 @@ func recentOutboundLooksLikeOTPRequest(historyFile, brainID string, markers ...s
 	return false
 }
 
-// tailLines returns the complete lines in the last maxBytes of a file.
-func tailLines(path string, maxBytes int64) []string {
-	f, err := os.Open(path)
-	if err != nil {
-		return nil
-	}
-	defer f.Close()
+// tailLines returns the complete lines in the last maxBytes of f.
+func tailLines(f *os.File, maxBytes int64) []string {
 	st, err := f.Stat()
 	if err != nil {
 		return nil
@@ -158,10 +152,9 @@ func tailLines(path string, maxBytes int64) []string {
 type Brain struct {
 	// Fixed for the brain's lifetime. Changing a brain's folder replaces the
 	// Brain; everything else is in settings and changes live.
-	id          string
-	workDir     string
-	historyFile string
-	storeKey    string
+	id       string
+	workDir  string
+	storeKey string
 	// root is the brain's folder, opened once when the Brain is made and
 	// closed when it is retired. The bridge reads and writes its files in
 	// the folder through it (see openInFolder), and through this handle
@@ -266,7 +259,21 @@ func (br *Brain) Dir() string { return br.workDir }
 func (br *Brain) DropsOTP(text string) bool {
 	s := br.settings.Load()
 	return s.otpGuard && bareCodeRe.MatchString(text) &&
-		recentOutboundLooksLikeOTPRequest(br.historyFile, br.id, s.otpMarkers...)
+		recentOutboundLooksLikeOTPRequest(br.historyTail(256*1024), br.id, s.otpMarkers...)
+}
+
+// historyFileName is the brain's conversation history, in its folder.
+const historyFileName = "conversation-history.jsonl"
+
+// historyTail returns the complete lines in the last maxBytes of the
+// brain's history, or none when it cannot be read (see openInFolder).
+func (br *Brain) historyTail(maxBytes int64) []string {
+	f, err := openInFolder(br.root, historyFileName, os.O_RDONLY, 0)
+	if err != nil {
+		return nil
+	}
+	defer f.Close()
+	return tailLines(f, maxBytes)
 }
 
 // Submit queues a message for the brain. It returns the message's position in
@@ -951,7 +958,7 @@ func (br *Brain) invoke(run *brainRun, ctx context.Context, s *brainSettings, m 
 // composePreface reads the chat history for chatJID and formats recent messages:
 // the last 10 for a DM, the last 20 for a group.
 func (br *Brain) composePreface(chatJID string, isGroup bool) string {
-	histFile, err := os.Open(br.historyFile)
+	histFile, err := openInFolder(br.root, historyFileName, os.O_RDONLY, 0)
 	if err != nil {
 		return ""
 	}
@@ -1230,9 +1237,11 @@ func (br *Brain) appendHistory(chatJID, from, text, typ string) {
 	if err != nil {
 		return
 	}
-	f, err := os.OpenFile(br.historyFile, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600)
+	// Through the folder: appending through a symlink would let a brain
+	// write to files its sandbox denies it, another brain's among them.
+	f, err := openInFolder(br.root, historyFileName, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600)
 	if err != nil {
-		log.Printf("brain %s: failed to open history file %s: %v", br.id, br.historyFile, err)
+		log.Printf("brain %s: failed to open history file %s: %v", br.id, filepath.Join(br.workDir, historyFileName), err)
 		return
 	}
 	_, _ = f.Write(append(data, '\n'))
@@ -1338,14 +1347,13 @@ func (bm *BrainManager) reload(specs []BrainSpec, issues []BrainIssue, cfg *Conf
 				continue
 			}
 			br = &Brain{
-				id:          m.ID,
-				workDir:     sp.Dir,
-				historyFile: filepath.Join(sp.Dir, "conversation-history.jsonl"),
-				storeKey:    "brain:" + m.ID,
-				root:        root,
-				store:       bm.store,
-				sandbox:     bm.profiler,
-				hooks:       bm.hooks,
+				id:       m.ID,
+				workDir:  sp.Dir,
+				storeKey: "brain:" + m.ID,
+				root:     root,
+				store:    bm.store,
+				sandbox:  bm.profiler,
+				hooks:    bm.hooks,
 			}
 			created = append(created, br)
 		}

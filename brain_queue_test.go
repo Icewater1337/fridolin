@@ -759,8 +759,7 @@ func TestMCPConfigOfStaysInTheBrainFolder(t *testing.T) {
 }
 
 func TestBuildPromptListsAllAttachments(t *testing.T) {
-	br := &Brain{id: "a", workDir: t.TempDir()}
-	br.historyFile = filepath.Join(br.workDir, "h.jsonl")
+	br := bareBrain(t)
 	p := br.buildPrompt(&brainSettings{}, Inbound{JID: "x@s.whatsapp.net", Sender: "1", Text: "file these", Media: []string{"/m/1.jpg", "/m/2.pdf"}})
 	if !strings.Contains(p, "2 files were shared together") || !strings.Contains(p, "- /m/2.pdf") {
 		t.Errorf("prompt:\n%s", p)
@@ -771,12 +770,11 @@ func TestBuildPromptListsAllAttachments(t *testing.T) {
 }
 
 func TestOTPMarkersConfigurable(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "h.jsonl")
-	_ = os.WriteFile(path, []byte(`{"type":"out","from":"a","text":"Please send the Examplebank code"}`+"\n"), 0o600)
-	if recentOutboundLooksLikeOTPRequest(path, "a") {
+	lines := []string{`{"type":"out","from":"a","text":"Please send the Examplebank code"}`}
+	if recentOutboundLooksLikeOTPRequest(lines, "a") {
 		t.Error("default markers should not match a bank name")
 	}
-	if !recentOutboundLooksLikeOTPRequest(path, "a", "Examplebank") {
+	if !recentOutboundLooksLikeOTPRequest(lines, "a", "Examplebank") {
 		t.Error("a configured marker should arm the guard")
 	}
 }

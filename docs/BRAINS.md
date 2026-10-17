@@ -60,7 +60,7 @@ restart.
 | `routing.groups` | Group JIDs this brain answers. The group must also be allowed in the global settings. |
 | `model`, `effort` | Override the global `brain_model` / `brain_effort`. |
 | `disallowed_tools` | Override the global list; omit to inherit, `[]` to allow every tool. |
-| `prompt_file` | The prompt sent ahead of every message, relative to the folder. It must stay inside the folder, and be a file rather than a symlink (see [Files the bridge reads](#files-the-bridge-reads)). |
+| `prompt_file` | The prompt sent ahead of every message, relative to the folder. It must stay inside the folder, and be a file rather than a symlink (see [Files the bridge reads and writes](#files-the-bridge-reads-and-writes)). |
 | `reply_chat` | Where answers go for files handed in through `/ingest`. Default: the first allowed number for the DM brain, else the brain's first group. |
 | `backup` | Google Drive backup for this folder; see [BACKUP.md](BACKUP.md). |
 | `calendar` | The Google account this brain signed in with and the calendars it may use; set by *Connect Google Calendar*, see [CALENDAR.md](CALENDAR.md). |
@@ -77,16 +77,18 @@ group. Such a change has no effect: the dashboard marks the brain as
 *changed on disk* and shows the difference, and you approve it or not.
 Edits you make in the dashboard update both copies.
 
-## Files the bridge reads
+## Files the bridge reads and writes
 
 The bridge itself, outside the sandbox, reads these files in a brain's
-folder: its prompt file. A brain can change any file in its folder, and
-put a symlink to `~/.ssh` in place of one of them, so the bridge opens the
-folder once when it loads the brain and goes through that: it never leaves
-the folder through a symlink, and it takes only a regular file, not a
-symlink at the file itself, even one to another file in the folder. It
-treats such a file as missing, and its log says why. Copy a file into the
-folder rather than link it.
+folder: its prompt file and `conversation-history.jsonl`, which it also
+appends every message to. A brain can change any file in its folder, and
+put a symlink to `~/.ssh` or to another brain's history in place of one of
+them, so the bridge opens the folder once when it loads the brain and goes
+through that: it never leaves the folder through a symlink, and it takes
+only a regular file, not a symlink at the file itself, even one to another
+file in the folder. It treats such a file as missing, writes nothing
+through it, and its log says why. Copy a file into the folder rather than
+link it.
 
 ## Moving a brain
 

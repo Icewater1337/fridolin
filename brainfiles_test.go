@@ -71,6 +71,18 @@ func folderBrain(t *testing.T) (*Brain, string) {
 	return br, home
 }
 
+// bareBrain is brain a in a fresh folder, outside any manager.
+func bareBrain(t *testing.T) *Brain {
+	t.Helper()
+	dir := t.TempDir()
+	root, err := os.OpenRoot(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { root.Close() })
+	return &Brain{id: "a", workDir: dir, root: root}
+}
+
 // plant replaces path with a symlink to target.
 func plant(t *testing.T, path, target string) {
 	t.Helper()
@@ -280,5 +292,99 @@ func TestInlinePromptOutsideTheFolderIsStillRead(t *testing.T) {
 	br := mgr.Get("in")
 	if got := br.buildPrompt(br.settings.Load(), dm("hello")); strings.Contains(got, "SHARED PROMPT") {
 		t.Errorf("an inline brain's prompt in its folder followed a symlink:\n%s", got)
+	}
+}
+
+// TestHistoryIsNotFollowedOutOfTheFolder: the bridge appends every message
+// to the brain's history and reads it back for the chat-history preface,
+// the one-time-code guard and the dashboard's activity feed. A history
+// swapped for a symlink, to another brain's history say, is neither
+// written to nor read through; nor is a missing file created at a
+// dangling symlink's target.
+func TestHistoryIsNotFollowedOutOfTheFolder(t *testing.T) {
+	const otherLines = `{"ts":"2026-01-01T10:00:00Z","from":"15551234567","chat":"15551234567@s.whatsapp.net","text":"OTHER-BRAIN-SECRET","type":"in"}
+{"ts":"2026-01-01T10:01:00Z","from":"a","chat":"15551234567@s.whatsapp.net","text":"🔐 send me the code","type":"out"}
+`
+	cases := []struct {
+		name   string
+		target func(home string) string // what the history points to; "" for a regular file
+	}{
+		{"regular file", nil},
+		{"another brain's history", func(home string) string { return filepath.Join(home, "b", historyFileName) }},
+		{"relative symlink up and out", func(string) string { return filepath.Join("..", "b", historyFileName) }},
+		{"symlink inside the folder", func(string) string { return "notes.jsonl" }},
+		{"dangling symlink out", func(home string) string { return filepath.Join(home, ".ssh", "authorized_keys") }},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			br, home := folderBrain(t)
+			s := *br.settings.Load()
+			s.otpGuard = true
+			br.settings.Store(&s)
+			dir := filepath.Join(home, "a")
+			hist := filepath.Join(dir, historyFileName)
+			for _, p := range []string{filepath.Join(home, "b", historyFileName), filepath.Join(dir, "notes.jsonl")} {
+				if err := os.MkdirAll(filepath.Dir(p), 0o700); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.WriteFile(p, []byte(otherLines), 0o600); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if tc.target == nil {
+				if err := os.WriteFile(hist, []byte(otherLines), 0o600); err != nil {
+					t.Fatal(err)
+				}
+			} else {
+				plant(t, hist, tc.target(home))
+			}
+			logged := captureLog(t)
+
+			br.appendHistory("15551234567@s.whatsapp.net", "15551234567", "NEW-MESSAGE", "in")
+			preface := br.composePreface("15551234567@s.whatsapp.net", false)
+			drops := br.DropsOTP("123456")
+			feed := NewActivity(10)
+			feed.Seed(br)
+			var seeded []string
+			for _, e := range feed.Recent(10, "") {
+				seeded = append(seeded, e.Text)
+			}
+
+			if tc.target == nil {
+				// The control: all of it works on a regular file.
+				data, _ := os.ReadFile(hist)
+				if !strings.HasSuffix(string(data), `"text":"NEW-MESSAGE","type":"in"}`+"\n") {
+					t.Errorf("history = %s, want the new message appended", data)
+				}
+				if !strings.Contains(preface, "OTHER-BRAIN-SECRET") || !strings.Contains(preface, "NEW-MESSAGE") {
+					t.Errorf("preface = %q, want the history", preface)
+				}
+				if !drops || len(seeded) != 3 {
+					t.Errorf("DropsOTP = %v, activity = %q; want the code dropped and three entries", drops, seeded)
+				}
+				if lines := logged(); len(lines) > 0 {
+					t.Errorf("unexpected log %q", lines)
+				}
+				return
+			}
+			for _, p := range []string{filepath.Join(home, "b", historyFileName), filepath.Join(dir, "notes.jsonl")} {
+				if data, _ := os.ReadFile(p); string(data) != otherLines {
+					t.Errorf("%s was written through the symlink:\n%s", p, data)
+				}
+			}
+			if _, err := os.Lstat(filepath.Join(home, ".ssh", "authorized_keys")); !os.IsNotExist(err) {
+				t.Errorf("the dangling symlink's target was created (%v)", err)
+			}
+			if fi, err := os.Lstat(hist); err != nil || fi.Mode()&os.ModeSymlink == 0 {
+				t.Errorf("the history symlink was replaced (%v)", err)
+			}
+			if strings.Contains(preface, "OTHER-BRAIN-SECRET") || drops || len(seeded) > 0 {
+				t.Errorf("read through the symlink: preface %q, DropsOTP %v, activity %q", preface, drops, seeded)
+			}
+			lines := logged()
+			if len(lines) != 1 || !strings.Contains(lines[0], "brain a: failed to open history file "+hist+": "+errSymlink.Error()) {
+				t.Errorf("log = %q, want one line refusing the symlink", lines)
+			}
+		})
 	}
 }
