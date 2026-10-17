@@ -155,7 +155,9 @@ process of your user, another brain's included, can read that with `ps`, as
 it can the prompt, so a token in a server's `env` shows there too; to avoid
 that, take a server you do not want out of `.mcp.json` instead, and the
 bridge passes the file as it is. When it cannot read one of those two
-files, it passes no server at all, and its log says why. Every other
+files, it passes no server at all, and its log says why; that includes a
+`.claude` folder that is a symlink out of the brain's folder, which the
+bridge, reading outside the sandbox, does not follow. Every other
 server in `.mcp.json` starts, whatever `enabledMcpjsonServers` says, as it
 always did for brains; to stop one, take it out of `.mcp.json` or list it
 in `disabledMcpjsonServers`.

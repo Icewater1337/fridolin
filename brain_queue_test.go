@@ -528,6 +528,14 @@ func TestMCPConfigOf(t *testing.T) {
 				t.Fatal(err)
 			}
 		}, false, "symlink"},
+		// Even one that stays in the brain's folder.
+		{"symlink inside the folder", func(t *testing.T, p string) {
+			target := filepath.Join(filepath.Dir(p), "servers.json")
+			write(`{"mcpServers": {}}`)(t, target)
+			if err := os.Symlink("servers.json", p); err != nil {
+				t.Fatal(err)
+			}
+		}, false, "symlink"},
 		{"folder", func(t *testing.T, p string) {
 			if err := os.Mkdir(p, 0o700); err != nil {
 				t.Fatal(err)
@@ -671,6 +679,80 @@ func TestMCPConfigOfDropsServersTurnedOff(t *testing.T) {
 			}
 			if tc.leftOut != "" && (len(logged) != 1 || !strings.Contains(logged[0], "leaving out "+p+": "+tc.leftOut)) {
 				t.Errorf("log = %q, want one line leaving out %s for %q", logged, p, tc.leftOut)
+			}
+		})
+	}
+}
+
+// TestMCPConfigOfStaysInTheBrainFolder: the bridge reads a brain's
+// settings outside the sandbox, so it follows no symlink out of the
+// brain's folder. A .claude folder linked to another brain's would
+// otherwise tell the brain, by which of its servers start, what that
+// brain turns off. Such a folder counts as settings it cannot read, so the
+// brain gets no server. A link that stays inside the folder is followed.
+func TestMCPConfigOfStaysInTheBrainFolder(t *testing.T) {
+	cases := []struct {
+		name    string
+		link    func(dir, other string) string // where the brain's .claude points
+		want    []string                       // the servers passed; nil for none
+		leftOut bool                           // the log says none is passed
+	}{
+		{"inside the folder", func(string, string) string { return "conf" }, []string{"keep"}, false},
+		{"another brain's .claude", func(_, other string) string { return filepath.Join(other, ".claude") }, nil, true},
+		{"up and out", func(_, other string) string { return filepath.Join("..", filepath.Base(other), ".claude") }, nil, true},
+		// os.Root does not tell a path that comes back from one that stays out.
+		{"out and back in", func(dir, _ string) string { return filepath.Join("..", filepath.Base(dir), "conf") }, nil, true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			ring := NewLogRing(10)
+			prev := log.Writer()
+			log.SetOutput(ring)
+			t.Cleanup(func() { log.SetOutput(prev) })
+
+			parent := t.TempDir()
+			dir, other := filepath.Join(parent, "brain"), filepath.Join(parent, "other")
+			off := []byte(`{"disabledMcpjsonServers": ["off"]}`)
+			for _, d := range []string{filepath.Join(dir, "conf"), filepath.Join(other, ".claude")} {
+				if err := os.MkdirAll(d, 0o700); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.WriteFile(filepath.Join(d, "settings.local.json"), off, 0o600); err != nil {
+					t.Fatal(err)
+				}
+			}
+			p := filepath.Join(dir, ".mcp.json")
+			if err := os.WriteFile(p, []byte(`{"mcpServers": {"keep": {"command": "k"}, "off": {"command": "o"}}}`), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.Symlink(tc.link(dir, other), filepath.Join(dir, ".claude")); err != nil {
+				t.Fatal(err)
+			}
+
+			got := mcpConfigOf("a", dir)
+			var names []string
+			if got != "" {
+				var cfg struct {
+					MCPServers map[string]json.RawMessage `json:"mcpServers"`
+				}
+				if err := json.Unmarshal([]byte(got), &cfg); err != nil {
+					t.Fatalf("mcpConfigOf = %q, want JSON: %v", got, err)
+				}
+				names = slices.Sorted(maps.Keys(cfg.MCPServers))
+			}
+			if !slices.Equal(names, tc.want) {
+				t.Errorf("servers passed = %q, want %q", names, tc.want)
+			}
+			lines, _ := ring.Since(0, 10)
+			var logged []string
+			for _, l := range lines {
+				logged = append(logged, l.Text)
+			}
+			if !tc.leftOut && len(logged) > 0 {
+				t.Errorf("unexpected log %q", logged)
+			}
+			if tc.leftOut && (len(logged) != 1 || !strings.Contains(logged[0], "leaving out "+p+": cannot tell which servers")) {
+				t.Errorf("log = %q, want one line leaving out %s", logged, p)
 			}
 		})
 	}

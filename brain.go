@@ -620,7 +620,7 @@ func globEscape(p string) string {
 // mcpServers it takes in its stride.
 func mcpConfigOf(brainID, dir string) string {
 	p := filepath.Join(dir, ".mcp.json")
-	data, err := readBrainFile(p)
+	data, err := readBrainFile(dir, ".mcp.json")
 	if errors.Is(err, fs.ErrNotExist) {
 		return ""
 	}
@@ -670,7 +670,7 @@ func disabledMCPServers(dir string) (map[string]bool, error) {
 	disabled := map[string]bool{}
 	for _, name := range []string{"settings.json", "settings.local.json"} {
 		p := filepath.Join(dir, ".claude", name)
-		data, err := readBrainFile(p)
+		data, err := readBrainFile(dir, filepath.Join(".claude", name))
 		if errors.Is(err, fs.ErrNotExist) {
 			continue
 		}
@@ -732,17 +732,28 @@ func jsonObject(data []byte) (map[string]json.RawMessage, error) {
 // pass a .mcp.json on the command line.
 const maxBrainFile = 256 << 10
 
-// readBrainFile reads a file in a brain's folder, which the bridge does
-// outside the sandbox while the brain controls what is there. It follows
-// no symlink, and it takes only a regular file, checked on the open file
-// so that nothing can be swapped in after the check; the open does not
-// block, so a FIFO cannot hang the run either. It refuses a file larger
-// than maxBrainFile.
-func readBrainFile(p string) ([]byte, error) {
-	f, err := os.OpenFile(p, os.O_RDONLY|syscall.O_NOFOLLOW|syscall.O_NONBLOCK, 0)
-	if errors.Is(err, syscall.ELOOP) {
+// readBrainFile reads the file name, relative to the brain folder dir,
+// which the bridge does outside the sandbox while the brain controls what
+// is there. It reads nothing outside dir: os.Root refuses, at every step
+// of the open, a path that leads out of it, through a symlinked .claude
+// folder say, which could otherwise point at another brain's settings. It
+// refuses a symlink at the file itself too; one swapped in after that
+// check can lead only to another file in dir. It takes only a regular
+// file, checked on the open file so that nothing can be swapped in after
+// the check; the open does not block, so a FIFO cannot hang the run
+// either. It refuses a file larger than maxBrainFile.
+func readBrainFile(dir, name string) ([]byte, error) {
+	root, err := os.OpenRoot(dir)
+	if err != nil {
+		return nil, err
+	}
+	defer root.Close()
+	if fi, err := root.Lstat(name); err != nil {
+		return nil, err
+	} else if fi.Mode()&fs.ModeSymlink != 0 {
 		return nil, errors.New("it is a symlink, which the bridge does not follow")
 	}
+	f, err := root.OpenFile(name, os.O_RDONLY|syscall.O_NONBLOCK, 0)
 	if err != nil {
 		return nil, err
 	}
