@@ -498,6 +498,9 @@ func (br *Brain) Snapshot() BrainRuntime {
 	return rt
 }
 
+// startViewer is NewTmuxViewer, a variable so tests need no tmux.
+var startViewer = NewTmuxViewer
+
 // ensureViewer starts the tmux activity viewer if enabled and not running.
 func (br *Brain) ensureViewer(s *brainSettings) {
 	if !s.viewer {
@@ -506,7 +509,16 @@ func (br *Brain) ensureViewer(s *brainSettings) {
 	if br.tmuxViewer != nil && br.tmuxViewer.IsAlive() {
 		return
 	}
-	tv, err := NewTmuxViewer("claude-"+br.id, br.streamLogPath(), br.workDir)
+	// tail fails on a log that does not exist yet, so create it first,
+	// through the folder as a run opens it: touch would have followed a
+	// dangling symlink there and created the file it points to.
+	f, err := openInFolder(br.root, streamLogName, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600)
+	if err != nil {
+		log.Printf("brain %s: no tmux viewer: could not open stream log: %v", br.id, err)
+		return
+	}
+	f.Close()
+	tv, err := startViewer("claude-"+br.id, br.streamLogPath(), br.workDir)
 	if err != nil {
 		log.Printf("brain %s: could not start tmux viewer: %v", br.id, err)
 		return
@@ -514,8 +526,11 @@ func (br *Brain) ensureViewer(s *brainSettings) {
 	br.tmuxViewer = tv
 }
 
+// streamLogName is the brain's activity log, in its folder.
+const streamLogName = "claude-stream.log"
+
 func (br *Brain) streamLogPath() string {
-	return filepath.Join(br.workDir, "claude-stream.log")
+	return filepath.Join(br.workDir, streamLogName)
 }
 
 // claudeArgs builds the CLI arguments for one run. mcpConfig is what
@@ -1074,7 +1089,9 @@ func (br *Brain) parseStream(jid string, reader io.Reader) RunResult {
 	scanner := bufio.NewScanner(reader)
 	scanner.Buffer(make([]byte, 4*1024*1024), 4*1024*1024)
 
-	streamLog, logErr := os.OpenFile(br.streamLogPath(), os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600)
+	// Through the folder, like the history: a brain can swap the log for a
+	// symlink to a file its sandbox denies it writing.
+	streamLog, logErr := openInFolder(br.root, streamLogName, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600)
 	if logErr != nil {
 		log.Printf("brain %s: could not open stream log: %v", br.id, logErr)
 	}

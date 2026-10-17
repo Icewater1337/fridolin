@@ -79,10 +79,11 @@ Edits you make in the dashboard update both copies.
 
 ## Files the bridge reads and writes
 
-The bridge itself, outside the sandbox, reads these files in a brain's
-folder: its prompt file and `conversation-history.jsonl`, which it also
-appends every message to. A brain can change any file in its folder, and
-put a symlink to `~/.ssh` or to another brain's history in place of one of
+The bridge itself, outside the sandbox, works on these files in a brain's
+folder: it reads the prompt file, appends every message to
+`conversation-history.jsonl` and reads it back, and logs what each run did
+in `claude-stream.log`. A brain can change any file in its folder, and put
+a symlink to `~/.ssh` or to another brain's history in place of one of
 them, so the bridge opens the folder once when it loads the brain and goes
 through that: it never leaves the folder through a symlink, and it takes
 only a regular file, not a symlink at the file itself, even one to another

@@ -780,7 +780,7 @@ func TestOTPMarkersConfigurable(t *testing.T) {
 }
 
 func TestParseStreamReportsErrorText(t *testing.T) {
-	br := &Brain{id: "a", workDir: t.TempDir()}
+	br := bareBrain(t)
 	stream := `{"type":"assistant","message":{"content":[{"type":"text","text":"Failed to authenticate. API Error: 401"}]}}
 {"type":"result","is_error":true}
 `
