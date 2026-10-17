@@ -222,7 +222,7 @@ export default {
         h('div.field', enabled, h('div.help', 'Runs at the time below while the computer is awake. A run missed while it slept happens as soon as it wakes.')),
         h('div.form-grid',
           field({ label: 'Time of day', control: time, help: '24-hour time on this computer.' }),
-          field({ label: 'Keep old versions for (days)', control: keep, help: '0 keeps them forever.' }),
+          field({ label: 'Keep old versions for (days)', control: keep, help: 'Counted from the backup that replaced or deleted the files. 0 keeps them forever.' }),
           field({ label: 'Folder in Google Drive', control: rootIn, help: 'A plain folder name. Changing it starts a fresh backup in the new folder.' })),
         h('div.field', incSw, h('div.help', 'config.json and the approved brain settings — enough to set up the bridge again on a new computer. Never the WhatsApp session or tokens.')),
         bar);
@@ -283,7 +283,7 @@ export default {
         return h('tr',
           h('td', h('div', h('strong', b.name || b.id)), h('div.small', mono(b.dir))),
           h('td', sw),
-          h('td', resultCell(b.last)),
+          h('td', resultCell(b.last, b)),
           h('td.right.nowrap',
             btn(`Excludes${b.exclude && b.exclude.length ? ` (${b.exclude.length})` : ''}`, { small: true, kind: 'ghost', icon: 'edit', onClick: () => editExcludes(b) }),
             btn('Back up', {
@@ -301,12 +301,41 @@ export default {
         h('tbody', rows))));
     }
 
-    function resultCell(r) {
+    function resultCell(r, b) {
       if (!r) return h('span.muted', 'Not backed up yet');
+      let state;
+      if (r.ok) state = pill('OK', 'ok');
+      else if (r.error === 'cancelled') state = pill('Cancelled', 'warn');
+      else if (r.refused) state = pill('Not mirrored', 'warn');
+      else state = pill('Failed', 'bad');
       return h('div.result',
-        h('div', r.ok ? pill('OK', 'ok') : pill(r.error === 'cancelled' ? 'Cancelled' : 'Failed', r.error === 'cancelled' ? 'warn' : 'bad'), ' ', timeAgo(r.finished)),
+        h('div', state, ' ', timeAgo(r.finished)),
         h('div.muted.small', r.ok ? `${fmtBytes(r.bytes)} in ${plural(r.files, 'file')} · ${fmtDuration(r.seconds)}${r.trigger === 'scheduled' ? ' · scheduled' : ''}` : fmtDuration(r.seconds)),
-        r.error && r.error !== 'cancelled' ? h('div.error-text.small', r.error) : null);
+        r.error && r.error !== 'cancelled' ? h('div.error-text.small', r.error) : null,
+        r.refused && b ? h('div', btn('Mirror the deletion…', {
+          small: true, icon: 'backup', disabled: !!st.job, title: 'Back up this brain including the deletion',
+          onClick: () => mirrorDeletion(b),
+        })) : null);
+    }
+
+    // A run refused as a mass deletion is only mirrored when the owner says
+    // so: it removes the missing files from the latest copy in Drive.
+    async function mirrorDeletion(b) {
+      const name = b.name || b.id;
+      const days = (st.settings || {}).keep_versions_days ?? 30;
+      const ok = await confirmDialog({
+        title: `Mirror the deletion in ${name}?`,
+        message: h('div',
+          h('p', 'Most of the files backed up from ', mono(b.dir), ' are gone from that folder. Check it first: a brain, a disk that is not mounted or a moved folder can empty it by accident.'),
+          h('p', 'Mirroring removes the missing files from the latest copy in Google Drive. ',
+            days > 0 ? `Their previous copies stay in the older versions for ${plural(days, 'day')}.` : 'Their previous copies stay in the older versions.')),
+        confirm: 'Mirror the deletion', danger: true,
+      });
+      if (!ok) return;
+      await post('/api/backup/run', { brains: [b.id], include_bridge: false, force: true });
+      toast(`Backing up ${name}, deletions included`, 'ok');
+      memo.brains = '';
+      refresh();
     }
 
     async function editExcludes(b) {
