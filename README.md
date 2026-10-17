@@ -86,7 +86,8 @@ See [docs/SITE.md](docs/SITE.md).
 ## Requirements
 
 - **macOS or Linux.** The sandbox layer is macOS-only; everything else is portable.
-- **[Claude Code](https://claude.com/claude-code)**, installed and logged in.
+- **[Claude Code](https://claude.com/claude-code)** 2.1.302 or newer, installed
+  and logged in.
 - **Go 1.26+** and a C compiler to build (`xcode-select --install` on macOS).
 - **Python 3.9+** for the helper tools.
 - **[rclone](https://rclone.org/install/)** — only for Google Drive backups.

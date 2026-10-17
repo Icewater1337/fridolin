@@ -18,7 +18,8 @@ import (
 // WCB_FAKE_CLAUDE=1 it prints a stream-json result echoing its working
 // directory and the new message, after WCB_FAKE_SLEEP_MS. With
 // WCB_FAKE_READ it also reports whether it could read that file, and with
-// WCB_FAKE_ENV the value of that environment variable. Tests point
+// WCB_FAKE_ENV the value of that environment variable. Asked for
+// --version, it answers testedClaudeVersion. Tests point
 // claude_path at os.Args[0], so no script or real CLI is needed.
 //
 // Before the tests run it unsets the variables the bridge reads: a shell
@@ -140,6 +141,11 @@ func bridgeVariables() []string {
 
 func fakeClaude() {
 	args := os.Args[1:]
+	if len(args) == 1 && args[0] == "--version" {
+		// What the dashboard and `fridolin check` ask for.
+		fmt.Println(testedClaudeVersion + " (Claude Code)")
+		return
+	}
 	prompt := ""
 	for i, a := range args {
 		if a == "-p" && i+1 < len(args) {

@@ -151,6 +151,7 @@ func runCmd(args []string) {
 	if err != nil {
 		log.Fatalf("creating bridge: %v", err)
 	}
+	go logClaudeCLI(cfg.ClaudePath, cfg.ChildEnvPassthrough)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -267,7 +268,7 @@ func checkCmd(args []string) {
 	}
 
 	fmt.Printf("Config OK: %s\n", path)
-	fmt.Printf("  claude:    %s\n", cfg.ClaudePath)
+	fmt.Printf("  claude:    %s\n", claudeSummary(cfg.ClaudePath, cfg.ChildEnvPassthrough))
 	fmt.Printf("  data dir:  %s\n", cfg.DataDir)
 	fmt.Printf("  dashboard: http://%s/\n", cfg.HTTPListen)
 	fmt.Printf("  DM allow:  %s\n", dmAllowSummary(cfg))
@@ -316,6 +317,23 @@ func checkCmd(args []string) {
 			fmt.Print(profile)
 		}
 	}
+}
+
+// claudeSummary is the CLI brains run and its version, with a warning when
+// it is missing or older than the release the bridge was tested with.
+func claudeSummary(path string, passthrough []string) string {
+	st := claudeInfo(path, passthrough)
+	switch {
+	case !st.Found:
+		return path + " — not found, so brains cannot run"
+	case st.Version == "":
+		return st.Path + " (`--version` gave no answer)"
+	}
+	s := st.Path + " (" + st.Version + ")"
+	if claudeVersionWarning(st) != "" {
+		s += " — older than " + testedClaudeVersion + ", the oldest release tested; update it (claude update)"
+	}
+	return s
 }
 
 // dmAllowSummary says who may DM the bridge. A bare empty list would read

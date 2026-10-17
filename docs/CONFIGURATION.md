@@ -121,6 +121,12 @@ That path contains a version number and changes when Claude updates. Either
 point `claude_path` at a stable `claude` on your PATH, or re-run `setup.sh`
 after an update.
 
+Brains need Claude Code 2.1.302 or newer, the oldest release the bridge was
+tested with: they rely on its flags and on the shape of its `stream-json`
+output. The bridge logs the CLI's path and version when it starts, and the
+log, `fridolin check` and the dashboard warn when it is older or missing. The
+CLI normally updates itself; `claude update` does it by hand.
+
 ### `model` and `brain_model`
 
 Model to use — `"sonnet"`, `"opus"`, `"haiku"`, or a full model ID. Empty uses

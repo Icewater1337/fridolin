@@ -54,8 +54,10 @@ func TestCheckShowsWhoMayDM(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			home := t.TempDir()
 			t.Setenv("HOME", home)
+			// check runs the CLI for its version: the fake, not one on PATH.
 			path := writeConfig(t, `{
 				"brain_mode": true,
+				"claude_path": "`+fakeClaudeEnv(t, 0)+`",
 				"data_dir": "`+home+`/data"`+brainDirsJSON(t,
 				brainFolder(t, home+"/main", BrainManifest{ID: "main", Routing: BrainRouting{HandlesDMs: true}}),
 			)+`,
