@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"slices"
 	"strconv"
@@ -1161,6 +1162,98 @@ func TestPlaudPolishedFallsBackToTheRawTranscript(t *testing.T) {
 }
 
 func ptr[T any](v T) *T { return &v }
+
+// plaudIDs returns n recording ids, newest first, that start with prefix
+// (one hex digit).
+func plaudIDs(prefix string, n int) []string {
+	ids := make([]string, n)
+	for i := range ids {
+		ids[i] = fmt.Sprintf("of_%s%021x", prefix, n-i)
+	}
+	return ids
+}
+
+// A check pages back through Plaud's list until it reaches a recording it
+// knows, so a gap (the bridge down, the login expired, sending off) misses
+// nothing. A backlog arrives a few recordings per check, oldest first.
+func TestPlaudPagesBackToTheLastKnownRecording(t *testing.T) {
+	tb, fp := plaudBridge(t, "")
+	var handed []string
+	tb.plaud.handOff = func(br *Brain, jid, sender, text string, media []string) {
+		handed = append(handed, strings.TrimSuffix(media[0][strings.LastIndex(media[0], " - ")+3:], ".txt"))
+	}
+	plaudSignIn(t, tb)
+	if err := tb.plaud.saveState(plaudSeededState("u_1", plaudOld2, plaudOld1)); err != nil {
+		t.Fatal(err)
+	}
+	backlog := plaudIDs("a", 120)
+	fp.files(append(slices.Clone(backlog), plaudOld1, plaudOld2)...)
+	for _, id := range backlog {
+		fp.recording(id, true)
+	}
+	if err := tb.plaud.Poll(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if calls := fp.calls(); !strings.Contains(calls, "files --page 2 --page-size 100\n") || strings.Contains(calls, "--page 3") {
+		t.Errorf("listed:\n%s\nwant pages 1 and 2 of 100", calls)
+	}
+	oldest := slices.Clone(backlog)
+	slices.Reverse(oldest)
+	if !slices.Equal(handed, oldest[:plaudHandOffsPerCheck]) {
+		t.Errorf("handed over %v, want the oldest %d: %v", handed, plaudHandOffsPerCheck, oldest[:plaudHandOffsPerCheck])
+	}
+	if st, _ := tb.plaud.loadState(); len(st.Pending) != len(backlog)-plaudHandOffsPerCheck {
+		t.Errorf("%d waiting, want %d", len(st.Pending), len(backlog)-plaudHandOffsPerCheck)
+	}
+	if err := tb.plaud.Poll(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Equal(handed, oldest[:2*plaudHandOffsPerCheck]) {
+		t.Errorf("after two checks handed over %v, want the oldest %d", handed, 2*plaudHandOffsPerCheck)
+	}
+}
+
+// The first sync remembers every page of recordings, oldest first, so
+// that trimming the list drops the oldest.
+func TestPlaudFirstSyncReadsEveryPage(t *testing.T) {
+	tb, fp := plaudBridge(t, "")
+	plaudSignIn(t, tb)
+	existing := plaudIDs("b", 150)
+	fp.files(existing...)
+	if err := tb.plaud.Poll(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	st, _ := tb.plaud.loadState()
+	want := slices.Clone(existing)
+	slices.Reverse(want)
+	if !slices.Equal(st.Seen, want) || len(st.Pending) != 0 {
+		t.Errorf("seen %d, pending %d; want all %d seen, oldest first", len(st.Seen), len(st.Pending), len(existing))
+	}
+}
+
+// Only the id column of `plaud files` holds ids: a recording named like
+// one does not add a recording.
+func TestPlaudListedIDsComeFromTheIDColumn(t *testing.T) {
+	golden := loadPlaudGolden(t)["files"].Stdout
+	if got := plaudListedIDs(golden); !slices.Equal(got, []string{plaudGoldTeam, plaudGoldDoctor, plaudGoldOld}) {
+		t.Errorf("ids from the recorded listing = %v", got)
+	}
+	dir := t.TempDir()
+	r := fakePlaudRecording{ID: plaudNew, Name: "of_00000000000000000000ff copy", CreatedAt: "2026-10-16T18:00:00", Duration: 60000}
+	writeFakePlaudRecordings(t, dir, []string{plaudNew}, []fakePlaudRecording{r})
+	home := t.TempDir()
+	_ = os.MkdirAll(filepath.Join(home, ".plaud"), 0o700)
+	_ = os.WriteFile(filepath.Join(home, ".plaud", "tokens.json"), []byte("{}"), 0o600)
+	cmd := exec.Command(os.Args[0], "files")
+	cmd.Env = []string{"FRIDOLIN_FAKE_PLAUD=1", "FRIDOLIN_FAKE_PLAUD_DIR=" + dir, "HOME=" + home, "GORACE=atexit_sleep_ms=0"}
+	out, err := cmd.Output()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := plaudListedIDs(string(out)); !slices.Equal(got, []string{plaudNew}) {
+		t.Errorf("ids = %v from:\n%s", got, out)
+	}
+}
 
 // A state.json from before the version field still reads: its Unix-second
 // times become times, and it counts as seeded when it named the account or

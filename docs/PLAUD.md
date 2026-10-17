@@ -24,10 +24,12 @@ unreachable, or the login has already expired), the next one starts over,
 so recordings from before you connected are still not sent. Signing in
 with a different Plaud account starts over the same way. Signing in again
 with the same account, after the login expired say, picks up where it left
-off: what you recorded in between still arrives (up to the latest 20).
-Turning **Send new recordings to a brain** off and on again does the same:
-nothing is checked while it is off, so what you recorded meanwhile is sent
-once it is back on (up to the latest 20).
+off: what you recorded in between still arrives. Turning **Send new
+recordings to a brain** off and on again does the same: nothing is checked
+while it is off, so what you recorded meanwhile is sent once it is back on.
+Each check reads Plaud's list back to the last recording it knows (up to
+2,000 recordings back), and hands over at most five, oldest first, so a
+backlog arrives a few recordings a minute rather than all at once.
 
 ## What happens
 

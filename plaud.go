@@ -71,15 +71,27 @@ const defaultPlaudMessage = `[Plaud] New recording "{name}" ({when}, {duration})
 
 var (
 	errPlaudAuth = errors.New("the Plaud login expired")
-	plaudIDRe    = regexp.MustCompile(`\b(of_[0-9a-f]{16,})\b`)
-	ansiRe       = regexp.MustCompile(`\x1b\[[0-9;]*[A-Za-z]`)
-	plaudKVRe    = regexp.MustCompile(`^\s*([a-z_]+):\s*(.*)$`)
+	// plaudRowRe is a row of `plaud files`: the id in the first column,
+	// padded, then two spaces before the name. Only the first column
+	// counts: a name may well contain something that looks like an id.
+	plaudRowRe = regexp.MustCompile(`(?m)^ {2}(of_[0-9a-f]{16,}) {2}`)
+	ansiRe     = regexp.MustCompile(`\x1b\[[0-9;]*[A-Za-z]`)
+	plaudKVRe  = regexp.MustCompile(`^\s*([a-z_]+):\s*(.*)$`)
 )
 
 const (
-	plaudPageSize      = 20
-	plaudSeedPages     = 25
-	plaudPendingMaxAge = 3 * 24 * time.Hour
+	// plaudPageSize is how many recordings one `plaud files` lists, the
+	// most the CLI allows. A check reads page after page, newest first,
+	// until it reaches a recording it knows, so a gap in checking (the
+	// bridge down, the login expired, sending turned off) misses nothing
+	// up to plaudListPages pages back.
+	plaudPageSize  = 100
+	plaudListPages = plaudSeenKeep / plaudPageSize
+	// plaudHandOffsPerCheck caps the recordings one check hands over; the
+	// rest wait for the next one. After a gap, a backlog arrives a few at
+	// a time rather than as a burst of brain runs and replies.
+	plaudHandOffsPerCheck = 5
+	plaudPendingMaxAge    = 3 * 24 * time.Hour
 	// plaudPolishedWait is how long a recording waits for Plaud's cleaned-up
 	// transcript (plaud.polished) before the raw one is sent instead. Plaud
 	// makes the raw one first, and may never make the other.
@@ -461,16 +473,40 @@ func (c *cappedBuffer) Write(b []byte) (int, error) {
 
 func (c *cappedBuffer) String() string { return c.buf.String() }
 
+// listIDs returns the ids on one page of `plaud files`, newest first.
 func (p *PlaudManager) listIDs(ctx context.Context, page int) ([]string, error) {
 	out, err := p.run(ctx, "files", "--page", fmt.Sprint(page), "--page-size", fmt.Sprint(plaudPageSize))
 	if err != nil {
 		return nil, err
 	}
+	return plaudListedIDs(out), nil
+}
+
+// plaudListedIDs reads the ids out of what `plaud files` prints.
+func plaudListedIDs(out string) []string {
 	var ids []string
-	for _, m := range plaudIDRe.FindAllStringSubmatch(out, -1) {
+	for _, m := range plaudRowRe.FindAllStringSubmatch(out, -1) {
 		ids = append(ids, m[1])
 	}
-	return ids, nil
+	return ids
+}
+
+// listUntil lists recordings newest first, page by page, and stops after
+// the first page with one that known says it knows, a page that is not
+// full, or plaudListPages pages.
+func (p *PlaudManager) listUntil(ctx context.Context, known func(id string) bool) ([]string, error) {
+	var all []string
+	for page := 1; page <= plaudListPages; page++ {
+		ids, err := p.listIDs(ctx, page)
+		if err != nil {
+			return nil, err
+		}
+		all = append(all, ids...)
+		if len(ids) < plaudPageSize || slices.ContainsFunc(ids, known) {
+			break
+		}
+	}
+	return all, nil
 }
 
 // parseKV reads the "  key: value" lines `plaud file` and `plaud me`
@@ -910,7 +946,14 @@ func (p *PlaudManager) poll(ctx context.Context) error {
 		p.checkedLogin = stamp
 	}
 
-	ids, err := p.listIDs(ctx, 1)
+	known := map[string]bool{}
+	for _, id := range st.Seen {
+		known[id] = true
+	}
+	for id := range st.Pending {
+		known[id] = true
+	}
+	ids, err := p.listUntil(ctx, func(id string) bool { return known[id] })
 	if err != nil {
 		return err
 	}
@@ -925,9 +968,12 @@ func (p *PlaudManager) poll(ctx context.Context) error {
 		for _, id := range st.Seen {
 			seen[id] = true
 		}
-		for _, id := range ids {
+		// Oldest first, each a nanosecond after the one before, so that
+		// recordings that show up together go in the order they were made.
+		now := time.Now()
+		for i, id := range slices.Backward(ids) {
 			if _, pending := st.Pending[id]; !seen[id] && !pending {
-				st.Pending[id] = &plaudPending{FirstSeen: time.Now()}
+				st.Pending[id] = &plaudPending{FirstSeen: now.Add(time.Duration(len(ids) - i))}
 				log.Printf("plaud %s: new recording, waiting for the transcript", id)
 			}
 		}
@@ -957,13 +1003,20 @@ func (p *PlaudManager) poll(ctx context.Context) error {
 	// shows it instead of counting the recording as waiting for Plaud.
 	var failed []error
 	maxAge := fmt.Sprintf("%d days", plaudPendingMaxAge/(24*time.Hour))
+	handed := 0
 	for _, id := range st.pendingInOrder() {
+		if handed == plaudHandOffsPerCheck {
+			break
+		}
 		since := st.Pending[id].FirstSeen
 		fw, err := p.forward(ctx, id, since, br, jid)
 		if errors.Is(err, errPlaudAuth) {
 			return err
 		}
 		done := fw != nil
+		if done {
+			handed++
+		}
 		giveUp := !done && time.Since(since) > plaudPendingMaxAge
 		if err != nil {
 			next := "will retry"
@@ -1003,21 +1056,19 @@ func (p *PlaudManager) poll(ctx context.Context) error {
 // has, all marked as seen. What does not belong to an account stays: the
 // sign-in and the last recording handed over, for the card.
 func (p *PlaudManager) seed(ctx context.Context, acct string) error {
+	ids, err := p.listUntil(ctx, func(string) bool { return false })
+	if err != nil {
+		return err
+	}
+	// Oldest first, like the recordings seen later, so that keeping the
+	// last plaudSeenKeep drops the oldest. A recording may show on two
+	// pages when one arrives while they are listed.
 	var listed []string
 	seen := map[string]bool{}
-	for page := 1; page <= plaudSeedPages; page++ {
-		ids, err := p.listIDs(ctx, page)
-		if err != nil {
-			return err
-		}
-		for _, id := range ids {
-			if !seen[id] {
-				seen[id] = true
-				listed = append(listed, id)
-			}
-		}
-		if len(ids) < plaudPageSize {
-			break
+	for _, id := range slices.Backward(ids) {
+		if !seen[id] {
+			seen[id] = true
+			listed = append(listed, id)
 		}
 	}
 	log.Printf("plaud: first sync — %d existing recordings marked as seen", len(listed))
