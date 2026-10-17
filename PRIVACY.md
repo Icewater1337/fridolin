@@ -18,6 +18,8 @@ policy describes what that copy does with data.
 - **Plaud recordings**, if you connect a Plaud account: the name, date and
   length of new recordings, Plaud's transcript and AI summary. Fridolin fetches
   them with Plaud's own command-line tool, with its usage statistics turned off.
+  Brains get the same setting, for when they may run the tool themselves;
+  runs you start in your own terminal follow your own settings.
 
 ## Where it goes
 

@@ -1052,6 +1052,7 @@ func (br *Brain) invoke(run *brainRun, ctx context.Context, s *brainSettings, m 
 	binary := s.claudePath
 	finalArgs := args
 	extraEnv := append(dataEnv(s), calendarEnv(br.id, s.manifest, s.credsDir)...)
+	extraEnv = append(extraEnv, plaudOptOut...)
 	if s.toolsDir != "" {
 		// Prompts and skills run the helpers as $FRIDOLIN_TOOLS_DIR/<tool>,
 		// wherever the bridge is installed.

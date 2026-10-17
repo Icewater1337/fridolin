@@ -170,6 +170,9 @@ func TestBrainGetsOnlyTheAllowlistedEnvironment(t *testing.T) {
 		"BRIDGE_CREDENTIALS_DIR": filepath.Join(home, "data"),
 		"BRIDGE_DATA_DIR":        filepath.Join(home, "data"),
 		"BRIDGE_DB_PATH":         filepath.Join(home, "data", "bridge.db"),
+		// Plaud's CLI stays quiet in every brain's run (plaudOptOut).
+		"PLAUD_TELEMETRY_DISABLED": "1",
+		"PLAUD_NO_UPDATE_NOTIFIER": "1",
 		// The fake CLI's own (testChildEnv).
 		"FRIDOLIN_FAKE_CLAUDE":  "1",
 		"FRIDOLIN_FAKE_ENV_LOG": got["FRIDOLIN_FAKE_ENV_LOG"],

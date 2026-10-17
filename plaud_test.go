@@ -1954,6 +1954,25 @@ func TestPlaudDisconnectReportsALoginThatStays(t *testing.T) {
 	}
 }
 
+// Brains' runs get Plaud's telemetry opt-out too, whether or not brains may
+// use the CLI: a brain that runs it must not report to Plaud's analytics.
+func TestBrainRunsKeepPlaudTelemetryOff(t *testing.T) {
+	tb, _ := plaudBridge(t, "")
+	envLog := filepath.Join(t.TempDir(), "brain.env")
+	t.Setenv("FRIDOLIN_FAKE_ENV_LOG", envLog)
+	tb.handleInbound(context.Background(), Inbound{JID: "15551234567@s.whatsapp.net", Sender: "15551234567", Text: "hello", Source: "whatsapp"})
+	waitFor(t, 10*time.Second, "the run", func() bool { return len(tb.dev.Outbox()) > 0 })
+	logged, err := os.ReadFile(envLog)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range plaudOptOut {
+		if !slices.Contains(strings.Split(string(logged), "\n"), want) {
+			t.Errorf("the brain's run lacks %s", want)
+		}
+	}
+}
+
 func TestPlaudBrainAccessSharesTheLogin(t *testing.T) {
 	tb, fp := plaudBridge(t, `, "brain_access": true`)
 	fp.files()

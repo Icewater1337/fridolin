@@ -845,10 +845,12 @@ directory and database it runs with (absolute, wherever `data_dir` and
 `db_path` put them), which the tools read; `FRIDOLIN_TOOLS_DIR`, the
 folder with the tools (see [BRAINS.md](BRAINS.md)); `BRIDGE_BRAIN_ID`,
 `BRIDGE_CREDENTIALS_DIR`, `BRIDGE_CALENDARS` and `BRIDGE_CALENDAR_DEFAULT`
-for the calendar tool; and `DISABLE_AUTOUPDATER=1` in the sandbox. What
-the bridge's own environment has under these names does not reach brains.
-Run by hand, outside a brain, the tools default to `~/.fridolin`; set
-`BRIDGE_DATA_DIR` for another data directory. The list lives in one place,
+for the calendar tool; `PLAUD_TELEMETRY_DISABLED=1` and
+`PLAUD_NO_UPDATE_NOTIFIER=1` for [Plaud](PLAUD.md)'s CLI; and
+`DISABLE_AUTOUPDATER=1` in the sandbox. What the bridge's own environment
+has under these names does not reach brains. Run by hand, outside a
+brain, the tools default to `~/.fridolin`; set `BRIDGE_DATA_DIR` for
+another data directory. The list lives in one place,
 `childEnvAllowlist` in `childenv.go`.
 
 Brains are not handed anything else, for example `GROQ_API_KEY`,

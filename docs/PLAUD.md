@@ -114,7 +114,10 @@ Fridolin runs Plaud's tool with its usage statistics turned off
 (`DO_NOT_TRACK`), and with only a few variables of its own environment,
 such as the locale and the proxy settings, and while it signs you in also
 your desktop session's, so that it can open your browser
-([details](CONFIGURATION.md#what-reaches-brains)).
+([details](CONFIGURATION.md#what-reaches-brains)). Brains' runs get
+`PLAUD_TELEMETRY_DISABLED=1` and `PLAUD_NO_UPDATE_NOTIFIER=1`, so a brain
+that runs the tool itself does not report to Plaud's analytics or check npm
+for updates either; `plaud` in your own terminal follows your own settings.
 
 ## Settings
 

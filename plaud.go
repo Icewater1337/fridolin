@@ -453,6 +453,14 @@ func findPlaudCLI(c string) (string, error) {
 	return "", errors.New("the Plaud CLI is not installed")
 }
 
+// plaudOptOut keeps Plaud's CLI from sending usage statistics to Plaud's
+// analytics and from asking npm for updates. Fridolin's own runs get it,
+// and so does every brain's run: with plaud.brain_access brains run the
+// CLI themselves, and the bridge's environment has neither variable. It
+// names Plaud's own variables, not DO_NOT_TRACK, which other tools in a
+// brain's run read too, Claude Code among them.
+var plaudOptOut = []string{"PLAUD_TELEMETRY_DISABLED=1", "PLAUD_NO_UPDATE_NOTIFIER=1"}
+
 // plaudPATH is the PATH the Plaud CLI runs with: its own folder first, so
 // that its #!/usr/bin/env node finds the node it was installed with.
 func plaudPATH(bin string) string {
