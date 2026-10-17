@@ -171,7 +171,7 @@ func (b *Bridge) apiStatus(w http.ResponseWriter, r *http.Request) {
 		resp.RestartRequired = []string{}
 	}
 	if cfg.AnyoneCanDM() {
-		resp.Warnings = append(resp.Warnings, "allowed_numbers is empty, so anyone who can message this WhatsApp account can use the assistant. Add your number under Settings → Access.")
+		resp.Warnings = append(resp.Warnings, "allowed_numbers is empty, so anyone who can message this WhatsApp account can use the assistant. Add your number under Chats → Allowed numbers.")
 	}
 	if cfg.DangerouslySkipPermissions && !cfg.Sandbox.Enabled && runtime.GOOS == "darwin" {
 		resp.Warnings = append(resp.Warnings, "Brains run with all permissions and the sandbox is off. Turn the sandbox on under Settings → Sandbox.")

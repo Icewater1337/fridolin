@@ -4,11 +4,13 @@
 import { h } from '../lib/dom.js';
 import { icon } from './icons.js';
 
+// Made by the first toast, and again once it is no longer in the document
+// (each page test installs a fresh one).
 let toastBox = null;
 const recentToasts = new Map();
 
 export function toast(message, kind = 'error', { timeout } = {}) {
-  if (!toastBox) {
+  if (!toastBox || !toastBox.isConnected) {
     toastBox = h('div.toasts', { 'aria-live': 'polite', role: 'status' });
     document.body.appendChild(toastBox);
   }

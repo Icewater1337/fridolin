@@ -50,8 +50,8 @@ The person's data lives in brain folders they choose and in
      the bridge answers as whichever account it is linked to.
    - **Add a brain** (Brains → Add brain): pick or create a folder; decide
      whether it handles direct messages.
-   - **Allow their own number** (Settings → Access): digits with country
-     code, no `+`.
+   - **Allow their own number** (Chats → Allowed numbers): with the
+     country code; a `+`, spaces and dashes are fine.
    - Optional: **Backup → Connect Google Drive**.
    - Optional: **Google Calendar** per brain. Needs a one-time Google OAuth
      client (docs/CALENDAR.md walks through it); the person creates it in

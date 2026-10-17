@@ -472,7 +472,7 @@ func (p *PlaudManager) destination() (*Brain, string, error) {
 	}
 	jid := p.summaryChat(br)
 	if jid == "" {
-		return br, "", fmt.Errorf("no private chat for Plaud summaries — add your number under Settings → Access, or set brain %s's reply chat to a direct chat", br.ID())
+		return br, "", fmt.Errorf("no private chat for Plaud summaries — add your number under Chats → Allowed numbers, or set brain %s's reply chat to a direct chat", br.ID())
 	}
 	return br, jid, nil
 }

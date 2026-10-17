@@ -1,6 +1,7 @@
 // A stand-in for the bridge's API in page tests: fetch answers at once with
-// what route(path, init) returns for the path (a body, or {status, body}),
-// so a test sets up what the bridge holds and lets the page poll it.
+// what route(path, init) returns for the path (a body, or {status, body}
+// for another status or a body that has a status field of its own), so a
+// test sets up what the bridge holds and lets the page poll it.
 
 export function serve(t, route) {
   const real = globalThis.fetch;

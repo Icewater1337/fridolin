@@ -2,6 +2,13 @@
 
 export function isGroupJid(jid) { return typeof jid === 'string' && jid.endsWith('@g.us'); }
 
+/**
+ * A group JID as typed in to be routed or allowed: digits (with an
+ * old-style group's -suffix) and @g.us. The bridge checks the allow lists
+ * the same way (allowListGroup in dashboard_api.go).
+ */
+export const GROUP_JID_RE = /^[0-9]+(-[0-9]+)?@g\.us$/;
+
 /** Short, readable form of a chat JID. */
 export function shortJid(jid) {
   if (!jid) return '';

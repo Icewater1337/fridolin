@@ -16,8 +16,6 @@ import { callout, mono, pageHeader, loading } from '../components/common.js';
 import { googleClientCard } from '../components/calendar.js';
 import { saveBar } from '../components/save-bar.js';
 
-const digits = (v) => (/^\d{6,15}$/.test(v) ? '' : 'Digits only, with country code, no + (e.g. 15551234567)');
-const groupJid = (v) => (/@g\.us$/.test(v) ? '' : 'A group JID ends in @g.us');
 // The bridge refuses a relative sandbox path: as a rule it would match nothing.
 const absPath = (v) => (/^(\/|~(\/|$))/.test(v) ? '' : 'Absolute, or starting with ~/');
 
@@ -27,9 +25,8 @@ const SECTIONS = [
     title: 'Access',
     intro: 'Who may talk to the bridge. Everyone else is ignored and shows up on the Chats page.',
     fields: [
-      { key: 'allowed_numbers', type: 'list', label: 'Allowed numbers', placeholder: '15551234567', validate: digits, addLabel: 'Add number', help: 'Phone numbers that may send direct messages. Digits with the country code, no + or spaces.' },
-      { key: 'allow_any_dm', type: 'bool', label: 'Let anyone message while the list is empty', help: 'Only matters while “Allowed numbers” is empty. Off (the default): nobody can send direct messages until you add a number. On: anyone who knows the account’s number can use the assistant.' },
-      { key: 'allowed_groups', type: 'list', label: 'Allowed groups', placeholder: '120363000000000000@g.us', validate: groupJid, addLabel: 'Add group', help: 'Group JIDs the bridge answers in. Every other group is ignored. Easier: allow groups on the Chats page.' },
+      { type: 'allowLists', label: 'Allowed numbers and groups' },
+      { key: 'allow_any_dm', type: 'bool', label: 'Let anyone message while the list is empty', help: 'Only matters while the allowed numbers (on the Chats page) are none. Off (the default): nobody can send direct messages until you add a number. On: anyone who knows the account’s number can use the assistant.' },
       { key: 'triggers', type: 'triggers', label: 'Group triggers', help: 'Words that address the bridge in a group; they are removed before the brain sees the message. An @-mention of the bridge’s account always counts, and direct messages never need a trigger. “Start” fits short shorthands like @c.' },
     ],
   },
@@ -221,6 +218,7 @@ export default {
 // ── controls ─────────────────────────────────────────────────────────────
 
 function makeControl(f, cfg, eff, onChange) {
+  if (f.type === 'allowLists') return allowLists(f, cfg);
   const fileVal = getPath(cfg, f.key);
   const effVal = getPath(eff, f.key);
   const tag = f.restart ? 'restart' : null;
@@ -332,10 +330,20 @@ function makeControl(f, cfg, eff, onChange) {
   }
 }
 
+// The allow lists are edited on the Chats page only, through the bridge's
+// checks; Settings says how many there are. It never has unsaved changes.
+function allowLists(f, cfg) {
+  const n = (cfg.allowed_numbers || []).length;
+  const g = (cfg.allowed_groups || []).length;
+  const el = field({
+    label: f.label,
+    control: h('div.static', h('span', `${plural(n, 'number')} and ${plural(g, 'group')} may talk to the bridge. `, h('a', { href: '#/chats' }, 'Edit them on the Chats page'), '.')),
+  });
+  return { key: null, label: f.label, el, isDirty: () => false, isValid: () => true, serialize: () => undefined };
+}
+
 function emptyListText(f, effVal) {
   if (f.key === 'otp_markers') return 'Using the built-in phrases';
-  if (f.key === 'allowed_numbers') return 'Empty — see the switch below';
-  if (f.key === 'allowed_groups') return 'No groups allowed';
   if (f.key === 'disallowed_tools') return 'No tools blocked';
   if (Array.isArray(effVal) && effVal.length) return `Default: ${effVal.join(', ')}`;
   return 'None';

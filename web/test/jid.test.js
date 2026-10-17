@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { isGroupJid, shortJid, phone, phoneish, senderLabel } from '../assets/lib/jid.js';
+import { isGroupJid, GROUP_JID_RE, shortJid, phone, phoneish, senderLabel } from '../assets/lib/jid.js';
 import { waKind, waLabel } from '../assets/lib/whatsapp.js';
 
 const DM = '15551234567@s.whatsapp.net';
@@ -10,6 +10,24 @@ test('isGroupJid', async (t) => {
   const cases = [[GROUP, true], [DM, false], ['', false], [null, false], [42, false]];
   for (const [jid, want] of cases) {
     await t.test(String(jid), () => assert.equal(isGroupJid(jid), want));
+  }
+});
+
+test('GROUP_JID_RE takes what the bridge allows', async (t) => {
+  // The same cases as TestAllowListEntries in dashboard_test.go.
+  const cases = [
+    [GROUP, true],
+    ['15551234567-1400000000@g.us', true], // personal-data:ignore (an old-style group JID made of placeholders)
+    [` ${GROUP} `, false], // the routing editor trims first
+    [`${GROUP}/x`, false],
+    ['x@g.us', false],
+    ['@g.us', false],
+    ['-1@g.us', false],
+    [DM, false],
+    ['', false],
+  ];
+  for (const [jid, want] of cases) {
+    await t.test(jid || 'empty', () => assert.equal(GROUP_JID_RE.test(jid), want));
   }
 });
 

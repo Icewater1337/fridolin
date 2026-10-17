@@ -3,7 +3,7 @@
 
 import { store, loadGroups, chatName } from '../app/store.js';
 import { h, mount } from '../lib/dom.js';
-import { isGroupJid } from '../lib/jid.js';
+import { GROUP_JID_RE } from '../lib/jid.js';
 import { btn } from './buttons.js';
 import { toggle, field, textInput, nextId } from './fields.js';
 import { mono, loading } from './common.js';
@@ -50,7 +50,7 @@ export function routingEditor({ routing = {}, selfId = '', brains = [], allowedG
     const v = addIn.value.trim();
     addErr.hidden = true;
     if (!v) return;
-    if (!isGroupJid(v)) { addErr.hidden = false; addErr.textContent = 'A group JID ends in @g.us.'; return; }
+    if (!GROUP_JID_RE.test(v)) { addErr.hidden = false; addErr.textContent = 'A group JID looks like 120363000000000000@g.us.'; return; }
     extra.add(v);
     selected.add(v);
     addIn.value = '';
