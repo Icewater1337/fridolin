@@ -328,3 +328,33 @@ func FuzzDecodeManifest(f *testing.F) {
 		}
 	})
 }
+
+// The templates a new brain is scaffolded from are the files in examples/,
+// as they are in the checkout: all the skills, in name order, and the
+// prompt with its placeholder.
+func TestEmbeddedTemplatesAreTheExamples(t *testing.T) {
+	prompt, err := os.ReadFile(filepath.Join(repoDir, "examples", "brain-prompt.example.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := examplePromptTemplate(); got != string(prompt) || !strings.Contains(got, "{{BRAIN_NAME}}") {
+		t.Errorf("the prompt template is %q, want examples/brain-prompt.example.md with {{BRAIN_NAME}}", truncate(got, 80))
+	}
+	files, err := filepath.Glob(filepath.Join(repoDir, "examples", "skills", "*.md"))
+	if err != nil || len(files) == 0 {
+		t.Fatalf("no skills in examples/skills: %v", err)
+	}
+	skills := exampleSkills()
+	if len(skills) != len(files) {
+		t.Fatalf("%d embedded skills, want the %d in examples/skills", len(skills), len(files))
+	}
+	for i, f := range files { // Glob sorts too
+		want, err := os.ReadFile(f)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if skills[i].name != filepath.Base(f) || skills[i].content != string(want) {
+			t.Errorf("skill %d is %s, want %s as in the checkout", i, skills[i].name, filepath.Base(f))
+		}
+	}
+}
