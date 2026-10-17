@@ -19,6 +19,7 @@ import (
 	"sync/atomic"
 	"syscall"
 	"time"
+	"unicode"
 )
 
 // historyEntry is one line in a brain's conversation-history.jsonl file.
@@ -32,11 +33,15 @@ type historyEntry struct {
 
 // normalizeJID strips the WhatsApp server suffix and a leading + from a JID,
 // e.g. "15551234567@s.whatsapp.net" and "+15551234567" both become "15551234567".
+// Spaces around the number and further +s in front of it go too, so that
+// normalising the result again changes nothing: a number saved normalised
+// still equals the normalised JID of its sender.
 func normalizeJID(jid string) string {
 	if idx := strings.Index(jid, "@"); idx != -1 {
 		jid = jid[:idx]
 	}
-	return strings.TrimPrefix(jid, "+")
+	jid = strings.TrimLeftFunc(jid, func(r rune) bool { return r == '+' || unicode.IsSpace(r) })
+	return strings.TrimRightFunc(jid, unicode.IsSpace)
 }
 
 // identityMapFile is the brain's contact map, in its folder.
