@@ -20,10 +20,10 @@ import (
 // WCB_FAKE_ENV the value of that environment variable. Tests point
 // claude_path at os.Args[0], so no script or real CLI is needed.
 //
-// Before the tests run it unsets every config override variable: a shell
-// that exports DATA_DIR or CONFIG_FILE for a real bridge would otherwise
-// point the tests at that bridge's data. It also gives them an empty HOME,
-// see useEmptyHome, and moves them out of the checkout, see runInEmptyDir.
+// Before the tests run it unsets the variables the bridge reads: a shell
+// that exports FRIDOLIN_CONFIG for a real bridge would otherwise point the
+// tests at that bridge's config. It also gives them an empty HOME, see
+// useEmptyHome, and moves them out of the checkout, see runInEmptyDir.
 func TestMain(m *testing.M) {
 	if os.Getenv("WCB_FAKE_PLAUD") == "1" && len(os.Args) > 1 && isPlaudCommand(os.Args[1]) {
 		os.Exit(fakePlaud(os.Args[1:]))
@@ -32,7 +32,7 @@ func TestMain(m *testing.M) {
 		fakeClaude()
 		return
 	}
-	for _, k := range overrideVariables() {
+	for _, k := range bridgeVariables() {
 		if err := os.Unsetenv(k); err != nil {
 			fmt.Fprintf(os.Stderr, "unsetting %s: %v\n", k, err)
 			os.Exit(1)
@@ -78,8 +78,8 @@ func useEmptyHome() (func(), error) {
 var repoDir string
 
 // runInEmptyDir runs the tests in a new, empty working directory. A relative
-// path in a test, or the bridge's own ./config.json lookup, must not reach the
-// checkout, where a developer may keep a config.json and the .env beside it.
+// path in a test must not reach the checkout, where a developer may keep a
+// config.json.
 func runInEmptyDir(m *testing.M) (int, error) {
 	var err error
 	if repoDir, err = os.Getwd(); err != nil {
@@ -106,14 +106,10 @@ func runInEmptyDir(m *testing.M) (int, error) {
 	return m.Run(), nil
 }
 
-// overrideVariables are the environment variables that change which config
-// the bridge loads or what it contains. A false BRAIN_MODE refuses it.
-func overrideVariables() []string {
-	keys := []string{"CONFIG_FILE", "BRAIN_MODE"}
-	for _, o := range envOverrides {
-		keys = append(keys, o.env)
-	}
-	return keys
+// bridgeVariables are the environment variables the bridge reads:
+// FRIDOLIN_CONFIG picks the config, and a false BRAIN_MODE refuses it.
+func bridgeVariables() []string {
+	return []string{"FRIDOLIN_CONFIG", "BRAIN_MODE"}
 }
 
 func fakeClaude() {
@@ -184,8 +180,8 @@ func fakeClaudeEnv(t *testing.T, sleepMS int) string {
 // requireTestDataDir fails the test unless every path the bridge writes its
 // data to lies inside this test's temporary directory. The helpers that open
 // a store call it first, so a config that still points at a real install
-// (through an override TestMain missed, say) stops the test before the
-// store, the token or rclone's config is touched.
+// (a data_dir copied from one, say) stops the test before the store, the
+// token or rclone's config is touched.
 func requireTestDataDir(t testing.TB, cfg *Config) {
 	t.Helper()
 	// t.TempDir hands out numbered folders inside one directory per test.

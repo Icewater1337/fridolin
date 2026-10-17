@@ -31,8 +31,8 @@ Usage:
   fridolin version
 
 Common flags:
-  --config PATH     config file (default: $CONFIG_FILE, ./config.json if present,
-                    else ~/.fridolin/config.json)
+  --config PATH     config file (default: $FRIDOLIN_CONFIG, else
+                    ~/.fridolin/config.json)
 
 Run flags:
   --no-whatsapp     dev mode: dashboard and brains without a WhatsApp connection
@@ -67,13 +67,23 @@ func main() {
 	}
 }
 
-// defaultConfigPath picks the config file when --config is not given.
-func defaultConfigPath() string {
-	if p := os.Getenv("CONFIG_FILE"); p != "" {
-		return p
+// configFlagHelp describes --config for every command's flag set.
+const configFlagHelp = "config file (default: $FRIDOLIN_CONFIG, else ~/.fridolin/config.json)"
+
+// configPath picks the config file: the --config value, else
+// FRIDOLIN_CONFIG, else config.json in the data dir. Never one in the
+// working directory: a command run from some project folder would take that
+// project's config.json, and a dashboard save would rewrite it. CONFIG_FILE,
+// the variable's old name, is ignored, and said so.
+func configPath(flagValue string) string {
+	if old := os.Getenv("CONFIG_FILE"); old != "" {
+		log.Printf("warning: CONFIG_FILE=%s is ignored: set FRIDOLIN_CONFIG instead, or pass --config", old)
 	}
-	if _, err := os.Stat("config.json"); err == nil {
-		return "config.json"
+	if flagValue != "" {
+		return flagValue
+	}
+	if p := os.Getenv("FRIDOLIN_CONFIG"); p != "" {
+		return p
 	}
 	home, _ := os.UserHomeDir()
 	return filepath.Join(defaultDataDir(home), "config.json")
@@ -116,7 +126,7 @@ func writeStarterConfig(path, claudePath string) error {
 
 func runCmd(args []string) {
 	fs := flag.NewFlagSet("run", flag.ExitOnError)
-	cfgPath := fs.String("config", defaultConfigPath(), "path to config.json")
+	cfgPath := fs.String("config", "", configFlagHelp)
 	noWA := fs.Bool("no-whatsapp", false, "dev mode: run without connecting to WhatsApp")
 	dashOnly := fs.Bool("dashboard-only", false, "alias for --no-whatsapp")
 	openDash := fs.Bool("open", false, "open the dashboard in the browser once started")
@@ -128,13 +138,11 @@ func runCmd(args []string) {
 		return
 	}
 
-	ring := NewLogRing(2000)
-	log.SetOutput(io.MultiWriter(os.Stderr, ring))
-
-	if err := ensureConfigFile(*cfgPath); err != nil {
+	ring, path := runLog(os.Stderr, *cfgPath)
+	if err := ensureConfigFile(path); err != nil {
 		log.Fatalf("creating config: %v", err)
 	}
-	cfgs, err := OpenConfigStore(*cfgPath)
+	cfgs, err := OpenConfigStore(path)
 	if err != nil {
 		log.Fatalf("loading config: %v", err)
 	}
@@ -175,36 +183,48 @@ func runCmd(args []string) {
 	bridge.Stop()
 }
 
+// runLog sends the log to console and to a ring the dashboard shows, then
+// picks the config file. In that order: a warning configPath logs, such as
+// the one about CONFIG_FILE, must reach the dashboard's log too, the only
+// one many people read.
+func runLog(console io.Writer, configFlag string) (*LogRing, string) {
+	ring := NewLogRing(2000)
+	log.SetOutput(io.MultiWriter(console, ring))
+	return ring, configPath(configFlag)
+}
+
 func initCmd(args []string) {
 	fs := flag.NewFlagSet("init", flag.ExitOnError)
-	cfgPath := fs.String("config", defaultConfigPath(), "path to config.json")
+	cfgPath := fs.String("config", "", configFlagHelp)
 	claudePath := fs.String("claude-path", "", "path to the Claude Code CLI")
 	_ = fs.Parse(args)
-	if _, err := os.Stat(*cfgPath); err == nil {
-		fmt.Printf("%s already exists — leaving it alone.\n", *cfgPath)
+	path := configPath(*cfgPath)
+	if _, err := os.Stat(path); err == nil {
+		fmt.Printf("%s already exists — leaving it alone.\n", path)
 		return
 	}
-	if err := writeStarterConfig(*cfgPath, *claudePath); err != nil {
-		log.Fatalf("writing %s: %v", *cfgPath, err)
+	if err := writeStarterConfig(path, *claudePath); err != nil {
+		log.Fatalf("writing %s: %v", path, err)
 	}
-	if _, err := LoadConfig(*cfgPath); err != nil {
+	if _, err := LoadConfig(path); err != nil {
 		log.Fatalf("the starter config does not load: %v", err)
 	}
 }
 
 func openCmd(args []string) {
 	fs := flag.NewFlagSet("open", flag.ExitOnError)
-	cfgPath := fs.String("config", defaultConfigPath(), "path to config.json")
+	cfgPath := fs.String("config", "", configFlagHelp)
 	printOnly := fs.Bool("print", false, "print the URL instead of opening it")
 	_ = fs.Parse(args)
+	path := configPath(*cfgPath)
 
-	cfgs, err := OpenConfigStore(*cfgPath)
+	cfgs, err := OpenConfigStore(path)
 	if err != nil {
 		log.Fatalf("loading config: %v", err)
 	}
 	cfg := cfgs.Get()
 	if !cfg.HTTPEnabled() || cfg.Dashboard.Disabled {
-		log.Fatalf("the dashboard is turned off in %s", *cfgPath)
+		log.Fatalf("the dashboard is turned off in %s", path)
 	}
 	data, err := os.ReadFile(filepath.Join(cfg.DataDir, "dashboard.token"))
 	if err != nil {
@@ -234,18 +254,19 @@ func openBrowser(url string) error {
 
 func checkCmd(args []string) {
 	fs := flag.NewFlagSet("check", flag.ExitOnError)
-	cfgPath := fs.String("config", defaultConfigPath(), "path to config.json")
+	cfgPath := fs.String("config", "", configFlagHelp)
 	var routes multiFlag
 	fs.Var(&routes, "route", "show which brain handles this chat JID (repeatable)")
 	sandboxFor := fs.String("print-sandbox", "", "print the sandbox profile for this brain id")
 	_ = fs.Parse(args)
+	path := configPath(*cfgPath)
 
-	cfg, err := LoadConfig(*cfgPath)
+	cfg, err := LoadConfig(path)
 	if err != nil {
 		log.Fatalf("loading config: %v", err)
 	}
 
-	fmt.Printf("Config OK: %s\n", *cfgPath)
+	fmt.Printf("Config OK: %s\n", path)
 	fmt.Printf("  claude:    %s\n", cfg.ClaudePath)
 	fmt.Printf("  data dir:  %s\n", cfg.DataDir)
 	fmt.Printf("  dashboard: http://%s/\n", cfg.HTTPListen)
@@ -267,7 +288,7 @@ func checkCmd(args []string) {
 
 	if len(routes) > 0 || *sandboxFor != "" {
 		mgr := &BrainManager{brains: map[string]*Brain{}, byGroup: map[string]*Brain{}, profiler: NewSandboxProfiler(nil, cfg), hooks: &BrainHooks{}}
-		mgr.profiler.SetConfigFile(*cfgPath)
+		mgr.profiler.SetConfigFile(path)
 		if err := mgr.reload(specs, issues, cfg); err != nil {
 			log.Fatalf("%v", err)
 		}
@@ -311,12 +332,12 @@ func dmAllowSummary(cfg *Config) string {
 
 func migrateCmd(args []string) {
 	fs := flag.NewFlagSet("migrate", flag.ExitOnError)
-	cfgPath := fs.String("config", defaultConfigPath(), "path to config.json")
+	cfgPath := fs.String("config", "", configFlagHelp)
 	dry := fs.Bool("dry-run", false, "show what would change without writing anything")
 	force := fs.Bool("force", false, "overwrite a brain.json that differs")
 	_ = fs.Parse(args)
 
-	cfgs, err := OpenConfigStore(*cfgPath)
+	cfgs, err := OpenConfigStore(configPath(*cfgPath))
 	if err != nil {
 		log.Fatalf("loading config: %v", err)
 	}

@@ -140,7 +140,6 @@ export default {
       data = d;
       const cfg = d.config || {};
       const eff = d.effective || {};
-      const locked = d.env_locked || {};
       controls = [];
       const nav = h('nav.section-nav', { 'aria-label': 'Settings sections' });
       const sections = SECTIONS.map((sec) => {
@@ -151,7 +150,7 @@ export default {
           h('h2', sec.title),
           sec.intro ? h('p.muted.section-intro', sec.intro) : null,
           h('div.settings-fields', sec.fields.map((f) => {
-            const c = makeControl(f, cfg, eff, locked[f.key], onChange);
+            const c = makeControl(f, cfg, eff, onChange);
             controls.push(c);
             return c.el;
           })));
@@ -210,10 +209,9 @@ export default {
 
 // ── controls ─────────────────────────────────────────────────────────────
 
-function makeControl(f, cfg, eff, lockedBy, onChange) {
+function makeControl(f, cfg, eff, onChange) {
   const fileVal = getPath(cfg, f.key);
   const effVal = getPath(eff, f.key);
-  const disabled = !!lockedBy;
   const tag = f.restart ? 'restart' : null;
   let input;
   let read;
@@ -226,7 +224,7 @@ function makeControl(f, cfg, eff, lockedBy, onChange) {
     case 'bool': {
       const v = fileVal !== undefined && fileVal !== null ? !!fileVal : (effVal !== undefined && effVal !== null ? !!effVal : !!f.def);
       initial = v;
-      const sw = toggle({ checked: lockedBy ? !!effVal : v, label: f.label, disabled });
+      const sw = toggle({ checked: v, label: f.label });
       input = sw;
       read = () => sw.input.checked;
       serialize = read;
@@ -247,14 +245,13 @@ function makeControl(f, cfg, eff, lockedBy, onChange) {
       if (f.danger) extra = h('div.callout.warn.inline-callout', icon('alert', 'callout-icon'), h('div.callout-body', f.help));
       const el = h('div.field.bool-field', sw,
         f.danger ? extra : (f.help ? h('div.help', f.help) : null),
-        tag ? h('span.field-tag', tag) : null,
-        lockedBy ? h('div.help.locked', icon('lock'), `Set by the environment variable ${lockedBy} (or the .env next to config.json) — change it there.`) : null);
+        tag ? h('span.field-tag', tag) : null);
       return finish(el);
     }
     case 'text': {
       initial = typeof fileVal === 'string' ? fileVal : '';
       const ph = typeof effVal === 'string' && effVal && effVal !== initial ? effVal : (f.placeholder || '');
-      input = textInput({ value: lockedBy ? (effVal || '') : initial, placeholder: ph, class: f.mono ? 'mono' : '', disabled, spellcheck: f.mono ? 'false' : 'true' });
+      input = textInput({ value: initial, placeholder: ph, class: f.mono ? 'mono' : '', spellcheck: f.mono ? 'false' : 'true' });
       input.addEventListener('input', onChange);
       read = () => input.value.trim();
       serialize = read;
@@ -263,7 +260,7 @@ function makeControl(f, cfg, eff, lockedBy, onChange) {
     case 'int': {
       initial = (fileVal === undefined || fileVal === null || (!f.nullable && fileVal === 0)) ? '' : String(fileVal);
       const ph = effVal !== undefined && effVal !== null && effVal !== 0 ? String(effVal) : String(f.def ?? '');
-      input = textInput({ value: lockedBy ? String(effVal ?? '') : initial, inputmode: 'numeric', placeholder: `${ph} (default)`, disabled, class: 'num' });
+      input = textInput({ value: initial, inputmode: 'numeric', placeholder: `${ph} (default)`, class: 'num' });
       input.addEventListener('input', () => { check(); onChange(); });
       const check = () => {
         const ok = input.value.trim() === '' || (/^\d+$/.test(input.value.trim()) && Number(input.value) >= (f.min ?? 0) && Number(input.value) <= (f.max ?? Infinity));
@@ -281,26 +278,26 @@ function makeControl(f, cfg, eff, lockedBy, onChange) {
       let v = typeof fileVal === 'string' ? fileVal : '';
       if (!has(v)) v = has(effVal) ? effVal : (f.def ?? '');
       initial = v;
-      input = select(opts, lockedBy ? (effVal || '') : v, { disabled });
+      input = select(opts, v);
       input.addEventListener('change', onChange);
       read = () => input.value;
       serialize = read;
       break;
     }
     case 'list': {
-      const arr = Array.isArray(lockedBy ? effVal : fileVal) ? (lockedBy ? effVal : fileVal) : [];
+      const arr = Array.isArray(fileVal) ? fileVal : [];
       initial = JSON.stringify(arr);
-      input = listEditor({ values: arr, placeholder: f.placeholder, mono: f.mono !== false, disabled, addLabel: f.addLabel || 'Add', onChange, validate: f.validate, empty: emptyListText(f, effVal) });
+      input = listEditor({ values: arr, placeholder: f.placeholder, mono: f.mono !== false, addLabel: f.addLabel || 'Add', onChange, validate: f.validate, empty: emptyListText(f, effVal) });
       read = () => JSON.stringify(input.getValues());
       serialize = () => input.getValues();
       isValid = () => input.isValid();
       break;
     }
     case 'triggers': {
-      const raw = Array.isArray(lockedBy ? effVal : fileVal) ? (lockedBy ? effVal : fileVal) : [];
+      const raw = Array.isArray(fileVal) ? fileVal : [];
       const list = raw.map((t) => (typeof t === 'string' ? { text: t, match: 'anywhere' } : { text: t.text || '', match: t.match || 'anywhere' }));
       initial = JSON.stringify(list);
-      input = triggersEditor(list, { disabled, onChange, defaults: Array.isArray(effVal) ? effVal : [] });
+      input = triggersEditor(list, { onChange, defaults: Array.isArray(effVal) ? effVal : [] });
       read = () => JSON.stringify(input.getValues());
       serialize = () => input.getValues().map((t) => (t.match === 'anywhere' ? t.text : { text: t.text, match: t.match }));
       break;
@@ -309,7 +306,7 @@ function makeControl(f, cfg, eff, lockedBy, onChange) {
       throw new Error(`unknown field type ${f.type}`);
   }
 
-  const el = field({ label: f.label, control: input, help: f.help, locked: lockedBy, tag });
+  const el = field({ label: f.label, control: input, help: f.help, tag });
   return finish(el);
 
   function finish(el) {
@@ -317,7 +314,7 @@ function makeControl(f, cfg, eff, lockedBy, onChange) {
       key: f.key,
       label: f.label,
       el,
-      isDirty: () => !lockedBy && read() !== initial,
+      isDirty: () => read() !== initial,
       isValid,
       serialize,
     };
@@ -333,15 +330,15 @@ function emptyListText(f, effVal) {
   return 'None';
 }
 
-function triggersEditor(values, { disabled, onChange, defaults }) {
+function triggersEditor(values, { onChange, defaults }) {
   const rows = h('div.list-rows');
   const emptyEl = h('div.list-empty.muted', `Empty — the default is used: ${(defaults || []).map((t) => (typeof t === 'string' ? t : t.text)).join(', ') || '@claude'}`);
   const el = h('div.list-editor.triggers-editor', emptyEl, rows);
   const paintEmpty = () => { emptyEl.hidden = rows.children.length > 0; };
   const add = (t = { text: '', match: 'anywhere' }, focus = false) => {
-    const text = textInput({ value: t.text, placeholder: '@claude', class: 'mono', disabled, 'aria-label': 'Trigger word' });
-    const match = select([['anywhere', 'Anywhere'], ['start', 'At the start'], ['word', 'Whole word']], t.match, { disabled, 'aria-label': 'Where it must appear' });
-    const del = h('button.icon-btn', { type: 'button', title: 'Remove', 'aria-label': 'Remove', disabled }, icon('x'));
+    const text = textInput({ value: t.text, placeholder: '@claude', class: 'mono', 'aria-label': 'Trigger word' });
+    const match = select([['anywhere', 'Anywhere'], ['start', 'At the start'], ['word', 'Whole word']], t.match, { 'aria-label': 'Where it must appear' });
+    const del = h('button.icon-btn', { type: 'button', title: 'Remove', 'aria-label': 'Remove' }, icon('x'));
     const row = h('div.list-row.trigger-row', text, match, del);
     text.addEventListener('input', onChange);
     match.addEventListener('change', onChange);
@@ -352,7 +349,7 @@ function triggersEditor(values, { disabled, onChange, defaults }) {
   };
   values.forEach((v) => add(v));
   paintEmpty();
-  if (!disabled) el.appendChild(h('div.list-add', btn('Add trigger', { icon: 'plus', small: true, kind: 'ghost', onClick: () => { add(undefined, true); onChange(); } })));
+  el.appendChild(h('div.list-add', btn('Add trigger', { icon: 'plus', small: true, kind: 'ghost', onClick: () => { add(undefined, true); onChange(); } })));
   el.getValues = () => [...rows.querySelectorAll('.trigger-row')].map((r) => ({ text: r.querySelector('input').value.trim(), match: r.querySelector('select').value })).filter((t) => t.text);
   return el;
 }

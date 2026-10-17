@@ -583,44 +583,24 @@ func TestLoadConfigAllowsNoBrains(t *testing.T) {
 	}
 }
 
-func TestLoadConfigEnvOverride(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
-	t.Setenv("ALLOWED_NUMBERS", "111, 222 ,333")
-	t.Setenv("TRIGGERS", "@bot")
-	cfg, err := LoadConfig(writeConfig(t, `{"allowed_numbers":["999"]}`))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(cfg.AllowedNumbers) != 3 || cfg.AllowedNumbers[2] != "333" {
-		t.Errorf("AllowedNumbers = %v", cfg.AllowedNumbers)
-	}
-	if len(cfg.Triggers) != 1 || cfg.Triggers[0].Text != "@bot" {
-		t.Errorf("Triggers = %v", cfg.Triggers)
-	}
-}
-
 func TestLoadConfigMaxChunkSize(t *testing.T) {
 	// Below 100 the "[i/N] " numbering leaves too little room for text;
 	// such a limit is refused at load time rather than quietly changed.
 	cases := []struct {
-		name, body, env string
-		want            int // 0: the config must be refused
+		name, body string
+		want       int // 0: the config must be refused
 	}{
-		{"unset means the default", `{}`, "", 3900},
-		{"zero means the default", `{"max_chunk_size":0}`, "", 3900},
-		{"the minimum is allowed", `{"max_chunk_size":100}`, "", 100},
-		{"a larger limit is kept", `{"max_chunk_size":5000}`, "", 5000},
-		{"just below the minimum", `{"max_chunk_size":99}`, "", 0},
-		{"smaller than the numbering", `{"max_chunk_size":5}`, "", 0},
-		{"negative", `{"max_chunk_size":-1}`, "", 0},
-		{"too small from the environment", `{}`, "50", 0},
+		{"unset means the default", `{}`, 3900},
+		{"zero means the default", `{"max_chunk_size":0}`, 3900},
+		{"the minimum is allowed", `{"max_chunk_size":100}`, 100},
+		{"a larger limit is kept", `{"max_chunk_size":5000}`, 5000},
+		{"just below the minimum", `{"max_chunk_size":99}`, 0},
+		{"smaller than the numbering", `{"max_chunk_size":5}`, 0},
+		{"negative", `{"max_chunk_size":-1}`, 0},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Setenv("HOME", t.TempDir())
-			if tc.env != "" {
-				t.Setenv("MAX_CHUNK_SIZE", tc.env)
-			}
 			cfg, err := LoadConfig(writeConfig(t, tc.body))
 			if tc.want == 0 {
 				if err == nil || !strings.Contains(err.Error(), "max_chunk_size") {
@@ -639,8 +619,6 @@ func TestLoadConfigMaxChunkSize(t *testing.T) {
 }
 
 func TestExampleConfigIsValid(t *testing.T) {
-	// Loaded from a copy: the .env next to the config is read too, and next
-	// to the example lies whatever .env a developer keeps in the checkout.
 	t.Setenv("HOME", t.TempDir())
 	example, err := os.ReadFile(filepath.Join(repoDir, "config.example.json"))
 	if err != nil {
@@ -652,7 +630,21 @@ func TestExampleConfigIsValid(t *testing.T) {
 		if _, err := LoadConfig(cfgPath); err == nil || !strings.Contains(err.Error(), "sandbox.enabled") {
 			t.Fatalf("config.example.json on %s: err = %v, want the sandbox.enabled error", runtime.GOOS, err)
 		}
-		t.Setenv("SANDBOX_ENABLED", "false")
+		// The rest of it must load all the same.
+		var cfg map[string]any
+		if err := json.Unmarshal(example, &cfg); err != nil {
+			t.Fatal(err)
+		}
+		sandbox, _ := cfg["sandbox"].(map[string]any)
+		if sandbox == nil {
+			t.Fatal("config.example.json has no sandbox object")
+		}
+		sandbox["enabled"] = false
+		data, err := json.Marshal(cfg)
+		if err != nil {
+			t.Fatal(err)
+		}
+		cfgPath = writeConfig(t, string(data))
 	}
 	if _, err := LoadConfig(cfgPath); err != nil {
 		t.Fatalf("config.example.json does not load: %v", err)
@@ -1050,19 +1042,6 @@ func TestIsLoopbackAddr(t *testing.T) {
 	for _, a := range exposed {
 		if isLoopbackAddr(a) {
 			t.Errorf("isLoopbackAddr(%q) = true, want false", a)
-		}
-	}
-}
-
-func TestSplitTrimmed(t *testing.T) {
-	got := splitTrimmed(" a , b ,, c ")
-	want := []string{"a", "b", "c"}
-	if len(got) != len(want) {
-		t.Fatalf("got %v, want %v", got, want)
-	}
-	for i := range want {
-		if got[i] != want[i] {
-			t.Errorf("got %v, want %v", got, want)
 		}
 	}
 }

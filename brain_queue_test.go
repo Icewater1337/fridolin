@@ -1031,12 +1031,12 @@ func TestStopKillsProcessesClaudeStarted(t *testing.T) {
 }
 
 func TestBrainsDoNotSeeTheDotEnv(t *testing.T) {
-	// The .env next to config.json configures the bridge only. Its values
-	// used to be exported into the bridge's environment, which every brain
-	// inherits, so any brain could read them with `env`.
+	// The bridge reads no .env. Older versions exported the one next to
+	// config.json into the bridge's environment, which every brain
+	// inherits, so any brain could read it with `env`.
 	home := canonicalDir(t.TempDir())
 	t.Setenv("HOME", home)
-	clearEnv(t, "FRIDOLIN_TEST_DOTENV_ONLY")
+	clearEnv(t, "MODEL", "FRIDOLIN_TEST_DOTENV_ONLY")
 	envLog := filepath.Join(home, "brain.env")
 	t.Setenv("WCB_FAKE_ENV_LOG", envLog)
 	claude := fakeClaudeEnv(t, 0)
@@ -1046,7 +1046,7 @@ func TestBrainsDoNotSeeTheDotEnv(t *testing.T) {
 		"claude_path": "`+claude+`",
 		"brains": [{"name": "a", "work_dir": "`+home+`/a", "handles_dms": true}]
 	}`)
-	// One key the bridge reads as an override, one it ignores.
+	// One key older versions read as a setting, one they only exported.
 	dotenv := "MODEL=from-dotenv\nFRIDOLIN_TEST_DOTENV_ONLY=secret\n"
 	if err := os.WriteFile(filepath.Join(filepath.Dir(path), ".env"), []byte(dotenv), 0o600); err != nil {
 		t.Fatal(err)
@@ -1054,9 +1054,6 @@ func TestBrainsDoNotSeeTheDotEnv(t *testing.T) {
 	cfg, err := LoadConfig(path)
 	if err != nil {
 		t.Fatal(err)
-	}
-	if cfg.Model != "from-dotenv" {
-		t.Fatalf("Model = %q: the .env was not read, so the check below would prove nothing", cfg.Model)
 	}
 	mgr := newTestManager(t, cfg)
 	d := &deliveries{}

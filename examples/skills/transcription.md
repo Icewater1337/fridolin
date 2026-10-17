@@ -113,8 +113,8 @@ pip install -r <bridge-repo>/tools/requirements-transcription.txt
 pip install groq && export GROQ_API_KEY=...
 ```
 
-`GROQ_API_KEY` must be set in the bridge's process environment; the bridge's
-`.env` does not reach brains. Re-running `setup.sh` rewrites the launchd plist
+`GROQ_API_KEY` must be set in the bridge's process environment; the bridge
+reads no `.env` file. Re-running `setup.sh` rewrites the launchd plist
 and the systemd unit, so keep the key where it survives that: see "Environment
 variables" in `<bridge-repo>/docs/CONFIGURATION.md`.
 

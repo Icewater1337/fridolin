@@ -2,18 +2,13 @@ package main
 
 import (
 	"encoding/json"
-	"errors"
 	"fmt"
-	"io/fs"
 	"log"
 	"os"
 	"path/filepath"
 	"runtime"
-	"strconv"
 	"strings"
 	"syscall"
-
-	"github.com/joho/godotenv"
 )
 
 // BrainConfig describes one brain inline in config.json — the original way to
@@ -339,59 +334,15 @@ func (c *Config) AllowsAnyDM() bool { return boolOr(c.AllowAnyDM, false) }
 // AnyoneCanDM reports whether every sender passes the DM allowlist.
 func (c *Config) AnyoneCanDM() bool { return len(c.AllowedNumbers) == 0 && c.AllowsAnyDM() }
 
-// LoadConfig reads configuration with this priority (highest → lowest):
-//  1. The .env next to the config file
-//  2. Environment variables
-//  3. config.json values
-//  4. Built-in defaults
-//
-// Only the .env next to the config file is read: one in the working directory
-// counts only when the config file is there too.
+// LoadConfig reads config.json and fills in the built-in defaults. The file
+// is the only source of settings: no environment variable or .env overrides
+// any of them.
 func LoadConfig(cfgPath string) (*Config, error) {
 	cs, err := OpenConfigStore(cfgPath)
 	if err != nil {
 		return nil, err
 	}
 	return cs.Get(), nil
-}
-
-// envLookup returns the value of an override variable, "" when it is unset.
-type envLookup func(key string) string
-
-// loadDotEnv reads the .env next to the config, if there is one, and returns
-// the lookup the config overrides come from: a key in the .env wins over the
-// process environment. The values are never exported into the environment,
-// so brains, rclone and the other programs the bridge starts do not see them,
-// and a test cannot leave them behind for the next one. There is no fallback
-// to the working directory: a bridge started from a checkout, or the tests
-// run in one, must not pick up whatever file happens to lie there. A missing
-// .env means no overrides; one that cannot be read or parsed is an error.
-// Every other key in it is logged by name, see warnIgnoredDotEnvKeys.
-func loadDotEnv(cfgPath string) (envLookup, error) {
-	path := dotEnvPath(cfgPath)
-	if abs, err := filepath.Abs(path); err == nil {
-		path = abs // so an error names the folder, for ./config.json too
-	}
-	vars, err := godotenv.Read(path)
-	var pathErr *fs.PathError
-	switch {
-	case errors.Is(err, fs.ErrNotExist):
-		vars = nil
-	case errors.As(err, &pathErr):
-		return nil, fmt.Errorf("reading .env: %w", err)
-	case err != nil:
-		// Not ignored: the bridge would run without the settings the file
-		// meant to set. The parser's message quotes the text around the
-		// mistake, which may be a secret, so it is left out.
-		return nil, fmt.Errorf("%s is not a valid .env file (one KEY=value per line)", path)
-	}
-	warnIgnoredDotEnvKeys(path, vars)
-	return func(key string) string {
-		if v, ok := vars[key]; ok {
-			return v
-		}
-		return os.Getenv(key)
-	}, nil
 }
 
 // dataDirName and legacyDataDirName are the home-relative names of the data
@@ -401,8 +352,9 @@ const (
 	legacyDataDirName = ".whatsapp-claude-bridge"
 )
 
-// dotEnvPath is the .env loadDotEnv reads, the one next to the config. The
-// sandbox profile denies it to brains.
+// dotEnvPath is the .env next to the config, which older versions read
+// settings from. The bridge reads it no more, but it may still hold settings
+// and secrets, so the sandbox profile denies it to brains.
 func dotEnvPath(cfgPath string) string {
 	return filepath.Join(filepath.Dir(cfgPath), ".env")
 }
@@ -421,18 +373,16 @@ func defaultDataDir(home string) string {
 }
 
 // effective derives the running configuration from the on-disk layer:
-// overrides from env, defaults, ~ expansion, validation. It returns the json
-// field names that an environment variable overrode.
-func effective(file *Config, env envLookup) (*Config, map[string]string, error) {
+// defaults, ~ expansion, validation.
+func effective(file *Config) (*Config, error) {
 	cfg, err := file.clone()
 	if err != nil {
-		return nil, nil, err
+		return nil, err
 	}
-	locked := applyEnvOverrides(cfg, env)
 
 	home, err := os.UserHomeDir()
 	if err != nil {
-		return nil, nil, fmt.Errorf("getting home dir: %w", err)
+		return nil, fmt.Errorf("getting home dir: %w", err)
 	}
 
 	if cfg.ClaudePath == "" {
@@ -537,20 +487,20 @@ func effective(file *Config, env envLookup) (*Config, map[string]string, error) 
 	}
 
 	if err := cfg.validate(); err != nil {
-		return nil, nil, err
+		return nil, err
 	}
 
 	if err := os.MkdirAll(cfg.DataDir, 0o700); err != nil {
-		return nil, nil, fmt.Errorf("creating data directory: %w", err)
+		return nil, fmt.Errorf("creating data directory: %w", err)
 	}
 	if err := os.MkdirAll(filepath.Dir(cfg.DBPath), 0o700); err != nil {
-		return nil, nil, fmt.Errorf("creating db directory: %w", err)
+		return nil, fmt.Errorf("creating db directory: %w", err)
 	}
 	if err := os.MkdirAll(cfg.MediaDir, 0o700); err != nil {
-		return nil, nil, fmt.Errorf("creating media directory: %w", err)
+		return nil, fmt.Errorf("creating media directory: %w", err)
 	}
 
-	return cfg, locked, nil
+	return cfg, nil
 }
 
 // protectDataDir takes group and other access away from the data dir and
@@ -766,70 +716,11 @@ func expandHome(path, home string) string {
 	return path
 }
 
-// envOverride maps an environment variable to the config field it sets.
-type envOverride struct {
-	env, field string
-	apply      func(cfg *Config, v string)
-}
-
-// envOverrides are the supported environment variables. Comma-separated list
-// vars replace the whole slice. Brains are configured in files only — they are
-// too structured for environment variables.
-var envOverrides = []envOverride{
-	{"ALLOWED_NUMBERS", "allowed_numbers", func(c *Config, v string) { c.AllowedNumbers = splitTrimmed(v) }},
-	{"ALLOWED_GROUPS", "allowed_groups", func(c *Config, v string) { c.AllowedGroups = splitTrimmed(v) }},
-	{"TRIGGERS", "triggers", func(c *Config, v string) { c.Triggers = TriggersFromStrings(splitTrimmed(v)) }},
-	{"CLAUDE_PATH", "claude_path", func(c *Config, v string) { c.ClaudePath = v }},
-	{"DATA_DIR", "data_dir", func(c *Config, v string) { c.DataDir = v }},
-	{"DB_PATH", "db_path", func(c *Config, v string) { c.DBPath = v }},
-	{"MEDIA_DIR", "media_dir", func(c *Config, v string) { c.MediaDir = v }},
-	{"MAX_CHUNK_SIZE", "max_chunk_size", func(c *Config, v string) {
-		if n, err := strconv.Atoi(v); err == nil {
-			c.MaxChunkSize = n
-		}
-	}},
-	{"MODEL", "model", func(c *Config, v string) { c.Model = v }},
-	{"BRAIN_MODEL", "brain_model", func(c *Config, v string) { c.BrainModel = v }},
-	{"BRAIN_EFFORT", "brain_effort", func(c *Config, v string) { c.BrainEffort = v }},
-	{"DISALLOWED_TOOLS", "disallowed_tools", func(c *Config, v string) { c.DisallowedTools = splitTrimmed(v) }},
-	{"DANGEROUSLY_SKIP_PERMISSIONS", "dangerously_skip_permissions", func(c *Config, v string) { c.DangerouslySkipPermissions = isTruthy(v) }},
-	{"HTTP_LISTEN", "http_listen", func(c *Config, v string) { c.HTTPListen = v }},
-	{"LOG_LEVEL", "log_level", func(c *Config, v string) { c.LogLevel = v }},
-	{"SANDBOX_ENABLED", "sandbox.enabled", func(c *Config, v string) { c.Sandbox.Enabled = isTruthy(v) }},
-	{"OTP_GUARD", "otp_guard", func(c *Config, v string) { c.OTPGuard = isTruthy(v) }},
-	{"VIEWER", "viewer", func(c *Config, v string) { c.Viewer = isTruthy(v) }},
-}
-
-// applyEnvOverrides overwrites cfg fields with every override variable env
-// has a value for, and returns field → variable for every field it overrode,
-// so the dashboard can show which settings it cannot change.
-func applyEnvOverrides(cfg *Config, env envLookup) map[string]string {
-	locked := map[string]string{}
-	for _, o := range envOverrides {
-		if v := env(o.env); v != "" {
-			o.apply(cfg, v)
-			locked[o.field] = o.env
-		}
-	}
-	return locked
-}
-
+// isTruthy reports whether v reads as true: true, 1, yes or on.
 func isTruthy(v string) bool {
 	switch strings.ToLower(strings.TrimSpace(v)) {
 	case "true", "1", "yes", "on":
 		return true
 	}
 	return false
-}
-
-// splitTrimmed splits a comma-separated string and trims whitespace from each item.
-func splitTrimmed(s string) []string {
-	parts := strings.Split(s, ",")
-	out := make([]string, 0, len(parts))
-	for _, p := range parts {
-		if t := strings.TrimSpace(p); t != "" {
-			out = append(out, t)
-		}
-	}
-	return out
 }

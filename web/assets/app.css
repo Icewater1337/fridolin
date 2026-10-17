@@ -545,8 +545,6 @@ input[type="checkbox"], input[type="radio"] { accent-color: var(--accent); width
   align-self: flex-start;
 }
 .help { font-size: 12.5px; color: var(--muted); }
-.help.locked { display: flex; align-items: center; gap: 6px; color: var(--warn); }
-.help.locked .icon { width: 14px; height: 14px; }
 .static { min-height: 38px; display: flex; align-items: center; }
 
 .fieldset { border: 0; border-top: 1px solid var(--border); margin: 0; padding: 18px 0 0; min-width: 0; }
