@@ -909,6 +909,58 @@ func TestPutConfigKeepsBrainsAndReportsRestart(t *testing.T) {
 	}
 }
 
+// A setting read only at startup stays pending in /api/status until the
+// restart, so the dashboard's restart banner survives a reload and shows in
+// every tab. Set back to the value the bridge started with, it is not
+// pending any more.
+func TestStatusReportsSettingsWaitingForRestart(t *testing.T) {
+	tb := newTestBridge(t, "")
+	status := func(t *testing.T) []string {
+		t.Helper()
+		var st struct {
+			RestartRequired []string `json:"restart_required"`
+		}
+		if err := json.Unmarshal(tb.do("GET", "/api/status", nil).Body.Bytes(), &st); err != nil || st.RestartRequired == nil {
+			t.Fatalf("status restart_required = %v (%v), want a list", st.RestartRequired, err)
+		}
+		return st.RestartRequired
+	}
+	if got := status(t); len(got) != 0 {
+		t.Fatalf("at start: restart_required = %v, want none", got)
+	}
+	steps := []struct {
+		name, logLevel string
+		want           []string
+	}{
+		{"changed", "debug", []string{"log_level"}},
+		{"changed again", "warn", []string{"log_level"}},
+		{"back to the startup value", "info", []string{}},
+	}
+	for _, s := range steps {
+		t.Run(s.name, func(t *testing.T) {
+			var cur struct {
+				ETag   string         `json:"etag"`
+				Config map[string]any `json:"config"`
+			}
+			_ = json.Unmarshal(tb.do("GET", "/api/config", nil).Body.Bytes(), &cur)
+			cur.Config["log_level"] = s.logLevel
+			w := tb.do("PUT", "/api/config", map[string]any{"etag": cur.ETag, "config": cur.Config})
+			var put struct {
+				RestartRequired []string `json:"restart_required"`
+			}
+			if err := json.Unmarshal(w.Body.Bytes(), &put); w.Code != 200 || err != nil {
+				t.Fatalf("put: %d %s", w.Code, w.Body.String())
+			}
+			if !slices.Equal(put.RestartRequired, s.want) {
+				t.Errorf("PUT restart_required = %v, want %v", put.RestartRequired, s.want)
+			}
+			if got := status(t); !slices.Equal(got, s.want) {
+				t.Errorf("status restart_required = %v, want %v", got, s.want)
+			}
+		})
+	}
+}
+
 // The settings page sends brain_mode back as it got it, true. A request
 // that turns it off is refused, not saved: the next start would fail on it.
 func TestPutConfigRefusesClassicMode(t *testing.T) {

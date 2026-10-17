@@ -26,11 +26,12 @@ import (
 type ConfigStore struct {
 	path string
 
-	mu   sync.Mutex // serialises Update
-	file *Config
-	eff  atomic.Pointer[Config]
-	etag atomic.Value // string
-	subs []func(old, new *Config)
+	mu      sync.Mutex // serialises Update
+	file    *Config
+	startup *Config // the effective configuration the process started with
+	eff     atomic.Pointer[Config]
+	etag    atomic.Value // string
+	subs    []func(old, new *Config)
 }
 
 // ErrConfigConflict means config.json changed since the caller read it.
@@ -64,7 +65,7 @@ func OpenConfigStore(cfgPath string) (*ConfigStore, error) {
 	if err != nil {
 		return nil, err
 	}
-	cs := &ConfigStore{path: cfgPath, file: file}
+	cs := &ConfigStore{path: cfgPath, file: file, startup: eff}
 	cs.eff.Store(eff)
 	cs.etag.Store(etagOf(raw))
 	return cs, nil
@@ -102,8 +103,8 @@ func (cs *ConfigStore) Subscribe(fn func(old, new *Config)) {
 
 // Update applies mutate to a copy of the file layer, validates the result,
 // writes it atomically and swaps in the new effective configuration. etag ""
-// skips the conflict check. It returns the settings that changed but only
-// take effect after a restart.
+// skips the conflict check. It returns RestartRequired as of the new
+// configuration.
 func (cs *ConfigStore) Update(etag string, mutate func(*Config) error) (restart []string, err error) {
 	cs.mu.Lock()
 	if etag != "" && etag != cs.ETag() {
@@ -145,7 +146,14 @@ func (cs *ConfigStore) Update(etag string, mutate func(*Config) error) (restart 
 	for _, fn := range subs {
 		fn(old, eff)
 	}
-	return restartRequired(old, eff), nil
+	return restartRequired(cs.startup, eff), nil
+}
+
+// RestartRequired lists the settings that are read once at startup and now
+// differ from the value the bridge started with, so they wait for a
+// restart. A setting changed and then changed back is not listed.
+func (cs *ConfigStore) RestartRequired() []string {
+	return restartRequired(cs.startup, cs.Get())
 }
 
 // restartFields are settings read once at startup.
