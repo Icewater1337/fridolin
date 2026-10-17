@@ -24,8 +24,9 @@ export default {
       pageHeader('Integrations', 'Services that hand things to your brains on their own.'),
       h('div.page-stack', card));
 
-    // It asks Plaud for the account, which may take 30 s.
-    const plaud = resource('/api/plaud/status', { timeout: 60000 });
+    // The status never waits for Plaud: who is signed in is what the
+    // bridge asked last.
+    const plaud = resource('/api/plaud/status');
     const refresh = () => plaud.refresh();
     let status = null;
     let brains = [];

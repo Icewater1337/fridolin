@@ -74,7 +74,8 @@ func fakePlaudTranscript(segs ...fakePlaudSegment) string {
 //
 // Without tokens.json in HOME/.plaud every command but login and logout
 // exits 2, as the real one does. Each call is appended to calls.log with
-// HOME and the working directory, and its environment goes to env.log.
+// HOME and the working directory, and its environment goes to env.log and
+// to env_<command>.log.
 func fakePlaud(args []string) int {
 	dir := os.Getenv("FRIDOLIN_FAKE_PLAUD_DIR")
 	cwd, _ := os.Getwd()
@@ -82,7 +83,9 @@ func fakePlaud(args []string) int {
 		fmt.Fprintf(f, "HOME=%s CWD=%s %s\n", os.Getenv("HOME"), cwd, strings.Join(args, " "))
 		f.Close()
 	}
-	_ = os.WriteFile(filepath.Join(dir, "env.log"), []byte(strings.Join(os.Environ(), "\n")+"\n"), 0o600)
+	env := []byte(strings.Join(os.Environ(), "\n") + "\n")
+	_ = os.WriteFile(filepath.Join(dir, "env.log"), env, 0o600)
+	_ = os.WriteFile(filepath.Join(dir, "env_"+args[0]+".log"), env, 0o600)
 	fp := fakePlaudCLI{dir: dir, token: filepath.Join(os.Getenv("HOME"), ".plaud", "tokens.json")}
 	return fp.run(args)
 }

@@ -84,6 +84,10 @@ const (
 	// transcript (plaud.polished) before the raw one is sent instead. Plaud
 	// makes the raw one first, and may never make the other.
 	plaudPolishedWait = time.Hour
+	// plaudAccountEvery is how often, at most, the card's status asks Plaud
+	// who is signed in. Checks ask whenever the login changes; the card
+	// shows what was asked last.
+	plaudAccountEvery = 10 * time.Minute
 	plaudSeenKeep     = 2000
 )
 
@@ -120,6 +124,10 @@ type plaudLogin struct {
 	// Dir is the CLI home it was made in (see cliHome).
 	Dir   string    `json:"dir"`
 	Since time.Time `json:"since"`
+	// Account names who signed in (an email, else a nickname), for the
+	// card, as `plaud me` last said at Checked.
+	Account string    `json:"account,omitempty"`
+	Checked time.Time `json:"checked,omitzero"`
 }
 
 // plaudPending is a recording waiting to be handed over.
@@ -226,7 +234,13 @@ type PlaudManager struct {
 	// clears it.
 	refused bool
 	busy    bool
-	stop    context.CancelFunc
+	// accountBusy and accountTried keep refreshAccount to one run at a
+	// time and one try per plaudAccountEvery.
+	accountBusy  bool
+	accountTried time.Time
+	// bg is the background work Stop waits for.
+	bg   sync.WaitGroup
+	stop context.CancelFunc
 	// life is the poller's context from Start, which Stop cancels; checks
 	// started from the dashboard run on it too.
 	life context.Context
@@ -501,24 +515,56 @@ func (p *PlaudManager) fetchBody(ctx context.Context, dir string, args ...string
 const plaudEmptyNote = "(this note has no content yet"
 
 // me returns what `plaud me` says about the signed-in user.
+// It also records who that is with the sign-in, for the card.
 func (p *PlaudManager) me(ctx context.Context) (map[string]string, error) {
 	out, err := p.run(ctx, "me")
 	if err != nil {
 		return nil, err
 	}
-	return parseKV(out), nil
+	d := parseKV(out)
+	name := d["email"]
+	if name == "" {
+		name = d["nickname"]
+	}
+	err = p.update(func(st *plaudState) error {
+		if st.Login == nil || st.Login.Dir != p.cliHome() {
+			// A sign-in from before they were recorded.
+			st.Login = &plaudLogin{Dir: p.cliHome(), Since: time.Now()}
+		}
+		st.Login.Account, st.Login.Checked = name, time.Now()
+		return nil
+	})
+	return d, err
 }
 
-// account returns the signed-in Plaud user, for the dashboard.
-func (p *PlaudManager) account(ctx context.Context) (string, error) {
-	d, err := p.me(ctx)
-	if err != nil {
-		return "", err
+// refreshAccount asks Plaud in the background who is signed in, when no
+// one did for plaudAccountEvery, so that the status never runs the CLI
+// while the dashboard waits. A refusal shows the login as expired. A
+// sign-in that is still running asks itself.
+func (p *PlaudManager) refreshAccount(checked time.Time) {
+	p.mu.Lock()
+	due := time.Since(checked) >= plaudAccountEvery && time.Since(p.accountTried) >= plaudAccountEvery
+	if !due || p.accountBusy || p.connect != nil && p.connect.State == "running" {
+		p.mu.Unlock()
+		return
 	}
-	if d["email"] != "" {
-		return d["email"], nil
-	}
-	return d["nickname"], nil
+	p.accountBusy, p.accountTried = true, time.Now()
+	p.mu.Unlock()
+	p.bg.Add(1)
+	go func() {
+		defer p.bg.Done()
+		ctx, cancel := context.WithTimeout(p.lifetime(), 30*time.Second)
+		defer cancel()
+		_, err := p.me(ctx)
+		p.mu.Lock()
+		defer p.mu.Unlock()
+		p.accountBusy = false
+		if errors.Is(err, errPlaudAuth) {
+			p.refused = p.loginStatus() == plaudConnected
+		} else if err == nil {
+			p.refused = false
+		}
+	}()
 }
 
 // accountID identifies the signed-in Plaud account: its user id, else its
@@ -1061,16 +1107,18 @@ func (p *PlaudManager) lifetime() context.Context {
 	return context.Background()
 }
 
-// Stop ends the poller, a running check and a running sign-in.
+// Stop ends the poller, a running check and a running sign-in, and waits
+// for a look-up of the account.
 func (p *PlaudManager) Stop() {
 	p.mu.Lock()
-	defer p.mu.Unlock()
 	if p.stop != nil {
 		p.stop()
 	}
 	if p.connect != nil && p.connect.cancel != nil {
 		p.connect.cancel()
 	}
+	p.mu.Unlock()
+	p.bg.Wait()
 }
 
 // ── API ──────────────────────────────────────────────────────────────────
@@ -1123,9 +1171,9 @@ type PlaudStatus struct {
 	Expired bool   `json:"expired,omitempty"`
 }
 
-// Status reports the integration's state. With account it asks Plaud who
-// is signed in, which also tells whether the login still works.
-func (p *PlaudManager) Status(ctx context.Context, account bool) PlaudStatus {
+// Status reports the integration's state. It never runs the CLI: who is
+// signed in comes from the last time Plaud was asked (see refreshAccount).
+func (p *PlaudManager) Status() PlaudStatus {
 	cfg := p.cfg()
 	login := p.loginStatus()
 	s := PlaudStatus{
@@ -1173,14 +1221,12 @@ func (p *PlaudManager) Status(ctx context.Context, account bool) PlaudStatus {
 	s.LastError = p.lastErr
 	s.Expired = s.Expired || p.refused && s.Connected
 	p.mu.Unlock()
-	if account && s.Connected && s.CLI.Found {
-		ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
-		if acct, err := p.account(ctx); err == nil {
-			s.Account = acct
-		} else if errors.Is(err, errPlaudAuth) {
-			s.Expired = true
+	if s.Connected && s.CLI.Found {
+		var checked time.Time
+		if st, _ := p.loadState(); st != nil && st.Login != nil && st.Login.Dir == p.cliHome() {
+			s.Account, checked = st.Login.Account, st.Login.Checked
 		}
-		cancel()
+		p.refreshAccount(checked)
 	}
 	return s
 }
@@ -1221,6 +1267,10 @@ func (p *PlaudManager) Connect() error {
 				st.AuthNotified = time.Time{}
 				return nil
 			})
+			// Who signed in, for the card; a check asks again if this fails.
+			if _, merr := p.me(ctx); merr != nil {
+				log.Printf("plaud: could not ask who signed in: %v", merr)
+			}
 		}
 		p.mu.Lock()
 		defer p.mu.Unlock()
@@ -1293,7 +1343,7 @@ func (p *PlaudManager) CheckNow() (bool, error) {
 }
 
 func (b *Bridge) apiPlaudStatus(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, http.StatusOK, b.plaud.Status(r.Context(), r.URL.Query().Get("account") != "0"))
+	writeJSON(w, http.StatusOK, b.plaud.Status())
 }
 
 func (b *Bridge) apiPlaudConnect(w http.ResponseWriter, r *http.Request) {
