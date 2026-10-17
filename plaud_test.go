@@ -1032,3 +1032,76 @@ func TestPlaudConfigValidation(t *testing.T) {
 		}
 	}
 }
+
+// TestPlaudCLIGetsTheAllowlistedEnvironment: the Plaud CLI gets what
+// childEnv gives a helper program, with the bridge's HOME, PATH and
+// DO_NOT_TRACK replaced by its own: not the Claude CLI's login, and not the
+// names in child_env_passthrough, which are for brains. Only `plaud login`,
+// which opens your browser, gets your desktop session's variables.
+func TestPlaudCLIGetsTheAllowlistedEnvironment(t *testing.T) {
+	tb, fp := plaudBridgeWith(t, `, "child_env_passthrough": ["GROQ_API_KEY"]`, "")
+	for k, v := range map[string]string{
+		"HTTPS_PROXY":             "http://proxy.example.com:3128",
+		"DO_NOT_TRACK":            "0",
+		"DISPLAY":                 ":0",
+		"GROQ_API_KEY":            "test-groq-key",
+		"CLAUDE_CODE_OAUTH_TOKEN": "test-oauth-token",
+		"FRIDOLIN_TEST_SECRET":    "test-secret",
+	} {
+		t.Setenv(k, v)
+	}
+	bin, err := tb.plaud.cliPath()
+	if err != nil {
+		t.Fatal(err)
+	}
+	cases := []struct {
+		name    string
+		run     func(t *testing.T)
+		desktop bool
+	}{
+		{"a sync", func(t *testing.T) {
+			if _, err := tb.plaud.runCLI(context.Background(), "me"); err != nil {
+				t.Fatal(err)
+			}
+		}, false},
+		{"the sign-in", func(t *testing.T) {
+			if w := tb.do("POST", "/api/plaud/connect", nil); w.Code != 202 {
+				t.Fatal(w.Body.String())
+			}
+			waitFor(t, 5*time.Second, "login", func() bool { return tb.plaud.connected() })
+		}, true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			tc.run(t)
+			data, err := os.ReadFile(filepath.Join(fp.dir, "env.log"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			got := map[string][]string{}
+			for _, kv := range strings.Split(strings.TrimSuffix(string(data), "\n"), "\n") {
+				k, v, _ := strings.Cut(kv, "=")
+				got[k] = append(got[k], v)
+			}
+			for k, want := range map[string]string{
+				"HOME":                     tb.plaud.cliHome(),
+				"PATH":                     plaudPATH(bin),
+				"HTTPS_PROXY":              "http://proxy.example.com:3128",
+				"DO_NOT_TRACK":             "1",
+				"PLAUD_TELEMETRY_DISABLED": "1",
+			} {
+				if v := got[k]; len(v) != 1 || v[0] != want {
+					t.Errorf("the CLI got %s=%q, want %q once", k, v, want)
+				}
+			}
+			if _, ok := got["DISPLAY"]; ok != tc.desktop {
+				t.Errorf("the CLI got DISPLAY: %v, want %v", ok, tc.desktop)
+			}
+			for _, k := range []string{"GROQ_API_KEY", "CLAUDE_CODE_OAUTH_TOKEN", "FRIDOLIN_TEST_SECRET"} {
+				if v, ok := got[k]; ok {
+					t.Errorf("the CLI got %s=%q", k, v)
+				}
+			}
+		})
+	}
+}

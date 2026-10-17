@@ -215,8 +215,11 @@ func plaudPATH(bin string) string {
 	return filepath.Dir(bin) + ":" + os.Getenv("PATH") + ":/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin"
 }
 
-// runCLI runs `plaud args…` with the chosen home, telemetry off, and node
-// (which the CLI needs) on PATH. Exit status 2 means the login expired.
+// runCLI runs `plaud args…` with what childEnv gives a helper program on
+// ctx (see helperScope), the chosen home, telemetry off, and node (which the
+// CLI needs) on PATH. child_env_passthrough is for brains: this third-party
+// CLI needs nothing but its own login. Exit status 2 means the login
+// expired.
 func (p *PlaudManager) runCLI(ctx context.Context, args ...string) (string, error) {
 	bin, err := p.cliPath()
 	if err != nil {
@@ -226,16 +229,9 @@ func (p *PlaudManager) runCLI(ctx context.Context, args ...string) (string, erro
 	if err := os.MkdirAll(home, 0o700); err != nil {
 		return "", err
 	}
-	env := []string{}
-	for _, kv := range os.Environ() {
-		if !strings.HasPrefix(kv, "HOME=") && !strings.HasPrefix(kv, "PATH=") {
-			env = append(env, kv)
-		}
-	}
-	env = append(env, "HOME="+home, "PATH="+plaudPATH(bin),
-		"DO_NOT_TRACK=1", "PLAUD_TELEMETRY_DISABLED=1", "PLAUD_NO_UPDATE_NOTIFIER=1", "NO_COLOR=1")
 	cmd := exec.CommandContext(ctx, bin, args...)
-	cmd.Env = env
+	cmd.Env = childEnv(helperScope(ctx), nil, "HOME="+home, "PATH="+plaudPATH(bin),
+		"DO_NOT_TRACK=1", "PLAUD_TELEMETRY_DISABLED=1", "PLAUD_NO_UPDATE_NOTIFIER=1", "NO_COLOR=1")
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &stdout, &stderr
 	if f, ok := ctx.Value(plaudOutputKey{}).(func([]byte)); ok {
@@ -897,7 +893,8 @@ func (b *Bridge) apiPlaudConnect(w http.ResponseWriter, r *http.Request) {
 				job.AuthURL = plaudURLRe.FindString(ansiRe.ReplaceAllString(string(seen.Bytes()[:i]), "")) // whole lines only
 			}
 		})
-		_, err := p.run(ctx, "login")
+		// The CLI opens the sign-in page in your browser itself.
+		_, err := p.run(withDesktop(ctx), "login")
 		p.mu.Lock()
 		defer p.mu.Unlock()
 		if err != nil || !p.connected() {

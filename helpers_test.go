@@ -276,13 +276,14 @@ func isPlaudCommand(c string) bool {
 // spinner line to stderr and exits 2 only when the login is rejected: an
 // "expired" file makes every call do that, "offline" makes every call exit 3
 // (Plaud unreachable), and fail_<command> makes that command exit 1. Each
-// call is logged with HOME.
+// call is logged with HOME, and the last call's environment is in env.log.
 func fakePlaud(args []string) int {
 	dir := os.Getenv("WCB_FAKE_PLAUD_DIR")
 	if f, err := os.OpenFile(dir+"/calls.log", os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600); err == nil {
 		fmt.Fprintf(f, "HOME=%s %s\n", os.Getenv("HOME"), strings.Join(args, " "))
 		f.Close()
 	}
+	_ = os.WriteFile(dir+"/env.log", []byte(strings.Join(os.Environ(), "\n")+"\n"), 0o600)
 	token := os.Getenv("HOME") + "/.plaud/tokens.json"
 	exists := func(name string) bool { _, err := os.Stat(dir + "/" + name); return err == nil }
 	read := func(name string) string { b, _ := os.ReadFile(dir + "/" + name); return string(b) }

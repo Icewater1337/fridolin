@@ -81,7 +81,10 @@ so on themselves. A brain could then also read the token — turn it on only if
 you want brains to look things up in Plaud directly.
 
 Fridolin runs Plaud's tool with its usage statistics turned off
-(`DO_NOT_TRACK`).
+(`DO_NOT_TRACK`), and with only a few variables of its own environment,
+such as the locale and the proxy settings, and while it signs you in also
+your desktop session's, so that it can open your browser
+([details](CONFIGURATION.md#what-reaches-brains)).
 
 ## Settings
 

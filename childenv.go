@@ -16,8 +16,8 @@ const (
 	// claudeChild is a Claude CLI run: a brain, and the scripts and tools it
 	// runs, which inherit the CLI's environment.
 	claudeChild
-	// desktopChild is a helper that opens your browser for a sign-in, such
-	// as rclone connecting Google Drive (see withDesktop).
+	// desktopChild is a helper that opens your browser for a sign-in:
+	// rclone connecting Google Drive, `plaud login` (see withDesktop).
 	desktopChild
 )
 
@@ -78,8 +78,8 @@ var childEnvAllowlist = []childEnvVar{
 	{"DISABLE_ERROR_REPORTING", claudeChild}, // its error reports, the same
 
 	// Your desktop session, for a sign-in that opens your browser: on Linux
-	// rclone calls xdg-open, which finds the session through these. macOS's
-	// open needs none of them.
+	// rclone and the Plaud CLI call xdg-open, which finds the session
+	// through these. macOS's open needs none of them.
 	{"DISPLAY", desktopChild},                  // the X11 display
 	{"WAYLAND_DISPLAY", desktopChild},          // the Wayland display
 	{"XAUTHORITY", desktopChild},               // the cookie that lets a program use DISPLAY

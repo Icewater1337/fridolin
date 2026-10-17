@@ -822,13 +822,16 @@ only, never the names in `child_env_passthrough`, which are for brains:
 
 - rclone for [backups](BACKUP.md), which never gets an `RCLONE_*`
   variable but `RCLONE_CONFIG`, the bridge's own rclone config
+- the [Plaud](PLAUD.md) CLI, whose `HOME`, `PATH` and `DO_NOT_TRACK` the
+  bridge sets itself
 
-While rclone connects Google Drive it opens your browser, so it also gets
-the variables of your desktop session that Linux needs to open one (macOS
-needs none of them): `DISPLAY`, `WAYLAND_DISPLAY`, `XAUTHORITY`,
-`XDG_RUNTIME_DIR`, `DBUS_SESSION_BUS_ADDRESS`, `XDG_CURRENT_DESKTOP`,
-`KDE_SESSION_VERSION`, `XDG_DATA_DIRS` (where snap and Flatpak browsers are
-found), `XDG_CONFIG_DIRS` and `BROWSER`.
+While rclone connects Google Drive, and while the Plaud CLI signs you in,
+they open your browser, so they also get the variables of your desktop
+session that Linux needs to open one (macOS needs none of them):
+`DISPLAY`, `WAYLAND_DISPLAY`, `XAUTHORITY`, `XDG_RUNTIME_DIR`,
+`DBUS_SESSION_BUS_ADDRESS`, `XDG_CURRENT_DESKTOP`, `KDE_SESSION_VERSION`,
+`XDG_DATA_DIRS` (where snap and Flatpak browsers are found),
+`XDG_CONFIG_DIRS` and `BROWSER`.
 
 ### Where to set them
 
