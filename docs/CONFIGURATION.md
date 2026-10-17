@@ -188,7 +188,10 @@ single-user setup.
 
 When enabled, each Claude run is wrapped in `sandbox-exec` under a generated
 profile. Changes (including added or removed brains) apply to the next run of
-every brain. The profile is allow-by-default with reads denied to:
+every brain. If the profile cannot be built or `/usr/bin/sandbox-exec` is
+missing, the run is refused: the chat gets an error, the bridge log names the
+cause, and Claude never starts unsandboxed. Classic mode (`brain_mode` off) is
+not sandboxed. The profile is allow-by-default with reads denied to:
 
 - every **other brain's** working directory
 - `~/.ssh`, `~/.gnupg`, `~/.aws`, `~/.config/gh`, `~/.config/gcloud`,
@@ -205,7 +208,18 @@ every brain. The profile is allow-by-default with reads denied to:
 credentials from the keychain and fails with "Not logged in" without it.
 
 `deny_paths` adds your own. `allow_paths` re-opens something the defaults
-closed (read access).
+closed (read access). Entries must be absolute or start with `~/`; the bridge
+refuses a config with a relative one, which would protect nothing.
+
+The sandbox compares real paths, so every deny covers both the path as
+configured and the path it reaches through symlinks (a home on another
+volume, a cloud-synced folder, `/var` → `/private/var`). Symlinks are
+resolved again on every run, and a folder that does not exist yet is still
+covered once it is created. Re-allowed paths (`allow_paths`, a brain's own
+folder, media, calendar files) are resolved only where your home, data or
+credentials folder itself is a symlink, never through any other symlink,
+because a brain could plant one to reach something else. If an
+`allow_paths` entry is a symlink or goes through one, list its real path.
 
 A brain's own folder is always readable and writable, even inside a denied
 directory. Other tools it runs may still need paths the defaults deny, so
@@ -219,13 +233,15 @@ git configuration entirely. `~/.git-credentials` is denied either way.
 
 ### `sandbox.credentials_dir`
 
-A directory of per-brain credential files kept outside the data directory.
-Brains are denied all of it except their own calendar pair
-(`google_calendar_credentials_<id>.json`, `google_calendar_token_<id>.json`).
+A directory of per-brain credential files kept outside the data directory
+(absolute or starting with `~/`). Brains are denied all of it except their
+own calendar pair (`google_calendar_credentials_<id>.json`,
+`google_calendar_token_<id>.json`).
 
 This is containment, not a jail — it raises the cost of a prompt injection
-rather than eliminating it. On Linux it does nothing; run the bridge as a
-dedicated user there.
+rather than eliminating it. Linux has no `sandbox-exec`: the bridge refuses a
+config with `sandbox.enabled` on there (the Linux default is off). Run the
+bridge as a dedicated user instead.
 
 ---
 

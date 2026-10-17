@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 
@@ -153,16 +154,20 @@ type Config struct {
 
 // SandboxConfig tunes the macOS sandbox profile applied to brain spawns.
 type SandboxConfig struct {
-	// Enabled wraps each brain spawn in sandbox-exec. macOS only; ignored
-	// elsewhere. Strongly recommended when running with skip-permissions.
+	// Enabled wraps each brain spawn in sandbox-exec. macOS only: elsewhere
+	// the config is rejected. Strongly recommended when running with
+	// skip-permissions. A run whose sandbox cannot be set up is refused,
+	// never run without it.
 	Enabled bool `json:"enabled"`
 
 	// DenyPaths are extra absolute paths (or ~-relative paths) that brains
 	// must not read — other projects, client work, anything private.
+	// Relative paths are rejected.
 	DenyPaths []string `json:"deny_paths"`
 
 	// AllowPaths are paths to re-allow after the built-in denies, for the rare
 	// case where a brain legitimately needs one of the default-denied dirs.
+	// Absolute or ~-relative, like DenyPaths.
 	AllowPaths []string `json:"allow_paths"`
 
 	// GitConfig is "read" (default: brains may read ~/.gitconfig and the files
@@ -171,7 +176,8 @@ type SandboxConfig struct {
 
 	// CredentialsDir is a directory of per-brain credential files. Brains are
 	// denied the whole directory except their own calendar credentials
-	// (google_calendar_{credentials,token}_<brain>.json).
+	// (google_calendar_{credentials,token}_<brain>.json). Absolute or
+	// ~-relative.
 	CredentialsDir string `json:"credentials_dir,omitempty"`
 }
 
@@ -470,6 +476,9 @@ func (cfg *Config) validate() error {
 	default:
 		return fmt.Errorf("sandbox.git_config must be \"read\" or \"deny\", not %q", cfg.Sandbox.GitConfig)
 	}
+	if err := cfg.Sandbox.validate(runtime.GOOS); err != nil {
+		return err
+	}
 	if cfg.HTTPEnabled() && !isLoopbackAddr(cfg.HTTPListen) {
 		return fmt.Errorf("http_listen %q must be a loopback address such as 127.0.0.1:8765 — the API and dashboard are for this machine only", cfg.HTTPListen)
 	}
@@ -516,6 +525,41 @@ func (cfg *Config) validate() error {
 			}
 			dmBrain = b.Name
 		}
+	}
+	return nil
+}
+
+// validate rejects sandbox settings that goos cannot honour. Brain runs
+// refuse to start without their sandbox, so an enabled sandbox on a system
+// without sandbox-exec is a configuration error, not something to ignore.
+// It runs after ~ expansion.
+func (sc SandboxConfig) validate(goos string) error {
+	if sc.Enabled && goos != "darwin" {
+		return fmt.Errorf("sandbox.enabled needs macOS (sandbox-exec) and this is %s: set it to false and run the bridge as a dedicated user instead", goos)
+	}
+	// A relative path is relative to whatever folder a brain runs in, so as
+	// a rule it would protect (or open) nothing anyone meant.
+	check := func(field, p string) error {
+		if !filepath.IsAbs(p) {
+			return fmt.Errorf("%s: %q must be an absolute path or start with ~/", field, p)
+		}
+		if _, err := sbplString(p); err != nil {
+			return fmt.Errorf("%s: %w", field, err)
+		}
+		return nil
+	}
+	for _, p := range sc.DenyPaths {
+		if err := check("sandbox.deny_paths", p); err != nil {
+			return err
+		}
+	}
+	for _, p := range sc.AllowPaths {
+		if err := check("sandbox.allow_paths", p); err != nil {
+			return err
+		}
+	}
+	if sc.CredentialsDir != "" {
+		return check("sandbox.credentials_dir", sc.CredentialsDir)
 	}
 	return nil
 }

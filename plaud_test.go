@@ -167,11 +167,11 @@ func TestPlaudBrainAccessSharesTheLogin(t *testing.T) {
 	if !strings.Contains(fp.calls(), "HOME="+tb.home+" ") {
 		t.Errorf("with brain_access the CLI must use the real home:\n%s", fp.calls())
 	}
-	if strings.Contains(tb.brainMgr.profiler.Profile("p"), filepath.Join(tb.home, ".plaud")) {
+	if strings.Contains(mustProfile(t, tb.brainMgr.profiler, "p"), filepath.Join(tb.home, ".plaud")) {
 		t.Error("with brain_access brains must be able to read ~/.plaud")
 	}
 	tb2, _ := plaudBridge(t, "")
-	if !strings.Contains(tb2.brainMgr.profiler.Profile("p"), filepath.Join(tb2.home, ".plaud")) {
+	if !strings.Contains(mustProfile(t, tb2.brainMgr.profiler, "p"), filepath.Join(tb2.home, ".plaud")) {
 		t.Error("without brain_access the sandbox must deny ~/.plaud")
 	}
 }

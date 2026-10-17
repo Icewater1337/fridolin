@@ -192,6 +192,17 @@ func (b *Bridge) apiStatus(w http.ResponseWriter, r *http.Request) {
 	if cfg.DangerouslySkipPermissions && !cfg.Sandbox.Enabled && runtime.GOOS == "darwin" {
 		resp.Warnings = append(resp.Warnings, "Brains run with all permissions and the sandbox is off. Turn the sandbox on under Settings → Sandbox.")
 	}
+	if cfg.Sandbox.Enabled {
+		// The Sandbox card shows "On" from the config alone; say when that
+		// does not hold.
+		if !cfg.BrainMode {
+			resp.Warnings = append(resp.Warnings, "Classic mode does not use the sandbox: Claude runs with everything your user account can reach. Brain mode sandboxes every run.")
+		} else if err := b.brainMgr.profiler.Available(); err != nil {
+			resp.Warnings = append(resp.Warnings, fmt.Sprintf("The sandbox is on but cannot run (%v), so brains refuse every message until it can.", err))
+		} else if w := sandboxProfileWarning(b.brainMgr); w != "" {
+			resp.Warnings = append(resp.Warnings, w)
+		}
+	}
 	for _, br := range b.brainMgr.Brains() {
 		resp.Brains = append(resp.Brains, br.Snapshot())
 	}
@@ -199,6 +210,30 @@ func (b *Bridge) apiStatus(w http.ResponseWriter, r *http.Request) {
 		resp.Brains = []BrainRuntime{}
 	}
 	writeJSON(w, http.StatusOK, resp)
+}
+
+// sandboxProfileWarning names the brains whose profile cannot be built, or
+// returns "". Every profile names every brain's folder, so one path the
+// profile cannot hold (a line break, a relative HOME) refuses the runs of
+// every brain, and the Overview would only show each run's generic error.
+func sandboxProfileWarning(bm *BrainManager) string {
+	var failing []string
+	var cause error
+	for _, br := range bm.Brains() {
+		if _, err := bm.profiler.Profile(br.ID()); err != nil {
+			failing = append(failing, br.ID())
+			if cause == nil {
+				cause = err
+			}
+		}
+	}
+	switch len(failing) {
+	case 0:
+		return ""
+	case 1:
+		return fmt.Sprintf("The sandbox profile cannot be built (%v), so brain %s refuses every message until that is fixed.", cause, failing[0])
+	}
+	return fmt.Sprintf("The sandbox profile cannot be built (%v), so brains %s refuse every message until that is fixed.", cause, strings.Join(failing, ", "))
 }
 
 func (b *Bridge) apiQR(w http.ResponseWriter, r *http.Request) {

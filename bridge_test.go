@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -304,6 +305,13 @@ func TestLoadConfigEnvOverride(t *testing.T) {
 
 func TestExampleConfigIsValid(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
+	if runtime.GOOS != "darwin" {
+		// The example turns the sandbox on, which only macOS can honour.
+		if _, err := LoadConfig("config.example.json"); err == nil || !strings.Contains(err.Error(), "sandbox.enabled") {
+			t.Fatalf("config.example.json on %s: err = %v, want the sandbox.enabled error", runtime.GOOS, err)
+		}
+		t.Setenv("SANDBOX_ENABLED", "false")
+	}
 	if _, err := LoadConfig("config.example.json"); err != nil {
 		t.Fatalf("config.example.json does not load: %v", err)
 	}
@@ -408,7 +416,7 @@ func TestSandboxProfileIsolatesBrains(t *testing.T) {
 		"team":     "/opt/brains/team",
 	}, cfg)
 
-	profile := sp.Profile("personal")
+	profile := mustProfile(t, sp, "personal")
 
 	if !strings.Contains(profile, `(deny file-read* (subpath "/opt/brains/team"))`) {
 		t.Error("personal's profile does not deny the team work dir")
@@ -423,7 +431,7 @@ func TestSandboxProfileDeniesSecretsAndAllowsKeychain(t *testing.T) {
 	t.Setenv("HOME", home)
 
 	sp := NewSandboxProfiler(map[string]string{"a": "/tmp/a"}, &Config{DataDir: filepath.Join(home, "data")})
-	profile := sp.Profile("a")
+	profile := mustProfile(t, sp, "a")
 
 	for _, secret := range []string{".ssh", ".aws", ".gnupg", "Library/Mail", ".git-credentials"} {
 		if !strings.Contains(profile, filepath.Join(home, secret)) {
@@ -442,7 +450,7 @@ func TestSandboxProfileScopesCalendarCredentials(t *testing.T) {
 	dataDir := filepath.Join(home, "data")
 
 	sp := NewSandboxProfiler(map[string]string{"a": "/tmp/a", "b": "/tmp/b"}, &Config{DataDir: dataDir})
-	profile := sp.Profile("a")
+	profile := mustProfile(t, sp, "a")
 
 	if !strings.Contains(profile, filepath.Join(dataDir, "google_calendar_credentials_a.json")) {
 		t.Error("brain a cannot read its own calendar credentials")
@@ -460,7 +468,7 @@ func TestSandboxProfileIncludesConfiguredDenies(t *testing.T) {
 		DataDir: filepath.Join(home, "data"),
 		Sandbox: SandboxConfig{DenyPaths: []string{"/private/clients"}},
 	}
-	profile := NewSandboxProfiler(map[string]string{"a": "/tmp/a"}, cfg).Profile("a")
+	profile := mustProfile(t, NewSandboxProfiler(map[string]string{"a": "/tmp/a"}, cfg), "a")
 
 	if !strings.Contains(profile, `(deny file-read* (subpath "/private/clients"))`) {
 		t.Error("configured deny path missing from the profile")

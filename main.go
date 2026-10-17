@@ -297,8 +297,12 @@ func checkCmd(args []string) {
 			}
 		}
 		if *sandboxFor != "" {
+			profile, err := mgr.profiler.Profile(*sandboxFor)
+			if err != nil {
+				log.Fatalf("sandbox profile: %v", err)
+			}
 			fmt.Println()
-			fmt.Print(mgr.profiler.Profile(*sandboxFor))
+			fmt.Print(profile)
 		}
 	}
 }

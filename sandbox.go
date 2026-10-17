@@ -2,15 +2,16 @@ package main
 
 import (
 	"bufio"
-	"crypto/rand"
-	"encoding/hex"
+	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"runtime"
 	"sort"
 	"strings"
 	"sync"
+	"unicode/utf8"
 )
 
 // sandboxExecPath is the macOS sandbox wrapper used for brain spawns.
@@ -51,16 +52,19 @@ type SandboxProfiler struct {
 	// extraDeny and extraAllow come from config.
 	extraDeny  []string
 	extraAllow []string
+
+	// execPath is sandboxExecPath; tests point it at a missing file.
+	execPath string
 }
 
 // NewSandboxProfiler builds a profiler for the configured brains.
 func NewSandboxProfiler(workDirs map[string]string, cfg *Config) *SandboxProfiler {
-	sp := &SandboxProfiler{}
+	sp := &SandboxProfiler{execPath: sandboxExecPath}
 	sp.Update(workDirs, cfg)
 	return sp
 }
 
-// Update replaces the brain set and settings. Profiles are written per run,
+// Update replaces the brain set and settings. Profiles are built per run,
 // so the next run of every brain picks the change up.
 func (sp *SandboxProfiler) Update(workDirs map[string]string, cfg *Config) {
 	wd := make(map[string]string, len(workDirs))
@@ -132,13 +136,26 @@ var defaultDenyLiterals = []string{
 	".bash_history",
 }
 
-// Profile returns the sandbox profile source for the brain with this id.
-func (sp *SandboxProfiler) Profile(brainID string) string {
+// Profile returns the sandbox profile source for the brain with this id. It
+// fails when a path cannot be written into the profile: a profile that
+// silently skipped a rule would protect less than the config says.
+func (sp *SandboxProfiler) Profile(brainID string) (string, error) {
 	sp.mu.RLock()
 	defer sp.mu.RUnlock()
 	home := os.Getenv("HOME")
+	if !filepath.IsAbs(home) {
+		// Every home-relative deny would silently become a relative path.
+		return "", fmt.Errorf("HOME %q is not an absolute path", home)
+	}
 
-	var b strings.Builder
+	var b profileBuilder
+	b.trustRoot(home)
+	if sp.dataDir != "" {
+		b.trustRoot(sp.dataDir)
+	}
+	if sp.credsDir != "" {
+		b.trustRoot(sp.credsDir)
+	}
 	b.WriteString("(version 1)\n(allow default)\n\n")
 
 	// ── other brains' working trees ──────────────────────────────────────
@@ -152,8 +169,8 @@ func (sp *SandboxProfiler) Profile(brainID string) string {
 	if len(others) > 0 {
 		b.WriteString(";; Other brains' working trees\n")
 		for _, dir := range others {
-			fmt.Fprintf(&b, "(deny file-read* (subpath %q))\n", dir)
-			fmt.Fprintf(&b, "(deny file-write* (subpath %q))\n", dir)
+			b.deny("file-read*", "subpath", dir)
+			b.deny("file-write*", "subpath", dir)
 		}
 		b.WriteString("\n")
 	}
@@ -161,15 +178,15 @@ func (sp *SandboxProfiler) Profile(brainID string) string {
 	// ── home-directory hotspots ──────────────────────────────────────────
 	b.WriteString(";; Cross-session state, credentials, and personal data stores\n")
 	for _, sub := range defaultDenySubpaths {
-		fmt.Fprintf(&b, "(deny file-read* (subpath %q))\n", filepath.Join(home, sub))
+		b.deny("file-read*", "subpath", filepath.Join(home, sub))
 	}
 	for _, lit := range defaultDenyLiterals {
-		fmt.Fprintf(&b, "(deny file-read* (literal %q))\n", filepath.Join(home, lit))
+		b.deny("file-read*", "literal", filepath.Join(home, lit))
 	}
 	if !sp.plaudShared {
 		// The Plaud CLI's login, unless plaud.brain_access shares it.
-		fmt.Fprintf(&b, "(deny file-read* (subpath %q))\n", filepath.Join(home, ".plaud"))
-		fmt.Fprintf(&b, "(deny file-write* (subpath %q))\n", filepath.Join(home, ".plaud"))
+		b.deny("file-read*", "subpath", filepath.Join(home, ".plaud"))
+		b.deny("file-write*", "subpath", filepath.Join(home, ".plaud"))
 	}
 	b.WriteString("\n")
 
@@ -181,14 +198,14 @@ func (sp *SandboxProfiler) Profile(brainID string) string {
 	if sp.gitConfig == "deny" {
 		b.WriteString(";; Git configuration (denied by sandbox.git_config)\n")
 		for _, f := range gitFiles {
-			fmt.Fprintf(&b, "(deny file-read* (literal %q))\n", f)
+			b.deny("file-read*", "literal", f)
 		}
 	} else {
 		b.WriteString(";; Git configuration: readable, never writable\n")
 		for _, f := range gitFiles {
-			fmt.Fprintf(&b, "(deny file-write* (literal %q))\n", f)
+			b.deny("file-write*", "literal", f)
 		}
-		fmt.Fprintf(&b, "(deny file-write* (subpath %q))\n", filepath.Join(home, ".config", "git"))
+		b.deny("file-write*", "subpath", filepath.Join(home, ".config", "git"))
 	}
 	b.WriteString("\n")
 
@@ -198,18 +215,18 @@ func (sp *SandboxProfiler) Profile(brainID string) string {
 	// staging dir, so it is re-allowed below.
 	if sp.dataDir != "" {
 		b.WriteString(";; Bridge runtime data (media staging re-allowed below)\n")
-		fmt.Fprintf(&b, "(deny file-read* (subpath %q))\n", sp.dataDir)
-		fmt.Fprintf(&b, "(deny file-write* (subpath %q))\n", sp.dataDir)
-		fmt.Fprintf(&b, "(allow file-read* (subpath %q))\n", sp.mediaDir)
-		fmt.Fprintf(&b, "(allow file-write* (subpath %q))\n", sp.mediaDir)
-		writeCalendarAllows(&b, sp.dataDir, brainID)
+		b.deny("file-read*", "subpath", sp.dataDir)
+		b.deny("file-write*", "subpath", sp.dataDir)
+		b.allow("file-read*", "subpath", sp.mediaDir)
+		b.allow("file-write*", "subpath", sp.mediaDir)
+		b.calendarAllows(sp.dataDir, brainID)
 		b.WriteString("\n")
 	}
 	if sp.credsDir != "" {
 		b.WriteString(";; Shared credentials dir: only this brain's own calendar files\n")
-		fmt.Fprintf(&b, "(deny file-read* (subpath %q))\n", sp.credsDir)
-		fmt.Fprintf(&b, "(deny file-write* (subpath %q))\n", sp.credsDir)
-		writeCalendarAllows(&b, sp.credsDir, brainID)
+		b.deny("file-read*", "subpath", sp.credsDir)
+		b.deny("file-write*", "subpath", sp.credsDir)
+		b.calendarAllows(sp.credsDir, brainID)
 		b.WriteString("\n")
 	}
 
@@ -217,15 +234,15 @@ func (sp *SandboxProfiler) Profile(brainID string) string {
 	if len(sp.extraDeny) > 0 {
 		b.WriteString(";; Extra denies from config\n")
 		for _, p := range sp.extraDeny {
-			fmt.Fprintf(&b, "(deny file-read* (subpath %q))\n", p)
-			fmt.Fprintf(&b, "(deny file-write* (subpath %q))\n", p)
+			b.deny("file-read*", "subpath", p)
+			b.deny("file-write*", "subpath", p)
 		}
 		b.WriteString("\n")
 	}
 	if len(sp.extraAllow) > 0 {
 		b.WriteString(";; Extra allows from config (override the denies above)\n")
 		for _, p := range sp.extraAllow {
-			fmt.Fprintf(&b, "(allow file-read* (subpath %q))\n", p)
+			b.allow("file-read*", "subpath", p)
 		}
 		b.WriteString("\n")
 	}
@@ -235,22 +252,191 @@ func (sp *SandboxProfiler) Profile(brainID string) string {
 	// files, even when its folder sits inside a default-denied directory.
 	if own := sp.workDirs[brainID]; own != "" {
 		b.WriteString(";; This brain's own folder\n")
-		fmt.Fprintf(&b, "(allow file-read* (subpath %q))\n", own)
-		fmt.Fprintf(&b, "(allow file-write* (subpath %q))\n", own)
+		b.allow("file-read*", "subpath", own)
+		b.allow("file-write*", "subpath", own)
 	}
 
-	return b.String()
+	if b.err != nil {
+		return "", b.err
+	}
+	return b.String(), nil
 }
 
-// writeCalendarAllows re-allows a brain's own calendar credential pair in dir:
+// profileBuilder writes SBPL. Every path goes through deny or allow, so each
+// one is quoted and canonicalized the same way; the first path that cannot be
+// written is kept in err and fails the whole profile.
+type profileBuilder struct {
+	strings.Builder
+	err error
+	// roots are folders a brain cannot replace, with their real paths.
+	roots []pathAlias
+}
+
+type pathAlias struct{ configured, real string }
+
+// deny emits "(deny op (filter "path"))", e.g. deny("file-read*", "subpath", dir).
+//
+// The sandbox matches real paths, so a rule for a path that runs through a
+// symlink never fires: under a symlinked HOME (or /var instead of
+// /private/var) a brain read ~/.fridolin straight through its real path.
+// deny therefore emits the rule for the real path as well, following every
+// symlink: a deny that covers more only takes access away. The configured
+// spelling stays too, for the day the symlink is replaced by a real folder.
+func (b *profileBuilder) deny(op, filter, path string) {
+	p, ok := b.absolute(path)
+	if !ok {
+		return
+	}
+	configured := filepath.Clean(p)
+	b.emit("deny "+op, filter, configured)
+	if real := resolvePath(p); real != configured {
+		b.emit("deny "+op, filter, real)
+	}
+}
+
+// allow emits "(allow op (filter "path"))" for path, and again with its
+// longest trusted root (see trustRoot) replaced by that root's real path.
+// Unlike deny it follows no other symlink: a brain can replace its own
+// folder, the media dir or its calendar token with a symlink, and an allow
+// that followed it would open whatever the symlink points to.
+func (b *profileBuilder) allow(op, filter, path string) {
+	p, ok := b.absolute(path)
+	if !ok {
+		return
+	}
+	configured := filepath.Clean(p)
+	b.emit("allow "+op, filter, configured)
+	best := pathAlias{}
+	for _, r := range b.roots {
+		if (configured == r.configured || strings.HasPrefix(configured, r.configured+string(filepath.Separator))) &&
+			len(r.configured) > len(best.configured) {
+			best = r
+		}
+	}
+	if best.configured != "" {
+		b.emit("allow "+op, filter, best.real+strings.TrimPrefix(configured, best.configured))
+	}
+}
+
+// trustRoot lets allow rules under dir resolve through dir's real path. Only
+// for folders a brain cannot swap for a symlink: HOME, and the data and
+// credentials dirs, which the profile denies writes to.
+func (b *profileBuilder) trustRoot(dir string) {
+	p, ok := b.absolute(dir)
+	if !ok {
+		return
+	}
+	if configured, real := filepath.Clean(p), resolvePath(p); real != configured {
+		b.roots = append(b.roots, pathAlias{configured, real})
+	}
+}
+
+// absolute returns path made absolute, or fails the profile.
+func (b *profileBuilder) absolute(path string) (string, bool) {
+	if path == "" {
+		// Made absolute, "" would be the bridge's working directory.
+		b.fail(errors.New("empty path in the sandbox profile"))
+		return "", false
+	}
+	if filepath.IsAbs(path) {
+		return path, true
+	}
+	// A relative rule compiles and matches nothing. The bridge itself
+	// resolves such a path against its working directory, so do the same.
+	wd, err := os.Getwd()
+	if err != nil {
+		b.fail(fmt.Errorf("resolving sandbox path %q: %w", path, err))
+		return "", false
+	}
+	return wd + string(filepath.Separator) + path, true
+}
+
+func (b *profileBuilder) emit(rule, filter, path string) {
+	q, err := sbplString(path)
+	if err != nil {
+		b.fail(err)
+		return
+	}
+	fmt.Fprintf(b, "(%s (%s %s))\n", rule, filter, q)
+}
+
+func (b *profileBuilder) fail(err error) {
+	if b.err == nil {
+		b.err = err
+	}
+}
+
+// maxSymlinks bounds resolvePath on a symlink loop.
+const maxSymlinks = 64
+
+// resolvePath returns the real path of the absolute path p. Every symlink in
+// the part that exists is resolved, including a dangling one (it resolves to
+// its target), and the part that does not exist yet is kept as written, so
+// a rule still matches a folder created later. ".." is applied to the
+// resolved path, as the kernel does. On a symlink loop p comes back as is.
+func resolvePath(p string) string {
+	resolved := string(filepath.Separator)
+	rest := strings.Split(p, string(filepath.Separator))
+	links := 0
+	for len(rest) > 0 {
+		name := rest[0]
+		rest = rest[1:]
+		switch name {
+		case "", ".":
+			continue
+		case "..":
+			resolved = filepath.Dir(resolved)
+			continue
+		}
+		next := filepath.Join(resolved, name)
+		fi, err := os.Lstat(next)
+		if err != nil || fi.Mode()&fs.ModeSymlink == 0 {
+			// A real entry, or one that does not exist (yet): nothing to resolve.
+			resolved = next
+			continue
+		}
+		target, err := os.Readlink(next)
+		if links++; err != nil || links > maxSymlinks {
+			return filepath.Clean(p)
+		}
+		if !filepath.IsAbs(target) {
+			target = resolved + string(filepath.Separator) + target
+		}
+		// Walk the target from the root: it may hold symlinks and ".." too.
+		rest = append(strings.Split(target, string(filepath.Separator)), rest...)
+		resolved = string(filepath.Separator)
+	}
+	return resolved
+}
+
+// calendarAllows re-allows a brain's own calendar credential pair in dir:
 // read both, and write the token back on refresh.
-func writeCalendarAllows(b *strings.Builder, dir, brainID string) {
+func (b *profileBuilder) calendarAllows(dir, brainID string) {
 	creds := filepath.Join(dir, "google_calendar_credentials_"+brainID+".json")
 	token := filepath.Join(dir, "google_calendar_token_"+brainID+".json")
-	fmt.Fprintf(b, "(allow file-read* (literal %q))\n", creds)
-	fmt.Fprintf(b, "(allow file-read* (literal %q))\n", token)
-	fmt.Fprintf(b, "(allow file-write* (literal %q))\n", token)
+	b.allow("file-read*", "literal", creds)
+	b.allow("file-read*", "literal", token)
+	b.allow("file-write*", "literal", token)
 }
+
+// sbplString quotes s as an SBPL string literal. Go's %q is not one: it
+// writes a no-break space as \u00a0 and the joiner inside emoji as \u200d,
+// which the profile reader does not decode, so the rule named a path that
+// does not exist and never matched. Only backslash and double quote need
+// escaping; everything else goes in as UTF-8. A NUL cannot be passed in an
+// argument at all, and line breaks or invalid UTF-8 are refused rather than
+// guessed at.
+func sbplString(s string) (string, error) {
+	if !utf8.ValidString(s) {
+		return "", fmt.Errorf("sandbox path %q is not valid UTF-8", s)
+	}
+	if strings.ContainsAny(s, "\x00\n\r") {
+		return "", fmt.Errorf("sandbox path %q contains a NUL or a line break", s)
+	}
+	return `"` + sbplEscaper.Replace(s) + `"`, nil
+}
+
+var sbplEscaper = strings.NewReplacer(`\`, `\\`, `"`, `\"`)
 
 // gitConfigChain returns ~/.gitconfig plus every file it includes
 // ([include] / [includeIf] path = …), one level deep.
@@ -288,25 +474,29 @@ func gitConfigChain(home string) []string {
 	return out
 }
 
-// Write renders the profile for a brain into a private temp file and returns
-// its path. The caller unlinks the file once the spawned process exits.
-func (sp *SandboxProfiler) Write(brainID string) (string, error) {
+// Available reports why brain runs cannot be sandboxed on this machine, or
+// nil when they can.
+func (sp *SandboxProfiler) Available() error {
 	if runtime.GOOS != "darwin" {
-		return "", fmt.Errorf("sandbox-exec is macOS-only, got %s", runtime.GOOS)
+		return fmt.Errorf("sandbox-exec is macOS-only, got %s", runtime.GOOS)
 	}
-	if _, err := os.Stat(sandboxExecPath); err != nil {
-		return "", fmt.Errorf("%s not available: %w", sandboxExecPath, err)
+	if _, err := os.Stat(sp.execPath); err != nil {
+		return fmt.Errorf("%s not available: %w", sp.execPath, err)
 	}
+	return nil
+}
 
-	buf := make([]byte, 6)
-	if _, err := rand.Read(buf); err != nil {
-		return "", fmt.Errorf("rand: %w", err)
+// Command returns the program and arguments that run claudePath with args
+// under the brain's profile. The profile goes inline (-p): a profile file in
+// the shared TMPDIR could be swapped by another brain between being written
+// and being read, and a brain that made TMPDIR unwritable broke the sandbox.
+func (sp *SandboxProfiler) Command(brainID, claudePath string, args []string) (string, []string, error) {
+	if err := sp.Available(); err != nil {
+		return "", nil, err
 	}
-
-	name := fmt.Sprintf("fridolin-brain-%s-%s.sb", brainID, hex.EncodeToString(buf))
-	path := filepath.Join(os.TempDir(), name)
-	if err := os.WriteFile(path, []byte(sp.Profile(brainID)), 0o600); err != nil {
-		return "", fmt.Errorf("write profile: %w", err)
+	profile, err := sp.Profile(brainID)
+	if err != nil {
+		return "", nil, err
 	}
-	return path, nil
+	return sp.execPath, append([]string{"-p", profile, claudePath}, args...), nil
 }
