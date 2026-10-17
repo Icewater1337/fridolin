@@ -401,7 +401,8 @@ func LoadConfig(cfgPath string) (*Config, error) {
 }
 
 // dataDirName and legacyDataDirName are the home-relative names of the data
-// dir, now and before the project was renamed.
+// dir, now and before the project was renamed. compat: installs from before
+// the rename keep the old one, see defaultDataDir.
 const (
 	dataDirName       = ".fridolin"
 	legacyDataDirName = ".whatsapp-claude-bridge"

@@ -1602,8 +1602,8 @@ func settingsFor(cfg *Config, sp BrainSpec) *brainSettings {
 
 // dataEnv tells the tools in tools/ where the bridge keeps its data, so they
 // need not guess: poll_results.py opens the DB at BRIDGE_DB_PATH, and
-// calendar_tool.py falls back to BRIDGE_DATA_DIR. Both are external names
-// that brains and their scripts rely on.
+// calendar_tool.py falls back to BRIDGE_DATA_DIR. compat: brains and their
+// scripts rely on these names, as on the other BRIDGE_ variables.
 func dataEnv(s *brainSettings) []string {
 	return []string{"BRIDGE_DATA_DIR=" + s.dataDir, "BRIDGE_DB_PATH=" + s.dbPath}
 }

@@ -129,6 +129,8 @@ func originGuard(allowed map[string]bool, next http.Handler) http.Handler {
 // header and a JSON body on writes (which a cross-site form cannot send).
 func (b *Bridge) apiGuard(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// compat: the dashboard, and any script that calls the API, sends
+		// the token under this name.
 		if b.cfgs.Get().DashboardRequiresToken() && !b.token.Matches(r.Header.Get("X-Bridge-Token")) {
 			writeErr(w, http.StatusUnauthorized, "missing or wrong dashboard token")
 			return

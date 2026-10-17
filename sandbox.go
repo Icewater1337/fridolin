@@ -159,7 +159,8 @@ var defaultDenySubpaths = []string{
 	".config/gcloud",
 	".config/rclone",
 	// The personal-data denylist that scripts/check-personal-data.sh reads,
-	// under both names the project has had.
+	// under both names the project has had (compat: the old one may still
+	// be on disk, as may the old log folder below).
 	".config/fridolin",
 	".config/whatsapp-claude-bridge",
 	// The bridge's own logs (the launchd agent's, see service.go), which

@@ -155,6 +155,14 @@ Reopen the dashboard with `fridolin open`. To upgrade later: `git pull &&
   pages against a stubbed bridge in a fake DOM (`web/test/serve.js`,
   `web/test/fake-dom.js`), and check that every import resolves and keeps
   those layers.
+- The project was called whatsapp-claude-bridge before. Names from then
+  that are on disk or that others rely on stay, each marked `compat:` in
+  the code: the data dir `~/.whatsapp-claude-bridge`, which the bridge
+  still uses when `~/.fridolin` does not exist (`defaultDataDir`), and the
+  sandbox's denies of the old `~/.config` and `~/Library/Logs` folders.
+  *Bridge* is still the product's own word: `bridge.db`, `bridge.lock`,
+  the `X-Bridge-Token` header and the `BRIDGE_*` variables brains read
+  keep it. Mark a new shim like these the same way.
 - Run `scripts/install-hooks.sh` before committing. The hooks refuse commits
   and pushes containing phone numbers, WhatsApp JIDs, emails, home paths or
   tokens. Use placeholders: `15551234567`, `120363000000000000@g.us`,
