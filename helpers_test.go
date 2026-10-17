@@ -6,6 +6,7 @@ import (
 	"io/fs"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"testing"
@@ -114,6 +115,40 @@ func fakeClaudeEnv(t *testing.T, sleepMS int) string {
 	return os.Args[0]
 }
 
+// requireTestDataDir fails the test unless every path the bridge writes its
+// data to lies inside this test's temporary directory. The helpers that open
+// a store call it first, so a config that still points at a real install
+// (through an override TestMain missed, say) stops the test before the
+// store, the token or rclone's config is touched.
+func requireTestDataDir(t testing.TB, cfg *Config) {
+	t.Helper()
+	// t.TempDir hands out numbered folders inside one directory per test.
+	if err := checkTestDataDir(filepath.Dir(t.TempDir()), cfg); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// checkTestDataDir reports the first data path of cfg outside root. Paths
+// may use root as given or with its symlinks resolved (/var and /private/var
+// on macOS).
+func checkTestDataDir(root string, cfg *Config) error {
+	roots := []string{filepath.Clean(root), canonicalDir(root)}
+	for _, p := range []struct{ field, path string }{
+		{"data_dir", cfg.DataDir},
+		{"db_path", cfg.DBPath},
+		{"media_dir", cfg.MediaDir},
+	} {
+		inside := false
+		for _, r := range roots {
+			inside = inside || isWithin(p.path, r)
+		}
+		if !inside {
+			return fmt.Errorf("%s %q is outside the test's temp dir %s: refusing to touch it", p.field, p.path, root)
+		}
+	}
+	return nil
+}
+
 // clearEnv unsets keys for the rest of the test and restores them afterwards,
 // so a value the code under test exports cannot leak into the next test.
 func clearEnv(t *testing.T, keys ...string) {
@@ -207,3 +242,74 @@ func fakePlaud(args []string) int {
 	}
 	return 0
 }
+
+func TestCheckTestDataDir(t *testing.T) {
+	root := t.TempDir()
+	in := filepath.Join(root, "data")
+	out := filepath.Join(filepath.Dir(root), "elsewhere")
+	tests := []struct {
+		name            string
+		data, db, media string
+		wantErr         string // "" means the paths are accepted
+	}{
+		{"all inside", in, in + "/bridge.db", in + "/media", ""},
+		{"inside through the resolved root", canonicalDir(root) + "/data", canonicalDir(root) + "/data/bridge.db", canonicalDir(root) + "/data/media", ""},
+		{"data dir outside", out, in + "/bridge.db", in + "/media", "data_dir"},
+		{"database outside", in, out + "/bridge.db", in + "/media", "db_path"},
+		{"media outside", in, in + "/bridge.db", out + "/media", "media_dir"},
+		{"sibling sharing the prefix", root + "x/data", in + "/bridge.db", in + "/media", "data_dir"},
+		{"relative to the working directory", "data", in + "/bridge.db", in + "/media", "data_dir"},
+		{"empty", "", in + "/bridge.db", in + "/media", "data_dir"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			err := checkTestDataDir(root, &Config{DataDir: tc.data, DBPath: tc.db, MediaDir: tc.media})
+			switch {
+			case tc.wantErr == "" && err != nil:
+				t.Errorf("unexpected error: %v", err)
+			case tc.wantErr != "" && (err == nil || !strings.Contains(err.Error(), tc.wantErr)):
+				t.Errorf("err = %v, want one about %s", err, tc.wantErr)
+			}
+		})
+	}
+}
+
+func TestRequireTestDataDir(t *testing.T) {
+	// TestCheckTestDataDir passing says nothing about whether the guard the
+	// helpers call checks at all, or against which root. A data dir in
+	// another test's temp dir lies in the system temp dir too, so a root
+	// wider than the test's own lets it through.
+	other := filepath.Join(t.TempDir(), "data")
+	tests := []struct {
+		name    string
+		dataDir func(t *testing.T) string
+		refused bool
+	}{
+		{"in this test's temp dir", func(t *testing.T) string { return filepath.Join(t.TempDir(), "data") }, false},
+		{"in another test's temp dir", func(*testing.T) string { return other }, true},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := tc.dataDir(t)
+			r := &fatalRecorder{TB: t}
+			requireTestDataDir(r, &Config{DataDir: dir, DBPath: filepath.Join(dir, "bridge.db"), MediaDir: filepath.Join(dir, "media")})
+			switch {
+			case !tc.refused && r.fatal != "":
+				t.Errorf("refused a data dir inside the test's temp dir: %s", r.fatal)
+			case tc.refused && !strings.Contains(r.fatal, "data_dir"):
+				t.Errorf("Fatal(%q), want a refusal of data_dir %s", r.fatal, dir)
+			}
+		})
+	}
+}
+
+// fatalRecorder is a testing.TB whose Fatal records the message instead of
+// ending the test, so a test can check that a helper would have failed it.
+type fatalRecorder struct {
+	testing.TB
+	fatal string
+}
+
+func (r *fatalRecorder) Fatal(args ...any) { r.fatal = fmt.Sprint(args...) }
+
+func (r *fatalRecorder) Fatalf(format string, args ...any) { r.fatal = fmt.Sprintf(format, args...) }

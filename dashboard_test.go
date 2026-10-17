@@ -47,6 +47,7 @@ func newTestBridge(t *testing.T, extra string, dotenv ...string) *testBridge {
 	if err != nil {
 		t.Fatal(err)
 	}
+	requireTestDataDir(t, cfgs.Get())
 	b, err := NewBridge(cfgs, BridgeOptions{NoWhatsApp: true})
 	if err != nil {
 		t.Fatal(err)
