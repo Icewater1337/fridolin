@@ -1463,13 +1463,21 @@ func TestOTPGuardHandsCodeToLocalScripts(t *testing.T) {
 	if w := tb.do("POST", "/api/dev/inbound", map[string]any{"jid": "15551234567@s.whatsapp.net", "text": " 483920 "}); w.Code != 202 {
 		t.Fatal(w.Body.String())
 	}
+	asked := time.Now().UnixMilli()
 	otp := filepath.Join(tb.cfgs.Get().DataDir, "otp", "p.json")
 	waitFor(t, 3*time.Second, "otp file", func() bool { _, err := os.Stat(otp); return err == nil })
 	data, _ := os.ReadFile(otp)
-	var got map[string]string
+	var got struct {
+		Brain, Chat, Sender, Code, Received string
+		ReceivedUnixMS                      int64 `json:"received_unix_ms"`
+	}
 	_ = json.Unmarshal(data, &got)
-	if got["code"] != "483920" || got["chat"] != "15551234567@s.whatsapp.net" {
+	if got.Code != "483920" || got.Chat != "15551234567@s.whatsapp.net" || got.Brain != "p" || got.Sender == "" || got.Received == "" {
 		t.Errorf("otp file = %s", data)
+	}
+	// What a script compares with the time it asked: no time zone needed.
+	if got.ReceivedUnixMS < asked-5000 || got.ReceivedUnixMS > time.Now().UnixMilli() {
+		t.Errorf("received_unix_ms = %d, want a time around %d", got.ReceivedUnixMS, asked)
 	}
 	if st, _ := os.Stat(otp); st.Mode().Perm() != 0o600 {
 		t.Errorf("otp file mode %v", st.Mode().Perm())

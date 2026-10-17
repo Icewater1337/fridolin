@@ -181,7 +181,7 @@ func TestOTPGuardDropsQuotedCode(t *testing.T) {
 		_, err := os.Stat(otpFile)
 		return err == nil
 	})
-	var got map[string]string
+	var got map[string]any
 	data, _ := os.ReadFile(otpFile)
 	if err := json.Unmarshal(data, &got); err != nil || got["code"] != "483920" {
 		t.Errorf("otp file = %s (%v), want the bare code", data, err)

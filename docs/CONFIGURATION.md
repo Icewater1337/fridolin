@@ -743,12 +743,24 @@ include them if you still want them. Only what was typed counts: a code sent
 as a reply to the request is caught too.
 
 The code is never written to history or sent to the model — the assistant
-never sees it. It is handed to whatever local script asked for it instead:
-`<data_dir>/otp/<brain>.json` holds the latest caught code
-(`{"code", "chat", "sender", "received"}`), readable only by your user and
-denied to brains by the sandbox. A script that requested a code through
-`/send` (with one of the `otp_markers` in its message) polls that file for a
-`received` time after its request.
+never sees it. It is kept for local scripts instead:
+`<data_dir>/otp/<brain>.json` holds the latest code the guard caught for
+that brain, readable only by your user and denied to brains by the sandbox:
+
+```json
+{"brain": "main", "chat": "15551234567@s.whatsapp.net", "sender": "15551234567",
+ "code": "483920", "received": "2026-10-18T09:30:12+02:00", "received_unix_ms": 1792308612345}
+```
+
+Each caught code replaces the one before, and the file stays until then, so
+a script deletes it once it has used the code if it wants it gone. The
+guard reacts to any message the brain sent with a marker, not only to a
+`/send`, and the file carries no request id. A script that asked for a code
+through `/send` (with one of the `otp_markers` in its message) therefore
+polls the file for one whose `chat` (and `sender`) are the chat it asked in,
+and whose `received_unix_ms` is later than the time of its request; that
+field needs no time zone, unlike `received`, which ends in `Z` on a host
+set to UTC.
 
 ### `max_chunk_size`
 

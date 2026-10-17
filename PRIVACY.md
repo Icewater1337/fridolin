@@ -25,7 +25,9 @@ policy describes what that copy does with data.
 
 - Everything is stored **on your own computer**: messages, history, memories,
   downloaded files, and the sign-in tokens for Google (readable only by the
-  brain they belong to).
+  brain they belong to). A one-time code the OTP guard catches is kept in
+  `<data_dir>/otp/` for the local script that asked for it, readable only by
+  your user, until the next code replaces it.
 - To answer a message, the bridge runs **Claude Code** on your computer. Claude
   Code sends the prompt — which can include the message, recent chat history
   and any calendar details the brain looked up — to **Anthropic** to generate

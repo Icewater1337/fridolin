@@ -328,12 +328,17 @@ func (b *Bridge) recordOTP(br *Brain, m Inbound) {
 		log.Printf("otp: %v", err)
 		return
 	}
-	data, _ := json.Marshal(map[string]string{
+	now := time.Now()
+	data, _ := json.Marshal(map[string]any{
 		"brain":    br.ID(),
 		"chat":     m.JID,
 		"sender":   m.Sender,
 		"code":     strings.TrimSpace(m.Text),
-		"received": time.Now().Format(time.RFC3339), // local time with offset, like the history
+		"received": now.Format(time.RFC3339), // local time with offset, like the history
+		// What scripts compare with the time of their request: it needs no
+		// time zone (received ends in "Z" on a host in UTC, which Python
+		// before 3.11 cannot read) and tells apart two codes in one second.
+		"received_unix_ms": now.UnixMilli(),
 	})
 	if err := writeFileAtomic(filepath.Join(dir, br.ID()+".json"), data, 0o600, false); err != nil {
 		log.Printf("otp: %v", err)
