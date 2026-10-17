@@ -33,6 +33,9 @@ Usage:
                                            fridolin service --help for more
   fridolin version
 
+Run by brains, inside a run (each prints JSON; -h shows its flags):
+  fridolin history QUERY     search the brain's conversation history
+
 Common flags:
   --config PATH     config file (default: $FRIDOLIN_CONFIG, else
                     ~/.fridolin/config.json)
@@ -64,6 +67,8 @@ func main() {
 		mcpSiteCmd()
 	case "service":
 		serviceCmd(args)
+	case "history":
+		os.Exit(historyCmd(args, processToolIO()))
 	case "version":
 		fmt.Println(bridgeVersion())
 	case "help":
