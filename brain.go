@@ -606,7 +606,7 @@ func (br *Brain) ensureViewer(s *brainSettings) {
 		return
 	}
 	f.Close()
-	tv, err := startViewer("claude-"+br.id, br.streamLogPath(), br.workDir)
+	tv, err := startViewer("claude-"+br.id, br.streamLogPath(), br.workDir, childEnv(anyChild, s.envPassthrough))
 	if err != nil {
 		log.Printf("brain %s: could not start tmux viewer: %v", br.id, err)
 		return

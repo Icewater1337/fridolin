@@ -62,6 +62,7 @@ var childEnvAllowlist = []childEnvVar{
 	{"SSL_CERT_DIR", anyChild},        // a folder of CA certificates for the same
 
 	{"DO_NOT_TRACK", anyChild}, // the telemetry opt-out many tools honour
+	{"TMUX_TMPDIR", anyChild},  // where tmux keeps its socket: the viewer must start the server `tmux attach` finds
 
 	// The Claude CLI's own settings.
 	//

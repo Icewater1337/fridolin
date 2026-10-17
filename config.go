@@ -89,8 +89,9 @@ type Config struct {
 	InheritClaudeUserConfig bool `json:"inherit_claude_user_config,omitempty"`
 
 	// ChildEnvPassthrough names variables of the bridge's environment that
-	// brains get besides childEnvAllowlist, such as GROQ_API_KEY for a
-	// transcription tool. Anyone who may message a brain can read them.
+	// brains, and the activity viewer's tmux server they can read, get
+	// besides childEnvAllowlist, such as GROQ_API_KEY for a transcription
+	// tool. Anyone who may message a brain can read them.
 	ChildEnvPassthrough []string `json:"child_env_passthrough,omitempty"`
 
 	// HTTPListen is the address of the local HTTP server: the dashboard plus

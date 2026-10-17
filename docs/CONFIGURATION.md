@@ -284,12 +284,14 @@ environment does not have is skipped. Names a setup typically needs:
   `transcribe.py` (about 1.5 GB), which a brain otherwise downloads again
   into the default cache
 
-A brain's run gets them, and so the scripts and tools it runs, and so
-does the dashboard's `claude --version` check. Anyone who may message a
-brain can ask it for these values, so list only what a brain needs, and
-set the variables themselves where the bridge's environment comes from (see
-[Environment variables](#environment-variables)).
-A change applies from the next message.
+A brain's run gets them, and so the scripts and tools it runs, and so do
+the dashboard's `claude --version` check and the tmux server of the
+activity [`viewer`](#viewer), which brains can read anyway. Anyone who may
+message a brain can ask it for these values, so list only what a brain
+needs, and set the variables themselves where the bridge's environment
+comes from (see [Environment variables](#environment-variables)). A change
+applies from the next run; an open activity viewer keeps what it started
+with.
 
 A setting that is no secret, such as the CLI's or a cache's, can go into
 a brain folder's `.claude/settings.json` instead, under `env`. The CLI sets
@@ -750,6 +752,10 @@ starts these sessions on tmux's default server, outside the sandbox, and any
 brain can send that server commands (`tmux run-shell`), which then run
 unsandboxed. The same goes for a tmux you run yourself; see
 [what the sandbox does not cover yet](#what-the-sandbox-does-not-cover-yet).
+A server the bridge starts keeps the environment it started with, which
+any brain can read, so it gets only a few of the bridge's variables,
+never the Claude CLI's login (see
+[what reaches brains](#what-reaches-brains)).
 
 ### `log_level` *(restart)*
 
@@ -792,7 +798,7 @@ variables of the bridge's environment:
 | --------- | --- |
 | `HOME`, `USER`, `LOGNAME`, `PATH`, `SHELL`, `TMPDIR`, `LANG`, `LC_*`, `TERM`, `TZ` | what any program expects |
 | `HTTPS_PROXY`, `HTTP_PROXY`, `NO_PROXY` (also in lower case), `NODE_EXTRA_CA_CERTS`, `SSL_CERT_FILE`, `SSL_CERT_DIR` | a proxy, or a firewall that inspects TLS |
-| `DO_NOT_TRACK` | the telemetry opt-out many tools honour |
+| `DO_NOT_TRACK`, `TMUX_TMPDIR` | the telemetry opt-out many tools honour; where tmux keeps its socket |
 | `CLAUDE_CODE_*`, `ANTHROPIC_*`, `CLAUDE_CONFIG_DIR` | the Claude CLI's login (`CLAUDE_CODE_OAUTH_TOKEN`, `ANTHROPIC_API_KEY`), provider and gateway (`ANTHROPIC_BASE_URL`) |
 | `DISABLE_AUTOUPDATER`, `DISABLE_TELEMETRY`, `DISABLE_ERROR_REPORTING` | the CLI's update check and reports |
 | `BRIDGE_DATA_DIR`, `BRIDGE_DB_PATH`, `CALENDAR_TZ`, `TRANSCRIBE_MODEL`, `TRANSCRIBE_LANGUAGE` | the tools in [tools/](../tools/): the data directory and database if you moved them, the calendar's timezone, the transcription model and language |
@@ -818,12 +824,17 @@ yet](#what-the-sandbox-does-not-cover-yet)). Keep anything a brain must not
 see out of the bridge's environment and its service file.
 
 These programs the bridge starts for itself get the first three rows
-only, never the names in `child_env_passthrough`, which are for brains:
+only:
 
 - rclone for [backups](BACKUP.md), which never gets an `RCLONE_*`
   variable but `RCLONE_CONFIG`, the bridge's own rclone config
 - the [Plaud](PLAUD.md) CLI, whose `HOME`, `PATH` and `DO_NOT_TRACK` the
   bridge sets itself
+- tmux and `osascript` for the [`viewer`](#viewer), which also get the
+  names in `child_env_passthrough`: brains can read the viewer's tmux
+  server anyway
+
+rclone and the Plaud CLI never get those names, which are for brains.
 
 While rclone connects Google Drive, and while the Plaud CLI signs you in,
 they open your browser, so they also get the variables of your desktop

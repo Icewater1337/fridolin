@@ -24,6 +24,7 @@ func TestChildGets(t *testing.T) {
 		{"HTTPS_PROXY", true, true, true},
 		{"https_proxy", true, true, true},
 		{"NODE_EXTRA_CA_CERTS", true, true, true},
+		{"TMUX_TMPDIR", true, true, true},
 		// What a launchd job that logs the CLI in with a token sets besides
 		// HOME and PATH.
 		{"CLAUDE_CODE_OAUTH_TOKEN", true, false, false},
