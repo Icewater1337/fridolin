@@ -1,0 +1,64 @@
+name: Bug report
+description: Something does not work the way the docs say it should.
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        This repository is public, and so is this issue. Before you paste
+        anything, **remove phone numbers, group JIDs, email addresses, names,
+        home-directory paths, tokens and chat content**. Use placeholders
+        instead: `15551234567`, `120363000000000000@g.us`, `you@example.com`,
+        `/Users/you`.
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened
+      description: What you did, what you expected, and what happened instead.
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. …
+        2. …
+  - type: input
+    id: version
+    attributes:
+      label: Version
+      description: What `fridolin version` prints.
+      placeholder: dev-1a2b3c4
+    validations:
+      required: true
+  - type: input
+    id: os
+    attributes:
+      label: Operating system
+      placeholder: macOS 15 (Apple silicon), Ubuntu 24.04, …
+    validations:
+      required: true
+  - type: textarea
+    id: check
+    attributes:
+      label: Output of `fridolin check`, redacted
+      description: It lists the numbers and groups you allowed; replace them with placeholders.
+      render: text
+  - type: textarea
+    id: logs
+    attributes:
+      label: Bridge log lines, redacted
+      description: >-
+        From the dashboard's Logs page, ~/Library/Logs/fridolin/stderr.log on
+        macOS, or journalctl --user -u fridolin on Linux.
+      render: text
+  - type: checkboxes
+    id: redacted
+    attributes:
+      label: Personal data
+      options:
+        - label: >-
+            I removed phone numbers, group JIDs, email addresses, names, paths,
+            tokens and chat content from everything above.
+          required: true

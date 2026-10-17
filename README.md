@@ -506,7 +506,9 @@ Overview shows it too, with the brains it affects.
 ## Contributing
 
 Issues and pull requests welcome. Please don't include real phone numbers,
-group JIDs, or chat content in bug reports — redact them.
+group JIDs, or chat content in bug reports — redact them. The issue forms ask
+for `fridolin version`, your OS and a redacted `fridolin check`, and the pull
+request template has a short checklist.
 
 Run `scripts/install-hooks.sh` once: it blocks commits and pushes that contain
 phone numbers, WhatsApp JIDs, email addresses, home-directory paths or tokens,

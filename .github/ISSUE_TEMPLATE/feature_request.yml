@@ -1,0 +1,28 @@
+name: Feature request
+description: Something Fridolin could do, or do better.
+labels: [enhancement]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        This repository is public. Describe what you need without real phone
+        numbers, group JIDs, email addresses, names or chat content.
+  - type: textarea
+    id: problem
+    attributes:
+      label: What you are trying to do
+      description: The situation and what gets in the way today.
+    validations:
+      required: true
+  - type: textarea
+    id: idea
+    attributes:
+      label: What would help
+      description: How you picture it working. Alternatives you considered are welcome too.
+  - type: checkboxes
+    id: redacted
+    attributes:
+      label: Personal data
+      options:
+        - label: This request contains no real phone numbers, JIDs, email addresses, names or chat content.
+          required: true
