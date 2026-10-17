@@ -87,30 +87,93 @@ const (
 	plaudSeenKeep     = 2000
 )
 
+// plaudStateVersion is the layout of state.json that saveState writes.
+// Version 1 had no version field and kept times as Unix seconds.
+const plaudStateVersion = 2
+
 // plaudState is <data_dir>/plaud/state.json.
 type plaudState struct {
+	Version int `json:"version"`
+	// Seeded means the first sync for Account ran: Seen then held every
+	// recording the account had, so none of them is sent. A state that is
+	// not seeded only keeps the times below.
+	Seeded bool `json:"seeded"`
 	// Account is the Plaud account the state was seeded for; its seen list
 	// means nothing for another one.
-	Account      string             `json:"account,omitempty"`
-	Seen         []string           `json:"seen"`
-	Pending      map[string]float64 `json:"pending"` // id → unix time first seen
-	AuthNotified float64            `json:"auth_notified"`
+	Account string   `json:"account,omitempty"`
+	Seen    []string `json:"seen"`
+	// Pending holds the recordings that are new and not handed over yet.
+	Pending map[string]*plaudPending `json:"pending"`
+	// LastForwarded is the last recording handed to a brain, for the card.
+	LastForwarded *PlaudForward `json:"last_forwarded,omitempty"`
+	// AuthNotified is when the chat was last told the login expired.
+	AuthNotified time.Time `json:"auth_notified,omitzero"`
 }
 
-// seededFor reports whether st was seeded for the account acct. A state from
-// before the account was recorded counts for whoever is signed in as long as
-// it remembers any recording; one that remembers none was only written for
-// an expiry notice and never seeded. When the CLI does not say who is signed
-// in (acct is ""), the state is taken as it is.
-func (st *plaudState) seededFor(acct string) bool {
-	switch {
-	case st.Account == "":
-		return len(st.Seen) > 0 || len(st.Pending) > 0
-	case acct == "":
-		return true
-	default:
-		return st.Account == acct
+// plaudPending is a recording waiting to be handed over.
+type plaudPending struct {
+	FirstSeen time.Time `json:"first_seen"`
+}
+
+// UnmarshalJSON reads both layouts of state.json.
+//
+// compat: version 1 (no version field) kept the times as Unix seconds,
+// and a state counted as seeded when it named the account or remembered
+// any recording; one that did neither was only written for an expiry
+// notice.
+func (st *plaudState) UnmarshalJSON(data []byte) error {
+	type current plaudState // without this method
+	var v struct {
+		Version int `json:"version"`
 	}
+	if err := json.Unmarshal(data, &v); err != nil {
+		return err
+	}
+	if v.Version >= 2 {
+		return json.Unmarshal(data, (*current)(st))
+	}
+	var v1 struct {
+		Account      string             `json:"account"`
+		Seen         []string           `json:"seen"`
+		Pending      map[string]float64 `json:"pending"`
+		AuthNotified float64            `json:"auth_notified"`
+	}
+	if err := json.Unmarshal(data, &v1); err != nil {
+		return err
+	}
+	*st = plaudState{Version: 1, Account: v1.Account, Seen: v1.Seen, Pending: map[string]*plaudPending{},
+		Seeded: v1.Account != "" || len(v1.Seen) > 0 || len(v1.Pending) > 0}
+	for id, at := range v1.Pending {
+		st.Pending[id] = &plaudPending{FirstSeen: time.Unix(int64(at), 0)}
+	}
+	if v1.AuthNotified > 0 {
+		st.AuthNotified = time.Unix(int64(v1.AuthNotified), 0)
+	}
+	return nil
+}
+
+// seededFor reports whether st was seeded for the account acct. A state
+// seeded before the account was recorded counts for whoever is signed in.
+// When the CLI does not say who is signed in (acct is ""), a seeded state
+// is taken as it is.
+func (st *plaudState) seededFor(acct string) bool {
+	return st != nil && st.Seeded && (acct == "" || st.Account == "" || st.Account == acct)
+}
+
+// pendingInOrder returns the waiting recordings, the one seen first first.
+func (st *plaudState) pendingInOrder() []string {
+	ids := make([]string, 0, len(st.Pending))
+	for id := range st.Pending {
+		ids = append(ids, id)
+	}
+	sort.Slice(ids, func(i, j int) bool {
+		a, b := st.Pending[ids[i]].FirstSeen, st.Pending[ids[j]].FirstSeen
+		if !a.Equal(b) {
+			return a.Before(b)
+		}
+		return ids[i] < ids[j]
+	})
+	return ids
 }
 
 // PlaudForward describes the last recording handed to a brain.
@@ -138,19 +201,15 @@ type PlaudManager struct {
 	// twice.
 	cliMu sync.Mutex
 
-	mu            sync.Mutex
-	connect       *connectJob
-	lastPoll      time.Time
-	lastErr       string
-	lastForwarded *PlaudForward
-	busy          bool
-	stop          context.CancelFunc
+	mu       sync.Mutex
+	connect  *connectJob
+	lastPoll time.Time
+	lastErr  string
+	busy     bool
+	stop     context.CancelFunc
 	// life is the poller's context from Start, which Stop cancels; checks
 	// started from the dashboard run on it too.
 	life context.Context
-	// authNotified is when the expiry notice went out while there was no
-	// state to keep that time in (the login expired before the first sync).
-	authNotified time.Time
 	// checkedLogin is the login (see loginStamp) whose account the state was
 	// last checked against. Only polls use it, one at a time.
 	checkedLogin string
@@ -429,20 +488,21 @@ func (p *PlaudManager) accountID(ctx context.Context) (string, error) {
 }
 
 // forward hands one recording, first seen at since, to br, whose answer
-// goes to jid. It reports false while Plaud has not finished the transcript.
-func (p *PlaudManager) forward(ctx context.Context, id string, since time.Time, br *Brain, jid string) (bool, error) {
+// goes to jid, and says what it handed over: nil while Plaud has not
+// finished the transcript.
+func (p *PlaudManager) forward(ctx context.Context, id string, since time.Time, br *Brain, jid string) (*PlaudForward, error) {
 	cfg := p.cfg()
 	detailsOut, err := p.run(ctx, "file", id)
 	if err != nil {
-		return false, err
+		return nil, err
 	}
 	d := parseKV(detailsOut)
 	if d["transcript"] != "available" {
-		return false, nil
+		return nil, nil
 	}
 	tmp, err := os.MkdirTemp(p.dir(), "fetch-")
 	if err != nil {
-		return false, err
+		return nil, err
 	}
 	defer os.RemoveAll(tmp)
 	// `plaud file` says "transcript: available" for the raw transcript
@@ -450,10 +510,10 @@ func (p *PlaudManager) forward(ctx context.Context, id string, since time.Time, 
 	var transcript, note string
 	if cfg.Plaud.Polished {
 		if transcript, err = p.fetchBody(ctx, tmp, "transcript", id, "--polished"); err != nil {
-			return false, err
+			return nil, err
 		}
 		if transcript == "" && time.Since(since) < plaudPolishedWait {
-			return false, nil
+			return nil, nil
 		}
 		if transcript == "" {
 			note = fmt.Sprintf("Plaud's cleaned-up transcript was not there %v after the recording arrived, so this is the raw one.\n", plaudPolishedWait)
@@ -462,11 +522,11 @@ func (p *PlaudManager) forward(ctx context.Context, id string, since time.Time, 
 	}
 	if transcript == "" {
 		if transcript, err = p.fetchBody(ctx, tmp, "transcript", id); err != nil {
-			return false, err
+			return nil, err
 		}
 	}
 	if transcript == "" {
-		return false, nil
+		return nil, nil
 	}
 	summary := ""
 	if d["summary"] == "available" {
@@ -475,7 +535,7 @@ func (p *PlaudManager) forward(ctx context.Context, id string, since time.Time, 
 				summary = s
 			}
 		} else if errors.Is(err, errPlaudAuth) {
-			return false, err
+			return nil, err
 		} else {
 			log.Printf("plaud %s: summary: %v", id, err)
 		}
@@ -501,7 +561,7 @@ func (p *PlaudManager) forward(ctx context.Context, id string, since time.Time, 
 
 	dir := filepath.Join(cfg.MediaDir, "plaud")
 	if err := os.MkdirAll(dir, 0o700); err != nil {
-		return false, err
+		return nil, err
 	}
 	path := plaudTranscriptPath(dir, day, name, id)
 	var body strings.Builder
@@ -511,7 +571,7 @@ func (p *PlaudManager) forward(ctx context.Context, id string, since time.Time, 
 	}
 	body.WriteString("=== Transcript ===\n" + strings.TrimSpace(transcript) + "\n")
 	if err := writeFileAtomic(path, []byte(body.String()), 0o600, false); err != nil {
-		return false, err
+		return nil, err
 	}
 
 	tpl := cfg.Plaud.Message
@@ -520,11 +580,8 @@ func (p *PlaudManager) forward(ctx context.Context, id string, since time.Time, 
 	}
 	text := strings.NewReplacer("{name}", name, "{when}", when, "{duration}", duration).Replace(tpl)
 	p.handOff(br, jid, "plaud", text, []string{path})
-	p.mu.Lock()
-	p.lastForwarded = &PlaudForward{Name: name, Brain: br.ID(), At: time.Now()}
-	p.mu.Unlock()
 	log.Printf("plaud %s: handed %q to brain %s", id, name, br.ID())
-	return true, nil
+	return &PlaudForward{Name: name, Brain: br.ID(), At: time.Now()}, nil
 }
 
 // plaudTranscriptPath is where the transcript of recording id goes in dir.
@@ -613,12 +670,18 @@ func (p *PlaudManager) loadState() (*plaudState, error) {
 		return nil, err
 	}
 	if st.Pending == nil {
-		st.Pending = map[string]float64{}
+		st.Pending = map[string]*plaudPending{}
 	}
 	return st, nil
 }
 
+// newPlaudState is the state before the first sync.
+func newPlaudState() *plaudState {
+	return &plaudState{Version: plaudStateVersion, Pending: map[string]*plaudPending{}}
+}
+
 func (p *PlaudManager) saveState(st *plaudState) error {
+	st.Version = plaudStateVersion
 	if len(st.Seen) > plaudSeenKeep {
 		st.Seen = st.Seen[len(st.Seen)-plaudSeenKeep:]
 	}
@@ -671,7 +734,6 @@ func (p *PlaudManager) runPoll(ctx context.Context) error {
 		p.lastErr = err.Error()
 	} else {
 		p.lastErr = ""
-		p.authNotified = time.Time{}
 	}
 	p.mu.Unlock()
 	if errors.Is(err, errPlaudAuth) {
@@ -694,20 +756,16 @@ func (p *PlaudManager) poll(ctx context.Context) error {
 	// again keeps its state, so what it recorded in between still arrives.
 	// The login counts as checked as it was before `me` ran: one that
 	// changes while the account is looked up is looked up again.
-	if stamp := p.loginStamp(); st == nil || stamp != p.checkedLogin {
+	if stamp := p.loginStamp(); !st.seededFor("") || stamp != p.checkedLogin {
 		acct, err := p.accountID(ctx)
 		if err != nil {
 			return err
 		}
-		if st == nil || !st.seededFor(acct) {
-			if st != nil {
-				why := "signed in to another Plaud account"
-				if st.Account == "" {
-					why = "the state only held an expiry notice and was never seeded"
-				}
-				log.Printf("plaud: %s, starting over", why)
+		if !st.seededFor(acct) {
+			if st.seededFor("") {
+				log.Printf("plaud: signed in to another Plaud account, starting over")
 			}
-			if err := p.seed(ctx, acct); err != nil {
+			if err := p.seed(ctx, st, acct); err != nil {
 				return err
 			}
 			p.checkedLogin = stamp
@@ -738,7 +796,7 @@ func (p *PlaudManager) poll(ctx context.Context) error {
 	}
 	for _, id := range ids {
 		if _, pending := st.Pending[id]; !seen[id] && !pending {
-			st.Pending[id] = float64(time.Now().Unix())
+			st.Pending[id] = &plaudPending{FirstSeen: time.Now()}
 			log.Printf("plaud %s: new recording, waiting for the transcript", id)
 		}
 	}
@@ -753,19 +811,19 @@ func (p *PlaudManager) poll(ctx context.Context) error {
 		}
 		return err
 	}
-	pendingIDs := make([]string, 0, len(st.Pending))
-	for id := range st.Pending {
-		pendingIDs = append(pendingIDs, id)
-	}
-	sort.Strings(pendingIDs)
+	pendingIDs := st.pendingInOrder()
 	// A recording that fails is retried next time, until it is given up,
 	// and does not hold up the others; its error is the check's, so the card
 	// shows it instead of counting the recording as waiting for Plaud.
 	var failed []error
 	maxAge := fmt.Sprintf("%d days", plaudPendingMaxAge/(24*time.Hour))
 	for _, id := range pendingIDs {
-		since := time.Unix(int64(st.Pending[id]), 0)
-		done, err := p.forward(ctx, id, since, br, jid)
+		since := st.Pending[id].FirstSeen
+		fw, err := p.forward(ctx, id, since, br, jid)
+		done := fw != nil
+		if done {
+			st.LastForwarded = fw
+		}
 		if errors.Is(err, errPlaudAuth) {
 			_ = p.saveState(st)
 			return err
@@ -794,7 +852,7 @@ func (p *PlaudManager) poll(ctx context.Context) error {
 			return err
 		}
 	}
-	st.AuthNotified = 0
+	st.AuthNotified = time.Time{}
 	if err := p.saveState(st); err != nil {
 		return err
 	}
@@ -802,9 +860,14 @@ func (p *PlaudManager) poll(ctx context.Context) error {
 }
 
 // seed starts the state for acct with the recordings it already has, all
-// marked as seen.
-func (p *PlaudManager) seed(ctx context.Context, acct string) error {
-	st := &plaudState{Account: acct, Pending: map[string]float64{}}
+// marked as seen. Of the old state st (nil for none) it keeps only the last
+// recording handed over, for the card.
+func (p *PlaudManager) seed(ctx context.Context, old *plaudState, acct string) error {
+	st := newPlaudState()
+	st.Seeded, st.Account = true, acct
+	if old != nil {
+		st.LastForwarded = old.LastForwarded
+	}
 	seen := map[string]bool{}
 	for page := 1; page <= plaudSeedPages; page++ {
 		ids, err := p.listIDs(ctx, page)
@@ -826,21 +889,19 @@ func (p *PlaudManager) seed(ctx context.Context, acct string) error {
 }
 
 // notifyAuthExpired tells the private chat Plaud uses once a day that Plaud
-// needs a new sign-in. Without one only the dashboard shows it.
-//
-// The notice time is kept in the state. Before the first sync there is none,
-// and the notice must not write one: a state is what tells the next check
-// that the existing recordings were already seen, so an empty one would make
-// it forward all of them. Until then the time is kept in memory.
+// needs a new sign-in. Without one only the dashboard shows it. The notice
+// time is kept in the state, also before the first sync: a state that is
+// not seeded still gets its first sync.
 func (p *PlaudManager) notifyAuthExpired() {
-	st, _ := p.loadState()
-	p.mu.Lock()
-	last := p.authNotified
-	p.mu.Unlock()
-	if st != nil {
-		last = time.Unix(int64(st.AuthNotified), 0)
+	st, err := p.loadState()
+	if err != nil {
+		log.Printf("plaud: %v", err)
+		return
 	}
-	if time.Since(last) < 24*time.Hour {
+	if st == nil {
+		st = newPlaudState()
+	}
+	if time.Since(st.AuthNotified) < 24*time.Hour {
 		return
 	}
 	_, jid, err := p.destination()
@@ -851,15 +912,10 @@ func (p *PlaudManager) notifyAuthExpired() {
 		log.Printf("plaud: could not send the expiry notice: %v", err)
 		return
 	}
-	now := time.Now()
-	if st == nil {
-		p.mu.Lock()
-		p.authNotified = now
-		p.mu.Unlock()
-		return
+	st.AuthNotified = time.Now()
+	if err := p.saveState(st); err != nil {
+		log.Printf("plaud: %v", err)
 	}
-	st.AuthNotified = float64(now.Unix())
-	_ = p.saveState(st)
 }
 
 // Start runs the poller.
@@ -996,8 +1052,11 @@ func (p *PlaudManager) Status(ctx context.Context, account bool) PlaudStatus {
 		}
 	}
 	if st, _ := p.loadState(); st != nil {
-		seen, pending := len(st.Seen), len(st.Pending)
-		s.Seen, s.Pending = &seen, &pending
+		if st.Seeded {
+			seen, pending := len(st.Seen), len(st.Pending)
+			s.Seen, s.Pending = &seen, &pending
+		}
+		s.LastForwarded = st.LastForwarded
 	}
 	p.mu.Lock()
 	if p.connect != nil {
@@ -1009,10 +1068,6 @@ func (p *PlaudManager) Status(ctx context.Context, account bool) PlaudStatus {
 		s.LastPoll = &last
 	}
 	s.LastError = p.lastErr
-	if p.lastForwarded != nil {
-		last := *p.lastForwarded
-		s.LastForwarded = &last
-	}
 	p.mu.Unlock()
 	if account && s.Connected && s.CLI.Found {
 		ctx, cancel := context.WithTimeout(ctx, 30*time.Second)

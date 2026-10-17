@@ -380,7 +380,7 @@ func TestPlaudForwardWithTheRealCLI(t *testing.T) {
 	tb := newTestBridge(t, `, "plaud": {"enabled": true, "cli_path": "`+bin+`"}`)
 	tb.addFolderBrain(t, plaudDMBrain)
 	writeRealPlaudLogin(t, tb.plaud.cliHome(), "ok", srv.URL)
-	if err := tb.plaud.saveState(&plaudState{Account: "u_1", Seen: []string{plaudGoldOld}, Pending: map[string]float64{}}); err != nil {
+	if err := tb.plaud.saveState(plaudSeededState("u_1", plaudGoldOld)); err != nil {
 		t.Fatal(err)
 	}
 	if err := tb.plaud.Poll(context.Background()); err != nil {

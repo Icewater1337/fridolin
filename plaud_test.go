@@ -109,7 +109,7 @@ func plaudDeliver(t *testing.T, tb *testBridge, fp *fakePlaudFixture) error {
 	t.Helper()
 	_ = os.MkdirAll(filepath.Dir(tb.plaud.tokenPath()), 0o700)
 	_ = os.WriteFile(tb.plaud.tokenPath(), []byte("{}"), 0o600)
-	if err := tb.plaud.saveState(&plaudState{Seen: []string{plaudOld1}, Pending: map[string]float64{}}); err != nil {
+	if err := tb.plaud.saveState(plaudSeededState("", plaudOld1)); err != nil {
 		t.Fatal(err)
 	}
 	fp.files(plaudNew, plaudOld1)
@@ -121,7 +121,7 @@ func plaudDeliver(t *testing.T, tb *testBridge, fp *fakePlaudFixture) error {
 func plaudDeliverRecording(t *testing.T, tb *testBridge, fp *fakePlaudFixture, r fakePlaudRecording) error {
 	t.Helper()
 	plaudSignIn(t, tb)
-	if err := tb.plaud.saveState(&plaudState{Seen: []string{plaudOld1}, Pending: map[string]float64{}}); err != nil {
+	if err := tb.plaud.saveState(plaudSeededState("", plaudOld1)); err != nil {
 		t.Fatal(err)
 	}
 	fp.files(r.ID, plaudOld1)
@@ -151,11 +151,9 @@ func TestPlaudRunsInThePickedBrain(t *testing.T) {
 	if hist, _ := os.ReadFile(filepath.Join(gDir, "conversation-history.jsonl")); !strings.Contains(string(hist), "[Plaud]") {
 		t.Errorf("g's history lacks the recording:\n%s", hist)
 	}
-	tb.plaud.mu.Lock()
-	last := tb.plaud.lastForwarded
-	tb.plaud.mu.Unlock()
-	if last == nil || last.Brain != "g" {
-		t.Errorf("last forwarded = %+v, want brain g", last)
+	st, _ := tb.plaud.loadState()
+	if last := st.LastForwarded; last == nil || last.Brain != "g" {
+		t.Errorf("last forwarded = %+v, want brain g", st.LastForwarded)
 	}
 }
 
@@ -218,7 +216,7 @@ func TestPlaudWithoutAPrivateChatWaits(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "no private chat") {
 		t.Fatalf("poll error = %v, want the missing private chat", err)
 	}
-	if st, _ := tb.plaud.loadState(); st.Pending[plaudNew] == 0 || slices.Contains(st.Seen, plaudNew) {
+	if st, _ := tb.plaud.loadState(); st.Pending[plaudNew] == nil || slices.Contains(st.Seen, plaudNew) {
 		t.Errorf("state = %+v, want the recording still pending", st)
 	}
 	if files, _ := filepath.Glob(filepath.Join(tb.cfgs.Get().MediaDir, "plaud", "*")); len(files) != 0 {
@@ -257,7 +255,7 @@ func TestPlaudMissingBrainIsReported(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "brain ghost") {
 		t.Fatalf("poll error = %v, want the missing brain named", err)
 	}
-	if st, _ := tb.plaud.loadState(); st.Pending[plaudNew] == 0 {
+	if st, _ := tb.plaud.loadState(); st.Pending[plaudNew] == nil {
 		t.Errorf("state = %+v, want the recording still pending", st)
 	}
 	if tb.plaudForwarded() {
@@ -309,7 +307,7 @@ func TestPlaudDeliveryErrorIsShown(t *testing.T) {
 			if err == nil || !strings.Contains(err.Error(), "recording "+plaudNew) {
 				t.Fatalf("poll error = %v, want the recording's error", err)
 			}
-			if st, _ := tb.plaud.loadState(); st.Pending[plaudNew] == 0 {
+			if st, _ := tb.plaud.loadState(); st.Pending[plaudNew] == nil {
 				t.Errorf("state = %+v, want the recording still pending", st)
 			}
 			var status map[string]any
@@ -352,8 +350,8 @@ func TestPlaudFailingRecordingIsGivenUpInTime(t *testing.T) {
 		t.Run(c.name, func(t *testing.T) {
 			tb, fp := plaudBridge(t, "")
 			plaudSignIn(t, tb)
-			first := float64(time.Now().Add(-c.age).Unix())
-			if err := tb.plaud.saveState(&plaudState{Account: "u_1", Seen: []string{plaudOld1}, Pending: map[string]float64{plaudNew: first}}); err != nil {
+			first := time.Now().Add(-c.age)
+			if err := tb.plaud.saveState(plaudWaiting(plaudSeededState("u_1", plaudOld1), plaudNew, first)); err != nil {
 				t.Fatal(err)
 			}
 			fp.files(plaudNew, plaudOld1)
@@ -384,7 +382,7 @@ func TestPlaudWithoutAPrivateChatIsQuietWhileNothingWaits(t *testing.T) {
 	tb, fp := plaudBridgeWith(t, `, "allowed_numbers": []`, "", plaudGroupBrain("f"))
 	_ = os.MkdirAll(filepath.Dir(tb.plaud.tokenPath()), 0o700)
 	_ = os.WriteFile(tb.plaud.tokenPath(), []byte("{}"), 0o600)
-	if err := tb.plaud.saveState(&plaudState{Seen: []string{plaudOld1}, Pending: map[string]float64{}}); err != nil {
+	if err := tb.plaud.saveState(plaudSeededState("", plaudOld1)); err != nil {
 		t.Fatal(err)
 	}
 	fp.files(plaudOld1)
@@ -563,7 +561,7 @@ func TestPlaudManagerUsesOnlyWhatItIsGiven(t *testing.T) {
 	}
 	p.notify = func(context.Context, string, string) error { t.Error("notify called"); return nil }
 	plaudSignIn(t, tb)
-	if err := p.saveState(&plaudState{Account: "u_1", Seen: []string{plaudOld1}, Pending: map[string]float64{}}); err != nil {
+	if err := p.saveState(plaudSeededState("u_1", plaudOld1)); err != nil {
 		t.Fatal(err)
 	}
 	fp.files(plaudNew, plaudOld1)
@@ -596,21 +594,37 @@ func plaudSignIn(t *testing.T, tb *testBridge) {
 	}
 }
 
-func (tb *testBridge) plaudStateExists() bool {
-	_, err := os.Stat(filepath.Join(tb.plaud.dir(), "state.json"))
-	return err == nil
+// plaudSeeded reports whether the first sync ran.
+func (tb *testBridge) plaudSeeded() bool {
+	st, _ := tb.plaud.loadState()
+	return st.seededFor("")
 }
 
-// The expiry notice goes out once a day. Before the first sync its time is
-// kept in memory: writing a state for it would count as the first sync.
-// After it, the time is saved in the state and survives a restart.
+// plaudSeededState is the state after the first sync for account ("" for
+// one from before accounts were recorded), which saw the recordings seen.
+func plaudSeededState(account string, seen ...string) *plaudState {
+	st := newPlaudState()
+	st.Seeded, st.Account, st.Seen = true, account, seen
+	return st
+}
+
+// plaudWaiting adds recording id, first seen at, to the recordings st
+// waits to hand over.
+func plaudWaiting(st *plaudState, id string, at time.Time) *plaudState {
+	st.Pending[id] = &plaudPending{FirstSeen: at}
+	return st
+}
+
+// The expiry notice goes out once a day. Its time is saved in the state
+// and survives a restart, also before the first sync, which the saved
+// time does not count as.
 func TestPlaudExpiredLoginNotifiesOncePerDay(t *testing.T) {
 	for _, seeded := range []bool{false, true} {
 		t.Run(fmt.Sprintf("seeded=%v", seeded), func(t *testing.T) {
 			tb, fp := plaudBridge(t, "")
 			plaudSignIn(t, tb)
 			if seeded {
-				if err := tb.plaud.saveState(&plaudState{Seen: []string{plaudOld1}, Pending: map[string]float64{}}); err != nil {
+				if err := tb.plaud.saveState(plaudSeededState("", plaudOld1)); err != nil {
 					t.Fatal(err)
 				}
 			}
@@ -624,13 +638,10 @@ func TestPlaudExpiredLoginNotifiesOncePerDay(t *testing.T) {
 			if len(out) != 1 || !strings.Contains(out[0].Text, "Plaud: the login expired") {
 				t.Errorf("notices = %+v, want exactly one", out)
 			}
-			if !seeded {
-				if tb.plaudStateExists() {
-					t.Error("the notice wrote a state before the first sync")
-				}
-				return
+			if tb.plaudSeeded() != seeded {
+				t.Errorf("seeded = %v after the notice, want %v", !seeded, seeded)
 			}
-			if st, _ := tb.plaud.loadState(); st.AuthNotified == 0 {
+			if st, _ := tb.plaud.loadState(); st.AuthNotified.IsZero() {
 				t.Error("the notice time was not saved in the state")
 			}
 			if err := plaudAfterRestart(tb).Poll(context.Background()); err != errPlaudAuth {
@@ -643,8 +654,9 @@ func TestPlaudExpiredLoginNotifiesOncePerDay(t *testing.T) {
 	}
 }
 
-// However the first sync fails, it leaves no state behind, so the next check
-// syncs again and still forwards none of the recordings that already exist.
+// However the first sync fails, it does not count as done, so the next
+// check syncs again and still forwards none of the recordings that already
+// exist.
 func TestPlaudFailedFirstSyncForwardsNothingOld(t *testing.T) {
 	for _, c := range []struct {
 		name, fixture string
@@ -666,8 +678,8 @@ func TestPlaudFailedFirstSyncForwardsNothingOld(t *testing.T) {
 			if err == nil || errors.Is(err, errPlaudAuth) != c.auth {
 				t.Fatalf("first poll: err = %v, want a failure (auth=%v)", err, c.auth)
 			}
-			if tb.plaudStateExists() {
-				t.Fatal("a failed first sync left a state behind")
+			if tb.plaudSeeded() {
+				t.Fatal("a failed first sync counted as done")
 			}
 
 			// Plaud's CLI deletes a login that expired: you sign in again.
@@ -715,16 +727,16 @@ func TestPlaudStateBelongsToTheAccount(t *testing.T) {
 		forward bool   // whether plaudNew is sent
 		logs    string // why the log says it starts over, if it does
 	}{
-		{"another account", plaudState{Account: "u_1", Seen: []string{plaudOld1}}, "u_2", false, "signed in to another Plaud account"},
-		{"the same account again", plaudState{Account: "u_1", Seen: []string{plaudOld1}}, "u_1", true, ""},
-		{"a state from before accounts were recorded", plaudState{Seen: []string{plaudOld1}}, "u_1", true, ""},
-		{"a state only the expiry notice wrote", plaudState{AuthNotified: 1}, "u_1", false, "only held an expiry notice"},
+		{"another account", *plaudSeededState("u_1", plaudOld1), "u_2", false, "signed in to another Plaud account"},
+		{"the same account again", *plaudSeededState("u_1", plaudOld1), "u_1", true, ""},
+		{"a state from before accounts were recorded", *plaudSeededState("", plaudOld1), "u_1", true, ""},
+		{"a state only the expiry notice wrote", plaudState{AuthNotified: time.Unix(1, 0)}, "u_1", false, ""},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			logs := captureLog(t)
 			tb, fp := plaudBridge(t, "")
 			plaudSignIn(t, tb)
-			c.state.Pending = map[string]float64{}
+			c.state.Pending = map[string]*plaudPending{}
 			if err := tb.plaud.saveState(&c.state); err != nil {
 				t.Fatal(err)
 			}
@@ -754,7 +766,7 @@ func TestPlaudStateBelongsToTheAccount(t *testing.T) {
 func TestPlaudChecksTheAccountWhenTheLoginChanges(t *testing.T) {
 	tb, fp := plaudBridge(t, "")
 	plaudSignIn(t, tb)
-	if err := tb.plaud.saveState(&plaudState{Account: "u_1", Seen: []string{plaudOld1}, Pending: map[string]float64{}}); err != nil {
+	if err := tb.plaud.saveState(plaudSeededState("u_1", plaudOld1)); err != nil {
 		t.Fatal(err)
 	}
 	fp.files(plaudOld1)
@@ -800,14 +812,13 @@ func TestPlaudLoginChangingDuringAPollSendsNothing(t *testing.T) {
 		before string      // …or just before this one runs
 	}{
 		{"while the first sync lists the recordings", nil, "", "files"},
-		{"just after the account was looked up", &plaudState{Account: "u_1", Seen: []string{plaudOld1}}, "me", ""},
-		{"before the recordings are listed", &plaudState{Account: "u_1", Seen: []string{plaudOld1}}, "", "files"},
+		{"just after the account was looked up", plaudSeededState("u_1", plaudOld1), "me", ""},
+		{"before the recordings are listed", plaudSeededState("u_1", plaudOld1), "", "files"},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			tb, fp := plaudBridge(t, "")
 			plaudSignIn(t, tb)
 			if c.state != nil {
-				c.state.Pending = map[string]float64{}
 				if err := tb.plaud.saveState(c.state); err != nil {
 					t.Fatal(err)
 				}
@@ -948,8 +959,8 @@ func TestPlaudPolishedFallsBackToTheRawTranscript(t *testing.T) {
 		t.Run(c.name, func(t *testing.T) {
 			tb, fp := plaudBridge(t, `, "polished": true`)
 			plaudSignIn(t, tb)
-			first := float64(time.Now().Add(-c.age).Unix())
-			if err := tb.plaud.saveState(&plaudState{Account: "u_1", Seen: []string{plaudOld1}, Pending: map[string]float64{plaudNew: first}}); err != nil {
+			first := time.Now().Add(-c.age)
+			if err := tb.plaud.saveState(plaudWaiting(plaudSeededState("u_1", plaudOld1), plaudNew, first)); err != nil {
 				t.Fatal(err)
 			}
 			r := fp.teamSync(plaudNew, true)
@@ -970,7 +981,7 @@ func TestPlaudPolishedFallsBackToTheRawTranscript(t *testing.T) {
 				if tb.plaudForwarded() {
 					t.Fatal("handed over before the cleaned-up transcript was there or the wait was up")
 				}
-				if st, _ := tb.plaud.loadState(); st.Pending[plaudNew] == 0 {
+				if st, _ := tb.plaud.loadState(); st.Pending[plaudNew] == nil {
 					t.Errorf("state = %+v, want the recording still waiting", st)
 				}
 				return
@@ -988,6 +999,86 @@ func TestPlaudPolishedFallsBackToTheRawTranscript(t *testing.T) {
 
 func ptr[T any](v T) *T { return &v }
 
+// A state.json from before the version field still reads: its Unix-second
+// times become times, and it counts as seeded when it named the account or
+// remembered a recording, as it did then. A saved state is version 2.
+func TestPlaudReadsTheOldState(t *testing.T) {
+	for _, c := range []struct {
+		name, file string
+		want       plaudState
+	}{
+		{"seeded", `{"account":"u_1","seen":["of_a"],"pending":{"of_b":1760000000},"auth_notified":1760000100}`,
+			plaudState{Version: 1, Seeded: true, Account: "u_1", Seen: []string{"of_a"},
+				Pending: map[string]*plaudPending{"of_b": {FirstSeen: time.Unix(1760000000, 0)}}, AuthNotified: time.Unix(1760000100, 0)}},
+		{"from before accounts were recorded", `{"seen":["of_a"],"pending":{},"auth_notified":0}`,
+			plaudState{Version: 1, Seeded: true, Seen: []string{"of_a"}, Pending: map[string]*plaudPending{}}},
+		{"only an expiry notice", `{"seen":null,"pending":{},"auth_notified":5}`,
+			plaudState{Version: 1, Pending: map[string]*plaudPending{}, AuthNotified: time.Unix(5, 0)}},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			tb, _ := plaudBridge(t, "")
+			if err := os.MkdirAll(tb.plaud.dir(), 0o700); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(filepath.Join(tb.plaud.dir(), "state.json"), []byte(c.file), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			st, err := tb.plaud.loadState()
+			if err != nil {
+				t.Fatal(err)
+			}
+			got, _ := json.Marshal(st)
+			want, _ := json.Marshal(c.want)
+			if st.Version != c.want.Version || string(got) != string(want) {
+				t.Errorf("read %s\nwant %s", got, want)
+			}
+			if err := tb.plaud.saveState(st); err != nil {
+				t.Fatal(err)
+			}
+			saved, _ := os.ReadFile(filepath.Join(tb.plaud.dir(), "state.json"))
+			if !strings.Contains(string(saved), `"version": 2`) || strings.Contains(string(saved), "1760000000") {
+				t.Errorf("saved:\n%s", saved)
+			}
+			again, err := tb.plaud.loadState()
+			if err != nil {
+				t.Fatal(err)
+			}
+			if again.seededFor("") != st.Seeded || !again.AuthNotified.Equal(st.AuthNotified) {
+				t.Errorf("read back %+v, want %+v", again, st)
+			}
+		})
+	}
+}
+
+// Recordings waiting to be handed over go in the order they showed up,
+// whatever their ids, and the last one handed over is still on the card
+// after a restart.
+func TestPlaudPendingGoesOldestFirst(t *testing.T) {
+	const older, newer = "of_00000000000000000000bb", "of_00000000000000000000ba"
+	tb, fp := plaudBridge(t, "")
+	var order []string
+	tb.plaud.handOff = func(br *Brain, jid, sender, text string, media []string) {
+		order = append(order, media[0][len(media[0])-len(older)-4:len(media[0])-4])
+	}
+	plaudSignIn(t, tb)
+	st := plaudWaiting(plaudSeededState("u_1", plaudOld1), older, time.Now().Add(-2*time.Hour))
+	if err := tb.plaud.saveState(plaudWaiting(st, newer, time.Now().Add(-time.Hour))); err != nil {
+		t.Fatal(err)
+	}
+	fp.files(newer, older, plaudOld1)
+	fp.recording(older, true)
+	fp.recording(newer, true)
+	if err := tb.plaud.Poll(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Join(order, ",") != older+","+newer {
+		t.Errorf("handed over %v, want %s first", order, older)
+	}
+	if fw := plaudAfterRestart(tb).Status(context.Background(), false).LastForwarded; fw == nil || fw.Name != "Team sync" || fw.Brain != "p" {
+		t.Errorf("last forwarded after a restart = %+v", fw)
+	}
+}
+
 // A recording handed over again, as after a crash before the state was
 // saved, rewrites its transcript file instead of adding a copy, even when
 // it was renamed in Plaud in between.
@@ -1001,7 +1092,7 @@ func TestPlaudRetryRewritesTheSameTranscript(t *testing.T) {
 	renamed := fp.teamSync(plaudNew, true)
 	renamed.Name = "Weekly sync"
 	fp.put(renamed)
-	if err := tb.plaud.saveState(&plaudState{Seen: []string{plaudOld1}, Pending: map[string]float64{plaudNew: float64(time.Now().Unix())}}); err != nil {
+	if err := tb.plaud.saveState(plaudWaiting(plaudSeededState("", plaudOld1), plaudNew, time.Now())); err != nil {
 		t.Fatal(err)
 	}
 	if err := tb.plaud.Poll(context.Background()); err != nil {
@@ -1091,7 +1182,7 @@ func TestPlaudTranscriptPathFindsTheEarlierFile(t *testing.T) {
 func TestPlaudCheckNowNeedsSendingOn(t *testing.T) {
 	tb, fp := plaudBridge(t, "")
 	plaudSignIn(t, tb)
-	if err := tb.plaud.saveState(&plaudState{Account: "u_1", Seen: []string{plaudOld1}, Pending: map[string]float64{}}); err != nil {
+	if err := tb.plaud.saveState(plaudSeededState("u_1", plaudOld1)); err != nil {
 		t.Fatal(err)
 	}
 	fp.files(plaudNew, plaudOld1)
@@ -1152,7 +1243,7 @@ func TestPlaudCheckNowWhileChecking(t *testing.T) {
 	waitFor(t, 10*time.Second, "the check to finish", func() bool {
 		tb.plaud.mu.Lock()
 		defer tb.plaud.mu.Unlock()
-		return !tb.plaud.busy && tb.plaudStateExists()
+		return !tb.plaud.busy && tb.plaudSeeded()
 	})
 }
 
