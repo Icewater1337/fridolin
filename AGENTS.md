@@ -92,6 +92,9 @@ Reopen the dashboard with `./fridolin open`.
 - The Python helpers in `tools/` have stdlib-only tests that never touch the
   network: `python3 -m unittest discover -s tools/tests`. Keep them passing
   on Python 3.9.
+- The site process in `site/` (Node, TypeScript run by tsx; docs/SITE.md) has
+  its own tests: `cd site && npm install && npm test`. The Go end-to-end
+  tests of the site run it too and skip without its `node_modules`.
 - The dashboard is plain HTML/CSS/JS in `web/` (no build step), embedded into
   the binary — rebuild after changing it. It runs under a strict CSP: no
   inline scripts or styles.

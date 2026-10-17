@@ -95,7 +95,8 @@ function home(site, me, list) {
   document.title = site.title;
   if (site.preview) {
     const bar = document.getElementById('preview');
-    bar.textContent = `Preview of ${site.preview} — not live yet`;
+    bar.replaceChildren(`Preview of ${site.preview} — not live yet`,
+      site.exit ? h('span', {}, ' · ', h('a', { href: '/_fridolin/preview-exit' }, 'Back to the live site')) : '');
     bar.hidden = false;
   }
   const me = await json('/auth/me');

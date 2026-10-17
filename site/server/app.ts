@@ -1,11 +1,11 @@
 // The site: sign-in, the home page with a tile per module, and the modules.
 
 import express from 'express'
-import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { readGoogleClient, UserStore, type Runtime } from './config.ts'
-import { createAuth, loadSessionKey, page } from './auth.ts'
+import { createAuth, loadSessionKey, page, type Auth } from './auth.ts'
 import { loadModules, mountModules } from './modules.ts'
+import { createPreviewAuth, previewForwarding, PreviewList } from './preview.ts'
 
 const WEB_DIR = fileURLToPath(new URL('../web/', import.meta.url))
 
@@ -27,15 +27,21 @@ export type SiteOptions = {
 }
 
 export async function createSite(rt: Runtime, opts: SiteOptions = {}): Promise<express.Express> {
-  const users = new UserStore(rt.users_file)
-  const auth = createAuth({
-    key: loadSessionKey(rt.session_key_file),
-    users,
-    // Read per sign-in, so connecting the client in Fridolin needs no restart.
-    google: () => readGoogleClient(rt.google_client_file),
-    publicOrigin: rt.public_origin,
-    googleFetch: opts.googleFetch,
-  })
+  // A preview knows no accounts: only its token opens it (preview.ts).
+  const auth: Auth = rt.preview_token
+    ? createPreviewAuth(rt.preview_token, rt.listen)
+    : createAuth({
+      key: loadSessionKey(rt.session_key_file),
+      users: new UserStore(rt.users_file),
+      // Read per sign-in, so connecting the client in Fridolin needs no restart.
+      google: () => readGoogleClient(rt.google_client_file),
+      publicOrigin: rt.public_origin,
+      googleFetch: opts.googleFetch,
+    })
+  const forwarding = !rt.preview_token && rt.previews_file
+    ? previewForwarding(new PreviewList(rt.previews_file), auth,
+      (req) => (rt.public_origin || `${req.protocol}://`).startsWith('https://'))
+    : null
 
   const app = express()
   // Behind cloudflared (or another proxy on this machine): trust its forwarded
@@ -54,20 +60,27 @@ export async function createSite(rt: Runtime, opts: SiteOptions = {}): Promise<e
   }
 
   app.get('/_fridolin/health', (_req, res) => { res.type('text').send('ok') })
-  app.get('/_fridolin/site.json', (_req, res) => {
-    res.json({ title: rt.title, preview: rt.preview_label ?? null })
+  app.get('/_fridolin/site.json', (req, res) => {
+    const forwarded = forwarding?.active(req)
+    res.json({ title: rt.title, preview: rt.preview_label ?? forwarded?.entry.label ?? null, exit: Boolean(forwarded) })
   })
   // Revalidated on every load (ETag), so a new Fridolin's pages show at once.
   app.use('/_fridolin', shell, express.static(WEB_DIR, { index: false, maxAge: 0 }))
 
   app.use('/auth', shell)
   app.use(auth.router)
+  if (forwarding) {
+    app.use(forwarding.router)
+    app.use(forwarding.forward)
+  }
 
   await mountModules(app, loadModules(rt.modules_dir), auth.requireAuth)
 
   app.get('/', shell, (_req, res) => {
     res.setHeader('Cache-Control', 'no-cache')
-    res.sendFile(join(WEB_DIR, 'index.html'))
+    // With root, only the part below it is checked for dot folders: a preview
+    // runs from a brain's .fridolin-site folder.
+    res.sendFile('index.html', { root: WEB_DIR })
   })
 
   app.use(shell, (_req, res) => {

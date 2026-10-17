@@ -23,11 +23,20 @@ export type Runtime = {
   google_client_file: string
   /** Set on a preview process: the branch it serves. Shown in a banner. */
   preview_label?: string
+  /**
+   * Set on a preview process: the token that opens it. A preview knows no
+   * accounts (it runs code nobody approved yet, so it gets no session key and
+   * no user list); see preview.ts.
+   */
+  preview_token?: string
+  /** The live site: previews.json, the previews it may forward admins to. */
+  previews_file?: string
 }
 
 export function readRuntime(path: string): Runtime {
   const raw = JSON.parse(readFileSync(path, 'utf8')) as Partial<Runtime>
-  for (const k of ['listen', 'modules_dir', 'users_file', 'session_key_file'] as const) {
+  const required = raw.preview_token ? ['listen', 'modules_dir'] as const : ['listen', 'modules_dir', 'users_file', 'session_key_file'] as const
+  for (const k of required) {
     if (typeof raw[k] !== 'string' || !raw[k]) throw new Error(`${path}: "${k}" is required`)
   }
   return {
@@ -35,10 +44,12 @@ export function readRuntime(path: string): Runtime {
     public_origin: (raw.public_origin ?? '').replace(/\/+$/, ''),
     title: raw.title || 'My site',
     modules_dir: raw.modules_dir!,
-    users_file: raw.users_file!,
-    session_key_file: raw.session_key_file!,
+    users_file: raw.users_file ?? '',
+    session_key_file: raw.session_key_file ?? '',
     google_client_file: raw.google_client_file ?? '',
     preview_label: raw.preview_label || undefined,
+    preview_token: raw.preview_token || undefined,
+    previews_file: raw.previews_file || undefined,
   }
 }
 

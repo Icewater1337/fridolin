@@ -1,0 +1,5 @@
+{
+  "name": "fridolin-site-builder",
+  "version": "1.0.0",
+  "description": "Build modules for the website Fridolin serves: the workflow, the module format and how Fridolin runs them. Comes with the fridolin-site MCP server (site_context, site_check, site_preview, site_sync, site_propose)."
+}

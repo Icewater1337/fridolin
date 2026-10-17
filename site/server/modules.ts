@@ -286,7 +286,7 @@ export async function mountModules(
   app: express.Express,
   loaded: { modules: SiteModule[]; broken: BrokenModule[] },
   requireAuth: express.RequestHandler,
-): Promise<void> {
+): Promise<{ mounted: string[]; broken: BrokenModule[] }> {
   const mounted: SiteModule[] = []
   const broken = [...loaded.broken]
 
@@ -319,6 +319,7 @@ export async function mountModules(
       }))
     res.json({ modules: tiles, broken: user?.role === 'admin' ? broken : [] })
   })
+  return { mounted: mounted.map(m => m.manifest.id), broken }
 }
 
 // Load errors, with a hint for the two everyone hits once.
@@ -359,7 +360,8 @@ function mountModule(app: express.Express, mod: SiteModule, router: express.Rout
   // Public files go first so the sign-in check below does not catch them.
   for (const f of m.app?.public ?? []) {
     app.get(`${m.route}/${f}`, (_req, res) => {
-      res.sendFile(join(mod.distDir!, f), (err: unknown) => { if (err) res.status(404).send('Not found') })
+      // root: a preview's modules live under a brain's .fridolin-site folder.
+      res.sendFile(f, { root: mod.distDir! }, (err: unknown) => { if (err) res.status(404).send('Not found') })
     })
   }
 

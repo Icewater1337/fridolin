@@ -57,6 +57,9 @@ type SiteSettings struct {
 	History  []SiteDeploy `json:"history"`
 	// Tunnel runs cloudflared with the saved tunnel token.
 	Tunnel bool `json:"tunnel"`
+	// Builders are the brains allowed to build the site (site_builder.go).
+	Builders  []string       `json:"builders"`
+	Proposals []SiteProposal `json:"proposals"`
 }
 
 // SiteRepo is the private repository that holds the site's modules.
@@ -91,8 +94,10 @@ type SiteManager struct {
 	dataDir      string
 	googleClient func() string // path of Fridolin's shared Google OAuth client file
 
-	// Swappable for tests: installing npm dependencies into a folder.
-	npmInstall func(ctx context.Context, dir string, prod bool) error
+	// Swappable for tests: installing npm dependencies into a folder, and
+	// into a builder brain's workspace (as that brain).
+	npmInstall       func(ctx context.Context, dir string, prod bool) error
+	workspaceInstall func(ctx context.Context, brainID, dir string) error
 
 	mu       sync.Mutex
 	settings SiteSettings
@@ -101,6 +106,8 @@ type SiteManager struct {
 	tunnel   *siteProc
 	deploy   *siteJob
 	previews map[string]*sitePreview
+	tokens   map[string]string // builder token → brain id
+	hooks    builderHooks
 	ctx      context.Context
 }
 
@@ -114,6 +121,7 @@ func NewSiteManager(dataDir string, googleClient func() string) *SiteManager {
 		tunnel:       newSiteProc("tunnel"),
 	}
 	m.npmInstall = m.runNpmInstall
+	m.workspaceInstall = m.npmInstallAsBrain
 	m.settings = m.loadSettings()
 	m.users = m.loadUsers()
 	return m
@@ -159,7 +167,10 @@ func (m *SiteManager) Settings() SiteSettings {
 	defer m.mu.Unlock()
 	s := m.settings
 	s.Roles = slices.Clone(s.Roles)
-	s.History = append([]SiteDeploy{}, s.History...) // [] rather than null in JSON
+	// [] rather than null in JSON.
+	s.History = append([]SiteDeploy{}, s.History...)
+	s.Builders = append([]string{}, s.Builders...)
+	s.Proposals = append([]SiteProposal{}, s.Proposals...)
 	return s
 }
 
@@ -532,6 +543,7 @@ type siteRuntime struct {
 	SessionKeyFile   string `json:"session_key_file"`
 	GoogleClientFile string `json:"google_client_file"`
 	PreviewLabel     string `json:"preview_label,omitempty"`
+	PreviewsFile     string `json:"previews_file,omitempty"`
 }
 
 // googleClientFile is the site's own Google client if one is saved, else
@@ -578,8 +590,11 @@ func (m *SiteManager) processCommand(ctx context.Context, name, listen, modulesD
 		UsersFile: m.dir("users.json"), SessionKeyFile: keyFile,
 		GoogleClientFile: m.googleClientFile(), PreviewLabel: label,
 	}
-	if s.Domain != "" && label == "" {
-		rt.PublicOrigin = "https://" + s.Domain
+	if label == "" {
+		rt.PreviewsFile = m.dir("previews.json")
+		if s.Domain != "" {
+			rt.PublicOrigin = "https://" + s.Domain
+		}
 	}
 	if !fileExists(rt.UsersFile) {
 		m.mu.Lock()
@@ -745,7 +760,7 @@ func (m *SiteManager) ensureShell(ctx context.Context) (string, error) {
 			return err
 		}
 		if d.IsDir() {
-			if p == "site/template" {
+			if p == "site/template" || p == "site/builder" || p == "site/test" {
 				return fs.SkipDir
 			}
 			return nil

@@ -87,6 +87,42 @@ listed; *Roll back to this* makes one live again (the last few are kept built,
 so a rollback is instant). A deploy that fails to build leaves the live site
 as it was.
 
+## Building with a brain
+
+Site → **Builders** lets a brain build the site. That brain then gets, in its
+own folder under `.fridolin-site/`:
+
+- the **site-builder plugin** — skills for the workflow, the module format and
+  how Fridolin runs the site (`site/builder` in this repository);
+- a **workspace** — a clone of the site repository on the branch
+  `builder/<brain>`;
+- the **fridolin-site MCP server** (`fridolin mcp-site`) with five tools:
+  `site_context` (the live site, roles, the workspace), `site_check` (loads the
+  workspace's modules as the site will and lists what you will review),
+  `site_preview` (runs the workspace), `site_sync` (rebases onto the newest
+  branch) and `site_propose`.
+
+Ask it for a page — on WhatsApp, or on the Build page — and it builds the
+module, checks it, previews it and proposes it. Proposals appear under Site →
+**Proposals** with the same review list as a deploy; *Merge and deploy* merges
+the branch, pushes it and deploys it. The brain cannot deploy, merge, or change
+people, roles or the domain.
+
+What keeps a builder contained:
+
+- Everything about the workspace runs **inside the brain's sandbox**: the clone,
+  `npm install`, checks and previews. Fridolin never runs git or npm on the
+  workspace itself (its `.git` and `package.json` are the brain's to write), so
+  history moves in and out only as git bundles.
+- A **preview** knows no accounts: it gets no session key and no user list. It
+  opens with its own link (the dashboard has it), or, for a signed-in admin,
+  through the real domain at `/_fridolin/preview/<brain>`, where the live site
+  forwards the admin's requests to it.
+- Each brain's MCP server has a **token of its own**, valid only while the brain
+  is a builder and only for its own workspace.
+- Turning a builder off revokes its token and stops its preview; its workspace
+  stays, so no unproposed work is lost.
+
 ## Modules
 
 ```

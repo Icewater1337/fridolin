@@ -29,11 +29,13 @@ export default {
     const statusCard = h('section.card', loading('Loading the site…'));
     const repoCard = h('section.card');
     const deployCard = h('section.card');
+    const proposalsCard = h('section.card');
+    const buildersCard = h('section.card');
     const domainCard = h('section.card');
     const peopleCard = h('section.card');
     mount(root,
       pageHeader('Site', 'Your own website: people sign in with Google or a password, and every page is a module in your own repository.'),
-      h('div.page-stack', statusCard, repoCard, deployCard, domainCard, peopleCard));
+      h('div.page-stack', statusCard, repoCard, deployCard, proposalsCard, buildersCard, domainCard, peopleCard));
 
     let st = null;
     let updates = null;
@@ -46,6 +48,7 @@ export default {
     // replaced under the pointer.
     let statusSig = '';
     let deploySig = '';
+    let proposalSig = '';
     const sig = (...v) => JSON.stringify(v);
     const poller = ctx.poll(async () => {
       st = await get('/api/site');
@@ -53,13 +56,14 @@ export default {
       if (s1 !== statusSig) renderStatus();
       const s2 = sig(st.deploy, st.settings.approved, st.settings.history, st.repo);
       if (!editing && s2 !== deploySig) renderDeploy();
+      if (!editing && sig(st.settings.proposals, st.settings.builders) !== proposalSig) { renderProposals(); renderBuilders(); }
     }, () => (st && st.deploy && st.deploy.state === 'running' ? 1500 : 5000));
 
     get('/api/site').then((s) => { st = s; renderAll(); }).catch((e) => mount(statusCard, callout('bad', 'Could not load the site', e.message)));
 
     function renderAll() {
       editing = false;
-      renderStatus(); renderRepo(); renderDeploy(); renderDomain(); renderPeople();
+      renderStatus(); renderRepo(); renderDeploy(); renderProposals(); renderBuilders(); renderDomain(); renderPeople();
     }
 
     // ── status ─────────────────────────────────────────────────────────
@@ -156,6 +160,14 @@ export default {
       renderDeploy();
     }
 
+    // "It changes who may open it and where it is served." — from the review items.
+    function reviewSentence(changes) {
+      const notes = [...new Set((changes || []).flatMap((c) => c.review.map((r) => r.note)))];
+      if (!notes.length) return '';
+      const list = notes.length === 1 ? notes[0] : `${notes.slice(0, -1).join(', ')} and ${notes.at(-1)}`;
+      return `It changes ${list}. Look at the list before approving.`;
+    }
+
     function reviewList(change) {
       if (!change.review.length) return h('p.small.muted', 'No change to access, server code, files or commands.');
       return h('ul.site-review', change.review.map((r) => h('li',
@@ -201,8 +213,8 @@ export default {
           h('div.actions',
             btn(`Approve and deploy ${short(updates.head)}`, {
               kind: 'primary', icon: 'check', disabled: running, onClick: async () => {
-                const risky = updates.changes.some((c) => c.review.length);
-                if (risky && !await confirmDialog({ title: 'Approve these changes?', message: 'Some modules change who may open them, run code on this Mac, or touch files. Look at the list before approving.', confirm: 'Approve and deploy' })) return;
+                const sentence = reviewSentence(updates.changes);
+                if (sentence && !await confirmDialog({ title: 'Approve these changes?', message: sentence, confirm: 'Approve and deploy' })) return;
                 await post('/api/site/deploy', { commit: updates.head });
                 updates = null;
                 poller.kick();
@@ -222,6 +234,68 @@ export default {
             }))))));
       }
       mount(deployCard, parts);
+    }
+
+    // ── proposals from builder brains ─────────────────────────────────
+    async function renderProposals() {
+      proposalSig = sig(st.settings.proposals, st.settings.builders);
+      const head = h('div.card-head', h('div.card-title', icon('inbox'), h('h2', 'Proposals')));
+      if (!st.settings.builders.length && !st.settings.proposals.length) {
+        mount(proposalsCard, head, h('p.muted', 'Brains you allow to build the site (below) propose their work here. You review it and deploy it — they cannot.'));
+        return;
+      }
+      const { proposals } = await get('/api/site/proposals');
+      if (!proposals.length) {
+        mount(proposalsCard, head, h('p.muted', 'Nothing waiting. Ask a builder brain for a page — on WhatsApp, or here on the Build page.'));
+        return;
+      }
+      const running = st.deploy && st.deploy.state === 'running';
+      mount(proposalsCard, head, proposals.map(({ proposal: p, changes, preview, error }) => h('div.site-block',
+        h('div', h('strong', p.title), h('span.muted.small', ` — ${p.brain}, `, timeAgo(p.at), ' · ', mono(short(p.commit)))),
+        p.summary ? h('p.small.site-summary', p.summary) : null,
+        error ? callout('bad', 'Cannot compare it with the live site', error) : null,
+        changes && changes.length ? changes.map((c) => h('div.site-change', h('div', h('strong', c.id), ' ', pill(c.status, c.status === 'removed' ? 'bad' : c.review.length ? 'warn' : 'neutral')), reviewList(c)))
+          : h('p.small.muted', 'No module changes.'),
+        h('div.actions',
+          btn('Merge and deploy', {
+            kind: 'primary', icon: 'check', disabled: running, onClick: async () => {
+              const sentence = reviewSentence(changes);
+              if (!await confirmDialog({ title: `Merge “${p.title}”?`, message: `${sentence ? `${sentence} ` : ''}It is merged into ${st.settings.repo.branch}, pushed and deployed.`, confirm: 'Merge and deploy' })) return;
+              await post(`/api/site/proposals/${encodeURIComponent(p.brain)}/merge`);
+              toast('Merged — deploying', 'ok'); await refresh();
+            },
+          }),
+          preview ? h('a.btn.small', { href: preview.local, target: '_blank', rel: 'noopener noreferrer' }, icon('external'), h('span.btn-label', 'Open the preview'))
+            : btn('Start a preview', { small: true, icon: 'play', onClick: async () => { const u = await post(`/api/site/previews/${encodeURIComponent(p.brain)}`); window.open(u.local, '_blank', 'noopener'); renderProposals(); } }),
+          btn('Discard', {
+            small: true, icon: 'x', onClick: async () => {
+              if (!await confirmDialog({ title: 'Discard this proposal?', message: 'It leaves the list. The brain’s branch and workspace stay as they are.', confirm: 'Discard', danger: true })) return;
+              await del(`/api/site/proposals/${encodeURIComponent(p.brain)}`); await refresh();
+            },
+          })))));
+    }
+
+    // ── which brains may build ─────────────────────────────────────────
+    async function renderBuilders() {
+      const head = h('div.card-head', h('div.card-title', icon('brain'), h('h2', 'Builders')));
+      if (!st.repo.connected) {
+        mount(buildersCard, head, h('p.muted', 'Connect a repository first.'));
+        return;
+      }
+      const { brains } = await get('/api/site/builders');
+      mount(buildersCard, head,
+        h('p.small', 'A brain you allow gets the site-builder skills and tools, and a workspace of its own (a clone of the repository in its folder, under .fridolin-site). It builds and previews inside its sandbox and can only propose; you merge and deploy here.'),
+        brains.length ? h('div.site-builders', brains.map((br) => toggle({
+          checked: br.builder, label: br.name || br.id,
+          onChange: async (on, input) => {
+            input.disabled = true;
+            try {
+              await put(`/api/site/builders/${encodeURIComponent(br.id)}`, { on });
+              toast(on ? `${br.name || br.id} may build the site` : `${br.name || br.id} no longer builds the site`, 'ok');
+              await refresh();
+            } catch (e) { input.checked = !on; toast(e.message, 'bad'); } finally { input.disabled = false; }
+          },
+        }))) : h('p.muted', 'No brains yet.'));
     }
 
     // ── domain and sign-in ─────────────────────────────────────────────
