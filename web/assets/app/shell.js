@@ -7,6 +7,7 @@ import { plural } from '../lib/format.js';
 import { waKind, waLabel } from '../lib/whatsapp.js';
 import { icon } from '../components/icons.js';
 import { btn } from '../components/buttons.js';
+import { callout } from '../components/common.js';
 import { ROUTES } from './routes.js';
 import { BRAND, routeHref } from './router.js';
 import { store } from './store.js';
@@ -43,11 +44,12 @@ function themeButton() {
 }
 
 /**
- * createShell({onRestart}) builds the shell. It returns {nodes, page,
- * setActive(navId), closeNav(), setOffline(bool)}: mount nodes into #app,
- * render pages into page. onRestart runs from the restart banner's button.
+ * createShell({onRestart, onReload}) builds the shell. It returns {nodes,
+ * page, setActive(navId), closeNav(), setOffline(bool)}: mount nodes into
+ * #app, render pages into page. onRestart runs from the restart banner's
+ * button, onReload (location.reload) from the update banner's.
  */
-export function createShell({ onRestart }) {
+export function createShell({ onRestart, onReload = () => location.reload() }) {
   const links = new Map();
   const nav = h('nav.nav', { 'aria-label': 'Main' });
   for (const route of ROUTES) {
@@ -74,7 +76,10 @@ export function createShell({ onRestart }) {
   const banners = h('div.banners');
   const offline = h('div.banner.bad', { hidden: true, role: 'alert' }, icon('alert'), h('span', 'Cannot reach the bridge. Retrying…'));
   const restartBanner = h('div.banner.warn', { hidden: true });
-  banners.append(offline, restartBanner);
+  const updateBanner = h('div.banner.info', { hidden: true },
+    icon('info'), h('span', 'Fridolin was updated. Reload the page to use the new dashboard.'),
+    btn('Reload', { kind: 'primary', small: true, onClick: () => onReload() }));
+  banners.append(offline, restartBanner, updateBanner);
   const page = h('main.main', { id: 'main' });
 
   menuBtn.addEventListener('click', () => {
@@ -113,6 +118,16 @@ export function createShell({ onRestart }) {
       btn('Restart now', { kind: 'primary', small: true, onClick: () => onRestart() }));
   });
 
+  // Pages load their modules on first visit. Once the bridge runs another
+  // version, a page opened next would come from the new build but use the
+  // old build's components, which this tab has loaded already.
+  let startVersion = '';
+  store.subscribe((s) => (s.status && s.status.version) || '', (v) => {
+    if (!v) return;
+    if (!startVersion) startVersion = v;
+    updateBanner.hidden = v === startVersion;
+  });
+
   return {
     nodes: [sidebar, h('div.content', banners, page)],
     page,
@@ -125,4 +140,15 @@ export function createShell({ onRestart }) {
     closeNav() { sidebar.classList.remove('nav-open'); menuBtn.setAttribute('aria-expanded', 'false'); },
     setOffline(off) { offline.hidden = !off; },
   };
+}
+
+/**
+ * What a page shows when it failed to load or to render. Mixed versions
+ * after an update are one cause, so it offers a reload (location.reload).
+ */
+export function pageFailed(e, onReload = () => location.reload()) {
+  return callout('bad', 'This page failed to load',
+    h('div', (e && e.message) || String(e)),
+    h('p.muted.small', 'If Fridolin was just updated, reloading the page loads the new version of all of it.'),
+    h('div.actions', btn('Reload page', { kind: 'primary', icon: 'refresh', small: true, onClick: () => onReload() })));
 }

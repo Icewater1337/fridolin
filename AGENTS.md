@@ -124,10 +124,13 @@ Reopen the dashboard with `./fridolin open`.
   page), `components/` (shared pieces of UI) and `lib/` (the element builder
   and pure helpers, which know nothing about the app). Pages import from
   `app/`, `components/` and `lib/`, never from each other; `lib/` imports
-  nothing outside itself. Its tests need Node 22+ and nothing installed:
-  `make test-web` syntax-checks every module and runs `node --test` on
-  `web/**/*.test.js` files (`web/test`). They cover the pure helpers and
-  check that every import resolves and keeps those layers.
+  nothing outside itself. Pages load on first visit (the route table is
+  `app/routes.js`), so once the bridge runs another version an open tab
+  asks for a reload instead of mixing two builds. Its tests need Node 22+
+  and nothing installed: `make test-web` syntax-checks every module and
+  runs `node --test` on `web/**/*.test.js` files (`web/test`). They cover
+  the pure helpers and check that every import resolves and keeps those
+  layers.
 - Run `scripts/install-hooks.sh` before committing. The hooks refuse commits
   and pushes containing phone numbers, WhatsApp JIDs, emails, home paths or
   tokens. Use placeholders: `15551234567`, `120363000000000000@g.us`,

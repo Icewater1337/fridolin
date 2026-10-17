@@ -256,6 +256,8 @@ code.mono {
 .banner.bad { background: var(--bad-soft); color: var(--bad); border-bottom: 1px solid var(--bad-border); }
 .banner.warn { background: var(--warn-soft); color: var(--text); border-bottom: 1px solid var(--warn-border); }
 .banner.warn > .icon { color: var(--warn); }
+.banner.info { background: var(--info-soft); color: var(--text); border-bottom: 1px solid var(--info-border); }
+.banner.info > .icon { color: var(--info); }
 .banner .btn { margin-left: auto; }
 
 .main { width: 100%; max-width: 1120px; margin: 0 auto; padding: 28px 32px 80px; }

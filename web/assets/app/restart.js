@@ -1,5 +1,7 @@
 // Restarting the bridge from the dashboard: POST /api/restart, then wait
 // until /api/status answers from the new process. The token stays the same.
+// A new process of another version serves other modules, and pages load
+// theirs on first visit, so the page reloads instead of mixing the two.
 
 import { get, post } from './api.js';
 import { store, setStatus } from './store.js';
@@ -10,9 +12,11 @@ import { spinner } from '../components/common.js';
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
-export async function restartBridge() {
+/** reload is location.reload, unless a test says otherwise. */
+export async function restartBridge({ reload = () => location.reload() } = {}) {
   const { status } = store.get();
   const before = status ? status.started_at : null;
+  const version = status ? status.version : '';
   const msg = h('p', 'Restarting the bridge… this usually takes a few seconds.');
   const body = h('div.restart-body', spinner('large'), msg);
   const actions = h('div.dialog-actions');
@@ -40,8 +44,12 @@ export async function restartBridge() {
     try {
       const s = await get('/api/status');
       if ((before && s.started_at !== before) || (!before && sawDown) || (sawDown && s.started_at !== before)) {
-        setStatus(s); // the new process has nothing waiting for a restart
         close();
+        if (version && s.version && s.version !== version) {
+          reload();
+          return true;
+        }
+        setStatus(s); // the new process has nothing waiting for a restart
         toast('The bridge restarted', 'ok');
         return true;
       }

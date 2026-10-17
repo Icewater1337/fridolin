@@ -13,7 +13,7 @@ import { keepTimesFresh } from '../components/common.js';
 import { restartBridge } from './restart.js';
 import { makePoll, pausePollsWhen, resumePolls } from './poll.js';
 import { createPage } from './page.js';
-import { createShell } from './shell.js';
+import { createShell, pageFailed } from './shell.js';
 import { connectScreen } from './connect.js';
 import { ROUTES } from './routes.js';
 import { matchRoute, activeNav, docTitle, tokenFromHash } from './router.js';
@@ -103,7 +103,7 @@ async function renderRoute() {
     if (ctx.dead) return;
     console.error(e);
     document.title = docTitle('Error');
-    mount(root, h('div.callout.bad', h('div.callout-body', h('strong', 'This page failed to load'), h('div', e.message || String(e)))));
+    mount(root, pageFailed(e));
     return;
   }
   if (ctx.dead) return;
@@ -112,7 +112,7 @@ async function renderRoute() {
     page.render(root, ctx);
   } catch (e) {
     console.error(e);
-    mount(root, h('div.callout.bad', h('div.callout-body', h('strong', 'This page failed to load'), h('div', e.message || String(e)))));
+    mount(root, pageFailed(e));
   }
 }
 
