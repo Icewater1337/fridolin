@@ -453,6 +453,24 @@ func findPlaudCLI(c string) (string, error) {
 	return "", errors.New("the Plaud CLI is not installed")
 }
 
+// brainPlaudPATH is the PATH brains run with when plaud.brain_access lets
+// them use Plaud's CLI, or "" to keep the bridge's own. The bridge finds
+// the CLI in nvm when it is not on its PATH, which under the service it
+// often is not, so brains get the CLI's folder first, as the bridge's own
+// runs do: `plaud` and the node its #!/usr/bin/env node needs. The sandbox
+// already keeps brains from writing to every folder on that PATH (see
+// plantablePrograms).
+func brainPlaudPATH(cfg *Config) string {
+	if !cfg.Plaud.BrainAccess {
+		return ""
+	}
+	bin, err := findPlaudCLI(cfg.Plaud.CLIPath)
+	if err != nil {
+		return ""
+	}
+	return plaudPATH(bin)
+}
+
 // plaudOptOut keeps Plaud's CLI from sending usage statistics to Plaud's
 // analytics and from asking npm for updates. Fridolin's own runs get it,
 // and so does every brain's run: with plaud.brain_access brains run the

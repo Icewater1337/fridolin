@@ -1973,6 +1973,32 @@ func TestBrainRunsKeepPlaudTelemetryOff(t *testing.T) {
 	}
 }
 
+// With plaud.brain_access brains find the Plaud CLI, and the node next to
+// it, first on their PATH, as the bridge's own runs do; without it their
+// PATH is the bridge's.
+func TestBrainsFindThePlaudCLIWhenTheyMayUseIt(t *testing.T) {
+	for _, access := range []bool{true, false} {
+		t.Run(fmt.Sprintf("brain_access=%v", access), func(t *testing.T) {
+			tb, _ := plaudBridge(t, fmt.Sprintf(`, "brain_access": %v`, access))
+			envLog := filepath.Join(t.TempDir(), "brain.env")
+			t.Setenv("FRIDOLIN_FAKE_ENV_LOG", envLog)
+			tb.handleInbound(context.Background(), Inbound{JID: "15551234567@s.whatsapp.net", Sender: "15551234567", Text: "hello", Source: "whatsapp"})
+			waitFor(t, 10*time.Second, "the run", func() bool { return len(tb.dev.Outbox()) > 0 })
+			logged, _ := os.ReadFile(envLog)
+			var path string
+			for _, kv := range strings.Split(string(logged), "\n") {
+				if v, ok := strings.CutPrefix(kv, "PATH="); ok {
+					path = v
+				}
+			}
+			cliDir := filepath.Dir(os.Args[0])
+			if first := filepath.SplitList(path)[0]; (first == cliDir) != access {
+				t.Errorf("PATH = %s, want %s first: %v", path, cliDir, access)
+			}
+		})
+	}
+}
+
 func TestPlaudBrainAccessSharesTheLogin(t *testing.T) {
 	tb, fp := plaudBridge(t, `, "brain_access": true`)
 	fp.files()

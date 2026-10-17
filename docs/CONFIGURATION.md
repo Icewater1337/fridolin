@@ -846,7 +846,8 @@ directory and database it runs with (absolute, wherever `data_dir` and
 folder with the tools (see [BRAINS.md](BRAINS.md)); `BRIDGE_BRAIN_ID`,
 `BRIDGE_CREDENTIALS_DIR`, `BRIDGE_CALENDARS` and `BRIDGE_CALENDAR_DEFAULT`
 for the calendar tool; `PLAUD_TELEMETRY_DISABLED=1` and
-`PLAUD_NO_UPDATE_NOTIFIER=1` for [Plaud](PLAUD.md)'s CLI; and
+`PLAUD_NO_UPDATE_NOTIFIER=1` for [Plaud](PLAUD.md)'s CLI, with
+`plaud.brain_access` a `PATH` that starts with that CLI's folder; and
 `DISABLE_AUTOUPDATER=1` in the sandbox. What the bridge's own environment
 has under these names does not reach brains. Run by hand, outside a
 brain, the tools default to `~/.fridolin`; set `BRIDGE_DATA_DIR` for

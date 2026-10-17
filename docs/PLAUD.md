@@ -98,8 +98,11 @@ write anywhere in `~/.nvm/versions/node`, and they cannot add a `plaud` or
 
 **Let brains use the Plaud CLI** (`plaud.brain_access`) keeps the login in
 `~/.plaud/` instead, so brains can run `plaud search`, `plaud transcript` and
-so on themselves. A brain could then also read the token — turn it on only if
-you want brains to look things up in Plaud directly.
+so on themselves. Their `PATH` then starts with the tool's folder, as
+Fridolin's own runs do, so they find it, and the `node` it was installed
+with, also where the service's `PATH` does not have them. A brain could
+then also read the token — turn it on only if you want brains to look
+things up in Plaud directly.
 
 Changing it does not move a login. Fridolin stops checking until you
 connect again, and then uses the login the tool has in its new home: your

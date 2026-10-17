@@ -228,6 +228,7 @@ type brainSettings struct {
 	toolsDir        string // the bridge's Python helpers, or ""
 	dataDir         string // the data dir, absolute
 	dbPath          string // the bridge's DB, absolute
+	plaudPATH       string // the PATH to run with when brains may use Plaud's CLI
 }
 
 // BrainHooks connect brains to the rest of the bridge.
@@ -1058,6 +1059,9 @@ func (br *Brain) invoke(run *brainRun, ctx context.Context, s *brainSettings, m 
 		// wherever the bridge is installed.
 		extraEnv = append(extraEnv, "FRIDOLIN_TOOLS_DIR="+s.toolsDir)
 	}
+	if s.plaudPATH != "" {
+		extraEnv = append(extraEnv, "PATH="+s.plaudPATH) // replaces the bridge's
+	}
 	if br.sandbox != nil && br.sandbox.Enabled() {
 		sbBinary, sbArgs, sbErr := br.sandbox.Command(br.id, s.claudePath, args)
 		if sbErr != nil {
@@ -1649,8 +1653,9 @@ func settingsFor(cfg *Config, sp BrainSpec) *brainSettings {
 		toolsDir:        ownLayout().Tools,
 		// Absolute: brains run in their own folder, where a relative
 		// data_dir would name another one.
-		dataDir: absPath(cfg.DataDir),
-		dbPath:  absPath(cfg.DBPath),
+		dataDir:   absPath(cfg.DataDir),
+		dbPath:    absPath(cfg.DBPath),
+		plaudPATH: brainPlaudPATH(cfg),
 	}
 }
 
