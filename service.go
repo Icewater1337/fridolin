@@ -246,7 +246,7 @@ func (h *serviceHost) logDir() string {
 // logHint says where to look when the bridge does not come up.
 func (h *serviceHost) logHint() string {
 	if h.goos == "darwin" {
-		return "tail -f ~/Library/Logs/fridolin/stderr.log"
+		return "tail -F ~/Library/Logs/fridolin/stderr.log"
 	}
 	return "journalctl --user -u fridolin -f"
 }
@@ -316,6 +316,8 @@ const launchdTemplate = `<?xml version="1.0" encoding="UTF-8"?>
         <string>{{xml .Binary}}</string>
         <string>--config</string>
         <string>{{xml .Config}}</string>
+        <string>--log-file</string>
+        <string>{{xml .LogDir}}/stderr.log</string>
     </array>
 
     <key>WorkingDirectory</key>

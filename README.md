@@ -397,8 +397,9 @@ Each install rewrites the unit. Variables you add to the launchd agent's
 `EnvironmentVariables` are kept (a dry run names them, but does not show
 their values); on Linux keep them in a drop-in: see
 [Environment variables](docs/CONFIGURATION.md#environment-variables). The
-macOS log is in `~/Library/Logs/fridolin/`; on Linux,
-`journalctl --user -u fridolin -f`.
+macOS log is `~/Library/Logs/fridolin/stderr.log` (`tail -F` it), private to
+you; past 10 MB it moves to `stderr.log.1`, replacing the one before. On
+Linux, `journalctl --user -u fridolin -f`.
 
 ### Releases
 

@@ -38,6 +38,8 @@ Common flags:
 Run flags:
   --no-whatsapp     dev mode: dashboard and brains without a WhatsApp connection
   --open            open the dashboard once the bridge is up
+  --log-file PATH   the file stderr goes to, kept under 10 MiB (PATH.1 holds the
+                    one before); the launchd agent passes it
 `
 
 func main() {
@@ -137,6 +139,7 @@ func runCmd(args []string) {
 	noWA := fs.Bool("no-whatsapp", false, "dev mode: run without connecting to WhatsApp")
 	dashOnly := fs.Bool("dashboard-only", false, "alias for --no-whatsapp")
 	openDash := fs.Bool("open", false, "open the dashboard in the browser once started")
+	logFile := fs.String("log-file", "", "the file stderr goes to, rotated at 10 MiB (the launchd agent passes it)")
 	legacyCheck := fs.Bool("check", false, "validate the configuration and exit (same as `check`)")
 	_ = fs.Parse(args)
 
@@ -145,7 +148,20 @@ func runCmd(args []string) {
 		return
 	}
 
-	ring, path := runLog(os.Stderr, *cfgPath)
+	// Under launchd stderr is a file, which --log-file keeps small.
+	var console io.Writer = os.Stderr
+	var logErr error
+	if *logFile != "" {
+		var lf *rotatingLog
+		if lf, logErr = openRotatingLog(*logFile, int(os.Stderr.Fd()), maxLogBytes); logErr == nil {
+			console = lf
+		}
+	}
+	ring, path := runLog(console, *cfgPath)
+	if logErr != nil {
+		// Once the log reaches the dashboard too.
+		log.Printf("%v; logging to stderr without rotating it", logErr)
+	}
 	if err := ensureConfigFile(path); err != nil {
 		log.Fatalf("creating config: %v", err)
 	}

@@ -177,6 +177,9 @@ func TestRenderLaunchdAgentEscapesEveryValue(t *testing.T) {
 	if root["WorkingDirectory"] != d.WorkDir || root["StandardErrorPath"] != d.LogDir+"/stderr.log" || root["Label"] != serviceLabel {
 		t.Errorf("plist = %v", root)
 	}
+	if args, _ := root["ProgramArguments"].([]any); len(args) != 5 || args[3] != "--log-file" || args[4] != d.LogDir+"/stderr.log" {
+		t.Errorf("ProgramArguments = %q, want the log file passed to the bridge", args)
+	}
 	if root["KeepAlive"] != true || root["RunAtLoad"] != true {
 		t.Errorf("KeepAlive/RunAtLoad = %v/%v, want true", root["KeepAlive"], root["RunAtLoad"])
 	}
@@ -795,7 +798,7 @@ func TestServiceInstallChecksTheNewBridgeAnswers(t *testing.T) {
 			case c.wantErr != "" && (err == nil || !strings.Contains(err.Error(), c.wantErr)):
 				t.Fatalf("err = %v, want %q", err, c.wantErr)
 			}
-			if c.wantErr != "" && c.wantErr != "older build" && !strings.Contains(err.Error(), "tail -f ~/Library/Logs/fridolin/stderr.log") {
+			if c.wantErr != "" && c.wantErr != "older build" && !strings.Contains(err.Error(), "tail -F ~/Library/Logs/fridolin/stderr.log") {
 				t.Errorf("err = %v, want the log hint", err)
 			}
 			if !strings.Contains(f.out.String(), c.wantOut) {
