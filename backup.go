@@ -541,11 +541,7 @@ func (a *authURLWatcher) Write(p []byte) (int, error) {
 func (a *authURLWatcher) tail() string {
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	s := strings.TrimSpace(a.buf.String())
-	if len(s) > 400 {
-		s = s[len(s)-400:]
-	}
-	return s
+	return tail(a.buf.String(), 400)
 }
 
 func (b *Bridge) apiBackupDisconnect(w http.ResponseWriter, r *http.Request) {

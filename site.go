@@ -827,14 +827,6 @@ func (m *SiteManager) runNpmInstall(ctx context.Context, dir string, prod bool) 
 	return nil
 }
 
-func tail(s string, n int) string {
-	s = strings.TrimSpace(s)
-	if len(s) > n {
-		return "…" + s[len(s)-n:]
-	}
-	return s
-}
-
 // SiteProcStatus is what the dashboard shows about one process.
 type SiteProcStatus struct {
 	State    string   `json:"state"` // stopped, starting, running, crashed

@@ -1345,6 +1345,23 @@ func TestAllowGroupMovesItBetweenBrains(t *testing.T) {
 	}
 }
 
+// The name suggested for a new brain's folder starts with a capital, also
+// when its first letter takes more than one byte.
+func TestPrettyName(t *testing.T) {
+	for in, want := range map[string]string{
+		"":             "Brain",
+		"personal":     "Personal",
+		"work_notes":   "Work notes",
+		"éclair-notes": "Éclair notes",
+		"ölkanne":      "Ölkanne",
+		"日記":           "日記",
+	} {
+		if got := prettyName(in); got != want {
+			t.Errorf("prettyName(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
+
 // The dashboard edits brain_model only. A config that still has the
 // retired model key shows its value there, and a save from a tab opened
 // before the upgrade, which still sends model, keeps it the same way.

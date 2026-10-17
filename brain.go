@@ -1311,6 +1311,22 @@ func truncate(s string, n int) string {
 	return s[:n] + "…"
 }
 
+// tail is truncate's counterpart for the end of s, for the last lines of
+// a command's output: s without surrounding space, cut after an ellipsis
+// to its last n bytes when longer, or a few fewer so that no rune is cut
+// in two.
+func tail(s string, n int) string {
+	s = strings.TrimSpace(s)
+	if len(s) <= n {
+		return s
+	}
+	i := len(s) - n
+	for i < len(s) && !isRuneStart(s[i]) {
+		i++
+	}
+	return "…" + s[i:]
+}
+
 func isRuneStart(b byte) bool { return b&0xC0 != 0x80 }
 
 func (br *Brain) finishRun(run *brainRun) {

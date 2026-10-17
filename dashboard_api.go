@@ -21,6 +21,8 @@ import (
 	"sync"
 	"syscall"
 	"time"
+	"unicode"
+	"unicode/utf8"
 
 	qrcode "github.com/skip2/go-qrcode"
 )
@@ -754,7 +756,9 @@ func prettyName(s string) string {
 	if s == "" {
 		return "Brain"
 	}
-	return strings.ToUpper(s[:1]) + s[1:]
+	// The first rune, not byte: a folder named "éclair" must not lose its é.
+	r, size := utf8.DecodeRuneInString(s)
+	return string(unicode.ToUpper(r)) + s[size:]
 }
 
 func nz(s []string) []string {
