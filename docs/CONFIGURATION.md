@@ -103,7 +103,10 @@ after an update.
 
 Model to use — `"sonnet"`, `"opus"`, `"haiku"`, or a full model ID. Empty uses
 the CLI default. `model` applies to classic mode, `brain_model` to brains, and
-an individual brain can override it with its own `model` field.
+an individual brain can override it with its own `model` field. For a brain,
+empty means the `model` in its folder's `.claude/settings.json`, or Claude
+Code's own default, never the one in your `~/.claude/settings.json` (see
+[`inherit_claude_user_config`](#inherit_claude_user_config)).
 
 ### `brain_effort`
 
@@ -138,9 +141,9 @@ yours. Every brain runs with `--setting-sources project,local` and
 folder has that file. So a brain gets the `CLAUDE.md`, `.claude/` settings,
 skills, agents and commands and the `.mcp.json` servers of its own folder,
 but not your user settings in `~/.claude/settings.json` (their hooks,
-plugins, permissions, `env` and `apiKeyHelper`), the skills, agents and
-commands in `~/.claude`, the MCP servers in `~/.claude.json`, or those of
-plugins and of your claude.ai account. Given with `--mcp-config`, a
+plugins, permissions, `env`, `apiKeyHelper` and `model`), the skills,
+agents and commands in `~/.claude`, the MCP servers in `~/.claude.json`, or
+those of plugins and of your claude.ai account. Given with `--mcp-config`, a
 `.mcp.json` the CLI cannot use stops it from starting at all, where it used
 to be ignored: one that is not a JSON object with an `mcpServers` object
 (`{}` or a misspelt key included). The bridge therefore leaves out such a
@@ -187,20 +190,35 @@ Claude Code session you start yourself in the brain's folder, and the
 sandbox lets them read those instruction files again (it still denies
 writing them, as listed under [sandbox](#sandbox-macos)).
 
-When you upgrade to a version with this setting, check whether your brains
-relied on any of this:
+Before you upgrade to a version with this setting, check whether your
+brains rely on any of this:
 
+- Instructions brains got from `~/CLAUDE.md`, `~/.claude/CLAUDE.md`,
+  `~/.claude/rules` or a `CLAUDE.md`, `CLAUDE.local.md` or `.claude/rules`
+  above their folder no longer reach them, with or without the sandbox.
+  `~/CLAUDE.md` reached every brain under your home folder. Copy what each
+  brain needs into its own `CLAUDE.md` or `brain-prompt.md`.
+- `apiKeyHelper`, `env` and `model` in `~/.claude/settings.json` no longer
+  apply to brains, so neither does the API key, provider
+  (`CLAUDE_CODE_USE_BEDROCK`, say) or model they choose. Move what a brain
+  needs into its folder's `.claude/settings.json`, or set `brain_model`.
 - Permission rules and hooks in `~/.claude/settings.json` no longer apply
   to brains, the `deny` rules and `PreToolUse` guards among them. Copy the
   ones a brain should keep into its folder's `.claude/settings.json`.
 - MCP servers from `~/.claude.json`, from plugins and from your claude.ai
   account no longer load. Add the ones a brain needs to its `.mcp.json`.
+- A `.mcp.json` server you declined that only `~/.claude.json` records as
+  off for the brain's folder (`disabledMcpjsonServers` under `projects`)
+  starts on the brain's first run: the bridge reads only the folder's
+  settings, and Claude Code moves that record into the folder's
+  `.claude/settings.local.json` only during that run. Copy it there first.
 - With the sandbox, a `CLAUDE.md`, skill or rule in a brain's folder that is
   a symlink to one of the instruction files it denies above the folder
   (`~/CLAUDE.md`, say) no longer loads, and nothing says so: the sandbox
   goes by the real path. Copy the file into the brain's folder instead.
-- Then send each brain a test message, asking it which MCP tools it has and
-  something only its `CLAUDE.md` answers.
+- Then send each brain a test message. Its reply shows that it can still log
+  in; ask it which MCP tools it has and something only its `CLAUDE.md`
+  answers.
 
 > **Warning:** with this on, every brain runs your hooks, sees your personal
 > instructions and can call your MCP servers' tools without asking (see

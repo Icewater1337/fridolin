@@ -128,6 +128,16 @@ file's real path, so a `CLAUDE.md`, skill or rule in the brain's folder
 that is a symlink to one of those files above it is denied as well, and
 nothing says so: copy such a file into the brain's folder instead.
 
+> **Before upgrading** from a version without
+> [`inherit_claude_user_config`](CONFIGURATION.md#inherit_claude_user_config):
+> instructions brains got from `~/CLAUDE.md`, `~/.claude/CLAUDE.md`,
+> `~/.claude/rules` or a `CLAUDE.md` above their folder no longer reach
+> them, with or without the sandbox, and neither do the `apiKeyHelper`,
+> `env` and `model` in `~/.claude/settings.json`. Copy what each brain
+> needs into its own `CLAUDE.md` or `brain-prompt.md` and its
+> `.claude/settings.json`, then go through the upgrade checklist under that
+> setting.
+
 > **Warning:**
 > [`inherit_claude_user_config`](CONFIGURATION.md#inherit_claude_user_config)
 > brings back the old behaviour, in which every brain loads all of your
