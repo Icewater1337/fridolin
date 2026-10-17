@@ -118,13 +118,15 @@ whoever may message it. What a brain needs belongs in its folder, the
 permission rules and hooks that should hold for it too. Claude Code would
 also load the `CLAUDE.md` files and `.claude/` folders above the brain's
 folder, your `~/CLAUDE.md` and `~/.claude/CLAUDE.md` included, which
-`--setting-sources` does not cover; the sandbox keeps brains from reading
-them (see below). Without the sandbox, a brain still gets them, so keep
-brain folders out from under folders that hold your instructions. The
-sandbox goes by a file's real path, so a `CLAUDE.md`, skill or rule in the
-brain's folder that is a symlink to one of those files above it is denied
-as well, and nothing says so: copy such a file into the brain's folder
-instead.
+`--setting-sources` does not cover. The bridge tells it to skip the
+`CLAUDE.md` files and rules there (`claudeMdExcludes`), and the sandbox
+keeps brains from reading any of it, the skills, agents and commands in
+those `.claude` folders too (see below). Without the sandbox, a brain still
+gets those and can read your instructions with its tools, so keep brain
+folders out from under folders that hold either. The sandbox goes by a
+file's real path, so a `CLAUDE.md`, skill or rule in the brain's folder
+that is a symlink to one of those files above it is denied as well, and
+nothing says so: copy such a file into the brain's folder instead.
 
 > **Warning:**
 > [`inherit_claude_user_config`](CONFIGURATION.md#inherit_claude_user_config)

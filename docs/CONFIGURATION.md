@@ -161,13 +161,21 @@ These flags do not skip the `CLAUDE.md` and `CLAUDE.local.md` files and the
 `.claude/` folders (their `CLAUDE.md`, rules, skills, agents and commands)
 in the folders above a brain's folder: Claude Code reads them as part of
 the project. A brain in your home folder would therefore load `~/CLAUDE.md`,
-`~/.claude/CLAUDE.md` and `~/.claude/rules`, your personal instructions. The
-[sandbox](#sandbox-macos) keeps brains from reading or writing any of them,
-up to `/`; in your home folder it denies only `.claude/CLAUDE.md` and
-`.claude/rules`, since the rest of `~/.claude` is the CLI's own state.
-Without the sandbox (Linux, or `sandbox.enabled` off), brains still load
-them, so keep brain folders out from under folders that hold your
-instructions.
+`~/.claude/CLAUDE.md` and `~/.claude/rules`, your personal instructions. So
+every brain also runs with `--settings` holding a `claudeMdExcludes` list:
+the `CLAUDE.md`, `CLAUDE.local.md`, `.claude/CLAUDE.md` and `.claude/rules`
+of every folder above its folder, up to `/`, and `~/.claude/CLAUDE.md` and
+`~/.claude/rules`, your user memory, wherever the brain lives. It adds to
+the brain's own `claudeMdExcludes`, if it has any. It does not cover the
+skills, agents and commands in those `.claude` folders, nor keep a brain
+from reading any of these files with its tools. The
+[sandbox](#sandbox-macos) does both: it keeps brains from reading or
+writing any of them, up to `/`; in your home folder it denies only
+`.claude/CLAUDE.md` and `.claude/rules`, since the rest of `~/.claude` is
+the CLI's own state. Without the sandbox (Linux, or `sandbox.enabled` off),
+brains still get the skills, agents and commands above their folder and
+can read your instructions, so keep brain folders out from under folders
+that hold either.
 
 `true` brings back the old behaviour: brains load all of your setup, like a
 Claude Code session you start yourself in the brain's folder, and the

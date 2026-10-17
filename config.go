@@ -109,9 +109,10 @@ type Config struct {
 	// their hooks, plugins and permissions), skills, agents and commands,
 	// the MCP servers in ~/.claude.json, and the CLAUDE.md files and
 	// .claude folders above the brain's folder, ~/CLAUDE.md and
-	// ~/.claude/CLAUDE.md included (which only the sandbox keeps out). Off
-	// by default: a brain loads only its own folder's, since anyone who may
-	// message it can steer it.
+	// ~/.claude/CLAUDE.md included. Off by default: a brain loads only its
+	// own folder's, since anyone who may message it can steer it. Off, the
+	// CLI is told to skip the CLAUDE.md files and rules above the folder,
+	// and only the sandbox keeps out the skills, agents and commands there.
 	InheritClaudeUserConfig bool `json:"inherit_claude_user_config,omitempty"`
 
 	// HTTPListen is the address of the local HTTP server: the dashboard plus

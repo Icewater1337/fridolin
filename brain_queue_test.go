@@ -252,30 +252,34 @@ func TestReloadKeepsRunningBrainAndRetiresRemoved(t *testing.T) {
 }
 
 // TestClaudeArgs: a brain loads only its own folder's Claude Code setup,
-// with the folder's .mcp.json passed explicitly, unless
-// inherit_claude_user_config asks for the old behaviour. The other settings
-// map to their flags, and the prompt comes last.
+// with the folder's .mcp.json passed explicitly and the instructions above
+// it excluded, unless inherit_claude_user_config asks for the old
+// behaviour. The other settings map to their flags, and the prompt comes
+// last.
 func TestClaudeArgs(t *testing.T) {
 	const mcp = "/brains/a/.mcp.json"
+	const settings = `{"claudeMdExcludes":["/brains/CLAUDE.md"]}`
 	cases := []struct {
-		name           string
-		s              brainSettings
-		mcpConfig      string
-		want, dontWant []string
+		name                string
+		s                   brainSettings
+		mcpConfig, settings string
+		want, dontWant      []string
 	}{
-		{"own setup only", brainSettings{}, "",
+		{"own setup only", brainSettings{}, "", "",
 			[]string{"--setting-sources project,local", "--strict-mcp-config"},
-			[]string{"--mcp-config", "--dangerously-skip-permissions", "--model", "--effort", "--disallowed-tools"}},
-		{"with the folder's .mcp.json", brainSettings{}, mcp,
+			[]string{"--settings", "--mcp-config", "--dangerously-skip-permissions", "--model", "--effort", "--disallowed-tools"}},
+		{"with the folder's .mcp.json", brainSettings{}, mcp, "",
 			[]string{"--setting-sources project,local", "--strict-mcp-config --mcp-config " + mcp}, nil},
-		{"inherit_claude_user_config", brainSettings{inheritUser: true}, mcp,
-			nil, []string{"--setting-sources", "--strict-mcp-config", "--mcp-config"}},
-		{"model, effort, tools, permissions", brainSettings{model: "m", effort: "high", disallowedTools: []string{"WebFetch", "WebSearch"}, dangerously: true}, mcp,
+		{"with the instructions above excluded", brainSettings{}, mcp, settings,
+			[]string{"--setting-sources project,local", "--settings " + settings, "--mcp-config " + mcp}, nil},
+		{"inherit_claude_user_config", brainSettings{inheritUser: true}, mcp, settings,
+			nil, []string{"--setting-sources", "--strict-mcp-config", "--settings", "--mcp-config"}},
+		{"model, effort, tools, permissions", brainSettings{model: "m", effort: "high", disallowedTools: []string{"WebFetch", "WebSearch"}, dangerously: true}, mcp, settings,
 			[]string{"--model m", "--effort high", "--disallowed-tools WebFetch,WebSearch", "--dangerously-skip-permissions"}, nil},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			args := claudeArgs(&tc.s, tc.mcpConfig, "hi")
+			args := claudeArgs(&tc.s, tc.mcpConfig, tc.settings, "hi")
 			got := strings.Join(args, " ")
 			for _, w := range tc.want {
 				if !strings.Contains(got, w) {
@@ -299,10 +303,112 @@ func TestClaudeArgs(t *testing.T) {
 	}
 }
 
+// TestInstructionsAbove: the claudeMdExcludes for a brain name the
+// instruction files of every folder above it, up to /, in each spelling the
+// CLI may meet them, and your user memory for a brain outside your home
+// folder too, but nothing of the brain's own folder.
+func TestInstructionsAbove(t *testing.T) {
+	mkdir := func(t *testing.T, p string) {
+		if err := os.MkdirAll(p, 0o700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	cases := []struct {
+		name string
+		// layout makes the folders below root and returns the brain's
+		// folder and HOME.
+		layout func(t *testing.T, root string) (dir, home string)
+		// folders above the brain whose four patterns must be there, and
+		// patterns that must not, below root.
+		above, without []string
+	}{
+		{"a brain in the home folder", func(t *testing.T, root string) (string, string) {
+			mkdir(t, filepath.Join(root, "home", "brains", "a"))
+			return filepath.Join(root, "home", "brains", "a"), filepath.Join(root, "home")
+		}, []string{"home/brains", "home", ""},
+			[]string{"home/brains/a/CLAUDE.md", "home/brains/a/CLAUDE.local.md", "home/brains/a/.claude/CLAUDE.md", "home/brains/a/.claude/rules/**"}},
+		{"a brain outside the home folder", func(t *testing.T, root string) (string, string) {
+			mkdir(t, filepath.Join(root, "home"))
+			mkdir(t, filepath.Join(root, "elsewhere", "a"))
+			return filepath.Join(root, "elsewhere", "a"), filepath.Join(root, "home")
+		}, []string{"elsewhere", ""},
+			// Only the user memory of the home folder: no brain loads the rest.
+			[]string{"home/CLAUDE.md", "home/CLAUDE.local.md"}},
+		{"a brains folder linked from another volume", func(t *testing.T, root string) (string, string) {
+			mkdir(t, filepath.Join(root, "volume", "brains", "a"))
+			mkdir(t, filepath.Join(root, "home"))
+			if err := os.Symlink(filepath.Join(root, "volume", "brains"), filepath.Join(root, "home", "brains")); err != nil {
+				t.Fatal(err)
+			}
+			return filepath.Join(root, "home", "brains", "a"), filepath.Join(root, "home")
+		}, []string{"home/brains", "home", "volume/brains", "volume", ""}, nil},
+		{"folders with glob characters", func(t *testing.T, root string) (string, string) {
+			dir := filepath.Join(root, "home", "notes (old) [1] {x,y}", "*?!+@|", "a")
+			mkdir(t, dir)
+			return dir, filepath.Join(root, "home")
+		}, []string{"home/notes (old) [1] {x,y}/*?!+@|", "home/notes (old) [1] {x,y}", "home", ""}, nil},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			root := canonicalDir(t.TempDir())
+			dir, home := tc.layout(t, root)
+			got := instructionsAbove(dir, home)
+			for _, p := range got {
+				if !strings.HasPrefix(p, "/") {
+					t.Errorf("relative pattern %q", p)
+				}
+			}
+			for _, f := range tc.above {
+				d := globEscape(filepath.Join(root, f))
+				for _, want := range []string{"CLAUDE.md", "CLAUDE.local.md", ".claude/CLAUDE.md", ".claude/rules/**"} {
+					if want = filepath.Join(d, want); !slices.Contains(got, want) {
+						t.Errorf("patterns lack %q:\n%s", want, strings.Join(got, "\n"))
+					}
+				}
+			}
+			for _, f := range []string{"/CLAUDE.md", "/.claude/rules/**", filepath.Join(globEscape(home), ".claude", "CLAUDE.md"), filepath.Join(globEscape(home), ".claude", "rules", "**")} {
+				if !slices.Contains(got, f) {
+					t.Errorf("patterns lack %q", f)
+				}
+			}
+			for _, f := range tc.without {
+				if p := filepath.Join(globEscape(root), f); slices.Contains(got, p) {
+					t.Errorf("patterns have %q", p)
+				}
+			}
+		})
+	}
+}
+
+// TestGlobEscape: a path becomes a picomatch pattern that matches it alone.
+// Checked against CLI 2.1.302 with a parent folder named after each case:
+// its CLAUDE.md files and rules stayed out with the escaped pattern, and
+// without it "{x,y}" and "@(y)" let the rules through. The characters in
+// the last case it matched unescaped.
+func TestGlobEscape(t *testing.T) {
+	cases := []struct{ path, want string }{
+		{"/Users/you/brains", "/Users/you/brains"},
+		{"/Users/you/notes (old)", "/Users/you/notes [(]old[)]"},
+		{"/x/[a]{b,c}", "/x/[[]a[]][{]b,c[}]"},
+		{"/x/b]x/b[x", "/x/b[]]x/b[[]x"},
+		{"/x/*?!+@|", "/x/[*][?][!][+][@][|]"},
+		{"/x/!(y)+(y)@(y)", "/x/[!][(]y[)][+][(]y[)][@][(]y[)]"},
+		{"/x/^$.#%&~,=;'\"` é", "/x/^$.#%&~,=;'\"` é"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.path, func(t *testing.T) {
+			if got := globEscape(tc.path); got != tc.want {
+				t.Errorf("globEscape(%q) = %q, want %q", tc.path, got, tc.want)
+			}
+		})
+	}
+}
+
 // TestBrainRunsWithItsOwnClaudeSetup: a brain's run gets the flags that
-// keep your Claude Code setup out, and its folder's .mcp.json only when the
-// CLI would start with it (see TestMCPConfigOf).
-// inherit_claude_user_config drops them all again.
+// keep your Claude Code setup out, the instructions above its folder
+// excluded, and its folder's .mcp.json only when the CLI would start with
+// it (see TestMCPConfigOf). inherit_claude_user_config drops them all
+// again.
 func TestBrainRunsWithItsOwnClaudeSetup(t *testing.T) {
 	write := func(body string) func(t *testing.T, p string) {
 		return func(t *testing.T, p string) {
@@ -317,8 +423,8 @@ func TestBrainRunsWithItsOwnClaudeSetup(t *testing.T) {
 		mcp            func(t *testing.T, p string) // lays out the brain's .mcp.json at p
 		want, dontWant []string
 	}{
-		{"no .mcp.json", "", nil, []string{isolated}, []string{"--mcp-config"}},
-		{"a .mcp.json", "", write(`{"mcpServers": {}}`), []string{isolated + " --mcp-config <mcp>"}, nil},
+		{"no .mcp.json", "", nil, []string{isolated + " --settings <settings>"}, []string{"--mcp-config"}},
+		{"a .mcp.json", "", write(`{"mcpServers": {}}`), []string{isolated + " --settings <settings> --mcp-config <mcp>"}, nil},
 		{"a .mcp.json that is not JSON", "", write(`{"mcpServers": `), []string{isolated}, []string{"--mcp-config"}},
 		{"a symlinked .mcp.json", "", func(t *testing.T, p string) {
 			target := filepath.Join(t.TempDir(), "servers.json")
@@ -338,9 +444,9 @@ func TestBrainRunsWithItsOwnClaudeSetup(t *testing.T) {
 				t.Fatal(err)
 			}
 			write(`{"disabledMcpjsonServers": ["off"]}`)(t, filepath.Join(filepath.Dir(p), ".claude", "settings.local.json"))
-		}, []string{isolated + ` --mcp-config {"mcpServers":{"keep":{"command":"k"}}}`}, []string{"<mcp>"}},
+		}, []string{isolated + ` --settings <settings> --mcp-config {"mcpServers":{"keep":{"command":"k"}}}`}, []string{"<mcp>"}},
 		{"inherit_claude_user_config", `, "inherit_claude_user_config": true`, write(`{"mcpServers": {}}`),
-			nil, []string{"--setting-sources", "--strict-mcp-config", "--mcp-config"}},
+			nil, []string{"--setting-sources", "--strict-mcp-config", "--settings", "--mcp-config"}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -363,13 +469,14 @@ func TestBrainRunsWithItsOwnClaudeSetup(t *testing.T) {
 				t.Fatal(err)
 			}
 			got := string(data)
+			fill := strings.NewReplacer("<mcp>", mcp, "<settings>", excludeInstructionsAbove(filepath.Join(home, "a"))).Replace
 			for _, w := range tc.want {
-				if w = strings.ReplaceAll(w, "<mcp>", mcp); !strings.Contains(got, w) {
+				if w = fill(w); !strings.Contains(got, w) {
 					t.Errorf("args %q lack %q", got, w)
 				}
 			}
 			for _, w := range tc.dontWant {
-				if w = strings.ReplaceAll(w, "<mcp>", mcp); strings.Contains(got, w) {
+				if w = fill(w); strings.Contains(got, w) {
 					t.Errorf("args %q have %q", got, w)
 				}
 			}

@@ -494,8 +494,9 @@ func (br *Brain) streamLogPath() string {
 }
 
 // claudeArgs builds the CLI arguments for one run. mcpConfig is what
-// mcpConfigOf returned for the brain's folder, or "" for none.
-func claudeArgs(s *brainSettings, mcpConfig, prompt string) []string {
+// mcpConfigOf returned for the brain's folder, or "" for none; settings is
+// the brain's excludeInstructionsAbove.
+func claudeArgs(s *brainSettings, mcpConfig, settings, prompt string) []string {
 	args := []string{"--output-format", "stream-json", "--verbose"}
 	if !s.inheritUser {
 		// Only the brain folder's own Claude Code setup. Your user settings
@@ -505,6 +506,9 @@ func claudeArgs(s *brainSettings, mcpConfig, prompt string) []string {
 		// --dangerously-skip-permissions it would call those MCP tools
 		// without asking.
 		args = append(args, "--setting-sources", "project,local", "--strict-mcp-config")
+		if settings != "" {
+			args = append(args, "--settings", settings)
+		}
 		if mcpConfig != "" {
 			// --mcp-config takes several files: an option must follow.
 			args = append(args, "--mcp-config", mcpConfig)
@@ -523,6 +527,85 @@ func claudeArgs(s *brainSettings, mcpConfig, prompt string) []string {
 		args = append(args, "--disallowed-tools", strings.Join(s.disallowedTools, ","))
 	}
 	return append(args, "-p", prompt)
+}
+
+// excludeInstructionsAbove returns the --settings for a brain in dir that
+// keep the CLI from loading your instructions above the folder, which
+// --setting-sources does not cover: the CLI reads the CLAUDE.md files and
+// .claude rules of every folder up to / as part of the project, and your
+// user memory in ~/.claude whatever the sources. Its claudeMdExcludes
+// setting skips them, and it merges with the brain's own. It does not
+// cover the skills, agents and commands in those .claude folders, nor
+// stop a brain from reading the files with its tools; that takes the
+// sandbox, which denies them all.
+func excludeInstructionsAbove(dir string) string {
+	data, err := json.Marshal(map[string][]string{"claudeMdExcludes": instructionsAbove(dir, os.Getenv("HOME"))})
+	if err != nil {
+		return ""
+	}
+	return string(data)
+}
+
+// instructionsAbove lists the claudeMdExcludes patterns for a brain in dir:
+// the CLAUDE.md, CLAUDE.local.md, .claude/CLAUDE.md and .claude/rules of
+// every folder above dir, and those in home's .claude, the user memory,
+// for a brain outside home too. The patterns match paths as the CLI spells
+// them, which differ below a symlink (a brains folder linked from another
+// volume), so the folders above dir come along its path as configured and
+// along its real path, and home both ways too.
+func instructionsAbove(dir, home string) []string {
+	var folders []string
+	seen := map[string]bool{}
+	for _, start := range []string{absPath(dir), resolvePath(absPath(dir))} {
+		for d := filepath.Dir(filepath.Clean(start)); ; d = filepath.Dir(d) {
+			if !seen[d] {
+				seen[d] = true
+				folders = append(folders, d)
+			}
+			if d == filepath.Dir(d) {
+				break
+			}
+		}
+	}
+	var out []string
+	patterns := func(d string, names ...string) {
+		for _, name := range names {
+			out = append(out, filepath.Join(globEscape(d), name))
+		}
+	}
+	inDotClaude := []string{filepath.Join(".claude", "CLAUDE.md"), filepath.Join(".claude", "rules", "**")}
+	for _, d := range folders {
+		patterns(d, instructionFiles...)
+		patterns(d, inDotClaude...)
+	}
+	if filepath.IsAbs(home) {
+		for _, h := range []string{home, resolvePath(home)} {
+			if !seen[h] {
+				seen[h] = true
+				patterns(h, inDotClaude...)
+			}
+		}
+	}
+	return out
+}
+
+// globEscape makes p a picomatch pattern, which the CLI matches
+// claudeMdExcludes with, that matches the path p alone. A backslash does
+// not do it, since the CLI turns every one into a / first, so each glob
+// character goes in brackets: a folder named "notes (old)" would otherwise
+// be a pattern for "notes old".
+func globEscape(p string) string {
+	var b strings.Builder
+	for _, r := range p {
+		if strings.ContainsRune("*?[]{}()!+@|", r) {
+			b.WriteByte('[')
+			b.WriteRune(r)
+			b.WriteByte(']')
+			continue
+		}
+		b.WriteRune(r)
+	}
+	return b.String()
 }
 
 // mcpConfigOf returns what to pass with --mcp-config for the .mcp.json in
@@ -685,11 +768,12 @@ func readBrainFile(p string) ([]byte, error) {
 func (br *Brain) invoke(run *brainRun, ctx context.Context, s *brainSettings, m Inbound) RunResult {
 	prompt := br.buildPrompt(s, m)
 
-	mcpConfig := ""
+	mcpConfig, settings := "", ""
 	if !s.inheritUser {
 		mcpConfig = mcpConfigOf(br.id, br.workDir)
+		settings = excludeInstructionsAbove(br.workDir)
 	}
-	args := claudeArgs(s, mcpConfig, prompt)
+	args := claudeArgs(s, mcpConfig, settings, prompt)
 
 	// Wrap the spawn in sandbox-exec so prompt injection in an incoming message
 	// cannot reach another brain's tree or cross-session Claude state. The brain

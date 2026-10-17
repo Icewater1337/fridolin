@@ -356,8 +356,9 @@ What the bridge does about it:
 - **Brain isolation.** Brains have separate directories, sessions, histories,
   and calendar credentials, and they do not load your own Claude Code
   setup: your user settings and their hooks, skills, plugins and MCP
-  servers, or (with the sandbox) the `CLAUDE.md` files and `.claude`
-  folders above their folder (see
+  servers, or the `CLAUDE.md` files above their folder, `~/CLAUDE.md` and
+  `~/.claude/CLAUDE.md` included (and, with the sandbox, nothing else from
+  the `.claude` folders above it either; see
   [what a brain loads](docs/BRAINS.md#what-a-brain-loads)).
 - **A guarded dashboard.** It only listens on localhost, rejects requests
   from web pages on other sites (and DNS-rebinding tricks), and requires a

@@ -425,9 +425,12 @@ func (sp *SandboxProfiler) Profile(brainID string) (string, error) {
 	// ~/.claude/CLAUDE.md and ~/.claude/rules: your instructions, not the
 	// brain's. ~/.claude is also the CLI's state, so only those two are
 	// denied there; they are your user memory too, so for brains outside
-	// HOME as well. Writes are denied too, so that nothing here can be
-	// renamed and read under another name. After the allow_paths allows,
-	// which cannot open them again; inherit_claude_user_config does.
+	// HOME as well. The claudeMdExcludes a brain runs with (see
+	// excludeInstructionsAbove) skip the CLAUDE.md files and rules, but
+	// neither the skills, agents and commands nor the brain's own tools.
+	// Writes are denied too, so that nothing here can be renamed and read
+	// under another name. After the allow_paths allows, which cannot open
+	// them again; inherit_claude_user_config does.
 	if !sp.inheritUser {
 		b.WriteString(";; Your Claude Code instructions above this brain's folder\n")
 		var above []string
