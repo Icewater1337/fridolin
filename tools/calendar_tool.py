@@ -67,6 +67,7 @@ import sys
 import traceback
 from datetime import datetime, time, timedelta
 from pathlib import Path
+from time import sleep
 from typing import NoReturn
 from zoneinfo import ZoneInfo
 
@@ -208,7 +209,7 @@ def get_service():
     if not token_file.exists():
         err(f"Google Calendar is not connected: there is no token at {token_file}. {reconnect_hint()}")
     try:
-        creds = Credentials.from_authorized_user_file(str(token_file), SCOPES)
+        creds = read_token(Credentials, token_file)
     except (OSError, ValueError) as e:
         err(f"Cannot read the Google token {token_file}: {e}. {reconnect_hint()}")
 
@@ -225,6 +226,21 @@ def get_service():
         save_token(token_file, creds)
 
     return build("calendar", "v3", credentials=creds)
+
+
+def read_token(Credentials, token_file: Path):
+    """Load the saved token, reading it a second time if it is not valid JSON.
+
+    write_token rewrites the file in place, so a command that reads it while
+    a parallel one refreshes it can find it empty or half written for an
+    instant. That is no reason to send the owner off to reconnect: wait a
+    moment, then believe what the file says.
+    """
+    try:
+        return Credentials.from_authorized_user_file(str(token_file), SCOPES)
+    except ValueError:
+        sleep(0.2)
+        return Credentials.from_authorized_user_file(str(token_file), SCOPES)
 
 
 def write_token(token_file: Path, creds) -> None:

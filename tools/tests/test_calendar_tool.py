@@ -57,7 +57,8 @@ class TokenTestCase(CalendarTestCase):
         # realpath: the macOS sandbox matches resolved paths (/private/var/…).
         self.dir = Path(os.path.realpath(tmp.name))
         self.google = support.FakeGoogle().install(self)
-        for name, value in {"DATA_DIR": self.dir, "_profile": self.profile}.items():
+        self.sleep = mock.Mock()  # a token that stays unreadable is read again at once
+        for name, value in {"DATA_DIR": self.dir, "_profile": self.profile, "sleep": self.sleep}.items():
             patcher = mock.patch.object(calendar_tool, name, value)
             patcher.start()
             self.addCleanup(patcher.stop)
@@ -89,6 +90,16 @@ class TokenRefreshTest(TokenTestCase):
         self.assertIn("could not save the refreshed Google token", err)
         self.assertEqual(self.google.refreshed, 1)
         self.assertEqual(json.loads(self.token_file.read_text())["token"], "old", "the old token is kept")
+
+    def test_a_token_being_rewritten_is_read_again(self):
+        # A parallel command refreshing the token has just truncated it, and
+        # writes the new one while this command waits.
+        self.token_file.write_text("", encoding="utf-8")
+        self.sleep.side_effect = lambda seconds: self.write_token()
+        code, out, err = support.run(calendar_tool.get_service)
+        self.assertEqual((code, out), (0, ""), out)
+        self.assertEqual(self.sleep.call_count, 1)
+        self.assertEqual(self.google.built_with.token, "old")
 
     def test_a_valid_token_is_not_rewritten(self):
         self.write_token()
