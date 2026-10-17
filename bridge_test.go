@@ -365,6 +365,75 @@ func TestBrainRouting(t *testing.T) {
 	}
 }
 
+// Route honours a brain named on the message before routing by chat, and a
+// named brain that is gone is never swapped for the chat's owner.
+func TestRouteHonoursTheNamedBrain(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	cfg, err := LoadConfig(writeConfig(t, `{
+		"brain_mode": true,
+		"data_dir": "`+home+`/data",
+		"brains": [
+			{"name": "personal", "work_dir": "`+home+`/p", "handles_dms": true},
+			{"name": "team",     "work_dir": "`+home+`/t", "groups": ["team@g.us"]}
+		]
+	}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	mgr := newTestManager(t, cfg)
+	const dm = "15551234567@s.whatsapp.net"
+	for _, c := range []struct {
+		name string
+		m    Inbound
+		want string // "" = no brain
+	}{
+		{"by chat", Inbound{JID: dm}, "personal"},
+		{"named brain wins over the chat's owner", Inbound{JID: dm, Brain: "team"}, "team"},
+		{"named brain in a group it does not own", Inbound{JID: "other@g.us", Brain: "personal"}, "personal"},
+		{"named brain is gone", Inbound{JID: dm, Brain: "removed"}, ""},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			got := ""
+			if br := mgr.Route(c.m); br != nil {
+				got = br.ID()
+			}
+			if got != c.want {
+				t.Errorf("Route = %q, want %q", got, c.want)
+			}
+		})
+	}
+	if _, _, _, err := mgr.Submit(Inbound{JID: dm, Brain: "removed", Text: "x"}); err == nil {
+		t.Error("Submit to a removed brain must fail, not run in the DM brain")
+	}
+}
+
+// A DM goes by its chat JID and the sender's phone number, which WhatsApp
+// may use instead of each other; a group goes by its JID only.
+func TestChatJIDs(t *testing.T) {
+	const (
+		pn    = "15551234567@s.whatsapp.net"
+		lid   = "15559876543@lid"
+		group = "120363000000000000@g.us"
+	)
+	for _, c := range []struct {
+		name string
+		m    Inbound
+		want string
+	}{
+		{"DM by number", Inbound{JID: pn, Sender: "15551234567"}, pn},
+		{"DM by LID", Inbound{JID: lid, Sender: "15551234567"}, lid + "," + pn},
+		{"DM without a sender", Inbound{JID: lid}, lid},
+		{"group", Inbound{JID: group, Sender: "15551234567"}, group},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			if got := strings.Join(chatJIDs(c.m), ","); got != c.want {
+				t.Errorf("chatJIDs = %q, want %q", got, c.want)
+			}
+		})
+	}
+}
+
 func TestBrainRoutingFallsBackToFirstBrain(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)

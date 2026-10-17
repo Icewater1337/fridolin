@@ -248,7 +248,9 @@ func (b *Bridge) handleInbound(ctx context.Context, m Inbound) {
 	m.Text = strings.TrimSpace(m.Text)
 	cfg := b.cfgs.Get()
 
-	if m.Source != "ingest" && b.handleCommand(ctx, m, cfg) {
+	// Commands come from a chat. A message handed to a brain (/ingest, Plaud,
+	// a dev message that names one) carries none: its text is for that brain.
+	if m.Source != "ingest" && m.Brain == "" && b.handleCommand(ctx, m, cfg) {
 		return
 	}
 	if m.Text == "" && len(m.Media) == 0 {
@@ -262,7 +264,13 @@ func (b *Bridge) handleInbound(ctx context.Context, m Inbound) {
 	}
 
 	if cfg.BrainMode {
-		br := b.brainMgr.BrainFor(m.JID, m.IsGroup())
+		// Resolved like the run itself (BrainManager.Submit), so the OTP guard
+		// checks the brain that would read the message.
+		br := b.brainMgr.Route(m)
+		if br == nil && m.Brain != "" {
+			log.Printf("brain %s is not configured; dropping the message for %s", m.Brain, m.JID)
+			return
+		}
 		if br == nil {
 			log.Printf("No brain configured for %s — add one in the dashboard", m.JID)
 			if !m.Silent && m.Source != "ingest" {
@@ -325,10 +333,20 @@ func (b *Bridge) handleCommand(ctx context.Context, m Inbound, cfg *Config) bool
 		return true
 
 	case "!stop":
-		b.deb.Drop(m.JID)
+		chats := chatJIDs(m)
+		for _, jid := range chats {
+			b.deb.Drop(jid)
+		}
 		stopped := false
 		if br := b.brainMgr.BrainFor(m.JID, m.IsGroup()); cfg.BrainMode && br != nil {
 			stopped = br.StopCurrent(true)
+		}
+		// A file or recording handed to another brain may answer here too,
+		// and the chat's own brain knows nothing about it.
+		for _, jid := range chats {
+			if cfg.BrainMode && b.brainMgr.StopHandOffs(jid) {
+				stopped = true
+			}
 		}
 		if stopped {
 			_ = b.wa.SendMessage(ctx, m.JID, "🛑 Stopped, and cleared anything that was waiting.")
@@ -353,6 +371,17 @@ func (b *Bridge) handleCommand(ctx context.Context, m Inbound, cfg *Config) bool
 		return true
 	}
 	return false
+}
+
+// chatJIDs lists the JIDs m's chat goes by: the chat and, for a DM, the
+// sender's phone number. WhatsApp may address a DM by LID, while a hand-off
+// that answers there (a reply_chat, the owner's DM) names the number.
+func chatJIDs(m Inbound) []string {
+	jids := []string{m.JID}
+	if pn := m.Sender + "@s.whatsapp.net"; !m.IsGroup() && m.Sender != "" && pn != m.JID {
+		jids = append(jids, pn)
+	}
+	return jids
 }
 
 // dispatch hands a (debounced) message to its brain or the classic runner.

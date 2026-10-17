@@ -101,8 +101,9 @@ func (b *Bridge) appendHTTPMessageToHistory(jid, text string) {
 
 // httpIngest handles POST /ingest. It feeds files that arrived outside
 // WhatsApp (a web upload, a recorder sync) through the same pipeline as a
-// WhatsApp attachment, and the brain's reply goes to the brain's chat.
-// Responds 202 at once; processing is asynchronous.
+// WhatsApp attachment. They run in the brain the request names, and the
+// brain's reply goes to its reply chat, even when that chat routes to another
+// brain. Responds 202 at once; processing is asynchronous.
 func (b *Bridge) httpIngest(w http.ResponseWriter, r *http.Request) {
 	cfg := b.cfgs.Get()
 	if !cfg.Ingest.Enabled {
@@ -156,27 +157,35 @@ func (b *Bridge) httpIngest(w http.ResponseWriter, r *http.Request) {
 	if text == "" {
 		text = "New files were uploaded."
 	}
-	m := Inbound{JID: jid, Sender: sender, Text: text, Media: paths, Source: "ingest", At: time.Now()}
-	go b.handleInbound(context.Background(), m)
+	go b.handOff(br, jid, sender, text, paths)
 	writeJSON(w, http.StatusAccepted, map[string]string{"status": "accepted", "jid": jid})
+}
+
+// handOff feeds files that arrived outside WhatsApp to the brain picked for
+// them, for /ingest and the Plaud integration. The message names the brain,
+// so it runs there even when jid, the chat that gets the answer, belongs to
+// another brain.
+func (b *Bridge) handOff(br *Brain, jid, sender, text string, media []string) {
+	m := Inbound{JID: jid, Brain: br.ID(), Sender: sender, Text: text, Media: media, Source: "ingest", At: time.Now()}
+	b.handleInbound(context.Background(), m)
 }
 
 // replyChatFor picks the chat a brain answers in when a message did not come
 // from a chat: its configured reply_chat, else the first allowed number for
-// the DM brain, else the brain's first group.
+// the brain that gets DMs (the DM brain, or the fallback when there is none),
+// else the brain's first group. The DM comes before any group: files handed
+// in privately must not land in a group because the brain also serves one.
 func (b *Bridge) replyChatFor(br *Brain, cfg *Config) string {
 	m := br.settings.Load().manifest
 	if m.ReplyChat != "" {
 		return m.ReplyChat
 	}
-	if m.Routing.HandlesDMs && len(cfg.AllowedNumbers) > 0 {
+	getsDMs := m.Routing.HandlesDMs || b.brainMgr.BrainFor("", false) == br
+	if getsDMs && len(cfg.AllowedNumbers) > 0 {
 		return cfg.AllowedNumbers[0] + "@s.whatsapp.net"
 	}
 	if len(m.Routing.Groups) > 0 {
 		return m.Routing.Groups[0]
-	}
-	if b.brainMgr.BrainFor("", false) == br && len(cfg.AllowedNumbers) > 0 {
-		return cfg.AllowedNumbers[0] + "@s.whatsapp.net"
 	}
 	return ""
 }

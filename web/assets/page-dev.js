@@ -16,6 +16,7 @@ export default {
 
     const jidIn = textInput({ value: DM, class: 'mono', required: true });
     const senderIn = textInput({ placeholder: 'defaults to the number in the JID', class: 'mono' });
+    const brainIn = textInput({ placeholder: 'the brain that owns the chat', class: 'mono' });
     const textIn = h('textarea', { rows: 4, placeholder: 'Message text — in a group, include a trigger such as @claude to get a reply' });
     const silentSw = toggle({ label: 'Silent — like an untagged group message: the brain reads along but does not reply' });
     const sendBtn = btn('Send to the bridge', { kind: 'primary', icon: 'send', type: 'submit' });
@@ -24,8 +25,9 @@ export default {
         field({ label: 'Chat JID', control: h('div.stack', jidIn, h('div.chip-row',
           h('button.chip', { type: 'button', onclick: () => { jidIn.value = DM; } }, 'Direct message'),
           h('button.chip', { type: 'button', onclick: () => { jidIn.value = GROUP; } }, 'Group'))),
-        help: 'The chat the message appears to come from. Dev messages skip the allow lists and trigger words, so every one reaches the brain that owns the chat.' }),
-        field({ label: 'Sender', control: senderIn, help: 'Phone number of the person writing, digits only. In a group this is the member.' })),
+        help: 'The chat the message appears to come from. Dev messages skip the allow lists and trigger words, so every one reaches the brain that owns the chat, or the Brain below.' }),
+        field({ label: 'Sender', control: senderIn, help: 'Phone number of the person writing, digits only. In a group this is the member.' }),
+        field({ label: 'Brain', control: brainIn, help: 'Optional brain id: the message runs there and the reply goes to the chat above, like a file handed in through /ingest. Commands such as !stop are then passed on as text.' })),
       field({ label: 'Message', control: textIn, wide: true }),
       h('div.field', silentSw),
       h('div.actions', sendBtn, h('span.muted.small', 'Ctrl/⌘ + Enter sends')));
@@ -33,7 +35,7 @@ export default {
     const send = () => runBusy(sendBtn, async () => {
       const jid = jidIn.value.trim();
       if (!jid) { jidIn.focus(); return; }
-      await post('/api/dev/inbound', { jid, sender: senderIn.value.trim(), text: textIn.value, silent: silentSw.input.checked });
+      await post('/api/dev/inbound', { jid, sender: senderIn.value.trim(), brain: brainIn.value.trim(), text: textIn.value, silent: silentSw.input.checked });
       toast('Message injected', 'ok', { timeout: 2000 });
       textIn.value = '';
       textIn.focus();

@@ -396,12 +396,39 @@ func (br *Brain) StopCurrent(clearQueue bool) bool {
 	}
 	cur := br.current
 	br.mu.Unlock()
-	if cur == nil {
+	return br.stopRun(cur)
+}
+
+// StopHandOffs stops the messages handed to this brain (/ingest, Plaud) that
+// answer in jid: the run in flight if it is one, and those waiting. The rest
+// of the brain's work goes on: jid may well be another brain's chat. It
+// reports whether a run was stopped.
+func (br *Brain) StopHandOffs(jid string) bool {
+	handOff := func(m Inbound) bool { return m.Brain != "" && m.JID == jid }
+	br.mu.Lock()
+	kept := br.pending[:0]
+	for _, p := range br.pending {
+		if !handOff(p) {
+			kept = append(kept, p)
+		}
+	}
+	br.pending = kept
+	cur := br.current
+	if cur != nil && !handOff(cur.msg) {
+		cur = nil
+	}
+	br.mu.Unlock()
+	return br.stopRun(cur)
+}
+
+// stopRun kills run, if there is one, and waits for it to end.
+func (br *Brain) stopRun(run *brainRun) bool {
+	if run == nil {
 		return false
 	}
-	br.interruptRun(cur)
+	br.interruptRun(run)
 	select {
-	case <-cur.done:
+	case <-run.done:
 	case <-time.After(10 * time.Second):
 		log.Printf("brain %s: run did not stop within 10s", br.id)
 	}
@@ -1527,11 +1554,24 @@ func (bm *BrainManager) Issues() []BrainIssue {
 	return append([]BrainIssue(nil), bm.issues...)
 }
 
+// Route returns the brain that handles m: the brain it names, else the one
+// its chat routes to. A message that names a brain that no longer exists gets
+// nil rather than whichever brain owns its chat.
+func (bm *BrainManager) Route(m Inbound) *Brain {
+	if m.Brain != "" {
+		return bm.Get(m.Brain)
+	}
+	return bm.BrainFor(m.JID, m.IsGroup())
+}
+
 // Submit routes a message to its brain. A message that lands on a brain being
 // removed at that moment is routed again once.
 func (bm *BrainManager) Submit(m Inbound) (br *Brain, pos int, busy bool, err error) {
 	for attempt := 0; attempt < 2; attempt++ {
-		br = bm.BrainFor(m.JID, m.IsGroup())
+		br = bm.Route(m)
+		if br == nil && m.Brain != "" {
+			return nil, 0, false, fmt.Errorf("brain %s is not configured", m.Brain)
+		}
 		if br == nil {
 			return nil, 0, false, fmt.Errorf("no brain configured for %s", m.JID)
 		}
@@ -1550,6 +1590,20 @@ func (bm *BrainManager) ResetSession(jid string, isGroup bool) error {
 		return fmt.Errorf("no brain configured for %s", jid)
 	}
 	return br.ResetSession()
+}
+
+// StopHandOffs stops, in every brain, the hand-offs that answer in jid (see
+// Brain.StopHandOffs). A brain picked for files or recordings answers in its
+// reply chat, often a chat another brain owns, so !stop there must reach it.
+// It reports whether a run was stopped.
+func (bm *BrainManager) StopHandOffs(jid string) bool {
+	stopped := false
+	for _, br := range bm.Brains() {
+		if br.StopHandOffs(jid) {
+			stopped = true
+		}
+	}
+	return stopped
 }
 
 // Stop interrupts every run and drops every queue.

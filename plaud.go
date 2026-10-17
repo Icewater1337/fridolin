@@ -250,9 +250,9 @@ func (p *PlaudManager) account(ctx context.Context) (string, error) {
 	return d["nickname"], nil
 }
 
-// forward hands one recording to the brain. It reports false while Plaud has
-// not finished the transcript.
-func (p *PlaudManager) forward(ctx context.Context, id string) (bool, error) {
+// forward hands one recording to br, whose answer goes to jid. It reports
+// false while Plaud has not finished the transcript.
+func (p *PlaudManager) forward(ctx context.Context, id string, br *Brain, jid string) (bool, error) {
 	cfg := p.cfg()
 	detailsOut, err := p.run(ctx, "file", id)
 	if err != nil {
@@ -333,20 +333,12 @@ func (p *PlaudManager) forward(ctx context.Context, id string) (bool, error) {
 		return false, err
 	}
 
-	br := p.targetBrain()
-	if br == nil {
-		return false, errors.New("no brain to send Plaud recordings to")
-	}
-	jid := p.b.replyChatFor(br, cfg)
-	if jid == "" {
-		return false, fmt.Errorf("brain %s has no chat to reply in — set its reply chat", br.ID())
-	}
 	tpl := cfg.Plaud.Message
 	if strings.TrimSpace(tpl) == "" {
 		tpl = defaultPlaudMessage
 	}
 	text := strings.NewReplacer("{name}", name, "{when}", when, "{duration}", duration).Replace(tpl)
-	p.b.handleInbound(context.Background(), Inbound{JID: jid, Sender: "plaud", Text: text, Media: []string{path}, Source: "ingest", At: time.Now()})
+	p.b.handOff(br, jid, "plaud", text, []string{path})
 	p.mu.Lock()
 	p.lastForwarded = &PlaudForward{Name: name, Brain: br.ID(), At: time.Now()}
 	p.mu.Unlock()
@@ -371,6 +363,41 @@ func (p *PlaudManager) targetBrain() *Brain {
 		return p.b.brainMgr.Get(id)
 	}
 	return p.b.brainMgr.BrainFor("", false)
+}
+
+// summaryChat is where br's answer to a recording and the expiry notice go.
+// Recordings are private (a doctor's visit, an HR talk), so it is never a
+// group, whatever chats the brain serves: its reply_chat when that is a
+// direct chat, else your own DM (the first allowed number). "" means there
+// is no private chat to use.
+func (p *PlaudManager) summaryChat(br *Brain) string {
+	if rc := br.settings.Load().manifest.ReplyChat; isDirectChat(rc) {
+		return rc
+	}
+	if cfg := p.cfg(); len(cfg.AllowedNumbers) > 0 {
+		return cfg.AllowedNumbers[0] + "@s.whatsapp.net"
+	}
+	return ""
+}
+
+// isDirectChat reports whether jid is a one-to-one chat (a phone number or a
+// LID), not a group, a broadcast list or a channel.
+func isDirectChat(jid string) bool {
+	return strings.HasSuffix(jid, "@s.whatsapp.net") || strings.HasSuffix(jid, "@lid")
+}
+
+// destination returns the brain that receives recordings and the private
+// chat its answers go to.
+func (p *PlaudManager) destination() (*Brain, string, error) {
+	br := p.targetBrain()
+	if br == nil {
+		return nil, "", errors.New("no brain to send Plaud recordings to")
+	}
+	jid := p.summaryChat(br)
+	if jid == "" {
+		return br, "", fmt.Errorf("no private chat for Plaud summaries — add your number under Settings → Access, or set brain %s's reply chat to a direct chat", br.ID())
+	}
+	return br, jid, nil
 }
 
 func (p *PlaudManager) loadState() (*plaudState, error) {
@@ -477,13 +504,24 @@ func (p *PlaudManager) poll(ctx context.Context) error {
 			log.Printf("plaud %s: new recording, waiting for the transcript", id)
 		}
 	}
+	// Resolved before anything is fetched or written: without a brain or a
+	// private chat the recordings wait, and the error shows on the dashboard.
+	// With nothing waiting nothing is blocked, so the poll stays quiet rather
+	// than log the same error every interval; the status call reports it.
+	br, jid, err := p.destination()
+	if err != nil && len(st.Pending) > 0 {
+		if serr := p.saveState(st); serr != nil {
+			return serr
+		}
+		return err
+	}
 	pendingIDs := make([]string, 0, len(st.Pending))
 	for id := range st.Pending {
 		pendingIDs = append(pendingIDs, id)
 	}
 	sort.Strings(pendingIDs)
 	for _, id := range pendingIDs {
-		done, err := p.forward(ctx, id)
+		done, err := p.forward(ctx, id, br, jid)
 		if errors.Is(err, errPlaudAuth) {
 			_ = p.saveState(st)
 			return err
@@ -507,8 +545,8 @@ func (p *PlaudManager) poll(ctx context.Context) error {
 	return p.saveState(st)
 }
 
-// notifyAuthExpired tells the brain's chat once a day that Plaud needs a new
-// sign-in.
+// notifyAuthExpired tells the private chat Plaud uses once a day that Plaud
+// needs a new sign-in. Without one only the dashboard shows it.
 func (p *PlaudManager) notifyAuthExpired() {
 	st, _ := p.loadState()
 	if st == nil {
@@ -517,12 +555,8 @@ func (p *PlaudManager) notifyAuthExpired() {
 	if time.Since(time.Unix(int64(st.AuthNotified), 0)) < 24*time.Hour {
 		return
 	}
-	br := p.targetBrain()
-	if br == nil {
-		return
-	}
-	jid := p.b.replyChatFor(br, p.cfg())
-	if jid == "" {
+	_, jid, err := p.destination()
+	if err != nil {
 		return
 	}
 	if err := p.b.wa.SendMessage(context.Background(), jid, "⚠️ Plaud: the login expired, so new recordings are not arriving. Reconnect in the Fridolin dashboard (Integrations → Plaud)."); err != nil {
@@ -604,6 +638,17 @@ func (b *Bridge) apiPlaudStatus(w http.ResponseWriter, r *http.Request) {
 	}
 	if br := p.targetBrain(); br != nil {
 		resp["target_brain"] = br.ID()
+	}
+	// Where summaries go, for the card: a chat that belongs to another brain
+	// gets a warning, since what you write back there goes to that brain.
+	if br, jid, err := p.destination(); err != nil {
+		resp["summary_error"] = err.Error()
+	} else {
+		resp["summary_chat"] = jid
+		resp["summary_to_you"] = len(cfg.AllowedNumbers) > 0 && jid == cfg.AllowedNumbers[0]+"@s.whatsapp.net"
+		if owner := b.brainMgr.BrainFor(jid, false); owner != nil && owner != br {
+			resp["summary_chat_brain"] = owner.ID()
+		}
 	}
 	if st, _ := p.loadState(); st != nil {
 		resp["seen"], resp["pending"] = len(st.Seen), len(st.Pending)

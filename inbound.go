@@ -14,6 +14,11 @@ type Inbound struct {
 	Sender string   // phone number (or LID) of the person who wrote it
 	Text   string   // message text, triggers already stripped
 	Media  []string // downloaded attachments, in arrival order
+	// Brain is the id of the brain the message was handed to (/ingest, Plaud,
+	// a dev message that names one). It wins over routing by chat: such a
+	// message answers in JID, which may be a chat that belongs to another
+	// brain. Empty routes by JID.
+	Brain string
 	// Silent means untagged group chatter: the brain reads it to keep up with
 	// the conversation but sends nothing back.
 	Silent bool

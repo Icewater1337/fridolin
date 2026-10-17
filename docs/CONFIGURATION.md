@@ -529,9 +529,10 @@ without the dashboard token but refuse requests sent by web pages.
 ### `ingest.enabled`
 
 Enables `POST /ingest {"brain","paths","text","sender"}` (`scope` is accepted
-as an alias of `brain`). Paths must be files inside the media directory; the
-brain receives them like WhatsApp attachments and answers in its
-`reply_chat`. Off by default.
+as an alias of `brain`). Paths must be files inside the media directory. The
+named brain receives them like WhatsApp attachments and answers in its
+`reply_chat`, even when that chat belongs to another brain (your DM, say).
+Off by default.
 
 ### `queue`
 
@@ -544,7 +545,8 @@ brain receives them like WhatsApp attachments and answers in its
 current run when a new message arrives. Untagged group chatter waiting in the
 queue is dropped when a newer message from that chat arrives — it is already in
 the history the next run reads. `!stop` stops the current run and clears the
-queue.
+queue, and also stops files handed to another brain that answers in that chat
+(its `reply_chat`).
 
 ### `debounce`
 
@@ -554,7 +556,9 @@ queue.
 
 Messages from the same person in the same chat that arrive less than
 `quiet_ms` apart are merged into one run (an album, a file and its question).
-A batch never waits longer than `max_wait_ms`. `quiet_ms: 0` turns it off.
+Files handed to different brains through `/ingest` stay apart even when those
+brains answer in the same chat. A batch never waits longer than
+`max_wait_ms`. `quiet_ms: 0` turns it off.
 
 ### `startup_checks`
 

@@ -68,6 +68,26 @@ func (tb *testBridge) do(method, path string, body any, mutate ...func(*http.Req
 	return w
 }
 
+// ingest posts to /ingest the way a local script does: no dashboard token.
+func (tb *testBridge) ingest(body string) *httptest.ResponseRecorder {
+	r := httptest.NewRequest("POST", "http://127.0.0.1:8765/ingest", strings.NewReader(body))
+	r.Host = "127.0.0.1:8765"
+	r.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	tb.h.ServeHTTP(w, r)
+	return w
+}
+
+// addFolderBrain adds a folder brain through the dashboard API, as the Add
+// brain page does, and returns its folder.
+func (tb *testBridge) addFolderBrain(t *testing.T, m BrainManifest) string {
+	t.Helper()
+	if w := tb.do("POST", "/api/brains", map[string]any{"path": "~/" + m.ID, "manifest": m, "create_dir": true}); w.Code != 200 {
+		t.Fatalf("add brain %s: %d %s", m.ID, w.Code, w.Body.String())
+	}
+	return filepath.Join(tb.home, m.ID)
+}
+
 func TestDashboardGuards(t *testing.T) {
 	tb := newTestBridge(t, "")
 	cases := []struct {
@@ -201,14 +221,7 @@ func TestIngestConfinedToMediaDir(t *testing.T) {
 	link := filepath.Join(cfg.MediaDir, "link.txt")
 	_ = os.Symlink(outside, link)
 
-	ingest := func(body string) *httptest.ResponseRecorder {
-		r := httptest.NewRequest("POST", "http://127.0.0.1:8765/ingest", strings.NewReader(body))
-		r.Host = "127.0.0.1:8765"
-		r.Header.Set("Content-Type", "application/json")
-		w := httptest.NewRecorder()
-		tb.h.ServeHTTP(w, r)
-		return w
-	}
+	ingest := tb.ingest
 	w := ingest(`{"scope":"personal","paths":["` + inside + `"],"text":"file this"}`)
 	if w.Code != 202 || !strings.Contains(w.Body.String(), `"status":"accepted"`) || !strings.Contains(w.Body.String(), "15551234567@s.whatsapp.net") {
 		t.Fatalf("ingest: %d %s", w.Code, w.Body.String())
@@ -227,6 +240,165 @@ func TestIngestConfinedToMediaDir(t *testing.T) {
 	hist, _ := os.ReadFile(filepath.Join(tb.home, "p", "conversation-history.jsonl"))
 	if !strings.Contains(string(hist), "[attachment: "+canonicalDir(inside)+"]") {
 		t.Errorf("history does not record the ingested file:\n%s", hist)
+	}
+}
+
+// A brain without chats of its own (an upload or recorder brain) answers in
+// its reply_chat, here the DM that belongs to another brain. The files must
+// still be handled by the brain the request names: its prompt, memory,
+// sandbox and history.
+func TestIngestRunsInTheNamedBrain(t *testing.T) {
+	const dm = "15551234567@s.whatsapp.net"
+	tb := newTestBridge(t, `, "ingest": {"enabled": true}`)
+	dmDir := tb.addFolderBrain(t, BrainManifest{ID: "dm", Name: "DM", Routing: BrainRouting{HandlesDMs: true}})
+	upDir := tb.addFolderBrain(t, BrainManifest{ID: "up", Name: "Uploads", ReplyChat: dm})
+
+	w := tb.ingest(`{"brain":"up","text":"file this"}`)
+	if w.Code != 202 || !strings.Contains(w.Body.String(), dm) {
+		t.Fatalf("ingest: %d %s", w.Code, w.Body.String())
+	}
+	waitFor(t, 5*time.Second, "ingest reply", func() bool { return len(tb.dev.Outbox()) > 0 })
+	out := tb.dev.Outbox()[0]
+	if out.JID != dm || !strings.Contains(out.Text, "echo:"+upDir+":upload says: file this") {
+		t.Errorf("reply = %+v, want it from %s in %s", out, upDir, dm)
+	}
+	upHist, _ := os.ReadFile(filepath.Join(upDir, "conversation-history.jsonl"))
+	if !strings.Contains(string(upHist), "file this") {
+		t.Errorf("up's history lacks the message:\n%s", upHist)
+	}
+	if dmHist, _ := os.ReadFile(filepath.Join(dmDir, "conversation-history.jsonl")); strings.Contains(string(dmHist), "file this") {
+		t.Errorf("the DM brain saw a message meant for up:\n%s", dmHist)
+	}
+}
+
+// The OTP guard checks the brain the hand-off names, not the brain that owns
+// its reply chat: up asked for the code, so up's guard must catch it.
+func TestIngestOTPGuardChecksTheNamedBrain(t *testing.T) {
+	const dm = "15551234567@s.whatsapp.net"
+	tb := newTestBridge(t, `, "ingest": {"enabled": true}, "otp_guard": true, "otp_markers": ["Examplebank 2FA"]`)
+	tb.addFolderBrain(t, BrainManifest{ID: "dm", Name: "DM", Routing: BrainRouting{HandlesDMs: true}})
+	upDir := tb.addFolderBrain(t, BrainManifest{ID: "up", Name: "Uploads", ReplyChat: dm})
+	tb.brainMgr.Get("up").appendHistory(dm, "up", "Examplebank 2FA: reply with the code", "out")
+
+	if w := tb.ingest(`{"brain":"up","text":"483920"}`); w.Code != 202 {
+		t.Fatalf("ingest: %d %s", w.Code, w.Body.String())
+	}
+	otp := filepath.Join(tb.cfgs.Get().DataDir, "otp", "up.json")
+	waitFor(t, 3*time.Second, "otp file", func() bool { _, err := os.Stat(otp); return err == nil })
+	time.Sleep(200 * time.Millisecond)
+	if hist, _ := os.ReadFile(filepath.Join(upDir, "conversation-history.jsonl")); strings.Contains(string(hist), "483920") {
+		t.Error("the code reached up's history; the guard checked the wrong brain")
+	}
+	if out := tb.dev.Outbox(); len(out) != 0 {
+		t.Errorf("outbox = %+v, want nothing: a caught code must not start a run", out)
+	}
+}
+
+// !stop in a chat also stops a hand-off that answers there although another
+// brain runs it: up answers /ingest in the DM, which belongs to dm, so dm has
+// nothing to stop. WhatsApp may address the DM by the sender's LID, while the
+// hand-off names the phone number; it is the same chat.
+func TestStopReachesAHandOffInItsReplyChat(t *testing.T) {
+	const dm = "15551234567@s.whatsapp.net"
+	for _, c := range []struct {
+		name string
+		stop map[string]any // the dev message that sends !stop
+	}{
+		{"from the chat", map[string]any{"jid": dm, "text": "!stop"}},
+		{"from the chat's LID", map[string]any{"jid": "15559876543@lid", "sender": "15551234567", "text": "!stop"}},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			tb := newTestBridge(t, `, "ingest": {"enabled": true}`)
+			tb.addFolderBrain(t, BrainManifest{ID: "dm", Name: "DM", Routing: BrainRouting{HandlesDMs: true}})
+			tb.addFolderBrain(t, BrainManifest{ID: "up", Name: "Uploads", ReplyChat: dm})
+			t.Setenv("WCB_FAKE_SLEEP_MS", "30000")
+			up := tb.brainMgr.Get("up")
+
+			if w := tb.ingest(`{"brain":"up","text":"file this"}`); w.Code != 202 {
+				t.Fatalf("ingest: %d %s", w.Code, w.Body.String())
+			}
+			waitFor(t, 5*time.Second, "up's run", func() bool { r := up.Snapshot().Running; return r != nil && r.PID > 0 })
+			if w := tb.ingest(`{"brain":"up","text":"and this"}`); w.Code != 202 {
+				t.Fatalf("ingest: %d %s", w.Code, w.Body.String())
+			}
+			waitFor(t, 5*time.Second, "the second file to wait", func() bool { return len(up.Snapshot().Queue) == 1 })
+
+			if w := tb.do("POST", "/api/dev/inbound", c.stop); w.Code != 202 || !strings.Contains(w.Body.String(), "accepted") {
+				t.Fatalf("!stop: %d %s", w.Code, w.Body.String())
+			}
+			answer := func() string {
+				for _, m := range tb.dev.Outbox() {
+					if strings.Contains(m.Text, "Stopped") || strings.Contains(m.Text, "Nothing was running") {
+						return m.Text
+					}
+				}
+				return ""
+			}
+			waitFor(t, 15*time.Second, "the answer to !stop", func() bool { return answer() != "" })
+			if got := answer(); !strings.HasPrefix(got, "🛑 Stopped") {
+				t.Errorf("!stop answered %q, want that it stopped up's run", got)
+			}
+			if rt := up.Snapshot(); rt.Running != nil || len(rt.Queue) != 0 {
+				t.Errorf("up still has work after !stop: running %+v, queue %+v", rt.Running, rt.Queue)
+			}
+		})
+	}
+}
+
+func TestReplyChatFor(t *testing.T) {
+	const (
+		dm = "15551234567@s.whatsapp.net"
+		g1 = "120363000000000001@g.us"
+		g2 = "120363000000000002@g.us"
+	)
+	for _, c := range []struct {
+		name  string
+		extra string
+		brain string
+		want  string
+	}{
+		{"DM brain with a group answers in the DM",
+			`, "brains": [{"name": "p", "work_dir": "~/p", "handles_dms": true, "groups": ["` + g1 + `"]}]`, "p", dm},
+		{"fallback brain gets the DMs, so it answers there before its group",
+			`, "brains": [{"name": "f", "work_dir": "~/f", "default": true, "groups": ["` + g1 + `"]}]`, "f", dm},
+		{"group brain answers in its group",
+			`, "brains": [{"name": "p", "work_dir": "~/p", "handles_dms": true}, {"name": "g", "work_dir": "~/g", "groups": ["` + g2 + `"]}]`, "g", g2},
+		{"brain without chats has none",
+			`, "brains": [{"name": "p", "work_dir": "~/p", "handles_dms": true}, {"name": "n", "work_dir": "~/n"}]`, "n", ""},
+		{"no allowed number: the fallback's group",
+			`, "allowed_numbers": [], "brains": [{"name": "f", "work_dir": "~/f", "groups": ["` + g1 + `"]}]`, "f", g1},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			tb := newTestBridge(t, c.extra)
+			if got := tb.replyChatFor(tb.brainMgr.Get(c.brain), tb.cfgs.Get()); got != c.want {
+				t.Errorf("replyChatFor(%s) = %q, want %q", c.brain, got, c.want)
+			}
+		})
+	}
+}
+
+// The dev page can hand a message to a named brain, the way /ingest does, to
+// try out hand-offs without WhatsApp. Like a hand-off it carries no commands:
+// "!help" is text for the named brain, not a command for the chat's owner.
+func TestDevInboundCanNameABrain(t *testing.T) {
+	const dm = "15551234567@s.whatsapp.net"
+	tb := newTestBridge(t, "")
+	tb.addFolderBrain(t, BrainManifest{ID: "dm", Name: "DM", Routing: BrainRouting{HandlesDMs: true}})
+	upDir := tb.addFolderBrain(t, BrainManifest{ID: "up", Name: "Uploads"})
+
+	if w := tb.do("POST", "/api/dev/inbound", map[string]any{"jid": dm, "brain": "nobody", "text": "x"}); w.Code != 400 {
+		t.Errorf("unknown brain: %d, want 400", w.Code)
+	}
+	for i, text := range []string{"hello up", "!help"} {
+		t.Run(text, func(t *testing.T) {
+			if w := tb.do("POST", "/api/dev/inbound", map[string]any{"jid": dm, "brain": " Up ", "text": text}); w.Code != 202 {
+				t.Fatalf("dev inbound: %d %s", w.Code, w.Body.String())
+			}
+			waitFor(t, 5*time.Second, "reply", func() bool { return len(tb.dev.Outbox()) > i })
+			if out := tb.dev.Outbox()[0]; out.JID != dm || !strings.Contains(out.Text, "echo:"+upDir+":") || !strings.Contains(out.Text, text) {
+				t.Errorf("reply = %+v, want an echo of %q from %s", out, text, upDir)
+			}
+		})
 	}
 }
 

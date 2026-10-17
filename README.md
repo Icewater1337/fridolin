@@ -193,7 +193,7 @@ on the **Dev** page and read the replies there.
 | Command  | Effect |
 | -------- | ------ |
 | `!help`  | Show available commands |
-| `!stop`  | Stop the current run and drop anything queued |
+| `!stop`  | Stop the current run and drop anything queued, including files or recordings another brain is answering in this chat |
 | `!reset` | Forget the current session and start fresh |
 
 ### Shaping the assistant
@@ -284,8 +284,11 @@ curl -X POST http://127.0.0.1:8765/ingest \
   -d '{"brain":"personal","paths":["/Users/you/.fridolin/media/upload/scan.pdf"],"text":"File this"}'
 ```
 
-The brain handles it like a WhatsApp attachment and replies in its chat. Both
-endpoints only listen on localhost and refuse requests a web page sends.
+The brain you name handles it like a WhatsApp attachment and replies in its
+reply chat (`reply_chat`, or the default described in
+[docs/BRAINS.md](docs/BRAINS.md)), even when that chat belongs to another
+brain. Both endpoints only listen on localhost and refuse requests a web page
+sends.
 
 ### Google Calendar
 

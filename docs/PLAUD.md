@@ -28,13 +28,23 @@ recordings. A new one waits until its transcript is ready (up to three days).
 Then Fridolin writes a `.txt` with the details, Plaud's summary and the
 timestamped transcript to `~/.fridolin/media/plaud/`, and gives it to the brain
 like a WhatsApp attachment, with an instruction (`plaud.message`; `{name}`,
-`{when}` and `{duration}` are filled in). The brain answers in its chat — your
-DM for the DM brain, or the brain's `reply_chat`.
+`{when}` and `{duration}` are filled in). It runs in the brain you picked, with
+that brain's memory and history.
+
+Recordings are private, so the brain's answer never goes to a group: it goes
+to the brain's `reply_chat` when that is a direct chat, otherwise to your own
+DM (your first allowed number) — also for a brain that serves a group. When
+that chat belongs to another brain (your DM, for a brain that is not the DM
+brain), what you write back there goes to that other brain, although `!stop`
+there still stops the picked brain's work on a recording. Without any
+private chat (no allowed number and no direct `reply_chat`) recordings are not
+handed over: they wait, and the dashboard says what to set. The Plaud card
+shows where summaries go, and warns when that chat belongs to another brain.
 
 New brains get a `skills/plaud.md` that tells them how to file recordings.
 
-If Plaud's login expires, the brain's chat gets one notice a day until you
-connect again.
+If Plaud's login expires, that private chat gets one notice a day until you
+connect again; without one, only the dashboard shows it.
 
 ## Where the login lives
 
