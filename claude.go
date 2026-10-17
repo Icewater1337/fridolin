@@ -33,38 +33,6 @@ type ClaudeResult struct {
 	AlreadySent bool
 }
 
-// ── stream-json event types ───────────────────────────────────────────────
-
-type streamEvent struct {
-	Type      string     `json:"type"`
-	Subtype   string     `json:"subtype"`
-	IsError   bool       `json:"is_error"`
-	Message   *streamMsg `json:"message"`
-	Result    string     `json:"result"`
-	SessionID string     `json:"session_id"`
-	Error     string     `json:"error"`
-}
-
-type streamMsg struct {
-	Content []streamContent `json:"content"`
-}
-
-type streamContent struct {
-	Type  string          `json:"type"`
-	Text  string          `json:"text"`
-	Name  string          `json:"name"`
-	Input json.RawMessage `json:"input"`
-}
-
-type askInput struct {
-	Questions []askQuestion `json:"questions"`
-}
-
-type askQuestion struct {
-	Question string `json:"question"`
-	Header   string `json:"header"`
-}
-
 // ── ClaudeRunner ─────────────────────────────────────────────────────────
 
 // ClaudeRunner is the classic (non-brain) runner: one resumable Claude session
@@ -303,26 +271,6 @@ func (r *ClaudeRunner) parseStream(jid string, reader io.Reader) (ClaudeResult, 
 	}
 
 	return ClaudeResult{Text: finalResult, SessionID: finalSessionID}, false
-}
-
-// extractAskQuestion pulls the question text out of an AskUserQuestion input.
-func extractAskQuestion(raw json.RawMessage) string {
-	if len(raw) == 0 {
-		return ""
-	}
-	var ask askInput
-	if err := json.Unmarshal(raw, &ask); err != nil {
-		return ""
-	}
-	var parts []string
-	for _, q := range ask.Questions {
-		text := q.Question
-		if q.Header != "" && q.Header != q.Question {
-			text = q.Header + ": " + text
-		}
-		parts = append(parts, text)
-	}
-	return strings.Join(parts, "\n")
 }
 
 // globalWorkingNotify is replaced by the bridge with a real WhatsApp send.
