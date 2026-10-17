@@ -60,11 +60,11 @@ const SECTIONS = [
   {
     id: 'sandbox',
     title: 'Sandbox',
-    intro: 'macOS only. Every brain run is wrapped in sandbox-exec: brains cannot read other brains’ folders, your keys, mail, messages, browser profiles, Documents, Desktop or Downloads.',
+    intro: 'macOS only. Every brain run is wrapped in sandbox-exec: brains cannot read or change other brains’ folders, your keys, mail, messages, browser profiles, Documents, Desktop or Downloads.',
     fields: [
       { key: 'sandbox.enabled', type: 'bool', label: 'Sandbox brains', help: 'Strongly recommended while brains may use tools without asking.' },
-      { key: 'sandbox.deny_paths', type: 'list', mono: true, label: 'Also block', placeholder: '~/clients', validate: absPath, addLabel: 'Add folder', help: 'Extra folders brains must not read. Absolute, or starting with ~/.' },
-      { key: 'sandbox.allow_paths', type: 'list', mono: true, label: 'Re-allow', placeholder: '~/Documents/assistant-share', validate: absPath, addLabel: 'Add folder', help: 'Folders to open again after the built-in blocks. Rarely needed. Absolute, or starting with ~/.' },
+      { key: 'sandbox.deny_paths', type: 'list', mono: true, label: 'Also block', placeholder: '~/clients', validate: absPath, addLabel: 'Add folder', help: 'Extra folders brains must not read or change. Absolute, or starting with ~/.' },
+      { key: 'sandbox.allow_paths', type: 'list', mono: true, label: 'Re-allow', placeholder: '~/Documents/assistant-share', validate: absPath, addLabel: 'Add folder', help: 'Folders brains may read again despite the built-in blocks (reading only), except other brains’ folders and the bridge’s own data. Rarely needed. Absolute, or starting with ~/.' },
       { key: 'sandbox.git_config', type: 'select', def: 'read', label: 'Git settings (~/.gitconfig)', options: [['read', 'Readable — brains can commit in their folder'], ['deny', 'Blocked']] },
       { key: 'sandbox.credentials_dir', type: 'text', mono: true, label: 'Credentials folder', placeholder: 'not set', help: 'A folder of per-brain credential files. Each brain may read only its own calendar credentials there. Absolute, or starting with ~/.' },
     ],
@@ -88,7 +88,7 @@ const SECTIONS = [
       { key: 'http_listen', type: 'text', mono: true, restart: true, label: 'Listen address', placeholder: '127.0.0.1:8765', help: 'Loopback addresses only. Changing it moves this dashboard to the new address after a restart.' },
       { key: 'data_dir', type: 'text', mono: true, restart: true, label: 'Data folder', help: 'Holds the WhatsApp pairing, the database, media and the dashboard token. Changing it does not move those files — the bridge starts fresh (and unpaired) in the new folder.' },
       { key: 'log_level', type: 'select', restart: true, label: 'Log level', options: [['', 'Default (info)'], ['debug', 'Debug — very verbose'], ['info', 'Info'], ['warn', 'Warnings'], ['error', 'Errors only']] },
-      { key: 'viewer', type: 'bool', label: 'Open a terminal viewer per brain', help: 'macOS, needs tmux. Opens a Terminal window per brain that follows its activity. Handy while tuning a prompt.' },
+      { key: 'viewer', type: 'bool', label: 'Open a terminal viewer per brain', help: 'macOS, needs tmux. Opens a Terminal window per brain that follows its activity. Handy while tuning a prompt. Its tmux runs outside the sandbox, and brains can send it commands.' },
       { key: 'dashboard.require_token', type: 'bool', def: true, label: 'Require the dashboard token', confirmOff: true, help: 'Brains run on this computer and can reach this dashboard. The token is what stops a manipulated brain from changing these settings — or turning the sandbox off.' },
     ],
   },

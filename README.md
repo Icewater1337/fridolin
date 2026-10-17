@@ -339,13 +339,18 @@ What the bridge does about it:
 - **No Status or channels.** WhatsApp Status updates and channels are ignored,
   and the bridge refuses to send to Status, broadcast lists or channels, so
   nothing the assistant writes can end up in your public Status.
-- **Sandbox (macOS).** Each Claude run is wrapped in `sandbox-exec` with reads
-  denied to SSH keys, cloud credentials, shell history, browser and mail data,
-  your Documents/Downloads/Desktop, other Claude sessions' transcripts, the
-  bridge's own database — and to every other brain's directory. Add your own
-  paths under `sandbox.deny_paths`. When the sandbox is on but cannot be set
-  up, the brain refuses the message with an error instead of running
-  without it.
+- **Sandbox (macOS).** Each Claude run is wrapped in `sandbox-exec`. Brains
+  can neither read nor write SSH keys, cloud credentials, shell history,
+  browser and mail data, your Documents/Downloads/Desktop, the bridge's own
+  database — or any other brain's directory — and cannot rename the folders
+  above them to get around that. Other Claude sessions' transcripts are
+  unreadable. Files that run outside the sandbox — Claude Code's settings,
+  hooks and `CLAUDE.md` (also those above brain folders), its auto-memory,
+  `~/Library/LaunchAgents`, shell startup files, the bridge's own binary and
+  checkout, the Claude CLI and the other tools the bridge runs — are
+  readable but never writable. Add your own paths under
+  `sandbox.deny_paths`. When the sandbox is on but cannot be set up, the
+  brain refuses the message with an error instead of running without it.
 - **Brain isolation.** Brains have separate directories, sessions, histories,
   and calendar credentials.
 - **A guarded dashboard.** It only listens on localhost, rejects requests
@@ -360,7 +365,14 @@ What the bridge does about it:
 What it does not do:
 
 - The sandbox is containment, not a jail. It raises the cost of a prompt
-  injection; it does not stop code execution.
+  injection; it does not stop code execution. It denies writing only where
+  listed, so a brain can still write elsewhere in your home folder,
+  including the Claude Code state all brains and your own sessions share
+  (`~/.claude.json` and its MCP servers) and the files your shell startup
+  files load (such as `~/.nvm/nvm.sh`), and it can ask launchd, `crontab`,
+  `at`, `open`, `osascript` or a running tmux server (the activity viewer's,
+  or your own) to start a program outside the sandbox. See
+  [what the sandbox does not cover yet](docs/CONFIGURATION.md#what-the-sandbox-does-not-cover-yet).
 - Classic mode (`brain_mode` off) runs Claude without the sandbox.
 - On Linux there is no sandbox layer at all (the bridge refuses to start with
   `sandbox.enabled` on). Run the bridge as a dedicated user.

@@ -278,6 +278,7 @@ func checkCmd(args []string) {
 
 	if len(routes) > 0 || *sandboxFor != "" {
 		mgr := &BrainManager{brains: map[string]*Brain{}, byGroup: map[string]*Brain{}, profiler: NewSandboxProfiler(nil, cfg), hooks: &BrainHooks{}}
+		mgr.profiler.SetConfigFile(*cfgPath)
 		if err := mgr.reload(specs, issues, cfg); err != nil {
 			log.Fatalf("%v", err)
 		}

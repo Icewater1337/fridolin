@@ -522,6 +522,7 @@ func (br *Brain) invoke(run *brainRun, ctx context.Context, s *brainSettings, m 
 	// without it: the fallback would quietly drop the only barrier left.
 	binary := s.claudePath
 	finalArgs := args
+	env := append(os.Environ(), calendarEnv(br.id, s.manifest, s.credsDir)...)
 	if br.sandbox != nil && br.sandbox.Enabled() {
 		sbBinary, sbArgs, sbErr := br.sandbox.Command(br.id, s.claudePath, args)
 		if sbErr != nil {
@@ -529,6 +530,10 @@ func (br *Brain) invoke(run *brainRun, ctx context.Context, s *brainSettings, m 
 			return RunResult{Err: errSandboxUnavailable}
 		}
 		binary, finalArgs = sbBinary, sbArgs
+		// The profile denies writes to the CLI's own install, so its
+		// auto-updater could download a new version on every run and never
+		// switch to it. The last value wins, whatever the bridge's own is.
+		env = append(env, "DISABLE_AUTOUPDATER=1")
 	}
 
 	// Only once the sandbox is settled: a refused run starts no process.
@@ -536,7 +541,7 @@ func (br *Brain) invoke(run *brainRun, ctx context.Context, s *brainSettings, m 
 
 	cmd := exec.CommandContext(ctx, binary, finalArgs...)
 	cmd.Dir = br.workDir
-	cmd.Env = append(os.Environ(), calendarEnv(br.id, s.manifest, s.credsDir)...)
+	cmd.Env = env
 	isolateProcessGroup(cmd)
 
 	// stdin must be /dev/null or the CLI blocks waiting for input.
