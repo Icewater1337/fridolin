@@ -264,7 +264,7 @@ Older configs list brains inline. They keep working, and
 | `handles_dms` | Routes all direct messages here. At most one brain. |
 | `groups` | Group JIDs routed here. A group may belong to only one brain. |
 | `default` | Fallback for allowed chats no brain claims. Defaults to the first brain. |
-| `prompt_file` | Override the prompt path (default `<work_dir>/brain-prompt.md`). |
+| `prompt_file` | Override the prompt path (default `<work_dir>/brain-prompt.md`). One inside `work_dir` is read as a folder brain's is, never through a symlink; one outside it is read as configured. |
 | `model`, `effort` | Override `brain_model` / `brain_effort` for this brain. |
 
 A brain whose settings clash with another (same id, a group claimed twice, two
@@ -621,10 +621,12 @@ sentence boundaries and numbered `[1/3]`.
 
 Opens a tmux session per brain, tailing its activity log, in a Terminal window
 (macOS). Off by default. Handy while tuning a prompt; noisy otherwise. Requires
-tmux — without it the bridge logs a warning and carries on. The bridge starts
-these sessions on tmux's default server, outside the sandbox, and any brain can
-send that server commands (`tmux run-shell`), which then run unsandboxed. The
-same goes for a tmux you run yourself; see
+tmux — without it the bridge logs a warning and carries on. Nor does a viewer
+start for a brain whose `claude-stream.log` the bridge refuses, a symlink say
+(see [BRAINS.md](BRAINS.md#files-the-bridge-reads-and-writes)). The bridge
+starts these sessions on tmux's default server, outside the sandbox, and any
+brain can send that server commands (`tmux run-shell`), which then run
+unsandboxed. The same goes for a tmux you run yourself; see
 [what the sandbox does not cover yet](#what-the-sandbox-does-not-cover-yet).
 
 ### `log_level` *(restart)*

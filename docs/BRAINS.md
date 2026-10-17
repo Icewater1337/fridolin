@@ -60,7 +60,7 @@ restart.
 | `routing.groups` | Group JIDs this brain answers. The group must also be allowed in the global settings. |
 | `model`, `effort` | Override the global `brain_model` / `brain_effort`. |
 | `disallowed_tools` | Override the global list; omit to inherit, `[]` to allow every tool. |
-| `prompt_file` | The prompt sent ahead of every message, relative to the folder. It must stay inside the folder. |
+| `prompt_file` | The prompt sent ahead of every message, relative to the folder. It must stay inside the folder, and be a file rather than a symlink (see [Files the bridge reads and writes](#files-the-bridge-reads-and-writes)). |
 | `reply_chat` | Where answers go for files handed in through `/ingest`. Default: the first allowed number for the DM brain, else the brain's first group. |
 | `backup` | Google Drive backup for this folder; see [BACKUP.md](BACKUP.md). |
 | `calendar` | The Google account this brain signed in with and the calendars it may use; set by *Connect Google Calendar*, see [CALENDAR.md](CALENDAR.md). |
@@ -77,12 +77,39 @@ group. Such a change has no effect: the dashboard marks the brain as
 *changed on disk* and shows the difference, and you approve it or not.
 Edits you make in the dashboard update both copies.
 
+## Files the bridge reads and writes
+
+The bridge itself, outside the sandbox, works on these files in a brain's
+folder: it reads the prompt file, `brain.json` (to tell when it changed on
+disk) and `memories/people/whatsapp-identity-map.md`, appends every message
+to `conversation-history.jsonl` and reads it back, and logs what each run
+did in `claude-stream.log`. A brain can change any file in its folder, and
+put a symlink to `~/.ssh` or to another brain's history in place of one of
+them, so the bridge never leaves the folder through a symlink, and takes
+only a regular file there: not a symlink at the file itself, even one to
+another file in the folder. Nor does it take a prompt file, `brain.json`
+or identity map larger than 256 KiB. It treats such a file as missing and
+writes nothing through it; its log says why, and the dashboard shows a
+`brain.json` it cannot read. It opens the folder once when it loads the
+brain and goes through that handle from then on (`brain.json` excepted,
+which it reads for brains that are not running too), so a folder you put
+in a brain's place takes a reload; see [Moving a brain](#moving-a-brain).
+Copy a file into the folder rather than link it.
+
 ## Moving a brain
 
 Brain folders are portable. To move one to another machine: copy the folder
 (or restore it from a Drive backup), then *Add brain* on the new machine — the
 dashboard offers to use the `brain.json` it finds. Keep the same `id` so
 history and credentials still match.
+
+To swap a brain's folder for another at the same path, a restored backup
+say, move the old one aside, put the new one in its place, then restart the
+bridge or save a setting in the dashboard. Until it loads its brains again,
+the bridge goes on reading the prompt and writing the history in the folder
+it opened, the one you moved aside, while runs start in the new one. The
+reload stops the brain's run in progress, drops the messages waiting for
+it, and starts it afresh in the new folder.
 
 ## Removing a brain
 

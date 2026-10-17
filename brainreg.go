@@ -23,10 +23,17 @@ type BrainRef struct {
 
 // BrainSpec is a brain ready to run, from either source.
 type BrainSpec struct {
-	Manifest   BrainManifest
-	Dir        string // absolute, symlinks resolved
-	PromptPath string
-	Source     string // "inline" or "folder"
+	Manifest BrainManifest
+	Dir      string // absolute, symlinks resolved
+	// PromptFile is the prompt file relative to Dir. The bridge reads it
+	// through the brain's open folder, which stops a brain from pointing it
+	// at ~/.ssh with a symlink; checking the path here would not, as the
+	// brain can plant one at any time after.
+	PromptFile string
+	// OutsidePrompt is an inline brain's prompt_file when that is outside
+	// its folder, read as configured; PromptFile is "" then.
+	OutsidePrompt string
+	Source        string // "inline" or "folder"
 }
 
 // BrainIssue is a problem with one configured brain, shown on the dashboard.
@@ -35,6 +42,9 @@ type BrainIssue struct {
 	Path   string `json:"path"`
 	Kind   string `json:"kind"` // drift, missing, invalid, unapproved
 	Detail string `json:"detail"`
+	// atLoad marks one the brain manager found as it loaded the brains, a
+	// folder it could not open, which ResolveBrains does not see.
+	atLoad bool
 }
 
 // ResolveBrains turns the configuration into runnable brains: inline brains
@@ -58,7 +68,13 @@ func ResolveBrains(cfg *Config) ([]BrainSpec, []BrainIssue) {
 	for _, b := range cfg.Brains {
 		dir := canonicalDir(b.WorkDir)
 		m := ManifestFromInline(b)
-		add(BrainSpec{Manifest: m, Dir: dir, PromptPath: b.PromptFile, Source: "inline"})
+		s := BrainSpec{Manifest: m, Dir: dir, Source: "inline"}
+		if rel, err := filepath.Rel(b.WorkDir, b.PromptFile); err == nil && filepath.IsLocal(rel) {
+			s.PromptFile = rel
+		} else {
+			s.OutsidePrompt = b.PromptFile
+		}
+		add(s)
 	}
 
 	for _, ref := range cfg.BrainDirs {
@@ -81,12 +97,9 @@ func ResolveBrains(cfg *Config) ([]BrainSpec, []BrainIssue) {
 		} else if err != nil && !errors.Is(err, fs.ErrNotExist) {
 			issues = append(issues, BrainIssue{ID: m.ID, Path: ref.Path, Kind: "drift", Detail: err.Error()})
 		}
-		prompt, err := confinedPath(dir, m.PromptFile)
-		if err != nil {
-			issues = append(issues, BrainIssue{ID: m.ID, Path: ref.Path, Kind: "invalid", Detail: err.Error()})
-			continue
-		}
-		add(BrainSpec{Manifest: m, Dir: dir, PromptPath: prompt, Source: "folder"})
+		// Validate kept prompt_file inside the folder; the folder's os.Root
+		// keeps it there when the bridge reads it.
+		add(BrainSpec{Manifest: m, Dir: dir, PromptFile: m.PromptFile, Source: "folder"})
 	}
 
 	// Drop brains that clash with an earlier one rather than refusing to run.
@@ -182,26 +195,6 @@ func CheckBrainPath(path string, cfg *Config, otherDirs []string) (abs string, p
 		}
 	}
 	return abs, problems, warnings
-}
-
-// confinedPath resolves rel inside dir and rejects anything that escapes it,
-// including through symlinks. The bridge reads the prompt file outside the
-// sandbox, so this is what stops brain.json from pointing it at ~/.ssh.
-func confinedPath(dir, rel string) (string, error) {
-	if rel == "" {
-		rel = "brain-prompt.md"
-	}
-	p := filepath.Join(dir, rel)
-	if !isWithin(p, dir) {
-		return "", fmt.Errorf("prompt_file %q leaves the brain folder", rel)
-	}
-	if resolved, err := filepath.EvalSymlinks(p); err == nil {
-		if !isWithin(resolved, canonicalDir(dir)) {
-			return "", fmt.Errorf("prompt_file %q points outside the brain folder", rel)
-		}
-		return resolved, nil
-	}
-	return p, nil
 }
 
 // canonicalDir cleans p and resolves symlinks when it exists (on macOS /tmp is

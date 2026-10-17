@@ -138,15 +138,19 @@ func (m BrainManifest) Equal(o BrainManifest) bool {
 }
 
 // ReadManifest loads <dir>/brain.json. It returns os.ErrNotExist (wrapped)
-// when the folder is not a brain yet.
+// when the folder is not a brain yet. The brain may write the file, and
+// the bridge reads it outside the sandbox (for the drift check, too), so
+// it goes as readBrainFile reads: nothing outside the folder, no symlink,
+// only a regular file, so that a FIFO cannot hang a reload.
 func ReadManifest(dir string) (*BrainManifest, error) {
-	data, err := os.ReadFile(filepath.Join(dir, ManifestFile))
+	path := filepath.Join(dir, ManifestFile)
+	data, err := readBrainFile(dir, ManifestFile)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("%s: %w", path, err)
 	}
 	m := &BrainManifest{}
 	if err := json.Unmarshal(data, m); err != nil {
-		return nil, fmt.Errorf("%s: %w", filepath.Join(dir, ManifestFile), err)
+		return nil, fmt.Errorf("%s: %w", path, err)
 	}
 	n := m.normalized()
 	return &n, nil

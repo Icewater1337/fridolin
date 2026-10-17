@@ -549,6 +549,13 @@ func (b *Bridge) brainViews() []brainView {
 	cfg := b.cfgs.Get()
 	_, issues := ResolveBrains(cfg)
 	byPath := map[string][]BrainIssue{}
+	// A brain left out because its folder would not open is known only to
+	// the brain manager, until it loads the brains again.
+	for _, is := range b.brainMgr.Issues() {
+		if is.atLoad {
+			issues = append(issues, is)
+		}
+	}
 	for _, is := range issues {
 		byPath[canonicalDir(is.Path)] = append(byPath[canonicalDir(is.Path)], is)
 	}

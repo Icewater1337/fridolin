@@ -493,6 +493,14 @@ func TestBareCodeRe(t *testing.T) {
 func TestRecentOutboundLooksLikeOTPRequest(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "history.jsonl")
+	tail := func() []string {
+		f, err := os.Open(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer f.Close()
+		return tailLines(f, 256*1024)
+	}
 
 	write := func(entries ...historyEntry) {
 		f, err := os.Create(path)
@@ -507,28 +515,28 @@ func TestRecentOutboundLooksLikeOTPRequest(t *testing.T) {
 	}
 
 	write(historyEntry{Type: "out", From: "personal", Text: "🔐 Please send the code"})
-	if !recentOutboundLooksLikeOTPRequest(path, "personal") {
+	if !recentOutboundLooksLikeOTPRequest(tail(), "personal") {
 		t.Error("should detect the OTP request")
 	}
 
 	// An inbound message quoting the marker must not arm the guard.
 	write(historyEntry{Type: "in", From: "15551234567", Text: "what is an OTP?"})
-	if recentOutboundLooksLikeOTPRequest(path, "personal") {
+	if recentOutboundLooksLikeOTPRequest(tail(), "personal") {
 		t.Error("inbound message must not arm the guard")
 	}
 
 	// Another brain's outbound message must not arm this brain's guard.
 	write(historyEntry{Type: "out", From: "team", Text: "🔐 send the code"})
-	if recentOutboundLooksLikeOTPRequest(path, "personal") {
+	if recentOutboundLooksLikeOTPRequest(tail(), "personal") {
 		t.Error("another brain's message must not arm the guard")
 	}
 
 	write(historyEntry{Type: "out", From: "personal", Text: "here is your summary"})
-	if recentOutboundLooksLikeOTPRequest(path, "personal") {
+	if recentOutboundLooksLikeOTPRequest(tail(), "personal") {
 		t.Error("ordinary message must not arm the guard")
 	}
 
-	if recentOutboundLooksLikeOTPRequest(filepath.Join(dir, "missing.jsonl"), "personal") {
+	if recentOutboundLooksLikeOTPRequest(nil, "personal") {
 		t.Error("a missing history file must not arm the guard")
 	}
 }
@@ -536,16 +544,13 @@ func TestRecentOutboundLooksLikeOTPRequest(t *testing.T) {
 // ── identity map ──────────────────────────────────────────────────────────
 
 func TestParseIdentityMap(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "map.md")
-	os.WriteFile(path, []byte(`# People
+	ids := parseIdentityMap([]byte(`# People
 
 | WhatsApp Number | Person | Notes |
 | --------------- | ------ | ----- |
 | 15551234567     | Alex   | work  |
 | +15559876543    | Sam    |       |
-`), 0o600)
-
-	ids := parseIdentityMap(path)
+`))
 	if ids["15551234567"] != "Alex" {
 		t.Errorf("got %q for Alex", ids["15551234567"])
 	}
@@ -556,7 +561,7 @@ func TestParseIdentityMap(t *testing.T) {
 	if _, ok := ids["WhatsApp Number"]; ok {
 		t.Error("header row was parsed as an entry")
 	}
-	if len(parseIdentityMap("/nonexistent")) != 0 {
+	if len(parseIdentityMap(nil)) != 0 {
 		t.Error("a missing map should yield an empty map, not an error")
 	}
 }

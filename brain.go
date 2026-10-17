@@ -39,7 +39,11 @@ func normalizeJID(jid string) string {
 	return strings.TrimPrefix(jid, "+")
 }
 
-// parseIdentityMap reads a brain's contact map and returns normalized JID → name.
+// identityMapFile is the brain's contact map, in its folder.
+const identityMapFile = "memories/people/whatsapp-identity-map.md"
+
+// parseIdentityMap parses a brain's contact map and returns normalized
+// JID → name.
 //
 // The map is a markdown table at <work_dir>/memories/people/whatsapp-identity-map.md:
 //
@@ -48,13 +52,8 @@ func normalizeJID(jid string) string {
 //	| 15551234567     | Alex   | …     |
 //
 // It is entirely optional — without it, chat history shows raw JIDs.
-func parseIdentityMap(mapPath string) map[string]string {
+func parseIdentityMap(data []byte) map[string]string {
 	identities := make(map[string]string)
-
-	data, err := os.ReadFile(mapPath)
-	if err != nil {
-		return identities
-	}
 
 	for _, line := range strings.Split(string(data), "\n") {
 		line = strings.TrimSpace(line)
@@ -89,13 +88,12 @@ var bareCodeRe = regexp.MustCompile(`^\s*\d{4,8}\s*$`)
 var defaultOTPMarkers = []string{"🔐", "OTP", "one-time code", "2FA", "verification code"}
 
 // recentOutboundLooksLikeOTPRequest reports whether any of the brain's last 50
-// outbound messages asked for a one-time code. With no markers given it uses
-// the built-in list.
-func recentOutboundLooksLikeOTPRequest(historyFile, brainID string, markers ...string) bool {
+// outbound messages in lines, the tail of its history, asked for a one-time
+// code. With no markers given it uses the built-in list.
+func recentOutboundLooksLikeOTPRequest(lines []string, brainID string, markers ...string) bool {
 	if len(markers) == 0 {
 		markers = defaultOTPMarkers
 	}
-	lines := tailLines(historyFile, 256*1024)
 	start := len(lines) - 50
 	if start < 0 {
 		start = 0
@@ -117,13 +115,8 @@ func recentOutboundLooksLikeOTPRequest(historyFile, brainID string, markers ...s
 	return false
 }
 
-// tailLines returns the complete lines in the last maxBytes of a file.
-func tailLines(path string, maxBytes int64) []string {
-	f, err := os.Open(path)
-	if err != nil {
-		return nil
-	}
-	defer f.Close()
+// tailLines returns the complete lines in the last maxBytes of f.
+func tailLines(f *os.File, maxBytes int64) []string {
 	st, err := f.Stat()
 	if err != nil {
 		return nil
@@ -158,10 +151,14 @@ func tailLines(path string, maxBytes int64) []string {
 type Brain struct {
 	// Fixed for the brain's lifetime. Changing a brain's folder replaces the
 	// Brain; everything else is in settings and changes live.
-	id          string
-	workDir     string
-	historyFile string
-	storeKey    string
+	id       string
+	workDir  string
+	storeKey string
+	// root is the brain's folder, opened once when the Brain is made and
+	// closed when it is retired. The bridge reads and writes its files in
+	// the folder through it (see openInFolder), and through this handle
+	// rather than the path, which could lead elsewhere by then.
+	root *os.Root
 
 	settings atomic.Pointer[brainSettings]
 	store    *Store
@@ -189,7 +186,8 @@ type brainSettings struct {
 	model           string
 	effort          string
 	disallowedTools []string
-	promptPath      string
+	promptFile      string // relative to the folder; see BrainSpec
+	outsidePrompt   string // an inline brain's prompt_file outside its folder
 	dangerously     bool
 	inheritUser     bool // inherit_claude_user_config
 	otpGuard        bool
@@ -260,7 +258,21 @@ func (br *Brain) Dir() string { return br.workDir }
 func (br *Brain) DropsOTP(text string) bool {
 	s := br.settings.Load()
 	return s.otpGuard && bareCodeRe.MatchString(text) &&
-		recentOutboundLooksLikeOTPRequest(br.historyFile, br.id, s.otpMarkers...)
+		recentOutboundLooksLikeOTPRequest(br.historyTail(256*1024), br.id, s.otpMarkers...)
+}
+
+// historyFileName is the brain's conversation history, in its folder.
+const historyFileName = "conversation-history.jsonl"
+
+// historyTail returns the complete lines in the last maxBytes of the
+// brain's history, or none when it cannot be read (see openInFolder).
+func (br *Brain) historyTail(maxBytes int64) []string {
+	f, err := openInFolder(br.root, historyFileName, os.O_RDONLY, 0)
+	if err != nil {
+		return nil
+	}
+	defer f.Close()
+	return tailLines(f, maxBytes)
 }
 
 // Submit queues a message for the brain. It returns the message's position in
@@ -412,6 +424,32 @@ func (br *Brain) retire() {
 	br.pending = nil
 	br.mu.Unlock()
 	br.StopCurrent(true)
+	// Done with the folder. A run that would not stop finds it closed.
+	br.root.Close()
+}
+
+// holdsFolder reports whether the folder the brain opened is still the one
+// at dir. When you move it aside and put another folder there, a restored
+// copy say, the next reload makes the brain anew in that one, as for a new
+// path. A brain cannot do this to its own folder: the sandbox pins it.
+func (br *Brain) holdsFolder(dir string) bool {
+	held, err := br.root.Stat(".")
+	if err != nil {
+		return false
+	}
+	at, err := os.Stat(dir)
+	return err == nil && os.SameFile(held, at)
+}
+
+// readFile reads the file name in the brain's folder (see openInFolder),
+// at most maxBrainFile of it.
+func (br *Brain) readFile(name string) ([]byte, error) {
+	f, err := openInFolder(br.root, name, os.O_RDONLY, 0)
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+	return readAtMost(f)
 }
 
 // BrainRuntime is a brain's live state, for the dashboard.
@@ -473,6 +511,9 @@ func (br *Brain) Snapshot() BrainRuntime {
 	return rt
 }
 
+// startViewer is NewTmuxViewer, a variable so tests need no tmux.
+var startViewer = NewTmuxViewer
+
 // ensureViewer starts the tmux activity viewer if enabled and not running.
 func (br *Brain) ensureViewer(s *brainSettings) {
 	if !s.viewer {
@@ -481,7 +522,16 @@ func (br *Brain) ensureViewer(s *brainSettings) {
 	if br.tmuxViewer != nil && br.tmuxViewer.IsAlive() {
 		return
 	}
-	tv, err := NewTmuxViewer("claude-"+br.id, br.streamLogPath(), br.workDir)
+	// tail fails on a log that does not exist yet, so create it first,
+	// through the folder as a run opens it: touch would have followed a
+	// dangling symlink there and created the file it points to.
+	f, err := openInFolder(br.root, streamLogName, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600)
+	if err != nil {
+		log.Printf("brain %s: no tmux viewer: could not open stream log: %v", br.id, err)
+		return
+	}
+	f.Close()
+	tv, err := startViewer("claude-"+br.id, br.streamLogPath(), br.workDir)
 	if err != nil {
 		log.Printf("brain %s: could not start tmux viewer: %v", br.id, err)
 		return
@@ -489,8 +539,11 @@ func (br *Brain) ensureViewer(s *brainSettings) {
 	br.tmuxViewer = tv
 }
 
+// streamLogName is the brain's activity log, in its folder.
+const streamLogName = "claude-stream.log"
+
 func (br *Brain) streamLogPath() string {
-	return filepath.Join(br.workDir, "claude-stream.log")
+	return filepath.Join(br.workDir, streamLogName)
 }
 
 // claudeArgs builds the CLI arguments for one run. mcpConfig is what
@@ -726,46 +779,17 @@ func jsonObject(data []byte) (map[string]json.RawMessage, error) {
 	return obj, nil
 }
 
-// maxBrainFile bounds what the bridge reads of a brain's .mcp.json and
-// settings: far more than any real one holds, so that a brain cannot make
+// maxBrainFile bounds what the bridge reads of the files a brain can
+// write: its .mcp.json, settings, prompt, identity map and calendar token.
+// That is far more than any real one holds, so that a brain cannot make
 // the bridge load gigabytes into memory on every run, and little enough to
-// pass a .mcp.json on the command line.
+// pass a .mcp.json or the prompt on the command line.
 const maxBrainFile = 256 << 10
 
-// readBrainFile reads the file name, relative to the brain folder dir,
-// which the bridge does outside the sandbox while the brain controls what
-// is there. It reads nothing outside dir: os.Root refuses, at every step
-// of the open, a path that leads out of it, through a symlinked .claude
-// folder say, which could otherwise point at another brain's settings. It
-// refuses a symlink at the file itself too; one swapped in after that
-// check can lead only to another file in dir. It takes only a regular
-// file, checked on the open file so that nothing can be swapped in after
-// the check; the open does not block, so a FIFO cannot hang the run
-// either. It refuses a file larger than maxBrainFile.
-func readBrainFile(dir, name string) ([]byte, error) {
-	root, err := os.OpenRoot(dir)
-	if err != nil {
-		return nil, err
-	}
-	defer root.Close()
-	if fi, err := root.Lstat(name); err != nil {
-		return nil, err
-	} else if fi.Mode()&fs.ModeSymlink != 0 {
-		return nil, errors.New("it is a symlink, which the bridge does not follow")
-	}
-	f, err := root.OpenFile(name, os.O_RDONLY|syscall.O_NONBLOCK, 0)
-	if err != nil {
-		return nil, err
-	}
-	defer f.Close()
-	fi, err := f.Stat()
-	if err != nil {
-		return nil, err
-	}
-	if !fi.Mode().IsRegular() {
-		return nil, errors.New("not a regular file")
-	}
-	data, err := io.ReadAll(io.LimitReader(f, maxBrainFile+1))
+// readAtMost reads r to the end, and refuses it when that is more than
+// maxBrainFile.
+func readAtMost(r io.Reader) ([]byte, error) {
+	data, err := io.ReadAll(io.LimitReader(r, maxBrainFile+1))
 	if err != nil {
 		return nil, err
 	}
@@ -773,6 +797,74 @@ func readBrainFile(dir, name string) ([]byte, error) {
 		return nil, fmt.Errorf("larger than %d KiB", maxBrainFile>>10)
 	}
 	return data, nil
+}
+
+// errSymlink is why the bridge refuses a file that a brain could have
+// replaced with a symlink.
+var errSymlink = errors.New("it is a symlink, which the bridge does not follow")
+
+// openInFolder opens the file name, relative to the brain folder root, for
+// the bridge, which works on it outside the sandbox while the brain
+// controls what is there: a brain may replace any file in its folder with
+// a symlink to ~/.ssh, to another brain's history or to a file the sandbox
+// denies it, and have the bridge read that into its prompt or append to
+// it. os.Root refuses, at every step of the open, a path that leads out of
+// the folder, through a symlinked .claude folder say. It refuses a symlink
+// at the file itself too, even one that stays inside, and anything but a
+// regular file, and the file it opens must be the one it looked at, so
+// that nothing swapped in between gets through. The open does not block,
+// so a FIFO cannot hang the bridge either. With os.O_CREATE it creates
+// the file when there is none, never through a symlink.
+func openInFolder(root *os.Root, name string, flag int, perm os.FileMode) (*os.File, error) {
+	for tries := 0; ; tries++ {
+		fi, err := root.Lstat(name)
+		if errors.Is(err, fs.ErrNotExist) && flag&os.O_CREATE != 0 {
+			// With O_EXCL, os.Root follows no symlink, not even one
+			// planted since the Lstat; that makes the create fail.
+			f, err := root.OpenFile(name, flag|os.O_EXCL|syscall.O_NONBLOCK, perm)
+			if errors.Is(err, fs.ErrExist) && tries < 2 {
+				continue // something appeared there meanwhile: look again
+			}
+			return f, err
+		}
+		if err != nil {
+			return nil, err
+		}
+		if fi.Mode()&fs.ModeSymlink != 0 {
+			return nil, errSymlink
+		}
+		if !fi.Mode().IsRegular() {
+			return nil, errors.New("not a regular file")
+		}
+		f, err := root.OpenFile(name, flag&^os.O_CREATE|syscall.O_NONBLOCK, perm)
+		if err != nil {
+			return nil, err
+		}
+		if st, err := f.Stat(); err != nil || !os.SameFile(fi, st) {
+			f.Close()
+			if err == nil {
+				err = errors.New("it was replaced while the bridge opened it")
+			}
+			return nil, err
+		}
+		return f, nil
+	}
+}
+
+// readBrainFile reads the file name, relative to the brain folder dir, as
+// openInFolder opens it. It refuses a file larger than maxBrainFile.
+func readBrainFile(dir, name string) ([]byte, error) {
+	root, err := os.OpenRoot(dir)
+	if err != nil {
+		return nil, err
+	}
+	defer root.Close()
+	f, err := openInFolder(root, name, os.O_RDONLY, 0)
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+	return readAtMost(f)
 }
 
 // invoke runs the Claude CLI once for m.
@@ -901,7 +993,7 @@ func (br *Brain) invoke(run *brainRun, ctx context.Context, s *brainSettings, m 
 // composePreface reads the chat history for chatJID and formats recent messages:
 // the last 10 for a DM, the last 20 for a group.
 func (br *Brain) composePreface(chatJID string, isGroup bool) string {
-	histFile, err := os.Open(br.historyFile)
+	histFile, err := openInFolder(br.root, historyFileName, os.O_RDONLY, 0)
 	if err != nil {
 		return ""
 	}
@@ -932,7 +1024,13 @@ func (br *Brain) composePreface(chatJID string, isGroup bool) string {
 		return ""
 	}
 
-	identities := parseIdentityMap(filepath.Join(br.workDir, "memories", "people", "whatsapp-identity-map.md"))
+	// Through the folder: a map swapped for a symlink to another brain's
+	// would put that brain's contacts in this one's prompt.
+	idMap, err := br.readFile(identityMapFile)
+	if err != nil && !errors.Is(err, fs.ErrNotExist) {
+		log.Printf("brain %s: could not read identity map %s: %v", br.id, identityMapFile, err)
+	}
+	identities := parseIdentityMap(idMap)
 
 	var sb strings.Builder
 	for _, entry := range entries {
@@ -959,14 +1057,24 @@ func (br *Brain) buildPrompt(s *brainSettings, m Inbound) string {
 	var sb strings.Builder
 	isGroup := m.IsGroup()
 
-	if s.promptPath != "" {
-		sysPrompt, err := os.ReadFile(s.promptPath)
-		if err != nil {
-			log.Printf("brain %s: could not read prompt file %s: %v", br.id, s.promptPath, err)
-		} else {
-			sb.WriteString(strings.TrimSpace(string(sysPrompt)))
-			sb.WriteString("\n\n")
-		}
+	var sysPrompt []byte
+	var err error
+	name := s.promptFile
+	switch {
+	case s.outsidePrompt != "":
+		// An inline brain's prompt_file outside its folder is a path you
+		// wrote in config.json, read as it is, symlinks and all. Folder
+		// brains cannot name one, and inline brains are on their way out.
+		name = s.outsidePrompt
+		sysPrompt, err = os.ReadFile(name)
+	case name != "":
+		sysPrompt, err = br.readFile(name)
+	}
+	if err != nil {
+		log.Printf("brain %s: could not read prompt file %s: %v", br.id, name, err)
+	} else if name != "" {
+		sb.WriteString(strings.TrimSpace(string(sysPrompt)))
+		sb.WriteString("\n\n")
 	}
 
 	if preface := br.composePreface(m.JID, isGroup); preface != "" {
@@ -1007,7 +1115,9 @@ func (br *Brain) parseStream(jid string, reader io.Reader) RunResult {
 	scanner := bufio.NewScanner(reader)
 	scanner.Buffer(make([]byte, 4*1024*1024), 4*1024*1024)
 
-	streamLog, logErr := os.OpenFile(br.streamLogPath(), os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600)
+	// Through the folder, like the history: a brain can swap the log for a
+	// symlink to a file its sandbox denies it writing.
+	streamLog, logErr := openInFolder(br.root, streamLogName, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600)
 	if logErr != nil {
 		log.Printf("brain %s: could not open stream log: %v", br.id, logErr)
 	}
@@ -1170,9 +1280,11 @@ func (br *Brain) appendHistory(chatJID, from, text, typ string) {
 	if err != nil {
 		return
 	}
-	f, err := os.OpenFile(br.historyFile, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600)
+	// Through the folder: appending through a symlink would let a brain
+	// write to files its sandbox denies it, another brain's among them.
+	f, err := openInFolder(br.root, historyFileName, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600)
 	if err != nil {
-		log.Printf("brain %s: failed to open history file %s: %v", br.id, br.historyFile, err)
+		log.Printf("brain %s: failed to open history file %s: %v", br.id, filepath.Join(br.workDir, historyFileName), err)
 		return
 	}
 	_, _ = f.Write(append(data, '\n'))
@@ -1248,6 +1360,17 @@ func (bm *BrainManager) reload(specs []BrainSpec, issues []BrainIssue, cfg *Conf
 	var dm, def *Brain
 	workDirs := map[string]string{}
 
+	// The folders opened for new brains, closed again unless they run.
+	var created []*Brain
+	applied := false
+	defer func() {
+		if !applied {
+			for _, br := range created {
+				br.root.Close()
+			}
+		}
+	}()
+
 	for _, sp := range specs {
 		if sp.Source == "inline" {
 			if err := os.MkdirAll(sp.Dir, 0o700); err != nil {
@@ -1255,24 +1378,32 @@ func (bm *BrainManager) reload(specs []BrainSpec, issues []BrainIssue, cfg *Conf
 			}
 		}
 		m := sp.Manifest
+		// Even a brain left out below keeps its folder denied to the others.
+		workDirs[m.ID] = sp.Dir
 		s := settingsFor(cfg, sp)
 		br, ok := old[m.ID]
-		if !ok || br.workDir != sp.Dir {
-			br = &Brain{
-				id:          m.ID,
-				workDir:     sp.Dir,
-				historyFile: filepath.Join(sp.Dir, "conversation-history.jsonl"),
-				storeKey:    "brain:" + m.ID,
-				store:       bm.store,
-				sandbox:     bm.profiler,
-				hooks:       bm.hooks,
+		if !ok || br.workDir != sp.Dir || !br.holdsFolder(sp.Dir) {
+			root, err := os.OpenRoot(sp.Dir)
+			if err != nil {
+				log.Printf("brain %s: leaving it out: %v", m.ID, err)
+				issues = append(issues, BrainIssue{ID: m.ID, Path: sp.Dir, Kind: "missing", Detail: "the folder cannot be opened: " + err.Error(), atLoad: true})
+				continue
 			}
+			br = &Brain{
+				id:       m.ID,
+				workDir:  sp.Dir,
+				storeKey: "brain:" + m.ID,
+				root:     root,
+				store:    bm.store,
+				sandbox:  bm.profiler,
+				hooks:    bm.hooks,
+			}
+			created = append(created, br)
 		}
 		br.settings.Store(s)
 
 		next[m.ID] = br
 		order = append(order, br)
-		workDirs[m.ID] = sp.Dir
 		for _, g := range m.Routing.Groups {
 			byGroup[g] = br
 		}
@@ -1299,9 +1430,14 @@ func (bm *BrainManager) reload(specs []BrainSpec, issues []BrainIssue, cfg *Conf
 	bm.mu.Lock()
 	bm.brains, bm.order, bm.byGroup, bm.dmBrain, bm.fallback, bm.issues = next, order, byGroup, dm, def, issues
 	bm.mu.Unlock()
+	applied = true
 
 	for _, br := range removed {
-		log.Printf("brain %s: removed from configuration; stopping it", br.id)
+		if nb, ok := next[br.id]; ok {
+			log.Printf("brain %s: now in the folder at %s; stopping it in the old one", br.id, nb.workDir)
+		} else {
+			log.Printf("brain %s: removed from configuration; stopping it", br.id)
+		}
 		go br.retire()
 	}
 	return nil
@@ -1333,7 +1469,8 @@ func settingsFor(cfg *Config, sp BrainSpec) *brainSettings {
 		model:           model,
 		effort:          effort,
 		disallowedTools: append([]string(nil), tools...),
-		promptPath:      sp.PromptPath,
+		promptFile:      sp.PromptFile,
+		outsidePrompt:   sp.OutsidePrompt,
 		dangerously:     cfg.DangerouslySkipPermissions,
 		inheritUser:     cfg.InheritClaudeUserConfig,
 		otpGuard:        cfg.OTPGuard,

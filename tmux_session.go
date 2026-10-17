@@ -15,7 +15,7 @@ import (
 // if tmux or Terminal.app is missing, the bridge runs exactly the same.
 type TmuxViewer struct {
 	Name      string // tmux session name, e.g. "claude-personal"
-	StreamLog string // path to the brain's claude-stream.log
+	StreamLog string // path to the brain's claude-stream.log, which must exist
 	CWD       string
 }
 
@@ -53,9 +53,6 @@ func (tv *TmuxViewer) start() error {
 	// Replace any stale session of the same name.
 	_ = exec.Command(tmux, "kill-session", "-t", tv.Name).Run()
 	time.Sleep(300 * time.Millisecond)
-
-	// tail fails on a file that does not exist yet.
-	_ = exec.Command("touch", tv.StreamLog).Run()
 
 	tailCmd := fmt.Sprintf(
 		`printf '\033[1m=== %s — Claude activity ===\033[0m\n\n'; `+

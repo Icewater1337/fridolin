@@ -2,7 +2,6 @@ package main
 
 import (
 	"encoding/json"
-	"path/filepath"
 	"sort"
 	"sync"
 	"time"
@@ -50,14 +49,15 @@ func (a *Activity) addLocked(brainID string, e historyEntry) {
 }
 
 // Seed loads the last messages of a brain's history once per brain.
-func (a *Activity) Seed(brainID, dir string) {
+func (a *Activity) Seed(br *Brain) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
+	brainID := br.ID()
 	if a.seeded[brainID] {
 		return
 	}
 	a.seeded[brainID] = true
-	lines := tailLines(filepath.Join(dir, "conversation-history.jsonl"), 128*1024)
+	lines := br.historyTail(128 * 1024)
 	if len(lines) > 50 {
 		lines = lines[len(lines)-50:]
 	}

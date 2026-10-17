@@ -138,7 +138,7 @@ func NewBridge(cfgs *ConfigStore, opts BridgeOptions) (*Bridge, error) {
 		OnHistory: b.activity.Add,
 	})
 	for _, br := range b.brainMgr.Brains() {
-		b.activity.Seed(br.ID(), br.Dir())
+		b.activity.Seed(br)
 	}
 
 	// Configuration edits (from the dashboard) apply to the brains at once.
@@ -147,7 +147,7 @@ func NewBridge(cfgs *ConfigStore, opts BridgeOptions) (*Bridge, error) {
 			log.Printf("applying configuration: %v", err)
 		}
 		for _, br := range b.brainMgr.Brains() {
-			b.activity.Seed(br.ID(), br.Dir())
+			b.activity.Seed(br)
 		}
 	})
 
