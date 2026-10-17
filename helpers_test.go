@@ -112,8 +112,12 @@ func isPlaudCommand(c string) bool {
 }
 
 // fakePlaud plays Plaud's CLI from fixture files in WCB_FAKE_PLAUD_DIR:
-// files.txt, file_<id>.txt, transcript_<id>.txt, summary_<id>.txt, and an
-// "expired" file that makes every call exit 2. Each call is logged with HOME.
+// files.txt, file_<id>.txt, transcript_<id>.txt, summary_<id>.txt, and
+// "account" (the id `me` reports). Like @plaud-ai/cli 0.3.15 it prints its
+// spinner line to stderr and exits 2 only when the login is rejected: an
+// "expired" file makes every call do that, "offline" makes every call exit 3
+// (Plaud unreachable), and fail_<command> makes that command exit 1. Each
+// call is logged with HOME.
 func fakePlaud(args []string) int {
 	dir := os.Getenv("WCB_FAKE_PLAUD_DIR")
 	if f, err := os.OpenFile(dir+"/calls.log", os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600); err == nil {
@@ -121,11 +125,22 @@ func fakePlaud(args []string) int {
 		f.Close()
 	}
 	token := os.Getenv("HOME") + "/.plaud/tokens.json"
-	if _, err := os.Stat(dir + "/expired"); err == nil && args[0] != "login" {
-		fmt.Fprintln(os.Stderr, "login expired")
-		return 2
-	}
+	exists := func(name string) bool { _, err := os.Stat(dir + "/" + name); return err == nil }
 	read := func(name string) string { b, _ := os.ReadFile(dir + "/" + name); return string(b) }
+	if args[0] != "login" && args[0] != "logout" {
+		fmt.Fprintf(os.Stderr, "- Fetching %s...\n", args[0])
+		switch {
+		case exists("expired"):
+			fmt.Fprintln(os.Stderr, "✗ [AUTH_FAILED] Token invalid or expired. Run `plaud login`.")
+			return 2
+		case exists("offline"):
+			fmt.Fprintln(os.Stderr, "✗ [UNREACHABLE] Cannot reach Plaud servers. Check your network.")
+			return 3
+		case exists("fail_" + args[0]):
+			fmt.Fprintf(os.Stderr, "✗ [FETCH_FAILED] Failed to fetch %s.\n", args[0])
+			return 1
+		}
+	}
 	switch args[0] {
 	case "login":
 		if _, err := os.Stat(dir + "/login_wait"); err == nil {
@@ -144,7 +159,11 @@ func fakePlaud(args []string) int {
 	case "logout":
 		_ = os.Remove(token)
 	case "me":
-		fmt.Print("- Fetching user info...\n\nUser Info:\n\n  id: 1\n  email: you@example.com\n  nickname: You\n")
+		id := strings.TrimSpace(read("account"))
+		if id == "" {
+			id = "u_1"
+		}
+		fmt.Printf("\nUser Info:\n\n  id: %s\n  nickname: You\n  email: you@example.com\n\n", id)
 	case "files":
 		fmt.Print(read("files.txt"))
 	case "file", "transcript", "summary":

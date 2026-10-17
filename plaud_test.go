@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -34,23 +35,25 @@ func (f *fakePlaudFixture) write(name, body string) {
 	}
 }
 
+// files sets what `plaud files` lists, in the CLI's table layout.
 func (f *fakePlaudFixture) files(ids ...string) {
 	var sb strings.Builder
-	sb.WriteString("- Fetching files...\n\nFiles on this page: x\n\n  ID   NAME   DATE   DURATION\n  ────\n")
+	fmt.Fprintf(&sb, "\nFiles on this page: %d\n\n  %-34s  %-36s  %-12s  DURATION\n  %s\n", len(ids), "ID", "NAME", "DATE", strings.Repeat("─", 98))
 	for _, id := range ids {
-		sb.WriteString("  " + id + "  Some name  2026-10-16  00:05:00\n")
+		fmt.Fprintf(&sb, "  %-34s  %-36s  %-12s  5m00s\n", id, "Some name", "2026-10-16")
 	}
+	sb.WriteString("\nPage 1\n")
 	f.write("files.txt", sb.String())
 }
 
 func (f *fakePlaudFixture) recording(id string, transcriptReady bool) {
-	state := "pending"
+	state := "unavailable"
 	if transcriptReady {
 		state = "available"
 	}
-	f.write("file_"+id+".txt", "- Fetching file...\n\nFile Details:\n\n  id:           "+id+"\n  name:         Team sync\n  created_at:   2026-10-16T18:00:00\n  start_at:   2026-10-16T18:00:00\n  duration:   00:05:00\n  transcript:   "+state+"\n  summary:      available\n")
-	f.write("transcript_"+id+".txt", "- Fetching transcript...\n\nTranscript: Team sync\n\n[00:00 - 00:04] Speaker 1: Let's ship on Friday.\n")
-	f.write("summary_"+id+".txt", "- Fetching summary...\n\nSummary: Decided to ship on Friday.\n")
+	f.write("file_"+id+".txt", "\nFile Details:\n\n  id:           "+id+"\n  name:         Team sync\n  created_at:   2026-10-16T18:00:00\n  start_at:     2026-10-16T18:00:00\n  duration:     5m00s\n  serial_number: -\n  audio:        unknown (run `plaud audio` to check)\n  transcript:   "+state+"\n  summary:      available\n\n")
+	f.write("transcript_"+id+".txt", "\nTranscript: Team sync\n\n[00:00 - 00:04] Speaker 1: Let's ship on Friday.\n\n")
+	f.write("summary_"+id+".txt", "\nSummary: Team sync\n\nDecided to ship on Friday.\n\n")
 }
 
 func (f *fakePlaudFixture) calls() string {
