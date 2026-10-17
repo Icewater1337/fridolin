@@ -538,7 +538,7 @@ func (sp *SandboxProfiler) Profile(brainID string) (string, error) {
 		if len(again) > 0 {
 			b.WriteString("\n;; Inside this brain's folder, the rules above apply again\n")
 			for _, r := range again {
-				b.WriteString(r.text)
+				b.add(r.kind, r.path, r.text)
 			}
 		}
 	}
@@ -745,6 +745,9 @@ type profileBuilder struct {
 	// creatable holds every spelling of ~/.claude, the folder a pin lets
 	// a brain create (with the folders in it) while missing; see pin.
 	creatable []string
+	// denies holds the text of every deny written since the last allow;
+	// see add.
+	denies map[string]bool
 }
 
 type pathAlias struct{ configured, real string }
@@ -991,10 +994,25 @@ func (b *profileBuilder) quote(value string) (string, bool) {
 	return q, true
 }
 
-// add writes the rule text, a rule of this kind for path.
+// add writes the rule text, a rule of this kind for path. A deny written
+// already since the last allow changes nothing, so it is written once:
+// the same paths come from several places (a program the bridge runs is
+// also one it runs by name), and the profile goes inline on every run.
+// After an allow it is written again, since the last matching rule wins.
+// Every rule is kept in rules either way.
 func (b *profileBuilder) add(kind ruleKind, path, text string) {
-	b.WriteString(text)
 	b.rules = append(b.rules, profileRule{text, path, kind})
+	switch {
+	case kind == ruleAllow:
+		clear(b.denies)
+	case b.denies[text]:
+		return
+	case b.denies == nil:
+		b.denies = map[string]bool{text: true}
+	default:
+		b.denies[text] = true
+	}
+	b.WriteString(text)
 }
 
 func (b *profileBuilder) fail(err error) {

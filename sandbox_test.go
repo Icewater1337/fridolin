@@ -777,6 +777,52 @@ func sbplRegex(p string) string {
 	return strings.ReplaceAll(regexp.QuoteMeta(p), `\`, `\\`)
 }
 
+// TestSandboxProfileWritesEachDenyOnce: the same path comes from several
+// places (the Claude CLI the bridge runs is also a name it runs from a PATH
+// folder, rclone's fallback is on PATH too), and the profile goes inline
+// with every run. A deny is written once until an allow follows. After an
+// allow it must be written again: the last matching rule wins, so leaving
+// it out there would let the allow open the path.
+func TestSandboxProfileWritesEachDenyOnce(t *testing.T) {
+	home := canonicalDir(t.TempDir())
+	t.Run("no deny twice between allows", func(t *testing.T) {
+		profile := mustProfile(t, outsideProgramsFixture(t, home), "a")
+		if !strings.Contains(profile, `(deny file-write* (literal "`+home+`/.local/bin/claude"))`) {
+			t.Fatal("the fixture's profile does not protect the Claude CLI")
+		}
+		seen := map[string]bool{}
+		for _, line := range strings.Split(profile, "\n") {
+			switch {
+			case strings.HasPrefix(line, "(allow"):
+				clear(seen)
+			case !strings.HasPrefix(line, "(deny"):
+			case seen[line]:
+				t.Errorf("written twice: %s", line)
+			default:
+				seen[line] = true
+			}
+		}
+	})
+	t.Run("a deny again after an allow", func(t *testing.T) {
+		t.Setenv("HOME", home)
+		team, b := filepath.Join(home, "team"), filepath.Join(home, "team", "b")
+		cfg := &Config{Sandbox: SandboxConfig{DenyPaths: []string{b}, AllowPaths: []string{team}}}
+		lines := strings.Split(mustProfile(t, NewSandboxProfiler(map[string]string{"a": filepath.Join(home, "a"), "b": b}, cfg), "a"), "\n")
+		allow := slices.Index(lines, `(allow file-read* (subpath "`+team+`"))`)
+		for _, rule := range []string{`(deny file-read* (subpath "` + b + `"))`, `(deny file-write* (subpath "` + b + `"))`} {
+			first, last := slices.Index(lines, rule), -1
+			for i, l := range lines {
+				if l == rule {
+					last = i
+				}
+			}
+			if allow < 0 || first < 0 || first > allow || last < allow {
+				t.Errorf("%s at lines %d and %d, the allow_paths allow at %d; want it before and after", rule, first, last, allow)
+			}
+		}
+	})
+}
+
 // TestNodePackage finds the npm package folder of an installed file.
 func TestNodePackage(t *testing.T) {
 	cases := []struct{ in, want string }{
