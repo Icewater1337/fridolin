@@ -504,3 +504,52 @@ func TestStreamLogIsNotFollowedOutOfTheFolder(t *testing.T) {
 		})
 	}
 }
+
+// TestIdentityMapIsNotFollowedOutOfTheFolder: the identity map names the
+// people in the chat-history preface. Swapped for a symlink to another
+// brain's map, it would put that brain's contacts in this brain's prompt;
+// the bridge shows raw numbers instead, and logs why.
+func TestIdentityMapIsNotFollowedOutOfTheFolder(t *testing.T) {
+	const table = "| WhatsApp Number | Person | Notes |\n| --- | --- | --- |\n| 15551234567 | Alex | |\n"
+	cases := []struct {
+		name   string
+		target func(home string) string // what the map points to; nil for a regular file
+	}{
+		{"regular file", nil},
+		{"another brain's map", func(home string) string { return filepath.Join(home, "b", identityMapFile) }},
+		{"symlink inside the folder", func(string) string { return "other.md" }},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			br, home := folderBrain(t)
+			mapPath := filepath.Join(home, "a", identityMapFile)
+			for _, p := range []string{filepath.Join(home, "b", identityMapFile), filepath.Join(filepath.Dir(mapPath), "other.md"), mapPath} {
+				if err := os.MkdirAll(filepath.Dir(p), 0o700); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.WriteFile(p, []byte(table), 0o600); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if tc.target != nil {
+				plant(t, mapPath, tc.target(home))
+			}
+			br.appendHistory("15551234567@s.whatsapp.net", "15551234567", "hi", "in")
+			logged := captureLog(t)
+			preface := br.composePreface("15551234567@s.whatsapp.net", false)
+			lines := logged()
+			if tc.target == nil {
+				if !strings.Contains(preface, "Alex (15551234567): hi") || len(lines) > 0 {
+					t.Errorf("preface = %q, log = %q; want the name from the map and no log", preface, lines)
+				}
+				return
+			}
+			if strings.Contains(preface, "Alex") || !strings.Contains(preface, "15551234567: hi") {
+				t.Errorf("preface = %q, want the raw number", preface)
+			}
+			if len(lines) != 1 || !strings.Contains(lines[0], "brain a: could not read identity map "+identityMapFile+": "+errSymlink.Error()) {
+				t.Errorf("log = %q, want one line refusing the symlink", lines)
+			}
+		})
+	}
+}

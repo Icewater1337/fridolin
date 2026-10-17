@@ -80,7 +80,8 @@ Edits you make in the dashboard update both copies.
 ## Files the bridge reads and writes
 
 The bridge itself, outside the sandbox, works on these files in a brain's
-folder: it reads the prompt file, appends every message to
+folder: it reads the prompt file and
+`memories/people/whatsapp-identity-map.md`, appends every message to
 `conversation-history.jsonl` and reads it back, and logs what each run did
 in `claude-stream.log`. A brain can change any file in its folder, and put
 a symlink to `~/.ssh` or to another brain's history in place of one of

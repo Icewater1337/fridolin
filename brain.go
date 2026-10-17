@@ -39,7 +39,11 @@ func normalizeJID(jid string) string {
 	return strings.TrimPrefix(jid, "+")
 }
 
-// parseIdentityMap reads a brain's contact map and returns normalized JID → name.
+// identityMapFile is the brain's contact map, in its folder.
+const identityMapFile = "memories/people/whatsapp-identity-map.md"
+
+// parseIdentityMap parses a brain's contact map and returns normalized
+// JID → name.
 //
 // The map is a markdown table at <work_dir>/memories/people/whatsapp-identity-map.md:
 //
@@ -48,13 +52,8 @@ func normalizeJID(jid string) string {
 //	| 15551234567     | Alex   | …     |
 //
 // It is entirely optional — without it, chat history shows raw JIDs.
-func parseIdentityMap(mapPath string) map[string]string {
+func parseIdentityMap(data []byte) map[string]string {
 	identities := make(map[string]string)
-
-	data, err := os.ReadFile(mapPath)
-	if err != nil {
-		return identities
-	}
 
 	for _, line := range strings.Split(string(data), "\n") {
 		line = strings.TrimSpace(line)
@@ -1004,7 +1003,13 @@ func (br *Brain) composePreface(chatJID string, isGroup bool) string {
 		return ""
 	}
 
-	identities := parseIdentityMap(filepath.Join(br.workDir, "memories", "people", "whatsapp-identity-map.md"))
+	// Through the folder: a map swapped for a symlink to another brain's
+	// would put that brain's contacts in this one's prompt.
+	idMap, err := br.readFile(identityMapFile)
+	if err != nil && !errors.Is(err, fs.ErrNotExist) {
+		log.Printf("brain %s: could not read identity map %s: %v", br.id, identityMapFile, err)
+	}
+	identities := parseIdentityMap(idMap)
 
 	var sb strings.Builder
 	for _, entry := range entries {

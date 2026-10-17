@@ -544,16 +544,13 @@ func TestRecentOutboundLooksLikeOTPRequest(t *testing.T) {
 // ── identity map ──────────────────────────────────────────────────────────
 
 func TestParseIdentityMap(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "map.md")
-	os.WriteFile(path, []byte(`# People
+	ids := parseIdentityMap([]byte(`# People
 
 | WhatsApp Number | Person | Notes |
 | --------------- | ------ | ----- |
 | 15551234567     | Alex   | work  |
 | +15559876543    | Sam    |       |
-`), 0o600)
-
-	ids := parseIdentityMap(path)
+`))
 	if ids["15551234567"] != "Alex" {
 		t.Errorf("got %q for Alex", ids["15551234567"])
 	}
@@ -564,7 +561,7 @@ func TestParseIdentityMap(t *testing.T) {
 	if _, ok := ids["WhatsApp Number"]; ok {
 		t.Error("header row was parsed as an entry")
 	}
-	if len(parseIdentityMap("/nonexistent")) != 0 {
+	if len(parseIdentityMap(nil)) != 0 {
 		t.Error("a missing map should yield an empty map, not an error")
 	}
 }
