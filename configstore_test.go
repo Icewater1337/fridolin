@@ -3,6 +3,7 @@ package main
 import (
 	"encoding/json"
 	"errors"
+	"log"
 	"os"
 	"path/filepath"
 	"strings"
@@ -334,5 +335,62 @@ func TestBadDotEnvIsAnError(t *testing.T) {
 				}
 			})
 		}
+	}
+}
+
+func TestDotEnvLogsTheKeysItIgnores(t *testing.T) {
+	// Only the override variables are read from the .env and nothing in it is
+	// exported, so a key meant for the Claude CLI or a brain's tool reaches
+	// nothing. The log names such keys, so that does not go unnoticed, but
+	// never their values.
+	const secret = "sk-not-a-real-secret"
+	tests := []struct {
+		name   string
+		dotenv string // "" means no .env
+		want   string // what the log says about the .env; "" means nothing
+	}{
+		{"no .env", "", ""},
+		{"only override variables", "MODEL=from-dotenv\nLOG_LEVEL=debug\n", ""},
+		{"a key for a brain's tool", "MODEL=from-dotenv\nGROQ_API_KEY=" + secret + "\n", "ignoring GROQ_API_KEY ("},
+		{"several keys, sorted", "PATH=/opt/bin\nANTHROPIC_API_KEY=" + secret + "\nCONFIG_FILE=/elsewhere.json\n", "ignoring ANTHROPIC_API_KEY, CONFIG_FILE, PATH ("},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Setenv("HOME", t.TempDir())
+			path := writeConfig(t, `{}`)
+			dotenv := filepath.Join(filepath.Dir(path), ".env")
+			if tc.dotenv != "" {
+				if err := os.WriteFile(dotenv, []byte(tc.dotenv), 0o600); err != nil {
+					t.Fatal(err)
+				}
+			}
+			var logs strings.Builder
+			defer log.SetOutput(log.Writer())
+			log.SetOutput(&logs)
+			cs, err := OpenConfigStore(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			// The .env is read once, so an edit does not log it again.
+			if _, err := cs.Update("", func(c *Config) error { c.LogLevel = "debug"; return nil }); err != nil {
+				t.Fatal(err)
+			}
+			got := logs.String()
+			if strings.Contains(got, secret) {
+				t.Errorf("the log quotes a .env value: %q", got)
+			}
+			if tc.want == "" {
+				if strings.Contains(got, "ignoring") {
+					t.Errorf("nothing is ignored, but the log says %q", got)
+				}
+				return
+			}
+			if n := strings.Count(got, tc.want); n != 1 {
+				t.Errorf("log %q has %q %d times, want once", got, tc.want, n)
+			}
+			if !strings.Contains(got, ".env "+dotenv+": ") {
+				t.Errorf("log %q does not name %s", got, dotenv)
+			}
+		})
 	}
 }

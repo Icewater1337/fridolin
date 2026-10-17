@@ -703,10 +703,14 @@ keeps brains from reading the `.env` file, but every brain inherits the
 bridge's environment, including what `.env` sets, so do not put anything
 there that brains must not see.
 
-Values in the `.env` only configure the bridge itself. They are not exported,
-so the Claude CLI, brains, and the scripts and tools they run do not see
-them. Whatever those need belongs in the bridge's process environment
-instead, and from there it reaches every brain:
+Only the variables in the table below are read from the `.env`, all but
+`CONFIG_FILE`, which picks the config and with it the `.env`. Any other key
+is ignored, and the bridge names those keys (never their values) in its log
+when it loads the config. Nothing in the `.env` is exported either: the
+Claude CLI, brains, and the scripts and tools they run do not see it, and a
+`PATH` or `HOME` set there changes nothing, not even for the bridge. Whatever
+those programs need belongs in the bridge's process environment instead,
+and from there it reaches every brain:
 
 - The Claude CLI's own login and network settings, if you set them rather
   than log in once with `claude`: `ANTHROPIC_API_KEY`,

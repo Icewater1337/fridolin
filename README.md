@@ -478,7 +478,8 @@ Access*), with country code and no `+`. An empty list allows nobody unless
 authenticate. Under launchd, check that `HOME` is set correctly in the plist.
 If the CLI logs in through `ANTHROPIC_API_KEY` or `CLAUDE_CODE_OAUTH_TOKEN`,
 that variable must be in the bridge's process environment: the bridge's
-`.env` does not reach the CLI ([details](docs/CONFIGURATION.md#environment-variables)).
+`.env` does not reach the CLI, and the bridge's log names every key there it
+ignores ([details](docs/CONFIGURATION.md#environment-variables)).
 
 **Logged out of WhatsApp** — remove the device under *Linked Devices* on the
 phone, stop the bridge, move `bridge.db` out of your data directory (keep it

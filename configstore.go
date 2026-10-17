@@ -217,6 +217,28 @@ func etagOf(data []byte) string {
 	return hex.EncodeToString(sum[:8])
 }
 
+// warnIgnoredDotEnvKeys logs the keys in the .env that are not override
+// variables. The bridge reads nothing else from it and exports nothing, so
+// a key meant for the Claude CLI or a brain's tool (ANTHROPIC_API_KEY,
+// GROQ_API_KEY) reaches neither: without this line the first sign would be
+// brains failing with "Not logged in". Names only, the values may be secrets.
+func warnIgnoredDotEnvKeys(path string, vars map[string]string) {
+	known := map[string]bool{}
+	for _, o := range envOverrides {
+		known[o.env] = true
+	}
+	var ignored []string
+	for k := range vars {
+		if !known[k] {
+			ignored = append(ignored, k)
+		}
+	}
+	if len(ignored) > 0 {
+		sort.Strings(ignored)
+		log.Printf(".env %s: ignoring %s (not config overrides; brains and the Claude CLI do not see them either, see docs/CONFIGURATION.md#environment-variables)", path, strings.Join(ignored, ", "))
+	}
+}
+
 // warnUnknownKeys logs top-level keys config.json has but the bridge does not
 // know — usually a typo, or a setting from another version. They are dropped
 // the next time the dashboard saves the file.

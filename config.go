@@ -337,6 +337,7 @@ type envLookup func(key string) string
 // to the working directory: a bridge started from a checkout, or the tests
 // run in one, must not pick up whatever file happens to lie there. A missing
 // .env means no overrides; one that cannot be read or parsed is an error.
+// Every other key in it is logged by name, see warnIgnoredDotEnvKeys.
 func loadDotEnv(cfgPath string) (envLookup, error) {
 	path := filepath.Join(filepath.Dir(cfgPath), ".env")
 	if abs, err := filepath.Abs(path); err == nil {
@@ -355,6 +356,7 @@ func loadDotEnv(cfgPath string) (envLookup, error) {
 		// mistake, which may be a secret, so it is left out.
 		return nil, fmt.Errorf("%s is not a valid .env file (one KEY=value per line)", path)
 	}
+	warnIgnoredDotEnvKeys(path, vars)
 	return func(key string) string {
 		if v, ok := vars[key]; ok {
 			return v
