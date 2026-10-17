@@ -41,25 +41,34 @@ func (f *fakePlaudFixture) write(name, body string) {
 	}
 }
 
-// files sets what `plaud files` lists, in the CLI's table layout.
+// files sets what `plaud files` lists, newest first.
 func (f *fakePlaudFixture) files(ids ...string) {
-	var sb strings.Builder
-	fmt.Fprintf(&sb, "\nFiles on this page: %d\n\n  %-34s  %-36s  %-12s  DURATION\n  %s\n", len(ids), "ID", "NAME", "DATE", strings.Repeat("─", 98))
-	for _, id := range ids {
-		fmt.Fprintf(&sb, "  %-34s  %-36s  %-12s  5m00s\n", id, "Some name", "2026-10-16")
-	}
-	sb.WriteString("\nPage 1\n")
-	f.write("files.txt", sb.String())
+	data, _ := json.Marshal(ids)
+	f.write("list.json", string(data))
 }
 
+// recording puts a recording named "Team sync" in Plaud, with Plaud's
+// summary, and with its transcript once transcriptReady.
 func (f *fakePlaudFixture) recording(id string, transcriptReady bool) {
-	state := "unavailable"
+	f.put(f.teamSync(id, transcriptReady))
+}
+
+// teamSync is the recording that recording puts in Plaud, to change before
+// putting it there.
+func (f *fakePlaudFixture) teamSync(id string, transcriptReady bool) fakePlaudRecording {
+	start := "2026-10-16T18:00:00"
+	r := fakePlaudRecording{ID: id, Name: "Team sync", CreatedAt: start, StartAt: &start, Duration: 300000,
+		Notes: []fakePlaudBlock{{DataType: "auto_sum_note", Content: "Decided to ship on Friday.", TabName: "Summary"}}}
 	if transcriptReady {
-		state = "available"
+		r.Sources = []fakePlaudBlock{{DataType: "transaction", Content: fakePlaudTranscript(fakePlaudSegment{0, 4000, "Speaker 1", "Let's ship on Friday."})}}
 	}
-	f.write("file_"+id+".txt", "\nFile Details:\n\n  id:           "+id+"\n  name:         Team sync\n  created_at:   2026-10-16T18:00:00\n  start_at:     2026-10-16T18:00:00\n  duration:     5m00s\n  serial_number: -\n  audio:        unknown (run `plaud audio` to check)\n  transcript:   "+state+"\n  summary:      available\n\n")
-	f.write("transcript_"+id+".txt", "\nTranscript: Team sync\n\n[00:00 - 00:04] Speaker 1: Let's ship on Friday.\n\n")
-	f.write("summary_"+id+".txt", "\nSummary: Team sync\n\nDecided to ship on Friday.\n\n")
+	return r
+}
+
+// put puts r in Plaud, or replaces it there.
+func (f *fakePlaudFixture) put(r fakePlaudRecording) {
+	data, _ := json.Marshal(r)
+	f.write("rec_"+r.ID+".json", string(data))
 }
 
 func (f *fakePlaudFixture) calls() string {
@@ -505,8 +514,12 @@ func TestPlaudFirstSyncThenForwardsNewRecordings(t *testing.T) {
 	if !strings.Contains(fp.calls(), "HOME="+filepath.Join(tb.cfgs.Get().DataDir, "plaud", "home")) {
 		t.Errorf("CLI not run with the private home:\n%s", fp.calls())
 	}
+	token, err := os.ReadFile(tb.plaud.tokenPath())
+	if err != nil || !strings.Contains(string(token), "test-access") {
+		t.Fatalf("the sign-in left no login: %q, %v", token, err)
+	}
 	body := tb.do("GET", "/api/plaud/status", nil).Body.String()
-	if strings.Contains(body, "FAKE-") || !strings.Contains(body, `"account":"you@example.com"`) {
+	if strings.Contains(body, "test-access") || !strings.Contains(body, `"account":"you@example.com"`) {
 		t.Errorf("status = %s", body)
 	}
 }
@@ -623,6 +636,7 @@ func TestPlaudFailedFirstSyncForwardsNothingOld(t *testing.T) {
 		auth          bool
 	}{
 		{"login expired", "expired", true},
+		{"login refused", "revoked", true},
 		{"Plaud unreachable", "offline", false},
 		{"listing fails", "fail_files", false},
 	} {
@@ -641,7 +655,9 @@ func TestPlaudFailedFirstSyncForwardsNothingOld(t *testing.T) {
 				t.Fatal("a failed first sync left a state behind")
 			}
 
+			// Plaud's CLI deletes a login that expired: you sign in again.
 			_ = os.Remove(filepath.Join(fp.dir, c.fixture))
+			plaudSignIn(t, tb)
 			if err := tb.plaud.Poll(context.Background()); err != nil {
 				t.Fatal(err)
 			}
@@ -839,8 +855,9 @@ func TestPlaudRetryRewritesTheSameTranscript(t *testing.T) {
 	}
 	waitFor(t, 10*time.Second, "brain reply", func() bool { return len(tb.dev.Outbox()) == 1 })
 
-	details, _ := os.ReadFile(filepath.Join(fp.dir, "file_"+plaudNew+".txt"))
-	fp.write("file_"+plaudNew+".txt", strings.Replace(string(details), "Team sync", "Weekly sync", 1))
+	renamed := fp.teamSync(plaudNew, true)
+	renamed.Name = "Weekly sync"
+	fp.put(renamed)
 	if err := tb.plaud.saveState(&plaudState{Seen: []string{plaudOld1}, Pending: map[string]float64{plaudNew: float64(time.Now().Unix())}}); err != nil {
 		t.Fatal(err)
 	}
@@ -1065,7 +1082,7 @@ func TestPlaudConnectShowsTheSignInLinkWhileWaiting(t *testing.T) {
 		t.Fatalf("timed out waiting for %s", what)
 	}
 	waitFor("the sign-in link", func(s status) bool {
-		return s.Connect.State == "running" && s.Connect.AuthURL == "https://example.com/oauth?client=x"
+		return s.Connect.State == "running" && s.Connect.AuthURL == "https://web.plaud.ai/platform/oauth?client_id=x&state=y"
 	})
 	fp.write("login_go", "")
 	waitFor("the sign-in to finish", func(s status) bool { return s.Connect.State == "done" && s.Connected })
@@ -1107,11 +1124,13 @@ func TestPlaudCLIGetsTheAllowlistedEnvironment(t *testing.T) {
 		desktop bool
 	}{
 		{"a sync", func(t *testing.T) {
+			plaudSignIn(t, tb) // like the real CLI, the fake answers only with a login
 			if _, err := tb.plaud.runCLI(context.Background(), "me"); err != nil {
 				t.Fatal(err)
 			}
 		}, false},
 		{"the sign-in", func(t *testing.T) {
+			_ = os.Remove(tb.plaud.tokenPath()) // signed out again, so the sign-in runs
 			if w := tb.do("POST", "/api/plaud/connect", nil); w.Code != 202 {
 				t.Fatal(w.Body.String())
 			}
