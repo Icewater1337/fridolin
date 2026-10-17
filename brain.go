@@ -1432,9 +1432,6 @@ func NewBrainManager(cfg *Config) (*BrainManager, error) {
 // SetHooks wires the brains to the bridge. Call before the first message.
 func (bm *BrainManager) SetHooks(h BrainHooks) { *bm.hooks = h }
 
-// SetIntermediateSendFn wires the mid-run notification callback.
-func (bm *BrainManager) SetIntermediateSendFn(fn func(jid, text string)) { bm.hooks.Intermediate = fn }
-
 // Apply makes the running brains match cfg.
 func (bm *BrainManager) Apply(cfg *Config) error {
 	specs, issues := ResolveBrains(cfg)

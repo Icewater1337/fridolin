@@ -251,7 +251,6 @@ func TestSendRefusesStatusBroadcastAndChannels(t *testing.T) {
 			_, err := tw.SendPoll(ctx, jid, "Lunch?", []string{"Yes", "No"}, 1)
 			return err
 		},
-		"SendReaction": func(jid string) error { return tw.SendReaction(ctx, jid, "3EB0TEST", "👍") },
 	}
 	for _, jid := range []string{"status@broadcast", "status:3@broadcast", "1700000000@broadcast", "broadcast", "120363000000000000@newsletter"} {
 		for name, send := range sends {

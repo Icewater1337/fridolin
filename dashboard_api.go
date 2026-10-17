@@ -35,7 +35,6 @@ func (b *Bridge) apiMux() http.Handler {
 	mux.HandleFunc("POST /api/whatsapp/pair", b.apiPair)
 	mux.HandleFunc("GET /api/whatsapp/groups", b.apiGroups)
 	mux.HandleFunc("GET /api/activity", b.apiActivity)
-	mux.HandleFunc("GET /api/runs", b.apiRuns)
 	mux.HandleFunc("POST /api/runs/{brain}/stop", b.apiStopRun)
 	mux.HandleFunc("GET /api/logs", b.apiLogs)
 
@@ -277,14 +276,6 @@ func (b *Bridge) apiActivity(w http.ResponseWriter, r *http.Request) {
 		limit = 100
 	}
 	writeJSON(w, http.StatusOK, b.activity.Recent(limit, r.URL.Query().Get("brain")))
-}
-
-func (b *Bridge) apiRuns(w http.ResponseWriter, r *http.Request) {
-	out := []BrainRuntime{}
-	for _, br := range b.brainMgr.Brains() {
-		out = append(out, br.Snapshot())
-	}
-	writeJSON(w, http.StatusOK, out)
 }
 
 func (b *Bridge) apiStopRun(w http.ResponseWriter, r *http.Request) {

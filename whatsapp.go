@@ -19,7 +19,6 @@ import (
 
 	"github.com/mdp/qrterminal/v3"
 	"go.mau.fi/whatsmeow"
-	"go.mau.fi/whatsmeow/proto/waCommon"
 	"go.mau.fi/whatsmeow/proto/waE2E"
 	"go.mau.fi/whatsmeow/types"
 	"go.mau.fi/whatsmeow/types/events"
@@ -282,25 +281,6 @@ func (wa *WhatsAppClient) SendPoll(ctx context.Context, jid string, question str
 		return "", err
 	}
 	return string(resp.ID), nil
-}
-
-// SendReaction sends an emoji reaction to a message.
-func (wa *WhatsAppClient) SendReaction(ctx context.Context, jid string, msgID types.MessageID, emoji string) error {
-	recipient, err := parseRecipient(jid)
-	if err != nil {
-		return err
-	}
-	_, err = wa.client.SendMessage(ctx, recipient, &waE2E.Message{
-		ReactionMessage: &waE2E.ReactionMessage{
-			Key: &waCommon.MessageKey{
-				RemoteJID: proto.String(jid),
-				ID:        proto.String(string(msgID)),
-			},
-			Text:              proto.String(emoji),
-			SenderTimestampMS: proto.Int64(time.Now().UnixMilli()),
-		},
-	})
-	return err
 }
 
 // JoinedGroups lists the groups the bridge account is in.
