@@ -1197,6 +1197,47 @@ func TestParseIdentityMap(t *testing.T) {
 	}
 }
 
+// FuzzParseIdentityMap: the brain writes its contact map itself, so it can
+// hold anything. Every entry that comes out is a normalised number and a
+// name, each a trimmed cell; and a row with a number and a name in its first
+// two cells is read back, whatever its notes say.
+func FuzzParseIdentityMap(f *testing.F) {
+	table := "# People\n\n| WhatsApp Number | Person | Notes |\n| --------------- | ------ | ----- |\n| 15551234567     | Alex   | work  |\n"
+	f.Add([]byte(table), "+15559876543", "Sam", "")
+	f.Add([]byte(table), "15551234567", "Alex Again", "replaces the first row")
+	f.Add([]byte(""), "15551234567@s.whatsapp.net", "Sam", "met in 2024")
+	f.Add([]byte("|a|b|\n|:--|--:|\r\n| x |"), "WhatsApp Number", "Person", "Notes")
+	f.Add([]byte("||\n|\n| | |\n"), " 15551234567 ", " Sam ", " | ")
+	f.Fuzz(func(t *testing.T, table []byte, number, name, notes string) {
+		check := func(ids map[string]string) {
+			for k, v := range ids {
+				if k == "" || strings.ContainsAny(k, "@|\n") || normalizeJID(k) != k || k != strings.TrimSpace(k) {
+					t.Errorf("key %q is not a normalised number", k)
+				}
+				if v == "" || strings.ContainsAny(v, "|\n") || v != strings.TrimSpace(v) {
+					t.Errorf("name %q for %q is not a trimmed cell", v, k)
+				}
+			}
+		}
+		check(parseIdentityMap(table))
+
+		// A row the brain appends, its cells made into cells.
+		cell := func(s string) string {
+			return strings.TrimSpace(strings.NewReplacer("|", " ", "\n", " ").Replace(s))
+		}
+		number, name, notes = cell(number), cell(name), cell(notes)
+		ids := parseIdentityMap([]byte(string(table) + "\n| " + number + " | " + name + " | " + notes + " |\n"))
+		check(ids)
+		// Nothing to read back, or the header and the line under it.
+		if number == "" || normalizeJID(number) == "" || name == "" || number == "WhatsApp Number" || strings.Trim(number+name+notes, "-: \t") == "" {
+			return
+		}
+		if got := ids[normalizeJID(number)]; got != name {
+			t.Errorf("row | %s | %s | %s | read back as %q, want %q", number, name, notes, got, name)
+		}
+	})
+}
+
 func TestNormalizeJID(t *testing.T) {
 	cases := map[string]string{
 		"15551234567@s.whatsapp.net": "15551234567",
