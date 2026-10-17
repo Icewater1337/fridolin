@@ -532,6 +532,11 @@ Default `~/.fridolin`. `db_path` and `media_dir` override
 individually. Brains cannot read it, except the `media/` inbox and their own
 calendar credentials; a `db_path` elsewhere is denied to them too.
 
+The lock that keeps a second bridge off the same WhatsApp session is
+`bridge.lock` in `data_dir`. It does not cover a `db_path` outside
+`data_dir`, so never point `db_path` at another bridge's `bridge.db`: a
+second bridge with its own `data_dir` would open it anyway.
+
 ### `http_listen` *(restart)*
 
 Address of the dashboard and the local APIs. Default `"127.0.0.1:8765"`;
