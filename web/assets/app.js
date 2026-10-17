@@ -16,6 +16,7 @@ import chats from './page-chats.js';
 import settings from './page-settings.js';
 import backup from './page-backup.js';
 import integrations from './page-integrations.js';
+import site from './page-site.js';
 import logs from './page-logs.js';
 import dev from './page-dev.js';
 
@@ -122,6 +123,7 @@ const NAV = [
   { id: 'settings', label: 'Settings', icon: 'settings' },
   { id: 'backup', label: 'Backup', icon: 'backup' },
   { id: 'integrations', label: 'Integrations', icon: 'inbox' },
+  { id: 'site', label: 'Site', icon: 'external' },
   { id: 'logs', label: 'Logs', icon: 'logs' },
   { id: 'dev', label: 'Dev', icon: 'dev', devOnly: true },
 ];
@@ -142,6 +144,7 @@ function resolvePage(name, params) {
     case 'settings': return settings;
     case 'backup': return backup;
     case 'integrations': return integrations;
+    case 'site': return site;
     case 'logs': return logs;
     case 'dev': return dev;
     default: return null;
