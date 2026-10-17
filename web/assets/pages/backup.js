@@ -44,15 +44,16 @@ export default {
 
     ctx.dirty = () => scheduleDirty;
 
-    const poller = ctx.poll(async () => {
-      const s = await get('/api/backup/status');
+    const poller = ctx.poll(async (signal) => {
+      const s = await get('/api/backup/status', { signal });
       st = s;
       const m = !s.rclone || !s.rclone.found ? 'norclone' : s.connected ? 'connected' : 'connect';
       if (m !== mode) { mode = m; Object.keys(memo).forEach((k) => delete memo[k]); layout(); }
       paint();
     }, () => (st && (st.job || (st.connect && st.connect.state === 'running')) ? 2000 : 8000));
 
-    const refresh = () => { poller.kick(); };
+    // Resolves once the page shows what the server has now.
+    const refresh = () => poller.kick();
 
     function layout() {
       for (const k of Object.keys(regions)) delete regions[k];
@@ -101,7 +102,7 @@ export default {
           h('h2', 'Install rclone first'),
           h('p', 'Backups use rclone, a free open-source tool that copies files to Google Drive. Install it on the computer running the bridge:'),
           isCmd ? h('div.code-line', h('code.mono', hint), copyButton(hint)) : h('p', mono(hint)),
-          h('div.actions', btn('Check again', { kind: 'primary', icon: 'refresh', onClick: async () => { memo.rc = ''; await poller.kick(); } })))));
+          h('div.actions', btn('Check again', { kind: 'primary', icon: 'refresh', onClick: () => refresh() })))));
     }
 
     // ── connecting ──
@@ -132,8 +133,7 @@ export default {
             kind: 'primary', icon: 'external',
             onClick: async () => {
               await post('/api/backup/connect');
-              memo.connect = '';
-              refresh();
+              await refresh();
             },
           })))));
     }
@@ -161,7 +161,7 @@ export default {
           h('div.actions',
             btn('Back up now', {
               kind: 'primary', icon: 'backup', disabled: !!st.job,
-              onClick: async () => { await post('/api/backup/run', {}); toast('Backup started', 'ok'); memo.status = ''; refresh(); },
+              onClick: async () => { await post('/api/backup/run', {}); toast('Backup started', 'ok'); await refresh(); },
             }),
             btn('Disconnect…', {
               kind: 'ghost', icon: 'x',
@@ -174,7 +174,7 @@ export default {
                 if (!ok) return;
                 await post('/api/backup/disconnect');
                 toast('Google Drive disconnected', 'ok');
-                refresh();
+                await refresh();
               },
             })))));
     }
@@ -196,7 +196,7 @@ export default {
           h('div.card-title', spinner(), h('h2', restoring ? label(j.current) : 'Backing up…')),
           btn('Cancel', {
             small: true, icon: 'stop',
-            onClick: async () => { await post('/api/backup/cancel'); toast('Cancelling…', 'info'); refresh(); },
+            onClick: async () => { await post('/api/backup/cancel'); toast('Cancelling…', 'info'); await refresh(); },
           })),
         restoring ? h('p.muted', 'Copying files from Google Drive. Large folders can take a while.') : [
           bar,
@@ -248,10 +248,9 @@ export default {
             include_bridge_config: incSw.input.checked,
           });
           scheduleDirty = false;
-          memo.schedule = '';
-          memo.status = '';
+          memo.schedule = ''; // rebuilds the form even if nothing changed, hiding its buttons
           toast('Backup schedule saved', 'ok');
-          refresh();
+          await refresh();
         });
       });
       mount(regions.schedule, form);
@@ -274,8 +273,7 @@ export default {
             try {
               await put('/api/backup/settings', { brain: b.id, brain_enabled: v });
               toast(`${b.name || b.id}: backups ${v ? 'on' : 'off'}`, 'ok');
-              memo.brains = '';
-              refresh();
+              await refresh();
             } catch (e) {
               input.checked = !v;
               toast(e.message);
@@ -292,7 +290,7 @@ export default {
             btn(`Excludes${b.exclude && b.exclude.length ? ` (${b.exclude.length})` : ''}`, { small: true, kind: 'ghost', icon: 'edit', onClick: () => editExcludes(b) }),
             btn('Back up', {
               small: true, icon: 'backup', disabled: !!st.job, title: 'Back up only this brain now',
-              onClick: async () => { await post('/api/backup/run', { brains: [b.id], include_bridge: false }); toast(`Backing up ${b.name || b.id}`, 'ok'); refresh(); },
+              onClick: async () => { await post('/api/backup/run', { brains: [b.id], include_bridge: false }); toast(`Backing up ${b.name || b.id}`, 'ok'); await refresh(); },
             })));
       });
       rows.push(h('tr.muted-row',
@@ -338,8 +336,7 @@ export default {
       if (!ok) return;
       await post('/api/backup/run', { brains: [b.id], include_bridge: false, force: true });
       toast(`Backing up ${name}, deletions included`, 'ok');
-      memo.brains = '';
-      refresh();
+      await refresh();
     }
 
     async function editExcludes(b) {
@@ -355,7 +352,7 @@ export default {
           { label: 'Save', kind: 'primary', onClick: async () => { await put('/api/backup/settings', { brain: b.id, brain_exclude: linesOf(ta) }); return true; } },
         ],
       });
-      if (saved) { toast('Saved', 'ok'); memo.brains = ''; refresh(); }
+      if (saved) { toast('Saved', 'ok'); await refresh(); }
     }
 
     // ── restore ──
@@ -446,7 +443,7 @@ export default {
           if (!ok) return;
           const r = await post('/api/backup/restore', { brain: id, version, target });
           toast(`Restoring into ${r && r.target ? r.target : target}`, 'ok');
-          refresh();
+          await refresh();
         });
       });
       mount(regions.restore, form);

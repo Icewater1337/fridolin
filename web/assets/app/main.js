@@ -1,6 +1,6 @@
 // Entry point: token handling, the app shell (sidebar / top bar), the hash
-// router, page-scoped polling that pauses in background tabs, and the
-// "Connect to your bridge" screen shown on 401.
+// router, page contexts, and the "Connect to your bridge" screen shown on
+// 401.
 
 import { get, setToken, getToken, on as onApi } from './api.js';
 import { store, setStatus, onStatus, onRestartChange, loadGroups, setIgnoredCount, onIgnoredCount } from './state.js';
@@ -8,12 +8,13 @@ import { h, mount } from '../lib/dom.js';
 import { plural } from '../lib/format.js';
 import { waKind, waLabel } from '../lib/whatsapp.js';
 import { icon } from '../components/icons.js';
-import { toast, toastError } from '../components/toast.js';
+import { toast } from '../components/toast.js';
 import { btn, copyButton } from '../components/buttons.js';
 import { confirmDialog, closeAllDialogs } from '../components/dialog.js';
 import { textInput } from '../components/fields.js';
 import { setChatNames } from '../components/chat.js';
 import { restartBridge } from './restart.js';
+import { makePoll, pausePollsWhen, resumePolls } from './poll.js';
 
 import { ROUTES } from './routes.js';
 import { BRAND, matchRoute, routeHref, activeNav, docTitle } from './router.js';
@@ -64,52 +65,8 @@ function themeButton() {
 // ── polling ──────────────────────────────────────────────────────────────
 
 let blocked = false; // true while the connect screen is shown
-const allPolls = new Set();
-
-/**
- * Runs fn now and then every interval ms (a number or a function returning
- * one). Pauses while the tab is hidden or the connect screen is up; runs
- * never overlap. Errors other than 401/offline become (deduplicated) toasts.
- */
-function makePoll(fn, interval) {
-  const p = { timer: null, running: false, stopped: false, waiting: false, lastErr: '' };
-  const next = () => (typeof interval === 'function' ? interval() : interval);
-  const run = async () => {
-    clearTimeout(p.timer);
-    p.timer = null;
-    if (p.stopped) return;
-    if (document.hidden || blocked) { p.waiting = true; return; }
-    p.waiting = false;
-    p.running = true;
-    try {
-      await fn();
-      p.lastErr = '';
-    } catch (e) {
-      if (e && e.status !== 401 && e.status !== 0 && e.name !== 'AbortError') {
-        const m = e.message || String(e);
-        if (m !== p.lastErr) toastError(e);
-        p.lastErr = m;
-      }
-      if (e && e.status === undefined && e.name !== 'AbortError') console.error(e);
-    } finally {
-      p.running = false;
-    }
-    if (!p.stopped) p.timer = setTimeout(run, next());
-  };
-  p.kick = () => { if (!p.running && !p.stopped) run(); };
-  p.stop = () => { p.stopped = true; clearTimeout(p.timer); allPolls.delete(p); };
-  allPolls.add(p);
-  run();
-  return p;
-}
-
-document.addEventListener('visibilitychange', () => {
-  if (!document.hidden) allPolls.forEach((p) => { if (p.waiting) p.kick(); });
-});
-
-function resumeAll() {
-  allPolls.forEach((p) => { if (p.waiting || !p.running) p.kick(); });
-}
+pausePollsWhen(() => document.hidden || blocked);
+document.addEventListener('visibilitychange', () => { if (!document.hidden) resumePolls(); });
 
 // ── routing ──────────────────────────────────────────────────────────────
 
@@ -124,8 +81,9 @@ function makeCtx(params) {
     params,
     dead: false,
     dirty: null, // () => boolean; when true, leaving asks for confirmation
+    /** Polls fn(signal) every interval ms until the page goes; pass signal to its requests. */
     poll(fn, interval = 3000) {
-      const p = makePoll(async () => { if (!ctx.dead) await fn(); }, interval);
+      const p = makePoll(fn, interval);
       polls.push(p);
       return p;
     },
@@ -345,7 +303,7 @@ function unblock() {
   buildShell();
   if (!location.hash || location.hash === '#' || location.hash.startsWith('#token=')) history.replaceState(null, '', '#/overview');
   renderRoute();
-  resumeAll();
+  resumePolls();
   loadGroups(true);
 }
 
@@ -363,16 +321,16 @@ onStatus((s) => { if (shell) shell.paintStatus(s); });
 onIgnoredCount((n) => { if (shell) shell.setChatsBadge(n); });
 
 let lastWaMode = '';
-makePoll(async () => {
-  const s = await get('/api/status');
+makePoll(async (signal) => {
+  const s = await get('/api/status', { signal });
   setStatus(s);
   const mode = s.whatsapp && s.whatsapp.mode;
   if (mode === 'connected' && lastWaMode !== 'connected') loadGroups(true);
   lastWaMode = mode;
 }, 3000);
 
-makePoll(async () => {
-  const list = await get('/api/chats/ignored');
+makePoll(async (signal) => {
+  const list = await get('/api/chats/ignored', { signal });
   setIgnoredCount(Array.isArray(list) ? list.length : 0);
 }, 10000);
 

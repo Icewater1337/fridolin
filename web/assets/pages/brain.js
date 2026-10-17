@@ -55,8 +55,8 @@ export default {
 
     get('/api/config').then((c) => { cfg = c; if (brain && !formDirty) renderForm(true); }).catch(() => {});
 
-    const poller = ctx.poll(async () => {
-      const list = await get('/api/brains');
+    const poller = ctx.poll(async (signal) => {
+      const list = await get('/api/brains', { signal });
       brains = list;
       const b = list.find((x) => x.id === id) || null;
       if (!changed(memo, 'brain', b)) return;
@@ -75,8 +75,8 @@ export default {
       renderDanger();
     }, 3000);
 
-    ctx.poll(async () => {
-      const items = await get(`/api/activity${qs({ limit: 30, brain: id })}`);
+    ctx.poll(async (signal) => {
+      const items = await get(`/api/activity${qs({ limit: 30, brain: id })}`, { signal });
       if (!changed(memo, 'act', items)) return;
       mount(actBox, items.length ? items.map((e) => activityItem(e, { compact: true, showBrain: false })) : empty('No messages yet', 'Messages this brain receives and sends show up here.'));
     }, 3000);
@@ -120,8 +120,7 @@ export default {
           }
           await post(`/api/brains/${encodeURIComponent(id)}/approve`);
           toast('Changes approved — the brain now runs the new brain.json', 'ok');
-          memo.brain = '';
-          poller.kick();
+          await poller.kick();
         },
       });
       const { left, right } = lineDiff(prettyJSON(sortKeys(a)), prettyJSON(sortKeys(d)));
@@ -161,8 +160,7 @@ export default {
           }
           const r = await post(`/api/runs/${encodeURIComponent(id)}/stop`, { clear_queue: clear });
           toast(r && r.stopped ? 'Stopped' : 'Nothing was running', r && r.stopped ? 'ok' : 'info');
-          memo.brain = '';
-          poller.kick();
+          await poller.kick();
         },
       });
       mount(liveBox, h('div.grid.two',
@@ -275,9 +273,7 @@ export default {
           formDirty = false;
           saveBar.hidden = true;
           toast('Settings saved', 'ok');
-          memo.brain = '';
-          formBase = '';
-          poller.kick();
+          await poller.kick();
         });
       });
       mount(formBox, form);

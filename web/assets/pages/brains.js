@@ -20,8 +20,8 @@ export default {
         btn('Add brain', { href: '#/add-brain', kind: 'primary', icon: 'plus' })),
       list);
 
-    ctx.poll(async () => {
-      const brains = await get('/api/brains');
+    ctx.poll(async (signal) => {
+      const brains = await get('/api/brains', { signal });
       if (!changed(memo, 'brains', brains)) return;
       renderList(brains);
     }, 3000);

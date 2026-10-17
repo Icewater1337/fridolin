@@ -53,8 +53,8 @@ export default {
     let deploySig = '';
     let proposalSig = '';
     const sig = (...v) => JSON.stringify(v);
-    const poller = ctx.poll(async () => {
-      st = await get('/api/site');
+    const poller = ctx.poll(async (signal) => {
+      st = await get('/api/site', { signal });
       const s1 = sig(st.settings, st.site, st.accounts, st.runtime, st.public_url);
       if (s1 !== statusSig) renderStatus();
       const s2 = sig(st.deploy, st.settings.approved, st.settings.history, st.repo);
@@ -84,7 +84,7 @@ export default {
         checked: s.enabled, label: s.enabled ? 'The site is on' : 'The site is off',
         disabled: !s.enabled && todo.length > 0,
         onChange: async (on, input) => {
-          try { await put('/api/site/settings', { enabled: on }); toast(on ? 'Site turned on' : 'Site turned off', 'ok'); poller.kick(); } catch (e) { input.checked = !on; toastError(e); }
+          try { await put('/api/site/settings', { enabled: on }); toast(on ? 'Site turned on' : 'Site turned off', 'ok'); await poller.kick(); } catch (e) { input.checked = !on; toastError(e); }
         },
       });
       mount(statusCard,
@@ -97,7 +97,7 @@ export default {
           ['Accounts', `${st.accounts.total} (${st.accounts.admins} admin${st.accounts.admins === 1 ? '' : 's'})`],
         ]),
         site.process.error ? callout('bad', 'The site stopped', site.process.error) : null,
-        h('div.actions', sw, s.enabled ? btn('Restart', { icon: 'refresh', small: true, onClick: async () => { await post('/api/site/restart'); toast('Restarting the site', 'ok'); poller.kick(); } }) : null),
+        h('div.actions', sw, s.enabled ? btn('Restart', { icon: 'refresh', small: true, onClick: async () => { await post('/api/site/restart'); toast('Restarting the site', 'ok'); await poller.kick(); } }) : null),
         logBox(site.process.log));
     }
 
@@ -220,7 +220,7 @@ export default {
                 if (sentence && !await confirmDialog({ title: 'Approve these changes?', message: sentence, confirm: 'Approve and deploy' })) return;
                 await post('/api/site/deploy', { commit: updates.head });
                 updates = null;
-                poller.kick();
+                await poller.kick();
               },
             }),
             btn('Check again', { small: true, icon: 'refresh', onClick: checkUpdates })));
@@ -232,7 +232,7 @@ export default {
             d.commit === s.approved ? pill('live', 'ok') : btn('Roll back to this', {
               small: true, disabled: running, onClick: async () => {
                 if (!await confirmDialog({ title: `Roll back to ${short(d.commit)}?`, message: d.subject, confirm: 'Roll back' })) return;
-                await post('/api/site/deploy', { commit: d.commit }); poller.kick();
+                await post('/api/site/deploy', { commit: d.commit }); await poller.kick();
               },
             }))))));
       }
@@ -318,7 +318,7 @@ export default {
       const token = h('input', { type: 'password', autocomplete: 'off', placeholder: st.tunnel.token_saved ? 'saved — paste a new one to replace it' : 'eyJ…' });
       const tunnelSw = toggle({
         checked: s.tunnel, label: 'Run the tunnel while the site is on', disabled: !st.tunnel.token_saved || !st.runtime.cloudflared,
-        onChange: async (on, input) => { try { await put('/api/site/settings', { tunnel: on }); poller.kick(); } catch (e) { input.checked = !on; toastError(e); } },
+        onChange: async (on, input) => { try { await put('/api/site/settings', { tunnel: on }); await poller.kick(); } catch (e) { input.checked = !on; toastError(e); } },
       });
       mount(domainCard,
         h('div.card-head', h('div.card-title', icon('lock'), h('h2', 'Domain and sign-in'))),
@@ -361,7 +361,7 @@ export default {
           u.kind === 'password' ? btn('New password', { small: true, onClick: () => newPassword(u) }) : null,
           btn('', { small: true, icon: 'trash', title: 'Remove', onClick: async () => {
             if (!await confirmDialog({ title: `Remove ${u.name || u.email || u.username}?`, message: 'They are signed out at once and can no longer sign in.', confirm: 'Remove', danger: true })) return;
-            await del(`/api/site/users/${encodeURIComponent(u.id)}`); renderPeople(); poller.kick();
+            await del(`/api/site/users/${encodeURIComponent(u.id)}`); await Promise.all([renderPeople(), poller.kick()]);
           } }))));
 
       const kind = select([['google', 'Google account'], ['password', 'Username and password']], 'google');
@@ -393,12 +393,12 @@ export default {
             kind: 'primary', icon: 'plus', onClick: async () => {
               const isPw = kind.value === 'password';
               await post('/api/site/users', { kind: kind.value, email: isPw ? '' : ident.value, username: isPw ? ident.value : '', name: name.value, role: role.value, password: isPw ? pw.value : '' });
-              toast('Added', 'ok'); editing = false; renderPeople(); poller.kick();
+              toast('Added', 'ok'); editing = false; await Promise.all([renderPeople(), poller.kick()]);
             },
           }))),
         h('details.site-block', h('summary', 'Roles'),
           field({ label: 'Roles besides admin, separated by commas', control: rolesInput }),
-          h('div.actions', btn('Save roles', { small: true, onClick: async () => { await put('/api/site/roles', { roles: rolesInput.value.split(',') }); toast('Roles saved', 'ok'); editing = false; renderPeople(); } }))));
+          h('div.actions', btn('Save roles', { small: true, onClick: async () => { await put('/api/site/roles', { roles: rolesInput.value.split(',') }); toast('Roles saved', 'ok'); editing = false; await renderPeople(); } }))));
     }
 
     async function newPassword(u) {

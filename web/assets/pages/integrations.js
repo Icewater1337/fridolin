@@ -27,9 +27,9 @@ export default {
     ctx.dirty = () => formDirty;
     get('/api/brains').then((b) => { brains = b; }).catch(() => {});
 
-    const poller = ctx.poll(async () => {
+    const poller = ctx.poll(async (signal) => {
       if (formDirty) return;
-      const s = await get('/api/plaud/status');
+      const s = await get('/api/plaud/status', { signal });
       render(s);
     }, 4000);
 
@@ -57,7 +57,7 @@ export default {
           h('p.muted.small', 'Fridolin keeps the Plaud login in its own data folder, out of the brains’ reach. Plaud’s tool runs with its usage statistics turned off.'),
           h('div.actions', btn(connecting ? 'Waiting for Plaud…' : 'Connect Plaud', {
             kind: 'primary', icon: 'external', disabled: connecting,
-            onClick: async () => { await post('/api/plaud/connect'); toast('Plaud’s sign-in opened in your browser', 'ok'); poller.kick(); },
+            onClick: async () => { await post('/api/plaud/connect'); toast('Plaud’s sign-in opened in your browser', 'ok'); await poller.kick(); },
           })));
         return;
       }
@@ -89,7 +89,7 @@ export default {
           });
           formDirty = false;
           toast('Plaud settings saved', 'ok');
-          poller.kick();
+          await poller.kick();
         },
       });
 
@@ -128,14 +128,14 @@ export default {
               setTimeout(() => poller.kick(), 3000);
             },
           }) : null,
-          s.expired ? btn('Connect again', { icon: 'external', onClick: async () => { await post('/api/plaud/connect'); poller.kick(); } }) : null,
+          s.expired ? btn('Connect again', { icon: 'external', onClick: async () => { await post('/api/plaud/connect'); await poller.kick(); } }) : null,
           btn('Disconnect', {
             kind: 'danger', icon: 'x', small: true,
             onClick: async () => {
               const ok = await confirmDialog({ title: 'Disconnect Plaud?', message: 'Fridolin signs out of Plaud and stops checking for recordings. Your recordings stay in Plaud.', confirm: 'Disconnect', danger: true });
               if (!ok) return;
               await post('/api/plaud/disconnect');
-              poller.kick();
+              await poller.kick();
             },
           })),
         h('p.muted.small', 'Login stored in ', mono(s.login_dir), '.'));

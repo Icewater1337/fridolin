@@ -95,8 +95,8 @@ export default {
       startedAt = s.started_at;
     }));
 
-    ctx.poll(async () => {
-      const r = await get(`/api/logs${qs({ after, limit: 500 })}`);
+    ctx.poll(async (signal) => {
+      const r = await get(`/api/logs${qs({ after, limit: 500 })}`, { signal });
       addLines(r.lines || []);
       if (typeof r.next === 'number') after = r.next;
     }, 2000);

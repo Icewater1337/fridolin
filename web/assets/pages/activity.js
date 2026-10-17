@@ -63,8 +63,8 @@ export default {
       h('div.toolbar', h('div.toolbar-group', brainSel, searchIn), count),
       list);
 
-    const poller = ctx.poll(async () => {
-      const data = await get(`/api/activity${qs({ limit: 200, brain })}`);
+    const poller = ctx.poll(async (signal) => {
+      const data = await get(`/api/activity${qs({ limit: 200, brain })}`, { signal });
       if (!changed(memo, 'items', data)) return;
       items = data || [];
       paint();

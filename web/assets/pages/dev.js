@@ -61,10 +61,10 @@ export default {
       mount(notice, s.dev_mode ? null : callout('warn', 'Dev mode is off', 'This page only works when the bridge was started with --no-whatsapp.'));
     }));
 
-    const outboxPoll = ctx.poll(async () => {
+    const outboxPoll = ctx.poll(async (signal) => {
       let items;
       try {
-        items = await get('/api/dev/outbox');
+        items = await get('/api/dev/outbox', { signal });
       } catch (e) {
         if (e.status === 404) { mount(outbox, empty('Not available', e.message)); return; }
         throw e;

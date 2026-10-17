@@ -201,8 +201,8 @@ export default {
       }
     }
 
-    ctx.poll(async () => {
-      const d = await get('/api/config');
+    ctx.poll(async (signal) => {
+      const d = await get('/api/config', { signal });
       if (!data) {
         build(d);
         const target = ctx.params.section && document.getElementById(`sec-${ctx.params.section}`);

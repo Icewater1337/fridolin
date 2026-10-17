@@ -26,7 +26,7 @@ export default {
     const groupsBox = h('div', spinner());
     const numbersBox = h('div');
     const allowedGroupsBox = h('div');
-    const refreshGroups = btn('Refresh', { small: true, kind: 'ghost', icon: 'refresh', onClick: async () => { await loadGroups(true); groupsLoaded = true; memo.groups = ''; paintGroups(); } });
+    const refreshGroups = btn('Refresh', { small: true, kind: 'ghost', icon: 'refresh', onClick: async () => { await loadGroups(true); await groupsPoll.kick(); } });
 
     mount(root,
       pageHeader('Chats', 'Decide who can talk to the bridge and which brain answers each group.'),
@@ -66,15 +66,15 @@ export default {
     };
 
     // ── waiting ──
-    ctx.poll(async () => {
-      const [ignored, br] = await Promise.all([get('/api/chats/ignored'), get('/api/brains')]);
+    const waitingPoll = ctx.poll(async (signal) => {
+      const [ignored, br] = await Promise.all([get('/api/chats/ignored', { signal }), get('/api/brains', { signal })]);
       const brainsChanged = changed(memo, 'brains', br);
       brains = br;
       for (const c of ignored) if (c.kind === 'group') rememberName(c.jid, c.name);
       setIgnoredCount(ignored.length);
-      if (!changed(memo, 'ignored', ignored) && !brainsChanged) return;
-      paintWaiting(ignored);
-      if (brainsChanged) { memo.groups = ''; paintGroups(); }
+      if (changed(memo, 'ignored', ignored) || brainsChanged) paintWaiting(ignored);
+      // The groups table and the allow lists show which brain owns a group.
+      if (brainsChanged) { paintGroups(); paintLists(); }
     }, 3000);
 
     function paintWaiting(list) {
@@ -92,9 +92,8 @@ export default {
             const body = isGroup ? { jid: c.jid, kind: 'group', brain: sel.value } : { jid: c.jid, kind: 'dm', number: c.sender };
             await post('/api/chats/allow', body);
             toast(isGroup ? `Allowed ${title}` : `Allowed ${phone(c.sender) || title}`, 'ok');
-            memo.ignored = '';
-            memo.cfg = '';
-            pollAll();
+            if (isGroup) await loadGroups(true);
+            await Promise.all([waitingPoll.kick(), groupsPoll.kick(), listsPoll.kick()]);
           },
         });
         const dismiss = btn('Dismiss', {
@@ -102,8 +101,7 @@ export default {
           onClick: async () => {
             await post('/api/chats/dismiss', { jid: c.jid });
             toast('Dismissed — it stays hidden even if it writes again', 'info');
-            memo.ignored = '';
-            pollAll();
+            await waitingPoll.kick();
           },
         });
         return h('div.card.waiting-row',
@@ -121,7 +119,7 @@ export default {
 
     // ── groups ──
     let groupsLoaded = false;
-    ctx.poll(async () => {
+    const groupsPoll = ctx.poll(async () => {
       await loadGroups();
       groupsLoaded = true;
       paintGroups();
@@ -154,8 +152,7 @@ export default {
                 toast(`${g.name || 'Group'} now goes to ${sel.value}`, 'ok');
                 choice.delete(g.jid);
                 await loadGroups(true);
-                memo.groups = '';
-                pollAll();
+                await Promise.all([waitingPoll.kick(), groupsPoll.kick()]);
               },
             })
             : btn('Allow', {
@@ -165,9 +162,7 @@ export default {
                 toast(`Allowed ${g.name || 'the group'}`, 'ok');
                 choice.delete(g.jid);
                 await loadGroups(true);
-                memo.groups = '';
-                memo.cfg = '';
-                pollAll();
+                await Promise.all([waitingPoll.kick(), groupsPoll.kick(), listsPoll.kick()]);
               },
             });
           return h('tr',
@@ -180,14 +175,15 @@ export default {
     }
 
     // ── allow lists (config) ──
-    ctx.poll(async () => {
-      const c = await get('/api/config');
-      cfg = c;
-      if (!changed(memo, 'cfg', { file: c.config, any: c.effective.allow_any_dm })) return;
+    const listsPoll = ctx.poll(async (signal) => {
+      cfg = await get('/api/config', { signal });
       paintLists();
     }, 5000);
 
     function paintLists() {
+      if (!cfg) return;
+      const c = cfg;
+      if (!changed(memo, 'lists', { file: c.config, any: c.effective.allow_any_dm, brains: memo.brains })) return;
       const file = cfg.config || {};
       const eff = cfg.effective || {};
       const numbers = file.allowed_numbers || [];
@@ -267,30 +263,7 @@ export default {
         if (e.status === 409) throw new Error('The configuration changed at the same moment. Try again.');
         throw e;
       }
-      memo.cfg = '';
-      pollAll();
-    }
-
-    function pollAll() {
-      refresh();
-    }
-
-    async function refresh() {
-      try {
-        const [ignored, br, c] = await Promise.all([get('/api/chats/ignored'), get('/api/brains'), get('/api/config')]);
-        brains = br;
-        memo.brains = JSON.stringify(br);
-        cfg = c;
-        memo.ignored = JSON.stringify(ignored);
-        setIgnoredCount(ignored.length);
-        paintWaiting(ignored);
-        memo.cfg = '';
-        paintLists();
-        memo.groups = '';
-        paintGroups();
-      } catch (e) {
-        if (e.status !== 401) toast(e.message);
-      }
+      await listsPoll.kick();
     }
   },
 };

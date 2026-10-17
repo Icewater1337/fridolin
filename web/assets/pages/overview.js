@@ -45,9 +45,9 @@ export default {
 
     // ── WhatsApp + QR ──
     const qr = { img: null, url: '', pairing: false };
-    const loadQR = async () => {
+    const loadQR = async (signal) => {
       try {
-        const r = await get('/api/whatsapp/qr');
+        const r = await get('/api/whatsapp/qr', { signal });
         if (r && r.data_url && r.data_url !== qr.url) {
           qr.url = r.data_url;
           if (qr.img) qr.img.src = r.data_url;
@@ -226,12 +226,12 @@ export default {
     if (!memo.health) mount(header, spinner());
 
     // QR refresh while pairing (codes rotate roughly every 20 s).
-    ctx.poll(async () => {
-      if (qr.img) await loadQR();
+    ctx.poll(async (signal) => {
+      if (qr.img) await loadQR(signal);
     }, 3000);
 
-    ctx.poll(async () => {
-      const items = await get(`/api/activity${qs({ limit: 10 })}`);
+    ctx.poll(async (signal) => {
+      const items = await get(`/api/activity${qs({ limit: 10 })}`, { signal });
       if (!changed(memo, 'activity', items)) return;
       if (!items.length) {
         mount(activityBox, empty('No messages yet', 'Messages your brains receive and send show up here.'));
