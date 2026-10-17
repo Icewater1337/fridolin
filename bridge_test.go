@@ -2,14 +2,18 @@ package main
 
 import (
 	"encoding/json"
+	"fmt"
 	"log"
 	"os"
 	"path/filepath"
+	"reflect"
+	"regexp"
 	"runtime"
 	"strings"
 	"syscall"
 	"testing"
 	"time"
+	"unicode"
 	"unicode/utf8"
 )
 
@@ -90,12 +94,69 @@ func TestIsJunkMessage(t *testing.T) {
 		}
 	}
 
-	real := []string{"what time is it", "ok but why", "book it for 3pm", "PR 42?"}
+	real := []string{"what time is it", "ok but why", "book it for 3pm", "PR 42?", "привет", "你好", "שלום!", "ßß"}
 	for _, s := range real {
 		if isJunkMessage(s) {
 			t.Errorf("isJunkMessage(%q) = true, want false", s)
 		}
 	}
+}
+
+// FuzzIsJunkMessage: untagged group messages the filter calls junk are
+// dropped unread, so it may only catch what carries nothing: a single
+// character, no letter or digit in any script, or one of the short
+// acknowledgements, which are ASCII once lowercased the way the filter
+// compares them. Whitespace around a message and its ASCII letter case
+// never change the verdict.
+func FuzzIsJunkMessage(f *testing.F) {
+	for _, s := range []string{"ok", "OK", "o\u212a", "than\u212a you", "thanks", "thank you", "👍", "...", "?", "a", "🎉🎉", "what time is it", "ok but why", "book it for 3pm", "PR 42?", "", " \n", "\xff\xfe"} {
+		f.Add(s)
+	}
+	f.Fuzz(func(t *testing.T, text string) {
+		got := isJunkMessage(text)
+		if padded := isJunkMessage(" \t" + text + "\n "); padded != got {
+			t.Errorf("isJunkMessage(%q) = %v, but %v with whitespace around it", text, got, padded)
+		}
+		if swapped := swapASCIICase(text); isJunkMessage(swapped) != got {
+			t.Errorf("isJunkMessage(%q) = %v, but not for %q", text, got, swapped)
+		}
+		trimmed := strings.TrimSpace(text)
+		short := utf8.RuneCountInString(trimmed) <= 1
+		content := strings.IndexFunc(trimmed, func(r rune) bool { return unicode.IsLetter(r) || unicode.IsDigit(r) }) >= 0
+		if (short || !content) && !got {
+			t.Errorf("isJunkMessage(%q) = false for a message without content", text)
+		}
+		// Lowercased like the filter does: strings.ToLower turns some
+		// non-ASCII letters into ASCII ones, so "o\u212a" is "ok".
+		lower := strings.ToLower(trimmed)
+		if got && !short && content && (len(lower) > len("thank you") || !isASCII(lower)) {
+			t.Errorf("isJunkMessage(%q) = true for a message with letters or digits", text)
+		}
+	})
+}
+
+// swapASCIICase turns ASCII lowercase letters into uppercase and back,
+// leaving every other byte as it is.
+func swapASCIICase(s string) string {
+	b := []byte(s)
+	for i, c := range b {
+		switch {
+		case 'a' <= c && c <= 'z':
+			b[i] = c - 'a' + 'A'
+		case 'A' <= c && c <= 'Z':
+			b[i] = c - 'A' + 'a'
+		}
+	}
+	return string(b)
+}
+
+func isASCII(s string) bool {
+	for i := 0; i < len(s); i++ {
+		if s[i] >= utf8.RuneSelf {
+			return false
+		}
+	}
+	return true
 }
 
 // ── polls ─────────────────────────────────────────────────────────────────
@@ -130,6 +191,18 @@ Let me know.`
 	}
 	if !strings.Contains(remaining, "Let me know.") {
 		t.Errorf("surrounding text lost: %q", remaining)
+	}
+}
+
+// The end of a block is found in any letter case, like its start: a
+// "[Poll]…[/poll]" block is a poll, not markup in the chat.
+func TestExtractPollsAnyCase(t *testing.T) {
+	polls, remaining := extractPolls("Vote:\n[Poll max=2]\nQuestion: Which?\n- A\n- B\n[/poll] thanks")
+	if len(polls) != 1 || polls[0].Question != "Which?" || polls[0].MaxSelectable != 2 {
+		t.Errorf("got %+v", polls)
+	}
+	if remaining != "Vote:\n thanks" {
+		t.Errorf("remaining = %q", remaining)
 	}
 }
 
@@ -189,6 +262,131 @@ func TestExtractPollsNoPoll(t *testing.T) {
 	if remaining != "just a normal reply" {
 		t.Errorf("remaining = %q", remaining)
 	}
+}
+
+// anyPollCloseRe finds the end of a poll block in any letter case, the way
+// pollHeaderRe finds its start.
+var anyPollCloseRe = regexp.MustCompile(`(?i)\[/POLL\]`)
+
+// FuzzExtractPolls feeds extractPolls model output. Whatever the model
+// writes, each poll that comes out has a question, 2 to 12 trimmed
+// options and a max within them, and no complete poll block reaches the
+// chat (see checkPolls). A well-formed block built from the fuzzed
+// question and options, with nothing around it that looks like one, comes
+// back as exactly that poll, and the text around it as it was.
+func FuzzExtractPolls(f *testing.F) {
+	seeds := []struct {
+		before, question, options, after string
+		maxSel                           uint8
+	}{
+		{"Sure, let's vote.\n\n", "When should we meet?", "Monday 2pm\nTuesday 3pm", "\n\nLet me know.", 0},
+		{"", "Which?", "A\nB\nC", "", 2},
+		{"", "Which?", "A\nB", "", 9},
+		{"", "Pick", strings.Repeat("option\n", 20), "", 0},
+		{"", "Only one?", "A", "", 0},
+		{"", "", "A\nB", "", 0},
+		{"[POLL]\nQuestion: unterminated\n- A\n- B", "Q", "a\nb", "", 0},
+		{"[POLL max=3]\nQuestion: Q\n- a\n- b\n[/POLL] and ", "Q", "a\nb", " [POLL]", 1},
+		{"[PO[POLL]", "Q", "a\nb", "LL]", 0},
+		{"İİ ", "Fråga?", "é\n\U0001F600", " \xff", 3},
+	}
+	for _, s := range seeds {
+		f.Add(s.before, s.question, s.options, s.after, s.maxSel)
+	}
+	f.Fuzz(func(t *testing.T, before, question, options, after string, maxSel uint8) {
+		checkPolls(t, before)
+
+		q := strings.TrimSpace(strings.ReplaceAll(question, "\n", " "))
+		var opts []string
+		for _, o := range strings.Split(options, "\n") {
+			if o = strings.TrimSpace(o); o != "" {
+				opts = append(opts, o)
+			}
+		}
+		var block strings.Builder
+		if maxSel > 0 {
+			fmt.Fprintf(&block, "[POLL max=%d]\n", maxSel)
+		} else {
+			block.WriteString("[POLL]\n")
+		}
+		block.WriteString("Question: " + q + "\n")
+		for _, o := range opts {
+			block.WriteString("- " + o + "\n")
+		}
+		block.WriteString("[/POLL]")
+		text := before + block.String() + after
+		polls, remaining := checkPolls(t, text)
+
+		// Another start or end in the text, the fuzzed parts' own included,
+		// makes a different block.
+		if len(pollHeaderRe.FindAllString(text, -1)) != 1 || len(anyPollCloseRe.FindAllString(text, -1)) != 1 {
+			return
+		}
+		if want := strings.TrimSpace(before + after); remaining != want {
+			t.Errorf("remaining text = %q, want %q", remaining, want)
+		}
+		if q == "" || len(opts) < 2 {
+			if len(polls) != 0 {
+				t.Errorf("got %+v from a block without a question or two options", polls)
+			}
+			return
+		}
+		want := pollData{Question: q, Options: opts[:min(len(opts), maxPollOptions)], MaxSelectable: 1}
+		if maxSel > 0 {
+			want.MaxSelectable = int(maxSel)
+		}
+		want.MaxSelectable = min(want.MaxSelectable, len(want.Options))
+		if len(polls) != 1 || !reflect.DeepEqual(polls[0], want) {
+			t.Errorf("got %+v, want [%+v]", polls, want)
+		}
+	})
+}
+
+// checkPolls runs extractPolls on text and checks what holds for any text:
+// each poll has a question and 2 to 12 options, each a trimmed line of its
+// own; there are no more polls than closed blocks; and the remaining text,
+// which goes to the chat, is no longer than the input, still valid UTF-8
+// if the input was, and holds no complete block.
+func checkPolls(t *testing.T, text string) ([]pollData, string) {
+	t.Helper()
+	polls, remaining := extractPolls(text)
+	line := func(s string) bool {
+		return s != "" && s == strings.TrimSpace(s) && !strings.Contains(s, "\n")
+	}
+	for _, p := range polls {
+		if !line(p.Question) {
+			t.Errorf("question %q is not a trimmed line", p.Question)
+		}
+		if n := len(p.Options); n < 2 || n > maxPollOptions {
+			t.Errorf("poll %q has %d options, want 2 to %d", p.Question, n, maxPollOptions)
+		}
+		for _, o := range p.Options {
+			if !line(o) {
+				t.Errorf("option %q is not a trimmed line", o)
+			}
+		}
+		if p.MaxSelectable < 0 || p.MaxSelectable > len(p.Options) {
+			t.Errorf("poll %q: max %d for %d options", p.Question, p.MaxSelectable, len(p.Options))
+		}
+		if utf8.ValidString(text) && !utf8.ValidString(p.Question+strings.Join(p.Options, "")) {
+			t.Errorf("poll %+v is not valid UTF-8", p)
+		}
+	}
+	if closed := len(anyPollCloseRe.FindAllString(text, -1)); len(polls) > closed {
+		t.Errorf("%d polls from %d closed blocks", len(polls), closed)
+	} else if closed == 0 && remaining != strings.TrimSpace(text) {
+		t.Errorf("text without a closed block came back as %q", remaining)
+	}
+	if len(remaining) > len(text) {
+		t.Errorf("remaining text %q is longer than the input", remaining)
+	}
+	if utf8.ValidString(text) && !utf8.ValidString(remaining) {
+		t.Errorf("remaining text %q is not valid UTF-8", remaining)
+	}
+	if loc := pollHeaderRe.FindStringIndex(remaining); loc != nil && anyPollCloseRe.MatchString(remaining[loc[1]:]) {
+		t.Errorf("remaining text %q still holds a poll block", remaining)
+	}
+	return polls, remaining
 }
 
 // ── chunking ──────────────────────────────────────────────────────────────
@@ -982,21 +1180,71 @@ func TestParseIdentityMap(t *testing.T) {
 | WhatsApp Number | Person | Notes |
 | --------------- | ------ | ----- |
 | 15551234567     | Alex   | work  |
-| +15559876543    | Sam    |       |
+| +15559876543    | Sam    | --- see the 2024 notes |
+| :-------------- | :----: | ----: |
 `))
 	if ids["15551234567"] != "Alex" {
 		t.Errorf("got %q for Alex", ids["15551234567"])
 	}
-	// A leading + must be normalised away so it matches the JID form.
+	// A leading + must be normalised away so it matches the JID form, and
+	// dashes in the notes do not make a row the line under the header.
 	if ids["15559876543"] != "Sam" {
 		t.Errorf("got %q for Sam", ids["15559876543"])
 	}
 	if _, ok := ids["WhatsApp Number"]; ok {
 		t.Error("header row was parsed as an entry")
 	}
+	// The line under the header, in any alignment, is no entry.
+	if len(ids) != 2 {
+		t.Errorf("got %d entries, want 2: %v", len(ids), ids)
+	}
+	if name, ok := parseIdentityMap([]byte("| + | Nobody |\n"))[""]; ok {
+		t.Errorf("a row without a number was read as %q", name)
+	}
 	if len(parseIdentityMap(nil)) != 0 {
 		t.Error("a missing map should yield an empty map, not an error")
 	}
+}
+
+// FuzzParseIdentityMap: the brain writes its contact map itself, so it can
+// hold anything. Every entry that comes out is a normalised number and a
+// name, each a trimmed cell; and a row with a number and a name in its first
+// two cells is read back, whatever its notes say.
+func FuzzParseIdentityMap(f *testing.F) {
+	table := "# People\n\n| WhatsApp Number | Person | Notes |\n| --------------- | ------ | ----- |\n| 15551234567     | Alex   | work  |\n"
+	f.Add([]byte(table), "+15559876543", "Sam", "")
+	f.Add([]byte(table), "15551234567", "Alex Again", "replaces the first row")
+	f.Add([]byte(""), "15551234567@s.whatsapp.net", "Sam", "met in 2024")
+	f.Add([]byte("|a|b|\n|:--|--:|\r\n| x |"), "WhatsApp Number", "Person", "Notes")
+	f.Add([]byte("||\n|\n| | |\n"), " 15551234567 ", " Sam ", " | ")
+	f.Fuzz(func(t *testing.T, table []byte, number, name, notes string) {
+		check := func(ids map[string]string) {
+			for k, v := range ids {
+				if k == "" || strings.ContainsAny(k, "@|\n") || normalizeJID(k) != k || k != strings.TrimSpace(k) {
+					t.Errorf("key %q is not a normalised number", k)
+				}
+				if v == "" || strings.ContainsAny(v, "|\n") || v != strings.TrimSpace(v) {
+					t.Errorf("name %q for %q is not a trimmed cell", v, k)
+				}
+			}
+		}
+		check(parseIdentityMap(table))
+
+		// A row the brain appends, its cells made into cells.
+		cell := func(s string) string {
+			return strings.TrimSpace(strings.NewReplacer("|", " ", "\n", " ").Replace(s))
+		}
+		number, name, notes = cell(number), cell(name), cell(notes)
+		ids := parseIdentityMap([]byte(string(table) + "\n| " + number + " | " + name + " | " + notes + " |\n"))
+		check(ids)
+		// Nothing to read back, or the header and the line under it.
+		if number == "" || normalizeJID(number) == "" || name == "" || number == "WhatsApp Number" || strings.Trim(number+name+notes, "-: \t") == "" {
+			return
+		}
+		if got := ids[normalizeJID(number)]; got != name {
+			t.Errorf("row | %s | %s | %s | read back as %q, want %q", number, name, notes, got, name)
+		}
+	})
 }
 
 func TestNormalizeJID(t *testing.T) {
@@ -1005,12 +1253,53 @@ func TestNormalizeJID(t *testing.T) {
 		"+15551234567":               "15551234567",
 		"120363000000000000@g.us":    "120363000000000000",
 		"15551234567":                "15551234567",
+		"++15551234567":              "15551234567",
+		" + 15551234567 ":            "15551234567",
 	}
 	for in, want := range cases {
 		if got := normalizeJID(in); got != want {
 			t.Errorf("normalizeJID(%q) = %q, want %q", in, got, want)
 		}
 	}
+}
+
+// FuzzNormalizeJID: a normalised JID is what allowed_numbers and the
+// identity map hold, and what a sender is compared with. It has no server
+// and no space around it, it is part of the input, normalising it again
+// changes nothing, and every way of writing a number gives the number.
+func FuzzNormalizeJID(f *testing.F) {
+	for _, s := range []string{"15551234567@s.whatsapp.net", "+15551234567", "120363000000000000@g.us", "15551234567", "15551234567:12@s.whatsapp.net", "", "@", "+", "a@b@c", "+@s.whatsapp.net"} {
+		f.Add(s)
+	}
+	f.Fuzz(func(t *testing.T, jid string) {
+		n := normalizeJID(jid)
+		if strings.Contains(n, "@") {
+			t.Errorf("normalizeJID(%q) = %q, which still has a server", jid, n)
+		}
+		if n != strings.TrimSpace(n) {
+			t.Errorf("normalizeJID(%q) = %q, not trimmed", jid, n)
+		}
+		if !strings.Contains(jid, n) {
+			t.Errorf("normalizeJID(%q) = %q, which is not part of it", jid, n)
+		}
+		if again := normalizeJID(n); again != n {
+			t.Errorf("normalizeJID(%q) = %q, but normalising that gives %q", jid, n, again)
+		}
+		digits := strings.Map(func(r rune) rune {
+			if '0' <= r && r <= '9' {
+				return r
+			}
+			return -1
+		}, jid)
+		if digits == "" {
+			return
+		}
+		for _, form := range []string{digits, "+" + digits, digits + "@s.whatsapp.net", "+" + digits + "@s.whatsapp.net", digits + "@g.us"} {
+			if got := normalizeJID(form); got != digits {
+				t.Errorf("normalizeJID(%q) = %q, want %q", form, got, digits)
+			}
+		}
+	})
 }
 
 // ── misc ──────────────────────────────────────────────────────────────────

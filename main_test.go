@@ -3,6 +3,7 @@ package main
 import (
 	"errors"
 	"io"
+	"io/fs"
 	"log"
 	"os"
 	"os/exec"
@@ -261,6 +262,57 @@ func TestTestsDoNotRunInTheCheckout(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(repoDir, "go.mod")); err != nil {
 		t.Errorf("repoDir %q is not the checkout: %v", repoDir, err)
 	}
+}
+
+// The fuzz engine finds a target's committed inputs, and saves a failing
+// one, under testdata/fuzz relative to the working directory. In the empty
+// one the tests run in, that must still be the package's testdata.
+func TestFuzzCorpusIsThePackagesTestdata(t *testing.T) {
+	got, err := os.Readlink("testdata")
+	if want := filepath.Join(repoDir, "testdata"); err != nil || got != want {
+		t.Errorf("testdata in the working directory links to %q (%v), want %q", got, err, want)
+	}
+
+	t.Run("reads and writes land in the package", func(t *testing.T) {
+		pkg, wd := t.TempDir(), t.TempDir()
+		corpus := filepath.Join(pkg, "testdata", "fuzz", "FuzzX")
+		if err := os.MkdirAll(corpus, 0o700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(corpus, "seed"), []byte("go test fuzz v1\n"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		if err := linkTestdata(pkg, wd); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := os.Stat(filepath.Join(wd, "testdata", "fuzz", "FuzzX", "seed")); err != nil {
+			t.Errorf("the committed input is not found from the working directory: %v", err)
+		}
+		// What the engine does with a failing input of a new target.
+		crashDir := filepath.Join(wd, "testdata", "fuzz", "FuzzY")
+		if err := os.MkdirAll(crashDir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(crashDir, "crash"), nil, 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := os.Stat(filepath.Join(pkg, "testdata", "fuzz", "FuzzY", "crash")); err != nil {
+			t.Errorf("a failing input saved from the working directory is not in the package: %v", err)
+		}
+	})
+
+	t.Run("a package without testdata", func(t *testing.T) {
+		pkg, wd := t.TempDir(), t.TempDir()
+		if err := linkTestdata(pkg, wd); err != nil {
+			t.Fatalf("linking a missing testdata: %v", err)
+		}
+		if _, err := os.ReadDir(filepath.Join(wd, "testdata", "fuzz", "FuzzX")); !errors.Is(err, fs.ErrNotExist) {
+			t.Errorf("reading the corpus: %v, want it missing", err)
+		}
+		if err := os.MkdirAll(filepath.Join(wd, "testdata", "fuzz", "FuzzX"), 0o755); err == nil {
+			t.Error("saving a failing input succeeded, so it went somewhere other than the package")
+		}
+	})
 }
 
 func TestTestsStartWithATempHome(t *testing.T) {

@@ -83,7 +83,7 @@ func brainASetup(t *testing.T) (*Config, string) {
 }
 
 // bareBrain is brain a in a fresh folder, outside any manager.
-func bareBrain(t *testing.T) *Brain {
+func bareBrain(t testing.TB) *Brain {
 	t.Helper()
 	dir := t.TempDir()
 	root, err := os.OpenRoot(dir)

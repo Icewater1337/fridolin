@@ -9,10 +9,12 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
 	"time"
+	"unicode"
 	"unicode/utf8"
 
 	"go.mau.fi/whatsmeow"
@@ -361,6 +363,89 @@ func TestSanitizeMediaName(t *testing.T) {
 			}
 		})
 	}
+}
+
+// FuzzSanitizeMediaName: whatever name the sender gives an attachment, the
+// file is saved in the media directory, under a name that is not hidden,
+// keeps to one line and is short enough to save; and so is every name
+// placeMedia falls back to when that one is taken.
+func FuzzSanitizeMediaName(f *testing.F) {
+	for _, s := range []string{
+		"scan.pdf", "../../etc/passwd", "/etc/passwd", ".bashrc", "..", "", "/", "a\nb.pdf", "a\r\tb.pdf",
+		"a\x00b.pdf", "a\u2028b\u2029c.pdf", "\n\n", "Rechnung März 🧾.pdf", "x/.", "./..", ".../...",
+		strings.Repeat("ä", 150) + ".pdf", strings.Repeat("x", 100) + "." + strings.Repeat("y", 100), "\xff\xfe.\xc3",
+	} {
+		f.Add(s)
+	}
+	const dir = "/media"
+	f.Fuzz(func(t *testing.T, name string) {
+		got := sanitizeMediaName(name)
+		if len(got) > maxMediaNameBytes {
+			t.Errorf("sanitizeMediaName(%q) = %q, %d bytes, more than %d", name, got, len(got), maxMediaNameBytes)
+		}
+		for _, i := range []int{1, 2, lastMediaCandidate - 1, lastMediaCandidate} {
+			c := mediaNameCandidate(got, i)
+			if filepath.Dir(filepath.Join(dir, c)) != dir || strings.HasPrefix(c, ".") {
+				t.Errorf("%q, from %q, is not a visible file in the media directory", c, name)
+			}
+			if strings.IndexFunc(c, func(r rune) bool { return unicode.IsControl(r) || r == '\u2028' || r == '\u2029' }) >= 0 {
+				t.Errorf("%q, from %q, has a control character or a line break", c, name)
+			}
+			if !utf8.ValidString(c) {
+				t.Errorf("%q, from %q, is not valid UTF-8", c, name)
+			}
+			if len(c) > 255 {
+				t.Errorf("%q, from %q, is longer than a file name may be", c, name)
+			}
+		}
+	})
+}
+
+// FuzzNumberAllowed: allowed_numbers lets a sender DM the bridge only when
+// it lists the number exactly: no prefix, no suffix, no other number.
+// allow_any_dm decides what an empty list means and never widens a list.
+// A listed number gets in however the JID it came from was written.
+func FuzzNumberAllowed(f *testing.F) {
+	const n = "15551234567"
+	f.Add(n, n, false)
+	f.Add(n, "", true)
+	f.Add(n, "", false)
+	f.Add(n[:len(n)-1], n+",15559876543", true) // a listed number cut short
+	f.Add(n+"8", n, true)                       // and one made longer
+	f.Add("+"+n, n, false)
+	f.Add("", ",", false)
+	f.Fuzz(func(t *testing.T, number, list string, anyDM bool) {
+		var allowed []string
+		if list != "" {
+			allowed = strings.Split(list, ",")
+		}
+		cfg := &Config{AllowedNumbers: allowed, AllowAnyDM: &anyDM}
+		got := numberAllowed(cfg, number)
+		if len(allowed) == 0 {
+			if got != anyDM {
+				t.Errorf("with no allowed_numbers and allow_any_dm %v, %q allowed: %v", anyDM, number, got)
+			}
+			return
+		}
+		if listed := slices.Contains(allowed, number); got != listed {
+			t.Errorf("allowed_numbers %q: %q allowed: %v, listed: %v", allowed, number, got, listed)
+		}
+		other := !anyDM
+		if numberAllowed(&Config{AllowedNumbers: allowed, AllowAnyDM: &other}, number) != got {
+			t.Errorf("allowed_numbers %q: allow_any_dm changes whether %q is allowed", allowed, number)
+		}
+		for _, n := range allowed {
+			// The dashboard saves numbers normalised.
+			if n != normalizeJID(n) {
+				continue
+			}
+			for _, jid := range []string{n, "+" + n, n + "@s.whatsapp.net", "+" + n + "@s.whatsapp.net"} {
+				if !numberAllowed(cfg, normalizeJID(jid)) {
+					t.Errorf("allowed_numbers %q: %q is refused", allowed, jid)
+				}
+			}
+		}
+	})
 }
 
 // fakeDownloader stands in for whatsmeow's media download. Like whatsmeow,

@@ -148,12 +148,36 @@ func ReadManifest(dir string) (*BrainManifest, error) {
 	if err != nil {
 		return nil, fmt.Errorf("%s: %w", path, err)
 	}
+	m, err := decodeManifest(data)
+	if err != nil {
+		return nil, fmt.Errorf("%s: %w", path, err)
+	}
+	return m, nil
+}
+
+// decodeManifest decodes the contents of a brain.json, with defaults filled
+// in. It does not validate them.
+func decodeManifest(data []byte) (*BrainManifest, error) {
 	m := &BrainManifest{}
 	if err := json.Unmarshal(data, m); err != nil {
-		return nil, fmt.Errorf("%s: %w", path, err)
+		return nil, err
 	}
 	n := m.normalized()
 	return &n, nil
+}
+
+// encodeManifest returns the contents WriteManifest writes for m, or why m
+// is not a valid manifest.
+func encodeManifest(m *BrainManifest) ([]byte, error) {
+	n := m.normalized()
+	if err := n.Validate(); err != nil {
+		return nil, err
+	}
+	data, err := json.MarshalIndent(n, "", "  ")
+	if err != nil {
+		return nil, err
+	}
+	return append(data, '\n'), nil
 }
 
 // errManifestExists means a brain.json is already there and overwrite was off.
@@ -162,15 +186,10 @@ var errManifestExists = errors.New("brain.json already exists")
 // WriteManifest writes <dir>/brain.json. Without overwrite it refuses to
 // replace an existing file.
 func WriteManifest(dir string, m *BrainManifest, overwrite bool) error {
-	n := m.normalized()
-	if err := n.Validate(); err != nil {
-		return err
-	}
-	data, err := json.MarshalIndent(n, "", "  ")
+	data, err := encodeManifest(m)
 	if err != nil {
 		return err
 	}
-	data = append(data, '\n')
 	path := filepath.Join(dir, ManifestFile)
 	if !overwrite {
 		f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)

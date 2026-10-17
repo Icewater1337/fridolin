@@ -19,6 +19,7 @@ import (
 	"sync/atomic"
 	"syscall"
 	"time"
+	"unicode"
 )
 
 // historyEntry is one line in a brain's conversation-history.jsonl file.
@@ -32,11 +33,15 @@ type historyEntry struct {
 
 // normalizeJID strips the WhatsApp server suffix and a leading + from a JID,
 // e.g. "15551234567@s.whatsapp.net" and "+15551234567" both become "15551234567".
+// Spaces around the number and further +s in front of it go too, so that
+// normalising the result again changes nothing: a number saved normalised
+// still equals the normalised JID of its sender.
 func normalizeJID(jid string) string {
 	if idx := strings.Index(jid, "@"); idx != -1 {
 		jid = jid[:idx]
 	}
-	return strings.TrimPrefix(jid, "+")
+	jid = strings.TrimLeftFunc(jid, func(r rune) bool { return r == '+' || unicode.IsSpace(r) })
+	return strings.TrimRightFunc(jid, unicode.IsSpace)
 }
 
 // identityMapFile is the brain's contact map, in its folder.
@@ -57,12 +62,12 @@ func parseIdentityMap(data []byte) map[string]string {
 
 	for _, line := range strings.Split(string(data), "\n") {
 		line = strings.TrimSpace(line)
-		if !strings.HasPrefix(line, "|") || strings.Contains(line, "---") {
+		if !strings.HasPrefix(line, "|") {
 			continue
 		}
 
 		parts := strings.Split(line, "|")
-		if len(parts) < 3 {
+		if len(parts) < 3 || isTableRule(parts) {
 			continue
 		}
 
@@ -71,10 +76,27 @@ func parseIdentityMap(data []byte) map[string]string {
 		if jid == "" || name == "" || jid == "WhatsApp Number" {
 			continue
 		}
-		identities[normalizeJID(jid)] = name
+		// A cell like "+" or "@lid" holds no number to look up.
+		number := normalizeJID(jid)
+		if number == "" {
+			continue
+		}
+		identities[number] = name
 	}
 
 	return identities
+}
+
+// isTableRule reports whether the cells of a markdown table row hold only
+// dashes and colons, as the line under the header does. A row that merely
+// contains "---", say in its notes, is a contact like any other.
+func isTableRule(cells []string) bool {
+	for _, c := range cells {
+		if strings.Trim(c, "-: \t") != "" {
+			return false
+		}
+	}
+	return true
 }
 
 // bareCodeRe matches a message that is nothing but a 4–8 digit number.

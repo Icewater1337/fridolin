@@ -79,7 +79,7 @@ var repoDir string
 
 // runInEmptyDir runs the tests in a new, empty working directory. A relative
 // path in a test must not reach the checkout, where a developer may keep a
-// config.json.
+// config.json. Only the package's testdata is linked in, see linkTestdata.
 func runInEmptyDir(m *testing.M) (int, error) {
 	var err error
 	if repoDir, err = os.Getwd(); err != nil {
@@ -103,7 +103,21 @@ func runInEmptyDir(m *testing.M) (int, error) {
 	if err := os.Setenv("PWD", wd); err != nil {
 		return 0, err
 	}
+	if err := linkTestdata(repoDir, wd); err != nil {
+		return 0, err
+	}
 	return m.Run(), nil
+}
+
+// linkTestdata makes testdata in the working directory wd the package's own.
+// The fuzz engine reads a target's corpus from testdata/fuzz/<target> and
+// saves a failing input there, both relative to the working directory: in
+// the empty one, `go test` would skip the committed inputs, and `go test
+// -fuzz` would save a crash into a directory that is removed when the tests
+// end. The link is made even when the package has no testdata yet, so that
+// saving a crash then fails loudly instead of going nowhere.
+func linkTestdata(pkgDir, wd string) error {
+	return os.Symlink(filepath.Join(pkgDir, "testdata"), filepath.Join(wd, "testdata"))
 }
 
 // bridgeVariables are the environment variables the bridge reads:
