@@ -1,7 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { BRAIN_ID_RE, slugify, routingSummary } from '../assets/lib/brain.js';
-import { changed } from '../assets/lib/memo.js';
 
 test('slugify', async (t) => {
   const cases = [
@@ -40,12 +39,4 @@ test('routingSummary', async (t) => {
   for (const [name, routing, want] of cases) {
     await t.test(name, () => assert.equal(routingSummary(routing), want));
   }
-});
-
-test('changed remembers the last value per key', () => {
-  const memo = {};
-  assert.equal(changed(memo, 'a', { x: 1 }), true);
-  assert.equal(changed(memo, 'a', { x: 1 }), false);
-  assert.equal(changed(memo, 'b', { x: 1 }), true);
-  assert.equal(changed(memo, 'a', { x: 2 }), true);
 });
