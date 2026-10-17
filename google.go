@@ -308,7 +308,7 @@ func (g *GoogleAuth) postToken(ctx context.Context, c *GoogleClient, form url.Va
 		if msg == "" {
 			msg = resp.Status
 		}
-		return nil, fmt.Errorf("Google token request failed: %s", msg)
+		return nil, fmt.Errorf("token request to Google failed: %s", msg)
 	}
 	return &tr, nil
 }

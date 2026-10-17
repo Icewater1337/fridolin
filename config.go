@@ -597,40 +597,40 @@ var validEfforts = map[string]bool{"": true, "low": true, "medium": true, "high"
 // validate rejects configurations that would misroute messages or start a
 // brain with no working directory. Zero brains is fine: a fresh install adds
 // its first brain from the dashboard.
-func (cfg *Config) validate() error {
-	if !validEfforts[cfg.BrainEffort] {
-		return fmt.Errorf("brain_effort %q must be one of low, medium, high, xhigh, max", cfg.BrainEffort)
+func (c *Config) validate() error {
+	if !validEfforts[c.BrainEffort] {
+		return fmt.Errorf("brain_effort %q must be one of low, medium, high, xhigh, max", c.BrainEffort)
 	}
-	switch cfg.Queue.Mode {
+	switch c.Queue.Mode {
 	case "queue", "interrupt":
 	default:
-		return fmt.Errorf("queue.mode must be \"queue\" or \"interrupt\", not %q", cfg.Queue.Mode)
+		return fmt.Errorf("queue.mode must be \"queue\" or \"interrupt\", not %q", c.Queue.Mode)
 	}
-	switch cfg.Sandbox.GitConfig {
+	switch c.Sandbox.GitConfig {
 	case "read", "deny":
 	default:
-		return fmt.Errorf("sandbox.git_config must be \"read\" or \"deny\", not %q", cfg.Sandbox.GitConfig)
+		return fmt.Errorf("sandbox.git_config must be \"read\" or \"deny\", not %q", c.Sandbox.GitConfig)
 	}
-	if err := cfg.Sandbox.validate(runtime.GOOS); err != nil {
+	if err := c.Sandbox.validate(runtime.GOOS); err != nil {
 		return err
 	}
-	if cfg.MaxChunkSize < minChunkSize {
-		return fmt.Errorf("max_chunk_size %d is too small: use at least %d, or 0 for the default of %d", cfg.MaxChunkSize, minChunkSize, defaultChunkSize)
+	if c.MaxChunkSize < minChunkSize {
+		return fmt.Errorf("max_chunk_size %d is too small: use at least %d, or 0 for the default of %d", c.MaxChunkSize, minChunkSize, defaultChunkSize)
 	}
-	if cfg.MaxMediaMB < 1 || cfg.MaxMediaMB > maxMaxMediaMB {
-		return fmt.Errorf("max_media_mb must be between 1 and %d, not %d", maxMaxMediaMB, cfg.MaxMediaMB)
+	if c.MaxMediaMB < 1 || c.MaxMediaMB > maxMaxMediaMB {
+		return fmt.Errorf("max_media_mb must be between 1 and %d, not %d", maxMaxMediaMB, c.MaxMediaMB)
 	}
-	if cfg.HTTPEnabled() && !isLoopbackAddr(cfg.HTTPListen) {
-		return fmt.Errorf("http_listen %q must be a loopback address such as 127.0.0.1:8765 — the API and dashboard are for this machine only", cfg.HTTPListen)
+	if c.HTTPEnabled() && !isLoopbackAddr(c.HTTPListen) {
+		return fmt.Errorf("http_listen %q must be a loopback address such as 127.0.0.1:8765 — the API and dashboard are for this machine only", c.HTTPListen)
 	}
-	if err := cfg.Backup.validate(); err != nil {
+	if err := c.Backup.validate(); err != nil {
 		return err
 	}
-	if err := cfg.Plaud.validate(); err != nil {
+	if err := c.Plaud.validate(); err != nil {
 		return err
 	}
 
-	for _, b := range cfg.Brains {
+	for _, b := range c.Brains {
 		if b.Name == "" {
 			return fmt.Errorf("every brain needs a name")
 		}
@@ -646,10 +646,10 @@ func (cfg *Config) validate() error {
 	}
 	// Names, groups and the DM brain must be unique across inline brains.
 	// Manifest brains join this check when the brain set is resolved.
-	seenNames := make(map[string]bool, len(cfg.Brains))
-	seenGroups := make(map[string]string, len(cfg.Brains))
+	seenNames := make(map[string]bool, len(c.Brains))
+	seenGroups := make(map[string]string, len(c.Brains))
 	dmBrain := ""
-	for _, b := range cfg.Brains {
+	for _, b := range c.Brains {
 		if seenNames[b.Name] {
 			return fmt.Errorf("duplicate brain name %q", b.Name)
 		}

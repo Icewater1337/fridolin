@@ -505,7 +505,7 @@ func (m *BackupManager) connectDrive(ctx context.Context, job *connectJob) error
 			"--result", answerFor(q), "--non-interactive"}, stderr)
 	}
 	if !m.connected() {
-		return errors.New("Google Drive was not authorised")
+		return errors.New("access to Google Drive was not authorised")
 	}
 	// Prove the link works and create the backup folder.
 	if _, err := m.runner(ctx, []string{"mkdir", remote + ":" + m.cfgs.Get().Backup.Root}, nil); err != nil {
@@ -666,7 +666,7 @@ func (b *Bridge) apiBackupCancel(w http.ResponseWriter, r *http.Request) {
 // deletion the owner meant.
 func (m *BackupManager) StartRun(ids []string, includeBridge bool, trigger string, force bool) error {
 	if !m.connected() {
-		return errors.New("Google Drive is not connected")
+		return errors.New("not connected to Google Drive")
 	}
 	var targets []*Brain
 	for _, br := range m.bm.Brains() {

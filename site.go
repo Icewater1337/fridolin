@@ -397,7 +397,7 @@ func (m *SiteManager) UpdateUser(id string, in SiteUserInput) (SiteUser, error) 
 	}
 	if in.Password != "" {
 		if u.Kind != "password" {
-			return SiteUser{}, errors.New("Google accounts have no password here")
+			return SiteUser{}, errors.New("accounts that sign in with Google have no password here")
 		}
 		h, err := hashSitePassword(in.Password)
 		if err != nil {
@@ -710,7 +710,7 @@ func findNode() (string, error) {
 		found, _ := filepath.Glob(filepath.Join(home, ".nvm/versions/node/v*/bin/node"))
 		slices.SortFunc(found, func(a, b string) int { return compareVersionDirs(b, a) })
 		if len(found) == 0 {
-			return "", errors.New("Node.js is not installed (macOS: brew install node); the site needs version 22 or newer")
+			return "", errors.New("node is not installed (macOS: brew install node); the site needs Node.js 22 or newer")
 		}
 		bin = found[0]
 	}
