@@ -51,8 +51,8 @@ class FakeCalendar:
     events maps a calendar ID to its events, already in start order; busy
     maps a calendar ID to its freebusy slots. errors maps a method name
     ("list", "insert", "delete", "freebusy", "calendarList") to an exception
-    its request raises on execute(). page_size caps the events in one page
-    below maxResults, as Google may.
+    its request raises on execute(). page_size caps the events or calendars
+    in one page below maxResults, as Google may.
     """
 
     def __init__(self, events=None, busy=None, calendars=None):
@@ -62,6 +62,22 @@ class FakeCalendar:
         self.page_size: int | None = None
         self.errors: dict[str, Exception] = {}
         self.calls: list[tuple[str, dict]] = []
+
+    def _page(self, items, kw):
+        """One page of items for a list request; pageToken is an offset here."""
+        offset = int(kw.get("pageToken") or 0)
+        size = min(kw.get("maxResults", 250), self.page_size or 2500)
+        resp = {"items": items[offset:offset + size]}
+        if offset + size < len(items):
+            resp["nextPageToken"] = str(offset + size)
+        return resp
+
+    @staticmethod
+    def _list_next(list_method, previous_request, previous_response):
+        token = previous_response.get("nextPageToken")
+        if not token:
+            return None
+        return list_method(**{**previous_request.kwargs, "pageToken": token})
 
     def _request(self, name, kwargs, result):
         self.calls.append((name, kwargs))
@@ -78,22 +94,11 @@ class FakeCalendar:
 
         class Events:
             def list(self, **kw):
-                def page():
-                    items = fake.events_by_cal.get(kw["calendarId"], [])
-                    offset = int(kw.get("pageToken") or 0)
-                    size = min(kw.get("maxResults", 250), fake.page_size or 2500)
-                    resp = {"items": items[offset:offset + size]}
-                    if offset + size < len(items):
-                        resp["nextPageToken"] = str(offset + size)
-                    return resp
-
-                return fake._request("list", kw, page)
+                items = fake.events_by_cal.get(kw["calendarId"], [])
+                return fake._request("list", kw, lambda: fake._page(items, kw))
 
             def list_next(self, previous_request, previous_response):
-                token = previous_response.get("nextPageToken")
-                if not token:
-                    return None
-                return self.list(**{**previous_request.kwargs, "pageToken": token})
+                return fake._list_next(self.list, previous_request, previous_response)
 
             def insert(self, **kw):
                 return fake._request("insert", kw, lambda: {"id": "new1", **kw["body"]})
@@ -119,7 +124,10 @@ class FakeCalendar:
 
         class CalendarList:
             def list(self, **kw):
-                return fake._request("calendarList", kw, lambda: {"items": fake.calendar_items})
+                return fake._request("calendarList", kw, lambda: fake._page(fake.calendar_items, kw))
+
+            def list_next(self, previous_request, previous_response):
+                return fake._list_next(self.list, previous_request, previous_response)
 
         return CalendarList()
 

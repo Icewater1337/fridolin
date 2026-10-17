@@ -321,6 +321,24 @@ class ListCommandTest(TokenTestCase):
         self.assertEqual(kwargs["timeMin"], "2026-01-06T00:00:00+14:00")
 
 
+class CalendarsCommandTest(TokenTestCase):
+    def test_follows_pages(self):
+        ids = [f"cal{i}@example.com" for i in range(7)]
+        cases = [
+            # name, the brain's calendars (empty: all of them), the ones listed
+            ("unrestricted", [], ids),
+            ("an allowed calendar on the last page", ["cal6@example.com"], ["cal6@example.com"]),
+        ]
+        self.write_token()
+        self.google.service.calendar_items = [{"id": c, "summary": c} for c in ids]
+        self.google.service.page_size = 3
+        for name, allowed, want in cases:
+            with self.subTest(name), mock.patch.object(calendar_tool, "ALLOWED", allowed):
+                code, out, _ = support.run_main(calendar_tool, ["--profile", self.profile, "calendars"])
+                self.assertEqual(code, 0, out)
+                self.assertEqual([c["id"] for c in json.loads(out)["calendars"]], want)
+
+
 class FreeCommandCase(TokenTestCase):
     def free(self, *argv: str) -> tuple[int, dict]:
         self.write_token()

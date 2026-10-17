@@ -542,7 +542,15 @@ def cmd_delete(args) -> None:
 def cmd_calendars(args) -> None:
     """List the calendars this brain may use (all of the account's, if unrestricted)."""
     service = get_service()
-    items = service.calendarList().list(maxResults=250).execute().get("items", [])
+    # An account can have more calendars than fit in one page, and a brain's
+    # calendar on the second page would look as if it did not exist.
+    calendar_list = service.calendarList()
+    request = calendar_list.list(maxResults=250)  # the API's largest page
+    items: list[dict] = []
+    while request is not None:
+        response = request.execute()
+        items.extend(response.get("items", []))
+        request = calendar_list.list_next(request, response)
     out = []
     for c in items:
         if ALLOWED and c["id"] not in ALLOWED:
