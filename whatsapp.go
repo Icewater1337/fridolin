@@ -6,6 +6,7 @@ import (
 	"crypto/sha256"
 	"errors"
 	"fmt"
+	"io"
 	"io/fs"
 	"log"
 	"os"
@@ -73,7 +74,8 @@ type WhatsAppClient struct {
 	handler   InboundHandler
 	onIgnored IgnoredHandler
 	log       waLog.Logger
-	media     mediaDownloader // the client; tests swap in a fake
+	media     mediaDownloader        // the client; tests swap in a fake
+	notify    func(jid, text string) // sendNotice; tests record instead
 
 	// ctx ends when the client disconnects for good. Attachment downloads
 	// run under it, so shutting down does not wait for them.
@@ -108,6 +110,7 @@ func NewWhatsAppClient(cfg func() *Config, store *Store, handler InboundHandler,
 		cancel:    cancel,
 		state:     WAState{Mode: "connecting", Since: time.Now()},
 	}
+	wa.notify = wa.sendNotice
 
 	client.AddEventHandler(wa.eventHandler)
 	return wa, nil
@@ -465,7 +468,10 @@ func (wa *WhatsAppClient) handleDMMessage(msg *events.Message, senderNumber stri
 	text := extractText(msg.Message)
 	quoted := quoteOf(msg.Message)
 
-	mediaPath, caption := wa.downloadAttachment(msg, chatJID)
+	mediaPath, caption, notice := wa.downloadAttachment(msg, chatJID)
+	if notice != "" {
+		go wa.notify(chatJID, notice)
+	}
 	if caption != "" {
 		if text == "" {
 			text = caption
@@ -567,7 +573,12 @@ func (wa *WhatsAppClient) handleGroupMessage(msg *events.Message) {
 	text = stripMentions(cfg.Triggers.Strip(text), ownMentions)
 	quoted := quoteOf(msg.Message)
 
-	mediaPath, caption := wa.downloadAttachment(msg, groupJID)
+	mediaPath, caption, notice := wa.downloadAttachment(msg, groupJID)
+	// Untagged chatter gets no reply. A file always tags a group message,
+	// so this only guards against that rule changing.
+	if notice != "" && !silent {
+		go wa.notify(groupJID, notice)
+	}
 	if caption != "" {
 		caption = stripMentions(cfg.Triggers.Strip(caption), ownMentions)
 		if text == "" {
@@ -591,19 +602,36 @@ func (wa *WhatsAppClient) handleGroupMessage(msg *events.Message) {
 
 // downloadAttachment saves whichever attachment the message carries and
 // returns its local path plus the attachment's caption (both may be empty).
-func (wa *WhatsAppClient) downloadAttachment(msg *events.Message, chatJID string) (path string, caption string) {
+// A notice is what to tell the chat about a file that was not saved.
+func (wa *WhatsAppClient) downloadAttachment(msg *events.Message, chatJID string) (path, caption, notice string) {
 	att, ok := attachmentOf(msg.Message, msg.Info.ID)
 	if !ok {
-		return "", ""
+		return "", "", ""
 	}
+	cfg := wa.cfg()
+	maxBytes := cfg.MaxMediaBytes()
 	ctx, cancel := context.WithTimeout(wa.ctx, mediaDownloadTimeout)
 	defer cancel()
-	path, err := saveAttachment(ctx, wa.media, wa.cfg().MediaDir, att)
-	if err != nil {
+	path, err := saveAttachment(ctx, wa.media, cfg.MediaDir, att, maxBytes)
+	switch {
+	case errors.Is(err, errMediaTooLarge):
+		wa.log.Warnf("Skipped attachment from %s: %v", chatJID, err)
+		return "", att.caption, fmt.Sprintf("⚠️ That file is over the %d MB limit, so I skipped it.", maxBytes>>20)
+	case err != nil:
 		wa.log.Errorf("Failed to download attachment from %s: %v", chatJID, err)
-		return "", att.caption
+		return "", att.caption, ""
 	}
-	return path, att.caption
+	return path, att.caption, ""
+}
+
+// sendNotice tells a chat about a problem with its message, such as a file
+// too large to download. A failure is only logged.
+func (wa *WhatsAppClient) sendNotice(jid, text string) {
+	ctx, cancel := context.WithTimeout(wa.ctx, 30*time.Second)
+	defer cancel()
+	if err := wa.SendMessage(ctx, jid, text); err != nil {
+		wa.log.Warnf("Failed to send notice to %s: %v", jid, err)
+	}
 }
 
 // mediaDownloadTimeout bounds one attachment download. Downloads run on
@@ -622,6 +650,7 @@ type attachment struct {
 	kind    string // image, document, audio or video
 	media   whatsmeow.DownloadableMessage
 	name    string // the name to save it under, before sanitising
+	size    uint64 // the size the message declares; 0 when it does not
 	caption string
 }
 
@@ -631,7 +660,7 @@ func attachmentOf(m *waE2E.Message, id types.MessageID) (attachment, bool) {
 	switch {
 	case m.GetImageMessage() != nil:
 		img := m.GetImageMessage()
-		return attachment{kind: "image", media: img, name: string(id) + mediaExt(img.GetMimetype(), ".jpg"), caption: img.GetCaption()}, true
+		return attachment{kind: "image", media: img, name: string(id) + mediaExt(img.GetMimetype(), ".jpg"), size: img.GetFileLength(), caption: img.GetCaption()}, true
 
 	case m.GetDocumentMessage() != nil:
 		doc := m.GetDocumentMessage()
@@ -641,15 +670,15 @@ func attachmentOf(m *waE2E.Message, id types.MessageID) (attachment, bool) {
 		if name == "" {
 			name = string(id) + mediaExt(doc.GetMimetype(), ".bin")
 		}
-		return attachment{kind: "document", media: doc, name: name, caption: doc.GetCaption()}, true
+		return attachment{kind: "document", media: doc, name: name, size: doc.GetFileLength(), caption: doc.GetCaption()}, true
 
 	case m.GetAudioMessage() != nil:
 		audio := m.GetAudioMessage()
-		return attachment{kind: "audio", media: audio, name: string(id) + mediaExt(audio.GetMimetype(), ".ogg")}, true
+		return attachment{kind: "audio", media: audio, name: string(id) + mediaExt(audio.GetMimetype(), ".ogg"), size: audio.GetFileLength()}, true
 
 	case m.GetVideoMessage() != nil && !m.GetVideoMessage().GetGifPlayback():
 		vid := m.GetVideoMessage()
-		return attachment{kind: "video", media: vid, name: string(id) + mediaExt(vid.GetMimetype(), ".mp4"), caption: vid.GetCaption()}, true
+		return attachment{kind: "video", media: vid, name: string(id) + mediaExt(vid.GetMimetype(), ".mp4"), size: vid.GetFileLength(), caption: vid.GetCaption()}, true
 	}
 	return attachment{}, false
 }
@@ -693,25 +722,112 @@ func mediaExt(mimeType, def string) string {
 	return def
 }
 
+// errMediaTooLarge marks an attachment over max_media_mb.
+var errMediaTooLarge = errors.New("attachment is larger than max_media_mb")
+
 // saveAttachment downloads att into dir and returns where it was saved. It
 // streams the download into a hidden temp file, so the attachment is never
 // held in memory and a brain never sees a half-written file, and names the
 // file only once it is complete. A failed download leaves nothing behind.
-func saveAttachment(ctx context.Context, dl mediaDownloader, dir string, att attachment) (string, error) {
+//
+// A file over maxBytes is refused, before the download when the message
+// declares its size, and as soon as it passes the limit otherwise: the
+// declared size is only the sender's word.
+func saveAttachment(ctx context.Context, dl mediaDownloader, dir string, att attachment, maxBytes int64) (string, error) {
+	if att.size > uint64(maxBytes) {
+		return "", fmt.Errorf("%w: the %s is %d bytes, over the limit of %d", errMediaTooLarge, att.kind, att.size, maxBytes)
+	}
 	tmp, err := os.CreateTemp(dir, ".download-*")
 	if err != nil {
 		return "", fmt.Errorf("saving %s: %w", att.kind, err)
 	}
 	defer os.Remove(tmp.Name()) // a failed download's; a saved one was renamed
-	err = dl.DownloadToFile(ctx, att.media, tmp)
+
+	// The cap cancels ctx once the file passes it, so nothing more is
+	// fetched for this attachment.
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	f := &cappedFile{f: tmp, limit: maxBytes + mediaCipherOverhead, stop: cancel}
+	// whatsmeow does not rewind the file before it tries its next server.
+	// When one fails partway, the next one's bytes follow the partial ones
+	// and the download fails; for a file near the limit, it can pass the
+	// cap instead, and the sender is wrongly told the file is too large.
+	err = dl.DownloadToFile(ctx, att.media, f)
+	if err == nil && !f.over {
+		// The cap leaves room for the encryption's padding and MAC, so check
+		// the decrypted file too.
+		if st, serr := tmp.Stat(); serr != nil {
+			err = serr
+		} else if st.Size() > maxBytes {
+			f.over = true
+		}
+	}
 	if cerr := tmp.Close(); err == nil {
 		err = cerr
+	}
+	if f.over {
+		return "", fmt.Errorf("%w: the %s passed the limit of %d bytes while downloading", errMediaTooLarge, att.kind, maxBytes)
 	}
 	if err != nil {
 		return "", fmt.Errorf("downloading %s: %w", att.kind, err)
 	}
 	return placeMedia(tmp.Name(), dir, att.name)
 }
+
+// mediaCipherOverhead is how much larger than a file its encrypted download
+// can be: up to 16 bytes of AES-CBC padding and a 10-byte MAC.
+const mediaCipherOverhead = 16 + 10
+
+// cappedFile is the file whatsmeow downloads into. It refuses to grow past
+// limit, and then calls stop. whatsmeow must not get the *os.File itself:
+// it would set aside as much disk as the server announces before the cap
+// could act. Nor may cappedFile embed it: io.Copy would use the file's
+// ReadFrom and write around the cap.
+type cappedFile struct {
+	f     *os.File
+	limit int64
+	stop  func()
+	over  bool
+}
+
+// refuse marks the file as over the cap and ends the download. Its error
+// counts as a cancellation too: after any other error, whatsmeow would try
+// its next server.
+func (c *cappedFile) refuse() error {
+	c.over = true
+	c.stop()
+	return fmt.Errorf("%w: %w", errMediaTooLarge, context.Canceled)
+}
+
+func (c *cappedFile) Write(p []byte) (int, error) {
+	pos, err := c.f.Seek(0, io.SeekCurrent)
+	if err != nil {
+		return 0, err
+	}
+	if pos+int64(len(p)) > c.limit {
+		return 0, c.refuse()
+	}
+	return c.f.Write(p)
+}
+
+func (c *cappedFile) WriteAt(p []byte, off int64) (int, error) {
+	if off+int64(len(p)) > c.limit {
+		return 0, c.refuse()
+	}
+	return c.f.WriteAt(p, off)
+}
+
+func (c *cappedFile) Truncate(size int64) error {
+	if size > c.limit {
+		return c.refuse()
+	}
+	return c.f.Truncate(size)
+}
+
+func (c *cappedFile) Read(p []byte) (int, error)                { return c.f.Read(p) }
+func (c *cappedFile) ReadAt(p []byte, off int64) (int, error)   { return c.f.ReadAt(p, off) }
+func (c *cappedFile) Seek(off int64, whence int) (int64, error) { return c.f.Seek(off, whence) }
+func (c *cappedFile) Stat() (os.FileInfo, error)                { return c.f.Stat() }
 
 // placeMedia renames the finished download at tmp into dir. It first claims
 // a free name with O_EXCL, which fails when anything is there, even a

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -16,8 +17,10 @@ import (
 
 	"go.mau.fi/whatsmeow"
 	"go.mau.fi/whatsmeow/proto/waE2E"
+	"go.mau.fi/whatsmeow/store"
 	"go.mau.fi/whatsmeow/types"
 	"go.mau.fi/whatsmeow/types/events"
+	"go.mau.fi/whatsmeow/util/cbcutil"
 	waLog "go.mau.fi/whatsmeow/util/log"
 	"google.golang.org/protobuf/proto"
 )
@@ -86,6 +89,7 @@ type testWhatsApp struct {
 	mu      sync.Mutex
 	ignored []string // chat JIDs offered on the dashboard
 	logs    []string // "LEVEL message"
+	notices chan string
 }
 
 // testWaLogger records what the client logs through whatsmeow's logger.
@@ -105,7 +109,7 @@ func (l testWaLogger) Sub(string) waLog.Logger                { return l }
 func newTestWhatsApp(t *testing.T) *testWhatsApp {
 	t.Helper()
 	cfg := &Config{AllowedNumbers: []string{"15551234567"}, MediaDir: t.TempDir(), MaxChunkSize: 4000}
-	tw := &testWhatsApp{inbound: make(chan Inbound, 4)}
+	tw := &testWhatsApp{inbound: make(chan Inbound, 4), notices: make(chan string, 4)}
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
 	tw.WhatsAppClient = &WhatsAppClient{
@@ -113,6 +117,7 @@ func newTestWhatsApp(t *testing.T) *testWhatsApp {
 		log:     testWaLogger{tw},
 		ctx:     ctx,
 		cancel:  cancel,
+		notify:  func(jid, text string) { tw.notices <- jid + ": " + text },
 		handler: func(_ context.Context, m Inbound) { tw.inbound <- m },
 		onIgnored: func(_, jid, _, _, _ string) {
 			tw.mu.Lock()
@@ -379,29 +384,87 @@ func TestSafeMediaPathNeverReusesAName(t *testing.T) {
 // fakeDownloader stands in for whatsmeow's media download. Like whatsmeow,
 // it writes the body into the file with io.Copy; then it fails with err, or,
 // with block set, waits for the context to end.
+//
+// With encrypted set, it does what whatsmeow does with a real attachment:
+// the body arrives AES-CBC encrypted with a MAC after it, up to
+// mediaCipherOverhead bytes larger, and is then decrypted in place.
 type fakeDownloader struct {
-	body  string
-	err   error
-	block bool
+	body      string
+	encrypted bool
+	err       error
+	block     bool
 
-	mu    sync.Mutex
-	calls int
-	ctx   context.Context // of the last call
+	mu      sync.Mutex
+	calls   int
+	ctx     context.Context // of the last call
+	sent    int64           // bytes the download carried
+	copied  int64           // bytes the file took
+	stopped bool            // the context ended while copying
 }
 
+// fakeMediaKey and fakeMediaIV encrypt the fake's attachments; whatsmeow
+// derives both from the media key in the message.
+var (
+	fakeMediaKey = bytes.Repeat([]byte{7}, 32)
+	fakeMediaIV  = bytes.Repeat([]byte{9}, 16)
+)
+
 func (d *fakeDownloader) DownloadToFile(ctx context.Context, _ whatsmeow.DownloadableMessage, f whatsmeow.File) error {
+	wire := []byte(d.body)
+	if d.encrypted {
+		enc, err := cbcutil.Encrypt(fakeMediaKey, fakeMediaIV, wire[:len(wire):len(wire)])
+		if err != nil {
+			return err
+		}
+		wire = append(enc, make([]byte, fakeMACLength)...) // whatsmeow checks the MAC; the fake does not
+	}
 	d.mu.Lock()
 	d.calls++
 	d.ctx = ctx
+	d.sent = int64(len(wire))
 	d.mu.Unlock()
-	if _, err := io.Copy(f, io.TeeReader(strings.NewReader(d.body), io.Discard)); err != nil {
+	n, err := io.Copy(f, io.TeeReader(bytes.NewReader(wire), io.Discard))
+	d.mu.Lock()
+	d.copied, d.stopped = n, ctx.Err() != nil
+	d.mu.Unlock()
+	if err != nil {
 		return err
+	}
+	if d.encrypted {
+		if err := decryptInPlace(f, n); err != nil {
+			return err
+		}
 	}
 	if d.block {
 		<-ctx.Done()
 		return ctx.Err()
 	}
 	return d.err
+}
+
+// fakeMACLength is the length of whatsmeow's media MAC.
+const fakeMACLength = 10
+
+// decryptInPlace turns the n encrypted bytes in f back into the attachment
+// the way whatsmeow's DownloadToFile does: it reads the MAC off the end,
+// truncates it away, and decrypts the rest in place, which writes over the
+// file with WriteAt and truncates off the padding.
+func decryptInPlace(f whatsmeow.File, n int64) error {
+	mac := make([]byte, fakeMACLength)
+	if _, err := f.ReadAt(mac, n-fakeMACLength); err != nil {
+		return err
+	}
+	if err := f.Truncate(n - fakeMACLength); err != nil {
+		return err
+	}
+	if _, err := f.Seek(0, io.SeekStart); err != nil {
+		return err
+	}
+	if err := cbcutil.DecryptFile(fakeMediaKey, fakeMediaIV, f); err != nil {
+		return err
+	}
+	_, err := f.Seek(0, io.SeekStart)
+	return err
 }
 
 func (d *fakeDownloader) callCount() int {
@@ -425,25 +488,27 @@ func dirNames(t *testing.T, dir string) []string {
 }
 
 // All four kinds of attachment go through one path; the name a file is
-// saved under comes from one table of MIME types.
+// saved under comes from one table of MIME types, and each kind passes on
+// the size its message declares.
 func TestAttachmentOf(t *testing.T) {
 	cases := []struct {
 		name          string
 		msg           *waE2E.Message
 		kind, saveAs  string
 		caption       string
+		size          uint64
 		noAttachments bool
 	}{
-		{name: "jpeg photo", msg: &waE2E.Message{ImageMessage: &waE2E.ImageMessage{Mimetype: proto.String("image/jpeg"), Caption: proto.String("look")}}, kind: "image", saveAs: "3EB0TEST.jpg", caption: "look"},
+		{name: "jpeg photo", msg: &waE2E.Message{ImageMessage: &waE2E.ImageMessage{Mimetype: proto.String("image/jpeg"), Caption: proto.String("look"), FileLength: proto.Uint64(1)}}, kind: "image", saveAs: "3EB0TEST.jpg", caption: "look", size: 1},
 		{name: "png photo", msg: &waE2E.Message{ImageMessage: &waE2E.ImageMessage{Mimetype: proto.String("image/png")}}, kind: "image", saveAs: "3EB0TEST.png"},
 		{name: "photo of no known type", msg: &waE2E.Message{ImageMessage: &waE2E.ImageMessage{}}, kind: "image", saveAs: "3EB0TEST.jpg"},
-		{name: "named document", msg: &waE2E.Message{DocumentMessage: &waE2E.DocumentMessage{FileName: proto.String("Q3 report.pdf"), Mimetype: proto.String("application/pdf"), Caption: proto.String("numbers")}}, kind: "document", saveAs: "Q3 report.pdf", caption: "numbers"},
+		{name: "named document", msg: &waE2E.Message{DocumentMessage: &waE2E.DocumentMessage{FileName: proto.String("Q3 report.pdf"), Mimetype: proto.String("application/pdf"), Caption: proto.String("numbers"), FileLength: proto.Uint64(2)}}, kind: "document", saveAs: "Q3 report.pdf", caption: "numbers", size: 2},
 		{name: "unnamed spreadsheet", msg: &waE2E.Message{DocumentMessage: &waE2E.DocumentMessage{Mimetype: proto.String("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")}}, kind: "document", saveAs: "3EB0TEST.xlsx"},
 		{name: "unnamed document of no known type", msg: &waE2E.Message{DocumentMessage: &waE2E.DocumentMessage{Mimetype: proto.String("application/x-unknown")}}, kind: "document", saveAs: "3EB0TEST.bin"},
-		{name: "voice note", msg: &waE2E.Message{AudioMessage: &waE2E.AudioMessage{Mimetype: proto.String("audio/ogg; codecs=opus")}}, kind: "audio", saveAs: "3EB0TEST.ogg"},
+		{name: "voice note", msg: &waE2E.Message{AudioMessage: &waE2E.AudioMessage{Mimetype: proto.String("audio/ogg; codecs=opus"), FileLength: proto.Uint64(3)}}, kind: "audio", saveAs: "3EB0TEST.ogg", size: 3},
 		{name: "m4a audio", msg: &waE2E.Message{AudioMessage: &waE2E.AudioMessage{Mimetype: proto.String("audio/mp4")}}, kind: "audio", saveAs: "3EB0TEST.m4a"},
 		{name: "mp3 audio", msg: &waE2E.Message{AudioMessage: &waE2E.AudioMessage{Mimetype: proto.String("Audio/MPEG")}}, kind: "audio", saveAs: "3EB0TEST.mp3"},
-		{name: "mp4 video", msg: &waE2E.Message{VideoMessage: &waE2E.VideoMessage{Mimetype: proto.String("video/mp4"), Caption: proto.String("clip")}}, kind: "video", saveAs: "3EB0TEST.mp4", caption: "clip"},
+		{name: "mp4 video", msg: &waE2E.Message{VideoMessage: &waE2E.VideoMessage{Mimetype: proto.String("video/mp4"), Caption: proto.String("clip"), FileLength: proto.Uint64(4)}}, kind: "video", saveAs: "3EB0TEST.mp4", caption: "clip", size: 4},
 		{name: "quicktime video", msg: &waE2E.Message{VideoMessage: &waE2E.VideoMessage{Mimetype: proto.String("video/quicktime")}}, kind: "video", saveAs: "3EB0TEST.mov"},
 		{name: "webm video with parameters", msg: &waE2E.Message{VideoMessage: &waE2E.VideoMessage{Mimetype: proto.String("video/webm; codecs=vp9")}}, kind: "video", saveAs: "3EB0TEST.webm"},
 		{name: "GIF reaction", msg: &waE2E.Message{VideoMessage: &waE2E.VideoMessage{GifPlayback: proto.Bool(true)}}, noAttachments: true},
@@ -458,8 +523,8 @@ func TestAttachmentOf(t *testing.T) {
 			if !ok {
 				return
 			}
-			if att.kind != c.kind || att.name != c.saveAs || att.caption != c.caption || att.media == nil {
-				t.Errorf("got kind %q, name %q, caption %q, media %v; want %q, %q, %q", att.kind, att.name, att.caption, att.media, c.kind, c.saveAs, c.caption)
+			if att.kind != c.kind || att.name != c.saveAs || att.caption != c.caption || att.size != c.size || att.media == nil {
+				t.Errorf("got kind %q, name %q, caption %q, size %d, media %v; want %q, %q, %q, %d", att.kind, att.name, att.caption, att.size, att.media, c.kind, c.saveAs, c.caption, c.size)
 			}
 		})
 	}
@@ -473,7 +538,7 @@ func TestSaveAttachment(t *testing.T) {
 
 	t.Run("saved under its name", func(t *testing.T) {
 		dir := t.TempDir()
-		path, err := saveAttachment(context.Background(), &fakeDownloader{body: "%PDF-1.7"}, dir, doc)
+		path, err := saveAttachment(context.Background(), &fakeDownloader{body: "%PDF-1.7"}, dir, doc, 1<<20)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -493,7 +558,7 @@ func TestSaveAttachment(t *testing.T) {
 
 	t.Run("sanitised name", func(t *testing.T) {
 		dir := t.TempDir()
-		path, err := saveAttachment(context.Background(), &fakeDownloader{body: "x"}, dir, attachment{kind: "document", media: &waE2E.DocumentMessage{}, name: "../a\nb.pdf"})
+		path, err := saveAttachment(context.Background(), &fakeDownloader{body: "x"}, dir, attachment{kind: "document", media: &waE2E.DocumentMessage{}, name: "../a\nb.pdf"}, 1<<20)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -512,7 +577,7 @@ func TestSaveAttachment(t *testing.T) {
 		if err := os.Symlink(outside, filepath.Join(dir, "scan-2.pdf")); err != nil {
 			t.Fatal(err)
 		}
-		path, err := saveAttachment(context.Background(), &fakeDownloader{body: "second"}, dir, doc)
+		path, err := saveAttachment(context.Background(), &fakeDownloader{body: "second"}, dir, doc, 1<<20)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -550,7 +615,7 @@ func TestSaveAttachment(t *testing.T) {
 				ctx, cancel = c.ctx()
 				defer cancel()
 			}
-			path, err := saveAttachment(ctx, c.dl, dir, doc)
+			path, err := saveAttachment(ctx, c.dl, dir, doc, 1<<20)
 			if !errors.Is(err, c.want) {
 				t.Errorf("err = %v, want %v", err, c.want)
 			}
@@ -617,4 +682,179 @@ func TestHandleMessageSavesAttachment(t *testing.T) {
 			t.Errorf("left behind %q", names)
 		}
 	})
+}
+
+// A file over the limit is never saved. One that declares its size is
+// refused before anything is downloaded; one that understates it is cut off
+// once it passes the limit, so a lying sender cannot fill the disk.
+func TestSaveAttachmentSizeLimit(t *testing.T) {
+	// A multiple of the AES block size, as every limit in MB is, so that a
+	// file at the limit needs all of mediaCipherOverhead while encrypted.
+	const limit = 1024
+	cases := []struct {
+		name      string
+		declared  uint64
+		body      int  // the attachment's real size
+		encrypted bool // downloaded the way whatsmeow downloads it
+		saved     bool
+		calls     int
+	}{
+		{name: "declared and real size at the limit", declared: limit, body: limit, saved: true, calls: 1},
+		{name: "no declared size, under the limit", body: limit - 1, saved: true, calls: 1},
+		{name: "declares more than the limit", declared: limit + 1},
+		{name: "declares far more than the limit", declared: 2 << 30},
+		{name: "understates by a byte", declared: 10, body: limit + 1, calls: 1},
+		{name: "understates by a lot", declared: 10, body: 50 * limit, calls: 1},
+		{name: "no declared size, over the limit", body: 50 * limit, calls: 1},
+
+		// Encrypted, a file is up to mediaCipherOverhead bytes larger while it
+		// downloads; it must still fit when it is within the limit.
+		{name: "encrypted, one byte", body: 1, encrypted: true, saved: true, calls: 1},
+		{name: "encrypted, just under the limit", body: limit - 8, encrypted: true, saved: true, calls: 1},
+		{name: "encrypted, at the limit", body: limit, encrypted: true, saved: true, calls: 1},
+		{name: "encrypted, a byte over the limit", body: limit + 1, encrypted: true, calls: 1},
+		{name: "encrypted, just over the limit", body: limit + 8, encrypted: true, calls: 1},
+		{name: "encrypted, a block over the limit", body: limit + 16, encrypted: true, calls: 1},
+		{name: "encrypted, far over the limit", body: 50 * limit, encrypted: true, calls: 1},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			dir := t.TempDir()
+			dl := &fakeDownloader{body: strings.Repeat("x", c.body), encrypted: c.encrypted}
+			att := attachment{kind: "video", media: &waE2E.VideoMessage{}, name: "clip.mp4", size: c.declared}
+			path, err := saveAttachment(context.Background(), dl, dir, att, limit)
+			if dl.callCount() != c.calls {
+				t.Errorf("downloaded %d times, want %d", dl.callCount(), c.calls)
+			}
+			if !c.saved {
+				if !errors.Is(err, errMediaTooLarge) {
+					t.Errorf("err = %v, want errMediaTooLarge", err)
+				}
+				if names := dirNames(t, dir); len(names) != 0 {
+					t.Errorf("left behind %q", names)
+				}
+				if dl.copied > limit+mediaCipherOverhead {
+					t.Errorf("the file took %d bytes, more than the limit allows", dl.copied)
+				}
+				if dl.sent > limit+mediaCipherOverhead && !dl.stopped {
+					t.Error("the download was not cancelled when the file passed the cap")
+				}
+				return
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got, err := os.ReadFile(path); err != nil || string(got) != dl.body {
+				t.Errorf("saved %d bytes (%v), want the %d sent, unchanged", len(got), err, c.body)
+			}
+		})
+	}
+}
+
+// cappedFile refuses every way whatsmeow could grow the file past the cap,
+// and allows everything up to it. A refusal counts as a cancellation, which
+// whatsmeow does not retry on its next server.
+func TestCappedFile(t *testing.T) {
+	ops := []struct {
+		name string
+		op   func(f whatsmeow.File) error
+		over bool
+	}{
+		{"write up to the cap", func(f whatsmeow.File) error { _, err := f.Write(make([]byte, 10)); return err }, false},
+		{"write past the cap", func(f whatsmeow.File) error { _, err := f.Write(make([]byte, 11)); return err }, true},
+		{"write after a seek past the cap", func(f whatsmeow.File) error {
+			if _, err := f.Seek(8, io.SeekStart); err != nil {
+				return err
+			}
+			_, err := f.Write(make([]byte, 3))
+			return err
+		}, true},
+		{"write at the end of the cap", func(f whatsmeow.File) error { _, err := f.WriteAt(make([]byte, 2), 8); return err }, false},
+		{"write at past the cap", func(f whatsmeow.File) error { _, err := f.WriteAt(make([]byte, 3), 8); return err }, true},
+		{"truncate to the cap", func(f whatsmeow.File) error { return f.Truncate(10) }, false},
+		{"truncate past the cap", func(f whatsmeow.File) error { return f.Truncate(11) }, true},
+		{"copy past the cap", func(f whatsmeow.File) error {
+			_, err := io.Copy(f, io.TeeReader(strings.NewReader(strings.Repeat("x", 11)), io.Discard))
+			return err
+		}, true},
+	}
+	for _, c := range ops {
+		t.Run(c.name, func(t *testing.T) {
+			tmp, err := os.CreateTemp(t.TempDir(), "capped")
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer tmp.Close()
+			stopped := false
+			f := &cappedFile{f: tmp, limit: 10, stop: func() { stopped = true }}
+			err = c.op(f)
+			if c.over != errors.Is(err, errMediaTooLarge) || c.over != f.over || c.over != stopped {
+				t.Errorf("err %v, over %v, stopped %v; want refused = %v", err, f.over, stopped, c.over)
+			}
+			if c.over && !errors.Is(err, context.Canceled) {
+				t.Errorf("err %v, want it to count as context.Canceled", err)
+			}
+			if !c.over && err != nil {
+				t.Errorf("unexpected error: %v", err)
+			}
+			if st, _ := tmp.Stat(); st.Size() > 10 {
+				t.Errorf("the file grew to %d bytes", st.Size())
+			}
+		})
+	}
+}
+
+// An attachment over max_media_mb is skipped without a download; the
+// sender is told, in a DM and in a group, and the caption still reaches the
+// brain.
+func TestHandleMessageSkipsOversizedAttachment(t *testing.T) {
+	contact := mustJID(t, testDMChat)
+	backup := &waE2E.Message{DocumentMessage: &waE2E.DocumentMessage{
+		FileName: proto.String("backup.zip"), Caption: proto.String("keep this"),
+		FileLength: proto.Uint64(101 << 20),
+	}}
+	cases := []struct {
+		name, chat string
+		evt        func(tw *testWhatsApp) *events.Message
+	}{
+		{"DM", testDMChat, func(*testWhatsApp) *events.Message {
+			evt := textEvent(types.MessageSource{Chat: contact, Sender: contact}, "")
+			evt.Message = backup
+			return evt
+		}},
+		{"group", testGroup, func(tw *testWhatsApp) *events.Message {
+			tw.cfg().AllowedGroups = []string{testGroup}
+			// The group path looks the group up; a client that never
+			// connected fails that at once, without the network.
+			tw.client = whatsmeow.NewClient(&store.Device{}, waLog.Noop)
+			return groupEvent(backup)
+		}},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			tw := newTestWhatsApp(t)
+			dl := &fakeDownloader{body: "x"}
+			tw.media = dl
+			tw.handle(t, c.evt(tw))
+
+			m, ok := tw.next(2 * time.Second)
+			if !ok || m.JID != c.chat || m.Text != "keep this" || len(m.Media) != 0 || m.Silent {
+				t.Errorf("got %+v (delivered %v), want the caption without the file", m, ok)
+			}
+			select {
+			case n := <-tw.notices:
+				if want := c.chat + ": ⚠️ That file is over the 100 MB limit, so I skipped it."; n != want {
+					t.Errorf("notice %q, want %q", n, want)
+				}
+			case <-time.After(2 * time.Second):
+				t.Error("the sender was not told")
+			}
+			if dl.callCount() != 0 {
+				t.Error("the file was downloaded anyway")
+			}
+			if names := dirNames(t, tw.cfg().MediaDir); len(names) != 0 {
+				t.Errorf("left behind %q", names)
+			}
+		})
+	}
 }
