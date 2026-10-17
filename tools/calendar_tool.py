@@ -69,7 +69,7 @@ from datetime import datetime, time, timedelta
 from pathlib import Path
 from time import sleep
 from typing import NoReturn
-from zoneinfo import ZoneInfo
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 SCOPES = ["https://www.googleapis.com/auth/calendar"]
 
@@ -83,6 +83,11 @@ DATA_DIR = Path(
 # The calendars the dashboard allowed for this brain (empty: no restriction).
 ALLOWED = [c for c in os.environ.get("BRIDGE_CALENDARS", "").split(",") if c]
 DEFAULT_CALENDAR = os.environ.get("BRIDGE_CALENDAR_DEFAULT") or (ALLOWED[0] if ALLOWED else "primary")
+
+# What ZoneInfo raises for a name it cannot load: unknown, malformed (an
+# absolute or ../ path, a trailing slash), or a zone file it cannot read.
+# Anything else is a bug, and calling it a bad timezone would hide it.
+ZONE_ERRORS = (ZoneInfoNotFoundError, ValueError, OSError)
 
 # Set from CLI args in main().
 _profile: str | None = None
@@ -124,13 +129,13 @@ def resolve_timezone(name: str | None) -> ZoneInfo:
     if explicit:
         try:
             return ZoneInfo(explicit)
-        except Exception:
+        except ZONE_ERRORS:
             err(f"Unknown timezone: {explicit!r}. Use an IANA name such as 'Europe/Berlin'.")
 
     if detected := system_timezone_name():
         try:
             return ZoneInfo(detected)
-        except Exception:
+        except ZONE_ERRORS:
             pass
 
     # Guessing here would create events at the wrong time and look like the
@@ -689,7 +694,6 @@ def main() -> None:
 
     global _profile, _timezone
     _profile = args.profile
-    _timezone = resolve_timezone(args.timezone)
 
     command = {
         "list": cmd_list,
@@ -702,6 +706,7 @@ def main() -> None:
     # The one exception boundary: whatever goes wrong, stdout is a JSON error
     # the assistant can read, never just a traceback on stderr.
     try:
+        _timezone = resolve_timezone(args.timezone)
         command(args)
     except Exception as e:
         err(describe_error(e))

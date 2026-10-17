@@ -545,6 +545,51 @@ class EnsureTimezoneTest(CalendarTestCase):
         self.assertIn("Cannot parse datetime", json.loads(out)["error"])
 
 
+class ResolveTimezoneTest(CalendarTestCase):
+    def test_names_zoneinfo_cannot_load_are_a_json_error(self):
+        cases = [
+            ("unknown", "Not/AZone"),
+            ("a region, not a zone", "Europe"),
+            ("a relative path", "../etc/passwd"),
+            ("an absolute path", "/etc/localtime"),
+            ("a trailing slash", "Europe/Berlin/"),
+        ]
+        for name, given in cases:
+            with self.subTest(name):
+                code, out, _ = support.run(calendar_tool.resolve_timezone, given)
+                self.assertEqual(code, 1)
+                self.assertIn("Unknown timezone", json.loads(out)["error"])
+
+    def test_an_unreadable_zone_file_is_a_json_error(self):
+        with mock.patch.object(calendar_tool, "ZoneInfo", side_effect=PermissionError("denied")):
+            code, out, _ = support.run(calendar_tool.resolve_timezone, "Europe/Berlin")
+        self.assertEqual(code, 1)
+        self.assertIn("Unknown timezone", json.loads(out)["error"])
+
+    def test_a_detected_name_zoneinfo_cannot_load_asks_for_one(self):
+        os.environ.pop("CALENDAR_TZ")
+        with mock.patch.object(calendar_tool, "system_timezone_name", return_value="Not/AZone"):
+            code, out, _ = support.run(calendar_tool.resolve_timezone, None)
+        self.assertEqual(code, 1)
+        self.assertIn("Could not determine your timezone", json.loads(out)["error"])
+
+    def test_a_bug_is_not_reported_as_a_bad_timezone(self):
+        boom = mock.patch.object(calendar_tool, "ZoneInfo", side_effect=RuntimeError("boom"))
+        with self.subTest("explicit name"), boom:
+            self.assertRaises(RuntimeError, calendar_tool.resolve_timezone, "Europe/Berlin")
+        # Its own patch.dict brings CALENDAR_TZ back for the next subtest,
+        # which would otherwise detect the host's timezone, or find none.
+        with self.subTest("detected name"), boom, mock.patch.dict(os.environ), \
+                mock.patch.object(calendar_tool, "system_timezone_name", return_value="Europe/Berlin"):
+            os.environ.pop("CALENDAR_TZ", None)
+            self.assertRaises(RuntimeError, calendar_tool.resolve_timezone, None)
+        with self.subTest("from the command line"), boom:
+            code, out, err = support.run_main(calendar_tool, ["calendars"])
+            self.assertEqual(code, 1)
+            self.assertEqual(json.loads(out), {"error": "RuntimeError: boom"})
+            self.assertIn("Traceback", err)
+
+
 class FormatEventTest(unittest.TestCase):
     def test_timed_and_all_day(self):
         timed = calendar_tool.format_event({
