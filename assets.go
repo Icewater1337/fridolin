@@ -7,9 +7,11 @@ import (
 )
 
 // The dashboard and the brain templates are compiled into the binary, so a
-// built bridge needs nothing else from the checkout to serve them.
+// built bridge needs nothing else from the checkout to serve them. Only the
+// page is embedded: web/ also holds its JavaScript tests and the package.json
+// node reads for them.
 //
-//go:embed web
+//go:embed web/index.html web/favicon.png web/assets
 var webFS embed.FS
 
 //go:embed examples/brain-prompt.example.md examples/skills/*.md

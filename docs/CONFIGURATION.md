@@ -8,7 +8,9 @@ the `FRIDOLIN_CONFIG` environment variable points (`--config` wins). A
 `config.json` in the current directory is not used. On first start a safe
 starter config is written there. Changes made in the dashboard apply
 immediately; a few runtime settings (marked *restart*) need a restart, which
-the dashboard offers.
+the dashboard offers: once one differs from the value the bridge started
+with, every dashboard tab shows a "Restart the bridge to apply" banner until
+the bridge restarts or the setting is changed back.
 
 Validate at any time:
 

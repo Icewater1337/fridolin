@@ -119,8 +119,18 @@ Reopen the dashboard with `./fridolin open`.
   tests of the site run it too and skip without its `node_modules`.
 - The dashboard is plain HTML/CSS/JS in `web/` (no build step), embedded into
   the binary — rebuild after changing it. It runs under a strict CSP: no
-  inline scripts or styles. `make test-web` syntax-checks every module and
-  runs `node --test` on `web/**/*.test.js` files.
+  inline scripts or styles. Its ES modules live in `web/assets`: `app/` (the
+  entry point and the plumbing every page shares), `pages/` (one module per
+  page), `components/` (shared pieces of UI) and `lib/` (the element builder
+  and pure helpers, which know nothing about the app). Pages import from
+  `app/`, `components/` and `lib/`, never from each other; `lib/` imports
+  nothing outside itself. Pages load on first visit (the route table is
+  `app/routes.js`), so once the bridge runs another version an open tab
+  asks for a reload instead of mixing two builds. Its tests need Node 22+
+  and nothing installed: `make test-web` syntax-checks every module and
+  runs `node --test` on `web/**/*.test.js` files (`web/test`). They cover
+  the pure helpers and check that every import resolves and keeps those
+  layers.
 - Run `scripts/install-hooks.sh` before committing. The hooks refuse commits
   and pushes containing phone numbers, WhatsApp JIDs, emails, home paths or
   tokens. Use placeholders: `15551234567`, `120363000000000000@g.us`,

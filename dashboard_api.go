@@ -115,6 +115,9 @@ type statusResponse struct {
 	Backup     backupSummary  `json:"backup"`
 	Ingest     bool           `json:"ingest"`
 	Pending    int            `json:"debouncing"`
+	// Settings saved since the start that only apply after a restart. The
+	// dashboard shows its restart banner from this, in every tab.
+	RestartRequired []string `json:"restart_required"`
 }
 
 type waStatus struct {
@@ -178,12 +181,17 @@ func (b *Bridge) apiStatus(w http.ResponseWriter, r *http.Request) {
 		Backup:     b.backup.Summary(),
 		Ingest:     cfg.Ingest.Enabled,
 		Pending:    b.deb.Pending(),
+
+		RestartRequired: b.cfgs.RestartRequired(),
 	}
 	if resp.Issues == nil {
 		resp.Issues = []BrainIssue{}
 	}
 	if resp.Warnings == nil {
 		resp.Warnings = []string{}
+	}
+	if resp.RestartRequired == nil {
+		resp.RestartRequired = []string{}
 	}
 	if cfg.AnyoneCanDM() {
 		resp.Warnings = append(resp.Warnings, "allowed_numbers is empty, so anyone who can message this WhatsApp account can use the assistant. Add your number under Settings → Access.")

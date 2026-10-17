@@ -1,0 +1,8 @@
+{
+  "private": true,
+  "description": "Marks the dashboard's modules as ES modules for node --test. Nothing is built or installed.",
+  "type": "module",
+  "scripts": {
+    "test": "node --test test/*.test.js"
+  }
+}

@@ -187,7 +187,7 @@ class ReconnectHintTest(CalendarTestCase):
     def test_names_buttons_the_dashboard_shows(self):
         # The brain's Calendar card offers "Connect Google Calendar" until it
         # is connected, and "Sign in again" once Google refuses the sign-in.
-        js = (support.TOOLS_DIR.parent / "web" / "assets" / "calendar.js").read_text(encoding="utf-8")
+        js = (support.TOOLS_DIR.parent / "web" / "assets" / "components" / "calendar.js").read_text(encoding="utf-8")
         with mock.patch.dict(os.environ, {"BRIDGE_BRAIN_ID": "work"}):
             hint = calendar_tool.reconnect_hint()
         for label in ("Sign in again", "Connect Google Calendar"):

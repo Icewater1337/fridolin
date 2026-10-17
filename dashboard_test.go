@@ -137,6 +137,35 @@ func TestDashboardGuards(t *testing.T) {
 	}
 }
 
+// The page's modules are served as JavaScript, which browsers require of
+// module scripts. The JavaScript tests and the package.json that marks the
+// modules for node sit in web/ too, but are not part of the page.
+func TestDashboardServesOnlyThePage(t *testing.T) {
+	tb := newTestBridge(t, "")
+	cases := []struct {
+		path string
+		want int
+	}{
+		{"/", 200},
+		{"/favicon.png", 200},
+		{"/assets/app/main.js", 200},
+		{"/assets/lib/format.js", 200},
+		{"/package.json", 404},
+		{"/test/format.test.js", 404},
+	}
+	for _, c := range cases {
+		t.Run(c.path, func(t *testing.T) {
+			w := tb.do("GET", c.path, nil)
+			if w.Code != c.want {
+				t.Fatalf("GET %s: %d, want %d", c.path, w.Code, c.want)
+			}
+			if ct := w.Header().Get("Content-Type"); c.want == 200 && strings.HasSuffix(c.path, ".js") && !strings.Contains(ct, "javascript") {
+				t.Errorf("GET %s: Content-Type %q, want JavaScript", c.path, ct)
+			}
+		})
+	}
+}
+
 // TestStatusWarnsWhenBrainsInheritYourClaudeSetup: inherit_claude_user_config
 // has no dashboard field, so the status says when it is on.
 func TestStatusWarnsWhenBrainsInheritYourClaudeSetup(t *testing.T) {
@@ -877,6 +906,58 @@ func TestPutConfigKeepsBrainsAndReportsRestart(t *testing.T) {
 	}
 	if w := tb.do("PUT", "/api/config", map[string]any{"etag": got.ETag, "config": c}); w.Code != 409 {
 		t.Errorf("stale etag: %d, want 409", w.Code)
+	}
+}
+
+// A setting read only at startup stays pending in /api/status until the
+// restart, so the dashboard's restart banner survives a reload and shows in
+// every tab. Set back to the value the bridge started with, it is not
+// pending any more.
+func TestStatusReportsSettingsWaitingForRestart(t *testing.T) {
+	tb := newTestBridge(t, "")
+	status := func(t *testing.T) []string {
+		t.Helper()
+		var st struct {
+			RestartRequired []string `json:"restart_required"`
+		}
+		if err := json.Unmarshal(tb.do("GET", "/api/status", nil).Body.Bytes(), &st); err != nil || st.RestartRequired == nil {
+			t.Fatalf("status restart_required = %v (%v), want a list", st.RestartRequired, err)
+		}
+		return st.RestartRequired
+	}
+	if got := status(t); len(got) != 0 {
+		t.Fatalf("at start: restart_required = %v, want none", got)
+	}
+	steps := []struct {
+		name, logLevel string
+		want           []string
+	}{
+		{"changed", "debug", []string{"log_level"}},
+		{"changed again", "warn", []string{"log_level"}},
+		{"back to the startup value", "info", []string{}},
+	}
+	for _, s := range steps {
+		t.Run(s.name, func(t *testing.T) {
+			var cur struct {
+				ETag   string         `json:"etag"`
+				Config map[string]any `json:"config"`
+			}
+			_ = json.Unmarshal(tb.do("GET", "/api/config", nil).Body.Bytes(), &cur)
+			cur.Config["log_level"] = s.logLevel
+			w := tb.do("PUT", "/api/config", map[string]any{"etag": cur.ETag, "config": cur.Config})
+			var put struct {
+				RestartRequired []string `json:"restart_required"`
+			}
+			if err := json.Unmarshal(w.Body.Bytes(), &put); w.Code != 200 || err != nil {
+				t.Fatalf("put: %d %s", w.Code, w.Body.String())
+			}
+			if !slices.Equal(put.RestartRequired, s.want) {
+				t.Errorf("PUT restart_required = %v, want %v", put.RestartRequired, s.want)
+			}
+			if got := status(t); !slices.Equal(got, s.want) {
+				t.Errorf("status restart_required = %v, want %v", got, s.want)
+			}
+		})
 	}
 }
 
