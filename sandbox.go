@@ -1164,8 +1164,8 @@ func resolvePath(p string) string {
 // calendarAllows re-allows a brain's own calendar credential pair in dir:
 // read both, and write the token back on refresh.
 func (b *profileBuilder) calendarAllows(dir, brainID string) {
-	creds := filepath.Join(dir, "google_calendar_credentials_"+brainID+".json")
-	token := filepath.Join(dir, "google_calendar_token_"+brainID+".json")
+	creds := calendarCredentialsFile(dir, brainID)
+	token := calendarTokenFile(dir, brainID)
 	b.allow("file-read*", "literal", creds)
 	b.allow("file-read*", "literal", token)
 	b.allow("file-write*", "literal", token)

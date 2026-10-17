@@ -1318,9 +1318,9 @@ func TestIsLoopbackAddr(t *testing.T) {
 }
 
 // Some names are read outside Go: the dashboard labels the run outcomes
-// and the bridge's backup and offers the queue modes, and
-// tools/history_search.py filters history entries by type. Only this test
-// keeps the two sides in step.
+// and the bridge's backup and offers the queue modes,
+// tools/history_search.py reads the history, and tools/calendar_tool.py a
+// brain's calendar files. Only this test keeps the two sides in step.
 func TestNamesReadOutsideGo(t *testing.T) {
 	cases := []struct {
 		file string
@@ -1330,6 +1330,10 @@ func TestNamesReadOutsideGo(t *testing.T) {
 		{"web/assets/pages/settings.js", []string{"def: '" + queueModeQueue + "'", "['" + queueModeQueue + "', ", "['" + queueModeInterrupt + "', "}},
 		{"tools/history_search.py", []string{`HISTORY_FILENAME = "` + historyFileName + `"`, `row.get("type") != "` + historyIn + `"`}},
 		{"web/assets/pages/backup.js", []string{"id === '" + bridgeBackupID + "'"}},
+		// The tool's profile is the brain id, and its suffix is "_" + profile.
+		{"tools/calendar_tool.py", []string{`suffix = f"_{_profile}"`,
+			`f"` + strings.Replace(calendarCredentialsFile("", "ID"), "_ID", "{suffix}", 1) + `"`,
+			`f"` + strings.Replace(calendarTokenFile("", "ID"), "_ID", "{suffix}", 1) + `"`}},
 	}
 	for _, c := range cases {
 		t.Run(c.file, func(t *testing.T) {
