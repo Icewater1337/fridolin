@@ -2,7 +2,8 @@
 // shell, the polls every page needs, and the "Connect to your bridge" screen
 // shown on 401.
 
-import { get, setToken, getToken, on as onApi } from './api.js';
+import { setToken, getToken, on as onApi } from './api.js';
+import { ignoredResource } from './resources.js';
 import { pollStatus, setIgnoredCount, loadGroups, chatName } from './store.js';
 import { h, mount } from '../lib/dom.js';
 import { toast } from '../components/toast.js';
@@ -161,10 +162,7 @@ pollStatus((s) => {
   lastWaMode = mode;
 });
 
-makePoll(async (signal) => {
-  const list = await get('/api/chats/ignored', { signal });
-  setIgnoredCount(Array.isArray(list) ? list.length : 0);
-}, 10000);
+ignoredResource.follow((list) => setIgnoredCount(Array.isArray(list) ? list.length : 0), 10000);
 
 makePoll(async () => { await loadGroups(); }, 60000);
 

@@ -1,6 +1,6 @@
 // Brains: a card per brain with its routing, live state and issues.
 
-import { get } from '../app/api.js';
+import { brainsResource } from '../app/resources.js';
 import { h, mount } from '../lib/dom.js';
 import { routingSummary } from '../lib/brain.js';
 import { changed } from '../lib/memo.js';
@@ -20,8 +20,7 @@ export default {
         btn('Add brain', { href: '#/add-brain', kind: 'primary', icon: 'plus' })),
       list);
 
-    ctx.poll(async (signal) => {
-      const brains = await get('/api/brains', { signal });
+    ctx.follow(brainsResource, (brains) => {
       if (!changed(memo, 'brains', brains)) return;
       renderList(brains);
     }, 3000);

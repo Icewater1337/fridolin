@@ -1,6 +1,7 @@
 // A page's context. Everything a page starts — polls, requests, timers,
-// listeners, store subscriptions — belongs to it and ends when the user
-// leaves, so nothing keeps fetching or painting into a page that is gone.
+// listeners, store subscriptions, the resources it follows — belongs to it
+// and ends when the user leaves, so nothing keeps fetching or painting into
+// a page that is gone.
 
 import { makePoll } from './poll.js';
 
@@ -43,6 +44,15 @@ export function createPage({ params = {}, replaceHash = () => {}, setTitle = () 
         if (t !== null) { clearTimeout(t); timers.delete(t); }
         t = ctx.timeout(() => { t = null; fn(...args); }, ms);
       };
+    },
+
+    /**
+     * resource.follow(fn, interval) until the page goes: fn gets the data
+     * now (when known) and whenever it changes; interval (ms, or a function
+     * returning them) is how fresh this page wants it.
+     */
+    follow(resource, fn, interval = 3000) {
+      cleanups.push(resource.follow(fn, interval));
     },
 
     /** store.subscribe(select, fn) until the page goes: fn gets the value now and on every change. */

@@ -3,7 +3,7 @@
 // chats wait for access.
 
 import { get } from './api.js';
-import { makePoll } from './poll.js';
+import { statusResource } from './resources.js';
 
 /**
  * createStore(initial) → {get(), set(patch), subscribe(select, fn)}.
@@ -45,21 +45,20 @@ export const store = createStore({
 
 export function setStatus(status) { store.set({ status }); }
 
-let statusPoll = null;
-
-/** Polls /api/status for every page (the app starts it once); then(status) runs after each answer. */
+/**
+ * Follows /api/status into the store for every page (the app starts it
+ * once); then(status) runs after each new answer. Returns {stop()}.
+ */
 export function pollStatus(then = () => {}) {
-  statusPoll = makePoll(async (signal) => {
-    const status = await get('/api/status', { signal });
-    if (signal.aborted) return; // refreshStatus() asked again meanwhile
+  const stop = statusResource.follow((status) => {
     setStatus(status);
     then(status);
   }, 3000);
-  return statusPoll;
+  return { stop };
 }
 
-/** Asks for /api/status now, dropping a poll in flight; resolves once the answer is in. */
-export function refreshStatus() { return statusPoll ? statusPoll.kick() : Promise.resolve(); }
+/** Asks for /api/status now, dropping a request in flight; resolves once the answer is in. */
+export function refreshStatus() { return statusResource.refresh(); }
 
 export function setIgnoredCount(ignoredCount) { store.set({ ignoredCount }); }
 

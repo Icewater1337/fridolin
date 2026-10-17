@@ -1,7 +1,8 @@
 // Chats: who is waiting for access, the account's groups, and the allow lists.
 
 import { get, post, put } from '../app/api.js';
-import { store, loadGroups, rememberName, setIgnoredCount } from '../app/store.js';
+import { store, loadGroups, rememberName } from '../app/store.js';
+import { brainsResource, configResource, ignoredResource } from '../app/resources.js';
 import { h, mount } from '../lib/dom.js';
 import { plural } from '../lib/format.js';
 import { phone, shortJid } from '../lib/jid.js';
@@ -26,7 +27,7 @@ export default {
     const groupsBox = h('div', spinner());
     const numbersBox = h('div');
     const allowedGroupsBox = h('div');
-    const refreshGroups = btn('Refresh', { small: true, kind: 'ghost', icon: 'refresh', onClick: async () => { await loadGroups(true); await groupsPoll.kick(); } });
+    const refreshGroups = btn('Refresh', { small: true, kind: 'ghost', icon: 'refresh', onClick: () => loadGroups(true) });
 
     mount(root,
       pageHeader('Chats', 'Decide who can talk to the bridge and which brain answers each group.'),
@@ -65,19 +66,31 @@ export default {
       return b ? b.id : '';
     };
 
+    // The shell follows the waiting chats (for the sidebar badge) and
+    // reloads the groups; the page shares those polls instead of running
+    // its own.
+    const refreshAll = () => Promise.all([ignoredResource.refresh(), brainsResource.refresh(), configResource.refresh()]);
+
     // ── waiting ──
-    const waitingPoll = ctx.poll(async (signal) => {
-      const [ignored, br] = await Promise.all([get('/api/chats/ignored', { signal }), get('/api/brains', { signal })]);
-      const brainsChanged = changed(memo, 'brains', br);
-      brains = br;
+    let ignored = null;
+    ctx.follow(ignoredResource, (list) => {
+      ignored = list || [];
       for (const c of ignored) if (c.kind === 'group') rememberName(c.jid, c.name);
-      setIgnoredCount(ignored.length);
-      if (changed(memo, 'ignored', ignored) || brainsChanged) paintWaiting(ignored);
-      // The groups table and the allow lists show which brain owns a group.
-      if (brainsChanged) { paintGroups(); paintLists(); }
+      paintWaiting();
+    }, 3000);
+    // The waiting rows, the groups table and the allow lists show which
+    // brain owns a group.
+    ctx.follow(brainsResource, (br) => {
+      brains = br || [];
+      memo.brains = JSON.stringify(brains);
+      paintWaiting();
+      paintGroups();
+      paintLists();
     }, 3000);
 
-    function paintWaiting(list) {
+    function paintWaiting() {
+      if (!ignored || !changed(memo, 'ignored', { ignored, brains: memo.brains })) return;
+      const list = ignored;
       if (!list.length) {
         mount(waitingBox, h('div.card', empty('Nobody is waiting', 'When someone who is not allowed writes to the bridge — or the bridge is added to a group — they appear here so you can let them in.')));
         return;
@@ -93,7 +106,7 @@ export default {
             await post('/api/chats/allow', body);
             toast(isGroup ? `Allowed ${title}` : `Allowed ${phone(c.sender) || title}`, 'ok');
             if (isGroup) await loadGroups(true);
-            await Promise.all([waitingPoll.kick(), groupsPoll.kick(), listsPoll.kick()]);
+            await refreshAll();
           },
         });
         const dismiss = btn('Dismiss', {
@@ -101,7 +114,7 @@ export default {
           onClick: async () => {
             await post('/api/chats/dismiss', { jid: c.jid });
             toast('Dismissed — it stays hidden even if it writes again', 'info');
-            await waitingPoll.kick();
+            await ignoredResource.refresh();
           },
         });
         return h('div.card.waiting-row',
@@ -118,16 +131,14 @@ export default {
     }
 
     // ── groups ──
-    let groupsLoaded = false;
-    const groupsPoll = ctx.poll(async () => {
-      await loadGroups();
-      groupsLoaded = true;
-      paintGroups();
-    }, 30000);
+    // The shell reloads them every minute; the page shows them once known.
+    loadGroups();
+    ctx.watch(store, (s) => s.groups, () => paintGroups());
+    ctx.watch(store, (s) => s.groupsError, () => paintGroups());
 
     function paintGroups() {
-      if (!groupsLoaded) return;
       const { groups, groupsError } = store.get();
+      if (groups === null && !groupsError) return;
       if (!changed(memo, 'groups', { groups, err: groupsError, brains: memo.brains })) return;
       if (!groups) {
         mount(groupsBox, h('div.card', empty('Groups are not available', groupsError ? `WhatsApp says: ${groupsError}. Connect WhatsApp to see the groups the bridge is in.` : 'Connect WhatsApp to see the groups the bridge is in.')));
@@ -152,7 +163,7 @@ export default {
                 toast(`${g.name || 'Group'} now goes to ${sel.value}`, 'ok');
                 choice.delete(g.jid);
                 await loadGroups(true);
-                await Promise.all([waitingPoll.kick(), groupsPoll.kick()]);
+                await refreshAll();
               },
             })
             : btn('Allow', {
@@ -162,7 +173,7 @@ export default {
                 toast(`Allowed ${g.name || 'the group'}`, 'ok');
                 choice.delete(g.jid);
                 await loadGroups(true);
-                await Promise.all([waitingPoll.kick(), groupsPoll.kick(), listsPoll.kick()]);
+                await refreshAll();
               },
             });
           return h('tr',
@@ -175,8 +186,8 @@ export default {
     }
 
     // ── allow lists (config) ──
-    const listsPoll = ctx.poll(async (signal) => {
-      cfg = await get('/api/config', { signal });
+    ctx.follow(configResource, (c) => {
+      cfg = c;
       paintLists();
     }, 5000);
     // The allowed groups show their names once the groups have loaded.
@@ -264,7 +275,7 @@ export default {
         if (e.status === 409) throw new Error('The configuration changed at the same moment. Try again.');
         throw e;
       }
-      await listsPoll.kick();
+      await configResource.refresh();
     }
   },
 };

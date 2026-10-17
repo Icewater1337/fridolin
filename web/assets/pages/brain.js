@@ -3,6 +3,7 @@
 
 import { get, post, put, del, qs } from '../app/api.js';
 import { store } from '../app/store.js';
+import { brainsResource, configResource } from '../app/resources.js';
 import { routingEditor } from '../components/routing-editor.js';
 import { activityItem } from '../components/activity-item.js';
 import { calendarCard } from '../components/calendar.js';
@@ -55,16 +56,15 @@ export default {
 
     ctx.dirty = () => formDirty;
 
-    // The form shows the inherited model, effort and groups from the config.
-    // Until it loads, the poll retries it (and says why it fails).
-    const cfgPoll = ctx.poll(async (signal) => {
-      cfg = await get('/api/config', { signal });
-      cfgPoll.stop();
+    // The form shows the inherited model, effort and groups from the config,
+    // which seldom changes.
+    ctx.follow(configResource, (c) => {
+      cfg = c;
       if (brain && !formDirty) renderForm(true);
-    }, 3000);
+    }, 60000);
 
-    const poller = ctx.poll(async (signal) => {
-      const list = await get('/api/brains', { signal });
+    const refresh = () => brainsResource.refresh();
+    ctx.follow(brainsResource, (list) => {
       brains = list;
       const b = list.find((x) => x.id === id) || null;
       if (!changed(memo, 'brain', b)) return;
@@ -140,7 +140,7 @@ export default {
           }
           await post(`/api/brains/${encodeURIComponent(id)}/approve`);
           toast('Changes approved — the brain now runs the new brain.json', 'ok');
-          await poller.kick();
+          await refresh();
         },
       });
       const { left, right } = lineDiff(prettyJSON(sortKeys(a)), prettyJSON(sortKeys(d)));
@@ -180,7 +180,7 @@ export default {
           }
           const r = await post(`/api/runs/${encodeURIComponent(id)}/stop`, { clear_queue: clear });
           toast(r && r.stopped ? 'Stopped' : 'Nothing was running', r && r.stopped ? 'ok' : 'info');
-          await poller.kick();
+          await refresh();
         },
       });
       mount(liveBox, h('div.grid.two',
@@ -290,7 +290,7 @@ export default {
           formDirty = false;
           bar.hide();
           toast('Settings saved', 'ok');
-          await poller.kick();
+          await refresh();
         });
       });
       mount(formBox, form);
