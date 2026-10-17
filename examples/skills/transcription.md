@@ -20,7 +20,7 @@ Both the transcript and the original media land in the transcripts folder of
 your working directory:
 
 ```
-<work_dir>/transcripts/
+<brain-folder>/transcripts/
 ├── 2026-01-15 - Notes from the planning call.txt
 └── 2026-01-15 - Notes from the planning call.ogg
 ```
@@ -52,7 +52,7 @@ If the tool errors, read the error and fix the cause. Don't route around it.
 One command, whatever the format or length:
 
 ```bash
-python3 "$FRIDOLIN_TOOLS_DIR/transcribe.py" <file> --output-dir <work_dir>/transcripts
+python3 "$FRIDOLIN_TOOLS_DIR/transcribe.py" <file> --output-dir <brain-folder>/transcripts
 ```
 
 Useful flags:
@@ -95,7 +95,7 @@ Someone sends a voice note. You receive the file path in the message:
 ```bash
 python3 "$FRIDOLIN_TOOLS_DIR/transcribe.py" \
   ~/.fridolin/media/3EB0A1B2C3.ogg \
-  --output-dir <work_dir>/transcripts \
+  --output-dir <brain-folder>/transcripts \
   --language en
 ```
 

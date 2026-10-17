@@ -23,7 +23,7 @@ const defaultPromptFile = "brain-prompt.md"
 // routing and settings.
 type BrainManifest struct {
 	Version int    `json:"version"`
-	ID      string `json:"id"`   // stable slug: session key, history sender, sandbox profile name
+	ID      string `json:"id"`   // stable slug: history sender, sandbox profile and credential file names
 	Name    string `json:"name"` // display name
 
 	Routing BrainRouting `json:"routing"`

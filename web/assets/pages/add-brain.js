@@ -266,7 +266,7 @@ export default {
         h('div.path-line.muted', icon('folder'), mono(r.abs_path), !r.exists ? ' (will be created)' : ''),
         h('div.form-grid',
           field({ label: 'Name', control: nameIn, help: 'Shown in the dashboard.' }),
-          h('div', field({ label: 'Id', control: idIn, help: 'Permanent. Used for sessions, logs, sandbox rules and backups.' }), idErr)),
+          h('div', field({ label: 'Id', control: idIn, help: 'Permanent. Used for history, logs, sandbox rules and backups.' }), idErr)),
         h('fieldset.fieldset', h('legend', 'Which chats does it answer?'), routing),
         h('fieldset.fieldset', h('legend', 'Model'),
           h('div.form-grid',

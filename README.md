@@ -465,7 +465,7 @@ What the bridge does about it:
   file and the bridge's environment, so keep anything a brain must not see
   out of both; see
   [what reaches brains](docs/CONFIGURATION.md#what-reaches-brains).
-- **Brain isolation.** Brains have separate directories, sessions, histories,
+- **Brain isolation.** Brains have separate folders, memories, histories
   and calendar credentials, and they do not load your own Claude Code
   setup: your user settings and their hooks, skills, plugins and MCP
   servers, or the `CLAUDE.md` files above their folder, `~/CLAUDE.md` and
