@@ -6,12 +6,13 @@
 import { makePoll } from './poll.js';
 
 /**
- * createPage({params, replaceHash, setTitle}) returns the ctx a page's
- * render(root, ctx) gets. The router supplies replaceHash(hash), which
- * changes the address without leaving the page, and setTitle(title), which
- * names the page in the browser tab.
+ * createPage({params, navigate, replaceHash, setTitle}) returns the ctx a
+ * page's render(root, ctx) gets. The router supplies navigate(hash), which
+ * goes to another page as a link does (asking first about unsaved
+ * changes), replaceHash(hash), which changes the address without leaving
+ * the page, and setTitle(title), which names the page in the browser tab.
  */
-export function createPage({ params = {}, replaceHash = () => {}, setTitle = () => {} } = {}) {
+export function createPage({ params = {}, navigate = (hash) => { location.hash = hash; }, replaceHash = () => {}, setTitle = () => {} } = {}) {
   const abort = new AbortController();
   const polls = [];
   const timers = new Set();
@@ -63,7 +64,7 @@ export function createPage({ params = {}, replaceHash = () => {}, setTitle = () 
     /** Runs fn when the page goes, e.g. an unsubscribe. */
     onCleanup(fn) { cleanups.push(fn); },
 
-    navigate(hash) { location.hash = hash; },
+    navigate(hash) { if (!ctx.dead) navigate(hash); },
 
     replaceHash(hash) { if (!ctx.dead) replaceHash(hash); },
 
