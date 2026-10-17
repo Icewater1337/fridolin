@@ -47,6 +47,7 @@ backed up incrementally every night, with old versions kept.
 
 **Files.** Photos, PDFs, documents, voice notes, and video are downloaded and
 handed over as file paths. The assistant opens them and does whatever you asked.
+A download that takes longer than two minutes is given up.
 
 **Real polls.** The assistant can send native WhatsApp polls and read the votes
 back:

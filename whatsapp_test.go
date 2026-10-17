@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
@@ -12,6 +14,7 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"go.mau.fi/whatsmeow"
 	"go.mau.fi/whatsmeow/proto/waE2E"
 	"go.mau.fi/whatsmeow/types"
 	"go.mau.fi/whatsmeow/types/events"
@@ -74,7 +77,8 @@ func TestIncomingChat(t *testing.T) {
 // testWhatsApp is a WhatsAppClient without a whatsmeow connection. Anything
 // that would reach WhatsApp (a download, a group lookup) fails or panics on
 // the nil client and shows up in the log, so a test can tell that a message
-// was dropped before that work.
+// was dropped before that work. A test that wants a download to work sets
+// media to a fakeDownloader.
 type testWhatsApp struct {
 	*WhatsAppClient
 	inbound chan Inbound
@@ -102,9 +106,13 @@ func newTestWhatsApp(t *testing.T) *testWhatsApp {
 	t.Helper()
 	cfg := &Config{AllowedNumbers: []string{"15551234567"}, MediaDir: t.TempDir(), MaxChunkSize: 4000}
 	tw := &testWhatsApp{inbound: make(chan Inbound, 4)}
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
 	tw.WhatsAppClient = &WhatsAppClient{
 		cfg:     func() *Config { return cfg },
 		log:     testWaLogger{tw},
+		ctx:     ctx,
+		cancel:  cancel,
 		handler: func(_ context.Context, m Inbound) { tw.inbound <- m },
 		onIgnored: func(_, jid, _, _, _ string) {
 			tw.mu.Lock()
@@ -366,4 +374,247 @@ func TestSafeMediaPathNeverReusesAName(t *testing.T) {
 	if got, want := safeMediaPath(dir, "a\nb.pdf"), filepath.Join(dir, "ab.pdf"); got != want {
 		t.Errorf("safeMediaPath sanitises: got %q, want %q", got, want)
 	}
+}
+
+// fakeDownloader stands in for whatsmeow's media download. Like whatsmeow,
+// it writes the body into the file with io.Copy; then it fails with err, or,
+// with block set, waits for the context to end.
+type fakeDownloader struct {
+	body  string
+	err   error
+	block bool
+
+	mu    sync.Mutex
+	calls int
+	ctx   context.Context // of the last call
+}
+
+func (d *fakeDownloader) DownloadToFile(ctx context.Context, _ whatsmeow.DownloadableMessage, f whatsmeow.File) error {
+	d.mu.Lock()
+	d.calls++
+	d.ctx = ctx
+	d.mu.Unlock()
+	if _, err := io.Copy(f, io.TeeReader(strings.NewReader(d.body), io.Discard)); err != nil {
+		return err
+	}
+	if d.block {
+		<-ctx.Done()
+		return ctx.Err()
+	}
+	return d.err
+}
+
+func (d *fakeDownloader) callCount() int {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	return d.calls
+}
+
+// dirNames lists dir, hidden temp files included.
+func dirNames(t *testing.T, dir string) []string {
+	t.Helper()
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var names []string
+	for _, e := range entries {
+		names = append(names, e.Name())
+	}
+	return names
+}
+
+// All four kinds of attachment go through one path; the name a file is
+// saved under comes from one table of MIME types.
+func TestAttachmentOf(t *testing.T) {
+	cases := []struct {
+		name          string
+		msg           *waE2E.Message
+		kind, saveAs  string
+		caption       string
+		noAttachments bool
+	}{
+		{name: "jpeg photo", msg: &waE2E.Message{ImageMessage: &waE2E.ImageMessage{Mimetype: proto.String("image/jpeg"), Caption: proto.String("look")}}, kind: "image", saveAs: "3EB0TEST.jpg", caption: "look"},
+		{name: "png photo", msg: &waE2E.Message{ImageMessage: &waE2E.ImageMessage{Mimetype: proto.String("image/png")}}, kind: "image", saveAs: "3EB0TEST.png"},
+		{name: "photo of no known type", msg: &waE2E.Message{ImageMessage: &waE2E.ImageMessage{}}, kind: "image", saveAs: "3EB0TEST.jpg"},
+		{name: "named document", msg: &waE2E.Message{DocumentMessage: &waE2E.DocumentMessage{FileName: proto.String("Q3 report.pdf"), Mimetype: proto.String("application/pdf"), Caption: proto.String("numbers")}}, kind: "document", saveAs: "Q3 report.pdf", caption: "numbers"},
+		{name: "unnamed spreadsheet", msg: &waE2E.Message{DocumentMessage: &waE2E.DocumentMessage{Mimetype: proto.String("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")}}, kind: "document", saveAs: "3EB0TEST.xlsx"},
+		{name: "unnamed document of no known type", msg: &waE2E.Message{DocumentMessage: &waE2E.DocumentMessage{Mimetype: proto.String("application/x-unknown")}}, kind: "document", saveAs: "3EB0TEST.bin"},
+		{name: "voice note", msg: &waE2E.Message{AudioMessage: &waE2E.AudioMessage{Mimetype: proto.String("audio/ogg; codecs=opus")}}, kind: "audio", saveAs: "3EB0TEST.ogg"},
+		{name: "m4a audio", msg: &waE2E.Message{AudioMessage: &waE2E.AudioMessage{Mimetype: proto.String("audio/mp4")}}, kind: "audio", saveAs: "3EB0TEST.m4a"},
+		{name: "mp3 audio", msg: &waE2E.Message{AudioMessage: &waE2E.AudioMessage{Mimetype: proto.String("Audio/MPEG")}}, kind: "audio", saveAs: "3EB0TEST.mp3"},
+		{name: "mp4 video", msg: &waE2E.Message{VideoMessage: &waE2E.VideoMessage{Mimetype: proto.String("video/mp4"), Caption: proto.String("clip")}}, kind: "video", saveAs: "3EB0TEST.mp4", caption: "clip"},
+		{name: "quicktime video", msg: &waE2E.Message{VideoMessage: &waE2E.VideoMessage{Mimetype: proto.String("video/quicktime")}}, kind: "video", saveAs: "3EB0TEST.mov"},
+		{name: "webm video with parameters", msg: &waE2E.Message{VideoMessage: &waE2E.VideoMessage{Mimetype: proto.String("video/webm; codecs=vp9")}}, kind: "video", saveAs: "3EB0TEST.webm"},
+		{name: "GIF reaction", msg: &waE2E.Message{VideoMessage: &waE2E.VideoMessage{GifPlayback: proto.Bool(true)}}, noAttachments: true},
+		{name: "text", msg: &waE2E.Message{Conversation: proto.String("hi")}, noAttachments: true},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			att, ok := attachmentOf(c.msg, "3EB0TEST")
+			if ok == c.noAttachments {
+				t.Fatalf("attachment found = %v, want %v", ok, !c.noAttachments)
+			}
+			if !ok {
+				return
+			}
+			if att.kind != c.kind || att.name != c.saveAs || att.caption != c.caption || att.media == nil {
+				t.Errorf("got kind %q, name %q, caption %q, media %v; want %q, %q, %q", att.kind, att.name, att.caption, att.media, c.kind, c.saveAs, c.caption)
+			}
+		})
+	}
+}
+
+// saveAttachment streams the download into the media directory and names it
+// only when it is complete. It never replaces or follows what is already
+// there, and a failed download leaves nothing behind.
+func TestSaveAttachment(t *testing.T) {
+	doc := attachment{kind: "document", media: &waE2E.DocumentMessage{}, name: "scan.pdf"}
+
+	t.Run("saved under its name", func(t *testing.T) {
+		dir := t.TempDir()
+		path, err := saveAttachment(context.Background(), &fakeDownloader{body: "%PDF-1.7"}, dir, doc)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if want := filepath.Join(dir, "scan.pdf"); path != want {
+			t.Errorf("saved as %q, want %q", path, want)
+		}
+		if got, _ := os.ReadFile(path); string(got) != "%PDF-1.7" {
+			t.Errorf("content %q", got)
+		}
+		if st, err := os.Stat(path); err != nil || st.Mode().Perm() != 0o600 {
+			t.Errorf("mode %v (%v), want 0600", st.Mode().Perm(), err)
+		}
+		if names := dirNames(t, dir); len(names) != 1 {
+			t.Errorf("media dir holds %q, want only the saved file", names)
+		}
+	})
+
+	t.Run("sanitised name", func(t *testing.T) {
+		dir := t.TempDir()
+		path, err := saveAttachment(context.Background(), &fakeDownloader{body: "x"}, dir, attachment{kind: "document", media: &waE2E.DocumentMessage{}, name: "../a\nb.pdf"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if want := filepath.Join(dir, "ab.pdf"); path != want {
+			t.Errorf("saved as %q, want %q", path, want)
+		}
+	})
+
+	t.Run("never replaces or follows", func(t *testing.T) {
+		dir := t.TempDir()
+		if err := os.WriteFile(filepath.Join(dir, "scan.pdf"), []byte("first"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		// A dangling symlink, as a brain could leave in the media directory.
+		outside := filepath.Join(t.TempDir(), "outside.pdf")
+		if err := os.Symlink(outside, filepath.Join(dir, "scan-2.pdf")); err != nil {
+			t.Fatal(err)
+		}
+		path, err := saveAttachment(context.Background(), &fakeDownloader{body: "second"}, dir, doc)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if want := filepath.Join(dir, "scan-3.pdf"); path != want {
+			t.Errorf("saved as %q, want %q", path, want)
+		}
+		if got, _ := os.ReadFile(filepath.Join(dir, "scan.pdf")); string(got) != "first" {
+			t.Errorf("the existing scan.pdf now holds %q", got)
+		}
+		if _, err := os.Lstat(outside); !errors.Is(err, fs.ErrNotExist) {
+			t.Errorf("the symlink was followed: %v", err)
+		}
+		if got, _ := os.ReadFile(path); string(got) != "second" {
+			t.Errorf("content %q", got)
+		}
+	})
+
+	failures := []struct {
+		name string
+		dl   *fakeDownloader
+		ctx  func() (context.Context, context.CancelFunc)
+		want error
+	}{
+		{"download fails", &fakeDownloader{body: "half", err: whatsmeow.ErrMediaDownloadFailedWith404}, nil, whatsmeow.ErrMediaDownloadFailedWith404},
+		{"timeout", &fakeDownloader{body: "half", block: true}, func() (context.Context, context.CancelFunc) {
+			return context.WithTimeout(context.Background(), 10*time.Millisecond)
+		}, context.DeadlineExceeded},
+	}
+	for _, c := range failures {
+		t.Run(c.name, func(t *testing.T) {
+			dir := t.TempDir()
+			ctx := context.Background()
+			if c.ctx != nil {
+				var cancel context.CancelFunc
+				ctx, cancel = c.ctx()
+				defer cancel()
+			}
+			path, err := saveAttachment(ctx, c.dl, dir, doc)
+			if !errors.Is(err, c.want) {
+				t.Errorf("err = %v, want %v", err, c.want)
+			}
+			if path != "" {
+				t.Errorf("path = %q, want none", path)
+			}
+			if names := dirNames(t, dir); len(names) != 0 {
+				t.Errorf("left behind %q", names)
+			}
+		})
+	}
+}
+
+// An attachment reaches the brain as the path it was saved under. Its
+// download has a deadline, and disconnecting ends it.
+func TestHandleMessageSavesAttachment(t *testing.T) {
+	contact := mustJID(t, "15551234567@s.whatsapp.net")
+	docEvent := func() *events.Message {
+		evt := textEvent(types.MessageSource{Chat: contact, Sender: contact}, "")
+		evt.Message = &waE2E.Message{DocumentMessage: &waE2E.DocumentMessage{
+			FileName: proto.String("scan.pdf"), Caption: proto.String("file this"),
+		}}
+		return evt
+	}
+
+	t.Run("saved and handed over", func(t *testing.T) {
+		tw := newTestWhatsApp(t)
+		dl := &fakeDownloader{body: "%PDF-1.7"}
+		tw.media = dl
+		start := time.Now()
+		tw.handle(t, docEvent())
+		m, ok := tw.next(2 * time.Second)
+		want := filepath.Join(tw.cfg().MediaDir, "scan.pdf")
+		if !ok || m.Text != "file this" || len(m.Media) != 1 || m.Media[0] != want {
+			t.Fatalf("got %+v (delivered %v), want the caption and %s", m, ok, want)
+		}
+		deadline, ok := dl.ctx.Deadline()
+		if !ok || deadline.After(start.Add(mediaDownloadTimeout+time.Second)) {
+			t.Errorf("download deadline %v (set %v), want within %v", deadline, ok, mediaDownloadTimeout)
+		}
+	})
+
+	t.Run("disconnect ends the download", func(t *testing.T) {
+		tw := newTestWhatsApp(t)
+		dl := &fakeDownloader{body: "half", block: true}
+		tw.media = dl
+		done := make(chan struct{})
+		go func() {
+			defer close(done)
+			tw.handle(t, docEvent())
+		}()
+		waitFor(t, 2*time.Second, "the download to start", func() bool { return dl.callCount() == 1 })
+		tw.Disconnect()
+		select {
+		case <-done:
+		case <-time.After(2 * time.Second):
+			t.Fatal("the download kept running after Disconnect")
+		}
+		m, ok := tw.next(2 * time.Second)
+		if !ok || m.Text != "file this" || len(m.Media) != 0 {
+			t.Errorf("got %+v (delivered %v), want the caption without the file", m, ok)
+		}
+		if names := dirNames(t, tw.cfg().MediaDir); len(names) != 0 {
+			t.Errorf("left behind %q", names)
+		}
+	})
 }
