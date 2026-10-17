@@ -309,9 +309,10 @@ func (c *Config) AllowsAnyDM() bool { return boolOr(c.AllowAnyDM, false) }
 func (c *Config) AnyoneCanDM() bool { return len(c.AllowedNumbers) == 0 && c.AllowsAnyDM() }
 
 // LoadConfig reads configuration with this priority (highest → lowest):
-//  1. Environment variables (including those loaded from .env)
-//  2. config.json values
-//  3. Built-in defaults
+//  1. The .env next to the config file
+//  2. Environment variables
+//  3. config.json values
+//  4. Built-in defaults
 //
 // Only the .env next to the config file is read: one in the working directory
 // counts only when the config file is there too.
@@ -323,12 +324,24 @@ func LoadConfig(cfgPath string) (*Config, error) {
 	return cs.Get(), nil
 }
 
-// loadDotEnv loads the .env next to the config, if there is one. Values in it
-// override config.json (and the process environment). There is no fallback to
-// the working directory: a bridge started from a checkout, or the tests run in
-// one, must not pick up whatever file happens to lie there.
-func loadDotEnv(cfgPath string) {
-	_ = godotenv.Overload(filepath.Join(filepath.Dir(cfgPath), ".env"))
+// envLookup returns the value of an override variable, "" when it is unset.
+type envLookup func(key string) string
+
+// loadDotEnv reads the .env next to the config, if there is one, and returns
+// the lookup the config overrides come from: a key in the .env wins over the
+// process environment. The values are never exported into the environment,
+// so brains, rclone and the other programs the bridge starts do not see them,
+// and a test cannot leave them behind for the next one. There is no fallback
+// to the working directory: a bridge started from a checkout, or the tests
+// run in one, must not pick up whatever file happens to lie there.
+func loadDotEnv(cfgPath string) envLookup {
+	vars, _ := godotenv.Read(filepath.Join(filepath.Dir(cfgPath), ".env"))
+	return func(key string) string {
+		if v, ok := vars[key]; ok {
+			return v
+		}
+		return os.Getenv(key)
+	}
 }
 
 // dataDirName and legacyDataDirName are the home-relative names of the data
@@ -358,14 +371,14 @@ func defaultDataDir(home string) string {
 }
 
 // effective derives the running configuration from the on-disk layer:
-// environment overrides, defaults, ~ expansion, validation. It returns the
-// json field names that an environment variable overrode.
-func effective(file *Config) (*Config, map[string]string, error) {
+// overrides from env, defaults, ~ expansion, validation. It returns the json
+// field names that an environment variable overrode.
+func effective(file *Config, env envLookup) (*Config, map[string]string, error) {
 	cfg, err := file.clone()
 	if err != nil {
 		return nil, nil, err
 	}
-	locked := applyEnvOverrides(cfg)
+	locked := applyEnvOverrides(cfg, env)
 
 	home, err := os.UserHomeDir()
 	if err != nil {
@@ -667,13 +680,13 @@ var envOverrides = []envOverride{
 	{"VIEWER", "viewer", func(c *Config, v string) { c.Viewer = isTruthy(v) }},
 }
 
-// applyEnvOverrides overwrites cfg fields with any matching environment
-// variables and returns field → variable for every field it overrode, so the
-// dashboard can show which settings it cannot change.
-func applyEnvOverrides(cfg *Config) map[string]string {
+// applyEnvOverrides overwrites cfg fields with every override variable env
+// has a value for, and returns field → variable for every field it overrode,
+// so the dashboard can show which settings it cannot change.
+func applyEnvOverrides(cfg *Config, env envLookup) map[string]string {
 	locked := map[string]string{}
 	for _, o := range envOverrides {
-		if v := os.Getenv(o.env); v != "" {
+		if v := env(o.env); v != "" {
 			o.apply(cfg, v)
 			locked[o.field] = o.env
 		}

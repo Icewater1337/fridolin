@@ -778,7 +778,7 @@ func (b *Bridge) apiUpdateBrain(w http.ResponseWriter, r *http.Request) {
 				}
 				c.Brains = append(c.Brains[:i], c.Brains[i+1:]...)
 				c.BrainDirs = append(c.BrainDirs, BrainRef{Path: bc.WorkDir, Approved: &m})
-				return checkSet(c)
+				return checkSet(c, b.cfgs.env)
 			}
 		}
 		for i := range c.BrainDirs {
@@ -788,7 +788,7 @@ func (b *Bridge) apiUpdateBrain(w http.ResponseWriter, r *http.Request) {
 					return err
 				}
 				ref.Approved = &m
-				return checkSet(c)
+				return checkSet(c, b.cfgs.env)
 			}
 		}
 		return fmt.Errorf("no brain %q", id)
@@ -801,8 +801,8 @@ func (b *Bridge) apiUpdateBrain(w http.ResponseWriter, r *http.Request) {
 }
 
 // checkSet rejects an edit that would make two brains clash.
-func checkSet(c *Config) error {
-	eff, _, err := effective(c)
+func checkSet(c *Config, env envLookup) error {
+	eff, _, err := effective(c, env)
 	if err != nil {
 		return err
 	}
@@ -835,7 +835,7 @@ func (b *Bridge) apiApproveBrain(w http.ResponseWriter, r *http.Request) {
 				return err
 			}
 			ref.Approved = disk
-			return checkSet(c)
+			return checkSet(c, b.cfgs.env)
 		}
 		return fmt.Errorf("no folder brain %q", id)
 	})

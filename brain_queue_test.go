@@ -1029,3 +1029,60 @@ func TestStopKillsProcessesClaudeStarted(t *testing.T) {
 		t.Errorf("stop took %v — the child kept the run alive", el)
 	}
 }
+
+func TestBrainsDoNotSeeTheDotEnv(t *testing.T) {
+	// The .env next to config.json configures the bridge only. Its values
+	// used to be exported into the bridge's environment, which every brain
+	// inherits, so any brain could read them with `env`.
+	home := canonicalDir(t.TempDir())
+	t.Setenv("HOME", home)
+	clearEnv(t, "FRIDOLIN_TEST_DOTENV_ONLY")
+	envLog := filepath.Join(home, "brain.env")
+	t.Setenv("WCB_FAKE_ENV_LOG", envLog)
+	claude := fakeClaudeEnv(t, 0)
+	path := writeConfig(t, `{
+		"brain_mode": true,
+		"data_dir": "`+home+`/data",
+		"claude_path": "`+claude+`",
+		"brains": [{"name": "a", "work_dir": "`+home+`/a", "handles_dms": true}]
+	}`)
+	// One key the bridge reads as an override, one it ignores.
+	dotenv := "MODEL=from-dotenv\nFRIDOLIN_TEST_DOTENV_ONLY=secret\n"
+	if err := os.WriteFile(filepath.Join(filepath.Dir(path), ".env"), []byte(dotenv), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := LoadConfig(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Model != "from-dotenv" {
+		t.Fatalf("Model = %q: the .env was not read, so the check below would prove nothing", cfg.Model)
+	}
+	mgr := newTestManager(t, cfg)
+	d := &deliveries{}
+	mgr.SetHooks(BrainHooks{Deliver: d.add})
+	t.Cleanup(mgr.Stop)
+
+	if _, _, _, err := mgr.Submit(dm("hello")); err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, 10*time.Second, "the run", func() bool { return d.count() == 1 })
+	if err := d.all()[0].res.Err; err != nil {
+		t.Fatal(err)
+	}
+	logged, err := os.ReadFile(envLog)
+	if err != nil {
+		t.Fatal(err)
+	}
+	env := strings.Split(string(logged), "\n")
+	if !contains(env, "HOME="+home) {
+		t.Fatalf("the logged environment lacks the HOME the brain inherits:\n%s", logged)
+	}
+	for _, kv := range env {
+		for _, k := range []string{"MODEL", "FRIDOLIN_TEST_DOTENV_ONLY"} {
+			if strings.HasPrefix(kv, k+"=") {
+				t.Errorf("the brain sees %s from the .env", kv)
+			}
+		}
+	}
+}

@@ -227,3 +227,59 @@ func TestDotEnvIsReadOnlyNextToTheConfig(t *testing.T) {
 		})
 	}
 }
+
+func TestDotEnvOverridesWithoutExporting(t *testing.T) {
+	// The .env configures the bridge only. Exported into the process
+	// environment, its values would reach every brain and tool the bridge
+	// starts, and would outlive the test that loaded them.
+	tests := []struct {
+		name        string
+		env, dotenv string // MODEL in the process environment and in the .env; "" means unset
+		want        string // effective model
+	}{
+		{"config.json alone", "", "", "from-file"},
+		{"process environment", "from-env", "", "from-env"},
+		{".env", "", "from-dotenv", "from-dotenv"},
+		{".env wins over the process environment", "from-env", "from-dotenv", "from-dotenv"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Setenv("HOME", t.TempDir())
+			clearEnv(t, "MODEL", "FRIDOLIN_TEST_DOTENV_ONLY")
+			if tc.env != "" {
+				t.Setenv("MODEL", tc.env)
+			}
+			path := writeConfig(t, `{"model":"from-file"}`)
+			dotenv := "FRIDOLIN_TEST_DOTENV_ONLY=secret\n"
+			if tc.dotenv != "" {
+				dotenv += "MODEL=" + tc.dotenv + "\n"
+			}
+			if err := os.WriteFile(filepath.Join(filepath.Dir(path), ".env"), []byte(dotenv), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			cs, err := OpenConfigStore(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got := cs.Get().Model; got != tc.want {
+				t.Errorf("Model = %q, want %q", got, tc.want)
+			}
+			if v, ok := os.LookupEnv("FRIDOLIN_TEST_DOTENV_ONLY"); ok {
+				t.Errorf("a .env value was exported into the process environment: %q", v)
+			}
+			if got := os.Getenv("MODEL"); got != tc.env {
+				t.Errorf("process MODEL = %q, want it left at %q", got, tc.env)
+			}
+			// An edit re-derives the effective config from the same overrides.
+			if _, err := cs.Update("", func(c *Config) error { c.LogLevel = "debug"; return nil }); err != nil {
+				t.Fatal(err)
+			}
+			if got := cs.Get().Model; got != tc.want {
+				t.Errorf("Model after an edit = %q, want %q", got, tc.want)
+			}
+			if locked := cs.EnvLocked()["model"] == "MODEL"; locked != (tc.want != "from-file") {
+				t.Errorf("model locked = %v, env locked = %v", locked, cs.EnvLocked())
+			}
+		})
+	}
+}

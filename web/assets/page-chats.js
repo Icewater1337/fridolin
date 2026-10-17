@@ -190,7 +190,7 @@ export default {
       const anyDM = eff.allow_any_dm === true;
 
       mount(numbersBox,
-        locked.allowed_numbers ? callout('info', null, `Set by the environment variable ${locked.allowed_numbers}. Change it there.`) : null,
+        locked.allowed_numbers ? callout('info', null, `Set by the environment variable ${locked.allowed_numbers} (or the .env next to config.json). Change it there.`) : null,
         numbers.length ? h('ul.plain-list', numbers.map((n) => h('li',
           h('div', mono(phone(n))),
           locked.allowed_numbers ? null : removeBtn(`Remove ${phone(n)}?`, 'They can no longer message the bridge directly. Messages they already sent are kept.', (c) => { c.allowed_numbers = (c.allowed_numbers || []).filter((x) => x !== n); }))))
@@ -205,7 +205,7 @@ export default {
         }));
 
       mount(allowedGroupsBox,
-        locked.allowed_groups ? callout('info', null, `Set by the environment variable ${locked.allowed_groups}. Change it there.`) : null,
+        locked.allowed_groups ? callout('info', null, `Set by the environment variable ${locked.allowed_groups} (or the .env next to config.json). Change it there.`) : null,
         groups.length ? h('ul.plain-list', groups.map((g) => h('li',
           h('div', chatName(g) ? h('div', h('strong', chatName(g))) : null, h('div.small', mono(g))),
           h('span.muted.small', explicitOwner(g) ? `→ ${explicitOwner(g)}` : '→ default'),

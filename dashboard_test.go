@@ -22,7 +22,10 @@ type testBridge struct {
 	home string
 }
 
-func newTestBridge(t *testing.T, extra string) *testBridge {
+// newTestBridge starts a dev-mode bridge in a temp home. extra is appended to
+// the config's JSON object; dotenv, if given, are the lines of the .env next
+// to config.json.
+func newTestBridge(t *testing.T, extra string, dotenv ...string) *testBridge {
 	t.Helper()
 	home := canonicalDir(t.TempDir())
 	t.Setenv("HOME", home)
@@ -35,6 +38,11 @@ func newTestBridge(t *testing.T, extra string) *testBridge {
 		"allowed_groups": ["120363000000000000@g.us"],
 		"debounce": {"quiet_ms": 0}`+extra+`
 	}`)
+	if len(dotenv) > 0 {
+		if err := os.WriteFile(filepath.Join(filepath.Dir(path), ".env"), []byte(strings.Join(dotenv, "\n")+"\n"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
 	cfgs, err := OpenConfigStore(path)
 	if err != nil {
 		t.Fatal(err)
@@ -602,6 +610,33 @@ func TestApproveDrift(t *testing.T) {
 	}
 	if tb.brainMgr.Get("notes").Name() != "Notes 2" {
 		t.Error("approval did not apply")
+	}
+}
+
+func TestBrainEditsAreCheckedWithTheDotEnv(t *testing.T) {
+	// A brain edit is checked against the whole effective config, the .env
+	// next to config.json included. Here config.json alone would not load
+	// (max_chunk_size 5 is too small) and the .env fixes that: a check built
+	// from the process environment alone would refuse every edit.
+	tb := newTestBridge(t, `, "max_chunk_size": 5`, "MAX_CHUNK_SIZE=4000")
+	m := BrainManifest{ID: "notes", Name: "Notes"}
+	if w := tb.do("POST", "/api/brains", map[string]any{"path": "~/notes", "manifest": m, "create_dir": true}); w.Code != 200 {
+		t.Fatal(w.Body.String())
+	}
+	edited := m
+	edited.Name = "Notes 2"
+	for _, req := range []struct {
+		method, path string
+		body         any
+	}{
+		{"PUT", "/api/brains/notes", map[string]any{"manifest": edited}},
+		{"POST", "/api/brains/notes/approve", nil},
+	} {
+		t.Run(req.method+" "+req.path, func(t *testing.T) {
+			if w := tb.do(req.method, req.path, req.body); w.Code != 200 {
+				t.Errorf("%d %s", w.Code, w.Body)
+			}
+		})
 	}
 }
 

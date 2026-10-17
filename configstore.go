@@ -25,6 +25,7 @@ import (
 // change applies on the next message without a restart.
 type ConfigStore struct {
 	path string
+	env  envLookup // override variables: the .env next to path, then the process environment
 
 	mu        sync.Mutex // serialises Update
 	file      *Config
@@ -40,7 +41,7 @@ var ErrConfigConflict = errors.New("config changed since it was loaded — reloa
 // OpenConfigStore loads cfgPath. A missing file is not an error: it means an
 // empty configuration with defaults, which is what a fresh install starts from.
 func OpenConfigStore(cfgPath string) (*ConfigStore, error) {
-	loadDotEnv(cfgPath)
+	env := loadDotEnv(cfgPath)
 
 	file := &Config{}
 	var raw []byte
@@ -54,11 +55,11 @@ func OpenConfigStore(cfgPath string) (*ConfigStore, error) {
 		return nil, fmt.Errorf("reading config file %q: %w", cfgPath, err)
 	}
 
-	eff, locked, err := effective(file)
+	eff, locked, err := effective(file, env)
 	if err != nil {
 		return nil, err
 	}
-	cs := &ConfigStore{path: cfgPath, file: file}
+	cs := &ConfigStore{path: cfgPath, env: env, file: file}
 	cs.eff.Store(eff)
 	cs.envLocked.Store(&locked)
 	cs.etag.Store(etagOf(raw))
@@ -118,7 +119,7 @@ func (cs *ConfigStore) Update(etag string, mutate func(*Config) error) (restart 
 		cs.mu.Unlock()
 		return nil, err
 	}
-	eff, locked, err := effective(next)
+	eff, locked, err := effective(next, cs.env)
 	if err != nil {
 		cs.mu.Unlock()
 		return nil, err

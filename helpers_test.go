@@ -53,6 +53,10 @@ func fakeClaude() {
 			f.Close()
 		}
 	}
+	if log := os.Getenv("WCB_FAKE_ENV_LOG"); log != "" {
+		// What a brain inherits, one VAR=value per line.
+		_ = os.WriteFile(log, []byte(strings.Join(os.Environ(), "\n")+"\n"), 0o600)
+	}
 	msg := prompt
 	if i := strings.LastIndex(prompt, "<new_message>\n"); i >= 0 {
 		msg = strings.TrimSuffix(strings.TrimSpace(prompt[i+len("<new_message>\n"):]), "</new_message>")

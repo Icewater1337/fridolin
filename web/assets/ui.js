@@ -478,7 +478,7 @@ export function field({ label, help, control, id, locked, tag, wide, warn }) {
     ctrl,
     help ? h('div.help', help) : null,
     warn ? h('div.help.warn-text', warn) : null,
-    locked ? h('div.help.locked', icon('lock'), `Set by the environment variable ${locked} — change it there.`) : null);
+    locked ? h('div.help.locked', icon('lock'), `Set by the environment variable ${locked} (or the .env next to config.json) — change it there.`) : null);
 }
 
 /** A switch (checkbox with role=switch). Returns the wrapper; .input is the checkbox. */

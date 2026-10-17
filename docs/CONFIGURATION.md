@@ -701,6 +701,35 @@ there. The sandbox keeps brains from reading the `.env` file, but every brain
 inherits the bridge's environment, including what `.env` sets, so do not put
 anything there that brains must not see.
 
+Values in the `.env` only configure the bridge itself. They are not exported,
+so the Claude CLI, brains, and the scripts and tools they run do not see
+them. Whatever those need belongs in the bridge's process environment
+instead, and from there it reaches every brain:
+
+- The Claude CLI's own login and network settings, if you set them rather
+  than log in once with `claude`: `ANTHROPIC_API_KEY`,
+  `CLAUDE_CODE_OAUTH_TOKEN`, `HTTPS_PROXY`, `NODE_EXTRA_CA_CERTS`. Left in
+  the `.env`, they no longer reach `claude`, and every brain fails with "Not
+  logged in" (or cannot get through the proxy).
+- Keys a brain's tools need, such as `GROQ_API_KEY` for transcription.
+
+Re-running `setup.sh` rewrites the launchd plist and the systemd unit from the
+templates in [deploy/](../deploy/), which drops anything added to them. Keep
+these variables where it does not:
+
+- **Linux (systemd):** `systemctl --user edit fridolin` opens a drop-in that
+  `setup.sh` leaves alone. Add the keys under `[Service]`, one
+  `Environment=GROQ_API_KEY=...` line each, then run
+  `systemctl --user restart fridolin`.
+- **macOS (launchd):** there is no drop-in. Add the keys under
+  `EnvironmentVariables` in `~/Library/LaunchAgents/ai.fridolin.bridge.plist`,
+  reload the agent with `launchctl bootout gui/$(id -u)/ai.fridolin.bridge`
+  and `launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/ai.fridolin.bridge.plist`,
+  and add them again after every `setup.sh` run.
+- **Started by hand:** export them in the shell that runs `./fridolin`.
+
+These are the variables that override `config.json`:
+
 | Variable | Config field |
 | -------- | ------------ |
 | `ALLOWED_NUMBERS` | `allowed_numbers` (comma-separated) |
@@ -729,4 +758,5 @@ Booleans accept `true`, `1`, `yes`, or `on`. Brains are too structured for
 environment variables and are configured in `config.json` only.
 
 The Python tools read `BRIDGE_DATA_DIR` and `BRIDGE_DB_PATH` if you moved the
-data directory, and `CALENDAR_TZ` for the calendar timezone.
+data directory, and `CALENDAR_TZ` for the calendar timezone. Brains run them,
+so these too belong in the bridge's process environment, not in its `.env`.
