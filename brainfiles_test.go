@@ -334,50 +334,6 @@ func TestReplacedFolderIsOpenedOnReload(t *testing.T) {
 	}
 }
 
-// TestInlinePromptOutsideTheFolderIsStillRead: an inline brain's
-// prompt_file may be a path you chose outside its folder. It is read as
-// configured until inline brains go away.
-func TestInlinePromptOutsideTheFolderIsStillRead(t *testing.T) {
-	home := canonicalDir(t.TempDir())
-	t.Setenv("HOME", home)
-	shared := filepath.Join(home, "prompts", "shared.md")
-	if err := os.MkdirAll(filepath.Dir(shared), 0o700); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(shared, []byte("SHARED PROMPT\n"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	cfg, err := LoadConfig(writeConfig(t, `{
-		"brain_mode": true,
-		"data_dir": "`+home+`/data",
-		"claude_path": "`+fakeClaudeEnv(t, 0)+`",
-		"brains": [
-			{"name": "out", "work_dir": "~/out", "prompt_file": "~/prompts/shared.md"},
-			{"name": "in", "work_dir": "~/in", "groups": ["120363000000000000@g.us"]}
-		]
-	}`))
-	if err != nil {
-		t.Fatal(err)
-	}
-	mgr := newTestManager(t, cfg)
-	t.Cleanup(mgr.Stop)
-	if err := os.WriteFile(filepath.Join(home, "in", "brain-prompt.md"), []byte("IN PROMPT\n"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	for id, want := range map[string]string{"out": "SHARED PROMPT", "in": "IN PROMPT"} {
-		br := mgr.Get(id)
-		if got := br.buildPrompt(br.settings.Load(), dm("hello")); !strings.HasPrefix(got, want) {
-			t.Errorf("brain %s: prompt = %q, want it to start with %q", id, got, want)
-		}
-	}
-	// The default prompt file, inside the folder, goes through the folder.
-	plant(t, filepath.Join(home, "in", "brain-prompt.md"), shared)
-	br := mgr.Get("in")
-	if got := br.buildPrompt(br.settings.Load(), dm("hello")); strings.Contains(got, "SHARED PROMPT") {
-		t.Errorf("an inline brain's prompt in its folder followed a symlink:\n%s", got)
-	}
-}
-
 // TestHistoryIsNotFollowedOutOfTheFolder: the bridge appends every message
 // to the brain's history and reads it back for the chat-history preface,
 // the one-time-code guard and the dashboard's activity feed. A history

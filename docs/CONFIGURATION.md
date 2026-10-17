@@ -265,31 +265,16 @@ dashboard; see [BRAINS.md](BRAINS.md). In `config.json` they appear as:
 
 `approved` is the manifest you accepted — the version that runs.
 
+A brain whose settings clash with another (same id, a group claimed twice, two
+DM brains, the same folder or a folder inside another brain's) is left out
+and reported on the dashboard; the others keep running.
+
 ### Inline brains
 
-Older configs list brains inline. They keep working, and
-`fridolin migrate` moves them into `brain.json` files:
-
-```json
-"brains": [
-  { "name": "personal", "work_dir": "~/assistant/personal", "handles_dms": true },
-  { "name": "team", "work_dir": "~/assistant/team", "groups": ["120363000000000000@g.us"], "model": "opus" }
-]
-```
-
-| Field | Meaning |
-| ----- | ------- |
-| `name` | Identifier (becomes the brain's id). No spaces or slashes. |
-| `work_dir` | The brain's folder. Created if missing. |
-| `handles_dms` | Routes all direct messages here. At most one brain. |
-| `groups` | Group JIDs routed here. A group may belong to only one brain. |
-| `default` | Fallback for allowed chats no brain claims. Defaults to the first brain. |
-| `prompt_file` | Override the prompt path (default `<work_dir>/brain-prompt.md`). One inside `work_dir` is read as a folder brain's is, never through a symlink; one outside it is read as configured. |
-| `model`, `effort` | Override `brain_model` / `brain_effort` for this brain. |
-
-A brain whose settings clash with another (same id, a group claimed twice, two
-DM brains, a folder inside another brain's) is left out and reported on the
-dashboard; the others keep running.
+Older configs listed brains inline, under `"brains"`. The bridge refuses to
+start while that list has a brain in it; an empty list is ignored. To move
+them into their folders, see
+[Configs with inline brains](BRAINS.md#configs-with-inline-brains).
 
 ### `brain_mode`
 

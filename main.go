@@ -23,9 +23,6 @@ Usage:
   fridolin open              open the dashboard in your browser
   fridolin check [--route JID ...]
                                            validate the configuration and show routing
-  fridolin migrate [--dry-run] [--force]
-                                           move brains configured inline in config.json
-                                           into their folders (brain.json)
   fridolin init [--claude-path PATH]
                                            write a starter config (if there is none)
   fridolin version
@@ -51,8 +48,6 @@ func main() {
 		runCmd(args)
 	case "check":
 		checkCmd(args)
-	case "migrate":
-		migrateCmd(args)
 	case "open":
 		openCmd(args)
 	case "init":
@@ -282,7 +277,7 @@ func checkCmd(args []string) {
 	}
 	for _, s := range specs {
 		m := s.Manifest
-		fmt.Printf("  brain %-14s → %s [%s] (dms=%v default=%v groups=%v)\n", m.ID, s.Dir, s.Source, m.Routing.HandlesDMs, m.Routing.Default, m.Routing.Groups)
+		fmt.Printf("  brain %-14s → %s (dms=%v default=%v groups=%v)\n", m.ID, s.Dir, m.Routing.HandlesDMs, m.Routing.Default, m.Routing.Groups)
 	}
 	for _, is := range issues {
 		fmt.Printf("  ! %s %s: %s\n", is.Kind, is.Path, is.Detail)
@@ -330,40 +325,6 @@ func dmAllowSummary(cfg *Config) string {
 		return "nobody (allowed_numbers is empty)"
 	}
 	return fmt.Sprint(cfg.AllowedNumbers)
-}
-
-func migrateCmd(args []string) {
-	fs := flag.NewFlagSet("migrate", flag.ExitOnError)
-	cfgPath := fs.String("config", "", configFlagHelp)
-	dry := fs.Bool("dry-run", false, "show what would change without writing anything")
-	force := fs.Bool("force", false, "overwrite a brain.json that differs")
-	_ = fs.Parse(args)
-
-	cfgs, err := OpenConfigStore(configPath(*cfgPath))
-	if err != nil {
-		log.Fatalf("loading config: %v", err)
-	}
-	rep, err := MigrateInlineBrains(cfgs, *dry, *force)
-	if err != nil {
-		log.Fatalf("migrate: %v", err)
-	}
-	if len(rep.Brains) == 0 {
-		fmt.Println("Nothing to migrate: no brains are configured inline.")
-		return
-	}
-	for _, r := range rep.Brains {
-		fmt.Printf("  %-14s %-8s %s", r.ID, r.Action, r.Dir)
-		if r.Detail != "" {
-			fmt.Printf("  (%s)", r.Detail)
-		}
-		fmt.Println()
-		if r.Warning != "" {
-			fmt.Printf("      warning: %s\n", r.Warning)
-		}
-	}
-	if *dry {
-		fmt.Println("Dry run: nothing was written.")
-	}
 }
 
 type multiFlag []string

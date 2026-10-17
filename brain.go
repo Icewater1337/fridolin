@@ -200,14 +200,12 @@ type Brain struct {
 // Each run takes one snapshot, so an edit never changes a run half-way.
 type brainSettings struct {
 	name            string
-	source          string // "inline" or "folder"
 	manifest        BrainManifest
 	claudePath      string
 	model           string
 	effort          string
 	disallowedTools []string
 	promptFile      string // relative to the folder; see BrainSpec
-	outsidePrompt   string // an inline brain's prompt_file outside its folder
 	dangerously     bool
 	inheritUser     bool // inherit_claude_user_config
 	otpGuard        bool
@@ -534,7 +532,6 @@ type BrainRuntime struct {
 	ID       string        `json:"id"`
 	Name     string        `json:"name"`
 	Dir      string        `json:"dir"`
-	Source   string        `json:"source"`
 	Routing  BrainRouting  `json:"routing"`
 	Model    string        `json:"model"`
 	Effort   string        `json:"effort"`
@@ -568,7 +565,7 @@ type QueuedView struct {
 func (br *Brain) Snapshot() BrainRuntime {
 	s := br.settings.Load()
 	rt := BrainRuntime{
-		ID: br.id, Name: s.name, Dir: br.workDir, Source: s.source,
+		ID: br.id, Name: s.name, Dir: br.workDir,
 		Routing: s.manifest.Routing, Model: s.model, Effort: s.effort,
 		Backup: s.manifest.Backup, Manifest: s.manifest, Queue: []QueuedView{},
 	}
@@ -1145,24 +1142,13 @@ func (br *Brain) buildPrompt(s *brainSettings, m Inbound) string {
 	var sb strings.Builder
 	isGroup := m.IsGroup()
 
-	var sysPrompt []byte
-	var err error
-	name := s.promptFile
-	switch {
-	case s.outsidePrompt != "":
-		// An inline brain's prompt_file outside its folder is a path you
-		// wrote in config.json, read as it is, symlinks and all. Folder
-		// brains cannot name one, and inline brains are on their way out.
-		name = s.outsidePrompt
-		sysPrompt, err = os.ReadFile(name)
-	case name != "":
-		sysPrompt, err = br.readFile(name)
-	}
-	if err != nil {
-		log.Printf("brain %s: could not read prompt file %s: %v", br.id, name, err)
-	} else if name != "" {
-		sb.WriteString(strings.TrimSpace(string(sysPrompt)))
-		sb.WriteString("\n\n")
+	if name := s.promptFile; name != "" {
+		if sysPrompt, err := br.readFile(name); err != nil {
+			log.Printf("brain %s: could not read prompt file %s: %v", br.id, name, err)
+		} else {
+			sb.WriteString(strings.TrimSpace(string(sysPrompt)))
+			sb.WriteString("\n\n")
+		}
 	}
 
 	if preface := br.composePreface(m.JID, isGroup); preface != "" {
@@ -1457,11 +1443,6 @@ func (bm *BrainManager) reload(specs []BrainSpec, issues []BrainIssue, cfg *Conf
 	}()
 
 	for _, sp := range specs {
-		if sp.Source == "inline" {
-			if err := os.MkdirAll(sp.Dir, 0o700); err != nil {
-				return fmt.Errorf("creating work dir %s: %w", sp.Dir, err)
-			}
-		}
 		m := sp.Manifest
 		// Even a brain left out below keeps its folder denied to the others.
 		// The profiles get the folder as configured too, see BrainSpec.Path.
@@ -1550,14 +1531,12 @@ func settingsFor(cfg *Config, sp BrainSpec) *brainSettings {
 	}
 	return &brainSettings{
 		name:            m.Name,
-		source:          sp.Source,
 		manifest:        m,
 		claudePath:      cfg.ClaudePath,
 		model:           model,
 		effort:          effort,
 		disallowedTools: append([]string(nil), tools...),
 		promptFile:      sp.PromptFile,
-		outsidePrompt:   sp.OutsidePrompt,
 		dangerously:     cfg.DangerouslySkipPermissions,
 		inheritUser:     cfg.InheritClaudeUserConfig,
 		otpGuard:        cfg.OTPGuard,

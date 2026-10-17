@@ -97,7 +97,10 @@ Reopen the dashboard with `./fridolin open`.
   The tests run in an empty temp directory, with an empty temp `HOME` and
   the variables the bridge reads (`FRIDOLIN_CONFIG`, `BRAIN_MODE`) unset,
   so they never see a `config.json` in the checkout or a real data dir;
-  read a repository file through `repoDir`.
+  read a repository file through `repoDir`. Tests set up brains as the
+  bridge runs them, in folders with a `brain.json` listed in `brain_dirs`
+  (`brainFolder`, `addFolderBrain`); a config with inline `"brains"` no
+  longer loads.
 - The parsers of untrusted input (chunking, poll blocks, triggers, JIDs and
   the DM allowlist, the identity map, brain.json, stream-json, attachment
   names, the junk filter) have fuzz targets beside their tests. Fuzz one
