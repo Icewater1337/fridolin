@@ -154,7 +154,7 @@ export default {
         h('div.card-body',
           c.path ? h('p', mono(c.path)) : null,
           c.version ? h('p.muted', c.version) : null,
-          !c.found ? h('p.muted', 'Install Claude Code and log in once with ', h('code.mono', 'claude'), ', or point ', h('a', { href: '#/settings' }, 'Settings → Claude'), ' at the right binary.') : null));
+          !c.found ? h('p.muted', 'Install Claude Code and log in once with ', h('code.mono', 'claude'), ', or point ', h('a', { href: '#/settings/claude' }, 'Settings → Claude'), ' at the right binary.') : null));
     };
 
     const renderSandbox = (s) => {
@@ -165,7 +165,7 @@ export default {
       if (!sb.supported) { p = pill('Not available', 'neutral'); text = 'The sandbox uses macOS sandbox-exec. On this system, run the bridge as a separate user instead.'; } else if (sb.enabled) { p = pill('On', 'ok'); text = 'Brains cannot read other brains’ folders, your keys, mail or documents.'; } else { p = pill('Off', 'warn'); text = 'Brains can read everything your user account can. Turn the sandbox on in Settings.'; }
       mount(sandboxCard,
         h('div.card-head', h('div.card-title', icon('shield'), h('h2', 'Sandbox')), p),
-        h('div.card-body', h('p.muted', text), sb.supported ? h('a.small', { href: '#/settings' }, 'Sandbox settings') : null));
+        h('div.card-body', h('p.muted', text), sb.supported ? h('a.small', { href: '#/settings/sandbox' }, 'Sandbox settings') : null));
     };
 
     const renderBackup = (s) => {

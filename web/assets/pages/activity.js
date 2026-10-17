@@ -46,7 +46,7 @@ export default {
 
     brainSel.addEventListener('change', () => {
       brain = brainSel.value;
-      history.replaceState(null, '', brain ? `#/activity/${encodeURIComponent(brain)}` : '#/activity');
+      ctx.replaceHash(brain ? `#/activity/${encodeURIComponent(brain)}` : '#/activity');
       items = null;
       memo.items = '';
       mount(list, spinner());

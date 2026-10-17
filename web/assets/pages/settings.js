@@ -11,7 +11,7 @@ import { icon } from '../components/icons.js';
 import { toast } from '../components/toast.js';
 import { btn } from '../components/buttons.js';
 import { confirmDialog } from '../components/dialog.js';
-import { field, toggle, select, textInput, listEditor, nextId } from '../components/fields.js';
+import { field, toggle, select, textInput, listEditor } from '../components/fields.js';
 import { callout, mono, pageHeader, loading } from '../components/common.js';
 import { googleClientCard } from '../components/calendar.js';
 
@@ -147,11 +147,18 @@ export default {
       const eff = d.effective || {};
       controls = [];
       const nav = h('nav.section-nav', { 'aria-label': 'Settings sections' });
-      const sections = SECTIONS.map((sec) => {
-        const id = nextId(`sec-${sec.id}`);
-        const b = h('button.chip', { type: 'button' }, sec.title);
+      // A chip scrolls to its section and names it in the address, so
+      // #/settings/<section> links (the overview has some) land there too.
+      const chip = (title, sectionId, el) => {
+        const b = h('button.chip', { type: 'button' }, title);
+        b.addEventListener('click', () => {
+          el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+          ctx.replaceHash(`#/settings/${sectionId}`);
+        });
         nav.appendChild(b);
-        const el = h('section.card.settings-section', { id },
+      };
+      const sections = SECTIONS.map((sec) => {
+        const el = h('section.card.settings-section', { id: `sec-${sec.id}` },
           h('h2', sec.title),
           sec.intro ? h('p.muted.section-intro', sec.intro) : null,
           h('div.settings-fields', sec.fields.map((f) => {
@@ -159,12 +166,10 @@ export default {
             controls.push(c);
             return c.el;
           })));
-        b.addEventListener('click', () => el.scrollIntoView({ behavior: 'smooth', block: 'start' }));
+        chip(sec.title, sec.id, el);
         return el;
       });
-      const gChip = h('button.chip', { type: 'button' }, 'Google sign-in');
-      gChip.addEventListener('click', () => googleCard.scrollIntoView({ behavior: 'smooth', block: 'start' }));
-      nav.appendChild(gChip);
+      chip('Google sign-in', 'google', googleCard);
       mount(body, nav, sections, googleCard);
       mount(sub.querySelector('.page-sub') || sub.appendChild(h('p.page-sub')), 'Saved to ', mono(d.path, { copy: true }), '. Brains are configured on the Brains page, backups on the Backup page.');
       onChange();
@@ -198,7 +203,12 @@ export default {
 
     ctx.poll(async () => {
       const d = await get('/api/config');
-      if (!data) { build(d); return; }
+      if (!data) {
+        build(d);
+        const target = ctx.params.section && document.getElementById(`sec-${ctx.params.section}`);
+        if (target) target.scrollIntoView({ block: 'start' });
+        return;
+      }
       if (d.etag === data.etag) return;
       if (!ctx.dirty()) { build(d); return; }
       if (conflict) return;

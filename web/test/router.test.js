@@ -16,6 +16,8 @@ test('matchRoute finds the page and its parameters', async (t) => {
     ['malformed escape kept as typed', '#/brains/%E0%A4%A', 'brain', { id: '%E0%A4%A' }],
     ['trailing slash', '#/chats/', 'chats', {}],
     ['add brain', '#/add-brain', 'add-brain', {}],
+    ['settings', '#/settings', 'settings', {}],
+    ['a settings section', '#/settings/sandbox', 'settings', { section: 'sandbox' }],
     ['dev', '#/dev', 'dev', {}],
     ['unknown page', '#/nope', null, null],
     ['extra segment', '#/overview/more', null, null],

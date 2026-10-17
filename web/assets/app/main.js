@@ -131,6 +131,12 @@ function makeCtx(params) {
     },
     onCleanup(fn) { cleanups.push(fn); },
     navigate(hash) { location.hash = hash; },
+    /** Changes the address without leaving the page, e.g. to name a section or filter. */
+    replaceHash(hash) {
+      if (ctx.dead) return;
+      history.replaceState(null, '', hash);
+      lastHash = location.hash;
+    },
     destroy() {
       ctx.dead = true;
       polls.forEach((p) => p.stop());
