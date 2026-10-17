@@ -124,8 +124,11 @@ fi
 
 # ── 3. configuration ──────────────────────────────────────────────────────
 step "Configuration"
-mkdir -p "$DATA_DIR"
-chmod 700 "$DATA_DIR"
+# A new data folder is private from the start. An existing one is the
+# bridge's to fix when it starts: it leaves the home folder (or one above
+# it) and another user's folder alone, which a chmod here would not.
+mkdir -p "$(dirname "$DATA_DIR")"
+[ -d "$DATA_DIR" ] || mkdir -m 700 "$DATA_DIR"
 if [ -f "$CONFIG_FILE" ]; then
   ok "using $CONFIG_FILE"
 else
