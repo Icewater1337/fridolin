@@ -1,0 +1,13 @@
+# LF in the repository and in every checkout, whatever core.autocrlf says:
+# the scripts and git hooks break with CRLF, and the bridge only runs on
+# macOS and Linux.
+* text=auto eol=lf
+
+# Never diffed, merged or normalised as text.
+*.png binary
+*.webp binary
+*.ico binary
+
+# Generated: GitHub collapses it in diffs and leaves it out of the language
+# statistics.
+go.sum linguist-generated=true
