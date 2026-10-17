@@ -384,7 +384,7 @@ func TestExampleConfigIsValid(t *testing.T) {
 	// Loaded from a copy: the .env next to the config is read too, and next
 	// to the example lies whatever .env a developer keeps in the checkout.
 	t.Setenv("HOME", t.TempDir())
-	example, err := os.ReadFile("config.example.json")
+	example, err := os.ReadFile(filepath.Join(repoDir, "config.example.json"))
 	if err != nil {
 		t.Fatal(err)
 	}

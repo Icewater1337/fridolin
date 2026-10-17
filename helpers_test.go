@@ -22,7 +22,8 @@ import (
 //
 // Before the tests run it unsets every config override variable: a shell
 // that exports DATA_DIR or CONFIG_FILE for a real bridge would otherwise
-// point the tests at that bridge's data.
+// point the tests at that bridge's data. It also moves them out of the
+// checkout, see runInEmptyDir.
 func TestMain(m *testing.M) {
 	if os.Getenv("WCB_FAKE_PLAUD") == "1" && len(os.Args) > 1 && isPlaudCommand(os.Args[1]) {
 		os.Exit(fakePlaud(os.Args[1:]))
@@ -37,7 +38,45 @@ func TestMain(m *testing.M) {
 			os.Exit(1)
 		}
 	}
-	os.Exit(m.Run())
+	code, err := runInEmptyDir(m)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "moving the tests out of the checkout: %v\n", err)
+		os.Exit(1)
+	}
+	os.Exit(code)
+}
+
+// repoDir is the package directory the tests were started in. They run
+// elsewhere, so a test that reads a file of the checkout joins it to this.
+var repoDir string
+
+// runInEmptyDir runs the tests in a new, empty working directory. A relative
+// path in a test, or the bridge's own ./config.json lookup, must not reach the
+// checkout, where a developer may keep a config.json and the .env beside it.
+func runInEmptyDir(m *testing.M) (int, error) {
+	var err error
+	if repoDir, err = os.Getwd(); err != nil {
+		return 0, err
+	}
+	// Tests run this binary again through os.Args[0], which must keep
+	// working from the new directory when it was started by a relative path.
+	if strings.ContainsRune(os.Args[0], filepath.Separator) {
+		if os.Args[0], err = filepath.Abs(os.Args[0]); err != nil {
+			return 0, err
+		}
+	}
+	wd, err := os.MkdirTemp("", "fridolin-test-wd-")
+	if err != nil {
+		return 0, err
+	}
+	defer os.RemoveAll(wd)
+	if err := os.Chdir(wd); err != nil {
+		return 0, err
+	}
+	if err := os.Setenv("PWD", wd); err != nil {
+		return 0, err
+	}
+	return m.Run(), nil
 }
 
 // overrideVariables are the environment variables that change which config

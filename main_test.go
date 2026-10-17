@@ -86,6 +86,24 @@ func lineWith(out, s string) string {
 	return ""
 }
 
+func TestTestsDoNotRunInTheCheckout(t *testing.T) {
+	// A relative path, or the bridge's own ./config.json lookup, would
+	// otherwise find a config.json or .env a developer keeps in the checkout.
+	wd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat("go.mod"); err == nil {
+		t.Errorf("the tests run in the checkout (%s)", wd)
+	}
+	if tmp := canonicalDir(os.TempDir()); !isWithin(canonicalDir(wd), tmp) {
+		t.Errorf("working directory %s is not inside the temp dir %s", wd, tmp)
+	}
+	if _, err := os.Stat(filepath.Join(repoDir, "go.mod")); err != nil {
+		t.Errorf("repoDir %q is not the checkout: %v", repoDir, err)
+	}
+}
+
 func TestShellOverridesDoNotReachTests(t *testing.T) {
 	// Runs the test binary again with every override variable set, the way a
 	// developer's shell might export them for a real bridge, and checks from
