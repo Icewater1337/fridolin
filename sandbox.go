@@ -284,6 +284,13 @@ func (sp *SandboxProfiler) Profile(brainID string) (string, error) {
 	b.deny("file-write-unlink", "subpath", projects)
 	b.deny("file-read*", "subpath", sessions)
 	b.pin(sessions)
+	// Nor may a brain plant a symlink in either. One that linked a project
+	// folder the CLI had not created yet into its own folder got that
+	// project's later transcripts, yours included: the CLI wrote them
+	// through the link, to where the brain reads. The CLI creates real
+	// folders and files there, which stay allowed.
+	b.denySymlinksIn(projects)
+	b.denySymlinksIn(sessions)
 	if !sp.plaudShared {
 		// The Plaud CLI's login, unless plaud.brain_access shares it.
 		b.deny("file-read*", "subpath", filepath.Join(home, ".plaud"))
@@ -797,6 +804,15 @@ func (b *profileBuilder) denyBelow(op, dir, pattern string) {
 	}
 }
 
+// denySymlinksIn refuses a new symlink at dir and anywhere below it, for
+// every spelling of dir; see emitNoSymlink.
+func (b *profileBuilder) denySymlinksIn(dir string) {
+	for _, s := range b.spellings(dir, true) {
+		b.emitNoSymlink(b.denyKind(), "regex", s, "^"+regexp.QuoteMeta(s)+"(/.*)?$")
+		b.denied = append(b.denied, s)
+	}
+}
+
 // spellings returns path as configured and its real path, following every
 // symlink, and with entry also the path of its entry: its folder resolved,
 // its own name kept. The configured spelling stays for the day a symlink is
@@ -834,8 +850,8 @@ func (b *profileBuilder) spellings(path string, entry bool) []string {
 // or files of its own inside, and the sandbox checks where a rename lands
 // the same way as a new folder. The exception is ~/.claude and the
 // folders in it, which the Claude CLI creates on its first run: a missing
-// one may still be created, but not renamed or removed afterwards, and the
-// next run's profile pins it fully.
+// one may still be created as a folder, though not as a symlink, and not
+// renamed or removed afterwards; the next run's profile pins it fully.
 func (b *profileBuilder) pin(dir string) {
 	for _, s := range b.spellings(dir, true) {
 		b.pinSpelling(s)
@@ -848,6 +864,7 @@ func (b *profileBuilder) pinSpelling(dir string) {
 		// file-write-unlink is what the sandbox checks on the source of a
 		// rename, and on a delete.
 		b.emit(rulePin, "deny file-write-unlink", "literal", dir, dir)
+		b.emitNoSymlink(rulePin, "literal", dir, dir)
 	} else {
 		b.emit(rulePin, "deny file-write*", "literal", dir, dir)
 	}
@@ -949,12 +966,33 @@ func (b *profileBuilder) absolute(path string) (string, bool) {
 
 // emit writes "(rule (filter "value"))", a rule of this kind for path.
 func (b *profileBuilder) emit(kind ruleKind, rule, filter, path, value string) {
+	if q, ok := b.quote(value); ok {
+		b.add(kind, path, fmt.Sprintf("(%s (%s %s))\n", rule, filter, q))
+	}
+}
+
+// emitNoSymlink writes a rule of this kind for path that refuses a new
+// symlink wherever filter matches. The sandbox checks the type of what is
+// created, and checks a symlink moved there the same way, so files and
+// folders may still be created where no symlink can.
+func (b *profileBuilder) emitNoSymlink(kind ruleKind, filter, path, value string) {
+	if q, ok := b.quote(value); ok {
+		b.add(kind, path, fmt.Sprintf("(deny file-write-create (require-all (%s %s) (vnode-type SYMLINK)))\n", filter, q))
+	}
+}
+
+// quote returns value as an SBPL string, or fails the profile.
+func (b *profileBuilder) quote(value string) (string, bool) {
 	q, err := sbplString(value)
 	if err != nil {
 		b.fail(err)
-		return
+		return "", false
 	}
-	text := fmt.Sprintf("(%s (%s %s))\n", rule, filter, q)
+	return q, true
+}
+
+// add writes the rule text, a rule of this kind for path.
+func (b *profileBuilder) add(kind ruleKind, path, text string) {
 	b.WriteString(text)
 	b.rules = append(b.rules, profileRule{text, path, kind})
 }

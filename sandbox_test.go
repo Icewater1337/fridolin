@@ -433,7 +433,8 @@ func TestSandboxConfigRejectsUnusablePaths(t *testing.T) {
 // yet: a brain could otherwise create it as a symlink into its own folder.
 // Only a missing ~/.claude, and a missing folder in it, are pinned against
 // rename and delete alone, so the CLI can still create them on its first
-// run.
+// run, and against being created as a symlink. Nor can a symlink be
+// planted in the CLI's records of other sessions.
 func TestSandboxProfilePinsParents(t *testing.T) {
 	root := canonicalDir(t.TempDir())
 	home := filepath.Join(root, "home")
@@ -454,6 +455,9 @@ func TestSandboxProfilePinsParents(t *testing.T) {
 	dirs := map[string]string{"a": filepath.Join(home, "assistant", "a"), "b": filepath.Join(home, "assistant", "b")}
 	profile := mustProfile(t, NewSandboxProfiler(dirs, cfg), "a")
 	lines := strings.Split(profile, "\n")
+	noSymlink := func(filter, value string) string {
+		return `(deny file-write-create (require-all (` + filter + ` "` + value + `") (vnode-type SYMLINK)))`
+	}
 
 	cases := []struct {
 		name, rule string
@@ -473,6 +477,11 @@ func TestSandboxProfilePinsParents(t *testing.T) {
 		{"missing ~/.claude still creatable", `(deny file-write-unlink (literal "` + home + `/.claude"))`, true},
 		{"missing ~/.claude not pinned fully", `(deny file-write* (literal "` + home + `/.claude"))`, false},
 		{"missing sessions folder pinned", `(deny file-write-unlink (literal "` + home + `/.claude/sessions"))`, true},
+		{"missing ~/.claude not creatable as a symlink", noSymlink("literal", home+"/.claude"), true},
+		{"missing sessions folder not creatable as a symlink", noSymlink("literal", home+"/.claude/sessions"), true},
+		{"no symlink planted among the transcripts", noSymlink("regex", "^"+sbplRegex(home+"/.claude/projects")+"(/.*)?$"), true},
+		{"no symlink planted among the session files", noSymlink("regex", "^"+sbplRegex(home+"/.claude/sessions")+"(/.*)?$"), true},
+		{"existing ~/.config needs no symlink rule", noSymlink("literal", home+"/.config"), false},
 		// The CLI deletes its sessions/<pid>.json on exit.
 		{"session files stay removable", `(deny file-write-unlink (subpath "` + home + `/.claude/sessions"))`, false},
 		{"deny path outside home pinned up to /", `(deny file-write* (literal "` + outside + `"))`, true},

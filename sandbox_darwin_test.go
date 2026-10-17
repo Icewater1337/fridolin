@@ -629,11 +629,75 @@ func TestSandboxAllowPathsKeepBridgeSecrets(t *testing.T) {
 	}
 }
 
+// TestSandboxRefusesLinksIntoSessionRecords: a brain could link a project
+// folder the CLI had not created yet into its own folder. The next session
+// of that project, yours included, then wrote its transcript through the
+// link, and the brain read it there. Under the real sandbox-exec no symlink
+// can be planted among the CLI's records of every session, neither made
+// there, moved there nor hard-linked there, while the folders and files the
+// CLI itself creates still can be.
+func TestSandboxRefusesLinksIntoSessionRecords(t *testing.T) {
+	requireSandboxExec(t)
+	cases := []struct {
+		name, cmd string // cmd runs in sh with $HOME and $L, a folder of the brain's own, set
+		allow     bool
+	}{
+		{"link a new project folder into its own", `ln -s "$L" "$HOME/.claude/projects/-Users-you-new1"`, false},
+		{"move a link there", `ln -s "$L" "$L.link" && mv "$L.link" "$HOME/.claude/projects/-Users-you-new2"`, false},
+		{"hard-link a link there", `ln -s "$L" "$L.link2" && ln -P "$L.link2" "$HOME/.claude/projects/-Users-you-new4"`, false},
+		{"link a file into an existing project", `ln -s "$L/s.jsonl" "$HOME/.claude/projects/p/s2.jsonl"`, false},
+		{"link a session file", `ln -s "$L/1.json" "$HOME/.claude/sessions/99999.json"`, false},
+		{"create a new project folder, as the CLI does", `mkdir "$HOME/.claude/projects/-Users-you-new3" && printf '{}' > "$HOME/.claude/projects/-Users-you-new3/s.jsonl"`, true},
+		{"create a session file, as the CLI does", `printf '{}' > "$HOME/.claude/sessions/1.json"`, true},
+	}
+	for _, l := range sandboxLayouts() {
+		t.Run(l.name, func(t *testing.T) {
+			home := l.home(t)
+			t.Setenv("HOME", home)
+			sp, ownDir := sandboxFixture(t, home, l.otherBrain, l.denyDir)
+			for _, d := range []string{".claude/projects/p", ".claude/sessions"} {
+				if err := os.MkdirAll(filepath.Join(home, d), 0o700); err != nil {
+					t.Fatal(err)
+				}
+			}
+			loot := filepath.Join(ownDir, "loot")
+			if err := os.Mkdir(loot, 0o700); err != nil {
+				t.Fatal(err)
+			}
+			t.Setenv("L", loot)
+			for _, c := range cases {
+				t.Run(c.name, func(t *testing.T) {
+					if allowed, out := sandboxRun(t, sp, ownDir, "/bin/sh", "-c", c.cmd); allowed != c.allow {
+						t.Errorf("%s: allowed=%v, want %v (output %q)", c.cmd, allowed, c.allow, out)
+					}
+				})
+			}
+			// What a later session writes there, outside the sandbox, stays
+			// out of the brain's folder.
+			for _, f := range []string{".claude/projects/-Users-you-new1/s.jsonl", ".claude/projects/-Users-you-new2/s.jsonl"} {
+				p := filepath.Join(home, f)
+				if err := os.MkdirAll(filepath.Dir(p), 0o700); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.WriteFile(p, []byte("your transcript"), 0o600); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if entries, err := os.ReadDir(loot); err != nil || len(entries) > 0 {
+				t.Errorf("the brain's folder got %v (%v)", entries, err)
+			}
+		})
+	}
+}
+
 // TestSandboxLetsTheCLICreateItsState: on a home where the Claude CLI never
 // ran, ~/.claude does not exist yet. It sits above denied paths, so it is
 // pinned, but only against rename and delete: the CLI must still be able to
 // create it and write its state, and the brain must not be able to move it
-// once it exists.
+// once it exists. Nor can the brain create it, or a missing folder in it,
+// as a symlink into its own folder, where what the CLI and your own
+// sessions write there would land. Each step builds the profile afresh,
+// as each run does.
 func TestSandboxLetsTheCLICreateItsState(t *testing.T) {
 	requireSandboxExec(t)
 	home := canonicalDir(t.TempDir())
@@ -642,11 +706,16 @@ func TestSandboxLetsTheCLICreateItsState(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(home, ".claude")); !os.IsNotExist(err) {
 		t.Fatalf("~/.claude exists before the run: %v", err)
 	}
+	t.Setenv("L", filepath.Join(ownDir, "loot"))
 	steps := []struct {
 		name  string
 		cmd   string
 		allow bool
 	}{
+		{"link a missing ~/.claude into its own folder", `mkdir -p "$L" && ln -s "$L" "$HOME/.claude"`, false},
+		{"create ~/.claude", `mkdir "$HOME/.claude"`, true},
+		{"link a missing sessions folder into its own folder", `ln -s "$L" "$HOME/.claude/sessions"`, false},
+		{"link a missing transcripts folder into its own folder", `ln -s "$L" "$HOME/.claude/projects"`, false},
 		{"create its state", `mkdir -p "$HOME/.claude/projects/x" "$HOME/.claude/sessions" && printf '{}' > "$HOME/.claude/projects/x/s.jsonl" && printf '{}' > "$HOME/.claude/sessions/1.json" && printf '{}' > "$HOME/.claude.json"`, true},
 		{"move ~/.claude away", `mv "$HOME/.claude" "$HOME/c2"`, false},
 		{"move the transcripts away", `mv "$HOME/.claude/projects" "$HOME/p2"`, false},

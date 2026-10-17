@@ -219,7 +219,9 @@ Other Claude Code sessions' records (`~/.claude/projects`,
 `~/.claude/sessions`, yours included) are unreadable, but the CLI writes its
 own run's files there, so writing stays allowed. Transcripts cannot be moved
 or deleted; the small per-process files in `sessions/` can (the CLI deletes
-its own on exit).
+its own on exit). Nor can a brain plant a symlink in either folder, such as
+a new project's folder linked into its own, through which a later session's
+transcript would reach it.
 
 Brains can read but never write the files that are loaded or run outside
 their sandbox, so a manipulated brain cannot plant code there:
@@ -272,8 +274,8 @@ brain create such a folder while it does not exist yet, for example a
 missing `~/.config` or `PATH` folder: it could create it as a symlink into
 its own folder, or move a folder of its own there, and so redirect what
 lies below it. The exception is `~/.claude` and the folders in it, which
-the Claude CLI creates on its first run; from the next run on they are
-pinned too.
+the Claude CLI creates on its first run: brains can create them too, though
+not as a symlink, and from the next run on they are pinned too.
 
 `~/Library/Keychains` is deliberately **not** denied: the Claude CLI reads its
 credentials from the keychain and fails with "Not logged in" without it.
@@ -363,16 +365,17 @@ for the paths listed above. A manipulated brain can therefore still:
   and `~/.claude/session-env` (sourced into running sessions' shell
   commands), and the small per-process files in `~/.claude/sessions`,
   which it can also move and then read
-- create a folder in `~/.claude/projects` for a project that has none yet as
-  a symlink into its own folder, which would give that project's sessions
-  an auto-memory the brain wrote
-- create `~/.claude`, or a folder in it such as `~/.claude/sessions`,
-  while it is missing (on a home where the Claude CLI has not created it
-  yet): as a symlink into its own folder, so that what the CLI and your
-  own sessions later read and write there lands with the brain (pinned
-  from the next run), or by moving a prepared folder there, with settings,
-  hooks or a `CLAUDE.md` of its own inside, which stays in place after the
-  next run pins it
+- move a prepared folder into `~/.claude/projects` for a project that has
+  none yet (a symlink there is refused), which gives that project's
+  sessions an auto-memory the brain wrote; with a `memory` symlink into its
+  own folder inside, the brain also reads what those sessions save there
+- create `~/.claude`, or a folder in it such as `~/.claude/projects`, while
+  it is missing (on a home where the Claude CLI has not created it yet), by
+  moving a prepared folder there (a symlink there is refused). What it put
+  inside stays after the next run pins the folder: settings, hooks or a
+  `CLAUDE.md` that the CLI and your own sessions load, or symlinks into its
+  own folder, through which what they write there, transcripts included,
+  reaches the brain
 - ask launchd (`launchctl`), cron (`crontab`), `at`, LaunchServices
   (`open`), another app (`osascript`) or a tmux server that runs outside
   the sandbox (the activity viewer's, or your own) to start a program
