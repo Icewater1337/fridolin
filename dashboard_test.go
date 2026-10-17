@@ -211,6 +211,39 @@ func TestHTTPSendRefusesStatusBroadcastAndChannels(t *testing.T) {
 	}
 }
 
+func TestSendRefusesMissingJIDOrText(t *testing.T) {
+	// Blank text gives no chunks, so it used to send nothing while still
+	// answering "sent" and writing the blank text to the brain's history.
+	tb := newTestBridge(t, `, "brains": [{"name": "p", "work_dir": "~/p", "handles_dms": true}]`)
+	cases := []struct {
+		name string
+		body string
+	}{
+		{"no jid", `{"text":"hello"}`},
+		{"no text", `{"jid":"15551234567@s.whatsapp.net"}`},
+		{"empty text", `{"jid":"15551234567@s.whatsapp.net","text":""}`},
+		{"blank text", `{"jid":"15551234567@s.whatsapp.net","text":"  \n\t "}`},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			r := httptest.NewRequest("POST", "http://127.0.0.1:8765/send", strings.NewReader(c.body))
+			r.Host = "127.0.0.1:8765"
+			r.Header.Set("Content-Type", "application/json")
+			w := httptest.NewRecorder()
+			tb.h.ServeHTTP(w, r)
+			if w.Code != http.StatusBadRequest {
+				t.Errorf("status %d, want 400 (%s)", w.Code, w.Body.String())
+			}
+		})
+	}
+	if out := tb.dev.Outbox(); len(out) != 0 {
+		t.Errorf("outbox = %+v, want nothing sent", out)
+	}
+	if hist, _ := os.ReadFile(filepath.Join(tb.home, "p", "conversation-history.jsonl")); len(hist) != 0 {
+		t.Errorf("history = %s, want nothing recorded", hist)
+	}
+}
+
 func TestIngestConfinedToMediaDir(t *testing.T) {
 	tb := newTestBridge(t, `, "ingest": {"enabled": true}, "brains": [{"name": "personal", "work_dir": "~/p", "handles_dms": true}]`)
 	cfg := tb.cfgs.Get()

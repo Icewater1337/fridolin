@@ -524,9 +524,11 @@ sign another bridge is running.
 
 `POST /send {"jid","text"}` sends a message (see the README); it is appended to
 the owning brain's history, so the assistant knows what went out under its
-name. Status, broadcast-list and channel JIDs (`…@broadcast`, `…@newsletter`)
-are refused with `400 {"error": …}`. `GET /health` returns `ok`. Both work
-without the dashboard token but refuse requests sent by web pages.
+name. Text that is empty or only whitespace is refused with 400, since there
+would be nothing to send. Status, broadcast-list and channel JIDs
+(`…@broadcast`, `…@newsletter`) are refused with `400 {"error": …}`.
+`GET /health` returns `ok`. Both work without the dashboard token but refuse
+requests sent by web pages.
 
 ### `ingest.enabled`
 
