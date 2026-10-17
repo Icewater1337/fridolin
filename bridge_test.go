@@ -136,6 +136,18 @@ Let me know.`
 	}
 }
 
+// The end of a block is found in any letter case, like its start: a
+// "[Poll]…[/poll]" block is a poll, not markup in the chat.
+func TestExtractPollsAnyCase(t *testing.T) {
+	polls, remaining := extractPolls("Vote:\n[Poll max=2]\nQuestion: Which?\n- A\n- B\n[/poll] thanks")
+	if len(polls) != 1 || polls[0].Question != "Which?" || polls[0].MaxSelectable != 2 {
+		t.Errorf("got %+v", polls)
+	}
+	if remaining != "Vote:\n thanks" {
+		t.Errorf("remaining = %q", remaining)
+	}
+}
+
 func TestExtractPollsMaxSelectable(t *testing.T) {
 	polls, _ := extractPolls("[POLL max=2]\nQuestion: Which?\n- A\n- B\n- C\n[/POLL]")
 	if len(polls) != 1 || polls[0].MaxSelectable != 2 {

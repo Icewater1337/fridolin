@@ -587,8 +587,12 @@ type pollData struct {
 // maxPollOptions is WhatsApp's own limit on options per poll.
 const maxPollOptions = 12
 
-// pollHeaderRe matches [POLL] or [POLL max=N].
-var pollHeaderRe = regexp.MustCompile(`(?i)\[POLL(?:\s+max=(\d+))?\]`)
+// pollHeaderRe matches [POLL] or [POLL max=N], and pollCloseRe the [/POLL]
+// that ends the block, both in any letter case.
+var (
+	pollHeaderRe = regexp.MustCompile(`(?i)\[POLL(?:\s+max=(\d+))?\]`)
+	pollCloseRe  = regexp.MustCompile(`(?i)\[/POLL\]`)
+)
 
 // extractPolls finds all [POLL]…[/POLL] blocks in text, parses them, and
 // returns the remaining text with the blocks removed.
@@ -601,11 +605,11 @@ func extractPolls(text string) ([]pollData, string) {
 		if loc == nil {
 			break
 		}
-		end := strings.Index(remaining[loc[1]:], "[/POLL]")
-		if end == -1 {
+		closing := pollCloseRe.FindStringIndex(remaining[loc[1]:])
+		if closing == nil {
 			break
 		}
-		end += loc[1] // absolute position of "[/POLL]"
+		end := loc[1] + closing[0] // absolute position of "[/POLL]"
 
 		maxSelectable := 1
 		headerMatch := pollHeaderRe.FindStringSubmatch(remaining[loc[0]:loc[1]])
@@ -616,7 +620,7 @@ func extractPolls(text string) ([]pollData, string) {
 		}
 
 		block := remaining[loc[1]:end]
-		remaining = remaining[:loc[0]] + remaining[end+len("[/POLL]"):]
+		remaining = remaining[:loc[0]] + remaining[loc[1]+closing[1]:]
 
 		var question string
 		var options []string
