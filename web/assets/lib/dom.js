@@ -50,7 +50,10 @@ export function append(el, children) {
   for (const c of children) {
     if (c === null || c === undefined || c === false || c === true) continue;
     if (Array.isArray(c)) append(el, c);
-    else if (c instanceof Node) el.appendChild(c);
+    // The typeof test changes nothing for a node, but CodeQL only takes a
+    // typeof test, not instanceof, as proof that no string reaches
+    // appendChild, and would otherwise report text from inputs as XSS.
+    else if (typeof c === 'object' && c instanceof Node) el.appendChild(c);
     else el.appendChild(document.createTextNode(String(c)));
   }
   return el;
