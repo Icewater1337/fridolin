@@ -283,3 +283,56 @@ func TestDotEnvOverridesWithoutExporting(t *testing.T) {
 		})
 	}
 }
+
+func TestBadDotEnvIsAnError(t *testing.T) {
+	// Ignoring a .env that does not parse would run the bridge without the
+	// settings it meant to set; the error must not quote its contents.
+	const secret = "sk-not-a-real-secret"
+	tests := []struct {
+		name string
+		body string // "" makes .env a directory
+	}{
+		{"unterminated quote", "MODEL=\"" + secret + "\n"},
+		{"invalid variable name", "MY-KEY=" + secret + "\n"},
+		{"unreadable", ""},
+	}
+	for _, tc := range tests {
+		for _, relative := range []bool{false, true} {
+			name := tc.name
+			if relative {
+				name += ", relative config path"
+			}
+			t.Run(name, func(t *testing.T) {
+				t.Setenv("HOME", t.TempDir())
+				path := writeConfig(t, `{}`)
+				dotenv := filepath.Join(filepath.Dir(path), ".env")
+				var err error
+				if tc.body == "" {
+					err = os.Mkdir(dotenv, 0o700)
+				} else {
+					err = os.WriteFile(dotenv, []byte(tc.body), 0o600)
+				}
+				if err != nil {
+					t.Fatal(err)
+				}
+				if relative {
+					// ./config.json, which the bridge uses when no --config is
+					// given: the error must still say which folder's .env it is.
+					t.Chdir(filepath.Dir(path))
+					path = "config.json"
+				}
+				_, err = OpenConfigStore(path)
+				if err == nil {
+					t.Fatal("a .env that cannot be read must stop the config from loading")
+				}
+				resolved := filepath.Join(canonicalDir(filepath.Dir(dotenv)), ".env")
+				if !strings.Contains(err.Error(), dotenv) && !strings.Contains(err.Error(), resolved) {
+					t.Errorf("error %q does not name %s", err, dotenv)
+				}
+				if strings.Contains(err.Error(), secret) {
+					t.Errorf("error %q quotes the .env contents", err)
+				}
+			})
+		}
+	}
+}

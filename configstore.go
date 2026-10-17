@@ -41,7 +41,10 @@ var ErrConfigConflict = errors.New("config changed since it was loaded — reloa
 // OpenConfigStore loads cfgPath. A missing file is not an error: it means an
 // empty configuration with defaults, which is what a fresh install starts from.
 func OpenConfigStore(cfgPath string) (*ConfigStore, error) {
-	env := loadDotEnv(cfgPath)
+	env, err := loadDotEnv(cfgPath)
+	if err != nil {
+		return nil, err
+	}
 
 	file := &Config{}
 	var raw []byte

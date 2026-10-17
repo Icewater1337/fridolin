@@ -2,7 +2,9 @@ package main
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -333,15 +335,32 @@ type envLookup func(key string) string
 // so brains, rclone and the other programs the bridge starts do not see them,
 // and a test cannot leave them behind for the next one. There is no fallback
 // to the working directory: a bridge started from a checkout, or the tests
-// run in one, must not pick up whatever file happens to lie there.
-func loadDotEnv(cfgPath string) envLookup {
-	vars, _ := godotenv.Read(filepath.Join(filepath.Dir(cfgPath), ".env"))
+// run in one, must not pick up whatever file happens to lie there. A missing
+// .env means no overrides; one that cannot be read or parsed is an error.
+func loadDotEnv(cfgPath string) (envLookup, error) {
+	path := filepath.Join(filepath.Dir(cfgPath), ".env")
+	if abs, err := filepath.Abs(path); err == nil {
+		path = abs // so an error names the folder, for ./config.json too
+	}
+	vars, err := godotenv.Read(path)
+	var pathErr *fs.PathError
+	switch {
+	case errors.Is(err, fs.ErrNotExist):
+		vars = nil
+	case errors.As(err, &pathErr):
+		return nil, fmt.Errorf("reading .env: %w", err)
+	case err != nil:
+		// Not ignored: the bridge would run without the settings the file
+		// meant to set. The parser's message quotes the text around the
+		// mistake, which may be a secret, so it is left out.
+		return nil, fmt.Errorf("%s is not a valid .env file (one KEY=value per line)", path)
+	}
 	return func(key string) string {
 		if v, ok := vars[key]; ok {
 			return v
 		}
 		return os.Getenv(key)
-	}
+	}, nil
 }
 
 // dataDirName and legacyDataDirName are the home-relative names of the data
