@@ -202,7 +202,15 @@ write:
 - `~/Library/Mail`, `Messages`, `Calendars`, `Safari`, Chrome and Firefox
   profiles, `Containers`, `Group Containers`, Contacts, Notes
 - the bridge's data directory — except `media/` and the brain's own calendar
-  credentials
+  credentials — under both names it has had, `~/.fridolin` and
+  `~/.whatsapp-claude-bridge`, whichever is in use (an old one left behind
+  can still hold the WhatsApp keys and tokens)
+- the database (`db_path`, with its `-wal`, `-shm` and `-journal` files)
+  wherever it is, and its folder when that lies outside the data directory,
+  unless the folder is your home folder or a temp folder
+- the bridge's logs in `~/Library/Logs/fridolin`
+- `~/.config/fridolin`, which holds the personal-data denylist the commit
+  hooks read
 
 Other Claude Code sessions' records (`~/.claude/projects`,
 `~/.claude/sessions`, yours included) are unreadable, but the CLI writes its
@@ -311,7 +319,7 @@ Database (including the WhatsApp session), downloaded media, the dashboard
 token, backup state, the bridge's rclone config and calendar credentials.
 Default `~/.fridolin`. `db_path` and `media_dir` override
 individually. Brains cannot read it, except the `media/` inbox and their own
-calendar credentials.
+calendar credentials; a `db_path` elsewhere is denied to them too.
 
 ### `http_listen` *(restart)*
 

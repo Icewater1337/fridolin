@@ -298,11 +298,18 @@ func loadDotEnv(cfgPath string) {
 	}
 }
 
+// dataDirName and legacyDataDirName are the home-relative names of the data
+// dir, now and before the project was renamed.
+const (
+	dataDirName       = ".fridolin"
+	legacyDataDirName = ".whatsapp-claude-bridge"
+)
+
 // defaultDataDir is ~/.fridolin, or the folder installs used before the
 // project was renamed (~/.whatsapp-claude-bridge) when only that one exists.
 func defaultDataDir(home string) string {
-	current := filepath.Join(home, ".fridolin")
-	legacy := filepath.Join(home, ".whatsapp-claude-bridge")
+	current := filepath.Join(home, dataDirName)
+	legacy := filepath.Join(home, legacyDataDirName)
 	if _, err := os.Stat(current); os.IsNotExist(err) {
 		if st, err := os.Stat(legacy); err == nil && st.IsDir() {
 			return legacy

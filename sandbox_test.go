@@ -784,3 +784,83 @@ func TestNodePackage(t *testing.T) {
 		}
 	}
 }
+
+// TestSandboxProfileDeniesBridgeSecrets: the deny set follows the bridge's
+// secrets wherever they are. db_path can put the WhatsApp session store
+// outside the data dir, where every brain could read it; an install that
+// moved to ~/.fridolin can leave the old ~/.whatsapp-claude-bridge behind
+// with older copies of the same keys and tokens.
+func TestSandboxProfileDeniesBridgeSecrets(t *testing.T) {
+	home := canonicalDir(t.TempDir())
+	t.Setenv("HOME", home)
+	tmp := canonicalDir(os.TempDir())
+	both := func(filter, p string) []string {
+		return []string{`(deny file-read* (` + filter + ` "` + p + `"))`, `(deny file-write* (` + filter + ` "` + p + `"))`}
+	}
+	dbRules := func(db string) []string {
+		var out []string
+		for _, s := range []string{"", "-wal", "-shm", "-journal"} {
+			out = append(out, both("literal", db+s)...)
+		}
+		return out
+	}
+	cases := []struct {
+		name          string
+		dataDir, db   string
+		want, notWant []string
+	}{
+		{"db_path outside the data dir", home + "/.fridolin", home + "/wa-store/bridge.db",
+			append(dbRules(home+"/wa-store/bridge.db"), both("subpath", home+"/wa-store")...), nil},
+		{"db_path in the data dir", home + "/.fridolin", home + "/.fridolin/bridge.db",
+			dbRules(home + "/.fridolin/bridge.db"), nil},
+		{"db_path in HOME keeps HOME open", home + "/.fridolin", home + "/bridge.db",
+			dbRules(home + "/bridge.db"), both("subpath", home)},
+		{"db_path in the temp dir keeps it open", home + "/.fridolin", tmp + "/bridge.db",
+			dbRules(tmp + "/bridge.db"), both("subpath", tmp)},
+		{"custom data dir still denies both default names", home + "/fd", home + "/fd/bridge.db",
+			append(append(both("subpath", home+"/fd"), both("subpath", home+"/.fridolin")...), both("subpath", home+"/.whatsapp-claude-bridge")...), nil},
+		{"legacy data dir active", home + "/.whatsapp-claude-bridge", home + "/.whatsapp-claude-bridge/bridge.db",
+			append(both("subpath", home+"/.fridolin"), `(allow file-read* (subpath "`+home+`/.whatsapp-claude-bridge/media"))`), nil},
+		{"bridge logs", home + "/.fridolin", home + "/.fridolin/bridge.db",
+			append(both("subpath", home+"/Library/Logs/fridolin"), both("subpath", home+"/Library/Logs/whatsapp-claude-bridge")...), nil},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg := &Config{DataDir: tc.dataDir, DBPath: tc.db}
+			lines := strings.Split(mustProfile(t, NewSandboxProfiler(map[string]string{"a": home + "/a"}, cfg), "a"), "\n")
+			for _, rule := range tc.want {
+				if !slices.Contains(lines, rule) {
+					t.Errorf("profile lacks %s", rule)
+				}
+			}
+			for _, rule := range tc.notWant {
+				if slices.Contains(lines, rule) {
+					t.Errorf("profile has %s", rule)
+				}
+			}
+			// No media_dir can open the DB again: its denies follow the allow.
+			media := slices.IndexFunc(lines, func(l string) bool { return strings.HasPrefix(l, "(allow file-read* (subpath") })
+			db := slices.Index(lines, `(deny file-read* (literal "`+tc.db+`"))`)
+			if media < 0 || db < media {
+				t.Errorf("the DB deny (line %d) does not follow the media allow (line %d)", db, media)
+			}
+		})
+	}
+	// db_path and DB_PATH are only ~-expanded, so they can be relative; the
+	// bridge then opens the DB in its working directory. Its folder is
+	// denied like any other, relative to that directory, not to "/".
+	for _, db := range []string{"wa/bridge.db", "bridge.db"} {
+		t.Run("relative db_path "+db, func(t *testing.T) {
+			wd := canonicalDir(t.TempDir())
+			t.Chdir(wd)
+			cfg := &Config{DataDir: home + "/.fridolin", DBPath: db}
+			lines := strings.Split(mustProfile(t, NewSandboxProfiler(map[string]string{"a": home + "/a"}, cfg), "a"), "\n")
+			abs := filepath.Join(wd, db)
+			for _, rule := range append(dbRules(abs), both("subpath", filepath.Dir(abs))...) {
+				if !slices.Contains(lines, rule) {
+					t.Errorf("profile lacks %s", rule)
+				}
+			}
+		})
+	}
+}

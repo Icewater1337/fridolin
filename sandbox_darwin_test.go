@@ -491,6 +491,57 @@ func TestSandboxProtectsOutsidePrograms(t *testing.T) {
 	}
 }
 
+// TestSandboxDeniesBridgeSecretsWhereverTheyLive: with db_path outside the
+// data dir, the WhatsApp session store (enough to take the account over
+// from another machine) used to be readable by every brain, and so was a
+// data dir left behind under the old project name.
+func TestSandboxDeniesBridgeSecretsWhereverTheyLive(t *testing.T) {
+	requireSandboxExec(t)
+	for _, l := range sandboxLayouts() {
+		t.Run(l.name, func(t *testing.T) {
+			home := l.home(t)
+			t.Setenv("HOME", home)
+			sp, ownDir := sandboxFixture(t, home, l.otherBrain, l.denyDir, map[string]any{"db_path": "~/wa-store/bridge.db"})
+			for _, f := range []string{
+				"wa-store/bridge.db-wal",
+				"wa-store/notes.txt",
+				".whatsapp-claude-bridge/bridge.db",
+				".whatsapp-claude-bridge/dashboard.token",
+				"Library/Logs/fridolin/stderr.log",
+				".config/fridolin/personal-denylist",
+			} {
+				p := filepath.Join(home, f)
+				if err := os.MkdirAll(filepath.Dir(p), 0o700); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.WriteFile(p, []byte("content of "+f), 0o600); err != nil {
+					t.Fatal(err)
+				}
+			}
+			cases := []struct {
+				name, cmd string // cmd runs in sh with $HOME set
+			}{
+				{"read the session store", `cat "$HOME/wa-store/bridge.db"`},
+				{"read its write-ahead log", `cat "$HOME/wa-store/bridge.db-wal"`},
+				{"read next to it", `cat "$HOME/wa-store/notes.txt"`},
+				{"write next to it", `printf x > "$HOME/wa-store/planted"`},
+				{"move it aside", `mv "$HOME/wa-store" "$HOME/w2"`},
+				{"read the old data dir's store", `cat "$HOME/.whatsapp-claude-bridge/bridge.db"`},
+				{"read the old dashboard token", `cat "$HOME/.whatsapp-claude-bridge/dashboard.token"`},
+				{"read the bridge log", `cat "$HOME/Library/Logs/fridolin/stderr.log"`},
+				{"read the personal-data denylist", `cat "$HOME/.config/fridolin/personal-denylist"`},
+			}
+			for _, c := range cases {
+				t.Run(c.name, func(t *testing.T) {
+					if allowed, out := sandboxRun(t, sp, ownDir, "/bin/sh", "-c", c.cmd); allowed {
+						t.Errorf("%s was allowed: %q", c.cmd, out)
+					}
+				})
+			}
+		})
+	}
+}
+
 // TestSandboxLetsTheCLICreateItsState: on a home where the Claude CLI never
 // ran, ~/.claude does not exist yet. It sits above denied paths, so it is
 // pinned, but only against rename and delete: the CLI must still be able to
@@ -547,11 +598,12 @@ func symlinkedHome(t *testing.T) string {
 }
 
 // sandboxFixture writes a config with brains a and b, a credentials dir,
-// a deny path and an allow path, loads it the way the bridge does, and
-// creates one file for every check. It returns the profiler and a's folder.
-func sandboxFixture(t *testing.T, home, otherBrain, denyDir string) (*SandboxProfiler, string) {
+// a deny path and an allow path, plus any extra top-level settings, loads it
+// the way the bridge does, and creates one file for every check. It returns
+// the profiler and a's folder.
+func sandboxFixture(t *testing.T, home, otherBrain, denyDir string, extra ...map[string]any) (*SandboxProfiler, string) {
 	t.Helper()
-	cfgJSON, err := json.Marshal(map[string]any{
+	settings := map[string]any{
 		"brain_mode": true,
 		"data_dir":   "~/.fridolin",
 		"sandbox": map[string]any{
@@ -564,7 +616,13 @@ func sandboxFixture(t *testing.T, home, otherBrain, denyDir string) (*SandboxPro
 			{"name": "a", "work_dir": "~/assistant/a", "handles_dms": true},
 			{"name": "b", "work_dir": "~/assistant/" + otherBrain, "groups": []string{"120363000000000000@g.us"}},
 		},
-	})
+	}
+	for _, e := range extra {
+		for k, v := range e {
+			settings[k] = v
+		}
+	}
+	cfgJSON, err := json.Marshal(settings)
 	if err != nil {
 		t.Fatal(err)
 	}

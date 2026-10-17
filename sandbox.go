@@ -46,6 +46,10 @@ type SandboxProfiler struct {
 	dataDir  string
 	mediaDir string
 
+	// dbPath is the WhatsApp session and chat database, which db_path can
+	// put outside the data dir.
+	dbPath string
+
 	// credsDir holds per-brain credential files; see SandboxConfig.CredentialsDir.
 	credsDir string
 
@@ -92,10 +96,13 @@ func (sp *SandboxProfiler) Update(workDirs map[string]string, cfg *Config) {
 	defer sp.mu.Unlock()
 	sp.enabled = cfg.Sandbox.Enabled
 	sp.workDirs = wd
-	sp.dataDir = cfg.DataDir
-	sp.mediaDir = cfg.MediaDir
-	if sp.mediaDir == "" && cfg.DataDir != "" {
-		sp.mediaDir = filepath.Join(cfg.DataDir, "media")
+	// These may be relative, and the bridge opens them relative to its
+	// working directory; the comparisons below need them absolute.
+	sp.dataDir = absPath(cfg.DataDir)
+	sp.dbPath = absPath(cfg.DBPath)
+	sp.mediaDir = absPath(cfg.MediaDir)
+	if sp.mediaDir == "" && sp.dataDir != "" {
+		sp.mediaDir = filepath.Join(sp.dataDir, "media")
 	}
 	sp.credsDir = cfg.Sandbox.CredentialsDir
 	sp.gitConfig = cfg.Sandbox.GitConfig
@@ -126,8 +133,13 @@ var defaultDenySubpaths = []string{
 	".config/gh",
 	".config/gcloud",
 	".config/rclone",
+	// The personal-data denylist that scripts/check-personal-data.sh reads,
+	// under both names the project has had.
 	".config/fridolin",
-	".config/whatsapp-claude-bridge", // the name before the rename
+	".config/whatsapp-claude-bridge",
+	// The bridge's own logs (setup.sh), which name every chat.
+	"Library/Logs/fridolin",
+	"Library/Logs/whatsapp-claude-bridge",
 	"Documents",
 	"Downloads",
 	"Desktop",
@@ -356,18 +368,46 @@ func (sp *SandboxProfiler) Profile(brainID string) (string, error) {
 	b.WriteString("\n")
 
 	// ── bridge runtime dir ───────────────────────────────────────────────
-	// The DB holds every chat's session IDs and poll votes; the dashboard
-	// token and backup credentials live here too. Media is the shared inbound
-	// staging dir, so it is re-allowed below.
+	// The DB holds the WhatsApp session keys (enough to take the account
+	// over from another machine), every chat's session IDs and poll votes;
+	// the dashboard token and backup credentials live in the data dir too.
+	// Media is the shared inbound staging dir, so it is re-allowed below.
+	b.WriteString(";; Bridge runtime data (media staging re-allowed below)\n")
+	// Both names the data dir has had, whichever is active: an install that
+	// moved to ~/.fridolin can leave the old folder behind, with an old copy
+	// of the session keys, the dashboard token and the Drive login.
+	dataDirs := []string{filepath.Join(home, dataDirName), filepath.Join(home, legacyDataDirName)}
+	if sp.dataDir != "" && !slices.Contains(dataDirs, filepath.Clean(sp.dataDir)) {
+		dataDirs = append(dataDirs, sp.dataDir)
+	}
+	for _, dir := range dataDirs {
+		b.deny("file-read*", "subpath", dir)
+		b.deny("file-write*", "subpath", dir)
+	}
+	// db_path can put the DB anywhere. Its folder goes too, unless it is a
+	// folder the brain needs (HOME or above, a temp dir), where denying it
+	// would take the brain's home or scratch space away.
+	dbFiles := []string{}
+	if sp.dbPath != "" {
+		for _, suffix := range []string{"", "-wal", "-shm", "-journal"} {
+			dbFiles = append(dbFiles, sp.dbPath+suffix)
+		}
+		if dir := filepath.Dir(sp.dbPath); !withinAny(sp.dbPath, dataDirs) && !sharedDir(dir, home) {
+			b.deny("file-read*", "subpath", dir)
+			b.deny("file-write*", "subpath", dir)
+		}
+	}
 	if sp.dataDir != "" {
-		b.WriteString(";; Bridge runtime data (media staging re-allowed below)\n")
-		b.deny("file-read*", "subpath", sp.dataDir)
-		b.deny("file-write*", "subpath", sp.dataDir)
 		b.allow("file-read*", "subpath", sp.mediaDir)
 		b.allow("file-write*", "subpath", sp.mediaDir)
 		b.calendarAllows(sp.dataDir, brainID)
-		b.WriteString("\n")
 	}
+	// After the media allow, so no media_dir setting can open the DB again.
+	for _, f := range dbFiles {
+		b.deny("file-read*", "literal", f)
+		b.deny("file-write*", "literal", f)
+	}
+	b.WriteString("\n")
 	if sp.credsDir != "" {
 		b.WriteString(";; Shared credentials dir: only this brain's own calendar files\n")
 		b.deny("file-read*", "subpath", sp.credsDir)
@@ -544,6 +584,30 @@ func nodePackage(p string) string {
 		return ""
 	}
 	return p[:i+len(nm)] + strings.Join(rest[:n], "/")
+}
+
+// absPath is p made absolute against the working directory, or p itself
+// when it is empty or that fails.
+func absPath(p string) string {
+	if p == "" {
+		return ""
+	}
+	if abs, err := filepath.Abs(p); err == nil {
+		return abs
+	}
+	return p
+}
+
+// sharedDir reports whether dir is HOME or a temp dir, or a folder above
+// one of them: a folder that holds much more than the bridge's files.
+func sharedDir(dir, home string) bool {
+	real := resolvePath(dir)
+	for _, d := range []string{home, os.TempDir(), "/tmp"} {
+		if isWithin(resolvePath(d), real) {
+			return true
+		}
+	}
+	return false
 }
 
 // withinAny reports whether p is one of dirs or inside one.
