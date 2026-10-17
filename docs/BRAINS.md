@@ -114,5 +114,8 @@ binary and the tools it runs. It can still write most other places your
 user can, including the Claude Code state all brains share;
 [the sandbox section](CONFIGURATION.md#what-the-sandbox-does-not-cover-yet)
 lists what that leaves open. Its own folder is always readable and
-writable, even if it lives somewhere the defaults deny. A run that cannot be
-sandboxed is refused, never run without it.
+writable, even if it lives somewhere the defaults deny, but it cannot move
+or replace the folder itself and it re-opens nothing denied inside it; a
+brain whose folder is your home folder, or is itself something the sandbox
+protects, is refused. A run that cannot be sandboxed is refused, never run
+without it.

@@ -480,12 +480,6 @@ func TestSandboxProfilePinsParents(t *testing.T) {
 			}
 		})
 	}
-	t.Run("own folder stays last", func(t *testing.T) {
-		own := `(allow file-write* (subpath "` + dirs["a"] + `"))`
-		if i := slices.Index(lines, own); i < 0 || slices.ContainsFunc(lines[i:], func(l string) bool { return strings.HasPrefix(l, "(deny") }) {
-			t.Errorf("a deny follows the own-folder allow, or it is missing:\n%s", profile)
-		}
-	})
 }
 
 // TestSandboxDeniesEverySpelling: a deny covers the path as configured and
@@ -986,5 +980,212 @@ func TestSandboxAllowPathsCannotOpenBridgeSecrets(t *testing.T) {
 	deny := slices.Index(lines, `(deny file-read* (subpath "`+home+`/Documents"))`)
 	if deny < 0 || allow < deny {
 		t.Errorf("allow_paths no longer re-opens Documents/share (deny line %d, allow line %d)", deny, allow)
+	}
+}
+
+// boxFixture lays out a brain folder, ~/box for brain a, that holds what
+// the sandbox protects: another brain (b), a brain one folder further down
+// (c), the data dir with media, a db_path folder, the credentials dir, a
+// config file outside the data dir, the bridge's checkout, a deny_paths
+// entry with an allow_paths folder inside, and a folder on PATH.
+func boxFixture(t *testing.T, home string) (*SandboxProfiler, string) {
+	t.Helper()
+	t.Setenv("HOME", home)
+	box := home + "/box"
+	t.Setenv("PATH", box+"/bin:/usr/bin:/bin")
+	for _, f := range []string{
+		"notes.md", "b/diary.md", "team/c/notes.md", "bin/mytool",
+		".fridolin/dashboard.token", ".fridolin/media/photo.jpg", "wa/bridge.db",
+		"creds/google_calendar_token_a.json", "creds/google_calendar_token_b.json",
+		"etc/config.json", "fridolin/fridolin", "fridolin/tools/calendar_tool.py",
+		"clients/contract.txt", "clients/share/ok.txt",
+	} {
+		p := filepath.Join(box, f)
+		if err := os.MkdirAll(filepath.Dir(p), 0o700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(p, []byte("content of "+f), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	cfg := &Config{
+		DataDir: box + "/.fridolin",
+		DBPath:  box + "/wa/bridge.db",
+		Sandbox: SandboxConfig{
+			CredentialsDir: box + "/creds",
+			DenyPaths:      []string{box + "/clients"},
+			AllowPaths:     []string{box + "/clients/share"},
+		},
+	}
+	sp := NewSandboxProfiler(map[string]string{"a": box, "b": box + "/b", "c": box + "/team/c"}, cfg)
+	sp.SetConfigFile(box + "/etc/config.json")
+	sp.bridgeExe = box + "/fridolin/fridolin"
+	return sp, box
+}
+
+// splitAtOwnAllow splits a profile at the allow of brain folder own: the
+// rules before it, and those after it.
+func splitAtOwnAllow(t *testing.T, profile, own string) (before, after []string) {
+	t.Helper()
+	var rules []string
+	for _, l := range strings.Split(profile, "\n") {
+		if strings.HasPrefix(l, "(") && !strings.HasPrefix(l, "(version") {
+			rules = append(rules, l)
+		}
+	}
+	i := slices.Index(rules, `(allow file-read* (subpath "`+own+`"))`)
+	if i < 0 || i+1 >= len(rules) || rules[i+1] != `(allow file-write* (subpath "`+own+`"))` {
+		t.Fatalf("profile lacks the own-folder allow for %s:\n%s", own, profile)
+	}
+	return rules[:i], rules[i+2:]
+}
+
+// TestSandboxOwnFolderOpensNothingInside: a brain's folder is allowed after
+// every deny, so that it wins over those on folders above it. It used to win
+// over those inside it as well: a brain whose folder held another brain,
+// the data dir, a db_path folder or the checkout could read and write all
+// of them. Every rule for a path inside the folder now follows the allow
+// again, in the same order, after a pin on the folder itself.
+func TestSandboxOwnFolderOpensNothingInside(t *testing.T) {
+	home := canonicalDir(t.TempDir())
+	sp, box := boxFixture(t, home)
+	profile := mustProfile(t, sp, "a")
+	before, after := splitAtOwnAllow(t, profile, box)
+
+	// What lies inside the folder, as the rules above the allow name it.
+	inside := func(rule string) bool {
+		return strings.Contains(rule, ` "`+box+`/`) || // a literal or subpath
+			strings.Contains(rule, `(regex "^`+sbplRegex(box)+`/`) // a pattern below a folder in it
+	}
+	want := []string{`(deny file-write* (literal "` + box + `"))`}
+	for _, r := range before {
+		if inside(r) {
+			want = append(want, r)
+		}
+	}
+	if !slices.Equal(after, want) {
+		t.Errorf("rules after the own-folder allow:\n%s\nwant its pin, then every rule inside it, in order:\n%s", strings.Join(after, "\n"), strings.Join(want, "\n"))
+	}
+
+	// That covers every protected path inside the folder.
+	q := func(op, filter, p string) string { return `(` + op + ` (` + filter + ` "` + p + `"))` }
+	cases := []struct{ name, rule string }{
+		{"another brain", q("deny file-read*", "subpath", box+"/b")},
+		{"the data dir", q("deny file-read*", "subpath", box+"/.fridolin")},
+		{"media, re-opened", q("allow file-read*", "subpath", box+"/.fridolin/media")},
+		{"the database", q("deny file-read*", "literal", box+"/wa/bridge.db")},
+		{"the database's folder", q("deny file-read*", "subpath", box+"/wa")},
+		{"the credentials dir", q("deny file-read*", "subpath", box+"/creds")},
+		{"its own calendar token, re-opened", q("allow file-read*", "literal", box+"/creds/google_calendar_token_a.json")},
+		{"the config file", q("deny file-read*", "literal", box+"/etc/config.json")},
+		{"the bridge binary", q("deny file-write*", "literal", box+"/fridolin/fridolin")},
+		{"the checkout", q("deny file-write*", "subpath", box+"/fridolin")},
+		{"a deny_paths entry", q("deny file-read*", "subpath", box+"/clients")},
+		{"an allow_paths folder in it, re-opened", q("allow file-read*", "subpath", box+"/clients/share")},
+		{"a program the bridge runs, on PATH", q("deny file-write*", "literal", box+"/bin/osascript")},
+		{"the CLAUDE.md above a brain inside", q("deny file-write*", "literal", box+"/team/CLAUDE.md")},
+		{"the folder itself, pinned", q("deny file-write*", "literal", box)},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if !slices.Contains(after, tc.rule) {
+				t.Errorf("%s does not follow the own-folder allow", tc.rule)
+			}
+		})
+	}
+
+	t.Run("only the pin for a folder of its own", func(t *testing.T) {
+		home := canonicalDir(t.TempDir())
+		t.Setenv("HOME", home)
+		cfg := &Config{DataDir: home + "/.fridolin", DBPath: home + "/wa/bridge.db", Sandbox: SandboxConfig{CredentialsDir: home + "/creds"}}
+		sp := NewSandboxProfiler(map[string]string{"a": home + "/assistant/a", "b": home + "/assistant/b"}, cfg)
+		want := []string{`(deny file-write* (literal "` + home + `/assistant/a"))`}
+		if _, after := splitAtOwnAllow(t, mustProfile(t, sp, "a"), home+"/assistant/a"); !slices.Equal(after, want) {
+			t.Errorf("rules after the own-folder allow = %q, want %q", after, want)
+		}
+	})
+
+	// A brain that moved its folder aside and left a symlink in its place
+	// failed another brain's profile, or every profile; see
+	// TestSandboxPinsItsOwnFolder. The folder is pinned fully in every
+	// spelling, also through a symlinked folder above it.
+	t.Run("its folder pinned in every spelling", func(t *testing.T) {
+		root := canonicalDir(t.TempDir())
+		home := root + "/home"
+		if err := os.MkdirAll(root+"/elsewhere/assistant/a", 0o700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Mkdir(home, 0o700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Symlink(root+"/elsewhere/assistant", home+"/assistant"); err != nil {
+			t.Fatal(err)
+		}
+		t.Setenv("HOME", home)
+		sp := NewSandboxProfiler(map[string]string{"a": home + "/assistant/a"}, &Config{})
+		_, after := splitAtOwnAllow(t, mustProfile(t, sp, "a"), home+"/assistant/a")
+		for _, p := range []string{home + "/assistant/a", root + "/elsewhere/assistant/a"} {
+			if rule := `(deny file-write* (literal "` + p + `"))`; !slices.Contains(after, rule) {
+				t.Errorf("%s does not follow the own-folder allow: %q", rule, after)
+			}
+		}
+	})
+}
+
+// TestSandboxRefusesBrainFoldersItCannotProtect: a brain whose folder is
+// your home folder, or holds it, would open everything the sandbox protects
+// there, ~/CLAUDE.md included, and its folder rule would deny all of HOME to
+// every other brain; config.json accepts such a folder although the
+// dashboard does not. A brain whose folder is itself something denied
+// would open that. Both are refused rather than run with less protection,
+// except a folder that is a deny_paths entry: that keeps it from the others.
+func TestSandboxRefusesBrainFoldersItCannotProtect(t *testing.T) {
+	root := canonicalDir(t.TempDir())
+	home := root + "/home"
+	t.Setenv("HOME", home)
+	cases := []struct {
+		name, a string // brain a's folder
+		wantErr string
+		bFails  bool // brain b's profile fails too
+	}{
+		{"home folder", home, "home folder", true},
+		{"above it", root, "home folder", true},
+		{"the filesystem root", "/", "home folder", true},
+		{"the data dir", home + "/.fridolin", "keeps from brains", false},
+		{"the old data dir", home + "/.whatsapp-claude-bridge", "keeps from brains", false},
+		{"the credentials dir", home + "/creds", "keeps from brains", false},
+		{"the database's folder", home + "/wa", "keeps from brains", false},
+		{"the bridge's checkout", home + "/fridolin", "keeps from brains", false},
+		{"another brain's folder", home + "/assistant/b", "keeps from brains", true},
+		{"a default-denied folder", home + "/.ssh", "keeps from brains", false},
+		{"code run outside the sandbox", home + "/Library/LaunchAgents", "keeps from brains", false},
+		{"a deny_paths entry", home + "/clients", "", false},
+		{"a folder of its own", home + "/assistant/a", "", false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg := &Config{
+				DataDir: home + "/.fridolin",
+				DBPath:  home + "/wa/bridge.db",
+				Sandbox: SandboxConfig{CredentialsDir: home + "/creds", DenyPaths: []string{home + "/clients"}},
+			}
+			sp := NewSandboxProfiler(map[string]string{"a": tc.a, "b": home + "/assistant/b"}, cfg)
+			if err := os.MkdirAll(home+"/fridolin/tools", 0o700); err != nil {
+				t.Fatal(err)
+			}
+			sp.bridgeExe = home + "/fridolin/fridolin"
+			_, err := sp.Profile("a")
+			switch {
+			case tc.wantErr == "" && err != nil:
+				t.Fatalf("Profile(a): %v", err)
+			case tc.wantErr != "" && (err == nil || !strings.Contains(err.Error(), tc.wantErr)):
+				t.Fatalf("Profile(a) error = %v, want one saying %q", err, tc.wantErr)
+			}
+			// Every profile names every brain's folder, so a brain holding
+			// HOME breaks the others' profiles too.
+			if _, err := sp.Profile("b"); (err != nil) != tc.bFails {
+				t.Errorf("Profile(b) error = %v, want an error %v", err, tc.bFails)
+			}
+		})
 	}
 }

@@ -293,8 +293,21 @@ because a brain could plant one to reach something else. If an
 `allow_paths` entry is a symlink or goes through one, list its real path.
 
 A brain's own folder is always readable and writable, even inside a denied
-directory. Other tools it runs may still need paths the defaults deny, so
-keeping brains somewhere like `~/assistant/<name>` is simplest.
+directory. The brain cannot rename, delete or replace the folder itself,
+though (with a symlink to another brain's folder, say), only what is inside
+it, and the folder re-opens nothing denied inside it: another brain, the
+data directory, a `db_path` folder, the credentials folder, the bridge's
+checkout or a `deny_paths` entry inside a brain's folder stay as closed to
+that brain as to every other, and so does the `CLAUDE.md` above a brain
+further down. The sandbox refuses a brain whose folder is your home folder
+or holds it (that fails every brain's runs, since each profile names every
+brain's folder), and one whose folder is itself something the sandbox
+protects: another brain's folder, the data, database or credentials folder,
+the checkout, a default-denied folder such as `~/.ssh`. Its runs fail until
+you move it. A `deny_paths` entry may be a brain's folder, which keeps that
+folder from every other brain. Other tools a brain runs may still need
+paths the defaults deny, so keeping brains somewhere like
+`~/assistant/<name>` is simplest.
 
 ### `sandbox.git_config`
 

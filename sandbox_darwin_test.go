@@ -646,6 +646,106 @@ func TestSandboxLetsTheCLICreateItsState(t *testing.T) {
 	}
 }
 
+// TestSandboxOwnFolderKeepsWhatIsInsideIt: under the real sandbox-exec, a
+// brain whose folder holds what the sandbox protects (see boxFixture) still
+// reaches its own files, media and its own calendar token, but none of the
+// rest. Its folder rule used to win over every deny inside it. A brain
+// whose folder is your home folder is refused outright.
+func TestSandboxOwnFolderKeepsWhatIsInsideIt(t *testing.T) {
+	requireSandboxExec(t)
+	home := canonicalDir(t.TempDir())
+	sp, box := boxFixture(t, home)
+	cases := []struct {
+		name, cmd string // cmd runs in sh with $B set to the brain's folder
+		allow     bool
+	}{
+		{"read its own notes", `cat "$B/notes.md"`, true},
+		{"write a file of its own", `printf x > "$B/new.md"`, true},
+		{"read media", `cat "$B/.fridolin/media/photo.jpg"`, true},
+		{"read its own calendar token", `cat "$B/creds/google_calendar_token_a.json"`, true},
+		{"read an allow_paths folder", `cat "$B/clients/share/ok.txt"`, true},
+		{"install a tool of its own on PATH", `printf x > "$B/bin/mytool2"`, true},
+		{"read another brain's files", `cat "$B/b/diary.md"`, false},
+		{"write into another brain's folder", `printf x > "$B/team/c/planted.md"`, false},
+		{"move another brain aside", `mv "$B/b" "$B/b2"`, false},
+		{"read the dashboard token", `cat "$B/.fridolin/dashboard.token"`, false},
+		{"read the database", `cat "$B/wa/bridge.db"`, false},
+		{"read another brain's calendar token", `cat "$B/creds/google_calendar_token_b.json"`, false},
+		{"read the config file", `cat "$B/etc/config.json"`, false},
+		{"read a deny_paths entry", `cat "$B/clients/contract.txt"`, false},
+		{"rewrite a bridge tool", `printf x >> "$B/fridolin/tools/calendar_tool.py"`, false},
+		{"plant a program the bridge runs", `printf x > "$B/bin/osascript"`, false},
+		{"write the CLAUDE.md above another brain", `printf obey > "$B/team/CLAUDE.md"`, false},
+		{"move its own folder, and all of it with it", `mv "$B" "$B.moved"`, false},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			t.Setenv("B", box)
+			if allowed, out := sandboxRun(t, sp, box, "/bin/sh", "-c", c.cmd); allowed != c.allow {
+				t.Errorf("%s: allowed=%v, want %v (output %q)", c.cmd, allowed, c.allow, out)
+			}
+		})
+	}
+
+	t.Run("a brain at your home folder is refused", func(t *testing.T) {
+		sp := NewSandboxProfiler(map[string]string{"a": home}, &Config{DataDir: home + "/.fridolin"})
+		if bin, args, err := sp.Command("a", "/bin/cat", []string{home + "/box/.fridolin/dashboard.token"}); err == nil {
+			t.Errorf("Command = %s %q, want it refused", bin, args)
+		}
+	})
+}
+
+// TestSandboxPinsItsOwnFolder: a brain could move its own folder aside and
+// leave a symlink in its place. One to another brain's folder failed that
+// brain's next profile (its folder had become one this brain's profile
+// denies); one to HOME failed every profile; and the bridge, which reads and
+// appends a brain's history in its folder outside the sandbox, followed the
+// link. Under the real sandbox-exec the folder cannot be moved, by either
+// spelling, while everything inside it stays the brain's to change.
+func TestSandboxPinsItsOwnFolder(t *testing.T) {
+	requireSandboxExec(t)
+	cases := []struct {
+		name, cmd string // cmd runs in sh with $A, $R, $B and $HOME set
+		allow     bool
+	}{
+		{"swap it for a link to another brain", `mv "$A" "$A.old" && ln -s "$B" "$A"`, false},
+		{"swap it for a link to HOME", `mv "$A" "$A.old" && ln -s "$HOME" "$A"`, false},
+		{"swap it by its real path", `mv "$R" "$R.old" && ln -s "$B" "$R"`, false},
+		{"rename a file inside it", `mv "$A/notes.md" "$A/n2.md" && mv "$A/n2.md" "$A/notes.md"`, true},
+		{"make and remove a folder inside it", `mkdir "$A/sub" && rmdir "$A/sub"`, true},
+	}
+	for _, l := range sandboxLayouts() {
+		t.Run(l.name, func(t *testing.T) {
+			home := l.home(t)
+			t.Setenv("HOME", home)
+			sp, ownDir := sandboxFixture(t, home, l.otherBrain, l.denyDir)
+			configured := filepath.Join(home, "assistant", "a")
+			real, err := filepath.EvalSymlinks(configured)
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Setenv("A", configured)
+			t.Setenv("R", real)
+			t.Setenv("B", filepath.Join(home, "assistant", l.otherBrain))
+			for _, c := range cases {
+				t.Run(c.name, func(t *testing.T) {
+					if allowed, out := sandboxRun(t, sp, ownDir, "/bin/sh", "-c", c.cmd); allowed != c.allow {
+						t.Errorf("%s: allowed=%v, want %v (output %q)", c.cmd, allowed, c.allow, out)
+					}
+				})
+			}
+			if fi, err := os.Lstat(real); err != nil || !fi.IsDir() {
+				t.Errorf("brain a's folder is no longer a folder: %v, %v", fi, err)
+			}
+			for _, id := range []string{"a", "b"} {
+				if _, err := sp.Profile(id); err != nil {
+					t.Errorf("Profile(%s) after the attempts: %v", id, err)
+				}
+			}
+		})
+	}
+}
+
 // symlinkedHome makes HOME a symlink, and the data dir, the credentials
 // dir, the deny path, ~/.ssh and the brains' parent folder symlinks out of
 // it, the way a home on another volume or a cloud-synced folder looks.
@@ -800,6 +900,9 @@ func TestStatusWarnsWhenSandboxDoesNotApply(t *testing.T) {
 		// b's folder is in a's profile too, so both brains are refused.
 		{"brain folder the profile cannot hold", on + brains,
 			func(sp *SandboxProfiler) { sp.workDirs["b"] += "\nx" }, true, "line break), so brains a, b refuse every message"},
+		// config.json accepts a brain at ~, which the dashboard refuses.
+		{"brain folder at the home folder", on + `, "brains": [{"name": "a", "work_dir": "~", "handles_dms": true}]`,
+			nil, true, "is your home folder or holds it"},
 		{"classic mode", `, "brain_mode": false` + on, nil, false, "Classic mode does not use the sandbox"},
 	}
 	for _, tc := range cases {

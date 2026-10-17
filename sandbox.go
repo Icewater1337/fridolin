@@ -236,6 +236,18 @@ func (sp *SandboxProfiler) Profile(brainID string) (string, error) {
 		// Every home-relative deny would silently become a relative path.
 		return "", fmt.Errorf("HOME %q is not an absolute path", home)
 	}
+	// A brain's own folder wins over the denies above it (see below), so a
+	// folder that holds HOME would open all of it, ~/CLAUDE.md included.
+	ids := make([]string, 0, len(sp.workDirs))
+	for id := range sp.workDirs {
+		ids = append(ids, id)
+	}
+	sort.Strings(ids)
+	for _, id := range ids {
+		if dir := sp.workDirs[id]; dir != "" && (isWithin(home, dir) || isWithin(resolvePath(home), resolvePath(dir))) {
+			return "", fmt.Errorf("brain %s: its folder %s is your home folder or holds it, which the sandbox cannot protect; give the brain a folder of its own", id, dir)
+		}
+	}
 
 	var b profileBuilder
 	b.trustRoot(home)
@@ -368,10 +380,12 @@ func (sp *SandboxProfiler) Profile(brainID string) (string, error) {
 	// ── user-supplied extras ─────────────────────────────────────────────
 	if len(sp.extraDeny) > 0 {
 		b.WriteString(";; Extra denies from config\n")
+		b.ownable = true
 		for _, p := range sp.extraDeny {
 			b.deny("file-read*", "subpath", p)
 			b.deny("file-write*", "subpath", p)
 		}
+		b.ownable = false
 		b.WriteString("\n")
 	}
 	if len(sp.extraAllow) > 0 {
@@ -478,12 +492,46 @@ func (sp *SandboxProfiler) Profile(brainID string) (string, error) {
 	b.WriteString("\n")
 
 	// ── the brain's own folder ───────────────────────────────────────────
-	// Last, so it wins over any deny above: a brain always reaches its own
-	// files, even when its folder sits inside a default-denied directory.
+	// After the denies, so it wins over those on the folder and above it: a
+	// brain always reaches its own files, even when its folder sits inside
+	// a default-denied directory. It must not open what is denied inside
+	// the folder, though (another brain, the data dir, a db_path folder,
+	// the bridge's checkout), so every rule for a path in the folder is
+	// written again after it, in order. A folder that is itself denied,
+	// other than a deny_paths entry, is refused: opening it would give the
+	// brain what it protects.
 	if own := sp.workDirs[brainID]; own != "" {
+		before := b.rules
 		b.WriteString(";; This brain's own folder\n")
-		b.allow("file-read*", "subpath", own)
+		owns := b.allow("file-read*", "subpath", own)
 		b.allow("file-write*", "subpath", own)
+		// The folder itself stays put, in every spelling. A brain that moved
+		// it aside and left a symlink in its place pointed it at another
+		// brain's folder, whose profile then failed (its folder had become
+		// one this profile denies), or at HOME, which failed every profile;
+		// and the bridge, outside the sandbox, followed the link to read and
+		// write what it keeps there for this brain.
+		pins := b.spellings(own, true)
+		for _, s := range pins {
+			b.emit(rulePin, "deny file-write*", "literal", s, s)
+		}
+		var again []profileRule
+		for _, r := range before {
+			switch {
+			case r.kind == ruleDeny && slices.Contains(owns, r.path):
+				return "", fmt.Errorf("brain %s: its folder %s is one the sandbox keeps from brains; give the brain a folder of its own", brainID, own)
+			case r.kind == rulePin && slices.Contains(pins, r.path):
+				// Pinned just above.
+			case withinAny(r.path, owns) && (r.kind == rulePin || !slices.Contains(owns, r.path)):
+				again = append(again, r)
+			}
+		}
+		if len(again) > 0 {
+			b.WriteString("\n;; Inside this brain's folder, the rules above apply again\n")
+			for _, r := range again {
+				b.WriteString(r.text)
+			}
+		}
 	}
 
 	if b.err != nil {
@@ -679,9 +727,43 @@ type profileBuilder struct {
 	// denied holds every spelling of every path denied so far, so that
 	// pinParents can protect the folders above them.
 	denied []string
+	// rules holds every rule written so far, for the brain's own folder;
+	// see Profile.
+	rules []profileRule
+	// ownable marks the denies written while it is set as ones a brain's
+	// folder may itself be.
+	ownable bool
 }
 
 type pathAlias struct{ configured, real string }
+
+// profileRule is one rule as written, with the path it covers (for a
+// pattern, the folder it matches below).
+type profileRule struct {
+	text, path string
+	kind       ruleKind
+}
+
+type ruleKind int
+
+const (
+	// ruleDeny denies a path no brain's folder may be.
+	ruleDeny ruleKind = iota
+	// ruleOwnable denies a sandbox.deny_paths entry, which a brain's folder
+	// may be: that keeps the folder from every other brain.
+	ruleOwnable
+	// rulePin keeps a folder from being renamed or removed.
+	rulePin
+	ruleAllow
+)
+
+// denyKind is the kind of the denies written now.
+func (b *profileBuilder) denyKind() ruleKind {
+	if b.ownable {
+		return ruleOwnable
+	}
+	return ruleDeny
+}
 
 // deny emits "(deny op (filter "path"))", e.g. deny("file-read*", "subpath", dir).
 //
@@ -695,7 +777,7 @@ func (b *profileBuilder) deny(op, filter, path string) {
 	// itself would also block what is allowed behind it, such as media under
 	// a symlinked data dir. Writes act on the link, so they need its entry.
 	for _, s := range b.spellings(path, strings.HasPrefix(op, "file-write")) {
-		b.emit("deny "+op, filter, s)
+		b.emit(b.denyKind(), "deny "+op, filter, s, s)
 		b.denied = append(b.denied, s)
 	}
 }
@@ -705,7 +787,7 @@ func (b *profileBuilder) deny(op, filter, path string) {
 // above dir are pinned like those above any denied path.
 func (b *profileBuilder) denyBelow(op, dir, pattern string) {
 	for _, s := range b.spellings(dir, strings.HasPrefix(op, "file-write")) {
-		b.emit("deny "+op, "regex", "^"+regexp.QuoteMeta(s)+pattern)
+		b.emit(b.denyKind(), "deny "+op, "regex", s, "^"+regexp.QuoteMeta(s)+pattern)
 		b.denied = append(b.denied, s)
 	}
 }
@@ -751,11 +833,11 @@ func (b *profileBuilder) pin(dir string) {
 
 func (b *profileBuilder) pinSpelling(dir string) {
 	if _, err := os.Lstat(dir); err == nil {
-		b.emit("deny file-write*", "literal", dir)
+		b.emit(rulePin, "deny file-write*", "literal", dir, dir)
 	} else {
 		// file-write-unlink is what the sandbox checks on the source of a
 		// rename, and on a delete.
-		b.emit("deny file-write-unlink", "literal", dir)
+		b.emit(rulePin, "deny file-write-unlink", "literal", dir, dir)
 	}
 }
 
@@ -795,14 +877,15 @@ func (b *profileBuilder) pinParents(homes ...string) {
 // longest trusted root (see trustRoot) replaced by that root's real path.
 // Unlike deny it follows no other symlink: a brain can replace its own
 // folder, the media dir or its calendar token with a symlink, and an allow
-// that followed it would open whatever the symlink points to.
-func (b *profileBuilder) allow(op, filter, path string) {
+// that followed it would open whatever the symlink points to. It returns
+// the spellings it allowed.
+func (b *profileBuilder) allow(op, filter, path string) []string {
 	p, ok := b.absolute(path)
 	if !ok {
-		return
+		return nil
 	}
 	configured := filepath.Clean(p)
-	b.emit("allow "+op, filter, configured)
+	out := []string{configured}
 	best := pathAlias{}
 	for _, r := range b.roots {
 		if (configured == r.configured || strings.HasPrefix(configured, r.configured+string(filepath.Separator))) &&
@@ -811,8 +894,12 @@ func (b *profileBuilder) allow(op, filter, path string) {
 		}
 	}
 	if best.configured != "" {
-		b.emit("allow "+op, filter, best.real+strings.TrimPrefix(configured, best.configured))
+		out = append(out, best.real+strings.TrimPrefix(configured, best.configured))
 	}
+	for _, s := range out {
+		b.emit(ruleAllow, "allow "+op, filter, s, s)
+	}
+	return out
 }
 
 // trustRoot lets allow rules under dir resolve through dir's real path. Only
@@ -848,13 +935,16 @@ func (b *profileBuilder) absolute(path string) (string, bool) {
 	return wd + string(filepath.Separator) + path, true
 }
 
-func (b *profileBuilder) emit(rule, filter, path string) {
-	q, err := sbplString(path)
+// emit writes "(rule (filter "value"))", a rule of this kind for path.
+func (b *profileBuilder) emit(kind ruleKind, rule, filter, path, value string) {
+	q, err := sbplString(value)
 	if err != nil {
 		b.fail(err)
 		return
 	}
-	fmt.Fprintf(b, "(%s (%s %s))\n", rule, filter, q)
+	text := fmt.Sprintf("(%s (%s %s))\n", rule, filter, q)
+	b.WriteString(text)
+	b.rules = append(b.rules, profileRule{text, path, kind})
 }
 
 func (b *profileBuilder) fail(err error) {
