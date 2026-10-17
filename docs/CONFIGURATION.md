@@ -607,8 +607,10 @@ writes deny-by-default.
 
 Database (including the WhatsApp session), downloaded media, the dashboard
 token, backup state, the bridge's rclone config and calendar credentials.
-Default `~/.fridolin`. `db_path` and `media_dir` override
-individually. Brains cannot read it, except the `media/` inbox and their own
+Default `~/.fridolin`; an install from before the project was renamed keeps
+`~/.whatsapp-claude-bridge` while `~/.fridolin` does not exist, and says so
+in the log at every start: set `data_dir` to it to keep it for good.
+`db_path` and `media_dir` override individually. Brains cannot read it, except the `media/` inbox and their own
 calendar credentials; a `db_path` elsewhere is denied to them too.
 
 The lock that keeps a second bridge off the same WhatsApp session is

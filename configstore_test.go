@@ -395,6 +395,45 @@ func TestBrainsKeepTheRetiredModel(t *testing.T) {
 	}
 }
 
+// The data dir from before the rename is still found when ~/.fridolin
+// does not exist, and the log says so, until data_dir names it.
+func TestLegacyDataDir(t *testing.T) {
+	cases := []struct {
+		name        string
+		dirs        []string // made in the home folder
+		config      string
+		want        string // the data dir, relative to home
+		wantWarning bool
+	}{
+		{"fresh install", nil, `{}`, ".fridolin", false},
+		{"only the old one", []string{".whatsapp-claude-bridge"}, `{}`, ".whatsapp-claude-bridge", true},
+		{"both", []string{".fridolin", ".whatsapp-claude-bridge"}, `{}`, ".fridolin", false},
+		{"named in data_dir", []string{".whatsapp-claude-bridge"}, `{"data_dir": "~/.whatsapp-claude-bridge"}`, ".whatsapp-claude-bridge", false},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			home := t.TempDir()
+			t.Setenv("HOME", home)
+			for _, d := range c.dirs {
+				if err := os.Mkdir(filepath.Join(home, d), 0o700); err != nil {
+					t.Fatal(err)
+				}
+			}
+			logs := captureLog(t)
+			cs, err := OpenConfigStore(writeConfig(t, c.config))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got, want := cs.Get().DataDir, filepath.Join(home, c.want); got != want {
+				t.Errorf("data dir %s, want %s", got, want)
+			}
+			if got := logContains(logs, "has the name from before the rename"); got != c.wantWarning {
+				t.Errorf("warned %v, want %v (log %q)", got, c.wantWarning, logs())
+			}
+		})
+	}
+}
+
 func TestConfigStoreRejectsTooSmallChunkSize(t *testing.T) {
 	// The dashboard asks for at least 100 too, but the server must not rely
 	// on it: a smaller limit would leave no room for the numbering.

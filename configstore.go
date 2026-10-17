@@ -72,6 +72,9 @@ func OpenConfigStore(cfgPath string) (*ConfigStore, error) {
 	if err != nil {
 		return nil, err
 	}
+	if file.DataDir == "" {
+		warnLegacyDataDir(eff.DataDir)
+	}
 	cs := &ConfigStore{path: cfgPath, file: file, startup: eff}
 	cs.eff.Store(eff)
 	cs.etag.Store(etagOf(raw))
@@ -242,6 +245,17 @@ func warnDotEnvNotRead(cfgPath string) {
 	if _, err := os.Lstat(path); err == nil {
 		log.Printf("warning: %s is no longer read: settings belong in config.json, and variables for the Claude CLI or brains in the bridge's environment (see docs/CONFIGURATION.md#environment-variables)", path)
 	}
+}
+
+// warnLegacyDataDir says when the default data dir is the one from before
+// the rename, taken because ~/.fridolin does not exist, so that it can be
+// named in data_dir before the bridge stops looking for it.
+func warnLegacyDataDir(dataDir string) {
+	home := homeDir()
+	if home == "" || dataDir != filepath.Join(home, legacyDataDirName) {
+		return
+	}
+	log.Printf("warning: data dir %s has the name from before the rename and is used because %s does not exist; set the data folder to it (Settings → Advanced) to keep it once the bridge no longer looks for that name", dataDir, filepath.Join(home, dataDirName))
 }
 
 // warnUnknownKeys logs top-level keys config.json has but the bridge does not
