@@ -511,6 +511,52 @@ func TestPlaudFirstSyncThenForwardsNewRecordings(t *testing.T) {
 	}
 }
 
+// plaudAfterRestart is a new manager on tb's configuration and brains, as
+// after a restart, wired the way the bridge wires its own.
+func plaudAfterRestart(tb *testBridge) *PlaudManager {
+	p := NewPlaudManager(tb.cfgs, tb.brainMgr)
+	p.handOff, p.notify = tb.handOff, tb.wa.SendMessage
+	return p
+}
+
+// The manager needs only the configuration, the brains and the two
+// functions it is given: it hands each recording to handOff and says
+// nothing else to the bridge.
+func TestPlaudManagerUsesOnlyWhatItIsGiven(t *testing.T) {
+	tb, fp := plaudBridge(t, "")
+	type handed struct {
+		brain, jid, sender, text string
+		media                    []string
+	}
+	var got []handed
+	p := NewPlaudManager(tb.cfgs, tb.brainMgr)
+	p.handOff = func(br *Brain, jid, sender, text string, media []string) {
+		got = append(got, handed{br.ID(), jid, sender, text, media})
+	}
+	p.notify = func(context.Context, string, string) error { t.Error("notify called"); return nil }
+	plaudSignIn(t, tb)
+	if err := p.saveState(&plaudState{Account: "u_1", Seen: []string{plaudOld1}, Pending: map[string]float64{}}); err != nil {
+		t.Fatal(err)
+	}
+	fp.files(plaudNew, plaudOld1)
+	fp.recording(plaudNew, true)
+	if err := p.Poll(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("handed over %d times, want once: %+v", len(got), got)
+	}
+	h := got[0]
+	if h.brain != "p" || h.jid != "15551234567@s.whatsapp.net" || h.sender != "plaud" || !strings.HasPrefix(h.text, "[Plaud] New recording") ||
+		len(h.media) != 1 || !strings.HasSuffix(h.media[0], " - "+plaudNew+".txt") {
+		t.Errorf("handed %+v", h)
+	}
+	time.Sleep(100 * time.Millisecond)
+	if out := tb.dev.Outbox(); len(out) != 0 {
+		t.Errorf("the bridge sent %+v, want nothing: only handOff was to be used", out)
+	}
+}
+
 // plaudSignIn leaves a login in place, as a finished sign-in does.
 func plaudSignIn(t *testing.T, tb *testBridge) {
 	t.Helper()
@@ -559,7 +605,7 @@ func TestPlaudExpiredLoginNotifiesOncePerDay(t *testing.T) {
 			if st, _ := tb.plaud.loadState(); st.AuthNotified == 0 {
 				t.Error("the notice time was not saved in the state")
 			}
-			if err := NewPlaudManager(tb.Bridge).Poll(context.Background()); err != errPlaudAuth {
+			if err := plaudAfterRestart(tb).Poll(context.Background()); err != errPlaudAuth {
 				t.Fatalf("poll after restart: err = %v", err)
 			}
 			if out := tb.dev.Outbox(); len(out) != 1 {

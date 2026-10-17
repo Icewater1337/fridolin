@@ -177,7 +177,9 @@ func NewBridge(cfgs *ConfigStore, opts BridgeOptions) (_ *Bridge, err error) {
 		return b.wa.SendMessage(ctx, jid, text)
 	}
 	b.google = NewGoogleAuth(cfgs)
-	b.plaud = NewPlaudManager(b)
+	b.plaud = NewPlaudManager(cfgs, b.brainMgr)
+	b.plaud.handOff = b.handOff
+	b.plaud.notify = b.wa.SendMessage
 	b.site = NewSiteManager(cfg.DataDir, b.google.clientPath)
 	b.site.hooks = b.siteBuilderHooks()
 	return b, nil

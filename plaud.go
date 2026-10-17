@@ -116,9 +116,16 @@ type PlaudForward struct {
 	At    time.Time `json:"at"`
 }
 
-// PlaudManager runs the CLI, the poller and the connect flow.
+// PlaudManager runs the CLI, the poller and the connect flow. It knows the
+// rest of the bridge only through the configuration, the brains and two
+// functions, like the backup manager, so it can be tested without a bridge.
 type PlaudManager struct {
-	b *Bridge
+	cfgs   *ConfigStore
+	brains *BrainManager
+	// handOff gives a recording's transcript to br, whose answer goes to jid.
+	handOff func(br *Brain, jid, sender, text string, media []string)
+	// notify sends text to a chat (the expiry notice).
+	notify func(ctx context.Context, jid, text string) error
 
 	mu            sync.Mutex
 	connect       *connectJob
@@ -137,18 +144,19 @@ type PlaudManager struct {
 	// last checked against. Only polls use it, one at a time.
 	checkedLogin string
 
-	// run executes the CLI; tests replace it.
+	// run executes the CLI for everything but the sign-in. It is runCLI;
+	// tests wrap it to act between two commands.
 	run func(ctx context.Context, args ...string) (string, error)
 }
 
-// NewPlaudManager creates the manager.
-func NewPlaudManager(b *Bridge) *PlaudManager {
-	p := &PlaudManager{b: b}
+// NewPlaudManager creates the manager. The caller sets handOff and notify.
+func NewPlaudManager(cfgs *ConfigStore, brains *BrainManager) *PlaudManager {
+	p := &PlaudManager{cfgs: cfgs, brains: brains}
 	p.run = p.runCLI
 	return p
 }
 
-func (p *PlaudManager) cfg() *Config { return p.b.cfgs.Get() }
+func (p *PlaudManager) cfg() *Config { return p.cfgs.Get() }
 
 func (p *PlaudManager) dir() string { return filepath.Join(p.cfg().DataDir, "plaud") }
 
@@ -218,6 +226,12 @@ func plaudPATH(bin string) string {
 // CLI needs nothing but its own login. Exit status 2 means the login
 // expired.
 func (p *PlaudManager) runCLI(ctx context.Context, args ...string) (string, error) {
+	return p.runCLIOut(ctx, nil, args...)
+}
+
+// runCLIOut is runCLI that also copies the CLI's output to out as it
+// arrives, when out is not nil: the sign-in prints its link, then waits.
+func (p *PlaudManager) runCLIOut(ctx context.Context, out io.Writer, args ...string) (string, error) {
 	bin, err := p.cliPath()
 	if err != nil {
 		return "", err
@@ -231,20 +245,19 @@ func (p *PlaudManager) runCLI(ctx context.Context, args ...string) (string, erro
 		"DO_NOT_TRACK=1", "PLAUD_TELEMETRY_DISABLED=1", "PLAUD_NO_UPDATE_NOTIFIER=1", "NO_COLOR=1")
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &stdout, &stderr
-	if f, ok := ctx.Value(plaudOutputKey{}).(func([]byte)); ok {
-		w := writerFunc(f)
-		cmd.Stdout, cmd.Stderr = io.MultiWriter(&stdout, w), io.MultiWriter(&stderr, w)
+	if out != nil {
+		cmd.Stdout, cmd.Stderr = io.MultiWriter(&stdout, out), io.MultiWriter(&stderr, out)
 	}
 	err = cmd.Run()
-	out := ansiRe.ReplaceAllString(stdout.String(), "")
+	text := ansiRe.ReplaceAllString(stdout.String(), "")
 	var ee *exec.ExitError
 	if errors.As(err, &ee) && ee.ExitCode() == 2 {
-		return out, errPlaudAuth
+		return text, errPlaudAuth
 	}
 	if err != nil {
-		return out, fmt.Errorf("plaud %s: %v %s", args[0], err, truncate(strings.TrimSpace(ansiRe.ReplaceAllString(stderr.String(), "")), 300))
+		return text, fmt.Errorf("plaud %s: %v %s", args[0], err, truncate(strings.TrimSpace(ansiRe.ReplaceAllString(stderr.String(), "")), 300))
 	}
-	return out, nil
+	return text, nil
 }
 
 func (p *PlaudManager) listIDs(ctx context.Context, page int) ([]string, error) {
@@ -393,7 +406,7 @@ func (p *PlaudManager) forward(ctx context.Context, id string, br *Brain, jid st
 		tpl = defaultPlaudMessage
 	}
 	text := strings.NewReplacer("{name}", name, "{when}", when, "{duration}", duration).Replace(tpl)
-	p.b.handOff(br, jid, "plaud", text, []string{path})
+	p.handOff(br, jid, "plaud", text, []string{path})
 	p.mu.Lock()
 	p.lastForwarded = &PlaudForward{Name: name, Brain: br.ID(), At: time.Now()}
 	p.mu.Unlock()
@@ -431,9 +444,9 @@ func safePlaudName(s string) string {
 // targetBrain is the configured brain, else the DM brain, else the default.
 func (p *PlaudManager) targetBrain() *Brain {
 	if id := p.cfg().Plaud.Brain; id != "" {
-		return p.b.brainMgr.Get(id)
+		return p.brains.Get(id)
 	}
-	return p.b.brainMgr.BrainFor("", false)
+	return p.brains.BrainFor("", false)
 }
 
 // summaryChat is where br's answer to a recording and the expiry notice go.
@@ -721,7 +734,7 @@ func (p *PlaudManager) notifyAuthExpired() {
 	if err != nil {
 		return
 	}
-	if err := p.b.wa.SendMessage(context.Background(), jid, "⚠️ Plaud: the login expired, so new recordings are not arriving. Reconnect in the Fridolin dashboard (Integrations → Plaud)."); err != nil {
+	if err := p.notify(context.Background(), jid, "⚠️ Plaud: the login expired, so new recordings are not arriving. Reconnect in the Fridolin dashboard (Integrations → Plaud)."); err != nil {
 		log.Printf("plaud: could not send the expiry notice: %v", err)
 		return
 	}
@@ -795,84 +808,122 @@ func (p *PlaudManager) Stop() {
 
 var plaudURLRe = regexp.MustCompile(`https?://[^\s'"]+`)
 
-// plaudOutputKey carries a func([]byte) in a context; runCLI hands it the
-// CLI's output as it arrives (the login prints its sign-in URL, then waits).
-type plaudOutputKey struct{}
+// What the dashboard's Plaud actions refuse, and why; the handlers word
+// them for the card.
+var (
+	errPlaudNotInstalled = errors.New("the Plaud CLI is not installed")
+	errPlaudSigningIn    = errors.New("already signing in — finish in the browser tab Plaud opened")
+	errPlaudNotConnected = errors.New("the Plaud CLI is not signed in")
+	errPlaudSendingOff   = errors.New("sending new recordings to a brain is off")
+)
 
-type writerFunc func([]byte)
+// PlaudCLI says whether the Plaud CLI is installed, and where.
+type PlaudCLI struct {
+	Found       bool   `json:"found"`
+	Path        string `json:"path,omitempty"`
+	InstallHint string `json:"install_hint"`
+}
 
-func (f writerFunc) Write(b []byte) (int, error) { f(b); return len(b), nil }
+// PlaudStatus is what the dashboard's Plaud card shows.
+type PlaudStatus struct {
+	CLI       PlaudCLI    `json:"cli"`
+	Connected bool        `json:"connected"`
+	Settings  PlaudConfig `json:"settings"`
+	LoginDir  string      `json:"login_dir"`
+	// TargetBrain receives recordings; BrainMissing means the picked one is
+	// gone, so none does.
+	TargetBrain  string `json:"target_brain,omitempty"`
+	BrainMissing bool   `json:"brain_missing,omitempty"`
+	// Where summaries go, or why they cannot go anywhere. SummaryChatBrain
+	// names another brain that owns that chat: what you write back there
+	// goes to it.
+	SummaryChat      string `json:"summary_chat,omitempty"`
+	SummaryToYou     bool   `json:"summary_to_you,omitempty"`
+	SummaryChatBrain string `json:"summary_chat_brain,omitempty"`
+	SummaryError     string `json:"summary_error,omitempty"`
+	// Seen and Pending count recordings once there is a state.
+	Seen          *int          `json:"seen,omitempty"`
+	Pending       *int          `json:"pending,omitempty"`
+	Connect       *connectJob   `json:"connect,omitempty"`
+	LastPoll      *time.Time    `json:"last_poll,omitempty"`
+	LastError     string        `json:"last_error,omitempty"`
+	LastForwarded *PlaudForward `json:"last_forwarded,omitempty"`
+	// Account is who is signed in; Expired means Plaud refused the login.
+	Account string `json:"account,omitempty"`
+	Expired bool   `json:"expired,omitempty"`
+}
 
-func (b *Bridge) apiPlaudStatus(w http.ResponseWriter, r *http.Request) {
-	p := b.plaud
-	cfg := b.cfgs.Get()
-	cli := map[string]any{"found": false, "install_hint": "npm install -g @plaud-ai/cli"}
-	if path, err := p.cliPath(); err == nil {
-		cli["found"], cli["path"] = true, path
+// Status reports the integration's state. With account it asks Plaud who
+// is signed in, which also tells whether the login still works.
+func (p *PlaudManager) Status(ctx context.Context, account bool) PlaudStatus {
+	cfg := p.cfg()
+	s := PlaudStatus{
+		CLI:       PlaudCLI{InstallHint: "npm install -g @plaud-ai/cli"},
+		Connected: p.connected(),
+		Settings:  cfg.Plaud,
+		LoginDir:  filepath.Dir(p.tokenPath()),
 	}
-	resp := map[string]any{
-		"cli":       cli,
-		"connected": p.connected(),
-		"settings":  cfg.Plaud,
-		"login_dir": filepath.Dir(p.tokenPath()),
+	if path, err := p.cliPath(); err == nil {
+		s.CLI.Found, s.CLI.Path = true, path
 	}
 	if br := p.targetBrain(); br != nil {
-		resp["target_brain"] = br.ID()
+		s.TargetBrain = br.ID()
 	} else if cfg.Plaud.Brain != "" {
-		resp["brain_missing"] = true
+		s.BrainMissing = true
 	}
 	// Where summaries go, for the card: a chat that belongs to another brain
 	// gets a warning, since what you write back there goes to that brain.
 	if br, jid, err := p.destination(); err != nil {
-		resp["summary_error"] = err.Error()
+		s.SummaryError = err.Error()
 	} else {
-		resp["summary_chat"] = jid
-		resp["summary_to_you"] = len(cfg.AllowedNumbers) > 0 && jid == userJID(cfg.AllowedNumbers[0])
-		if owner := b.brainMgr.BrainFor(jid, false); owner != nil && owner != br {
-			resp["summary_chat_brain"] = owner.ID()
+		s.SummaryChat = jid
+		s.SummaryToYou = len(cfg.AllowedNumbers) > 0 && jid == userJID(cfg.AllowedNumbers[0])
+		if owner := p.brains.BrainFor(jid, false); owner != nil && owner != br {
+			s.SummaryChatBrain = owner.ID()
 		}
 	}
 	if st, _ := p.loadState(); st != nil {
-		resp["seen"], resp["pending"] = len(st.Seen), len(st.Pending)
+		seen, pending := len(st.Seen), len(st.Pending)
+		s.Seen, s.Pending = &seen, &pending
 	}
 	p.mu.Lock()
 	if p.connect != nil {
 		job := *p.connect // a copy: the sign-in goroutine keeps writing to the original
-		resp["connect"] = job
+		s.Connect = &job
 	}
 	if !p.lastPoll.IsZero() {
-		resp["last_poll"] = p.lastPoll
+		last := p.lastPoll
+		s.LastPoll = &last
 	}
-	if p.lastErr != "" {
-		resp["last_error"] = p.lastErr
-	}
+	s.LastError = p.lastErr
 	if p.lastForwarded != nil {
-		resp["last_forwarded"] = p.lastForwarded
+		last := *p.lastForwarded
+		s.LastForwarded = &last
 	}
 	p.mu.Unlock()
-	if p.connected() && cli["found"] == true && r.URL.Query().Get("account") != "0" {
-		ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
+	if account && s.Connected && s.CLI.Found {
+		ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
 		if acct, err := p.account(ctx); err == nil {
-			resp["account"] = acct
+			s.Account = acct
 		} else if errors.Is(err, errPlaudAuth) {
-			resp["expired"] = true
+			s.Expired = true
 		}
 		cancel()
 	}
-	writeJSON(w, http.StatusOK, resp)
+	return s
 }
 
-func (b *Bridge) apiPlaudConnect(w http.ResponseWriter, r *http.Request) {
-	p := b.plaud
+// Connect starts Plaud's sign-in in the background: the CLI opens Plaud's
+// page in the browser and waits for the approval. Status reports how it
+// goes.
+func (p *PlaudManager) Connect() error {
 	if _, err := p.cliPath(); err != nil {
-		writeErr(w, http.StatusPreconditionFailed, "Install Plaud's CLI first: npm install -g @plaud-ai/cli")
-		return
+		return errPlaudNotInstalled
 	}
 	p.mu.Lock()
 	if p.connect != nil && p.connect.State == "running" {
 		p.mu.Unlock()
-		writeErr(w, http.StatusConflict, "already signing in — finish in the browser tab Plaud opened")
-		return
+		return errPlaudSigningIn
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
 	job := &connectJob{State: "running", cancel: cancel}
@@ -882,7 +933,7 @@ func (b *Bridge) apiPlaudConnect(w http.ResponseWriter, r *http.Request) {
 	go func() {
 		defer cancel()
 		var seen bytes.Buffer
-		ctx := context.WithValue(ctx, plaudOutputKey{}, func(b []byte) {
+		out := writerFunc(func(b []byte) {
 			p.mu.Lock()
 			defer p.mu.Unlock()
 			seen.Write(b)
@@ -891,7 +942,7 @@ func (b *Bridge) apiPlaudConnect(w http.ResponseWriter, r *http.Request) {
 			}
 		})
 		// The CLI opens the sign-in page in your browser itself.
-		_, err := p.run(withDesktop(ctx), "login")
+		_, err := p.runCLIOut(withDesktop(ctx), out, "login")
 		p.mu.Lock()
 		defer p.mu.Unlock()
 		if err != nil || !p.connected() {
@@ -907,18 +958,71 @@ func (b *Bridge) apiPlaudConnect(w http.ResponseWriter, r *http.Request) {
 		job.State = "done"
 		log.Printf("plaud: connected")
 	}()
-	writeJSON(w, http.StatusAccepted, map[string]string{"status": "connecting"})
+	return nil
 }
 
-func (b *Bridge) apiPlaudDisconnect(w http.ResponseWriter, r *http.Request) {
-	p := b.plaud
-	ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
-	defer cancel()
+// writerFunc is an io.Writer that hands what is written to a function.
+type writerFunc func([]byte)
+
+func (f writerFunc) Write(b []byte) (int, error) { f(b); return len(b), nil }
+
+// Disconnect signs out of Plaud.
+func (p *PlaudManager) Disconnect(ctx context.Context) error {
 	if _, err := p.run(ctx, "logout"); err != nil && !errors.Is(err, errPlaudAuth) {
 		log.Printf("plaud: logout: %v", err)
 	}
-	if !b.cfgs.Get().Plaud.BrainAccess {
+	if !p.cfg().Plaud.BrainAccess {
 		_ = os.Remove(p.tokenPath()) // our private copy; the shared one is the CLI's to manage
+	}
+	return nil
+}
+
+// CheckNow starts a check in the background, on the poller's lifetime so
+// that stopping Fridolin ends it. false means one is already running, which
+// covers this one.
+func (p *PlaudManager) CheckNow() (bool, error) {
+	if !p.connected() {
+		return false, errPlaudNotConnected
+	}
+	if !p.cfg().Plaud.Enabled {
+		return false, errPlaudSendingOff
+	}
+	if !p.beginPoll() {
+		return false, nil
+	}
+	go func() {
+		ctx, cancel := context.WithTimeout(p.lifetime(), 10*time.Minute)
+		defer cancel()
+		if err := p.runPoll(ctx); err != nil {
+			log.Printf("plaud: %v", err)
+		}
+	}()
+	return true, nil
+}
+
+func (b *Bridge) apiPlaudStatus(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, http.StatusOK, b.plaud.Status(r.Context(), r.URL.Query().Get("account") != "0"))
+}
+
+func (b *Bridge) apiPlaudConnect(w http.ResponseWriter, r *http.Request) {
+	switch err := b.plaud.Connect(); {
+	case errors.Is(err, errPlaudNotInstalled):
+		writeErr(w, http.StatusPreconditionFailed, "Install Plaud's CLI first: npm install -g @plaud-ai/cli")
+	case errors.Is(err, errPlaudSigningIn):
+		writeErr(w, http.StatusConflict, err.Error())
+	case err != nil:
+		writeErr(w, http.StatusInternalServerError, err.Error())
+	default:
+		writeJSON(w, http.StatusAccepted, map[string]string{"status": "connecting"})
+	}
+}
+
+func (b *Bridge) apiPlaudDisconnect(w http.ResponseWriter, r *http.Request) {
+	ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
+	defer cancel()
+	if err := b.plaud.Disconnect(ctx); err != nil {
+		writeErr(w, http.StatusBadGateway, err.Error())
+		return
 	}
 	writeJSON(w, http.StatusOK, map[string]string{"status": "disconnected"})
 }
@@ -967,26 +1071,19 @@ func (b *Bridge) apiPlaudSettings(w http.ResponseWriter, r *http.Request) {
 }
 
 func (b *Bridge) apiPlaudSync(w http.ResponseWriter, r *http.Request) {
-	if !b.plaud.connected() {
+	started, err := b.plaud.CheckNow()
+	switch {
+	case errors.Is(err, errPlaudNotConnected):
 		writeErr(w, http.StatusPreconditionFailed, "Plaud is not connected")
-		return
-	}
-	if !b.cfgs.Get().Plaud.Enabled {
+	case errors.Is(err, errPlaudSendingOff):
 		writeErr(w, http.StatusConflict, "Turn on “Send new recordings to a brain” first: a check hands new recordings to the brain")
-		return
-	}
-	// A check that is already running covers this one; say so rather than
-	// claim to start one.
-	if !b.plaud.beginPoll() {
+	case err != nil:
+		writeErr(w, http.StatusInternalServerError, err.Error())
+	case !started:
+		// A check that is already running covers this one; say so rather
+		// than claim to start one.
 		writeJSON(w, http.StatusOK, map[string]string{"status": "already checking"})
-		return
+	default:
+		writeJSON(w, http.StatusAccepted, map[string]string{"status": "syncing"})
 	}
-	go func() {
-		ctx, cancel := context.WithTimeout(b.plaud.lifetime(), 10*time.Minute)
-		defer cancel()
-		if err := b.plaud.runPoll(ctx); err != nil {
-			log.Printf("plaud: %v", err)
-		}
-	}()
-	writeJSON(w, http.StatusAccepted, map[string]string{"status": "syncing"})
 }
