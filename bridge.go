@@ -320,7 +320,10 @@ func (b *Bridge) recordOTP(br *Brain, m Inbound) {
 func (b *Bridge) handleCommand(ctx context.Context, m Inbound, cfg *Config) bool {
 	switch strings.ToLower(m.Text) {
 	case "!reset":
-		b.deb.Drop(m.JID)
+		// Whatever else it does, a reset stops what !stop stops for the
+		// chat, hand-offs from other brains included: its reply says the
+		// chat has nothing left running or waiting.
+		b.stopChat(m, cfg)
 		var resetErr error
 		if cfg.BrainMode {
 			resetErr = b.brainMgr.ResetSession(m.JID, m.IsGroup())
@@ -342,29 +345,7 @@ func (b *Bridge) handleCommand(ctx context.Context, m Inbound, cfg *Config) bool
 		return true
 
 	case "!stop":
-		// Only this chat's work: a brain serves several chats, and one
-		// chat must not cancel what another asked for. A DM goes by two
-		// JIDs (see chatJIDs), and its run may have come in under either.
-		chats := chatJIDs(m)
-		for _, jid := range chats {
-			b.deb.Drop(jid)
-		}
-		stopped, dropped := false, 0
-		if br := b.brainMgr.BrainFor(m.JID, m.IsGroup()); cfg.BrainMode && br != nil {
-			for _, jid := range chats {
-				s, d := br.StopChat(jid)
-				stopped, dropped = stopped || s, dropped+d
-			}
-		}
-		// A file or recording handed to another brain may answer here too,
-		// and the chat's own brain knows nothing about it. What waits for
-		// one counts as this chat's, for the reply.
-		if cfg.BrainMode {
-			for _, jid := range chats {
-				s, d := b.brainMgr.StopHandOffs(jid)
-				stopped, dropped = stopped || s, dropped+d
-			}
-		}
+		stopped, dropped := b.stopChat(m, cfg)
 		switch {
 		case stopped:
 			_ = b.wa.SendMessage(ctx, m.JID, "🛑 Stopped, and cleared anything this chat had waiting.")
@@ -395,6 +376,36 @@ func (b *Bridge) handleCommand(ctx context.Context, m Inbound, cfg *Config) bool
 		return true
 	}
 	return false
+}
+
+// stopChat stops what is going on for m's chat, for !stop and !reset. It
+// reports whether a run was stopped and how many waiting messages were
+// dropped.
+func (b *Bridge) stopChat(m Inbound, cfg *Config) (stopped bool, dropped int) {
+	// Only this chat's work: a brain serves several chats, and one chat must
+	// not cancel what another asked for. A DM goes by two JIDs (see
+	// chatJIDs), and its run may have come in under either.
+	chats := chatJIDs(m)
+	for _, jid := range chats {
+		b.deb.Drop(jid)
+	}
+	if !cfg.BrainMode {
+		return false, 0
+	}
+	if br := b.brainMgr.BrainFor(m.JID, m.IsGroup()); br != nil {
+		for _, jid := range chats {
+			s, d := br.StopChat(jid)
+			stopped, dropped = stopped || s, dropped+d
+		}
+	}
+	// A file or recording handed to another brain may answer here too, and
+	// the chat's own brain knows nothing about it. What waits for one counts
+	// as this chat's, for the reply.
+	for _, jid := range chats {
+		s, d := b.brainMgr.StopHandOffs(jid)
+		stopped, dropped = stopped || s, dropped+d
+	}
+	return stopped, dropped
 }
 
 // chatJIDs lists the JIDs m's chat goes by: the chat and, for a DM, the

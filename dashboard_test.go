@@ -346,6 +346,35 @@ func TestStopReachesAHandOffInItsReplyChat(t *testing.T) {
 	}
 }
 
+// !reset stops what !stop stops, so it reaches a hand-off that another brain
+// answers in the chat: once it says the chat has nothing running or waiting,
+// up must have neither the file it is on nor the one waiting.
+func TestResetReachesAHandOffInItsReplyChat(t *testing.T) {
+	const dm = "15551234567@s.whatsapp.net"
+	tb := newTestBridge(t, `, "ingest": {"enabled": true}`)
+	tb.addFolderBrain(t, BrainManifest{ID: "dm", Name: "DM", Routing: BrainRouting{HandlesDMs: true}})
+	tb.addFolderBrain(t, BrainManifest{ID: "up", Name: "Uploads", ReplyChat: dm})
+	t.Setenv("WCB_FAKE_SLEEP_MS", "30000")
+	up := tb.brainMgr.Get("up")
+
+	if w := tb.ingest(`{"brain":"up","text":"file this"}`); w.Code != 202 {
+		t.Fatalf("ingest: %d %s", w.Code, w.Body.String())
+	}
+	waitFor(t, 5*time.Second, "up's run", func() bool { r := up.Snapshot().Running; return r != nil && r.PID > 0 })
+	if w := tb.ingest(`{"brain":"up","text":"and this"}`); w.Code != 202 {
+		t.Fatalf("ingest: %d %s", w.Code, w.Body.String())
+	}
+	waitFor(t, 5*time.Second, "the second file to wait", func() bool { return len(up.Snapshot().Queue) == 1 })
+
+	tb.handleInbound(context.Background(), Inbound{JID: dm, Sender: "15551234567", Text: "!reset", Source: "whatsapp"})
+	if !tb.sentPrefix(dm, "✅ Cleared anything this chat had running or waiting") {
+		t.Errorf("!reset answered %q, want that it cleared the chat", tb.sentTo(dm))
+	}
+	if rt := up.Snapshot(); rt.Running != nil || len(rt.Queue) != 0 {
+		t.Errorf("up still has work after !reset: running %+v, queue %+v", rt.Running, rt.Queue)
+	}
+}
+
 // !stop that finds no run for the chat but drops hand-offs waiting to answer
 // there says it cleared them: up is busy with its own group, and a file
 // handed to it for the DM waits behind that run.
