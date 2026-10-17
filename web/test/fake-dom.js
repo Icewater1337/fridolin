@@ -34,6 +34,14 @@ class FakeNode {
 
   append(...nodes) { nodes.forEach((n) => this.appendChild(toNode(n))); }
 
+  insertBefore(child, ref) {
+    if (!ref) return this.appendChild(child);
+    child.remove();
+    child.parentNode = this;
+    this.childNodes.splice(this.childNodes.indexOf(ref), 0, child);
+    return child;
+  }
+
   prepend(...nodes) {
     const rest = this.childNodes.splice(0);
     rest.forEach((n) => { n.parentNode = null; });
