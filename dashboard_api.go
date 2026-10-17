@@ -407,30 +407,27 @@ func (b *Bridge) apiAllowChat(w http.ResponseWriter, r *http.Request) {
 }
 
 // assignGroup routes a group to a brain, taking it away from any other brain,
-// in their manifests (brain.json and the approved copy).
+// in their manifests (brain.json and the approved copy). The chosen brain
+// goes first, so that one that is not there is refused before the others'
+// brain.json are written.
 func assignGroup(c *Config, jid, brainID string) error {
-	found := false
-	for i := range c.BrainDirs {
-		ref := &c.BrainDirs[i]
-		if ref.Approved == nil {
-			continue
-		}
-		m := *ref.Approved
-		had := contains(m.Routing.Groups, jid)
-		m.Routing.Groups = without(m.Routing.Groups, jid)
-		if m.ID == brainID {
+	if err := updateManifestIn(c, brainID, func(m *BrainManifest) error {
+		if !contains(m.Routing.Groups, jid) {
 			m.Routing.Groups = append(m.Routing.Groups, jid)
-			found = true
-		} else if !had {
-			continue
 		}
-		if err := WriteManifest(expandHomeDir(ref.Path), &m, true); err != nil {
-			return err
-		}
-		ref.Approved = &m
+		return nil
+	}); err != nil {
+		return err
 	}
-	if !found {
-		return fmt.Errorf("no brain %q", brainID)
+	for _, ref := range c.BrainDirs {
+		if a := ref.Approved; a != nil && a.ID != brainID && contains(a.Routing.Groups, jid) {
+			if err := updateManifestIn(c, a.ID, func(m *BrainManifest) error {
+				m.Routing.Groups = without(m.Routing.Groups, jid)
+				return nil
+			}); err != nil {
+				return err
+			}
+		}
 	}
 	return nil
 }
@@ -750,23 +747,33 @@ func (b *Bridge) apiUpdateBrain(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	_, err := b.cfgs.Update("", func(c *Config) error {
-		for i := range c.BrainDirs {
-			ref := &c.BrainDirs[i]
-			if ref.Approved != nil && ref.Approved.ID == id {
-				if err := WriteManifest(expandHomeDir(ref.Path), &m, true); err != nil {
-					return err
-				}
-				ref.Approved = &m
-				return checkSet(c)
-			}
+		// Check the brains with the edit before it is written: a refused
+		// edit must leave brain.json as it was, not show up as drift.
+		if err := checkSet(withApproved(c, id, m)); err != nil {
+			return err
 		}
-		return fmt.Errorf("no brain %q", id)
+		return updateManifestIn(c, id, func(cur *BrainManifest) error {
+			*cur = m
+			return nil
+		})
 	})
 	if err != nil {
 		writeErr(w, http.StatusUnprocessableEntity, err.Error())
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]string{"status": "saved"})
+}
+
+// withApproved returns a copy of c in which brain id runs m, for checkSet.
+func withApproved(c *Config, id string, m BrainManifest) *Config {
+	probe := *c
+	probe.BrainDirs = append([]BrainRef(nil), c.BrainDirs...)
+	for i, ref := range probe.BrainDirs {
+		if ref.Approved != nil && ref.Approved.ID == id {
+			probe.BrainDirs[i].Approved = &m
+		}
+	}
+	return &probe
 }
 
 // checkSet rejects an edit that would make two brains clash.
