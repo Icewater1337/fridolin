@@ -20,6 +20,7 @@ import { field, textInput, select, toggle, linesArea, linesOf } from '../compone
 import { pill, badge, callout, timeAgo, mono, empty, loading } from '../components/common.js';
 import { chatEl } from '../components/chat.js';
 import { outcomePill, brainStatusPill } from '../components/brain.js';
+import { saveBar } from '../components/save-bar.js';
 
 export default {
   title: (params) => `Brain ${params.id}`,
@@ -101,6 +102,7 @@ export default {
 
     function renderHead() {
       const b = brain;
+      ctx.setTitle(b.name || b.id);
       mount(head, h('header.page-header',
         h('div.page-heading',
           h('a.back-link', { href: '#/brains' }, icon('left'), 'Brains'),
@@ -219,7 +221,7 @@ export default {
       formDirty = false;
       const eff = (cfg && cfg.effective) || {};
       const allowedGroups = (cfg && cfg.config && cfg.config.allowed_groups) || eff.allowed_groups || [];
-      const markDirty = () => { formDirty = true; saveBar.hidden = false; };
+      const markDirty = () => { formDirty = true; bar.show(); };
 
       const nameIn = textInput({ value: m.name || '', spellcheck: 'true' });
       const routing = routingEditor({ routing: m.routing || {}, selfId: id, brains, allowedGroups, onChange: markDirty, signal: ctx.signal });
@@ -239,10 +241,7 @@ export default {
       const excludes = linesArea((m.backup && m.backup.exclude) || [], { rows: 5, placeholder: 'node_modules/\n*.log' });
 
       const saveBtn = btn('Save settings', { kind: 'primary', type: 'submit', icon: 'check' });
-      const saveBar = h('div.save-bar', { hidden: true },
-        h('span', 'Unsaved changes'),
-        btn('Discard', { onClick: () => { formDirty = false; renderForm(true); } }),
-        saveBtn);
+      const bar = saveBar({ save: saveBtn, onDiscard: () => { formDirty = false; renderForm(true); } });
       const stale = h('div.callout.warn.form-stale', { hidden: true },
         icon('alert', 'callout-icon'),
         h('div.callout-body', h('strong', 'These settings changed elsewhere'), h('div', 'Saving now would overwrite that change.'),
@@ -268,7 +267,7 @@ export default {
         h('fieldset.fieldset', h('legend', 'Backup'),
           h('div.field', backupSw),
           field({ label: 'Leave out of backups', control: excludes, help: 'One pattern per line, relative to the brain folder. A trailing / means a folder.' })),
-        saveBar);
+        bar);
       form.addEventListener('input', markDirty);
       form.addEventListener('change', markDirty);
       form.addEventListener('submit', (e) => {
@@ -289,7 +288,7 @@ export default {
         runBusy(saveBtn, async () => {
           await put(`/api/brains/${encodeURIComponent(id)}`, { manifest });
           formDirty = false;
-          saveBar.hidden = true;
+          bar.hide();
           toast('Settings saved', 'ok');
           await poller.kick();
         });

@@ -82,6 +82,7 @@ async function renderRoute() {
       history.replaceState(null, '', hash);
       lastHash = location.hash;
     },
+    setTitle(title) { document.title = docTitle(title); },
   });
   current = ctx;
   const root = h('div.page', { 'data-page': match ? match.route.id : 'not-found' });
@@ -106,7 +107,7 @@ async function renderRoute() {
     return;
   }
   if (ctx.dead) return;
-  document.title = docTitle(typeof page.title === 'function' ? page.title(ctx.params) : page.title);
+  ctx.setTitle(typeof page.title === 'function' ? page.title(ctx.params) : page.title);
   try {
     page.render(root, ctx);
   } catch (e) {

@@ -77,9 +77,10 @@ export default {
         pill(waLabel(wa.mode), kind, { pulse: wa.mode === 'connecting' || wa.mode === 'pairing' }));
       const facts = h('div.card-body',
         wa.own_number ? h('p', 'Linked to ', mono(phone(wa.own_number))) : null,
-        wa.detail ? h('p.muted', wa.detail) : null,
+        // In dev mode the detail only repeats the note below.
+        wa.detail && !s.dev_mode ? h('p.muted', wa.detail) : null,
         parseTs(wa.since) ? h('p.muted.small', timeAgo(wa.since, 'Since ')) : null,
-        s.dev_mode ? h('p.muted', 'Dev mode: nothing is sent to WhatsApp. Use the Dev page to simulate messages.') : null,
+        s.dev_mode ? h('p.muted', 'Dev mode: nothing is sent to WhatsApp. Use the ', h('a', { href: '#/dev' }, 'Dev page'), ' to simulate messages.') : null,
         pairBtn ? h('div.actions', pairBtn) : null);
       if (wa.qr_available) {
         qr.img = h('img.qr-img', { alt: 'WhatsApp pairing QR code', width: 280, height: 280 });

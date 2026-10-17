@@ -14,6 +14,7 @@ import { confirmDialog } from '../components/dialog.js';
 import { field, toggle, select, textInput, listEditor } from '../components/fields.js';
 import { callout, mono, pageHeader, loading } from '../components/common.js';
 import { googleClientCard } from '../components/calendar.js';
+import { saveBar } from '../components/save-bar.js';
 
 const digits = (v) => (/^\d{6,15}$/.test(v) ? '' : 'Digits only, with country code, no + (e.g. 15551234567)');
 const groupJid = (v) => (/@g\.us$/.test(v) ? '' : 'A group JID ends in @g.us');
@@ -122,23 +123,18 @@ export default {
     let controls = [];
     const top = h('div');
     const body = h('div.page-stack', h('div.card', loading('Loading settings…')));
-    const countEl = h('span');
-    const saveBtn = btn('Save', { kind: 'primary', icon: 'check', onClick: () => save() });
-    const saveBar = h('div.save-bar.floating', { hidden: true },
-      icon('edit'), countEl,
-      btn('Discard', { onClick: () => build(data) }),
-      saveBtn);
+    const bar = saveBar({ save: btn('Save', { kind: 'primary', icon: 'check', onClick: () => save() }), onDiscard: () => build(data), floating: true });
+    const where = h('span'); // the file, once the settings have loaded
 
     const googleCard = googleClientCard({ signal: ctx.signal });
-    mount(root, pageHeader('Settings', null), top, body, saveBar);
-    const sub = root.querySelector('.page-heading');
+    mount(root, pageHeader('Settings', where), top, body, bar);
 
     const dirtyCount = () => controls.filter((c) => c.isDirty()).length;
     ctx.dirty = () => dirtyCount() > 0;
     const onChange = () => {
       const n = dirtyCount();
-      saveBar.hidden = n === 0;
-      countEl.textContent = `${plural(n, 'unsaved change')}`;
+      if (n) bar.show(plural(n, 'unsaved change'));
+      else bar.hide();
     };
 
     function build(d) {
@@ -171,7 +167,7 @@ export default {
       });
       chip('Google sign-in', 'google', googleCard);
       mount(body, nav, sections, googleCard);
-      mount(sub.querySelector('.page-sub') || sub.appendChild(h('p.page-sub')), 'Saved to ', mono(d.path, { copy: true }), '. Brains are configured on the Brains page, backups on the Backup page.');
+      mount(where, 'Saved to ', mono(d.path, { copy: true }), '. Brains are configured on the Brains page, backups on the Backup page.');
       onChange();
       conflict = false;
       mount(top);
@@ -218,7 +214,7 @@ export default {
         h('div.actions', btn('Reload settings', { icon: 'refresh', onClick: async () => build(await get('/api/config')) }))));
     }, 5000);
 
-    ctx.onCleanup(() => saveBar.remove());
+    ctx.onCleanup(() => bar.remove());
   },
 };
 

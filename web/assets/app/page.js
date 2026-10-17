@@ -5,11 +5,12 @@
 import { makePoll } from './poll.js';
 
 /**
- * createPage({params, replaceHash}) returns the ctx a page's render(root,
- * ctx) gets. replaceHash(hash) changes the address without leaving the page;
- * the router supplies it.
+ * createPage({params, replaceHash, setTitle}) returns the ctx a page's
+ * render(root, ctx) gets. The router supplies replaceHash(hash), which
+ * changes the address without leaving the page, and setTitle(title), which
+ * names the page in the browser tab.
  */
-export function createPage({ params = {}, replaceHash = () => {} } = {}) {
+export function createPage({ params = {}, replaceHash = () => {}, setTitle = () => {} } = {}) {
   const abort = new AbortController();
   const polls = [];
   const timers = new Set();
@@ -61,6 +62,9 @@ export function createPage({ params = {}, replaceHash = () => {} } = {}) {
     navigate(hash) { location.hash = hash; },
 
     replaceHash(hash) { if (!ctx.dead) replaceHash(hash); },
+
+    /** Renames the page once it knows better than its route, e.g. a brain's name. */
+    setTitle(title) { if (!ctx.dead) setTitle(title); },
 
     destroy() {
       if (ctx.dead) return;

@@ -68,3 +68,12 @@ test('replaceHash goes to the router only while the page is shown', () => {
   ctx.replaceHash('#/settings/sandbox');
   assert.deepEqual(seen, ['#/settings/claude']);
 });
+
+test('setTitle renames the page only while it is shown', () => {
+  const titles = [];
+  const ctx = createPage({ setTitle: (t) => titles.push(t) });
+  ctx.setTitle('Work');
+  ctx.destroy();
+  ctx.setTitle('Late answer');
+  assert.deepEqual(titles, ['Work']);
+});

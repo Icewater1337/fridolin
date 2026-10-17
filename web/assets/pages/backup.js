@@ -13,7 +13,8 @@ import { openDialog, confirmDialog } from '../components/dialog.js';
 import { field, textInput, toggle, select, linesArea, linesOf, nextId } from '../components/fields.js';
 import { pill, callout, timeAgo, mono, empty, pageHeader, spinner, loading } from '../components/common.js';
 
-const label = (id, brains) => {
+// What a backup job is working on, as the progress card names it.
+const jobLabel = (id, brains) => {
   if (id === '_bridge') return 'Bridge settings';
   if (id && id.startsWith('restore:')) return `Restoring ${id.slice(8)}`;
   const b = (brains || []).find((x) => x.id === id);
@@ -35,7 +36,7 @@ export default {
   title: 'Backup',
   render(root, ctx) {
     const memo = {};
-    let st = null;
+    let backupStatus = null;
     let mode = '';
     let scheduleDirty = false;
     const regions = {};
@@ -46,11 +47,11 @@ export default {
 
     const poller = ctx.poll(async (signal) => {
       const s = await get('/api/backup/status', { signal });
-      st = s;
-      const m = !s.rclone || !s.rclone.found ? 'norclone' : s.connected ? 'connected' : 'connect';
-      if (m !== mode) { mode = m; Object.keys(memo).forEach((k) => delete memo[k]); layout(); }
+      backupStatus = s;
+      const nextMode = !s.rclone || !s.rclone.found ? 'norclone' : s.connected ? 'connected' : 'connect';
+      if (nextMode !== mode) { mode = nextMode; Object.keys(memo).forEach((k) => delete memo[k]); layout(); }
       paint();
-    }, () => (st && (st.job || (st.connect && st.connect.state === 'running')) ? 2000 : 8000));
+    }, () => (backupStatus && (backupStatus.job || (backupStatus.connect && backupStatus.connect.state === 'running')) ? 2000 : 8000));
 
     // Resolves once the page shows what the server has now.
     const refresh = () => poller.kick();
@@ -92,7 +93,7 @@ export default {
 
     // ── rclone missing ──
     function paintRclone() {
-      const rc = st.rclone || {};
+      const rc = backupStatus.rclone || {};
       if (!changed(memo, 'rc', rc)) return;
       const hint = rc.install_hint || 'See https://rclone.org/install/';
       const isCmd = !/^see /i.test(hint);
@@ -107,7 +108,7 @@ export default {
 
     // ── connecting ──
     function paintConnect() {
-      const c = st.connect;
+      const c = backupStatus.connect;
       if (!changed(memo, 'connect', c)) return;
       const privacy = h('ul.facts',
         h('li', icon('shield'), h('span', 'The bridge asks only for access to files it creates (Google’s “drive.file” permission). It cannot see anything else in your Drive.')),
@@ -140,11 +141,11 @@ export default {
 
     // ── connected: status ──
     function paintStatus() {
-      const key = { s: st.settings, next: st.next_run, rc: st.rclone, running: !!st.job, brains: (st.brains || []).map((b) => [b.id, b.enabled]), bridge: st.bridge };
+      const key = { s: backupStatus.settings, next: backupStatus.next_run, rc: backupStatus.rclone, running: !!backupStatus.job, brains: (backupStatus.brains || []).map((b) => [b.id, b.enabled]), bridge: backupStatus.bridge };
       if (!changed(memo, 'status', key)) return;
-      const s = st.settings || {};
-      const anyEnabled = (st.brains || []).some((b) => b.enabled);
-      const results = [...(st.brains || []).map((b) => b.last), st.bridge].filter(Boolean);
+      const s = backupStatus.settings || {};
+      const anyEnabled = (backupStatus.brains || []).some((b) => b.enabled);
+      const results = [...(backupStatus.brains || []).map((b) => b.last), backupStatus.bridge].filter(Boolean);
       const lastOK = results.filter((r) => r.ok).sort((a, b) => new Date(b.finished) - new Date(a.finished))[0];
       mount(regions.status, h('div.card.backup-status',
         h('div.card-head',
@@ -154,13 +155,13 @@ export default {
           h('p', 'Backups go to the folder ', h('strong', s.root || 'fridolin-backup'), ' in your Google Drive.'),
           h('dl.kv',
             h('dt', 'Schedule'), h('dd', s.enabled ? `Every day at ${s.daily_at || '03:30'}` : 'Off — only when you click “Back up now”'),
-            st.next_run ? [h('dt', 'Next run'), h('dd', timeAgo(st.next_run))] : null,
+            backupStatus.next_run ? [h('dt', 'Next run'), h('dd', timeAgo(backupStatus.next_run))] : null,
             h('dt', 'Last good backup'), h('dd', lastOK ? timeAgo(lastOK.finished) : h('span.muted', 'none yet')),
-            h('dt', 'rclone'), h('dd', h('span.muted.small', st.rclone.version || st.rclone.path || 'found'))),
-          !anyEnabled && (st.brains || []).length ? callout('warn', null, 'No brain has backups turned on. Turn them on below.') : null,
+            h('dt', 'rclone'), h('dd', h('span.muted.small', backupStatus.rclone.version || backupStatus.rclone.path || 'found'))),
+          !anyEnabled && (backupStatus.brains || []).length ? callout('warn', null, 'No brain has backups turned on. Turn them on below.') : null,
           h('div.actions',
             btn('Back up now', {
-              kind: 'primary', icon: 'backup', disabled: !!st.job,
+              kind: 'primary', icon: 'backup', disabled: !!backupStatus.job,
               onClick: async () => { await post('/api/backup/run', {}); toast('Backup started', 'ok'); await refresh(); },
             }),
             btn('Disconnect…', {
@@ -181,7 +182,7 @@ export default {
 
     // ── job progress ──
     function paintJob() {
-      const j = st.job;
+      const j = backupStatus.job;
       if (!changed(memo, 'job', j)) return;
       if (!j) { mount(regions.job); return; }
       const done = j.done || [];
@@ -193,7 +194,7 @@ export default {
       const restoring = j.current && j.current.startsWith('restore:');
       mount(regions.job, h('div.card.job-card',
         h('div.card-head',
-          h('div.card-title', spinner(), h('h2', restoring ? label(j.current) : 'Backing up…')),
+          h('div.card-title', spinner(), h('h2', restoring ? jobLabel(j.current) : 'Backing up…')),
           btn('Cancel', {
             small: true, icon: 'stop',
             onClick: async () => { await post('/api/backup/cancel'); toast('Cancelling…', 'info'); await refresh(); },
@@ -201,17 +202,17 @@ export default {
         restoring ? h('p.muted', 'Copying files from Google Drive. Large folders can take a while.') : [
           bar,
           h('div.job-items',
-            done.map((id) => h('span.job-item.done', icon('check'), label(id, st.brains))),
-            j.current ? h('span.job-item.current', spinner(), label(j.current, st.brains)) : null,
-            queue.map((id) => h('span.job-item.queued', icon('clock'), label(id, st.brains)))),
+            done.map((id) => h('span.job-item.done', icon('check'), jobLabel(id, backupStatus.brains))),
+            j.current ? h('span.job-item.current', spinner(), jobLabel(j.current, backupStatus.brains)) : null,
+            queue.map((id) => h('span.job-item.queued', icon('clock'), jobLabel(id, backupStatus.brains)))),
         ],
         h('p.muted.small', timeAgo(j.started, 'Started '))));
     }
 
     // ── schedule ──
     function paintSchedule() {
-      const s = st.settings || {};
-      const inc = st.include_bridge_config;
+      const s = backupStatus.settings || {};
+      const inc = backupStatus.include_bridge_config;
       const key = { s, inc };
       if (!changed(memo, 'schedule', key) && regions.schedule.firstChild) return;
       if (scheduleDirty) return;
@@ -258,8 +259,8 @@ export default {
 
     // ── per-brain ──
     function paintBrains() {
-      const brains = st.brains || [];
-      if (!changed(memo, 'brains', { brains, bridge: st.bridge, job: !!st.job, inc: st.include_bridge_config })) return;
+      const brains = backupStatus.brains || [];
+      if (!changed(memo, 'brains', { brains, bridge: backupStatus.bridge, job: !!backupStatus.job, inc: backupStatus.include_bridge_config })) return;
       if (!brains.length) {
         mount(regions.brains, h('div.card', empty('No brains yet', 'Add a brain first; its folder can then be backed up.', btn('Add a brain', { href: '#/add-brain', kind: 'primary', icon: 'plus' }))));
         return;
@@ -289,14 +290,14 @@ export default {
           h('td.right.nowrap',
             btn(`Excludes${b.exclude && b.exclude.length ? ` (${b.exclude.length})` : ''}`, { small: true, kind: 'ghost', icon: 'edit', onClick: () => editExcludes(b) }),
             btn('Back up', {
-              small: true, icon: 'backup', disabled: !!st.job, title: 'Back up only this brain now',
+              small: true, icon: 'backup', disabled: !!backupStatus.job, title: 'Back up only this brain now',
               onClick: async () => { await post('/api/backup/run', { brains: [b.id], include_bridge: false }); toast(`Backing up ${b.name || b.id}`, 'ok'); await refresh(); },
             })));
       });
       rows.push(h('tr.muted-row',
         h('td', h('div', h('strong', 'Bridge settings')), h('div.small.muted', 'config.json and approved brain.json files')),
-        h('td', st.include_bridge_config === false ? pill('Off', 'neutral') : pill('On', 'ok')),
-        h('td', resultCell(st.bridge)),
+        h('td', backupStatus.include_bridge_config === false ? pill('Off', 'neutral') : pill('On', 'ok')),
+        h('td', resultCell(backupStatus.bridge)),
         h('td')));
       mount(regions.brains, h('div.card.flush.table-wrap', h('table.table.backup-table',
         h('thead', h('tr', h('th', 'Brain'), h('th', 'Backup'), h('th', 'Last result'), h('th.right', ''))),
@@ -315,7 +316,7 @@ export default {
         h('div.muted.small', r.ok ? `${fmtBytes(r.bytes)} in ${plural(r.files, 'file')} · ${fmtDuration(r.seconds)}${r.trigger === 'scheduled' ? ' · scheduled' : ''}` : fmtDuration(r.seconds)),
         r.error && r.error !== 'cancelled' ? h('div.error-text.small', r.error) : null,
         r.refused && b ? h('div', btn('Mirror the deletion…', {
-          small: true, icon: 'backup', disabled: !!st.job, title: 'Back up this brain including the deletion',
+          small: true, icon: 'backup', disabled: !!backupStatus.job, title: 'Back up this brain including the deletion',
           onClick: () => mirrorDeletion(b),
         })) : null);
     }
@@ -324,7 +325,7 @@ export default {
     // so: it removes the missing files from the latest copy in Drive.
     async function mirrorDeletion(b) {
       const name = b.name || b.id;
-      const days = (st.settings || {}).keep_versions_days ?? 30;
+      const days = (backupStatus.settings || {}).keep_versions_days ?? 30;
       const ok = await confirmDialog({
         title: `Mirror the deletion in ${name}?`,
         message: h('div',
@@ -357,12 +358,12 @@ export default {
 
     // ── restore ──
     function paintRestore() {
-      const ids = (st.brains || []).map((b) => b.id);
+      const ids = (backupStatus.brains || []).map((b) => b.id);
       if (regions.restore.firstChild && !changed(memo, 'restoreIds', ids)) return;
       memo.restoreIds = JSON.stringify(ids);
       let versions = null;
       let version = 'current';
-      const brainSel = select([['', 'Choose a brain…'], ...(st.brains || []).map((b) => [b.id, b.name && b.name !== b.id ? `${b.name} (${b.id})` : b.id]), ['__other', 'Another id…']], '');
+      const brainSel = select([['', 'Choose a brain…'], ...(backupStatus.brains || []).map((b) => [b.id, b.name && b.name !== b.id ? `${b.name} (${b.id})` : b.id]), ['__other', 'Another id…']], '');
       const otherIn = textInput({ placeholder: 'brain id', class: 'mono', hidden: true, 'aria-label': 'Brain id' });
       const versionsBox = h('div.versions', h('p.muted.small', 'Choose a brain to see its backups.'));
       const targetIn = textInput({ placeholder: '~/restored/brain-name', class: 'mono' });
