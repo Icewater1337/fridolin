@@ -518,8 +518,7 @@ func (sp *SandboxProfiler) Profile(brainID string) (string, error) {
 		b.deny("file-write*", "literal", f)
 	}
 	// The config file (saved with a .bak copy) and the .env loaded with
-	// it, where the data dir deny does not cover them already. What a
-	// .env sets still reaches brains through the environment. Also the
+	// it, where the data dir deny does not cover them already. Also the
 	// .env in the working directory: the bridge no longer reads it, but it
 	// used to when there was none next to the config, so a bridge started
 	// by hand from a checkout may still have settings and secrets there.

@@ -705,9 +705,7 @@ so) rather than run without the settings it holds. No other `.env` is read:
 one in the working directory counts only when the config file itself is in
 the working directory. The dashboard shows settings an environment variable
 controls as locked — remove the variable to edit them there. The sandbox
-keeps brains from reading the `.env` file, but every brain inherits the
-bridge's environment, including what `.env` sets, so do not put anything
-there that brains must not see.
+keeps brains from reading the `.env` file.
 
 Only the variables in the table below are read from the `.env`, all but
 `CONFIG_FILE`, which picks the config and with it the `.env`. Any other key
