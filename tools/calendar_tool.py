@@ -69,7 +69,7 @@ import traceback
 from datetime import datetime, time, timedelta
 from pathlib import Path
 from time import sleep
-from typing import NoReturn
+from typing import Any, NoReturn
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 SCOPES = ["https://www.googleapis.com/auth/calendar"]
@@ -199,7 +199,7 @@ def missing_package(e: ImportError) -> NoReturn:
     )
 
 
-def get_service():
+def get_service() -> Any:
     """Return the Google Calendar API service, using the saved token.
 
     This never starts an interactive sign-in. Inside a brain nobody is at the
@@ -238,7 +238,7 @@ def get_service():
     return build("calendar", "v3", credentials=creds)
 
 
-def read_token(Credentials, token_file: Path):
+def read_token(Credentials: Any, token_file: Path) -> Any:
     """Load the saved token, reading it a second time if it is not valid JSON.
 
     write_token rewrites the file in place, so a command that reads it while
@@ -253,7 +253,7 @@ def read_token(Credentials, token_file: Path):
         return Credentials.from_authorized_user_file(str(token_file), SCOPES)
 
 
-def write_token(token_file: Path, creds) -> None:
+def write_token(token_file: Path, creds: Any) -> None:
     """Write the token, readable by its owner only.
 
     Inside a brain the sandbox lets this tool write the token file itself and
@@ -266,7 +266,7 @@ def write_token(token_file: Path, creds) -> None:
     os.chmod(token_file, 0o600)
 
 
-def save_token(token_file: Path, creds) -> None:
+def save_token(token_file: Path, creds: Any) -> None:
     """Write a refreshed token back, best effort.
 
     When the sandbox or the file's mode refuses the write, the old token is
@@ -288,7 +288,7 @@ def target_calendars(requested: str | None, many: bool = False) -> list[str]:
     With no --calendar-id, read commands (many=True) use every allowed
     calendar and write commands use the default one.
     """
-    if requested in (None, ""):
+    if not requested:
         if many and ALLOWED:
             return ALLOWED
         return [DEFAULT_CALENDAR]
@@ -345,7 +345,7 @@ def ensure_timezone(dt_str: str) -> str:
 
 # ── commands ──────────────────────────────────────────────────────────────
 
-def cmd_list(args) -> None:
+def cmd_list(args: argparse.Namespace) -> None:
     service = get_service()
 
     from_date = args.from_date or datetime.now(tz()).date().isoformat()
@@ -372,7 +372,7 @@ def cmd_list(args) -> None:
     print(json.dumps({"events": events, "count": len(events), "truncated": truncated}, indent=2))
 
 
-def fetch_events(service, calendar_id: str, time_min: datetime, time_max: datetime,
+def fetch_events(service: Any, calendar_id: str, time_min: datetime, time_max: datetime,
                  limit: int) -> tuple[list[dict], bool]:
     """Return up to limit events of one calendar in start order, and whether it had more.
 
@@ -400,7 +400,7 @@ def fetch_events(service, calendar_id: str, time_min: datetime, time_max: dateti
     return items, False
 
 
-def cmd_create(args) -> None:
+def cmd_create(args: argparse.Namespace) -> None:
     service = get_service()
 
     all_day = "T" not in args.start
@@ -448,7 +448,7 @@ def cmd_create(args) -> None:
     print(json.dumps({"created": format_event(event)}, indent=2))
 
 
-def cmd_free(args) -> None:
+def cmd_free(args: argparse.Namespace) -> None:
     """Report busy slots and the free windows between them for one day."""
     service = get_service()
 
@@ -543,13 +543,13 @@ def parse_hours(s: str) -> tuple[int, int]:
     return first, last
 
 
-def cmd_delete(args) -> None:
+def cmd_delete(args: argparse.Namespace) -> None:
     service = get_service()
     service.events().delete(calendarId=target_calendars(args.calendar_id)[0], eventId=args.event_id).execute()
     print(json.dumps({"deleted": args.event_id}))
 
 
-def cmd_calendars(args) -> None:
+def cmd_calendars(args: argparse.Namespace) -> None:
     """List the calendars this brain may use (all of the account's, if unrestricted)."""
     service = get_service()
     # An account can have more calendars than fit in one page, and a brain's
@@ -575,7 +575,7 @@ def cmd_calendars(args) -> None:
     print(json.dumps({"calendars": out, "restricted": bool(ALLOWED)}, indent=2))
 
 
-def cmd_auth(args) -> None:
+def cmd_auth(args: argparse.Namespace) -> None:
     """Sign in through the browser and save the token. Only ever run by hand."""
     if in_brain():
         err(f"Signing in needs someone at a browser, so it cannot run inside a brain. {reconnect_hint()}")

@@ -76,7 +76,7 @@ def parse_ts(s: str) -> datetime | None:
         return None
 
 
-def resolve_history(args) -> Path:
+def resolve_history(args: argparse.Namespace) -> Path:
     if args.file:
         return Path(args.file).expanduser()
     if args.brain_dir:

@@ -61,7 +61,7 @@ import time
 from dataclasses import dataclass
 from datetime import date
 from pathlib import Path
-from typing import NoReturn
+from typing import Any, NoReturn
 
 DEFAULT_MODEL = os.environ.get("TRANSCRIBE_MODEL", "openai/whisper-large-v3-turbo")
 VIDEO_EXTS = {".mp4", ".mov", ".webm", ".3gp", ".mkv", ".avi", ".m4v"}
@@ -163,8 +163,8 @@ def split_audio(audio_path: Path, chunk_seconds: int) -> list[Path]:
 
 # ── local engine ──────────────────────────────────────────────────────────
 
-_PIPE = None
-_PROCESSOR = None  # kept next to _PIPE: it turns --prompt into prompt token IDs
+_PIPE: Any = None
+_PROCESSOR: Any = None  # kept next to _PIPE: it turns --prompt into prompt token IDs
 
 
 def local_available() -> bool:
@@ -176,7 +176,7 @@ def local_available() -> bool:
         return False
 
 
-def load_local_pipeline(model_id: str):
+def load_local_pipeline(model_id: str) -> Any:
     """Load the local ASR pipeline once and reuse it across chunks."""
     global _PIPE, _PROCESSOR
     if _PIPE is not None:
@@ -229,7 +229,7 @@ def transcribe_local(audio_path: Path, model_id: str, language: str | None, prom
     return result["text"].strip()
 
 
-def fit_prompt(ids):
+def fit_prompt(ids: Any) -> Any:
     """Cut Whisper prompt IDs to PROMPT_TOKENS, keeping the start-of-prompt token.
 
     A prompt that fills the decoder fails every window, and --engine auto
@@ -325,7 +325,7 @@ def choose_engines(engine: str) -> Engines:
     return Engines(local=use_local, groq=use_groq)
 
 
-def transcribe_chunk(path: Path, args, available: Engines) -> tuple[str, str]:
+def transcribe_chunk(path: Path, args: argparse.Namespace, available: Engines) -> tuple[str, str]:
     """Transcribe one file, returning (text, engine_used)."""
     if available.local:
         try:
