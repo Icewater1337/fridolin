@@ -6,10 +6,12 @@ import (
 	"encoding/json"
 	"io"
 	"log"
+	"maps"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -23,9 +25,8 @@ type testBridge struct {
 }
 
 // newTestBridge starts a dev-mode bridge in a temp home. extra is appended to
-// the config's JSON object; dotenv, if given, are the lines of the .env next
-// to config.json.
-func newTestBridge(t *testing.T, extra string, dotenv ...string) *testBridge {
+// the config's JSON object.
+func newTestBridge(t *testing.T, extra string) *testBridge {
 	t.Helper()
 	home := canonicalDir(t.TempDir())
 	t.Setenv("HOME", home)
@@ -38,11 +39,6 @@ func newTestBridge(t *testing.T, extra string, dotenv ...string) *testBridge {
 		"allowed_groups": ["120363000000000000@g.us"],
 		"debounce": {"quiet_ms": 0}`+extra+`
 	}`)
-	if len(dotenv) > 0 {
-		if err := os.WriteFile(filepath.Join(filepath.Dir(path), ".env"), []byte(strings.Join(dotenv, "\n")+"\n"), 0o600); err != nil {
-			t.Fatal(err)
-		}
-	}
 	cfgs, err := OpenConfigStore(path)
 	if err != nil {
 		t.Fatal(err)
@@ -612,33 +608,6 @@ func TestApproveDrift(t *testing.T) {
 	}
 }
 
-func TestBrainEditsAreCheckedWithTheDotEnv(t *testing.T) {
-	// A brain edit is checked against the whole effective config, the .env
-	// next to config.json included. Here config.json alone would not load
-	// (max_chunk_size 5 is too small) and the .env fixes that: a check built
-	// from the process environment alone would refuse every edit.
-	tb := newTestBridge(t, `, "max_chunk_size": 5`, "MAX_CHUNK_SIZE=4000")
-	m := BrainManifest{ID: "notes", Name: "Notes"}
-	if w := tb.do("POST", "/api/brains", map[string]any{"path": "~/notes", "manifest": m, "create_dir": true}); w.Code != 200 {
-		t.Fatal(w.Body.String())
-	}
-	edited := m
-	edited.Name = "Notes 2"
-	for _, req := range []struct {
-		method, path string
-		body         any
-	}{
-		{"PUT", "/api/brains/notes", map[string]any{"manifest": edited}},
-		{"POST", "/api/brains/notes/approve", nil},
-	} {
-		t.Run(req.method+" "+req.path, func(t *testing.T) {
-			if w := tb.do(req.method, req.path, req.body); w.Code != 200 {
-				t.Errorf("%d %s", w.Code, w.Body)
-			}
-		})
-	}
-}
-
 // lockedBuffer collects log output that the bridge's goroutines may write
 // while the test reads it.
 type lockedBuffer struct {
@@ -713,6 +682,29 @@ func TestAPINeverReturnsSecrets(t *testing.T) {
 		if strings.Contains(body, "very-secret-value") || strings.Contains(body, tb.token.Value()) {
 			t.Errorf("%s leaks a secret", p)
 		}
+	}
+}
+
+func TestGetConfigLocksNoSettings(t *testing.T) {
+	// Environment variables used to override config.json, and the response
+	// named the settings they locked, so the dashboard could disable them.
+	// Now the file is all there is: what it says is what runs.
+	t.Setenv("ALLOWED_GROUPS", "120363000000000001@g.us")
+	tb := newTestBridge(t, "")
+	var got map[string]json.RawMessage
+	if err := json.Unmarshal(tb.do("GET", "/api/config", nil).Body.Bytes(), &got); err != nil {
+		t.Fatal(err)
+	}
+	keys := slices.Sorted(maps.Keys(got))
+	if want := []string{"config", "effective", "etag", "path"}; !slices.Equal(keys, want) {
+		t.Errorf("GET /api/config has %v, want %v", keys, want)
+	}
+	var eff Config
+	if err := json.Unmarshal(got["effective"], &eff); err != nil {
+		t.Fatal(err)
+	}
+	if want := []string{"120363000000000000@g.us"}; !slices.Equal(eff.AllowedGroups, want) {
+		t.Errorf("effective allowed_groups = %v, want config.json's %v", eff.AllowedGroups, want)
 	}
 }
 

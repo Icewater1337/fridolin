@@ -3,7 +3,6 @@ package main
 import (
 	"encoding/json"
 	"errors"
-	"log"
 	"os"
 	"path/filepath"
 	"strings"
@@ -61,26 +60,83 @@ func TestConfigStoreUpdateWritesAtomicallyAndKeepsTilde(t *testing.T) {
 	}
 }
 
-func TestConfigStoreReportsEnvLockedFields(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
-	t.Setenv("ALLOWED_GROUPS", "120363000000000000@g.us")
-	cs, err := OpenConfigStore(writeConfig(t, `{"allowed_groups":[]}`))
+// The configuration comes from config.json alone. These variables used to
+// override it, and their generic names are easily set by other software: a
+// DATA_DIR meant for something else moved the bridge's data, and every one
+// of them locked its setting in the dashboard.
+func TestEnvironmentDoesNotOverrideTheConfig(t *testing.T) {
+	// $ELSEWHERE is a dir of the subtest's own, so a regression that
+	// creates it is blamed on the one variable that did.
+	vars := []struct{ name, value string }{
+		{"ALLOWED_NUMBERS", "15559876543"},
+		{"ALLOWED_GROUPS", "120363000000000001@g.us"},
+		{"TRIGGERS", "@bot"},
+		{"CLAUDE_PATH", "$ELSEWHERE/claude"},
+		{"DATA_DIR", "$ELSEWHERE"},
+		{"DB_PATH", "$ELSEWHERE/bridge.db"},
+		{"MEDIA_DIR", "$ELSEWHERE/media"},
+		{"MAX_CHUNK_SIZE", "4000"},
+		{"MODEL", "from-env"},
+		{"BRAIN_MODEL", "from-env"},
+		{"BRAIN_EFFORT", "high"},
+		{"DISALLOWED_TOOLS", "Bash"},
+		{"DANGEROUSLY_SKIP_PERMISSIONS", "false"},
+		{"HTTP_LISTEN", "127.0.0.1:9999"},
+		{"LOG_LEVEL", "debug"},
+		{"SANDBOX_ENABLED", "true"},
+		{"OTP_GUARD", "false"},
+		{"VIEWER", "true"},
+	}
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	path := writeConfig(t, `{
+		"allowed_numbers": ["15551234567"],
+		"allowed_groups": ["120363000000000000@g.us"],
+		"triggers": ["@claude"],
+		"data_dir": "`+home+`/data",
+		"max_chunk_size": 3000,
+		"model": "from-file",
+		"brain_model": "from-file",
+		"brain_effort": "low",
+		"disallowed_tools": ["WebFetch"],
+		"dangerously_skip_permissions": true,
+		"log_level": "info",
+		"sandbox": {"enabled": false},
+		"otp_guard": true,
+		"viewer": false
+	}`)
+	for _, v := range vars {
+		clearEnv(t, v.name)
+	}
+	want := effectiveJSON(t, path)
+	for _, v := range vars {
+		t.Run(v.name, func(t *testing.T) {
+			elsewhere := filepath.Join(t.TempDir(), "elsewhere")
+			value := strings.ReplaceAll(v.value, "$ELSEWHERE", elsewhere)
+			t.Setenv(v.name, value)
+			if got := effectiveJSON(t, path); got != want {
+				t.Errorf("%s=%s changed the effective config:\n got %s\nwant %s", v.name, value, got, want)
+			}
+			if _, err := os.Stat(elsewhere); !os.IsNotExist(err) {
+				t.Errorf("%s=%s made the bridge create %s (%v)", v.name, value, elsewhere, err)
+			}
+		})
+	}
+}
+
+// effectiveJSON loads the config at path and returns the effective
+// configuration as JSON.
+func effectiveJSON(t *testing.T, path string) string {
+	t.Helper()
+	cfg, err := LoadConfig(path)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if cs.EnvLocked()["allowed_groups"] != "ALLOWED_GROUPS" {
-		t.Errorf("env locked = %v", cs.EnvLocked())
-	}
-	// Saving never writes the environment's value into the file.
-	if _, err := cs.Update("", func(c *Config) error { c.Model = "sonnet"; return nil }); err != nil {
+	data, err := json.Marshal(cfg)
+	if err != nil {
 		t.Fatal(err)
 	}
-	data, _ := os.ReadFile(cs.Path())
-	var raw map[string]any
-	_ = json.Unmarshal(data, &raw)
-	if g, _ := raw["allowed_groups"].([]any); len(g) != 0 {
-		t.Errorf("environment value leaked into the file: %v", raw["allowed_groups"])
-	}
+	return string(data)
 }
 
 func TestConfigDefaultsAndLoopbackOnly(t *testing.T) {
@@ -147,26 +203,21 @@ func readRawConfig(t *testing.T, path string) map[string]json.RawMessage {
 // Classic mode was removed. A config or environment that asks for it is
 // refused, with what to do instead; quietly running brains would leave the
 // chats with no brain set up. Without the switch, or with it on, it loads.
-// The bridge reads BRAIN_MODE in a .env to refuse it, so the log must not
-// call it ignored.
 func TestConfigRefusesClassicMode(t *testing.T) {
 	cases := []struct {
 		name, config string
 		env          string // BRAIN_MODE in the environment, "" for unset
-		dotenv       string // the .env next to the config, "" for none
 		want         string // part of the error, "" when the config loads
 		fix          string // part of the error that says what to change
 	}{
-		{"no brain_mode", `{}`, "", "", "", ""},
-		{"brain_mode true", `{"brain_mode": true}`, "", "", "", ""},
-		{"brain_mode null", `{"brain_mode": null}`, "", "", "", ""},
-		{"brain_mode false", `{"brain_mode": false}`, "", "", `"brain_mode": false asks for classic mode, which was removed`, `Set "brain_mode" to true in config.json`},
-		{"brain_mode not a bool", `{"brain_mode": "off"}`, "", "", "brain_mode: json: cannot unmarshal", ""},
-		{"BRAIN_MODE=0", `{}`, "0", "", "BRAIN_MODE=0 asks for classic mode, which was removed", "Unset BRAIN_MODE"},
-		{"BRAIN_MODE=false over brain_mode true", `{"brain_mode": true}`, "false", "", "BRAIN_MODE=false asks for classic mode", "Unset BRAIN_MODE"},
-		{"BRAIN_MODE=0 in the .env", `{}`, "", "BRAIN_MODE=0\n", "BRAIN_MODE=0 asks for classic mode", "Unset BRAIN_MODE"},
-		{"BRAIN_MODE=1", `{}`, "1", "", "", ""},
-		{"BRAIN_MODE=1 in the .env", `{}`, "", "BRAIN_MODE=1\n", "", ""},
+		{"no brain_mode", `{}`, "", "", ""},
+		{"brain_mode true", `{"brain_mode": true}`, "", "", ""},
+		{"brain_mode null", `{"brain_mode": null}`, "", "", ""},
+		{"brain_mode false", `{"brain_mode": false}`, "", `"brain_mode": false asks for classic mode, which was removed`, `Set "brain_mode" to true in config.json`},
+		{"brain_mode not a bool", `{"brain_mode": "off"}`, "", "brain_mode: json: cannot unmarshal", ""},
+		{"BRAIN_MODE=0", `{}`, "0", "BRAIN_MODE=0 asks for classic mode, which was removed", "Unset BRAIN_MODE"},
+		{"BRAIN_MODE=false over brain_mode true", `{"brain_mode": true}`, "false", "BRAIN_MODE=false asks for classic mode", "Unset BRAIN_MODE"},
+		{"BRAIN_MODE=1", `{}`, "1", "", ""},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -175,19 +226,7 @@ func TestConfigRefusesClassicMode(t *testing.T) {
 			if c.env != "" {
 				t.Setenv("BRAIN_MODE", c.env)
 			}
-			path := writeConfig(t, c.config)
-			if c.dotenv != "" {
-				if err := os.WriteFile(filepath.Join(filepath.Dir(path), ".env"), []byte(c.dotenv), 0o600); err != nil {
-					t.Fatal(err)
-				}
-			}
-			logs := captureLog(t)
-			_, err := LoadConfig(path)
-			for _, l := range logs() {
-				if strings.Contains(l, "ignoring") && strings.Contains(l, "BRAIN_MODE") {
-					t.Errorf("log %q calls BRAIN_MODE ignored", l)
-				}
-			}
+			_, err := LoadConfig(writeConfig(t, c.config))
 			switch {
 			case c.want == "" && err != nil:
 				t.Fatalf("load: %v, want it to load", err)
@@ -228,21 +267,16 @@ func TestConfigSavesKeepBrainModeOn(t *testing.T) {
 }
 
 // work_dir was the folder classic mode ran in; brains run in their own. So
-// neither the key nor WORK_DIR sets anything any more: a config that still
-// has the key says so in the log, and the variable locks no setting.
+// the key sets nothing any more, and a config that still has it says so in
+// the log.
 func TestClassicWorkDirIsNoLongerASetting(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
-	t.Setenv("WORK_DIR", "/elsewhere")
 	logs := captureLog(t)
-	cs, err := OpenConfigStore(writeConfig(t, `{"work_dir": "~/classic"}`))
-	if err != nil {
+	if _, err := OpenConfigStore(writeConfig(t, `{"work_dir": "~/classic"}`)); err != nil {
 		t.Fatal(err)
 	}
 	if !logContains(logs, "ignoring unknown settings [work_dir]") {
 		t.Errorf("log %q does not say work_dir is ignored", logs())
-	}
-	if v, ok := cs.EnvLocked()["work_dir"]; ok {
-		t.Errorf("work_dir is locked by %s", v)
 	}
 }
 
@@ -310,27 +344,42 @@ func TestRemovingTheLastNumberDoesNotOpenDMs(t *testing.T) {
 	}
 }
 
-func TestDotEnvIsReadOnlyNextToTheConfig(t *testing.T) {
-	// The tests run in the repository and a bridge may be started from a
-	// checkout: a .env lying in the working directory must not configure it.
+func TestDotEnvIsNotRead(t *testing.T) {
+	// A .env sets nothing, next to config.json, where older versions read
+	// settings from, or in the working directory. One next to the config is
+	// named in the log, so settings that stopped applying do not go
+	// unnoticed, but nothing in it is: it may hold secrets. Nor does it reach
+	// the process environment, which every brain inherits.
+	const secret = "sk-not-a-real-secret"
 	tests := []struct {
 		name        string
 		beside, cwd string // .env contents next to config.json and in the working directory; "" means none
-		want        string // effective model
+		dir         bool   // the .env next to config.json is a directory
+		relative    bool   // load ./config.json from its folder
+		warn        bool   // the log names the .env next to config.json
 	}{
-		{"next to the config", "MODEL=beside\n", "", "beside"},
-		{"only in the working directory", "", "MODEL=cwd\n", ""},
-		{"in both places", "MODEL=beside\n", "MODEL=cwd\n", "beside"},
+		{"no .env", "", "", false, false, false},
+		{"next to the config", "MODEL=beside\nFRIDOLIN_TEST_DOTENV_ONLY=" + secret + "\n", "", false, false, true},
+		{"next to a relative config path", "MODEL=beside\n", "", false, true, true},
+		{"one older versions refused to parse", "MODEL=\"" + secret + "\n", "", false, false, true},
+		{"a directory", "", "", true, false, true},
+		{"only in the working directory", "", "MODEL=cwd\n", false, false, false},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Setenv("HOME", t.TempDir())
-			clearEnv(t, "MODEL")
-			path := writeConfig(t, `{}`)
-			if tc.beside != "" {
-				if err := os.WriteFile(filepath.Join(filepath.Dir(path), ".env"), []byte(tc.beside), 0o600); err != nil {
-					t.Fatal(err)
-				}
+			clearEnv(t, "MODEL", "FRIDOLIN_TEST_DOTENV_ONLY")
+			path := writeConfig(t, `{"model":"from-file"}`)
+			dotenv := filepath.Join(filepath.Dir(path), ".env")
+			var err error
+			switch {
+			case tc.dir:
+				err = os.Mkdir(dotenv, 0o700)
+			case tc.beside != "":
+				err = os.WriteFile(dotenv, []byte(tc.beside), 0o600)
+			}
+			if err != nil {
+				t.Fatal(err)
 			}
 			wd := t.TempDir()
 			if tc.cwd != "" {
@@ -339,178 +388,45 @@ func TestDotEnvIsReadOnlyNextToTheConfig(t *testing.T) {
 				}
 			}
 			t.Chdir(wd)
-			cfg, err := LoadConfig(path)
-			if err != nil {
-				t.Fatal(err)
+			if tc.relative {
+				t.Chdir(filepath.Dir(path))
+				path = "config.json"
 			}
-			if cfg.Model != tc.want {
-				t.Errorf("Model = %q, want %q", cfg.Model, tc.want)
-			}
-		})
-	}
-}
-
-func TestDotEnvOverridesWithoutExporting(t *testing.T) {
-	// The .env configures the bridge only. Exported into the process
-	// environment, its values would reach every brain and tool the bridge
-	// starts, and would outlive the test that loaded them.
-	tests := []struct {
-		name        string
-		env, dotenv string // MODEL in the process environment and in the .env; "" means unset
-		want        string // effective model
-	}{
-		{"config.json alone", "", "", "from-file"},
-		{"process environment", "from-env", "", "from-env"},
-		{".env", "", "from-dotenv", "from-dotenv"},
-		{".env wins over the process environment", "from-env", "from-dotenv", "from-dotenv"},
-	}
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			t.Setenv("HOME", t.TempDir())
-			clearEnv(t, "MODEL", "FRIDOLIN_TEST_DOTENV_ONLY")
-			if tc.env != "" {
-				t.Setenv("MODEL", tc.env)
-			}
-			path := writeConfig(t, `{"model":"from-file"}`)
-			dotenv := "FRIDOLIN_TEST_DOTENV_ONLY=secret\n"
-			if tc.dotenv != "" {
-				dotenv += "MODEL=" + tc.dotenv + "\n"
-			}
-			if err := os.WriteFile(filepath.Join(filepath.Dir(path), ".env"), []byte(dotenv), 0o600); err != nil {
-				t.Fatal(err)
-			}
+			logs := captureLog(t)
 			cs, err := OpenConfigStore(path)
 			if err != nil {
 				t.Fatal(err)
 			}
-			if got := cs.Get().Model; got != tc.want {
-				t.Errorf("Model = %q, want %q", got, tc.want)
+			if got := cs.Get().Model; got != "from-file" {
+				t.Errorf("Model = %q, want the config's from-file", got)
+			}
+			// An edit re-derives the effective config from the file alone.
+			if _, err := cs.Update("", func(c *Config) error { c.LogLevel = "debug"; return nil }); err != nil {
+				t.Fatal(err)
+			}
+			if got := cs.Get().Model; got != "from-file" {
+				t.Errorf("Model after an edit = %q, want the config's from-file", got)
 			}
 			if v, ok := os.LookupEnv("FRIDOLIN_TEST_DOTENV_ONLY"); ok {
-				t.Errorf("a .env value was exported into the process environment: %q", v)
+				t.Errorf("a .env value reached the process environment: %q", v)
 			}
-			if got := os.Getenv("MODEL"); got != tc.env {
-				t.Errorf("process MODEL = %q, want it left at %q", got, tc.env)
+			if v, ok := os.LookupEnv("MODEL"); ok {
+				t.Errorf("a .env value reached the process environment: MODEL=%q", v)
 			}
-			// An edit re-derives the effective config from the same overrides.
-			if _, err := cs.Update("", func(c *Config) error { c.LogLevel = "debug"; return nil }); err != nil {
-				t.Fatal(err)
-			}
-			if got := cs.Get().Model; got != tc.want {
-				t.Errorf("Model after an edit = %q, want %q", got, tc.want)
-			}
-			if locked := cs.EnvLocked()["model"] == "MODEL"; locked != (tc.want != "from-file") {
-				t.Errorf("model locked = %v, env locked = %v", locked, cs.EnvLocked())
-			}
-		})
-	}
-}
-
-func TestBadDotEnvIsAnError(t *testing.T) {
-	// Ignoring a .env that does not parse would run the bridge without the
-	// settings it meant to set; the error must not quote its contents.
-	const secret = "sk-not-a-real-secret"
-	tests := []struct {
-		name string
-		body string // "" makes .env a directory
-	}{
-		{"unterminated quote", "MODEL=\"" + secret + "\n"},
-		{"invalid variable name", "MY-KEY=" + secret + "\n"},
-		{"unreadable", ""},
-	}
-	for _, tc := range tests {
-		for _, relative := range []bool{false, true} {
-			name := tc.name
-			if relative {
-				name += ", relative config path"
-			}
-			t.Run(name, func(t *testing.T) {
-				t.Setenv("HOME", t.TempDir())
-				path := writeConfig(t, `{}`)
-				dotenv := filepath.Join(filepath.Dir(path), ".env")
-				var err error
-				if tc.body == "" {
-					err = os.Mkdir(dotenv, 0o700)
-				} else {
-					err = os.WriteFile(dotenv, []byte(tc.body), 0o600)
-				}
-				if err != nil {
-					t.Fatal(err)
-				}
-				if relative {
-					// ./config.json, which the bridge uses when no --config is
-					// given: the error must still say which folder's .env it is.
-					t.Chdir(filepath.Dir(path))
-					path = "config.json"
-				}
-				_, err = OpenConfigStore(path)
-				if err == nil {
-					t.Fatal("a .env that cannot be read must stop the config from loading")
-				}
-				resolved := filepath.Join(canonicalDir(filepath.Dir(dotenv)), ".env")
-				if !strings.Contains(err.Error(), dotenv) && !strings.Contains(err.Error(), resolved) {
-					t.Errorf("error %q does not name %s", err, dotenv)
-				}
-				if strings.Contains(err.Error(), secret) {
-					t.Errorf("error %q quotes the .env contents", err)
-				}
-			})
-		}
-	}
-}
-
-func TestDotEnvLogsTheKeysItIgnores(t *testing.T) {
-	// Only the override variables are read from the .env and nothing in it is
-	// exported, so a key meant for the Claude CLI or a brain's tool reaches
-	// nothing. The log names such keys, so that does not go unnoticed, but
-	// never their values.
-	const secret = "sk-not-a-real-secret"
-	tests := []struct {
-		name   string
-		dotenv string // "" means no .env
-		want   string // what the log says about the .env; "" means nothing
-	}{
-		{"no .env", "", ""},
-		{"only override variables", "MODEL=from-dotenv\nLOG_LEVEL=debug\n", ""},
-		{"a key for a brain's tool", "MODEL=from-dotenv\nGROQ_API_KEY=" + secret + "\n", "ignoring GROQ_API_KEY ("},
-		{"several keys, sorted", "PATH=/opt/bin\nANTHROPIC_API_KEY=" + secret + "\nCONFIG_FILE=/elsewhere.json\n", "ignoring ANTHROPIC_API_KEY, CONFIG_FILE, PATH ("},
-	}
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			t.Setenv("HOME", t.TempDir())
-			path := writeConfig(t, `{}`)
-			dotenv := filepath.Join(filepath.Dir(path), ".env")
-			if tc.dotenv != "" {
-				if err := os.WriteFile(dotenv, []byte(tc.dotenv), 0o600); err != nil {
-					t.Fatal(err)
-				}
-			}
-			var logs strings.Builder
-			defer log.SetOutput(log.Writer())
-			log.SetOutput(&logs)
-			cs, err := OpenConfigStore(path)
-			if err != nil {
-				t.Fatal(err)
-			}
-			// The .env is read once, so an edit does not log it again.
-			if _, err := cs.Update("", func(c *Config) error { c.LogLevel = "debug"; return nil }); err != nil {
-				t.Fatal(err)
-			}
-			got := logs.String()
+			got := strings.Join(logs(), "\n")
 			if strings.Contains(got, secret) {
-				t.Errorf("the log quotes a .env value: %q", got)
+				t.Errorf("the log quotes the .env: %q", got)
 			}
-			if tc.want == "" {
-				if strings.Contains(got, "ignoring") {
-					t.Errorf("nothing is ignored, but the log says %q", got)
-				}
-				return
+			resolved := filepath.Join(canonicalDir(filepath.Dir(dotenv)), ".env")
+			n := strings.Count(got, dotenv+" is no longer read")
+			if resolved != dotenv {
+				n += strings.Count(got, resolved+" is no longer read")
 			}
-			if n := strings.Count(got, tc.want); n != 1 {
-				t.Errorf("log %q has %q %d times, want once", got, tc.want, n)
-			}
-			if !strings.Contains(got, ".env "+dotenv+": ") {
-				t.Errorf("log %q does not name %s", got, dotenv)
+			switch {
+			case tc.warn && n != 1:
+				t.Errorf("log %q names %s %d times, want once", got, dotenv, n)
+			case !tc.warn && strings.Contains(got, ".env"):
+				t.Errorf("log %q mentions a .env, but there is none next to the config", got)
 			}
 		})
 	}

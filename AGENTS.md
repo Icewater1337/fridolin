@@ -86,8 +86,8 @@ Reopen the dashboard with `./fridolin open`.
 
 - `go vet ./... && go test -race ./...` must pass; `gofmt` everything.
   The tests run in an empty temp directory, with an empty temp `HOME` and
-  the config override variables unset, so they never see a `config.json`
-  or `.env` in the checkout or a real data dir; read a repository file
+  the variables that pick the config unset, so they never see a
+  `config.json` in the checkout or a real data dir; read a repository file
   through `repoDir`.
 - The Python helpers in `tools/` have stdlib-only tests that never touch the
   network: `python3 -m unittest discover -s tools/tests`. Keep them passing

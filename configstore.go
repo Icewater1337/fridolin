@@ -19,20 +19,18 @@ import (
 
 // ConfigStore holds the configuration in two layers: what is written in
 // config.json (the "file" layer, ~ kept as typed) and the effective
-// configuration the bridge runs with (environment overrides, defaults and
-// expanded paths applied). The dashboard edits the file layer; every component
-// reads the effective layer through Get, which is a cheap atomic load, so a
-// change applies on the next message without a restart.
+// configuration the bridge runs with (defaults and expanded paths applied).
+// The dashboard edits the file layer; every component reads the effective
+// layer through Get, which is a cheap atomic load, so a change applies on
+// the next message without a restart.
 type ConfigStore struct {
 	path string
-	env  envLookup // override variables: the .env next to path, then the process environment
 
-	mu        sync.Mutex // serialises Update
-	file      *Config
-	eff       atomic.Pointer[Config]
-	envLocked atomic.Pointer[map[string]string]
-	etag      atomic.Value // string
-	subs      []func(old, new *Config)
+	mu   sync.Mutex // serialises Update
+	file *Config
+	eff  atomic.Pointer[Config]
+	etag atomic.Value // string
+	subs []func(old, new *Config)
 }
 
 // ErrConfigConflict means config.json changed since the caller read it.
@@ -41,15 +39,14 @@ var ErrConfigConflict = errors.New("config changed since it was loaded — reloa
 // OpenConfigStore loads cfgPath. A missing file is not an error: it means an
 // empty configuration with defaults, which is what a fresh install starts from.
 func OpenConfigStore(cfgPath string) (*ConfigStore, error) {
-	env, err := loadDotEnv(cfgPath)
-	if err != nil {
-		return nil, err
-	}
 	// BRAIN_MODE switched classic mode on as "brain_mode": false did, and
-	// is refused like it (see retiredBrainMode). True overrides nothing.
-	if v := env("BRAIN_MODE"); v != "" && !isTruthy(v) {
-		return nil, classicModeRemoved("BRAIN_MODE="+v, "Unset BRAIN_MODE (in the environment or the .env next to config.json)")
+	// is refused like it (see retiredBrainMode). It is no setting: the
+	// environment only gets this check, so a bridge that ran classic mode
+	// from it does not quietly start without a brain for its chats.
+	if v := os.Getenv("BRAIN_MODE"); v != "" && !isTruthy(v) {
+		return nil, classicModeRemoved("BRAIN_MODE="+v, "Unset BRAIN_MODE in the bridge's environment")
 	}
+	warnDotEnvNotRead(cfgPath)
 
 	file := &Config{}
 	var raw []byte
@@ -63,13 +60,12 @@ func OpenConfigStore(cfgPath string) (*ConfigStore, error) {
 		return nil, fmt.Errorf("reading config file %q: %w", cfgPath, err)
 	}
 
-	eff, locked, err := effective(file, env)
+	eff, err := effective(file)
 	if err != nil {
 		return nil, err
 	}
-	cs := &ConfigStore{path: cfgPath, env: env, file: file}
+	cs := &ConfigStore{path: cfgPath, file: file}
 	cs.eff.Store(eff)
-	cs.envLocked.Store(&locked)
 	cs.etag.Store(etagOf(raw))
 	return cs, nil
 }
@@ -83,10 +79,6 @@ func (cs *ConfigStore) Get() *Config { return cs.eff.Load() }
 
 // ETag identifies the current file contents for optimistic concurrency.
 func (cs *ConfigStore) ETag() string { return cs.etag.Load().(string) }
-
-// EnvLocked returns json field → environment variable for every setting an
-// environment variable overrides; editing those in config.json has no effect.
-func (cs *ConfigStore) EnvLocked() map[string]string { return *cs.envLocked.Load() }
 
 // FileCopy returns a deep copy of the file layer for editing.
 func (cs *ConfigStore) FileCopy() *Config {
@@ -127,7 +119,7 @@ func (cs *ConfigStore) Update(etag string, mutate func(*Config) error) (restart 
 		cs.mu.Unlock()
 		return nil, err
 	}
-	eff, locked, err := effective(next, cs.env)
+	eff, err := effective(next)
 	if err != nil {
 		cs.mu.Unlock()
 		return nil, err
@@ -146,7 +138,6 @@ func (cs *ConfigStore) Update(etag string, mutate func(*Config) error) (restart 
 	old := cs.eff.Load()
 	cs.file = next
 	cs.eff.Store(eff)
-	cs.envLocked.Store(&locked)
 	cs.etag.Store(etagOf(data))
 	subs := append([]func(old, new *Config){}, cs.subs...)
 	cs.mu.Unlock()
@@ -222,27 +213,19 @@ func etagOf(data []byte) string {
 	return hex.EncodeToString(sum[:8])
 }
 
-// warnIgnoredDotEnvKeys logs the keys in the .env that are not override
-// variables. The bridge reads nothing else from it and exports nothing, so
-// a key meant for the Claude CLI or a brain's tool (ANTHROPIC_API_KEY,
-// GROQ_API_KEY) reaches neither: without this line the first sign would be
-// brains failing with "Not logged in". Names only, the values may be secrets.
-// BRAIN_MODE is no override any more, but it is read, to refuse classic mode
-// (see OpenConfigStore): calling it ignored would contradict that refusal.
-func warnIgnoredDotEnvKeys(path string, vars map[string]string) {
-	known := map[string]bool{"BRAIN_MODE": true}
-	for _, o := range envOverrides {
-		known[o.env] = true
+// warnDotEnvNotRead logs that the .env next to the config, if there is
+// one, is not read. Older versions took settings from it, and a key meant
+// for the Claude CLI or a brain's tool may sit there too: without this line
+// the first sign would be a setting gone back to its config.json value, or
+// brains failing with "Not logged in". The file is not opened, so nothing
+// in it, a secret say, can end up in the log.
+func warnDotEnvNotRead(cfgPath string) {
+	path := dotEnvPath(cfgPath)
+	if abs, err := filepath.Abs(path); err == nil {
+		path = abs // so the line names the folder, for a relative --config too
 	}
-	var ignored []string
-	for k := range vars {
-		if !known[k] {
-			ignored = append(ignored, k)
-		}
-	}
-	if len(ignored) > 0 {
-		sort.Strings(ignored)
-		log.Printf(".env %s: ignoring %s (not config overrides; brains and the Claude CLI do not see them either, see docs/CONFIGURATION.md#environment-variables)", path, strings.Join(ignored, ", "))
+	if _, err := os.Lstat(path); err == nil {
+		log.Printf("warning: %s is no longer read: settings belong in config.json, and variables for the Claude CLI or brains in the bridge's environment (see docs/CONFIGURATION.md#environment-variables)", path)
 	}
 }
 

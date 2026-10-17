@@ -295,9 +295,10 @@ dashboard; the others keep running.
 Every chat goes to a brain. Classic mode, one resumable Claude session per
 chat in one shared folder without the sandbox, was removed. The bridge
 refuses to start with `"brain_mode": false`, or with `BRAIN_MODE` set to
-anything but true: set the key to `true` (or unset the variable), start the
-bridge, and add a brain under *Brains → Add brain*. One that handles direct
-messages and is the default answers every allowed chat, as classic mode did.
+anything but `true`, `1`, `yes` or `on`: set the key to `true` (or unset the
+variable), start the bridge, and add a brain under *Brains → Add brain*. One
+that handles direct messages and is the default answers every allowed chat,
+as classic mode did.
 
 Keep the key rather than delete it. The bridge itself writes
 `"brain_mode": true` on every save, so that an older version you go back to
@@ -337,9 +338,10 @@ Brains can neither read nor write:
   wherever it is, and its folder when that lies outside the data directory,
   unless the folder is your home folder or a temp folder
 - the config file (with its `.bak` and the temp file each save writes next
-  to it) and the `.env` loaded with it, when `--config` puts them outside
-  the data directory, and a `.env` in the directory the bridge was started
-  in, which older versions read
+  to it) when `--config` puts it outside the data directory, and the `.env`
+  files older versions read settings from, which may still hold some: the
+  one next to the config and the one in the directory the bridge was
+  started in
 - the bridge's logs in `~/Library/Logs/fridolin`
 - `~/.config/fridolin`, which holds the personal-data denylist the commit
   hooks read
@@ -715,30 +717,29 @@ whatsmeow protocol chatter.
 
 ## Environment variables
 
-Environment variables override `config.json`. A `.env` file next to the config
-is loaded automatically and overrides the process environment. If it cannot
-be read or parsed, the bridge refuses to start (and `fridolin check` says
-so) rather than run without the settings it holds. No other `.env` is read:
-one in the working directory counts only when the config file itself is in
-the working directory. The dashboard shows settings an environment variable
-controls as locked — remove the variable to edit them there. The sandbox
-keeps brains from reading the `.env` file.
+Every setting comes from `config.json`: no environment variable overrides
+one, and the bridge reads no `.env` file. Older versions did both. If a
+`.env` lies next to the config, the bridge says in its log that it is no
+longer read; move what it set into `config.json` (or the dashboard), and
+whatever the Claude CLI or a brain's tools need into the bridge's process
+environment (below). The sandbox still keeps brains from reading it.
 
-Only the variables in the table below are read from the `.env`, all but
-`CONFIG_FILE`, which picks the config and with it the `.env`. Besides them,
-`BRAIN_MODE` is read, only to refuse classic mode (see
-[`brain_mode`](#brain_mode)). Any other key is ignored, and the bridge names
-those keys (never their values) in its log when it loads the config. Nothing
-in the `.env` is exported either: the Claude CLI, brains, and the scripts and
-tools they run do not see it, and a `PATH` or `HOME` set there changes
-nothing, not even for the bridge. Whatever those programs need belongs in the
-bridge's process environment instead, and from there it reaches every brain:
+The bridge itself reads two variables:
+
+| Variable | What it does |
+| -------- | ------------ |
+| `CONFIG_FILE` | the config file when `--config` is not given |
+| `BRAIN_MODE` | anything but true refuses to start, see [`brain_mode`](#brain_mode) |
+
+The rest of the bridge's process environment reaches the programs it
+starts: the Claude CLI, brains, and the scripts and tools they run. What
+those need belongs there:
 
 - The Claude CLI's own login and network settings, if you set them rather
   than log in once with `claude`: `ANTHROPIC_API_KEY`,
-  `CLAUDE_CODE_OAUTH_TOKEN`, `HTTPS_PROXY`, `NODE_EXTRA_CA_CERTS`. Left in
-  the `.env`, they no longer reach `claude`, and every brain fails with "Not
-  logged in" (or cannot get through the proxy).
+  `CLAUDE_CODE_OAUTH_TOKEN`, `HTTPS_PROXY`, `NODE_EXTRA_CA_CERTS`. Left in a
+  `.env`, they do not reach `claude`, and every brain fails with "Not logged
+  in" (or cannot get through the proxy).
 - Keys a brain's tools need, such as `GROQ_API_KEY` for transcription.
 
 Re-running `setup.sh` rewrites the launchd plist and the systemd unit from the
@@ -756,33 +757,6 @@ these variables where it does not:
   and add them again after every `setup.sh` run.
 - **Started by hand:** export them in the shell that runs `./fridolin`.
 
-These are the variables that override `config.json`:
-
-| Variable | Config field |
-| -------- | ------------ |
-| `ALLOWED_NUMBERS` | `allowed_numbers` (comma-separated) |
-| `ALLOWED_GROUPS` | `allowed_groups` (comma-separated) |
-| `TRIGGERS` | `triggers` (comma-separated) |
-| `CLAUDE_PATH` | `claude_path` |
-| `DATA_DIR` | `data_dir` |
-| `DB_PATH` | `db_path` |
-| `MEDIA_DIR` | `media_dir` |
-| `MODEL` | `model` |
-| `BRAIN_MODEL` | `brain_model` |
-| `BRAIN_EFFORT` | `brain_effort` |
-| `DISALLOWED_TOOLS` | `disallowed_tools` (comma-separated) |
-| `SANDBOX_ENABLED` | `sandbox.enabled` |
-| `OTP_GUARD` | `otp_guard` |
-| `VIEWER` | `viewer` |
-| `HTTP_LISTEN` | `http_listen` |
-| `MAX_CHUNK_SIZE` | `max_chunk_size` |
-| `DANGEROUSLY_SKIP_PERMISSIONS` | `dangerously_skip_permissions` |
-| `LOG_LEVEL` | `log_level` |
-| `CONFIG_FILE` | default `--config` path |
-
-Booleans accept `true`, `1`, `yes`, or `on`. Brains are too structured for
-environment variables and are configured in `config.json` only.
-
 The Python tools read `BRIDGE_DATA_DIR` and `BRIDGE_DB_PATH` if you moved the
 data directory, and `CALENDAR_TZ` for the calendar timezone. Brains run them,
-so these too belong in the bridge's process environment, not in its `.env`.
+so these too belong in the bridge's process environment.

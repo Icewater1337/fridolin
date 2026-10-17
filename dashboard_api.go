@@ -467,11 +467,10 @@ func (b *Bridge) apiGetConfig(w http.ResponseWriter, r *http.Request) {
 	eff, _ := b.cfgs.Get().clone()
 	eff.Brains, eff.BrainDirs = nil, nil
 	writeJSON(w, http.StatusOK, map[string]any{
-		"etag":       b.cfgs.ETag(),
-		"path":       b.cfgs.Path(),
-		"config":     file,
-		"effective":  eff,
-		"env_locked": b.cfgs.EnvLocked(),
+		"etag":      b.cfgs.ETag(),
+		"path":      b.cfgs.Path(),
+		"config":    file,
+		"effective": eff,
 	})
 }
 
@@ -775,7 +774,7 @@ func (b *Bridge) apiUpdateBrain(w http.ResponseWriter, r *http.Request) {
 				}
 				c.Brains = append(c.Brains[:i], c.Brains[i+1:]...)
 				c.BrainDirs = append(c.BrainDirs, BrainRef{Path: bc.WorkDir, Approved: &m})
-				return checkSet(c, b.cfgs.env)
+				return checkSet(c)
 			}
 		}
 		for i := range c.BrainDirs {
@@ -785,7 +784,7 @@ func (b *Bridge) apiUpdateBrain(w http.ResponseWriter, r *http.Request) {
 					return err
 				}
 				ref.Approved = &m
-				return checkSet(c, b.cfgs.env)
+				return checkSet(c)
 			}
 		}
 		return fmt.Errorf("no brain %q", id)
@@ -798,8 +797,8 @@ func (b *Bridge) apiUpdateBrain(w http.ResponseWriter, r *http.Request) {
 }
 
 // checkSet rejects an edit that would make two brains clash.
-func checkSet(c *Config, env envLookup) error {
-	eff, _, err := effective(c, env)
+func checkSet(c *Config) error {
+	eff, err := effective(c)
 	if err != nil {
 		return err
 	}
@@ -832,7 +831,7 @@ func (b *Bridge) apiApproveBrain(w http.ResponseWriter, r *http.Request) {
 				return err
 			}
 			ref.Approved = disk
-			return checkSet(c, b.cfgs.env)
+			return checkSet(c)
 		}
 		return fmt.Errorf("no folder brain %q", id)
 	})

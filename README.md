@@ -277,8 +277,8 @@ pip install -r tools/requirements-transcription.txt   # local: private, ~1.5 GB 
 pip install groq && export GROQ_API_KEY=...           # API: light, needs a key
 ```
 
-Brains get `GROQ_API_KEY` from the bridge's process environment, not from its
-`.env`, whose values never reach brains. [Environment
+Brains get `GROQ_API_KEY` from the bridge's process environment; the bridge
+reads no `.env` file. [Environment
 variables](docs/CONFIGURATION.md#environment-variables) says where to keep it
 so that re-running `setup.sh` does not drop it.
 
@@ -481,9 +481,9 @@ Access*), with country code and no `+`. An empty list allows nobody unless
 **"Not logged in" from the CLI** — run `claude` once in a terminal to
 authenticate. Under launchd, check that `HOME` is set correctly in the plist.
 If the CLI logs in through `ANTHROPIC_API_KEY` or `CLAUDE_CODE_OAUTH_TOKEN`,
-that variable must be in the bridge's process environment: the bridge's
-`.env` does not reach the CLI, and the bridge's log names every key there it
-ignores ([details](docs/CONFIGURATION.md#environment-variables)).
+that variable must be in the bridge's process environment: the bridge reads
+no `.env` file, and says so in its log when one lies next to the config
+([details](docs/CONFIGURATION.md#environment-variables)).
 
 **Logged out of WhatsApp** — remove the device under *Linked Devices* on the
 phone, stop the bridge, move `bridge.db` out of your data directory (keep it
