@@ -921,3 +921,30 @@ func TestBridgeTellsTheSandboxItsConfigFile(t *testing.T) {
 		t.Errorf("profile lacks %s", rule)
 	}
 }
+
+// TestSandboxGitConfigModes: "deny" hides all git configuration, the XDG
+// file (~/.config/git/config) as well as ~/.gitconfig; "read" leaves both
+// readable. Neither mode lets a brain write them.
+func TestSandboxGitConfigModes(t *testing.T) {
+	home := canonicalDir(t.TempDir())
+	t.Setenv("HOME", home)
+	for _, mode := range []string{"read", "deny"} {
+		t.Run(mode, func(t *testing.T) {
+			cfg := &Config{Sandbox: SandboxConfig{GitConfig: mode}}
+			lines := strings.Split(mustProfile(t, NewSandboxProfiler(map[string]string{"a": home + "/a"}, cfg), "a"), "\n")
+			for _, c := range []struct {
+				rule string
+				want bool
+			}{
+				{`(deny file-read* (literal "` + home + `/.gitconfig"))`, mode == "deny"},
+				{`(deny file-read* (subpath "` + home + `/.config/git"))`, mode == "deny"},
+				{`(deny file-write* (literal "` + home + `/.gitconfig"))`, true},
+				{`(deny file-write* (subpath "` + home + `/.config/git"))`, true},
+			} {
+				if got := slices.Contains(lines, c.rule); got != c.want {
+					t.Errorf("profile has %s: %v, want %v", c.rule, got, c.want)
+				}
+			}
+		})
+	}
+}

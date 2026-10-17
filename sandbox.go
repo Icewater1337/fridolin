@@ -364,11 +364,13 @@ func (sp *SandboxProfiler) Profile(brainID string) (string, error) {
 	// signing settings). Writing it would let a brain change how *you* use
 	// git, so that stays denied. Credentials stay denied either way.
 	gitFiles := gitConfigChain(home)
+	xdgGit := filepath.Join(home, ".config", "git")
 	if sp.gitConfig == "deny" {
 		b.WriteString(";; Git configuration (denied by sandbox.git_config)\n")
 		for _, f := range gitFiles {
 			b.deny("file-read*", "literal", f)
 		}
+		b.deny("file-read*", "subpath", xdgGit)
 	} else {
 		b.WriteString(";; Git configuration: readable, never writable\n")
 	}
@@ -377,7 +379,7 @@ func (sp *SandboxProfiler) Profile(brainID string) (string, error) {
 	for _, f := range gitFiles {
 		b.deny("file-write*", "literal", f)
 	}
-	b.deny("file-write*", "subpath", filepath.Join(home, ".config", "git"))
+	b.deny("file-write*", "subpath", xdgGit)
 	b.WriteString("\n")
 
 	// ── bridge runtime dir ───────────────────────────────────────────────

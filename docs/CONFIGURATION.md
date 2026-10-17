@@ -298,7 +298,8 @@ keeping brains somewhere like `~/assistant/<name>` is simplest.
 
 `"read"` (default): brains may read `~/.gitconfig` and the files it includes,
 so they can commit in their own folder, but never write them. `"deny"` hides
-git configuration entirely. `~/.git-credentials` is denied either way.
+git configuration entirely: those files and `~/.config/git`.
+`~/.git-credentials` is denied either way.
 
 ### `sandbox.credentials_dir`
 
