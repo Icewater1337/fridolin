@@ -84,6 +84,15 @@ func NewBridge(cfgs *ConfigStore, opts BridgeOptions) (_ *Bridge, err error) {
 	if err != nil {
 		return nil, fmt.Errorf("creating store: %w", err)
 	}
+	defer func() {
+		// Runs before the lock is given back: whoever takes it next must be
+		// the only one with bridge.db open.
+		if err != nil {
+			if cerr := store.Close(); cerr != nil {
+				log.Printf("closing store: %v", cerr)
+			}
+		}
+	}()
 
 	b := &Bridge{
 		cfgs:     cfgs,
