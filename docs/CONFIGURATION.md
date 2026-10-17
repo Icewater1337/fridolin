@@ -127,7 +127,10 @@ Read [Security](../README.md#security) before running with this on.
 
 ### `inherit_claude_user_config`
 
-Set it in `config.json`; the dashboard has no field for it.
+The dashboard has no field for it, but its overview warns while it is on.
+To change it, stop the bridge, edit `config.json` and start the bridge
+again: the bridge reads that file only when it starts, and a dashboard save
+while it runs would write back the old value.
 
 Off by default: a brain loads only its own folder's Claude Code setup, never
 yours. Every brain runs with `--setting-sources project,local` and

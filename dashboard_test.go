@@ -108,6 +108,39 @@ func TestDashboardGuards(t *testing.T) {
 	}
 }
 
+// TestStatusWarnsWhenBrainsInheritYourClaudeSetup: inherit_claude_user_config
+// has no dashboard field, so the status says when it is on; classic mode
+// runs Claude with your setup whatever it says.
+func TestStatusWarnsWhenBrainsInheritYourClaudeSetup(t *testing.T) {
+	cases := []struct {
+		name, extra string
+		want        bool
+	}{
+		{"off", "", false},
+		{"on", `, "inherit_claude_user_config": true`, true},
+		{"on in classic mode", `, "inherit_claude_user_config": true, "brain_mode": false`, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			tb := newTestBridge(t, tc.extra)
+			w := tb.do("GET", "/api/status", nil)
+			var st statusResponse
+			if err := json.Unmarshal(w.Body.Bytes(), &st); err != nil {
+				t.Fatal(err)
+			}
+			var got []string
+			for _, warning := range st.Warnings {
+				if strings.Contains(warning, "inherit_claude_user_config") {
+					got = append(got, warning)
+				}
+			}
+			if (len(got) == 1) != tc.want || len(got) > 1 {
+				t.Errorf("warnings about it = %q, want one: %v", got, tc.want)
+			}
+		})
+	}
+}
+
 func TestSendKeepsScriptContractButBlocksBrowsers(t *testing.T) {
 	tb := newTestBridge(t, "")
 	send := func(mutate func(*http.Request)) int {
