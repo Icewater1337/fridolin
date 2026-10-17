@@ -343,14 +343,18 @@ func (b *Bridge) handleCommand(ctx context.Context, m Inbound, cfg *Config) bool
 
 	case "!stop":
 		// Only this chat's work: a brain serves several chats, and one
-		// chat must not cancel what another asked for.
+		// chat must not cancel what another asked for. A DM goes by two
+		// JIDs (see chatJIDs), and its run may have come in under either.
 		chats := chatJIDs(m)
 		for _, jid := range chats {
 			b.deb.Drop(jid)
 		}
 		stopped, dropped := false, 0
 		if br := b.brainMgr.BrainFor(m.JID, m.IsGroup()); cfg.BrainMode && br != nil {
-			stopped, dropped = br.StopChat(m.JID)
+			for _, jid := range chats {
+				s, d := br.StopChat(jid)
+				stopped, dropped = stopped || s, dropped+d
+			}
 		}
 		// A file or recording handed to another brain may answer here too,
 		// and the chat's own brain knows nothing about it. What waits for

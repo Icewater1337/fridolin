@@ -556,3 +556,23 @@ func TestInterruptModeQueuedNotice(t *testing.T) {
 		})
 	}
 }
+
+// WhatsApp may address a DM by the sender's LID while the run in flight came
+// in under the phone number (a broadcast-list message turned into a DM, say).
+// It is the same chat, so a !stop that arrives by LID stops that run and
+// drops what waits behind it.
+func TestStopByLIDReachesTheDMsRun(t *testing.T) {
+	const lid = otherNumber + "@lid"
+	tb, br := newMainBridge(t, "")
+	ctx := context.Background()
+	startLongRun(t, tb, br, Inbound{JID: testDMChat, Sender: "15551234567", Text: "dm 1", Source: "whatsapp"})
+	tb.handleInbound(ctx, Inbound{JID: testDMChat, Sender: "15551234567", Text: "dm 2", Source: "whatsapp"})
+
+	tb.handleInbound(ctx, Inbound{JID: lid, Sender: "15551234567", Text: "!stop", Source: "whatsapp"})
+	if !tb.sentPrefix(lid, "🛑 Stopped") {
+		t.Errorf("!stop answered %q, want that it stopped the DM's run", tb.sentTo(lid))
+	}
+	if rt := br.Snapshot(); rt.Running != nil || len(rt.Queue) != 0 {
+		t.Errorf("the DM still has work after !stop: running %+v, queue %+v", rt.Running, rt.Queue)
+	}
+}
