@@ -95,7 +95,7 @@ test('home page, health and the strict policy on the site’s own pages', async 
   assert.equal(home.status, 200)
   assert.match(home.headers.get('content-security-policy') ?? '', /script-src 'self'/)
   assert.match(await home.text(), /\/_fridolin\/app\.js/)
-  assert.deepEqual(await (await fetch(`${url}/_fridolin/site.json`)).json(), { title: 'Test site', preview: null })
+  assert.deepEqual(await (await fetch(`${url}/_fridolin/site.json`)).json(), { title: 'Test site', preview: null, exit: false })
   const me = await fetch(`${url}/auth/me`)
   assert.equal(me.status, 401)
   assert.deepEqual(await me.json(), { error: 'Sign in first', google: true, password: true })

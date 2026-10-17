@@ -147,6 +147,7 @@ func NewBridge(cfgs *ConfigStore, opts BridgeOptions) (_ *Bridge, err error) {
 		},
 		Deliver:   b.deliver,
 		OnHistory: b.activity.Add,
+		ExtraArgs: func(id string) []string { return b.site.BuilderArgs(id) },
 	})
 	for _, br := range b.brainMgr.Brains() {
 		b.activity.Seed(br)
@@ -181,6 +182,7 @@ func NewBridge(cfgs *ConfigStore, opts BridgeOptions) (_ *Bridge, err error) {
 	b.google = NewGoogleAuth(cfgs)
 	b.plaud = NewPlaudManager(b)
 	b.site = NewSiteManager(cfg.DataDir, b.google.clientPath)
+	b.site.hooks = b.siteBuilderHooks()
 	return b, nil
 }
 

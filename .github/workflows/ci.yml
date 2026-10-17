@@ -74,6 +74,35 @@ jobs:
       - name: python tests
         run: python3 -m unittest discover -s tools/tests -v
 
+  site:
+    # The site process (site/, docs/SITE.md): its own tests, then the Go
+    # end-to-end tests that run it, which skip without its node_modules.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - uses: actions/setup-go@v5
+        with:
+          go-version: stable
+          cache: true
+
+      - name: install
+        working-directory: site
+        run: npm ci
+
+      - name: typecheck
+        working-directory: site
+        run: npx tsc --noEmit
+
+      - name: test
+        working-directory: site
+        run: npm test
+
+      - name: Go end-to-end tests of the site
+        run: go test -count=1 -run 'TestSite|TestBuilder' .
+
   personal-data:
     runs-on: ubuntu-latest
     steps:

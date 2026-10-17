@@ -33,6 +33,13 @@ func (b *Bridge) siteAPI(mux *http.ServeMux) {
 	mux.HandleFunc("PUT /api/site/tunnel", b.apiSiteTunnel)
 	mux.HandleFunc("PUT /api/site/google-client", b.apiSiteGoogleClient)
 	mux.HandleFunc("DELETE /api/site/google-client", b.apiSiteGoogleClientDelete)
+
+	mux.HandleFunc("GET /api/site/builders", b.apiSiteBuilders)
+	mux.HandleFunc("PUT /api/site/builders/{id}", b.apiSiteSetBuilder)
+	mux.HandleFunc("GET /api/site/proposals", b.apiSiteProposals)
+	mux.HandleFunc("POST /api/site/proposals/{id}/merge", b.apiSiteMergeProposal)
+	mux.HandleFunc("DELETE /api/site/proposals/{id}", b.apiSiteDiscardProposal)
+	mux.HandleFunc("POST /api/site/previews/{id}", b.apiSiteStartPreview)
 }
 
 func (b *Bridge) apiSiteStatus(w http.ResponseWriter, r *http.Request) {
@@ -310,4 +317,66 @@ func (b *Bridge) apiSiteGoogleClientDelete(w http.ResponseWriter, r *http.Reques
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
+}
+
+func (b *Bridge) apiSiteBuilders(w http.ResponseWriter, r *http.Request) {
+	out := []map[string]any{}
+	for _, br := range b.brainMgr.Brains() {
+		item := map[string]any{"id": br.ID(), "name": br.Name(), "builder": b.site.IsBuilder(br.ID())}
+		if p := b.site.previewOf(br.ID()); p != nil {
+			item["preview"] = b.site.previewURLs(br.ID(), p)
+		}
+		out = append(out, item)
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"brains": out})
+}
+
+func (b *Bridge) apiSiteSetBuilder(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		On bool `json:"on"`
+	}
+	if err := decodeJSON(r, &req); err != nil {
+		writeErr(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	// Setting up the workspace can take a while (npm install); it outlives the request.
+	if err := b.site.SetBuilder(b.site.baseContext(), r.PathValue("id"), req.On); err != nil {
+		writeErr(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
+}
+
+func (b *Bridge) apiSiteProposals(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, http.StatusOK, map[string]any{"proposals": b.site.Proposals(r.Context())})
+}
+
+func (b *Bridge) apiSiteMergeProposal(w http.ResponseWriter, r *http.Request) {
+	if err := b.site.MergeProposal(r.Context(), r.PathValue("id")); err != nil {
+		writeErr(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusAccepted, b.site.DeployStatus())
+}
+
+func (b *Bridge) apiSiteDiscardProposal(w http.ResponseWriter, r *http.Request) {
+	if err := b.site.DiscardProposal(r.PathValue("id")); err != nil {
+		writeErr(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
+}
+
+func (b *Bridge) apiSiteStartPreview(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	if !b.site.IsBuilder(id) {
+		writeErr(w, http.StatusBadRequest, "that brain does not build the site")
+		return
+	}
+	urls, err := b.site.BuilderPreview(b.site.baseContext(), id)
+	if err != nil {
+		writeErr(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, urls)
 }

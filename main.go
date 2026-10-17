@@ -57,6 +57,8 @@ func main() {
 		openCmd(args)
 	case "init":
 		initCmd(args)
+	case "mcp-site":
+		mcpSiteCmd()
 	case "version":
 		fmt.Println(bridgeVersion())
 	case "help", "-h", "--help":

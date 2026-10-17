@@ -1197,3 +1197,5 @@ blockquote.preview {
 .site-history li { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
 .site-change { display: flex; flex-direction: column; gap: 4px; padding: 8px 0; }
 .site-review .mono { overflow-wrap: anywhere; white-space: normal; }
+.site-builders { display: flex; flex-direction: column; gap: 10px; }
+.site-summary { white-space: pre-wrap; margin: 0; }

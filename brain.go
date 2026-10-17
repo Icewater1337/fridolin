@@ -205,6 +205,9 @@ type BrainHooks struct {
 	Deliver func(br *Brain, m Inbound, res RunResult)
 	// OnHistory sees every line written to a brain's history.
 	OnHistory func(brainID string, e historyEntry)
+	// ExtraArgs adds CLI arguments to a brain's runs (the site builder's
+	// plugin and MCP server, for brains allowed to build the site).
+	ExtraArgs func(brainID string) []string
 }
 
 // RunResult is the outcome of one brain run.
@@ -634,6 +637,17 @@ func claudeArgs(s *brainSettings, mcpConfig, settings, prompt string) []string {
 	return append(args, "-p", prompt)
 }
 
+// withArgsBeforePrompt puts extra before the trailing "-p <prompt>" that
+// claudeArgs ends with, where an option list such as --mcp-config's ends.
+func withArgsBeforePrompt(args, extra []string) []string {
+	if len(extra) == 0 || len(args) < 2 {
+		return args
+	}
+	out := append([]string{}, args[:len(args)-2]...)
+	out = append(out, extra...)
+	return append(out, args[len(args)-2:]...)
+}
+
 // excludeInstructionsAbove returns the --settings for a brain in dir that
 // keep the CLI from loading your instructions above the folder, which
 // --setting-sources does not cover: the CLI reads the CLAUDE.md files and
@@ -929,6 +943,9 @@ func (br *Brain) invoke(run *brainRun, ctx context.Context, s *brainSettings, m 
 		settings = excludeInstructionsAbove(br.workDir)
 	}
 	args := claudeArgs(s, mcpConfig, settings, prompt)
+	if br.hooks != nil && br.hooks.ExtraArgs != nil {
+		args = withArgsBeforePrompt(args, br.hooks.ExtraArgs(br.id))
+	}
 
 	// Wrap the spawn in sandbox-exec so prompt injection in an incoming message
 	// cannot reach another brain's tree or cross-session Claude state. The brain

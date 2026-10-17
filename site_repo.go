@@ -707,7 +707,8 @@ func (m *SiteManager) pruneDeploys(ctx context.Context) {
 // sitePreview is a site process serving a branch that is not approved yet.
 type sitePreview struct {
 	Branch string
-	Commit string
 	Listen string
-	proc   *siteProc
+	// Token opens the preview: it knows no accounts.
+	Token string
+	proc  *siteProc
 }

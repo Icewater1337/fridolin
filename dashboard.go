@@ -170,6 +170,8 @@ func (b *Bridge) newHTTPHandler(listen string) http.Handler {
 	})
 	mux.HandleFunc("POST /send", b.httpSend)
 	mux.HandleFunc("POST /ingest", b.httpIngest)
+	// The site builder's MCP servers; each brain's own token (site_builder.go).
+	mux.Handle("/builder/", b.builderHandler())
 
 	if !b.cfgs.Get().Dashboard.Disabled {
 		sub, _ := fs.Sub(webFS, "web")
