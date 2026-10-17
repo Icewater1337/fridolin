@@ -106,7 +106,7 @@ func NewBridge(cfgs *ConfigStore, opts BridgeOptions) (_ *Bridge, err error) {
 		b.logs = NewLogRing(2000)
 	}
 
-	mgr, err := NewBrainManager(cfg, store)
+	mgr, err := NewBrainManager(cfg)
 	if err != nil {
 		return nil, fmt.Errorf("creating brain manager: %w", err)
 	}
@@ -339,18 +339,17 @@ func (b *Bridge) recordOTP(br *Brain, m Inbound) {
 func (b *Bridge) handleCommand(ctx context.Context, m Inbound, cfg *Config) bool {
 	switch strings.ToLower(m.Text) {
 	case "!reset":
-		// Whatever else it does, a reset stops what !stop stops for the
-		// chat, hand-offs from other brains included: its reply says the
-		// chat has nothing left running or waiting.
+		// A reset stops what !stop stops for the chat, hand-offs from other
+		// brains included. That is all there is to reset: a brain run never
+		// resumes a session, each starts from the recent chat history, which
+		// a reset keeps. Say only what happened, and mention the history only
+		// where a brain will read the next message.
 		b.stopChat(m)
-		if err := b.brainMgr.ResetSession(m.JID, m.IsGroup()); err != nil {
-			log.Printf("error resetting session for %s: %v", m.JID, err)
-			_ = b.wa.SendMessage(ctx, m.JID, "❌ Failed to reset session.")
-			return true
+		reply := "✅ Cleared anything this chat had running or waiting."
+		if b.brainMgr.BrainFor(m.JID, m.IsGroup()) != nil {
+			reply += " The recent chat history stays, so the next message still sees it."
 		}
-		// A brain run never resumes a session: each starts from the recent
-		// chat history, which a reset keeps. Say only what happened.
-		_ = b.wa.SendMessage(ctx, m.JID, "✅ Cleared anything this chat had running or waiting. The recent chat history stays, so the next message still sees it.")
+		_ = b.wa.SendMessage(ctx, m.JID, reply)
 		return true
 
 	case "!stop":

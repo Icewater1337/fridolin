@@ -564,6 +564,42 @@ func TestResetReplySaysWhatItDoes(t *testing.T) {
 	}
 }
 
+// A chat no brain answers has nothing to reset, which is not an error. Its
+// next message gets "no brain is set up", so the reply does not promise that
+// message sees the history.
+func TestResetWithoutABrain(t *testing.T) {
+	tb := newTestBridge(t, "")
+	tb.handleInbound(context.Background(), Inbound{JID: testDMChat, Sender: "15551234567", Text: "!reset", Source: "whatsapp"})
+	sent := tb.sentTo(testDMChat)
+	if len(sent) != 1 || sent[0] != "✅ Cleared anything this chat had running or waiting." {
+		t.Errorf("sent %q, want only that it cleared the chat", sent)
+	}
+}
+
+// Brain runs keep nothing in the sessions and process_state tables: a run
+// never resumes a session, and nothing read the PIDs. The tables stay, for
+// an older bridge rolled back to.
+func TestBrainRunsWriteNoSessionOrProcessRows(t *testing.T) {
+	tb, br := newMainBridge(t, "")
+	rows := func(when string) {
+		t.Helper()
+		for _, table := range []string{"sessions", "process_state"} {
+			var n int
+			if err := tb.store.db.QueryRow(`SELECT COUNT(*) FROM ` + table).Scan(&n); err != nil {
+				t.Fatalf("%s: %v", table, err)
+			}
+			if n != 0 {
+				t.Errorf("%s has %d rows %s, want none", table, n, when)
+			}
+		}
+	}
+	startLongRun(t, tb, br, Inbound{JID: testDMChat, Sender: "15551234567", Text: "dm 1", Source: "whatsapp"})
+	rows("while a brain runs")
+	tb.handleInbound(context.Background(), Inbound{JID: testDMChat, Sender: "15551234567", Text: "!reset", Source: "whatsapp"})
+	waitFor(t, 10*time.Second, "the run to stop", func() bool { return br.Snapshot().Running == nil })
+	rows("after !reset")
+}
+
 // In interrupt mode a request that has to wait for another chat is told so,
 // like in queue mode; one that takes over its sender's own run is not.
 func TestInterruptModeQueuedNotice(t *testing.T) {

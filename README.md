@@ -449,8 +449,8 @@ API; the page is plain HTML/JS compiled into the binary.
 **`sandbox.go`** — generates a per-brain `sandbox-exec` profile, passed to
 `sandbox-exec -p` on each run (never written to a file).
 
-**`store.go`** — SQLite: the whatsmeow device store, session IDs, active PIDs,
-polls, and votes.
+**`store.go`** — SQLite: the whatsmeow device store, polls, votes, and the
+chats that wrote without being allowed.
 
 **`chunks.go`** — splits long replies at paragraph, line, sentence, then word
 boundaries so messages break somewhere readable, and numbers the parts.
@@ -483,7 +483,7 @@ ignores ([details](docs/CONFIGURATION.md#environment-variables)).
 **Logged out of WhatsApp** — remove the device under *Linked Devices* on the
 phone, stop the bridge, move `bridge.db` out of your data directory (keep it
 until the new pairing works), start the bridge and pair again from the
-dashboard. This also clears sessions and poll history.
+dashboard. This also clears the poll history.
 
 **"another bridge is already running"** — only one bridge may use a data
 directory; two bridges on one WhatsApp session knock each other offline.

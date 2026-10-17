@@ -15,14 +15,14 @@ import (
 	"go.mau.fi/whatsmeow/store/sqlstore"
 )
 
-// Store manages both the whatsmeow device store and the sessions table.
+// Store manages both the whatsmeow device store and the bridge's own tables.
 type Store struct {
 	db        *sql.DB
 	Container *sqlstore.Container
 }
 
-// NewStore opens (or creates) the SQLite database and initialises both
-// the whatsmeow device container and the sessions table. When it fails it
+// NewStore opens (or creates) the SQLite database and initialises both the
+// whatsmeow device container and the bridge's own tables. When it fails it
 // closes whatever it had opened, since the caller gets no store to close:
 // NewBridge gives the instance lock back on that error, and whoever takes it
 // next must be the only one with bridge.db open.
@@ -39,7 +39,7 @@ func NewStore(cfg *Config) (*Store, error) {
 		return nil, fmt.Errorf("creating sqlstore container: %w", err)
 	}
 
-	// Open a plain sql.DB on the same file for the sessions table.
+	// Open a plain sql.DB on the same file for the bridge's own tables.
 	db, err := sql.Open("sqlite3", dbURL)
 	if err != nil {
 		return nil, errors.Join(fmt.Errorf("opening sqlite db: %w", err), container.Close())
@@ -119,6 +119,10 @@ func restrictToOwner(path string) error {
 
 func (s *Store) migrate() error {
 	stmts := []string{
+		// sessions and process_state are written no more: classic mode kept
+		// each chat's Claude session in one, and runs kept their PID in the
+		// other, which nothing read. Both stay, so that an older bridge
+		// rolled back to finds the tables it expects.
 		`CREATE TABLE IF NOT EXISTS sessions (
 			jid        TEXT PRIMARY KEY,
 			session_id TEXT NOT NULL,
@@ -203,79 +207,6 @@ func (s *Store) SavePollVote(pollMsgID, voterJID string, selectedOptions []strin
 		pollMsgID, voterJID, string(selJSON), time.Now().UTC(),
 	)
 	return err
-}
-
-// GetSession returns the stored Claude session ID for the given JID,
-// or an empty string if no session is stored.
-func (s *Store) GetSession(jid string) (string, error) {
-	var sessionID string
-	err := s.db.QueryRow(`SELECT session_id FROM sessions WHERE jid = ?`, jid).Scan(&sessionID)
-	if err == sql.ErrNoRows {
-		return "", nil
-	}
-	if err != nil {
-		return "", fmt.Errorf("querying session for %q: %w", jid, err)
-	}
-	return sessionID, nil
-}
-
-// SaveSession upserts the Claude session ID for the given JID.
-func (s *Store) SaveSession(jid, sessionID string) error {
-	_, err := s.db.Exec(
-		`INSERT INTO sessions (jid, session_id, updated_at)
-		 VALUES (?, ?, ?)
-		 ON CONFLICT(jid) DO UPDATE SET session_id = excluded.session_id, updated_at = excluded.updated_at`,
-		jid, sessionID, time.Now().UTC(),
-	)
-	if err != nil {
-		return fmt.Errorf("saving session for %q: %w", jid, err)
-	}
-	return nil
-}
-
-// DeleteSession removes the session record for the given JID.
-func (s *Store) DeleteSession(jid string) error {
-	_, err := s.db.Exec(`DELETE FROM sessions WHERE jid = ?`, jid)
-	if err != nil {
-		return fmt.Errorf("deleting session for %q: %w", jid, err)
-	}
-	return nil
-}
-
-// SaveProcessPID upserts the active process PID for the given JID.
-func (s *Store) SaveProcessPID(jid string, pid int) error {
-	_, err := s.db.Exec(
-		`INSERT INTO process_state (jid, pid, updated_at)
-		 VALUES (?, ?, ?)
-		 ON CONFLICT(jid) DO UPDATE SET pid = excluded.pid, updated_at = excluded.updated_at`,
-		jid, pid, time.Now().UTC(),
-	)
-	if err != nil {
-		return fmt.Errorf("saving process pid for %q: %w", jid, err)
-	}
-	return nil
-}
-
-// GetProcessPID returns the active process PID for the given JID, or 0 if unset.
-func (s *Store) GetProcessPID(jid string) (int, error) {
-	var pid int
-	err := s.db.QueryRow(`SELECT pid FROM process_state WHERE jid = ?`, jid).Scan(&pid)
-	if err == sql.ErrNoRows {
-		return 0, nil
-	}
-	if err != nil {
-		return 0, fmt.Errorf("querying process pid for %q: %w", jid, err)
-	}
-	return pid, nil
-}
-
-// DeleteProcessPID removes the active process PID record for the given JID.
-func (s *Store) DeleteProcessPID(jid string) error {
-	_, err := s.db.Exec(`DELETE FROM process_state WHERE jid = ?`, jid)
-	if err != nil {
-		return fmt.Errorf("deleting process pid for %q: %w", jid, err)
-	}
-	return nil
 }
 
 // Close closes both connections to the database: the plain one and the

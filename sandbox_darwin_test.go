@@ -963,6 +963,13 @@ func sandboxFixture(t *testing.T, home, otherBrain, denyDir string, extra ...map
 	if err != nil {
 		t.Fatal(err)
 	}
+	// The bridge opens its database before the brains, and the checks need
+	// the real file.
+	store, err := NewStore(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { store.Close() })
 	mgr := newTestManager(t, cfg)
 	t.Cleanup(mgr.Stop)
 
