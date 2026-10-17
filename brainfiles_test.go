@@ -7,7 +7,9 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"testing"
+	"time"
 )
 
 // The bridge reads and writes files in a brain's folder outside the
@@ -37,6 +39,20 @@ func captureLog(t *testing.T) func() []string {
 // brain to aim symlinks at. It returns the brain and home.
 func folderBrain(t *testing.T) (*Brain, string) {
 	t.Helper()
+	cfg, home := brainASetup(t)
+	mgr := newTestManager(t, cfg)
+	t.Cleanup(mgr.Stop)
+	br := mgr.Get("a")
+	if br == nil {
+		t.Fatalf("brain a did not load: %v", mgr.Issues())
+	}
+	return br, home
+}
+
+// brainASetup sets up what folderBrain runs, and returns its
+// configuration and home.
+func brainASetup(t *testing.T) (*Config, string) {
+	t.Helper()
 	home := canonicalDir(t.TempDir())
 	t.Setenv("HOME", home)
 	m := testManifest("a")
@@ -63,13 +79,7 @@ func folderBrain(t *testing.T) (*Brain, string) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	mgr := newTestManager(t, cfg)
-	t.Cleanup(mgr.Stop)
-	br := mgr.Get("a")
-	if br == nil {
-		t.Fatalf("brain a did not load: %v", mgr.Issues())
-	}
-	return br, home
+	return cfg, home
 }
 
 // bareBrain is brain a in a fresh folder, outside any manager.
@@ -549,6 +559,84 @@ func TestIdentityMapIsNotFollowedOutOfTheFolder(t *testing.T) {
 			}
 			if len(lines) != 1 || !strings.Contains(lines[0], "brain a: could not read identity map "+identityMapFile+": "+errSymlink.Error()) {
 				t.Errorf("log = %q, want one line refusing the symlink", lines)
+			}
+		})
+	}
+}
+
+// TestManifestIsNotFollowedOutOfTheFolder: the bridge reads brain.json to
+// tell when it changed on disk, outside the sandbox. A brain.json swapped
+// for a symlink is not read through, and shows as one the bridge cannot
+// read, while the brain runs on with the manifest you approved. A FIFO
+// there must not hang the reload either.
+func TestManifestIsNotFollowedOutOfTheFolder(t *testing.T) {
+	cases := []struct {
+		name  string
+		plant func(t *testing.T, home string)
+		want  string // in the error
+	}{
+		{"symlink to a manifest outside", func(t *testing.T, home string) {
+			plant(t, filepath.Join(home, "a", ManifestFile), filepath.Join(home, "b", ManifestFile))
+		}, errSymlink.Error()},
+		{"symlink inside the folder", func(t *testing.T, home string) {
+			plant(t, filepath.Join(home, "a", ManifestFile), "copy.json")
+		}, errSymlink.Error()},
+		{"FIFO", func(t *testing.T, home string) {
+			p := filepath.Join(home, "a", ManifestFile)
+			if err := os.Remove(p); err != nil {
+				t.Fatal(err)
+			}
+			if err := syscall.Mkfifo(p, 0o600); err != nil {
+				t.Fatal(err)
+			}
+		}, "not a regular file"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg, home := brainASetup(t)
+			// Another brain's manifest, and a copy in the folder, both with
+			// a's id but taking a group: read through, they would show as a
+			// change to approve.
+			other := testManifest("a")
+			other.Routing.Groups = []string{"120363000000000000@g.us"}
+			for _, dir := range []string{filepath.Join(home, "b"), filepath.Join(home, "a", "copy")} {
+				if err := os.MkdirAll(dir, 0o700); err != nil {
+					t.Fatal(err)
+				}
+				if err := WriteManifest(dir, &other, false); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if err := os.Rename(filepath.Join(home, "a", "copy", ManifestFile), filepath.Join(home, "a", "copy.json")); err != nil {
+				t.Fatal(err)
+			}
+			tc.plant(t, home)
+
+			type resolved struct {
+				specs  []BrainSpec
+				issues []BrainIssue
+				err    error
+			}
+			done := make(chan resolved, 1)
+			go func() {
+				_, err := ReadManifest(filepath.Join(home, "a"))
+				specs, issues := ResolveBrains(cfg)
+				done <- resolved{specs, issues, err}
+			}()
+			var got resolved
+			select {
+			case got = <-done:
+			case <-time.After(5 * time.Second):
+				t.Fatal("reading brain.json hangs")
+			}
+			if got.err == nil || !strings.Contains(got.err.Error(), filepath.Join(home, "a", ManifestFile)+": "+tc.want) {
+				t.Errorf("ReadManifest: %v, want %q for it", got.err, tc.want)
+			}
+			if len(got.specs) != 1 || len(got.specs[0].Manifest.Routing.Groups) != 0 || !got.specs[0].Manifest.Routing.HandlesDMs {
+				t.Errorf("specs = %+v, want brain a as approved", got.specs)
+			}
+			if len(got.issues) != 1 || got.issues[0].Kind != "drift" || !strings.Contains(got.issues[0].Detail, tc.want) {
+				t.Errorf("issues = %+v, want brain.json reported as unreadable", got.issues)
 			}
 		})
 	}
