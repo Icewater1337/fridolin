@@ -1318,8 +1318,9 @@ func TestIsLoopbackAddr(t *testing.T) {
 }
 
 // Some names are read outside Go: the dashboard labels the run outcomes
-// and offers the queue modes, and tools/history_search.py filters history
-// entries by type. Only this test keeps the two sides in step.
+// and the bridge's backup and offers the queue modes, and
+// tools/history_search.py filters history entries by type. Only this test
+// keeps the two sides in step.
 func TestNamesReadOutsideGo(t *testing.T) {
 	cases := []struct {
 		file string
@@ -1328,6 +1329,7 @@ func TestNamesReadOutsideGo(t *testing.T) {
 		{"web/assets/components/brain.js", []string{outcomeOK + ": [", outcomeError + ": [", outcomeInterrupted + ": [", outcomeQuestion + ": ["}},
 		{"web/assets/pages/settings.js", []string{"def: '" + queueModeQueue + "'", "['" + queueModeQueue + "', ", "['" + queueModeInterrupt + "', "}},
 		{"tools/history_search.py", []string{`HISTORY_FILENAME = "` + historyFileName + `"`, `row.get("type") != "` + historyIn + `"`}},
+		{"web/assets/pages/backup.js", []string{"id === '" + bridgeBackupID + "'"}},
 	}
 	for _, c := range cases {
 		t.Run(c.file, func(t *testing.T) {

@@ -34,6 +34,28 @@ func TestNextRun(t *testing.T) {
 	}
 }
 
+// The status page, the scheduler and the check when backups are switched
+// on all take today's due time from dueToday, which reads an empty or bad
+// daily_at as the default, 03:30.
+func TestDueToday(t *testing.T) {
+	loc := time.FixedZone("x", 3600)
+	now := time.Date(2026, 3, 1, 10, 0, 0, 0, loc)
+	for at, want := range map[string]time.Time{
+		"07:05": time.Date(2026, 3, 1, 7, 5, 0, 0, loc),
+		"23:59": time.Date(2026, 3, 1, 23, 59, 0, 0, loc),
+		"":      time.Date(2026, 3, 1, 3, 30, 0, 0, loc),
+		"25:00": time.Date(2026, 3, 1, 3, 30, 0, 0, loc),
+		"noon":  time.Date(2026, 3, 1, 3, 30, 0, 0, loc),
+	} {
+		if got := dueToday(at, now); !got.Equal(want) {
+			t.Errorf("dueToday(%q) = %v, want %v", at, got, want)
+		}
+	}
+	if got, want := nextRun("", now), time.Date(2026, 3, 2, 3, 30, 0, 0, loc); !got.Equal(want) {
+		t.Errorf("nextRun(\"\") = %v, want %v", got, want)
+	}
+}
+
 func TestBackupConfigValidate(t *testing.T) {
 	for _, bad := range []BackupConfig{{DailyAt: "25:00"}, {Remote: "my remote"}, {Root: "../x"}, {Root: "/abs"}, {Root: "a:b"}} {
 		if bad.validate() == nil {
