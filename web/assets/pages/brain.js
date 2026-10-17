@@ -11,7 +11,6 @@ import { h, mount, paint } from '../lib/dom.js';
 import { fmtDuration, plural, prettyJSON } from '../lib/format.js';
 import { phoneish, isGroupJid } from '../lib/jid.js';
 import { EFFORTS } from '../lib/brain.js';
-import { changed } from '../lib/memo.js';
 import { sortKeys, fieldDiff, lineDiff } from '../lib/diff.js';
 import { icon } from '../components/icons.js';
 import { toast } from '../components/toast.js';
@@ -19,20 +18,18 @@ import { btn, runBusy } from '../components/buttons.js';
 import { confirmDialog } from '../components/dialog.js';
 import { field, textInput, select, toggle, linesArea, linesOf } from '../components/fields.js';
 import { pill, badge, callout, timeAgo, mono, empty, loading } from '../components/common.js';
-import { chatEl } from '../components/chat.js';
+import { chatEl, chatName } from '../components/chat.js';
 import { outcomePill, brainStatusPill } from '../components/brain.js';
 import { saveBar } from '../components/save-bar.js';
+import { liveForm } from '../components/live-form.js';
 
 export default {
   title: (params) => `Brain ${params.id}`,
   render(root, ctx) {
     const id = ctx.params.id;
-    const memo = {};
     let brain = null;
-    let brains = [];
+    let brains = null; // the /api/brains list, once it is in
     let cfg = null;
-    let formDirty = false;
-    let formBase = ''; // manifest JSON the form was built from
 
     const head = h('div');
     const issuesBox = h('div.alerts');
@@ -54,35 +51,46 @@ export default {
         actBox),
       dangerBox);
 
-    ctx.dirty = () => formDirty;
+    const refresh = () => brainsResource.refresh();
+    const settings = liveForm({
+      build: buildForm,
+      edits: (d) => d.manifest,
+      onChange: ({ dirty }) => { const f = settings.form(); if (f) f.bar[dirty ? 'show' : 'hide'](); },
+    });
+    ctx.dirty = () => settings.dirty();
 
     // The form shows the inherited model, effort and groups from the config,
     // which seldom changes.
     ctx.follow(configResource, (c) => {
       cfg = c;
-      if (brain && !formDirty) renderForm(true);
+      paintAll();
     }, 60000);
 
-    const refresh = () => brainsResource.refresh();
     ctx.follow(brainsResource, (list) => {
-      brains = list;
-      const b = list.find((x) => x.id === id) || null;
-      if (!changed(memo, 'brain', b)) return;
-      brain = b;
-      if (!b) {
-        mount(head, h('header.page-header', h('div.page-heading', h('a.back-link', { href: '#/brains' }, icon('left'), 'Brains'), h('h1', id))));
-        mount(issuesBox, empty('No such brain', `There is no brain with the id “${id}”. It may have been removed.`, btn('All brains', { href: '#/brains', kind: 'primary' })));
-        mount(driftBox); mount(liveBox); mount(formBox); mount(dangerBox);
-        return;
-      }
-      renderHead();
-      renderIssues();
-      renderDrift();
-      renderLive();
-      renderForm(false);
-      renderDanger();
+      brains = list || [];
+      brain = brains.find((x) => x.id === id) || null;
+      paintAll();
     }, 3000);
 
+    function paintAll() {
+      if (!brains) return;
+      if (!brain) {
+        if (settings.dirty()) settings.discard(); // its form is gone from the page, and so are the edits
+        paint(head, { missing: id }, () => h('header.page-header', h('div.page-heading', h('a.back-link', { href: '#/brains' }, icon('left'), 'Brains'), h('h1', id))));
+        paint(issuesBox, 'missing', () => empty('No such brain', `There is no brain with the id “${id}”. It may have been removed.`, btn('All brains', { href: '#/brains', kind: 'primary' })));
+        [driftBox, liveBox, formBox, dangerBox].forEach((box) => paint(box, 'missing', () => null));
+        return;
+      }
+      ctx.setTitle(brain.name || brain.id);
+      paint(head, { name: brain.name, id: brain.id, status: brain.status, path: brain.path }, renderHead);
+      paint(issuesBox, (brain.issues || []).filter((is) => is.kind !== 'drift'), renderIssues);
+      paintDrift();
+      paintLive();
+      paintForm();
+      paint(dangerBox, 'shown', renderDanger);
+    }
+
+    // ── recent messages ──
     let items = null;
     const paintActivity = () => {
       if (!items) return;
@@ -100,39 +108,38 @@ export default {
     // Chat labels show group names once the groups have loaded.
     ctx.watch(store, (s) => s.names, () => {
       paintActivity();
-      if (brain) renderLive();
+      paintLive();
     });
 
-    function renderHead() {
-      const b = brain;
-      ctx.setTitle(b.name || b.id);
-      mount(head, h('header.page-header',
+    function renderHead(b) {
+      return h('header.page-header',
         h('div.page-heading',
           h('a.back-link', { href: '#/brains' }, icon('left'), 'Brains'),
           h('h1', b.name || b.id),
           h('div.head-meta',
             brainStatusPill(b.status),
             h('code.mono.muted', b.id)),
-          h('div.path-line', icon('folder'), mono(b.path, { copy: true })))));
+          h('div.path-line', icon('folder'), mono(b.path, { copy: true }))));
     }
 
-    function renderIssues() {
-      const issues = (brain.issues || []).filter((is) => is.kind !== 'drift');
-      mount(issuesBox, issues.map((is) => callout('bad', { missing: 'Folder missing', invalid: 'Invalid configuration', unapproved: 'Not approved' }[is.kind] || is.kind, is.detail)));
+    function renderIssues(issues) {
+      return issues.map((is) => callout('bad', { missing: 'Folder missing', invalid: 'Invalid configuration', unapproved: 'Not approved' }[is.kind] || is.kind, is.detail));
     }
 
     // ── on-disk changes ──
-    function renderDrift() {
+    function paintDrift() {
       const b = brain;
-      if (b.status !== 'drift' && !(b.issues || []).some((is) => is.kind === 'drift')) { mount(driftBox); return; }
-      if (!b.disk_manifest) {
-        const d = (b.issues || []).find((is) => is.kind === 'drift');
-        mount(driftBox, callout('warn', 'brain.json on disk cannot be read', d ? d.detail : '', h('div.muted.small', 'The bridge keeps running the approved version. Fix the file, or save the settings below to overwrite it.')));
-        return;
+      const drift = (b.issues || []).find((is) => is.kind === 'drift');
+      if (b.status !== 'drift' && !drift) { paint(driftBox, null, () => null); return; }
+      paint(driftBox, { manifest: b.manifest, disk: b.disk_manifest || null, detail: drift ? drift.detail : '', path: b.path }, renderDrift);
+    }
+
+    function renderDrift({ manifest, disk, detail, path }) {
+      if (!disk) {
+        return callout('warn', 'brain.json on disk cannot be read', detail, h('div.muted.small', 'The bridge keeps running the approved version. Fix the file, or save the settings below to overwrite it.'));
       }
-      const a = b.manifest || {};
-      const d = b.disk_manifest;
-      const rows = fieldDiff(a, d);
+      const a = manifest || {};
+      const rows = fieldDiff(a, disk);
       const sensitive = rows.some((r) => /^(routing|disallowed_tools|prompt_file|reply_chat)/.test(r.path));
       const approveBtn = btn('Approve changes', {
         kind: 'primary', icon: 'check',
@@ -146,10 +153,10 @@ export default {
           await refresh();
         },
       });
-      const { left, right } = lineDiff(prettyJSON(sortKeys(a)), prettyJSON(sortKeys(d)));
-      mount(driftBox, h('section.card.drift-card',
+      const { left, right } = lineDiff(prettyJSON(sortKeys(a)), prettyJSON(sortKeys(disk)));
+      return h('section.card.drift-card',
         h('div.card-head', h('div.card-title', icon('alert'), h('h2', 'brain.json changed on disk')), pill('Waiting for approval', 'warn')),
-        h('p', 'Someone — possibly the brain itself — edited ', mono(`${b.path}/brain.json`), '. The bridge keeps running the version you approved until you accept the change.'),
+        h('p', 'Someone — possibly the brain itself — edited ', mono(`${path}/brain.json`), '. The bridge keeps running the version you approved until you accept the change.'),
         sensitive ? callout('warn', 'Check routing and tool changes carefully', 'A brain can edit its own brain.json. Changes to routing decide which chats reach it; changes to tools decide what it may do.') : null,
         rows.length ? h('div.table-wrap', h('table.table.diff-table',
           h('thead', h('tr', h('th', 'Setting'), h('th', 'Approved'), h('th', 'On disk'))),
@@ -161,15 +168,21 @@ export default {
           h('div.diff-cols',
             h('div', h('div.diff-label', 'Approved'), h('pre.code.diff', left.map((l) => h(`span.diff-line${l.changed ? '.del' : ''}`, l.text)))),
             h('div', h('div.diff-label', 'On disk'), h('pre.code.diff', right.map((l) => h(`span.diff-line${l.changed ? '.add' : ''}`, l.text)))))),
-        h('div.actions', approveBtn, h('span.muted.small', 'To reject, edit the file back — or save the settings below, which overwrites it with the approved version plus your edits.'))));
+        h('div.actions', approveBtn, h('span.muted.small', 'To reject, edit the file back — or save the settings below, which overwrites it with the approved version plus your edits.')));
     }
 
     // ── live state ──
-    function renderLive() {
-      const rt = brain.runtime;
+    function paintLive() {
+      if (!brain) return;
+      const rt = brain.runtime || null;
+      // The chats it names, so their labels follow the names learnt.
+      const chats = rt ? [rt.running && rt.running.chat, ...(rt.queue || []).map((q) => q.chat), rt.last && rt.last.chat].filter(Boolean) : [];
+      paint(liveBox, { rt, status: brain.status, names: chats.map(chatName) }, renderLive);
+    }
+
+    function renderLive({ rt, status }) {
       if (!rt) {
-        mount(liveBox, h('div.card', h('p.muted', brain.status === 'ok' ? 'This brain is not running yet.' : 'This brain is not running until the problem above is fixed.')));
-        return;
+        return h('div.card', h('p.muted', status === 'ok' ? 'This brain is not running yet.' : 'This brain is not running until the problem above is fixed.'));
       }
       const run = rt.running;
       const queue = rt.queue || [];
@@ -186,7 +199,7 @@ export default {
           await refresh();
         },
       });
-      mount(liveBox, h('div.grid.two',
+      return h('div.grid.two',
         h('div.card',
           h('div.card-head', h('div.card-title', h('h3', 'Current run')), run ? pill('Working', 'info', { pulse: true }) : pill('Idle', 'neutral')),
           run ? h('div.card-body',
@@ -206,32 +219,37 @@ export default {
             last ? h('div',
               h('div.run-meta', outcomePill(last), chatEl(last.chat), h('span.muted.small', timeAgo(last.finished)), h('span.muted.small', `took ${fmtDuration(last.seconds)}`)),
               last.error ? h('p.error-text.small', last.error) : null)
-              : h('p.muted', 'No runs since the bridge started.')))));
+              : h('p.muted', 'No runs since the bridge started.'))));
     }
 
     // ── settings form ──
-    function renderForm(force) {
+    // What the form shows: the approved manifest it edits, and what it needs
+    // to explain it (the inherited settings, the other brains' routing).
+    function paintForm() {
       const m = brain.manifest;
-      if (!m) { mount(formBox, h('div.card', h('p.muted', 'This brain has no approved settings to edit.'))); return; }
-      const base = JSON.stringify(m);
-      if (!force && base === formBase && formBox.querySelector('form')) return;
-      if (formDirty && base !== formBase) {
-        const note = formBox.querySelector('.form-stale');
-        if (note) note.hidden = false;
+      if (!m) {
+        if (settings.dirty()) settings.discard(); // nothing left on the page to save
+        paint(formBox, 'none', () => h('div.card', h('p.muted', 'This brain has no approved settings to edit.')));
         return;
       }
-      formBase = base;
-      formDirty = false;
+      paint(formBox, 'form', () => settings.el);
       const eff = (cfg && cfg.effective) || {};
-      const allowedGroups = (cfg && cfg.config && cfg.config.allowed_groups) || eff.allowed_groups || [];
-      const markDirty = () => { formDirty = true; bar.show(); };
+      settings.set({
+        manifest: m,
+        drift: brain.status === 'drift',
+        eff: { brain_model: eff.brain_model || '', brain_effort: eff.brain_effort || '', disallowed_tools: eff.disallowed_tools || [] },
+        allowedGroups: (cfg && cfg.config && cfg.config.allowed_groups) || eff.allowed_groups || [],
+        others: brains.filter((b) => b.id && b.id !== id && b.manifest).map((b) => ({ id: b.id, name: b.name, manifest: { routing: b.manifest.routing } })),
+      });
+    }
 
+    function buildForm({ manifest: m, drift, eff, allowedGroups, others }, changed) {
       const nameIn = textInput({ value: m.name || '', spellcheck: 'true' });
-      const routing = routingEditor({ routing: m.routing || {}, selfId: id, brains, allowedGroups, onChange: markDirty, signal: ctx.signal });
+      const routing = routingEditor({ routing: m.routing || {}, selfId: id, brains: others, allowedGroups, onChange: changed, signal: ctx.signal });
       const modelIn = textInput({ value: m.model || '', class: 'mono', placeholder: eff.brain_model ? `inherit (${eff.brain_model})` : 'inherit' });
       const effortSel = select(EFFORTS.map(([v, l]) => [v, v === '' && eff.brain_effort ? `Inherit (${eff.brain_effort})` : l]), m.effort || '');
       const override = Array.isArray(m.disallowed_tools);
-      const globalTools = eff.disallowed_tools && eff.disallowed_tools.length ? eff.disallowed_tools.join(', ') : 'none';
+      const globalTools = eff.disallowed_tools.length ? eff.disallowed_tools.join(', ') : 'none';
       const toolsIn = textInput({ value: override ? m.disallowed_tools.join(', ') : '', class: 'mono', placeholder: 'e.g. WebFetch, Bash', disabled: !override });
       const toolsSw = toggle({
         checked: override,
@@ -243,16 +261,27 @@ export default {
       const backupSw = toggle({ checked: m.backup ? !!m.backup.enabled : true, label: 'Include in Google Drive backups' });
       const excludes = linesArea((m.backup && m.backup.exclude) || [], { rows: 5, placeholder: 'node_modules/\n*.log' });
 
-      const saveBtn = btn('Save settings', { kind: 'primary', type: 'submit', icon: 'check' });
-      const bar = saveBar({ save: saveBtn, onDiscard: () => { formDirty = false; renderForm(true); } });
-      const stale = h('div.callout.warn.form-stale', { hidden: true },
-        icon('alert', 'callout-icon'),
-        h('div.callout-body', h('strong', 'These settings changed elsewhere'), h('div', 'Saving now would overwrite that change.'),
-          h('div.actions', btn('Load the new settings', { small: true, onClick: () => { formDirty = false; renderForm(true); } }))));
+      // The manifest a save would write.
+      const value = () => {
+        const manifest = {
+          ...m,
+          name: nameIn.value.trim(),
+          routing: routing.getValue(),
+          model: modelIn.value.trim(),
+          effort: effortSel.value,
+          prompt_file: promptIn.value.trim(),
+          reply_chat: replyIn.value.trim(),
+          backup: { enabled: backupSw.input.checked, exclude: linesOf(excludes) },
+        };
+        if (toolsSw.input.checked) manifest.disallowed_tools = toolsIn.value.split(',').map((t) => t.trim()).filter(Boolean);
+        else delete manifest.disallowed_tools;
+        return manifest;
+      };
 
+      const saveBtn = btn('Save settings', { kind: 'primary', type: 'submit', icon: 'check' });
+      const bar = saveBar({ save: saveBtn, onDiscard: () => settings.discard() });
       const form = h('form.card.form.brain-form',
-        stale,
-        brain.status === 'drift' ? callout('warn', null, 'brain.json on disk differs from the approved version (see above). Saving overwrites it.') : null,
+        drift ? callout('warn', null, 'brain.json on disk differs from the approved version (see above). Saving overwrites it.') : null,
         h('div.form-grid',
           field({ label: 'Name', control: nameIn }),
           field({ label: 'Id', control: h('div.static', mono(m.id)), help: 'Ids cannot change. To use a new id, remove the brain and add the folder again.' })),
@@ -271,38 +300,21 @@ export default {
           h('div.field', backupSw),
           field({ label: 'Leave out of backups', control: excludes, help: 'One pattern per line, relative to the brain folder. A trailing / means a folder.' })),
         bar);
-      form.addEventListener('input', markDirty);
-      form.addEventListener('change', markDirty);
       form.addEventListener('submit', (e) => {
         e.preventDefault();
         if (!nameIn.value.trim()) { nameIn.focus(); toast('The brain needs a name'); return; }
-        const manifest = {
-          ...m,
-          name: nameIn.value.trim(),
-          routing: routing.getValue(),
-          model: modelIn.value.trim(),
-          effort: effortSel.value,
-          prompt_file: promptIn.value.trim(),
-          reply_chat: replyIn.value.trim(),
-          backup: { enabled: backupSw.input.checked, exclude: linesOf(excludes) },
-        };
-        if (toolsSw.input.checked) manifest.disallowed_tools = toolsIn.value.split(',').map((s) => s.trim()).filter(Boolean);
-        else delete manifest.disallowed_tools;
         runBusy(saveBtn, async () => {
-          await put(`/api/brains/${encodeURIComponent(id)}`, { manifest });
-          formDirty = false;
-          bar.hide();
+          await put(`/api/brains/${encodeURIComponent(id)}`, { manifest: value() });
+          settings.saved();
           toast('Settings saved', 'ok');
           await refresh();
         });
       });
-      mount(formBox, form);
+      return { el: form, value, bar };
     }
 
     function renderDanger() {
-      if (memo.danger) return;
-      memo.danger = '1';
-      mount(dangerBox, h('section.section.danger-zone',
+      return h('section.section.danger-zone',
         h('h2.section-title', 'Remove'),
         h('div.card.danger-card',
           h('div', h('strong', 'Remove this brain'), h('p.muted', 'The bridge stops routing messages to it. The folder and everything in it stay exactly as they are — you can add it again later.')),
@@ -319,12 +331,11 @@ export default {
               });
               if (!ok) return;
               await del(`/api/brains/${encodeURIComponent(id)}`);
-              formDirty = false;
-              ctx.dirty = null;
+              ctx.dirty = null; // its settings are gone with it
               toast(`Removed ${id}. Its folder was left untouched.`, 'ok');
               ctx.navigate('#/brains');
             },
-          }))));
+          })));
     }
   },
 };
