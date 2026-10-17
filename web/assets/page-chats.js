@@ -186,7 +186,8 @@ export default {
       const locked = cfg.env_locked || {};
       const numbers = locked.allowed_numbers ? (eff.allowed_numbers || []) : (file.allowed_numbers || []);
       const groups = locked.allowed_groups ? (eff.allowed_groups || []) : (file.allowed_groups || []);
-      const anyDM = eff.allow_any_dm === undefined || eff.allow_any_dm === null ? true : eff.allow_any_dm;
+      // Only an explicit true opens an empty list; unset means nobody.
+      const anyDM = eff.allow_any_dm === true;
 
       mount(numbersBox,
         locked.allowed_numbers ? callout('info', null, `Set by the environment variable ${locked.allowed_numbers}. Change it there.`) : null,

@@ -256,7 +256,7 @@ func checkCmd(args []string) {
 	fmt.Printf("  claude:    %s\n", cfg.ClaudePath)
 	fmt.Printf("  data dir:  %s\n", cfg.DataDir)
 	fmt.Printf("  dashboard: http://%s/\n", cfg.HTTPListen)
-	fmt.Printf("  DM allow:  %v\n", cfg.AllowedNumbers)
+	fmt.Printf("  DM allow:  %s\n", dmAllowSummary(cfg))
 	fmt.Printf("  groups:    %v\n", cfg.AllowedGroups)
 	trig, _ := json.Marshal(cfg.Triggers)
 	fmt.Printf("  triggers:  %s\n", trig)
@@ -306,6 +306,18 @@ func checkCmd(args []string) {
 			fmt.Print(profile)
 		}
 	}
+}
+
+// dmAllowSummary says who may DM the bridge. A bare empty list would read
+// as "nobody" even when allow_any_dm lets everyone in.
+func dmAllowSummary(cfg *Config) string {
+	switch {
+	case cfg.AnyoneCanDM():
+		return "anyone (allow_any_dm is true and allowed_numbers is empty)"
+	case len(cfg.AllowedNumbers) == 0:
+		return "nobody (allowed_numbers is empty)"
+	}
+	return fmt.Sprint(cfg.AllowedNumbers)
 }
 
 func migrateCmd(args []string) {

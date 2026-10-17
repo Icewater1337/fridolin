@@ -92,6 +92,7 @@ func NewBridge(cfgs *ConfigStore, opts BridgeOptions) (*Bridge, error) {
 	for _, is := range mgr.Issues() {
 		log.Printf("brain %s (%s): %s — %s", is.ID, is.Path, is.Kind, is.Detail)
 	}
+	logDMAccess(nil, cfg)
 
 	b.deb = NewDebouncer(
 		func() time.Duration { return time.Duration(b.cfgs.Get().DebounceQuietMS()) * time.Millisecond },
@@ -142,10 +143,11 @@ func NewBridge(cfgs *ConfigStore, opts BridgeOptions) (*Bridge, error) {
 	}
 
 	// Configuration edits (from the dashboard) apply to the brains at once.
-	cfgs.Subscribe(func(_, next *Config) {
+	cfgs.Subscribe(func(prev, next *Config) {
 		if err := b.brainMgr.Apply(next); err != nil {
 			log.Printf("applying configuration: %v", err)
 		}
+		logDMAccess(prev, next)
 		for _, br := range b.brainMgr.Brains() {
 			b.activity.Seed(br)
 		}
@@ -577,6 +579,19 @@ func (b *Bridge) runStartupChecks(ctx context.Context) {
 	}
 	time.Sleep(3 * time.Second)
 	_ = b.wa.SendMessage(ctx, jid, "⚠️ Bridge startup check: "+msg)
+}
+
+// logDMAccess says in the log who may DM the bridge: at startup (prev nil),
+// and again when an edit opens DMs to everyone. Allowed senders run Claude
+// with all its permissions, so an open allowlist must not go unnoticed, and
+// a closed one explains why DMs get no answer.
+func logDMAccess(prev, next *Config) {
+	switch {
+	case next.AnyoneCanDM() && (prev == nil || !prev.AnyoneCanDM()):
+		log.Printf("WARNING: anyone who can message this WhatsApp account can use the assistant: allowed_numbers is empty and allow_any_dm is true. Add your number under Settings → Access, or turn allow_any_dm off.")
+	case prev == nil && len(next.AllowedNumbers) == 0:
+		log.Printf("allowed_numbers is empty, so nobody can send the bridge direct messages yet. Add your number under Settings → Access.")
+	}
 }
 
 // Warnings returns the startup-check findings.

@@ -167,7 +167,7 @@ The dashboard writes `~/.fridolin/config.json`; you can edit it
 too. Every option is documented in [docs/CONFIGURATION.md](docs/CONFIGURATION.md).
 
 ```bash
-./fridolin check                         # validate and show the routing
+./fridolin check                         # validate and show DM access and routing
 ./fridolin check --route 15551234567@s.whatsapp.net
 ./fridolin migrate                       # move inline brains into brain.json files
 ```
@@ -347,7 +347,8 @@ your machine**, and so can text inside any file they send it. Treat it that way.
 
 What the bridge does about it:
 
-- **DM allowlist.** Only numbers in `allowed_numbers` are answered. Groups are
+- **DM allowlist.** Only numbers in `allowed_numbers` are answered; an empty
+  list answers nobody unless you set `allow_any_dm` to `true`. Groups are
   deny-by-default: unlisted groups are ignored entirely.
 - **No Status or channels.** WhatsApp Status updates and channels are ignored,
   and the bridge refuses to send to Status, broadcast lists or channels, so
@@ -462,7 +463,8 @@ shows up there with an *Allow* button. Otherwise check which brain the group
 routes to, and that you used a trigger keyword.
 
 **No reply to a DM** — the sender's number must be allowed (*Settings →
-Access*), with country code and no `+`. Blocked senders appear under *Chats*.
+Access*), with country code and no `+`. An empty list allows nobody unless
+`allow_any_dm` is `true`. Blocked senders appear under *Chats*.
 
 **"Not logged in" from the CLI** — run `claude` once in a terminal to
 authenticate. Under launchd, check that `HOME` is set correctly in the plist.

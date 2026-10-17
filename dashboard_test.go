@@ -5,11 +5,13 @@ import (
 	"context"
 	"encoding/json"
 	"io"
+	"log"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 )
@@ -600,6 +602,72 @@ func TestApproveDrift(t *testing.T) {
 	}
 	if tb.brainMgr.Get("notes").Name() != "Notes 2" {
 		t.Error("approval did not apply")
+	}
+}
+
+// lockedBuffer collects log output that the bridge's goroutines may write
+// while the test reads it.
+type lockedBuffer struct {
+	mu  sync.Mutex
+	buf strings.Builder
+}
+
+func (l *lockedBuffer) Write(p []byte) (int, error) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return l.buf.Write(p)
+}
+
+func (l *lockedBuffer) String() string {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return l.buf.String()
+}
+
+func TestBridgeStartupWarnsWhenAnyoneCanDM(t *testing.T) {
+	var logs lockedBuffer
+	defer log.SetOutput(log.Writer())
+	log.SetOutput(&logs)
+	// A later "allowed_numbers" overrides the helper's own.
+	newTestBridge(t, `, "allowed_numbers": [], "allow_any_dm": true`)
+	if !strings.Contains(logs.String(), "WARNING: anyone") {
+		t.Errorf("startup log has no warning: %q", logs.String())
+	}
+}
+
+func TestEmptyingTheAllowlistWarnsOnlyWithAllowAnyDM(t *testing.T) {
+	tests := []struct {
+		name  string
+		extra string
+		open  bool
+	}{
+		{"flag unset", "", false},
+		{"explicit false", `, "allow_any_dm": false`, false},
+		{"explicit true", `, "allow_any_dm": true`, true},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			tb := newTestBridge(t, tc.extra)
+			var logs lockedBuffer
+			defer log.SetOutput(log.Writer())
+			log.SetOutput(&logs)
+			// What the dashboard does when you remove the last number.
+			if _, err := tb.cfgs.Update("", func(c *Config) error { c.AllowedNumbers = []string{}; return nil }); err != nil {
+				t.Fatal(err)
+			}
+			if got := strings.Contains(logs.String(), "WARNING: anyone"); got != tc.open {
+				t.Errorf("log warns = %v, want %v (log: %q)", got, tc.open, logs.String())
+			}
+			var st struct {
+				Warnings []string `json:"warnings"`
+			}
+			if err := json.Unmarshal(tb.do("GET", "/api/status", nil).Body.Bytes(), &st); err != nil {
+				t.Fatal(err)
+			}
+			if got := strings.Contains(strings.Join(st.Warnings, "\n"), "anyone"); got != tc.open {
+				t.Errorf("dashboard warns = %v, want %v (warnings: %q)", got, tc.open, st.Warnings)
+			}
+		})
 	}
 }
 

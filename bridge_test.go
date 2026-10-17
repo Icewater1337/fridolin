@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"log"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -390,6 +391,41 @@ func TestExampleConfigIsValid(t *testing.T) {
 	}
 	if _, err := LoadConfig("config.example.json"); err != nil {
 		t.Fatalf("config.example.json does not load: %v", err)
+	}
+}
+
+func TestLogDMAccessWarnsWhenAnyoneCanDM(t *testing.T) {
+	yes, no := true, false
+	open := &Config{AllowAnyDM: &yes}
+	unset := &Config{}
+	listed := &Config{AllowedNumbers: []string{"15551234567"}, AllowAnyDM: &yes}
+	closed := &Config{AllowAnyDM: &no}
+	tests := []struct {
+		name       string
+		prev, next *Config
+		want       string // "" means nothing is logged
+	}{
+		{"startup with explicit true and an empty list", nil, open, "WARNING: anyone"},
+		{"startup with the flag unset", nil, unset, "nobody can send"},
+		{"startup with numbers listed", nil, listed, ""},
+		{"edit that opens DMs", closed, open, "WARNING: anyone"},
+		{"edit that keeps DMs open", open, open, ""},
+		{"edit that closes DMs", open, closed, ""},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			var buf strings.Builder
+			defer log.SetOutput(log.Writer())
+			log.SetOutput(&buf)
+			logDMAccess(tc.prev, tc.next)
+			got := buf.String()
+			if tc.want == "" && got != "" {
+				t.Errorf("logged %q, want nothing", got)
+			}
+			if tc.want != "" && !strings.Contains(got, tc.want) {
+				t.Errorf("logged %q, want it to contain %q", got, tc.want)
+			}
+		})
 	}
 }
 

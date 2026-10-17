@@ -186,7 +186,7 @@ func (b *Bridge) apiStatus(w http.ResponseWriter, r *http.Request) {
 	if resp.Warnings == nil {
 		resp.Warnings = []string{}
 	}
-	if len(cfg.AllowedNumbers) == 0 && cfg.AllowsAnyDM() {
+	if cfg.AnyoneCanDM() {
 		resp.Warnings = append(resp.Warnings, "allowed_numbers is empty, so anyone who can message this WhatsApp account can use the assistant. Add your number under Settings → Access.")
 	}
 	if cfg.DangerouslySkipPermissions && !cfg.Sandbox.Enabled && runtime.GOOS == "darwin" {
