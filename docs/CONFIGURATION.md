@@ -332,8 +332,9 @@ write:
   wherever it is, and its folder when that lies outside the data directory,
   unless the folder is your home folder or a temp folder
 - the config file (with its `.bak` and the temp file each save writes next
-  to it) and the `.env` files loaded with it, when `--config` puts them
-  outside the data directory
+  to it) and the `.env` loaded with it, when `--config` puts them outside
+  the data directory, and a `.env` in the directory the bridge was started
+  in, which older versions read
 - the bridge's logs in `~/Library/Logs/fridolin`
 - `~/.config/fridolin`, which holds the personal-data denylist the commit
   hooks read
@@ -532,6 +533,11 @@ Default `~/.fridolin`. `db_path` and `media_dir` override
 individually. Brains cannot read it, except the `media/` inbox and their own
 calendar credentials; a `db_path` elsewhere is denied to them too.
 
+The lock that keeps a second bridge off the same WhatsApp session is
+`bridge.lock` in `data_dir`. It does not cover a `db_path` outside
+`data_dir`, so never point `db_path` at another bridge's `bridge.db`: a
+second bridge with its own `data_dir` would open it anyway.
+
 ### `http_listen` *(restart)*
 
 Address of the dashboard and the local APIs. Default `"127.0.0.1:8765"`;
@@ -693,12 +699,46 @@ whatsmeow protocol chatter.
 ## Environment variables
 
 Environment variables override `config.json`. A `.env` file next to the config
-(or in the working directory) is loaded automatically and overrides the
-process environment. The dashboard shows settings an environment variable
+is loaded automatically and overrides the process environment. If it cannot
+be read or parsed, the bridge refuses to start (and `fridolin check` says
+so) rather than run without the settings it holds. No other `.env` is read:
+one in the working directory counts only when the config file itself is in
+the working directory. The dashboard shows settings an environment variable
 controls as locked — remove the variable to edit them there. The sandbox
-keeps brains from reading the `.env` file, but every brain inherits the
-bridge's environment, including what `.env` sets, so do not put anything
-there that brains must not see.
+keeps brains from reading the `.env` file.
+
+Only the variables in the table below are read from the `.env`, all but
+`CONFIG_FILE`, which picks the config and with it the `.env`. Any other key
+is ignored, and the bridge names those keys (never their values) in its log
+when it loads the config. Nothing in the `.env` is exported either: the
+Claude CLI, brains, and the scripts and tools they run do not see it, and a
+`PATH` or `HOME` set there changes nothing, not even for the bridge. Whatever
+those programs need belongs in the bridge's process environment instead,
+and from there it reaches every brain:
+
+- The Claude CLI's own login and network settings, if you set them rather
+  than log in once with `claude`: `ANTHROPIC_API_KEY`,
+  `CLAUDE_CODE_OAUTH_TOKEN`, `HTTPS_PROXY`, `NODE_EXTRA_CA_CERTS`. Left in
+  the `.env`, they no longer reach `claude`, and every brain fails with "Not
+  logged in" (or cannot get through the proxy).
+- Keys a brain's tools need, such as `GROQ_API_KEY` for transcription.
+
+Re-running `setup.sh` rewrites the launchd plist and the systemd unit from the
+templates in [deploy/](../deploy/), which drops anything added to them. Keep
+these variables where it does not:
+
+- **Linux (systemd):** `systemctl --user edit fridolin` opens a drop-in that
+  `setup.sh` leaves alone. Add the keys under `[Service]`, one
+  `Environment=GROQ_API_KEY=...` line each, then run
+  `systemctl --user restart fridolin`.
+- **macOS (launchd):** there is no drop-in. Add the keys under
+  `EnvironmentVariables` in `~/Library/LaunchAgents/ai.fridolin.bridge.plist`,
+  reload the agent with `launchctl bootout gui/$(id -u)/ai.fridolin.bridge`
+  and `launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/ai.fridolin.bridge.plist`,
+  and add them again after every `setup.sh` run.
+- **Started by hand:** export them in the shell that runs `./fridolin`.
+
+These are the variables that override `config.json`:
 
 | Variable | Config field |
 | -------- | ------------ |
@@ -728,4 +768,5 @@ Booleans accept `true`, `1`, `yes`, or `on`. Brains are too structured for
 environment variables and are configured in `config.json` only.
 
 The Python tools read `BRIDGE_DATA_DIR` and `BRIDGE_DB_PATH` if you moved the
-data directory, and `CALENDAR_TZ` for the calendar timezone.
+data directory, and `CALENDAR_TZ` for the calendar timezone. Brains run them,
+so these too belong in the bridge's process environment, not in its `.env`.

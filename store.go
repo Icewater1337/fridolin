@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"time"
 
@@ -18,7 +19,10 @@ type Store struct {
 }
 
 // NewStore opens (or creates) the SQLite database and initialises both
-// the whatsmeow device container and the sessions table.
+// the whatsmeow device container and the sessions table. When it fails it
+// closes whatever it had opened, since the caller gets no store to close:
+// NewBridge gives the instance lock back on that error, and whoever takes it
+// next must be the only one with bridge.db open.
 func NewStore(cfg *Config) (*Store, error) {
 	dbURL := "file:" + cfg.DBPath + "?_foreign_keys=on"
 
@@ -32,12 +36,12 @@ func NewStore(cfg *Config) (*Store, error) {
 	// Open a plain sql.DB on the same file for the sessions table.
 	db, err := sql.Open("sqlite3", dbURL)
 	if err != nil {
-		return nil, fmt.Errorf("opening sqlite db: %w", err)
+		return nil, errors.Join(fmt.Errorf("opening sqlite db: %w", err), container.Close())
 	}
 
 	s := &Store{db: db, Container: container}
 	if err := s.migrate(); err != nil {
-		return nil, fmt.Errorf("migrating store: %w", err)
+		return nil, errors.Join(fmt.Errorf("migrating store: %w", err), s.Close())
 	}
 	return s, nil
 }
@@ -203,9 +207,10 @@ func (s *Store) DeleteProcessPID(jid string) error {
 	return nil
 }
 
-// Close closes the plain DB connection (the whatsmeow container manages its own).
+// Close closes both connections to the database: the plain one and the
+// whatsmeow container's, which nothing else closes.
 func (s *Store) Close() error {
-	return s.db.Close()
+	return errors.Join(s.db.Close(), s.Container.Close())
 }
 
 // IgnoredChat is a chat that messaged the bridge without being allowed.

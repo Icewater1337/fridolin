@@ -141,13 +141,8 @@ func runCmd(args []string) {
 	}
 	cfg := cfgs.Get()
 
-	// Dev mode with the live data dir would open the real WhatsApp session's
-	// database next to the running bridge; the lock refuses that too.
-	if err := acquireInstanceLock(cfg.DataDir); err != nil {
-		log.Fatalf("%v", err)
-	}
-	defer releaseInstanceLock()
-
+	// NewBridge takes the data dir's instance lock, so dev mode with the live
+	// data dir is refused next to the running bridge too.
 	bridge, err := NewBridge(cfgs, BridgeOptions{NoWhatsApp: *noWA || *dashOnly, Logs: ring})
 	if err != nil {
 		log.Fatalf("creating bridge: %v", err)
@@ -175,7 +170,6 @@ func runCmd(args []string) {
 	if err := bridge.Start(ctx); err != nil {
 		log.Printf("bridge stopped: %v", err)
 		bridge.Stop()
-		releaseInstanceLock()
 		os.Exit(1)
 	}
 

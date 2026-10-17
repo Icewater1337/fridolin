@@ -3,6 +3,8 @@ package main
 import (
 	"io"
 	"os"
+	"os/exec"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -82,4 +84,64 @@ func lineWith(out, s string) string {
 		}
 	}
 	return ""
+}
+
+func TestTestsDoNotRunInTheCheckout(t *testing.T) {
+	// A relative path, or the bridge's own ./config.json lookup, would
+	// otherwise find a config.json or .env a developer keeps in the checkout.
+	wd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat("go.mod"); err == nil {
+		t.Errorf("the tests run in the checkout (%s)", wd)
+	}
+	if tmp := canonicalDir(os.TempDir()); !isWithin(canonicalDir(wd), tmp) {
+		t.Errorf("working directory %s is not inside the temp dir %s", wd, tmp)
+	}
+	if _, err := os.Stat(filepath.Join(repoDir, "go.mod")); err != nil {
+		t.Errorf("repoDir %q is not the checkout: %v", repoDir, err)
+	}
+}
+
+func TestTestsStartWithATempHome(t *testing.T) {
+	// A test that forgets t.Setenv("HOME", ...) must find ~ and the default
+	// data dir in a temp dir, not in the home of whoever runs the tests.
+	home, err := os.UserHomeDir()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if tmp := canonicalDir(os.TempDir()); !isWithin(canonicalDir(home), tmp) {
+		t.Errorf("home %s is not inside the temp dir %s", home, tmp)
+	}
+	if home != testHome {
+		t.Errorf("home %s is not the one TestMain made (%q)", home, testHome)
+	}
+}
+
+func TestShellOverridesDoNotReachTests(t *testing.T) {
+	// Runs the test binary again with every override variable set, the way a
+	// developer's shell might export them for a real bridge, and checks from
+	// inside that TestMain cleared them before any test ran.
+	if os.Getenv("WCB_CHECK_OVERRIDES_CLEARED") == "1" {
+		for _, k := range overrideVariables() {
+			if _, ok := os.LookupEnv(k); ok {
+				t.Errorf("%s from the shell reached the tests", k)
+			}
+		}
+		return
+	}
+	cmd := exec.Command(os.Args[0], "-test.run=^TestShellOverridesDoNotReachTests$", "-test.count=1", "-test.v")
+	cmd.Env = append(os.Environ(), "WCB_CHECK_OVERRIDES_CLEARED=1")
+	notTheTests := filepath.Join(t.TempDir(), "not-the-tests")
+	for _, k := range overrideVariables() {
+		cmd.Env = append(cmd.Env, k+"="+notTheTests)
+	}
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("%v\n%s", err, out)
+	}
+	if !strings.Contains(string(out), "--- PASS: TestShellOverridesDoNotReachTests") {
+		t.Fatalf("the check did not run:\n%s", out)
+	}
 }

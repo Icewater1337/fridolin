@@ -3,6 +3,7 @@ package main
 import (
 	"encoding/json"
 	"errors"
+	"log"
 	"os"
 	"path/filepath"
 	"strings"
@@ -185,5 +186,211 @@ func TestRemovingTheLastNumberDoesNotOpenDMs(t *testing.T) {
 	}
 	if numberAllowed(cs.Get(), "15559876543") {
 		t.Error("an empty list with allow_any_dm unset must refuse everyone")
+	}
+}
+
+func TestDotEnvIsReadOnlyNextToTheConfig(t *testing.T) {
+	// The tests run in the repository and a bridge may be started from a
+	// checkout: a .env lying in the working directory must not configure it.
+	tests := []struct {
+		name        string
+		beside, cwd string // .env contents next to config.json and in the working directory; "" means none
+		want        string // effective model
+	}{
+		{"next to the config", "MODEL=beside\n", "", "beside"},
+		{"only in the working directory", "", "MODEL=cwd\n", ""},
+		{"in both places", "MODEL=beside\n", "MODEL=cwd\n", "beside"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Setenv("HOME", t.TempDir())
+			clearEnv(t, "MODEL")
+			path := writeConfig(t, `{}`)
+			if tc.beside != "" {
+				if err := os.WriteFile(filepath.Join(filepath.Dir(path), ".env"), []byte(tc.beside), 0o600); err != nil {
+					t.Fatal(err)
+				}
+			}
+			wd := t.TempDir()
+			if tc.cwd != "" {
+				if err := os.WriteFile(filepath.Join(wd, ".env"), []byte(tc.cwd), 0o600); err != nil {
+					t.Fatal(err)
+				}
+			}
+			t.Chdir(wd)
+			cfg, err := LoadConfig(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if cfg.Model != tc.want {
+				t.Errorf("Model = %q, want %q", cfg.Model, tc.want)
+			}
+		})
+	}
+}
+
+func TestDotEnvOverridesWithoutExporting(t *testing.T) {
+	// The .env configures the bridge only. Exported into the process
+	// environment, its values would reach every brain and tool the bridge
+	// starts, and would outlive the test that loaded them.
+	tests := []struct {
+		name        string
+		env, dotenv string // MODEL in the process environment and in the .env; "" means unset
+		want        string // effective model
+	}{
+		{"config.json alone", "", "", "from-file"},
+		{"process environment", "from-env", "", "from-env"},
+		{".env", "", "from-dotenv", "from-dotenv"},
+		{".env wins over the process environment", "from-env", "from-dotenv", "from-dotenv"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Setenv("HOME", t.TempDir())
+			clearEnv(t, "MODEL", "FRIDOLIN_TEST_DOTENV_ONLY")
+			if tc.env != "" {
+				t.Setenv("MODEL", tc.env)
+			}
+			path := writeConfig(t, `{"model":"from-file"}`)
+			dotenv := "FRIDOLIN_TEST_DOTENV_ONLY=secret\n"
+			if tc.dotenv != "" {
+				dotenv += "MODEL=" + tc.dotenv + "\n"
+			}
+			if err := os.WriteFile(filepath.Join(filepath.Dir(path), ".env"), []byte(dotenv), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			cs, err := OpenConfigStore(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got := cs.Get().Model; got != tc.want {
+				t.Errorf("Model = %q, want %q", got, tc.want)
+			}
+			if v, ok := os.LookupEnv("FRIDOLIN_TEST_DOTENV_ONLY"); ok {
+				t.Errorf("a .env value was exported into the process environment: %q", v)
+			}
+			if got := os.Getenv("MODEL"); got != tc.env {
+				t.Errorf("process MODEL = %q, want it left at %q", got, tc.env)
+			}
+			// An edit re-derives the effective config from the same overrides.
+			if _, err := cs.Update("", func(c *Config) error { c.LogLevel = "debug"; return nil }); err != nil {
+				t.Fatal(err)
+			}
+			if got := cs.Get().Model; got != tc.want {
+				t.Errorf("Model after an edit = %q, want %q", got, tc.want)
+			}
+			if locked := cs.EnvLocked()["model"] == "MODEL"; locked != (tc.want != "from-file") {
+				t.Errorf("model locked = %v, env locked = %v", locked, cs.EnvLocked())
+			}
+		})
+	}
+}
+
+func TestBadDotEnvIsAnError(t *testing.T) {
+	// Ignoring a .env that does not parse would run the bridge without the
+	// settings it meant to set; the error must not quote its contents.
+	const secret = "sk-not-a-real-secret"
+	tests := []struct {
+		name string
+		body string // "" makes .env a directory
+	}{
+		{"unterminated quote", "MODEL=\"" + secret + "\n"},
+		{"invalid variable name", "MY-KEY=" + secret + "\n"},
+		{"unreadable", ""},
+	}
+	for _, tc := range tests {
+		for _, relative := range []bool{false, true} {
+			name := tc.name
+			if relative {
+				name += ", relative config path"
+			}
+			t.Run(name, func(t *testing.T) {
+				t.Setenv("HOME", t.TempDir())
+				path := writeConfig(t, `{}`)
+				dotenv := filepath.Join(filepath.Dir(path), ".env")
+				var err error
+				if tc.body == "" {
+					err = os.Mkdir(dotenv, 0o700)
+				} else {
+					err = os.WriteFile(dotenv, []byte(tc.body), 0o600)
+				}
+				if err != nil {
+					t.Fatal(err)
+				}
+				if relative {
+					// ./config.json, which the bridge uses when no --config is
+					// given: the error must still say which folder's .env it is.
+					t.Chdir(filepath.Dir(path))
+					path = "config.json"
+				}
+				_, err = OpenConfigStore(path)
+				if err == nil {
+					t.Fatal("a .env that cannot be read must stop the config from loading")
+				}
+				resolved := filepath.Join(canonicalDir(filepath.Dir(dotenv)), ".env")
+				if !strings.Contains(err.Error(), dotenv) && !strings.Contains(err.Error(), resolved) {
+					t.Errorf("error %q does not name %s", err, dotenv)
+				}
+				if strings.Contains(err.Error(), secret) {
+					t.Errorf("error %q quotes the .env contents", err)
+				}
+			})
+		}
+	}
+}
+
+func TestDotEnvLogsTheKeysItIgnores(t *testing.T) {
+	// Only the override variables are read from the .env and nothing in it is
+	// exported, so a key meant for the Claude CLI or a brain's tool reaches
+	// nothing. The log names such keys, so that does not go unnoticed, but
+	// never their values.
+	const secret = "sk-not-a-real-secret"
+	tests := []struct {
+		name   string
+		dotenv string // "" means no .env
+		want   string // what the log says about the .env; "" means nothing
+	}{
+		{"no .env", "", ""},
+		{"only override variables", "MODEL=from-dotenv\nLOG_LEVEL=debug\n", ""},
+		{"a key for a brain's tool", "MODEL=from-dotenv\nGROQ_API_KEY=" + secret + "\n", "ignoring GROQ_API_KEY ("},
+		{"several keys, sorted", "PATH=/opt/bin\nANTHROPIC_API_KEY=" + secret + "\nCONFIG_FILE=/elsewhere.json\n", "ignoring ANTHROPIC_API_KEY, CONFIG_FILE, PATH ("},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Setenv("HOME", t.TempDir())
+			path := writeConfig(t, `{}`)
+			dotenv := filepath.Join(filepath.Dir(path), ".env")
+			if tc.dotenv != "" {
+				if err := os.WriteFile(dotenv, []byte(tc.dotenv), 0o600); err != nil {
+					t.Fatal(err)
+				}
+			}
+			var logs strings.Builder
+			defer log.SetOutput(log.Writer())
+			log.SetOutput(&logs)
+			cs, err := OpenConfigStore(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			// The .env is read once, so an edit does not log it again.
+			if _, err := cs.Update("", func(c *Config) error { c.LogLevel = "debug"; return nil }); err != nil {
+				t.Fatal(err)
+			}
+			got := logs.String()
+			if strings.Contains(got, secret) {
+				t.Errorf("the log quotes a .env value: %q", got)
+			}
+			if tc.want == "" {
+				if strings.Contains(got, "ignoring") {
+					t.Errorf("nothing is ignored, but the log says %q", got)
+				}
+				return
+			}
+			if n := strings.Count(got, tc.want); n != 1 {
+				t.Errorf("log %q has %q %d times, want once", got, tc.want, n)
+			}
+			if !strings.Contains(got, ".env "+dotenv+": ") {
+				t.Errorf("log %q does not name %s", got, dotenv)
+			}
+		})
 	}
 }

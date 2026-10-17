@@ -272,6 +272,11 @@ pip install -r tools/requirements-transcription.txt   # local: private, ~1.5 GB 
 pip install groq && export GROQ_API_KEY=...           # API: light, needs a key
 ```
 
+Brains get `GROQ_API_KEY` from the bridge's process environment, not from its
+`.env`, whose values never reach brains. [Environment
+variables](docs/CONFIGURATION.md#environment-variables) says where to keep it
+so that re-running `setup.sh` does not drop it.
+
 `ffmpeg` is required either way. `--model` accepts any Whisper-compatible model
 ID, so a fine-tune matching your language or dialect usually beats the default
 by a wide margin.
@@ -332,7 +337,10 @@ folder and never overwrite a brain. Details: [docs/BACKUP.md](docs/BACKUP.md).
 
 `setup.sh` installs a launchd agent (macOS) or a systemd user unit (Linux)
 from the templates in [deploy/](deploy/). Pairing happens in the dashboard, so
-the service can be started before WhatsApp is linked.
+the service can be started before WhatsApp is linked. Re-running `setup.sh`
+rewrites both files, so keep extra environment variables where it does not
+overwrite them: see [Environment
+variables](docs/CONFIGURATION.md#environment-variables).
 
 ---
 
@@ -468,6 +476,10 @@ Access*), with country code and no `+`. An empty list allows nobody unless
 
 **"Not logged in" from the CLI** — run `claude` once in a terminal to
 authenticate. Under launchd, check that `HOME` is set correctly in the plist.
+If the CLI logs in through `ANTHROPIC_API_KEY` or `CLAUDE_CODE_OAUTH_TOKEN`,
+that variable must be in the bridge's process environment: the bridge's
+`.env` does not reach the CLI, and the bridge's log names every key there it
+ignores ([details](docs/CONFIGURATION.md#environment-variables)).
 
 **Logged out of WhatsApp** — remove the device under *Linked Devices* on the
 phone, stop the bridge, move `bridge.db` out of your data directory (keep it

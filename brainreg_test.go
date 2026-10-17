@@ -127,7 +127,7 @@ func TestScaffoldedPromptSaysWhatItIs(t *testing.T) {
 func folderBrainConfig(t *testing.T, home string, refs ...BrainRef) *Config {
 	t.Helper()
 	cfg := &Config{DataDir: filepath.Join(home, "data"), BrainMode: true, BrainDirs: refs}
-	eff, _, err := effective(cfg)
+	eff, _, err := effective(cfg, os.Getenv)
 	if err != nil {
 		t.Fatal(err)
 	}

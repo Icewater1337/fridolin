@@ -112,5 +112,10 @@ pip install -r <bridge-repo>/tools/requirements-transcription.txt
 pip install groq && export GROQ_API_KEY=...
 ```
 
+`GROQ_API_KEY` must be set in the bridge's process environment; the bridge's
+`.env` does not reach brains. Re-running `setup.sh` rewrites the launchd plist
+and the systemd unit, so keep the key where it survives that: see "Environment
+variables" in `<bridge-repo>/docs/CONFIGURATION.md`.
+
 `ffmpeg` is required either way. If neither engine is available, the tool says
 so clearly — pass that message to the user rather than trying to work around it.

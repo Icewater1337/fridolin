@@ -1057,7 +1057,7 @@ func TestSandboxProfileDeniesTheConfigFile(t *testing.T) {
 					t.Errorf("profile has %s: %v, want %v", rule, got, tc.want)
 				}
 			}
-			// The .env in the working directory, which loadDotEnv falls back to.
+			// The .env in the working directory, which the bridge used to read.
 			if rule := `(deny file-read* (literal "` + filepath.Join(wd, ".env") + `"))`; !slices.Contains(lines, rule) {
 				t.Errorf("profile lacks %s", rule)
 			}

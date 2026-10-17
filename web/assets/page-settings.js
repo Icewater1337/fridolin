@@ -249,7 +249,7 @@ function makeControl(f, cfg, eff, lockedBy, onChange) {
       const el = h('div.field.bool-field', sw,
         f.danger ? extra : (f.help ? h('div.help', f.help) : null),
         tag ? h('span.field-tag', tag) : null,
-        lockedBy ? h('div.help.locked', icon('lock'), `Set by the environment variable ${lockedBy} — change it there.`) : null);
+        lockedBy ? h('div.help.locked', icon('lock'), `Set by the environment variable ${lockedBy} (or the .env next to config.json) — change it there.`) : null);
       return finish(el);
     }
     case 'text': {

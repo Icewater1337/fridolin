@@ -25,6 +25,7 @@ import (
 // change applies on the next message without a restart.
 type ConfigStore struct {
 	path string
+	env  envLookup // override variables: the .env next to path, then the process environment
 
 	mu        sync.Mutex // serialises Update
 	file      *Config
@@ -40,7 +41,10 @@ var ErrConfigConflict = errors.New("config changed since it was loaded — reloa
 // OpenConfigStore loads cfgPath. A missing file is not an error: it means an
 // empty configuration with defaults, which is what a fresh install starts from.
 func OpenConfigStore(cfgPath string) (*ConfigStore, error) {
-	loadDotEnv(cfgPath)
+	env, err := loadDotEnv(cfgPath)
+	if err != nil {
+		return nil, err
+	}
 
 	file := &Config{}
 	var raw []byte
@@ -54,11 +58,11 @@ func OpenConfigStore(cfgPath string) (*ConfigStore, error) {
 		return nil, fmt.Errorf("reading config file %q: %w", cfgPath, err)
 	}
 
-	eff, locked, err := effective(file)
+	eff, locked, err := effective(file, env)
 	if err != nil {
 		return nil, err
 	}
-	cs := &ConfigStore{path: cfgPath, file: file}
+	cs := &ConfigStore{path: cfgPath, env: env, file: file}
 	cs.eff.Store(eff)
 	cs.envLocked.Store(&locked)
 	cs.etag.Store(etagOf(raw))
@@ -118,7 +122,7 @@ func (cs *ConfigStore) Update(etag string, mutate func(*Config) error) (restart 
 		cs.mu.Unlock()
 		return nil, err
 	}
-	eff, locked, err := effective(next)
+	eff, locked, err := effective(next, cs.env)
 	if err != nil {
 		cs.mu.Unlock()
 		return nil, err
@@ -211,6 +215,28 @@ func writeFileAtomic(path string, data []byte, perm os.FileMode, backup bool) er
 func etagOf(data []byte) string {
 	sum := sha256.Sum256(data)
 	return hex.EncodeToString(sum[:8])
+}
+
+// warnIgnoredDotEnvKeys logs the keys in the .env that are not override
+// variables. The bridge reads nothing else from it and exports nothing, so
+// a key meant for the Claude CLI or a brain's tool (ANTHROPIC_API_KEY,
+// GROQ_API_KEY) reaches neither: without this line the first sign would be
+// brains failing with "Not logged in". Names only, the values may be secrets.
+func warnIgnoredDotEnvKeys(path string, vars map[string]string) {
+	known := map[string]bool{}
+	for _, o := range envOverrides {
+		known[o.env] = true
+	}
+	var ignored []string
+	for k := range vars {
+		if !known[k] {
+			ignored = append(ignored, k)
+		}
+	}
+	if len(ignored) > 0 {
+		sort.Strings(ignored)
+		log.Printf(".env %s: ignoring %s (not config overrides; brains and the Claude CLI do not see them either, see docs/CONFIGURATION.md#environment-variables)", path, strings.Join(ignored, ", "))
+	}
 }
 
 // warnUnknownKeys logs top-level keys config.json has but the bridge does not

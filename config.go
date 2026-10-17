@@ -2,7 +2,9 @@ package main
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -309,11 +311,13 @@ func (c *Config) AllowsAnyDM() bool { return boolOr(c.AllowAnyDM, false) }
 func (c *Config) AnyoneCanDM() bool { return len(c.AllowedNumbers) == 0 && c.AllowsAnyDM() }
 
 // LoadConfig reads configuration with this priority (highest → lowest):
-//  1. Environment variables (including those loaded from .env)
-//  2. config.json values
-//  3. Built-in defaults
+//  1. The .env next to the config file
+//  2. Environment variables
+//  3. config.json values
+//  4. Built-in defaults
 //
-// The .env file is looked for next to the config file, then in the working directory.
+// Only the .env next to the config file is read: one in the working directory
+// counts only when the config file is there too.
 func LoadConfig(cfgPath string) (*Config, error) {
 	cs, err := OpenConfigStore(cfgPath)
 	if err != nil {
@@ -322,14 +326,43 @@ func LoadConfig(cfgPath string) (*Config, error) {
 	return cs.Get(), nil
 }
 
-// loadDotEnv loads the first .env found next to the config or in the working
-// directory. Values in it override config.json (and the process environment).
-func loadDotEnv(cfgPath string) {
-	for _, p := range dotEnvPaths(cfgPath) {
-		if err := godotenv.Overload(p); err == nil {
-			return
-		}
+// envLookup returns the value of an override variable, "" when it is unset.
+type envLookup func(key string) string
+
+// loadDotEnv reads the .env next to the config, if there is one, and returns
+// the lookup the config overrides come from: a key in the .env wins over the
+// process environment. The values are never exported into the environment,
+// so brains, rclone and the other programs the bridge starts do not see them,
+// and a test cannot leave them behind for the next one. There is no fallback
+// to the working directory: a bridge started from a checkout, or the tests
+// run in one, must not pick up whatever file happens to lie there. A missing
+// .env means no overrides; one that cannot be read or parsed is an error.
+// Every other key in it is logged by name, see warnIgnoredDotEnvKeys.
+func loadDotEnv(cfgPath string) (envLookup, error) {
+	path := dotEnvPath(cfgPath)
+	if abs, err := filepath.Abs(path); err == nil {
+		path = abs // so an error names the folder, for ./config.json too
 	}
+	vars, err := godotenv.Read(path)
+	var pathErr *fs.PathError
+	switch {
+	case errors.Is(err, fs.ErrNotExist):
+		vars = nil
+	case errors.As(err, &pathErr):
+		return nil, fmt.Errorf("reading .env: %w", err)
+	case err != nil:
+		// Not ignored: the bridge would run without the settings the file
+		// meant to set. The parser's message quotes the text around the
+		// mistake, which may be a secret, so it is left out.
+		return nil, fmt.Errorf("%s is not a valid .env file (one KEY=value per line)", path)
+	}
+	warnIgnoredDotEnvKeys(path, vars)
+	return func(key string) string {
+		if v, ok := vars[key]; ok {
+			return v
+		}
+		return os.Getenv(key)
+	}, nil
 }
 
 // dataDirName and legacyDataDirName are the home-relative names of the data
@@ -339,10 +372,10 @@ const (
 	legacyDataDirName = ".whatsapp-claude-bridge"
 )
 
-// dotEnvPaths are the .env files loadDotEnv looks for, in order. The sandbox
-// profile denies them to brains.
-func dotEnvPaths(cfgPath string) []string {
-	return []string{filepath.Join(filepath.Dir(cfgPath), ".env"), ".env"}
+// dotEnvPath is the .env loadDotEnv reads, the one next to the config. The
+// sandbox profile denies it to brains.
+func dotEnvPath(cfgPath string) string {
+	return filepath.Join(filepath.Dir(cfgPath), ".env")
 }
 
 // defaultDataDir is ~/.fridolin, or the folder installs used before the
@@ -359,14 +392,14 @@ func defaultDataDir(home string) string {
 }
 
 // effective derives the running configuration from the on-disk layer:
-// environment overrides, defaults, ~ expansion, validation. It returns the
-// json field names that an environment variable overrode.
-func effective(file *Config) (*Config, map[string]string, error) {
+// overrides from env, defaults, ~ expansion, validation. It returns the json
+// field names that an environment variable overrode.
+func effective(file *Config, env envLookup) (*Config, map[string]string, error) {
 	cfg, err := file.clone()
 	if err != nil {
 		return nil, nil, err
 	}
-	locked := applyEnvOverrides(cfg)
+	locked := applyEnvOverrides(cfg, env)
 
 	home, err := os.UserHomeDir()
 	if err != nil {
@@ -668,13 +701,13 @@ var envOverrides = []envOverride{
 	{"VIEWER", "viewer", func(c *Config, v string) { c.Viewer = isTruthy(v) }},
 }
 
-// applyEnvOverrides overwrites cfg fields with any matching environment
-// variables and returns field → variable for every field it overrode, so the
-// dashboard can show which settings it cannot change.
-func applyEnvOverrides(cfg *Config) map[string]string {
+// applyEnvOverrides overwrites cfg fields with every override variable env
+// has a value for, and returns field → variable for every field it overrode,
+// so the dashboard can show which settings it cannot change.
+func applyEnvOverrides(cfg *Config, env envLookup) map[string]string {
 	locked := map[string]string{}
 	for _, o := range envOverrides {
-		if v := os.Getenv(o.env); v != "" {
+		if v := env(o.env); v != "" {
 			o.apply(cfg, v)
 			locked[o.field] = o.env
 		}

@@ -37,6 +37,7 @@ func isJunkMessage(text string) bool {
 // Bridge connects WhatsApp to the brains, and serves the dashboard.
 type Bridge struct {
 	cfgs     *ConfigStore
+	lock     *instanceLock
 	store    *Store
 	wa       Messenger
 	dev      *devMessenger // non-nil in --no-whatsapp mode
@@ -63,16 +64,39 @@ type BridgeOptions struct {
 	Logs       *LogRing
 }
 
-// NewBridge creates and wires up all components.
-func NewBridge(cfgs *ConfigStore, opts BridgeOptions) (*Bridge, error) {
+// NewBridge creates and wires up all components. It holds the data
+// directory's instance lock until Stop.
+func NewBridge(cfgs *ConfigStore, opts BridgeOptions) (_ *Bridge, err error) {
 	cfg := cfgs.Get()
+	// Taken before the store opens: a second bridge on the same data dir, dev
+	// mode or a test included, must not open the live WhatsApp session's
+	// database, let alone run whatsmeow's migrations on it.
+	lock, err := acquireInstanceLock(cfg.DataDir)
+	if err != nil {
+		return nil, err
+	}
+	defer func() {
+		if err != nil {
+			lock.release()
+		}
+	}()
 	store, err := NewStore(cfg)
 	if err != nil {
 		return nil, fmt.Errorf("creating store: %w", err)
 	}
+	defer func() {
+		// Runs before the lock is given back: whoever takes it next must be
+		// the only one with bridge.db open.
+		if err != nil {
+			if cerr := store.Close(); cerr != nil {
+				log.Printf("closing store: %v", cerr)
+			}
+		}
+	}()
 
 	b := &Bridge{
 		cfgs:     cfgs,
+		lock:     lock,
 		store:    store,
 		claude:   NewClaudeRunner(cfgs.Get, store),
 		logs:     opts.Logs,
@@ -233,6 +257,7 @@ func (b *Bridge) Stop() {
 	if err := b.store.Close(); err != nil {
 		log.Printf("closing store: %v", err)
 	}
+	b.lock.release()
 	log.Println("Bridge stopped.")
 }
 
