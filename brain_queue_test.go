@@ -46,8 +46,8 @@ func (d *deliveries) all() []delivered {
 	return append([]delivered(nil), d.runs...)
 }
 
-// queueTestManager builds a manager with inline brains a (DMs) and b (a group)
-// running the fake CLI.
+// queueTestManager builds a manager with folder brains a (DMs) and b (a
+// group) running the fake CLI.
 func queueTestManager(t *testing.T, sleepMS int, extra string) (*BrainManager, *deliveries, string) {
 	t.Helper()
 	home := canonicalDir(t.TempDir())
@@ -56,11 +56,10 @@ func queueTestManager(t *testing.T, sleepMS int, extra string) (*BrainManager, *
 	cfg, err := LoadConfig(writeConfig(t, `{
 		"brain_mode": true,
 		"data_dir": "`+home+`/data",
-		"claude_path": "`+claude+`",
-		"brains": [
-			{"name": "a", "work_dir": "`+home+`/a", "handles_dms": true},
-			{"name": "b", "work_dir": "`+home+`/b", "groups": ["120363000000000000@g.us"]}
-		]`+extra+`
+		"claude_path": "`+claude+`"`+brainDirsJSON(t,
+		brainFolder(t, home+"/a", BrainManifest{ID: "a", Routing: BrainRouting{HandlesDMs: true}}),
+		brainFolder(t, home+"/b", BrainManifest{ID: "b", Routing: BrainRouting{Groups: []string{"120363000000000000@g.us"}}}),
+	)+extra+`
 	}`))
 	if err != nil {
 		t.Fatal(err)
@@ -426,11 +425,10 @@ func TestReloadKeepsRunningBrainAndRetiresRemoved(t *testing.T) {
 		"brain_mode": true,
 		"data_dir": "`+home+`/data",
 		"claude_path": "`+os.Args[0]+`",
-		"brain_model": "new-model",
-		"brains": [
-			{"name": "a", "work_dir": "`+home+`/a", "handles_dms": true},
-			{"name": "c", "work_dir": "`+home+`/c", "groups": ["120363000000000000@g.us"]}
-		]
+		"brain_model": "new-model"`+brainDirsJSON(t,
+		brainFolder(t, home+"/a", BrainManifest{ID: "a", Routing: BrainRouting{HandlesDMs: true}}),
+		brainFolder(t, home+"/c", BrainManifest{ID: "c", Routing: BrainRouting{Groups: []string{"120363000000000000@g.us"}}}),
+	)+`
 	}`))
 	if err != nil {
 		t.Fatal(err)
@@ -1043,8 +1041,9 @@ func TestBrainsDoNotSeeTheDotEnv(t *testing.T) {
 	path := writeConfig(t, `{
 		"brain_mode": true,
 		"data_dir": "`+home+`/data",
-		"claude_path": "`+claude+`",
-		"brains": [{"name": "a", "work_dir": "`+home+`/a", "handles_dms": true}]
+		"claude_path": "`+claude+`"`+brainDirsJSON(t,
+		brainFolder(t, home+"/a", BrainManifest{ID: "a", Routing: BrainRouting{HandlesDMs: true}}),
+	)+`
 	}`)
 	// One key older versions read as a setting, one they only exported.
 	dotenv := "MODEL=from-dotenv\nFRIDOLIN_TEST_DOTENV_ONLY=secret\n"

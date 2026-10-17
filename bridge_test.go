@@ -484,7 +484,7 @@ func TestLoadConfigExpandsHome(t *testing.T) {
 	cfg, err := LoadConfig(writeConfig(t, `{
 		"data_dir": "~/data",
 		"brain_mode": true,
-		"brains": [{"name": "a", "work_dir": "~/brains/a"}]
+		"brain_dirs": [{"path": "~/brains/a", "approved": {"id": "a", "name": "A"}}]
 	}`))
 	if err != nil {
 		t.Fatal(err)
@@ -492,11 +492,8 @@ func TestLoadConfigExpandsHome(t *testing.T) {
 	if want := filepath.Join(home, "data"); cfg.DataDir != want {
 		t.Errorf("DataDir = %q, want %q", cfg.DataDir, want)
 	}
-	if want := filepath.Join(home, "brains", "a"); cfg.Brains[0].WorkDir != want {
-		t.Errorf("brain WorkDir = %q, want %q", cfg.Brains[0].WorkDir, want)
-	}
-	if want := filepath.Join(home, "brains", "a", "brain-prompt.md"); cfg.Brains[0].PromptFile != want {
-		t.Errorf("brain PromptFile = %q, want %q", cfg.Brains[0].PromptFile, want)
+	if want := filepath.Join(home, "brains", "a"); cfg.BrainDirs[0].Path != want {
+		t.Errorf("brain folder = %q, want %q", cfg.BrainDirs[0].Path, want)
 	}
 }
 
@@ -902,12 +899,11 @@ func TestBrainRouting(t *testing.T) {
 
 	cfg, err := LoadConfig(writeConfig(t, `{
 		"brain_mode": true,
-		"data_dir": "`+home+`/data",
-		"brains": [
-			{"name": "personal", "work_dir": "`+home+`/p", "handles_dms": true},
-			{"name": "team",     "work_dir": "`+home+`/t", "groups": ["team@g.us"]},
-			{"name": "other",    "work_dir": "`+home+`/o", "default": true}
-		]
+		"data_dir": "`+home+`/data"`+brainDirsJSON(t,
+		brainFolder(t, home+"/p", BrainManifest{ID: "personal", Routing: BrainRouting{HandlesDMs: true}}),
+		brainFolder(t, home+"/t", BrainManifest{ID: "team", Routing: BrainRouting{Groups: []string{"team@g.us"}}}),
+		brainFolder(t, home+"/o", BrainManifest{ID: "other", Routing: BrainRouting{Default: true}}),
+	)+`
 	}`))
 	if err != nil {
 		t.Fatal(err)
@@ -934,11 +930,10 @@ func TestRouteHonoursTheNamedBrain(t *testing.T) {
 	t.Setenv("HOME", home)
 	cfg, err := LoadConfig(writeConfig(t, `{
 		"brain_mode": true,
-		"data_dir": "`+home+`/data",
-		"brains": [
-			{"name": "personal", "work_dir": "`+home+`/p", "handles_dms": true},
-			{"name": "team",     "work_dir": "`+home+`/t", "groups": ["team@g.us"]}
-		]
+		"data_dir": "`+home+`/data"`+brainDirsJSON(t,
+		brainFolder(t, home+"/p", BrainManifest{ID: "personal", Routing: BrainRouting{HandlesDMs: true}}),
+		brainFolder(t, home+"/t", BrainManifest{ID: "team", Routing: BrainRouting{Groups: []string{"team@g.us"}}}),
+	)+`
 	}`))
 	if err != nil {
 		t.Fatal(err)
@@ -1002,8 +997,7 @@ func TestBrainRoutingFallsBackToFirstBrain(t *testing.T) {
 
 	cfg, err := LoadConfig(writeConfig(t, `{
 		"brain_mode": true,
-		"data_dir": "`+home+`/data",
-		"brains": [{"name": "only", "work_dir": "`+home+`/o"}]
+		"data_dir": "`+home+`/data"`+brainDirsJSON(t, brainFolder(t, home+"/o", BrainManifest{ID: "only"}))+`
 	}`))
 	if err != nil {
 		t.Fatal(err)

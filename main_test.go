@@ -56,8 +56,9 @@ func TestCheckShowsWhoMayDM(t *testing.T) {
 			t.Setenv("HOME", home)
 			path := writeConfig(t, `{
 				"brain_mode": true,
-				"data_dir": "`+home+`/data",
-				"brains": [{"name": "main", "work_dir": "`+home+`/main", "handles_dms": true}],
+				"data_dir": "`+home+`/data"`+brainDirsJSON(t,
+				brainFolder(t, home+"/main", BrainManifest{ID: "main", Routing: BrainRouting{HandlesDMs: true}}),
+			)+`,
 				`+tc.access+`
 			}`)
 			out := captureStdout(t, func() {

@@ -188,7 +188,8 @@ func TestCalendarSignInFlow(t *testing.T) {
 
 func TestCalendarSignInErrorsAreShown(t *testing.T) {
 	srv, _ := fakeGoogle(t)
-	tb := newTestBridge(t, `, "brains": [{"name": "p", "work_dir": "~/p"}]`)
+	tb := newTestBridge(t, "")
+	tb.addFolderBrain(t, BrainManifest{ID: "p", Name: "P"})
 	_ = tb.do("PUT", "/api/google/client", map[string]string{"json": fmt.Sprintf(testClientJSON, srv.URL)})
 	start := func() string {
 		var r struct {

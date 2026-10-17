@@ -168,12 +168,11 @@ func TestBrainWhoseFolderCannotBeOpenedIsLeftOut(t *testing.T) {
 	}
 	home := canonicalDir(t.TempDir())
 	t.Setenv("HOME", home)
+	dirs := brainDirsJSON(t,
+		brainFolder(t, "~/a", BrainManifest{ID: "a", Routing: BrainRouting{HandlesDMs: true, Default: true}}),
+		brainFolder(t, "~/b", BrainManifest{ID: "b", Routing: BrainRouting{Groups: []string{"120363000000000000@g.us"}}}),
+	)
 	locked := filepath.Join(home, "b")
-	for _, d := range []string{filepath.Join(home, "a"), locked} {
-		if err := os.MkdirAll(d, 0o700); err != nil {
-			t.Fatal(err)
-		}
-	}
 	if err := os.Chmod(locked, 0); err != nil {
 		t.Fatal(err)
 	}
@@ -181,11 +180,7 @@ func TestBrainWhoseFolderCannotBeOpenedIsLeftOut(t *testing.T) {
 	cfg, err := LoadConfig(writeConfig(t, `{
 		"brain_mode": true,
 		"data_dir": "`+home+`/data",
-		"claude_path": "`+fakeClaudeEnv(t, 0)+`",
-		"brains": [
-			{"name": "a", "work_dir": "~/a", "handles_dms": true, "default": true},
-			{"name": "b", "work_dir": "~/b", "groups": ["120363000000000000@g.us"]}
-		]
+		"claude_path": "`+fakeClaudeEnv(t, 0)+`"`+dirs+`
 	}`))
 	if err != nil {
 		t.Fatal(err)
@@ -199,9 +194,16 @@ func TestBrainWhoseFolderCannotBeOpenedIsLeftOut(t *testing.T) {
 	if br := mgr.BrainFor("120363000000000000@g.us", true); br != mgr.Get("a") {
 		t.Errorf("b's group went to %v, want the default brain a", br)
 	}
-	issues := mgr.Issues()
-	if len(issues) != 1 || issues[0].ID != "b" || issues[0].Kind != "missing" || !strings.Contains(issues[0].Detail, "the folder cannot be opened") {
-		t.Errorf("issues = %+v, want b's folder reported", issues)
+	// The drift check cannot read b's brain.json either, and says so too.
+	reported := false
+	for _, is := range mgr.Issues() {
+		if is.ID != "b" {
+			t.Errorf("issue %+v, want only b's", is)
+		}
+		reported = reported || is.Kind == "missing" && strings.Contains(is.Detail, "the folder cannot be opened")
+	}
+	if !reported {
+		t.Errorf("issues = %+v, want b's folder reported", mgr.Issues())
 	}
 	if lines := logged(); len(lines) != 1 || !strings.Contains(lines[0], "brain b: leaving it out") {
 		t.Errorf("log = %q, want one line leaving b out", lines)
