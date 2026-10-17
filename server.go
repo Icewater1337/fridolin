@@ -204,6 +204,18 @@ func (b *Bridge) handOff(br *Brain, jid, sender, text string, media []string) {
 	b.handleInbound(context.Background(), m)
 }
 
+// submitHandOff is handOff for a source that must know whether the brain
+// took the files, as Plaud must: a recording cannot be sent again by
+// whoever sent it. It skips the debouncer, which keeps messages only in
+// memory, and queues the message at once: an error means the brain did
+// not take it (its queue is full, or it is gone). done then hears how the
+// run ended, see Inbound.Done.
+func (b *Bridge) submitHandOff(br *Brain, jid, sender, text string, media []string, done func(error)) error {
+	m := Inbound{JID: jid, Brain: br.ID(), Sender: sender, Text: text, Media: media, Source: sourceIngest, At: time.Now(), Done: done}
+	_, _, _, err := b.brainMgr.Submit(m)
+	return err
+}
+
 // replyChatFor picks the chat a brain answers in when a message did not come
 // from a chat: its configured reply_chat, else the first allowed number for
 // the brain that gets DMs (the DM brain, or the fallback when there is none),

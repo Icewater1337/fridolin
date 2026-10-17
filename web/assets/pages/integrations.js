@@ -16,6 +16,9 @@ import { liveForm } from '../components/live-form.js';
 
 const every = (sec) => (sec % 60 === 0 ? (sec === 60 ? 'minute' : `${sec / 60} minutes`) : `${sec} seconds`);
 
+// What a recording's run is up to, as the status names it.
+const runState = { handed: 'with the brain', done: 'answered', stopped: 'stopped', failed: 'its run failed, trying again' };
+
 export default {
   title: 'Integrations',
   render(root, ctx) {
@@ -108,7 +111,7 @@ export default {
       ]);
       paint(factsBox, {
         chat: s.summary_chat || '', chatName: chatName(s.summary_chat || ''), toYou: !!s.summary_to_you, chatBrain: s.summary_chat_brain || '', target: s.target_brain || '',
-        last: s.last_forwarded || null, givenUp: (s.given_up || []).slice(-3).reverse(),
+        last: s.last_forwarded || null, givenUp: (s.given_up || []).slice(-3).reverse(), handed: s.handed || 0,
         poll: s.last_poll || '', pending: s.pending || 0, waiting: !!(blocked || s.last_error), seen: s.seen,
       }, renderFacts);
       // The picked brain is marked when it cannot take recordings: gone,
@@ -129,9 +132,18 @@ export default {
         facts.push(h('div', 'Summaries go to ', chatEl(f.chat), f.toYou ? ' (your DM)' : '', '.'));
         if (f.chatBrain) facts.push(h('div.muted.small', `What you write back in that chat goes to the ${f.chatBrain} brain, not to ${f.target}.`));
       }
-      if (f.last) facts.push(h('div', 'Last recording: ', h('strong', f.last.name), ' → ', f.last.brain, ' ', timeAgo(f.last.at)));
+      // "Send again" hands a recording over once more.
+      const again = (id) => btn('Send again', {
+        small: true, icon: 'refresh',
+        onClick: async () => { await post('/api/plaud/resend', { id }); toast('It goes to the brain with the next check', 'ok'); await refresh(); },
+      });
+      if (f.last) {
+        facts.push(h('div', 'Last recording: ', h('strong', f.last.name), ' → ', f.last.brain, ' ', timeAgo(f.last.at),
+          runState[f.last.status] ? ` · ${runState[f.last.status]}` : '', f.last.status === 'stopped' ? again(f.last.id) : null));
+      }
       // Recordings Fridolin stopped trying, newest first.
-      for (const g of f.givenUp) facts.push(h('div.muted', 'Not sent: ', h('strong', g.name || g.id), ` — ${g.reason} `, timeAgo(g.at)));
+      for (const g of f.givenUp) facts.push(h('div.muted', 'Not sent: ', h('strong', g.name || g.id), ` — ${g.reason} `, timeAgo(g.at), again(g.id)));
+      if (f.handed) facts.push(h('div.muted', f.handed === 1 ? '1 recording with the brain' : `${f.handed} recordings with the brain`));
       if (f.poll) facts.push(h('div.muted', 'Checked ', timeAgo(f.poll), f.pending ? ` · ${f.pending} ${f.waiting ? 'waiting to be delivered' : 'waiting for Plaud’s transcript'}` : ''));
       if (typeof f.seen === 'number') facts.push(h('div.muted.small', f.seen === 1 ? '1 recording known' : `${f.seen} recordings known`));
       return facts.length ? h('div.facts', facts) : null;

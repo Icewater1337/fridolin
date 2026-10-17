@@ -62,3 +62,7 @@ plaud summary <of_id>          # Plaud's AI summary
   fetched from Plaud (the card shows why). Fridolin tries again, less often
   over time, for up to three days, then gives up, lists it on the card and
   says so in this chat once; one deleted in Plaud is dropped at once.
+- A recording was stopped with `!stop`: it is not sent again on its own.
+  **Send again** on the Plaud card hands it over once more. One whose run
+  failed is handed over again by itself up to twice more, then given up
+  with a notice.

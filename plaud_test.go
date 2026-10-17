@@ -12,6 +12,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"sync"
 	"syscall"
 	"testing"
 	"time"
@@ -152,10 +153,10 @@ func TestPlaudRunsInThePickedBrain(t *testing.T) {
 	if hist, _ := os.ReadFile(filepath.Join(gDir, "conversation-history.jsonl")); !strings.Contains(string(hist), "[Plaud]") {
 		t.Errorf("g's history lacks the recording:\n%s", hist)
 	}
-	st, _ := tb.plaud.loadState()
-	if last := st.LastForwarded; last == nil || last.Brain != "g" {
-		t.Errorf("last forwarded = %+v, want brain g", st.LastForwarded)
-	}
+	waitFor(t, 10*time.Second, "the run to be noted", func() bool {
+		last := tb.plaud.Status().LastForwarded
+		return last != nil && last.Brain == "g" && last.Status == plaudRunDone
+	})
 }
 
 // Recordings are private: the answer goes to the picked brain's reply chat
@@ -376,6 +377,250 @@ func TestPlaudFailingRecordingIsGivenUpInTime(t *testing.T) {
 	}
 }
 
+// plaudRecorder stands in for the bridge's submit: it notes every hand-off
+// and keeps its done, or refuses it with refuse.
+type plaudRecorder struct {
+	mu     sync.Mutex
+	handed []string
+	done   map[string]func(error)
+	refuse error
+}
+
+func (r *plaudRecorder) submit(br *Brain, jid, sender, text string, media []string, done func(error)) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.refuse != nil {
+		return r.refuse
+	}
+	id := strings.TrimSuffix(media[0][strings.LastIndex(media[0], " - ")+3:], ".txt")
+	r.handed = append(r.handed, id)
+	if r.done == nil {
+		r.done = map[string]func(error){}
+	}
+	r.done[id] = done
+	return nil
+}
+
+// end ends id's run with err.
+func (r *plaudRecorder) end(id string, err error) {
+	r.mu.Lock()
+	done := r.done[id]
+	r.mu.Unlock()
+	done(err)
+}
+
+func (r *plaudRecorder) count() int {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return len(r.handed)
+}
+
+// A recording counts as seen only once its brain's run answered it. While
+// the run is on its way it is not handed over again. A run you stopped is
+// not repeated, and Send again on the dashboard hands it over once more.
+// A failed run is repeated later, up to plaudRunTries runs, then the
+// recording is given up and the chat hears about it. A brain that does not
+// take it (its queue is full) leaves it waiting, with the reason on the
+// card. After a restart, one whose run never ended is handed over again.
+func TestPlaudRecordingIsSeenOnlyOnceItsRunEnds(t *testing.T) {
+	stop := []error{errBrainInterrupted, errBrainDropped}
+	for _, c := range []struct {
+		name    string
+		ends    []error // the runs' outcomes, one per check
+		seen    bool
+		status  string
+		handed  int // hand-offs in all
+		givenUp bool
+	}{
+		{"answered", []error{nil}, true, plaudRunDone, 1, false},
+		{"stopped while it ran", stop[:1], true, plaudRunStopped, 1, false},
+		{"dropped before it ran", stop[1:], true, plaudRunStopped, 1, false},
+		{"failed once", []error{errors.New("claude exited: exit status 1"), nil}, true, plaudRunDone, 2, false},
+		{"failed every time", []error{errors.New("e1"), errors.New("e2"), errors.New("e3")}, true, plaudRunFailed, plaudRunTries, true},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			tb, fp := plaudBridge(t, "")
+			rec := &plaudRecorder{}
+			tb.plaud.submit = rec.submit
+			plaudSignIn(t, tb)
+			if err := tb.plaud.saveState(plaudSeededState("u_1", plaudOld1)); err != nil {
+				t.Fatal(err)
+			}
+			fp.files(plaudNew, plaudOld1)
+			fp.recording(plaudNew, true)
+			ctx := context.Background()
+			for i, end := range c.ends {
+				if err := tb.plaud.update(func(st *plaudState) error {
+					if it := st.Pending[plaudNew]; it != nil {
+						it.NextTry = time.Time{}
+					}
+					return nil
+				}); err != nil {
+					t.Fatal(err)
+				}
+				if err := tb.plaud.Poll(ctx); err != nil {
+					t.Fatal(err)
+				}
+				if rec.count() != i+1 {
+					t.Fatalf("check %d: handed over %d times, want %d", i+1, rec.count(), i+1)
+				}
+				// On its way: not seen, and not handed over again.
+				if tb.plaudSeenAll(plaudNew) {
+					t.Fatalf("check %d: seen before its run ended", i+1)
+				}
+				if err := tb.plaud.Poll(ctx); err != nil || rec.count() != i+1 {
+					t.Fatalf("a check during the run: %v, handed over %d times, want %d", err, rec.count(), i+1)
+				}
+				rec.end(plaudNew, end)
+			}
+			if got := tb.plaudSeenAll(plaudNew); got != c.seen {
+				t.Errorf("seen = %v, want %v", got, c.seen)
+			}
+			s := tb.plaud.Status()
+			if s.LastForwarded == nil || s.LastForwarded.Status != c.status {
+				t.Errorf("last forwarded = %+v, want status %s", s.LastForwarded, c.status)
+			}
+			if err := tb.plaud.Poll(ctx); err != nil || rec.count() != c.handed {
+				t.Errorf("after the runs: %v, handed over %d times, want %d", err, rec.count(), c.handed)
+			}
+			if (len(s.GivenUp) == 1) != c.givenUp {
+				t.Errorf("given up = %+v, want %v", s.GivenUp, c.givenUp)
+			}
+			if c.givenUp {
+				waitFor(t, 5*time.Second, "the notice", func() bool { return len(tb.dev.Outbox()) == 1 })
+				if m := tb.dev.Outbox()[0]; !strings.Contains(m.Text, "the brain's run failed 3 times (e3)") {
+					t.Errorf("notice = %q", m.Text)
+				}
+			}
+			if c.status == plaudRunStopped || c.givenUp {
+				if w := tb.do("POST", "/api/plaud/resend", map[string]string{"id": plaudNew}); w.Code != 202 {
+					t.Fatalf("send again: %d %s", w.Code, w.Body.String())
+				}
+				waitFor(t, 5*time.Second, "the recording to be handed over again", func() bool { return rec.count() == c.handed+1 })
+			}
+		})
+	}
+	t.Run("not taken", func(t *testing.T) {
+		tb, fp := plaudBridge(t, "")
+		rec := &plaudRecorder{refuse: errQueueFull}
+		tb.plaud.submit = rec.submit
+		plaudSignIn(t, tb)
+		if err := tb.plaud.saveState(plaudSeededState("u_1", plaudOld1)); err != nil {
+			t.Fatal(err)
+		}
+		fp.files(plaudNew, plaudOld1)
+		fp.recording(plaudNew, true)
+		err := tb.plaud.Poll(context.Background())
+		if err == nil || !strings.Contains(err.Error(), "brain p did not take it: brain queue is full") || !strings.Contains(err.Error(), "will retry") {
+			t.Errorf("poll = %v, want the full queue named", err)
+		}
+		st, _ := tb.plaud.loadState()
+		if it := st.Pending[plaudNew]; it == nil || !it.Handed.IsZero() || len(st.Forwarded) != 0 {
+			t.Errorf("state = %+v, want it still waiting", st)
+		}
+		rec.refuse = nil
+		if err := tb.plaud.Poll(context.Background()); err != nil || rec.count() != 1 {
+			t.Errorf("once the brain takes it: %v, handed over %d times", err, rec.count())
+		}
+	})
+	t.Run("a restart meanwhile", func(t *testing.T) {
+		tb, fp := plaudBridge(t, "")
+		rec := &plaudRecorder{}
+		tb.plaud.submit = rec.submit
+		plaudSignIn(t, tb)
+		if err := tb.plaud.saveState(plaudSeededState("u_1", plaudOld1)); err != nil {
+			t.Fatal(err)
+		}
+		fp.files(plaudNew, plaudOld1)
+		fp.recording(plaudNew, true)
+		if err := tb.plaud.Poll(context.Background()); err != nil {
+			t.Fatal(err)
+		}
+		// Fridolin stops, which stops the run.
+		tb.plaud.Stop()
+		rec.end(plaudNew, errBrainInterrupted)
+		restarted := plaudAfterRestart(tb)
+		restarted.submit = rec.submit
+		if err := restarted.Poll(context.Background()); err != nil || rec.count() != 2 {
+			t.Fatalf("after the restart: %v, handed over %d times, want 2", err, rec.count())
+		}
+		rec.end(plaudNew, nil)
+		if !tb.plaudSeenAll(plaudNew) {
+			t.Error("not seen after the second run answered it")
+		}
+	})
+	t.Run("its card entry trimmed meanwhile", func(t *testing.T) {
+		tb, fp := plaudBridge(t, "")
+		rec := &plaudRecorder{}
+		tb.plaud.submit = rec.submit
+		plaudSignIn(t, tb)
+		if err := tb.plaud.saveState(plaudSeededState("u_1", plaudOld1)); err != nil {
+			t.Fatal(err)
+		}
+		fp.files(plaudNew, plaudOld1)
+		fp.recording(plaudNew, true)
+		if err := tb.plaud.Poll(context.Background()); err != nil {
+			t.Fatal(err)
+		}
+		// Ten other recordings were handed over since.
+		if err := tb.plaud.update(func(st *plaudState) error { st.Forwarded = nil; return nil }); err != nil {
+			t.Fatal(err)
+		}
+		rec.end(plaudNew, nil)
+		if fw := tb.plaud.Status().LastForwarded; fw == nil || fw.ID != plaudNew || fw.Brain != "p" || fw.Status != plaudRunDone {
+			t.Errorf("last forwarded = %+v, want it answered by brain p", fw)
+		}
+	})
+}
+
+// plaudSeenAll reports whether every recording in ids is seen and none
+// waits.
+func (tb *testBridge) plaudSeenAll(ids ...string) bool {
+	st, _ := tb.plaud.loadState()
+	for _, id := range ids {
+		if st == nil || st.Pending[id] != nil || !slices.Contains(st.Seen, id) {
+			return false
+		}
+	}
+	return true
+}
+
+// With the real bridge: a hand-off is queued at once, so a full queue is
+// an error for Plaud rather than a "try again" in the chat, and !stop in
+// the chat its summaries go to stops it, waiting or running, as a stop
+// rather than a failure.
+func TestPlaudHandOffThroughTheBridge(t *testing.T) {
+	tb, _ := plaudBridgeWith(t, `, "queue": {"max_pending": 1}`, "", plaudDMBrain)
+	t.Setenv("FRIDOLIN_FAKE_SLEEP_MS", "3000")
+	br := tb.brainMgr.Get("p")
+	const dm = "15551234567@s.whatsapp.net"
+	var mu sync.Mutex
+	ended := map[string]error{}
+	done := func(name string) func(error) {
+		return func(err error) { mu.Lock(); ended[name] = err; mu.Unlock() }
+	}
+	if err := tb.submitHandOff(br, dm, "plaud", "first", nil, done("first")); err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, 5*time.Second, "the first run", func() bool { r := br.Snapshot().Running; return r != nil && r.PID > 0 })
+	if err := tb.submitHandOff(br, dm, "plaud", "second", nil, done("second")); err != nil {
+		t.Fatal(err)
+	}
+	if err := tb.submitHandOff(br, dm, "plaud", "third", nil, done("third")); !errors.Is(err, errQueueFull) {
+		t.Errorf("a hand-off to a full queue = %v, want errQueueFull", err)
+	}
+	tb.handleInbound(context.Background(), Inbound{JID: dm, Sender: "15551234567", Text: "!stop", Source: "whatsapp"})
+	waitFor(t, 10*time.Second, "both to end", func() bool { mu.Lock(); defer mu.Unlock(); return len(ended) == 2 })
+	if !errors.Is(ended["first"], errBrainInterrupted) || !errors.Is(ended["second"], errBrainDropped) {
+		t.Errorf("ended = %v, want the first stopped and the second dropped", ended)
+	}
+	for _, m := range tb.dev.Outbox() {
+		if strings.Contains(m.Text, "queue is full") {
+			t.Errorf("the chat was told to try again: %q", m.Text)
+		}
+	}
+}
+
 // A recording that is not ready is asked about at the next check, then
 // ever less often, up to every 15 minutes, rather than once a minute for
 // three days.
@@ -580,10 +825,8 @@ func TestPlaudFirstSyncThenForwardsNewRecordings(t *testing.T) {
 	if err := tb.plaud.Poll(ctx); err != nil {
 		t.Fatal(err)
 	}
-	st, _ = tb.plaud.loadState()
-	if len(st.Pending) != 0 || !slices.Contains(st.Seen, plaudNew) {
-		t.Fatalf("after transcript: %+v", st)
-	}
+	// Seen once the brain's run answered it.
+	tb.waitPlaudSeen(t, plaudNew)
 	files, _ := filepath.Glob(filepath.Join(tb.cfgs.Get().MediaDir, "plaud", "* - Team sync - "+plaudNew+".txt"))
 	if len(files) != 1 {
 		t.Fatalf("transcript files = %v", files)
@@ -630,12 +873,12 @@ func TestPlaudFirstSyncThenForwardsNewRecordings(t *testing.T) {
 // after a restart, wired the way the bridge wires its own.
 func plaudAfterRestart(tb *testBridge) *PlaudManager {
 	p := NewPlaudManager(tb.cfgs, tb.brainMgr)
-	p.handOff, p.notify = tb.handOff, tb.wa.SendMessage
+	p.submit, p.notify = tb.submitHandOff, tb.wa.SendMessage
 	return p
 }
 
 // The manager needs only the configuration, the brains and the two
-// functions it is given: it hands each recording to handOff and says
+// functions it is given: it hands each recording to submit and says
 // nothing else to the bridge.
 func TestPlaudManagerUsesOnlyWhatItIsGiven(t *testing.T) {
 	tb, fp := plaudBridge(t, "")
@@ -645,8 +888,9 @@ func TestPlaudManagerUsesOnlyWhatItIsGiven(t *testing.T) {
 	}
 	var got []handed
 	p := NewPlaudManager(tb.cfgs, tb.brainMgr)
-	p.handOff = func(br *Brain, jid, sender, text string, media []string) {
+	p.submit = func(br *Brain, jid, sender, text string, media []string, done func(error)) error {
 		got = append(got, handed{br.ID(), jid, sender, text, media})
+		return nil
 	}
 	p.notify = func(context.Context, string, string) error { t.Error("notify called"); return nil }
 	plaudSignIn(t, tb)
@@ -668,7 +912,7 @@ func TestPlaudManagerUsesOnlyWhatItIsGiven(t *testing.T) {
 	}
 	time.Sleep(100 * time.Millisecond)
 	if out := tb.dev.Outbox(); len(out) != 0 {
-		t.Errorf("the bridge sent %+v, want nothing: only handOff was to be used", out)
+		t.Errorf("the bridge sent %+v, want nothing: only submit was to be used", out)
 	}
 }
 
@@ -681,6 +925,16 @@ func plaudSignIn(t *testing.T, tb *testBridge) {
 	if err := os.WriteFile(tb.plaud.tokenPath(), []byte("{}"), 0o600); err != nil {
 		t.Fatal(err)
 	}
+}
+
+// waitPlaudSeen waits until recording id is seen and no longer waits, as
+// once the brain's run answered it.
+func (tb *testBridge) waitPlaudSeen(t *testing.T, id string) {
+	t.Helper()
+	waitFor(t, 10*time.Second, id+" to be seen", func() bool {
+		st, _ := tb.plaud.loadState()
+		return st != nil && st.Pending[id] == nil && slices.Contains(st.Seen, id)
+	})
 }
 
 // plaudSeeded reports whether the first sync ran.
@@ -900,6 +1154,7 @@ func TestPlaudStateChangesDuringAPollStay(t *testing.T) {
 	if err := tb.plaud.Poll(context.Background()); err != nil {
 		t.Fatal(err)
 	}
+	tb.waitPlaudSeen(t, plaudNew)
 	st, _ := tb.plaud.loadState()
 	if st.Login == nil || !st.Login.Since.Equal(signedIn) || !slices.Contains(st.Seen, plaudNew) {
 		t.Errorf("state = %+v, login %+v: want the sign-in made during the poll, and the recording seen", st, st.Login)
@@ -1003,6 +1258,7 @@ func TestPlaudStateBelongsToTheAccount(t *testing.T) {
 			}
 			if c.forward {
 				waitFor(t, 10*time.Second, "brain reply", func() bool { return len(tb.dev.Outbox()) > 0 })
+				tb.waitPlaudSeen(t, plaudNew)
 			}
 			if st, _ := tb.plaud.loadState(); st.Account != c.account || !slices.Contains(st.Seen, plaudNew) {
 				t.Errorf("state = %+v, want account %s with the recording seen", st, c.account)
@@ -1267,8 +1523,10 @@ func plaudIDs(prefix string, n int) []string {
 func TestPlaudPagesBackToTheLastKnownRecording(t *testing.T) {
 	tb, fp := plaudBridge(t, "")
 	var handed []string
-	tb.plaud.handOff = func(br *Brain, jid, sender, text string, media []string) {
+	tb.plaud.submit = func(br *Brain, jid, sender, text string, media []string, done func(error)) error {
 		handed = append(handed, strings.TrimSuffix(media[0][strings.LastIndex(media[0], " - ")+3:], ".txt"))
+		done(nil)
+		return nil
 	}
 	plaudSignIn(t, tb)
 	if err := tb.plaud.saveState(plaudSeededState("u_1", plaudOld2, plaudOld1)); err != nil {
@@ -1401,8 +1659,10 @@ func TestPlaudPendingGoesOldestFirst(t *testing.T) {
 	const older, newer = "of_00000000000000000000bb", "of_00000000000000000000ba"
 	tb, fp := plaudBridge(t, "")
 	var order []string
-	tb.plaud.handOff = func(br *Brain, jid, sender, text string, media []string) {
+	tb.plaud.submit = func(br *Brain, jid, sender, text string, media []string, done func(error)) error {
 		order = append(order, media[0][len(media[0])-len(older)-4:len(media[0])-4])
+		done(nil)
+		return nil
 	}
 	plaudSignIn(t, tb)
 	st := plaudWaiting(plaudSeededState("u_1", plaudOld1), older, time.Now().Add(-2*time.Hour))

@@ -19,9 +19,10 @@ matters and tells you the action items.
    the one that handles your direct messages).
 
 The first check only remembers the recordings that already exist; from then
-on, each new one is sent once. If that first check fails (Plaud is
-unreachable, or the login has already expired), the next one starts over,
-so recordings from before you connected are still not sent. Signing in
+on, each new one is sent until its brain has answered it. If that first
+check fails (Plaud is unreachable, or the login has already expired), the
+next one starts over, so recordings from before you connected are still not
+sent. Signing in
 with a different Plaud account starts over the same way. Signing in again
 with the same account, after the login expired say, picks up where it left
 off: what you recorded in between still arrives. Turning **Send new
@@ -48,6 +49,16 @@ rewrites its file rather than adding a copy), and gives it to the brain
 like a WhatsApp attachment, with an instruction (`plaud.message`; `{name}`,
 `{when}` and `{duration}` are filled in). It runs in the brain you picked, with
 that brain's memory and history.
+
+A recording counts as handed over once the brain's run has answered it.
+When the brain's queue is full, it waits for the next check. A run that
+fails is repeated after 5 and then 10 minutes; after the third the
+recording is given up (on the card, with one notice). A run you stop with
+`!stop` or from the dashboard is not repeated: the card offers **Send
+again**, as it does for recordings given up. When Fridolin restarts while
+a recording waits for its run or is running, it is handed over again
+after the restart, so a brain may now and then get the same recording
+twice; its file is rewritten, not copied.
 
 Recordings are private, so the brain's answer never goes to a group: it goes
 to the brain's `reply_chat` when that is a direct chat, otherwise to your own

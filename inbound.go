@@ -31,6 +31,12 @@ type Inbound struct {
 	Silent bool
 	Source string // sourceWhatsApp, sourceIngest or sourceDev
 	At     time.Time
+	// Done, when set, hears how the message ended once its brain took it:
+	// nil after a run that answered it, else why not (the run failed or
+	// was stopped, or the message was dropped before it ran). A refused
+	// Submit calls nothing. Only a hand-off that skips the debouncer sets
+	// it (Bridge.submitHandOff); a merged message keeps the first one's.
+	Done func(error)
 }
 
 // Where a message came from, Inbound.Source.

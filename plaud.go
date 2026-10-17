@@ -94,8 +94,15 @@ const (
 	// a time rather than as a burst of brain runs and replies.
 	plaudHandOffsPerCheck = 5
 	plaudPendingMaxAge    = 3 * 24 * time.Hour
-	// plaudGivenUpKeep is how many given-up recordings the card lists.
-	plaudGivenUpKeep = 20
+	// plaudGivenUpKeep is how many given-up recordings the card lists, and
+	// plaudForwardedKeep how many handed over.
+	plaudGivenUpKeep   = 20
+	plaudForwardedKeep = 10
+	// plaudRunTries is how many brain runs a recording gets before it is
+	// given up; plaudRunRetryDelay is the wait after the first that failed,
+	// doubled after each.
+	plaudRunTries      = 3
+	plaudRunRetryDelay = 5 * time.Minute
 	// plaudPolishedWait is how long a recording waits for Plaud's cleaned-up
 	// transcript (plaud.polished) before the raw one is sent instead. Plaud
 	// makes the raw one first, and may never make the other.
@@ -124,8 +131,9 @@ type plaudState struct {
 	Seen    []string `json:"seen"`
 	// Pending holds the recordings that are new and not handed over yet.
 	Pending map[string]*plaudPending `json:"pending"`
-	// LastForwarded is the last recording handed to a brain, for the card.
-	LastForwarded *PlaudForward `json:"last_forwarded,omitempty"`
+	// Forwarded lists the latest recordings handed to a brain, one entry
+	// each, the latest last, with how their runs went, for the card.
+	Forwarded []PlaudForward `json:"forwarded,omitempty"`
 	// GivenUp lists the latest recordings Fridolin gave up on, oldest
 	// first, for the card.
 	GivenUp []plaudGivenUp `json:"given_up,omitempty"`
@@ -158,6 +166,14 @@ type plaudPending struct {
 	// it. The next try is not before NextTry (see plaudRetryDelay).
 	Tries   int       `json:"tries,omitempty"`
 	NextTry time.Time `json:"next_try,omitzero"`
+	// Handed is when it was handed to a brain whose run has not ended yet.
+	// A recording stays here until its run answered it, so one whose run is
+	// lost (the bridge restarted meanwhile) is handed over again. Brain is
+	// the brain it went to, also once the card's entry for it is trimmed;
+	// Runs counts the runs that failed.
+	Handed time.Time `json:"handed,omitzero"`
+	Brain  string    `json:"brain,omitempty"`
+	Runs   int       `json:"runs,omitempty"`
 }
 
 // plaudGivenUp is a recording Fridolin stopped trying to hand over.
@@ -243,11 +259,36 @@ func (st *plaudState) pendingInOrder() []string {
 	return ids
 }
 
-// PlaudForward describes the last recording handed to a brain.
+// PlaudForward is a recording handed to a brain, and how its run went.
 type PlaudForward struct {
+	ID    string    `json:"id"`
 	Name  string    `json:"name"`
 	Brain string    `json:"brain"`
 	At    time.Time `json:"at"`
+	// Status is handed (the brain has it: waiting or running), done,
+	// stopped (by !stop, the dashboard, or the brain's removal; not sent
+	// again unless you send it again) or failed (tried again, up to
+	// plaudRunTries runs).
+	Status string `json:"status"`
+	Error  string `json:"error,omitempty"`
+}
+
+// The statuses of a PlaudForward.
+const (
+	plaudRunHanded  = "handed"
+	plaudRunDone    = "done"
+	plaudRunStopped = "stopped"
+	plaudRunFailed  = "failed"
+)
+
+// forwardOf returns the entry for recording id in st.Forwarded, or nil.
+func (st *plaudState) forwardOf(id string) *PlaudForward {
+	for i := range st.Forwarded {
+		if st.Forwarded[i].ID == id {
+			return &st.Forwarded[i]
+		}
+	}
+	return nil
 }
 
 // PlaudManager runs the CLI, the poller and the connect flow. It knows the
@@ -256,8 +297,10 @@ type PlaudForward struct {
 type PlaudManager struct {
 	cfgs   *ConfigStore
 	brains *BrainManager
-	// handOff gives a recording's transcript to br, whose answer goes to jid.
-	handOff func(br *Brain, jid, sender, text string, media []string)
+	// submit gives a recording's transcript to br, whose answer goes to
+	// jid. An error means br did not take it; done then hears how its run
+	// ended (see Inbound.Done).
+	submit func(br *Brain, jid, sender, text string, media []string, done func(error)) error
 	// notify sends text to a chat (the expiry notice).
 	notify func(ctx context.Context, jid, text string) error
 
@@ -281,6 +324,12 @@ type PlaudManager struct {
 	// clears it.
 	refused bool
 	busy    bool
+	// inFlight holds the recordings handed to a brain since this start
+	// whose runs have not ended. stopping is set by Stop: the runs that end
+	// then were stopped with Fridolin, and are handed over again at the
+	// next start.
+	inFlight map[string]bool
+	stopping bool
 	// accountBusy and accountTried keep refreshAccount to one run at a
 	// time and one try per plaudAccountEvery.
 	accountBusy  bool
@@ -300,9 +349,9 @@ type PlaudManager struct {
 	run func(ctx context.Context, args ...string) (string, error)
 }
 
-// NewPlaudManager creates the manager. The caller sets handOff and notify.
+// NewPlaudManager creates the manager. The caller sets submit and notify.
 func NewPlaudManager(cfgs *ConfigStore, brains *BrainManager) *PlaudManager {
-	p := &PlaudManager{cfgs: cfgs, brains: brains}
+	p := &PlaudManager{cfgs: cfgs, brains: brains, inFlight: map[string]bool{}}
 	p.run = p.runCLI
 	return p
 }
@@ -769,9 +818,121 @@ func (p *PlaudManager) forward(ctx context.Context, id string, item *plaudPendin
 		tpl = defaultPlaudMessage
 	}
 	text := strings.NewReplacer("{name}", name, "{when}", when, "{duration}", duration).Replace(tpl)
-	p.handOff(br, jid, "plaud", text, []string{path})
+	// Marked as handed before the brain gets it, so that a run that ends
+	// at once finds it so.
+	fw := PlaudForward{ID: id, Name: name, Brain: br.ID(), At: time.Now(), Status: plaudRunHanded}
+	if err := p.markHanded(fw); err != nil {
+		return nil, err
+	}
+	if err := p.submit(br, jid, "plaud", text, []string{path}, p.runEnded(id)); err != nil {
+		p.unmarkHanded(id)
+		return nil, fmt.Errorf("brain %s did not take it: %w", br.ID(), err)
+	}
 	log.Printf("plaud %s: handed %q to brain %s", id, name, br.ID())
-	return &PlaudForward{Name: name, Brain: br.ID(), At: time.Now()}, nil
+	return &fw, nil
+}
+
+// markHanded notes that the recording fw.ID is about to go to a brain.
+func (p *PlaudManager) markHanded(fw PlaudForward) error {
+	p.mu.Lock()
+	p.inFlight[fw.ID] = true
+	p.mu.Unlock()
+	return p.update(func(st *plaudState) error {
+		if cur := st.Pending[fw.ID]; cur != nil {
+			cur.Handed, cur.Brain = fw.At, fw.Brain
+		}
+		st.Forwarded = append(slices.DeleteFunc(st.Forwarded, func(f PlaudForward) bool { return f.ID == fw.ID }), fw)
+		if len(st.Forwarded) > plaudForwardedKeep {
+			st.Forwarded = st.Forwarded[len(st.Forwarded)-plaudForwardedKeep:]
+		}
+		return nil
+	})
+}
+
+// unmarkHanded undoes markHanded for a recording the brain did not take.
+func (p *PlaudManager) unmarkHanded(id string) {
+	p.mu.Lock()
+	delete(p.inFlight, id)
+	p.mu.Unlock()
+	if err := p.update(func(st *plaudState) error {
+		if cur := st.Pending[id]; cur != nil {
+			cur.Handed = time.Time{}
+		}
+		st.Forwarded = slices.DeleteFunc(st.Forwarded, func(f PlaudForward) bool { return f.ID == id })
+		return nil
+	}); err != nil {
+		log.Printf("plaud %s: %v", id, err)
+	}
+}
+
+// runEnded returns what recording id's hand-off calls when its run ends:
+// done, it is seen; stopped, it is seen too, and you can send it again
+// from the dashboard; failed, it is handed over again later, up to
+// plaudRunTries runs, and then given up. A run that ends because Fridolin
+// is stopping changes nothing, so the next start hands it over again.
+func (p *PlaudManager) runEnded(id string) func(error) {
+	return func(runErr error) {
+		p.mu.Lock()
+		stopping := p.stopping
+		delete(p.inFlight, id)
+		p.mu.Unlock()
+		if stopping {
+			return
+		}
+		var gaveUp *plaudGivenUp
+		var brain string
+		err := p.update(func(st *plaudState) error {
+			cur := st.Pending[id]
+			if cur == nil || cur.Handed.IsZero() {
+				return nil
+			}
+			fw := st.forwardOf(id)
+			if fw == nil {
+				st.Forwarded = append(st.Forwarded, PlaudForward{ID: id, Name: cur.Name, Brain: cur.Brain, At: cur.Handed})
+				fw = &st.Forwarded[len(st.Forwarded)-1]
+			}
+			brain = fw.Brain
+			switch {
+			case runErr == nil:
+				fw.Status, fw.Error = plaudRunDone, ""
+			case errors.Is(runErr, errBrainInterrupted) || errors.Is(runErr, errBrainDropped) || errors.Is(runErr, context.Canceled):
+				fw.Status, fw.Error = plaudRunStopped, ""
+				log.Printf("plaud %s: stopped before brain %s answered it; it is not sent again unless you send it again from the dashboard", id, brain)
+			default:
+				cur.Runs++
+				fw.Status, fw.Error = plaudRunFailed, runErr.Error()
+				if cur.Runs < plaudRunTries {
+					wait := plaudRunRetryDelay << (cur.Runs - 1)
+					cur.Handed, cur.NextTry = time.Time{}, time.Now().Add(wait)
+					log.Printf("plaud %s: brain %s's run failed (%v), handing it over again in %v", id, brain, runErr, wait)
+					return nil
+				}
+				g := plaudGivenUp{ID: id, Name: cur.Name, At: time.Now(), Reason: fmt.Sprintf("the brain's run failed %d times (%v)", cur.Runs, runErr)}
+				st.GivenUp = append(st.GivenUp, g)
+				if len(st.GivenUp) > plaudGivenUpKeep {
+					st.GivenUp = st.GivenUp[len(st.GivenUp)-plaudGivenUpKeep:]
+				}
+				gaveUp = &g
+				log.Printf("plaud %s: brain %s's run failed %d times, giving up", id, brain, cur.Runs)
+			}
+			delete(st.Pending, id)
+			st.Seen = append(st.Seen, id)
+			return nil
+		})
+		if err != nil {
+			log.Printf("plaud %s: %v", id, err)
+		}
+		if gaveUp != nil {
+			// The brain's worker calls this; the notice must not hold it up.
+			p.bg.Add(1)
+			go func() {
+				defer p.bg.Done()
+				if _, jid, err := p.destination(); err == nil {
+					p.noticeGivenUp(brain, jid, cmp.Or(gaveUp.Name, id), gaveUp.Reason)
+				}
+			}()
+		}
+	}
 }
 
 // plaudTranscriptPath is where the transcript of recording id goes in dir.
@@ -1063,6 +1224,15 @@ func (p *PlaudManager) poll(ctx context.Context) error {
 		if now.Before(item.NextTry) {
 			continue
 		}
+		if !item.Handed.IsZero() {
+			p.mu.Lock()
+			running := p.inFlight[id]
+			p.mu.Unlock()
+			if running {
+				continue
+			}
+			log.Printf("plaud %s: handed over before a restart and not answered, handing it over again", id)
+		}
 		fw, err := p.forward(ctx, id, &item, br, jid)
 		if errors.Is(err, errPlaudAuth) {
 			return err
@@ -1098,7 +1268,7 @@ func (p *PlaudManager) poll(ctx context.Context) error {
 			cur.Name = item.Name
 			switch {
 			case fw != nil:
-				st.LastForwarded = fw
+				return nil // markHanded noted it; its run decides the rest
 			case why != "":
 				st.GivenUp = append(st.GivenUp, plaudGivenUp{ID: id, Name: item.Name, At: time.Now(), Reason: why})
 				if len(st.GivenUp) > plaudGivenUpKeep {
@@ -1118,18 +1288,18 @@ func (p *PlaudManager) poll(ctx context.Context) error {
 		// You deleted it yourself; the rest you hear about, since a
 		// recording that never arrives is otherwise easy to miss.
 		if why != "" && !deleted {
-			p.noticeGivenUp(br, jid, cmp.Or(item.Name, id), why)
+			p.noticeGivenUp(br.ID(), jid, cmp.Or(item.Name, id), why)
 		}
 	}
 	return errors.Join(failed...)
 }
 
 // noticeGivenUp tells the chat summaries go to that recording name will
-// not reach br, and why.
-func (p *PlaudManager) noticeGivenUp(br *Brain, jid, name, why string) {
+// not reach brain, and why.
+func (p *PlaudManager) noticeGivenUp(brain, jid, name, why string) {
 	ctx, cancel := context.WithTimeout(p.lifetime(), 30*time.Second)
 	defer cancel()
-	text := fmt.Sprintf("⚠️ Plaud: the recording “%s” was not handed to brain %s: %s. It is still in Plaud, and the dashboard lists it (Integrations → Plaud).", name, br.ID(), why)
+	text := fmt.Sprintf("⚠️ Plaud: the recording “%s” was not handed to brain %s: %s. It is still in Plaud, and the dashboard lists it (Integrations → Plaud).", name, brain, why)
 	if err := p.notify(ctx, jid, text); err != nil {
 		log.Printf("plaud: could not send the notice about a recording given up: %v", err)
 	}
@@ -1158,7 +1328,7 @@ func (p *PlaudManager) seed(ctx context.Context, acct string) error {
 	return p.update(func(st *plaudState) error {
 		fresh := newPlaudState()
 		fresh.Seeded, fresh.Account, fresh.Seen = true, acct, listed
-		fresh.LastForwarded, fresh.Login = st.LastForwarded, st.Login
+		fresh.Forwarded, fresh.Login = st.Forwarded, st.Login
 		if fresh.Login == nil {
 			fresh.Login = &plaudLogin{Dir: p.cliHome(), Since: time.Now()}
 		}
@@ -1252,9 +1422,11 @@ func (p *PlaudManager) lifetime() context.Context {
 }
 
 // Stop ends the poller, a running check and a running sign-in, and waits
-// for a look-up of the account.
+// for a look-up of the account. Recordings whose runs it stops are handed
+// over again at the next start.
 func (p *PlaudManager) Stop() {
 	p.mu.Lock()
+	p.stopping = true
 	if p.stop != nil {
 		p.stop()
 	}
@@ -1272,10 +1444,12 @@ var plaudURLRe = regexp.MustCompile(`https?://[^\s'"]+`)
 // What the dashboard's Plaud actions refuse, and why; the handlers word
 // them for the card.
 var (
-	errPlaudNotInstalled = errors.New("the Plaud CLI is not installed")
-	errPlaudSigningIn    = errors.New("already signing in — finish in the browser tab Plaud opened")
-	errPlaudNotConnected = errors.New("the Plaud CLI is not signed in")
-	errPlaudSendingOff   = errors.New("sending new recordings to a brain is off")
+	errPlaudUnknownRecording = errors.New("no such recording: only one Fridolin handed over or gave up can be sent again")
+	errPlaudAlreadyWaiting   = errors.New("that recording is already waiting to be handed over")
+	errPlaudNotInstalled     = errors.New("the Plaud CLI is not installed")
+	errPlaudSigningIn        = errors.New("already signing in — finish in the browser tab Plaud opened")
+	errPlaudNotConnected     = errors.New("the Plaud CLI is not signed in")
+	errPlaudSendingOff       = errors.New("sending new recordings to a brain is off")
 )
 
 // PlaudCLI says whether the Plaud CLI is installed, and where.
@@ -1302,13 +1476,18 @@ type PlaudStatus struct {
 	SummaryToYou     bool   `json:"summary_to_you,omitempty"`
 	SummaryChatBrain string `json:"summary_chat_brain,omitempty"`
 	SummaryError     string `json:"summary_error,omitempty"`
-	// Seen and Pending count recordings once there is a state.
+	// Seen, Pending (waiting to be handed over) and Handed (with a brain,
+	// waiting for its run or running) count recordings after the first
+	// sync.
 	Seen          *int          `json:"seen,omitempty"`
 	Pending       *int          `json:"pending,omitempty"`
+	Handed        *int          `json:"handed,omitempty"`
 	Connect       *connectJob   `json:"connect,omitempty"`
 	LastPoll      *time.Time    `json:"last_poll,omitempty"`
 	LastError     string        `json:"last_error,omitempty"`
 	LastForwarded *PlaudForward `json:"last_forwarded,omitempty"`
+	// Forwarded lists the latest recordings handed over, the latest last.
+	Forwarded []PlaudForward `json:"forwarded,omitempty"`
 	// GivenUp lists the latest recordings that were not handed over, and
 	// why, oldest first.
 	GivenUp []plaudGivenUp `json:"given_up,omitempty"`
@@ -1355,10 +1534,20 @@ func (p *PlaudManager) Status() PlaudStatus {
 	}
 	if st, _ := p.loadState(); st != nil {
 		if st.Seeded {
-			seen, pending := len(st.Seen), len(st.Pending)
-			s.Seen, s.Pending = &seen, &pending
+			seen, pending, handed := len(st.Seen), 0, 0
+			for _, it := range st.Pending {
+				if it.Handed.IsZero() {
+					pending++
+				} else {
+					handed++
+				}
+			}
+			s.Seen, s.Pending, s.Handed = &seen, &pending, &handed
 		}
-		s.LastForwarded, s.GivenUp = st.LastForwarded, st.GivenUp
+		s.Forwarded, s.GivenUp = st.Forwarded, st.GivenUp
+		if n := len(st.Forwarded); n > 0 {
+			s.LastForwarded = &st.Forwarded[n-1]
+		}
 	}
 	p.mu.Lock()
 	if p.connect != nil {
@@ -1499,6 +1688,55 @@ func (p *PlaudManager) CheckNow() (bool, error) {
 		}
 	}()
 	return true, nil
+}
+
+// Resend hands recording id over again: one handed over before (its run
+// stopped, say) or given up. It waits like a new recording, and a check
+// starts at once when one can.
+func (p *PlaudManager) Resend(id string) error {
+	err := p.update(func(st *plaudState) error {
+		if st.Pending[id] != nil {
+			return errPlaudAlreadyWaiting
+		}
+		known := func(id string) bool {
+			return st.forwardOf(id) != nil || slices.ContainsFunc(st.GivenUp, func(g plaudGivenUp) bool { return g.ID == id })
+		}
+		if !known(id) {
+			return errPlaudUnknownRecording
+		}
+		st.Seen = slices.DeleteFunc(st.Seen, func(s string) bool { return s == id })
+		st.GivenUp = slices.DeleteFunc(st.GivenUp, func(g plaudGivenUp) bool { return g.ID == id })
+		st.Pending[id] = &plaudPending{FirstSeen: time.Now()}
+		return nil
+	})
+	if err != nil {
+		return err
+	}
+	log.Printf("plaud %s: sending it again, as asked on the dashboard", id)
+	if _, err := p.CheckNow(); err != nil {
+		log.Printf("plaud %s: sent again at the next check: %v", id, err)
+	}
+	return nil
+}
+
+func (b *Bridge) apiPlaudResend(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		ID string `json:"id"`
+	}
+	if err := decodeJSON(r, &req); err != nil {
+		writeErr(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	switch err := b.plaud.Resend(req.ID); {
+	case errors.Is(err, errPlaudUnknownRecording):
+		writeErr(w, http.StatusNotFound, err.Error())
+	case errors.Is(err, errPlaudAlreadyWaiting):
+		writeErr(w, http.StatusConflict, err.Error())
+	case err != nil:
+		writeErr(w, http.StatusInternalServerError, err.Error())
+	default:
+		writeJSON(w, http.StatusAccepted, map[string]string{"status": "waiting"})
+	}
 }
 
 func (b *Bridge) apiPlaudStatus(w http.ResponseWriter, r *http.Request) {

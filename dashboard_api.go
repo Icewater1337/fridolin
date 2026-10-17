@@ -80,6 +80,7 @@ func (b *Bridge) apiMux() http.Handler {
 	mux.HandleFunc("POST /api/plaud/disconnect", b.apiPlaudDisconnect)
 	mux.HandleFunc("PUT /api/plaud/settings", b.apiPlaudSettings)
 	mux.HandleFunc("POST /api/plaud/sync", b.apiPlaudSync)
+	mux.HandleFunc("POST /api/plaud/resend", b.apiPlaudResend)
 
 	b.siteAPI(mux)
 
