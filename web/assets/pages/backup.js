@@ -1,7 +1,7 @@
 // Backup: Google Drive via rclone — connect, schedule, per-brain settings,
 // run now, progress, and restore into a new folder.
 
-import { get, post, put, qs } from '../app/api.js';
+import { get, post, put } from '../app/api.js';
 import { resource } from '../app/resources.js';
 import { folderBrowser } from '../components/folder-browser.js';
 import { liveForm } from '../components/live-form.js';
@@ -296,7 +296,7 @@ export default {
         onChange: async (v, input) => {
           input.disabled = true;
           try {
-            await put('/api/backup/settings', { brain: b.id, brain_enabled: v });
+            await put(`/api/brains/${encodeURIComponent(b.id)}/backup`, { enabled: v });
             toast(`${b.name || b.id}: backups ${v ? 'on' : 'off'}`, 'ok');
             await refresh();
           } catch (e) {
@@ -373,7 +373,7 @@ export default {
           h('p.muted.small', 'Examples: ', mono('node_modules/'), ' ', mono('*.log'), ' ', mono('/big-exports/'))),
         actions: [
           { label: 'Cancel', value: null },
-          { label: 'Save', kind: 'primary', onClick: async () => { await put('/api/backup/settings', { brain: b.id, brain_exclude: linesOf(ta) }); return true; } },
+          { label: 'Save', kind: 'primary', onClick: async () => { await put(`/api/brains/${encodeURIComponent(b.id)}/backup`, { exclude: linesOf(ta) }); return true; } },
         ],
       });
       if (saved) { toast('Saved', 'ok'); await refresh(); }
@@ -413,7 +413,7 @@ export default {
         mount(versionsBox, h('div.muted', loading('Asking Google Drive for the versions…')));
         try {
           // rclone may take up to a minute to list them.
-          const r = await get(`/api/backup/versions${qs({ brain: id })}`, { signal: ctx.signal, timeout: 90000 });
+          const r = await get(`/api/brains/${encodeURIComponent(id)}/backup/versions`, { signal: ctx.signal, timeout: 90000 });
           if (currentId() !== id) return;
           versions = r.versions || [];
           paintVersions();

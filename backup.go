@@ -853,14 +853,11 @@ func (b *Bridge) apiBackupDisconnect(w http.ResponseWriter, r *http.Request) {
 
 func (b *Bridge) apiBackupSettings(w http.ResponseWriter, r *http.Request) {
 	var req struct {
-		Enabled             *bool    `json:"enabled"`
-		DailyAt             *string  `json:"daily_at"`
-		Root                *string  `json:"root"`
-		KeepVersionsDays    *int     `json:"keep_versions_days"`
-		IncludeBridgeConfig *bool    `json:"include_bridge_config"`
-		Brain               string   `json:"brain"`
-		BrainEnabled        *bool    `json:"brain_enabled"`
-		BrainExclude        []string `json:"brain_exclude"`
+		Enabled             *bool   `json:"enabled"`
+		DailyAt             *string `json:"daily_at"`
+		Root                *string `json:"root"`
+		KeepVersionsDays    *int    `json:"keep_versions_days"`
+		IncludeBridgeConfig *bool   `json:"include_bridge_config"`
 	}
 	if err := decodeJSON(r, &req); err != nil {
 		writeErr(w, http.StatusBadRequest, err.Error())
@@ -882,12 +879,29 @@ func (b *Bridge) apiBackupSettings(w http.ResponseWriter, r *http.Request) {
 		if req.IncludeBridgeConfig != nil {
 			c.Backup.IncludeBridgeConfig = req.IncludeBridgeConfig
 		}
-		if req.Brain == "" {
-			return nil
-		}
-		return updateBrainBackup(c, req.Brain, req.BrainEnabled, req.BrainExclude)
+		return nil
 	})
 	if err != nil {
+		writeErr(w, http.StatusUnprocessableEntity, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"status": "saved"})
+}
+
+// apiBrainBackup changes one brain's backup settings, which live in its
+// manifest: whether it is backed up and what is left out.
+func (b *Bridge) apiBrainBackup(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Enabled *bool    `json:"enabled"`
+		Exclude []string `json:"exclude"`
+	}
+	if err := decodeJSON(r, &req); err != nil {
+		writeErr(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	if _, err := b.cfgs.Update("", func(c *Config) error {
+		return updateBrainBackup(c, r.PathValue("id"), req.Enabled, req.Exclude)
+	}); err != nil {
 		writeErr(w, http.StatusUnprocessableEntity, err.Error())
 		return
 	}
@@ -1573,9 +1587,9 @@ func backupNameOK(id string) bool {
 var restoreVersionRe = regexp.MustCompile(`^(current|\d{8}-\d{6}Z?)$`)
 
 func (b *Bridge) apiBackupVersions(w http.ResponseWriter, r *http.Request) {
-	id := r.URL.Query().Get("brain")
+	id := r.PathValue("id")
 	if !backupNameOK(id) {
-		writeErr(w, http.StatusBadRequest, "brain required")
+		writeErr(w, http.StatusBadRequest, "invalid brain")
 		return
 	}
 	if !b.backup.connected() {

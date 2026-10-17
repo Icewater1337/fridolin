@@ -195,7 +195,7 @@ export default {
             const ok = await confirmDialog({ title: 'Stop and clear the queue?', message: `The current run stops and ${plural(queue.length, 'waiting message')} will not be answered.`, confirm: 'Stop & clear', danger: true });
             if (!ok) return;
           }
-          const r = await post(`/api/runs/${encodeURIComponent(id)}/stop`, { clear_queue: clear });
+          const r = await post(`/api/brains/${encodeURIComponent(id)}/stop`, { clear_queue: clear });
           toast(r && r.stopped ? 'Stopped' : 'Nothing was running', r && r.stopped ? 'ok' : 'info');
           await refresh();
         },

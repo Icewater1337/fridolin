@@ -36,7 +36,6 @@ func (b *Bridge) apiMux() http.Handler {
 	mux.HandleFunc("POST /api/whatsapp/pair", b.apiPair)
 	mux.HandleFunc("GET /api/whatsapp/groups", b.apiGroups)
 	mux.HandleFunc("GET /api/activity", b.apiActivity)
-	mux.HandleFunc("POST /api/runs/{brain}/stop", b.apiStopRun)
 	mux.HandleFunc("GET /api/logs", b.apiLogs)
 
 	mux.HandleFunc("GET /api/chats/ignored", b.apiIgnored)
@@ -54,6 +53,7 @@ func (b *Bridge) apiMux() http.Handler {
 	mux.HandleFunc("PUT /api/brains/{id}", b.apiUpdateBrain)
 	mux.HandleFunc("POST /api/brains/{id}/approve", b.apiApproveBrain)
 	mux.HandleFunc("DELETE /api/brains/{id}", b.apiRemoveBrain)
+	mux.HandleFunc("POST /api/brains/{id}/stop", b.apiStopRun)
 
 	mux.HandleFunc("GET /api/fs/capabilities", b.apiFSCaps)
 	mux.HandleFunc("POST /api/fs/pick", b.apiFSPick)
@@ -65,8 +65,9 @@ func (b *Bridge) apiMux() http.Handler {
 	mux.HandleFunc("PUT /api/backup/settings", b.apiBackupSettings)
 	mux.HandleFunc("POST /api/backup/run", b.apiBackupRun)
 	mux.HandleFunc("POST /api/backup/cancel", b.apiBackupCancel)
-	mux.HandleFunc("GET /api/backup/versions", b.apiBackupVersions)
 	mux.HandleFunc("POST /api/backup/restore", b.apiBackupRestore)
+	mux.HandleFunc("PUT /api/brains/{id}/backup", b.apiBrainBackup)
+	mux.HandleFunc("GET /api/brains/{id}/backup/versions", b.apiBackupVersions)
 
 	mux.HandleFunc("GET /api/google/client", b.apiGoogleClient)
 	mux.HandleFunc("PUT /api/google/client", b.apiSetGoogleClient)
@@ -85,12 +86,14 @@ func (b *Bridge) apiMux() http.Handler {
 
 	b.siteAPI(mux)
 
-	mux.HandleFunc("POST /api/dev/inbound", b.apiDevInbound)
-	mux.HandleFunc("GET /api/dev/outbox", b.apiDevOutbox)
+	// Only in dev mode: outside it they are not there at all (404).
+	if b.dev != nil {
+		mux.HandleFunc("POST /api/dev/inbound", b.apiDevInbound)
+		mux.HandleFunc("GET /api/dev/outbox", b.apiDevOutbox)
+	}
 
-	mux.HandleFunc("/api/", func(w http.ResponseWriter, r *http.Request) {
-		writeErr(w, http.StatusNotFound, "no such API endpoint")
-	})
+	// No catch-all: the mux answers an unknown path with 404 and a known
+	// one asked with the wrong method with 405 and an Allow header.
 	return mux
 }
 
@@ -309,7 +312,7 @@ func (b *Bridge) apiActivity(w http.ResponseWriter, r *http.Request) {
 }
 
 func (b *Bridge) apiStopRun(w http.ResponseWriter, r *http.Request) {
-	br := b.brainMgr.Get(r.PathValue("brain"))
+	br := b.brainMgr.Get(r.PathValue("id"))
 	if br == nil {
 		writeErr(w, http.StatusNotFound, "no such brain")
 		return
@@ -1078,10 +1081,6 @@ func (b *Bridge) apiFSList(w http.ResponseWriter, r *http.Request) {
 // ── dev mode ─────────────────────────────────────────────────────────────
 
 func (b *Bridge) apiDevInbound(w http.ResponseWriter, r *http.Request) {
-	if b.dev == nil {
-		writeErr(w, http.StatusNotFound, "only available with --no-whatsapp")
-		return
-	}
 	var req struct {
 		JID    string   `json:"jid"`
 		Sender string   `json:"sender"`
@@ -1131,10 +1130,6 @@ func (b *Bridge) apiDevInbound(w http.ResponseWriter, r *http.Request) {
 }
 
 func (b *Bridge) apiDevOutbox(w http.ResponseWriter, r *http.Request) {
-	if b.dev == nil {
-		writeErr(w, http.StatusNotFound, "only available with --no-whatsapp")
-		return
-	}
 	writeJSON(w, http.StatusOK, b.dev.Outbox())
 }
 

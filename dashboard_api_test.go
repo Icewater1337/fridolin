@@ -3,6 +3,7 @@ package main
 import (
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -77,7 +78,7 @@ func TestDashboardRequestBodiesDecode(t *testing.T) {
 			"model":   "", "effort": "", "backup": map[string]any{"enabled": true, "exclude": []string{}},
 		}, "create_dir": true, "use_existing": false}},
 		{"PUT", "/api/brains/notes", map[string]any{"manifest": manifest}},
-		{"POST", "/api/runs/notes/stop", map[string]any{"clear_queue": true}},
+		{"POST", "/api/brains/notes/stop", map[string]any{"clear_queue": true}},
 		{"POST", "/api/chats/allow", map[string]any{"jid": "15559876543@s.whatsapp.net", "kind": "dm", "number": "15559876543"}},
 		{"POST", "/api/chats/allow", map[string]any{"jid": "120363000000000001@g.us", "kind": "group", "brain": "notes"}},
 		{"POST", "/api/chats/dismiss", map[string]any{"jid": "120363000000000002@g.us"}},
@@ -87,8 +88,8 @@ func TestDashboardRequestBodiesDecode(t *testing.T) {
 		{"POST", "/api/chats/revoke", map[string]any{"kind": "dm", "number": "15559876543"}},
 		{"POST", "/api/chats/revoke", map[string]any{"kind": "group", "jid": "120363000000000003@g.us"}},
 		{"PUT", "/api/backup/settings", map[string]any{"enabled": false, "daily_at": "03:30", "root": "fridolin-backup", "keep_versions_days": 30, "include_bridge_config": true}},
-		{"PUT", "/api/backup/settings", map[string]any{"brain": "notes", "brain_enabled": true}},
-		{"PUT", "/api/backup/settings", map[string]any{"brain": "notes", "brain_exclude": []string{"*.log"}}},
+		{"PUT", "/api/brains/notes/backup", map[string]any{"enabled": true}},
+		{"PUT", "/api/brains/notes/backup", map[string]any{"exclude": []string{"*.log"}}},
 		{"POST", "/api/backup/run", map[string]any{}},
 		{"POST", "/api/backup/restore", map[string]any{"brain": "notes", "version": "../refused", "target": "~/restored"}},
 		{"POST", "/api/backup/run", map[string]any{"brains": []string{"notes"}, "include_bridge": false, "force": true}},
@@ -127,5 +128,65 @@ func TestDashboardRefusesUnknownKeys(t *testing.T) {
 	w = tb.do("POST", "/api/chats/dismiss", nil)
 	if w.Code != http.StatusBadRequest || !strings.Contains(w.Body.String(), "JSON body is required") {
 		t.Fatalf("dismiss without a body: %d %s", w.Code, w.Body.String())
+	}
+}
+
+// The API answers like any net/http mux: 404 for a path it does not have,
+// 405 with Allow for one asked with the wrong method. Outside dev mode the
+// dev endpoints are not there at all.
+func TestAPIRoutesAnswer404And405(t *testing.T) {
+	tb := newTestBridge(t, "")
+	cases := []struct {
+		method, path string
+		want         int
+		allow        string
+	}{
+		{"GET", "/api/restart", http.StatusMethodNotAllowed, "POST"},
+		{"POST", "/api/status", http.StatusMethodNotAllowed, "GET, HEAD"},
+		{"GET", "/api/nothing-here", http.StatusNotFound, ""},
+		{"GET", "/api/runs", http.StatusNotFound, ""},
+		{"POST", "/api/runs/notes/stop", http.StatusNotFound, ""},
+		{"GET", "/api/backup/versions?brain=notes", http.StatusNotFound, ""},
+		{"GET", "/api/dev/outbox", http.StatusOK, ""},
+	}
+	for _, c := range cases {
+		t.Run(c.method+" "+c.path, func(t *testing.T) {
+			w := tb.do(c.method, c.path, nil)
+			if w.Code != c.want || w.Header().Get("Allow") != c.allow {
+				t.Fatalf("%d (Allow %q), want %d (Allow %q): %s", w.Code, w.Header().Get("Allow"), c.want, c.allow, w.Body.String())
+			}
+		})
+	}
+
+	tb.dev = nil
+	tb.h = tb.newHTTPHandler("127.0.0.1:8765")
+	for _, path := range []string{"/api/dev/outbox", "/api/dev/inbound"} {
+		method := "GET"
+		if path == "/api/dev/inbound" {
+			method = "POST"
+		}
+		if w := tb.do(method, path, map[string]string{"jid": "x"}); w.Code != http.StatusNotFound {
+			t.Errorf("%s %s outside dev mode: %d %s", method, path, w.Code, w.Body.String())
+		}
+	}
+}
+
+// A brain's backup settings have a route of their own, and the global
+// settings no longer take a brain.
+func TestBrainBackupRoute(t *testing.T) {
+	tb := newTestBridge(t, "")
+	tb.addFolderBrain(t, BrainManifest{ID: "notes", Name: "Notes"})
+	if w := tb.do("PUT", "/api/brains/notes/backup", map[string]any{"enabled": false, "exclude": []string{" *.tmp ", ""}}); w.Code != 200 {
+		t.Fatalf("%d %s", w.Code, w.Body.String())
+	}
+	m := tb.brainMgr.Get("notes").settings.Load().manifest
+	if m.Backup.Enabled || !slices.Equal(m.Backup.Exclude, []string{"*.tmp"}) {
+		t.Fatalf("backup = %+v", m.Backup)
+	}
+	if w := tb.do("PUT", "/api/brains/nobody/backup", map[string]any{"enabled": true}); w.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("unknown brain: %d %s", w.Code, w.Body.String())
+	}
+	if w := tb.do("PUT", "/api/backup/settings", map[string]any{"brain": "notes", "brain_enabled": true}); w.Code != http.StatusBadRequest {
+		t.Fatalf("global settings with a brain: %d %s", w.Code, w.Body.String())
 	}
 }

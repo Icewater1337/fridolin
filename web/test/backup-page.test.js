@@ -48,6 +48,26 @@ test('a schedule edit goes with the connection, and the schedule comes back with
   assert.equal(ctx.dirty(), false);
 });
 
+test('a brain\'s backup switch saves through its own route', async (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout', 'Date'] });
+  installDom();
+  noConsoleErrors(t);
+  const calls = serve(t, (path) => (path.startsWith('/api/backup/status') ? connected() : {}));
+  const root = h('div');
+  document.body.append(root);
+  const ctx = createPage();
+  t.after(() => ctx.destroy());
+  page.render(root, ctx);
+  await settle();
+  const sw = root.querySelector('tr input[role=switch]');
+  assert.ok(sw, 'the brain row has a switch');
+  sw.checked = false;
+  sw.dispatchEvent(new Event('change'));
+  await settle();
+  const saves = calls.filter((c) => c.method === 'PUT');
+  assert.deepEqual(saves.map((c) => [c.path, c.body]), [['/api/brains/work/backup', { enabled: false }]]);
+});
+
 test('a refresh keeps the brain chosen for a restore', async (t) => {
   t.mock.timers.enable({ apis: ['setTimeout', 'Date'] });
   installDom();
@@ -55,7 +75,7 @@ test('a refresh keeps the brain chosen for a restore', async (t) => {
   const bridge = { status: connected() };
   serve(t, (path) => {
     if (path.startsWith('/api/backup/status')) return bridge.status;
-    if (path.startsWith('/api/backup/versions')) return { versions: [] };
+    if (path.endsWith('/backup/versions')) return { versions: [] };
     return {};
   });
   const root = h('div');
@@ -155,7 +175,7 @@ test('version folders named in UTC or in local time both show as dates', async (
   noConsoleErrors(t);
   serve(t, (path) => {
     if (path.startsWith('/api/backup/status')) return connected();
-    if (path.startsWith('/api/backup/versions')) return { versions: ['20261018-093000Z', '20261001-120000', 'manual-copy'] };
+    if (path.endsWith('/backup/versions')) return { versions: ['20261018-093000Z', '20261001-120000', 'manual-copy'] };
     return {};
   });
   const root = h('div');

@@ -75,7 +75,7 @@ export default {
       try {
         items = await get('/api/dev/outbox', { signal });
       } catch (e) {
-        if (e.status === 404) { paint(outbox, { unavailable: e.message }, () => empty('Not available', e.message)); return; }
+        if (e.status === 404) { paint(outbox, 'unavailable', () => empty('Not available', 'Only in dev mode: start the bridge with --no-whatsapp.')); return; }
         throw e;
       }
       paintOutbox();
