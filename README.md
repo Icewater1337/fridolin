@@ -514,6 +514,19 @@ plus anything in your personal denylist
 (`~/.config/fridolin/personal-denylist`, one string per line —
 your name, your numbers, your company). CI runs the same check.
 
+`make check` runs what CI's build, lint and test jobs run: gofmt, `go vet`,
+`go mod tidy -diff`, the race tests, staticcheck, shellcheck, ruff,
+actionlint, the Python, dashboard, personal-data-check and Makefile tests,
+and a smoke test that starts a race-enabled build in dev mode on a scratch
+config (`make help` lists every target). staticcheck and actionlint run
+through `go run` at pinned versions; ruff comes from
+`pip install -r tools/requirements-dev.txt`, shellcheck from your package
+manager. `make check` builds into a temp dir and leaves `./fridolin` alone:
+the service `setup.sh` installs runs that file from the checkout and starts
+whatever is there on its next restart. `make build` writes it, and
+`make install` also copies it to `~/.local/bin` (set `PREFIX` or `BINDIR` to
+change that).
+
 CI also runs [govulncheck](https://go.dev/doc/security/vuln/) on pushes to main,
 every pull request and once a week; it fails when the code reaches a known
 vulnerability. Run it yourself after changing dependencies:

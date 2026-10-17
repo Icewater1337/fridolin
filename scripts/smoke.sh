@@ -5,7 +5,10 @@
 # then stop it with SIGTERM and check that it shuts down cleanly. It never
 # reads your config or data dir and never talks to a running bridge.
 #
-#   scripts/smoke.sh [BINARY]      # default ./fridolin; `make smoke` builds it
+#   scripts/smoke.sh [BINARY]      # default ./fridolin
+#
+# `make smoke` builds the binary with -race into a temp dir and runs this on
+# it, so a data race at start or shutdown fails the run.
 #
 # Exit status: 0 when every step passed, 1 when one failed, 2 on bad usage.
 
@@ -106,6 +109,8 @@ pid=""
 [ "$status" = 0 ] || fail "the bridge exits 0 on SIGTERM (exit $status)"
 pass "clean shutdown on SIGTERM"
 
+# A DATA RACE report needs a binary built with -race, as make smoke builds
+# it; in any other build that half of the step never finds anything.
 if grep -q -e 'panic:' -e 'DATA RACE' "$log"; then fail "no panic or data race in the log"; fi
 pass "no panic or data race in the log"
 printf '\nsmoke test passed\n'
