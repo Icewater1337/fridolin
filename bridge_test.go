@@ -94,7 +94,7 @@ func TestIsJunkMessage(t *testing.T) {
 		}
 	}
 
-	real := []string{"what time is it", "ok but why", "book it for 3pm", "PR 42?"}
+	real := []string{"what time is it", "ok but why", "book it for 3pm", "PR 42?", "привет", "你好", "שלום!", "ßß"}
 	for _, s := range real {
 		if isJunkMessage(s) {
 			t.Errorf("isJunkMessage(%q) = true, want false", s)

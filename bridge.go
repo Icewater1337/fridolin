@@ -15,6 +15,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode"
 )
 
 // isJunkMessage reports whether a message is too trivial to be worth a Claude
@@ -30,8 +31,8 @@ func isJunkMessage(text string) bool {
 	case "ok", "ok!", "okay", "thanks", "thank you", "yes", "no", "yep", "nope", "lol", "haha", "hehe":
 		return true
 	}
-	// No letters and no digits: emoji, punctuation, or similar.
-	return !strings.ContainsAny(trimmed, "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789")
+	// No letters and no digits, in any script: emoji, punctuation, or similar.
+	return strings.IndexFunc(trimmed, func(r rune) bool { return unicode.IsLetter(r) || unicode.IsDigit(r) }) < 0
 }
 
 // Bridge connects WhatsApp to the brains, and serves the dashboard.
