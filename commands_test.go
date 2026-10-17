@@ -41,9 +41,15 @@ func newMainBridge(t *testing.T, extra string) (*testBridge, *Brain) {
 }
 
 // whatsApp is a WhatsApp client without a connection that hands allowed
-// messages to the test bridge, like the real one.
+// messages to the test bridge, like the real one. It cannot download an
+// attachment, and sends what it tells a chat about one through the test
+// bridge.
 func (tb *testBridge) whatsApp() *WhatsAppClient {
-	return &WhatsAppClient{cfg: tb.cfgs.Get, log: waLog.Noop, handler: tb.handleInbound}
+	ctx, cancel := context.WithCancel(context.Background())
+	wa := &WhatsAppClient{cfg: tb.cfgs.Get, log: waLog.Noop, handler: tb.handleInbound, ctx: ctx, cancel: cancel}
+	wa.media = wa.client // nil: every download fails with ErrClientIsNil
+	wa.notify = func(jid, text string) { tb.dev.SendMessage(ctx, jid, text) }
+	return wa
 }
 
 // whatsAppOffline is whatsApp with a whatsmeow client that never connected,
@@ -52,6 +58,7 @@ func (tb *testBridge) whatsApp() *WhatsAppClient {
 func (tb *testBridge) whatsAppOffline(dev *store.Device) *WhatsAppClient {
 	wa := tb.whatsApp()
 	wa.client = whatsmeow.NewClient(dev, waLog.Noop)
+	wa.media = wa.client
 	return wa
 }
 
@@ -253,6 +260,45 @@ func TestTriggerOnlyReplyAsksAboutTheQuote(t *testing.T) {
 			}
 			if h := readHistory(t, br); len(h) == 0 || h[0].Type != "in" || h[0].Text != want {
 				t.Errorf("history = %+v, want the reply line first", h)
+			}
+		})
+	}
+}
+
+// A file the bridge could not download is not lost without a word: the
+// sender is asked to send it again, and its caption is still answered.
+func TestFailedDownloadIsAnswered(t *testing.T) {
+	photo := &waE2E.Message{ImageMessage: &waE2E.ImageMessage{Caption: proto.String("What is this?")}}
+	cases := []struct {
+		name string
+		chat string
+		send func(tb *testBridge)
+	}{
+		{"in a DM", testDMChat, func(tb *testBridge) {
+			chat := types.NewJID("15551234567", types.DefaultUserServer)
+			tb.whatsApp().handleMessage(&events.Message{
+				Info:    types.MessageInfo{MessageSource: types.MessageSource{Chat: chat, Sender: chat}, ID: "3EB0PHOTO", Timestamp: time.Now()},
+				Message: photo,
+			})
+		}},
+		{"in a group", testGroup, func(tb *testBridge) {
+			tb.whatsAppOffline(&store.Device{}).handleMessage(groupEvent(photo))
+		}},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			tb, _ := newMainBridge(t, "")
+			c.send(tb)
+			waitFor(t, 10*time.Second, "the notice and the answer", func() bool { return len(tb.sentTo(c.chat)) >= 2 })
+			if !tb.sentPrefix(c.chat, "⚠️ I couldn't download that file. Please send it again.") {
+				t.Errorf("sent %q, want the notice among it", tb.sentTo(c.chat))
+			}
+			answered := false
+			for _, s := range tb.sentTo(c.chat) {
+				answered = answered || strings.HasSuffix(s, "says: What is this?")
+			}
+			if !answered {
+				t.Errorf("sent %q, want an answer to the caption", tb.sentTo(c.chat))
 			}
 		})
 	}

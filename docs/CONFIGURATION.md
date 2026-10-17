@@ -641,7 +641,8 @@ file is skipped without being downloaded, and the sender gets one line
 saying so; a caption sent with it still reaches the brain. The limit holds
 even when a message understates its file's size: the download stops as soon
 as it passes the limit. A download also has two minutes to finish, so a
-high limit needs a fast connection.
+high limit needs a fast connection; when one fails or runs out of time, the
+sender is told to send the file again.
 
 ### `viewer`
 

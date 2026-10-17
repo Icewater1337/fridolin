@@ -681,6 +681,32 @@ func TestHandleMessageSavesAttachment(t *testing.T) {
 		if names := dirNames(t, tw.cfg().MediaDir); len(names) != 0 {
 			t.Errorf("left behind %q", names)
 		}
+		select {
+		case n := <-tw.notices:
+			t.Errorf("told the sender %q while shutting down", n)
+		case <-time.After(100 * time.Millisecond):
+		}
+	})
+
+	// A file that cannot be downloaded is not dropped without a word: sent
+	// without a caption, it would otherwise get no reply at all.
+	t.Run("download fails", func(t *testing.T) {
+		tw := newTestWhatsApp(t)
+		tw.media = &fakeDownloader{err: whatsmeow.ErrMediaDownloadFailedWith410}
+		evt := textEvent(types.MessageSource{Chat: contact, Sender: contact}, "")
+		evt.Message = &waE2E.Message{AudioMessage: &waE2E.AudioMessage{Mimetype: proto.String("audio/ogg; codecs=opus")}}
+		tw.handle(t, evt)
+		select {
+		case n := <-tw.notices:
+			if want := "15551234567@s.whatsapp.net: ⚠️ I couldn't download that file. Please send it again."; n != want {
+				t.Errorf("notice %q, want %q", n, want)
+			}
+		case <-time.After(2 * time.Second):
+			t.Error("the sender was not told")
+		}
+		if m, ok := tw.next(100 * time.Millisecond); ok {
+			t.Errorf("an empty message reached the brains: %+v", m)
+		}
 	})
 }
 
