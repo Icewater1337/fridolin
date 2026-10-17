@@ -1,10 +1,13 @@
 # ── secrets and live config — never commit ────────────────────────────────
 config.json
 config.json.backup.*
+config.json.bak*
 .env
+.env.*
 *.pem
 *.key
 google_calendar_*.json
+dashboard.token
 
 # ── runtime state ─────────────────────────────────────────────────────────
 *.db
@@ -14,14 +17,22 @@ qrcode.png
 media/
 *.log
 conversation-history.jsonl
-claude-stream.log
+# transcribe.py's default output folder, wherever it ran in this checkout
+transcripts/
 
 # ── build output ──────────────────────────────────────────────────────────
 /fridolin
 /whatsapp-claude-bridge
 /bridge
 dist/
+
+# ── Python ────────────────────────────────────────────────────────────────
 __pycache__/
+*.py[cod]
+.venv/
+venv/
+.ruff_cache/
+.mypy_cache/
 
 # ── editors and OS ────────────────────────────────────────────────────────
 .DS_Store
@@ -32,5 +43,3 @@ __pycache__/
 
 # ── personal data guard ──────────────────────────────────────────────────
 .personal-denylist
-config.json.bak*
-dashboard.token

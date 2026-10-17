@@ -90,8 +90,9 @@ them, and says `"truncated": true` when there were more. The tool needs
 The tool never opens a sign-in page by itself. When a brain's sign-in is
 revoked or expires, every command answers with an error asking you to connect
 again on the brain's Calendar page. (Run by hand outside a brain,
-`calendar_tool.py --profile <name> auth` signs in through the browser instead;
-the comment at the top of `tools/calendar_tool.py` explains that setup.)
+`calendar_tool.py --profile <brain-id> auth` signs in through the browser
+instead; the comment at the top of `tools/calendar_tool.py` explains that
+setup.)
 
 **Limits.** Google grants access to a whole account, not to single calendars.
 Keeping a brain to the calendars you ticked is done by the calendar tool, not

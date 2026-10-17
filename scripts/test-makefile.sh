@@ -1,0 +1,61 @@
+#!/usr/bin/env bash
+#
+# Tests for the Makefile, read from what `make -n` would run, so nothing is
+# built. The service setup.sh installs runs ./fridolin from the checkout and
+# starts whatever is there on its next restart, so only build and install
+# may write it: running the checks on a branch must not swap in that
+# branch's binary.
+#
+#   scripts/test-makefile.sh
+#
+# Exit status: 0 when every case passed.
+
+set -euo pipefail
+
+root="$(cd "$(dirname "$0")/.." && pwd)"
+# Run make as if from a shell, not with the flags of the make running this.
+unset MAKEFLAGS MFLAGS MAKELEVEL
+
+# A made-up name for the binary: a command that names it would write the
+# file the service runs (BINARY is fridolin by default).
+bin="sentinel-not-the-binary"
+
+failed=0
+
+# expect NAME WANT TARGET PATTERN — WANT is "has" or "lacks": whether a line
+# of what make would run for TARGET matches the extended regexp PATTERN.
+expect() {
+  local name="$1" want="$2" target="$3" pattern="$4" out got=lacks
+  if ! out="$(make -C "$root" -n "$target" BINARY="$bin" 2>&1)"; then
+    printf 'FAIL  %s: make -n %s failed\n%s\n' "$name" "$target" "$out"
+    failed=$((failed + 1))
+    return
+  fi
+  if printf '%s\n' "$out" | grep -Eq -- "$pattern"; then got=has; fi
+  if [ "$got" = "$want" ]; then
+    printf 'ok    %s\n' "$name"
+  else
+    printf 'FAIL  %s: make -n %s %s %s, want %s\n%s\n' "$name" "$target" "$got" "$pattern" "$want" "$out"
+    failed=$((failed + 1))
+  fi
+}
+
+# Without these the cases below would pass even if BINARY were ignored.
+expect "build writes the binary" has build "-o $bin( |$)"
+expect "install builds the binary it copies" has install "-o $bin( |$)"
+
+# Every other target, as make help lists them; clean removes the binary.
+targets="$(make -C "$root" -s help | awk '{ print $1 }')"
+[ -n "$targets" ] || { printf 'FAIL  make help lists no targets\n'; exit 1; }
+for target in $targets; do
+  case "$target" in build | install | clean) continue ;; esac
+  expect "$target leaves the binary alone" lacks "$target" "$bin"
+done
+
+expect "smoke builds with the race detector into its temp dir" has smoke 'build -race -o "\$tmp/fridolin"'
+
+if [ "$failed" -gt 0 ]; then
+  printf '\n%d case(s) failed\n' "$failed" >&2
+  exit 1
+fi
+printf '\nall cases passed\n'

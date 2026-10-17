@@ -52,6 +52,7 @@ import argparse
 import json
 import os
 import re
+import shlex
 import shutil
 import subprocess
 import sys
@@ -60,7 +61,7 @@ import time
 from dataclasses import dataclass
 from datetime import date
 from pathlib import Path
-from typing import NoReturn
+from typing import Any, NoReturn
 
 DEFAULT_MODEL = os.environ.get("TRANSCRIBE_MODEL", "openai/whisper-large-v3-turbo")
 VIDEO_EXTS = {".mp4", ".mov", ".webm", ".3gp", ".mkv", ".avi", ".m4v"}
@@ -71,6 +72,9 @@ GROQ_MIN_INTERVAL = 6.0      # seconds between Groq calls, to stay under the rat
 # and the text of one 30 s window. Like openai-whisper, give the prompt at
 # most half.
 PROMPT_TOKENS = 448 // 2 - 1
+# Brains run this tool from their own folder, so an install hint names the
+# requirements file next to it rather than a path relative to the repo.
+LOCAL_REQUIREMENTS = Path(__file__).resolve().parent / "requirements-transcription.txt"
 
 
 def die(msg: str) -> NoReturn:
@@ -159,8 +163,8 @@ def split_audio(audio_path: Path, chunk_seconds: int) -> list[Path]:
 
 # ── local engine ──────────────────────────────────────────────────────────
 
-_PIPE = None
-_PROCESSOR = None  # kept next to _PIPE: it turns --prompt into prompt token IDs
+_PIPE: Any = None
+_PROCESSOR: Any = None  # kept next to _PIPE: it turns --prompt into prompt token IDs
 
 
 def local_available() -> bool:
@@ -172,7 +176,7 @@ def local_available() -> bool:
         return False
 
 
-def load_local_pipeline(model_id: str):
+def load_local_pipeline(model_id: str) -> Any:
     """Load the local ASR pipeline once and reuse it across chunks."""
     global _PIPE, _PROCESSOR
     if _PIPE is not None:
@@ -225,7 +229,7 @@ def transcribe_local(audio_path: Path, model_id: str, language: str | None, prom
     return result["text"].strip()
 
 
-def fit_prompt(ids):
+def fit_prompt(ids: Any) -> Any:
     """Cut Whisper prompt IDs to PROMPT_TOKENS, keeping the start-of-prompt token.
 
     A prompt that fills the decoder fails every window, and --engine auto
@@ -309,20 +313,19 @@ def choose_engines(engine: str) -> Engines:
     use_local = engine in ("auto", "local") and local_available()
     use_groq = engine in ("auto", "groq") and groq_available()
 
+    install_local = f"pip install -r {shlex.quote(str(LOCAL_REQUIREMENTS))}"
     if engine == "local" and not use_local:
-        die("--engine local, but transformers/torch are not installed. "
-            "Run: pip install -r tools/requirements-transcription.txt")
+        die(f"--engine local, but transformers/torch are not installed. Run: {install_local}")
     if engine == "groq" and not use_groq:
         die("--engine groq, but GROQ_API_KEY is unset or the groq package is missing. "
             "Run: pip install groq  and export GROQ_API_KEY=...")
     if not use_local and not use_groq:
-        die("No transcription engine available. Either install the local model "
-            "(pip install -r tools/requirements-transcription.txt) or set "
-            "GROQ_API_KEY and install the groq package.")
+        die(f"No transcription engine available. Either install the local model "
+            f"({install_local}) or set GROQ_API_KEY and install the groq package.")
     return Engines(local=use_local, groq=use_groq)
 
 
-def transcribe_chunk(path: Path, args, available: Engines) -> tuple[str, str]:
+def transcribe_chunk(path: Path, args: argparse.Namespace, available: Engines) -> tuple[str, str]:
     """Transcribe one file, returning (text, engine_used)."""
     if available.local:
         try:
@@ -413,7 +416,8 @@ def main() -> None:
     ap.add_argument("file", help="audio or video file to transcribe")
     ap.add_argument("--output-dir", default="transcripts",
                     help="where to write the transcript and a copy of the media "
-                         "(default: ./transcripts)")
+                         "(default: transcripts in the current folder, which is the "
+                         "brain's own folder when a brain runs this)")
     ap.add_argument("--engine", choices=["auto", "local", "groq"], default="auto",
                     help="auto (default) prefers a local model and falls back to Groq")
     ap.add_argument("--model", default=DEFAULT_MODEL,

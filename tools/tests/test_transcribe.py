@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import shlex
 import sys
 import tempfile
 import types
@@ -11,7 +12,7 @@ from datetime import date
 from pathlib import Path
 from unittest import mock
 
-import support  # noqa: F401  (puts tools/ on sys.path)
+import support  # first: it puts tools/ on sys.path
 import transcribe
 
 DAY = "2026-01-15"
@@ -347,6 +348,17 @@ class EngineChoiceTest(TempDirTestCase):
         code, out, _ = self.run_tool()
         self.assertEqual(code, 1)
         self.assertIn("No transcription engine available", out["error"])
+
+    def test_install_hints_name_the_requirements_file_itself(self):
+        # Brains run the tool from their own folder, where tools/ is no path.
+        want = support.TOOLS_DIR / "requirements-transcription.txt"
+        self.assertTrue(want.is_file())
+        self.local_available.result = self.groq_available.result = False
+        for name, flags in [("--engine local", ["--engine", "local"]), ("no engine at all", [])]:
+            with self.subTest(name):
+                code, out, _ = self.run_tool(*flags)
+                self.assertEqual(code, 1)
+                self.assertIn(f"pip install -r {shlex.quote(str(want))}", out["error"])
 
     def test_a_missing_engine_fails_before_extracting_video_audio(self):
         self.source = self.dir / "clip.mp4"

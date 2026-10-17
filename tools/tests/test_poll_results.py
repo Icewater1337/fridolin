@@ -10,7 +10,7 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
-import support  # noqa: F401  (puts tools/ on sys.path)
+import support  # first: it puts tools/ on sys.path
 import poll_results
 
 # The two tables poll_results.py reads, as store.go creates them.
@@ -51,11 +51,13 @@ class PollResultsTestCase(unittest.TestCase):
         patcher.start()
         self.addCleanup(patcher.stop)
 
-        # The tool leaves its connection to the process exit; close it here.
+        # Every connection the tool opens, to check it closes them.
+        self.conns: list[sqlite3.Connection] = []
         open_db = poll_results.open_db
 
         def open_and_track():
             conn = open_db()
+            self.conns.append(conn)
             self.addCleanup(conn.close)
             return conn
 
@@ -114,6 +116,48 @@ class TallyTest(PollResultsTestCase):
         code, out, _ = support.run_main(poll_results, ["--id", "nope"])
         self.assertEqual(code, 1)
         self.assertIn("not found", json.loads(out)["error"])
+
+
+class ArgumentsTest(PollResultsTestCase):
+    def test_id_does_not_combine_with_list_options(self):
+        cases = [
+            ("--recent", ["--id", "poll1", "--recent", "5"]),
+            ("--chat", ["--id", "poll1", "--chat", CHAT]),
+            ("both", ["--id", "poll1", "--recent", "5", "--chat", CHAT]),
+        ]
+        for name, argv in cases:
+            with self.subTest(name):
+                code, out, err = support.run_main(poll_results, argv)
+                self.assertEqual(code, 2)
+                self.assertEqual(out, "")
+                self.assertIn("cannot be combined with --recent or --chat", err)
+        self.assertEqual(self.conns, [], "a usage error opens no database")
+
+    def test_recent_limits_the_listing(self):
+        conn = sqlite3.connect(self.db)
+        conn.execute("INSERT INTO polls VALUES (?, ?, ?, ?, ?)",
+                     ("poll2", CHAT, "Where?", json.dumps(["Here"]), "2026-01-06 10:00:00"))
+        conn.commit()
+        conn.close()
+        cases = [("default", [], 2), ("--recent 1", ["--recent", "1"], 1)]
+        for name, argv, want in cases:
+            with self.subTest(name):
+                self.assertEqual(self.results(argv)["count"], want)
+
+    def test_the_database_is_closed_after_every_command(self):
+        cases = [
+            ("a poll", ["--id", "poll1"], 0),
+            ("an unknown poll", ["--id", "nope"], 1),
+            ("the listing", ["--recent", "5"], 0),
+        ]
+        for name, argv, want_code in cases:
+            with self.subTest(name):
+                self.conns.clear()
+                code, _, err = support.run_main(poll_results, argv)
+                self.assertEqual(code, want_code, err)
+                self.assertEqual(len(self.conns), 1)
+                with self.assertRaises(sqlite3.ProgrammingError):
+                    self.conns[0].execute("SELECT 1")
 
 
 if __name__ == "__main__":

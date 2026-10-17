@@ -1,0 +1,4 @@
+# Only for working on the tools: the linter (ruff check tools).
+# Pinned, so a local run and CI flag the same things; Dependabot proposes
+# new releases.
+ruff==0.17.1

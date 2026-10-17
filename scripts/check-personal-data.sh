@@ -10,12 +10,16 @@
 #
 #   scripts/check-personal-data.sh --staged        # pre-commit: the staged diff
 #   scripts/check-personal-data.sh --pre-push      # pre-push: reads the hook's stdin
-#   scripts/check-personal-data.sh --range A..B    # commits in a range
-#   scripts/check-personal-data.sh --all-history   # every commit reachable from HEAD (CI)
+#   scripts/check-personal-data.sh --range A..B    # commits in a range (CI)
+#   scripts/check-personal-data.sh --all-history   # every commit reachable from HEAD
 #
 # Commits are scanned line by line as they were added, so something added in
 # one commit and deleted in the next is still caught: deleting it does not
-# remove it from history.
+# remove it from history. Except with --staged, the files as they are in the
+# commit being published (HEAD for --all-history, B for --range, each pushed
+# commit for --pre-push) are scanned too, which catches content committed
+# before this check, or a denylist entry, existed. --pre-push reads only the
+# commits no remote has yet: a commit already published is not this push's.
 #
 # The denylist is read from the first of:
 #   $PERSONAL_DENYLIST
@@ -84,30 +88,45 @@ collect_staged() {
   git diff --cached --name-only --diff-filter=A | awk -v OFS='\t' 'NF { print "staged", $0 }' >>"$names"
 }
 
+# The commits whose files are scanned whole, besides the new lines.
+trees=""
+
 case "$mode" in
   --staged) collect_staged ;;
-  --all-history) collect_log HEAD ;;
-  --range) collect_log "$range" ;;
+  --all-history) collect_log HEAD; trees="HEAD" ;;
+  --range)
+    collect_log "$range"
+    trees="${range##*..}"; trees="${trees:-HEAD}"  # A..B and A...B: B; A..: HEAD
+    ;;
   --pre-push)
     zero="0000000000000000000000000000000000000000"
     while read -r _lref lsha _rref rsha; do
       [ "$lsha" = "$zero" ] && continue            # branch deletion
+      case " $trees " in *" $lsha "*) ;; *) trees="$trees $lsha" ;; esac
+      # Whatever no remote has yet. For a branch the remote has, also not
+      # what rsha has: after a rebase, rsha..lsha holds the main commits the
+      # branch moved onto, which are published already (GitHub's merge
+      # commits carry its identity and the owner's name).
       if [ "$rsha" = "$zero" ]; then
-        collect_log "$lsha" --not --remotes        # new branch: whatever no remote has yet
+        collect_log "$lsha" --not --remotes
       else
-        collect_log "$rsha..$lsha"
+        collect_log "$lsha" --not "$rsha" --remotes
       fi
     done
     ;;
 esac
 
-# Also scan the denylist and token patterns against the files as they exist at
-# HEAD/index, which catches content that pre-dates this hook.
-if [ "$mode" != "--staged" ]; then
-  git grep -I -n -e '' HEAD -- . ':!go.sum' 2>/dev/null |
-    awk -v OFS='\t' '{ i = index($0, ":"); rest = substr($0, i + 1); j = index(rest, ":"); k = index(substr(rest, j + 1), ":");
-                       print "HEAD:" substr(rest, 1, j - 1) ":" substr(rest, j + 1, k - 1), substr(rest, j + k + 1) }' >>"$scan" || true
-fi
+# Also scan every file of the commits being published, with all the patterns
+# and the denylist below. That catches content committed before this check
+# existed, which the history above may not reach. In pre-push mode these are
+# the pushed commits, not HEAD: a push need not include the checked-out branch.
+for tree in $trees; do
+  label="$tree"
+  case "$tree" in *[!0-9a-f]*) ;; *) label="$(git rev-parse --short "$tree")" ;; esac
+  git grep -I -n -e '' "$tree" -- . ':!go.sum' 2>/dev/null |
+    awk -v OFS='\t' -v label="$label" '{ i = index($0, ":"); rest = substr($0, i + 1); j = index(rest, ":"); k = index(substr(rest, j + 1), ":");
+                       print label ":" substr(rest, 1, j - 1) ":" substr(rest, j + 1, k - 1), substr(rest, j + k + 1) }' >>"$scan" || true
+done
 
 findings=0
 report() { printf '  %s  %s\n' "$1" "$2"; findings=$((findings + 1)); }

@@ -18,24 +18,28 @@ BRIDGE_CALENDAR_DEFAULT), so inside a brain no flags are needed:
 
 --calendar-id picks one of the allowed calendars; anything else is refused.
 
-Without the dashboard
----------------------
-The tool also works on its own, outside a brain. A profile is just a name;
-each one gets its own OAuth client and token in the bridge data directory,
-which keeps separate calendars separate:
+Signing in by hand
+------------------
+The dashboard is the supported way to connect a calendar. Signing in by
+hand, outside a brain, still works. A profile names the pair of files; for
+a brain, it is the brain's ID, the name the bridge looks for:
 
-    <data_dir>/google_calendar_credentials_<profile>.json   (you download this)
-    <data_dir>/google_calendar_token_<profile>.json         (written by auth)
+    google_calendar_credentials_<profile>.json   (an OAuth client you download)
+    google_calendar_token_<profile>.json         (written by auth)
 
-Name profiles after your brains ("personal", "work", …) so the sandbox profile
-generated for a brain grants it exactly its own calendar files. With no
---profile, the unsuffixed google_calendar_credentials.json / _token.json pair
-is used.
+The tool reads and writes them in $BRIDGE_CREDENTIALS_DIR, else
+$BRIDGE_DATA_DIR, else ~/.fridolin (or the old ~/.whatsapp-claude-bridge
+when only that one exists). A brain reads its token from the bridge's
+credentials dir: sandbox.credentials_dir when it is set, else the data
+dir. To sign in for a brain whose credentials dir is not the default, run
+auth with BRIDGE_DATA_DIR set to that dir (BRIDGE_CREDENTIALS_DIR marks a
+run inside a brain, where auth refuses). With no --profile, the unsuffixed
+google_calendar_credentials.json / _token.json pair is used.
 
     1. console.cloud.google.com → new project → enable the Google Calendar API
-    2. APIs & Services → Credentials → Create OAuth 2.0 Client ID (Desktop app)
+    2. APIs & Services → Credentials → Create OAuth client ID (Desktop app)
     3. Download the JSON to the credentials path above
-    4. calendar_tool.py --profile personal auth   (a browser opens for consent)
+    4. calendar_tool.py --profile <brain-id> auth   (a browser opens for consent)
 
 Only auth ever opens a browser, and it refuses to run inside a brain, where
 nobody is at the screen. When a brain's sign-in is revoked or expires, every
@@ -43,12 +47,12 @@ command prints a JSON error saying to reconnect in the dashboard instead.
 
 Usage
 -----
-    calendar_tool.py --profile personal list --from 2026-01-05 --to 2026-01-12
-    calendar_tool.py --profile work create --title "Design review" \
+    calendar_tool.py --profile <brain-id> list --from 2026-01-05 --to 2026-01-12
+    calendar_tool.py --profile <brain-id> create --title "Design review" \
         --start 2026-01-06T14:00:00 --end 2026-01-06T15:00:00 \
         --attendees "alex@example.com,sam@example.com"
-    calendar_tool.py --profile personal free --date 2026-01-06
-    calendar_tool.py --profile personal delete --event-id EVENT_ID
+    calendar_tool.py --profile <brain-id> free --date 2026-01-06
+    calendar_tool.py --profile <brain-id> delete --event-id EVENT_ID
 
 Timezone
 --------
@@ -63,15 +67,20 @@ import contextlib
 import json
 import os
 import re
+import shlex
 import sys
 import traceback
 from datetime import datetime, time, timedelta
 from pathlib import Path
 from time import sleep
-from typing import NoReturn
-from zoneinfo import ZoneInfo
+from typing import Any, NoReturn
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 SCOPES = ["https://www.googleapis.com/auth/calendar"]
+
+# Brains run this tool from their own folder, so an install hint names the
+# requirements file next to it rather than a path relative to the repo.
+REQUIREMENTS = Path(__file__).resolve().parent / "requirements.txt"
 
 DATA_DIR = Path(
     os.environ.get("BRIDGE_CREDENTIALS_DIR")
@@ -83,6 +92,11 @@ DATA_DIR = Path(
 # The calendars the dashboard allowed for this brain (empty: no restriction).
 ALLOWED = [c for c in os.environ.get("BRIDGE_CALENDARS", "").split(",") if c]
 DEFAULT_CALENDAR = os.environ.get("BRIDGE_CALENDAR_DEFAULT") or (ALLOWED[0] if ALLOWED else "primary")
+
+# What ZoneInfo raises for a name it cannot load: unknown, malformed (an
+# absolute or ../ path, a trailing slash), or a zone file it cannot read.
+# Anything else is a bug, and calling it a bad timezone would hide it.
+ZONE_ERRORS = (ZoneInfoNotFoundError, ValueError, OSError)
 
 # Set from CLI args in main().
 _profile: str | None = None
@@ -124,13 +138,13 @@ def resolve_timezone(name: str | None) -> ZoneInfo:
     if explicit:
         try:
             return ZoneInfo(explicit)
-        except Exception:
+        except ZONE_ERRORS:
             err(f"Unknown timezone: {explicit!r}. Use an IANA name such as 'Europe/Berlin'.")
 
     if detected := system_timezone_name():
         try:
             return ZoneInfo(detected)
-        except Exception:
+        except ZONE_ERRORS:
             pass
 
     # Guessing here would create events at the wrong time and look like the
@@ -185,11 +199,11 @@ def refresh_failure(e: Exception) -> str:
 def missing_package(e: ImportError) -> NoReturn:
     err(
         f"Missing Python package: {e}. Install the calendar extras with:\n"
-        "  pip3 install -r tools/requirements.txt"
+        f"  pip3 install -r {shlex.quote(str(REQUIREMENTS))}"
     )
 
 
-def get_service():
+def get_service() -> Any:
     """Return the Google Calendar API service, using the saved token.
 
     This never starts an interactive sign-in. Inside a brain nobody is at the
@@ -228,7 +242,7 @@ def get_service():
     return build("calendar", "v3", credentials=creds)
 
 
-def read_token(Credentials, token_file: Path):
+def read_token(Credentials: Any, token_file: Path) -> Any:
     """Load the saved token, reading it a second time if it is not valid JSON.
 
     write_token rewrites the file in place, so a command that reads it while
@@ -243,7 +257,7 @@ def read_token(Credentials, token_file: Path):
         return Credentials.from_authorized_user_file(str(token_file), SCOPES)
 
 
-def write_token(token_file: Path, creds) -> None:
+def write_token(token_file: Path, creds: Any) -> None:
     """Write the token, readable by its owner only.
 
     Inside a brain the sandbox lets this tool write the token file itself and
@@ -256,7 +270,7 @@ def write_token(token_file: Path, creds) -> None:
     os.chmod(token_file, 0o600)
 
 
-def save_token(token_file: Path, creds) -> None:
+def save_token(token_file: Path, creds: Any) -> None:
     """Write a refreshed token back, best effort.
 
     When the sandbox or the file's mode refuses the write, the old token is
@@ -278,7 +292,7 @@ def target_calendars(requested: str | None, many: bool = False) -> list[str]:
     With no --calendar-id, read commands (many=True) use every allowed
     calendar and write commands use the default one.
     """
-    if requested in (None, ""):
+    if not requested:
         if many and ALLOWED:
             return ALLOWED
         return [DEFAULT_CALENDAR]
@@ -335,7 +349,7 @@ def ensure_timezone(dt_str: str) -> str:
 
 # ── commands ──────────────────────────────────────────────────────────────
 
-def cmd_list(args) -> None:
+def cmd_list(args: argparse.Namespace) -> None:
     service = get_service()
 
     from_date = args.from_date or datetime.now(tz()).date().isoformat()
@@ -362,7 +376,7 @@ def cmd_list(args) -> None:
     print(json.dumps({"events": events, "count": len(events), "truncated": truncated}, indent=2))
 
 
-def fetch_events(service, calendar_id: str, time_min: datetime, time_max: datetime,
+def fetch_events(service: Any, calendar_id: str, time_min: datetime, time_max: datetime,
                  limit: int) -> tuple[list[dict], bool]:
     """Return up to limit events of one calendar in start order, and whether it had more.
 
@@ -390,7 +404,7 @@ def fetch_events(service, calendar_id: str, time_min: datetime, time_max: dateti
     return items, False
 
 
-def cmd_create(args) -> None:
+def cmd_create(args: argparse.Namespace) -> None:
     service = get_service()
 
     all_day = "T" not in args.start
@@ -430,15 +444,15 @@ def cmd_create(args) -> None:
     else:
         body["reminders"] = {"useDefault": False, "overrides": [{"method": "popup", "minutes": 10}]}
 
-    # sendUpdates="all" emails the invitation to attendees. If you would rather
-    # create events quietly, change this to "none".
+    # --send-updates (default all) decides whether Google emails the
+    # invitation to the attendees.
     event = service.events().insert(
         calendarId=target_calendars(args.calendar_id)[0], body=body, sendUpdates=args.send_updates
     ).execute()
     print(json.dumps({"created": format_event(event)}, indent=2))
 
 
-def cmd_free(args) -> None:
+def cmd_free(args: argparse.Namespace) -> None:
     """Report busy slots and the free windows between them for one day."""
     service = get_service()
 
@@ -533,13 +547,13 @@ def parse_hours(s: str) -> tuple[int, int]:
     return first, last
 
 
-def cmd_delete(args) -> None:
+def cmd_delete(args: argparse.Namespace) -> None:
     service = get_service()
     service.events().delete(calendarId=target_calendars(args.calendar_id)[0], eventId=args.event_id).execute()
     print(json.dumps({"deleted": args.event_id}))
 
 
-def cmd_calendars(args) -> None:
+def cmd_calendars(args: argparse.Namespace) -> None:
     """List the calendars this brain may use (all of the account's, if unrestricted)."""
     service = get_service()
     # An account can have more calendars than fit in one page, and a brain's
@@ -565,7 +579,7 @@ def cmd_calendars(args) -> None:
     print(json.dumps({"calendars": out, "restricted": bool(ALLOWED)}, indent=2))
 
 
-def cmd_auth(args) -> None:
+def cmd_auth(args: argparse.Namespace) -> None:
     """Sign in through the browser and save the token. Only ever run by hand."""
     if in_brain():
         err(f"Signing in needs someone at a browser, so it cannot run inside a brain. {reconnect_hint()}")
@@ -638,7 +652,7 @@ def main() -> None:
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     parser.add_argument("--profile", default=os.environ.get("BRIDGE_BRAIN_ID") or None,
-                        help="Credential profile name, e.g. the brain's name "
+                        help="Credential profile, e.g. a brain's ID "
                              "(default: the brain running this tool, else the unsuffixed files).")
     parser.add_argument("--calendar-id", default=None,
                         help="Calendar ID (default: all of the brain's calendars for list/free, "
@@ -689,7 +703,6 @@ def main() -> None:
 
     global _profile, _timezone
     _profile = args.profile
-    _timezone = resolve_timezone(args.timezone)
 
     command = {
         "list": cmd_list,
@@ -702,6 +715,7 @@ def main() -> None:
     # The one exception boundary: whatever goes wrong, stdout is a JSON error
     # the assistant can read, never just a traceback on stderr.
     try:
+        _timezone = resolve_timezone(args.timezone)
         command(args)
     except Exception as e:
         err(describe_error(e))

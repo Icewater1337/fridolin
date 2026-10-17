@@ -84,7 +84,16 @@ Reopen the dashboard with `./fridolin open`.
 
 ## Working on the code
 
-- `go vet ./... && go test -race ./...` must pass; `gofmt` everything.
+- `make check` runs what CI's build, lint and test jobs run: gofmt, both
+  `go vet` runs, `go mod tidy -diff`, the race tests, staticcheck,
+  shellcheck, ruff, actionlint, the action-pin check, the Python, web,
+  personal-data-check, action-pin-check and Makefile tests and a dev-mode
+  smoke test (`make help` lists the targets).
+  CI also runs the site's tests and the fuzz targets (both below),
+  govulncheck, CodeQL and the personal-data scan of the pushed commits.
+  `make check` never rewrites `./fridolin`, which the installed service
+  runs; `make build` and `make install` do. While iterating,
+  `go vet ./... && go test -race ./...` is enough; `gofmt` everything.
   The tests run in an empty temp directory, with an empty temp `HOME` and
   the variables the bridge reads (`FRIDOLIN_CONFIG`, `BRAIN_MODE`) unset,
   so they never see a `config.json` in the checkout or a real data dir;
@@ -95,17 +104,20 @@ Reopen the dashboard with `./fridolin open`.
   with `go test -run='^$' -fuzz='^FuzzExtractPolls$' -fuzztime=30s .`;
   a failing input is saved under the package's `testdata/fuzz/` (make
   `testdata` first in a package that has none), where plain `go test`
-  runs it from then on, so commit it with the fix. CI fuzzes every target
-  for 20 seconds on each push to main.
+  runs it from then on, so commit it with the fix. `make fuzz-short` runs
+  every target for 10 seconds (set `FUZZTIME`); CI fuzzes every target for
+  20 seconds on each push to main.
 - The Python helpers in `tools/` have stdlib-only tests that never touch the
-  network: `python3 -m unittest discover -s tools/tests`. Keep them passing
-  on Python 3.9.
+  network: `python3 -m unittest discover -s tools/tests` (`make test-py`).
+  Keep them passing on Python 3.9. `make lint-py` runs ruff
+  (`pip install -r tools/requirements-dev.txt`).
 - The site process in `site/` (Node, TypeScript run by tsx; docs/SITE.md) has
   its own tests: `cd site && npm install && npm test`. The Go end-to-end
   tests of the site run it too and skip without its `node_modules`.
 - The dashboard is plain HTML/CSS/JS in `web/` (no build step), embedded into
   the binary — rebuild after changing it. It runs under a strict CSP: no
-  inline scripts or styles.
+  inline scripts or styles. `make test-web` syntax-checks every module and
+  runs `node --test` on `web/**/*.test.js` files.
 - Run `scripts/install-hooks.sh` before committing. The hooks refuse commits
   and pushes containing phone numbers, WhatsApp JIDs, emails, home paths or
   tokens. Use placeholders: `15551234567`, `120363000000000000@g.us`,

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import shlex
 import shutil
 import subprocess
 import sys
@@ -15,7 +16,7 @@ from pathlib import Path
 from unittest import mock
 from zoneinfo import ZoneInfo
 
-import support  # noqa: F401  (puts tools/ on sys.path)
+import support  # first: it puts tools/ on sys.path
 import calendar_tool
 
 BERLIN = ZoneInfo("Europe/Berlin")
@@ -24,7 +25,7 @@ BERLIN = ZoneInfo("Europe/Berlin")
 class CalendarTestCase(unittest.TestCase):
     """Pins the module's configuration so no test depends on the host."""
 
-    allowed: list[str] = []
+    allowed: tuple[str, ...] = ()
     default = "primary"
 
     def setUp(self):
@@ -96,7 +97,7 @@ class TokenRefreshTest(TokenTestCase):
         # writes the new one while this command waits.
         self.token_file.write_text("", encoding="utf-8")
         self.sleep.side_effect = lambda seconds: self.write_token()
-        code, out, err = support.run(calendar_tool.get_service)
+        code, out, _ = support.run(calendar_tool.get_service)
         self.assertEqual((code, out), (0, ""), out)
         self.assertEqual(self.sleep.call_count, 1)
         self.assertEqual(self.google.built_with.token, "old")
@@ -504,7 +505,7 @@ class SandboxedRefreshTest(TokenTestCase):
 
 
 class TargetCalendarsTest(CalendarTestCase):
-    allowed = ["me@example.com", "team@example.com"]
+    allowed = ("me@example.com", "team@example.com")
     default = "me@example.com"
 
     def test_resolution(self):
@@ -543,6 +544,61 @@ class EnsureTimezoneTest(CalendarTestCase):
         code, out, _ = support.run(calendar_tool.ensure_timezone, "2026-01-06Tnoon")
         self.assertEqual(code, 1)
         self.assertIn("Cannot parse datetime", json.loads(out)["error"])
+
+
+class InstallHintTest(unittest.TestCase):
+    def test_names_the_requirements_file_itself(self):
+        # Brains run the tool from their own folder, where tools/ is no path.
+        want = support.TOOLS_DIR / "requirements.txt"
+        self.assertTrue(want.is_file())
+        code, out, _ = support.run(calendar_tool.missing_package, ImportError("No module named 'google'"))
+        self.assertEqual(code, 1)
+        self.assertIn(f"pip3 install -r {shlex.quote(str(want))}", json.loads(out)["error"])
+
+
+class ResolveTimezoneTest(CalendarTestCase):
+    def test_names_zoneinfo_cannot_load_are_a_json_error(self):
+        cases = [
+            ("unknown", "Not/AZone"),
+            ("a region, not a zone", "Europe"),
+            ("a relative path", "../etc/passwd"),
+            ("an absolute path", "/etc/localtime"),
+            ("a trailing slash", "Europe/Berlin/"),
+        ]
+        for name, given in cases:
+            with self.subTest(name):
+                code, out, _ = support.run(calendar_tool.resolve_timezone, given)
+                self.assertEqual(code, 1)
+                self.assertIn("Unknown timezone", json.loads(out)["error"])
+
+    def test_an_unreadable_zone_file_is_a_json_error(self):
+        with mock.patch.object(calendar_tool, "ZoneInfo", side_effect=PermissionError("denied")):
+            code, out, _ = support.run(calendar_tool.resolve_timezone, "Europe/Berlin")
+        self.assertEqual(code, 1)
+        self.assertIn("Unknown timezone", json.loads(out)["error"])
+
+    def test_a_detected_name_zoneinfo_cannot_load_asks_for_one(self):
+        os.environ.pop("CALENDAR_TZ")
+        with mock.patch.object(calendar_tool, "system_timezone_name", return_value="Not/AZone"):
+            code, out, _ = support.run(calendar_tool.resolve_timezone, None)
+        self.assertEqual(code, 1)
+        self.assertIn("Could not determine your timezone", json.loads(out)["error"])
+
+    def test_a_bug_is_not_reported_as_a_bad_timezone(self):
+        boom = mock.patch.object(calendar_tool, "ZoneInfo", side_effect=RuntimeError("boom"))
+        with self.subTest("explicit name"), boom:
+            self.assertRaises(RuntimeError, calendar_tool.resolve_timezone, "Europe/Berlin")
+        # Its own patch.dict brings CALENDAR_TZ back for the next subtest,
+        # which would otherwise detect the host's timezone, or find none.
+        with self.subTest("detected name"), boom, mock.patch.dict(os.environ), \
+                mock.patch.object(calendar_tool, "system_timezone_name", return_value="Europe/Berlin"):
+            os.environ.pop("CALENDAR_TZ", None)
+            self.assertRaises(RuntimeError, calendar_tool.resolve_timezone, None)
+        with self.subTest("from the command line"), boom:
+            code, out, err = support.run_main(calendar_tool, ["calendars"])
+            self.assertEqual(code, 1)
+            self.assertEqual(json.loads(out), {"error": "RuntimeError: boom"})
+            self.assertIn("Traceback", err)
 
 
 class FormatEventTest(unittest.TestCase):

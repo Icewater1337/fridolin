@@ -506,7 +506,9 @@ Overview shows it too, with the brains it affects.
 ## Contributing
 
 Issues and pull requests welcome. Please don't include real phone numbers,
-group JIDs, or chat content in bug reports — redact them.
+group JIDs, or chat content in bug reports — redact them. The issue forms ask
+for `fridolin version`, your OS and a redacted `fridolin check`, and the pull
+request template has a short checklist.
 
 Run `scripts/install-hooks.sh` once: it blocks commits and pushes that contain
 phone numbers, WhatsApp JIDs, email addresses, home-directory paths or tokens,
@@ -514,14 +516,34 @@ plus anything in your personal denylist
 (`~/.config/fridolin/personal-denylist`, one string per line —
 your name, your numbers, your company). CI runs the same check.
 
-CI also runs [govulncheck](https://go.dev/doc/security/vuln/) on pushes to main,
-every pull request and once a week; it fails when the code reaches a known
-vulnerability. Run it yourself after changing dependencies:
-`go run golang.org/x/vuln/cmd/govulncheck@latest ./...`.
+`make check` runs what CI's build, lint and test jobs run: gofmt, `go vet`,
+`go mod tidy -diff`, the race tests, staticcheck, shellcheck, ruff,
+actionlint, a check that every workflow action is pinned to a commit SHA,
+the Python, dashboard, personal-data-check, action-pin-check and Makefile
+tests, and a smoke test that starts a race-enabled build in dev mode on a
+scratch config (`make help` lists every target). staticcheck and actionlint
+run through `go run` at pinned versions; ruff comes from
+`pip install -r tools/requirements-dev.txt`, shellcheck from your package
+manager. `make check` builds into a temp dir and leaves `./fridolin` alone:
+the service `setup.sh` installs runs that file from the checkout and starts
+whatever is there on its next restart. `make build` writes it, and
+`make install` also copies it to `~/.local/bin` (set `PREFIX` or `BINDIR` to
+change that).
+
+CI also installs the site's npm packages and runs its own tests
+(`cd site && npm install && npm test`; [docs/SITE.md](docs/SITE.md));
+`make check` does not, and without those packages its Go tests of the site
+skip. It runs [govulncheck](https://go.dev/doc/security/vuln/) on pushes to
+main, every pull request and once a week; it fails when the code reaches a
+known vulnerability. Run it yourself after changing dependencies:
+`go run golang.org/x/vuln/cmd/govulncheck@latest ./...`. CodeQL scans the
+Go code, the dashboard JavaScript, the Python tools and the workflows on the
+same schedule; its findings go to the repository's code scanning alerts.
 
 On pushes to main, CI also fuzzes the parsers of untrusted input (WhatsApp
 messages, model output, files a brain writes) for 20 seconds each;
-[AGENTS.md](AGENTS.md) says how to run a fuzz target yourself.
+[AGENTS.md](AGENTS.md) says how to run a fuzz target yourself, and
+`make fuzz-short` runs them all for 10 seconds each.
 
 ## License
 

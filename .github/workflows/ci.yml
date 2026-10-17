@@ -9,6 +9,17 @@ on:
 permissions:
   contents: read
 
+# A new push to a pull request cancels the run still going for the old one.
+# Every other run (each push to main) gets a group of its own, so none is
+# cancelled or left waiting.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: true
+
+# Actions are pinned to a full commit SHA, which unlike a tag cannot be moved
+# to other code; the comment names the release. Dependabot proposes updates,
+# and scripts/check-action-pins.sh (make lint-actions) fails on a tag.
+
 jobs:
   go:
     strategy:
@@ -23,32 +34,51 @@ jobs:
         # still accept a release without security fixes.
         go: [oldstable, stable]
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
     env:
       # Test the release setup-go installed. With the default (auto), a go
       # directive newer than it would quietly download a newer toolchain.
       GOTOOLCHAIN: local
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version: ${{ matrix.go }}
           cache: true
 
+      # The steps are Makefile targets, so `make check` runs the same.
       - name: gofmt
-        run: |
-          unformatted="$(gofmt -l .)"
-          if [ -n "$unformatted" ]; then
-            echo "These files need gofmt:"; echo "$unformatted"; exit 1
-          fi
+        run: make fmt-check
 
       - name: go vet
-        run: go vet ./...
+        run: make vet
 
       - name: build
-        run: go build ./...
+        run: make build
 
       - name: test
-        run: go test -race -count=1 ./...
+        run: make race
+
+      # Builds the binary with -race in a temp dir, starts it in dev mode on
+      # a scratch config and stops it.
+      - name: smoke test
+        run: make smoke
+
+      # The linters need one Go release, but both systems: some files only
+      # build on one of them.
+      - name: staticcheck
+        if: matrix.go == 'stable'
+        run: make lint-go
+
+      - name: go.mod and go.sum are tidy
+        if: matrix.go == 'stable' && matrix.os == 'ubuntu-latest'
+        run: make tidy-check
+
+      - name: actionlint and action pins
+        if: matrix.go == 'stable' && matrix.os == 'ubuntu-latest'
+        run: make lint-actions
 
   fuzz:
     # After a merge only: twenty seconds a target would hold up every pull
@@ -56,11 +86,14 @@ jobs:
     # run there as part of go test.
     if: github.event_name == 'push'
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     env:
       GOTOOLCHAIN: local
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version: stable
           cache: true
@@ -100,45 +133,91 @@ jobs:
       # package. Commit it with the fix, and go test runs it from then on.
       - name: keep the failing inputs
         if: failure()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: fuzz-failing-inputs
           path: '**/testdata/fuzz/**'
 
   scripts:
-    # Pinned rather than ubuntu-latest: Python 3.9 is past its end of life,
-    # and setup-python only has builds of it for the images that exist now,
-    # so the next ubuntu-latest would break this job with no change here.
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       - name: shellcheck
-        run: shellcheck --severity=warning setup.sh scripts/*.sh .githooks/*
+        run: make lint-sh
 
-      # The oldest Python the README promises (and the one macOS ships as
-      # /usr/bin/python3), so a newer-only feature fails here first.
-      - uses: actions/setup-python@v5
+      - name: personal-data check, action-pin check and Makefile tests
+        run: make test-sh
+
+  python:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # The oldest Python the README promises, so a newer-only feature
+          # fails here first, and the newest release, so something it
+          # removed fails too. Ubuntu 24.04 rather than ubuntu-latest:
+          # Python 3.9 is past its end of life, and setup-python only has
+          # builds of it for the images that exist now.
+          - {os: ubuntu-24.04, python: '3.9'}
+          - {os: ubuntu-24.04, python: '3.x'}
+          # macOS's own /usr/bin/python3, which brains run the tools with,
+          # and the one system with sandbox-exec, which a test needs.
+          - {os: macos-latest, python: system}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          python-version: '3.9'
+          persist-credentials: false
 
-      - name: python syntax
+      - if: matrix.python != 'system'
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: ${{ matrix.python }}
+
+      # Once is enough: ruff reports the same on every Python.
+      - name: ruff
+        if: matrix.python == '3.9'
         run: |
-          python3 -m py_compile tools/*.py tools/tests/*.py
+          python3 -m pip install --disable-pip-version-check -r tools/requirements-dev.txt
+          make lint-py
 
-      - name: python tests
-        run: python3 -m unittest discover -s tools/tests -v
+      - name: python syntax and tests
+        run: make test-py PYTHON="${{ matrix.python == 'system' && '/usr/bin/python3' || 'python3' }}"
+
+  web:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: '24'
+
+      # Every dashboard module must parse: one syntax error leaves the whole
+      # dashboard blank. node --test runs web/**/*.test.js once there are any.
+      - name: dashboard modules and unit tests
+        run: make test-web
 
   site:
     # The site process (site/, docs/SITE.md): its own tests, then the Go
     # end-to-end tests that run it, which skip without its node_modules.
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: 22
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version: stable
           cache: true
@@ -160,10 +239,12 @@ jobs:
 
   personal-data:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
+          persist-credentials: false
 
       # Nothing published here may contain a real phone number, WhatsApp JID,
       # email address, home path or token. Contributors run the same check as a
@@ -172,6 +253,9 @@ jobs:
         env:
           BEFORE: ${{ github.event.pull_request.base.sha || github.event.before }}
         run: |
+          # Without a usable base, check everything after the root commit.
+          # Not the root commit itself: it predates this check, and what the
+          # check flags in it was removed later (published history stays).
           if [ -z "$BEFORE" ] || ! git cat-file -e "$BEFORE" 2>/dev/null || [ "$BEFORE" = 0000000000000000000000000000000000000000 ]; then
             BEFORE="$(git rev-list --max-parents=0 HEAD | tail -1)"
           fi
