@@ -35,6 +35,9 @@ const modules = walk(ASSETS).map((file) => {
 });
 const byFile = new Map(modules.map((m) => [m.file, m]));
 const layer = (rel) => rel.split(path.sep)[0];
+// Of these, only $ can be in a JavaScript name, but escaping them all keeps
+// the pattern right whatever the import list holds.
+const escapeRegExp = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
 test('every import resolves to an export', async (t) => {
   for (const m of modules) {
@@ -55,7 +58,7 @@ test('every imported name is used', async (t) => {
       const body = m.src.replace(/^import\s[\s\S]*?;$/gm, '');
       for (const im of m.src.matchAll(/^import\s*\{([^}]*)\}\s*from/gm)) {
         for (const local of im[1].split(',').map((n) => n.trim().split(/\s+as\s+/).pop()).filter(Boolean)) {
-          assert.match(body, new RegExp(`\\b${local.replace(/\$/g, '\\$')}\\b`), `${local} is imported but not used`);
+          assert.match(body, new RegExp(`\\b${escapeRegExp(local)}\\b`), `${local} is imported but not used`);
         }
       }
     });
