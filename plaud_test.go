@@ -114,6 +114,18 @@ func plaudDeliver(t *testing.T, tb *testBridge, fp *fakePlaudFixture) error {
 	return tb.plaud.Poll(context.Background())
 }
 
+// plaudDeliverRecording is plaudDeliver for the recording r.
+func plaudDeliverRecording(t *testing.T, tb *testBridge, fp *fakePlaudFixture, r fakePlaudRecording) error {
+	t.Helper()
+	plaudSignIn(t, tb)
+	if err := tb.plaud.saveState(&plaudState{Seen: []string{plaudOld1}, Pending: map[string]float64{}}); err != nil {
+		t.Fatal(err)
+	}
+	fp.files(r.ID, plaudOld1)
+	fp.put(r)
+	return tb.plaud.Poll(context.Background())
+}
+
 // The recording runs in the brain picked for Plaud, even when that brain
 // answers in the DM, which belongs to the DM brain.
 func TestPlaudRunsInThePickedBrain(t *testing.T) {
@@ -840,6 +852,72 @@ func TestPlaudLoginChangingDuringAPollSendsNothing(t *testing.T) {
 			st, _ := tb.plaud.loadState()
 			if st.Account != "u_2" || !slices.Contains(st.Seen, plaudNew) || !slices.Contains(st.Seen, plaudOld2) || len(st.Pending) != 0 {
 				t.Errorf("state = %+v, want it seeded for u_2", st)
+			}
+		})
+	}
+}
+
+// plaudDelivered returns the transcript file written for recording id.
+func (tb *testBridge) plaudDelivered(t *testing.T, id string) string {
+	t.Helper()
+	files, _ := filepath.Glob(filepath.Join(tb.cfgs.Get().MediaDir, "plaud", "* - "+id+".txt"))
+	if len(files) != 1 {
+		t.Fatalf("transcript files for %s = %v, want one", id, files)
+	}
+	data, err := os.ReadFile(files[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	return filepath.Base(files[0]) + "\n" + string(data)
+}
+
+// The transcript file holds what Plaud has, read the way the real CLI
+// prints it: the summary whole and without the "Summary: <name>" header,
+// even when a line of it starts like the spinner; the transcript without
+// its header; the recording's own date even when Plaud has no start time;
+// and no summary for an empty note.
+func TestPlaudForwardReadsWhatTheCLIPrints(t *testing.T) {
+	created := time.Date(2026, 10, 15, 7, 30, 0, 0, time.UTC).Local()
+	for _, c := range []struct {
+		name    string
+		change  func(r *fakePlaudRecording)
+		want    []string // in the file, which starts with its name
+		notWant []string
+	}{
+		{"a summary line that starts like the spinner",
+			func(r *fakePlaudRecording) { r.Notes[0].Content = plaudGoldenSummary },
+			[]string{"=== Plaud AI summary ===\n" + plaudGoldenSummary + "\n\n=== Transcript ===\n"},
+			[]string{"Team sync\n## Team sync"}},
+		{"the transcript without its header",
+			func(*fakePlaudRecording) {},
+			[]string{"=== Transcript ===\n[00:00 - 00:04] Speaker 1: Let's ship on Friday.\n"},
+			[]string{"Transcript: Team sync"}},
+		{"no start time: the day it reached Plaud",
+			func(r *fakePlaudRecording) { r.StartAt, r.CreatedAt = nil, "2026-10-15T07:30:00" },
+			[]string{created.Format("02.01.2006") + " - Team sync - ", "Recorded: " + created.Format("02.01.2006 15:04") + "\n"},
+			[]string{"Recorded: -"}},
+		{"an empty summary note",
+			func(r *fakePlaudRecording) { r.Notes[0].Content = "" },
+			nil,
+			[]string{"=== Plaud AI summary ===", "no content yet"}},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			tb, fp := plaudBridge(t, "")
+			r := fp.teamSync(plaudNew, true)
+			c.change(&r)
+			if err := plaudDeliverRecording(t, tb, fp, r); err != nil {
+				t.Fatal(err)
+			}
+			got := tb.plaudDelivered(t, plaudNew)
+			for _, w := range c.want {
+				if !strings.Contains(got, w) {
+					t.Errorf("the file lacks %q:\n%s", w, got)
+				}
+			}
+			for _, w := range c.notWant {
+				if strings.Contains(got, w) {
+					t.Errorf("the file has %q:\n%s", w, got)
+				}
 			}
 		})
 	}

@@ -13,6 +13,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -69,11 +70,10 @@ func (pc PlaudConfig) validate() error {
 const defaultPlaudMessage = `[Plaud] New recording "{name}" ({when}, {duration}). The attached .txt is the finished transcript from the Plaud recorder, with Plaud's AI summary when there is one — it is already transcribed, do not transcribe it again. File it as your plaud skill describes (skills/plaud.md); without one: save it under transcripts/ as "DD.MM.YYYY - Short description.txt", note durable facts in memories, and reply with a short summary, key points and action items.`
 
 var (
-	errPlaudAuth    = errors.New("the Plaud login expired")
-	plaudIDRe       = regexp.MustCompile(`\b(of_[0-9a-f]{16,})\b`)
-	ansiRe          = regexp.MustCompile(`\x1b\[[0-9;]*[A-Za-z]`)
-	plaudKVRe       = regexp.MustCompile(`^\s*([a-z_]+):\s*(.*)$`)
-	transcriptRowRe = regexp.MustCompile(`\[\d`)
+	errPlaudAuth = errors.New("the Plaud login expired")
+	plaudIDRe    = regexp.MustCompile(`\b(of_[0-9a-f]{16,})\b`)
+	ansiRe       = regexp.MustCompile(`\x1b\[[0-9;]*[A-Za-z]`)
+	plaudKVRe    = regexp.MustCompile(`^\s*([a-z_]+):\s*(.*)$`)
 )
 
 const (
@@ -272,15 +272,56 @@ func (p *PlaudManager) listIDs(ctx context.Context, page int) ([]string, error) 
 	return ids, nil
 }
 
+// parseKV reads the "  key: value" lines `plaud file` and `plaud me`
+// print. A value the CLI has not got is left out: it prints "-" for a
+// missing start_at or serial_number, and "undefined" or "null" for a field
+// Plaud did not send at all.
 func parseKV(out string) map[string]string {
 	d := map[string]string{}
 	for _, line := range strings.Split(out, "\n") {
 		if m := plaudKVRe.FindStringSubmatch(line); m != nil {
-			d[m[1]] = strings.TrimSpace(m[2])
+			switch v := strings.TrimSpace(m[2]); v {
+			case "", "-", "undefined", "null":
+			default:
+				d[m[1]] = v
+			}
 		}
 	}
 	return d
 }
+
+// plaudTime reads a time from `plaud file`: Plaud's API sends UTC, often
+// without an offset, which the CLI then reads as UTC too.
+func plaudTime(s string) (time.Time, bool) {
+	for _, layout := range []string{time.RFC3339Nano, "2006-01-02T15:04:05.999999999", "2006-01-02 15:04:05.999999999"} {
+		if t, err := time.ParseInLocation(layout, s, time.UTC); err == nil {
+			return t, true
+		}
+	}
+	return time.Time{}, false
+}
+
+// fetchBody runs `plaud args… -o <file>` and returns what it wrote, or ""
+// when it wrote nothing. With -o the CLI writes only the transcript or
+// the summary, without its header, and nothing at all when Plaud has none
+// (it says so on stdout and exits 0), so there is no output to pick apart.
+// The file goes in dir, which brains cannot read.
+func (p *PlaudManager) fetchBody(ctx context.Context, dir string, args ...string) (string, error) {
+	out := filepath.Join(dir, args[0]+".txt")
+	_ = os.Remove(out)
+	if _, err := p.run(ctx, append(slices.Clip(args), "-o", out)...); err != nil {
+		return "", err
+	}
+	data, err := os.ReadFile(out)
+	if errors.Is(err, os.ErrNotExist) {
+		return "", nil
+	}
+	return strings.TrimSpace(string(data)), err
+}
+
+// plaudEmptyNote starts what `plaud summary` writes for a summary note
+// Plaud has not filled in yet.
+const plaudEmptyNote = "(this note has no content yet"
 
 // me returns what `plaud me` says about the signed-in user.
 func (p *PlaudManager) me(ctx context.Context) (map[string]string, error) {
@@ -330,33 +371,28 @@ func (p *PlaudManager) forward(ctx context.Context, id string, br *Brain, jid st
 	if d["transcript"] != "available" {
 		return false, nil
 	}
+	tmp, err := os.MkdirTemp(p.dir(), "fetch-")
+	if err != nil {
+		return false, err
+	}
+	defer os.RemoveAll(tmp)
 	args := []string{"transcript", id}
 	if cfg.Plaud.Polished {
 		args = append(args, "--polished")
 	}
-	transcript, err := p.run(ctx, args...)
+	transcript, err := p.fetchBody(ctx, tmp, args...)
 	if err != nil {
 		return false, err
 	}
-	if i := strings.Index(transcript, "Transcript:"); i >= 0 {
-		transcript = transcript[i:]
-		if nl := strings.Index(transcript, "\n"); nl >= 0 {
-			transcript = transcript[nl+1:] // drop the "Transcript: <name>" header
-		}
-	}
-	if !transcriptRowRe.MatchString(transcript) {
-		return false, nil // the header is there, the segments not yet
+	if transcript == "" {
+		return false, nil
 	}
 	summary := ""
 	if d["summary"] == "available" {
-		if s, err := p.run(ctx, "summary", id); err == nil {
-			summary = strings.TrimSpace(s)
-			if i := strings.Index(summary, "Fetching"); i >= 0 {
-				if nl := strings.Index(summary[i:], "\n"); nl >= 0 {
-					summary = strings.TrimSpace(summary[i+nl+1:])
-				}
+		if s, err := p.fetchBody(ctx, tmp, "summary", id); err == nil {
+			if !strings.HasPrefix(s, plaudEmptyNote) {
+				summary = s
 			}
-			summary = strings.TrimSpace(strings.TrimPrefix(summary, "Summary:"))
 		} else if errors.Is(err, errPlaudAuth) {
 			return false, err
 		} else {
@@ -368,14 +404,10 @@ func (p *PlaudManager) forward(ctx context.Context, id string, br *Brain, jid st
 	if name == "" {
 		name = id
 	}
-	day, when := time.Now().Format("02.01.2006"), d["start_at"]
-	start := d["start_at"]
-	if start == "" {
-		start = d["created_at"]
-	}
-	// Plaud reports UTC without an offset.
-	for _, layout := range []string{"2006-01-02T15:04:05", "2006-01-02 15:04:05", time.RFC3339} {
-		if t, err := time.ParseInLocation(layout, strings.TrimSuffix(start, "Z"), time.UTC); err == nil {
+	// When it was recorded, else when it reached Plaud, else today.
+	day, when := time.Now().Format("02.01.2006"), "unknown"
+	for _, k := range []string{"start_at", "created_at"} {
+		if t, ok := plaudTime(d[k]); ok {
 			local := t.Local()
 			day, when = local.Format("02.01.2006"), local.Format("02.01.2006 15:04")
 			break

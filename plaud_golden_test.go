@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
@@ -364,6 +365,69 @@ func TestPlaudCLIContract(t *testing.T) {
 		data, _ := json.MarshalIndent(runs, "", "  ")
 		if err := os.WriteFile(filepath.Join(repoDir, plaudGoldenFile), append(data, '\n'), 0o644); err != nil {
 			t.Fatal(err)
+		}
+	}
+}
+
+// Fridolin reads what an installed CLI prints: a poll against the same
+// stand-in for Plaud's API hands both new recordings over, each with its
+// summary and transcript whole and its own date.
+func TestPlaudForwardWithTheRealCLI(t *testing.T) {
+	bin := realPlaudCLI(t)
+	list, recs := plaudGoldenRecordings()
+	srv := httptest.NewServer(plaudStubAPI(list, recs))
+	defer srv.Close()
+	tb := newTestBridge(t, `, "plaud": {"enabled": true, "cli_path": "`+bin+`"}`)
+	tb.addFolderBrain(t, plaudDMBrain)
+	writeRealPlaudLogin(t, tb.plaud.cliHome(), "ok", srv.URL)
+	if err := tb.plaud.saveState(&plaudState{Account: "u_1", Seen: []string{plaudGoldOld}, Pending: map[string]float64{}}); err != nil {
+		t.Fatal(err)
+	}
+	if err := tb.plaud.Poll(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	local := func(s string) string {
+		t, _ := time.ParseInLocation("2006-01-02T15:04:05", s, time.UTC)
+		return t.Local().Format("02.01.2006 15:04")
+	}
+	for id, want := range map[string][]string{
+		plaudGoldTeam: {"Plaud recording: Team sync\nRecorded: " + local("2026-10-16T18:00:00") + "\nDuration: 5m00s\n",
+			"=== Plaud AI summary ===\n" + plaudGoldenSummary + "\n\n=== Transcript ===\n[00:00 - 00:04] Speaker 1: Let's ship on Friday.\n[00:04 - 00:09] Speaker 2: Fetching the release notes is Anna's job.\n"},
+		plaudGoldDoctor: {"Plaud recording: Doctor: Fetching results\nRecorded: " + local("2026-10-15T07:30:00") + "\n"},
+	} {
+		got := tb.plaudDelivered(t, id)
+		for _, w := range want {
+			if !strings.Contains(got, w) {
+				t.Errorf("%s lacks %q:\n%s", id, w, got)
+			}
+		}
+	}
+}
+
+// parseKV leaves out a value the CLI has not got: "-" for a missing
+// start_at or serial_number, as in the recorded details, and "undefined"
+// or "null" for a field Plaud did not send. The transcript's header then
+// falls back ("?" for the duration) rather than print them.
+func TestPlaudParseKV(t *testing.T) {
+	d := parseKV(loadPlaudGolden(t)["file"].Stdout)
+	for k, want := range map[string]string{"id": plaudGoldTeam, "name": "Team sync", "duration": "5m00s", "transcript": "available", "start_at": "", "serial_number": ""} {
+		if d[k] != want {
+			t.Errorf("recorded details: %s = %q, want %q", k, d[k], want)
+		}
+	}
+	for _, c := range []struct {
+		line, want string
+	}{
+		{"  duration: 5m00s", "5m00s"},
+		{"  duration: -", ""},
+		{"  duration: undefined", ""},
+		{"  duration: null", ""},
+		{"  duration:", ""},
+		{"  duration:    ", ""},
+	} {
+		got, ok := parseKV(c.line)["duration"]
+		if got != c.want || ok != (c.want != "") {
+			t.Errorf("parseKV(%q) duration = %q (%v), want %q", c.line, got, ok, c.want)
 		}
 	}
 }
