@@ -363,24 +363,6 @@ func TestSanitizeMediaName(t *testing.T) {
 	}
 }
 
-// safeMediaPath never hands out a name that is taken, even by a dangling
-// symlink: writing there would follow the link out of the media directory.
-func TestSafeMediaPathNeverReusesAName(t *testing.T) {
-	dir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(dir, "scan.pdf"), []byte("first"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.Symlink(filepath.Join(t.TempDir(), "elsewhere"), filepath.Join(dir, "scan-2.pdf")); err != nil {
-		t.Fatal(err)
-	}
-	if got, want := safeMediaPath(dir, "scan.pdf"), filepath.Join(dir, "scan-3.pdf"); got != want {
-		t.Errorf("safeMediaPath = %q, want %q", got, want)
-	}
-	if got, want := safeMediaPath(dir, "a\nb.pdf"), filepath.Join(dir, "ab.pdf"); got != want {
-		t.Errorf("safeMediaPath sanitises: got %q, want %q", got, want)
-	}
-}
-
 // fakeDownloader stands in for whatsmeow's media download. Like whatsmeow,
 // it writes the body into the file with io.Copy; then it fails with err, or,
 // with block set, waits for the context to end.

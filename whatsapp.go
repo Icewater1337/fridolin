@@ -837,8 +837,8 @@ func (c *cappedFile) Stat() (os.FileInfo, error)                { return c.f.Sta
 // a free name with O_EXCL, which fails when anything is there, even a
 // dangling symlink, so a file a brain left in the shared media directory is
 // neither overwritten nor followed. A taken name moves on to "-2", "-3" and
-// so on, as in safeMediaPath. The rename then replaces only the empty file
-// it just created.
+// so on, so two documents called "scan.pdf" both survive. The rename then
+// replaces only the empty file it just created.
 func placeMedia(tmp, dir, name string) (string, error) {
 	name = sanitizeMediaName(name)
 	for i := 1; ; i++ {
@@ -856,20 +856,6 @@ func placeMedia(tmp, dir, name string) (string, error) {
 			return "", fmt.Errorf("naming the download: %w", err)
 		}
 		return p, nil
-	}
-}
-
-// safeMediaPath returns a free path for a file called name in dir. The name
-// is sanitised so a hostile filename cannot escape the media directory. An
-// existing file is never overwritten: two documents called "scan.pdf" both
-// survive.
-func safeMediaPath(dir, name string) string {
-	name = sanitizeMediaName(name)
-	for i := 1; ; i++ {
-		p := filepath.Join(dir, mediaNameCandidate(name, i))
-		if _, err := os.Lstat(p); err != nil || i == lastMediaCandidate {
-			return p
-		}
 	}
 }
 
