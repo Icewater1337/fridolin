@@ -12,6 +12,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode"
 
 	"github.com/mdp/qrterminal/v3"
 	"go.mau.fi/whatsmeow"
@@ -619,11 +620,7 @@ func (wa *WhatsAppClient) mediaPath(name string) string {
 }
 
 func safeMediaPath(dir, name string) string {
-	name = filepath.Base(filepath.Clean(name))
-	name = strings.TrimLeft(name, ".")
-	if name == "" || name == "/" {
-		name = "file"
-	}
+	name = sanitizeMediaName(name)
 	p := filepath.Join(dir, name)
 	if _, err := os.Lstat(p); err != nil {
 		return p
@@ -637,6 +634,41 @@ func safeMediaPath(dir, name string) string {
 		}
 	}
 	return filepath.Join(dir, fmt.Sprintf("%s-%d%s", stem, time.Now().UnixNano(), ext))
+}
+
+// maxMediaNameBytes caps the name of a saved file. File systems refuse names
+// over 255 bytes, and a "-2" suffix must still fit.
+const maxMediaNameBytes = 120
+
+// sanitizeMediaName turns a sender-chosen file name into a safe base name in
+// the media directory. Directories are dropped, so the name cannot escape it,
+// and leading dots, so it is never hidden or "..". Control characters and
+// line separators go too: the path is written into the prompt and into the
+// line-based history ("[attachment: <path>]"), where a newline would start a
+// line of its own, and a NUL makes the write fail. A name that is too long is
+// shortened, keeping its extension, because saving it would fail and the
+// attachment would be lost.
+func sanitizeMediaName(name string) string {
+	name = strings.Map(func(r rune) rune {
+		if unicode.IsControl(r) || r == '\u2028' || r == '\u2029' {
+			return -1
+		}
+		return r
+	}, name)
+	name = filepath.Base(filepath.Clean(name))
+	name = strings.TrimLeft(name, ".")
+	if name == "" || name == "/" {
+		return "file"
+	}
+	if len(name) <= maxMediaNameBytes {
+		return name
+	}
+	ext := filepath.Ext(name)
+	if len(ext) > 16 {
+		ext = "" // not an extension, just a dot in a long name
+	}
+	// truncate appends "…" (3 bytes) and never splits a character.
+	return truncate(strings.TrimSuffix(name, ext), maxMediaNameBytes-len(ext)-len("…")) + ext
 }
 
 func (wa *WhatsAppClient) downloadImage(img *waE2E.ImageMessage, msgID types.MessageID) (string, error) {

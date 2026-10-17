@@ -4,10 +4,13 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"go.mau.fi/whatsmeow/proto/waE2E"
 	"go.mau.fi/whatsmeow/types"
@@ -304,5 +307,63 @@ func TestStripMentions(t *testing.T) {
 	}
 	if got := stripMentions(" @15559876543 hi ", nil); got != "@15559876543 hi" {
 		t.Errorf("without accounts: %q, want the text trimmed and kept", got)
+	}
+}
+
+// Attachment names come from the sender. Whatever they send, the saved name
+// stays in the media directory, is not hidden, keeps to one line in the
+// prompt and the history, and is short enough to be saved at all.
+func TestSanitizeMediaName(t *testing.T) {
+	long := strings.Repeat("ä", 150) + ".pdf" // 304 bytes
+	cases := []struct {
+		name, in, want string
+	}{
+		{"plain", "scan.pdf", "scan.pdf"},
+		{"directories", "../../etc/passwd", "passwd"},
+		{"absolute", "/etc/passwd", "passwd"},
+		{"hidden", ".bashrc", "bashrc"},
+		{"dot dot", "..", "file"},
+		{"empty", "", "file"},
+		{"root", "/", "file"},
+		{"newline", "a\nb.pdf", "ab.pdf"},
+		{"carriage return and tab", "a\r\tb.pdf", "ab.pdf"},
+		{"NUL", "a\x00b.pdf", "ab.pdf"},
+		{"line separator", "a\u2028b\u2029c.pdf", "abc.pdf"},
+		{"only control characters", "\n\n", "file"},
+		{"unicode kept", "Rechnung März 🧾.pdf", "Rechnung März 🧾.pdf"},
+		{"too long", long, strings.Repeat("ä", 56) + "….pdf"},
+		{"too long, no real extension", strings.Repeat("x", 100) + "." + strings.Repeat("y", 100), strings.Repeat("x", 100) + "." + strings.Repeat("y", 16) + "…"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			got := sanitizeMediaName(c.in)
+			if got != c.want {
+				t.Errorf("sanitizeMediaName(%q) = %q, want %q", c.in, got, c.want)
+			}
+			if len(got) > maxMediaNameBytes {
+				t.Errorf("%d bytes, more than %d", len(got), maxMediaNameBytes)
+			}
+			if !utf8.ValidString(got) {
+				t.Errorf("%q is not valid UTF-8", got)
+			}
+		})
+	}
+}
+
+// safeMediaPath never hands out a name that is taken, even by a dangling
+// symlink: writing there would follow the link out of the media directory.
+func TestSafeMediaPathNeverReusesAName(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "scan.pdf"), []byte("first"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(filepath.Join(t.TempDir(), "elsewhere"), filepath.Join(dir, "scan-2.pdf")); err != nil {
+		t.Fatal(err)
+	}
+	if got, want := safeMediaPath(dir, "scan.pdf"), filepath.Join(dir, "scan-3.pdf"); got != want {
+		t.Errorf("safeMediaPath = %q, want %q", got, want)
+	}
+	if got, want := safeMediaPath(dir, "a\nb.pdf"), filepath.Join(dir, "ab.pdf"); got != want {
+		t.Errorf("safeMediaPath sanitises: got %q, want %q", got, want)
 	}
 }
