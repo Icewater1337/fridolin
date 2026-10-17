@@ -1,9 +1,12 @@
 package main
 
 import (
+	"encoding/json"
 	"log"
+	"maps"
 	"os"
 	"path/filepath"
+	"reflect"
 	"slices"
 	"strings"
 	"sync"
@@ -329,6 +332,13 @@ func TestBrainRunsWithItsOwnClaudeSetup(t *testing.T) {
 				t.Fatal(err)
 			}
 		}, []string{isolated}, []string{"--mcp-config"}},
+		{"a .mcp.json with a server turned off", "", func(t *testing.T, p string) {
+			write(`{"mcpServers": {"keep": {"command": "k"}, "off": {"command": "o"}}}`)(t, p)
+			if err := os.Mkdir(filepath.Join(filepath.Dir(p), ".claude"), 0o700); err != nil {
+				t.Fatal(err)
+			}
+			write(`{"disabledMcpjsonServers": ["off"]}`)(t, filepath.Join(filepath.Dir(p), ".claude", "settings.local.json"))
+		}, []string{isolated + ` --mcp-config {"mcpServers":{"keep":{"command":"k"}}}`}, []string{"<mcp>"}},
 		{"inherit_claude_user_config", `, "inherit_claude_user_config": true`, write(`{"mcpServers": {}}`),
 			nil, []string{"--setting-sources", "--strict-mcp-config", "--mcp-config"}},
 	}
@@ -359,7 +369,7 @@ func TestBrainRunsWithItsOwnClaudeSetup(t *testing.T) {
 				}
 			}
 			for _, w := range tc.dontWant {
-				if strings.Contains(got, w) {
+				if w = strings.ReplaceAll(w, "<mcp>", mcp); strings.Contains(got, w) {
 					t.Errorf("args %q have %q", got, w)
 				}
 			}
@@ -460,6 +470,100 @@ func TestMCPConfigOf(t *testing.T) {
 			_, reason, ok := strings.Cut(strings.Join(logged, "\n"), "brain a: leaving out "+p+": ")
 			if len(logged) != 1 || !ok || !strings.Contains(reason, tc.wantLog) {
 				t.Errorf("log = %q, want one line leaving out %s for %q", logged, p, tc.wantLog)
+			}
+		})
+	}
+}
+
+// TestMCPConfigOfDropsServersTurnedOff: a server the brain folder's
+// settings turn off with disabledMcpjsonServers stays off, as it did for a
+// project .mcp.json, although --mcp-config would start it: the bridge
+// passes the rest as JSON, or nothing when no server is left. A settings
+// file it cannot read leaves out every server, since nothing can tell
+// which ones it turns off. enabledMcpjsonServers changes nothing.
+func TestMCPConfigOfDropsServersTurnedOff(t *testing.T) {
+	const servers = `{"mcpServers": {"keep": {"command": "k", "args": ["<&>"]}, "off": {"command": "o"}}, "other": 1}`
+	cases := []struct {
+		name           string
+		project, local string   // the .claude/settings.json and settings.local.json; "" for none
+		want           []string // the servers passed as JSON; nil for the file itself
+		leftOut        string   // in the log line when the file is left out
+	}{
+		{"no settings", "", "", nil, ""},
+		{"nothing turned off", `{"permissions": {}}`, "", nil, ""},
+		{"an unknown server turned off", `{"disabledMcpjsonServers": ["gone"]}`, "", nil, ""},
+		{"turned off in settings.json", `{"disabledMcpjsonServers": ["off"]}`, "", []string{"keep"}, ""},
+		{"turned off in settings.local.json", "", `{"disabledMcpjsonServers": ["off"]}`, []string{"keep"}, ""},
+		{"enabled elsewhere", `{"disabledMcpjsonServers": ["off"]}`, `{"enabledMcpjsonServers": ["off"]}`, []string{"keep"}, ""},
+		{"only enabledMcpjsonServers", `{"enabledMcpjsonServers": ["keep"]}`, "", nil, ""},
+		{"all turned off", `{"disabledMcpjsonServers": ["off"]}`, `{"disabledMcpjsonServers": ["keep"]}`, []string{}, ""},
+		{"list is null", `{"disabledMcpjsonServers": null}`, "", nil, ""},
+		{"settings not JSON", `{"disabledMcpjsonServers": ["off"],}`, "", []string{}, "cannot tell which servers"},
+		{"list not a list", `{"disabledMcpjsonServers": "off"}`, "", []string{}, "cannot tell which servers"},
+		{"settings not an object", "", `[]`, []string{}, "cannot tell which servers"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			ring := NewLogRing(10)
+			prev := log.Writer()
+			log.SetOutput(ring)
+			t.Cleanup(func() { log.SetOutput(prev) })
+
+			dir := t.TempDir()
+			p := filepath.Join(dir, ".mcp.json")
+			for path, body := range map[string]string{
+				p: servers,
+				filepath.Join(dir, ".claude", "settings.json"):       tc.project,
+				filepath.Join(dir, ".claude", "settings.local.json"): tc.local,
+			} {
+				if body == "" {
+					continue
+				}
+				if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+					t.Fatal(err)
+				}
+			}
+			got := mcpConfigOf("a", dir)
+			lines, _ := ring.Since(0, 10)
+			switch {
+			case tc.want == nil:
+				if got != p {
+					t.Errorf("mcpConfigOf = %q, want the file %q", got, p)
+				}
+			case len(tc.want) == 0:
+				if got != "" {
+					t.Errorf("mcpConfigOf = %q, want nothing", got)
+				}
+			default:
+				var cfg struct {
+					MCPServers map[string]json.RawMessage `json:"mcpServers"`
+				}
+				if err := json.Unmarshal([]byte(got), &cfg); err != nil {
+					t.Fatalf("mcpConfigOf = %q, want JSON: %v", got, err)
+				}
+				if names := slices.Sorted(maps.Keys(cfg.MCPServers)); !slices.Equal(names, tc.want) {
+					t.Errorf("servers passed = %q, want %q", names, tc.want)
+				}
+				// A kept server is passed as it was written.
+				var kept, orig any
+				_ = json.Unmarshal(cfg.MCPServers["keep"], &kept)
+				_ = json.Unmarshal([]byte(`{"command": "k", "args": ["<&>"]}`), &orig)
+				if !reflect.DeepEqual(kept, orig) {
+					t.Errorf("keep = %s, want it unchanged", cfg.MCPServers["keep"])
+				}
+			}
+			var logged []string
+			for _, l := range lines {
+				logged = append(logged, l.Text)
+			}
+			if tc.leftOut == "" && len(logged) > 0 {
+				t.Errorf("unexpected log %q", logged)
+			}
+			if tc.leftOut != "" && (len(logged) != 1 || !strings.Contains(logged[0], "leaving out "+p+": "+tc.leftOut)) {
+				t.Errorf("log = %q, want one line leaving out %s for %q", logged, p, tc.leftOut)
 			}
 		})
 	}

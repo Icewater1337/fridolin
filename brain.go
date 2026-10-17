@@ -493,8 +493,8 @@ func (br *Brain) streamLogPath() string {
 	return filepath.Join(br.workDir, "claude-stream.log")
 }
 
-// claudeArgs builds the CLI arguments for one run. mcpConfig is the brain
-// folder's .mcp.json (see mcpConfigOf), or "" for none.
+// claudeArgs builds the CLI arguments for one run. mcpConfig is what
+// mcpConfigOf returned for the brain's folder, or "" for none.
 func claudeArgs(s *brainSettings, mcpConfig, prompt string) []string {
 	args := []string{"--output-format", "stream-json", "--verbose"}
 	if !s.inheritUser {
@@ -525,29 +525,88 @@ func claudeArgs(s *brainSettings, mcpConfig, prompt string) []string {
 	return append(args, "-p", prompt)
 }
 
-// mcpConfigOf returns the .mcp.json in the brain folder dir for
-// --mcp-config, or "" when there is none to pass. --strict-mcp-config makes
-// the CLI ignore the file otherwise. The CLI refuses to start with an
-// --mcp-config file that is not a JSON object holding an "mcpServers"
-// object, which it never did for a project .mcp.json: `{}` or a misspelt
-// key stops it as surely as a typo. Such a file is left out, as one
-// mistake, or a file a manipulated brain wrote, would otherwise stop every
-// run of the brain. Broken entries inside mcpServers it takes in its
-// stride.
+// mcpConfigOf returns what to pass with --mcp-config for the .mcp.json in
+// the brain folder dir: the file, or its JSON without the servers the
+// folder's settings turn off (see disabledMCPServers), or "" when there is
+// nothing to pass. --strict-mcp-config makes the CLI ignore the file
+// otherwise. The CLI refuses to start with an --mcp-config file that is not
+// a JSON object holding an "mcpServers" object, which it never did for a
+// project .mcp.json: `{}` or a misspelt key stops it as surely as a typo.
+// Such a file is left out, as one mistake, or a file a manipulated brain
+// wrote, would otherwise stop every run of the brain. Broken entries inside
+// mcpServers it takes in its stride.
 func mcpConfigOf(brainID, dir string) string {
 	p := filepath.Join(dir, ".mcp.json")
 	data, err := readBrainFile(p)
 	if errors.Is(err, fs.ErrNotExist) {
 		return ""
 	}
+	var servers map[string]json.RawMessage
 	if err == nil {
-		_, err = mcpServersOf(data)
+		servers, err = mcpServersOf(data)
+	}
+	var disabled map[string]bool
+	if err == nil {
+		disabled, err = disabledMCPServers(dir)
 	}
 	if err != nil {
 		log.Printf("brain %s: leaving out %s: %v", brainID, p, err)
 		return ""
 	}
-	return p
+	kept := make(map[string]json.RawMessage, len(servers))
+	for name, server := range servers {
+		if !disabled[name] {
+			kept[name] = server
+		}
+	}
+	switch {
+	case len(kept) == len(servers):
+		return p
+	case len(kept) == 0:
+		return ""
+	}
+	// --mcp-config takes the JSON itself as well as a file.
+	inline, err := json.Marshal(map[string]any{"mcpServers": kept})
+	if err != nil {
+		log.Printf("brain %s: leaving out %s: %v", brainID, p, err)
+		return ""
+	}
+	return string(inline)
+}
+
+// disabledMCPServers returns the .mcp.json servers that the
+// disabledMcpjsonServers of the brain folder dir's .claude/settings.json or
+// settings.local.json turn off, where Claude Code records a project's
+// server you declined. The CLI honours that list for a project's .mcp.json
+// but not for --mcp-config, which would start a server you turned off on
+// every run. Either file turns a server off, as it does for the CLI, and
+// enabledMcpjsonServers keeps no other server from starting there
+// (checked against CLI 2.1.302). When a file cannot be read, nothing can
+// tell which servers it turns off, so the brain gets none.
+func disabledMCPServers(dir string) (map[string]bool, error) {
+	disabled := map[string]bool{}
+	for _, name := range []string{"settings.json", "settings.local.json"} {
+		p := filepath.Join(dir, ".claude", name)
+		data, err := readBrainFile(p)
+		if errors.Is(err, fs.ErrNotExist) {
+			continue
+		}
+		var settings map[string]json.RawMessage
+		if err == nil {
+			settings, err = jsonObject(data)
+		}
+		var names []string
+		if raw, ok := settings["disabledMcpjsonServers"]; err == nil && ok {
+			err = json.Unmarshal(raw, &names)
+		}
+		if err != nil {
+			return nil, fmt.Errorf("cannot tell which servers %s turns off: %w", p, err)
+		}
+		for _, n := range names {
+			disabled[n] = true
+		}
+	}
+	return disabled, nil
 }
 
 // mcpServersOf returns the servers in the .mcp.json data by name, or why
@@ -584,9 +643,10 @@ func jsonObject(data []byte) (map[string]json.RawMessage, error) {
 	return obj, nil
 }
 
-// maxBrainFile bounds what the bridge reads of a brain's .mcp.json: far
-// more than any real one holds, so that a brain cannot make the bridge
-// load gigabytes into memory on every run.
+// maxBrainFile bounds what the bridge reads of a brain's .mcp.json and
+// settings: far more than any real one holds, so that a brain cannot make
+// the bridge load gigabytes into memory on every run, and little enough to
+// pass a .mcp.json on the command line.
 const maxBrainFile = 256 << 10
 
 // readBrainFile reads a file in a brain's folder, which the bridge does

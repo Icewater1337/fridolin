@@ -106,7 +106,8 @@ history and the new message; Claude Code adds its own system prompt. From
 the brain's folder it also loads the Claude Code setup a session started
 there would: `CLAUDE.md` and `CLAUDE.local.md`, the settings, skills,
 agents, commands and rules in `.claude/`, and the MCP servers in
-`.mcp.json`.
+`.mcp.json`, except those its `.claude` settings turn off with
+`disabledMcpjsonServers`.
 
 It does not load your own setup: not your user settings in
 `~/.claude/settings.json` (their hooks, plugins and permissions, so neither

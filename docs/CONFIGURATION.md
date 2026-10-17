@@ -144,6 +144,19 @@ to be ignored: one that is not a JSON object with an `mcpServers` object
 file, and a symlink, anything but a regular file, or a file over 256 KiB,
 and its log says why.
 
+A server the folder's `.claude/settings.json` or `settings.local.json` turns
+off with `disabledMcpjsonServers` (where Claude Code records a project
+server you decline) stays off: `--mcp-config` would start it, so the bridge
+passes the folder's other servers itself, as JSON on the command line. Any
+process of your user, another brain's included, can read that with `ps`, as
+it can the prompt, so a token in a server's `env` shows there too; to avoid
+that, take a server you do not want out of `.mcp.json` instead, and the
+bridge passes the file as it is. When it cannot read one of those two
+files, it passes no server at all, and its log says why. Every other
+server in `.mcp.json` starts, whatever `enabledMcpjsonServers` says, as it
+always did for brains; to stop one, take it out of `.mcp.json` or list it
+in `disabledMcpjsonServers`.
+
 These flags do not skip the `CLAUDE.md` and `CLAUDE.local.md` files and the
 `.claude/` folders (their `CLAUDE.md`, rules, skills, agents and commands)
 in the folders above a brain's folder: Claude Code reads them as part of
