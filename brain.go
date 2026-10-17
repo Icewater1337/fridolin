@@ -229,8 +229,8 @@ type brainSettings struct {
 
 // BrainHooks connect brains to the rest of the bridge.
 type BrainHooks struct {
-	// Intermediate delivers a message before the final answer: the
-	// "working on it" notice and questions the brain asks mid-run.
+	// Intermediate delivers a message before the final answer, ready to
+	// send: the working notice and questions the brain asks mid-run.
 	Intermediate func(jid, text string)
 	// Deliver receives every finished run.
 	Deliver func(br *Brain, m Inbound, res RunResult)
@@ -240,6 +240,14 @@ type BrainHooks struct {
 	// plugin and MCP server, for brains allowed to build the site).
 	ExtraArgs func(brainID string) []string
 }
+
+// A run that takes longer than workingNoticeAfter tells the chat it is
+// working on it, and questions it asks mid-run go out marked as such.
+const (
+	workingNoticeAfter = 10 * time.Second
+	workingNotice      = "⏳ Working on it..."
+	questionPrefix     = "❓ "
+)
 
 // RunResult is the outcome of one brain run.
 type RunResult struct {
@@ -1051,7 +1059,7 @@ func (br *Brain) invoke(run *brainRun, ctx context.Context, s *brainSettings, m 
 		parseDone <- br.parseStream(m.JID, stdout)
 	}()
 
-	timer := time.NewTimer(10 * time.Second)
+	timer := time.NewTimer(workingNoticeAfter)
 	defer timer.Stop()
 
 	invocationStart := time.Now()
@@ -1062,7 +1070,7 @@ func (br *Brain) invoke(run *brainRun, ctx context.Context, s *brainSettings, m 
 		// Untagged (silent) messages never produce a visible reply, so they
 		// must not produce a visible "working" notice either.
 		if !m.Silent && br.hooks != nil && br.hooks.Intermediate != nil {
-			br.hooks.Intermediate(m.JID, "⏳ Working on it...")
+			br.hooks.Intermediate(m.JID, workingNotice)
 		}
 		res = <-parseDone
 	}
@@ -1267,7 +1275,7 @@ func (br *Brain) parseStream(jid string, reader io.Reader) RunResult {
 					if content.Name == "AskUserQuestion" {
 						question := extractAskQuestion(content.Input)
 						if question != "" && br.hooks != nil && br.hooks.Intermediate != nil {
-							br.hooks.Intermediate(jid, question)
+							br.hooks.Intermediate(jid, questionPrefix+question)
 							questionSent = true
 						}
 					}

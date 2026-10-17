@@ -338,7 +338,7 @@ func TestQuotedCommandIsRecognised(t *testing.T) {
 	t.Run("!stop", func(t *testing.T) {
 		tb, br := newMainBridge(t, "")
 		startLongRun(t, tb, br, Inbound{JID: testDMChat, Sender: "15551234567", Text: "write a long report", Source: sourceWhatsApp})
-		tb.whatsApp().handleMessage(replyEvent("!stop", "⏳ Working on it..."))
+		tb.whatsApp().handleMessage(replyEvent("!stop", workingNotice))
 		// The confirmation goes out once the run has stopped, so wait for it
 		// rather than for the run: the snapshot clears a moment earlier.
 		waitFor(t, 10*time.Second, "the stop confirmation", func() bool { return tb.sentPrefix(testDMChat, "🛑") })

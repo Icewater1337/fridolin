@@ -138,11 +138,7 @@ func NewBridge(cfgs *ConfigStore, opts BridgeOptions) (_ *Bridge, err error) {
 
 	b.brainMgr.SetHooks(BrainHooks{
 		Intermediate: func(jid, text string) {
-			msg := text
-			if !strings.HasPrefix(text, "⏳") {
-				msg = "❓ " + text
-			}
-			if err := b.wa.SendChunked(context.Background(), jid, msg); err != nil {
+			if err := b.wa.SendChunked(context.Background(), jid, text); err != nil {
 				log.Printf("failed to send brain intermediate message to %s: %v", jid, err)
 			}
 		},

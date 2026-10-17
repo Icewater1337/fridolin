@@ -3,6 +3,7 @@ package main
 import (
 	"encoding/json"
 	"fmt"
+	"slices"
 	"strings"
 	"testing"
 	"unicode/utf8"
@@ -44,7 +45,7 @@ func TestParseStreamForwardsAskUserQuestion(t *testing.T) {
 	if res.Err != nil || !res.AlreadySent || res.Text != "" {
 		t.Errorf("result = %+v, want AlreadySent and no text", res)
 	}
-	if want := []string{"chat Meeting: Which day suits you?"}; strings.Join(sent, "|") != strings.Join(want, "|") {
+	if want := []string{"chat ❓ Meeting: Which day suits you?"}; strings.Join(sent, "|") != strings.Join(want, "|") {
 		t.Errorf("sent %q mid-run, want %q", sent, want)
 	}
 }
@@ -170,4 +171,27 @@ func FuzzParseStream(f *testing.F) {
 			t.Errorf("the line %q around the stream changed the result from %+v, %q to %+v, %q", junk, res, sent, res2, sent2)
 		}
 	})
+}
+
+// A question a brain asks mid-run reaches the chat marked as a question,
+// and the working notice as it is, whatever either starts with: the
+// bridge used to tell the two apart by a leading ⏳.
+func TestMidRunMessagesReachTheChatMarked(t *testing.T) {
+	const dm = "15551234567@s.whatsapp.net"
+	tb := newTestBridge(t, "")
+	tb.addFolderBrain(t, BrainManifest{ID: "a", Name: "A", Routing: BrainRouting{HandlesDMs: true}})
+	br := tb.brainMgr.Get("a")
+	stream := `{"type":"assistant","message":{"content":[{"type":"tool_use","name":"AskUserQuestion","input":{"questions":[{"question":"⏳ Wait for the delivery?"}]}}]}}
+{"type":"result","result":"asked"}
+`
+	br.parseStream(dm, strings.NewReader(stream))
+	br.hooks.Intermediate(dm, workingNotice)
+	var sent []string
+	for _, m := range tb.dev.Outbox() {
+		sent = append(sent, m.Text)
+	}
+	slices.Sort(sent) // the outbox lists the newest first
+	if want := []string{"⏳ Working on it...", "❓ ⏳ Wait for the delivery?"}; !slices.Equal(sent, want) {
+		t.Errorf("sent %q, want %q", sent, want)
+	}
 }
