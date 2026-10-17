@@ -210,6 +210,29 @@ own run's files there, so writing stays allowed. Transcripts cannot be moved
 or deleted; the small per-process files in `sessions/` can (the CLI deletes
 its own on exit).
 
+Brains can read but never write the files that are loaded or run outside
+their sandbox, so a manipulated brain cannot plant code there:
+
+- Claude Code's own configuration: `~/.claude/settings.json`,
+  `settings.local.json`, `CLAUDE.md` and the `hooks`, `rules`, `agents`,
+  `commands`, `skills`, `plugins` and `output-styles` folders. Every other
+  brain's next run and your own Claude Code sessions load them. Brains
+  therefore cannot change Claude Code settings or install plugins; do that
+  yourself.
+- the `CLAUDE.md`, `CLAUDE.local.md` and `.mcp.json` in every folder above a
+  brain's folder, up to and including your home folder (or up to `/` for a
+  brain outside it), and the `.claude` folder in each of them below your
+  home folder. Claude Code loads them for every brain below them, and your
+  own sessions load your home folder's. A brain's own folder is its own.
+- Claude Code's auto-memory, `~/.claude/projects/<project>/memory`, which
+  every new session of that project loads, yours included
+- `~/Library/LaunchAgents`
+- shell startup files: `~/.zshenv`, `.zprofile`, `.zshrc`, `.zlogin`,
+  `.zlogout`, `.bash_profile`, `.bash_login`, `.bashrc`, `.profile`,
+  `~/.config/fish`
+- `~/.tmux.conf` and `~/.config/tmux`, read by the activity viewer's tmux
+- `~/.gitconfig` and the files it includes (see `git_config` below)
+
 Renaming counts as writing. The sandbox matches paths, not files, so a brain
 that renamed `~/.ssh`, or the folder that holds another brain, used to read
 it under the new name. Nothing denied can be renamed or deleted, apart from

@@ -344,7 +344,10 @@ What the bridge does about it:
   browser and mail data, your Documents/Downloads/Desktop, the bridge's own
   database — or any other brain's directory — and cannot rename the folders
   above them to get around that. Other Claude sessions' transcripts are
-  unreadable. Add your own paths under `sandbox.deny_paths`. When the sandbox
+  unreadable. Files that run outside the sandbox — Claude Code's settings,
+  hooks and `CLAUDE.md` (also those above brain folders), its auto-memory,
+  `~/Library/LaunchAgents`, shell startup files — are readable but never
+  writable. Add your own paths under `sandbox.deny_paths`. When the sandbox
   is on but cannot be set up, the brain refuses the message with an error
   instead of running without it.
 - **Brain isolation.** Brains have separate directories, sessions, histories,

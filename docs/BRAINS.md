@@ -105,6 +105,10 @@ brain cannot read or write any other brain's folder, the bridge's data folder
 (except the shared media inbox), or the usual secrets (SSH keys, cloud
 credentials, browser and mail data, shell history), and it cannot rename or
 delete the folders above them, which would move them out from under the
-sandbox's rules. Its own folder is always readable and writable, even if it
-lives somewhere the defaults deny. A run that cannot be sandboxed is refused,
-never run without it.
+sandbox's rules. It can read but not change the files that run outside its
+sandbox: Claude Code's settings, hooks, `CLAUDE.md`, skills and plugins
+(which every other brain loads too), the `CLAUDE.md` files and `.claude`
+folders above brain folders, Claude Code's auto-memory,
+`~/Library/LaunchAgents` and your shell startup files. Its own folder is
+always readable and writable, even if it lives somewhere the defaults deny.
+A run that cannot be sandboxed is refused, never run without it.

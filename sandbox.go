@@ -7,6 +7,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"regexp"
 	"runtime"
 	"slices"
 	"sort"
@@ -140,6 +141,49 @@ var defaultDenyLiterals = []string{
 	".bash_history",
 }
 
+// defaultWriteDenySubpaths and defaultWriteDenyLiterals are home-relative
+// paths brains may read but never write. Each one is loaded or run by
+// something outside this brain's sandbox: every other brain's next run and
+// your own Claude Code sessions (settings and their hooks, CLAUDE.md, rules,
+// agents, commands, skills, plugins, output styles), launchd at your next
+// login, your own shells, the tmux server the activity viewer starts. A
+// brain that could write one would carry a prompt injection out of its
+// sandbox. Claude Code state the CLI writes on every run (~/.claude.json,
+// projects, todos, shell snapshots) is not in this list.
+var defaultWriteDenySubpaths = []string{
+	".claude/hooks",
+	".claude/rules",
+	".claude/agents",
+	".claude/commands",
+	".claude/skills",
+	".claude/plugins",
+	".claude/output-styles",
+	"Library/LaunchAgents",
+	".config/fish",
+	".config/tmux",
+}
+
+var defaultWriteDenyLiterals = []string{
+	".claude/settings.json",
+	".claude/settings.local.json",
+	".claude/CLAUDE.md",
+	".zshenv",
+	".zprofile",
+	".zshrc",
+	".zlogin",
+	".zlogout",
+	".bash_profile",
+	".bash_login",
+	".bashrc",
+	".profile",
+	".tmux.conf",
+}
+
+// memoryFiles are the files Claude Code loads from its working directory and
+// every folder above it, next to that folder's .claude/ (its CLAUDE.md, rules
+// and settings), whichever brain or session runs there.
+var memoryFiles = []string{"CLAUDE.md", "CLAUDE.local.md", ".mcp.json"}
+
 // Profile returns the sandbox profile source for the brain with this id. It
 // fails when a path cannot be written into the profile: a profile that
 // silently skipped a rule would protect less than the config says.
@@ -207,6 +251,33 @@ func (sp *SandboxProfiler) Profile(brainID string) (string, error) {
 		b.deny("file-read*", "subpath", filepath.Join(home, ".plaud"))
 		b.deny("file-write*", "subpath", filepath.Join(home, ".plaud"))
 	}
+	b.WriteString("\n")
+
+	// ── code that runs outside the sandbox ───────────────────────────────
+	b.WriteString(";; Loaded or run outside this sandbox: readable, never writable\n")
+	for _, sub := range defaultWriteDenySubpaths {
+		b.deny("file-write*", "subpath", filepath.Join(home, sub))
+	}
+	for _, lit := range defaultWriteDenyLiterals {
+		b.deny("file-write*", "literal", filepath.Join(home, lit))
+	}
+	// Above a brain's folder: what one brain wrote there would reach every
+	// brain below it, and your own sessions in your home folder. ~/.claude
+	// itself is the CLI's state; what it loads from there is denied above.
+	homes := []string{home, resolvePath(home)}
+	for _, dir := range memoryFolders(sp.workDirs, brainID, homes) {
+		for _, f := range memoryFiles {
+			b.deny("file-write*", "literal", filepath.Join(dir, f))
+		}
+		if !slices.Contains(homes, dir) {
+			b.deny("file-write*", "subpath", filepath.Join(dir, ".claude"))
+		}
+	}
+	// Auto-memory: Claude Code loads projects/<project>/memory/MEMORY.md into
+	// every new session in that project, yours included. The CLI writes the
+	// rest of projects/ on every run, and a project folder it has not
+	// created yet cannot be listed, hence a pattern.
+	b.denyBelow("file-write*", projects, `/[^/]+/memory(/.*)?$`)
 	b.WriteString("\n")
 
 	// ── git configuration ────────────────────────────────────────────────
@@ -288,6 +359,42 @@ func (sp *SandboxProfiler) Profile(brainID string) (string, error) {
 	return b.String(), nil
 }
 
+// memoryFolders returns the folders above every brain's folder whose
+// memory files and .claude/ Claude Code loads for the brains below: up to
+// and including HOME (either spelling), or up to / for a folder outside
+// HOME, and HOME itself, which your own sessions load. The brain's own
+// folder is its own to write, so it is left out when it holds another one.
+func memoryFolders(workDirs map[string]string, brainID string, homes []string) []string {
+	own := ""
+	if dir := workDirs[brainID]; dir != "" {
+		own = resolvePath(dir)
+	}
+	seen := map[string]bool{}
+	var out []string
+	walk := func(dir string) {
+		for {
+			if real := resolvePath(dir); !seen[real] {
+				seen[real] = true
+				if real != own {
+					out = append(out, dir)
+				}
+			}
+			if slices.Contains(homes, dir) || filepath.Dir(dir) == dir {
+				return
+			}
+			dir = filepath.Dir(dir)
+		}
+	}
+	walk(homes[0])
+	for _, dir := range workDirs {
+		if dir != "" {
+			walk(filepath.Dir(filepath.Clean(dir)))
+		}
+	}
+	sort.Strings(out)
+	return out
+}
+
 // profileBuilder writes SBPL. Every path goes through deny or allow, so each
 // one is quoted and canonicalized the same way; the first path that cannot be
 // written is kept in err and fails the whole profile.
@@ -316,6 +423,16 @@ func (b *profileBuilder) deny(op, filter, path string) {
 	// a symlinked data dir. Writes act on the link, so they need its entry.
 	for _, s := range b.spellings(path, strings.HasPrefix(op, "file-write")) {
 		b.emit("deny "+op, filter, s)
+		b.denied = append(b.denied, s)
+	}
+}
+
+// denyBelow emits "(deny op (regex "^<dir>pattern"))" for every spelling of
+// dir, for paths below it that cannot be listed in advance. The folders
+// above dir are pinned like those above any denied path.
+func (b *profileBuilder) denyBelow(op, dir, pattern string) {
+	for _, s := range b.spellings(dir, strings.HasPrefix(op, "file-write")) {
+		b.emit("deny "+op, "regex", "^"+regexp.QuoteMeta(s)+pattern)
 		b.denied = append(b.denied, s)
 	}
 }

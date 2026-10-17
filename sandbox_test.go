@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"runtime"
 	"slices"
 	"strings"
@@ -536,4 +537,106 @@ func TestSandboxDeniesEverySpelling(t *testing.T) {
 			t.Errorf("profile lacks %s", rule)
 		}
 	}
+}
+
+// TestSandboxProfileDeniesWritesToCodeOutsideIt: files that are loaded or
+// run outside the sandbox (Claude Code settings, hooks and memory, launchd
+// agents, shell startup files) are denied for writing, never for reading,
+// since the CLI and your shells must still read them.
+func TestSandboxProfileDeniesWritesToCodeOutsideIt(t *testing.T) {
+	home := canonicalDir(t.TempDir())
+	t.Setenv("HOME", home)
+	profile := mustProfile(t, NewSandboxProfiler(map[string]string{"a": filepath.Join(home, "a")}, &Config{}), "a")
+	paths := map[string]string{}
+	for _, sub := range defaultWriteDenySubpaths {
+		paths[sub] = "subpath"
+	}
+	for _, lit := range defaultWriteDenyLiterals {
+		paths[lit] = "literal"
+	}
+	for _, rel := range []string{".claude/settings.json", ".claude/CLAUDE.md", ".claude/hooks", "Library/LaunchAgents", ".zshrc", ".bashrc", ".profile", ".config/fish"} {
+		if paths[rel] == "" {
+			t.Errorf("%s is not in the write denies", rel)
+		}
+	}
+	for rel, filter := range paths {
+		t.Run(rel, func(t *testing.T) {
+			p := `(` + filter + ` "` + filepath.Join(home, rel) + `"))`
+			if !strings.Contains(profile, "(deny file-write* "+p) {
+				t.Errorf("profile lacks (deny file-write* %s", p)
+			}
+			if strings.Contains(profile, "(deny file-read* "+p) {
+				t.Errorf("profile denies reading %s", rel)
+			}
+		})
+	}
+	// The CLI writes these on every run.
+	for _, rel := range []string{".claude.json", ".claude/todos", ".claude/statsig", ".claude/shell-snapshots"} {
+		if strings.Contains(profile, `"`+filepath.Join(home, rel)+`"`) {
+			t.Errorf("profile has a rule for %s, which the CLI writes", rel)
+		}
+	}
+}
+
+// TestSandboxProfileDeniesMemoryAboveBrains: Claude Code loads CLAUDE.md,
+// CLAUDE.local.md, .mcp.json and .claude/ from every folder above its
+// working directory, and your own sessions load them from your home folder.
+// Brains must not write any of them, nor the auto-memory every new session
+// of a project loads, but each brain keeps its own folder's.
+func TestSandboxProfileDeniesMemoryAboveBrains(t *testing.T) {
+	root := canonicalDir(t.TempDir())
+	home := filepath.Join(root, "home")
+	outside := canonicalDir(t.TempDir()) // a sibling of root, not inside it
+	t.Setenv("HOME", home)
+	dirs := map[string]string{
+		"a": home + "/assistant/a",
+		"b": home + "/assistant/b",
+		"n": home + "/assistant/a/n", // inside a
+		"d": outside + "/brains/d",   // outside HOME
+	}
+	sp := NewSandboxProfiler(dirs, &Config{})
+	lit := func(p string) string { return `(deny file-write* (literal "` + p + `"))` }
+	sub := func(p string) string { return `(deny file-write* (subpath "` + p + `"))` }
+	cases := []struct {
+		brain, name, rule string
+		want              bool
+	}{
+		{"a", "your home folder's CLAUDE.md", lit(home + "/CLAUDE.md"), true},
+		{"a", "your home folder's CLAUDE.local.md", lit(home + "/CLAUDE.local.md"), true},
+		{"a", "your home folder's .mcp.json", lit(home + "/.mcp.json"), true},
+		{"a", "the CLI's own ~/.claude", sub(home + "/.claude"), false},
+		{"a", "the brains folder's CLAUDE.md", lit(home + "/assistant/CLAUDE.md"), true},
+		{"a", "the brains folder's CLAUDE.local.md", lit(home + "/assistant/CLAUDE.local.md"), true},
+		{"a", "the brains folder's .claude", sub(home + "/assistant/.claude"), true},
+		{"a", "its own CLAUDE.md, though a brain lives inside", lit(home + "/assistant/a/CLAUDE.md"), false},
+		{"a", "its own .claude", sub(home + "/assistant/a/.claude"), false},
+		{"n", "the CLAUDE.md of the brain it lives in", lit(home + "/assistant/a/CLAUDE.md"), true},
+		{"a", "above a brain outside HOME", lit(outside + "/brains/CLAUDE.md"), true},
+		{"a", "up to / outside HOME", lit("/CLAUDE.md"), true},
+		{"a", "nothing above HOME", lit(root + "/CLAUDE.md"), false},
+		{"a", "auto-memory in every project", `(deny file-write* (regex "^` + sbplRegex(home+"/.claude/projects") + `/[^/]+/memory(/.*)?$"))`, true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			lines := strings.Split(mustProfile(t, sp, tc.brain), "\n")
+			if got := slices.Contains(lines, tc.rule); got != tc.want {
+				t.Errorf("profile of %s has %s: %v, want %v", tc.brain, tc.rule, got, tc.want)
+			}
+		})
+	}
+	t.Run("pattern quotes HOME", func(t *testing.T) {
+		odd := filepath.Join(root, `h.o+m(e)[1]{2}$^|*`)
+		t.Setenv("HOME", odd)
+		// Each metacharacter escaped, and each backslash again for the string.
+		rule := `(deny file-write* (regex "^` + sbplRegex(root) +
+			`/h\\.o\\+m\\(e\\)\\[1\\]\\{2\\}\\$\\^\\|\\*/\\.claude/projects/[^/]+/memory(/.*)?$"))`
+		if lines := strings.Split(mustProfile(t, sp, "a"), "\n"); !slices.Contains(lines, rule) {
+			t.Errorf("profile lacks %s", rule)
+		}
+	})
+}
+
+// sbplRegex is p quoted for a regex, as written in the profile.
+func sbplRegex(p string) string {
+	return strings.ReplaceAll(regexp.QuoteMeta(p), `\`, `\\`)
 }
