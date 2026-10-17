@@ -127,8 +127,8 @@ func (sp *SandboxProfiler) Update(workDirs map[string]string, cfg *Config) {
 
 // SetConfigFile names the config.json the bridge runs with. It lives in the
 // data dir by default, but --config or CONFIG_FILE can put it anywhere, so
-// the profile denies it, its .bak, the temp file each save writes and the
-// .env files loaded with it.
+// the profile denies it, its .bak, the temp file each save writes, the .env
+// loaded with it and the one in the working directory.
 func (sp *SandboxProfiler) SetConfigFile(path string) {
 	sp.mu.Lock()
 	defer sp.mu.Unlock()
@@ -517,11 +517,14 @@ func (sp *SandboxProfiler) Profile(brainID string) (string, error) {
 		b.deny("file-read*", "literal", f)
 		b.deny("file-write*", "literal", f)
 	}
-	// The config file (saved with a .bak copy) and the .env files loaded
-	// with it, where the data dir deny does not cover them already. What a
-	// .env sets still reaches brains through the environment.
+	// The config file (saved with a .bak copy) and the .env loaded with
+	// it, where the data dir deny does not cover them already. What a
+	// .env sets still reaches brains through the environment. Also the
+	// .env in the working directory: the bridge no longer reads it, but it
+	// used to when there was none next to the config, so a bridge started
+	// by hand from a checkout may still have settings and secrets there.
 	if sp.configFile != "" {
-		files := append([]string{sp.configFile, sp.configFile + ".bak"}, dotEnvPaths(sp.configFile)...)
+		files := []string{sp.configFile, sp.configFile + ".bak", dotEnvPath(sp.configFile), ".env"}
 		for _, f := range files {
 			if abs, err := filepath.Abs(f); err == nil && !withinAny(abs, dataDirs) {
 				b.deny("file-read*", "literal", abs)

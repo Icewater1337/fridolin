@@ -339,7 +339,7 @@ type envLookup func(key string) string
 // .env means no overrides; one that cannot be read or parsed is an error.
 // Every other key in it is logged by name, see warnIgnoredDotEnvKeys.
 func loadDotEnv(cfgPath string) (envLookup, error) {
-	path := filepath.Join(filepath.Dir(cfgPath), ".env")
+	path := dotEnvPath(cfgPath)
 	if abs, err := filepath.Abs(path); err == nil {
 		path = abs // so an error names the folder, for ./config.json too
 	}
@@ -372,10 +372,10 @@ const (
 	legacyDataDirName = ".whatsapp-claude-bridge"
 )
 
-// dotEnvPaths are the .env files loadDotEnv looks for, in order. The sandbox
-// profile denies them to brains.
-func dotEnvPaths(cfgPath string) []string {
-	return []string{filepath.Join(filepath.Dir(cfgPath), ".env"), ".env"}
+// dotEnvPath is the .env loadDotEnv reads, the one next to the config. The
+// sandbox profile denies it to brains.
+func dotEnvPath(cfgPath string) string {
+	return filepath.Join(filepath.Dir(cfgPath), ".env")
 }
 
 // defaultDataDir is ~/.fridolin, or the folder installs used before the

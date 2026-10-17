@@ -332,8 +332,9 @@ write:
   wherever it is, and its folder when that lies outside the data directory,
   unless the folder is your home folder or a temp folder
 - the config file (with its `.bak` and the temp file each save writes next
-  to it) and the `.env` files loaded with it, when `--config` puts them
-  outside the data directory
+  to it) and the `.env` loaded with it, when `--config` puts them outside
+  the data directory, and a `.env` in the directory the bridge was started
+  in, which older versions read
 - the bridge's logs in `~/Library/Logs/fridolin`
 - `~/.config/fridolin`, which holds the personal-data denylist the commit
   hooks read
