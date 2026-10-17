@@ -59,6 +59,6 @@ plaud summary <of_id>          # Plaud's AI summary
   for Plaud was removed or is not approved. They arrive once another one is
   picked there.
 - The Plaud card says the last check failed for a recording: it could not be
-  fetched from Plaud (the card shows why). Fridolin tries again on every check
-  for up to three days; one deleted in Plaud meanwhile keeps failing until
-  then.
+  fetched from Plaud (the card shows why). Fridolin tries again, less often
+  over time, for up to three days, then gives up, lists it on the card and
+  says so in this chat once; one deleted in Plaud is dropped at once.

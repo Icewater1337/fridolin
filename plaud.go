@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"cmp"
 	"context"
 	"encoding/json"
 	"errors"
@@ -70,7 +71,8 @@ func (pc PlaudConfig) validate() error {
 const defaultPlaudMessage = `[Plaud] New recording "{name}" ({when}, {duration}). The attached .txt is the finished transcript from the Plaud recorder, with Plaud's AI summary when there is one — it is already transcribed, do not transcribe it again. File it as your plaud skill describes (skills/plaud.md); without one: save it under transcripts/ as "DD.MM.YYYY - Short description.txt", note durable facts in memories, and reply with a short summary, key points and action items.`
 
 var (
-	errPlaudAuth = errors.New("the Plaud login expired")
+	errPlaudAuth     = errors.New("the Plaud login expired")
+	errPlaudNotFound = errors.New("the recording is not in Plaud any more")
 	// plaudRowRe is a row of `plaud files`: the id in the first column,
 	// padded, then two spaces before the name. Only the first column
 	// counts: a name may well contain something that looks like an id.
@@ -92,6 +94,8 @@ const (
 	// a time rather than as a burst of brain runs and replies.
 	plaudHandOffsPerCheck = 5
 	plaudPendingMaxAge    = 3 * 24 * time.Hour
+	// plaudGivenUpKeep is how many given-up recordings the card lists.
+	plaudGivenUpKeep = 20
 	// plaudPolishedWait is how long a recording waits for Plaud's cleaned-up
 	// transcript (plaud.polished) before the raw one is sent instead. Plaud
 	// makes the raw one first, and may never make the other.
@@ -122,6 +126,9 @@ type plaudState struct {
 	Pending map[string]*plaudPending `json:"pending"`
 	// LastForwarded is the last recording handed to a brain, for the card.
 	LastForwarded *PlaudForward `json:"last_forwarded,omitempty"`
+	// GivenUp lists the latest recordings Fridolin gave up on, oldest
+	// first, for the card.
+	GivenUp []plaudGivenUp `json:"given_up,omitempty"`
 	// AuthNotified is when the chat was last told the login expired.
 	AuthNotified time.Time `json:"auth_notified,omitzero"`
 	// Login is the sign-in Fridolin made, kept until Disconnect. Plaud's CLI
@@ -145,6 +152,34 @@ type plaudLogin struct {
 // plaudPending is a recording waiting to be handed over.
 type plaudPending struct {
 	FirstSeen time.Time `json:"first_seen"`
+	// Name is the recording's name, once Plaud said it.
+	Name string `json:"name,omitempty"`
+	// Tries counts the checks that found it not ready, or failed to fetch
+	// it. The next try is not before NextTry (see plaudRetryDelay).
+	Tries   int       `json:"tries,omitempty"`
+	NextTry time.Time `json:"next_try,omitzero"`
+}
+
+// plaudGivenUp is a recording Fridolin stopped trying to hand over.
+type plaudGivenUp struct {
+	ID     string    `json:"id"`
+	Name   string    `json:"name,omitempty"`
+	At     time.Time `json:"at"`
+	Reason string    `json:"reason"`
+}
+
+// plaudRetryDelay is how long a recording waits before the next try after
+// tries failed ones: none after the first, so the next check tries again,
+// then twice as long each time, up to 15 minutes. A recording Plaud takes
+// three days over costs about 300 calls, not one a minute.
+func plaudRetryDelay(tries int) time.Duration {
+	if tries <= 1 {
+		return 0
+	}
+	if tries > 5 {
+		return 15 * time.Minute
+	}
+	return min(time.Minute<<(tries-1), 15*time.Minute)
 }
 
 // UnmarshalJSON reads both layouts of state.json.
@@ -455,6 +490,8 @@ func plaudRunError(cmd string, err error, stderr string) error {
 		return errors.New("the sign-in timed out: Plaud's tool waits two minutes for the approval in the browser")
 	case code == 2:
 		return errPlaudAuth
+	case code == 1 && strings.Contains(stderr, "[NOT_FOUND]"):
+		return fmt.Errorf("plaud %s: %w", cmd, errPlaudNotFound)
 	case code == 3:
 		return fmt.Errorf("plaud %s: cannot reach Plaud, check the network", cmd)
 	case code == 4:
@@ -636,16 +673,20 @@ func (p *PlaudManager) accountID(ctx context.Context) (string, error) {
 	return "", nil
 }
 
-// forward hands one recording, first seen at since, to br, whose answer
-// goes to jid, and says what it handed over: nil while Plaud has not
-// finished the transcript.
-func (p *PlaudManager) forward(ctx context.Context, id string, since time.Time, br *Brain, jid string) (*PlaudForward, error) {
+// forward hands one waiting recording to br, whose answer goes to jid, and
+// says what it handed over: nil while Plaud has not finished the
+// transcript. It notes the recording's name in item once Plaud said it.
+func (p *PlaudManager) forward(ctx context.Context, id string, item *plaudPending, br *Brain, jid string) (*PlaudForward, error) {
 	cfg := p.cfg()
+	since := item.FirstSeen
 	detailsOut, err := p.run(ctx, "file", id)
 	if err != nil {
 		return nil, err
 	}
 	d := parseKV(detailsOut)
+	if d["name"] != "" {
+		item.Name = d["name"]
+	}
 	if d["transcript"] != "available" {
 		return nil, nil
 	}
@@ -1006,58 +1047,92 @@ func (p *PlaudManager) poll(ctx context.Context) error {
 	if err != nil && len(st.Pending) > 0 {
 		return err
 	}
-	// A recording that fails is retried next time, until it is given up,
-	// and does not hold up the others; its error is the check's, so the card
-	// shows it instead of counting the recording as waiting for Plaud.
+	// A recording that fails is tried again, ever less often, until it is
+	// given up, and does not hold up the others; its error is the check's,
+	// so the card shows it instead of counting the recording as waiting for
+	// Plaud.
 	var failed []error
 	maxAge := fmt.Sprintf("%d days", plaudPendingMaxAge/(24*time.Hour))
 	handed := 0
+	now := time.Now()
 	for _, id := range st.pendingInOrder() {
 		if handed == plaudHandOffsPerCheck {
 			break
 		}
-		since := st.Pending[id].FirstSeen
-		fw, err := p.forward(ctx, id, since, br, jid)
+		item := *st.Pending[id]
+		if now.Before(item.NextTry) {
+			continue
+		}
+		fw, err := p.forward(ctx, id, &item, br, jid)
 		if errors.Is(err, errPlaudAuth) {
 			return err
 		}
-		done := fw != nil
-		if done {
-			handed++
-		}
-		giveUp := !done && time.Since(since) > plaudPendingMaxAge
-		if err != nil {
-			next := "will retry"
-			if giveUp {
-				next = "given up after " + maxAge
-			}
-			failed = append(failed, fmt.Errorf("recording %s (%s): %w", id, next, err))
-		}
-		if !done && !giveUp {
-			continue
-		}
-		// A recording that still fails may well have been transcribed
-		// long ago, so its line does not blame Plaud.
+		// Why it is given up, if it is. A recording deleted in Plaud is
+		// given up at once; the rest after plaudPendingMaxAge. A recording
+		// that still fails may well have been transcribed long ago, so its
+		// line does not blame Plaud.
+		var why string
+		old := time.Since(item.FirstSeen) > plaudPendingMaxAge
+		deleted := errors.Is(err, errPlaudNotFound)
 		switch {
-		case giveUp && err != nil:
+		case fw != nil:
+			handed++
+		case deleted:
+			why = "it was deleted in Plaud"
+			log.Printf("plaud %s: deleted in Plaud, giving up", id)
+		case old && err != nil:
+			why = fmt.Sprintf("fetching it from Plaud failed for %s (%v)", maxAge, err)
 			log.Printf("plaud %s: still failing after %s, giving up", id, maxAge)
-		case giveUp:
+			failed = append(failed, fmt.Errorf("recording %s (given up after %s): %w", id, maxAge, err))
+		case old:
+			why = fmt.Sprintf("Plaud had no transcript for it after %s", maxAge)
 			log.Printf("plaud %s: no transcript after %s, giving up", id, maxAge)
+		case err != nil:
+			failed = append(failed, fmt.Errorf("recording %s (will retry): %w", id, err))
 		}
 		if err := p.update(func(st *plaudState) error {
-			if _, ok := st.Pending[id]; ok {
-				delete(st.Pending, id)
-				st.Seen = append(st.Seen, id)
+			cur := st.Pending[id]
+			if cur == nil {
+				return nil // handled meanwhile
 			}
-			if fw != nil {
+			cur.Name = item.Name
+			switch {
+			case fw != nil:
 				st.LastForwarded = fw
+			case why != "":
+				st.GivenUp = append(st.GivenUp, plaudGivenUp{ID: id, Name: item.Name, At: time.Now(), Reason: why})
+				if len(st.GivenUp) > plaudGivenUpKeep {
+					st.GivenUp = st.GivenUp[len(st.GivenUp)-plaudGivenUpKeep:]
+				}
+			default:
+				cur.Tries++
+				cur.NextTry = time.Now().Add(plaudRetryDelay(cur.Tries))
+				return nil
 			}
+			delete(st.Pending, id)
+			st.Seen = append(st.Seen, id)
 			return nil
 		}); err != nil {
 			return err
 		}
+		// You deleted it yourself; the rest you hear about, since a
+		// recording that never arrives is otherwise easy to miss.
+		if why != "" && !deleted {
+			p.noticeGivenUp(br, jid, cmp.Or(item.Name, id), why)
+		}
 	}
 	return errors.Join(failed...)
+}
+
+// noticeGivenUp tells the chat summaries go to that recording name will
+// not reach br, and why.
+func (p *PlaudManager) noticeGivenUp(br *Brain, jid, name, why string) {
+	ctx, cancel := context.WithTimeout(p.lifetime(), 30*time.Second)
+	defer cancel()
+	text := fmt.Sprintf("⚠️ Plaud: the recording “%s” was not handed to brain %s: %s. It is still in Plaud, and the dashboard lists it (Integrations → Plaud).", name, br.ID(), why)
+	if err := p.notify(ctx, jid, text); err != nil {
+		log.Printf("plaud: could not send the notice about a recording given up: %v", err)
+	}
 }
 
 // seed starts the state over for acct, with the recordings it already
@@ -1234,6 +1309,9 @@ type PlaudStatus struct {
 	LastPoll      *time.Time    `json:"last_poll,omitempty"`
 	LastError     string        `json:"last_error,omitempty"`
 	LastForwarded *PlaudForward `json:"last_forwarded,omitempty"`
+	// GivenUp lists the latest recordings that were not handed over, and
+	// why, oldest first.
+	GivenUp []plaudGivenUp `json:"given_up,omitempty"`
 	// Account is who is signed in. Expired means the login lapsed: Plaud's
 	// CLI deleted it, or Plaud refuses it. LoginMoved means Fridolin signed
 	// in before plaud.brain_access changed where the login lives, and needs
@@ -1280,7 +1358,7 @@ func (p *PlaudManager) Status() PlaudStatus {
 			seen, pending := len(st.Seen), len(st.Pending)
 			s.Seen, s.Pending = &seen, &pending
 		}
-		s.LastForwarded = st.LastForwarded
+		s.LastForwarded, s.GivenUp = st.LastForwarded, st.GivenUp
 	}
 	p.mu.Lock()
 	if p.connect != nil {

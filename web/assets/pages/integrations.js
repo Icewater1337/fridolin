@@ -108,7 +108,8 @@ export default {
       ]);
       paint(factsBox, {
         chat: s.summary_chat || '', chatName: chatName(s.summary_chat || ''), toYou: !!s.summary_to_you, chatBrain: s.summary_chat_brain || '', target: s.target_brain || '',
-        last: s.last_forwarded || null, poll: s.last_poll || '', pending: s.pending || 0, waiting: !!(blocked || s.last_error), seen: s.seen,
+        last: s.last_forwarded || null, givenUp: (s.given_up || []).slice(-3).reverse(),
+        poll: s.last_poll || '', pending: s.pending || 0, waiting: !!(blocked || s.last_error), seen: s.seen,
       }, renderFacts);
       // The picked brain is marked when it cannot take recordings: gone,
       // or listed but not running (not approved, or it has an issue).
@@ -129,6 +130,8 @@ export default {
         if (f.chatBrain) facts.push(h('div.muted.small', `What you write back in that chat goes to the ${f.chatBrain} brain, not to ${f.target}.`));
       }
       if (f.last) facts.push(h('div', 'Last recording: ', h('strong', f.last.name), ' → ', f.last.brain, ' ', timeAgo(f.last.at)));
+      // Recordings Fridolin stopped trying, newest first.
+      for (const g of f.givenUp) facts.push(h('div.muted', 'Not sent: ', h('strong', g.name || g.id), ` — ${g.reason} `, timeAgo(g.at)));
       if (f.poll) facts.push(h('div.muted', 'Checked ', timeAgo(f.poll), f.pending ? ` · ${f.pending} ${f.waiting ? 'waiting to be delivered' : 'waiting for Plaud’s transcript'}` : ''));
       if (typeof f.seen === 'number') facts.push(h('div.muted.small', f.seen === 1 ? '1 recording known' : `${f.seen} recordings known`));
       return facts.length ? h('div.facts', facts) : null;

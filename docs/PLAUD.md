@@ -34,10 +34,13 @@ backlog arrives a few recordings a minute rather than all at once.
 ## What happens
 
 Every minute (`plaud.interval_seconds`) Fridolin asks Plaud for recent
-recordings. A new one waits until its transcript is ready (up to three days);
-if fetching it fails, the next check tries again and the Plaud card shows
-the error meanwhile. (A recording deleted in Plaud before its transcript was
-ready keeps failing like this until those three days are up.) Then Fridolin
+recordings. A new one waits until its transcript is ready: Fridolin asks
+about it at the next check, then less and less often, up to every 15
+minutes. If fetching it fails, it is tried again the same way, and the
+Plaud card shows the error meanwhile. After three days without a transcript,
+or of failing, Fridolin gives up on it: the card lists it with the reason,
+and the private chat below gets one notice. A recording deleted in Plaud
+meanwhile is given up at once, without a notice. Once it is ready, Fridolin
 writes a `.txt` with the details, Plaud's summary and the timestamped
 transcript to `~/.fridolin/media/plaud/` (as
 `DD.MM.YYYY - <name> - <Plaud ID>.txt`; a recording handed over again

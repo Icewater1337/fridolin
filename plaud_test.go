@@ -376,6 +376,94 @@ func TestPlaudFailingRecordingIsGivenUpInTime(t *testing.T) {
 	}
 }
 
+// A recording that is not ready is asked about at the next check, then
+// ever less often, up to every 15 minutes, rather than once a minute for
+// three days.
+func TestPlaudBacksOffOnARecordingThatIsNotReady(t *testing.T) {
+	for tries, want := range []time.Duration{0, 0, 2 * time.Minute, 4 * time.Minute, 8 * time.Minute, 15 * time.Minute, 15 * time.Minute, 15 * time.Minute} {
+		if got := plaudRetryDelay(tries); got != want {
+			t.Errorf("plaudRetryDelay(%d) = %v, want %v", tries, got, want)
+		}
+	}
+	tb, fp := plaudBridge(t, "")
+	plaudSignIn(t, tb)
+	if err := tb.plaud.saveState(plaudWaiting(plaudSeededState("u_1", plaudOld1), plaudNew, time.Now())); err != nil {
+		t.Fatal(err)
+	}
+	fp.files(plaudNew, plaudOld1)
+	fp.recording(plaudNew, false)
+	asked := func() int { return strings.Count(fp.calls(), " file "+plaudNew+"\n") }
+	for i, want := range []int{1, 2, 2, 2} {
+		if err := tb.plaud.Poll(context.Background()); err != nil {
+			t.Fatal(err)
+		}
+		if asked() != want {
+			t.Fatalf("after check %d Plaud was asked %d times, want %d", i+1, asked(), want)
+		}
+	}
+	st, _ := tb.plaud.loadState()
+	if it := st.Pending[plaudNew]; it.Tries != 2 || time.Until(it.NextTry) < time.Minute || it.Name != "Team sync" {
+		t.Errorf("waiting = %+v, want 2 tries, the next in about 2 minutes, and its name", it)
+	}
+	if err := tb.plaud.update(func(st *plaudState) error { st.Pending[plaudNew].NextTry = time.Now(); return nil }); err != nil {
+		t.Fatal(err)
+	}
+	fp.recording(plaudNew, true)
+	if err := tb.plaud.Poll(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if !tb.plaudForwarded() {
+		t.Error("not handed over once due and ready")
+	}
+}
+
+// A recording Fridolin gives up on is listed on the card with the reason,
+// and the chat hears about it once, unless it was deleted in Plaud, which
+// gives up at once and quietly.
+func TestPlaudGivesUpVisibly(t *testing.T) {
+	for _, c := range []struct {
+		name    string
+		age     time.Duration
+		setup   func(fp *fakePlaudFixture)
+		reason  string
+		notices int
+	}{
+		{"never transcribed", plaudPendingMaxAge + time.Hour,
+			func(fp *fakePlaudFixture) { fp.recording(plaudNew, false) }, "Plaud had no transcript for it after 3 days", 1},
+		{"fetching keeps failing", plaudPendingMaxAge + time.Hour,
+			func(fp *fakePlaudFixture) { fp.recording(plaudNew, true); fp.write("fail_transcript", "") }, "fetching it from Plaud failed for 3 days", 1},
+		{"deleted in Plaud", time.Minute,
+			func(*fakePlaudFixture) {}, "it was deleted in Plaud", 0},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			tb, fp := plaudBridge(t, "")
+			plaudSignIn(t, tb)
+			if err := tb.plaud.saveState(plaudWaiting(plaudSeededState("u_1", plaudOld1), plaudNew, time.Now().Add(-c.age))); err != nil {
+				t.Fatal(err)
+			}
+			fp.files(plaudNew, plaudOld1)
+			c.setup(fp)
+			for range 2 {
+				_ = tb.plaud.Poll(context.Background())
+			}
+			s := tb.plaud.Status()
+			if len(s.GivenUp) != 1 || s.GivenUp[0].ID != plaudNew || !strings.Contains(s.GivenUp[0].Reason, c.reason) {
+				t.Fatalf("given up = %+v, want %s: %q", s.GivenUp, plaudNew, c.reason)
+			}
+			if *s.Pending != 0 {
+				t.Errorf("%d still waiting", *s.Pending)
+			}
+			var got []string
+			for _, m := range tb.dev.Outbox() {
+				got = append(got, m.Text)
+			}
+			if len(got) != c.notices || c.notices > 0 && (!strings.Contains(got[0], "“Team sync” was not handed to brain p: "+c.reason) || tb.dev.Outbox()[0].JID != "15551234567@s.whatsapp.net") {
+				t.Errorf("notices = %q, want %d about it in the DM", got, c.notices)
+			}
+		})
+	}
+}
+
 // With nothing waiting, a missing private chat blocks nothing: the poll must
 // not fail, and log the same error, on every interval. The card still says
 // what is missing, from the status call.
