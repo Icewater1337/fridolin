@@ -37,21 +37,6 @@ func TestManifestValidate(t *testing.T) {
 	}
 }
 
-func TestConfinedPathRejectsSymlinkEscape(t *testing.T) {
-	dir := canonicalDir(t.TempDir())
-	outside := filepath.Join(t.TempDir(), "secret")
-	_ = os.WriteFile(outside, []byte("x"), 0o600)
-	if err := os.Symlink(outside, filepath.Join(dir, "brain-prompt.md")); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := confinedPath(dir, "brain-prompt.md"); err == nil {
-		t.Error("a prompt symlinked outside the folder must be rejected")
-	}
-	if _, err := confinedPath(dir, "../x.md"); err == nil {
-		t.Error("a relative escape must be rejected")
-	}
-}
-
 func TestCheckBrainPath(t *testing.T) {
 	home := canonicalDir(t.TempDir())
 	t.Setenv("HOME", home)

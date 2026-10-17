@@ -264,7 +264,7 @@ Older configs list brains inline. They keep working, and
 | `handles_dms` | Routes all direct messages here. At most one brain. |
 | `groups` | Group JIDs routed here. A group may belong to only one brain. |
 | `default` | Fallback for allowed chats no brain claims. Defaults to the first brain. |
-| `prompt_file` | Override the prompt path (default `<work_dir>/brain-prompt.md`). |
+| `prompt_file` | Override the prompt path (default `<work_dir>/brain-prompt.md`). One inside `work_dir` is read as a folder brain's is, never through a symlink; one outside it is read as configured. |
 | `model`, `effort` | Override `brain_model` / `brain_effort` for this brain. |
 
 A brain whose settings clash with another (same id, a group claimed twice, two

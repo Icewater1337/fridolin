@@ -162,6 +162,11 @@ type Brain struct {
 	workDir     string
 	historyFile string
 	storeKey    string
+	// root is the brain's folder, opened once when the Brain is made and
+	// closed when it is retired. The bridge reads and writes its files in
+	// the folder through it (see openInFolder), and through this handle
+	// rather than the path, which could lead elsewhere by then.
+	root *os.Root
 
 	settings atomic.Pointer[brainSettings]
 	store    *Store
@@ -189,7 +194,8 @@ type brainSettings struct {
 	model           string
 	effort          string
 	disallowedTools []string
-	promptPath      string
+	promptFile      string // relative to the folder; see BrainSpec
+	outsidePrompt   string // an inline brain's prompt_file outside its folder
 	dangerously     bool
 	inheritUser     bool // inherit_claude_user_config
 	otpGuard        bool
@@ -412,6 +418,18 @@ func (br *Brain) retire() {
 	br.pending = nil
 	br.mu.Unlock()
 	br.StopCurrent(true)
+	// Done with the folder. A run that would not stop finds it closed.
+	br.root.Close()
+}
+
+// readFile reads the file name in the brain's folder (see openInFolder).
+func (br *Brain) readFile(name string) ([]byte, error) {
+	f, err := openInFolder(br.root, name, os.O_RDONLY, 0)
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+	return io.ReadAll(f)
 }
 
 // BrainRuntime is a brain's live state, for the dashboard.
@@ -732,39 +750,71 @@ func jsonObject(data []byte) (map[string]json.RawMessage, error) {
 // pass a .mcp.json on the command line.
 const maxBrainFile = 256 << 10
 
-// readBrainFile reads the file name, relative to the brain folder dir,
-// which the bridge does outside the sandbox while the brain controls what
-// is there. It reads nothing outside dir: os.Root refuses, at every step
-// of the open, a path that leads out of it, through a symlinked .claude
-// folder say, which could otherwise point at another brain's settings. It
-// refuses a symlink at the file itself too; one swapped in after that
-// check can lead only to another file in dir. It takes only a regular
-// file, checked on the open file so that nothing can be swapped in after
-// the check; the open does not block, so a FIFO cannot hang the run
-// either. It refuses a file larger than maxBrainFile.
+// errSymlink is why the bridge refuses a file that a brain could have
+// replaced with a symlink.
+var errSymlink = errors.New("it is a symlink, which the bridge does not follow")
+
+// openInFolder opens the file name, relative to the brain folder root, for
+// the bridge, which works on it outside the sandbox while the brain
+// controls what is there: a brain may replace any file in its folder with
+// a symlink to ~/.ssh, to another brain's history or to a file the sandbox
+// denies it, and have the bridge read that into its prompt or append to
+// it. os.Root refuses, at every step of the open, a path that leads out of
+// the folder, through a symlinked .claude folder say. It refuses a symlink
+// at the file itself too, even one that stays inside, and anything but a
+// regular file, and the file it opens must be the one it looked at, so
+// that nothing swapped in between gets through. The open does not block,
+// so a FIFO cannot hang the bridge either. With os.O_CREATE it creates
+// the file when there is none, never through a symlink.
+func openInFolder(root *os.Root, name string, flag int, perm os.FileMode) (*os.File, error) {
+	for tries := 0; ; tries++ {
+		fi, err := root.Lstat(name)
+		if errors.Is(err, fs.ErrNotExist) && flag&os.O_CREATE != 0 {
+			// With O_EXCL, os.Root follows no symlink, not even one
+			// planted since the Lstat; that makes the create fail.
+			f, err := root.OpenFile(name, flag|os.O_EXCL|syscall.O_NONBLOCK, perm)
+			if errors.Is(err, fs.ErrExist) && tries < 2 {
+				continue // something appeared there meanwhile: look again
+			}
+			return f, err
+		}
+		if err != nil {
+			return nil, err
+		}
+		if fi.Mode()&fs.ModeSymlink != 0 {
+			return nil, errSymlink
+		}
+		if !fi.Mode().IsRegular() {
+			return nil, errors.New("not a regular file")
+		}
+		f, err := root.OpenFile(name, flag&^os.O_CREATE|syscall.O_NONBLOCK, perm)
+		if err != nil {
+			return nil, err
+		}
+		if st, err := f.Stat(); err != nil || !os.SameFile(fi, st) {
+			f.Close()
+			if err == nil {
+				err = errors.New("it was replaced while the bridge opened it")
+			}
+			return nil, err
+		}
+		return f, nil
+	}
+}
+
+// readBrainFile reads the file name, relative to the brain folder dir, as
+// openInFolder opens it. It refuses a file larger than maxBrainFile.
 func readBrainFile(dir, name string) ([]byte, error) {
 	root, err := os.OpenRoot(dir)
 	if err != nil {
 		return nil, err
 	}
 	defer root.Close()
-	if fi, err := root.Lstat(name); err != nil {
-		return nil, err
-	} else if fi.Mode()&fs.ModeSymlink != 0 {
-		return nil, errors.New("it is a symlink, which the bridge does not follow")
-	}
-	f, err := root.OpenFile(name, os.O_RDONLY|syscall.O_NONBLOCK, 0)
+	f, err := openInFolder(root, name, os.O_RDONLY, 0)
 	if err != nil {
 		return nil, err
 	}
 	defer f.Close()
-	fi, err := f.Stat()
-	if err != nil {
-		return nil, err
-	}
-	if !fi.Mode().IsRegular() {
-		return nil, errors.New("not a regular file")
-	}
 	data, err := io.ReadAll(io.LimitReader(f, maxBrainFile+1))
 	if err != nil {
 		return nil, err
@@ -959,14 +1009,24 @@ func (br *Brain) buildPrompt(s *brainSettings, m Inbound) string {
 	var sb strings.Builder
 	isGroup := m.IsGroup()
 
-	if s.promptPath != "" {
-		sysPrompt, err := os.ReadFile(s.promptPath)
-		if err != nil {
-			log.Printf("brain %s: could not read prompt file %s: %v", br.id, s.promptPath, err)
-		} else {
-			sb.WriteString(strings.TrimSpace(string(sysPrompt)))
-			sb.WriteString("\n\n")
-		}
+	var sysPrompt []byte
+	var err error
+	name := s.promptFile
+	switch {
+	case s.outsidePrompt != "":
+		// An inline brain's prompt_file outside its folder is a path you
+		// wrote in config.json, read as it is, symlinks and all. Folder
+		// brains cannot name one, and inline brains are on their way out.
+		name = s.outsidePrompt
+		sysPrompt, err = os.ReadFile(name)
+	case name != "":
+		sysPrompt, err = br.readFile(name)
+	}
+	if err != nil {
+		log.Printf("brain %s: could not read prompt file %s: %v", br.id, name, err)
+	} else if name != "" {
+		sb.WriteString(strings.TrimSpace(string(sysPrompt)))
+		sb.WriteString("\n\n")
 	}
 
 	if preface := br.composePreface(m.JID, isGroup); preface != "" {
@@ -1248,6 +1308,17 @@ func (bm *BrainManager) reload(specs []BrainSpec, issues []BrainIssue, cfg *Conf
 	var dm, def *Brain
 	workDirs := map[string]string{}
 
+	// The folders opened for new brains, closed again unless they run.
+	var created []*Brain
+	applied := false
+	defer func() {
+		if !applied {
+			for _, br := range created {
+				br.root.Close()
+			}
+		}
+	}()
+
 	for _, sp := range specs {
 		if sp.Source == "inline" {
 			if err := os.MkdirAll(sp.Dir, 0o700); err != nil {
@@ -1255,24 +1326,33 @@ func (bm *BrainManager) reload(specs []BrainSpec, issues []BrainIssue, cfg *Conf
 			}
 		}
 		m := sp.Manifest
+		// Even a brain left out below keeps its folder denied to the others.
+		workDirs[m.ID] = sp.Dir
 		s := settingsFor(cfg, sp)
 		br, ok := old[m.ID]
 		if !ok || br.workDir != sp.Dir {
+			root, err := os.OpenRoot(sp.Dir)
+			if err != nil {
+				log.Printf("brain %s: leaving it out: %v", m.ID, err)
+				issues = append(issues, BrainIssue{ID: m.ID, Path: sp.Dir, Kind: "missing", Detail: "the folder cannot be opened: " + err.Error(), atLoad: true})
+				continue
+			}
 			br = &Brain{
 				id:          m.ID,
 				workDir:     sp.Dir,
 				historyFile: filepath.Join(sp.Dir, "conversation-history.jsonl"),
 				storeKey:    "brain:" + m.ID,
+				root:        root,
 				store:       bm.store,
 				sandbox:     bm.profiler,
 				hooks:       bm.hooks,
 			}
+			created = append(created, br)
 		}
 		br.settings.Store(s)
 
 		next[m.ID] = br
 		order = append(order, br)
-		workDirs[m.ID] = sp.Dir
 		for _, g := range m.Routing.Groups {
 			byGroup[g] = br
 		}
@@ -1299,6 +1379,7 @@ func (bm *BrainManager) reload(specs []BrainSpec, issues []BrainIssue, cfg *Conf
 	bm.mu.Lock()
 	bm.brains, bm.order, bm.byGroup, bm.dmBrain, bm.fallback, bm.issues = next, order, byGroup, dm, def, issues
 	bm.mu.Unlock()
+	applied = true
 
 	for _, br := range removed {
 		log.Printf("brain %s: removed from configuration; stopping it", br.id)
@@ -1333,7 +1414,8 @@ func settingsFor(cfg *Config, sp BrainSpec) *brainSettings {
 		model:           model,
 		effort:          effort,
 		disallowedTools: append([]string(nil), tools...),
-		promptPath:      sp.PromptPath,
+		promptFile:      sp.PromptFile,
+		outsidePrompt:   sp.OutsidePrompt,
 		dangerously:     cfg.DangerouslySkipPermissions,
 		inheritUser:     cfg.InheritClaudeUserConfig,
 		otpGuard:        cfg.OTPGuard,
