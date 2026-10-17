@@ -2279,6 +2279,27 @@ func TestPlaudCLIVersion(t *testing.T) {
 	}
 }
 
+// Without plaud.cli_path and with no plaud on PATH, the CLI of the newest
+// nvm node version is used, by version and not by name.
+func TestFindPlaudCLIPrefersTheNewestNode(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("PATH", "/usr/bin:/bin")
+	for _, v := range []string{"v9.11.2", "v20.9.0", "v20.10.0", "v18.20.4", "system"} {
+		bin := filepath.Join(home, nvmNodeVersions, v, "bin", "plaud")
+		if err := os.MkdirAll(filepath.Dir(bin), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(bin, nil, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	got, err := findPlaudCLI("")
+	if want := filepath.Join(home, nvmNodeVersions, "v20.10.0", "bin", "plaud"); err != nil || got != want {
+		t.Errorf("findPlaudCLI = %s, %v; want %s", got, err, want)
+	}
+}
+
 func TestPlaudConfigValidation(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 	for _, bad := range []string{`{"plaud":{"brain":"Not A Slug"}}`, `{"plaud":{"interval_seconds":5}}`} {

@@ -18,6 +18,7 @@ import (
 	"regexp"
 	"slices"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -47,7 +48,8 @@ type PlaudConfig struct {
 	// Brain receives the recordings (default: the brain that handles DMs,
 	// else the default brain).
 	Brain string `json:"brain,omitempty"`
-	// CLIPath overrides the plaud binary (default: found on PATH or in nvm).
+	// CLIPath overrides the plaud binary (default: found on PATH, else in
+	// the newest nvm node version, else in /opt/homebrew or /usr/local).
 	CLIPath string `json:"cli_path,omitempty"`
 	// IntervalSeconds between polls (default 60, minimum 30).
 	IntervalSeconds int `json:"interval_seconds,omitempty"`
@@ -462,7 +464,11 @@ func findPlaudCLI(c string) (string, error) {
 		return found, nil
 	}
 	candidates, _ := filepath.Glob(filepath.Join(homeDir(), nvmNodeVersions, "*/bin/plaud"))
-	sort.Sort(sort.Reverse(sort.StringSlice(candidates)))
+	// The newest node first: by version, not by name, which would put
+	// v20.9.0 before v20.10.0, and v9 before v24.
+	slices.SortStableFunc(candidates, func(a, b string) int {
+		return -compareNodeVersions(filepath.Base(filepath.Dir(filepath.Dir(a))), filepath.Base(filepath.Dir(filepath.Dir(b))))
+	})
 	candidates = append(candidates, "/opt/homebrew/bin/plaud", "/usr/local/bin/plaud")
 	for _, c := range candidates {
 		if fileExists(c) {
@@ -497,6 +503,23 @@ func brainPlaudPATH(cfg *Config) string {
 // names Plaud's own variables, not DO_NOT_TRACK, which other tools in a
 // brain's run read too, Claude Code among them.
 var plaudOptOut = []string{"PLAUD_TELEMETRY_DISABLED=1", "PLAUD_NO_UPDATE_NOTIFIER=1"}
+
+// compareNodeVersions compares two nvm version folder names ("v20.10.0")
+// number by number. A name that is not a version sorts before every one.
+func compareNodeVersions(a, b string) int {
+	parse := func(v string) []int {
+		var n []int
+		for _, part := range strings.Split(strings.TrimPrefix(v, "v"), ".") {
+			i, err := strconv.Atoi(part)
+			if err != nil {
+				return nil
+			}
+			n = append(n, i)
+		}
+		return n
+	}
+	return slices.Compare(parse(a), parse(b))
+}
 
 // plaudCLITested is the version of @plaud-ai/cli whose output Fridolin
 // reads (testdata/plaud holds what it prints). The CLI is not 1.0 yet, so
@@ -815,8 +838,7 @@ func (p *PlaudManager) accountID(ctx context.Context) (string, error) {
 // forward hands one waiting recording to br, whose answer goes to jid, and
 // says what it handed over: nil while Plaud has not finished the
 // transcript. It notes the recording's name in item once Plaud said it.
-func (p *PlaudManager) forward(ctx context.Context, id string, item *plaudPending, br *Brain, jid string) (*PlaudForward, error) {
-	cfg := p.cfg()
+func (p *PlaudManager) forward(ctx context.Context, cfg *Config, id string, item *plaudPending, br *Brain, jid string) (*PlaudForward, error) {
 	since := item.FirstSeen
 	detailsOut, err := p.run(ctx, "file", id)
 	if err != nil {
@@ -919,7 +941,7 @@ func (p *PlaudManager) forward(ctx context.Context, id string, item *plaudPendin
 		p.unmarkHanded(id)
 		return nil, fmt.Errorf("brain %s did not take it: %w", br.ID(), err)
 	}
-	log.Printf("plaud %s: handed %q to brain %s", id, name, br.ID())
+	log.Printf("plaud %s: handed to brain %s", id, br.ID()) // its name is personal data, the id is not
 	return &fw, nil
 }
 
@@ -1018,7 +1040,7 @@ func (p *PlaudManager) runEnded(id string) func(error) {
 			p.bg.Add(1)
 			go func() {
 				defer p.bg.Done()
-				if _, jid, err := p.destination(); err == nil {
+				if _, jid, err := p.destination(p.cfg()); err == nil {
 					p.noticeGivenUp(brain, jid, cmp.Or(gaveUp.Name, id), gaveUp.Reason)
 				}
 			}()
@@ -1043,10 +1065,7 @@ func plaudTranscriptPath(dir, day, name, id string) string {
 }
 
 func safePlaudName(s string) string {
-	s = strings.TrimSpace(strings.NewReplacer("/", "-", "\\", "-", ":", "-", "\n", " ", "\r", " ", "\t", " ").Replace(s))
-	if len(s) > 120 {
-		s = truncate(s, 120)
-	}
+	s = truncate(strings.TrimSpace(strings.NewReplacer("/", "-", "\\", "-", ":", "-", "\n", " ", "\r", " ", "\t", " ").Replace(s)), 120)
 	if s == "" {
 		s = "Plaud recording"
 	}
@@ -1054,8 +1073,8 @@ func safePlaudName(s string) string {
 }
 
 // targetBrain is the configured brain, else the DM brain, else the default.
-func (p *PlaudManager) targetBrain() *Brain {
-	if id := p.cfg().Plaud.Brain; id != "" {
+func (p *PlaudManager) targetBrain(cfg *Config) *Brain {
+	if id := cfg.Plaud.Brain; id != "" {
 		return p.brains.Get(id)
 	}
 	return p.brains.BrainFor("", false)
@@ -1066,11 +1085,11 @@ func (p *PlaudManager) targetBrain() *Brain {
 // group, whatever chats the brain serves: its reply_chat when that is a
 // direct chat, else your own DM (the first allowed number). "" means there
 // is no private chat to use.
-func (p *PlaudManager) summaryChat(br *Brain) string {
+func (p *PlaudManager) summaryChat(cfg *Config, br *Brain) string {
 	if rc := br.settings.Load().manifest.ReplyChat; isDirectChat(rc) {
 		return rc
 	}
-	if cfg := p.cfg(); len(cfg.AllowedNumbers) > 0 {
+	if len(cfg.AllowedNumbers) > 0 {
 		return userJID(cfg.AllowedNumbers[0])
 	}
 	return ""
@@ -1083,16 +1102,17 @@ func isDirectChat(jid string) bool {
 }
 
 // destination returns the brain that receives recordings and the private
-// chat its answers go to.
-func (p *PlaudManager) destination() (*Brain, string, error) {
-	br := p.targetBrain()
+// chat its answers go to, under cfg. A check reads the configuration once
+// and passes it on, so that it never mixes two versions of it.
+func (p *PlaudManager) destination(cfg *Config) (*Brain, string, error) {
+	br := p.targetBrain(cfg)
 	if br == nil {
-		if id := p.cfg().Plaud.Brain; id != "" {
+		if id := cfg.Plaud.Brain; id != "" {
 			return nil, "", fmt.Errorf("brain %s, picked for Plaud recordings, was removed or is not approved — pick another one under Integrations → Plaud", id)
 		}
 		return nil, "", errors.New("no brain to send Plaud recordings to")
 	}
-	jid := p.summaryChat(br)
+	jid := p.summaryChat(cfg, br)
 	if jid == "" {
 		return br, "", fmt.Errorf("no private chat for Plaud summaries — add your number under Chats → Allowed numbers, or set brain %s's reply chat to a direct chat", br.ID())
 	}
@@ -1211,6 +1231,7 @@ func (p *PlaudManager) runPoll(ctx context.Context) error {
 }
 
 func (p *PlaudManager) poll(ctx context.Context) error {
+	cfg := p.cfg()
 	st, err := p.loadState()
 	if err != nil {
 		return err
@@ -1295,7 +1316,7 @@ func (p *PlaudManager) poll(ctx context.Context) error {
 	// private chat the recordings wait, and the error shows on the dashboard.
 	// With nothing waiting nothing is blocked, so the poll stays quiet rather
 	// than log the same error every interval; the status call reports it.
-	br, jid, err := p.destination()
+	br, jid, err := p.destination(cfg)
 	if err != nil && len(st.Pending) > 0 {
 		return err
 	}
@@ -1324,7 +1345,7 @@ func (p *PlaudManager) poll(ctx context.Context) error {
 			}
 			log.Printf("plaud %s: handed over before a restart and not answered, handing it over again", id)
 		}
-		fw, err := p.forward(ctx, id, &item, br, jid)
+		fw, err := p.forward(ctx, cfg, id, &item, br, jid)
 		if errors.Is(err, errPlaudAuth) {
 			return err
 		}
@@ -1441,7 +1462,7 @@ func (p *PlaudManager) notifyAuthExpired() {
 	if st != nil && time.Since(st.AuthNotified) < 24*time.Hour {
 		return
 	}
-	_, jid, err := p.destination()
+	_, jid, err := p.destination(p.cfg())
 	if err != nil {
 		return
 	}
@@ -1650,14 +1671,14 @@ func (p *PlaudManager) Status() PlaudStatus {
 		s.CLI.Version = plaudCLIVersion(path)
 		s.CLI.Warning = plaudCLIWarning(s.CLI.Version)
 	}
-	if br := p.targetBrain(); br != nil {
+	if br := p.targetBrain(cfg); br != nil {
 		s.TargetBrain = br.ID()
 	} else if cfg.Plaud.Brain != "" {
 		s.BrainMissing = true
 	}
 	// Where summaries go, for the card: a chat that belongs to another brain
 	// gets a warning, since what you write back there goes to that brain.
-	if br, jid, err := p.destination(); err != nil {
+	if br, jid, err := p.destination(cfg); err != nil {
 		s.SummaryError = err.Error()
 	} else {
 		s.SummaryChat = jid

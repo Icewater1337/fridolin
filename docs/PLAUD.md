@@ -96,13 +96,13 @@ Fridolin runs it with a private home in `~/.fridolin/plaud/home/`, which the
 sandbox denies to brains, and denies brains `~/.plaud/` as well. It runs the
 tool in that home folder, never in its own working folder (the tool would
 read a `.env` there), and stops it, with anything it started, when a check
-is cancelled. Fridolin
-runs the tool itself outside the sandbox, so when it is installed in your
-home folder (with nvm, for example) its whole npm package and the `node`
-that runs it are read-only to brains. Unless `cli_path` is set, Fridolin
-takes the tool from whichever nvm node version sorts last, so brains cannot
-write anywhere in `~/.nvm/versions/node`, and they cannot add a `plaud` or
-`node` to a `PATH` folder in your home folder either. One in
+is cancelled. Fridolin runs the tool itself outside the sandbox, so when it
+is installed in your home folder (with nvm, for example) its whole npm
+package and the `node` that runs it are read-only to brains. Unless
+`cli_path` is set, Fridolin takes the tool from the newest nvm node version
+that has it, so brains cannot write anywhere in `~/.nvm/versions/node`, and
+they cannot add a `plaud` or `node` to a `PATH` folder in your home folder
+either. One in
 `/opt/homebrew` or `/usr/local` is not protected yet; see
 [what the sandbox does not cover yet](CONFIGURATION.md#what-the-sandbox-does-not-cover-yet).
 
@@ -142,4 +142,4 @@ for updates either; `plaud` in your own terminal follows your own settings.
 | `polished` | `false` | use Plaud's AI-cleaned transcript; when Plaud has none an hour after the recording showed up, the raw one is sent, with a note saying so |
 | `message` | follow `skills/plaud.md` | instruction sent with each recording, after the fixed first line |
 | `brain_access` | `false` | share the login with brains (see above) |
-| `cli_path` | found on PATH | path to `plaud` |
+| `cli_path` | found on `PATH`, else in the newest nvm node version, else in `/opt/homebrew/bin` or `/usr/local/bin` | path to `plaud` |

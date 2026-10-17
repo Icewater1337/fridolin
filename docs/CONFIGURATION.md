@@ -464,7 +464,7 @@ their sandbox, so a manipulated brain cannot plant code there:
   `touch`, `osascript`, `open`), whether they exist there yet or not;
   `~/.local/bin/rclone`, where it looks when rclone is not on `PATH`; and,
   unless `plaud.cli_path` is set, all of `~/.nvm/versions/node`, because
-  the bridge takes the Plaud CLI of whichever node version sorts last.
+  the bridge takes the Plaud CLI of the newest node version that has one.
   Brains therefore cannot install node versions or global npm packages with
   nvm.
 

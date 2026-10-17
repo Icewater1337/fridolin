@@ -731,7 +731,7 @@ var programsRunByName = []string{"claude", "rclone", "plaud", "node", "tmux", "s
 // every name it runs by name in every folder of its PATH and the Plaud
 // CLI's, whether that file exists yet or not, and rclone's fallbacks off
 // PATH. Without plaud.cli_path it also returns nvm's node versions, since
-// the bridge takes the Plaud CLI of whichever version name sorts last.
+// the bridge takes the Plaud CLI of the newest node version that has one.
 func (sp *SandboxProfiler) plantablePrograms(home string) (files, dirs []string) {
 	names := slices.Clone(programsRunByName)
 	for _, p := range []string{sp.claudePath, sp.rclonePath} {
