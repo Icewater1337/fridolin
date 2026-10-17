@@ -3,7 +3,7 @@
 // sent back exactly as received.
 
 import { get, put } from '../app/api.js';
-import { setRestartRequired } from '../app/state.js';
+import { setRestartRequired } from '../app/store.js';
 import { h, mount } from '../lib/dom.js';
 import { plural } from '../lib/format.js';
 import { EFFORTS } from '../lib/brain.js';
@@ -187,7 +187,7 @@ export default {
         const fresh = await get('/api/config');
         build(fresh);
         toast('Settings saved', 'ok');
-        if (r && r.restart_required && r.restart_required.length) setRestartRequired(r.restart_required);
+        if (r) setRestartRequired(r.restart_required);
       } catch (e) {
         if (e.status === 409) {
           conflict = true;

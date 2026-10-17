@@ -1,7 +1,7 @@
 // Chats: who is waiting for access, the account's groups, and the allow lists.
 
 import { get, post, put } from '../app/api.js';
-import { store, loadGroups, rememberName, setIgnoredCount } from '../app/state.js';
+import { store, loadGroups, rememberName, setIgnoredCount } from '../app/store.js';
 import { h, mount } from '../lib/dom.js';
 import { plural } from '../lib/format.js';
 import { phone, shortJid } from '../lib/jid.js';
@@ -127,10 +127,10 @@ export default {
 
     function paintGroups() {
       if (!groupsLoaded) return;
-      const groups = store.groups;
-      if (!changed(memo, 'groups', { groups, err: store.groupsError, brains: memo.brains })) return;
+      const { groups, groupsError } = store.get();
+      if (!changed(memo, 'groups', { groups, err: groupsError, brains: memo.brains })) return;
       if (!groups) {
-        mount(groupsBox, h('div.card', empty('Groups are not available', store.groupsError ? `WhatsApp says: ${store.groupsError}. Connect WhatsApp to see the groups the bridge is in.` : 'Connect WhatsApp to see the groups the bridge is in.')));
+        mount(groupsBox, h('div.card', empty('Groups are not available', groupsError ? `WhatsApp says: ${groupsError}. Connect WhatsApp to see the groups the bridge is in.` : 'Connect WhatsApp to see the groups the bridge is in.')));
         return;
       }
       if (!groups.length) {
@@ -179,17 +179,18 @@ export default {
       cfg = await get('/api/config', { signal });
       paintLists();
     }, 5000);
+    // The allowed groups show their names once the groups have loaded.
+    ctx.watch(store, (s) => s.names, () => paintLists());
 
     function paintLists() {
       if (!cfg) return;
-      const c = cfg;
-      if (!changed(memo, 'lists', { file: c.config, any: c.effective.allow_any_dm, brains: memo.brains })) return;
       const file = cfg.config || {};
       const eff = cfg.effective || {};
       const numbers = file.allowed_numbers || [];
       const groups = file.allowed_groups || [];
       // Only an explicit true opens an empty list; unset means nobody.
       const anyDM = eff.allow_any_dm === true;
+      if (!changed(memo, 'lists', { numbers, groups, anyDM, owners: groups.map(explicitOwner), names: groups.map(chatName) })) return;
 
       mount(numbersBox,
         numbers.length ? h('ul.plain-list', numbers.map((n) => h('li',

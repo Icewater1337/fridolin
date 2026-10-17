@@ -1,7 +1,7 @@
 // Activity: messages across brains, newest first.
 
 import { get, qs } from '../app/api.js';
-import { store, onStatus } from '../app/state.js';
+import { store, chatName } from '../app/store.js';
 import { h, mount } from '../lib/dom.js';
 import { changed } from '../lib/memo.js';
 import { select, textInput } from '../components/fields.js';
@@ -28,12 +28,12 @@ export default {
       mount(brainSel, opts.map(([v, l]) => h('option', { value: v, selected: v === brain }, l)));
       brainSel.value = brain;
     };
-    ctx.onCleanup(onStatus(fillBrains));
+    ctx.watch(store, (s) => s.status, (s) => { if (s) fillBrains(s); });
 
     const paint = () => {
       if (!items) return;
       const q = search.toLowerCase();
-      const shown = q ? items.filter((e) => `${e.text} ${e.from} ${e.chat} ${e.brain} ${store.groupNames.get(e.chat) || ''}`.toLowerCase().includes(q)) : items;
+      const shown = q ? items.filter((e) => `${e.text} ${e.from} ${e.chat} ${e.brain} ${chatName(e.chat)}`.toLowerCase().includes(q)) : items;
       count.textContent = items.length ? `${shown.length} of ${items.length} messages` : '';
       if (!shown.length) {
         mount(list, items.length
@@ -43,6 +43,8 @@ export default {
       }
       mount(list, shown.map((e) => activityItem(e, { showBrain: !brain })));
     };
+    // Chat labels and the search use group names once the groups have loaded.
+    ctx.watch(store, (s) => s.names, () => paint());
 
     brainSel.addEventListener('change', () => {
       brain = brainSel.value;

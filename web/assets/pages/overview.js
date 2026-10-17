@@ -2,7 +2,7 @@
 // warnings and the latest messages.
 
 import { get, post, qs } from '../app/api.js';
-import { onStatus } from '../app/state.js';
+import { store } from '../app/store.js';
 import { h, mount } from '../lib/dom.js';
 import { fmtDuration, plural, parseTs } from '../lib/format.js';
 import { phone } from '../lib/jid.js';
@@ -221,23 +221,30 @@ export default {
     };
 
     // Status comes from the app-wide poller; this page only subscribes.
-    const unsub = onStatus(renderAll);
-    ctx.onCleanup(unsub);
-    if (!memo.health) mount(header, spinner());
+    if (!store.get().status) mount(header, spinner());
+    ctx.watch(store, (s) => s.status, (s) => { if (s) renderAll(s); });
 
     // QR refresh while pairing (codes rotate roughly every 20 s).
     ctx.poll(async (signal) => {
       if (qr.img) await loadQR(signal);
     }, 3000);
 
-    ctx.poll(async (signal) => {
-      const items = await get(`/api/activity${qs({ limit: 10 })}`, { signal });
-      if (!changed(memo, 'activity', items)) return;
+    let items = null;
+    const paintActivity = () => {
+      if (!items) return;
       if (!items.length) {
         mount(activityBox, empty('No messages yet', 'Messages your brains receive and send show up here.'));
         return;
       }
       mount(activityBox, items.map((e) => activityItem(e, { compact: true })));
+    };
+    ctx.poll(async (signal) => {
+      const data = await get(`/api/activity${qs({ limit: 10 })}`, { signal });
+      if (!changed(memo, 'activity', data)) return;
+      items = data;
+      paintActivity();
     }, 3000);
+    // Chat labels show group names once the groups have loaded.
+    ctx.watch(store, (s) => s.names, paintActivity);
   },
 };

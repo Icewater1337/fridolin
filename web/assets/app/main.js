@@ -1,25 +1,22 @@
-// Entry point: token handling, the app shell (sidebar / top bar), the hash
-// router, page contexts, and the "Connect to your bridge" screen shown on
-// 401.
+// Entry point: token handling, the router that renders a page into the app
+// shell, the polls every page needs, and the "Connect to your bridge" screen
+// shown on 401.
 
 import { get, setToken, getToken, on as onApi } from './api.js';
-import { store, setStatus, onStatus, onRestartChange, loadGroups, setIgnoredCount, onIgnoredCount } from './state.js';
+import { pollStatus, setIgnoredCount, loadGroups, chatName } from './store.js';
 import { h, mount } from '../lib/dom.js';
-import { plural } from '../lib/format.js';
-import { waKind, waLabel } from '../lib/whatsapp.js';
-import { icon } from '../components/icons.js';
 import { toast } from '../components/toast.js';
-import { btn, copyButton } from '../components/buttons.js';
+import { btn } from '../components/buttons.js';
 import { confirmDialog, closeAllDialogs } from '../components/dialog.js';
-import { textInput } from '../components/fields.js';
 import { setChatNames } from '../components/chat.js';
 import { keepTimesFresh } from '../components/common.js';
 import { restartBridge } from './restart.js';
 import { makePoll, pausePollsWhen, resumePolls } from './poll.js';
 import { createPage } from './page.js';
-
+import { createShell } from './shell.js';
+import { connectScreen } from './connect.js';
 import { ROUTES } from './routes.js';
-import { BRAND, matchRoute, routeHref, activeNav, docTitle } from './router.js';
+import { matchRoute, activeNav, docTitle } from './router.js';
 
 // ── token from the URL fragment ──────────────────────────────────────────
 
@@ -34,50 +31,50 @@ function takeTokenFromHash() {
 }
 takeTokenFromHash();
 
-// ── theme ────────────────────────────────────────────────────────────────
+// ── shell and connect screen ─────────────────────────────────────────────
 
-const THEMES = ['auto', 'light', 'dark'];
-function getTheme() {
-  try { return localStorage.getItem('bridgeTheme') || 'auto'; } catch { return 'auto'; }
-}
-function applyTheme(t) {
-  if (t === 'light' || t === 'dark') document.documentElement.setAttribute('data-theme', t);
-  else document.documentElement.removeAttribute('data-theme');
-  try { localStorage.setItem('bridgeTheme', t); } catch { /* ignore */ }
-}
-function themeButton() {
-  const b = h('button.icon-btn.theme-toggle', { type: 'button' });
-  const paint = () => {
-    const t = getTheme();
-    const label = { auto: 'Theme: follows your system', light: 'Theme: light', dark: 'Theme: dark' }[t];
-    b.title = `${label} (click to change)`;
-    b.setAttribute('aria-label', b.title);
-    mount(b, icon(t === 'auto' ? 'auto' : t === 'light' ? 'sun' : 'moon'));
-  };
-  b.addEventListener('click', () => {
-    const next = THEMES[(THEMES.indexOf(getTheme()) + 1) % THEMES.length];
-    applyTheme(next);
-    document.querySelectorAll('.theme-toggle').forEach((x) => x.dispatchEvent(new Event('repaint')));
-  });
-  b.addEventListener('repaint', paint);
-  paint();
-  return b;
-}
-
-// ── polling ──────────────────────────────────────────────────────────────
-
+const app = document.getElementById('app');
+const shell = createShell({ onRestart: () => restartBridge() });
 let blocked = false; // true while the connect screen is shown
+
 pausePollsWhen(() => document.hidden || blocked);
 document.addEventListener('visibilitychange', () => { if (!document.hidden) resumePolls(); });
+
+function showShell() {
+  app.className = 'shell';
+  mount(app, shell.nodes);
+}
+
+function showConnect(reason) {
+  if (blocked) return;
+  blocked = true;
+  if (current) { current.destroy(); current = null; }
+  app.className = 'connect';
+  connectScreen(app, { reason, onConnected: unblock });
+}
+
+function unblock() {
+  blocked = false;
+  showShell();
+  if (!location.hash || location.hash === '#' || location.hash.startsWith('#token=')) history.replaceState(null, '', '#/overview');
+  renderRoute();
+  resumePolls();
+  loadGroups(true);
+}
+
+onApi('unauthorized', () => {
+  showConnect(getToken() ? 'The saved token was not accepted — the bridge may have a new token. Open the dashboard again with the command below.' : '');
+});
+
+onApi('reachable', (ok) => shell.setOffline(!ok));
 
 // ── routing ──────────────────────────────────────────────────────────────
 
 let current = null; // the page context in use
-let shell = null;
 let lastHash = '';
 
 async function renderRoute() {
-  if (!shell) return;
+  if (blocked) return;
   const match = matchRoute(ROUTES, location.hash);
   if (current) current.destroy();
   closeAllDialogs();
@@ -144,169 +141,17 @@ window.addEventListener('beforeunload', (e) => {
   }
 });
 
-// ── shell ────────────────────────────────────────────────────────────────
+// ── polls every page needs ───────────────────────────────────────────────
 
-function buildShell() {
-  const app = document.getElementById('app');
-  app.className = 'shell';
-  const links = new Map();
-  const nav = h('nav.nav', { 'aria-label': 'Main' });
-  for (const route of ROUTES) {
-    if (!route.nav) continue;
-    const badgeEl = h('span.nav-badge', { hidden: true });
-    const a = h('a.nav-link', { href: routeHref(route), hidden: route.nav.devOnly ? true : null }, icon(route.nav.icon), h('span', route.nav.label), badgeEl);
-    a.badgeEl = badgeEl;
-    links.set(route.id, a);
-    nav.appendChild(a);
-  }
-  const menuBtn = h('button.icon-btn.menu-btn', { type: 'button', 'aria-label': 'Menu', 'aria-expanded': 'false' }, icon('menu'));
-  const waDot = h('span.dot');
-  const waText = h('span', 'Connecting…');
-  const waLink = h('a.sidebar-status', { href: '#/overview', title: 'WhatsApp connection' }, waDot, waText);
-  const version = h('span.version.muted');
-  const sidebar = h('aside.sidebar',
-    h('div.brand-row',
-      h('a.brand', { href: '#/overview' },
-        h('img.brand-logo', { src: '/assets/logo-mark.webp', alt: '', width: 34, height: 34 }),
-        h('span.brand-text', h('span.brand-name', BRAND), h('span.brand-sub', 'WhatsApp × Claude'))),
-      h('div.brand-tools', themeButton(), menuBtn)),
-    nav,
-    h('div.sidebar-foot', waLink, h('div.foot-row', version, themeButton())));
-  const banners = h('div.banners');
-  const offline = h('div.banner.bad', { hidden: true, role: 'alert' }, icon('alert'), h('span', 'Cannot reach the bridge. Retrying…'));
-  const restartBanner = h('div.banner.warn', { hidden: true });
-  banners.append(offline, restartBanner);
-  const page = h('main.main', { id: 'main' });
-  mount(app, sidebar, h('div.content', banners, page));
-
-  menuBtn.addEventListener('click', () => {
-    const open = !sidebar.classList.contains('nav-open');
-    sidebar.classList.toggle('nav-open', open);
-    menuBtn.setAttribute('aria-expanded', String(open));
-  });
-
-  const paintRestart = (fields) => {
-    restartBanner.hidden = !fields.length;
-    if (!fields.length) return;
-    mount(restartBanner, icon('refresh'),
-      h('span', 'Restart the bridge to apply: ', h('code.mono', fields.join(', '))),
-      btn('Restart now', { kind: 'primary', small: true, onClick: () => restartBridge() }));
-  };
-  onRestartChange(paintRestart);
-  paintRestart(store.restartRequired);
-
-  shell = {
-    page,
-    setActive(id) {
-      links.forEach((a, key) => {
-        if (key === id) a.setAttribute('aria-current', 'page');
-        else a.removeAttribute('aria-current');
-      });
-    },
-    closeNav() { sidebar.classList.remove('nav-open'); menuBtn.setAttribute('aria-expanded', 'false'); },
-    setOffline(off) { offline.hidden = !off; },
-    paintStatus(s) {
-      const devLink = links.get('dev');
-      devLink.hidden = !s.dev_mode;
-      version.textContent = s.version ? (/^\d/.test(s.version) ? `v${s.version}` : String(s.version)) : '';
-      const wa = s.whatsapp || {};
-      const kind = waKind(wa.mode);
-      waDot.className = `dot ${kind}`;
-      waText.textContent = waLabel(wa.mode);
-      if (s.dev_mode) waText.textContent = 'Dev mode (no WhatsApp)';
-      const issues = (s.issues || []).length;
-      const ob = links.get('brains').badgeEl;
-      ob.hidden = !issues;
-      ob.textContent = String(issues);
-      ob.title = issues ? plural(issues, 'brain issue') : '';
-    },
-    setChatsBadge(n) {
-      const b = links.get('chats').badgeEl;
-      b.hidden = !n;
-      b.textContent = String(n);
-      b.title = n ? `${plural(n, 'chat')} waiting for access` : '';
-    },
-  };
-  if (store.status) shell.paintStatus(store.status);
-  shell.setChatsBadge(store.ignoredCount);
-}
-
-// ── connect screen ───────────────────────────────────────────────────────
-
-function showConnect(reason) {
-  if (blocked) return;
-  blocked = true;
-  if (current) { current.destroy(); current = null; }
-  shell = null;
-  const app = document.getElementById('app');
-  app.className = 'connect';
-  const input = textInput({ placeholder: 'Paste the token (or the whole dashboard link)', class: 'mono', 'aria-label': 'Dashboard token' });
-  const errorEl = h('p.form-error', { hidden: true });
-  const form = h('form.connect-form', input, btn('Connect', { kind: 'primary', type: 'submit', icon: 'key' }));
-  form.addEventListener('submit', async (e) => {
-    e.preventDefault();
-    let t = input.value.trim();
-    const m = t.match(/#token=([A-Za-z0-9]+)/);
-    if (m) t = m[1];
-    if (!t) { input.focus(); return; }
-    const submitBtn = form.querySelector('button');
-    submitBtn.disabled = true;
-    const prev = getToken();
-    setToken(t);
-    try {
-      await get('/api/status');
-      unblock();
-    } catch (err) {
-      setToken(prev);
-      errorEl.hidden = false;
-      errorEl.textContent = err.status === 401 ? 'That token was not accepted. Check that you copied all of it.' : err.message;
-      blocked = true;
-    } finally {
-      submitBtn.disabled = false;
-    }
-  });
-  const cmd = 'fridolin open';
-  mount(app, h('div.connect-card.card',
-    h('div.connect-head', h('img.brand-logo', { src: '/assets/logo-mark.webp', alt: '', width: 56, height: 56 }), h('div', h('h1', 'Connect to your bridge'), h('p.muted', 'The dashboard needs your bridge’s access token.'))),
-    reason ? h('div.callout.warn', icon('alert', 'callout-icon'), h('div.callout-body', reason)) : null,
-    h('ol.steps-list',
-      h('li', h('div', 'In a terminal on this computer, run'), h('div.code-line', h('code.mono', cmd), copyButton(cmd)), h('div.muted.small', 'It opens this dashboard with the token filled in.')),
-      h('li', h('div', 'Or paste the token from ', h('code.mono', '~/.fridolin/dashboard.token'), ' (in your data folder, if you moved it):'), form, errorEl)),
-    h('div.connect-foot.muted.small', 'The token keeps programs on this computer — including your brains — from changing the bridge’s settings. It never leaves this machine.')));
-  setTimeout(() => input.focus(), 50);
-}
-
-function unblock() {
-  blocked = false;
-  buildShell();
-  if (!location.hash || location.hash === '#' || location.hash.startsWith('#token=')) history.replaceState(null, '', '#/overview');
-  renderRoute();
-  resumePolls();
-  loadGroups(true);
-}
-
-onApi('unauthorized', () => {
-  showConnect(getToken() ? 'The saved token was not accepted — the bridge may have a new token. Open the dashboard again with the command below.' : '');
-});
-
-onApi('reachable', (ok) => { if (shell) shell.setOffline(!ok); });
-
-// ── global pollers ───────────────────────────────────────────────────────
-
-setChatNames((jid) => store.groupNames.get(jid));
+setChatNames(chatName);
 keepTimesFresh();
 
-onStatus((s) => { if (shell) shell.paintStatus(s); });
-onIgnoredCount((n) => { if (shell) shell.setChatsBadge(n); });
-
 let lastWaMode = '';
-makePoll(async (signal) => {
-  const s = await get('/api/status', { signal });
-  setStatus(s);
+pollStatus((s) => {
   const mode = s.whatsapp && s.whatsapp.mode;
   if (mode === 'connected' && lastWaMode !== 'connected') loadGroups(true);
   lastWaMode = mode;
-}, 3000);
+});
 
 makePoll(async (signal) => {
   const list = await get('/api/chats/ignored', { signal });
@@ -319,7 +164,7 @@ makePoll(async () => { await loadGroups(); }, 60000);
 
 if (!location.hash || location.hash === '#') history.replaceState(null, '', '#/overview');
 if (!blocked) {
-  buildShell();
+  showShell();
   renderRoute();
 }
 

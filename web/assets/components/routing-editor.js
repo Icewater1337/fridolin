@@ -1,7 +1,7 @@
 // Routing controls shared by the add-brain wizard and the brain page:
 // direct messages, default brain, and which groups the brain answers.
 
-import { store, loadGroups } from '../app/state.js';
+import { store, loadGroups, chatName } from '../app/store.js';
 import { h, mount } from '../lib/dom.js';
 import { isGroupJid } from '../lib/jid.js';
 import { btn } from './buttons.js';
@@ -62,11 +62,12 @@ export function routingEditor({ routing = {}, selfId = '', brains = [], allowedG
 
   function paintGroups() {
     const rows = new Map();
-    for (const g of store.groups || []) {
+    const { groups, groupsError } = store.get();
+    for (const g of groups || []) {
       if (g.allowed || selected.has(g.jid)) rows.set(g.jid, { jid: g.jid, name: g.name, participants: g.participants, allowed: g.allowed });
     }
-    for (const jid of allowedGroups || []) if (!rows.has(jid)) rows.set(jid, { jid, name: store.groupNames.get(jid) || '', allowed: true });
-    for (const jid of [...selected, ...extra]) if (!rows.has(jid)) rows.set(jid, { jid, name: store.groupNames.get(jid) || '', allowed: (allowedGroups || []).includes(jid) });
+    for (const jid of allowedGroups || []) if (!rows.has(jid)) rows.set(jid, { jid, name: chatName(jid), allowed: true });
+    for (const jid of [...selected, ...extra]) if (!rows.has(jid)) rows.set(jid, { jid, name: chatName(jid), allowed: (allowedGroups || []).includes(jid) });
     const list = [...rows.values()].sort((a, b) => (a.name || a.jid).localeCompare(b.name || b.jid));
     if (!list.length) {
       mount(groupsBox, h('div.muted.small.group-empty', 'No allowed groups yet. Allow a group on the ', h('a', { href: '#/chats' }, 'Chats'), ' page, or add its JID below.'));
@@ -87,12 +88,18 @@ export function routingEditor({ routing = {}, selfId = '', brains = [], allowedG
             !owner && g.allowed && g.participants ? `${g.participants} people` : ''));
       }));
     }
-    note.textContent = store.groups === null && store.groupsError
-      ? `Group names are unavailable (${store.groupsError}). You can still pick allowed groups by JID.`
+    note.textContent = groups === null && groupsError
+      ? `Group names are unavailable (${groupsError}). You can still pick allowed groups by JID.`
       : 'Only allowed groups are listed. A group can belong to one brain; members still need to tag the bridge (see Settings → Access → Triggers).';
   }
 
-  loadGroups().finally(() => { if (!(signal && signal.aborted)) paintGroups(); });
+  // Paints once the groups are known (or failed to load), and again when
+  // they or their names change, until the page goes. loadGroups() fetches
+  // them unless they are fresh.
+  const paintKnown = () => { const s = store.get(); if (s.groups !== null || s.groupsError) paintGroups(); };
+  const offs = [(s) => s.groups, (s) => s.groupsError, (s) => s.names].map((select) => store.subscribe(select, paintKnown));
+  if (signal) signal.addEventListener('abort', () => offs.forEach((off) => off()), { once: true });
+  loadGroups();
 
   const el = h('div.routing-editor',
     h('div.field', dm, h('div.help', 'All direct messages from allowed numbers go to this brain. Only one brain can do this.'), dmWarn),

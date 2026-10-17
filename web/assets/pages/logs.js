@@ -1,7 +1,7 @@
 // Logs: a live tail of the bridge's log output.
 
 import { get, qs } from '../app/api.js';
-import { onStatus } from '../app/state.js';
+import { store } from '../app/store.js';
 import { h, mount } from '../lib/dom.js';
 import { absTime, hhmmss } from '../lib/format.js';
 import { btn } from '../components/buttons.js';
@@ -83,13 +83,14 @@ export default {
     }
 
     // The log sequence restarts with the bridge; start over when it restarts.
-    ctx.onCleanup(onStatus((s) => {
+    ctx.watch(store, (s) => s.status, (s) => {
+      if (!s) return;
       if (startedAt && s.started_at && s.started_at !== startedAt) {
         after = 0;
         view.appendChild(h('div.log-sep', '— the bridge restarted —'));
       }
       startedAt = s.started_at;
-    }));
+    });
 
     ctx.poll(async (signal) => {
       const r = await get(`/api/logs${qs({ after, limit: 500 })}`, { signal });

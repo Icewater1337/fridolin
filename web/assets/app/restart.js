@@ -2,7 +2,7 @@
 // until /api/status answers from the new process. The token stays the same.
 
 import { get, post } from './api.js';
-import { store, setStatus, setRestartRequired } from './state.js';
+import { store, setStatus } from './store.js';
 import { h, mount } from '../lib/dom.js';
 import { toast, toastError } from '../components/toast.js';
 import { btn } from '../components/buttons.js';
@@ -11,7 +11,8 @@ import { spinner } from '../components/common.js';
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 export async function restartBridge() {
-  const before = store.status ? store.status.started_at : null;
+  const { status } = store.get();
+  const before = status ? status.started_at : null;
   const msg = h('p', 'Restarting the bridge… this usually takes a few seconds.');
   const body = h('div.restart-body', spinner('large'), msg);
   const actions = h('div.dialog-actions');
@@ -39,8 +40,7 @@ export async function restartBridge() {
     try {
       const s = await get('/api/status');
       if ((before && s.started_at !== before) || (!before && sawDown) || (sawDown && s.started_at !== before)) {
-        setStatus(s);
-        setRestartRequired(null);
+        setStatus(s); // the new process has nothing waiting for a restart
         close();
         toast('The bridge restarted', 'ok');
         return true;

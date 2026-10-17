@@ -1,6 +1,6 @@
 // A page's context. Everything a page starts — polls, requests, timers,
-// listeners — belongs to it and ends when the user leaves, so nothing keeps
-// fetching or painting into a page that is gone.
+// listeners, store subscriptions — belongs to it and ends when the user
+// leaves, so nothing keeps fetching or painting into a page that is gone.
 
 import { makePoll } from './poll.js';
 
@@ -48,6 +48,11 @@ export function createPage({ params = {}, replaceHash = () => {} } = {}) {
     listen(target, type, fn, opts) {
       target.addEventListener(type, fn, opts);
       cleanups.push(() => target.removeEventListener(type, fn, opts));
+    },
+
+    /** store.subscribe(select, fn) until the page goes: fn gets the value now and on every change. */
+    watch(store, select, fn) {
+      cleanups.push(store.subscribe(select, fn));
     },
 
     /** Runs fn when the page goes, e.g. an unsubscribe. */

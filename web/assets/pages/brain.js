@@ -2,6 +2,7 @@
 // waiting for approval, recent messages, and removal.
 
 import { get, post, put, del, qs } from '../app/api.js';
+import { store } from '../app/store.js';
 import { routingEditor } from '../components/routing-editor.js';
 import { activityItem } from '../components/activity-item.js';
 import { calendarCard } from '../components/calendar.js';
@@ -75,11 +76,22 @@ export default {
       renderDanger();
     }, 3000);
 
-    ctx.poll(async (signal) => {
-      const items = await get(`/api/activity${qs({ limit: 30, brain: id })}`, { signal });
-      if (!changed(memo, 'act', items)) return;
+    let items = null;
+    const paintActivity = () => {
+      if (!items) return;
       mount(actBox, items.length ? items.map((e) => activityItem(e, { compact: true, showBrain: false })) : empty('No messages yet', 'Messages this brain receives and sends show up here.'));
+    };
+    ctx.poll(async (signal) => {
+      const data = await get(`/api/activity${qs({ limit: 30, brain: id })}`, { signal });
+      if (!changed(memo, 'act', data)) return;
+      items = data;
+      paintActivity();
     }, 3000);
+    // Chat labels show group names once the groups have loaded.
+    ctx.watch(store, (s) => s.names, () => {
+      paintActivity();
+      if (brain) renderLive();
+    });
 
     function renderHead() {
       const b = brain;
