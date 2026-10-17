@@ -27,6 +27,10 @@ func newFakePlaud(t *testing.T) *fakePlaudFixture {
 	dir := t.TempDir()
 	t.Setenv("WCB_FAKE_PLAUD", "1")
 	t.Setenv("WCB_FAKE_PLAUD_DIR", dir)
+	// Every CLI call is a run of this test binary. Under -race each one
+	// would wait a second on exit for late race reports, which adds up to
+	// minutes over the Plaud tests.
+	t.Setenv("GORACE", strings.TrimSpace(os.Getenv("GORACE")+" atexit_sleep_ms=0"))
 	return &fakePlaudFixture{dir: dir, t: t}
 }
 
