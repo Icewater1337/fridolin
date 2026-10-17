@@ -199,7 +199,10 @@ type Brain struct {
 	retired bool // removed from the configuration
 	last    *RunInfo
 
-	// tmuxViewer is an optional Terminal window tailing this brain's activity log.
+	// tmuxViewer is an optional Terminal window tailing this brain's
+	// activity log. A run starts it and a reload can close it, so viewerMu
+	// guards it.
+	viewerMu   sync.Mutex
 	tmuxViewer *TmuxViewer
 }
 
@@ -520,13 +523,20 @@ func (br *Brain) stopRun(run *brainRun) bool {
 	return true
 }
 
-// retire stops the brain for good after it was removed from the configuration.
-func (br *Brain) retire() {
+// retire stops the brain for good after it was removed from the
+// configuration, or when the bridge stops. With closeViewer it also ends
+// the activity viewer: not when the bridge stops, so the window stays until
+// the next start replaces it, nor when the brain moved to another folder,
+// where the brain that runs there replaces the tmux session of that name.
+func (br *Brain) retire(closeViewer bool) {
 	br.mu.Lock()
 	br.retired = true
 	br.pending = nil
 	br.mu.Unlock()
 	br.StopCurrent(true)
+	if closeViewer {
+		br.closeViewer()
+	}
 	// Done with the folder. A run that would not stop finds it closed.
 	br.root.Close()
 }
@@ -621,6 +631,8 @@ func (br *Brain) ensureViewer(s *brainSettings) {
 	if !s.viewer {
 		return
 	}
+	br.viewerMu.Lock()
+	defer br.viewerMu.Unlock()
 	if br.tmuxViewer != nil && br.tmuxViewer.IsAlive() {
 		return
 	}
@@ -639,6 +651,18 @@ func (br *Brain) ensureViewer(s *brainSettings) {
 		return
 	}
 	br.tmuxViewer = tv
+}
+
+// closeViewer ends the activity viewer's tmux session, if it has one, which
+// closes its Terminal window.
+func (br *Brain) closeViewer() {
+	br.viewerMu.Lock()
+	tv := br.tmuxViewer
+	br.tmuxViewer = nil
+	br.viewerMu.Unlock()
+	if tv != nil {
+		tv.Close()
+	}
 }
 
 // streamLogName is the brain's activity log, in its folder.
@@ -1518,6 +1542,9 @@ func (bm *BrainManager) reload(specs []BrainSpec, issues []BrainIssue, cfg *Conf
 			created = append(created, br)
 		}
 		br.settings.Store(s)
+		if !s.viewer {
+			br.closeViewer() // the viewer setting was turned off
+		}
 
 		next[m.ID] = br
 		order = append(order, br)
@@ -1555,7 +1582,8 @@ func (bm *BrainManager) reload(specs []BrainSpec, issues []BrainIssue, cfg *Conf
 		} else {
 			log.Printf("brain %s: removed from configuration; stopping it", br.id)
 		}
-		go br.retire()
+		_, moved := next[br.id]
+		go br.retire(!moved)
 	}
 	return nil
 }
@@ -1702,7 +1730,7 @@ func (bm *BrainManager) Stop() {
 		wg.Add(1)
 		go func(br *Brain) {
 			defer wg.Done()
-			br.retire()
+			br.retire(false)
 		}(br)
 	}
 	wg.Wait()

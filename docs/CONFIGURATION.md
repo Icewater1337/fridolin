@@ -778,7 +778,10 @@ sender is told to send the file again.
 ### `viewer`
 
 Opens a tmux session per brain, tailing its activity log, in a Terminal window
-(macOS). Off by default. Handy while tuning a prompt; noisy otherwise. Requires
+(macOS), on the brain's first run. Off by default. Handy while tuning a
+prompt; noisy otherwise. Turning it off, or removing the brain, ends the
+session and closes the window; one left open by a restart is replaced on
+the brain's next run. Requires
 tmux — without it the bridge logs a warning and carries on. Nor does a viewer
 start for a brain whose `claude-stream.log` the bridge refuses, a symlink say
 (see [BRAINS.md](BRAINS.md#files-the-bridge-reads-and-writes)). The bridge
