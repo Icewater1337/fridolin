@@ -23,11 +23,16 @@ directory under the same stem, so they stay paired:
     2026-01-15 - Notes from the planning call.txt
     2026-01-15 - Notes from the planning call.ogg
 
+Nothing is overwritten: when a stem is already taken (two short "Okay" notes
+on one day), the new pair gets "2026-01-15 - Okay (2)", then "(3)", and so on.
+
 Engines
 -------
 `--engine auto` (the default) uses a local model if `transformers` and `torch`
-are installed, and falls back to Groq per chunk when the local run fails.
-`local` and `groq` force one engine.
+are installed, and falls back to Groq per chunk when the local run fails (a
+model that cannot be loaded at all is not retried for every chunk). `local`
+and `groq` force one engine. `--prompt` reaches the model with either; keep
+it to a few sentences, since Whisper reads only the last 223 tokens of it.
 
     Local:  pip install -r tools/requirements-transcription.txt
             First run downloads the model (~1.5 GB for large-v3-turbo).
@@ -52,17 +57,23 @@ import subprocess
 import sys
 import tempfile
 import time
+from dataclasses import dataclass
 from datetime import date
 from pathlib import Path
+from typing import NoReturn
 
 DEFAULT_MODEL = os.environ.get("TRANSCRIBE_MODEL", "openai/whisper-large-v3-turbo")
 VIDEO_EXTS = {".mp4", ".mov", ".webm", ".3gp", ".mkv", ".avi", ".m4v"}
 DEFAULT_CHUNK_SECONDS = 600  # split anything longer than ~10 minutes
 GROQ_MODEL = "whisper-large-v3"
 GROQ_MIN_INTERVAL = 6.0      # seconds between Groq calls, to stay under the rate limit
+# Whisper's decoder holds 448 tokens in all: the prompt, a few start tokens
+# and the text of one 30 s window. Like openai-whisper, give the prompt at
+# most half.
+PROMPT_TOKENS = 448 // 2 - 1
 
 
-def die(msg: str) -> None:
+def die(msg: str) -> NoReturn:
     print(json.dumps({"error": msg}))
     sys.exit(1)
 
@@ -149,6 +160,7 @@ def split_audio(audio_path: Path, chunk_seconds: int) -> list[Path]:
 # ── local engine ──────────────────────────────────────────────────────────
 
 _PIPE = None
+_PROCESSOR = None  # kept next to _PIPE: it turns --prompt into prompt token IDs
 
 
 def local_available() -> bool:
@@ -162,7 +174,7 @@ def local_available() -> bool:
 
 def load_local_pipeline(model_id: str):
     """Load the local ASR pipeline once and reuse it across chunks."""
-    global _PIPE
+    global _PIPE, _PROCESSOR
     if _PIPE is not None:
         return _PIPE
 
@@ -197,14 +209,36 @@ def load_local_pipeline(model_id: str):
         chunk_length_s=30,
         stride_length_s=5,
     )
+    _PROCESSOR = processor
     return _PIPE
 
 
-def transcribe_local(audio_path: Path, model_id: str, language: str | None) -> str:
+def transcribe_local(audio_path: Path, model_id: str, language: str | None, prompt: str | None) -> str:
     pipe = load_local_pipeline(model_id)
     generate_kwargs = {"language": language} if language else {}
+    if prompt:
+        # Whisper reads the prompt as text that came before the audio, which
+        # steers spelling and vocabulary. Each 30 s window is conditioned on
+        # it, and the pipeline strips it from the output again.
+        generate_kwargs["prompt_ids"] = fit_prompt(_PROCESSOR.get_prompt_ids(prompt, return_tensors="pt"))
     result = pipe(str(audio_path), generate_kwargs=generate_kwargs)
     return result["text"].strip()
+
+
+def fit_prompt(ids):
+    """Cut Whisper prompt IDs to PROMPT_TOKENS, keeping the start-of-prompt token.
+
+    A prompt that fills the decoder fails every window, and --engine auto
+    would then quietly send the whole recording to Groq; one just under the
+    limit leaves no room for the transcript, which comes out as the prompt
+    repeated. Keep the end of the text, as openai-whisper does: it is what
+    the model reads right before the audio.
+    """
+    if len(ids) <= PROMPT_TOKENS + 1:
+        return ids
+    import torch
+    log(f"The prompt is {len(ids) - 1} tokens; Whisper reads only the last {PROMPT_TOKENS}.")
+    return torch.cat([ids[:1], ids[-PROMPT_TOKENS:]])
 
 
 # ── Groq engine ───────────────────────────────────────────────────────────
@@ -264,31 +298,53 @@ def transcribe_groq(audio_path: Path, language: str | None, prompt: str | None) 
 
 # ── orchestration ─────────────────────────────────────────────────────────
 
-def transcribe_chunk(path: Path, args) -> tuple[str, str]:
-    """Transcribe one file, returning (text, engine_used)."""
-    use_local = args.engine in ("auto", "local") and local_available()
-    use_groq = args.engine in ("auto", "groq") and groq_available()
+@dataclass
+class Engines:
+    """The engines this run may use, decided once before any work starts."""
+    local: bool
+    groq: bool
 
-    if args.engine == "local" and not use_local:
+
+def choose_engines(engine: str) -> Engines:
+    use_local = engine in ("auto", "local") and local_available()
+    use_groq = engine in ("auto", "groq") and groq_available()
+
+    if engine == "local" and not use_local:
         die("--engine local, but transformers/torch are not installed. "
             "Run: pip install -r tools/requirements-transcription.txt")
-    if args.engine == "groq" and not use_groq:
+    if engine == "groq" and not use_groq:
         die("--engine groq, but GROQ_API_KEY is unset or the groq package is missing. "
             "Run: pip install groq  and export GROQ_API_KEY=...")
     if not use_local and not use_groq:
         die("No transcription engine available. Either install the local model "
             "(pip install -r tools/requirements-transcription.txt) or set "
             "GROQ_API_KEY and install the groq package.")
+    return Engines(local=use_local, groq=use_groq)
 
-    if use_local:
+
+def transcribe_chunk(path: Path, args, available: Engines) -> tuple[str, str]:
+    """Transcribe one file, returning (text, engine_used)."""
+    if available.local:
         try:
-            return transcribe_local(path, args.model, args.language), f"local:{args.model}"
+            load_local_pipeline(args.model)
         except Exception as e:
-            if not use_groq:
+            if not available.groq:
+                die(f"The local model could not be loaded and no fallback is configured: {e}")
+            # Loading again for every chunk would only fail again, slowly.
+            log(f"The local model could not be loaded ({e}); using Groq for the rest")
+            available.local = False
+    if available.local:
+        try:
+            return transcribe_local(path, args.model, args.language, args.prompt), f"local:{args.model}"
+        except Exception as e:
+            if not available.groq:
                 die(f"Local transcription failed and no fallback is configured: {e}")
             log(f"Local model failed ({e}); falling back to Groq")
 
-    return transcribe_groq(path, args.language, args.prompt), f"groq:{GROQ_MODEL}"
+    try:
+        return transcribe_groq(path, args.language, args.prompt), f"groq:{GROQ_MODEL}"
+    except Exception as e:
+        die(f"Groq transcription failed: {e}")
 
 
 def build_filename(text: str, when: str) -> str:
@@ -314,6 +370,40 @@ def build_filename(text: str, when: str) -> str:
     return f"{when} - {summary}"
 
 
+def media_suffix_of(source: Path) -> str:
+    """The extension for the media copy; never .txt, which is the transcript's."""
+    suffix = source.suffix
+    return suffix if suffix and suffix.lower() != ".txt" else ".audio"
+
+
+def claim_paths(output_dir: Path, stem: str, media_suffix: str | None) -> tuple[Path, Path | None]:
+    """Create the transcript file, and the media copy's, under a stem nothing uses yet.
+
+    Short or near-silent notes from the same day share a stem ("2026-01-15 -
+    Okay"), and writing to a fixed name would replace an earlier recording's
+    transcript and media. Try "stem", then "stem (2)", "stem (3)", …; each
+    file is created with O_EXCL, so checking a name and taking it is one step
+    even when two transcriptions finish at once.
+    """
+    n = 0
+    while True:
+        n += 1
+        candidate = stem if n == 1 else f"{stem} ({n})"
+        transcript = output_dir / f"{candidate}.txt"
+        media = output_dir / f"{candidate}{media_suffix}" if media_suffix else None
+        try:
+            transcript.open("x").close()
+        except FileExistsError:
+            continue
+        if media is not None:
+            try:
+                media.open("xb").close()
+            except FileExistsError:
+                transcript.unlink()
+                continue
+        return transcript, media
+
+
 def main() -> None:
     ap = argparse.ArgumentParser(
         description="Transcribe an audio or video file to text.",
@@ -332,12 +422,12 @@ def main() -> None:
                     help="ISO language code, e.g. en, de, fr. Omit to auto-detect.")
     ap.add_argument("--prompt", default=None,
                     help="hint passed to the model — names, jargon, or the dialect "
-                         "spoken, which measurably improves accuracy")
+                         "spoken, which measurably improves accuracy. Keep it to a "
+                         f"few sentences: Whisper reads only its last {PROMPT_TOKENS} tokens")
     ap.add_argument("--chunk-seconds", type=int, default=DEFAULT_CHUNK_SECONDS,
                     help=f"split longer files into chunks of this size (default: {DEFAULT_CHUNK_SECONDS})")
-    ap.add_argument("--keep-original", action="store_true", default=True,
-                    help="copy the source media next to the transcript (default: on)")
-    ap.add_argument("--no-keep-original", dest="keep_original", action="store_false")
+    ap.add_argument("--keep-original", action=argparse.BooleanOptionalAction, default=True,
+                    help="copy the source media next to the transcript")
     args = ap.parse_args()
 
     source = Path(args.file).expanduser()
@@ -346,6 +436,9 @@ def main() -> None:
 
     output_dir = Path(args.output_dir).expanduser()
     output_dir.mkdir(parents=True, exist_ok=True)
+
+    # Before any slow work, so a missing engine fails fast.
+    available = choose_engines(args.engine)
 
     # Video needs its audio track pulled out first.
     working = source
@@ -357,7 +450,7 @@ def main() -> None:
         working = tmp_audio
 
     chunk_dir = None
-    engines: set[str] = set()
+    used: set[str] = set()  # the engine labels that produced text
     duration = 0.0
 
     try:
@@ -375,13 +468,13 @@ def main() -> None:
             segments = []
             for i, chunk in enumerate(chunks, 1):
                 log(f"Chunk {i}/{len(chunks)}…")
-                seg_text, engine = transcribe_chunk(chunk, args)
+                seg_text, engine = transcribe_chunk(chunk, args, available)
                 segments.append(seg_text)
-                engines.add(engine)
+                used.add(engine)
             text = " ".join(s for s in segments if s).strip()
         else:
-            text, engine = transcribe_chunk(working, args)
-            engines.add(engine)
+            text, engine = transcribe_chunk(working, args, available)
+            used.add(engine)
     finally:
         if tmp_audio is not None:
             tmp_audio.unlink(missing_ok=True)
@@ -392,13 +485,11 @@ def main() -> None:
         die("Transcription produced no text")
 
     stem = build_filename(text, date.today().strftime("%Y-%m-%d"))
+    media_suffix = media_suffix_of(source) if args.keep_original else None
+    transcript_path, audio_dest = claim_paths(output_dir, stem, media_suffix)
 
-    transcript_path = output_dir / f"{stem}.txt"
     transcript_path.write_text(text, encoding="utf-8")
-
-    audio_dest = None
-    if args.keep_original:
-        audio_dest = output_dir / f"{stem}{source.suffix or '.audio'}"
+    if audio_dest is not None:
         shutil.copy2(source, audio_dest)
 
     print(json.dumps({
@@ -406,7 +497,7 @@ def main() -> None:
         "transcript_file": str(transcript_path),
         "audio_file": str(audio_dest) if audio_dest else None,
         "language": args.language or "auto-detected",
-        "engine": "+".join(sorted(engines)),
+        "engine": "+".join(sorted(used)),
         "duration_seconds": round(duration, 1) if duration else None,
     }, ensure_ascii=False, indent=2))
 

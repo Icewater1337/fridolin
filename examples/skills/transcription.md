@@ -26,7 +26,8 @@ your working directory:
 ```
 
 The tool produces both, with a shared stem so they stay paired. Nothing to copy
-elsewhere afterwards.
+elsewhere afterwards. It never overwrites an earlier recording: a stem that is
+already taken gets ` (2)`, ` (3)`, … — use the paths the tool prints.
 
 ## Do not improvise
 
@@ -59,7 +60,7 @@ Useful flags:
 | Flag | When |
 | ---- | ---- |
 | `--language de` | You know the language. Skips detection and improves accuracy. |
-| `--prompt "..."` | Seed names, jargon, or the dialect being spoken — the single biggest accuracy win on domain-specific audio. |
+| `--prompt "..."` | Seed names, jargon, or the dialect being spoken — the single biggest accuracy win on domain-specific audio. Keep it to a few sentences: Whisper reads only the last ~220 tokens. |
 | `--engine groq` | The local model isn't installed, or you want speed over privacy. |
 | `--no-keep-original` | Don't copy the source media next to the transcript. |
 

@@ -18,18 +18,28 @@ BRIDGE_CALENDAR_DEFAULT), so inside a brain no flags are needed:
 
 --calendar-id picks one of the allowed calendars; anything else is refused.
 
-Profiles
---------
-A profile is just a name. Each one gets its own OAuth credentials and token in
-the bridge data directory, which keeps separate calendars separate:
+Without the dashboard
+---------------------
+The tool also works on its own, outside a brain. A profile is just a name;
+each one gets its own OAuth client and token in the bridge data directory,
+which keeps separate calendars separate:
 
     <data_dir>/google_calendar_credentials_<profile>.json   (you download this)
-    <data_dir>/google_calendar_token_<profile>.json         (created on first auth)
+    <data_dir>/google_calendar_token_<profile>.json         (written by auth)
 
 Name profiles after your brains ("personal", "work", …) so the sandbox profile
 generated for a brain grants it exactly its own calendar files. With no
 --profile, the unsuffixed google_calendar_credentials.json / _token.json pair
 is used.
+
+    1. console.cloud.google.com → new project → enable the Google Calendar API
+    2. APIs & Services → Credentials → Create OAuth 2.0 Client ID (Desktop app)
+    3. Download the JSON to the credentials path above
+    4. calendar_tool.py --profile personal auth   (a browser opens for consent)
+
+Only auth ever opens a browser, and it refuses to run inside a brain, where
+nobody is at the screen. When a brain's sign-in is revoked or expires, every
+command prints a JSON error saying to reconnect in the dashboard instead.
 
 Usage
 -----
@@ -40,13 +50,6 @@ Usage
     calendar_tool.py --profile personal free --date 2026-01-06
     calendar_tool.py --profile personal delete --event-id EVENT_ID
 
-Setup
------
-    1. console.cloud.google.com → new project → enable the Google Calendar API
-    2. APIs & Services → Credentials → Create OAuth 2.0 Client ID (Desktop app)
-    3. Download the JSON to the credentials path above
-    4. Run any command once — a browser opens for consent and the token is saved
-
 Timezone
 --------
 Defaults to the system timezone. Override per run with --timezone, or globally
@@ -56,11 +59,16 @@ with the CALENDAR_TZ environment variable (e.g. CALENDAR_TZ=Europe/Berlin).
 from __future__ import annotations
 
 import argparse
+import contextlib
 import json
 import os
+import re
 import sys
-from datetime import datetime, date, timedelta
+import traceback
+from datetime import datetime, time, timedelta
 from pathlib import Path
+from time import sleep
+from typing import NoReturn
 from zoneinfo import ZoneInfo
 
 SCOPES = ["https://www.googleapis.com/auth/calendar"]
@@ -81,7 +89,7 @@ _profile: str | None = None
 _timezone: ZoneInfo | None = None
 
 
-def err(msg: str) -> None:
+def err(msg: str) -> NoReturn:
     print(json.dumps({"error": msg}))
     sys.exit(1)
 
@@ -142,50 +150,126 @@ def credential_paths() -> tuple[Path, Path]:
     )
 
 
+def in_brain() -> bool:
+    """Whether the bridge started this tool for a brain, with no one at a browser."""
+    return bool(os.environ.get("BRIDGE_BRAIN_ID") or os.environ.get("BRIDGE_CREDENTIALS_DIR"))
+
+
+def reconnect_hint() -> str:
+    if in_brain():
+        # A brain whose sign-in Google refused shows "Sign in again"; one
+        # that was never connected, or was disconnected, shows "Connect".
+        return ("Ask the owner to reconnect the calendar in the dashboard: Brains → this brain → "
+                "Calendar → Sign in again (or Connect Google Calendar).")
+    profile = f" --profile {_profile}" if _profile else ""
+    return f"Sign in with: calendar_tool.py{profile} auth"
+
+
+def refresh_failure(e: Exception) -> str:
+    """The error for a RefreshError, which is not always a revoked sign-in.
+
+    When Google's token endpoint keeps answering 5xx or 429, google-auth
+    retries a few times and then raises RefreshError with retryable set
+    (older releases have no such attribute). Sending the owner off to
+    reconnect over an outage would be wrong, so only a refusal gets the hint.
+    """
+    # args[0] is Google's message; str(e) would also print the raw response.
+    reason = e.args[0] if e.args else e
+    if getattr(e, "retryable", False):
+        return (f"Google could not refresh the calendar sign-in just now ({reason}). "
+                "This is usually temporary; try again in a minute.")
+    return (f"Google refused to refresh the calendar sign-in ({reason}): it was revoked or has "
+            f"expired. {reconnect_hint()}")
+
+
+def missing_package(e: ImportError) -> NoReturn:
+    err(
+        f"Missing Python package: {e}. Install the calendar extras with:\n"
+        "  pip3 install -r tools/requirements.txt"
+    )
+
+
 def get_service():
-    """Authenticate and return the Google Calendar API service."""
+    """Return the Google Calendar API service, using the saved token.
+
+    This never starts an interactive sign-in. Inside a brain nobody is at the
+    browser it would open, the sandbox would not let it save the result, and
+    the command would hang until the Bash tool gives up. Every way the token
+    can fail ends in a JSON error that says how to reconnect instead.
+    """
     try:
         from google.oauth2.credentials import Credentials
+        from google.auth.exceptions import RefreshError, TransportError
         from google.auth.transport.requests import Request
-        from google_auth_oauthlib.flow import InstalledAppFlow
         from googleapiclient.discovery import build
     except ImportError as e:
-        err(
-            f"Missing Python package: {e}. Install the calendar extras with:\n"
-            "  pip3 install -r tools/requirements.txt"
-        )
+        missing_package(e)
 
-    credentials_file, token_file = credential_paths()
+    _, token_file = credential_paths()
+    if not token_file.exists():
+        err(f"Google Calendar is not connected: there is no token at {token_file}. {reconnect_hint()}")
+    try:
+        creds = read_token(Credentials, token_file)
+    except (OSError, ValueError) as e:
+        err(f"Cannot read the Google token {token_file}: {e}. {reconnect_hint()}")
 
-    creds = None
-    if token_file.exists():
-        creds = Credentials.from_authorized_user_file(str(token_file), SCOPES)
-
-    if not creds or not creds.valid:
-        if creds and creds.expired and creds.refresh_token:
-            try:
-                creds.refresh(Request())
-            except Exception:
-                creds = None  # refresh failed; fall through to a fresh consent
-
-        if not creds:
-            if not credentials_file.exists():
-                err(
-                    f"Credentials file not found: {credentials_file}\n"
-                    "Create OAuth credentials in the Google Cloud Console:\n"
-                    "  1. console.cloud.google.com → APIs & Services → Credentials\n"
-                    "  2. Create OAuth 2.0 Client ID (Desktop app)\n"
-                    "  3. Download the JSON and save it to the path above\n"
-                    "  4. Re-run this command to complete the OAuth flow"
-                )
-            flow = InstalledAppFlow.from_client_secrets_file(str(credentials_file), SCOPES)
-            creds = flow.run_local_server(port=0)
-
-        DATA_DIR.mkdir(parents=True, exist_ok=True)
-        token_file.write_text(creds.to_json())
-        token_file.chmod(0o600)
+    if not creds.valid:
+        if not creds.refresh_token:
+            err(f"The Google token {token_file} has expired and cannot be refreshed. {reconnect_hint()}")
+        try:
+            creds.refresh(Request())
+        except RefreshError as e:
+            err(refresh_failure(e))
+        except TransportError as e:
+            err(f"Could not reach Google to refresh the calendar sign-in ({e}). "
+                "This is usually temporary; try again in a minute.")
+        save_token(token_file, creds)
 
     return build("calendar", "v3", credentials=creds)
+
+
+def read_token(Credentials, token_file: Path):
+    """Load the saved token, reading it a second time if it is not valid JSON.
+
+    write_token rewrites the file in place, so a command that reads it while
+    a parallel one refreshes it can find it empty or half written for an
+    instant. That is no reason to send the owner off to reconnect: wait a
+    moment, then believe what the file says.
+    """
+    try:
+        return Credentials.from_authorized_user_file(str(token_file), SCOPES)
+    except ValueError:
+        sleep(0.2)
+        return Credentials.from_authorized_user_file(str(token_file), SCOPES)
+
+
+def write_token(token_file: Path, creds) -> None:
+    """Write the token, readable by its owner only.
+
+    Inside a brain the sandbox lets this tool write the token file itself and
+    nothing else in its directory: no mkdir (the directory exists, or there
+    would be no token to refresh), no temporary file to rename over it.
+    """
+    fd = os.open(token_file, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with os.fdopen(fd, "w", encoding="utf-8") as f:
+        f.write(creds.to_json())
+    os.chmod(token_file, 0o600)
+
+
+def save_token(token_file: Path, creds) -> None:
+    """Write a refreshed token back, best effort.
+
+    When the sandbox or the file's mode refuses the write, the old token is
+    left as it was and the next run simply refreshes again, so that is a
+    warning on stderr, and stdout stays the command's one JSON document. (A
+    write that fails halfway, on a full disk say, does lose the token: with
+    no rename allowed, the rewrite cannot be made atomic.)
+    """
+    try:
+        write_token(token_file, creds)
+    except OSError as e:
+        print(f"warning: could not save the refreshed Google token to {token_file}: {e}. "
+              "The next run refreshes it again.", file=sys.stderr)
 
 
 def target_calendars(requested: str | None, many: bool = False) -> list[str]:
@@ -254,7 +338,7 @@ def ensure_timezone(dt_str: str) -> str:
 def cmd_list(args) -> None:
     service = get_service()
 
-    from_date = args.from_date or date.today().isoformat()
+    from_date = args.from_date or datetime.now(tz()).date().isoformat()
     to_date = args.to_date or from_date
 
     # timeMax is the start of the day *after* to_date, so the last day is
@@ -263,24 +347,47 @@ def cmd_list(args) -> None:
     time_max = parse_day(to_date) + timedelta(days=1)
 
     calendars = target_calendars(args.calendar_id, many=True)
-    events = []
+    events, truncated = [], False
     for cal in calendars:
-        result = service.events().list(
-            calendarId=cal,
-            timeMin=time_min.isoformat(),
-            timeMax=time_max.isoformat(),
-            timeZone=str(tz()),
-            singleEvents=True,
-            orderBy="startTime",
-            maxResults=args.max_results,
-        ).execute()
-        for e in result.get("items", []):
+        items, more = fetch_events(service, cal, time_min, time_max, args.max_results)
+        truncated = truncated or more
+        for e in items:
             item = format_event(e)
             if len(calendars) > 1:
                 item["calendar"] = cal
             events.append(item)
     events.sort(key=lambda e: e.get("start") or "")
-    print(json.dumps({"events": events, "count": len(events)}, indent=2))
+    if len(events) > args.max_results:
+        events, truncated = events[:args.max_results], True
+    print(json.dumps({"events": events, "count": len(events), "truncated": truncated}, indent=2))
+
+
+def fetch_events(service, calendar_id: str, time_min: datetime, time_max: datetime,
+                 limit: int) -> tuple[list[dict], bool]:
+    """Return up to limit events of one calendar in start order, and whether it had more.
+
+    Google may return fewer events per page than asked for, even when more
+    match, so follow nextPageToken rather than trusting the first page:
+    stopping early would make a busy day look free.
+    """
+    events = service.events()
+    request = events.list(
+        calendarId=calendar_id,
+        timeMin=time_min.isoformat(),
+        timeMax=time_max.isoformat(),
+        timeZone=str(tz()),
+        singleEvents=True,
+        orderBy="startTime",
+        maxResults=min(limit, 2500),  # the API's largest page
+    )
+    items: list[dict] = []
+    while request is not None:
+        response = request.execute()
+        items.extend(response.get("items", []))
+        if len(items) >= limit:
+            return items[:limit], len(items) > limit or bool(response.get("nextPageToken"))
+        request = events.list_next(request, response)
+    return items, False
 
 
 def cmd_create(args) -> None:
@@ -350,40 +457,80 @@ def cmd_free(args) -> None:
     def to_local(iso_str: str) -> datetime:
         return datetime.fromisoformat(iso_str.replace("Z", "+00:00")).astimezone(tz())
 
-    hours_start, hours_end = args.hours.split("-", 1)
-    window_start = datetime.fromisoformat(f"{args.date}T{hours_start}:00").replace(tzinfo=tz())
-    window_end = datetime.fromisoformat(f"{args.date}T{hours_end}:00").replace(tzinfo=tz())
+    first, last = args.hours
+    window_start = day_start + timedelta(minutes=first)
+    window_end = day_start + timedelta(minutes=last)
 
-    busy_periods = [
-        {"start": to_local(s["start"]).strftime("%H:%M"), "end": to_local(s["end"]).strftime("%H:%M")}
-        for s in busy
-    ]
-
-    free_windows = []
-    cursor = window_start
-    for slot in sorted(busy, key=lambda x: x["start"]):
-        s, e = to_local(slot["start"]), to_local(slot["end"])
-        if s > cursor:
-            free_windows.append({
-                "start": cursor.strftime("%H:%M"),
-                "end": s.strftime("%H:%M"),
-                "duration_minutes": int((s - cursor).total_seconds() / 60),
-            })
-        cursor = max(cursor, e)
-    if cursor < window_end:
-        free_windows.append({
-            "start": cursor.strftime("%H:%M"),
-            "end": window_end.strftime("%H:%M"),
-            "duration_minutes": int((window_end - cursor).total_seconds() / 60),
-        })
+    busy_local = [(to_local(s["start"]), to_local(s["end"])) for s in busy]
+    busy_periods = [{"start": s.strftime("%H:%M"), "end": e.strftime("%H:%M")} for s, e in busy_local]
 
     print(json.dumps({
         "date": args.date,
         "timezone": str(tz()),
-        "hours": args.hours,
+        "hours": f"{hhmm(first)}-{hhmm(last)}",
         "busy": busy_periods,
-        "free_windows": [w for w in free_windows if w["duration_minutes"] >= args.min_slot],
+        "free_windows": free_windows(busy_local, window_start, window_end, args.min_slot),
     }, indent=2))
+
+
+def free_windows(busy: list[tuple[datetime, datetime]], window_start: datetime,
+                 window_end: datetime, min_slot: int) -> list[dict]:
+    """The gaps of at least min_slot minutes between busy slots, inside the window.
+
+    Each busy slot is clipped to the window first. Otherwise a meeting at
+    19:00 would stretch the last free window of an 08:00-18:00 search to
+    19:00, and the assistant would offer a slot outside the hours asked for.
+    """
+    windows = []
+    cursor = window_start
+    for s, e in sorted(busy):
+        s, e = max(s, window_start), min(e, window_end)
+        if s >= e:
+            continue  # entirely outside the window
+        if s > cursor:
+            windows.append((cursor, s))
+        cursor = max(cursor, e)
+    if cursor < window_end:
+        windows.append((cursor, window_end))
+
+    def clock(t: datetime) -> str:
+        # A window that runs to midnight ends at 24:00, not at 00:00.
+        return "24:00" if t > window_start and t.time() == time(0) else t.strftime("%H:%M")
+
+    out = []
+    for s, e in windows:
+        minutes = int((e - s).total_seconds() / 60)
+        if minutes >= min_slot:
+            out.append({"start": clock(s), "end": clock(e), "duration_minutes": minutes})
+    return out
+
+
+def positive_int(s: str) -> int:
+    try:
+        n = int(s)
+    except ValueError:
+        n = 0
+    if n < 1:
+        raise argparse.ArgumentTypeError(f"must be a whole number of at least 1 (got {s!r})")
+    return n
+
+
+def hhmm(minutes: int) -> str:
+    return f"{minutes // 60:02d}:{minutes % 60:02d}"
+
+
+def parse_hours(s: str) -> tuple[int, int]:
+    """Parse --hours HH:MM-HH:MM into minutes after midnight; the end may be 24:00."""
+    m = re.fullmatch(r"(\d{1,2}):(\d{2})-(\d{1,2}):(\d{2})", s.strip())
+    if not m:
+        raise argparse.ArgumentTypeError(f"use HH:MM-HH:MM, e.g. 08:00-18:00 (got {s!r})")
+    h1, m1, h2, m2 = (int(g) for g in m.groups())
+    first, last = h1 * 60 + m1, h2 * 60 + m2
+    if h1 > 23 or m1 > 59 or m2 > 59 or last > 24 * 60:
+        raise argparse.ArgumentTypeError(f"times run from 00:00 to 24:00 (got {s!r})")
+    if first >= last:
+        raise argparse.ArgumentTypeError(f"the start must be before the end (got {s!r})")
+    return first, last
 
 
 def cmd_delete(args) -> None:
@@ -395,7 +542,15 @@ def cmd_delete(args) -> None:
 def cmd_calendars(args) -> None:
     """List the calendars this brain may use (all of the account's, if unrestricted)."""
     service = get_service()
-    items = service.calendarList().list(maxResults=250).execute().get("items", [])
+    # An account can have more calendars than fit in one page, and a brain's
+    # calendar on the second page would look as if it did not exist.
+    calendar_list = service.calendarList()
+    request = calendar_list.list(maxResults=250)  # the API's largest page
+    items: list[dict] = []
+    while request is not None:
+        response = request.execute()
+        items.extend(response.get("items", []))
+        request = calendar_list.list_next(request, response)
     out = []
     for c in items:
         if ALLOWED and c["id"] not in ALLOWED:
@@ -410,10 +565,75 @@ def cmd_calendars(args) -> None:
     print(json.dumps({"calendars": out, "restricted": bool(ALLOWED)}, indent=2))
 
 
+def cmd_auth(args) -> None:
+    """Sign in through the browser and save the token. Only ever run by hand."""
+    if in_brain():
+        err(f"Signing in needs someone at a browser, so it cannot run inside a brain. {reconnect_hint()}")
+    try:
+        from google_auth_oauthlib.flow import InstalledAppFlow
+    except ImportError as e:
+        missing_package(e)
+
+    credentials_file, token_file = credential_paths()
+    if not credentials_file.exists():
+        err(
+            f"Credentials file not found: {credentials_file}\n"
+            "Create OAuth credentials in the Google Cloud Console:\n"
+            "  1. console.cloud.google.com → APIs & Services → Credentials\n"
+            "  2. Create OAuth 2.0 Client ID (Desktop app)\n"
+            "  3. Download the JSON and save it to the path above\n"
+            "  4. Run auth again"
+        )
+    flow = InstalledAppFlow.from_client_secrets_file(str(credentials_file), SCOPES)
+    # The flow prints "Please visit this URL…" on stdout, which would break
+    # the one JSON document stdout promises.
+    with contextlib.redirect_stdout(sys.stderr):
+        creds = flow.run_local_server(port=0)
+    try:
+        write_token(token_file, creds)
+    except OSError as e:
+        err(f"Signed in, but could not save the token to {token_file}: {e}")
+    print(json.dumps({"authorized": True, "token_file": str(token_file)}))
+
+
+def describe_error(e: Exception) -> str:
+    """One line for an error a command raised, for the JSON error."""
+    try:
+        from googleapiclient.errors import HttpError
+    except ImportError:
+        HttpError = ()
+    try:
+        from google.auth.exceptions import RefreshError, TransportError
+    except ImportError:
+        RefreshError = TransportError = ()
+
+    if isinstance(e, HttpError):
+        status = e.resp.status
+        msg = f"Google Calendar {status}: {e.reason}"
+        hint = {401: reconnect_hint(), 404: "Check the event and calendar IDs."}.get(status)
+        return f"{msg.rstrip('.')}. {hint}" if hint else msg
+    if isinstance(e, RefreshError):
+        return refresh_failure(e)
+    if isinstance(e, TransportError):
+        return f"Could not reach Google ({e}). This is usually temporary; try again in a minute."
+    # Not an error the Google client reports: keep the traceback for whoever
+    # debugs it, on stderr.
+    traceback.print_exc()
+    return f"{type(e).__name__}: {e}"
+
+
+class JSONArgumentParser(argparse.ArgumentParser):
+    """Reports usage errors as JSON on stdout, like every other error."""
+
+    def error(self, message: str) -> NoReturn:
+        self.print_usage(sys.stderr)
+        err(f"{self.prog}: {message}")
+
+
 # ── main ──────────────────────────────────────────────────────────────────
 
 def main() -> None:
-    parser = argparse.ArgumentParser(
+    parser = JSONArgumentParser(
         description="Google Calendar tool for Fridolin",
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
@@ -431,7 +651,9 @@ def main() -> None:
     p_list = sub.add_parser("list", help="List events in a date range")
     p_list.add_argument("--from", dest="from_date", help="Start date (YYYY-MM-DD, default: today)")
     p_list.add_argument("--to", dest="to_date", help="End date (YYYY-MM-DD, default: --from)")
-    p_list.add_argument("--max-results", type=int, default=50)
+    p_list.add_argument("--max-results", type=positive_int, default=100,
+                        help="Most events to return across all calendars (default: 100); "
+                             "the output says truncated: true when there were more")
 
     p_create = sub.add_parser("create", help="Create an event")
     p_create.add_argument("--title", required=True)
@@ -447,8 +669,8 @@ def main() -> None:
 
     p_free = sub.add_parser("free", help="Show busy slots and free windows for a date")
     p_free.add_argument("--date", required=True, help="YYYY-MM-DD")
-    p_free.add_argument("--hours", default="08:00-18:00",
-                        help="Window to search, HH:MM-HH:MM (default: 08:00-18:00)")
+    p_free.add_argument("--hours", type=parse_hours, default="08:00-18:00",
+                        help="Window to search, HH:MM-HH:MM; the end may be 24:00 (default: 08:00-18:00)")
     p_free.add_argument("--min-slot", type=int, default=30,
                         help="Ignore free windows shorter than this many minutes (default: 30)")
 
@@ -456,6 +678,9 @@ def main() -> None:
     p_delete.add_argument("--event-id", required=True)
 
     sub.add_parser("calendars", help="List the calendars this brain may use")
+
+    sub.add_parser("auth", help="Sign in through the browser and save the token "
+                                "(by hand only; brains connect in the dashboard)")
 
     args = parser.parse_args()
     if not args.command:
@@ -466,13 +691,20 @@ def main() -> None:
     _profile = args.profile
     _timezone = resolve_timezone(args.timezone)
 
-    {
+    command = {
         "list": cmd_list,
         "create": cmd_create,
         "free": cmd_free,
         "delete": cmd_delete,
         "calendars": cmd_calendars,
-    }[args.command](args)
+        "auth": cmd_auth,
+    }[args.command]
+    # The one exception boundary: whatever goes wrong, stdout is a JSON error
+    # the assistant can read, never just a traceback on stderr.
+    try:
+        command(args)
+    except Exception as e:
+        err(describe_error(e))
 
 
 if __name__ == "__main__":

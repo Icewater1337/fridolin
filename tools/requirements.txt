@@ -1,5 +1,6 @@
 # Only needed for tools/calendar_tool.py.
 # poll_results.py and history_search.py use the standard library only.
 google-api-python-client>=2.100.0
+# Only for `calendar_tool.py auth`, signing in by hand without the dashboard.
 google-auth-oauthlib>=1.1.0
 google-auth-httplib2>=0.1.1

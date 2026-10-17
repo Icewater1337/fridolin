@@ -82,8 +82,16 @@ python3 <bridge-repo>/tools/calendar_tool.py create --title "Dentist" \
     --start 2026-01-06T14:00:00 --end 2026-01-06T15:00:00               # into the default
 ```
 
-`--calendar-id` selects one of the chosen calendars; others are refused. The
-tool needs `pip3 install -r tools/requirements.txt`.
+`--calendar-id` selects one of the chosen calendars; others are refused.
+`list` returns at most `--max-results` events (default 100) across all of
+them, and says `"truncated": true` when there were more. The tool needs
+`pip3 install -r tools/requirements.txt`.
+
+The tool never opens a sign-in page by itself. When a brain's sign-in is
+revoked or expires, every command answers with an error asking you to connect
+again on the brain's Calendar page. (Run by hand outside a brain,
+`calendar_tool.py --profile <name> auth` signs in through the browser instead;
+the comment at the top of `tools/calendar_tool.py` explains that setup.)
 
 **Limits.** Google grants access to a whole account, not to single calendars.
 Keeping a brain to the calendars you ticked is done by the calendar tool, not
@@ -105,6 +113,9 @@ at [myaccount.google.com/permissions](https://myaccount.google.com/permissions).
   not a test user of an app in *Testing*. Add it, or publish the app.
 - **Works for a week, then fails** — the app is in *Testing*; publish it and
   connect again.
+- **The brain says to reconnect the calendar** — Google no longer accepts the
+  saved sign-in (access removed, the 7-day *Testing* limit, a changed
+  password). Connect again on the brain's Calendar page.
 - **"did not return a refresh token"** — remove the app at
   myaccount.google.com/permissions and connect again.
 - **"signed in with another Google OAuth client"** on a brain's page — the
