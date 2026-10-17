@@ -14,6 +14,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -671,7 +672,7 @@ func (b *Bridge) apiCalendarSelect(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusUnprocessableEntity, "choose at least one calendar (or disconnect)")
 		return
 	}
-	if req.Default == "" || !contains(req.Calendars, req.Default) {
+	if req.Default == "" || !slices.Contains(req.Calendars, req.Default) {
 		req.Default = req.Calendars[0]
 	}
 	err := b.cfgs.UpdateManifest(br.ID(), func(m *BrainManifest) error {

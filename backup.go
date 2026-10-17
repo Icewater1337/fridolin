@@ -14,6 +14,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -674,7 +675,7 @@ func (m *BackupManager) StartRun(ids []string, includeBridge bool, trigger strin
 		if len(ids) == 0 && !s.manifest.Backup.Enabled {
 			continue
 		}
-		if len(ids) > 0 && !contains(ids, br.ID()) {
+		if len(ids) > 0 && !slices.Contains(ids, br.ID()) {
 			continue
 		}
 		targets = append(targets, br)

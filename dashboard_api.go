@@ -417,12 +417,12 @@ func (b *Bridge) apiAllowChat(w http.ResponseWriter, r *http.Request) {
 	}
 	_, err = b.cfgs.Update("", func(c *Config) error {
 		if dm {
-			if !contains(c.AllowedNumbers, entry) {
+			if !slices.Contains(c.AllowedNumbers, entry) {
 				c.AllowedNumbers = append(c.AllowedNumbers, entry)
 			}
 			return nil
 		}
-		if !contains(c.AllowedGroups, entry) {
+		if !slices.Contains(c.AllowedGroups, entry) {
 			c.AllowedGroups = append(c.AllowedGroups, entry)
 		}
 		if req.Brain == "" {
@@ -527,7 +527,7 @@ func revokeEntry(list []string, sent, entry string, valid bool, canon func(strin
 // brain.json are written.
 func assignGroup(c *Config, jid, brainID string) error {
 	if err := updateManifestIn(c, brainID, func(m *BrainManifest) error {
-		if !contains(m.Routing.Groups, jid) {
+		if !slices.Contains(m.Routing.Groups, jid) {
 			m.Routing.Groups = append(m.Routing.Groups, jid)
 		}
 		return nil
@@ -535,9 +535,9 @@ func assignGroup(c *Config, jid, brainID string) error {
 		return err
 	}
 	for _, ref := range c.BrainDirs {
-		if a := ref.Approved; a != nil && a.ID != brainID && contains(a.Routing.Groups, jid) {
+		if a := ref.Approved; a != nil && a.ID != brainID && slices.Contains(a.Routing.Groups, jid) {
 			if err := updateManifestIn(c, a.ID, func(m *BrainManifest) error {
-				m.Routing.Groups = without(m.Routing.Groups, jid)
+				m.Routing.Groups = slices.DeleteFunc(slices.Clone(m.Routing.Groups), func(g string) bool { return g == jid })
 				return nil
 			}); err != nil {
 				return err
@@ -1110,7 +1110,7 @@ func (b *Bridge) apiDevInbound(w http.ResponseWriter, r *http.Request) {
 	cfg := b.cfgs.Get()
 	m := Inbound{JID: req.JID, Brain: req.Brain, Sender: req.Sender, Text: req.Text, Media: req.Media, Silent: req.Silent, Source: "dev", At: time.Now()}
 	if m.IsGroup() {
-		if !contains(cfg.AllowedGroups, m.JID) {
+		if !slices.Contains(cfg.AllowedGroups, m.JID) {
 			b.recordIgnored("group", m.JID, "", m.Sender, "")
 			writeJSON(w, http.StatusAccepted, map[string]string{"status": "ignored", "reason": "group not allowed"})
 			return
@@ -1137,25 +1137,6 @@ func (b *Bridge) apiDevOutbox(w http.ResponseWriter, r *http.Request) {
 }
 
 // ── helpers ──────────────────────────────────────────────────────────────
-
-func contains(list []string, s string) bool {
-	for _, x := range list {
-		if x == s {
-			return true
-		}
-	}
-	return false
-}
-
-func without(list []string, s string) []string {
-	out := list[:0:0]
-	for _, x := range list {
-		if x != s {
-			out = append(out, x)
-		}
-	}
-	return out
-}
 
 func expandHomeDir(p string) string {
 	home, _ := os.UserHomeDir()

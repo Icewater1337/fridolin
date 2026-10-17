@@ -11,6 +11,7 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -921,23 +922,13 @@ func numberAllowed(cfg *Config, number string) bool {
 	if len(cfg.AllowedNumbers) == 0 {
 		return cfg.AllowsAnyDM()
 	}
-	for _, n := range cfg.AllowedNumbers {
-		if n == number {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(cfg.AllowedNumbers, number)
 }
 
 // isAllowedGroup reports whether the group JID is in allowed_groups.
 // Unlike DMs, groups are deny-by-default: an empty list means no groups.
 func (wa *WhatsAppClient) isAllowedGroup(jid string) bool {
-	for _, g := range wa.cfg().AllowedGroups {
-		if g == jid {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(wa.cfg().AllowedGroups, jid)
 }
 
 // isBotMentioned reports whether the bridge's own JID appears in the message's

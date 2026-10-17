@@ -13,6 +13,7 @@ import (
 	"os/signal"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strings"
 	"syscall"
 )
@@ -341,7 +342,7 @@ func checkCmd(args []string) {
 		for _, jid := range routes {
 			isGroup := strings.HasSuffix(jid, "@g.us")
 			allowed := ""
-			if isGroup && !contains(cfg.AllowedGroups, jid) {
+			if isGroup && !slices.Contains(cfg.AllowedGroups, jid) {
 				allowed = " (not in allowed_groups: ignored)"
 			}
 			if !isGroup && !numberAllowed(cfg, normalizeJID(jid)) {

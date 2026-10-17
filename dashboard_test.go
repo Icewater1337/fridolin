@@ -675,13 +675,13 @@ func TestAddBrainAllowChatAndRoute(t *testing.T) {
 	if w.Code != 200 {
 		t.Fatalf("allow: %d %s", w.Code, w.Body.String())
 	}
-	if !contains(tb.cfgs.Get().AllowedGroups, "120363000000000001@g.us") {
+	if !slices.Contains(tb.cfgs.Get().AllowedGroups, "120363000000000001@g.us") {
 		t.Error("group not allowed")
 	}
 	if br := tb.brainMgr.BrainFor("120363000000000001@g.us", true); br == nil || br.ID() != "family" {
 		t.Error("group not routed to the chosen brain")
 	}
-	if disk, _ := ReadManifest(dir); !contains(disk.Routing.Groups, "120363000000000001@g.us") {
+	if disk, _ := ReadManifest(dir); !slices.Contains(disk.Routing.Groups, "120363000000000001@g.us") {
 		t.Error("the group must be saved in the brain's own brain.json")
 	}
 	if ign, _ := tb.store.ListIgnored(); len(ign) != 0 {
@@ -758,7 +758,7 @@ func TestUpdateBrain(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if disk.Name != "Assistant" || disk.Model != "opus" || !contains(disk.Routing.Groups, group) {
+	if disk.Name != "Assistant" || disk.Model != "opus" || !slices.Contains(disk.Routing.Groups, group) {
 		t.Errorf("brain.json = %+v, want the edit", disk)
 	}
 	var approved *BrainManifest
@@ -1045,7 +1045,7 @@ func TestRevokedGroupKeepsItsBrain(t *testing.T) {
 	if w := tb.do("POST", "/api/chats/revoke", map[string]string{"kind": "group", "jid": group}); w.Code != 200 {
 		t.Fatalf("revoke: %d %s", w.Code, w.Body)
 	}
-	if disk, _ := ReadManifest(dir); !contains(disk.Routing.Groups, group) {
+	if disk, _ := ReadManifest(dir); !slices.Contains(disk.Routing.Groups, group) {
 		t.Error("revoking the group took it out of the brain's routing")
 	}
 	if w := tb.do("POST", "/api/chats/allow", map[string]string{"kind": "group", "jid": group}); w.Code != 200 {
@@ -1301,6 +1301,31 @@ func TestPutConfigRefusesInlineBrains(t *testing.T) {
 	}
 	if tb.cfgs.ETag() != got.ETag {
 		t.Error("the refused request changed config.json")
+	}
+}
+
+// Allowing a group for a brain takes it away from the brain that had it,
+// in both brain.json files, and leaves that brain's other groups alone.
+func TestAllowGroupMovesItBetweenBrains(t *testing.T) {
+	const moved, kept = "120363000000000001@g.us", "120363000000000002@g.us"
+	tb := newTestBridge(t, `, "allowed_groups": ["`+moved+`", "`+kept+`"]`)
+	fromDir := tb.addFolderBrain(t, BrainManifest{ID: "from", Name: "From", Routing: BrainRouting{Groups: []string{kept, moved}}})
+	toDir := tb.addFolderBrain(t, BrainManifest{ID: "to", Name: "To"})
+
+	if w := tb.do("POST", "/api/chats/allow", map[string]string{"jid": moved, "kind": "group", "brain": "to"}); w.Code != 200 {
+		t.Fatalf("allow: %d %s", w.Code, w.Body.String())
+	}
+	if from, _ := ReadManifest(fromDir); !slices.Equal(from.Routing.Groups, []string{kept}) {
+		t.Errorf("from has groups %q, want only %q", from.Routing.Groups, kept)
+	}
+	if to, _ := ReadManifest(toDir); !slices.Equal(to.Routing.Groups, []string{moved}) {
+		t.Errorf("to has groups %q, want %q", to.Routing.Groups, moved)
+	}
+	if br := tb.brainMgr.BrainFor(moved, true); br == nil || br.ID() != "to" {
+		t.Errorf("the group routes to %v, want to", br)
+	}
+	if br := tb.brainMgr.BrainFor(kept, true); br == nil || br.ID() != "from" {
+		t.Errorf("the other group routes to %v, want from", br)
 	}
 }
 

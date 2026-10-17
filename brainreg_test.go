@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -79,10 +80,10 @@ func TestScaffoldBrainNeverOverwrites(t *testing.T) {
 	if data, _ := os.ReadFile(filepath.Join(dir, "brain-prompt.md")); string(data) != "mine" {
 		t.Error("an existing prompt was overwritten")
 	}
-	if !contains(created, ManifestFile) || !contains(created, "memories/people/whatsapp-identity-map.md") {
+	if !slices.Contains(created, ManifestFile) || !slices.Contains(created, "memories/people/whatsapp-identity-map.md") {
 		t.Errorf("created = %v", created)
 	}
-	if contains(created, "brain-prompt.md") {
+	if slices.Contains(created, "brain-prompt.md") {
 		t.Error("brain-prompt.md reported as created although it existed")
 	}
 	// A second scaffold creates nothing and keeps the manifest.

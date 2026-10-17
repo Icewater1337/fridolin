@@ -1131,7 +1131,7 @@ func TestBrainsDoNotSeeTheDotEnv(t *testing.T) {
 		t.Fatal(err)
 	}
 	env := strings.Split(string(logged), "\n")
-	if !contains(env, "HOME="+home) {
+	if !slices.Contains(env, "HOME="+home) {
 		t.Fatalf("the logged environment lacks the HOME the brain inherits:\n%s", logged)
 	}
 	for _, kv := range env {
