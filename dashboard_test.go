@@ -11,6 +11,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"reflect"
 	"slices"
 	"strings"
 	"sync"
@@ -618,12 +619,13 @@ func TestApproveDrift(t *testing.T) {
 // Saving a brain's settings writes its brain.json and the approved copy
 // together, so the edit runs at once and shows no drift. An edit that
 // changes the id, names no brain, is not valid on its own or clashes with
-// another brain is refused and leaves config.json as it was.
+// another brain is refused and leaves config.json and every brain.json as
+// they were.
 func TestUpdateBrain(t *testing.T) {
 	const group = "120363000000000000@g.us"
 	tb := newTestBridge(t, "")
 	dir := tb.addFolderBrain(t, BrainManifest{ID: "a", Name: "A", Routing: BrainRouting{HandlesDMs: true}})
-	tb.addFolderBrain(t, BrainManifest{ID: "b", Name: "B"})
+	dirB := tb.addFolderBrain(t, BrainManifest{ID: "b", Name: "B"})
 
 	edited := BrainManifest{ID: "a", Name: "Assistant", Model: "opus", Routing: BrainRouting{HandlesDMs: true, Groups: []string{group}}}
 	if w := tb.do("PUT", "/api/brains/a", map[string]any{"manifest": edited}); w.Code != 200 {
@@ -664,12 +666,88 @@ func TestUpdateBrain(t *testing.T) {
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			etag := tb.cfgs.ETag()
+			before := manifestFiles(t, dir, dirB)
 			w := tb.do("PUT", "/api/brains/"+c.id, map[string]any{"manifest": c.m})
 			if w.Code != 422 || !strings.Contains(w.Body.String(), c.want) {
 				t.Errorf("%d %s, want 422 saying %s", w.Code, w.Body, c.want)
 			}
 			if tb.cfgs.ETag() != etag {
 				t.Error("the refused edit changed config.json")
+			}
+			if !reflect.DeepEqual(manifestFiles(t, dir, dirB), before) {
+				t.Error("the refused edit changed a brain.json")
+			}
+		})
+	}
+}
+
+// manifestFiles returns the brain.json of each folder, as written.
+func manifestFiles(t *testing.T, dirs ...string) []string {
+	t.Helper()
+	var out []string
+	for _, d := range dirs {
+		data, err := os.ReadFile(filepath.Join(d, ManifestFile))
+		if err != nil {
+			t.Fatal(err)
+		}
+		out = append(out, string(data))
+	}
+	return out
+}
+
+// Assigning a group to a brain, as Chats does when it allows one, moves it
+// there: out of the brain.json and the approved copy of the brain that had
+// it, into the chosen brain's, so the routing changes at once and neither
+// shows drift. A brain that is not there is refused before any brain.json
+// is written.
+func TestAssignGroup(t *testing.T) {
+	const group = "120363000000000000@g.us"
+	cases := []struct {
+		name, to string
+		want     map[string][]string // brain → its groups after the request
+		code     int
+	}{
+		{"to another brain", "b", map[string][]string{"a": {}, "b": {group}}, 200},
+		{"to the brain that has it", "a", map[string][]string{"a": {group}, "b": {}}, 200},
+		{"to no brain", "nobody", map[string][]string{"a": {group}, "b": {}}, 422},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			tb := newTestBridge(t, "")
+			dirs := map[string]string{
+				"a": tb.addFolderBrain(t, BrainManifest{ID: "a", Name: "A", Routing: BrainRouting{Groups: []string{group}}}),
+				"b": tb.addFolderBrain(t, BrainManifest{ID: "b", Name: "B"}),
+			}
+			before := manifestFiles(t, dirs["a"], dirs["b"])
+			w := tb.do("POST", "/api/chats/allow", map[string]string{"jid": group, "kind": "group", "brain": c.to})
+			if w.Code != c.code {
+				t.Fatalf("allow: %d %s, want %d", w.Code, w.Body, c.code)
+			}
+			if c.code != 200 {
+				if !reflect.DeepEqual(manifestFiles(t, dirs["a"], dirs["b"]), before) {
+					t.Error("the refused request changed a brain.json")
+				}
+				return
+			}
+			for id, want := range c.want {
+				disk, err := ReadManifest(dirs[id])
+				if err != nil {
+					t.Fatal(err)
+				}
+				if !reflect.DeepEqual(disk.Routing.Groups, want) {
+					t.Errorf("%s's brain.json has groups %q, want %q", id, disk.Routing.Groups, want)
+				}
+			}
+			for _, ref := range tb.cfgs.Get().BrainDirs {
+				if want := c.want[ref.Approved.ID]; !reflect.DeepEqual(ref.Approved.Routing.Groups, want) {
+					t.Errorf("%s's approved groups are %q, want %q", ref.Approved.ID, ref.Approved.Routing.Groups, want)
+				}
+			}
+			if br := tb.brainMgr.BrainFor(group, true); br == nil || br.ID() != c.to {
+				t.Errorf("the group goes to %v, want %s", br, c.to)
+			}
+			if issues := tb.brainMgr.Issues(); len(issues) != 0 {
+				t.Errorf("issues = %+v, want none", issues)
 			}
 		})
 	}

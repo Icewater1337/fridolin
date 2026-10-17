@@ -201,14 +201,17 @@ func isWithin(p, dir string) bool {
 	return rel == "." || (rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)))
 }
 
-// UpdateManifest changes one brain's manifest: brain.json in its folder and
-// the approved copy in the config, together, so the change is not reported
-// as drift.
+// UpdateManifest changes one brain's manifest, see updateManifestIn.
 func (cs *ConfigStore) UpdateManifest(id string, mutate func(m *BrainManifest) error) error {
 	_, err := cs.Update("", func(c *Config) error { return updateManifestIn(c, id, mutate) })
 	return err
 }
 
+// updateManifestIn changes brain id's manifest in c: mutate edits a copy of
+// the approved one, which goes to brain.json in the brain's folder and
+// becomes the approved copy, together, so the change is not reported as
+// drift. It is the one way the bridge changes a manifest; an error from
+// mutate leaves both as they were.
 func updateManifestIn(c *Config, id string, mutate func(m *BrainManifest) error) error {
 	for i := range c.BrainDirs {
 		ref := &c.BrainDirs[i]
