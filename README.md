@@ -344,17 +344,21 @@ What the bridge does about it:
   browser and mail data, your Documents/Downloads/Desktop, the bridge's own
   database — or any other brain's directory — and cannot rename the folders
   above them to get around that. Other Claude sessions' transcripts are
-  unreadable. Files that run outside the sandbox — Claude Code's settings,
-  hooks and `CLAUDE.md` (also those above brain folders), its auto-memory,
-  `~/Library/LaunchAgents`, shell startup files, the bridge's own binary and
-  checkout, the Claude CLI and the other tools the bridge runs — are
-  readable but never writable. Add your own paths under
-  `sandbox.deny_paths`. When the sandbox is on but cannot be set up, the
-  brain refuses the message with an error instead of running without it.
+  unreadable, and so are your own Claude Code instructions (`~/CLAUDE.md`,
+  `~/.claude/CLAUDE.md` and every `CLAUDE.md` above a brain's folder)
+  unless `inherit_claude_user_config` is on. Files that run outside the
+  sandbox — Claude Code's settings and hooks (and the `CLAUDE.md` files
+  above brain folders), its auto-memory, `~/Library/LaunchAgents`, shell
+  startup files, the bridge's own binary and checkout, the Claude CLI and
+  the other tools the bridge runs — are never writable. Add your own paths
+  under `sandbox.deny_paths`. When the sandbox is on but cannot be set up,
+  the brain refuses the message with an error instead of running without it.
 - **Brain isolation.** Brains have separate directories, sessions, histories,
   and calendar credentials, and they do not load your own Claude Code
   setup: your user settings and their hooks, skills, plugins and MCP
-  servers (see [what a brain loads](docs/BRAINS.md#what-a-brain-loads)).
+  servers, or (with the sandbox) the `CLAUDE.md` files and `.claude`
+  folders above their folder (see
+  [what a brain loads](docs/BRAINS.md#what-a-brain-loads)).
 - **A guarded dashboard.** It only listens on localhost, rejects requests
   from web pages on other sites (and DNS-rebinding tricks), and requires a
   token from `~/.fridolin/dashboard.token` — a file the sandbox

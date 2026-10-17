@@ -64,7 +64,7 @@ const SECTIONS = [
     fields: [
       { key: 'sandbox.enabled', type: 'bool', label: 'Sandbox brains', help: 'Strongly recommended while brains may use tools without asking.' },
       { key: 'sandbox.deny_paths', type: 'list', mono: true, label: 'Also block', placeholder: '~/clients', validate: absPath, addLabel: 'Add folder', help: 'Extra folders brains must not read or change. Absolute, or starting with ~/.' },
-      { key: 'sandbox.allow_paths', type: 'list', mono: true, label: 'Re-allow', placeholder: '~/Documents/assistant-share', validate: absPath, addLabel: 'Add folder', help: 'Folders brains may read again despite the built-in blocks (reading only), except other brains’ folders and the bridge’s own data. Rarely needed. Absolute, or starting with ~/.' },
+      { key: 'sandbox.allow_paths', type: 'list', mono: true, label: 'Re-allow', placeholder: '~/Documents/assistant-share', validate: absPath, addLabel: 'Add folder', help: 'Folders brains may read again despite the built-in blocks (reading only), except other brains’ folders, the bridge’s own data and your CLAUDE.md files above a brain’s folder. Rarely needed. Absolute, or starting with ~/.' },
       { key: 'sandbox.git_config', type: 'select', def: 'read', label: 'Git settings (~/.gitconfig)', options: [['read', 'Readable — brains can commit in their folder'], ['deny', 'Blocked']] },
       { key: 'sandbox.credentials_dir', type: 'text', mono: true, label: 'Credentials folder', placeholder: 'not set', help: 'A folder of per-brain credential files. Each brain may read only its own calendar credentials there. Absolute, or starting with ~/.' },
     ],

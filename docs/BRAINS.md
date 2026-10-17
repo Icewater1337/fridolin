@@ -115,12 +115,23 @@ the `deny` rules nor the guard hooks there), nor the skills, agents and
 commands in `~/.claude`, nor the MCP servers in `~/.claude.json`, of
 plugins or of your claude.ai account. Those are yours, and a brain acts for
 whoever may message it. What a brain needs belongs in its folder, the
-permission rules and hooks that should hold for it too. Claude Code still
-loads the `CLAUDE.md` files and `.claude/` folders above the brain's
-folder, though, `~/CLAUDE.md` and `~/.claude/CLAUDE.md` included.
-[`inherit_claude_user_config`](CONFIGURATION.md#inherit_claude_user_config)
-brings back the old behaviour, in which brains load all of your setup; read
-its warning first.
+permission rules and hooks that should hold for it too. Claude Code would
+also load the `CLAUDE.md` files and `.claude/` folders above the brain's
+folder, your `~/CLAUDE.md` and `~/.claude/CLAUDE.md` included, which
+`--setting-sources` does not cover; the sandbox keeps brains from reading
+them (see below). Without the sandbox, a brain still gets them, so keep
+brain folders out from under folders that hold your instructions. The
+sandbox goes by a file's real path, so a `CLAUDE.md`, skill or rule in the
+brain's folder that is a symlink to one of those files above it is denied
+as well, and nothing says so: copy such a file into the brain's folder
+instead.
+
+> **Warning:**
+> [`inherit_claude_user_config`](CONFIGURATION.md#inherit_claude_user_config)
+> brings back the old behaviour, in which every brain loads all of your
+> setup: it runs your hooks, reads your personal instructions and can call
+> your MCP servers' tools without asking, on behalf of anyone who may
+> message it. Read its warning before you turn it on.
 
 ## Isolation
 
@@ -129,13 +140,16 @@ brain cannot read or write any other brain's folder, the bridge's data folder
 (except the shared media inbox), or the usual secrets (SSH keys, cloud
 credentials, browser and mail data, shell history), and it cannot rename or
 delete the folders above them, which would move them out from under the
-sandbox's rules. It can read but not change the files that run outside its
-sandbox: Claude Code's settings, hooks, `CLAUDE.md`, skills and plugins
-(which your own sessions load), the `CLAUDE.md` files and `.claude`
-folders above brain folders, Claude Code's auto-memory,
-`~/Library/LaunchAgents`, your shell startup files, and the bridge's own
-binary and the tools it runs. It can still write most other places your
-user can, including the Claude Code state all brains share;
+sandbox's rules. Nor can it read your own Claude Code instructions, unless
+`inherit_claude_user_config` is on: the `CLAUDE.md` and `CLAUDE.local.md`
+files and the `.claude` folders above its folder, up to `/`, and
+`~/.claude/CLAUDE.md` and `~/.claude/rules` (the rest of `~/.claude` is
+Claude Code's own state, which a brain's run needs). It can read but not
+change the other files that run outside its sandbox: Claude Code's
+settings, hooks, skills and plugins (which your own sessions load), Claude
+Code's auto-memory, `~/Library/LaunchAgents`, your shell startup files, and
+the bridge's own binary and the tools it runs. It can still write most other
+places your user can, including the Claude Code state all brains share;
 [the sandbox section](CONFIGURATION.md#what-the-sandbox-does-not-cover-yet)
 lists what that leaves open. Its own folder is always readable and
 writable, even if it lives somewhere the defaults deny, but it cannot move
