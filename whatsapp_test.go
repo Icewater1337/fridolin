@@ -14,6 +14,7 @@ import (
 	"sync"
 	"testing"
 	"time"
+	"unicode"
 	"unicode/utf8"
 
 	"go.mau.fi/whatsmeow"
@@ -362,6 +363,42 @@ func TestSanitizeMediaName(t *testing.T) {
 			}
 		})
 	}
+}
+
+// FuzzSanitizeMediaName: whatever name the sender gives an attachment, the
+// file is saved in the media directory, under a name that is not hidden,
+// keeps to one line and is short enough to save; and so is every name
+// placeMedia falls back to when that one is taken.
+func FuzzSanitizeMediaName(f *testing.F) {
+	for _, s := range []string{
+		"scan.pdf", "../../etc/passwd", "/etc/passwd", ".bashrc", "..", "", "/", "a\nb.pdf", "a\r\tb.pdf",
+		"a\x00b.pdf", "a\u2028b\u2029c.pdf", "\n\n", "Rechnung März 🧾.pdf", "x/.", "./..", ".../...",
+		strings.Repeat("ä", 150) + ".pdf", strings.Repeat("x", 100) + "." + strings.Repeat("y", 100), "\xff\xfe.\xc3",
+	} {
+		f.Add(s)
+	}
+	const dir = "/media"
+	f.Fuzz(func(t *testing.T, name string) {
+		got := sanitizeMediaName(name)
+		if len(got) > maxMediaNameBytes {
+			t.Errorf("sanitizeMediaName(%q) = %q, %d bytes, more than %d", name, got, len(got), maxMediaNameBytes)
+		}
+		for _, i := range []int{1, 2, lastMediaCandidate - 1, lastMediaCandidate} {
+			c := mediaNameCandidate(got, i)
+			if filepath.Dir(filepath.Join(dir, c)) != dir || strings.HasPrefix(c, ".") {
+				t.Errorf("%q, from %q, is not a visible file in the media directory", c, name)
+			}
+			if strings.IndexFunc(c, func(r rune) bool { return unicode.IsControl(r) || r == '\u2028' || r == '\u2029' }) >= 0 {
+				t.Errorf("%q, from %q, has a control character or a line break", c, name)
+			}
+			if !utf8.ValidString(c) {
+				t.Errorf("%q, from %q, is not valid UTF-8", c, name)
+			}
+			if len(c) > 255 {
+				t.Errorf("%q, from %q, is longer than a file name may be", c, name)
+			}
+		}
+	})
 }
 
 // FuzzNumberAllowed: allowed_numbers lets a sender DM the bridge only when
