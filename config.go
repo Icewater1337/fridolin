@@ -305,6 +305,9 @@ func (c *Config) HTTPEnabled() bool { return c.HTTPListen != "" && c.HTTPListen 
 // It takes an explicit allow_any_dm: true.
 func (c *Config) AllowsAnyDM() bool { return boolOr(c.AllowAnyDM, false) }
 
+// AnyoneCanDM reports whether every sender passes the DM allowlist.
+func (c *Config) AnyoneCanDM() bool { return len(c.AllowedNumbers) == 0 && c.AllowsAnyDM() }
+
 // LoadConfig reads configuration with this priority (highest → lowest):
 //  1. Environment variables (including those loaded from .env)
 //  2. config.json values

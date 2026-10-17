@@ -55,7 +55,8 @@ answered.
 
 Older versions treated an unset value as `true`. A config that relied on that
 now refuses every DM: add the numbers, or set `"allow_any_dm": true` on
-purpose. The dashboard warns while anyone may DM.
+purpose. While anyone may DM, the dashboard says so and the bridge logs a
+warning at startup and whenever an edit opens DMs to everyone.
 
 ### `allowed_groups`
 
