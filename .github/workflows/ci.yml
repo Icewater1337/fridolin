@@ -17,7 +17,8 @@ concurrency:
   cancel-in-progress: true
 
 # Actions are pinned to a full commit SHA, which unlike a tag cannot be moved
-# to other code; the comment names the release. Dependabot proposes updates.
+# to other code; the comment names the release. Dependabot proposes updates,
+# and scripts/check-action-pins.sh (make lint-actions) fails on a tag.
 
 jobs:
   go:
@@ -75,7 +76,7 @@ jobs:
         if: matrix.go == 'stable' && matrix.os == 'ubuntu-latest'
         run: make tidy-check
 
-      - name: actionlint
+      - name: actionlint and action pins
         if: matrix.go == 'stable' && matrix.os == 'ubuntu-latest'
         run: make lint-actions
 
@@ -85,11 +86,14 @@ jobs:
     # run there as part of go test.
     if: github.event_name == 'push'
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     env:
       GOTOOLCHAIN: local
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version: stable
           cache: true
@@ -129,7 +133,7 @@ jobs:
       # package. Commit it with the fix, and go test runs it from then on.
       - name: keep the failing inputs
         if: failure()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: fuzz-failing-inputs
           path: '**/testdata/fuzz/**'
@@ -145,7 +149,7 @@ jobs:
       - name: shellcheck
         run: make lint-sh
 
-      - name: personal-data check and Makefile tests
+      - name: personal-data check, action-pin check and Makefile tests
         run: make test-sh
 
   python:
@@ -205,12 +209,15 @@ jobs:
     # The site process (site/, docs/SITE.md): its own tests, then the Go
     # end-to-end tests that run it, which skip without its node_modules.
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: 22
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version: stable
           cache: true

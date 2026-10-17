@@ -87,8 +87,9 @@ lint-sh: ## shellcheck the scripts and git hooks
 lint-py: ## ruff on tools/ (pip install -r tools/requirements-dev.txt)
 	$(RUFF) check tools
 
-lint-actions: ## actionlint the GitHub workflows
+lint-actions: ## actionlint the GitHub workflows and check their action pins
 	$(ACTIONLINT)
+	scripts/check-action-pins.sh
 
 test-py: ## byte-compile the Python tools and run their tests
 	$(PYTHON) -m py_compile tools/*.py tools/tests/*.py
@@ -103,8 +104,9 @@ test-web: ## syntax-check the dashboard JS and run its unit tests
 	@tests="$$($(WEB_FIND) \( -name '*.test.js' -o -name '*.test.mjs' \) -print | sort)"; \
 	if [ -n "$$tests" ]; then $(NODE) --test $$tests; else echo "no web unit tests (web/**/*.test.js)"; fi
 
-test-sh: ## tests for the personal-data check and the Makefile
+test-sh: ## tests for the personal-data and action-pin checks and the Makefile
 	scripts/test-check-personal-data.sh
+	scripts/test-check-action-pins.sh
 	scripts/test-makefile.sh
 
 # A temp dir, not ./fridolin: a check must not replace the binary the

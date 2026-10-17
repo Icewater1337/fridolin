@@ -86,8 +86,9 @@ Reopen the dashboard with `./fridolin open`.
 
 - `make check` runs what CI's build, lint and test jobs run: gofmt, both
   `go vet` runs, `go mod tidy -diff`, the race tests, staticcheck,
-  shellcheck, ruff, actionlint, the Python, web, personal-data-check and
-  Makefile tests and a dev-mode smoke test (`make help` lists the targets).
+  shellcheck, ruff, actionlint, the action-pin check, the Python, web,
+  personal-data-check, action-pin-check and Makefile tests and a dev-mode
+  smoke test (`make help` lists the targets).
   CI also runs govulncheck, CodeQL and the personal-data scan of the pushed
   commits. `make check` never rewrites `./fridolin`, which the installed
   service runs; `make build` and `make install` do. While iterating,
