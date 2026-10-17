@@ -1,0 +1,25 @@
+name: govulncheck
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  # New advisories are published without any change here, so scan main
+  # once a week as well.
+  schedule:
+    - cron: '23 5 * * 1'
+
+permissions:
+  contents: read
+
+jobs:
+  govulncheck:
+    runs-on: ubuntu-latest
+    steps:
+      # Fails when the code reaches a known vulnerability in a dependency
+      # or in the standard library. stable is the toolchain release builds
+      # use, so standard-library findings match what actually ships.
+      - uses: golang/govulncheck-action@v1
+        with:
+          go-version-input: stable
+          go-package: ./...

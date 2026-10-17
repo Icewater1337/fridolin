@@ -65,14 +65,20 @@ OS="$(uname)"
 # ── 1. prerequisites ──────────────────────────────────────────────────────
 step "Checking prerequisites"
 
+# The oldest Go release that builds the bridge is the go directive in go.mod.
+GO_MIN="$(sed -nE 's/^go (1\.[0-9]+).*/\1/p' "$REPO_DIR/go.mod")"
 if ! command -v go >/dev/null 2>&1; then
-  fail "Go is not installed. Install Go 1.25+ (macOS: brew install go; Linux: https://go.dev/dl/), then re-run."
+  fail "Go is not installed. Install Go ${GO_MIN}+ (macOS: brew install go; Linux: https://go.dev/dl/), then re-run."
 fi
-GO_MINOR="$(go env GOVERSION | sed -E 's/^go1\.([0-9]+).*/\1/')"
-if [ "${GO_MINOR:-0}" -lt 25 ]; then
-  fail "Go $(go env GOVERSION) is too old; the bridge needs Go 1.25 or newer."
+# Ask from the repo folder, where the build below runs: there go may switch
+# to the release go.mod asks for (GOTOOLCHAIN=auto), so the answer must not
+# depend on where setup.sh was started from.
+GO_VERSION="$(cd "$REPO_DIR" && go env GOVERSION)" || fail "Could not run go in $REPO_DIR (see the error above)."
+GO_MINOR="$(printf '%s\n' "$GO_VERSION" | sed -E 's/^go1\.([0-9]+).*/\1/')"
+if [ "${GO_MINOR:-0}" -lt "${GO_MIN#1.}" ]; then
+  fail "Go $GO_VERSION is too old; the bridge needs Go ${GO_MIN} or newer."
 fi
-ok "Go $(go env GOVERSION)"
+ok "Go $GO_VERSION"
 
 if ! command -v cc >/dev/null 2>&1 && ! command -v gcc >/dev/null 2>&1 && ! command -v clang >/dev/null 2>&1; then
   if [ "$OS" = Darwin ]; then
@@ -118,8 +124,11 @@ fi
 
 # ── 3. configuration ──────────────────────────────────────────────────────
 step "Configuration"
-mkdir -p "$DATA_DIR"
-chmod 700 "$DATA_DIR"
+# A new data folder is private from the start. An existing one is the
+# bridge's to fix when it starts: it leaves the home folder (or one above
+# it) and another user's folder alone, which a chmod here would not.
+mkdir -p "$(dirname "$DATA_DIR")"
+[ -d "$DATA_DIR" ] || mkdir -m 700 "$DATA_DIR"
 if [ -f "$CONFIG_FILE" ]; then
   ok "using $CONFIG_FILE"
 else
