@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { makePoll, pausePollsWhen, resumePolls } from '../assets/app/poll.js';
+import { makePoll, pausePollsWhen, resumePolls, retryPolls, backoff } from '../assets/app/poll.js';
 
 const LONG = 60000; // no second scheduled run while a test looks
 const tick = () => new Promise((r) => setTimeout(r, 0));
@@ -120,4 +120,52 @@ test('errors are reported once per message, aborts never', async (t) => {
   t.after(() => p.stop());
   for (let n = 1; n < results.length; n++) { await tick(); await p.kick(); }
   assert.deepEqual(reported, ['down', 'other', 'down']);
+});
+
+test('backoff doubles per failure up to its cap', async (t) => {
+  const cases = [
+    // interval, failures in a row, wait
+    [3000, 0, 3000],
+    [3000, 1, 6000],
+    [3000, 2, 12000],
+    [3000, 3, 24000],
+    [3000, 4, 30000],
+    [3000, 20, 30000],
+    [60000, 0, 60000],
+    [60000, 1, 60000],
+    [60000, 5, 60000],
+  ];
+  for (const [interval, failures, want] of cases) {
+    await t.test(`${interval} ms after ${failures}`, () => assert.equal(backoff(interval, failures), want));
+  }
+});
+
+test('a failing poll waits longer, until it succeeds or is retried', async (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  let fail = true;
+  let n = 0;
+  const p = makePoll(async () => { n++; if (fail) throw Object.assign(new Error('down'), { status: 0 }); }, 1000, { onError: () => {} });
+  t.after(() => p.stop());
+  const waitFor = async (ms) => { await settle(); t.mock.timers.tick(ms - 1); assert.equal(n, runs, `not before ${ms} ms`); t.mock.timers.tick(1); runs++; assert.equal(n, runs, `after ${ms} ms`); };
+  let runs = 1;
+  await waitFor(2000);
+  await waitFor(4000);
+  fail = false;
+  await waitFor(8000);
+  await waitFor(1000); // a success resets the wait
+  fail = true;
+  await waitFor(1000);
+  await settle();
+  retryPolls();
+  assert.equal(n, runs + 1, 'retryPolls runs a failing poll at once');
+  runs++;
+  await settle();
+  retryPolls();
+  assert.equal(n, runs + 1, 'and again while it keeps failing');
+  fail = false;
+  runs++;
+  await waitFor(8000);
+  await settle();
+  retryPolls();
+  assert.equal(n, runs, 'retryPolls leaves a healthy poll alone');
 });

@@ -11,7 +11,7 @@ import { confirmDialog, closeAllDialogs } from '../components/dialog.js';
 import { setChatNames } from '../components/chat.js';
 import { keepTimesFresh } from '../components/common.js';
 import { restartBridge } from './restart.js';
-import { makePoll, pausePollsWhen, resumePolls } from './poll.js';
+import { makePoll, pausePollsWhen, resumePolls, retryPolls } from './poll.js';
 import { createPage } from './page.js';
 import { createShell, pageFailed } from './shell.js';
 import { connectScreen } from './connect.js';
@@ -36,7 +36,12 @@ const shell = createShell({ onRestart: () => restartBridge() });
 let blocked = false; // true while the connect screen is shown
 
 pausePollsWhen(() => document.hidden || blocked);
-document.addEventListener('visibilitychange', () => { if (!document.hidden) resumePolls(); });
+document.addEventListener('visibilitychange', () => {
+  if (document.hidden) return;
+  resumePolls();
+  retryPolls();
+});
+window.addEventListener('online', () => retryPolls());
 
 function showShell() {
   app.className = 'shell';
@@ -64,7 +69,11 @@ onApi('unauthorized', () => {
   showConnect(getToken() ? 'The saved token was not accepted — the bridge may have a new token. Open the dashboard again with the command below.' : '');
 });
 
-onApi('reachable', (ok) => shell.setOffline(!ok));
+// Polls wait longer after each failure; the first answer brings them back.
+onApi('reachable', (ok) => {
+  shell.setOffline(!ok);
+  if (ok) retryPolls();
+});
 
 // ── routing ──────────────────────────────────────────────────────────────
 
