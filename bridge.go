@@ -333,10 +333,20 @@ func (b *Bridge) handleCommand(ctx context.Context, m Inbound, cfg *Config) bool
 		return true
 
 	case "!stop":
-		b.deb.Drop(m.JID)
+		chats := chatJIDs(m)
+		for _, jid := range chats {
+			b.deb.Drop(jid)
+		}
 		stopped := false
 		if br := b.brainMgr.BrainFor(m.JID, m.IsGroup()); cfg.BrainMode && br != nil {
 			stopped = br.StopCurrent(true)
+		}
+		// A file or recording handed to another brain may answer here too,
+		// and the chat's own brain knows nothing about it.
+		for _, jid := range chats {
+			if cfg.BrainMode && b.brainMgr.StopHandOffs(jid) {
+				stopped = true
+			}
 		}
 		if stopped {
 			_ = b.wa.SendMessage(ctx, m.JID, "🛑 Stopped, and cleared anything that was waiting.")
@@ -361,6 +371,17 @@ func (b *Bridge) handleCommand(ctx context.Context, m Inbound, cfg *Config) bool
 		return true
 	}
 	return false
+}
+
+// chatJIDs lists the JIDs m's chat goes by: the chat and, for a DM, the
+// sender's phone number. WhatsApp may address a DM by LID, while a hand-off
+// that answers there (a reply_chat, the owner's DM) names the number.
+func chatJIDs(m Inbound) []string {
+	jids := []string{m.JID}
+	if pn := m.Sender + "@s.whatsapp.net"; !m.IsGroup() && m.Sender != "" && pn != m.JID {
+		jids = append(jids, pn)
+	}
+	return jids
 }
 
 // dispatch hands a (debounced) message to its brain or the classic runner.

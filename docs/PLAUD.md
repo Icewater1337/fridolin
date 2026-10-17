@@ -35,7 +35,8 @@ Recordings are private, so the brain's answer never goes to a group: it goes
 to the brain's `reply_chat` when that is a direct chat, otherwise to your own
 DM (your first allowed number) — also for a brain that serves a group. When
 that chat belongs to another brain (your DM, for a brain that is not the DM
-brain), what you write back there goes to that other brain. Without any
+brain), what you write back there goes to that other brain, although `!stop`
+there still stops the picked brain's work on a recording. Without any
 private chat (no allowed number and no direct `reply_chat`) recordings are not
 handed over: they wait, and the dashboard says what to set. The Plaud card
 shows where summaries go, and warns when that chat belongs to another brain.

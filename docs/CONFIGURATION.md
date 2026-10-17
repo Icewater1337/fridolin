@@ -545,7 +545,8 @@ Off by default.
 current run when a new message arrives. Untagged group chatter waiting in the
 queue is dropped when a newer message from that chat arrives — it is already in
 the history the next run reads. `!stop` stops the current run and clears the
-queue.
+queue, and also stops files handed to another brain that answers in that chat
+(its `reply_chat`).
 
 ### `debounce`
 

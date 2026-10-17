@@ -294,6 +294,57 @@ func TestIngestOTPGuardChecksTheNamedBrain(t *testing.T) {
 	}
 }
 
+// !stop in a chat also stops a hand-off that answers there although another
+// brain runs it: up answers /ingest in the DM, which belongs to dm, so dm has
+// nothing to stop. WhatsApp may address the DM by the sender's LID, while the
+// hand-off names the phone number; it is the same chat.
+func TestStopReachesAHandOffInItsReplyChat(t *testing.T) {
+	const dm = "15551234567@s.whatsapp.net"
+	for _, c := range []struct {
+		name string
+		stop map[string]any // the dev message that sends !stop
+	}{
+		{"from the chat", map[string]any{"jid": dm, "text": "!stop"}},
+		{"from the chat's LID", map[string]any{"jid": "15559876543@lid", "sender": "15551234567", "text": "!stop"}},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			tb := newTestBridge(t, `, "ingest": {"enabled": true}`)
+			tb.addFolderBrain(t, BrainManifest{ID: "dm", Name: "DM", Routing: BrainRouting{HandlesDMs: true}})
+			tb.addFolderBrain(t, BrainManifest{ID: "up", Name: "Uploads", ReplyChat: dm})
+			t.Setenv("WCB_FAKE_SLEEP_MS", "30000")
+			up := tb.brainMgr.Get("up")
+
+			if w := tb.ingest(`{"brain":"up","text":"file this"}`); w.Code != 202 {
+				t.Fatalf("ingest: %d %s", w.Code, w.Body.String())
+			}
+			waitFor(t, 5*time.Second, "up's run", func() bool { r := up.Snapshot().Running; return r != nil && r.PID > 0 })
+			if w := tb.ingest(`{"brain":"up","text":"and this"}`); w.Code != 202 {
+				t.Fatalf("ingest: %d %s", w.Code, w.Body.String())
+			}
+			waitFor(t, 5*time.Second, "the second file to wait", func() bool { return len(up.Snapshot().Queue) == 1 })
+
+			if w := tb.do("POST", "/api/dev/inbound", c.stop); w.Code != 202 || !strings.Contains(w.Body.String(), "accepted") {
+				t.Fatalf("!stop: %d %s", w.Code, w.Body.String())
+			}
+			answer := func() string {
+				for _, m := range tb.dev.Outbox() {
+					if strings.Contains(m.Text, "Stopped") || strings.Contains(m.Text, "Nothing was running") {
+						return m.Text
+					}
+				}
+				return ""
+			}
+			waitFor(t, 15*time.Second, "the answer to !stop", func() bool { return answer() != "" })
+			if got := answer(); !strings.HasPrefix(got, "🛑 Stopped") {
+				t.Errorf("!stop answered %q, want that it stopped up's run", got)
+			}
+			if rt := up.Snapshot(); rt.Running != nil || len(rt.Queue) != 0 {
+				t.Errorf("up still has work after !stop: running %+v, queue %+v", rt.Running, rt.Queue)
+			}
+		})
+	}
+}
+
 func TestReplyChatFor(t *testing.T) {
 	const (
 		dm = "15551234567@s.whatsapp.net"

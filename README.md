@@ -193,7 +193,7 @@ on the **Dev** page and read the replies there.
 | Command  | Effect |
 | -------- | ------ |
 | `!help`  | Show available commands |
-| `!stop`  | Stop the current run and drop anything queued |
+| `!stop`  | Stop the current run and drop anything queued, including files or recordings another brain is answering in this chat |
 | `!reset` | Forget the current session and start fresh |
 
 ### Shaping the assistant

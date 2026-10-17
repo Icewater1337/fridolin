@@ -140,6 +140,66 @@ func TestStopKillsTheRunningProcess(t *testing.T) {
 	}
 }
 
+// StopHandOffs stops only what was handed to a brain and answers in the chat:
+// not the brain's own work, not hand-offs that answer elsewhere, and not the
+// chat's own brain (that one !stop stops with StopCurrent).
+func TestStopHandOffsLeavesOtherWorkAlone(t *testing.T) {
+	const (
+		chat  = "15551234567@s.whatsapp.net"
+		other = "120363000000000001@g.us"
+		group = "120363000000000000@g.us"
+	)
+	handOff := func(jid, text string) Inbound { return Inbound{JID: jid, Brain: "b", Sender: "upload", Text: text} }
+	for _, c := range []struct {
+		name    string
+		running Inbound   // b's run in flight
+		queued  []Inbound // waiting behind it
+		stopped bool
+		left    string // b's work afterwards, running or waiting
+	}{
+		{"a hand-off answering in the chat is running", handOff(chat, "handed"),
+			[]Inbound{{JID: group, Text: "group"}, handOff(chat, "handed again"), handOff(other, "elsewhere")},
+			true, "group,elsewhere"},
+		{"the brain's own chat is running", Inbound{JID: group, Text: "group"},
+			[]Inbound{handOff(chat, "handed"), handOff(other, "elsewhere")},
+			false, "group,elsewhere"},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			mgr, _, _ := queueTestManager(t, 30000, "")
+			a, b := mgr.Get("a"), mgr.Get("b")
+			_, _, _, _ = mgr.Submit(dm("a's own"))
+			_, _, _, _ = mgr.Submit(c.running)
+			waitFor(t, 5*time.Second, "both runs", func() bool {
+				ra, rb := a.Snapshot().Running, b.Snapshot().Running
+				return ra != nil && ra.PID > 0 && rb != nil && rb.PID > 0
+			})
+			for _, m := range c.queued {
+				if _, _, _, err := mgr.Submit(m); err != nil {
+					t.Fatal(err)
+				}
+			}
+
+			if got := mgr.StopHandOffs(chat); got != c.stopped {
+				t.Errorf("StopHandOffs = %v, want %v", got, c.stopped)
+			}
+			rt := b.Snapshot()
+			var left []string
+			if rt.Running != nil {
+				left = append(left, rt.Running.Preview)
+			}
+			for _, q := range rt.Queue {
+				left = append(left, q.Preview)
+			}
+			if got := strings.Join(left, ","); got != c.left {
+				t.Errorf("b's work left = %q, want %q", got, c.left)
+			}
+			if a.Snapshot().Running == nil {
+				t.Error("a's own run in the chat was stopped")
+			}
+		})
+	}
+}
+
 func TestInterruptModeSupersedes(t *testing.T) {
 	mgr, d, _ := queueTestManager(t, 30000, `, "queue": {"mode": "interrupt"}`)
 	_, _, _, _ = mgr.Submit(dm("old"))

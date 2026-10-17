@@ -408,6 +408,32 @@ func TestRouteHonoursTheNamedBrain(t *testing.T) {
 	}
 }
 
+// A DM goes by its chat JID and the sender's phone number, which WhatsApp
+// may use instead of each other; a group goes by its JID only.
+func TestChatJIDs(t *testing.T) {
+	const (
+		pn    = "15551234567@s.whatsapp.net"
+		lid   = "15559876543@lid"
+		group = "120363000000000000@g.us"
+	)
+	for _, c := range []struct {
+		name string
+		m    Inbound
+		want string
+	}{
+		{"DM by number", Inbound{JID: pn, Sender: "15551234567"}, pn},
+		{"DM by LID", Inbound{JID: lid, Sender: "15551234567"}, lid + "," + pn},
+		{"DM without a sender", Inbound{JID: lid}, lid},
+		{"group", Inbound{JID: group, Sender: "15551234567"}, group},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			if got := strings.Join(chatJIDs(c.m), ","); got != c.want {
+				t.Errorf("chatJIDs = %q, want %q", got, c.want)
+			}
+		})
+	}
+}
+
 func TestBrainRoutingFallsBackToFirstBrain(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
