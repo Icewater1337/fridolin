@@ -11,7 +11,7 @@ import { mono, loading } from './common.js';
 /**
  * routingEditor({routing, selfId, brains, allowedGroups, onChange, signal})
  * brains: the /api/brains list (to see which brain holds DMs, default, groups).
- * signal: the page's; once it aborts, the editor stops painting.
+ * signal: the page's; once it aborts, the editor stops following the groups.
  * Returns an element with getValue() → {handles_dms, default, groups}.
  */
 export function routingEditor({ routing = {}, selfId = '', brains = [], allowedGroups = [], onChange, signal }) {
@@ -93,14 +93,6 @@ export function routingEditor({ routing = {}, selfId = '', brains = [], allowedG
       : 'Only allowed groups are listed. A group can belong to one brain; members still need to tag the bridge (see Settings → Access → Triggers).';
   }
 
-  // Paints once the groups are known (or failed to load), and again when
-  // they or their names change, until the page goes. loadGroups() fetches
-  // them unless they are fresh.
-  const paintKnown = () => { const s = store.get(); if (s.groups !== null || s.groupsError) paintGroups(); };
-  const offs = [(s) => s.groups, (s) => s.groupsError, (s) => s.names].map((select) => store.subscribe(select, paintKnown));
-  if (signal) signal.addEventListener('abort', () => offs.forEach((off) => off()), { once: true });
-  loadGroups();
-
   const el = h('div.routing-editor',
     h('div.field', dm, h('div.help', 'All direct messages from allowed numbers go to this brain. Only one brain can do this.'), dmWarn),
     h('div.field', def, h('div.help', 'Allowed groups that no brain claims come here — and direct messages too, when no brain handles them.'), defWarn),
@@ -109,5 +101,20 @@ export function routingEditor({ routing = {}, selfId = '', brains = [], allowedG
     h('div.field', h('label.field-label', { for: addIn.id }, 'Add a group by its JID'), h('div.inline-add', addIn, addBtn)),
     addErr);
   el.getValue = () => ({ handles_dms: dm.input.checked, default: def.input.checked, groups: [...selected] });
+
+  // Paints once the groups are known (or failed to load), and again when
+  // they or their names change. It stops when the page goes, or when a
+  // change finds the editor no longer shown (its form was rebuilt).
+  // loadGroups() fetches the groups unless they are fresh.
+  let offs = [];
+  const stop = () => { offs.forEach((off) => off()); offs = []; };
+  const paintKnown = () => {
+    if (offs.length && !el.isConnected) { stop(); return; }
+    const s = store.get();
+    if (s.groups !== null || s.groupsError) paintGroups();
+  };
+  offs = [(s) => s.groups, (s) => s.groupsError, (s) => s.names].map((select) => store.subscribe(select, paintKnown));
+  if (signal) signal.addEventListener('abort', stop, { once: true });
+  loadGroups();
   return el;
 }
