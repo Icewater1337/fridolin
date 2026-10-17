@@ -359,15 +359,15 @@ func TestIngestConfinedToMediaDir(t *testing.T) {
 	_ = os.Symlink(outside, link)
 
 	ingest := tb.ingest
-	w := ingest(`{"scope":"personal","paths":["` + inside + `"],"text":"file this"}`)
+	w := ingest(`{"brain":"personal","paths":["` + inside + `"],"text":"file this"}`)
 	if w.Code != 202 || !strings.Contains(w.Body.String(), `"status":"accepted"`) || !strings.Contains(w.Body.String(), "15551234567@s.whatsapp.net") {
 		t.Fatalf("ingest: %d %s", w.Code, w.Body.String())
 	}
 	for name, body := range map[string]string{
-		"outside media": `{"scope":"personal","paths":["` + outside + `"]}`,
-		"symlink out":   `{"scope":"personal","paths":["` + link + `"]}`,
-		"relative":      `{"scope":"personal","paths":["upload/scan.pdf"]}`,
-		"unknown brain": `{"scope":"nobody","paths":["` + inside + `"]}`,
+		"outside media": `{"brain":"personal","paths":["` + outside + `"]}`,
+		"symlink out":   `{"brain":"personal","paths":["` + link + `"]}`,
+		"relative":      `{"brain":"personal","paths":["upload/scan.pdf"]}`,
+		"unknown brain": `{"brain":"nobody","paths":["` + inside + `"]}`,
 	} {
 		if w := ingest(body); w.Code != 400 {
 			t.Errorf("%s: %d, want 400", name, w.Code)
@@ -377,6 +377,34 @@ func TestIngestConfinedToMediaDir(t *testing.T) {
 	hist, _ := os.ReadFile(filepath.Join(dir, "conversation-history.jsonl"))
 	if !strings.Contains(string(hist), "[attachment: "+canonicalDir(inside)+"]") {
 		t.Errorf("history does not record the ingested file:\n%s", hist)
+	}
+}
+
+// scope was the name of the brain field. A script that still sends it is
+// told the field to use, even when it names a brain that exists, and
+// nothing is handed to any brain.
+func TestIngestRefusesScope(t *testing.T) {
+	tb := newTestBridge(t, `, "ingest": {"enabled": true}`)
+	dir := tb.addFolderBrain(t, BrainManifest{ID: "personal", Name: "Personal", Routing: BrainRouting{HandlesDMs: true}})
+	for name, body := range map[string]string{
+		"scope only":         `{"scope":"personal","text":"file this"}`,
+		"scope and brain":    `{"scope":"personal","brain":"personal","text":"file this"}`,
+		"scope, other brain": `{"scope":"nobody","brain":"personal","text":"file this"}`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			w := tb.ingest(body)
+			if w.Code != http.StatusBadRequest || !strings.Contains(w.Body.String(), `name the brain in "brain"`) {
+				t.Errorf("%d %q, want 400 naming the brain field", w.Code, w.Body.String())
+			}
+		})
+	}
+	if w := tb.ingest(`{"brain":"personal","text":"file this"}`); w.Code != http.StatusAccepted {
+		t.Fatalf("with brain: %d %s, want 202", w.Code, w.Body.String())
+	}
+	waitFor(t, 5*time.Second, "the reply to the one accepted request", func() bool { return len(tb.dev.Outbox()) > 0 })
+	hist, _ := os.ReadFile(filepath.Join(dir, "conversation-history.jsonl"))
+	if n := strings.Count(string(hist), `"type":"in"`); n != 1 {
+		t.Errorf("history has %d ingested messages, want only the accepted one:\n%s", n, hist)
 	}
 }
 

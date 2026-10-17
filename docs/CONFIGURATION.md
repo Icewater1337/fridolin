@@ -650,8 +650,9 @@ requests sent by web pages.
 
 ### `ingest.enabled`
 
-Enables `POST /ingest {"brain","paths","text","sender"}` (`scope` is accepted
-as an alias of `brain`). Paths must be files inside the media directory. The
+Enables `POST /ingest {"brain","paths","text","sender"}`. A request that
+still sends `scope`, the old name of `brain`, is refused with 400 and told
+to use `brain`. Paths must be files inside the media directory. The
 named brain receives them like WhatsApp attachments and answers in its
 `reply_chat`, even when that chat belongs to another brain (your DM, say).
 Off by default.

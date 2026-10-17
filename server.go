@@ -19,15 +19,18 @@ type sendRequest struct {
 	Text string `json:"text"`
 }
 
-// ingestRequest is the JSON body expected by POST /ingest. Scope (or Brain)
-// names the brain; Paths are files already written inside the media
-// directory; Text is the message that goes with them.
+// ingestRequest is the JSON body expected by POST /ingest. Brain names the
+// brain; Paths are files already written inside the media directory; Text
+// is the message that goes with them.
 type ingestRequest struct {
-	Scope  string   `json:"scope"`
 	Brain  string   `json:"brain"`
 	Paths  []string `json:"paths"`
 	Text   string   `json:"text"`
 	Sender string   `json:"sender"`
+	// Scope is the name Brain had before. It is no longer read: a request
+	// that still sends it is refused with the field to use instead, rather
+	// than failing on a brain it does not name.
+	Scope string `json:"scope"`
 }
 
 // isLoopbackAddr reports whether addr binds to a loopback interface.
@@ -144,14 +147,15 @@ func (b *Bridge) httpIngest(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "invalid JSON: "+err.Error(), http.StatusBadRequest)
 		return
 	}
+	if req.Scope != "" {
+		http.Error(w, `"scope" is no longer read: name the brain in "brain"`, http.StatusBadRequest)
+		return
+	}
 	if len(req.Paths) == 0 && strings.TrimSpace(req.Text) == "" {
 		http.Error(w, "paths or text required", http.StatusBadRequest)
 		return
 	}
 	id := strings.ToLower(strings.TrimSpace(req.Brain))
-	if id == "" {
-		id = strings.ToLower(strings.TrimSpace(req.Scope))
-	}
 	br := b.brainMgr.Get(id)
 	if br == nil {
 		http.Error(w, "unknown brain "+strconvQuote(id), http.StatusBadRequest)
