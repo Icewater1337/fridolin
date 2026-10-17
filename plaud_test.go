@@ -313,8 +313,8 @@ func TestPlaudDeliveryErrorIsShown(t *testing.T) {
 			}
 			var status map[string]any
 			_ = json.Unmarshal(tb.do("GET", "/api/plaud/status", nil).Body.Bytes(), &status)
-			if e, _ := status["last_error"].(string); !strings.Contains(e, plaudNew) || !strings.Contains(e, "exit status 1") {
-				t.Errorf("status last_error = %q, want the recording's error", e)
+			if e, _ := status["last_error"].(string); !strings.Contains(e, plaudNew) || !strings.Contains(e, "Failed to fetch") || strings.Contains(e, "- Fetching") {
+				t.Errorf("status last_error = %q, want the recording's error without the spinner", e)
 			}
 
 			_ = os.Remove(filepath.Join(fp.dir, fixture))
@@ -1768,7 +1768,7 @@ func TestPlaudSignInSaysWhyItFailed(t *testing.T) {
 				job = *tb.plaud.Status().Connect
 				return job.State != "running"
 			})
-			if job.State != "error" || !strings.Contains(job.Error, c.want) || strings.Contains(job.Error, "expired") {
+			if job.State != "error" || !strings.Contains(job.Error, c.want) || strings.Contains(job.Error, "expired") || strings.Contains(job.Error, "Waiting for") {
 				t.Errorf("sign-in = %+v, want an error saying %q", job, c.want)
 			}
 		})

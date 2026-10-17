@@ -439,7 +439,15 @@ func plaudRunError(cmd string, err error, stderr string) error {
 	if errors.As(err, &ee) {
 		code = ee.ExitCode()
 	}
-	detail := truncate(strings.TrimSpace(stderr), 300)
+	// Without a terminal the CLI's spinner leaves "- Fetching file..." and
+	// the like on stderr, which says nothing about what went wrong.
+	var lines []string
+	for _, l := range strings.Split(stderr, "\n") {
+		if l = strings.TrimSpace(l); l != "" && !strings.HasPrefix(l, "- ") {
+			lines = append(lines, l)
+		}
+	}
+	detail := truncate(strings.Join(lines, " "), 300)
 	switch {
 	case cmd == "login" && code == 2:
 		return fmt.Errorf("access was not granted: it was denied on Plaud's page, or the sign-in failed (%s)", detail)
