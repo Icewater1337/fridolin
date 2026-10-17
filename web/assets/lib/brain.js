@@ -20,6 +20,26 @@ export function slugify(s) {
   return out || 'brain';
 }
 
+/** A brain as a choice in a list: its name, with the id when that differs. */
+export function brainLabel(b) {
+  return b.name && b.name !== b.id ? `${b.name} (${b.id})` : b.id;
+}
+
+// What a brain's issue kinds (and status, which names the worst of them)
+// are called: short on a pill, long where the brain is not named around it.
+const ISSUES = {
+  drift: ['Changed on disk', 'brain.json changed on disk'],
+  missing: ['Folder missing', 'Brain folder missing'],
+  invalid: ['Invalid', 'Invalid brain configuration'],
+  unapproved: ['Not approved', 'Brain not approved'],
+};
+
+/** The name of an issue kind (long unless short is set); an unknown kind as it is. */
+export function issueLabel(kind, { short = false } = {}) {
+  const names = ISSUES[kind];
+  return names ? names[short ? 0 : 1] : String(kind || '');
+}
+
 export function routingSummary(routing) {
   if (!routing) return 'No chats';
   const parts = [];

@@ -2,11 +2,11 @@
 
 import { brainsResource } from '../app/resources.js';
 import { h, mount, paint, reconcile } from '../lib/dom.js';
-import { routingSummary } from '../lib/brain.js';
+import { routingSummary, issueLabel } from '../lib/brain.js';
 import { icon } from '../components/icons.js';
 import { btn } from '../components/buttons.js';
-import { pill, badge, timeAgo, mono, pageHeader, spinner } from '../components/common.js';
-import { outcomePill, brainStatusPill } from '../components/brain.js';
+import { mono, pageHeader, spinner } from '../components/common.js';
+import { brainStatusPill, runtimeSummary, firstBrainHero } from '../components/brain.js';
 
 export default {
   title: 'Brains',
@@ -21,12 +21,7 @@ export default {
 
     ctx.follow(brainsResource, (brains) => {
       if (!brains.length) {
-        paint(box, 'none', () => h('div.card.hero',
-          h('div.hero-icon', icon('sparkle')),
-          h('div.hero-body',
-            h('h2', 'No brains yet'),
-            h('p', 'Add a folder as a brain. It gets a prompt file you can edit, its own memory and its own conversation history. You decide which chats it answers.'),
-            h('div.actions', btn('Add your first brain', { href: '#/add-brain', kind: 'primary', icon: 'plus' })))));
+        paint(box, 'none', firstBrainHero);
         return;
       }
       paint(box, 'list', () => cards);
@@ -40,7 +35,6 @@ function brainCard(b) {
   const rt = b.runtime;
   const m = b.manifest || {};
   const routing = (rt && rt.routing) || m.routing;
-  const queue = rt ? (rt.queue || []).length : 0;
   const href = b.id ? `#/brains/${encodeURIComponent(b.id)}` : null;
   const body = [
     h('div.bc-head',
@@ -54,13 +48,9 @@ function brainCard(b) {
       m.model ? h('span', icon('sparkle'), m.model) : null,
       m.effort ? h('span', `effort: ${m.effort}`) : null,
       m.backup ? h('span', icon('backup'), m.backup.enabled ? 'Backed up' : 'No backup') : null),
-    rt ? h('div.bc-runtime',
-      rt.running ? pill('Working', 'info', { pulse: true, title: rt.running.preview || '' }) : pill('Idle', 'neutral'),
-      queue ? badge(`${queue} queued`, 'warn') : null,
-      outcomePill(rt.last),
-      rt.last ? h('span.muted.small', timeAgo(rt.last.finished)) : null)
+    rt ? h('div.bc-runtime', runtimeSummary(rt))
       : (b.status === 'ok' ? null : h('div.bc-runtime', h('span.muted.small', 'Not running'))),
-    (b.issues || []).length ? h('ul.issue-list', b.issues.map((is) => h('li', h('strong', `${is.kind}: `), is.detail))) : null,
+    (b.issues || []).length ? h('ul.issue-list', b.issues.map((is) => h('li', h('strong', `${issueLabel(is.kind)}: `), is.detail))) : null,
   ];
   if (href) return h('a.card.brain-card.link-card', { href }, body, icon('right', 'row-chevron'));
   return h('div.card.brain-card', body, h('p.muted.small', 'This entry has no approved manifest, so it cannot be opened here. Remove it from brain_dirs in config.json and add the folder again.'));

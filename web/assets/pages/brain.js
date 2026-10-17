@@ -10,7 +10,7 @@ import { calendarCard } from '../components/calendar.js';
 import { h, mount, paint } from '../lib/dom.js';
 import { fmtDuration, plural, prettyJSON } from '../lib/format.js';
 import { phoneish, isGroupJid } from '../lib/jid.js';
-import { EFFORTS } from '../lib/brain.js';
+import { EFFORTS, issueLabel } from '../lib/brain.js';
 import { sortKeys, fieldDiff, lineDiff } from '../lib/diff.js';
 import { icon } from '../components/icons.js';
 import { toast } from '../components/toast.js';
@@ -123,7 +123,7 @@ export default {
     }
 
     function renderIssues(issues) {
-      return issues.map((is) => callout('bad', { missing: 'Folder missing', invalid: 'Invalid configuration', unapproved: 'Not approved' }[is.kind] || is.kind, is.detail));
+      return issues.map((is) => callout('bad', issueLabel(is.kind), is.detail));
     }
 
     // ── on-disk changes ──

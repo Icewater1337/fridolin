@@ -7,6 +7,7 @@ import { folderBrowser } from '../components/folder-browser.js';
 import { liveForm } from '../components/live-form.js';
 import { h, mount, paint, reconcile, syncOptions } from '../lib/dom.js';
 import { fmtDuration, fmtBytes, plural, absTime } from '../lib/format.js';
+import { brainLabel } from '../lib/brain.js';
 import { icon } from '../components/icons.js';
 import { toast } from '../components/toast.js';
 import { btn, copyButton, runBusy } from '../components/buttons.js';
@@ -456,7 +457,7 @@ export default {
         });
       });
       form.setBrains = (brains) => {
-        syncOptions(brainSel, [['', 'Choose a brain…'], ...brains.map((b) => [b.id, b.name && b.name !== b.id ? `${b.name} (${b.id})` : b.id]), ['__other', 'Another id…']]);
+        syncOptions(brainSel, [['', 'Choose a brain…'], ...brains.map((b) => [b.id, brainLabel(b)]), ['__other', 'Another id…']]);
       };
       return form;
     }

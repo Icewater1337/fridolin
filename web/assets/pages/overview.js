@@ -8,12 +8,12 @@ import { h, mount, paint, reconcile } from '../lib/dom.js';
 import { fmtDuration, plural, parseTs } from '../lib/format.js';
 import { phone } from '../lib/jid.js';
 import { waKind, waLabel } from '../lib/whatsapp.js';
-import { routingSummary } from '../lib/brain.js';
+import { routingSummary, issueLabel } from '../lib/brain.js';
 import { icon } from '../components/icons.js';
 import { toast } from '../components/toast.js';
 import { btn } from '../components/buttons.js';
 import { pill, badge, callout, timeAgo, mono, empty, spinner } from '../components/common.js';
-import { outcomePill } from '../components/brain.js';
+import { runtimeSummary, firstBrainHero } from '../components/brain.js';
 import { showActivity } from '../components/activity-item.js';
 
 export default {
@@ -122,18 +122,13 @@ export default {
     ]);
 
     // ── first run ──
-    const renderCTA = (s) => paint(cta, (s.brains || []).length === 0 && (s.issues || []).length === 0, (show) => (show ? h('div.card.hero',
-      h('div.hero-icon', icon('sparkle')),
-      h('div.hero-body',
-        h('h2', 'Set up your first brain'),
-        h('p', 'A brain is a folder on this computer with its own instructions, memory and conversation history. Pick or create a folder, choose which chats it answers, and you are ready to go.'),
-        h('div.actions', btn('Add a brain', { href: '#/add-brain', kind: 'primary', icon: 'plus' })))) : null));
+    const renderCTA = (s) => paint(cta, (s.brains || []).length === 0 && (s.issues || []).length === 0, (show) => (show ? firstBrainHero() : null));
 
     // ── warnings and brain issues ──
     const renderAlerts = (s) => paint(alerts, { warnings: s.warnings || [], issues: s.issues || [] }, ({ warnings, issues }) => [
       warnings.map((w) => callout('warn', null, w)),
       issues.map((is) => {
-        const label = { drift: 'brain.json changed on disk', missing: 'Brain folder missing', invalid: 'Brain configuration invalid', unapproved: 'Brain not approved' }[is.kind] || is.kind;
+        const label = issueLabel(is.kind);
         const link = is.id ? h('a', { href: `#/brains/${encodeURIComponent(is.id)}` }, is.kind === 'drift' ? 'Review and approve' : 'Open brain') : null;
         return callout(is.kind === 'drift' ? 'warn' : 'bad', `${label}${is.id ? `: ${is.id}` : ''}`,
           h('div', is.detail), h('div.muted.small', mono(is.path)), link ? h('div', link) : null);
@@ -179,24 +174,18 @@ export default {
 
     const renderBrains = (s) => {
       const list = s.brains || [];
+      // The first-brain card above says what to do then.
       if (!list.length) {
-        paint(brainsBox, 'none', () => empty('No brains yet', 'Add a folder as a brain to start answering messages.', btn('Add a brain', { href: '#/add-brain', kind: 'primary', icon: 'plus' })));
+        paint(brainsBox, 'none', () => empty('No brains yet', 'Add a folder as a brain to start answering messages.'));
         return;
       }
       paint(brainsBox, 'list', () => brainList);
-      reconcile(brainList, list, (b) => b.id, (b) => {
-        const running = b.running;
-        const q = (b.queue || []).length;
-        return h('a.brain-row.card.link-card', { href: `#/brains/${encodeURIComponent(b.id)}` },
-          h('div.brain-row-main',
-            h('div.brain-row-title', h('strong', b.name || b.id), h('code.mono.muted', b.id)),
-            h('div.muted.small', routingSummary(b.routing))),
-          h('div.brain-row-state',
-            running ? pill('Working', 'info', { pulse: true, title: running.preview || '' }) : pill('Idle', 'neutral'),
-            q ? badge(`${q} queued`, 'warn') : null,
-            h('span.brain-row-last', outcomePill(b.last), b.last ? h('span.muted.small', timeAgo(b.last.finished)) : null)),
-          icon('right', 'row-chevron'));
-      });
+      reconcile(brainList, list, (b) => b.id, (b) => h('a.brain-row.card.link-card', { href: `#/brains/${encodeURIComponent(b.id)}` },
+        h('div.brain-row-main',
+          h('div.brain-row-title', h('strong', b.name || b.id), h('code.mono.muted', b.id)),
+          h('div.muted.small', routingSummary(b.routing))),
+        h('div.brain-row-state', runtimeSummary(b)),
+        icon('right', 'row-chevron')));
     };
 
     const renderAll = (s) => {

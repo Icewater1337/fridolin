@@ -8,6 +8,7 @@ import { store, loadGroups, rememberName } from '../app/store.js';
 import { brainsResource, configResource, ignoredResource } from '../app/resources.js';
 import { h, mount, paint, reconcile, syncOptions } from '../lib/dom.js';
 import { plural } from '../lib/format.js';
+import { brainLabel } from '../lib/brain.js';
 import { phone, shortJid } from '../lib/jid.js';
 import { icon } from '../components/icons.js';
 import { toast } from '../components/toast.js';
@@ -77,7 +78,7 @@ export default {
       const d = defaultBrain();
       return [
         ...(withDefault ? [['', d ? `Default brain (${d.name || d.id})` : 'Default brain']] : []),
-        ...(brains || []).filter((b) => b.id).map((b) => [b.id, b.name && b.name !== b.id ? `${b.name} (${b.id})` : b.id]),
+        ...(brains || []).filter((b) => b.id).map((b) => [b.id, brainLabel(b)]),
       ];
     };
     const explicitOwner = (jid) => {

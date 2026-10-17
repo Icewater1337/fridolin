@@ -4,6 +4,7 @@ import { qs } from '../app/api.js';
 import { store, chatName } from '../app/store.js';
 import { resource } from '../app/resources.js';
 import { h, mount, paint, syncOptions } from '../lib/dom.js';
+import { brainLabel } from '../lib/brain.js';
 import { select, textInput } from '../components/fields.js';
 import { empty, pageHeader, spinner } from '../components/common.js';
 import { showActivity } from '../components/activity-item.js';
@@ -22,7 +23,7 @@ export default {
     const count = h('span.muted.small');
 
     const fillBrains = (s) => {
-      const opts = [['', 'All brains'], ...(s.brains || []).map((b) => [b.id, b.name && b.name !== b.id ? `${b.name} (${b.id})` : b.id])];
+      const opts = [['', 'All brains'], ...(s.brains || []).map((b) => [b.id, brainLabel(b)])];
       if (brain && !opts.some(([v]) => v === brain)) opts.push([brain, brain]);
       syncOptions(brainSel, opts, brain);
     };
