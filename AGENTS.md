@@ -85,9 +85,10 @@ Reopen the dashboard with `./fridolin open`.
 ## Working on the code
 
 - `go vet ./... && go test -race ./...` must pass; `gofmt` everything.
-  The tests run in an empty temp directory with the config override
-  variables unset, so they never see a `config.json` or `.env` in the
-  checkout; read a repository file through `repoDir`.
+  The tests run in an empty temp directory, with an empty temp `HOME` and
+  the config override variables unset, so they never see a `config.json`
+  or `.env` in the checkout or a real data dir; read a repository file
+  through `repoDir`.
 - The dashboard is plain HTML/CSS/JS in `web/` (no build step), embedded into
   the binary — rebuild after changing it. It runs under a strict CSP: no
   inline scripts or styles.

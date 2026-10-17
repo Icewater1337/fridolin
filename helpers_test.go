@@ -22,8 +22,8 @@ import (
 //
 // Before the tests run it unsets every config override variable: a shell
 // that exports DATA_DIR or CONFIG_FILE for a real bridge would otherwise
-// point the tests at that bridge's data. It also moves them out of the
-// checkout, see runInEmptyDir.
+// point the tests at that bridge's data. It also gives them an empty HOME,
+// see useEmptyHome, and moves them out of the checkout, see runInEmptyDir.
 func TestMain(m *testing.M) {
 	if os.Getenv("WCB_FAKE_PLAUD") == "1" && len(os.Args) > 1 && isPlaudCommand(os.Args[1]) {
 		os.Exit(fakePlaud(os.Args[1:]))
@@ -38,12 +38,39 @@ func TestMain(m *testing.M) {
 			os.Exit(1)
 		}
 	}
+	removeHome, err := useEmptyHome()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "giving the tests an empty HOME: %v\n", err)
+		os.Exit(1)
+	}
 	code, err := runInEmptyDir(m)
+	removeHome()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "moving the tests out of the checkout: %v\n", err)
 		os.Exit(1)
 	}
 	os.Exit(code)
+}
+
+// testHome is the HOME the tests start with.
+var testHome string
+
+// useEmptyHome points HOME at a new, empty temp directory and returns a
+// function that removes it. Tests set their own HOME with t.Setenv; one that
+// forgets and loads a config would otherwise resolve ~ and the default data
+// dir, ~/.fridolin, in the real home, and loading the config creates the
+// data dir and media/ there before any guard runs.
+func useEmptyHome() (func(), error) {
+	dir, err := os.MkdirTemp("", "fridolin-test-home-")
+	if err != nil {
+		return nil, err
+	}
+	if err := os.Setenv("HOME", dir); err != nil {
+		os.RemoveAll(dir)
+		return nil, err
+	}
+	testHome = dir
+	return func() { os.RemoveAll(dir) }, nil
 }
 
 // repoDir is the package directory the tests were started in. They run

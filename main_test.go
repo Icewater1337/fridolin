@@ -104,6 +104,21 @@ func TestTestsDoNotRunInTheCheckout(t *testing.T) {
 	}
 }
 
+func TestTestsStartWithATempHome(t *testing.T) {
+	// A test that forgets t.Setenv("HOME", ...) must find ~ and the default
+	// data dir in a temp dir, not in the home of whoever runs the tests.
+	home, err := os.UserHomeDir()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if tmp := canonicalDir(os.TempDir()); !isWithin(canonicalDir(home), tmp) {
+		t.Errorf("home %s is not inside the temp dir %s", home, tmp)
+	}
+	if home != testHome {
+		t.Errorf("home %s is not the one TestMain made (%q)", home, testHome)
+	}
+}
+
 func TestShellOverridesDoNotReachTests(t *testing.T) {
 	// Runs the test binary again with every override variable set, the way a
 	// developer's shell might export them for a real bridge, and checks from
