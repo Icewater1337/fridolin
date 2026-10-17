@@ -276,8 +276,10 @@ pip install -r tools/requirements-transcription.txt   # local: private, ~1.5 GB 
 pip install groq && export GROQ_API_KEY=...           # API: light, needs a key
 ```
 
-Brains get `GROQ_API_KEY` from the bridge's process environment; the bridge
-reads no `.env` file. [Environment
+Brains get `GROQ_API_KEY` from the bridge's process environment, and only
+when [`child_env_passthrough`](docs/CONFIGURATION.md#child_env_passthrough)
+names it: `"child_env_passthrough": ["GROQ_API_KEY"]`. The bridge reads no
+`.env` file. [Environment
 variables](docs/CONFIGURATION.md#environment-variables) says where to keep it
 so that re-running `setup.sh` does not drop it.
 
@@ -382,6 +384,13 @@ What the bridge does about it:
   the other tools the bridge runs — are never writable. Add your own paths
   under `sandbox.deny_paths`. When the sandbox is on but cannot be set up,
   the brain refuses the message with an error instead of running without it.
+- **An explicit environment.** Brains are handed only the variables of the
+  bridge's environment they need to run, such as the Claude CLI's login,
+  not every key in the service file or the shell that started it. That is
+  no secret store: a brain that goes looking can still read the service
+  file and the bridge's environment, so keep anything a brain must not see
+  out of both; see
+  [what reaches brains](docs/CONFIGURATION.md#what-reaches-brains).
 - **Brain isolation.** Brains have separate directories, sessions, histories,
   and calendar credentials, and they do not load your own Claude Code
   setup: your user settings and their hooks, skills, plugins and MCP
@@ -454,6 +463,9 @@ API; the page is plain HTML/JS compiled into the binary. In `web/assets`,
 
 **`sandbox.go`** — generates a per-brain `sandbox-exec` profile, passed to
 `sandbox-exec -p` on each run (never written to a file).
+
+**`childenv.go`** — the one list of the bridge's environment variables that
+brains, rclone, the Plaud CLI and the activity viewer get.
 
 **`store.go`** — SQLite: the whatsmeow device store, polls, votes, and the
 chats that wrote without being allowed.

@@ -455,7 +455,7 @@ func TestViewerCreatesTheStreamLogInTheFolder(t *testing.T) {
 			}
 			var started []string
 			prev := startViewer
-			startViewer = func(_, streamLog, _ string) (*TmuxViewer, error) {
+			startViewer = func(_, streamLog, _ string, _ []string) (*TmuxViewer, error) {
 				started = append(started, streamLog)
 				return nil, errors.New("no tmux in tests")
 			}

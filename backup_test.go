@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -54,14 +55,16 @@ func TestRcloneSection(t *testing.T) {
 
 // fakeRunner scripts rclone's answers for the connect flow.
 type fakeRunner struct {
-	mu    sync.Mutex
-	calls [][]string
-	conf  string
+	mu     sync.Mutex
+	calls  [][]string
+	scopes []childScope // each call's helperScope
+	conf   string
 }
 
-func (f *fakeRunner) run(_ context.Context, args []string, stderr io.Writer) ([]byte, error) {
+func (f *fakeRunner) run(ctx context.Context, args []string, stderr io.Writer) ([]byte, error) {
 	f.mu.Lock()
 	f.calls = append(f.calls, args)
+	f.scopes = append(f.scopes, helperScope(ctx))
 	f.mu.Unlock()
 	switch {
 	case len(args) > 1 && args[0] == "config" && args[1] == "create":
@@ -103,6 +106,13 @@ func TestConnectDriveWalksQuestionsAndHidesToken(t *testing.T) {
 	if last[0] != "mkdir" || last[1] != "brain-gdrive:"+defaultBackupRoot {
 		t.Errorf("last call = %v, want mkdir of the backup root", last)
 	}
+	// rclone opens the browser from one of these runs, so they all get the
+	// desktop session's variables.
+	for i, scope := range f.scopes {
+		if scope != desktopChild {
+			t.Errorf("call %v ran as scope %d, want desktopChild", f.calls[i], scope)
+		}
+	}
 	body := tb.do("GET", "/api/backup/status", nil).Body.String()
 	if strings.Contains(body, "SECRET-TOKEN") {
 		t.Error("the Drive token leaked into the API")
@@ -125,6 +135,83 @@ func TestRunRcloneUsesIsolatedConfig(t *testing.T) {
 	}
 	if strings.Contains(string(env), "RCLONE_CONFIG_EVIL") || !strings.Contains(string(env), "RCLONE_CONFIG="+tb.backup.rcloneConf()) {
 		t.Error("the user's RCLONE_* environment must not reach the bridge's rclone")
+	}
+}
+
+// TestRcloneGetsTheAllowlistedEnvironment: rclone, for a backup, for the
+// version the dashboard shows and while it connects Google Drive, gets what
+// childEnv gives a helper program: no RCLONE_* setting of yours, not the
+// Claude CLI's login, and not the names in child_env_passthrough, which are
+// for brains. Only the connect run, which opens your browser, gets your
+// desktop session's variables.
+func TestRcloneGetsTheAllowlistedEnvironment(t *testing.T) {
+	bin := t.TempDir()
+	script := filepath.Join(bin, "rclone")
+	// Each run records its environment under its command.
+	fake := "#!/bin/sh\ndir=$(dirname \"$0\")\n[ \"$1\" = --config ] && shift 2\nenv > \"$dir/env.$1\"\necho rclone v9.9\n"
+	if err := os.WriteFile(script, []byte(fake), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	tb := newTestBridge(t, `, "child_env_passthrough": ["GROQ_API_KEY", "RCLONE_CONFIG_EVIL_TYPE"], "backup": {"rclone_path": "`+script+`"}`)
+	for k, v := range map[string]string{
+		"HTTPS_PROXY":              "http://proxy.example.com:3128",
+		"DISPLAY":                  ":0",
+		"DBUS_SESSION_BUS_ADDRESS": "unix:path=/tmp/test-bus",
+		"XDG_DATA_DIRS":            "/usr/share:/var/lib/snapd/desktop",
+		"GROQ_API_KEY":             "test-groq-key",
+		"RCLONE_CONFIG_EVIL_TYPE":  "local",
+		"CLAUDE_CODE_OAUTH_TOKEN":  "test-oauth-token",
+		"FRIDOLIN_TEST_SECRET":     "test-secret",
+	} {
+		t.Setenv(k, v)
+	}
+	run := func(ctx context.Context, arg string) error {
+		_, err := tb.backup.runRclone(ctx, []string{arg, "x:"}, nil)
+		return err
+	}
+	desktop := []string{"DISPLAY=:0", "DBUS_SESSION_BUS_ADDRESS=unix:path=/tmp/test-bus", "XDG_DATA_DIRS=/usr/share:/var/lib/snapd/desktop"}
+	cases := []struct {
+		name, log string
+		run       func() error
+		desktop   bool
+	}{
+		{"backup", "env.lsd", func() error { return run(context.Background(), "lsd") }, false},
+		{"version", "env.version", func() error {
+			if v := rcloneVersion(script, tb.backup.rcloneEnv(anyChild)); v != "rclone v9.9" {
+				return fmt.Errorf("version = %q", v)
+			}
+			return nil
+		}, false},
+		{"connect", "env.config", func() error { return run(withDesktop(context.Background()), "config") }, true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if err := tc.run(); err != nil {
+				t.Fatal(err)
+			}
+			data, err := os.ReadFile(filepath.Join(bin, tc.log))
+			if err != nil {
+				t.Fatal(err)
+			}
+			env := strings.Split(string(data), "\n")
+			for _, want := range []string{"HOME=" + os.Getenv("HOME"), "HTTPS_PROXY=http://proxy.example.com:3128", "RCLONE_CONFIG=" + tb.backup.rcloneConf()} {
+				if !slices.Contains(env, want) {
+					t.Errorf("rclone lacks %s", want)
+				}
+			}
+			for _, kv := range desktop {
+				if slices.Contains(env, kv) != tc.desktop {
+					t.Errorf("rclone got %s: %v, want %v", kv, !tc.desktop, tc.desktop)
+				}
+			}
+			for _, kv := range env {
+				for _, k := range []string{"GROQ_API_KEY", "RCLONE_CONFIG_EVIL_TYPE", "CLAUDE_CODE_OAUTH_TOKEN", "FRIDOLIN_TEST_SECRET"} {
+					if strings.HasPrefix(kv, k+"=") {
+						t.Errorf("rclone got %s", kv)
+					}
+				}
+			}
+		})
 	}
 }
 

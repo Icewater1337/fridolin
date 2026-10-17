@@ -360,6 +360,16 @@ class EngineChoiceTest(TempDirTestCase):
                 self.assertEqual(code, 1)
                 self.assertIn(f"pip install -r {shlex.quote(str(want))}", out["error"])
 
+    def test_groq_hints_name_child_env_passthrough(self):
+        # Brains get GROQ_API_KEY only when the bridge's config names it.
+        self.local_available.result = self.groq_available.result = False
+        for name, flags in [("--engine groq", ["--engine", "groq"]), ("no engine at all", [])]:
+            with self.subTest(name):
+                code, out, _ = self.run_tool(*flags)
+                self.assertEqual(code, 1)
+                self.assertIn("child_env_passthrough", out["error"])
+                self.assertIn("docs/CONFIGURATION.md#child_env_passthrough", out["error"])
+
     def test_a_missing_engine_fails_before_extracting_video_audio(self):
         self.source = self.dir / "clip.mp4"
         self.source.write_bytes(b"video")

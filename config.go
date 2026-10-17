@@ -88,6 +88,12 @@ type Config struct {
 	// and only the sandbox keeps out the skills, agents and commands there.
 	InheritClaudeUserConfig bool `json:"inherit_claude_user_config,omitempty"`
 
+	// ChildEnvPassthrough names variables of the bridge's environment that
+	// brains, and the activity viewer's tmux server they can read, get
+	// besides childEnvAllowlist, such as GROQ_API_KEY for a transcription
+	// tool. Anyone who may message a brain can read them.
+	ChildEnvPassthrough []string `json:"child_env_passthrough,omitempty"`
+
 	// HTTPListen is the address of the local HTTP server: the dashboard plus
 	// the /send and /ingest APIs. Must be a loopback address. Default
 	// 127.0.0.1:8765; "off" disables it.
@@ -598,6 +604,11 @@ func (c *Config) validate() error {
 	}
 	if err := c.Sandbox.validate(runtime.GOOS); err != nil {
 		return err
+	}
+	for _, name := range c.ChildEnvPassthrough {
+		if !validEnvName(name) {
+			return fmt.Errorf("child_env_passthrough: %q is not a variable name: use letters, digits and _, and do not start with a digit", name)
+		}
 	}
 	if c.MaxChunkSize < minChunkSize {
 		return fmt.Errorf("max_chunk_size %d is too small: use at least %d, or 0 for the default of %d", c.MaxChunkSize, minChunkSize, defaultChunkSize)

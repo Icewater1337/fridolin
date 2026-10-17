@@ -214,6 +214,7 @@ type brainSettings struct {
 	queueMode       string
 	maxPending      int
 	credsDir        string // where per-brain credential files live
+	envPassthrough  []string
 }
 
 // BrainHooks connect brains to the rest of the bridge.
@@ -605,7 +606,7 @@ func (br *Brain) ensureViewer(s *brainSettings) {
 		return
 	}
 	f.Close()
-	tv, err := startViewer("claude-"+br.id, br.streamLogPath(), br.workDir)
+	tv, err := startViewer("claude-"+br.id, br.streamLogPath(), br.workDir, childEnv(anyChild, s.envPassthrough))
 	if err != nil {
 		log.Printf("brain %s: could not start tmux viewer: %v", br.id, err)
 		return
@@ -974,7 +975,7 @@ func (br *Brain) invoke(run *brainRun, ctx context.Context, s *brainSettings, m 
 	// without it: the fallback would quietly drop the only barrier left.
 	binary := s.claudePath
 	finalArgs := args
-	env := append(os.Environ(), calendarEnv(br.id, s.manifest, s.credsDir)...)
+	extraEnv := calendarEnv(br.id, s.manifest, s.credsDir)
 	if br.sandbox != nil && br.sandbox.Enabled() {
 		sbBinary, sbArgs, sbErr := br.sandbox.Command(br.id, s.claudePath, args)
 		if sbErr != nil {
@@ -984,9 +985,12 @@ func (br *Brain) invoke(run *brainRun, ctx context.Context, s *brainSettings, m 
 		binary, finalArgs = sbBinary, sbArgs
 		// The profile denies writes to the CLI's own install, so its
 		// auto-updater could download a new version on every run and never
-		// switch to it. The last value wins, whatever the bridge's own is.
-		env = append(env, "DISABLE_AUTOUPDATER=1")
+		// switch to it. This replaces the bridge's own value.
+		extraEnv = append(extraEnv, "DISABLE_AUTOUPDATER=1")
 	}
+	// Only the variables on childEnvAllowlist: anyone who may message the
+	// brain can ask it to print its environment.
+	env := childEnv(claudeChild, s.envPassthrough, extraEnv...)
 
 	// Only once the sandbox is settled: a refused run starts no process.
 	br.ensureViewer(s)
@@ -1545,6 +1549,7 @@ func settingsFor(cfg *Config, sp BrainSpec) *brainSettings {
 		queueMode:       cfg.Queue.Mode,
 		maxPending:      cfg.Queue.MaxPending,
 		credsDir:        credentialsDirOf(cfg),
+		envPassthrough:  append([]string(nil), cfg.ChildEnvPassthrough...),
 	}
 }
 
