@@ -1098,32 +1098,42 @@ func resolvedForTest(t *testing.T, p string) string {
 // "On" from the config alone, so the status warns when runs are refused for
 // a missing sandbox-exec or a profile that cannot be built.
 func TestStatusWarnsWhenSandboxDoesNotApply(t *testing.T) {
-	const on = `, "sandbox": {"enabled": true}`
-	const brains = `, "brains": [
-		{"name": "a", "work_dir": "~/a", "handles_dms": true},
-		{"name": "b", "work_dir": "~/b", "groups": ["120363000000000000@g.us"]}]`
+	a := BrainManifest{ID: "a", Name: "A", Routing: BrainRouting{HandlesDMs: true}}
+	b := BrainManifest{ID: "b", Name: "B", Routing: BrainRouting{Groups: []string{"120363000000000000@g.us"}}}
 	cases := []struct {
-		name, extra string
-		breakIt     func(sp *SandboxProfiler)
-		needsExec   bool   // the case expects sandbox-exec to work
-		want        string // "" for no sandbox warning
+		name      string
+		atHome    bool // brain a's folder is the home folder, and there is no b
+		breakIt   func(sp *SandboxProfiler)
+		needsExec bool   // the case expects sandbox-exec to work
+		want      string // "" for no sandbox warning
 	}{
-		{"working sandbox", on + brains, nil, true, ""},
-		{"sandbox-exec missing", on + brains,
+		{"working sandbox", false, nil, true, ""},
+		{"sandbox-exec missing", false,
 			func(sp *SandboxProfiler) { sp.execPath = "/nonexistent/sandbox-exec" }, false, "cannot run"},
 		// b's folder is in a's profile too, so both brains are refused.
-		{"brain folder the profile cannot hold", on + brains,
+		{"brain folder the profile cannot hold", false,
 			func(sp *SandboxProfiler) { sp.workDirs["b"] = []string{sp.workDirs["b"][0] + "\nx"} }, true, "line break), so brains a, b refuse every message"},
 		// config.json accepts a brain at ~, which the dashboard refuses.
-		{"brain folder at the home folder", on + `, "brains": [{"name": "a", "work_dir": "~", "handles_dms": true}]`,
-			nil, true, "is your home folder or holds it"},
+		{"brain folder at the home folder", true, nil, true, "is your home folder or holds it"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			if tc.needsExec {
 				requireSandboxExec(t)
 			}
-			tb := newTestBridge(t, tc.extra)
+			tb := newTestBridge(t, `, "sandbox": {"enabled": true}`)
+			if tc.atHome {
+				ref := brainFolder(t, "~", a)
+				if _, err := tb.cfgs.Update("", func(c *Config) error {
+					c.BrainDirs = append(c.BrainDirs, ref)
+					return nil
+				}); err != nil {
+					t.Fatal(err)
+				}
+			} else {
+				tb.addFolderBrain(t, a)
+				tb.addFolderBrain(t, b)
+			}
 			if tc.breakIt != nil {
 				sp := tb.brainMgr.profiler
 				sp.mu.Lock()

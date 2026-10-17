@@ -66,15 +66,26 @@ func (f *fakePlaudFixture) calls() string {
 	return string(b)
 }
 
-func plaudBridge(t *testing.T, extra string) (*testBridge, *fakePlaudFixture) {
-	return plaudBridgeWith(t, `, "brains": [{"name": "p", "work_dir": "~/p", "handles_dms": true}]`, extra)
+// plaudDMBrain is brain p, which gets the DMs: the one brain of plaudBridge.
+var plaudDMBrain = BrainManifest{ID: "p", Name: "P", Routing: BrainRouting{HandlesDMs: true}}
+
+// plaudGroupBrain is a brain id that serves the group and no DMs.
+func plaudGroupBrain(id string) BrainManifest {
+	return BrainManifest{ID: id, Name: strings.ToUpper(id), Routing: BrainRouting{Groups: []string{"120363000000000000@g.us"}}}
 }
 
-// plaudBridgeWith takes top-level settings (brains, allowed numbers) and
-// extra plaud settings.
-func plaudBridgeWith(t *testing.T, top, plaud string) (*testBridge, *fakePlaudFixture) {
+func plaudBridge(t *testing.T, extra string) (*testBridge, *fakePlaudFixture) {
+	return plaudBridgeWith(t, "", extra, plaudDMBrain)
+}
+
+// plaudBridgeWith takes top-level settings (allowed numbers), extra plaud
+// settings and the folder brains to add once the bridge runs.
+func plaudBridgeWith(t *testing.T, top, plaud string, brains ...BrainManifest) (*testBridge, *fakePlaudFixture) {
 	fp := newFakePlaud(t)
 	tb := newTestBridge(t, top+`, "plaud": {"enabled": true, "cli_path": "`+os.Args[0]+`"`+plaud+`}`)
+	for _, m := range brains {
+		tb.addFolderBrain(t, m)
+	}
 	return tb, fp
 }
 
@@ -132,34 +143,29 @@ func TestPlaudSummariesStayOutOfGroups(t *testing.T) {
 		other = "15559876543@s.whatsapp.net"
 		group = "120363000000000000@g.us"
 	)
-	dmBrain := `{"name": "p", "work_dir": "~/p", "handles_dms": true}`
 	for _, c := range []struct {
-		name  string
-		top   string // brains and other top-level settings
-		plaud string
-		add   *BrainManifest // a folder brain added after start
-		brain string         // brain that must run the recording
-		want  string         // chat that must get the answer
+		name   string
+		plaud  string
+		brains []BrainManifest
+		brain  string // brain that must run the recording
+		want   string // chat that must get the answer
 	}{
 		{name: "group brain without a reply chat answers in your DM",
-			top:   `, "brains": [` + dmBrain + `, {"name": "g", "work_dir": "~/g", "groups": ["` + group + `"]}]`,
-			plaud: `, "brain": "g"`, brain: "g", want: dm},
+			brains: []BrainManifest{plaudDMBrain, plaudGroupBrain("g")},
+			plaud:  `, "brain": "g"`, brain: "g", want: dm},
 		{name: "a group as reply chat is passed over for your DM",
-			top:   `, "brains": [` + dmBrain + `]`,
-			plaud: `, "brain": "g"`, add: &BrainManifest{ID: "g", Name: "G", ReplyChat: group}, brain: "g", want: dm},
+			brains: []BrainManifest{plaudDMBrain, {ID: "g", Name: "G", ReplyChat: group}},
+			plaud:  `, "brain": "g"`, brain: "g", want: dm},
 		{name: "a direct reply chat is used",
-			top:   `, "brains": [` + dmBrain + `]`,
-			plaud: `, "brain": "g"`, add: &BrainManifest{ID: "g", Name: "G", ReplyChat: other}, brain: "g", want: other},
+			brains: []BrainManifest{plaudDMBrain, {ID: "g", Name: "G", ReplyChat: other}},
+			plaud:  `, "brain": "g"`, brain: "g", want: other},
 		{name: "automatic: the fallback brain that serves a group answers in your DM",
-			top:   `, "brains": [{"name": "f", "work_dir": "~/f", "groups": ["` + group + `"]}]`,
-			brain: "f", want: dm},
+			brains: []BrainManifest{plaudGroupBrain("f")},
+			brain:  "f", want: dm},
 	} {
 		t.Run(c.name, func(t *testing.T) {
-			tb, fp := plaudBridgeWith(t, c.top, c.plaud)
+			tb, fp := plaudBridgeWith(t, "", c.plaud, c.brains...)
 			dir := filepath.Join(tb.home, c.brain)
-			if c.add != nil {
-				dir = tb.addFolderBrain(t, *c.add)
-			}
 			if err := plaudDeliver(t, tb, fp); err != nil {
 				t.Fatal(err)
 			}
@@ -182,7 +188,7 @@ func TestPlaudSummariesStayOutOfGroups(t *testing.T) {
 // nothing is written to the media folder, and the reason shows on the
 // dashboard. Once there is a DM, it arrives.
 func TestPlaudWithoutAPrivateChatWaits(t *testing.T) {
-	tb, fp := plaudBridgeWith(t, `, "allowed_numbers": [], "brains": [{"name": "f", "work_dir": "~/f", "groups": ["120363000000000000@g.us"]}]`, "")
+	tb, fp := plaudBridgeWith(t, `, "allowed_numbers": []`, "", plaudGroupBrain("f"))
 	err := plaudDeliver(t, tb, fp)
 	if err == nil || !strings.Contains(err.Error(), "no private chat") {
 		t.Fatalf("poll error = %v, want the missing private chat", err)
@@ -221,7 +227,7 @@ func TestPlaudWithoutAPrivateChatWaits(t *testing.T) {
 // a brain that is not running, even one the brain list shows (its folder
 // is gone), but still save the rest while the picked one is gone.
 func TestPlaudMissingBrainIsReported(t *testing.T) {
-	tb, fp := plaudBridgeWith(t, `, "brains": [{"name": "p", "work_dir": "~/p", "handles_dms": true}], "brain_dirs": [{"path": "~/gone", "approved": {"id": "gone", "name": "Gone"}}]`, `, "brain": "ghost"`)
+	tb, fp := plaudBridgeWith(t, `, "brain_dirs": [{"path": "~/gone", "approved": {"id": "gone", "name": "Gone"}}]`, `, "brain": "ghost"`, plaudDMBrain)
 	err := plaudDeliver(t, tb, fp)
 	if err == nil || !strings.Contains(err.Error(), "brain ghost") {
 		t.Fatalf("poll error = %v, want the missing brain named", err)
@@ -350,7 +356,7 @@ func TestPlaudFailingRecordingIsGivenUpInTime(t *testing.T) {
 // not fail, and log the same error, on every interval. The card still says
 // what is missing, from the status call.
 func TestPlaudWithoutAPrivateChatIsQuietWhileNothingWaits(t *testing.T) {
-	tb, fp := plaudBridgeWith(t, `, "allowed_numbers": [], "brains": [{"name": "f", "work_dir": "~/f", "groups": ["120363000000000000@g.us"]}]`, "")
+	tb, fp := plaudBridgeWith(t, `, "allowed_numbers": []`, "", plaudGroupBrain("f"))
 	_ = os.MkdirAll(filepath.Dir(tb.plaud.tokenPath()), 0o700)
 	_ = os.WriteFile(tb.plaud.tokenPath(), []byte("{}"), 0o600)
 	if err := tb.plaud.saveState(&plaudState{Seen: []string{plaudOld1}, Pending: map[string]float64{}}); err != nil {
@@ -373,21 +379,16 @@ func TestPlaudWithoutAPrivateChatIsQuietWhileNothingWaits(t *testing.T) {
 // The expiry notice follows the same rule: your DM for a group brain, and
 // nothing at all without a private chat (the dashboard shows the expiry).
 func TestPlaudExpiryNoticeStaysPrivate(t *testing.T) {
-	const group = "120363000000000000@g.us"
 	for _, c := range []struct {
 		name string
 		top  string
 		want []string // chats that get the notice
 	}{
-		{"group brain: your DM",
-			`, "brains": [{"name": "p", "work_dir": "~/p", "handles_dms": true}, {"name": "g", "work_dir": "~/g", "groups": ["` + group + `"]}]`,
-			[]string{"15551234567@s.whatsapp.net"}},
-		{"no private chat: nobody",
-			`, "allowed_numbers": [], "brains": [{"name": "p", "work_dir": "~/p", "handles_dms": true}, {"name": "g", "work_dir": "~/g", "groups": ["` + group + `"]}]`,
-			nil},
+		{"group brain: your DM", "", []string{"15551234567@s.whatsapp.net"}},
+		{"no private chat: nobody", `, "allowed_numbers": []`, nil},
 	} {
 		t.Run(c.name, func(t *testing.T) {
-			tb, fp := plaudBridgeWith(t, c.top, `, "brain": "g"`)
+			tb, fp := plaudBridgeWith(t, c.top, `, "brain": "g"`, plaudDMBrain, plaudGroupBrain("g"))
 			_ = os.MkdirAll(filepath.Dir(tb.plaud.tokenPath()), 0o700)
 			_ = os.WriteFile(tb.plaud.tokenPath(), []byte("{}"), 0o600)
 			fp.write("expired", "")
@@ -409,22 +410,21 @@ func TestPlaudExpiryNoticeStaysPrivate(t *testing.T) {
 // belongs to another brain or when there is no private chat.
 func TestPlaudStatusShowsWhereSummariesGo(t *testing.T) {
 	const dm = "15551234567@s.whatsapp.net"
-	brains := `, "brains": [{"name": "p", "work_dir": "~/p", "handles_dms": true}, {"name": "g", "work_dir": "~/g", "groups": ["120363000000000000@g.us"]}]`
 	for _, c := range []struct {
 		name  string
 		top   string
 		plaud string
 		want  map[string]any
 	}{
-		{"DM brain", brains, "",
+		{"DM brain", "", "",
 			map[string]any{"summary_chat": dm, "summary_to_you": true, "summary_chat_brain": nil, "summary_error": nil}},
-		{"group brain: your DM, which the DM brain answers", brains, `, "brain": "g"`,
+		{"group brain: your DM, which the DM brain answers", "", `, "brain": "g"`,
 			map[string]any{"summary_chat": dm, "summary_to_you": true, "summary_chat_brain": "p", "summary_error": nil}},
-		{"no private chat", `, "allowed_numbers": []` + brains, `, "brain": "g"`,
+		{"no private chat", `, "allowed_numbers": []`, `, "brain": "g"`,
 			map[string]any{"summary_chat": nil, "summary_error": "no private chat for Plaud summaries — add your number under Settings → Access, or set brain g's reply chat to a direct chat"}},
 	} {
 		t.Run(c.name, func(t *testing.T) {
-			tb, _ := plaudBridgeWith(t, c.top, c.plaud)
+			tb, _ := plaudBridgeWith(t, c.top, c.plaud, plaudDMBrain, plaudGroupBrain("g"))
 			var got map[string]any
 			_ = json.Unmarshal(tb.do("GET", "/api/plaud/status?account=0", nil).Body.Bytes(), &got)
 			for k, want := range c.want {

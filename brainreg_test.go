@@ -195,6 +195,53 @@ func TestResolveBrainsSkipsMissingAndClashing(t *testing.T) {
 	}
 }
 
+// TestResolveBrainsLeavesOutBadBrains: a brain that is not valid on its own,
+// or clashes with an earlier one, is left out and reported; the brain before
+// it keeps running.
+func TestResolveBrainsLeavesOutBadBrains(t *testing.T) {
+	const group = "120363000000000000@g.us"
+	cases := []struct {
+		name   string
+		dir    string // the second brain's folder, below home
+		second *BrainManifest
+		kind   string
+		detail string
+	}{
+		{"same id", "b", &BrainManifest{ID: "a", Name: "Other A"}, "invalid", `two brains use the id "a"`},
+		{"second DM brain", "b", &BrainManifest{ID: "b", Name: "B", Routing: BrainRouting{HandlesDMs: true}}, "invalid", "both handle DMs"},
+		{"second default", "b", &BrainManifest{ID: "b", Name: "B", Routing: BrainRouting{Default: true}}, "invalid", "both marked default"},
+		{"group claimed twice", "b", &BrainManifest{ID: "b", Name: "B", Routing: BrainRouting{Groups: []string{group}}}, "invalid", "is claimed by both"},
+		{"folder inside the other brain's", "a/b", &BrainManifest{ID: "b", Name: "B"}, "invalid", "is inside brain folder"},
+		{"id that is not a slug", "b", &BrainManifest{ID: "Work.Brain", Name: "B"}, "invalid", "must be 1–40 lowercase letters"},
+		{"no name", "b", &BrainManifest{ID: "b"}, "invalid", "needs a name"},
+		{"no approved manifest", "b", nil, "unapproved", "re-add this brain"},
+		{"no folder", "gone", &BrainManifest{ID: "b", Name: "B"}, "missing", "folder not found"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			home := canonicalDir(t.TempDir())
+			t.Setenv("HOME", home)
+			first := BrainManifest{ID: "a", Name: "A", Routing: BrainRouting{HandlesDMs: true, Default: true, Groups: []string{group}}}
+			for _, d := range []string{"a", "a/b", "b"} {
+				if err := os.MkdirAll(filepath.Join(home, d), 0o700); err != nil {
+					t.Fatal(err)
+				}
+			}
+			cfg := folderBrainConfig(t, home,
+				BrainRef{Path: filepath.Join(home, "a"), Approved: &first},
+				BrainRef{Path: filepath.Join(home, tc.dir), Approved: tc.second},
+			)
+			specs, issues := ResolveBrains(cfg)
+			if len(specs) != 1 || specs[0].Manifest.ID != "a" {
+				t.Errorf("specs = %+v, want only a", specs)
+			}
+			if len(issues) != 1 || issues[0].Kind != tc.kind || !strings.Contains(issues[0].Detail, tc.detail) {
+				t.Errorf("issues = %+v, want one %s issue saying %q", issues, tc.kind, tc.detail)
+			}
+		})
+	}
+}
+
 func TestReadManifestMissing(t *testing.T) {
 	if _, err := ReadManifest(t.TempDir()); !errors.Is(err, fs.ErrNotExist) {
 		t.Errorf("err = %v, want not-exist", err)

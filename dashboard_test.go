@@ -219,7 +219,8 @@ func TestHTTPSendRefusesStatusBroadcastAndChannels(t *testing.T) {
 func TestSendRefusesMissingJIDOrText(t *testing.T) {
 	// Blank text gives no chunks, so it used to send nothing while still
 	// answering "sent" and writing the blank text to the brain's history.
-	tb := newTestBridge(t, `, "brains": [{"name": "p", "work_dir": "~/p", "handles_dms": true}]`)
+	tb := newTestBridge(t, "")
+	dir := tb.addFolderBrain(t, BrainManifest{ID: "p", Name: "P", Routing: BrainRouting{HandlesDMs: true}})
 	cases := []struct {
 		name string
 		body string
@@ -244,13 +245,14 @@ func TestSendRefusesMissingJIDOrText(t *testing.T) {
 	if out := tb.dev.Outbox(); len(out) != 0 {
 		t.Errorf("outbox = %+v, want nothing sent", out)
 	}
-	if hist, _ := os.ReadFile(filepath.Join(tb.home, "p", "conversation-history.jsonl")); len(hist) != 0 {
+	if hist, _ := os.ReadFile(filepath.Join(dir, "conversation-history.jsonl")); len(hist) != 0 {
 		t.Errorf("history = %s, want nothing recorded", hist)
 	}
 }
 
 func TestIngestConfinedToMediaDir(t *testing.T) {
-	tb := newTestBridge(t, `, "ingest": {"enabled": true}, "brains": [{"name": "personal", "work_dir": "~/p", "handles_dms": true}]`)
+	tb := newTestBridge(t, `, "ingest": {"enabled": true}`)
+	dir := tb.addFolderBrain(t, BrainManifest{ID: "personal", Name: "Personal", Routing: BrainRouting{HandlesDMs: true}})
 	cfg := tb.cfgs.Get()
 	inside := filepath.Join(cfg.MediaDir, "upload", "scan.pdf")
 	_ = os.MkdirAll(filepath.Dir(inside), 0o700)
@@ -276,7 +278,7 @@ func TestIngestConfinedToMediaDir(t *testing.T) {
 		}
 	}
 	waitFor(t, 5*time.Second, "ingest reply", func() bool { return len(tb.dev.Outbox()) > 0 })
-	hist, _ := os.ReadFile(filepath.Join(tb.home, "p", "conversation-history.jsonl"))
+	hist, _ := os.ReadFile(filepath.Join(dir, "conversation-history.jsonl"))
 	if !strings.Contains(string(hist), "[attachment: "+canonicalDir(inside)+"]") {
 		t.Errorf("history does not record the ingested file:\n%s", hist)
 	}
@@ -455,25 +457,30 @@ func TestReplyChatFor(t *testing.T) {
 		g1 = "120363000000000001@g.us"
 		g2 = "120363000000000002@g.us"
 	)
+	dmBrain := BrainManifest{ID: "p", Name: "P", Routing: BrainRouting{HandlesDMs: true}}
 	for _, c := range []struct {
-		name  string
-		extra string
-		brain string
-		want  string
+		name   string
+		extra  string
+		brains []BrainManifest
+		brain  string
+		want   string
 	}{
-		{"DM brain with a group answers in the DM",
-			`, "brains": [{"name": "p", "work_dir": "~/p", "handles_dms": true, "groups": ["` + g1 + `"]}]`, "p", dm},
-		{"fallback brain gets the DMs, so it answers there before its group",
-			`, "brains": [{"name": "f", "work_dir": "~/f", "default": true, "groups": ["` + g1 + `"]}]`, "f", dm},
-		{"group brain answers in its group",
-			`, "brains": [{"name": "p", "work_dir": "~/p", "handles_dms": true}, {"name": "g", "work_dir": "~/g", "groups": ["` + g2 + `"]}]`, "g", g2},
-		{"brain without chats has none",
-			`, "brains": [{"name": "p", "work_dir": "~/p", "handles_dms": true}, {"name": "n", "work_dir": "~/n"}]`, "n", ""},
-		{"no allowed number: the fallback's group",
-			`, "allowed_numbers": [], "brains": [{"name": "f", "work_dir": "~/f", "groups": ["` + g1 + `"]}]`, "f", g1},
+		{"DM brain with a group answers in the DM", "",
+			[]BrainManifest{{ID: "p", Name: "P", Routing: BrainRouting{HandlesDMs: true, Groups: []string{g1}}}}, "p", dm},
+		{"fallback brain gets the DMs, so it answers there before its group", "",
+			[]BrainManifest{{ID: "f", Name: "F", Routing: BrainRouting{Default: true, Groups: []string{g1}}}}, "f", dm},
+		{"group brain answers in its group", "",
+			[]BrainManifest{dmBrain, {ID: "g", Name: "G", Routing: BrainRouting{Groups: []string{g2}}}}, "g", g2},
+		{"brain without chats has none", "",
+			[]BrainManifest{dmBrain, {ID: "n", Name: "N"}}, "n", ""},
+		{"no allowed number: the fallback's group", `, "allowed_numbers": []`,
+			[]BrainManifest{{ID: "f", Name: "F", Routing: BrainRouting{Groups: []string{g1}}}}, "f", g1},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			tb := newTestBridge(t, c.extra)
+			for _, m := range c.brains {
+				tb.addFolderBrain(t, m)
+			}
 			if got := tb.replyChatFor(tb.brainMgr.Get(c.brain), tb.cfgs.Get()); got != c.want {
 				t.Errorf("replyChatFor(%s) = %q, want %q", c.brain, got, c.want)
 			}
@@ -709,7 +716,8 @@ func TestGetConfigLocksNoSettings(t *testing.T) {
 }
 
 func TestPutConfigKeepsBrainsAndReportsRestart(t *testing.T) {
-	tb := newTestBridge(t, `, "brains": [{"name": "p", "work_dir": "~/p"}]`)
+	tb := newTestBridge(t, "")
+	tb.addFolderBrain(t, BrainManifest{ID: "p", Name: "P"})
 	var got struct {
 		ETag   string          `json:"etag"`
 		Config json.RawMessage `json:"config"`
@@ -723,7 +731,7 @@ func TestPutConfigKeepsBrainsAndReportsRestart(t *testing.T) {
 	if w.Code != 200 || !strings.Contains(w.Body.String(), "log_level") {
 		t.Fatalf("put: %d %s", w.Code, w.Body.String())
 	}
-	if len(tb.cfgs.FileCopy().Brains) != 1 {
+	if len(tb.cfgs.FileCopy().BrainDirs) != 1 {
 		t.Error("saving settings must not drop brains")
 	}
 	if !tb.cfgs.Get().Triggers.Matches("@c hi") || tb.cfgs.Get().Triggers.Matches("@carla") {
@@ -774,7 +782,8 @@ func TestAddBrainBackupDefaults(t *testing.T) {
 }
 
 func TestOTPGuardHandsCodeToLocalScripts(t *testing.T) {
-	tb := newTestBridge(t, `, "otp_guard": true, "otp_markers": ["Examplebank 2FA"], "brains": [{"name": "p", "work_dir": "~/p", "handles_dms": true}]`)
+	tb := newTestBridge(t, `, "otp_guard": true, "otp_markers": ["Examplebank 2FA"]`)
+	dir := tb.addFolderBrain(t, BrainManifest{ID: "p", Name: "P", Routing: BrainRouting{HandlesDMs: true}})
 	// A local script asks for a code through /send...
 	r := httptest.NewRequest("POST", "http://127.0.0.1:8765/send", strings.NewReader(`{"jid":"15551234567@s.whatsapp.net","text":"Examplebank 2FA: reply with the code"}`))
 	r.Host = "127.0.0.1:8765"
@@ -794,7 +803,7 @@ func TestOTPGuardHandsCodeToLocalScripts(t *testing.T) {
 	if st, _ := os.Stat(otp); st.Mode().Perm() != 0o600 {
 		t.Errorf("otp file mode %v", st.Mode().Perm())
 	}
-	hist, _ := os.ReadFile(filepath.Join(tb.home, "p", "conversation-history.jsonl"))
+	hist, _ := os.ReadFile(filepath.Join(dir, "conversation-history.jsonl"))
 	if strings.Contains(string(hist), "483920") {
 		t.Error("the code must not be written to the conversation history")
 	}
