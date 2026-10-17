@@ -875,7 +875,8 @@ func TestPlaudTranscriptPathFindsTheEarlierFile(t *testing.T) {
 }
 
 // "Check now" hands new recordings to a brain, so with sending turned off
-// it is refused, and a poll asked for anyway does nothing.
+// it is refused, and a check asked for anyway does nothing: one from the
+// poller, or one Check now started just before the switch went off.
 func TestPlaudCheckNowNeedsSendingOn(t *testing.T) {
 	tb, fp := plaudBridge(t, "")
 	plaudSignIn(t, tb)
@@ -893,6 +894,12 @@ func TestPlaudCheckNowNeedsSendingOn(t *testing.T) {
 	if err := tb.plaud.Poll(context.Background()); err != nil {
 		t.Fatal(err)
 	}
+	if !tb.plaud.beginPoll() {
+		t.Fatal("a check is still running")
+	}
+	if err := tb.plaud.runPoll(context.Background()); err != nil {
+		t.Fatal(err)
+	}
 	time.Sleep(200 * time.Millisecond)
 	if calls := fp.calls(); calls != "" || tb.plaudForwarded() {
 		t.Fatalf("Plaud was checked with sending off:\n%s", calls)
@@ -905,6 +912,37 @@ func TestPlaudCheckNowNeedsSendingOn(t *testing.T) {
 		t.Fatalf("check now = %d %s, want 202", w.Code, w.Body.String())
 	}
 	waitFor(t, 10*time.Second, "brain reply", func() bool { return len(tb.dev.Outbox()) > 0 })
+}
+
+// While a check is running, "Check now" says so instead of claiming to
+// start another one that would do nothing.
+func TestPlaudCheckNowWhileChecking(t *testing.T) {
+	tb, fp := plaudBridge(t, "")
+	plaudSignIn(t, tb)
+	fp.files(plaudOld1)
+	for _, c := range []struct {
+		busy bool
+		code int
+		want string
+	}{
+		{true, 200, "already checking"},
+		{false, 202, "syncing"},
+	} {
+		tb.plaud.mu.Lock()
+		tb.plaud.busy = c.busy
+		tb.plaud.mu.Unlock()
+		w := tb.do("POST", "/api/plaud/sync", nil)
+		var got struct{ Status string }
+		_ = json.Unmarshal(w.Body.Bytes(), &got)
+		if w.Code != c.code || got.Status != c.want {
+			t.Errorf("check now (busy=%v) = %d %q, want %d %q", c.busy, w.Code, got.Status, c.code, c.want)
+		}
+	}
+	waitFor(t, 10*time.Second, "the check to finish", func() bool {
+		tb.plaud.mu.Lock()
+		defer tb.plaud.mu.Unlock()
+		return !tb.plaud.busy && tb.plaudStateExists()
+	})
 }
 
 func TestPlaudBrainAccessSharesTheLogin(t *testing.T) {

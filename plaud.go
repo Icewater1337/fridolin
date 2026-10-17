@@ -509,24 +509,38 @@ func (p *PlaudManager) saveState(st *plaudState) error {
 
 // Poll checks for new recordings once. The first poll for an account only
 // remembers what already exists, so connecting never floods a brain with
-// old recordings. With "Send new recordings to a brain" off (plaud.enabled)
-// it does nothing, whoever asks.
+// old recordings. It does nothing while "Send new recordings to a brain"
+// (plaud.enabled) is off; see runPoll.
 func (p *PlaudManager) Poll(ctx context.Context) error {
-	if !p.cfg().Plaud.Enabled {
+	if !p.beginPoll() {
 		return nil
 	}
+	return p.runPoll(ctx)
+}
+
+// beginPoll marks a check as running; false means one already is.
+func (p *PlaudManager) beginPoll() bool {
 	p.mu.Lock()
+	defer p.mu.Unlock()
 	if p.busy {
-		p.mu.Unlock()
-		return nil
+		return false
 	}
 	p.busy = true
-	p.mu.Unlock()
+	return true
+}
+
+// runPoll does the check beginPoll started, and ends it. With "Send new
+// recordings to a brain" off (plaud.enabled) it does nothing, whoever asked
+// for it, in case the switch went off while the check was on its way.
+func (p *PlaudManager) runPoll(ctx context.Context) error {
 	defer func() {
 		p.mu.Lock()
 		p.busy = false
 		p.mu.Unlock()
 	}()
+	if !p.cfg().Plaud.Enabled {
+		return nil
+	}
 
 	err := p.poll(ctx)
 	p.mu.Lock()
@@ -953,10 +967,16 @@ func (b *Bridge) apiPlaudSync(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusConflict, "Turn on “Send new recordings to a brain” first: a check hands new recordings to the brain")
 		return
 	}
+	// A check that is already running covers this one; say so rather than
+	// claim to start one.
+	if !b.plaud.beginPoll() {
+		writeJSON(w, http.StatusOK, map[string]string{"status": "already checking"})
+		return
+	}
 	go func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
 		defer cancel()
-		if err := b.plaud.Poll(ctx); err != nil {
+		if err := b.plaud.runPoll(ctx); err != nil {
 			log.Printf("plaud: %v", err)
 		}
 	}()

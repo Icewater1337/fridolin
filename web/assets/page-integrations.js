@@ -116,7 +116,14 @@ export default {
         h('div.actions',
           save,
           // A check hands new recordings over, so it is offered only while that is on.
-          st.enabled ? btn('Check now', { icon: 'refresh', onClick: async () => { await post('/api/plaud/sync'); toast('Checking Plaud…', 'ok'); setTimeout(() => poller.kick(), 3000); } }) : null,
+          st.enabled ? btn('Check now', {
+            icon: 'refresh',
+            onClick: async () => {
+              const r = await post('/api/plaud/sync');
+              toast(r && r.status === 'already checking' ? 'Already checking Plaud…' : 'Checking Plaud…', 'ok');
+              setTimeout(() => poller.kick(), 3000);
+            },
+          }) : null,
           s.expired ? btn('Connect again', { icon: 'external', onClick: async () => { await post('/api/plaud/connect'); poller.kick(); } }) : null,
           btn('Disconnect', {
             kind: 'danger', icon: 'x', small: true,
