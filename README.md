@@ -76,6 +76,11 @@ and use the calendars you pick: list events, find free time, create events.
 the bridge — nightly summaries, alerts — or hand a brain files that arrived
 some other way.
 
+**Your own site.** Optionally, a website of your own on your domain: people
+sign in with Google or a password, and each page is a module in a private
+repository you link in the dashboard. Nothing goes live until you approve it.
+See [docs/SITE.md](docs/SITE.md).
+
 ---
 
 ## Requirements

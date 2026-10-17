@@ -1,0 +1,12 @@
+{
+  "version": 1,
+  "id": "welcome",
+  "title": "Welcome",
+  "description": "What this site is and how it grows",
+  "icon": "👋",
+  "color": "#3b5bdb",
+  "order": 1,
+  "route": "/welcome",
+  "access": { "roles": ["*"] },
+  "app": { "dist": "app", "base": "inject" }
+}

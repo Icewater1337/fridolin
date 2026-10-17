@@ -1,0 +1,20 @@
+{
+  "name": "fridolin-site",
+  "private": true,
+  "description": "The public website Fridolin serves: sign-in, users and the site modules from your own repository",
+  "type": "module",
+  "scripts": {
+    "start": "node --import tsx/esm server/main.ts",
+    "test": "node --import tsx/esm --test test/*.test.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "express": "^5.2.1",
+    "tsx": "^4.21.0"
+  },
+  "devDependencies": {
+    "@types/express": "^5.0.6",
+    "@types/node": "^24.12.2",
+    "typescript": "~6.0.2"
+  }
+}

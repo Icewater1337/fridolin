@@ -1184,3 +1184,16 @@ blockquote.preview {
 }
 .waiting-actions { justify-content: flex-end; }
 @media (max-width: 860px) { .waiting-actions { justify-content: flex-start; } }
+
+/* ── Site page ─────────────────────────────────────────────────────────── */
+.site-block { display: flex; flex-direction: column; gap: 8px; padding-top: 12px; border-top: 1px solid var(--border); }
+.site-block > h3, .card > h3 { margin: 0; font-size: 14px; }
+.site-block > summary, details.site-block > summary { cursor: pointer; font-weight: 600; font-size: 14px; }
+.site-key { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.site-key .mono { overflow-wrap: anywhere; white-space: normal; font-size: 12px; }
+.site-log pre, .site-error { max-height: 260px; overflow: auto; font-size: 12px; white-space: pre-wrap; overflow-wrap: anywhere; margin: 6px 0 0; }
+.site-log > summary, .site-history > summary { cursor: pointer; font-size: 13px; color: var(--muted); }
+.site-commits, .site-history ul, .site-review { margin: 0; padding-left: 18px; display: flex; flex-direction: column; gap: 4px; font-size: 13.5px; }
+.site-history li { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.site-change { display: flex; flex-direction: column; gap: 4px; padding: 8px 0; }
+.site-review .mono { overflow-wrap: anywhere; white-space: normal; }
