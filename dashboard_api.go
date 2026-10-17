@@ -300,7 +300,7 @@ func (b *Bridge) apiStopRun(w http.ResponseWriter, r *http.Request) {
 func (b *Bridge) apiLogs(w http.ResponseWriter, r *http.Request) {
 	after, _ := strconv.ParseInt(r.URL.Query().Get("after"), 10, 64)
 	limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
-	if limit <= 0 || limit > 2000 {
+	if limit <= 0 || limit > logRingLines {
 		limit = 500
 	}
 	lines, next := b.logs.Since(after, limit)

@@ -232,7 +232,7 @@ func runCmd(args []string) {
 // comes first even when the bridge then refuses to start (no config, one
 // that does not load, another bridge on the data dir).
 func runLog(console io.Writer, configFlag string) (*LogRing, string) {
-	ring := NewLogRing(2000)
+	ring := NewLogRing(logRingLines)
 	log.SetOutput(io.MultiWriter(console, ring))
 	log.Printf("Starting %s", versionLine())
 	return ring, configPath(configFlag)

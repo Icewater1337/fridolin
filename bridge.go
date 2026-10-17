@@ -105,7 +105,7 @@ func NewBridge(cfgs *ConfigStore, opts BridgeOptions) (_ *Bridge, err error) {
 		started:  time.Now(),
 	}
 	if b.logs == nil {
-		b.logs = NewLogRing(2000)
+		b.logs = NewLogRing(logRingLines)
 	}
 
 	mgr, err := NewBrainManager(cfg)
