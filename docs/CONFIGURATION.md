@@ -614,7 +614,12 @@ the owning brain's history, so the assistant knows what went out under its
 name. Text that is empty or only whitespace is refused with 400, since there
 would be nothing to send. Status, broadcast-list and channel JIDs
 (`…@broadcast`, `…@newsletter`) are refused with `400 {"error": …}`.
-`GET /health` returns `ok`. Both work without the dashboard token but refuse
+`GET /health` returns `ok` while the bridge runs, paired or not. `GET /ready`
+says whether `/send` can deliver: `200` once WhatsApp is connected (or in dev
+mode), `503` otherwise, both with
+`{"ready", "whatsapp", "version", "started_at"}`, where `whatsapp` is the
+connection state (`pairing`, `connecting`, `connected`, `logged-out`,
+`replaced`, …). None of these need the dashboard token, and all of them refuse
 requests sent by web pages.
 
 ### `ingest.enabled`

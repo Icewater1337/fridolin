@@ -280,6 +280,72 @@ func TestSendRefusesMissingJIDOrText(t *testing.T) {
 	}
 }
 
+// stateMessenger is the dev messenger with a WhatsApp state of the test's
+// choosing.
+type stateMessenger struct {
+	*devMessenger
+	state WAState
+}
+
+func (m stateMessenger) State() WAState { return m.state }
+
+func TestReadyReportsWhetherMessagesCanGoOut(t *testing.T) {
+	// /health only says the process is up. /ready tells a script (or
+	// setup) whether /send can deliver, without the dashboard token.
+	cases := []struct {
+		name  string
+		dev   bool
+		mode  string
+		ready bool
+	}{
+		{"connected", false, "connected", true},
+		{"not paired yet", false, "pairing", false},
+		{"connecting", false, "connecting", false},
+		{"logged out", false, "logged-out", false},
+		{"replaced by another session", false, "replaced", false},
+		{"dev mode simulates sending", true, "disabled", true},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			tb := newTestBridge(t, "")
+			if !c.dev {
+				tb.wa = stateMessenger{devMessenger: tb.dev, state: WAState{Mode: c.mode, OwnNumber: "15551234567"}}
+				tb.dev = nil
+			}
+			r := httptest.NewRequest("GET", "http://127.0.0.1:8765/ready", nil)
+			r.Host = "127.0.0.1:8765"
+			w := httptest.NewRecorder()
+			tb.h.ServeHTTP(w, r)
+
+			want := http.StatusServiceUnavailable
+			if c.ready {
+				want = http.StatusOK
+			}
+			var resp readyResponse
+			if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil || w.Code != want {
+				t.Fatalf("status %d (%v) %s, want %d with JSON", w.Code, err, w.Body.String(), want)
+			}
+			if resp.Ready != c.ready || resp.WhatsApp != c.mode || resp.Version != bridgeVersion() || !resp.StartedAt.Equal(tb.started) {
+				t.Errorf("body %+v, want ready=%v whatsapp=%q version=%q started_at=%v", resp, c.ready, c.mode, bridgeVersion(), tb.started)
+			}
+			if strings.Contains(w.Body.String(), "15551234567") {
+				t.Errorf("/ready names the account: %s", w.Body.String())
+			}
+		})
+	}
+
+	t.Run("refused under another host name", func(t *testing.T) {
+		tb := newTestBridge(t, "")
+		r := httptest.NewRequest("GET", "http://evil.example.com:8765/ready", nil)
+		r.Host = "evil.example.com:8765"
+		w := httptest.NewRecorder()
+		tb.h.ServeHTTP(w, r)
+		if w.Code != http.StatusMisdirectedRequest {
+			t.Errorf("status %d, want 421", w.Code)
+		}
+	})
+}
+
 func TestIngestConfinedToMediaDir(t *testing.T) {
 	tb := newTestBridge(t, `, "ingest": {"enabled": true}`)
 	dir := tb.addFolderBrain(t, BrainManifest{ID: "personal", Name: "Personal", Routing: BrainRouting{HandlesDMs: true}})

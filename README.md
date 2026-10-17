@@ -295,6 +295,10 @@ curl -X POST http://127.0.0.1:8765/send \
   -d '{"jid":"120363000000000000@g.us","text":"Deploy finished ✅"}'
 ```
 
+`curl -fsS http://127.0.0.1:8765/ready` succeeds only while WhatsApp is
+connected, so a script can check first; its JSON names the connection state
+and the bridge's version.
+
 To hand a brain files that arrived some other way (a web upload, a recorder
 sync), write them under `~/.fridolin/media/` and turn on
 `ingest.enabled`:

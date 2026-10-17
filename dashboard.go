@@ -26,8 +26,8 @@ import (
 //     API call needs the token in <data_dir>/dashboard.token — a directory the
 //     sandbox denies to brains.
 //
-// /send and /ingest keep their original token-free contract for local
-// scripts, but get the same Host and Origin checks.
+// /send, /ingest, /health and /ready keep their token-free contract for
+// local scripts, but get the same Host and Origin checks.
 
 // DashboardToken is the shared secret between the bridge and your browser.
 type DashboardToken struct {
@@ -168,6 +168,7 @@ func (b *Bridge) newHTTPHandler(listen string) http.Handler {
 	mux.HandleFunc("GET /health", func(w http.ResponseWriter, r *http.Request) {
 		fmt.Fprintln(w, "ok")
 	})
+	mux.HandleFunc("GET /ready", b.httpReady)
 	mux.HandleFunc("POST /send", b.httpSend)
 	mux.HandleFunc("POST /ingest", b.httpIngest)
 	// The site builder's MCP servers; each brain's own token (site_builder.go).

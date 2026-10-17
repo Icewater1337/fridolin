@@ -58,8 +58,9 @@ The person's data lives in brain folders they choose and in
    You cannot scan QR codes or approve Google or Plaud sign-ins for them.
 
 4. **Verify:** `curl -s http://127.0.0.1:8765/health` prints `ok`;
-   `./fridolin check` shows the brains and routing. Ask the
-   person to send the bridge a DM and confirm a reply arrives.
+   `curl -s http://127.0.0.1:8765/ready` shows `"whatsapp":"connected"` once
+   the phone is paired; `./fridolin check` shows the brains and routing. Ask
+   the person to send the bridge a DM and confirm a reply arrives.
 
 Reopen the dashboard with `./fridolin open`.
 
