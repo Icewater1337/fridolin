@@ -98,6 +98,29 @@ Configs from before brain folders define brains inline in `config.json`
 the same id — sessions and history carry over. Editing an inline brain in the
 dashboard migrates that one brain.
 
+## What a brain loads
+
+Each message is one `claude -p` run in the brain's folder. Its prompt is
+the brain's prompt file (`brain-prompt.md`) followed by the recent chat
+history and the new message; Claude Code adds its own system prompt. From
+the brain's folder it also loads the Claude Code setup a session started
+there would: `CLAUDE.md` and `CLAUDE.local.md`, the settings, skills,
+agents, commands and rules in `.claude/`, and the MCP servers in
+`.mcp.json`.
+
+It does not load your own setup: not your user settings in
+`~/.claude/settings.json` (their hooks, plugins and permissions, so neither
+the `deny` rules nor the guard hooks there), nor the skills, agents and
+commands in `~/.claude`, nor the MCP servers in `~/.claude.json`, of
+plugins or of your claude.ai account. Those are yours, and a brain acts for
+whoever may message it. What a brain needs belongs in its folder, the
+permission rules and hooks that should hold for it too. Claude Code still
+loads the `CLAUDE.md` files and `.claude/` folders above the brain's
+folder, though, `~/CLAUDE.md` and `~/.claude/CLAUDE.md` included.
+[`inherit_claude_user_config`](CONFIGURATION.md#inherit_claude_user_config)
+brings back the old behaviour, in which brains load all of your setup; read
+its warning first.
+
 ## Isolation
 
 With `sandbox.enabled` (macOS), every run is wrapped in `sandbox-exec`: the
@@ -107,7 +130,7 @@ credentials, browser and mail data, shell history), and it cannot rename or
 delete the folders above them, which would move them out from under the
 sandbox's rules. It can read but not change the files that run outside its
 sandbox: Claude Code's settings, hooks, `CLAUDE.md`, skills and plugins
-(which every other brain loads too), the `CLAUDE.md` files and `.claude`
+(which your own sessions load), the `CLAUDE.md` files and `.claude`
 folders above brain folders, Claude Code's auto-memory,
 `~/Library/LaunchAgents`, your shell startup files, and the bridge's own
 binary and the tools it runs. It can still write most other places your

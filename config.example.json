@@ -50,6 +50,7 @@
   "backup": {"enabled": false, "daily_at": "03:30", "keep_versions_days": 30},
 
   "dangerously_skip_permissions": true,
+  "inherit_claude_user_config": false,
   "otp_guard": true,
   "viewer": false,
   "http_listen": "127.0.0.1:8765",

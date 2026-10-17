@@ -125,6 +125,54 @@ conversation-only assistant with no tool access.
 
 Read [Security](../README.md#security) before running with this on.
 
+### `inherit_claude_user_config`
+
+Set it in `config.json`; the dashboard has no field for it.
+
+Off by default: a brain loads only its own folder's Claude Code setup, never
+yours. Every brain runs with `--setting-sources project,local` and
+`--strict-mcp-config`, plus `--mcp-config <brain folder>/.mcp.json` when the
+folder has that file. So a brain gets the `CLAUDE.md`, `.claude/` settings,
+skills, agents and commands and the `.mcp.json` servers of its own folder,
+but not your user settings in `~/.claude/settings.json` (their hooks,
+plugins, permissions, `env` and `apiKeyHelper`), the skills, agents and
+commands in `~/.claude`, the MCP servers in `~/.claude.json`, or those of
+plugins and of your claude.ai account. Given with `--mcp-config`, a
+`.mcp.json` the CLI cannot use stops it from starting at all, where it used
+to be ignored: one that is not a JSON object with an `mcpServers` object
+(`{}` or a misspelt key included). The bridge therefore leaves out such a
+file, and a symlink, anything but a regular file, or a file over 256 KiB,
+and its log says why.
+
+These flags do not skip the `CLAUDE.md` and `CLAUDE.local.md` files and the
+`.claude/` folders (their `CLAUDE.md`, rules, skills, agents and commands)
+in the folders above a brain's folder: Claude Code reads them as part of
+the project, so a brain in your home folder still loads `~/CLAUDE.md`,
+`~/.claude/CLAUDE.md` and `~/.claude/rules`.
+
+`true` brings back the old behaviour: brains load all of your setup, like a
+Claude Code session you start yourself in the brain's folder.
+
+When you upgrade to a version with this setting, check what your brains
+relied on in your own setup:
+
+- Permission rules and hooks in `~/.claude/settings.json` no longer apply
+  to brains, the `deny` rules and `PreToolUse` guards among them. Copy the
+  ones a brain should keep into its folder's `.claude/settings.json`.
+- MCP servers from `~/.claude.json`, from plugins and from your claude.ai
+  account no longer load. Add the ones a brain needs to its `.mcp.json`.
+- Then send each brain a test message, asking it which MCP tools it has and
+  something only its `CLAUDE.md` answers.
+
+> **Warning:** with this on, every brain runs your hooks, sees your personal
+> instructions and can call your MCP servers' tools without asking (see
+> `dangerously_skip_permissions`), on behalf of anyone who may message it,
+> and every brain gets the same ones. Turn it on only if your brains rely on
+> a user-level skill or MCP server. Better: copy what a brain needs into its
+> own folder (`.claude/skills/`, `.mcp.json`, `CLAUDE.md`), and an `env`
+> or `apiKeyHelper` it needs from `~/.claude/settings.json` into its
+> folder's `.claude/settings.json`.
+
 ---
 
 ## Brains
@@ -228,10 +276,10 @@ their sandbox, so a manipulated brain cannot plant code there:
 
 - Claude Code's own configuration: `~/.claude/settings.json`,
   `settings.local.json`, `CLAUDE.md` and the `hooks`, `rules`, `agents`,
-  `commands`, `skills`, `plugins` and `output-styles` folders. Every other
-  brain's next run and your own Claude Code sessions load them. Brains
-  therefore cannot change Claude Code settings or install plugins; do that
-  yourself.
+  `commands`, `skills`, `plugins` and `output-styles` folders. Your own
+  Claude Code sessions load them, and so may every brain's next run (see
+  `inherit_claude_user_config`). Brains therefore cannot change Claude Code
+  settings or install plugins; do that yourself.
 - the `CLAUDE.md`, `CLAUDE.local.md` and `.mcp.json` in every folder above a
   brain's folder, up to and including your home folder (or up to `/` for a
   brain outside it), and the `.claude` folder in each of them below your
@@ -360,7 +408,7 @@ for the paths listed above. A manipulated brain can therefore still:
   shell, git or Claude Code in a brain's folder.
 - change the Claude Code state the CLI writes on every run, which all brains
   and your own sessions share: `~/.claude.json` (including the MCP servers
-  every session starts), other sessions' transcripts in `~/.claude/projects`
+  your own sessions start), other sessions' transcripts in `~/.claude/projects`
   (it can add to them, not read or move them), `~/.claude/shell-snapshots`
   and `~/.claude/session-env` (sourced into running sessions' shell
   commands), and the small per-process files in `~/.claude/sessions`,

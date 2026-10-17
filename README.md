@@ -352,7 +352,9 @@ What the bridge does about it:
   `sandbox.deny_paths`. When the sandbox is on but cannot be set up, the
   brain refuses the message with an error instead of running without it.
 - **Brain isolation.** Brains have separate directories, sessions, histories,
-  and calendar credentials.
+  and calendar credentials, and they do not load your own Claude Code
+  setup: your user settings and their hooks, skills, plugins and MCP
+  servers (see [what a brain loads](docs/BRAINS.md#what-a-brain-loads)).
 - **A guarded dashboard.** It only listens on localhost, rejects requests
   from web pages on other sites (and DNS-rebinding tricks), and requires a
   token from `~/.fridolin/dashboard.token` — a file the sandbox

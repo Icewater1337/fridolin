@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"log"
 	"os"
 	"os/exec"
@@ -16,6 +17,7 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
+	"syscall"
 	"time"
 )
 
@@ -189,6 +191,7 @@ type brainSettings struct {
 	disallowedTools []string
 	promptPath      string
 	dangerously     bool
+	inheritUser     bool // inherit_claude_user_config
 	otpGuard        bool
 	otpMarkers      []string
 	viewer          bool
@@ -490,9 +493,23 @@ func (br *Brain) streamLogPath() string {
 	return filepath.Join(br.workDir, "claude-stream.log")
 }
 
-// claudeArgs builds the CLI arguments for one run.
-func claudeArgs(s *brainSettings, prompt string) []string {
+// claudeArgs builds the CLI arguments for one run. mcpConfig is the brain
+// folder's .mcp.json (see mcpConfigOf), or "" for none.
+func claudeArgs(s *brainSettings, mcpConfig, prompt string) []string {
 	args := []string{"--output-format", "stream-json", "--verbose"}
+	if !s.inheritUser {
+		// Only the brain folder's own Claude Code setup. Your user settings
+		// (with their hooks, plugins and permissions), skills, agents,
+		// commands and the MCP servers in ~/.claude.json are yours, and a
+		// brain answers whoever may message it; under
+		// --dangerously-skip-permissions it would call those MCP tools
+		// without asking.
+		args = append(args, "--setting-sources", "project,local", "--strict-mcp-config")
+		if mcpConfig != "" {
+			// --mcp-config takes several files: an option must follow.
+			args = append(args, "--mcp-config", mcpConfig)
+		}
+	}
 	if s.dangerously {
 		args = append(args, "--dangerously-skip-permissions")
 	}
@@ -508,11 +525,111 @@ func claudeArgs(s *brainSettings, prompt string) []string {
 	return append(args, "-p", prompt)
 }
 
+// mcpConfigOf returns the .mcp.json in the brain folder dir for
+// --mcp-config, or "" when there is none to pass. --strict-mcp-config makes
+// the CLI ignore the file otherwise. The CLI refuses to start with an
+// --mcp-config file that is not a JSON object holding an "mcpServers"
+// object, which it never did for a project .mcp.json: `{}` or a misspelt
+// key stops it as surely as a typo. Such a file is left out, as one
+// mistake, or a file a manipulated brain wrote, would otherwise stop every
+// run of the brain. Broken entries inside mcpServers it takes in its
+// stride.
+func mcpConfigOf(brainID, dir string) string {
+	p := filepath.Join(dir, ".mcp.json")
+	data, err := readBrainFile(p)
+	if errors.Is(err, fs.ErrNotExist) {
+		return ""
+	}
+	if err == nil {
+		_, err = mcpServersOf(data)
+	}
+	if err != nil {
+		log.Printf("brain %s: leaving out %s: %v", brainID, p, err)
+		return ""
+	}
+	return p
+}
+
+// mcpServersOf returns the servers in the .mcp.json data by name, or why
+// the CLI would refuse the file: it must be a JSON object whose
+// "mcpServers", spelt exactly so, is an object.
+func mcpServersOf(data []byte) (map[string]json.RawMessage, error) {
+	top, err := jsonObject(data)
+	if err != nil {
+		return nil, err
+	}
+	var servers map[string]json.RawMessage
+	if raw, ok := top["mcpServers"]; ok {
+		if err := json.Unmarshal(raw, &servers); err != nil {
+			return nil, fmt.Errorf("mcpServers is not an object: %w", err)
+		}
+	}
+	if servers == nil {
+		return nil, errors.New(`it has no "mcpServers" object`)
+	}
+	return servers, nil
+}
+
+// jsonObject decodes data, a JSON object, by key. Unlike a struct, a map
+// matches keys exactly, as the CLI does, and it skips a leading byte order
+// mark, as the CLI does too.
+func jsonObject(data []byte) (map[string]json.RawMessage, error) {
+	var obj map[string]json.RawMessage
+	if err := json.Unmarshal(bytes.TrimPrefix(data, []byte("\uFEFF")), &obj); err != nil {
+		return nil, fmt.Errorf("not a JSON object: %w", err)
+	}
+	if obj == nil {
+		return nil, errors.New("not a JSON object: null")
+	}
+	return obj, nil
+}
+
+// maxBrainFile bounds what the bridge reads of a brain's .mcp.json: far
+// more than any real one holds, so that a brain cannot make the bridge
+// load gigabytes into memory on every run.
+const maxBrainFile = 256 << 10
+
+// readBrainFile reads a file in a brain's folder, which the bridge does
+// outside the sandbox while the brain controls what is there. It follows
+// no symlink, and it takes only a regular file, checked on the open file
+// so that nothing can be swapped in after the check; the open does not
+// block, so a FIFO cannot hang the run either. It refuses a file larger
+// than maxBrainFile.
+func readBrainFile(p string) ([]byte, error) {
+	f, err := os.OpenFile(p, os.O_RDONLY|syscall.O_NOFOLLOW|syscall.O_NONBLOCK, 0)
+	if errors.Is(err, syscall.ELOOP) {
+		return nil, errors.New("it is a symlink, which the bridge does not follow")
+	}
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+	fi, err := f.Stat()
+	if err != nil {
+		return nil, err
+	}
+	if !fi.Mode().IsRegular() {
+		return nil, errors.New("not a regular file")
+	}
+	data, err := io.ReadAll(io.LimitReader(f, maxBrainFile+1))
+	if err != nil {
+		return nil, err
+	}
+	if len(data) > maxBrainFile {
+		return nil, fmt.Errorf("larger than %d KiB", maxBrainFile>>10)
+	}
+	return data, nil
+}
+
 // invoke runs the Claude CLI once for m.
 func (br *Brain) invoke(run *brainRun, ctx context.Context, s *brainSettings, m Inbound) RunResult {
 	prompt := br.buildPrompt(s, m)
 
-	args := claudeArgs(s, prompt)
+	mcpConfig := ""
+	if !s.inheritUser {
+		mcpConfig = mcpConfigOf(br.id, br.workDir)
+	}
+	args := claudeArgs(s, mcpConfig, prompt)
 
 	// Wrap the spawn in sandbox-exec so prompt injection in an incoming message
 	// cannot reach another brain's tree or cross-session Claude state. The brain
@@ -1063,6 +1180,7 @@ func settingsFor(cfg *Config, sp BrainSpec) *brainSettings {
 		disallowedTools: append([]string(nil), tools...),
 		promptPath:      sp.PromptPath,
 		dangerously:     cfg.DangerouslySkipPermissions,
+		inheritUser:     cfg.InheritClaudeUserConfig,
 		otpGuard:        cfg.OTPGuard,
 		otpMarkers:      append([]string(nil), cfg.OTPMarkers...),
 		viewer:          cfg.Viewer,

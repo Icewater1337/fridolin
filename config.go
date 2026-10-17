@@ -104,6 +104,13 @@ type Config struct {
 	// for unattended operation; see the security notes in the README.
 	DangerouslySkipPermissions bool `json:"dangerously_skip_permissions"`
 
+	// InheritClaudeUserConfig lets brains load your own Claude Code setup,
+	// as they did before this setting existed: your user settings (with
+	// their hooks, plugins and permissions), skills, agents and commands,
+	// and the MCP servers in ~/.claude.json. Off by default: a brain loads
+	// only its own folder's, since anyone who may message it can steer it.
+	InheritClaudeUserConfig bool `json:"inherit_claude_user_config,omitempty"`
+
 	// HTTPListen is the address of the local HTTP server: the dashboard plus
 	// the /send and /ingest APIs. Must be a loopback address. Default
 	// 127.0.0.1:8765; "off" disables it.

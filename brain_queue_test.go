@@ -1,10 +1,13 @@
 package main
 
 import (
+	"log"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
+	"syscall"
 	"testing"
 	"time"
 )
@@ -245,16 +248,220 @@ func TestReloadKeepsRunningBrainAndRetiresRemoved(t *testing.T) {
 	}
 }
 
-func TestClaudeArgsIncludeEffortAndTools(t *testing.T) {
-	args := claudeArgs(&brainSettings{model: "m", effort: "high", disallowedTools: []string{"WebFetch", "WebSearch"}, dangerously: true}, "hi")
-	got := strings.Join(args, " ")
-	for _, want := range []string{"--model m", "--effort high", "--disallowed-tools WebFetch,WebSearch", "--dangerously-skip-permissions", "-p hi"} {
-		if !strings.Contains(got, want) {
-			t.Errorf("args %q missing %q", got, want)
+// TestClaudeArgs: a brain loads only its own folder's Claude Code setup,
+// with the folder's .mcp.json passed explicitly, unless
+// inherit_claude_user_config asks for the old behaviour. The other settings
+// map to their flags, and the prompt comes last.
+func TestClaudeArgs(t *testing.T) {
+	const mcp = "/brains/a/.mcp.json"
+	cases := []struct {
+		name           string
+		s              brainSettings
+		mcpConfig      string
+		want, dontWant []string
+	}{
+		{"own setup only", brainSettings{}, "",
+			[]string{"--setting-sources project,local", "--strict-mcp-config"},
+			[]string{"--mcp-config", "--dangerously-skip-permissions", "--model", "--effort", "--disallowed-tools"}},
+		{"with the folder's .mcp.json", brainSettings{}, mcp,
+			[]string{"--setting-sources project,local", "--strict-mcp-config --mcp-config " + mcp}, nil},
+		{"inherit_claude_user_config", brainSettings{inheritUser: true}, mcp,
+			nil, []string{"--setting-sources", "--strict-mcp-config", "--mcp-config"}},
+		{"model, effort, tools, permissions", brainSettings{model: "m", effort: "high", disallowedTools: []string{"WebFetch", "WebSearch"}, dangerously: true}, mcp,
+			[]string{"--model m", "--effort high", "--disallowed-tools WebFetch,WebSearch", "--dangerously-skip-permissions"}, nil},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			args := claudeArgs(&tc.s, tc.mcpConfig, "hi")
+			got := strings.Join(args, " ")
+			for _, w := range tc.want {
+				if !strings.Contains(got, w) {
+					t.Errorf("args %q lack %q", got, w)
+				}
+			}
+			for _, w := range tc.dontWant {
+				if strings.Contains(got, w) {
+					t.Errorf("args %q have %q", got, w)
+				}
+			}
+			if !strings.HasSuffix(got, " -p hi") {
+				t.Errorf("args %q: the prompt must come last", got)
+			}
+			// --mcp-config takes several files, so the CLI would take
+			// anything after the file that is not an option for another.
+			if i := slices.Index(args, "--mcp-config"); i >= 0 && !strings.HasPrefix(args[i+2], "-") {
+				t.Errorf("args %q: %q follows --mcp-config's file", got, args[i+2])
+			}
+		})
+	}
+}
+
+// TestBrainRunsWithItsOwnClaudeSetup: a brain's run gets the flags that
+// keep your Claude Code setup out, and its folder's .mcp.json only when the
+// CLI would start with it (see TestMCPConfigOf).
+// inherit_claude_user_config drops them all again.
+func TestBrainRunsWithItsOwnClaudeSetup(t *testing.T) {
+	write := func(body string) func(t *testing.T, p string) {
+		return func(t *testing.T, p string) {
+			if err := os.WriteFile(p, []byte(body), 0o600); err != nil {
+				t.Fatal(err)
+			}
 		}
 	}
-	if !strings.HasSuffix(got, "-p hi") {
-		t.Error("the prompt must come last")
+	isolated := "--setting-sources project,local --strict-mcp-config"
+	cases := []struct {
+		name, extra    string
+		mcp            func(t *testing.T, p string) // lays out the brain's .mcp.json at p
+		want, dontWant []string
+	}{
+		{"no .mcp.json", "", nil, []string{isolated}, []string{"--mcp-config"}},
+		{"a .mcp.json", "", write(`{"mcpServers": {}}`), []string{isolated + " --mcp-config <mcp>"}, nil},
+		{"a .mcp.json that is not JSON", "", write(`{"mcpServers": `), []string{isolated}, []string{"--mcp-config"}},
+		{"a symlinked .mcp.json", "", func(t *testing.T, p string) {
+			target := filepath.Join(t.TempDir(), "servers.json")
+			write(`{"mcpServers": {}}`)(t, target)
+			if err := os.Symlink(target, p); err != nil {
+				t.Fatal(err)
+			}
+		}, []string{isolated}, []string{"--mcp-config"}},
+		{"a .mcp.json folder", "", func(t *testing.T, p string) {
+			if err := os.Mkdir(p, 0o700); err != nil {
+				t.Fatal(err)
+			}
+		}, []string{isolated}, []string{"--mcp-config"}},
+		{"inherit_claude_user_config", `, "inherit_claude_user_config": true`, write(`{"mcpServers": {}}`),
+			nil, []string{"--setting-sources", "--strict-mcp-config", "--mcp-config"}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			mgr, d, home := queueTestManager(t, 0, tc.extra)
+			argsLog := filepath.Join(home, "args.log")
+			t.Setenv("WCB_FAKE_ARGS_LOG", argsLog)
+			mcp := filepath.Join(home, "a", ".mcp.json")
+			if tc.mcp != nil {
+				tc.mcp(t, mcp)
+			}
+			if _, _, _, err := mgr.Submit(dm("hello")); err != nil {
+				t.Fatal(err)
+			}
+			waitFor(t, 10*time.Second, "the run", func() bool { return d.count() == 1 })
+			if err := d.all()[0].res.Err; err != nil {
+				t.Fatalf("run: %v", err)
+			}
+			data, err := os.ReadFile(argsLog)
+			if err != nil {
+				t.Fatal(err)
+			}
+			got := string(data)
+			for _, w := range tc.want {
+				if w = strings.ReplaceAll(w, "<mcp>", mcp); !strings.Contains(got, w) {
+					t.Errorf("args %q lack %q", got, w)
+				}
+			}
+			for _, w := range tc.dontWant {
+				if strings.Contains(got, w) {
+					t.Errorf("args %q have %q", got, w)
+				}
+			}
+		})
+	}
+}
+
+// TestMCPConfigOf: the brain's .mcp.json is passed only when the CLI starts
+// with it as an --mcp-config file, which it does not for anything but a
+// JSON object with an "mcpServers" object (checked against CLI 2.1.302),
+// and the bridge log says why it left one out. The bridge reads the file
+// outside the sandbox, so it follows no symlink and reads no FIFO, folder
+// or huge file.
+func TestMCPConfigOf(t *testing.T) {
+	write := func(body string) func(t *testing.T, p string) {
+		return func(t *testing.T, p string) {
+			if err := os.WriteFile(p, []byte(body), 0o600); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	cases := []struct {
+		name    string
+		mcp     func(t *testing.T, p string) // lays out the .mcp.json at p
+		pass    bool
+		wantLog string // in the log line when it is left out
+	}{
+		{"no .mcp.json", func(*testing.T, string) {}, false, ""},
+		{"no servers", write(`{"mcpServers": {}}`), true, ""},
+		// The CLI starts anyway and reports the server as failed.
+		{"broken servers", write(`{"mcpServers": {"x": 5, "y": [], "z": {"type": "bogus"}}}`), true, ""},
+		{"other keys too", write(`{"mcpServers": {}, "other": 1}`), true, ""},
+		{"byte order mark", write("\uFEFF" + `{"mcpServers": {}}`), true, ""},
+		{"not JSON", write(`{"mcpServers": `), false, "not a JSON object"},
+		{"trailing text", write(`{"mcpServers": {}} x`), false, "not a JSON object"},
+		{"empty object", write(`{}`), false, `no "mcpServers" object`},
+		{"array", write(`[]`), false, "not a JSON object"},
+		{"null", write(`null`), false, "not a JSON object"},
+		{"mcpServers an array", write(`{"mcpServers": []}`), false, "mcpServers is not an object"},
+		{"mcpServers null", write(`{"mcpServers": null}`), false, `no "mcpServers" object`},
+		{"misspelt key", write(`{"mcpServer": {}}`), false, `no "mcpServers" object`},
+		{"key in other case", write(`{"mcpservers": {}}`), false, `no "mcpServers" object`},
+		// Like the CLI, the last of two equal keys wins.
+		{"key given twice", write(`{"mcpServers": {}, "mcpServers": null}`), false, `no "mcpServers" object`},
+		{"symlink", func(t *testing.T, p string) {
+			target := filepath.Join(t.TempDir(), "servers.json")
+			write(`{"mcpServers": {}}`)(t, target)
+			if err := os.Symlink(target, p); err != nil {
+				t.Fatal(err)
+			}
+		}, false, "symlink"},
+		{"folder", func(t *testing.T, p string) {
+			if err := os.Mkdir(p, 0o700); err != nil {
+				t.Fatal(err)
+			}
+		}, false, "not a regular file"},
+		// Opening it to read would block until something writes to it.
+		{"FIFO", func(t *testing.T, p string) {
+			if err := syscall.Mkfifo(p, 0o600); err != nil {
+				t.Fatal(err)
+			}
+		}, false, "not a regular file"},
+		{"huge", write(`{"mcpServers": {}, "pad": "` + strings.Repeat("x", maxBrainFile) + `"}`), false, "larger than"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			ring := NewLogRing(10)
+			prev := log.Writer()
+			log.SetOutput(ring)
+			t.Cleanup(func() { log.SetOutput(prev) })
+
+			dir := t.TempDir()
+			p := filepath.Join(dir, ".mcp.json")
+			tc.mcp(t, p)
+			done := make(chan string, 1)
+			go func() { done <- mcpConfigOf("a", dir) }()
+			var got string
+			select {
+			case got = <-done:
+			case <-time.After(5 * time.Second):
+				t.Fatal("mcpConfigOf hangs")
+			}
+			if want := map[bool]string{true: p}[tc.pass]; got != want {
+				t.Errorf("mcpConfigOf = %q, want %q", got, want)
+			}
+			lines, _ := ring.Since(0, 10)
+			var logged []string
+			for _, l := range lines {
+				logged = append(logged, l.Text)
+			}
+			if tc.wantLog == "" {
+				if len(logged) > 0 {
+					t.Errorf("unexpected log %q", logged)
+				}
+				return
+			}
+			// The test's name is in p, so only the reason after it counts.
+			_, reason, ok := strings.Cut(strings.Join(logged, "\n"), "brain a: leaving out "+p+": ")
+			if len(logged) != 1 || !ok || !strings.Contains(reason, tc.wantLog) {
+				t.Errorf("log = %q, want one line leaving out %s for %q", logged, p, tc.wantLog)
+			}
+		})
 	}
 }
 
