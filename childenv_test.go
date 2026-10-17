@@ -13,38 +13,51 @@ import (
 
 func TestChildGets(t *testing.T) {
 	cases := []struct {
-		name          string
-		claude, other bool // given to a Claude run, to any other program
+		name                   string
+		claude, other, desktop bool // given to a Claude run, to any other program, to a sign-in
 	}{
-		{"HOME", true, true},
-		{"PATH", true, true},
-		{"LANG", true, true},
-		{"LC_ALL", true, true},
-		{"LC_CTYPE", true, true},
-		{"HTTPS_PROXY", true, true},
-		{"https_proxy", true, true},
-		{"NODE_EXTRA_CA_CERTS", true, true},
+		{"HOME", true, true, true},
+		{"PATH", true, true, true},
+		{"LANG", true, true, true},
+		{"LC_ALL", true, true, true},
+		{"LC_CTYPE", true, true, true},
+		{"HTTPS_PROXY", true, true, true},
+		{"https_proxy", true, true, true},
+		{"NODE_EXTRA_CA_CERTS", true, true, true},
 		// What a launchd job that logs the CLI in with a token sets besides
 		// HOME and PATH.
-		{"CLAUDE_CODE_OAUTH_TOKEN", true, false},
-		{"CLAUDE_CODE_ENTRYPOINT", true, false},
-		{"CLAUDE_CODE_PROVIDER_MANAGED_BY_HOST", true, false},
-		{"ANTHROPIC_API_KEY", true, false},
-		{"ANTHROPIC_BASE_URL", true, false},
-		{"BRIDGE_DATA_DIR", true, false},
-		{"CALENDAR_TZ", true, false},
+		{"CLAUDE_CODE_OAUTH_TOKEN", true, false, false},
+		{"CLAUDE_CODE_ENTRYPOINT", true, false, false},
+		{"CLAUDE_CODE_PROVIDER_MANAGED_BY_HOST", true, false, false},
+		{"ANTHROPIC_API_KEY", true, false, false},
+		{"ANTHROPIC_BASE_URL", true, false, false},
+		{"BRIDGE_DATA_DIR", true, false, false},
+		{"CALENDAR_TZ", true, false, false},
+		// Only for a sign-in that opens your browser.
+		{"DISPLAY", false, false, true},
+		{"WAYLAND_DISPLAY", false, false, true},
+		{"XAUTHORITY", false, false, true},
+		{"XDG_RUNTIME_DIR", false, false, true},
+		{"DBUS_SESSION_BUS_ADDRESS", false, false, true},
+		{"XDG_CURRENT_DESKTOP", false, false, true},
+		{"KDE_SESSION_VERSION", false, false, true},
+		{"XDG_DATA_DIRS", false, false, true},
+		{"XDG_CONFIG_DIRS", false, false, true},
+		{"BROWSER", false, false, true},
 		// Not on the list, some of them close to a name that is.
-		{"GROQ_API_KEY", false, false},
-		{"SSH_AUTH_SOCK", false, false},
-		{"AWS_SECRET_ACCESS_KEY", false, false},
-		{"RCLONE_CONFIG_DRIVE_TOKEN", false, false},
-		{"CLAUDECODE", false, false},
-		{"CLAUDE_CODE", false, false},
-		{"HOMEBREW_GITHUB_API_TOKEN", false, false},
-		{"PATHEXT", false, false},
-		{"LCX", false, false},
-		{"home", false, false},
-		{"", false, false},
+		{"GROQ_API_KEY", false, false, false},
+		{"SSH_AUTH_SOCK", false, false, false},
+		{"AWS_SECRET_ACCESS_KEY", false, false, false},
+		{"RCLONE_CONFIG_DRIVE_TOKEN", false, false, false},
+		{"CLAUDECODE", false, false, false},
+		{"CLAUDE_CODE", false, false, false},
+		{"HOMEBREW_GITHUB_API_TOKEN", false, false, false},
+		{"PATHEXT", false, false, false},
+		{"LCX", false, false, false},
+		{"DISPLAYX", false, false, false},
+		{"XDG_CONFIG_HOME", false, false, false},
+		{"home", false, false, false},
+		{"", false, false, false},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -53,6 +66,9 @@ func TestChildGets(t *testing.T) {
 			}
 			if got := childGets(anyChild, tc.name); got != tc.other {
 				t.Errorf("childGets(anyChild, %q) = %v, want %v", tc.name, got, tc.other)
+			}
+			if got := childGets(desktopChild, tc.name); got != tc.desktop {
+				t.Errorf("childGets(desktopChild, %q) = %v, want %v", tc.name, got, tc.desktop)
 			}
 		})
 	}
@@ -136,6 +152,7 @@ func TestBrainGetsOnlyTheAllowlistedEnvironment(t *testing.T) {
 		"AWS_SECRET_ACCESS_KEY":     "test-aws-key",
 		"RCLONE_CONFIG_DRIVE_TOKEN": "test-rclone-token",
 		"CLAUDECODE":                "1",
+		"DISPLAY":                   ":0", // for a sign-in only
 		// The bridge sets this one itself, so the brain gets the bridge's.
 		"BRIDGE_BRAIN_ID": "not-a",
 	}

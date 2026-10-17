@@ -13,7 +13,11 @@ it — without putting any of it in a git repository.
 
 The bridge drives rclone with its **own** config file,
 `~/.fridolin/rclone/rclone.conf`. Your personal rclone setup and
-`RCLONE_*` environment variables are never used or changed.
+`RCLONE_*` environment variables are never used or changed, and rclone gets
+only a few variables of the bridge's environment, such as `HOME`, `PATH`
+and the proxy settings, and while it connects Google Drive also your
+desktop session's, so that it can open your browser
+([details](CONFIGURATION.md#what-reaches-brains)).
 
 The link uses Google's `drive.file` scope: rclone can only see files it
 created itself. Your other Drive files stay invisible to it.

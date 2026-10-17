@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"os"
 	"slices"
 	"strings"
@@ -15,6 +16,9 @@ const (
 	// claudeChild is a Claude CLI run: a brain, and the scripts and tools it
 	// runs, which inherit the CLI's environment.
 	claudeChild
+	// desktopChild is a helper that opens your browser for a sign-in, such
+	// as rclone connecting Google Drive (see withDesktop).
+	desktopChild
 )
 
 // childEnvVar names one variable of the bridge's environment that a program
@@ -73,6 +77,20 @@ var childEnvAllowlist = []childEnvVar{
 	{"DISABLE_TELEMETRY", claudeChild},       // its usage telemetry, if you turned it off
 	{"DISABLE_ERROR_REPORTING", claudeChild}, // its error reports, the same
 
+	// Your desktop session, for a sign-in that opens your browser: on Linux
+	// rclone calls xdg-open, which finds the session through these. macOS's
+	// open needs none of them.
+	{"DISPLAY", desktopChild},                  // the X11 display
+	{"WAYLAND_DISPLAY", desktopChild},          // the Wayland display
+	{"XAUTHORITY", desktopChild},               // the cookie that lets a program use DISPLAY
+	{"XDG_RUNTIME_DIR", desktopChild},          // where the Wayland and D-Bus sockets live
+	{"DBUS_SESSION_BUS_ADDRESS", desktopChild}, // the session bus, through which the desktop opens a URL
+	{"XDG_CURRENT_DESKTOP", desktopChild},      // which desktop's opener xdg-open asks
+	{"KDE_SESSION_VERSION", desktopChild},      // which opener xdg-open runs on KDE (kde-open or kde-open5)
+	{"XDG_DATA_DIRS", desktopChild},            // where the desktop finds installed apps, snap and Flatpak browsers among them
+	{"XDG_CONFIG_DIRS", desktopChild},          // where it finds the system-wide default apps (mimeapps.list)
+	{"BROWSER", desktopChild},                  // a browser you chose over the desktop's
+
 	// Settings of the tools in tools/ that brains run (docs/CONFIGURATION.md).
 	{"BRIDGE_DATA_DIR", claudeChild},     // the data dir, when it is not ~/.fridolin
 	{"BRIDGE_DB_PATH", claudeChild},      // the database, when it is not in the data dir
@@ -99,6 +117,23 @@ func childEnv(scope childScope, passthrough []string, extra ...string) []string 
 		}
 	}
 	return append(env, extra...)
+}
+
+// desktopKey marks a context whose helper runs open your browser.
+type desktopKey struct{}
+
+// withDesktop marks ctx as a sign-in that opens your browser: the helper
+// programs run on it get desktopChild's variables (see helperScope).
+func withDesktop(ctx context.Context) context.Context {
+	return context.WithValue(ctx, desktopKey{}, true)
+}
+
+// helperScope is the scope of a helper program, such as rclone, run on ctx.
+func helperScope(ctx context.Context) childScope {
+	if ctx.Value(desktopKey{}) != nil {
+		return desktopChild
+	}
+	return anyChild
 }
 
 // childGets reports whether childEnvAllowlist gives a program of scope the

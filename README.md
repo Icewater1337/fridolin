@@ -465,7 +465,7 @@ API; the page is plain HTML/JS compiled into the binary. In `web/assets`,
 `sandbox-exec -p` on each run (never written to a file).
 
 **`childenv.go`** — the one list of the bridge's environment variables that
-brains get.
+brains and rclone get.
 
 **`store.go`** — SQLite: the whatsmeow device store, polls, votes, and the
 chats that wrote without being allowed.

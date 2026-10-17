@@ -817,6 +817,19 @@ on macOS, from launchd (see [what the sandbox does not cover
 yet](#what-the-sandbox-does-not-cover-yet)). Keep anything a brain must not
 see out of the bridge's environment and its service file.
 
+These programs the bridge starts for itself get the first three rows
+only, never the names in `child_env_passthrough`, which are for brains:
+
+- rclone for [backups](BACKUP.md), which never gets an `RCLONE_*`
+  variable but `RCLONE_CONFIG`, the bridge's own rclone config
+
+While rclone connects Google Drive it opens your browser, so it also gets
+the variables of your desktop session that Linux needs to open one (macOS
+needs none of them): `DISPLAY`, `WAYLAND_DISPLAY`, `XAUTHORITY`,
+`XDG_RUNTIME_DIR`, `DBUS_SESSION_BUS_ADDRESS`, `XDG_CURRENT_DESKTOP`,
+`KDE_SESSION_VERSION`, `XDG_DATA_DIRS` (where snap and Flatpak browsers are
+found), `XDG_CONFIG_DIRS` and `BROWSER`.
+
 ### Where to set them
 
 Set what the Claude CLI and brains need in the bridge's process

@@ -197,16 +197,12 @@ func rcloneFallbacks() []string {
 	return []string{"/opt/homebrew/bin/rclone", "/usr/local/bin/rclone", filepath.Join(os.Getenv("HOME"), ".local/bin/rclone")}
 }
 
-// rcloneEnv is the environment for rclone: the bridge's own config file, and
-// none of your RCLONE_* settings.
-func (m *BackupManager) rcloneEnv() []string {
-	var env []string
-	for _, kv := range os.Environ() {
-		if !strings.HasPrefix(kv, "RCLONE_") {
-			env = append(env, kv)
-		}
-	}
-	return append(env, "RCLONE_CONFIG="+m.rcloneConf())
+// rcloneEnv is the environment for rclone run as scope (see helperScope):
+// what childEnv gives it, and the bridge's own config file. None of your
+// RCLONE_* settings are on childEnvAllowlist, and child_env_passthrough is
+// for brains, so rclone gets neither.
+func (m *BackupManager) rcloneEnv(scope childScope) []string {
+	return childEnv(scope, nil, "RCLONE_CONFIG="+m.rcloneConf())
 }
 
 // runRclone runs rclone with the isolated config. Stdout is returned to the
@@ -220,7 +216,7 @@ func (m *BackupManager) runRclone(ctx context.Context, args []string, stderr io.
 		return nil, err
 	}
 	cmd := exec.CommandContext(ctx, bin, append([]string{"--config", m.rcloneConf()}, args...)...)
-	cmd.Env = m.rcloneEnv()
+	cmd.Env = m.rcloneEnv(helperScope(ctx))
 	cmd.Stdin = nil
 	var out bytes.Buffer
 	cmd.Stdout = &out
@@ -338,7 +334,7 @@ func (b *Bridge) apiBackupStatus(w http.ResponseWriter, r *http.Request) {
 	cfg := b.cfgs.Get()
 	rc := map[string]any{"found": false, "install_hint": rcloneInstallHint()}
 	if p, err := m.rclonePath(); err == nil {
-		rc["found"], rc["path"], rc["version"] = true, p, rcloneVersion(p)
+		rc["found"], rc["path"], rc["version"] = true, p, rcloneVersion(p, m.rcloneEnv(anyChild))
 	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -381,8 +377,8 @@ var (
 	rcloneVersionCache = map[string]string{}
 )
 
-// rcloneVersion runs `rclone version` once per binary.
-func rcloneVersion(p string) string {
+// rcloneVersion runs `rclone version` once per binary, with env.
+func rcloneVersion(p string, env []string) string {
 	rcloneVersionMu.Lock()
 	defer rcloneVersionMu.Unlock()
 	if v, ok := rcloneVersionCache[p]; ok {
@@ -390,7 +386,9 @@ func rcloneVersion(p string) string {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	out, err := exec.CommandContext(ctx, p, "version").Output()
+	cmd := exec.CommandContext(ctx, p, "version")
+	cmd.Env = env
+	out, err := cmd.Output()
 	v := ""
 	if err == nil {
 		v = strings.SplitN(strings.TrimSpace(string(out)), "\n", 2)[0]
@@ -475,9 +473,11 @@ func (b *Bridge) apiBackupConnect(w http.ResponseWriter, r *http.Request) {
 }
 
 // connectDrive walks rclone's config questions. Answering config_is_local
-// starts rclone's local OAuth listener and opens the browser; that step
-// blocks until you approve access (or the 10 minutes run out).
+// starts rclone's local OAuth listener and opens the browser, which is why
+// its runs get your desktop session's variables; that step blocks until you
+// approve access (or the 10 minutes run out).
 func (m *BackupManager) connectDrive(ctx context.Context, job *connectJob) error {
+	ctx = withDesktop(ctx)
 	remote := m.cfgs.Get().Backup.Remote
 	_, _ = m.runner(ctx, []string{"config", "delete", remote}, nil)
 
