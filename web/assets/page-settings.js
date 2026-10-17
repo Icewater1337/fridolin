@@ -22,7 +22,7 @@ const SECTIONS = [
     intro: 'Who may talk to the bridge. Everyone else is ignored and shows up on the Chats page.',
     fields: [
       { key: 'allowed_numbers', type: 'list', label: 'Allowed numbers', placeholder: '15551234567', validate: digits, addLabel: 'Add number', help: 'Phone numbers that may send direct messages. Digits with the country code, no + or spaces.' },
-      { key: 'allow_any_dm', type: 'bool', def: true, label: 'Let anyone message while the list is empty', help: 'Only matters while “Allowed numbers” is empty. Off: nobody can send direct messages until you add a number. On: anyone who knows the account’s number can use the assistant.' },
+      { key: 'allow_any_dm', type: 'bool', label: 'Let anyone message while the list is empty', help: 'Only matters while “Allowed numbers” is empty. Off (the default): nobody can send direct messages until you add a number. On: anyone who knows the account’s number can use the assistant.' },
       { key: 'allowed_groups', type: 'list', label: 'Allowed groups', placeholder: '120363000000000000@g.us', validate: groupJid, addLabel: 'Add group', help: 'Group JIDs the bridge answers in. Every other group is ignored. Easier: allow groups on the Chats page.' },
       { key: 'triggers', type: 'triggers', label: 'Group triggers', help: 'Words that address the bridge in a group; they are removed before the brain sees the message. An @-mention of the bridge’s account always counts, and direct messages never need a trigger. “Start” fits short shorthands like @c.' },
     ],

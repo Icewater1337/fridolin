@@ -29,10 +29,8 @@ Phone numbers permitted to DM the bridge. Country code, no `+`, no spaces.
 "allowed_numbers": ["15551234567", "15559876543"]
 ```
 
-What an empty list means depends on `allow_any_dm`. New configs set it to
-`false`: nobody may DM until you add a number. Older configs without the
-setting keep the original behaviour — an empty list allows **anyone** who can
-message the account — and the dashboard warns about it.
+An empty list means nobody may DM until you add a number, unless
+`allow_any_dm` (below) is `true`.
 
 Newer WhatsApp clients identify senders by an internal ID rather than a phone
 number; the bridge resolves that back to the number before checking, so plain
@@ -42,6 +40,22 @@ A message someone sends to a broadcast list you are on counts as a DM from
 them and is answered in your direct chat with them, which is where WhatsApp
 shows it. WhatsApp Status updates and channel posts are ignored, whoever
 posts them.
+
+### `allow_any_dm`
+
+What an empty `allowed_numbers` means. Unset or `false` (the default, and what
+new configs write): nobody may DM. `true`: **anyone** who can message the
+account may use the assistant — with every permission the brains have. It
+only matters while the list is empty; with numbers in it, only they are
+answered.
+
+```json
+"allow_any_dm": false
+```
+
+Older versions treated an unset value as `true`. A config that relied on that
+now refuses every DM: add the numbers, or set `"allow_any_dm": true` on
+purpose. The dashboard warns while anyone may DM.
 
 ### `allowed_groups`
 

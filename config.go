@@ -55,9 +55,10 @@ type Config struct {
 	// the bridge.
 	AllowedNumbers []string `json:"allowed_numbers"`
 
-	// AllowAnyDM decides what an empty allowed_numbers means. Unset keeps the
-	// original behaviour (anyone may DM); new configs write false, so an empty
-	// list means nobody until you add a number.
+	// AllowAnyDM decides what an empty allowed_numbers means. Unset or false:
+	// nobody may DM until you add a number. Only an explicit true lets anyone
+	// in, because allowed senders run Claude with all its permissions and a
+	// hand-written or partial config must not open the bridge by omission.
 	AllowAnyDM *bool `json:"allow_any_dm,omitempty"`
 
 	// AllowedGroups lists group JIDs (…@g.us) the bridge will respond in.
@@ -301,7 +302,8 @@ func (c *Config) MaxMediaBytes() int64 {
 func (c *Config) HTTPEnabled() bool { return c.HTTPListen != "" && c.HTTPListen != "off" }
 
 // AllowsAnyDM reports whether an empty allowed_numbers list means everyone.
-func (c *Config) AllowsAnyDM() bool { return boolOr(c.AllowAnyDM, true) }
+// It takes an explicit allow_any_dm: true.
+func (c *Config) AllowsAnyDM() bool { return boolOr(c.AllowAnyDM, false) }
 
 // LoadConfig reads configuration with this priority (highest → lowest):
 //  1. Environment variables (including those loaded from .env)
@@ -423,8 +425,9 @@ func effective(file *Config) (*Config, map[string]string, error) {
 		cfg.Debounce.MaxWaitMS = &mw
 	}
 	if cfg.AllowAnyDM == nil {
-		// Unset keeps the original meaning: an empty list allows anyone.
-		cfg.AllowAnyDM = &t
+		// Unset fails closed: an empty list allows nobody.
+		f := false
+		cfg.AllowAnyDM = &f
 	}
 	if cfg.Dashboard.RequireToken == nil {
 		cfg.Dashboard.RequireToken = &t

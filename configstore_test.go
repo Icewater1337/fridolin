@@ -94,8 +94,11 @@ func TestConfigDefaultsAndLoopbackOnly(t *testing.T) {
 	if cfg.Queue.Mode != "queue" || cfg.DebounceQuietMS() != defaultQuietMS || !cfg.QueueNotify() || !cfg.DashboardRequiresToken() {
 		t.Error("unexpected defaults")
 	}
-	if !cfg.AllowsAnyDM() {
-		t.Error("without allow_any_dm the original behaviour (empty list = anyone) must stay")
+	if cfg.AllowsAnyDM() || cfg.AllowAnyDM == nil || *cfg.AllowAnyDM {
+		t.Error("an unset allow_any_dm must mean false, and the effective config must say so")
+	}
+	if (&Config{}).AllowsAnyDM() {
+		t.Error("a Config built without the defaults must not let anyone DM either")
 	}
 	cfg, err = LoadConfig(writeConfig(t, `{"http_listen":"off"}`))
 	if err != nil || cfg.HTTPEnabled() {
@@ -134,5 +137,53 @@ func TestConfigStoreRejectsTooSmallChunkSize(t *testing.T) {
 	}
 	if got := cs.Get().MaxChunkSize; got != 3900 {
 		t.Errorf("a rejected edit must not apply: MaxChunkSize = %d", got)
+	}
+}
+
+func TestDMAccessFollowsAllowAnyDM(t *testing.T) {
+	// Allowed senders run Claude with all its permissions, so only an
+	// explicit allow_any_dm: true may open an empty allowlist to everyone.
+	const stranger = "15559876543"
+	tests := []struct {
+		name   string
+		config string
+		number string
+		want   bool
+	}{
+		{"unset and empty list refuses a stranger", `{}`, stranger, false},
+		{"hand-written config without the key refuses a stranger", `{"brain_mode":true,"dangerously_skip_permissions":true}`, stranger, false},
+		{"false and empty list refuses a stranger", `{"allow_any_dm":false}`, stranger, false},
+		{"explicit true and empty list lets anyone in", `{"allow_any_dm":true}`, stranger, true},
+		{"listed number is allowed", `{"allowed_numbers":["15551234567"]}`, "15551234567", true},
+		{"unlisted number is refused", `{"allowed_numbers":["15551234567"]}`, stranger, false},
+		{"true does not widen a non-empty list", `{"allowed_numbers":["15551234567"],"allow_any_dm":true}`, stranger, false},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Setenv("HOME", t.TempDir())
+			cfg, err := LoadConfig(writeConfig(t, tc.config))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got := numberAllowed(cfg, tc.number); got != tc.want {
+				t.Errorf("numberAllowed(%s) = %v, want %v", tc.number, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestRemovingTheLastNumberDoesNotOpenDMs(t *testing.T) {
+	// A config from before allow_any_dm existed: once the dashboard removes
+	// its last number, the list is empty and the flag is still unset.
+	t.Setenv("HOME", t.TempDir())
+	cs, err := OpenConfigStore(writeConfig(t, `{"allowed_numbers":["15551234567"]}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := cs.Update("", func(c *Config) error { c.AllowedNumbers = []string{}; return nil }); err != nil {
+		t.Fatal(err)
+	}
+	if numberAllowed(cs.Get(), "15559876543") {
+		t.Error("an empty list with allow_any_dm unset must refuse everyone")
 	}
 }
