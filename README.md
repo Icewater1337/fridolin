@@ -197,12 +197,12 @@ on the **Dev** page and read the replies there.
 | `!reset` | With brains: like `!stop` — the recent chat history stays, and the next message still sees it. In classic mode: forget the Claude session and start fresh |
 
 A command also works when sent as a reply to a message.
-In a group, address the bridge as for any request (`@claude !stop`): an
-untagged `!stop` is ordinary chatter. Commands act only on the chat they were
-sent in: one brain often serves several chats, and a `!stop` in a group leaves
-your DM alone. The dashboard's *Stop* buttons act on the whole brain.
-Any member of an allowed group can send an addressed command there; it
-affects only that group's work.
+In a group, address the bridge as for any request (`@claude !stop`, or
+@-mention its account): an untagged `!stop` is ordinary chatter. Commands act
+only on the chat they were sent in: one brain often serves several chats, and
+a `!stop` in a group leaves your DM alone. The dashboard's *Stop* buttons act
+on the whole brain. Any member of an allowed group can send an addressed
+command there; it affects only that group's work.
 
 ### Shaping the assistant
 

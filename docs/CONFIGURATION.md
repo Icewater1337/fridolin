@@ -73,7 +73,8 @@ message; an object can restrict it:
 | `word` | it appears as a whole word — `hey bot` yes, `robotics` no |
 
 An @-mention of the bridge's own account always counts, whatever this list
-says. So does sending a file, and so does forwarding a message.
+says, and is stripped the same way: `@Fridolin !stop` is the command `!stop`.
+So does sending a file, and so does forwarding a message.
 
 Untagged group messages still run through the brain — so it keeps up with the
 conversation — but produce no reply. Very short messages ("ok", "👍") are

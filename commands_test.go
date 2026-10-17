@@ -301,6 +301,56 @@ func TestQuotedCommandIsRecognised(t *testing.T) {
 	})
 }
 
+// bridgeLID is the LID of the bridge's own account (otherNumber) in tests:
+// short, so it cannot be anyone's real one.
+const bridgeLID = "424242"
+
+// bridgeLIDs is the part of whatsmeow's store that maps the bridge's own
+// number to its LID.
+type bridgeLIDs struct{ store.LIDStore }
+
+func (bridgeLIDs) GetLIDForPN(_ context.Context, pn types.JID) (types.JID, error) {
+	if pn.User == otherNumber {
+		return types.NewJID(bridgeLID, types.HiddenUserServer), nil
+	}
+	return types.EmptyJID, nil
+}
+
+// An @-mention addresses the bridge like the trigger keyword, commands
+// included. WhatsApp writes the mention into the text as "@" and the
+// number or LID, and the command must still be recognised.
+func TestMentionAddressesTheBridge(t *testing.T) {
+	own := types.JID{User: otherNumber, Device: 12, Server: types.DefaultUserServer}
+	byNumber := types.NewJID(otherNumber, types.DefaultUserServer).String()
+	byLID := types.NewJID(bridgeLID, types.HiddenUserServer).String()
+	cases := []struct {
+		name, text, mentioned string
+		want                  string // part of the bridge's answer
+	}{
+		{"!help by number", "@" + otherNumber + " !help", byNumber, "🤖 *Fridolin*"},
+		{"!help by LID", "@" + bridgeLID + " !help", byLID, "🤖 *Fridolin*"},
+		{"a request", "@" + otherNumber + " what is on today?", byNumber, "15551234567 says: what is on today?"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			tb, _ := newMainBridge(t, "")
+			wa := tb.whatsAppOffline(&store.Device{ID: &own, LIDs: bridgeLIDs{}})
+			wa.handleMessage(groupEvent(&waE2E.Message{ExtendedTextMessage: &waE2E.ExtendedTextMessage{
+				Text:        proto.String(c.text),
+				ContextInfo: &waE2E.ContextInfo{MentionedJID: []string{c.mentioned}},
+			}}))
+			waitFor(t, 10*time.Second, "the answer", func() bool { return len(tb.sentTo(testGroup)) > 0 })
+			got := tb.sentTo(testGroup)[0]
+			if !strings.Contains(got, c.want) {
+				t.Errorf("answered %q, want it to contain %q", got, c.want)
+			}
+			if strings.Contains(got, "@"+otherNumber) || strings.Contains(got, "@"+bridgeLID) {
+				t.Errorf("answered %q: the mention reached the model", got)
+			}
+		})
+	}
+}
+
 // In a group, only a message addressed to the bridge is a command. The dev
 // endpoint applies the WhatsApp client's trigger rules: the trigger is
 // stripped, and an untagged group message arrives Silent.

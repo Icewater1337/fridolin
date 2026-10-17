@@ -534,7 +534,8 @@ func (wa *WhatsAppClient) handleGroupMessage(msg *events.Message) {
 
 	textMatches := cfg.Triggers.Matches(text)
 	captionMatches := cfg.Triggers.Matches(attachmentCaption)
-	isTagged := hasFile || textMatches || captionMatches || wa.isBotMentioned(msg.Message) || isForwarded
+	isMentioned := wa.isBotMentioned(msg.Message)
+	isTagged := hasFile || textMatches || captionMatches || isMentioned || isForwarded
 
 	// Untagged plain text: run the brain, send nothing.
 	silent := !isTagged && text != ""
@@ -542,12 +543,19 @@ func (wa *WhatsAppClient) handleGroupMessage(msg *events.Message) {
 	if captionMatches && !textMatches {
 		text = attachmentCaption
 	}
-	text = cfg.Triggers.Strip(text)
+	// An @-mention is written into the text as "@" and the bridge's number
+	// (or LID). Like a trigger keyword, it only addresses the bridge, so it
+	// goes too: "@Fridolin !stop" must be the command "!stop".
+	var ownMentions []types.JID
+	if isMentioned {
+		ownMentions = wa.ownMentionJIDs()
+	}
+	text = stripMentions(cfg.Triggers.Strip(text), ownMentions)
 	quoted := quoteOf(msg.Message)
 
 	mediaPath, caption := wa.downloadAttachment(msg, groupJID)
 	if caption != "" {
-		caption = cfg.Triggers.Strip(caption)
+		caption = stripMentions(cfg.Triggers.Strip(caption), ownMentions)
 		if text == "" {
 			text = caption
 		} else if caption != text {
@@ -832,6 +840,33 @@ func (wa *WhatsAppClient) ownMentionJIDs() []types.JID {
 	}
 
 	return out
+}
+
+// stripMentions removes the @-mentions of the given accounts from text and
+// trims the result. A mention is "@" and the account's user part, and must
+// not be the start of a longer number.
+func stripMentions(text string, jids []types.JID) string {
+	for _, jid := range jids {
+		if jid.User == "" {
+			continue
+		}
+		mention := "@" + jid.User
+		for from := 0; from < len(text); {
+			i := strings.Index(text[from:], mention)
+			if i < 0 {
+				break
+			}
+			i += from
+			end := i + len(mention)
+			if (i > 0 && !boundaryBefore(text, i)) || !boundaryAt(text, end) {
+				from = end
+				continue
+			}
+			text = text[:i] + text[end:]
+			from = i
+		}
+	}
+	return strings.TrimSpace(text)
 }
 
 // quoteOf returns the message a text reply quotes, or nil.
