@@ -93,7 +93,7 @@ your desktop session's, so that it can open your browser
 | `enabled` | `false` | check for new recordings and hand them over; **Check now** needs it on |
 | `brain` | DM brain | brain id that receives recordings |
 | `interval_seconds` | `60` | at least 30 |
-| `polished` | `false` | use Plaud's AI-cleaned transcript |
+| `polished` | `false` | use Plaud's AI-cleaned transcript; when Plaud has none an hour after the recording showed up, the raw one is sent, with a note saying so |
 | `message` | built in | instruction sent with each recording |
 | `brain_access` | `false` | share the login with brains (see above) |
 | `cli_path` | found on PATH | path to `plaud` |

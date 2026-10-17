@@ -80,7 +80,11 @@ const (
 	plaudPageSize      = 20
 	plaudSeedPages     = 25
 	plaudPendingMaxAge = 3 * 24 * time.Hour
-	plaudSeenKeep      = 2000
+	// plaudPolishedWait is how long a recording waits for Plaud's cleaned-up
+	// transcript (plaud.polished) before the raw one is sent instead. Plaud
+	// makes the raw one first, and may never make the other.
+	plaudPolishedWait = time.Hour
+	plaudSeenKeep     = 2000
 )
 
 // plaudState is <data_dir>/plaud/state.json.
@@ -359,9 +363,9 @@ func (p *PlaudManager) accountID(ctx context.Context) (string, error) {
 	return "", nil
 }
 
-// forward hands one recording to br, whose answer goes to jid. It reports
-// false while Plaud has not finished the transcript.
-func (p *PlaudManager) forward(ctx context.Context, id string, br *Brain, jid string) (bool, error) {
+// forward hands one recording, first seen at since, to br, whose answer
+// goes to jid. It reports false while Plaud has not finished the transcript.
+func (p *PlaudManager) forward(ctx context.Context, id string, since time.Time, br *Brain, jid string) (bool, error) {
 	cfg := p.cfg()
 	detailsOut, err := p.run(ctx, "file", id)
 	if err != nil {
@@ -376,13 +380,25 @@ func (p *PlaudManager) forward(ctx context.Context, id string, br *Brain, jid st
 		return false, err
 	}
 	defer os.RemoveAll(tmp)
-	args := []string{"transcript", id}
+	// `plaud file` says "transcript: available" for the raw transcript
+	// only; whether there is a cleaned-up one shows when it is fetched.
+	var transcript, note string
 	if cfg.Plaud.Polished {
-		args = append(args, "--polished")
+		if transcript, err = p.fetchBody(ctx, tmp, "transcript", id, "--polished"); err != nil {
+			return false, err
+		}
+		if transcript == "" && time.Since(since) < plaudPolishedWait {
+			return false, nil
+		}
+		if transcript == "" {
+			note = fmt.Sprintf("Plaud's cleaned-up transcript was not there %v after the recording arrived, so this is the raw one.\n", plaudPolishedWait)
+			log.Printf("plaud %s: no cleaned-up transcript after %v, sending the raw one", id, plaudPolishedWait)
+		}
 	}
-	transcript, err := p.fetchBody(ctx, tmp, args...)
-	if err != nil {
-		return false, err
+	if transcript == "" {
+		if transcript, err = p.fetchBody(ctx, tmp, "transcript", id); err != nil {
+			return false, err
+		}
 	}
 	if transcript == "" {
 		return false, nil
@@ -424,7 +440,7 @@ func (p *PlaudManager) forward(ctx context.Context, id string, br *Brain, jid st
 	}
 	path := plaudTranscriptPath(dir, day, name, id)
 	var body strings.Builder
-	fmt.Fprintf(&body, "Plaud recording: %s\nRecorded: %s\nDuration: %s\nPlaud ID: %s\n\n", name, when, duration, id)
+	fmt.Fprintf(&body, "Plaud recording: %s\nRecorded: %s\nDuration: %s\nPlaud ID: %s\n%s\n", name, when, duration, id, note)
 	if summary != "" {
 		body.WriteString("=== Plaud AI summary ===\n" + summary + "\n\n")
 	}
@@ -683,12 +699,12 @@ func (p *PlaudManager) poll(ctx context.Context) error {
 	var failed []error
 	maxAge := fmt.Sprintf("%d days", plaudPendingMaxAge/(24*time.Hour))
 	for _, id := range pendingIDs {
-		done, err := p.forward(ctx, id, br, jid)
+		since := time.Unix(int64(st.Pending[id]), 0)
+		done, err := p.forward(ctx, id, since, br, jid)
 		if errors.Is(err, errPlaudAuth) {
 			_ = p.saveState(st)
 			return err
 		}
-		since := time.Unix(int64(st.Pending[id]), 0)
 		giveUp := !done && time.Since(since) > plaudPendingMaxAge
 		if err != nil {
 			next := "will retry"

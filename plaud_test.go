@@ -923,6 +923,68 @@ func TestPlaudForwardReadsWhatTheCLIPrints(t *testing.T) {
 	}
 }
 
+// With plaud.polished the cleaned-up transcript is sent when Plaud has
+// one. Plaud makes the raw transcript first and may never make the other,
+// so after plaudPolishedWait the raw one goes instead, with a note that
+// says so; before that the recording waits.
+func TestPlaudPolishedFallsBackToTheRawTranscript(t *testing.T) {
+	raw := "[00:00 - 00:04] Speaker 1: Let's ship on Friday."
+	for _, c := range []struct {
+		name     string
+		polished *string // the polished block's segment, nil for none
+		age      time.Duration
+		want     string // the transcript sent, "" for none yet
+		note     bool
+	}{
+		{"cleaned up", ptr("Let us ship on Friday."), time.Minute, "[00:00 - 00:04] Speaker 1: Let us ship on Friday.", false},
+		{"none yet", nil, time.Minute, "", false},
+		{"an empty one yet", ptr(""), time.Minute, "", false},
+		{"none after the wait", nil, plaudPolishedWait + time.Minute, raw, true},
+		{"an empty one after the wait", ptr(""), plaudPolishedWait + time.Minute, raw, true},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			tb, fp := plaudBridge(t, `, "polished": true`)
+			plaudSignIn(t, tb)
+			first := float64(time.Now().Add(-c.age).Unix())
+			if err := tb.plaud.saveState(&plaudState{Account: "u_1", Seen: []string{plaudOld1}, Pending: map[string]float64{plaudNew: first}}); err != nil {
+				t.Fatal(err)
+			}
+			r := fp.teamSync(plaudNew, true)
+			if c.polished != nil {
+				b := fakePlaudBlock{DataType: "transaction_polish"}
+				if *c.polished != "" {
+					b.Content = fakePlaudTranscript(fakePlaudSegment{0, 4000, "Speaker 1", *c.polished})
+				}
+				r.Sources = append(r.Sources, b)
+			}
+			fp.files(plaudNew, plaudOld1)
+			fp.put(r)
+			logs := captureLog(t)
+			if err := tb.plaud.Poll(context.Background()); err != nil {
+				t.Fatal(err)
+			}
+			if c.want == "" {
+				if tb.plaudForwarded() {
+					t.Fatal("handed over before the cleaned-up transcript was there or the wait was up")
+				}
+				if st, _ := tb.plaud.loadState(); st.Pending[plaudNew] == 0 {
+					t.Errorf("state = %+v, want the recording still waiting", st)
+				}
+				return
+			}
+			got := tb.plaudDelivered(t, plaudNew)
+			if !strings.Contains(got, "=== Transcript ===\n"+c.want+"\n") {
+				t.Errorf("the file lacks the transcript %q:\n%s", c.want, got)
+			}
+			if strings.Contains(got, "this is the raw one") != c.note || logContains(logs, "sending the raw one") != c.note {
+				t.Errorf("note about the raw transcript in the file or the log, want %v:\n%s\n%q", c.note, got, logs())
+			}
+		})
+	}
+}
+
+func ptr[T any](v T) *T { return &v }
+
 // A recording handed over again, as after a crash before the state was
 // saved, rewrites its transcript file instead of adding a copy, even when
 // it was renamed in Plaud in between.
