@@ -201,7 +201,7 @@ jobs:
           node-version: '24'
 
       # Every dashboard module must parse: one syntax error leaves the whole
-      # dashboard blank. node --test runs web/**/*.test.js once there are any.
+      # dashboard blank. node --test then runs web/test (web/**/*.test.js).
       - name: dashboard modules and unit tests
         run: make test-web
 

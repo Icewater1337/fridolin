@@ -137,6 +137,35 @@ func TestDashboardGuards(t *testing.T) {
 	}
 }
 
+// The page's modules are served as JavaScript, which browsers require of
+// module scripts. The JavaScript tests and the package.json that marks the
+// modules for node sit in web/ too, but are not part of the page.
+func TestDashboardServesOnlyThePage(t *testing.T) {
+	tb := newTestBridge(t, "")
+	cases := []struct {
+		path string
+		want int
+	}{
+		{"/", 200},
+		{"/favicon.png", 200},
+		{"/assets/app/main.js", 200},
+		{"/assets/lib/format.js", 200},
+		{"/package.json", 404},
+		{"/test/format.test.js", 404},
+	}
+	for _, c := range cases {
+		t.Run(c.path, func(t *testing.T) {
+			w := tb.do("GET", c.path, nil)
+			if w.Code != c.want {
+				t.Fatalf("GET %s: %d, want %d", c.path, w.Code, c.want)
+			}
+			if ct := w.Header().Get("Content-Type"); c.want == 200 && strings.HasSuffix(c.path, ".js") && !strings.Contains(ct, "javascript") {
+				t.Errorf("GET %s: Content-Type %q, want JavaScript", c.path, ct)
+			}
+		})
+	}
+}
+
 // TestStatusWarnsWhenBrainsInheritYourClaudeSetup: inherit_claude_user_config
 // has no dashboard field, so the status says when it is on.
 func TestStatusWarnsWhenBrainsInheritYourClaudeSetup(t *testing.T) {
