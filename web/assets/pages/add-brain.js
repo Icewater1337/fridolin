@@ -23,6 +23,7 @@ export default {
     let caps = null;
     let pickAbort = null;
     let tab = 'browse';
+    let configure = null; // the configure step's form: {value(), base}
 
     const stepper = h('ol.stepper');
     const body = h('div.wizard-body');
@@ -35,7 +36,9 @@ export default {
       stepper,
       body);
 
-    ctx.dirty = () => step === 'configure';
+    // Only edits in the configure step need asking about: until then the
+    // wizard holds nothing but the folder picked.
+    ctx.dirty = () => step === 'configure' && !!configure && JSON.stringify(configure.value()) !== configure.base;
     ctx.onCleanup(() => { if (pickAbort) pickAbort.abort(); });
 
     function paintStepper() {
@@ -48,6 +51,7 @@ export default {
 
     function go(next) {
       step = next;
+      configure = null;
       paintStepper();
       window.scrollTo(0, 0);
       if (step === 'folder') renderFolder();
@@ -247,6 +251,16 @@ export default {
       const backupSw = toggle({ checked: true, label: 'Include in Google Drive backups' });
       const excludes = linesArea(DEFAULT_BACKUP_EXCLUDES, { rows: 5 });
 
+      // The manifest the brain is added with.
+      const value = () => ({
+        version: 1,
+        id: idIn.value,
+        name: nameIn.value.trim(),
+        routing: routing.getValue(),
+        model: modelIn.value.trim(),
+        effort: effortSel.value,
+        backup: { enabled: backupSw.input.checked, exclude: linesOf(excludes) },
+      });
       const form = h('form.wizard-card.card.form',
         h('h2', 'Configure the brain'),
         h('div.path-line.muted', icon('folder'), mono(r.abs_path), !r.exists ? ' (will be created)' : ''),
@@ -269,19 +283,11 @@ export default {
         e.preventDefault();
         if (!nameIn.value.trim()) { nameIn.focus(); toast('Give the brain a name'); return; }
         if (!checkId()) { idIn.focus(); return; }
-        const manifest = {
-          version: 1,
-          id: idIn.value,
-          name: nameIn.value.trim(),
-          routing: routing.getValue(),
-          model: modelIn.value.trim(),
-          effort: effortSel.value,
-          backup: { enabled: backupSw.input.checked, exclude: linesOf(excludes) },
-        };
-        runBusy(form.querySelector('button[type=submit]'), () => submit({ manifest }));
+        runBusy(form.querySelector('button[type=submit]'), () => submit({ manifest: value() }));
       });
       mount(body, form);
       checkId();
+      configure = { value, base: JSON.stringify(value()) };
       nameIn.focus();
     }
 
@@ -294,7 +300,7 @@ export default {
         use_existing: useExisting,
       });
       step = 'done';
-      ctx.dirty = null;
+      configure = null;
       paintStepper();
       const m = useExisting ? r.manifest : manifest;
       const quiet = m && m.routing && !m.routing.handles_dms && !m.routing.default && !(m.routing.groups || []).length;
