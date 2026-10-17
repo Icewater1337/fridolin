@@ -85,6 +85,15 @@ write anywhere in `~/.nvm/versions/node`, and they cannot add a `plaud` or
 so on themselves. A brain could then also read the token — turn it on only if
 you want brains to look things up in Plaud directly.
 
+Changing it does not move a login. Fridolin stops checking until you
+connect again, and then uses the login the tool has in its new home: your
+terminal's `plaud` may already be signed in to `~/.plaud/`, maybe with
+another account, and Fridolin does not take that over unasked. Connecting
+with another account starts over, as above. With it on, **Disconnect**
+signs out the login in `~/.plaud/`, which your terminal's `plaud` uses too.
+If a login is still there after signing out, Disconnect says so instead of
+reporting success.
+
 Fridolin runs Plaud's tool with its usage statistics turned off
 (`DO_NOT_TRACK`), and with only a few variables of its own environment,
 such as the locale and the proxy settings, and while it signs you in also

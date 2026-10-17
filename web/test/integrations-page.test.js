@@ -13,12 +13,14 @@ const status = (checked) => ({
   target_brain: 'work', last_poll: checked, seen: 3,
 });
 
-async function openPage(t) {
+const button = (root, label) => root.querySelectorAll('button').find((b) => b.textContent === label);
+
+async function openPage(t, first = status('2026-10-18T10:00:00Z')) {
   t.mock.timers.enable({ apis: ['setTimeout', 'Date'] });
   installDom();
   noConsoleErrors(t);
-  const bridge = { status: status('2026-10-18T10:00:00Z') };
-  serve(t, (path) => {
+  const bridge = { status: first };
+  const calls = serve(t, (path) => {
     if (path.startsWith('/api/plaud/status')) return bridge.status;
     if (path.startsWith('/api/brains')) return [{ id: 'work', name: 'Work' }];
     return {};
@@ -31,7 +33,7 @@ async function openPage(t) {
   await settle();
   const poll = async (next) => { bridge.status = next; await resource('/api/plaud/status').refresh(); await settle(); };
   const note = () => root.querySelector('.live-form').firstChild; // the "changed elsewhere" note
-  return { root, ctx, poll, note };
+  return { root, ctx, poll, note, calls };
 }
 
 test('the Plaud status keeps refreshing while its settings have edits', async (t) => {
@@ -69,4 +71,17 @@ test('coming back to the page shows the Plaud status it knows at once', async (t
   t.after(() => ctx.destroy());
   page.render(root, ctx);
   assert.match(root.textContent, /Signed in as you@example\.com/, 'painted before the bridge answers again');
+});
+
+test('cancelling the brain_access dialog leaves nothing unsaved', async (t) => {
+  const { root, ctx } = await openPage(t);
+  const access = root.querySelectorAll('label.switch').find((l) => l.textContent.includes('Let brains use')).input;
+  access.checked = true;
+  access.dispatchEvent(new Event('change', { bubbles: true }));
+  await settle();
+  assert.equal(ctx.dirty(), true, 'the change is kept while you decide');
+  button(document.querySelector('dialog'), 'Cancel').click();
+  await settle();
+  assert.equal(access.checked, false, 'the switch is back off');
+  assert.equal(ctx.dirty(), false, 'and nothing is unsaved');
 });

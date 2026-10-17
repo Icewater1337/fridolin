@@ -1437,6 +1437,82 @@ func TestPlaudStopEndsCheckNow(t *testing.T) {
 	}
 }
 
+// Turning plaud.brain_access on or off moves where the CLI keeps its
+// login. Fridolin does not take over the login it finds there, which may
+// be your terminal's, of another account: it waits, without running the
+// CLI, until you connect again, and then starts over for that account if
+// it is another one.
+func TestPlaudBrainAccessNeedsConnectingAgain(t *testing.T) {
+	tb, fp := plaudBridge(t, "")
+	plaudSignIn(t, tb)
+	if err := tb.plaud.saveState(plaudRecordLogin(tb, plaudSeededState("u_1", plaudOld1))); err != nil {
+		t.Fatal(err)
+	}
+	// Your terminal is signed in to another account.
+	shared := filepath.Join(tb.home, ".plaud", "tokens.json")
+	if err := os.MkdirAll(filepath.Dir(shared), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(shared, []byte("{}"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	fp.write("account", "u_2")
+	fp.files(plaudNew, plaudOld1)
+	fp.recording(plaudNew, true)
+
+	if w := tb.do("PUT", "/api/plaud/settings", map[string]any{"brain_access": true}); w.Code != 200 {
+		t.Fatalf("settings: %d %s", w.Code, w.Body.String())
+	}
+	ctx := context.Background()
+	if s := tb.plaud.Status(); s.Connected || !s.LoginMoved || s.Expired {
+		t.Errorf("after turning brain_access on: connected=%v moved=%v expired=%v, want only moved", s.Connected, s.LoginMoved, s.Expired)
+	}
+	tb.plaud.tick(ctx, time.Now().Add(-time.Second))
+	if calls := fp.calls(); calls != "" {
+		t.Fatalf("the CLI ran with a login Fridolin did not make:\n%s", calls)
+	}
+
+	// Connect again: the CLI is already signed in there, and that is now
+	// Fridolin's login. Its account is another one, so nothing old is sent.
+	if err := tb.plaud.Connect(); err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, 10*time.Second, "the sign-in", func() bool { return tb.plaud.connected() })
+	if err := tb.plaud.Poll(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if tb.plaudForwarded() {
+		t.Error("the other account's recording was sent")
+	}
+	if st, _ := tb.plaud.loadState(); st.Account != "u_2" || st.Login == nil || st.Login.Dir != tb.home {
+		t.Errorf("state = %+v, login %+v: want it started over for u_2 with the login in %s", st, st.Login, tb.home)
+	}
+
+	// And back: the private login that is still there needs connecting too.
+	if w := tb.do("PUT", "/api/plaud/settings", map[string]any{"brain_access": false}); w.Code != 200 {
+		t.Fatalf("settings: %d %s", w.Code, w.Body.String())
+	}
+	if s := tb.plaud.Status(); s.Connected || !s.LoginMoved {
+		t.Errorf("after turning brain_access off: connected=%v moved=%v, want moved", s.Connected, s.LoginMoved)
+	}
+}
+
+// Disconnect fails, rather than claim it signed out, when the login is
+// still there afterwards (Fridolin would go on using it).
+func TestPlaudDisconnectReportsALoginThatStays(t *testing.T) {
+	tb, fp := plaudBridge(t, `, "brain_access": true`)
+	plaudSignIn(t, tb)
+	fp.write("logout_keeps", "")
+	w := tb.do("POST", "/api/plaud/disconnect", nil)
+	if w.Code != http.StatusBadGateway || !strings.Contains(w.Body.String(), "still there") {
+		t.Errorf("disconnect = %d %s, want 502 saying the login is still there", w.Code, w.Body.String())
+	}
+	_ = os.Remove(filepath.Join(fp.dir, "logout_keeps"))
+	if w := tb.do("POST", "/api/plaud/disconnect", nil); w.Code != 200 || tb.plaud.connected() {
+		t.Errorf("disconnect = %d %s, connected = %v", w.Code, w.Body.String(), tb.plaud.connected())
+	}
+}
+
 func TestPlaudBrainAccessSharesTheLogin(t *testing.T) {
 	tb, fp := plaudBridge(t, `, "brain_access": true`)
 	fp.files()

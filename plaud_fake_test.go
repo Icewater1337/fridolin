@@ -66,6 +66,7 @@ func fakePlaudTranscript(segs ...fakePlaudSegment) string {
 //	login_wait         `plaud login` prints the link and waits for login_go
 //	login_deny         `plaud login` is denied: exit 2
 //	login_timeout      `plaud login` times out: exit 4
+//	logout_keeps       `plaud logout` says it signed out, and leaves the login
 //	hang               the command starts a child that holds its output,
 //	                   writes the child's pid to child.pid, and hangs
 //	flood              the command prints 8 MiB
@@ -183,7 +184,9 @@ func (f fakePlaudCLI) run(args []string) int {
 			fmt.Println("Not logged in.")
 			return 0
 		}
-		_ = os.Remove(f.token)
+		if !f.exists("logout_keeps") {
+			_ = os.Remove(f.token)
+		}
 		fmt.Println("Logged out and revoked authorization.")
 		return 0
 	}

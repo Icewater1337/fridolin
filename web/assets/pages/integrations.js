@@ -67,15 +67,24 @@ export default {
         const connecting = s.connect && s.connect.state === 'running';
         // Plaud's tool deletes a login that expired; Fridolin remembers it
         // had one.
-        paint(card, { connect: s.connect || null, expired: !!s.expired && !connecting }, ({ connect, expired }) => [
+        const signIn = {
+          connect: s.connect || null, expired: !!s.expired && !connecting, moved: !!s.login_moved && !connecting,
+          loginDir: s.login_dir || '', access: !!(s.settings || {}).brain_access,
+        };
+        paint(card, signIn, ({ connect, expired, moved, loginDir, access }) => [
           head(connecting ? 'Signing in…' : expired ? 'Login expired' : 'Not connected', connecting ? 'warn' : expired ? 'bad' : 'neutral'),
           expired
             ? callout('bad', 'Plaud’s login expired', 'Recordings are not arriving, and the chat gets a reminder once a day. Connect again — it takes one approval in the browser.')
             : h('p', 'Sign in with your Plaud account. New recordings then reach the brain you choose as finished transcripts, with Plaud’s AI summary.'),
+          moved
+            ? callout('warn', 'Connect Plaud again', '“Let brains use the Plaud CLI” changed where the login lives, and Fridolin does not take over a login it did not make. Connect again to use the one in ', mono(loginDir), '.')
+            : null,
           connecting ? callout('info', 'Approve access in the browser tab Plaud just opened.',
             connect.auth_url ? h('div', 'No tab opened? ', h('a', { href: connect.auth_url, target: '_blank', rel: 'noopener noreferrer' }, 'Open Plaud’s sign-in')) : null) : null,
           connect && connect.state === 'error' ? callout('bad', 'Sign-in did not finish', connect.error) : null,
-          h('p.muted.small', 'Fridolin keeps the Plaud login in its own data folder, out of the brains’ reach. Plaud’s tool runs with its usage statistics turned off.'),
+          h('p.muted.small', access
+            ? 'The login goes to ~/.plaud/, where brains can use it (“Let brains use the Plaud CLI” is on). Plaud’s tool runs with its usage statistics turned off.'
+            : 'Fridolin keeps the Plaud login in its own data folder, out of the brains’ reach. Plaud’s tool runs with its usage statistics turned off.'),
           h('div.actions', btn(connecting ? 'Waiting for Plaud…' : expired ? 'Connect again' : 'Connect Plaud', {
             kind: 'primary', icon: 'external', disabled: connecting,
             onClick: async () => { await post('/api/plaud/connect'); toast('Plaud’s sign-in opened in your browser', 'ok'); await refresh(); },
@@ -109,7 +118,7 @@ export default {
       // still loading), so Save does not quietly switch to Automatic.
       if (st.brain && !brains.some((b) => b.id === st.brain)) options.push([st.brain, missing(st.brain)]);
       settings.set({ st, options });
-      paint(actionsBox, { enabled: !!st.enabled, expired: !!s.expired }, renderActions);
+      paint(actionsBox, { enabled: !!st.enabled, expired: !!s.expired, access: !!st.brain_access }, renderActions);
       paint(loginBox, s.login_dir || '', (dir) => ['Login stored in ', mono(dir), '.']);
     }
 
@@ -125,11 +134,34 @@ export default {
       return facts.length ? h('div.facts', facts) : null;
     }
 
-    function buildSettings({ st, options }) {
+    function buildSettings({ st, options }, changed) {
       const enabled = toggle({ checked: !!st.enabled, label: 'Send new recordings to a brain' });
       const brainSel = select(options, st.brain || '');
       const polished = toggle({ checked: !!st.polished, label: 'Use Plaud’s AI-cleaned transcript' });
-      const access = toggle({ checked: !!st.brain_access, label: 'Let brains use the Plaud CLI themselves' });
+      const accessWarn = h('div.help.warn-text', 'Brains can read the Plaud login while this is on.');
+      const showAccessWarn = () => { accessWarn.hidden = !access.input.checked; };
+      // The setting moves the login, so saving it means connecting again.
+      const access = toggle({
+        checked: !!st.brain_access, label: 'Let brains use the Plaud CLI themselves',
+        onChange: async (on, input) => {
+          const ok = await confirmDialog({
+            title: on ? 'Let brains use the Plaud CLI?' : 'Keep the Plaud login from brains?',
+            message: on
+              ? 'Plaud’s login then lives in ~/.plaud/, where brains can read it. The login Fridolin has now does not move: after saving, connect Plaud again. If your own terminal is signed in to Plaud, that login is used once you connect.'
+              : 'Plaud’s login then lives in Fridolin’s data folder, out of the brains’ reach. The one in ~/.plaud/ stays for your terminal: after saving, connect Plaud again.',
+            confirm: on ? 'Turn on' : 'Turn off',
+          });
+          // Cancelled, the switch is back as it was, and so is the form.
+          if (!ok) {
+            input.checked = !on;
+            changed();
+          }
+          showAccessWarn();
+        },
+      });
+      showAccessWarn();
+      const accessField = field({ control: access, help: h('span', 'On: the login lives in ', mono('~/.plaud/'), ' and brains may run ', mono('plaud search'), ', ', mono('plaud transcript'), ' … themselves. Off: only Fridolin can use it. Either way the login does not move: connect again after changing this.') });
+      accessField.append(accessWarn);
       const msg = h('textarea', { id: nextId('pmsg'), rows: 4, placeholder: 'Built-in instruction: file it under transcripts/, note what matters, reply with a summary and action items. {name}, {when} and {duration} are filled in.' });
       msg.value = st.message || '';
       const value = () => ({
@@ -140,12 +172,12 @@ export default {
         field({ control: enabled, help: `Every ${every(st.interval_seconds || 60)} Fridolin looks for new recordings and waits until Plaud has transcribed them. The first check — also the first after signing in with another Plaud account — only remembers what already exists, so old recordings are not sent. Recordings made while this is off are sent when you turn it back on (up to the latest 20).` }),
         field({ label: 'Brain', control: brainSel, help: 'Recordings run in this brain. Its answer is private: it goes to the brain’s reply chat when that is a direct chat, otherwise to your DM — never to a group.' }),
         field({ control: polished, help: 'Plaud makes the cleaned-up transcript after the raw one, and not always. When it has none an hour after the recording showed up, the raw one is sent, with a note saying so.' }),
-        field({ control: access, warn: access.input.checked ? 'Brains can read the Plaud login while this is on.' : null, help: h('span', 'On: the login lives in ', mono('~/.plaud/'), ' and brains may run ', mono('plaud search'), ', ', mono('plaud transcript'), ' … themselves. Off: only Fridolin can use it.') }),
+        accessField,
         field({ label: 'Instruction sent with each recording', control: msg, wide: true }));
       return { el, value };
     }
 
-    function renderActions({ enabled, expired }) {
+    function renderActions({ enabled, expired, access }) {
       return [
         btn('Save', {
           kind: 'primary', icon: 'check',
@@ -169,7 +201,10 @@ export default {
         btn('Disconnect', {
           kind: 'danger', icon: 'x', small: true,
           onClick: async () => {
-            const ok = await confirmDialog({ title: 'Disconnect Plaud?', message: 'Fridolin signs out of Plaud and stops checking for recordings. Your recordings stay in Plaud.', confirm: 'Disconnect', danger: true });
+            const shared = access
+              ? ' The login is the one in ~/.plaud/, so this also signs out the plaud command in your terminal.'
+              : '';
+            const ok = await confirmDialog({ title: 'Disconnect Plaud?', message: `Fridolin signs out of Plaud and stops checking for recordings.${shared} Your recordings stay in Plaud, and the transcripts already filed stay where they are.`, confirm: 'Disconnect', danger: true });
             if (!ok) return;
             // Plaud's logout may take the bridge's 30 s.
             await post('/api/plaud/disconnect', undefined, { timeout: 60000 });

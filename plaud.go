@@ -279,18 +279,32 @@ const (
 	plaudSignedOut = "signed out"
 	plaudConnected = "connected"
 	plaudExpired   = "expired"
+	// plaudMoved: Fridolin signed in with the other CLI home, before
+	// plaud.brain_access changed (see cliHome).
+	plaudMoved = "moved"
 )
 
 // loginStatus says whether Plaud is connected. A login is there while
 // tokens.json is, and expired when it is gone but Fridolin's sign-in is
 // still on record (the CLI deleted it). A login from before sign-ins were
 // recorded counts while its tokens.json is there.
+//
+// A sign-in made with the other CLI home counts for nothing until you
+// connect again: plaud.brain_access moves where the CLI keeps its login,
+// and ~/.plaud may hold your own terminal's login, maybe of another
+// account, which Fridolin must not take over unasked.
 func (p *PlaudManager) loginStatus() string {
-	_, err := os.Stat(p.tokenPath())
+	st, _ := p.loadState()
+	var dir string
+	if st != nil && st.Login != nil {
+		dir = st.Login.Dir
+	}
 	switch {
-	case err == nil:
+	case dir != "" && dir != p.cliHome():
+		return plaudMoved
+	case p.hasLogin():
 		return plaudConnected
-	case p.loginRecorded():
+	case dir != "":
 		return plaudExpired
 	}
 	return plaudSignedOut
@@ -298,12 +312,8 @@ func (p *PlaudManager) loginStatus() string {
 
 func (p *PlaudManager) connected() bool { return p.loginStatus() == plaudConnected }
 
-// loginRecorded reports whether state.json records Fridolin's sign-in for
-// the CLI home in use.
-func (p *PlaudManager) loginRecorded() bool {
-	st, _ := p.loadState()
-	return st != nil && st.Login != nil && st.Login.Dir == p.cliHome()
-}
+// hasLogin reports whether the CLI has a login in the CLI home in use.
+func (p *PlaudManager) hasLogin() bool { return fileExists(p.tokenPath()) }
 
 // loginStamp changes whenever the login file does: a sign-in, a sign-out, a
 // token refresh, or brain_access switching to the other login. "" means
@@ -1166,9 +1176,12 @@ type PlaudStatus struct {
 	LastError     string        `json:"last_error,omitempty"`
 	LastForwarded *PlaudForward `json:"last_forwarded,omitempty"`
 	// Account is who is signed in. Expired means the login lapsed: Plaud's
-	// CLI deleted it, or Plaud refuses it.
-	Account string `json:"account,omitempty"`
-	Expired bool   `json:"expired,omitempty"`
+	// CLI deleted it, or Plaud refuses it. LoginMoved means Fridolin signed
+	// in before plaud.brain_access changed where the login lives, and needs
+	// to connect again.
+	Account    string `json:"account,omitempty"`
+	Expired    bool   `json:"expired,omitempty"`
+	LoginMoved bool   `json:"login_moved,omitempty"`
 }
 
 // Status reports the integration's state. It never runs the CLI: who is
@@ -1177,11 +1190,12 @@ func (p *PlaudManager) Status() PlaudStatus {
 	cfg := p.cfg()
 	login := p.loginStatus()
 	s := PlaudStatus{
-		CLI:       PlaudCLI{InstallHint: "npm install -g @plaud-ai/cli"},
-		Connected: login == plaudConnected,
-		Expired:   login == plaudExpired,
-		Settings:  cfg.Plaud,
-		LoginDir:  filepath.Dir(p.tokenPath()),
+		CLI:        PlaudCLI{InstallHint: "npm install -g @plaud-ai/cli"},
+		Connected:  login == plaudConnected,
+		Expired:    login == plaudExpired,
+		LoginMoved: login == plaudMoved,
+		Settings:   cfg.Plaud,
+		LoginDir:   filepath.Dir(p.tokenPath()),
 	}
 	if path, err := p.cliPath(); err == nil {
 		s.CLI.Found, s.CLI.Path = true, path
@@ -1261,12 +1275,19 @@ func (p *PlaudManager) Connect() error {
 		})
 		// The CLI opens the sign-in page in your browser itself.
 		_, err := p.runCLIOut(withDesktop(ctx), out, "login")
-		if err == nil && p.connected() {
+		if err == nil && !p.hasLogin() {
+			err = errors.New("the sign-in did not finish: Plaud's tool left no login")
+		}
+		if err == nil {
+			// The login in this CLI home is Fridolin's now, also one the CLI
+			// already had ("Already logged in"): you asked for it.
 			err = p.update(func(st *plaudState) error {
 				st.Login = &plaudLogin{Dir: p.cliHome(), Since: time.Now()}
 				st.AuthNotified = time.Time{}
 				return nil
 			})
+		}
+		if err == nil {
 			// Who signed in, for the card; a check asks again if this fails.
 			if _, merr := p.me(ctx); merr != nil {
 				log.Printf("plaud: could not ask who signed in: %v", merr)
@@ -1274,19 +1295,12 @@ func (p *PlaudManager) Connect() error {
 		}
 		p.mu.Lock()
 		defer p.mu.Unlock()
-		if err == nil && p.connected() {
-			p.refused = false
-		}
-		if err != nil || !p.connected() {
-			job.State = "error"
-			if err != nil {
-				job.Error = err.Error()
-			} else {
-				job.Error = "Plaud sign-in did not finish"
-			}
+		if err != nil {
+			job.State, job.Error = "error", err.Error()
 			log.Printf("plaud: sign-in failed: %s", job.Error)
 			return
 		}
+		p.refused = false
 		job.State = "done"
 		log.Printf("plaud: connected")
 	}()
@@ -1300,7 +1314,9 @@ func (f writerFunc) Write(b []byte) (int, error) { f(b); return len(b), nil }
 
 // Disconnect signs out of Plaud. The sign-out runs to its end even when
 // whoever asked for it goes away: the CLI must not be stopped while it
-// rewrites its login.
+// rewrites its login. With plaud.brain_access on, that is the login in
+// ~/.plaud, which your terminal's plaud uses too. A login still there
+// afterwards is an error: Fridolin would go on using it.
 func (p *PlaudManager) Disconnect() error {
 	ctx, cancel := context.WithTimeout(p.lifetime(), 30*time.Second)
 	defer cancel()
@@ -1316,7 +1332,13 @@ func (p *PlaudManager) Disconnect() error {
 	p.mu.Lock()
 	p.refused = false
 	p.mu.Unlock()
-	return err
+	if err != nil {
+		return err
+	}
+	if p.hasLogin() {
+		return fmt.Errorf("the sign-out did not remove %s, so Plaud's login is still there — run `plaud logout` in a terminal", p.tokenPath())
+	}
+	return nil
 }
 
 // CheckNow starts a check in the background, on the poller's lifetime so
