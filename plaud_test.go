@@ -8,7 +8,9 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 )
@@ -1226,6 +1228,81 @@ func TestPlaudConnectShowsTheSignInLinkWhileWaiting(t *testing.T) {
 	})
 	fp.write("login_go", "")
 	waitFor("the sign-in to finish", func(s status) bool { return s.Connect.State == "done" && s.Connected })
+}
+
+// The CLI runs in its own home, not in the bridge's working folder (the
+// data folder under the service), whose .env it would load. It runs in a
+// process group of its own, so a check that is cancelled ends with all of
+// it, and what it prints is capped.
+func TestPlaudCLIRunsContained(t *testing.T) {
+	t.Run("in its home", func(t *testing.T) {
+		tb, fp := plaudBridge(t, "")
+		if _, err := tb.plaud.run(context.Background(), "logout"); err != nil {
+			t.Fatal(err)
+		}
+		if !strings.Contains(fp.calls(), "CWD="+tb.plaud.cliHome()+" logout") {
+			t.Errorf("the CLI did not run in %s:\n%s", tb.plaud.cliHome(), fp.calls())
+		}
+	})
+	t.Run("a cancel ends what it started", func(t *testing.T) {
+		tb, fp := plaudBridge(t, "")
+		plaudSignIn(t, tb)
+		fp.write("hang", "")
+		ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
+		defer cancel()
+		start := time.Now()
+		if _, err := tb.plaud.run(ctx, "files"); err == nil {
+			t.Fatal("a cancelled run reported success")
+		}
+		if d := time.Since(start); d > 8*time.Second {
+			t.Errorf("the cancelled run took %v to end", d)
+		}
+		pid, _ := strconv.Atoi(strings.TrimSpace(func() string { b, _ := os.ReadFile(filepath.Join(fp.dir, "child.pid")); return string(b) }()))
+		if pid <= 0 {
+			t.Fatal("the fake started no child")
+		}
+		waitFor(t, 5*time.Second, "the child to end", func() bool { return syscall.Kill(pid, 0) != nil })
+	})
+	t.Run("its output is capped", func(t *testing.T) {
+		tb, fp := plaudBridge(t, "")
+		plaudSignIn(t, tb)
+		fp.write("flood", "")
+		out, err := tb.plaud.run(context.Background(), "files")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(out) != plaudOutputLimit {
+			t.Errorf("kept %d bytes of the output, want the first %d", len(out), plaudOutputLimit)
+		}
+	})
+}
+
+// A sign-in that fails says why, from the CLI's exit status: a denial is
+// not an expired login, and a timeout says how long the CLI waits.
+func TestPlaudSignInSaysWhyItFailed(t *testing.T) {
+	for _, c := range []struct {
+		fixture string
+		want    string
+	}{
+		{"login_deny", "access was not granted"},
+		{"login_timeout", "the sign-in timed out: Plaud's tool waits two minutes"},
+	} {
+		t.Run(c.fixture, func(t *testing.T) {
+			tb, fp := plaudBridge(t, "")
+			fp.write(c.fixture, "")
+			if err := tb.plaud.Connect(); err != nil {
+				t.Fatal(err)
+			}
+			var job connectJob
+			waitFor(t, 10*time.Second, "the sign-in to end", func() bool {
+				job = *tb.plaud.Status(context.Background(), false).Connect
+				return job.State != "running"
+			})
+			if job.State != "error" || !strings.Contains(job.Error, c.want) || strings.Contains(job.Error, "expired") {
+				t.Errorf("sign-in = %+v, want an error saying %q", job, c.want)
+			}
+		})
+	}
 }
 
 func TestPlaudConfigValidation(t *testing.T) {

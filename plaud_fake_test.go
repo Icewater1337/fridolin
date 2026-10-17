@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -65,6 +66,9 @@ func fakePlaudTranscript(segs ...fakePlaudSegment) string {
 //	login_wait         `plaud login` prints the link and waits for login_go
 //	login_deny         `plaud login` is denied: exit 2
 //	login_timeout      `plaud login` times out: exit 4
+//	hang               the command starts a child that holds its output,
+//	                   writes the child's pid to child.pid, and hangs
+//	flood              the command prints 8 MiB
 //
 // Without tokens.json in HOME/.plaud every command but login and logout
 // exits 2, as the real one does. Each call is appended to calls.log with
@@ -138,6 +142,22 @@ func hasFlag(args []string, name string) bool {
 }
 
 func (f fakePlaudCLI) run(args []string) int {
+	switch {
+	case f.exists("hang"):
+		child := exec.Command("sleep", "30")
+		child.Stdout = os.Stdout
+		if err := child.Start(); err == nil {
+			_ = os.WriteFile(filepath.Join(f.dir, "child.pid"), []byte(strconv.Itoa(child.Process.Pid)), 0o600)
+		}
+		time.Sleep(30 * time.Second)
+		return 0
+	case f.exists("flood"):
+		line := strings.Repeat("x", 1023) + "\n"
+		for i := 0; i < 8<<10; i++ {
+			fmt.Print(line)
+		}
+		return 0
+	}
 	spinner := map[string]string{"me": "Fetching user info...", "files": "Fetching files...", "file": "Fetching file...",
 		"transcript": "Fetching transcript...", "summary": "Fetching summary..."}
 	switch args[0] {

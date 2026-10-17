@@ -224,6 +224,14 @@ func plaudPATH(bin string) string {
 	return filepath.Dir(bin) + ":" + os.Getenv("PATH") + ":/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin"
 }
 
+// plaudOutputLimit caps what Fridolin keeps of the CLI's stdout: a
+// listing or a details page is a few KB, and transcripts go to a file.
+// plaudErrorLimit caps stderr, of which errors show the start.
+const (
+	plaudOutputLimit = 4 << 20
+	plaudErrorLimit  = 64 << 10
+)
+
 // runCLI runs `plaud args…` with what childEnv gives a helper program on
 // ctx (see helperScope), the chosen home, telemetry off, and node (which the
 // CLI needs) on PATH. child_env_passthrough is for brains: this third-party
@@ -247,22 +255,68 @@ func (p *PlaudManager) runCLIOut(ctx context.Context, out io.Writer, args ...str
 	cmd := exec.CommandContext(ctx, bin, args...)
 	cmd.Env = childEnv(helperScope(ctx), nil, "HOME="+home, "PATH="+plaudPATH(bin),
 		"DO_NOT_TRACK=1", "PLAUD_TELEMETRY_DISABLED=1", "PLAUD_NO_UPDATE_NOTIFIER=1", "NO_COLOR=1")
-	var stdout, stderr bytes.Buffer
-	cmd.Stdout, cmd.Stderr = &stdout, &stderr
+	// The CLI loads a .env from its working folder (dotenv), and the
+	// bridge's is its data folder under the service: the CLI's home is
+	// the CLI's own.
+	cmd.Dir = home
+	// Like a brain run: its own process group, all of which a cancel
+	// kills, and a bounded wait for anything still holding its output.
+	isolateProcessGroup(cmd)
+	stdout, stderr := &cappedBuffer{limit: plaudOutputLimit}, &cappedBuffer{limit: plaudErrorLimit}
+	cmd.Stdout, cmd.Stderr = stdout, stderr
 	if out != nil {
-		cmd.Stdout, cmd.Stderr = io.MultiWriter(&stdout, out), io.MultiWriter(&stderr, out)
+		cmd.Stdout, cmd.Stderr = io.MultiWriter(stdout, out), io.MultiWriter(stderr, out)
 	}
 	err = cmd.Run()
 	text := ansiRe.ReplaceAllString(stdout.String(), "")
-	var ee *exec.ExitError
-	if errors.As(err, &ee) && ee.ExitCode() == 2 {
-		return text, errPlaudAuth
-	}
 	if err != nil {
-		return text, fmt.Errorf("plaud %s: %v %s", args[0], err, truncate(strings.TrimSpace(ansiRe.ReplaceAllString(stderr.String(), "")), 300))
+		return text, plaudRunError(args[0], err, ansiRe.ReplaceAllString(stderr.String(), ""))
 	}
 	return text, nil
 }
+
+// plaudRunError says why `plaud cmd` failed. The CLI's exit status names
+// the cause: 2 a login Plaud refuses (for a sign-in: one Plaud did not
+// grant), 3 Plaud unreachable, 4 a timeout, 1 anything else.
+func plaudRunError(cmd string, err error, stderr string) error {
+	var ee *exec.ExitError
+	code := -1
+	if errors.As(err, &ee) {
+		code = ee.ExitCode()
+	}
+	detail := truncate(strings.TrimSpace(stderr), 300)
+	switch {
+	case cmd == "login" && code == 2:
+		return fmt.Errorf("access was not granted: it was denied on Plaud's page, or the sign-in failed (%s)", detail)
+	case cmd == "login" && code == 4:
+		return errors.New("the sign-in timed out: Plaud's tool waits two minutes for the approval in the browser")
+	case code == 2:
+		return errPlaudAuth
+	case code == 3:
+		return fmt.Errorf("plaud %s: cannot reach Plaud, check the network", cmd)
+	case code == 4:
+		return fmt.Errorf("plaud %s: Plaud did not answer in time", cmd)
+	}
+	return fmt.Errorf("plaud %s: %v %s", cmd, err, detail)
+}
+
+// cappedBuffer keeps the first limit bytes written to it and drops the
+// rest, so a CLI that floods its output cannot fill the bridge's memory.
+// It must not embed bytes.Buffer: io.Copy would use the buffer's ReadFrom
+// and never call Write.
+type cappedBuffer struct {
+	buf   bytes.Buffer
+	limit int
+}
+
+func (c *cappedBuffer) Write(b []byte) (int, error) {
+	if room := c.limit - c.buf.Len(); room > 0 {
+		c.buf.Write(b[:min(len(b), room)])
+	}
+	return len(b), nil
+}
+
+func (c *cappedBuffer) String() string { return c.buf.String() }
 
 func (p *PlaudManager) listIDs(ctx context.Context, page int) ([]string, error) {
 	out, err := p.run(ctx, "files", "--page", fmt.Sprint(page), "--page-size", fmt.Sprint(plaudPageSize))

@@ -65,7 +65,10 @@ connect again; without one, only the dashboard shows it.
 
 Plaud's tool stores its login in `<home>/.plaud/tokens.json`. By default
 Fridolin runs it with a private home in `~/.fridolin/plaud/home/`, which the
-sandbox denies to brains, and denies brains `~/.plaud/` as well. Fridolin
+sandbox denies to brains, and denies brains `~/.plaud/` as well. It runs the
+tool in that home folder, never in its own working folder (the tool would
+read a `.env` there), and stops it, with anything it started, when a check
+is cancelled. Fridolin
 runs the tool itself outside the sandbox, so when it is installed in your
 home folder (with nvm, for example) its whole npm package and the `node`
 that runs it are read-only to brains. Unless `cli_path` is set, Fridolin
