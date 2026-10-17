@@ -530,7 +530,9 @@ change that).
 CI also runs [govulncheck](https://go.dev/doc/security/vuln/) on pushes to main,
 every pull request and once a week; it fails when the code reaches a known
 vulnerability. Run it yourself after changing dependencies:
-`go run golang.org/x/vuln/cmd/govulncheck@latest ./...`.
+`go run golang.org/x/vuln/cmd/govulncheck@latest ./...`. CodeQL scans the
+Go code, the dashboard JavaScript, the Python tools and the workflows on the
+same schedule; its findings go to the repository's code scanning alerts.
 
 On pushes to main, CI also fuzzes the parsers of untrusted input (WhatsApp
 messages, model output, files a brain writes) for 20 seconds each;
