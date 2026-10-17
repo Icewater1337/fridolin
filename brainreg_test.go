@@ -358,3 +358,28 @@ func TestEmbeddedTemplatesAreTheExamples(t *testing.T) {
 		}
 	}
 }
+
+// The brain.json in docs/BRAINS.md is the one example of a manifest, so it
+// must be one this version accepts as it stands.
+func TestBrainsDocExampleIsAValidManifest(t *testing.T) {
+	doc, err := os.ReadFile(filepath.Join(repoDir, "docs", "BRAINS.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, section, ok := strings.Cut(string(doc), "\n## brain.json\n")
+	_, block, ok2 := strings.Cut(section, "```json\n")
+	block, _, ok3 := strings.Cut(block, "```")
+	if !ok || !ok2 || !ok3 {
+		t.Fatal("docs/BRAINS.md has no json block under ## brain.json")
+	}
+	dec := json.NewDecoder(strings.NewReader(block))
+	dec.DisallowUnknownFields()
+	var m BrainManifest
+	if err := dec.Decode(&m); err != nil {
+		t.Fatalf("the example does not decode as brain.json: %v", err)
+	}
+	m = m.normalized()
+	if err := m.Validate(); err != nil {
+		t.Errorf("the example is not a valid manifest: %v", err)
+	}
+}
