@@ -1,8 +1,8 @@
-// The dashboard has no build step, so nothing else notices a broken import
-// before a browser does, and one broken module stops the whole page. These
-// tests read every module and check the imports resolve and keep the layers:
-// lib/ stands alone, components/ never reach into pages/, and pages never
-// import each other.
+// The dashboard has no build step or linter, so nothing else notices a
+// broken import before a browser does, and one broken module stops the
+// whole page. These tests read every module and check the imports resolve,
+// are used, and keep the layers: lib/ stands alone, components/ never reach
+// into pages/, and pages never import each other.
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
@@ -44,6 +44,19 @@ test('every import resolves to an export', async (t) => {
         const target = byFile.get(path.resolve(path.dirname(m.file), spec));
         assert.ok(target, `${spec} does not exist`);
         for (const n of names) assert.ok(target.exports.has(n), `${spec} has no export ${n}`);
+      }
+    });
+  }
+});
+
+test('every imported name is used', async (t) => {
+  for (const m of modules) {
+    await t.test(m.rel, () => {
+      const body = m.src.replace(/^import\s[\s\S]*?;$/gm, '');
+      for (const im of m.src.matchAll(/^import\s*\{([^}]*)\}\s*from/gm)) {
+        for (const local of im[1].split(',').map((n) => n.trim().split(/\s+as\s+/).pop()).filter(Boolean)) {
+          assert.match(body, new RegExp(`\\b${local.replace(/\$/g, '\\$')}\\b`), `${local} is imported but not used`);
+        }
       }
     });
   }
