@@ -66,7 +66,7 @@ func TestSandboxedRunAppliesProfileInline(t *testing.T) {
 // Claude CLI's install, so its auto-updater could download a new version on
 // every sandboxed run and never switch to it. Sandboxed runs therefore get
 // DISABLE_AUTOUPDATER=1, whatever the bridge's own value; runs without the
-// sandbox get the bridge's environment as it is.
+// sandbox get the bridge's own, which childEnvAllowlist passes on.
 func TestSandboxedRunTurnsOffTheAutoUpdater(t *testing.T) {
 	cases := []struct {
 		name, extra string

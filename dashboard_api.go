@@ -141,8 +141,10 @@ var (
 	claudeVersionCache = map[string]claudeStatus{}
 )
 
-// claudeInfo finds the CLI and its version, cached per path.
-func claudeInfo(path string) claudeStatus {
+// claudeInfo finds the CLI and its version, cached per path. It runs the CLI
+// with a brain's environment: a claude_path wrapper may run what a brain
+// can change.
+func claudeInfo(path string, passthrough []string) claudeStatus {
 	claudeVersionMu.Lock()
 	defer claudeVersionMu.Unlock()
 	if c, ok := claudeVersionCache[path]; ok {
@@ -152,7 +154,9 @@ func claudeInfo(path string) claudeStatus {
 	if p, err := exec.LookPath(path); err == nil {
 		st.Found, st.Path = true, p
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		out, err := exec.CommandContext(ctx, p, "--version").Output()
+		cmd := exec.CommandContext(ctx, p, "--version")
+		cmd.Env = childEnv(claudeChild, passthrough)
+		out, err := cmd.Output()
 		cancel()
 		if err == nil {
 			st.Version = strings.TrimSpace(string(out))
@@ -174,7 +178,7 @@ func (b *Bridge) apiStatus(w http.ResponseWriter, r *http.Request) {
 		DevMode:    b.dev != nil,
 		Platform:   runtime.GOOS,
 		WhatsApp:   waStatus{WAState: wa, QRAvailable: wa.QRCode != ""},
-		Claude:     claudeInfo(cfg.ClaudePath),
+		Claude:     claudeInfo(cfg.ClaudePath, cfg.ChildEnvPassthrough),
 		Sandbox:    sandboxStatus{Enabled: cfg.Sandbox.Enabled, Supported: runtime.GOOS == "darwin"},
 		Issues:     b.brainMgr.Issues(),
 		Warnings:   b.Warnings(),

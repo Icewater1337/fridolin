@@ -51,6 +51,7 @@
 
   "dangerously_skip_permissions": true,
   "inherit_claude_user_config": false,
+  "child_env_passthrough": [],
   "otp_guard": true,
   "viewer": false,
   "http_listen": "127.0.0.1:8765",

@@ -252,6 +252,53 @@ brains rely on any of this:
 > or `apiKeyHelper` it needs from `~/.claude/settings.json` into its
 > folder's `.claude/settings.json`.
 
+### `child_env_passthrough`
+
+Names of variables in the bridge's environment that brains get besides
+[the ones they always get](#what-reaches-brains). Empty by default; the
+dashboard has no field for it.
+
+```json
+"child_env_passthrough": ["GROQ_API_KEY"]
+```
+
+Each entry is one exact name of letters, digits and `_`, not starting with
+a digit: no prefixes such as `AWS_*`, no `NAME=value`. A name the bridge's
+environment does not have is skipped. Names a setup typically needs:
+
+- `GROQ_API_KEY` for transcription with the Groq API
+- `SSH_AUTH_SOCK` for a brain that pushes over ssh with your ssh-agent
+- Amazon Bedrock: `AWS_REGION`, and `AWS_PROFILE`, or `AWS_ACCESS_KEY_ID`,
+  `AWS_SECRET_ACCESS_KEY` and `AWS_SESSION_TOKEN`, or
+  `AWS_BEARER_TOKEN_BEDROCK` (`CLAUDE_CODE_USE_BEDROCK` is on the list
+  already)
+- Google Vertex AI: `CLOUD_ML_REGION`, `GOOGLE_APPLICATION_CREDENTIALS`
+  for a key file, and each `VERTEX_REGION_CLAUDE_...` you set
+  (`CLAUDE_CODE_USE_VERTEX` and `ANTHROPIC_VERTEX_PROJECT_ID` are on the
+  list already)
+- the Claude CLI's settings whose names start with neither `CLAUDE_CODE_`
+  nor `ANTHROPIC_`, such as `MAX_THINKING_TOKENS`,
+  `BASH_DEFAULT_TIMEOUT_MS`, `BASH_MAX_TIMEOUT_MS`, `API_TIMEOUT_MS`,
+  `MCP_TIMEOUT`, `MAX_MCP_OUTPUT_TOKENS` and `DISABLE_PROMPT_CACHING`
+- a cache you moved, such as `HF_HOME` for the local model of
+  `transcribe.py` (about 1.5 GB), which a brain otherwise downloads again
+  into the default cache
+
+A brain's run gets them, and so the scripts and tools it runs, and so
+does the dashboard's `claude --version` check. Anyone who may message a
+brain can ask it for these values, so list only what a brain needs, and
+set the variables themselves where the bridge's environment comes from (see
+[Environment variables](#environment-variables)).
+A change applies from the next message.
+
+A setting that is no secret, such as the CLI's or a cache's, can go into
+a brain folder's `.claude/settings.json` instead, under `env`. The CLI sets
+it for that brain's runs and the tools they start:
+
+```json
+{ "env": { "MAX_THINKING_TOKENS": "16000" } }
+```
+
 ---
 
 ## Brains
@@ -478,7 +525,8 @@ for the paths listed above. A manipulated brain can therefore still:
   `~/.oh-my-zsh`, `~/.p10k.zsh`, or a `ZDOTDIR` like `~/.config/zsh`), the
   scripts and programs a `claude_path` wrapper script runs or sources
   (only the wrapper itself is protected, and the bridge runs it outside
-  the sandbox for the dashboard's `claude --version`), a new program in a
+  the sandbox, with a brain's environment, for the dashboard's
+  `claude --version`), a new program in a
   folder on your `PATH` that shadows another one (other than the names the
   bridge runs, in folders under your home folder), and programs outside
   your home folder such as `/opt/homebrew` (user-writable on Apple Silicon)
@@ -512,8 +560,13 @@ for the paths listed above. A manipulated brain can therefore still:
   (`open`), another app (`osascript`) or a tmux server that runs outside
   the sandbox (the activity viewer's, or your own) to start a program
   (`tmux run-shell`), which then runs outside the sandbox
-- see the bridge's whole environment, write to the shared media inbox, and
-  reach the network
+- read what the bridge was started with, although a brain's run is handed
+  only [part of it](#what-reaches-brains): the variables in the service
+  file (`~/Library/LaunchAgents/ai.fridolin.bridge.plist`, which the
+  profile leaves readable), what `launchctl print` shows of the job, and
+  the bridge's own process environment (`ps eww`); and use your ssh-agent,
+  through the socket that `launchctl getenv SSH_AUTH_SOCK` names
+- write to the shared media inbox, and reach the network
 
 Later changes give each brain its own Claude Code state folder and make
 writes deny-by-default.
@@ -727,16 +780,55 @@ service up with another config. If it points at Fridolin's config, re-run
 `setup.sh` with `FRIDOLIN_CONFIG` set to it; if it belongs to other
 software, re-run it as `env -u CONFIG_FILE ./setup.sh`.
 
-The rest of the bridge's process environment reaches the programs it
-starts: the Claude CLI, brains, and the scripts and tools they run. What
-those need belongs there:
+### What reaches brains
+
+Brains are not handed the bridge's whole environment: anyone who may
+message one can ask it to run `env`, so a key in the service file, or in
+the shell that started the bridge, would otherwise reach every brain. A
+brain's run, and so the scripts and tools it runs, gets only these
+variables of the bridge's environment:
+
+| Variables | For |
+| --------- | --- |
+| `HOME`, `USER`, `LOGNAME`, `PATH`, `SHELL`, `TMPDIR`, `LANG`, `LC_*`, `TERM`, `TZ` | what any program expects |
+| `HTTPS_PROXY`, `HTTP_PROXY`, `NO_PROXY` (also in lower case), `NODE_EXTRA_CA_CERTS`, `SSL_CERT_FILE`, `SSL_CERT_DIR` | a proxy, or a firewall that inspects TLS |
+| `DO_NOT_TRACK` | the telemetry opt-out many tools honour |
+| `CLAUDE_CODE_*`, `ANTHROPIC_*`, `CLAUDE_CONFIG_DIR` | the Claude CLI's login (`CLAUDE_CODE_OAUTH_TOKEN`, `ANTHROPIC_API_KEY`), provider and gateway (`ANTHROPIC_BASE_URL`) |
+| `DISABLE_AUTOUPDATER`, `DISABLE_TELEMETRY`, `DISABLE_ERROR_REPORTING` | the CLI's update check and reports |
+| `BRIDGE_DATA_DIR`, `BRIDGE_DB_PATH`, `CALENDAR_TZ`, `TRANSCRIBE_MODEL`, `TRANSCRIBE_LANGUAGE` | the tools in [tools/](../tools/): the data directory and database if you moved them, the calendar's timezone, the transcription model and language |
+
+On top, the bridge sets `BRIDGE_BRAIN_ID`, `BRIDGE_CREDENTIALS_DIR`,
+`BRIDGE_CALENDARS` and `BRIDGE_CALENDAR_DEFAULT` for the calendar tool, and
+`DISABLE_AUTOUPDATER=1` in the sandbox. The list lives in one place,
+`childEnvAllowlist` in `childenv.go`.
+
+Brains are not handed anything else, for example `GROQ_API_KEY`,
+`SSH_AUTH_SOCK` (your ssh-agent), the variables of a Bedrock or Vertex
+setup such as `AWS_REGION` and `CLOUD_ML_REGION`, the Claude CLI's
+settings outside `CLAUDE_CODE_*` and `ANTHROPIC_*` such as
+`MAX_THINKING_TOKENS`, or `HF_HOME`. Name the ones a brain needs in
+[`child_env_passthrough`](#child_env_passthrough).
+
+This only keeps variables from being handed over unasked; it is not a
+secret store. A brain that goes looking can still read the bridge's
+environment: from the bridge's process (`ps eww`, or `/proc/<pid>/environ`
+on Linux, where brains run without a sandbox), from the service file and,
+on macOS, from launchd (see [what the sandbox does not cover
+yet](#what-the-sandbox-does-not-cover-yet)). Keep anything a brain must not
+see out of the bridge's environment and its service file.
+
+### Where to set them
+
+Set what the Claude CLI and brains need in the bridge's process
+environment:
 
 - The Claude CLI's own login and network settings, if you set them rather
   than log in once with `claude`: `ANTHROPIC_API_KEY`,
   `CLAUDE_CODE_OAUTH_TOKEN`, `HTTPS_PROXY`, `NODE_EXTRA_CA_CERTS`. Left in a
   `.env`, they do not reach `claude`, and every brain fails with "Not logged
   in" (or cannot get through the proxy).
-- Keys a brain's tools need, such as `GROQ_API_KEY` for transcription.
+- Keys a brain's tools need, such as `GROQ_API_KEY` for transcription,
+  together with their names in `child_env_passthrough`.
 
 Re-running `setup.sh` rewrites the launchd plist and the systemd unit from the
 templates in [deploy/](../deploy/), which drops anything added to them. Keep
@@ -752,7 +844,3 @@ these variables where it does not:
   and `launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/ai.fridolin.bridge.plist`,
   and add them again after every `setup.sh` run.
 - **Started by hand:** export them in the shell that runs `./fridolin`.
-
-The Python tools read `BRIDGE_DATA_DIR` and `BRIDGE_DB_PATH` if you moved the
-data directory, and `CALENDAR_TZ` for the calendar timezone. Brains run them,
-so these too belong in the bridge's process environment.

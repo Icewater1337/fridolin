@@ -24,7 +24,8 @@ import (
 // Before the tests run it unsets the variables the bridge reads: a shell
 // that exports FRIDOLIN_CONFIG for a real bridge would otherwise point the
 // tests at that bridge's config. It also gives them an empty HOME, see
-// useEmptyHome, and moves them out of the checkout, see runInEmptyDir.
+// useEmptyHome, moves them out of the checkout, see runInEmptyDir, and
+// passes testChildEnv on to the programs the bridge starts.
 func TestMain(m *testing.M) {
 	if os.Getenv("WCB_FAKE_PLAUD") == "1" && len(os.Args) > 1 && isPlaudCommand(os.Args[1]) {
 		os.Exit(fakePlaud(os.Args[1:]))
@@ -33,6 +34,7 @@ func TestMain(m *testing.M) {
 		fakeClaude()
 		return
 	}
+	childEnvAllowlist = append(childEnvAllowlist, testChildEnv...)
 	for _, k := range bridgeVariables() {
 		if err := os.Unsetenv(k); err != nil {
 			fmt.Fprintf(os.Stderr, "unsetting %s: %v\n", k, err)
@@ -51,6 +53,15 @@ func TestMain(m *testing.M) {
 		os.Exit(1)
 	}
 	os.Exit(code)
+}
+
+// testChildEnv is what the programs the bridge starts get in tests on top
+// of childEnvAllowlist: the WCB_FAKE_* variables that steer the fakes, this
+// binary playing the Claude or Plaud CLI among them, and GORACE, which
+// keeps each run of this binary from waiting a second on exit under -race.
+var testChildEnv = []childEnvVar{
+	{"WCB_FAKE_*", anyChild},
+	{"GORACE", anyChild},
 }
 
 // testHome is the HOME the tests start with.

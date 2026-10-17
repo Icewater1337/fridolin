@@ -36,7 +36,10 @@ it to a few sentences, since Whisper reads only the last 223 tokens of it.
 
     Local:  pip install -r tools/requirements-transcription.txt
             First run downloads the model (~1.5 GB for large-v3-turbo).
-    Groq:   export GROQ_API_KEY=...     (no local model needed, much lighter)
+    Groq:   pip install groq          (no local model needed, much lighter)
+            and set GROQ_API_KEY: in the bridge's environment, listed in its
+            config's child_env_passthrough, or brains do not get it
+            (docs/CONFIGURATION.md#child_env_passthrough)
 
 `--model` takes any Whisper-compatible model ID from the Hugging Face hub.
 A dialect- or language-specific fine-tune usually beats the base model by a
@@ -75,6 +78,10 @@ PROMPT_TOKENS = 448 // 2 - 1
 # Brains run this tool from their own folder, so an install hint names the
 # requirements file next to it rather than a path relative to the repo.
 LOCAL_REQUIREMENTS = Path(__file__).resolve().parent / "requirements-transcription.txt"
+# A key exported in some shell does not reach a brain: the bridge hands
+# brains only the variables on its own list and those its config names.
+GROQ_KEY_HINT = ("set GROQ_API_KEY in the bridge's environment and list it in the bridge config's "
+                 "child_env_passthrough (docs/CONFIGURATION.md#child_env_passthrough)")
 
 
 def die(msg: str) -> NoReturn:
@@ -318,10 +325,10 @@ def choose_engines(engine: str) -> Engines:
         die(f"--engine local, but transformers/torch are not installed. Run: {install_local}")
     if engine == "groq" and not use_groq:
         die("--engine groq, but GROQ_API_KEY is unset or the groq package is missing. "
-            "Run: pip install groq  and export GROQ_API_KEY=...")
+            f"Run: pip install groq, and {GROQ_KEY_HINT}.")
     if not use_local and not use_groq:
         die(f"No transcription engine available. Either install the local model "
-            f"({install_local}) or set GROQ_API_KEY and install the groq package.")
+            f"({install_local}) or install the groq package and {GROQ_KEY_HINT}.")
     return Engines(local=use_local, groq=use_groq)
 
 
