@@ -9,6 +9,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -361,6 +362,53 @@ func TestSanitizeMediaName(t *testing.T) {
 			}
 		})
 	}
+}
+
+// FuzzNumberAllowed: allowed_numbers lets a sender DM the bridge only when
+// it lists the number exactly: no prefix, no suffix, no other number.
+// allow_any_dm decides what an empty list means and never widens a list.
+// A listed number gets in however the JID it came from was written.
+func FuzzNumberAllowed(f *testing.F) {
+	const n = "15551234567"
+	f.Add(n, n, false)
+	f.Add(n, "", true)
+	f.Add(n, "", false)
+	f.Add(n[:len(n)-1], n+",15559876543", true) // a listed number cut short
+	f.Add(n+"8", n, true)                       // and one made longer
+	f.Add("+"+n, n, false)
+	f.Add("", ",", false)
+	f.Fuzz(func(t *testing.T, number, list string, anyDM bool) {
+		var allowed []string
+		if list != "" {
+			allowed = strings.Split(list, ",")
+		}
+		cfg := &Config{AllowedNumbers: allowed, AllowAnyDM: &anyDM}
+		got := numberAllowed(cfg, number)
+		if len(allowed) == 0 {
+			if got != anyDM {
+				t.Errorf("with no allowed_numbers and allow_any_dm %v, %q allowed: %v", anyDM, number, got)
+			}
+			return
+		}
+		if listed := slices.Contains(allowed, number); got != listed {
+			t.Errorf("allowed_numbers %q: %q allowed: %v, listed: %v", allowed, number, got, listed)
+		}
+		other := !anyDM
+		if numberAllowed(&Config{AllowedNumbers: allowed, AllowAnyDM: &other}, number) != got {
+			t.Errorf("allowed_numbers %q: allow_any_dm changes whether %q is allowed", allowed, number)
+		}
+		for _, n := range allowed {
+			// The dashboard saves numbers normalised.
+			if n != normalizeJID(n) {
+				continue
+			}
+			for _, jid := range []string{n, "+" + n, n + "@s.whatsapp.net", "+" + n + "@s.whatsapp.net"} {
+				if !numberAllowed(cfg, normalizeJID(jid)) {
+					t.Errorf("allowed_numbers %q: %q is refused", allowed, jid)
+				}
+			}
+		}
+	})
 }
 
 // fakeDownloader stands in for whatsmeow's media download. Like whatsmeow,

@@ -1211,6 +1211,45 @@ func TestNormalizeJID(t *testing.T) {
 	}
 }
 
+// FuzzNormalizeJID: a normalised JID is what allowed_numbers and the
+// identity map hold, and what a sender is compared with. It has no server
+// and no space around it, it is part of the input, normalising it again
+// changes nothing, and every way of writing a number gives the number.
+func FuzzNormalizeJID(f *testing.F) {
+	for _, s := range []string{"15551234567@s.whatsapp.net", "+15551234567", "120363000000000000@g.us", "15551234567", "15551234567:12@s.whatsapp.net", "", "@", "+", "a@b@c", "+@s.whatsapp.net"} {
+		f.Add(s)
+	}
+	f.Fuzz(func(t *testing.T, jid string) {
+		n := normalizeJID(jid)
+		if strings.Contains(n, "@") {
+			t.Errorf("normalizeJID(%q) = %q, which still has a server", jid, n)
+		}
+		if n != strings.TrimSpace(n) {
+			t.Errorf("normalizeJID(%q) = %q, not trimmed", jid, n)
+		}
+		if !strings.Contains(jid, n) {
+			t.Errorf("normalizeJID(%q) = %q, which is not part of it", jid, n)
+		}
+		if again := normalizeJID(n); again != n {
+			t.Errorf("normalizeJID(%q) = %q, but normalising that gives %q", jid, n, again)
+		}
+		digits := strings.Map(func(r rune) rune {
+			if '0' <= r && r <= '9' {
+				return r
+			}
+			return -1
+		}, jid)
+		if digits == "" {
+			return
+		}
+		for _, form := range []string{digits, "+" + digits, digits + "@s.whatsapp.net", "+" + digits + "@s.whatsapp.net", digits + "@g.us"} {
+			if got := normalizeJID(form); got != digits {
+				t.Errorf("normalizeJID(%q) = %q, want %q", form, got, digits)
+			}
+		}
+	})
+}
+
 // ── misc ──────────────────────────────────────────────────────────────────
 
 func TestTruncateDoesNotSplitRunes(t *testing.T) {
