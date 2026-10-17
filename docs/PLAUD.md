@@ -40,15 +40,20 @@ about it at the next check, then less and less often, up to every 15
 minutes. If fetching it fails, it is tried again the same way, and the
 Plaud card shows the error meanwhile. After three days without a transcript,
 or of failing, Fridolin gives up on it: the card lists it with the reason,
-and the private chat below gets one notice. A recording deleted in Plaud
-meanwhile is given up at once, without a notice. Once it is ready, Fridolin
+and the private chat summaries go to (see below) gets one notice. A
+recording deleted in Plaud meanwhile is given up at once, without a notice.
+Once it is ready, Fridolin
 writes a `.txt` with the details, Plaud's summary and the timestamped
 transcript to `~/.fridolin/media/plaud/` (as
-`DD.MM.YYYY - <name> - <Plaud ID>.txt`; a recording handed over again
-rewrites its file rather than adding a copy), and gives it to the brain
-like a WhatsApp attachment, with an instruction (`plaud.message`; `{name}`,
-`{when}` and `{duration}` are filled in). It runs in the brain you picked, with
-that brain's memory and history.
+`YYYY-MM-DD - <name> - <Plaud ID>.txt`, by the day it was recorded; a
+recording handed over again rewrites its file rather than adding a copy),
+and gives it to the brain like a WhatsApp attachment. The message with it
+starts with a fixed line, `[Plaud] New recording "<name>" (<when>,
+<duration>)…`, so skills can recognise it, and then gives an instruction:
+`plaud.message` (`{name}`, `{when}` and `{duration}` are filled in), or a
+built-in one that says to follow the brain's `skills/plaud.md`. How
+recordings are filed is up to that skill, not to Fridolin. It runs in the
+brain you picked, with that brain's memory and history.
 
 A recording counts as handed over once the brain's run has answered it.
 When the brain's queue is full, it waits for the next check. A run that
@@ -130,6 +135,6 @@ for updates either; `plaud` in your own terminal follows your own settings.
 | `brain` | DM brain | brain id that receives recordings |
 | `interval_seconds` | `60` | at least 30 |
 | `polished` | `false` | use Plaud's AI-cleaned transcript; when Plaud has none an hour after the recording showed up, the raw one is sent, with a note saying so |
-| `message` | built in | instruction sent with each recording |
+| `message` | follow `skills/plaud.md` | instruction sent with each recording, after the fixed first line |
 | `brain_access` | `false` | share the login with brains (see above) |
 | `cli_path` | found on PATH | path to `plaud` |

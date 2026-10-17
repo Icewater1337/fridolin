@@ -51,11 +51,20 @@ type PlaudConfig struct {
 	IntervalSeconds int `json:"interval_seconds,omitempty"`
 	// Polished uses Plaud's AI-cleaned transcript instead of the raw one.
 	Polished bool `json:"polished,omitempty"`
-	// Message is sent to the brain with each recording. {name}, {when} and
-	// {duration} are filled in. Empty uses a built-in instruction.
+	// Message is the instruction sent to the brain with each recording,
+	// after a fixed line that says what arrived. {name}, {when} and
+	// {duration} are filled in. Empty uses defaultPlaudMessage.
 	Message string `json:"message,omitempty"`
 	// BrainAccess keeps the login in ~/.plaud/ so brains can use the CLI.
 	BrainAccess bool `json:"brain_access,omitempty"`
+}
+
+// interval is how often Plaud is checked.
+func (pc PlaudConfig) interval() time.Duration {
+	if pc.IntervalSeconds > 0 {
+		return time.Duration(pc.IntervalSeconds) * time.Second
+	}
+	return time.Minute
 }
 
 func (pc PlaudConfig) validate() error {
@@ -68,7 +77,15 @@ func (pc PlaudConfig) validate() error {
 	return nil
 }
 
-const defaultPlaudMessage = `[Plaud] New recording "{name}" ({when}, {duration}). The attached .txt is the finished transcript from the Plaud recorder, with Plaud's AI summary when there is one — it is already transcribed, do not transcribe it again. File it as your plaud skill describes (skills/plaud.md); without one: save it under transcripts/ as "DD.MM.YYYY - Short description.txt", note durable facts in memories, and reply with a short summary, key points and action items.`
+// plaudMessageHead starts every message a recording comes with: what
+// arrived. Skills and brain prompts can recognise it whatever instruction
+// follows. How the brain files a recording is the plaud skill's business
+// (examples/skills/plaud.md), not the binary's.
+const plaudMessageHead = `[Plaud] New recording "{name}" ({when}, {duration}). The attached .txt is Plaud's finished transcript, with Plaud's AI summary when there is one: it is text already, do not transcribe it again.`
+
+// defaultPlaudMessage is the instruction after plaudMessageHead when
+// plaud.message is empty.
+const defaultPlaudMessage = `Handle it as skills/plaud.md says. Without that skill: keep it with this brain's notes, then reply with a short summary and the action items.`
 
 var (
 	errPlaudAuth     = errors.New("the Plaud login expired")
@@ -811,11 +828,12 @@ func (p *PlaudManager) forward(ctx context.Context, id string, item *plaudPendin
 		name = id
 	}
 	// When it was recorded, else when it reached Plaud, else today.
-	day, when := time.Now().Format("02.01.2006"), "unknown"
+	// Dates go year first, so that files sort by date.
+	day, when := time.Now().Format("2006-01-02"), "unknown"
 	for _, k := range []string{"start_at", "created_at"} {
 		if t, ok := plaudTime(d[k]); ok {
 			local := t.Local()
-			day, when = local.Format("02.01.2006"), local.Format("02.01.2006 15:04")
+			day, when = local.Format("2006-01-02"), local.Format("2006-01-02 15:04")
 			break
 		}
 	}
@@ -839,11 +857,11 @@ func (p *PlaudManager) forward(ctx context.Context, id string, item *plaudPendin
 		return nil, err
 	}
 
-	tpl := cfg.Plaud.Message
-	if strings.TrimSpace(tpl) == "" {
-		tpl = defaultPlaudMessage
+	instruction := cfg.Plaud.Message
+	if strings.TrimSpace(instruction) == "" {
+		instruction = defaultPlaudMessage
 	}
-	text := strings.NewReplacer("{name}", name, "{when}", when, "{duration}", duration).Replace(tpl)
+	text := strings.NewReplacer("{name}", name, "{when}", when, "{duration}", duration).Replace(plaudMessageHead + "\n\n" + strings.TrimSpace(instruction))
 	// Marked as handed before the brain gets it, so that a run that ends
 	// at once finds it so.
 	fw := PlaudForward{ID: id, Name: name, Brain: br.ID(), At: time.Now(), Status: plaudRunHanded}
@@ -1429,11 +1447,7 @@ func (p *PlaudManager) tick(ctx context.Context, due time.Time) time.Time {
 	default:
 		return due
 	}
-	interval := time.Minute
-	if cfg.Plaud.IntervalSeconds > 0 {
-		interval = time.Duration(cfg.Plaud.IntervalSeconds) * time.Second
-	}
-	return time.Now().Add(interval)
+	return time.Now().Add(cfg.Plaud.interval())
 }
 
 // lifetime is the context a check runs on: Start's, so that Stop ends it,
@@ -1491,6 +1505,10 @@ type PlaudStatus struct {
 	Connected bool        `json:"connected"`
 	Settings  PlaudConfig `json:"settings"`
 	LoginDir  string      `json:"login_dir"`
+	// DefaultMessage is the instruction sent when plaud.message is empty,
+	// and IntervalSeconds how often Plaud is checked, defaults applied.
+	DefaultMessage  string `json:"default_message"`
+	IntervalSeconds int    `json:"interval_seconds"`
 	// TargetBrain receives recordings; BrainMissing means the picked one is
 	// gone, so none does.
 	TargetBrain  string `json:"target_brain,omitempty"`
@@ -1538,6 +1556,9 @@ func (p *PlaudManager) Status() PlaudStatus {
 		LoginMoved: login == plaudMoved,
 		Settings:   cfg.Plaud,
 		LoginDir:   filepath.Dir(p.tokenPath()),
+
+		DefaultMessage:  defaultPlaudMessage,
+		IntervalSeconds: int(cfg.Plaud.interval() / time.Second),
 	}
 	if path, err := p.cliPath(); err == nil {
 		s.CLI.Found, s.CLI.Path = true, path

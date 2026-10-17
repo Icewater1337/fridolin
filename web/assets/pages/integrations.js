@@ -121,7 +121,7 @@ export default {
       // The picked brain keeps its option while it is gone (or the list is
       // still loading), so Save does not quietly switch to Automatic.
       if (st.brain && !brains.some((b) => b.id === st.brain)) options.push([st.brain, missing(st.brain)]);
-      settings.set({ st, options });
+      settings.set({ st, options, defaultMessage: s.default_message || '', interval: s.interval_seconds || 60 });
       paint(actionsBox, { enabled: !!st.enabled, expired: !!s.expired, access: !!st.brain_access }, renderActions);
       paint(loginBox, s.login_dir || '', (dir) => ['Login stored in ', mono(dir), '.']);
     }
@@ -149,7 +149,7 @@ export default {
       return facts.length ? h('div.facts', facts) : null;
     }
 
-    function buildSettings({ st, options }, changed) {
+    function buildSettings({ st, options, defaultMessage, interval }, changed) {
       const enabled = toggle({ checked: !!st.enabled, label: 'Send new recordings to a brain' });
       const brainSel = select(options, st.brain || '');
       const polished = toggle({ checked: !!st.polished, label: 'Use Plaud’s AI-cleaned transcript' });
@@ -177,18 +177,20 @@ export default {
       showAccessWarn();
       const accessField = field({ control: access, help: h('span', 'On: the login lives in ', mono('~/.plaud/'), ' and brains may run ', mono('plaud search'), ', ', mono('plaud transcript'), ' … themselves. Off: only Fridolin can use it. Either way the login does not move: connect again after changing this.') });
       accessField.append(accessWarn);
-      const msg = h('textarea', { id: nextId('pmsg'), rows: 4, placeholder: 'Built-in instruction: file it under transcripts/, note what matters, reply with a summary and action items. {name}, {when} and {duration} are filled in.' });
+      // The built-in instruction comes from the bridge, the one place it is
+      // written down.
+      const msg = h('textarea', { id: nextId('pmsg'), rows: 4, placeholder: defaultMessage ? `Built in: ${defaultMessage}` : '' });
       msg.value = st.message || '';
       const value = () => ({
         enabled: enabled.input.checked, brain: brainSel.value, polished: polished.input.checked,
         brain_access: access.input.checked, message: msg.value,
       });
       const el = h('div.settings-fields',
-        field({ control: enabled, help: `Every ${every(st.interval_seconds || 60)} Fridolin looks for new recordings and waits until Plaud has transcribed them. The first check — also the first after signing in with another Plaud account — only remembers what already exists, so old recordings are not sent. Recordings made while this is off are sent when you turn it back on, five per check, oldest first.` }),
+        field({ control: enabled, help: `Every ${every(interval)} Fridolin looks for new recordings and waits until Plaud has transcribed them. The first check — also the first after signing in with another Plaud account — only remembers what already exists, so old recordings are not sent. Recordings made while this is off are sent when you turn it back on, five per check, oldest first.` }),
         field({ label: 'Brain', control: brainSel, help: 'Recordings run in this brain. Its answer is private: it goes to the brain’s reply chat when that is a direct chat, otherwise to your DM — never to a group.' }),
         field({ control: polished, help: 'Plaud makes the cleaned-up transcript after the raw one, and not always. When it has none an hour after the recording showed up, the raw one is sent, with a note saying so.' }),
         accessField,
-        field({ label: 'Instruction sent with each recording', control: msg, wide: true }));
+        field({ label: 'Instruction sent with each recording', control: msg, wide: true, help: h('span', 'It follows a first line that says what arrived. ', mono('{name}'), ', ', mono('{when}'), ' and ', mono('{duration}'), ' are filled in. How a brain files recordings belongs in its ', mono('skills/plaud.md'), '.') }));
       return { el, value };
     }
 

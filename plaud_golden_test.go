@@ -388,7 +388,7 @@ func TestPlaudForwardWithTheRealCLI(t *testing.T) {
 	}
 	local := func(s string) string {
 		t, _ := time.ParseInLocation("2006-01-02T15:04:05", s, time.UTC)
-		return t.Local().Format("02.01.2006 15:04")
+		return t.Local().Format("2006-01-02 15:04")
 	}
 	for id, want := range map[string][]string{
 		plaudGoldTeam: {"Plaud recording: Team sync\nRecorded: " + local("2026-10-16T18:00:00") + "\nDuration: 5m00s\n",

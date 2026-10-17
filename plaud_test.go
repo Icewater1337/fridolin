@@ -1393,6 +1393,50 @@ func (tb *testBridge) plaudDelivered(t *testing.T, id string) string {
 	return filepath.Base(files[0]) + "\n" + string(data)
 }
 
+// The message a recording comes with says what arrived, in a fixed first
+// line, then the instruction: plaud.message, or a built-in one that points
+// to the plaud skill and names no folder or date convention of its own.
+// Dates go year first. The status gives the dashboard the built-in
+// instruction and the interval it uses.
+func TestPlaudMessageSaysWhatArrived(t *testing.T) {
+	recorded := time.Date(2026, 10, 16, 18, 0, 0, 0, time.UTC).Local()
+	head := `[Plaud] New recording "Team sync" (` + recorded.Format("2006-01-02 15:04") + `, 5m00s). The attached .txt is Plaud's finished transcript`
+	for _, c := range []struct {
+		name, settings string
+		instruction    string
+		interval       int
+	}{
+		{"built in", "", defaultPlaudMessage, 60},
+		{"plaud.message", `, "message": "File {name} under inbox/.", "interval_seconds": 120`, "File Team sync under inbox/.", 120},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			tb, fp := plaudBridge(t, c.settings)
+			var text, file string
+			tb.plaud.submit = func(br *Brain, jid, sender, txt string, media []string, done func(error)) error {
+				text, file = txt, filepath.Base(media[0])
+				return nil
+			}
+			if err := plaudDeliver(t, tb, fp); err != nil {
+				t.Fatal(err)
+			}
+			if !strings.HasPrefix(text, head) || !strings.HasSuffix(text, "\n\n"+c.instruction) {
+				t.Errorf("message = %q, want %q… then %q", text, head, c.instruction)
+			}
+			for _, personal := range []string{"transcripts/", "DD.MM.YYYY", "memories"} {
+				if strings.Contains(text, personal) {
+					t.Errorf("the message names %q: %q", personal, text)
+				}
+			}
+			if want := recorded.Format("2006-01-02") + " - Team sync - " + plaudNew + ".txt"; file != want {
+				t.Errorf("file = %s, want %s", file, want)
+			}
+			if s := tb.plaud.Status(); s.DefaultMessage != defaultPlaudMessage || s.IntervalSeconds != c.interval {
+				t.Errorf("status default_message = %q, interval_seconds = %d", s.DefaultMessage, s.IntervalSeconds)
+			}
+		})
+	}
+}
+
 // The transcript file holds what Plaud has, read the way the real CLI
 // prints it: the summary whole and without the "Summary: <name>" header,
 // even when a line of it starts like the spinner; the transcript without
@@ -1416,7 +1460,7 @@ func TestPlaudForwardReadsWhatTheCLIPrints(t *testing.T) {
 			[]string{"Transcript: Team sync"}},
 		{"no start time: the day it reached Plaud",
 			func(r *fakePlaudRecording) { r.StartAt, r.CreatedAt = nil, "2026-10-15T07:30:00" },
-			[]string{created.Format("02.01.2006") + " - Team sync - ", "Recorded: " + created.Format("02.01.2006 15:04") + "\n"},
+			[]string{created.Format("2006-01-02") + " - Team sync - ", "Recorded: " + created.Format("2006-01-02 15:04") + "\n"},
 			[]string{"Recorded: -"}},
 		{"an empty summary note",
 			func(r *fakePlaudRecording) { r.Notes[0].Content = "" },

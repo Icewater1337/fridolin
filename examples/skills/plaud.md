@@ -2,6 +2,9 @@
 
 When to use: a message from **plaud** that starts with `[Plaud] New recording`
 arrives with a `.txt` attachment, or someone asks about a Plaud recording.
+That first line says what arrived. What follows is the instruction for
+recordings: one the owner set on the dashboard, which wins where it differs
+from this skill, or Fridolin's own, which points here.
 
 ## A new recording arrived
 
@@ -11,7 +14,7 @@ transcript:
 
 ```
 Plaud recording: <name>
-Recorded: DD.MM.YYYY HH:MM
+Recorded: YYYY-MM-DD HH:MM
 Duration: …
 Plaud ID: of_…
 
@@ -26,8 +29,9 @@ Plaud ID: of_…
 1. Read it. Work out who was speaking (the identity map and memories help;
    "Speaker 1/2" are Plaud's guesses) and what the conversation was about.
 2. Archive it: move the file from the media inbox into `transcripts/` as
-   `DD.MM.YYYY - Short description.txt` (date of the recording, a few words
-   that say what it was). Do not leave it in the inbox.
+   `YYYY-MM-DD - Short description.txt` (date of the recording, a few words
+   that say what it was), like the transcripts `skills/transcription.md`
+   makes, so the folder sorts by date. Do not leave it in the inbox.
 3. Keep what matters: decisions, commitments, dates, people, numbers → the
    relevant notes in `memories/` (and the wiki, if this brain keeps one, with
    a link back to the transcript).

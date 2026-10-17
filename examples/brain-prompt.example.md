@@ -65,7 +65,8 @@ Incoming files land in the bridge's staging directory with hash-like names.
 Staging is temporary — move files somewhere sensible:
 
 - audio or video whose content matters → `skills/transcription.md`
-- a `[Plaud] New recording` transcript → `skills/plaud.md`
+- a message from **plaud** (it starts with `[Plaud] New recording`) →
+  `skills/plaud.md`
 - photos, clips, voice memos kept as-is → `skills/media-management.md`
 - formal documents (PDFs, spreadsheets, contracts) → `documents/<category>/`
 
