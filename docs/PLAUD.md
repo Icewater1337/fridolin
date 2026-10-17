@@ -42,6 +42,11 @@ Plaud's tool stores its login in `<home>/.plaud/tokens.json`. By default
 Fridolin runs it with a private home in `~/.fridolin/plaud/home/`, which the
 sandbox denies to brains, and denies brains `~/.plaud/` as well.
 
+Fridolin runs the tool itself outside the sandbox. Unless `cli_path` is set,
+it takes the tool from whichever nvm node version sorts last, so brains
+cannot write anywhere in `~/.nvm/versions/node`, and they cannot add a
+`plaud` or `node` to a `PATH` folder in your home folder either.
+
 **Let brains use the Plaud CLI** (`plaud.brain_access`) keeps the login in
 `~/.plaud/` instead, so brains can run `plaud search`, `plaud transcript` and
 so on themselves. A brain could then also read the token — turn it on only if

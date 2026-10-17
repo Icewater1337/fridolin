@@ -346,10 +346,11 @@ What the bridge does about it:
   above them to get around that. Other Claude sessions' transcripts are
   unreadable. Files that run outside the sandbox — Claude Code's settings,
   hooks and `CLAUDE.md` (also those above brain folders), its auto-memory,
-  `~/Library/LaunchAgents`, shell startup files — are readable but never
-  writable. Add your own paths under `sandbox.deny_paths`. When the sandbox
-  is on but cannot be set up, the brain refuses the message with an error
-  instead of running without it.
+  `~/Library/LaunchAgents`, shell startup files, the bridge's own binary and
+  checkout, the Claude CLI and the other tools the bridge runs — are
+  readable but never writable. Add your own paths under
+  `sandbox.deny_paths`. When the sandbox is on but cannot be set up, the
+  brain refuses the message with an error instead of running without it.
 - **Brain isolation.** Brains have separate directories, sessions, histories,
   and calendar credentials.
 - **A guarded dashboard.** It only listens on localhost, rejects requests

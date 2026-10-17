@@ -148,13 +148,18 @@ func (m *BackupManager) saveStateLocked() {
 
 // rclonePath finds the rclone binary.
 func (m *BackupManager) rclonePath() (string, error) {
-	p := m.cfgs.Get().Backup.RclonePath
+	return findRclone(m.cfgs.Get().Backup.RclonePath)
+}
+
+// findRclone finds the rclone binary, given backup.rclone_path. The sandbox
+// profile uses it too, to keep brains from replacing the binary.
+func findRclone(p string) (string, error) {
 	if p == "" {
 		p = "rclone"
 	}
 	found, err := exec.LookPath(p)
 	if err != nil {
-		for _, c := range []string{"/opt/homebrew/bin/rclone", "/usr/local/bin/rclone", filepath.Join(os.Getenv("HOME"), ".local/bin/rclone")} {
+		for _, c := range rcloneFallbacks() {
 			if _, err := os.Stat(c); err == nil {
 				return c, nil
 			}
@@ -162,6 +167,11 @@ func (m *BackupManager) rclonePath() (string, error) {
 		return "", errors.New("rclone is not installed")
 	}
 	return found, nil
+}
+
+// rcloneFallbacks are where findRclone looks when rclone is not on PATH.
+func rcloneFallbacks() []string {
+	return []string{"/opt/homebrew/bin/rclone", "/usr/local/bin/rclone", filepath.Join(os.Getenv("HOME"), ".local/bin/rclone")}
 }
 
 // rcloneEnv is the environment for rclone: the bridge's own config file, and

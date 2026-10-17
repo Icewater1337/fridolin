@@ -353,9 +353,17 @@ func bridgeRepoDir() string {
 	if err != nil {
 		return "<bridge-repo>"
 	}
+	if dir := checkoutOf(exe); dir != "" {
+		return dir
+	}
+	return "<bridge-repo>"
+}
+
+// checkoutOf is the source checkout the binary exe was built in, or "".
+func checkoutOf(exe string) string {
 	dir := filepath.Dir(exe)
 	if st, err := os.Stat(filepath.Join(dir, "tools")); err == nil && st.IsDir() {
 		return dir
 	}
-	return "<bridge-repo>"
+	return ""
 }

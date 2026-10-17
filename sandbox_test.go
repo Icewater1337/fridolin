@@ -636,7 +636,151 @@ func TestSandboxProfileDeniesMemoryAboveBrains(t *testing.T) {
 	})
 }
 
+// outsideProgramsFixture lays out, under home, what the bridge runs outside
+// the sandbox: a natively installed Claude CLI (a symlink into versions/),
+// rclone, the Plaud CLI as an npm package in nvm with its node, tmux, and
+// the bridge binary inside its checkout. PATH finds only the Claude CLI,
+// and also names ~/bin2, which does not exist yet. It returns a profiler
+// for brain a that runs all of them.
+func outsideProgramsFixture(t *testing.T, home string) *SandboxProfiler {
+	t.Helper()
+	t.Setenv("HOME", home)
+	t.Setenv("PATH", filepath.Join(home, ".local", "bin")+":"+filepath.Join(home, "bin2")+":/usr/bin:/bin")
+	nvm := ".nvm/versions/node/v22.0.0/"
+	for _, f := range []string{
+		".local/share/claude/versions/1.0.0",
+		"bin/rclone",
+		"bin/tmux",
+		nvm + "bin/node",
+		nvm + "lib/node_modules/@plaud-ai/cli/dist/index.js",
+		nvm + "lib/node_modules/@plaud-ai/cli/node_modules/dep/index.js",
+		"fridolin/fridolin",
+		"fridolin/tools/calendar_tool.py",
+		"a/notes.md",
+	} {
+		p := filepath.Join(home, f)
+		if err := os.MkdirAll(filepath.Dir(p), 0o700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(p, []byte("#!/bin/sh\necho ran "+filepath.Base(f)+"\n"), 0o700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for link, target := range map[string]string{
+		".local/bin/claude": "../share/claude/versions/1.0.0",
+		nvm + "bin/plaud":   "../lib/node_modules/@plaud-ai/cli/dist/index.js",
+	} {
+		p := filepath.Join(home, link)
+		if err := os.MkdirAll(filepath.Dir(p), 0o700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Symlink(target, p); err != nil {
+			t.Fatal(err)
+		}
+	}
+	old := tmuxPath
+	tmuxOnce.Do(func() {}) // keep findTmux from looking up the real one
+	tmuxPath = filepath.Join(home, "bin", "tmux")
+	t.Cleanup(func() { tmuxPath = old })
+
+	cfg := &Config{ClaudePath: "claude", Viewer: true, Backup: BackupConfig{RclonePath: filepath.Join(home, "bin", "rclone")}}
+	sp := NewSandboxProfiler(map[string]string{"a": filepath.Join(home, "a")}, cfg)
+	sp.bridgeExe = filepath.Join(home, "fridolin", "fridolin")
+	return sp
+}
+
+// TestSandboxProfileProtectsOutsidePrograms: launchd runs the bridge outside
+// any sandbox, and the bridge runs the Claude CLI, rclone, the Plaud CLI
+// and tmux unsandboxed. A brain that replaced one of them would run code
+// outside its sandbox, so they are never writable: the bridge binary and its
+// checkout, and every helper under HOME, as found and as resolved, with the
+// whole npm package and the node of a node script. Nor can a brain plant a
+// program the bridge would find next: a name it runs by name in a PATH
+// folder under HOME, rclone off PATH, a newer node version in nvm.
+func TestSandboxProfileProtectsOutsidePrograms(t *testing.T) {
+	home := canonicalDir(t.TempDir())
+	sp := outsideProgramsFixture(t, home)
+	nvm := filepath.Join(home, ".nvm/versions/node/v22.0.0")
+	cases := []struct{ name, rule string }{
+		{"bridge binary", `(literal "` + home + `/fridolin/fridolin")`},
+		{"bridge checkout", `(subpath "` + home + `/fridolin")`},
+		{"claude on PATH", `(literal "` + home + `/.local/bin/claude")`},
+		{"claude it resolves to", `(literal "` + home + `/.local/share/claude/versions/1.0.0")`},
+		{"configured rclone", `(literal "` + home + `/bin/rclone")`},
+		{"plaud found in nvm", `(literal "` + nvm + `/bin/plaud")`},
+		{"plaud's npm package", `(subpath "` + nvm + `/lib/node_modules/@plaud-ai/cli")`},
+		{"the node that runs plaud", `(literal "` + nvm + `/bin/node")`},
+		{"tmux for the viewer", `(literal "` + home + `/bin/tmux")`},
+		{"a name it runs, in a PATH folder", `(literal "` + home + `/.local/bin/osascript")`},
+		{"a name it runs, in a PATH folder not there yet", `(literal "` + home + `/bin2/touch")`},
+		{"a name it runs, in the Plaud CLI's own folder", `(literal "` + nvm + `/bin/open")`},
+		{"rclone off PATH", `(literal "` + home + `/.local/bin/rclone")`},
+		{"every node version in nvm", `(subpath "` + home + `/.nvm/versions/node")`},
+	}
+	profile := mustProfile(t, sp, "a")
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if !strings.Contains(profile, "(deny file-write* "+tc.rule+")") {
+				t.Errorf("profile lacks (deny file-write* %s)", tc.rule)
+			}
+			if strings.Contains(profile, "(deny file-read* "+tc.rule+")") {
+				t.Errorf("profile denies reading %s", tc.rule)
+			}
+		})
+	}
+
+	t.Run("nvm stays writable with plaud.cli_path", func(t *testing.T) {
+		sp.mu.Lock()
+		sp.plaudCLIPath = nvm + "/bin/plaud"
+		sp.mu.Unlock()
+		t.Cleanup(func() {
+			sp.mu.Lock()
+			sp.plaudCLIPath = ""
+			sp.mu.Unlock()
+		})
+		profile := mustProfile(t, sp, "a")
+		if rule := `(deny file-write* (subpath "` + home + `/.nvm/versions/node"))`; strings.Contains(profile, rule) {
+			t.Errorf("profile has %s", rule)
+		}
+		for _, f := range []string{"/bin/plaud", "/bin/node", "/bin/open"} {
+			if rule := `(deny file-write* (literal "` + nvm + f + `"))`; !strings.Contains(profile, rule) {
+				t.Errorf("profile lacks %s", rule)
+			}
+		}
+	})
+
+	t.Run("helpers outside HOME are left to a later change", func(t *testing.T) {
+		sp.mu.Lock()
+		sp.claudePath, sp.viewer = "/bin/sh", false
+		sp.mu.Unlock()
+		profile := mustProfile(t, sp, "a")
+		for _, p := range []string{"/bin/sh", "/usr/bin/touch", "/opt/homebrew/bin/plaud"} {
+			if strings.Contains(profile, `"`+p+`"`) {
+				t.Errorf("profile has a rule for %s", p)
+			}
+		}
+	})
+}
+
 // sbplRegex is p quoted for a regex, as written in the profile.
 func sbplRegex(p string) string {
 	return strings.ReplaceAll(regexp.QuoteMeta(p), `\`, `\\`)
+}
+
+// TestNodePackage finds the npm package folder of an installed file.
+func TestNodePackage(t *testing.T) {
+	cases := []struct{ in, want string }{
+		{"/n/lib/node_modules/@plaud-ai/cli/dist/index.js", "/n/lib/node_modules/@plaud-ai/cli"},
+		{"/n/lib/node_modules/@anthropic-ai/claude-code/cli.js", "/n/lib/node_modules/@anthropic-ai/claude-code"},
+		{"/n/lib/node_modules/rimraf/bin.js", "/n/lib/node_modules/rimraf"},
+		{"/n/lib/node_modules/a/node_modules/b/bin.js", "/n/lib/node_modules/a/node_modules/b"},
+		{"/n/lib/node_modules/@scope", ""},
+		{"/n/lib/node_modules/rimraf", ""},
+		{"/Users/you/.local/share/claude/versions/2.1.0", ""},
+	}
+	for _, tc := range cases {
+		if got := nodePackage(tc.in); got != tc.want {
+			t.Errorf("nodePackage(%s) = %q, want %q", tc.in, got, tc.want)
+		}
+	}
 }

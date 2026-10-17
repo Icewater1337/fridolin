@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io/fs"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"regexp"
 	"runtime"
@@ -54,17 +55,28 @@ type SandboxProfiler struct {
 	// plaudShared: the Plaud login in ~/.plaud is meant for brains too.
 	plaudShared bool
 
+	// claudePath, rclonePath, plaudCLIPath and viewer name the programs the
+	// bridge itself runs outside the sandbox; see outsidePrograms.
+	claudePath, rclonePath, plaudCLIPath string
+	viewer                               bool
+
 	// extraDeny and extraAllow come from config.
 	extraDeny  []string
 	extraAllow []string
 
 	// execPath is sandboxExecPath; tests point it at a missing file.
 	execPath string
+
+	// bridgeExe is the running bridge binary; tests point it elsewhere.
+	bridgeExe string
 }
 
 // NewSandboxProfiler builds a profiler for the configured brains.
 func NewSandboxProfiler(workDirs map[string]string, cfg *Config) *SandboxProfiler {
 	sp := &SandboxProfiler{execPath: sandboxExecPath}
+	if exe, err := os.Executable(); err == nil {
+		sp.bridgeExe = exe
+	}
 	sp.Update(workDirs, cfg)
 	return sp
 }
@@ -88,6 +100,10 @@ func (sp *SandboxProfiler) Update(workDirs map[string]string, cfg *Config) {
 	sp.credsDir = cfg.Sandbox.CredentialsDir
 	sp.gitConfig = cfg.Sandbox.GitConfig
 	sp.plaudShared = cfg.Plaud.BrainAccess
+	sp.claudePath = cfg.ClaudePath
+	sp.rclonePath = cfg.Backup.RclonePath
+	sp.plaudCLIPath = cfg.Plaud.CLIPath
+	sp.viewer = cfg.Viewer
 	sp.extraDeny = append([]string(nil), cfg.Sandbox.DenyPaths...)
 	sp.extraAllow = append([]string(nil), cfg.Sandbox.AllowPaths...)
 }
@@ -280,6 +296,44 @@ func (sp *SandboxProfiler) Profile(brainID string) (string, error) {
 	b.denyBelow("file-write*", projects, `/[^/]+/memory(/.*)?$`)
 	b.WriteString("\n")
 
+	// ── the bridge and the programs it runs ──────────────────────────────
+	// launchd runs the bridge outside any sandbox, and the bridge runs its
+	// helpers unsandboxed too, so a brain that replaced one of them would
+	// run code outside its sandbox the next time it starts.
+	b.WriteString(";; The bridge, its checkout and the programs it runs: never writable\n")
+	if sp.bridgeExe != "" {
+		b.deny("file-write*", "literal", sp.bridgeExe)
+		if repo := checkoutOf(sp.bridgeExe); repo != "" {
+			b.deny("file-write*", "subpath", repo)
+		}
+	}
+	// Only those under HOME for now: a later change makes writes
+	// deny-by-default everywhere.
+	inHome := func(p string) bool { return withinAny(p, homes) || withinAny(resolvePath(p), homes) }
+	for _, p := range sp.outsidePrograms() {
+		if !inHome(p) {
+			continue
+		}
+		if st, err := os.Stat(p); err == nil && st.IsDir() {
+			b.deny("file-write*", "subpath", p)
+		} else {
+			b.deny("file-write*", "literal", p)
+		}
+	}
+	// Nor may a brain plant a program the bridge would find next.
+	files, dirs := sp.plantablePrograms(home)
+	for _, p := range files {
+		if inHome(p) {
+			b.deny("file-write*", "literal", p)
+		}
+	}
+	for _, p := range dirs {
+		if inHome(p) {
+			b.deny("file-write*", "subpath", p)
+		}
+	}
+	b.WriteString("\n")
+
 	// ── git configuration ────────────────────────────────────────────────
 	// Reading git config lets a brain commit in its own folder (name, email,
 	// signing settings). Writing it would let a brain change how *you* use
@@ -393,6 +447,122 @@ func memoryFolders(workDirs map[string]string, brainID string, homes []string) [
 	}
 	sort.Strings(out)
 	return out
+}
+
+// outsidePrograms returns the programs the bridge itself starts outside any
+// sandbox: the Claude CLI (claude --version for the dashboard), rclone for
+// backups, the Plaud CLI, tmux for the activity viewer, each as the bridge
+// would find it now. A node script comes with its npm package folder, all
+// of which node loads, and the node that runs it.
+func (sp *SandboxProfiler) outsidePrograms() []string {
+	var found []string
+	if p, err := exec.LookPath(sp.claudePath); err == nil {
+		found = append(found, p)
+	}
+	if p, err := findRclone(sp.rclonePath); err == nil {
+		found = append(found, p)
+	}
+	if p, err := findPlaudCLI(sp.plaudCLIPath); err == nil {
+		found = append(found, p)
+	}
+	if p := findTmux(); sp.viewer && p != "" {
+		found = append(found, p)
+	}
+	var out []string
+	for _, p := range found {
+		out = append(out, p)
+		if pkg := nodePackage(resolvePath(p)); pkg != "" {
+			// #!/usr/bin/env node: the bridge runs the Plaud CLI with its own
+			// folder first on PATH, everything else with its own PATH.
+			out = append(out, pkg)
+			for _, path := range []string{plaudPATH(p), os.Getenv("PATH")} {
+				if node := lookPathIn("node", path); node != "" {
+					out = append(out, node)
+				}
+			}
+		}
+	}
+	return out
+}
+
+// programsRunByName are the programs the bridge starts by name, so from the
+// first folder on its PATH that has one: the Claude CLI, rclone and the
+// Plaud CLI unless configured with a path, the node the Plaud CLI's
+// #!/usr/bin/env node finds, tmux and the sh and tail it runs for the
+// viewer, touch, osascript (the viewer, the folder picker) and open.
+var programsRunByName = []string{"claude", "rclone", "plaud", "node", "tmux", "sh", "tail", "touch", "osascript", "open"}
+
+// plantablePrograms returns where a brain could plant a program for the
+// bridge to run outside the sandbox later, ahead of the one it finds now:
+// every name it runs by name in every folder of its PATH and the Plaud
+// CLI's, whether that file exists yet or not, and rclone's fallbacks off
+// PATH. Without plaud.cli_path it also returns nvm's node versions, since
+// the bridge takes the Plaud CLI of whichever version name sorts last.
+func (sp *SandboxProfiler) plantablePrograms(home string) (files, dirs []string) {
+	names := slices.Clone(programsRunByName)
+	for _, p := range []string{sp.claudePath, sp.rclonePath} {
+		if p != "" && !strings.Contains(p, "/") && !slices.Contains(names, p) {
+			names = append(names, p)
+		}
+	}
+	path := filepath.SplitList(os.Getenv("PATH"))
+	if p, err := findPlaudCLI(sp.plaudCLIPath); err == nil {
+		path = append(path, filepath.SplitList(plaudPATH(p))...)
+	}
+	seen := map[string]bool{}
+	for _, dir := range path {
+		// exec.LookPath skips relative entries.
+		if dir = filepath.Clean(dir); !filepath.IsAbs(dir) || seen[dir] {
+			continue
+		}
+		seen[dir] = true
+		for _, name := range names {
+			files = append(files, filepath.Join(dir, name))
+		}
+	}
+	files = append(files, rcloneFallbacks()...)
+	if sp.plaudCLIPath == "" {
+		dirs = append(dirs, filepath.Join(home, nvmNodeVersions))
+	}
+	return files, dirs
+}
+
+// nodePackage returns the npm package folder that holds the file p
+// (…/node_modules/<name> or …/node_modules/@scope/<name>), or "".
+func nodePackage(p string) string {
+	const nm = "/node_modules/"
+	i := strings.LastIndex(p, nm)
+	if i < 0 {
+		return ""
+	}
+	rest := strings.Split(p[i+len(nm):], "/")
+	n := 1
+	if strings.HasPrefix(rest[0], "@") {
+		n = 2
+	}
+	if len(rest) <= n {
+		return ""
+	}
+	return p[:i+len(nm)] + strings.Join(rest[:n], "/")
+}
+
+// withinAny reports whether p is one of dirs or inside one.
+func withinAny(p string, dirs []string) bool {
+	return slices.ContainsFunc(dirs, func(dir string) bool { return isWithin(p, dir) })
+}
+
+// lookPathIn is exec.LookPath for name in the list of folders path.
+func lookPathIn(name, path string) string {
+	for _, dir := range filepath.SplitList(path) {
+		if dir == "" {
+			continue
+		}
+		p := filepath.Join(dir, name)
+		if st, err := os.Stat(p); err == nil && !st.IsDir() && st.Mode()&0o111 != 0 {
+			return p
+		}
+	}
+	return ""
 }
 
 // profileBuilder writes SBPL. Every path goes through deny or allow, so each

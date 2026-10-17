@@ -232,6 +232,24 @@ their sandbox, so a manipulated brain cannot plant code there:
   `~/.config/fish`
 - `~/.tmux.conf` and `~/.config/tmux`, read by the activity viewer's tmux
 - `~/.gitconfig` and the files it includes (see `git_config` below)
+- the bridge's own binary and, when it runs from one, its source checkout
+  (launchd runs it outside any sandbox)
+- the programs the bridge runs unsandboxed, when they live in your home
+  folder: the Claude CLI (as found on `PATH` and the file it links to),
+  rclone, the Plaud CLI with its whole npm package and the `node` that runs
+  it, and tmux when the viewer is on. Brain runs therefore cannot update the
+  Claude CLI or these tools, so the bridge turns the CLI's auto-updater off
+  for them (`DISABLE_AUTOUPDATER=1`); your own sessions still update it.
+- where the bridge would find such a program next, so that a brain cannot
+  plant one: in every folder of the bridge's `PATH` (and the Plaud CLI's)
+  that lies in your home folder, such as `~/.local/bin`, the names it runs
+  by name (`claude`, `rclone`, `plaud`, `node`, `tmux`, `sh`, `tail`,
+  `touch`, `osascript`, `open`), whether they exist there yet or not;
+  `~/.local/bin/rclone`, where it looks when rclone is not on `PATH`; and,
+  unless `plaud.cli_path` is set, all of `~/.nvm/versions/node`, because
+  the bridge takes the Plaud CLI of whichever node version sorts last.
+  Brains therefore cannot install node versions or global npm packages with
+  nvm.
 
 Renaming counts as writing. The sandbox matches paths, not files, so a brain
 that renamed `~/.ssh`, or the folder that holds another brain, used to read

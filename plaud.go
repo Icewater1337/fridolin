@@ -140,7 +140,16 @@ func (p *PlaudManager) connected() bool {
 
 // cliPath finds the plaud binary.
 func (p *PlaudManager) cliPath() (string, error) {
-	if c := p.cfg().Plaud.CLIPath; c != "" {
+	return findPlaudCLI(p.cfg().Plaud.CLIPath)
+}
+
+// nvmNodeVersions is where nvm installs node versions, relative to HOME.
+const nvmNodeVersions = ".nvm/versions/node"
+
+// findPlaudCLI finds the plaud binary, given plaud.cli_path. The sandbox
+// profile uses it too, to keep brains from replacing the CLI.
+func findPlaudCLI(c string) (string, error) {
+	if c != "" {
 		if _, err := os.Stat(c); err != nil {
 			return "", fmt.Errorf("plaud.cli_path %s: %w", c, err)
 		}
@@ -150,7 +159,7 @@ func (p *PlaudManager) cliPath() (string, error) {
 		return found, nil
 	}
 	home, _ := os.UserHomeDir()
-	candidates, _ := filepath.Glob(filepath.Join(home, ".nvm/versions/node/*/bin/plaud"))
+	candidates, _ := filepath.Glob(filepath.Join(home, nvmNodeVersions, "*/bin/plaud"))
 	sort.Sort(sort.Reverse(sort.StringSlice(candidates)))
 	candidates = append(candidates, "/opt/homebrew/bin/plaud", "/usr/local/bin/plaud")
 	for _, c := range candidates {
@@ -159,6 +168,12 @@ func (p *PlaudManager) cliPath() (string, error) {
 		}
 	}
 	return "", errors.New("the Plaud CLI is not installed")
+}
+
+// plaudPATH is the PATH the Plaud CLI runs with: its own folder first, so
+// that its #!/usr/bin/env node finds the node it was installed with.
+func plaudPATH(bin string) string {
+	return filepath.Dir(bin) + ":" + os.Getenv("PATH") + ":/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin"
 }
 
 // runCLI runs `plaud args…` with the chosen home, telemetry off, and node
@@ -178,7 +193,7 @@ func (p *PlaudManager) runCLI(ctx context.Context, args ...string) (string, erro
 			env = append(env, kv)
 		}
 	}
-	env = append(env, "HOME="+home, "PATH="+filepath.Dir(bin)+":"+os.Getenv("PATH")+":/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin",
+	env = append(env, "HOME="+home, "PATH="+plaudPATH(bin),
 		"DO_NOT_TRACK=1", "PLAUD_TELEMETRY_DISABLED=1", "PLAUD_NO_UPDATE_NOTIFIER=1", "NO_COLOR=1")
 	cmd := exec.CommandContext(ctx, bin, args...)
 	cmd.Env = env
