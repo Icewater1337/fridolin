@@ -1,6 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { createPage } from '../assets/app/page.js';
+import { createStore } from '../assets/app/store.js';
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
@@ -18,10 +19,9 @@ test('leaving a page ends everything it started', async () => {
   const later = ctx.debounce(() => { debounced++; }, 5);
   later();
 
-  const target = new EventTarget();
-  let heard = 0;
-  ctx.listen(target, 'ping', () => { heard++; });
-  target.dispatchEvent(new Event('ping'));
+  const store = createStore({ n: 0 });
+  const watched = [];
+  ctx.watch(store, (s) => s.n, (n) => watched.push(n));
 
   const order = [];
   ctx.onCleanup(() => { order.push('first'); throw new Error('one cleanup failing does not stop the rest'); });
@@ -39,9 +39,9 @@ test('leaving a page ends everything it started', async () => {
   assert.equal(ctx.dead, true);
   assert.equal(ctx.signal.aborted, true, 'one-off requests are aborted');
   assert.equal(pollSignal.aborted, true, 'the running poll is aborted');
-  target.dispatchEvent(new Event('ping'));
-  assert.equal(heard, 1, 'listeners are removed');
   assert.deepEqual(order, ['first', 'second'], 'cleanups run once, in order');
+  store.set({ n: 1 });
+  assert.deepEqual(watched, [0], 'store subscriptions end');
   await sleep(30);
   assert.equal(polled, 1, 'polls stop');
   assert.equal(timedOut, false, 'timeouts are cleared');

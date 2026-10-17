@@ -45,12 +45,6 @@ export function createPage({ params = {}, replaceHash = () => {}, setTitle = () 
       };
     },
 
-    /** addEventListener on something that outlives the page (window, document). */
-    listen(target, type, fn, opts) {
-      target.addEventListener(type, fn, opts);
-      cleanups.push(() => target.removeEventListener(type, fn, opts));
-    },
-
     /** store.subscribe(select, fn) until the page goes: fn gets the value now and on every change. */
     watch(store, select, fn) {
       cleanups.push(store.subscribe(select, fn));
