@@ -18,16 +18,27 @@ export function toast(message, kind = 'error', { timeout } = {}) {
   const icn = { ok: 'check', warn: 'alert', error: 'alert', info: 'info' }[kind] || 'info';
   const close = h('button.icon-btn', { type: 'button', 'aria-label': 'Dismiss' }, icon('x'));
   const el = h(`div.toast.${kind}`, icon(icn, 'toast-icon'), h('div.toast-msg', message), close);
-  const remove = () => { el.classList.add('leaving'); setTimeout(() => el.remove(), 200); recentToasts.delete(key); };
+  let timer = null;
+  // Runs from the close button and from the timer, whichever comes first.
+  // A newer toast may own the key by then; only this toast's entry goes.
+  const remove = () => {
+    if (!timer) return;
+    clearTimeout(timer);
+    timer = null;
+    el.classList.add('leaving');
+    setTimeout(() => el.remove(), 200);
+    if (recentToasts.get(key) === el) recentToasts.delete(key);
+  };
   close.addEventListener('click', remove);
   toastBox.appendChild(el);
   recentToasts.set(key, el);
-  setTimeout(remove, timeout || (kind === 'error' ? 9000 : 5000));
+  timer = setTimeout(remove, timeout || (kind === 'error' ? 9000 : 5000));
   return el;
 }
 
 export function toastError(e) {
   const msg = (e && e.message) ? e.message : String(e);
   if (e && e.status === 401) return null; // the connect screen takes over
+  if (e && e.name === 'AbortError') return null; // the page that asked is gone
   return toast(msg, 'error');
 }
