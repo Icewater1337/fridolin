@@ -125,7 +125,7 @@ func (b *Bridge) httpSend(w http.ResponseWriter, r *http.Request) {
 // appendHTTPMessageToHistory records an HTTP-sent message in the history of
 // whichever brain owns the target chat.
 func (b *Bridge) appendHTTPMessageToHistory(jid, text string) {
-	br := b.brainMgr.BrainFor(jid, strings.HasSuffix(jid, "@g.us"))
+	br := b.brainMgr.BrainFor(jid, isGroupJID(jid))
 	if br == nil {
 		return
 	}
@@ -216,7 +216,7 @@ func (b *Bridge) replyChatFor(br *Brain, cfg *Config) string {
 	}
 	getsDMs := m.Routing.HandlesDMs || b.brainMgr.BrainFor("", false) == br
 	if getsDMs && len(cfg.AllowedNumbers) > 0 {
-		return cfg.AllowedNumbers[0] + "@s.whatsapp.net"
+		return userJID(cfg.AllowedNumbers[0])
 	}
 	if len(m.Routing.Groups) > 0 {
 		return m.Routing.Groups[0]

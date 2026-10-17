@@ -339,7 +339,7 @@ func checkCmd(args []string) {
 			log.Fatalf("%v", err)
 		}
 		for _, jid := range routes {
-			isGroup := strings.HasSuffix(jid, "@g.us")
+			isGroup := isGroupJID(jid)
 			allowed := ""
 			if isGroup && !slices.Contains(cfg.AllowedGroups, jid) {
 				allowed = " (not in allowed_groups: ignored)"

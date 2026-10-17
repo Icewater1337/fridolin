@@ -421,7 +421,7 @@ func (b *Bridge) stopChat(m Inbound) (stopped bool, dropped int) {
 // that answers there (a reply_chat, the owner's DM) names the number.
 func chatJIDs(m Inbound) []string {
 	jids := []string{m.JID}
-	if pn := m.Sender + "@s.whatsapp.net"; !m.IsGroup() && m.Sender != "" && pn != m.JID {
+	if pn := userJID(m.Sender); !m.IsGroup() && m.Sender != "" && pn != m.JID {
 		jids = append(jids, pn)
 	}
 	return jids
@@ -536,7 +536,7 @@ func (b *Bridge) runStartupChecks(ctx context.Context) {
 	}
 	jid := cfg.StartupChecks.NotifyJID
 	if jid == "" && len(cfg.AllowedNumbers) > 0 {
-		jid = cfg.AllowedNumbers[0] + "@s.whatsapp.net"
+		jid = userJID(cfg.AllowedNumbers[0])
 	}
 	if jid == "" {
 		return

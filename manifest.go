@@ -97,7 +97,7 @@ func (m *BrainManifest) Validate() error {
 		}
 	}
 	for _, g := range m.Routing.Groups {
-		if !strings.HasSuffix(g, "@g.us") {
+		if !isGroupJID(g) {
 			return fmt.Errorf("brain %q: %q is not a group JID (…@g.us)", m.ID, g)
 		}
 	}

@@ -421,7 +421,7 @@ func (b *Bridge) apiAllowChat(w http.ResponseWriter, r *http.Request) {
 	if dm {
 		waiting = req.JID
 		if waiting == "" {
-			waiting = entry + "@s.whatsapp.net"
+			waiting = userJID(entry)
 		}
 	}
 	_ = b.store.DismissIgnored(waiting, true)

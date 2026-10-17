@@ -406,7 +406,7 @@ func (wa *WhatsAppClient) handleMessage(msg *events.Message) {
 		msg = &dm
 	}
 
-	if msg.Info.Chat.Server == "g.us" {
+	if msg.Info.Chat.Server == types.GroupServer {
 		// Group messages sent from the operator's own phone are still worth
 		// processing (IsFromMe is true for any device on the account), so the
 		// group path does its own gating.
@@ -424,7 +424,7 @@ func (wa *WhatsAppClient) handleMessage(msg *events.Message) {
 	senderNumber := senderJID.User
 	// Newer WhatsApp clients address senders by LID rather than phone number;
 	// resolve it so the allowlist can be written in plain phone numbers.
-	if senderJID.Server == "lid" {
+	if senderJID.Server == types.HiddenUserServer {
 		if pnJID, err := wa.client.Store.LIDs.GetPNForLID(context.Background(), senderJID); err == nil {
 			senderNumber = pnJID.User
 		} else {

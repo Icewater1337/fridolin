@@ -17,6 +17,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"go.mau.fi/whatsmeow/types"
 )
 
 // Plaud integration: recordings from a Plaud voice recorder reach a brain as
@@ -444,7 +446,7 @@ func (p *PlaudManager) summaryChat(br *Brain) string {
 		return rc
 	}
 	if cfg := p.cfg(); len(cfg.AllowedNumbers) > 0 {
-		return cfg.AllowedNumbers[0] + "@s.whatsapp.net"
+		return userJID(cfg.AllowedNumbers[0])
 	}
 	return ""
 }
@@ -452,7 +454,7 @@ func (p *PlaudManager) summaryChat(br *Brain) string {
 // isDirectChat reports whether jid is a one-to-one chat (a phone number or a
 // LID), not a group, a broadcast list or a channel.
 func isDirectChat(jid string) bool {
-	return strings.HasSuffix(jid, "@s.whatsapp.net") || strings.HasSuffix(jid, "@lid")
+	return strings.HasSuffix(jid, "@"+types.DefaultUserServer) || strings.HasSuffix(jid, "@"+types.HiddenUserServer)
 }
 
 // destination returns the brain that receives recordings and the private
@@ -825,7 +827,7 @@ func (b *Bridge) apiPlaudStatus(w http.ResponseWriter, r *http.Request) {
 		resp["summary_error"] = err.Error()
 	} else {
 		resp["summary_chat"] = jid
-		resp["summary_to_you"] = len(cfg.AllowedNumbers) > 0 && jid == cfg.AllowedNumbers[0]+"@s.whatsapp.net"
+		resp["summary_to_you"] = len(cfg.AllowedNumbers) > 0 && jid == userJID(cfg.AllowedNumbers[0])
 		if owner := b.brainMgr.BrainFor(jid, false); owner != nil && owner != br {
 			resp["summary_chat_brain"] = owner.ID()
 		}

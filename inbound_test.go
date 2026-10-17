@@ -69,3 +69,26 @@ func TestMergeKeepsQuotes(t *testing.T) {
 		})
 	}
 }
+
+// Group chats are told apart, and DM chats built, by the server names
+// whatsmeow uses.
+func TestJIDHelpers(t *testing.T) {
+	for jid, want := range map[string]bool{
+		"120363000000000000@g.us":    true,
+		"15551234567@s.whatsapp.net": false,
+		"15551234567@lid":            false,
+		"status@broadcast":           false,
+		"g.us":                       false,
+		"":                           false,
+	} {
+		if got := isGroupJID(jid); got != want {
+			t.Errorf("isGroupJID(%q) = %v, want %v", jid, got, want)
+		}
+		if got := (Inbound{JID: jid}).IsGroup(); got != want {
+			t.Errorf("Inbound{JID: %q}.IsGroup() = %v, want %v", jid, got, want)
+		}
+	}
+	if got := userJID("15551234567"); got != "15551234567@s.whatsapp.net" {
+		t.Errorf("userJID = %q", got)
+	}
+}
