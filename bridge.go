@@ -353,10 +353,12 @@ func (b *Bridge) handleCommand(ctx context.Context, m Inbound, cfg *Config) bool
 			stopped, dropped = br.StopChat(m.JID)
 		}
 		// A file or recording handed to another brain may answer here too,
-		// and the chat's own brain knows nothing about it.
-		for _, jid := range chats {
-			if cfg.BrainMode && b.brainMgr.StopHandOffs(jid) {
-				stopped = true
+		// and the chat's own brain knows nothing about it. What waits for
+		// one counts as this chat's, for the reply.
+		if cfg.BrainMode {
+			for _, jid := range chats {
+				s, d := b.brainMgr.StopHandOffs(jid)
+				stopped, dropped = stopped || s, dropped+d
 			}
 		}
 		switch {

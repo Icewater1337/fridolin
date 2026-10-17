@@ -435,15 +435,18 @@ func (br *Brain) StopChat(jid string) (stopped bool, dropped int) {
 // StopHandOffs stops the messages handed to this brain (/ingest, Plaud) that
 // answer in jid: the run in flight if it is one, and those waiting. The rest
 // of the brain's work goes on: jid may well be another brain's chat. It
-// reports whether a run was stopped.
-func (br *Brain) StopHandOffs(jid string) bool {
+// reports whether a run was stopped and how many waiting messages were
+// dropped.
+func (br *Brain) StopHandOffs(jid string) (stopped bool, dropped int) {
 	handOff := func(m Inbound) bool { return m.Brain != "" && m.JID == jid }
 	br.mu.Lock()
 	kept := br.pending[:0]
 	for _, p := range br.pending {
-		if !handOff(p) {
-			kept = append(kept, p)
+		if handOff(p) {
+			dropped++
+			continue
 		}
+		kept = append(kept, p)
 	}
 	br.pending = kept
 	cur := br.current
@@ -451,7 +454,7 @@ func (br *Brain) StopHandOffs(jid string) bool {
 		cur = nil
 	}
 	br.mu.Unlock()
-	return br.stopRun(cur)
+	return br.stopRun(cur), dropped
 }
 
 // stopRun kills run, if there is one, and waits for it to end.
@@ -1627,15 +1630,14 @@ func (bm *BrainManager) ResetSession(jid string, isGroup bool) error {
 // StopHandOffs stops, in every brain, the hand-offs that answer in jid (see
 // Brain.StopHandOffs). A brain picked for files or recordings answers in its
 // reply chat, often a chat another brain owns, so !stop there must reach it.
-// It reports whether a run was stopped.
-func (bm *BrainManager) StopHandOffs(jid string) bool {
-	stopped := false
+// It reports whether a run was stopped and how many waiting messages were
+// dropped.
+func (bm *BrainManager) StopHandOffs(jid string) (stopped bool, dropped int) {
 	for _, br := range bm.Brains() {
-		if br.StopHandOffs(jid) {
-			stopped = true
-		}
+		s, d := br.StopHandOffs(jid)
+		stopped, dropped = stopped || s, dropped+d
 	}
-	return stopped
+	return stopped, dropped
 }
 
 // Stop interrupts every run and drops every queue.

@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -342,6 +343,42 @@ func TestStopReachesAHandOffInItsReplyChat(t *testing.T) {
 				t.Errorf("up still has work after !stop: running %+v, queue %+v", rt.Running, rt.Queue)
 			}
 		})
+	}
+}
+
+// !stop that finds no run for the chat but drops hand-offs waiting to answer
+// there says it cleared them: up is busy with its own group, and a file
+// handed to it for the DM waits behind that run.
+func TestStopCountsWaitingHandOffs(t *testing.T) {
+	const (
+		dm    = "15551234567@s.whatsapp.net"
+		group = "120363000000000000@g.us"
+	)
+	tb := newTestBridge(t, `, "ingest": {"enabled": true}`)
+	tb.addFolderBrain(t, BrainManifest{ID: "dm", Name: "DM", Routing: BrainRouting{HandlesDMs: true}})
+	tb.addFolderBrain(t, BrainManifest{ID: "up", Name: "Uploads", ReplyChat: dm, Routing: BrainRouting{Groups: []string{group}}})
+	t.Setenv("WCB_FAKE_SLEEP_MS", "30000")
+	up := tb.brainMgr.Get("up")
+
+	if _, _, _, err := tb.brainMgr.Submit(Inbound{JID: group, Sender: "15551234567", Text: "group work", Source: "whatsapp"}); err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, 5*time.Second, "up's group run", func() bool { r := up.Snapshot().Running; return r != nil && r.PID > 0 })
+	if w := tb.ingest(`{"brain":"up","text":"file this"}`); w.Code != 202 {
+		t.Fatalf("ingest: %d %s", w.Code, w.Body.String())
+	}
+	waitFor(t, 5*time.Second, "the file to wait", func() bool { return len(up.Snapshot().Queue) == 1 })
+
+	tb.handleInbound(context.Background(), Inbound{JID: dm, Sender: "15551234567", Text: "!stop", Source: "whatsapp"})
+	if !tb.sentPrefix(dm, "🛑 Nothing was running for this chat; cleared") {
+		t.Errorf("!stop answered %q, want that it cleared the waiting file", tb.sentTo(dm))
+	}
+	rt := up.Snapshot()
+	if len(rt.Queue) != 0 {
+		t.Errorf("up still has %+v waiting", rt.Queue)
+	}
+	if rt.Running == nil || rt.Running.Chat != group {
+		t.Errorf("up's own group run was stopped: running %+v", rt.Running)
 	}
 }
 

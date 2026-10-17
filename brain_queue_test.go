@@ -143,7 +143,7 @@ func TestStopKillsTheRunningProcess(t *testing.T) {
 
 // StopHandOffs stops only what was handed to a brain and answers in the chat:
 // not the brain's own work, not hand-offs that answer elsewhere, and not the
-// chat's own brain (that one !stop stops with StopCurrent).
+// chat's own brain (that one !stop stops with StopChat).
 func TestStopHandOffsLeavesOtherWorkAlone(t *testing.T) {
 	const (
 		chat  = "15551234567@s.whatsapp.net"
@@ -156,14 +156,15 @@ func TestStopHandOffsLeavesOtherWorkAlone(t *testing.T) {
 		running Inbound   // b's run in flight
 		queued  []Inbound // waiting behind it
 		stopped bool
+		dropped int    // hand-offs that were waiting
 		left    string // b's work afterwards, running or waiting
 	}{
 		{"a hand-off answering in the chat is running", handOff(chat, "handed"),
 			[]Inbound{{JID: group, Text: "group"}, handOff(chat, "handed again"), handOff(other, "elsewhere")},
-			true, "group,elsewhere"},
+			true, 1, "group,elsewhere"},
 		{"the brain's own chat is running", Inbound{JID: group, Text: "group"},
 			[]Inbound{handOff(chat, "handed"), handOff(other, "elsewhere")},
-			false, "group,elsewhere"},
+			false, 1, "group,elsewhere"},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			mgr, _, _ := queueTestManager(t, 30000, "")
@@ -180,8 +181,8 @@ func TestStopHandOffsLeavesOtherWorkAlone(t *testing.T) {
 				}
 			}
 
-			if got := mgr.StopHandOffs(chat); got != c.stopped {
-				t.Errorf("StopHandOffs = %v, want %v", got, c.stopped)
+			if stopped, dropped := mgr.StopHandOffs(chat); stopped != c.stopped || dropped != c.dropped {
+				t.Errorf("StopHandOffs = %v, %d, want %v, %d", stopped, dropped, c.stopped, c.dropped)
 			}
 			rt := b.Snapshot()
 			var left []string
