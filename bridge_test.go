@@ -381,15 +381,22 @@ func TestLoadConfigMaxChunkSize(t *testing.T) {
 }
 
 func TestExampleConfigIsValid(t *testing.T) {
+	// Loaded from a copy: the .env next to the config is read too, and next
+	// to the example lies whatever .env a developer keeps in the checkout.
 	t.Setenv("HOME", t.TempDir())
+	example, err := os.ReadFile("config.example.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfgPath := writeConfig(t, string(example))
 	if runtime.GOOS != "darwin" {
 		// The example turns the sandbox on, which only macOS can honour.
-		if _, err := LoadConfig("config.example.json"); err == nil || !strings.Contains(err.Error(), "sandbox.enabled") {
+		if _, err := LoadConfig(cfgPath); err == nil || !strings.Contains(err.Error(), "sandbox.enabled") {
 			t.Fatalf("config.example.json on %s: err = %v, want the sandbox.enabled error", runtime.GOOS, err)
 		}
 		t.Setenv("SANDBOX_ENABLED", "false")
 	}
-	if _, err := LoadConfig("config.example.json"); err != nil {
+	if _, err := LoadConfig(cfgPath); err != nil {
 		t.Fatalf("config.example.json does not load: %v", err)
 	}
 }

@@ -313,7 +313,8 @@ func (c *Config) AnyoneCanDM() bool { return len(c.AllowedNumbers) == 0 && c.All
 //  2. config.json values
 //  3. Built-in defaults
 //
-// The .env file is looked for next to the config file, then in the working directory.
+// Only the .env next to the config file is read: one in the working directory
+// counts only when the config file is there too.
 func LoadConfig(cfgPath string) (*Config, error) {
 	cs, err := OpenConfigStore(cfgPath)
 	if err != nil {
@@ -322,14 +323,12 @@ func LoadConfig(cfgPath string) (*Config, error) {
 	return cs.Get(), nil
 }
 
-// loadDotEnv loads the first .env found next to the config or in the working
-// directory. Values in it override config.json (and the process environment).
+// loadDotEnv loads the .env next to the config, if there is one. Values in it
+// override config.json (and the process environment). There is no fallback to
+// the working directory: a bridge started from a checkout, or the tests run in
+// one, must not pick up whatever file happens to lie there.
 func loadDotEnv(cfgPath string) {
-	for _, p := range dotEnvPaths(cfgPath) {
-		if err := godotenv.Overload(p); err == nil {
-			return
-		}
-	}
+	_ = godotenv.Overload(filepath.Join(filepath.Dir(cfgPath), ".env"))
 }
 
 // dataDirName and legacyDataDirName are the home-relative names of the data

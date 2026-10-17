@@ -693,12 +693,13 @@ whatsmeow protocol chatter.
 ## Environment variables
 
 Environment variables override `config.json`. A `.env` file next to the config
-(or in the working directory) is loaded automatically and overrides the
-process environment. The dashboard shows settings an environment variable
-controls as locked — remove the variable to edit them there. The sandbox
-keeps brains from reading the `.env` file, but every brain inherits the
-bridge's environment, including what `.env` sets, so do not put anything
-there that brains must not see.
+is loaded automatically and overrides the process environment. No other
+`.env` is read: one in the working directory counts only when the config
+file itself is in the working directory. The dashboard shows settings
+an environment variable controls as locked — remove the variable to edit them
+there. The sandbox keeps brains from reading the `.env` file, but every brain
+inherits the bridge's environment, including what `.env` sets, so do not put
+anything there that brains must not see.
 
 | Variable | Config field |
 | -------- | ------------ |

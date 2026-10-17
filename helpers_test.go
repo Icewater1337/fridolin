@@ -90,6 +90,18 @@ func fakeClaudeEnv(t *testing.T, sleepMS int) string {
 	return os.Args[0]
 }
 
+// clearEnv unsets keys for the rest of the test and restores them afterwards,
+// so a value the code under test exports cannot leak into the next test.
+func clearEnv(t *testing.T, keys ...string) {
+	t.Helper()
+	for _, k := range keys {
+		t.Setenv(k, "") // registers the restore
+		if err := os.Unsetenv(k); err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
 // waitFor polls cond until it holds or the timeout passes.
 func waitFor(t *testing.T, timeout time.Duration, what string, cond func() bool) {
 	t.Helper()

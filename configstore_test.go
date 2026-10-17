@@ -187,3 +187,43 @@ func TestRemovingTheLastNumberDoesNotOpenDMs(t *testing.T) {
 		t.Error("an empty list with allow_any_dm unset must refuse everyone")
 	}
 }
+
+func TestDotEnvIsReadOnlyNextToTheConfig(t *testing.T) {
+	// The tests run in the repository and a bridge may be started from a
+	// checkout: a .env lying in the working directory must not configure it.
+	tests := []struct {
+		name        string
+		beside, cwd string // .env contents next to config.json and in the working directory; "" means none
+		want        string // effective model
+	}{
+		{"next to the config", "MODEL=beside\n", "", "beside"},
+		{"only in the working directory", "", "MODEL=cwd\n", ""},
+		{"in both places", "MODEL=beside\n", "MODEL=cwd\n", "beside"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Setenv("HOME", t.TempDir())
+			clearEnv(t, "MODEL")
+			path := writeConfig(t, `{}`)
+			if tc.beside != "" {
+				if err := os.WriteFile(filepath.Join(filepath.Dir(path), ".env"), []byte(tc.beside), 0o600); err != nil {
+					t.Fatal(err)
+				}
+			}
+			wd := t.TempDir()
+			if tc.cwd != "" {
+				if err := os.WriteFile(filepath.Join(wd, ".env"), []byte(tc.cwd), 0o600); err != nil {
+					t.Fatal(err)
+				}
+			}
+			t.Chdir(wd)
+			cfg, err := LoadConfig(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if cfg.Model != tc.want {
+				t.Errorf("Model = %q, want %q", cfg.Model, tc.want)
+			}
+		})
+	}
+}
