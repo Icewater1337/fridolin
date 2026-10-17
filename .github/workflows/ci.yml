@@ -9,6 +9,16 @@ on:
 permissions:
   contents: read
 
+# A new push to a pull request cancels the run still going for the old one.
+# Every other run (each push to main) gets a group of its own, so none is
+# cancelled or left waiting.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: true
+
+# Actions are pinned to a full commit SHA, which unlike a tag cannot be moved
+# to other code; the comment names the release. Dependabot proposes updates.
+
 jobs:
   go:
     strategy:
@@ -23,13 +33,16 @@ jobs:
         # still accept a release without security fixes.
         go: [oldstable, stable]
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
     env:
       # Test the release setup-go installed. With the default (auto), a go
       # directive newer than it would quietly download a newer toolchain.
       GOTOOLCHAIN: local
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
         with:
           go-version: ${{ matrix.go }}
           cache: true
@@ -110,15 +123,18 @@ jobs:
     # and setup-python only has builds of it for the images that exist now,
     # so the next ubuntu-latest would break this job with no change here.
     runs-on: ubuntu-24.04
+    timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
 
       - name: shellcheck
         run: shellcheck --severity=warning setup.sh scripts/*.sh .githooks/*
 
       # The oldest Python the README promises (and the one macOS ships as
       # /usr/bin/python3), so a newer-only feature fails here first.
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
         with:
           python-version: '3.9'
 
@@ -160,10 +176,12 @@ jobs:
 
   personal-data:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           fetch-depth: 0
+          persist-credentials: false
 
       # Nothing published here may contain a real phone number, WhatsApp JID,
       # email address, home path or token. Contributors run the same check as a
