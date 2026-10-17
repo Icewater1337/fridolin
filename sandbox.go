@@ -162,7 +162,8 @@ var defaultDenySubpaths = []string{
 	// under both names the project has had.
 	".config/fridolin",
 	".config/whatsapp-claude-bridge",
-	// The bridge's own logs (setup.sh), which name every chat.
+	// The bridge's own logs (the launchd agent's, see service.go), which
+	// name every chat.
 	"Library/Logs/fridolin",
 	"Library/Logs/whatsapp-claude-bridge",
 	"Documents",

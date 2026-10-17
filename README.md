@@ -117,10 +117,15 @@ cd fridolin
 Or open the folder in Claude Code (or any coding assistant) and say *"set this
 up"* — [AGENTS.md](AGENTS.md) tells it exactly what to do.
 
-`setup.sh` checks the prerequisites, builds the bridge, runs the tests,
-installs a background service (launchd on macOS, systemd on Linux) and opens
-the dashboard. Re-run it any time; it leaves your configuration and brains
-alone.
+`setup.sh` checks the prerequisites, builds the bridge and runs the tests on
+the build. Only then does it install it, to `~/.local/lib/fridolin/`, with a
+background service (launchd on macOS, a systemd user unit on Linux) that runs
+it from there, and open the dashboard. The checkout only builds, so working in
+it never changes the running bridge. Re-run it any time; it leaves your
+configuration and brains alone. `./setup.sh --help` lists its options.
+
+The commands below are `~/.local/lib/fridolin/fridolin`, shortened to
+`fridolin`: put that folder on your `PATH`, or type the full path.
 
 Then, in the dashboard:
 
@@ -136,8 +141,28 @@ Then, in the dashboard:
 Reopen the dashboard any time with:
 
 ```bash
-./fridolin open
+fridolin open
 ```
+
+### Upgrading and rolling back
+
+```bash
+git pull && ./setup.sh
+```
+
+builds and tests the new version, installs it and restarts the bridge, which
+cuts off any reply it is working on. The version it replaced stays next to it,
+with its tools, as `fridolin.prev`. To go back to it:
+
+```bash
+fridolin service rollback     # run it again to undo
+```
+
+`fridolin version`, the dashboard's Overview and the `Starting fridolin …`
+line each start writes to the log say which version runs (on macOS:
+`grep 'Starting fridolin' ~/Library/Logs/fridolin/stderr.log | tail -1`).
+`fridolin service status` shows what is installed, what the service runs
+and whether the bridge answers.
 
 ### Adding a group
 
@@ -173,15 +198,19 @@ The dashboard writes `~/.fridolin/config.json`; you can edit it
 too. Every option is documented in [docs/CONFIGURATION.md](docs/CONFIGURATION.md).
 
 ```bash
-./fridolin check                         # validate and show DM access and routing
-./fridolin check --route 15551234567@s.whatsapp.net
+fridolin check                           # validate and show DM access and routing
+fridolin check --route 15551234567@s.whatsapp.net
 ```
 
 ### Trying it without WhatsApp
 
 ```bash
-./fridolin --no-whatsapp --config /tmp/try/config.json --open
+go build -o bin/fridolin . && bin/fridolin --no-whatsapp --config /tmp/try/config.json --open
 ```
+
+A build in `bin/` finds the tools in the checkout and leaves the installed
+bridge alone. Give the scratch config its own `http_listen` port and
+`data_dir`.
 
 Dev mode runs the dashboard and brains with a simulated chat: inject messages
 on the **Dev** page and read the replies there.
@@ -282,7 +311,7 @@ when [`child_env_passthrough`](docs/CONFIGURATION.md#child_env_passthrough)
 names it: `"child_env_passthrough": ["GROQ_API_KEY"]`. The bridge reads no
 `.env` file. [Environment
 variables](docs/CONFIGURATION.md#environment-variables) says where to keep it
-so that re-running `setup.sh` does not drop it.
+so that the next install does not drop it.
 
 `ffmpeg` is required either way. `--model` accepts any Whisper-compatible model
 ID, so a fine-tune matching your language or dialect usually beats the default
@@ -349,12 +378,27 @@ uploaded. Restores go into a new folder and never overwrite a brain. Details:
 
 ### Running in the background
 
-`setup.sh` installs a launchd agent (macOS) or a systemd user unit (Linux)
-from the templates in [deploy/](deploy/). Pairing happens in the dashboard, so
-the service can be started before WhatsApp is linked. Re-running `setup.sh`
-rewrites both files, so keep extra environment variables where it does not
-overwrite them: see [Environment
-variables](docs/CONFIGURATION.md#environment-variables).
+`setup.sh` runs `fridolin service install`, which you can also run yourself.
+It copies the binary and the Python tools to
+`~/.local/lib/fridolin/` and writes a launchd agent
+(`~/Library/LaunchAgents/ai.fridolin.bridge.plist`) or a systemd user unit
+(`~/.config/systemd/user/fridolin.service`) that runs it with your shell's
+`PATH`, then restarts it and checks that the new version answers. Pairing
+happens in the dashboard, so the service can start before WhatsApp is linked.
+
+```bash
+fridolin service status       # what is installed and running
+fridolin service restart
+fridolin service install --dry-run   # show the unit without writing it
+fridolin service uninstall    # remove the service and the install, not your data
+```
+
+Each install rewrites the unit. Variables you add to the launchd agent's
+`EnvironmentVariables` are kept (a dry run names them, but does not show
+their values); on Linux keep them in a drop-in: see
+[Environment variables](docs/CONFIGURATION.md#environment-variables). The
+macOS log is in `~/Library/Logs/fridolin/`; on Linux,
+`journalctl --user -u fridolin -f`.
 
 ---
 
@@ -426,7 +470,13 @@ What it does not do:
   or your own) to start a program outside the sandbox. See
   [what the sandbox does not cover yet](docs/CONFIGURATION.md#what-the-sandbox-does-not-cover-yet).
 - On Linux there is no sandbox layer at all (the bridge refuses to start with
-  `sandbox.enabled` on). Run the bridge as a dedicated user.
+  `sandbox.enabled` on). Run the bridge as a dedicated user: create one
+  (`sudo useradd -m fridolin`), let its services run without a login
+  (`sudo loginctl enable-linger fridolin`), then log in as it (over SSH, or
+  `sudo machinectl shell fridolin@`; `sudo -u` gives `systemctl --user` no
+  session) and run `./setup.sh` there. The unit sets `NoNewPrivileges=yes`,
+  so nothing a brain starts can gain privileges through `sudo` or another
+  setuid program.
 - Every file sent to the bridge lands in your data directory, and the assistant
   reads it.
 

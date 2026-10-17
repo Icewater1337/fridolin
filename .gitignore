@@ -21,6 +21,7 @@ conversation-history.jsonl
 transcripts/
 
 # ── build output ──────────────────────────────────────────────────────────
+/bin/
 /fridolin
 /whatsapp-claude-bridge
 /bridge

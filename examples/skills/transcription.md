@@ -115,9 +115,9 @@ pip install groq && export GROQ_API_KEY=...
 
 `GROQ_API_KEY` must be set in the bridge's process environment and named in
 the bridge's config, `"child_env_passthrough": ["GROQ_API_KEY"]`, or brains
-do not get it; the bridge reads no `.env` file. Re-running `setup.sh`
-rewrites the launchd plist and the systemd unit, so keep the key where it
-survives that: see "Environment variables" in
+do not get it; the bridge reads no `.env` file. Each install rewrites the
+launchd plist and the systemd unit, so keep the key where it survives
+that: see "Environment variables" in
 Fridolin's `docs/CONFIGURATION.md`. The same goes for `HF_HOME` if you
 moved the local model's cache: otherwise a brain downloads the model again
 into the default cache.

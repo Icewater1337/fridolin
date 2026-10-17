@@ -33,12 +33,15 @@ The person's data lives in brain folders they choose and in
    ./setup.sh --yes
    ```
 
-   This builds `./fridolin`, runs the tests, writes a starter
-   config to `~/.fridolin/config.json`, installs a launchd agent
-   (macOS) or systemd user unit (Linux), starts it, and opens the dashboard.
-   Use `./setup.sh --no-service` if the person does not want it to start at
-   login; then run `./fridolin --open` yourself (it runs in the
-   foreground — start it in the background or a separate terminal).
+   This builds the bridge, runs the tests on the build, writes a starter
+   config to `~/.fridolin/config.json`, installs the build to
+   `~/.local/lib/fridolin/` with a launchd agent (macOS) or systemd user
+   unit (Linux), restarts it, waits for the new version to answer and opens
+   the dashboard. Use `./setup.sh --no-service` if the person does not want
+   it to start at login; it then builds `bin/fridolin`, which you run with
+   `bin/fridolin --open` (it runs in the foreground — start it in the
+   background or a separate terminal). Below, `fridolin` means
+   `~/.local/lib/fridolin/fridolin` (or `bin/fridolin` without the service).
 
 3. **Hand over to the dashboard.** Tell the person to:
    - **Pair WhatsApp**: scan the QR code shown on the Overview page with the
@@ -60,10 +63,12 @@ The person's data lives in brain folders they choose and in
 
 4. **Verify:** `curl -s http://127.0.0.1:8765/health` prints `ok`;
    `curl -s http://127.0.0.1:8765/ready` shows `"whatsapp":"connected"` once
-   the phone is paired; `./fridolin check` shows the brains and routing. Ask
-   the person to send the bridge a DM and confirm a reply arrives.
+   the phone is paired; `fridolin service status` shows what is installed
+   and running; `fridolin check` shows the brains and routing. Ask the
+   person to send the bridge a DM and confirm a reply arrives.
 
-Reopen the dashboard with `./fridolin open`.
+Reopen the dashboard with `fridolin open`. To upgrade later: `git pull &&
+./setup.sh`; to go back to the version before: `fridolin service rollback`.
 
 ## Rules
 
@@ -73,8 +78,11 @@ Reopen the dashboard with `./fridolin open`.
 - **Never run two bridges on one data directory or WhatsApp session.** The
   binary refuses (lock file + port), but do not try to work around it. To
   experiment, use dev mode with a scratch config:
-  `./fridolin --no-whatsapp --config /tmp/try/config.json`
+  `bin/fridolin --no-whatsapp --config /tmp/try/config.json`
   (set a different `http_listen` port and `data_dir` in that config).
+- **`./setup.sh` and `fridolin service install` restart the running
+  bridge**, cutting off replies in progress. Ask before running them on a
+  machine where the bridge is in use.
 - **Never print or paste** `~/.fridolin/dashboard.token`, the
   rclone config in `~/.fridolin/rclone/`, or anything that looks
   like a credential into chat or logs. `fridolin open` passes
@@ -119,6 +127,9 @@ Reopen the dashboard with `./fridolin open`.
 - The site process in `site/` (Node, TypeScript run by tsx; docs/SITE.md) has
   its own tests: `cd site && npm install && npm test`. The Go end-to-end
   tests of the site run it too and skip without its `node_modules`.
+- Build with `go build -o bin/fridolin .` (`bin/` is ignored by git) and try
+  changes in dev mode. The service runs the copy in `~/.local/lib/fridolin/`,
+  so a build in the checkout never reaches it; `./setup.sh` installs one.
 - The dashboard is plain HTML/CSS/JS in `web/` (no build step), embedded into
   the binary — rebuild after changing it. It runs under a strict CSP: no
   inline scripts or styles. Its ES modules live in `web/assets`: `app/` (the

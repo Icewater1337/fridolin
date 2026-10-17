@@ -1,25 +1,50 @@
 #!/usr/bin/env bash
 #
-# Sets up Fridolin on this machine:
-#   1. checks prerequisites (Go, a C compiler, the Claude CLI; rclone optional)
-#   2. builds the binary and runs the tests
-#   3. optionally installs a background service (launchd on macOS,
-#      a systemd user unit on Linux) so it starts at login
-#   4. starts the bridge and opens the dashboard
-#
-# Everything else — pairing WhatsApp, adding brains, allowing chats, Google
-# Drive backups — happens in the dashboard.
-#
-#   ./setup.sh                 guided
-#   ./setup.sh --yes           accept every default (installs the service)
-#   ./setup.sh --no-service    build only; run ./fridolin yourself
-#
-# Safe to re-run: it rebuilds and leaves your configuration and brains alone.
+# Sets up Fridolin on this machine, or upgrades it after a `git pull`. The
+# checkout only builds: `fridolin service install` copies the build to
+# ~/.local/lib/fridolin and runs it from there. `./setup.sh --help` says more.
 
 set -euo pipefail
 
+usage() {
+  cat <<'EOF'
+Usage: ./setup.sh [--yes] [--no-service] [--skip-tests]
+
+Sets up Fridolin on this machine, or upgrades it after `git pull`:
+  1. checks the prerequisites (Go, a C compiler, the Claude CLI; rclone optional)
+  2. builds the bridge from this checkout and runs the tests on the build
+  3. writes a starter config if there is none
+  4. installs the build to ~/.local/lib/fridolin, keeping the one it replaces
+     as fridolin.prev, installs the background service (a launchd agent on
+     macOS, a systemd user unit on Linux), restarts it and waits for the bridge
+  5. opens the dashboard
+
+Pairing WhatsApp, adding brains, allowing chats and Google Drive backups
+happen in the dashboard. Safe to re-run: configuration and brains stay. A
+failed build or test run installs nothing.
+
+Options:
+  -y, --yes       accept every default: run the tests, install, restart
+  --no-service    build into ./bin/fridolin and stop there; run it yourself
+  --skip-tests    install without running the test suite first
+  -h, --help      show this help
+
+Environment:
+  DATA_DIR        data folder for a new config (default ~/.fridolin)
+  FRIDOLIN_CONFIG config file (default $DATA_DIR/config.json)
+  INSTALL_DIR     install folder (default ~/.local/lib/fridolin)
+
+Afterwards:
+  ~/.local/lib/fridolin/fridolin service status     what runs, and is it up
+  ~/.local/lib/fridolin/fridolin service rollback   back to the previous build
+EOF
+}
+
 REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-BINARY="$REPO_DIR/fridolin"
+INSTALL_DIR="${INSTALL_DIR:-$HOME/.local/lib/fridolin}"
+# A data folder given by the caller goes into a new config: the service
+# never sees this script's environment.
+DATA_DIR_GIVEN="${DATA_DIR:-}"
 # Installs from before the rename keep their data folder.
 if [ -z "${DATA_DIR:-}" ] && [ ! -d "$HOME/.fridolin" ] && [ -d "$HOME/.whatsapp-claude-bridge" ]; then
   DATA_DIR="$HOME/.whatsapp-claude-bridge"
@@ -27,16 +52,17 @@ fi
 DATA_DIR="${DATA_DIR:-$HOME/.fridolin}"
 # The config file the service is given: FRIDOLIN_CONFIG, else the data dir's.
 CONFIG="${FRIDOLIN_CONFIG:-$DATA_DIR/config.json}"
-LABEL="ai.fridolin.bridge"
 
 ASSUME_YES=false
 NO_SERVICE=false
+SKIP_TESTS=false
 for arg in "$@"; do
   case "$arg" in
-    --yes|-y) ASSUME_YES=true ;;
+    -y|--yes) ASSUME_YES=true ;;
     --no-service) NO_SERVICE=true ;;
-    -h|--help) sed -n '2,20p' "$0"; exit 0 ;;
-    *) echo "unknown option: $arg" >&2; exit 2 ;;
+    --skip-tests) SKIP_TESTS=true ;;
+    -h|--help) usage; exit 0 ;;
+    *) echo "unknown option: $arg" >&2; usage >&2; exit 2 ;;
   esac
 done
 
@@ -89,12 +115,12 @@ if [ "${GO_MINOR:-0}" -lt "${GO_MIN#1.}" ]; then
 fi
 ok "Go $GO_VERSION"
 
-if ! command -v cc >/dev/null 2>&1 && ! command -v gcc >/dev/null 2>&1 && ! command -v clang >/dev/null 2>&1; then
-  if [ "$OS" = Darwin ]; then
-    fail "No C compiler (needed for SQLite). Run: xcode-select --install"
-  else
-    fail "No C compiler (needed for SQLite). Install build-essential (Debian/Ubuntu) or gcc."
-  fi
+if [ "$OS" = Darwin ]; then
+  # /usr/bin/cc exists without the Command Line Tools too: it only offers
+  # to install them, and the cgo build fails later.
+  xcode-select -p >/dev/null 2>&1 || fail "No C compiler (needed for SQLite). Run: xcode-select --install"
+elif ! command -v cc >/dev/null 2>&1 && ! command -v gcc >/dev/null 2>&1 && ! command -v clang >/dev/null 2>&1; then
+  fail "No C compiler (needed for SQLite). Install build-essential (Debian/Ubuntu) or gcc."
 fi
 ok "C compiler"
 
@@ -104,9 +130,7 @@ if [ -z "$CLAUDE_BIN" ]; then
     [ -x "$c" ] && CLAUDE_BIN="$c" && break
   done
 fi
-if [ -n "$CLAUDE_BIN" ]; then
-  ok "Claude Code CLI: $CLAUDE_BIN"
-else
+if [ -z "$CLAUDE_BIN" ]; then
   warn "Claude Code CLI not found. Install it (https://claude.com/claude-code) and log in;"
   warn "then set its path under Settings → Claude in the dashboard."
 fi
@@ -115,16 +139,32 @@ if command -v rclone >/dev/null 2>&1; then
   ok "rclone (for Google Drive backups)"
 else
   warn "rclone not installed — only needed for Google Drive backups."
-  [ "$OS" = Darwin ] && info "${DIM}brew install rclone${RESET}" || info "${DIM}https://rclone.org/install/${RESET}"
+  if [ "$OS" = Darwin ]; then info "${DIM}brew install rclone${RESET}"; else info "${DIM}https://rclone.org/install/${RESET}"; fi
 fi
 
 # ── 2. build and test ─────────────────────────────────────────────────────
 step "Building"
-( cd "$REPO_DIR" && go build -o "$BINARY" . ) || fail "Build failed — see the Go errors above."
-ok "built $BINARY"
+BUILD_DIR="$(mktemp -d "${TMPDIR:-/tmp}/fridolin-setup.XXXXXX")"
+trap 'rm -rf "$BUILD_DIR"' EXIT
+VERSION="$(git -C "$REPO_DIR" describe --tags --always --dirty 2>/dev/null || echo dev)"
+NEW="$BUILD_DIR/fridolin"
+# The main package is at the repo root or in ./cmd/fridolin.
+PKG=.
+if [ -d "$REPO_DIR/cmd/fridolin" ]; then PKG=./cmd/fridolin; fi
+( cd "$REPO_DIR" && go build -trimpath -ldflags "-X main.version=$VERSION" -o "$NEW" "$PKG" ) || fail "Build failed — see the Go errors above. Nothing was installed."
+ok "built $VERSION"
 
-if confirm "Run the test suite (about a minute)?" y; then
-  ( cd "$REPO_DIR" && go test -count=1 ./... >/dev/null ) && ok "tests pass" || fail "Tests failed — run: go test ./..."
+if ! $SKIP_TESTS && confirm "Run the test suite before installing (recommended, about a minute)?" y; then
+  # A name of its own: two runs, or another user's file in a shared /tmp,
+  # must not meet.
+  TEST_LOG="$(mktemp "${TMPDIR:-/tmp}/fridolin-setup-tests.XXXXXX")"
+  if ( cd "$REPO_DIR" && go test -count=1 ./... ) >"$TEST_LOG" 2>&1; then
+    rm -f "$TEST_LOG"
+    ok "tests pass"
+  else
+    tail -n 30 "$TEST_LOG" | sed 's/^/    /'
+    fail "Tests failed, so nothing was installed. Full output: $TEST_LOG"
+  fi
 fi
 
 if [ -d "$REPO_DIR/.git" ] && [ "$(git -C "$REPO_DIR" config core.hooksPath || true)" != ".githooks" ]; then
@@ -142,69 +182,93 @@ if [ -f "$CONFIG" ]; then
   ok "using $CONFIG"
 else
   # Seed the CLI path so brains work under launchd/systemd's minimal PATH.
-  "$BINARY" init --config "$CONFIG" ${CLAUDE_BIN:+--claude-path "$CLAUDE_BIN"}
+  "$NEW" init --config "$CONFIG" ${CLAUDE_BIN:+--claude-path "$CLAUDE_BIN"} ${DATA_DIR_GIVEN:+--data-dir "$DATA_DIR_GIVEN"}
   ok "wrote a starter config to $CONFIG"
 fi
+# A config this build does not load (inline brains, say) stops here,
+# before anything is installed, with check's error above. Its claude line
+# is the CLI brains will run, with the version checked against the
+# release the bridge was tested with.
+CHECK_OUT="$("$NEW" check --config "$CONFIG")" || fail "This build cannot load $CONFIG (see the error above). Nothing was installed."
+CLAUDE_LINE="$(printf '%s\n' "$CHECK_OUT" | sed -n 's/^  claude: *//p')"
+case "$CLAUDE_LINE" in
+  "") ;;
+  *"not found"*|*"older than"*) warn "Claude Code CLI: $CLAUDE_LINE" ;;
+  *) ok "Claude Code CLI: $CLAUDE_LINE" ;;
+esac
 
-# ── 4. background service ─────────────────────────────────────────────────
-SERVICE=false
+# ── 4. install ────────────────────────────────────────────────────────────
+INSTALLED=false
+FAILED=false
+SWAPPED=false
+if ! $NO_SERVICE && [ "$OS" != Darwin ] && ! command -v systemctl >/dev/null 2>&1; then
+  warn "systemd is not available, so there is no background service to install."
+  NO_SERVICE=true
+fi
+# Whether a bridge answers on the configured address: status exits 0 when
+# one does, 4 when http_listen is off and it cannot ask.
+STATUS_RC=0
+"$NEW" service status --config "$CONFIG" --dir "$INSTALL_DIR" >/dev/null 2>&1 || STATUS_RC=$?
+case $STATUS_RC in
+  0) BRIDGE=running ;;
+  4) BRIDGE=unknown ;;
+  *) BRIDGE=down ;;
+esac
 if ! $NO_SERVICE; then
-  step "Background service"
+  step "Installing"
   if [ "$OS" = Darwin ]; then
-    if confirm "Start the bridge at login with launchd (recommended)?" y; then
-      PLIST="$HOME/Library/LaunchAgents/$LABEL.plist"
-      mkdir -p "$HOME/Library/LaunchAgents" "$HOME/Library/Logs/fridolin"
-      sed -e "s|{{BINARY}}|$BINARY|g" \
-          -e "s|{{WORKDIR}}|$DATA_DIR|g" \
-          -e "s|{{CONFIG}}|$CONFIG|g" \
-          -e "s|{{HOME}}|$HOME|g" \
-          "$REPO_DIR/deploy/launchd.plist.template" > "$PLIST"
-      launchctl bootout "gui/$(id -u)/$LABEL" 2>/dev/null || true
-      # The service's name before the rename.
-      OLD_PLIST="$HOME/Library/LaunchAgents/com.whatsapp-claude-bridge.plist"
-      if [ -f "$OLD_PLIST" ]; then
-        launchctl bootout "gui/$(id -u)/com.whatsapp-claude-bridge" 2>/dev/null || true
-        mv "$OLD_PLIST" "$OLD_PLIST.replaced-by-fridolin"
-      fi
-      SERVICE=true
-      ok "installed $PLIST"
-    fi
+    PROMPT="Install to $INSTALL_DIR and start the bridge at login with launchd (recommended)?"
   else
-    if command -v systemctl >/dev/null 2>&1 && confirm "Start the bridge at login with a systemd user unit (recommended)?" y; then
-      UNIT_DIR="$HOME/.config/systemd/user"
-      mkdir -p "$UNIT_DIR"
-      sed -e "s|{{BINARY}}|$BINARY|g" \
-          -e "s|{{WORKDIR}}|$DATA_DIR|g" \
-          -e "s|{{CONFIG}}|$CONFIG|g" \
-          -e "s|{{USER}}|$(id -un)|g" \
-          "$REPO_DIR/deploy/systemd.service.template" > "$UNIT_DIR/fridolin.service"
-      systemctl --user daemon-reload
-      SERVICE=true
-      ok "installed $UNIT_DIR/fridolin.service"
-      info "${DIM}To keep it running after you log out: sudo loginctl enable-linger $(id -un)${RESET}"
-    fi
+    PROMPT="Install to $INSTALL_DIR and start the bridge at login with a systemd user unit (recommended)?"
+  fi
+  case $BRIDGE in
+    running)
+      info "A bridge is running. Installing restarts it, which cuts off any reply it is working on."
+      PROMPT="Install $VERSION and restart the bridge now?" ;;
+    unknown)
+      info "If a bridge is running, installing restarts it, which cuts off any reply it is working on." ;;
+  esac
+  if confirm "$PROMPT" y; then
+    # Whether the install replaced another build, so that a rollback has
+    # one to go back to.
+    REPLACES=false
+    if [ -e "$INSTALL_DIR/fridolin" ] && ! cmp -s "$NEW" "$INSTALL_DIR/fridolin"; then REPLACES=true; fi
+    INSTALL_RC=0
+    "$NEW" service install --config "$CONFIG" --dir "$INSTALL_DIR" --source "$REPO_DIR" || INSTALL_RC=$?
+    case $INSTALL_RC in
+      0)
+        INSTALLED=true
+        if [ "$OS" != Darwin ]; then
+          info "${DIM}To keep it running after you log out: sudo loginctl enable-linger $(id -un)${RESET}"
+        fi ;;
+      # Refused before it changed anything: a rollback would swap a
+      # working install for the one before it.
+      5) fail "The install was refused (see the error above). Nothing was installed, and the bridge that ran before, if any, still runs." ;;
+      *)
+        FAILED=true
+        if $REPLACES && cmp -s "$NEW" "$INSTALL_DIR/fridolin" && [ -e "$INSTALL_DIR/fridolin.prev" ]; then SWAPPED=true; fi ;;
+    esac
+  else
+    NO_SERVICE=true
   fi
 fi
+if $NO_SERVICE && ! $FAILED; then
+  mkdir -p "$REPO_DIR/bin"
+  mv -f "$NEW" "$REPO_DIR/bin/fridolin"
+  ok "built $REPO_DIR/bin/fridolin (not installed)"
+fi
 
-# ── 5. start ──────────────────────────────────────────────────────────────
-if $SERVICE; then
-  step "Starting"
-  if [ "$OS" = Darwin ]; then
-    launchctl bootstrap "gui/$(id -u)" "$HOME/Library/LaunchAgents/$LABEL.plist"
-  else
-    systemctl --user enable --now fridolin
+# ── 5. open ───────────────────────────────────────────────────────────────
+OPENED=false
+if $INSTALLED && "$INSTALL_DIR/fridolin" open --config "$CONFIG" >/dev/null 2>&1; then
+  OPENED=true
+fi
+
+if $FAILED; then
+  if $SWAPPED; then
+    fail "The new build is installed, but the install or the restart failed (see above). Go back to the build that ran before with: $INSTALL_DIR/fridolin service rollback"
   fi
-  for _ in $(seq 1 30); do
-    curl -fsS "http://127.0.0.1:8765/health" >/dev/null 2>&1 && break
-    sleep 1
-  done
-  if curl -fsS "http://127.0.0.1:8765/health" >/dev/null 2>&1; then
-    ok "the bridge is running"
-    "$BINARY" open --config "$CONFIG" || true
-  else
-    warn "the bridge did not answer yet — check the log:"
-    [ "$OS" = Darwin ] && info "tail -f ~/Library/Logs/fridolin/stderr.log" || info "journalctl --user -u fridolin -f"
-  fi
+  fail "The install or the restart failed (see above)."
 fi
 
 cat <<EOS
@@ -212,14 +276,20 @@ cat <<EOS
 ${BOLD}${GREEN}Setup complete.${RESET}
 
 EOS
-if $SERVICE; then
-  cat <<EOS
- The dashboard is open in your browser (or run: ${BOLD}$BINARY open${RESET}).
-EOS
+if $OPENED; then
+  echo " The dashboard is open in your browser (or run: ${BOLD}$INSTALL_DIR/fridolin open${RESET})."
+elif $INSTALLED; then
+  echo " Open the dashboard: ${BOLD}$INSTALL_DIR/fridolin open${RESET}"
+elif [ "$BRIDGE" = running ]; then
+  # A second bridge would find the data folder and the port taken.
+  echo " Not installed: the running bridge keeps its old build until you re-run ./setup.sh."
+  echo " Open its dashboard: ${BOLD}$REPO_DIR/bin/fridolin open${RESET}"
+elif [ "$BRIDGE" = unknown ]; then
+  # With http_listen off there was no asking whether one runs.
+  echo " Not installed: a bridge that is running keeps its old build until you re-run ./setup.sh."
+  echo " If none is running, start it: ${BOLD}$REPO_DIR/bin/fridolin --open${RESET}"
 else
-  cat <<EOS
- Start the bridge:   ${BOLD}$BINARY --open${RESET}
-EOS
+  echo " Start the bridge:   ${BOLD}$REPO_DIR/bin/fridolin --open${RESET}"
 fi
 cat <<EOS
 
@@ -232,3 +302,10 @@ cat <<EOS
    4. Optional: ${BOLD}Backup${RESET} → Connect Google Drive.
 
 EOS
+if $INSTALLED; then
+  cat <<EOS
+ Upgrade later with ${BOLD}git pull && ./setup.sh${RESET}; go back to the previous build
+ with ${BOLD}$INSTALL_DIR/fridolin service rollback${RESET}.
+
+EOS
+fi

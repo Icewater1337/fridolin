@@ -148,7 +148,7 @@ version, go through what it printed:
 - **warning: the prompt file is outside the brain folder**: the brain now
   reads `brain-prompt.md` in its folder, so copy the prompt file there.
 
-Then run `./fridolin check` with this version. It must load the config,
+Then run `fridolin check` with this version. It must load the config,
 and a brain whose folder was in `brain_dirs` already may now be listed
 twice, which it reports as two brains with the same id: remove one of the
 two entries from `brain_dirs` in `config.json`. Until you do, the
