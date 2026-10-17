@@ -19,7 +19,9 @@ matters and tells you the action items.
    the one that handles your direct messages).
 
 The first check only remembers the recordings that already exist; from then
-on, each new one is sent once.
+on, each new one is sent once. If that first check fails (Plaud is
+unreachable, or the login has already expired), the next one starts over,
+so recordings from before you connected are still not sent.
 
 ## What happens
 

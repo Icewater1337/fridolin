@@ -106,6 +106,9 @@ type PlaudManager struct {
 	lastForwarded *PlaudForward
 	busy          bool
 	stop          context.CancelFunc
+	// authNotified is when the expiry notice went out while there was no
+	// state to keep that time in (the login expired before the first sync).
+	authNotified time.Time
 
 	// run executes the CLI; tests replace it.
 	run func(ctx context.Context, args ...string) (string, error)
@@ -452,6 +455,7 @@ func (p *PlaudManager) Poll(ctx context.Context) error {
 		p.lastErr = err.Error()
 	} else {
 		p.lastErr = ""
+		p.authNotified = time.Time{}
 	}
 	p.mu.Unlock()
 	if errors.Is(err, errPlaudAuth) {
@@ -547,12 +551,20 @@ func (p *PlaudManager) poll(ctx context.Context) error {
 
 // notifyAuthExpired tells the private chat Plaud uses once a day that Plaud
 // needs a new sign-in. Without one only the dashboard shows it.
+//
+// The notice time is kept in the state. Before the first sync there is none,
+// and the notice must not write one: a state is what tells the next check
+// that the existing recordings were already seen, so an empty one would make
+// it forward all of them. Until then the time is kept in memory.
 func (p *PlaudManager) notifyAuthExpired() {
 	st, _ := p.loadState()
-	if st == nil {
-		st = &plaudState{Pending: map[string]float64{}}
+	p.mu.Lock()
+	last := p.authNotified
+	p.mu.Unlock()
+	if st != nil {
+		last = time.Unix(int64(st.AuthNotified), 0)
 	}
-	if time.Since(time.Unix(int64(st.AuthNotified), 0)) < 24*time.Hour {
+	if time.Since(last) < 24*time.Hour {
 		return
 	}
 	_, jid, err := p.destination()
@@ -563,7 +575,14 @@ func (p *PlaudManager) notifyAuthExpired() {
 		log.Printf("plaud: could not send the expiry notice: %v", err)
 		return
 	}
-	st.AuthNotified = float64(time.Now().Unix())
+	now := time.Now()
+	if st == nil {
+		p.mu.Lock()
+		p.authNotified = now
+		p.mu.Unlock()
+		return
+	}
+	st.AuthNotified = float64(now.Unix())
 	_ = p.saveState(st)
 }
 

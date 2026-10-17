@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -374,25 +375,113 @@ func TestPlaudFirstSyncThenForwardsNewRecordings(t *testing.T) {
 	}
 }
 
+// plaudSignIn leaves a login in place, as a finished sign-in does.
+func plaudSignIn(t *testing.T, tb *testBridge) {
+	t.Helper()
+	if err := os.MkdirAll(filepath.Dir(tb.plaud.tokenPath()), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(tb.plaud.tokenPath(), []byte("{}"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func (tb *testBridge) plaudStateExists() bool {
+	_, err := os.Stat(filepath.Join(tb.plaud.dir(), "state.json"))
+	return err == nil
+}
+
+// The expiry notice goes out once a day. Before the first sync its time is
+// kept in memory: writing a state for it would count as the first sync.
+// After it, the time is saved in the state and survives a restart.
 func TestPlaudExpiredLoginNotifiesOncePerDay(t *testing.T) {
-	tb, fp := plaudBridge(t, "")
-	_ = os.MkdirAll(filepath.Join(tb.cfgs.Get().DataDir, "plaud", "home", ".plaud"), 0o700)
-	_ = os.WriteFile(tb.plaud.tokenPath(), []byte("{}"), 0o600)
-	fp.write("expired", "")
-	for i := 0; i < 2; i++ {
-		if err := tb.plaud.Poll(context.Background()); err != errPlaudAuth {
-			t.Fatalf("poll %d: err = %v", i, err)
-		}
+	for _, seeded := range []bool{false, true} {
+		t.Run(fmt.Sprintf("seeded=%v", seeded), func(t *testing.T) {
+			tb, fp := plaudBridge(t, "")
+			plaudSignIn(t, tb)
+			if seeded {
+				if err := tb.plaud.saveState(&plaudState{Seen: []string{plaudOld1}, Pending: map[string]float64{}}); err != nil {
+					t.Fatal(err)
+				}
+			}
+			fp.write("expired", "")
+			for i := 0; i < 2; i++ {
+				if err := tb.plaud.Poll(context.Background()); err != errPlaudAuth {
+					t.Fatalf("poll %d: err = %v", i, err)
+				}
+			}
+			out := tb.dev.Outbox()
+			if len(out) != 1 || !strings.Contains(out[0].Text, "Plaud: the login expired") {
+				t.Errorf("notices = %+v, want exactly one", out)
+			}
+			if !seeded {
+				if tb.plaudStateExists() {
+					t.Error("the notice wrote a state before the first sync")
+				}
+				return
+			}
+			if st, _ := tb.plaud.loadState(); st.AuthNotified == 0 {
+				t.Error("the notice time was not saved in the state")
+			}
+			if err := NewPlaudManager(tb.Bridge).Poll(context.Background()); err != errPlaudAuth {
+				t.Fatalf("poll after restart: err = %v", err)
+			}
+			if out := tb.dev.Outbox(); len(out) != 1 {
+				t.Errorf("notices after a restart = %+v, want still one", out)
+			}
+		})
 	}
-	out := tb.dev.Outbox()
-	if len(out) != 1 || !strings.Contains(out[0].Text, "Plaud: the login expired") {
-		t.Errorf("notices = %+v, want exactly one", out)
-	}
-	var st map[string]any
-	data, _ := os.ReadFile(filepath.Join(tb.cfgs.Get().DataDir, "plaud", "state.json"))
-	_ = json.Unmarshal(data, &st)
-	if st["auth_notified"] == float64(0) {
-		t.Error("the notice time was not remembered")
+}
+
+// However the first sync fails, it leaves no state behind, so the next check
+// syncs again and still forwards none of the recordings that already exist.
+func TestPlaudFailedFirstSyncForwardsNothingOld(t *testing.T) {
+	for _, c := range []struct {
+		name, fixture string
+		auth          bool
+	}{
+		{"login expired", "expired", true},
+		{"Plaud unreachable", "offline", false},
+		{"listing fails", "fail_files", false},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			tb, fp := plaudBridge(t, "")
+			plaudSignIn(t, tb)
+			fp.files(plaudOld1, plaudOld2)
+			fp.recording(plaudOld1, true)
+			fp.recording(plaudOld2, true)
+			fp.write(c.fixture, "")
+			err := tb.plaud.Poll(context.Background())
+			if err == nil || errors.Is(err, errPlaudAuth) != c.auth {
+				t.Fatalf("first poll: err = %v, want a failure (auth=%v)", err, c.auth)
+			}
+			if tb.plaudStateExists() {
+				t.Fatal("a failed first sync left a state behind")
+			}
+
+			_ = os.Remove(filepath.Join(fp.dir, c.fixture))
+			if err := tb.plaud.Poll(context.Background()); err != nil {
+				t.Fatal(err)
+			}
+			if st, _ := tb.plaud.loadState(); st == nil || len(st.Seen) != 2 || len(st.Pending) != 0 {
+				t.Fatalf("state after the sync = %+v, want both recordings seen", st)
+			}
+			if err := tb.plaud.Poll(context.Background()); err != nil {
+				t.Fatal(err)
+			}
+			if files, _ := filepath.Glob(filepath.Join(tb.cfgs.Get().MediaDir, "plaud", "*")); len(files) != 0 {
+				t.Errorf("old recordings were written out: %v", files)
+			}
+			if strings.Contains(fp.calls(), " file ") {
+				t.Errorf("old recordings were fetched:\n%s", fp.calls())
+			}
+			time.Sleep(100 * time.Millisecond)
+			for _, m := range tb.dev.Outbox() {
+				if strings.Contains(m.Text, "plaud says") {
+					t.Errorf("an old recording reached the brain: %+v", m)
+				}
+			}
+		})
 	}
 }
 
