@@ -215,6 +215,7 @@ type brainSettings struct {
 	maxPending      int
 	credsDir        string // where per-brain credential files live
 	envPassthrough  []string
+	toolsDir        string // the bridge's Python helpers, or ""
 }
 
 // BrainHooks connect brains to the rest of the bridge.
@@ -976,6 +977,11 @@ func (br *Brain) invoke(run *brainRun, ctx context.Context, s *brainSettings, m 
 	binary := s.claudePath
 	finalArgs := args
 	extraEnv := calendarEnv(br.id, s.manifest, s.credsDir)
+	if s.toolsDir != "" {
+		// Prompts and skills run the helpers as $FRIDOLIN_TOOLS_DIR/<tool>,
+		// wherever the bridge is installed.
+		extraEnv = append(extraEnv, "FRIDOLIN_TOOLS_DIR="+s.toolsDir)
+	}
 	if br.sandbox != nil && br.sandbox.Enabled() {
 		sbBinary, sbArgs, sbErr := br.sandbox.Command(br.id, s.claudePath, args)
 		if sbErr != nil {
@@ -1164,7 +1170,7 @@ func (br *Brain) buildPrompt(s *brainSettings, m Inbound) string {
 		sb.WriteString("The following is the last " + count + " in this WhatsApp chat (for context, not action). ")
 		sb.WriteString("You do NOT have prior turns in your working memory — the only context you have about previous conversation is what's in this block. ")
 		sb.WriteString("Names come from your identity map at `memories/people/whatsapp-identity-map.md`; the JID in parens is the raw WhatsApp identifier. ")
-		sb.WriteString("For anything older or more detailed, search `conversation-history.jsonl` with tools/history_search.py.\n\n")
+		sb.WriteString("For anything older or more detailed, search `conversation-history.jsonl` with `$FRIDOLIN_TOOLS_DIR/history_search.py`.\n\n")
 		sb.WriteString(preface)
 		sb.WriteString("</chat_history>\n\n")
 	}
@@ -1550,6 +1556,7 @@ func settingsFor(cfg *Config, sp BrainSpec) *brainSettings {
 		maxPending:      cfg.Queue.MaxPending,
 		credsDir:        credentialsDirOf(cfg),
 		envPassthrough:  append([]string(nil), cfg.ChildEnvPassthrough...),
+		toolsDir:        ownLayout().Tools,
 	}
 }
 

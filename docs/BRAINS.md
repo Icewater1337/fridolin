@@ -165,6 +165,18 @@ agents, commands and rules in `.claude/`, and the MCP servers in
 `.mcp.json`, except those its `.claude` settings turn off with
 `disabledMcpjsonServers`.
 
+Every run gets the bridge's environment plus a few variables of its own:
+`FRIDOLIN_TOOLS_DIR`, the folder with the bridge's Python helpers
+(`history_search.py`, `poll_results.py`, `transcribe.py`,
+`calendar_tool.py`), and the `BRIDGE_*` variables the calendar tool reads.
+The starter prompt and the example skills run the helpers as
+`python3 "$FRIDOLIN_TOOLS_DIR/<tool>.py"`, so they keep working wherever the
+bridge is installed. The bridge finds the helpers in `tools/` next to its
+binary, or in the checkout above `bin/` for a development build; without
+them the variable is not set. Prompts written by older versions name the
+checkout's `tools/` folder by its full path, which keeps working while the
+checkout is there.
+
 It does not load your own setup: not your user settings in
 `~/.claude/settings.json` (their hooks, plugins and permissions, so neither
 the `deny` rules nor the guard hooks there), nor the skills, agents and
@@ -216,7 +228,8 @@ Claude Code's own state, which a brain's run needs). It can read but not
 change the other files that run outside its sandbox: Claude Code's
 settings, hooks, skills and plugins (which your own sessions load), Claude
 Code's auto-memory, `~/Library/LaunchAgents`, your shell startup files, and
-the bridge's own binary and the tools it runs. It can still write most other
+the bridge's own binary, its helpers and source checkout, and the tools it
+runs. It can still write most other
 places your user can, including the Claude Code state all brains share;
 [the sandbox section](CONFIGURATION.md#what-the-sandbox-does-not-cover-yet)
 lists what that leaves open. Its own folder is always readable and
