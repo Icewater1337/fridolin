@@ -23,7 +23,7 @@ Usage:
   fridolin open              open the dashboard in your browser
   fridolin check [--route JID ...]
                                            validate the configuration and show routing
-  fridolin init [--claude-path PATH]
+  fridolin init [--claude-path PATH] [--data-dir DIR]
                                            write a starter config (if there is none)
   fridolin service install|rollback|restart|status|uninstall
                                            run the bridge in the background (launchd or
@@ -110,15 +110,19 @@ func starterConfig() *Config {
 }
 
 func ensureConfigFile(path string) error {
-	return writeStarterConfig(path, "")
+	return writeStarterConfig(path, "", "")
 }
 
-func writeStarterConfig(path, claudePath string) error {
+// writeStarterConfig writes the starter config to path unless there is a
+// file there. dataDir is written into it when set: a data folder given only
+// in the environment of setup.sh would not reach the service.
+func writeStarterConfig(path, claudePath, dataDir string) error {
 	if _, err := os.Stat(path); err == nil || !os.IsNotExist(err) {
 		return err
 	}
 	cfg := starterConfig()
 	cfg.ClaudePath = claudePath
+	cfg.DataDir = dataDir
 	data, err := json.MarshalIndent(cfg, "", "  ")
 	if err != nil {
 		return err
@@ -204,13 +208,14 @@ func initCmd(args []string) {
 	fs := flag.NewFlagSet("init", flag.ExitOnError)
 	cfgPath := fs.String("config", "", configFlagHelp)
 	claudePath := fs.String("claude-path", "", "path to the Claude Code CLI")
+	dataDir := fs.String("data-dir", "", "data folder to write into the config (default ~/.fridolin)")
 	_ = fs.Parse(args)
 	path := configPath(*cfgPath)
 	if _, err := os.Stat(path); err == nil {
 		fmt.Printf("%s already exists — leaving it alone.\n", path)
 		return
 	}
-	if err := writeStarterConfig(path, *claudePath); err != nil {
+	if err := writeStarterConfig(path, *claudePath, *dataDir); err != nil {
 		log.Fatalf("writing %s: %v", path, err)
 	}
 	if _, err := LoadConfig(path); err != nil {

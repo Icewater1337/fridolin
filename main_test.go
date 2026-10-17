@@ -359,3 +359,31 @@ func TestShellBridgeVariablesDoNotReachTests(t *testing.T) {
 		t.Fatalf("the check did not run:\n%s", out)
 	}
 }
+
+func TestInitWritesTheDataDirItIsGiven(t *testing.T) {
+	// setup.sh takes DATA_DIR from its environment, which the service
+	// never sees: the folder must be in the config.
+	cases := []struct{ name, flag, want string }{
+		{"default", "", "/.fridolin"},
+		{"given", "/elsewhere/data", "/elsewhere/data"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			home := canonicalDir(t.TempDir())
+			t.Setenv("HOME", home)
+			path := filepath.Join(home, "cfg", "config.json")
+			args := []string{"--config", path}
+			if c.flag != "" {
+				args = append(args, "--data-dir", home+c.flag)
+			}
+			captureStdout(t, func() { initCmd(args) })
+			cfg, err := LoadConfig(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if cfg.DataDir != home+c.want {
+				t.Errorf("data_dir = %q, want %q", cfg.DataDir, home+c.want)
+			}
+		})
+	}
+}
