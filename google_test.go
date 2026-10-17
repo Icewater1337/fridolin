@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"syscall"
 	"testing"
 	"time"
@@ -47,9 +48,9 @@ func fakeGoogle(t *testing.T) (*httptest.Server, *map[string]string) {
 		}
 	}))
 	t.Cleanup(srv.Close)
-	googleAPIBase, googleRevokeEndpoint = srv.URL, srv.URL+"/revoke"
+	googleAPIBase, googleTokenEndpoint, googleRevokeEndpoint = srv.URL, srv.URL+"/token", srv.URL+"/revoke"
 	t.Cleanup(func() {
-		googleAPIBase, googleRevokeEndpoint = "https://www.googleapis.com", "https://oauth2.googleapis.com/revoke"
+		googleAPIBase, googleTokenEndpoint, googleRevokeEndpoint = "https://www.googleapis.com", "https://oauth2.googleapis.com/token", "https://oauth2.googleapis.com/revoke"
 	})
 	return srv, &got
 }
@@ -339,4 +340,104 @@ func mustSymlink(t *testing.T, target, link string) {
 	if err := os.Symlink(target, link); err != nil {
 		t.Fatal(err)
 	}
+}
+
+// TestCalendarTokenRequestsGoToGoogleWithYourClient: the brain can write
+// its token file, so the bridge takes neither the token_uri nor the client
+// in it. It refreshes at Google's token endpoint with the client you
+// configured, and a token from another client cannot be refreshed. The
+// token_uri of a pasted client file is not used either.
+func TestCalendarTokenRequestsGoToGoogleWithYourClient(t *testing.T) {
+	var elsewhere atomic.Int32
+	other := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		elsewhere.Add(1)
+		fmt.Fprint(w, `{"access_token":"ACCESS-1","expires_in":3600}`)
+	}))
+	t.Cleanup(other.Close)
+
+	cases := []struct {
+		name     string
+		clientID string // in the token file
+		noClient bool   // remove your client first
+		want     string // list_error; "" for the calendars
+	}{
+		{"your client", "123-abc.apps.googleusercontent.com", false, ""},
+		{"another client", "999-other.apps.googleusercontent.com", false, "connect it again"},
+		{"no client configured", "123-abc.apps.googleusercontent.com", true, "add your Google OAuth client first"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			_, got := fakeGoogle(t)
+			tb := newTestBridge(t, "")
+			// The pasted client names another token endpoint too.
+			if w := tb.do("PUT", "/api/google/client", map[string]string{"json": fmt.Sprintf(testClientJSON, other.URL)}); w.Code != 200 {
+				t.Fatal(w.Body.String())
+			}
+			if w := tb.do("POST", "/api/brains", map[string]any{"path": "~/a", "create_dir": true, "manifest": BrainManifest{ID: "a", Name: "A"}}); w.Code != 200 {
+				t.Fatal(w.Body.String())
+			}
+			tok, _ := json.Marshal(googleToken{
+				Token: "OLD", RefreshToken: "A-REFRESH", TokenURI: other.URL + "/token",
+				ClientID: tc.clientID, ClientSecret: "SECRET-THE-BRAIN-WROTE",
+				Expiry: "2020-01-01T00:00:00.000000Z",
+			})
+			if err := os.WriteFile(tb.google.tokenPath("a"), tok, 0o600); err != nil {
+				t.Fatal(err)
+			}
+			if tc.noClient {
+				if w := tb.do("DELETE", "/api/google/client", nil); w.Code != 200 {
+					t.Fatal(w.Body.String())
+				}
+			}
+
+			var st struct {
+				Calendars []CalendarEntry `json:"calendars"`
+				ListError string          `json:"list_error"`
+			}
+			_ = json.Unmarshal(tb.do("GET", "/api/brains/a/calendar", nil).Body.Bytes(), &st)
+			if n := elsewhere.Load(); n != 0 {
+				t.Fatalf("%d request(s) went to the token_uri in a file", n)
+			}
+			if tc.want != "" {
+				if !strings.Contains(st.ListError, tc.want) || (*got)["refresh_token"] != "" {
+					t.Errorf("status = %+v, token request %v; want no refresh and %q", st, *got, tc.want)
+				}
+				return
+			}
+			if st.ListError != "" || len(st.Calendars) != 2 {
+				t.Errorf("status = %+v, want the calendars", st)
+			}
+			if (*got)["refresh_token"] != "A-REFRESH" || (*got)["client_id"] != "123-abc.apps.googleusercontent.com" || (*got)["client_secret"] != "TEST-CLIENT-SECRET" {
+				t.Errorf("refresh request = %v, want your client's", *got)
+			}
+		})
+	}
+
+	t.Run("sign-in", func(t *testing.T) {
+		srv, got := fakeGoogle(t)
+		tb := newTestBridge(t, "")
+		if w := tb.do("PUT", "/api/google/client", map[string]string{"json": fmt.Sprintf(testClientJSON, other.URL)}); w.Code != 200 {
+			t.Fatal(w.Body.String())
+		}
+		if w := tb.do("POST", "/api/brains", map[string]any{"path": "~/a", "create_dir": true, "manifest": BrainManifest{ID: "a", Name: "A"}}); w.Code != 200 {
+			t.Fatal(w.Body.String())
+		}
+		var start struct {
+			AuthURL string `json:"auth_url"`
+		}
+		_ = json.Unmarshal(tb.do("POST", "/api/brains/a/calendar/connect", nil).Body.Bytes(), &start)
+		u, _ := url.Parse(start.AuthURL)
+		r := httptest.NewRequest("GET", "http://127.0.0.1:8765/?state="+url.QueryEscape(u.Query().Get("state"))+"&code=good-code", nil)
+		r.Host = "127.0.0.1:8765"
+		tb.h.ServeHTTP(httptest.NewRecorder(), r)
+		if n := elsewhere.Load(); n != 0 || (*got)["code"] != "good-code" {
+			t.Fatalf("code exchange went elsewhere (%d) or nowhere: %v", n, *got)
+		}
+		var tok googleToken
+		data, _ := os.ReadFile(tb.google.tokenPath("a"))
+		_ = json.Unmarshal(data, &tok)
+		if tok.TokenURI != srv.URL+"/token" {
+			t.Errorf("token file token_uri = %q, want Google's endpoint", tok.TokenURI)
+		}
+	})
 }

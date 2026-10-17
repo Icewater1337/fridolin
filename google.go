@@ -41,9 +41,12 @@ import (
 
 const calendarScope = "https://www.googleapis.com/auth/calendar"
 
-// Endpoints, variables so tests can point them at a fake server.
+// Endpoints, variables so tests can point them at a fake server. Token
+// requests always go to googleTokenEndpoint, never to a token_uri from a
+// file: a brain can write its own token file.
 var (
 	googleAuthEndpoint   = "https://accounts.google.com/o/oauth2/v2/auth"
+	googleTokenEndpoint  = "https://oauth2.googleapis.com/token"
 	googleRevokeEndpoint = "https://oauth2.googleapis.com/revoke"
 	googleAPIBase        = "https://www.googleapis.com"
 	googleHTTP           = &http.Client{Timeout: 20 * time.Second}
@@ -54,16 +57,15 @@ type GoogleClient struct {
 	Type         string // installed or web
 	ClientID     string
 	ClientSecret string
-	TokenURI     string
 	raw          []byte
 }
 
 // ParseGoogleClient reads the JSON Google Cloud Console offers for download.
+// Its token_uri is not used; see googleTokenEndpoint.
 func ParseGoogleClient(data []byte) (*GoogleClient, error) {
 	var f map[string]struct {
 		ClientID     string `json:"client_id"`
 		ClientSecret string `json:"client_secret"`
-		TokenURI     string `json:"token_uri"`
 	}
 	if err := json.Unmarshal(data, &f); err != nil {
 		return nil, fmt.Errorf("not a Google OAuth client file: %w", err)
@@ -76,10 +78,7 @@ func ParseGoogleClient(data []byte) (*GoogleClient, error) {
 		if c.ClientID == "" || c.ClientSecret == "" {
 			return nil, errors.New("the client file has no client_id or client_secret")
 		}
-		if c.TokenURI == "" {
-			c.TokenURI = "https://oauth2.googleapis.com/token"
-		}
-		return &GoogleClient{Type: typ, ClientID: c.ClientID, ClientSecret: c.ClientSecret, TokenURI: c.TokenURI, raw: data}, nil
+		return &GoogleClient{Type: typ, ClientID: c.ClientID, ClientSecret: c.ClientSecret, raw: data}, nil
 	}
 	return nil, errors.New(`expected a Google OAuth client file with an "installed" (Desktop app) or "web" section`)
 }
@@ -288,7 +287,7 @@ type tokenResponse struct {
 func (g *GoogleAuth) postToken(ctx context.Context, c *GoogleClient, form url.Values) (*tokenResponse, error) {
 	form.Set("client_id", c.ClientID)
 	form.Set("client_secret", c.ClientSecret)
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.TokenURI, strings.NewReader(form.Encode()))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, googleTokenEndpoint, strings.NewReader(form.Encode()))
 	if err != nil {
 		return nil, err
 	}
@@ -329,7 +328,7 @@ func (g *GoogleAuth) exchange(ctx context.Context, code, verifier string) (*goog
 		return nil, err
 	}
 	return &googleToken{
-		Token: tr.AccessToken, RefreshToken: tr.RefreshToken, TokenURI: c.TokenURI,
+		Token: tr.AccessToken, RefreshToken: tr.RefreshToken, TokenURI: googleTokenEndpoint,
 		ClientID: c.ClientID, ClientSecret: c.ClientSecret, Scopes: []string{calendarScope},
 		Expiry: time.Now().Add(time.Duration(tr.ExpiresIn) * time.Second).UTC().Format("2006-01-02T15:04:05.000000Z"),
 	}, nil
@@ -415,9 +414,16 @@ func (g *GoogleAuth) accessToken(ctx context.Context, brainID string) (*googleTo
 	if t.RefreshToken == "" {
 		return nil, errors.New("the token has no refresh token — connect again")
 	}
-	c := &GoogleClient{ClientID: t.ClientID, ClientSecret: t.ClientSecret, TokenURI: t.TokenURI}
-	if c.TokenURI == "" {
-		c.TokenURI = "https://oauth2.googleapis.com/token"
+	// The brain can write its token file, so the client in it is not
+	// trusted: the refresh uses yours, at Google's fixed endpoint. A
+	// refresh token works only with the client that issued it, so a token
+	// from another client cannot be refreshed here.
+	c := g.Client()
+	if c == nil {
+		return nil, errors.New("add your Google OAuth client first (Settings → Google sign-in)")
+	}
+	if t.ClientID != c.ClientID {
+		return nil, errors.New("this brain signed in with another Google OAuth client than the one in Settings → Google sign-in — connect it again")
 	}
 	tr, err := g.postToken(ctx, c, url.Values{"grant_type": {"refresh_token"}, "refresh_token": {t.RefreshToken}})
 	if err != nil {

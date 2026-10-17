@@ -56,8 +56,10 @@ the calendars on the brain's page and to revoke it on disconnect, and
 takes only a regular file there: a brain that put a symlink or a hard link
 to another brain's token in its place would otherwise have the bridge
 refresh that token into its own file, or revoke it. The brain's page then
-shows why its calendars cannot be listed; connect it again. The chosen
-calendars are stored in the brain's `brain.json`:
+shows why its calendars cannot be listed; connect it again. Nor does the
+bridge take the `token_uri` or the client in that file: it refreshes at
+Google's token endpoint with the client under Settings → Google sign-in.
+The chosen calendars are stored in the brain's `brain.json`:
 
 ```json
 "calendar": {
@@ -103,3 +105,7 @@ at [myaccount.google.com/permissions](https://myaccount.google.com/permissions).
   connect again.
 - **"did not return a refresh token"** — remove the app at
   myaccount.google.com/permissions and connect again.
+- **"signed in with another Google OAuth client"** on a brain's page — the
+  client under Settings → Google sign-in was replaced after the brain
+  connected, and its token works only with the old one. Connect the brain
+  again.
