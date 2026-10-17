@@ -76,7 +76,12 @@ func parseIdentityMap(data []byte) map[string]string {
 		if jid == "" || name == "" || jid == "WhatsApp Number" {
 			continue
 		}
-		identities[normalizeJID(jid)] = name
+		// A cell like "+" or "@lid" holds no number to look up.
+		number := normalizeJID(jid)
+		if number == "" {
+			continue
+		}
+		identities[number] = name
 	}
 
 	return identities

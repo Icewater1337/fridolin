@@ -1192,6 +1192,9 @@ func TestParseIdentityMap(t *testing.T) {
 	if _, ok := ids["WhatsApp Number"]; ok {
 		t.Error("header row was parsed as an entry")
 	}
+	if name, ok := parseIdentityMap([]byte("| + | Nobody |\n"))[""]; ok {
+		t.Errorf("a row without a number was read as %q", name)
+	}
 	if len(parseIdentityMap(nil)) != 0 {
 		t.Error("a missing map should yield an empty map, not an error")
 	}
