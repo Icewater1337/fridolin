@@ -73,11 +73,13 @@ message; an object can restrict it:
 | `word` | it appears as a whole word — `hey bot` yes, `robotics` no |
 
 An @-mention of the bridge's own account always counts, whatever this list
-says. So does sending a file, and so does forwarding a message.
+says, and is stripped the same way: `@Fridolin !stop` is the command `!stop`.
+So does sending a file, and so does forwarding a message.
 
 Untagged group messages still run through the brain — so it keeps up with the
 conversation — but produce no reply. Very short messages ("ok", "👍") are
-skipped entirely.
+skipped entirely. An untagged message is never a command: in a group, `!stop`
+needs the trigger (`@claude !stop`).
 
 DMs never need a trigger.
 
@@ -541,12 +543,21 @@ Off by default.
 ```
 
 `mode: "queue"` (default) runs a brain's messages one after another and, with
-`notify`, tells the sender "⏳ Queued (#2)". `mode: "interrupt"` stops the
-current run when a new message arrives. Untagged group chatter waiting in the
-queue is dropped when a newer message from that chat arrives — it is already in
-the history the next run reads. `!stop` stops the current run and clears the
-queue, and also stops files handed to another brain that answers in that chat
-(its `reply_chat`).
+`notify`, tells the sender "⏳ Queued (#2)". `mode: "interrupt"` lets a newer
+request replace the sender's own: it stops their run in flight in that chat (or
+a run on the chat's untagged chatter) and drops their earlier waiting request.
+The newer request then waits behind what is already queued, so someone who
+keeps correcting themselves cannot push other chats back. Requests from other
+chats, and other people's in a group, still wait their turn (with the same
+notice). Untagged group chatter never interrupts a run, and files sent through
+`/ingest` neither interrupt nor replace one another: each is a job of its own.
+`max_pending` applies in both modes.
+
+Untagged group chatter waiting in the queue is dropped when a newer message
+from that chat arrives — it is already in the history the next run reads.
+`!stop` stops the run for the chat it was sent in and drops that chat's
+waiting messages; other chats keep theirs. It also stops files handed to
+another brain that answers in that chat (its `reply_chat`).
 
 ### `debounce`
 
@@ -605,7 +616,8 @@ Drops a message that is only a 4–8 digit number when one of the assistant's
 last 50 outbound messages contains one of `otp_markers` — by default `🔐`,
 `OTP`, `2FA`, `one-time code`, `verification code`. Add your own (a bank's
 name in its code prompt, say); setting the list replaces the defaults, so
-include them if you still want them.
+include them if you still want them. Only what was typed counts: a code sent
+as a reply to the request is caught too.
 
 The code is never written to history or sent to the model — the assistant
 never sees it. It is handed to whatever local script asked for it instead:

@@ -147,7 +147,7 @@ func tailLines(f *os.File, maxBytes int64) []string {
 // A brain does not keep a Claude process alive between messages. Each message
 // spawns a fresh `claude -p` run seeded with the recent chat history. Messages
 // for a brain run one at a time from its queue (or, in interrupt mode, a newer
-// message stops the run in flight).
+// request from the same person in the same chat stops the run in flight).
 type Brain struct {
 	// Fixed for the brain's lifetime. Changing a brain's folder replaces the
 	// Brain; everything else is in settings and changes live.
@@ -276,7 +276,8 @@ func (br *Brain) historyTail(maxBytes int64) []string {
 }
 
 // Submit queues a message for the brain. It returns the message's position in
-// the queue (1 = next) and whether the brain was busy when it arrived.
+// the queue (1 = next) and whether it has to wait for other work; a run it
+// interrupts does not count.
 func (br *Brain) Submit(m Inbound) (pos int, busy bool, err error) {
 	if m.At.IsZero() {
 		m.At = time.Now()
@@ -285,7 +286,7 @@ func (br *Brain) Submit(m Inbound) (pos int, busy bool, err error) {
 
 	// History first, so the run (and any later run) sees the message even when
 	// it is merged into a queue that is already moving.
-	br.appendHistory(m.JID, m.Sender, historyTextWithMedia(m.Text, m.Media), "in")
+	br.appendHistory(m.JID, m.Sender, historyTextWithMedia(m.textWithQuote(), m.Media), "in")
 
 	br.mu.Lock()
 	if br.retired {
@@ -294,34 +295,42 @@ func (br *Brain) Submit(m Inbound) (pos int, busy bool, err error) {
 	}
 	busy = br.current != nil || len(br.pending) > 0
 
+	// A newer message from the same chat supersedes queued untagged chatter:
+	// it is already in the history the next run reads. In interrupt mode, a
+	// tagged message also replaces its sender's own earlier request in that
+	// chat, waiting or running. Nothing else is touched: other chats, and
+	// other people's requests in a group, keep their place, and untagged
+	// chatter never interrupts a run. Neither do ingested files, nor are they
+	// replaced: each is a job of its own, not a correction of the last one.
+	interrupting := s.queueMode == "interrupt" && !m.Silent && m.Source != "ingest"
+	replaces := func(p Inbound) bool {
+		return p.JID == m.JID && (p.Silent || (interrupting && p.Sender == m.Sender && p.Source != "ingest"))
+	}
+	kept := br.pending[:0]
+	for _, p := range br.pending {
+		if !replaces(p) {
+			kept = append(kept, p)
+		}
+	}
+	br.pending = kept
+	if len(br.pending) >= s.maxPending {
+		dropped := false
+		for i, p := range br.pending {
+			if p.Silent {
+				br.pending = append(br.pending[:i], br.pending[i+1:]...)
+				dropped = true
+				break
+			}
+		}
+		if !dropped {
+			br.mu.Unlock()
+			return 0, busy, errQueueFull
+		}
+	}
 	var interrupt *brainRun
-	if s.queueMode == "interrupt" {
-		br.pending = br.pending[:0]
+	if interrupting && br.current != nil && replaces(br.current.msg) {
 		interrupt = br.current
-	} else {
-		// A newer message from the same chat supersedes queued untagged
-		// chatter: it is already in the history the next run reads.
-		kept := br.pending[:0]
-		for _, p := range br.pending {
-			if !(p.Silent && p.JID == m.JID) {
-				kept = append(kept, p)
-			}
-		}
-		br.pending = kept
-		if len(br.pending) >= s.maxPending {
-			dropped := false
-			for i, p := range br.pending {
-				if p.Silent {
-					br.pending = append(br.pending[:i], br.pending[i+1:]...)
-					dropped = true
-					break
-				}
-			}
-			if !dropped {
-				br.mu.Unlock()
-				return 0, busy, errQueueFull
-			}
-		}
+		busy = len(br.pending) > 0
 	}
 	br.pending = append(br.pending, m)
 	pos = len(br.pending)
@@ -387,8 +396,9 @@ func (br *Brain) recordLast(m Inbound, res RunResult) {
 	br.mu.Unlock()
 }
 
-// StopCurrent kills the run in flight and, with clearQueue, drops everything
-// waiting. It reports whether a run was stopped.
+// StopCurrent kills the run in flight, whichever chat it serves, and, with
+// clearQueue, drops everything waiting. It is for the dashboard and shutdown;
+// a chat's own !stop uses StopChat. It reports whether a run was stopped.
 func (br *Brain) StopCurrent(clearQueue bool) bool {
 	br.mu.Lock()
 	if clearQueue {
@@ -399,18 +409,44 @@ func (br *Brain) StopCurrent(clearQueue bool) bool {
 	return br.stopRun(cur)
 }
 
+// StopChat stops what the brain does for one chat: the run in flight if it
+// is that chat's, and the chat's waiting messages. One brain serves several
+// chats, so nothing another chat asked for is touched. It reports whether a
+// run was stopped and how many waiting messages were dropped.
+func (br *Brain) StopChat(jid string) (stopped bool, dropped int) {
+	br.mu.Lock()
+	kept := br.pending[:0]
+	for _, p := range br.pending {
+		if p.JID == jid {
+			dropped++
+			continue
+		}
+		kept = append(kept, p)
+	}
+	br.pending = kept
+	cur := br.current
+	if cur != nil && cur.msg.JID != jid {
+		cur = nil
+	}
+	br.mu.Unlock()
+	return br.stopRun(cur), dropped
+}
+
 // StopHandOffs stops the messages handed to this brain (/ingest, Plaud) that
 // answer in jid: the run in flight if it is one, and those waiting. The rest
 // of the brain's work goes on: jid may well be another brain's chat. It
-// reports whether a run was stopped.
-func (br *Brain) StopHandOffs(jid string) bool {
+// reports whether a run was stopped and how many waiting messages were
+// dropped.
+func (br *Brain) StopHandOffs(jid string) (stopped bool, dropped int) {
 	handOff := func(m Inbound) bool { return m.Brain != "" && m.JID == jid }
 	br.mu.Lock()
 	kept := br.pending[:0]
 	for _, p := range br.pending {
-		if !handOff(p) {
-			kept = append(kept, p)
+		if handOff(p) {
+			dropped++
+			continue
 		}
+		kept = append(kept, p)
 	}
 	br.pending = kept
 	cur := br.current
@@ -418,7 +454,7 @@ func (br *Brain) StopHandOffs(jid string) bool {
 		cur = nil
 	}
 	br.mu.Unlock()
-	return br.stopRun(cur)
+	return br.stopRun(cur), dropped
 }
 
 // stopRun kills run, if there is one, and waits for it to end.
@@ -435,13 +471,12 @@ func (br *Brain) stopRun(run *brainRun) bool {
 	return true
 }
 
-// ResetSession stops the brain and clears its stored session.
-func (br *Brain) ResetSession() error {
-	br.StopCurrent(true)
-	return errors.Join(
-		br.store.DeleteSession(br.storeKey),
-		br.store.DeleteProcessPID(br.storeKey),
-	)
+// ResetSession stops what the brain does for the chat and clears its stored
+// session. The stored process id is left to the run it belongs to, which may
+// be another chat's; a stopped run clears it as it finishes.
+func (br *Brain) ResetSession(jid string) error {
+	br.StopChat(jid)
+	return br.store.DeleteSession(br.storeKey)
 }
 
 // retire stops the brain for good after it was removed from the configuration.
@@ -525,11 +560,11 @@ func (br *Brain) Snapshot() BrainRuntime {
 	br.mu.Lock()
 	defer br.mu.Unlock()
 	if cur := br.current; cur != nil {
-		rt.Running = &RunView{Chat: cur.msg.JID, Sender: cur.msg.Sender, Preview: truncate(cur.msg.Text, 160),
+		rt.Running = &RunView{Chat: cur.msg.JID, Sender: cur.msg.Sender, Preview: truncate(cur.msg.textWithQuote(), 160),
 			Silent: cur.msg.Silent, Started: cur.started, PID: cur.pid}
 	}
 	for _, p := range br.pending {
-		rt.Queue = append(rt.Queue, QueuedView{Chat: p.JID, Sender: p.Sender, Preview: truncate(p.Text, 160), Silent: p.Silent, Queued: p.At})
+		rt.Queue = append(rt.Queue, QueuedView{Chat: p.JID, Sender: p.Sender, Preview: truncate(p.textWithQuote(), 160), Silent: p.Silent, Queued: p.At})
 	}
 	if br.last != nil {
 		l := *br.last
@@ -1131,7 +1166,7 @@ func (br *Brain) buildPrompt(s *brainSettings, m Inbound) string {
 	}
 
 	sb.WriteString("<new_message>\n")
-	sb.WriteString(fmt.Sprintf("%s says: %s\n", m.Sender, m.Text))
+	sb.WriteString(fmt.Sprintf("%s says: %s\n", m.Sender, m.textWithQuote()))
 	sb.WriteString("</new_message>")
 	return sb.String()
 }
@@ -1583,27 +1618,26 @@ func (bm *BrainManager) Submit(m Inbound) (br *Brain, pos int, busy bool, err er
 	return br, pos, busy, err
 }
 
-// ResetSession clears the stored session for the brain that owns the chat.
+// ResetSession resets the chat on the brain that owns it.
 func (bm *BrainManager) ResetSession(jid string, isGroup bool) error {
 	br := bm.BrainFor(jid, isGroup)
 	if br == nil {
 		return fmt.Errorf("no brain configured for %s", jid)
 	}
-	return br.ResetSession()
+	return br.ResetSession(jid)
 }
 
 // StopHandOffs stops, in every brain, the hand-offs that answer in jid (see
 // Brain.StopHandOffs). A brain picked for files or recordings answers in its
 // reply chat, often a chat another brain owns, so !stop there must reach it.
-// It reports whether a run was stopped.
-func (bm *BrainManager) StopHandOffs(jid string) bool {
-	stopped := false
+// It reports whether a run was stopped and how many waiting messages were
+// dropped.
+func (bm *BrainManager) StopHandOffs(jid string) (stopped bool, dropped int) {
 	for _, br := range bm.Brains() {
-		if br.StopHandOffs(jid) {
-			stopped = true
-		}
+		s, d := br.StopHandOffs(jid)
+		stopped, dropped = stopped || s, dropped+d
 	}
-	return stopped
+	return stopped, dropped
 }
 
 // Stop interrupts every run and drops every queue.

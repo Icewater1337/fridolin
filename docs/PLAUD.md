@@ -49,8 +49,8 @@ to the brain's `reply_chat` when that is a direct chat, otherwise to your own
 DM (your first allowed number) — also for a brain that serves a group. When
 that chat belongs to another brain (your DM, for a brain that is not the DM
 brain), what you write back there goes to that other brain, although `!stop`
-there still stops the picked brain's work on a recording. Without any
-private chat (no allowed number and no direct `reply_chat`) recordings are not
+or `!reset` there still stops the picked brain's work on a recording. Without
+any private chat (no allowed number and no direct `reply_chat`) recordings are not
 handed over: they wait, and the dashboard says what to set. The same goes
 for a picked brain that was removed or is not approved: the card names it,
 and recordings wait until you pick another one. The Plaud card shows where

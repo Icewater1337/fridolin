@@ -46,7 +46,7 @@ const SECTIONS = [
     title: 'Messages',
     intro: 'Queueing, batching and splitting.',
     fields: [
-      { key: 'queue.mode', type: 'select', def: 'queue', label: 'When a brain is busy', options: [['queue', 'Queue — answer one after another'], ['interrupt', 'Interrupt — stop and answer the newest']] },
+      { key: 'queue.mode', type: 'select', def: 'queue', label: 'When a brain is busy', options: [['queue', 'Queue — answer one after another'], ['interrupt', 'Interrupt — a newer request replaces the sender’s own']], help: 'Interrupt stops a run only for a newer request from the same person in the same chat. Other chats and other people still wait their turn; untagged group chatter and ingested files never interrupt.' },
       { key: 'queue.max_pending', type: 'int', def: 10, min: 1, label: 'Waiting messages per brain', help: 'Messages beyond this are turned away.' },
       { key: 'queue.notify', type: 'bool', def: true, label: 'Tell people their message is queued', help: 'Sends “⏳ queued” when a tagged message has to wait.' },
       { key: 'debounce.quiet_ms', type: 'int', def: 2000, min: 0, nullable: true, label: 'Gather messages for (ms)', help: 'Messages from the same person within this pause are answered together — several photos plus a question. 0 turns it off.' },

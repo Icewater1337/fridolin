@@ -242,18 +242,21 @@ func (b *Bridge) recordIgnored(kind, jid, name, sender, pushName string) {
 }
 
 // handleInbound is the entry point for every allowed message. Access control
-// already happened: groups against allowed_groups plus the trigger, DMs
-// against allowed_numbers.
+// already happened: groups against allowed_groups, DMs against
+// allowed_numbers. Group messages without the trigger arrive Silent.
 func (b *Bridge) handleInbound(ctx context.Context, m Inbound) {
 	m.Text = strings.TrimSpace(m.Text)
 	cfg := b.cfgs.Get()
 
 	// Commands come from a chat. A message handed to a brain (/ingest, Plaud,
 	// a dev message that names one) carries none: its text is for that brain.
-	if m.Source != "ingest" && m.Brain == "" && b.handleCommand(ctx, m, cfg) {
+	// A command must also be addressed to the bridge. In a group, an untagged
+	// "!stop" is someone talking to the others: it must not stop anything,
+	// and the bridge must not answer it.
+	if m.Source != "ingest" && m.Brain == "" && !m.Silent && b.handleCommand(ctx, m, cfg) {
 		return
 	}
-	if m.Text == "" && len(m.Media) == 0 {
+	if m.Text == "" && len(m.Media) == 0 && m.Quoted == nil {
 		return
 	}
 
@@ -317,41 +320,39 @@ func (b *Bridge) recordOTP(br *Brain, m Inbound) {
 func (b *Bridge) handleCommand(ctx context.Context, m Inbound, cfg *Config) bool {
 	switch strings.ToLower(m.Text) {
 	case "!reset":
-		b.deb.Drop(m.JID)
+		// Whatever else it does, a reset stops what !stop stops for the
+		// chat, hand-offs from other brains included: its reply says the
+		// chat has nothing left running or waiting.
+		b.stopChat(m, cfg)
 		var resetErr error
 		if cfg.BrainMode {
 			resetErr = b.brainMgr.ResetSession(m.JID, m.IsGroup())
 		} else {
 			resetErr = b.store.DeleteSession(m.JID)
 		}
-		if resetErr != nil {
+		switch {
+		case resetErr != nil:
 			log.Printf("error resetting session for %s: %v", m.JID, resetErr)
 			_ = b.wa.SendMessage(ctx, m.JID, "❌ Failed to reset session.")
-		} else {
+		case cfg.BrainMode:
+			// A brain run never resumes a session: each starts from the
+			// recent chat history, which a reset keeps. Say only what
+			// happened.
+			_ = b.wa.SendMessage(ctx, m.JID, "✅ Cleared anything this chat had running or waiting. The recent chat history stays, so the next message still sees it.")
+		default:
 			_ = b.wa.SendMessage(ctx, m.JID, "✅ Session reset. The next message starts a fresh conversation.")
 		}
 		return true
 
 	case "!stop":
-		chats := chatJIDs(m)
-		for _, jid := range chats {
-			b.deb.Drop(jid)
-		}
-		stopped := false
-		if br := b.brainMgr.BrainFor(m.JID, m.IsGroup()); cfg.BrainMode && br != nil {
-			stopped = br.StopCurrent(true)
-		}
-		// A file or recording handed to another brain may answer here too,
-		// and the chat's own brain knows nothing about it.
-		for _, jid := range chats {
-			if cfg.BrainMode && b.brainMgr.StopHandOffs(jid) {
-				stopped = true
-			}
-		}
-		if stopped {
-			_ = b.wa.SendMessage(ctx, m.JID, "🛑 Stopped, and cleared anything that was waiting.")
-		} else {
-			_ = b.wa.SendMessage(ctx, m.JID, "Nothing was running.")
+		stopped, dropped := b.stopChat(m, cfg)
+		switch {
+		case stopped:
+			_ = b.wa.SendMessage(ctx, m.JID, "🛑 Stopped, and cleared anything this chat had waiting.")
+		case dropped > 0:
+			_ = b.wa.SendMessage(ctx, m.JID, "🛑 Nothing was running for this chat; cleared what it had waiting.")
+		default:
+			_ = b.wa.SendMessage(ctx, m.JID, "Nothing was running for this chat.")
 		}
 		return true
 
@@ -360,17 +361,51 @@ func (b *Bridge) handleCommand(ctx context.Context, m Inbound, cfg *Config) bool
 			"Send a message to talk to Claude. Images, documents, audio, and video are passed along as files.\n\n" +
 			"*Commands:*\n" +
 			"• `!help` — show this help\n" +
-			"• `!stop` — stop what I'm doing and drop anything queued\n" +
-			"• `!reset` — clear the current session and start fresh"
+			"• `!stop` — stop what I'm doing for this chat and drop its queued messages\n"
+		if cfg.BrainMode {
+			help += "• `!reset` — like `!stop`; I still see the recent chat history afterwards"
+		} else {
+			help += "• `!reset` — clear the current session and start fresh"
+		}
 		if m.IsGroup() {
 			if t := cfg.Triggers.First(); t != "" {
-				help += "\n\nIn this group, start your message with `" + t + "` to address me."
+				help += "\n\nIn this group, start your message with `" + t + "` to address me, commands included."
 			}
 		}
 		_ = b.wa.SendMessage(ctx, m.JID, help)
 		return true
 	}
 	return false
+}
+
+// stopChat stops what is going on for m's chat, for !stop and !reset. It
+// reports whether a run was stopped and how many waiting messages were
+// dropped.
+func (b *Bridge) stopChat(m Inbound, cfg *Config) (stopped bool, dropped int) {
+	// Only this chat's work: a brain serves several chats, and one chat must
+	// not cancel what another asked for. A DM goes by two JIDs (see
+	// chatJIDs), and its run may have come in under either.
+	chats := chatJIDs(m)
+	for _, jid := range chats {
+		b.deb.Drop(jid)
+	}
+	if !cfg.BrainMode {
+		return false, 0
+	}
+	if br := b.brainMgr.BrainFor(m.JID, m.IsGroup()); br != nil {
+		for _, jid := range chats {
+			s, d := br.StopChat(jid)
+			stopped, dropped = stopped || s, dropped+d
+		}
+	}
+	// A file or recording handed to another brain may answer here too, and
+	// the chat's own brain knows nothing about it. What waits for one counts
+	// as this chat's, for the reply.
+	for _, jid := range chats {
+		s, d := b.brainMgr.StopHandOffs(jid)
+		stopped, dropped = stopped || s, dropped+d
+	}
+	return stopped, dropped
 }
 
 // chatJIDs lists the JIDs m's chat goes by: the chat and, for a DM, the
@@ -397,11 +432,18 @@ func (b *Bridge) dispatch(m Inbound) {
 	case errors.Is(err, errQueueFull):
 		log.Printf("brain %s: queue full, rejecting message from %s", br.ID(), m.Sender)
 		if !m.Silent {
-			_ = b.wa.SendMessage(ctx, m.JID, "⏳ I'm still busy with earlier messages and my queue is full. Try again in a bit, or send !stop.")
+			// !stop drops only this chat's work, and in a group it needs the
+			// trigger like any command.
+			stop := "!stop"
+			if t := cfg.Triggers.First(); m.IsGroup() && t != "" {
+				stop = t + " !stop"
+			}
+			_ = b.wa.SendMessage(ctx, m.JID, "⏳ I'm still busy with earlier messages and my queue is full. Try again in a bit, or send `"+stop+"` to drop what this chat has waiting.")
 		}
 	case err != nil:
 		log.Printf("routing message for %s: %v", m.JID, err)
-	case busy && !m.Silent && cfg.QueueNotify() && cfg.Queue.Mode == "queue":
+	case busy && !m.Silent && cfg.QueueNotify():
+		// Interrupt mode queues too: behind other chats and other people.
 		_ = b.wa.SendMessage(ctx, m.JID, fmt.Sprintf("⏳ Queued (#%d) — I'll get to this right after the current task.", pos))
 	}
 }
@@ -435,7 +477,7 @@ func (b *Bridge) handleClassicMessage(ctx context.Context, m Inbound) {
 	replyChan := make(chan ClaudeResult, 1)
 	b.claude.Enqueue(ClaudeRequest{
 		JID:       m.JID,
-		Text:      m.Text,
+		Text:      m.textWithQuote(),
 		Media:     m.Media,
 		ReplyChan: replyChan,
 	})
