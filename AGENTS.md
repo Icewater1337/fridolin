@@ -89,6 +89,14 @@ Reopen the dashboard with `./fridolin open`.
   the variables the bridge reads (`FRIDOLIN_CONFIG`, `BRAIN_MODE`) unset,
   so they never see a `config.json` in the checkout or a real data dir;
   read a repository file through `repoDir`.
+- The parsers of untrusted input (chunking, poll blocks, triggers, JIDs and
+  the DM allowlist, the identity map, brain.json, stream-json, attachment
+  names, the junk filter) have fuzz targets beside their tests. Fuzz one
+  with `go test -run='^$' -fuzz='^FuzzExtractPolls$' -fuzztime=30s .`;
+  a failing input is saved under the package's `testdata/fuzz/` (make
+  `testdata` first in a package that has none), where plain `go test`
+  runs it from then on, so commit it with the fix. CI fuzzes every target
+  for 20 seconds on each push to main.
 - The Python helpers in `tools/` have stdlib-only tests that never touch the
   network: `python3 -m unittest discover -s tools/tests`. Keep them passing
   on Python 3.9.

@@ -519,6 +519,10 @@ every pull request and once a week; it fails when the code reaches a known
 vulnerability. Run it yourself after changing dependencies:
 `go run golang.org/x/vuln/cmd/govulncheck@latest ./...`.
 
+On pushes to main, CI also fuzzes the parsers of untrusted input (WhatsApp
+messages, model output, files a brain writes) for 20 seconds each;
+[AGENTS.md](AGENTS.md) says how to run a fuzz target yourself.
+
 ## License
 
 MIT — see [LICENSE](LICENSE). Privacy: [PRIVACY.md](PRIVACY.md).
