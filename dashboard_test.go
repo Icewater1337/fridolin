@@ -3,7 +3,9 @@ package main
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
+	"image/png"
 	"io"
 	"log"
 	"maps"
@@ -1359,6 +1361,47 @@ func TestPrettyName(t *testing.T) {
 		if got := prettyName(in); got != want {
 			t.Errorf("prettyName(%q) = %q, want %q", in, got, want)
 		}
+	}
+}
+
+// qrMessenger is the dev messenger with a pairing code to show.
+type qrMessenger struct {
+	*devMessenger
+	code string
+}
+
+func (q qrMessenger) State() WAState { return WAState{Mode: "pairing", QRCode: q.code} }
+
+// The pairing code is served as a PNG, square and big enough to scan once
+// the dashboard scales it, and only while there is a code.
+func TestQRCodeIsServedAsAPNG(t *testing.T) {
+	tb := newTestBridge(t, "")
+	if w := tb.do("GET", "/api/whatsapp/qr", nil); w.Code != http.StatusNotFound {
+		t.Errorf("without a code: %d, want 404", w.Code)
+	}
+	// As long as the codes whatsmeow hands out.
+	tb.wa = qrMessenger{tb.dev, "2@" + strings.Repeat("AbCdEfGh", 20) + ",x+y/z=,1234567890abcdef=="}
+	w := tb.do("GET", "/api/whatsapp/qr", nil)
+	var body struct {
+		DataURL string `json:"data_url"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil || w.Code != http.StatusOK {
+		t.Fatalf("%d %s", w.Code, w.Body.String())
+	}
+	b64, ok := strings.CutPrefix(body.DataURL, "data:image/png;base64,")
+	if !ok {
+		t.Fatalf("data_url %q is not a base64 PNG", truncate(body.DataURL, 40))
+	}
+	data, err := base64.StdEncoding.DecodeString(b64)
+	if err != nil {
+		t.Fatal(err)
+	}
+	img, err := png.Decode(bytes.NewReader(data))
+	if err != nil {
+		t.Fatalf("not a PNG: %v", err)
+	}
+	if b := img.Bounds(); b.Dx() != b.Dy() || b.Dx() < 200 {
+		t.Errorf("the PNG is %dx%d, want a square of at least 200 pixels", b.Dx(), b.Dy())
 	}
 }
 

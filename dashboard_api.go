@@ -24,7 +24,7 @@ import (
 	"unicode"
 	"unicode/utf8"
 
-	qrcode "github.com/skip2/go-qrcode"
+	"rsc.io/qr"
 )
 
 func (b *Bridge) apiMux() http.Handler {
@@ -221,13 +221,16 @@ func (b *Bridge) apiQR(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusNotFound, "no pairing code right now")
 		return
 	}
-	png, err := qrcode.Encode(st.QRCode, qrcode.Medium, 320)
+	// rsc.io/qr is what qrterminal draws the terminal's code with. Its PNG
+	// is 8 pixels per module with the quiet zone included; the dashboard
+	// scales it.
+	code, err := qr.Encode(st.QRCode, qr.M)
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, err.Error())
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
-		"data_url":   "data:image/png;base64," + base64.StdEncoding.EncodeToString(png),
+		"data_url":   "data:image/png;base64," + base64.StdEncoding.EncodeToString(code.PNG()),
 		"created_at": st.QRAt,
 	})
 }
