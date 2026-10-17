@@ -765,7 +765,6 @@ These are the variables that override `config.json`:
 | `TRIGGERS` | `triggers` (comma-separated) |
 | `CLAUDE_PATH` | `claude_path` |
 | `DATA_DIR` | `data_dir` |
-| `WORK_DIR` | `work_dir` |
 | `DB_PATH` | `db_path` |
 | `MEDIA_DIR` | `media_dir` |
 | `MODEL` | `model` |

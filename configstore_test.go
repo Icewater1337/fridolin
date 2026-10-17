@@ -227,6 +227,25 @@ func TestConfigSavesKeepBrainModeOn(t *testing.T) {
 	}
 }
 
+// work_dir was the folder classic mode ran in; brains run in their own. So
+// neither the key nor WORK_DIR sets anything any more: a config that still
+// has the key says so in the log, and the variable locks no setting.
+func TestClassicWorkDirIsNoLongerASetting(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("WORK_DIR", "/elsewhere")
+	logs := captureLog(t)
+	cs, err := OpenConfigStore(writeConfig(t, `{"work_dir": "~/classic"}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !logContains(logs, "ignoring unknown settings [work_dir]") {
+		t.Errorf("log %q does not say work_dir is ignored", logs())
+	}
+	if v, ok := cs.EnvLocked()["work_dir"]; ok {
+		t.Errorf("work_dir is locked by %s", v)
+	}
+}
+
 func TestConfigStoreRejectsTooSmallChunkSize(t *testing.T) {
 	// The dashboard asks for at least 100 too, but the server must not rely
 	// on it: a smaller limit would leave no room for the numbering.

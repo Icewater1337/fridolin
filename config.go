@@ -150,9 +150,6 @@ type Config struct {
 	// cannot widen its own routing by editing its manifest).
 	BrainDirs []BrainRef `json:"brain_dirs,omitempty"`
 
-	// WorkDir is the working directory for classic mode (default: home dir).
-	WorkDir string `json:"work_dir,omitempty"`
-
 	// Sandbox controls the macOS sandbox-exec wrapper around brain spawns.
 	Sandbox SandboxConfig `json:"sandbox"`
 
@@ -454,10 +451,6 @@ func effective(file *Config, env envLookup) (*Config, map[string]string, error) 
 	}
 	cfg.DBPath = expandHome(cfg.DBPath, home)
 	cfg.MediaDir = expandHome(cfg.MediaDir, home)
-	if cfg.WorkDir == "" {
-		cfg.WorkDir = home
-	}
-	cfg.WorkDir = expandHome(cfg.WorkDir, home)
 	if cfg.MaxChunkSize == 0 {
 		cfg.MaxChunkSize = defaultChunkSize
 	}
@@ -788,7 +781,6 @@ var envOverrides = []envOverride{
 	{"TRIGGERS", "triggers", func(c *Config, v string) { c.Triggers = TriggersFromStrings(splitTrimmed(v)) }},
 	{"CLAUDE_PATH", "claude_path", func(c *Config, v string) { c.ClaudePath = v }},
 	{"DATA_DIR", "data_dir", func(c *Config, v string) { c.DataDir = v }},
-	{"WORK_DIR", "work_dir", func(c *Config, v string) { c.WorkDir = v }},
 	{"DB_PATH", "db_path", func(c *Config, v string) { c.DBPath = v }},
 	{"MEDIA_DIR", "media_dir", func(c *Config, v string) { c.MediaDir = v }},
 	{"MAX_CHUNK_SIZE", "max_chunk_size", func(c *Config, v string) {
