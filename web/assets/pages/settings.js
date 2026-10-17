@@ -2,13 +2,18 @@
 // everything else in the file (including fields this page does not show) is
 // sent back exactly as received.
 
-import { get, put } from './api.js';
-import { setRestartRequired } from './state.js';
-import {
-  h, mount, icon, btn, callout, field, toggle, select, textInput, listEditor, mono, pageHeader,
-  spinner, confirmDialog, toast, runBusy, EFFORTS, nextId, plural, loading,
-} from './ui.js';
-import { googleClientCard } from './calendar.js';
+import { get, put } from '../app/api.js';
+import { setRestartRequired } from '../app/state.js';
+import { h, mount } from '../lib/dom.js';
+import { plural } from '../lib/format.js';
+import { EFFORTS } from '../lib/brain.js';
+import { icon } from '../components/icons.js';
+import { toast } from '../components/toast.js';
+import { btn } from '../components/buttons.js';
+import { confirmDialog } from '../components/dialog.js';
+import { field, toggle, select, textInput, listEditor, nextId } from '../components/fields.js';
+import { callout, mono, pageHeader, loading } from '../components/common.js';
+import { googleClientCard } from '../components/calendar.js';
 
 const digits = (v) => (/^\d{6,15}$/.test(v) ? '' : 'Digits only, with country code, no + (e.g. 15551234567)');
 const groupJid = (v) => (/@g\.us$/.test(v) ? '' : 'A group JID ends in @g.us');

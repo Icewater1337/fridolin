@@ -444,7 +444,9 @@ touching brains that did not change.
 checks and scaffolding. **`configstore.go`** — the live configuration.
 
 **`dashboard.go`, `dashboard_api.go`, `web/`** — the dashboard, its guards and
-API; the page is plain HTML/JS compiled into the binary.
+API; the page is plain HTML/JS compiled into the binary. In `web/assets`,
+`app/` starts it, `pages/` holds one module per page, and `components/` and
+`lib/` the pieces they share.
 
 **`backup.go`** — Google Drive backups through rclone.
 

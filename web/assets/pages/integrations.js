@@ -2,11 +2,15 @@
 // with Plaud's own sign-in, pick the brain that receives recordings, and see
 // what was handed over last.
 
-import { get, post, put } from './api.js';
-import {
-  h, mount, icon, pill, btn, callout, timeAgo, mono, field, toggle, select, pageHeader,
-  confirmDialog, toast, loading, nextId, chatEl,
-} from './ui.js';
+import { get, post, put } from '../app/api.js';
+import { h, mount } from '../lib/dom.js';
+import { icon } from '../components/icons.js';
+import { toast } from '../components/toast.js';
+import { btn } from '../components/buttons.js';
+import { confirmDialog } from '../components/dialog.js';
+import { field, toggle, select, nextId } from '../components/fields.js';
+import { pill, callout, timeAgo, mono, pageHeader, loading } from '../components/common.js';
+import { chatEl } from '../components/chat.js';
 
 const every = (sec) => (sec % 60 === 0 ? (sec === 60 ? 'minute' : `${sec / 60} minutes`) : `${sec} seconds`);
 

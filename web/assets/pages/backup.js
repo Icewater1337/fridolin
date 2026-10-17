@@ -1,13 +1,17 @@
 // Backup: Google Drive via rclone — connect, schedule, per-brain settings,
 // run now, progress, and restore into a new folder.
 
-import { get, post, put, qs } from './api.js';
-import { folderBrowser } from './folder-browser.js';
-import {
-  h, mount, icon, pill, badge, btn, callout, timeAgo, fmtDuration, fmtBytes, mono, plural, field,
-  textInput, toggle, select, linesArea, linesOf, empty, changed, pageHeader, spinner, openDialog,
-  confirmDialog, toast, copyButton, runBusy, nextId, absTime, loading,
-} from './ui.js';
+import { get, post, put, qs } from '../app/api.js';
+import { folderBrowser } from '../components/folder-browser.js';
+import { h, mount } from '../lib/dom.js';
+import { fmtDuration, fmtBytes, plural, absTime } from '../lib/format.js';
+import { changed } from '../lib/memo.js';
+import { icon } from '../components/icons.js';
+import { toast } from '../components/toast.js';
+import { btn, copyButton, runBusy } from '../components/buttons.js';
+import { openDialog, confirmDialog } from '../components/dialog.js';
+import { field, textInput, toggle, select, linesArea, linesOf, nextId } from '../components/fields.js';
+import { pill, callout, timeAgo, mono, empty, pageHeader, spinner, loading } from '../components/common.js';
 
 const label = (id, brains) => {
   if (id === '_bridge') return 'Bridge settings';

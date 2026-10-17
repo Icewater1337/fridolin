@@ -1,10 +1,13 @@
 // Brains: a card per brain with its routing, live state and issues.
 
-import { get } from './api.js';
-import {
-  h, mount, icon, pill, badge, btn, timeAgo, mono, routingSummary, outcomePill,
-  brainStatusPill, changed, pageHeader, spinner,
-} from './ui.js';
+import { get } from '../app/api.js';
+import { h, mount } from '../lib/dom.js';
+import { routingSummary } from '../lib/brain.js';
+import { changed } from '../lib/memo.js';
+import { icon } from '../components/icons.js';
+import { btn } from '../components/buttons.js';
+import { pill, badge, timeAgo, mono, pageHeader, spinner } from '../components/common.js';
+import { outcomePill, brainStatusPill } from '../components/brain.js';
 
 export default {
   title: 'Brains',

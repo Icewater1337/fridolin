@@ -1,8 +1,14 @@
 // Dev mode (--no-whatsapp): inject messages and read what the bridge "sent".
 
-import { get, post } from './api.js';
-import { onStatus } from './state.js';
-import { h, mount, btn, field, textInput, toggle, timeAgo, chatEl, empty, changed, pageHeader, callout, toast, runBusy, longText } from './ui.js';
+import { get, post } from '../app/api.js';
+import { onStatus } from '../app/state.js';
+import { h, mount } from '../lib/dom.js';
+import { changed } from '../lib/memo.js';
+import { toast } from '../components/toast.js';
+import { btn, runBusy } from '../components/buttons.js';
+import { field, textInput, toggle } from '../components/fields.js';
+import { timeAgo, empty, pageHeader, callout, longText } from '../components/common.js';
+import { chatEl } from '../components/chat.js';
 
 const DM = '15551234567@s.whatsapp.net';
 const GROUP = '120363000000000000@g.us';

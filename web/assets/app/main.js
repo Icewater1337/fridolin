@@ -4,21 +4,29 @@
 
 import { get, setToken, getToken, on as onApi } from './api.js';
 import { store, setStatus, onStatus, onRestartChange, loadGroups, setIgnoredCount, onIgnoredCount } from './state.js';
-import { h, mount, icon, btn, toast, toastError, confirmDialog, textInput, copyButton, plural, waKind, waLabel, closeAllDialogs } from './ui.js';
+import { h, mount } from '../lib/dom.js';
+import { plural } from '../lib/format.js';
+import { waKind, waLabel } from '../lib/whatsapp.js';
+import { icon } from '../components/icons.js';
+import { toast, toastError } from '../components/toast.js';
+import { btn, copyButton } from '../components/buttons.js';
+import { confirmDialog, closeAllDialogs } from '../components/dialog.js';
+import { textInput } from '../components/fields.js';
+import { setChatNames } from '../components/chat.js';
 import { restartBridge } from './restart.js';
 
-import overview from './page-overview.js';
-import activity from './page-activity.js';
-import brains from './page-brains.js';
-import brainDetail from './page-brain.js';
-import addBrain from './page-add-brain.js';
-import chats from './page-chats.js';
-import settings from './page-settings.js';
-import backup from './page-backup.js';
-import integrations from './page-integrations.js';
-import site from './page-site.js';
-import logs from './page-logs.js';
-import dev from './page-dev.js';
+import overview from '../pages/overview.js';
+import activity from '../pages/activity.js';
+import brains from '../pages/brains.js';
+import brainDetail from '../pages/brain.js';
+import addBrain from '../pages/add-brain.js';
+import chats from '../pages/chats.js';
+import settings from '../pages/settings.js';
+import backup from '../pages/backup.js';
+import integrations from '../pages/integrations.js';
+import site from '../pages/site.js';
+import logs from '../pages/logs.js';
+import dev from '../pages/dev.js';
 
 // ── token from the URL fragment ──────────────────────────────────────────
 
@@ -124,7 +132,7 @@ const NAV = [
   { id: 'backup', label: 'Backup', icon: 'backup' },
   { id: 'integrations', label: 'Integrations', icon: 'inbox' },
   { id: 'site', label: 'Site', icon: 'external' },
-  { id: 'logs', label: 'Logs', icon: 'logs' },
+  { id: 'logs', label: 'Logs', icon: 'terminal' },
   { id: 'dev', label: 'Dev', icon: 'dev', devOnly: true },
 ];
 
@@ -377,6 +385,8 @@ onApi('unauthorized', () => {
 onApi('reachable', (ok) => { if (shell) shell.setOffline(!ok); });
 
 // ── global pollers ───────────────────────────────────────────────────────
+
+setChatNames((jid) => store.groupNames.get(jid));
 
 onStatus((s) => { if (shell) shell.paintStatus(s); });
 onIgnoredCount((n) => { if (shell) shell.setChatsBadge(n); });

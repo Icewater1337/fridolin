@@ -1,13 +1,20 @@
 // Overview: health, WhatsApp pairing, Claude CLI, sandbox, brains, backup,
 // warnings and the latest messages.
 
-import { get, post, qs } from './api.js';
-import { onStatus } from './state.js';
-import {
-  h, mount, icon, pill, badge, btn, callout, timeAgo, fmtDuration, mono, phone, plural,
-  routingSummary, outcomePill, empty, changed, toast, spinner, waKind, waLabel, parseTs,
-} from './ui.js';
-import { activityItem } from './page-activity.js';
+import { get, post, qs } from '../app/api.js';
+import { onStatus } from '../app/state.js';
+import { h, mount } from '../lib/dom.js';
+import { fmtDuration, plural, parseTs } from '../lib/format.js';
+import { phone } from '../lib/jid.js';
+import { waKind, waLabel } from '../lib/whatsapp.js';
+import { routingSummary } from '../lib/brain.js';
+import { changed } from '../lib/memo.js';
+import { icon } from '../components/icons.js';
+import { toast } from '../components/toast.js';
+import { btn } from '../components/buttons.js';
+import { pill, badge, callout, timeAgo, mono, empty, spinner } from '../components/common.js';
+import { outcomePill } from '../components/brain.js';
+import { activityItem } from '../components/activity-item.js';
 
 export default {
   title: 'Overview',

@@ -3,7 +3,10 @@
 
 import { get, post } from './api.js';
 import { store, setStatus, setRestartRequired } from './state.js';
-import { h, mount, spinner, btn, toast, toastError } from './ui.js';
+import { h, mount } from '../lib/dom.js';
+import { toast, toastError } from '../components/toast.js';
+import { btn } from '../components/buttons.js';
+import { spinner } from '../components/common.js';
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 

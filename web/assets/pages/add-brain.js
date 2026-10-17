@@ -1,12 +1,16 @@
 // Add a brain: choose a folder → check it → configure → done.
 
-import { get, post } from './api.js';
-import { folderBrowser } from './folder-browser.js';
-import { routingEditor } from './routing-editor.js';
-import {
-  h, mount, icon, btn, callout, mono, field, textInput, select, toggle, spinner, routingSummary,
-  slugify, BRAIN_ID_RE, EFFORTS, DEFAULT_BACKUP_EXCLUDES, linesArea, linesOf, prettyJSON, toast, runBusy, loading,
-} from './ui.js';
+import { get, post } from '../app/api.js';
+import { folderBrowser } from '../components/folder-browser.js';
+import { routingEditor } from '../components/routing-editor.js';
+import { h, mount } from '../lib/dom.js';
+import { prettyJSON } from '../lib/format.js';
+import { routingSummary, slugify, BRAIN_ID_RE, EFFORTS, DEFAULT_BACKUP_EXCLUDES } from '../lib/brain.js';
+import { icon } from '../components/icons.js';
+import { toast } from '../components/toast.js';
+import { btn, runBusy } from '../components/buttons.js';
+import { field, textInput, select, toggle, linesArea, linesOf } from '../components/fields.js';
+import { callout, mono, spinner, loading } from '../components/common.js';
 
 const STEPS = [['folder', 'Folder'], ['inspect', 'Check'], ['configure', 'Configure']];
 

@@ -1,19 +1,16 @@
 // Logs: a live tail of the bridge's log output.
 
-import { get, qs } from './api.js';
-import { onStatus } from './state.js';
-import { h, mount, toggle, textInput, btn, pageHeader, absTime } from './ui.js';
+import { get, qs } from '../app/api.js';
+import { onStatus } from '../app/state.js';
+import { h, mount } from '../lib/dom.js';
+import { absTime, hhmmss } from '../lib/format.js';
+import { btn } from '../components/buttons.js';
+import { toggle, textInput } from '../components/fields.js';
+import { pageHeader } from '../components/common.js';
 
 const MAX_LINES = 5000;
 // Go's log package prefixes "2006/01/02 15:04:05 "; the time column shows it already.
 const GO_TS = /^\d{4}\/\d{2}\/\d{2} \d{2}:\d{2}:\d{2}(\.\d+)? /;
-
-function hhmmss(ts) {
-  const d = new Date(ts);
-  if (Number.isNaN(d.getTime())) return '';
-  const p = (n) => String(n).padStart(2, '0');
-  return `${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`;
-}
 
 function levelOf(text) {
   if (/\b(ERROR|FATAL|FAILED|panic)\b|\berror\b/i.test(text)) return 'err';

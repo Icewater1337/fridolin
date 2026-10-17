@@ -1,8 +1,12 @@
 // In-dashboard folder browser (folders inside the home folder only), used
 // when adding a brain and when choosing where to restore a backup.
 
-import { get, qs } from './api.js';
-import { h, mount, icon, btn, badge, spinner, toggle, textInput } from './ui.js';
+import { get, qs } from '../app/api.js';
+import { h, mount } from '../lib/dom.js';
+import { icon } from './icons.js';
+import { btn } from './buttons.js';
+import { toggle, textInput } from './fields.js';
+import { badge, spinner } from './common.js';
 
 /**
  * folderBrowser({start, onPick(path, {create}), pickLabel, newLabel})

@@ -1,15 +1,24 @@
 // One brain: live run and queue, settings (brain.json), on-disk changes
 // waiting for approval, recent messages, and removal.
 
-import { get, post, put, del, qs } from './api.js';
-import { routingEditor } from './routing-editor.js';
-import { activityItem } from './page-activity.js';
-import { calendarCard } from './calendar.js';
-import {
-  h, mount, icon, pill, badge, btn, callout, timeAgo, fmtDuration, mono, chatEl, plural, field,
-  textInput, select, toggle, linesArea, linesOf, outcomePill, brainStatusPill, empty, changed,
-  spinner, confirmDialog, toast, prettyJSON, EFFORTS, runBusy, phone, loading, isGroupJid,
-} from './ui.js';
+import { get, post, put, del, qs } from '../app/api.js';
+import { routingEditor } from '../components/routing-editor.js';
+import { activityItem } from '../components/activity-item.js';
+import { calendarCard } from '../components/calendar.js';
+import { h, mount } from '../lib/dom.js';
+import { fmtDuration, plural, prettyJSON } from '../lib/format.js';
+import { phoneish, isGroupJid } from '../lib/jid.js';
+import { EFFORTS } from '../lib/brain.js';
+import { changed } from '../lib/memo.js';
+import { sortKeys, fieldDiff, lineDiff } from '../lib/diff.js';
+import { icon } from '../components/icons.js';
+import { toast } from '../components/toast.js';
+import { btn, runBusy } from '../components/buttons.js';
+import { confirmDialog } from '../components/dialog.js';
+import { field, textInput, select, toggle, linesArea, linesOf } from '../components/fields.js';
+import { pill, badge, callout, timeAgo, mono, empty, loading } from '../components/common.js';
+import { chatEl } from '../components/chat.js';
+import { outcomePill, brainStatusPill } from '../components/brain.js';
 
 export default {
   title: (params) => `Brain ${params[0] || ''}`,
@@ -303,71 +312,3 @@ export default {
     }
   },
 };
-
-function phoneish(s) {
-  return /^\d{6,}$/.test(s) ? phone(s) : s;
-}
-
-// ── diff helpers ─────────────────────────────────────────────────────────
-
-function sortKeys(v) {
-  if (Array.isArray(v)) return v.map(sortKeys);
-  if (v && typeof v === 'object') {
-    const out = {};
-    for (const k of Object.keys(v).sort()) out[k] = sortKeys(v[k]);
-    return out;
-  }
-  return v;
-}
-
-function flatten(v, prefix, out) {
-  if (v && typeof v === 'object' && !Array.isArray(v)) {
-    for (const k of Object.keys(v)) flatten(v[k], prefix ? `${prefix}.${k}` : k, out);
-  } else {
-    out.set(prefix, v);
-  }
-  return out;
-}
-
-function show(v) {
-  if (v === undefined) return '(not set)';
-  if (Array.isArray(v)) return v.length ? v.map((x) => JSON.stringify(x)).join('\n') : '[]';
-  return JSON.stringify(v);
-}
-
-function fieldDiff(a, b) {
-  const fa = flatten(a, '', new Map());
-  const fb = flatten(b, '', new Map());
-  const keys = [...new Set([...fa.keys(), ...fb.keys()])].sort();
-  const rows = [];
-  for (const k of keys) {
-    const x = show(fa.get(k));
-    const y = show(fb.get(k));
-    const empty = (s) => s === '(not set)' || s === '""' || s === '[]' || s === 'null';
-    if (x !== y && !(empty(x) && empty(y))) rows.push({ path: k, a: x, b: y });
-  }
-  return rows;
-}
-
-/** Line diff via LCS; marks lines that only appear on one side. */
-function lineDiff(aText, bText) {
-  const a = aText.split('\n');
-  const b = bText.split('\n');
-  const n = a.length;
-  const m = b.length;
-  const dp = Array.from({ length: n + 1 }, () => new Array(m + 1).fill(0));
-  for (let i = n - 1; i >= 0; i--) {
-    for (let j = m - 1; j >= 0; j--) dp[i][j] = a[i] === b[j] ? dp[i + 1][j + 1] + 1 : Math.max(dp[i + 1][j], dp[i][j + 1]);
-  }
-  const keepA = new Array(n).fill(false);
-  const keepB = new Array(m).fill(false);
-  let i = 0;
-  let j = 0;
-  while (i < n && j < m) {
-    if (a[i] === b[j]) { keepA[i] = true; keepB[j] = true; i++; j++; } else if (dp[i + 1][j] >= dp[i][j + 1]) i++; else j++;
-  }
-  return {
-    left: a.map((text, k) => ({ text, changed: !keepA[k] })),
-    right: b.map((text, k) => ({ text, changed: !keepB[k] })),
-  };
-}

@@ -3,11 +3,14 @@
 // may sign in. Everything here stays on this machine; the site itself only
 // reads the result.
 
-import { get, post, put, del } from './api.js';
-import {
-  h, mount, icon, pill, btn, callout, mono, field, toggle, select, pageHeader, textInput,
-  confirmDialog, toast, loading, timeAgo, kv, copyButton, openDialog,
-} from './ui.js';
+import { get, post, put, del } from '../app/api.js';
+import { h, mount } from '../lib/dom.js';
+import { icon } from '../components/icons.js';
+import { toast, toastError } from '../components/toast.js';
+import { btn, copyButton } from '../components/buttons.js';
+import { confirmDialog, openDialog } from '../components/dialog.js';
+import { field, toggle, select, textInput } from '../components/fields.js';
+import { pill, callout, mono, pageHeader, loading, timeAgo, kv } from '../components/common.js';
 
 const short = (c) => (c ? c.slice(0, 12) : '');
 const procPill = (p, healthy) => {
@@ -81,7 +84,7 @@ export default {
         checked: s.enabled, label: s.enabled ? 'The site is on' : 'The site is off',
         disabled: !s.enabled && todo.length > 0,
         onChange: async (on, input) => {
-          try { await put('/api/site/settings', { enabled: on }); toast(on ? 'Site turned on' : 'Site turned off', 'ok'); poller.kick(); } catch (e) { input.checked = !on; toast(e.message, 'bad'); }
+          try { await put('/api/site/settings', { enabled: on }); toast(on ? 'Site turned on' : 'Site turned off', 'ok'); poller.kick(); } catch (e) { input.checked = !on; toastError(e); }
         },
       });
       mount(statusCard,
@@ -293,7 +296,7 @@ export default {
               await put(`/api/site/builders/${encodeURIComponent(br.id)}`, { on });
               toast(on ? `${br.name || br.id} may build the site` : `${br.name || br.id} no longer builds the site`, 'ok');
               await refresh();
-            } catch (e) { input.checked = !on; toast(e.message, 'bad'); } finally { input.disabled = false; }
+            } catch (e) { input.checked = !on; toastError(e); } finally { input.disabled = false; }
           },
         }))) : h('p.muted', 'No brains yet.'));
     }
@@ -315,7 +318,7 @@ export default {
       const token = h('input', { type: 'password', autocomplete: 'off', placeholder: st.tunnel.token_saved ? 'saved — paste a new one to replace it' : 'eyJ…' });
       const tunnelSw = toggle({
         checked: s.tunnel, label: 'Run the tunnel while the site is on', disabled: !st.tunnel.token_saved || !st.runtime.cloudflared,
-        onChange: async (on, input) => { try { await put('/api/site/settings', { tunnel: on }); poller.kick(); } catch (e) { input.checked = !on; toast(e.message, 'bad'); } },
+        onChange: async (on, input) => { try { await put('/api/site/settings', { tunnel: on }); poller.kick(); } catch (e) { input.checked = !on; toastError(e); } },
       });
       mount(domainCard,
         h('div.card-head', h('div.card-title', icon('lock'), h('h2', 'Domain and sign-in'))),
@@ -352,7 +355,7 @@ export default {
       const rows = users.map((u) => h('tr',
         h('td', h('strong', u.name || u.email || u.username), h('div.small.muted', u.kind === 'google' ? `Google: ${u.email}` : `Password: ${u.username}`)),
         h('td', roleSelect(u.role, u.kind, async (role, sel) => {
-          try { await put(`/api/site/users/${encodeURIComponent(u.id)}`, { role }); toast('Role changed', 'ok'); } catch (e) { sel.value = u.role; toast(e.message, 'bad'); }
+          try { await put(`/api/site/users/${encodeURIComponent(u.id)}`, { role }); toast('Role changed', 'ok'); } catch (e) { sel.value = u.role; toastError(e); }
         })),
         h('td.right',
           u.kind === 'password' ? btn('New password', { small: true, onClick: () => newPassword(u) }) : null,

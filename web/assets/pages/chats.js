@@ -1,11 +1,18 @@
 // Chats: who is waiting for access, the account's groups, and the allow lists.
 
-import { get, post, put } from './api.js';
-import { store, loadGroups, rememberName, setIgnoredCount } from './state.js';
-import {
-  h, mount, icon, pill, badge, btn, timeAgo, mono, plural, empty, changed, pageHeader, spinner,
-  select, textInput, confirmDialog, toast, phone, runBusy, shortJid, chatName,
-} from './ui.js';
+import { get, post, put } from '../app/api.js';
+import { store, loadGroups, rememberName, setIgnoredCount } from '../app/state.js';
+import { h, mount } from '../lib/dom.js';
+import { plural } from '../lib/format.js';
+import { phone, shortJid } from '../lib/jid.js';
+import { changed } from '../lib/memo.js';
+import { icon } from '../components/icons.js';
+import { toast } from '../components/toast.js';
+import { btn, runBusy } from '../components/buttons.js';
+import { confirmDialog } from '../components/dialog.js';
+import { select, textInput } from '../components/fields.js';
+import { pill, badge, timeAgo, mono, empty, pageHeader, spinner } from '../components/common.js';
+import { chatName } from '../components/chat.js';
 
 export default {
   title: 'Chats',

@@ -1,8 +1,12 @@
 // Routing controls shared by the add-brain wizard and the brain page:
 // direct messages, default brain, and which groups the brain answers.
 
-import { store, loadGroups } from './state.js';
-import { h, mount, toggle, field, textInput, btn, spinner, mono, isGroupJid, nextId, loading } from './ui.js';
+import { store, loadGroups } from '../app/state.js';
+import { h, mount } from '../lib/dom.js';
+import { isGroupJid } from '../lib/jid.js';
+import { btn } from './buttons.js';
+import { toggle, field, textInput, nextId } from './fields.js';
+import { mono, loading } from './common.js';
 
 /**
  * routingEditor({routing, selfId, brains, allowedGroups, onChange})

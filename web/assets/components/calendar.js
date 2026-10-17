@@ -1,10 +1,14 @@
 // Google Calendar: the one-time OAuth client setup (Settings) and the
 // per-brain "Connect Google Calendar" card (brain page).
 
-import { get, post, put, del } from './api.js';
-import {
-  h, mount, icon, pill, btn, callout, mono, loading, confirmDialog, toast, nextId,
-} from './ui.js';
+import { get, post, put, del } from '../app/api.js';
+import { h, mount } from '../lib/dom.js';
+import { icon } from './icons.js';
+import { toast } from './toast.js';
+import { btn } from './buttons.js';
+import { confirmDialog } from './dialog.js';
+import { nextId } from './fields.js';
+import { pill, callout, mono, loading } from './common.js';
 
 const CONSOLE = 'https://console.cloud.google.com/apis/credentials';
 const ENABLE_API = 'https://console.cloud.google.com/apis/library/calendar-json.googleapis.com';
