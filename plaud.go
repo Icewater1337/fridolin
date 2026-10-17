@@ -153,8 +153,7 @@ func (p *PlaudManager) dir() string { return filepath.Join(p.cfg().DataDir, "pla
 // cliHome is the HOME the CLI runs with, which decides where its login lives.
 func (p *PlaudManager) cliHome() string {
 	if p.cfg().Plaud.BrainAccess {
-		home, _ := os.UserHomeDir()
-		return home
+		return homeDir()
 	}
 	return filepath.Join(p.dir(), "home")
 }
@@ -197,8 +196,7 @@ func findPlaudCLI(c string) (string, error) {
 	if found, err := exec.LookPath("plaud"); err == nil {
 		return found, nil
 	}
-	home, _ := os.UserHomeDir()
-	candidates, _ := filepath.Glob(filepath.Join(home, nvmNodeVersions, "*/bin/plaud"))
+	candidates, _ := filepath.Glob(filepath.Join(homeDir(), nvmNodeVersions, "*/bin/plaud"))
 	sort.Sort(sort.Reverse(sort.StringSlice(candidates)))
 	candidates = append(candidates, "/opt/homebrew/bin/plaud", "/usr/local/bin/plaud")
 	for _, c := range candidates {

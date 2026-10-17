@@ -195,7 +195,7 @@ func findRclone(p string) (string, error) {
 
 // rcloneFallbacks are where findRclone looks when rclone is not on PATH.
 func rcloneFallbacks() []string {
-	return []string{"/opt/homebrew/bin/rclone", "/usr/local/bin/rclone", filepath.Join(os.Getenv("HOME"), ".local/bin/rclone")}
+	return []string{"/opt/homebrew/bin/rclone", "/usr/local/bin/rclone", filepath.Join(homeDir(), ".local/bin/rclone")}
 }
 
 // rcloneEnv is the environment for rclone run as scope (see helperScope):
@@ -1237,7 +1237,7 @@ func (b *Bridge) apiBackupRestore(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	cfg := b.cfgs.Get()
-	home, _ := os.UserHomeDir()
+	home := homeDir()
 	target := canonicalDir(expandHome(strings.TrimSpace(req.Target), home))
 	if !filepath.IsAbs(target) || !isWithin(target, canonicalDir(home)) || target == canonicalDir(home) {
 		writeErr(w, http.StatusUnprocessableEntity, "restore into a new folder inside your home folder")

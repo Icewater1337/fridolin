@@ -653,11 +653,8 @@ func (m *SiteManager) prepareCheckout(ctx context.Context, job *siteJob, commit,
 // runBuild runs a module's app.build command (paths as in docs/SITE.md: ~/…
 // is the home folder, a relative path is inside the module folder).
 func (m *SiteManager) runBuild(ctx context.Context, moduleDir, cwd string, run []string) error {
-	home, _ := os.UserHomeDir()
 	dir := moduleDir
-	switch {
-	case cwd == "~" || strings.HasPrefix(cwd, "~/"):
-		dir = filepath.Join(home, strings.TrimPrefix(strings.TrimPrefix(cwd, "~"), "/"))
+	switch cwd = expandHome(cwd, homeDir()); {
 	case filepath.IsAbs(cwd):
 		dir = cwd
 	case cwd != "":

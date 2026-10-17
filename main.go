@@ -92,8 +92,7 @@ func configPath(flagValue string) string {
 	if p := os.Getenv("FRIDOLIN_CONFIG"); p != "" {
 		return p
 	}
-	home, _ := os.UserHomeDir()
-	return filepath.Join(defaultDataDir(home), "config.json")
+	return filepath.Join(defaultDataDir(homeDir()), "config.json")
 }
 
 // starterConfig is written on the very first run, so the bridge can start and

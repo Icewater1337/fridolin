@@ -21,6 +21,11 @@ type BrainRef struct {
 	Approved *BrainManifest `json:"approved"`
 }
 
+// Dir is the brain's folder with ~ expanded, for code that works on the
+// file layer, where Path is kept as typed. The effective configuration has
+// Path expanded already.
+func (r BrainRef) Dir() string { return expandHome(r.Path, homeDir()) }
+
 // BrainSpec is a brain ready to run.
 type BrainSpec struct {
 	Manifest BrainManifest
@@ -142,7 +147,7 @@ func ValidateBrainSet(specs []BrainSpec) error {
 // CheckBrainPath vets a folder before it becomes a brain. Problems block it;
 // warnings are shown but allowed.
 func CheckBrainPath(path string, cfg *Config, otherDirs []string) (abs string, problems, warnings []string) {
-	home, _ := os.UserHomeDir()
+	home := homeDir()
 	abs = canonicalDir(expandHome(strings.TrimSpace(path), home))
 	if !filepath.IsAbs(abs) {
 		return abs, []string{"enter an absolute path (or one starting with ~/)"}, nil
@@ -228,8 +233,7 @@ func updateManifestIn(c *Config, id string, mutate func(m *BrainManifest) error)
 		if m.ID != id {
 			return fmt.Errorf("a brain's id cannot change")
 		}
-		home, _ := os.UserHomeDir()
-		if err := WriteManifest(expandHome(ref.Path, home), &m, true); err != nil {
+		if err := WriteManifest(ref.Dir(), &m, true); err != nil {
 			return err
 		}
 		n := m.normalized()

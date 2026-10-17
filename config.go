@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
 	"os"
@@ -426,9 +427,9 @@ func effective(file *Config) (*Config, error) {
 		return nil, err
 	}
 
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return nil, fmt.Errorf("getting home dir: %w", err)
+	home := homeDir()
+	if home == "" {
+		return nil, errors.New("getting home dir: $HOME is not set")
 	}
 
 	if cfg.ClaudePath == "" {
@@ -562,9 +563,9 @@ func protectDataDir(cfg *Config) {
 	// relate it to the home folder, so it would get past the home check.
 	dataDir := absPath(cfg.DataDir)
 	dbDir := absPath(filepath.Dir(cfg.DBPath))
-	home, homeErr := os.UserHomeDir()
+	home := homeDir()
 	homeOrAbove := func(dir string) bool {
-		return homeErr == nil && isWithin(canonicalDir(home), canonicalDir(dir))
+		return home != "" && isWithin(canonicalDir(home), canonicalDir(dir))
 	}
 
 	mode, open := openToOthers(dataDir)
@@ -708,7 +709,18 @@ func (sc SandboxConfig) validate(goos string) error {
 	return nil
 }
 
-// expandHome rewrites a leading "~" to the user's home directory.
+// homeDir is the user's home folder, $HOME on Unix, or "" when there is
+// none. Every part of the bridge looks it up here, so that ~ and the
+// defaults under it mean the same folder everywhere.
+func homeDir() string {
+	home, _ := os.UserHomeDir()
+	return home
+}
+
+// expandHome rewrites a leading "~" to home, the user's home directory. It
+// is the one ~ expansion: effective applies it to every path setting, so
+// only code that works on the file layer, or on a path from a request,
+// calls it itself.
 func expandHome(path, home string) string {
 	if path == "~" {
 		return home

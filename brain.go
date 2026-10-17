@@ -681,7 +681,7 @@ func withArgsBeforePrompt(args, extra []string) []string {
 // stop a brain from reading the files with its tools; that takes the
 // sandbox, which denies them all.
 func excludeInstructionsAbove(dir string) string {
-	data, err := json.Marshal(map[string][]string{"claudeMdExcludes": instructionsAbove(dir, os.Getenv("HOME"))})
+	data, err := json.Marshal(map[string][]string{"claudeMdExcludes": instructionsAbove(dir, homeDir())})
 	if err != nil {
 		return ""
 	}

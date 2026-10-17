@@ -686,9 +686,8 @@ func (m *SiteManager) SetGoogleClient(data []byte) error {
 // siteEnv is the whole environment of a site process: nothing of the bridge's
 // own environment (tokens, API keys) reaches it.
 func siteEnv(bin string, extra ...string) []string {
-	home, _ := os.UserHomeDir()
 	env := []string{
-		"HOME=" + home,
+		"HOME=" + homeDir(),
 		"PATH=" + filepath.Dir(bin) + ":/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin",
 		"LANG=en_US.UTF-8",
 	}
@@ -706,8 +705,7 @@ func siteEnv(bin string, extra ...string) []string {
 func findNode() (string, error) {
 	bin, err := findTool("node")
 	if err != nil {
-		home, _ := os.UserHomeDir()
-		found, _ := filepath.Glob(filepath.Join(home, ".nvm/versions/node/v*/bin/node"))
+		found, _ := filepath.Glob(filepath.Join(homeDir(), ".nvm/versions/node/v*/bin/node"))
 		slices.SortFunc(found, func(a, b string) int { return compareVersionDirs(b, a) })
 		if len(found) == 0 {
 			return "", errors.New("node is not installed (macOS: brew install node); the site needs Node.js 22 or newer")
@@ -740,8 +738,7 @@ func findTool(name string) (string, error) {
 	if p, err := exec.LookPath(name); err == nil {
 		return p, nil
 	}
-	home, _ := os.UserHomeDir()
-	for _, dir := range []string{"/opt/homebrew/bin", "/usr/local/bin", filepath.Join(home, ".local/bin")} {
+	for _, dir := range []string{"/opt/homebrew/bin", "/usr/local/bin", filepath.Join(homeDir(), ".local/bin")} {
 		if p := filepath.Join(dir, name); fileExists(p) {
 			return p, nil
 		}

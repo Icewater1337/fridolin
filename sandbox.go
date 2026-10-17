@@ -250,7 +250,7 @@ var instructionFiles = []string{"CLAUDE.md", "CLAUDE.local.md"}
 func (sp *SandboxProfiler) Profile(brainID string) (string, error) {
 	sp.mu.RLock()
 	defer sp.mu.RUnlock()
-	home := os.Getenv("HOME")
+	home := homeDir()
 	if !filepath.IsAbs(home) {
 		// Every home-relative deny would silently become a relative path.
 		return "", fmt.Errorf("HOME %q is not an absolute path", home)

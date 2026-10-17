@@ -703,7 +703,7 @@ func (b *Bridge) otherBrainDirs(exceptID string) []string {
 	var dirs []string
 	for _, v := range b.brainViews() {
 		if v.ID != exceptID {
-			dirs = append(dirs, expandHomeDir(v.Path))
+			dirs = append(dirs, v.Path) // expanded: brainViews reads the effective config
 		}
 	}
 	return dirs
@@ -921,7 +921,7 @@ func (b *Bridge) apiApproveBrain(w http.ResponseWriter, r *http.Request) {
 			if ref.Approved == nil || ref.Approved.ID != id {
 				continue
 			}
-			disk, err := ReadManifest(expandHomeDir(ref.Path))
+			disk, err := ReadManifest(ref.Dir())
 			if err != nil {
 				return err
 			}
@@ -950,7 +950,7 @@ func (b *Bridge) apiRemoveBrain(w http.ResponseWriter, r *http.Request) {
 		path := r.URL.Query().Get("path")
 		for i, ref := range c.BrainDirs {
 			if (ref.Approved != nil && ref.Approved.ID == id) ||
-				(ref.Approved == nil && path != "" && canonicalDir(expandHomeDir(ref.Path)) == canonicalDir(expandHomeDir(path))) {
+				(ref.Approved == nil && path != "" && canonicalDir(ref.Dir()) == canonicalDir(expandHome(path, homeDir()))) {
 				c.BrainDirs = append(c.BrainDirs[:i], c.BrainDirs[i+1:]...)
 				return nil
 			}
@@ -981,14 +981,14 @@ func nativePicker() []string {
 			return []string{p, "--file-selection", "--directory", "--title=Choose a folder for this brain"}
 		}
 		if p, err := exec.LookPath("kdialog"); err == nil {
-			return []string{p, "--getexistingdirectory", os.Getenv("HOME")}
+			return []string{p, "--getexistingdirectory", homeDir()}
 		}
 	}
 	return nil
 }
 
 func (b *Bridge) apiFSCaps(w http.ResponseWriter, r *http.Request) {
-	home, _ := os.UserHomeDir()
+	home := homeDir()
 	picker := ""
 	if p := nativePicker(); p != nil {
 		picker = filepath.Base(p[0])
@@ -1022,8 +1022,7 @@ func (b *Bridge) apiFSPick(w http.ResponseWriter, r *http.Request) {
 // apiFSList lists folders inside your home folder, for the in-dashboard
 // folder browser. The bridge's data folder is hidden.
 func (b *Bridge) apiFSList(w http.ResponseWriter, r *http.Request) {
-	home, _ := os.UserHomeDir()
-	home = canonicalDir(home)
+	home := canonicalDir(homeDir())
 	p := r.URL.Query().Get("path")
 	if p == "" {
 		p = home
@@ -1138,16 +1137,11 @@ func (b *Bridge) apiDevOutbox(w http.ResponseWriter, r *http.Request) {
 
 // ── helpers ──────────────────────────────────────────────────────────────
 
-func expandHomeDir(p string) string {
-	home, _ := os.UserHomeDir()
-	return expandHome(p, home)
-}
-
 // tildePath writes paths under the home folder as ~/…, so config.json and
 // backups stay valid on a machine with a different user name.
 func tildePath(p string) string {
-	home, err := os.UserHomeDir()
-	if err != nil {
+	home := homeDir()
+	if home == "" {
 		return p
 	}
 	home = canonicalDir(home)
