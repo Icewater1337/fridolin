@@ -247,23 +247,6 @@ func (sp *SandboxProfiler) Profile(brainID string) (string, error) {
 	}
 	b.WriteString("(version 1)\n(allow default)\n\n")
 
-	// ── other brains' working trees ──────────────────────────────────────
-	others := make([]string, 0, len(sp.workDirs))
-	for id, dir := range sp.workDirs {
-		if id != brainID && dir != "" {
-			others = append(others, dir)
-		}
-	}
-	sort.Strings(others)
-	if len(others) > 0 {
-		b.WriteString(";; Other brains' working trees\n")
-		for _, dir := range others {
-			b.deny("file-read*", "subpath", dir)
-			b.deny("file-write*", "subpath", dir)
-		}
-		b.WriteString("\n")
-	}
-
 	// ── home-directory hotspots ──────────────────────────────────────────
 	b.WriteString(";; Cross-session state, credentials, and personal data stores\n")
 	for _, sub := range defaultDenySubpaths {
@@ -382,11 +365,50 @@ func (sp *SandboxProfiler) Profile(brainID string) (string, error) {
 	b.deny("file-write*", "subpath", xdgGit)
 	b.WriteString("\n")
 
+	// ── user-supplied extras ─────────────────────────────────────────────
+	if len(sp.extraDeny) > 0 {
+		b.WriteString(";; Extra denies from config\n")
+		for _, p := range sp.extraDeny {
+			b.deny("file-read*", "subpath", p)
+			b.deny("file-write*", "subpath", p)
+		}
+		b.WriteString("\n")
+	}
+	if len(sp.extraAllow) > 0 {
+		b.WriteString(";; Extra allows from config (override the denies above, not those below)\n")
+		for _, p := range sp.extraAllow {
+			b.allow("file-read*", "subpath", p)
+		}
+		b.WriteString("\n")
+	}
+
+	// ── other brains' working trees ──────────────────────────────────────
+	// After the allow_paths allows, like the bridge's data below, so that
+	// an entry covering the folder that holds the brains (~/assistant, say)
+	// cannot open them again.
+	others := make([]string, 0, len(sp.workDirs))
+	for id, dir := range sp.workDirs {
+		if id != brainID && dir != "" {
+			others = append(others, dir)
+		}
+	}
+	sort.Strings(others)
+	if len(others) > 0 {
+		b.WriteString(";; Other brains' working trees\n")
+		for _, dir := range others {
+			b.deny("file-read*", "subpath", dir)
+			b.deny("file-write*", "subpath", dir)
+		}
+		b.WriteString("\n")
+	}
+
 	// ── bridge runtime dir ───────────────────────────────────────────────
 	// The DB holds the WhatsApp session keys (enough to take the account
 	// over from another machine), every chat's session IDs and poll votes;
 	// the dashboard token and backup credentials live in the data dir too.
 	// Media is the shared inbound staging dir, so it is re-allowed below.
+	// This comes after the allow_paths allows, which therefore cannot open
+	// any of it again; only media and this brain's calendar files can.
 	b.WriteString(";; Bridge runtime data (media staging re-allowed below)\n")
 	// Both names the data dir has had, whichever is active: an install that
 	// moved to ~/.fridolin can leave the old folder behind, with an old copy
@@ -402,7 +424,7 @@ func (sp *SandboxProfiler) Profile(brainID string) (string, error) {
 	// db_path can put the DB anywhere. Its folder goes too, unless it is a
 	// folder the brain needs (HOME or above, a temp dir), where denying it
 	// would take the brain's home or scratch space away.
-	dbFiles := []string{}
+	var dbFiles []string
 	if sp.dbPath != "" {
 		for _, suffix := range []string{"", "-wal", "-shm", "-journal"} {
 			dbFiles = append(dbFiles, sp.dbPath+suffix)
@@ -447,23 +469,6 @@ func (sp *SandboxProfiler) Profile(brainID string) (string, error) {
 		b.deny("file-read*", "subpath", sp.credsDir)
 		b.deny("file-write*", "subpath", sp.credsDir)
 		b.calendarAllows(sp.credsDir, brainID)
-		b.WriteString("\n")
-	}
-
-	// ── user-supplied extras ─────────────────────────────────────────────
-	if len(sp.extraDeny) > 0 {
-		b.WriteString(";; Extra denies from config\n")
-		for _, p := range sp.extraDeny {
-			b.deny("file-read*", "subpath", p)
-			b.deny("file-write*", "subpath", p)
-		}
-		b.WriteString("\n")
-	}
-	if len(sp.extraAllow) > 0 {
-		b.WriteString(";; Extra allows from config (override the denies above)\n")
-		for _, p := range sp.extraAllow {
-			b.allow("file-read*", "subpath", p)
-		}
 		b.WriteString("\n")
 	}
 

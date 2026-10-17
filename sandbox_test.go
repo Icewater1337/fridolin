@@ -948,3 +948,43 @@ func TestSandboxGitConfigModes(t *testing.T) {
 		})
 	}
 }
+
+// TestSandboxAllowPathsCannotOpenBridgeSecrets: allow_paths re-opens what the
+// home-folder defaults close, but not the bridge's own secrets or another
+// brain's folder. Their denies follow the allow_paths allows, so an entry
+// that happens to cover the data dir, the credentials dir, the database or
+// the folder that holds the brains opens none of it.
+func TestSandboxAllowPathsCannotOpenBridgeSecrets(t *testing.T) {
+	home := canonicalDir(t.TempDir())
+	t.Setenv("HOME", home)
+	cfg := &Config{
+		DataDir: home + "/.fridolin",
+		DBPath:  home + "/wa-store/bridge.db",
+		Sandbox: SandboxConfig{
+			CredentialsDir: home + "/creds",
+			AllowPaths:     []string{home + "/.fridolin", home + "/creds", home + "/wa-store", home + "/assistant", home + "/Documents/share"},
+		},
+	}
+	dirs := map[string]string{"a": home + "/assistant/a", "b": home + "/assistant/b"}
+	lines := strings.Split(mustProfile(t, NewSandboxProfiler(dirs, cfg), "a"), "\n")
+	for _, c := range []struct{ allowed, denied string }{
+		{"/.fridolin", "/.fridolin"},
+		{"/creds", "/creds"},
+		{"/wa-store", "/wa-store"},
+		{"/assistant", "/assistant/b"},
+	} {
+		for _, op := range []string{"file-read*", "file-write*"} {
+			allow := slices.Index(lines, `(allow file-read* (subpath "`+home+c.allowed+`"))`)
+			deny := slices.Index(lines, `(deny `+op+` (subpath "`+home+c.denied+`"))`)
+			if allow < 0 || deny < allow {
+				t.Errorf("%s: %s deny on line %d does not follow the allow_paths allow on line %d", c.denied, op, deny, allow)
+			}
+		}
+	}
+	// A home-folder default still opens: its deny comes before the allow.
+	allow := slices.Index(lines, `(allow file-read* (subpath "`+home+`/Documents/share"))`)
+	deny := slices.Index(lines, `(deny file-read* (subpath "`+home+`/Documents"))`)
+	if deny < 0 || allow < deny {
+		t.Errorf("allow_paths no longer re-opens Documents/share (deny line %d, allow line %d)", deny, allow)
+	}
+}

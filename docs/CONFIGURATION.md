@@ -277,6 +277,8 @@ credentials from the keychain and fails with "Not logged in" without it.
 
 `deny_paths` adds your own (denied for reading and writing). `allow_paths`
 re-opens reading something the defaults closed; writing there stays denied.
+It cannot re-open another brain's folder, nor the bridge's own data
+directory, database, config file or credentials folder.
 Entries must be absolute or start with `~/`; the bridge refuses a config with
 a relative one, which would protect nothing.
 

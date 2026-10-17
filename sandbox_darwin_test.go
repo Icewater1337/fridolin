@@ -575,6 +575,47 @@ func TestSandboxDeniesTheConfigFile(t *testing.T) {
 	}
 }
 
+// TestSandboxAllowPathsKeepBridgeSecrets: under the real sandbox-exec, an
+// allow_paths entry covering the data dir opens neither the dashboard token
+// nor the database, and one covering the folder that holds the brains opens
+// no other brain, while media stays readable and an entry inside a
+// default-denied home folder still works.
+func TestSandboxAllowPathsKeepBridgeSecrets(t *testing.T) {
+	requireSandboxExec(t)
+	home := canonicalDir(t.TempDir())
+	t.Setenv("HOME", home)
+	for _, f := range []string{".fridolin/dashboard.token", ".fridolin/bridge.db", ".fridolin/media/photo.jpg", "Documents/share/ok.txt", "a/notes.md", "team/b/diary.md"} {
+		p := filepath.Join(home, f)
+		if err := os.MkdirAll(filepath.Dir(p), 0o700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(p, []byte("content of "+f), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	cfg := &Config{
+		DataDir: filepath.Join(home, ".fridolin"),
+		DBPath:  filepath.Join(home, ".fridolin", "bridge.db"),
+		Sandbox: SandboxConfig{AllowPaths: []string{filepath.Join(home, ".fridolin"), filepath.Join(home, "team"), filepath.Join(home, "Documents", "share")}},
+	}
+	sp := NewSandboxProfiler(map[string]string{"a": filepath.Join(home, "a"), "b": filepath.Join(home, "team", "b")}, cfg)
+	for _, c := range []struct {
+		path         string
+		write, allow bool
+	}{
+		{".fridolin/dashboard.token", false, false},
+		{".fridolin/bridge.db", false, false},
+		{"team/b/diary.md", false, false},
+		{"team/b/planted.md", true, false},
+		{".fridolin/media/photo.jpg", false, true},
+		{"Documents/share/ok.txt", false, true},
+	} {
+		if allowed, out := sandboxTry(t, sp, filepath.Join(home, "a"), c.write, filepath.Join(home, c.path)); allowed != c.allow {
+			t.Errorf("%s (write %v): allowed=%v, want %v (output %q)", c.path, c.write, allowed, c.allow, out)
+		}
+	}
+}
+
 // TestSandboxLetsTheCLICreateItsState: on a home where the Claude CLI never
 // ran, ~/.claude does not exist yet. It sits above denied paths, so it is
 // pinned, but only against rename and delete: the CLI must still be able to
