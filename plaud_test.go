@@ -337,7 +337,7 @@ func TestPlaudFirstSyncThenForwardsNewRecordings(t *testing.T) {
 	if len(st.Pending) != 0 || !contains(st.Seen, plaudNew) {
 		t.Fatalf("after transcript: %+v", st)
 	}
-	files, _ := filepath.Glob(filepath.Join(tb.cfgs.Get().MediaDir, "plaud", "*Team sync.txt"))
+	files, _ := filepath.Glob(filepath.Join(tb.cfgs.Get().MediaDir, "plaud", "* - Team sync - "+plaudNew+".txt"))
 	if len(files) != 1 {
 		t.Fatalf("transcript files = %v", files)
 	}
@@ -642,6 +642,102 @@ func TestPlaudLoginChangingDuringAPollSendsNothing(t *testing.T) {
 			st, _ := tb.plaud.loadState()
 			if st.Account != "u_2" || !contains(st.Seen, plaudNew) || !contains(st.Seen, plaudOld2) || len(st.Pending) != 0 {
 				t.Errorf("state = %+v, want it seeded for u_2", st)
+			}
+		})
+	}
+}
+
+// A recording handed over again, as after a crash before the state was
+// saved, rewrites its transcript file instead of adding a copy, even when
+// it was renamed in Plaud in between.
+func TestPlaudRetryRewritesTheSameTranscript(t *testing.T) {
+	tb, fp := plaudBridge(t, "")
+	if err := plaudDeliver(t, tb, fp); err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, 10*time.Second, "brain reply", func() bool { return len(tb.dev.Outbox()) == 1 })
+
+	details, _ := os.ReadFile(filepath.Join(fp.dir, "file_"+plaudNew+".txt"))
+	fp.write("file_"+plaudNew+".txt", strings.Replace(string(details), "Team sync", "Weekly sync", 1))
+	if err := tb.plaud.saveState(&plaudState{Seen: []string{plaudOld1}, Pending: map[string]float64{plaudNew: float64(time.Now().Unix())}}); err != nil {
+		t.Fatal(err)
+	}
+	if err := tb.plaud.Poll(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, 10*time.Second, "second brain reply", func() bool { return len(tb.dev.Outbox()) == 2 })
+
+	files, _ := filepath.Glob(filepath.Join(tb.cfgs.Get().MediaDir, "plaud", "*"))
+	if len(files) != 1 || !strings.HasSuffix(files[0], " - "+plaudNew+".txt") {
+		t.Fatalf("transcript files = %v, want one named after the recording id", files)
+	}
+	if data, _ := os.ReadFile(files[0]); !strings.Contains(string(data), "Plaud recording: Weekly sync") {
+		t.Errorf("the file was not rewritten:\n%s", data)
+	}
+}
+
+// Brains may write to the media folder, so one can put a symlink where a
+// recording's transcript will go. The transcript replaces the link instead
+// of being written through it to the file it points to.
+func TestPlaudTranscriptReplacesASymlink(t *testing.T) {
+	tb, fp := plaudBridge(t, "")
+	target := filepath.Join(t.TempDir(), "elsewhere.txt")
+	if err := os.WriteFile(target, []byte("keep me"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	dir := filepath.Join(tb.cfgs.Get().MediaDir, "plaud")
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	link := filepath.Join(dir, "01.01.2026 - x - "+plaudNew+".txt")
+	if err := os.Symlink(target, link); err != nil {
+		t.Fatal(err)
+	}
+	if err := plaudDeliver(t, tb, fp); err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, 10*time.Second, "brain reply", func() bool { return len(tb.dev.Outbox()) == 1 })
+
+	if data, _ := os.ReadFile(target); string(data) != "keep me" {
+		t.Errorf("the transcript was written through the link:\n%s", data)
+	}
+	fi, err := os.Lstat(link)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !fi.Mode().IsRegular() {
+		t.Fatalf("the transcript's entry is %v, want a regular file in place of the link", fi.Mode())
+	}
+	if data, _ := os.ReadFile(link); !strings.Contains(string(data), "=== Transcript ===\n[00:00 - 00:04] Speaker 1: Let's ship on Friday.") {
+		t.Errorf("the file lacks the transcript:\n%s", data)
+	}
+}
+
+// The earlier transcript is found whatever characters the media folder's
+// path holds, and only the file of that very recording.
+func TestPlaudTranscriptPathFindsTheEarlierFile(t *testing.T) {
+	const id = "of_00000000000000000000aa"
+	for _, folder := range []string{"media", "media [1]", "media[", "media *?"} {
+		t.Run(folder, func(t *testing.T) {
+			dir := filepath.Join(t.TempDir(), folder)
+			if err := os.MkdirAll(dir, 0o700); err != nil {
+				t.Fatal(err)
+			}
+			fresh := filepath.Join(dir, "17.10.2026 - Weekly sync - "+id+".txt")
+			if got := plaudTranscriptPath(dir, "17.10.2026", "Weekly sync", id); got != fresh {
+				t.Errorf("with no earlier file: %s, want %s", got, fresh)
+			}
+			for _, other := range []string{"16.10.2026 - Team sync - " + id + "b.txt", "16.10.2026 - Team sync - x" + id + ".txt"} {
+				if err := os.WriteFile(filepath.Join(dir, other), nil, 0o600); err != nil {
+					t.Fatal(err)
+				}
+			}
+			earlier := filepath.Join(dir, "16.10.2026 - Team sync - "+id+".txt")
+			if err := os.WriteFile(earlier, nil, 0o600); err != nil {
+				t.Fatal(err)
+			}
+			if got := plaudTranscriptPath(dir, "17.10.2026", "Weekly sync", id); got != earlier {
+				t.Errorf("with an earlier file: %s, want %s", got, earlier)
 			}
 		})
 	}

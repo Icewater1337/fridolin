@@ -31,7 +31,9 @@ off: what you recorded in between still arrives (up to the latest 20).
 Every minute (`plaud.interval_seconds`) Fridolin asks Plaud for recent
 recordings. A new one waits until its transcript is ready (up to three days).
 Then Fridolin writes a `.txt` with the details, Plaud's summary and the
-timestamped transcript to `~/.fridolin/media/plaud/`, and gives it to the brain
+timestamped transcript to `~/.fridolin/media/plaud/` (as
+`DD.MM.YYYY - <name> - <Plaud ID>.txt`; a recording handed over again
+rewrites its file rather than adding a copy), and gives it to the brain
 like a WhatsApp attachment, with an instruction (`plaud.message`; `{name}`,
 `{when}` and `{duration}` are filled in). It runs in the brain you picked, with
 that brain's memory and history.

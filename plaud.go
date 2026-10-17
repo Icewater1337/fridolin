@@ -381,14 +381,14 @@ func (p *PlaudManager) forward(ctx context.Context, id string, br *Brain, jid st
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return false, err
 	}
-	path := safeMediaPath(dir, day+" - "+safePlaudName(name)+".txt")
+	path := plaudTranscriptPath(dir, day, name, id)
 	var body strings.Builder
 	fmt.Fprintf(&body, "Plaud recording: %s\nRecorded: %s\nDuration: %s\nPlaud ID: %s\n\n", name, when, duration, id)
 	if summary != "" {
 		body.WriteString("=== Plaud AI summary ===\n" + summary + "\n\n")
 	}
 	body.WriteString("=== Transcript ===\n" + strings.TrimSpace(transcript) + "\n")
-	if err := os.WriteFile(path, []byte(body.String()), 0o600); err != nil {
+	if err := writeFileAtomic(path, []byte(body.String()), 0o600, false); err != nil {
 		return false, err
 	}
 
@@ -403,6 +403,22 @@ func (p *PlaudManager) forward(ctx context.Context, id string, br *Brain, jid st
 	p.mu.Unlock()
 	log.Printf("plaud %s: handed %q to brain %s", id, name, br.ID())
 	return true, nil
+}
+
+// plaudTranscriptPath is where the transcript of recording id goes in dir.
+// The name ends in the Plaud id, so a retry finds the file it wrote before,
+// even after the recording was renamed, and rewrites it instead of adding
+// a copy. (Writing it atomically also replaces, rather than follows, a
+// symlink a brain may have put there.) The folder is read rather than
+// globbed, since media_dir may contain '[' or '*'.
+func plaudTranscriptPath(dir, day, name, id string) string {
+	entries, _ := os.ReadDir(dir)
+	for _, e := range entries {
+		if strings.HasSuffix(e.Name(), " - "+id+".txt") {
+			return filepath.Join(dir, e.Name())
+		}
+	}
+	return filepath.Join(dir, day+" - "+safePlaudName(name)+" - "+id+".txt")
 }
 
 func safePlaudName(s string) string {
