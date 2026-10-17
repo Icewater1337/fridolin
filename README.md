@@ -339,13 +339,14 @@ What the bridge does about it:
 - **No Status or channels.** WhatsApp Status updates and channels are ignored,
   and the bridge refuses to send to Status, broadcast lists or channels, so
   nothing the assistant writes can end up in your public Status.
-- **Sandbox (macOS).** Each Claude run is wrapped in `sandbox-exec` with reads
-  denied to SSH keys, cloud credentials, shell history, browser and mail data,
-  your Documents/Downloads/Desktop, other Claude sessions' transcripts, the
-  bridge's own database — and to every other brain's directory. Add your own
-  paths under `sandbox.deny_paths`. When the sandbox is on but cannot be set
-  up, the brain refuses the message with an error instead of running
-  without it.
+- **Sandbox (macOS).** Each Claude run is wrapped in `sandbox-exec`. Brains
+  can neither read nor write SSH keys, cloud credentials, shell history,
+  browser and mail data, your Documents/Downloads/Desktop, the bridge's own
+  database — or any other brain's directory — and cannot rename the folders
+  above them to get around that. Other Claude sessions' transcripts are
+  unreadable. Add your own paths under `sandbox.deny_paths`. When the sandbox
+  is on but cannot be set up, the brain refuses the message with an error
+  instead of running without it.
 - **Brain isolation.** Brains have separate directories, sessions, histories,
   and calendar credentials.
 - **A guarded dashboard.** It only listens on localhost, rejects requests

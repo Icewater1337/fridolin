@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -26,8 +27,11 @@ const sandboxExecPath = "/usr/bin/sandbox-exec"
 // determined attacker with code execution.
 //
 // Brains keep write access by default, so a brain can still maintain its own
-// notes and files. Add anything else that must stay unreadable to
-// sandbox.deny_paths in config.json.
+// notes and files. Everything denied is denied for writes as well, and the
+// folders above it cannot be renamed: the sandbox matches paths, not files,
+// so a brain that moved ~/.ssh (or the folder holding another brain) to a
+// new name could read it there. Add anything else that must stay unreadable
+// to sandbox.deny_paths in config.json.
 type SandboxProfiler struct {
 	mu sync.RWMutex
 
@@ -94,12 +98,11 @@ func (sp *SandboxProfiler) Enabled() bool {
 	return sp.enabled
 }
 
-// defaultDenySubpaths are home-relative directories no brain should read.
-// Keychains are deliberately absent: the Claude CLI reads its credentials from
-// the macOS keychain, and denying it breaks the CLI with "Not logged in".
+// defaultDenySubpaths are home-relative directories no brain may read or
+// write. Keychains are deliberately absent: the Claude CLI reads its
+// credentials from the macOS keychain, and denying it breaks the CLI with
+// "Not logged in".
 var defaultDenySubpaths = []string{
-	".claude/projects", // other Claude Code sessions' transcripts
-	".claude/sessions",
 	".ssh",
 	".gnupg",
 	".aws",
@@ -127,7 +130,8 @@ var defaultDenySubpaths = []string{
 	"Library/Group Containers",
 }
 
-// defaultDenyLiterals are individual home-relative files to deny.
+// defaultDenyLiterals are individual home-relative files to deny, for
+// reading and writing.
 var defaultDenyLiterals = []string{
 	".claude/history.jsonl",
 	".git-credentials",
@@ -179,10 +183,25 @@ func (sp *SandboxProfiler) Profile(brainID string) (string, error) {
 	b.WriteString(";; Cross-session state, credentials, and personal data stores\n")
 	for _, sub := range defaultDenySubpaths {
 		b.deny("file-read*", "subpath", filepath.Join(home, sub))
+		b.deny("file-write*", "subpath", filepath.Join(home, sub))
 	}
 	for _, lit := range defaultDenyLiterals {
 		b.deny("file-read*", "literal", filepath.Join(home, lit))
+		b.deny("file-write*", "literal", filepath.Join(home, lit))
 	}
+	// Claude Code's record of every session, yours included: transcripts in
+	// projects/, one file per running CLI in sessions/. The CLI writes its
+	// own run's files there, so only reading is denied, and moving files
+	// out: a rename is checked as file-write-unlink on its source, and a
+	// transcript moved elsewhere could be read there. The CLI deletes its
+	// sessions/<pid>.json on exit, so sessions/ keeps unlink and only the
+	// folder itself is pinned.
+	projects := filepath.Join(home, ".claude", "projects")
+	sessions := filepath.Join(home, ".claude", "sessions")
+	b.deny("file-read*", "subpath", projects)
+	b.deny("file-write-unlink", "subpath", projects)
+	b.deny("file-read*", "subpath", sessions)
+	b.pin(sessions)
 	if !sp.plaudShared {
 		// The Plaud CLI's login, unless plaud.brain_access shares it.
 		b.deny("file-read*", "subpath", filepath.Join(home, ".plaud"))
@@ -202,11 +221,13 @@ func (sp *SandboxProfiler) Profile(brainID string) (string, error) {
 		}
 	} else {
 		b.WriteString(";; Git configuration: readable, never writable\n")
-		for _, f := range gitFiles {
-			b.deny("file-write*", "literal", f)
-		}
-		b.deny("file-write*", "subpath", filepath.Join(home, ".config", "git"))
 	}
+	// Never writable in either mode; denied files must not be renamable
+	// either, or a brain could read them under their new name.
+	for _, f := range gitFiles {
+		b.deny("file-write*", "literal", f)
+	}
+	b.deny("file-write*", "subpath", filepath.Join(home, ".config", "git"))
 	b.WriteString("\n")
 
 	// ── bridge runtime dir ───────────────────────────────────────────────
@@ -247,6 +268,11 @@ func (sp *SandboxProfiler) Profile(brainID string) (string, error) {
 		b.WriteString("\n")
 	}
 
+	// ── the folders above every denied path ──────────────────────────────
+	b.WriteString(";; Folders above the denied paths: not renamable or removable\n")
+	b.pinParents(home, resolvePath(home))
+	b.WriteString("\n")
+
 	// ── the brain's own folder ───────────────────────────────────────────
 	// Last, so it wins over any deny above: a brain always reaches its own
 	// files, even when its folder sits inside a default-denied directory.
@@ -270,6 +296,9 @@ type profileBuilder struct {
 	err error
 	// roots are folders a brain cannot replace, with their real paths.
 	roots []pathAlias
+	// denied holds every spelling of every path denied so far, so that
+	// pinParents can protect the folders above them.
+	denied []string
 }
 
 type pathAlias struct{ configured, real string }
@@ -279,18 +308,96 @@ type pathAlias struct{ configured, real string }
 // The sandbox matches real paths, so a rule for a path that runs through a
 // symlink never fires: under a symlinked HOME (or /var instead of
 // /private/var) a brain read ~/.fridolin straight through its real path.
-// deny therefore emits the rule for the real path as well, following every
-// symlink: a deny that covers more only takes access away. The configured
-// spelling stays too, for the day the symlink is replaced by a real folder.
+// deny therefore emits the rule for every spelling (see spellings): a deny
+// that covers more only takes access away.
 func (b *profileBuilder) deny(op, filter, path string) {
+	// Reading a symlink is part of following it, so a read rule on the link
+	// itself would also block what is allowed behind it, such as media under
+	// a symlinked data dir. Writes act on the link, so they need its entry.
+	for _, s := range b.spellings(path, strings.HasPrefix(op, "file-write")) {
+		b.emit("deny "+op, filter, s)
+		b.denied = append(b.denied, s)
+	}
+}
+
+// spellings returns path as configured and its real path, following every
+// symlink, and with entry also the path of its entry: its folder resolved,
+// its own name kept. The configured spelling stays for the day a symlink is
+// replaced by a real folder. The entry matters when path itself is a
+// symlink, such as a ~/.zshrc linked from a dotfiles repo: renaming or
+// deleting it acts on the link, not on its target, so a write rule for the
+// target alone would let a brain swap the link for a file of its own.
+func (b *profileBuilder) spellings(path string, entry bool) []string {
 	p, ok := b.absolute(path)
 	if !ok {
-		return
+		return nil
 	}
 	configured := filepath.Clean(p)
-	b.emit("deny "+op, filter, configured)
-	if real := resolvePath(p); real != configured {
-		b.emit("deny "+op, filter, real)
+	out := []string{configured}
+	if dir := filepath.Dir(configured); entry && dir != configured {
+		out = append(out, filepath.Join(resolvePath(dir), filepath.Base(configured)))
+	}
+	out = append(out, resolvePath(p))
+	return slices.Compact(out)
+}
+
+// pin stops a brain from renaming or removing the folder dir while leaving
+// it free to create and change files inside. A brain that renamed a folder
+// above a denied path took the path out from under its rule (the sandbox
+// matches paths) and read it under the new name; one that replaced such a
+// folder with a symlink redirected what other programs write there.
+//
+// A folder that exists is pinned for every write to the folder itself:
+// rename, delete, chmod, swapping it for a symlink. One that does not exist
+// yet may still be created, because the Claude CLI creates ~/.claude on its
+// first run, but not renamed or removed afterwards; the next run's profile
+// pins it fully.
+func (b *profileBuilder) pin(dir string) {
+	for _, s := range b.spellings(dir, true) {
+		b.pinSpelling(s)
+		b.denied = append(b.denied, s)
+	}
+}
+
+func (b *profileBuilder) pinSpelling(dir string) {
+	if _, err := os.Lstat(dir); err == nil {
+		b.emit("deny file-write*", "literal", dir)
+	} else {
+		// file-write-unlink is what the sandbox checks on the source of a
+		// rename, and on a delete.
+		b.emit("deny file-write-unlink", "literal", dir)
+	}
+}
+
+// pinParents pins every folder above a denied path, up to and including
+// HOME (either spelling), or up to / for a path outside HOME. Each folder
+// is pinned in every spelling, so a symlink on the way (a brains folder
+// linked from another volume) cannot be renamed either.
+func (b *profileBuilder) pinParents(homes ...string) {
+	seen := map[string]bool{}
+	var dirs []string
+	for _, p := range b.denied {
+		for dir := filepath.Dir(p); !seen[dir]; dir = filepath.Dir(dir) {
+			seen[dir] = true
+			dirs = append(dirs, dir)
+			if dir == string(filepath.Separator) || slices.Contains(homes, dir) {
+				break
+			}
+		}
+	}
+	pinned := map[string]bool{}
+	var spelled []string
+	for _, dir := range dirs {
+		for _, s := range b.spellings(dir, true) {
+			if !pinned[s] {
+				pinned[s] = true
+				spelled = append(spelled, s)
+			}
+		}
+	}
+	sort.Strings(spelled)
+	for _, dir := range spelled {
+		b.pinSpelling(dir)
 	}
 }
 

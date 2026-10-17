@@ -424,3 +424,116 @@ func TestSandboxConfigRejectsUnusablePaths(t *testing.T) {
 		})
 	}
 }
+
+// TestSandboxProfilePinsParents: the sandbox matches paths, so a brain that
+// renamed a denied path, or any folder above it, read it under the new name.
+// Every denied path is denied for writes too, and every folder above one is
+// pinned up to HOME (or / outside HOME): fully when it exists, against
+// rename and delete only when it does not, so the CLI can still create
+// ~/.claude on its first run.
+func TestSandboxProfilePinsParents(t *testing.T) {
+	root := canonicalDir(t.TempDir())
+	home := filepath.Join(root, "home")
+	outside := canonicalDir(t.TempDir()) // a sibling of root, not inside it
+	for _, d := range []string{"home/assistant/a", "home/assistant/b", "home/.config"} {
+		if err := os.MkdirAll(filepath.Join(root, d), 0o700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.Mkdir(filepath.Join(outside, "clients"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("HOME", home)
+	cfg := &Config{
+		DataDir: filepath.Join(home, ".fridolin"),
+		Sandbox: SandboxConfig{DenyPaths: []string{filepath.Join(outside, "clients")}},
+	}
+	dirs := map[string]string{"a": filepath.Join(home, "assistant", "a"), "b": filepath.Join(home, "assistant", "b")}
+	profile := mustProfile(t, NewSandboxProfiler(dirs, cfg), "a")
+	lines := strings.Split(profile, "\n")
+
+	cases := []struct {
+		name, rule string
+		want       bool
+	}{
+		{"home-relative literal denied for writes", `(deny file-write* (literal "` + home + `/.git-credentials"))`, true},
+		{"home-relative subpath denied for writes", `(deny file-write* (subpath "` + home + `/.ssh"))`, true},
+		{"transcripts cannot be moved out", `(deny file-write-unlink (subpath "` + home + `/.claude/projects"))`, true},
+		{"transcripts stay writable for the CLI", `(deny file-write* (subpath "` + home + `/.claude/projects"))`, false},
+		{"home pinned", `(deny file-write* (literal "` + home + `"))`, true},
+		{"nothing above home pinned", `(literal "` + root + `"))`, false},
+		{"other brain's parent pinned", `(deny file-write* (literal "` + home + `/assistant"))`, true},
+		{"existing ~/.config pinned fully", `(deny file-write* (literal "` + home + `/.config"))`, true},
+		{"missing ~/.claude still creatable", `(deny file-write-unlink (literal "` + home + `/.claude"))`, true},
+		{"missing ~/.claude not pinned fully", `(deny file-write* (literal "` + home + `/.claude"))`, false},
+		{"missing sessions folder pinned", `(deny file-write-unlink (literal "` + home + `/.claude/sessions"))`, true},
+		// The CLI deletes its sessions/<pid>.json on exit.
+		{"session files stay removable", `(deny file-write-unlink (subpath "` + home + `/.claude/sessions"))`, false},
+		{"deny path outside home pinned up to /", `(deny file-write* (literal "` + outside + `"))`, true},
+		{"filesystem root pinned", `(deny file-write* (literal "/"))`, true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := slices.Contains(lines, tc.rule) || (!tc.want && strings.Contains(profile, tc.rule)); got != tc.want {
+				t.Errorf("profile has %s: %v, want %v", tc.rule, got, tc.want)
+			}
+		})
+	}
+	t.Run("own folder stays last", func(t *testing.T) {
+		own := `(allow file-write* (subpath "` + dirs["a"] + `"))`
+		if i := slices.Index(lines, own); i < 0 || slices.ContainsFunc(lines[i:], func(l string) bool { return strings.HasPrefix(l, "(deny") }) {
+			t.Errorf("a deny follows the own-folder allow, or it is missing:\n%s", profile)
+		}
+	})
+}
+
+// TestSandboxDeniesEverySpelling: a deny covers the path as configured and
+// its real path; a write deny also covers its entry (folder resolved, own
+// name kept). The entry matters for a symlink such as a dotfiles-linked
+// file: renaming or deleting it acts on the link, which a rule for the
+// target alone does not cover. Read rules leave the link alone, because
+// following it reads it, and that would block what is allowed behind it.
+func TestSandboxDeniesEverySpelling(t *testing.T) {
+	root := canonicalDir(t.TempDir())
+	home := filepath.Join(root, "home")
+	for _, d := range []string{"home", "dotfiles/config", "vault/gh"} {
+		if err := os.MkdirAll(filepath.Join(root, d), 0o700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for link, target := range map[string]string{
+		filepath.Join(home, ".config"):                  filepath.Join(root, "dotfiles", "config"),
+		filepath.Join(root, "dotfiles", "config", "gh"): filepath.Join(root, "vault", "gh"),
+	} {
+		if err := os.Symlink(target, link); err != nil {
+			t.Fatal(err)
+		}
+	}
+	t.Setenv("HOME", home)
+	profile := mustProfile(t, NewSandboxProfiler(map[string]string{"a": filepath.Join(home, "a")}, &Config{}), "a")
+	configured := filepath.Join(home, ".config", "gh")
+	link := filepath.Join(root, "dotfiles", "config", "gh")
+	target := filepath.Join(root, "vault", "gh")
+	for _, c := range []struct {
+		op, path string
+		want     bool
+	}{
+		{"file-read*", configured, true},
+		{"file-read*", link, false},
+		{"file-read*", target, true},
+		{"file-write*", configured, true},
+		{"file-write*", link, true},
+		{"file-write*", target, true},
+	} {
+		rule := `(deny ` + c.op + ` (subpath "` + c.path + `"))`
+		if got := strings.Contains(profile, rule); got != c.want {
+			t.Errorf("profile has %s: %v, want %v", rule, got, c.want)
+		}
+	}
+	// The folders above the link and above its target are pinned too.
+	for _, dir := range []string{filepath.Join(root, "dotfiles", "config"), filepath.Join(root, "vault")} {
+		if rule := `(deny file-write* (literal "` + dir + `"))`; !strings.Contains(profile, rule) {
+			t.Errorf("profile lacks %s", rule)
+		}
+	}
+}

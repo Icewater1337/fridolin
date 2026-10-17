@@ -103,6 +103,8 @@ dashboard migrates that one brain.
 With `sandbox.enabled` (macOS), every run is wrapped in `sandbox-exec`: the
 brain cannot read or write any other brain's folder, the bridge's data folder
 (except the shared media inbox), or the usual secrets (SSH keys, cloud
-credentials, browser and mail data, shell history). Its own folder is always
-readable and writable, even if it lives somewhere the defaults deny. A run
-that cannot be sandboxed is refused, never run without it.
+credentials, browser and mail data, shell history), and it cannot rename or
+delete the folders above them, which would move them out from under the
+sandbox's rules. Its own folder is always readable and writable, even if it
+lives somewhere the defaults deny. A run that cannot be sandboxed is refused,
+never run without it.

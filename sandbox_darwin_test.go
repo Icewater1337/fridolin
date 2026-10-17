@@ -119,6 +119,25 @@ type sandboxLayout struct {
 	otherBrain, denyDir string
 }
 
+// sandboxLayouts are the fake homes the enforcement tests run in.
+func sandboxLayouts() []sandboxLayout {
+	return []sandboxLayout{
+		{name: "canonical home", home: func(t *testing.T) string { return canonicalDir(t.TempDir()) },
+			otherBrain: "b", denyDir: "clients"},
+		// No-break spaces, emoji joiners, quotes and backslashes in folder
+		// names. Go's %q quoting broke the first two silently.
+		{name: "unusual characters", home: func(t *testing.T) string { return canonicalDir(t.TempDir()) },
+			otherBrain: "My\u00a0Brain \"q\" \\ \U0001F468\u200d\U0001F469\u200d\U0001F467",
+			denyDir:    "Screenshot 10.00\u202fAM"},
+		// t.TempDir() is under /var, a symlink to /private/var, so HOME and
+		// the data dir are reached through a symlink. Before the profile
+		// resolved its paths, a brain read the data dir via /private/var.
+		{name: "home under /var", home: func(t *testing.T) string { return filepath.Join(t.TempDir(), "home") },
+			otherBrain: "b", denyDir: "clients"},
+		{name: "symlinked home and folders", home: symlinkedHome, otherBrain: "b", denyDir: "clients"},
+	}
+}
+
 // sandboxCheck is one access a brain tries under its profile.
 type sandboxCheck struct {
 	name  string
@@ -134,21 +153,6 @@ type sandboxCheck struct {
 // paths and an injected brain can use either.
 func TestSandboxEnforcesProfile(t *testing.T) {
 	requireSandboxExec(t)
-	layouts := []sandboxLayout{
-		{name: "canonical home", home: func(t *testing.T) string { return canonicalDir(t.TempDir()) },
-			otherBrain: "b", denyDir: "clients"},
-		// No-break spaces, emoji joiners, quotes and backslashes in folder
-		// names. Go's %q quoting broke the first two silently.
-		{name: "unusual characters", home: func(t *testing.T) string { return canonicalDir(t.TempDir()) },
-			otherBrain: "My\u00a0Brain \"q\" \\ \U0001F468\u200d\U0001F469\u200d\U0001F467",
-			denyDir:    "Screenshot 10.00\u202fAM"},
-		// t.TempDir() is under /var, a symlink to /private/var, so HOME and
-		// the data dir are reached through a symlink. Before the profile
-		// resolved its paths, a brain read the data dir via /private/var.
-		{name: "home under /var", home: func(t *testing.T) string { return filepath.Join(t.TempDir(), "home") },
-			otherBrain: "b", denyDir: "clients"},
-		{name: "symlinked home and folders", home: symlinkedHome, otherBrain: "b", denyDir: "clients"},
-	}
 	checks := []sandboxCheck{
 		{"own folder read", false, "assistant/a/notes.md", true},
 		{"own folder write", true, "assistant/a/new.md", true},
@@ -167,7 +171,7 @@ func TestSandboxEnforcesProfile(t *testing.T) {
 		{"default-denied Documents", false, "Documents/private.txt", false},
 		{"allow_paths entry", false, "Documents/share/ok.txt", true},
 	}
-	for _, l := range layouts {
+	for _, l := range sandboxLayouts() {
 		t.Run(l.name, func(t *testing.T) {
 			home := l.home(t)
 			t.Setenv("HOME", home)
@@ -193,6 +197,116 @@ func TestSandboxEnforcesProfile(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// TestSandboxRefusesRenames: the sandbox matches paths, not files, so a
+// brain that renamed a denied path, or a folder above one, used to read it
+// under its new name (mv ~/.git-credentials ~/gc && cat ~/gc). Every class
+// of deny must refuse the rename, while the brain's own tree stays free.
+func TestSandboxRefusesRenames(t *testing.T) {
+	requireSandboxExec(t)
+	cases := []struct {
+		name     string
+		from, to string // relative to HOME
+		allow    bool
+	}{
+		{"home-relative literal", ".git-credentials", "gc", false},
+		{"home-relative subpath", ".ssh", "s2", false},
+		{"file out of a subpath", ".ssh/id_ed25519", "id", false},
+		{"other brain's folder", "assistant/{b}", "b2", false},
+		{"other brain's parent", "assistant", "as2", false},
+		{"data dir", ".fridolin", "f2", false},
+		{"file out of the data dir", ".fridolin/dashboard.token", ".fridolin/media/token", false},
+		{"credentials dir", "creds", "c2", false},
+		{"other brain's calendar token", "creds/google_calendar_token_b.json", "t.json", false},
+		{"deny_paths entry", "{deny}", "d2", false},
+		{"folder above a default deny", "Library", "lib2", false},
+		{"another session's transcript", ".claude/projects/other/s.jsonl", "s.jsonl", false},
+		{"the transcripts folder", ".claude/projects", "p2", false},
+		{"the folder above the transcripts", ".claude", "c3", false},
+		{"own file", "assistant/a/notes.md", "assistant/a/renamed.md", true},
+		{"own subfolder", "assistant/a/sub", "assistant/a/sub2", true},
+		{"media file", ".fridolin/media/photo.jpg", ".fridolin/media/p2.jpg", true},
+	}
+	for _, l := range sandboxLayouts() {
+		t.Run(l.name, func(t *testing.T) {
+			home := l.home(t)
+			t.Setenv("HOME", home)
+			sp, ownDir := sandboxFixture(t, home, l.otherBrain, l.denyDir)
+			for _, f := range []string{".git-credentials", "Library/Mail/inbox", ".claude/projects/other/s.jsonl", "assistant/a/sub/f"} {
+				p := filepath.Join(home, f)
+				if err := os.MkdirAll(filepath.Dir(p), 0o700); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.WriteFile(p, []byte("content of "+f), 0o600); err != nil {
+					t.Fatal(err)
+				}
+			}
+			expand := strings.NewReplacer("{b}", l.otherBrain, "{deny}", l.denyDir)
+			try := func(t *testing.T, from, to string, allow bool) {
+				allowed, out := sandboxRun(t, sp, ownDir, "/bin/mv", from, to)
+				if allowed != allow {
+					t.Errorf("mv %s %s: allowed=%v, want %v (output %q)", from, to, allowed, allow, out)
+				}
+				if allowed {
+					// Put it back for the cases that follow.
+					if err := os.Rename(to, from); err != nil {
+						t.Fatal(err)
+					}
+				}
+			}
+			for _, c := range cases {
+				t.Run(c.name, func(t *testing.T) {
+					try(t, filepath.Join(home, expand.Replace(c.from)), filepath.Join(home, c.to), c.allow)
+				})
+			}
+			// The folders above a brain are pinned in every spelling: with a
+			// symlinked brains folder, the real folder that holds brain b,
+			// and the one above that, cannot be renamed either.
+			for _, c := range []struct{ name, of, to string }{
+				{"other brain's parent, by its real path", "assistant/{b}", "as3"},
+				{"the folder above that, by its real path", "assistant", "../e2"},
+			} {
+				t.Run(c.name, func(t *testing.T) {
+					real, err := filepath.EvalSymlinks(filepath.Join(home, expand.Replace(c.of)))
+					if err != nil {
+						t.Fatal(err)
+					}
+					try(t, filepath.Dir(real), filepath.Join(home, c.to), false)
+				})
+			}
+		})
+	}
+}
+
+// TestSandboxLetsTheCLICreateItsState: on a home where the Claude CLI never
+// ran, ~/.claude does not exist yet. It sits above denied paths, so it is
+// pinned, but only against rename and delete: the CLI must still be able to
+// create it and write its state, and the brain must not be able to move it
+// once it exists.
+func TestSandboxLetsTheCLICreateItsState(t *testing.T) {
+	requireSandboxExec(t)
+	home := canonicalDir(t.TempDir())
+	t.Setenv("HOME", home)
+	sp, ownDir := sandboxFixture(t, home, "b", "clients")
+	if _, err := os.Stat(filepath.Join(home, ".claude")); !os.IsNotExist(err) {
+		t.Fatalf("~/.claude exists before the run: %v", err)
+	}
+	steps := []struct {
+		name  string
+		cmd   string
+		allow bool
+	}{
+		{"create its state", `mkdir -p "$HOME/.claude/projects/x" "$HOME/.claude/sessions" && printf '{}' > "$HOME/.claude/projects/x/s.jsonl" && printf '{}' > "$HOME/.claude/sessions/1.json" && printf '{}' > "$HOME/.claude.json"`, true},
+		{"move ~/.claude away", `mv "$HOME/.claude" "$HOME/c2"`, false},
+		{"move the transcripts away", `mv "$HOME/.claude/projects" "$HOME/p2"`, false},
+	}
+	for _, s := range steps {
+		allowed, out := sandboxRun(t, sp, ownDir, "/bin/sh", "-c", s.cmd)
+		if allowed != s.allow {
+			t.Errorf("%s: allowed=%v, want %v (output %q)", s.name, allowed, s.allow, out)
+		}
 	}
 }
 
@@ -283,10 +397,16 @@ func sandboxFixture(t *testing.T, home, otherBrain, denyDir string) (*SandboxPro
 // profile (its own errors start with "sandbox-exec:").
 func sandboxTry(t *testing.T, sp *SandboxProfiler, dir string, write bool, path string) (bool, string) {
 	t.Helper()
-	prog, args := "/bin/cat", []string{path}
 	if write {
-		prog, args = "/bin/sh", []string{"-c", `printf planted > "$1"`, "sh", path}
+		return sandboxRun(t, sp, dir, "/bin/sh", "-c", `printf planted > "$1"`, "sh", path)
 	}
+	return sandboxRun(t, sp, dir, "/bin/cat", path)
+}
+
+// sandboxRun runs prog with args as brain a under its profile, from dir,
+// and reports whether it succeeded; see sandboxTry.
+func sandboxRun(t *testing.T, sp *SandboxProfiler, dir, prog string, args ...string) (bool, string) {
+	t.Helper()
 	bin, argv, err := sp.Command("a", prog, args)
 	if err != nil {
 		t.Fatal(err)

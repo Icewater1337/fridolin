@@ -60,11 +60,11 @@ const SECTIONS = [
   {
     id: 'sandbox',
     title: 'Sandbox',
-    intro: 'macOS only. Every brain run is wrapped in sandbox-exec: brains cannot read other brains’ folders, your keys, mail, messages, browser profiles, Documents, Desktop or Downloads.',
+    intro: 'macOS only. Every brain run is wrapped in sandbox-exec: brains cannot read or change other brains’ folders, your keys, mail, messages, browser profiles, Documents, Desktop or Downloads.',
     fields: [
       { key: 'sandbox.enabled', type: 'bool', label: 'Sandbox brains', help: 'Strongly recommended while brains may use tools without asking.' },
-      { key: 'sandbox.deny_paths', type: 'list', mono: true, label: 'Also block', placeholder: '~/clients', validate: absPath, addLabel: 'Add folder', help: 'Extra folders brains must not read. Absolute, or starting with ~/.' },
-      { key: 'sandbox.allow_paths', type: 'list', mono: true, label: 'Re-allow', placeholder: '~/Documents/assistant-share', validate: absPath, addLabel: 'Add folder', help: 'Folders to open again after the built-in blocks. Rarely needed. Absolute, or starting with ~/.' },
+      { key: 'sandbox.deny_paths', type: 'list', mono: true, label: 'Also block', placeholder: '~/clients', validate: absPath, addLabel: 'Add folder', help: 'Extra folders brains must not read or change. Absolute, or starting with ~/.' },
+      { key: 'sandbox.allow_paths', type: 'list', mono: true, label: 'Re-allow', placeholder: '~/Documents/assistant-share', validate: absPath, addLabel: 'Add folder', help: 'Folders brains may read again despite the built-in blocks (reading only). Rarely needed. Absolute, or starting with ~/.' },
       { key: 'sandbox.git_config', type: 'select', def: 'read', label: 'Git settings (~/.gitconfig)', options: [['read', 'Readable — brains can commit in their folder'], ['deny', 'Blocked']] },
       { key: 'sandbox.credentials_dir', type: 'text', mono: true, label: 'Credentials folder', placeholder: 'not set', help: 'A folder of per-brain credential files. Each brain may read only its own calendar credentials there. Absolute, or starting with ~/.' },
     ],

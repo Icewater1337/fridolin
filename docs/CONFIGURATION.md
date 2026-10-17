@@ -191,7 +191,8 @@ profile. Changes (including added or removed brains) apply to the next run of
 every brain. If the profile cannot be built or `/usr/bin/sandbox-exec` is
 missing, the run is refused: the chat gets an error, the bridge log names the
 cause, and Claude never starts unsandboxed. Classic mode (`brain_mode` off) is
-not sandboxed. The profile is allow-by-default with reads denied to:
+not sandboxed. The profile is allow-by-default. Brains can neither read nor
+write:
 
 - every **other brain's** working directory
 - `~/.ssh`, `~/.gnupg`, `~/.aws`, `~/.config/gh`, `~/.config/gcloud`,
@@ -200,16 +201,32 @@ not sandboxed. The profile is allow-by-default with reads denied to:
 - `~/Documents`, `~/Downloads`, `~/Desktop`, `~/Movies`, `~/Music`, `~/Pictures`
 - `~/Library/Mail`, `Messages`, `Calendars`, `Safari`, Chrome and Firefox
   profiles, `Containers`, `Group Containers`, Contacts, Notes
-- other Claude Code sessions' transcripts (`~/.claude/projects`, `~/.claude/sessions`)
 - the bridge's data directory — except `media/` and the brain's own calendar
   credentials
+
+Other Claude Code sessions' records (`~/.claude/projects`,
+`~/.claude/sessions`, yours included) are unreadable, but the CLI writes its
+own run's files there, so writing stays allowed. Transcripts cannot be moved
+or deleted; the small per-process files in `sessions/` can (the CLI deletes
+its own on exit).
+
+Renaming counts as writing. The sandbox matches paths, not files, so a brain
+that renamed `~/.ssh`, or the folder that holds another brain, used to read
+it under the new name. Nothing denied can be renamed or deleted, apart from
+the per-process files in `~/.claude/sessions`, and neither can any folder
+above it, up to your home folder (or up to `/` for a path outside it).
+Brains can still create and change files inside those folders. A folder
+above a denied path that does not exist yet can be created, because the
+Claude CLI creates `~/.claude` on its first run; from the next run on it is
+pinned too.
 
 `~/Library/Keychains` is deliberately **not** denied: the Claude CLI reads its
 credentials from the keychain and fails with "Not logged in" without it.
 
-`deny_paths` adds your own. `allow_paths` re-opens something the defaults
-closed (read access). Entries must be absolute or start with `~/`; the bridge
-refuses a config with a relative one, which would protect nothing.
+`deny_paths` adds your own (denied for reading and writing). `allow_paths`
+re-opens reading something the defaults closed; writing there stays denied.
+Entries must be absolute or start with `~/`; the bridge refuses a config with
+a relative one, which would protect nothing.
 
 The sandbox compares real paths, so every deny covers both the path as
 configured and the path it reaches through symlinks (a home on another
