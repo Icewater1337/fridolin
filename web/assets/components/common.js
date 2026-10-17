@@ -89,8 +89,12 @@ export function timeAgo(ts, prefix = '') {
   return h('time.rel', { datetime: d.toISOString(), title: absTime(d), dataset: { ts: d.toISOString(), prefix } }, prefix + relTime(d));
 }
 
-setInterval(() => {
-  document.querySelectorAll('time.rel[data-ts]').forEach((el) => {
-    el.textContent = (el.dataset.prefix || '') + relTime(el.dataset.ts);
-  });
-}, 15000);
+/** Keeps every timeAgo() on the page current; the app starts it once. */
+export function keepTimesFresh() {
+  setInterval(() => {
+    if (document.hidden) return;
+    document.querySelectorAll('time.rel[data-ts]').forEach((el) => {
+      el.textContent = (el.dataset.prefix || '') + relTime(el.dataset.ts);
+    });
+  }, 15000);
+}

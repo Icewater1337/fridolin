@@ -46,7 +46,7 @@ export default {
     ctx.dirty = () => editing;
     const markEditing = (el) => { el.addEventListener('input', () => { editing = true; }); return el; };
 
-    const refresh = async () => { st = await get('/api/site'); renderAll(); };
+    const refresh = async () => { st = await get('/api/site', { signal: ctx.signal }); renderAll(); };
     // Redraw a card only when what it shows changed, so a button is never
     // replaced under the pointer.
     let statusSig = '';
@@ -62,7 +62,7 @@ export default {
       if (!editing && sig(st.settings.proposals, st.settings.builders) !== proposalSig) { renderProposals(); renderBuilders(); }
     }, () => (st && st.deploy && st.deploy.state === 'running' ? 1500 : 5000));
 
-    get('/api/site').then((s) => { st = s; renderAll(); }).catch((e) => mount(statusCard, callout('bad', 'Could not load the site', e.message)));
+    get('/api/site', { signal: ctx.signal }).then((s) => { st = s; renderAll(); }).catch((e) => { if (!ctx.dead) mount(statusCard, callout('bad', 'Could not load the site', e.message)); });
 
     function renderAll() {
       editing = false;
@@ -247,7 +247,7 @@ export default {
         mount(proposalsCard, head, h('p.muted', 'Brains you allow to build the site (below) propose their work here. You review it and deploy it — they cannot.'));
         return;
       }
-      const { proposals } = await get('/api/site/proposals');
+      const { proposals } = await get('/api/site/proposals', { signal: ctx.signal });
       if (!proposals.length) {
         mount(proposalsCard, head, h('p.muted', 'Nothing waiting. Ask a builder brain for a page — on WhatsApp, or here on the Build page.'));
         return;
@@ -285,7 +285,7 @@ export default {
         mount(buildersCard, head, h('p.muted', 'Connect a repository first.'));
         return;
       }
-      const { brains } = await get('/api/site/builders');
+      const { brains } = await get('/api/site/builders', { signal: ctx.signal });
       mount(buildersCard, head,
         h('p.small', 'A brain you allow gets the site-builder skills and tools, and a workspace of its own (a clone of the repository in its folder, under .fridolin-site). It builds and previews inside its sandbox and can only propose; you merge and deploy here.'),
         brains.length ? h('div.site-builders', brains.map((br) => toggle({
@@ -345,7 +345,7 @@ export default {
 
     // ── people ─────────────────────────────────────────────────────────
     async function renderPeople() {
-      const { users, roles } = await get('/api/site/users');
+      const { users, roles } = await get('/api/site/users', { signal: ctx.signal });
       const roleSelect = (value, kind, onChange) => {
         const opts = roles.filter((r) => kind === 'google' || r !== 'admin');
         const sel = select(opts, value);

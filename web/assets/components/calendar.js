@@ -49,15 +49,18 @@ export function googleClientSetup({ redirectUri, onSaved, compact = false } = {}
     redirectUri ? h('p.muted.small', 'Using a “Web application” client instead? Add ', mono(redirectUri, { copy: true }), ' to its authorised redirect URIs.') : null);
 }
 
-/** Settings page card: client status, replace or remove. */
-export function googleClientCard() {
+// A load that failed because the page went away needs no message.
+const failed = (signal, show) => (e) => { if (!(signal && signal.aborted)) show(e); };
+
+/** Settings page card: client status, replace or remove. signal is the page's. */
+export function googleClientCard({ signal } = {}) {
   const el = h('section.card.settings-section', { id: 'sec-google' },
     h('h2', 'Google sign-in'),
     h('p.muted.section-intro', 'Brains can connect a Google account for their calendar. Google needs an OAuth client from a Google Cloud project for that — you set it up once here, then every brain signs in with one click on its own page.'));
   const body = h('div', loading('Loading…'));
   el.appendChild(body);
   async function refresh() {
-    const c = await get('/api/google/client');
+    const c = await get('/api/google/client', { signal });
     if (!c.configured) {
       mount(body, googleClientSetup({ redirectUri: c.redirect_uri, onSaved: refresh }));
       return;
@@ -91,18 +94,18 @@ export function googleClientCard() {
       h('div.actions', replaceBtn, removeBtn),
       replaceBox);
   }
-  refresh().catch((e) => mount(body, callout('bad', 'Could not load', e.message)));
+  refresh().catch(failed(signal, (e) => mount(body, callout('bad', 'Could not load', e.message))));
   return el;
 }
 
-/** Brain page card: connect, choose calendars, disconnect. */
-export function calendarCard(brainId) {
+/** Brain page card: connect, choose calendars, disconnect. signal is the page's. */
+export function calendarCard(brainId, { signal } = {}) {
   const el = h('div.card', loading('Checking calendar…'));
   let selection = null; // Set of calendar ids being edited
   let dflt = '';
 
   async function refresh() {
-    const s = await get(`/api/brains/${encodeURIComponent(brainId)}/calendar`);
+    const s = await get(`/api/brains/${encodeURIComponent(brainId)}/calendar`, { signal });
     render(s);
   }
 
@@ -195,7 +198,7 @@ export function calendarCard(brainId) {
       h('div.actions', cals.length ? saveBtn : null, connectButton('Switch account'), disconnectBtn));
   }
 
-  refresh().catch((e) => mount(el, callout('bad', 'Could not check the calendar', e.message)));
+  refresh().catch(failed(signal, (e) => mount(el, callout('bad', 'Could not check the calendar', e.message))));
   el.refresh = refresh;
   return el;
 }

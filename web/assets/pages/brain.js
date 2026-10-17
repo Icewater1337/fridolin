@@ -45,7 +45,7 @@ export default {
       driftBox,
       h('section.section', h('h2.section-title', 'Now'), liveBox),
       h('section.section', h('h2.section-title', 'Settings'), formBox),
-      h('section.section', h('h2.section-title', 'Calendar'), calendarCard(id)),
+      h('section.section', h('h2.section-title', 'Calendar'), calendarCard(id, { signal: ctx.signal })),
       h('section.section',
         h('div.section-head', h('h2.section-title', 'Recent messages'), btn('All of this brain’s activity', { href: `#/activity/${encodeURIComponent(id)}`, small: true, kind: 'ghost', icon: 'right' })),
         actBox),
@@ -53,7 +53,7 @@ export default {
 
     ctx.dirty = () => formDirty;
 
-    get('/api/config').then((c) => { cfg = c; if (brain && !formDirty) renderForm(true); }).catch(() => {});
+    get('/api/config', { signal: ctx.signal }).then((c) => { cfg = c; if (brain && !formDirty) renderForm(true); }).catch(() => {});
 
     const poller = ctx.poll(async (signal) => {
       const list = await get('/api/brains', { signal });
@@ -204,7 +204,7 @@ export default {
       const markDirty = () => { formDirty = true; saveBar.hidden = false; };
 
       const nameIn = textInput({ value: m.name || '', spellcheck: 'true' });
-      const routing = routingEditor({ routing: m.routing || {}, selfId: id, brains, allowedGroups, onChange: markDirty });
+      const routing = routingEditor({ routing: m.routing || {}, selfId: id, brains, allowedGroups, onChange: markDirty, signal: ctx.signal });
       const modelIn = textInput({ value: m.model || '', class: 'mono', placeholder: eff.brain_model ? `inherit (${eff.brain_model})` : 'inherit' });
       const effortSel = select(EFFORTS.map(([v, l]) => [v, v === '' && eff.brain_effort ? `Inherit (${eff.brain_effort})` : l]), m.effort || '');
       const override = Array.isArray(m.disallowed_tools);

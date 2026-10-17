@@ -25,7 +25,7 @@ export default {
     let brains = [];
     let formDirty = false;
     ctx.dirty = () => formDirty;
-    get('/api/brains').then((b) => { brains = b; }).catch(() => {});
+    get('/api/brains', { signal: ctx.signal }).then((b) => { brains = b; }).catch(() => {});
 
     const poller = ctx.poll(async (signal) => {
       if (formDirty) return;
@@ -125,7 +125,7 @@ export default {
             onClick: async () => {
               const r = await post('/api/plaud/sync');
               toast(r && r.status === 'already checking' ? 'Already checking Plaud…' : 'Checking Plaud…', 'ok');
-              setTimeout(() => poller.kick(), 3000);
+              ctx.timeout(() => poller.kick(), 3000);
             },
           }) : null,
           s.expired ? btn('Connect again', { icon: 'external', onClick: async () => { await post('/api/plaud/connect'); await poller.kick(); } }) : null,

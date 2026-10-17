@@ -13,8 +13,10 @@ import { btn, copyButton } from '../components/buttons.js';
 import { confirmDialog, closeAllDialogs } from '../components/dialog.js';
 import { textInput } from '../components/fields.js';
 import { setChatNames } from '../components/chat.js';
+import { keepTimesFresh } from '../components/common.js';
 import { restartBridge } from './restart.js';
 import { makePoll, pausePollsWhen, resumePolls } from './poll.js';
+import { createPage } from './page.js';
 
 import { ROUTES } from './routes.js';
 import { BRAND, matchRoute, routeHref, activeNav, docTitle } from './router.js';
@@ -74,42 +76,18 @@ let current = null; // the page context in use
 let shell = null;
 let lastHash = '';
 
-function makeCtx(params) {
-  const polls = [];
-  const cleanups = [];
-  const ctx = {
-    params,
-    dead: false,
-    dirty: null, // () => boolean; when true, leaving asks for confirmation
-    /** Polls fn(signal) every interval ms until the page goes; pass signal to its requests. */
-    poll(fn, interval = 3000) {
-      const p = makePoll(fn, interval);
-      polls.push(p);
-      return p;
-    },
-    onCleanup(fn) { cleanups.push(fn); },
-    navigate(hash) { location.hash = hash; },
-    /** Changes the address without leaving the page, e.g. to name a section or filter. */
-    replaceHash(hash) {
-      if (ctx.dead) return;
-      history.replaceState(null, '', hash);
-      lastHash = location.hash;
-    },
-    destroy() {
-      ctx.dead = true;
-      polls.forEach((p) => p.stop());
-      cleanups.forEach((fn) => { try { fn(); } catch (e) { console.error(e); } });
-    },
-  };
-  return ctx;
-}
-
 async function renderRoute() {
   if (!shell) return;
   const match = matchRoute(ROUTES, location.hash);
   if (current) current.destroy();
   closeAllDialogs();
-  const ctx = makeCtx(match ? match.params : {});
+  const ctx = createPage({
+    params: match ? match.params : {},
+    replaceHash(hash) {
+      history.replaceState(null, '', hash);
+      lastHash = location.hash;
+    },
+  });
   current = ctx;
   const root = h('div.page', { 'data-page': match ? match.route.id : 'not-found' });
   mount(shell.page, root);
@@ -316,6 +294,7 @@ onApi('reachable', (ok) => { if (shell) shell.setOffline(!ok); });
 // ── global pollers ───────────────────────────────────────────────────────
 
 setChatNames((jid) => store.groupNames.get(jid));
+keepTimesFresh();
 
 onStatus((s) => { if (shell) shell.paintStatus(s); });
 onIgnoredCount((n) => { if (shell) shell.setChatsBadge(n); });

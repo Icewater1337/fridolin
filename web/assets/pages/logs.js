@@ -47,16 +47,12 @@ export default {
     };
     const scrollEnd = () => { view.scrollTop = view.scrollHeight; };
 
-    let t;
-    filterIn.addEventListener('input', () => {
-      clearTimeout(t);
-      t = setTimeout(() => {
-        filter = filterIn.value.trim().toLowerCase();
-        for (const el of view.children) if (el.dataset.text !== undefined) el.hidden = !matches(el);
-        paintCount();
-        if (auto) scrollEnd();
-      }, 120);
-    });
+    filterIn.addEventListener('input', ctx.debounce(() => {
+      filter = filterIn.value.trim().toLowerCase();
+      for (const el of view.children) if (el.dataset.text !== undefined) el.hidden = !matches(el);
+      paintCount();
+      if (auto) scrollEnd();
+    }, 120));
 
     view.addEventListener('scroll', () => {
       const atEnd = view.scrollHeight - view.scrollTop - view.clientHeight < 24;

@@ -9,14 +9,16 @@ import { toggle, textInput } from './fields.js';
 import { badge, spinner } from './common.js';
 
 /**
- * folderBrowser({start, onPick(path, {create}), pickLabel, newLabel})
+ * folderBrowser({start, onPick(path, {create}), pickLabel, newLabel, signal})
  * returns an element. onPick receives an absolute path; create is true when
- * the folder does not exist yet (typed into "New folder").
+ * the folder does not exist yet (typed into "New folder"). signal (the page's)
+ * stops loading when it aborts.
  */
-export function folderBrowser({ start = '', onPick, pickLabel = 'Use this folder', newLabel = 'Use new folder', newHint = '' }) {
+export function folderBrowser({ start = '', onPick, pickLabel = 'Use this folder', newLabel = 'Use new folder', newHint = '', signal }) {
   let path = start;
   let hidden = false;
   let data = null;
+  let loading = null; // AbortController of the folder being loaded
   const crumbs = h('nav.fb-crumbs', { 'aria-label': 'Folder path' });
   const listEl = h('div.fb-list', { role: 'list' });
   const err = h('p.form-error', { hidden: true });
@@ -53,14 +55,25 @@ export function folderBrowser({ start = '', onPick, pickLabel = 'Use this folder
       h('div.fb-new', nameIn, newBtn, newErr),
       newHint ? h('p.muted.small', newHint) : null));
 
+  // Only the folder clicked last is shown: opening another one stops the
+  // load before it, so a slow answer cannot replace a newer folder.
+  // Leaving the page stops the one in progress.
+  if (signal) signal.addEventListener('abort', () => { if (loading) loading.abort(); }, { once: true });
   async function load(p) {
+    if (loading) loading.abort();
+    if (signal && signal.aborted) return;
+    const mine = new AbortController();
+    loading = mine;
     mount(listEl, h('div.fb-loading.muted', spinner(), h('span', 'Loading…')));
     err.hidden = true;
     try {
-      data = await get(`/api/fs/list${qs({ path: p, hidden: hidden ? 1 : '' })}`);
+      const next = await get(`/api/fs/list${qs({ path: p, hidden: hidden ? 1 : '' })}`, { signal: mine.signal });
+      if (loading !== mine) return;
+      data = next;
       path = data.path;
       paint();
     } catch (e) {
+      if (loading !== mine || mine.signal.aborted) return;
       err.hidden = false;
       err.textContent = e.message;
       if (!data) mount(listEl);

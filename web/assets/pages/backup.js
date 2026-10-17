@@ -378,11 +378,12 @@ export default {
         if (!targetIn.dataset.touched) targetIn.value = `~/restored/${id}-${stamp()}`;
         mount(versionsBox, h('div.muted', loading('Asking Google Drive for the versions…')));
         try {
-          const r = await get(`/api/backup/versions${qs({ brain: id })}`);
+          const r = await get(`/api/backup/versions${qs({ brain: id })}`, { signal: ctx.signal });
           if (currentId() !== id) return;
           versions = r.versions || [];
           paintVersions();
         } catch (e) {
+          if (ctx.dead) return;
           mount(versionsBox, callout('bad', 'Could not list the versions', e.message));
         }
       };
@@ -404,8 +405,7 @@ export default {
             }))) : h('p.muted.small', 'No older versions yet.'));
       };
       brainSel.addEventListener('change', () => { otherIn.hidden = brainSel.value !== '__other'; if (!otherIn.hidden) otherIn.focus(); else loadVersions(); });
-      let t;
-      otherIn.addEventListener('input', () => { clearTimeout(t); t = setTimeout(loadVersions, 500); });
+      otherIn.addEventListener('input', ctx.debounce(loadVersions, 500));
       targetIn.addEventListener('input', () => { targetIn.dataset.touched = '1'; });
 
       async function pickTarget() {
@@ -415,6 +415,7 @@ export default {
           pickLabel: 'Restore into a new folder here',
           newLabel: 'Create and use',
           onPick: (p, { create }) => pending.close(create ? p : `${p}/${id}-restored-${stamp()}`),
+          signal: ctx.signal,
         });
         pending = openDialog({ title: 'Where should the copy go?', body: h('div', h('p.muted', 'Pick a folder; the backup is copied into a new folder inside it. Or type a name for a new folder.'), fb), wide: true, actions: [{ label: 'Cancel', value: null }] });
         const picked = await pending;

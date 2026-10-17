@@ -96,7 +96,7 @@ export default {
                 h('li', 'Go to ', h('strong', 'Settings → Linked Devices → Link a Device'), '.'),
                 h('li', 'Point the camera at this code.')),
               h('p.muted.small', 'The code changes every few seconds — this page keeps it fresh. Use a second number if you can: the bridge answers as whichever account it is linked to.'))));
-        loadQR().catch(() => {});
+        loadQR(ctx.signal).catch(() => {});
       } else {
         qr.img = null;
         qr.url = '';

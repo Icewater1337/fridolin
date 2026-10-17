@@ -9,11 +9,12 @@ import { toggle, field, textInput, nextId } from './fields.js';
 import { mono, loading } from './common.js';
 
 /**
- * routingEditor({routing, selfId, brains, allowedGroups, onChange})
+ * routingEditor({routing, selfId, brains, allowedGroups, onChange, signal})
  * brains: the /api/brains list (to see which brain holds DMs, default, groups).
+ * signal: the page's; once it aborts, the editor stops painting.
  * Returns an element with getValue() → {handles_dms, default, groups}.
  */
-export function routingEditor({ routing = {}, selfId = '', brains = [], allowedGroups = [], onChange }) {
+export function routingEditor({ routing = {}, selfId = '', brains = [], allowedGroups = [], onChange, signal }) {
   const others = brains.filter((b) => b.id && b.id !== selfId && b.manifest);
   const dmOwner = others.find((b) => b.manifest.routing && b.manifest.routing.handles_dms);
   const defOwner = others.find((b) => b.manifest.routing && b.manifest.routing.default);
@@ -91,7 +92,7 @@ export function routingEditor({ routing = {}, selfId = '', brains = [], allowedG
       : 'Only allowed groups are listed. A group can belong to one brain; members still need to tag the bridge (see Settings → Access → Triggers).';
   }
 
-  loadGroups().finally(paintGroups);
+  loadGroups().finally(() => { if (!(signal && signal.aborted)) paintGroups(); });
 
   const el = h('div.routing-editor',
     h('div.field', dm, h('div.help', 'All direct messages from allowed numbers go to this brain. Only one brain can do this.'), dmWarn),

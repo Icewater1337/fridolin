@@ -52,11 +52,7 @@ export default {
       mount(list, spinner());
       poller.kick();
     });
-    let t = null;
-    searchIn.addEventListener('input', () => {
-      clearTimeout(t);
-      t = setTimeout(() => { search = searchIn.value.trim(); paint(); }, 150);
-    });
+    searchIn.addEventListener('input', ctx.debounce(() => { search = searchIn.value.trim(); paint(); }, 150));
 
     mount(root,
       pageHeader('Activity', 'Messages across all brains, newest first. Long messages are folded.'),

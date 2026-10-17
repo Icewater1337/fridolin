@@ -7,7 +7,7 @@ import { h, mount } from '../lib/dom.js';
 import { prettyJSON } from '../lib/format.js';
 import { routingSummary, slugify, BRAIN_ID_RE, EFFORTS, DEFAULT_BACKUP_EXCLUDES } from '../lib/brain.js';
 import { icon } from '../components/icons.js';
-import { toast } from '../components/toast.js';
+import { toast, toastError } from '../components/toast.js';
 import { btn, runBusy } from '../components/buttons.js';
 import { field, textInput, select, toggle, linesArea, linesOf } from '../components/fields.js';
 import { callout, mono, spinner, loading } from '../components/common.js';
@@ -59,8 +59,8 @@ export default {
     async function renderFolder() {
       if (!caps) {
         mount(body, h('div.card', loading('Loading…')));
-        try { caps = await get('/api/fs/capabilities'); } catch (e) { caps = { picker: '', home: '' }; if (e.status !== 401) toast(e.message); }
-        if (ctx.dead || step !== 'folder') return;
+        try { caps = await get('/api/fs/capabilities', { signal: ctx.signal }); } catch (e) { if (ctx.dead) return; caps = { picker: '', home: '' }; toastError(e); }
+        if (step !== 'folder') return;
       }
       const pickerName = caps.picker === 'osascript' ? 'Finder' : 'a folder dialog';
       const typed = textInput({ placeholder: '~/assistant/personal', class: 'mono', 'aria-label': 'Folder path' });
@@ -88,12 +88,13 @@ export default {
             newLabel: 'Create here',
             newHint: 'A new folder is created when you add the brain, not before.',
             onPick: (path, { create }) => { picked = { path, create }; go('inspect'); },
+            signal: ctx.signal,
           }));
         } else {
           mount(panel,
             h('p.muted', 'An absolute path, or one starting with ~/ for your home folder. It may not exist yet.'),
             typedForm);
-          setTimeout(() => typed.focus(), 30);
+          ctx.timeout(() => typed.focus(), 30);
         }
       };
       paintTabs();
@@ -138,7 +139,7 @@ export default {
     async function renderInspect() {
       mount(body, h('div.card.wizard-card', loading('Checking ', mono(picked.path), '…')));
       try {
-        report = await post('/api/brains/inspect', { path: picked.path });
+        report = await post('/api/brains/inspect', { path: picked.path }, { signal: ctx.signal });
       } catch (e) {
         if (ctx.dead) return;
         mount(body, h('div.card.wizard-card', callout('bad', 'Could not check that folder', e.message), h('div.actions', btn('Back', { icon: 'left', onClick: () => go('folder') }))));
@@ -195,12 +196,12 @@ export default {
       let brains = [];
       let cfg = null;
       try {
-        [brains, cfg] = await Promise.all([get('/api/brains'), get('/api/config')]);
+        [brains, cfg] = await Promise.all([get('/api/brains', { signal: ctx.signal }), get('/api/config', { signal: ctx.signal })]);
       } catch (e) {
-        if (e.status === 401) return;
-        toast(e.message);
+        if (ctx.dead || e.status === 401) return;
+        toastError(e);
       }
-      if (ctx.dead || step !== 'configure') return;
+      if (step !== 'configure') return;
       const r = report;
       const taken = new Set(brains.map((b) => b.id));
       let idTouched = false;
@@ -238,6 +239,7 @@ export default {
         routing: { handles_dms: noDM, default: brains.length === 0, groups: [] },
         brains,
         allowedGroups,
+        signal: ctx.signal,
       });
       const modelIn = textInput({ placeholder: eff.brain_model ? `inherit (${eff.brain_model})` : 'inherit', class: 'mono' });
       const effortSel = select(EFFORTS.map(([v, l]) => [v, v === '' && eff.brain_effort ? `Inherit (${eff.brain_effort})` : l]), '');

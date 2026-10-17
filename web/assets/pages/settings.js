@@ -129,7 +129,7 @@ export default {
       btn('Discard', { onClick: () => build(data) }),
       saveBtn);
 
-    const googleCard = googleClientCard();
+    const googleCard = googleClientCard({ signal: ctx.signal });
     mount(root, pageHeader('Settings', null), top, body, saveBar);
     const sub = root.querySelector('.page-heading');
 
