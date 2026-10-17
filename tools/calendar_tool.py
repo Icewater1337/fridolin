@@ -18,24 +18,28 @@ BRIDGE_CALENDAR_DEFAULT), so inside a brain no flags are needed:
 
 --calendar-id picks one of the allowed calendars; anything else is refused.
 
-Without the dashboard
----------------------
-The tool also works on its own, outside a brain. A profile is just a name;
-each one gets its own OAuth client and token in the bridge data directory,
-which keeps separate calendars separate:
+Signing in by hand
+------------------
+The dashboard is the supported way to connect a calendar. Signing in by
+hand, outside a brain, still works. A profile names the pair of files; for
+a brain, it is the brain's ID, the name the bridge looks for:
 
-    <data_dir>/google_calendar_credentials_<profile>.json   (you download this)
-    <data_dir>/google_calendar_token_<profile>.json         (written by auth)
+    google_calendar_credentials_<profile>.json   (an OAuth client you download)
+    google_calendar_token_<profile>.json         (written by auth)
 
-Name profiles after your brains ("personal", "work", …) so the sandbox profile
-generated for a brain grants it exactly its own calendar files. With no
---profile, the unsuffixed google_calendar_credentials.json / _token.json pair
-is used.
+The tool reads and writes them in $BRIDGE_CREDENTIALS_DIR, else
+$BRIDGE_DATA_DIR, else ~/.fridolin (or the old ~/.whatsapp-claude-bridge
+when only that one exists). A brain reads its token from the bridge's
+credentials dir: sandbox.credentials_dir when it is set, else the data
+dir. To sign in for a brain whose credentials dir is not the default, run
+auth with BRIDGE_DATA_DIR set to that dir (BRIDGE_CREDENTIALS_DIR marks a
+run inside a brain, where auth refuses). With no --profile, the unsuffixed
+google_calendar_credentials.json / _token.json pair is used.
 
     1. console.cloud.google.com → new project → enable the Google Calendar API
-    2. APIs & Services → Credentials → Create OAuth 2.0 Client ID (Desktop app)
+    2. APIs & Services → Credentials → Create OAuth client ID (Desktop app)
     3. Download the JSON to the credentials path above
-    4. calendar_tool.py --profile personal auth   (a browser opens for consent)
+    4. calendar_tool.py --profile <brain-id> auth   (a browser opens for consent)
 
 Only auth ever opens a browser, and it refuses to run inside a brain, where
 nobody is at the screen. When a brain's sign-in is revoked or expires, every
@@ -43,12 +47,12 @@ command prints a JSON error saying to reconnect in the dashboard instead.
 
 Usage
 -----
-    calendar_tool.py --profile personal list --from 2026-01-05 --to 2026-01-12
-    calendar_tool.py --profile work create --title "Design review" \
+    calendar_tool.py --profile <brain-id> list --from 2026-01-05 --to 2026-01-12
+    calendar_tool.py --profile <brain-id> create --title "Design review" \
         --start 2026-01-06T14:00:00 --end 2026-01-06T15:00:00 \
         --attendees "alex@example.com,sam@example.com"
-    calendar_tool.py --profile personal free --date 2026-01-06
-    calendar_tool.py --profile personal delete --event-id EVENT_ID
+    calendar_tool.py --profile <brain-id> free --date 2026-01-06
+    calendar_tool.py --profile <brain-id> delete --event-id EVENT_ID
 
 Timezone
 --------
@@ -440,8 +444,8 @@ def cmd_create(args: argparse.Namespace) -> None:
     else:
         body["reminders"] = {"useDefault": False, "overrides": [{"method": "popup", "minutes": 10}]}
 
-    # sendUpdates="all" emails the invitation to attendees. If you would rather
-    # create events quietly, change this to "none".
+    # --send-updates (default all) decides whether Google emails the
+    # invitation to the attendees.
     event = service.events().insert(
         calendarId=target_calendars(args.calendar_id)[0], body=body, sendUpdates=args.send_updates
     ).execute()
@@ -648,7 +652,7 @@ def main() -> None:
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     parser.add_argument("--profile", default=os.environ.get("BRIDGE_BRAIN_ID") or None,
-                        help="Credential profile name, e.g. the brain's name "
+                        help="Credential profile, e.g. a brain's ID "
                              "(default: the brain running this tool, else the unsuffixed files).")
     parser.add_argument("--calendar-id", default=None,
                         help="Calendar ID (default: all of the brain's calendars for list/free, "
