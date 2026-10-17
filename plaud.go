@@ -160,10 +160,7 @@ func (p *PlaudManager) cliHome() string {
 
 func (p *PlaudManager) tokenPath() string { return filepath.Join(p.cliHome(), ".plaud", "tokens.json") }
 
-func (p *PlaudManager) connected() bool {
-	_, err := os.Stat(p.tokenPath())
-	return err == nil
-}
+func (p *PlaudManager) connected() bool { return fileExists(p.tokenPath()) }
 
 // loginStamp changes whenever the login file does: a sign-in, a sign-out, a
 // token refresh, or brain_access switching to the other login. "" means
@@ -200,7 +197,7 @@ func findPlaudCLI(c string) (string, error) {
 	sort.Sort(sort.Reverse(sort.StringSlice(candidates)))
 	candidates = append(candidates, "/opt/homebrew/bin/plaud", "/usr/local/bin/plaud")
 	for _, c := range candidates {
-		if _, err := os.Stat(c); err == nil {
+		if fileExists(c) {
 			return c, nil
 		}
 	}

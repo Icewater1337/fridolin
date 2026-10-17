@@ -725,12 +725,9 @@ func (b *Bridge) apiInspectFolder(w http.ResponseWriter, r *http.Request) {
 	if err == nil && st.IsDir() {
 		entries, _ := os.ReadDir(abs)
 		resp["entries"] = len(entries)
-		_, gitErr := os.Stat(filepath.Join(abs, ".git"))
-		resp["is_git"] = gitErr == nil
-		_, promptErr := os.Stat(filepath.Join(abs, "brain-prompt.md"))
-		resp["has_prompt"] = promptErr == nil
-		_, histErr := os.Stat(filepath.Join(abs, "conversation-history.jsonl"))
-		resp["has_history"] = histErr == nil
+		resp["is_git"] = fileExists(filepath.Join(abs, ".git"))
+		resp["has_prompt"] = fileExists(filepath.Join(abs, "brain-prompt.md"))
+		resp["has_history"] = fileExists(filepath.Join(abs, "conversation-history.jsonl"))
 		if m, err := ReadManifest(abs); err == nil {
 			resp["manifest"] = m
 		}
@@ -1060,9 +1057,7 @@ func (b *Bridge) apiFSList(w http.ResponseWriter, r *http.Request) {
 		if canonicalDir(full) == data {
 			continue
 		}
-		_, brainErr := os.Stat(filepath.Join(full, ManifestFile))
-		_, gitErr := os.Stat(filepath.Join(full, ".git"))
-		out = append(out, entry{Name: e.Name(), Path: full, IsBrain: brainErr == nil, IsGit: gitErr == nil})
+		out = append(out, entry{Name: e.Name(), Path: full, IsBrain: fileExists(filepath.Join(full, ManifestFile)), IsGit: fileExists(filepath.Join(full, ".git"))})
 	}
 	sort.Slice(out, func(i, j int) bool { return strings.ToLower(out[i].Name) < strings.ToLower(out[j].Name) })
 	parent := filepath.Dir(p)
@@ -1099,7 +1094,7 @@ func (b *Bridge) apiDevInbound(w http.ResponseWriter, r *http.Request) {
 	}
 	req.Brain = strings.ToLower(strings.TrimSpace(req.Brain))
 	if req.Brain != "" && b.brainMgr.Get(req.Brain) == nil {
-		writeErr(w, http.StatusBadRequest, "unknown brain "+strconvQuote(req.Brain))
+		writeErr(w, http.StatusBadRequest, fmt.Sprintf("unknown brain %q", req.Brain))
 		return
 	}
 	if req.Sender == "" {

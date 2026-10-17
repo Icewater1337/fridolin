@@ -515,7 +515,7 @@ func (b *Bridge) runStartupChecks(ctx context.Context) {
 	cfg := b.cfgs.Get()
 	var missing []string
 	for _, f := range cfg.StartupChecks.RequiredFiles {
-		if _, err := os.Stat(f); err != nil {
+		if !fileExists(f) {
 			missing = append(missing, f)
 		}
 	}

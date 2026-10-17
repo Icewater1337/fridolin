@@ -380,6 +380,22 @@ func TestIngestConfinedToMediaDir(t *testing.T) {
 	}
 }
 
+// An unknown brain is named as it was sent, in Go quotes: these errors are
+// plain text, where JSON's escapes of <, > and & would only garble it.
+func TestUnknownBrainIsQuotedAsSent(t *testing.T) {
+	tb := newTestBridge(t, `, "ingest": {"enabled": true}`)
+	const want = `unknown brain "<a&b>"`
+	if w := tb.ingest(`{"brain":"<a&b>","text":"x"}`); w.Code != http.StatusBadRequest || !strings.Contains(w.Body.String(), want) {
+		t.Errorf("ingest: %d %q, want 400 saying %s", w.Code, w.Body.String(), want)
+	}
+	w := tb.do("POST", "/api/dev/inbound", map[string]any{"jid": "15551234567@s.whatsapp.net", "brain": "<a&b>", "text": "x"})
+	var body struct{ Error string }
+	_ = json.Unmarshal(w.Body.Bytes(), &body)
+	if w.Code != http.StatusBadRequest || body.Error != want {
+		t.Errorf("dev inbound: %d %q, want 400 saying %s", w.Code, body.Error, want)
+	}
+}
+
 // scope was the name of the brain field. A script that still sends it is
 // told the field to use, even when it names a brain that exists, and
 // nothing is handed to any brain.

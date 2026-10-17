@@ -245,7 +245,7 @@ func initCmd(args []string) {
 	dataDir := fs.String("data-dir", "", "data folder to write into the config (default ~/.fridolin)")
 	_ = fs.Parse(args)
 	path := configPath(*cfgPath)
-	if _, err := os.Stat(path); err == nil {
+	if fileExists(path) {
 		fmt.Printf("%s already exists — leaving it alone.\n", path)
 		return
 	}

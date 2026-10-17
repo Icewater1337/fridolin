@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log"
 	"net"
 	"net/http"
@@ -158,7 +159,7 @@ func (b *Bridge) httpIngest(w http.ResponseWriter, r *http.Request) {
 	id := strings.ToLower(strings.TrimSpace(req.Brain))
 	br := b.brainMgr.Get(id)
 	if br == nil {
-		http.Error(w, "unknown brain "+strconvQuote(id), http.StatusBadRequest)
+		http.Error(w, fmt.Sprintf("unknown brain %q", id), http.StatusBadRequest)
 		return
 	}
 
@@ -221,9 +222,4 @@ func (b *Bridge) replyChatFor(br *Brain, cfg *Config) string {
 		return m.Routing.Groups[0]
 	}
 	return ""
-}
-
-func strconvQuote(s string) string {
-	data, _ := json.Marshal(s)
-	return string(data)
 }

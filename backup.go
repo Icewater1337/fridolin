@@ -184,7 +184,7 @@ func findRclone(p string) (string, error) {
 	found, err := exec.LookPath(p)
 	if err != nil {
 		for _, c := range rcloneFallbacks() {
-			if _, err := os.Stat(c); err == nil {
+			if fileExists(c) {
 				return c, nil
 			}
 		}
@@ -409,6 +409,8 @@ func rcloneInstallHint() string {
 	}
 }
 
+// fileExists reports whether p names a file or folder that exists (and can
+// be looked at), following symlinks.
 func fileExists(p string) bool { _, err := os.Stat(p); return err == nil }
 
 // ── connecting Google Drive ──────────────────────────────────────────────
