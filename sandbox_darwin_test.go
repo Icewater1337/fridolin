@@ -353,6 +353,9 @@ func TestSandboxProtectsCodeOutsideIt(t *testing.T) {
 		{"move LaunchAgents aside for a new one", `mv "$HOME/Library/LaunchAgents" "$HOME/Library/la-old"`, false},
 		{"rewrite a symlinked ~/.bashrc", `printf x >> "$HOME/.bashrc"`, false},
 		{"replace a symlinked ~/.bashrc", `rm "$HOME/.bashrc"`, false},
+		// Your git reads ~/.config/git/config, where core.fsmonitor runs a program.
+		{"link a missing ~/.config into its own folder", `mkdir -p "$HOME/assistant/a/cfg/git" && ln -s "$HOME/assistant/a/cfg" "$HOME/.config"`, false},
+		{"move a folder of its own into the place of a missing ~/.config", `mkdir -p "$HOME/assistant/a/cfg2/git" && mv "$HOME/assistant/a/cfg2" "$HOME/.config"`, false},
 		{"read ~/.claude/settings.json", `cat "$HOME/.claude/settings.json"`, true},
 		{"read ~/.zshrc", `cat "$HOME/.zshrc"`, true},
 		{"write the CLI's ~/.claude.json", `printf '{}' > "$HOME/.claude.json"`, true},
@@ -374,6 +377,9 @@ func TestSandboxProtectsCodeOutsideIt(t *testing.T) {
 			}
 			if err := os.Symlink(filepath.Join(home, "dotfiles", "bashrc"), filepath.Join(home, ".bashrc")); err != nil {
 				t.Fatal(err)
+			}
+			if _, err := os.Lstat(filepath.Join(home, ".config")); !os.IsNotExist(err) {
+				t.Fatalf("~/.config exists before the run: %v", err)
 			}
 			for _, c := range cases {
 				t.Run(c.name, func(t *testing.T) {
@@ -446,7 +452,8 @@ func TestSandboxProtectsMemoryAboveBrains(t *testing.T) {
 // plant one the bridge would pick up next: a newer Plaud CLI in nvm (the
 // bridge takes the version that sorts last), or a program the bridge runs
 // by name in a PATH folder that comes first, which launchd's PATH has in
-// ~/.local/bin.
+// ~/.local/bin, also not by creating a missing PATH folder as a symlink
+// into its own folder or by moving a folder of its own there.
 func TestSandboxProtectsOutsidePrograms(t *testing.T) {
 	requireSandboxExec(t)
 	home := canonicalDir(t.TempDir())
@@ -476,7 +483,10 @@ func TestSandboxProtectsOutsidePrograms(t *testing.T) {
 		{"plant node on PATH", `printf x > "$HOME/.local/bin/node"`, false},
 		{"plant tmux on PATH", `printf x > "$HOME/.local/bin/tmux"`, false},
 		{"plant rclone where the bridge looks off PATH", `printf x > "$HOME/.local/bin/rclone"`, false},
+		{"link a PATH folder not there yet into its own folder", `mkdir -p "$HOME/a/evil" && ln -s "$HOME/a/evil" "$HOME/bin2" && printf x > "$HOME/bin2/touch" && chmod +x "$HOME/bin2/touch"`, false},
 		{"plant open in a PATH folder not there yet", `mkdir -p "$HOME/bin2" && printf x > "$HOME/bin2/open"`, false},
+		{"move a folder of its own into the place of a PATH folder not there yet", `mkdir -p "$HOME/a/evil3" && printf x > "$HOME/a/evil3/touch" && chmod +x "$HOME/a/evil3/touch" && mv "$HOME/a/evil3" "$HOME/bin2"`, false},
+		{"link the missing folder above a PATH folder into its own", `mkdir -p "$HOME/a/evil2/bin" && ln -s "$HOME/a/evil2" "$HOME/tools" && printf x > "$HOME/tools/bin/touch" && chmod +x "$HOME/tools/bin/touch"`, false},
 		{"install a tool of its own on PATH", `printf x > "$HOME/.local/bin/mytool"`, true},
 	}
 	for _, c := range cases {
@@ -488,6 +498,9 @@ func TestSandboxProtectsOutsidePrograms(t *testing.T) {
 	}
 	if p, err := findPlaudCLI(""); err != nil || p != home+"/.nvm/versions/node/v22.0.0/bin/plaud" {
 		t.Errorf("findPlaudCLI after the plants = %q, %v; want the v22.0.0 one", p, err)
+	}
+	if p := lookPathIn("touch", os.Getenv("PATH")); p != "/usr/bin/touch" {
+		t.Errorf("touch after the plants is %q, want /usr/bin/touch", p)
 	}
 }
 

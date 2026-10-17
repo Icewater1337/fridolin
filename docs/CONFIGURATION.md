@@ -267,9 +267,12 @@ that renamed `~/.ssh`, or the folder that holds another brain, used to read
 it under the new name. Nothing denied can be renamed or deleted, apart from
 the per-process files in `~/.claude/sessions`, and neither can any folder
 above it, up to your home folder (or up to `/` for a path outside it).
-Brains can still create and change files inside those folders. A folder
-above a denied path that does not exist yet can be created, because the
-Claude CLI creates `~/.claude` on its first run; from the next run on it is
+Brains can still create and change files inside those folders. Nor can a
+brain create such a folder while it does not exist yet, for example a
+missing `~/.config` or `PATH` folder: it could create it as a symlink into
+its own folder, or move a folder of its own there, and so redirect what
+lies below it. The exception is `~/.claude` and the folders in it, which
+the Claude CLI creates on its first run; from the next run on they are
 pinned too.
 
 `~/Library/Keychains` is deliberately **not** denied: the Claude CLI reads its
@@ -363,9 +366,13 @@ for the paths listed above. A manipulated brain can therefore still:
 - create a folder in `~/.claude/projects` for a project that has none yet as
   a symlink into its own folder, which would give that project's sessions
   an auto-memory the brain wrote
-- create a folder above a denied path that does not exist yet, for example a
-  missing `~/.config`, as a symlink into its own folder, so that what other
-  programs later write there lands with the brain (pinned from the next run)
+- create `~/.claude`, or a folder in it such as `~/.claude/sessions`,
+  while it is missing (on a home where the Claude CLI has not created it
+  yet): as a symlink into its own folder, so that what the CLI and your
+  own sessions later read and write there lands with the brain (pinned
+  from the next run), or by moving a prepared folder there, with settings,
+  hooks or a `CLAUDE.md` of its own inside, which stays in place after the
+  next run pins it
 - ask launchd (`launchctl`), cron (`crontab`), `at`, LaunchServices
   (`open`), another app (`osascript`) or a tmux server that runs outside
   the sandbox (the activity viewer's, or your own) to start a program

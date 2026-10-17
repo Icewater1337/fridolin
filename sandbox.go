@@ -30,10 +30,11 @@ const sandboxExecPath = "/usr/bin/sandbox-exec"
 //
 // Brains keep write access by default, so a brain can still maintain its own
 // notes and files. Everything denied is denied for writes as well, and the
-// folders above it cannot be renamed: the sandbox matches paths, not files,
-// so a brain that moved ~/.ssh (or the folder holding another brain) to a
-// new name could read it there. Add anything else that must stay unreadable
-// to sandbox.deny_paths in config.json.
+// folders above it cannot be renamed, nor created while missing: the
+// sandbox matches paths, not files, so a brain that moved ~/.ssh (or the
+// folder holding another brain) to a new name could read it there. Add
+// anything else that must stay unreadable to sandbox.deny_paths in
+// config.json.
 type SandboxProfiler struct {
 	mu sync.RWMutex
 
@@ -250,6 +251,7 @@ func (sp *SandboxProfiler) Profile(brainID string) (string, error) {
 	}
 
 	var b profileBuilder
+	b.creatable = b.spellings(filepath.Join(home, ".claude"), true)
 	b.trustRoot(home)
 	if sp.dataDir != "" {
 		b.trustRoot(sp.dataDir)
@@ -733,6 +735,9 @@ type profileBuilder struct {
 	// ownable marks the denies written while it is set as ones a brain's
 	// folder may itself be.
 	ownable bool
+	// creatable holds every spelling of ~/.claude, the folder a pin lets
+	// a brain create (with the folders in it) while missing; see pin.
+	creatable []string
 }
 
 type pathAlias struct{ configured, real string }
@@ -819,11 +824,18 @@ func (b *profileBuilder) spellings(path string, entry bool) []string {
 // matches paths) and read it under the new name; one that replaced such a
 // folder with a symlink redirected what other programs write there.
 //
-// A folder that exists is pinned for every write to the folder itself:
-// rename, delete, chmod, swapping it for a symlink. One that does not exist
-// yet may still be created, because the Claude CLI creates ~/.claude on its
-// first run, but not renamed or removed afterwards; the next run's profile
-// pins it fully.
+// The folder is pinned for every write to the folder itself: rename,
+// delete, chmod, swapping it for a symlink, and creating it while it does
+// not exist yet. A brain that created a missing one as a symlink into its
+// own folder redirected what lies below it, such as a missing ~/.config,
+// where your git looks for its config, or a PATH folder, where the bridge
+// looks for the programs it runs. Refusing only symlinks would not do: a
+// brain can as well move a folder it prepared into place, with symlinks
+// or files of its own inside, and the sandbox checks where a rename lands
+// the same way as a new folder. The exception is ~/.claude and the
+// folders in it, which the Claude CLI creates on its first run: a missing
+// one may still be created, but not renamed or removed afterwards, and the
+// next run's profile pins it fully.
 func (b *profileBuilder) pin(dir string) {
 	for _, s := range b.spellings(dir, true) {
 		b.pinSpelling(s)
@@ -832,12 +844,12 @@ func (b *profileBuilder) pin(dir string) {
 }
 
 func (b *profileBuilder) pinSpelling(dir string) {
-	if _, err := os.Lstat(dir); err == nil {
-		b.emit(rulePin, "deny file-write*", "literal", dir, dir)
-	} else {
+	if _, err := os.Lstat(dir); err != nil && withinAny(dir, b.creatable) {
 		// file-write-unlink is what the sandbox checks on the source of a
 		// rename, and on a delete.
 		b.emit(rulePin, "deny file-write-unlink", "literal", dir, dir)
+	} else {
+		b.emit(rulePin, "deny file-write*", "literal", dir, dir)
 	}
 }
 

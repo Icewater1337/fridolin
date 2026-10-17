@@ -429,9 +429,11 @@ func TestSandboxConfigRejectsUnusablePaths(t *testing.T) {
 // TestSandboxProfilePinsParents: the sandbox matches paths, so a brain that
 // renamed a denied path, or any folder above it, read it under the new name.
 // Every denied path is denied for writes too, and every folder above one is
-// pinned up to HOME (or / outside HOME): fully when it exists, against
-// rename and delete only when it does not, so the CLI can still create
-// ~/.claude on its first run.
+// pinned up to HOME (or / outside HOME), fully, also when it does not exist
+// yet: a brain could otherwise create it as a symlink into its own folder.
+// Only a missing ~/.claude, and a missing folder in it, are pinned against
+// rename and delete alone, so the CLI can still create them on its first
+// run.
 func TestSandboxProfilePinsParents(t *testing.T) {
 	root := canonicalDir(t.TempDir())
 	home := filepath.Join(root, "home")
@@ -465,6 +467,9 @@ func TestSandboxProfilePinsParents(t *testing.T) {
 		{"nothing above home pinned", `(literal "` + root + `"))`, false},
 		{"other brain's parent pinned", `(deny file-write* (literal "` + home + `/assistant"))`, true},
 		{"existing ~/.config pinned fully", `(deny file-write* (literal "` + home + `/.config"))`, true},
+		{"missing ~/Library pinned fully", `(deny file-write* (literal "` + home + `/Library"))`, true},
+		{"missing ~/Library not only against rename", `(deny file-write-unlink (literal "` + home + `/Library"))`, false},
+		{"missing folder above nvm's node versions pinned fully", `(deny file-write* (literal "` + home + `/.nvm"))`, true},
 		{"missing ~/.claude still creatable", `(deny file-write-unlink (literal "` + home + `/.claude"))`, true},
 		{"missing ~/.claude not pinned fully", `(deny file-write* (literal "` + home + `/.claude"))`, false},
 		{"missing sessions folder pinned", `(deny file-write-unlink (literal "` + home + `/.claude/sessions"))`, true},
@@ -634,12 +639,12 @@ func TestSandboxProfileDeniesMemoryAboveBrains(t *testing.T) {
 // the sandbox: a natively installed Claude CLI (a symlink into versions/),
 // rclone, the Plaud CLI as an npm package in nvm with its node, tmux, and
 // the bridge binary inside its checkout. PATH finds only the Claude CLI,
-// and also names ~/bin2, which does not exist yet. It returns a profiler
-// for brain a that runs all of them.
+// and also names ~/bin2 and ~/tools/bin, which do not exist yet. It returns
+// a profiler for brain a that runs all of them.
 func outsideProgramsFixture(t *testing.T, home string) *SandboxProfiler {
 	t.Helper()
 	t.Setenv("HOME", home)
-	t.Setenv("PATH", filepath.Join(home, ".local", "bin")+":"+filepath.Join(home, "bin2")+":/usr/bin:/bin")
+	t.Setenv("PATH", filepath.Join(home, ".local", "bin")+":"+filepath.Join(home, "bin2")+":"+filepath.Join(home, "tools", "bin")+":/usr/bin:/bin")
 	nvm := ".nvm/versions/node/v22.0.0/"
 	for _, f := range []string{
 		".local/share/claude/versions/1.0.0",
@@ -707,6 +712,8 @@ func TestSandboxProfileProtectsOutsidePrograms(t *testing.T) {
 		{"tmux for the viewer", `(literal "` + home + `/bin/tmux")`},
 		{"a name it runs, in a PATH folder", `(literal "` + home + `/.local/bin/osascript")`},
 		{"a name it runs, in a PATH folder not there yet", `(literal "` + home + `/bin2/touch")`},
+		{"a PATH folder not there yet", `(literal "` + home + `/bin2")`},
+		{"the missing folders above a PATH folder", `(literal "` + home + `/tools")`},
 		{"a name it runs, in the Plaud CLI's own folder", `(literal "` + nvm + `/bin/open")`},
 		{"rclone off PATH", `(literal "` + home + `/.local/bin/rclone")`},
 		{"every node version in nvm", `(subpath "` + home + `/.nvm/versions/node")`},
