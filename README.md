@@ -205,7 +205,7 @@ fridolin check --route 15551234567@s.whatsapp.net
 ### Trying it without WhatsApp
 
 ```bash
-go build -o bin/fridolin . && bin/fridolin --no-whatsapp --config /tmp/try/config.json --open
+make build && bin/fridolin --no-whatsapp --config /tmp/try/config.json --open
 ```
 
 A build in `bin/` finds the tools in the checkout and leaves the installed
@@ -617,11 +617,11 @@ tests, and a smoke test that starts a race-enabled build in dev mode on a
 scratch config (`make help` lists every target). staticcheck and actionlint
 run through `go run` at pinned versions; ruff comes from
 `pip install -r tools/requirements-dev.txt`, shellcheck from your package
-manager. `make check` builds into a temp dir and leaves `./fridolin` alone:
-the service `setup.sh` installs runs that file from the checkout and starts
-whatever is there on its next restart. `make build` writes it, and
-`make install` also copies it to `~/.local/bin` (set `PREFIX` or `BINDIR` to
-change that).
+manager. `make check` builds into a temp dir. `make build` writes
+`bin/fridolin`, and `make install` also copies it to `~/.local/bin` (set
+`PREFIX` or `BINDIR` to change that) to run by hand. Neither changes the
+service, which runs its own copy in `~/.local/lib/fridolin/`: `./setup.sh`
+installs one.
 
 CI also installs the site's npm packages and runs its own tests
 (`cd site && npm install && npm test`; [docs/SITE.md](docs/SITE.md));

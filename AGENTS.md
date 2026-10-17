@@ -101,8 +101,10 @@ Reopen the dashboard with `fridolin open`. To upgrade later: `git pull &&
   smoke test (`make help` lists the targets).
   CI also runs the site's tests and the fuzz targets (both below),
   govulncheck, CodeQL and the personal-data scan of the pushed commits.
-  `make check` never rewrites `./fridolin`, which the installed service
-  runs; `make build` and `make install` do. While iterating,
+  `make check` builds only into temp dirs; `make build` writes
+  `bin/fridolin`, and `make install` also copies it to `~/.local/bin`.
+  None of them touches the service, which runs the copy in
+  `~/.local/lib/fridolin/` that `./setup.sh` installs. While iterating,
   `go vet ./... && go test -race ./...` is enough; `gofmt` everything.
   The tests run in an empty temp directory, with an empty temp `HOME` and
   the variables the bridge reads (`FRIDOLIN_CONFIG`, `BRAIN_MODE`) unset,
@@ -127,9 +129,9 @@ Reopen the dashboard with `fridolin open`. To upgrade later: `git pull &&
 - The site process in `site/` (Node, TypeScript run by tsx; docs/SITE.md) has
   its own tests: `cd site && npm install && npm test`. The Go end-to-end
   tests of the site run it too and skip without its `node_modules`.
-- Build with `go build -o bin/fridolin .` (`bin/` is ignored by git) and try
-  changes in dev mode. The service runs the copy in `~/.local/lib/fridolin/`,
-  so a build in the checkout never reaches it; `./setup.sh` installs one.
+- Build with `make build` (into `bin/`, which git ignores) and try changes in
+  dev mode. A build in the checkout never reaches the service; `./setup.sh`
+  installs one.
 - The dashboard is plain HTML/CSS/JS in `web/` (no build step), embedded into
   the binary — rebuild after changing it. It runs under a strict CSP: no
   inline scripts or styles. Its ES modules live in `web/assets`: `app/` (the

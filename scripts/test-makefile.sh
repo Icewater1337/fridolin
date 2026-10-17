@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
 #
 # Tests for the Makefile, read from what `make -n` would run, so nothing is
-# built. The service setup.sh installs runs ./fridolin from the checkout and
-# starts whatever is there on its next restart, so only build and install
-# may write it: running the checks on a branch must not swap in that
-# branch's binary.
+# built. Only build and install may write the binary: running the checks on
+# a branch must not replace a build someone runs from the checkout, such as
+# ./fridolin, which a service set up by an older setup.sh still starts on
+# its next restart.
 #
 #   scripts/test-makefile.sh
 #
@@ -17,7 +17,7 @@ root="$(cd "$(dirname "$0")/.." && pwd)"
 unset MAKEFLAGS MFLAGS MAKELEVEL
 
 # A made-up name for the binary: a command that names it would write the
-# file the service runs (BINARY is fridolin by default).
+# build (BINARY is bin/fridolin by default).
 bin="sentinel-not-the-binary"
 
 failed=0

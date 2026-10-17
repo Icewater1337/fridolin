@@ -5,7 +5,7 @@
 # then stop it with SIGTERM and check that it shuts down cleanly. It never
 # reads your config or data dir and never talks to a running bridge.
 #
-#   scripts/smoke.sh [BINARY]      # default ./fridolin
+#   scripts/smoke.sh [BINARY]      # default bin/fridolin
 #
 # `make smoke` builds the binary with -race into a temp dir and runs this on
 # it, so a data race at start or shutdown fails the run.
@@ -14,7 +14,7 @@
 
 set -euo pipefail
 
-bin="${1:-./fridolin}"
+bin="${1:-bin/fridolin}"
 [ -x "$bin" ] || { printf 'smoke: no executable at %s (run make build)\n' "$bin" >&2; exit 2; }
 bin="$(cd "$(dirname "$bin")" && pwd)/$(basename "$bin")"
 command -v curl >/dev/null 2>&1 || { printf 'smoke: curl is needed\n' >&2; exit 2; }
