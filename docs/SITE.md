@@ -102,8 +102,11 @@ own folder under `.fridolin-site/`:
   `site_preview` (runs the workspace), `site_sync` (rebases onto the newest
   branch) and `site_propose`.
 
-Ask it for a page — on WhatsApp, or on the Build page — and it builds the
-module, checks it, previews it and proposes it. Proposals appear under Site →
+Ask it for a page — on WhatsApp, or on the dashboard's **Build** page — and it
+builds the module, checks it, previews it and proposes it. The Build page is a
+chat with the builder brain next to its live preview; it runs in a chat of its
+own (a Claude session of its own, *New conversation* starts another), with the
+same sandbox, skills and tools as on WhatsApp. Proposals appear under Site →
 **Proposals** with the same review list as a deploy; *Merge and deploy* merges
 the branch, pushes it and deploys it. The brain cannot deploy, merge, or change
 people, roles or the domain.

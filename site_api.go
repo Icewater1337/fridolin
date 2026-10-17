@@ -40,6 +40,7 @@ func (b *Bridge) siteAPI(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/site/proposals/{id}/merge", b.apiSiteMergeProposal)
 	mux.HandleFunc("DELETE /api/site/proposals/{id}", b.apiSiteDiscardProposal)
 	mux.HandleFunc("POST /api/site/previews/{id}", b.apiSiteStartPreview)
+	b.buildAPI(mux)
 }
 
 func (b *Bridge) apiSiteStatus(w http.ResponseWriter, r *http.Request) {

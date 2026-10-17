@@ -13,6 +13,7 @@ export const ROUTES = [
   { id: 'backup', path: 'backup', nav: { label: 'Backup', icon: 'backup' }, load: () => import('../pages/backup.js') },
   { id: 'integrations', path: 'integrations', nav: { label: 'Integrations', icon: 'inbox' }, load: () => import('../pages/integrations.js') },
   { id: 'site', path: 'site', nav: { label: 'Site', icon: 'external' }, load: () => import('../pages/site.js') },
+  { id: 'build', path: 'build', nav: { label: 'Build', icon: 'sparkle' }, load: () => import('../pages/build.js') },
   { id: 'logs', path: 'logs', nav: { label: 'Logs', icon: 'terminal' }, load: () => import('../pages/logs.js') },
   { id: 'dev', path: 'dev', nav: { label: 'Dev', icon: 'dev', devOnly: true }, load: () => import('../pages/dev.js') },
 ];

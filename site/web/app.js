@@ -66,10 +66,12 @@ function signIn(site, me) {
 }
 
 function home(site, me, list) {
+  // A preview opened with its own link has no accounts to sign out of.
+  const accounts = !site.preview || site.exit;
   const who = h('div', { class: 'who' },
     me.picture ? h('img', { src: me.picture, alt: '', referrerpolicy: 'no-referrer' }) : null,
     h('span', me.name || me.email),
-    h('button', {
+    accounts && h('button', {
       class: 'small',
       onclick: async () => { await json('/auth/logout', { method: 'POST' }); location.assign('/'); },
     }, 'Sign out'));
