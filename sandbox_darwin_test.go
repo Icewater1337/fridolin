@@ -446,6 +446,83 @@ func TestSandboxProtectsMemoryAboveBrains(t *testing.T) {
 	}
 }
 
+// TestSandboxKeepsYourInstructionsFromBrains: under the real sandbox-exec,
+// a brain can read none of the instructions Claude Code would load from
+// above its folder (the CLAUDE.md files, the .claude/ folders with their
+// rules and skills, ~/.claude/CLAUDE.md and ~/.claude/rules), nor move them
+// aside to read them there. Its own CLAUDE.md and the rest of ~/.claude,
+// the CLI's state, stay readable. With inherit_claude_user_config the
+// instructions are readable again, but still not movable.
+func TestSandboxKeepsYourInstructionsFromBrains(t *testing.T) {
+	requireSandboxExec(t)
+	cases := []struct {
+		name, cmd         string // cmd runs in sh with $HOME set
+		isolated, inherit bool   // whether it is allowed
+	}{
+		{"read ~/CLAUDE.md", `cat "$HOME/CLAUDE.md"`, false, true},
+		{"read ~/CLAUDE.local.md", `cat "$HOME/CLAUDE.local.md"`, false, true},
+		{"read the brains folder's CLAUDE.md", `cat "$HOME/assistant/CLAUDE.md"`, false, true},
+		{"read a rule above the brain", `cat "$HOME/assistant/.claude/rules/r.md"`, false, true},
+		{"read a skill above the brain", `cat "$HOME/assistant/.claude/skills/s/SKILL.md"`, false, true},
+		{"list the .claude above the brain", `ls "$HOME/assistant/.claude"`, false, true},
+		{"read ~/.claude/CLAUDE.md", `cat "$HOME/.claude/CLAUDE.md"`, false, true},
+		{"read a rule in ~/.claude", `cat "$HOME/.claude/rules/r.md"`, false, true},
+		{"move the .claude above the brain aside", `mv "$HOME/assistant/.claude" "$HOME/assistant/c2"`, false, false},
+		{"move ~/.claude/rules aside", `mv "$HOME/.claude/rules" "$HOME/.claude/r2"`, false, false},
+		{"read the CLI's ~/.claude/settings.json", `cat "$HOME/.claude/settings.json"`, true, true},
+		{"read its own CLAUDE.md", `cat "$HOME/assistant/a/CLAUDE.md"`, true, true},
+	}
+	for _, l := range sandboxLayouts() {
+		for _, inherit := range []bool{false, true} {
+			name := l.name
+			if inherit {
+				name += " with inherit_claude_user_config"
+			}
+			t.Run(name, func(t *testing.T) {
+				home := l.home(t)
+				t.Setenv("HOME", home)
+				sp, ownDir := sandboxFixture(t, home, l.otherBrain, l.denyDir, map[string]any{"inherit_claude_user_config": inherit})
+				for _, f := range []string{"CLAUDE.md", "CLAUDE.local.md", "assistant/CLAUDE.md", "assistant/.claude/rules/r.md",
+					"assistant/.claude/skills/s/SKILL.md", ".claude/CLAUDE.md", ".claude/rules/r.md", ".claude/settings.json", "assistant/a/CLAUDE.md"} {
+					p := filepath.Join(home, f)
+					if err := os.MkdirAll(filepath.Dir(p), 0o700); err != nil {
+						t.Fatal(err)
+					}
+					if err := os.WriteFile(p, []byte("content of "+f), 0o600); err != nil {
+						t.Fatal(err)
+					}
+				}
+				for _, c := range cases {
+					t.Run(c.name, func(t *testing.T) {
+						want := c.isolated
+						if inherit {
+							want = c.inherit
+						}
+						if allowed, out := sandboxRun(t, sp, ownDir, "/bin/sh", "-c", c.cmd); allowed != want {
+							t.Errorf("%s: allowed=%v, want %v (output %q)", c.cmd, allowed, want, out)
+						}
+					})
+				}
+				// The CLI walks up from the folder's real path, which in the
+				// symlinked layout passes a folder no configured path names.
+				t.Run("read the CLAUDE.md two folders above its real path", func(t *testing.T) {
+					real, err := filepath.EvalSymlinks(ownDir)
+					if err != nil {
+						t.Fatal(err)
+					}
+					p := filepath.Join(filepath.Dir(filepath.Dir(real)), "CLAUDE.md")
+					if err := os.WriteFile(p, []byte("content of "+p), 0o600); err != nil {
+						t.Fatal(err)
+					}
+					if allowed, out := sandboxTry(t, sp, ownDir, false, p); allowed != inherit {
+						t.Errorf("reading %s: allowed=%v, want %v (output %q)", p, allowed, inherit, out)
+					}
+				})
+			})
+		}
+	}
+}
+
 // TestSandboxProtectsOutsidePrograms: under the real sandbox-exec, a brain
 // can still run the programs the bridge runs unsandboxed, but cannot
 // rewrite or replace them, the bridge binary, or its checkout. Nor can it

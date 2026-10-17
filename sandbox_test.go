@@ -468,7 +468,10 @@ func TestSandboxProfilePinsParents(t *testing.T) {
 		{"transcripts cannot be moved out", `(deny file-write-unlink (subpath "` + home + `/.claude/projects"))`, true},
 		{"transcripts stay writable for the CLI", `(deny file-write* (subpath "` + home + `/.claude/projects"))`, false},
 		{"home pinned", `(deny file-write* (literal "` + home + `"))`, true},
-		{"nothing above home pinned", `(literal "` + root + `"))`, false},
+		// For the CLAUDE.md files in it; with inherit_claude_user_config
+		// nothing above home is pinned (see
+		// TestSandboxProfileDeniesInstructionsAboveBrains).
+		{"home's parent pinned", `(deny file-write* (literal "` + root + `"))`, true},
 		{"other brain's parent pinned", `(deny file-write* (literal "` + home + `/assistant"))`, true},
 		{"existing ~/.config pinned fully", `(deny file-write* (literal "` + home + `/.config"))`, true},
 		{"missing ~/Library pinned fully", `(deny file-write* (literal "` + home + `/Library"))`, true},
@@ -567,13 +570,16 @@ func TestSandboxProfileDeniesWritesToCodeOutsideIt(t *testing.T) {
 			t.Errorf("%s is not in the write denies", rel)
 		}
 	}
+	// Your own instructions are denied for reading too; see
+	// TestSandboxProfileDeniesInstructionsAboveBrains.
+	instructions := []string{".claude/CLAUDE.md", ".claude/rules"}
 	for rel, filter := range paths {
 		t.Run(rel, func(t *testing.T) {
 			p := `(` + filter + ` "` + filepath.Join(home, rel) + `"))`
 			if !strings.Contains(profile, "(deny file-write* "+p) {
 				t.Errorf("profile lacks (deny file-write* %s", p)
 			}
-			if strings.Contains(profile, "(deny file-read* "+p) {
+			if strings.Contains(profile, "(deny file-read* "+p) && !slices.Contains(instructions, rel) {
 				t.Errorf("profile denies reading %s", rel)
 			}
 		})
@@ -621,7 +627,10 @@ func TestSandboxProfileDeniesMemoryAboveBrains(t *testing.T) {
 		{"n", "the CLAUDE.md of the brain it lives in", lit(home + "/assistant/a/CLAUDE.md"), true},
 		{"a", "above a brain outside HOME", lit(outside + "/brains/CLAUDE.md"), true},
 		{"a", "up to / outside HOME", lit("/CLAUDE.md"), true},
-		{"a", "nothing above HOME", lit(root + "/CLAUDE.md"), false},
+		// Denied with the reading of your instructions; with
+		// inherit_claude_user_config nothing above HOME is (see
+		// TestSandboxProfileDeniesInstructionsAboveBrains).
+		{"a", "above HOME too", lit(root + "/CLAUDE.md"), true},
 		{"a", "auto-memory in every project", `(deny file-write* (regex "^` + sbplRegex(home+"/.claude/projects") + `/[^/]+/memory(/.*)?$"))`, true},
 	}
 	for _, tc := range cases {
@@ -642,6 +651,94 @@ func TestSandboxProfileDeniesMemoryAboveBrains(t *testing.T) {
 			t.Errorf("profile lacks %s", rule)
 		}
 	})
+}
+
+// TestSandboxProfileDeniesInstructionsAboveBrains: Claude Code reads the
+// CLAUDE.md, CLAUDE.local.md and .claude/ in every folder above its working
+// directory whatever its flags say, so a brain in HOME read ~/CLAUDE.md and
+// ~/.claude/CLAUDE.md. Brains may neither read nor write them, up to /,
+// along the folder's path as configured and its real path, nor
+// ~/.claude/CLAUDE.md and ~/.claude/rules for a brain outside HOME. The
+// rest of ~/.claude is the CLI's state, and a brain's own folder is its own.
+// inherit_claude_user_config drops all of it again.
+func TestSandboxProfileDeniesInstructionsAboveBrains(t *testing.T) {
+	root := canonicalDir(t.TempDir())
+	home := filepath.Join(root, "home")
+	outside := canonicalDir(t.TempDir()) // a sibling of root, not inside it
+	vol := canonicalDir(t.TempDir())     // where ~/linked really is
+	for _, d := range []string{home + "/assistant/a", home + "/assistant/b", outside + "/brains/d", vol + "/brains/l"} {
+		if err := os.MkdirAll(d, 0o700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.Symlink(vol+"/brains", home+"/linked"); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("HOME", home)
+	dirs := map[string]string{
+		"a": home + "/assistant/a",
+		"b": home + "/assistant/b",
+		"d": outside + "/brains/d", // outside HOME
+		"l": home + "/linked/l",    // really vol/brains/l
+	}
+	isolated := NewSandboxProfiler(dirs, &Config{})
+	inherit := NewSandboxProfiler(dirs, &Config{InheritClaudeUserConfig: true})
+	rule := func(op, filter, p string) string { return `(deny ` + op + ` (` + filter + ` "` + p + `"))` }
+	cases := []struct {
+		brain, name string
+		sp          *SandboxProfiler
+		rules       []string
+		want        bool
+	}{
+		{"a", "the brains folder's CLAUDE.md", isolated, []string{
+			rule("file-read*", "literal", home+"/assistant/CLAUDE.md"), rule("file-write*", "literal", home+"/assistant/CLAUDE.md")}, true},
+		{"a", "the brains folder's CLAUDE.local.md", isolated, []string{
+			rule("file-read*", "literal", home+"/assistant/CLAUDE.local.md"), rule("file-write*", "literal", home+"/assistant/CLAUDE.local.md")}, true},
+		{"a", "the brains folder's .claude", isolated, []string{
+			rule("file-read*", "subpath", home+"/assistant/.claude"), rule("file-write*", "subpath", home+"/assistant/.claude")}, true},
+		{"a", "your home folder's CLAUDE.md and CLAUDE.local.md", isolated, []string{
+			rule("file-read*", "literal", home+"/CLAUDE.md"), rule("file-read*", "literal", home+"/CLAUDE.local.md")}, true},
+		{"a", "~/.claude/CLAUDE.md and ~/.claude/rules", isolated, []string{
+			rule("file-read*", "literal", home+"/.claude/CLAUDE.md"), rule("file-read*", "subpath", home+"/.claude/rules"),
+			rule("file-write*", "literal", home+"/.claude/CLAUDE.md"), rule("file-write*", "subpath", home+"/.claude/rules")}, true},
+		{"a", "not the rest of ~/.claude", isolated, []string{rule("file-read*", "subpath", home+"/.claude")}, false},
+		{"a", "above HOME", isolated, []string{
+			rule("file-read*", "literal", root+"/CLAUDE.md"), rule("file-read*", "subpath", root+"/.claude"),
+			rule("file-write*", "literal", root+"/CLAUDE.md"), rule("file-write*", "subpath", root+"/.claude")}, true},
+		{"a", "up to /", isolated, []string{
+			rule("file-read*", "literal", "/CLAUDE.md"), rule("file-read*", "literal", "/CLAUDE.local.md"), rule("file-read*", "subpath", "/.claude")}, true},
+		{"a", "its own CLAUDE.md", isolated, []string{rule("file-read*", "literal", home+"/assistant/a/CLAUDE.md")}, false},
+		{"a", "its own .claude", isolated, []string{rule("file-read*", "subpath", home+"/assistant/a/.claude")}, false},
+		{"a", "not what is above another brain only", isolated, []string{rule("file-read*", "literal", outside+"/brains/CLAUDE.md")}, false},
+		{"d", "above a brain outside HOME", isolated, []string{
+			rule("file-read*", "literal", outside+"/brains/CLAUDE.md"), rule("file-read*", "subpath", outside+"/brains/.claude")}, true},
+		{"d", "~/.claude/CLAUDE.md for a brain outside HOME too", isolated, []string{
+			rule("file-read*", "literal", home+"/.claude/CLAUDE.md"), rule("file-read*", "subpath", home+"/.claude/rules")}, true},
+		{"d", "not ~/CLAUDE.md, which is not above it", isolated, []string{rule("file-read*", "literal", home+"/CLAUDE.md")}, false},
+		{"l", "above its path as configured", isolated, []string{
+			rule("file-read*", "literal", home+"/linked/CLAUDE.md"), rule("file-read*", "subpath", home+"/linked/.claude")}, true},
+		{"l", "above its real path", isolated, []string{
+			rule("file-read*", "literal", vol+"/brains/CLAUDE.md"), rule("file-read*", "literal", vol+"/CLAUDE.md"), rule("file-read*", "subpath", vol+"/.claude")}, true},
+		{"a", "inherit: none of your instructions", inherit, []string{
+			rule("file-read*", "literal", home+"/assistant/CLAUDE.md"), rule("file-read*", "subpath", home+"/assistant/.claude"),
+			rule("file-read*", "literal", home+"/CLAUDE.md"), rule("file-read*", "literal", home+"/.claude/CLAUDE.md"),
+			rule("file-read*", "subpath", home+"/.claude/rules"), rule("file-read*", "literal", "/CLAUDE.md")}, false},
+		{"a", "inherit: nothing above HOME, not even a pin", inherit, []string{
+			rule("file-write*", "literal", root+"/CLAUDE.md"), rule("file-write*", "literal", root)}, false},
+		{"a", "inherit: still never writable", inherit, []string{
+			rule("file-write*", "literal", home+"/assistant/CLAUDE.md"), rule("file-write*", "subpath", home+"/assistant/.claude"),
+			rule("file-write*", "literal", home+"/CLAUDE.md"), rule("file-write*", "literal", home+"/.claude/CLAUDE.md")}, true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			lines := strings.Split(mustProfile(t, tc.sp, tc.brain), "\n")
+			for _, r := range tc.rules {
+				if got := slices.Contains(lines, r); got != tc.want {
+					t.Errorf("profile of %s has %s: %v, want %v", tc.brain, r, got, tc.want)
+				}
+			}
+		})
+	}
 }
 
 // outsideProgramsFixture lays out, under home, what the bridge runs outside

@@ -192,6 +192,10 @@ func (b *Bridge) apiStatus(w http.ResponseWriter, r *http.Request) {
 	if cfg.DangerouslySkipPermissions && !cfg.Sandbox.Enabled && runtime.GOOS == "darwin" {
 		resp.Warnings = append(resp.Warnings, "Brains run with all permissions and the sandbox is off. Turn the sandbox on under Settings → Sandbox.")
 	}
+	if cfg.InheritClaudeUserConfig && cfg.BrainMode {
+		// Set in config.json only, so the dashboard shows it nowhere else.
+		resp.Warnings = append(resp.Warnings, "Brains load your own Claude Code setup (inherit_claude_user_config in config.json): they run your hooks, read your instructions and can use your MCP servers for anyone who may message them.")
+	}
 	if cfg.Sandbox.Enabled {
 		// The Sandbox card shows "On" from the config alone; say when that
 		// does not hold.

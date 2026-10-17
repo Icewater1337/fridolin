@@ -1,8 +1,8 @@
 # Brains
 
-A brain is one isolated assistant: a folder with its own system prompt,
-memories, skills and conversation history. Every chat the bridge answers is
-routed to exactly one brain.
+A brain is one isolated assistant: a folder with its own prompt, memories,
+skills and conversation history. Every chat the bridge answers is routed to
+exactly one brain.
 
 ## Adding a brain
 
@@ -19,7 +19,7 @@ then writes what is missing:
 ```
 <folder>/
 ├── brain.json                       this brain's settings
-├── brain-prompt.md                  starter system prompt — make it yours
+├── brain-prompt.md                  sent ahead of each message — make it yours
 ├── memories/
 │   ├── README.md
 │   └── people/whatsapp-identity-map.md
@@ -60,7 +60,7 @@ restart.
 | `routing.groups` | Group JIDs this brain answers. The group must also be allowed in the global settings. |
 | `model`, `effort` | Override the global `brain_model` / `brain_effort`. |
 | `disallowed_tools` | Override the global list; omit to inherit, `[]` to allow every tool. |
-| `prompt_file` | System prompt, relative to the folder. It must stay inside the folder. |
+| `prompt_file` | The prompt sent ahead of every message, relative to the folder. It must stay inside the folder. |
 | `reply_chat` | Where answers go for files handed in through `/ingest`. Default: the first allowed number for the DM brain, else the brain's first group. |
 | `backup` | Google Drive backup for this folder; see [BACKUP.md](BACKUP.md). |
 | `calendar` | The Google account this brain signed in with and the calendars it may use; set by *Connect Google Calendar*, see [CALENDAR.md](CALENDAR.md). |
@@ -98,6 +98,53 @@ Configs from before brain folders define brains inline in `config.json`
 the same id — sessions and history carry over. Editing an inline brain in the
 dashboard migrates that one brain.
 
+## What a brain loads
+
+Each message is one `claude -p` run in the brain's folder. Its prompt is
+the brain's prompt file (`brain-prompt.md`) followed by the recent chat
+history and the new message; Claude Code adds its own system prompt. From
+the brain's folder it also loads the Claude Code setup a session started
+there would: `CLAUDE.md` and `CLAUDE.local.md`, the settings, skills,
+agents, commands and rules in `.claude/`, and the MCP servers in
+`.mcp.json`, except those its `.claude` settings turn off with
+`disabledMcpjsonServers`.
+
+It does not load your own setup: not your user settings in
+`~/.claude/settings.json` (their hooks, plugins and permissions, so neither
+the `deny` rules nor the guard hooks there), nor the skills, agents and
+commands in `~/.claude`, nor the MCP servers in `~/.claude.json`, of
+plugins or of your claude.ai account. Those are yours, and a brain acts for
+whoever may message it. What a brain needs belongs in its folder, the
+permission rules and hooks that should hold for it too. Claude Code would
+also load the `CLAUDE.md` files and `.claude/` folders above the brain's
+folder, your `~/CLAUDE.md` and `~/.claude/CLAUDE.md` included, which
+`--setting-sources` does not cover. The bridge tells it to skip the
+`CLAUDE.md` files and rules there (`claudeMdExcludes`), and the sandbox
+keeps brains from reading any of it, the skills, agents and commands in
+those `.claude` folders too (see below). Without the sandbox, a brain still
+gets those and can read your instructions with its tools, so keep brain
+folders out from under folders that hold either. The sandbox goes by a
+file's real path, so a `CLAUDE.md`, skill or rule in the brain's folder
+that is a symlink to one of those files above it is denied as well, and
+nothing says so: copy such a file into the brain's folder instead.
+
+> **Before upgrading** from a version without
+> [`inherit_claude_user_config`](CONFIGURATION.md#inherit_claude_user_config):
+> instructions brains got from `~/CLAUDE.md`, `~/.claude/CLAUDE.md`,
+> `~/.claude/rules` or a `CLAUDE.md` above their folder no longer reach
+> them, with or without the sandbox, and neither do the `apiKeyHelper`,
+> `env` and `model` in `~/.claude/settings.json`. Copy what each brain
+> needs into its own `CLAUDE.md` or `brain-prompt.md` and its
+> `.claude/settings.json`, then go through the upgrade checklist under that
+> setting.
+
+> **Warning:**
+> [`inherit_claude_user_config`](CONFIGURATION.md#inherit_claude_user_config)
+> brings back the old behaviour, in which every brain loads all of your
+> setup: it runs your hooks, reads your personal instructions and can call
+> your MCP servers' tools without asking, on behalf of anyone who may
+> message it. Read its warning before you turn it on.
+
 ## Isolation
 
 With `sandbox.enabled` (macOS), every run is wrapped in `sandbox-exec`: the
@@ -105,13 +152,16 @@ brain cannot read or write any other brain's folder, the bridge's data folder
 (except the shared media inbox), or the usual secrets (SSH keys, cloud
 credentials, browser and mail data, shell history), and it cannot rename or
 delete the folders above them, which would move them out from under the
-sandbox's rules. It can read but not change the files that run outside its
-sandbox: Claude Code's settings, hooks, `CLAUDE.md`, skills and plugins
-(which every other brain loads too), the `CLAUDE.md` files and `.claude`
-folders above brain folders, Claude Code's auto-memory,
-`~/Library/LaunchAgents`, your shell startup files, and the bridge's own
-binary and the tools it runs. It can still write most other places your
-user can, including the Claude Code state all brains share;
+sandbox's rules. Nor can it read your own Claude Code instructions, unless
+`inherit_claude_user_config` is on: the `CLAUDE.md` and `CLAUDE.local.md`
+files and the `.claude` folders above its folder, up to `/`, and
+`~/.claude/CLAUDE.md` and `~/.claude/rules` (the rest of `~/.claude` is
+Claude Code's own state, which a brain's run needs). It can read but not
+change the other files that run outside its sandbox: Claude Code's
+settings, hooks, skills and plugins (which your own sessions load), Claude
+Code's auto-memory, `~/Library/LaunchAgents`, your shell startup files, and
+the bridge's own binary and the tools it runs. It can still write most other
+places your user can, including the Claude Code state all brains share;
 [the sandbox section](CONFIGURATION.md#what-the-sandbox-does-not-cover-yet)
 lists what that leaves open. Its own folder is always readable and
 writable, even if it lives somewhere the defaults deny, but it cannot move

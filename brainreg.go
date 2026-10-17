@@ -273,7 +273,7 @@ func updateManifestIn(c *Config, id string, mutate func(m *BrainManifest) error)
 }
 
 // ScaffoldBrain prepares a folder for a new brain: the folder itself, a
-// starter system prompt, the memory layout and brain.json. It never replaces
+// starter prompt file, the memory layout and brain.json. It never replaces
 // a file that already exists, so adopting a folder with content is safe. It
 // returns the files it created.
 func ScaffoldBrain(dir string, m *BrainManifest) ([]string, error) {

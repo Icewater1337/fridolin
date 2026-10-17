@@ -29,8 +29,8 @@ type BrainManifest struct {
 	// DisallowedTools overrides the global list; nil inherits it, [] allows all.
 	DisallowedTools *[]string `json:"disallowed_tools,omitempty"`
 
-	// PromptFile is the system prompt, relative to the folder (default
-	// brain-prompt.md). It must stay inside the folder.
+	// PromptFile is the prompt file sent ahead of each message, relative to
+	// the folder (default brain-prompt.md). It must stay inside the folder.
 	PromptFile string `json:"prompt_file,omitempty"`
 
 	// ReplyChat is where replies go for messages that did not come from a

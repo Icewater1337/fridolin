@@ -24,9 +24,10 @@ const sandboxExecPath = "/usr/bin/sandbox-exec"
 //
 // The profile is allow-by-default with an explicit denylist. That is a
 // containment measure, not a jail: it stops a prompt-injected brain from
-// reading the *other* brains' trees, your cross-session Claude state, and the
-// usual home-directory hotspots (keys, mail, browser data). It does not stop a
-// determined attacker with code execution.
+// reading the *other* brains' trees, your cross-session Claude state and your
+// own Claude Code instructions, and the usual home-directory hotspots (keys,
+// mail, browser data). It does not stop a determined attacker with code
+// execution.
 //
 // Brains keep write access by default, so a brain can still maintain its own
 // notes and files. Everything denied is denied for writes as well, and the
@@ -62,6 +63,10 @@ type SandboxProfiler struct {
 
 	// plaudShared: the Plaud login in ~/.plaud is meant for brains too.
 	plaudShared bool
+
+	// inheritUser: inherit_claude_user_config lets brains load your own
+	// Claude Code instructions, the CLAUDE.md files above their folders.
+	inheritUser bool
 
 	// claudePath, rclonePath, plaudCLIPath and viewer name the programs the
 	// bridge itself runs outside the sandbox; see outsidePrograms.
@@ -111,6 +116,7 @@ func (sp *SandboxProfiler) Update(workDirs map[string]string, cfg *Config) {
 	sp.credsDir = cfg.Sandbox.CredentialsDir
 	sp.gitConfig = cfg.Sandbox.GitConfig
 	sp.plaudShared = cfg.Plaud.BrainAccess
+	sp.inheritUser = cfg.InheritClaudeUserConfig
 	sp.claudePath = cfg.ClaudePath
 	sp.rclonePath = cfg.Backup.RclonePath
 	sp.plaudCLIPath = cfg.Plaud.CLIPath
@@ -185,13 +191,14 @@ var defaultDenyLiterals = []string{
 
 // defaultWriteDenySubpaths and defaultWriteDenyLiterals are home-relative
 // paths brains may read but never write. Each one is loaded or run by
-// something outside this brain's sandbox: every other brain's next run and
-// your own Claude Code sessions (settings and their hooks, CLAUDE.md, rules,
-// agents, commands, skills, plugins, output styles), launchd at your next
-// login, your own shells, the tmux server the activity viewer starts. A
-// brain that could write one would carry a prompt injection out of its
-// sandbox. Claude Code state the CLI writes on every run (~/.claude.json,
-// projects, todos, shell snapshots) is not in this list.
+// something outside this brain's sandbox: your own Claude Code sessions
+// and, with inherit_claude_user_config, every other brain's next run
+// (settings and their hooks, CLAUDE.md, rules, agents, commands, skills,
+// plugins, output styles), launchd at your next login, your own shells,
+// the tmux server the activity viewer starts. A brain that could write one
+// would carry a prompt injection out of its sandbox. Claude Code state the
+// CLI writes on every run (~/.claude.json, projects, todos, shell
+// snapshots) is not in this list.
 var defaultWriteDenySubpaths = []string{
 	".claude/hooks",
 	".claude/rules",
@@ -225,6 +232,11 @@ var defaultWriteDenyLiterals = []string{
 // every folder above it, next to that folder's .claude/ (its CLAUDE.md, rules
 // and settings), whichever brain or session runs there.
 var memoryFiles = []string{"CLAUDE.md", "CLAUDE.local.md", ".mcp.json"}
+
+// instructionFiles are the memory files Claude Code reads as instructions,
+// whatever --setting-sources says; it skips .mcp.json under
+// --strict-mcp-config.
+var instructionFiles = []string{"CLAUDE.md", "CLAUDE.local.md"}
 
 // Profile returns the sandbox profile source for the brain with this id. It
 // fails when a path cannot be written into the profile: a profile that
@@ -405,6 +417,44 @@ func (sp *SandboxProfiler) Profile(brainID string) (string, error) {
 		b.WriteString("\n")
 	}
 
+	// ── your instructions above the brain's folder ───────────────────────
+	// Claude Code reads CLAUDE.md, CLAUDE.local.md and .claude/ (its
+	// CLAUDE.md, rules, skills, agents and commands) in every folder above
+	// its working directory as part of the project, whatever
+	// --setting-sources says, so a brain in HOME read ~/CLAUDE.md,
+	// ~/.claude/CLAUDE.md and ~/.claude/rules: your instructions, not the
+	// brain's. ~/.claude is also the CLI's state, so only those two are
+	// denied there; they are your user memory too, so for brains outside
+	// HOME as well. The claudeMdExcludes a brain runs with (see
+	// excludeInstructionsAbove) skip the CLAUDE.md files and rules, but
+	// neither the skills, agents and commands nor the brain's own tools.
+	// Writes are denied too, so that nothing here can be renamed and read
+	// under another name. After the allow_paths allows, which cannot open
+	// them again; inherit_claude_user_config does.
+	if !sp.inheritUser {
+		b.WriteString(";; Your Claude Code instructions above this brain's folder\n")
+		var above []string
+		if own := sp.workDirs[brainID]; own != "" {
+			above = foldersAbove(own)
+		}
+		for _, dir := range above {
+			for _, f := range instructionFiles {
+				b.deny("file-read*", "literal", filepath.Join(dir, f))
+				b.deny("file-write*", "literal", filepath.Join(dir, f))
+			}
+			if resolvePath(dir) != resolvePath(home) {
+				b.deny("file-read*", "subpath", filepath.Join(dir, ".claude"))
+				b.deny("file-write*", "subpath", filepath.Join(dir, ".claude"))
+			}
+		}
+		userMemory, userRules := filepath.Join(home, ".claude", "CLAUDE.md"), filepath.Join(home, ".claude", "rules")
+		b.deny("file-read*", "literal", userMemory)
+		b.deny("file-write*", "literal", userMemory)
+		b.deny("file-read*", "subpath", userRules)
+		b.deny("file-write*", "subpath", userRules)
+		b.WriteString("\n")
+	}
+
 	// ── other brains' working trees ──────────────────────────────────────
 	// After the allow_paths allows, like the bridge's data below, so that
 	// an entry covering the folder that holds the brains (~/assistant, say)
@@ -582,6 +632,27 @@ func memoryFolders(workDirs map[string]string, brainID string, homes []string) [
 		}
 	}
 	sort.Strings(out)
+	return out
+}
+
+// foldersAbove returns every folder above dir up to /, along its path as
+// configured and along its real path, each folder once: the CLI walks up
+// from the real path of its working directory, which differs below a
+// symlink (a brains folder linked from another volume).
+func foldersAbove(dir string) []string {
+	seen := map[string]bool{}
+	var out []string
+	for _, start := range []string{absPath(dir), resolvePath(absPath(dir))} {
+		for d := filepath.Dir(filepath.Clean(start)); ; d = filepath.Dir(d) {
+			if real := resolvePath(d); !seen[real] {
+				seen[real] = true
+				out = append(out, d)
+			}
+			if d == filepath.Dir(d) {
+				break
+			}
+		}
+	}
 	return out
 }
 

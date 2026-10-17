@@ -103,7 +103,10 @@ after an update.
 
 Model to use — `"sonnet"`, `"opus"`, `"haiku"`, or a full model ID. Empty uses
 the CLI default. `model` applies to classic mode, `brain_model` to brains, and
-an individual brain can override it with its own `model` field.
+an individual brain can override it with its own `model` field. For a brain,
+empty means the `model` in its folder's `.claude/settings.json`, or Claude
+Code's own default, never the one in your `~/.claude/settings.json` (see
+[`inherit_claude_user_config`](#inherit_claude_user_config)).
 
 ### `brain_effort`
 
@@ -124,6 +127,107 @@ without it every tool call hangs. Set to `false` only if you want a
 conversation-only assistant with no tool access.
 
 Read [Security](../README.md#security) before running with this on.
+
+### `inherit_claude_user_config`
+
+The dashboard has no field for it, but its overview warns while it is on.
+To change it, stop the bridge, edit `config.json` and start the bridge
+again: the bridge reads that file only when it starts, and a dashboard save
+while it runs would write back the old value.
+
+Off by default: a brain loads only its own folder's Claude Code setup, never
+yours. Every brain runs with `--setting-sources project,local` and
+`--strict-mcp-config`, plus `--mcp-config <brain folder>/.mcp.json` when the
+folder has that file. So a brain gets the `CLAUDE.md`, `.claude/` settings,
+skills, agents and commands and the `.mcp.json` servers of its own folder,
+but not your user settings in `~/.claude/settings.json` (their hooks,
+plugins, permissions, `env`, `apiKeyHelper` and `model`), the skills,
+agents and commands in `~/.claude`, the MCP servers in `~/.claude.json`, or
+those of plugins and of your claude.ai account. Given with `--mcp-config`, a
+`.mcp.json` the CLI cannot use stops it from starting at all, where it used
+to be ignored: one that is not a JSON object with an `mcpServers` object
+(`{}` or a misspelt key included). The bridge therefore leaves out such a
+file, and a symlink, anything but a regular file, or a file over 256 KiB,
+and its log says why.
+
+A server the folder's `.claude/settings.json` or `settings.local.json` turns
+off with `disabledMcpjsonServers` (where Claude Code records a project
+server you decline) stays off: `--mcp-config` would start it, so the bridge
+passes the folder's other servers itself, as JSON on the command line. Any
+process of your user, another brain's included, can read that with `ps`, as
+it can the prompt, so a token in a server's `env` shows there too; to avoid
+that, take a server you do not want out of `.mcp.json` instead, and the
+bridge passes the file as it is. When it cannot read one of those two
+files, it passes no server at all, and its log says why; that includes a
+`.claude` folder that is a symlink out of the brain's folder, which the
+bridge, reading outside the sandbox, does not follow. Every other
+server in `.mcp.json` starts, whatever `enabledMcpjsonServers` says, as it
+always did for brains; to stop one, take it out of `.mcp.json` or list it
+in `disabledMcpjsonServers`.
+
+These flags do not skip the `CLAUDE.md` and `CLAUDE.local.md` files and the
+`.claude/` folders (their `CLAUDE.md`, rules, skills, agents and commands)
+in the folders above a brain's folder: Claude Code reads them as part of
+the project. A brain in your home folder would therefore load `~/CLAUDE.md`,
+`~/.claude/CLAUDE.md` and `~/.claude/rules`, your personal instructions. So
+every brain also runs with `--settings` holding a `claudeMdExcludes` list:
+the `CLAUDE.md`, `CLAUDE.local.md`, `.claude/CLAUDE.md` and `.claude/rules`
+of every folder above its folder, up to `/`, and `~/.claude/CLAUDE.md` and
+`~/.claude/rules`, your user memory, wherever the brain lives. It adds to
+the brain's own `claudeMdExcludes`, if it has any. It does not cover the
+skills, agents and commands in those `.claude` folders, nor keep a brain
+from reading any of these files with its tools. The
+[sandbox](#sandbox-macos) does both: it keeps brains from reading or
+writing any of them, up to `/`; in your home folder it denies only
+`.claude/CLAUDE.md` and `.claude/rules`, since the rest of `~/.claude` is
+the CLI's own state. Without the sandbox (Linux, or `sandbox.enabled` off),
+brains still get the skills, agents and commands above their folder and
+can read your instructions, so keep brain folders out from under folders
+that hold either.
+
+`true` brings back the old behaviour: brains load all of your setup, like a
+Claude Code session you start yourself in the brain's folder, and the
+sandbox lets them read those instruction files again (it still denies
+writing them, as listed under [sandbox](#sandbox-macos)).
+
+Before you upgrade to a version with this setting, check whether your
+brains rely on any of this:
+
+- Instructions brains got from `~/CLAUDE.md`, `~/.claude/CLAUDE.md`,
+  `~/.claude/rules` or a `CLAUDE.md`, `CLAUDE.local.md` or `.claude/rules`
+  above their folder no longer reach them, with or without the sandbox.
+  `~/CLAUDE.md` reached every brain under your home folder. Copy what each
+  brain needs into its own `CLAUDE.md` or `brain-prompt.md`.
+- `apiKeyHelper`, `env` and `model` in `~/.claude/settings.json` no longer
+  apply to brains, so neither does the API key, provider
+  (`CLAUDE_CODE_USE_BEDROCK`, say) or model they choose. Move what a brain
+  needs into its folder's `.claude/settings.json`, or set `brain_model`.
+- Permission rules and hooks in `~/.claude/settings.json` no longer apply
+  to brains, the `deny` rules and `PreToolUse` guards among them. Copy the
+  ones a brain should keep into its folder's `.claude/settings.json`.
+- MCP servers from `~/.claude.json`, from plugins and from your claude.ai
+  account no longer load. Add the ones a brain needs to its `.mcp.json`.
+- A `.mcp.json` server you declined that only `~/.claude.json` records as
+  off for the brain's folder (`disabledMcpjsonServers` under `projects`)
+  starts on the brain's first run: the bridge reads only the folder's
+  settings, and Claude Code moves that record into the folder's
+  `.claude/settings.local.json` only during that run. Copy it there first.
+- With the sandbox, a `CLAUDE.md`, skill or rule in a brain's folder that is
+  a symlink to one of the instruction files it denies above the folder
+  (`~/CLAUDE.md`, say) no longer loads, and nothing says so: the sandbox
+  goes by the real path. Copy the file into the brain's folder instead.
+- Then send each brain a test message. Its reply shows that it can still log
+  in; ask it which MCP tools it has and something only its `CLAUDE.md`
+  answers.
+
+> **Warning:** with this on, every brain runs your hooks, sees your personal
+> instructions and can call your MCP servers' tools without asking (see
+> `dangerously_skip_permissions`), on behalf of anyone who may message it,
+> and every brain gets the same ones. Turn it on only if your brains rely on
+> a user-level skill or MCP server. Better: copy what a brain needs into its
+> own folder (`.claude/skills/`, `.mcp.json`, `CLAUDE.md`), and an `env`
+> or `apiKeyHelper` it needs from `~/.claude/settings.json` into its
+> folder's `.claude/settings.json`.
 
 ---
 
@@ -214,6 +318,12 @@ write:
 - the bridge's logs in `~/Library/Logs/fridolin`
 - `~/.config/fridolin`, which holds the personal-data denylist the commit
   hooks read
+- your Claude Code instructions above a brain's folder: the `CLAUDE.md` and
+  `CLAUDE.local.md` in every folder above it, up to `/`, the `.claude`
+  folder in each of them (in your home folder only `.claude/CLAUDE.md` and
+  `.claude/rules`), and `~/.claude/CLAUDE.md` and `~/.claude/rules` for a
+  brain outside your home folder too; unless `inherit_claude_user_config`
+  is on, which makes them readable again
 
 Other Claude Code sessions' records (`~/.claude/projects`,
 `~/.claude/sessions`, yours included) are unreadable, but the CLI writes its
@@ -228,15 +338,19 @@ their sandbox, so a manipulated brain cannot plant code there:
 
 - Claude Code's own configuration: `~/.claude/settings.json`,
   `settings.local.json`, `CLAUDE.md` and the `hooks`, `rules`, `agents`,
-  `commands`, `skills`, `plugins` and `output-styles` folders. Every other
-  brain's next run and your own Claude Code sessions load them. Brains
-  therefore cannot change Claude Code settings or install plugins; do that
-  yourself.
+  `commands`, `skills`, `plugins` and `output-styles` folders (`CLAUDE.md`
+  and `rules` are not even readable, see above). Your own Claude Code
+  sessions load them, and with `inherit_claude_user_config` so does every
+  brain's next run. Brains therefore cannot change Claude Code settings or
+  install plugins; do that yourself.
 - the `CLAUDE.md`, `CLAUDE.local.md` and `.mcp.json` in every folder above a
   brain's folder, up to and including your home folder (or up to `/` for a
   brain outside it), and the `.claude` folder in each of them below your
-  home folder. Claude Code loads them for every brain below them, and your
-  own sessions load your home folder's. A brain's own folder is its own.
+  home folder. Your own sessions load them. So would the brains below
+  them, but the sandbox keeps the `CLAUDE.md` files and `.claude` folders
+  from brains (see above), and a brain loads no `.mcp.json` but its own,
+  unless `inherit_claude_user_config` is on. A brain's own folder is its
+  own.
 - Claude Code's auto-memory, `~/.claude/projects/<project>/memory`, which
   every new session of that project loads, yours included
 - `~/Library/LaunchAgents`
@@ -283,7 +397,8 @@ credentials from the keychain and fails with "Not logged in" without it.
 `deny_paths` adds your own (denied for reading and writing). `allow_paths`
 re-opens reading something the defaults closed; writing there stays denied.
 It cannot re-open another brain's folder, nor the bridge's own data
-directory, database, config file or credentials folder.
+directory, database, config file or credentials folder, nor your Claude
+Code instructions above a brain's folder.
 Entries must be absolute or start with `~/`; the bridge refuses a config with
 a relative one, which would protect nothing.
 
@@ -360,7 +475,7 @@ for the paths listed above. A manipulated brain can therefore still:
   shell, git or Claude Code in a brain's folder.
 - change the Claude Code state the CLI writes on every run, which all brains
   and your own sessions share: `~/.claude.json` (including the MCP servers
-  every session starts), other sessions' transcripts in `~/.claude/projects`
+  your own sessions start), other sessions' transcripts in `~/.claude/projects`
   (it can add to them, not read or move them), `~/.claude/shell-snapshots`
   and `~/.claude/session-env` (sourced into running sessions' shell
   commands), and the small per-process files in `~/.claude/sessions`,
