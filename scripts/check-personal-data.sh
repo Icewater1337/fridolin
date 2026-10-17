@@ -18,7 +18,8 @@
 # remove it from history. Except with --staged, the files as they are in the
 # commit being published (HEAD for --all-history, B for --range, each pushed
 # commit for --pre-push) are scanned too, which catches content committed
-# before this check, or a denylist entry, existed.
+# before this check, or a denylist entry, existed. --pre-push reads only the
+# commits no remote has yet: a commit already published is not this push's.
 #
 # The denylist is read from the first of:
 #   $PERSONAL_DENYLIST
@@ -102,10 +103,14 @@ case "$mode" in
     while read -r _lref lsha _rref rsha; do
       [ "$lsha" = "$zero" ] && continue            # branch deletion
       case " $trees " in *" $lsha "*) ;; *) trees="$trees $lsha" ;; esac
+      # Whatever no remote has yet. For a branch the remote has, also not
+      # what rsha has: after a rebase, rsha..lsha holds the main commits the
+      # branch moved onto, which are published already (GitHub's merge
+      # commits carry its identity and the owner's name).
       if [ "$rsha" = "$zero" ]; then
-        collect_log "$lsha" --not --remotes        # new branch: whatever no remote has yet
+        collect_log "$lsha" --not --remotes
       else
-        collect_log "$rsha..$lsha"
+        collect_log "$lsha" --not "$rsha" --remotes
       fi
     done
     ;;

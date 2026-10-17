@@ -98,6 +98,35 @@ expect "--range scans the end of the range, not HEAD" 1 "$repo" --range "$leaky.
 expect_output "--range names the branch and file" "leaky2:notes.txt:1"
 expect "--range of a clean branch passes" 0 "$repo" --range "$base..main"
 
+# A branch already on the remote, rebased onto a main that moved meanwhile
+# and pushed again. main's new commit stands for GitHub's merge commit: it
+# is on the remote already, under another identity and with a message that
+# names the owner, so it is not this push's to publish.
+remote="$work/remote.git"
+git init -q --bare "$remote"
+clone="$work/clone"
+new_repo "$clone"
+git -C "$clone" remote add origin "$remote"
+commit "$clone" README "hello" >/dev/null
+git -C "$clone" push -q origin main
+git -C "$clone" switch -q -c feature
+old_tip="$(commit "$clone" feature.txt "a feature")"
+git -C "$clone" push -q origin feature
+git -C "$clone" switch -q main
+commit "$clone" site.txt "the site" >/dev/null
+GIT_COMMITTER_NAME="Merge Bot" GIT_COMMITTER_EMAIL=merge-bot@localhost \
+  git -C "$clone" commit -q --allow-empty -m "Merge pull request #1 from $secret/site"
+git -C "$clone" push -q origin main
+git -C "$clone" switch -q feature
+git -C "$clone" rebase -q main
+new_tip="$(git -C "$clone" rev-parse HEAD)"
+expect "pre-push after a rebase skips the commits a remote already has" 0 "$clone" --pre-push \
+  <<<"refs/heads/feature $new_tip refs/heads/feature $old_tip"
+leak_tip="$(commit "$clone" plan.txt "ask $secret")"
+expect "pre-push after a rebase still scans the new commits" 1 "$clone" --pre-push \
+  <<<"refs/heads/feature $leak_tip refs/heads/feature $old_tip"
+expect_output "pre-push after a rebase names the new commit" "$(git -C "$clone" rev-parse --short "$leak_tip"):plan.txt"
+
 expect "--all-history of a clean HEAD passes" 0 "$repo" --all-history
 git -C "$repo" switch -q leaky
 expect "--all-history finds the string at HEAD" 1 "$repo" --all-history
