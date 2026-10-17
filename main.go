@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -64,7 +65,7 @@ func main() {
 		serviceCmd(args)
 	case "version":
 		fmt.Println(bridgeVersion())
-	case "help", "-h", "--help":
+	case "help":
 		fmt.Print(usage)
 	default:
 		fmt.Fprintf(os.Stderr, "unknown command %q\n\n%s", cmd, usage)
@@ -133,31 +134,48 @@ func writeStarterConfig(path, claudePath, dataDir string) error {
 	return writeFileAtomic(path, append(data, '\n'), 0o600, false)
 }
 
-func runCmd(args []string) {
-	fs := flag.NewFlagSet("run", flag.ExitOnError)
-	cfgPath := fs.String("config", "", configFlagHelp)
-	noWA := fs.Bool("no-whatsapp", false, "dev mode: run without connecting to WhatsApp")
-	dashOnly := fs.Bool("dashboard-only", false, "alias for --no-whatsapp")
-	openDash := fs.Bool("open", false, "open the dashboard in the browser once started")
-	logFile := fs.String("log-file", "", "the file stderr goes to, rotated at 10 MiB (the launchd agent passes it)")
-	legacyCheck := fs.Bool("check", false, "validate the configuration and exit (same as `check`)")
-	_ = fs.Parse(args)
+// runOptions are the run command's flags.
+type runOptions struct {
+	config     string
+	noWhatsApp bool
+	open       bool
+	logFile    string
+}
 
-	if *legacyCheck {
-		checkCmd([]string{"--config", *cfgPath})
-		return
+// parseRunFlags reads the run command's flags, which are also what
+// `fridolin` without a command takes. -h and --help print the usage text,
+// so `fridolin -h` shows every command and not only these flags.
+func parseRunFlags(args []string, output io.Writer) (runOptions, error) {
+	fs := flag.NewFlagSet("run", flag.ContinueOnError)
+	fs.SetOutput(output)
+	fs.Usage = func() { fmt.Fprint(fs.Output(), usage) }
+	var o runOptions
+	fs.StringVar(&o.config, "config", "", configFlagHelp)
+	fs.BoolVar(&o.noWhatsApp, "no-whatsapp", false, "dev mode: run without connecting to WhatsApp")
+	fs.BoolVar(&o.open, "open", false, "open the dashboard in the browser once started")
+	fs.StringVar(&o.logFile, "log-file", "", "the file stderr goes to, rotated at 10 MiB (the launchd agent passes it)")
+	return o, fs.Parse(args)
+}
+
+func runCmd(args []string) {
+	opts, err := parseRunFlags(args, os.Stderr)
+	switch {
+	case errors.Is(err, flag.ErrHelp):
+		os.Exit(0)
+	case err != nil:
+		os.Exit(2) // the flag package has said what is wrong
 	}
 
 	// Under launchd stderr is a file, which --log-file keeps small.
 	var console io.Writer = os.Stderr
 	var logErr error
-	if *logFile != "" {
+	if opts.logFile != "" {
 		var lf *rotatingLog
-		if lf, logErr = openRotatingLog(*logFile, int(os.Stderr.Fd()), maxLogBytes); logErr == nil {
+		if lf, logErr = openRotatingLog(opts.logFile, int(os.Stderr.Fd()), maxLogBytes); logErr == nil {
 			console = lf
 		}
 	}
-	ring, path := runLog(console, *cfgPath)
+	ring, path := runLog(console, opts.config)
 	if logErr != nil {
 		// Once the log reaches the dashboard too.
 		log.Printf("%v; logging to stderr without rotating it", logErr)
@@ -173,7 +191,7 @@ func runCmd(args []string) {
 
 	// NewBridge takes the data dir's instance lock, so dev mode with the live
 	// data dir is refused next to the running bridge too.
-	bridge, err := NewBridge(cfgs, BridgeOptions{NoWhatsApp: *noWA || *dashOnly, Logs: ring})
+	bridge, err := NewBridge(cfgs, BridgeOptions{NoWhatsApp: opts.noWhatsApp, Logs: ring})
 	if err != nil {
 		log.Fatalf("creating bridge: %v", err)
 	}
@@ -194,7 +212,7 @@ func runCmd(args []string) {
 		// Only on an interactive terminal: the token must not end up in a log file.
 		fmt.Printf("\n  Dashboard: %s\n\n", dashboardURL(cfg.HTTPListen, bridge.token.Value()))
 	}
-	if *openDash && cfg.HTTPEnabled() {
+	if opts.open && cfg.HTTPEnabled() {
 		go func() { _ = openBrowser(dashboardURL(cfg.HTTPListen, bridge.token.Value())) }()
 	}
 
