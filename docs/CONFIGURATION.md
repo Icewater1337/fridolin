@@ -132,15 +132,15 @@ output. The bridge logs the CLI's path and version when it starts, and the
 log, `fridolin check` and the dashboard warn when it is older or missing. The
 CLI normally updates itself; `claude update` does it by hand.
 
-### `model` and `brain_model`
+### `brain_model`
 
-Model to use — `"sonnet"`, `"opus"`, `"haiku"`, or a full model ID. Empty uses
-the CLI default. `brain_model` applies to brains, and an individual brain can
-override it with its own `model` field. `model` is left from classic mode:
-brains use it while `brain_model` is empty. For a brain, empty means the
-`model` in its folder's `.claude/settings.json`, or Claude Code's own default,
-never the one in your `~/.claude/settings.json` (see
-[`inherit_claude_user_config`](#inherit_claude_user_config)).
+Model brains use — `"sonnet"`, `"opus"`, `"haiku"`, or a full model ID. An
+individual brain can override it with its own `model` field. Empty means the
+`model` in the brain folder's `.claude/settings.json`, or Claude Code's own
+default, never the one in your `~/.claude/settings.json` (see
+[`inherit_claude_user_config`](#inherit_claude_user_config)). The top-level
+`model` key older versions had is [retired](#retired-keys): while
+`brain_model` is empty, its value moves there.
 
 ### `brain_effort`
 
@@ -334,9 +334,24 @@ and reported on the dashboard; the others keep running.
 ### Inline brains
 
 Older configs listed brains inline, under `"brains"`. The bridge refuses to
-start while that list has a brain in it; an empty list is ignored. To move
-them into their folders, see
+start while that list has a brain in it; an empty list is a
+[retired key](#retired-keys). To move them into their folders, see
 [Configs with inline brains](BRAINS.md#configs-with-inline-brains).
+
+### Retired keys
+
+Older versions wrote a few top-level keys this one has no setting for. A
+config that still has them loads; the log says once per start what became
+of each, and the next dashboard save leaves them out:
+
+| Key | What became of it |
+|---|---|
+| `model` | The model brains fell back to while `brain_model` was empty. Its value becomes `brain_model` then, so brains keep their model; otherwise it is unused. |
+| `work_dir` | The folder classic mode ran in. Brains run in their own folders. |
+| `brains` | Inline brains, when the list is empty or `null`. One that lists brains is refused, see [Inline brains](#inline-brains). |
+
+Any other key the bridge does not know is logged as an unknown setting and
+dropped the same way.
 
 ### `brain_mode`
 

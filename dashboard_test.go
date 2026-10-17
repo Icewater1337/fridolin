@@ -1276,6 +1276,36 @@ func TestPutConfigRefusesInlineBrains(t *testing.T) {
 	}
 }
 
+// The dashboard edits brain_model only. A config that still has the
+// retired model key shows its value there, and a save from a tab opened
+// before the upgrade, which still sends model, keeps it the same way.
+func TestConfigPageFoldsTheRetiredModel(t *testing.T) {
+	tb := newTestBridge(t, `, "model": "sonnet"`)
+	var got struct {
+		ETag   string         `json:"etag"`
+		Config map[string]any `json:"config"`
+	}
+	_ = json.Unmarshal(tb.do("GET", "/api/config", nil).Body.Bytes(), &got)
+	if _, ok := got.Config["model"]; ok {
+		t.Errorf("GET /api/config has a model key: %v", got.Config["model"])
+	}
+	if got.Config["brain_model"] != "sonnet" {
+		t.Errorf("GET /api/config: brain_model %v, want sonnet", got.Config["brain_model"])
+	}
+
+	// An old tab: brain_model as an older bridge served it, and model.
+	got.Config["brain_model"], got.Config["model"] = "", "haiku"
+	if w := tb.do("PUT", "/api/config", map[string]any{"etag": got.ETag, "config": got.Config}); w.Code != http.StatusOK {
+		t.Fatalf("put: %d %s", w.Code, w.Body.String())
+	}
+	if m := tb.cfgs.Get().BrainModel; m != "haiku" {
+		t.Errorf("brain_model after the save = %q, want haiku", m)
+	}
+	if raw, ok := readRawConfig(t, tb.cfgs.Path())["model"]; ok {
+		t.Errorf("the save wrote model: %s", raw)
+	}
+}
+
 func TestAddBrainBackupDefaults(t *testing.T) {
 	tb := newTestBridge(t, "")
 	// No backup settings given: backed up, with the default exclusions.

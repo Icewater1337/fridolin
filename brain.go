@@ -1528,9 +1528,6 @@ func settingsFor(cfg *Config, sp BrainSpec) *brainSettings {
 	if model == "" {
 		model = cfg.BrainModel
 	}
-	if model == "" {
-		model = cfg.Model
-	}
 	effort := m.Effort
 	if effort == "" {
 		effort = cfg.BrainEffort

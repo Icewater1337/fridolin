@@ -593,6 +593,12 @@ func (b *Bridge) apiPutConfig(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, "invalid config: "+err.Error())
 		return
 	}
+	// Folded as at startup, so a dashboard tab opened before an upgrade
+	// keeps a model it still sends, and cannot bring inline brains back.
+	if _, err := foldRetiredKeys(req.Config, &incoming); err != nil {
+		writeErr(w, http.StatusBadRequest, "invalid config: "+err.Error())
+		return
+	}
 	restart, err := b.cfgs.Update(req.ETag, func(c *Config) error {
 		incoming.BrainDirs = c.BrainDirs
 		*c = incoming

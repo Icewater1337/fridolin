@@ -57,11 +57,9 @@ type Config struct {
 	// 2048 (WhatsApp's own limit is 2 GB).
 	MaxMediaMB int `json:"max_media_mb,omitempty"`
 
-	// Model is the model brains use when brain_model is empty, e.g.
-	// "sonnet". Left from classic mode, which had no brain_model.
-	Model string `json:"model,omitempty"`
-
-	// BrainModel is the model used by brains (falls back to Model when empty).
+	// BrainModel is the model brains use, e.g. "sonnet"; empty uses the CLI
+	// default. Brains can override it. A config that still has the retired
+	// "model" key and no brain_model gets that value, see retiredKeys.
 	BrainModel string `json:"brain_model"`
 
 	// BrainEffort is passed to the CLI as --effort (low, medium, high, xhigh,
@@ -107,11 +105,6 @@ type Config struct {
 	// as true, so that an older bridge you roll back to runs brains too:
 	// without it, that one falls back to classic mode.
 	BrainMode retiredBrainMode `json:"brain_mode"`
-
-	// InlineBrains is the "brains" key, where brains were configured
-	// before they had folders of their own. A config that still lists any
-	// is refused, see retiredInlineBrains; an empty list is ignored.
-	InlineBrains retiredInlineBrains `json:"brains,omitempty"`
 
 	// BrainDirs are brain folders added through the dashboard. Each holds a
 	// brain.json manifest; Approved is the version you accepted (a brain
@@ -170,23 +163,78 @@ func (*retiredBrainMode) UnmarshalJSON(data []byte) error {
 // write-back drops no setting.
 const migrateBuild = "2592376"
 
-// retiredInlineBrains is the brains key. Inline brains were removed together
-// with `fridolin migrate`. Nothing sets the key any more, so saves leave it
-// out.
-type retiredInlineBrains []json.RawMessage
+// retiredKeys are the top-level keys older versions wrote that this one has
+// no setting for. A config.json with one still loads: each is logged once,
+// saying what became of it, and the next save leaves it out, since saves
+// write the Config, which has no field for it. brain_mode is not one of
+// them: saves keep writing it, see retiredBrainMode.
+var retiredKeys = []struct {
+	name string
+	// fold carries over what the value still means into the file layer and
+	// says what became of it, or refuses a value this version cannot honour.
+	fold func(file *Config, value json.RawMessage) (string, error)
+}{
+	{"model", foldModel},
+	{"work_dir", func(*Config, json.RawMessage) (string, error) {
+		return "it named the folder classic mode ran in, and brains run in their own", nil
+	}},
+	{"brains", foldInlineBrains},
+}
 
-// UnmarshalJSON refuses a list with brains in it: running without them
-// would leave their chats unanswered, or answered by whichever brain is the
-// default. Dashboard saves are parsed the same way.
-func (*retiredInlineBrains) UnmarshalJSON(data []byte) error {
+// foldModel takes over model, the classic-mode model that brains fell back
+// to while brain_model was empty, so those brains keep the model they ran
+// with.
+func foldModel(file *Config, value json.RawMessage) (string, error) {
+	var model string
+	if err := json.Unmarshal(value, &model); err != nil {
+		return "", fmt.Errorf("model: %w", err)
+	}
+	switch {
+	case model == "":
+		return "it was empty", nil
+	case file.BrainModel == "":
+		file.BrainModel = model
+		return fmt.Sprintf("brain_model is now %q, the model brains fell back to", model), nil
+	}
+	return fmt.Sprintf("brains use brain_model %q, so %q went unused", file.BrainModel, model), nil
+}
+
+// foldInlineBrains checks brains, where brains were configured before they
+// had folders of their own. Inline brains were removed together with
+// `fridolin migrate`. A list with brains in it is refused: running without
+// them would leave their chats unanswered, or answered by whichever brain
+// is the default. An empty list or null loads.
+func foldInlineBrains(_ *Config, value json.RawMessage) (string, error) {
 	var brains []json.RawMessage
-	if err := json.Unmarshal(data, &brains); err != nil {
-		return fmt.Errorf("brains: %w", err)
+	if err := json.Unmarshal(value, &brains); err != nil {
+		return "", fmt.Errorf("brains: %w", err)
 	}
 	if len(brains) > 0 {
-		return fmt.Errorf(`config.json lists brains inline under "brains", which this version no longer runs. Move them into their folders first: run "fridolin migrate" with a build from before this change (commit %s), then start this version again (see docs/BRAINS.md#configs-with-inline-brains)`, migrateBuild)
+		return "", fmt.Errorf(`config.json lists brains inline under "brains", which this version no longer runs. Move them into their folders first: run "fridolin migrate" with a build from before this change (commit %s), then start this version again (see docs/BRAINS.md#configs-with-inline-brains)`, migrateBuild)
 	}
-	return nil
+	return "it listed no brains, and brains live in their folders (brain_dirs)", nil
+}
+
+// foldRetiredKeys applies retiredKeys to file, which was decoded from data,
+// and returns a note for each retired key data has, in table order.
+func foldRetiredKeys(data []byte, file *Config) ([]string, error) {
+	var m map[string]json.RawMessage
+	if err := json.Unmarshal(data, &m); err != nil {
+		return nil, err
+	}
+	var notes []string
+	for _, rk := range retiredKeys {
+		value, ok := m[rk.name]
+		if !ok {
+			continue
+		}
+		what, err := rk.fold(file, value)
+		if err != nil {
+			return nil, err
+		}
+		notes = append(notes, fmt.Sprintf("%q is retired and is dropped the next time the dashboard saves: %s", rk.name, what))
+	}
+	return notes, nil
 }
 
 // classicModeRemoved is the error for a setting that asks for classic mode:
