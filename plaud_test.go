@@ -485,6 +485,168 @@ func TestPlaudFailedFirstSyncForwardsNothingOld(t *testing.T) {
 	}
 }
 
+// plaudForwarded reports whether a recording was written out for a brain.
+func (tb *testBridge) plaudForwarded() bool {
+	files, _ := filepath.Glob(filepath.Join(tb.cfgs.Get().MediaDir, "plaud", "*.txt"))
+	return len(files) > 0
+}
+
+// A state belongs to the account it was seeded for. Another account starts
+// over, so its existing recordings are not sent; the same account keeps its
+// place, so what it recorded while it was signed out still arrives.
+func TestPlaudStateBelongsToTheAccount(t *testing.T) {
+	for _, c := range []struct {
+		name    string
+		state   plaudState
+		account string // who `me` says is signed in
+		forward bool   // whether plaudNew is sent
+		logs    string // why the log says it starts over, if it does
+	}{
+		{"another account", plaudState{Account: "u_1", Seen: []string{plaudOld1}}, "u_2", false, "signed in to another Plaud account"},
+		{"the same account again", plaudState{Account: "u_1", Seen: []string{plaudOld1}}, "u_1", true, ""},
+		{"a state from before accounts were recorded", plaudState{Seen: []string{plaudOld1}}, "u_1", true, ""},
+		{"a state only the expiry notice wrote", plaudState{AuthNotified: 1}, "u_1", false, "only held an expiry notice"},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			logs := captureLog(t)
+			tb, fp := plaudBridge(t, "")
+			plaudSignIn(t, tb)
+			c.state.Pending = map[string]float64{}
+			if err := tb.plaud.saveState(&c.state); err != nil {
+				t.Fatal(err)
+			}
+			fp.write("account", c.account)
+			fp.files(plaudNew, plaudOld1)
+			fp.recording(plaudNew, true)
+			if err := tb.plaud.Poll(context.Background()); err != nil {
+				t.Fatal(err)
+			}
+			if got := tb.plaudForwarded(); got != c.forward {
+				t.Errorf("forwarded = %v, want %v", got, c.forward)
+			}
+			if c.forward {
+				waitFor(t, 10*time.Second, "brain reply", func() bool { return len(tb.dev.Outbox()) > 0 })
+			}
+			if st, _ := tb.plaud.loadState(); st.Account != c.account || !contains(st.Seen, plaudNew) {
+				t.Errorf("state = %+v, want account %s with the recording seen", st, c.account)
+			}
+			if got := strings.Join(logs(), "\n"); strings.Contains(got, "starting over") != (c.logs != "") || !strings.Contains(got, c.logs) {
+				t.Errorf("log = %q, want it to say %q", got, c.logs)
+			}
+		})
+	}
+}
+
+// The account is checked again when the login changes, and only then.
+func TestPlaudChecksTheAccountWhenTheLoginChanges(t *testing.T) {
+	tb, fp := plaudBridge(t, "")
+	plaudSignIn(t, tb)
+	if err := tb.plaud.saveState(&plaudState{Account: "u_1", Seen: []string{plaudOld1}, Pending: map[string]float64{}}); err != nil {
+		t.Fatal(err)
+	}
+	fp.files(plaudOld1)
+	for i := 0; i < 2; i++ {
+		if err := tb.plaud.Poll(context.Background()); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if n := strings.Count(fp.calls(), " me\n"); n != 1 {
+		t.Errorf("`plaud me` ran %d times in two polls, want once", n)
+	}
+
+	// Signed out, and in again with another account.
+	fp.write("account", "u_2")
+	plaudSignIn(t, tb)
+	later := time.Now().Add(time.Minute)
+	_ = os.Chtimes(tb.plaud.tokenPath(), later, later)
+	fp.files(plaudNew, plaudOld1)
+	fp.recording(plaudNew, true)
+	if err := tb.plaud.Poll(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if n := strings.Count(fp.calls(), " me\n"); n != 2 {
+		t.Errorf("`plaud me` ran %d times, want again after the new login", n)
+	}
+	if tb.plaudForwarded() {
+		t.Error("the other account's existing recording was sent")
+	}
+	if st, _ := tb.plaud.loadState(); st.Account != "u_2" || !contains(st.Seen, plaudNew) {
+		t.Errorf("state = %+v, want it seeded for u_2", st)
+	}
+}
+
+// A login that changes in the middle of a poll ("Connect again" with another
+// account finishing, brain_access switching) is not trusted for that poll:
+// what Plaud lists may already be the other account's, and none of it may
+// be sent. The next poll checks the account and starts over for it.
+func TestPlaudLoginChangingDuringAPollSendsNothing(t *testing.T) {
+	for _, c := range []struct {
+		name   string
+		state  *plaudState // nil: no first sync yet
+		after  string      // the login changes once this command ran…
+		before string      // …or just before this one runs
+	}{
+		{"while the first sync lists the recordings", nil, "", "files"},
+		{"just after the account was looked up", &plaudState{Account: "u_1", Seen: []string{plaudOld1}}, "me", ""},
+		{"before the recordings are listed", &plaudState{Account: "u_1", Seen: []string{plaudOld1}}, "", "files"},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			tb, fp := plaudBridge(t, "")
+			plaudSignIn(t, tb)
+			if c.state != nil {
+				c.state.Pending = map[string]float64{}
+				if err := tb.plaud.saveState(c.state); err != nil {
+					t.Fatal(err)
+				}
+			}
+			fp.files(plaudOld1)
+			for _, id := range []string{plaudOld2, plaudNew} {
+				fp.recording(id, true)
+			}
+			// u_2 signs in: `me` names it, Plaud lists its recordings, and
+			// the login file is rewritten.
+			switched := false
+			switchAccount := func() {
+				switched = true
+				fp.write("account", "u_2")
+				fp.files(plaudNew, plaudOld2)
+				if err := os.WriteFile(tb.plaud.tokenPath(), []byte(`{"user":"u_2"}`), 0o600); err != nil {
+					t.Fatal(err)
+				}
+				later := time.Now().Add(time.Minute)
+				_ = os.Chtimes(tb.plaud.tokenPath(), later, later)
+			}
+			run := tb.plaud.run
+			tb.plaud.run = func(ctx context.Context, args ...string) (string, error) {
+				if !switched && args[0] == c.before {
+					switchAccount()
+				}
+				out, err := run(ctx, args...)
+				if !switched && args[0] == c.after {
+					switchAccount()
+				}
+				return out, err
+			}
+
+			for i := 0; i < 3; i++ {
+				if err := tb.plaud.Poll(context.Background()); err != nil {
+					t.Fatalf("poll %d: %v", i, err)
+				}
+			}
+			if !switched {
+				t.Fatal("the login never changed")
+			}
+			if tb.plaudForwarded() {
+				t.Error("the other account's existing recordings were sent")
+			}
+			st, _ := tb.plaud.loadState()
+			if st.Account != "u_2" || !contains(st.Seen, plaudNew) || !contains(st.Seen, plaudOld2) || len(st.Pending) != 0 {
+				t.Errorf("state = %+v, want it seeded for u_2", st)
+			}
+		})
+	}
+}
+
 func TestPlaudBrainAccessSharesTheLogin(t *testing.T) {
 	tb, fp := plaudBridge(t, `, "brain_access": true`)
 	fp.files()

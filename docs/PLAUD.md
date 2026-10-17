@@ -21,7 +21,10 @@ matters and tells you the action items.
 The first check only remembers the recordings that already exist; from then
 on, each new one is sent once. If that first check fails (Plaud is
 unreachable, or the login has already expired), the next one starts over,
-so recordings from before you connected are still not sent.
+so recordings from before you connected are still not sent. Signing in
+with a different Plaud account starts over the same way. Signing in again
+with the same account, after the login expired say, picks up where it left
+off: what you recorded in between still arrives (up to the latest 20).
 
 ## What happens
 
