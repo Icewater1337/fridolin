@@ -1142,3 +1142,95 @@ func TestBrainsDoNotSeeTheDotEnv(t *testing.T) {
 		}
 	}
 }
+
+// Brains are told the data dir and the DB the bridge runs with, absolute,
+// so the Python tools find them without guessing between the data dir's
+// names or knowing data_dir and db_path. What the bridge's own environment
+// has under those names does not reach them.
+func TestBrainsAreToldTheDataDir(t *testing.T) {
+	cases := []struct {
+		name     string
+		settings string // config.json settings besides the brain
+		legacy   bool   // the home has only the pre-rename data dir
+		want     func(home string) (dataDir, dbPath string)
+	}{
+		{"default", ``, false, func(home string) (string, string) {
+			return home + "/.fridolin", home + "/.fridolin/bridge.db"
+		}},
+		{"pre-rename data dir", ``, true, func(home string) (string, string) {
+			return home + "/.whatsapp-claude-bridge", home + "/.whatsapp-claude-bridge/bridge.db"
+		}},
+		{"data_dir", `"data_dir": "~/data",`, false, func(home string) (string, string) {
+			return home + "/data", home + "/data/bridge.db"
+		}},
+		{"db_path elsewhere", `"data_dir": "~/data", "db_path": "~/db/bridge.db",`, false, func(home string) (string, string) {
+			return home + "/data", home + "/db/bridge.db"
+		}},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			home := canonicalDir(t.TempDir())
+			t.Setenv("HOME", home)
+			t.Setenv("BRIDGE_DATA_DIR", "/from/the/bridge/env")
+			t.Setenv("BRIDGE_DB_PATH", "/from/the/bridge/env/bridge.db")
+			if c.legacy {
+				if err := os.Mkdir(home+"/.whatsapp-claude-bridge", 0o700); err != nil {
+					t.Fatal(err)
+				}
+			}
+			envLog := filepath.Join(home, "brain.env")
+			t.Setenv("WCB_FAKE_ENV_LOG", envLog)
+			claude := fakeClaudeEnv(t, 0)
+			path := writeConfig(t, `{`+c.settings+`
+				"claude_path": "`+claude+`"`+brainDirsJSON(t,
+				brainFolder(t, home+"/a", BrainManifest{ID: "a", Routing: BrainRouting{HandlesDMs: true}}),
+			)+`
+			}`)
+			cfg, err := LoadConfig(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			mgr := newTestManager(t, cfg)
+			d := &deliveries{}
+			mgr.SetHooks(BrainHooks{Deliver: d.add})
+			t.Cleanup(mgr.Stop)
+
+			if _, _, _, err := mgr.Submit(dm("hello")); err != nil {
+				t.Fatal(err)
+			}
+			waitFor(t, 10*time.Second, "the run", func() bool { return d.count() == 1 })
+			if err := d.all()[0].res.Err; err != nil {
+				t.Fatal(err)
+			}
+			logged, err := os.ReadFile(envLog)
+			if err != nil {
+				t.Fatal(err)
+			}
+			got := map[string]string{}
+			for _, kv := range strings.Split(string(logged), "\n") {
+				if k, v, ok := strings.Cut(kv, "="); ok {
+					got[k] = v
+				}
+			}
+			dataDir, dbPath := c.want(home)
+			if got["BRIDGE_DATA_DIR"] != dataDir {
+				t.Errorf("BRIDGE_DATA_DIR=%q, want %q", got["BRIDGE_DATA_DIR"], dataDir)
+			}
+			if got["BRIDGE_DB_PATH"] != dbPath {
+				t.Errorf("BRIDGE_DB_PATH=%q, want %q", got["BRIDGE_DB_PATH"], dbPath)
+			}
+		})
+	}
+}
+
+// A brain runs in its own folder, so a relative data_dir or db_path, which
+// the bridge opens relative to its working directory, reaches it absolute.
+func TestDataEnvIsAbsolute(t *testing.T) {
+	cwd := canonicalDir(t.TempDir())
+	t.Chdir(cwd)
+	s := settingsFor(&Config{DataDir: "rel", DBPath: "rel/bridge.db"}, BrainSpec{})
+	want := []string{"BRIDGE_DATA_DIR=" + cwd + "/rel", "BRIDGE_DB_PATH=" + cwd + "/rel/bridge.db"}
+	if got := dataEnv(s); !slices.Equal(got, want) {
+		t.Errorf("dataEnv = %q, want %q", got, want)
+	}
+}

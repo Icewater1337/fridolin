@@ -216,6 +216,8 @@ type brainSettings struct {
 	credsDir        string // where per-brain credential files live
 	envPassthrough  []string
 	toolsDir        string // the bridge's Python helpers, or ""
+	dataDir         string // the data dir, absolute
+	dbPath          string // the bridge's DB, absolute
 }
 
 // BrainHooks connect brains to the rest of the bridge.
@@ -976,7 +978,7 @@ func (br *Brain) invoke(run *brainRun, ctx context.Context, s *brainSettings, m 
 	// without it: the fallback would quietly drop the only barrier left.
 	binary := s.claudePath
 	finalArgs := args
-	extraEnv := calendarEnv(br.id, s.manifest, s.credsDir)
+	extraEnv := append(dataEnv(s), calendarEnv(br.id, s.manifest, s.credsDir)...)
 	if s.toolsDir != "" {
 		// Prompts and skills run the helpers as $FRIDOLIN_TOOLS_DIR/<tool>,
 		// wherever the bridge is installed.
@@ -1554,7 +1556,19 @@ func settingsFor(cfg *Config, sp BrainSpec) *brainSettings {
 		credsDir:        credentialsDirOf(cfg),
 		envPassthrough:  append([]string(nil), cfg.ChildEnvPassthrough...),
 		toolsDir:        ownLayout().Tools,
+		// Absolute: brains run in their own folder, where a relative
+		// data_dir would name another one.
+		dataDir: absPath(cfg.DataDir),
+		dbPath:  absPath(cfg.DBPath),
 	}
+}
+
+// dataEnv tells the tools in tools/ where the bridge keeps its data, so they
+// need not guess: poll_results.py opens the DB at BRIDGE_DB_PATH, and
+// calendar_tool.py falls back to BRIDGE_DATA_DIR. Both are external names
+// that brains and their scripts rely on.
+func dataEnv(s *brainSettings) []string {
+	return []string{"BRIDGE_DATA_DIR=" + s.dataDir, "BRIDGE_DB_PATH=" + s.dbPath}
 }
 
 // credentialsDirOf is where per-brain credential files live.

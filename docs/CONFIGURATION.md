@@ -833,11 +833,17 @@ variables of the bridge's environment:
 | `DO_NOT_TRACK`, `TMUX_TMPDIR` | the telemetry opt-out many tools honour; where tmux keeps its socket |
 | `CLAUDE_CODE_*`, `ANTHROPIC_*`, `CLAUDE_CONFIG_DIR` | the Claude CLI's login (`CLAUDE_CODE_OAUTH_TOKEN`, `ANTHROPIC_API_KEY`), provider and gateway (`ANTHROPIC_BASE_URL`) |
 | `DISABLE_AUTOUPDATER`, `DISABLE_TELEMETRY`, `DISABLE_ERROR_REPORTING` | the CLI's update check and reports |
-| `BRIDGE_DATA_DIR`, `BRIDGE_DB_PATH`, `CALENDAR_TZ`, `TRANSCRIBE_MODEL`, `TRANSCRIBE_LANGUAGE` | the tools in [tools/](../tools/): the data directory and database if you moved them, the calendar's timezone, the transcription model and language |
+| `CALENDAR_TZ`, `TRANSCRIBE_MODEL`, `TRANSCRIBE_LANGUAGE` | the tools in [tools/](../tools/): the calendar's timezone, the transcription model and language |
 
-On top, the bridge sets `BRIDGE_BRAIN_ID`, `BRIDGE_CREDENTIALS_DIR`,
-`BRIDGE_CALENDARS` and `BRIDGE_CALENDAR_DEFAULT` for the calendar tool, and
-`DISABLE_AUTOUPDATER=1` in the sandbox. The list lives in one place,
+On top, the bridge sets `BRIDGE_DATA_DIR` and `BRIDGE_DB_PATH`, the data
+directory and database it runs with (absolute, wherever `data_dir` and
+`db_path` put them), which the tools read; `FRIDOLIN_TOOLS_DIR`, the
+folder with the tools (see [BRAINS.md](BRAINS.md)); `BRIDGE_BRAIN_ID`,
+`BRIDGE_CREDENTIALS_DIR`, `BRIDGE_CALENDARS` and `BRIDGE_CALENDAR_DEFAULT`
+for the calendar tool; and `DISABLE_AUTOUPDATER=1` in the sandbox. What
+the bridge's own environment has under these names does not reach brains.
+Run by hand, outside a brain, the tools default to `~/.fridolin`; set
+`BRIDGE_DATA_DIR` for another data directory. The list lives in one place,
 `childEnvAllowlist` in `childenv.go`.
 
 Brains are not handed anything else, for example `GROQ_API_KEY`,

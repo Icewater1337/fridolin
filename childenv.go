@@ -93,8 +93,6 @@ var childEnvAllowlist = []childEnvVar{
 	{"BROWSER", desktopChild},                  // a browser you chose over the desktop's
 
 	// Settings of the tools in tools/ that brains run (docs/CONFIGURATION.md).
-	{"BRIDGE_DATA_DIR", claudeChild},     // the data dir, when it is not ~/.fridolin
-	{"BRIDGE_DB_PATH", claudeChild},      // the database, when it is not in the data dir
 	{"CALENDAR_TZ", claudeChild},         // calendar_tool.py's timezone
 	{"TRANSCRIBE_MODEL", claudeChild},    // transcribe.py's model
 	{"TRANSCRIBE_LANGUAGE", claudeChild}, // transcribe.py's language

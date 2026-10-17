@@ -160,5 +160,29 @@ class ArgumentsTest(PollResultsTestCase):
                     self.conns[0].execute("SELECT 1")
 
 
+class DBPathTest(unittest.TestCase):
+    """Where the tool looks for the bridge's DB."""
+
+    def test_db_path(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            home = Path(tmp)
+            # Only the data dir from before the rename exists. Whether an
+            # install still uses it is the bridge's call, which it passes on
+            # in BRIDGE_DB_PATH: the tool must not pick it by itself.
+            (home / ".whatsapp-claude-bridge").mkdir()
+            cases = [
+                ("nothing set", {}, home / ".fridolin" / "bridge.db"),
+                ("empty data dir", {"BRIDGE_DATA_DIR": ""}, home / ".fridolin" / "bridge.db"),
+                ("data dir", {"BRIDGE_DATA_DIR": "/srv/data"}, Path("/srv/data/bridge.db")),
+                ("db path", {"BRIDGE_DATA_DIR": "/srv/data", "BRIDGE_DB_PATH": "/srv/db/b.db"}, Path("/srv/db/b.db")),
+            ]
+            for name, env, want in cases:
+                with self.subTest(name), mock.patch.dict(os.environ, {"HOME": str(home)}):
+                    os.environ.pop("BRIDGE_DATA_DIR", None)
+                    os.environ.pop("BRIDGE_DB_PATH", None)
+                    os.environ.update(env)
+                    self.assertEqual(poll_results.db_path(), want)
+
+
 if __name__ == "__main__":
     unittest.main()
