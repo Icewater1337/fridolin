@@ -148,7 +148,7 @@ class FakeGoogle:
         self.refreshed = 0
         self.modules = self._modules()
 
-    def install(self, testcase) -> "FakeGoogle":
+    def install(self, testcase) -> FakeGoogle:
         patcher = mock.patch.dict(sys.modules, self.modules)
         patcher.start()
         testcase.addCleanup(patcher.stop)

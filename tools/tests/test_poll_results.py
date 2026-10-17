@@ -10,7 +10,7 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
-import support  # noqa: F401  (puts tools/ on sys.path)
+import support  # first: it puts tools/ on sys.path
 import poll_results
 
 # The two tables poll_results.py reads, as store.go creates them.

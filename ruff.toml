@@ -1,0 +1,14 @@
+# Ruff settings for the Python helpers in tools/: ruff check tools
+#
+# The tools must keep running on Python 3.9, the /usr/bin/python3 that
+# macOS ships, so pyupgrade only suggests what 3.9 already has.
+target-version = "py39"
+# The tools are written to about 120 columns; this only stops lines that
+# are much longer.
+line-length = 120
+
+[lint]
+# pycodestyle errors and warnings, Pyflakes, bugbear, pyupgrade,
+# flake8-simplify and Ruff's own rules. Import sorting stays off: each test
+# imports support first, because that import puts tools/ on sys.path.
+select = ["E", "W", "F", "B", "UP", "SIM", "RUF"]

@@ -8,7 +8,7 @@ import unittest
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
-import support  # noqa: F401  (puts tools/ on sys.path)
+import support  # first: it puts tools/ on sys.path
 import history_search
 
 CHAT = "120363000000000000@g.us"

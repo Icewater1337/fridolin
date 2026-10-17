@@ -11,7 +11,7 @@ from datetime import date
 from pathlib import Path
 from unittest import mock
 
-import support  # noqa: F401  (puts tools/ on sys.path)
+import support  # first: it puts tools/ on sys.path
 import transcribe
 
 DAY = "2026-01-15"

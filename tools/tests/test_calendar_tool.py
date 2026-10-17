@@ -15,7 +15,7 @@ from pathlib import Path
 from unittest import mock
 from zoneinfo import ZoneInfo
 
-import support  # noqa: F401  (puts tools/ on sys.path)
+import support  # first: it puts tools/ on sys.path
 import calendar_tool
 
 BERLIN = ZoneInfo("Europe/Berlin")
@@ -24,7 +24,7 @@ BERLIN = ZoneInfo("Europe/Berlin")
 class CalendarTestCase(unittest.TestCase):
     """Pins the module's configuration so no test depends on the host."""
 
-    allowed: list[str] = []
+    allowed: tuple[str, ...] = ()
     default = "primary"
 
     def setUp(self):
@@ -96,7 +96,7 @@ class TokenRefreshTest(TokenTestCase):
         # writes the new one while this command waits.
         self.token_file.write_text("", encoding="utf-8")
         self.sleep.side_effect = lambda seconds: self.write_token()
-        code, out, err = support.run(calendar_tool.get_service)
+        code, out, _ = support.run(calendar_tool.get_service)
         self.assertEqual((code, out), (0, ""), out)
         self.assertEqual(self.sleep.call_count, 1)
         self.assertEqual(self.google.built_with.token, "old")
@@ -504,7 +504,7 @@ class SandboxedRefreshTest(TokenTestCase):
 
 
 class TargetCalendarsTest(CalendarTestCase):
-    allowed = ["me@example.com", "team@example.com"]
+    allowed = ("me@example.com", "team@example.com")
     default = "me@example.com"
 
     def test_resolution(self):
