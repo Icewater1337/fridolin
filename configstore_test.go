@@ -266,6 +266,60 @@ func TestConfigSavesKeepBrainModeOn(t *testing.T) {
 	}
 }
 
+// Inline brains were removed with `fridolin migrate`, which moved them into
+// their folders. A config that still lists some is refused, naming a build
+// that can still move them: running without them would leave their chats
+// to the default brain. An empty or null list is ignored, and the key is
+// not written back.
+func TestConfigRefusesInlineBrains(t *testing.T) {
+	cases := []struct {
+		name, config string
+		want         string // part of the error, "" when the config loads
+	}{
+		{"no brains key", `{}`, ""},
+		{"empty list", `{"brains": []}`, ""},
+		{"null", `{"brains": null}`, ""},
+		{"one inline brain", `{"brains": [{"name": "a", "work_dir": "~/a", "handles_dms": true}]}`, `lists brains inline under "brains", which this version no longer runs`},
+		{"not a list", `{"brains": {"name": "a"}}`, "brains: json: cannot unmarshal"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			t.Setenv("HOME", t.TempDir())
+			path := writeConfig(t, c.config)
+			logs := captureLog(t)
+			cs, err := OpenConfigStore(path)
+			switch {
+			case c.want == "" && err != nil:
+				t.Fatalf("load: %v, want it to load", err)
+			case c.want == "":
+				if logContains(logs, "brains") {
+					t.Errorf("log %q mentions the brains key", logs())
+				}
+				if _, err := cs.Update("", func(c *Config) error { c.LogLevel = "debug"; return nil }); err != nil {
+					t.Fatal(err)
+				}
+				if raw, ok := readRawConfig(t, path)["brains"]; ok {
+					t.Errorf(`a save wrote "brains": %s`, raw)
+				}
+			case err == nil:
+				t.Fatalf("loaded, want an error containing %q", c.want)
+			case !strings.Contains(err.Error(), c.want):
+				t.Errorf("error %q, want it to contain %q", err, c.want)
+			}
+			if strings.Contains(c.want, "inline") {
+				for _, part := range []string{
+					`run "fridolin migrate" with a build from before this change (commit ` + migrateBuild + ")",
+					"see docs/BRAINS.md#configs-with-inline-brains",
+				} {
+					if !strings.Contains(err.Error(), part) {
+						t.Errorf("error %q does not say %q", err, part)
+					}
+				}
+			}
+		})
+	}
+}
+
 // work_dir was the folder classic mode ran in; brains run in their own. So
 // the key sets nothing any more, and a config that still has it says so in
 // the log.

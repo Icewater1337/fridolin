@@ -556,26 +556,10 @@ func TestConfigWritesLeaveFolderModesAlone(t *testing.T) {
 	}
 }
 
-func TestLoadConfigRejectsBadBrains(t *testing.T) {
-	cases := map[string]string{
-		"duplicate name":  `{"brain_mode":true,"brains":[{"name":"a","work_dir":"/tmp/a"},{"name":"a","work_dir":"/tmp/b"}]}`,
-		"two dm brains":   `{"brain_mode":true,"brains":[{"name":"a","work_dir":"/tmp/a","handles_dms":true},{"name":"b","work_dir":"/tmp/b","handles_dms":true}]}`,
-		"shared group":    `{"brain_mode":true,"brains":[{"name":"a","work_dir":"/tmp/a","groups":["g@g.us"]},{"name":"b","work_dir":"/tmp/b","groups":["g@g.us"]}]}`,
-		"missing workdir": `{"brain_mode":true,"brains":[{"name":"a"}]}`,
-		"name with slash": `{"brain_mode":true,"brains":[{"name":"a/b","work_dir":"/tmp/a"}]}`,
-	}
-	for name, body := range cases {
-		t.Setenv("HOME", t.TempDir())
-		if _, err := LoadConfig(writeConfig(t, body)); err == nil {
-			t.Errorf("%s: expected an error, got none", name)
-		}
-	}
-}
-
 func TestLoadConfigAllowsNoBrains(t *testing.T) {
 	// A fresh install starts with no brains and adds them in the dashboard.
 	t.Setenv("HOME", t.TempDir())
-	if _, err := LoadConfig(writeConfig(t, `{"brain_mode":true,"brains":[]}`)); err != nil {
+	if _, err := LoadConfig(writeConfig(t, `{"brain_mode":true,"brain_dirs":[]}`)); err != nil {
 		t.Fatalf("an empty brain list must load: %v", err)
 	}
 }
@@ -809,25 +793,6 @@ func TestBrainRoutingFallsBackToFirstBrain(t *testing.T) {
 	// No brain sets handles_dms, so DMs land on the fallback.
 	if got := mgr.BrainFor("15551234567@s.whatsapp.net", false); got.ID() != "only" {
 		t.Errorf("DM routed to %q, want only", got.ID())
-	}
-}
-
-func TestNewBrainManagerCreatesWorkDirs(t *testing.T) {
-	home := t.TempDir()
-	t.Setenv("HOME", home)
-
-	cfg, err := LoadConfig(writeConfig(t, `{
-		"brain_mode": true,
-		"data_dir": "`+home+`/data",
-		"brains": [{"name": "a", "work_dir": "`+home+`/brains/a"}]
-	}`))
-	if err != nil {
-		t.Fatal(err)
-	}
-	newTestManager(t, cfg)
-
-	if fi, err := os.Stat(filepath.Join(home, "brains", "a")); err != nil || !fi.IsDir() {
-		t.Errorf("work dir was not created: %v", err)
 	}
 }
 

@@ -174,7 +174,6 @@ too. Every option is documented in [docs/CONFIGURATION.md](docs/CONFIGURATION.md
 ```bash
 ./fridolin check                         # validate and show DM access and routing
 ./fridolin check --route 15551234567@s.whatsapp.net
-./fridolin migrate                       # move inline brains into brain.json files
 ```
 
 ### Trying it without WhatsApp

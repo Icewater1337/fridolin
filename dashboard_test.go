@@ -109,16 +109,16 @@ func TestDashboardGuards(t *testing.T) {
 		{"dns rebinding", "GET", "/api/status", func(r *http.Request) { r.Host = "evil.example.com:8765" }, 421},
 		{"no token", "GET", "/api/status", func(r *http.Request) { r.Header.Del("X-Bridge-Token") }, 401},
 		{"wrong token", "GET", "/api/status", func(r *http.Request) { r.Header.Set("X-Bridge-Token", "nope") }, 401},
-		{"cross-site origin", "POST", "/api/brains/migrate", func(r *http.Request) { r.Header.Set("Origin", "https://evil.example.com") }, 403},
-		{"cross-site fetch", "POST", "/api/brains/migrate", func(r *http.Request) { r.Header.Set("Sec-Fetch-Site", "cross-site") }, 403},
-		{"no dashboard header", "POST", "/api/brains/migrate", func(r *http.Request) { r.Header.Del("X-Bridge-Dashboard") }, 403},
-		{"form post", "POST", "/api/brains/migrate", func(r *http.Request) { r.Header.Set("Content-Type", "text/plain") }, 415},
-		{"same origin", "POST", "/api/brains/migrate", func(r *http.Request) { r.Header.Set("Origin", "http://127.0.0.1:8765") }, 200},
+		{"cross-site origin", "POST", "/api/brains/inspect", func(r *http.Request) { r.Header.Set("Origin", "https://evil.example.com") }, 403},
+		{"cross-site fetch", "POST", "/api/brains/inspect", func(r *http.Request) { r.Header.Set("Sec-Fetch-Site", "cross-site") }, 403},
+		{"no dashboard header", "POST", "/api/brains/inspect", func(r *http.Request) { r.Header.Del("X-Bridge-Dashboard") }, 403},
+		{"form post", "POST", "/api/brains/inspect", func(r *http.Request) { r.Header.Set("Content-Type", "text/plain") }, 415},
+		{"same origin", "POST", "/api/brains/inspect", func(r *http.Request) { r.Header.Set("Origin", "http://127.0.0.1:8765") }, 200},
 	}
 	for _, c := range cases {
 		var body any
 		if c.method == "POST" {
-			body = map[string]bool{"dry_run": true}
+			body = map[string]string{"path": "~/new"}
 		}
 		var muts []func(*http.Request)
 		if c.mutate != nil {
@@ -818,6 +818,29 @@ func TestPutConfigRefusesClassicMode(t *testing.T) {
 	w := tb.do("PUT", "/api/config", map[string]any{"etag": got.ETag, "config": got.Config})
 	if w.Code != http.StatusBadRequest || !strings.Contains(w.Body.String(), "classic mode, which was removed") {
 		t.Errorf("put brain_mode false: %d %s, want 400 saying classic mode was removed", w.Code, w.Body.String())
+	}
+	if tb.cfgs.ETag() != got.ETag {
+		t.Error("the refused request changed config.json")
+	}
+}
+
+// Inline brains were removed. A dashboard save that brings some back is
+// refused like a config.json that still has them, and the config the
+// dashboard loads has no brains key to send back.
+func TestPutConfigRefusesInlineBrains(t *testing.T) {
+	tb := newTestBridge(t, "")
+	var got struct {
+		ETag   string         `json:"etag"`
+		Config map[string]any `json:"config"`
+	}
+	_ = json.Unmarshal(tb.do("GET", "/api/config", nil).Body.Bytes(), &got)
+	if _, ok := got.Config["brains"]; ok {
+		t.Errorf("GET /api/config has a brains key: %v", got.Config["brains"])
+	}
+	got.Config["brains"] = []map[string]any{{"name": "a", "work_dir": "~/a"}}
+	w := tb.do("PUT", "/api/config", map[string]any{"etag": got.ETag, "config": got.Config})
+	if w.Code != http.StatusBadRequest || !strings.Contains(w.Body.String(), "no longer runs") {
+		t.Errorf("put inline brains: %d %s, want 400 saying they no longer run", w.Code, w.Body.String())
 	}
 	if tb.cfgs.ETag() != got.ETag {
 		t.Error("the refused request changed config.json")
