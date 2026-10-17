@@ -542,6 +542,39 @@ func TestSandboxDeniesBridgeSecretsWhereverTheyLive(t *testing.T) {
 	}
 }
 
+// TestSandboxDeniesTheConfigFile: a config.json outside the data dir, and
+// the .env next to it, are neither readable nor writable under the real
+// sandbox-exec.
+func TestSandboxDeniesTheConfigFile(t *testing.T) {
+	requireSandboxExec(t)
+	home := canonicalDir(t.TempDir())
+	t.Setenv("HOME", home)
+	// A save in progress: writeFileAtomic writes the whole config here first.
+	for _, f := range []string{"etc/config.json", "etc/.env", "etc/.config.json.123456.tmp", "a/notes.md"} {
+		p := filepath.Join(home, f)
+		if err := os.MkdirAll(filepath.Dir(p), 0o700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(p, []byte("content of "+f), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	sp := NewSandboxProfiler(map[string]string{"a": filepath.Join(home, "a")}, &Config{DataDir: filepath.Join(home, ".fridolin")})
+	sp.SetConfigFile(filepath.Join(home, "etc", "config.json"))
+	for _, cmd := range []string{
+		`cat "$HOME/etc/config.json"`,
+		`cat "$HOME/etc/.env"`,
+		`cat "$HOME/etc/.config.json.123456.tmp"`,
+		`printf '{"sandbox":{"enabled":false}}' > "$HOME/etc/.config.json.654321.tmp"`,
+		`printf '{"sandbox":{"enabled":false}}' > "$HOME/etc/config.json"`,
+		`mv "$HOME/etc/config.json" "$HOME/a/c.json"`,
+	} {
+		if allowed, out := sandboxRun(t, sp, filepath.Join(home, "a"), "/bin/sh", "-c", cmd); allowed {
+			t.Errorf("%s was allowed: %q", cmd, out)
+		}
+	}
+}
+
 // TestSandboxLetsTheCLICreateItsState: on a home where the Claude CLI never
 // ran, ~/.claude does not exist yet. It sits above denied paths, so it is
 // pinned, but only against rename and delete: the CLI must still be able to

@@ -291,7 +291,7 @@ func LoadConfig(cfgPath string) (*Config, error) {
 // loadDotEnv loads the first .env found next to the config or in the working
 // directory. Values in it override config.json (and the process environment).
 func loadDotEnv(cfgPath string) {
-	for _, p := range []string{filepath.Join(filepath.Dir(cfgPath), ".env"), ".env"} {
+	for _, p := range dotEnvPaths(cfgPath) {
 		if err := godotenv.Overload(p); err == nil {
 			return
 		}
@@ -304,6 +304,12 @@ const (
 	dataDirName       = ".fridolin"
 	legacyDataDirName = ".whatsapp-claude-bridge"
 )
+
+// dotEnvPaths are the .env files loadDotEnv looks for, in order. The sandbox
+// profile denies them to brains.
+func dotEnvPaths(cfgPath string) []string {
+	return []string{filepath.Join(filepath.Dir(cfgPath), ".env"), ".env"}
+}
 
 // defaultDataDir is ~/.fridolin, or the folder installs used before the
 // project was renamed (~/.whatsapp-claude-bridge) when only that one exists.

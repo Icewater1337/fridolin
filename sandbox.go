@@ -50,6 +50,9 @@ type SandboxProfiler struct {
 	// put outside the data dir.
 	dbPath string
 
+	// configFile is the config.json the bridge runs with; see SetConfigFile.
+	configFile string
+
 	// credsDir holds per-brain credential files; see SandboxConfig.CredentialsDir.
 	credsDir string
 
@@ -113,6 +116,16 @@ func (sp *SandboxProfiler) Update(workDirs map[string]string, cfg *Config) {
 	sp.viewer = cfg.Viewer
 	sp.extraDeny = append([]string(nil), cfg.Sandbox.DenyPaths...)
 	sp.extraAllow = append([]string(nil), cfg.Sandbox.AllowPaths...)
+}
+
+// SetConfigFile names the config.json the bridge runs with. It lives in the
+// data dir by default, but --config or CONFIG_FILE can put it anywhere, so
+// the profile denies it, its .bak, the temp file each save writes and the
+// .env files loaded with it.
+func (sp *SandboxProfiler) SetConfigFile(path string) {
+	sp.mu.Lock()
+	defer sp.mu.Unlock()
+	sp.configFile = absPath(path)
 }
 
 // Enabled reports whether brain spawns should be sandboxed.
@@ -406,6 +419,25 @@ func (sp *SandboxProfiler) Profile(brainID string) (string, error) {
 	for _, f := range dbFiles {
 		b.deny("file-read*", "literal", f)
 		b.deny("file-write*", "literal", f)
+	}
+	// The config file (saved with a .bak copy) and the .env files loaded
+	// with it, where the data dir deny does not cover them already. What a
+	// .env sets still reaches brains through the environment.
+	if sp.configFile != "" {
+		files := append([]string{sp.configFile, sp.configFile + ".bak"}, dotEnvPaths(sp.configFile)...)
+		for _, f := range files {
+			if abs, err := filepath.Abs(f); err == nil && !withinAny(abs, dataDirs) {
+				b.deny("file-read*", "literal", abs)
+				b.deny("file-write*", "literal", abs)
+			}
+		}
+		// Every save writes the whole config to a temp file next to it
+		// first (writeFileAtomic), which is readable until the rename.
+		if dir := filepath.Dir(sp.configFile); !withinAny(sp.configFile, dataDirs) {
+			tmp := "/" + regexp.QuoteMeta("."+filepath.Base(sp.configFile)+".") + `[^/]*\.tmp$`
+			b.denyBelow("file-read*", dir, tmp)
+			b.denyBelow("file-write*", dir, tmp)
+		}
 	}
 	b.WriteString("\n")
 	if sp.credsDir != "" {

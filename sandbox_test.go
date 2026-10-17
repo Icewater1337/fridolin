@@ -864,3 +864,60 @@ func TestSandboxProfileDeniesBridgeSecrets(t *testing.T) {
 		})
 	}
 }
+
+// TestSandboxProfileDeniesTheConfigFile: --config or CONFIG_FILE can put
+// config.json outside the data dir, and with it the .env loaded next to it.
+// Brains could read both, and rewrite the config without the dashboard
+// token. Inside the data dir the data dir deny covers them already.
+func TestSandboxProfileDeniesTheConfigFile(t *testing.T) {
+	home := canonicalDir(t.TempDir())
+	t.Setenv("HOME", home)
+	wd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	cases := []struct {
+		name, cfgFile string
+		want          bool
+	}{
+		{"outside the data dir", home + "/etc/fridolin/config.json", true},
+		{"in the data dir", home + "/.fridolin/config.json", false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			sp := NewSandboxProfiler(map[string]string{"a": home + "/a"}, &Config{DataDir: home + "/.fridolin"})
+			sp.SetConfigFile(tc.cfgFile)
+			lines := strings.Split(mustProfile(t, sp, "a"), "\n")
+			dir := filepath.Dir(tc.cfgFile)
+			for _, f := range []string{tc.cfgFile, tc.cfgFile + ".bak", dir + "/.env"} {
+				for _, op := range []string{"file-read*", "file-write*"} {
+					rule := `(deny ` + op + ` (literal "` + f + `"))`
+					if got := slices.Contains(lines, rule); got != tc.want {
+						t.Errorf("profile has %s: %v, want %v", rule, got, tc.want)
+					}
+				}
+			}
+			// The temp file writeFileAtomic saves through, .config.json.*.tmp.
+			for _, op := range []string{"file-read*", "file-write*"} {
+				rule := `(deny ` + op + ` (regex "^` + sbplRegex(dir) + `/\\.config\\.json\\.[^/]*\\.tmp$"))`
+				if got := slices.Contains(lines, rule); got != tc.want {
+					t.Errorf("profile has %s: %v, want %v", rule, got, tc.want)
+				}
+			}
+			// The .env in the working directory, which loadDotEnv falls back to.
+			if rule := `(deny file-read* (literal "` + filepath.Join(wd, ".env") + `"))`; !slices.Contains(lines, rule) {
+				t.Errorf("profile lacks %s", rule)
+			}
+		})
+	}
+}
+
+// TestBridgeTellsTheSandboxItsConfigFile: the bridge hands the profiler the
+// config file it loaded, so every brain's profile denies it.
+func TestBridgeTellsTheSandboxItsConfigFile(t *testing.T) {
+	tb := newTestBridge(t, "")
+	rule := `(deny file-read* (literal "` + tb.cfgs.Path() + `"))`
+	if profile := mustProfile(t, tb.brainMgr.profiler, "a"); !strings.Contains(profile, rule) {
+		t.Errorf("profile lacks %s", rule)
+	}
+}

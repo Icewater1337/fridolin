@@ -88,6 +88,7 @@ func NewBridge(cfgs *ConfigStore, opts BridgeOptions) (*Bridge, error) {
 		return nil, fmt.Errorf("creating brain manager: %w", err)
 	}
 	b.brainMgr = mgr
+	mgr.profiler.SetConfigFile(cfgs.Path())
 	for _, is := range mgr.Issues() {
 		log.Printf("brain %s (%s): %s — %s", is.ID, is.Path, is.Kind, is.Detail)
 	}

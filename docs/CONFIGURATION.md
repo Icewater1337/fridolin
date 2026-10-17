@@ -208,6 +208,9 @@ write:
 - the database (`db_path`, with its `-wal`, `-shm` and `-journal` files)
   wherever it is, and its folder when that lies outside the data directory,
   unless the folder is your home folder or a temp folder
+- the config file (with its `.bak` and the temp file each save writes next
+  to it) and the `.env` files loaded with it, when `--config` puts them
+  outside the data directory
 - the bridge's logs in `~/Library/Logs/fridolin`
 - `~/.config/fridolin`, which holds the personal-data denylist the commit
   hooks read
@@ -443,7 +446,10 @@ whatsmeow protocol chatter.
 Environment variables override `config.json`. A `.env` file next to the config
 (or in the working directory) is loaded automatically and overrides the
 process environment. The dashboard shows settings an environment variable
-controls as locked — remove the variable to edit them there.
+controls as locked — remove the variable to edit them there. The sandbox
+keeps brains from reading the `.env` file, but every brain inherits the
+bridge's environment, including what `.env` sets, so do not put anything
+there that brains must not see.
 
 | Variable | Config field |
 | -------- | ------------ |
