@@ -1180,17 +1180,23 @@ func TestParseIdentityMap(t *testing.T) {
 | WhatsApp Number | Person | Notes |
 | --------------- | ------ | ----- |
 | 15551234567     | Alex   | work  |
-| +15559876543    | Sam    |       |
+| +15559876543    | Sam    | --- see the 2024 notes |
+| :-------------- | :----: | ----: |
 `))
 	if ids["15551234567"] != "Alex" {
 		t.Errorf("got %q for Alex", ids["15551234567"])
 	}
-	// A leading + must be normalised away so it matches the JID form.
+	// A leading + must be normalised away so it matches the JID form, and
+	// dashes in the notes do not make a row the line under the header.
 	if ids["15559876543"] != "Sam" {
 		t.Errorf("got %q for Sam", ids["15559876543"])
 	}
 	if _, ok := ids["WhatsApp Number"]; ok {
 		t.Error("header row was parsed as an entry")
+	}
+	// The line under the header, in any alignment, is no entry.
+	if len(ids) != 2 {
+		t.Errorf("got %d entries, want 2: %v", len(ids), ids)
 	}
 	if name, ok := parseIdentityMap([]byte("| + | Nobody |\n"))[""]; ok {
 		t.Errorf("a row without a number was read as %q", name)

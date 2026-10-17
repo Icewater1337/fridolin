@@ -62,12 +62,12 @@ func parseIdentityMap(data []byte) map[string]string {
 
 	for _, line := range strings.Split(string(data), "\n") {
 		line = strings.TrimSpace(line)
-		if !strings.HasPrefix(line, "|") || strings.Contains(line, "---") {
+		if !strings.HasPrefix(line, "|") {
 			continue
 		}
 
 		parts := strings.Split(line, "|")
-		if len(parts) < 3 {
+		if len(parts) < 3 || isTableRule(parts) {
 			continue
 		}
 
@@ -85,6 +85,18 @@ func parseIdentityMap(data []byte) map[string]string {
 	}
 
 	return identities
+}
+
+// isTableRule reports whether the cells of a markdown table row hold only
+// dashes and colons, as the line under the header does. A row that merely
+// contains "---", say in its notes, is a contact like any other.
+func isTableRule(cells []string) bool {
+	for _, c := range cells {
+		if strings.Trim(c, "-: \t") != "" {
+			return false
+		}
+	}
+	return true
 }
 
 // bareCodeRe matches a message that is nothing but a 4–8 digit number.
