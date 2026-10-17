@@ -6,12 +6,15 @@ import (
 	"crypto/sha256"
 	"errors"
 	"fmt"
+	"io"
+	"io/fs"
 	"log"
 	"os"
 	"path/filepath"
 	"strings"
 	"sync"
 	"time"
+	"unicode"
 
 	"github.com/mdp/qrterminal/v3"
 	"go.mau.fi/whatsmeow"
@@ -71,6 +74,13 @@ type WhatsAppClient struct {
 	handler   InboundHandler
 	onIgnored IgnoredHandler
 	log       waLog.Logger
+	media     mediaDownloader        // the client; tests swap in a fake
+	notify    func(jid, text string) // sendNotice; tests record instead
+
+	// ctx ends when the client disconnects for good. Attachment downloads
+	// run under it, so shutting down does not wait for them.
+	ctx    context.Context
+	cancel context.CancelFunc
 
 	mu    sync.Mutex
 	state WAState
@@ -87,6 +97,7 @@ func NewWhatsAppClient(cfg func() *Config, store *Store, handler InboundHandler,
 
 	client := whatsmeow.NewClient(deviceStore, logger)
 
+	ctx, cancel := context.WithCancel(context.Background())
 	wa := &WhatsAppClient{
 		client:    client,
 		cfg:       cfg,
@@ -94,8 +105,12 @@ func NewWhatsAppClient(cfg func() *Config, store *Store, handler InboundHandler,
 		handler:   handler,
 		onIgnored: onIgnored,
 		log:       logger,
+		media:     client,
+		ctx:       ctx,
+		cancel:    cancel,
 		state:     WAState{Mode: "connecting", Since: time.Now()},
 	}
+	wa.notify = wa.sendNotice
 
 	client.AddEventHandler(wa.eventHandler)
 	return wa, nil
@@ -189,8 +204,10 @@ func isTerminal(f *os.File) bool {
 	return err == nil && st.Mode()&os.ModeCharDevice != 0
 }
 
-// Disconnect disconnects the client.
+// Disconnect disconnects the client for good: it also ends the attachment
+// downloads still running.
 func (wa *WhatsAppClient) Disconnect() {
+	wa.cancel()
 	wa.client.Disconnect()
 }
 
@@ -451,7 +468,10 @@ func (wa *WhatsAppClient) handleDMMessage(msg *events.Message, senderNumber stri
 	text := extractText(msg.Message)
 	quoted := quoteOf(msg.Message)
 
-	mediaPath, caption := wa.downloadAttachment(msg, chatJID)
+	mediaPath, caption, notice := wa.downloadAttachment(msg, chatJID)
+	if notice != "" {
+		go wa.notify(chatJID, notice)
+	}
 	if caption != "" {
 		if text == "" {
 			text = caption
@@ -553,7 +573,12 @@ func (wa *WhatsAppClient) handleGroupMessage(msg *events.Message) {
 	text = stripMentions(cfg.Triggers.Strip(text), ownMentions)
 	quoted := quoteOf(msg.Message)
 
-	mediaPath, caption := wa.downloadAttachment(msg, groupJID)
+	mediaPath, caption, notice := wa.downloadAttachment(msg, groupJID)
+	// Untagged chatter gets no reply. A file always tags a group message,
+	// so this only guards against that rule changing.
+	if notice != "" && !silent {
+		go wa.notify(groupJID, notice)
+	}
 	if caption != "" {
 		caption = stripMentions(cfg.Triggers.Strip(caption), ownMentions)
 		if text == "" {
@@ -575,172 +600,316 @@ func (wa *WhatsAppClient) handleGroupMessage(msg *events.Message) {
 	})
 }
 
-// downloadAttachment downloads whichever attachment the message carries and
+// downloadAttachment saves whichever attachment the message carries and
 // returns its local path plus the attachment's caption (both may be empty).
-func (wa *WhatsAppClient) downloadAttachment(msg *events.Message, chatJID string) (path string, caption string) {
-	var err error
-
+// A notice is what to tell the chat about a file that was not saved.
+func (wa *WhatsAppClient) downloadAttachment(msg *events.Message, chatJID string) (path, caption, notice string) {
+	att, ok := attachmentOf(msg.Message, msg.Info.ID)
+	if !ok {
+		return "", "", ""
+	}
+	cfg := wa.cfg()
+	maxBytes := cfg.MaxMediaBytes()
+	ctx, cancel := context.WithTimeout(wa.ctx, mediaDownloadTimeout)
+	defer cancel()
+	path, err := saveAttachment(ctx, wa.media, cfg.MediaDir, att, maxBytes)
 	switch {
-	case msg.Message.GetImageMessage() != nil:
-		img := msg.Message.GetImageMessage()
-		path, err = wa.downloadImage(img, msg.Info.ID)
-		caption = img.GetCaption()
-
-	case msg.Message.GetDocumentMessage() != nil:
-		doc := msg.Message.GetDocumentMessage()
-		path, err = wa.downloadDocument(doc, msg.Info.ID)
-		caption = doc.GetCaption()
-
-	case msg.Message.GetAudioMessage() != nil:
-		path, err = wa.downloadAudio(msg.Message.GetAudioMessage(), msg.Info.ID)
-
-	case msg.Message.GetVideoMessage() != nil && !msg.Message.GetVideoMessage().GetGifPlayback():
-		vid := msg.Message.GetVideoMessage()
-		path, err = wa.downloadVideo(vid, msg.Info.ID)
-		caption = vid.GetCaption()
-
-	default:
-		return "", ""
-	}
-
-	if err != nil {
+	case errors.Is(err, errMediaTooLarge):
+		wa.log.Warnf("Skipped attachment from %s: %v", chatJID, err)
+		return "", att.caption, fmt.Sprintf("⚠️ That file is over the %d MB limit, so I skipped it.", maxBytes>>20)
+	case err != nil:
 		wa.log.Errorf("Failed to download attachment from %s: %v", chatJID, err)
-		return "", caption
+		if wa.ctx.Err() != nil {
+			return "", att.caption, "" // shutting down, not the sender's problem
+		}
+		// Without a word, a file sent without a caption would get no reply.
+		return "", att.caption, "⚠️ I couldn't download that file. Please send it again."
 	}
-	return path, caption
+	return path, att.caption, ""
 }
 
-// mediaPath builds a safe destination path inside MediaDir. The base name is
-// sanitised so a hostile filename cannot escape the media directory. An
-// existing file is never overwritten: two documents called "scan.pdf" both
-// survive.
-func (wa *WhatsAppClient) mediaPath(name string) string {
-	return safeMediaPath(wa.cfg().MediaDir, name)
+// sendNotice tells a chat about a problem with its message, such as a file
+// too large to download. A failure is only logged.
+func (wa *WhatsAppClient) sendNotice(jid, text string) {
+	ctx, cancel := context.WithTimeout(wa.ctx, 30*time.Second)
+	defer cancel()
+	if err := wa.SendMessage(ctx, jid, text); err != nil {
+		wa.log.Warnf("Failed to send notice to %s: %v", jid, err)
+	}
 }
 
-func safeMediaPath(dir, name string) string {
-	name = filepath.Base(filepath.Clean(name))
-	name = strings.TrimLeft(name, ".")
-	if name == "" || name == "/" {
-		name = "file"
+// mediaDownloadTimeout bounds one attachment download. Downloads run on
+// whatsmeow's event goroutine, so a stalled one holds up every message
+// behind it.
+const mediaDownloadTimeout = 2 * time.Minute
+
+// mediaDownloader is what saveAttachment needs from whatsmeow.Client; tests
+// swap in a fake.
+type mediaDownloader interface {
+	DownloadToFile(ctx context.Context, msg whatsmeow.DownloadableMessage, file whatsmeow.File) error
+}
+
+// attachment is the file a message carries.
+type attachment struct {
+	kind    string // image, document, audio or video
+	media   whatsmeow.DownloadableMessage
+	name    string // the name to save it under, before sanitising
+	size    uint64 // the size the message declares; 0 when it does not
+	caption string
+}
+
+// attachmentOf returns the file a message carries. GIF-playback videos are
+// WhatsApp GIF reactions, not content, so they carry none.
+func attachmentOf(m *waE2E.Message, id types.MessageID) (attachment, bool) {
+	switch {
+	case m.GetImageMessage() != nil:
+		img := m.GetImageMessage()
+		return attachment{kind: "image", media: img, name: string(id) + mediaExt(img.GetMimetype(), ".jpg"), size: img.GetFileLength(), caption: img.GetCaption()}, true
+
+	case m.GetDocumentMessage() != nil:
+		doc := m.GetDocumentMessage()
+		// Prefer the sender's filename, but fall back to the message ID plus an
+		// extension derived from the MIME type.
+		name := doc.GetFileName()
+		if name == "" {
+			name = string(id) + mediaExt(doc.GetMimetype(), ".bin")
+		}
+		return attachment{kind: "document", media: doc, name: name, size: doc.GetFileLength(), caption: doc.GetCaption()}, true
+
+	case m.GetAudioMessage() != nil:
+		audio := m.GetAudioMessage()
+		return attachment{kind: "audio", media: audio, name: string(id) + mediaExt(audio.GetMimetype(), ".ogg"), size: audio.GetFileLength()}, true
+
+	case m.GetVideoMessage() != nil && !m.GetVideoMessage().GetGifPlayback():
+		vid := m.GetVideoMessage()
+		return attachment{kind: "video", media: vid, name: string(id) + mediaExt(vid.GetMimetype(), ".mp4"), size: vid.GetFileLength(), caption: vid.GetCaption()}, true
 	}
-	p := filepath.Join(dir, name)
-	if _, err := os.Lstat(p); err != nil {
-		return p
+	return attachment{}, false
+}
+
+// mediaExts maps a MIME type, without its parameters, to the extension a
+// saved attachment gets.
+var mediaExts = map[string]string{
+	"image/jpeg": ".jpg",
+	"image/png":  ".png",
+	"image/webp": ".webp",
+	"image/gif":  ".gif",
+
+	"audio/ogg":   ".ogg",
+	"audio/opus":  ".ogg",
+	"audio/mp4":   ".m4a",
+	"audio/m4a":   ".m4a",
+	"audio/x-m4a": ".m4a",
+	"audio/mpeg":  ".mp3",
+
+	"video/mp4":       ".mp4",
+	"video/webm":      ".webm",
+	"video/quicktime": ".mov",
+	"video/3gpp":      ".3gp",
+
+	"application/pdf":          ".pdf",
+	"application/msword":       ".doc",
+	"application/vnd.ms-excel": ".xls",
+	"application/vnd.openxmlformats-officedocument.wordprocessingml.document": ".docx",
+	"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet":       ".xlsx",
+	"text/plain": ".txt",
+	"text/csv":   ".csv",
+}
+
+// mediaExt returns the extension for a MIME type such as
+// "audio/ogg; codecs=opus", or def for a type it does not know.
+func mediaExt(mimeType, def string) string {
+	base, _, _ := strings.Cut(mimeType, ";")
+	if ext, ok := mediaExts[strings.ToLower(strings.TrimSpace(base))]; ok {
+		return ext
+	}
+	return def
+}
+
+// errMediaTooLarge marks an attachment over max_media_mb.
+var errMediaTooLarge = errors.New("attachment is larger than max_media_mb")
+
+// saveAttachment downloads att into dir and returns where it was saved. It
+// streams the download into a hidden temp file, so the attachment is never
+// held in memory and a brain never sees a half-written file, and names the
+// file only once it is complete. A failed download leaves nothing behind.
+//
+// A file over maxBytes is refused, before the download when the message
+// declares its size, and as soon as it passes the limit otherwise: the
+// declared size is only the sender's word.
+func saveAttachment(ctx context.Context, dl mediaDownloader, dir string, att attachment, maxBytes int64) (string, error) {
+	if att.size > uint64(maxBytes) {
+		return "", fmt.Errorf("%w: the %s is %d bytes, over the limit of %d", errMediaTooLarge, att.kind, att.size, maxBytes)
+	}
+	tmp, err := os.CreateTemp(dir, ".download-*")
+	if err != nil {
+		return "", fmt.Errorf("saving %s: %w", att.kind, err)
+	}
+	defer os.Remove(tmp.Name()) // a failed download's; a saved one was renamed
+
+	// The cap cancels ctx once the file passes it, so nothing more is
+	// fetched for this attachment.
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	f := &cappedFile{f: tmp, limit: maxBytes + mediaCipherOverhead, stop: cancel}
+	// whatsmeow does not rewind the file before it tries its next server.
+	// When one fails partway, the next one's bytes follow the partial ones
+	// and the download fails; for a file near the limit, it can pass the
+	// cap instead, and the sender is wrongly told the file is too large.
+	err = dl.DownloadToFile(ctx, att.media, f)
+	if err == nil && !f.over {
+		// The cap leaves room for the encryption's padding and MAC, so check
+		// the decrypted file too.
+		if st, serr := tmp.Stat(); serr != nil {
+			err = serr
+		} else if st.Size() > maxBytes {
+			f.over = true
+		}
+	}
+	if cerr := tmp.Close(); err == nil {
+		err = cerr
+	}
+	if f.over {
+		return "", fmt.Errorf("%w: the %s passed the limit of %d bytes while downloading", errMediaTooLarge, att.kind, maxBytes)
+	}
+	if err != nil {
+		return "", fmt.Errorf("downloading %s: %w", att.kind, err)
+	}
+	return placeMedia(tmp.Name(), dir, att.name)
+}
+
+// mediaCipherOverhead is how much larger than a file its encrypted download
+// can be: up to 16 bytes of AES-CBC padding and a 10-byte MAC.
+const mediaCipherOverhead = 16 + 10
+
+// cappedFile is the file whatsmeow downloads into. It refuses to grow past
+// limit, and then calls stop. whatsmeow must not get the *os.File itself:
+// it would set aside as much disk as the server announces before the cap
+// could act. Nor may cappedFile embed it: io.Copy would use the file's
+// ReadFrom and write around the cap.
+type cappedFile struct {
+	f     *os.File
+	limit int64
+	stop  func()
+	over  bool
+}
+
+// refuse marks the file as over the cap and ends the download. Its error
+// counts as a cancellation too: after any other error, whatsmeow would try
+// its next server.
+func (c *cappedFile) refuse() error {
+	c.over = true
+	c.stop()
+	return fmt.Errorf("%w: %w", errMediaTooLarge, context.Canceled)
+}
+
+func (c *cappedFile) Write(p []byte) (int, error) {
+	pos, err := c.f.Seek(0, io.SeekCurrent)
+	if err != nil {
+		return 0, err
+	}
+	if pos+int64(len(p)) > c.limit {
+		return 0, c.refuse()
+	}
+	return c.f.Write(p)
+}
+
+func (c *cappedFile) WriteAt(p []byte, off int64) (int, error) {
+	if off+int64(len(p)) > c.limit {
+		return 0, c.refuse()
+	}
+	return c.f.WriteAt(p, off)
+}
+
+func (c *cappedFile) Truncate(size int64) error {
+	if size > c.limit {
+		return c.refuse()
+	}
+	return c.f.Truncate(size)
+}
+
+func (c *cappedFile) Read(p []byte) (int, error)                { return c.f.Read(p) }
+func (c *cappedFile) ReadAt(p []byte, off int64) (int, error)   { return c.f.ReadAt(p, off) }
+func (c *cappedFile) Seek(off int64, whence int) (int64, error) { return c.f.Seek(off, whence) }
+func (c *cappedFile) Stat() (os.FileInfo, error)                { return c.f.Stat() }
+
+// placeMedia renames the finished download at tmp into dir. It first claims
+// a free name with O_EXCL, which fails when anything is there, even a
+// dangling symlink, so a file a brain left in the shared media directory is
+// neither overwritten nor followed. A taken name moves on to "-2", "-3" and
+// so on, so two documents called "scan.pdf" both survive. The rename then
+// replaces only the empty file it just created.
+func placeMedia(tmp, dir, name string) (string, error) {
+	name = sanitizeMediaName(name)
+	for i := 1; ; i++ {
+		p := filepath.Join(dir, mediaNameCandidate(name, i))
+		f, err := os.OpenFile(p, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
+		if errors.Is(err, fs.ErrExist) && i < lastMediaCandidate {
+			continue
+		}
+		if err != nil {
+			return "", fmt.Errorf("naming the download: %w", err)
+		}
+		f.Close()
+		if err := os.Rename(tmp, p); err != nil {
+			os.Remove(p)
+			return "", fmt.Errorf("naming the download: %w", err)
+		}
+		return p, nil
+	}
+}
+
+// lastMediaCandidate is the last name mediaNameCandidate offers.
+const lastMediaCandidate = 1000
+
+// mediaNameCandidate is the i-th name to try for a file called name: the name
+// itself, then "scan-2.pdf" to "scan-999.pdf", then one the clock makes
+// unique.
+func mediaNameCandidate(name string, i int) string {
+	if i <= 1 {
+		return name
 	}
 	ext := filepath.Ext(name)
 	stem := strings.TrimSuffix(name, ext)
-	for i := 2; i < 1000; i++ {
-		alt := filepath.Join(dir, fmt.Sprintf("%s-%d%s", stem, i, ext))
-		if _, err := os.Lstat(alt); err != nil {
-			return alt
+	if i < lastMediaCandidate {
+		return fmt.Sprintf("%s-%d%s", stem, i, ext)
+	}
+	return fmt.Sprintf("%s-%d%s", stem, time.Now().UnixNano(), ext)
+}
+
+// maxMediaNameBytes caps the name of a saved file. File systems refuse names
+// over 255 bytes, and a "-2" suffix must still fit.
+const maxMediaNameBytes = 120
+
+// sanitizeMediaName turns a sender-chosen file name into a safe base name in
+// the media directory. Directories are dropped, so the name cannot escape it,
+// and leading dots, so it is never hidden or "..". Control characters and
+// line separators go too: the path is written into the prompt and into the
+// line-based history ("[attachment: <path>]"), where a newline would start a
+// line of its own, and a NUL makes the write fail. A name that is too long is
+// shortened, keeping its extension, because saving it would fail and the
+// attachment would be lost.
+func sanitizeMediaName(name string) string {
+	name = strings.Map(func(r rune) rune {
+		if unicode.IsControl(r) || r == '\u2028' || r == '\u2029' {
+			return -1
 		}
+		return r
+	}, name)
+	name = filepath.Base(filepath.Clean(name))
+	name = strings.TrimLeft(name, ".")
+	if name == "" || name == "/" {
+		return "file"
 	}
-	return filepath.Join(dir, fmt.Sprintf("%s-%d%s", stem, time.Now().UnixNano(), ext))
-}
-
-func (wa *WhatsAppClient) downloadImage(img *waE2E.ImageMessage, msgID types.MessageID) (string, error) {
-	data, err := wa.client.Download(context.Background(), img)
-	if err != nil {
-		return "", fmt.Errorf("downloading image: %w", err)
+	if len(name) <= maxMediaNameBytes {
+		return name
 	}
-
-	ext := ".jpg"
-	switch img.GetMimetype() {
-	case "image/png":
-		ext = ".png"
-	case "image/webp":
-		ext = ".webp"
-	case "image/gif":
-		ext = ".gif"
+	ext := filepath.Ext(name)
+	if len(ext) > 16 {
+		ext = "" // not an extension, just a dot in a long name
 	}
-
-	path := wa.mediaPath(string(msgID) + ext)
-	if err := os.WriteFile(path, data, 0o600); err != nil {
-		return "", fmt.Errorf("writing image to %q: %w", path, err)
-	}
-	return path, nil
-}
-
-func (wa *WhatsAppClient) downloadDocument(doc *waE2E.DocumentMessage, msgID types.MessageID) (string, error) {
-	data, err := wa.client.Download(context.Background(), doc)
-	if err != nil {
-		return "", fmt.Errorf("downloading document: %w", err)
-	}
-
-	// Prefer the sender's filename, but fall back to the message ID plus an
-	// extension derived from the MIME type.
-	filename := doc.GetFileName()
-	if filename == "" {
-		ext := ".bin"
-		switch doc.GetMimetype() {
-		case "application/pdf":
-			ext = ".pdf"
-		case "application/msword":
-			ext = ".doc"
-		case "application/vnd.openxmlformats-officedocument.wordprocessingml.document":
-			ext = ".docx"
-		case "application/vnd.ms-excel":
-			ext = ".xls"
-		case "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet":
-			ext = ".xlsx"
-		case "text/plain":
-			ext = ".txt"
-		case "text/csv":
-			ext = ".csv"
-		}
-		filename = string(msgID) + ext
-	}
-
-	path := wa.mediaPath(filename)
-	if err := os.WriteFile(path, data, 0o600); err != nil {
-		return "", fmt.Errorf("writing document to %q: %w", path, err)
-	}
-	return path, nil
-}
-
-func (wa *WhatsAppClient) downloadAudio(audio *waE2E.AudioMessage, msgID types.MessageID) (string, error) {
-	data, err := wa.client.Download(context.Background(), audio)
-	if err != nil {
-		return "", fmt.Errorf("downloading audio: %w", err)
-	}
-
-	ext := ".ogg"
-	mimetype := audio.GetMimetype()
-	if strings.Contains(mimetype, "mp4") || strings.Contains(mimetype, "m4a") {
-		ext = ".m4a"
-	} else if strings.Contains(mimetype, "mpeg") {
-		ext = ".mp3"
-	}
-
-	path := wa.mediaPath(string(msgID) + ext)
-	if err := os.WriteFile(path, data, 0o600); err != nil {
-		return "", fmt.Errorf("writing audio to %q: %w", path, err)
-	}
-	return path, nil
-}
-
-func (wa *WhatsAppClient) downloadVideo(vid *waE2E.VideoMessage, msgID types.MessageID) (string, error) {
-	data, err := wa.client.Download(context.Background(), vid)
-	if err != nil {
-		return "", fmt.Errorf("downloading video: %w", err)
-	}
-
-	ext := ".mp4"
-	mimetype := vid.GetMimetype()
-	if strings.Contains(mimetype, "webm") {
-		ext = ".webm"
-	} else if strings.Contains(mimetype, "quicktime") || strings.Contains(mimetype, "mov") {
-		ext = ".mov"
-	} else if strings.Contains(mimetype, "3gpp") {
-		ext = ".3gp"
-	}
-
-	path := wa.mediaPath(string(msgID) + ext)
-	if err := os.WriteFile(path, data, 0o600); err != nil {
-		return "", fmt.Errorf("writing video to %q: %w", path, err)
-	}
-	return path, nil
+	// truncate appends "…" (3 bytes) and never splits a character.
+	return truncate(strings.TrimSuffix(name, ext), maxMediaNameBytes-len(ext)-len("…")) + ext
 }
 
 // isAllowed reports whether the phone number may DM the bridge.

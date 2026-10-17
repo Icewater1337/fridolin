@@ -241,6 +241,42 @@ func TestLoadConfigDefaults(t *testing.T) {
 	}
 }
 
+// max_media_mb defaults to 100 and must stay within what WhatsApp can send.
+func TestLoadConfigMaxMediaMB(t *testing.T) {
+	cases := []struct {
+		body string
+		want int // 0: rejected
+	}{
+		{`{}`, 100},
+		{`{"max_media_mb": 0}`, 100},
+		{`{"max_media_mb": 1}`, 1},
+		{`{"max_media_mb": 2048}`, 2048},
+		{`{"max_media_mb": -1}`, 0},
+		{`{"max_media_mb": 2049}`, 0},
+	}
+	for _, c := range cases {
+		t.Run(c.body, func(t *testing.T) {
+			t.Setenv("HOME", t.TempDir())
+			cfg, err := LoadConfig(writeConfig(t, c.body))
+			if c.want == 0 {
+				if err == nil {
+					t.Errorf("loaded with max_media_mb %d, want an error", cfg.MaxMediaMB)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			if cfg.MaxMediaMB != c.want || cfg.MaxMediaBytes() != int64(c.want)<<20 {
+				t.Errorf("max_media_mb %d (%d bytes), want %d", cfg.MaxMediaMB, cfg.MaxMediaBytes(), c.want)
+			}
+		})
+	}
+	if got := (&Config{}).MaxMediaBytes(); got != 100<<20 {
+		t.Errorf("an unfilled config allows %d bytes, want the default", got)
+	}
+}
+
 func TestLoadConfigExpandsHome(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)

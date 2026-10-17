@@ -47,6 +47,8 @@ backed up incrementally every night, with old versions kept.
 
 **Files.** Photos, PDFs, documents, voice notes, and video are downloaded and
 handed over as file paths. The assistant opens them and does whatever you asked.
+A file over 100 MB (`max_media_mb`) is skipped, and so is one that cannot be
+downloaded within two minutes; the sender is told either way.
 
 **Real polls.** The assistant can send native WhatsApp polls and read the votes
 back:

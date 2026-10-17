@@ -633,6 +633,17 @@ Longest single outgoing message, in characters. Default 3900 (WhatsApp's limit
 is around 4096). Longer replies are split at paragraph, then line, then
 sentence boundaries and numbered `[1/3]`.
 
+### `max_media_mb`
+
+Largest attachment the bridge downloads, in megabytes (1 MB = 1,048,576
+bytes). Default 100, at most 2048 (WhatsApp's own limit is 2 GB). A larger
+file is skipped without being downloaded, and the sender gets one line
+saying so; a caption sent with it still reaches the brain. The limit holds
+even when a message understates its file's size: the download stops as soon
+as it passes the limit. A download also has two minutes to finish, so a
+high limit needs a fast connection; when one fails or runs out of time, the
+sender is told to send the file again.
+
 ### `viewer`
 
 Opens a tmux session per brain, tailing its activity log, in a Terminal window

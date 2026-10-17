@@ -55,5 +55,6 @@
   "viewer": false,
   "http_listen": "127.0.0.1:8765",
   "max_chunk_size": 3900,
+  "max_media_mb": 100,
   "log_level": "info"
 }

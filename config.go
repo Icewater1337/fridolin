@@ -85,6 +85,11 @@ type Config struct {
 	// (longer replies are split and numbered). Default 3900.
 	MaxChunkSize int `json:"max_chunk_size,omitempty"`
 
+	// MaxMediaMB is the largest attachment the bridge downloads, in MB.
+	// Larger ones are skipped and the sender is told. Default 100, at most
+	// 2048 (WhatsApp's own limit is 2 GB).
+	MaxMediaMB int `json:"max_media_mb,omitempty"`
+
 	// Model is the Claude model for classic (non-brain) mode, e.g. "sonnet".
 	Model string `json:"model,omitempty"`
 
@@ -253,6 +258,8 @@ const (
 	defaultBackupRoot    = "fridolin-backup"
 	defaultBackupDailyAt = "03:30"
 	defaultKeepVersions  = 30
+	defaultMaxMediaMB    = 100
+	maxMaxMediaMB        = 2048
 )
 
 func boolOr(p *bool, def bool) bool {
@@ -278,6 +285,15 @@ func (c *Config) DebounceMaxWaitMS() int { return intOr(c.Debounce.MaxWaitMS, de
 
 // DashboardRequiresToken reports whether API calls need the dashboard token.
 func (c *Config) DashboardRequiresToken() bool { return boolOr(c.Dashboard.RequireToken, true) }
+
+// MaxMediaBytes is the largest attachment to download, in bytes.
+func (c *Config) MaxMediaBytes() int64 {
+	mb := c.MaxMediaMB
+	if mb <= 0 {
+		mb = defaultMaxMediaMB
+	}
+	return int64(mb) << 20
+}
 
 // HTTPEnabled reports whether the local HTTP server should run.
 func (c *Config) HTTPEnabled() bool { return c.HTTPListen != "" && c.HTTPListen != "off" }
@@ -372,6 +388,9 @@ func effective(file *Config) (*Config, map[string]string, error) {
 	cfg.WorkDir = expandHome(cfg.WorkDir, home)
 	if cfg.MaxChunkSize <= 0 {
 		cfg.MaxChunkSize = 3900
+	}
+	if cfg.MaxMediaMB == 0 {
+		cfg.MaxMediaMB = defaultMaxMediaMB
 	}
 	if len(cfg.Triggers) == 0 {
 		cfg.Triggers = TriggersFromStrings([]string{"@claude"})
@@ -502,6 +521,9 @@ func (cfg *Config) validate() error {
 	}
 	if err := cfg.Sandbox.validate(runtime.GOOS); err != nil {
 		return err
+	}
+	if cfg.MaxMediaMB < 1 || cfg.MaxMediaMB > maxMaxMediaMB {
+		return fmt.Errorf("max_media_mb must be between 1 and %d, not %d", maxMaxMediaMB, cfg.MaxMediaMB)
 	}
 	if cfg.HTTPEnabled() && !isLoopbackAddr(cfg.HTTPListen) {
 		return fmt.Errorf("http_listen %q must be a loopback address such as 127.0.0.1:8765 — the API and dashboard are for this machine only", cfg.HTTPListen)
