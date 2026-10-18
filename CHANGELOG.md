@@ -67,6 +67,11 @@ yet, so everything is under Unreleased until the first one.
   of other chats' messages starts without its earlier ones. A history
   line longer than 4 MB is skipped; before, a line over 1 MB stopped the
   reading, and every chat's prompt stayed at the messages before it.
+- A message's `in` line in `conversation-history.jsonl` has the time the
+  message was sent as its `ts`, not the time the bridge wrote it, a few
+  seconds later. The line is written once the brain took the message: one
+  its full queue turned away ("Try again in a bit") is no longer recorded,
+  so the sender's retry is no longer in the history twice.
 
 ### Added
 

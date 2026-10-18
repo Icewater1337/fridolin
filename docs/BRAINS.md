@@ -93,7 +93,9 @@ under a line naming the run. A history line has the type `in`, `out` for an
 answer, written once all of it reached WhatsApp as what the chat got (a
 poll as its question and numbered options), or `event` for a vote in one
 of the brain's polls or an edit of a message a run already read, and a
-message from WhatsApp carries its `id`. A message deleted for everyone is
+message from WhatsApp carries its `id`. An `in` line is written once the
+brain took the message (not for one its full queue turned away), with
+the time it was sent as its `ts`. A message deleted for everyone is
 taken out of the history again, by rewriting the file. A run that finds the
 log over 5 MB first moves it to `claude-stream.1.log`, replacing the one
 before. A brain can change any file in its folder, and put a symlink to

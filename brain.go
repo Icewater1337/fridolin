@@ -381,19 +381,33 @@ func (br *Brain) historyTail(maxBytes int64) []string {
 
 // logInbound writes m to the brain's history: a line for each part of a
 // merged message, with its ID, so that one deleted later is taken out
-// alone. It returns m with each part's line kept on it (Inbound.logged),
-// so that its own run shows the message once, as the new message, after
-// the chat's history before those lines.
+// alone, and with the time it was sent, not the time the debouncer let it
+// through. It returns m with each part's line kept on it
+// (Inbound.logged), so that its own run shows the message once, as the
+// new message, after the chat's history before those lines.
 func (br *Brain) logInbound(m Inbound) Inbound {
 	parts := m.ownParts()
 	for i, p := range parts {
-		parts[i].logged = br.appendEntry(historyEntry{Chat: m.JID, From: p.Sender, Text: historyTextWithMedia(p.textWithQuote(), p.Media), Type: historyIn, ID: p.ID})
+		at := p.At
+		if at.IsZero() {
+			at = m.At
+		}
+		parts[i].logged = br.appendEntry(historyEntry{TS: historyTime(at), Chat: m.JID, From: p.Sender, Text: historyTextWithMedia(p.textWithQuote(), p.Media), Type: historyIn, ID: p.ID})
 	}
 	if len(m.parts) > 0 {
 		m.parts = parts
 	}
 	m.logged = parts[0].logged
 	return m
+}
+
+// historyTime is t as a history line has it, "" for none: the time the
+// line is written.
+func historyTime(t time.Time) string {
+	if t.IsZero() {
+		return ""
+	}
+	return t.Format(time.RFC3339)
 }
 
 // Submit hands a message to the brain: it goes into the history and, unless
@@ -406,21 +420,42 @@ func (br *Brain) Submit(m Inbound) (pos int, busy bool, err error) {
 		m.At = time.Now()
 	}
 	s := br.settings.Load()
+	// Untagged chatter needs nothing more than the history, unless the
+	// brain observes it with runs: the next run in the chat reads it there.
+	queues := !m.Silent || observeRuns(s.observe, m)
 
-	// History first, so that later runs see the message even when it is
-	// merged into a queue that is already moving.
-	m = br.logInbound(m)
-
+	// Turned away before anything is written: a message the brain does not
+	// take is not in its history, where the sender's retry after "queue is
+	// full", or the brain it is routed to instead of a retired one, would
+	// put it a second time.
 	br.mu.Lock()
 	if br.retired {
 		br.mu.Unlock()
 		return 0, false, errBrainRetired
 	}
-	// Untagged chatter needs nothing more, unless the brain observes it with
-	// runs: the next run in the chat reads it in the history.
-	if m.Silent && !observeRuns(s.observe, m) {
-		br.mu.Unlock()
+	if queues && !br.hasRoomLocked(m, s) {
+		if !m.Silent {
+			br.mu.Unlock()
+			return 0, true, errQueueFull
+		}
+		// Chatter that finds no place is kept in the history all the
+		// same, without a run of its own: it was said in the chat, and
+		// the next run there reads it.
+		queues = false
+	}
+	br.mu.Unlock()
+
+	// History first, so that later runs see the message even when it is
+	// merged into a queue that is already moving.
+	m = br.logInbound(m)
+	if !queues {
 		return 0, false, nil
+	}
+
+	br.mu.Lock()
+	if br.retired {
+		br.mu.Unlock()
+		return 0, false, errBrainRetired
 	}
 
 	// A newer message from the same chat supersedes queued untagged chatter:
@@ -431,10 +466,7 @@ func (br *Brain) Submit(m Inbound) (pos int, busy bool, err error) {
 	// chatter never interrupts a run. Nor do ingested files interrupt a
 	// request, or get replaced: each is a job of its own, not a correction of
 	// the last one. Observe-only runs are another matter, see below.
-	interrupting := s.queueMode == queueModeInterrupt && !m.Silent && m.Source != sourceIngest
-	replaces := func(p Inbound) bool {
-		return p.JID == m.JID && (p.Silent || (interrupting && p.Sender == m.Sender && p.Source != sourceIngest))
-	}
+	interrupting, replaces := supersedes(m, s)
 	var gone []Inbound
 	kept := br.pending[:0]
 	for _, p := range br.pending {
@@ -447,6 +479,8 @@ func (br *Brain) Submit(m Inbound) (pos int, busy bool, err error) {
 	br.pending = kept
 	defer dropped(gone)
 	if len(br.pending) >= s.maxPending {
+		// Only when another message took the last place since the check
+		// above.
 		dropped := false
 		for i, p := range br.pending {
 			if p.Silent {
@@ -487,6 +521,31 @@ func (br *Brain) Submit(m Inbound) (pos int, busy bool, err error) {
 		go br.worker()
 	}
 	return pos, busy, nil
+}
+
+// supersedes says what m replaces when it joins the queue (see Submit):
+// whether it interrupts its sender's own run, which only a request does in
+// interrupt mode, and which waiting or running messages it replaces.
+func supersedes(m Inbound, s *brainSettings) (interrupting bool, replaces func(Inbound) bool) {
+	interrupting = s.queueMode == queueModeInterrupt && !m.Silent && m.Source != sourceIngest
+	return interrupting, func(p Inbound) bool {
+		return p.JID == m.JID && (p.Silent || (interrupting && p.Sender == m.Sender && p.Source != sourceIngest))
+	}
+}
+
+// hasRoomLocked reports whether the queue takes m: it has a free place,
+// or one m makes by what it replaces, or untagged chatter to drop. br.mu is
+// held.
+func (br *Brain) hasRoomLocked(m Inbound, s *brainSettings) bool {
+	_, replaces := supersedes(m, s)
+	n, silent := 0, false
+	for _, p := range br.pending {
+		if !replaces(p) {
+			n++
+			silent = silent || p.Silent
+		}
+	}
+	return n < s.maxPending || silent
 }
 
 // worker drains the queue one message at a time.
@@ -1834,8 +1893,8 @@ func (br *Brain) appendHistoryVia(chatJID, from, text, typ, via string) {
 }
 
 // appendEntry appends entry to the brain's history file, stamped with the
-// time now. It returns the line as it reads back, or none when the file
-// could not be opened.
+// time now unless it has a time. It returns the line as it reads back, or
+// none when the file could not be opened.
 func (br *Brain) appendEntry(entry historyEntry) historyEntry {
 	br.historyMu.Lock()
 	entry, err := br.writeEntryLocked(entry)
@@ -1866,10 +1925,13 @@ func (br *Brain) recordDelivered(chat, text string, remove func() error) error {
 }
 
 // writeEntryLocked appends entry to the history file, stamped with the
-// time now, and returns it as it reads back, which historyBefore looks
-// for: invalid UTF-8 in its text is written as U+FFFD. historyMu is held.
+// time now unless it has a time, and returns it as it reads back, which
+// historyBefore looks for: invalid UTF-8 in its text is written as U+FFFD.
+// historyMu is held.
 func (br *Brain) writeEntryLocked(entry historyEntry) (historyEntry, error) {
-	entry.TS = time.Now().Format(time.RFC3339)
+	if entry.TS == "" {
+		entry.TS = time.Now().Format(time.RFC3339)
+	}
 	data, err := json.Marshal(entry)
 	if err != nil {
 		return entry, err
