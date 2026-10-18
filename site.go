@@ -35,6 +35,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"fridolin/site"
 )
 
 const (
@@ -888,21 +890,24 @@ func (m *SiteManager) ensureShell(ctx context.Context) (string, error) {
 	dir := m.dir("shell")
 	h := sha256.New()
 	var files []string
-	err := fs.WalkDir(siteShellFS, "site", func(p string, d fs.DirEntry, err error) error {
+	err := fs.WalkDir(site.FS, ".", func(p string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return err
 		}
 		if d.IsDir() {
-			if p == "site/template" || p == "site/builder" || p == "site/test" {
+			if p == "template" || p == "builder" || p == "test" {
 				return fs.SkipDir
 			}
 			return nil
 		}
-		data, err := siteShellFS.ReadFile(p)
+		data, err := site.FS.ReadFile(p)
 		if err != nil {
 			return err
 		}
-		h.Write([]byte(p + "\x00"))
+		// Named as from the checkout's root, as when the files were
+		// embedded there: the same files give the same stamp, so an
+		// upgrade does not install the dependencies again for nothing.
+		h.Write([]byte("site/" + p + "\x00"))
 		h.Write(data)
 		files = append(files, p)
 		return nil
@@ -916,8 +921,8 @@ func (m *SiteManager) ensureShell(ctx context.Context) (string, error) {
 		return dir, nil
 	}
 	for _, p := range files {
-		data, _ := siteShellFS.ReadFile(p)
-		dst := filepath.Join(dir, strings.TrimPrefix(p, "site/"))
+		data, _ := site.FS.ReadFile(p)
+		dst := filepath.Join(dir, p)
 		if err := os.MkdirAll(filepath.Dir(dst), 0o700); err != nil {
 			return "", err
 		}

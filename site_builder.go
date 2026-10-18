@@ -31,6 +31,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"fridolin/site"
 )
 
 // SiteProposal is a change a builder brain pushed for review.
@@ -179,7 +181,7 @@ func (m *SiteManager) ensureBuilder(ctx context.Context, brainID string) error {
 	if err := os.MkdirAll(plugin, 0o700); err != nil {
 		return err
 	}
-	if err := copyEmbedded(siteShellFS, "site/builder", plugin); err != nil {
+	if err := copyEmbedded(site.FS, "builder", plugin); err != nil {
 		return err
 	}
 	if err := m.writeMCPConfig(brainID); err != nil {

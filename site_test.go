@@ -3,8 +3,11 @@ package main
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"io/fs"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -69,6 +72,74 @@ func waitDeploy(t *testing.T, m *SiteManager) *siteJob {
 		t.Fatalf("deploy %s: %s\n%s", j.State, j.Error, strings.Join(j.Log, "\n"))
 	}
 	return j
+}
+
+// TestSiteShellIsTheEmbeddedProcess checks what ensureShell unpacks: the
+// site process from the checkout's site/, byte for byte, without the
+// starter template and the builder plugin, and a stamp over the files'
+// names and contents. The stamp names each file as from the checkout's
+// root (site/server/...), as it did when the files were embedded from
+// there, so the same files keep the same stamp and an upgrade does not
+// install the site's dependencies again for nothing.
+func TestSiteShellIsTheEmbeddedProcess(t *testing.T) {
+	m := newTestSite(t)
+	dir, err := m.ensureShell(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	src := filepath.Join(repoDir, "site")
+	h := sha256.New()
+	var want []string
+	// In the order fs.WalkDir visits them, which go:embed's own rules
+	// decide the set of: no file whose name starts with . or _.
+	for _, top := range []string{"package-lock.json", "package.json", "server", "web"} {
+		err := filepath.WalkDir(filepath.Join(src, top), func(p string, d fs.DirEntry, err error) error {
+			if err != nil || d.IsDir() || strings.HasPrefix(d.Name(), ".") || strings.HasPrefix(d.Name(), "_") {
+				return err
+			}
+			rel, err := filepath.Rel(src, p)
+			if err != nil {
+				return err
+			}
+			data, err := os.ReadFile(p)
+			if err != nil {
+				return err
+			}
+			h.Write([]byte("site/" + filepath.ToSlash(rel) + "\x00"))
+			h.Write(data)
+			want = append(want, rel)
+			if got, err := os.ReadFile(filepath.Join(dir, rel)); err != nil || !bytes.Equal(got, data) {
+				t.Errorf("shell/%s is not the checkout's site/%s (%v)", rel, rel, err)
+			}
+			return nil
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	var got []string
+	err = filepath.WalkDir(dir, func(p string, d fs.DirEntry, err error) error {
+		if err != nil || d.IsDir() {
+			if d != nil && d.Name() == "node_modules" {
+				return fs.SkipDir
+			}
+			return err
+		}
+		if rel, _ := filepath.Rel(dir, p); rel != ".fridolin-shell" {
+			got = append(got, rel)
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Equal(got, want) {
+		t.Errorf("the shell holds\n%s\nwant\n%s", strings.Join(got, "\n"), strings.Join(want, "\n"))
+	}
+	stamp, err := os.ReadFile(filepath.Join(dir, ".fridolin-shell"))
+	if want := hex.EncodeToString(h.Sum(nil)) + "\n"; err != nil || string(stamp) != want {
+		t.Errorf("stamp = %q (%v), want %q", stamp, err, want)
+	}
 }
 
 func TestSiteAccounts(t *testing.T) {

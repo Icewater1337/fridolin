@@ -28,6 +28,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"fridolin/site"
 )
 
 // The identity of the commits Fridolin makes in the site repository.
@@ -308,7 +310,7 @@ func (m *SiteManager) AddStarter(ctx context.Context) error {
 	if fileExists(filepath.Join(root, "modules")) {
 		return errors.New("the repository already has a modules folder")
 	}
-	if err := copyEmbedded(siteShellFS, "site/template", root); err != nil {
+	if err := copyEmbedded(site.FS, "template", root); err != nil {
 		return err
 	}
 	if _, err := m.git(ctx, work, "add", "-A"); err != nil {
