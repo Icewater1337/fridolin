@@ -517,9 +517,11 @@ func (b *Bridge) deliver(br *Brain, m Inbound, res RunResult) {
 			log.Printf("brain %s: run for %s was stopped", br.ID(), m.JID)
 			return
 		}
+		// The error in full goes to the log and the dashboard only: it can
+		// hold the CLI's stderr, and a group's members read the chat.
 		log.Printf("brain %s: error for %s: %v", br.ID(), m.JID, res.Err)
-		if !m.Silent {
-			_ = b.wa.SendMessage(ctx, m.JID, fmt.Sprintf("❌ Error: %v", res.Err))
+		if text := chatErrorText(res.Err, !m.IsGroup()); text != "" && !m.Silent {
+			_ = b.wa.SendMessage(ctx, m.JID, text)
 		}
 		return
 	}

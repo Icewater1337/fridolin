@@ -1616,7 +1616,7 @@ func (br *Brain) readStream(jid string, reader io.Reader, heading string, onResu
 					errMsg = "(claude exited with an error but no message)"
 				}
 				writeLog("❌ Error: " + errMsg)
-				return RunResult{Err: fmt.Errorf("claude error: %s", errMsg)}
+				return RunResult{Err: &cliError{msg: errMsg}}
 			}
 			finalResult = event.Result
 			writeLog("✅ Result: " + truncate(finalResult, 2000))
