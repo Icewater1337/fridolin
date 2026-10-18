@@ -14,7 +14,7 @@ import { toast } from '../components/toast.js';
 import { btn } from '../components/buttons.js';
 import { confirmDialog } from '../components/dialog.js';
 import { field, toggle, select, textInput, listEditor } from '../components/fields.js';
-import { mono, pageHeader, loading } from '../components/common.js';
+import { callout, mono, pageHeader, loading } from '../components/common.js';
 import { googleClientCard } from '../components/calendar.js';
 import { saveBar } from '../components/save-bar.js';
 import { liveForm } from '../components/live-form.js';
@@ -284,7 +284,7 @@ function makeControl(f, cfg, eff, onChange) {
         }
         onChange();
       });
-      if (f.danger) extra = h('div.callout.warn.inline-callout', icon('alert', 'callout-icon'), h('div.callout-body', f.help));
+      if (f.danger) extra = callout('warn', null, { class: 'inline-callout' }, f.help);
       const el = h('div.field.bool-field', sw,
         f.danger ? extra : (f.help ? h('div.help', f.help) : null),
         tag ? h('span.field-tag', tag) : null);

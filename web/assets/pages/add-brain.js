@@ -171,19 +171,16 @@ export default {
       let manifestBox = null;
       if (r.manifest && !problems.length) {
         const m = r.manifest;
-        manifestBox = h('div.callout.info',
-          icon('info', 'callout-icon'),
-          h('div.callout-body',
-            h('strong', 'This folder already has a brain.json'),
-            h('div', 'You can add it as it is. Check what it asks for — especially which chats it wants to answer.'),
-            h('dl.kv',
-              h('dt', 'Name'), h('dd', m.name || '—'),
-              h('dt', 'Id'), h('dd', mono(m.id || '—')),
-              h('dt', 'Chats'), h('dd', routingSummary(m.routing)),
-              m.routing && m.routing.groups && m.routing.groups.length ? [h('dt', 'Groups'), h('dd', m.routing.groups.map((g) => h('div', mono(g))))] : null,
-              h('dt', 'Model'), h('dd', m.model || 'inherit'),
-              m.disallowed_tools ? [h('dt', 'Blocked tools'), h('dd', m.disallowed_tools.length ? m.disallowed_tools.join(', ') : 'none (all tools allowed)')] : null),
-            h('details', h('summary', 'Show brain.json'), h('pre.code', prettyJSON(m)))));
+        manifestBox = callout('info', 'This folder already has a brain.json',
+          h('div', 'You can add it as it is. Check what it asks for — especially which chats it wants to answer.'),
+          h('dl.kv',
+            h('dt', 'Name'), h('dd', m.name || '—'),
+            h('dt', 'Id'), h('dd', mono(m.id || '—')),
+            h('dt', 'Chats'), h('dd', routingSummary(m.routing)),
+            m.routing && m.routing.groups && m.routing.groups.length ? [h('dt', 'Groups'), h('dd', m.routing.groups.map((g) => h('div', mono(g))))] : null,
+            h('dt', 'Model'), h('dd', m.model || 'inherit'),
+            m.disallowed_tools ? [h('dt', 'Blocked tools'), h('dd', m.disallowed_tools.length ? m.disallowed_tools.join(', ') : 'none (all tools allowed)')] : null),
+          h('details', h('summary', 'Show brain.json'), h('pre.code', prettyJSON(m))));
         actions.append(btn('Use the brain.json already in this folder', { kind: 'primary', icon: 'check', onClick: () => submit({ useExisting: true }) }));
       } else if (!problems.length) {
         actions.append(btn('Continue', { kind: 'primary', icon: 'right', onClick: () => go('configure') }));

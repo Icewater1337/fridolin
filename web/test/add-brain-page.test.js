@@ -79,3 +79,35 @@ test('the folder step chooses between browsing and typing with real tabs', async
   assert.equal(panel.getAttribute('aria-labelledby'), typeTab.id);
   assert.ok(panel.querySelector('form.inline-add input'), 'the path field is the panel now');
 });
+
+test('a folder that has a brain.json shows what it asks for', async (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout', 'Date'] });
+  installDom();
+  noConsoleErrors(t);
+  globalThis.window = { scrollTo() {} };
+  t.after(() => { delete globalThis.window; });
+  const manifest = { version: 1, id: 'notes', name: 'Notes', routing: { handles_dms: false, default: false, groups: ['120363000000000000@g.us'] }, model: 'opus' };
+  serve(t, (path) => {
+    if (path.startsWith('/api/fs/capabilities')) return { picker: '', home: '/Users/you' };
+    if (path.startsWith('/api/fs/list')) return { path: '/Users/you', home: '/Users/you', parent: '', entries: [] };
+    if (path.startsWith('/api/brains/inspect')) return { exists: true, is_dir: true, entries: 2, abs_path: '/Users/you/notes', manifest };
+    return {};
+  });
+  const root = h('div');
+  document.body.append(root);
+  const ctx = createPage();
+  t.after(() => ctx.destroy());
+  page.render(root, ctx);
+  await settle();
+  root.querySelectorAll('button').find((b) => b.textContent === 'Type a path').click();
+  const typed = root.querySelector('form.inline-add');
+  type(typed.querySelector('input'), '~/notes');
+  typed.dispatchEvent(new Event('submit', { cancelable: true }));
+  await settle();
+
+  const note = root.querySelector('.callout.info');
+  assert.ok(note.querySelector('.callout-icon'));
+  assert.equal(note.querySelector('.callout-body strong').textContent, 'This folder already has a brain.json');
+  assert.match(note.querySelector('dl.kv').textContent, /NameNotes.*Groups120363000000000000@g\.us.*Modelopus/);
+  assert.equal(note.querySelector('details summary').textContent, 'Show brain.json');
+});

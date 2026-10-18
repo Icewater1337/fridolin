@@ -34,9 +34,17 @@ export function empty(title, text, ...actions) {
   return h('div.empty', h('div.empty-title', title), text && h('p', text), actions.length ? h('div.actions', actions) : null);
 }
 
+/**
+ * callout(kind, title, ...body): a note of kind info, ok, warn or bad, with
+ * a title in bold (none when null) above the body. When the first item of
+ * body is a plain object, not a node, an array or null, it holds the
+ * callout's attributes as h() takes them, e.g. {class, hidden}.
+ */
 export function callout(kind, title, ...body) {
+  const first = body[0];
+  const attrs = first && typeof first === 'object' && !(first instanceof Node) && !Array.isArray(first) ? body.shift() : {};
   const icn = { warn: 'alert', bad: 'alert', ok: 'check', info: 'info' }[kind] || 'info';
-  return h(`div.callout.${kind}`, { role: kind === 'bad' ? 'alert' : null }, icon(icn, 'callout-icon'), h('div.callout-body', title && h('strong', title), body.length ? h('div.callout-text', body) : null));
+  return h(`div.callout.${kind}`, { role: kind === 'bad' ? 'alert' : null, ...attrs }, icon(icn, 'callout-icon'), h('div.callout-body', title && h('strong', title), body.length ? h('div.callout-text', body) : null));
 }
 
 export function kv(rows) {

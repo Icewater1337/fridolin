@@ -129,6 +129,15 @@ test('an edited nested setting is saved inside its object, beside the others', a
   });
 });
 
+test('a dangerous setting says why in a warning beside it', async (t) => {
+  const { inputFor } = await openPage(t);
+  const field = inputFor('Let brains use tools without asking').closest('.field');
+  const warn = field.querySelector('.callout.warn.inline-callout');
+  assert.ok(warn, 'the help is a warning');
+  assert.match(warn.textContent, /the sandbox \(below\) is the safety net/);
+  assert.equal(field.querySelector('.help'), null, 'and is not repeated as plain help');
+});
+
 test('a link to a section gives the focus to its heading', async (t) => {
   for (const params of [{ section: 'claude' }, { section: 'google' }, { section: 'nope' }, {}]) {
     await t.test(params.section || 'no section', async (t) => {
