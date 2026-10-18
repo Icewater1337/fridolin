@@ -554,8 +554,10 @@ Linux, `journalctl --user -u fridolin -f`.
 
 Each version tag (`v1.2.3`) builds archives for macOS (arm64, amd64) and Linux
 (amd64, arm64) on the project's GitHub releases page, with a `SHA256SUMS`
-file. To run one without building it yourself, download the archive for your
-machine and `SHA256SUMS`, then:
+file. Each holds the binary, `tools/`, `README.md`, `LICENSE` and
+`THIRD_PARTY_NOTICES` (see [License](#license)). To run one without
+building it yourself, download the archive for your machine and
+`SHA256SUMS`, then:
 
 ```bash
 shasum -a 256 -c SHA256SUMS --ignore-missing     # Linux: sha256sum -c --ignore-missing SHA256SUMS
@@ -880,8 +882,8 @@ your name, your numbers, your company). CI runs the same check.
 `go mod tidy -diff`, the race tests, staticcheck, shellcheck, ruff,
 actionlint, a check that every workflow action is pinned to a commit SHA,
 a check that `THIRD_PARTY_NOTICES` is current, ESLint on the dashboard,
-the Python, dashboard, personal-data-check, action-pin-check, notices and
-Makefile tests, and a smoke test that starts a
+the Python, dashboard, personal-data-check, action-pin-check, notices,
+release-archive and Makefile tests, and a smoke test that starts a
 race-enabled build in dev mode on a scratch config (`make help` lists every
 target). staticcheck and actionlint run through `go run` at pinned
 versions, and ESLint through `npx` at a pinned version, which it fetches
@@ -915,9 +917,14 @@ go.mau.fi/util under MPL-2.0 and go.mau.fi/libsignal under GPL-3.0, so a
 binary, such as the one in a release archive, may be distributed only
 under the terms of GPL-3.0 as a whole; the source stays MIT, which both
 allow combining with. [THIRD_PARTY_NOTICES](THIRD_PARTY_NOTICES) lists
-every module the binary links with its licence, and their licence texts.
-After changing dependencies, `make notices` writes it again: `make check`
-and CI fail while it is out of date.
+every module the binary links with its licence, and their licence texts;
+each release archive carries it next to LICENSE. The Corresponding Source
+of a release binary is that release's tag of this repository, which its
+release page also offers as *Source code*, with the module versions the
+notices list, which `go mod download` fetches from the Go module proxy or
+from the modules' own repositories. After changing dependencies, `make
+notices` writes the file again: `make check` and CI fail while it is out
+of date, and so does the release workflow.
 
 Privacy: [PRIVACY.md](PRIVACY.md).
 

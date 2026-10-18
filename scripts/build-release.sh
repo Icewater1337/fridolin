@@ -1,7 +1,9 @@
 #!/usr/bin/env bash
 #
 # Builds one release archive, OUTDIR/fridolin_<version>_<os>_<arch>.tar.gz,
-# holding the binary, the Python tools, README.md and LICENSE. Unpacked,
+# holding the binary, the Python tools, README.md, LICENSE and
+# THIRD_PARTY_NOTICES, the licences of the modules the binary links, which
+# whoever passes the binary on must pass on with it. Unpacked,
 # `./fridolin service install` installs the binary and the tools next to it.
 # The release workflow runs it once per platform; it works locally too:
 #
@@ -31,7 +33,7 @@ mkdir -p "$stage/$name/tools" "$out"
 # What `fridolin service install` copies from tools/: the helpers and their
 # requirements, not their tests.
 cp "$repo"/tools/*.py "$repo"/tools/requirements*.txt "$stage/$name/tools/"
-cp "$repo/README.md" "$repo/LICENSE" "$stage/$name/"
+cp "$repo/README.md" "$repo/LICENSE" "$repo/THIRD_PARTY_NOTICES" "$stage/$name/"
 
 tar -C "$stage" -czf "$out/$name.tar.gz" "$name"
 echo "$out/$name.tar.gz"

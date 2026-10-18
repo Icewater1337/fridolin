@@ -200,7 +200,7 @@ jobs:
         if: matrix.os == 'ubuntu-latest'
         run: make lint-sh
 
-      - name: tests of the personal-data, action-pin and notices scripts and the Makefile
+      - name: tests of the personal-data, action-pin, notices and release scripts and the Makefile
         run: make test-sh
 
   python:
