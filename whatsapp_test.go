@@ -934,9 +934,6 @@ func TestHandleMessageSkipsOversizedAttachment(t *testing.T) {
 		}},
 		{"group", testGroup, func(tw *testWhatsApp) *events.Message {
 			tw.cfg().AllowedGroups = []string{testGroup}
-			// The group path looks the group up; a client that never
-			// connected fails that at once, without the network.
-			tw.client = whatsmeow.NewClient(&store.Device{}, waLog.Noop)
 			return groupEvent(backup)
 		}},
 	}
@@ -1336,5 +1333,98 @@ func TestIgnoredSendersAreMaskedInTheLog(t *testing.T) {
 				t.Errorf("the dashboard was told of %v, want %s", senders, c.sender)
 			}
 		})
+	}
+}
+
+// feed hands evts to the event handler one after another, on a goroutine
+// of its own as whatsmeow does, so that an event handler that blocks
+// shows up as a message that does not arrive rather than as a test that
+// hangs.
+func (tw *testWhatsApp) feed(evts ...*events.Message) {
+	go func() {
+		for _, evt := range evts {
+			tw.eventHandler(evt)
+		}
+	}()
+}
+
+// ignoredGroupNames records the names of the groups tw offers the
+// dashboard, as they come.
+func ignoredGroupNames(tw *testWhatsApp) func() []string {
+	var mu sync.Mutex
+	var names []string
+	tw.onIgnored = func(_, _, name, _, _ string) {
+		mu.Lock()
+		defer mu.Unlock()
+		names = append(names, name)
+	}
+	return func() []string {
+		mu.Lock()
+		defer mu.Unlock()
+		return slices.Clone(names)
+	}
+}
+
+// A group the bridge does not allow is named in the log and on the
+// dashboard, but however much it sends, WhatsApp is asked for its name at
+// most once per groupNameTTL.
+func TestIgnoredGroupNameIsLookedUpOnce(t *testing.T) {
+	logged := captureLog(t)
+	tw := newTestWhatsApp(t)
+	fl := &fakeLister{info: "Family"}
+	tw.lister = fl
+	offered := ignoredGroupNames(tw)
+	stranger := types.NewJID(otherNumber, types.DefaultUserServer)
+	var evts []*events.Message
+	for range 5 {
+		evts = append(evts, groupMessage(stranger, types.EmptyJID, groupChatter()))
+	}
+	tw.feed(evts...)
+	waitFor(t, 2*time.Second, "the five messages", func() bool { return len(offered()) == 5 })
+	if n := fl.infoCalls.Load(); n != 1 {
+		t.Errorf("WhatsApp was asked for the name %d times, want once", n)
+	}
+	for _, name := range offered() {
+		if name != "Family" {
+			t.Errorf("offered as %q, want Family", name)
+		}
+	}
+	got := strings.Join(logged(), "\n")
+	if !strings.Contains(got, `("Family") by `+maskPhone(otherNumber)+": ignored (not in allowed_groups)") {
+		t.Errorf("log %q, want the group's name and the sender masked", got)
+	}
+}
+
+// An allowed group's name is only ever read from what the bridge knows,
+// for the log line: no message of the group asks WhatsApp for it.
+func TestAllowedGroupNameIsNeverLookedUp(t *testing.T) {
+	logged := captureLog(t)
+	tw, _ := newGroupTestWhatsApp(t, []string{"15551234567"})
+	fl := &fakeLister{info: "Family"}
+	tw.lister = fl
+	member := types.NewJID("15551234567", types.DefaultUserServer)
+	arrive := func(n int) {
+		t.Helper()
+		for range n {
+			if _, ok := tw.next(2 * time.Second); !ok {
+				t.Fatal("a message did not reach the brains")
+			}
+		}
+	}
+	tw.feed(groupMessage(member, types.EmptyJID, groupChatter()))
+	arrive(1)
+	// Before, the log names the group by its JID alone.
+	if got := strings.Join(logged(), "\n"); !strings.Contains(got, testGroup+" by 15551234567: processing") {
+		t.Errorf("log %q, want the group by its JID", got)
+	}
+	// The group is named once a rename (or the group list) told its name.
+	tw.eventHandler(&events.GroupInfo{JID: types.NewJID("120363000000000000", types.GroupServer), Name: &types.GroupName{Name: "Family"}})
+	tw.feed(groupMessage(member, types.EmptyJID, groupTrigger()), groupMessage(member, types.EmptyJID, groupChatter()))
+	arrive(2)
+	if n := fl.infoCalls.Load(); n != 0 {
+		t.Errorf("WhatsApp was asked for the name %d times, want never", n)
+	}
+	if got := strings.Join(logged(), "\n"); !strings.Contains(got, testGroup+` ("Family") by 15551234567: processing`) {
+		t.Errorf("log %q, want the name the event told", got)
 	}
 }

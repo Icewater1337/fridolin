@@ -85,7 +85,8 @@ type WhatsAppClient struct {
 	notify     func(jid, text string) // sendNotice; tests record instead
 
 	// ctx ends when the client disconnects for good. Attachment downloads
-	// run under it, so shutting down does not wait for them.
+	// and group lookups run under it, so shutting down does not wait for
+	// them.
 	ctx    context.Context
 	cancel context.CancelFunc
 
@@ -548,7 +549,7 @@ func (wa *WhatsAppClient) handleGroupMessage(msg *events.Message) {
 	// that neither config admits.
 	if !isAllowedGroup(cfg, groupJID) {
 		groupName := wa.groupName(msg.Info.Chat)
-		log.Printf("Group message from %s (%q) by %s: ignored (not in allowed_groups)", groupJID, groupName, who.masked())
+		log.Printf("Group message from %s by %s: ignored (not in allowed_groups)", groupLabel(groupJID, groupName), who.masked())
 		if wa.onIgnored != nil {
 			wa.onIgnored("group", groupJID, groupName, senderNumber, msg.Info.PushName)
 		}
@@ -568,7 +569,8 @@ func (wa *WhatsAppClient) handleGroupMessage(msg *events.Message) {
 		log.Printf("Group message in %s by %s: ignored (not admitted by group_members)", groupJID, who.masked())
 		return
 	}
-	groupName := wa.groupName(msg.Info.Chat)
+	// Only for the log line: an allowed group's name is never looked up.
+	groupName := wa.groups.names.cached(groupJID)
 
 	own := wa.ownMentionJIDs()
 	kind, target, content := classify(msg)
@@ -639,7 +641,7 @@ func (wa *WhatsAppClient) handleGroupMessage(msg *events.Message) {
 		return
 	}
 
-	log.Printf("Group message from %s (%q) by %s: processing (silent=%v)", groupJID, groupName, senderNumber, silent)
+	log.Printf("Group message from %s by %s: processing (silent=%v)", groupLabel(groupJID, groupName), senderNumber, silent)
 	go wa.handler(context.Background(), Inbound{
 		JID: groupJID, Sender: senderNumber, Text: text, Media: mediaList(mediaPath),
 		Quoted: quoted, Silent: silent, Source: sourceWhatsApp, At: msg.Info.Timestamp, ID: string(msg.Info.ID),
@@ -1052,13 +1054,30 @@ func (wa *WhatsAppClient) senderOf(src types.MessageSource) (sender types.JID, r
 	return sender, sender.Server == types.DefaultUserServer
 }
 
-// groupName is the group's subject as WhatsApp has it, or "" when it
-// cannot be looked up.
-func (wa *WhatsAppClient) groupName(jid types.JID) string {
-	if info, err := wa.cl().GetGroupInfo(context.Background(), jid); err == nil && info != nil {
-		return info.Name
+// groupLabel is how the log names a group: by its JID, and by its name
+// too when the bridge knows one, which it may not for long, or ever when
+// nobody opens the dashboard's group list.
+func groupLabel(jid, name string) string {
+	if name == "" {
+		return jid
 	}
-	return ""
+	return fmt.Sprintf("%s (%q)", jid, name)
+}
+
+// groupName is the group's subject as WhatsApp has it, or "" when it
+// cannot be looked up: from the names kept (see groupNameCache), or else
+// asked of WhatsApp.
+func (wa *WhatsAppClient) groupName(jid types.JID) string {
+	return wa.groups.names.lookup(wa.ctx, jid.String(), func(ctx context.Context) (string, error) {
+		info, err := wa.groupsFrom().GetGroupInfo(ctx, jid)
+		if err != nil {
+			return "", err
+		}
+		if info == nil {
+			return "", errors.New("WhatsApp sent no group info")
+		}
+		return info.Name, nil
+	})
 }
 
 // lidStore is whatsmeow's map between LIDs and phone numbers, or nil

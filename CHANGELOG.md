@@ -270,6 +270,10 @@ for compatibility.
   say, keeps its answer. The bridge failed it with "token too long" and
   lost the result that came after; now it skips the line and notes it in
   the brain's `claude-stream.log`.
+- A group the bridge does not allow is looked up on WhatsApp, for its
+  name in the log and on the Chats page, at most once an hour instead of
+  for every message it sends, and an allowed group not at all. A lookup
+  that hangs gives up after five seconds.
 - The log names who voted for what in a poll only at the debug level,
   and a vote it fails to record only masked. It masks the numbers and
   LIDs of the senders it ignores, as it already did for group members

@@ -702,12 +702,14 @@ folders of their own rather than your home directory, and
 
 **`whatsapp.go`** — [whatsmeow](https://github.com/tulir/whatsmeow) client.
 Handles pairing, allowlists, trigger matching, attachment downloads, and poll
-vote decryption. It keeps the list of the account's groups that the
-dashboard shows (`groupcache.go`), and asks WhatsApp for it again only after
-a group event or a reconnect, once it is ten minutes old, or when you press
-Refresh on the Chats page. **`polls.go`** — the `[POLL]` blocks in replies,
-sending them, and matching votes to options (WhatsApp sends SHA-256 hashes of
-option names, which are matched against the stored options).
+vote decryption. It keeps the list of the account's groups that the dashboard
+shows (`groupcache.go`), and asks WhatsApp for it again only after a group
+event or a reconnect, once it is ten minutes old, or when you press Refresh on
+the Chats page. Group names come from that list and from rename events; only a
+group that is not allowed is looked up, at most once an hour. **`polls.go`** —
+the `[POLL]` blocks in replies, sending them, and matching votes to options
+(WhatsApp sends SHA-256 hashes of option names, which are matched against the
+stored options).
 
 **`media.go`** — the media inbox: each brain's own folder in the media
 directory, and moving a message's files into the inbox of the brain that

@@ -281,11 +281,31 @@ func TestGroupEventsDropTheList(t *testing.T) {
 	}
 }
 
-// fakeLister is a logged-in whatsmeow client as far as JoinedGroups goes:
-// it counts the joined-groups queries and answers each with one group.
-type fakeLister struct{ calls atomic.Int32 }
+// fakeLister is a logged-in whatsmeow client as far as the group queries
+// go: it counts the joined-groups queries and answers each with one group,
+// and counts the group-info queries, which answer with the name info, or
+// fail with infoErr, or, with hang set, wait for their context to end.
+type fakeLister struct {
+	calls     atomic.Int32
+	infoCalls atomic.Int32
+	info      string
+	infoErr   error
+	hang      bool
+}
 
 func (*fakeLister) IsLoggedIn() bool { return true }
+
+func (f *fakeLister) GetGroupInfo(ctx context.Context, jid types.JID) (*types.GroupInfo, error) {
+	f.infoCalls.Add(1)
+	if f.hang {
+		<-ctx.Done()
+		return nil, ctx.Err()
+	}
+	if f.infoErr != nil {
+		return nil, f.infoErr
+	}
+	return &types.GroupInfo{JID: jid, GroupName: types.GroupName{Name: f.info}}, nil
+}
 
 func (f *fakeLister) GetJoinedGroups(context.Context) ([]*types.GroupInfo, error) {
 	f.calls.Add(1)
@@ -327,6 +347,211 @@ func TestJoinedGroupsAnswersFromTheCache(t *testing.T) {
 			}
 			if n := fl.calls.Load(); n != c.queries {
 				t.Errorf("WhatsApp was asked %d times, want %d", n, c.queries)
+			}
+		})
+	}
+}
+
+// fakeGroupName stands in for WhatsApp's answer to a group's info: it
+// counts the lookups and answers each with name, or fails while fail is
+// set; while held is set, it answers only once the test closes release.
+type fakeGroupName struct {
+	calls   atomic.Int32
+	name    atomic.Value // string
+	fail    atomic.Bool
+	held    atomic.Bool
+	release chan struct{}
+}
+
+func newFakeGroupName(name string) *fakeGroupName {
+	f := &fakeGroupName{release: make(chan struct{})}
+	f.name.Store(name)
+	return f
+}
+
+func (f *fakeGroupName) fetch(ctx context.Context) (string, error) {
+	f.calls.Add(1)
+	name := f.name.Load().(string)
+	if f.held.Load() {
+		select {
+		case <-f.release:
+		case <-ctx.Done():
+			return "", ctx.Err()
+		}
+	}
+	if f.fail.Load() {
+		return "", errors.New("item-not-found")
+	}
+	return name, nil
+}
+
+// A group's name is asked of WhatsApp at most once per groupNameTTL, or
+// per groupNameFailTTL after a lookup failed, however many messages ask
+// for it; lookups of one group at once share one query, which has a
+// timeout of its own.
+func TestGroupNameCache(t *testing.T) {
+	const jid = "120363000000000000@g.us"
+	ask := func(t *testing.T, c *groupNameCache, f *fakeGroupName, want string) {
+		t.Helper()
+		if got := c.lookup(context.Background(), jid, f.fetch); got != want {
+			t.Fatalf("lookup = %q, want %q", got, want)
+		}
+	}
+	queries := func(t *testing.T, f *fakeGroupName, want int32) {
+		t.Helper()
+		if n := f.calls.Load(); n != want {
+			t.Fatalf("%d lookups reached WhatsApp, want %d", n, want)
+		}
+	}
+
+	t.Run("once per TTL", func(t *testing.T) {
+		synctest.Test(t, func(t *testing.T) {
+			var c groupNameCache
+			f := newFakeGroupName("Family")
+			for range 10 {
+				ask(t, &c, f, "Family")
+			}
+			f.name.Store("Family 2026")
+			time.Sleep(groupNameTTL - time.Second)
+			ask(t, &c, f, "Family")
+			queries(t, f, 1)
+			time.Sleep(time.Second)
+			ask(t, &c, f, "Family 2026")
+			queries(t, f, 2)
+		})
+	})
+
+	t.Run("a failure is kept for a few minutes", func(t *testing.T) {
+		synctest.Test(t, func(t *testing.T) {
+			var c groupNameCache
+			f := newFakeGroupName("Family")
+			f.fail.Store(true)
+			for range 10 {
+				ask(t, &c, f, "")
+			}
+			queries(t, f, 1)
+			f.fail.Store(false)
+			time.Sleep(groupNameFailTTL)
+			ask(t, &c, f, "Family")
+			queries(t, f, 2)
+		})
+	})
+
+	t.Run("lookups at once share one query", func(t *testing.T) {
+		synctest.Test(t, func(t *testing.T) {
+			var c groupNameCache
+			f := newFakeGroupName("Family")
+			f.held.Store(true)
+			got := make(chan string, 3)
+			for range 3 {
+				go func() { got <- c.lookup(context.Background(), jid, f.fetch) }()
+			}
+			synctest.Wait()
+			queries(t, f, 1)
+			close(f.release)
+			for range 3 {
+				if name := <-got; name != "Family" {
+					t.Errorf("a lookup got %q", name)
+				}
+			}
+		})
+	})
+
+	t.Run("a lookup that hangs ends", func(t *testing.T) {
+		synctest.Test(t, func(t *testing.T) {
+			var c groupNameCache
+			f := newFakeGroupName("Family")
+			f.held.Store(true) // and never released
+			start := time.Now()
+			ask(t, &c, f, "")
+			if waited := time.Since(start); waited != groupNameTimeout {
+				t.Errorf("the lookup took %v, want %v", waited, groupNameTimeout)
+			}
+			ask(t, &c, f, "") // kept as a failure
+			queries(t, f, 1)
+		})
+	})
+
+	t.Run("a lookup cut off by shutting down is not kept", func(t *testing.T) {
+		synctest.Test(t, func(t *testing.T) {
+			var c groupNameCache
+			f := newFakeGroupName("Family")
+			f.held.Store(true)
+			ctx, cancel := context.WithCancel(context.Background())
+			done := make(chan string)
+			go func() { done <- c.lookup(ctx, jid, f.fetch) }()
+			synctest.Wait()
+			cancel()
+			if name := <-done; name != "" {
+				t.Errorf("lookup = %q, want none", name)
+			}
+			f.held.Store(false)
+			ask(t, &c, f, "Family")
+			queries(t, f, 2)
+		})
+	})
+
+	t.Run("a rename during a lookup wins", func(t *testing.T) {
+		synctest.Test(t, func(t *testing.T) {
+			var c groupNameCache
+			f := newFakeGroupName("Family")
+			f.held.Store(true)
+			done := make(chan string)
+			go func() { done <- c.lookup(context.Background(), jid, f.fetch) }()
+			synctest.Wait()
+			c.set(jid, "Family 2026")
+			close(f.release)
+			if name := <-done; name != "Family 2026" {
+				t.Errorf("lookup = %q, want the new name", name)
+			}
+			ask(t, &c, f, "Family 2026")
+			queries(t, f, 1)
+		})
+	})
+
+	t.Run("cached never asks", func(t *testing.T) {
+		var c groupNameCache
+		if name := c.cached(jid); name != "" {
+			t.Errorf("cached = %q, want none", name)
+		}
+		c.set(jid, "Family")
+		if name := c.cached(jid); name != "Family" {
+			t.Errorf("cached = %q, want Family", name)
+		}
+	})
+}
+
+// The names come from the group list whenever it is loaded, and from the
+// events that name a group: those are not asked of WhatsApp again.
+func TestGroupNamesFromTheListAndEvents(t *testing.T) {
+	group := types.NewJID("120363000000000000", types.GroupServer)
+	jid := group.String()
+	t.Run("the list", func(t *testing.T) {
+		var c groupCache
+		if _, err := c.get(t.Context(), newFakeGroups("Family").fetch); err != nil {
+			t.Fatal(err)
+		}
+		f := newFakeGroupName("not asked")
+		if name := c.names.lookup(t.Context(), jid, f.fetch); name != "Family" || f.calls.Load() != 0 {
+			t.Errorf("lookup = %q after %d queries, want Family from the list", name, f.calls.Load())
+		}
+	})
+	cases := []struct {
+		name string
+		evt  any
+		want string
+	}{
+		{"renamed", &events.GroupInfo{JID: group, Name: &types.GroupName{Name: "Work"}}, "Work"},
+		{"joined", &events.JoinedGroup{GroupInfo: types.GroupInfo{JID: group, GroupName: types.GroupName{Name: "Work"}}}, "Work"},
+		{"another change keeps the name", &events.GroupInfo{JID: group, Leave: []types.JID{types.NewJID("15551234567", types.DefaultUserServer)}}, "Family"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			var cache groupCache
+			cache.names.set(jid, "Family")
+			cache.observe(c.evt)
+			if name := cache.names.cached(jid); name != c.want {
+				t.Errorf("name = %q, want %q", name, c.want)
 			}
 		})
 	}
