@@ -621,7 +621,9 @@ dashboard save, which writes version 2, leaves them out:
 | `brains` | Inline brains, when the list is empty or `null`. One that lists brains is refused, see [Inline brains](#inline-brains). |
 
 In a version 2 config they are unknown keys. Any key the bridge does not
-know is logged as an unknown setting and dropped the same way.
+know, at the top or inside a section, is logged as an unknown setting by
+its path (`sandbox.enable`, a typo of `sandbox.enabled`, say) and dropped
+the same way.
 
 ### `brain_mode`
 

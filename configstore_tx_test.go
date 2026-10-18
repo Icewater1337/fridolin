@@ -7,6 +7,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"reflect"
 	"slices"
 	"strings"
 	"sync"
@@ -570,5 +571,57 @@ func TestDownloadMakesTheMediaFolder(t *testing.T) {
 	}
 	if path != filepath.Join(dir, "scan.pdf") {
 		t.Errorf("saved as %q", path)
+	}
+}
+
+// A key config.json has that no setting takes is logged by its path, also
+// inside a section or a brain's approved manifest: a typo there was
+// dropped without a word on the next save.
+func TestUnknownConfigKeysAreLoggedByPath(t *testing.T) {
+	cases := []struct {
+		name, body string
+		want       string // the logged list, "" for no line
+	}{
+		{"in sections", `{"sandbox": {"enable": true}, "queue": {"notfy": false, "mode": "queue"}}`, "[queue.notfy sandbox.enable]"},
+		{"at the top", `{"alowed_numbers": []}`, "[alowed_numbers]"},
+		{"in a brain's approved manifest", `{"brain_dirs": [{"path": "~/a", "approved": {"id": "a", "name": "A", "nmae": "x", "routing": {"handles_dm": true}}}]}`, "[brain_dirs[0].approved.nmae brain_dirs[0].approved.routing.handles_dm]"},
+		{"in another case", `{"Sandbox": {"Enabled": true}}`, ""},
+		{"a retired key", `{"work_dir": "~/w"}`, ""},
+		{"inside what decodes itself", `{"triggers": [{"text": "@c", "match": "word"}]}`, ""},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			logs := captureLog(t)
+			openTxStore(t, tc.body)
+			var got string
+			for _, l := range logs() {
+				if _, rest, ok := strings.Cut(l, "ignoring unknown settings "); ok {
+					got, _, _ = strings.Cut(rest, " (they will")
+				}
+			}
+			if got != tc.want {
+				t.Errorf("logged unknown settings %q, want %q (log %q)", got, tc.want, logs())
+			}
+		})
+	}
+}
+
+// unknownKeys goes into maps and slices that hold structs.
+func TestUnknownKeysInMapsAndSlices(t *testing.T) {
+	type item struct {
+		Name string `json:"name"`
+	}
+	type doc struct {
+		Items  []item          `json:"items"`
+		ByName map[string]item `json:"by_name"`
+		Tags   []string        `json:"tags"`
+		Ptr    *item           `json:"ptr,omitempty"`
+		Plain  string
+	}
+	data := `{"items": [{"name": "a"}, {"nmae": "b"}], "by_name": {"x": {"name": "x", "extra": 1}}, "tags": ["t"], "ptr": {"bad": 1}, "Plain": "p", "other": 2}`
+	got := unknownKeys([]byte(data), reflect.TypeOf(doc{}), "")
+	want := []string{"by_name.x.extra", "items[1].nmae", "other", "ptr.bad"}
+	if !slices.Equal(got, want) {
+		t.Errorf("unknownKeys = %v, want %v", got, want)
 	}
 }
