@@ -55,8 +55,7 @@ const failed = (signal, show) => (e) => { if (!(signal && signal.aborted)) show(
 /** Settings page card: client status, replace or remove. signal is the page's. */
 export function googleClientCard({ signal } = {}) {
   const el = h('section.card.settings-section', { id: 'sec-google' },
-    h('h2', 'Google sign-in'),
-    h('p.muted.section-intro', 'Brains can connect a Google account for their calendar. Google needs an OAuth client from a Google Cloud project for that — you set it up once here, then every brain signs in with one click on its own page.'));
+    h('div.section-heading', h('h2', 'Google sign-in'), h('p.muted.section-intro', 'Brains can connect a Google account for their calendar. Google needs an OAuth client from a Google Cloud project for that — you set it up once here, then every brain signs in with one click on its own page.')));
   const body = h('div', loading('Loading…'));
   el.appendChild(body);
   async function refresh() {

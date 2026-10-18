@@ -9,8 +9,12 @@
 
 .wa-card.pairing { border-color: var(--accent); }
 .qr-layout { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 28px; align-items: center; }
+/* Light in both themes, so a phone reads the code: color-scheme makes
+   the tokens inside take their light values. */
 .qr-frame {
-  background: #fff;
+  color-scheme: light;
+  background: var(--surface);
+  color: var(--text);
   padding: 12px;
   border-radius: 14px;
   border: 1px solid var(--border);
@@ -19,7 +23,7 @@
   align-items: center;
   gap: 4px;
 }
-.qr-frame .muted { color: #5e6977; }
+.qr-frame .muted { color: var(--neutral); }
 .qr-img { width: 280px; height: 280px; max-width: 100%; image-rendering: pixelated; display: block; }
 .qr-steps { display: flex; flex-direction: column; gap: 10px; }
 .qr-steps h3 { font-size: 17px; }
@@ -147,7 +151,7 @@ blockquote.preview {
 .section-nav { display: flex; gap: 6px; flex-wrap: wrap; position: sticky; top: 0; z-index: 10; padding: 10px 0; background: var(--bg); }
 .settings-section { scroll-margin-top: 64px; gap: 14px; }
 .settings-section h2 { font-size: 17px; }
-.section-intro { margin-top: -8px; font-size: 13.5px; max-width: 80ch; }
+.section-intro { font-size: 13.5px; max-width: 80ch; }
 .settings-fields { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(320px, 100%), 1fr)); gap: 22px 30px; }
 .bool-field { gap: 6px; }
 .bool-field > .field-tag { margin-top: 2px; }
@@ -188,8 +192,9 @@ blockquote.preview {
 
 /* ── logs ───────────────────────────────────────────────────────────────── */
 
+/* It takes the height the page leaves (see .main). */
 .log-view {
-  height: calc(100vh - 240px);
+  flex: 1 1 0;
   min-height: 320px;
   overflow: auto;
   background: var(--log-bg);
@@ -202,7 +207,7 @@ blockquote.preview {
   line-height: 1.55;
 }
 .log-line { display: grid; grid-template-columns: 74px minmax(0, 1fr); gap: 10px; padding: 0 14px; }
-.log-line:hover { background: rgba(127, 127, 127, 0.08); }
+.log-line:hover { background: var(--row-hover); }
 .log-time { color: var(--log-muted); user-select: none; white-space: nowrap; }
 .log-text { white-space: pre-wrap; overflow-wrap: anywhere; }
 .log-line.err .log-text { color: var(--log-err); }
@@ -219,7 +224,7 @@ blockquote.preview {
 
 /* ── connect screen ─────────────────────────────────────────────────────── */
 
-.connect { min-height: 100vh; display: grid; place-items: center; padding: 24px 16px; }
+.connect { min-height: 100dvh; display: grid; place-items: center; padding: 24px 16px; }
 .connect-card { width: min(580px, 100%); padding: 28px; gap: 20px; }
 .connect-head { display: flex; gap: 14px; align-items: center; }
 .connect-head h1 { font-size: 22px; }
@@ -256,7 +261,7 @@ blockquote.preview {
   .groups-table td:first-child { min-width: 0; }
   .trigger-row { grid-template-columns: minmax(0, 1fr) auto; }
   .trigger-row select { grid-column: 1 / 2; grid-row: 2; }
-  .log-view { height: calc(100vh - 290px); font-size: 12px; }
+  .log-view { font-size: 12px; }
   .log-line { grid-template-columns: minmax(0, 1fr); gap: 0; padding: 2px 12px; }
   .connect-form { flex-direction: column; }
   .connect-card { padding: 20px; }

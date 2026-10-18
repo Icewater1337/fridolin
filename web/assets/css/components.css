@@ -3,12 +3,12 @@
 
 /* ── shell ──────────────────────────────────────────────────────────────── */
 
-.shell { display: grid; grid-template-columns: var(--sidebar-w) minmax(0, 1fr); min-height: 100vh; }
+.shell { display: grid; grid-template-columns: var(--sidebar-w) minmax(0, 1fr); min-height: 100dvh; }
 
 .sidebar {
   position: sticky;
   top: 0;
-  height: 100vh;
+  height: 100dvh;
   display: flex;
   flex-direction: column;
   padding: 16px 12px 14px;
@@ -77,11 +77,15 @@
 .banner.info > .icon { color: var(--info); }
 .banner .btn { margin-left: auto; }
 
-.main { width: 100%; max-width: 1120px; margin: 0 auto; padding: 28px 32px 80px; }
+/* The page fills the height below the banners, so a page can give the
+   rest of the screen to one part (the log view) without knowing how tall
+   the header and the banners are. */
+.main { flex: 1 0 auto; display: flex; flex-direction: column; width: 100%; max-width: 1120px; margin: 0 auto; padding: 28px 32px 80px; }
 
 /* ── page structure ─────────────────────────────────────────────────────── */
 
 .page, .page-stack { display: flex; flex-direction: column; gap: 22px; }
+.page { flex: 1 0 auto; }
 .page > :empty, .page-stack > :empty { display: none; }
 
 .page-header { display: flex; align-items: flex-end; justify-content: space-between; gap: 16px; flex-wrap: wrap; }
@@ -99,7 +103,9 @@
 .section:empty { display: none; }
 .section-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
 .section-title { font-size: 16px; font-weight: 650; }
-.section-sub { margin-top: -6px; font-size: 13.5px; }
+/* A heading and the line under it, closer together than the section's gap. */
+.section-heading { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.section-sub { font-size: 13.5px; }
 .alerts { display: flex; flex-direction: column; gap: 10px; }
 .alerts:empty { display: none; }
 
@@ -381,8 +387,8 @@ a.badge:hover { color: var(--accent); }
   width: 16px;
   height: 16px;
   border-radius: 50%;
-  background: #fff;
-  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.25);
+  background: var(--switch-thumb);
+  box-shadow: var(--shadow-thumb);
   transition: transform 0.15s;
 }
 .switch input:checked + .track { background: var(--accent); }
@@ -513,7 +519,7 @@ dialog.dialog {
   border-radius: 14px;
   padding: 0;
   width: min(540px, calc(100vw - 24px));
-  max-height: calc(100vh - 40px);
+  max-height: calc(100dvh - 40px);
   background: var(--surface);
   color: var(--text);
   box-shadow: var(--shadow-lg);
@@ -557,8 +563,8 @@ dialog.dialog::backdrop { background: var(--backdrop); }
 .msg-wrap.collapsed .msg-text {
   max-height: 7.4em;
   overflow: hidden;
-  -webkit-mask-image: linear-gradient(to bottom, #000 60%, transparent);
-  mask-image: linear-gradient(to bottom, #000 60%, transparent);
+  -webkit-mask-image: linear-gradient(to bottom, black 60%, transparent);
+  mask-image: linear-gradient(to bottom, black 60%, transparent);
 }
 .act-item.compact .msg-wrap.collapsed .msg-text { max-height: 4.5em; }
 
@@ -656,11 +662,14 @@ dialog.dialog::backdrop { background: var(--backdrop); }
 /* ── narrow screens ─────────────────────────────────────────────────────── */
 
 @media (max-width: 860px) {
-  .shell { display: block; }
+  /* A column, not a grid: a grid item would keep the sticky bar inside
+     its own row. */
+  .shell { display: flex; flex-direction: column; }
+  .content { flex: 1 0 auto; }
   .sidebar {
     z-index: 40;
     height: auto;
-    max-height: 100vh;
+    max-height: 100dvh;
     padding: 8px 10px 8px 14px;
     border-right: 0;
     border-bottom: 1px solid var(--border);

@@ -1,7 +1,8 @@
-/* Design tokens. Each colour is light-dark(light, dark), so one list serves
-   both themes: the browser picks by color-scheme, which follows the system
-   unless the theme button pinned one (data-theme, which theme.js sets
-   before the page paints). */
+/* Design tokens, the only colours in the stylesheet. Each is
+   light-dark(light, dark), so one list serves both themes: the browser
+   picks by color-scheme, which follows the system unless the theme
+   button pinned one (data-theme, which theme.js sets before the page
+   paints). */
 
 :root {
   --sans: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, Roboto, "Helvetica Neue", Arial, "Noto Sans", sans-serif, "Apple Color Emoji", "Segoe UI Emoji";
@@ -43,10 +44,14 @@
   --info-border: light-dark(#c5d5f5, #2b4572);
   --neutral: light-dark(#5e6977, #9ba5b2);
   --neutral-soft: light-dark(#eceff3, #232932);
+  /* The switch's thumb is white on both themes' tracks. */
+  --switch-thumb: light-dark(#ffffff, #ffffff);
+  --row-hover: light-dark(rgba(16, 24, 40, 0.05), rgba(255, 255, 255, 0.05));
   /* light-dark() takes only colours, so each shadow colour has its own; a
      layer one theme does not have is transparent there. */
   --shadow: 0 1px 2px light-dark(rgba(16, 24, 40, 0.04), rgba(0, 0, 0, 0.3)), 0 1px 3px light-dark(rgba(16, 24, 40, 0.04), transparent);
   --shadow-lg: 0 12px 32px light-dark(rgba(16, 24, 40, 0.16), transparent), 0 16px 40px light-dark(transparent, rgba(0, 0, 0, 0.5));
+  --shadow-thumb: 0 1px 2px light-dark(rgba(0, 0, 0, 0.25), rgba(0, 0, 0, 0.25));
   --backdrop: light-dark(rgba(15, 20, 28, 0.42), rgba(0, 0, 0, 0.6));
   --log-bg: light-dark(#fbfcfd, #0b0e13);
   --log-text: light-dark(#1f2933, #d5dae1);

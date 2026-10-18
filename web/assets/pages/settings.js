@@ -169,8 +169,7 @@ export default {
       };
       const sections = SECTIONS.map((sec) => {
         const el = h('section.card.settings-section', { id: `sec-${sec.id}` },
-          h('h2', sec.title),
-          sec.intro ? h('p.muted.section-intro', sec.intro) : null,
+          h('div.section-heading', h('h2', sec.title), sec.intro ? h('p.muted.section-intro', sec.intro) : null),
           h('div.settings-fields', sec.fields.map((f) => {
             const c = makeControl(f, cfg, eff, changed);
             controls.push(c);

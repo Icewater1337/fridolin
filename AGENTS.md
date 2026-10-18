@@ -150,8 +150,8 @@ Reopen the dashboard with `fridolin open`. To upgrade later: `git pull &&
   which keeps edits across refreshes and says when the data changed
   elsewhere. Leaving a page with unsaved changes asks first
   (`app/nav-guard.js`). Its styles are in `web/assets/css`, one cascade
-  layer per file, which `app.css` puts in order: `tokens.css` (the
-  colours, each as `light-dark(light, dark)`, so the dark theme is no
+  layer per file, which `app.css` puts in order: `tokens.css` (every
+  colour, each as `light-dark(light, dark)`, so the dark theme is no
   second list), `base.css` (elements and utilities), `components.css`
   (the shell and shared pieces) and `pages.css`. A later layer wins over
   an earlier one whatever the selectors, so change a rule where it lives

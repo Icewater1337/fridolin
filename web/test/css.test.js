@@ -80,6 +80,29 @@ test('each colour token has its light and its dark value in one place', () => {
   }
 });
 
+test('colours come only from the tokens', async (t) => {
+  for (const file of files.filter((f) => f !== 'tokens.css')) {
+    await t.test(file, () => {
+      // A data: URL may spell a colour (%23…), as an image it has no other way to.
+      const src = read(path.join(CSS, file)).replace(/\/\*[\s\S]*?\*\//g, '').replace(/url\([^)]*\)/g, 'url()');
+      const found = src.match(/#[0-9a-f]{3,8}\b|\b(?:rgba?|hsla?)\(/gi);
+      assert.equal(found, null, `use a token from tokens.css instead of ${found}`);
+    });
+  }
+});
+
+// 100vh is the height with the browser's toolbars hidden, so on a phone
+// the bottom of a full-height layout sits under them; dvh follows them.
+test('heights follow the visible viewport', async (t) => {
+  for (const file of files) {
+    await t.test(file, () => {
+      const src = read(path.join(CSS, file)).replace(/\/\*[\s\S]*?\*\//g, '');
+      assert.doesNotMatch(src, /\d(?:vh|svh|lvh)\b/, 'use dvh');
+      assert.doesNotMatch(src, /calc\(\s*100dvh\s*-\s*\d{3,}px\s*\)/, 'a page part that fills the screen grows into the space left (flex), it does not subtract the height of what is above it');
+    });
+  }
+});
+
 test('no file declares a selector twice or repeats a breakpoint', async (t) => {
   for (const file of files) {
     await t.test(file, () => {
