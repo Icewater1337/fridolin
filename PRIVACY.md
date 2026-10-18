@@ -23,6 +23,9 @@ policy describes what that copy does with data.
   runs you start in your own terminal follow your own settings. With the
   Plaud Sync phone app (`plaud.phone_dir`), the transcripts come instead
   from the folder the app's files are synced to, which Fridolin only reads.
+  With `plaud.phone_upload`, a paired phone sends signed transcripts
+  through your site, and Fridolin writes them into that folder or its
+  private upload inbox (`<data_dir>/plaud/inbox`).
 - **Your site's visitors**, if you turn on [your own site](docs/SITE.md):
   the accounts you give them (a Google address, or a username and a
   password, with a name and a role) and whatever they enter in its modules.
@@ -82,7 +85,9 @@ policy describes what that copy does with data.
   recordings and transcripts. The Plaud Sync phone app sends Plaud each
   recording to transcribe instead, and the tool you sync its folder to
   this computer with (Syncthing, say) carries the recordings and
-  transcripts as that tool does.
+  transcripts as that tool does. When the phone uploads through your
+  site instead, its transcripts also pass through the site's tunnel,
+  including Cloudflare while that tunnel is on.
 - **Groq**, only when `GROQ_API_KEY` reaches a brain: `tools/transcribe.py`
   sends the audio it transcribes to Groq's API with `--engine groq`, and
   with the default engine whenever the local model is not installed or
@@ -132,6 +137,8 @@ column says.
 | Memories, notes and whatever else a brain writes | The brain's folder | Until you delete them | Your user and that brain |
 | Files sent to the bridge (photos, documents, voice notes, video) and Plaud transcripts | The inbox of the brain that takes them, `<brain id>/` in the media folder (`media/` in the data folder, or `media_dir`), and where that brain files them; what older versions left in the media folder is in `media/.old/` | Until you or the brain delete them; an inbox stays when its brain is removed, and a brain added later under the same id gets it | Your user and that brain; `media/.old/` not brains |
 | Recordings (MP3) and transcripts from the Plaud Sync phone app | The folder `plaud.phone_dir` names, which your sync tool fills | Until you delete them on the phone: Fridolin only reads the folder | Your user, and brains unless the folder is in one the sandbox closes (such as `~/Documents`) or in `sandbox.deny_paths` |
+| Transcripts uploaded by paired phones | `plaud.phone_dir`, or `plaud/inbox/` in the data folder | Until you delete them; deleting a recording on the phone does not delete an uploaded copy | Your user; brains only if the configured folder permits it, or through their own media inbox after hand-off |
+| Paired phones' public keys and pairing-code hashes; Plaud developer keys and the built phone app | `plaud/devices.json`, `plaud/developer.json` and `plaud/app/` in the data folder, with a public-key copy in `site/devices.json`; copies of the APK wherever you download it | Until unpaired or deleted; used and expired pairing codes are dropped on the next device update | Your user; the site reads public keys; the APK contains developer keys, so anyone with a copy can extract them |
 | Sign-ins: each brain's Google token, the OAuth client, the Drive link (rclone), the Plaud login, the dashboard and scripts tokens | The data folder, or `sandbox.credentials_dir` for the Google tokens; the Plaud login is in `~/.plaud/` while "Let brains use the Plaud CLI" is on | Until you disconnect, or delete them | Your user and the bridge; not brains, except that Plaud login |
 | The keys you put in the service's environment, such as the Claude login sandboxed brains use (`CLAUDE_CODE_OAUTH_TOKEN`) or `GROQ_API_KEY` | macOS: `~/Library/LaunchAgents/ai.fridolin.bridge.plist`; Linux: the drop-in `systemctl --user edit fridolin` made | Until you remove them | Your user; brains get the login, and the keys `child_env_passthrough` names, in their environment, and can read the service file |
 | The bridge's log: connections, routing, runs and errors, naming chats, senders' numbers, group names, poll questions and votes, but not what messages say | macOS: `~/Library/Logs/fridolin/`; Linux: your user journal (`journalctl --user -u fridolin`) | macOS: up to 10 MB a file, and one older file; Linux: as journald is set to keep it | Your user; not brains |
@@ -209,7 +216,10 @@ including the Limited Use requirements.
   9. A Plaud login in `~/.plaud/` (with "Let brains use the Plaud CLI" on)
      belongs to Plaud's tool: sign out with it, or delete the folder. With
      the phone app, delete the recordings on the phone and the folder
-     `plaud.phone_dir` names, and stop syncing it. The transcription venv
+     `plaud.phone_dir` names, and stop syncing it. For uploads, unpair the
+     phones, delete downloaded APKs and uninstall the phone app; its
+     uploaded copies in the data folder go with that folder, while any
+     configured `phone_dir` must be removed separately. The transcription venv
      (`~/.local/share/fridolin/venv`) and Hugging Face's model cache
      (`~/.cache/huggingface/`) hold no messages.
 

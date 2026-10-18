@@ -60,8 +60,11 @@ Out of scope:
   `dangerously_skip_permissions` on, anyone who may message a brain can
   have it run commands as you (README, *Security*): a prompt injection is
   a vulnerability here only when it crosses one of the boundaries above.
-- Linux, or the sandbox turned off, where brains run with the bridge's own
-  rights, and the other limits README lists under *What it does not do*.
+- A brain using the bridge user's filesystem or process permissions on
+  Linux or with the sandbox turned off, where no sandbox boundary is
+  promised, and the other limits README lists under *What it does not do*.
+  Authentication, API authorization and chat routing remain in scope on
+  every supported platform.
 - Flaws in Claude Code, whatsmeow, WhatsApp or another dependency: report
   those to their makers, and tell us if Fridolin has to change because of
   one.
