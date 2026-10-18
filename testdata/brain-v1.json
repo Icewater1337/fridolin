@@ -1,0 +1,40 @@
+{
+  "version": 1,
+  "id": "family",
+  "name": "Family",
+  "routing": {
+    "handles_dms": false,
+    "default": false,
+    "groups": [
+      "120363000000000000@g.us",
+      "120363000000000001@g.us"
+    ],
+    "answer_files": false,
+    "answer_forwards": false
+  },
+  "model": "opus",
+  "effort": "medium",
+  "disallowed_tools": [
+    "WebFetch",
+    "WebSearch"
+  ],
+  "prompt_file": "prompts/family.md",
+  "reply_chat": "120363000000000000@g.us",
+  "observe": "run",
+  "backup": {
+    "enabled": true,
+    "exclude": [
+      "node_modules/",
+      "*.log",
+      "/big-folder/"
+    ]
+  },
+  "calendar": {
+    "account": "you@example.com",
+    "calendars": [
+      "you@example.com",
+      "family@example.com"
+    ],
+    "default": "family@example.com"
+  }
+}

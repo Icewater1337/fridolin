@@ -1,0 +1,23 @@
+{
+  "_comment": "A config as versions before the legacy removal wrote it: the retired keys model, work_dir, brain_mode and an empty brains list. Synthetic values only.",
+  "allowed_numbers": [
+    "15551234567"
+  ],
+  "allowed_groups": [],
+  "triggers": [
+    "@claude"
+  ],
+  "claude_path": "claude",
+  "data_dir": "~/.fridolin",
+  "model": "opus",
+  "work_dir": "~/assistant",
+  "brain_mode": true,
+  "brains": [],
+  "http_listen": "127.0.0.1:8765",
+  "sandbox": {
+    "enabled": false,
+    "deny_paths": [],
+    "allow_paths": []
+  },
+  "otp_guard": true
+}
