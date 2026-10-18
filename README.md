@@ -479,8 +479,11 @@ What the bridge does about it:
   [what a brain loads](docs/BRAINS.md#what-a-brain-loads)).
 - **A guarded dashboard.** It only listens on localhost, rejects requests
   from web pages on other sites (and DNS-rebinding tricks), and requires a
-  token from `~/.fridolin/dashboard.token` — a file the sandbox
-  keeps away from brains, so a manipulated brain cannot reconfigure the bridge.
+  token from `~/.fridolin/dashboard.token`. On macOS the sandbox keeps
+  that file away from brains, so a manipulated brain cannot reconfigure the
+  bridge. On Linux, or with the sandbox off, a brain that runs with all
+  permissions can read the token like any other file of yours; the
+  dashboard warns about it.
 - **You approve brain settings.** A brain that edits its own `brain.json` to
   claim your DMs or another group changes nothing until you approve it.
 - **OTP guard.** A message that is only a numeric code, arriving right after

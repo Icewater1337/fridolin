@@ -174,19 +174,27 @@ func (cs *ConfigStore) RestartRequired() []string {
 var restartFields = []struct {
 	name string
 	get  func(*Config) string
+	// waits, when set, decides instead of get whether a change from the
+	// value at the start waits for a restart.
+	waits func(start, now *Config) bool
 }{
-	{"http_listen", func(c *Config) string { return c.HTTPListen }},
-	{"data_dir", func(c *Config) string { return c.DataDir }},
-	{"db_path", func(c *Config) string { return c.DBPath }},
-	{"media_dir", func(c *Config) string { return c.MediaDir }},
-	{"log_level", func(c *Config) string { return c.LogLevel }},
-	{"dashboard.disabled", func(c *Config) string { return fmt.Sprint(c.Dashboard.Disabled) }},
+	{name: "http_listen", get: func(c *Config) string { return c.HTTPListen }},
+	{name: "data_dir", get: func(c *Config) string { return c.DataDir }},
+	{name: "db_path", get: func(c *Config) string { return c.DBPath }},
+	{name: "media_dir", get: func(c *Config) string { return c.MediaDir }},
+	{name: "log_level", get: func(c *Config) string { return c.LogLevel }},
+	{name: "dashboard.disabled", get: func(c *Config) string { return fmt.Sprint(c.Dashboard.Disabled) }},
+	// Turning the token off waits for a restart (see apiGuard); turning it
+	// on applies at once.
+	{name: "dashboard.require_token", waits: func(start, now *Config) bool {
+		return start.DashboardRequiresToken() && !now.DashboardRequiresToken()
+	}},
 }
 
 func restartRequired(old, new *Config) []string {
 	var out []string
 	for _, f := range restartFields {
-		if f.get(old) != f.get(new) {
+		if f.waits != nil && f.waits(old, new) || f.waits == nil && f.get(old) != f.get(new) {
 			out = append(out, f.name)
 		}
 	}

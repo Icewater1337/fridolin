@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -333,5 +334,109 @@ func TestBackupStatusWritesWithoutTheLock(t *testing.T) {
 		if !w.free {
 			t.Errorf("%s %s wrote its response holding the lock (%d)", c.method, c.path, w.Code)
 		}
+	}
+}
+
+// editConfig saves the settings page's config with edit applied, the way
+// the page does: the whole file layer, with the etag it was read with.
+func (tb *testBridge) editConfig(t *testing.T, edit func(c map[string]any)) *httptest.ResponseRecorder {
+	t.Helper()
+	var cur struct {
+		ETag   string         `json:"etag"`
+		Config map[string]any `json:"config"`
+	}
+	if err := json.Unmarshal(tb.do("GET", "/api/config", nil).Body.Bytes(), &cur); err != nil {
+		t.Fatal(err)
+	}
+	edit(cur.Config)
+	return tb.do("PUT", "/api/config", map[string]any{"etag": cur.ETag, "config": cur.Config})
+}
+
+// status returns the parts of /api/status these tests read.
+func (tb *testBridge) status(t *testing.T) (warnings, restart []string) {
+	t.Helper()
+	var st struct {
+		Warnings        []string `json:"warnings"`
+		RestartRequired []string `json:"restart_required"`
+	}
+	if err := json.Unmarshal(tb.do("GET", "/api/status", nil).Body.Bytes(), &st); err != nil {
+		t.Fatal(err)
+	}
+	return st.Warnings, st.RestartRequired
+}
+
+func hasWarning(warnings []string, part string) bool {
+	return slices.ContainsFunc(warnings, func(w string) bool { return strings.Contains(w, part) })
+}
+
+// Turning the dashboard token off is saved but waits for a restart, with a
+// warning until then; turning it on applies at once.
+func TestRequireTokenOffWaitsForARestart(t *testing.T) {
+	noToken := func(r *http.Request) { r.Header.Del("X-Bridge-Token") }
+	t.Run("off", func(t *testing.T) {
+		tb := newTestBridge(t, "")
+		if w := tb.editConfig(t, func(c map[string]any) { c["dashboard"] = map[string]any{"require_token": false} }); w.Code != 200 ||
+			!strings.Contains(w.Body.String(), "dashboard.require_token") {
+			t.Fatalf("put: %d %s", w.Code, w.Body.String())
+		}
+		if w := tb.do("GET", "/api/status", nil, noToken); w.Code != http.StatusUnauthorized {
+			t.Fatalf("without the token after turning it off: %d, want 401 until a restart", w.Code)
+		}
+		warnings, restart := tb.status(t)
+		if !slices.Contains(restart, "dashboard.require_token") || !hasWarning(warnings, "takes effect at the next restart") {
+			t.Fatalf("restart_required %v, warnings %q", restart, warnings)
+		}
+	})
+	t.Run("on", func(t *testing.T) {
+		tb := newTestBridge(t, `, "dashboard": {"require_token": false}`)
+		if w := tb.do("GET", "/api/status", nil, noToken); w.Code != 200 {
+			t.Fatalf("started without the token: %d", w.Code)
+		}
+		if warnings, _ := tb.status(t); !hasWarning(warnings, "The dashboard token is off") {
+			t.Fatalf("warnings %q", warnings)
+		}
+		if w := tb.editConfig(t, func(c map[string]any) { c["dashboard"] = map[string]any{"require_token": true} }); w.Code != 200 {
+			t.Fatalf("put: %d %s", w.Code, w.Body.String())
+		}
+		if w := tb.do("GET", "/api/status", nil, noToken); w.Code != http.StatusUnauthorized {
+			t.Fatalf("without the token after turning it on: %d, want 401 at once", w.Code)
+		}
+		if warnings, restart := tb.status(t); len(restart) != 0 || hasWarning(warnings, "dashboard token") {
+			t.Fatalf("restart_required %v, warnings %q", restart, warnings)
+		}
+	})
+}
+
+// Brains with all permissions and no sandbox can read the token
+// themselves, on every OS, and the status says so.
+func TestTokenWarningsWithoutASandbox(t *testing.T) {
+	tb := newTestBridge(t, "")
+	cases := []struct {
+		name    string
+		goos    string
+		skip    bool
+		sandbox bool
+		want    string
+	}{
+		{"macOS, sandbox off", "darwin", true, false, "Turn the sandbox on"},
+		{"Linux", "linux", true, false, "there is no sandbox on linux"},
+		{"macOS, sandbox on", "darwin", true, true, ""},
+		{"no skip-permissions", "linux", false, false, ""},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			cfg := *tb.cfgs.Get()
+			cfg.DangerouslySkipPermissions, cfg.Sandbox.Enabled = c.skip, c.sandbox
+			got := tb.tokenWarnings(&cfg, c.goos)
+			if c.want == "" {
+				if len(got) != 0 {
+					t.Fatalf("warnings %q, want none", got)
+				}
+				return
+			}
+			if !hasWarning(got, c.want) || !hasWarning(got, "dashboard token") {
+				t.Fatalf("warnings %q, want one with %q", got, c.want)
+			}
+		})
 	}
 }

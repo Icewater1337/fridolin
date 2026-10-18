@@ -47,11 +47,13 @@ type Bridge struct {
 	logs     *LogRing
 	activity *Activity
 	token    *DashboardToken
-	backup   *BackupManager
-	google   *GoogleAuth
-	plaud    *PlaudManager
-	site     *SiteManager
-	started  time.Time
+	// tokenAtStart is dashboard.require_token as the bridge started.
+	tokenAtStart bool
+	backup       *BackupManager
+	google       *GoogleAuth
+	plaud        *PlaudManager
+	site         *SiteManager
+	started      time.Time
 
 	// listen is the address the HTTP server binds, "" when it is off;
 	// runs reach the brain API there with a token from runTokens.
@@ -184,6 +186,10 @@ func NewBridge(cfgs *ConfigStore, opts BridgeOptions) (_ *Bridge, err error) {
 		return nil, err
 	}
 	b.token = tok
+	b.tokenAtStart = cfg.DashboardRequiresToken()
+	if !b.tokenAtStart {
+		log.Printf("warning: dashboard.require_token is off: any program on this computer, brains included, can change every setting through the dashboard API")
+	}
 	b.backup = NewBackupManager(cfgs, b.brainMgr)
 	// A refused scheduled backup goes to the brain's chat, like Plaud's
 	// expired-login notice: the owner may not open the dashboard for weeks.

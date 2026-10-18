@@ -195,9 +195,7 @@ func (b *Bridge) apiStatus(w http.ResponseWriter, r *http.Request) {
 	if cfg.AnyoneCanDM() {
 		resp.Warnings = append(resp.Warnings, "allowed_numbers is empty, so anyone who can message this WhatsApp account can use the assistant. Add your number under Chats → Allowed numbers.")
 	}
-	if cfg.DangerouslySkipPermissions && !cfg.Sandbox.Enabled && runtime.GOOS == "darwin" {
-		resp.Warnings = append(resp.Warnings, "Brains run with all permissions and the sandbox is off. Turn the sandbox on under Settings → Sandbox.")
-	}
+	resp.Warnings = append(resp.Warnings, b.tokenWarnings(cfg, runtime.GOOS)...)
 	if w := claudeVersionWarning(resp.Claude); w != "" {
 		resp.Warnings = append(resp.Warnings, w)
 	}
@@ -219,6 +217,30 @@ func (b *Bridge) apiStatus(w http.ResponseWriter, r *http.Request) {
 	}
 	resp.Brains = nonNil(resp.Brains)
 	writeJSON(w, http.StatusOK, resp)
+}
+
+// tokenWarnings says when the dashboard token does not keep brains out of
+// the API: when it is off or about to be, and when brains with all
+// permissions run without a sandbox, which on any OS lets them read the
+// token (and the rest of the data dir) themselves. A sandbox that is on
+// but cannot run gets its own warning: brains then refuse every message.
+func (b *Bridge) tokenWarnings(cfg *Config, goos string) []string {
+	var out []string
+	switch {
+	case !b.requiresToken():
+		out = append(out, "The dashboard token is off (dashboard.require_token): any program on this computer, brains included, can change every setting, allow chats and turn the sandbox off. Turn it on under Settings → Advanced.")
+	case !cfg.DashboardRequiresToken():
+		out = append(out, "The dashboard token was turned off (dashboard.require_token). That takes effect at the next restart: from then on any program on this computer, brains included, can change every setting. Turn it back on under Settings → Advanced to keep it.")
+	}
+	if cfg.DangerouslySkipPermissions && !cfg.Sandbox.Enabled {
+		const risk = "so they can read and change the bridge's own data — the dashboard token, config.json and the WhatsApp session — and with them every setting."
+		if goos == "darwin" {
+			out = append(out, "Brains run with all permissions and the sandbox is off, "+risk+" Turn the sandbox on under Settings → Sandbox.")
+		} else {
+			out = append(out, "Brains run with all permissions and there is no sandbox on "+goos+", "+risk+" Let only people you trust message the bridge.")
+		}
+	}
+	return out
 }
 
 // sandboxProfileWarning names the brains whose profile cannot be built, or

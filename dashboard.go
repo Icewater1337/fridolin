@@ -26,8 +26,10 @@ import (
 //     both.
 //   - Brains are local programs that can run curl. The dashboard can change
 //     which chats reach which brain and whether the sandbox is on, so every
-//     API call needs the token in <data_dir>/dashboard.token — a directory the
-//     sandbox denies to brains.
+//     API call needs the token in <data_dir>/dashboard.token. That keeps
+//     brains out only while they cannot read the data dir, which takes the
+//     macOS sandbox: on Linux, or with the sandbox off, a brain with all
+//     permissions can read the token, and the status page says so.
 //
 // /send, /ingest, /health and /ready keep their token-free contract for
 // local scripts, but get the same Host and Origin checks.
@@ -150,7 +152,7 @@ func (b *Bridge) apiGuard(next http.Handler) http.Handler {
 		w.Header().Set("Cache-Control", "no-store")
 		// compat: the dashboard, and any script that calls the API, sends
 		// the token under this name.
-		if b.cfgs.Get().DashboardRequiresToken() && !b.token.Matches(r.Header.Get("X-Bridge-Token")) {
+		if b.requiresToken() && !b.token.Matches(r.Header.Get("X-Bridge-Token")) {
 			writeErr(w, http.StatusUnauthorized, "missing or wrong dashboard token")
 			return
 		}
@@ -167,6 +169,15 @@ func (b *Bridge) apiGuard(next http.Handler) http.Handler {
 		}
 		next.ServeHTTP(w, r)
 	})
+}
+
+// requiresToken reports whether API calls need the token. Turning
+// dashboard.require_token off waits for a restart, while the dashboard
+// warns about it: one saved setting must not drop the only thing keeping
+// other programs on this computer out of the API at once. Turning it on
+// applies at once.
+func (b *Bridge) requiresToken() bool {
+	return b.tokenAtStart || b.cfgs.Get().DashboardRequiresToken()
 }
 
 func securityHeaders(next http.Handler) http.Handler {

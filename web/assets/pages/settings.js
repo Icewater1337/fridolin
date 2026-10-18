@@ -94,7 +94,7 @@ const SECTIONS = [
       { key: 'data_dir', type: 'text', mono: true, restart: true, label: 'Data folder', help: 'Holds the WhatsApp pairing, the database, media and the dashboard token. Changing it does not move those files — the bridge starts fresh (and unpaired) in the new folder. At startup the folder is made private to your user (mode 0700), unless it is your home folder, one above it or another user’s folder.' },
       { key: 'log_level', type: 'select', restart: true, label: 'Log level', options: [['', 'Default (info)'], ['debug', 'Debug — very verbose'], ['info', 'Info'], ['warn', 'Warnings'], ['error', 'Errors only']] },
       { key: 'viewer', type: 'bool', label: 'Open a terminal viewer per brain', help: 'macOS, needs tmux. Opens a Terminal window per brain that follows its activity. Handy while tuning a prompt. Its tmux runs outside the sandbox, and brains can send it commands.' },
-      { key: 'dashboard.require_token', type: 'bool', def: true, label: 'Require the dashboard token', confirmOff: true, help: 'Brains run on this computer and can reach this dashboard. The token is what stops a manipulated brain from changing these settings — or turning the sandbox off.' },
+      { key: 'dashboard.require_token', type: 'bool', def: true, label: 'Require the dashboard token', confirmOff: true, help: 'Brains run on this computer and can reach this dashboard. The token is what stops a manipulated brain from changing these settings — or turning the sandbox off. Turning it off takes effect after a restart; turning it on, at once.' },
     ],
   },
 ];
@@ -257,6 +257,7 @@ function makeControl(f, cfg, eff, onChange) {
             title: 'Turn off the dashboard token?',
             message: h('div',
               h('p', 'Without the token, any program on this computer can change the bridge’s settings — including a brain that was tricked by a message into doing so. It could allow new chats, widen its own routing or switch the sandbox off.'),
+              h('p', 'It takes effect after the bridge restarts. Until then the token is still required.'),
               h('p', h('strong', 'Only do this on a machine where nothing untrusted runs.'))),
             confirm: 'Turn it off',
             danger: true,

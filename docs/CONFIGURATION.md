@@ -160,7 +160,10 @@ Effectively required: nobody is at the keyboard to approve a prompt, so
 without it every tool call hangs. Set to `false` only if you want a
 conversation-only assistant with no tool access.
 
-Read [Security](../README.md#security) before running with this on.
+Read [Security](../README.md#security) before running with this on. Without
+a sandbox in effect (on Linux, or with `sandbox.enabled` off) the dashboard
+warns that brains can read and change the bridge's own data; see
+[`dashboard`](#dashboard).
 
 ### `run_timeout_minutes`
 
@@ -773,7 +776,16 @@ The Plaud recorder integration; see [PLAUD.md](PLAUD.md) for every setting.
 `dashboard.disabled` turns the web dashboard off (*restart*).
 `dashboard.require_token` (default `true`) requires the token from
 `<data_dir>/dashboard.token` on every API call. Brains run on this machine and
-could otherwise reach the dashboard with `curl`; leave it on.
+could otherwise reach the dashboard with `curl`; leave it on. Turning it off
+takes effect only after a restart, and the dashboard warns about it until
+then and for as long as it stays off; turning it on applies at once.
+
+The token keeps brains out only while they cannot read the data dir. The
+macOS sandbox denies it to them. On Linux, or on macOS with the sandbox off,
+a brain that runs with `dangerously_skip_permissions` can read the token,
+`config.json` and the WhatsApp session like any other file of yours, and so
+change every setting; the dashboard shows a warning whenever that is the
+case.
 
 ### `otp_guard` and `otp_markers`
 
