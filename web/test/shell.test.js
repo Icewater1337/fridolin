@@ -106,3 +106,23 @@ test('the skip link comes first and moves the focus to the page', () => {
   assert.equal(e.defaultPrevented, true, 'the address stays the page’s');
   assert.equal(document.activeElement, heading);
 });
+
+test('Escape closes the phone menu and gives the focus back to its button', () => {
+  const { app } = shellInPage();
+  const sidebar = app.querySelector('.sidebar');
+  const menu = app.querySelector('.menu-btn');
+  const link = app.querySelector('.nav-link');
+  assert.equal(menu.getAttribute('aria-controls'), app.querySelector('nav.nav').id);
+  const escape = () => link.dispatchEvent(Object.assign(new Event('keydown', { bubbles: true }), { key: 'Escape' }));
+  menu.click();
+  assert.equal(sidebar.classList.contains('nav-open'), true);
+  assert.equal(menu.getAttribute('aria-expanded'), 'true');
+  link.focus();
+  escape();
+  assert.equal(sidebar.classList.contains('nav-open'), false);
+  assert.equal(menu.getAttribute('aria-expanded'), 'false');
+  assert.equal(document.activeElement, menu);
+  link.focus();
+  escape();
+  assert.equal(document.activeElement, link, 'a closed menu leaves the focus alone');
+});

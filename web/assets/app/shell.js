@@ -53,7 +53,7 @@ function themeButton() {
  */
 export function createShell({ onRestart, onReload = () => location.reload() }) {
   const links = new Map();
-  const nav = h('nav.nav', { 'aria-label': 'Main' });
+  const nav = h('nav.nav', { id: 'nav', 'aria-label': 'Main' });
   for (const route of ROUTES) {
     if (!route.nav) continue;
     const badgeEl = h('span.nav-badge', { hidden: true });
@@ -62,7 +62,7 @@ export function createShell({ onRestart, onReload = () => location.reload() }) {
     links.set(route.id, a);
     nav.appendChild(a);
   }
-  const menuBtn = h('button.icon-btn.menu-btn', { type: 'button', 'aria-label': 'Menu', 'aria-expanded': 'false' }, icon('menu'));
+  const menuBtn = h('button.icon-btn.menu-btn', { type: 'button', 'aria-label': 'Menu', 'aria-expanded': 'false', 'aria-controls': 'nav' }, icon('menu'));
   const waDot = h('span.dot');
   const waText = h('span', 'Connecting…');
   const waLink = h('a.sidebar-status', { href: '#/overview', title: 'WhatsApp connection' }, waDot, waText);
@@ -98,10 +98,16 @@ export function createShell({ onRestart, onReload = () => location.reload() }) {
   const skip = h('a.skip-link', { href: '#main' }, 'Skip to content');
   skip.addEventListener('click', (e) => { e.preventDefault(); focusPage(); });
 
-  menuBtn.addEventListener('click', () => {
-    const open = !sidebar.classList.contains('nav-open');
+  const setNav = (open) => {
     sidebar.classList.toggle('nav-open', open);
     menuBtn.setAttribute('aria-expanded', String(open));
+  };
+  menuBtn.addEventListener('click', () => setNav(!sidebar.classList.contains('nav-open')));
+  // Escape closes the phone menu and gives the focus back to its button.
+  sidebar.addEventListener('keydown', (e) => {
+    if (e.key !== 'Escape' || !sidebar.classList.contains('nav-open')) return;
+    setNav(false);
+    menuBtn.focus();
   });
 
   const setBadge = (id, n, title) => {
@@ -153,7 +159,7 @@ export function createShell({ onRestart, onReload = () => location.reload() }) {
         else a.removeAttribute('aria-current');
       });
     },
-    closeNav() { sidebar.classList.remove('nav-open'); menuBtn.setAttribute('aria-expanded', 'false'); },
+    closeNav() { setNav(false); },
     focusPage,
     setOffline(off) { offline.hidden = !off; },
   };
