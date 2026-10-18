@@ -79,10 +79,10 @@ export default {
         paint(card, signIn, ({ connect, expired, moved, loginDir, access, cliWarning }) => [
           head(connecting ? 'Signing in…' : expired ? 'Login expired' : 'Not connected', connecting ? 'warn' : expired ? 'bad' : 'neutral'),
           expired
-            ? callout('bad', 'Plaud’s login expired', 'Recordings are not arriving, and the chat gets a reminder once a day. Connect again — it takes one approval in the browser.')
+            ? callout('bad', 'Plaud’s login expired', 'Recordings are not arriving, and the chat gets a reminder once a day. Connect again — it takes one approval in the browser — or disconnect to stop the reminders.')
             : h('p', 'Sign in with your Plaud account. New recordings then reach the brain you choose as finished transcripts, with Plaud’s AI summary.'),
           moved
-            ? callout('warn', 'Connect Plaud again', '“Let brains use the Plaud CLI” changed where the login lives, and Fridolin does not take over a login it did not make. Connect again to use the one in ', mono(loginDir), '.')
+            ? callout('warn', 'Connect Plaud again', '“Let brains use the Plaud CLI” changed where the login lives, and Fridolin does not take over a login it did not make. Connect again to use the one in ', mono(loginDir), ', or disconnect.')
             : null,
           cliWarn(cliWarning),
           connecting ? callout('info', 'Approve access in the browser tab Plaud just opened.',
@@ -98,7 +98,9 @@ export default {
           h('div.actions', btn(connecting ? 'Waiting for Plaud…' : expired ? 'Connect again' : 'Connect Plaud', {
             kind: 'primary', icon: 'external', disabled: connecting,
             onClick: async () => { await post('/api/plaud/connect'); toast('Plaud’s sign-in opened in your browser', 'ok'); await refresh(); },
-          })),
+          }),
+          // Fridolin still has a login on record: you may rather stop here.
+          expired || moved ? disconnectButton({ connected: false, expired, moved, access }) : null),
         ]);
         return;
       }
@@ -227,20 +229,27 @@ export default {
           },
         }) : null,
         expired ? btn('Connect again', { icon: 'external', onClick: async () => { await post('/api/plaud/connect'); await refresh(); } }) : null,
-        btn('Disconnect', {
-          kind: 'danger', icon: 'x', small: true,
-          onClick: async () => {
-            const shared = access
-              ? ' The login is the one in ~/.plaud/, so this also signs out the plaud command in your terminal.'
-              : '';
-            const ok = await confirmDialog({ title: 'Disconnect Plaud?', message: `Fridolin signs out of Plaud and stops checking for recordings.${shared} Your recordings stay in Plaud, and the transcripts already filed stay where they are.`, confirm: 'Disconnect', danger: true });
-            if (!ok) return;
-            // Plaud's logout may take the bridge's 30 s.
-            await post('/api/plaud/disconnect', undefined, { timeout: 60000 });
-            await refresh();
-          },
-        }),
+        disconnectButton({ connected: true, expired, moved: false, access }),
       ];
+    }
+
+    // Disconnect, on the connected card and on one that waits for you to
+    // connect again; what it signs out depends on which.
+    function disconnectButton({ connected, expired, moved, access }) {
+      return btn('Disconnect', {
+        kind: 'danger', icon: 'x', small: true,
+        onClick: async () => {
+          let note = '';
+          if (moved) note = ' The login in ~/.plaud/ stays: the plaud command in your terminal may use it.';
+          else if (access && connected) note = ' The login is the one in ~/.plaud/, so this also signs out the plaud command in your terminal.';
+          if (expired) note += ' The daily reminder in the chat stops.';
+          const ok = await confirmDialog({ title: 'Disconnect Plaud?', message: `Fridolin signs out of Plaud and stops checking for recordings.${note} Your recordings stay in Plaud, and the transcripts already filed stay where they are.`, confirm: 'Disconnect', danger: true });
+          if (!ok) return;
+          // Plaud's logout may take the bridge's 30 s.
+          await post('/api/plaud/disconnect', undefined, { timeout: 60000 });
+          await refresh();
+        },
+      });
     }
   },
 };

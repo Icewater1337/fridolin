@@ -2188,15 +2188,66 @@ func TestPlaudDisconnectReportsALoginThatStays(t *testing.T) {
 		t.Errorf("disconnect = %d %s, connected = %v", w.Code, w.Body.String(), tb.plaud.connected())
 	}
 	// Your terminal signs in to ~/.plaud again: not Fridolin's login until
-	// you connect.
+	// you connect, nor Fridolin's to sign out.
 	plaudSignIn(t, tb)
 	if tb.plaud.connected() {
 		t.Error("a login made after disconnecting counts without connecting")
+	}
+	if w := tb.do("POST", "/api/plaud/disconnect", nil); w.Code != 200 || !tb.plaud.hasLogin() {
+		t.Errorf("disconnect again = %d %s, terminal's login there = %v; want it left alone", w.Code, w.Body.String(), tb.plaud.hasLogin())
 	}
 	if err := tb.plaud.Connect(); err != nil {
 		t.Fatal(err)
 	}
 	waitFor(t, 10*time.Second, "the sign-in", func() bool { return tb.plaud.connected() })
+}
+
+// Disconnecting while the card asks to connect again, after brain_access
+// moved the login, signs out only Fridolin's private login. ~/.plaud may
+// hold your terminal's own login, which Fridolin never made, or the one
+// Fridolin made there, which the dashboard said would stay for your
+// terminal when you turned brain_access off: it is left alone, and does
+// not count as Fridolin's afterwards.
+func TestPlaudDisconnectAfterTheLoginMoved(t *testing.T) {
+	for _, access := range []bool{true, false} {
+		t.Run(fmt.Sprintf("brain_access turned %v", map[bool]string{true: "on", false: "off"}[access]), func(t *testing.T) {
+			tb, fp := plaudBridge(t, fmt.Sprintf(`, "brain_access": %v`, !access))
+			if err := tb.plaud.saveState(plaudRecordLogin(tb, plaudSeededState("u_1", plaudOld1))); err != nil {
+				t.Fatal(err)
+			}
+			private := filepath.Join(tb.plaud.privateHome(), ".plaud", "tokens.json")
+			shared := filepath.Join(tb.home, ".plaud", "tokens.json")
+			for _, token := range []string{private, shared} {
+				if err := os.MkdirAll(filepath.Dir(token), 0o700); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.WriteFile(token, []byte("{}"), 0o600); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if w := tb.do("PUT", "/api/plaud/settings", map[string]any{"brain_access": access}); w.Code != 200 {
+				t.Fatalf("settings: %d %s", w.Code, w.Body.String())
+			}
+			if s := tb.plaud.Status(); !s.LoginMoved {
+				t.Fatalf("login moved = %v, want true", s.LoginMoved)
+			}
+			if w := tb.do("POST", "/api/plaud/disconnect", nil); w.Code != 200 {
+				t.Fatalf("disconnect: %d %s", w.Code, w.Body.String())
+			}
+			if _, err := os.Stat(private); err == nil {
+				t.Error("the private login is still there")
+			}
+			if _, err := os.Stat(shared); err != nil {
+				t.Errorf("the login in ~/.plaud was signed out: %v", err)
+			}
+			if calls := fp.calls(); strings.Count(calls, " logout") != 1 || !strings.Contains(calls, "HOME="+tb.plaud.privateHome()+" ") {
+				t.Errorf("calls:\n%s\nwant one logout, in the private home", calls)
+			}
+			if s := tb.plaud.Status(); s.Connected || s.Expired || s.LoginMoved {
+				t.Errorf("after disconnecting: connected=%v expired=%v moved=%v, want signed out", s.Connected, s.Expired, s.LoginMoved)
+			}
+		})
+	}
 }
 
 // Brains' runs get Plaud's telemetry opt-out too, whether or not brains may

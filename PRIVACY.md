@@ -62,7 +62,8 @@ including the Limited Use requirements.
   and where brains filed them) and the list of recordings it has seen
   (`~/.fridolin/plaud/state.json`) stay. With "Let brains use the Plaud CLI"
   on, the login is the one in `~/.plaud/`, and disconnecting also signs out
-  the `plaud` command in your terminal.
+  the `plaud` command in your terminal (unless the card asks you to connect
+  again after that setting changed: then `~/.plaud/` is left alone).
 - Deleting a brain folder and `~/.fridolin/` removes everything
   the bridge stored locally, except a Plaud login in `~/.plaud/` (with "Let
   brains use the Plaud CLI" on), which belongs to Plaud's tool.

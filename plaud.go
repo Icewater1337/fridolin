@@ -382,8 +382,9 @@ type PlaudManager struct {
 	// last checked against. Only polls use it, one at a time.
 	checkedLogin string
 
-	// run executes the CLI for everything but the sign-in. It is runCLI;
-	// tests wrap it to act between two commands.
+	// run executes the CLI in the CLI home in use, for everything but the
+	// sign-in and the sign-out of the private login (see Disconnect). It is
+	// runCLI; tests wrap it to act between two commands.
 	run func(ctx context.Context, args ...string) (string, error)
 }
 
@@ -403,8 +404,12 @@ func (p *PlaudManager) cliHome() string {
 	if p.cfg().Plaud.BrainAccess {
 		return homeDir()
 	}
-	return filepath.Join(p.dir(), "home")
+	return p.privateHome()
 }
+
+// privateHome is the CLI home without plaud.brain_access, in the data
+// folder: only Fridolin uses it.
+func (p *PlaudManager) privateHome() string { return filepath.Join(p.dir(), "home") }
 
 func (p *PlaudManager) tokenPath() string { return filepath.Join(p.cliHome(), ".plaud", "tokens.json") }
 
@@ -614,6 +619,12 @@ func (p *PlaudManager) runCLI(ctx context.Context, args ...string) (string, erro
 // runCLIOut is runCLI that also copies the CLI's output to out as it
 // arrives, when out is not nil: the sign-in prints its link, then waits.
 func (p *PlaudManager) runCLIOut(ctx context.Context, out io.Writer, args ...string) (string, error) {
+	return p.runCLIIn(ctx, "", out, args...)
+}
+
+// runCLIIn is runCLIOut with the CLI home home, or "" for the one in use
+// once the command may run.
+func (p *PlaudManager) runCLIIn(ctx context.Context, home string, out io.Writer, args ...string) (string, error) {
 	bin, err := p.cliPath()
 	if err != nil {
 		return "", err
@@ -622,7 +633,9 @@ func (p *PlaudManager) runCLIOut(ctx context.Context, out io.Writer, args ...str
 		p.cliMu.Lock()
 		defer p.cliMu.Unlock()
 	}
-	home := p.cliHome()
+	if home == "" {
+		home = p.cliHome()
+	}
 	if err := os.MkdirAll(home, 0o700); err != nil {
 		return "", err
 	}
@@ -1839,11 +1852,19 @@ func (f writerFunc) Write(b []byte) (int, error) { f(b); return len(b), nil }
 // afterwards is an error: Fridolin no longer uses it, but it is still
 // signed in.
 //
+// While the login waits to be connected again after brain_access changed
+// (plaudMoved), or when there is none, ~/.plaud is not Fridolin's to sign
+// out: it may hold your terminal's own login, or the one Fridolin made
+// there, which the dashboard said would stay for your terminal when you
+// turned brain_access off. Only the private login is signed out then.
+//
 // The state says so first: a check still running finds its login gone
 // from then on, and must take that for a sign-out rather than an expiry.
 func (p *PlaudManager) Disconnect() error {
 	ctx, cancel := context.WithTimeout(p.lifetime(), 30*time.Second)
 	defer cancel()
+	login := p.loginStatus()
+	shared := p.cfg().Plaud.BrainAccess && (login == plaudConnected || login == plaudExpired)
 	// Signed out on purpose, not expired. What was seen stays, for the
 	// same account signing in again.
 	err := p.update(func(st *plaudState) error { st.Login, st.Disconnected = nil, true; return nil })
@@ -1853,14 +1874,19 @@ func (p *PlaudManager) Disconnect() error {
 	if err != nil {
 		return err
 	}
-	if _, err := p.run(ctx, "logout"); err != nil && !errors.Is(err, errPlaudAuth) {
+	token := filepath.Join(p.privateHome(), ".plaud", "tokens.json")
+	if shared {
+		token = p.tokenPath()
+		_, err = p.run(ctx, "logout")
+	} else {
+		_, err = p.runCLIIn(ctx, p.privateHome(), nil, "logout")
+		_ = os.Remove(token) // our private copy; the shared one is the CLI's to manage
+	}
+	if err != nil && !errors.Is(err, errPlaudAuth) {
 		log.Printf("plaud: logout: %v", err)
 	}
-	if !p.cfg().Plaud.BrainAccess {
-		_ = os.Remove(p.tokenPath()) // our private copy; the shared one is the CLI's to manage
-	}
-	if p.hasLogin() {
-		return fmt.Errorf("the sign-out did not remove %s, so Plaud's login is still there — run `plaud logout` in a terminal", p.tokenPath())
+	if fileExists(token) {
+		return fmt.Errorf("the sign-out did not remove %s, so Plaud's login is still there — run `plaud logout` in a terminal", token)
 	}
 	return nil
 }

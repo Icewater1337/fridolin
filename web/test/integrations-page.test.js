@@ -85,3 +85,32 @@ test('cancelling the brain_access dialog leaves nothing unsaved', async (t) => {
   assert.equal(access.checked, false, 'the switch is back off');
   assert.equal(ctx.dirty(), false, 'and nothing is unsaved');
 });
+
+// A card that waits for you to connect again still has a login on record:
+// it offers Disconnect, which stops the checks and the daily reminder,
+// without signing out a login in ~/.plaud that Fridolin did not make.
+for (const c of [
+  { name: 'the login expired', over: { connected: false, expired: true }, says: /daily reminder in the chat stops/ },
+  {
+    name: 'brain_access moved the login',
+    over: { connected: false, login_moved: true, login_dir: '/Users/you/.plaud', settings: { ...status('').settings, brain_access: true } },
+    says: /login in ~\/\.plaud\/ stays/,
+  },
+]) {
+  test(`the card offers Disconnect when ${c.name}`, async (t) => {
+    const { root, calls } = await openPage(t, { ...status('2026-10-18T10:00:00Z'), ...c.over });
+    assert.ok(button(root, 'Connect again') || button(root, 'Connect Plaud'), 'connecting again is offered');
+    button(root, 'Disconnect').click();
+    await settle();
+    const dialog = document.querySelector('dialog');
+    assert.match(dialog.textContent, c.says);
+    button(dialog, 'Disconnect').click(); // confirm
+    await settle();
+    assert.ok(calls.some((call) => call.path === '/api/plaud/disconnect' && call.method === 'POST'), 'Disconnect was posted');
+  });
+}
+
+test('a card that was never connected offers only Connect', async (t) => {
+  const { root } = await openPage(t, { ...status('2026-10-18T10:00:00Z'), connected: false });
+  assert.deepEqual(root.querySelectorAll('button').map((b) => b.textContent), ['Connect Plaud']);
+});
