@@ -2082,6 +2082,63 @@ func TestPlaudCheckNowWhileChecking(t *testing.T) {
 	})
 }
 
+// A sign-in that waits for the browser ends when Fridolin stops, and Stop
+// waits for it: it would write to the data folder after Fridolin stopped.
+func TestPlaudStopEndsASignIn(t *testing.T) {
+	tb, fp := plaudBridge(t, "")
+	fp.write("login_wait", "")
+	if err := tb.plaud.Connect(); err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, 5*time.Second, "the sign-in to start", func() bool { return strings.Contains(fp.calls(), " login") })
+	tb.plaud.Stop()
+	if c := tb.plaud.Status().Connect; c == nil || c.State != "error" {
+		t.Errorf("sign-in after Stop = %+v, want it ended", c)
+	}
+}
+
+// A run that ends while Fridolin stops has its end recorded before Stop
+// returns: the brain's worker records it after the reply went out, and
+// would otherwise write to the data folder after Fridolin stopped.
+func TestPlaudStopWaitsForARunsEnd(t *testing.T) {
+	tb, fp := plaudBridge(t, "")
+	rec := &plaudRecorder{}
+	tb.plaud.submit = rec.submit
+	plaudSignIn(t, tb)
+	if err := tb.plaud.saveState(plaudSeededState("u_1", plaudOld1)); err != nil {
+		t.Fatal(err)
+	}
+	fp.files(plaudNew, plaudOld1)
+	fp.recording(plaudNew, true)
+	if err := tb.plaud.Poll(context.Background()); err != nil || rec.count() != 1 {
+		t.Fatalf("poll = %v, handed over %d times", err, rec.count())
+	}
+	// The run's end waits to write the state while Stop is called.
+	tb.plaud.stMu.Lock()
+	go rec.end(plaudNew, nil)
+	waitFor(t, 5*time.Second, "the run's end to begin", func() bool {
+		tb.plaud.mu.Lock()
+		defer tb.plaud.mu.Unlock()
+		return !tb.plaud.inFlight[plaudNew]
+	})
+	stopped := make(chan struct{})
+	go func() { tb.plaud.Stop(); close(stopped) }()
+	select {
+	case <-stopped:
+		t.Error("Stop returned before the run's end was recorded")
+	case <-time.After(200 * time.Millisecond):
+	}
+	tb.plaud.stMu.Unlock()
+	select {
+	case <-stopped:
+	case <-time.After(5 * time.Second):
+		t.Fatal("Stop did not return")
+	}
+	if !tb.plaudSeenAll(plaudNew) {
+		t.Error("the run's end was not recorded")
+	}
+}
+
 // A check that Check now started ends when Fridolin stops, like the
 // poller's own checks, instead of running on for up to ten minutes.
 func TestPlaudStopEndsCheckNow(t *testing.T) {

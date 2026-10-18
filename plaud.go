@@ -1030,10 +1030,17 @@ func (p *PlaudManager) runEnded(id string) func(error) {
 		p.mu.Lock()
 		stopping := p.stopping
 		delete(p.inFlight, id)
+		if !stopping {
+			// Stop waits for what this records: the brain's worker calls
+			// it after the reply went out, and stopping does not wait for
+			// the worker.
+			p.bg.Add(1)
+		}
 		p.mu.Unlock()
 		if stopping {
 			return
 		}
+		defer p.bg.Done()
 		var gaveUp *plaudGivenUp
 		var brain string
 		err := p.update(func(st *plaudState) error {
@@ -1604,8 +1611,9 @@ func (p *PlaudManager) lifetime() context.Context {
 }
 
 // Stop ends the poller, a running check and a running sign-in, and waits
-// for a look-up of the account. Recordings whose runs it stops are handed
-// over again at the next start.
+// for the sign-in, a look-up of the account and the recording of a run
+// that ended. Recordings whose runs it stops are handed over again at the
+// next start.
 func (p *PlaudManager) Stop() {
 	p.mu.Lock()
 	p.stopping = true
@@ -1821,7 +1829,11 @@ func (p *PlaudManager) Connect() error {
 	p.connect = job
 	p.mu.Unlock()
 
+	// Stop cancels it and waits for its end: it records the sign-in in the
+	// data folder, and asks who signed in.
+	p.bg.Add(1)
 	go func() {
+		defer p.bg.Done()
 		defer cancel()
 		var seen bytes.Buffer
 		out := writerFunc(func(b []byte) {
