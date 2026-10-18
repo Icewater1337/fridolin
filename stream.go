@@ -186,10 +186,11 @@ type streamParser struct {
 	provider string
 	codex    codexStream
 	sink     StreamSink
-	result   string // the last result's
-	lastText string // the last text the model wrote
-	asked    bool   // a question went out
-	err      error  // the run's error result
+	result   string          // the last result's
+	lastText string          // the last text the model wrote
+	asked    bool            // a question went out
+	err      error           // the run's error result
+	unknown  map[string]bool // the event types logged as unknown
 }
 
 // event handles one line of the output. Lines that are no JSON object,
@@ -251,6 +252,22 @@ func (p *streamParser) event(line []byte) {
 		p.result = event.Result
 		p.sink.Log("✅ Result: " + truncate(p.result, 2000))
 		p.sink.Result(RunResult{Text: p.result, Asked: p.asked})
+
+	case "user", "system":
+		// Tool results, and the CLI's own notes (its settings, a
+		// compaction): nothing the run says.
+
+	default:
+		// A kind of event the bridge does not know, from a newer CLI say.
+		// The log names it once a run, so that a change in what the CLI
+		// sends shows.
+		if !p.unknown[event.Type] {
+			if p.unknown == nil {
+				p.unknown = map[string]bool{}
+			}
+			p.unknown[event.Type] = true
+			p.sink.Log(fmt.Sprintf("❔ Event of a type the bridge does not read: %q", truncate(event.Type, 100)))
+		}
 	}
 }
 

@@ -122,8 +122,10 @@ to `conversation-history.jsonl` and reads it back, and logs what each run
 did in `claude-stream.log`, each run under a line naming its chat, sender,
 process and model, and after it the end of what the CLI wrote to stderr,
 under a line naming the run. A line of the CLI's output longer than 4 MiB,
-a tool's large result say, is not read; the log notes its size. A history
-line (see [below](#conversation-historyjsonl)) has the type `in`, `out` for an
+a tool's large result say, is not read; the log notes its size. It also
+names each kind of event in the output that the bridge does not read,
+once a run, so that a new CLI that sends something new shows there. A
+history line (see [below](#conversation-historyjsonl)) has the type `in`, `out` for an
 answer, written once all of it reached WhatsApp as what the chat got (a
 poll as its question and numbered options), `event` for a vote in one
 of the brain's polls or an edit of a message a run already read, or

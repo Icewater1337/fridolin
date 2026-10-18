@@ -48,7 +48,8 @@ const fillLine = "@@FILL@@"
 // field the CLI sends, the system init event and the tool results the
 // parser has no use for among them. Their paths, IDs and texts are made
 // up. An answer after a tool call, an API error, a failed login that only
-// the last text explains, a question the model asks, and a tool result
+// the last text explains, a question the model asks, events of kinds the
+// bridge does not read, each named once in the log, and a tool result
 // longer than the parser reads of a line.
 func TestParseStreamFixtures(t *testing.T) {
 	const fill = 5 << 20
@@ -102,6 +103,17 @@ func TestParseStreamFixtures(t *testing.T) {
 				"🔧 Tool: AskUserQuestion",
 				"💬 I asked which day suits you. Until you answer, Thursday at 10:00 stays in your notes.",
 				"✅ Result: I asked which day suits you. Until you answer, Thursday at 10:00 stays in your notes.",
+			},
+		},
+		{
+			file: "unknown-events.jsonl",
+			text: "You keep notes.md and a people folder.",
+			logs: []string{
+				`❔ Event of a type the bridge does not read: "rate_limit_event"`,
+				"🔧 Tool: Bash",
+				`❔ Event of a type the bridge does not read: "tool_progress"`,
+				"💬 You keep notes.md and a people folder.",
+				"✅ Result: You keep notes.md and a people folder.",
 			},
 		},
 		{
@@ -295,5 +307,36 @@ func TestParseStreamDrainsAfterAnError(t *testing.T) {
 	}
 	if len(sink.questions) > 0 || len(sink.results) != 1 || len(sink.logs) != 2 {
 		t.Errorf("after the error: questions %q, results %+v, log %q; want nothing", sink.questions, sink.results, sink.logs)
+	}
+}
+
+// TestParseStreamUnknownEvents: the log names each kind of event the bridge
+// does not read once a run, quoted and cut short as the model's text is;
+// the kinds it knows to have nothing for the chat leave no line.
+func TestParseStreamUnknownEvents(t *testing.T) {
+	const result = `{"type":"result","result":"done"}`
+	cases := []struct {
+		name   string
+		events []string
+		logs   []string
+	}{
+		{"known kinds", []string{`{"type":"system","subtype":"init"}`, `{"type":"user","message":{"content":[]}}`}, nil},
+		{"each kind once", []string{`{"type":"tool_progress"}`, `{"type":"auth_status"}`, `{"type":"tool_progress"}`},
+			[]string{`❔ Event of a type the bridge does not read: "tool_progress"`, `❔ Event of a type the bridge does not read: "auth_status"`}},
+		{"no type", []string{`{"uuid":"x"}`}, []string{`❔ Event of a type the bridge does not read: ""`}},
+		{"a long type, with a newline", []string{`{"type":"\n` + strings.Repeat("a", 300) + `"}`},
+			[]string{`❔ Event of a type the bridge does not read: "\n` + strings.Repeat("a", 99) + `…"`}},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			var sink recordingSink
+			res := parseStream(strings.NewReader(strings.Join(append(c.events, result), "\n")+"\n"), &sink)
+			if res.Err != nil || res.Text != "done" {
+				t.Errorf("result = %+v, want the text done", res)
+			}
+			if want := append(c.logs, "✅ Result: done"); !slices.Equal(sink.logs, want) {
+				t.Errorf("activity log %q, want %q", sink.logs, want)
+			}
+		})
 	}
 }
