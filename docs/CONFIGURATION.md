@@ -137,7 +137,9 @@ the poll's options.
 
 - **No entry** for an allowed group: the senders `allowed_numbers` admits,
   and no one else. With an empty `allowed_numbers` and `allow_any_dm`
-  `true`, that is anyone.
+  `true`, that is anyone. The bridge logs each allowed group without an
+  entry once at startup, and when an edit leaves one without, with the
+  entry that lets everyone in again.
 - **A list of numbers**: those members, and no one else. `allowed_numbers`
   does not count here, so list your own number too. An empty list lets
   nobody in.

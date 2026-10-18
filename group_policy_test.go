@@ -216,6 +216,75 @@ func TestConfigUpdateRefusesStrayGroupMembers(t *testing.T) {
 	}
 }
 
+// Each allowed group that admits only allowed_numbers is named once in
+// the log, at startup and when an edit makes it so, with how to let every
+// member in again; a group with an entry, or a bridge anyone may DM, is
+// not.
+func TestConfigWarnsAboutGroupsWithoutMembers(t *testing.T) {
+	const (
+		listed = "120363000000000001@g.us"
+		added  = "120363000000000002@g.us"
+	)
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	logged := captureLog(t)
+	cs, err := OpenConfigStore(writeConfig(t, `{"data_dir": "`+home+`/data", "allowed_numbers": ["15551234567"],
+		"allowed_groups": ["120363000000000000@g.us", "`+listed+`"], "group_members": {"`+listed+`": ["15559876543"]}}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	warned := func(g string) int {
+		n := 0
+		for _, line := range logged() {
+			if strings.Contains(line, "group "+g+" has no group_members entry") {
+				n++
+				if !strings.Contains(line, `["*"]`) {
+					t.Errorf("warning %q does not say how to let every member in", line)
+				}
+			}
+		}
+		return n
+	}
+	if warned(testGroup) != 1 || warned(listed) != 0 {
+		t.Fatalf("at startup the log has:\n%s\nwant one warning, about %s", strings.Join(logged(), "\n"), testGroup)
+	}
+
+	// Another group allowed: only it is named.
+	if _, err := cs.Update("", func(c *Config) error {
+		c.AllowedGroups = append(c.AllowedGroups, added)
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if warned(testGroup) != 1 || warned(added) != 1 {
+		t.Errorf("after allowing %s the log has:\n%s\nwant it named once and %s not again", added, strings.Join(logged(), "\n"), testGroup)
+	}
+	// Its entry removed: the listed group is named now.
+	if _, err := cs.Update("", func(c *Config) error {
+		c.GroupMembers = nil
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if warned(listed) != 1 {
+		t.Errorf("after removing its entry the log has:\n%s\nwant %s named", strings.Join(logged(), "\n"), listed)
+	}
+}
+
+// While anyone may DM, a group without an entry still lets every member
+// in, so there is nothing to warn about.
+func TestNoGroupWarningWhileAnyoneMayDM(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	logged := captureLog(t)
+	if _, err := OpenConfigStore(writeConfig(t, `{"data_dir": "`+home+`/data", "allowed_numbers": [], "allow_any_dm": true, "allowed_groups": ["120363000000000000@g.us"]}`)); err != nil {
+		t.Fatal(err)
+	}
+	if got := strings.Join(logged(), "\n"); strings.Contains(got, "group_members") {
+		t.Errorf("warned although every member still gets in:\n%s", got)
+	}
+}
+
 // Who was let in or out of which group is a security change like any
 // other, and the log says so.
 func TestLogSecurityChangesNamesGroupMembers(t *testing.T) {

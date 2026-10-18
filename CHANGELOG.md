@@ -16,8 +16,9 @@ yet, so everything is under Unreleased until the first one.
   add an entry to `config.json` as you upgrade, right before `./setup.sh`
   (an older bridge ignores the key, but its dashboard drops it when it
   saves): `"group_members": {"<group JID>": ["*"]}` keeps the old
-  behaviour, or list their numbers. Nothing changes while
-  `allowed_numbers` is empty and `allow_any_dm` is `true`.
+  behaviour, or list their numbers. The log names every allowed group
+  without an entry at startup. Nothing changes while `allowed_numbers` is
+  empty and `allow_any_dm` is `true`.
 - `setup.sh` reads `FRIDOLIN_DATA_DIR` and `FRIDOLIN_INSTALL_DIR`.
   `DATA_DIR` and `INSTALL_DIR`, the names it read before, are ignored with
   a warning, since other software exports them too. When one of them names

@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"log"
 	"slices"
 	"sort"
 )
@@ -131,6 +132,36 @@ func groupMembersAsNumbers(members map[string][]string) map[string][]string {
 		out[g] = allowedNumbersAsNumbers(list)
 	}
 	return out
+}
+
+// onlyAllowedNumbers lists the groups of c in which only allowed_numbers
+// reach the brain: allowed and without a group_members entry, unless an
+// empty allowed_numbers with allow_any_dm lets everyone in anyway.
+func onlyAllowedNumbers(c *Config) []string {
+	if c == nil || c.AnyoneCanDM() {
+		return nil
+	}
+	var out []string
+	for _, g := range c.AllowedGroups {
+		if _, listed := c.GroupMembers[g]; !listed {
+			out = append(out, g)
+		}
+	}
+	return out
+}
+
+// warnGroupsWithoutMembers logs, once for each, the allowed groups of next
+// that admit only allowed_numbers and did not in prev (nil at startup), so
+// that an owner whose groups trusted every member before group_members
+// existed sees why the others go unheard, and how to change it.
+func warnGroupsWithoutMembers(prev, next *Config) {
+	before := onlyAllowedNumbers(prev)
+	for _, g := range onlyAllowedNumbers(next) {
+		if slices.Contains(before, g) {
+			continue
+		}
+		log.Printf("config: group %s has no group_members entry: only allowed_numbers can start runs there, and what other members write is not read; an entry of [%q] for it lets every member in, as before, or list their numbers", g, anyMember)
+	}
 }
 
 // groupMemberPairs is group_members as a sorted list of "group:number"

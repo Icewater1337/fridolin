@@ -210,3 +210,4 @@
 ;; Inside this brain's folder, the rules above apply again
 (deny file-read* (subpath "<HOME>/main/private"))
 (deny file-write* (subpath "<HOME>/main/private"))
+<TIME> config: group 120363000000000000@g.us has no group_members entry: only allowed_numbers can start runs there, and what other members write is not read; an entry of ["*"] for it lets every member in, as before, or list their numbers

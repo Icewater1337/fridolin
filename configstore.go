@@ -77,6 +77,7 @@ func OpenConfigStore(cfgPath string) (*ConfigStore, error) {
 	if file.DataDir == "" {
 		warnLegacyDataDir(eff.DataDir)
 	}
+	warnGroupsWithoutMembers(nil, eff)
 	cs := &ConfigStore{path: cfgPath, file: file, startup: eff}
 	cs.eff.Store(eff)
 	cs.etag.Store(etagOf(raw))
@@ -158,6 +159,8 @@ func (cs *ConfigStore) Update(etag string, mutate func(*Config) error) (restart 
 	cs.etag.Store(etagOf(data))
 	subs := append([]func(old, new *Config){}, cs.subs...)
 	cs.mu.Unlock()
+
+	warnGroupsWithoutMembers(old, eff)
 
 	for _, fn := range subs {
 		fn(old, eff)
