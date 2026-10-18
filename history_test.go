@@ -83,6 +83,32 @@ func TestScanHistoryBackward(t *testing.T) {
 	}
 }
 
+// The prompt's quick look takes the lines that hold one of the chat's
+// JIDs, and costs no allocation for each of the many lines it looks at.
+func TestMentionsChat(t *testing.T) {
+	// A JID longer than the 32 bytes Go converts on the stack.
+	long := strings.Repeat("1", 40) + "@lid"
+	want := mentionsChat([]string{testDMChat, long})
+	cases := []struct {
+		line string
+		want bool
+	}{
+		{`{"chat":"` + testDMChat + `","text":"hi"}`, true},
+		{`{"chat":"` + long + `","text":"hi"}`, true},
+		{`{"chat":"` + testGroup + `","text":"hi"}`, false},
+		{``, false},
+	}
+	for _, c := range cases {
+		if got := want([]byte(c.line)); got != c.want {
+			t.Errorf("mentionsChat(%q) = %v, want %v", c.line, got, c.want)
+		}
+	}
+	line := []byte(`{"chat":"` + testGroup + `","text":"` + strings.Repeat("chatter ", 50) + `"}`)
+	if n := testing.AllocsPerRun(100, func() { want(line) }); n != 0 {
+		t.Errorf("%v allocations a line, want none", n)
+	}
+}
+
 // A line of megabytes is copied once or twice, not again for each block it
 // crosses: that cost about 136 MB for a line of 4 MB, on every reading
 // that went past it.
@@ -161,8 +187,11 @@ func TestPromptHistoryIsReadFromTheEnd(t *testing.T) {
 			if entryTexts(before) != c.want || len(since) != 0 {
 				t.Errorf("historyBefore = %q, %q; want %q", entryTexts(before), entryTexts(since), c.want)
 			}
-			if strings.Contains(c.name, "too long") && !logContains(logged, "skipped 1 history lines") {
+			switch {
+			case strings.Contains(c.name, "too long") && !logContains(logged, "brain a: skipped 1 history lines longer than 256 KiB"):
 				t.Errorf("log = %q, want the long line noted", logged())
+			case strings.Contains(c.name, "no JSON") && !logContains(logged, "brain a: skipped 1 history lines that are not JSON"):
+				t.Errorf("log = %q, want the broken line noted", logged())
 			}
 		})
 	}

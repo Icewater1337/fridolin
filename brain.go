@@ -1692,12 +1692,8 @@ func (m Inbound) enoughBefore(limit int) func(e historyEntry) bool {
 // openInFolder).
 func (br *Brain) chatHistory(chats []string, enough func(historyEntry) bool) []historyEntry {
 	var entries []historyEntry
-	br.scanHistory(promptHistoryBudget, func(line []byte) bool {
-		if !mentionsChat(line, chats) {
-			return true
-		}
-		var e historyEntry
-		if json.Unmarshal(line, &e) != nil || !slices.Contains(chats, e.Chat) {
+	br.scanHistory(promptHistoryBudget, mentionsChat(chats), func(e historyEntry) bool {
+		if !slices.Contains(chats, e.Chat) {
 			return true
 		}
 		if e.Type == historyReset {

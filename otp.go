@@ -126,11 +126,7 @@ func (br *Brain) codeRequest(chats, markers []string, now time.Time) (req otpReq
 		markers = defaultOTPMarkers
 	}
 	since := now.Add(-otpWindow)
-	br.scanHistory(otpRequestBudget, func(line []byte) bool {
-		var e historyEntry
-		if json.Unmarshal(line, &e) != nil {
-			return true
-		}
+	br.scanHistory(otpRequestBudget, nil, func(e historyEntry) bool {
 		at, err := time.Parse(time.RFC3339, e.TS)
 		if err != nil {
 			return true

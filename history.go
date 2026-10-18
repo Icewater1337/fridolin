@@ -111,39 +111,63 @@ func scanHistoryBackward(r io.ReaderAt, size, budget int64, visit func(line []by
 	return skipped, nil
 }
 
-// scanHistory runs scanHistoryBackward over the brain's history, through
-// its folder (see openInFolder). It returns false when the history cannot
-// be read: there is none yet, or it is no regular file in the folder.
-func (br *Brain) scanHistory(budget int64, visit func(line []byte) bool) bool {
+// scanHistory hands visit the entries of the brain's history, newest
+// first, as scanHistoryBackward reads them back from its end, until visit
+// returns false: through the folder (see openInFolder), and none when the
+// history cannot be read, as when there is none yet. Only the lines want
+// takes, as written, are decoded, a quick look that most lines of a busy
+// brain's other chats fail; nil takes them all. A line that is no history
+// entry is skipped, and how many were is logged, as are lines too long to
+// take: a brain can write anything into its own history.
+func (br *Brain) scanHistory(budget int64, want func(line []byte) bool, visit func(e historyEntry) bool) {
 	f, err := openInFolder(br.root, historyFileName, os.O_RDONLY, 0)
 	if err != nil {
-		return false
+		return
 	}
 	defer f.Close()
 	st, err := f.Stat()
 	if err != nil {
-		return false
+		return
 	}
-	skipped, err := scanHistoryBackward(f, st.Size(), budget, visit)
-	if skipped > 0 {
-		log.Printf("brain %s: skipped %d history lines longer than %d KiB", br.id, skipped, maxHistoryLine>>10)
+	broken := 0
+	long, err := scanHistoryBackward(f, st.Size(), budget, func(line []byte) bool {
+		if want != nil && !want(line) {
+			return true
+		}
+		var e historyEntry
+		if json.Unmarshal(line, &e) != nil {
+			broken++
+			return true
+		}
+		return visit(e)
+	})
+	if long > 0 {
+		log.Printf("brain %s: skipped %d history lines longer than %d KiB", br.id, long, maxHistoryLine>>10)
+	}
+	if broken > 0 {
+		log.Printf("brain %s: skipped %d history lines that are not JSON", br.id, broken)
 	}
 	if err != nil {
 		log.Printf("brain %s: reading its history: %v", br.id, err)
 	}
-	return true
 }
 
-// mentionsChat reports whether line, a history line as written, may be
-// one of the chats': a quick look for one of their JIDs before the line is
-// decoded, which most lines of a busy brain's other chats fail.
-func mentionsChat(line []byte, chats []string) bool {
-	for _, c := range chats {
-		if bytes.Contains(line, []byte(c)) {
-			return true
-		}
+// mentionsChat returns a want for scanHistory that takes the lines that
+// may be one of the chats': those that hold one of their JIDs. The JIDs
+// are made bytes once, not for each of the many lines it looks at.
+func mentionsChat(chats []string) func(line []byte) bool {
+	jids := make([][]byte, len(chats))
+	for i, c := range chats {
+		jids[i] = []byte(c)
 	}
-	return false
+	return func(line []byte) bool {
+		for _, j := range jids {
+			if bytes.Contains(line, j) {
+				return true
+			}
+		}
+		return false
+	}
 }
 
 // recentHistory returns the last n entries of the brain's history, oldest
@@ -151,9 +175,8 @@ func mentionsChat(line []byte, chats []string) bool {
 // reset marker is no message and stays out.
 func (br *Brain) recentHistory(n int, budget int64) []historyEntry {
 	var out []historyEntry
-	br.scanHistory(budget, func(line []byte) bool {
-		var e historyEntry
-		if json.Unmarshal(line, &e) == nil && e.Type != historyReset {
+	br.scanHistory(budget, nil, func(e historyEntry) bool {
+		if e.Type != historyReset {
 			out = append(out, e)
 		}
 		return len(out) < n
