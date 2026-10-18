@@ -2259,3 +2259,33 @@ func TestBackupRestoreFolderThatCannotBeMade(t *testing.T) {
 		t.Error("a restore started anyway")
 	}
 }
+
+// TestBackupCancel: Cancel on the Backup page stops the running backup,
+// whose result then says it was cancelled, and is refused when none runs.
+func TestBackupCancel(t *testing.T) {
+	tb := newTestBridge(t, "")
+	connectAlias(t, tb)
+	addBackupBrain(t, tb, "notes")
+	if w := tb.do("POST", "/api/backup/cancel", nil); w.Code != 409 {
+		t.Errorf("cancel with nothing running = %d, want 409", w.Code)
+	}
+	syncing := make(chan struct{})
+	tb.backup.runner = func(ctx context.Context, args []string, _ io.Writer) ([]byte, error) {
+		if args[0] != "sync" {
+			return []byte("[]"), nil
+		}
+		close(syncing)
+		<-ctx.Done()
+		return nil, ctx.Err()
+	}
+	if w := tb.do("POST", "/api/backup/run", map[string]any{"brains": []string{"notes"}, "include_bridge": false, "force": true}); w.Code != 202 {
+		t.Fatalf("run = %d %s", w.Code, w.Body.String())
+	}
+	<-syncing
+	if w := tb.do("POST", "/api/backup/cancel", nil); w.Code != 200 {
+		t.Fatalf("cancel = %d %s", w.Code, w.Body.String())
+	}
+	if res := waitBackup(t, tb, "notes"); res.OK || res.Error != "cancelled" {
+		t.Errorf("result = %+v, want cancelled", res)
+	}
+}
