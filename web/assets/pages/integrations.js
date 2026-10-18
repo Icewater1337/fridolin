@@ -71,9 +71,13 @@ export default {
     };
 
     // A status known from an earlier visit paints at once, so everything
-    // render() uses is defined above.
+    // render() uses is defined above. It is asked for often only while
+    // Plaud's sign-in runs, so the card shows at once when it is done;
+    // otherwise only a check changes it, at most every 30 s
+    // (plaud.interval_seconds).
+    const signingIn = () => !!(status && status.connect && status.connect.state === 'running');
     ctx.follow(brainsResource, (list) => { brains = list || []; if (status) render(); }, 60000);
-    ctx.follow(plaud, (s) => { status = s; render(); }, 4000);
+    ctx.follow(plaud, (s) => { status = s; render(); }, () => (signingIn() ? 2000 : 20000));
 
     function render() {
       const s = status;
