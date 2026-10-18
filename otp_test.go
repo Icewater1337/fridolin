@@ -1,6 +1,10 @@
 package main
 
 import (
+	"encoding/json"
+	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -80,7 +84,9 @@ func TestHasMarker(t *testing.T) {
 // A chat asked for a code when an outbound line there, written in the last
 // otpWindow, holds a marker: the brain's own words, or a /send in the
 // chat. Another chat's request, an old one, a person's own words and
-// another brain's are none.
+// another brain's are none. A script's request with an id is the one a
+// code answers, even when the brain's own words with a marker came after
+// it: its script waits for a code that names it.
 func TestCodeRequest(t *testing.T) {
 	now := time.Now()
 	ago := func(d time.Duration) string { return now.Add(-d).Format(time.RFC3339) }
@@ -88,35 +94,56 @@ func TestCodeRequest(t *testing.T) {
 	ask := func(chat, from, via, text string, d time.Duration) historyEntry {
 		return historyEntry{TS: ago(d), Chat: chat, From: from, Via: via, Text: text, Type: historyOut}
 	}
+	// askFor is a script's request in the DM, which /send answered with id.
+	askFor := func(id, text string, d time.Duration) historyEntry {
+		e := ask(testDMChat, "script", "script", text, d)
+		e.OTPRequest = id
+		return e
+	}
 	cases := []struct {
 		name    string
 		lines   []historyEntry
 		chats   []string
 		markers []string
 		want    bool
+		id      string // the request's id, "" for the brain's own words
 	}{
-		{"its own request", []historyEntry{ask(testDMChat, "a", "", "🔐 Send me the code", time.Minute)}, nil, nil, true},
-		{"in another chat", []historyEntry{ask(testGroup, "a", "", "🔐 Send me the code", time.Minute)}, nil, nil, false},
-		{"longer ago than the window", []historyEntry{ask(testDMChat, "a", "", "🔐 Send me the code", 11*time.Minute)}, nil, nil, false},
-		{"a person's words", []historyEntry{{TS: ago(time.Minute), Chat: testDMChat, From: "15551234567", Text: "what is an OTP?", Type: historyIn}}, nil, nil, false},
-		{"another brain's own words", []historyEntry{ask(testDMChat, "b", "", "🔐 Send me the code", time.Minute)}, nil, nil, false},
-		{"a script's request", []historyEntry{ask(testDMChat, "script", "script", "your OTP please", time.Minute)}, nil, nil, true},
-		{"a request without a token", []historyEntry{ask(testDMChat, "script", "api", "your OTP please", time.Minute)}, nil, nil, true},
-		{"its own /send", []historyEntry{ask(testDMChat, "a", "brain", "your OTP please", time.Minute)}, nil, nil, true},
-		{"no marker", []historyEntry{ask(testDMChat, "a", "", "here is your summary", time.Minute)}, nil, nil, false},
-		{"a marker inside a word", []historyEntry{ask(testDMChat, "a", "", "hotpot tonight?", time.Minute)}, nil, nil, false},
-		{"a bank's name by default", []historyEntry{ask(testDMChat, "a", "", "Please send the Examplebank code", time.Minute)}, nil, nil, false},
-		{"a bank's name configured", []historyEntry{ask(testDMChat, "a", "", "Please send the Examplebank code", time.Minute)}, nil, []string{"Examplebank"}, true},
+		{"its own request", []historyEntry{ask(testDMChat, "a", "", "🔐 Send me the code", time.Minute)}, nil, nil, true, ""},
+		{"in another chat", []historyEntry{ask(testGroup, "a", "", "🔐 Send me the code", time.Minute)}, nil, nil, false, ""},
+		{"longer ago than the window", []historyEntry{ask(testDMChat, "a", "", "🔐 Send me the code", 11*time.Minute)}, nil, nil, false, ""},
+		{"a person's words", []historyEntry{{TS: ago(time.Minute), Chat: testDMChat, From: "15551234567", Text: "what is an OTP?", Type: historyIn}}, nil, nil, false, ""},
+		{"another brain's own words", []historyEntry{ask(testDMChat, "b", "", "🔐 Send me the code", time.Minute)}, nil, nil, false, ""},
+		{"a script's request", []historyEntry{ask(testDMChat, "script", "script", "your OTP please", time.Minute)}, nil, nil, true, ""},
+		{"a request without a token", []historyEntry{ask(testDMChat, "script", "api", "your OTP please", time.Minute)}, nil, nil, true, ""},
+		{"its own /send", []historyEntry{ask(testDMChat, "a", "brain", "your OTP please", time.Minute)}, nil, nil, true, ""},
+		{"no marker", []historyEntry{ask(testDMChat, "a", "", "here is your summary", time.Minute)}, nil, nil, false, ""},
+		{"a marker inside a word", []historyEntry{ask(testDMChat, "a", "", "hotpot tonight?", time.Minute)}, nil, nil, false, ""},
+		{"a bank's name by default", []historyEntry{ask(testDMChat, "a", "", "Please send the Examplebank code", time.Minute)}, nil, nil, false, ""},
+		{"a bank's name configured", []historyEntry{ask(testDMChat, "a", "", "Please send the Examplebank code", time.Minute)}, nil, []string{"Examplebank"}, true, ""},
 		{"followed by other words", []historyEntry{
 			ask(testDMChat, "a", "", "🔐 Send me the code", 3*time.Minute),
 			ask(testDMChat, "a", "", "Still waiting for it", 2*time.Minute),
 			{TS: ago(time.Minute), Chat: testDMChat, From: "15551234567", Text: "one moment", Type: historyIn},
-		}, nil, nil, true},
+		}, nil, nil, true, ""},
 		{"behind a late message sent long ago", []historyEntry{
 			ask(testDMChat, "a", "", "🔐 Send me the code", time.Minute),
 			{TS: ago(3 * time.Hour), Chat: testDMChat, From: "15551234567", Text: "sent while offline", Type: historyIn},
-		}, nil, nil, true},
-		{"by the DM's LID", []historyEntry{ask(lid, "a", "", "🔐 Send me the code", time.Minute)}, []string{testDMChat, lid}, nil, true},
+		}, nil, nil, true, ""},
+		{"by the DM's LID", []historyEntry{ask(lid, "a", "", "🔐 Send me the code", time.Minute)}, []string{testDMChat, lid}, nil, true, ""},
+		{"a script's request names its id", []historyEntry{askFor("abc123", "your OTP please", time.Minute)}, nil, nil, true, "abc123"},
+		{"a script's request, then the brain's own words", []historyEntry{
+			askFor("abc123", "your OTP please", 2*time.Minute),
+			ask(testDMChat, "a", "", "That is your Examplebank login asking for the 2FA code", time.Minute),
+		}, nil, nil, true, "abc123"},
+		{"the newest of two scripts' requests", []historyEntry{
+			askFor("abc123", "your OTP please", 3*time.Minute),
+			askFor("def456", "your OTP please", 2*time.Minute),
+			ask(testDMChat, "a", "", "🔐 Send me the code", time.Minute),
+		}, nil, nil, true, "def456"},
+		{"the brain's own words after a script's request ran out", []historyEntry{
+			askFor("abc123", "your OTP please", 11*time.Minute),
+			ask(testDMChat, "a", "", "🔐 Send me the code", time.Minute),
+		}, nil, nil, true, ""},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -135,6 +162,166 @@ func TestCodeRequest(t *testing.T) {
 			if ok && (req.At.Before(now.Add(-otpWindow)) || req.At.After(now)) {
 				t.Errorf("request at %v, want within the window", req.At)
 			}
+			if req.ID != c.id {
+				t.Errorf("request id %q, want %q", req.ID, c.id)
+			}
+			for _, e := range c.lines {
+				if c.id != "" && e.OTPRequest == c.id && req.At.Format(time.RFC3339) != e.TS {
+					t.Errorf("request at %v, want %s, when the script asked", req.At, e.TS)
+				}
+			}
 		})
+	}
+}
+
+// A caught code waits in its hand-off file until it expires, and is then
+// taken away, unless a newer code replaced it; one a script removed stays
+// removed.
+func TestOTPHandoffExpires(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "otp")
+	path := filepath.Join(dir, "a.json")
+	// Each received a millisecond after the one before.
+	received := time.Now().UnixMilli()
+	handoff := func(code string, ttl time.Duration) otpHandoff {
+		received++
+		return otpHandoff{Brain: "a", Code: code, ReceivedUnixMS: received, ExpiresUnixMS: time.Now().Add(ttl).UnixMilli()}
+	}
+	read := func() string {
+		var h otpHandoff
+		data, err := os.ReadFile(path)
+		if err != nil {
+			return ""
+		}
+		_ = json.Unmarshal(data, &h)
+		return h.Code
+	}
+	var o otpHandoffs
+	t.Cleanup(o.stop)
+
+	if err := o.write(dir, handoff("111111", 150*time.Millisecond)); err != nil {
+		t.Fatal(err)
+	}
+	if read() != "111111" {
+		t.Fatal("the code was not handed over")
+	}
+	waitFor(t, 5*time.Second, "the code to expire", func() bool { return read() == "" })
+
+	// A newer code is not taken away at the older one's expiry.
+	older := handoff("222222", time.Hour)
+	if err := o.write(dir, older); err != nil {
+		t.Fatal(err)
+	}
+	if err := o.write(dir, handoff("333333", time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+	o.expire(path, older.ReceivedUnixMS)
+	if read() != "333333" {
+		t.Errorf("the newer code went at the older one's expiry: %q", read())
+	}
+
+	// Picked up and removed by the script, it stays removed.
+	if err := os.Remove(path); err != nil {
+		t.Fatal(err)
+	}
+	o.expire(path, older.ReceivedUnixMS)
+	if _, err := os.Stat(path); !os.IsNotExist(err) {
+		t.Errorf("a removed hand-off came back (%v)", err)
+	}
+}
+
+// At startup the hand-off files of codes that expired while the bridge was
+// stopped are removed, and those still valid kept.
+func TestSweepOTPHandoffs(t *testing.T) {
+	now := time.Now()
+	old := now.Add(-time.Hour)
+	cases := []struct {
+		name  string
+		data  string
+		mtime time.Time
+		kept  bool
+	}{
+		{"expired", fmt.Sprintf(`{"code":"1234","expires_unix_ms":%d}`, now.Add(-time.Second).UnixMilli()), now, false},
+		{"still valid", fmt.Sprintf(`{"code":"1234","expires_unix_ms":%d}`, now.Add(time.Minute).UnixMilli()), old, true},
+		{"from before expiry, old", `{"code":"1234"}`, old, false},
+		{"from before expiry, recent", `{"code":"1234"}`, now, true},
+		{"no JSON, old", `nonsense`, old, false},
+	}
+	dir := t.TempDir()
+	for i, c := range cases {
+		p := filepath.Join(dir, fmt.Sprintf("b%d.json", i))
+		if err := os.WriteFile(p, []byte(c.data), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Chtimes(p, c.mtime, c.mtime); err != nil {
+			t.Fatal(err)
+		}
+	}
+	other := filepath.Join(dir, "notes.txt")
+	if err := os.WriteFile(other, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chtimes(other, old, old); err != nil {
+		t.Fatal(err)
+	}
+	sweepOTPHandoffs(dir, now)
+	for i, c := range cases {
+		_, err := os.Stat(filepath.Join(dir, fmt.Sprintf("b%d.json", i)))
+		if kept := err == nil; kept != c.kept {
+			t.Errorf("%s: kept %v, want %v", c.name, kept, c.kept)
+		}
+	}
+	if _, err := os.Stat(other); err != nil {
+		t.Errorf("a file that is no hand-off went: %v", err)
+	}
+}
+
+// The bridge sweeps the hand-offs when it starts: a code that expired
+// while it was stopped is gone, one still valid stays for its script.
+func TestBridgeStartRemovesExpiredOTPHandoffs(t *testing.T) {
+	home := canonicalDir(t.TempDir())
+	t.Setenv("HOME", home)
+	dir := filepath.Join(home, "data", "otp")
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now()
+	files := map[string]int64{"expired.json": now.Add(-time.Minute).UnixMilli(), "valid.json": now.Add(time.Minute).UnixMilli()}
+	for name, expires := range files {
+		if err := os.WriteFile(filepath.Join(dir, name), fmt.Appendf(nil, `{"code":"483920","expires_unix_ms":%d}`, expires), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	cfgs, err := OpenConfigStore(writeConfig(t, `{"brain_mode": true, "data_dir": "`+home+`/data"}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	requireTestDataDir(t, cfgs.Get())
+	b, err := NewBridge(cfgs, BridgeOptions{NoWhatsApp: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(b.Stop)
+	if _, err := os.Stat(filepath.Join(dir, "expired.json")); !os.IsNotExist(err) {
+		t.Errorf("the expired code is still there (%v)", err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "valid.json")); err != nil {
+		t.Errorf("the valid code went: %v", err)
+	}
+}
+
+// A code the brain asked for in its own words names no request, but says
+// when the brain asked.
+func TestHandOffOfACodeTheBrainAskedFor(t *testing.T) {
+	tb, br := newMainBridge(t, "")
+	asked := time.Now().Add(-2 * time.Minute).Truncate(time.Second)
+	br.appendEntry(historyEntry{TS: asked.Format(time.RFC3339), Chat: testDMChat, From: "main", Text: "🔐 Please send me the verification code", Type: historyOut})
+	tb.handleInbound(t.Context(), Inbound{JID: testDMChat, Sender: "15551234567", Text: "483920", Source: sourceWhatsApp})
+	var h otpHandoff
+	data, err := os.ReadFile(filepath.Join(tb.cfgs.Get().DataDir, "otp", "main.json"))
+	if err == nil {
+		err = json.Unmarshal(data, &h)
+	}
+	if err != nil || h.Code != "483920" || h.Request != "" || h.RequestedUnixMS != asked.UnixMilli() {
+		t.Errorf("hand-off %s (%v), want the code, no request id and the time the brain asked", data, err)
 	}
 }

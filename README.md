@@ -576,8 +576,9 @@ What the bridge does about it:
   within ten minutes after the assistant or a script asked that chat for
   one, is dropped before it reaches history or the model — also when it is
   sent as a reply to the request or corrected by an edit — and kept in
-  `<data_dir>/otp/` for the local script that asked for it. The sender is
-  told.
+  `<data_dir>/otp/` for ten minutes, with the id of the request it
+  answers, for the local script that asked for it. The sender is told,
+  unless it was untagged group chatter, which the bridge never answers.
 
 What it does not do:
 

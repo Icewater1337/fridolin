@@ -101,7 +101,7 @@ brain that sent it, not as the brain's own words.
 
 | Status | Body | When |
 | --- | --- | --- |
-| `200` | `{"status": "sent"}` | Every part went out. |
+| `200` | `{"status": "sent"}` | Every part went out. A message that asks for a one-time code the OTP guard would catch (`otp_guard` on, one of `otp_markers` in `text`, a brain that answers the chat) also gets `"otp_request"`, an id that the [hand-off of the code](CONFIGURATION.md#otp_guard-and-otp_markers) repeats in its `request`. |
 | `400` | `{"error": …}` | The body is not JSON, `jid` or `text` is missing or blank, `jid` is not a chat, or it is a Status, broadcast list or channel (`…@broadcast`, `…@newsletter`), which the bridge never posts to. |
 | `401` | `{"error": …}` | No token while `script_api.tokenless_send` is off, or a token the bridge did not give out. |
 | `403` | `{"error": …}` | The caller may not send to that chat (see [Who may call](#who-may-call)). |

@@ -84,6 +84,12 @@ yet, so everything is under Unreleased until the first one.
   out, and leaves text handed in through `/ingest` alone. The hand-off
   file's `code` has the spaces and dashes taken out; `typed` holds the
   message as it was sent.
+- The OTP hand-off file, `<data_dir>/otp/<brain>.json`, names the request
+  a code answers: `/send` answers a message that asks for a code with an
+  `otp_request` id, which the file repeats as `request`, with
+  `requested_unix_ms` and `expires_unix_ms`. The bridge deletes the file
+  ten minutes after the code came, and at startup one that expired while
+  it was stopped; a script deletes it once it has the code.
 - A run's prompt looks for the chat's last messages in the last 16 MB of
   the brain's history, read back from its end, instead of reading the
   whole file for every run. A chat that was quiet behind more than 16 MB

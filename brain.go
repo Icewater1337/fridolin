@@ -38,6 +38,9 @@ type historyEntry struct {
 	// ID is the WhatsApp message's ID for a message from WhatsApp, which an
 	// edit or a deletion of it names (see recordChange).
 	ID string `json:"id,omitempty"`
+	// OTPRequest is the id /send answered a request for a one-time code
+	// with, on the "out" line of that request (see otpRequest).
+	OTPRequest string `json:"otp_request,omitempty"`
 }
 
 // The history entry types. They are written to every brain's history file,

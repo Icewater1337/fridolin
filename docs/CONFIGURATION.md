@@ -1025,26 +1025,39 @@ unless it was untagged group chatter, which the bridge never answers.
 The code is never written to history or sent to the model — the assistant
 never sees it. It is kept for local scripts instead:
 `<data_dir>/otp/<brain>.json` holds the latest code the guard caught for
-that brain, readable only by your user and denied to brains by the sandbox:
+that brain, readable only by your user (in a folder only you can open) and
+denied to brains by the sandbox:
 
 ```json
 {"brain": "main", "chat": "15551234567@s.whatsapp.net", "sender": "15551234567",
  "code": "483920", "typed": "483 920",
- "received": "2026-10-18T09:30:12+02:00", "received_unix_ms": 1792308612345}
+ "received": "2026-10-18T09:30:12+02:00", "received_unix_ms": 1792308612345,
+ "request": "9f3c2a71d04b6e58", "requested_unix_ms": 1792308590000,
+ "expires_unix_ms": 1792309212345}
 ```
 
 `code` is the code without spaces and dashes, `typed` the message as it
-was sent.
-
-Each caught code replaces the one before, and the file stays until then, so
-a script deletes it once it has used the code if it wants it gone. The
-guard reacts to any message the brain sent with a marker, not only to a
-`/send`, and the file carries no request id. A script that asked for a code
-through `/send` (with one of the `otp_markers` in its message) therefore
-polls the file for one whose `chat` (and `sender`) are the chat it asked in,
-and whose `received_unix_ms` is later than the time of its request; that
-field needs no time zone, unlike `received`, which ends in `Z` on a host
+was sent. `request` is the id `/send` answered the request with, in its
+`otp_request` (see [API.md](API.md#post-send)): that of the newest such
+request in the chat in the last ten minutes, also when the assistant's
+own reply held a marker after it, and `""` when only the brain asked, in
+its own words. `requested_unix_ms` is when the request went out. The unix
+times need no time zone, unlike `received`, which ends in `Z` on a host
 set to UTC.
+
+A script that asked for a code through `/send` (with one of the
+`otp_markers` in its message) polls the file until its `request` is the
+id it got, then takes the code and deletes the file, or renames it away
+first if another program might read it too. One that asked a group also
+checks `chat` and `sender`: for ten minutes anything in the group that
+reads as a code is caught for its request, a year such as `2024` from
+another member too, so only the code from the person it asked is its
+code. The bridge deletes the file itself ten minutes after the code came
+(`expires_unix_ms`), and at the next start one that expired while it was
+stopped. A newer code for the same brain replaces the file: a corrected
+code from the same chat, another member's number in a group, or one for
+another request, which the `request`, `chat` and `sender` of the file
+then tell apart.
 
 ### `max_chunk_size`
 
