@@ -61,8 +61,8 @@ mistakes to avoid.
 
 ## Files you receive
 
-Incoming files land in the bridge's staging directory with hash-like names.
-Staging is temporary — move files somewhere sensible:
+Incoming files land in the bridge's media inbox, and the message gives the path
+of each. The inbox is staging only — move files somewhere sensible:
 
 - audio or video whose content matters → `skills/transcription.md`
 - a message from **plaud** (it starts with `[Plaud] New recording`) →

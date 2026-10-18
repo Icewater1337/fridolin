@@ -401,7 +401,9 @@ func TestBrainTemplatesNameNoPaths(t *testing.T) {
 		t.Fatalf("only %d templates", len(files))
 	}
 	for name, content := range files {
-		for _, bad := range []string{"{{", "}}", "<bridge-repo>", "tools/history_search.py", "tools/poll_results.py", "tools/calendar_tool.py", filepath.Dir(exe), repoDir} {
+		// <work_dir> and ~/.fridolin/media were never filled in either: the
+		// brain runs in its folder, and the message gives each file's path.
+		for _, bad := range []string{"{{", "}}", "<bridge-repo>", "<work_dir>", "~/.fridolin", "tools/history_search.py", "tools/poll_results.py", "tools/calendar_tool.py", filepath.Dir(exe), repoDir} {
 			if strings.Contains(content, bad) {
 				t.Errorf("%s contains %q", name, bad)
 			}
@@ -415,8 +417,8 @@ func TestBrainTemplatesNameNoPaths(t *testing.T) {
 	if p := files["brain-prompt.md"]; !strings.HasPrefix(p, "# Family assistant") || !strings.Contains(p, `"$FRIDOLIN_BIN" history`) || !strings.Contains(p, `"$FRIDOLIN_BIN" polls`) || !strings.Contains(p, `"$FRIDOLIN_BIN" calendar`) {
 		t.Errorf("brain-prompt.md does not name the brain or the commands:\n%s", p)
 	}
-	if s := files["skills/transcription.md"]; !strings.Contains(s, `"$FRIDOLIN_TOOLS_DIR/transcribe.py"`) {
-		t.Errorf("skills/transcription.md does not run the helper by $FRIDOLIN_TOOLS_DIR:\n%s", s)
+	if s := files["skills/transcription.md"]; !strings.Contains(s, `"$FRIDOLIN_TOOLS_DIR/transcribe.py"`) || !strings.Contains(s, "--move-original") {
+		t.Errorf("skills/transcription.md does not run the helper by $FRIDOLIN_TOOLS_DIR, moving the original out of the inbox:\n%s", s)
 	}
 
 	// ScaffoldBrain writes them so.

@@ -9,7 +9,8 @@ you'd want to look at again, not extract information from.
 ## When not to use this
 
 - **Audio or video whose content matters as text** → use the **transcription**
-  skill. Transcript and original both go to `transcripts/`. Don't store it twice.
+  skill. It moves the original into `transcripts/`, next to the transcript, so
+  it is not stored twice.
 - **Formal documents** — PDFs, spreadsheets, contracts, invoices, reports →
   those belong in `documents/<category>/`.
 - **A document that happens to be an image** — a photographed receipt, a
@@ -22,28 +23,29 @@ a JPEG)? Document.
 
 ## Where things go
 
-Everything lives in your brain folder, the directory you run in:
+Everything lives in your brain folder, the one you run in:
 
 ```
-<brain-folder>/
+./
 ├── media/<subfolder>/     ← this skill
 ├── transcripts/           ← transcription skill
 ├── documents/<category>/  ← formal documents
 └── memories/              ← notes you write for yourself
 ```
 
-The bridge's inbound directory — `media/` inside its `data_dir`, by default
-`~/.fridolin/media/` — is **staging only**. Files arrive there
-with hash-like names and no permanent home. Move them out.
+Files people send arrive in the bridge's media inbox, and the message gives you
+the path of each. Photos, voice notes and videos are named after their WhatsApp
+message ID (`3EB0A1B2C3D4E5F6.jpg`); documents keep the name the sender gave
+them. The inbox is **staging only**, with no permanent home for anything.
+Move files out.
 
 ## Workflow
 
 ### 1. Confirm it's media
 
-It arrived at `~/.fridolin/media/<HASH>.<ext>`. Check it's the
-artifact itself rather than a document or something worth transcribing. If it's
-audio or video and the user wants the content, switch to the transcription
-skill instead.
+It arrived at the path the message gives. Check it's the artifact itself rather
+than a document or something worth transcribing. If it's audio or video and the
+user wants the content, switch to the transcription skill instead.
 
 ### 2. Pick a subfolder
 
@@ -74,9 +76,8 @@ use *that* date, not today's.
 ### 4. Move it, don't copy it
 
 ```bash
-mkdir -p "<brain-folder>/media/<subfolder>"
-mv ~/.fridolin/media/<HASH>.<ext> \
-   "<brain-folder>/media/<subfolder>/YYYY-MM-DD - description.<ext>"
+mkdir -p "media/<subfolder>"
+mv "PATH-FROM-THE-MESSAGE" "media/<subfolder>/YYYY-MM-DD - description.<ext>"
 ```
 
 Move. The staging directory is not a backup, and leaving copies there means it

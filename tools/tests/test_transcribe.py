@@ -156,6 +156,30 @@ class KeepOriginalTest(TranscribeTestCase):
                 if kept:
                     self.assertEqual(Path(out["audio_file"]).read_bytes(), b"audio")
 
+    def test_move_original(self):
+        # Only on request: the tool never moves a file it was not told to,
+        # so one outside the media inbox is not taken from where it was.
+        cases = [
+            ("copy by default", [], True),
+            ("--move-original", ["--move-original"], False),
+        ]
+        for name, flags, source_stays in cases:
+            with self.subTest(name):
+                source = self.media("note.ogg", b"audio")
+                code, out, err = self.transcribe(str(source), *flags)
+                self.assertEqual(code, 0, err)
+                self.assertEqual(source.exists(), source_stays)
+                self.assertEqual(Path(out["audio_file"]).read_bytes(), b"audio")
+                self.assertEqual(Path(out["audio_file"]).parent, self.out)
+
+    def test_move_original_needs_the_original_kept(self):
+        source = self.media("note.ogg", b"audio")
+        code, out, _ = self.transcribe(str(source), "--move-original", "--no-keep-original")
+        self.assertEqual(code, 1)
+        self.assertIn("--move-original", out["error"])
+        self.assertTrue(source.exists())
+        self.assertEqual(self.engine.calls, [], "refused before any work")
+
     def test_one_documented_switch(self):
         # --keep-original used to be a separate store_true flag that defaulted
         # to on, so passing it did nothing.

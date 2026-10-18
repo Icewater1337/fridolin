@@ -25,6 +25,11 @@ directory under the same stem, so they stay paired:
     2026-01-15 - Notes from the planning call.txt
     2026-01-15 - Notes from the planning call.ogg
 
+--move-original moves the original there instead of copying it, which is how
+a file in the bridge's media inbox leaves it; --no-keep-original leaves it
+where it is and writes the transcript alone. The tool never moves a file
+unless it is told to.
+
 Nothing is overwritten: when a stem is already taken (two short "Okay" notes
 on one day), the new pair gets "2026-01-15 - Okay (2)", then "(3)", and so on.
 
@@ -445,7 +450,12 @@ def main() -> None:
                     help=f"split longer files into chunks of this size (default: {DEFAULT_CHUNK_SECONDS})")
     ap.add_argument("--keep-original", action=argparse.BooleanOptionalAction, default=True,
                     help="copy the source media next to the transcript")
+    ap.add_argument("--move-original", action="store_true",
+                    help="move the source media next to the transcript instead of copying it, "
+                         "such as a file out of the bridge's media inbox")
     args = ap.parse_args()
+    if args.move_original and not args.keep_original:
+        ap.error("--move-original keeps the original next to the transcript; it cannot go with --no-keep-original")
     # The one exception boundary: whatever goes wrong, stdout is a JSON error
     # the assistant can read, never just a traceback on stderr.
     try:
@@ -515,7 +525,11 @@ def run(args: argparse.Namespace) -> None:
     transcript_path, audio_dest = claim_paths(output_dir, stem, media_suffix)
 
     transcript_path.write_text(text, encoding="utf-8")
-    if audio_dest is not None:
+    if audio_dest is not None and args.move_original:
+        # Over the empty file claim_paths made: a rename on one file system,
+        # else a copy, then the original is removed.
+        shutil.move(str(source), str(audio_dest))
+    elif audio_dest is not None:
         shutil.copy2(source, audio_dest)
 
     emit_json({
