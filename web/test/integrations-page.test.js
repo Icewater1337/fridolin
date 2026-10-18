@@ -115,6 +115,13 @@ test('a card that was never connected offers only Connect', async (t) => {
   assert.deepEqual(root.querySelectorAll('button').map((b) => b.textContent), ['Connect Plaud']);
 });
 
+test('the brains to pick are named with their ids', async (t) => {
+  const now = status('2026-10-18T10:00:00Z');
+  const { root } = await openPage(t, { ...now, settings: { ...now.settings, brain: 'personal' }, brain_missing: true });
+  const options = root.querySelectorAll('select option').map((o) => [o.value, o.textContent]);
+  assert.deepEqual(options.slice(1), [['work', 'Work (work)'], ['personal', 'Personal (personal) (missing)']]);
+});
+
 test('Automatic names the brain it picks, not the one picked instead', async (t) => {
   const now = status('2026-10-18T10:00:00Z');
   const { root } = await openPage(t, { ...now, settings: { ...now.settings, brain: 'work' }, target_brain: 'work', auto_brain: 'personal' });
@@ -155,4 +162,34 @@ test('Disconnect says it is done', async (t) => {
   button(document.querySelector('dialog'), 'Disconnect').click(); // confirm
   await settle();
   assert.ok(toasts().includes('Plaud disconnected'));
+});
+
+// The status changes on its own only with a check, at most every 30 s,
+// so the page asks for it seldom, except while a sign-in runs, whose end
+// it shows at once.
+test('the Plaud status is asked for every 2 s while a sign-in runs', async (t) => {
+  const signingIn = { ...status('2026-10-18T10:00:00Z'), connected: false, connect: { state: 'running', auth_url: 'https://web.plaud.ai/platform/oauth?client_id=x' } };
+  const { calls } = await openPage(t, signingIn);
+  const asked = () => calls.filter((c) => c.path === '/api/plaud/status').length;
+  const wait = async (ms) => { t.mock.timers.tick(ms); await settle(); };
+  assert.equal(asked(), 1);
+  await wait(1999);
+  assert.equal(asked(), 1);
+  await wait(1);
+  assert.equal(asked(), 2, 'again after 2 s while signing in');
+  await wait(2000);
+  assert.equal(asked(), 3);
+});
+
+test('a finished sign-in slows the Plaud status down', async (t) => {
+  const signingIn = { ...status('2026-10-18T10:00:00Z'), connected: false, connect: { state: 'running' } };
+  const { calls, poll } = await openPage(t, signingIn);
+  const asked = () => calls.filter((c) => c.path === '/api/plaud/status').length;
+  const wait = async (ms) => { t.mock.timers.tick(ms); await settle(); };
+  await poll(status('2026-10-18T10:00:30Z')); // signed in
+  const n = asked();
+  await wait(19999);
+  assert.equal(asked(), n, 'nothing for almost 20 s');
+  await wait(1);
+  assert.equal(asked(), n + 1, 'then once');
 });

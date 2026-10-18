@@ -1,6 +1,6 @@
 {
   "private": true,
-  "description": "Marks the dashboard's modules as ES modules for node --test. Nothing is built or installed.",
+  "description": "Marks the dashboard's modules, its tests and eslint.config.js as ES modules for node --test and ESLint. Nothing is built or installed.",
   "type": "module",
   "scripts": {
     "test": "node --test test/*.test.js"

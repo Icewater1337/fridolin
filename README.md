@@ -724,16 +724,17 @@ your name, your numbers, your company). CI runs the same check.
 `make check` runs what CI's build, lint and test jobs run: gofmt, `go vet`,
 `go mod tidy -diff`, the race tests, staticcheck, shellcheck, ruff,
 actionlint, a check that every workflow action is pinned to a commit SHA,
-the Python, dashboard, personal-data-check, action-pin-check and Makefile
-tests, and a smoke test that starts a race-enabled build in dev mode on a
-scratch config (`make help` lists every target). staticcheck and actionlint
-run through `go run` at pinned versions; ruff comes from
-`pip install -r tools/requirements-dev.txt`, shellcheck from your package
-manager. `make check` builds into a temp dir. `make build` writes
-`bin/fridolin`, and `make install` also copies it to `~/.local/bin` (set
-`PREFIX` or `BINDIR` to change that) to run by hand. Neither changes the
-service, which runs its own copy in `~/.local/lib/fridolin/`: `./setup.sh`
-installs one.
+ESLint on the dashboard, the Python, dashboard, personal-data-check,
+action-pin-check and Makefile tests, and a smoke test that starts a
+race-enabled build in dev mode on a scratch config (`make help` lists every
+target). staticcheck and actionlint run through `go run` at pinned
+versions, and ESLint through `npx` at a pinned version, which it fetches
+the first time; ruff comes from `pip install -r tools/requirements-dev.txt`,
+shellcheck from your package manager. `make check` builds into a temp dir.
+`make build` writes `bin/fridolin`, and `make install` also copies it to
+`~/.local/bin` (set `PREFIX` or `BINDIR` to change that) to run by hand.
+Neither changes the service, which runs its own copy in
+`~/.local/lib/fridolin/`: `./setup.sh` installs one.
 
 CI also installs the site's npm packages and runs its own tests
 (`cd site && npm install && npm test`; [docs/SITE.md](docs/SITE.md));

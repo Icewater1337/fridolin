@@ -57,9 +57,6 @@ export function pollStatus(then = () => {}) {
   return { stop };
 }
 
-/** Asks for /api/status now, dropping a request in flight; resolves once the answer is in. */
-export function refreshStatus() { return statusResource.refresh(); }
-
 export function setIgnoredCount(ignoredCount) { store.set({ ignoredCount }); }
 
 /**
@@ -70,7 +67,7 @@ export function setIgnoredCount(ignoredCount) { store.set({ ignoredCount }); }
 export function setRestartRequired(fields) {
   const { status } = store.get();
   if (status) store.set({ status: { ...status, restart_required: fields || [] } });
-  refreshStatus();
+  statusResource.refresh();
 }
 
 /** The name of a chat, '' when unknown. */

@@ -8,7 +8,7 @@ import { get, post } from './api.js';
 import { store, setStatus } from './store.js';
 import { h, mount } from '../lib/dom.js';
 import { toast, toastError } from '../components/toast.js';
-import { btn } from '../components/buttons.js';
+import { openDialog } from '../components/dialog.js';
 import { spinner } from '../components/common.js';
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -18,17 +18,11 @@ export async function restartBridge({ reload = () => location.reload() } = {}) {
   const { status } = store.get();
   const before = status ? status.started_at : null;
   const version = status ? status.version : '';
-  const msg = h('p', 'Restarting the bridge… this usually takes a few seconds.');
-  const body = h('div.restart-body', spinner('large'), msg);
-  const actions = h('div.dialog-actions');
-  const dlg = h('dialog.dialog', { 'aria-label': 'Restarting' },
-    h('div.dialog-head', h('h2', 'Restarting')),
-    h('div.dialog-body', body),
-    actions);
-  dlg.addEventListener('cancel', (e) => e.preventDefault());
-  document.body.appendChild(dlg);
-  dlg.showModal();
-  const close = () => { dlg.close(); dlg.remove(); };
+  const body = h('div.restart-body', spinner('large'), h('p', 'Restarting the bridge… this usually takes a few seconds.'));
+  // Only the restart's outcome closes it, and leaving the page (the browser's
+  // Back button) does not: the restart goes on regardless.
+  const dlg = openDialog({ title: 'Restarting', body, actions: [], dismissible: false, outlivesPage: true });
+  const close = () => dlg.close();
 
   try {
     await post('/api/restart');
@@ -64,6 +58,6 @@ export async function restartBridge({ reload = () => location.reload() } = {}) {
     h('p', 'The bridge has not answered yet.'),
     h('p.muted', 'If you changed the listen address (http_listen), the dashboard has moved: run ',
       h('code.mono', 'fridolin open'), ' in a terminal to open it at the new address. Otherwise check the terminal or service log of the bridge.'));
-  mount(actions, btn('Close', { onClick: () => close() }), btn('Reload page', { kind: 'primary', onClick: () => location.reload() }));
+  dlg.setActions([{ label: 'Close', value: null }, { label: 'Reload page', kind: 'primary', onClick: () => { reload(); return true; } }]);
   return false;
 }

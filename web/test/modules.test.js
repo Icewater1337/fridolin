@@ -1,8 +1,10 @@
-// The dashboard has no build step or linter, so nothing else notices a
-// broken import before a browser does, and one broken module stops the
-// whole page. These tests read every module and check the imports resolve,
-// are used, and keep the layers: lib/ stands alone, components/ never reach
-// into pages/, and pages never import each other.
+// The dashboard has no build step, and ESLint (make lint-web) reads one
+// file at a time, so nothing else notices a broken import before a browser
+// does, and one broken module stops the whole page. These tests read every
+// module and check the imports resolve, are used, and keep the layers:
+// lib/ stands alone, components/ never reach into pages/, and pages never
+// import each other. Every export is imported somewhere, so none is left
+// behind by code that is gone.
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
@@ -65,6 +67,35 @@ test('every imported name is used', async (t) => {
   }
 });
 
+// The tests import from the modules too: an export only a test uses is a
+// pure helper kept apart so it can be tested.
+const testImports = fs.readdirSync(path.join(WEB, 'test')).filter((f) => f.endsWith('.js')).flatMap((f) => {
+  const file = path.join(WEB, 'test', f);
+  const src = fs.readFileSync(file, 'utf8');
+  return [...src.matchAll(/^import\s*(?:\{([^}]*)\}|([\w$]+))\s*from\s*'([^']+)';/gm)]
+    .map((m) => ({ target: path.resolve(path.dirname(file), m[3]), names: m[1] ? m[1].split(',').map((n) => n.trim().split(/\s+as\s+/)[0]).filter(Boolean) : ['default'] }));
+});
+
+// Modules nothing imports, which the page loads itself (index.html).
+const ENTRY_POINTS = new Set([path.join('app', 'main.js')]);
+
+test('every export is imported somewhere', async (t) => {
+  const used = new Map(modules.map((m) => [m.file, new Set()]));
+  const all = [
+    ...modules.flatMap((m) => m.imports.map(({ spec, names }) => ({ target: path.resolve(path.dirname(m.file), spec), names }))),
+    ...testImports,
+  ];
+  for (const { target, names } of all) if (used.has(target)) names.forEach((n) => used.get(target).add(n));
+  for (const m of modules) {
+    if (ENTRY_POINTS.has(m.rel)) continue;
+    await t.test(m.rel, () => {
+      for (const name of m.exports) {
+        assert.ok(used.get(m.file).has(name), `${name} is exported but no module or test imports it: drop the export, or the code`);
+      }
+    });
+  }
+});
+
 test('modules keep their layers', async (t) => {
   const allowed = {
     lib: ['lib'],
@@ -90,4 +121,47 @@ test('index.html loads files that exist', () => {
   const refs = [...html.matchAll(/(?:src|href)="\/([^"]+)"/g)].map((m) => m[1]);
   assert.ok(refs.includes('assets/app/main.js'), 'the entry module is not loaded');
   for (const r of refs) assert.ok(fs.existsSync(path.join(WEB, r)), `${r} does not exist`);
+});
+
+// The bridge serves the dashboard with a Content-Security-Policy that
+// allows no inline script or style: one in the page would be refused, and
+// what it does would silently not happen. inlineCode lists what in html
+// the policy would refuse.
+function inlineCode(html) {
+  const found = [];
+  // A browser ends a script at </script followed by anything up to the >,
+  // such as </script foo>, so the end tag allows that too.
+  for (const m of html.matchAll(/<script\b([^>]*)>([\s\S]*?)<\/script\b[^>]*>/gi)) {
+    if (!/\ssrc="/.test(m[1])) found.push(`a script without src: ${m[0]}`);
+    if (m[2].trim() !== '') found.push(`a script with a body: ${m[0]}`);
+  }
+  if (/<style\b/i.test(html)) found.push('a <style> element');
+  for (const m of html.matchAll(/<[a-z][\w-]*\b([^>]*)>/gi)) {
+    if (/(^|\s)style\s*=/i.test(m[1])) found.push(`a style attribute: ${m[0]}`);
+    if (/(^|\s)on[a-z]+\s*=/i.test(m[1])) found.push(`an event handler attribute: ${m[0]}`);
+  }
+  return found;
+}
+
+test('index.html has no inline script or style', () => {
+  assert.deepEqual(inlineCode(fs.readFileSync(path.join(WEB, 'index.html'), 'utf8')), []);
+});
+
+// The check on pages that break each rule, so a check that misses one
+// fails here rather than passing index.html.
+test('inlineCode finds each kind of inline script and style', async (t) => {
+  const cases = [
+    ['scripts loaded by src', '<script src="/a.js"></script>\n<script type="module" src="/b.js"></script>', []],
+    ['an inline script', '<script>run()</script>', ['a script without src', 'a script with a body']],
+    ['a body beside src', '<script src="/a.js">run()</script>', ['a script with a body']],
+    ['an end tag with attributes', '<script>run()</script\tfoo>', ['a script without src', 'a script with a body']],
+    ['upper case and a newline', '<SCRIPT>run()</SCRIPT\n>', ['a script without src', 'a script with a body']],
+    ['a style element', '<style>p { color: red }</style>', ['a <style> element']],
+    ['a style attribute', '<p style="color: red">x</p>', ['a style attribute']],
+    ['an event handler attribute', '<button onclick="go()">Go</button>', ['an event handler attribute']],
+    ['names that only contain style or on', '<p data-style="a" data-onclick="b" class="onward">x</p>', []],
+  ];
+  for (const [name, html, want] of cases) {
+    await t.test(name, () => assert.deepEqual(inlineCode(html).map((f) => f.split(':')[0]), want));
+  }
 });

@@ -226,6 +226,10 @@ jobs:
       - name: dashboard modules and unit tests
         run: make test-web
 
+      # ESLint at the version the Makefile pins, which npx fetches.
+      - name: ESLint
+        run: make lint-web
+
   site:
     # The site process (site/, docs/SITE.md): its own tests, then the Go
     # end-to-end tests that run it, which skip without its node_modules.

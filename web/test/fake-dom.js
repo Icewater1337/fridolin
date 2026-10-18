@@ -131,6 +131,11 @@ class FakeElement extends FakeNode {
     return !event.defaultPrevented;
   }
 
+  closest(selector) {
+    for (let n = this; n instanceof FakeElement; n = n.parentNode) if (matches(n, selector)) return n;
+    return null;
+  }
+
   click() { if (!this.disabled) this.dispatchEvent(new Event('click', { bubbles: true, cancelable: true })); }
   focus() { globalThis.document.activeElement = this; }
   scrollIntoView() {}
