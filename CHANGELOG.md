@@ -270,10 +270,16 @@ for compatibility.
   say, keeps its answer. The bridge failed it with "token too long" and
   lost the result that came after; now it skips the line and notes it in
   the brain's `claude-stream.log`.
+- A chat's messages reach the bridge in the order they were sent: a
+  photo and "what is this?" right after it no longer merge the wrong way
+  round, `!stop` no longer runs before the message it is to stop, and an
+  edit or a deletion comes after the message it changes. A file that
+  takes long to download holds up only the messages its own chat sent
+  after it, no longer every chat's.
 - A group the bridge does not allow is looked up on WhatsApp, for its
   name in the log and on the Chats page, at most once an hour instead of
   for every message it sends, and an allowed group not at all. A lookup
-  that hangs gives up after five seconds.
+  that hangs gives up after five seconds and holds up only that group.
 - The log names who voted for what in a poll only at the debug level,
   and a vote it fails to record only masked. It masks the numbers and
   LIDs of the senders it ignores, as it already did for group members

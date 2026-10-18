@@ -84,11 +84,16 @@ type WhatsAppClient struct {
 	lister     groupLister            // nil: the client; tests set a fake
 	notify     func(jid, text string) // sendNotice; tests record instead
 
-	// ctx ends when the client disconnects for good. Attachment downloads
-	// and group lookups run under it, so shutting down does not wait for
-	// them.
+	// ctx ends when the client disconnects for good. Attachment downloads,
+	// group lookups and what the handlers send run under it, so shutting
+	// down does not wait for them. What is only read from the disk runs
+	// under storeCtx instead.
 	ctx    context.Context
 	cancel context.CancelFunc
+
+	// intake holds each chat's message events until its worker handles
+	// them, in the order they came (see chatQueues).
+	intake chatQueues
 
 	// pairMu serialises pairing; pairing is set while a pairing session's
 	// codes are followed (see StartPairing).
@@ -147,6 +152,14 @@ func NewWhatsAppClient(cfg func() *Config, store *Store, handler InboundHandler,
 	client.AddEventHandler(wa.eventHandler)
 	return wa, nil
 }
+
+// storeCtx is ctx without its end, for what is only read from the disk:
+// whatsmeow's map between LIDs and numbers and its message secrets, and
+// the polls the bridge sent. Disconnect ends ctx to cut the downloads off,
+// and then still has the chats' workers hand on the messages they hold;
+// those reads must not fail then, and they take too little time to be
+// worth cutting off.
+func (wa *WhatsAppClient) storeCtx() context.Context { return context.WithoutCancel(wa.ctx) }
 
 // cl returns the whatsmeow client.
 func (wa *WhatsAppClient) cl() *whatsmeow.Client {
@@ -311,25 +324,61 @@ func (wa *WhatsAppClient) JoinedGroups(ctx context.Context) ([]GroupInfo, error)
 	})
 }
 
-// eventHandler handles all whatsmeow events: messages here, the
-// connection's in connectionEvent. The group list sees each first, as
-// group and connection events are what drop it.
+// eventHandler handles all whatsmeow events, on whatsmeow's one event
+// goroutine, which must not wait: a message, an edit, a deletion or a
+// poll vote goes onto its chat's queue, whose worker handles it (see
+// chatQueues); the connection's events go to connectionEvent. The group
+// list sees each first, as group and connection events are what drop it.
 func (wa *WhatsAppClient) eventHandler(rawEvt interface{}) {
 	wa.groups.observe(rawEvt)
 	if evt, ok := rawEvt.(*events.Message); ok {
-		if evt.Message.GetPollUpdateMessage() != nil {
-			wa.handlePollVote(evt)
-		} else {
-			wa.handleMessage(evt)
-		}
+		wa.enqueue(evt)
 		return
 	}
 	wa.connectionEvent(rawEvt)
 }
 
+// enqueue puts evt on its chat's queue. One in no chat the bridge handles
+// (see incomingChat) is dropped at once, which costs nothing.
+func (wa *WhatsAppClient) enqueue(evt *events.Message) {
+	chat, ok := queueChat(evt.Info.MessageSource)
+	if !ok {
+		wa.handleMessage(evt)
+		return
+	}
+	if err := wa.intake.add(chat, func() { wa.handleEvent(evt) }); errors.Is(err, errIntakeClosed) {
+		wa.log.Debugf("Dropped message %s: the client is disconnecting", evt.Info.ID)
+	}
+}
+
+// queueChat is the queue src's message goes on: its chat, as incomingChat
+// finds it. A person WhatsApp names by LID, with their number along, goes
+// by the number, so that their messages share one queue however WhatsApp
+// addresses them. ok is false for a message in no chat the bridge handles.
+func queueChat(src types.MessageSource) (string, bool) {
+	chat, ok := incomingChat(src)
+	if !ok {
+		return "", false
+	}
+	chat = chat.ToNonAD()
+	if chat.Server == types.HiddenUserServer && !src.IsFromMe && src.Sender.ToNonAD() == chat && src.SenderAlt.Server == types.DefaultUserServer {
+		chat = src.SenderAlt.ToNonAD()
+	}
+	return chat.String(), true
+}
+
+// handleEvent handles a message event, on its chat's worker.
+func (wa *WhatsAppClient) handleEvent(evt *events.Message) {
+	if evt.Message.GetPollUpdateMessage() != nil {
+		wa.handlePollVote(evt)
+		return
+	}
+	wa.handleMessage(evt)
+}
+
 // handlePollVote decrypts a poll vote and records it (see recordVote).
 func (wa *WhatsAppClient) handlePollVote(evt *events.Message) {
-	pollVote, err := wa.cl().DecryptPollVote(wa.ctx, evt)
+	pollVote, err := wa.cl().DecryptPollVote(wa.storeCtx(), evt)
 	if err != nil {
 		// Masked, in whatsmeow's error too, which names the voter: the
 		// main log names no voter (see recordVote).
@@ -343,7 +392,7 @@ func (wa *WhatsAppClient) handlePollVote(evt *events.Message) {
 	}
 	// One voter, however WhatsApp addressed them: a vote changed later
 	// must replace the first, not count as a second voter's.
-	voter := canonicalUser(wa.ctx, wa.lidStore(), evt.Info.Sender, evt.Info.SenderAlt)
+	voter := canonicalUser(wa.storeCtx(), wa.lidStore(), evt.Info.Sender, evt.Info.SenderAlt)
 	wa.recordVote(pollMsgID, voter, pollVote.GetSelectedOptions())
 }
 
@@ -351,7 +400,7 @@ func (wa *WhatsAppClient) handlePollVote(evt *events.Message) {
 // as WhatsApp sends it, the hashes of the chosen options, and tells
 // onVote. A vote for a poll the bridge did not keep is dropped.
 func (wa *WhatsAppClient) recordVote(pollMsgID string, voter types.JID, hashes [][]byte) {
-	poll, err := wa.store.SentPoll(wa.ctx, pollMsgID)
+	poll, err := wa.store.SentPoll(wa.storeCtx(), pollMsgID)
 	if err != nil {
 		// Not necessarily an error: the poll may predate vote tracking.
 		log.Printf("Poll vote for unknown poll %s (not in DB) — skipping", pollMsgID)
@@ -486,7 +535,7 @@ func (wa *WhatsAppClient) handleDMMessage(msg *events.Message, sender types.JID)
 	// may be under the LID WhatsApp addressed them by.
 	alt := msg.Info.Chat.ToNonAD()
 	if alt == sender {
-		alt = lidOf(wa.ctx, wa.lidStore(), sender)
+		alt = lidOf(wa.storeCtx(), wa.lidStore(), sender)
 	}
 	senderNumber := sender.User
 	text := extractText(msg.Message)
@@ -515,7 +564,9 @@ func (wa *WhatsAppClient) handleDMMessage(msg *events.Message, sender types.JID)
 	if !alt.IsEmpty() {
 		m.ChatAlt = alt.String()
 	}
-	go wa.handler(context.Background(), m)
+	// On the chat's worker, so the chat's messages reach the bridge in
+	// the order they came.
+	wa.handler(wa.ctx, m)
 }
 
 func mediaList(p string) []string {
@@ -642,7 +693,7 @@ func (wa *WhatsAppClient) handleGroupMessage(msg *events.Message) {
 	}
 
 	log.Printf("Group message from %s by %s: processing (silent=%v)", groupLabel(groupJID, groupName), senderNumber, silent)
-	go wa.handler(context.Background(), Inbound{
+	wa.handler(wa.ctx, Inbound{
 		JID: groupJID, Sender: senderNumber, Text: text, Media: mediaList(mediaPath),
 		Quoted: quoted, Silent: silent, Source: sourceWhatsApp, At: msg.Info.Timestamp, ID: string(msg.Info.ID),
 	})
@@ -689,8 +740,8 @@ func (wa *WhatsAppClient) sendNotice(jid, text string) {
 }
 
 // mediaDownloadTimeout bounds one attachment download. Downloads run on
-// whatsmeow's event goroutine, so a stalled one holds up every message
-// behind it.
+// their chat's worker, so a stalled one holds up the messages its chat
+// sent after it.
 const mediaDownloadTimeout = 2 * time.Minute
 
 // mediaDownloader is what saveAttachment needs from whatsmeow.Client; tests
@@ -1009,7 +1060,7 @@ func (wa *WhatsAppClient) ownMentionJIDs() []types.JID {
 		return nil
 	}
 	if lid.User == "" {
-		lid = lidOf(wa.ctx, wa.lidStore(), own)
+		lid = lidOf(wa.storeCtx(), wa.lidStore(), own)
 	}
 	out := []types.JID{own}
 	if lid.User != "" && lid != own {
@@ -1050,7 +1101,7 @@ func stripMentions(text string, jids []types.JID) string {
 // resolved is false for a LID nothing maps to a number, whose digits are
 // WhatsApp's internal id and must match no number on a list.
 func (wa *WhatsAppClient) senderOf(src types.MessageSource) (sender types.JID, resolved bool) {
-	sender = canonicalUser(wa.ctx, wa.lidStore(), src.Sender, src.SenderAlt)
+	sender = canonicalUser(wa.storeCtx(), wa.lidStore(), src.Sender, src.SenderAlt)
 	return sender, sender.Server == types.DefaultUserServer
 }
 
@@ -1066,7 +1117,7 @@ func groupLabel(jid, name string) string {
 
 // groupName is the group's subject as WhatsApp has it, or "" when it
 // cannot be looked up: from the names kept (see groupNameCache), or else
-// asked of WhatsApp.
+// asked for on the chat's worker, never on whatsmeow's event goroutine.
 func (wa *WhatsAppClient) groupName(jid types.JID) string {
 	return wa.groups.names.lookup(wa.ctx, jid.String(), func(ctx context.Context) (string, error) {
 		info, err := wa.groupsFrom().GetGroupInfo(ctx, jid)
@@ -1099,7 +1150,7 @@ func (wa *WhatsAppClient) quoteOf(msg *waE2E.Message) *Quote {
 	}
 	p, err := types.ParseJID(msg.GetExtendedTextMessage().GetContextInfo().GetParticipant())
 	if err == nil && p.Server == types.HiddenUserServer {
-		q.From = canonicalUser(wa.ctx, wa.lidStore(), p, types.EmptyJID).User
+		q.From = canonicalUser(wa.storeCtx(), wa.lidStore(), p, types.EmptyJID).User
 	}
 	return q
 }
