@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -10,6 +11,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 )
 
 func TestDecodeJSONIsStrict(t *testing.T) {
@@ -661,5 +663,185 @@ func TestInspectDoesNotProbeRefusedFolders(t *testing.T) {
 		if _, ok := got[k]; ok {
 			t.Errorf("response has %q for a refused folder: %v", k, got)
 		}
+	}
+}
+
+// Two adds at once that clash with each other cannot both be registered:
+// addMu runs them one after the other, so the second one's checks see the
+// first and refuse it.
+func TestConcurrentAddsCannotBothClaimAGroup(t *testing.T) {
+	tb := newTestBridge(t, "")
+	for round := range 8 {
+		group := fmt.Sprintf("1203630000000000%02d@g.us", round+10)
+		var wg sync.WaitGroup
+		codes := make([]int, 2)
+		for i := range 2 {
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				id := fmt.Sprintf("r%d-%d", round, i)
+				m := BrainManifest{ID: id, Name: id, Routing: BrainRouting{Groups: []string{group}}}
+				codes[i] = tb.do("POST", "/api/brains", map[string]any{"path": "~/" + id, "manifest": m, "create_dir": true}).Code
+			}()
+		}
+		wg.Wait()
+		slices.Sort(codes)
+		if !slices.Equal(codes, []int{200, http.StatusUnprocessableEntity}) {
+			t.Fatalf("round %d: codes %v, want one 200 and one 422", round, codes)
+		}
+		// The refused brain's folder is not left scaffolded.
+		for i := range 2 {
+			id := fmt.Sprintf("r%d-%d", round, i)
+			if tb.brainMgr.Get(id) == nil && dirExists(filepath.Join(tb.home, id)) {
+				t.Fatalf("round %d: the refused brain's folder %s was left behind", round, id)
+			}
+		}
+	}
+	for _, is := range tb.brainMgr.Issues() {
+		t.Errorf("issue: %+v", is)
+	}
+}
+
+// addMu keeps adds apart, not the other config writers. A brain saved
+// while an add runs, after its first check, that claims the group the new
+// brain claims refuses the add: it is checked again inside its config
+// update, and its folder is not left scaffolded.
+func TestAddBrainRechecksAgainstOtherWriters(t *testing.T) {
+	const group = "120363000000000000@g.us"
+	tb := newTestBridge(t, "")
+	tb.addFolderBrain(t, BrainManifest{ID: "a", Name: "A"})
+	// The other writer, as PUT /api/brains/a is, holds the config update
+	// until the add has passed its first check, then gives a the group.
+	inside, release, saved := make(chan struct{}), make(chan struct{}), make(chan error, 1)
+	go func() {
+		_, err := tb.cfgs.Update("", func(c *Config) error {
+			close(inside)
+			<-release
+			for _, ref := range c.BrainDirs {
+				if ref.Approved != nil && ref.Approved.ID == "a" {
+					ref.Approved.Routing.Groups = []string{group}
+				}
+			}
+			return nil
+		})
+		saved <- err
+	}()
+	<-inside
+	added := make(chan *httptest.ResponseRecorder, 1)
+	go func() {
+		m := BrainManifest{ID: "b", Name: "B", Routing: BrainRouting{Groups: []string{group}}}
+		added <- tb.do("POST", "/api/brains", map[string]any{"path": "~/b", "manifest": m, "create_dir": true})
+	}()
+	// It scaffolds only after its first check passed.
+	waitFor(t, 5*time.Second, "the add's scaffold", func() bool { return fileExists(filepath.Join(tb.home, "b", "brain.json")) })
+	close(release)
+	if err := <-saved; err != nil {
+		t.Fatal(err)
+	}
+	if w := <-added; w.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("add: %d %s, want 422", w.Code, w.Body.String())
+	}
+	for _, ref := range tb.cfgs.Get().BrainDirs {
+		if ref.Approved != nil && ref.Approved.ID == "a" && !slices.Contains(ref.Approved.Routing.Groups, group) {
+			t.Error("brain a lost the group")
+		}
+	}
+	if tb.brainMgr.Get("b") != nil || dirExists(filepath.Join(tb.home, "b")) {
+		t.Error("the refused brain was registered or its folder left behind")
+	}
+}
+
+// Adds of the same new folder at once register one brain, and its folder
+// keeps what the scaffold made: an add that lost must not take back files
+// it happened to create first, such as brain.json, that the winner counts
+// on.
+func TestConcurrentAddsOfOneFolder(t *testing.T) {
+	tb := newTestBridge(t, "")
+	for round := range 8 {
+		path := fmt.Sprintf("~/race-%d", round)
+		type result struct {
+			code int
+			id   string
+		}
+		results := make([]result, 6)
+		var wg sync.WaitGroup
+		for i := range results {
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				m := BrainManifest{ID: fmt.Sprintf("race-%d-%d", round, i), Name: "Race"}
+				w := tb.do("POST", "/api/brains", map[string]any{"path": path, "manifest": m, "create_dir": true})
+				var resp struct{ ID string }
+				_ = json.Unmarshal(w.Body.Bytes(), &resp)
+				results[i] = result{w.Code, resp.ID}
+			}()
+		}
+		wg.Wait()
+		var won []string
+		for _, r := range results {
+			if r.code == http.StatusOK {
+				won = append(won, r.id)
+			}
+		}
+		if len(won) != 1 {
+			t.Fatalf("round %d: %d adds succeeded (%v), want 1: %v", round, len(won), won, results)
+		}
+		dir := filepath.Join(tb.home, fmt.Sprintf("race-%d", round))
+		m, err := ReadManifest(dir)
+		if err != nil {
+			t.Fatalf("round %d: the added brain's folder has no brain.json: %v", round, err)
+		}
+		if m.ID != won[0] {
+			t.Fatalf("round %d: brain.json is brain %q's, but %q was added", round, m.ID, won[0])
+		}
+		if _, err := os.Stat(filepath.Join(dir, m.normalized().PromptFile)); err != nil {
+			t.Fatalf("round %d: the added brain's prompt file is gone: %v", round, err)
+		}
+	}
+}
+
+// A brain that could not be registered leaves no scaffold behind, so the
+// same folder can be added again.
+func TestFailedAddRemovesTheScaffold(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("root writes into a read-only folder")
+	}
+	tb := newTestBridge(t, "")
+	existing := filepath.Join(tb.home, "existing")
+	if err := os.MkdirAll(filepath.Join(existing, "memories"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(existing, "memories", "mine.md"), []byte("keep"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cfgDir := filepath.Dir(tb.cfgs.Path())
+	if err := os.Chmod(cfgDir, 0o500); err != nil { // config.json cannot be written
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(cfgDir, 0o700) })
+	// create_dir makes the folders above the brain's too.
+	for _, p := range []string{"~/fresh", "~/existing", "~/new/deeper/fresh", "~/existing/sub/fresh"} {
+		w := tb.do("POST", "/api/brains", map[string]any{"path": p, "manifest": BrainManifest{ID: "x", Name: "X"}, "create_dir": true})
+		if w.Code != http.StatusUnprocessableEntity {
+			t.Fatalf("add %s with config.json read-only: %d %s", p, w.Code, w.Body.String())
+		}
+	}
+	for _, d := range []string{"fresh", "new"} {
+		if dirExists(filepath.Join(tb.home, d)) {
+			t.Errorf("the folder ~/%s made for the brain was left behind", d)
+		}
+	}
+	entries, _ := os.ReadDir(existing)
+	if len(entries) != 1 || entries[0].Name() != "memories" {
+		t.Errorf("existing folder has %v, want only its own memories", entries)
+	}
+	if data, _ := os.ReadFile(filepath.Join(existing, "memories", "mine.md")); string(data) != "keep" {
+		t.Error("a file that was there before was touched")
+	}
+	if err := os.Chmod(cfgDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if w := tb.do("POST", "/api/brains", map[string]any{"path": "~/existing", "manifest": BrainManifest{ID: "x", Name: "X"}}); w.Code != 200 {
+		t.Fatalf("add again: %d %s", w.Code, w.Body.String())
 	}
 }

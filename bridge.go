@@ -66,6 +66,9 @@ type Bridge struct {
 
 	mu       sync.Mutex
 	warnings []string // from startup checks
+
+	// addMu makes adding a brain one step at a time (apiAddBrain).
+	addMu sync.Mutex
 }
 
 // BridgeOptions are the run-time switches from the command line.

@@ -839,12 +839,22 @@ func (b *Bridge) apiAddBrain(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, err.Error())
 		return
 	}
+	// One add at a time, from the checks to the registration, so that an
+	// add's checks see every brain the adds before it registered. Two adds
+	// of the same new folder would otherwise each scaffold a part of it, and
+	// the one that then lost the check in cfgs.Update would undo its part,
+	// which can be the brain.json or prompt the other one was added with.
+	b.addMu.Lock()
+	defer b.addMu.Unlock()
 	cfg := b.cfgs.Get()
 	abs, problems, _ := CheckBrainPath(req.Path, cfg, brainDirs(cfg))
 	if len(problems) > 0 {
 		writeErr(w, http.StatusUnprocessableEntity, strings.Join(problems, "; "))
 		return
 	}
+	// The first folder ScaffoldBrain will make, so a failed add can undo
+	// them all: create_dir makes the parents too.
+	made := firstMissing(abs)
 	if st, err := os.Stat(abs); err != nil {
 		if !req.CreateDir {
 			writeErr(w, http.StatusUnprocessableEntity, "folder does not exist")
@@ -881,9 +891,7 @@ func (b *Bridge) apiAddBrain(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Check the new brain against the others before touching the disk.
-	specs, _ := ResolveBrains(cfg)
-	specs = append(specs, BrainSpec{Manifest: m, Dir: abs})
-	if err := ValidateBrainSet(specs); err != nil {
+	if err := checkNewBrain(cfg, m, abs); err != nil {
 		writeErr(w, http.StatusUnprocessableEntity, err.Error())
 		return
 	}
@@ -894,15 +902,85 @@ func (b *Bridge) apiAddBrain(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if _, err := b.cfgs.Update("", func(c *Config) error {
+		// Again, against the config this update changes. addMu keeps adds
+		// apart, but not the other config writers: a brain saved or
+		// approved since the check above may claim the same group or the
+		// DMs, and the two must not both be registered.
+		eff, err := effective(c)
+		if err != nil {
+			return err
+		}
+		if err := checkNewBrain(eff, m, abs); err != nil {
+			return err
+		}
 		approved := m
 		c.BrainDirs = append(c.BrainDirs, BrainRef{Path: tildePath(abs), Approved: &approved})
 		return nil
 	}); err != nil {
+		unscaffold(abs, created, made)
 		writeErr(w, http.StatusUnprocessableEntity, err.Error())
 		return
 	}
 	log.Printf("brain %s: added (%s), created %v", m.ID, abs, created)
 	writeJSON(w, http.StatusOK, map[string]any{"id": m.ID, "path": abs, "created": nonNil(created)})
+}
+
+// checkNewBrain checks brain m, to go in folder abs, against the brains cfg
+// (an effective configuration) has: the folder must be none of theirs, in
+// or around one, and m must not clash with them.
+func checkNewBrain(cfg *Config, m BrainManifest, abs string) error {
+	if _, problems, _ := CheckBrainPath(abs, cfg, brainDirs(cfg)); len(problems) > 0 {
+		return errors.New(strings.Join(problems, "; "))
+	}
+	specs, _ := ResolveBrains(cfg)
+	return ValidateBrainSet(append(specs, BrainSpec{Manifest: m, Dir: abs}))
+}
+
+// firstMissing is the topmost folder of path that does not exist, the
+// first one os.MkdirAll(path) makes; "" when path is there.
+func firstMissing(path string) string {
+	missing := ""
+	for p := filepath.Clean(path); ; p = filepath.Dir(p) {
+		if _, err := os.Lstat(p); !errors.Is(err, fs.ErrNotExist) {
+			return missing
+		}
+		missing = p
+		if filepath.Dir(p) == p {
+			return missing
+		}
+	}
+}
+
+// unscaffold removes what ScaffoldBrain created in dir, the files in
+// created, for a brain that was then not added, so the folder can be added
+// again. Files that were there before stay. The folders it made for them
+// go once they are empty, an empty one that was there before with them.
+// made is the first folder that was missing (see firstMissing), or "":
+// dir and the folders above it up to made go too, while they are empty.
+func unscaffold(dir string, created []string, made string) {
+	var dirs []string
+	for _, rel := range created {
+		if err := os.Remove(filepath.Join(dir, rel)); err != nil && !errors.Is(err, fs.ErrNotExist) {
+			log.Printf("removing %s after the brain was not added: %v", filepath.Join(dir, rel), err)
+		}
+		for d := filepath.Dir(rel); d != "." && !slices.Contains(dirs, d); d = filepath.Dir(d) {
+			dirs = append(dirs, d)
+		}
+	}
+	// Deepest first: a folder's path is longer than its parent's. Remove
+	// refuses a folder that is not empty, which keeps one with files.
+	sort.Slice(dirs, func(i, j int) bool { return len(dirs[i]) > len(dirs[j]) })
+	for _, d := range dirs {
+		_ = os.Remove(filepath.Join(dir, d))
+	}
+	if made == "" {
+		return
+	}
+	for d := filepath.Clean(dir); ; d = filepath.Dir(d) {
+		if os.Remove(d) != nil || d == made {
+			return
+		}
+	}
 }
 
 // apiUpdateBrain saves edited settings for a brain.
