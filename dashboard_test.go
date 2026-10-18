@@ -149,7 +149,7 @@ func TestDashboardServesOnlyThePage(t *testing.T) {
 		want int
 	}{
 		{"/", 200},
-		{"/favicon.png", 200},
+		{"/favicon.svg", 200},
 		{"/assets/app/main.js", 200},
 		{"/assets/lib/format.js", 200},
 		{"/package.json", 404},
@@ -163,6 +163,10 @@ func TestDashboardServesOnlyThePage(t *testing.T) {
 			}
 			if ct := w.Header().Get("Content-Type"); c.want == 200 && strings.HasSuffix(c.path, ".js") && !strings.Contains(ct, "javascript") {
 				t.Errorf("GET %s: Content-Type %q, want JavaScript", c.path, ct)
+			}
+			// Browsers take an SVG icon only as image/svg+xml.
+			if ct := w.Header().Get("Content-Type"); c.want == 200 && strings.HasSuffix(c.path, ".svg") && ct != "image/svg+xml" {
+				t.Errorf("GET %s: Content-Type %q, want image/svg+xml", c.path, ct)
 			}
 		})
 	}
