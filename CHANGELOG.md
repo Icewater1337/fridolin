@@ -249,6 +249,12 @@ for compatibility.
 - An HTTP server that fails after the bridge started stops the bridge
   (exit 1, which the service manager restarts). Before, the bridge ran on
   without the dashboard, `/send` and `/ingest`, and looked healthy.
+- A command a run started that left the run's process group (a daemon,
+  or one started with `setsid`) and holds the CLI's output open no longer
+  keeps the brain and its run slot busy for as long as it runs, past
+  `run_timeout_minutes` and `!stop`, nor turns the answer the run already
+  gave into a "took too long" error. The bridge stops waiting for that
+  output five seconds after the CLI exited.
 - A run whose output has a line longer than 4 MiB, a tool's large result
   say, keeps its answer. The bridge failed it with "token too long" and
   lost the result that came after; now it skips the line and notes it in

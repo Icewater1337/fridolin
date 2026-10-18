@@ -728,10 +728,12 @@ seconds gets a "working on it" notice. The parser, in `stream.go`, skips
 a line over 4 MiB (a tool's large result, say) with a note in the activity
 log rather than failing the run. A run is stopped at
 `run_timeout_minutes`, and five seconds after its result when something it
-started holds its output open. Runs are listed in `<data_dir>/runs/` while
-they last, so that a bridge that crashed stops what is left of them when it
-starts again. `BrainManager.Apply` swaps the brain set at runtime without
-touching brains that did not change, and hands what a brain it takes out
+started holds its output open; output that a process outside the run's
+process group holds is let go of five seconds after the CLI exited. Runs
+are listed in `<data_dir>/runs/` while they last, so that a bridge that
+crashed stops what is left of them when it starts again.
+`BrainManager.Apply` swaps the brain set at runtime without touching
+brains that did not change, and hands what a brain it takes out
 had waiting to the brain that takes it now.
 
 **`manifest.go`, `brainreg.go`** — `brain.json`, the brain registry, path

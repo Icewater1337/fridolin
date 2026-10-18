@@ -1622,7 +1622,14 @@ func (br *Brain) invoke(run *brainRun, ctx context.Context, s *brainSettings, m 
 	// Only once the sandbox is settled: a refused run starts no process.
 	br.ensureViewer(s)
 
-	cmd := exec.CommandContext(ctx, binary, finalArgs...)
+	// The run's processes end with this context: when ctx does, at a stop
+	// or run_timeout, and when the grace after the result runs out.
+	// cmd.Cancel then kills the run's process group, and WaitDelay closes
+	// the pipes something outside the group may still hold.
+	cmdCtx, stopCmd := context.WithCancel(ctx)
+	defer stopCmd()
+
+	cmd := exec.CommandContext(cmdCtx, binary, finalArgs...)
 	cmd.Dir = br.workDir
 	cmd.Env = env
 	isolateProcessGroup(cmd)
@@ -1631,51 +1638,55 @@ func (br *Brain) invoke(run *brainRun, ctx context.Context, s *brainSettings, m 
 	// argv: argv is bounded by ARG_MAX, about 1 MiB on macOS with the
 	// environment, and on Linux one argument by 128 KiB, which a long
 	// prompt file and a few pasted texts reach; and every process listing
-	// shows it. The CLI takes 10 MB on stdin.
-	stdin, err := cmd.StdinPipe()
-	if err != nil {
-		return RunResult{Err: fmt.Errorf("stdin pipe: %w", err)}
-	}
+	// shows it. The CLI takes 10 MB on stdin. os/exec writes it, and Wait
+	// stops waiting for that once the CLI has exited.
+	cmd.Stdin = strings.NewReader(prompt)
 
-	stdout, err := cmd.StdoutPipe()
-	if err != nil {
-		return RunResult{Err: fmt.Errorf("stdout pipe: %w", err)}
-	}
+	// The output goes through a pipe of the bridge's own, which the parser
+	// reads: os/exec copies it there, and Wait waits for the copy, up to
+	// WaitDelay after the CLI exited. So Wait, which runs alongside the
+	// parser, ends the run even when a process the bridge cannot stop,
+	// one that left the run's process group, holds the CLI's output open,
+	// and the parser gets all the CLI wrote before that.
+	stdout, stdoutW := io.Pipe()
+	cmd.Stdout = stdoutW
 
 	// Only the end of stderr is kept: the CLI, or something it started that
 	// holds on to its stderr, could otherwise make the bridge hold any
 	// amount of it, and only the last error is of use.
 	stderrBuf := newTailBuffer(stderrTailBytes)
 	cmd.Stderr = stderrBuf
-	// Wait waits for that copy to end, which a background process holding
-	// stderr could put off for good; after this long it stops waiting.
 	cmd.WaitDelay = runWaitDelay
 
 	if err := cmd.Start(); err != nil {
 		return RunResult{Err: fmt.Errorf("starting %s: %w", agentName(s.provider), err)}
 	}
-	br.setRunPID(run, cmd.Process.Pid)
+	pid := cmd.Process.Pid
+	br.setRunPID(run, pid)
 	// Removed once Wait has returned and the run is over; a bridge that
 	// crashes before leaves it to the next start (reapOrphanedRuns).
-	if rec := recordRun(s.dataDir, br.id, cmd.Process.Pid); rec != "" {
+	if rec := recordRun(s.dataDir, br.id, pid); rec != "" {
 		defer os.Remove(rec)
 	}
-	// A panic from here on, in a hook say, skips the Wait below. The run's
-	// process group is then stopped and reaped here, before its record
-	// goes: cancelling the run alone would leave the CLI a zombie for as
-	// long as the bridge runs.
-	waited := false
-	defer func() {
-		if !waited {
-			_ = killProcessGroup(cmd.Process.Pid)
-			_ = cmd.Wait()
-		}
-	}()
+
+	var waitErr error
+	waited := make(chan struct{})
 	go func() {
-		// Nothing waits for this: Wait closes the pipe once the CLI has
-		// exited, which ends a write it never read.
-		_, _ = io.WriteString(stdin, prompt)
-		stdin.Close()
+		defer close(waited)
+		waitErr = cmd.Wait()
+		// What is left of the process group, a command the run left in
+		// the background say: nothing else stops it.
+		_ = killProcessGroup(pid)
+		// Everything the CLI wrote has reached the parser: this ends its
+		// output.
+		stdoutW.Close()
+	}()
+	// However invoke ends, a panic in a hook included, the run's processes
+	// are stopped and reaped here, before its record goes: left running,
+	// the CLI would stay a zombie for as long as the bridge runs.
+	defer func() {
+		stopCmd()
+		<-waited
 	}()
 
 	// Parse the stream in a goroutine so we can race it against the 10s timer.
@@ -1683,6 +1694,9 @@ func (br *Brain) invoke(run *brainRun, ctx context.Context, s *brainSettings, m 
 	resultSeen := make(chan struct{})
 	var resultOnce sync.Once
 	go func() {
+		// Once the parser is done, the copy into its pipe ends too: a parser
+		// that failed would leave it blocked otherwise.
+		defer stdout.Close()
 		// A panic while the output is read, in the hook that sends a
 		// question to the chat say, ends the run as one in invoke does
 		// (invokeGuarded). In a goroutine of its own, unrecovered, it would
@@ -1693,7 +1707,7 @@ func (br *Brain) invoke(run *brainRun, ctx context.Context, s *brainSettings, m 
 				parseDone <- RunResult{Err: errRunPanicked}
 			}
 		}()
-		parseDone <- br.readAgentStream(m, stdout, runHeading(m, s, cmd.Process.Pid), func() { resultOnce.Do(func() { close(resultSeen) }) }, s.provider)
+		parseDone <- br.readAgentStream(m, stdout, runHeading(m, s, pid), func() { resultOnce.Do(func() { close(resultSeen) }) }, s.provider)
 	}()
 
 	notice := time.NewTimer(workingNoticeAfter)
@@ -1701,12 +1715,19 @@ func (br *Brain) invoke(run *brainRun, ctx context.Context, s *brainSettings, m 
 
 	invocationStart := time.Now()
 	var res RunResult
+	parsed := false
 	var grace <-chan time.Time
-	resultIn := resultSeen // nil once the grace runs
-	for parsing := true; parsing; {
+	resultIn, stopped := resultSeen, ctx.Done() // each nil once it came
+	for running := true; running; {
 		select {
+		case <-waited:
+			running = false
 		case res = <-parseDone:
-			parsing = false
+			// The parser reads to the end of the output, which comes after
+			// Wait, unless it failed: then nothing reads what the CLI
+			// writes any more, and the run is over.
+			parsed, parseDone = true, nil
+			stopCmd()
 		case <-notice.C:
 			// Untagged (silent) messages never produce a visible reply, so they
 			// must not produce a visible "working" notice either.
@@ -1715,45 +1736,33 @@ func (br *Brain) invoke(run *brainRun, ctx context.Context, s *brainSettings, m 
 			}
 		case <-resultIn:
 			// The answer is in, and the CLI exits right after it, unless
-			// something it started still holds its output open, a command
-			// left running in the background, say. That gets
-			// postResultGrace, or the brain would stay busy as long as it ran.
+			// it, or something it started, keeps going with its output
+			// open, a command left running in the background, say. That
+			// gets postResultGrace, or the brain would stay busy as long
+			// as it ran.
 			resultIn, grace = nil, time.After(postResultGrace)
 			notice.Stop()
 		case <-grace:
 			grace = nil
 			log.Printf("brain %s: %s's output was still open %v after its result; stopping what is left of the run", br.id, agentName(s.provider), postResultGrace)
-			if err := killProcessGroup(cmd.Process.Pid); err != nil {
-				log.Printf("brain %s: failed to kill process group %d: %v", br.id, cmd.Process.Pid, err)
-			}
+			stopCmd()
+		case <-stopped:
+			// Stopped, or at run_timeout: cmdCtx ends with ctx, which
+			// stops the process group. Nothing is working on it any more.
+			stopped = nil
+			notice.Stop()
 		}
+	}
+	if !parsed {
+		res = <-parseDone
 	}
 
 	if elapsed := time.Since(invocationStart); elapsed > 5*time.Minute && res.Text != "" {
 		log.Printf("brain %s: response took %v for %s (slow response)", br.id, elapsed, m.JID)
 	}
 
-	// The result event is final, but the CLI may still be winding down. Ask it
-	// to exit, then hard-kill anything still alive 5 seconds later.
-	if cmd.Process != nil {
-		exited := make(chan struct{})
-		defer close(exited)
-		go func() {
-			select {
-			case <-exited:
-			case <-time.After(5 * time.Second):
-				if err := killProcessGroup(cmd.Process.Pid); err == nil {
-					log.Printf("brain %s: killed %s process group %d", br.id, agentName(s.provider), cmd.Process.Pid)
-				}
-			}
-		}()
-		_ = cmd.Process.Signal(os.Interrupt)
-	}
-
-	waitErr := cmd.Wait()
-	waited = true
 	stderr := strings.TrimSpace(stderrBuf.String())
-	br.logStderr(m, cmd.Process.Pid, stderr)
+	br.logStderr(m, pid, stderr)
 	// Whether the result event came: readStream has returned, so it would
 	// have closed resultSeen by now.
 	gotResult := false
@@ -1784,13 +1793,14 @@ func (br *Brain) invoke(run *brainRun, ctx context.Context, s *brainSettings, m 
 	return res
 }
 
-// postResultGrace is how long a run may keep its output open after its
-// result, a variable so tests need not wait for it.
+// postResultGrace is how long a run may go on after its result, a
+// variable so tests need not wait for it.
 var postResultGrace = 5 * time.Second
 
 // runWaitDelay is how long Wait waits, once the CLI has exited, for the
-// copy of its stderr to end.
-const runWaitDelay = 5 * time.Second
+// copies of its output and stderr to end, a variable so tests need not
+// wait for it.
+var runWaitDelay = 5 * time.Second
 
 // logStderr adds what the CLI wrote to stderr to the brain's activity log,
 // the end of it when there is much, where a failed run can be looked into
