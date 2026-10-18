@@ -1,0 +1,187 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Fridolin config.json",
+  "description": "The bridge's configuration, version 2, as docs/CONFIGURATION.md describes it. A file without \"version\", or with null, is version 1, which may also have the retired keys model, work_dir and brains. Every key is optional: the bridge fills in a default for each one left out. Keys are added in later versions without a new version; one renamed, removed or given another meaning comes with a new version.",
+  "type": "object",
+  "additionalProperties": false,
+  "anyOf": [
+    {"properties": {"version": {"enum": [1, null]}}},
+    {"not": {"anyOf": [{"required": ["model"]}, {"required": ["work_dir"]}, {"required": ["brains"]}]}}
+  ],
+  "properties": {
+    "_comment": {"type": "string", "description": "A note for whoever reads the file; the bridge keeps it as it is."},
+    "version": {"type": ["integer", "null"], "minimum": 1, "maximum": 2, "description": "The version of this file, written by the bridge on every save; absent or null is 1."},
+    "allowed_numbers": {"type": ["array", "null"], "items": {"type": "string"}, "description": "Phone numbers, with the country code, that may DM the bridge."},
+    "allow_any_dm": {"type": "boolean", "description": "true lets anyone DM while allowed_numbers is empty; unset or false lets nobody."},
+    "allowed_groups": {"type": ["array", "null"], "items": {"type": "string"}, "description": "Group JIDs (…@g.us) the bridge answers in."},
+    "group_members": {
+      "type": "object",
+      "description": "Who in an allowed group reaches its brain: by group JID, which allowed_groups must list too, the members' phone numbers, or [\"*\"] for every member.",
+      "propertyNames": {"pattern": "^[0-9]+(-[0-9]+)?@g\\.us$"},
+      "additionalProperties": {
+        "oneOf": [
+          {"const": ["*"]},
+          {"type": "array", "items": {"$ref": "#/$defs/phone_number"}}
+        ]
+      }
+    },
+    "triggers": {
+      "type": "array",
+      "description": "Keywords that address the bridge in a group: a string matches anywhere, an object can say where.",
+      "items": {
+        "oneOf": [
+          {"type": "string"},
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["text"],
+            "properties": {
+              "text": {"type": "string"},
+              "match": {"enum": ["", "anywhere", "start", "word"]}
+            }
+          }
+        ]
+      }
+    },
+    "claude_path": {"type": "string", "description": "The Claude Code CLI; \"claude\" looks it up on PATH."},
+    "data_dir": {"type": "string", "description": "The bridge's own data: bridge.db, media, tokens. Needs a restart."},
+    "db_path": {"type": "string", "description": "Default <data_dir>/bridge.db. Needs a restart."},
+    "media_dir": {"type": "string", "description": "Default <data_dir>/media. Needs a restart."},
+    "max_chunk_size": {
+      "type": "integer",
+      "description": "The most characters in one outgoing message; 0 is the default, 3900.",
+      "anyOf": [{"const": 0}, {"minimum": 100}]
+    },
+    "max_media_mb": {"type": "integer", "minimum": 0, "maximum": 2048, "description": "The largest attachment downloaded, in MB; 0 is the default, 100."},
+    "brain_model": {"type": "string", "description": "The model brains use unless they name their own; empty uses the CLI's default."},
+    "brain_effort": {"enum": ["", "low", "medium", "high", "xhigh", "max"]},
+    "disallowed_tools": {"type": "array", "items": {"type": "string"}, "description": "Passed to the CLI as --disallowed-tools; brains can override it."},
+    "dangerously_skip_permissions": {"type": "boolean"},
+    "run_timeout_minutes": {"type": "integer", "minimum": 0, "maximum": 1440, "description": "Stops a run that takes longer; 0 lets it run as long as it takes. Default 30."},
+    "max_concurrent_runs": {"type": "integer", "minimum": 0, "maximum": 64, "description": "How many Claude runs may go at once, all brains together; 0 for no limit. Default 2."},
+    "inherit_claude_user_config": {"type": "boolean"},
+    "child_env_passthrough": {"type": "array", "items": {"type": "string", "pattern": "^[A-Za-z_][A-Za-z0-9_]*$"}, "description": "Variables of the bridge's environment that brains get too."},
+    "http_listen": {
+      "type": "string",
+      "description": "The dashboard's and the script API's address, on loopback only, or \"off\". Needs a restart.",
+      "pattern": "^$|^off$|^(127\\.[0-9]{1,3}\\.[0-9]{1,3}\\.[0-9]{1,3}|localhost|\\[::1\\]):[0-9]+$"
+    },
+    "log_level": {"enum": ["", "debug", "info", "warn", "error"], "description": "Needs a restart."},
+    "brain_mode": {"const": true, "description": "Retired: brains always run. false is refused; the bridge writes true, for an older version rolled back to."},
+    "brain_dirs": {
+      "type": "array",
+      "description": "The brain folders added in the dashboard, each with the brain.json you approved.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["path"],
+        "properties": {
+          "path": {"type": "string"},
+          "approved": {"oneOf": [{"$ref": "brain.schema.json"}, {"type": "null"}]}
+        }
+      }
+    },
+    "sandbox": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "enabled": {"type": "boolean", "description": "Runs brains in sandbox-exec; macOS only."},
+        "deny_paths": {"type": ["array", "null"], "items": {"$ref": "#/$defs/absolute_path"}},
+        "allow_paths": {"type": ["array", "null"], "items": {"$ref": "#/$defs/absolute_path"}},
+        "git_config": {"enum": ["", "read", "deny"]},
+        "credentials_dir": {"anyOf": [{"const": ""}, {"$ref": "#/$defs/absolute_path"}]}
+      }
+    },
+    "otp_guard": {"type": "boolean"},
+    "otp_markers": {"type": "array", "items": {"type": "string"}},
+    "viewer": {"type": "boolean"},
+    "queue": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "mode": {"enum": ["", "queue", "interrupt"]},
+        "max_pending": {"type": "integer", "description": "0 or less is the default, 10."},
+        "notify": {"type": "boolean"}
+      }
+    },
+    "debounce": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "quiet_ms": {"type": "integer"},
+        "max_wait_ms": {"type": "integer"}
+      }
+    },
+    "ingest": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "enabled": {"type": "boolean"}
+      }
+    },
+    "startup_checks": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "required_files": {"type": "array", "items": {"type": "string"}},
+        "notify_whatsapp": {"type": "boolean"},
+        "notify_jid": {"type": "string"},
+        "hint": {"type": "string"}
+      }
+    },
+    "backup": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "enabled": {"type": "boolean"},
+        "remote": {"type": "string", "pattern": "^$|^[A-Za-z0-9_-]{1,40}$"},
+        "root": {"type": "string", "not": {"pattern": "^/|[:\\r\\n\\\\]|\\.\\."}},
+        "daily_at": {"type": "string", "pattern": "^$|^([01][0-9]|2[0-3]):[0-5][0-9]$"},
+        "rclone_path": {"type": "string"},
+        "keep_versions_days": {"type": "integer", "minimum": 0, "description": "0 keeps versions forever. Default 30."},
+        "include_bridge_config": {"type": "boolean"},
+        "include_secret_files": {"type": "boolean", "description": "Also uploads .env files, private keys and tokens from brain folders. Default false."}
+      }
+    },
+    "plaud": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "enabled": {"type": "boolean"},
+        "brain": {"type": "string", "pattern": "^$|^[a-z0-9][a-z0-9_-]{0,39}$"},
+        "cli_path": {"type": "string"},
+        "interval_seconds": {"type": "integer", "anyOf": [{"const": 0}, {"minimum": 30}]},
+        "polished": {"type": "boolean"},
+        "message": {"type": "string"},
+        "brain_access": {"type": "boolean"},
+        "phone_dir": {"anyOf": [{"const": ""}, {"$ref": "#/$defs/absolute_path"}]}
+      }
+    },
+    "dashboard": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "disabled": {"type": "boolean", "description": "Needs a restart."},
+        "require_token": {"type": "boolean"}
+      }
+    },
+    "script_api": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "tokenless_send": {"type": "boolean"}
+      }
+    },
+    "model": {"type": "string", "deprecated": true, "description": "Retired in version 2: version 1's model, which becomes brain_model while that is empty."},
+    "work_dir": {"type": "string", "deprecated": true, "description": "Retired in version 2: the folder classic mode ran in."},
+    "brains": {"type": ["array", "null"], "maxItems": 0, "deprecated": true, "description": "Retired in version 2: inline brains, refused unless the list is empty."}
+  },
+  "$defs": {
+    "absolute_path": {"type": "string", "pattern": "^(/|~/|~$)", "description": "An absolute path, or one that starts with ~/."},
+    "phone_number": {
+      "type": "string",
+      "pattern": "^[\\s+]*([ \u00a0().-]*[0-9]){6,15}[ \u00a0().-]*\\s*(@s\\.whatsapp\\.net\\s*)?$",
+      "description": "6 to 15 digits with the country code, written as people write a number: a +, spaces, dashes, dots or brackets, or as its …@s.whatsapp.net JID."
+    }
+  }
+}

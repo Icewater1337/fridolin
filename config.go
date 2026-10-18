@@ -402,6 +402,10 @@ const (
 	queueModeInterrupt = "interrupt"
 )
 
+// validQueueModes are the values queue.mode takes once effective() has
+// filled in the default.
+var validQueueModes = map[string]bool{queueModeQueue: true, queueModeInterrupt: true}
+
 // DebounceConfig merges messages that arrive in quick succession from the
 // same person in the same chat (several photos, a file plus its question)
 // into one brain run.
@@ -852,7 +856,16 @@ func (c *Config) clone() (*Config, error) {
 	return out, nil
 }
 
+// validEfforts are the values brain_effort and a brain's effort take, ""
+// being the CLI's default. Like the other sets of values a setting takes
+// (validGitConfigs, validQueueModes, validTriggerMatches, validObserve,
+// waLevels), it is what the schemas in docs/schemas list for the setting,
+// which TestSchemaEnumsAreTheBridgesValues checks.
 var validEfforts = map[string]bool{"": true, "low": true, "medium": true, "high": true, "xhigh": true, "max": true}
+
+// validGitConfigs are the values sandbox.git_config takes once
+// effective() has filled in the default, "read".
+var validGitConfigs = map[string]bool{"read": true, "deny": true}
 
 // validate rejects settings the bridge cannot run with. Brains are checked
 // when they are resolved (ResolveBrains), which leaves one that clashes with
@@ -862,14 +875,10 @@ func (c *Config) validate() error {
 	if !validEfforts[c.BrainEffort] {
 		return fmt.Errorf("brain_effort %q must be one of low, medium, high, xhigh, max", c.BrainEffort)
 	}
-	switch c.Queue.Mode {
-	case queueModeQueue, queueModeInterrupt:
-	default:
+	if !validQueueModes[c.Queue.Mode] {
 		return fmt.Errorf("queue.mode must be %q or %q, not %q", queueModeQueue, queueModeInterrupt, c.Queue.Mode)
 	}
-	switch c.Sandbox.GitConfig {
-	case "read", "deny":
-	default:
+	if !validGitConfigs[c.Sandbox.GitConfig] {
 		return fmt.Errorf("sandbox.git_config must be \"read\" or \"deny\", not %q", c.Sandbox.GitConfig)
 	}
 	if err := c.Sandbox.validate(runtime.GOOS); err != nil {

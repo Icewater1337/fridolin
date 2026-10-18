@@ -84,6 +84,9 @@ restart.
 | `backup` | Google Drive backup for this folder; see [BACKUP.md](BACKUP.md). |
 | `calendar` | The Google account this brain signed in with and the calendars it may use; set by *Connect Google Calendar*, see [CALENDAR.md](CALENDAR.md). |
 
+[`schemas/brain.schema.json`](schemas/brain.schema.json) is a JSON Schema
+of the file, version 1.
+
 ## Approval
 
 The bridge does not simply trust `brain.json`. Your accepted version is stored

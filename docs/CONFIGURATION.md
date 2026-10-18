@@ -34,6 +34,18 @@ The bridge's log names both, and where each came from, at every start.
 
 Paths may start with `~`, which expands to your home directory.
 
+[`schemas/config.schema.json`](schemas/config.schema.json) is a JSON Schema
+of the file, for an editor or a script to check it against; tests keep it
+to what the bridge reads. It refuses what stops the bridge from starting,
+but not what the bridge only warns about, such as a group JID with a typo.
+It also refuses keys the bridge does not know, which the bridge logs and
+leaves out, and a few values the bridge takes anyway: a `log_level` in
+capitals or one it does not know (read as `info`), and an `http_listen`
+on loopback written other than as `127.x.x.x`, `localhost` or `[::1]`
+with a port number, such as `[::ffff:127.0.0.1]:8765`. The other way
+round, most editors take a whole number written as `1.0`, which the
+bridge refuses.
+
 ---
 
 ## `version`
