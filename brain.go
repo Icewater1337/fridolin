@@ -10,10 +10,10 @@ import (
 	"io"
 	"io/fs"
 	"log"
+	"maps"
 	"os"
 	"os/exec"
 	"path/filepath"
-	"regexp"
 	"runtime/debug"
 	"slices"
 	"strings"
@@ -30,7 +30,7 @@ type historyEntry struct {
 	From string `json:"from"`
 	Chat string `json:"chat"` // JID of the chat (DM participant or group)
 	Text string `json:"text"`
-	Type string `json:"type"` // historyIn, historyOut or historyEvent
+	Type string `json:"type"` // historyIn, historyOut, historyEvent or historyReset
 	// Via marks an "out" line that came in through /send: "brain" (From is
 	// the brain that sent it), "script" (the scripts token) or "api" (no
 	// token). A brain's own replies have none.
@@ -38,6 +38,9 @@ type historyEntry struct {
 	// ID is the WhatsApp message's ID for a message from WhatsApp, which an
 	// edit or a deletion of it names (see recordChange).
 	ID string `json:"id,omitempty"`
+	// OTPRequest is the id /send answered a request for a one-time code
+	// with, on the "out" line of that request (see otpRequest).
+	OTPRequest string `json:"otp_request,omitempty"`
 }
 
 // The history entry types. They are written to every brain's history file,
@@ -50,6 +53,11 @@ const (
 	// such as a poll vote. Its From is who did it, and its text says what,
 	// after their name.
 	historyEvent = "event"
+	// historyReset marks where !reset started a chat afresh. Its From is
+	// who sent it, and it has no text. A run's prompt shows only the
+	// chat's lines after the newest one; it is no message, so neither the
+	// dashboard's feed nor `fridolin history` shows it.
+	historyReset = "reset"
 )
 
 // normalizeJID strips the WhatsApp server suffix and a leading + from a JID,
@@ -121,69 +129,6 @@ func isTableRule(cells []string) bool {
 	return true
 }
 
-// bareCodeRe matches a message that is nothing but a 4–8 digit number.
-var bareCodeRe = regexp.MustCompile(`^\s*\d{4,8}\s*$`)
-
-// defaultOTPMarkers are the substrings that mark an outbound message as a
-// request for a one-time code. When the last thing the brain said contains one
-// of these and the reply is a bare numeric code, the message is dropped
-// instead of being fed to the model — a 2FA code pasted into the chat should
-// not end up in a prompt. Add your own (a bank's name, say) with otp_markers.
-var defaultOTPMarkers = []string{"🔐", "OTP", "one-time code", "2FA", "verification code"}
-
-// recentOutboundLooksLikeOTPRequest reports whether any of the brain's last 50
-// outbound messages in lines, the tail of its history, asked for a one-time
-// code: its own replies, and what went out in its chats through /send, from
-// a script or a brain. With no markers given it uses the built-in list.
-func recentOutboundLooksLikeOTPRequest(lines []string, brainID string, markers ...string) bool {
-	if len(markers) == 0 {
-		markers = defaultOTPMarkers
-	}
-	start := len(lines) - 50
-	if start < 0 {
-		start = 0
-	}
-	for i := len(lines) - 1; i >= start; i-- {
-		var entry historyEntry
-		if err := json.Unmarshal([]byte(lines[i]), &entry); err != nil {
-			continue
-		}
-		if entry.Type != historyOut || (entry.From != brainID && entry.Via == "") {
-			continue
-		}
-		for _, marker := range markers {
-			if marker != "" && strings.Contains(entry.Text, marker) {
-				return true
-			}
-		}
-	}
-	return false
-}
-
-// tailLines returns the complete lines in the last maxBytes of f.
-func tailLines(f *os.File, maxBytes int64) []string {
-	st, err := f.Stat()
-	if err != nil {
-		return nil
-	}
-	off := st.Size() - maxBytes
-	if off < 0 {
-		off = 0
-	}
-	buf := make([]byte, st.Size()-off)
-	if _, err := f.ReadAt(buf, off); err != nil && err != io.EOF {
-		return nil
-	}
-	lines := strings.Split(strings.TrimRight(string(buf), "\n"), "\n")
-	if off > 0 && len(lines) > 0 {
-		lines = lines[1:] // the first line was cut in half
-	}
-	if len(lines) == 1 && lines[0] == "" {
-		return nil
-	}
-	return lines
-}
-
 // ── Brain ────────────────────────────────────────────────────────────────
 
 // Brain is one isolated Claude Code context: its own folder, conversation
@@ -192,7 +137,9 @@ func tailLines(f *os.File, maxBytes int64) []string {
 // A brain does not keep a Claude process alive between messages. Each message
 // spawns a fresh `claude -p` run seeded with the recent chat history. Messages
 // for a brain run one at a time from its queue (or, in interrupt mode, a newer
-// request from the same person in the same chat stops the run in flight).
+// request from the same person in the same chat stops the run in flight),
+// each chat's in order and the chats in turn, so that one busy chat does not
+// keep the others waiting behind all of its messages.
 type Brain struct {
 	// Fixed for the brain's lifetime. Changing a brain's folder replaces the
 	// Brain; everything else is in settings and changes live.
@@ -207,6 +154,9 @@ type Brain struct {
 	settings atomic.Pointer[brainSettings]
 	sandbox  *SandboxProfiler
 	hooks    *BrainHooks
+	// slots are the run slots all brains share (max_concurrent_runs); nil
+	// for no limit.
+	slots *runSlots
 
 	// historyMu serialises the bridge's writes to the history file: an
 	// append must not land in a copy that a rewrite then drops (see
@@ -215,10 +165,20 @@ type Brain struct {
 
 	mu      sync.Mutex
 	current *brainRun
+	// pending holds what waits, in the order it came in. Each chat's
+	// messages in it are that chat's lane, which runs in order; which
+	// lane goes next is nextIn's choice.
 	pending []Inbound
+	// turns is, by chat, when its last run started, counted by turn: the
+	// chat whose turn is longest ago goes next. Chats with nothing waiting
+	// are forgotten once that no longer decides anything (takeTurnLocked).
+	turns   map[string]uint64
+	turn    uint64
 	working bool // a worker goroutine is draining pending
 	retired bool // removed from the configuration
 	last    *RunInfo
+	// slotWait is set while the worker waits for a run slot.
+	slotWait *slotWait
 
 	// tmuxViewer is an optional Terminal window tailing this brain's
 	// activity log. A run starts it in the background and a reload can close
@@ -357,37 +317,23 @@ func (br *Brain) Name() string { return br.settings.Load().name }
 // Dir is the brain's folder.
 func (br *Brain) Dir() string { return br.workDir }
 
-// DropsOTP reports whether text is a one-time code the brain asked for, which
-// must not be written to history or sent to the model.
-func (br *Brain) DropsOTP(text string) bool {
-	s := br.settings.Load()
-	return s.otpGuard && bareCodeRe.MatchString(text) &&
-		recentOutboundLooksLikeOTPRequest(br.historyTail(256*1024), br.id, s.otpMarkers...)
-}
-
 // historyFileName is the brain's conversation history, in its folder.
 const historyFileName = "conversation-history.jsonl"
 
-// historyTail returns the complete lines in the last maxBytes of the
-// brain's history, or none when it cannot be read (see openInFolder).
-func (br *Brain) historyTail(maxBytes int64) []string {
-	f, err := openInFolder(br.root, historyFileName, os.O_RDONLY, 0)
-	if err != nil {
-		return nil
-	}
-	defer f.Close()
-	return tailLines(f, maxBytes)
-}
-
 // logInbound writes m to the brain's history: a line for each part of a
 // merged message, with its ID, so that one deleted later is taken out
-// alone. It returns m with each part's line kept on it (Inbound.logged),
-// so that its own run shows the message once, as the new message, after
-// the chat's history before those lines.
+// alone, and with the time it was sent, not the time the debouncer let it
+// through. It returns m with each part's line kept on it
+// (Inbound.logged), so that its own run shows the message once, as the
+// new message, after the chat's history before those lines.
 func (br *Brain) logInbound(m Inbound) Inbound {
 	parts := m.ownParts()
 	for i, p := range parts {
-		parts[i].logged = br.appendEntry(historyEntry{Chat: m.JID, From: p.Sender, Text: historyTextWithMedia(p.textWithQuote(), p.Media), Type: historyIn, ID: p.ID})
+		at := p.At
+		if at.IsZero() {
+			at = m.At
+		}
+		parts[i].logged = br.appendEntry(historyEntry{TS: historyTime(at), Chat: m.JID, From: p.Sender, Text: historyTextWithMedia(p.textWithQuote(), p.Media), Type: historyIn, ID: p.ID})
 	}
 	if len(m.parts) > 0 {
 		m.parts = parts
@@ -396,31 +342,62 @@ func (br *Brain) logInbound(m Inbound) Inbound {
 	return m
 }
 
+// historyTime is t as a history line has it, "" for none: the time the
+// line is written.
+func historyTime(t time.Time) string {
+	if t.IsZero() {
+		return ""
+	}
+	return t.Format(time.RFC3339)
+}
+
 // Submit hands a message to the brain: it goes into the history and, unless
 // it is untagged chatter that gets no run (see observeRuns), into the
 // queue. It returns the message's position in the queue (1 = next, 0 for
-// none) and whether it has to wait for other work; a run it interrupts
-// does not count.
+// none) and whether it has to wait for other work: the brain's, or other
+// brains' runs that take every run slot. A run it interrupts does not
+// count.
 func (br *Brain) Submit(m Inbound) (pos int, busy bool, err error) {
 	if m.At.IsZero() {
 		m.At = time.Now()
 	}
 	s := br.settings.Load()
+	// Untagged chatter needs nothing more than the history, unless the
+	// brain observes it with runs: the next run in the chat reads it there.
+	queues := !m.Silent || observeRuns(s.observe, m)
 
-	// History first, so that later runs see the message even when it is
-	// merged into a queue that is already moving.
-	m = br.logInbound(m)
-
+	// Turned away before anything is written: a message the brain does not
+	// take is not in its history, where the sender's retry after "queue is
+	// full", or the brain it is routed to instead of a retired one, would
+	// put it a second time.
 	br.mu.Lock()
 	if br.retired {
 		br.mu.Unlock()
 		return 0, false, errBrainRetired
 	}
-	// Untagged chatter needs nothing more, unless the brain observes it with
-	// runs: the next run in the chat reads it in the history.
-	if m.Silent && !observeRuns(s.observe, m) {
-		br.mu.Unlock()
+	if queues && !br.hasRoomLocked(m, s) {
+		if !m.Silent {
+			br.mu.Unlock()
+			return 0, true, errQueueFull
+		}
+		// Chatter that finds no place is kept in the history all the
+		// same, without a run of its own: it was said in the chat, and
+		// the next run there reads it.
+		queues = false
+	}
+	br.mu.Unlock()
+
+	// History first, so that later runs see the message even when it is
+	// merged into a queue that is already moving.
+	m = br.logInbound(m)
+	if !queues {
 		return 0, false, nil
+	}
+
+	br.mu.Lock()
+	if br.retired {
+		br.mu.Unlock()
+		return 0, false, errBrainRetired
 	}
 
 	// A newer message from the same chat supersedes queued untagged chatter:
@@ -431,10 +408,7 @@ func (br *Brain) Submit(m Inbound) (pos int, busy bool, err error) {
 	// chatter never interrupts a run. Nor do ingested files interrupt a
 	// request, or get replaced: each is a job of its own, not a correction of
 	// the last one. Observe-only runs are another matter, see below.
-	interrupting := s.queueMode == queueModeInterrupt && !m.Silent && m.Source != sourceIngest
-	replaces := func(p Inbound) bool {
-		return p.JID == m.JID && (p.Silent || (interrupting && p.Sender == m.Sender && p.Source != sourceIngest))
-	}
+	interrupting, replaces := supersedes(m, s)
 	var gone []Inbound
 	kept := br.pending[:0]
 	for _, p := range br.pending {
@@ -447,6 +421,8 @@ func (br *Brain) Submit(m Inbound) (pos int, busy bool, err error) {
 	br.pending = kept
 	defer dropped(gone)
 	if len(br.pending) >= s.maxPending {
+		// Only when another message took the last place since the check
+		// above.
 		dropped := false
 		for i, p := range br.pending {
 			if p.Silent {
@@ -467,21 +443,24 @@ func (br *Brain) Submit(m Inbound) (pos int, busy bool, err error) {
 	if cur := br.current; cur != nil && (interrupting && replaces(cur.msg) || !m.Silent && cur.msg.Silent) {
 		interrupt = cur
 	}
-	at := len(br.pending)
-	if !m.Silent {
-		if i := slices.IndexFunc(br.pending, func(p Inbound) bool { return p.Silent }); i >= 0 {
-			at = i
-		}
-	}
-	br.pending = slices.Insert(br.pending, at, m)
-	pos = at + 1
-	busy = at > 0 || (br.current != nil && interrupt == nil)
+	br.pending = append(br.pending, m)
+	pos = slices.Index(br.queueOrderLocked(), len(br.pending)-1) + 1
+	busy = pos > 1 || (br.current != nil && interrupt == nil) || br.slots.busy(!m.Silent)
 	start := !br.working
 	br.working = true
+	// A worker that waits for a slot for chatter now waits for one for a
+	// request, which goes first.
+	var stopOther func()
+	if br.slotWait != nil && !m.Silent {
+		stopOther = br.slots.upgrade(br.slotWait)
+	}
 	br.mu.Unlock()
 
 	if interrupt != nil {
 		br.interruptRun(interrupt)
+	}
+	if stopOther != nil {
+		stopOther()
 	}
 	if start {
 		go br.worker()
@@ -489,7 +468,110 @@ func (br *Brain) Submit(m Inbound) (pos int, busy bool, err error) {
 	return pos, busy, nil
 }
 
-// worker drains the queue one message at a time.
+// nextIn returns where in pending, waiting messages in the order they came
+// in, the one to run next is. Work addressed to the brain goes before
+// untagged chatter, then the chat whose last turn (see Brain.turns) is
+// longest ago, one that never had one first, and among chats alike the one
+// whose message came in first. A chat's own messages run in the order they
+// came in: they share a turn, and the earliest of them wins the tie.
+func nextIn(pending []Inbound, turns map[string]uint64) int {
+	best := -1
+	for i, p := range pending {
+		if best < 0 {
+			best = i
+			continue
+		}
+		b := pending[best]
+		if p.Silent != b.Silent {
+			if !p.Silent {
+				best = i
+			}
+			continue
+		}
+		if turns[p.JID] < turns[b.JID] {
+			best = i
+		}
+	}
+	return best
+}
+
+// takeTurnLocked records that a run for chat starts now. A chat with
+// nothing waiting whose turn came before every waiting chat's is
+// forgotten: it would go before all of them anyway, as one that never had
+// a turn does, so the record is no longer needed. br.mu is held.
+func (br *Brain) takeTurnLocked(chat string) {
+	if br.turns == nil {
+		br.turns = map[string]uint64{}
+	}
+	br.turn++
+	br.turns[chat] = br.turn
+	low := br.turn
+	waiting := map[string]bool{}
+	for _, p := range br.pending {
+		waiting[p.JID] = true
+		low = min(low, br.turns[p.JID])
+	}
+	for c, t := range br.turns {
+		if !waiting[c] && t < low {
+			delete(br.turns, c)
+		}
+	}
+}
+
+// queueOrderLocked returns the indexes of pending in the order the
+// messages will run as things stand (see nextIn). Messages that come
+// later can still go before some of them, in a chat whose turn comes
+// first. br.mu is held.
+func (br *Brain) queueOrderLocked() []int {
+	idx := make([]int, len(br.pending))
+	for i := range idx {
+		idx[i] = i
+	}
+	rest := slices.Clone(br.pending)
+	turns := maps.Clone(br.turns)
+	if turns == nil {
+		turns = map[string]uint64{}
+	}
+	turn := br.turn
+	order := make([]int, 0, len(rest))
+	for len(rest) > 0 {
+		i := nextIn(rest, turns)
+		order = append(order, idx[i])
+		turn++
+		turns[rest[i].JID] = turn
+		rest = slices.Delete(rest, i, i+1)
+		idx = slices.Delete(idx, i, i+1)
+	}
+	return order
+}
+
+// supersedes says what m replaces when it joins the queue (see Submit):
+// whether it interrupts its sender's own run, which only a request does in
+// interrupt mode, and which waiting or running messages it replaces.
+func supersedes(m Inbound, s *brainSettings) (interrupting bool, replaces func(Inbound) bool) {
+	interrupting = s.queueMode == queueModeInterrupt && !m.Silent && m.Source != sourceIngest
+	return interrupting, func(p Inbound) bool {
+		return p.JID == m.JID && (p.Silent || (interrupting && p.Sender == m.Sender && p.Source != sourceIngest))
+	}
+}
+
+// hasRoomLocked reports whether the queue takes m: it has a free place,
+// or one m makes by what it replaces, or untagged chatter to drop. br.mu is
+// held.
+func (br *Brain) hasRoomLocked(m Inbound, s *brainSettings) bool {
+	_, replaces := supersedes(m, s)
+	n, silent := 0, false
+	for _, p := range br.pending {
+		if !replaces(p) {
+			n++
+			silent = silent || p.Silent
+		}
+	}
+	return n < s.maxPending || silent
+}
+
+// worker drains the queue one message at a time, each in a run slot (see
+// runSlots).
 func (br *Brain) worker() {
 	for {
 		br.mu.Lock()
@@ -498,8 +580,28 @@ func (br *Brain) worker() {
 			br.mu.Unlock()
 			return
 		}
-		m := br.pending[0]
-		br.pending = br.pending[1:]
+		slot, ok := br.waitForSlotLocked()
+		if !ok || br.retired || len(br.pending) == 0 {
+			// Retired, or what waited was dropped meanwhile.
+			br.mu.Unlock()
+			if ok {
+				slot.release()
+			}
+			continue
+		}
+		i := nextIn(br.pending, br.turns)
+		m := br.pending[i]
+		br.pending = slices.Delete(br.pending, i, i+1)
+		if slot != nil && !slot.running(!m.Silent) {
+			// A request in another brain took this slot's place before
+			// the run began: the chatter is in the history, as for an
+			// observe-only run it stops.
+			br.mu.Unlock()
+			slot.release()
+			dropped([]Inbound{m})
+			continue
+		}
+		br.takeTurnLocked(m.JID)
 		s := br.settings.Load()
 		ctx, cancel := runContext(s.runTimeout)
 		run := &brainRun{cancel: cancel, done: make(chan struct{}), msg: m, started: time.Now()}
@@ -515,8 +617,51 @@ func (br *Brain) worker() {
 		// Outbox), not here: the next run must not read as said what
 		// never reached the chat.
 		br.finishRun(run)
+		if slot != nil {
+			slot.release()
+		}
 		br.recordLast(m, res)
 		br.deliverGuarded(m, res)
+	}
+}
+
+// waitForSlotLocked waits for a run slot for what runs next, with br.mu
+// held on entry and again on return, though not while it waits: messages
+// keep coming in, and a request among them makes the wait one for a
+// request (see Submit). It returns a nil slot without a limit, and false
+// when the brain was retired while it waited.
+func (br *Brain) waitForSlotLocked() (*runSlot, bool) {
+	if br.slots == nil {
+		return nil, true
+	}
+	request := !br.pending[nextIn(br.pending, br.turns)].Silent
+	w, stopOther := br.slots.wait(request, br.stopObservation)
+	br.slotWait = w
+	br.mu.Unlock()
+	if stopOther != nil {
+		stopOther()
+	}
+	select {
+	case <-w.ready:
+	default:
+		log.Printf("brain %s: waiting for a run slot: other brains' runs take all of max_concurrent_runs", br.id)
+		<-w.ready
+	}
+	slot, ok := br.slots.take(w)
+	br.mu.Lock()
+	br.slotWait = nil
+	return slot, ok
+}
+
+// stopObservation stops the brain's observe-only run, for a request in
+// another brain that waits for its run slot.
+func (br *Brain) stopObservation() {
+	br.mu.Lock()
+	cur := br.current
+	br.mu.Unlock()
+	if cur != nil && cur.msg.Silent {
+		log.Printf("brain %s: stopping the observe-only run in %s: a request waits for its run slot", br.id, cur.msg.JID)
+		br.interruptRun(cur)
 	}
 }
 
@@ -640,6 +785,18 @@ func (br *Brain) StopChat(jid string) (stopped bool, n int) {
 	return br.stopRun(cur), len(gone)
 }
 
+// ResetChat starts the chat that goes by chats (see chatJIDs) afresh for
+// the brain: a reset marker in its history under each of the chat's JIDs,
+// which the next run's prompt stops reading the chat's messages at. What
+// the chat had running or waiting is for the caller to stop (StopChat);
+// the history itself keeps every line, for `fridolin history`. by is who
+// sent !reset.
+func (br *Brain) ResetChat(chats []string, by string) {
+	for _, jid := range chats {
+		br.appendEntry(historyEntry{Chat: jid, From: by, Type: historyReset})
+	}
+}
+
 // StopHandOffs stops the messages handed to this brain (/ingest, Plaud) that
 // answer in jid: the run in flight if it is one, and those waiting. The rest
 // of the brain's work goes on: jid may well be another brain's chat. It
@@ -691,6 +848,9 @@ func (br *Brain) retire(closeViewer bool) {
 	br.retired = true
 	gone := br.pending
 	br.pending = nil
+	if br.slotWait != nil {
+		br.slots.giveUp(br.slotWait)
+	}
 	br.mu.Unlock()
 	dropped(gone)
 	br.StopCurrent(true)
@@ -759,7 +919,8 @@ type QueuedView struct {
 	Queued  time.Time `json:"queued"`
 }
 
-// Snapshot returns the brain's live state.
+// Snapshot returns the brain's live state, the queue in the order it will
+// run.
 func (br *Brain) Snapshot() BrainRuntime {
 	s := br.settings.Load()
 	rt := BrainRuntime{
@@ -773,7 +934,8 @@ func (br *Brain) Snapshot() BrainRuntime {
 		rt.Running = &RunView{Chat: cur.msg.JID, Sender: cur.msg.Sender, Preview: truncate(cur.msg.textWithQuote(), 160),
 			Silent: cur.msg.Silent, Started: cur.started, PID: cur.pid}
 	}
-	for _, p := range br.pending {
+	for _, i := range br.queueOrderLocked() {
+		p := br.pending[i]
 		rt.Queue = append(rt.Queue, QueuedView{Chat: p.JID, Sender: p.Sender, Preview: truncate(p.textWithQuote(), 160), Silent: p.Silent, Queued: p.At})
 	}
 	if br.last != nil {
@@ -1450,9 +1612,11 @@ const (
 	groupHistoryWindow = 20
 )
 
-// promptHistoryTail is how much of the end of the history a run's prompt
-// is looked for in first: far more than a window of messages takes.
-const promptHistoryTail = 1 << 20
+// promptHistoryBudget is how far back from the end of the history a run's
+// prompt looks for its chat's messages: far more than a window of them
+// takes in a busy brain, so that a chat quiet while others talked still
+// gets its last messages, without reading years of history on every run.
+var promptHistoryBudget int64 = 16 << 20
 
 // historyBefore returns what m's run is shown of its chat, the one that
 // goes by chatJIDs(m), oldest first and at most limit entries in all.
@@ -1473,13 +1637,12 @@ func (br *Brain) historyBefore(m Inbound, limit int) (before, since []historyEnt
 	// The answers on their way first, then the history: one delivered in
 	// between is in both, and withUndelivered takes it once.
 	pending := br.undelivered(chats)
-	split := func(entries []historyEntry) {
-		at := m.loggedIn(entries)
-		if at < 0 {
-			before, since = withUndelivered(entries, pending), nil
-			return
-		}
-		before, since = entries[:at], nil
+	entries := br.chatHistory(chats, m.enoughBefore(limit))
+	at := m.loggedIn(entries)
+	if at < 0 {
+		before = withUndelivered(entries, pending)
+	} else {
+		before = entries[:at]
 		for _, e := range entries[at+1:] {
 			if e.Type == historyOut {
 				since = append(since, e)
@@ -1487,54 +1650,60 @@ func (br *Brain) historyBefore(m Inbound, limit int) (before, since []historyEnt
 		}
 		since = withUndelivered(since, pending)
 	}
-	entries, whole := br.chatHistory(chats, promptHistoryTail)
-	split(entries)
-	if len(before) < limit && !whole {
-		// A chat that was quiet while others were busy: its window is
-		// further back than the end of the file.
-		entries, _ = br.chatHistory(chats, 0)
-		split(entries)
-	}
 	// The newest count most: what was sent since, then what came before.
 	since = since[max(0, len(since)-limit):]
 	before = before[max(0, len(before)-(limit-len(since))):]
 	return before, since
 }
 
+// enoughBefore tells chatHistory, which reads the chat's history back from
+// its end, when it has what m's run needs: every line of m's (see
+// Inbound.logged) and limit entries before the first of them, or for a
+// message without lines, limit entries. A line deleted since is not
+// found, and the reading goes on as far as it may.
+func (m Inbound) enoughBefore(limit int) func(e historyEntry) bool {
+	var lines []historyEntry
+	for _, p := range m.ownParts() {
+		if p.logged != (historyEntry{}) {
+			lines = append(lines, p.logged)
+		}
+	}
+	older := 0
+	return func(e historyEntry) bool {
+		if len(lines) > 0 {
+			// Newest first: the first of m's lines is the last found.
+			if i := slices.IndexFunc(lines, func(l historyEntry) bool { return l.sameLine(e) }); i >= 0 {
+				lines = slices.Delete(lines, i, i+1)
+			}
+			return false
+		}
+		older++
+		return older >= limit
+	}
+}
+
 // chatHistory returns the entries of the chat that goes by chats in the
-// brain's history, oldest first: those in the last tail bytes of the file,
-// or all of them for a tail of 0, and whether that was all. A DM's lines
-// may be under its LID or its number, and both are the one chat. It
-// returns none when the history cannot be read (see openInFolder).
-func (br *Brain) chatHistory(chats []string, tail int64) (entries []historyEntry, whole bool) {
-	f, err := openInFolder(br.root, historyFileName, os.O_RDONLY, 0)
-	if err != nil {
-		return nil, true
-	}
-	defer f.Close()
-	keep := func(line []byte) {
-		var e historyEntry
-		if json.Unmarshal(line, &e) == nil && slices.Contains(chats, e.Chat) {
-			entries = append(entries, e)
+// brain's history, oldest first. It reads them back from the end of the
+// file, each newest first to enough, until enough reports that it has
+// what it needs, or it reaches the chat's newest reset marker (see
+// historyReset), or promptHistoryBudget is read, or the file's start is
+// reached. A DM's lines may be under its LID or its number, and both are
+// the one chat. It returns none when the history cannot be read (see
+// openInFolder).
+func (br *Brain) chatHistory(chats []string, enough func(historyEntry) bool) []historyEntry {
+	var entries []historyEntry
+	br.scanHistory(promptHistoryBudget, mentionsChat(chats), func(e historyEntry) bool {
+		if !slices.Contains(chats, e.Chat) {
+			return true
 		}
-	}
-	if st, err := f.Stat(); err == nil && tail > 0 && st.Size() > tail {
-		for _, line := range tailLines(f, tail) {
-			keep([]byte(line))
+		if e.Type == historyReset {
+			return false
 		}
-		return entries, false
-	}
-	// A line at a time, however long one is.
-	r := bufio.NewReader(f)
-	for {
-		line, err := r.ReadBytes('\n')
-		if line = bytes.TrimSpace(line); len(line) > 0 {
-			keep(line)
-		}
-		if err != nil {
-			return entries, true
-		}
-	}
+		entries = append(entries, e)
+		return !enough(e)
+	})
+	slices.Reverse(entries)
+	return entries
 }
 
 // loggedIn returns where m's own lines begin in entries, the chat's
@@ -1827,8 +1996,8 @@ func (br *Brain) appendHistoryVia(chatJID, from, text, typ, via string) {
 }
 
 // appendEntry appends entry to the brain's history file, stamped with the
-// time now. It returns the line as it reads back, or none when the file
-// could not be opened.
+// time now unless it has a time. It returns the line as it reads back, or
+// none when the file could not be opened.
 func (br *Brain) appendEntry(entry historyEntry) historyEntry {
 	br.historyMu.Lock()
 	entry, err := br.writeEntryLocked(entry)
@@ -1859,10 +2028,13 @@ func (br *Brain) recordDelivered(chat, text string, remove func() error) error {
 }
 
 // writeEntryLocked appends entry to the history file, stamped with the
-// time now, and returns it as it reads back, which historyBefore looks
-// for: invalid UTF-8 in its text is written as U+FFFD. historyMu is held.
+// time now unless it has a time, and returns it as it reads back, which
+// historyBefore looks for: invalid UTF-8 in its text is written as U+FFFD.
+// historyMu is held.
 func (br *Brain) writeEntryLocked(entry historyEntry) (historyEntry, error) {
-	entry.TS = time.Now().Format(time.RFC3339)
+	if entry.TS == "" {
+		entry.TS = time.Now().Format(time.RFC3339)
+	}
 	data, err := json.Marshal(entry)
 	if err != nil {
 		return entry, err
@@ -1958,6 +2130,8 @@ type BrainManager struct {
 
 	profiler *SandboxProfiler
 	hooks    *BrainHooks
+	// slots bound the runs of every brain together, across reloads.
+	slots *runSlots
 }
 
 // NewBrainManager builds the configured brains.
@@ -1967,6 +2141,7 @@ func NewBrainManager(cfg *Config) (*BrainManager, error) {
 		byGroup:  map[string]*Brain{},
 		profiler: NewSandboxProfiler(nil, cfg),
 		hooks:    &BrainHooks{},
+		slots:    newRunSlots(cfg.RunLimit()),
 	}
 	if err := bm.Apply(cfg); err != nil {
 		return nil, err
@@ -2035,6 +2210,7 @@ func (bm *BrainManager) reload(specs []BrainSpec, issues []BrainIssue, cfg *Conf
 				root:    root,
 				sandbox: bm.profiler,
 				hooks:   bm.hooks,
+				slots:   bm.slots,
 			}
 			created = append(created, br)
 		}
@@ -2067,6 +2243,7 @@ func (bm *BrainManager) reload(specs []BrainSpec, issues []BrainIssue, cfg *Conf
 	}
 
 	bm.profiler.Update(workDirs, cfg)
+	bm.slots.setLimit(cfg.RunLimit())
 
 	bm.mu.Lock()
 	bm.brains, bm.order, bm.byGroup, bm.dmBrain, bm.fallback, bm.issues = next, order, byGroup, dm, def, issues

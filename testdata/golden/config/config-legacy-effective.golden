@@ -32,6 +32,7 @@
   },
   "log_level": "info",
   "max_chunk_size": 3900,
+  "max_concurrent_runs": 2,
   "max_media_mb": 100,
   "media_dir": "<HOME>/.fridolin/media",
   "otp_guard": true,

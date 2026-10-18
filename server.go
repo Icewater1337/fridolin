@@ -147,14 +147,22 @@ func (b *Bridge) httpSend(w http.ResponseWriter, r *http.Request) {
 		// What did go out is in the chat, so it goes in the history too.
 		var partial *partialSendError
 		if errors.As(err, &partial) {
-			b.appendHTTPMessageToHistory(who, jid, strings.Join(partial.sent, "\n"))
+			b.appendHTTPMessageToHistory(who, jid, strings.Join(partial.sent, "\n"), "")
 		}
 		writeErr(w, sendErrStatus(err), "send failed: "+err.Error())
 		return
 	}
 
-	b.appendHTTPMessageToHistory(who, jid, req.Text)
-	writeJSON(w, http.StatusOK, map[string]string{"status": "sent"})
+	// A message that asks for a one-time code gets an id, which the
+	// hand-off of the code that answers it repeats (see handOffCode).
+	resp := map[string]string{"status": "sent"}
+	request := ""
+	if br := b.brainMgr.BrainFor(jid, isGroupJID(jid)); br != nil && br.asksForCode(req.Text) {
+		request = newOTPRequestID()
+		resp["otp_request"] = request
+	}
+	b.appendHTTPMessageToHistory(who, jid, req.Text, request)
+	writeJSON(w, http.StatusOK, resp)
 }
 
 // maySend refuses a /send that who may not make: a brain may send only to
@@ -218,8 +226,8 @@ func sendErrStatus(err error) int {
 // appendHTTPMessageToHistory records a message who sent through /send in the
 // history of whichever brain owns the target chat, marked with how it came
 // in: the brain must not take a line a script or another brain sent for its
-// own words.
-func (b *Bridge) appendHTTPMessageToHistory(who principal, jid, text string) {
+// own words. request is the id of the code request it makes, "" for none.
+func (b *Bridge) appendHTTPMessageToHistory(who principal, jid, text, request string) {
 	br := b.brainMgr.BrainFor(jid, isGroupJID(jid))
 	if br == nil {
 		return
@@ -228,7 +236,7 @@ func (b *Bridge) appendHTTPMessageToHistory(who principal, jid, text string) {
 	if who.kind == callerBrain {
 		from = who.brain
 	}
-	br.appendHistoryVia(jid, from, text, historyOut, who.via())
+	br.appendEntry(historyEntry{From: from, Chat: jid, Text: text, Type: historyOut, Via: who.via(), OTPRequest: request})
 }
 
 // httpIngest handles POST /ingest. It feeds files that arrived outside

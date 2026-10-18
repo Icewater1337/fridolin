@@ -64,7 +64,7 @@ restart.
 | `model`, `effort` | Override the global `brain_model` / `brain_effort`. |
 | `disallowed_tools` | Override the global list; omit to inherit, `[]` to allow every tool. |
 | `prompt_file` | The prompt sent ahead of every message, relative to the folder. It must stay inside the folder, and be a file rather than a symlink (see [Files the bridge reads and writes](#files-the-bridge-reads-and-writes)). |
-| `reply_chat` | Where answers go for files handed in through `/ingest`. The files are handled by this brain even when the chat belongs to another one, so a brain without chats can answer in your DM. `!stop` and `!reset` in that chat also stop this brain's work on them. Default: the first allowed number for the brain that gets DMs (the DM brain, or the fallback brain when none handles DMs), else the brain's first group. |
+| `reply_chat` | Where answers go for files handed in through `/ingest`. The files are handled by this brain even when the chat belongs to another one, so a brain without chats can answer in your DM. `!stop` and `!reset` in that chat also stop this brain's work on them, and `!reset` starts the chat afresh for this brain too. Default: the first allowed number for the brain that gets DMs (the DM brain, or the fallback brain when none handles DMs), else the brain's first group. |
 | `observe` | What the brain does with untagged group messages, the ones nobody addressed to it (see [triggers](CONFIGURATION.md#triggers)). `history`, the default, keeps them in its history, where its next run in that group reads them; they cost nothing. `run` also gives each one a run of its own (a bare "ok" or emoji excepted), for a brain that keeps notes as the conversation goes: its prompt marks it `<observe_only>`, nothing it writes is sent, and a message addressed to the brain stops it and goes first, but each costs a full Claude run, with tools, on whatever any member the group's `group_members` admits writes (see [group_members](CONFIGURATION.md#group_members)). Set in the dashboard under *Untagged group messages*. |
 | `backup` | Google Drive backup for this folder; see [BACKUP.md](BACKUP.md). |
 | `calendar` | The Google account this brain signed in with and the calendars it may use; set by *Connect Google Calendar*, see [CALENDAR.md](CALENDAR.md). |
@@ -91,9 +91,15 @@ did in `claude-stream.log`, each run under a line naming its chat, sender,
 process and model, and after it the end of what the CLI wrote to stderr,
 under a line naming the run. A history line has the type `in`, `out` for an
 answer, written once all of it reached WhatsApp as what the chat got (a
-poll as its question and numbered options), or `event` for a vote in one
-of the brain's polls or an edit of a message a run already read, and a
-message from WhatsApp carries its `id`. A message deleted for everyone is
+poll as its question and numbered options), `event` for a vote in one
+of the brain's polls or an edit of a message a run already read, or
+`reset`, without text, where someone sent `!reset` in the chat: a run's
+prompt shows only the chat's messages after the newest one, while the
+file keeps the ones before for `fridolin history`, which, like the
+dashboard's feed, leaves the marker out. A message from WhatsApp carries
+its `id`. An `in` line is written once the
+brain took the message (not for one its full queue turned away), with
+the time it was sent as its `ts`. A message deleted for everyone is
 taken out of the history again, by rewriting the file. A run that finds the
 log over 5 MB first moves it to `claude-stream.1.log`, replacing the one
 before. A brain can change any file in its folder, and put a symlink to
@@ -172,9 +178,11 @@ dashboard refuses to save any brain's settings.
 Each message is one `claude -p` run in the brain's folder. Its prompt is
 the brain's prompt file (`brain-prompt.md`) followed by the messages of
 the chat before the new one (the last 10 of a direct chat, 20 of a
-group), what went out there while the new one waited for its run or
-still waits to go out to WhatsApp (the reply to the message before it,
-say), and the new message; Claude Code adds its own system prompt. Each
+group, looked for in the last 16 MB of the history, which the bridge
+reads back from its end, skipping a line longer than 4 MB), what went
+out there while the new one waited for its run or still waits to go
+out to WhatsApp (the reply to the message before it, say), and the new
+message; Claude Code adds its own system prompt. Each
 message is one line of JSON with its time, sender and text, so that
 nothing someone writes can pass for the prompt's own structure or for
 another sender. The prompt reaches the CLI on stdin, not among its

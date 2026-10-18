@@ -532,9 +532,11 @@ func TestIngestRunsInTheNamedBrain(t *testing.T) {
 	}
 }
 
-// The OTP guard checks the brain the hand-off names, not the brain that owns
-// its reply chat: up asked for the code, so up's guard must catch it.
-func TestIngestOTPGuardChecksTheNamedBrain(t *testing.T) {
+// What /ingest hands a brain comes from a program, not from the chat that
+// asked for a code: the OTP guard leaves it alone, and the brain reads it
+// like any other message. Otherwise a brain could plant a code for the
+// script that waits for one, through its own /ingest.
+func TestIngestedCodeIsNotCaught(t *testing.T) {
 	const dm = "15551234567@s.whatsapp.net"
 	tb := newTestBridge(t, `, "ingest": {"enabled": true}, "otp_guard": true, "otp_markers": ["Examplebank 2FA"]`)
 	tb.addFolderBrain(t, BrainManifest{ID: "dm", Name: "DM", Routing: BrainRouting{HandlesDMs: true}})
@@ -544,14 +546,12 @@ func TestIngestOTPGuardChecksTheNamedBrain(t *testing.T) {
 	if w := tb.ingest(`{"brain":"up","text":"483920"}`); w.Code != 202 {
 		t.Fatalf("ingest: %d %s", w.Code, w.Body.String())
 	}
-	otp := filepath.Join(tb.cfgs.Get().DataDir, "otp", "up.json")
-	waitFor(t, 3*time.Second, "otp file", func() bool { _, err := os.Stat(otp); return err == nil })
-	time.Sleep(200 * time.Millisecond)
-	if hist, _ := os.ReadFile(filepath.Join(upDir, "conversation-history.jsonl")); strings.Contains(string(hist), "483920") {
-		t.Error("the code reached up's history; the guard checked the wrong brain")
+	waitFor(t, 5*time.Second, "up's answer", func() bool { return tb.sentPrefix(dm, "echo:") })
+	if hist, _ := os.ReadFile(filepath.Join(upDir, "conversation-history.jsonl")); !strings.Contains(string(hist), `"text":"483920","type":"in"`) {
+		t.Errorf("up's history lacks the ingested text:\n%s", hist)
 	}
-	if out := tb.dev.Outbox(); len(out) != 0 {
-		t.Errorf("outbox = %+v, want nothing: a caught code must not start a run", out)
+	if _, err := os.Stat(filepath.Join(tb.cfgs.Get().DataDir, "otp", "up.json")); !os.IsNotExist(err) {
+		t.Errorf("the ingested text was handed over as a code (%v)", err)
 	}
 }
 
@@ -627,11 +627,19 @@ func TestResetReachesAHandOffInItsReplyChat(t *testing.T) {
 	waitFor(t, 5*time.Second, "the second file to wait", func() bool { return len(up.Snapshot().Queue) == 1 })
 
 	tb.handleInbound(context.Background(), Inbound{JID: dm, Sender: "15551234567", Text: "!reset", Source: sourceWhatsApp})
-	if !tb.sentPrefix(dm, "✅ Cleared anything this chat had running or waiting") {
+	if !tb.sentPrefix(dm, "✅ Reset. I stopped what this chat had running or waiting") {
 		t.Errorf("!reset answered %q, want that it cleared the chat", tb.sentTo(dm))
 	}
 	if rt := up.Snapshot(); rt.Running != nil || len(rt.Queue) != 0 {
 		t.Errorf("up still has work after !reset: running %+v, queue %+v", rt.Running, rt.Queue)
+	}
+	// up answers in the chat, so the chat starts afresh for it too: its
+	// next file's run reads none of the earlier ones.
+	if !slices.ContainsFunc(readHistory(t, up), func(e historyEntry) bool { return e.Type == historyReset && e.Chat == dm }) {
+		t.Errorf("up's history has no reset marker for the chat:\n%+v", readHistory(t, up))
+	}
+	if before, _ := up.historyBefore(Inbound{JID: dm, Brain: "up", Sender: "upload", Text: "next file", Source: sourceIngest}, dmHistoryWindow); len(before) != 0 {
+		t.Errorf("up's next run in the chat would read %+v", before)
 	}
 }
 
@@ -1669,22 +1677,25 @@ func TestAddBrainBackupDefaults(t *testing.T) {
 func TestOTPGuardHandsCodeToLocalScripts(t *testing.T) {
 	h := newHarness(t, `{"otp_guard": true, "otp_markers": ["Examplebank 2FA"]}`)
 	dir := h.AddBrain(BrainManifest{ID: "p", Name: "P", Routing: BrainRouting{HandlesDMs: true}})
-	// A local script asks for a code through /send...
-	if w := h.Script("POST", "/send", `{"jid":"15551234567@s.whatsapp.net","text":"Examplebank 2FA: reply with the code"}`); w.Code != http.StatusOK {
-		t.Fatalf("send: %d %s", w.Code, w.Body.String())
+	// A local script asks for a code through /send, which names the
+	// request...
+	asked := time.Now().UnixMilli()
+	sent := h.Script("POST", "/send", `{"jid":"15551234567@s.whatsapp.net","text":"Examplebank 2FA: reply with the code"}`)
+	var answer struct {
+		Status     string `json:"status"`
+		OTPRequest string `json:"otp_request"`
+	}
+	if err := json.Unmarshal(sent.Body.Bytes(), &answer); err != nil || sent.Code != http.StatusOK || answer.Status != "sent" || len(answer.OTPRequest) != 16 {
+		t.Fatalf("/send = %d %s, want it sent with the request's id", sent.Code, sent.Body.String())
 	}
 	// ...and the reply arrives.
 	if w := h.Do("POST", "/api/dev/inbound", map[string]any{"jid": "15551234567@s.whatsapp.net", "text": " 483920 "}); w.Code != 202 {
 		t.Fatal(w.Body.String())
 	}
-	asked := time.Now().UnixMilli()
 	otp := filepath.Join(h.DataDir(), "otp", "p.json")
 	waitFor(t, 3*time.Second, "otp file", func() bool { _, err := os.Stat(otp); return err == nil })
 	data, _ := os.ReadFile(otp)
-	var got struct {
-		Brain, Chat, Sender, Code, Received string
-		ReceivedUnixMS                      int64 `json:"received_unix_ms"`
-	}
+	var got otpHandoff
 	_ = json.Unmarshal(data, &got)
 	if got.Code != "483920" || got.Chat != "15551234567@s.whatsapp.net" || got.Brain != "p" || got.Sender == "" || got.Received == "" {
 		t.Errorf("otp file = %s", data)
@@ -1693,15 +1704,73 @@ func TestOTPGuardHandsCodeToLocalScripts(t *testing.T) {
 	if got.ReceivedUnixMS < asked-5000 || got.ReceivedUnixMS > time.Now().UnixMilli() {
 		t.Errorf("received_unix_ms = %d, want a time around %d", got.ReceivedUnixMS, asked)
 	}
+	// The code names the request it answers, and when the file goes.
+	if got.Request != answer.OTPRequest || got.RequestedUnixMS < asked-5000 || got.RequestedUnixMS > got.ReceivedUnixMS {
+		t.Errorf("request %q at %d, want %q around %d", got.Request, got.RequestedUnixMS, answer.OTPRequest, asked)
+	}
+	if want := got.ReceivedUnixMS + otpHandoffTTL.Milliseconds(); got.ExpiresUnixMS != want {
+		t.Errorf("expires_unix_ms = %d, want %d", got.ExpiresUnixMS, want)
+	}
 	if st, _ := os.Stat(otp); st.Mode().Perm() != 0o600 {
 		t.Errorf("otp file mode %v", st.Mode().Perm())
+	}
+	if st, _ := os.Stat(filepath.Dir(otp)); st.Mode().Perm() != 0o700 {
+		t.Errorf("otp folder mode %v", st.Mode().Perm())
 	}
 	hist, _ := os.ReadFile(filepath.Join(dir, "conversation-history.jsonl"))
 	if strings.Contains(string(hist), "483920") {
 		t.Error("the code must not be written to the conversation history")
 	}
 	time.Sleep(200 * time.Millisecond)
-	if out := h.Outbox(); len(out) != 1 || !strings.Contains(out[0].Text, "Examplebank 2FA") {
-		t.Errorf("outbox = %+v — only the script's own request may be there; the brain must not run on a caught code", out)
+	// The sender is told what became of the code; nothing else is sent.
+	var texts []string
+	for _, m := range h.Outbox() {
+		texts = append(texts, m.Text)
+	}
+	slices.Sort(texts)
+	if len(texts) != 2 || !strings.Contains(texts[0], "Examplebank 2FA") || texts[1] != otpCaughtNotice {
+		t.Errorf("sent %q — only the script's own request and the notice may be there; the brain must not run on a caught code", texts)
+	}
+}
+
+// /send names a message that asks for a one-time code, which the guard
+// would catch the answer to, and records the name with its history line.
+func TestSendNamesACodeRequest(t *testing.T) {
+	cases := []struct {
+		name, extra, text string
+		brain             bool // a brain answers the chat
+		named             bool
+	}{
+		{"a request", `, "otp_guard": true`, "🔐 Please reply with the code", true, true},
+		{"no marker", `, "otp_guard": true`, "Deploy finished", true, false},
+		{"the guard off", `, "otp_guard": false`, "🔐 Please reply with the code", true, false},
+		{"a chat no brain answers", `, "otp_guard": true`, "🔐 Please reply with the code", false, false},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			tb := newTestBridge(t, c.extra)
+			if c.brain {
+				tb.addFolderBrain(t, BrainManifest{ID: "dm", Name: "DM", Routing: BrainRouting{HandlesDMs: true}})
+			}
+			body, _ := json.Marshal(map[string]string{"jid": testDMChat, "text": c.text})
+			r := httptest.NewRequest("POST", "http://127.0.0.1:8765/send", bytes.NewReader(body))
+			r.Host = "127.0.0.1:8765"
+			w := httptest.NewRecorder()
+			tb.h.ServeHTTP(w, r)
+			var answer map[string]string
+			if err := json.Unmarshal(w.Body.Bytes(), &answer); err != nil || w.Code != 200 {
+				t.Fatalf("/send = %d %s", w.Code, w.Body.String())
+			}
+			id, named := answer["otp_request"]
+			if named != c.named {
+				t.Errorf("/send = %v, named %v, want %v", answer, named, c.named)
+			}
+			if br := tb.brainMgr.Get("dm"); br != nil {
+				h := readHistory(t, br)
+				if len(h) != 1 || h[0].OTPRequest != id {
+					t.Errorf("history = %+v, want the line with the request's id %q", h, id)
+				}
+			}
+		})
 	}
 }

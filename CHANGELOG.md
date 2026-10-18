@@ -61,6 +61,46 @@ yet, so everything is under Unreleased until the first one.
   backed-up files lost more than half of them, so that a wiped
   `memories/` is no longer mirrored. "Mirror the deletion…" on the
   backup card goes ahead with one that was meant.
+- At most two Claude runs go at once, all brains together
+  (`max_concurrent_runs`, Settings → Claude); a brain whose turn it is
+  waits for a free one, requests ahead of untagged chatter, and a request
+  that has to wait gets the "Queued" notice. Set it to 0 for runs without
+  a limit, as before.
+- A brain's queue takes each chat's messages in order and the chats in
+  turn, so a busy chat no longer keeps the brain's other chats waiting
+  behind all of its messages. "Queued (#n)" counts the same way.
+- `!reset` starts the chat afresh: besides what `!stop` does, it writes a
+  `reset` line into the history of each brain that answers in the chat,
+  and a run's prompt shows only the chat's messages after it. The file
+  keeps the earlier ones; `fridolin history` and the dashboard's feed
+  leave the marker out. Scripts that read `conversation-history.jsonl`
+  themselves meet a new line type, which has no text.
+- The OTP guard catches a code only in the chat that was asked for one,
+  and only for ten minutes after: a number in the brain's other chats, or
+  long after the request, reaches the brain like any other message. It
+  also catches codes written in groups (`483 920`, `483-920`) and
+  letter-and-digit codes (`G-483920`), matches `otp_markers` in any
+  letter case as whole words, tells the sender that the code was kept
+  out, and leaves text handed in through `/ingest` alone. The hand-off
+  file's `code` has the spaces and dashes taken out; `typed` holds the
+  message as it was sent.
+- The OTP hand-off file, `<data_dir>/otp/<brain>.json`, names the request
+  a code answers: `/send` answers a message that asks for a code with an
+  `otp_request` id, which the file repeats as `request`, with
+  `requested_unix_ms` and `expires_unix_ms`. The bridge deletes the file
+  ten minutes after the code came, and at startup one that expired while
+  it was stopped; a script deletes it once it has the code.
+- A run's prompt looks for the chat's last messages in the last 16 MB of
+  the brain's history, read back from its end, instead of reading the
+  whole file for every run. A chat that was quiet behind more than 16 MB
+  of other chats' messages starts without its earlier ones. A history
+  line longer than 4 MB is skipped; before, a line over 1 MB stopped the
+  reading, and every chat's prompt stayed at the messages before it.
+- A message's `in` line in `conversation-history.jsonl` has the time the
+  message was sent as its `ts`, not the time the bridge wrote it, a few
+  seconds later. The line is written once the brain took the message: one
+  its full queue turned away ("Try again in a bit") is no longer recorded,
+  so the sender's retry is no longer in the history twice.
 
 ### Added
 

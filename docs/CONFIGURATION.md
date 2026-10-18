@@ -279,6 +279,25 @@ CLI's output open is stopped then, rather than keeping the brain busy for
 as long as it runs. The answer goes out either way, also when the limit
 above comes within those five seconds.
 
+### `max_concurrent_runs`
+
+How many Claude runs may go at once, all brains together. Default 2, at
+most 64; `0` lets every brain run whenever it has work, as before this
+setting. A brain runs one message at a time anyway, so this matters once
+more than two brains are busy at the same time: each run is a full Claude
+Code agent with tools, on your CPU and on your account's rate limits, and
+the next request needs them as much. A brain whose turn it is waits for
+a free run, and the log says so; the sender of a request that has to
+wait for one is told "⏳ Queued (#1)" (with [`queue`](#queue)'s
+`notify`), as when it waits behind the brain's own work. Work addressed
+to a brain gets the next free run before untagged chatter (an
+observe-only run, see [`observe`](BRAINS.md)), and among them the brain
+that asked first, so a brain that just had a run asks again behind the
+others. A request that finds every run taken by observe-only runs stops
+one of them, as it would in its own brain: the chatter is already in the
+history. A change applies at once; with a lower limit, runs going on
+finish and the next waits.
+
 ### `inherit_claude_user_config`
 
 The dashboard has no field for it, but its overview warns while it is on.
@@ -845,7 +864,10 @@ send their run's token; see [API.md](API.md#who-may-call).
 ```
 
 `mode: "queue"` (default) runs a brain's messages one after another and, with
-`notify`, tells the sender "⏳ Queued (#2)". `mode: "interrupt"` lets a newer
+`notify`, tells the sender "⏳ Queued (#2)". Each chat's messages run in the
+order they came, and the chats take turns: the chat whose last run started
+longest ago goes next, so a chat that sends five messages does not keep
+another chat's one waiting behind all five. `mode: "interrupt"` lets a newer
 request replace the sender's own: it stops their run in flight in that chat (or
 a run on the chat's untagged chatter) and drops their earlier waiting request.
 The newer request then waits behind the requests already queued (though ahead
@@ -980,33 +1002,62 @@ case.
 
 ### `otp_guard` and `otp_markers`
 
-Drops a message that is only a 4–8 digit number when one of the assistant's
-last 50 outbound messages contains one of `otp_markers` — by default `🔐`,
-`OTP`, `2FA`, `one-time code`, `verification code`. Add your own (a bank's
-name in its code prompt, say); setting the list replaces the defaults, so
-include them if you still want them. Only what was typed counts: a code sent
-as a reply to the request is caught too, and so is a corrected code, when
-its sender edits the message.
+Catches a one-time code in a chat that was just asked for one. A chat was
+asked when, in the last ten minutes, something went out there that holds
+one of `otp_markers`: the assistant's own reply, or a message sent in the
+chat through `/send` by a script or a brain. The markers are by default
+`🔐`, `OTP`, `2FA`, `one-time code` and `verification code`, matched in
+any letter case and as whole words (`OTP` is not found in "hotpot"). Add
+your own (a bank's name in its code prompt, say); setting the list
+replaces the defaults, so include them if you still want them. A message
+in that chat, from anyone in it, is caught when it is nothing but a code:
+4 to 8 digits, also in groups such as `483 920` or `483-920`, or 6 to 10
+upper-case letters and digits with at least two digits, such as
+`G-483920`. A number in another chat of the brain, or one that comes
+later than ten minutes after the request, is a message like any other.
+Only what was typed counts: a code sent as a reply to the request is
+caught too, and so is a corrected code, when its sender edits the message.
+Only messages from a chat are caught: text handed to a brain through
+`/ingest` or by Plaud comes from a program, and the brain reads it.
+Whoever sent the code is told that it was kept out of the conversation,
+unless it was untagged group chatter, which the bridge never answers.
 
 The code is never written to history or sent to the model — the assistant
 never sees it. It is kept for local scripts instead:
 `<data_dir>/otp/<brain>.json` holds the latest code the guard caught for
-that brain, readable only by your user and denied to brains by the sandbox:
+that brain, readable only by your user (in a folder only you can open) and
+denied to brains by the sandbox:
 
 ```json
 {"brain": "main", "chat": "15551234567@s.whatsapp.net", "sender": "15551234567",
- "code": "483920", "received": "2026-10-18T09:30:12+02:00", "received_unix_ms": 1792308612345}
+ "code": "483920", "typed": "483 920",
+ "received": "2026-10-18T09:30:12+02:00", "received_unix_ms": 1792308612345,
+ "request": "9f3c2a71d04b6e58", "requested_unix_ms": 1792308590000,
+ "expires_unix_ms": 1792309212345}
 ```
 
-Each caught code replaces the one before, and the file stays until then, so
-a script deletes it once it has used the code if it wants it gone. The
-guard reacts to any message the brain sent with a marker, not only to a
-`/send`, and the file carries no request id. A script that asked for a code
-through `/send` (with one of the `otp_markers` in its message) therefore
-polls the file for one whose `chat` (and `sender`) are the chat it asked in,
-and whose `received_unix_ms` is later than the time of its request; that
-field needs no time zone, unlike `received`, which ends in `Z` on a host
+`code` is the code without spaces and dashes, `typed` the message as it
+was sent. `request` is the id `/send` answered the request with, in its
+`otp_request` (see [API.md](API.md#post-send)): that of the newest such
+request in the chat in the last ten minutes, also when the assistant's
+own reply held a marker after it, and `""` when only the brain asked, in
+its own words. `requested_unix_ms` is when the request went out. The unix
+times need no time zone, unlike `received`, which ends in `Z` on a host
 set to UTC.
+
+A script that asked for a code through `/send` (with one of the
+`otp_markers` in its message) polls the file until its `request` is the
+id it got, then takes the code and deletes the file, or renames it away
+first if another program might read it too. One that asked a group also
+checks `chat` and `sender`: for ten minutes anything in the group that
+reads as a code is caught for its request, a year such as `2024` from
+another member too, so only the code from the person it asked is its
+code. The bridge deletes the file itself ten minutes after the code came
+(`expires_unix_ms`), and at the next start one that expired while it was
+stopped. A newer code for the same brain replaces the file: a corrected
+code from the same chat, another member's number in a group, or one for
+another request, which the `request`, `chat` and `sender` of the file
+then tell apart.
 
 ### `max_chunk_size`
 

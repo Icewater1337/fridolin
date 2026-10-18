@@ -262,8 +262,8 @@ func TestHistoryV1Fixture(t *testing.T) {
 			t.Errorf("line written again as\n%s\nwant\n%s", out, sc.Bytes())
 		}
 	}
-	if !kinds[historyIn] || !kinds[historyOut] || !kinds[historyEvent] || len(kinds) != 3 {
-		t.Errorf("history-v1.jsonl has the types %v, want %q, %q and %q", kinds, historyIn, historyOut, historyEvent)
+	if !kinds[historyIn] || !kinds[historyOut] || !kinds[historyEvent] || !kinds[historyReset] || len(kinds) != 4 {
+		t.Errorf("history-v1.jsonl has the types %v, want %q, %q, %q and %q", kinds, historyIn, historyOut, historyEvent, historyReset)
 	}
 	all, err := json.Marshal(keys)
 	if err != nil {

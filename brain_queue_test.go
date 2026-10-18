@@ -1098,16 +1098,6 @@ func TestBuildPromptNamesTheHistorySearch(t *testing.T) {
 	}
 }
 
-func TestOTPMarkersConfigurable(t *testing.T) {
-	lines := []string{`{"type":"out","from":"a","text":"Please send the Examplebank code"}`}
-	if recentOutboundLooksLikeOTPRequest(lines, "a") {
-		t.Error("default markers should not match a bank name")
-	}
-	if !recentOutboundLooksLikeOTPRequest(lines, "a", "Examplebank") {
-		t.Error("a configured marker should arm the guard")
-	}
-}
-
 func TestParseStreamReportsErrorText(t *testing.T) {
 	br := bareBrain(t)
 	stream := `{"type":"assistant","message":{"content":[{"type":"text","text":"Failed to authenticate. API Error: 401"}]}}
@@ -1549,5 +1539,503 @@ func TestStreamLogIsRotatedAndNamesEachRun(t *testing.T) {
 	first, _, _ := strings.Cut(string(data), "\n")
 	if len(data) > 4096 || !strings.Contains(first, "Run for 15551234567@s.whatsapp.net from 15551234567, pid ") || !strings.Contains(first, "model sonnet") {
 		t.Errorf("new log starts %q (%d bytes), want the run named", first, len(data))
+	}
+}
+
+// A message's history line is written once the brain takes the message,
+// and says when it was sent: not when the debouncer let it through. A
+// message the brain turns away leaves no line, or the sender's retry, or
+// the brain it is routed to instead, would put it in the history twice.
+func TestHistoryLineIsWrittenOnceTakenAtItsOwnTime(t *testing.T) {
+	sent := time.Now().Add(-time.Hour).Truncate(time.Second)
+	cases := []struct {
+		name  string
+		setup func(t *testing.T, br *Brain)
+		m     Inbound
+		err   error
+		want  []string // the history lines' text and time, "text@ts"
+	}{
+		{"a message, at its time", nil, Inbound{JID: testDMChat, Sender: "15551234567", Text: "hi", At: sent},
+			nil, []string{"hi@" + sent.Format(time.RFC3339)}},
+		{"each part at its own time", nil, Inbound{JID: testDMChat, Sender: "15551234567", Text: "photo", At: sent}.merge(
+			Inbound{JID: testDMChat, Sender: "15551234567", Text: "what is it?", At: sent.Add(5 * time.Second)}),
+			nil, []string{"photo@" + sent.Format(time.RFC3339), "what is it?@" + sent.Add(5*time.Second).Format(time.RFC3339)}},
+		{"turned away by a full queue", func(t *testing.T, br *Brain) {
+			if _, _, err := br.Submit(dm("long task")); err != nil {
+				t.Fatal(err)
+			}
+			waitFor(t, 5*time.Second, "the first run", func() bool { r := br.Snapshot().Running; return r != nil && r.PID > 0 })
+			if _, _, err := br.Submit(Inbound{JID: testGroup, Sender: otherNumber, Text: "waiting"}); err != nil {
+				t.Fatal(err)
+			}
+		}, Inbound{JID: testDMChat, Sender: "15551234567", Text: "one more", At: sent}, errQueueFull, []string{"long task", "waiting"}},
+		{"chatter that finds no place", func(t *testing.T, br *Brain) {
+			// b observes its group with runs, and its one place is taken.
+			if _, _, err := br.Submit(Inbound{JID: "120363000000000000@g.us", Sender: otherNumber, Text: "long task"}); err != nil {
+				t.Fatal(err)
+			}
+			waitFor(t, 5*time.Second, "the first run", func() bool { r := br.Snapshot().Running; return r != nil && r.PID > 0 })
+			if _, _, err := br.Submit(Inbound{JID: "120363000000000000@g.us", Sender: otherNumber, Text: "waiting"}); err != nil {
+				t.Fatal(err)
+			}
+		}, Inbound{JID: "120363000000000000@g.us", Sender: "15551234567", Text: "chatter", At: sent, Silent: true},
+			nil, []string{"long task", "waiting", "chatter@" + sent.Format(time.RFC3339)}},
+		{"turned away by a retired brain", func(t *testing.T, br *Brain) {
+			br.mu.Lock()
+			br.retired = true
+			br.mu.Unlock()
+		}, Inbound{JID: testDMChat, Sender: "15551234567", Text: "too late", At: sent}, errBrainRetired, nil},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			mgr, _, _ := queueTestManager(t, 30000, `, "queue": {"max_pending": 1}`)
+			br := mgr.Get("a")
+			if c.m.IsGroup() {
+				br = mgr.Get("b")
+			}
+			if c.setup != nil {
+				c.setup(t, br)
+			}
+			if _, _, err := br.Submit(c.m); !errors.Is(err, c.err) {
+				t.Fatalf("Submit: %v, want %v", err, c.err)
+			}
+			var got []string
+			for _, e := range readHistory(t, br) {
+				if e.TS == sent.Format(time.RFC3339) || e.TS == sent.Add(5*time.Second).Format(time.RFC3339) {
+					got = append(got, e.Text+"@"+e.TS)
+				} else {
+					got = append(got, e.Text)
+				}
+			}
+			if !slices.Equal(got, c.want) {
+				t.Errorf("history = %q, want %q", got, c.want)
+			}
+		})
+	}
+}
+
+// Each chat's messages wait in a lane of their own, which runs in order,
+// and the chats take turns: the chat whose last run started longest ago
+// goes next, one that never had a run first. Work addressed to the brain
+// goes before untagged chatter whatever the turns.
+func TestQueueOrderGivesEachChatItsTurn(t *testing.T) {
+	const x, y, z = "x@s.whatsapp.net", "y@s.whatsapp.net", "z@g.us"
+	msg := func(chat, text string) Inbound { return Inbound{JID: chat, Text: text} }
+	chatter := func(chat, text string) Inbound { return Inbound{JID: chat, Text: text, Silent: true} }
+	cases := []struct {
+		name    string
+		turns   map[string]uint64
+		pending []Inbound
+		want    string
+	}{
+		{"one chat runs in order", nil, []Inbound{msg(x, "x1"), msg(x, "x2"), msg(x, "x3")}, "x1 x2 x3"},
+		{"chats alternate", nil, []Inbound{msg(x, "x1"), msg(x, "x2"), msg(y, "y1"), msg(y, "y2")}, "x1 y1 x2 y2"},
+		{"the chat that just ran goes last", map[string]uint64{x: 3}, []Inbound{msg(x, "x2"), msg(y, "y1"), msg(z, "z1")}, "y1 z1 x2"},
+		{"the longest ago goes first", map[string]uint64{x: 3, y: 1, z: 2}, []Inbound{msg(x, "x1"), msg(z, "z1"), msg(y, "y1")}, "y1 z1 x1"},
+		{"requests before chatter", nil, []Inbound{chatter(z, "z1"), msg(x, "x1"), msg(x, "x2"), msg(y, "y1")}, "x1 y1 x2 z1"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			br := &Brain{pending: c.pending, turns: maps.Clone(c.turns), turn: 10}
+			var got []string
+			for _, i := range br.queueOrderLocked() {
+				got = append(got, c.pending[i].Text)
+			}
+			if strings.Join(got, " ") != c.want {
+				t.Errorf("order %q, want %q", got, c.want)
+			}
+			// The worker takes them in that order.
+			got = nil
+			for len(br.pending) > 0 {
+				i := nextIn(br.pending, br.turns)
+				got = append(got, br.pending[i].Text)
+				chat := br.pending[i].JID
+				br.pending = slices.Delete(br.pending, i, i+1)
+				br.takeTurnLocked(chat)
+			}
+			if strings.Join(got, " ") != c.want {
+				t.Errorf("ran %q, want %q", got, c.want)
+			}
+			if len(br.turns) != 1 {
+				t.Errorf("turns = %v once all ran, want only the last chat's", br.turns)
+			}
+		})
+	}
+}
+
+// Through the brain: a chat that sends three messages while the brain
+// works does not keep another chat's one waiting behind all three, and
+// Submit says where each waits.
+func TestBusyChatDoesNotHoldUpAnother(t *testing.T) {
+	mgr, d, _ := queueTestManager(t, 400, "")
+	br := mgr.Get("a")
+	other := Inbound{JID: otherNumber + "@s.whatsapp.net", Sender: otherNumber, Text: "other 1"}
+	if _, _, err := br.Submit(dm("dm 1")); err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, 5*time.Second, "the first run", func() bool { r := br.Snapshot().Running; return r != nil && r.PID > 0 })
+	var pos []int
+	for _, m := range []Inbound{dm("dm 2"), dm("dm 3"), other} {
+		p, busy, err := br.Submit(m)
+		if err != nil || !busy {
+			t.Fatalf("%s: busy %v, %v", m.Text, busy, err)
+		}
+		pos = append(pos, p)
+	}
+	if !slices.Equal(pos, []int{1, 2, 1}) {
+		t.Errorf("positions %v, want dm 2 and 3 at #1 and #2, then the other chat's at #1, ahead of them", pos)
+	}
+	if q := queuePreviews(br); strings.Join(q, "|") != "other 1|dm 2|dm 3" {
+		t.Errorf("queue = %q, want the other chat's message first", q)
+	}
+	waitFor(t, 20*time.Second, "four runs", func() bool { return d.count() == 4 })
+	var ran []string
+	for _, r := range d.all() {
+		ran = append(ran, r.msg.Text)
+	}
+	if strings.Join(ran, "|") != "dm 1|other 1|dm 2|dm 3" {
+		t.Errorf("ran %q, want the other chat's message right after the run in flight", ran)
+	}
+}
+
+// limitTestManager is queueTestManager with a third brain, c, for the
+// group 120363000000000001@g.us, which observes it with runs like b, and
+// runs limited to limit at once.
+func limitTestManager(t *testing.T, sleepMS, limit int) (*BrainManager, *deliveries) {
+	t.Helper()
+	home := canonicalDir(t.TempDir())
+	t.Setenv("HOME", home)
+	claude := fakeClaudeEnv(t, sleepMS)
+	cfg, err := LoadConfig(writeConfig(t, `{
+		"brain_mode": true,
+		"data_dir": "`+home+`/data",
+		"claude_path": "`+claude+`",
+		"max_concurrent_runs": `+strconv.Itoa(limit)+brainDirsJSON(t,
+		brainFolder(t, home+"/a", BrainManifest{ID: "a", Routing: BrainRouting{HandlesDMs: true}}),
+		brainFolder(t, home+"/b", BrainManifest{ID: "b", Routing: BrainRouting{Groups: []string{"120363000000000000@g.us"}}, Observe: observeRun}),
+		brainFolder(t, home+"/c", BrainManifest{ID: "c", Routing: BrainRouting{Groups: []string{"120363000000000001@g.us"}}, Observe: observeRun}),
+	)+`
+	}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	mgr := newTestManager(t, cfg)
+	d := &deliveries{}
+	mgr.SetHooks(BrainHooks{Deliver: d.add})
+	t.Cleanup(mgr.Stop)
+	return mgr, d
+}
+
+// The chats of limitTestManager's brains b and c, and messages there.
+const (
+	groupB = "120363000000000000@g.us"
+	groupC = "120363000000000001@g.us"
+)
+
+func groupMsg(chat, text string, chatter bool) Inbound {
+	return Inbound{JID: chat, Sender: otherNumber, Text: text, Silent: chatter}
+}
+
+// slotState is what the run slots hold: how many slots are held and how
+// many wait, and whether a held one was asked to give way.
+func slotState(mgr *BrainManager) (held, waiting int, stopped bool) {
+	rs := mgr.slots
+	rs.mu.Lock()
+	defer rs.mu.Unlock()
+	for _, h := range rs.held {
+		stopped = stopped || h.stopped
+	}
+	return len(rs.held), len(rs.waiting), stopped
+}
+
+// waitsForSlot reports whether br's worker waits for a run slot.
+func waitsForSlot(br *Brain) bool {
+	br.mu.Lock()
+	defer br.mu.Unlock()
+	return br.slotWait != nil
+}
+
+// hasRun waits until br runs claude.
+func hasRun(t *testing.T, br *Brain) {
+	t.Helper()
+	waitFor(t, 5*time.Second, br.ID()+"'s run", func() bool { r := br.Snapshot().Running; return r != nil && r.PID > 0 })
+}
+
+// running counts the brains with a run going.
+func running(mgr *BrainManager) int {
+	n := 0
+	for _, br := range mgr.Brains() {
+		if br.Snapshot().Running != nil {
+			n++
+		}
+	}
+	return n
+}
+
+// max_concurrent_runs bounds the runs of all brains together: three busy
+// brains with a limit of two run two at a time, and the third gets its
+// turn once one is done.
+func TestRunLimitBoundsRunsAcrossBrains(t *testing.T) {
+	cases := []struct {
+		limit, most int
+	}{
+		{1, 1},
+		{2, 2},
+		{0, 3}, // no limit
+	}
+	for _, c := range cases {
+		t.Run("limit "+strconv.Itoa(c.limit), func(t *testing.T) {
+			mgr, d := limitTestManager(t, 700, c.limit)
+			for _, m := range []Inbound{
+				dm("for a"),
+				{JID: "120363000000000000@g.us", Sender: otherNumber, Text: "for b"},
+				{JID: "120363000000000001@g.us", Sender: otherNumber, Text: "for c"},
+			} {
+				if _, _, _, err := mgr.Submit(m); err != nil {
+					t.Fatal(err)
+				}
+			}
+			most := 0
+			waitFor(t, 20*time.Second, "three runs", func() bool {
+				most = max(most, running(mgr))
+				return d.count() == 3
+			})
+			if most != c.most {
+				t.Errorf("at most %d runs at once, want %d", most, c.most)
+			}
+			for _, r := range d.all() {
+				if r.res.Err != nil {
+					t.Errorf("brain %s: %v", r.brain, r.res.Err)
+				}
+			}
+		})
+	}
+}
+
+// A brain that just had a run asks for the next slot behind the brains
+// already waiting, so a brain with a long queue does not keep the slot.
+func TestRunSlotsGoToBrainsInTurn(t *testing.T) {
+	mgr, d := limitTestManager(t, 300, 1)
+	a := mgr.Get("a")
+	if _, _, err := a.Submit(dm("a 1")); err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, 5*time.Second, "a's first run", func() bool { r := a.Snapshot().Running; return r != nil && r.PID > 0 })
+	for _, m := range []Inbound{dm("a 2"), {JID: "120363000000000001@g.us", Sender: otherNumber, Text: "c 1"}} {
+		if _, _, _, err := mgr.Submit(m); err != nil {
+			t.Fatal(err)
+		}
+	}
+	most := 0
+	waitFor(t, 20*time.Second, "three runs", func() bool {
+		most = max(most, running(mgr))
+		return d.count() == 3
+	})
+	var ran []string
+	for _, r := range d.all() {
+		ran = append(ran, r.msg.Text)
+	}
+	if strings.Join(ran, "|") != "a 1|c 1|a 2" || most != 1 {
+		t.Errorf("ran %q, %d at most at once; want c's message between a's, one at a time", ran, most)
+	}
+}
+
+// Work addressed to a brain does not wait for another brain's
+// observe-only run to end: with every slot taken by chatter, it stops one.
+func TestRequestStopsChatterInAnotherBrainForASlot(t *testing.T) {
+	mgr, d := limitTestManager(t, 30000, 1)
+	b := mgr.Get("b")
+	if _, _, err := b.Submit(Inbound{JID: "120363000000000000@g.us", Sender: otherNumber, Text: "chatter here", Silent: true}); err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, 5*time.Second, "b's observe-only run", func() bool { r := b.Snapshot().Running; return r != nil && r.PID > 0 })
+	t.Setenv("FRIDOLIN_FAKE_SLEEP_MS", "10")
+	if _, _, _, err := mgr.Submit(dm("question")); err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, 15*time.Second, "both runs to end", func() bool { return d.count() == 2 })
+	got := map[string]error{}
+	for _, r := range d.all() {
+		got[r.msg.Text] = r.res.Err
+	}
+	if !errors.Is(got["chatter here"], errBrainInterrupted) || got["question"] != nil {
+		t.Errorf("results %v, want the chatter's run stopped and the question answered", got)
+	}
+}
+
+// A request that has to wait for a run slot other brains' runs take says
+// so, as one that waits behind its own brain's work does: with the limit
+// on by default, an idle brain can wait for minutes, and the sender would
+// hear nothing until its run began.
+func TestRequestWaitingForARunSlotIsBusy(t *testing.T) {
+	cases := []struct {
+		name    string
+		limit   int
+		running Inbound // in another brain
+		busy    bool
+	}{
+		{"every slot taken by a request", 1, groupMsg(groupC, "for c", false), true},
+		{"a slot free", 2, groupMsg(groupC, "for c", false), false},
+		{"the slot taken by chatter, which gives way", 1, groupMsg(groupB, "chatter here", true), false},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			mgr, _ := limitTestManager(t, 30000, c.limit)
+			other, _, _, err := mgr.Submit(c.running)
+			if err != nil {
+				t.Fatal(err)
+			}
+			hasRun(t, other)
+			_, pos, busy, err := mgr.Submit(dm("question"))
+			if err != nil || pos != 1 || busy != c.busy {
+				t.Errorf("Submit = #%d, busy %v, %v; want #1, busy %v", pos, busy, err, c.busy)
+			}
+		})
+	}
+}
+
+// A brain that waits for a slot for chatter and then gets a request waits
+// for one for the request, which stops another brain's observe-only run
+// for it, as a request that asks for a slot does.
+func TestRequestUpgradesAWaitForChatter(t *testing.T) {
+	mgr, d := limitTestManager(t, 30000, 1)
+	b, c := mgr.Get("b"), mgr.Get("c")
+	if _, _, err := b.Submit(groupMsg(groupB, "chatter in b", true)); err != nil {
+		t.Fatal(err)
+	}
+	hasRun(t, b)
+	if _, _, err := c.Submit(groupMsg(groupC, "chatter in c", true)); err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, 5*time.Second, "c to wait for a slot", func() bool { return waitsForSlot(c) })
+	t.Setenv("FRIDOLIN_FAKE_SLEEP_MS", "10")
+	if _, _, err := c.Submit(groupMsg(groupC, "question for c", false)); err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, 10*time.Second, "both runs to end", func() bool { return d.count() == 2 })
+	got := map[string]error{}
+	for _, r := range d.all() {
+		got[r.msg.Text] = r.res.Err
+	}
+	if !errors.Is(got["chatter in b"], errBrainInterrupted) || got["question for c"] != nil {
+		t.Errorf("results %v, want b's chatter stopped and c's question answered", got)
+	}
+}
+
+// A brain removed while it waits for a run slot gives up its place: its
+// worker ends at once, rather than when a slot comes free for nothing.
+func TestRetiredBrainGivesUpItsWaitForASlot(t *testing.T) {
+	mgr, _ := limitTestManager(t, 30000, 1)
+	a, c := mgr.Get("a"), mgr.Get("c")
+	if _, _, err := c.Submit(groupMsg(groupC, "for c", false)); err != nil {
+		t.Fatal(err)
+	}
+	hasRun(t, c)
+	if _, _, err := a.Submit(dm("for a")); err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, 5*time.Second, "a to wait for a slot", func() bool { return waitsForSlot(a) })
+	a.retire(false)
+	waitFor(t, 3*time.Second, "a's worker to end", func() bool {
+		a.mu.Lock()
+		defer a.mu.Unlock()
+		return !a.working
+	})
+	if held, waiting, _ := slotState(mgr); held != 1 || waiting != 0 {
+		t.Errorf("%d slots held, %d waits; want c's slot and no wait", held, waiting)
+	}
+}
+
+// Chatter whose slot a request in another brain asked to give way before
+// its run began never starts that run: it would only be stopped.
+func TestChatterAskedToGiveWayBeforeItsRunDoesNotRun(t *testing.T) {
+	mgr, d := limitTestManager(t, 30000, 1)
+	a, b, c := mgr.Get("a"), mgr.Get("b"), mgr.Get("c")
+	if _, _, err := c.Submit(groupMsg(groupC, "for c", false)); err != nil {
+		t.Fatal(err)
+	}
+	hasRun(t, c)
+	if _, _, err := b.Submit(groupMsg(groupB, "chatter in b", true)); err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, 5*time.Second, "b to wait for a slot", func() bool { return waitsForSlot(b) })
+
+	// Holding b's lock keeps its worker between the slot it is granted and
+	// the run, while a's request asks the slot to give way.
+	b.mu.Lock()
+	locked := true
+	defer func() {
+		if locked {
+			b.mu.Unlock()
+		}
+	}()
+	c.StopCurrent(false)
+	waitFor(t, 5*time.Second, "b to get the slot", func() bool { held, waiting, _ := slotState(mgr); return held == 1 && waiting == 0 })
+	t.Setenv("FRIDOLIN_FAKE_SLEEP_MS", "10")
+	if _, _, err := a.Submit(dm("question")); err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, 5*time.Second, "a to ask b's slot to give way", func() bool { _, _, stopped := slotState(mgr); return stopped })
+	b.mu.Unlock()
+	locked = false
+
+	waitFor(t, 10*time.Second, "a's answer", func() bool {
+		return slices.ContainsFunc(d.all(), func(r delivered) bool { return r.msg.Text == "question" })
+	})
+	time.Sleep(300 * time.Millisecond)
+	for _, r := range d.all() {
+		if r.brain == "b" {
+			t.Errorf("b ran its chatter: %v", r.res.Err)
+		}
+	}
+	if last := b.Snapshot().Last; last != nil {
+		t.Errorf("b's last run = %+v, want none", last)
+	}
+}
+
+// The limit is read when the configuration changes, and refused outside
+// 0 (no limit) to 64.
+func TestRunLimitSetting(t *testing.T) {
+	cases := []struct {
+		json string
+		want int
+		err  string
+	}{
+		{``, 2, ""},
+		{`, "max_concurrent_runs": 0`, 0, ""},
+		{`, "max_concurrent_runs": 5`, 5, ""},
+		{`, "max_concurrent_runs": -1`, 0, "max_concurrent_runs must be between 0 (no limit) and 64, not -1"},
+		{`, "max_concurrent_runs": 65`, 0, "max_concurrent_runs must be between 0 (no limit) and 64, not 65"},
+	}
+	for _, c := range cases {
+		t.Run(c.json, func(t *testing.T) {
+			home := t.TempDir()
+			cfg, err := LoadConfig(writeConfig(t, `{"brain_mode": true, "data_dir": "`+home+`/data"`+c.json+`}`))
+			if c.err != "" {
+				if err == nil || !strings.Contains(err.Error(), c.err) {
+					t.Errorf("err = %v, want %q", err, c.err)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got := cfg.RunLimit(); got != c.want {
+				t.Errorf("RunLimit = %d, want %d", got, c.want)
+			}
+			mgr := newTestManager(t, cfg)
+			if mgr.slots.limit != c.want {
+				t.Errorf("slots limit = %d, want %d", mgr.slots.limit, c.want)
+			}
+			n := 7
+			next := *cfg
+			next.MaxConcurrentRuns = &n
+			if err := mgr.Apply(&next); err != nil {
+				t.Fatal(err)
+			}
+			if mgr.slots.limit != 7 {
+				t.Errorf("slots limit after a change = %d, want 7", mgr.slots.limit)
+			}
+		})
 	}
 }

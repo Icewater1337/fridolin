@@ -280,7 +280,7 @@ on the **Dev** page and read the replies there.
 | -------- | ------ |
 | `!help`  | Show available commands |
 | `!stop`  | Stop the run for this chat and drop its queued messages, including files or recordings another brain is answering here |
-| `!reset` | Like `!stop` — the recent chat history stays, and the next message still sees it |
+| `!reset` | Like `!stop`, and the chat starts afresh: the next message's run sees none of the chat's earlier messages. The history file keeps them, and what the assistant wrote in its memory files stays |
 
 A command also works when sent as a reply to a message.
 In a group, address the bridge as for any request (`@claude !stop`, or
@@ -301,8 +301,8 @@ file that matters most for how good the thing feels.
 ### Memory
 
 The assistant does not remember previous runs. Each message is a fresh Claude
-process that gets the recent chat history and nothing else. Continuity comes
-from files it writes itself:
+process that gets the recent chat history (since the chat's last `!reset`)
+and nothing else. Continuity comes from files it writes itself:
 
 ```
 <brain folder>/
@@ -572,10 +572,13 @@ What the bridge does about it:
   see [docs/API.md](docs/API.md#who-may-call).
 - **You approve brain settings.** A brain that edits its own `brain.json` to
   claim your DMs or another group changes nothing until you approve it.
-- **OTP guard.** A message that is only a numeric code, arriving right after
-  the assistant asked for one, is dropped before it reaches history or the model
-  — also when it is sent as a reply to the request or corrected by an edit —
-  and kept in `<data_dir>/otp/` for the local script that asked for it.
+- **OTP guard.** A message that is only a one-time code, arriving in a chat
+  within ten minutes after the assistant or a script asked that chat for
+  one, is dropped before it reaches history or the model — also when it is
+  sent as a reply to the request or corrected by an edit — and kept in
+  `<data_dir>/otp/` for ten minutes, with the id of the request it
+  answers, for the local script that asked for it. The sender is told,
+  unless it was untagged group chatter, which the bridge never answers.
 
 What it does not do:
 
@@ -632,12 +635,16 @@ option names, which are matched against the stored options).
 **`debounce.go`** — merges a burst of messages from one person into one run.
 
 **`brain.go`** — the multi-brain runner. Each brain has a queue and one
-worker; each message spawns `claude -p` with `--output-format stream-json`,
-seeded on stdin with the brain's prompt file and recent chat history. Events
-are parsed live, so an `AskUserQuestion` reaches WhatsApp immediately, with
-its options numbered (the answer comes as the next message, and the run's
-final reply is sent too), and a run over 10 seconds gets a "working on it"
-notice (the event types are in `stream.go`). A run is stopped at
+worker, which takes each chat's messages in order and the chats in turn,
+and waits for one of the `max_concurrent_runs` run slots all brains share
+(`runslots.go`); each message spawns `claude -p` with
+`--output-format stream-json`, seeded on stdin with the brain's prompt
+file and recent chat history, which `history.go` reads back from the end
+of the file. Events are parsed live, so an `AskUserQuestion` reaches
+WhatsApp immediately, with its options numbered (the answer comes as the
+next message, and the run's final reply is sent too), and a run over 10
+seconds gets a "working on it" notice (the event types are in
+`stream.go`). A run is stopped at
 `run_timeout_minutes`, and five seconds after its result when something it
 started holds its output open. Runs are listed in `<data_dir>/runs/` while
 they last, so that a bridge that crashed stops what is left of them when it
@@ -677,6 +684,10 @@ numbered options); until then a run reads them from the outbox. One that
 cannot go out within an hour is given up on, and the Overview says so.
 
 **`server.go`** — the localhost `/send` and `/ingest` endpoints.
+
+**`otp.go`** — the OTP guard: a one-time code a chat was just asked for
+is kept out of the history and the model, and handed to the script that
+asked for it through `<data_dir>/otp/`, until it expires.
 
 **`brainapi.go`** — `/brain/`, what the tools a brain runs ask the bridge
 for, with a token that works only while that run lasts.

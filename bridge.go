@@ -2,13 +2,11 @@ package main
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"log"
 	"net"
 	"net/http"
-	"os"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -60,6 +58,7 @@ type Bridge struct {
 	plaud         *PlaudManager
 	site          *SiteManager
 	outbox        *Outbox
+	otp           otpHandoffs
 	started       time.Time
 
 	// listen is the address the HTTP server binds, "" when it is off;
@@ -103,6 +102,7 @@ func NewBridge(cfgs *ConfigStore, opts BridgeOptions) (_ *Bridge, err error) {
 	}()
 	protectDataDir(cfg)
 	pruneRunTokens(cfg.DataDir)
+	sweepOTPHandoffs(filepath.Join(cfg.DataDir, "otp"), time.Now())
 	// With the lock held no other bridge runs here, so any run the last one
 	// recorded that is still going was left behind by a crash.
 	reapOrphanedRuns(cfg.DataDir)
@@ -345,6 +345,7 @@ func (b *Bridge) Stop() {
 	// After the brains, whose last runs may still reply; what does not go
 	// out stays in bridge.db for the next start.
 	b.outbox.Stop()
+	b.otp.stop()
 	b.wa.Disconnect()
 	if err := b.store.Close(); err != nil {
 		log.Printf("closing store: %v", err)
@@ -362,10 +363,13 @@ func (b *Bridge) handleChange(c messageChange) {
 	// (handleInbound), before anything else sees it: a sender who corrects
 	// a code hands the new one to the script that asked for it, and the
 	// message edited stays as it was.
-	if c.Kind == changeEdit && br != nil && br.DropsOTP(strings.TrimSpace(c.Text)) {
-		log.Printf("brain %s: kept an edited one-time code out of the conversation (OTP guard)", br.ID())
-		b.recordOTP(br, Inbound{JID: c.Chat, Sender: c.Sender, Text: c.Text})
-		return
+	if c.Kind == changeEdit && br != nil {
+		edited := Inbound{JID: c.Chat, ChatAlt: c.ChatAlt, Sender: c.Sender, Text: c.Text, Source: sourceWhatsApp}
+		if code, ok := br.catchesCode(edited, time.Now()); ok {
+			log.Printf("brain %s: kept an edited one-time code out of the conversation (OTP guard)", br.ID())
+			b.handOffCode(br, edited, code)
+			return
+		}
 	}
 	if b.deb.Change(c) {
 		return
@@ -435,57 +439,39 @@ func (b *Bridge) handleInbound(ctx context.Context, m Inbound) {
 		return
 	}
 	// The OTP guard runs before anything is written to history, so a
-	// stray two-factor code is neither logged nor sent to the model.
-	if len(m.Media) == 0 && br.DropsOTP(m.Text) {
+	// two-factor code the chat was asked for is neither logged nor sent to
+	// the model. Whoever sent it is told, unless it was untagged chatter,
+	// which the bridge never answers: a code that vanished without a word
+	// looks lost.
+	if code, ok := br.catchesCode(m, time.Now()); ok {
 		log.Printf("brain %s: kept a one-time code out of the conversation (OTP guard)", br.ID())
-		b.recordOTP(br, m)
+		b.handOffCode(br, m, code)
+		if !m.Silent {
+			_ = b.wa.SendMessage(ctx, m.JID, otpCaughtNotice)
+		}
 		return
 	}
 
 	b.deb.Add(m)
 }
 
-// recordOTP hands a code the OTP guard caught to the local script that asked
-// for it (it sent the request through /send): it is written to
-// <data_dir>/otp/<brain>.json, readable only by this user. Brains cannot read
-// it (the sandbox denies the data folder), and it never reaches the history
-// or the model. Each code replaces the previous one.
-func (b *Bridge) recordOTP(br *Brain, m Inbound) {
-	dir := filepath.Join(b.cfgs.Get().DataDir, "otp")
-	if err := os.MkdirAll(dir, 0o700); err != nil {
-		log.Printf("otp: %v", err)
-		return
-	}
-	now := time.Now()
-	data, _ := json.Marshal(map[string]any{
-		"brain":    br.ID(),
-		"chat":     m.JID,
-		"sender":   m.Sender,
-		"code":     strings.TrimSpace(m.Text),
-		"received": now.Format(time.RFC3339), // local time with offset, like the history
-		// What scripts compare with the time of their request: it needs no
-		// time zone (received ends in "Z" on a host in UTC, which Python
-		// before 3.11 cannot read) and tells apart two codes in one second.
-		"received_unix_ms": now.UnixMilli(),
-	})
-	if err := writeFileAtomic(filepath.Join(dir, br.ID()+".json"), data, 0o600, false); err != nil {
-		log.Printf("otp: %v", err)
-	}
-}
+// otpCaughtNotice tells the sender of a caught code what became of it.
+const otpCaughtNotice = "🔐 That looks like the one-time code this chat was asked for, so I kept it out of the conversation: the assistant does not see it."
 
 // handleCommand runs !help, !reset and !stop. It reports whether text was one.
 func (b *Bridge) handleCommand(ctx context.Context, m Inbound, cfg *Config) bool {
 	switch strings.ToLower(m.Text) {
 	case "!reset":
 		// A reset stops what !stop stops for the chat, hand-offs from other
-		// brains included. That is all there is to reset: a brain run never
-		// resumes a session, each starts from the recent chat history, which
-		// a reset keeps. Say only what happened, and mention the history only
-		// where a brain will read the next message.
+		// brains included, and starts the chat afresh: a brain run never
+		// resumes a session, each starts from the chat's recent history,
+		// which the next one reads only from the reset on. Say only what
+		// happened: the brain's memory files stay, and a chat no brain
+		// answers has no history to start afresh.
 		b.stopChat(m)
 		reply := "✅ Cleared anything this chat had running or waiting."
-		if b.brainMgr.BrainFor(m.JID, m.IsGroup()) != nil {
-			reply += " The recent chat history stays, so the next message still sees it."
+		if b.resetChat(m) {
+			reply = "✅ Reset. I stopped what this chat had running or waiting, and the next message starts without its earlier messages. What I noted in my memory files stays."
 		}
 		_ = b.wa.SendMessage(ctx, m.JID, reply)
 		return true
@@ -508,7 +494,7 @@ func (b *Bridge) handleCommand(ctx context.Context, m Inbound, cfg *Config) bool
 			"*Commands:*\n" +
 			"• `!help` — show this help\n" +
 			"• `!stop` — stop what I'm doing for this chat and drop its queued messages\n" +
-			"• `!reset` — like `!stop`; I still see the recent chat history afterwards"
+			"• `!reset` — like `!stop`, and the next message starts without this chat's earlier messages"
 		if m.IsGroup() {
 			if t := cfg.Triggers.First(); t != "" {
 				help += "\n\nIn this group, start your message with `" + t + "` or reply to one of mine to address me, commands included."
@@ -545,6 +531,24 @@ func (b *Bridge) stopChat(m Inbound) (stopped bool, dropped int) {
 		stopped, dropped = stopped || s, dropped+d
 	}
 	return stopped, dropped
+}
+
+// resetChat starts m's chat afresh (Brain.ResetChat) in the brain that
+// answers there and in every brain whose reply chat it is, which answers
+// files handed to it there: !reset is about the chat, whichever brain
+// speaks in it. It reports whether any brain does.
+func (b *Bridge) resetChat(m Inbound) bool {
+	cfg := b.cfgs.Get()
+	chats := chatJIDs(m)
+	owner := b.brainMgr.BrainFor(m.JID, m.IsGroup())
+	reset := false
+	for _, br := range b.brainMgr.Brains() {
+		if br == owner || slices.Contains(chats, b.replyChatFor(br, cfg)) {
+			br.ResetChat(chats, m.Sender)
+			reset = true
+		}
+	}
+	return reset
 }
 
 // chatJIDs lists the JIDs m's chat goes by: the chat and, for a DM, its

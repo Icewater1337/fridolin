@@ -188,19 +188,27 @@ func TestEditOfAMessageTheHistoryLacks(t *testing.T) {
 		// handed is the code the script that asked for one finds, "" for
 		// none.
 		handed string
+		// alt is the DM's LID, which the request went to and which the
+		// code and its edit carry, "" for none.
+		alt string
 	}{
-		{"a corrected code", true, "483921", "483921"},
-		{"a code corrected in words", true, "483921, sorry", "483920"},
-		{"a message never received", false, "book Wednesday", ""},
+		{"a corrected code", true, "483921", "483921", ""},
+		{"a code corrected in words", true, "483921, sorry", "483920", ""},
+		{"a message never received", false, "book Wednesday", "", ""},
+		{"a code asked for by the DM's LID, corrected", true, "483921", "483921", "15559876543@lid"},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			tb, br := newMainBridge(t, "")
-			br.appendHistory(testDMChat, "main", "🔐 Please send me the verification code", historyOut)
-			if c.code {
-				tb.handleInbound(t.Context(), Inbound{JID: testDMChat, Sender: "15551234567", Text: "483920", Source: sourceWhatsApp, ID: "3EB0OTP"})
+			askIn := testDMChat
+			if c.alt != "" {
+				askIn = c.alt
 			}
-			tb.handleChange(messageChange{Kind: changeEdit, Chat: testDMChat, Sender: "15551234567", Target: "3EB0OTP", Text: c.edit})
+			br.appendHistory(askIn, "main", "🔐 Please send me the verification code", historyOut)
+			if c.code {
+				tb.handleInbound(t.Context(), Inbound{JID: testDMChat, ChatAlt: c.alt, Sender: "15551234567", Text: "483920", Source: sourceWhatsApp, ID: "3EB0OTP"})
+			}
+			tb.handleChange(messageChange{Kind: changeEdit, Chat: testDMChat, ChatAlt: c.alt, Sender: "15551234567", Target: "3EB0OTP", Text: c.edit})
 
 			if h := readHistory(t, br); len(h) != 1 || h[0].Type != historyOut {
 				t.Errorf("history = %+v, want only the request", h)

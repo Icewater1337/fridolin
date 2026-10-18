@@ -310,7 +310,8 @@ func TestHistoryBeforeAfterChanges(t *testing.T) {
 		}, "one", "waiting delivered"},
 		{"a quiet chat behind a busy one", func(br *Brain) Inbound {
 			filler := strings.Repeat("chatter ", 128)
-			for range promptHistoryTail / len(filler) {
+			// More than a block of the reader, well within its budget.
+			for range (2 << 20) / len(filler) {
 				br.appendHistory(testGroup, "15559876543", filler, historyIn)
 			}
 			return br.logInbound(dm("two"))

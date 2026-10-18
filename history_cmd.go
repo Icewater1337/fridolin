@@ -176,7 +176,8 @@ func matchHistoryLine(line []byte, q historyQuery) historyHit {
 		return nil
 	}
 	text, _ := h["text"].(string)
-	if text == "" {
+	// A reset marker is no message, whatever it holds.
+	if text == "" || h["type"] == historyReset {
 		return nil
 	}
 	if q.fromOnly && h["type"] != historyIn {
