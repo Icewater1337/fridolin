@@ -11,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -43,6 +44,8 @@ type harness struct {
 	root string
 	home string
 	cfg  string
+	// stop stops the bridge once, whether a test or the cleanup asks.
+	stop func()
 }
 
 // harnessGroup is the group the harness's config allows, and harnessDM the
@@ -96,9 +99,14 @@ func newHarness(t *testing.T, cfgJSON string) *harness {
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(b.Stop)
-	return &harness{t: t, b: b, h: b.newHTTPHandler(defaultHTTPListen), root: root, home: home, cfg: path}
+	h := &harness{t: t, b: b, h: b.newHTTPHandler(defaultHTTPListen), root: root, home: home, cfg: path, stop: sync.OnceFunc(b.Stop)}
+	t.Cleanup(h.stop)
+	return h
 }
+
+// Shutdown stops the bridge as SIGTERM does. The API still answers what it
+// can from memory afterwards, such as the dev outbox.
+func (h *harness) Shutdown() { h.stop() }
 
 // Do sends a request the way the dashboard does: with the token, and on
 // writes the dashboard header and a JSON body. mutate adjusts it first.
@@ -298,6 +306,28 @@ func (h *harness) Issues() []BrainIssue {
 		h.t.Fatalf("GET /api/status: %d %s", w.Code, w.Body.String())
 	}
 	return st.Issues
+}
+
+// Running reports whether brain id is answering a message, as GET
+// /api/status says.
+func (h *harness) Running(id string) bool {
+	h.t.Helper()
+	var st struct {
+		Brains []struct {
+			ID      string          `json:"id"`
+			Running json.RawMessage `json:"running"`
+		} `json:"brains"`
+	}
+	if w := h.Do("GET", "/api/status", nil); w.Code != http.StatusOK || json.Unmarshal(w.Body.Bytes(), &st) != nil {
+		h.t.Fatalf("GET /api/status: %d %s", w.Code, w.Body.String())
+	}
+	for _, b := range st.Brains {
+		if b.ID == id {
+			return len(b.Running) > 0 && string(b.Running) != "null"
+		}
+	}
+	h.t.Fatalf("GET /api/status lists no brain %q", id)
+	return false
 }
 
 // WaitFor polls cond until it holds, for up to ten seconds.
