@@ -18,15 +18,17 @@ import { pill, callout, timeAgo, mono, empty, pageHeader, spinner, loading } fro
 // What a backup job is working on, as the progress card names it.
 const jobLabel = (id, brains) => {
   if (id === '_bridge') return 'Bridge settings';
-  if (id && id.startsWith('restore:')) return `Restoring ${id.slice(8)}`;
   const b = (brains || []).find((x) => x.id === id);
   return b ? (b.name || b.id) : id;
 };
 
+// A version folder is named after its run's time: in UTC with a Z, or in
+// the bridge's local time for folders made before.
 function versionDate(v) {
-  const m = /^(\d{4})(\d{2})(\d{2})-(\d{2})(\d{2})(\d{2})$/.exec(v || '');
+  const m = /^(\d{4})(\d{2})(\d{2})-(\d{2})(\d{2})(\d{2})(Z?)$/.exec(v || '');
   if (!m) return null;
-  return new Date(+m[1], +m[2] - 1, +m[3], +m[4], +m[5], +m[6]);
+  const parts = [+m[1], +m[2] - 1, +m[3], +m[4], +m[5], +m[6]];
+  return m[7] ? new Date(Date.UTC(...parts)) : new Date(...parts);
 }
 
 function stamp(d = new Date()) {
@@ -81,12 +83,13 @@ export default {
         regions.brains = h('div');
         regions.brainRows = h('tbody');
         regions.restore = restoreForm();
+        regions.lastRestore = h('div');
         mount(main,
           regions.status,
           regions.job,
           h('section.section', h('h2.section-title', 'What gets backed up'), regions.brains),
           h('section.section', h('h2.section-title', 'Schedule'), schedule.el),
-          h('section.section', h('h2.section-title', 'Restore'), regions.restore));
+          h('section.section', h('h2.section-title', 'Restore'), regions.lastRestore, regions.restore));
       }
     }
 
@@ -102,12 +105,24 @@ export default {
         paint(regions.job, st.job ? { job: st.job, names: (st.brains || []).map((b) => [b.id, b.name]) } : null, renderJob);
         schedule.set({ settings: st.settings || {}, inc: st.include_bridge_config });
         paintBrains();
+        paint(regions.lastRestore, st.job && st.job.kind === 'restore' ? null : (st.last_restore || null), renderLastRestore);
         regions.restore.setBrains(st.brains || []);
       }
     }
 
     // ── rclone missing ──
     function renderRclone(rc) {
+      if (rc.error) {
+        // backup.rclone_path names an rclone that cannot run; the bridge
+        // uses no other one instead.
+        return h('div.card.hero',
+          h('div.hero-icon', icon('download')),
+          h('div.hero-body',
+            h('h2', 'The configured rclone does not work'),
+            callout('bad', null, rc.error),
+            h('p', 'Fix ', mono('backup.rclone_path'), ' in config.json, or remove it to use the rclone on this computer’s PATH.'),
+            h('div.actions', btn('Check again', { kind: 'primary', icon: 'refresh', onClick: () => refresh() }))));
+      }
       const hint = rc.install_hint || 'See https://rclone.org/install/';
       const isCmd = !/^see /i.test(hint);
       return h('div.card.hero',
@@ -176,7 +191,7 @@ export default {
               onClick: async () => {
                 const ok = await confirmDialog({
                   title: 'Disconnect Google Drive?',
-                  message: 'Backups stop until you connect again. Everything already in your Drive stays there.',
+                  message: 'Backups stop until you connect again. Everything already in your Drive stays there. The bridge removes only its own link: rclone keeps its access to your Google account until you remove it at myaccount.google.com/permissions.',
                   confirm: 'Disconnect', danger: true,
                 });
                 if (!ok) return;
@@ -197,15 +212,15 @@ export default {
       const total = done.length + queue.length + (j.current ? 1 : 0);
       const pct = total ? Math.round((done.length / total) * 100) : 0;
       const bar = h('progress.progress', { max: 100, value: pct, 'aria-label': 'Backup progress', 'aria-valuetext': `${done.length} of ${total} done` });
-      const restoring = j.current && j.current.startsWith('restore:');
+      const restoring = j.kind === 'restore';
       return h('div.card.job-card',
         h('div.card-head',
-          h('div.card-title', spinner(), h('h2', restoring ? jobLabel(j.current) : 'Backing up…')),
+          h('div.card-title', spinner(), h('h2', restoring ? `Restoring ${jobLabel(j.brain, brains)}` : 'Backing up…')),
           btn('Cancel', {
             small: true, icon: 'stop',
             onClick: async () => { await post('/api/backup/cancel'); toast('Cancelling…', 'info'); await refresh(); },
           })),
-        restoring ? h('p.muted', 'Copying files from Google Drive. Large folders can take a while.') : [
+        restoring ? h('p.muted', 'Copying files from Google Drive into ', mono(j.target), '. Large folders can take a while.') : [
           bar,
           h('div.job-items',
             done.map((id) => h('span.job-item.done', icon('check'), jobLabel(id, brains))),
@@ -232,7 +247,7 @@ export default {
         include_bridge_config: incSw.input.checked,
       });
       const form = h('form.card.form',
-        h('div.field', enabled, h('div.help', 'Runs at the time below while the computer is awake. A run missed while it slept happens as soon as it wakes.')),
+        h('div.field', enabled, h('div.help', 'Runs at the time below while the computer is awake. A run missed while it slept happens as soon as it wakes. Switched on, or moved to a time already past today, it first runs tomorrow.')),
         h('div.form-grid',
           field({ label: 'Time of day', control: time, help: '24-hour time on this computer.' }),
           field({ label: 'Keep old versions for (days)', control: keep, help: 'Counted from the backup that replaced or deleted the files. 0 keeps them forever.' }),
@@ -365,6 +380,18 @@ export default {
     }
 
     // ── restore ──
+    // How the last restore went; a failed one would otherwise look just
+    // like a finished one once its progress card is gone.
+    function renderLastRestore(r) {
+      if (!r) return null;
+      const what = h('span', r.version === 'current' ? 'the latest copy' : `version ${r.version}`, ' of ', mono(r.brain), ' into ', mono(r.target));
+      if (r.ok) {
+        return callout('ok', 'Last restore finished', h('span', 'Copied ', what, ` ${plural(r.files, 'file')}, ${fmtBytes(r.bytes)}, `, timeAgo(r.finished), '. Look through it, then add it as a brain.'));
+      }
+      return callout(r.error === 'cancelled' ? 'warn' : 'bad', r.error === 'cancelled' ? 'Last restore was cancelled' : 'Last restore failed',
+        h('span', 'Restoring ', what, ' ', timeAgo(r.finished), r.error === 'cancelled' ? '' : `: ${r.error}`, '. What it copied is still in that folder.'));
+    }
+
     // Built once per connected layout, so a brain chosen and a folder typed
     // stay while the status refreshes; setBrains() only updates the choice.
     function restoreForm() {
@@ -432,6 +459,7 @@ export default {
 
       const form = h('form.card.form',
         h('p', 'Restoring copies a backup into a ', h('strong', 'new, empty folder'), ' inside your home folder. It never overwrites an existing brain: look through the copy, then add it as a brain or swap folders yourself.'),
+        h('p.muted.small', 'Until the copy is a brain itself, every brain can read it: the sandbox keeps brains out of each other’s folders, and a restored copy is not one yet.'),
         h('div.form-grid',
           field({ label: 'Brain', control: h('div.stack', brainSel, otherIn) }),
           field({ label: 'Restore into', control: h('div.inline-add', targetIn, browse), help: 'Must be new or empty.' })),
@@ -446,7 +474,7 @@ export default {
         runBusy(go, async () => {
           const ok = await confirmDialog({
             title: 'Start the restore?',
-            message: h('div', h('p', 'Copy ', h('strong', version === 'current' ? 'the latest full copy' : `version ${version}`), ' of ', mono(id), ' into ', mono(target), '?'), h('p.muted', 'It runs in the background. Watch progress here or on the Logs page.')),
+            message: h('div', h('p', 'Copy ', h('strong', version === 'current' ? 'the latest full copy' : `version ${version}`), ' of ', mono(id), ' into ', mono(target), '?'), h('p.muted', 'It runs in the background; this page shows how it went.')),
             confirm: 'Restore',
           });
           if (!ok) return;

@@ -21,7 +21,10 @@ import (
 // directory and the new message, after FRIDOLIN_FAKE_SLEEP_MS. With
 // FRIDOLIN_FAKE_READ it also reports whether it could read that file, with
 // FRIDOLIN_FAKE_ENV the value of that environment variable, and with
-// FRIDOLIN_FAKE_POLLS=1 what `fridolin polls` answers in the run. Asked for
+// FRIDOLIN_FAKE_POLLS=1 what `fridolin polls` answers in the run. With
+// FRIDOLIN_FAKE_ASK_ON a message ending in that asks a question first (and
+// with FRIDOLIN_FAKE_HANG_AFTER_ASK=1 never answers), and
+// FRIDOLIN_FAKE_PID_LOG gets each run's process ID. Asked for
 // --version, it answers testedClaudeVersion. Tests point
 // claude_path at os.Args[0], so no script or real CLI is needed.
 //
@@ -155,6 +158,14 @@ func fakeClaude() {
 			prompt = args[i+1]
 		}
 	}
+	if log := os.Getenv("FRIDOLIN_FAKE_PID_LOG"); log != "" {
+		// One line a run, so that a test can look for the process later.
+		f, err := os.OpenFile(log, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600)
+		if err == nil {
+			fmt.Fprintln(f, os.Getpid())
+			f.Close()
+		}
+	}
 	if os.Getenv("FRIDOLIN_FAKE_CHILD") == "1" {
 		// A grandchild that inherits stdout, like a shell command Claude ran.
 		child := exec.Command("sleep", "30")
@@ -203,6 +214,15 @@ func fakeClaude() {
 			out += " " + name + "=" + v
 		} else {
 			out += " " + name + " unset"
+		}
+	}
+	if ask := os.Getenv("FRIDOLIN_FAKE_ASK_ON"); ask != "" && strings.HasSuffix(msg, ask) {
+		// A message ending in it asks the chat a question first.
+		fmt.Println(`{"type":"assistant","message":{"content":[{"type":"tool_use","name":"AskUserQuestion","input":{"questions":[{"question":"Which day suits you?"}]}}]}}`)
+		if os.Getenv("FRIDOLIN_FAKE_HANG_AFTER_ASK") == "1" {
+			// A run that hangs once it has asked, until it is stopped.
+			time.Sleep(30 * time.Second)
+			return
 		}
 	}
 	q := strconv.Quote(out)

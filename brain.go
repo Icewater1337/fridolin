@@ -14,6 +14,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"runtime/debug"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -201,10 +202,14 @@ type Brain struct {
 	last    *RunInfo
 
 	// tmuxViewer is an optional Terminal window tailing this brain's
-	// activity log. A run starts it and a reload can close it, so viewerMu
-	// guards it.
-	viewerMu   sync.Mutex
-	tmuxViewer *TmuxViewer
+	// activity log. A run starts it in the background and a reload can close
+	// it, so viewerMu guards it, with viewerStarting, set while a start is
+	// under way, and viewerGen, which closeViewer moves on so that a start
+	// that ends after it knows to close what it opened.
+	viewerMu       sync.Mutex
+	tmuxViewer     *TmuxViewer
+	viewerStarting bool
+	viewerGen      int
 }
 
 // brainSettings is everything about a brain that can change while it runs.
@@ -222,6 +227,7 @@ type brainSettings struct {
 	otpGuard        bool
 	otpMarkers      []string
 	viewer          bool
+	runTimeout      time.Duration // 0 for none
 	queueMode       string
 	maxPending      int
 	credsDir        string // where per-brain credential files live
@@ -253,10 +259,12 @@ type BrainHooks struct {
 // A run that takes longer than workingNoticeAfter tells the chat it is
 // working on it, and questions it asks mid-run go out marked as such.
 const (
-	workingNoticeAfter = 10 * time.Second
-	workingNotice      = "⏳ Working on it..."
-	questionPrefix     = "❓ "
+	workingNotice  = "⏳ Working on it..."
+	questionPrefix = "❓ "
 )
+
+// workingNoticeAfter is a variable so tests need not wait for it.
+var workingNoticeAfter = 10 * time.Second
 
 // RunResult is the outcome of one brain run.
 type RunResult struct {
@@ -298,6 +306,8 @@ var (
 	errBrainDropped     = errors.New("dropped before it ran")
 	errBrainRetired     = errors.New("brain was removed")
 	errQueueFull        = errors.New("brain queue is full")
+	// errRunTimedOut is a run that took longer than run_timeout_minutes.
+	errRunTimedOut = errors.New("the run took too long and was stopped")
 	// errSandboxUnavailable is what the chat sees. The cause goes to the log
 	// only, because it can name private paths.
 	errSandboxUnavailable = errors.New("the sandbox could not be set up, so this message was not run (details in the bridge log)")
@@ -421,30 +431,80 @@ func (br *Brain) worker() {
 		}
 		m := br.pending[0]
 		br.pending = br.pending[1:]
-		ctx, cancel := context.WithCancel(context.Background())
+		s := br.settings.Load()
+		ctx, cancel := runContext(s.runTimeout)
 		run := &brainRun{cancel: cancel, done: make(chan struct{}), msg: m, started: time.Now()}
 		br.current = run
 		br.mu.Unlock()
 
-		s := br.settings.Load()
 		if m.Silent {
 			log.Printf("brain %s: running silently for untagged message from %s", br.id, m.Sender)
 		}
-		res := br.invoke(run, ctx, s, m)
+		res := br.invokeGuarded(run, ctx, s, m)
 		res.Duration = time.Since(run.started)
 		if res.Err == nil && !res.AlreadySent && res.Text != "" {
 			br.appendHistory(m.JID, br.id, res.Text, historyOut)
 		}
 		br.finishRun(run)
 		br.recordLast(m, res)
-
-		if br.hooks != nil && br.hooks.Deliver != nil {
-			br.hooks.Deliver(br, m, res)
-		}
-		if m.Done != nil {
-			m.Done(res.Err)
-		}
+		br.deliverGuarded(m, res)
 	}
+}
+
+// errRunPanicked is what a run that panicked inside the bridge ends with;
+// the panic and its stack go to the log only.
+var errRunPanicked = errors.New("the bridge failed while running this message (details in the bridge log)")
+
+// invokeGuarded is invoke with a panic in it turned into the run's error,
+// so that the run is finished and recorded like any failed one and the
+// worker goes on with the next message. Unrecovered, the panic would end
+// the whole bridge and leave every brain's running claude behind.
+func (br *Brain) invokeGuarded(run *brainRun, ctx context.Context, s *brainSettings, m Inbound) (res RunResult) {
+	defer func() {
+		if p := recover(); p != nil {
+			log.Printf("brain %s: the run for %s panicked: %v\n%s", br.id, m.JID, p, debug.Stack())
+			res = RunResult{Err: errRunPanicked}
+		}
+	}()
+	return br.invoke(run, ctx, s, m)
+}
+
+// deliverGuarded hands a finished run to the bridge and then to whoever
+// waits for the message, each with a panic logged rather than ending the
+// worker, and the one waiting told even when the delivery panicked.
+func (br *Brain) deliverGuarded(m Inbound, res RunResult) {
+	guard := func(what string, fn func()) {
+		defer func() {
+			if p := recover(); p != nil {
+				log.Printf("brain %s: %s the run for %s panicked: %v\n%s", br.id, what, m.JID, p, debug.Stack())
+			}
+		}()
+		fn()
+	}
+	if br.hooks != nil && br.hooks.Deliver != nil {
+		guard("delivering", func() { br.hooks.Deliver(br, m, res) })
+	}
+	if m.Done != nil {
+		guard("finishing", func() { m.Done(res.Err) })
+	}
+}
+
+// runContext is a run's context, which a stop cancels and which ends after
+// timeout too, unless that is 0.
+func runContext(timeout time.Duration) (context.Context, context.CancelFunc) {
+	if timeout > 0 {
+		return context.WithTimeout(context.Background(), timeout)
+	}
+	return context.WithCancel(context.Background())
+}
+
+// runTimedOut is the error of a run stopped at run_timeout_minutes.
+func runTimedOut(timeout time.Duration) error {
+	after := timeout.String()
+	if timeout%time.Minute == 0 {
+		after = fmt.Sprintf("%d minutes", int(timeout/time.Minute))
+	}
+	return fmt.Errorf("%w after %s (run_timeout_minutes)", errRunTimedOut, after)
 }
 
 // dropped tells the messages in ms that will not run, outside br.mu.
@@ -658,14 +718,41 @@ func (br *Brain) Snapshot() BrainRuntime {
 var startViewer = NewTmuxViewer
 
 // ensureViewer starts the tmux activity viewer if enabled and not running.
+// It does so in the background, one start at a time: tmux and osascript,
+// which can wait on an Automation consent prompt under launchd, must not
+// hold up the run.
 func (br *Brain) ensureViewer(s *brainSettings) {
 	if !s.viewer {
 		return
 	}
 	br.viewerMu.Lock()
-	defer br.viewerMu.Unlock()
-	if br.tmuxViewer != nil && br.tmuxViewer.IsAlive() {
+	if br.viewerStarting {
+		br.viewerMu.Unlock()
 		return
+	}
+	br.viewerStarting = true
+	tv, gen := br.tmuxViewer, br.viewerGen
+	br.viewerMu.Unlock()
+	go func() {
+		started := br.startViewerUnlessAlive(tv, s)
+		br.viewerMu.Lock()
+		br.viewerStarting = false
+		closed := gen != br.viewerGen // the setting went off, or the brain
+		if started != nil && !closed {
+			br.tmuxViewer = started
+		}
+		br.viewerMu.Unlock()
+		if started != nil && closed {
+			started.Close()
+		}
+	}()
+}
+
+// startViewerUnlessAlive starts a viewer unless tv still runs. It returns
+// the new viewer, or nil when tv runs or none could start.
+func (br *Brain) startViewerUnlessAlive(tv *TmuxViewer, s *brainSettings) *TmuxViewer {
+	if tv != nil && tv.IsAlive() {
+		return nil
 	}
 	// tail fails on a log that does not exist yet, so create it first,
 	// through the folder as a run opens it: touch would have followed a
@@ -673,23 +760,24 @@ func (br *Brain) ensureViewer(s *brainSettings) {
 	f, err := openInFolder(br.root, streamLogName, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600)
 	if err != nil {
 		log.Printf("brain %s: no tmux viewer: could not open stream log: %v", br.id, err)
-		return
+		return nil
 	}
 	f.Close()
-	tv, err := startViewer("claude-"+br.id, br.streamLogPath(), br.workDir, childEnv(anyChild, s.envPassthrough))
+	nv, err := startViewer("claude-"+br.id, br.streamLogPath(), br.workDir, childEnv(anyChild, s.envPassthrough))
 	if err != nil {
 		log.Printf("brain %s: could not start tmux viewer: %v", br.id, err)
-		return
+		return nil
 	}
-	br.tmuxViewer = tv
+	return nv
 }
 
 // closeViewer ends the activity viewer's tmux session, if it has one, which
-// closes its Terminal window.
+// closes its Terminal window. A start under way closes what it opens.
 func (br *Brain) closeViewer() {
 	br.viewerMu.Lock()
 	tv := br.tmuxViewer
 	br.tmuxViewer = nil
+	br.viewerGen++
 	br.viewerMu.Unlock()
 	if tv != nil {
 		tv.Close()
@@ -1119,27 +1207,72 @@ func (br *Brain) invoke(run *brainRun, ctx context.Context, s *brainSettings, m 
 		return RunResult{Err: fmt.Errorf("starting claude: %w", err)}
 	}
 	br.setRunPID(run, cmd.Process.Pid)
+	// Removed once Wait has returned and the run is over; a bridge that
+	// crashes before leaves it to the next start (reapOrphanedRuns).
+	if rec := recordRun(s.dataDir, br.id, cmd.Process.Pid); rec != "" {
+		defer os.Remove(rec)
+	}
+	// A panic from here on, in a hook say, skips the Wait below. The run's
+	// process group is then stopped and reaped here, before its record
+	// goes: cancelling the run alone would leave the CLI a zombie for as
+	// long as the bridge runs.
+	waited := false
+	defer func() {
+		if !waited {
+			_ = killProcessGroup(cmd.Process.Pid)
+			_ = cmd.Wait()
+		}
+	}()
 
 	// Parse the stream in a goroutine so we can race it against the 10s timer.
 	parseDone := make(chan RunResult, 1)
+	resultSeen := make(chan struct{})
+	var resultOnce sync.Once
 	go func() {
-		parseDone <- br.parseStream(m.JID, stdout)
+		// A panic while the output is read, in the hook that sends a
+		// question to the chat say, ends the run as one in invoke does
+		// (invokeGuarded). In a goroutine of its own, unrecovered, it would
+		// end the whole bridge.
+		defer func() {
+			if p := recover(); p != nil {
+				log.Printf("brain %s: reading the output of the run for %s panicked: %v\n%s", br.id, m.JID, p, debug.Stack())
+				parseDone <- RunResult{Err: errRunPanicked}
+			}
+		}()
+		parseDone <- br.readStream(m.JID, stdout, runHeading(m, s, cmd.Process.Pid), func() { resultOnce.Do(func() { close(resultSeen) }) })
 	}()
 
-	timer := time.NewTimer(workingNoticeAfter)
-	defer timer.Stop()
+	notice := time.NewTimer(workingNoticeAfter)
+	defer notice.Stop()
 
 	invocationStart := time.Now()
 	var res RunResult
-	select {
-	case res = <-parseDone:
-	case <-timer.C:
-		// Untagged (silent) messages never produce a visible reply, so they
-		// must not produce a visible "working" notice either.
-		if !m.Silent && br.hooks != nil && br.hooks.Intermediate != nil {
-			br.hooks.Intermediate(m.JID, workingNotice)
+	var grace <-chan time.Time
+	resultIn := resultSeen // nil once the grace runs
+	for parsing := true; parsing; {
+		select {
+		case res = <-parseDone:
+			parsing = false
+		case <-notice.C:
+			// Untagged (silent) messages never produce a visible reply, so they
+			// must not produce a visible "working" notice either.
+			if !m.Silent && br.hooks != nil && br.hooks.Intermediate != nil {
+				br.hooks.Intermediate(m.JID, workingNotice)
+			}
+		case <-resultIn:
+			// The answer is in, and the CLI exits right after it, unless
+			// something it started still holds its output open, a command
+			// left running in the background, say. That gets
+			// postResultGrace, or the brain would stay busy as long as it ran.
+			resultIn, grace = nil, time.After(postResultGrace)
+			notice.Stop()
+		case <-grace:
+			grace = nil
+			log.Printf("brain %s: claude's output was still open %v after its result; stopping what is left of the run", br.id, postResultGrace)
+			if err := killProcessGroup(cmd.Process.Pid); err != nil {
+				log.Printf("brain %s: failed to kill process group %d: %v", br.id, cmd.Process.Pid, err)
+			}
 		}
-		res = <-parseDone
 	}
 
 	if elapsed := time.Since(invocationStart); elapsed > 5*time.Minute && res.Text != "" {
@@ -1163,20 +1296,40 @@ func (br *Brain) invoke(run *brainRun, ctx context.Context, s *brainSettings, m 
 		_ = cmd.Process.Signal(os.Interrupt)
 	}
 
-	if waitErr := cmd.Wait(); waitErr != nil {
-		if ctx.Err() != nil {
+	waitErr := cmd.Wait()
+	waited = true
+	// Whether the result event came: readStream has returned, so it would
+	// have closed resultSeen by now.
+	gotResult := false
+	select {
+	case <-resultSeen:
+		gotResult = true
+	default:
+	}
+	switch {
+	case errors.Is(ctx.Err(), context.DeadlineExceeded):
+		// The deadline may come in the grace after the result, which is
+		// the run's answer then all the same. A question sent before the
+		// run hung is not: the chat must hear that the run was stopped.
+		if res.Err != nil || !gotResult {
+			return RunResult{Err: runTimedOut(s.runTimeout)}
+		}
+	case ctx.Err() != nil:
+		if waitErr != nil || res.Text == "" {
 			return RunResult{Err: errBrainInterrupted}
 		}
+	case waitErr != nil:
 		stderr := strings.TrimSpace(stderrBuf.String())
 		if res.Err == nil && res.Text == "" && !res.AlreadySent {
 			return RunResult{Err: fmt.Errorf("claude exited: %w — stderr: %s", waitErr, truncate(stderr, 500))}
 		}
 	}
-	if ctx.Err() != nil && res.Text == "" {
-		return RunResult{Err: errBrainInterrupted}
-	}
 	return res
 }
+
+// postResultGrace is how long a run may keep its output open after its
+// result, a variable so tests need not wait for it.
+var postResultGrace = 5 * time.Second
 
 // composePreface reads the chat history for chatJID and formats recent messages:
 // the last 10 for a DM, the last 20 for a group.
@@ -1289,9 +1442,49 @@ func (br *Brain) buildPrompt(s *brainSettings, m Inbound) string {
 // parseStream reads the stream-json output from the Claude CLI and returns
 // the result, writing a human-readable activity log alongside it.
 func (br *Brain) parseStream(jid string, reader io.Reader) RunResult {
+	return br.readStream(jid, reader, "── New invocation ──", nil)
+}
+
+// runHeading starts a run's part of the activity log: what it answers and
+// with what, so that it can be told from the others and matched to the
+// run the dashboard shows.
+func runHeading(m Inbound, s *brainSettings, pid int) string {
+	model := s.model
+	if model == "" {
+		model = "the CLI's default"
+	}
+	return fmt.Sprintf("── Run for %s from %s, pid %d, model %s ──", m.JID, m.Sender, pid, model)
+}
+
+// streamLogMax is the size at which the activity log is rotated when a run
+// starts: it becomes streamLogOld, replacing the one before, so the two
+// hold about twice this at most. Named *.log, the old one is left out of
+// backups too.
+const (
+	streamLogMax = 5 << 20
+	streamLogOld = "claude-stream.1.log"
+)
+
+// rotateStreamLog moves a full activity log aside, through the folder: a
+// rename replaces a symlink at streamLogOld itself, never what it points to.
+func (br *Brain) rotateStreamLog() {
+	fi, err := br.root.Lstat(streamLogName)
+	if err != nil || !fi.Mode().IsRegular() || fi.Size() < streamLogMax {
+		return
+	}
+	if err := br.root.Rename(streamLogName, streamLogOld); err != nil {
+		log.Printf("brain %s: could not rotate its stream log: %v", br.id, err)
+	}
+}
+
+// readStream is parseStream with heading as the first line of the run in
+// the activity log, calling onResult, when set, as soon as the result is
+// in, while the stream may still go on.
+func (br *Brain) readStream(jid string, reader io.Reader, heading string, onResult func()) RunResult {
 	scanner := bufio.NewScanner(reader)
 	scanner.Buffer(make([]byte, 4*1024*1024), 4*1024*1024)
 
+	br.rotateStreamLog()
 	// Through the folder, like the history: a brain can swap the log for a
 	// symlink to a file its sandbox denies it writing.
 	streamLog, logErr := openInFolder(br.root, streamLogName, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600)
@@ -1309,7 +1502,7 @@ func (br *Brain) parseStream(jid string, reader io.Reader) RunResult {
 		}
 	}()
 
-	writeLog("── New invocation ──")
+	writeLog(heading)
 
 	var finalResult, lastText string
 	questionSent := false
@@ -1368,6 +1561,9 @@ func (br *Brain) parseStream(jid string, reader io.Reader) RunResult {
 			}
 			finalResult = event.Result
 			writeLog("✅ Result: " + truncate(finalResult, 2000))
+			if onResult != nil {
+				onResult()
+			}
 		}
 	}
 
@@ -1659,6 +1855,7 @@ func settingsFor(cfg *Config, sp BrainSpec) *brainSettings {
 		otpGuard:        cfg.OTPGuard,
 		otpMarkers:      append([]string(nil), cfg.OTPMarkers...),
 		viewer:          cfg.Viewer,
+		runTimeout:      cfg.RunTimeout(),
 		queueMode:       cfg.Queue.Mode,
 		maxPending:      cfg.Queue.MaxPending,
 		credsDir:        credentialsDirOf(cfg),

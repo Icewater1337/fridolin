@@ -162,6 +162,24 @@ conversation-only assistant with no tool access.
 
 Read [Security](../README.md#security) before running with this on.
 
+### `run_timeout_minutes`
+
+How long one brain run may take, in minutes. Default 30, at most 1440 (a
+day); `0` lets a run take as long as it takes. A brain answers one message
+at a time, so a run that hangs (a tool that waits for input, a network
+stall) would otherwise hold up every later message of that brain until
+someone sends `!stop`. At the limit the bridge stops the run, with every
+command it started, and the chat gets an error that says so, also when
+the run had asked the chat a question before it hung; the next message
+runs. Long agentic tasks can take a while, so raise it rather than turn
+it off if yours do.
+
+Once a run has given its answer, the bridge waits five seconds for it to
+end. A command it left running in the background that still holds the
+CLI's output open is stopped then, rather than keeping the brain busy for
+as long as it runs. The answer goes out either way, also when the limit
+above comes within those five seconds.
+
 ### `inherit_claude_user_config`
 
 The dashboard has no field for it, but its overview warns while it is on.
@@ -617,6 +635,13 @@ in the log at every start: set `data_dir` to it to keep it for good.
 except the `media/` inbox and their own runs' brain API tokens in
 `run-tokens/<id>/`; a `db_path` elsewhere is denied to them too.
 
+`runs/` in it lists the brain runs going on. Each run has a process group
+of its own, which launchd's or systemd's cleanup does not reach, so when
+the bridge crashes or is killed, the next start stops what is left of the
+runs listed there, with the commands they started, before any brain runs.
+It checks that each group's leader is still the process that ran, by its
+start time, so a process that got the same PID since is left alone.
+
 The lock that keeps a second bridge off the same WhatsApp session is
 `bridge.lock` in `data_dir`. It does not cover a `db_path` outside
 `data_dir`, so never point `db_path` at another bridge's `bridge.db`: a
@@ -737,7 +762,7 @@ Google Drive backups; see [BACKUP.md](BACKUP.md).
 | `remote` | `"brain-gdrive"` | rclone remote name in the bridge's own rclone config |
 | `keep_versions_days` | `30` | days a version folder is kept after the run that made it; `0` keeps them forever |
 | `include_bridge_config` | `true` | also back up `config.json` and the brain list |
-| `rclone_path` | found on PATH | |
+| `rclone_path` | found on PATH | the rclone to run; when set, only that one: one that is missing or not executable stops backups with an error naming it. Unset, rclone is looked for on PATH, then in `/opt/homebrew/bin`, `/usr/local/bin` and `~/.local/bin` |
 
 ### `plaud`
 
@@ -810,8 +835,10 @@ Opens a tmux session per brain, tailing its activity log, in a Terminal window
 (macOS), on the brain's first run. Off by default. Handy while tuning a
 prompt; noisy otherwise. Turning it off, or removing the brain, ends the
 session and closes the window; one left open by a restart is replaced on
-the brain's next run. Requires
-tmux — without it the bridge logs a warning and carries on. Nor does a viewer
+the brain's next run. The viewer starts in the background, so a run never
+waits for tmux or Terminal (each of their calls gets five seconds), and
+Terminal does not come to the front. Requires tmux 3.0 or newer — without
+tmux the bridge logs a warning and carries on. Nor does a viewer
 start for a brain whose `claude-stream.log` the bridge refuses, a symlink say
 (see [BRAINS.md](BRAINS.md#files-the-bridge-reads-and-writes)). The bridge
 starts these sessions on tmux's default server, outside the sandbox, and any

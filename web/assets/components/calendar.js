@@ -177,11 +177,26 @@ export function calendarCard(brainId, { signal } = {}) {
       onClick: async () => {
         const ok = await confirmDialog({
           title: 'Disconnect Google Calendar?',
-          message: 'The bridge revokes this brain’s access at Google and deletes its token. The calendars themselves are not touched.',
+          message: 'The bridge revokes this brain’s access at Google and deletes its token, unless another brain is signed in to the same Google account: that brain would lose its access too, so the access then stays at Google. The calendars themselves are not touched.',
           confirm: 'Disconnect', danger: true,
         });
         if (!ok) return;
-        await del(`/api/brains/${encodeURIComponent(brainId)}/calendar`);
+        const url = `/api/brains/${encodeURIComponent(brainId)}/calendar`;
+        let r;
+        try {
+          r = await del(url);
+        } catch (e) {
+          // The revocation was not confirmed by Google, so the token was kept.
+          if (e.status !== 502) throw e;
+          const anyway = await confirmDialog({
+            title: 'Google did not revoke the access',
+            message: h('div', h('p', e.message), h('p', 'Delete the token here anyway? The access then stays at Google until you remove it at myaccount.google.com/permissions.')),
+            confirm: 'Delete the token', danger: true,
+          });
+          if (!anyway) return;
+          r = await del(`${url}?local_only=1`);
+        }
+        if (r && r.note) toast(`Disconnected; ${r.note}`, 'info');
         selection = null;
         await refresh();
       },
@@ -191,8 +206,8 @@ export function calendarCard(brainId, { signal } = {}) {
       errBox,
       h('p', 'Signed in as ', h('strong', s.account || 'unknown account'), '.'),
       s.broad_access ? callout('warn', 'More access than the calendar needs',
-        'This brain signed in with full access to the account’s calendars, which older versions asked for and which includes deleting calendars and changing who they are shared with. Disconnect, then connect again, to grant only what the calendar uses: its events, free and busy times, and the list of calendars. Disconnecting revokes the old access at Google, every copy of it included.') : null,
-      s.list_error ? callout('bad', 'Could not load the calendars', s.list_error, h('div.actions', connectButton('Sign in again'))) : null,
+        'This brain signed in with full access to the account’s calendars, which older versions asked for and which includes deleting calendars and changing who they are shared with. Disconnect, then connect again, to grant only what the calendar uses: its events, free and busy times, and the list of calendars. Disconnecting revokes the old access at Google, every copy of it included, unless another brain is signed in to the same Google account: disconnect that one too, or the old access stays.') : null,
+      s.list_error ? callout('bad', s.reconnect_needed ? 'Google no longer accepts this sign-in' : 'Could not load the calendars', s.list_error, h('div.actions', connectButton('Sign in again'))) : null,
       cals.length ? h('div.table-wrap', h('table.table',
         h('thead', h('tr', h('th', ''), h('th', 'Calendar'), h('th', ''), h('th', 'New events'))),
         h('tbody', rows))) : null,

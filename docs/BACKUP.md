@@ -22,6 +22,18 @@ desktop session's, so that it can open your browser
 The link uses Google's `drive.file` scope: rclone can only see files it
 created itself. Your other Drive files stay invisible to it.
 
+To link another Google account, **Disconnect** first, then connect again:
+connecting replaces the link, so the bridge refuses it while Drive is
+connected (an abandoned sign-in would otherwise leave backups without
+one), and both are refused while a backup or restore runs. Disconnect
+stops a sign-in that is still waiting for the browser before it removes
+the link, refuses backups, restores and a new sign-in until it is done, and
+says so when the link could not be removed. It removes only the
+bridge's own link: to take away rclone's access entirely, remove it at
+[myaccount.google.com/permissions](https://myaccount.google.com/permissions),
+as the Disconnect dialog says. While daily backups are on but Drive is
+not connected, the overview says so and the log repeats it once a day.
+
 ## What is backed up
 
 ```
@@ -37,12 +49,14 @@ fridolin-backup/        (backup.root)
 
 Each run is an incremental `rclone sync`: only changed files upload. When a
 file changes or disappears, the previous copy moves to `versions/<timestamp>/`
-instead of being lost. The timestamp is the local time of that run
-(`YYYYMMDD-HHMMSS`), and the whole folder is deleted `keep_versions_days`
-(default 30, `0` keeps them forever) after that run, however old the files in
-it are. A version folder holds only what changed in that run, not a full
-snapshot. Folders in `versions/` whose name is not such a timestamp are never
-deleted.
+instead of being lost. The timestamp is the time of that run in UTC
+(`YYYYMMDD-HHMMSSZ`), so that the hour the clocks go back cannot reorder
+runs or give two the same name; folders from before are in local time,
+without the `Z`, and are read as such. The whole folder is deleted
+`keep_versions_days` (default 30, `0` keeps them forever) after that run,
+however old the files in it are. A version folder holds only what changed
+in that run, not a full snapshot. Folders in `versions/` whose name is not
+such a timestamp are never deleted.
 
 **Never uploaded:** the WhatsApp session (`bridge.db`), `.env` files, the
 dashboard token, the rclone config, downloaded media in the data folder.
@@ -67,8 +81,13 @@ employer).
 ## Schedule
 
 Turn on the daily backup and pick a time (default 03:30). If the machine was
-asleep, the backup runs as soon as it wakes. *Back up now* runs one
-immediately; one brain or all.
+asleep, the backup runs as soon as it wakes. Switching the schedule on, or
+moving it to a time that has already passed today, does not start a backup
+at once: the first run is tomorrow's (a time still to come today runs
+today, unless today's scheduled backup already ran). The next run shown on
+the Backup page and the overview is the one that will happen; there is none
+while Google Drive is not connected.
+*Back up now* runs one immediately; one brain or all.
 
 ## Mass deletions
 
@@ -118,10 +137,17 @@ be listed, the run fails without syncing.
 ## Restoring
 
 Backup → Restore: choose a brain, `current` or a version, and a **new, empty**
-folder. The bridge never restores over an existing brain. Inspect the result,
-then add it as a brain (the dashboard picks up its `brain.json`) or swap
-folders yourself, which the bridge picks up when it restarts or you next
-save a setting (see [Moving a brain](BRAINS.md#moving-a-brain)).
+folder. The bridge never restores over an existing brain. The folder must
+pass the checks a new brain's folder does: inside your home folder, not in
+or around a brain, and not in the bridge's data folder or the credentials
+folder, also where a symlink on the way leads. The restore runs in the background (one at a time, and not while a
+backup runs), and the Backup page shows how the last one went, a failure
+included, with what rclone said. Inspect the result, then add it as a brain
+(the dashboard picks up its `brain.json`) or swap folders yourself, which
+the bridge picks up when it restarts or you next save a setting (see
+[Moving a brain](BRAINS.md#moving-a-brain)). Until then, every brain can
+read the copy: the sandbox keeps brains out of each other's folders, and a
+restored copy is not a brain's folder yet.
 
 On a new machine: install the bridge, connect Drive, restore each brain into a
 new folder, add them, and pair WhatsApp again. `_bridge/current/config.json`

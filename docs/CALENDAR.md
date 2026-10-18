@@ -57,8 +57,11 @@ and the brain's page says which was missing.
 A brain connected with an older version has the full `calendar` scope,
 which includes both. It keeps working, and its page says so: **Disconnect**
 it and connect again to narrow it. Signing in again without disconnecting
-first is not enough, since Google keeps the old grant until it is revoked,
-and Disconnect revokes it.
+first is not enough, since Google keeps the old grant until it is revoked.
+Disconnect revokes it, but not while another brain is signed in to the same
+account (see below): disconnect that brain too, or remove the access at
+[myaccount.google.com/permissions](https://myaccount.google.com/permissions),
+before you connect again.
 
 ## What the brain gets
 
@@ -81,7 +84,9 @@ token file over 256 KiB too, far more than a real one holds; the brain's
 page then shows why its calendars cannot be listed, and connecting again
 fixes it. Nor does the bridge take the `token_uri` or the client in that
 file: it refreshes at Google's token endpoint with the client under
-Settings → Google sign-in.
+Settings → Google sign-in. A refresh keeps a new refresh token Google
+hands out, and every field an older version's calendar tool added to the
+file.
 
 The chosen calendars are stored in the brain's `brain.json`:
 
@@ -143,6 +148,21 @@ and `auth` points to the dashboard). It needs no Python packages any more.
 deletes its token. Your calendars are not touched. You can also remove access
 at [myaccount.google.com/permissions](https://myaccount.google.com/permissions).
 
+Google keeps one grant per app and account, and revoking any brain's token
+revokes that grant. So when another brain is signed in to the same account
+with the same OAuth client (or the bridge cannot tell, because a token does
+not record its account), Disconnect deletes only this brain's token and
+says that the access stayed at Google; disconnect the other brain too, or
+remove the access yourself. A token file left by a brain that was removed
+without a disconnect counts too: the message names it, so that you can
+delete it if nothing else uses it. When Google does not confirm a
+revocation (it is down, the network is), the token is kept and the page
+offers to delete it here only. **Switch account** revokes the grant of the
+account the brain leaves, unless another brain uses it too; signing in to
+the same account again keeps it, since the new token belongs to it. It
+revokes only once the new sign-in is saved: one that fails keeps the
+brain's old token.
+
 ## Troubleshooting
 
 - **"redirect_uri_mismatch"** — you are using a *Web application* client; add
@@ -151,9 +171,10 @@ at [myaccount.google.com/permissions](https://myaccount.google.com/permissions).
   not a test user of an app in *Testing*. Add it, or publish the app.
 - **Works for a week, then fails** — the app is in *Testing*; publish it and
   connect again.
-- **The brain says to reconnect the calendar** — Google no longer accepts the
-  saved sign-in (access removed, the 7-day *Testing* limit, a changed
-  password). Connect again on the brain's Calendar page.
+- **The brain says to reconnect the calendar**, or its page says Google no
+  longer accepts the sign-in — Google refused the saved sign-in (access
+  removed, the 7-day *Testing* limit, a changed password). Connect again on
+  the brain's Calendar page.
 - **"did not return a refresh token"** — remove the app at
   myaccount.google.com/permissions and connect again.
 - **"signed in with another Google OAuth client"** on a brain's page — the

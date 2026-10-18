@@ -54,9 +54,19 @@ including the Limited Use requirements.
 ## Removing access and data
 
 - **Disconnect** a brain's calendar in the dashboard: the bridge revokes the
-  token at Google and deletes it. You can also remove access at
+  brain's access at Google and deletes its token. Google keeps one grant per
+  app and account, so when another brain, or a token file left by a brain
+  removed without a disconnect, signs in to the same account with the same
+  OAuth client (or the bridge cannot tell), only this brain's token is
+  deleted, and the page says that the access stayed and names that brain or
+  file. When Google does not confirm a revocation, the token stays unless
+  you choose to delete it here only. You can also remove access at
   [myaccount.google.com/permissions](https://myaccount.google.com/permissions).
-- Disconnect Google Drive on the dashboard's Backup page.
+- **Disconnect** Google Drive on the dashboard's Backup page: the bridge
+  removes its own rclone link, and backups stop. What is already in your
+  Drive stays there, and rclone keeps the access Google gave it until you
+  remove it at
+  [myaccount.google.com/permissions](https://myaccount.google.com/permissions).
 - Disconnect Plaud under Integrations: Fridolin signs out of Plaud and stops
   fetching recordings. The transcripts already written (in the media inbox
   and where brains filed them) and the list of recordings it has seen

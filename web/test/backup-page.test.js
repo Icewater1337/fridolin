@@ -100,3 +100,96 @@ test('a running backup says how far it is in a progress bar', async (t) => {
   assert.equal(bar.getAttribute('aria-label'), 'Backup progress');
   assert.equal(bar.getAttribute('aria-valuetext'), '2 of 4 done');
 });
+
+test('a backup.rclone_path that does not work is named, not offered for install', async (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout', 'Date'] });
+  installDom();
+  noConsoleErrors(t);
+  const error = 'backup.rclone_path /Users/you/bin/rclone: exec: "/Users/you/bin/rclone": stat /Users/you/bin/rclone: no such file or directory';
+  serve(t, (path) => (path.startsWith('/api/backup/status')
+    ? { rclone: { found: false, install_hint: 'brew install rclone', error }, connected: false }
+    : {}));
+  const root = h('div');
+  document.body.append(root);
+  const ctx = createPage();
+  t.after(() => ctx.destroy());
+  page.render(root, ctx);
+  await settle();
+  const text = root.textContent;
+  assert.ok(text.includes('The configured rclone does not work'), text);
+  assert.ok(text.includes(error), 'the error is shown');
+  assert.ok(!text.includes('brew install rclone'), 'no install hint for a path that is set');
+});
+
+test('a restore shows while it runs and how it went once it ended', async (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout', 'Date'] });
+  installDom();
+  noConsoleErrors(t);
+  const running = { ...connected(), job: { kind: 'restore', brain: 'work', target: '/Users/you/restored/work', started: '2026-10-18T09:00:00Z', queue: [], done: [] } };
+  const bridge = { status: running };
+  serve(t, (path) => (path.startsWith('/api/backup/status') ? bridge.status : {}));
+  const root = h('div');
+  document.body.append(root);
+  const ctx = createPage();
+  t.after(() => ctx.destroy());
+  page.render(root, ctx);
+  await settle();
+  assert.ok(root.textContent.includes('Restoring Work'), root.textContent);
+  assert.ok(root.textContent.includes('/Users/you/restored/work'), 'the target is named');
+
+  bridge.status = {
+    ...connected(),
+    last_restore: { brain: 'work', version: 'current', target: '/Users/you/restored/work', ok: false, error: 'directory not found', finished: '2026-10-18T09:01:00Z', files: 0, bytes: 0 },
+  };
+  await resource('/api/backup/status').refresh();
+  await settle();
+  const text = root.textContent;
+  assert.ok(text.includes('Last restore failed'), text);
+  assert.ok(text.includes('directory not found'), 'the error is shown');
+  assert.ok(!text.includes('Restoring Work'), 'the progress card is gone');
+});
+
+test('version folders named in UTC or in local time both show as dates', async (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout', 'Date'] });
+  installDom();
+  noConsoleErrors(t);
+  serve(t, (path) => {
+    if (path.startsWith('/api/backup/status')) return connected();
+    if (path.startsWith('/api/backup/versions')) return { versions: ['20261018-093000Z', '20261001-120000', 'manual-copy'] };
+    return {};
+  });
+  const root = h('div');
+  document.body.append(root);
+  const ctx = createPage();
+  t.after(() => ctx.destroy());
+  page.render(root, ctx);
+  await settle();
+  const restore = root.querySelectorAll('form').at(-1);
+  const sel = restore.querySelector('select');
+  sel.value = 'work';
+  sel.dispatchEvent(new Event('change'));
+  await settle();
+  const labels = restore.querySelectorAll('label.version-opt').map((l) => l.textContent);
+  const dated = labels.filter((l) => l.includes('files replaced or deleted in that run'));
+  assert.equal(dated.length, 2, labels.join(' | '));
+  assert.ok(!labels.some((l) => l.includes('20261018-093000Z')), 'the UTC name is shown as a date');
+  assert.ok(labels.some((l) => l.includes('manual-copy')), 'other names as they are');
+});
+
+test('the Disconnect dialog says where to take away rclone\'s access at Google', async (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout', 'Date'] });
+  installDom();
+  noConsoleErrors(t);
+  serve(t, (path) => (path.startsWith('/api/backup/status') ? connected() : {}));
+  const root = h('div');
+  document.body.append(root);
+  const ctx = createPage();
+  t.after(() => ctx.destroy());
+  page.render(root, ctx);
+  await settle();
+  root.querySelectorAll('button').find((b) => b.textContent === 'Disconnect…').click();
+  await settle();
+  const dialog = document.querySelector('dialog');
+  assert.ok(dialog, 'a confirm dialog');
+  assert.ok(dialog.textContent.includes('myaccount.google.com/permissions'), dialog.textContent);
+});

@@ -72,9 +72,8 @@ func TestSandboxFailsClosed(t *testing.T) {
 				t.Fatal(err)
 			}
 			waitFor(t, 10*time.Second, "the second run", func() bool { return d.count() == 2 })
-			if _, err := os.Stat(tmuxCalls); err != nil {
-				t.Errorf("the unsandboxed run did not start the viewer: %v", err)
-			}
+			// The viewer starts in the background.
+			waitFor(t, 10*time.Second, "the viewer to start", func() bool { return fileExists(tmuxCalls) })
 		})
 	}
 }
@@ -1554,7 +1553,7 @@ func TestViewerClosesWithItsBrain(t *testing.T) {
 				waitFor(t, 5*time.Second, "the viewer to close", func() bool { return logContains(logs, "[viewer] closed claude-a") })
 			}
 			data, _ := os.ReadFile(calls)
-			if killed := strings.Contains(string(data), "kill-session -t claude-a"); killed != c.closed {
+			if killed := strings.Contains(string(data), "kill-session -t =claude-a"); killed != c.closed {
 				t.Errorf("tmux calls %q, want the session killed: %v", data, c.closed)
 			}
 		})
