@@ -18,6 +18,11 @@ Use GitHub's private vulnerability reporting: on the repository's
 **Security** tab, choose **Report a vulnerability**. Only the maintainers
 see the report, and you can discuss it with them there.
 
+If that option is unavailable, open an issue asking the maintainers to
+enable private vulnerability reporting. Include no vulnerability details
+or sensitive data in that request; send the report once the private form
+is available.
+
 Please include what you can of:
 
 - the version (`fridolin version`), the OS, and whether the sandbox was on;
