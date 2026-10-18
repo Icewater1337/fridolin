@@ -1934,3 +1934,73 @@ func TestBackupSummaryShowsTheLatestFailure(t *testing.T) {
 		t.Errorf("saved results for %v, want a and b only", slices.Collect(maps.Keys(saved)))
 	}
 }
+
+// TestBackupBridgeRefusesAnIncompleteStage: the bridge's settings are
+// synced only when every file of them could be staged. A sync of what
+// could would move the good copies in Drive to versions/ and report OK.
+func TestBackupBridgeRefusesAnIncompleteStage(t *testing.T) {
+	cases := []struct {
+		name    string
+		failing string // the staged file whose write fails; "" for none
+	}{
+		// What the last run staged cannot be cleared: its brains folder
+		// became read-only.
+		{"the last stage stays", ""},
+		{"config.json", "config.json"},
+		{"a brain's manifest", "notes.brain.json"},
+		{"the README", "README.txt"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			tb := newTestBridge(t, "")
+			addBackupBrain(t, tb, "notes")
+			m := tb.backup
+			var mu sync.Mutex
+			var calls [][]string
+			m.runner = func(_ context.Context, args []string, _ io.Writer) ([]byte, error) {
+				mu.Lock()
+				calls = append(calls, args)
+				mu.Unlock()
+				return nil, nil
+			}
+			if tc.failing == "" {
+				if os.Geteuid() == 0 {
+					t.Skip("root writes to read-only folders")
+				}
+				brains := filepath.Join(m.dir(), "_staging", "brains")
+				if err := os.MkdirAll(brains, 0o700); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.WriteFile(filepath.Join(brains, "old.brain.json"), []byte("{}"), 0o600); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.Chmod(brains, 0o500); err != nil {
+					t.Fatal(err)
+				}
+				t.Cleanup(func() { _ = os.Chmod(brains, 0o700) })
+			} else {
+				prev := writeStaged
+				writeStaged = func(name string, data []byte, perm os.FileMode) error {
+					if filepath.Base(name) == tc.failing {
+						return errors.New("disk full")
+					}
+					return prev(name, data, perm)
+				}
+				t.Cleanup(func() { writeStaged = prev })
+			}
+
+			res := m.backupBridge(context.Background(), "manual")
+			if res.OK || !strings.Contains(res.Error, "staging the bridge's settings failed") {
+				t.Errorf("result = %+v, want a staging failure", res)
+			}
+			if tc.failing != "" && !strings.Contains(res.Error, "disk full") {
+				t.Errorf("result = %+v, want the write's error", res)
+			}
+			mu.Lock()
+			defer mu.Unlock()
+			if len(calls) != 0 {
+				t.Errorf("rclone ran %v", calls)
+			}
+		})
+	}
+}

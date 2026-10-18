@@ -1224,30 +1224,61 @@ func (m *BackupManager) listFiles(ctx context.Context, path, filterFile string) 
 	return paths, nil
 }
 
-// backupBridge stages the bridge's own configuration and syncs it.
+// backupBridge stages the bridge's own configuration and syncs it. A
+// staging folder that could not be written in full is not synced: the
+// sync would move the good copies in Drive to versions/ and report OK
+// without them.
 func (m *BackupManager) backupBridge(ctx context.Context, trigger string) *BackupResult {
+	started := time.Now()
 	stage := filepath.Join(m.dir(), "_staging")
-	_ = os.RemoveAll(stage)
-	if err := os.MkdirAll(filepath.Join(stage, "brains"), 0o700); err != nil {
-		return &BackupResult{Started: time.Now(), Finished: time.Now(), Error: err.Error(), Trigger: trigger}
+	if err := m.stageBridge(stage); err != nil {
+		now := time.Now()
+		return &BackupResult{Started: started, Finished: now, Seconds: now.Sub(started).Seconds(), Trigger: trigger,
+			Error: "staging the bridge's settings failed, so nothing was synced: " + err.Error()}
 	}
-	file := m.cfgs.FileCopy()
-	data, _ := json.MarshalIndent(file, "", "  ")
-	_ = os.WriteFile(filepath.Join(stage, "config.json"), data, 0o600)
-	for _, ref := range file.BrainDirs {
-		if ref.Approved != nil {
-			md, _ := json.MarshalIndent(ref.Approved, "", "  ")
-			_ = os.WriteFile(filepath.Join(stage, "brains", ref.Approved.ID+".brain.json"), md, 0o600)
-		}
-	}
-	readme := "Bridge configuration backup.\n\nTo restore on a new machine: put config.json at ~/.fridolin/config.json,\n" +
-		"restore each brain folder from <brain-id>/current, and pair WhatsApp again from the dashboard.\n" +
-		"The WhatsApp session, .env files and tokens are deliberately not backed up.\n"
-	_ = os.WriteFile(filepath.Join(stage, "README.txt"), []byte(readme), 0o600)
 	// No deletion limit: the bridge writes this folder itself, and removing
 	// a brain drops its manifest, a deletion the backup must mirror.
 	cfg := m.cfgs.Get()
 	return m.syncDir(ctx, stage, cfg.Backup.Remote+":"+cfg.Backup.Root+"/"+bridgeBackupID, "", trigger, -1)
+}
+
+// writeStaged writes one file into the staging folder, a variable so tests
+// can make a write fail.
+var writeStaged = os.WriteFile
+
+// stageBridge writes config.json, the approved manifests and a README
+// into a fresh staging folder, and returns every error on the way.
+func (m *BackupManager) stageBridge(stage string) error {
+	// What the last run staged must go, or a removed brain's manifest
+	// would stay in the backup.
+	if err := os.RemoveAll(stage); err != nil {
+		return err
+	}
+	if err := os.MkdirAll(filepath.Join(stage, "brains"), 0o700); err != nil {
+		return err
+	}
+	file := m.cfgs.FileCopy()
+	data, err := json.MarshalIndent(file, "", "  ")
+	if err != nil {
+		return err
+	}
+	errs := []error{writeStaged(filepath.Join(stage, "config.json"), data, 0o600)}
+	for _, ref := range file.BrainDirs {
+		if ref.Approved == nil {
+			continue
+		}
+		md, err := json.MarshalIndent(ref.Approved, "", "  ")
+		if err == nil {
+			err = writeStaged(filepath.Join(stage, "brains", ref.Approved.ID+".brain.json"), md, 0o600)
+		}
+		errs = append(errs, err)
+	}
+	readme := "Bridge configuration backup.\n\nTo restore on a new machine: put config.json at the default config location\n" +
+		"(~/.fridolin/config.json), restore each brain folder from <brain-id>/current, and pair WhatsApp\n" +
+		"again from the dashboard.\n" +
+		"The WhatsApp session, .env files and tokens are deliberately not backed up.\n"
+	errs = append(errs, writeStaged(filepath.Join(stage, "README.txt"), []byte(readme), 0o600))
+	return errors.Join(errs...)
 }
 
 // versionLayout names a version folder after the local time of its run.
