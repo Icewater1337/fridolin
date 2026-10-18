@@ -17,6 +17,8 @@ import (
 	"strings"
 	"sync/atomic"
 	"time"
+
+	"fridolin/web"
 )
 
 // The dashboard and its API are served by the bridge on http_listen, which is
@@ -355,15 +357,6 @@ func securityHeaders(next http.Handler) http.Handler {
 	})
 }
 
-// webRoot is the page's files, web/ without its prefix.
-func webRoot() fs.FS {
-	sub, err := fs.Sub(webFS, "web")
-	if err != nil {
-		panic(fmt.Sprintf("embedded dashboard: %v", err)) // only a bad constant path fails
-	}
-	return sub
-}
-
 // staticHandler serves the page's files from root. http.FileServer alone
 // lists the files of a folder (GET /assets/), and embedded files have no
 // modification time, so it sends no validator and the browser downloads
@@ -429,7 +422,7 @@ func (b *Bridge) newHTTPHandler(listen string) http.Handler {
 	mux.Handle("/brain/", b.brainAPIHandler())
 
 	if !b.cfgs.Get().Dashboard.Disabled {
-		static := staticHandler(webRoot())
+		static := staticHandler(web.FS)
 		mux.Handle("/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			if r.Method != http.MethodGet && r.Method != http.MethodHead {
 				http.Error(w, "method not allowed", http.StatusMethodNotAllowed)

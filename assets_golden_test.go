@@ -8,6 +8,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"fridolin/web"
 )
 
 // TestGoldenAssetInventory pins what the dashboard serves under /: every
@@ -34,11 +36,11 @@ func TestGoldenAssetInventory(t *testing.T) {
 		return data
 	}
 	check("/", checkout("web/index.html"))
-	err := fs.WalkDir(webFS, "web", func(path string, d fs.DirEntry, err error) error {
+	err := fs.WalkDir(web.FS, ".", func(path string, d fs.DirEntry, err error) error {
 		if err != nil || d.IsDir() {
 			return err
 		}
-		check(strings.TrimPrefix(path, "web"), checkout(path))
+		check("/"+path, checkout("web/"+path))
 		return nil
 	})
 	if err != nil {
