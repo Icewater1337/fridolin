@@ -578,6 +578,20 @@ each brain downloads such a model once for itself. Point a tool that does
 not at its own folder, for example in the brain folder's
 `.claude/settings.json`: `{ "env": { "HF_HOME": "/Users/you/assistant/a/.cache/hf" } }`.
 
+**Temporary files.** A brain's `TMPDIR` is its own `tmp/`, and writing
+`/tmp`, `/var/tmp` or your own temp folder (`/var/folders/…`) is denied.
+Python's `tempfile`, Node's `os.tmpdir()`, Go's `os.TempDir` and shell
+here-documents follow `TMPDIR`, the CLI's Bash tool `CLAUDE_CODE_TMPDIR`
+and zsh `TMPPREFIX`, which the bridge sets to the same folder. macOS's
+`mktemp` does not: without a template (`mktemp`, `mktemp -d`, `mktemp -t
+name`) it takes your user's temp folder even when `TMPDIR` is set, and fails
+with "Operation not permitted", as does any fixed path in `/tmp`. Name the
+folder instead: `mktemp "$TMPDIR/name.XXXXXX"`, `mktemp -d
+"$TMPDIR/name.XXXXXX"` or `mktemp -p "$TMPDIR" name.XXXXXX`. A new brain's
+starter `brain-prompt.md` says so; add the same to the prompt of a brain
+you made before. What a brain leaves in its `tmp/` stays there until it
+or you remove it.
+
 **Logging in.** The login you made with `claude` lives in your keychain,
 which the sandbox closes to brains (see [reading](#reading)), with
 `inherit_claude_user_config` too. So a sandboxed brain needs a login from

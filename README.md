@@ -757,7 +757,9 @@ directory; two bridges on one WhatsApp session knock each other offline.
 **Everything times out with the sandbox on** — set `sandbox.enabled` to `false`
 to confirm it's the cause, then add the path it needs to read to
 `sandbox.allow_paths`. That opens reading only: a brain writes nowhere but
-its own folder, inbox and state.
+its own folder, inbox and state. A tool that fails with "Operation not
+permitted" writing to `/tmp`, or a bare `mktemp`, needs `$TMPDIR` named
+([temporary files](docs/CONFIGURATION.md#writing)).
 
 **"the sandbox could not be set up"** — the sandbox is on, but the bridge
 could not build the profile or find `/usr/bin/sandbox-exec`, so it did not run

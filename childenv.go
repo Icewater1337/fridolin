@@ -217,8 +217,8 @@ func (s brainState) folders() []string { return []string{s.claude, s.tmp, s.cach
 //
 // A brain may write nowhere else outside its folder and inbox, and shares
 // none of these with your own sessions or another brain. Programs that
-// ignore TMPDIR still fail to write their temp files (see "Writing" in
-// docs/CONFIGURATION.md).
+// ignore TMPDIR, macOS's mktemp without a template among them, fail to
+// write their temp files (see "Temporary files" in docs/CONFIGURATION.md).
 func prepareBrainState(dataDir, mediaDir, id string, inheritUser bool) ([]string, error) {
 	if dataDir == "" {
 		return nil, errors.New("the sandbox needs the data folder, which holds each brain's own state")

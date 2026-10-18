@@ -654,6 +654,55 @@ func TestSandboxWritesOnlyItsOwnPlaces(t *testing.T) {
 	}
 }
 
+// TestSandboxGivesBrainsTheirOwnTemporaryFiles: writing is denied outside a
+// brain's own places, /tmp and your own temp folder included, so a brain
+// keeps temporary files in its own TMPDIR, which the bridge points every run
+// at. Under the real sandbox-exec the ways to use it work: mktemp with a
+// template in $TMPDIR or -p, here-documents in sh and in zsh, which takes
+// TMPPREFIX instead. A bare mktemp fails: macOS's takes your user's temp
+// folder (_CS_DARWIN_USER_TEMP_DIR) over TMPDIR, which is why
+// docs/CONFIGURATION.md and the starter prompt tell brains to name
+// $TMPDIR; so does a fixed path in /tmp.
+func TestSandboxGivesBrainsTheirOwnTemporaryFiles(t *testing.T) {
+	requireSandboxExec(t)
+	home := canonicalDir(t.TempDir())
+	t.Setenv("HOME", home)
+	sp, own := sandboxFixture(t, home, "b", "clients")
+	tmp := filepath.Join(home, ".fridolin", "brains", "a", "tmp")
+	// inTmp checks that the file $f a command made is in the brain's TMPDIR.
+	inTmp := `case "$f" in "$TMPDIR"/?*) [ -e "$f" ] ;; *) echo "outside TMPDIR: $f"; exit 1 ;; esac`
+	cases := []struct {
+		name, cmd string
+		allow     bool
+	}{
+		{"mktemp with a template in $TMPDIR", `f=$(mktemp "$TMPDIR/x.XXXXXX") && ` + inTmp, true},
+		{"mktemp -d with a template in $TMPDIR", `f=$(mktemp -d "$TMPDIR/d.XXXXXX") && ` + inTmp, true},
+		{"mktemp -p $TMPDIR", `f=$(mktemp -p "$TMPDIR" p.XXXXXX) && ` + inTmp, true},
+		{"a here-document in sh", `cat <<EOF
+heredoc
+EOF`, true},
+		{"a here-document in zsh", `/bin/zsh -fc 'cat <<EOF
+heredoc
+EOF'`, true},
+		{"a bare mktemp", `mktemp`, false},
+		{"mktemp -t", `mktemp -t brain`, false},
+		{"mktemp in /tmp", `mktemp /tmp/brain.XXXXXX`, false},
+		{"a fixed path in /tmp", `printf x > /tmp/brain-out.txt`, false},
+		{"a fixed path in /var/tmp", `printf x > /var/tmp/brain-out.txt`, false},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			allowed, out := sandboxRun(t, sp, own, "/bin/sh", "-c", c.cmd)
+			if allowed != c.allow {
+				t.Errorf("%s: allowed=%v, want %v (output %q)", c.cmd, allowed, c.allow, out)
+			}
+		})
+	}
+	if entries, err := os.ReadDir(tmp); err != nil || len(entries) == 0 {
+		t.Errorf("the brain's TMPDIR %s holds %d entries (%v), want what the runs left", tmp, len(entries), err)
+	}
+}
+
 // TestSandboxKeepsTheBridgesProgramsFromBrains: the bridge runs the Claude
 // CLI, rclone and the rest outside any sandbox, found by name in the
 // folders of its PATH. A brain whose folder held such a folder could plant a

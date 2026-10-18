@@ -21,6 +21,11 @@ Edit it freely — it is yours to shape.
 You are running Claude Code with full tool access in this directory. You can
 read and write files, run commands, search the web, and write code.
 
+Keep scratch files in `$TMPDIR`, never in `/tmp`: on macOS the sandbox lets
+you write only this folder, your media inbox and that temp folder. Name it
+when you make one, `mktemp "$TMPDIR/name.XXXXXX"` (or `mktemp -d …`): a bare
+`mktemp` ignores `TMPDIR` on macOS and fails.
+
 Files you receive over WhatsApp — photos, PDFs, voice notes, videos — are saved
 to disk and their path is given to you. Open them and work with them.
 
