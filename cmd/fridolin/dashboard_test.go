@@ -6,7 +6,6 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
-	"github.com/Icewater1337/fridolin/internal/otp"
 	"image/png"
 	"io"
 	"log"
@@ -26,6 +25,7 @@ import (
 	"github.com/Icewater1337/fridolin/internal/chat"
 	"github.com/Icewater1337/fridolin/internal/fsx"
 	"github.com/Icewater1337/fridolin/internal/history"
+	"github.com/Icewater1337/fridolin/internal/otp"
 	"github.com/Icewater1337/fridolin/internal/textx"
 	"github.com/Icewater1337/fridolin/internal/version"
 )
@@ -1982,7 +1982,7 @@ func TestOTPGuardHandsCodeToLocalScripts(t *testing.T) {
 	otpPath := filepath.Join(h.DataDir(), "otp", "p.json")
 	waitFor(t, 3*time.Second, "otp file", func() bool { _, err := os.Stat(otpPath); return err == nil })
 	data, _ := os.ReadFile(otpPath)
-	var got otpHandoff
+	var got otp.Record
 	_ = json.Unmarshal(data, &got)
 	if got.Code != "483920" || got.Chat != "15551234567@s.whatsapp.net" || got.Brain != "p" || got.Sender == "" || got.Received == "" {
 		t.Errorf("otp file = %s", data)

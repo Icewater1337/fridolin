@@ -43,6 +43,10 @@ behaviour unless its title says so. The steps so far:
   command keeps the runtime wrapper carrying logged history and merged
   parts until the brain extraction.
 
+- **R4, OTP slice**: `otp` owns code recognition, recent request lookup,
+  handoff records and expiry. The command keeps runtime settings, inbound
+  source checks and bridge callbacks.
+
 Everything else is still `package main` in `cmd/fridolin`, one file per
 subject (section 3 names the file each package will come from). A package
 that is not yet extracted is marked *(to come, Rn)* with the step that
@@ -269,9 +273,11 @@ responsibility and says what it must not do.
   policy and wraps a command: the profile goes inline with `-p`, and if the
   sandbox is on but cannot be applied, the run fails instead of starting
   unsandboxed.
-- **`otp`** *(to come, R4; `otp.go`)*: decides whether a message is a
+- **`otp`**: decides whether a message is a
   one-time code its chat asked for, in the last ten minutes of the brain's
-  outbound history. `Handoff` writes a caught code, and the request it
+  outbound history through `Requested`. `Code` normalizes a bare code;
+  `HasMarker` and `DefaultMarkers` recognize requests. `Handoff.Write`
+  writes a caught code as a `Record`, and the request it
   answers, to the file local scripts read.
 - **`brain`** *(to come, R10; `brain.go`, `runrecord.go`, `observe.go`,
   `runslots.go`)*: the brain runtime. `Manager` owns the brain set, swaps

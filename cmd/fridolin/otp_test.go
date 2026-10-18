@@ -11,6 +11,7 @@ import (
 	"github.com/Icewater1337/fridolin/internal/chat"
 	"github.com/Icewater1337/fridolin/internal/fsx"
 	"github.com/Icewater1337/fridolin/internal/history"
+	"github.com/Icewater1337/fridolin/internal/otp"
 )
 
 // The bridge sweeps the hand-offs when it starts: a code that expired
@@ -54,7 +55,7 @@ func TestHandOffOfACodeTheBrainAskedFor(t *testing.T) {
 	asked := time.Now().Add(-2 * time.Minute).Truncate(time.Second)
 	br.appendEntry(history.Entry{TS: asked.Format(time.RFC3339), Chat: testDMChat, From: "main", Text: "🔐 Please send me the verification code", Type: history.Out})
 	tb.handleInbound(t.Context(), Inbound{Inbound: chat.Inbound{JID: testDMChat, Sender: "15551234567", Text: "483920", Source: chat.SourceWhatsApp}})
-	var h otpHandoff
+	var h otp.Record
 	data, err := os.ReadFile(filepath.Join(tb.cfgs.Get().DataDir, "otp", "main.json"))
 	if err == nil {
 		err = json.Unmarshal(data, &h)

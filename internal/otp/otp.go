@@ -25,8 +25,8 @@ import (
 // for the one-time code through /send, or the brain asks for one itself.
 // The code that comes back must not reach the model, nor the history every
 // later run reads: it is caught on its way in and handed to the script
-// instead (see handOffCode). A message is caught when it is nothing but a
-// code (otpCode) and its chat asked for one within otpWindow (codeRequest).
+// instead (see Handoff.Write). A message is caught when it is nothing but a
+// code (Code) and its chat asked for one within Window (Requested).
 
 // Window is how long after a chat was asked for a code a code that
 // arrives there is caught. Codes expire within minutes; past this, a bare
@@ -35,7 +35,7 @@ var Window = 10 * time.Minute
 
 // DefaultMarkers are the phrases that mark an outbound message as a
 // request for a one-time code, each matched in any letter case and as
-// whole words (see hasMarker). Add your own (a bank's name, say) with
+// whole words (see HasMarker). Add your own (a bank's name, say) with
 // otp_markers, which replaces them.
 var DefaultMarkers = []string{"🔐", "OTP", "one-time code", "2FA", "verification code"}
 
@@ -103,18 +103,18 @@ func HasMarker(text, marker string) bool {
 
 // Request is the outbound line that asked a chat for a code.
 type Request struct {
-	// ID is what /send answered the request with (historyEntry.OTPRequest),
+	// ID is what /send answered the request with (history.Entry.OTPRequest),
 	// "" when the brain asked in its own words.
 	ID string
 	At time.Time // when it was written
 }
 
 // otpRequestBudget is how far back from the end of the history the guard
-// looks for a request: far more than otpWindow of messages takes.
+// looks for a request: far more than Window of messages takes.
 const otpRequestBudget = 1 << 20
 
 // Requested returns the request for a code in the chat that goes by
-// chats which was written in the otpWindow before now: an outbound line
+// chats which was written in the Window before now: an outbound line
 // there, the brain's own or one sent on its behalf through /send, that
 // holds one of markers (the built-in ones for none). Another brain's own
 // words in this history do not count. Of several, it is the newest that
@@ -252,7 +252,7 @@ func (o *Handoff) Stop() {
 // Sweep removes the hand-off files in dir that expired by now,
 // left by a bridge that stopped before their time: one whose expiry has
 // passed, or for one written before files had an expiry, one older than
-// otpHandoffTTL.
+// HandoffTTL.
 func Sweep(dir string, now time.Time) {
 	entries, err := os.ReadDir(dir)
 	if err != nil {

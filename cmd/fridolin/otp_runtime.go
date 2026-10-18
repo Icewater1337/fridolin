@@ -1,7 +1,6 @@
 package main
 
 import (
-	"github.com/Icewater1337/fridolin/internal/otp"
 	"log"
 	"path/filepath"
 	"slices"
@@ -9,13 +8,14 @@ import (
 	"time"
 
 	"github.com/Icewater1337/fridolin/internal/chat"
+	"github.com/Icewater1337/fridolin/internal/otp"
 )
 
 // otpCatch is a code the guard caught, and the request it answers.
 type otpCatch struct {
 	Code    string // the code, without spaces and dashes
 	Typed   string // the message as it was typed
-	Request otpRequest
+	Request otp.Request
 }
 
 // catchesCode reports whether m is a one-time code that its chat asked for
@@ -29,11 +29,11 @@ func (br *Brain) catchesCode(m Inbound, now time.Time) (otpCatch, bool) {
 	if !s.otpGuard || len(m.Media) > 0 || !fromChat(m) {
 		return otpCatch{}, false
 	}
-	code, ok := otpCode(m.Text)
+	code, ok := otp.Code(m.Text)
 	if !ok {
 		return otpCatch{}, false
 	}
-	req, ok := otpRequested(br.root, br.id, chatJIDs(m), s.otpMarkers, now)
+	req, ok := otp.Requested(br.root, br.id, chatJIDs(m), s.otpMarkers, now)
 	if !ok {
 		return otpCatch{}, false
 	}
@@ -54,7 +54,7 @@ func (br *Brain) asksForCode(text string) bool {
 	if len(markers) == 0 {
 		markers = otp.DefaultMarkers
 	}
-	return s.otpGuard && slices.ContainsFunc(markers, func(m string) bool { return hasMarker(text, m) })
+	return s.otpGuard && slices.ContainsFunc(markers, func(m string) bool { return otp.HasMarker(text, m) })
 }
 
 // handOffCode hands a code the OTP guard caught in m to the local script
@@ -65,7 +65,7 @@ func (br *Brain) asksForCode(text string) bool {
 // it.
 func (b *Bridge) handOffCode(br *Brain, m Inbound, c otpCatch) {
 	now := time.Now()
-	h := otpHandoff{
+	h := otp.Record{
 		Brain: br.ID(), Chat: m.JID, Sender: m.Sender, Code: c.Code, Typed: c.Typed,
 		Received: now.Format(time.RFC3339), ReceivedUnixMS: now.UnixMilli(),
 		Request: c.Request.ID, RequestedUnixMS: c.Request.At.UnixMilli(),
