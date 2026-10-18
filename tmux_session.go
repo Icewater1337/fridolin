@@ -109,7 +109,7 @@ func (tv *TmuxViewer) IsAlive() bool {
 	return tv.command(tmux, "has-session", "-t", tv.Name).Run() == nil
 }
 
-// Close terminates the tmux session.
+// Close ends the tmux session, and with it the Terminal window attached.
 func (tv *TmuxViewer) Close() {
 	if tmux := findTmux(); tmux != "" {
 		_ = tv.command(tmux, "kill-session", "-t", tv.Name).Run()

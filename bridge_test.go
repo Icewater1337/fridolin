@@ -1104,24 +1104,24 @@ func TestRecentOutboundLooksLikeOTPRequest(t *testing.T) {
 		}
 	}
 
-	write(historyEntry{Type: "out", From: "personal", Text: "🔐 Please send the code"})
+	write(historyEntry{Type: historyOut, From: "personal", Text: "🔐 Please send the code"})
 	if !recentOutboundLooksLikeOTPRequest(tail(), "personal") {
 		t.Error("should detect the OTP request")
 	}
 
 	// An inbound message quoting the marker must not arm the guard.
-	write(historyEntry{Type: "in", From: "15551234567", Text: "what is an OTP?"})
+	write(historyEntry{Type: historyIn, From: "15551234567", Text: "what is an OTP?"})
 	if recentOutboundLooksLikeOTPRequest(tail(), "personal") {
 		t.Error("inbound message must not arm the guard")
 	}
 
 	// Another brain's outbound message must not arm this brain's guard.
-	write(historyEntry{Type: "out", From: "team", Text: "🔐 send the code"})
+	write(historyEntry{Type: historyOut, From: "team", Text: "🔐 send the code"})
 	if recentOutboundLooksLikeOTPRequest(tail(), "personal") {
 		t.Error("another brain's message must not arm the guard")
 	}
 
-	write(historyEntry{Type: "out", From: "personal", Text: "here is your summary"})
+	write(historyEntry{Type: historyOut, From: "personal", Text: "here is your summary"})
 	if recentOutboundLooksLikeOTPRequest(tail(), "personal") {
 		t.Error("ordinary message must not arm the guard")
 	}
@@ -1279,6 +1279,29 @@ func TestTruncateDoesNotSplitRunes(t *testing.T) {
 	}
 }
 
+// tail keeps the end of a command's output for an error message. Cutting
+// mid-rune would put invalid UTF-8 into the log and the dashboard.
+func TestTailDoesNotSplitRunes(t *testing.T) {
+	cases := []struct {
+		in   string
+		n    int
+		want string
+	}{
+		{"  short\n", 100, "short"},
+		{"exactly", 7, "exactly"},
+		{"abcdef", 3, "…def"},
+		{"ééé", 4, "…éé"},
+		{"ééé", 3, "…é"}, // the last 3 bytes start inside an é
+		{"x 🙂", 3, "…"},  // so do the last 3 bytes here, of the 4-byte 🙂
+	}
+	for _, c := range cases {
+		got := tail(c.in, c.n)
+		if got != c.want || !utf8.ValidString(got) {
+			t.Errorf("tail(%q, %d) = %q, want %q", c.in, c.n, got, c.want)
+		}
+	}
+}
+
 func TestIsLoopbackAddr(t *testing.T) {
 	loopback := []string{"127.0.0.1:8765", "localhost:8765", "[::1]:8765"}
 	for _, a := range loopback {
@@ -1291,5 +1314,38 @@ func TestIsLoopbackAddr(t *testing.T) {
 		if isLoopbackAddr(a) {
 			t.Errorf("isLoopbackAddr(%q) = true, want false", a)
 		}
+	}
+}
+
+// Some names are read outside Go: the dashboard labels the run outcomes
+// and the bridge's backup and offers the queue modes,
+// tools/history_search.py reads the history, and tools/calendar_tool.py a
+// brain's calendar files. Only this test keeps the two sides in step.
+func TestNamesReadOutsideGo(t *testing.T) {
+	cases := []struct {
+		file string
+		want []string
+	}{
+		{"web/assets/components/brain.js", []string{outcomeOK + ": [", outcomeError + ": [", outcomeInterrupted + ": [", outcomeQuestion + ": ["}},
+		{"web/assets/pages/settings.js", []string{"def: '" + queueModeQueue + "'", "['" + queueModeQueue + "', ", "['" + queueModeInterrupt + "', "}},
+		{"tools/history_search.py", []string{`HISTORY_FILENAME = "` + historyFileName + `"`, `row.get("type") != "` + historyIn + `"`}},
+		{"web/assets/pages/backup.js", []string{"id === '" + bridgeBackupID + "'"}},
+		// The tool's profile is the brain id, and its suffix is "_" + profile.
+		{"tools/calendar_tool.py", []string{`suffix = f"_{_profile}"`,
+			`f"` + strings.Replace(calendarCredentialsFile("", "ID"), "_ID", "{suffix}", 1) + `"`,
+			`f"` + strings.Replace(calendarTokenFile("", "ID"), "_ID", "{suffix}", 1) + `"`}},
+	}
+	for _, c := range cases {
+		t.Run(c.file, func(t *testing.T) {
+			data, err := os.ReadFile(filepath.Join(repoDir, c.file))
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, w := range c.want {
+				if !strings.Contains(string(data), w) {
+					t.Errorf("%s does not have %s", c.file, w)
+				}
+			}
+		})
 	}
 }

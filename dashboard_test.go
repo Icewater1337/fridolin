@@ -3,7 +3,9 @@ package main
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
+	"image/png"
 	"io"
 	"log"
 	"maps"
@@ -359,15 +361,15 @@ func TestIngestConfinedToMediaDir(t *testing.T) {
 	_ = os.Symlink(outside, link)
 
 	ingest := tb.ingest
-	w := ingest(`{"scope":"personal","paths":["` + inside + `"],"text":"file this"}`)
+	w := ingest(`{"brain":"personal","paths":["` + inside + `"],"text":"file this"}`)
 	if w.Code != 202 || !strings.Contains(w.Body.String(), `"status":"accepted"`) || !strings.Contains(w.Body.String(), "15551234567@s.whatsapp.net") {
 		t.Fatalf("ingest: %d %s", w.Code, w.Body.String())
 	}
 	for name, body := range map[string]string{
-		"outside media": `{"scope":"personal","paths":["` + outside + `"]}`,
-		"symlink out":   `{"scope":"personal","paths":["` + link + `"]}`,
-		"relative":      `{"scope":"personal","paths":["upload/scan.pdf"]}`,
-		"unknown brain": `{"scope":"nobody","paths":["` + inside + `"]}`,
+		"outside media": `{"brain":"personal","paths":["` + outside + `"]}`,
+		"symlink out":   `{"brain":"personal","paths":["` + link + `"]}`,
+		"relative":      `{"brain":"personal","paths":["upload/scan.pdf"]}`,
+		"unknown brain": `{"brain":"nobody","paths":["` + inside + `"]}`,
 	} {
 		if w := ingest(body); w.Code != 400 {
 			t.Errorf("%s: %d, want 400", name, w.Code)
@@ -377,6 +379,50 @@ func TestIngestConfinedToMediaDir(t *testing.T) {
 	hist, _ := os.ReadFile(filepath.Join(dir, "conversation-history.jsonl"))
 	if !strings.Contains(string(hist), "[attachment: "+canonicalDir(inside)+"]") {
 		t.Errorf("history does not record the ingested file:\n%s", hist)
+	}
+}
+
+// An unknown brain is named as it was sent, in Go quotes: these errors are
+// plain text, where JSON's escapes of <, > and & would only garble it.
+func TestUnknownBrainIsQuotedAsSent(t *testing.T) {
+	tb := newTestBridge(t, `, "ingest": {"enabled": true}`)
+	const want = `unknown brain "<a&b>"`
+	if w := tb.ingest(`{"brain":"<a&b>","text":"x"}`); w.Code != http.StatusBadRequest || !strings.Contains(w.Body.String(), want) {
+		t.Errorf("ingest: %d %q, want 400 saying %s", w.Code, w.Body.String(), want)
+	}
+	w := tb.do("POST", "/api/dev/inbound", map[string]any{"jid": "15551234567@s.whatsapp.net", "brain": "<a&b>", "text": "x"})
+	var body struct{ Error string }
+	_ = json.Unmarshal(w.Body.Bytes(), &body)
+	if w.Code != http.StatusBadRequest || body.Error != want {
+		t.Errorf("dev inbound: %d %q, want 400 saying %s", w.Code, body.Error, want)
+	}
+}
+
+// scope was the name of the brain field. A script that still sends it is
+// told the field to use, even when it names a brain that exists, and
+// nothing is handed to any brain.
+func TestIngestRefusesScope(t *testing.T) {
+	tb := newTestBridge(t, `, "ingest": {"enabled": true}`)
+	dir := tb.addFolderBrain(t, BrainManifest{ID: "personal", Name: "Personal", Routing: BrainRouting{HandlesDMs: true}})
+	for name, body := range map[string]string{
+		"scope only":         `{"scope":"personal","text":"file this"}`,
+		"scope and brain":    `{"scope":"personal","brain":"personal","text":"file this"}`,
+		"scope, other brain": `{"scope":"nobody","brain":"personal","text":"file this"}`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			w := tb.ingest(body)
+			if w.Code != http.StatusBadRequest || !strings.Contains(w.Body.String(), `name the brain in "brain"`) {
+				t.Errorf("%d %q, want 400 naming the brain field", w.Code, w.Body.String())
+			}
+		})
+	}
+	if w := tb.ingest(`{"brain":"personal","text":"file this"}`); w.Code != http.StatusAccepted {
+		t.Fatalf("with brain: %d %s, want 202", w.Code, w.Body.String())
+	}
+	waitFor(t, 5*time.Second, "the reply to the one accepted request", func() bool { return len(tb.dev.Outbox()) > 0 })
+	hist, _ := os.ReadFile(filepath.Join(dir, "conversation-history.jsonl"))
+	if n := strings.Count(string(hist), `"type":"in"`); n != 1 {
+		t.Errorf("history has %d ingested messages, want only the accepted one:\n%s", n, hist)
 	}
 }
 
@@ -415,7 +461,7 @@ func TestIngestOTPGuardChecksTheNamedBrain(t *testing.T) {
 	tb := newTestBridge(t, `, "ingest": {"enabled": true}, "otp_guard": true, "otp_markers": ["Examplebank 2FA"]`)
 	tb.addFolderBrain(t, BrainManifest{ID: "dm", Name: "DM", Routing: BrainRouting{HandlesDMs: true}})
 	upDir := tb.addFolderBrain(t, BrainManifest{ID: "up", Name: "Uploads", ReplyChat: dm})
-	tb.brainMgr.Get("up").appendHistory(dm, "up", "Examplebank 2FA: reply with the code", "out")
+	tb.brainMgr.Get("up").appendHistory(dm, "up", "Examplebank 2FA: reply with the code", historyOut)
 
 	if w := tb.ingest(`{"brain":"up","text":"483920"}`); w.Code != 202 {
 		t.Fatalf("ingest: %d %s", w.Code, w.Body.String())
@@ -448,7 +494,7 @@ func TestStopReachesAHandOffInItsReplyChat(t *testing.T) {
 			tb := newTestBridge(t, `, "ingest": {"enabled": true}`)
 			tb.addFolderBrain(t, BrainManifest{ID: "dm", Name: "DM", Routing: BrainRouting{HandlesDMs: true}})
 			tb.addFolderBrain(t, BrainManifest{ID: "up", Name: "Uploads", ReplyChat: dm})
-			t.Setenv("WCB_FAKE_SLEEP_MS", "30000")
+			t.Setenv("FRIDOLIN_FAKE_SLEEP_MS", "30000")
 			up := tb.brainMgr.Get("up")
 
 			if w := tb.ingest(`{"brain":"up","text":"file this"}`); w.Code != 202 {
@@ -490,7 +536,7 @@ func TestResetReachesAHandOffInItsReplyChat(t *testing.T) {
 	tb := newTestBridge(t, `, "ingest": {"enabled": true}`)
 	tb.addFolderBrain(t, BrainManifest{ID: "dm", Name: "DM", Routing: BrainRouting{HandlesDMs: true}})
 	tb.addFolderBrain(t, BrainManifest{ID: "up", Name: "Uploads", ReplyChat: dm})
-	t.Setenv("WCB_FAKE_SLEEP_MS", "30000")
+	t.Setenv("FRIDOLIN_FAKE_SLEEP_MS", "30000")
 	up := tb.brainMgr.Get("up")
 
 	if w := tb.ingest(`{"brain":"up","text":"file this"}`); w.Code != 202 {
@@ -502,7 +548,7 @@ func TestResetReachesAHandOffInItsReplyChat(t *testing.T) {
 	}
 	waitFor(t, 5*time.Second, "the second file to wait", func() bool { return len(up.Snapshot().Queue) == 1 })
 
-	tb.handleInbound(context.Background(), Inbound{JID: dm, Sender: "15551234567", Text: "!reset", Source: "whatsapp"})
+	tb.handleInbound(context.Background(), Inbound{JID: dm, Sender: "15551234567", Text: "!reset", Source: sourceWhatsApp})
 	if !tb.sentPrefix(dm, "✅ Cleared anything this chat had running or waiting") {
 		t.Errorf("!reset answered %q, want that it cleared the chat", tb.sentTo(dm))
 	}
@@ -522,10 +568,10 @@ func TestStopCountsWaitingHandOffs(t *testing.T) {
 	tb := newTestBridge(t, `, "ingest": {"enabled": true}`)
 	tb.addFolderBrain(t, BrainManifest{ID: "dm", Name: "DM", Routing: BrainRouting{HandlesDMs: true}})
 	tb.addFolderBrain(t, BrainManifest{ID: "up", Name: "Uploads", ReplyChat: dm, Routing: BrainRouting{Groups: []string{group}}})
-	t.Setenv("WCB_FAKE_SLEEP_MS", "30000")
+	t.Setenv("FRIDOLIN_FAKE_SLEEP_MS", "30000")
 	up := tb.brainMgr.Get("up")
 
-	if _, _, _, err := tb.brainMgr.Submit(Inbound{JID: group, Sender: "15551234567", Text: "group work", Source: "whatsapp"}); err != nil {
+	if _, _, _, err := tb.brainMgr.Submit(Inbound{JID: group, Sender: "15551234567", Text: "group work", Source: sourceWhatsApp}); err != nil {
 		t.Fatal(err)
 	}
 	waitFor(t, 5*time.Second, "up's group run", func() bool { r := up.Snapshot().Running; return r != nil && r.PID > 0 })
@@ -534,7 +580,7 @@ func TestStopCountsWaitingHandOffs(t *testing.T) {
 	}
 	waitFor(t, 5*time.Second, "the file to wait", func() bool { return len(up.Snapshot().Queue) == 1 })
 
-	tb.handleInbound(context.Background(), Inbound{JID: dm, Sender: "15551234567", Text: "!stop", Source: "whatsapp"})
+	tb.handleInbound(context.Background(), Inbound{JID: dm, Sender: "15551234567", Text: "!stop", Source: sourceWhatsApp})
 	if !tb.sentPrefix(dm, "🛑 Nothing was running for this chat; cleared") {
 		t.Errorf("!stop answered %q, want that it cleared the waiting file", tb.sentTo(dm))
 	}
@@ -647,13 +693,13 @@ func TestAddBrainAllowChatAndRoute(t *testing.T) {
 	if w.Code != 200 {
 		t.Fatalf("allow: %d %s", w.Code, w.Body.String())
 	}
-	if !contains(tb.cfgs.Get().AllowedGroups, "120363000000000001@g.us") {
+	if !slices.Contains(tb.cfgs.Get().AllowedGroups, "120363000000000001@g.us") {
 		t.Error("group not allowed")
 	}
 	if br := tb.brainMgr.BrainFor("120363000000000001@g.us", true); br == nil || br.ID() != "family" {
 		t.Error("group not routed to the chosen brain")
 	}
-	if disk, _ := ReadManifest(dir); !contains(disk.Routing.Groups, "120363000000000001@g.us") {
+	if disk, _ := ReadManifest(dir); !slices.Contains(disk.Routing.Groups, "120363000000000001@g.us") {
 		t.Error("the group must be saved in the brain's own brain.json")
 	}
 	if ign, _ := tb.store.ListIgnored(); len(ign) != 0 {
@@ -730,7 +776,7 @@ func TestUpdateBrain(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if disk.Name != "Assistant" || disk.Model != "opus" || !contains(disk.Routing.Groups, group) {
+	if disk.Name != "Assistant" || disk.Model != "opus" || !slices.Contains(disk.Routing.Groups, group) {
 		t.Errorf("brain.json = %+v, want the edit", disk)
 	}
 	var approved *BrainManifest
@@ -1017,7 +1063,7 @@ func TestRevokedGroupKeepsItsBrain(t *testing.T) {
 	if w := tb.do("POST", "/api/chats/revoke", map[string]string{"kind": "group", "jid": group}); w.Code != 200 {
 		t.Fatalf("revoke: %d %s", w.Code, w.Body)
 	}
-	if disk, _ := ReadManifest(dir); !contains(disk.Routing.Groups, group) {
+	if disk, _ := ReadManifest(dir); !slices.Contains(disk.Routing.Groups, group) {
 		t.Error("revoking the group took it out of the brain's routing")
 	}
 	if w := tb.do("POST", "/api/chats/allow", map[string]string{"kind": "group", "jid": group}); w.Code != 200 {
@@ -1273,6 +1319,119 @@ func TestPutConfigRefusesInlineBrains(t *testing.T) {
 	}
 	if tb.cfgs.ETag() != got.ETag {
 		t.Error("the refused request changed config.json")
+	}
+}
+
+// Allowing a group for a brain takes it away from the brain that had it,
+// in both brain.json files, and leaves that brain's other groups alone.
+func TestAllowGroupMovesItBetweenBrains(t *testing.T) {
+	const moved, kept = "120363000000000001@g.us", "120363000000000002@g.us"
+	tb := newTestBridge(t, `, "allowed_groups": ["`+moved+`", "`+kept+`"]`)
+	fromDir := tb.addFolderBrain(t, BrainManifest{ID: "from", Name: "From", Routing: BrainRouting{Groups: []string{kept, moved}}})
+	toDir := tb.addFolderBrain(t, BrainManifest{ID: "to", Name: "To"})
+
+	if w := tb.do("POST", "/api/chats/allow", map[string]string{"jid": moved, "kind": "group", "brain": "to"}); w.Code != 200 {
+		t.Fatalf("allow: %d %s", w.Code, w.Body.String())
+	}
+	if from, _ := ReadManifest(fromDir); !slices.Equal(from.Routing.Groups, []string{kept}) {
+		t.Errorf("from has groups %q, want only %q", from.Routing.Groups, kept)
+	}
+	if to, _ := ReadManifest(toDir); !slices.Equal(to.Routing.Groups, []string{moved}) {
+		t.Errorf("to has groups %q, want %q", to.Routing.Groups, moved)
+	}
+	if br := tb.brainMgr.BrainFor(moved, true); br == nil || br.ID() != "to" {
+		t.Errorf("the group routes to %v, want to", br)
+	}
+	if br := tb.brainMgr.BrainFor(kept, true); br == nil || br.ID() != "from" {
+		t.Errorf("the other group routes to %v, want from", br)
+	}
+}
+
+// The name suggested for a new brain's folder starts with a capital, also
+// when its first letter takes more than one byte.
+func TestPrettyName(t *testing.T) {
+	for in, want := range map[string]string{
+		"":             "Brain",
+		"personal":     "Personal",
+		"work_notes":   "Work notes",
+		"éclair-notes": "Éclair notes",
+		"ölkanne":      "Ölkanne",
+		"日記":           "日記",
+	} {
+		if got := prettyName(in); got != want {
+			t.Errorf("prettyName(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
+
+// qrMessenger is the dev messenger with a pairing code to show.
+type qrMessenger struct {
+	*devMessenger
+	code string
+}
+
+func (q qrMessenger) State() WAState { return WAState{Mode: "pairing", QRCode: q.code} }
+
+// The pairing code is served as a PNG, square and big enough to scan once
+// the dashboard scales it, and only while there is a code.
+func TestQRCodeIsServedAsAPNG(t *testing.T) {
+	tb := newTestBridge(t, "")
+	if w := tb.do("GET", "/api/whatsapp/qr", nil); w.Code != http.StatusNotFound {
+		t.Errorf("without a code: %d, want 404", w.Code)
+	}
+	// As long as the codes whatsmeow hands out.
+	tb.wa = qrMessenger{tb.dev, "2@" + strings.Repeat("AbCdEfGh", 20) + ",x+y/z=,1234567890abcdef=="}
+	w := tb.do("GET", "/api/whatsapp/qr", nil)
+	var body struct {
+		DataURL string `json:"data_url"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil || w.Code != http.StatusOK {
+		t.Fatalf("%d %s", w.Code, w.Body.String())
+	}
+	b64, ok := strings.CutPrefix(body.DataURL, "data:image/png;base64,")
+	if !ok {
+		t.Fatalf("data_url %q is not a base64 PNG", truncate(body.DataURL, 40))
+	}
+	data, err := base64.StdEncoding.DecodeString(b64)
+	if err != nil {
+		t.Fatal(err)
+	}
+	img, err := png.Decode(bytes.NewReader(data))
+	if err != nil {
+		t.Fatalf("not a PNG: %v", err)
+	}
+	if b := img.Bounds(); b.Dx() != b.Dy() || b.Dx() < 200 {
+		t.Errorf("the PNG is %dx%d, want a square of at least 200 pixels", b.Dx(), b.Dy())
+	}
+}
+
+// The dashboard edits brain_model only. A config that still has the
+// retired model key shows its value there, and a save from a tab opened
+// before the upgrade, which still sends model, keeps it the same way.
+func TestConfigPageFoldsTheRetiredModel(t *testing.T) {
+	tb := newTestBridge(t, `, "model": "sonnet"`)
+	var got struct {
+		ETag   string         `json:"etag"`
+		Config map[string]any `json:"config"`
+	}
+	_ = json.Unmarshal(tb.do("GET", "/api/config", nil).Body.Bytes(), &got)
+	if _, ok := got.Config["model"]; ok {
+		t.Errorf("GET /api/config has a model key: %v", got.Config["model"])
+	}
+	if got.Config["brain_model"] != "sonnet" {
+		t.Errorf("GET /api/config: brain_model %v, want sonnet", got.Config["brain_model"])
+	}
+
+	// An old tab: brain_model as an older bridge served it, and model.
+	got.Config["brain_model"], got.Config["model"] = "", "haiku"
+	if w := tb.do("PUT", "/api/config", map[string]any{"etag": got.ETag, "config": got.Config}); w.Code != http.StatusOK {
+		t.Fatalf("put: %d %s", w.Code, w.Body.String())
+	}
+	if m := tb.cfgs.Get().BrainModel; m != "haiku" {
+		t.Errorf("brain_model after the save = %q, want haiku", m)
+	}
+	if raw, ok := readRawConfig(t, tb.cfgs.Path())["model"]; ok {
+		t.Errorf("the save wrote model: %s", raw)
 	}
 }
 

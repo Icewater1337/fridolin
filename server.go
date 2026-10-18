@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log"
 	"net"
 	"net/http"
@@ -19,15 +20,18 @@ type sendRequest struct {
 	Text string `json:"text"`
 }
 
-// ingestRequest is the JSON body expected by POST /ingest. Scope (or Brain)
-// names the brain; Paths are files already written inside the media
-// directory; Text is the message that goes with them.
+// ingestRequest is the JSON body expected by POST /ingest. Brain names the
+// brain; Paths are files already written inside the media directory; Text
+// is the message that goes with them.
 type ingestRequest struct {
-	Scope  string   `json:"scope"`
 	Brain  string   `json:"brain"`
 	Paths  []string `json:"paths"`
 	Text   string   `json:"text"`
 	Sender string   `json:"sender"`
+	// Scope is the name Brain had before. It is no longer read: a request
+	// that still sends it is refused with the field to use instead, rather
+	// than failing on a brain it does not name.
+	Scope string `json:"scope"`
 }
 
 // isLoopbackAddr reports whether addr binds to a loopback interface.
@@ -121,11 +125,11 @@ func (b *Bridge) httpSend(w http.ResponseWriter, r *http.Request) {
 // appendHTTPMessageToHistory records an HTTP-sent message in the history of
 // whichever brain owns the target chat.
 func (b *Bridge) appendHTTPMessageToHistory(jid, text string) {
-	br := b.brainMgr.BrainFor(jid, strings.HasSuffix(jid, "@g.us"))
+	br := b.brainMgr.BrainFor(jid, isGroupJID(jid))
 	if br == nil {
 		return
 	}
-	br.appendHistory(jid, br.id, text, "out")
+	br.appendHistory(jid, br.id, text, historyOut)
 }
 
 // httpIngest handles POST /ingest. It feeds files that arrived outside
@@ -144,17 +148,18 @@ func (b *Bridge) httpIngest(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "invalid JSON: "+err.Error(), http.StatusBadRequest)
 		return
 	}
+	if req.Scope != "" {
+		http.Error(w, `"scope" is no longer read: name the brain in "brain"`, http.StatusBadRequest)
+		return
+	}
 	if len(req.Paths) == 0 && strings.TrimSpace(req.Text) == "" {
 		http.Error(w, "paths or text required", http.StatusBadRequest)
 		return
 	}
 	id := strings.ToLower(strings.TrimSpace(req.Brain))
-	if id == "" {
-		id = strings.ToLower(strings.TrimSpace(req.Scope))
-	}
 	br := b.brainMgr.Get(id)
 	if br == nil {
-		http.Error(w, "unknown brain "+strconvQuote(id), http.StatusBadRequest)
+		http.Error(w, fmt.Sprintf("unknown brain %q", id), http.StatusBadRequest)
 		return
 	}
 
@@ -195,7 +200,7 @@ func (b *Bridge) httpIngest(w http.ResponseWriter, r *http.Request) {
 // so it runs there even when jid, the chat that gets the answer, belongs to
 // another brain.
 func (b *Bridge) handOff(br *Brain, jid, sender, text string, media []string) {
-	m := Inbound{JID: jid, Brain: br.ID(), Sender: sender, Text: text, Media: media, Source: "ingest", At: time.Now()}
+	m := Inbound{JID: jid, Brain: br.ID(), Sender: sender, Text: text, Media: media, Source: sourceIngest, At: time.Now()}
 	b.handleInbound(context.Background(), m)
 }
 
@@ -211,15 +216,10 @@ func (b *Bridge) replyChatFor(br *Brain, cfg *Config) string {
 	}
 	getsDMs := m.Routing.HandlesDMs || b.brainMgr.BrainFor("", false) == br
 	if getsDMs && len(cfg.AllowedNumbers) > 0 {
-		return cfg.AllowedNumbers[0] + "@s.whatsapp.net"
+		return userJID(cfg.AllowedNumbers[0])
 	}
 	if len(m.Routing.Groups) > 0 {
 		return m.Routing.Groups[0]
 	}
 	return ""
-}
-
-func strconvQuote(s string) string {
-	data, _ := json.Marshal(s)
-	return string(data)
 }

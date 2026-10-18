@@ -22,10 +22,10 @@ a JPEG)? Document.
 
 ## Where things go
 
-Everything lives under your working directory:
+Everything lives in your brain folder, the directory you run in:
 
 ```
-<work_dir>/
+<brain-folder>/
 ├── media/<subfolder>/     ← this skill
 ├── transcripts/           ← transcription skill
 ├── documents/<category>/  ← formal documents
@@ -74,9 +74,9 @@ use *that* date, not today's.
 ### 4. Move it, don't copy it
 
 ```bash
-mkdir -p "<work_dir>/media/<subfolder>"
+mkdir -p "<brain-folder>/media/<subfolder>"
 mv ~/.fridolin/media/<HASH>.<ext> \
-   "<work_dir>/media/<subfolder>/YYYY-MM-DD - description.<ext>"
+   "<brain-folder>/media/<subfolder>/YYYY-MM-DD - description.<ext>"
 ```
 
 Move. The staging directory is not a backup, and leaving copies there means it

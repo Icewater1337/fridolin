@@ -14,6 +14,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -123,11 +124,23 @@ func (g *GoogleAuth) clientPath() string {
 func (g *GoogleAuth) credsDir() string { return credentialsDirOf(g.cfgs.Get()) }
 
 func (g *GoogleAuth) tokenPath(brainID string) string {
-	return filepath.Join(g.credsDir(), "google_calendar_token_"+brainID+".json")
+	return calendarTokenFile(g.credsDir(), brainID)
 }
 
 func (g *GoogleAuth) credentialsPath(brainID string) string {
-	return filepath.Join(g.credsDir(), "google_calendar_credentials_"+brainID+".json")
+	return calendarCredentialsFile(g.credsDir(), brainID)
+}
+
+// calendarTokenFile and calendarCredentialsFile are a brain's calendar
+// files in dir, the credentials dir. The sandbox opens exactly these two
+// to the brain, and tools/calendar_tool.py, which reads them in the brain,
+// builds the same names from its profile, the brain's id.
+func calendarTokenFile(dir, brainID string) string {
+	return filepath.Join(dir, "google_calendar_token_"+brainID+".json")
+}
+
+func calendarCredentialsFile(dir, brainID string) string {
+	return filepath.Join(dir, "google_calendar_credentials_"+brainID+".json")
 }
 
 // Client returns the configured OAuth client, or nil.
@@ -615,7 +628,7 @@ func (b *Bridge) apiCalendarStatus(w http.ResponseWriter, r *http.Request) {
 		"selected":          []string{},
 	}
 	if m.Calendar != nil {
-		resp["account"], resp["selected"], resp["default"] = m.Calendar.Account, nz(m.Calendar.Calendars), m.Calendar.Default
+		resp["account"], resp["selected"], resp["default"] = m.Calendar.Account, nonNil(m.Calendar.Calendars), m.Calendar.Default
 	}
 	g.mu.Lock()
 	if e := g.lastError[br.ID()]; e != "" {
@@ -671,7 +684,7 @@ func (b *Bridge) apiCalendarSelect(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusUnprocessableEntity, "choose at least one calendar (or disconnect)")
 		return
 	}
-	if req.Default == "" || !contains(req.Calendars, req.Default) {
+	if req.Default == "" || !slices.Contains(req.Calendars, req.Default) {
 		req.Default = req.Calendars[0]
 	}
 	err := b.cfgs.UpdateManifest(br.ID(), func(m *BrainManifest) error {

@@ -27,6 +27,10 @@ type LogLine struct {
 	Text string    `json:"text"`
 }
 
+// logRingLines is how many lines the bridge keeps for the dashboard's Logs
+// page, which can ask for all of them at once.
+const logRingLines = 2000
+
 // NewLogRing keeps up to max lines.
 func NewLogRing(max int) *LogRing { return &LogRing{max: max, nextSeq: 1} }
 

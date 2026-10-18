@@ -56,6 +56,13 @@ func OpenConfigStore(cfgPath string) (*ConfigStore, error) {
 		if err := json.Unmarshal(data, file); err != nil {
 			return nil, fmt.Errorf("parsing config file %q: %w", cfgPath, err)
 		}
+		notes, err := foldRetiredKeys(data, file)
+		if err != nil {
+			return nil, fmt.Errorf("parsing config file %q: %w", cfgPath, err)
+		}
+		for _, note := range notes {
+			log.Printf("config %s: %s", cfgPath, note)
+		}
 		warnUnknownKeys(cfgPath, data)
 	} else if !os.IsNotExist(err) {
 		return nil, fmt.Errorf("reading config file %q: %w", cfgPath, err)
@@ -64,6 +71,9 @@ func OpenConfigStore(cfgPath string) (*ConfigStore, error) {
 	eff, err := effective(file)
 	if err != nil {
 		return nil, err
+	}
+	if file.DataDir == "" {
+		warnLegacyDataDir(eff.DataDir)
 	}
 	cs := &ConfigStore{path: cfgPath, file: file, startup: eff}
 	cs.eff.Store(eff)
@@ -237,9 +247,21 @@ func warnDotEnvNotRead(cfgPath string) {
 	}
 }
 
+// warnLegacyDataDir says when the default data dir is the one from before
+// the rename, taken because ~/.fridolin does not exist, so that it can be
+// named in data_dir before the bridge stops looking for it.
+func warnLegacyDataDir(dataDir string) {
+	home := homeDir()
+	if home == "" || dataDir != filepath.Join(home, legacyDataDirName) {
+		return
+	}
+	log.Printf("warning: data dir %s has the name from before the rename and is used because %s does not exist; set the data folder to it (Settings → Advanced) to keep it once the bridge no longer looks for that name", dataDir, filepath.Join(home, dataDirName))
+}
+
 // warnUnknownKeys logs top-level keys config.json has but the bridge does not
 // know — usually a typo, or a setting from another version. They are dropped
-// the next time the dashboard saves the file.
+// the next time the dashboard saves the file. Retired keys are known: they
+// get a line of their own, see foldRetiredKeys.
 func warnUnknownKeys(path string, data []byte) {
 	var m map[string]json.RawMessage
 	if json.Unmarshal(data, &m) != nil {
@@ -250,6 +272,9 @@ func warnUnknownKeys(path string, data []byte) {
 	for i := 0; i < t.NumField(); i++ {
 		name, _, _ := strings.Cut(t.Field(i).Tag.Get("json"), ",")
 		known[name] = true
+	}
+	for _, rk := range retiredKeys {
+		known[rk.name] = true
 	}
 	var unknown []string
 	for k := range m {

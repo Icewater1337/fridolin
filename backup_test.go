@@ -34,6 +34,28 @@ func TestNextRun(t *testing.T) {
 	}
 }
 
+// The status page, the scheduler and the check when backups are switched
+// on all take today's due time from dueToday, which reads an empty or bad
+// daily_at as the default, 03:30.
+func TestDueToday(t *testing.T) {
+	loc := time.FixedZone("x", 3600)
+	now := time.Date(2026, 3, 1, 10, 0, 0, 0, loc)
+	for at, want := range map[string]time.Time{
+		"07:05": time.Date(2026, 3, 1, 7, 5, 0, 0, loc),
+		"23:59": time.Date(2026, 3, 1, 23, 59, 0, 0, loc),
+		"":      time.Date(2026, 3, 1, 3, 30, 0, 0, loc),
+		"25:00": time.Date(2026, 3, 1, 3, 30, 0, 0, loc),
+		"noon":  time.Date(2026, 3, 1, 3, 30, 0, 0, loc),
+	} {
+		if got := dueToday(at, now); !got.Equal(want) {
+			t.Errorf("dueToday(%q) = %v, want %v", at, got, want)
+		}
+	}
+	if got, want := nextRun("", now), time.Date(2026, 3, 2, 3, 30, 0, 0, loc); !got.Equal(want) {
+		t.Errorf("nextRun(\"\") = %v, want %v", got, want)
+	}
+}
+
 func TestBackupConfigValidate(t *testing.T) {
 	for _, bad := range []BackupConfig{{DailyAt: "25:00"}, {Remote: "my remote"}, {Root: "../x"}, {Root: "/abs"}, {Root: "a:b"}} {
 		if bad.validate() == nil {
@@ -69,7 +91,7 @@ func (f *fakeRunner) run(ctx context.Context, args []string, stderr io.Writer) (
 	switch {
 	case len(args) > 1 && args[0] == "config" && args[1] == "create":
 		return []byte(`{"State":"*oauth-islocal,teamdrive,,","Option":{"Name":"config_is_local","DefaultStr":"true"}}`), nil
-	case len(args) > 1 && args[0] == "config" && args[1] == "update" && contains(args, "*oauth-islocal,teamdrive,,"):
+	case len(args) > 1 && args[0] == "config" && args[1] == "update" && slices.Contains(args, "*oauth-islocal,teamdrive,,"):
 		if stderr != nil {
 			fmt.Fprintln(stderr, "NOTICE: Please go to the following link: http://127.0.0.1:53682/auth?state=abc123")
 		}
@@ -77,7 +99,7 @@ func (f *fakeRunner) run(ctx context.Context, args []string, stderr io.Writer) (
 		_ = os.WriteFile(f.conf, []byte("[brain-gdrive]\ntype = drive\nscope = drive.file\ntoken = {\"access_token\":\"SECRET-TOKEN\"}\n"), 0o600)
 		return []byte(`{"State":"*teamdrive","Option":{"Name":"config_change_team_drive","DefaultStr":"false"},"Result":"SECRET-TOKEN"}`), nil
 	case len(args) > 1 && args[0] == "config" && args[1] == "update":
-		if !contains(args, "false") {
+		if !slices.Contains(args, "false") {
 			return nil, fmt.Errorf("team drive question must be answered false: %v", args)
 		}
 		return []byte(`{"State":""}`), nil
@@ -581,7 +603,7 @@ func (d *deletionRunner) run(_ context.Context, args []string, stderr io.Writer)
 		}
 		return nil, nil
 	case "lsjson":
-		if contains(args, "--dirs-only") {
+		if slices.Contains(args, "--dirs-only") {
 			return []byte("[]"), nil
 		}
 		d.lists = append(d.lists, args)
@@ -758,7 +780,7 @@ func TestMassDeletionCheckListsLikeTheSync(t *testing.T) {
 		t.Fatalf("backup = %+v", res)
 	}
 	filter := filepath.Join(tb.backup.dir(), "filters-notes.txt")
-	if len(d.syncs) != 1 || flagValue(d.syncs[0], "--filter-from") != filter || !contains(d.syncs[0], "--links") {
+	if len(d.syncs) != 1 || flagValue(d.syncs[0], "--filter-from") != filter || !slices.Contains(d.syncs[0], "--links") {
 		t.Fatalf("syncs = %v, want one with --filter-from %s and --links", d.syncs, filter)
 	}
 	for _, side := range []struct{ name, path string }{
@@ -768,7 +790,7 @@ func TestMassDeletionCheckListsLikeTheSync(t *testing.T) {
 		t.Run(side.name, func(t *testing.T) {
 			var args []string
 			for _, l := range d.lists {
-				if contains(l, side.path) {
+				if slices.Contains(l, side.path) {
 					args = l
 				}
 			}
@@ -778,7 +800,7 @@ func TestMassDeletionCheckListsLikeTheSync(t *testing.T) {
 			if got := flagValue(args, "--filter-from"); got != filter {
 				t.Errorf("--filter-from = %q, want the sync's %s", got, filter)
 			}
-			if !contains(args, "--links") {
+			if !slices.Contains(args, "--links") {
 				t.Errorf("listed without --links: %v", args)
 			}
 		})

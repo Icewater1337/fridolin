@@ -13,13 +13,17 @@ import (
 // ManifestFile is the file that turns a folder into a brain.
 const ManifestFile = "brain.json"
 
+// defaultPromptFile is the prompt file of a brain whose brain.json names
+// none, and the one a new brain is scaffolded with.
+const defaultPromptFile = "brain-prompt.md"
+
 // BrainManifest is a brain's portable description, stored as brain.json in
 // the brain's own folder. Copy the folder to another machine (or restore it
 // from a backup), add it in the dashboard, and the brain comes back with its
 // routing and settings.
 type BrainManifest struct {
 	Version int    `json:"version"`
-	ID      string `json:"id"`   // stable slug: session key, history sender, sandbox profile name
+	ID      string `json:"id"`   // stable slug: history sender, sandbox profile and credential file names
 	Name    string `json:"name"` // display name
 
 	Routing BrainRouting `json:"routing"`
@@ -30,7 +34,7 @@ type BrainManifest struct {
 	DisallowedTools *[]string `json:"disallowed_tools,omitempty"`
 
 	// PromptFile is the prompt file sent ahead of each message, relative to
-	// the folder (default brain-prompt.md). It must stay inside the folder.
+	// the folder (default defaultPromptFile). It must stay inside the folder.
 	PromptFile string `json:"prompt_file,omitempty"`
 
 	// ReplyChat is where replies go for messages that did not come from a
@@ -93,7 +97,7 @@ func (m *BrainManifest) Validate() error {
 		}
 	}
 	for _, g := range m.Routing.Groups {
-		if !strings.HasSuffix(g, "@g.us") {
+		if !isGroupJID(g) {
 			return fmt.Errorf("brain %q: %q is not a group JID (…@g.us)", m.ID, g)
 		}
 	}
@@ -119,14 +123,10 @@ func (m BrainManifest) normalized() BrainManifest {
 		m.Version = manifestVersion
 	}
 	if m.PromptFile == "" {
-		m.PromptFile = "brain-prompt.md"
+		m.PromptFile = defaultPromptFile
 	}
-	if m.Routing.Groups == nil {
-		m.Routing.Groups = []string{}
-	}
-	if m.Backup.Exclude == nil {
-		m.Backup.Exclude = []string{}
-	}
+	m.Routing.Groups = nonNil(m.Routing.Groups)
+	m.Backup.Exclude = nonNil(m.Backup.Exclude)
 	return m
 }
 

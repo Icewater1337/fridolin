@@ -32,7 +32,7 @@ func TestChildGets(t *testing.T) {
 		{"CLAUDE_CODE_PROVIDER_MANAGED_BY_HOST", true, false, false},
 		{"ANTHROPIC_API_KEY", true, false, false},
 		{"ANTHROPIC_BASE_URL", true, false, false},
-		{"BRIDGE_DATA_DIR", true, false, false},
+		{"TRANSCRIBE_MODEL", true, false, false},
 		{"CALENDAR_TZ", true, false, false},
 		// Only for a sign-in that opens your browser.
 		{"DISPLAY", false, false, true},
@@ -154,8 +154,10 @@ func TestBrainGetsOnlyTheAllowlistedEnvironment(t *testing.T) {
 		"RCLONE_CONFIG_DRIVE_TOKEN": "test-rclone-token",
 		"CLAUDECODE":                "1",
 		"DISPLAY":                   ":0", // for a sign-in only
-		// The bridge sets this one itself, so the brain gets the bridge's.
+		// The bridge sets these itself, so the brain gets the bridge's.
 		"BRIDGE_BRAIN_ID": "not-a",
+		"BRIDGE_DATA_DIR": "/elsewhere",
+		"BRIDGE_DB_PATH":  "/elsewhere/bridge.db",
 	}
 	env := maps.Clone(listed)
 	maps.Copy(env, unlisted)
@@ -166,9 +168,11 @@ func TestBrainGetsOnlyTheAllowlistedEnvironment(t *testing.T) {
 		"HOME":                   home,
 		"BRIDGE_BRAIN_ID":        "a",
 		"BRIDGE_CREDENTIALS_DIR": filepath.Join(home, "data"),
+		"BRIDGE_DATA_DIR":        filepath.Join(home, "data"),
+		"BRIDGE_DB_PATH":         filepath.Join(home, "data", "bridge.db"),
 		// The fake CLI's own (testChildEnv).
-		"WCB_FAKE_CLAUDE":  "1",
-		"WCB_FAKE_ENV_LOG": got["WCB_FAKE_ENV_LOG"],
+		"FRIDOLIN_FAKE_CLAUDE":  "1",
+		"FRIDOLIN_FAKE_ENV_LOG": got["FRIDOLIN_FAKE_ENV_LOG"],
 	})
 	if !maps.Equal(got, want) {
 		for _, k := range slices.Sorted(maps.Keys(want)) {
@@ -310,7 +314,7 @@ func brainRunEnv(t *testing.T, env map[string]string, config string) (map[string
 	home := canonicalDir(t.TempDir())
 	envLog := filepath.Join(t.TempDir(), "brain.env")
 	all := maps.Clone(env)
-	maps.Copy(all, map[string]string{"HOME": home, "WCB_FAKE_CLAUDE": "1", "WCB_FAKE_ENV_LOG": envLog})
+	maps.Copy(all, map[string]string{"HOME": home, "FRIDOLIN_FAKE_CLAUDE": "1", "FRIDOLIN_FAKE_ENV_LOG": envLog})
 	onlyEnv(t, all)
 
 	m := testManifest("a")

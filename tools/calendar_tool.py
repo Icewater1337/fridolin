@@ -28,12 +28,12 @@ a brain, it is the brain's ID, the name the bridge looks for:
     google_calendar_token_<profile>.json         (written by auth)
 
 The tool reads and writes them in $BRIDGE_CREDENTIALS_DIR, else
-$BRIDGE_DATA_DIR, else ~/.fridolin (or the old ~/.whatsapp-claude-bridge
-when only that one exists). A brain reads its token from the bridge's
-credentials dir: sandbox.credentials_dir when it is set, else the data
-dir. To sign in for a brain whose credentials dir is not the default, run
-auth with BRIDGE_DATA_DIR set to that dir (BRIDGE_CREDENTIALS_DIR marks a
-run inside a brain, where auth refuses). With no --profile, the unsuffixed
+$BRIDGE_DATA_DIR, else ~/.fridolin. A brain reads its token from the
+bridge's credentials dir, which the bridge passes in
+BRIDGE_CREDENTIALS_DIR: sandbox.credentials_dir when it is set, else the
+data dir. To sign in for a brain whose credentials dir is not
+~/.fridolin, run auth with BRIDGE_DATA_DIR set to that dir
+(BRIDGE_CREDENTIALS_DIR marks a run inside a brain, where auth refuses). With no --profile, the unsuffixed
 google_calendar_credentials.json / _token.json pair is used.
 
     1. console.cloud.google.com → new project → enable the Google Calendar API
@@ -82,12 +82,22 @@ SCOPES = ["https://www.googleapis.com/auth/calendar"]
 # requirements file next to it rather than a path relative to the repo.
 REQUIREMENTS = Path(__file__).resolve().parent / "requirements.txt"
 
-DATA_DIR = Path(
-    os.environ.get("BRIDGE_CREDENTIALS_DIR")
-    or os.environ.get("BRIDGE_DATA_DIR")
-    or next((p for p in (Path.home() / ".fridolin", Path.home() / ".whatsapp-claude-bridge") if p.is_dir()),
-            Path.home() / ".fridolin")
-)
+
+def credentials_dir() -> Path:
+    """Where the profile's files live, as the module docstring describes.
+
+    Only the bridge knows an install's data dir (it still finds one from
+    before the rename), so the tool does not guess: outside a brain, name
+    any other dir in BRIDGE_DATA_DIR.
+    """
+    return Path(
+        os.environ.get("BRIDGE_CREDENTIALS_DIR")
+        or os.environ.get("BRIDGE_DATA_DIR")
+        or Path.home() / ".fridolin"
+    )
+
+
+DATA_DIR = credentials_dir()
 
 # The calendars the dashboard allowed for this brain (empty: no restriction).
 ALLOWED = [c for c in os.environ.get("BRIDGE_CALENDARS", "").split(",") if c]

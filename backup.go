@@ -14,6 +14,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -39,6 +40,13 @@ import (
 // A brain folder that lost most of its files is not mirrored without force
 // (see checkMassDeletion), and a scheduled run that refuses tells the owner
 // on WhatsApp (see noticeRefusal).
+
+// bridgeBackupID stands for the bridge's own settings wherever backups
+// list brains by id: in a job, in the backup state, and in Drive, where it
+// is the folder name above, so it must not change. The dashboard's Backup
+// page shows it as "Bridge settings". It cannot clash with a brain: brain
+// ids start with a letter or digit.
+const bridgeBackupID = "_bridge"
 
 // BackupConfig controls Google Drive backups.
 type BackupConfig struct {
@@ -183,7 +191,7 @@ func findRclone(p string) (string, error) {
 	found, err := exec.LookPath(p)
 	if err != nil {
 		for _, c := range rcloneFallbacks() {
-			if _, err := os.Stat(c); err == nil {
+			if fileExists(c) {
 				return c, nil
 			}
 		}
@@ -194,7 +202,7 @@ func findRclone(p string) (string, error) {
 
 // rcloneFallbacks are where findRclone looks when rclone is not on PATH.
 func rcloneFallbacks() []string {
-	return []string{"/opt/homebrew/bin/rclone", "/usr/local/bin/rclone", filepath.Join(os.Getenv("HOME"), ".local/bin/rclone")}
+	return []string{"/opt/homebrew/bin/rclone", "/usr/local/bin/rclone", filepath.Join(homeDir(), ".local/bin/rclone")}
 }
 
 // rcloneEnv is the environment for rclone run as scope (see helperScope):
@@ -317,12 +325,21 @@ func (m *BackupManager) allResultsLocked() []*BackupResult {
 	return out
 }
 
-func nextRun(dailyAt string, now time.Time) time.Time {
+// dueToday is when today's scheduled backup is due: daily_at on now's day,
+// in now's time zone. An empty or unparsable daily_at means the default.
+// The status, the scheduler and the switch-on check all ask here, so they
+// agree on when that is.
+func dueToday(dailyAt string, now time.Time) time.Time {
 	t, err := time.ParseInLocation("15:04", dailyAt, now.Location())
 	if err != nil {
 		t, _ = time.ParseInLocation("15:04", defaultBackupDailyAt, now.Location())
 	}
-	next := time.Date(now.Year(), now.Month(), now.Day(), t.Hour(), t.Minute(), 0, 0, now.Location())
+	return time.Date(now.Year(), now.Month(), now.Day(), t.Hour(), t.Minute(), 0, 0, now.Location())
+}
+
+// nextRun is the next time a scheduled backup is due after now.
+func nextRun(dailyAt string, now time.Time) time.Time {
+	next := dueToday(dailyAt, now)
 	if !next.After(now) {
 		next = next.AddDate(0, 0, 1)
 	}
@@ -350,7 +367,7 @@ func (b *Bridge) apiBackupStatus(w http.ResponseWriter, r *http.Request) {
 	for _, br := range b.brainMgr.Brains() {
 		s := br.settings.Load()
 		rows = append(rows, brainRow{ID: br.ID(), Name: s.name, Dir: br.Dir(), Enabled: s.manifest.Backup.Enabled,
-			Exclude: nz(s.manifest.Backup.Exclude), Last: m.state.Brains[br.ID()]})
+			Exclude: nonNil(s.manifest.Backup.Exclude), Last: m.state.Brains[br.ID()]})
 	}
 	var job map[string]any
 	if m.job != nil {
@@ -408,6 +425,8 @@ func rcloneInstallHint() string {
 	}
 }
 
+// fileExists reports whether p names a file or folder that exists (and can
+// be looked at), following symlinks.
 func fileExists(p string) bool { _, err := os.Stat(p); return err == nil }
 
 // ── connecting Google Drive ──────────────────────────────────────────────
@@ -538,11 +557,7 @@ func (a *authURLWatcher) Write(p []byte) (int, error) {
 func (a *authURLWatcher) tail() string {
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	s := strings.TrimSpace(a.buf.String())
-	if len(s) > 400 {
-		s = s[len(s)-400:]
-	}
-	return s
+	return tail(a.buf.String(), 400)
 }
 
 func (b *Bridge) apiBackupDisconnect(w http.ResponseWriter, r *http.Request) {
@@ -674,7 +689,7 @@ func (m *BackupManager) StartRun(ids []string, includeBridge bool, trigger strin
 		if len(ids) == 0 && !s.manifest.Backup.Enabled {
 			continue
 		}
-		if len(ids) > 0 && !contains(ids, br.ID()) {
+		if len(ids) > 0 && !slices.Contains(ids, br.ID()) {
 			continue
 		}
 		targets = append(targets, br)
@@ -690,7 +705,7 @@ func (m *BackupManager) StartRun(ids []string, includeBridge bool, trigger strin
 		job.queue = append(job.queue, br.ID())
 	}
 	if includeBridge {
-		job.queue = append(job.queue, "_bridge")
+		job.queue = append(job.queue, bridgeBackupID)
 	}
 	m.job = job
 	m.mu.Unlock()
@@ -703,7 +718,7 @@ func (m *BackupManager) StartRun(ids []string, includeBridge bool, trigger strin
 			}
 		}
 		if includeBridge {
-			m.runOne(ctx, job, "_bridge", func() *BackupResult { return m.backupBridge(ctx, trigger) })
+			m.runOne(ctx, job, bridgeBackupID, func() *BackupResult { return m.backupBridge(ctx, trigger) })
 		}
 		if ctx.Err() == nil {
 			m.prune(ctx, targets)
@@ -729,7 +744,7 @@ func (m *BackupManager) runOne(ctx context.Context, job *backupJob, id string, f
 	}
 	res := fn()
 	m.mu.Lock()
-	if id == "_bridge" {
+	if id == bridgeBackupID {
 		m.state.Bridge = res
 	} else {
 		m.state.Brains[id] = res
@@ -981,7 +996,7 @@ func (m *BackupManager) backupBridge(ctx context.Context, trigger string) *Backu
 	// No deletion limit: the bridge writes this folder itself, and removing
 	// a brain drops its manifest, a deletion the backup must mirror.
 	cfg := m.cfgs.Get()
-	return m.syncDir(ctx, stage, cfg.Backup.Remote+":"+cfg.Backup.Root+"/_bridge", "", trigger, -1)
+	return m.syncDir(ctx, stage, cfg.Backup.Remote+":"+cfg.Backup.Root+"/"+bridgeBackupID, "", trigger, -1)
 }
 
 // versionLayout names a version folder after the local time of its run.
@@ -1104,7 +1119,7 @@ func (m *BackupManager) prune(ctx context.Context, targets []*Brain) {
 	if days <= 0 {
 		return
 	}
-	ids := []string{"_bridge"}
+	ids := []string{bridgeBackupID}
 	for _, br := range targets {
 		ids = append(ids, br.ID())
 	}
@@ -1236,7 +1251,7 @@ func (b *Bridge) apiBackupRestore(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	cfg := b.cfgs.Get()
-	home, _ := os.UserHomeDir()
+	home := homeDir()
 	target := canonicalDir(expandHome(strings.TrimSpace(req.Target), home))
 	if !filepath.IsAbs(target) || !isWithin(target, canonicalDir(home)) || target == canonicalDir(home) {
 		writeErr(w, http.StatusUnprocessableEntity, "restore into a new folder inside your home folder")
@@ -1313,17 +1328,12 @@ func (m *BackupManager) tick(now time.Time) {
 	if !cfg.Backup.Enabled || !m.connected() {
 		return
 	}
-	due, err := time.ParseInLocation("15:04", cfg.Backup.DailyAt, now.Location())
-	if err != nil {
-		return
-	}
 	today := now.Format("2006-01-02")
-	dueToday := time.Date(now.Year(), now.Month(), now.Day(), due.Hour(), due.Minute(), 0, 0, now.Location())
 	m.mu.Lock()
 	last := m.state.LastScheduledDay
 	busy := m.job != nil
 	m.mu.Unlock()
-	if now.Before(dueToday) || last == today || busy {
+	if now.Before(dueToday(cfg.Backup.DailyAt, now)) || last == today || busy {
 		return
 	}
 	if err := m.StartRun(nil, boolOr(cfg.Backup.IncludeBridgeConfig, true), "scheduled", false); err != nil {
@@ -1343,16 +1353,8 @@ func (m *BackupManager) skipTodayIfPastDue(current string, next *string) {
 	if next != nil {
 		at = *next
 	}
-	if at == "" {
-		at = defaultBackupDailyAt
-	}
 	now := time.Now()
-	due, err := time.ParseInLocation("15:04", at, now.Location())
-	if err != nil {
-		return
-	}
-	dueToday := time.Date(now.Year(), now.Month(), now.Day(), due.Hour(), due.Minute(), 0, 0, now.Location())
-	if now.After(dueToday) {
+	if now.After(dueToday(at, now)) {
 		m.mu.Lock()
 		m.state.LastScheduledDay = now.Format("2006-01-02")
 		m.saveStateLocked()

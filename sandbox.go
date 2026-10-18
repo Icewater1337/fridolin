@@ -159,7 +159,8 @@ var defaultDenySubpaths = []string{
 	".config/gcloud",
 	".config/rclone",
 	// The personal-data denylist that scripts/check-personal-data.sh reads,
-	// under both names the project has had.
+	// under both names the project has had (compat: the old one may still
+	// be on disk, as may the old log folder below).
 	".config/fridolin",
 	".config/whatsapp-claude-bridge",
 	// The bridge's own logs (the launchd agent's, see service.go), which
@@ -250,7 +251,7 @@ var instructionFiles = []string{"CLAUDE.md", "CLAUDE.local.md"}
 func (sp *SandboxProfiler) Profile(brainID string) (string, error) {
 	sp.mu.RLock()
 	defer sp.mu.RUnlock()
-	home := os.Getenv("HOME")
+	home := homeDir()
 	if !filepath.IsAbs(home) {
 		// Every home-relative deny would silently become a relative path.
 		return "", fmt.Errorf("HOME %q is not an absolute path", home)
@@ -1164,8 +1165,8 @@ func resolvePath(p string) string {
 // calendarAllows re-allows a brain's own calendar credential pair in dir:
 // read both, and write the token back on refresh.
 func (b *profileBuilder) calendarAllows(dir, brainID string) {
-	creds := filepath.Join(dir, "google_calendar_credentials_"+brainID+".json")
-	token := filepath.Join(dir, "google_calendar_token_"+brainID+".json")
+	creds := calendarCredentialsFile(dir, brainID)
+	token := calendarTokenFile(dir, brainID)
 	b.allow("file-read*", "literal", creds)
 	b.allow("file-read*", "literal", token)
 	b.allow("file-write*", "literal", token)

@@ -251,7 +251,6 @@ func TestSendRefusesStatusBroadcastAndChannels(t *testing.T) {
 			_, err := tw.SendPoll(ctx, jid, "Lunch?", []string{"Yes", "No"}, 1)
 			return err
 		},
-		"SendReaction": func(jid string) error { return tw.SendReaction(ctx, jid, "3EB0TEST", "👍") },
 	}
 	for _, jid := range []string{"status@broadcast", "status:3@broadcast", "1700000000@broadcast", "broadcast", "120363000000000000@newsletter"} {
 		for name, send := range sends {
@@ -949,5 +948,36 @@ func TestHandleMessageSkipsOversizedAttachment(t *testing.T) {
 				t.Errorf("left behind %q", names)
 			}
 		})
+	}
+}
+
+// A reply's quote names the quoted sender by number, as the identity map
+// and the allowlist write it, and is left out when there is nothing to show.
+func TestExtractQuote(t *testing.T) {
+	ctx := func(participant, text string) *waE2E.ContextInfo {
+		return &waE2E.ContextInfo{Participant: proto.String(participant), QuotedMessage: &waE2E.Message{Conversation: proto.String(text)}}
+	}
+	cases := []struct {
+		name string
+		info *waE2E.ContextInfo
+		want *Quote
+	}{
+		{"phone number", ctx("15559876543@s.whatsapp.net", "Lunch?"), &Quote{From: "15559876543", Text: "Lunch?"}},
+		{"lid", ctx("15559876543@lid", "Lunch?"), &Quote{From: "15559876543", Text: "Lunch?"}},
+		{"no sender", ctx("", "Lunch?"), nil},
+		{"no text", ctx("15559876543@s.whatsapp.net", ""), nil},
+		{"no context", nil, nil},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			got := extractQuote(c.info)
+			if (got == nil) != (c.want == nil) || got != nil && *got != *c.want {
+				t.Errorf("extractQuote = %+v, want %+v", got, c.want)
+			}
+		})
+	}
+	long := strings.Repeat("é", 150)
+	if q := extractQuote(ctx("15559876543@s.whatsapp.net", long)); q == nil || len(q.Text) > 200+len("…") || !utf8.ValidString(q.Text) {
+		t.Errorf("a long quote is %q, want it cut to 200 bytes", q)
 	}
 }

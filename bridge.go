@@ -105,7 +105,7 @@ func NewBridge(cfgs *ConfigStore, opts BridgeOptions) (_ *Bridge, err error) {
 		started:  time.Now(),
 	}
 	if b.logs == nil {
-		b.logs = NewLogRing(2000)
+		b.logs = NewLogRing(logRingLines)
 	}
 
 	mgr, err := NewBrainManager(cfg)
@@ -138,11 +138,7 @@ func NewBridge(cfgs *ConfigStore, opts BridgeOptions) (_ *Bridge, err error) {
 
 	b.brainMgr.SetHooks(BrainHooks{
 		Intermediate: func(jid, text string) {
-			msg := text
-			if !strings.HasPrefix(text, "⏳") {
-				msg = "❓ " + text
-			}
-			if err := b.wa.SendChunked(context.Background(), jid, msg); err != nil {
+			if err := b.wa.SendChunked(context.Background(), jid, text); err != nil {
 				log.Printf("failed to send brain intermediate message to %s: %v", jid, err)
 			}
 		},
@@ -281,7 +277,7 @@ func (b *Bridge) handleInbound(ctx context.Context, m Inbound) {
 	// A command must also be addressed to the bridge. In a group, an untagged
 	// "!stop" is someone talking to the others: it must not stop anything,
 	// and the bridge must not answer it.
-	if m.Source != "ingest" && m.Brain == "" && !m.Silent && b.handleCommand(ctx, m, cfg) {
+	if m.Source != sourceIngest && m.Brain == "" && !m.Silent && b.handleCommand(ctx, m, cfg) {
 		return
 	}
 	if m.Text == "" && len(m.Media) == 0 && m.Quoted == nil {
@@ -303,7 +299,7 @@ func (b *Bridge) handleInbound(ctx context.Context, m Inbound) {
 	}
 	if br == nil {
 		log.Printf("No brain configured for %s — add one in the dashboard", m.JID)
-		if !m.Silent && m.Source != "ingest" {
+		if !m.Silent && m.Source != sourceIngest {
 			_ = b.wa.SendMessage(ctx, m.JID, "🧠 No brain is set up for this chat yet. Open the bridge dashboard and add one.")
 		}
 		return
@@ -421,7 +417,7 @@ func (b *Bridge) stopChat(m Inbound) (stopped bool, dropped int) {
 // that answers there (a reply_chat, the owner's DM) names the number.
 func chatJIDs(m Inbound) []string {
 	jids := []string{m.JID}
-	if pn := m.Sender + "@s.whatsapp.net"; !m.IsGroup() && m.Sender != "" && pn != m.JID {
+	if pn := userJID(m.Sender); !m.IsGroup() && m.Sender != "" && pn != m.JID {
 		jids = append(jids, pn)
 	}
 	return jids
@@ -515,7 +511,7 @@ func (b *Bridge) runStartupChecks(ctx context.Context) {
 	cfg := b.cfgs.Get()
 	var missing []string
 	for _, f := range cfg.StartupChecks.RequiredFiles {
-		if _, err := os.Stat(f); err != nil {
+		if !fileExists(f) {
 			missing = append(missing, f)
 		}
 	}
@@ -536,7 +532,7 @@ func (b *Bridge) runStartupChecks(ctx context.Context) {
 	}
 	jid := cfg.StartupChecks.NotifyJID
 	if jid == "" && len(cfg.AllowedNumbers) > 0 {
-		jid = cfg.AllowedNumbers[0] + "@s.whatsapp.net"
+		jid = userJID(cfg.AllowedNumbers[0])
 	}
 	if jid == "" {
 		return

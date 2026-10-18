@@ -31,7 +31,7 @@ import (
 
 const (
 	serviceLabel       = "ai.fridolin.bridge"
-	legacyServiceLabel = "com.whatsapp-claude-bridge" // the launchd label before the rename
+	legacyServiceLabel = "com.whatsapp-claude-bridge" // compat: the launchd label before the rename, see retireLegacyAgent
 	systemdUnitName    = "fridolin.service"
 )
 
@@ -90,7 +90,7 @@ type serviceHost struct {
 }
 
 func newServiceHost() *serviceHost {
-	home, _ := os.UserHomeDir()
+	home := homeDir()
 	client := &http.Client{Timeout: 2 * time.Second}
 	return &serviceHost{
 		goos: runtime.GOOS,

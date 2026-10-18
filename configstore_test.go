@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -48,7 +49,7 @@ func TestConfigStoreUpdateWritesAtomicallyAndKeepsTilde(t *testing.T) {
 	}
 
 	// A stale etag is a conflict and changes nothing.
-	if _, err := cs.Update(etag, func(c *Config) error { c.Model = "x"; return nil }); !errors.Is(err, ErrConfigConflict) {
+	if _, err := cs.Update(etag, func(c *Config) error { c.BrainModel = "x"; return nil }); !errors.Is(err, ErrConfigConflict) {
 		t.Errorf("stale etag: err = %v, want conflict", err)
 	}
 	// An invalid edit is rejected and changes nothing.
@@ -269,38 +270,21 @@ func TestConfigSavesKeepBrainModeOn(t *testing.T) {
 // Inline brains were removed with `fridolin migrate`, which moved them into
 // their folders. A config that still lists some is refused, naming a build
 // that can still move them: running without them would leave their chats
-// to the default brain. An empty or null list is ignored, and the key is
-// not written back.
+// to the default brain. An empty or null list loads, see
+// TestRetiredConfigKeys.
 func TestConfigRefusesInlineBrains(t *testing.T) {
 	cases := []struct {
 		name, config string
-		want         string // part of the error, "" when the config loads
+		want         string // part of the error
 	}{
-		{"no brains key", `{}`, ""},
-		{"empty list", `{"brains": []}`, ""},
-		{"null", `{"brains": null}`, ""},
 		{"one inline brain", `{"brains": [{"name": "a", "work_dir": "~/a", "handles_dms": true}]}`, `lists brains inline under "brains", which this version no longer runs`},
 		{"not a list", `{"brains": {"name": "a"}}`, "brains: json: cannot unmarshal"},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			t.Setenv("HOME", t.TempDir())
-			path := writeConfig(t, c.config)
-			logs := captureLog(t)
-			cs, err := OpenConfigStore(path)
+			_, err := OpenConfigStore(writeConfig(t, c.config))
 			switch {
-			case c.want == "" && err != nil:
-				t.Fatalf("load: %v, want it to load", err)
-			case c.want == "":
-				if logContains(logs, "brains") {
-					t.Errorf("log %q mentions the brains key", logs())
-				}
-				if _, err := cs.Update("", func(c *Config) error { c.LogLevel = "debug"; return nil }); err != nil {
-					t.Fatal(err)
-				}
-				if raw, ok := readRawConfig(t, path)["brains"]; ok {
-					t.Errorf(`a save wrote "brains": %s`, raw)
-				}
 			case err == nil:
 				t.Fatalf("loaded, want an error containing %q", c.want)
 			case !strings.Contains(err.Error(), c.want):
@@ -320,17 +304,133 @@ func TestConfigRefusesInlineBrains(t *testing.T) {
 	}
 }
 
-// work_dir was the folder classic mode ran in; brains run in their own. So
-// the key sets nothing any more, and a config that still has it says so in
-// the log.
-func TestClassicWorkDirIsNoLongerASetting(t *testing.T) {
+// Keys older versions wrote and this one has no setting for still load.
+// Each is logged once, as retired rather than unknown, and the next save
+// leaves it out. model is the one with a value to keep: brains fell back
+// to it while brain_model was empty, so it becomes brain_model then, and
+// they run with the same model as before.
+func TestRetiredConfigKeys(t *testing.T) {
+	cases := []struct {
+		name, config string
+		brainModel   string   // the effective brain_model
+		logged       []string // the retired keys the log names, in order
+		note         string   // part of the log line, if one is logged
+	}{
+		{"none", `{"brain_model": "opus"}`, "opus", nil, ""},
+		{"model without brain_model", `{"model": "sonnet"}`, "sonnet", []string{"model"}, `brain_model is now "sonnet"`},
+		{"model with an empty brain_model", `{"model": "sonnet", "brain_model": ""}`, "sonnet", []string{"model"}, `brain_model is now "sonnet"`},
+		{"model and brain_model", `{"model": "sonnet", "brain_model": "opus"}`, "opus", []string{"model"}, `brains use brain_model "opus", so "sonnet" went unused`},
+		{"empty model", `{"model": ""}`, "", []string{"model"}, "it was empty"},
+		{"work_dir", `{"work_dir": "~/classic"}`, "", []string{"work_dir"}, "classic mode"},
+		{"empty brains", `{"brains": []}`, "", []string{"brains"}, "brain_dirs"},
+		{"null brains", `{"brains": null}`, "", []string{"brains"}, "brain_dirs"},
+		{"all of them", `{"brains": [], "work_dir": "~", "model": "haiku"}`, "haiku", []string{"model", "work_dir", "brains"}, ""},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			t.Setenv("HOME", t.TempDir())
+			path := writeConfig(t, c.config)
+			logs := captureLog(t)
+			cs, err := OpenConfigStore(path)
+			if err != nil {
+				t.Fatalf("load: %v, want it to load", err)
+			}
+			if got := cs.Get().BrainModel; got != c.brainModel {
+				t.Errorf("brain_model = %q, want %q", got, c.brainModel)
+			}
+			var logged []string
+			for _, l := range logs() {
+				if strings.Contains(l, "ignoring unknown settings") {
+					t.Errorf("logged as unknown: %q", l)
+				}
+				if _, rest, ok := strings.Cut(l, "config "+path+`: "`); ok {
+					key, _, _ := strings.Cut(rest, `"`)
+					logged = append(logged, key)
+					if !strings.Contains(l, "is retired and is dropped the next time the dashboard saves") {
+						t.Errorf("log line %q does not say the key is dropped on the next save", l)
+					}
+					if c.note != "" && !strings.Contains(l, c.note) {
+						t.Errorf("log line %q does not say %q", l, c.note)
+					}
+				}
+			}
+			if !slices.Equal(logged, c.logged) {
+				t.Errorf("logged retired keys %q, want %q (log %q)", logged, c.logged, logs())
+			}
+
+			if _, err := cs.Update("", func(c *Config) error { c.LogLevel = "debug"; return nil }); err != nil {
+				t.Fatal(err)
+			}
+			raw := readRawConfig(t, path)
+			for _, rk := range retiredKeys {
+				if v, ok := raw[rk.name]; ok {
+					t.Errorf("a save wrote %q: %s", rk.name, v)
+				}
+			}
+			var saved string
+			_ = json.Unmarshal(raw["brain_model"], &saved)
+			if saved != c.brainModel {
+				t.Errorf("saved brain_model %q, want %q", saved, c.brainModel)
+			}
+			if got := cs.Get().BrainModel; got != c.brainModel {
+				t.Errorf("brain_model after a save = %q, want %q", got, c.brainModel)
+			}
+		})
+	}
+}
+
+// The live config has model and no brain_model, and its brains name no
+// model of their own: they must keep running with that model.
+func TestBrainsKeepTheRetiredModel(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
-	logs := captureLog(t)
-	if _, err := OpenConfigStore(writeConfig(t, `{"work_dir": "~/classic"}`)); err != nil {
+	cfg, err := LoadConfig(writeConfig(t, `{"model": "sonnet"}`))
+	if err != nil {
 		t.Fatal(err)
 	}
-	if !logContains(logs, "ignoring unknown settings [work_dir]") {
-		t.Errorf("log %q does not say work_dir is ignored", logs())
+	if got := settingsFor(cfg, BrainSpec{Manifest: BrainManifest{ID: "a"}}).model; got != "sonnet" {
+		t.Errorf("a brain without a model of its own runs %q, want sonnet", got)
+	}
+	if got := settingsFor(cfg, BrainSpec{Manifest: BrainManifest{ID: "a", Model: "opus"}}).model; got != "opus" {
+		t.Errorf("a brain with model opus runs %q, want opus", got)
+	}
+}
+
+// The data dir from before the rename is still found when ~/.fridolin
+// does not exist, and the log says so, until data_dir names it.
+func TestLegacyDataDir(t *testing.T) {
+	cases := []struct {
+		name        string
+		dirs        []string // made in the home folder
+		config      string
+		want        string // the data dir, relative to home
+		wantWarning bool
+	}{
+		{"fresh install", nil, `{}`, ".fridolin", false},
+		{"only the old one", []string{".whatsapp-claude-bridge"}, `{}`, ".whatsapp-claude-bridge", true},
+		{"both", []string{".fridolin", ".whatsapp-claude-bridge"}, `{}`, ".fridolin", false},
+		{"named in data_dir", []string{".whatsapp-claude-bridge"}, `{"data_dir": "~/.whatsapp-claude-bridge"}`, ".whatsapp-claude-bridge", false},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			home := t.TempDir()
+			t.Setenv("HOME", home)
+			for _, d := range c.dirs {
+				if err := os.Mkdir(filepath.Join(home, d), 0o700); err != nil {
+					t.Fatal(err)
+				}
+			}
+			logs := captureLog(t)
+			cs, err := OpenConfigStore(writeConfig(t, c.config))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got, want := cs.Get().DataDir, filepath.Join(home, c.want); got != want {
+				t.Errorf("data dir %s, want %s", got, want)
+			}
+			if got := logContains(logs, "has the name from before the rename"); got != c.wantWarning {
+				t.Errorf("warned %v, want %v (log %q)", got, c.wantWarning, logs())
+			}
+		})
 	}
 }
 
@@ -423,7 +523,7 @@ func TestDotEnvIsNotRead(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Setenv("HOME", t.TempDir())
 			clearEnv(t, "MODEL", "FRIDOLIN_TEST_DOTENV_ONLY")
-			path := writeConfig(t, `{"model":"from-file"}`)
+			path := writeConfig(t, `{"brain_model":"from-file"}`)
 			dotenv := filepath.Join(filepath.Dir(path), ".env")
 			var err error
 			switch {
@@ -451,15 +551,15 @@ func TestDotEnvIsNotRead(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if got := cs.Get().Model; got != "from-file" {
-				t.Errorf("Model = %q, want the config's from-file", got)
+			if got := cs.Get().BrainModel; got != "from-file" {
+				t.Errorf("BrainModel = %q, want the config's from-file", got)
 			}
 			// An edit re-derives the effective config from the file alone.
 			if _, err := cs.Update("", func(c *Config) error { c.LogLevel = "debug"; return nil }); err != nil {
 				t.Fatal(err)
 			}
-			if got := cs.Get().Model; got != "from-file" {
-				t.Errorf("Model after an edit = %q, want the config's from-file", got)
+			if got := cs.Get().BrainModel; got != "from-file" {
+				t.Errorf("BrainModel after an edit = %q, want the config's from-file", got)
 			}
 			if v, ok := os.LookupEnv("FRIDOLIN_TEST_DOTENV_ONLY"); ok {
 				t.Errorf("a .env value reached the process environment: %q", v)

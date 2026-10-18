@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -25,8 +26,8 @@ type fakePlaudFixture struct {
 
 func newFakePlaud(t *testing.T) *fakePlaudFixture {
 	dir := t.TempDir()
-	t.Setenv("WCB_FAKE_PLAUD", "1")
-	t.Setenv("WCB_FAKE_PLAUD_DIR", dir)
+	t.Setenv("FRIDOLIN_FAKE_PLAUD", "1")
+	t.Setenv("FRIDOLIN_FAKE_PLAUD_DIR", dir)
 	// Every CLI call is a run of this test binary. Under -race each one
 	// would wait a second on exit for late race reports, which adds up to
 	// minutes over the Plaud tests.
@@ -193,7 +194,7 @@ func TestPlaudWithoutAPrivateChatWaits(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "no private chat") {
 		t.Fatalf("poll error = %v, want the missing private chat", err)
 	}
-	if st, _ := tb.plaud.loadState(); st.Pending[plaudNew] == 0 || contains(st.Seen, plaudNew) {
+	if st, _ := tb.plaud.loadState(); st.Pending[plaudNew] == 0 || slices.Contains(st.Seen, plaudNew) {
 		t.Errorf("state = %+v, want the recording still pending", st)
 	}
 	if files, _ := filepath.Glob(filepath.Join(tb.cfgs.Get().MediaDir, "plaud", "*")); len(files) != 0 {
@@ -345,7 +346,7 @@ func TestPlaudFailingRecordingIsGivenUpInTime(t *testing.T) {
 				t.Errorf("log = %q, want it to say %q", got, c.logs)
 			}
 			st, _ := tb.plaud.loadState()
-			if _, pending := st.Pending[plaudNew]; pending != c.pending || contains(st.Seen, plaudNew) == c.pending {
+			if _, pending := st.Pending[plaudNew]; pending != c.pending || slices.Contains(st.Seen, plaudNew) == c.pending {
 				t.Errorf("state = %+v, want pending=%v", st, c.pending)
 			}
 		})
@@ -469,7 +470,7 @@ func TestPlaudFirstSyncThenForwardsNewRecordings(t *testing.T) {
 		t.Fatal(err)
 	}
 	st, _ = tb.plaud.loadState()
-	if len(st.Pending) != 0 || !contains(st.Seen, plaudNew) {
+	if len(st.Pending) != 0 || !slices.Contains(st.Seen, plaudNew) {
 		t.Fatalf("after transcript: %+v", st)
 	}
 	files, _ := filepath.Glob(filepath.Join(tb.cfgs.Get().MediaDir, "plaud", "* - Team sync - "+plaudNew+".txt"))
@@ -662,7 +663,7 @@ func TestPlaudStateBelongsToTheAccount(t *testing.T) {
 			if c.forward {
 				waitFor(t, 10*time.Second, "brain reply", func() bool { return len(tb.dev.Outbox()) > 0 })
 			}
-			if st, _ := tb.plaud.loadState(); st.Account != c.account || !contains(st.Seen, plaudNew) {
+			if st, _ := tb.plaud.loadState(); st.Account != c.account || !slices.Contains(st.Seen, plaudNew) {
 				t.Errorf("state = %+v, want account %s with the recording seen", st, c.account)
 			}
 			if got := strings.Join(logs(), "\n"); strings.Contains(got, "starting over") != (c.logs != "") || !strings.Contains(got, c.logs) {
@@ -705,7 +706,7 @@ func TestPlaudChecksTheAccountWhenTheLoginChanges(t *testing.T) {
 	if tb.plaudForwarded() {
 		t.Error("the other account's existing recording was sent")
 	}
-	if st, _ := tb.plaud.loadState(); st.Account != "u_2" || !contains(st.Seen, plaudNew) {
+	if st, _ := tb.plaud.loadState(); st.Account != "u_2" || !slices.Contains(st.Seen, plaudNew) {
 		t.Errorf("state = %+v, want it seeded for u_2", st)
 	}
 }
@@ -775,7 +776,7 @@ func TestPlaudLoginChangingDuringAPollSendsNothing(t *testing.T) {
 				t.Error("the other account's existing recordings were sent")
 			}
 			st, _ := tb.plaud.loadState()
-			if st.Account != "u_2" || !contains(st.Seen, plaudNew) || !contains(st.Seen, plaudOld2) || len(st.Pending) != 0 {
+			if st.Account != "u_2" || !slices.Contains(st.Seen, plaudNew) || !slices.Contains(st.Seen, plaudOld2) || len(st.Pending) != 0 {
 				t.Errorf("state = %+v, want it seeded for u_2", st)
 			}
 		})

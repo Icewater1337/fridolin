@@ -17,7 +17,9 @@ total_voters counts people with a current vote; someone who retracted theirs
 is left out.
 
 The database location follows BRIDGE_DB_PATH, then BRIDGE_DATA_DIR/bridge.db,
-then ~/.fridolin/bridge.db.
+then ~/.fridolin/bridge.db. The bridge sets both variables for brains, so
+inside one the tool opens the DB the bridge runs with, wherever data_dir and
+db_path put it.
 """
 
 from __future__ import annotations
@@ -35,10 +37,10 @@ from typing import Any
 def db_path() -> Path:
     if p := os.environ.get("BRIDGE_DB_PATH"):
         return Path(p)
-    default = next((p for p in (Path.home() / ".fridolin", Path.home() / ".whatsapp-claude-bridge") if p.is_dir()),
-                   Path.home() / ".fridolin")
-    data_dir = Path(os.environ.get("BRIDGE_DATA_DIR", default))
-    return data_dir / "bridge.db"
+    # Only the bridge knows an install's data dir (it still finds one from
+    # before the rename): outside a brain, name it in BRIDGE_DATA_DIR.
+    data_dir = os.environ.get("BRIDGE_DATA_DIR") or Path.home() / ".fridolin"
+    return Path(data_dir) / "bridge.db"
 
 
 def open_db() -> sqlite3.Connection:

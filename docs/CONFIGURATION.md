@@ -132,15 +132,15 @@ output. The bridge logs the CLI's path and version when it starts, and the
 log, `fridolin check` and the dashboard warn when it is older or missing. The
 CLI normally updates itself; `claude update` does it by hand.
 
-### `model` and `brain_model`
+### `brain_model`
 
-Model to use — `"sonnet"`, `"opus"`, `"haiku"`, or a full model ID. Empty uses
-the CLI default. `brain_model` applies to brains, and an individual brain can
-override it with its own `model` field. `model` is left from classic mode:
-brains use it while `brain_model` is empty. For a brain, empty means the
-`model` in its folder's `.claude/settings.json`, or Claude Code's own default,
-never the one in your `~/.claude/settings.json` (see
-[`inherit_claude_user_config`](#inherit_claude_user_config)).
+Model brains use — `"sonnet"`, `"opus"`, `"haiku"`, or a full model ID. An
+individual brain can override it with its own `model` field. Empty means the
+`model` in the brain folder's `.claude/settings.json`, or Claude Code's own
+default, never the one in your `~/.claude/settings.json` (see
+[`inherit_claude_user_config`](#inherit_claude_user_config)). The top-level
+`model` key older versions had is [retired](#retired-keys): while
+`brain_model` is empty, its value moves there.
 
 ### `brain_effort`
 
@@ -334,9 +334,24 @@ and reported on the dashboard; the others keep running.
 ### Inline brains
 
 Older configs listed brains inline, under `"brains"`. The bridge refuses to
-start while that list has a brain in it; an empty list is ignored. To move
-them into their folders, see
+start while that list has a brain in it; an empty list is a
+[retired key](#retired-keys). To move them into their folders, see
 [Configs with inline brains](BRAINS.md#configs-with-inline-brains).
+
+### Retired keys
+
+Older versions wrote a few top-level keys this one has no setting for. A
+config that still has them loads; the log says once per start what became
+of each, and the next dashboard save leaves them out:
+
+| Key | What became of it |
+|---|---|
+| `model` | The model brains fell back to while `brain_model` was empty. Its value becomes `brain_model` then, so brains keep their model; otherwise it is unused. |
+| `work_dir` | The folder classic mode ran in. Brains run in their own folders. |
+| `brains` | Inline brains, when the list is empty or `null`. One that lists brains is refused, see [Inline brains](#inline-brains). |
+
+Any other key the bridge does not know is logged as an unknown setting and
+dropped the same way.
 
 ### `brain_mode`
 
@@ -592,8 +607,10 @@ writes deny-by-default.
 
 Database (including the WhatsApp session), downloaded media, the dashboard
 token, backup state, the bridge's rclone config and calendar credentials.
-Default `~/.fridolin`. `db_path` and `media_dir` override
-individually. Brains cannot read it, except the `media/` inbox and their own
+Default `~/.fridolin`; an install from before the project was renamed keeps
+`~/.whatsapp-claude-bridge` while `~/.fridolin` does not exist, and says so
+in the log at every start: set `data_dir` to it to keep it for good.
+`db_path` and `media_dir` override individually. Brains cannot read it, except the `media/` inbox and their own
 calendar credentials; a `db_path` elsewhere is denied to them too.
 
 The lock that keeps a second bridge off the same WhatsApp session is
@@ -635,8 +652,9 @@ requests sent by web pages.
 
 ### `ingest.enabled`
 
-Enables `POST /ingest {"brain","paths","text","sender"}` (`scope` is accepted
-as an alias of `brain`). Paths must be files inside the media directory. The
+Enables `POST /ingest {"brain","paths","text","sender"}`. A request that
+still sends `scope`, the old name of `brain`, is refused with 400 and told
+to use `brain`. Paths must be files inside the media directory. The
 named brain receives them like WhatsApp attachments and answers in its
 `reply_chat`, even when that chat belongs to another brain (your DM, say).
 Off by default.
@@ -760,7 +778,10 @@ sender is told to send the file again.
 ### `viewer`
 
 Opens a tmux session per brain, tailing its activity log, in a Terminal window
-(macOS). Off by default. Handy while tuning a prompt; noisy otherwise. Requires
+(macOS), on the brain's first run. Off by default. Handy while tuning a
+prompt; noisy otherwise. Turning it off, or removing the brain, ends the
+session and closes the window; one left open by a restart is replaced on
+the brain's next run. Requires
 tmux — without it the bridge logs a warning and carries on. Nor does a viewer
 start for a brain whose `claude-stream.log` the bridge refuses, a symlink say
 (see [BRAINS.md](BRAINS.md#files-the-bridge-reads-and-writes)). The bridge
@@ -817,11 +838,17 @@ variables of the bridge's environment:
 | `DO_NOT_TRACK`, `TMUX_TMPDIR` | the telemetry opt-out many tools honour; where tmux keeps its socket |
 | `CLAUDE_CODE_*`, `ANTHROPIC_*`, `CLAUDE_CONFIG_DIR` | the Claude CLI's login (`CLAUDE_CODE_OAUTH_TOKEN`, `ANTHROPIC_API_KEY`), provider and gateway (`ANTHROPIC_BASE_URL`) |
 | `DISABLE_AUTOUPDATER`, `DISABLE_TELEMETRY`, `DISABLE_ERROR_REPORTING` | the CLI's update check and reports |
-| `BRIDGE_DATA_DIR`, `BRIDGE_DB_PATH`, `CALENDAR_TZ`, `TRANSCRIBE_MODEL`, `TRANSCRIBE_LANGUAGE` | the tools in [tools/](../tools/): the data directory and database if you moved them, the calendar's timezone, the transcription model and language |
+| `CALENDAR_TZ`, `TRANSCRIBE_MODEL`, `TRANSCRIBE_LANGUAGE` | the tools in [tools/](../tools/): the calendar's timezone, the transcription model and language |
 
-On top, the bridge sets `BRIDGE_BRAIN_ID`, `BRIDGE_CREDENTIALS_DIR`,
-`BRIDGE_CALENDARS` and `BRIDGE_CALENDAR_DEFAULT` for the calendar tool, and
-`DISABLE_AUTOUPDATER=1` in the sandbox. The list lives in one place,
+On top, the bridge sets `BRIDGE_DATA_DIR` and `BRIDGE_DB_PATH`, the data
+directory and database it runs with (absolute, wherever `data_dir` and
+`db_path` put them), which the tools read; `FRIDOLIN_TOOLS_DIR`, the
+folder with the tools (see [BRAINS.md](BRAINS.md)); `BRIDGE_BRAIN_ID`,
+`BRIDGE_CREDENTIALS_DIR`, `BRIDGE_CALENDARS` and `BRIDGE_CALENDAR_DEFAULT`
+for the calendar tool; and `DISABLE_AUTOUPDATER=1` in the sandbox. What
+the bridge's own environment has under these names does not reach brains.
+Run by hand, outside a brain, the tools default to `~/.fridolin`; set
+`BRIDGE_DATA_DIR` for another data directory. The list lives in one place,
 `childEnvAllowlist` in `childenv.go`.
 
 Brains are not handed anything else, for example `GROQ_API_KEY`,

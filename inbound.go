@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"strings"
 	"time"
+
+	"go.mau.fi/whatsmeow/types"
 )
 
 // Inbound is one message on its way to a brain: from WhatsApp, from the
@@ -27,9 +29,19 @@ type Inbound struct {
 	// Silent means untagged group chatter: the brain reads it to keep up with
 	// the conversation but sends nothing back.
 	Silent bool
-	Source string // "whatsapp", "ingest" or "dev"
+	Source string // sourceWhatsApp, sourceIngest or sourceDev
 	At     time.Time
 }
+
+// Where a message came from, Inbound.Source.
+const (
+	sourceWhatsApp = "whatsapp"
+	// sourceIngest is files handed in outside WhatsApp, through /ingest or
+	// the Plaud integration: never a command, and never interrupting.
+	sourceIngest = "ingest"
+	// sourceDev is the dashboard's dev page (--no-whatsapp).
+	sourceDev = "dev"
+)
 
 // Quote is the message a reply quotes.
 type Quote struct {
@@ -38,7 +50,14 @@ type Quote struct {
 }
 
 // IsGroup reports whether the message came from a group chat.
-func (m Inbound) IsGroup() bool { return strings.HasSuffix(m.JID, "@g.us") }
+func (m Inbound) IsGroup() bool { return isGroupJID(m.JID) }
+
+// isGroupJID reports whether jid is a group chat's, …@g.us.
+func isGroupJID(jid string) bool { return strings.HasSuffix(jid, "@"+types.GroupServer) }
+
+// userJID is the JID of the direct chat with a phone number, given as
+// allowed_numbers has it (country code, no +).
+func userJID(number string) string { return number + "@" + types.DefaultUserServer }
 
 // textWithQuote is the text the model and the history see: a line naming the
 // quoted message, then the message itself. The line's format is what the

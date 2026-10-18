@@ -2,8 +2,8 @@ package main
 
 import (
 	"embed"
+	"fmt"
 	"io/fs"
-	"sort"
 )
 
 // The dashboard and the brain templates are compiled into the binary, so a
@@ -17,28 +17,39 @@ var webFS embed.FS
 //go:embed examples/brain-prompt.example.md examples/skills/*.md
 var exampleFS embed.FS
 
-func examplePromptTemplate() string {
-	data, err := exampleFS.ReadFile("examples/brain-prompt.example.md")
-	if err != nil {
-		return "# {{BRAIN_NAME}} assistant\n"
-	}
-	return string(data)
-}
+// The templates are read once, at startup. go:embed fails the build when a
+// pattern above matches nothing, so a read can only fail when a name here
+// drifted from its pattern: a programming error, which stops the bridge
+// rather than scaffold every new brain with less than it should.
+var (
+	examplePrompt   = string(mustReadExample("examples/brain-prompt.example.md"))
+	exampleSkillSet = readExampleSkills()
+)
+
+func examplePromptTemplate() string { return examplePrompt }
 
 type exampleSkill struct{ name, content string }
 
-func exampleSkills() []exampleSkill {
+// exampleSkills are the starter skills, in file name order.
+func exampleSkills() []exampleSkill { return exampleSkillSet }
+
+func readExampleSkills() []exampleSkill {
 	entries, err := fs.ReadDir(exampleFS, "examples/skills")
 	if err != nil {
-		return nil
+		panic(fmt.Errorf("embedded skills: %w", err))
 	}
-	var out []exampleSkill
+	// ReadDir sorts by name.
+	out := make([]exampleSkill, 0, len(entries))
 	for _, e := range entries {
-		data, err := exampleFS.ReadFile("examples/skills/" + e.Name())
-		if err == nil {
-			out = append(out, exampleSkill{e.Name(), string(data)})
-		}
+		out = append(out, exampleSkill{e.Name(), string(mustReadExample("examples/skills/" + e.Name()))})
 	}
-	sort.Slice(out, func(i, j int) bool { return out[i].name < out[j].name })
 	return out
+}
+
+func mustReadExample(name string) []byte {
+	data, err := exampleFS.ReadFile(name)
+	if err != nil {
+		panic(fmt.Errorf("embedded template %s: %w", name, err))
+	}
+	return data
 }

@@ -11,6 +11,7 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -18,7 +19,6 @@ import (
 
 	"github.com/mdp/qrterminal/v3"
 	"go.mau.fi/whatsmeow"
-	"go.mau.fi/whatsmeow/proto/waCommon"
 	"go.mau.fi/whatsmeow/proto/waE2E"
 	"go.mau.fi/whatsmeow/types"
 	"go.mau.fi/whatsmeow/types/events"
@@ -283,25 +283,6 @@ func (wa *WhatsAppClient) SendPoll(ctx context.Context, jid string, question str
 	return string(resp.ID), nil
 }
 
-// SendReaction sends an emoji reaction to a message.
-func (wa *WhatsAppClient) SendReaction(ctx context.Context, jid string, msgID types.MessageID, emoji string) error {
-	recipient, err := parseRecipient(jid)
-	if err != nil {
-		return err
-	}
-	_, err = wa.client.SendMessage(ctx, recipient, &waE2E.Message{
-		ReactionMessage: &waE2E.ReactionMessage{
-			Key: &waCommon.MessageKey{
-				RemoteJID: proto.String(jid),
-				ID:        proto.String(string(msgID)),
-			},
-			Text:              proto.String(emoji),
-			SenderTimestampMS: proto.Int64(time.Now().UnixMilli()),
-		},
-	})
-	return err
-}
-
 // JoinedGroups lists the groups the bridge account is in.
 func (wa *WhatsAppClient) JoinedGroups(ctx context.Context) ([]GroupInfo, error) {
 	if !wa.client.IsLoggedIn() {
@@ -425,7 +406,7 @@ func (wa *WhatsAppClient) handleMessage(msg *events.Message) {
 		msg = &dm
 	}
 
-	if msg.Info.Chat.Server == "g.us" {
+	if msg.Info.Chat.Server == types.GroupServer {
 		// Group messages sent from the operator's own phone are still worth
 		// processing (IsFromMe is true for any device on the account), so the
 		// group path does its own gating.
@@ -443,7 +424,7 @@ func (wa *WhatsAppClient) handleMessage(msg *events.Message) {
 	senderNumber := senderJID.User
 	// Newer WhatsApp clients address senders by LID rather than phone number;
 	// resolve it so the allowlist can be written in plain phone numbers.
-	if senderJID.Server == "lid" {
+	if senderJID.Server == types.HiddenUserServer {
 		if pnJID, err := wa.client.Store.LIDs.GetPNForLID(context.Background(), senderJID); err == nil {
 			senderNumber = pnJID.User
 		} else {
@@ -486,7 +467,7 @@ func (wa *WhatsAppClient) handleDMMessage(msg *events.Message, senderNumber stri
 
 	go wa.handler(context.Background(), Inbound{
 		JID: chatJID, Sender: senderNumber, Text: text, Media: mediaList(mediaPath),
-		Quoted: quoted, Source: "whatsapp", At: msg.Info.Timestamp,
+		Quoted: quoted, Source: sourceWhatsApp, At: msg.Info.Timestamp,
 	})
 }
 
@@ -596,7 +577,7 @@ func (wa *WhatsAppClient) handleGroupMessage(msg *events.Message) {
 	log.Printf("Group message from %s (%q) by %s: processing (silent=%v)", groupJID, groupName, senderNumber, silent)
 	go wa.handler(context.Background(), Inbound{
 		JID: groupJID, Sender: senderNumber, Text: text, Media: mediaList(mediaPath),
-		Quoted: quoted, Silent: silent, Source: "whatsapp", At: msg.Info.Timestamp,
+		Quoted: quoted, Silent: silent, Source: sourceWhatsApp, At: msg.Info.Timestamp,
 	})
 }
 
@@ -921,23 +902,13 @@ func numberAllowed(cfg *Config, number string) bool {
 	if len(cfg.AllowedNumbers) == 0 {
 		return cfg.AllowsAnyDM()
 	}
-	for _, n := range cfg.AllowedNumbers {
-		if n == number {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(cfg.AllowedNumbers, number)
 }
 
 // isAllowedGroup reports whether the group JID is in allowed_groups.
 // Unlike DMs, groups are deny-by-default: an empty list means no groups.
 func (wa *WhatsAppClient) isAllowedGroup(jid string) bool {
-	for _, g := range wa.cfg().AllowedGroups {
-		if g == jid {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(wa.cfg().AllowedGroups, jid)
 }
 
 // isBotMentioned reports whether the bridge's own JID appears in the message's
@@ -1059,12 +1030,9 @@ func extractQuote(contextInfo *waE2E.ContextInfo) *Quote {
 		return nil
 	}
 
-	senderJID := contextInfo.GetParticipant()
+	senderJID := normalizeJID(contextInfo.GetParticipant())
 	if senderJID == "" {
 		return nil
-	}
-	if idx := strings.Index(senderJID, "@"); idx > 0 {
-		senderJID = senderJID[:idx]
 	}
 
 	const maxQuoteLen = 200

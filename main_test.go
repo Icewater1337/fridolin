@@ -1,7 +1,9 @@
 package main
 
 import (
+	"bytes"
 	"errors"
+	"flag"
 	"io"
 	"io/fs"
 	"log"
@@ -337,7 +339,7 @@ func TestShellBridgeVariablesDoNotReachTests(t *testing.T) {
 	// Runs the test binary again with every variable the bridge reads set,
 	// the way a developer's shell might export them for a real bridge, and
 	// checks from inside that TestMain cleared them before any test ran.
-	if os.Getenv("WCB_CHECK_BRIDGE_VARIABLES_CLEARED") == "1" {
+	if os.Getenv("FRIDOLIN_TEST_CHECK_BRIDGE_VARIABLES_CLEARED") == "1" {
 		for _, k := range bridgeVariables() {
 			if _, ok := os.LookupEnv(k); ok {
 				t.Errorf("%s from the shell reached the tests", k)
@@ -346,7 +348,7 @@ func TestShellBridgeVariablesDoNotReachTests(t *testing.T) {
 		return
 	}
 	cmd := exec.Command(os.Args[0], "-test.run=^TestShellBridgeVariablesDoNotReachTests$", "-test.count=1", "-test.v")
-	cmd.Env = append(os.Environ(), "WCB_CHECK_BRIDGE_VARIABLES_CLEARED=1")
+	cmd.Env = append(os.Environ(), "FRIDOLIN_TEST_CHECK_BRIDGE_VARIABLES_CLEARED=1")
 	notTheTests := filepath.Join(t.TempDir(), "not-the-tests")
 	for _, k := range bridgeVariables() {
 		cmd.Env = append(cmd.Env, k+"="+notTheTests)
@@ -383,6 +385,44 @@ func TestInitWritesTheDataDirItIsGiven(t *testing.T) {
 			}
 			if cfg.DataDir != home+c.want {
 				t.Errorf("data_dir = %q, want %q", cfg.DataDir, home+c.want)
+			}
+		})
+	}
+}
+
+// The run flags are the documented ones. --check (now the check command)
+// and --dashboard-only (now --no-whatsapp) are refused like any other
+// unknown flag, and -h prints the usage text with every command.
+func TestRunFlags(t *testing.T) {
+	cases := []struct {
+		args    []string
+		want    runOptions
+		wantErr string // part of the error, "" for none
+	}{
+		{nil, runOptions{}, ""},
+		{[]string{"--config", "/tmp/x.json", "--no-whatsapp", "--open"}, runOptions{config: "/tmp/x.json", noWhatsApp: true, open: true}, ""},
+		{[]string{"--log-file", "/tmp/x.log"}, runOptions{logFile: "/tmp/x.log"}, ""},
+		{[]string{"--check"}, runOptions{}, "flag provided but not defined: -check"},
+		{[]string{"--config", "/tmp/x.json", "--check"}, runOptions{config: "/tmp/x.json"}, "flag provided but not defined: -check"},
+		{[]string{"--dashboard-only"}, runOptions{}, "flag provided but not defined: -dashboard-only"},
+		{[]string{"-h"}, runOptions{}, flag.ErrHelp.Error()},
+		{[]string{"--help"}, runOptions{}, flag.ErrHelp.Error()},
+	}
+	for _, c := range cases {
+		t.Run(strings.Join(c.args, " "), func(t *testing.T) {
+			var out bytes.Buffer
+			got, err := parseRunFlags(c.args, &out)
+			switch {
+			case c.wantErr == "" && err != nil:
+				t.Fatalf("error %v, want none", err)
+			case c.wantErr != "" && (err == nil || !strings.Contains(err.Error(), c.wantErr)):
+				t.Fatalf("error %v, want one containing %q", err, c.wantErr)
+			}
+			if got != c.want {
+				t.Errorf("options %+v, want %+v", got, c.want)
+			}
+			if c.wantErr != "" && !strings.Contains(out.String(), "fridolin check [--route JID ...]") {
+				t.Errorf("printed %q, want the usage text", out.String())
 			}
 		})
 	}

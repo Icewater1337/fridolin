@@ -313,7 +313,7 @@ func TestReplacedFolderIsOpenedOnReload(t *testing.T) {
 			if got := br.buildPrompt(br.settings.Load(), dm("hello")); !strings.HasPrefix(got, want) {
 				t.Errorf("prompt = %q, want it to start with %q", got, want)
 			}
-			br.appendHistory("15551234567@s.whatsapp.net", "15551234567", "AFTER-RELOAD", "in")
+			br.appendHistory("15551234567@s.whatsapp.net", "15551234567", "AFTER-RELOAD", historyIn)
 			if data, _ := os.ReadFile(filepath.Join(dir, historyFileName)); !strings.Contains(string(data), "AFTER-RELOAD") {
 				t.Errorf("history at %s = %q, want the message", dir, data)
 			}
@@ -379,7 +379,7 @@ func TestHistoryIsNotFollowedOutOfTheFolder(t *testing.T) {
 			}
 			logged := captureLog(t)
 
-			br.appendHistory("15551234567@s.whatsapp.net", "15551234567", "NEW-MESSAGE", "in")
+			br.appendHistory("15551234567@s.whatsapp.net", "15551234567", "NEW-MESSAGE", historyIn)
 			preface := br.composePreface("15551234567@s.whatsapp.net", false)
 			drops := br.DropsOTP("123456")
 			feed := NewActivity(10)
@@ -572,7 +572,7 @@ func TestIdentityMapIsNotFollowedOutOfTheFolder(t *testing.T) {
 			if tc.target != nil {
 				plant(t, mapPath, tc.target(home))
 			}
-			br.appendHistory("15551234567@s.whatsapp.net", "15551234567", "hi", "in")
+			br.appendHistory("15551234567@s.whatsapp.net", "15551234567", "hi", historyIn)
 			logged := captureLog(t)
 			preface := br.composePreface("15551234567@s.whatsapp.net", false)
 			lines := logged()
@@ -695,7 +695,7 @@ func TestBrainFilesAreReadUpToALimit(t *testing.T) {
 					t.Fatal(err)
 				}
 			}
-			br.appendHistory("15551234567@s.whatsapp.net", "15551234567", "hi", "in")
+			br.appendHistory("15551234567@s.whatsapp.net", "15551234567", "hi", historyIn)
 			logged := captureLog(t)
 			got := br.buildPrompt(br.settings.Load(), dm("hello"))
 			lines := logged()

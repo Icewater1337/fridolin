@@ -40,7 +40,7 @@ func TestSandboxedRunAppliesProfileInline(t *testing.T) {
 	if err := os.WriteFile(secret, []byte("brain b only"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	t.Setenv("WCB_FAKE_READ", secret)
+	t.Setenv("FRIDOLIN_FAKE_READ", secret)
 
 	tmp := t.TempDir()
 	if err := os.Chmod(tmp, 0o500); err != nil {
@@ -87,7 +87,7 @@ func TestSandboxedRunTurnsOffTheAutoUpdater(t *testing.T) {
 			if c.bridge == "" {
 				os.Unsetenv("DISABLE_AUTOUPDATER")
 			}
-			t.Setenv("WCB_FAKE_ENV", "DISABLE_AUTOUPDATER")
+			t.Setenv("FRIDOLIN_FAKE_ENV", "DISABLE_AUTOUPDATER")
 			mgr, d, _ := queueTestManager(t, 0, c.extra)
 			if _, _, _, err := mgr.Submit(dm("hello")); err != nil {
 				t.Fatal(err)

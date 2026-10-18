@@ -168,7 +168,9 @@ agents, commands and rules in `.claude/`, and the MCP servers in
 Every run gets the bridge's environment plus a few variables of its own:
 `FRIDOLIN_TOOLS_DIR`, the folder with the bridge's Python helpers
 (`history_search.py`, `poll_results.py`, `transcribe.py`,
-`calendar_tool.py`), and the `BRIDGE_*` variables the calendar tool reads.
+`calendar_tool.py`), `BRIDGE_DATA_DIR` and `BRIDGE_DB_PATH`, the data
+directory and database the bridge runs with, which those helpers read, and
+the `BRIDGE_*` variables the calendar tool reads.
 The starter prompt and the example skills run the helpers as
 `python3 "$FRIDOLIN_TOOLS_DIR/<tool>.py"`, so they keep working wherever the
 bridge is installed. The bridge finds the helpers in `tools/` next to its

@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -79,10 +80,10 @@ func TestScaffoldBrainNeverOverwrites(t *testing.T) {
 	if data, _ := os.ReadFile(filepath.Join(dir, "brain-prompt.md")); string(data) != "mine" {
 		t.Error("an existing prompt was overwritten")
 	}
-	if !contains(created, ManifestFile) || !contains(created, "memories/people/whatsapp-identity-map.md") {
+	if !slices.Contains(created, ManifestFile) || !slices.Contains(created, "memories/people/whatsapp-identity-map.md") {
 		t.Errorf("created = %v", created)
 	}
-	if contains(created, "brain-prompt.md") {
+	if slices.Contains(created, "brain-prompt.md") {
 		t.Error("brain-prompt.md reported as created although it existed")
 	}
 	// A second scaffold creates nothing and keeps the manifest.
@@ -326,4 +327,59 @@ func FuzzDecodeManifest(f *testing.F) {
 			t.Errorf("encoded %+v, decoded back %+v", *m, *back)
 		}
 	})
+}
+
+// The templates a new brain is scaffolded from are the files in examples/,
+// as they are in the checkout: all the skills, in name order, and the
+// prompt with its placeholder.
+func TestEmbeddedTemplatesAreTheExamples(t *testing.T) {
+	prompt, err := os.ReadFile(filepath.Join(repoDir, "examples", "brain-prompt.example.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := examplePromptTemplate(); got != string(prompt) || !strings.Contains(got, "{{BRAIN_NAME}}") {
+		t.Errorf("the prompt template is %q, want examples/brain-prompt.example.md with {{BRAIN_NAME}}", truncate(got, 80))
+	}
+	files, err := filepath.Glob(filepath.Join(repoDir, "examples", "skills", "*.md"))
+	if err != nil || len(files) == 0 {
+		t.Fatalf("no skills in examples/skills: %v", err)
+	}
+	skills := exampleSkills()
+	if len(skills) != len(files) {
+		t.Fatalf("%d embedded skills, want the %d in examples/skills", len(skills), len(files))
+	}
+	for i, f := range files { // Glob sorts too
+		want, err := os.ReadFile(f)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if skills[i].name != filepath.Base(f) || skills[i].content != string(want) {
+			t.Errorf("skill %d is %s, want %s as in the checkout", i, skills[i].name, filepath.Base(f))
+		}
+	}
+}
+
+// The brain.json in docs/BRAINS.md is the one example of a manifest, so it
+// must be one this version accepts as it stands.
+func TestBrainsDocExampleIsAValidManifest(t *testing.T) {
+	doc, err := os.ReadFile(filepath.Join(repoDir, "docs", "BRAINS.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, section, ok := strings.Cut(string(doc), "\n## brain.json\n")
+	_, block, ok2 := strings.Cut(section, "```json\n")
+	block, _, ok3 := strings.Cut(block, "```")
+	if !ok || !ok2 || !ok3 {
+		t.Fatal("docs/BRAINS.md has no json block under ## brain.json")
+	}
+	dec := json.NewDecoder(strings.NewReader(block))
+	dec.DisallowUnknownFields()
+	var m BrainManifest
+	if err := dec.Decode(&m); err != nil {
+		t.Fatalf("the example does not decode as brain.json: %v", err)
+	}
+	m = m.normalized()
+	if err := m.Validate(); err != nil {
+		t.Errorf("the example is not a valid manifest: %v", err)
+	}
 }

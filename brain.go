@@ -28,8 +28,15 @@ type historyEntry struct {
 	From string `json:"from"`
 	Chat string `json:"chat"` // JID of the chat (DM participant or group)
 	Text string `json:"text"`
-	Type string `json:"type"` // "in" or "out"
+	Type string `json:"type"` // historyIn or historyOut
 }
+
+// The history entry types. They are written to every brain's history file,
+// which tools/history_search.py reads, so their values must not change.
+const (
+	historyIn  = "in"  // a message to the brain
+	historyOut = "out" // a message the brain sent, or one sent on its behalf
+)
 
 // normalizeJID strips the WhatsApp server suffix and a leading + from a JID,
 // e.g. "15551234567@s.whatsapp.net" and "+15551234567" both become "15551234567".
@@ -50,7 +57,7 @@ const identityMapFile = "memories/people/whatsapp-identity-map.md"
 // parseIdentityMap parses a brain's contact map and returns normalized
 // JID → name.
 //
-// The map is a markdown table at <work_dir>/memories/people/whatsapp-identity-map.md:
+// The map is a markdown table at identityMapFile in the brain's folder:
 //
 //	| WhatsApp Number | Person | Notes |
 //	| --------------- | ------ | ----- |
@@ -125,7 +132,7 @@ func recentOutboundLooksLikeOTPRequest(lines []string, brainID string, markers .
 		if err := json.Unmarshal([]byte(lines[i]), &entry); err != nil {
 			continue
 		}
-		if entry.Type != "out" || entry.From != brainID {
+		if entry.Type != historyOut || entry.From != brainID {
 			continue
 		}
 		for _, marker := range markers {
@@ -192,7 +199,10 @@ type Brain struct {
 	retired bool // removed from the configuration
 	last    *RunInfo
 
-	// tmuxViewer is an optional Terminal window tailing this brain's activity log.
+	// tmuxViewer is an optional Terminal window tailing this brain's
+	// activity log. A run starts it and a reload can close it, so viewerMu
+	// guards it.
+	viewerMu   sync.Mutex
 	tmuxViewer *TmuxViewer
 }
 
@@ -216,12 +226,14 @@ type brainSettings struct {
 	credsDir        string // where per-brain credential files live
 	envPassthrough  []string
 	toolsDir        string // the bridge's Python helpers, or ""
+	dataDir         string // the data dir, absolute
+	dbPath          string // the bridge's DB, absolute
 }
 
 // BrainHooks connect brains to the rest of the bridge.
 type BrainHooks struct {
-	// Intermediate delivers a message before the final answer: the
-	// "working on it" notice and questions the brain asks mid-run.
+	// Intermediate delivers a message before the final answer, ready to
+	// send: the working notice and questions the brain asks mid-run.
 	Intermediate func(jid, text string)
 	// Deliver receives every finished run.
 	Deliver func(br *Brain, m Inbound, res RunResult)
@@ -231,6 +243,14 @@ type BrainHooks struct {
 	// plugin and MCP server, for brains allowed to build the site).
 	ExtraArgs func(brainID string) []string
 }
+
+// A run that takes longer than workingNoticeAfter tells the chat it is
+// working on it, and questions it asks mid-run go out marked as such.
+const (
+	workingNoticeAfter = 10 * time.Second
+	workingNotice      = "⏳ Working on it..."
+	questionPrefix     = "❓ "
+)
 
 // RunResult is the outcome of one brain run.
 type RunResult struct {
@@ -245,9 +265,18 @@ type RunInfo struct {
 	Chat     string    `json:"chat"`
 	Finished time.Time `json:"finished"`
 	Seconds  float64   `json:"seconds"`
-	Outcome  string    `json:"outcome"` // ok, error, interrupted, question
+	Outcome  string    `json:"outcome"` // one of the outcome constants
 	Error    string    `json:"error,omitempty"`
 }
+
+// The outcomes of a run, RunInfo.Outcome. The dashboard labels each one
+// (outcomePill in web/assets/components/brain.js).
+const (
+	outcomeOK          = "ok"
+	outcomeError       = "error"
+	outcomeInterrupted = "interrupted"
+	outcomeQuestion    = "question" // it asked a question and is waiting
+)
 
 type brainRun struct {
 	cancel  context.CancelFunc
@@ -309,7 +338,7 @@ func (br *Brain) Submit(m Inbound) (pos int, busy bool, err error) {
 
 	// History first, so the run (and any later run) sees the message even when
 	// it is merged into a queue that is already moving.
-	br.appendHistory(m.JID, m.Sender, historyTextWithMedia(m.textWithQuote(), m.Media), "in")
+	br.appendHistory(m.JID, m.Sender, historyTextWithMedia(m.textWithQuote(), m.Media), historyIn)
 
 	br.mu.Lock()
 	if br.retired {
@@ -325,9 +354,9 @@ func (br *Brain) Submit(m Inbound) (pos int, busy bool, err error) {
 	// other people's requests in a group, keep their place, and untagged
 	// chatter never interrupts a run. Neither do ingested files, nor are they
 	// replaced: each is a job of its own, not a correction of the last one.
-	interrupting := s.queueMode == "interrupt" && !m.Silent && m.Source != "ingest"
+	interrupting := s.queueMode == queueModeInterrupt && !m.Silent && m.Source != sourceIngest
 	replaces := func(p Inbound) bool {
-		return p.JID == m.JID && (p.Silent || (interrupting && p.Sender == m.Sender && p.Source != "ingest"))
+		return p.JID == m.JID && (p.Silent || (interrupting && p.Sender == m.Sender && p.Source != sourceIngest))
 	}
 	kept := br.pending[:0]
 	for _, p := range br.pending {
@@ -393,7 +422,7 @@ func (br *Brain) worker() {
 		res := br.invoke(run, ctx, s, m)
 		res.Duration = time.Since(run.started)
 		if res.Err == nil && !res.AlreadySent && res.Text != "" {
-			br.appendHistory(m.JID, br.id, res.Text, "out")
+			br.appendHistory(m.JID, br.id, res.Text, historyOut)
 		}
 		br.finishRun(run)
 		br.recordLast(m, res)
@@ -405,14 +434,14 @@ func (br *Brain) worker() {
 }
 
 func (br *Brain) recordLast(m Inbound, res RunResult) {
-	info := &RunInfo{Chat: m.JID, Finished: time.Now(), Seconds: res.Duration.Seconds(), Outcome: "ok"}
+	info := &RunInfo{Chat: m.JID, Finished: time.Now(), Seconds: res.Duration.Seconds(), Outcome: outcomeOK}
 	switch {
 	case errors.Is(res.Err, errBrainInterrupted):
-		info.Outcome = "interrupted"
+		info.Outcome = outcomeInterrupted
 	case res.Err != nil:
-		info.Outcome, info.Error = "error", res.Err.Error()
+		info.Outcome, info.Error = outcomeError, res.Err.Error()
 	case res.AlreadySent:
-		info.Outcome = "question"
+		info.Outcome = outcomeQuestion
 	}
 	br.mu.Lock()
 	br.last = info
@@ -494,13 +523,20 @@ func (br *Brain) stopRun(run *brainRun) bool {
 	return true
 }
 
-// retire stops the brain for good after it was removed from the configuration.
-func (br *Brain) retire() {
+// retire stops the brain for good after it was removed from the
+// configuration, or when the bridge stops. With closeViewer it also ends
+// the activity viewer: not when the bridge stops, so the window stays until
+// the next start replaces it, nor when the brain moved to another folder,
+// where the brain that runs there replaces the tmux session of that name.
+func (br *Brain) retire(closeViewer bool) {
 	br.mu.Lock()
 	br.retired = true
 	br.pending = nil
 	br.mu.Unlock()
 	br.StopCurrent(true)
+	if closeViewer {
+		br.closeViewer()
+	}
 	// Done with the folder. A run that would not stop finds it closed.
 	br.root.Close()
 }
@@ -595,6 +631,8 @@ func (br *Brain) ensureViewer(s *brainSettings) {
 	if !s.viewer {
 		return
 	}
+	br.viewerMu.Lock()
+	defer br.viewerMu.Unlock()
 	if br.tmuxViewer != nil && br.tmuxViewer.IsAlive() {
 		return
 	}
@@ -613,6 +651,18 @@ func (br *Brain) ensureViewer(s *brainSettings) {
 		return
 	}
 	br.tmuxViewer = tv
+}
+
+// closeViewer ends the activity viewer's tmux session, if it has one, which
+// closes its Terminal window.
+func (br *Brain) closeViewer() {
+	br.viewerMu.Lock()
+	tv := br.tmuxViewer
+	br.tmuxViewer = nil
+	br.viewerMu.Unlock()
+	if tv != nil {
+		tv.Close()
+	}
 }
 
 // streamLogName is the brain's activity log, in its folder.
@@ -679,7 +729,7 @@ func withArgsBeforePrompt(args, extra []string) []string {
 // stop a brain from reading the files with its tools; that takes the
 // sandbox, which denies them all.
 func excludeInstructionsAbove(dir string) string {
-	data, err := json.Marshal(map[string][]string{"claudeMdExcludes": instructionsAbove(dir, os.Getenv("HOME"))})
+	data, err := json.Marshal(map[string][]string{"claudeMdExcludes": instructionsAbove(dir, homeDir())})
 	if err != nil {
 		return ""
 	}
@@ -976,7 +1026,7 @@ func (br *Brain) invoke(run *brainRun, ctx context.Context, s *brainSettings, m 
 	// without it: the fallback would quietly drop the only barrier left.
 	binary := s.claudePath
 	finalArgs := args
-	extraEnv := calendarEnv(br.id, s.manifest, s.credsDir)
+	extraEnv := append(dataEnv(s), calendarEnv(br.id, s.manifest, s.credsDir)...)
 	if s.toolsDir != "" {
 		// Prompts and skills run the helpers as $FRIDOLIN_TOOLS_DIR/<tool>,
 		// wherever the bridge is installed.
@@ -1033,7 +1083,7 @@ func (br *Brain) invoke(run *brainRun, ctx context.Context, s *brainSettings, m 
 		parseDone <- br.parseStream(m.JID, stdout)
 	}()
 
-	timer := time.NewTimer(10 * time.Second)
+	timer := time.NewTimer(workingNoticeAfter)
 	defer timer.Stop()
 
 	invocationStart := time.Now()
@@ -1044,7 +1094,7 @@ func (br *Brain) invoke(run *brainRun, ctx context.Context, s *brainSettings, m 
 		// Untagged (silent) messages never produce a visible reply, so they
 		// must not produce a visible "working" notice either.
 		if !m.Silent && br.hooks != nil && br.hooks.Intermediate != nil {
-			br.hooks.Intermediate(m.JID, "⏳ Working on it...")
+			br.hooks.Intermediate(m.JID, workingNotice)
 		}
 		res = <-parseDone
 	}
@@ -1133,7 +1183,7 @@ func (br *Brain) composePreface(chatJID string, isGroup bool) string {
 		timeStr := ts.Format("15:04")
 
 		var senderDisplay string
-		if entry.Type == "out" {
+		if entry.Type == historyOut {
 			senderDisplay = fmt.Sprintf("You (%s)", br.id)
 		} else if name, found := identities[normalizeJID(entry.From)]; found {
 			senderDisplay = fmt.Sprintf("%s (%s)", name, entry.From)
@@ -1169,8 +1219,8 @@ func (br *Brain) buildPrompt(s *brainSettings, m Inbound) string {
 		sb.WriteString("<chat_history>\n")
 		sb.WriteString("The following is the last " + count + " in this WhatsApp chat (for context, not action). ")
 		sb.WriteString("You do NOT have prior turns in your working memory — the only context you have about previous conversation is what's in this block. ")
-		sb.WriteString("Names come from your identity map at `memories/people/whatsapp-identity-map.md`; the JID in parens is the raw WhatsApp identifier. ")
-		sb.WriteString("For anything older or more detailed, search `conversation-history.jsonl` with `$FRIDOLIN_TOOLS_DIR/history_search.py`.\n\n")
+		sb.WriteString("Names come from your identity map at `" + identityMapFile + "`; the JID in parens is the raw WhatsApp identifier. ")
+		sb.WriteString("For anything older or more detailed, search `" + historyFileName + "` with `$FRIDOLIN_TOOLS_DIR/history_search.py`.\n\n")
 		sb.WriteString(preface)
 		sb.WriteString("</chat_history>\n\n")
 	}
@@ -1249,7 +1299,7 @@ func (br *Brain) parseStream(jid string, reader io.Reader) RunResult {
 					if content.Name == "AskUserQuestion" {
 						question := extractAskQuestion(content.Input)
 						if question != "" && br.hooks != nil && br.hooks.Intermediate != nil {
-							br.hooks.Intermediate(jid, question)
+							br.hooks.Intermediate(jid, questionPrefix+question)
 							questionSent = true
 						}
 					}
@@ -1307,6 +1357,22 @@ func truncate(s string, n int) string {
 		n--
 	}
 	return s[:n] + "…"
+}
+
+// tail is truncate's counterpart for the end of s, for the last lines of
+// a command's output: s without surrounding space, cut after an ellipsis
+// to its last n bytes when longer, or a few fewer so that no rune is cut
+// in two.
+func tail(s string, n int) string {
+	s = strings.TrimSpace(s)
+	if len(s) <= n {
+		return s
+	}
+	i := len(s) - n
+	for i < len(s) && !isRuneStart(s[i]) {
+		i++
+	}
+	return "…" + s[i:]
 }
 
 func isRuneStart(b byte) bool { return b&0xC0 != 0x80 }
@@ -1414,9 +1480,6 @@ func NewBrainManager(cfg *Config) (*BrainManager, error) {
 // SetHooks wires the brains to the bridge. Call before the first message.
 func (bm *BrainManager) SetHooks(h BrainHooks) { *bm.hooks = h }
 
-// SetIntermediateSendFn wires the mid-run notification callback.
-func (bm *BrainManager) SetIntermediateSendFn(fn func(jid, text string)) { bm.hooks.Intermediate = fn }
-
 // Apply makes the running brains match cfg.
 func (bm *BrainManager) Apply(cfg *Config) error {
 	specs, issues := ResolveBrains(cfg)
@@ -1479,6 +1542,9 @@ func (bm *BrainManager) reload(specs []BrainSpec, issues []BrainIssue, cfg *Conf
 			created = append(created, br)
 		}
 		br.settings.Store(s)
+		if !s.viewer {
+			br.closeViewer() // the viewer setting was turned off
+		}
 
 		next[m.ID] = br
 		order = append(order, br)
@@ -1516,7 +1582,8 @@ func (bm *BrainManager) reload(specs []BrainSpec, issues []BrainIssue, cfg *Conf
 		} else {
 			log.Printf("brain %s: removed from configuration; stopping it", br.id)
 		}
-		go br.retire()
+		_, moved := next[br.id]
+		go br.retire(!moved)
 	}
 	return nil
 }
@@ -1527,9 +1594,6 @@ func settingsFor(cfg *Config, sp BrainSpec) *brainSettings {
 	model := m.Model
 	if model == "" {
 		model = cfg.BrainModel
-	}
-	if model == "" {
-		model = cfg.Model
 	}
 	effort := m.Effort
 	if effort == "" {
@@ -1557,7 +1621,19 @@ func settingsFor(cfg *Config, sp BrainSpec) *brainSettings {
 		credsDir:        credentialsDirOf(cfg),
 		envPassthrough:  append([]string(nil), cfg.ChildEnvPassthrough...),
 		toolsDir:        ownLayout().Tools,
+		// Absolute: brains run in their own folder, where a relative
+		// data_dir would name another one.
+		dataDir: absPath(cfg.DataDir),
+		dbPath:  absPath(cfg.DBPath),
 	}
+}
+
+// dataEnv tells the tools in tools/ where the bridge keeps its data, so they
+// need not guess: poll_results.py opens the DB at BRIDGE_DB_PATH, and
+// calendar_tool.py falls back to BRIDGE_DATA_DIR. compat: brains and their
+// scripts rely on these names, as on the other BRIDGE_ variables.
+func dataEnv(s *brainSettings) []string {
+	return []string{"BRIDGE_DATA_DIR=" + s.dataDir, "BRIDGE_DB_PATH=" + s.dbPath}
 }
 
 // credentialsDirOf is where per-brain credential files live.
@@ -1654,7 +1730,7 @@ func (bm *BrainManager) Stop() {
 		wg.Add(1)
 		go func(br *Brain) {
 			defer wg.Done()
-			br.retire()
+			br.retire(false)
 		}(br)
 	}
 	wg.Wait()

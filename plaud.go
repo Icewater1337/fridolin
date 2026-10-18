@@ -17,6 +17,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"go.mau.fi/whatsmeow/types"
 )
 
 // Plaud integration: recordings from a Plaud voice recorder reach a brain as
@@ -153,18 +155,14 @@ func (p *PlaudManager) dir() string { return filepath.Join(p.cfg().DataDir, "pla
 // cliHome is the HOME the CLI runs with, which decides where its login lives.
 func (p *PlaudManager) cliHome() string {
 	if p.cfg().Plaud.BrainAccess {
-		home, _ := os.UserHomeDir()
-		return home
+		return homeDir()
 	}
 	return filepath.Join(p.dir(), "home")
 }
 
 func (p *PlaudManager) tokenPath() string { return filepath.Join(p.cliHome(), ".plaud", "tokens.json") }
 
-func (p *PlaudManager) connected() bool {
-	_, err := os.Stat(p.tokenPath())
-	return err == nil
-}
+func (p *PlaudManager) connected() bool { return fileExists(p.tokenPath()) }
 
 // loginStamp changes whenever the login file does: a sign-in, a sign-out, a
 // token refresh, or brain_access switching to the other login. "" means
@@ -197,12 +195,11 @@ func findPlaudCLI(c string) (string, error) {
 	if found, err := exec.LookPath("plaud"); err == nil {
 		return found, nil
 	}
-	home, _ := os.UserHomeDir()
-	candidates, _ := filepath.Glob(filepath.Join(home, nvmNodeVersions, "*/bin/plaud"))
+	candidates, _ := filepath.Glob(filepath.Join(homeDir(), nvmNodeVersions, "*/bin/plaud"))
 	sort.Sort(sort.Reverse(sort.StringSlice(candidates)))
 	candidates = append(candidates, "/opt/homebrew/bin/plaud", "/usr/local/bin/plaud")
 	for _, c := range candidates {
-		if _, err := os.Stat(c); err == nil {
+		if fileExists(c) {
 			return c, nil
 		}
 	}
@@ -449,7 +446,7 @@ func (p *PlaudManager) summaryChat(br *Brain) string {
 		return rc
 	}
 	if cfg := p.cfg(); len(cfg.AllowedNumbers) > 0 {
-		return cfg.AllowedNumbers[0] + "@s.whatsapp.net"
+		return userJID(cfg.AllowedNumbers[0])
 	}
 	return ""
 }
@@ -457,7 +454,7 @@ func (p *PlaudManager) summaryChat(br *Brain) string {
 // isDirectChat reports whether jid is a one-to-one chat (a phone number or a
 // LID), not a group, a broadcast list or a channel.
 func isDirectChat(jid string) bool {
-	return strings.HasSuffix(jid, "@s.whatsapp.net") || strings.HasSuffix(jid, "@lid")
+	return strings.HasSuffix(jid, "@"+types.DefaultUserServer) || strings.HasSuffix(jid, "@"+types.HiddenUserServer)
 }
 
 // destination returns the brain that receives recordings and the private
@@ -830,7 +827,7 @@ func (b *Bridge) apiPlaudStatus(w http.ResponseWriter, r *http.Request) {
 		resp["summary_error"] = err.Error()
 	} else {
 		resp["summary_chat"] = jid
-		resp["summary_to_you"] = len(cfg.AllowedNumbers) > 0 && jid == cfg.AllowedNumbers[0]+"@s.whatsapp.net"
+		resp["summary_to_you"] = len(cfg.AllowedNumbers) > 0 && jid == userJID(cfg.AllowedNumbers[0])
 		if owner := b.brainMgr.BrainFor(jid, false); owner != nil && owner != br {
 			resp["summary_chat_brain"] = owner.ID()
 		}

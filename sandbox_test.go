@@ -33,7 +33,7 @@ func TestSandboxFailsClosed(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			mgr, d, home := queueTestManager(t, 0, `, "viewer": true`)
 			argsLog := filepath.Join(home, "args.log")
-			t.Setenv("WCB_FAKE_ARGS_LOG", argsLog)
+			t.Setenv("FRIDOLIN_FAKE_ARGS_LOG", argsLog)
 			tmuxCalls := fakeTmux(t)
 			sp := mgr.profiler
 			sp.mu.Lock()
@@ -59,7 +59,7 @@ func TestSandboxFailsClosed(t *testing.T) {
 			if _, err := os.Stat(tmuxCalls); !os.IsNotExist(err) {
 				t.Error("a refused run started the tmux viewer")
 			}
-			if last := mgr.Get("a").Snapshot().Last; last == nil || last.Outcome != "error" {
+			if last := mgr.Get("a").Snapshot().Last; last == nil || last.Outcome != outcomeError {
 				t.Errorf("last run = %+v, want outcome error", last)
 			}
 
@@ -86,9 +86,9 @@ func fakeTmux(t *testing.T) string {
 	t.Helper()
 	dir := t.TempDir()
 	calls := filepath.Join(dir, "calls.log")
-	t.Setenv("WCB_FAKE_TMUX_LOG", calls)
+	t.Setenv("FRIDOLIN_FAKE_TMUX_LOG", calls)
 	script := filepath.Join(dir, "tmux")
-	if err := os.WriteFile(script, []byte("#!/bin/sh\necho \"$@\" >> \"$WCB_FAKE_TMUX_LOG\"\nexit 1\n"), 0o700); err != nil {
+	if err := os.WriteFile(script, []byte("#!/bin/sh\necho \"$@\" >> \"$FRIDOLIN_FAKE_TMUX_LOG\"\nexit 1\n"), 0o700); err != nil {
 		t.Fatal(err)
 	}
 	tmuxOnce.Do(func() {}) // keep findTmux from looking up the real one
@@ -1498,6 +1498,67 @@ func TestSandboxRefusesBrainFoldersItCannotProtect(t *testing.T) {
 			// HOME breaks the others' profiles too.
 			if _, err := sp.Profile("b"); (err != nil) != tc.bFails {
 				t.Errorf("Profile(b) error = %v, want an error %v", err, tc.bFails)
+			}
+		})
+	}
+}
+
+// The activity viewer's tmux session, and so its Terminal window, ends
+// when its brain is removed or the viewer setting is turned off. It stays
+// when the bridge stops, for the next start to take over by its name.
+func TestViewerClosesWithItsBrain(t *testing.T) {
+	cases := []struct {
+		name   string
+		change func(t *testing.T, mgr *BrainManager, cfg *Config, home string)
+		closed bool
+	}{
+		{"brain removed", func(t *testing.T, mgr *BrainManager, cfg *Config, _ string) {
+			next := *cfg
+			next.BrainDirs = nil
+			if err := mgr.Apply(&next); err != nil {
+				t.Fatal(err)
+			}
+		}, true},
+		{"viewer turned off", func(t *testing.T, mgr *BrainManager, cfg *Config, _ string) {
+			next := *cfg
+			next.Viewer = false
+			if err := mgr.Apply(&next); err != nil {
+				t.Fatal(err)
+			}
+		}, true},
+		{"bridge stopped", func(t *testing.T, mgr *BrainManager, _ *Config, _ string) {
+			mgr.Stop()
+		}, false},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			home := canonicalDir(t.TempDir())
+			t.Setenv("HOME", home)
+			calls := fakeTmux(t)
+			cfg, err := LoadConfig(writeConfig(t, `{
+				"data_dir": "`+home+`/data",
+				"viewer": true`+brainDirsJSON(t,
+				brainFolder(t, home+"/a", BrainManifest{ID: "a", Routing: BrainRouting{HandlesDMs: true}}),
+			)+`
+			}`))
+			if err != nil {
+				t.Fatal(err)
+			}
+			mgr := newTestManager(t, cfg)
+			t.Cleanup(mgr.Stop)
+			br := mgr.Get("a")
+			br.tmuxViewer = &TmuxViewer{Name: "claude-a"} // as if it had started
+			logs := captureLog(t)
+
+			c.change(t, mgr, cfg, home)
+			if c.closed {
+				// The line comes last, from the goroutine that retires the
+				// brain, which is then done with the fake tmux.
+				waitFor(t, 5*time.Second, "the viewer to close", func() bool { return logContains(logs, "[viewer] closed claude-a") })
+			}
+			data, _ := os.ReadFile(calls)
+			if killed := strings.Contains(string(data), "kill-session -t claude-a"); killed != c.closed {
+				t.Errorf("tmux calls %q, want the session killed: %v", data, c.closed)
 			}
 		})
 	}

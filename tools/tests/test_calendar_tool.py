@@ -601,6 +601,31 @@ class ResolveTimezoneTest(CalendarTestCase):
             self.assertIn("Traceback", err)
 
 
+class CredentialsDirTest(unittest.TestCase):
+    """Where the tool keeps a profile's files."""
+
+    def test_credentials_dir(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            home = Path(tmp)
+            # Only the data dir from before the rename exists. Whether an
+            # install still uses it is the bridge's call, which it passes on
+            # to brains: the tool must not pick it by itself.
+            (home / ".whatsapp-claude-bridge").mkdir()
+            cases = [
+                ("nothing set", {}, home / ".fridolin"),
+                ("empty data dir", {"BRIDGE_DATA_DIR": ""}, home / ".fridolin"),
+                ("data dir", {"BRIDGE_DATA_DIR": "/srv/data"}, Path("/srv/data")),
+                ("credentials dir", {"BRIDGE_DATA_DIR": "/srv/data", "BRIDGE_CREDENTIALS_DIR": "/srv/creds"},
+                 Path("/srv/creds")),
+            ]
+            for name, env, want in cases:
+                with self.subTest(name), mock.patch.dict(os.environ, {"HOME": str(home)}):
+                    os.environ.pop("BRIDGE_DATA_DIR", None)
+                    os.environ.pop("BRIDGE_CREDENTIALS_DIR", None)
+                    os.environ.update(env)
+                    self.assertEqual(calendar_tool.credentials_dir(), want)
+
+
 class FormatEventTest(unittest.TestCase):
     def test_timed_and_all_day(self):
         timed = calendar_tool.format_event({
