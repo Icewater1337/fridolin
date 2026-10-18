@@ -23,6 +23,7 @@ const usage = `fridolin — talk to Claude Code over WhatsApp
 Usage:
   fridolin [run] [flags]     start the bridge (default)
   fridolin open              open the dashboard in your browser
+  fridolin rotate-token      replace the dashboard token and sign out every browser
   fridolin check [--route JID ...]
                                            validate the configuration and show routing
   fridolin init [--claude-path PATH] [--data-dir DIR]
@@ -64,6 +65,8 @@ func main() {
 		checkCmd(args)
 	case "open":
 		openCmd(args)
+	case "rotate-token":
+		rotateTokenCmd(args)
 	case "init":
 		initCmd(args)
 	case "mcp-site":
@@ -121,6 +124,8 @@ func starterConfig() *Config {
 		HTTPListen:                 defaultHTTPListen,
 		OTPGuard:                   true,
 		Sandbox:                    SandboxConfig{Enabled: runtime.GOOS == "darwin", DenyPaths: []string{}, AllowPaths: []string{}},
+		// A new install has no scripts written before tokens.
+		ScriptAPI: ScriptAPIConfig{TokenlessSend: &f},
 	}
 }
 
@@ -221,11 +226,14 @@ func runCmd(args []string) {
 	}()
 
 	if isTerminal(os.Stdout) && cfg.HTTPEnabled() && !cfg.Dashboard.Disabled {
-		// Only on an interactive terminal: the token must not end up in a log file.
-		fmt.Printf("\n  Dashboard: %s\n\n", dashboardURL(cfg.HTTPListen, bridge.token.Value()))
+		// Only on an interactive terminal: even a code that works once
+		// must not end up in a log file.
+		code, _ := bridge.sessions.newCode()
+		fmt.Printf("\n  Dashboard: %s\n  (the link works once, within a minute; after that, run: fridolin open)\n\n", loginURL(cfg.HTTPListen, code))
 	}
 	if opts.open && cfg.HTTPEnabled() {
-		go func() { _ = openBrowser(dashboardURL(cfg.HTTPListen, bridge.token.Value())) }()
+		code, _ := bridge.sessions.newCode()
+		go func() { _ = openBrowser(loginURL(cfg.HTTPListen, code)) }()
 	}
 
 	if err := bridge.Start(ctx); err != nil {
@@ -284,11 +292,10 @@ func openCmd(args []string) {
 	if !cfg.HTTPEnabled() || cfg.Dashboard.Disabled {
 		log.Fatalf("the dashboard is turned off in %s", path)
 	}
-	data, err := os.ReadFile(filepath.Join(cfg.DataDir, "dashboard.token"))
+	url, err := dashboardLink(cfg)
 	if err != nil {
-		log.Fatalf("no dashboard token yet — start the bridge first (%v)", err)
+		log.Fatal(err)
 	}
-	url := dashboardURL(cfg.HTTPListen, strings.TrimSpace(string(data)))
 	if *printOnly {
 		fmt.Println(url)
 		return
@@ -298,6 +305,88 @@ func openCmd(args []string) {
 		return
 	}
 	fmt.Printf("Opened the dashboard at http://%s/\n", cfg.HTTPListen)
+}
+
+// dashboardLink is the address `fridolin open` opens for cfg's bridge. It
+// carries a code that works once, within a minute, not the token: a
+// browser keeps every address it opened. A bridge older than this binary
+// has no login codes, and its dashboard took the token in the link; there
+// is no falling back to that, since `fridolin open --print` is what an
+// agent runs and pastes into a chat.
+func dashboardLink(cfg *Config) (string, error) {
+	tokenPath := filepath.Join(cfg.DataDir, "dashboard.token")
+	data, err := os.ReadFile(tokenPath)
+	if err != nil {
+		return "", fmt.Errorf("no dashboard token yet — start the bridge first (%w)", err)
+	}
+	code, err := askLoginCode(cfg.HTTPListen, strings.TrimSpace(string(data)))
+	if errors.Is(err, errOlderBridge) {
+		return "", fmt.Errorf("%w. Restart it on this build (./setup.sh installs it and restarts the bridge), or open its dashboard with the fridolin that runs it, or at http://%s/ with the token from %s", err, cfg.HTTPListen, tokenPath)
+	}
+	if err != nil {
+		return "", err
+	}
+	return loginURL(cfg.HTTPListen, code), nil
+}
+
+// rotateTokenCmd replaces the dashboard token and signs out every browser:
+// through the running bridge, or, when none runs, in the data dir itself.
+func rotateTokenCmd(args []string) {
+	fs := flag.NewFlagSet("rotate-token", flag.ExitOnError)
+	cfgPath := fs.String("config", "", configFlagHelp)
+	_ = fs.Parse(args)
+	cfgs, err := OpenConfigStore(configPath(*cfgPath))
+	if err != nil {
+		log.Fatalf("loading config: %v", err)
+	}
+	if err := rotateToken(cfgs.Get()); err != nil {
+		log.Fatal(err)
+	}
+	fmt.Println("The dashboard token was replaced and every browser signed out. Open the dashboard again with: fridolin open")
+}
+
+// rotateToken does rotateTokenCmd's work for cfg.
+func rotateToken(cfg *Config) error {
+	data, err := os.ReadFile(filepath.Join(cfg.DataDir, "dashboard.token"))
+	if err != nil {
+		return fmt.Errorf("no dashboard token yet — start the bridge first (%w)", err)
+	}
+	if cfg.HTTPEnabled() {
+		var resp struct{ Status string }
+		err := callBridge(cfg.HTTPListen, strings.TrimSpace(string(data)), "/api/token/rotate", &resp)
+		if errors.Is(err, errOlderBridge) && cfg.Dashboard.Disabled {
+			// It serves no dashboard API, so it answers 404 whatever its
+			// build. Nothing takes the token until the dashboard is on.
+			return fmt.Errorf("the dashboard is turned off (dashboard.disabled), so the bridge at http://%s cannot replace the token while it runs. Run fridolin rotate-token while the bridge is stopped, or once the dashboard is on and the bridge restarted", cfg.HTTPListen)
+		}
+		if errors.Is(err, errOlderBridge) {
+			// It keeps the token in memory and has no way to replace it.
+			return fmt.Errorf("%w, so the token was not replaced. Restart it on this build (./setup.sh installs it and restarts the bridge), then run fridolin rotate-token again", err)
+		}
+		if !errors.Is(err, errBridgeDown) {
+			return err
+		}
+	}
+	// No bridge answers. The instance lock says whether one runs anyway
+	// (with its server off, say); only without one are the files changed
+	// here, since a running bridge keeps the token in memory.
+	lock, err := acquireInstanceLock(cfg.DataDir)
+	if err != nil {
+		return fmt.Errorf("the bridge runs but does not answer, so the token was not replaced: %w", err)
+	}
+	defer lock.release()
+	tok, err := LoadDashboardToken(cfg.DataDir)
+	if err != nil {
+		return err
+	}
+	if err := tok.Rotate(); err != nil {
+		return fmt.Errorf("writing a new token: %w", err)
+	}
+	sessions, err := loadDashSessions(cfg.DataDir)
+	if err != nil {
+		return err
+	}
+	return sessions.dropAll()
 }
 
 func openBrowser(url string) error {

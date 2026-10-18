@@ -146,6 +146,11 @@ Reopen the dashboard any time with:
 fridolin open
 ```
 
+It asks the running bridge for a link that signs your browser in and works
+once, within a minute; the browser then stays signed in for 30 days.
+*Settings → Dashboard sign-in* signs it out, or signs out every browser and
+replaces the dashboard token (`fridolin rotate-token` does the same).
+
 ### Upgrading and rolling back
 
 ```bash
@@ -159,6 +164,38 @@ with its tools, as `fridolin.prev`. To go back to it:
 ```bash
 fridolin service rollback     # run it again to undo
 ```
+
+**Coming from a version without API tokens** (one whose `/ingest` took
+none): `POST /ingest` now refuses a call without a token with `401`, so an
+upload handler or recorder sync written for the old version stops working
+until it sends yours:
+
+```bash
+curl -X POST http://127.0.0.1:8765/ingest \
+  -H "Authorization: Bearer $(cat ~/.fridolin/scripts.token)" …
+```
+
+`/send` without a token keeps reaching your allowed chats while
+[`script_api.tokenless_send`](docs/CONFIGURATION.md#script_apitokenless_send)
+is on, which it is in a config written before tokens. Before you turn it
+off, give your scripts that header too, and change brain instructions that
+`curl …/send` without one to send their run's token to
+`"$FRIDOLIN_API/send"`, as [Isolation](docs/BRAINS.md#isolation) shows.
+
+**Coming from a version without dashboard sign-in** (one whose
+`fridolin open` put the token in the link): the token stays the same, and
+copies of it may still sit in your browser's history and storage, where a
+brain could read them (see [Dashboard](docs/CONFIGURATION.md#dashboard)).
+Once the new build runs, replace it once:
+
+```bash
+fridolin rotate-token     # or Settings → Dashboard sign-in → Sign out everywhere
+```
+
+Scripts that send the old token in `X-Bridge-Token` are refused from then
+on; give them the new one from `~/.fridolin/dashboard.token`. The upgrade
+does not rotate it for you, so that those scripts do not stop without
+warning.
 
 `fridolin version`, the dashboard's Overview and the `Starting fridolin …`
 line each start writes to the log say which version runs (on macOS:
@@ -326,9 +363,17 @@ by a wide margin.
 
 ```bash
 curl -X POST http://127.0.0.1:8765/send \
+  -H "Authorization: Bearer $(cat ~/.fridolin/scripts.token)" \
   -H 'Content-Type: application/json' \
   -d '{"jid":"120363000000000000@g.us","text":"Deploy finished ✅"}'
 ```
+
+The token in `~/.fridolin/scripts.token` is your scripts'. A brain
+sends its run's, from the file `$FRIDOLIN_BRAIN_TOKEN_FILE` names, and may
+send only to its own chats.
+Without a token, `/send` reaches only your allowed chats, and only while
+[`script_api.tokenless_send`](docs/CONFIGURATION.md#script_apitokenless_send)
+is on.
 
 `curl -fsS http://127.0.0.1:8765/ready` succeeds only while WhatsApp is
 connected, so a script can check first; its JSON names the connection state
@@ -340,6 +385,7 @@ sync), write them under `~/.fridolin/media/` and turn on
 
 ```bash
 curl -X POST http://127.0.0.1:8765/ingest \
+  -H "Authorization: Bearer $(cat ~/.fridolin/scripts.token)" \
   -H 'Content-Type: application/json' \
   -d '{"brain":"personal","paths":["/Users/you/.fridolin/media/upload/scan.pdf"],"text":"File this"}'
 ```
@@ -348,7 +394,7 @@ The brain you name handles it like a WhatsApp attachment and replies in its
 reply chat (`reply_chat`, or the default described in
 [docs/BRAINS.md](docs/BRAINS.md)), even when that chat belongs to another
 brain. Both endpoints only listen on localhost and refuse requests a web page
-sends.
+sends. [docs/API.md](docs/API.md) is their full contract.
 
 ### Google Calendar
 
@@ -479,8 +525,22 @@ What the bridge does about it:
   [what a brain loads](docs/BRAINS.md#what-a-brain-loads)).
 - **A guarded dashboard.** It only listens on localhost, rejects requests
   from web pages on other sites (and DNS-rebinding tricks), and requires a
-  token from `~/.fridolin/dashboard.token` — a file the sandbox
-  keeps away from brains, so a manipulated brain cannot reconfigure the bridge.
+  token from `~/.fridolin/dashboard.token`. Browsers never hold the token:
+  they sign in with a link that works once and keep a session, a cookie
+  page scripts cannot read that counts only together with a key the
+  dashboard page keeps for its own address. On macOS the sandbox keeps
+  the token file away from brains, so a manipulated brain cannot
+  reconfigure the bridge; the browser's files, where a session is kept,
+  it denies them only for the common browsers
+  ([which ones](docs/CONFIGURATION.md#dashboard)). On Linux, or with the
+  sandbox off, a brain that runs with all permissions can read the token
+  like any other file of yours; the dashboard warns about it.
+- **Tokens for `/send` and `/ingest`.** Each brain's run gets a token of
+  its own, which works while the run lasts: with it, a brain sends only to
+  its own chats and hands files only to itself, so it cannot make another
+  brain run with that brain's memories and credentials. Your scripts use
+  `~/.fridolin/scripts.token`;
+  see [docs/API.md](docs/API.md#who-may-call).
 - **You approve brain settings.** A brain that edits its own `brain.json` to
   claim your DMs or another group changes nothing until you approve it.
 - **OTP guard.** A message that is only a numeric code, arriving right after
@@ -506,7 +566,10 @@ What it does not do:
   `sudo machinectl shell fridolin@`; `sudo -u` gives `systemctl --user` no
   session) and run `./setup.sh` there. The unit sets `NoNewPrivileges=yes`,
   so nothing a brain starts can gain privileges through `sudo` or another
-  setuid program.
+  setuid program. That keeps brains out of your own files, but not out of
+  the bridge's: brains run as that user too, so they can read and change
+  its token, `config.json` and WhatsApp session, and with them every
+  setting.
 - Every file sent to the bridge lands in your data directory, and the assistant
   reads it.
 

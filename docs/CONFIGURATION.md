@@ -35,10 +35,14 @@ Phone numbers permitted to DM the bridge. Country code, no `+`, no spaces.
 In the dashboard both allow lists are edited on the **Chats** page (Settings
 only counts them). It takes a number the way you would write it, with a `+`,
 spaces, dashes or brackets, stores its digits, and refuses anything that is
-not 6 to 15 of them; a group must be a group JID.
+not 6 to 15 of them, or a `@lid` JID (WhatsApp's internal ID for a sender,
+not a number); a group must be a group JID.
 
 An empty list means nobody may DM until you add a number, unless
-`allow_any_dm` (below) is `true`.
+`allow_any_dm` (below) is `true`. The bridge compares entries exactly as
+they are written, so one written by hand with a `+` or spaces matches
+nobody; it names such entries in the log when it starts, with the form to
+write them in.
 
 Newer WhatsApp clients identify senders by an internal ID rather than a phone
 number; the bridge resolves that back to the number before checking, so plain
@@ -160,7 +164,10 @@ Effectively required: nobody is at the keyboard to approve a prompt, so
 without it every tool call hangs. Set to `false` only if you want a
 conversation-only assistant with no tool access.
 
-Read [Security](../README.md#security) before running with this on.
+Read [Security](../README.md#security) before running with this on. Without
+a sandbox in effect (on Linux, or with `sandbox.enabled` off) the dashboard
+warns that brains can read and change the bridge's own data; see
+[`dashboard`](#dashboard).
 
 ### `run_timeout_minutes`
 
@@ -343,7 +350,10 @@ dashboard; see [BRAINS.md](BRAINS.md). In `config.json` they appear as:
 ]
 ```
 
-`approved` is the manifest you accepted — the version that runs.
+`approved` is the manifest you accepted — the version that runs. An entry
+without one (written by hand) does not run; the Brains page shows it with a
+Remove button, and a new brain cannot be added in, around or on its folder
+until it is gone.
 
 A brain whose settings clash with another (same id, a group claimed twice, two
 DM brains, the same folder or a folder inside another brain's) is left out
@@ -409,8 +419,11 @@ Brains can neither read nor write:
   `~/.config/rclone`
 - `~/.git-credentials`, `~/.netrc`, shell history files
 - `~/Documents`, `~/Downloads`, `~/Desktop`, `~/Movies`, `~/Music`, `~/Pictures`
-- `~/Library/Mail`, `Messages`, `Calendars`, `Safari`, Chrome and Firefox
-  profiles, `Containers`, `Group Containers`, Contacts, Notes
+- `~/Library/Mail`, `Messages`, `Calendars`, `Containers`,
+  `Group Containers`, Contacts, Notes
+- the profiles of Safari, Chrome (all of `Application Support/Google`),
+  Firefox, Brave, Edge, Arc, Chromium, Vivaldi and Opera, with the release
+  channels kept beside them (Edge Beta, Vivaldi Snapshot, Opera GX, …)
 - the bridge's data directory — except `media/`, and a brain's own
   `run-tokens/<id>/` to read — under both names it has had, `~/.fridolin`
   and `~/.whatsapp-claude-bridge`, whichever is in use (an old one left
@@ -558,8 +571,10 @@ brain read its own token, and copied the OAuth client next to it as
 
 This is containment, not a jail — it raises the cost of a prompt injection
 rather than eliminating it. Linux has no `sandbox-exec`: the bridge refuses a
-config with `sandbox.enabled` on there (the Linux default is off). Run the
-bridge as a dedicated user instead.
+config with `sandbox.enabled` on there (the Linux default is off). Running
+the bridge as a dedicated user keeps brains out of your own files, but not
+out of the bridge's data dir: brains run as that user too, so they can read
+the dashboard token and change any setting.
 
 ### What the sandbox does not cover yet
 
@@ -627,7 +642,8 @@ writes deny-by-default.
 ### `data_dir` *(restart)*
 
 Database (including the WhatsApp session), downloaded media, the dashboard
-token, backup state, the bridge's rclone config and calendar credentials.
+token, the scripts token for `/send` and `/ingest` (`scripts.token`),
+backup state, the bridge's rclone config and calendar credentials.
 Default `~/.fridolin`; an install from before the project was renamed keeps
 `~/.whatsapp-claude-bridge` while `~/.fridolin` does not exist, and says so
 in the log at every start: set `data_dir` to it to keep it for good.
@@ -666,18 +682,12 @@ Address of the dashboard and the local APIs. Default `"127.0.0.1:8765"`;
 binds it before connecting to WhatsApp and exits if it is taken — usually a
 sign another bridge is running.
 
-`POST /send {"jid","text"}` sends a message (see the README); it is appended to
-the owning brain's history, so the assistant knows what went out under its
-name. Text that is empty or only whitespace is refused with 400, since there
-would be nothing to send. Status, broadcast-list and channel JIDs
-(`…@broadcast`, `…@newsletter`) are refused with `400 {"error": …}`.
-`GET /health` returns `ok` while the bridge runs, paired or not. `GET /ready`
-says whether `/send` can deliver: `200` once WhatsApp is connected (or in dev
-mode), `503` otherwise, both with
-`{"ready", "whatsapp", "version", "started_at"}`, where `whatsapp` is the
-connection state (`pairing`, `connecting`, `connected`, `logged-out`,
-`replaced`, …). None of these need the dashboard token, and all of them refuse
-requests sent by web pages.
+`POST /send {"jid","text"}` sends a message; it is appended to the owning
+brain's history, so the assistant knows what went out under its name.
+`GET /health` returns `ok` while the bridge runs, paired or not; `GET /ready`
+says whether `/send` can deliver. None of these need the dashboard token, and
+all of them refuse requests sent by web pages. [API.md](API.md) has their
+contract and that of `/ingest`: request bodies, answers, every status code.
 
 Brains reach `/brain/` there, which `fridolin polls` asks for the brain's
 poll results and `fridolin calendar` for its calendar calls. It takes no
@@ -685,7 +695,9 @@ dashboard token but one the bridge makes for each run, in a file in the
 data directory's `run-tokens/<id>/` that the sandbox lets only that
 brain read; the run's `FRIDOLIN_BRAIN_TOKEN_FILE` names it. The token
 stops working, and its file goes, when the run ends, and the bridge
-answers with that brain's things only. The token is not in the run's
+answers with that brain's things only. The same token lets the run use
+`/send` for the brain's own chats and `/ingest` for itself
+([API.md](API.md#who-may-call)). The token is not in the run's
 environment, since macOS shows a process's environment to every program
 of the same user, other brains included. With `http_listen` off, those
 commands do not work.
@@ -697,7 +709,24 @@ still sends `scope`, the old name of `brain`, is refused with 400 and told
 to use `brain`. Paths must be files inside the media directory. The
 named brain receives them like WhatsApp attachments and answers in its
 `reply_chat`, even when that chat belongs to another brain (your DM, say).
-Off by default.
+Off by default; see [API.md](API.md#post-ingest). It always needs a token:
+yours in `<data_dir>/scripts.token`, or a brain's run's, which hands files
+only to that brain.
+
+### `script_api.tokenless_send`
+
+```json
+"script_api": { "tokenless_send": false }
+```
+
+Whether `POST /send` works without a token, as it did before tokens. Without
+one it reaches only the chats `allowed_numbers` and `allowed_groups` name.
+Unset means `true`, so scripts written before tokens keep working; new
+configs set it to `false`. While it is on, any program on this computer, a
+brain among them, can message those chats, and the dashboard says so. Have
+your scripts send the token in `<data_dir>/scripts.token` as
+`Authorization: Bearer …`, then turn it off (Settings → Advanced). Brains
+send their run's token; see [API.md](API.md#who-may-call).
 
 ### `queue`
 
@@ -771,9 +800,64 @@ The Plaud recorder integration; see [PLAUD.md](PLAUD.md) for every setting.
 ### `dashboard`
 
 `dashboard.disabled` turns the web dashboard off (*restart*).
+
+Browsers sign in rather than keep the token. `fridolin open`, and the line
+the bridge prints when it starts in a terminal, give the browser a link with
+a login code that works once, within a minute; the page trades it (or a
+token you paste) for a session that lasts 30 days, which replaces the one
+the browser had. A bridge older than the `fridolin` you run `open` from
+has no login codes: `open` then says so and how to open its dashboard,
+rather than putting the token in the link. A session is two
+halves: an HttpOnly, SameSite=Strict cookie, and a binding the page keeps
+in the browser's storage for the dashboard's address and sends with every
+call (`X-Bridge-Session`). The bridge takes neither alone. Cookies are not
+kept apart by port, so the browser sends the cookie to every server on
+`127.0.0.1`, a brain's [site preview](SITE.md) among them; that server
+cannot read the dashboard's storage, which belongs to its own port.
+
+The binding is in the browser's files on disk too, so this keeps a session
+out of a brain's reach only in a browser whose profile the macOS sandbox
+denies to brains: Safari, Chrome (every channel), Chromium, Brave, Arc,
+Edge, Vivaldi, Opera and Firefox. In another Chromium browser (Thorium,
+Yandex, Comet and others) a brain can read the binding, and gets the cookie
+once you open a server it runs on `127.0.0.1` in that browser, such as its
+site preview, which the Build page shows too; Chromium keeps cookies
+encrypted on disk, so it needs that request. Firefox forks (Zen, LibreWolf,
+Waterfox, Floorp) keep cookies unencrypted, so there a brain can read both
+halves without one. Use one of the listed browsers for the dashboard, or at
+least open no brain's server, the Build page included, in the one you sign
+in with.
+
+Sessions are kept, as hashes, in `<data_dir>/dashboard-sessions.json`, so a
+restart keeps you signed in. *Settings → Dashboard sign-in* signs this
+browser out, or every browser, which also replaces the token: scripts that
+send the old one in `X-Bridge-Token` are refused from then on.
+`fridolin rotate-token` does the same from a terminal, also while the
+bridge is stopped. A bridge that runs with `dashboard.disabled` has no
+dashboard API to replace the token through: run it while the bridge is
+stopped, or once the dashboard is back on.
+
+Versions before sign-in put the token in the link `fridolin open` opened
+and kept it in the browser's storage, so after upgrading from one,
+copies of the token may still be in the browser's history and in the
+leftovers of that storage on disk, which a brain could read in a browser
+the sandbox does not deny. They work until the token changes: run
+`fridolin rotate-token` (or *Sign out everywhere*) once the new build runs,
+and give scripts that send `X-Bridge-Token` the new one. The upgrade does
+not do it for you, since that would cut those scripts off without warning.
+
 `dashboard.require_token` (default `true`) requires the token from
 `<data_dir>/dashboard.token` on every API call. Brains run on this machine and
-could otherwise reach the dashboard with `curl`; leave it on.
+could otherwise reach the dashboard with `curl`; leave it on. Turning it off
+takes effect only after a restart, and the dashboard warns about it until
+then and for as long as it stays off; turning it on applies at once.
+
+The token keeps brains out only while they cannot read the data dir. The
+macOS sandbox denies it to them. On Linux, or on macOS with the sandbox off,
+a brain that runs with `dangerously_skip_permissions` can read the token,
+`config.json` and the WhatsApp session like any other file of yours, and so
+change every setting; the dashboard shows a warning whenever that is the
+case.
 
 ### `otp_guard` and `otp_markers`
 
@@ -900,7 +984,9 @@ On top, the bridge sets `FRIDOLIN_BRAIN_ID`, the brain's id; `FRIDOLIN_BIN`
 and `FRIDOLIN_TOOLS_DIR`, its own binary and the folder of its Python
 helpers ([BRAINS.md](BRAINS.md#what-a-brain-loads)); `FRIDOLIN_API` and
 `FRIDOLIN_BRAIN_TOKEN_FILE`, where the brain API is and the file with the
-run's token for it (see [`http_listen`](#http_listen-restart));
+run's token for it (see [`http_listen`](#http_listen-restart)), which
+also opens [`/send` and `/ingest`](API.md#who-may-call) to the brain's own
+chats and itself;
 `PLAUD_TELEMETRY_DISABLED=1` and `PLAUD_NO_UPDATE_NOTIFIER=1` for
 [Plaud](PLAUD.md)'s CLI, with `plaud.brain_access` a `PATH` that starts
 with that CLI's folder; and `DISABLE_AUTOUPDATER=1` in the sandbox. It

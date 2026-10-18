@@ -36,13 +36,16 @@ export function matchRoute(routes, hash) {
 }
 
 /**
- * The token in a #token=… fragment, the way `fridolin open` passes it, or
+ * What signs in from the fragment: { code } from a #login=… link, the way
+ * `fridolin open` passes it, { token } from an older #token=… link, or
  * null. A malformed escape is kept as typed: the bridge then refuses it and
  * the connect screen says so, where throwing would stop the app from starting.
  */
-export function tokenFromHash(hash) {
-  if (!String(hash || '').startsWith('#token=')) return null;
-  return decode(hash.slice('#token='.length));
+export function credentialFromHash(hash) {
+  const h = String(hash || '');
+  if (h.startsWith('#login=')) return { code: decode(h.slice('#login='.length)) };
+  if (h.startsWith('#token=')) return { token: decode(h.slice('#token='.length)) };
+  return null;
 }
 
 /** The link to a route without its parameters, as the sidebar uses it. */

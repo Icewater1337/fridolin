@@ -2,7 +2,7 @@
 // everything else in the file (including fields this page does not show) is
 // sent back exactly as received.
 
-import { put } from '../app/api.js';
+import { put, rotateToken, signOut } from '../app/api.js';
 import { setRestartRequired } from '../app/store.js';
 import { configResource } from '../app/resources.js';
 import { h, mount, paint } from '../lib/dom.js';
@@ -59,7 +59,7 @@ const SECTIONS = [
       { key: 'max_media_mb', type: 'int', def: 100, min: 1, max: 2048, label: 'Largest attachment (MB)', help: 'Bigger files are not downloaded, and the sender is told. A download also has two minutes to finish. At most 2048.' },
       { key: 'otp_guard', type: 'bool', label: 'Hold back one-time codes', help: 'After the assistant asked for a code, a message that is only a 4–8 digit number is dropped before the model sees it, and kept in the data folder’s otp/ for the local script that asked for it.' },
       { key: 'otp_markers', type: 'list', label: 'Phrases that ask for a code', placeholder: 'verification code', addLabel: 'Add phrase', help: 'Empty uses the built-in list: 🔐, OTP, 2FA, one-time code, verification code.' },
-      { key: 'ingest.enabled', type: 'bool', label: 'Accept files through /ingest', help: 'Lets local programs (a web upload, a recorder sync) hand files to a brain with POST /ingest.' },
+      { key: 'ingest.enabled', type: 'bool', label: 'Accept files through /ingest', help: 'Lets local programs (a web upload, a recorder sync) hand files to a brain with POST /ingest. Every call needs a token: your programs send the one in scripts.token in the data folder (Authorization: Bearer …); a brain sends its own, and may hand files only to itself.' },
     ],
   },
   {
@@ -94,10 +94,40 @@ const SECTIONS = [
       { key: 'data_dir', type: 'text', mono: true, restart: true, label: 'Data folder', help: 'Holds the WhatsApp pairing, the database, media and the dashboard token. Changing it does not move those files — the bridge starts fresh (and unpaired) in the new folder. At startup the folder is made private to your user (mode 0700), unless it is your home folder, one above it or another user’s folder.' },
       { key: 'log_level', type: 'select', restart: true, label: 'Log level', options: [['', 'Default (info)'], ['debug', 'Debug — very verbose'], ['info', 'Info'], ['warn', 'Warnings'], ['error', 'Errors only']] },
       { key: 'viewer', type: 'bool', label: 'Open a terminal viewer per brain', help: 'macOS, needs tmux. Opens a Terminal window per brain that follows its activity. Handy while tuning a prompt. Its tmux runs outside the sandbox, and brains can send it commands.' },
-      { key: 'dashboard.require_token', type: 'bool', def: true, label: 'Require the dashboard token', confirmOff: true, help: 'Brains run on this computer and can reach this dashboard. The token is what stops a manipulated brain from changing these settings — or turning the sandbox off.' },
+      { key: 'script_api.tokenless_send', type: 'bool', def: true, label: 'Let /send work without a token', help: 'For scripts written before /send had tokens: without one, it reaches only your allowed chats. While this is on, any program on this computer — a brain too — can message those chats. Scripts send the token in scripts.token in the data folder; brains get their own.' },
+      { key: 'dashboard.require_token', type: 'bool', def: true, label: 'Require the dashboard token', confirmOff: true, help: 'Brains run on this computer and can reach this dashboard. The token is what stops a manipulated brain from changing these settings — or turning the sandbox off. Turning it off takes effect after a restart; turning it on, at once.' },
     ],
   },
 ];
+
+// Signing out this browser, or every browser and script that holds the
+// dashboard token, which `fridolin rotate-token` does too.
+function dashboardSignInCard() {
+  return h('section.card.settings-section', { id: 'sec-signin' },
+    h('h2', 'Dashboard sign-in'),
+    h('p.muted.section-intro', 'This browser stays signed in for 30 days: a cookie page scripts cannot read, which counts only with a key this page keeps for its own address. Signing out everywhere also replaces the dashboard token, so a copy of it that got out stops working.'),
+    h('div.actions',
+      btn('Sign out', {
+        icon: 'lock',
+        onClick: async () => { await signOut(); location.reload(); },
+      }),
+      btn('Sign out everywhere…', {
+        kind: 'danger', icon: 'key',
+        onClick: async () => {
+          const ok = await confirmDialog({
+            title: 'Sign out everywhere?',
+            message: h('div',
+              h('p', 'Every other browser is signed out, and the dashboard token is replaced: scripts that send the old one are refused. This browser stays signed in.'),
+              h('p.muted', 'Open the dashboard elsewhere again with fridolin open.')),
+            confirm: 'Sign out everywhere',
+            danger: true,
+          });
+          if (!ok) return;
+          await rotateToken();
+          toast('Every other browser was signed out, and the dashboard token replaced', 'ok');
+        },
+      })));
+}
 
 function getPath(obj, key) {
   return key.split('.').reduce((o, k) => (o && typeof o === 'object' ? o[k] : undefined), obj);
@@ -121,6 +151,7 @@ export default {
     const bar = saveBar({ save: btn('Save', { kind: 'primary', icon: 'check', onClick: () => save() }), onDiscard: () => form.discard(), floating: true });
     const where = h('span'); // the file, once the settings have loaded
     const googleCard = googleClientCard({ signal: ctx.signal });
+    const signInCard = dashboardSignInCard();
     mount(root, pageHeader('Settings', where), body, bar);
 
     // Only the settings edited here count as a conflict: one changed
@@ -182,8 +213,9 @@ export default {
         return el;
       });
       chip('Google sign-in', 'google', googleCard);
+      chip('Dashboard sign-in', 'signin', signInCard);
       return {
-        el: h('div.page-stack', nav, sections, googleCard),
+        el: h('div.page-stack', nav, sections, googleCard, signInCard),
         value: () => controls.map((c) => c.value()),
         controls,
       };
@@ -257,6 +289,7 @@ function makeControl(f, cfg, eff, onChange) {
             title: 'Turn off the dashboard token?',
             message: h('div',
               h('p', 'Without the token, any program on this computer can change the bridge’s settings — including a brain that was tricked by a message into doing so. It could allow new chats, widen its own routing or switch the sandbox off.'),
+              h('p', 'It takes effect after the bridge restarts. Until then the token is still required.'),
               h('p', h('strong', 'Only do this on a machine where nothing untrusted runs.'))),
             confirm: 'Turn it off',
             danger: true,

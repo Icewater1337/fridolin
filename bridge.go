@@ -47,11 +47,17 @@ type Bridge struct {
 	logs     *LogRing
 	activity *Activity
 	token    *DashboardToken
-	backup   *BackupManager
-	google   *GoogleAuth
-	plaud    *PlaudManager
-	site     *SiteManager
-	started  time.Time
+	// tokenAtStart is dashboard.require_token as the bridge started.
+	tokenAtStart bool
+	sessions     *dashSessions
+	// sessionCookie names the session cookie for the address served on.
+	sessionCookie string
+	scriptAuth    *scriptAuth
+	backup        *BackupManager
+	google        *GoogleAuth
+	plaud         *PlaudManager
+	site          *SiteManager
+	started       time.Time
 
 	// listen is the address the HTTP server binds, "" when it is off;
 	// runs reach the brain API there with a token from runTokens.
@@ -64,6 +70,9 @@ type Bridge struct {
 
 	mu       sync.Mutex
 	warnings []string // from startup checks
+
+	// addMu makes adding a brain one step at a time (apiAddBrain).
+	addMu sync.Mutex
 }
 
 // BridgeOptions are the run-time switches from the command line.
@@ -174,6 +183,7 @@ func NewBridge(cfgs *ConfigStore, opts BridgeOptions) (_ *Bridge, err error) {
 			log.Printf("applying configuration: %v", err)
 		}
 		logDMAccess(prev, next)
+		logSecurityChanges(prev, next)
 		for _, br := range b.brainMgr.Brains() {
 			b.activity.Seed(br)
 		}
@@ -184,6 +194,16 @@ func NewBridge(cfgs *ConfigStore, opts BridgeOptions) (_ *Bridge, err error) {
 		return nil, err
 	}
 	b.token = tok
+	b.tokenAtStart = cfg.DashboardRequiresToken()
+	if b.sessions, err = loadDashSessions(cfg.DataDir); err != nil {
+		return nil, err
+	}
+	if b.scriptAuth, err = newScriptAuth(cfg.DataDir, b.runTokens.brainOf, func(id string) bool { return b.brainMgr.Get(id) != nil }); err != nil {
+		return nil, err
+	}
+	if !b.tokenAtStart {
+		log.Printf("warning: dashboard.require_token is off: any program on this computer, brains included, can change every setting through the dashboard API")
+	}
 	b.backup = NewBackupManager(cfgs, b.brainMgr)
 	// A refused scheduled backup goes to the brain's chat, like Plaud's
 	// expired-login notice: the owner may not open the dashboard for weeks.
@@ -216,10 +236,7 @@ func (b *Bridge) Start(ctx context.Context) error {
 		if err != nil {
 			return fmt.Errorf("listening on %s (is another bridge running?): %w", b.listen, err)
 		}
-		b.httpSrv = &http.Server{
-			Handler:           b.newHTTPHandler(b.listen),
-			ReadHeaderTimeout: 10 * time.Second,
-		}
+		b.httpSrv = newHTTPServer(b.newHTTPHandler(b.listen))
 		go func() {
 			if err := b.httpSrv.Serve(ln); err != nil && err != http.ErrServerClosed {
 				log.Printf("HTTP server error: %v", err)
@@ -239,6 +256,23 @@ func (b *Bridge) Start(ctx context.Context) error {
 	log.Println("Bridge started. Waiting for messages…")
 	<-ctx.Done()
 	return nil
+}
+
+// newHTTPServer is the server for the dashboard, /send, /ingest and
+// /brain/. Any local program can connect, so none may hold a connection
+// for ever: reading a request (headers and body, which is 1 MiB at most)
+// is cut off after 30 seconds and an idle keep-alive connection after two
+// minutes. There is no write timeout, because some handlers rightly take
+// minutes: a folder picker waits for you, rclone lists versions, a sign-in
+// checks back with Google.
+func newHTTPServer(h http.Handler) *http.Server {
+	return &http.Server{
+		Handler:           h,
+		ReadHeaderTimeout: 10 * time.Second,
+		ReadTimeout:       30 * time.Second,
+		IdleTimeout:       2 * time.Minute,
+		MaxHeaderBytes:    64 << 10,
+	}
 }
 
 // connectLoop connects to WhatsApp, retrying while the network is down.
@@ -558,8 +592,8 @@ func (b *Bridge) runStartupChecks(ctx context.Context) {
 		return
 	}
 	jid := cfg.StartupChecks.NotifyJID
-	if jid == "" && len(cfg.AllowedNumbers) > 0 {
-		jid = userJID(cfg.AllowedNumbers[0])
+	if jid == "" {
+		jid = ownerChat(cfg)
 	}
 	if jid == "" {
 		return

@@ -646,7 +646,7 @@ func TestBackupVersionsNewestFirst(t *testing.T) {
 	tb.backup.runner = func(_ context.Context, args []string, _ io.Writer) ([]byte, error) {
 		return []byte(`[{"Name":"20261001-120000"},{"Name":"manual-copy"},{"Name":"20261016-080000Z"},{"Name":"20261015-080000"},{"Name":"20250101-000000"}]`), nil
 	}
-	w := tb.do("GET", "/api/backup/versions?brain=notes", nil)
+	w := tb.do("GET", "/api/brains/notes/backup/versions", nil)
 	if w.Code != 200 {
 		t.Fatal(w.Body.String())
 	}
@@ -1467,7 +1467,7 @@ func TestBackupExcludedThenDeletedWithRealRclone(t *testing.T) {
 		t.Fatalf("first backup = %+v", res)
 	}
 
-	if w := tb.do("PUT", "/api/backup/settings", map[string]any{"brain": "notes", "brain_exclude": []string{"exports/"}}); w.Code != 200 {
+	if w := tb.do("PUT", "/api/brains/notes/backup", map[string]any{"exclude": []string{"exports/"}}); w.Code != 200 {
 		t.Fatal(w.Body.String())
 	}
 	if err := os.RemoveAll(filepath.Join(dir, "exports")); err != nil {
@@ -2148,8 +2148,8 @@ func TestBackupRestoreChecksWhatItIsGiven(t *testing.T) {
 			t.Errorf("a refused restore made ~/%s (%v)", made, err)
 		}
 	}
-	for _, id := range []string{"..", "a/b", ""} {
-		if w := tb.do("GET", "/api/backup/versions?brain="+url.QueryEscape(id), nil); w.Code != 400 {
+	for _, id := range []string{"a/b", "a:b", "a\x01b"} {
+		if w := tb.do("GET", "/api/brains/"+url.PathEscape(id)+"/backup/versions", nil); w.Code != 400 {
 			t.Errorf("versions of %q = %d, want 400", id, w.Code)
 		}
 	}
@@ -2167,7 +2167,7 @@ func TestBackupRestoreNeedsDrive(t *testing.T) {
 	if w := tb.do("POST", "/api/backup/restore", map[string]string{"brain": "notes", "version": "current", "target": "~/restored"}); w.Code != 412 {
 		t.Errorf("restore = %d %s, want 412", w.Code, w.Body.String())
 	}
-	if w := tb.do("GET", "/api/backup/versions?brain=notes", nil); w.Code != 412 {
+	if w := tb.do("GET", "/api/brains/notes/backup/versions", nil); w.Code != 412 {
 		t.Errorf("versions = %d %s, want 412", w.Code, w.Body.String())
 	}
 }

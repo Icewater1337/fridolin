@@ -706,6 +706,48 @@ func TestSandboxedRunReachesTheBrainAPI(t *testing.T) {
 	}
 }
 
+// TestSandboxDeniesBrowserProfiles: under the real sandbox-exec a brain
+// reads no browser's profile, where a dashboard session lives, in any
+// release channel beside the stable one; other programs' folders in
+// Application Support stay readable.
+func TestSandboxDeniesBrowserProfiles(t *testing.T) {
+	requireSandboxExec(t)
+	for _, l := range sandboxLayouts() {
+		t.Run(l.name, func(t *testing.T) {
+			home := l.home(t)
+			t.Setenv("HOME", home)
+			sp, ownDir := sandboxFixture(t, home, l.otherBrain, l.denyDir)
+			for _, c := range []struct {
+				folder string
+				want   bool // readable
+			}{
+				{"Google/Chrome Canary", false},
+				{"BraveSoftware/Brave-Browser-Beta", false},
+				{"Microsoft Edge", false},
+				{"Microsoft Edge Beta", false},
+				{"Microsoft Edge Dev", false},
+				{"Vivaldi Snapshot", false},
+				{"com.operasoftware.OperaGX", false},
+				{"com.operasoftware.OperaNext", false},
+				{"SomeTool", true},
+			} {
+				t.Run(c.folder, func(t *testing.T) {
+					p := filepath.Join(home, "Library", "Application Support", c.folder, "Default", "Cookies")
+					if err := os.MkdirAll(filepath.Dir(p), 0o700); err != nil {
+						t.Fatal(err)
+					}
+					if err := os.WriteFile(p, []byte("cookies"), 0o600); err != nil {
+						t.Fatal(err)
+					}
+					if allowed, out := sandboxRun(t, sp, ownDir, "/bin/cat", p); allowed != c.want {
+						t.Errorf("reading %s: allowed %v, want %v (%q)", c.folder, allowed, c.want, out)
+					}
+				})
+			}
+		})
+	}
+}
+
 // TestSandboxDeniesTheConfigFile: a config.json outside the data dir, and
 // the .env older versions read next to it, are neither readable nor
 // writable under the real sandbox-exec.

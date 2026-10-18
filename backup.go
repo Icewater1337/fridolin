@@ -533,8 +533,9 @@ func (b *Bridge) apiBackupStatus(w http.ResponseWriter, r *http.Request) {
 	} else if !errors.Is(err, errRcloneMissing) {
 		rc["error"] = err.Error() // backup.rclone_path names one that does not work
 	}
+	// The response is built under the lock and written after it: a client
+	// that reads slowly must not hold up the backup job.
 	m.mu.Lock()
-	defer m.mu.Unlock()
 	type brainRow struct {
 		ID      string        `json:"id"`
 		Name    string        `json:"name"`
@@ -547,11 +548,12 @@ func (b *Bridge) apiBackupStatus(w http.ResponseWriter, r *http.Request) {
 	for _, br := range b.brainMgr.Brains() {
 		s := br.settings.Load()
 		rows = append(rows, brainRow{ID: br.ID(), Name: s.name, Dir: br.Dir(), Enabled: s.manifest.Backup.Enabled,
-			Exclude: nonNil(s.manifest.Backup.Exclude), Last: m.state.Brains[br.ID()]})
+			Exclude: nonNil(s.manifest.Backup.Exclude), Last: copyOf(m.state.Brains[br.ID()])})
 	}
 	var job map[string]any
 	if j := m.job; j != nil {
-		job = map[string]any{"kind": j.kind, "started": j.started, "current": j.current, "queue": j.queue, "done": j.done}
+		job = map[string]any{"kind": j.kind, "started": j.started, "current": j.current,
+			"queue": slices.Clone(j.queue), "done": slices.Clone(j.done)}
 		if j.kind == jobRestore {
 			job["brain"], job["target"] = j.brain, j.target
 		}
@@ -560,17 +562,18 @@ func (b *Bridge) apiBackupStatus(w http.ResponseWriter, r *http.Request) {
 	resp := map[string]any{
 		"rclone":                rc,
 		"connected":             connected,
-		"connect":               m.connect,
+		"connect":               copyOf(m.connect),
 		"settings":              cfg.Backup,
 		"include_bridge_config": cfg.Backup.includeBridge(),
 		"brains":                rows,
-		"bridge":                m.state.Bridge,
+		"bridge":                copyOf(m.state.Bridge),
 		"job":                   job,
-		"last_restore":          m.state.LastRestore,
+		"last_restore":          copyOf(m.state.LastRestore),
 	}
 	if next := m.nextRunLocked(cfg, connected); next != nil {
 		resp["next_run"] = *next
 	}
+	m.mu.Unlock()
 	writeJSON(w, http.StatusOK, resp)
 }
 
@@ -853,14 +856,11 @@ func (b *Bridge) apiBackupDisconnect(w http.ResponseWriter, r *http.Request) {
 
 func (b *Bridge) apiBackupSettings(w http.ResponseWriter, r *http.Request) {
 	var req struct {
-		Enabled             *bool    `json:"enabled"`
-		DailyAt             *string  `json:"daily_at"`
-		Root                *string  `json:"root"`
-		KeepVersionsDays    *int     `json:"keep_versions_days"`
-		IncludeBridgeConfig *bool    `json:"include_bridge_config"`
-		Brain               string   `json:"brain"`
-		BrainEnabled        *bool    `json:"brain_enabled"`
-		BrainExclude        []string `json:"brain_exclude"`
+		Enabled             *bool   `json:"enabled"`
+		DailyAt             *string `json:"daily_at"`
+		Root                *string `json:"root"`
+		KeepVersionsDays    *int    `json:"keep_versions_days"`
+		IncludeBridgeConfig *bool   `json:"include_bridge_config"`
 	}
 	if err := decodeJSON(r, &req); err != nil {
 		writeErr(w, http.StatusBadRequest, err.Error())
@@ -882,12 +882,29 @@ func (b *Bridge) apiBackupSettings(w http.ResponseWriter, r *http.Request) {
 		if req.IncludeBridgeConfig != nil {
 			c.Backup.IncludeBridgeConfig = req.IncludeBridgeConfig
 		}
-		if req.Brain == "" {
-			return nil
-		}
-		return updateBrainBackup(c, req.Brain, req.BrainEnabled, req.BrainExclude)
+		return nil
 	})
 	if err != nil {
+		writeErr(w, http.StatusUnprocessableEntity, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"status": "saved"})
+}
+
+// apiBrainBackup changes one brain's backup settings, which live in its
+// manifest: whether it is backed up and what is left out.
+func (b *Bridge) apiBrainBackup(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Enabled *bool    `json:"enabled"`
+		Exclude []string `json:"exclude"`
+	}
+	if err := decodeJSON(r, &req); err != nil {
+		writeErr(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	if _, err := b.cfgs.Update("", func(c *Config) error {
+		return updateBrainBackup(c, r.PathValue("id"), req.Enabled, req.Exclude)
+	}); err != nil {
 		writeErr(w, http.StatusUnprocessableEntity, err.Error())
 		return
 	}
@@ -923,7 +940,7 @@ func (b *Bridge) apiBackupRun(w http.ResponseWriter, r *http.Request) {
 		// files are gone (see checkMassDeletion).
 		Force bool `json:"force"`
 	}
-	if err := decodeJSON(r, &req); err != nil {
+	if err := decodeOptionalJSON(r, &req); err != nil {
 		writeErr(w, http.StatusBadRequest, err.Error())
 		return
 	}
@@ -943,13 +960,26 @@ func (b *Bridge) apiBackupRun(w http.ResponseWriter, r *http.Request) {
 
 func (b *Bridge) apiBackupCancel(w http.ResponseWriter, r *http.Request) {
 	b.backup.mu.Lock()
-	defer b.backup.mu.Unlock()
-	if b.backup.job == nil {
+	job := b.backup.job
+	if job != nil {
+		job.cancel()
+	}
+	b.backup.mu.Unlock()
+	if job == nil {
 		writeErr(w, http.StatusConflict, "no backup is running")
 		return
 	}
-	b.backup.job.cancel()
 	writeJSON(w, http.StatusOK, map[string]string{"status": "cancelling"})
+}
+
+// copyOf returns a copy of *p, or nil: what the status shows of state a
+// job goes on changing once the lock is released.
+func copyOf[T any](p *T) *T {
+	if p == nil {
+		return nil
+	}
+	c := *p
+	return &c
 }
 
 // StartRun backs up the given brains (all with backup enabled when empty).
@@ -1573,9 +1603,9 @@ func backupNameOK(id string) bool {
 var restoreVersionRe = regexp.MustCompile(`^(current|\d{8}-\d{6}Z?)$`)
 
 func (b *Bridge) apiBackupVersions(w http.ResponseWriter, r *http.Request) {
-	id := r.URL.Query().Get("brain")
+	id := r.PathValue("id")
 	if !backupNameOK(id) {
-		writeErr(w, http.StatusBadRequest, "brain required")
+		writeErr(w, http.StatusBadRequest, "invalid brain")
 		return
 	}
 	if !b.backup.connected() {
@@ -1621,7 +1651,7 @@ func resolveExisting(p string) string {
 // It returns the folder, resolved.
 func (b *Bridge) restoreTarget(p string) (string, error) {
 	cfg := b.cfgs.Get()
-	target, problems, _ := CheckBrainPath(resolveExisting(expandHome(strings.TrimSpace(p), homeDir())), cfg, b.otherBrainDirs(""))
+	target, problems, _ := CheckBrainPath(resolveExisting(expandHome(strings.TrimSpace(p), homeDir())), cfg, brainDirs(cfg))
 	if creds := canonicalDir(cfg.Sandbox.CredentialsDir); len(problems) == 0 && creds != "" && (isWithin(target, creds) || isWithin(creds, target)) {
 		problems = append(problems, "the credentials folder cannot be (or contain) the restore folder")
 	}

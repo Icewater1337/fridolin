@@ -156,12 +156,16 @@ export default {
       const notDir = r.exists && !r.is_dir;
       if (notDir) problems.push('This path is a file, not a folder.');
       const facts = [];
-      if (!r.exists) facts.push(['folderPlus', 'New folder — it will be created when you add the brain.']);
-      else if (r.is_dir) facts.push(['folder', r.entries ? `Existing folder with ${r.entries} item${r.entries === 1 ? '' : 's'}.` : 'Existing, empty folder.']);
-      if (r.is_git) facts.push(['git', 'Git repository — the brain’s files (history, memories) will show up as changes. Consider ignoring them.']);
-      if (r.has_prompt) facts.push(['check', 'Has brain-prompt.md — it is kept as it is.']);
-      else if (!r.manifest) facts.push(['edit', 'A starter brain-prompt.md will be created for you to edit.']);
-      if (r.has_history) facts.push(['check', 'Has conversation history — it is kept and the brain picks up from it.']);
+      // The bridge does not look into a folder that cannot be a brain, so
+      // there are no facts about it to show.
+      if (!problems.length) {
+        if (!r.exists) facts.push(['folderPlus', 'New folder — it will be created when you add the brain.']);
+        else if (r.is_dir) facts.push(['folder', r.entries ? `Existing folder with ${r.entries} item${r.entries === 1 ? '' : 's'}.` : 'Existing, empty folder.']);
+        if (r.is_git) facts.push(['git', 'Git repository — the brain’s files (history, memories) will show up as changes. Consider ignoring them.']);
+        if (r.has_prompt) facts.push(['check', 'Has brain-prompt.md — it is kept as it is.']);
+        else if (!r.manifest) facts.push(['edit', 'A starter brain-prompt.md will be created for you to edit.']);
+        if (r.has_history) facts.push(['check', 'Has conversation history — it is kept and the brain picks up from it.']);
+      }
 
       const actions = h('div.actions.wizard-actions', btn('Choose another folder', { icon: 'left', onClick: () => go('folder') }));
       let manifestBox = null;

@@ -39,6 +39,8 @@ type BrainSpec struct {
 	// at ~/.ssh with a symlink; checking the path here would not, as the
 	// brain can plant one at any time after.
 	PromptFile string
+	// entry is the spec's index in brain_dirs, which its issues carry.
+	entry int
 }
 
 // BrainIssue is a problem with one configured brain, shown on the dashboard.
@@ -50,6 +52,10 @@ type BrainIssue struct {
 	// atLoad marks one the brain manager found as it loaded the brains, a
 	// folder it could not open, which ResolveBrains does not see.
 	atLoad bool
+	// entry is the index in brain_dirs of the entry the issue is about.
+	// The dashboard shows an issue on that entry, not on every entry with
+	// the same folder.
+	entry int
 }
 
 // ResolveBrains turns the brain folders in the configuration into runnable
@@ -59,36 +65,36 @@ func ResolveBrains(cfg *Config) ([]BrainSpec, []BrainIssue) {
 	var specs []BrainSpec
 	var issues []BrainIssue
 
-	for _, ref := range cfg.BrainDirs {
+	for i, ref := range cfg.BrainDirs {
 		dir := canonicalDir(ref.Path)
 		if ref.Approved == nil {
-			issues = append(issues, BrainIssue{Path: ref.Path, Kind: "unapproved", Detail: "no approved manifest — re-add this brain"})
+			issues = append(issues, BrainIssue{Path: ref.Path, Kind: "unapproved", Detail: "no approved manifest — remove this entry and add the folder again", entry: i})
 			continue
 		}
 		m := ref.Approved.normalized()
 		if err := m.Validate(); err != nil {
-			issues = append(issues, BrainIssue{ID: m.ID, Path: ref.Path, Kind: "invalid", Detail: err.Error()})
+			issues = append(issues, BrainIssue{ID: m.ID, Path: ref.Path, Kind: "invalid", Detail: err.Error(), entry: i})
 			continue
 		}
 		if st, err := os.Stat(dir); err != nil || !st.IsDir() {
-			issues = append(issues, BrainIssue{ID: m.ID, Path: ref.Path, Kind: "missing", Detail: "folder not found"})
+			issues = append(issues, BrainIssue{ID: m.ID, Path: ref.Path, Kind: "missing", Detail: "folder not found", entry: i})
 			continue
 		}
 		if disk, err := ReadManifest(dir); err == nil && !disk.Equal(m) {
-			issues = append(issues, BrainIssue{ID: m.ID, Path: ref.Path, Kind: "drift", Detail: "brain.json changed on disk — review and approve it in the dashboard"})
+			issues = append(issues, BrainIssue{ID: m.ID, Path: ref.Path, Kind: "drift", Detail: "brain.json changed on disk — review and approve it in the dashboard", entry: i})
 		} else if err != nil && !errors.Is(err, fs.ErrNotExist) {
-			issues = append(issues, BrainIssue{ID: m.ID, Path: ref.Path, Kind: "drift", Detail: err.Error()})
+			issues = append(issues, BrainIssue{ID: m.ID, Path: ref.Path, Kind: "drift", Detail: err.Error(), entry: i})
 		}
 		// Validate kept prompt_file inside the folder; the folder's os.Root
 		// keeps it there when the bridge reads it.
-		specs = append(specs, BrainSpec{Manifest: m, Dir: dir, Path: filepath.Clean(ref.Path), PromptFile: m.PromptFile})
+		specs = append(specs, BrainSpec{Manifest: m, Dir: dir, Path: filepath.Clean(ref.Path), PromptFile: m.PromptFile, entry: i})
 	}
 
 	// Drop brains that clash with an earlier one rather than refusing to run.
 	var ok []BrainSpec
 	for _, s := range specs {
 		if err := ValidateBrainSet(append(append([]BrainSpec{}, ok...), s)); err != nil {
-			issues = append(issues, BrainIssue{ID: s.Manifest.ID, Path: s.Dir, Kind: "invalid", Detail: err.Error()})
+			issues = append(issues, BrainIssue{ID: s.Manifest.ID, Path: s.Dir, Kind: "invalid", Detail: err.Error(), entry: s.entry})
 			continue
 		}
 		ok = append(ok, s)
@@ -206,6 +212,21 @@ func isWithin(p, dir string) bool {
 		return false
 	}
 	return rel == "." || (rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)))
+}
+
+// inHome builds p, an absolute path a request named, again from your home
+// folder and the part of p below it. CheckBrainPath decides whether such a
+// folder may be used, but it only reports: the folder it hands back is still
+// the one the request named. What a handler then makes, lists or removes is
+// built this way, inside the home folder by construction. ok is false for
+// the home folder itself and for anything outside it.
+func inHome(p string) (string, bool) {
+	home := canonicalDir(homeDir())
+	rel, err := filepath.Rel(home, p)
+	if home == "" || err != nil || rel == "." || !filepath.IsLocal(rel) {
+		return "", false
+	}
+	return filepath.Join(home, rel), true
 }
 
 // UpdateManifest changes one brain's manifest, see updateManifestIn.

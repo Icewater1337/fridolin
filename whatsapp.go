@@ -211,6 +211,57 @@ func (wa *WhatsAppClient) Disconnect() {
 	wa.client.Disconnect()
 }
 
+// errOffline marks a send that failed because WhatsApp is not connected or
+// not paired: worth trying again later, and not the caller's mistake.
+var errOffline = errors.New("WhatsApp is not connected")
+
+// errBadRecipient marks a send to an address WhatsApp has no chat for.
+var errBadRecipient = errors.New("not a chat WhatsApp can send to")
+
+// classifySendErr marks err, from whatsmeow, with errOffline or
+// errBadRecipient where it is one, so callers can tell them apart without
+// knowing whatsmeow.
+func classifySendErr(err error) error {
+	switch {
+	case errors.Is(err, whatsmeow.ErrNotConnected), errors.Is(err, whatsmeow.ErrNotLoggedIn):
+		return fmt.Errorf("%w: %w", errOffline, err)
+	case errors.Is(err, whatsmeow.ErrUnknownServer):
+		return fmt.Errorf("%w: %w", errBadRecipient, err)
+	}
+	return err
+}
+
+// partialSendError is a chunked send that failed after some chunks went
+// out: sent holds those, as the chat shows them.
+type partialSendError struct {
+	sent  []string
+	total int
+	err   error
+}
+
+func (e *partialSendError) Error() string {
+	return fmt.Sprintf("sent %d of %d parts, then: %v", len(e.sent), e.total, e.err)
+}
+
+func (e *partialSendError) Unwrap() error { return e.err }
+
+// sendChunks sends chunks one by one with send, pausing between them. A
+// failure after the first chunk is a *partialSendError naming what went out.
+func sendChunks(chunks []string, pause time.Duration, send func(chunk string) error) error {
+	for i, chunk := range chunks {
+		if err := send(chunk); err != nil {
+			if i > 0 {
+				return &partialSendError{sent: chunks[:i], total: len(chunks), err: err}
+			}
+			return err
+		}
+		if len(chunks) > 1 && pause > 0 {
+			time.Sleep(pause)
+		}
+	}
+	return nil
+}
+
 // errRefusedRecipient marks a send the bridge refuses because of where it
 // would go.
 var errRefusedRecipient = errors.New("refusing to send to a Status, broadcast list or channel")
@@ -250,22 +301,16 @@ func (wa *WhatsAppClient) SendMessage(ctx context.Context, jid string, text stri
 	_, err = wa.client.SendMessage(ctx, recipient, &waE2E.Message{
 		Conversation: proto.String(text),
 	})
-	return err
+	return classifySendErr(err)
 }
 
-// SendChunked splits text into chunks and sends each as a separate message.
+// SendChunked splits text into chunks and sends each as a separate message,
+// with a small delay between them so they arrive in order. A failure part
+// of the way is a *partialSendError.
 func (wa *WhatsAppClient) SendChunked(ctx context.Context, jid string, text string) error {
-	chunks := ChunkMessage(text, wa.cfg().MaxChunkSize)
-	for _, chunk := range chunks {
-		if err := wa.SendMessage(ctx, jid, chunk); err != nil {
-			return err
-		}
-		// Small delay between chunks so they arrive in order.
-		if len(chunks) > 1 {
-			time.Sleep(300 * time.Millisecond)
-		}
-	}
-	return nil
+	return sendChunks(ChunkMessage(text, wa.cfg().MaxChunkSize), 300*time.Millisecond, func(chunk string) error {
+		return wa.SendMessage(ctx, jid, chunk)
+	})
 }
 
 // SendPoll sends a WhatsApp poll and returns the message ID.

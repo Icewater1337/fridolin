@@ -28,7 +28,9 @@ your own once, and every brain uses it to sign in.
 A *Desktop app* client is the right type: Google lets it return to the bridge
 on `http://127.0.0.1:<port>/` without any further setup. A *Web application*
 client also works if you add the bridge's address
-(`http://127.0.0.1:8765/` by default) to its authorised redirect URIs.
+(`http://127.0.0.1:8765/` by default) to its authorised redirect URIs. The
+address is the one the bridge is serving on: a changed `http_listen` counts
+for sign-ins only after the restart that moves the dashboard there.
 
 The client file is stored in `~/.fridolin/google/`, which brains
 cannot read.

@@ -299,9 +299,17 @@ if $OPENED; then
 elif $INSTALLED; then
   echo " Open the dashboard: ${BOLD}$INSTALL_DIR/fridolin open${RESET}"
 elif [ "$BRIDGE" = running ]; then
-  # A second bridge would find the data folder and the port taken.
+  # A second bridge would find the data folder and the port taken. This
+  # build's `open` asks the bridge for a login code, which a bridge older
+  # than it cannot give, so the installed build, most likely the one that
+  # runs, opens it.
   echo " Not installed: the running bridge keeps its old build until you re-run ./setup.sh."
-  echo " Open its dashboard: ${BOLD}$REPO_DIR/bin/fridolin open${RESET}"
+  if [ -e "$INSTALL_DIR/fridolin" ]; then
+    echo " Open its dashboard: ${BOLD}$INSTALL_DIR/fridolin open${RESET}"
+  else
+    echo " Open its dashboard: ${BOLD}$REPO_DIR/bin/fridolin open${RESET} (if the bridge is older than this"
+    echo " build, that says how to open it instead)"
+  fi
 elif [ "$BRIDGE" = unknown ]; then
   # With http_listen off there was no asking whether one runs.
   echo " Not installed: a bridge that is running keeps its old build until you re-run ./setup.sh."

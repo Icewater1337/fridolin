@@ -1,5 +1,6 @@
 // Restarting the bridge from the dashboard: POST /api/restart, then wait
-// until /api/status answers from the new process. The token stays the same.
+// until /api/status answers from the new process. The sign-in stays: the
+// bridge keeps sessions in its data folder.
 // A new process of another version serves other modules, and pages load
 // theirs on first visit, so the page reloads instead of mixing the two.
 

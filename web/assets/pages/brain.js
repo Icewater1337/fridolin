@@ -149,7 +149,17 @@ export default {
             const ok = await confirmDialog({ title: 'Approve these changes?', message: 'They change which chats reach this brain or what it may do. Only approve changes you or someone you trust made.', confirm: 'Approve', danger: false });
             if (!ok) return;
           }
-          await post(`/api/brains/${encodeURIComponent(id)}/approve`);
+          // The bridge approves only the brain.json shown here: if the brain
+          // changed it again meanwhile, it answers 409 and the page shows
+          // the new changes.
+          try {
+            await post(`/api/brains/${encodeURIComponent(id)}/approve`, { manifest: disk });
+          } catch (e) {
+            if (e.status !== 409) throw e;
+            toast(e.message, 'warn');
+            await refresh();
+            return;
+          }
           toast('Changes approved — the brain now runs the new brain.json', 'ok');
           await refresh();
         },
@@ -195,7 +205,7 @@ export default {
             const ok = await confirmDialog({ title: 'Stop and clear the queue?', message: `The current run stops and ${plural(queue.length, 'waiting message')} will not be answered.`, confirm: 'Stop & clear', danger: true });
             if (!ok) return;
           }
-          const r = await post(`/api/runs/${encodeURIComponent(id)}/stop`, { clear_queue: clear });
+          const r = await post(`/api/brains/${encodeURIComponent(id)}/stop`, { clear_queue: clear });
           toast(r && r.stopped ? 'Stopped' : 'Nothing was running', r && r.stopped ? 'ok' : 'info');
           await refresh();
         },
@@ -296,7 +306,7 @@ export default {
         h('fieldset.fieldset', h('legend', 'Files and replies'),
           h('div.form-grid',
             field({ label: 'Prompt file', control: promptIn, help: 'The brain’s instructions, relative to its folder.' }),
-            field({ label: 'Reply chat', control: replyIn, help: 'Where replies go for files handed in through /ingest. This brain handles the files even when that chat belongs to another brain. Default: your first allowed number for the brain that gets DMs, else its first group.' }))),
+            field({ label: 'Reply chat', control: replyIn, help: 'Where replies go for files handed in through /ingest. This brain handles the files even when that chat belongs to another brain. Default: your first allowed number for the brain that gets DMs (the DM brain, or the fallback brain when none handles DMs), else its first group.' }))),
         h('fieldset.fieldset', h('legend', 'Backup'),
           h('div.field', backupSw),
           field({ label: 'Leave out of backups', control: excludes, help: 'One pattern per line, relative to the brain folder. A trailing / means a folder.' })),

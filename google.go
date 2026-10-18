@@ -129,10 +129,16 @@ type googleToken struct {
 	Expiry       string   `json:"expiry,omitempty"`
 }
 
+// oauthPending is a sign-in waiting for Google to send the browser back.
+// It keeps the client and redirect URI the sign-in started with: the code
+// Google returns can be exchanged only with those, whatever was changed in
+// Settings in the meantime.
 type oauthPending struct {
-	brainID  string
-	verifier string
-	created  time.Time
+	brainID     string
+	verifier    string
+	created     time.Time
+	client      *GoogleClient
+	redirectURI string
 }
 
 // GoogleAuth manages the client, sign-ins and per-brain tokens.
@@ -216,6 +222,16 @@ func (g *GoogleAuth) redirectURI() string {
 	return "http://" + g.cfgs.Startup().HTTPListen + "/"
 }
 
+// tokenLifetime is how long an access token Google issued lasts. An
+// expires_in that is missing or not positive gets Google's usual hour,
+// rather than a token that counts as expired at once.
+func tokenLifetime(expiresIn int) time.Duration {
+	if expiresIn <= 0 {
+		return time.Hour
+	}
+	return time.Duration(expiresIn) * time.Second
+}
+
 func randomString(n int) string {
 	b := make([]byte, n)
 	_, _ = rand.Read(b)
@@ -238,7 +254,8 @@ func (g *GoogleAuth) StartSignIn(brainID string) (string, error) {
 			delete(g.pending, s)
 		}
 	}
-	g.pending[state] = oauthPending{brainID: brainID, verifier: verifier, created: time.Now()}
+	redirect := g.redirectURI()
+	g.pending[state] = oauthPending{brainID: brainID, verifier: verifier, created: time.Now(), client: c, redirectURI: redirect}
 	delete(g.lastError, brainID)
 	g.mu.Unlock()
 
@@ -246,7 +263,7 @@ func (g *GoogleAuth) StartSignIn(brainID string) (string, error) {
 	// was ever granted into the brain's token.
 	q := url.Values{
 		"client_id":             {c.ClientID},
-		"redirect_uri":          {g.redirectURI()},
+		"redirect_uri":          {redirect},
 		"response_type":         {"code"},
 		"scope":                 {strings.Join(calendarScopes, " ")},
 		"access_type":           {"offline"},
@@ -295,7 +312,7 @@ func (g *GoogleAuth) HandleCallback(w http.ResponseWriter, r *http.Request) {
 	// browser that goes away meanwhile must not throw the sign-in away.
 	ctx, cancel := context.WithTimeout(context.WithoutCancel(r.Context()), 30*time.Second)
 	defer cancel()
-	tok, err := g.exchange(ctx, q.Get("code"), p.verifier)
+	tok, err := g.exchange(ctx, p, q.Get("code"))
 	if err != nil {
 		fail(err.Error())
 		return
@@ -433,16 +450,15 @@ func (g *GoogleAuth) postToken(ctx context.Context, c *GoogleClient, form url.Va
 	return &tr, nil
 }
 
-func (g *GoogleAuth) exchange(ctx context.Context, code, verifier string) (*googleToken, error) {
-	c := g.Client()
-	if c == nil {
-		return nil, errors.New("the Google OAuth client was removed")
-	}
+// exchange trades the code Google returned for sign-in p for a token, with
+// the client and redirect URI p started with.
+func (g *GoogleAuth) exchange(ctx context.Context, p oauthPending, code string) (*googleToken, error) {
+	c := p.client
 	tr, err := g.postToken(ctx, c, url.Values{
 		"grant_type":    {"authorization_code"},
 		"code":          {code},
-		"code_verifier": {verifier},
-		"redirect_uri":  {g.redirectURI()},
+		"code_verifier": {p.verifier},
+		"redirect_uri":  {p.redirectURI},
 	})
 	if err != nil {
 		return nil, err
@@ -450,7 +466,7 @@ func (g *GoogleAuth) exchange(ctx context.Context, code, verifier string) (*goog
 	return &googleToken{
 		Token: tr.AccessToken, RefreshToken: tr.RefreshToken, TokenURI: googleTokenEndpoint,
 		ClientID: c.ClientID, ClientSecret: c.ClientSecret, Scopes: tr.grantedScopes(calendarScopes),
-		Expiry: time.Now().Add(time.Duration(tr.ExpiresIn) * time.Second).UTC().Format("2006-01-02T15:04:05.000000Z"),
+		Expiry: time.Now().Add(tokenLifetime(tr.ExpiresIn)).UTC().Format("2006-01-02T15:04:05.000000Z"),
 	}, nil
 }
 
@@ -592,7 +608,7 @@ func (g *GoogleAuth) accessToken(ctx context.Context, brainID string) (*googleTo
 	}
 	t.Token = tr.AccessToken
 	t.Scopes = tr.grantedScopes(t.Scopes)
-	t.Expiry = time.Now().Add(time.Duration(tr.ExpiresIn) * time.Second).UTC().Format("2006-01-02T15:04:05.000000Z")
+	t.Expiry = time.Now().Add(tokenLifetime(tr.ExpiresIn)).UTC().Format("2006-01-02T15:04:05.000000Z")
 	// Google may hand out a new refresh token with a refresh, and the old
 	// one may stop working once it did.
 	if tr.RefreshToken != "" {

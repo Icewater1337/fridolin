@@ -216,11 +216,45 @@ var defaultDenySubpaths = []string{
 	"Library/Cookies",
 	"Library/Application Support/AddressBook",
 	"Library/Application Support/Notes",
-	"Library/Application Support/Google/Chrome",
+	// Browser profiles: cookies, saved logins, history and the pages'
+	// storage, where a dashboard session or an older dashboard's token
+	// lives. Google as a whole, for Chrome's Beta and Canary beside it;
+	// the browsers in browserProfilePrefixes by the start of the name.
+	"Library/Application Support/Google",
 	"Library/Application Support/Firefox",
+	"Library/Application Support/BraveSoftware",
+	"Library/Application Support/Arc",
+	"Library/Application Support/Chromium",
 	"Library/Safari",
 	"Library/Containers",
 	"Library/Group Containers",
+}
+
+// browserProfilePrefixes are browsers that keep each release channel in a
+// folder of its own beside the stable one in ~/Library/Application Support
+// ("Microsoft Edge Beta", "Vivaldi Snapshot", "com.operasoftware.OperaGX"),
+// so every folder whose name starts with one of them is denied.
+var browserProfilePrefixes = []string{
+	"Microsoft Edge",
+	"Vivaldi",
+	"com.operasoftware.Opera",
+}
+
+// browserProfilePattern matches, below Application Support, every folder
+// named with one of browserProfilePrefixes and everything in it.
+func browserProfilePattern() string {
+	quoted := make([]string, len(browserProfilePrefixes))
+	for i, p := range browserProfilePrefixes {
+		quoted[i] = regexp.QuoteMeta(p)
+	}
+	return "/(" + strings.Join(quoted, "|") + ")"
+}
+
+// inBrowserProfile reports whether p is in a folder browserProfilePattern
+// matches in home's Application Support.
+func inBrowserProfile(home, p string) bool {
+	appSupport := filepath.Join(home, "Library", "Application Support")
+	return regexp.MustCompile("^" + regexp.QuoteMeta(appSupport) + browserProfilePattern()).MatchString(p)
 }
 
 // defaultDenyLiterals are individual home-relative files to deny, for
@@ -325,6 +359,9 @@ func (sp *SandboxProfiler) Profile(brainID string) (string, error) {
 		b.deny("file-read*", "subpath", filepath.Join(home, sub))
 		b.deny("file-write*", "subpath", filepath.Join(home, sub))
 	}
+	appSupport := filepath.Join(home, "Library", "Application Support")
+	b.denyBelow("file-read*", appSupport, browserProfilePattern())
+	b.denyBelow("file-write*", appSupport, browserProfilePattern())
 	for _, lit := range defaultDenyLiterals {
 		b.deny("file-read*", "literal", filepath.Join(home, lit))
 		b.deny("file-write*", "literal", filepath.Join(home, lit))

@@ -79,11 +79,13 @@ func (tb *testBridge) do(method, path string, body any, mutate ...func(*http.Req
 	return w
 }
 
-// ingest posts to /ingest the way a local script does: no dashboard token.
+// ingest posts to /ingest the way a local script does: no dashboard token,
+// the scripts token.
 func (tb *testBridge) ingest(body string) *httptest.ResponseRecorder {
 	r := httptest.NewRequest("POST", "http://127.0.0.1:8765/ingest", strings.NewReader(body))
 	r.Host = "127.0.0.1:8765"
 	r.Header.Set("Content-Type", "application/json")
+	r.Header.Set("Authorization", "Bearer "+tb.scriptAuth.scripts.Value())
 	w := httptest.NewRecorder()
 	tb.h.ServeHTTP(w, r)
 	return w
@@ -436,16 +438,18 @@ func TestIngestConfinedToMediaDir(t *testing.T) {
 	}
 }
 
-// An unknown brain is named as it was sent, in Go quotes: these errors are
-// plain text, where JSON's escapes of <, > and & would only garble it.
+// An unknown brain is named as it was sent, in Go quotes.
 func TestUnknownBrainIsQuotedAsSent(t *testing.T) {
 	tb := newTestBridge(t, `, "ingest": {"enabled": true}`)
 	const want = `unknown brain "<a&b>"`
-	if w := tb.ingest(`{"brain":"<a&b>","text":"x"}`); w.Code != http.StatusBadRequest || !strings.Contains(w.Body.String(), want) {
-		t.Errorf("ingest: %d %q, want 400 saying %s", w.Code, w.Body.String(), want)
-	}
-	w := tb.do("POST", "/api/dev/inbound", map[string]any{"jid": "15551234567@s.whatsapp.net", "brain": "<a&b>", "text": "x"})
 	var body struct{ Error string }
+	w := tb.ingest(`{"brain":"<a&b>","text":"x"}`)
+	_ = json.Unmarshal(w.Body.Bytes(), &body)
+	if w.Code != http.StatusBadRequest || body.Error != want {
+		t.Errorf("ingest: %d %q, want 400 saying %s", w.Code, body.Error, want)
+	}
+	w = tb.do("POST", "/api/dev/inbound", map[string]any{"jid": "15551234567@s.whatsapp.net", "brain": "<a&b>", "text": "x"})
+	body.Error = ""
 	_ = json.Unmarshal(w.Body.Bytes(), &body)
 	if w.Code != http.StatusBadRequest || body.Error != want {
 		t.Errorf("dev inbound: %d %q, want 400 saying %s", w.Code, body.Error, want)
@@ -465,7 +469,9 @@ func TestIngestRefusesScope(t *testing.T) {
 	} {
 		t.Run(name, func(t *testing.T) {
 			w := tb.ingest(body)
-			if w.Code != http.StatusBadRequest || !strings.Contains(w.Body.String(), `name the brain in "brain"`) {
+			var got struct{ Error string }
+			_ = json.Unmarshal(w.Body.Bytes(), &got)
+			if w.Code != http.StatusBadRequest || !strings.Contains(got.Error, `name the brain in "brain"`) {
 				t.Errorf("%d %q, want 400 naming the brain field", w.Code, w.Body.String())
 			}
 		})
@@ -803,7 +809,7 @@ func TestApproveDrift(t *testing.T) {
 	if tb.brainMgr.Get("notes").Name() != "Notes" {
 		t.Error("drift must not apply before approval")
 	}
-	if w := tb.do("POST", "/api/brains/notes/approve", nil); w.Code != 200 {
+	if w := tb.do("POST", "/api/brains/notes/approve", map[string]any{"manifest": views[0].Disk}); w.Code != 200 {
 		t.Fatal(w.Body.String())
 	}
 	if tb.brainMgr.Get("notes").Name() != "Notes 2" {
@@ -962,6 +968,8 @@ func TestAllowListEntries(t *testing.T) {
 		{"1555123456789012", ""},
 		{"1555abc4567", ""},
 		{"15551234567:12@s.whatsapp.net", ""},
+		{"15551234567@lid", ""}, // WhatsApp's id for the sender, not a number
+		{"120363000000000000@g.us", ""},
 		{"", ""},
 		{"+", ""},
 	}
@@ -1055,6 +1063,10 @@ func TestAllowAndRevokeChats(t *testing.T) {
 			[]string{"15551234567"}, []string{"120363000000000000@g.us"}},
 		{"refuse a number that is none", "", "/api/chats/allow", map[string]string{"kind": "dm", "number": "call me"}, 400,
 			[]string{"15551234567"}, []string{"120363000000000000@g.us"}},
+		{"refuse a @lid JID without its number", "", "/api/chats/allow", map[string]string{"kind": "dm", "jid": "15559876543@lid"}, 400,
+			[]string{"15551234567"}, []string{"120363000000000000@g.us"}},
+		{"allow a @lid JID's number", "", "/api/chats/allow", map[string]string{"kind": "dm", "jid": "15551234567@lid", "number": "15559876543"}, 200,
+			[]string{"15551234567", "15559876543"}, []string{"120363000000000000@g.us"}},
 		{"allow a typed group", "", "/api/chats/allow", map[string]string{"kind": "group", "jid": group}, 200,
 			[]string{"15551234567"}, []string{"120363000000000000@g.us", group}},
 		{"refuse a group that is none", "", "/api/chats/allow", map[string]string{"kind": "group", "jid": "120363000000000001@g.us/x"}, 400,
@@ -1492,17 +1504,26 @@ func TestConfigPageFoldsTheRetiredModel(t *testing.T) {
 func TestAddBrainBackupDefaults(t *testing.T) {
 	tb := newTestBridge(t, "")
 	// No backup settings given: backed up, with the default exclusions.
-	_ = tb.do("POST", "/api/brains", map[string]any{"path": "~/a", "create_dir": true, "manifest": BrainManifest{ID: "a", Name: "A"}})
+	_ = tb.do("POST", "/api/brains", map[string]any{"path": "~/a", "create_dir": true, "manifest": map[string]any{"id": "a", "name": "A"}})
 	// Explicitly off stays off.
 	off := BrainManifest{ID: "b", Name: "B", Backup: BrainBackup{Enabled: false, Exclude: []string{"*.log"}}}
 	_ = tb.do("POST", "/api/brains", map[string]any{"path": "~/b", "create_dir": true, "manifest": off})
+	// Off without an exclude list stays off too, with the default
+	// exclusions should it be turned on.
+	if w := tb.do("POST", "/api/brains", map[string]any{"path": "~/c", "create_dir": true, "manifest": map[string]any{"id": "c", "name": "C", "backup": map[string]any{"enabled": false}}}); w.Code != 200 {
+		t.Fatalf("add c: %d %s", w.Code, w.Body.String())
+	}
 	a, _ := ReadManifest(filepath.Join(tb.home, "a"))
 	b, _ := ReadManifest(filepath.Join(tb.home, "b"))
+	c, _ := ReadManifest(filepath.Join(tb.home, "c"))
 	if !a.Backup.Enabled || len(a.Backup.Exclude) == 0 {
 		t.Errorf("a.backup = %+v, want on with defaults", a.Backup)
 	}
 	if b.Backup.Enabled || len(b.Backup.Exclude) != 1 {
 		t.Errorf("b.backup = %+v, want off as requested", b.Backup)
+	}
+	if c.Backup.Enabled || !slices.Equal(c.Backup.Exclude, DefaultBackupExcludes) {
+		t.Errorf("c.backup = %+v, want off with the default exclusions", c.Backup)
 	}
 }
 
