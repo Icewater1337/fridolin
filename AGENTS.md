@@ -247,9 +247,11 @@ rollback`.
   and pushes containing phone numbers, WhatsApp JIDs, emails, home paths or
   tokens. Use placeholders: `15551234567`, `120363000000000000@g.us`,
   `you@example.com`, `/Users/you`.
-- Architecture notes are in the README ("How it works"); configuration in
-  `docs/CONFIGURATION.md`; brains in `docs/BRAINS.md`; backups in
-  `docs/BACKUP.md`; Google Calendar in `docs/CALENDAR.md`; the Plaud
-  recorder in `docs/PLAUD.md`; the site in `docs/SITE.md`; what stays
-  compatible between versions, and how something is retired, in
-  `docs/COMPATIBILITY.md`.
+- The code's layout, the rules between its packages, which archtest
+  (`internal/archtest`) enforces, and how far the move into packages has
+  got are in `docs/ARCHITECTURE.md`; what each file does is in the README
+  ("How it works"); configuration in `docs/CONFIGURATION.md`; brains in
+  `docs/BRAINS.md`; backups in `docs/BACKUP.md`; Google Calendar in
+  `docs/CALENDAR.md`; the Plaud recorder in `docs/PLAUD.md`; the site in
+  `docs/SITE.md`; what stays compatible between versions, and how something
+  is retired, in `docs/COMPATIBILITY.md`.

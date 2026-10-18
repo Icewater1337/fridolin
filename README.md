@@ -718,7 +718,9 @@ folders of their own rather than your home directory, and
 ## How it works
 
 The Go code is the `main` package in `cmd/fridolin`, where the files
-below are: `main.go` loads config; `bridge.go` wires everything together.
+below are, and the packages below `internal/` it is being split into
+([docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) has the layout and its
+rules): `main.go` loads config; `bridge.go` wires everything together.
 
 **`whatsapp.go`** — [whatsmeow](https://github.com/tulir/whatsmeow) client.
 Handles pairing, allowlists, trigger matching, attachment downloads, and poll
