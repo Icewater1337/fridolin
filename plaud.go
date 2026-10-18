@@ -1722,9 +1722,10 @@ type PlaudStatus struct {
 	DefaultMessage  string `json:"default_message"`
 	IntervalSeconds int    `json:"interval_seconds"`
 	// TargetBrain receives recordings; BrainMissing means the picked one is
-	// gone, so none does.
+	// gone, so none does. AutoBrain is the one that would without a pick.
 	TargetBrain  string `json:"target_brain,omitempty"`
 	BrainMissing bool   `json:"brain_missing,omitempty"`
+	AutoBrain    string `json:"auto_brain,omitempty"`
 	// Where summaries go, or why they cannot go anywhere. SummaryChatBrain
 	// names another brain that owns that chat: what you write back there
 	// goes to it.
@@ -1781,6 +1782,11 @@ func (p *PlaudManager) Status() PlaudStatus {
 		s.TargetBrain = br.ID()
 	} else if cfg.Plaud.Brain != "" {
 		s.BrainMissing = true
+	}
+	// What "Automatic" stands for in the card's brain select: the target
+	// is the picked brain while one is picked.
+	if br := p.brains.BrainFor("", false); br != nil {
+		s.AutoBrain = br.ID()
 	}
 	// Where summaries go, for the card: a chat that belongs to another brain
 	// gets a warning, since what you write back there goes to that brain.

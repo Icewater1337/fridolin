@@ -246,6 +246,30 @@ func TestPlaudWithoutAPrivateChatWaits(t *testing.T) {
 	}
 }
 
+// The card labels its "Automatic" choice with the brain Automatic picks,
+// which is not the target while another brain is picked.
+func TestPlaudStatusNamesTheAutomaticBrain(t *testing.T) {
+	for _, c := range []struct {
+		name, picked, target string
+	}{
+		{"automatic", "", "p"},
+		{"picked", "g", "g"},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			tb, _ := plaudBridge(t, "")
+			tb.addFolderBrain(t, BrainManifest{ID: "g", Name: "Recordings"})
+			if w := tb.do("PUT", "/api/plaud/settings", map[string]any{"brain": c.picked}); w.Code != 200 {
+				t.Fatalf("settings: %d %s", w.Code, w.Body.String())
+			}
+			var status map[string]any
+			_ = json.Unmarshal(tb.do("GET", "/api/plaud/status", nil).Body.Bytes(), &status)
+			if status["auto_brain"] != "p" || status["target_brain"] != c.target {
+				t.Errorf("auto_brain = %v, target_brain = %v; want p (the DM brain) and %s", status["auto_brain"], status["target_brain"], c.target)
+			}
+		})
+	}
+}
+
 // A picked brain that went away (removed, renamed, not approved) is
 // reported by name, on the card and as the check's error, and nothing is
 // written or handed over until another one is picked. The settings refuse

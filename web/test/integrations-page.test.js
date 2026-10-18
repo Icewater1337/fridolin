@@ -22,7 +22,7 @@ async function openPage(t, first = status('2026-10-18T10:00:00Z')) {
   const bridge = { status: first };
   const calls = serve(t, (path) => {
     if (path.startsWith('/api/plaud/status')) return bridge.status;
-    if (path.startsWith('/api/brains')) return [{ id: 'work', name: 'Work' }];
+    if (path.startsWith('/api/brains')) return [{ id: 'work', name: 'Work' }, { id: 'personal', name: 'Personal' }];
     return {};
   });
   const root = h('div');
@@ -113,4 +113,11 @@ for (const c of [
 test('a card that was never connected offers only Connect', async (t) => {
   const { root } = await openPage(t, { ...status('2026-10-18T10:00:00Z'), connected: false });
   assert.deepEqual(root.querySelectorAll('button').map((b) => b.textContent), ['Connect Plaud']);
+});
+
+test('Automatic names the brain it picks, not the one picked instead', async (t) => {
+  const now = status('2026-10-18T10:00:00Z');
+  const { root } = await openPage(t, { ...now, settings: { ...now.settings, brain: 'work' }, target_brain: 'work', auto_brain: 'personal' });
+  const automatic = root.querySelectorAll('select option').find((o) => o.value === '');
+  assert.equal(automatic.textContent, 'Automatic (Personal)');
 });
