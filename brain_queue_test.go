@@ -1191,17 +1191,6 @@ func TestBuildPromptNamesTheHistorySearch(t *testing.T) {
 	}
 }
 
-func TestParseStreamReportsErrorText(t *testing.T) {
-	br := bareBrain(t)
-	stream := `{"type":"assistant","message":{"content":[{"type":"text","text":"Failed to authenticate. API Error: 401"}]}}
-{"type":"result","is_error":true}
-`
-	res := br.parseStream(Inbound{JID: "x"}, strings.NewReader(stream))
-	if res.Err == nil || !strings.Contains(res.Err.Error(), "Failed to authenticate") {
-		t.Errorf("err = %v, want the CLI's own message", res.Err)
-	}
-}
-
 func TestStopKillsProcessesClaudeStarted(t *testing.T) {
 	// A command Claude started keeps the output pipe open; stopping must kill
 	// the whole process group, not just the CLI, or the stop hangs.

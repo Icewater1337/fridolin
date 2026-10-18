@@ -1,7 +1,6 @@
 package main
 
 import (
-	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
@@ -242,7 +241,7 @@ type BrainHooks struct {
 	// one, and reports whether it is on its way, ahead of the run's final
 	// reply. br's history records it once it arrived, like an answer: the
 	// reply to it comes as a new message, whose run must see what it
-	// answers. A silent run asks nothing (see readStream).
+	// answers. A silent run asks nothing (see runSink.Question).
 	Question func(br *Brain, jid, text string) bool
 	// Deliver receives every finished run. It records the answer in the
 	// brain's history once it is sent.
@@ -1976,13 +1975,6 @@ func (br *Brain) buildPrompt(s *brainSettings, m Inbound) string {
 	return renderPrompt(in)
 }
 
-// parseStream reads the stream-json output of m's run from the Claude CLI
-// and returns the result, writing a human-readable activity log alongside
-// it.
-func (br *Brain) parseStream(m Inbound, reader io.Reader) RunResult {
-	return br.readStream(m, reader, "── New invocation ──", nil)
-}
-
 // runHeading starts a run's part of the activity log: what it answers and
 // with what, so that it can be told from the others and matched to the
 // run the dashboard shows.
@@ -2032,124 +2024,54 @@ func (br *Brain) rotateStreamLog() {
 	}
 }
 
-// readStream is parseStream with heading as the first line of the run in
-// the activity log, calling onResult, when set, as soon as the result is
-// in, while the stream may still go on.
+// runSink is the StreamSink of m's run in br: the brain's activity log, and
+// the chat for the questions the run asks.
+type runSink struct {
+	br       *Brain
+	m        Inbound
+	log      *os.File // nil when it could not be opened
+	onResult func()
+}
+
+func (s *runSink) Log(line string) {
+	if s.log != nil {
+		_, _ = fmt.Fprintf(s.log, "[%s] %s\n", time.Now().Format("15:04:05"), line)
+	}
+}
+
+// Question sends text to the run's chat. Untagged (silent) messages never
+// produce a visible reply, so they must not ask anything either.
+func (s *runSink) Question(text string) bool {
+	h := s.br.hooks
+	return !s.m.Silent && h != nil && h.Question != nil && h.Question(s.br, s.m.JID, questionPrefix+text)
+}
+
+func (s *runSink) Result(RunResult) {
+	if s.onResult != nil {
+		s.onResult()
+	}
+}
+
+// readStream is parseStream for m's run, with heading as the run's first
+// line in the activity log, calling onResult, when set, as soon as the
+// result is in, while the stream may still go on.
 func (br *Brain) readStream(m Inbound, reader io.Reader, heading string, onResult func()) RunResult {
 	return br.readAgentStream(m, reader, heading, onResult, "claude")
 }
 
 func (br *Brain) readAgentStream(m Inbound, reader io.Reader, heading string, onResult func(), provider string) RunResult {
-	scanner := bufio.NewScanner(reader)
-	scanner.Buffer(make([]byte, 4*1024*1024), 4*1024*1024)
-
 	br.rotateStreamLog()
 	// Through the folder, like the history: a brain can swap the log for a
 	// symlink to a file its sandbox denies it writing.
-	streamLog, logErr := openInFolder(br.root, streamLogName, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600)
-	if logErr != nil {
-		log.Printf("brain %s: could not open stream log: %v", br.id, logErr)
+	streamLog, err := openInFolder(br.root, streamLogName, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600)
+	if err != nil {
+		log.Printf("brain %s: could not open stream log: %v", br.id, err)
+	} else {
+		defer streamLog.Close()
 	}
-	writeLog := func(msg string) {
-		if streamLog != nil {
-			_, _ = fmt.Fprintf(streamLog, "[%s] %s\n", time.Now().Format("15:04:05"), msg)
-		}
-	}
-	defer func() {
-		if streamLog != nil {
-			streamLog.Close()
-		}
-	}()
-
-	writeLog(heading)
-
-	var finalResult, lastText string
-	asked := false
-	var codex codexStream
-
-	for scanner.Scan() {
-		line := strings.TrimSpace(scanner.Text())
-		if !strings.HasPrefix(line, "{") {
-			continue
-		}
-
-		var event streamEvent
-		if provider == "codex" {
-			event = codex.event([]byte(line))
-		} else if err := json.Unmarshal([]byte(line), &event); err != nil {
-			continue
-		}
-
-		switch event.Type {
-		case "assistant":
-			if event.Message == nil {
-				continue
-			}
-			for _, content := range event.Message.Content {
-				switch content.Type {
-				case "text":
-					if content.Text != "" {
-						lastText = content.Text
-						writeLog("💬 " + truncate(content.Text, 2000))
-					}
-				case "tool_use":
-					writeLog("🔧 Tool: " + content.Name)
-					if content.Name == "AskUserQuestion" {
-						// Untagged (silent) messages never produce a visible
-						// reply, so they must not ask anything either. Only a
-						// question on its way counts as asked.
-						question := extractAskQuestion(content.Input)
-						if question != "" && !m.Silent && br.hooks != nil && br.hooks.Question != nil && br.hooks.Question(br, m.JID, questionPrefix+question) {
-							asked = true
-						}
-					}
-				}
-			}
-
-		case "result":
-			if event.IsError || event.Error != "" {
-				errMsg := event.Error
-				if errMsg == "" {
-					errMsg = event.Result
-				}
-				if errMsg == "" {
-					// The CLI reports some failures (authentication, quota) only
-					// as its last message.
-					errMsg = truncate(lastText, 300)
-				}
-				if errMsg == "" {
-					errMsg = "(claude exited with an error but no message)"
-				}
-				writeLog("❌ Error: " + errMsg)
-				return RunResult{Err: &cliError{msg: errMsg, provider: provider}, Asked: asked}
-			}
-			finalResult = event.Result
-			writeLog("✅ Result: " + truncate(finalResult, 2000))
-			if onResult != nil {
-				onResult()
-			}
-		}
-	}
-
-	if err := scanner.Err(); err != nil && err != io.EOF {
-		if errors.Is(err, os.ErrClosed) {
-			return RunResult{Err: errBrainInterrupted}
-		}
-		return RunResult{Err: fmt.Errorf("reading %s output: %w", agentName(provider), err)}
-	}
-
-	// A -p run is stateless and nobody answers its AskUserQuestion, so the
-	// model goes on after asking, often to an answer of its own ("I booked
-	// Monday"), which the chat must get too. A run that only asked has said
-	// what it had to say.
-	if finalResult == "" && !asked {
-		if provider == "codex" && codex.err != "" {
-			return RunResult{Err: &cliError{msg: codex.err, provider: "codex"}}
-		}
-		return RunResult{Err: errNoResult}
-	}
-
-	return RunResult{Text: finalResult, Asked: asked}
+	sink := &runSink{br: br, m: m, log: streamLog, onResult: onResult}
+	sink.Log(heading)
+	return parseAgentStream(reader, sink, provider)
 }
 
 // truncate shortens s to at most n bytes without splitting a UTF-8 rune.

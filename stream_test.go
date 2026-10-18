@@ -40,6 +40,12 @@ func TestExtractAskQuestion(t *testing.T) {
 	}
 }
 
+// readTestStream is what a run of br for m makes of the CLI output stream,
+// its activity log and questions included, without a CLI that writes it.
+func readTestStream(br *Brain, m Inbound, stream string) RunResult {
+	return br.readStream(m, strings.NewReader(stream), "── Test run ──", nil)
+}
+
 // A brain that asks with AskUserQuestion gets the question to the chat
 // while it runs, with its options. Nobody answers the call in a -p run,
 // so the model goes on, and what it ends with reaches the chat too: an
@@ -120,7 +126,7 @@ func TestParseStreamQuestions(t *testing.T) {
 				sent = append(sent, text)
 				return true
 			}}
-			res := br.parseStream(Inbound{JID: "chat", Silent: c.silent}, strings.NewReader(strings.Join(c.stream, "\n")+"\n"))
+			res := readTestStream(br, Inbound{JID: "chat", Silent: c.silent}, strings.Join(c.stream, "\n")+"\n")
 			if (res.Err != nil) != c.err {
 				t.Errorf("error = %v, want one: %v", res.Err, c.err)
 			}
@@ -210,13 +216,10 @@ func FuzzParseStream(f *testing.F) {
 	} {
 		f.Add(s.stream, s.junk)
 	}
-	// One brain for every input: a fuzz worker runs them one at a time, and
-	// a new folder for each would make most of the work file system calls.
-	br := bareBrain(f)
 	run := func(stream string) (RunResult, []string) {
-		var sent []string
-		br.hooks = &BrainHooks{Question: func(_ *Brain, _, text string) bool { sent = append(sent, text); return true }}
-		return br.parseStream(Inbound{JID: "chat"}, strings.NewReader(stream)), sent
+		var sink recordingSink
+		res := parseStream(strings.NewReader(stream), &sink)
+		return res, sink.questions
 	}
 	f.Fuzz(func(t *testing.T, stream, junk string) {
 		res, sent := run(stream)
@@ -257,7 +260,7 @@ func TestMidRunMessagesReachTheChatMarked(t *testing.T) {
 	stream := `{"type":"assistant","message":{"content":[{"type":"tool_use","name":"AskUserQuestion","input":{"questions":[{"question":"⏳ Wait for the delivery?"}]}}]}}
 {"type":"result","result":"asked"}
 `
-	br.parseStream(Inbound{JID: dm}, strings.NewReader(stream))
+	readTestStream(br, Inbound{JID: dm}, stream)
 	br.hooks.Notice(dm, workingNotice)
 	// The question goes through the outbox, after the notice.
 	waitFor(t, 5*time.Second, "both messages", func() bool { return len(tb.sentTo(dm)) == 2 })

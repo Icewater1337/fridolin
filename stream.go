@@ -1,8 +1,12 @@
 package main
 
 import (
+	"bufio"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
+	"os"
 	"strings"
 )
 
@@ -88,4 +92,117 @@ func extractAskQuestion(raw json.RawMessage) string {
 		parts = append(parts, text)
 	}
 	return strings.Join(parts, "\n\n")
+}
+
+// StreamSink is what parseStream tells about a run's output while it reads
+// it: the lines of the brain's activity log, the questions the model asks,
+// and the result as soon as it is in.
+type StreamSink interface {
+	// Log takes one line of the activity log.
+	Log(line string)
+	// Question takes a question the model asked with AskUserQuestion, as
+	// the chat would get it, and reports whether it is on its way: only
+	// then does the run count as one that asked.
+	Question(text string) bool
+	// Result takes the run's result once its event is in. The output may
+	// go on after it: a command the run left in the background can hold
+	// it open.
+	Result(res RunResult)
+}
+
+// parseStream reads the stream-json output of one run of the Claude CLI and
+// returns the run's outcome, telling sink what it finds on the way. It does
+// nothing else: writing the activity log and sending a question to the chat
+// are for the sink to do (see Brain.readStream), so that the parser can be
+// run on a recorded stream alone.
+func parseStream(r io.Reader, sink StreamSink) RunResult {
+	return parseAgentStream(r, sink, "claude")
+}
+
+func parseAgentStream(r io.Reader, sink StreamSink, provider string) RunResult {
+	scanner := bufio.NewScanner(r)
+	scanner.Buffer(make([]byte, 4*1024*1024), 4*1024*1024)
+
+	var finalResult, lastText string
+	asked := false
+	var codex codexStream
+
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		if !strings.HasPrefix(line, "{") {
+			continue
+		}
+
+		var event streamEvent
+		if provider == "codex" {
+			event = codex.event([]byte(line))
+		} else if err := json.Unmarshal([]byte(line), &event); err != nil {
+			continue
+		}
+
+		switch event.Type {
+		case "assistant":
+			if event.Message == nil {
+				continue
+			}
+			for _, content := range event.Message.Content {
+				switch content.Type {
+				case "text":
+					if content.Text != "" {
+						lastText = content.Text
+						sink.Log("💬 " + truncate(content.Text, 2000))
+					}
+				case "tool_use":
+					sink.Log("🔧 Tool: " + content.Name)
+					if content.Name == "AskUserQuestion" {
+						// Only a question on its way counts as asked.
+						if question := extractAskQuestion(content.Input); question != "" && sink.Question(question) {
+							asked = true
+						}
+					}
+				}
+			}
+
+		case "result":
+			if event.IsError || event.Error != "" {
+				errMsg := event.Error
+				if errMsg == "" {
+					errMsg = event.Result
+				}
+				if errMsg == "" {
+					// The CLI reports some failures (authentication, quota) only
+					// as its last message.
+					errMsg = truncate(lastText, 300)
+				}
+				if errMsg == "" {
+					errMsg = "(claude exited with an error but no message)"
+				}
+				sink.Log("❌ Error: " + errMsg)
+				return RunResult{Err: &cliError{msg: errMsg, provider: provider}, Asked: asked}
+			}
+			finalResult = event.Result
+			sink.Log("✅ Result: " + truncate(finalResult, 2000))
+			sink.Result(RunResult{Text: finalResult, Asked: asked})
+		}
+	}
+
+	if err := scanner.Err(); err != nil && err != io.EOF {
+		if errors.Is(err, os.ErrClosed) {
+			return RunResult{Err: errBrainInterrupted}
+		}
+		return RunResult{Err: fmt.Errorf("reading %s output: %w", agentName(provider), err)}
+	}
+
+	// A -p run is stateless and nobody answers its AskUserQuestion, so the
+	// model goes on after asking, often to an answer of its own ("I booked
+	// Monday"), which the chat must get too. A run that only asked has said
+	// what it had to say.
+	if finalResult == "" && !asked {
+		if provider == "codex" && codex.err != "" {
+			return RunResult{Err: &cliError{msg: codex.err, provider: provider}}
+		}
+		return RunResult{Err: errNoResult}
+	}
+
+	return RunResult{Text: finalResult, Asked: asked}
 }
