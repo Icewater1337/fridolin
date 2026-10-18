@@ -1,4 +1,4 @@
-package main
+package media
 
 import (
 	"context"
@@ -15,9 +15,9 @@ import (
 	"github.com/Icewater1337/fridolin/internal/textx"
 )
 
-// mediaFile is the bounded random-access file supplied to a downloader. It
+// File is the bounded random-access file supplied to a downloader. It
 // deliberately exposes neither the underlying *os.File nor ReadFrom.
-type mediaFile interface {
+type File interface {
 	io.Reader
 	io.Writer
 	io.Seeker
@@ -27,8 +27,8 @@ type mediaFile interface {
 	Stat() (os.FileInfo, error)
 }
 
-// errMediaTooLarge marks an attachment over max_media_mb.
-var errMediaTooLarge = errors.New("attachment is larger than max_media_mb")
+// ErrTooLarge marks an attachment over max_media_mb.
+var ErrTooLarge = errors.New("attachment is larger than max_media_mb")
 
 // Save downloads a named attachment into Dir and returns where it was saved. It
 // streams the download into a hidden temp file, so the attachment is never
@@ -38,10 +38,10 @@ var errMediaTooLarge = errors.New("attachment is larger than max_media_mb")
 // A file over maxBytes is refused, before the download when the message
 // declares its size, and as soon as it passes the limit otherwise: the
 // declared size is only the sender's word.
-func (in MediaInbox) Save(ctx context.Context, kind, name string, size uint64, maxBytes int64, download func(context.Context, mediaFile) error) (string, error) {
+func (in Inbox) Save(ctx context.Context, kind, name string, size uint64, maxBytes int64, download func(context.Context, File) error) (string, error) {
 	dir := in.Dir
 	if size > uint64(maxBytes) {
-		return "", fmt.Errorf("%w: the %s is %d bytes, over the limit of %d", errMediaTooLarge, kind, size, maxBytes)
+		return "", fmt.Errorf("%w: the %s is %d bytes, over the limit of %d", ErrTooLarge, kind, size, maxBytes)
 	}
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return "", fmt.Errorf("saving %s: %w", kind, err)
@@ -56,7 +56,7 @@ func (in MediaInbox) Save(ctx context.Context, kind, name string, size uint64, m
 	// fetched for this attachment.
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
-	f := &cappedFile{f: tmp, limit: maxBytes + mediaCipherOverhead, stop: cancel}
+	f := &cappedFile{f: tmp, limit: maxBytes + CipherOverhead, stop: cancel}
 	// whatsmeow does not rewind the file before it tries its next server.
 	// When one fails partway, the next one's bytes follow the partial ones
 	// and the download fails; for a file near the limit, it can pass the
@@ -75,7 +75,7 @@ func (in MediaInbox) Save(ctx context.Context, kind, name string, size uint64, m
 		err = cerr
 	}
 	if f.over {
-		return "", fmt.Errorf("%w: the %s passed the limit of %d bytes while downloading", errMediaTooLarge, kind, maxBytes)
+		return "", fmt.Errorf("%w: the %s passed the limit of %d bytes while downloading", ErrTooLarge, kind, maxBytes)
 	}
 	if err != nil {
 		return "", fmt.Errorf("downloading %s: %w", kind, err)
@@ -83,9 +83,9 @@ func (in MediaInbox) Save(ctx context.Context, kind, name string, size uint64, m
 	return placeMedia(tmp.Name(), dir, name)
 }
 
-// mediaCipherOverhead is how much larger than a file its encrypted download
+// CipherOverhead is how much larger than a file its encrypted download
 // can be: up to 16 bytes of AES-CBC padding and a 10-byte MAC.
-const mediaCipherOverhead = 16 + 10
+const CipherOverhead = 16 + 10
 
 // cappedFile is the file whatsmeow downloads into. It refuses to grow past
 // limit, and then calls stop. whatsmeow must not get the *os.File itself:
@@ -105,7 +105,7 @@ type cappedFile struct {
 func (c *cappedFile) refuse() error {
 	c.over = true
 	c.stop()
-	return fmt.Errorf("%w: %w", errMediaTooLarge, context.Canceled)
+	return fmt.Errorf("%w: %w", ErrTooLarge, context.Canceled)
 }
 
 func (c *cappedFile) Write(p []byte) (int, error) {

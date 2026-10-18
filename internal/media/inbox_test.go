@@ -1,4 +1,4 @@
-package main
+package media
 
 import (
 	"context"
@@ -18,11 +18,11 @@ import (
 )
 
 var mediaTestStarted = time.Now()
-var mediaTestMigration = MediaMigration{Started: mediaTestStarted}
+var mediaTestMigration = Migration{Started: mediaTestStarted}
 
-func testMediaInboxAt(dir string) MediaInbox {
+func testMediaInboxAt(dir string) Inbox {
 	workingDir, _ := os.Getwd()
-	return MediaInbox{Dir: dir, WorkingDir: workingDir, Migration: &mediaTestMigration}
+	return Inbox{Dir: dir, WorkingDir: workingDir, Migration: &mediaTestMigration}
 }
 
 func mediaTestFile(t *testing.T, p, content string) string {
@@ -61,7 +61,7 @@ func TestClaimMedia(t *testing.T) {
 		check func(t *testing.T, media string)
 	}{
 		{"downloaded attachment", func(t *testing.T, media string) string {
-			return mediaTestFile(t, filepath.Join(media, incomingMediaDir, "scan.pdf"), "%PDF")
+			return mediaTestFile(t, filepath.Join(media, IncomingDir, "scan.pdf"), "%PDF")
 		}, "a/scan.pdf", nil},
 		{"dropped by a script into a folder of its own", func(t *testing.T, media string) string {
 			return mediaTestFile(t, filepath.Join(media, "upload", "scan.pdf"), "%PDF")
@@ -77,7 +77,7 @@ func TestClaimMedia(t *testing.T) {
 		}, "", nil},
 		{"a name already taken in the inbox", func(t *testing.T, media string) string {
 			mediaTestFile(t, filepath.Join(media, "a", "scan.pdf"), "older")
-			return mediaTestFile(t, filepath.Join(media, incomingMediaDir, "scan.pdf"), "newer")
+			return mediaTestFile(t, filepath.Join(media, IncomingDir, "scan.pdf"), "newer")
 		}, "a/scan-2.pdf", func(t *testing.T, media string) {
 			if data, _ := os.ReadFile(filepath.Join(media, "a", "scan.pdf")); string(data) != "older" {
 				t.Errorf("the file already in the inbox was replaced: %q", data)
@@ -93,7 +93,7 @@ func TestClaimMedia(t *testing.T) {
 			if err := os.Symlink(target, filepath.Join(media, "a", "scan.pdf")); err != nil {
 				t.Fatal(err)
 			}
-			return mediaTestFile(t, filepath.Join(media, incomingMediaDir, "scan.pdf"), "%PDF")
+			return mediaTestFile(t, filepath.Join(media, IncomingDir, "scan.pdf"), "%PDF")
 		}, "a/scan-2.pdf", func(t *testing.T, media string) {
 			if data, _ := os.ReadFile(filepath.Join(filepath.Dir(media), "outside.txt")); string(data) != "keep" {
 				t.Errorf("written through the symlink: %q", data)
@@ -108,7 +108,7 @@ func TestClaimMedia(t *testing.T) {
 			if err := os.Symlink(filepath.Join(media, "b"), filepath.Join(media, "a")); err != nil {
 				t.Fatal(err)
 			}
-			return mediaTestFile(t, filepath.Join(media, incomingMediaDir, "scan.pdf"), "%PDF")
+			return mediaTestFile(t, filepath.Join(media, IncomingDir, "scan.pdf"), "%PDF")
 		}, "", func(t *testing.T, media string) {
 			if names := mediaDirNames(t, filepath.Join(media, "b")); len(names) != 0 {
 				t.Errorf("moved into the symlink's target: %q", names)
@@ -156,14 +156,14 @@ func TestClaimMedia(t *testing.T) {
 	t.Run("the media folder by its real path", func(t *testing.T) {
 		root := fsx.Canonical(t.TempDir())
 		real := filepath.Join(root, "real-media")
-		if err := os.MkdirAll(filepath.Join(real, incomingMediaDir), 0o700); err != nil {
+		if err := os.MkdirAll(filepath.Join(real, IncomingDir), 0o700); err != nil {
 			t.Fatal(err)
 		}
 		media := filepath.Join(root, "media")
 		if err := os.Symlink(real, media); err != nil {
 			t.Fatal(err)
 		}
-		p := mediaTestFile(t, filepath.Join(real, incomingMediaDir, "x.jpg"), "x")
+		p := mediaTestFile(t, filepath.Join(real, IncomingDir, "x.jpg"), "x")
 		if got := testMediaInboxAt(media).Claim("a", []string{p}); !maps.Equal(got, map[string]string{p: filepath.Join(media, "a", "x.jpg")}) {
 			t.Errorf("claimMedia = %q", got)
 		}
@@ -182,7 +182,7 @@ func TestClaimMedia(t *testing.T) {
 // folders stay, and so do the inboxes made after it.
 func TestLegacyMediaFoldersMoveAside(t *testing.T) {
 	media := filepath.Join(fsx.Canonical(t.TempDir()), "media")
-	for _, f := range []string{"plaud/2026-01-15 standup.txt", "upload/scan.pdf", "top.pdf", incomingMediaDir + "/voice.ogg", legacyMediaDir + "/upload/older.pdf"} {
+	for _, f := range []string{"plaud/2026-01-15 standup.txt", "upload/scan.pdf", "top.pdf", IncomingDir + "/voice.ogg", LegacyDir + "/upload/older.pdf"} {
 		mediaTestFile(t, filepath.Join(media, f), "content of "+f)
 	}
 	// Downloaded by an older version, before this bridge started.
@@ -193,7 +193,7 @@ func TestLegacyMediaFoldersMoveAside(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	mediaTestFile(t, filepath.Join(media, legacyMediaDir, "older.pdf"), "an older one")
+	mediaTestFile(t, filepath.Join(media, LegacyDir, "older.pdf"), "an older one")
 	inbox, err := testMediaInboxAt(media).Open("plaud")
 	if err != nil {
 		t.Fatal(err)
@@ -203,27 +203,27 @@ func TestLegacyMediaFoldersMoveAside(t *testing.T) {
 		t.Errorf("brain plaud's inbox holds %q, want it new", names)
 	}
 	for _, f := range []string{
-		legacyMediaDir + "/plaud/2026-01-15 standup.txt",
-		legacyMediaDir + "/upload-2/scan.pdf", // .old/upload was taken
-		legacyMediaDir + "/upload/older.pdf",
-		legacyMediaDir + "/invoice.pdf",
-		legacyMediaDir + "/3EB0A1B2.jpg",
-		legacyMediaDir + "/older-2.pdf", // .old/older.pdf was taken
+		LegacyDir + "/plaud/2026-01-15 standup.txt",
+		LegacyDir + "/upload-2/scan.pdf", // .old/upload was taken
+		LegacyDir + "/upload/older.pdf",
+		LegacyDir + "/invoice.pdf",
+		LegacyDir + "/3EB0A1B2.jpg",
+		LegacyDir + "/older-2.pdf", // .old/older.pdf was taken
 		"top.pdf",
-		incomingMediaDir + "/voice.ogg",
-		mediaInboxesMarker,
+		IncomingDir + "/voice.ogg",
+		InboxesMarker,
 	} {
 		if _, err := os.Stat(filepath.Join(media, f)); err != nil {
 			t.Errorf("%s: %v", f, err)
 		}
 	}
-	if names := mediaDirNames(t, media); !slices.Equal(names, []string{mediaInboxesMarker, incomingMediaDir, legacyMediaDir, "plaud", "top.pdf"}) {
+	if names := mediaDirNames(t, media); !slices.Equal(names, []string{InboxesMarker, IncomingDir, LegacyDir, "plaud", "top.pdf"}) {
 		t.Errorf("the media folder holds %q, want only the new file at its top", names)
 	}
 	// The marker is a folder, which /ingest and claimMedia, taking
 	// regular files only, cannot move into a brain's inbox: the next
 	// inbox would then have moved every inbox aside.
-	marker := filepath.Join(media, mediaInboxesMarker)
+	marker := filepath.Join(media, InboxesMarker)
 	if fi, err := os.Lstat(marker); err != nil || !fi.IsDir() {
 		t.Errorf("%s is not a folder: %v", marker, err)
 	}
@@ -324,23 +324,23 @@ func FuzzSanitizeMediaName(f *testing.F) {
 func TestCappedFile(t *testing.T) {
 	ops := []struct {
 		name string
-		op   func(f mediaFile) error
+		op   func(f File) error
 		over bool
 	}{
-		{"write up to the cap", func(f mediaFile) error { _, err := f.Write(make([]byte, 10)); return err }, false},
-		{"write past the cap", func(f mediaFile) error { _, err := f.Write(make([]byte, 11)); return err }, true},
-		{"write after a seek past the cap", func(f mediaFile) error {
+		{"write up to the cap", func(f File) error { _, err := f.Write(make([]byte, 10)); return err }, false},
+		{"write past the cap", func(f File) error { _, err := f.Write(make([]byte, 11)); return err }, true},
+		{"write after a seek past the cap", func(f File) error {
 			if _, err := f.Seek(8, io.SeekStart); err != nil {
 				return err
 			}
 			_, err := f.Write(make([]byte, 3))
 			return err
 		}, true},
-		{"write at the end of the cap", func(f mediaFile) error { _, err := f.WriteAt(make([]byte, 2), 8); return err }, false},
-		{"write at past the cap", func(f mediaFile) error { _, err := f.WriteAt(make([]byte, 3), 8); return err }, true},
-		{"truncate to the cap", func(f mediaFile) error { return f.Truncate(10) }, false},
-		{"truncate past the cap", func(f mediaFile) error { return f.Truncate(11) }, true},
-		{"copy past the cap", func(f mediaFile) error {
+		{"write at the end of the cap", func(f File) error { _, err := f.WriteAt(make([]byte, 2), 8); return err }, false},
+		{"write at past the cap", func(f File) error { _, err := f.WriteAt(make([]byte, 3), 8); return err }, true},
+		{"truncate to the cap", func(f File) error { return f.Truncate(10) }, false},
+		{"truncate past the cap", func(f File) error { return f.Truncate(11) }, true},
+		{"copy past the cap", func(f File) error {
 			_, err := io.Copy(f, io.TeeReader(strings.NewReader(strings.Repeat("x", 11)), io.Discard))
 			return err
 		}, true},
@@ -355,7 +355,7 @@ func TestCappedFile(t *testing.T) {
 			stopped := false
 			f := &cappedFile{f: tmp, limit: 10, stop: func() { stopped = true }}
 			err = c.op(f)
-			if c.over != errors.Is(err, errMediaTooLarge) || c.over != f.over || c.over != stopped {
+			if c.over != errors.Is(err, ErrTooLarge) || c.over != f.over || c.over != stopped {
 				t.Errorf("err %v, over %v, stopped %v; want refused = %v", err, f.over, stopped, c.over)
 			}
 			if c.over && !errors.Is(err, context.Canceled) {
