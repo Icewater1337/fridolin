@@ -1226,7 +1226,7 @@ func (br *Brain) invoke(run *brainRun, ctx context.Context, s *brainSettings, m 
 
 	// Parse the stream in a goroutine so we can race it against the 10s timer.
 	parseDone := make(chan RunResult, 1)
-	resultIn := make(chan struct{})
+	resultSeen := make(chan struct{})
 	var resultOnce sync.Once
 	go func() {
 		// A panic while the output is read, in the hook that sends a
@@ -1239,7 +1239,7 @@ func (br *Brain) invoke(run *brainRun, ctx context.Context, s *brainSettings, m 
 				parseDone <- RunResult{Err: errRunPanicked}
 			}
 		}()
-		parseDone <- br.readStream(m.JID, stdout, runHeading(m, s, cmd.Process.Pid), func() { resultOnce.Do(func() { close(resultIn) }) })
+		parseDone <- br.readStream(m.JID, stdout, runHeading(m, s, cmd.Process.Pid), func() { resultOnce.Do(func() { close(resultSeen) }) })
 	}()
 
 	notice := time.NewTimer(workingNoticeAfter)
@@ -1248,6 +1248,7 @@ func (br *Brain) invoke(run *brainRun, ctx context.Context, s *brainSettings, m 
 	invocationStart := time.Now()
 	var res RunResult
 	var grace <-chan time.Time
+	resultIn := resultSeen // nil once the grace runs
 	for parsing := true; parsing; {
 		select {
 		case res = <-parseDone:
@@ -1297,11 +1298,20 @@ func (br *Brain) invoke(run *brainRun, ctx context.Context, s *brainSettings, m 
 
 	waitErr := cmd.Wait()
 	waited = true
+	// Whether the result event came: readStream has returned, so it would
+	// have closed resultSeen by now.
+	gotResult := false
+	select {
+	case <-resultSeen:
+		gotResult = true
+	default:
+	}
 	switch {
 	case errors.Is(ctx.Err(), context.DeadlineExceeded):
 		// The deadline may come in the grace after the result, which is
-		// the run's answer then all the same.
-		if res.Err != nil || res.Text == "" && !res.AlreadySent {
+		// the run's answer then all the same. A question sent before the
+		// run hung is not: the chat must hear that the run was stopped.
+		if res.Err != nil || !gotResult {
 			return RunResult{Err: runTimedOut(s.runTimeout)}
 		}
 	case ctx.Err() != nil:

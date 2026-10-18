@@ -1351,27 +1351,59 @@ func TestPanicsInARunAreContained(t *testing.T) {
 
 // TestRunTimeoutStopsAStuckRun: a run that takes longer than
 // run_timeout_minutes is stopped, process group and all, and ends with an
-// error that says so, so that its brain goes on with the next message.
+// error that says so, so that its brain goes on with the next message. A
+// question it sent before it hung does not make it an answer: the chat
+// still hears that the run was stopped.
 func TestRunTimeoutStopsAStuckRun(t *testing.T) {
 	prev := runTimeoutUnit
 	runTimeoutUnit = 100 * time.Millisecond
 	t.Cleanup(func() { runTimeoutUnit = prev })
-	mgr, d, _ := queueTestManager(t, 30000, `, "run_timeout_minutes": 3`)
-	t.Setenv("FRIDOLIN_FAKE_CHILD", "1") // a command holding the output open too
-	start := time.Now()
-	if _, _, _, err := mgr.Submit(dm("stuck")); err != nil {
-		t.Fatal(err)
+	cases := []struct {
+		name     string
+		sleepMS  int
+		minutes  string // run_timeout_minutes, in runTimeoutUnit
+		env      map[string]string
+		question bool // the question goes out before the deadline
+	}{
+		// With a command holding the output open too.
+		{"before any output", 30000, "3", map[string]string{"FRIDOLIN_FAKE_CHILD": "1"}, false},
+		// Time enough for the question to go out first.
+		{"after asking a question", 0, "20", map[string]string{"FRIDOLIN_FAKE_ASK_ON": "says: stuck", "FRIDOLIN_FAKE_HANG_AFTER_ASK": "1"}, true},
 	}
-	waitFor(t, 10*time.Second, "the run to be stopped", func() bool { return d.count() == 1 })
-	res := d.all()[0].res
-	if !errors.Is(res.Err, errRunTimedOut) || !strings.Contains(res.Err.Error(), "run_timeout_minutes") {
-		t.Errorf("result = %+v, want errRunTimedOut", res)
-	}
-	if el := time.Since(start); el > 5*time.Second {
-		t.Errorf("the run took %v to stop", el)
-	}
-	if last := mgr.Get("a").Snapshot().Last; last == nil || last.Outcome != outcomeError {
-		t.Errorf("last run = %+v, want outcome error", last)
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			mgr, d, _ := queueTestManager(t, tc.sleepMS, `, "run_timeout_minutes": `+tc.minutes)
+			for k, v := range tc.env {
+				t.Setenv(k, v)
+			}
+			var mu sync.Mutex
+			var sent []string
+			mgr.SetHooks(BrainHooks{Deliver: d.add, Intermediate: func(_, text string) {
+				mu.Lock()
+				defer mu.Unlock()
+				sent = append(sent, text)
+			}})
+			start := time.Now()
+			if _, _, _, err := mgr.Submit(dm("stuck")); err != nil {
+				t.Fatal(err)
+			}
+			waitFor(t, 10*time.Second, "the run to be stopped", func() bool { return d.count() == 1 })
+			res := d.all()[0].res
+			if !errors.Is(res.Err, errRunTimedOut) || !strings.Contains(res.Err.Error(), "run_timeout_minutes") {
+				t.Errorf("result = %+v, want errRunTimedOut", res)
+			}
+			if el := time.Since(start); el > 5*time.Second {
+				t.Errorf("the run took %v to stop", el)
+			}
+			if last := mgr.Get("a").Snapshot().Last; last == nil || last.Outcome != outcomeError {
+				t.Errorf("last run = %+v, want outcome error", last)
+			}
+			mu.Lock()
+			defer mu.Unlock()
+			if asked := slices.ContainsFunc(sent, func(s string) bool { return strings.HasPrefix(s, questionPrefix) }); asked != tc.question {
+				t.Errorf("sent to the chat mid-run: %q, want a question: %v", sent, tc.question)
+			}
+		})
 	}
 }
 

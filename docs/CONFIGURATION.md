@@ -169,9 +169,10 @@ day); `0` lets a run take as long as it takes. A brain answers one message
 at a time, so a run that hangs (a tool that waits for input, a network
 stall) would otherwise hold up every later message of that brain until
 someone sends `!stop`. At the limit the bridge stops the run, with every
-command it started, and the chat gets an error that says so; the next
-message runs. Long agentic tasks can take a while, so raise it rather
-than turn it off if yours do.
+command it started, and the chat gets an error that says so, also when
+the run had asked the chat a question before it hung; the next message
+runs. Long agentic tasks can take a while, so raise it rather than turn
+it off if yours do.
 
 Once a run has given its answer, the bridge waits five seconds for it to
 end. A command it left running in the background that still holds the
