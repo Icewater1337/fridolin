@@ -9,6 +9,7 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"regexp"
 	"slices"
 	"strings"
 	"sync"
@@ -32,8 +33,9 @@ import (
 // files in it: those are on their way to the brain of their chat.
 const incomingMediaDir = ".incoming"
 
-// mediaInbox is the inbox of brain id in the media folder.
-func mediaInbox(mediaDir, id string) string {
+// Path is the inbox of brain id in the media folder.
+func (in MediaInbox) Path(id string) string {
+	mediaDir := in.Dir
 	return filepath.Join(mediaDir, id)
 }
 
@@ -53,13 +55,34 @@ const mediaInboxesMarker = ".inboxes"
 // becomes an inbox: no brain can read it, and /ingest takes nothing from it.
 const legacyMediaDir = ".old"
 
-// legacyMediaMu keeps two first inboxes from moving the same folders.
-var legacyMediaMu sync.Mutex
+// MediaMigration shares the startup cutoff and lock across inboxes. Its
+// owner constructs it once when the process starts, before accepting files.
+type MediaMigration struct {
+	Started time.Time
+	mu      sync.Mutex
+}
 
-// processStarted is when this process started: a file at the top of the
-// media folder older than that was left by an older version (see
-// retireLegacyMedia).
-var processStarted = time.Now()
+// MediaInbox confines attachments to Dir. WorkingDir resolves relative inputs
+// without reading the process's working directory inside the media layer.
+// Migration must be shared by every inbox of this process.
+type MediaInbox struct {
+	Dir        string
+	WorkingDir string
+	Migration  *MediaMigration
+}
+
+// absolute preserves the old path resolution, with the working directory
+// supplied by the caller rather than read from process state.
+func (in MediaInbox) absolute(p string) string {
+	if p == "" || filepath.IsAbs(p) || in.WorkingDir == "" {
+		return p
+	}
+	return filepath.Join(in.WorkingDir, p)
+}
+
+// validInboxID repeats the folder-name constraint at the storage boundary:
+// media cannot trust a caller to have validated an id as a manifest first.
+var validInboxID = regexp.MustCompile(`^[a-z0-9][a-z0-9_-]{0,39}$`)
 
 // mediaStuckFile, in the mediaInboxesMarker folder, names what
 // retireLegacyMedia could not move aside, one name a line: none of them
@@ -71,7 +94,7 @@ const mediaStuckFile = "stuck"
 // path, would open to it.
 var errNotTheInbox = errors.New("not the brain's inbox")
 
-// retireLegacyMedia readies the media folder for inboxes, once: unless it
+// RetireLegacy readies the media folder for inboxes, once: unless it
 // has the mediaInboxesMarker, every folder (or symlink) in it whose name
 // could be a brain id's goes into legacyMediaDir, under a free name, and
 // so does every file at its top older than this process; then the folder
@@ -89,9 +112,10 @@ var errNotTheInbox = errors.New("not the brain's inbox")
 // file) stays where it is, logged and listed in the marker's
 // mediaStuckFile, and it goes on with the rest. One entry like that used
 // to fail every call, and with it every brain's every run.
-func retireLegacyMedia(mediaDir string) error {
-	legacyMediaMu.Lock()
-	defer legacyMediaMu.Unlock()
+func (in MediaInbox) RetireLegacy() error {
+	mediaDir := in.Dir
+	in.Migration.mu.Lock()
+	defer in.Migration.mu.Unlock()
 	if err := os.MkdirAll(mediaDir, 0o700); err != nil {
 		return err
 	}
@@ -119,7 +143,7 @@ func retireLegacyMedia(mediaDir string) error {
 		if strings.HasPrefix(name, ".") {
 			continue
 		}
-		dst, err := moveLegacyMedia(media, e)
+		dst, err := in.moveLegacyMedia(media, e)
 		switch {
 		case err != nil:
 			log.Printf("media: cannot move %s, which an older version left in the media folder, aside (%v); it stays in %s, and no brain named %s gets an inbox while it is there: move it out by hand", name, err, mediaDir, name)
@@ -161,14 +185,14 @@ func retireLegacyMedia(mediaDir string) error {
 // moveLegacyMedia moves the entry e at the top of the media folder into
 // legacyMediaDir under a free name and returns that name, or "" for a file
 // it leaves where it is, one newer than this process.
-func moveLegacyMedia(media *os.Root, e fs.DirEntry) (string, error) {
+func (in MediaInbox) moveLegacyMedia(media *os.Root, e fs.DirEntry) (string, error) {
 	name := e.Name()
 	if e.Type().IsRegular() {
 		fi, err := e.Info()
 		if err != nil {
 			return "", err
 		}
-		if !fi.ModTime().Before(processStarted) {
+		if !fi.ModTime().Before(in.Migration.Started) {
 			return "", nil
 		}
 	}
@@ -214,7 +238,7 @@ func stuckMedia(media *os.Root, name string) (bool, error) {
 	return false, media.WriteFile(list, []byte(strings.Join(names, "\n")+"\n"), 0o600)
 }
 
-// openInbox opens brain id's inbox in the media folder as an os.Root,
+// Open opens brain id's inbox in the media folder as an os.Root,
 // creating it first if needed. The inbox is the brain's to write, but not
 // the folder itself: the sandbox keeps a brain from renaming or replacing
 // it (with a symlink to another brain's folder, say), and the media folder
@@ -223,13 +247,14 @@ func stuckMedia(media *os.Root, name string) (bool, error) {
 // the root, which refuses a path that a symlink the brain planted would
 // lead out of the inbox. What is at the inbox's path and is no inbox, a
 // file or what an older version left there, fails with errNotTheInbox.
-func openInbox(mediaDir, id string) (*os.Root, error) {
-	if !brainIDRe.MatchString(id) {
+func (in MediaInbox) Open(id string) (*os.Root, error) {
+	mediaDir := in.Dir
+	if !validInboxID.MatchString(id) {
 		// The id names a folder; anything else could name another one.
 		return nil, fmt.Errorf("brain id %q cannot name an inbox", id)
 	}
 	// A folder an older version left under this name is not the brain's.
-	if err := retireLegacyMedia(mediaDir); err != nil {
+	if err := in.RetireLegacy(); err != nil {
 		return nil, fmt.Errorf("readying the media folder for inboxes: %w", err)
 	}
 	media, err := os.OpenRoot(mediaDir)
@@ -237,9 +262,9 @@ func openInbox(mediaDir, id string) (*os.Root, error) {
 		return nil, err
 	}
 	defer media.Close()
-	legacyMediaMu.Lock()
+	in.Migration.mu.Lock()
 	stuck, err := stuckMedia(media, id)
-	legacyMediaMu.Unlock()
+	in.Migration.mu.Unlock()
 	if err != nil {
 		return nil, err
 	}
@@ -260,9 +285,10 @@ func openInbox(mediaDir, id string) (*os.Root, error) {
 // mediaRel returns p relative to the media folder, by the folder as
 // configured or by its real path, and whether p lies inside it. The folder
 // itself does not count.
-func mediaRel(mediaDir, p string) (string, bool) {
-	p = filepath.Clean(absPath(p))
-	for _, base := range []string{filepath.Clean(absPath(mediaDir)), fsx.Canonical(mediaDir)} {
+func (in MediaInbox) relative(p string) (string, bool) {
+	mediaDir := in.Dir
+	p = filepath.Clean(in.absolute(p))
+	for _, base := range []string{filepath.Clean(in.absolute(mediaDir)), fsx.Canonical(mediaDir)} {
 		if base == "" || !fsx.Within(p, base) {
 			continue
 		}
@@ -289,7 +315,7 @@ func mediaOwner(rel string) string {
 // answer says nothing of what is outside the inbox.
 var errNotInOwnInbox = errors.New("not a file in the brain's own inbox")
 
-// ownInboxFile returns p, a regular file in brain id's inbox, by the media
+// OwnFile returns p, a regular file in brain id's inbox, by the media
 // folder's real path, for /ingest called with that brain's own token. The
 // brain may put symlinks in its inbox, and one that leads out of it, to a
 // file left at the top of the media folder for another brain, say, must
@@ -300,8 +326,9 @@ var errNotInOwnInbox = errors.New("not a file in the brain's own inbox")
 // what they lead to is there or not, the answer is errNotInOwnInbox. The
 // path returned is not resolved further; a link in it leads, as checked,
 // to a file in the inbox, and the sandbox has the last word on it anyway.
-func ownInboxFile(mediaDir, id, p string) (string, error) {
-	rel, ok := mediaRel(mediaDir, p)
+func (in MediaInbox) OwnFile(id, p string) (string, error) {
+	mediaDir := in.Dir
+	rel, ok := in.relative(p)
 	if !filepath.IsAbs(p) || !ok || mediaOwner(rel) != id {
 		return "", errNotInOwnInbox
 	}
@@ -325,7 +352,7 @@ func ownInboxFile(mediaDir, id, p string) (string, error) {
 	return filepath.Join(fsx.Canonical(mediaDir), id, inner), nil
 }
 
-// claimMedia moves each file in paths that lies in the media folder, but
+// Claim moves each file in paths that lies in the media folder, but
 // not in brain id's inbox, into that inbox, and returns where each file it
 // moved went, by the path it had (see Inbound.withMediaMoved). It runs
 // once the brain is known (see Brain.Submit), so a message that lands on
@@ -334,7 +361,8 @@ func ownInboxFile(mediaDir, id, p string) (string, error) {
 // log says why; the brain cannot read it there under the sandbox, but
 // nothing is lost. A name already taken in the inbox gets "-2", "-3" and
 // so on, as in placeMedia, so nothing there is replaced.
-func claimMedia(mediaDir, id string, paths []string) map[string]string {
+func (in MediaInbox) Claim(id string, paths []string) map[string]string {
+	mediaDir := in.Dir
 	if mediaDir == "" || len(paths) == 0 {
 		return nil
 	}
@@ -349,13 +377,13 @@ func claimMedia(mediaDir, id string, paths []string) map[string]string {
 		}
 	}()
 	for _, p := range paths {
-		rel, ok := mediaRel(mediaDir, p)
+		rel, ok := in.relative(p)
 		if !ok || mediaOwner(rel) == id {
 			continue
 		}
 		if inbox == nil {
 			var err error
-			if inbox, err = openInbox(mediaDir, id); err != nil {
+			if inbox, err = in.Open(id); err != nil {
 				log.Printf("brain %s: cannot move its files into its inbox: %v", id, err)
 				return moved
 			}
@@ -369,7 +397,7 @@ func claimMedia(mediaDir, id string, paths []string) map[string]string {
 			log.Printf("brain %s: cannot move %s into its inbox: %v", id, filepath.Base(rel), err)
 			continue
 		}
-		moved[p] = filepath.Join(mediaInbox(mediaDir, id), dst)
+		moved[p] = filepath.Join(in.Path(id), dst)
 	}
 	return moved
 }
@@ -407,13 +435,13 @@ func moveIntoInbox(media, inbox *os.Root, id, rel string) (string, error) {
 	}
 }
 
-// writeInboxFile writes data to rel inside brain id's inbox, replacing what
+// Write writes data to rel inside brain id's inbox, replacing what
 // is there, and returns the file's path. Like fsx.WriteFileAtomic it writes a
 // temp file first and renames it into place, so the brain never reads half
 // a file; unlike it, every step goes through the inbox's root, because the
 // brain can replace any folder inside its inbox with a symlink.
-func writeInboxFile(mediaDir, id, rel string, data []byte) (string, error) {
-	inbox, err := openInbox(mediaDir, id)
+func (in MediaInbox) Write(id, rel string, data []byte) (string, error) {
+	inbox, err := in.Open(id)
 	if err != nil {
 		return "", err
 	}
@@ -446,5 +474,58 @@ func writeInboxFile(mediaDir, id, rel string, data []byte) (string, error) {
 	if err := inbox.Rename(tmp, rel); err != nil {
 		return "", err
 	}
-	return filepath.Join(mediaInbox(mediaDir, id), rel), nil
+	return filepath.Join(in.Path(id), rel), nil
+}
+
+// Resolve checks the paths handed to /ingest. A script may hand in files at
+// the top or in this brain's inbox; a brain token can name only its own files.
+// Errors preserve the HTTP contract without coupling storage to HTTP.
+func (in MediaInbox) Resolve(id string, requested []string, ownOnly bool) ([]string, error) {
+	media := fsx.Canonical(in.Dir)
+	var paths []string
+	for _, p := range requested {
+		// A brain writes no part of the media folder but its own inbox, so
+		// a file anywhere else, at its top too, was left there by someone
+		// else for some brain: by a script or the site, between its write
+		// and its /ingest, or for good after an /ingest that failed. A
+		// brain's own token takes only what is in its inbox already, and
+		// is told so in one answer for every file it may not hand in, so
+		// that the answer says nothing of whether a name it guessed is
+		// there. That holds for a symlink it put in its inbox too: one
+		// that leads out of the inbox is refused unfollowed (see
+		// ownInboxFile).
+		if ownOnly {
+			f, err := in.OwnFile(id, p)
+			if err != nil {
+				return nil, fmt.Errorf("brain %s hands in only files in its own inbox, %s", id, in.Path(id))
+			}
+			paths = append(paths, f)
+			continue
+		}
+		resolved, err := filepath.EvalSymlinks(p)
+		if !filepath.IsAbs(p) || err != nil || !fsx.Within(resolved, media) {
+			return nil, errors.New("every path must be an existing file inside the media directory")
+		}
+		if st, err := os.Stat(resolved); err != nil || !st.Mode().IsRegular() {
+			return nil, errors.New("not a regular file: " + filepath.Base(p))
+		}
+		// The brain takes the file into its inbox (see claimMedia), and a
+		// brain can ask /ingest for that itself, so only a file handed in
+		// for it may move: one at the top of the media folder, where
+		// scripts drop their files, or one already in its own inbox. Every
+		// folder below the media folder holds files for a brain, which
+		// would then read them: another brain's inbox, the inbox left by
+		// a brain that was removed or is left out (whose id may come
+		// back), .old/ with the folders older versions left there, every
+		// brain's Plaud transcripts among them (see retireLegacyMedia), and
+		// .incoming/ with attachments on their way to the brain of their
+		// chat.
+		rel, _ := in.relative(resolved)
+		if owner := mediaOwner(rel); owner != "" && owner != id {
+			return nil, fmt.Errorf("not a file for brain %s: %s is in %s/ in the media directory; /ingest takes files at its top or in the brain's own inbox", id, filepath.Base(p), owner)
+		}
+		paths = append(paths, resolved)
+	}
+
+	return paths, nil
 }

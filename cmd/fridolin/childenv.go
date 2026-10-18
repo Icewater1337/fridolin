@@ -238,7 +238,7 @@ func prepareBrainState(dataDir, mediaDir, id string, inheritUser bool) ([]string
 		// no inbox refuses the run. Any other failure leaves the run without
 		// an inbox: the files sent to it stay where they are (see
 		// claimMedia), and the brain runs, as it used to fail every run.
-		switch inbox, err := openInbox(mediaDir, id); {
+		switch inbox, err := mediaInboxAt(mediaDir).Open(id); {
 		case errors.Is(err, errNotTheInbox):
 			return nil, err
 		case err != nil:

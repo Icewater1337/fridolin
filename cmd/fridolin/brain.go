@@ -391,7 +391,7 @@ func (br *Brain) submit(m *Inbound) (pos int, busy bool, err error) {
 
 	// The files go into this brain's inbox, the only part of the media
 	// folder its sandbox opens, before the history names where they are.
-	*m = m.withMediaMoved(claimMedia(s.mediaDir, br.id, m.Media))
+	*m = m.withMediaMoved(mediaInboxAt(s.mediaDir).Claim(br.id, m.Media))
 
 	// History first, so that later runs see the message even when it is
 	// merged into a queue that is already moving.

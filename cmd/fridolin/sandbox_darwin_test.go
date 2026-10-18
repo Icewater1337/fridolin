@@ -1117,7 +1117,7 @@ func TestSandboxAllowPathsKeepBridgeSecrets(t *testing.T) {
 	t.Setenv("HOME", home)
 	// Ready for inboxes, as the bridge has it before any run, so that a's
 	// photo stays in a's inbox.
-	if err := retireLegacyMedia(filepath.Join(home, ".fridolin", "media")); err != nil {
+	if err := mediaInboxAt(filepath.Join(home, ".fridolin", "media")).RetireLegacy(); err != nil {
 		t.Fatal(err)
 	}
 	for _, f := range []string{".fridolin/dashboard.token", ".fridolin/bridge.db", ".fridolin/media/a/photo.jpg", "Documents/share/ok.txt", "a/notes.md", "team/b/diary.md", "Library/Keychains/login.keychain-db", "Library/Preferences/x.plist"} {
@@ -1611,7 +1611,7 @@ func sandboxFixture(t *testing.T, home, otherBrain, denyDir string, extra ...map
 	t.Cleanup(mgr.Stop)
 	// As the bridge does when it starts: the inboxes below are the
 	// brains' own, not what an older version left there.
-	if err := retireLegacyMedia(cfg.MediaDir); err != nil {
+	if err := mediaInboxAt(cfg.MediaDir).RetireLegacy(); err != nil {
 		t.Fatal(err)
 	}
 

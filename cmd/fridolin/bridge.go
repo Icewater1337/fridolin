@@ -141,7 +141,7 @@ func NewBridge(cfgs *ConfigStore, opts BridgeOptions) (_ *Bridge, err error) {
 	// bridge's media folder under it. A failure here leaves it to the
 	// first inbox.
 	if cfg.MediaDir != "" {
-		if err := retireLegacyMedia(cfg.MediaDir); err != nil {
+		if err := mediaInboxAt(cfg.MediaDir).RetireLegacy(); err != nil {
 			log.Printf("media: readying %s for inboxes: %v", cfg.MediaDir, err)
 		}
 	}

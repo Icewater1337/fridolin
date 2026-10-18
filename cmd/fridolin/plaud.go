@@ -1031,14 +1031,14 @@ func (p *PlaudManager) forward(ctx context.Context, cfg *Config, id string, item
 
 	// Into the plaud folder of the brain's own inbox: no other brain may
 	// read the recording.
-	file := plaudTranscriptPath(filepath.Join(mediaInbox(cfg.MediaDir, br.ID()), "plaud"), rec.day, rec.name, id)
+	file := plaudTranscriptPath(filepath.Join(mediaInboxAt(cfg.MediaDir).Path(br.ID()), "plaud"), rec.day, rec.name, id)
 	var body strings.Builder
 	fmt.Fprintf(&body, "Plaud recording: %s\nRecorded: %s\nDuration: %s\nPlaud ID: %s\n%s\n", rec.name, rec.when, rec.duration, id, rec.note)
 	if rec.summary != "" {
 		body.WriteString("=== Plaud AI summary ===\n" + rec.summary + "\n\n")
 	}
 	body.WriteString("=== Transcript ===\n" + strings.TrimSpace(rec.transcript) + "\n")
-	path, err := writeInboxFile(cfg.MediaDir, br.ID(), filepath.Join("plaud", filepath.Base(file)), []byte(body.String()))
+	path, err := mediaInboxAt(cfg.MediaDir).Write(br.ID(), filepath.Join("plaud", filepath.Base(file)), []byte(body.String()))
 	if err != nil {
 		return nil, err
 	}
