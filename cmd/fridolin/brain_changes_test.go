@@ -8,7 +8,6 @@ import (
 	"slices"
 	"strings"
 	"testing"
-	"testing/iotest"
 	"time"
 
 	"go.mau.fi/whatsmeow/proto/waCommon"
@@ -318,33 +317,6 @@ func TestActivityFollowsChanges(t *testing.T) {
 	slices.Sort(texts)
 	if want := []string{"a long report", "book Wednesday"}; !slices.Equal(texts, want) {
 		t.Errorf("activity = %q, want %q", texts, want)
-	}
-}
-
-func TestHoldsID(t *testing.T) {
-	line := `{"ts":"2026-10-18T10:00:00+02:00","from":"15551234567","chat":"15551234567@s.whatsapp.net","text":"hi","type":"in","id":"3EB0A"}` + "\n"
-	filler := strings.Repeat(`{"text":"`+strings.Repeat("x", 1000)+`"}`+"\n", 100) // past one read
-	cases := []struct {
-		name, data, id string
-		want           bool
-	}{
-		{"there", line, "3EB0A", true},
-		{"after much else", filler + line, "3EB0A", true},
-		{"absent", filler + line, "3EB0B", false},
-		{"a prefix of another", line, "3EB0", false},
-		{"only in a text", `{"text":"say \"id\":\"3EB0A\""}` + "\n", "3EB0A", false},
-		{"empty", "", "3EB0A", false},
-	}
-	for _, c := range cases {
-		t.Run(c.name, func(t *testing.T) {
-			if got, err := holdsID(strings.NewReader(c.data), c.id); err != nil || got != c.want {
-				t.Errorf("holdsID(%q) = %v, %v; want %v", c.id, got, err, c.want)
-			}
-			// A byte at a time, so the ID is cut by every read boundary.
-			if got, err := holdsID(iotest.OneByteReader(strings.NewReader(c.data)), c.id); err != nil || got != c.want {
-				t.Errorf("a byte at a time: holdsID(%q) = %v, %v; want %v", c.id, got, err, c.want)
-			}
-		})
 	}
 }
 

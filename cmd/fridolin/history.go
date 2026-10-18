@@ -8,6 +8,7 @@ import (
 	"log"
 	"os"
 	"slices"
+	"time"
 )
 
 // Reading a brain's history back from its end. The file holds every message
@@ -119,8 +120,8 @@ func scanHistoryBackward(r io.ReaderAt, size, budget int64, visit func(line []by
 // brain's other chats fail; nil takes them all. A line that is no history
 // entry is skipped, and how many were is logged, as are lines too long to
 // take: a brain can write anything into its own history.
-func (br *Brain) scanHistory(budget int64, want func(line []byte) bool, visit func(e historyEntry) bool) {
-	f, err := openInFolder(br.root, historyFileName, os.O_RDONLY, 0)
+func scanHistory(root *os.Root, brainID string, budget int64, want func(line []byte) bool, visit func(e historyEntry) bool) {
+	f, err := openInFolder(root, historyFileName, os.O_RDONLY, 0)
 	if err != nil {
 		return
 	}
@@ -142,13 +143,13 @@ func (br *Brain) scanHistory(budget int64, want func(line []byte) bool, visit fu
 		return visit(e)
 	})
 	if long > 0 {
-		log.Printf("brain %s: skipped %d history lines longer than %d KiB", br.id, long, maxHistoryLine>>10)
+		log.Printf("brain %s: skipped %d history lines longer than %d KiB", brainID, long, maxHistoryLine>>10)
 	}
 	if broken > 0 {
-		log.Printf("brain %s: skipped %d history lines that are not JSON", br.id, broken)
+		log.Printf("brain %s: skipped %d history lines that are not JSON", brainID, broken)
 	}
 	if err != nil {
-		log.Printf("brain %s: reading its history: %v", br.id, err)
+		log.Printf("brain %s: reading its history: %v", brainID, err)
 	}
 }
 
@@ -173,9 +174,9 @@ func mentionsChat(chats []string) func(line []byte) bool {
 // recentHistory returns the last n entries of the brain's history, oldest
 // first, from no further back than budget bytes: the dashboard's feed. A
 // reset marker is no message and stays out.
-func (br *Brain) recentHistory(n int, budget int64) []historyEntry {
+func recentHistory(root *os.Root, brainID string, n int, budget int64) []historyEntry {
 	var out []historyEntry
-	br.scanHistory(budget, nil, func(e historyEntry) bool {
+	scanHistory(root, brainID, budget, nil, func(e historyEntry) bool {
 		if e.Type != historyReset {
 			out = append(out, e)
 		}
@@ -183,4 +184,107 @@ func (br *Brain) recentHistory(n int, budget int64) []historyEntry {
 	})
 	slices.Reverse(out)
 	return out
+}
+
+// historyEntry is one line in a brain's conversation-history.jsonl file.
+// Brains' own scripts read the file too, so docs/BRAINS.md and
+// docs/schemas/history-line.schema.json describe the line: fields are
+// added, never renamed or removed.
+type historyEntry struct {
+	TS   string `json:"ts"`
+	From string `json:"from"`
+	Chat string `json:"chat"` // JID of the chat (DM participant or group)
+	Text string `json:"text"`
+	Type string `json:"type"` // historyIn, historyOut, historyEvent or historyReset
+	// Via marks an "out" line that came in through /send: "brain" (From is
+	// the brain that sent it), "script" (the scripts token) or "api" (no
+	// token). A brain's own replies have none.
+	Via string `json:"via,omitempty"`
+	// ID is the WhatsApp message's ID for a message from WhatsApp, which an
+	// edit or a deletion of it names (see recordChange).
+	ID string `json:"id,omitempty"`
+	// OTPRequest is the id /send answered a request for a one-time code
+	// with, on the "out" line of that request (see otpRequest).
+	OTPRequest string `json:"otp_request,omitempty"`
+}
+
+// The history entry types. They are written to every brain's history file,
+// which `fridolin history` and a brain's own scripts read, so their values
+// must not change.
+const (
+	historyIn  = "in"  // a message to the brain
+	historyOut = "out" // a message the brain sent, or one sent on its behalf
+	// historyEvent is something that happened in a chat without a message,
+	// such as a poll vote. Its From is who did it, and its text says what,
+	// after their name.
+	historyEvent = "event"
+	// historyReset marks where !reset started a chat afresh. Its From is
+	// who sent it, and it has no text. A run's prompt shows only the
+	// chat's lines after the newest one; it is no message, so neither the
+	// dashboard's feed nor `fridolin history` shows it.
+	historyReset = "reset"
+)
+
+// historyFileName is the brain's conversation history, in its folder.
+const historyFileName = "conversation-history.jsonl"
+
+// sameLine reports whether e is the history line l: equal, or for a
+// message from WhatsApp, whose line an edit rewrites, equal but for the
+// text.
+func (l historyEntry) sameLine(e historyEntry) bool {
+	if l.ID != "" {
+		e.Text = l.Text
+	}
+	return e == l
+}
+
+// historyForChat returns the entries of the chat that goes by chats in the
+// brain's history, oldest first. It reads them back from the end of the
+// file, each newest first to enough, until enough reports that it has
+// what it needs, or it reaches the chat's newest reset marker (see
+// historyReset), or promptHistoryBudget is read, or the file's start is
+// reached. A DM's lines may be under its LID or its number, and both are
+// the one chat. It returns none when the history cannot be read (see
+// openInFolder).
+func historyForChat(root *os.Root, brainID string, chats []string, budget int64, enough func(historyEntry) bool) []historyEntry {
+	var entries []historyEntry
+	scanHistory(root, brainID, budget, mentionsChat(chats), func(e historyEntry) bool {
+		if !slices.Contains(chats, e.Chat) {
+			return true
+		}
+		if e.Type == historyReset {
+			return false
+		}
+		entries = append(entries, e)
+		return !enough(e)
+	})
+	slices.Reverse(entries)
+	return entries
+}
+
+// appendHistoryEntry appends entry to the history file, stamped with the
+// time now unless it has a time, and returns it as it reads back, which
+// historyBefore looks for: invalid UTF-8 in its text is written as U+FFFD.
+// The caller owns serialization with other history writes.
+func appendHistoryEntry(root *os.Root, entry historyEntry) (historyEntry, error) {
+	if entry.TS == "" {
+		entry.TS = time.Now().Format(time.RFC3339)
+	}
+	data, err := json.Marshal(entry)
+	if err != nil {
+		return entry, err
+	}
+	var written historyEntry
+	if json.Unmarshal(data, &written) == nil {
+		entry = written
+	}
+	// Through the folder: appending through a symlink would let a brain
+	// write to files its sandbox denies it, another brain's among them.
+	f, err := openInFolder(root, historyFileName, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600)
+	if err != nil {
+		return entry, err
+	}
+	_, _ = f.Write(append(data, '\n'))
+	f.Close()
+	return entry, nil
 }
