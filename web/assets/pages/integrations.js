@@ -81,7 +81,10 @@ export default {
 
     function render() {
       const s = status;
-      if (!s.cli.found) {
+      // With plaud.phone_dir set, recordings come from a folder the Plaud
+      // Sync phone app's files are synced to: no CLI, no login.
+      const phone = (s.settings || {}).phone_dir || '';
+      if (!s.cli.found && !phone) {
         paint(card, { install: s.cli.install_hint }, () => [
           head('Not installed', 'neutral'),
           h('p', 'New recordings from your Plaud reach a brain as finished transcripts — with Plaud’s AI summary — so it can file them, remember what matters and tell you the action items.'),
@@ -124,8 +127,9 @@ export default {
 
       paint(card, 'connected', () => [headBox, alertsBox, factsBox, settings.el, actionsBox, loginBox]);
       const st = s.settings || {};
-      paint(headBox, { expired: !!s.expired, account: s.account || '' }, ({ expired, account }) => [
-        head(expired ? 'Login expired' : 'Connected', expired ? 'bad' : 'ok'),
+      paint(headBox, { expired: !!s.expired, account: s.account || '', phone }, ({ expired, account }) => [
+        head(phone ? 'Phone folder' : expired ? 'Login expired' : 'Connected', expired ? 'bad' : 'ok'),
+        phone ? h('p', 'Recordings come from the Plaud Sync phone app, through the folder ', mono(phone), ' its files are synced to (', mono('plaud.phone_dir'), ').') : null,
         account ? h('p', 'Signed in as ', h('strong', account), '.') : null,
       ]);
       // A destination problem only blocks anything while Plaud is on.
@@ -143,7 +147,7 @@ export default {
       paint(factsBox, {
         chat: s.summary_chat || '', chatName: chatName(s.summary_chat || ''), toYou: !!s.summary_to_you, chatBrain: s.summary_chat_brain || '', target: s.target_brain || '',
         last: s.last_forwarded || null, givenUp: (s.given_up || []).slice(-3).reverse(), handed: s.handed || 0,
-        poll: s.last_poll || '', pending: s.pending || 0, waiting: !!(blocked || s.last_error), seen: s.seen, cliVersion: s.cli.version || '',
+        poll: s.last_poll || '', pending: s.pending || 0, waiting: !!(blocked || s.last_error), seen: s.seen, cliVersion: phone ? '' : s.cli.version || '',
       }, renderFacts);
       // The picked brain is marked when it cannot take recordings: gone,
       // or listed but not running (not approved, or it has an issue).
@@ -154,8 +158,8 @@ export default {
       // still loading), so Save does not quietly switch to Automatic.
       if (st.brain && !brains.some((b) => b.id === st.brain)) options.push([st.brain, missing(st.brain)]);
       settings.set({ st, options, defaultMessage: s.default_message || '', interval: s.interval_seconds || 60 });
-      paint(actionsBox, { enabled: !!st.enabled, expired: !!s.expired, connecting: !!(s.connect && s.connect.state === 'running'), access: !!st.brain_access }, renderActions);
-      paint(loginBox, s.login_dir || '', (dir) => ['Login stored in ', mono(dir), '.']);
+      paint(actionsBox, { enabled: !!st.enabled, expired: !!s.expired, connecting: !!(s.connect && s.connect.state === 'running'), access: !!st.brain_access, phone }, renderActions);
+      paint(loginBox, phone ? '' : s.login_dir || '', (dir) => (dir ? ['Login stored in ', mono(dir), '.'] : null));
     }
 
     function renderFacts(f) {
@@ -218,16 +222,20 @@ export default {
         enabled: enabled.input.checked, brain: brainSel.value, polished: polished.input.checked,
         brain_access: access.input.checked, message: msg.value,
       });
+      // The phone app's transcripts have no cleaned-up version, and no login is shared.
+      const phone = !!st.phone_dir;
       const el = h('div.settings-fields',
-        field({ control: enabled, help: `Every ${every(interval)} Fridolin looks for new recordings and waits until Plaud has transcribed them. The first check — also the first after signing in with another Plaud account — only remembers what already exists, so old recordings are not sent. Recordings made while this is off are sent when you turn it back on, oldest first, at most five with the brain at once.` }),
+        field({ control: enabled, help: phone
+          ? `Every ${every(interval)} Fridolin looks in the phone folder for new transcripts. The first check — also the first after the folder changed — only remembers what is already there. Transcripts that arrive while this is off are sent when you turn it back on, oldest first, at most five with the brain at once.`
+          : `Every ${every(interval)} Fridolin looks for new recordings and waits until Plaud has transcribed them. The first check — also the first after signing in with another Plaud account — only remembers what already exists, so old recordings are not sent. Recordings made while this is off are sent when you turn it back on, oldest first, at most five with the brain at once.` }),
         field({ label: 'Brain', control: brainSel, help: 'Recordings run in this brain. Its answer is private: it goes to the brain’s reply chat when that is a direct chat, otherwise to your DM — never to a group.' }),
-        field({ control: polished, help: 'Plaud makes the cleaned-up transcript after the raw one, and not always. When it has none an hour after the recording showed up, the raw one is sent, with a note saying so.' }),
-        accessField,
+        phone ? null : field({ control: polished, help: 'Plaud makes the cleaned-up transcript after the raw one, and not always. When it has none an hour after the recording showed up, the raw one is sent, with a note saying so.' }),
+        phone ? null : accessField,
         field({ label: 'Instruction sent with each recording', control: msg, wide: true, help: h('span', 'It follows a first line that says what arrived. ', mono('{name}'), ', ', mono('{when}'), ' and ', mono('{duration}'), ' are filled in. How a brain files recordings belongs in its ', mono('skills/plaud.md'), '.') }));
       return { el, value };
     }
 
-    function renderActions({ enabled, expired, connecting, access }) {
+    function renderActions({ enabled, expired, connecting, access, phone }) {
       return [
         btn('Save', {
           kind: 'primary', icon: 'check',
@@ -248,7 +256,7 @@ export default {
           },
         }) : null,
         expired ? btn(connecting ? 'Waiting for Plaud…' : 'Connect again', { icon: 'external', disabled: connecting, onClick: startSignIn }) : null,
-        disconnectButton({ connected: true, expired, moved: false, access }),
+        phone ? null : disconnectButton({ connected: true, expired, moved: false, access }),
       ];
     }
 

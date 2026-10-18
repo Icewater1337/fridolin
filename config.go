@@ -642,6 +642,7 @@ func effective(file *Config) (*Config, error) {
 		cfg.Backup.KeepVersionsDays = &n
 	}
 	cfg.Backup.RclonePath = expandHome(cfg.Backup.RclonePath, home)
+	cfg.Plaud.PhoneDir = expandHome(cfg.Plaud.PhoneDir, home)
 
 	// Compared with senders as digits, however they were typed into the
 	// file. The dashboard writes them so; a hand edit may not have.

@@ -3435,3 +3435,71 @@ func TestPlaudCLIGetsTheAllowlistedEnvironment(t *testing.T) {
 		})
 	}
 }
+
+// With plaud.phone_dir, recordings come from the folder the phone app's
+// files are synced to, and Plaud's CLI never runs: the first check only
+// remembers what is there, then each new transcript goes to the brain,
+// also one that arrives after newer ones, and nothing a sync tool leaves
+// beside them counts.
+func TestPlaudPhoneFolder(t *testing.T) {
+	phone := t.TempDir()
+	tb, fp := plaudBridge(t, `, "phone_dir": "`+phone+`"`)
+	ctx := context.Background()
+	put := func(name, body string) {
+		if err := os.WriteFile(filepath.Join(phone, name), []byte(body), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if !tb.plaud.connected() {
+		t.Fatal("a phone folder needs no sign-in")
+	}
+
+	put("2026-10-18_09-00-00.txt", "[00:00 - 00:03] Speaker 1: Old.")
+	if err := tb.plaud.Poll(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if st, _ := tb.plaud.loadState(); !slices.Equal(st.Seen, []string{"phone_2026-10-18_09-00-00"}) || st.Login != nil {
+		t.Fatalf("seed: %+v", st)
+	}
+
+	put("2026-10-18_10-00-00.txt", "[00:00 - 00:04] Speaker 1: Let's ship on Friday.\n[00:04 - 01:05] Speaker 2: Agreed.\n")
+	put("2026-10-18_08-00-00.txt", "") // transcribed late, and silent
+	put("2026-10-18_10-00-00.mp3", "audio")
+	put(".syncthing.2026-10-18_11-00-00.txt.tmp", "half")
+	put("2026-10-18_11-00-00.sync-conflict-20261018-110000-ABCDEFG.txt", "conflict")
+	put("notes.txt", "mine")
+	if err := tb.plaud.Poll(ctx); err != nil {
+		t.Fatal(err)
+	}
+	tb.waitPlaudSeen(t, "phone_2026-10-18_10-00-00")
+	tb.waitPlaudSeen(t, "phone_2026-10-18_08-00-00")
+	if st, _ := tb.plaud.loadState(); len(st.Seen) != 3 || len(st.Pending) != 0 {
+		t.Fatalf("state = %+v", st)
+	}
+	data, err := os.ReadFile(filepath.Join(tb.cfgs.Get().MediaDir, plaudDMBrain.ID, "plaud", "2026-10-18 - Phone recording - phone_2026-10-18_10-00-00.txt"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"Plaud recording: Phone recording\nRecorded: 2026-10-18 10:00\nDuration: 01:05\n", "=== Transcript ===\n[00:00 - 00:04] Speaker 1: Let's ship"} {
+		if !strings.Contains(string(data), want) {
+			t.Errorf("transcript file lacks %q:\n%s", want, data)
+		}
+	}
+	waitFor(t, 5*time.Second, "brain replies", func() bool { return len(tb.dev.Outbox()) == 2 })
+	if out := tb.dev.Outbox(); !slices.ContainsFunc(out, func(m DevMessage) bool {
+		return strings.Contains(m.Text, `[Plaud] New recording "Phone recording" (2026-10-18 10:00, 01:05)`)
+	}) {
+		t.Errorf("replies = %+v", out)
+	}
+	if calls := fp.calls(); calls != "" {
+		t.Errorf("the CLI ran:\n%s", calls)
+	}
+
+	// A folder that is gone fails the check, so the card says so.
+	if err := os.RemoveAll(phone); err != nil {
+		t.Fatal(err)
+	}
+	if err := tb.plaud.Poll(ctx); err == nil || !strings.Contains(err.Error(), "the phone folder") {
+		t.Errorf("poll without the folder = %v", err)
+	}
+}

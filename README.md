@@ -459,7 +459,9 @@ under *Settings → Google sign-in*. Step by step:
 
 Record conversations with a Plaud? Dashboard → *Integrations → Plaud* signs in
 with Plaud's own login, and every new recording reaches a brain as a finished
-transcript with Plaud's summary. See [docs/PLAUD.md](docs/PLAUD.md).
+transcript with Plaud's summary. A NotePin can also skip Plaud's slow cloud
+sync: the Android app in [plaud-android/](plaud-android/README.md) pulls
+each recording off the pin as it stops. See [docs/PLAUD.md](docs/PLAUD.md).
 
 ### Backups
 

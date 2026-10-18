@@ -123,7 +123,8 @@
     "interval_seconds": 120,
     "polished": true,
     "message": "[Plaud] {name} ({when}, {duration})",
-    "brain_access": true
+    "brain_access": true,
+    "phone_dir": "~/PlaudSync"
   },
   "dashboard": {
     "require_token": true

@@ -40,6 +40,36 @@ most five are with the brain at once, waiting or running (fewer when
 arrives oldest first, as the brain gets through it, and never fills the
 brain's queue, which then would turn your own messages away.
 
+## Without Plaud's cloud: the phone app
+
+Plaud's own app syncs a NotePin only while it is open, so a recording can
+take hours to reach Plaud's cloud, and Fridolin with it. The Plaud Sync app
+in [`plaud-android/`](../plaud-android/README.md) replaces it on an Android
+phone: it keeps the pin connected, pulls every recording off it as soon as
+it stops, has Plaud transcribe it, and saves `YYYY-MM-DD_HH-MM-SS.mp3` and
+`.txt` in the phone's `Documents/PlaudSync`. Recordings no longer go to
+your Plaud account then, and Plaud makes no AI summary of them.
+
+To hand them to a brain, sync that folder to a folder on this computer —
+[Syncthing](https://syncthing.net) does it directly, without a cloud
+(Syncthing-Fork on the phone, `brew install syncthing` here) — and set
+that folder in `config.json`:
+
+```json
+"plaud": { "enabled": true, "phone_dir": "~/PlaudSync" }
+```
+
+then `fridolin service restart`. Plaud's CLI and its login are not used
+while `phone_dir` is set; the card says **Phone folder** instead of who is
+signed in. Everything else is as below: the first check only remembers the
+transcripts already there, each new one goes to the brain as a
+`[Plaud] New recording "Phone recording" (<when>, <length>)…` message with
+the transcript attached, and the card lists what was handed over or given
+up. A transcript is in the folder only once Plaud finished it, so it is
+handed over at the next check. Only the app's own file names count: a sync
+tool's temporary and conflict files are left alone, and so are the MP3s.
+Fridolin only reads the folder; delete old recordings on the phone.
+
 ## What happens
 
 Every minute (`plaud.interval_seconds`) Fridolin asks Plaud for recent
@@ -198,4 +228,5 @@ for updates either; `plaud` in your own terminal follows your own settings.
 | `polished` | `false` | use Plaud's AI-cleaned transcript; when Plaud has none an hour after the recording showed up, the raw one is sent, with a note saying so |
 | `message` | follow `skills/plaud.md` | instruction sent with each recording, after the fixed first line |
 | `brain_access` | `false` | share the login with brains (see above) |
+| `phone_dir` | unset | a folder the phone app's files are synced to; recordings come from there instead of Plaud's cloud (see above) |
 | `cli_path` | found in the folders of `PATH` Fridolin takes its helpers from (see [CONFIGURATION.md](CONFIGURATION.md#helper-programs)), else in the newest nvm node version, else in `/opt/homebrew/bin` or `/usr/local/bin` | path to `plaud` |
