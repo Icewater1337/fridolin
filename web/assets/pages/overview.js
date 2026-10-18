@@ -154,7 +154,14 @@ export default {
       ];
     });
 
-    const renderBackup = (s) => paint(backupCard, s.backup || {}, (b) => {
+    // Whose backup failed: the bridge's settings, or a brain by its name.
+    const backupOwner = (s, id) => {
+      if (!id) return '';
+      if (id === '_bridge') return 'Bridge settings';
+      const br = (s.brains || []).find((x) => x.id === id);
+      return br ? (br.name || br.id) : id;
+    };
+    const renderBackup = (s) => paint(backupCard, { ...(s.backup || {}), owner: backupOwner(s, (s.backup || {}).last_error_brain) }, (b) => {
       let p;
       // Daily backups that lost their Drive link would otherwise just stop.
       const stranded = !b.connected && b.enabled;
@@ -171,7 +178,7 @@ export default {
           !b.connected && !stranded ? h('p.muted', 'Back up your brains to Google Drive every day.') : null,
           b.connected ? h('p', 'Last good backup: ', b.last_ok ? timeAgo(b.last_ok) : h('span.muted', 'none yet')) : null,
           b.connected && b.next_run ? h('p.muted', 'Next: ', timeAgo(b.next_run)) : null,
-          b.last_error ? h('p.error-text.small', b.last_error) : null,
+          b.last_error ? h('p.error-text.small', b.owner ? `${b.owner}: ${b.last_error}` : b.last_error) : null,
           h('a.small', { href: '#/backup' }, b.connected || stranded ? 'Backup settings' : 'Set up backups')),
       ];
     });

@@ -36,3 +36,11 @@ test('backups that were never set up are offered', async (t) => {
   assert.ok(text.includes('Not set up'), text);
   assert.ok(!text.includes('Daily backups are on'), text);
 });
+
+test('a failed backup says whose it was', async (t) => {
+  const root = await openOverview(t, {
+    brains: [{ id: 'notes', name: 'Notes', routing: {} }],
+    backup: { connected: true, enabled: true, last_error: 'quota exceeded', last_error_brain: 'notes' },
+  });
+  assert.ok(root.textContent.includes('Notes: quota exceeded'), root.textContent);
+});

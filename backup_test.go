@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -1894,5 +1895,42 @@ func TestDailyBackupWithoutDriveIsLogged(t *testing.T) {
 	all := strings.Join(logs(), "\n")
 	if n := strings.Count(all, "Google Drive is not connected"); n != 2 {
 		t.Errorf("logged %d times over two days, want 2:\n%s", n, all)
+	}
+}
+
+// TestBackupSummaryShowsTheLatestFailure: with several brains failing, the
+// overview shows the latest failure and whose it is, the same on every
+// refresh, and a removed brain's failure neither shows nor stays saved.
+func TestBackupSummaryShowsTheLatestFailure(t *testing.T) {
+	tb := newTestBridge(t, `, "backup": {"include_bridge_config": false}`)
+	m := tb.backup
+	_ = os.MkdirAll(filepath.Dir(m.rcloneConf()), 0o700)
+	_ = os.WriteFile(m.rcloneConf(), []byte("[brain-gdrive]\ntype = alias\nremote = /nowhere\n"), 0o600)
+	addBackupBrain(t, tb, "a")
+	addBackupBrain(t, tb, "b")
+	at := time.Date(2026, 10, 18, 3, 30, 0, 0, time.Local)
+	failed := func(min int, msg string) *BackupResult {
+		return &BackupResult{Started: at, Finished: at.Add(time.Duration(min) * time.Minute), Error: msg}
+	}
+	m.mu.Lock()
+	m.state.Brains["a"] = failed(1, "a failed")
+	m.state.Brains["b"] = failed(2, "b failed")
+	m.state.Brains["gone"] = failed(3, "gone failed") // a brain removed since
+	m.state.Bridge = &BackupResult{OK: true, Finished: at.Add(4 * time.Minute)}
+	m.mu.Unlock()
+	for range 20 {
+		s := m.Summary()
+		if s.LastError != "b failed" || s.LastErrorBrain != "b" {
+			t.Fatalf("summary error = %q of %q, want b's, the latest of the configured brains", s.LastError, s.LastErrorBrain)
+		}
+	}
+
+	m.runner = (&deletionRunner{src: []string{"x"}, cur: []string{"x"}}).run
+	if res := runBackup(t, tb, "a"); !res.OK {
+		t.Fatalf("backup of a = %+v", res)
+	}
+	saved := NewBackupManager(tb.cfgs, tb.brainMgr).state.Brains
+	if _, ok := saved["gone"]; ok || saved["a"] == nil || saved["b"] == nil {
+		t.Errorf("saved results for %v, want a and b only", slices.Collect(maps.Keys(saved)))
 	}
 }

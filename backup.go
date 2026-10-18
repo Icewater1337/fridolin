@@ -391,39 +391,65 @@ type backupSummary struct {
 	Running   bool       `json:"running"`
 	LastOK    *time.Time `json:"last_ok,omitempty"`
 	LastError string     `json:"last_error,omitempty"`
-	NextRun   *time.Time `json:"next_run,omitempty"`
+	// LastErrorBrain is whose backup LastError is: a brain's id, or
+	// bridgeBackupID for the bridge's settings.
+	LastErrorBrain string     `json:"last_error_brain,omitempty"`
+	NextRun        *time.Time `json:"next_run,omitempty"`
 }
 
-// Summary is the short version shown on the overview.
+// Summary is the short version shown on the overview. It looks at the
+// brains that run and the bridge's settings, as the Backup page does, and
+// its error is the latest failure among them, whatever order the results
+// are stored in: with several, a refresh must not show another each time.
 func (m *BackupManager) Summary() backupSummary {
 	cfg := m.cfgs.Get()
+	brains := m.bm.Brains()
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	s := backupSummary{Connected: m.connected(), Enabled: cfg.Backup.Enabled, Running: m.job != nil}
-	for _, r := range m.allResultsLocked() {
-		if r.OK && (s.LastOK == nil || r.Finished.After(*s.LastOK)) {
-			t := r.Finished
-			s.LastOK = &t
+	results := map[string]*BackupResult{bridgeBackupID: m.state.Bridge}
+	for _, br := range brains {
+		results[br.ID()] = m.state.Brains[br.ID()]
+	}
+	var failed *BackupResult
+	for id, r := range results {
+		switch {
+		case r == nil:
+		case r.OK:
+			if s.LastOK == nil || r.Finished.After(*s.LastOK) {
+				t := r.Finished
+				s.LastOK = &t
+			}
+		case r.Error != "":
+			if failed == nil || r.Finished.After(failed.Finished) || r.Finished.Equal(failed.Finished) && id < s.LastErrorBrain {
+				failed, s.LastErrorBrain = r, id
+			}
 		}
-		if !r.OK && r.Error != "" {
-			s.LastError = r.Error
-		}
+	}
+	if failed != nil {
+		s.LastError = failed.Error
 	}
 	s.NextRun = m.nextRunLocked(cfg, s.Connected)
 	return s
 }
 
-func (m *BackupManager) allResultsLocked() []*BackupResult {
-	var out []*BackupResult
-	for _, r := range m.state.Brains {
-		if r != nil {
-			out = append(out, r)
+// forgetRemovedLocked drops the results of brains that are no longer
+// configured, so that state.json does not keep them for good and a new
+// brain that reuses an id does not start with another's last result. A
+// brain whose folder is missing for now is still configured, and keeps
+// its result. Hold m.mu.
+func (m *BackupManager) forgetRemovedLocked(cfg *Config) {
+	configured := map[string]bool{}
+	for _, ref := range cfg.BrainDirs {
+		if ref.Approved != nil {
+			configured[ref.Approved.ID] = true
 		}
 	}
-	if m.state.Bridge != nil {
-		out = append(out, m.state.Bridge)
+	for id := range m.state.Brains {
+		if !configured[id] {
+			delete(m.state.Brains, id)
+		}
 	}
-	return out
 }
 
 // dayLayout names a day in backupState.LastScheduledDay.
@@ -975,6 +1001,7 @@ func (m *BackupManager) runOne(ctx context.Context, job *backupJob, id string, f
 	}
 	job.done = append(job.done, id)
 	job.current = ""
+	m.forgetRemovedLocked(m.cfgs.Get())
 	m.saveStateLocked()
 	m.mu.Unlock()
 	if res.OK {
