@@ -267,10 +267,12 @@ from files it writes itself:
         └── whatsapp-identity-map.md   phone numbers → names
 ```
 
-Anything older than the recent window is searchable:
+Anything older than the recent window is searchable. A brain runs
+`"$FRIDOLIN_BIN" history` in its own folder; from your shell, name the
+folder:
 
 ```bash
-python3 tools/history_search.py --brain-dir ~/assistant/personal --since 30d "invoice"
+fridolin history --brain-dir ~/assistant/personal --since 30d "invoice"
 ```
 
 ### Skills

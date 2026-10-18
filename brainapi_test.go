@@ -152,9 +152,9 @@ func TestPollsAreTheBrainsOwn(t *testing.T) {
 	})
 }
 
-// TestRunsGetATokenForTheirRunOnly: every run is told where the brain API
-// is and gets a token of its own in a file, which works while the run
-// lasts and not after it.
+// TestRunsGetATokenForTheirRunOnly: every run is told where the bridge's
+// binary and the brain API are, and gets a token of its own in a file,
+// which works while the run lasts and not after it.
 func TestRunsGetATokenForTheirRunOnly(t *testing.T) {
 	tb, url := serveTestBridge(t, "")
 	tb.addFolderBrain(t, BrainManifest{ID: "a", Name: "A", Routing: BrainRouting{HandlesDMs: true}})
@@ -182,6 +182,13 @@ func TestRunsGetATokenForTheirRunOnly(t *testing.T) {
 	file := env["FRIDOLIN_BRAIN_TOKEN_FILE"]
 	if env["FRIDOLIN_API"] != url || env["FRIDOLIN_BRAIN_ID"] != "a" || filepath.Dir(file) != runTokenDir(tb.cfgs.Get().DataDir, "a") {
 		t.Errorf("run env: FRIDOLIN_API=%q FRIDOLIN_BRAIN_ID=%q FRIDOLIN_BRAIN_TOKEN_FILE=%q", env["FRIDOLIN_API"], env["FRIDOLIN_BRAIN_ID"], file)
+	}
+	// Prompts and skills run "$FRIDOLIN_BIN" calendar, wherever the bridge
+	// is (TestBrainRunsKnowWhereTheToolsAre has FRIDOLIN_TOOLS_DIR).
+	exe, _ := os.Executable()
+	exe, _ = filepath.EvalSymlinks(exe)
+	if env["FRIDOLIN_BIN"] != exe {
+		t.Errorf("run env: FRIDOLIN_BIN=%q, want %q", env["FRIDOLIN_BIN"], exe)
 	}
 	waitFor(t, 5*time.Second, "the run's token to be revoked and its file deleted", func() bool {
 		_, err := os.Stat(file)

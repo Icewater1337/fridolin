@@ -867,14 +867,15 @@ variables of the bridge's environment:
 | `DISABLE_AUTOUPDATER`, `DISABLE_TELEMETRY`, `DISABLE_ERROR_REPORTING` | the CLI's update check and reports |
 | `CALENDAR_TZ`, `TRANSCRIBE_MODEL`, `TRANSCRIBE_LANGUAGE` | the tools in [tools/](../tools/): the calendar's timezone, the transcription model and language |
 
-On top, the bridge sets `FRIDOLIN_BRAIN_ID`, the brain's id; `FRIDOLIN_API`
-and `FRIDOLIN_BRAIN_TOKEN_FILE`, where the brain API is and the file with
-the run's token for it (see [`http_listen`](#http_listen-restart));
+On top, the bridge sets `FRIDOLIN_BRAIN_ID`, the brain's id; `FRIDOLIN_BIN`
+and `FRIDOLIN_TOOLS_DIR`, its own binary and the folder of its Python
+helpers ([BRAINS.md](BRAINS.md#what-a-brain-loads)); `FRIDOLIN_API` and
+`FRIDOLIN_BRAIN_TOKEN_FILE`, where the brain API is and the file with the
+run's token for it (see [`http_listen`](#http_listen-restart));
 `BRIDGE_DATA_DIR` and `BRIDGE_DB_PATH`, the data directory and database it
 runs with (absolute, wherever `data_dir` and `db_path` put them), which the
-tools read; `FRIDOLIN_TOOLS_DIR`, the folder with the tools (see
-[BRAINS.md](BRAINS.md)); `BRIDGE_BRAIN_ID`, `BRIDGE_CREDENTIALS_DIR`,
-`BRIDGE_CALENDARS` and `BRIDGE_CALENDAR_DEFAULT` for the calendar tool;
+tools read; `BRIDGE_BRAIN_ID`, `BRIDGE_CREDENTIALS_DIR`, `BRIDGE_CALENDARS`
+and `BRIDGE_CALENDAR_DEFAULT` for the calendar tool;
 `PLAUD_TELEMETRY_DISABLED=1` and `PLAUD_NO_UPDATE_NOTIFIER=1` for
 [Plaud](PLAUD.md)'s CLI, with `plaud.brain_access` a `PATH` that starts
 with that CLI's folder; and `DISABLE_AUTOUPDATER=1` in the sandbox. What

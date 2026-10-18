@@ -1262,7 +1262,7 @@ func (br *Brain) buildPrompt(s *brainSettings, m Inbound) string {
 		sb.WriteString("The following is the last " + count + " in this WhatsApp chat (for context, not action). ")
 		sb.WriteString("You do NOT have prior turns in your working memory — the only context you have about previous conversation is what's in this block. ")
 		sb.WriteString("Names come from your identity map at `" + identityMapFile + "`; the JID in parens is the raw WhatsApp identifier. ")
-		sb.WriteString("For anything older or more detailed, search `" + historyFileName + "` with `$FRIDOLIN_TOOLS_DIR/history_search.py`.\n\n")
+		sb.WriteString("For anything older or more detailed, search `" + historyFileName + "` with `\"$FRIDOLIN_BIN\" history QUERY`.\n\n")
 		sb.WriteString(preface)
 		sb.WriteString("</chat_history>\n\n")
 	}

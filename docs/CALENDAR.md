@@ -87,15 +87,16 @@ The chosen calendars are stored in the brain's `brain.json`:
 
 A brain uses its calendar with `fridolin calendar`, which asks the bridge:
 the bridge makes the call to Google with the brain's token, and only on the
-calendars ticked on the brain's page. Inside a brain:
+calendars ticked on the brain's page. Inside a brain, where `FRIDOLIN_BIN`
+names the bridge's binary:
 
 ```bash
-fridolin calendar calendars                  # what it may use
-fridolin calendar list --from 2026-01-05     # all chosen calendars
-fridolin calendar free --date 2026-01-06     # busy across all of them
-fridolin calendar create --title "Dentist" \
+"$FRIDOLIN_BIN" calendar calendars                  # what it may use
+"$FRIDOLIN_BIN" calendar list --from 2026-01-05     # all chosen calendars
+"$FRIDOLIN_BIN" calendar free --date 2026-01-06     # busy across all of them
+"$FRIDOLIN_BIN" calendar create --title "Dentist" \
     --start 2026-01-06T14:00:00 --end 2026-01-06T15:00:00    # into the default
-fridolin calendar delete --event-id EVENT_ID
+"$FRIDOLIN_BIN" calendar delete --event-id EVENT_ID
 ```
 
 `--calendar-id` selects one of the chosen calendars, and the bridge refuses

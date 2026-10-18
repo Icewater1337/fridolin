@@ -57,6 +57,8 @@ type Bridge struct {
 	// runs reach the brain API there with a token from runTokens.
 	listen    string
 	runTokens runTokens
+	// exe is the binary brains run (see brainRunEnv).
+	exe string
 
 	httpSrv *http.Server
 
@@ -115,6 +117,7 @@ func NewBridge(cfgs *ConfigStore, opts BridgeOptions) (_ *Bridge, err error) {
 		// server listens, and runs are told, where it started.
 		b.listen = cfg.HTTPListen
 	}
+	b.exe = bridgeBinary()
 	if b.logs == nil {
 		b.logs = NewLogRing(logRingLines)
 	}

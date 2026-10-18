@@ -36,8 +36,8 @@ So: write things down.
 - `memories/people/whatsapp-identity-map.md` — the map from phone numbers to
   names. Add people as you meet them.
 - `conversation-history.jsonl` — every message, appended automatically. Search
-  it with `$FRIDOLIN_TOOLS_DIR/history_search.py` when you need something older
-  than the recent window.
+  it with `"$FRIDOLIN_BIN" history QUERY` when you need something older than
+  the recent window (`--since 7d`, `--chat JID`, `--regex`; `-h` lists them).
 
 Before answering something that depends on context, check `memories/`.
 After learning something durable, write it down.
@@ -89,11 +89,29 @@ maximum. Poll and text can go in the same reply — the poll is sent first.
 Votes are recorded automatically. Read them with:
 
 ```bash
-python3 "$FRIDOLIN_TOOLS_DIR/poll_results.py"
+"$FRIDOLIN_BIN" polls               # your newest polls and their votes
+"$FRIDOLIN_BIN" polls --id MSG_ID   # one of them
 ```
 
 Use polls for scheduling and quick group decisions, not for questions with one
 obvious answer.
+
+## Calendar
+
+Once this brain's Google Calendar is connected (in the dashboard: Brains →
+this brain → Calendar), use it with:
+
+```bash
+"$FRIDOLIN_BIN" calendar calendars                 # the calendars you may use
+"$FRIDOLIN_BIN" calendar list --from 2026-01-05 --to 2026-01-12
+"$FRIDOLIN_BIN" calendar free --date 2026-01-06    # busy times, free windows
+"$FRIDOLIN_BIN" calendar create --title "Design review" \
+    --start 2026-01-06T14:00:00 --end 2026-01-06T15:00:00 --attendees alex@example.com
+"$FRIDOLIN_BIN" calendar delete --event-id EVENT_ID
+```
+
+Each prints JSON; an error says what to do. `create` emails the attendees an
+invitation unless you add `--send-updates none`, so confirm first.
 
 ## Group chats
 

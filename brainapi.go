@@ -76,21 +76,29 @@ func (rt *runTokens) brainOf(tok string) string {
 	return rt.brains[sum]
 }
 
-// brainRunEnv is what a run of brain needs to reach the brain API: its
-// address and the file that holds a token for this run. The second result
+// brainRunEnv is what a run of brain gets to use the bridge's commands: the
+// binary, for "$FRIDOLIN_BIN" calendar and the like, and the brain API's
+// address with the file that holds a token for this run. Prompts and
+// skills name the binary by the variable, never by a path, so a brain
+// folder keeps working when it or the bridge moves; FRIDOLIN_TOOLS_DIR
+// does the same for the Python helpers (see invoke). The second result
 // revokes the token and deletes its file.
 func (b *Bridge) brainRunEnv(brain string) ([]string, func()) {
+	var env []string
+	if b.exe != "" {
+		env = append(env, "FRIDOLIN_BIN="+b.exe)
+	}
 	if b.listen == "" {
-		return nil, func() {}
+		return env, func() {}
 	}
 	tok, revoke := b.runTokens.mint(brain)
 	path, err := writeRunToken(runTokenDir(b.cfgs.Get().DataDir, brain), tok)
 	if err != nil {
 		revoke()
 		log.Printf("brain %s: no brain API for this run: %v", brain, err)
-		return nil, func() {}
+		return env, func() {}
 	}
-	return []string{"FRIDOLIN_API=http://" + b.listen, "FRIDOLIN_BRAIN_TOKEN_FILE=" + path}, func() {
+	return append(env, "FRIDOLIN_API=http://"+b.listen, "FRIDOLIN_BRAIN_TOKEN_FILE="+path), func() {
 		revoke()
 		if err := os.Remove(path); err != nil && !errors.Is(err, fs.ErrNotExist) {
 			log.Printf("brain %s: removing the run's brain API token: %v", brain, err)
@@ -141,6 +149,24 @@ func pruneRunTokens(dataDir string) {
 			log.Printf("warning: removing a stale brain API token: %v", err)
 		}
 	}
+}
+
+// bridgeBinary is the running binary, which brains run as $FRIDOLIN_BIN:
+// the copy `fridolin service install` made, or a build. Without it, or
+// without the Python helpers next to it, the log says what brains lack.
+func bridgeBinary() string {
+	if ownLayout().Tools == "" {
+		log.Printf("warning: the bridge has no tools/ next to its binary: brains get no FRIDOLIN_TOOLS_DIR, so tools/transcribe.py is not there for them")
+	}
+	exe, err := os.Executable()
+	if err != nil {
+		log.Printf("warning: cannot tell where the bridge's binary is (%v): brains get no FRIDOLIN_BIN, so fridolin calendar, polls and history fail in them", err)
+		return ""
+	}
+	if real, err := filepath.EvalSymlinks(exe); err == nil {
+		exe = real
+	}
+	return exe
 }
 
 // brainAPIHandler serves /brain/.
