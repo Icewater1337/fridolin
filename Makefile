@@ -47,7 +47,7 @@ FUZZTIME ?= 10s
 
 .DEFAULT_GOAL := build
 .PHONY: help build install test race vet fmt fmt-check tidy-check \
-	lint lint-go lint-sh lint-py lint-actions \
+	lint lint-go lint-sh lint-py lint-actions lint-web \
 	test-py test-web test-sh smoke fuzz-short check clean
 
 help: ## list the targets
@@ -80,7 +80,7 @@ fmt-check: ## fail if a Go file needs gofmt
 tidy-check: ## fail if go.mod or go.sum is not tidy
 	$(GO) mod tidy -diff
 
-lint: lint-go lint-sh lint-py lint-actions ## every linter
+lint: lint-go lint-sh lint-py lint-actions lint-web ## every linter
 
 lint-go: ## staticcheck
 	$(STATICCHECK) ./...
@@ -107,6 +107,20 @@ test-web: ## syntax-check the dashboard JS and run its unit tests
 	@set -e; for f in $$($(WEB_FIND) \( -name '*.js' -o -name '*.mjs' \) -print | sort); do $(NODE) --check "$$f"; done
 	@tests="$$($(WEB_FIND) \( -name '*.test.js' -o -name '*.test.mjs' \) -print | sort)"; \
 	if [ -n "$$tests" ]; then $(NODE) --test $$tests; else echo "no web unit tests (web/**/*.test.js)"; fi
+
+# ESLint on the dashboard's JS, with web/eslint.config.js. npx fetches the
+# pinned version into its own cache the first time (that needs the
+# network), so nothing is installed into the checkout and a local run and
+# CI run the same ESLint. Only ESLint itself is pinned: npm resolves
+# its dependencies afresh for each new cache, within the ranges ESLint
+# allows, and runs none of their install scripts. Dependabot does not see
+# this pin either, so move it by hand; 10.12.0 was two weeks old when it
+# was pinned. It needs Node 20.19+, 22.13+ or 24+.
+ESLINT_VERSION := 10.12.0
+NPX    ?= npx
+ESLINT ?= $(NPX) --yes eslint@$(ESLINT_VERSION)
+lint-web: ## ESLint on the dashboard's JS (npx fetches it)
+	cd web && NPM_CONFIG_IGNORE_SCRIPTS=true $(ESLINT) .
 
 test-sh: ## tests for the personal-data and action-pin checks and the Makefile
 	scripts/test-check-personal-data.sh

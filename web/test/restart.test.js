@@ -86,7 +86,8 @@ test('a bridge that does not come back offers to close the dialog or reload', as
   await tick();
   t.mock.timers.tick(700);
   // The old process keeps answering: the restart never happened.
-  for (let i = 1; !finished && i < 100; i++) {
+  for (let i = 1; i < 100; i++) {
+    if (finished) break;
     for (let n = 0; net.calls.length <= i && n < 5; n++) await tick();
     net.answer(i, before);
     await tick();

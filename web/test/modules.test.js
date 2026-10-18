@@ -1,9 +1,10 @@
-// The dashboard has no build step or linter, so nothing else notices a
-// broken import before a browser does, and one broken module stops the
-// whole page. These tests read every module and check the imports resolve,
-// are used, and keep the layers: lib/ stands alone, components/ never reach
-// into pages/, and pages never import each other. Every export is imported
-// somewhere, so none is left behind by code that is gone.
+// The dashboard has no build step, and ESLint (make lint-web) reads one
+// file at a time, so nothing else notices a broken import before a browser
+// does, and one broken module stops the whole page. These tests read every
+// module and check the imports resolve, are used, and keep the layers:
+// lib/ stands alone, components/ never reach into pages/, and pages never
+// import each other. Every export is imported somewhere, so none is left
+// behind by code that is gone.
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';

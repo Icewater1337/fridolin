@@ -45,7 +45,7 @@ export default {
 
     function paintStepper() {
       const idx = STEPS.findIndex(([k]) => k === step);
-      mount(stepper, STEPS.map(([k, label], i) => h(`li.${i < idx || step === 'done' ? 'done' : i === idx ? 'current' : 'todo'}`,
+      mount(stepper, STEPS.map(([, label], i) => h(`li.${i < idx || step === 'done' ? 'done' : i === idx ? 'current' : 'todo'}`,
         { 'aria-current': i === idx ? 'step' : null },
         h('span.step-num', i < idx || step === 'done' ? icon('check') : String(i + 1)),
         h('span.step-label', label))));

@@ -103,9 +103,10 @@ the version before: `fridolin service rollback`.
 
 - `make check` runs what CI's build, lint and test jobs run: gofmt, both
   `go vet` runs, `go mod tidy -diff`, the race tests, staticcheck,
-  shellcheck, ruff, actionlint, the action-pin check, the Python, web,
-  personal-data-check, action-pin-check and Makefile tests and a dev-mode
-  smoke test (`make help` lists the targets).
+  shellcheck, ruff, actionlint, the action-pin check, ESLint on the
+  dashboard, the Python, web, personal-data-check, action-pin-check and
+  Makefile tests and a dev-mode smoke test (`make help` lists the
+  targets).
   CI also runs the site's tests and the fuzz targets (both below),
   govulncheck, CodeQL and the personal-data scan of the pushed commits.
   `make check` builds only into temp dirs; `make build` writes
@@ -171,7 +172,10 @@ the version before: `fridolin service rollback`.
   pages against a stubbed bridge in a fake DOM (`web/test/serve.js`,
   `web/test/fake-dom.js`), check that every import resolves and keeps
   those layers and that every export is imported, and hold the
-  stylesheet to its layout.
+  stylesheet to its layout. `make lint-web` runs ESLint with
+  `web/eslint.config.js` (names that are not defined, code that is never
+  used), which needs Node 22.13+: npx fetches the version the Makefile
+  pins the first time, and nothing is installed into the checkout.
 - The project was called whatsapp-claude-bridge before. Names from then
   that are on disk or that others rely on stay, each marked `compat:` in
   the code: the data dir `~/.whatsapp-claude-bridge`, which the bridge
