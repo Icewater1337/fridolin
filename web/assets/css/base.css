@@ -1,0 +1,104 @@
+/* Base: the reset, what plain elements look like, form controls, small
+   utility classes and the animations. */
+
+*, *::before, *::after { box-sizing: border-box; }
+[hidden] { display: none !important; }
+
+html { -webkit-text-size-adjust: 100%; text-size-adjust: 100%; }
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font: 14.5px/1.5 var(--sans);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+a { color: var(--accent); text-decoration-thickness: 1px; text-underline-offset: 2px; }
+a:hover { color: var(--accent-strong); }
+h1, h2, h3, h4 { line-height: 1.25; }
+h1 { font-size: 24px; font-weight: 700; letter-spacing: -0.01em; margin: 0; }
+h2 { font-size: 16px; font-weight: 650; margin: 0; }
+h3 { font-size: 15px; font-weight: 650; margin: 0; }
+p { margin: 0; }
+strong { font-weight: 650; }
+button { font: inherit; }
+code, .mono { font-family: var(--mono); }
+code.mono {
+  font-size: 0.88em;
+  background: var(--surface-2);
+  color: var(--text-2);
+  padding: 1px 6px;
+  border-radius: 5px;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+
+/* ── form controls ──────────────────────────────────────────────────────── */
+
+input[type="text"], input[type="search"], input[type="password"], input[type="email"], input[type="url"], input[type="time"], input[type="number"], select, textarea {
+  width: 100%;
+  min-height: 38px;
+  padding: 7px 11px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  color: var(--text);
+  font: inherit;
+  font-size: 14px;
+}
+textarea { resize: vertical; line-height: 1.45; }
+input::placeholder, textarea::placeholder { color: var(--muted); opacity: 0.85; }
+input:focus, select:focus, textarea:focus { outline: 2px solid var(--focus); outline-offset: -1px; border-color: var(--focus); }
+input:disabled, select:disabled, textarea:disabled { background: var(--surface-2); color: var(--muted); cursor: not-allowed; }
+input.mono, textarea.mono { font-family: var(--mono); font-size: 13px; }
+input.num { max-width: 220px; }
+.invalid, input.invalid { border-color: var(--bad) !important; background: var(--bad-soft); }
+select {
+  appearance: none;
+  -webkit-appearance: none;
+  padding-right: 32px;
+  /* A mid grey that reads on both themes' fields. */
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%238a94a3' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 10px center;
+  background-size: 16px;
+  cursor: pointer;
+}
+input[type="checkbox"], input[type="radio"] { accent-color: var(--accent); width: 16px; height: 16px; margin: 0; flex-shrink: 0; }
+
+/* ── utilities ──────────────────────────────────────────────────────────── */
+
+.icon { width: 18px; height: 18px; flex-shrink: 0; vertical-align: middle; }
+.muted { color: var(--muted); }
+.small { font-size: 12.5px; }
+.error-text { color: var(--bad); overflow-wrap: anywhere; }
+.warn-text { color: var(--warn); }
+.form-error { color: var(--bad); font-size: 13px; margin: 0; }
+.right { text-align: right; }
+.nowrap { white-space: nowrap; }
+.stack { display: flex; flex-direction: column; gap: 6px; }
+
+.boot { min-height: 100dvh; display: grid; place-items: center; color: var(--muted); }
+.noscript { padding: 24px; text-align: center; }
+
+/* ── animation ──────────────────────────────────────────────────────────── */
+
+@keyframes spin { to { transform: rotate(360deg); } }
+@keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.35; } }
+@keyframes toast-in { from { opacity: 0; transform: translateY(8px); } }
+
+/* Marked important: in this early layer, that is what beats the later
+   layers' animations and transitions. */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { transition: none !important; }
+  .dot.pulse, .toast { animation: none !important; }
+  .spinner, .btn.busy::after { animation-duration: 1.6s !important; }
+}
+
+@media (max-width: 640px) {
+  body { font-size: 14px; }
+  h1 { font-size: 21px; }
+}

@@ -6,13 +6,15 @@
 import { makePoll } from './poll.js';
 
 /**
- * createPage({params, navigate, replaceHash, setTitle}) returns the ctx a
- * page's render(root, ctx) gets. The router supplies navigate(hash), which
- * goes to another page as a link does (asking first about unsaved
- * changes), replaceHash(hash), which changes the address without leaving
- * the page, and setTitle(title), which names the page in the browser tab.
+ * createPage({params, navigate, replaceHash, setTitle, focusAt}) returns
+ * the ctx a page's render(root, ctx) gets. The router supplies
+ * navigate(hash), which goes to another page as a link does (asking first
+ * about unsaved changes), replaceHash(hash), which changes the address
+ * without leaving the page, setTitle(title), which names the page in the
+ * browser tab, and focusAt(heading), which puts the focus there instead
+ * of on the page's h1 when the router moves it to the page.
  */
-export function createPage({ params = {}, navigate = (hash) => { location.hash = hash; }, replaceHash = () => {}, setTitle = () => {} } = {}) {
+export function createPage({ params = {}, navigate = (hash) => { location.hash = hash; }, replaceHash = () => {}, setTitle = () => {}, focusAt = () => {} } = {}) {
   const abort = new AbortController();
   const polls = [];
   const timers = new Set();
@@ -70,6 +72,13 @@ export function createPage({ params = {}, navigate = (hash) => { location.hash =
 
     /** Renames the page once it knows better than its route, e.g. a brain's name. */
     setTitle(title) { if (!ctx.dead) setTitle(title); },
+
+    /**
+     * The heading of the part the address names, e.g. a Settings section:
+     * the focus goes there rather than to the page's h1, if the router
+     * moves it to this page (after a link, not when the dashboard opens).
+     */
+    focusAt(heading) { if (!ctx.dead) focusAt(heading); },
 
     destroy() {
       if (ctx.dead) return;

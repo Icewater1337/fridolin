@@ -1,0 +1,65 @@
+/* Design tokens, the only colours in the stylesheet. Each is
+   light-dark(light, dark), so one list serves both themes: the browser
+   picks by color-scheme, which follows the system unless the theme
+   button pinned one (data-theme, which theme.js sets before the page
+   paints). */
+
+:root {
+  --sans: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, Roboto, "Helvetica Neue", Arial, "Noto Sans", sans-serif, "Apple Color Emoji", "Segoe UI Emoji";
+  --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+  --radius: 12px;
+  --radius-sm: 8px;
+  --sidebar-w: 236px;
+
+  color-scheme: light dark;
+  --bg: light-dark(#f4f6f8, #0e1116);
+  --surface: light-dark(#ffffff, #161a21);
+  --surface-2: light-dark(#f2f4f7, #1c2129);
+  --surface-3: light-dark(#e8ecf1, #252b35);
+  --border: light-dark(#e1e5ea, #272e38);
+  --border-strong: light-dark(#cdd3db, #38404c);
+  --text: light-dark(#19202a, #e6e9ed);
+  --text-2: light-dark(#3b4552, #c2c8d0);
+  --muted: light-dark(#66707e, #8e98a6);
+  --accent: light-dark(#0f7b62, #36c79c);
+  --accent-strong: light-dark(#0a634e, #62d8b4);
+  --accent-soft: light-dark(#e2f3ed, #11352c);
+  --accent-text: light-dark(#ffffff, #052119);
+  --focus: light-dark(#0f7b62, #62d8b4);
+  --ok: light-dark(#177c3b, #4cc777);
+  --ok-soft: light-dark(#e5f4ea, #13301f);
+  --ok-border: light-dark(#b9dfc6, #25573a);
+  --warn: light-dark(#965a00, #e6ae4a);
+  --warn-soft: light-dark(#fdf2dd, #33260f);
+  --warn-border: light-dark(#efd29d, #5e461f);
+  --bad: light-dark(#c22d2d, #f2756b);
+  --bad-strong: light-dark(#a82626, #f68f86);
+  --bad-soft: light-dark(#fcebea, #391a19);
+  --bad-border: light-dark(#f1c1bd, #67302c);
+  /* Text on a --bad background, like --accent-text: the dark theme's
+     light red needs dark text. */
+  --bad-text: light-dark(#ffffff, #2a0a08);
+  --info: light-dark(#2458c6, #7ea9ff);
+  --info-soft: light-dark(#e8effc, #172744);
+  --info-border: light-dark(#c5d5f5, #2b4572);
+  --neutral: light-dark(#5e6977, #9ba5b2);
+  --neutral-soft: light-dark(#eceff3, #232932);
+  /* The switch's thumb is white on both themes' tracks. */
+  --switch-thumb: light-dark(#ffffff, #ffffff);
+  --row-hover: light-dark(rgba(16, 24, 40, 0.05), rgba(255, 255, 255, 0.05));
+  /* light-dark() takes only colours, so each shadow colour has its own; a
+     layer one theme does not have is transparent there. */
+  --shadow: 0 1px 2px light-dark(rgba(16, 24, 40, 0.04), rgba(0, 0, 0, 0.3)), 0 1px 3px light-dark(rgba(16, 24, 40, 0.04), transparent);
+  --shadow-lg: 0 12px 32px light-dark(rgba(16, 24, 40, 0.16), transparent), 0 16px 40px light-dark(transparent, rgba(0, 0, 0, 0.5));
+  --shadow-thumb: 0 1px 2px light-dark(rgba(0, 0, 0, 0.25), rgba(0, 0, 0, 0.25));
+  --backdrop: light-dark(rgba(15, 20, 28, 0.42), rgba(0, 0, 0, 0.6));
+  --log-bg: light-dark(#fbfcfd, #0b0e13);
+  --log-text: light-dark(#1f2933, #d5dae1);
+  --log-muted: light-dark(#687380, #7a8594);
+  --log-err: light-dark(#c22d2d, #ff7b72);
+  --log-warn: light-dark(#965a00, #e3b341);
+  --log-dev: light-dark(#2458c6, #79c0ff);
+}
+
+:root[data-theme="light"] { color-scheme: light; }
+:root[data-theme="dark"] { color-scheme: dark; }

@@ -80,3 +80,23 @@ test('a refresh keeps the brain chosen for a restore', async (t) => {
   assert.ok(sel.querySelectorAll('option').some((o) => o.value === 'home'), 'the new brain is offered');
   assert.equal(target.value, '~/restored/mine');
 });
+
+test('a running backup says how far it is in a progress bar', async (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout', 'Date'] });
+  installDom();
+  noConsoleErrors(t);
+  const status = { ...connected(), job: { started: '2026-10-18T10:00:00Z', done: ['work', 'bridge'], current: 'home', queue: ['notes'] } };
+  serve(t, (path) => (path.startsWith('/api/backup/status') ? status : {}));
+  const root = h('div');
+  document.body.append(root);
+  const ctx = createPage();
+  t.after(() => ctx.destroy());
+  page.render(root, ctx);
+  await settle();
+  const bar = root.querySelector('.job-card progress');
+  assert.ok(bar, 'a <progress>, which screen readers announce');
+  assert.equal(bar.value, 50);
+  assert.equal(bar.getAttribute('max'), '100');
+  assert.equal(bar.getAttribute('aria-label'), 'Backup progress');
+  assert.equal(bar.getAttribute('aria-valuetext'), '2 of 4 done');
+});

@@ -132,7 +132,7 @@ class FakeElement extends FakeNode {
   }
 
   click() { if (!this.disabled) this.dispatchEvent(new Event('click', { bubbles: true, cancelable: true })); }
-  focus() {}
+  focus() { globalThis.document.activeElement = this; }
   scrollIntoView() {}
   showModal() { this.open = true; }
   close() { this.open = false; }
@@ -178,6 +178,7 @@ class FakeDocument extends FakeNode {
     this.hidden = false;
     this.documentElement = this.appendChild(new FakeElement('html'));
     this.body = this.documentElement.appendChild(new FakeElement('body'));
+    this.activeElement = this.body;
   }
 
   createElement(tag) { return new FakeElement(tag); }

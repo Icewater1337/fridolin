@@ -88,3 +88,15 @@ test('edits whose form left the page are not unsaved changes', async (t) => {
     });
   }
 });
+
+test('a brain that does not exist shows only that', async (t) => {
+  const { root, poll } = await openPage(t);
+  const shown = () => root.querySelectorAll('section.section').filter((s) => !s.hidden).map((s) => s.querySelector('h2').textContent);
+  const all = ['Now', 'Settings', 'Calendar', 'Recent messages', 'Remove'];
+  assert.deepEqual(shown(), all);
+  await poll([]);
+  assert.match(root.textContent, /No such brain/);
+  assert.deepEqual(shown(), [], 'no empty sections of a brain that is not there');
+  await poll([view('Work')]);
+  assert.deepEqual(shown(), all, 'back once it is');
+});

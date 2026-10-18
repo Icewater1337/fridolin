@@ -62,8 +62,10 @@ func fakePlaudTranscript(segs ...fakePlaudSegment) string {
 //	                   tokens.json and exits 2
 //	revoked            Plaud refuses the login: exit 2, tokens.json stays
 //	offline            Plaud is unreachable: exit 3
-//	fail_<command>     that command fails: exit 1
+//	fail_<command>     that command fails: exit 1 (login before it looks
+//	                   for a login it has)
 //	login_wait         `plaud login` prints the link and waits for login_go
+//	login_then_fail    `plaud login` writes the login, then exits 1
 //	login_deny         `plaud login` is denied: exit 2
 //	login_timeout      `plaud login` times out: exit 4
 //	logout_keeps       `plaud logout` says it signed out, and leaves the login
@@ -230,6 +232,9 @@ func (f fakePlaudCLI) run(args []string) int {
 }
 
 func (f fakePlaudCLI) login() int {
+	if f.exists("fail_login") {
+		return fail(1, "LOGIN_FAILED", "Login failed.")
+	}
 	if _, err := os.Stat(f.token); err == nil {
 		fmt.Println("Already logged in. Run `plaud logout` first to switch accounts.")
 		return 0
@@ -252,6 +257,9 @@ func (f fakePlaudCLI) login() int {
 	_ = os.MkdirAll(filepath.Dir(f.token), 0o700)
 	_ = os.WriteFile(f.token, []byte(`{"access_token":"test-access","refresh_token":"fake","token_type":"Bearer"}`), 0o600)
 	fmt.Fprintln(os.Stderr, "✔ Logged in successfully!")
+	if f.exists("login_then_fail") {
+		return fail(1, "LOGIN_FAILED", "Login failed.")
+	}
 	return 0
 }
 

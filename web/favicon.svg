@@ -1,0 +1,26 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <!-- Fridolin's mark, the fox of docs/logo.webp in its headset and glasses,
+       drawn as shapes so it stays sharp at favicon size. Edit it here. -->
+  <circle cx="32" cy="32" r="32" fill="#0f7b62"/>
+  <path d="M13 33 11 7 29 20Z M51 33 53 7 35 20Z" fill="#e8712a"/>
+  <path d="M15.5 27 14.5 13 24.5 20.5Z M48.5 27 49.5 13 39.5 20.5Z" fill="#ffd2ad"/>
+  <path d="M32 56C21 56 11.5 48 11 38 10.5 28 19 19 32 19S53.5 28 53 38C52.5 48 43 56 32 56Z" fill="#ef7d2d"/>
+  <path d="M13.5 41C19.5 43 26 44.5 32 49.5 38 44.5 44.5 43 50.5 41 47.5 50 40.5 56 32 56S16.5 50 13.5 41Z" fill="#fff3e6"/>
+  <g fill="#2b1d16">
+    <circle cx="24.5" cy="36" r="2.7"/>
+    <circle cx="39.5" cy="36" r="2.7"/>
+    <ellipse cx="32" cy="47" rx="3.2" ry="2.3"/>
+  </g>
+  <g fill="none" stroke="#2b1d16" stroke-width="2.6">
+    <circle cx="24.5" cy="36" r="6.6"/>
+    <circle cx="39.5" cy="36" r="6.6"/>
+    <path d="M31 35.5Q32 34 33 35.5"/>
+  </g>
+  <g fill="#3a4048" stroke="#3a4048">
+    <path d="M12.5 34C12.5 12 51.5 12 51.5 34" fill="none" stroke-width="3.6"/>
+    <rect x="6.5" y="29.5" width="9" height="13" rx="4" stroke="none"/>
+    <rect x="48.5" y="29.5" width="9" height="13" rx="4" stroke="none"/>
+    <path d="M52 41.5C52 48.5 46 51 40.5 51" fill="none" stroke-width="2.2"/>
+    <circle cx="39.5" cy="51" r="2.3" stroke="none"/>
+  </g>
+</svg>

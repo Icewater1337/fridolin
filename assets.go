@@ -11,7 +11,7 @@ import (
 // page is embedded: web/ also holds its JavaScript tests and the package.json
 // node reads for them.
 //
-//go:embed web/index.html web/favicon.png web/assets
+//go:embed web/index.html web/favicon.svg web/assets
 var webFS embed.FS
 
 //go:embed examples/brain-prompt.example.md examples/skills/*.md

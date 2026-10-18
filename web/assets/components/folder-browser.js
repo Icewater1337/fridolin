@@ -20,7 +20,7 @@ export function folderBrowser({ start = '', onPick, pickLabel = 'Use this folder
   let data = null;
   let loading = null; // AbortController of the folder being loaded
   const crumbs = h('nav.fb-crumbs', { 'aria-label': 'Folder path' });
-  const listEl = h('div.fb-list', { role: 'list' });
+  const listEl = h('div.fb-list');
   const err = h('p.form-error', { hidden: true });
   const upBtn = h('button.icon-btn', { type: 'button', title: 'Up one folder', 'aria-label': 'Up one folder' }, icon('up'));
   const hiddenSw = toggle({ label: 'Show hidden', onChange: (v) => { hidden = v; load(path); } });
@@ -103,12 +103,14 @@ export function folderBrowser({ start = '', onPick, pickLabel = 'Use this folder
       mount(listEl, h('div.fb-empty.muted', 'No folders here. Create a new one below.'));
       return;
     }
-    mount(listEl, data.entries.map((e) => h('button.fb-item', { type: 'button', role: 'listitem', title: e.path, onclick: () => load(e.path) },
+    // A list of buttons: a role on the button itself would hide from
+    // screen readers that it is one.
+    mount(listEl, h('ul.fb-entries', { 'aria-label': 'Folders' }, data.entries.map((e) => h('li', h('button.fb-item', { type: 'button', title: e.path, onclick: () => load(e.path) },
       icon('folder'),
       h('span.fb-name', e.name),
       e.is_brain ? badge('brain.json', 'info', 'This folder has a brain.json') : null,
       e.is_git ? badge('git', 'neutral', 'Git repository') : null,
-      icon('right', 'fb-chevron'))));
+      icon('right', 'fb-chevron'))))));
   }
 
   load(path);

@@ -10,6 +10,7 @@ import { icon } from '../components/icons.js';
 import { toast, toastError } from '../components/toast.js';
 import { btn, runBusy } from '../components/buttons.js';
 import { field, textInput, select, toggle, linesArea, linesOf } from '../components/fields.js';
+import { tabs } from '../components/tabs.js';
 import { callout, mono, spinner, loading } from '../components/common.js';
 
 const STEPS = [['folder', 'Folder'], ['inspect', 'Check'], ['configure', 'Configure']];
@@ -76,32 +77,30 @@ export default {
         picked = { path: v, create: null };
         go('inspect');
       });
-      const tabsEl = h('div.tabs', { role: 'tablist' });
-      const panel = h('div.tab-panel');
-      const tabs = [['browse', 'Browse folders'], ['type', 'Type a path']];
-      const paintTabs = () => {
-        mount(tabsEl, tabs.map(([k, l]) => {
-          const b = h('button.tab', { type: 'button', role: 'tab', 'aria-selected': String(tab === k) }, l);
-          b.addEventListener('click', () => { tab = k; paintTabs(); });
-          return b;
-        }));
-        if (tab === 'browse') {
-          mount(panel, folderBrowser({
-            start: '',
-            pickLabel: 'Use this folder',
-            newLabel: 'Create here',
-            newHint: 'A new folder is created when you add the brain, not before.',
-            onPick: (path, { create }) => { picked = { path, create }; go('inspect'); },
-            signal: ctx.signal,
-          }));
-        } else {
+      const chooser = tabs({
+        label: 'How to choose the folder',
+        items: [['browse', 'Browse folders'], ['type', 'Type a path']],
+        selected: tab,
+        onSelect: (k, panel, { by }) => {
+          tab = k;
+          if (k === 'browse') {
+            mount(panel, folderBrowser({
+              start: '',
+              pickLabel: 'Use this folder',
+              newLabel: 'Create here',
+              newHint: 'A new folder is created when you add the brain, not before.',
+              onPick: (path, { create }) => { picked = { path, create }; go('inspect'); },
+              signal: ctx.signal,
+            }));
+            return;
+          }
           mount(panel,
             h('p.muted', 'An absolute path, or one starting with ~/ for your home folder. It may not exist yet.'),
             typedForm);
-          ctx.timeout(() => typed.focus(), 30);
-        }
-      };
-      paintTabs();
+          // Not while the arrow keys move between the tabs: that needs the focus.
+          if (by !== 'key') ctx.timeout(() => typed.focus(), 30);
+        },
+      });
       mount(body, h('div.card.wizard-card',
         h('h2', 'Choose a folder'),
         h('p.muted', 'Use a folder of its own, inside your home folder — for example ', h('code.mono', '~/assistant/personal'), '. Avoid Documents, Desktop and Downloads: macOS protects them and the sandbox blocks them.'),
@@ -109,8 +108,8 @@ export default {
           btn('Choose folder…', { kind: 'primary', icon: 'folder', onClick: () => nativePick() }),
           h('span.muted.small', `Opens ${pickerName} on the computer running the bridge.`)) : null,
         caps.picker ? h('div.or-sep', h('span', 'or')) : null,
-        tabsEl,
-        panel));
+        chooser.list,
+        chooser.panel));
     }
 
     async function nativePick() {

@@ -90,6 +90,8 @@ See [docs/SITE.md](docs/SITE.md).
   and logged in.
 - **Go 1.26+** and a C compiler to build (`xcode-select --install` on macOS).
 - **Python 3.9+** for the helper tools.
+- **A current browser** for the dashboard: Chrome or Edge 123+, Firefox 120+
+  or Safari 17.5+.
 - **[rclone](https://rclone.org/install/)** — only for Google Drive backups.
 - **A WhatsApp account for the bridge.** Use a second number, not your personal
   one — see below.
@@ -534,9 +536,9 @@ touching brains that did not change.
 checks and scaffolding. **`configstore.go`** — the live configuration.
 
 **`dashboard.go`, `dashboard_api.go`, `web/`** — the dashboard, its guards and
-API; the page is plain HTML/JS compiled into the binary. In `web/assets`,
+API; the page is plain HTML/CSS/JS compiled into the binary. In `web/assets`,
 `app/` starts it, `pages/` holds one module per page, and `components/` and
-`lib/` the pieces they share.
+`lib/` the pieces they share; `css/` holds its styles.
 
 **`backup.go`** — Google Drive backups through rclone.
 

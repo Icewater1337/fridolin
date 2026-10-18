@@ -45,13 +45,15 @@ function themeButton() {
 
 /**
  * createShell({onRestart, onReload}) builds the shell. It returns {nodes,
- * page, setActive(navId), closeNav(), setOffline(bool)}: mount nodes into
- * #app, render pages into page. onRestart runs from the restart banner's
- * button, onReload (location.reload) from the update banner's.
+ * page, setActive(navId), closeNav(), focusPage(heading),
+ * setOffline(bool)}: mount nodes into #app, render pages into page.
+ * focusPage returns the element it focused. onRestart runs from the
+ * restart banner's button, onReload (location.reload) from the update
+ * banner's.
  */
 export function createShell({ onRestart, onReload = () => location.reload() }) {
   const links = new Map();
-  const nav = h('nav.nav', { 'aria-label': 'Main' });
+  const nav = h('nav.nav', { id: 'nav', 'aria-label': 'Main' });
   for (const route of ROUTES) {
     if (!route.nav) continue;
     const badgeEl = h('span.nav-badge', { hidden: true });
@@ -60,7 +62,7 @@ export function createShell({ onRestart, onReload = () => location.reload() }) {
     links.set(route.id, a);
     nav.appendChild(a);
   }
-  const menuBtn = h('button.icon-btn.menu-btn', { type: 'button', 'aria-label': 'Menu', 'aria-expanded': 'false' }, icon('menu'));
+  const menuBtn = h('button.icon-btn.menu-btn', { type: 'button', 'aria-label': 'Menu', 'aria-expanded': 'false', 'aria-controls': 'nav' }, icon('menu'));
   const waDot = h('span.dot');
   const waText = h('span', 'Connecting…');
   const waLink = h('a.sidebar-status', { href: '#/overview', title: 'WhatsApp connection' }, waDot, waText);
@@ -80,12 +82,32 @@ export function createShell({ onRestart, onReload = () => location.reload() }) {
     icon('info'), h('span', 'Fridolin was updated. Reload the page to use the new dashboard.'),
     btn('Reload', { kind: 'primary', small: true, onClick: () => onReload() }));
   banners.append(offline, restartBanner, updateBanner);
-  const page = h('main.main', { id: 'main' });
+  const page = h('main.main', { id: 'main', tabindex: '-1' });
 
-  menuBtn.addEventListener('click', () => {
-    const open = !sidebar.classList.contains('nav-open');
+  // The keyboard's way into a page: the heading given, else the page's
+  // own, or the page area until it has one. A screen reader then reads
+  // the new page from there, not on from the link that was followed.
+  const focusPage = (target) => {
+    const heading = target || page.querySelector('h1');
+    if (heading) heading.setAttribute('tabindex', '-1');
+    const el = heading || page;
+    el.focus({ preventScroll: true });
+    return el;
+  };
+  // Past the sidebar's links, for keyboard users; shown once focused.
+  const skip = h('a.skip-link', { href: '#main' }, 'Skip to content');
+  skip.addEventListener('click', (e) => { e.preventDefault(); focusPage(); });
+
+  const setNav = (open) => {
     sidebar.classList.toggle('nav-open', open);
     menuBtn.setAttribute('aria-expanded', String(open));
+  };
+  menuBtn.addEventListener('click', () => setNav(!sidebar.classList.contains('nav-open')));
+  // Escape closes the phone menu and gives the focus back to its button.
+  sidebar.addEventListener('keydown', (e) => {
+    if (e.key !== 'Escape' || !sidebar.classList.contains('nav-open')) return;
+    setNav(false);
+    menuBtn.focus();
   });
 
   const setBadge = (id, n, title) => {
@@ -129,7 +151,7 @@ export function createShell({ onRestart, onReload = () => location.reload() }) {
   });
 
   return {
-    nodes: [sidebar, h('div.content', banners, page)],
+    nodes: [skip, sidebar, h('div.content', banners, page)],
     page,
     setActive(id) {
       links.forEach((a, key) => {
@@ -137,7 +159,8 @@ export function createShell({ onRestart, onReload = () => location.reload() }) {
         else a.removeAttribute('aria-current');
       });
     },
-    closeNav() { sidebar.classList.remove('nav-open'); menuBtn.setAttribute('aria-expanded', 'false'); },
+    closeNav() { setNav(false); },
+    focusPage,
     setOffline(off) { offline.hidden = !off; },
   };
 }

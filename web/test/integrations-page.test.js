@@ -22,7 +22,7 @@ async function openPage(t, first = status('2026-10-18T10:00:00Z')) {
   const bridge = { status: first };
   const calls = serve(t, (path) => {
     if (path.startsWith('/api/plaud/status')) return bridge.status;
-    if (path.startsWith('/api/brains')) return [{ id: 'work', name: 'Work' }];
+    if (path.startsWith('/api/brains')) return [{ id: 'work', name: 'Work' }, { id: 'personal', name: 'Personal' }];
     return {};
   });
   const root = h('div');
@@ -113,4 +113,46 @@ for (const c of [
 test('a card that was never connected offers only Connect', async (t) => {
   const { root } = await openPage(t, { ...status('2026-10-18T10:00:00Z'), connected: false });
   assert.deepEqual(root.querySelectorAll('button').map((b) => b.textContent), ['Connect Plaud']);
+});
+
+test('Automatic names the brain it picks, not the one picked instead', async (t) => {
+  const now = status('2026-10-18T10:00:00Z');
+  const { root } = await openPage(t, { ...now, settings: { ...now.settings, brain: 'work' }, target_brain: 'work', auto_brain: 'personal' });
+  const automatic = root.querySelectorAll('select option').find((o) => o.value === '');
+  assert.equal(automatic.textContent, 'Automatic (Personal)');
+});
+
+const toasts = () => document.querySelectorAll('.toast').map((el) => el.textContent);
+
+test('Connect says the sign-in starts, not that a tab opened', async (t) => {
+  const { root, calls } = await openPage(t, { cli: { found: true }, connected: false, settings: {} });
+  button(root, 'Connect Plaud').click();
+  await settle();
+  assert.ok(calls.some((c) => c.path === '/api/plaud/connect' && c.method === 'POST'));
+  assert.deepEqual(toasts(), ['Starting Plaud’s sign-in…']);
+});
+
+test('a sign-in from the connected card shows its progress and its failure', async (t) => {
+  const expired = { ...status('2026-10-18T10:00:00Z'), expired: true };
+  const { root, poll } = await openPage(t, { ...expired, connect: { state: 'running', auth_url: 'https://web.plaud.ai/platform/oauth?client_id=x' } });
+  assert.match(root.textContent, /Approve access in the browser tab Plaud just opened.*\(web\.plaud\.ai\)/);
+  assert.equal(button(root, 'Waiting for Plaud…').disabled, true, 'no second sign-in while one runs');
+  await poll({ ...expired, connect: { state: 'error', error: 'PORT_IN_USE' } });
+  assert.match(root.textContent, /Sign-in did not finish.*PORT_IN_USE/);
+  assert.equal(button(root, 'Connect again').disabled, false);
+});
+
+test('a connected card with a working login shows no old sign-in failure', async (t) => {
+  const { root } = await openPage(t, { ...status('2026-10-18T10:00:00Z'), connect: { state: 'error', error: 'exit status 1' } });
+  assert.match(root.textContent, /Signed in as you@example\.com/);
+  assert.doesNotMatch(root.textContent, /Sign-in did not finish/);
+});
+
+test('Disconnect says it is done', async (t) => {
+  const { root } = await openPage(t);
+  button(root, 'Disconnect').click();
+  await settle();
+  button(document.querySelector('dialog'), 'Disconnect').click(); // confirm
+  await settle();
+  assert.ok(toasts().includes('Plaud disconnected'));
 });

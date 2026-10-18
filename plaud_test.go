@@ -246,6 +246,30 @@ func TestPlaudWithoutAPrivateChatWaits(t *testing.T) {
 	}
 }
 
+// The card labels its "Automatic" choice with the brain Automatic picks,
+// which is not the target while another brain is picked.
+func TestPlaudStatusNamesTheAutomaticBrain(t *testing.T) {
+	for _, c := range []struct {
+		name, picked, target string
+	}{
+		{"automatic", "", "p"},
+		{"picked", "g", "g"},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			tb, _ := plaudBridge(t, "")
+			tb.addFolderBrain(t, BrainManifest{ID: "g", Name: "Recordings"})
+			if w := tb.do("PUT", "/api/plaud/settings", map[string]any{"brain": c.picked}); w.Code != 200 {
+				t.Fatalf("settings: %d %s", w.Code, w.Body.String())
+			}
+			var status map[string]any
+			_ = json.Unmarshal(tb.do("GET", "/api/plaud/status", nil).Body.Bytes(), &status)
+			if status["auto_brain"] != "p" || status["target_brain"] != c.target {
+				t.Errorf("auto_brain = %v, target_brain = %v; want p (the DM brain) and %s", status["auto_brain"], status["target_brain"], c.target)
+			}
+		})
+	}
+}
+
 // A picked brain that went away (removed, renamed, not approved) is
 // reported by name, on the card and as the check's error, and nothing is
 // written or handed over until another one is picked. The settings refuse
@@ -2703,6 +2727,47 @@ func TestPlaudSignInSaysWhyItFailed(t *testing.T) {
 			})
 			if job.State != "error" || !strings.Contains(job.Error, c.want) || strings.Contains(job.Error, "expired") || strings.Contains(job.Error, "Waiting for") {
 				t.Errorf("sign-in = %+v, want an error saying %q", job, c.want)
+			}
+		})
+	}
+}
+
+// A sign-in is judged by the login it leaves: the CLI may fail after it
+// wrote a new one, which signed in all the same, while a failure that
+// leaves the old login in place did not.
+func TestPlaudConnectJudgesTheSignInByTheLogin(t *testing.T) {
+	for _, c := range []struct {
+		name, fixture string
+		oldLogin      bool
+		want          string
+	}{
+		{"signed in", "", false, "done"},
+		{"failed after writing a new login", "login_then_fail", false, "done"},
+		{"failed, the old login stays", "fail_login", true, "error"},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			tb, fp := plaudBridge(t, "")
+			if c.oldLogin {
+				if err := os.MkdirAll(filepath.Dir(tb.plaud.tokenPath()), 0o700); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.WriteFile(tb.plaud.tokenPath(), []byte(`{"old":true}`), 0o600); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if c.fixture != "" {
+				fp.write(c.fixture, "")
+			}
+			if rec := tb.do("POST", "/api/plaud/connect", nil); rec.Code != 202 {
+				t.Fatalf("connect: %d %s", rec.Code, rec.Body)
+			}
+			var job connectJob
+			waitFor(t, 10*time.Second, "the sign-in to end", func() bool {
+				job = *tb.plaud.Status().Connect
+				return job.State != "running"
+			})
+			if job.State != c.want {
+				t.Errorf("sign-in %s (%s), want %s", job.State, job.Error, c.want)
 			}
 		})
 	}
