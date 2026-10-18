@@ -1,4 +1,4 @@
-package main
+package chat
 
 import (
 	"fmt"
@@ -7,11 +7,11 @@ import (
 	"unicode"
 )
 
-// InboundContent is one message on its way to a brain: from WhatsApp, from the
+// Inbound is one message on its way to a brain: from WhatsApp, from the
 // /ingest endpoint, or injected in dev mode. Several WhatsApp messages sent in
 // quick succession (an album, a caption plus files) are merged into one
-// InboundContent by the debouncer before they reach a brain.
-type InboundContent struct {
+// Inbound by the debouncer before they reach a brain.
+type Inbound struct {
 	// JID is the chat: the group's JID, or for a DM the partner's phone
 	// number's JID (their LID's when the number is not known).
 	JID string
@@ -47,7 +47,7 @@ type InboundContent struct {
 	Done func(error)
 }
 
-// Where a message came from, InboundContent.Source.
+// Where a message came from, Inbound.Source.
 const (
 	SourceWhatsApp = "whatsapp"
 	// SourceIngest is files handed in outside WhatsApp, through /ingest or
@@ -65,7 +65,7 @@ type Quote struct {
 }
 
 // IsGroup reports whether the message came from a group chat.
-func (m InboundContent) IsGroup() bool { return IsGroupJID(m.JID) }
+func (m Inbound) IsGroup() bool { return IsGroupJID(m.JID) }
 
 // IsGroupJID reports whether jid is a group chat's, …@g.us.
 func IsGroupJID(jid string) bool { return strings.HasSuffix(jid, "@g.us") }
@@ -77,7 +77,7 @@ func DMJID(number string) string { return number + "@s.whatsapp.net" }
 // TextWithQuote is the text the model and the history see: a line naming the
 // quoted message, then the message itself. The line's format is what the
 // history has always held, and what `fridolin history` finds.
-func (m InboundContent) TextWithQuote() string {
+func (m Inbound) TextWithQuote() string {
 	if m.Quoted == nil {
 		return m.Text
 	}
@@ -89,7 +89,7 @@ func (m InboundContent) TextWithQuote() string {
 }
 
 // Names reports whether c is about the message p.
-func (c Change) Names(p InboundContent) bool {
+func (c Change) Names(p Inbound) bool {
 	sameChat := p.JID == c.Chat || (c.ChatAlt != "" && p.JID == c.ChatAlt) || (p.ChatAlt != "" && p.ChatAlt == c.Chat)
 	return c.Target != "" && p.ID == c.Target && sameChat && p.Sender == c.Sender
 }
@@ -112,7 +112,7 @@ const (
 )
 
 // Merge folds the text, quote, files and silence of next into m.
-func (m InboundContent) Merge(next InboundContent) InboundContent {
+func (m Inbound) Merge(next Inbound) Inbound {
 	switch {
 	case m.Text == "" && m.Quoted == nil:
 		m.Text, m.Quoted = next.Text, next.Quoted

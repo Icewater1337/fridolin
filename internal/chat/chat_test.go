@@ -1,4 +1,4 @@
-package main
+package chat
 
 import (
 	"strings"
@@ -9,13 +9,13 @@ func TestTextWithQuote(t *testing.T) {
 	q := &Quote{From: "15559876543", Text: `Lunch at "12"?`}
 	cases := []struct {
 		name string
-		m    InboundContent
+		m    Inbound
 		want string
 	}{
-		{"no quote", InboundContent{Text: "hello"}, "hello"},
-		{"quote and text", InboundContent{Text: "yes", Quoted: q}, `[reply to 15559876543: "Lunch at \"12\"?"]` + "\nyes"},
+		{"no quote", Inbound{Text: "hello"}, "hello"},
+		{"quote and text", Inbound{Text: "yes", Quoted: q}, `[reply to 15559876543: "Lunch at \"12\"?"]` + "\nyes"},
 		// A group reply that was only the trigger: the quote is the content.
-		{"quote only", InboundContent{Quoted: q}, `[reply to 15559876543: "Lunch at \"12\"?"]`},
+		{"quote only", Inbound{Quoted: q}, `[reply to 15559876543: "Lunch at \"12\"?"]`},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -33,28 +33,28 @@ func TestMergeKeepsQuotes(t *testing.T) {
 	q2 := &Quote{From: "15551234567", Text: "Dinner?"}
 	cases := []struct {
 		name       string
-		first      InboundContent
-		next       InboundContent
+		first      Inbound
+		next       Inbound
 		wantText   string
 		wantQuoted *Quote
 		wantModel  string
 	}{
-		{"plain parts", InboundContent{Text: "a"}, InboundContent{Text: "b"}, "a\n\nb", nil, "a\n\nb"},
-		{"file, then a reply", InboundContent{Media: []string{"/m/1.jpg"}}, InboundContent{Text: "what is this?", Quoted: q1}, "what is this?", q1,
+		{"plain parts", Inbound{Text: "a"}, Inbound{Text: "b"}, "a\n\nb", nil, "a\n\nb"},
+		{"file, then a reply", Inbound{Media: []string{"/m/1.jpg"}}, Inbound{Text: "what is this?", Quoted: q1}, "what is this?", q1,
 			"[reply to 15559876543: \"Lunch?\"]\nwhat is this?"},
-		{"reply, then plain text", InboundContent{Text: "yes", Quoted: q1}, InboundContent{Text: "at 12"}, "yes\n\nat 12", q1,
+		{"reply, then plain text", Inbound{Text: "yes", Quoted: q1}, Inbound{Text: "at 12"}, "yes\n\nat 12", q1,
 			"[reply to 15559876543: \"Lunch?\"]\nyes\n\nat 12"},
-		{"plain text, then a reply", InboundContent{Text: "hi"}, InboundContent{Text: "yes", Quoted: q1}, "hi\n\n[reply to 15559876543: \"Lunch?\"]\nyes", nil,
+		{"plain text, then a reply", Inbound{Text: "hi"}, Inbound{Text: "yes", Quoted: q1}, "hi\n\n[reply to 15559876543: \"Lunch?\"]\nyes", nil,
 			"hi\n\n[reply to 15559876543: \"Lunch?\"]\nyes"},
-		{"two replies", InboundContent{Text: "yes", Quoted: q1}, InboundContent{Text: "no", Quoted: q2}, "yes\n\n[reply to 15551234567: \"Dinner?\"]\nno", q1,
+		{"two replies", Inbound{Text: "yes", Quoted: q1}, Inbound{Text: "no", Quoted: q2}, "yes\n\n[reply to 15551234567: \"Dinner?\"]\nno", q1,
 			"[reply to 15559876543: \"Lunch?\"]\nyes\n\n[reply to 15551234567: \"Dinner?\"]\nno"},
-		{"the same reply twice", InboundContent{Text: "yes", Quoted: q1}, InboundContent{Text: "yes", Quoted: q1}, "yes", q1,
+		{"the same reply twice", Inbound{Text: "yes", Quoted: q1}, Inbound{Text: "yes", Quoted: q1}, "yes", q1,
 			"[reply to 15559876543: \"Lunch?\"]\nyes"},
-		{"trigger-only reply, then text", InboundContent{Quoted: q1}, InboundContent{Text: "and this"}, "and this", q1,
+		{"trigger-only reply, then text", Inbound{Quoted: q1}, Inbound{Text: "and this"}, "and this", q1,
 			"[reply to 15559876543: \"Lunch?\"]\nand this"},
-		{"the same trigger-only reply twice", InboundContent{Quoted: q1}, InboundContent{Quoted: q1}, "", q1,
+		{"the same trigger-only reply twice", Inbound{Quoted: q1}, Inbound{Quoted: q1}, "", q1,
 			"[reply to 15559876543: \"Lunch?\"]"},
-		{"trigger-only reply, then another", InboundContent{Quoted: q1}, InboundContent{Quoted: q2}, "[reply to 15551234567: \"Dinner?\"]", q1,
+		{"trigger-only reply, then another", Inbound{Quoted: q1}, Inbound{Quoted: q2}, "[reply to 15551234567: \"Dinner?\"]", q1,
 			"[reply to 15559876543: \"Lunch?\"]\n[reply to 15551234567: \"Dinner?\"]"},
 	}
 	for _, c := range cases {
@@ -87,7 +87,7 @@ func TestJIDHelpers(t *testing.T) {
 		if got := IsGroupJID(jid); got != want {
 			t.Errorf("isGroupJID(%q) = %v, want %v", jid, got, want)
 		}
-		if got := (InboundContent{JID: jid}).IsGroup(); got != want {
+		if got := (Inbound{JID: jid}).IsGroup(); got != want {
 			t.Errorf("Inbound{JID: %q}.IsGroup() = %v, want %v", jid, got, want)
 		}
 	}
