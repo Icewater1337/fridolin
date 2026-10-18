@@ -120,8 +120,12 @@ export default {
       build: buildRolesForm,
       staleNote: { title: 'The roles changed elsewhere', text: 'Saving now would overwrite that change.', action: 'Load the new roles' },
     });
-    // The Repository form is hidden while a repository is connected.
-    ctx.dirty = () => [st && st.repo.connected ? null : repoForm, domainForm, addForm, rolesForm].some((f) => f && f.dirty());
+    // The Repository form is hidden while a repository is connected. The
+    // fields that save with a button of their own (a secret, the tunnel
+    // token, a Google client, a new GitHub repository's name) are .draft:
+    // empty until you type, and emptied again once saved.
+    ctx.dirty = () => [st && st.repo.connected ? null : repoForm, domainForm, addForm, rolesForm].some((f) => f && f.dirty())
+      || [...stack.querySelectorAll('.draft')].some((el) => el.value !== '');
 
     const stack = h('div.page-stack', h('section.card', loading('Loading the site…')));
     mount(root,
@@ -268,13 +272,14 @@ export default {
     }
 
     function renderRepoIntro({ gh }) {
-      const ghName = textInput({ placeholder: 'my-site' });
+      const ghName = textInput({ placeholder: 'my-site', class: 'draft' });
       return [
         h('p', 'A private repository holds the site’s modules, one folder each. Fridolin clones it with its own deploy key, and nothing in it reaches the site until you approve a commit.'),
         gh ? h('div.site-block', h('h3', 'No repository yet?'),
           h('div.actions', ghName, btn('Create a private GitHub repository', {
             small: true, onClick: async () => {
               const r = await post('/api/site/github-repo', { name: ghName.value }, { timeout: GIT_TIMEOUT_MS });
+              ghName.value = '';
               const form = repoForm.form();
               if (form) form.setURL(r.url);
               toast(`Created ${r.url}`, 'ok');
@@ -513,14 +518,14 @@ export default {
       const row = (m, name) => {
         const isSet = m.set.includes(name);
         const declared = m.declared.includes(name);
-        const value = h('input', { type: 'password', autocomplete: 'off', placeholder: isSet ? 'set — enter a new value to replace it' : 'value', 'aria-label': `Value of ${name}` });
+        const value = h('input.draft', { type: 'password', autocomplete: 'off', placeholder: isSet ? 'set — enter a new value to replace it' : 'value', 'aria-label': `Value of ${name}` });
         const path = `/api/site/secrets/${encodeURIComponent(m.module)}/${encodeURIComponent(name)}`;
         return h('li',
           mono(name),
           isSet ? pill('set', 'ok') : pill('not set', declared ? 'warn' : 'neutral'),
           declared ? null : pill('not declared', 'neutral', { title: 'No live module.json lists it, so no module gets it.' }),
           declared ? h('span.site-secret-input', value, btn(isSet ? 'Replace' : 'Save', {
-            small: true, onClick: async () => { await put(path, { value: value.value }); toast(`Saved ${name}; restarting the site`, 'ok'); await secrets.refresh(); },
+            small: true, onClick: async () => { await put(path, { value: value.value }); value.value = ''; toast(`Saved ${name}; restarting the site`, 'ok'); await secrets.refresh(); },
           })) : null,
           isSet ? btn('', {
             small: true, icon: 'trash', title: `Remove ${name}`, onClick: async () => {
@@ -579,21 +584,21 @@ export default {
           ? callout('warn', 'Your Google client is a Desktop app client', 'Google lets a website sign people in only with a “Web application” client. Create one in Google Cloud Console and paste it below.')
           : callout('ok', g.source === 'site' ? 'Using the site’s own Google client' : 'Using Fridolin’s Google client',
             h('div', 'In Google Cloud Console, add this to the client’s ', h('em', 'Authorized redirect URIs'), ': ', mono(g.redirect_uri, { copy: true })));
-      const clientJSON = h('textarea.mono', { rows: 3, placeholder: '{"web": {"client_id": "…", "client_secret": "…"}}' });
+      const clientJSON = h('textarea.mono.draft', { rows: 3, placeholder: '{"web": {"client_id": "…", "client_secret": "…"}}' });
       return h('div.site-block', h('h3', 'Google sign-in'), clientNote,
         h('details', h('summary', g.source === 'site' ? 'Replace or remove the site’s Google client' : 'Use a separate Google client for the site'),
           field({ label: 'Client JSON (as downloaded from Google Cloud Console)', control: clientJSON, wide: true }),
           h('div.actions',
-            btn('Save client', { small: true, onClick: async () => { await put('/api/site/google-client', { json: clientJSON.value }); toast('Google client saved', 'ok'); await refresh(); } }),
+            btn('Save client', { small: true, onClick: async () => { await put('/api/site/google-client', { json: clientJSON.value }); clientJSON.value = ''; toast('Google client saved', 'ok'); await refresh(); } }),
             g.source === 'site' ? btn('Remove', { small: true, onClick: async () => { await del('/api/site/google-client'); await refresh(); } }) : null)));
     }
 
     function renderTunnelSetup({ listen, saved, cloudflared }) {
-      const token = h('input', { type: 'password', autocomplete: 'off', placeholder: saved ? 'saved — paste a new one to replace it' : 'eyJ…' });
+      const token = h('input.draft', { type: 'password', autocomplete: 'off', placeholder: saved ? 'saved — paste a new one to replace it' : 'eyJ…' });
       return [
         h('p.small', 'A tunnel gives the domain to this Mac without opening a port. In Cloudflare Zero Trust create a tunnel, give it a public host name for your domain pointing at ', mono(`http://${listen}`), ', and paste its token here.'),
         !cloudflared ? callout('info', 'cloudflared is not installed', h('div', 'macOS: ', mono('brew install cloudflared', { copy: true }))) : null,
-        h('div.actions', token, btn(saved ? 'Replace token' : 'Save token', { small: true, onClick: async () => { await put('/api/site/tunnel', { token: token.value }); toast('Tunnel token saved', 'ok'); await refresh(); } }),
+        h('div.actions', token, btn(saved ? 'Replace token' : 'Save token', { small: true, onClick: async () => { await put('/api/site/tunnel', { token: token.value }); token.value = ''; toast('Tunnel token saved', 'ok'); await refresh(); } }),
           saved ? btn('Remove token', { small: true, onClick: async () => { await put('/api/site/tunnel', { token: '' }); await refresh(); } }) : null),
       ];
     }

@@ -35,7 +35,7 @@ function siteStatus() {
 
 const proposal = { proposal: { brain: 'web', title: 'Events page', summary: 'A page with this month’s events.', commit: commit('c'), at: '2026-10-18T10:00:00Z' }, changes: [], preview: null };
 
-async function openPage(t, first = siteStatus(), { proposals = [], brains = [{ id: 'web', name: 'Web' }] } = {}) {
+async function openPage(t, first = siteStatus(), { proposals = [], brains = [{ id: 'web', name: 'Web' }], secrets = [] } = {}) {
   t.mock.timers.enable({ apis: ['setTimeout', 'Date'] });
   installDom();
   noConsoleErrors(t);
@@ -83,7 +83,8 @@ async function openPage(t, first = siteStatus(), { proposals = [], brains = [{ i
       return gate ? gate.then((how) => end[how]()) : done();
     }
     if (path === '/api/site/proposals') return { proposals: bridge.proposals };
-    if (path === '/api/site/secrets') return { modules: [] };
+    if (path === '/api/site/secrets') return { modules: secrets };
+    if (path === '/api/site/github-repo' && method === 'POST') return { url: `git@github.com:you/${body.name}.git` };
     return { ok: true };
   });
   const root = h('div');
@@ -270,6 +271,42 @@ test('what is typed into the repository form outlasts a clone', async (t) => {
       assert.equal(now === url, c.kept);
       assert.equal(now.value, c.kept ? 'git@github.com:you/my-site.git' : '');
       assert.equal(ctx.dirty(), c.kept);
+    });
+  }
+});
+
+test('a secret or token typed in counts as unsaved until it is saved', async (t) => {
+  const notConnected = siteStatus();
+  notConnected.repo = { connected: false, github: false };
+  notConnected.runtime.gh = true;
+  notConnected.settings = { ...notConnected.settings, enabled: false, approved: '', history: [], repo: { url: '', branch: 'main', subdir: '' } };
+  const placeholder = (p) => (root) => root.querySelectorAll('input, textarea').find((i) => i.getAttribute('placeholder') === p);
+  const cases = [
+    {
+      name: 'a module’s secret',
+      options: { secrets: [{ module: 'finance', title: 'Finance', live: true, declared: ['API_KEY'], set: [] }] },
+      find: placeholder('value'), save: 'Save', path: '/api/site/secrets/finance/API_KEY',
+    },
+    { name: 'the tunnel token', find: placeholder('eyJ…'), save: 'Save token', path: '/api/site/tunnel' },
+    { name: 'a Google client', find: (root) => root.querySelector('textarea.draft'), save: 'Save client', path: '/api/site/google-client' },
+    {
+      name: 'a new GitHub repository’s name', first: notConnected,
+      find: placeholder('my-site'), save: 'Create a private GitHub repository', path: '/api/site/github-repo',
+      after: true, // the Repository form has its address now, to connect it
+    },
+  ];
+  for (const c of cases) {
+    await t.test(c.name, async (t) => {
+      const { root, ctx, calls } = await openPage(t, structuredClone(c.first || siteStatus()), c.options);
+      const input = c.find(root);
+      assert.equal(ctx.dirty(), false);
+      type(input, 'typed');
+      assert.equal(ctx.dirty(), true, 'leaving would lose it');
+      input.closest('li, .actions, details').querySelectorAll('button').find((x) => x.textContent === c.save).click();
+      await settle();
+      assert.ok(calls.some((x) => x.path === c.path && x.method !== 'GET'), 'saved');
+      assert.equal(input.value, '', 'never shown again');
+      assert.equal(ctx.dirty(), c.after || false);
     });
   }
 });
