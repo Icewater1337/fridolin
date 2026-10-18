@@ -463,6 +463,7 @@ func TestViewerCreatesTheStreamLogInTheFolder(t *testing.T) {
 			logged := captureLog(t)
 
 			br.ensureViewer(&brainSettings{viewer: true})
+			viewerIdle(t, br)
 
 			if tc.target == "" {
 				if len(started) != 1 || started[0] != logPath {

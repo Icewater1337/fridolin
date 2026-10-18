@@ -202,10 +202,14 @@ type Brain struct {
 	last    *RunInfo
 
 	// tmuxViewer is an optional Terminal window tailing this brain's
-	// activity log. A run starts it and a reload can close it, so viewerMu
-	// guards it.
-	viewerMu   sync.Mutex
-	tmuxViewer *TmuxViewer
+	// activity log. A run starts it in the background and a reload can close
+	// it, so viewerMu guards it, with viewerStarting, set while a start is
+	// under way, and viewerGen, which closeViewer moves on so that a start
+	// that ends after it knows to close what it opened.
+	viewerMu       sync.Mutex
+	tmuxViewer     *TmuxViewer
+	viewerStarting bool
+	viewerGen      int
 }
 
 // brainSettings is everything about a brain that can change while it runs.
@@ -712,14 +716,41 @@ func (br *Brain) Snapshot() BrainRuntime {
 var startViewer = NewTmuxViewer
 
 // ensureViewer starts the tmux activity viewer if enabled and not running.
+// It does so in the background, one start at a time: tmux and osascript,
+// which can wait on an Automation consent prompt under launchd, must not
+// hold up the run.
 func (br *Brain) ensureViewer(s *brainSettings) {
 	if !s.viewer {
 		return
 	}
 	br.viewerMu.Lock()
-	defer br.viewerMu.Unlock()
-	if br.tmuxViewer != nil && br.tmuxViewer.IsAlive() {
+	if br.viewerStarting {
+		br.viewerMu.Unlock()
 		return
+	}
+	br.viewerStarting = true
+	tv, gen := br.tmuxViewer, br.viewerGen
+	br.viewerMu.Unlock()
+	go func() {
+		started := br.startViewerUnlessAlive(tv, s)
+		br.viewerMu.Lock()
+		br.viewerStarting = false
+		closed := gen != br.viewerGen // the setting went off, or the brain
+		if started != nil && !closed {
+			br.tmuxViewer = started
+		}
+		br.viewerMu.Unlock()
+		if started != nil && closed {
+			started.Close()
+		}
+	}()
+}
+
+// startViewerUnlessAlive starts a viewer unless tv still runs. It returns
+// the new viewer, or nil when tv runs or none could start.
+func (br *Brain) startViewerUnlessAlive(tv *TmuxViewer, s *brainSettings) *TmuxViewer {
+	if tv != nil && tv.IsAlive() {
+		return nil
 	}
 	// tail fails on a log that does not exist yet, so create it first,
 	// through the folder as a run opens it: touch would have followed a
@@ -727,23 +758,24 @@ func (br *Brain) ensureViewer(s *brainSettings) {
 	f, err := openInFolder(br.root, streamLogName, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600)
 	if err != nil {
 		log.Printf("brain %s: no tmux viewer: could not open stream log: %v", br.id, err)
-		return
+		return nil
 	}
 	f.Close()
-	tv, err := startViewer("claude-"+br.id, br.streamLogPath(), br.workDir, childEnv(anyChild, s.envPassthrough))
+	nv, err := startViewer("claude-"+br.id, br.streamLogPath(), br.workDir, childEnv(anyChild, s.envPassthrough))
 	if err != nil {
 		log.Printf("brain %s: could not start tmux viewer: %v", br.id, err)
-		return
+		return nil
 	}
-	br.tmuxViewer = tv
+	return nv
 }
 
 // closeViewer ends the activity viewer's tmux session, if it has one, which
-// closes its Terminal window.
+// closes its Terminal window. A start under way closes what it opens.
 func (br *Brain) closeViewer() {
 	br.viewerMu.Lock()
 	tv := br.tmuxViewer
 	br.tmuxViewer = nil
+	br.viewerGen++
 	br.viewerMu.Unlock()
 	if tv != nil {
 		tv.Close()

@@ -834,8 +834,10 @@ Opens a tmux session per brain, tailing its activity log, in a Terminal window
 (macOS), on the brain's first run. Off by default. Handy while tuning a
 prompt; noisy otherwise. Turning it off, or removing the brain, ends the
 session and closes the window; one left open by a restart is replaced on
-the brain's next run. Requires
-tmux — without it the bridge logs a warning and carries on. Nor does a viewer
+the brain's next run. The viewer starts in the background, so a run never
+waits for tmux or Terminal (each of their calls gets five seconds), and
+Terminal does not come to the front. Requires tmux 3.0 or newer — without
+tmux the bridge logs a warning and carries on. Nor does a viewer
 start for a brain whose `claude-stream.log` the bridge refuses, a symlink say
 (see [BRAINS.md](BRAINS.md#files-the-bridge-reads-and-writes)). The bridge
 starts these sessions on tmux's default server, outside the sandbox, and any
