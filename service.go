@@ -31,7 +31,7 @@ import (
 
 const (
 	serviceLabel       = "ai.fridolin.bridge"
-	legacyServiceLabel = "com.whatsapp-claude-bridge" // the launchd label before the rename
+	legacyServiceLabel = "com.whatsapp-claude-bridge" // compat: the launchd label before the rename, see retireLegacyAgent
 	systemdUnitName    = "fridolin.service"
 )
 

@@ -45,7 +45,8 @@ INSTALL_DIR="${INSTALL_DIR:-$HOME/.local/lib/fridolin}"
 # A data folder given by the caller goes into a new config: the service
 # never sees this script's environment.
 DATA_DIR_GIVEN="${DATA_DIR:-}"
-# Installs from before the rename keep their data folder.
+# Installs from before the rename keep their data folder (compat: the
+# bridge's defaultDataDir makes the same choice).
 if [ -z "${DATA_DIR:-}" ] && [ ! -d "$HOME/.fridolin" ] && [ -d "$HOME/.whatsapp-claude-bridge" ]; then
   DATA_DIR="$HOME/.whatsapp-claude-bridge"
 fi

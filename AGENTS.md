@@ -158,8 +158,11 @@ Reopen the dashboard with `fridolin open`. To upgrade later: `git pull &&
 - The project was called whatsapp-claude-bridge before. Names from then
   that are on disk or that others rely on stay, each marked `compat:` in
   the code: the data dir `~/.whatsapp-claude-bridge`, which the bridge
-  still uses when `~/.fridolin` does not exist (`defaultDataDir`), and the
-  sandbox's denies of the old `~/.config` and `~/Library/Logs` folders.
+  still uses when `~/.fridolin` does not exist (`defaultDataDir`, and
+  `setup.sh` for the config it installs), the launchd label
+  `com.whatsapp-claude-bridge`, whose agent `fridolin service install`
+  retires, and the sandbox's denies of the old `~/.config` and
+  `~/Library/Logs` folders.
   *Bridge* is still the product's own word: `bridge.db`, `bridge.lock`,
   the `X-Bridge-Token` header and the `BRIDGE_*` variables brains read
   keep it. Mark a new shim like these the same way.
