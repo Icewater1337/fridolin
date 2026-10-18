@@ -266,3 +266,60 @@ func TestSiteSearchKeepsOnlyTheEndOfStderr(t *testing.T) {
 		t.Errorf("a search that wrote %d MiB to stderr allocated %d MiB", flood>>20, n>>20)
 	}
 }
+
+// A result is final even if a stop or deadline arrives while inherited
+// output is still open. Keep both answers and the CLI's own error then.
+func TestCancellationKeepsTheRecordedResult(t *testing.T) {
+	cases := []struct {
+		name     string
+		cliError string
+		timeout  bool
+	}{
+		{"stop after answer", "", false},
+		{"stop after error", "API quota exhausted", false},
+		{"timeout after error", "API quota exhausted", true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			prevGrace, prevDelay := postResultGrace, runWaitDelay
+			postResultGrace, runWaitDelay = 30*time.Second, 3*time.Second
+			t.Cleanup(func() { postResultGrace, runWaitDelay = prevGrace, prevDelay })
+			mgr, _, home := queueTestManager(t, 0, "")
+			setsidChildren(t, home, "stdout,stderr")
+			t.Setenv("FRIDOLIN_FAKE_RESULT_ERROR", tc.cliError)
+			br := mgr.Get("a")
+			ctx, cancel := context.WithCancel(context.Background())
+			if tc.timeout {
+				cancel()
+				ctx, cancel = context.WithTimeout(context.Background(), 2*time.Second)
+			}
+			defer cancel()
+			m := dm("answer before stopping")
+			run := &brainRun{cancel: cancel, done: make(chan struct{}), msg: m}
+			result := make(chan RunResult, 1)
+			go func() { result <- br.invokeGuarded(run, ctx, br.settings.Load(), m) }()
+			waitFor(t, 5*time.Second, "the recorded result", func() bool {
+				data, _ := os.ReadFile(filepath.Join(br.workDir, streamLogName))
+				return strings.Contains(string(data), "✅ Result:") || strings.Contains(string(data), "❌ Error:")
+			})
+			if !tc.timeout {
+				cancel()
+			}
+			select {
+			case res := <-result:
+				if tc.cliError == "" {
+					if res.Err != nil || !strings.HasSuffix(res.Text, "says: answer before stopping") {
+						t.Errorf("result = %+v, want the recorded answer", res)
+					}
+				} else {
+					var cliErr *cliError
+					if !errors.As(res.Err, &cliErr) || cliErr.msg != tc.cliError {
+						t.Errorf("result = %+v, want CLI error %q", res, tc.cliError)
+					}
+				}
+			case <-time.After(10 * time.Second):
+				t.Fatal("the cancelled run kept waiting for inherited output")
+			}
+		})
+	}
+}

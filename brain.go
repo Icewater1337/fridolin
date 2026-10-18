@@ -1627,6 +1627,8 @@ func (br *Brain) invoke(run *brainRun, ctx context.Context, s *brainSettings, m 
 	stdout, stdoutW := io.Pipe()
 	proc, err := startClaude(cmdCtx, claudeRun{binary: binary, args: finalArgs, dir: br.workDir, env: env, prompt: prompt, stdout: stdoutW})
 	if err != nil {
+		stdout.Close()
+		stdoutW.Close()
 		if ctx.Err() != nil {
 			// Stopped before the CLI started, which Start then refuses: a
 			// stop like any other, no failure.
@@ -1665,6 +1667,7 @@ func (br *Brain) invoke(run *brainRun, ctx context.Context, s *brainSettings, m 
 	parseDone := make(chan RunResult, 1)
 	resultSeen := make(chan struct{})
 	var resultOnce sync.Once
+	var recordedResult RunResult
 	go func() {
 		// Once the parser is done, the copy into its pipe ends too: a parser
 		// that failed would leave it blocked otherwise.
@@ -1679,7 +1682,12 @@ func (br *Brain) invoke(run *brainRun, ctx context.Context, s *brainSettings, m 
 				parseDone <- RunResult{Err: errRunPanicked}
 			}
 		}()
-		parseDone <- br.readAgentStream(m, stdout, runHeading(m, s, pid), func() { resultOnce.Do(func() { close(resultSeen) }) }, s.provider)
+		parseDone <- br.readAgentStream(m, stdout, runHeading(m, s, pid), func(res RunResult) {
+			resultOnce.Do(func() {
+				recordedResult = res
+				close(resultSeen)
+			})
+		}, s.provider)
 	}()
 
 	notice := time.NewTimer(workingNoticeAfter)
@@ -1743,18 +1751,17 @@ func (br *Brain) invoke(run *brainRun, ctx context.Context, s *brainSettings, m 
 		gotResult = true
 	default:
 	}
+	// A result is the CLI's final answer, including an error result. A
+	// stop while its inherited output drains must not replace it with an
+	// interruption or timeout, even when Wait had to close those pipes.
+	if gotResult && ctx.Err() != nil {
+		return recordedResult
+	}
 	switch {
 	case errors.Is(ctx.Err(), context.DeadlineExceeded):
-		// The deadline may come in the grace after the result, which is
-		// the run's answer then all the same. A question sent before the
-		// run hung is not: the chat must hear that the run was stopped.
-		if res.Err != nil || !gotResult {
-			return RunResult{Err: runTimedOut(s.runTimeout)}
-		}
+		return RunResult{Err: runTimedOut(s.runTimeout)}
 	case ctx.Err() != nil:
-		if waitErr != nil || res.Text == "" {
-			return RunResult{Err: errBrainInterrupted}
-		}
+		return RunResult{Err: errBrainInterrupted}
 	case waitErr != nil:
 		// Without a result, what the CLI wrote to stderr is the only
 		// account of what went wrong.
@@ -2007,7 +2014,7 @@ type runSink struct {
 	br       *Brain
 	m        Inbound
 	log      *os.File // nil when it could not be opened
-	onResult func()
+	onResult func(RunResult)
 }
 
 func (s *runSink) Log(line string) {
@@ -2023,20 +2030,20 @@ func (s *runSink) Question(text string) bool {
 	return !s.m.Silent && h != nil && h.Question != nil && h.Question(s.br, s.m.JID, questionPrefix+text)
 }
 
-func (s *runSink) Result(RunResult) {
+func (s *runSink) Result(res RunResult) {
 	if s.onResult != nil {
-		s.onResult()
+		s.onResult(res)
 	}
 }
 
 // readStream is parseStream for m's run, with heading as the run's first
 // line in the activity log, calling onResult, when set, as soon as the
 // result is in, while the stream may still go on.
-func (br *Brain) readStream(m Inbound, reader io.Reader, heading string, onResult func()) RunResult {
+func (br *Brain) readStream(m Inbound, reader io.Reader, heading string, onResult func(RunResult)) RunResult {
 	return br.readAgentStream(m, reader, heading, onResult, "claude")
 }
 
-func (br *Brain) readAgentStream(m Inbound, reader io.Reader, heading string, onResult func(), provider string) RunResult {
+func (br *Brain) readAgentStream(m Inbound, reader io.Reader, heading string, onResult func(RunResult), provider string) RunResult {
 	br.rotateStreamLog()
 	// Through the folder, like the history: a brain can swap the log for a
 	// symlink to a file its sandbox denies it writing.
