@@ -18,6 +18,10 @@ Validate at any time:
 fridolin check
 ```
 
+For a bug report, `fridolin check --redact` prints the same with phone
+numbers, group JIDs, LIDs and email addresses masked and `~` for your home
+folder, its log lines and any `--print-sandbox` profile included.
+
 `fridolin paths` prints the config file and the data dir the other
 commands use, and where each came from (`--json` for a program to read).
 The bridge's log names both, and where each came from, at every start.

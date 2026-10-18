@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -12,6 +13,7 @@ import (
 	"os/exec"
 	"os/signal"
 	"path/filepath"
+	"regexp"
 	"runtime"
 	"slices"
 	"strings"
@@ -24,8 +26,9 @@ Usage:
   fridolin [run] [flags]     start the bridge (default)
   fridolin open              open the dashboard in your browser
   fridolin rotate-token      replace the dashboard token and sign out every browser
-  fridolin check [--route JID ...]
-                                           validate the configuration and show routing
+  fridolin check [--route JID ...] [--redact]
+                                           validate the configuration and show routing;
+                                           --redact masks numbers, JIDs, emails and home paths
   fridolin init [--claude-path PATH] [--data-dir DIR]
                                            write a starter config (if there is none)
   fridolin paths [--json]                  the config file and data dir in use, and
@@ -511,70 +514,118 @@ func openBrowser(url string) error {
 	return fmt.Errorf("don't know how to open a browser on %s", runtime.GOOS)
 }
 
+// checkOptions are the check command's flags.
+type checkOptions struct {
+	config     string
+	routes     []string
+	sandboxFor string
+	redact     bool
+}
+
 func checkCmd(args []string) {
 	fs := flag.NewFlagSet("check", flag.ExitOnError)
-	cfgPath := fs.String("config", "", configFlagHelp)
+	var o checkOptions
 	var routes multiFlag
+	fs.StringVar(&o.config, "config", "", configFlagHelp)
 	fs.Var(&routes, "route", "show which brain handles this chat JID (repeatable)")
-	sandboxFor := fs.String("print-sandbox", "", "print the sandbox profile for this brain id")
+	fs.StringVar(&o.sandboxFor, "print-sandbox", "", "print the sandbox profile for this brain id")
+	fs.BoolVar(&o.redact, "redact", false, "mask phone numbers, JIDs and email addresses, and write ~ for the home folder, to paste the output into a bug report")
 	_ = fs.Parse(args)
-	path := configPath(*cfgPath)
+	o.routes = routes
+	if err := writeCheck(os.Stdout, o); err != nil {
+		log.Fatal(err)
+	}
+}
 
+// writeCheck writes check's report to w. With o.redact the report, what
+// is logged meanwhile and the error that ends it, if one does, are
+// redacted: the output then goes into a public bug report as it is.
+func writeCheck(w io.Writer, o checkOptions) error {
+	var red *redactor
+	if o.redact {
+		red = newRedactor(homeDir())
+		red.addChats(o.routes...)
+		// The log entries of loading the config name paths, and the
+		// allowed chats it finds odd, as they are written.
+		prev := log.Writer()
+		log.SetOutput(redactingWriter{prev, red})
+		defer log.SetOutput(prev)
+	}
+	path := configPath(o.config)
+	if red != nil {
+		red.addConfig(path)
+	}
 	cfg, err := LoadConfig(path)
 	if err != nil {
-		log.Fatalf("loading config: %v", err)
+		return red.err(fmt.Errorf("loading config: %w", err))
 	}
+	if red == nil {
+		return checkReport(w, path, cfg, o)
+	}
+	red.addChats(cfg.AllowedNumbers...)
+	red.addGroups(cfg.AllowedGroups...)
+	var buf bytes.Buffer
+	err = checkReport(&buf, path, cfg, o)
+	if _, werr := io.WriteString(w, red.text(buf.String())); werr != nil && err == nil {
+		err = werr
+	}
+	return red.err(err)
+}
 
-	fmt.Printf("Config OK: %s\n", path)
-	fmt.Printf("  claude:    %s\n", claudeSummary(cfg.ClaudePath, cfg.ChildEnvPassthrough))
-	fmt.Printf("  data dir:  %s\n", cfg.DataDir)
-	fmt.Printf("  dashboard: http://%s/\n", cfg.HTTPListen)
-	fmt.Printf("  DM allow:  %s\n", dmAllowSummary(cfg))
-	fmt.Printf("  groups:    %v\n", cfg.AllowedGroups)
+// checkReport writes what check says of cfg, the config loaded from path.
+func checkReport(w io.Writer, path string, cfg *Config, o checkOptions) error {
+	fmt.Fprintf(w, "Config OK: %s\n", path)
+	fmt.Fprintf(w, "  claude:    %s\n", claudeSummary(cfg.ClaudePath, cfg.ChildEnvPassthrough))
+	fmt.Fprintf(w, "  data dir:  %s\n", cfg.DataDir)
+	fmt.Fprintf(w, "  dashboard: http://%s/\n", cfg.HTTPListen)
+	fmt.Fprintf(w, "  DM allow:  %s\n", dmAllowSummary(cfg))
+	fmt.Fprintf(w, "  groups:    %v\n", cfg.AllowedGroups)
 	trig, _ := json.Marshal(cfg.Triggers)
-	fmt.Printf("  triggers:  %s\n", trig)
+	fmt.Fprintf(w, "  triggers:  %s\n", trig)
 	specs, issues := ResolveBrains(cfg)
 	if len(specs) == 0 {
-		fmt.Println("  brains:    none yet — add one in the dashboard")
+		fmt.Fprintln(w, "  brains:    none yet — add one in the dashboard")
 	}
 	for _, s := range specs {
 		m := s.Manifest
-		fmt.Printf("  brain %-14s → %s (dms=%v default=%v groups=%v)\n", m.ID, s.Dir, m.Routing.HandlesDMs, m.Routing.Default, m.Routing.Groups)
+		fmt.Fprintf(w, "  brain %-14s → %s (dms=%v default=%v groups=%v)\n", m.ID, s.Dir, m.Routing.HandlesDMs, m.Routing.Default, m.Routing.Groups)
 	}
 	for _, is := range issues {
-		fmt.Printf("  ! %s %s: %s\n", is.Kind, is.Path, is.Detail)
+		fmt.Fprintf(w, "  ! %s %s: %s\n", is.Kind, is.Path, is.Detail)
 	}
 
-	if len(routes) > 0 || *sandboxFor != "" {
-		mgr := &BrainManager{brains: map[string]*Brain{}, byGroup: map[string]*Brain{}, profiler: NewSandboxProfiler(nil, cfg), hooks: &BrainHooks{}}
-		mgr.profiler.SetConfigFile(path)
-		if err := mgr.reload(specs, issues, cfg); err != nil {
-			log.Fatalf("%v", err)
+	if len(o.routes) == 0 && o.sandboxFor == "" {
+		return nil
+	}
+	mgr := &BrainManager{brains: map[string]*Brain{}, byGroup: map[string]*Brain{}, profiler: NewSandboxProfiler(nil, cfg), hooks: &BrainHooks{}}
+	mgr.profiler.SetConfigFile(path)
+	if err := mgr.reload(specs, issues, cfg); err != nil {
+		return err
+	}
+	for _, jid := range o.routes {
+		isGroup := isGroupJID(jid)
+		allowed := ""
+		if isGroup && !slices.Contains(cfg.AllowedGroups, jid) {
+			allowed = " (not in allowed_groups: ignored)"
 		}
-		for _, jid := range routes {
-			isGroup := isGroupJID(jid)
-			allowed := ""
-			if isGroup && !slices.Contains(cfg.AllowedGroups, jid) {
-				allowed = " (not in allowed_groups: ignored)"
-			}
-			if !isGroup && !numberAllowed(cfg, normalizeJID(jid)) {
-				allowed = " (not in allowed_numbers: ignored)"
-			}
-			if br := mgr.BrainFor(jid, isGroup); br != nil {
-				fmt.Printf("  route %s → %s%s\n", jid, br.ID(), allowed)
-			} else {
-				fmt.Printf("  route %s → no brain%s\n", jid, allowed)
-			}
+		if !isGroup && !numberAllowed(cfg, normalizeJID(jid)) {
+			allowed = " (not in allowed_numbers: ignored)"
 		}
-		if *sandboxFor != "" {
-			profile, err := mgr.profiler.Profile(*sandboxFor)
-			if err != nil {
-				log.Fatalf("sandbox profile: %v", err)
-			}
-			fmt.Println()
-			fmt.Print(profile)
+		if br := mgr.BrainFor(jid, isGroup); br != nil {
+			fmt.Fprintf(w, "  route %s → %s%s\n", jid, br.ID(), allowed)
+		} else {
+			fmt.Fprintf(w, "  route %s → no brain%s\n", jid, allowed)
 		}
 	}
+	if o.sandboxFor != "" {
+		profile, err := mgr.profiler.Profile(o.sandboxFor)
+		if err != nil {
+			return fmt.Errorf("sandbox profile: %w", err)
+		}
+		fmt.Fprintln(w)
+		fmt.Fprint(w, profile)
+	}
+	return nil
 }
 
 // claudeSummary is the CLI brains run and its version, with a warning when
@@ -604,6 +655,219 @@ func dmAllowSummary(cfg *Config) string {
 		return "nobody (allowed_numbers is empty)"
 	}
 	return fmt.Sprint(cfg.AllowedNumbers)
+}
+
+// redactor masks what check --redact must not show: phone numbers down to
+// the country code and the last two digits, group JIDs and LIDs down to
+// their last two digits, email addresses as maskEmail does, and the home
+// folder, written as ~ in every path. Two numbers or groups still tell
+// apart, and paths still say where under the home folder they are.
+type redactor struct {
+	// The configured chats, which are printed without a JID too, each
+	// with its masked form; the longest first, since one may hold another.
+	chats []redactedChat
+	homes []*regexp.Regexp
+}
+
+type redactedChat struct{ value, masked string }
+
+// jidExpr is a WhatsApp JID or LID: its user part, with a device or
+// creator suffix, then the server.
+const jidExpr = `([0-9]+)((?:[-.:][0-9]+)*)@(s\.whatsapp\.net|g\.us|lid)`
+
+// redactPattern finds a JID or LID, a number in international format, or
+// an email address.
+var redactPattern = regexp.MustCompile(jidExpr + `\b|\+[0-9]{7,15}\b|[A-Za-z0-9._%+-]+@[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)*\.[A-Za-z]{2,}`)
+
+// trailingJID finds a JID at the end of what redactPattern took for an
+// email address: one right after a name, "brain-120363…@g.us" say, which
+// the address's pattern matches from the name's start.
+var trailingJID = regexp.MustCompile(jidExpr + `$`)
+
+// newRedactor redacts home, as given and with its symlinks resolved, in
+// each way a path is written: plain, in a regular expression, and quoted
+// in a sandbox profile.
+func newRedactor(home string) *redactor {
+	r := &redactor{}
+	if home == "" || home == string(filepath.Separator) {
+		return r // every path would match
+	}
+	var spellings []string
+	for _, h := range []string{home, resolvePath(home)} {
+		spellings = append(spellings, h, sbplEscaper.Replace(h), regexp.QuoteMeta(h), sbplEscaper.Replace(regexp.QuoteMeta(h)))
+	}
+	// The longest first, since one may begin with another; equal ones next
+	// to each other, for Compact.
+	slices.SortFunc(spellings, func(a, b string) int {
+		if len(a) != len(b) {
+			return len(b) - len(a)
+		}
+		return strings.Compare(a, b)
+	})
+	for _, h := range slices.Compact(spellings) {
+		// Only the folder itself, not a sibling whose name begins like it.
+		r.homes = append(r.homes, regexp.MustCompile(regexp.QuoteMeta(h)+`([^A-Za-z0-9._-]|$)`))
+	}
+	return r
+}
+
+// addConfig adds the allowed numbers and groups of the config file at
+// path as they are written, read before it loads: loading logs the
+// entries it finds odd, a number with a note after it say, as they are.
+// A file that does not parse adds nothing.
+func (r *redactor) addConfig(path string) {
+	var file struct {
+		AllowedNumbers []string `json:"allowed_numbers"`
+		AllowedGroups  []string `json:"allowed_groups"`
+	}
+	if data, err := os.ReadFile(path); err == nil && json.Unmarshal(data, &file) == nil {
+		r.addChats(file.AllowedNumbers...)
+		r.addGroups(file.AllowedGroups...)
+	}
+}
+
+// addChats adds phone numbers and chat JIDs to mask wherever they are
+// printed without a JID too, as written and as digits alone.
+func (r *redactor) addChats(chats ...string) { r.add(false, chats) }
+
+// addGroups adds group JIDs as addChats does, also when one is written
+// without @g.us.
+func (r *redactor) addGroups(groups ...string) { r.add(true, groups) }
+
+func (r *redactor) add(groups bool, chats []string) {
+	for _, c := range chats {
+		id, server, _ := strings.Cut(strings.TrimSpace(c), "@")
+		digits := digitsOf(id)
+		if len(digits) < 6 {
+			continue
+		}
+		masked := maskPhone(digits)
+		if groups || server == "g.us" || server == "lid" {
+			masked = maskDigits(digits, 0)
+		}
+		written := masked
+		if strings.HasPrefix(id, "+") {
+			written = "+" + masked
+		}
+		r.chats = append(r.chats, redactedChat{id, written}, redactedChat{digits, masked})
+	}
+	slices.SortStableFunc(r.chats, func(a, b redactedChat) int { return len(b.value) - len(a.value) })
+}
+
+// text returns s redacted.
+func (r *redactor) text(s string) string {
+	s = redactPattern.ReplaceAllStringFunc(s, func(m string) string {
+		sub := redactPattern.FindStringSubmatch(m)
+		switch {
+		case sub[3] != "":
+			return maskJID(sub[1], sub[2], sub[3])
+		case strings.HasPrefix(m, "+"):
+			return "+" + maskPhone(m[1:])
+		case isWhatsAppServer(m[strings.LastIndex(m, "@")+1:]):
+			// No address: a JID after a name, or no JID either
+			// ("digits@g.us", say).
+			if j := trailingJID.FindStringSubmatch(m); j != nil {
+				return strings.TrimSuffix(m, j[0]) + maskJID(j[1], j[2], j[3])
+			}
+			return m
+		}
+		return maskEmail(m)
+	})
+	for _, c := range r.chats {
+		s = strings.ReplaceAll(s, c.value, c.masked)
+	}
+	for _, re := range r.homes {
+		s = re.ReplaceAllString(s, "~$1")
+	}
+	return s
+}
+
+// maskJID masks a JID's user part and the suffix after it: a phone
+// number's down to its country code and last two digits, without the
+// device, a group's or a LID's down to the last two digits of the two
+// together, which hides the number of whoever made an old-style group.
+func maskJID(user, suffix, server string) string {
+	if server == "s.whatsapp.net" {
+		return maskPhone(user) + "@" + server
+	}
+	return maskDigits(user+suffix, 0) + "@" + server
+}
+
+// isWhatsAppServer reports whether domain is one of WhatsApp's JID servers.
+func isWhatsAppServer(domain string) bool {
+	return domain == "s.whatsapp.net" || domain == "g.us" || domain == "lid"
+}
+
+// err returns err redacted, or err itself without a redactor.
+func (r *redactor) err(err error) error {
+	if r == nil || err == nil {
+		return err
+	}
+	return errors.New(r.text(err.Error()))
+}
+
+// redactingWriter writes what it is given redacted. The log package writes
+// each entry whole, so a number is never split between two writes.
+type redactingWriter struct {
+	w   io.Writer
+	red *redactor
+}
+
+func (rw redactingWriter) Write(p []byte) (int, error) {
+	if _, err := io.WriteString(rw.w, rw.red.text(string(p))); err != nil {
+		return 0, err
+	}
+	return len(p), nil
+}
+
+// maskPhone keeps a phone number's country code and its last two digits.
+func maskPhone(n string) string {
+	return maskDigits(n, countryCodeLen(n))
+}
+
+// maskDigits keeps the first keep and the last two characters of n, or
+// nothing when that would leave fewer than four of them masked.
+func maskDigits(n string, keep int) string {
+	if len(n) < keep+2+4 {
+		return "…"
+	}
+	return n[:keep] + "…" + n[len(n)-2:]
+}
+
+// countryCodeLen is how many leading digits of an international number
+// are its country calling code (ITU-T E.164): 1 and 7 stand alone, the
+// codes below take two digits, every other code three.
+func countryCodeLen(n string) int {
+	if n == "" {
+		return 0
+	}
+	if n[0] == '1' || n[0] == '7' {
+		return 1
+	}
+	if len(n) >= 2 && slices.Contains(twoDigitCountryCodes, n[:2]) {
+		return 2
+	}
+	return 3
+}
+
+var twoDigitCountryCodes = []string{
+	"20", "27",
+	"30", "31", "32", "33", "34", "36", "39",
+	"40", "41", "43", "44", "45", "46", "47", "48", "49",
+	"51", "52", "53", "54", "55", "56", "57", "58",
+	"60", "61", "62", "63", "64", "65", "66",
+	"81", "82", "84", "86",
+	"90", "91", "92", "93", "94", "95", "98",
+}
+
+// digitsOf is s without anything but its digits.
+func digitsOf(s string) string {
+	return strings.Map(func(r rune) rune {
+		if r >= '0' && r <= '9' {
+			return r
+		}
+		return -1
+	}, s)
 }
 
 type multiFlag []string
