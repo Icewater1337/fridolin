@@ -50,3 +50,32 @@ test('the wizard asks before leaving only once something was edited', async (t) 
   await settle();
   assert.equal(ctx.dirty(), false, 'the step that had the edits is gone');
 });
+
+test('the folder step chooses between browsing and typing with real tabs', async (t) => {
+  installDom();
+  noConsoleErrors(t);
+  globalThis.window = { scrollTo() {} };
+  t.after(() => { delete globalThis.window; });
+  serve(t, (path) => {
+    if (path.startsWith('/api/fs/capabilities')) return { picker: '', home: '/Users/you' };
+    if (path.startsWith('/api/fs/list')) return { path: '/Users/you', home: '/Users/you', parent: '', entries: [] };
+    return {};
+  });
+  const root = h('div');
+  document.body.append(root);
+  const ctx = createPage();
+  t.after(() => ctx.destroy());
+  page.render(root, ctx);
+  await settle();
+  const list = root.querySelector('[role=tablist]');
+  const panel = root.querySelector('[role=tabpanel]');
+  assert.ok(list && panel);
+  const [browse, typeTab] = list.querySelectorAll('[role=tab]');
+  assert.equal(browse.getAttribute('aria-selected'), 'true');
+  assert.equal(typeTab.getAttribute('aria-controls'), panel.id);
+  assert.ok(panel.querySelector('.folder-browser'), 'the browser is the panel');
+  browse.dispatchEvent(Object.assign(new Event('keydown', { cancelable: true }), { key: 'ArrowRight' }));
+  assert.equal(document.activeElement, typeTab);
+  assert.equal(panel.getAttribute('aria-labelledby'), typeTab.id);
+  assert.ok(panel.querySelector('form.inline-add input'), 'the path field is the panel now');
+});
