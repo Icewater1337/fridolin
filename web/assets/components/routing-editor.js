@@ -98,7 +98,7 @@ export function routingEditor({ routing = {}, selfId = '', brains = [], allowedG
     }
     note.textContent = groups === null && groupsError
       ? `Group names are unavailable (${groupsError}). You can still pick allowed groups by JID.`
-      : 'Only allowed groups are listed. A group can belong to one brain; members still need to tag the bridge (see Settings → Access → Triggers), and only those group_members in config.json admits are read.';
+      : 'Only allowed groups are listed. A group can belong to one brain; members still need to tag the bridge (see Settings → Access → Triggers), and only the members the group admits are read (Chats → Allowed groups → Members).';
   }
 
   const el = h('div.routing-editor',

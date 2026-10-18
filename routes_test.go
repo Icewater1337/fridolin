@@ -94,6 +94,7 @@ var routeInventory = []route{
 	{"GET", "/api/chats/ignored", classAPI, ""},
 	{"POST", "/api/chats/allow", classAPI, ""},
 	{"POST", "/api/chats/revoke", classAPI, ""},
+	{"POST", "/api/chats/members", classAPI, ""},
 	{"POST", "/api/chats/dismiss", classAPI, ""},
 	{"GET", "/api/config", classAPI, ""},
 	{"PUT", "/api/config", classAPI, ""},

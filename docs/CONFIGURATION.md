@@ -148,8 +148,9 @@ up in the dashboard under **Chats → waiting for access**, with an *Allow*
 button that also assigns it to a brain.
 
 Allowing a group does not let everyone in it use the bridge: which of its
-members get through is up to `group_members` (below). Without an entry
-there, only the numbers in `allowed_numbers` do.
+members get through is up to `group_members` (below), which **Members**
+next to the group on the **Chats** page sets. Without an entry there,
+only the numbers in `allowed_numbers` do.
 
 ### `group_members`
 
@@ -203,12 +204,18 @@ with a key that is no group JID, an entry for a group that is not in
 dashes are fine and dropped), or `"*"` together with numbers. The error
 names a number that is none by its place in the group's list ("entry 2")
 and does not repeat it, nor a key that is no group JID, so that it can go
-into a bug report as `fridolin check --redact` prints it. Revoking a group
-on the **Chats** page removes its entry too. The dashboard has no form for
-the lists yet, and keeps them as they are when it saves: write them into
-`config.json` and restart the bridge (`fridolin service restart`).
-`fridolin check` tells you whether the file loads, and its `heard in` line
-for each allowed group says whose messages there are read.
+into a bug report as `fridolin check --redact` prints it.
+
+In the dashboard, **Members** next to each group under **Chats → Allowed
+groups** edits its entry, which applies at once: *Whom the allowed
+numbers admit* (no entry), *Every member of the group* (`["*"]`) or *Only
+these numbers*. It checks each number as the bridge does, keeps it as
+digits, once, and says when the bridge refuses the list. Revoking a group
+on the same page removes its entry too. Written into `config.json` by
+hand, an entry applies once the bridge restarts (`fridolin service
+restart`). `fridolin check` tells you whether the file loads, and its
+`heard in` line for each allowed group says whose messages there are
+read.
 
 ### `triggers`
 

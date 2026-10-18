@@ -44,6 +44,7 @@ func (b *Bridge) apiMux() http.Handler {
 	mux.HandleFunc("GET /api/chats/ignored", b.apiIgnored)
 	mux.HandleFunc("POST /api/chats/allow", b.apiAllowChat)
 	mux.HandleFunc("POST /api/chats/revoke", b.apiRevokeChat)
+	mux.HandleFunc("POST /api/chats/members", b.apiGroupMembers)
 	mux.HandleFunc("POST /api/chats/dismiss", b.apiDismissChat)
 
 	mux.HandleFunc("GET /api/config", b.apiGetConfig)
@@ -662,6 +663,60 @@ func (b *Bridge) apiRevokeChat(w http.ResponseWriter, r *http.Request) {
 	default:
 		writeJSON(w, http.StatusOK, map[string]any{"status": "revoked", "removed": removed})
 	}
+}
+
+// apiGroupMembers sets who in an allowed group reaches its brain, its
+// group_members entry: ["*"] for every member, or the numbers given,
+// stored as digits like allowed_numbers. members null, or left out,
+// removes the entry, so that allowed_numbers decide again; an empty list
+// lets nobody in. The list is checked as the config checks it
+// (validateGroupMembers), and a group allowed_groups does not list is
+// refused.
+func (b *Bridge) apiGroupMembers(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		JID     string    `json:"jid"`
+		Members *[]string `json:"members"`
+	}
+	if err := decodeJSON(r, &req); err != nil {
+		writeErr(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	group, err := allowListGroup(req.JID)
+	if err != nil {
+		writeErr(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	var members []string
+	if req.Members != nil {
+		entry := map[string][]string{group: *req.Members}
+		if err := validateGroupMembers(entry, []string{group}); err != nil {
+			writeErr(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		// A number typed twice, in two ways perhaps, is kept once.
+		members = []string{}
+		for _, n := range groupMembersAsNumbers(entry)[group] {
+			if !slices.Contains(members, n) {
+				members = append(members, n)
+			}
+		}
+	}
+	_, err = b.cfgs.Update("", func(c *Config) error {
+		if req.Members == nil {
+			delete(c.GroupMembers, group)
+			return nil
+		}
+		if c.GroupMembers == nil {
+			c.GroupMembers = map[string][]string{}
+		}
+		c.GroupMembers[group] = members
+		return nil
+	})
+	if err != nil {
+		writeErr(w, http.StatusUnprocessableEntity, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"status": "saved", "members": members})
 }
 
 // revokeEntry splits list into what stays and what revoking sent removes.

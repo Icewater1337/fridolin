@@ -1463,6 +1463,67 @@ func TestRevokedGroupTakesItsMembers(t *testing.T) {
 	}
 }
 
+// The Chats page sets who in an allowed group is heard through
+// /api/chats/members: numbers as digits, each once, ["*"] or no one, and
+// null takes the entry away. What the config would refuse is refused,
+// with config.json left as it was, and the other groups' entries stay.
+func TestGroupMembersEditedOnTheChatsPage(t *testing.T) {
+	const other, unknown = "120363000000000001@g.us", "120363000000000009@g.us"
+	start := map[string][]string{other: {anyMember}}
+	cases := []struct {
+		name string
+		body map[string]any
+		code int
+		want map[string][]string // group_members afterwards
+		err  string
+	}{
+		{"numbers, as people write them", map[string]any{"jid": testGroup, "members": []string{"+1 555 987 6543", "15551234567", "15559876543@s.whatsapp.net"}}, 200,
+			map[string][]string{testGroup: {"15559876543", "15551234567"}, other: {anyMember}}, ""},
+		{"every member", map[string]any{"jid": " " + testGroup, "members": []string{"*"}}, 200,
+			map[string][]string{testGroup: {anyMember}, other: {anyMember}}, ""},
+		{"no one", map[string]any{"jid": testGroup, "members": []string{}}, 200,
+			map[string][]string{testGroup: {}, other: {anyMember}}, ""},
+		{"no entry", map[string]any{"jid": other, "members": nil}, 200, map[string][]string{}, ""},
+		{"no entry, left out", map[string]any{"jid": other}, 200, map[string][]string{}, ""},
+		{"a number that is none", map[string]any{"jid": testGroup, "members": []string{"15551234567", "call me"}}, 400, start, "entry 2 is not a phone number"},
+		{"a LID", map[string]any{"jid": testGroup, "members": []string{"15551234567@lid"}}, 400, start, "entry 1 is not a phone number"},
+		{"everyone with numbers", map[string]any{"jid": testGroup, "members": []string{"*", "15551234567"}}, 400, start, "with numbers: use"},
+		{"a chat that is no group", map[string]any{"jid": "15551234567@s.whatsapp.net", "members": []string{"*"}}, 400, start, "is not a group JID"},
+		{"a group that is not allowed", map[string]any{"jid": unknown, "members": []string{"*"}}, 422, start, unknown + " is not in allowed_groups"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			tb := newTestBridge(t, `, "allowed_groups": ["`+testGroup+`", "`+other+`"], "group_members": {"`+other+`": ["*"]}`)
+			before, _ := os.ReadFile(tb.cfgs.Path())
+			w := tb.do("POST", "/api/chats/members", c.body)
+			if w.Code != c.code || !strings.Contains(w.Body.String(), c.err) {
+				t.Fatalf("members: %d %s, want %d and %q", w.Code, w.Body, c.code, c.err)
+			}
+			got := tb.cfgs.FileCopy().GroupMembers
+			if got == nil {
+				got = map[string][]string{}
+			}
+			if !reflect.DeepEqual(got, c.want) {
+				t.Errorf("group_members = %q, want %q", got, c.want)
+			}
+			if after, _ := os.ReadFile(tb.cfgs.Path()); c.code != 200 && !bytes.Equal(after, before) {
+				t.Errorf("a refusal rewrote config.json:\n%s", after)
+			}
+		})
+	}
+
+	// It applies at once: a member left off the list is no longer heard.
+	tb := newTestBridge(t, "")
+	if w := tb.do("POST", "/api/chats/members", map[string]any{"jid": testGroup, "members": []string{"15559876543"}}); w.Code != 200 {
+		t.Fatalf("members: %d %s", w.Code, w.Body)
+	}
+	for sender, want := range map[string]string{"15559876543": "accepted", "15551234567": "ignored"} {
+		if w := tb.do("POST", "/api/dev/inbound", map[string]any{"jid": testGroup, "sender": sender, "text": "hi"}); !strings.Contains(w.Body.String(), want) {
+			t.Errorf("a message from %s: %d %s, want it %s", sender, w.Code, w.Body, want)
+		}
+	}
+}
+
 func TestRevokedGroupKeepsItsBrain(t *testing.T) {
 	h := newHarness(t, "")
 	dir := h.AddBrain(BrainManifest{ID: "family", Name: "Family", Routing: BrainRouting{Groups: []string{harnessGroup}}})
