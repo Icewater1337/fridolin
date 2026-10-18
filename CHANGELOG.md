@@ -121,7 +121,8 @@ yet, so everything is under Unreleased until the first one.
   folders (`media/plaud/` among them) and the attachments at its top,
   moves to `media/.old/`, which no brain can read.
 - `/ingest` takes files only at the top of the media folder or in the
-  named brain's own inbox.
+  named brain's own inbox, and from a brain's own run token only those in
+  its inbox.
 - Brains cannot start code outside the sandbox through `launchctl`,
   `open`, `osascript`, Apple events or the sockets of Docker and tmux, and
   runs start without a terminal.

@@ -998,7 +998,8 @@ WhatsApp attachments and answers in its `reply_chat`, even when that chat
 belongs to another brain (your DM, say). Off by default; see
 [API.md](API.md#post-ingest). It always needs a token: yours in
 `<data_dir>/scripts.token`, or a brain's run's, which hands files only to
-that brain.
+that brain, and only files in its own inbox (a symlink there only when it
+leads to a file in the inbox).
 
 ### `script_api.tokenless_send`
 

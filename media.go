@@ -282,6 +282,47 @@ func mediaOwner(rel string) string {
 	return first
 }
 
+// errNotInOwnInbox is what ownInboxFile answers for any p that is not a
+// regular file in the brain's inbox, whatever the reason, so that the
+// answer says nothing of what is outside the inbox.
+var errNotInOwnInbox = errors.New("not a file in the brain's own inbox")
+
+// ownInboxFile returns p, a regular file in brain id's inbox, by the media
+// folder's real path, for /ingest called with that brain's own token. The
+// brain may put symlinks in its inbox, and one that leads out of it, to a
+// file left at the top of the media folder for another brain, say, must
+// not hand that file in: /ingest would move it into the inbox for the
+// brain to read. So p is looked up through the inbox's root, which refuses
+// a symlink that leads out of the inbox without looking at what it leads
+// to, and p's own ".." are taken away first, by its clean form: whether
+// what they lead to is there or not, the answer is errNotInOwnInbox. The
+// path returned is not resolved further; a link in it leads, as checked,
+// to a file in the inbox, and the sandbox has the last word on it anyway.
+func ownInboxFile(mediaDir, id, p string) (string, error) {
+	rel, ok := mediaRel(mediaDir, p)
+	if !filepath.IsAbs(p) || !ok || mediaOwner(rel) != id {
+		return "", errNotInOwnInbox
+	}
+	inner := rel[len(id)+1:]
+	media, err := os.OpenRoot(mediaDir)
+	if err != nil {
+		return "", errNotInOwnInbox
+	}
+	defer media.Close()
+	if fi, err := media.Lstat(id); err != nil || !fi.IsDir() {
+		return "", errNotInOwnInbox
+	}
+	inbox, err := media.OpenRoot(id)
+	if err != nil {
+		return "", errNotInOwnInbox
+	}
+	defer inbox.Close()
+	if fi, err := inbox.Stat(inner); err != nil || !fi.Mode().IsRegular() {
+		return "", errNotInOwnInbox
+	}
+	return filepath.Join(canonicalDir(mediaDir), id, inner), nil
+}
+
 // claimMedia moves each file in paths that lies in the media folder, but
 // not in brain id's inbox, into that inbox, and returns where each file it
 // moved went, by the path it had (see Inbound.withMediaMoved). It runs

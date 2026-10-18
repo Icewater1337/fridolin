@@ -133,6 +133,12 @@ sync), as if they were sent in its chat. Off until
   files for brains (see
   [`ingest.enabled`](CONFIGURATION.md#ingestenabled)). Each must be an
   absolute path to a regular file there, also after symlinks are resolved.
+  A brain calling with its run's token hands in only files in its own
+  inbox: it cannot write the top of the media directory, so a file there
+  is one a script left for some brain. A symlink in its inbox counts only
+  when it leads to a file in that inbox; one that leads out is refused
+  without being followed, with the same answer as a file that is not
+  there.
 - `text`: the message that goes with them; without one the brain is told
   "New files were uploaded." `paths` or `text` must be given.
 - `sender`: who the brain is told it is from. Default `upload`.

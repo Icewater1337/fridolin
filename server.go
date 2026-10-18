@@ -296,6 +296,25 @@ func (b *Bridge) httpIngest(w http.ResponseWriter, r *http.Request) {
 	media := canonicalDir(cfg.MediaDir)
 	var paths []string
 	for _, p := range req.Paths {
+		// A brain writes no part of the media folder but its own inbox, so
+		// a file anywhere else, at its top too, was left there by someone
+		// else for some brain: by a script or the site, between its write
+		// and its /ingest, or for good after an /ingest that failed. A
+		// brain's own token takes only what is in its inbox already, and
+		// is told so in one answer for every file it may not hand in, so
+		// that the answer says nothing of whether a name it guessed is
+		// there. That holds for a symlink it put in its inbox too: one
+		// that leads out of the inbox is refused unfollowed (see
+		// ownInboxFile).
+		if who.kind == callerBrain {
+			f, err := ownInboxFile(cfg.MediaDir, br.ID(), p)
+			if err != nil {
+				writeErr(w, http.StatusBadRequest, fmt.Sprintf("brain %s hands in only files in its own inbox, %s", br.ID(), mediaInbox(cfg.MediaDir, br.ID())))
+				return
+			}
+			paths = append(paths, f)
+			continue
+		}
 		resolved, err := filepath.EvalSymlinks(p)
 		if !filepath.IsAbs(p) || err != nil || !isWithin(resolved, media) {
 			writeErr(w, http.StatusBadRequest, "every path must be an existing file inside the media directory")

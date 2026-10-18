@@ -431,7 +431,8 @@ and turn on `ingest.enabled`. The brain takes them into its own inbox,
 `~/.fridolin/media/<brain id>/`. A file in any folder of the media folder
 is refused, unless it is already in that brain's own inbox: those folders
 hold files for brains (another brain's inbox, one a removed brain left),
-which a brain could otherwise ask for itself:
+which a brain could otherwise ask for itself. A brain that calls with its
+own run's token hands in only what is in its own inbox:
 
 ```bash
 curl -X POST http://127.0.0.1:8765/ingest \
