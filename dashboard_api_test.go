@@ -845,3 +845,62 @@ func TestFailedAddRemovesTheScaffold(t *testing.T) {
 		t.Fatalf("add again: %d %s", w.Code, w.Body.String())
 	}
 }
+
+// A limit above the maximum gets the maximum, not the default.
+func TestListLimitsClampToTheMaximum(t *testing.T) {
+	tb := newTestBridge(t, "")
+	for i := range 600 {
+		fmt.Fprintf(tb.logs, "line %d\n", i)
+		tb.activity.Add("a", historyEntry{TS: "2026-10-18T10:00:00Z", From: "a", Chat: "15551234567@s.whatsapp.net", Text: fmt.Sprint(i), Type: historyIn})
+	}
+	count := map[string]func([]byte) int{
+		"/api/logs": func(b []byte) int {
+			var logs struct{ Lines []LogLine }
+			_ = json.Unmarshal(b, &logs)
+			return len(logs.Lines)
+		},
+		"/api/activity": func(b []byte) int {
+			var entries []ActivityEntry
+			_ = json.Unmarshal(b, &entries)
+			return len(entries)
+		},
+	}
+	for _, c := range []struct {
+		path string
+		want int // at least
+	}{
+		{"/api/logs", 600},     // every line: the maximum is 2000
+		{"/api/activity", 500}, // the maximum, not the default of 100
+	} {
+		t.Run(c.path, func(t *testing.T) {
+			if n := count[c.path](tb.do("GET", c.path+"?limit=100000", nil).Body.Bytes()); n < c.want {
+				t.Fatalf("%s?limit=100000 gave %d, want at least %d", c.path, n, c.want)
+			}
+		})
+	}
+}
+
+// A config that lists a number or group that can match no chat still
+// loads, with a warning that names the entries.
+func TestConfigWarnsAboutOddChats(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	logged := captureLog(t)
+	path := writeConfig(t, `{"data_dir": "`+t.TempDir()+`", "allowed_numbers": ["15551234567", "+1 555 987 6543", "call me"], "allowed_groups": ["120363000000000000@g.us", " 120363000000000001@g.us", "@g.us"]}`)
+	if _, err := OpenConfigStore(path); err != nil {
+		t.Fatal(err)
+	}
+	got := strings.Join(logged(), "\n")
+	for _, want := range []string{
+		`allowed_numbers "+1 555 987 6543" (write it as 15559876543)`,
+		`allowed_numbers "call me" (digits`,
+		`allowed_groups " 120363000000000001@g.us" (write it as 120363000000000001@g.us)`,
+		`allowed_groups "@g.us" (digits@g.us)`,
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("log lacks %q:\n%s", want, got)
+		}
+	}
+	if strings.Contains(got, `"15551234567"`) || strings.Contains(got, `"120363000000000000@g.us"`) {
+		t.Errorf("log names a valid entry:\n%s", got)
+	}
+}

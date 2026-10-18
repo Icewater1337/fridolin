@@ -35,10 +35,14 @@ Phone numbers permitted to DM the bridge. Country code, no `+`, no spaces.
 In the dashboard both allow lists are edited on the **Chats** page (Settings
 only counts them). It takes a number the way you would write it, with a `+`,
 spaces, dashes or brackets, stores its digits, and refuses anything that is
-not 6 to 15 of them; a group must be a group JID.
+not 6 to 15 of them, or a `@lid` JID (WhatsApp's internal ID for a sender,
+not a number); a group must be a group JID.
 
 An empty list means nobody may DM until you add a number, unless
-`allow_any_dm` (below) is `true`.
+`allow_any_dm` (below) is `true`. The bridge compares entries exactly as
+they are written, so one written by hand with a `+` or spaces matches
+nobody; it names such entries in the log when it starts, with the form to
+write them in.
 
 Newer WhatsApp clients identify senders by an internal ID rather than a phone
 number; the bridge resolves that back to the number before checking, so plain

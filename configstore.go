@@ -65,6 +65,7 @@ func OpenConfigStore(cfgPath string) (*ConfigStore, error) {
 			log.Printf("config %s: %s", cfgPath, note)
 		}
 		warnUnknownKeys(cfgPath, data)
+		warnOddChats(cfgPath, file)
 	} else if !os.IsNotExist(err) {
 		return nil, fmt.Errorf("reading config file %q: %w", cfgPath, err)
 	}

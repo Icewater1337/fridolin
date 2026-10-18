@@ -962,6 +962,8 @@ func TestAllowListEntries(t *testing.T) {
 		{"1555123456789012", ""},
 		{"1555abc4567", ""},
 		{"15551234567:12@s.whatsapp.net", ""},
+		{"15551234567@lid", ""}, // WhatsApp's id for the sender, not a number
+		{"120363000000000000@g.us", ""},
 		{"", ""},
 		{"+", ""},
 	}
@@ -1055,6 +1057,10 @@ func TestAllowAndRevokeChats(t *testing.T) {
 			[]string{"15551234567"}, []string{"120363000000000000@g.us"}},
 		{"refuse a number that is none", "", "/api/chats/allow", map[string]string{"kind": "dm", "number": "call me"}, 400,
 			[]string{"15551234567"}, []string{"120363000000000000@g.us"}},
+		{"refuse a @lid JID without its number", "", "/api/chats/allow", map[string]string{"kind": "dm", "jid": "15559876543@lid"}, 400,
+			[]string{"15551234567"}, []string{"120363000000000000@g.us"}},
+		{"allow a @lid JID's number", "", "/api/chats/allow", map[string]string{"kind": "dm", "jid": "15551234567@lid", "number": "15559876543"}, 200,
+			[]string{"15551234567", "15559876543"}, []string{"120363000000000000@g.us"}},
 		{"allow a typed group", "", "/api/chats/allow", map[string]string{"kind": "group", "jid": group}, 200,
 			[]string{"15551234567"}, []string{"120363000000000000@g.us", group}},
 		{"refuse a group that is none", "", "/api/chats/allow", map[string]string{"kind": "group", "jid": "120363000000000001@g.us/x"}, 400,

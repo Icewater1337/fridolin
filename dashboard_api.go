@@ -26,6 +26,7 @@ import (
 	"unicode"
 	"unicode/utf8"
 
+	"go.mau.fi/whatsmeow/types"
 	"rsc.io/qr"
 )
 
@@ -339,9 +340,10 @@ func (b *Bridge) apiGroups(w http.ResponseWriter, r *http.Request) {
 
 func (b *Bridge) apiActivity(w http.ResponseWriter, r *http.Request) {
 	limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
-	if limit <= 0 || limit > 500 {
+	if limit <= 0 {
 		limit = 100
 	}
+	limit = min(limit, 500)
 	writeJSON(w, http.StatusOK, b.activity.Recent(limit, r.URL.Query().Get("brain")))
 }
 
@@ -364,9 +366,10 @@ func (b *Bridge) apiStopRun(w http.ResponseWriter, r *http.Request) {
 func (b *Bridge) apiLogs(w http.ResponseWriter, r *http.Request) {
 	after, _ := strconv.ParseInt(r.URL.Query().Get("after"), 10, 64)
 	limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
-	if limit <= 0 || limit > logRingLines {
+	if limit <= 0 {
 		limit = 500
 	}
+	limit = min(limit, logRingLines)
 	lines, next := b.logs.Since(after, limit)
 	writeJSON(w, http.StatusOK, map[string]any{"lines": nonNil(lines), "next": next, "boot": b.started.Unix()})
 }
@@ -392,8 +395,12 @@ var (
 
 // allowListNumber is s as allowed_numbers holds it: digits with the country
 // code. It takes the ways people write a number (a +, spaces, dashes,
-// dots, brackets, a WhatsApp JID) and refuses anything else.
+// dots, brackets, a WhatsApp JID) and refuses anything else, a @lid JID
+// too: its digits are WhatsApp's internal id for the sender, not a number.
 func allowListNumber(s string) (string, error) {
+	if _, server, ok := strings.Cut(strings.TrimSpace(s), "@"); ok && server != types.DefaultUserServer {
+		return "", fmt.Errorf("%q holds no phone number: send the number with the country code, e.g. 15551234567", strings.TrimSpace(s))
+	}
 	n := strings.Map(func(r rune) rune {
 		switch r {
 		case ' ', '\u00a0', '-', '.', '(', ')':

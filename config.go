@@ -408,6 +408,33 @@ func (c *Config) AllowsAnyDM() bool { return boolOr(c.AllowAnyDM, false) }
 // AnyoneCanDM reports whether every sender passes the DM allowlist.
 func (c *Config) AnyoneCanDM() bool { return len(c.AllowedNumbers) == 0 && c.AllowsAnyDM() }
 
+// warnOddChats logs entries of allowed_numbers and allowed_groups that can
+// never match a chat, since the bridge compares them as they are: a typo,
+// a "+" or spaces in a number, a JID where a number belongs. They are
+// logged rather than refused, so a config that ran before still starts.
+func warnOddChats(path string, c *Config) {
+	var odd []string
+	for _, n := range c.AllowedNumbers {
+		switch want, err := allowListNumber(n); {
+		case err != nil:
+			odd = append(odd, fmt.Sprintf("allowed_numbers %q (digits with the country code, no +)", n))
+		case want != n:
+			odd = append(odd, fmt.Sprintf("allowed_numbers %q (write it as %s)", n, want))
+		}
+	}
+	for _, g := range c.AllowedGroups {
+		switch want, err := allowListGroup(g); {
+		case err != nil:
+			odd = append(odd, fmt.Sprintf("allowed_groups %q (digits@g.us)", g))
+		case want != g:
+			odd = append(odd, fmt.Sprintf("allowed_groups %q (write it as %s)", g, want))
+		}
+	}
+	if len(odd) > 0 {
+		log.Printf("config %s: these entries match no chat: %s", path, strings.Join(odd, "; "))
+	}
+}
+
 // LoadConfig reads config.json and fills in the built-in defaults. The file
 // is the only source of settings: no environment variable or .env overrides
 // any of them.
