@@ -16,6 +16,7 @@ import (
 	"unicode"
 
 	"fridolin/internal/textx"
+	"fridolin/internal/trigger"
 	"go.mau.fi/whatsmeow"
 	"go.mau.fi/whatsmeow/proto/waE2E"
 	"go.mau.fi/whatsmeow/store"
@@ -1112,7 +1113,7 @@ func stripMentions(text string, jids []types.JID) string {
 			}
 			i += from
 			end := i + len(mention)
-			if (i > 0 && !boundaryBefore(text, i)) || !boundaryAt(text, end) {
+			if (i > 0 && !trigger.BoundaryBefore(text, i)) || !trigger.BoundaryAt(text, end) {
 				from = end
 				continue
 			}

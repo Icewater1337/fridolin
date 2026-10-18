@@ -3,6 +3,7 @@ package main
 import (
 	"slices"
 
+	"fridolin/internal/trigger"
 	"go.mau.fi/whatsmeow/proto/waE2E"
 	"go.mau.fi/whatsmeow/types"
 )
@@ -37,7 +38,7 @@ type groupAddressing struct {
 // of the bridge or a quote-reply to one of its messages; a file and a
 // forward do as rules say. Video captions do not count: they are the
 // video's metadata, and a video is a file.
-func addressGroup(msg *waE2E.Message, text string, triggers TriggerList, own []types.JID, rules groupRules) groupAddressing {
+func addressGroup(msg *waE2E.Message, text string, triggers trigger.List, own []types.JID, rules groupRules) groupAddressing {
 	var a groupAddressing
 	_, a.file = attachmentOf(msg, "")
 	caption := ""

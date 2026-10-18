@@ -18,6 +18,7 @@ import (
 	"testing"
 
 	"fridolin/internal/fsx"
+	"fridolin/internal/trigger"
 	"go.mau.fi/whatsmeow/proto/waAdv"
 	"go.mau.fi/whatsmeow/types"
 )
@@ -197,7 +198,7 @@ func TestUnsetKeys(t *testing.T) {
 		Section section   `json:"section"`
 		Pointer *section  `json:"pointer,omitempty"`
 		List    []section `json:"list,omitempty"`
-		Own     TriggerList
+		Own     trigger.List
 	}
 	full := `{"plain": "x", "section": {"a": "", "b": ""}, "pointer": {"a": "", "b": ""}, "list": [{"a": ""}, {"b": ""}], "Own": ["x"]}`
 	tests := []struct {

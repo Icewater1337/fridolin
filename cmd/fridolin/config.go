@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"fridolin/internal/fsx"
+	"fridolin/internal/trigger"
 )
 
 // Config holds all configuration for the bridge.
@@ -53,7 +54,7 @@ type Config struct {
 	// is a string (matched anywhere, case-insensitively) or
 	// {"text": "@c", "match": "start"|"word"}. An @-mention of the bridge
 	// account always counts as a trigger.
-	Triggers TriggerList `json:"triggers"`
+	Triggers trigger.List `json:"triggers"`
 
 	// ClaudePath is the path to the Claude Code CLI binary ("claude" uses PATH).
 	ClaudePath string `json:"claude_path"`
@@ -700,7 +701,7 @@ func effective(file *Config) (*Config, error) {
 		cfg.MaxMediaMB = defaultMaxMediaMB
 	}
 	if len(cfg.Triggers) == 0 {
-		cfg.Triggers = TriggersFromStrings([]string{"@claude"})
+		cfg.Triggers = trigger.FromStrings([]string{"@claude"})
 	}
 	if cfg.LogLevel == "" {
 		cfg.LogLevel = "info"

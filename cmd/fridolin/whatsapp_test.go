@@ -19,6 +19,7 @@ import (
 	"unicode"
 	"unicode/utf8"
 
+	"fridolin/internal/trigger"
 	"go.mau.fi/whatsmeow"
 	"go.mau.fi/whatsmeow/proto/waE2E"
 	"go.mau.fi/whatsmeow/store"
@@ -1022,7 +1023,7 @@ func newGroupTestWhatsApp(t *testing.T, members []string) (*testWhatsApp, *fakeD
 	tw := newTestWhatsApp(t)
 	cfg := tw.cfg()
 	cfg.AllowedGroups = []string{testGroup}
-	cfg.Triggers = TriggersFromStrings([]string{"@claude"})
+	cfg.Triggers = trigger.FromStrings([]string{"@claude"})
 	if members != nil {
 		cfg.GroupMembers = map[string][]string{testGroup: members}
 	}

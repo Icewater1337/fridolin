@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	"fridolin/internal/trigger"
 	"go.mau.fi/whatsmeow/proto/waE2E"
 	"go.mau.fi/whatsmeow/store"
 	"go.mau.fi/whatsmeow/types"
@@ -18,7 +19,7 @@ func TestAddressGroup(t *testing.T) {
 	ownDevice := ownPN
 	ownDevice.Device = 12
 	member := types.NewJID("15551234567", types.DefaultUserServer).String()
-	triggers := TriggersFromStrings([]string{"@claude"})
+	triggers := trigger.FromStrings([]string{"@claude"})
 
 	text := func(s string, ci *waE2E.ContextInfo) *waE2E.Message {
 		return &waE2E.Message{ExtendedTextMessage: &waE2E.ExtendedTextMessage{Text: proto.String(s), ContextInfo: ci}}

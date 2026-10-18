@@ -21,6 +21,7 @@ import (
 	"syscall"
 
 	"fridolin/internal/fsx"
+	"fridolin/internal/trigger"
 	"fridolin/internal/version"
 )
 
@@ -214,7 +215,7 @@ func starterConfig() *Config {
 		AllowedNumbers:             []string{},
 		AllowAnyDM:                 &f,
 		AllowedGroups:              []string{},
-		Triggers:                   TriggersFromStrings([]string{"@claude"}),
+		Triggers:                   trigger.FromStrings([]string{"@claude"}),
 		DangerouslySkipPermissions: true,
 		HTTPListen:                 defaultHTTPListen,
 		OTPGuard:                   true,
