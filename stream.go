@@ -105,9 +105,9 @@ type StreamSink interface {
 	// the chat would get it, and reports whether it is on its way: only
 	// then does the run count as one that asked.
 	Question(text string) bool
-	// Result takes the run's result once its event is in. The output may
-	// go on after it: a command the run left in the background can hold
-	// it open.
+	// Result takes the run's result once its event is in, an error result
+	// too. The output may go on after it: a command the run left in the
+	// background can hold it open.
 	Result(res RunResult)
 }
 
@@ -133,13 +133,18 @@ func parseAgentStream(r io.Reader, sink StreamSink, provider string) RunResult {
 	for {
 		line, size, err := readStreamLine(in, buf)
 		buf = line
-		if size > maxStreamLine {
+		switch {
+		case p.err != nil:
+			// An error result is the run's last word. What comes after it
+			// is read all the same, to the end: a CLI left with output
+			// nobody reads would block writing it.
+		case size > maxStreamLine:
 			sink.Log(fmt.Sprintf("⚠️ Skipped a line of %d bytes, longer than the %d MiB the bridge reads", size, maxStreamLine>>20))
-		} else {
+		default:
 			p.event(line)
 		}
 		switch {
-		case p.err != nil, err == io.EOF:
+		case p.err != nil && err != nil, err == io.EOF:
 			return p.outcome()
 		case errors.Is(err, os.ErrClosed):
 			return RunResult{Err: errBrainInterrupted}
@@ -240,6 +245,7 @@ func (p *streamParser) event(line []byte) {
 			}
 			p.sink.Log("❌ Error: " + errMsg)
 			p.err = &cliError{msg: errMsg, provider: p.provider}
+			p.sink.Result(RunResult{Err: p.err, Asked: p.asked})
 			return
 		}
 		p.result = event.Result

@@ -3,11 +3,13 @@ package main
 import (
 	"errors"
 	"fmt"
+	"io"
 	"io/fs"
 	"os"
 	"slices"
 	"strings"
 	"testing"
+	"time"
 )
 
 // recordingSink is a StreamSink that keeps what parseStream tells it.
@@ -137,6 +139,11 @@ func TestParseStreamFixtures(t *testing.T) {
 			if !slices.Equal(sink.logs, c.logs) {
 				t.Errorf("activity log:\n%s\nwant:\n%s", strings.Join(sink.logs, "\n"), strings.Join(c.logs, "\n"))
 			}
+			// The result, an error one too, as soon as it came: each
+			// stream has one.
+			if len(sink.results) != 1 || sink.results[0].Text != res.Text || sink.results[0].Err != res.Err {
+				t.Errorf("results told %+v, want the one of %+v", sink.results, res)
+			}
 		})
 	}
 }
@@ -218,5 +225,75 @@ func TestParseStreamReadErrors(t *testing.T) {
 				t.Errorf("result = %+v", res)
 			}
 		})
+	}
+}
+
+// TestParseStreamErrorResults: a result event with is_error, or an error,
+// fails the run with the CLI's own words: its error, its result, or else
+// the last text the model wrote, where the CLI puts some failures, or a
+// note that it gave none.
+func TestParseStreamErrorResults(t *testing.T) {
+	const said = `{"type":"assistant","message":{"content":[{"type":"text","text":"Credit balance is too low"}]}}`
+	cases := []struct {
+		name, stream, want string
+	}{
+		{"the error", `{"type":"result","is_error":true,"error":"quota","result":"ignored"}`, "quota"},
+		{"an error without is_error", `{"type":"result","error":"quota"}`, "quota"},
+		{"the result", `{"type":"result","subtype":"error_during_execution","is_error":true,"result":"Execution error"}`, "Execution error"},
+		{"the last text", said + "\n" + `{"type":"result","is_error":true}`, "Credit balance is too low"},
+		{"the last text, cut", strings.Replace(said, "Credit balance is too low", strings.Repeat("é", 400), 1) + "\n" + `{"type":"result","is_error":true}`,
+			strings.Repeat("é", 150) + "…"},
+		{"no message at all", `{"type":"result","is_error":true}`, "(claude exited with an error but no message)"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			var sink recordingSink
+			res := parseStream(strings.NewReader(c.stream+"\n"), &sink)
+			var cliErr *cliError
+			if !errors.As(res.Err, &cliErr) || cliErr.msg != c.want || res.Text != "" {
+				t.Fatalf("result = %+v, want the error %q", res, c.want)
+			}
+			if last := sink.logs[len(sink.logs)-1]; last != "❌ Error: "+c.want {
+				t.Errorf("logged %q last, want the error", last)
+			}
+		})
+	}
+}
+
+// TestParseStreamDrainsAfterAnError: after an error result the parser still
+// reads the output to its end, though nothing in it counts any more. It
+// stopped at the error, and a CLI, or a command it started, still writing
+// to the pipe then blocked for good.
+func TestParseStreamDrainsAfterAnError(t *testing.T) {
+	r, w := io.Pipe()
+	t.Cleanup(func() { r.Close() })
+	written := make(chan error, 1)
+	go func() {
+		_, err := io.WriteString(w, `{"type":"assistant","message":{"content":[{"type":"text","text":"Rate limited"}]}}`+"\n"+
+			`{"type":"result","is_error":true,"result":"API Error: 429"}`+"\n")
+		// More than a pipe holds, with what would count before the error.
+		for i := 0; err == nil && i < 2000; i++ {
+			_, err = io.WriteString(w, `{"type":"assistant","message":{"content":[{"type":"tool_use","name":"AskUserQuestion","input":{"questions":[{"question":"Retry?"}]}}]}}`+"\n"+
+				`{"type":"result","result":"late"}`+"\n")
+		}
+		w.Close()
+		written <- err
+	}()
+	var sink recordingSink
+	res := parseStream(r, &sink)
+	select {
+	case err := <-written:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("the parser left the rest of the output unread")
+	}
+	var cliErr *cliError
+	if !errors.As(res.Err, &cliErr) || cliErr.msg != "API Error: 429" || res.Text != "" || res.Asked {
+		t.Errorf("result = %+v, want the error result", res)
+	}
+	if len(sink.questions) > 0 || len(sink.results) != 1 || len(sink.logs) != 2 {
+		t.Errorf("after the error: questions %q, results %+v, log %q; want nothing", sink.questions, sink.results, sink.logs)
 	}
 }
