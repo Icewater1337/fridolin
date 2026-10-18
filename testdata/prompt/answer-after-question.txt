@@ -1,8 +1,8 @@
 <chat_history>
-The 2 messages before the new one in this WhatsApp chat, oldest first (for context, not action). You do NOT have prior turns in your working memory — the only context you have about previous conversation is what's in this block. Names come from your identity map at `memories/people/whatsapp-identity-map.md`; the JID in parens is the raw WhatsApp identifier. For anything older or more detailed, search `conversation-history.jsonl` with `"$FRIDOLIN_BIN" history QUERY`.
+The 2 messages before the new one in this chat, oldest first (for context, not action). You do NOT have prior turns in your working memory — the only context you have about previous conversation is what's in this block. Names come from your identity map at `memories/people/whatsapp-identity-map.md`; the JID in parens is the raw WhatsApp identifier. For anything older or more detailed, search `conversation-history.jsonl` with `"$FRIDOLIN_BIN" history QUERY`.
 
-[09:20] Alex (15551234567): Book us a table for Friday
-[09:20] You (main): ❓ Where?
+[Sun 2026-10-18 09:20] Alex (15551234567): Book us a table for Friday
+[Sun 2026-10-18 09:20] You (main): ❓ Where?
 1. Rosa
 2. Luigi
 </chat_history>
@@ -10,8 +10,10 @@ The 2 messages before the new one in this WhatsApp chat, oldest first (for conte
 <sent_since>
 What went out to this chat after the new message came in, while it waited for its run, or is on its way there ahead of your reply, oldest first: its sender had not seen these when they wrote it.
 
-[09:21] You (main): I booked Rosa for 7pm.
+[Sun 2026-10-18 09:21] You (main): I booked Rosa for 7pm.
 </sent_since>
+
+It is now Sun 2026-10-18 09:31 CEST (UTC+02:00). This chat is a direct chat on WhatsApp.
 
 Nobody can answer AskUserQuestion while you work: a question you ask with it goes to the chat at once, with its options, and the answer comes as a new message. Your final reply is sent as well, so after asking, end your turn without repeating the question.
 

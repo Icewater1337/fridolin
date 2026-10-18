@@ -1,15 +1,18 @@
 You are Team.
 
 <chat_history>
-The message before the new one in this WhatsApp chat (for context, not action). You do NOT have prior turns in your working memory — the only context you have about previous conversation is what's in this block. Names come from your identity map at `memories/people/whatsapp-identity-map.md`; the JID in parens is the raw WhatsApp identifier. For anything older or more detailed, search `conversation-history.jsonl` with `"$FRIDOLIN_BIN" history QUERY`.
+The 2 messages before the new one in this chat, oldest first (for context, not action). You do NOT have prior turns in your working memory — the only context you have about previous conversation is what's in this block. Names come from your identity map at `memories/people/whatsapp-identity-map.md`; the JID in parens is the raw WhatsApp identifier. For anything older or more detailed, search `conversation-history.jsonl` with `"$FRIDOLIN_BIN" history QUERY`.
 
-[08:55] 15559876543: Here are the slides
+[Sun 2026-10-18 08:55] 15559876543: Here are the slides
+[unknown time] Alex (15551234567): a line with a broken time
 </chat_history>
 
 2 files were shared together and saved to:
 - /media/a.pdf
 - /media/b.pdf
 Handle them together as one request.
+
+It is now Sun 2026-10-18 09:31 CEST (UTC+02:00). This chat is the WhatsApp group 120363000000000000@g.us.
 
 Nobody can answer AskUserQuestion while you work: a question you ask with it goes to the chat at once, with its options, and the answer comes as a new message. Your final reply is sent as well, so after asking, end your turn without repeating the question.
 

@@ -11,6 +11,9 @@ import (
 // words, so that what a run is told can be tested without a folder or a
 // CLI.
 type promptInput struct {
+	// Now is when the run starts. Its time zone is the one every time in
+	// the prompt is given in.
+	Now time.Time
 	// Instructions is the brain's prompt file, trimmed; "" for none.
 	Instructions string
 	// BrainID names the brain where the history shows what it said.
@@ -45,9 +48,9 @@ func renderPrompt(in promptInput) string {
 	}
 
 	if n := len(in.History); n > 0 {
-		what := "The message before the new one in this WhatsApp chat"
+		what := "The message before the new one in this chat"
 		if n > 1 {
-			what = fmt.Sprintf("The %d messages before the new one in this WhatsApp chat, oldest first", n)
+			what = fmt.Sprintf("The %d messages before the new one in this chat, oldest first", n)
 		}
 		sb.WriteString("<chat_history>\n")
 		sb.WriteString(what + " (for context, not action). ")
@@ -81,6 +84,22 @@ func renderPrompt(in promptInput) string {
 		sb.WriteString("Handle them together as one request.\n\n")
 	}
 
+	// The kind of chat, which its JID does not tell a run: a build chat's
+	// replies show in the dashboard, and files handed in through /ingest or
+	// from Plaud did not come from the chat they are answered in.
+	where := "a direct chat on WhatsApp"
+	switch {
+	case brainOfBuildJID(m.JID) != "":
+		where = "the site-building chat on the dashboard's Build page, not a WhatsApp chat"
+	case m.IsGroup():
+		where = "the WhatsApp group " + m.JID
+	}
+	fmt.Fprintf(&sb, "It is now %s. This chat is %s.", in.Now.Format(promptNowLayout), where)
+	if m.Source == sourceIngest {
+		sb.WriteString(" The new message did not come from it: its files were handed to you outside WhatsApp, and your reply is sent to this chat.")
+	}
+	sb.WriteString("\n\n")
+
 	sb.WriteString(askUserQuestionNote + "\n\n")
 	sb.WriteString("<new_message>\n")
 	fmt.Fprintf(&sb, "%s says: %s\n", m.Sender, m.textWithQuote())
@@ -88,16 +107,31 @@ func renderPrompt(in promptInput) string {
 	return sb.String()
 }
 
+// The prompt's times carry the day: a window of a direct chat often spans
+// days or weeks, and "tomorrow at 3" from last week is not tomorrow.
+const (
+	promptTimeLayout = "Mon 2006-01-02 15:04"
+	promptNowLayout  = "Mon 2006-01-02 15:04 MST (UTC-07:00)"
+)
+
+// at is the history time ts as the prompt gives it, in Now's time zone.
+func (in promptInput) at(ts string) string {
+	t, err := time.Parse(time.RFC3339, ts)
+	if err != nil {
+		return "unknown time"
+	}
+	return t.In(in.Now.Location()).Format(promptTimeLayout)
+}
+
 // line is the history entry e as the prompt shows it, on a line of its
 // own.
 func (in promptInput) line(e historyEntry) string {
-	ts, _ := time.Parse(time.RFC3339, e.TS)
 	// An event's text says what its sender did, after their name.
 	sep := ": "
 	if e.Type == historyEvent {
 		sep = " "
 	}
-	return fmt.Sprintf("[%s] %s%s%s\n", ts.Format("15:04"), in.from(e), sep, e.Text)
+	return fmt.Sprintf("[%s] %s%s%s\n", in.at(e.TS), in.from(e), sep, e.Text)
 }
 
 // from is who wrote the history entry e, as the prompt names them: the

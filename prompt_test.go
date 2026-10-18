@@ -20,8 +20,10 @@ var updatePromptGolden = flag.Bool("update-prompt-golden", false, "rewrite testd
 func promptCases() map[string]promptInput {
 	const alex, sam = "15551234567", "15559876543"
 	names := map[string]string{alex: "Alex"}
+	now := time.Date(2026, 10, 18, 9, 31, 0, 0, time.FixedZone("CEST", 2*60*60))
 	return map[string]promptInput{
 		"dm": {
+			Now:          now,
 			Instructions: "You are Main, Alex's assistant.",
 			BrainID:      "main",
 			History: []historyEntry{
@@ -32,10 +34,12 @@ func promptCases() map[string]promptInput {
 			Message: Inbound{JID: alex + "@s.whatsapp.net", Sender: alex, Text: "Tuesday at 3?"},
 		},
 		"group-files-quote": {
+			Now:          now,
 			Instructions: "You are Team.",
 			BrainID:      "team",
 			History: []historyEntry{
-				{TS: "2026-10-18T08:55:00+02:00", From: sam, Chat: testGroup, Text: "Here are the slides", Type: historyIn},
+				{TS: "2026-10-18T06:55:00Z", From: sam, Chat: testGroup, Text: "Here are the slides", Type: historyIn},
+				{TS: "yesterday", From: alex, Chat: testGroup, Text: "a line with a broken time", Type: historyIn},
 			},
 			Names: names,
 			Message: Inbound{JID: testGroup, Sender: alex, Text: "file these", Media: []string{"/media/a.pdf", "/media/b.pdf"},
@@ -44,6 +48,7 @@ func promptCases() map[string]promptInput {
 		"answer-after-question": {
 			// The answer came while the run that asked was still at work, and
 			// that run's reply went out before the answer's run started.
+			Now:     now,
 			BrainID: "main",
 			History: []historyEntry{
 				{TS: "2026-10-18T09:20:00+02:00", From: alex, Chat: alex + "@s.whatsapp.net", Text: "Book us a table for Friday", Type: historyIn},
@@ -56,6 +61,7 @@ func promptCases() map[string]promptInput {
 			Message: Inbound{JID: alex + "@s.whatsapp.net", Sender: alex, Text: "Luigi, please"},
 		},
 		"first-message": {
+			Now:     now,
 			BrainID: "main",
 			Message: Inbound{JID: alex + "@s.whatsapp.net", Sender: alex, Text: "hello", Media: []string{"/media/voice.ogg"}},
 		},
@@ -284,6 +290,33 @@ func TestHistoryBeforeAfterChanges(t *testing.T) {
 			before, since := br.historyBefore(m, dmHistoryWindow)
 			if texts(before) != c.before || texts(since) != c.since {
 				t.Errorf("historyBefore = %q, %q; want %q, %q", texts(before), texts(since), c.before, c.since)
+			}
+		})
+	}
+}
+
+// The prompt says what kind of chat the run is in, which a JID does not
+// tell the model, and when the new message did not come from that chat.
+func TestPromptSaysWhatChatItIs(t *testing.T) {
+	cases := []struct {
+		name     string
+		m        Inbound
+		want     string
+		handedIn bool
+	}{
+		{"a direct chat", Inbound{JID: testDMChat, Sender: "15551234567", Text: "hi", Source: sourceWhatsApp}, "This chat is a direct chat on WhatsApp.", false},
+		{"a group", Inbound{JID: testGroup, Sender: "15551234567", Text: "hi", Source: sourceWhatsApp}, "This chat is the WhatsApp group ", false},
+		{"a build chat", Inbound{JID: buildChatJID("main", 2), Sender: "owner", Text: "make the header blue", Source: sourceDev}, "This chat is the site-building chat on the dashboard's Build page, not a WhatsApp chat.", false},
+		{"files handed in", Inbound{JID: testDMChat, Sender: "upload", Text: "a scan", Media: []string{"/media/a.pdf"}, Source: sourceIngest}, "This chat is a direct chat on WhatsApp.", true},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			p := renderPrompt(promptInput{Now: time.Now(), BrainID: "main", Message: c.m})
+			if !strings.Contains(p, c.want) {
+				t.Errorf("the prompt does not say %q:\n%s", c.want, p)
+			}
+			if got := strings.Contains(p, "handed to you outside WhatsApp"); got != c.handedIn {
+				t.Errorf("the prompt says the files were handed in: %v, want %v:\n%s", got, c.handedIn, p)
 			}
 		})
 	}
