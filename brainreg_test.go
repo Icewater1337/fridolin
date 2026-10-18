@@ -123,7 +123,9 @@ func TestResolveBrainsRefusesFoldersTheSandboxProtects(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			ref := brainFolder(t, tc.path, BrainManifest{ID: "x", Routing: BrainRouting{HandlesDMs: true}})
 			other := brainFolder(t, "~/elsewhere/y", BrainManifest{ID: "y"})
-			cfg := &Config{DataDir: filepath.Join(home, "box", ".fridolin"), BrainDirs: []BrainRef{ref, other}}
+			// x second: the dashboard shows an issue on the entry it
+			// names, which was the first one for these.
+			cfg := &Config{DataDir: filepath.Join(home, "box", ".fridolin"), BrainDirs: []BrainRef{other, ref}}
 			for i := range cfg.BrainDirs {
 				cfg.BrainDirs[i].Path = expandHome(cfg.BrainDirs[i].Path, home)
 			}
@@ -133,7 +135,7 @@ func TestResolveBrainsRefusesFoldersTheSandboxProtects(t *testing.T) {
 				ids = append(ids, s.Manifest.ID)
 			}
 			if tc.want == "" {
-				if !slices.Equal(ids, []string{"x", "y"}) || len(issues) != 0 {
+				if !slices.Equal(ids, []string{"y", "x"}) || len(issues) != 0 {
 					t.Errorf("brains %v, issues %+v; want both to run", ids, issues)
 				}
 				return
@@ -141,8 +143,8 @@ func TestResolveBrainsRefusesFoldersTheSandboxProtects(t *testing.T) {
 			if !slices.Equal(ids, []string{"y"}) {
 				t.Errorf("brains %v, want only y", ids)
 			}
-			if len(issues) != 1 || issues[0].ID != "x" || issues[0].Kind != "invalid" || !strings.Contains(issues[0].Detail, tc.want) {
-				t.Errorf("issues = %+v, want one for x saying %q", issues, tc.want)
+			if len(issues) != 1 || issues[0].ID != "x" || issues[0].Kind != "invalid" || !strings.Contains(issues[0].Detail, tc.want) || issues[0].entry != 1 {
+				t.Errorf("issues = %+v, want one for x, on its entry 1, saying %q", issues, tc.want)
 			}
 		})
 	}

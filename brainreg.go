@@ -94,7 +94,7 @@ func ResolveBrains(cfg *Config) ([]BrainSpec, []BrainIssue) {
 		// by hand, and a folder can be moved, or a symlink on its way
 		// changed, after it was added.
 		if err := checkBrainDir(dir, ref.Path, cfg, homeDir()); err != nil {
-			issues = append(issues, BrainIssue{ID: m.ID, Path: ref.Path, Kind: "invalid", Detail: "the folder " + err.Error() + ", so it cannot hold a brain; move the brain to a folder of its own", routing: m.Routing})
+			issues = append(issues, BrainIssue{ID: m.ID, Path: ref.Path, Kind: "invalid", Detail: "the folder " + err.Error() + ", so it cannot hold a brain; move the brain to a folder of its own", entry: i, routing: m.Routing})
 			continue
 		}
 		if disk, err := ReadManifest(dir); err == nil && !disk.Equal(m) {
