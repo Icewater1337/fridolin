@@ -416,6 +416,42 @@ func TestStopWaitsForTheDelivery(t *testing.T) {
 	}
 }
 
+func TestStopWaitsForARemovedBrainsDelivery(t *testing.T) {
+	tb := newTestBridge(t, "")
+	tb.addFolderBrain(t, BrainManifest{ID: "a", Name: "A", Routing: BrainRouting{HandlesDMs: true}})
+	entered, release := make(chan struct{}), make(chan struct{})
+	releaseDelivery := sync.OnceFunc(func() { close(release) })
+	defer releaseDelivery()
+	tb.brainMgr.SetHooks(BrainHooks{Deliver: func(*Brain, Inbound, RunResult) {
+		close(entered)
+		<-release
+	}})
+	if _, _, _, err := tb.brainMgr.Submit(dm("hello")); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-entered:
+	case <-time.After(5 * time.Second):
+		t.Fatal("run did not reach delivery")
+	}
+	if _, err := tb.cfgs.Update("", func(c *Config) error { c.BrainDirs = nil; return nil }); err != nil {
+		t.Fatal(err)
+	}
+	stopped := make(chan struct{})
+	go func() { tb.Stop(); close(stopped) }()
+	select {
+	case <-stopped:
+		t.Fatal("Stop returned while a removed brain was still delivering")
+	case <-time.After(100 * time.Millisecond):
+	}
+	releaseDelivery()
+	select {
+	case <-stopped:
+	case <-time.After(5 * time.Second):
+		t.Fatal("Stop did not return after the removed brain finished delivery")
+	}
+}
+
 // Finishing the grace and the kill wait must not close the store beneath
 // an answer already being delivered. A second signal remains the way to
 // abandon a stuck shutdown.

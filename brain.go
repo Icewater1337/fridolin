@@ -1015,10 +1015,14 @@ func (br *Brain) closeQueue() []Inbound {
 func (br *Brain) retire(closeViewer bool) {
 	dropped(br.closeQueue())
 	br.StopCurrent(false)
+	// run.done precedes delivery. Retirement must finish that hand-off
+	// before closing the folder, requeuing work in its replacement, or
+	// allowing Bridge.Stop to close the store below the old worker.
+	br.workers.Wait()
 	if closeViewer {
 		br.closeViewer()
 	}
-	// Done with the folder. A run that would not stop finds it closed.
+	// Every worker has finished with the folder.
 	br.root.Close()
 }
 
