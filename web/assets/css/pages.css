@@ -194,6 +194,29 @@ blockquote.preview {
 .site-secret-input { display: flex; align-items: center; gap: 6px; flex: 1 1 16em; min-width: 0; }
 .site-secret-input input { flex: 1 1 auto; min-width: 0; }
 
+/* ── Build page ────────────────────────────────────────────────────────── */
+.build-layout { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.2fr); gap: 16px; align-items: start; }
+.build-chat { display: flex; flex-direction: column; gap: 10px; min-height: 60dvh; }
+.build-messages { display: flex; flex-direction: column; gap: 10px; max-height: 58dvh; min-height: 30dvh; overflow-y: auto; padding: 4px 2px; }
+.build-msg { max-width: 92%; padding: 10px 12px; border-radius: 12px; border: 1px solid var(--border); }
+.build-msg.user { align-self: flex-end; background: var(--accent-soft); border-color: transparent; }
+.build-msg.assistant { align-self: flex-start; }
+.build-text { white-space: pre-wrap; overflow-wrap: anywhere; font-size: 14px; line-height: 1.5; }
+.build-time { margin-top: 4px; font-size: 11.5px; color: var(--muted); }
+.build-empty { margin: auto 0; text-align: center; }
+.build-status { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.build-status:empty { display: none; }
+.build-working { display: flex; align-items: center; gap: 8px; min-width: 0; font-size: 13.5px; }
+.build-last { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.build-compose { display: flex; flex-direction: column; gap: 8px; }
+.build-compose .actions { justify-content: flex-end; }
+.build-input { width: 100%; resize: vertical; min-height: 72px; }
+.build-side { padding: 0; overflow: hidden; }
+.build-preview { display: flex; flex-direction: column; }
+.build-preview-bar { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 10px 12px; border-bottom: 1px solid var(--border); }
+.build-frame { width: 100%; height: 70dvh; border: 0; background: var(--surface); }
+.build-preview-empty { padding: 32px 20px; display: flex; flex-direction: column; align-items: center; gap: 12px; text-align: center; }
+
 /* ── logs ───────────────────────────────────────────────────────────────── */
 
 /* It takes the height the page leaves (see .main). */
@@ -275,4 +298,8 @@ blockquote.preview {
   .stepper { gap: 6px; }
   .stepper li { gap: 6px; font-size: 13px; }
   .stepper li + li::before { width: 14px; }
+}
+
+@media (max-width: 1100px) {
+  .build-layout { grid-template-columns: minmax(0, 1fr); }
 }

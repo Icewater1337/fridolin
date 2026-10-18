@@ -640,20 +640,22 @@ func (m *SiteManager) BuilderPreview(ctx context.Context, brainID string) (map[s
 		cmd.Env = siteEnv(node, "FRIDOLIN_SITE_RUNTIME="+rtFile, "NODE_ENV=production")
 		return cmd, nil
 	}
-	m.mu.Lock()
-	m.previews[brainID] = p
-	m.mu.Unlock()
 	p.proc.ensure(m.baseContext(), build)
-	if err := m.writePreviewsFile(); err != nil {
-		return nil, err
-	}
 	deadline := time.Now().Add(20 * time.Second)
 	for !siteHealthy(listen) {
 		if time.Now().After(deadline) {
 			st := p.proc.status()
+			p.proc.stop()
 			return nil, fmt.Errorf("the preview did not start: %s\n%s", st.Error, strings.Join(st.Log, "\n"))
 		}
 		time.Sleep(200 * time.Millisecond)
+	}
+	// Known only once it answers, so nobody opens a link that is not up yet.
+	m.mu.Lock()
+	m.previews[brainID] = p
+	m.mu.Unlock()
+	if err := m.writePreviewsFile(); err != nil {
+		return nil, err
 	}
 	return m.previewURLs(brainID, p), nil
 }

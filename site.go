@@ -113,6 +113,7 @@ type SiteManager struct {
 	previews map[string]*sitePreview
 	tokens   map[string]string // builder token → brain id
 	hooks    builderHooks
+	chats    *siteChats
 	ctx      context.Context
 
 	warnNoSandbox sync.Once
@@ -130,6 +131,7 @@ func NewSiteManager(dataDir string, googleClient func() string) *SiteManager {
 	}
 	m.npmInstall = m.runNpmInstall
 	m.workspaceInstall = m.npmInstallAsBrain
+	m.chats = &siteChats{m: m}
 	m.settings = m.loadSettings()
 	m.users = m.loadUsers()
 	return m

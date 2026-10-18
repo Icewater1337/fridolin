@@ -56,8 +56,10 @@ export async function createSite(rt: Runtime, opts: SiteOptions = {}): Promise<e
     next()
   })
 
+  // A preview shows inside Fridolin's dashboard (another port of this machine).
+  const csp = rt.preview_token ? SHELL_CSP.replace("frame-ancestors 'self'", "frame-ancestors 'self' http://127.0.0.1:* http://localhost:*") : SHELL_CSP
   const shell: express.RequestHandler = (_req, res, next) => {
-    res.setHeader('Content-Security-Policy', SHELL_CSP)
+    res.setHeader('Content-Security-Policy', csp)
     next()
   }
 
