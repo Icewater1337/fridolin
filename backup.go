@@ -1167,10 +1167,8 @@ func (m *BackupManager) noticeRefusal(ctx context.Context, br *Brain, res *Backu
 	if name == "" {
 		name = id
 	}
-	text := fmt.Sprintf("⚠️ Backup of %s: %s\n\nCheck the brain folder, then the Backup page in the Fridolin dashboard. "+
-		"Scheduled backups of this brain keep refusing until one succeeds; this is the only message about it.", name, res.Error)
 	sctx, cancel := context.WithTimeout(ctx, refusalNoticeTimeout)
-	err := m.notify(sctx, br, text)
+	err := m.notify(sctx, br, backupRefusedAlert(name, res.Error))
 	cancel()
 	if err != nil {
 		log.Printf("backup %s: could not send the refusal notice: %v", id, err)

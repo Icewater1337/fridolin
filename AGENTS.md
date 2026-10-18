@@ -130,8 +130,9 @@ the version before: `fridolin service rollback`.
 - The golden files in `testdata/golden` pin what the bridge says and writes
   today: every GET of the API, config writes and their errors, the files the
   dashboard serves, sandbox profiles, prompts and the Claude CLI's
-  arguments, `fridolin check` and `init`, a new brain's folder, backup files
-  and the replies of `/send` and `/ingest`. Times, temp paths, PIDs and the
+  arguments, `fridolin check` and `init`, a new brain's folder, backup files,
+  the replies of `/send` and `/ingest`, and every message the bridge itself
+  sends into chats, which live in `messages.go`. Times, temp paths, PIDs and the
   version are masked, so a second run writes the same bytes. A change meant
   to change one rewrites it with `go test -run 'TestName' -update .`, and
   the pull request says why. A new setting also goes into

@@ -56,9 +56,6 @@ func classify(evt *events.Message) (kind msgKind, target string, content *waE2E.
 	return kindOther, "", nil
 }
 
-// viewOnceNotice is what a chat is told about a view-once message.
-const viewOnceNotice = "👁️ I don't open view-once photos, videos or voice notes: I would keep them. Send it as a normal one if I should see it."
-
 // locationText is a shared location as the model reads it.
 func locationText(lat, lng float64, name, address, url string) string {
 	var sb strings.Builder

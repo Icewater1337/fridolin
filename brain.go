@@ -256,14 +256,9 @@ type BrainHooks struct {
 	RunEnv func(brainID string) (env []string, done func())
 }
 
-// A run that takes longer than workingNoticeAfter tells the chat it is
-// working on it, and questions it asks mid-run go out marked as such.
-const (
-	workingNotice  = "⏳ Working on it..."
-	questionPrefix = "❓ "
-)
-
-// workingNoticeAfter is a variable so tests need not wait for it.
+// workingNoticeAfter is how long a run goes before the chat is told that
+// it is working on it (workingNotice), a variable so tests need not wait
+// for it.
 var workingNoticeAfter = 10 * time.Second
 
 // RunResult is the outcome of one brain run.

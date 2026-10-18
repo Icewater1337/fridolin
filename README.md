@@ -720,6 +720,9 @@ chats that wrote without being allowed.
 **`chunks.go`** — splits long replies at paragraph, line, sentence, then word
 boundaries so messages break somewhere readable, and numbers the parts.
 
+**`messages.go`** — every message the bridge itself sends into chats, as
+opposed to a brain's answers, pinned in `testdata/golden/messages.golden`.
+
 **`outbox.go`** — brains' replies, and the questions they ask mid-run,
 wait in `bridge.db` until WhatsApp took every message of them, are tried
 again with backoff (from the message that failed, and at once when

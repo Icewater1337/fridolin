@@ -240,7 +240,7 @@ func (b *Bridge) apiBuildSend(w http.ResponseWriter, r *http.Request) {
 		Text: text, Source: "site-build", At: time.Now(),
 	}
 	if _, _, _, err := b.brainMgr.Submit(m); err != nil {
-		_ = b.site.chats.add(br.ID(), "assistant", "❌ "+err.Error())
+		_ = b.site.chats.add(br.ID(), "assistant", buildChatError(err))
 		writeErr(w, http.StatusBadRequest, err.Error())
 		return
 	}
