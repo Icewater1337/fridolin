@@ -224,6 +224,10 @@ for compatibility.
   the paired phones, each of which can be unpaired. A phone pairs a key
   made in its keystore and signs every upload with it; the site and the
   bridge both check the signature (docs/PLAUD.md, docs/SITE.md).
+- Release archives carry `THIRD_PARTY_NOTICES`, the licences of the
+  modules a binary links (with libsignal's GPL-3.0, a binary as a whole
+  is GPL-3.0), and the dashboard names the fallback brain, which answers
+  the chats no brain claims and your DMs while no brain handles them.
 
 ### Removed
 
