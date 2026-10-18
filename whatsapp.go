@@ -81,6 +81,7 @@ type WhatsAppClient struct {
 	groupRules func(groupJID string) groupRules
 	log        waLog.Logger
 	media      mediaDownloader        // nil: the client; tests set a fake
+	lister     groupLister            // nil: the client; tests set a fake
 	notify     func(jid, text string) // sendNotice; tests record instead
 
 	// ctx ends when the client disconnects for good. Attachment downloads
@@ -92,6 +93,8 @@ type WhatsAppClient struct {
 	// codes are followed (see StartPairing).
 	pairMu  sync.Mutex
 	pairing bool
+
+	groups groupCache // what JoinedGroups answers with
 
 	mu sync.Mutex // guards the fields below, client included
 	// client is replaced when WhatsApp logged the device out (see
@@ -287,26 +290,31 @@ func (wa *WhatsAppClient) SendPoll(ctx context.Context, jid string, question str
 	return string(resp.ID), nil
 }
 
-// JoinedGroups lists the groups the bridge account is in.
+// JoinedGroups lists the groups the bridge account is in, as WhatsApp
+// said last: kept until an event changes them or groupsTTL passes.
 func (wa *WhatsAppClient) JoinedGroups(ctx context.Context) ([]GroupInfo, error) {
-	cli := wa.cl()
+	cli := wa.groupsFrom()
 	if !cli.IsLoggedIn() {
 		return nil, fmt.Errorf("not connected to WhatsApp")
 	}
-	groups, err := cli.GetJoinedGroups(ctx)
-	if err != nil {
-		return nil, err
-	}
-	out := make([]GroupInfo, 0, len(groups))
-	for _, g := range groups {
-		out = append(out, GroupInfo{JID: g.JID.String(), Name: g.Name, Participants: len(g.Participants)})
-	}
-	return out, nil
+	return wa.groups.get(ctx, func(ctx context.Context) ([]GroupInfo, error) {
+		groups, err := cli.GetJoinedGroups(ctx)
+		if err != nil {
+			return nil, err
+		}
+		out := make([]GroupInfo, 0, len(groups))
+		for _, g := range groups {
+			out = append(out, GroupInfo{JID: g.JID.String(), Name: g.Name, Participants: len(g.Participants)})
+		}
+		return out, nil
+	})
 }
 
 // eventHandler handles all whatsmeow events: messages here, the
-// connection's in connectionEvent.
+// connection's in connectionEvent. The group list sees each first, as
+// group and connection events are what drop it.
 func (wa *WhatsAppClient) eventHandler(rawEvt interface{}) {
+	wa.groups.observe(rawEvt)
 	if evt, ok := rawEvt.(*events.Message); ok {
 		if evt.Message.GetPollUpdateMessage() != nil {
 			wa.handlePollVote(evt)
