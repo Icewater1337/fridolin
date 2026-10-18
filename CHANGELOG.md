@@ -69,6 +69,12 @@ yet, so everything is under Unreleased until the first one.
 - A brain's queue takes each chat's messages in order and the chats in
   turn, so a busy chat no longer keeps the brain's other chats waiting
   behind all of its messages. "Queued (#n)" counts the same way.
+- `!reset` starts the chat afresh: besides what `!stop` does, it writes a
+  `reset` line into the history of each brain that answers in the chat,
+  and a run's prompt shows only the chat's messages after it. The file
+  keeps the earlier ones; `fridolin history` and the dashboard's feed
+  leave the marker out. Scripts that read `conversation-history.jsonl`
+  themselves meet a new line type, which has no text.
 - A run's prompt looks for the chat's last messages in the last 16 MB of
   the brain's history, read back from its end, instead of reading the
   whole file for every run. A chat that was quiet behind more than 16 MB

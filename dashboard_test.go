@@ -627,11 +627,19 @@ func TestResetReachesAHandOffInItsReplyChat(t *testing.T) {
 	waitFor(t, 5*time.Second, "the second file to wait", func() bool { return len(up.Snapshot().Queue) == 1 })
 
 	tb.handleInbound(context.Background(), Inbound{JID: dm, Sender: "15551234567", Text: "!reset", Source: sourceWhatsApp})
-	if !tb.sentPrefix(dm, "✅ Cleared anything this chat had running or waiting") {
+	if !tb.sentPrefix(dm, "✅ Reset. I stopped what this chat had running or waiting") {
 		t.Errorf("!reset answered %q, want that it cleared the chat", tb.sentTo(dm))
 	}
 	if rt := up.Snapshot(); rt.Running != nil || len(rt.Queue) != 0 {
 		t.Errorf("up still has work after !reset: running %+v, queue %+v", rt.Running, rt.Queue)
+	}
+	// up answers in the chat, so the chat starts afresh for it too: its
+	// next file's run reads none of the earlier ones.
+	if !slices.ContainsFunc(readHistory(t, up), func(e historyEntry) bool { return e.Type == historyReset && e.Chat == dm }) {
+		t.Errorf("up's history has no reset marker for the chat:\n%+v", readHistory(t, up))
+	}
+	if before, _ := up.historyBefore(Inbound{JID: dm, Brain: "up", Sender: "upload", Text: "next file", Source: sourceIngest}, dmHistoryWindow); len(before) != 0 {
+		t.Errorf("up's next run in the chat would read %+v", before)
 	}
 }
 

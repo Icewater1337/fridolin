@@ -478,14 +478,15 @@ func (b *Bridge) handleCommand(ctx context.Context, m Inbound, cfg *Config) bool
 	switch strings.ToLower(m.Text) {
 	case "!reset":
 		// A reset stops what !stop stops for the chat, hand-offs from other
-		// brains included. That is all there is to reset: a brain run never
-		// resumes a session, each starts from the recent chat history, which
-		// a reset keeps. Say only what happened, and mention the history only
-		// where a brain will read the next message.
+		// brains included, and starts the chat afresh: a brain run never
+		// resumes a session, each starts from the chat's recent history,
+		// which the next one reads only from the reset on. Say only what
+		// happened: the brain's memory files stay, and a chat no brain
+		// answers has no history to start afresh.
 		b.stopChat(m)
 		reply := "✅ Cleared anything this chat had running or waiting."
-		if b.brainMgr.BrainFor(m.JID, m.IsGroup()) != nil {
-			reply += " The recent chat history stays, so the next message still sees it."
+		if b.resetChat(m) {
+			reply = "✅ Reset. I stopped what this chat had running or waiting, and the next message starts without its earlier messages. What I noted in my memory files stays."
 		}
 		_ = b.wa.SendMessage(ctx, m.JID, reply)
 		return true
@@ -508,7 +509,7 @@ func (b *Bridge) handleCommand(ctx context.Context, m Inbound, cfg *Config) bool
 			"*Commands:*\n" +
 			"• `!help` — show this help\n" +
 			"• `!stop` — stop what I'm doing for this chat and drop its queued messages\n" +
-			"• `!reset` — like `!stop`; I still see the recent chat history afterwards"
+			"• `!reset` — like `!stop`, and the next message starts without this chat's earlier messages"
 		if m.IsGroup() {
 			if t := cfg.Triggers.First(); t != "" {
 				help += "\n\nIn this group, start your message with `" + t + "` or reply to one of mine to address me, commands included."
@@ -545,6 +546,24 @@ func (b *Bridge) stopChat(m Inbound) (stopped bool, dropped int) {
 		stopped, dropped = stopped || s, dropped+d
 	}
 	return stopped, dropped
+}
+
+// resetChat starts m's chat afresh (Brain.ResetChat) in the brain that
+// answers there and in every brain whose reply chat it is, which answers
+// files handed to it there: !reset is about the chat, whichever brain
+// speaks in it. It reports whether any brain does.
+func (b *Bridge) resetChat(m Inbound) bool {
+	cfg := b.cfgs.Get()
+	chats := chatJIDs(m)
+	owner := b.brainMgr.BrainFor(m.JID, m.IsGroup())
+	reset := false
+	for _, br := range b.brainMgr.Brains() {
+		if br == owner || slices.Contains(chats, b.replyChatFor(br, cfg)) {
+			br.ResetChat(chats, m.Sender)
+			reset = true
+		}
+	}
+	return reset
 }
 
 // chatJIDs lists the JIDs m's chat goes by: the chat and, for a DM, its

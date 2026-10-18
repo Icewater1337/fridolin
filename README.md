@@ -280,7 +280,7 @@ on the **Dev** page and read the replies there.
 | -------- | ------ |
 | `!help`  | Show available commands |
 | `!stop`  | Stop the run for this chat and drop its queued messages, including files or recordings another brain is answering here |
-| `!reset` | Like `!stop` — the recent chat history stays, and the next message still sees it |
+| `!reset` | Like `!stop`, and the chat starts afresh: the next message's run sees none of the chat's earlier messages. The history file keeps them, and what the assistant wrote in its memory files stays |
 
 A command also works when sent as a reply to a message.
 In a group, address the bridge as for any request (`@claude !stop`, or
@@ -301,8 +301,8 @@ file that matters most for how good the thing feels.
 ### Memory
 
 The assistant does not remember previous runs. Each message is a fresh Claude
-process that gets the recent chat history and nothing else. Continuity comes
-from files it writes itself:
+process that gets the recent chat history (since the chat's last `!reset`)
+and nothing else. Continuity comes from files it writes itself:
 
 ```
 <brain folder>/

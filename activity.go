@@ -30,8 +30,11 @@ type ActivityEntry struct {
 // NewActivity keeps up to max entries.
 func NewActivity(max int) *Activity { return &Activity{max: max, seeded: map[string]bool{}} }
 
-// Add records a history line.
+// Add records a history line. A reset marker is no message and stays out.
 func (a *Activity) Add(brainID string, e historyEntry) {
+	if e.Type == historyReset {
+		return
+	}
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	a.addLocked(brainID, e)

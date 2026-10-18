@@ -147,12 +147,13 @@ func mentionsChat(line []byte, chats []string) bool {
 }
 
 // recentHistory returns the last n entries of the brain's history, oldest
-// first, from no further back than budget bytes: the dashboard's feed.
+// first, from no further back than budget bytes: the dashboard's feed. A
+// reset marker is no message and stays out.
 func (br *Brain) recentHistory(n int, budget int64) []historyEntry {
 	var out []historyEntry
 	br.scanHistory(budget, func(line []byte) bool {
 		var e historyEntry
-		if json.Unmarshal(line, &e) == nil {
+		if json.Unmarshal(line, &e) == nil && e.Type != historyReset {
 			out = append(out, e)
 		}
 		return len(out) < n

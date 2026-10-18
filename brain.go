@@ -31,7 +31,7 @@ type historyEntry struct {
 	From string `json:"from"`
 	Chat string `json:"chat"` // JID of the chat (DM participant or group)
 	Text string `json:"text"`
-	Type string `json:"type"` // historyIn, historyOut or historyEvent
+	Type string `json:"type"` // historyIn, historyOut, historyEvent or historyReset
 	// Via marks an "out" line that came in through /send: "brain" (From is
 	// the brain that sent it), "script" (the scripts token) or "api" (no
 	// token). A brain's own replies have none.
@@ -51,6 +51,11 @@ const (
 	// such as a poll vote. Its From is who did it, and its text says what,
 	// after their name.
 	historyEvent = "event"
+	// historyReset marks where !reset started a chat afresh. Its From is
+	// who sent it, and it has no text. A run's prompt shows only the
+	// chat's lines after the newest one; it is no message, so neither the
+	// dashboard's feed nor `fridolin history` shows it.
+	historyReset = "reset"
 )
 
 // normalizeJID strips the WhatsApp server suffix and a leading + from a JID,
@@ -858,6 +863,18 @@ func (br *Brain) StopChat(jid string) (stopped bool, n int) {
 	br.mu.Unlock()
 	dropped(gone)
 	return br.stopRun(cur), len(gone)
+}
+
+// ResetChat starts the chat that goes by chats (see chatJIDs) afresh for
+// the brain: a reset marker in its history under each of the chat's JIDs,
+// which the next run's prompt stops reading the chat's messages at. What
+// the chat had running or waiting is for the caller to stop (StopChat);
+// the history itself keeps every line, for `fridolin history`. by is who
+// sent !reset.
+func (br *Brain) ResetChat(chats []string, by string) {
+	for _, jid := range chats {
+		br.appendEntry(historyEntry{Chat: jid, From: by, Type: historyReset})
+	}
 }
 
 // StopHandOffs stops the messages handed to this brain (/ingest, Plaud) that
@@ -1748,7 +1765,8 @@ func (m Inbound) enoughBefore(limit int) func(e historyEntry) bool {
 // chatHistory returns the entries of the chat that goes by chats in the
 // brain's history, oldest first. It reads them back from the end of the
 // file, each newest first to enough, until enough reports that it has
-// what it needs, or promptHistoryBudget is read, or the file's start is
+// what it needs, or it reaches the chat's newest reset marker (see
+// historyReset), or promptHistoryBudget is read, or the file's start is
 // reached. A DM's lines may be under its LID or its number, and both are
 // the one chat. It returns none when the history cannot be read (see
 // openInFolder).
@@ -1761,6 +1779,9 @@ func (br *Brain) chatHistory(chats []string, enough func(historyEntry) bool) []h
 		var e historyEntry
 		if json.Unmarshal(line, &e) != nil || !slices.Contains(chats, e.Chat) {
 			return true
+		}
+		if e.Type == historyReset {
+			return false
 		}
 		entries = append(entries, e)
 		return !enough(e)

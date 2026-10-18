@@ -1,10 +1,14 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
+	"io"
+	"maps"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -530,7 +534,7 @@ func TestStopAndResetAreScopedToTheChat(t *testing.T) {
 		{"!stop from a chat with only a waiting message", testGroup, "!stop", "dm 1", []string{"dm 2"}, "🛑 Nothing was running for this chat; cleared"},
 		// The DM had its turn with dm 1, so the group goes first.
 		{"!stop from a chat with nothing going", otherDM, "!stop", "dm 1", []string{"group 1", "dm 2"}, "Nothing was running for this chat."},
-		{"!reset from another chat", testGroup, "!reset", "dm 1", []string{"dm 2"}, "✅ Cleared"},
+		{"!reset from another chat", testGroup, "!reset", "dm 1", []string{"dm 2"}, "✅ Reset."},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -563,8 +567,9 @@ func TestStopAndResetAreScopedToTheChat(t *testing.T) {
 	}
 }
 
-// !reset must not promise a fresh conversation, which it cannot give: a
-// brain's next run still reads the recent chat history.
+// !reset says what it does, and only that: the chat's next message starts
+// without its earlier messages, while what the brain wrote into its memory
+// files stays. !help says the same.
 func TestResetReplySaysWhatItDoes(t *testing.T) {
 	tb, _ := newMainBridge(t, "")
 	ctx := context.Background()
@@ -575,13 +580,85 @@ func TestResetReplySaysWhatItDoes(t *testing.T) {
 	if len(sent) != 2 {
 		t.Fatalf("sent %q, want a reply to !reset and to !help", sent)
 	}
-	for _, s := range sent {
-		if strings.Contains(s, "fresh") {
-			t.Errorf("reply %q promises a fresh start", s)
+	if !strings.Contains(sent[0], "the next message starts without its earlier messages") || !strings.Contains(sent[0], "memory files stays") {
+		t.Errorf("reply %q does not say what a reset forgets and what it keeps", sent[0])
+	}
+	if !strings.Contains(sent[1], "`!reset` — like `!stop`, and the next message starts without this chat's earlier messages") {
+		t.Errorf("!help %q does not say what !reset does", sent[1])
+	}
+}
+
+// After !reset a chat's next run reads none of the chat's messages from
+// before it: the brain's history keeps them, behind a reset marker for
+// the chat. Its other chats keep theirs, and the marker is no message:
+// neither the dashboard's feed nor a history search shows it.
+func TestResetStartsOnlyThatChatAfresh(t *testing.T) {
+	tb, br := newMainBridge(t, "")
+	promptLog := filepath.Join(tb.home, "prompts.log")
+	t.Setenv("FRIDOLIN_FAKE_PROMPT_LOG", promptLog)
+	ctx := context.Background()
+	// send sends text and waits until the answer is in the history.
+	send := func(chat, sender, text string) {
+		t.Helper()
+		tb.handleInbound(ctx, Inbound{JID: chat, Sender: sender, Text: text, Source: sourceWhatsApp})
+		waitFor(t, 10*time.Second, "the answer to "+text, func() bool {
+			return slices.ContainsFunc(readHistory(t, br), func(e historyEntry) bool {
+				return e.Type == historyOut && strings.HasSuffix(e.Text, "says: "+text)
+			})
+		})
+	}
+	send(testDMChat, "15551234567", "DM-BEFORE-RESET")
+	tb.handleInbound(ctx, Inbound{JID: testGroup, Sender: otherNumber, Text: "GROUP-BEFORE-RESET", Silent: true, Source: sourceWhatsApp})
+	tb.handleInbound(ctx, Inbound{JID: testDMChat, Sender: "15551234567", Text: "!reset", Source: sourceWhatsApp})
+	send(testDMChat, "15551234567", "DM-AFTER-RESET")
+	send(testGroup, otherNumber, "GROUP-AFTER")
+
+	prompts := loggedPrompts(t, promptLog)
+	var dmPrompt, groupPrompt string
+	for msg, p := range prompts {
+		switch {
+		case strings.HasSuffix(msg, "DM-AFTER-RESET"):
+			dmPrompt = p
+		case strings.HasSuffix(msg, "GROUP-AFTER"):
+			groupPrompt = p
 		}
 	}
-	if !strings.Contains(sent[0], "history") {
-		t.Errorf("reply %q does not say the chat history stays", sent[0])
+	if dmPrompt == "" || groupPrompt == "" {
+		t.Fatalf("prompts for %q", slices.Collect(maps.Keys(prompts)))
+	}
+	if strings.Contains(dmPrompt, "DM-BEFORE-RESET") || strings.Contains(dmPrompt, "<chat_history>") {
+		t.Errorf("the DM's prompt after !reset shows its earlier messages:\n%s", dmPrompt)
+	}
+	if !strings.Contains(groupPrompt, "GROUP-BEFORE-RESET") {
+		t.Errorf("the group's prompt lost its history to the DM's reset:\n%s", groupPrompt)
+	}
+
+	var markers []historyEntry
+	for _, e := range readHistory(t, br) {
+		if e.Type == historyReset {
+			markers = append(markers, e)
+		}
+	}
+	if len(markers) != 1 || markers[0].Chat != testDMChat || markers[0].From != "15551234567" || markers[0].Text != "" {
+		t.Errorf("reset markers %+v, want one for the DM by its sender", markers)
+	}
+	if hist := readHistory(t, br); !slices.ContainsFunc(hist, func(e historyEntry) bool { return e.Text == "DM-BEFORE-RESET" }) {
+		t.Error("the history lost the DM's messages from before the reset")
+	}
+
+	seeded := NewActivity(100)
+	seeded.Seed(br)
+	for name, feed := range map[string][]ActivityEntry{"live": tb.activity.Recent(100, ""), "seeded": seeded.Recent(100, "")} {
+		for _, e := range feed {
+			if e.Type == historyReset {
+				t.Errorf("the %s feed shows the reset marker: %+v", name, e)
+			}
+		}
+	}
+	var out bytes.Buffer
+	code := historyCmd([]string{"--brain-dir", br.Dir(), "--limit", "0", ""}, toolIO{stdout: &out, stderr: io.Discard, getenv: os.Getenv, now: time.Now()})
+	if code != 0 || strings.Contains(out.String(), historyReset) || !strings.Contains(out.String(), "DM-BEFORE-RESET") {
+		t.Errorf("fridolin history = %d %s, want every message and no marker", code, out.String())
 	}
 }
 
@@ -644,6 +721,17 @@ func TestInterruptModeQueuedNotice(t *testing.T) {
 				t.Errorf("queued notice sent = %v, want %v (sent %q)", got, c.notice, tb.sentTo(c.next.JID))
 			}
 		})
+	}
+}
+
+// A DM goes by its number and its LID (chatJIDs), and !reset may come by
+// either: the next message by the number starts afresh all the same.
+func TestResetByLIDStartsTheDMAfresh(t *testing.T) {
+	tb, br := newMainBridge(t, "")
+	br.appendHistory(testDMChat, "15551234567", "before the reset", historyIn)
+	tb.handleInbound(context.Background(), Inbound{JID: otherNumber + "@lid", Sender: "15551234567", Text: "!reset", Source: sourceWhatsApp})
+	if before, _ := br.historyBefore(dm("next"), dmHistoryWindow); len(before) != 0 {
+		t.Errorf("the DM's next run would read %+v", before)
 	}
 }
 
