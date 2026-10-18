@@ -456,6 +456,15 @@ func (p *PlaudManager) loginStatus() string {
 
 func (p *PlaudManager) connected() bool { return p.loginStatus() == plaudConnected }
 
+// loginStays reports whether the login a check started with, in the CLI
+// home home, is still the one in use: brain_access did not move the CLI
+// home and you did not disconnect. A check ends once it is not, since its
+// commands would then run with whatever login the new home holds, maybe
+// your terminal's of another account (see poll).
+func (p *PlaudManager) loginStays(home string) bool {
+	return p.cliHome() == home && p.loginStatus() == plaudConnected
+}
+
 // hasLogin reports whether the CLI has a login in the CLI home in use.
 func (p *PlaudManager) hasLogin() bool { return fileExists(p.tokenPath()) }
 
@@ -1280,7 +1289,9 @@ func (p *PlaudManager) runPoll(ctx context.Context) error {
 }
 
 func (p *PlaudManager) poll(ctx context.Context) error {
-	cfg := p.cfg()
+	// The check ends once brain_access moves the login it started with in
+	// home, or you disconnect (see loginStays).
+	cfg, home := p.cfg(), p.cliHome()
 	st, err := p.loadState()
 	if err != nil {
 		return err
@@ -1295,6 +1306,11 @@ func (p *PlaudManager) poll(ctx context.Context) error {
 		acct, err := p.accountID(ctx)
 		if err != nil {
 			return err
+		}
+		// `me` may have named the account of the login in the new home,
+		// which must not start the state over.
+		if !p.loginStays(home) {
+			return nil
 		}
 		if !st.seededFor(acct) {
 			if st.seededFor("") {
@@ -1383,7 +1399,7 @@ func (p *PlaudManager) poll(ctx context.Context) error {
 	p.mu.Unlock()
 	now := time.Now()
 	for _, id := range st.pendingInOrder() {
-		if room <= 0 {
+		if room <= 0 || !p.loginStays(home) {
 			break
 		}
 		item := *st.Pending[id]
@@ -1402,6 +1418,14 @@ func (p *PlaudManager) poll(ctx context.Context) error {
 		fw, err := p.forward(ctx, cfg, id, &item, br, jid)
 		if errors.Is(err, errPlaudAuth) {
 			return err
+		}
+		// brain_access moved the login, or you disconnected, while it was
+		// fetched: what failed may have run with the login in the new home,
+		// maybe your terminal's of another account, which does not have the
+		// recording. It is not given up for that, nor tried less often: it
+		// waits, and the check ends.
+		if fw == nil && !p.loginStays(home) {
+			break
 		}
 		// Why it is given up, if it is. A recording deleted in Plaud is
 		// given up at once; the rest after plaudPendingMaxAge. A recording

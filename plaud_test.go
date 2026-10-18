@@ -1235,6 +1235,131 @@ func TestPlaudSigningOutDuringACheckIsNoExpiry(t *testing.T) {
 	}
 }
 
+// A check ends with the command it is at once its login is no longer the
+// one in use. brain_access may be saved while your terminal is signed in
+// to ~/.plaud with another account: the commands after it would run with
+// that login, which has none of Fridolin's recordings, also once you
+// connected it: the check looked up the account of the login before. Or
+// you disconnect with brain_access on, and the sign-out leaves the login
+// in ~/.plaud behind. No recording is given up as
+// deleted in Plaud or handed over after that, the state does not start
+// over for the other account, and what was not handed over waits for the
+// login you connect.
+func TestPlaudCheckEndsWhenItsLoginGoes(t *testing.T) {
+	const newer = "of_0000000000000000000004"
+	// Your terminal's login, of another account, which has none of these
+	// recordings, and brain_access turned on.
+	moveLogin := func(tb *testBridge, fp *fakePlaudFixture) error {
+		token := filepath.Join(tb.home, ".plaud", "tokens.json")
+		if err := os.MkdirAll(filepath.Dir(token), 0o700); err != nil {
+			return err
+		}
+		if err := os.WriteFile(token, []byte("{}"), 0o600); err != nil {
+			return err
+		}
+		fp.write("account", "u_2")
+		for _, id := range []string{plaudNew, newer} {
+			if err := os.Remove(filepath.Join(fp.dir, "rec_"+id+".json")); err != nil {
+				return err
+			}
+		}
+		_, err := tb.cfgs.Update("", func(c *Config) error { c.Plaud.BrainAccess = true; return nil })
+		return err
+	}
+	// The same, and you connect that login, as a sign-in that finishes does.
+	moveAndConnect := func(tb *testBridge, fp *fakePlaudFixture) error {
+		if err := moveLogin(tb, fp); err != nil {
+			return err
+		}
+		return tb.plaud.update(func(st *plaudState) error { plaudRecordLogin(tb, st); return nil })
+	}
+	disconnectKeeping := func(tb *testBridge, fp *fakePlaudFixture) error {
+		fp.write("logout_keeps", "")
+		if err := tb.plaud.Disconnect(); err == nil {
+			return errors.New("disconnect did not say the login is still there")
+		}
+		return nil
+	}
+	for _, c := range []struct {
+		name   string
+		access bool   // brain_access before
+		cmd    string // the command before (or after) which it happens
+		after  bool
+		act    func(tb *testBridge, fp *fakePlaudFixture) error
+		// later is how many of the check's commands ran after it happened:
+		// the one that was on its way then.
+		later   int
+		waiting []string
+		state   string
+	}{
+		{"brain_access turned on while the account is looked up", false, "me", false, moveLogin, 1, nil, plaudMoved},
+		{"brain_access turned on before a recording is fetched", false, "file", false, moveLogin, 1, []string{plaudNew, newer}, plaudMoved},
+		{"brain_access turned on once a recording was handed over", false, "summary", true, moveLogin, 0, []string{newer}, plaudMoved},
+		{"brain_access turned on and connected before a recording is fetched", false, "file", false, moveAndConnect, 1, []string{plaudNew, newer}, plaudConnected},
+		{"disconnected once a recording was handed over", true, "summary", true, disconnectKeeping, 0, []string{newer}, plaudSignedOut},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			tb, fp := plaudBridge(t, fmt.Sprintf(`, "brain_access": %v`, c.access))
+			plaudSignIn(t, tb)
+			if err := tb.plaud.saveState(plaudRecordLogin(tb, plaudSeededState("u_1", plaudOld1))); err != nil {
+				t.Fatal(err)
+			}
+			fp.files(newer, plaudNew, plaudOld1)
+			fp.recording(plaudNew, true)
+			fp.recording(newer, true)
+			var once sync.Once
+			var acted bool
+			var later []string
+			act := func() {
+				once.Do(func() {
+					if err := c.act(tb, fp); err != nil {
+						t.Error(err)
+					}
+					acted = true
+				})
+			}
+			run := tb.plaud.run
+			tb.plaud.run = func(ctx context.Context, args ...string) (string, error) {
+				if args[0] == c.cmd && !c.after {
+					act()
+				}
+				if acted {
+					later = append(later, strings.Join(args, " "))
+				}
+				out, err := run(ctx, args...)
+				if args[0] == c.cmd && c.after {
+					act()
+				}
+				return out, err
+			}
+			if err := tb.plaud.Poll(context.Background()); err != nil {
+				t.Fatal(err)
+			}
+			st, err := tb.plaud.loadState()
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(st.GivenUp) != 0 {
+				t.Errorf("given up: %+v, want none", st.GivenUp)
+			}
+			if st.Account != "u_1" || !slices.Contains(st.Seen, plaudOld1) {
+				t.Errorf("account %q, seen %v: want the state of u_1 kept", st.Account, st.Seen)
+			}
+			for _, id := range c.waiting {
+				if item := st.Pending[id]; item == nil || item.Tries != 0 || !item.Handed.IsZero() {
+					t.Errorf("recording %s: %+v, want it waiting, untried", id, item)
+				}
+			}
+			if len(later) != c.later {
+				t.Errorf("ran %q afterwards, want %d commands", later, c.later)
+			}
+			if got := tb.plaud.loginStatus(); got != c.state {
+				t.Errorf("login %s, want %s", got, c.state)
+			}
+		})
+	}
+}
+
 // Changes to the state never get lost to a poll that works through
 // recordings meanwhile: a sign-in that finishes during a poll keeps its
 // record. A login from before sign-ins were recorded gets one with the

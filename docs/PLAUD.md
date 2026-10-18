@@ -128,14 +128,15 @@ then also read the token — turn it on only if you want brains to look
 things up in Plaud directly.
 
 Changing it does not move a login. Fridolin stops checking until you
-connect again, and then uses the login the tool has in its new home: your
-terminal's `plaud` may already be signed in to `~/.plaud/`, maybe with
-another account, and Fridolin does not take that over unasked. Connecting
-with another account starts over, as above. **Disconnect** meanwhile
-signs out only the login in Fridolin's data folder: whatever `~/.plaud/`
-holds stays for your terminal. Fridolin runs its own Plaud commands one at
-a time, since the tool rewrites its login without a lock when it
-refreshes it; a brain running the tool at the same moment can
+connect again (a check that is running ends there, and the recordings it
+has not handed over wait), and then uses the login the tool has in its new
+home: your terminal's `plaud` may already be signed in to `~/.plaud/`,
+maybe with another account, and Fridolin does not take that over unasked.
+Connecting with another account starts over, as above. **Disconnect**
+meanwhile signs out only the login in Fridolin's data folder: whatever
+`~/.plaud/` holds stays for your terminal. Fridolin runs its own Plaud
+commands one at a time, since the tool rewrites its login without a lock
+when it refreshes it; a brain running the tool at the same moment can
 still collide with it, which at worst signs Plaud out (the card then says
 the login expired). With it on, **Disconnect** signs out the login in
 `~/.plaud/`, which your terminal's `plaud` uses too. If a login is still
