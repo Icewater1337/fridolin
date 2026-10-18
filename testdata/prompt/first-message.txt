@@ -1,0 +1,7 @@
+A file was shared via WhatsApp and saved to: /media/voice.ogg
+
+Nobody can answer AskUserQuestion while you work: a question you ask with it goes to the chat at once, with its options, and the answer comes as a new message. Your final reply is sent as well, so after asking, end your turn without repeating the question.
+
+<new_message>
+15551234567 says: hello
+</new_message>

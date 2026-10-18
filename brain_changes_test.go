@@ -169,7 +169,7 @@ func TestEditedMessage(t *testing.T) {
 		if ev := historyTexts(t, br, historyEvent); !slices.Equal(ev, []string{`edited a message to: "book Wednesday"`}) {
 			t.Errorf("events = %q, want the edit noted", ev)
 		}
-		if preface := br.composePreface([]string{testDMChat}, false); !strings.Contains(preface, `15551234567 edited a message to: "book Wednesday"`) {
+		if preface := br.buildPrompt(br.settings.Load(), Inbound{JID: testDMChat, Sender: "15551234567", Text: "next"}); !strings.Contains(preface, `15551234567 edited a message to: "book Wednesday"`) {
 			t.Errorf("preface = %q, want the edit", preface)
 		}
 	})
@@ -205,7 +205,7 @@ func TestEditOfAMessageTheHistoryLacks(t *testing.T) {
 			if h := readHistory(t, br); len(h) != 1 || h[0].Type != historyOut {
 				t.Errorf("history = %+v, want only the request", h)
 			}
-			if preface := br.composePreface([]string{testDMChat}, false); strings.Contains(preface, "4839") || strings.Contains(preface, c.edit) {
+			if preface := br.buildPrompt(br.settings.Load(), Inbound{JID: testDMChat, Sender: "15551234567", Text: "next"}); strings.Contains(preface, "4839") || strings.Contains(preface, c.edit) {
 				t.Errorf("preface = %q, want no trace of the edit", preface)
 			}
 			if a := tb.activity.Recent(10, "main"); len(a) != 1 {

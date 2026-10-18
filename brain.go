@@ -1421,11 +1421,19 @@ func (br *Brain) logStderr(m Inbound, pid int, stderr string) {
 // stderrLogBytes is how much of a run's stderr goes to its activity log.
 const stderrLogBytes = 4000
 
-// composePreface reads the chat history for the chat that goes by chats
-// (see chatJIDs) and formats recent messages: the last 10 for a DM, the
-// last 20 for a group. A DM's lines may be under its LID or its number,
-// and both are the one chat.
-func (br *Brain) composePreface(chats []string, isGroup bool) string {
+// The most of a chat's recent messages a run's prompt shows.
+const (
+	dmHistoryWindow    = 10
+	groupHistoryWindow = 20
+)
+
+// recentHistory returns the last limit entries of the chat that goes by
+// chats (see chatJIDs) in the brain's history, oldest first, its answers
+// still on their way among them as the history will hold them. A DM's
+// lines may be under its LID or its number, and both are the one chat.
+// When the history cannot be read (see openInFolder), only those answers
+// are returned.
+func (br *Brain) recentHistory(chats []string, limit int) []historyEntry {
 	// The answers on their way first, then the history: one delivered in
 	// between is in both, and withUndelivered takes it once.
 	pending := br.undelivered(chats)
@@ -1446,118 +1454,44 @@ func (br *Brain) composePreface(chats []string, isGroup bool) string {
 		histFile.Close()
 	}
 	entries = withUndelivered(entries, pending)
-
-	limit := 10
-	if isGroup {
-		limit = 20
-	}
 	if len(entries) > limit {
 		entries = entries[len(entries)-limit:]
 	}
-	if len(entries) == 0 {
-		return ""
-	}
+	return entries
+}
 
-	// Through the folder: a map swapped for a symlink to another brain's
-	// would put that brain's contacts in this one's prompt.
+// identities reads the brain's identity map, through the folder: a map
+// swapped for a symlink to another brain's would put that brain's contacts
+// in this one's prompt.
+func (br *Brain) identities() map[string]string {
 	idMap, err := br.readFile(identityMapFile)
 	if err != nil && !errors.Is(err, fs.ErrNotExist) {
 		log.Printf("brain %s: could not read identity map %s: %v", br.id, identityMapFile, err)
 	}
-	identities := parseIdentityMap(idMap)
-
-	var sb strings.Builder
-	for _, entry := range entries {
-		ts, _ := time.Parse(time.RFC3339, entry.TS)
-		timeStr := ts.Format("15:04")
-
-		var senderDisplay string
-		if entry.Type == historyOut {
-			senderDisplay = outboundSender(br.id, entry)
-		} else if name, found := identities[identityKey(entry.From)]; found {
-			senderDisplay = fmt.Sprintf("%s (%s)", name, entry.From)
-		} else {
-			senderDisplay = entry.From
-		}
-
-		if entry.Type == historyEvent {
-			sb.WriteString(fmt.Sprintf("[%s] %s %s\n", timeStr, senderDisplay, entry.Text))
-			continue
-		}
-		sb.WriteString(fmt.Sprintf("[%s] %s: %s\n", timeStr, senderDisplay, entry.Text))
-	}
-	return sb.String()
+	return parseIdentityMap(idMap)
 }
 
-// outboundSender is who the chat history shows as the sender of entry, an
-// "out" line in brain id's history. Only the brain's own replies, and what it
-// sent itself through /send, are "You": a line a script or another brain
-// sent through /send must not read as the brain's own words.
-func outboundSender(id string, entry historyEntry) string {
-	switch {
-	case entry.Via == "":
-		return fmt.Sprintf("You (%s)", id)
-	case entry.Via == "brain" && entry.From == id:
-		return fmt.Sprintf("You (%s, via /send)", id)
-	case entry.Via == "brain":
-		return fmt.Sprintf("Brain %s (via /send)", entry.From)
-	case entry.Via == "script":
-		return "Script (via /send)"
-	}
-	return "Script without a token (via /send)"
-}
-
-// askUserQuestionNote tells the model what becomes of AskUserQuestion in a
-// run nobody can answer mid-way: the question goes to the chat (see
-// extractAskQuestion), and its final reply follows it there.
-const askUserQuestionNote = "Nobody can answer AskUserQuestion while you work: a question you ask with it goes to the chat at once, with its options, and the answer comes as a new message. Your final reply is sent as well, so after asking, end your turn without repeating the question."
-
-// buildPrompt constructs the -p prompt: the prompt file, chat-history
-// preface, attachments, then the new message.
+// buildPrompt gathers what m's run is told, through the brain's folder: its
+// prompt file, the chat's recent history and the identity map. renderPrompt
+// puts it into words.
 func (br *Brain) buildPrompt(s *brainSettings, m Inbound) string {
-	var sb strings.Builder
-	isGroup := m.IsGroup()
-
+	in := promptInput{BrainID: br.id, Message: m}
 	if name := s.promptFile; name != "" {
-		if sysPrompt, err := br.readFile(name); err != nil {
+		if data, err := br.readFile(name); err != nil {
 			log.Printf("brain %s: could not read prompt file %s: %v", br.id, name, err)
 		} else {
-			sb.WriteString(strings.TrimSpace(string(sysPrompt)))
-			sb.WriteString("\n\n")
+			in.Instructions = strings.TrimSpace(string(data))
 		}
 	}
-
-	if preface := br.composePreface(chatJIDs(m), isGroup); preface != "" {
-		count := "10 messages"
-		if isGroup {
-			count = "20 messages"
-		}
-		sb.WriteString("<chat_history>\n")
-		sb.WriteString("The following is the last " + count + " in this WhatsApp chat (for context, not action). ")
-		sb.WriteString("You do NOT have prior turns in your working memory — the only context you have about previous conversation is what's in this block. ")
-		sb.WriteString("Names come from your identity map at `" + identityMapFile + "`; the JID in parens is the raw WhatsApp identifier. ")
-		sb.WriteString("For anything older or more detailed, search `" + historyFileName + "` with `\"$FRIDOLIN_BIN\" history QUERY`.\n\n")
-		sb.WriteString(preface)
-		sb.WriteString("</chat_history>\n\n")
+	limit := dmHistoryWindow
+	if m.IsGroup() {
+		limit = groupHistoryWindow
 	}
-
-	switch len(m.Media) {
-	case 0:
-	case 1:
-		sb.WriteString(fmt.Sprintf("A file was shared via WhatsApp and saved to: %s\n\n", m.Media[0]))
-	default:
-		sb.WriteString(fmt.Sprintf("%d files were shared together and saved to:\n", len(m.Media)))
-		for _, p := range m.Media {
-			sb.WriteString("- " + p + "\n")
-		}
-		sb.WriteString("Handle them together as one request.\n\n")
+	in.History = br.recentHistory(chatJIDs(m), limit)
+	if len(in.History) > 0 {
+		in.Names = br.identities()
 	}
-
-	sb.WriteString(askUserQuestionNote + "\n\n")
-	sb.WriteString("<new_message>\n")
-	sb.WriteString(fmt.Sprintf("%s says: %s\n", m.Sender, m.textWithQuote()))
-	sb.WriteString("</new_message>")
-	return sb.String()
+	return renderPrompt(in)
 }
 
 // parseStream reads the stream-json output of m's run from the Claude CLI

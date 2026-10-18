@@ -204,7 +204,8 @@ func TestSendHistoryShowsWhoSentIt(t *testing.T) {
 			t.Errorf("line %d = %+v, want from %q via %q", i, got[i], w.from, w.via)
 		}
 	}
-	preface := tb.brainMgr.Get("a").composePreface([]string{tokenTestDM}, false)
+	br := tb.brainMgr.Get("a")
+	preface := br.buildPrompt(br.settings.Load(), Inbound{JID: tokenTestDM, Sender: "15551234567", Text: "next"})
 	for _, line := range []string{
 		"Script (via /send): from a script",
 		"Script without a token (via /send): from nobody",

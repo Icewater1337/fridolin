@@ -380,7 +380,7 @@ func TestHistoryIsNotFollowedOutOfTheFolder(t *testing.T) {
 			logged := captureLog(t)
 
 			br.appendHistory("15551234567@s.whatsapp.net", "15551234567", "NEW-MESSAGE", historyIn)
-			preface := br.composePreface([]string{"15551234567@s.whatsapp.net"}, false)
+			preface := br.buildPrompt(br.settings.Load(), dm("hello"))
 			drops := br.DropsOTP("123456")
 			feed := NewActivity(10)
 			feed.Seed(br)
@@ -575,7 +575,7 @@ func TestIdentityMapIsNotFollowedOutOfTheFolder(t *testing.T) {
 			}
 			br.appendHistory("15551234567@s.whatsapp.net", "15551234567", "hi", historyIn)
 			logged := captureLog(t)
-			preface := br.composePreface([]string{"15551234567@s.whatsapp.net"}, false)
+			preface := br.buildPrompt(br.settings.Load(), dm("hello"))
 			lines := logged()
 			if tc.target == nil {
 				if !strings.Contains(preface, "Alex (15551234567): hi") || len(lines) > 0 {
@@ -583,7 +583,8 @@ func TestIdentityMapIsNotFollowedOutOfTheFolder(t *testing.T) {
 				}
 				return
 			}
-			if strings.Contains(preface, "Alex") || !strings.Contains(preface, "15551234567: hi") {
+			// The starter prompt names Alex too, in an example.
+			if history := promptBlock(preface, "chat_history"); strings.Contains(history, "Alex") || !strings.Contains(history, "15551234567: hi") {
 				t.Errorf("preface = %q, want the raw number", preface)
 			}
 			if len(lines) != 1 || !strings.Contains(lines[0], "brain a: could not read identity map "+identityMapFile+": "+errSymlink.Error()) {
