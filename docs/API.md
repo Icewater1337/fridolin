@@ -108,6 +108,8 @@ brain that sent it, not as the brain's own words.
 
 When a long message fails part of the way, the parts that went out are in
 the chat and in the history, and the error says how many of them there were.
+`/send` does not try again: the script decides. Brains' own replies go
+through an outbox in `bridge.db` instead, which keeps trying for an hour.
 
 ## `POST /ingest`
 

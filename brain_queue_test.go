@@ -93,8 +93,10 @@ func TestBrainRunsAndDeliversInOrder(t *testing.T) {
 			t.Errorf("run %d = %q, want an echo of %q from brain a's folder", i, r.res.Text, want)
 		}
 	}
+	// The answers go into the history once they are delivered, which is
+	// the bridge's part (see TestReplyIsRecordedOnceDelivered).
 	hist, _ := os.ReadFile(filepath.Join(home, "a", "conversation-history.jsonl"))
-	if strings.Count(string(hist), `"type":"in"`) != 3 || strings.Count(string(hist), `"type":"out"`) != 3 {
+	if strings.Count(string(hist), `"type":"in"`) != 3 || strings.Count(string(hist), `"type":"out"`) != 0 {
 		t.Errorf("history:\n%s", hist)
 	}
 }
@@ -1277,13 +1279,13 @@ func TestPanicsInARunAreContained(t *testing.T) {
 		}},
 		{"while claude runs", map[string]string{"FRIDOLIN_FAKE_SLEEP_MS": "1000"}, 100 * time.Millisecond, true, func(d *deliveries, first *sync.Once) BrainHooks {
 			// The working notice comes from invoke itself.
-			return BrainHooks{Deliver: d.add, Intermediate: func(string, string) {
+			return BrainHooks{Deliver: d.add, Notice: func(string, string) {
 				first.Do(func() { panic("boom in the working notice") })
 			}}
 		}},
 		{"while its output is read", map[string]string{"FRIDOLIN_FAKE_ASK_ON": "says: one"}, 0, true, func(d *deliveries, first *sync.Once) BrainHooks {
 			// The question goes out from the goroutine that reads the output.
-			return BrainHooks{Deliver: d.add, Intermediate: func(string, string) {
+			return BrainHooks{Deliver: d.add, Question: func(string, string) {
 				first.Do(func() { panic("boom in sending the question") })
 			}}
 		}},
@@ -1378,11 +1380,12 @@ func TestRunTimeoutStopsAStuckRun(t *testing.T) {
 			}
 			var mu sync.Mutex
 			var sent []string
-			mgr.SetHooks(BrainHooks{Deliver: d.add, Intermediate: func(_, text string) {
+			say := func(_, text string) {
 				mu.Lock()
 				defer mu.Unlock()
 				sent = append(sent, text)
-			}})
+			}
+			mgr.SetHooks(BrainHooks{Deliver: d.add, Notice: say, Question: say})
 			start := time.Now()
 			if _, _, _, err := mgr.Submit(dm("stuck")); err != nil {
 				t.Fatal(err)

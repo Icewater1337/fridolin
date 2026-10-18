@@ -259,11 +259,20 @@ type brainSettings struct {
 
 // BrainHooks connect brains to the rest of the bridge.
 type BrainHooks struct {
-	// Intermediate delivers a message before the final answer, ready to
-	// send: the working notice and questions the brain asks mid-run.
-	Intermediate func(jid, text string)
-	// Deliver receives every finished run.
+	// Notice tells the chat jid, ready to send, that a run is working on
+	// its message: of use only now.
+	Notice func(jid, text string)
+	// Question sends the chat jid a question its brain asks mid-run,
+	// marked as one: the run sends nothing else, so it must arrive.
+	Question func(jid, text string)
+	// Deliver receives every finished run. It records the answer in the
+	// brain's history once it is sent.
 	Deliver func(br *Brain, m Inbound, res RunResult)
+	// Undelivered returns the brain's answers still on their way to
+	// WhatsApp, as its history will record them once they arrived. A
+	// chat gets them before anything a later run says there, so that run
+	// reads them as said (see undelivered).
+	Undelivered func(brainID string) []historyEntry
 	// OnHistory sees every line written to a brain's history.
 	OnHistory func(brainID string, e historyEntry)
 	// ExtraArgs adds CLI arguments to a brain's runs (the site builder's
@@ -465,9 +474,9 @@ func (br *Brain) worker() {
 		}
 		res := br.invokeGuarded(run, ctx, s, m)
 		res.Duration = time.Since(run.started)
-		if res.Err == nil && !res.AlreadySent && res.Text != "" {
-			br.appendHistory(m.JID, br.id, res.Text, historyOut)
-		}
+		// The answer goes into the history once it was delivered (see
+		// Outbox), not here: the next run must not read as said what
+		// never reached the chat.
 		br.finishRun(run)
 		br.recordLast(m, res)
 		br.deliverGuarded(m, res)
@@ -1285,8 +1294,8 @@ func (br *Brain) invoke(run *brainRun, ctx context.Context, s *brainSettings, m 
 		case <-notice.C:
 			// Untagged (silent) messages never produce a visible reply, so they
 			// must not produce a visible "working" notice either.
-			if !m.Silent && br.hooks != nil && br.hooks.Intermediate != nil {
-				br.hooks.Intermediate(m.JID, workingNotice)
+			if !m.Silent && br.hooks != nil && br.hooks.Notice != nil {
+				br.hooks.Notice(m.JID, workingNotice)
 			}
 		case <-resultIn:
 			// The answer is in, and the CLI exits right after it, unless
@@ -1394,25 +1403,26 @@ const stderrLogBytes = 4000
 // last 20 for a group. A DM's lines may be under its LID or its number,
 // and both are the one chat.
 func (br *Brain) composePreface(chats []string, isGroup bool) string {
-	histFile, err := openInFolder(br.root, historyFileName, os.O_RDONLY, 0)
-	if err != nil {
-		return ""
-	}
-	defer histFile.Close()
-
-	scanner := bufio.NewScanner(histFile)
-	scanner.Buffer(make([]byte, 1024*1024), 1024*1024)
+	// The answers on their way first, then the history: one delivered in
+	// between is in both, and withUndelivered takes it once.
+	pending := br.undelivered(chats)
 	var entries []historyEntry
-	for scanner.Scan() {
-		var entry historyEntry
-		if err := json.Unmarshal(scanner.Bytes(), &entry); err != nil {
-			continue
+	if histFile, err := openInFolder(br.root, historyFileName, os.O_RDONLY, 0); err == nil {
+		scanner := bufio.NewScanner(histFile)
+		scanner.Buffer(make([]byte, 1024*1024), 1024*1024)
+		for scanner.Scan() {
+			var entry historyEntry
+			if err := json.Unmarshal(scanner.Bytes(), &entry); err != nil {
+				continue
+			}
+			if !slices.Contains(chats, entry.Chat) {
+				continue
+			}
+			entries = append(entries, entry)
 		}
-		if !slices.Contains(chats, entry.Chat) {
-			continue
-		}
-		entries = append(entries, entry)
+		histFile.Close()
 	}
+	entries = withUndelivered(entries, pending)
 
 	limit := 10
 	if isGroup {
@@ -1616,8 +1626,8 @@ func (br *Brain) readStream(jid string, reader io.Reader, heading string, onResu
 					writeLog("🔧 Tool: " + content.Name)
 					if content.Name == "AskUserQuestion" {
 						question := extractAskQuestion(content.Input)
-						if question != "" && br.hooks != nil && br.hooks.Intermediate != nil {
-							br.hooks.Intermediate(jid, questionPrefix+question)
+						if question != "" && br.hooks != nil && br.hooks.Question != nil {
+							br.hooks.Question(jid, questionPrefix+question)
 							questionSent = true
 						}
 					}
@@ -1751,20 +1761,52 @@ func (br *Brain) appendHistoryVia(chatJID, from, text, typ, via string) {
 // appendEntry appends entry to the brain's history file, stamped with the
 // time now.
 func (br *Brain) appendEntry(entry historyEntry) {
+	br.historyMu.Lock()
+	entry, err := br.writeEntryLocked(entry)
+	br.historyMu.Unlock()
+	br.entryWritten(entry, err)
+}
+
+// recordDelivered writes the brain's answer text to chat into its
+// history once it reached WhatsApp, after remove took it out of the
+// outbox; when remove fails, it writes nothing and returns the error, and
+// the outbox tries again later, so the answer is recorded once. Both
+// happen under historyMu, which undelivered reads the outbox under: a run
+// finds the answer in the outbox or in the history, never in neither.
+func (br *Brain) recordDelivered(chat, text string, remove func() error) error {
+	br.historyMu.Lock()
+	if err := remove(); err != nil {
+		br.historyMu.Unlock()
+		return err
+	}
+	entry, err := br.writeEntryLocked(historyEntry{From: br.id, Chat: chat, Text: text, Type: historyOut})
+	br.historyMu.Unlock()
+	br.entryWritten(entry, err)
+	return nil
+}
+
+// writeEntryLocked appends entry to the history file, stamped with the
+// time now, and returns it as written. historyMu is held.
+func (br *Brain) writeEntryLocked(entry historyEntry) (historyEntry, error) {
 	entry.TS = time.Now().Format(time.RFC3339)
 	data, err := json.Marshal(entry)
 	if err != nil {
-		return
+		return entry, err
 	}
 	// Through the folder: appending through a symlink would let a brain
 	// write to files its sandbox denies it, another brain's among them.
-	br.historyMu.Lock()
 	f, err := openInFolder(br.root, historyFileName, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600)
-	if err == nil {
-		_, _ = f.Write(append(data, '\n'))
-		f.Close()
+	if err != nil {
+		return entry, err
 	}
-	br.historyMu.Unlock()
+	_, _ = f.Write(append(data, '\n'))
+	f.Close()
+	return entry, nil
+}
+
+// entryWritten logs an entry that could not be written, or hands one that
+// was to OnHistory, outside historyMu.
+func (br *Brain) entryWritten(entry historyEntry, err error) {
 	if err != nil {
 		log.Printf("brain %s: failed to open history file %s: %v", br.id, filepath.Join(br.workDir, historyFileName), err)
 		return
@@ -1772,6 +1814,52 @@ func (br *Brain) appendEntry(entry historyEntry) {
 	if br.hooks != nil && br.hooks.OnHistory != nil {
 		br.hooks.OnHistory(br.id, entry)
 	}
+}
+
+// undelivered returns the brain's answers in the chat that goes by chats
+// which are still on their way (BrainHooks.Undelivered). It reads them
+// under historyMu, which recordDelivered moves an answer from the outbox
+// into the history under: the history, read after, holds every answer
+// this did not return.
+func (br *Brain) undelivered(chats []string) []historyEntry {
+	if br.hooks == nil || br.hooks.Undelivered == nil {
+		return nil
+	}
+	br.historyMu.Lock()
+	all := br.hooks.Undelivered(br.id)
+	br.historyMu.Unlock()
+	var out []historyEntry
+	for _, e := range all {
+		if slices.Contains(chats, e.Chat) {
+			out = append(out, e)
+		}
+	}
+	return out
+}
+
+// withUndelivered puts the answers still on their way among the history's
+// entries, each after the last entry no later than it. One the history
+// holds already, delivered after pending was read, is left out: the same
+// answer, in the same chat, recorded no earlier than it was written.
+func withUndelivered(entries, pending []historyEntry) []historyEntry {
+	at := func(e historyEntry) time.Time {
+		t, _ := time.Parse(time.RFC3339, e.TS)
+		return t
+	}
+	for _, p := range pending {
+		pt := at(p)
+		if slices.ContainsFunc(entries, func(e historyEntry) bool {
+			return e.Type == historyOut && e.Chat == p.Chat && e.Text == p.Text && !at(e).Before(pt)
+		}) {
+			continue
+		}
+		i := len(entries)
+		for i > 0 && at(entries[i-1]).After(pt) {
+			i--
+		}
+		entries = slices.Insert(entries, i, p)
+	}
+	return entries
 }
 
 // ── BrainManager ─────────────────────────────────────────────────────────

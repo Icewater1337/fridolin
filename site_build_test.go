@@ -124,3 +124,56 @@ func TestSiteBuildChat(t *testing.T) {
 		t.Errorf("outbox = %+v", out)
 	}
 }
+
+// A long answer in a build chat reaches the Build page as one message,
+// as it did before replies went through the outbox, which split it into
+// "[1/5]" to "[5/5]" for a page that has no length limit. WhatsApp
+// still gets it in parts.
+func TestLongBuildChatAnswerStaysWhole(t *testing.T) {
+	long := strings.Repeat("This is one sentence of a long answer. ", 24)
+	cases := []struct {
+		name  string
+		send  func(o *Outbox, chat string) error
+		build bool // to a build chat
+		want  int  // messages
+	}{
+		{"a reply to a build chat", func(o *Outbox, chat string) error { return o.Reply(t.Context(), "web", chat, long, 200) }, true, 1},
+		{"a question in a build chat", func(o *Outbox, chat string) error { return o.Text(t.Context(), chat, long, 200) }, true, 1},
+		{"a reply to WhatsApp", func(o *Outbox, chat string) error { return o.Reply(t.Context(), "web", chat, long, 200) }, false, 5},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			tb := newTestBridge(t, `, "max_chunk_size": 200`)
+			tb.addFolderBrain(t, BrainManifest{ID: "web", Name: "Web"})
+			chat := testDMChat
+			if c.build {
+				chat = buildChatJID("web", 1)
+			}
+			if err := c.send(tb.outbox, chat); err != nil {
+				t.Fatal(err)
+			}
+			received := func() []string {
+				if !c.build {
+					return tb.sentTo(chat)
+				}
+				var out []string
+				for _, m := range tb.site.chats.get("web").Messages {
+					out = append(out, m.Text)
+				}
+				return out
+			}
+			waitFor(t, 10*time.Second, "the answer", func() bool { return len(received()) >= c.want })
+			time.Sleep(100 * time.Millisecond) // for a part too many
+			got := received()
+			if c.build {
+				if len(got) != 1 || strings.TrimSpace(got[0]) != strings.TrimSpace(long) {
+					t.Errorf("the Build page got %d messages %q, want the answer whole", len(got), got)
+				}
+				return
+			}
+			if len(got) != c.want || !strings.HasPrefix(got[0], "[1/5] ") {
+				t.Errorf("WhatsApp got %q, want it in %d numbered parts", got, c.want)
+			}
+		})
+	}
+}

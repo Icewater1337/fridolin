@@ -918,7 +918,8 @@ leaves room for text; the bridge refuses to start with a smaller value.
 Longer replies are split and numbered `[1/3]`, `[2/3]`, … They are cut at
 paragraphs first, then lines, sentence ends and spaces, each finer level only
 for a part that is still too long; a word longer than a whole message is cut
-between characters. Only the whitespace at a cut is dropped.
+between characters. Only the whitespace at a cut is dropped. The Build page
+has no such limit and shows a builder brain's answer whole.
 
 ### `max_media_mb`
 

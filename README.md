@@ -71,11 +71,13 @@ when you send it a file (each brain can turn files and forwards off).
 **Orderly.** Messages that arrive while the assistant is busy wait their turn
 (or, if you prefer, a newer request replaces the one you sent before it). A
 photo album or a file plus "what is this?" sent in quick succession becomes
-one request. `!stop` stops whatever it is doing for that chat. A message you
-delete for everyone is not answered, even while it is being answered, and
-leaves the chat history; an edit of one still waiting changes what is
-answered, and an edit of one already answered is noted for the next message,
-without a second run.
+one request. `!stop` stops whatever it is doing for that chat. A reply written
+while the connection is down goes out once it is back, even after a restart,
+and the next message is answered knowing it. A message you delete for everyone
+is not answered, even while it is being answered, and leaves the chat history
+(an answer already written, waiting for the connection, still goes out); an
+edit of one still waiting changes what is answered, and an edit of one already
+answered is noted for the next message, without a second run.
 
 **Calendar.** Each brain can sign in to a Google account from the dashboard
 and use the calendars you pick: list events, find free time, create events.
@@ -635,6 +637,13 @@ chats that wrote without being allowed.
 
 **`chunks.go`** — splits long replies at paragraph, line, sentence, then word
 boundaries so messages break somewhere readable, and numbers the parts.
+
+**`outbox.go`** — brains' replies wait in `bridge.db` until WhatsApp took
+every message of them, are tried again with backoff (from the message that
+failed, and at once when WhatsApp reconnects, after a restart too), and go
+into the brain's history only once delivered; until then a run reads them
+from the outbox. One that cannot go out within an hour is given up on, and
+the Overview says so.
 
 **`server.go`** — the localhost `/send` and `/ingest` endpoints.
 

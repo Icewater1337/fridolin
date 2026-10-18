@@ -2,7 +2,6 @@ package main
 
 import (
 	"bytes"
-	"context"
 	"crypto/sha256"
 	"fmt"
 	"log"
@@ -22,9 +21,9 @@ import (
 //	- Tuesday 3pm
 //	[/POLL]
 //
-// The bridge sends each block as a real WhatsApp poll, keeps the poll in
-// bridge.db (Store.SavePoll) and matches the votes WhatsApp reports back
-// to its options (matchVote).
+// The bridge sends each block as a real WhatsApp poll (Outbox.Reply), keeps
+// the poll in bridge.db (Store.SavePoll) and matches the votes WhatsApp
+// reports back to its options (matchVote).
 
 // pollData represents a parsed [POLL]…[/POLL] block.
 type pollData struct {
@@ -118,27 +117,8 @@ func parsePollBlock(block string, maxSelectable int) (pollData, bool) {
 	return pollData{Question: question, Options: options, MaxSelectable: maxSelectable}, true
 }
 
-// sendPolls sends each poll brain wrote to jid and keeps it, so the votes
-// can be matched back to its options and reach brain. They go before the
-// text of the reply, as the example brain prompt tells brains: "the poll
-// is sent first". A poll WhatsApp refuses goes out as a numbered list
-// instead.
-func (b *Bridge) sendPolls(ctx context.Context, brain, jid string, polls []pollData) {
-	for _, p := range polls {
-		log.Printf("Sending poll to %s: %q (%d options)", jid, p.Question, len(p.Options))
-		msgID, err := b.wa.SendPoll(ctx, jid, p.Question, p.Options, p.MaxSelectable)
-		if err != nil {
-			log.Printf("failed to send poll to %s: %v — falling back to text", jid, err)
-			_ = b.wa.SendMessage(ctx, jid, pollAsText(p))
-			continue
-		}
-		if err := b.store.SavePoll(msgID, jid, brain, p.Question, p.Options); err != nil {
-			log.Printf("failed to save poll %s to DB: %v", msgID, err)
-		}
-	}
-}
-
-// pollAsText is a poll as a numbered list, for when it cannot go as one.
+// pollAsText is a poll as a numbered list, for when WhatsApp refuses it
+// as a poll.
 func pollAsText(p pollData) string {
 	text := "📊 *" + p.Question + "*\n"
 	for i, opt := range p.Options {

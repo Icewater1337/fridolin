@@ -35,6 +35,9 @@ type Messenger interface {
 	SendChunked(ctx context.Context, jid, text string) error
 	SendPoll(ctx context.Context, jid, question string, options []string, maxSelectable int) (string, error)
 	State() WAState
+	// Connected returns a channel that is closed while the messenger can
+	// send: at once when it is connected, else when it next connects.
+	Connected() <-chan struct{}
 	StartPairing() error
 	JoinedGroups(ctx context.Context) ([]GroupInfo, error)
 }
@@ -88,6 +91,9 @@ type WhatsAppClient struct {
 
 	mu    sync.Mutex
 	state WAState
+	// online is closed while the state is "connected", and replaced by an
+	// open one when it leaves it (see Connected).
+	online chan struct{}
 }
 
 // NewWhatsAppClient creates a client. It does NOT connect — call Connect.
@@ -126,6 +132,17 @@ func (wa *WhatsAppClient) setState(mode, detail string) {
 	if wa.state.Mode != mode {
 		wa.state.Since = time.Now()
 	}
+	online := wa.onlineLocked()
+	select {
+	case <-online:
+		if mode != "connected" {
+			wa.online = make(chan struct{})
+		}
+	default:
+		if mode == "connected" {
+			close(online)
+		}
+	}
 	wa.state.Mode, wa.state.Detail = mode, detail
 	if mode != "pairing" {
 		wa.state.QRCode = ""
@@ -133,6 +150,20 @@ func (wa *WhatsAppClient) setState(mode, detail string) {
 	if id := wa.client.Store.ID; id != nil {
 		wa.state.OwnNumber = id.User
 	}
+}
+
+// Connected returns a channel closed while WhatsApp is connected.
+func (wa *WhatsAppClient) Connected() <-chan struct{} {
+	wa.mu.Lock()
+	defer wa.mu.Unlock()
+	return wa.onlineLocked()
+}
+
+func (wa *WhatsAppClient) onlineLocked() chan struct{} {
+	if wa.online == nil {
+		wa.online = make(chan struct{})
+	}
+	return wa.online
 }
 
 // State returns the current connection state.
@@ -249,18 +280,27 @@ func (e *partialSendError) Error() string {
 
 func (e *partialSendError) Unwrap() error { return e.err }
 
-// sendChunks sends chunks one by one with send, pausing between them. A
-// failure after the first chunk is a *partialSendError naming what went out.
-func sendChunks(chunks []string, pause time.Duration, send func(chunk string) error) error {
+// sendChunks sends chunks one by one with send, pausing between them
+// unless ctx ends. A failure after the first chunk is a *partialSendError
+// naming what went out.
+func sendChunks(ctx context.Context, chunks []string, pause time.Duration, send func(chunk string) error) error {
 	for i, chunk := range chunks {
-		if err := send(chunk); err != nil {
+		err := ctx.Err()
+		if i > 0 && pause > 0 && err == nil {
+			select {
+			case <-ctx.Done():
+				err = ctx.Err()
+			case <-time.After(pause):
+			}
+		}
+		if err == nil {
+			err = send(chunk)
+		}
+		if err != nil {
 			if i > 0 {
 				return &partialSendError{sent: chunks[:i], total: len(chunks), err: err}
 			}
 			return err
-		}
-		if len(chunks) > 1 && pause > 0 {
-			time.Sleep(pause)
 		}
 	}
 	return nil
@@ -309,10 +349,11 @@ func (wa *WhatsAppClient) SendMessage(ctx context.Context, jid string, text stri
 }
 
 // SendChunked splits text into chunks and sends each as a separate message,
-// with a small delay between them so they arrive in order. A failure part
-// of the way is a *partialSendError.
+// with a small delay between them so they arrive in order, for /send,
+// whose caller hears of a failure; brains' replies go through the Outbox.
+// A failure part of the way is a *partialSendError.
 func (wa *WhatsAppClient) SendChunked(ctx context.Context, jid string, text string) error {
-	return sendChunks(ChunkMessage(text, wa.cfg().MaxChunkSize), 300*time.Millisecond, func(chunk string) error {
+	return sendChunks(ctx, ChunkMessage(text, wa.cfg().MaxChunkSize), outboxPace, func(chunk string) error {
 		return wa.SendMessage(ctx, jid, chunk)
 	})
 }
@@ -1184,8 +1225,12 @@ type DevMessage struct {
 	Poll []string  `json:"poll,omitempty"`
 }
 
-func (d *devMessenger) Connect() error { return nil }
-func (d *devMessenger) Disconnect()    {}
+// devConnected is always closed: dev mode can always send.
+var devConnected = func() chan struct{} { c := make(chan struct{}); close(c); return c }()
+
+func (d *devMessenger) Connected() <-chan struct{} { return devConnected }
+func (d *devMessenger) Connect() error             { return nil }
+func (d *devMessenger) Disconnect()                {}
 func (d *devMessenger) State() WAState {
 	return WAState{Mode: "disabled", Detail: "Dev mode (--no-whatsapp): messages are simulated"}
 }

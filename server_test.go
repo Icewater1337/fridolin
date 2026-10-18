@@ -172,7 +172,7 @@ func TestSendChunksReportsWhatWentOut(t *testing.T) {
 	for i := range chunks {
 		t.Run(fmt.Sprint("fails at ", i), func(t *testing.T) {
 			var sent []string
-			err := sendChunks(chunks, 0, func(c string) error {
+			err := sendChunks(context.Background(), chunks, 0, func(c string) error {
 				if len(sent) == i {
 					return fail
 				}
@@ -190,7 +190,7 @@ func TestSendChunksReportsWhatWentOut(t *testing.T) {
 			}
 		})
 	}
-	if err := sendChunks(chunks, 0, func(string) error { return nil }); err != nil {
+	if err := sendChunks(context.Background(), chunks, 0, func(string) error { return nil }); err != nil {
 		t.Fatal(err)
 	}
 }

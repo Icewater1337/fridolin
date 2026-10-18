@@ -20,7 +20,9 @@ import (
 // which brain backups copy to Drive. An edit of a message that waits
 // replaces its text; once a run has acted on a message, starting another
 // could repeat what it did (book the table twice), so the edit only goes
-// into the history for the next run to see.
+// into the history for the next run to see. An answer a run finished
+// before the deletion, which waits in the outbox for the connection, still
+// goes out: the outbox does not know which message it answers.
 
 // Change applies an edit or a deletion to the brain's queue: a waiting
 // message gets the new text or is dropped, and a run for a message that

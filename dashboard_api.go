@@ -208,6 +208,7 @@ func (b *Bridge) apiStatus(w http.ResponseWriter, r *http.Request) {
 
 		RestartRequired: nonNil(b.cfgs.RestartRequired()),
 	}
+	resp.Warnings = append(resp.Warnings, b.outboxWarnings(r.Context())...)
 	if bad := badAllowedNumbers(cfg.AllowedNumbers); len(bad) > 0 {
 		resp.Warnings = append(resp.Warnings, fmt.Sprintf("allowed_numbers holds %q, which lets nobody in: each entry must be a phone number, digits with the country code. Fix it under Chats → Allowed numbers.", bad))
 	}
@@ -263,6 +264,43 @@ func (b *Bridge) tokenWarnings(cfg *Config, goos string) []string {
 		}
 	}
 	return out
+}
+
+// outboxWaitWarning is how long a reply may wait before the Overview
+// mentions it: a reconnect usually takes seconds.
+const outboxWaitWarning = time.Minute
+
+// outboxWarnings says what the outbox holds that the owner should know:
+// replies that have waited a while, and replies given up on, which the
+// chats never got.
+func (b *Bridge) outboxWarnings(ctx context.Context) []string {
+	sum, err := b.store.OutboxSummary(ctx, time.Now())
+	if err != nil {
+		return []string{fmt.Sprintf("Cannot read the outbox of replies: %v", err)}
+	}
+	var out []string
+	if sum.Waiting > 0 && time.Since(sum.OldestWaiting) > outboxWaitWarning {
+		w := fmt.Sprintf("%d %s waiting to go out to WhatsApp, the oldest since %s; the bridge keeps trying for an hour.",
+			sum.Waiting, plural(sum.Waiting, "reply is", "replies are"), sum.OldestWaiting.Local().Format("15:04"))
+		if sum.WaitingError != "" {
+			w += " Last error: " + truncate(sum.WaitingError, 200)
+		}
+		out = append(out, w)
+	}
+	if sum.Failed > 0 {
+		out = append(out, fmt.Sprintf("%d %s could not be delivered to WhatsApp and %s given up on, the last at %s: %s. The chats never got them, and the brains' history does not hold them.",
+			sum.Failed, plural(sum.Failed, "reply", "replies"), plural(sum.Failed, "was", "were"),
+			sum.LastFailed.Local().Format("Jan 2 15:04"), truncate(sum.FailedError, 200)))
+	}
+	return out
+}
+
+// plural is one when n is 1, else many.
+func plural(n int, one, many string) string {
+	if n == 1 {
+		return one
+	}
+	return many
 }
 
 // sandboxProfileWarning names the brains whose profile cannot be built, or

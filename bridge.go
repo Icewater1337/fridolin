@@ -59,6 +59,7 @@ type Bridge struct {
 	google        *GoogleAuth
 	plaud         *PlaudManager
 	site          *SiteManager
+	outbox        *Outbox
 	started       time.Time
 
 	// listen is the address the HTTP server binds, "" when it is off;
@@ -173,15 +174,23 @@ func NewBridge(cfgs *ConfigStore, opts BridgeOptions) (_ *Bridge, err error) {
 	}
 
 	b.brainMgr.SetHooks(BrainHooks{
-		Intermediate: func(jid, text string) {
-			if err := b.wa.SendChunked(context.Background(), jid, text); err != nil {
-				log.Printf("failed to send brain intermediate message to %s: %v", jid, err)
+		Notice: func(jid, text string) {
+			// At once or not at all: a notice that arrives after the
+			// answer would only confuse.
+			if err := b.wa.SendMessage(context.Background(), jid, text); err != nil {
+				log.Printf("failed to send the working notice to %s: %v", jid, err)
 			}
 		},
-		Deliver:   b.deliver,
-		OnHistory: b.activity.Add,
-		ExtraArgs: func(id string) []string { return b.site.BuilderArgs(id) },
-		RunEnv:    b.brainRunEnv,
+		Question: func(jid, text string) {
+			if err := b.outbox.Text(context.Background(), jid, text, b.cfgs.Get().MaxChunkSize); err != nil {
+				log.Printf("brain question to %s: %v", jid, err)
+			}
+		},
+		Deliver:     b.deliver,
+		Undelivered: b.undelivered,
+		OnHistory:   b.activity.Add,
+		ExtraArgs:   func(id string) []string { return b.site.BuilderArgs(id) },
+		RunEnv:      b.brainRunEnv,
 	})
 	for _, br := range b.brainMgr.Brains() {
 		b.activity.Seed(br)
@@ -232,6 +241,11 @@ func NewBridge(cfgs *ConfigStore, opts BridgeOptions) (_ *Bridge, err error) {
 	b.site.hooks = b.siteBuilderHooks()
 	// What builder brains say in the Build page's chats goes there, not to WhatsApp.
 	b.wa = siteChatMessenger{Messenger: b.wa, chats: b.site.chats}
+	pace := outboxPace
+	if opts.NoWhatsApp {
+		pace = 0
+	}
+	b.outbox = newOutbox(store, func() Messenger { return b.wa }, pace, b.delivered)
 	return b, nil
 }
 
@@ -316,6 +330,9 @@ func (b *Bridge) Stop() {
 	b.site.Stop()
 	b.deb.DropAll()
 	b.brainMgr.Stop()
+	// After the brains, whose last runs may still reply; what does not go
+	// out stays in bridge.db for the next start.
+	b.outbox.Stop()
 	b.wa.Disconnect()
 	if err := b.store.Close(); err != nil {
 		log.Printf("closing store: %v", err)
@@ -589,19 +606,41 @@ func (b *Bridge) deliver(br *Brain, m Inbound, res RunResult) {
 		return
 	}
 	log.Printf("brain %s: sending response (%d chars) to %s after %s", br.ID(), len(res.Text), m.JID, res.Duration.Round(time.Second))
-	b.sendResponse(ctx, br.ID(), m.JID, res.Text)
+	if err := b.outbox.Reply(ctx, br.ID(), m.JID, res.Text, b.cfgs.Get().MaxChunkSize); err != nil {
+		log.Printf("brain %s: %v", br.ID(), err)
+	}
 }
 
-// sendResponse sends what brain replied in jid: each [POLL]…[/POLL] block as a real
-// WhatsApp poll (see sendPolls), then the rest as text.
-func (b *Bridge) sendResponse(ctx context.Context, brain, jid, text string) {
-	polls, remaining := extractPolls(text)
-	b.sendPolls(ctx, brain, jid, polls)
-	if remaining != "" {
-		if err := b.wa.SendChunked(ctx, jid, remaining); err != nil {
-			log.Printf("failed to send response to %s: %v", jid, err)
-		}
+// delivered takes a reply that went out in full out of the outbox and
+// records it in the history of the brain that wrote it: only now is it
+// something the brain said. The history gets it only once its row is gone,
+// so the retry after a failed removal does not record it twice.
+func (b *Bridge) delivered(ctx context.Context, r outboxRow) error {
+	remove := func() error { return b.store.OutboxDelivered(ctx, r.ID) }
+	if r.Brain == "" || r.History == "" {
+		return remove()
 	}
+	br := b.brainMgr.Get(r.Brain)
+	if br == nil {
+		log.Printf("brain %s: delivered a reply to %s, but the brain is gone", r.Brain, r.Chat)
+		return remove()
+	}
+	return br.recordDelivered(r.Chat, r.History, remove)
+}
+
+// undelivered is what brainID answered that waits in the outbox, as its
+// history will record it (BrainHooks.Undelivered).
+func (b *Bridge) undelivered(brainID string) []historyEntry {
+	rows, err := b.store.UndeliveredReplies(context.Background(), brainID)
+	if err != nil {
+		log.Printf("brain %s: reading its replies in the outbox: %v", brainID, err)
+		return nil
+	}
+	out := make([]historyEntry, 0, len(rows))
+	for _, r := range rows {
+		out = append(out, historyEntry{TS: r.CreatedAt.Local().Format(time.RFC3339), From: brainID, Chat: r.Chat, Text: r.History, Type: historyOut})
+	}
+	return out
 }
 
 // ── startup checks ────────────────────────────────────────────────────────

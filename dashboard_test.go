@@ -775,9 +775,8 @@ func TestAddBrainAllowChatAndRoute(t *testing.T) {
 	if out := tb.dev.Outbox()[0].Text; !strings.Contains(out, dir) || !strings.Contains(out, "hello brain") {
 		t.Errorf("reply %q not from the family brain", out)
 	}
-	if acts := tb.activity.Recent(10, "family"); len(acts) < 2 {
-		t.Errorf("activity = %+v", acts)
-	}
+	// The answer reaches the history, and the feed, once it went out.
+	waitFor(t, 5*time.Second, "the answer in the activity feed", func() bool { return len(tb.activity.Recent(10, "family")) >= 2 })
 
 	// Removing a brain unregisters it and leaves the folder alone.
 	if w := tb.do("DELETE", "/api/brains/family", nil); w.Code != 200 {

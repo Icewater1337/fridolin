@@ -9,6 +9,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 	"unicode/utf8"
 
 	"go.mau.fi/whatsmeow/types"
@@ -372,11 +373,14 @@ func TestPollVoteBecomesAHistoryEvent(t *testing.T) {
 // A poll a brain sends is kept with that brain's id.
 func TestSentPollRemembersItsBrain(t *testing.T) {
 	tb, _ := newMainBridge(t, "")
-	tb.sendResponse(context.Background(), "main", testDMChat, "[POLL]\nQuestion: Lunch?\n- yes\n- no\n[/POLL]")
-	polls, err := tb.store.RecentPolls(context.Background(), "", 10, func(string) bool { return true })
-	if err != nil || len(polls) != 1 {
-		t.Fatalf("polls = %+v, %v; want the one sent", polls, err)
+	if err := tb.outbox.Reply(context.Background(), "main", testDMChat, "[POLL]\nQuestion: Lunch?\n- yes\n- no\n[/POLL]", 0); err != nil {
+		t.Fatal(err)
 	}
+	var polls []PollResult
+	waitFor(t, 5*time.Second, "the poll", func() bool {
+		polls, _ = tb.store.RecentPolls(context.Background(), "", 10, func(string) bool { return true })
+		return len(polls) == 1
+	})
 	p, err := tb.store.SentPoll(context.Background(), polls[0].MsgID)
 	if err != nil || p.Brain != "main" || p.Chat != testDMChat || p.Question != "Lunch?" {
 		t.Errorf("SentPoll = %+v, %v; want brain main's poll in %s", p, err, testDMChat)
