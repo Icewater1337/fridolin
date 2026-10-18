@@ -933,6 +933,64 @@ func TestUnscaffoldStaysInTheFolder(t *testing.T) {
 	}
 }
 
+// What the dashboard polls every few seconds carries an ETag, and a poll
+// that sends it back while nothing changed gets a 304 without a body; once
+// something changed, the new answer with a new ETag.
+func TestPolledEndpointsAnswer304WhileUnchanged(t *testing.T) {
+	tb := newTestBridge(t, "")
+	dir := tb.addFolderBrain(t, BrainManifest{ID: "notes", Name: "Notes"})
+	say := func(text string) func() {
+		return func() {
+			tb.activity.Add("notes", historyEntry{TS: "2026-10-18T10:00:00Z", From: "15551234567", Chat: "15551234567@s.whatsapp.net", Text: text, Type: historyIn})
+		}
+	}
+	say("hello")()
+	cases := []struct {
+		path   string
+		change func()
+	}{
+		{"/api/activity?limit=30", say("again")},
+		{"/api/activity?brain=notes", say("once more")},
+		{"/api/brains", func() {
+			if err := WriteManifest(dir, &BrainManifest{ID: "notes", Name: "Notes 2"}, true); err != nil {
+				t.Fatal(err)
+			}
+		}},
+		{"/api/brains/notes", func() {
+			if err := WriteManifest(dir, &BrainManifest{ID: "notes", Name: "Notes 3"}, true); err != nil {
+				t.Fatal(err)
+			}
+		}},
+	}
+	ifNoneMatch := func(v string) func(*http.Request) {
+		return func(r *http.Request) { r.Header.Set("If-None-Match", v) }
+	}
+	for _, c := range cases {
+		t.Run(c.path, func(t *testing.T) {
+			first := tb.do("GET", c.path, nil)
+			etag := first.Header().Get("ETag")
+			if first.Code != 200 || !strings.HasPrefix(etag, `"`) || first.Header().Get("Content-Type") != "application/json" {
+				t.Fatalf("first poll: %d, ETag %q, Content-Type %q", first.Code, etag, first.Header().Get("Content-Type"))
+			}
+			for _, sent := range []string{etag, "W/" + etag, `"other", ` + etag, "*"} {
+				w := tb.do("GET", c.path, nil, ifNoneMatch(sent))
+				if w.Code != http.StatusNotModified || w.Body.Len() != 0 || w.Header().Get("ETag") != etag {
+					t.Errorf("If-None-Match %s: %d, ETag %q, body %q; want 304, the same ETag, no body", sent, w.Code, w.Header().Get("ETag"), w.Body.String())
+				}
+			}
+			if w := tb.do("GET", c.path, nil, ifNoneMatch(`"other"`)); w.Code != 200 || w.Body.String() != first.Body.String() {
+				t.Errorf("another ETag: %d %s; want the answer", w.Code, w.Body.String())
+			}
+
+			c.change()
+			w := tb.do("GET", c.path, nil, ifNoneMatch(etag))
+			if w.Code != 200 || w.Header().Get("ETag") == etag || w.Body.String() == first.Body.String() {
+				t.Fatalf("after a change: %d, ETag %q (was %q); want the new answer with a new ETag", w.Code, w.Header().Get("ETag"), etag)
+			}
+		})
+	}
+}
+
 // A limit above the maximum gets the maximum, not the default.
 func TestListLimitsClampToTheMaximum(t *testing.T) {
 	tb := newTestBridge(t, "")
