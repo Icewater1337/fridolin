@@ -674,7 +674,9 @@ keeps correcting themselves cannot push other chats back. Requests from other
 chats, and other people's in a group, still wait their turn (with the same
 notice). Untagged group chatter never interrupts a run, and files sent through
 `/ingest` neither interrupt nor replace one another: each is a job of its own.
-`max_pending` applies in both modes.
+`max_pending` applies in both modes. [Plaud](PLAUD.md) recordings take at
+most five places, and half of a smaller queue (at least one), so your own
+messages still get in.
 
 Untagged group chatter waiting in the queue is dropped when a newer message
 from that chat arrives — it is already in the history the next run reads.

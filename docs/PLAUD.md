@@ -34,8 +34,11 @@ off: what you recorded in between still arrives. Turning **Send new
 recordings to a brain** off and on again does the same: nothing is checked
 while it is off, so what you recorded meanwhile is sent once it is back on.
 Each check reads Plaud's list back to the last recording it knows (up to
-2,000 recordings back), and hands over at most five, oldest first, so a
-backlog arrives a few recordings a minute rather than all at once.
+2,000 recordings back). Each recording is a brain run of its own, and at
+most five are with the brain at once, waiting or running (fewer when
+`queue.max_pending` is below 10: half of it, at least one). So a backlog
+arrives oldest first, as the brain gets through it, and never fills the
+brain's queue, which then would turn your own messages away.
 
 ## What happens
 

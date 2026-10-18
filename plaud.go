@@ -110,11 +110,13 @@ const (
 	// up to plaudListPages pages back.
 	plaudPageSize  = 100
 	plaudListPages = plaudSeenKeep / plaudPageSize
-	// plaudHandOffsPerCheck caps the recordings one check hands over; the
-	// rest wait for the next one. After a gap, a backlog arrives a few at
-	// a time rather than as a burst of brain runs and replies.
-	plaudHandOffsPerCheck = 5
-	plaudPendingMaxAge    = 3 * 24 * time.Hour
+	// plaudHandedMax caps the recordings with brains at once, waiting in a
+	// queue or running (see plaudHandedLimit); the rest wait their turn.
+	// Each is a run of its own, and a brain's queue also takes your own
+	// messages, which it turns away once it is full: after a gap, a backlog
+	// must arrive a few at a time, as runs end, rather than fill it.
+	plaudHandedMax     = 5
+	plaudPendingMaxAge = 3 * 24 * time.Hour
 	// plaudGivenUpKeep is how many given-up recordings the card lists, and
 	// plaudForwardedKeep how many handed over.
 	plaudGivenUpKeep   = 20
@@ -217,6 +219,13 @@ func plaudRetryDelay(tries int) time.Duration {
 		return 15 * time.Minute
 	}
 	return min(time.Minute<<(tries-1), 15*time.Minute)
+}
+
+// plaudHandedLimit is how many recordings may be with brains at once under
+// cfg: plaudHandedMax, or half of queue.max_pending when that is less, so
+// that the queue keeps room for your own messages. One always may.
+func plaudHandedLimit(cfg *Config) int {
+	return max(1, min(plaudHandedMax, cfg.Queue.MaxPending/2))
 }
 
 // UnmarshalJSON reads both layouts of state.json.
@@ -1326,10 +1335,15 @@ func (p *PlaudManager) poll(ctx context.Context) error {
 	// Plaud.
 	var failed []error
 	maxAge := fmt.Sprintf("%d days", plaudPendingMaxAge/(24*time.Hour))
-	handed := 0
+	// Only as many as there is room for: the recordings still with a brain
+	// count, not just those this check hands over, so a backlog never fills
+	// a brain's queue however many checks it takes.
+	p.mu.Lock()
+	room := plaudHandedLimit(cfg) - len(p.inFlight)
+	p.mu.Unlock()
 	now := time.Now()
 	for _, id := range st.pendingInOrder() {
-		if handed == plaudHandOffsPerCheck {
+		if room <= 0 {
 			break
 		}
 		item := *st.Pending[id]
@@ -1358,7 +1372,7 @@ func (p *PlaudManager) poll(ctx context.Context) error {
 		deleted := errors.Is(err, errPlaudNotFound)
 		switch {
 		case fw != nil:
-			handed++
+			room--
 		case deleted:
 			why = "it was deleted in Plaud"
 			log.Printf("plaud %s: deleted in Plaud, giving up", id)

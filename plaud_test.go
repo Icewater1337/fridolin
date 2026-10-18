@@ -1589,17 +1589,91 @@ func TestPlaudPagesBackToTheLastKnownRecording(t *testing.T) {
 	}
 	oldest := slices.Clone(backlog)
 	slices.Reverse(oldest)
-	if !slices.Equal(handed, oldest[:plaudHandOffsPerCheck]) {
-		t.Errorf("handed over %v, want the oldest %d: %v", handed, plaudHandOffsPerCheck, oldest[:plaudHandOffsPerCheck])
+	if !slices.Equal(handed, oldest[:plaudHandedMax]) {
+		t.Errorf("handed over %v, want the oldest %d: %v", handed, plaudHandedMax, oldest[:plaudHandedMax])
 	}
-	if st, _ := tb.plaud.loadState(); len(st.Pending) != len(backlog)-plaudHandOffsPerCheck {
-		t.Errorf("%d waiting, want %d", len(st.Pending), len(backlog)-plaudHandOffsPerCheck)
+	if st, _ := tb.plaud.loadState(); len(st.Pending) != len(backlog)-plaudHandedMax {
+		t.Errorf("%d waiting, want %d", len(st.Pending), len(backlog)-plaudHandedMax)
 	}
 	if err := tb.plaud.Poll(context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	if !slices.Equal(handed, oldest[:2*plaudHandOffsPerCheck]) {
-		t.Errorf("after two checks handed over %v, want the oldest %d", handed, 2*plaudHandOffsPerCheck)
+	if !slices.Equal(handed, oldest[:2*plaudHandedMax]) {
+		t.Errorf("after two checks handed over %v, want the oldest %d", handed, 2*plaudHandedMax)
+	}
+}
+
+// Only so many recordings are with brains at once, those of earlier checks
+// included: a backlog goes on, oldest first, as their runs end. The limit
+// leaves half of a small queue for your own messages.
+func TestPlaudBacklogTricklesInAsRunsEnd(t *testing.T) {
+	for _, c := range []struct{ maxPending, want int }{{10, plaudHandedMax}, {100, plaudHandedMax}, {6, 3}, {3, 1}, {1, 1}} {
+		if got := plaudHandedLimit(&Config{Queue: QueueConfig{MaxPending: c.maxPending}}); got != c.want {
+			t.Errorf("limit with queue.max_pending %d = %d, want %d", c.maxPending, got, c.want)
+		}
+	}
+	tb, fp := plaudBridge(t, "")
+	rec := &plaudRecorder{}
+	tb.plaud.submit = rec.submit
+	plaudSignIn(t, tb)
+	if err := tb.plaud.saveState(plaudSeededState("u_1", plaudOld1)); err != nil {
+		t.Fatal(err)
+	}
+	backlog := plaudIDs("d", 12)
+	fp.files(append(slices.Clone(backlog), plaudOld1)...)
+	for _, id := range backlog {
+		fp.recording(id, true)
+	}
+	oldest := slices.Clone(backlog)
+	slices.Reverse(oldest)
+	ctx := context.Background()
+	ended := 0
+	for _, step := range []struct {
+		end  int // runs that end before the check, oldest first
+		want int // hand-offs in all after it
+	}{{0, plaudHandedMax}, {0, plaudHandedMax}, {2, plaudHandedMax + 2}, {0, plaudHandedMax + 2}, {5, 2*plaudHandedMax + 2}} {
+		for _, id := range oldest[ended : ended+step.end] {
+			rec.end(id, nil)
+		}
+		ended += step.end
+		if err := tb.plaud.Poll(ctx); err != nil {
+			t.Fatal(err)
+		}
+		rec.mu.Lock()
+		handed := slices.Clone(rec.handed)
+		rec.mu.Unlock()
+		if !slices.Equal(handed, oldest[:step.want]) {
+			t.Fatalf("after %d more runs ended: handed over %d, want the oldest %d", step.end, len(handed), step.want)
+		}
+	}
+}
+
+// With the real bridge and a slow brain, a backlog never fills the brain's
+// queue, however many checks come while it works: none of them finds the
+// queue full, and your own message to that brain still gets in.
+func TestPlaudBacklogLeavesRoomInTheBrainsQueue(t *testing.T) {
+	tb, fp := plaudBridge(t, "")
+	t.Setenv("FRIDOLIN_FAKE_SLEEP_MS", "60000") // the cleanup stops the runs
+	plaudSignIn(t, tb)
+	if err := tb.plaud.saveState(plaudSeededState("u_1", plaudOld1)); err != nil {
+		t.Fatal(err)
+	}
+	backlog := plaudIDs("c", 15)
+	fp.files(append(slices.Clone(backlog), plaudOld1)...)
+	for _, id := range backlog {
+		fp.recording(id, true)
+	}
+	limit := plaudHandedLimit(tb.cfgs.Get())
+	for i := range 4 {
+		if err := tb.plaud.Poll(context.Background()); err != nil {
+			t.Fatalf("check %d: %v", i+1, err)
+		}
+		if s := tb.plaud.Status(); *s.Handed != limit || *s.Pending != len(backlog)-limit {
+			t.Fatalf("check %d: %d with the brain and %d waiting, want %d and %d", i+1, *s.Handed, *s.Pending, limit, len(backlog)-limit)
+		}
+	}
+	if _, _, _, err := tb.brainMgr.Submit(Inbound{JID: "15551234567@s.whatsapp.net", Sender: "15551234567", Text: "hello", Source: "whatsapp"}); err != nil {
+		t.Errorf("your own message to the brain = %v, want it taken", err)
 	}
 }
 
