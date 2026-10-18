@@ -115,8 +115,10 @@
 .back-link .icon { width: 16px; height: 16px; }
 .back-link:hover { color: var(--text); }
 .head-meta { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-top: 8px; }
-.path-line { display: flex; align-items: center; gap: 6px; margin-top: 8px; flex-wrap: wrap; min-width: 0; }
+/* One row: a long path wraps inside its box, next to the folder icon. */
+.path-line { display: flex; align-items: center; gap: 6px; margin-top: 8px; min-width: 0; }
 .path-line > .icon { color: var(--muted); width: 16px; height: 16px; }
+.path-line > code { min-width: 0; }
 
 .section { display: flex; flex-direction: column; gap: 12px; }
 .section:empty { display: none; }
@@ -242,6 +244,7 @@ a.badge:hover { color: var(--accent); }
 .callout-icon { color: var(--info); margin-top: 1px; }
 .callout-body { display: flex; flex-direction: column; gap: 4px; min-width: 0; flex: 1; overflow-wrap: anywhere; }
 .callout-text { min-width: 0; }
+.callout-text :where(ul, ol) { margin: 0; padding-left: 18px; }
 .callout-text > * + * { margin-top: 4px; }
 .callout.warn { background: var(--warn-soft); border-color: var(--warn-border); }
 .callout.warn .callout-icon { color: var(--warn); }
@@ -657,7 +660,9 @@ dialog.dialog::backdrop { background: var(--backdrop); }
 .fb-loading, .fb-empty { padding: 18px 14px; display: flex; align-items: center; gap: 8px; }
 .fb-footer { display: flex; flex-direction: column; gap: 10px; padding: 12px 14px; border-top: 1px solid var(--border); background: var(--surface-2); }
 .fb-use { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
-.fb-current { flex: 1; min-width: 0; }
+/* As wide as the path, so on a narrow screen the button wraps below it
+   instead of squeezing it to a few letters a line. */
+.fb-current { flex: 1 1 auto; min-width: 0; }
 .fb-new { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
 .fb-new input { flex: 1; min-width: 180px; }
 
