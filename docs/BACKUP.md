@@ -164,8 +164,11 @@ folder. The bridge never restores over an existing brain. The folder must
 pass the checks a new brain's folder does (see [adding a brain](BRAINS.md)):
 inside your home folder, not in or around a brain, and not in the bridge's
 data folder or the credentials folder. Nor may it lie inside what the
-sandbox keeps from brains, such as `~/.claude`, `~/.ssh` or a `deny_paths`
-entry, since the bridge writes the copy outside any sandbox. Each check
+sandbox keeps from brains, such as `~/.claude`, `~/.ssh`, `~/Library/Mail`
+or a `deny_paths` entry, since the bridge writes the copy outside any
+sandbox. The folders of your own files (`~/Documents`, `~/Desktop`,
+`~/Downloads`, `~/Movies`, `~/Music`, `~/Pictures`) are fine, as they are
+for a new brain. Each check
 looks where the folder really is, through any symlink on the way. The
 restore runs in the background (one at a time, and not while a
 backup runs), and the Backup page shows how the last one went, a failure

@@ -275,6 +275,12 @@ var defaultDenySubpaths = []string{
 	"Library/Group Containers",
 }
 
+// userFileFolders are the folders of defaultDenySubpaths that hold your own
+// files rather than secrets: a brain's folder may lie in one, where the
+// sandbox opens that folder alone, and so may a restore (see
+// checkRestoreTarget).
+var userFileFolders = []string{"Documents", "Downloads", "Desktop", "Movies", "Music", "Pictures"}
+
 // browserProfilePrefixes are browsers that keep each release channel in a
 // folder of its own beside the stable one in ~/Library/Application Support
 // ("Microsoft Edge Beta", "Vivaldi Snapshot", "com.operasoftware.OperaGX"),

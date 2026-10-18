@@ -2241,6 +2241,35 @@ func TestBackupRestoreChecksWhatItIsGiven(t *testing.T) {
 	}
 }
 
+// TestBackupRestoreIntoYourOwnFilesFolders: a restore refused every folder
+// inside what the sandbox denies brains, ~/Documents too, where brain
+// folders may live and a new one is accepted: restoring a brain to
+// ~/Documents/assistant, where it used to be, failed. Only the folders of
+// your own files are open to a restore now; secrets and deny_paths
+// entries stay refused.
+func TestBackupRestoreIntoYourOwnFilesFolders(t *testing.T) {
+	tb := newTestBridge(t, `, "sandbox": {"deny_paths": ["~/clients"]}`)
+	cases := []struct {
+		target string
+		ok     bool
+	}{
+		{"~/Documents/assistant/restored", true},
+		{"~/Desktop/restored", true},
+		{"~/Music/restored", true},
+		{"~/.ssh/restored", false},
+		{"~/.config/gh/restored", false},
+		{"~/Library/Mail/restored", false},
+		{"~/clients/restored", false},
+	}
+	for _, c := range cases {
+		t.Run(c.target, func(t *testing.T) {
+			if _, err := tb.restoreTarget(c.target); (err == nil) != c.ok {
+				t.Errorf("restoreTarget(%s) = %v, want ok=%v", c.target, err, c.ok)
+			}
+		})
+	}
+}
+
 // TestBackupRestoreNeedsDrive: a restore and the versions list say that
 // Drive is not connected, rather than fail out of sight.
 func TestBackupRestoreNeedsDrive(t *testing.T) {

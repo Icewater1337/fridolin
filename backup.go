@@ -1795,11 +1795,15 @@ func resolveExisting(p string) string {
 // in what the sandbox keeps from brains ("is inside …", like
 // checkBrainDir), or nil. The bridge writes the copy outside any sandbox,
 // so where a brain folder may still live, inside ~/.ssh or a deny_paths
-// entry, no restore needs to write.
+// entry, no restore needs to write. The folders of your own files are the
+// exception, ~/Documents and the rest of userFileFolders: brains live
+// there, and so may a restored one, as CheckBrainPath lets a new one.
 func checkRestoreTarget(target string, cfg *Config, home string) error {
 	var denied []protectedPath
 	for _, p := range sandboxPolicyOf(cfg).protected(home, ownLayout()) {
-		p.inside = true
+		if !slices.ContainsFunc(userFileFolders, func(sub string) bool { return p.path == filepath.Join(home, sub) }) {
+			p.inside = true
+		}
 		denied = append(denied, p)
 	}
 	for _, p := range cfg.Sandbox.DenyPaths {
