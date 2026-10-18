@@ -43,6 +43,32 @@ func TestBuildChatPathNeedsABrainID(t *testing.T) {
 	}
 }
 
+// The Build page shows that a run is working on its own, so the working
+// notice is left out of a build chat. Every other notice reaches it, those
+// that start with the same ⏳ too, such as the one about Claude's usage
+// limit.
+func TestBuildChatLeavesOutOnlyTheWorkingNotice(t *testing.T) {
+	c := &siteChats{m: newTestSite(t)}
+	s := siteChatMessenger{chats: c}
+	for _, tc := range []struct {
+		text  string
+		shown bool
+	}{
+		{workingNotice, false},
+		{chatErrLimit, true},
+		{"⏳ Queued (#2) — I'll get to this right after the current task.", true},
+		{"Here is the new page.", true},
+	} {
+		before := len(c.get("web").Messages)
+		if err := s.SendMessage(context.Background(), buildChatJID("web", 1), tc.text); err != nil {
+			t.Fatal(err)
+		}
+		if shown := len(c.get("web").Messages) > before; shown != tc.shown {
+			t.Errorf("%q in the build chat: %v, want %v", tc.text, shown, tc.shown)
+		}
+	}
+}
+
 // A message on the Build page runs the builder brain in a chat of its own;
 // its answer lands in the page, not in WhatsApp.
 func TestSiteBuildChat(t *testing.T) {

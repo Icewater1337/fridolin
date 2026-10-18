@@ -179,6 +179,11 @@ with its tools, as `fridolin.prev`. To go back to it:
 fridolin service rollback     # run it again to undo
 ```
 
+[docs/COMPATIBILITY.md](docs/COMPATIBILITY.md) lists what an upgrade
+keeps working (`config.json`, `brain.json`, the history files,
+`bridge.db`, `/send` and `/ingest`, the commands) and how something is
+retired; [CHANGELOG.md](CHANGELOG.md) what changed.
+
 **Coming from a version without API tokens** (one whose `/ingest` took
 none): `POST /ingest` now refuses a call without a token with `401`, so an
 upload handler or recorder sync written for the old version stops working
@@ -714,6 +719,9 @@ chats that wrote without being allowed.
 
 **`chunks.go`** — splits long replies at paragraph, line, sentence, then word
 boundaries so messages break somewhere readable, and numbers the parts.
+
+**`messages.go`** — every message the bridge itself sends into chats, as
+opposed to a brain's answers, pinned in `testdata/golden/messages.golden`.
 
 **`outbox.go`** — brains' replies, and the questions they ask mid-run,
 wait in `bridge.db` until WhatsApp took every message of them, are tried

@@ -585,3 +585,156 @@ func TestDotEnvIsNotRead(t *testing.T) {
 		})
 	}
 }
+
+// config.json carries the version it was written in. A file without one is
+// version 1, which is migrated to the current version as it is read; a
+// newer version, or a version that is no number, is refused.
+func TestMigrateConfig(t *testing.T) {
+	cases := []struct {
+		name, config string
+		from         int
+		want         map[string]string // keys of the migrated file, as JSON; "" for a key it lacks
+		err          string            // part of the error, "" when it migrates
+	}{
+		{"no version", `{"log_level": "debug"}`, 1, map[string]string{"version": "2", "log_level": `"debug"`}, ""},
+		{"null", `{"version": null}`, 1, map[string]string{"version": "2"}, ""},
+		{"version 1 with retired keys", `{"version": 1, "model": "sonnet", "work_dir": "~/a", "brains": []}`, 1,
+			map[string]string{"version": "2", "brain_model": `"sonnet"`, "model": "", "work_dir": "", "brains": ""}, ""},
+		{"version 1 keeps its brain_model", `{"model": "sonnet", "brain_model": "opus"}`, 1, map[string]string{"brain_model": `"opus"`, "model": ""}, ""},
+		// The retired keys are version 1's: in a version 2 file they are
+		// unknown keys, which no migration touches.
+		{"version 2", `{"version": 2, "model": "sonnet"}`, 2, map[string]string{"version": "2", "model": `"sonnet"`, "brain_model": ""}, ""},
+		{"version 1 with inline brains", `{"brains": [{"name": "a"}]}`, 1, nil, `lists brains inline under "brains"`},
+		{"newer", `{"version": 3}`, 3, nil, "version 3 is newer than the version 2 this build of Fridolin reads"},
+		{"zero", `{"version": 0}`, 0, nil, "version 0: must be a whole number from 1 to 2"},
+		{"negative", `{"version": -1}`, 0, nil, "version -1: must be a whole number from 1 to 2"},
+		{"a string", `{"version": "2"}`, 0, nil, `version "2": must be a whole number`},
+		{"a fraction", `{"version": 1.5}`, 0, nil, "version 1.5: must be a whole number"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			var obj map[string]json.RawMessage
+			if err := json.Unmarshal([]byte(c.config), &obj); err != nil {
+				t.Fatal(err)
+			}
+			from, _, err := migrateConfig(obj)
+			switch {
+			case c.err != "" && (err == nil || !strings.Contains(err.Error(), c.err)):
+				t.Fatalf("err = %v, want one containing %q", err, c.err)
+			case c.err == "" && err != nil:
+				t.Fatalf("err = %v", err)
+			}
+			if from != c.from {
+				t.Errorf("from = %d, want %d", from, c.from)
+			}
+			for key, want := range c.want {
+				if got := string(obj[key]); got != want {
+					t.Errorf("%s = %s, want %s", key, got, want)
+				}
+			}
+		})
+	}
+	if len(configMigrations) != currentConfigVersion-1 {
+		t.Errorf("%d migrations for version %d: each version after 1 needs one", len(configMigrations), currentConfigVersion)
+	}
+}
+
+// The store migrates in memory only: starting writes nothing, and the next
+// save writes the current version. A file of a newer version stops the
+// bridge before it can save it without the settings it does not know, and
+// a dashboard save of one is refused.
+func TestConfigVersionOnDisk(t *testing.T) {
+	t.Run("a version 1 file", func(t *testing.T) {
+		t.Setenv("HOME", t.TempDir())
+		const body = `{"model": "sonnet", "log_level": "info"}`
+		path := writeConfig(t, body)
+		cs, err := OpenConfigStore(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if data, _ := os.ReadFile(path); string(data) != body {
+			t.Errorf("starting rewrote the file:\n%s", data)
+		}
+		if v := cs.FileCopy().Version; v != currentConfigVersion {
+			t.Errorf("the file layer is version %d, want %d", v, currentConfigVersion)
+		}
+		if _, err := cs.Update(cs.ETag(), func(c *Config) error { c.LogLevel = "debug"; return nil }); err != nil {
+			t.Fatal(err)
+		}
+		raw := readRawConfig(t, path)
+		if string(raw["version"]) != "2" || string(raw["brain_model"]) != `"sonnet"` || raw["model"] != nil {
+			t.Errorf("saved version %s, brain_model %s, model %s; want 2, \"sonnet\" and no model", raw["version"], raw["brain_model"], raw["model"])
+		}
+		if _, err := OpenConfigStore(path); err != nil {
+			t.Errorf("the saved file does not load: %v", err)
+		}
+	})
+
+	t.Run("no file", func(t *testing.T) {
+		t.Setenv("HOME", t.TempDir())
+		path := filepath.Join(t.TempDir(), "config.json")
+		cs, err := OpenConfigStore(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := cs.Update(cs.ETag(), func(c *Config) error { c.Version = 0; return nil }); err != nil {
+			t.Fatal(err)
+		}
+		if v := string(readRawConfig(t, path)["version"]); v != "2" {
+			t.Errorf("the first save wrote version %s, want 2", v)
+		}
+	})
+
+	t.Run("a version 2 file with a retired key", func(t *testing.T) {
+		t.Setenv("HOME", t.TempDir())
+		path := writeConfig(t, `{"version": 2, "model": "sonnet"}`)
+		logs := captureLog(t)
+		cs, err := OpenConfigStore(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := cs.Get().BrainModel; got != "" {
+			t.Errorf("brain_model = %q, want none: model is no key of version 2", got)
+		}
+		if !slices.ContainsFunc(logs(), func(l string) bool { return strings.Contains(l, "ignoring unknown settings [model]") }) {
+			t.Errorf("model not logged as unknown: %q", logs())
+		}
+	})
+
+	t.Run("a newer file", func(t *testing.T) {
+		t.Setenv("HOME", t.TempDir())
+		const body = `{"version": 3, "allowed_numbers": ["15551234567"], "a_newer_setting": true}`
+		path := writeConfig(t, body)
+		_, err := OpenConfigStore(path)
+		if err == nil || !errors.Is(err, errConfigTooNew) {
+			t.Fatalf("err = %v, want errConfigTooNew", err)
+		}
+		for _, part := range []string{"version 3 is newer than the version 2", "Run that newer version again", "docs/CONFIGURATION.md#version"} {
+			if !strings.Contains(err.Error(), part) {
+				t.Errorf("error %q does not say %q", err, part)
+			}
+		}
+		if data, _ := os.ReadFile(path); string(data) != body {
+			t.Errorf("the refused file changed:\n%s", data)
+		}
+	})
+
+	t.Run("a newer dashboard save", func(t *testing.T) {
+		t.Setenv("HOME", t.TempDir())
+		cs, err := OpenConfigStore(writeConfig(t, `{}`))
+		if err != nil {
+			t.Fatal(err)
+		}
+		whole, err := json.Marshal(cs.FileCopy())
+		if err != nil {
+			t.Fatal(err)
+		}
+		newer := strings.Replace(string(whole), `"version":2`, `"version":3`, 1)
+		if _, err := decodeConfigReplacement([]byte(newer)); !errors.Is(err, errConfigTooNew) {
+			t.Errorf("a version 3 save: err = %v, want errConfigTooNew", err)
+		}
+		if _, err := decodeConfigReplacement(whole); err != nil {
+			t.Errorf("a version 2 save: %v", err)
+		}
+	})
+}

@@ -22,6 +22,10 @@ const (
 	MatchWord TriggerMatch = "word"
 )
 
+// validTriggerMatches are the values a trigger's match takes; one left
+// out is MatchAnywhere.
+var validTriggerMatches = map[TriggerMatch]bool{MatchAnywhere: true, MatchStart: true, MatchWord: true}
+
 // Trigger is one keyword that makes the bridge answer in a group.
 type Trigger struct {
 	Text  string       `json:"text"`
@@ -52,9 +56,7 @@ func (tl *TriggerList) UnmarshalJSON(data []byte) error {
 		if t.Match == "" {
 			t.Match = MatchAnywhere
 		}
-		switch t.Match {
-		case MatchAnywhere, MatchStart, MatchWord:
-		default:
+		if !validTriggerMatches[t.Match] {
 			return fmt.Errorf("trigger %q: match must be anywhere, start or word, not %q", t.Text, t.Match)
 		}
 		out = append(out, t)

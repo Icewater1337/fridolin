@@ -117,16 +117,6 @@ func parsePollBlock(block string, maxSelectable int) (pollData, bool) {
 	return pollData{Question: question, Options: options, MaxSelectable: maxSelectable}, true
 }
 
-// pollAsText is a poll as a numbered list, for when WhatsApp refuses it
-// as a poll.
-func pollAsText(p pollData) string {
-	text := "📊 *" + p.Question + "*\n"
-	for i, opt := range p.Options {
-		text += fmt.Sprintf("%d. %s\n", i+1, opt)
-	}
-	return strings.TrimSpace(text)
-}
-
 // matchVote returns the options a vote chose. WhatsApp sends the SHA-256
 // hashes of the chosen options' text, not the text; a hash that matches
 // none is dropped.

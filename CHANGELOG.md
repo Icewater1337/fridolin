@@ -2,6 +2,9 @@
 
 What changes for people who run Fridolin. There are no tagged releases
 yet, so everything is under Unreleased until the first one.
+[docs/COMPATIBILITY.md](docs/COMPATIBILITY.md) says what stays the same
+from one version to the next, and how something that goes is first kept
+for compatibility.
 
 ## Unreleased
 
@@ -152,6 +155,18 @@ yet, so everything is under Unreleased until the first one.
 
 - `group_members`: who in each allowed group reaches its brain, by phone
   number, or `["*"]` for everyone (docs/CONFIGURATION.md).
+- `config.json` has a `version`, 2 today, which every save writes. A
+  config without one is version 1 and is read as version 2, its retired
+  keys folded in as before; starting does not rewrite it. A bridge
+  refuses to start with a config of a newer version than it reads, and
+  the dashboard refuses to save one, instead of dropping the settings it
+  does not know. In a version 2 config, the version 1 keys `model`,
+  `work_dir` and `brains` are unknown settings.
+- `docs/schemas` has JSON Schemas of `config.json`, `brain.json`, a line
+  of a brain's `conversation-history.jsonl`, and the requests and answers
+  of `/send` and `/ingest`, for an editor or a script to check against.
+  docs/BRAINS.md describes the history line, whose fields and types are
+  added but never renamed or removed.
 - `fridolin paths` prints the config file and the data dir in use, and
   where each came from (`--json` for programs).
 - `fridolin check --redact` masks phone numbers, JIDs, email addresses and
@@ -177,6 +192,9 @@ yet, so everything is under Unreleased until the first one.
 
 ### Fixed
 
+- A build chat on the Site's Build page shows that Claude's usage limit is
+  reached, that its message is queued, or that the queue is full. It left
+  out every notice that starts with ⏳, to leave out "Working on it".
 - "Connect again" on a Plaud login that Plaud refuses signs that login
   out first, giving the sign-out up to 30 seconds. Before, it took the
   CLI's "Already logged in" for a new sign-in and showed Connected until
@@ -203,6 +221,10 @@ because they are on disk or because scripts rely on them:
 
 From earlier versions of the bridge:
 
+- A `config.json` without `version`, version 1, which is read with its
+  retired keys `model`, `work_dir` and `brains` folded in. It stays, as
+  every migration of `config.json` does, so that a config of any earlier
+  version loads.
 - The calendar variables `BRIDGE_BRAIN_ID`, `BRIDGE_CALENDARS` and
   `BRIDGE_CALENDAR_DEFAULT`, which nothing in `tools/` reads now that the
   bridge makes the calendar calls; they go after one release.

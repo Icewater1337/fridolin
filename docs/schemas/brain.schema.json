@@ -1,0 +1,50 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Fridolin brain.json",
+  "description": "A brain's manifest, version 1, in the brain's own folder, as docs/BRAINS.md describes it; config.json's brain_dirs[].approved holds the copy you approved. Fields are added without a new version; one renamed, removed or given another meaning comes with one.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["id", "name"],
+  "properties": {
+    "version": {"const": 1, "description": "The version of the manifest; absent is 1."},
+    "id": {"type": "string", "pattern": "^[a-z0-9][a-z0-9_-]{0,39}$", "description": "Stable: history, the sandbox profile and credential files go by it."},
+    "name": {"type": "string", "pattern": "\\S", "description": "The name the dashboard shows."},
+    "routing": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "handles_dms": {"type": "boolean"},
+        "default": {"type": "boolean"},
+        "groups": {"type": ["array", "null"], "items": {"type": "string", "pattern": "@g\\.us$"}},
+        "answer_files": {"type": "boolean", "description": "Default true."},
+        "answer_forwards": {"type": "boolean", "description": "Default true."}
+      }
+    },
+    "model": {"type": "string"},
+    "effort": {"enum": ["", "low", "medium", "high", "xhigh", "max"]},
+    "disallowed_tools": {"type": "array", "items": {"type": "string"}, "description": "Left out, the brain gets the global list; [] allows every tool."},
+    "prompt_file": {"type": "string", "not": {"pattern": "^(/|\\.\\.)"}, "description": "Relative to the brain's folder, and inside it. Default brain-prompt.md."},
+    "reply_chat": {"type": "string"},
+    "observe": {"enum": ["", "history", "run"]},
+    "backup": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "enabled": {"type": "boolean"},
+        "exclude": {"type": ["array", "null"], "items": {"type": "string", "not": {"pattern": "[\\r\\n]|^\\s*\\+"}}}
+      }
+    },
+    "calendar": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "account": {"$ref": "#/$defs/calendar_id"},
+        "calendars": {"type": ["array", "null"], "items": {"$ref": "#/$defs/calendar_id"}},
+        "default": {"$ref": "#/$defs/calendar_id"}
+      }
+    }
+  },
+  "$defs": {
+    "calendar_id": {"type": "string", "not": {"pattern": "[\\r\\n,]"}}
+  }
+}

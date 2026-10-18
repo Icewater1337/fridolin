@@ -1,0 +1,18 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "A line of a brain's conversation-history.jsonl",
+  "description": "One JSON object per line, appended by the bridge, as docs/BRAINS.md describes it. Fields and types are added, never renamed or removed, so a reader ignores the fields and the lines of a type it does not know. This schema describes exactly the lines this version writes, and refuses any other field or type so that tests hold it to the code: a reader validating against it should allow unknown fields and types, as later versions add them.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["ts", "from", "chat", "text", "type"],
+  "properties": {
+    "ts": {"type": "string", "format": "date-time", "description": "RFC 3339, to the second, with the offset of the bridge's time zone, or Z when the offset is zero (UTC, or London in winter, for one): for an in line when the message was sent, for the others when the line was written."},
+    "from": {"type": "string", "description": "in, event and reset: who wrote it, did it or sent !reset, by phone number, or the sender an /ingest named. out: the brain's id; for a line that came in through /send, the brain that sent it or \"script\" (see via)."},
+    "chat": {"type": "string", "description": "The chat's JID: a person's number@s.whatsapp.net, or a group's …@g.us."},
+    "text": {"type": "string", "description": "What was said, with a quote and attachments as lines of their own; for an event, what happened, after the name in from; empty for a reset."},
+    "type": {"enum": ["in", "out", "event", "reset"], "description": "in: a message to the brain. out: one it sent, or that was sent for it. event: something that happened in the chat without a message, such as a vote. reset: where !reset started the chat afresh, which a run reads only after."},
+    "via": {"enum": ["brain", "script", "api"], "description": "How an out line came in through /send: a brain's run token, the scripts token, or no token. A brain's own replies have none."},
+    "id": {"type": "string", "description": "The WhatsApp message's id, for a message from WhatsApp, which an edit or deletion names."},
+    "otp_request": {"type": "string", "description": "On the out line of a /send that asked for a one-time code: the id the answer of /send gave it, which the hand-off of the code repeats."}
+  }
+}

@@ -50,21 +50,26 @@ func OpenConfigStore(cfgPath string) (*ConfigStore, error) {
 	}
 	warnDotEnvNotRead(cfgPath)
 
-	file := &Config{}
+	file := &Config{Version: currentConfigVersion}
 	var raw []byte
 	if data, err := os.ReadFile(cfgPath); err == nil {
 		raw = data
-		if err := json.Unmarshal(data, file); err != nil {
+		// An older version is migrated in memory only, and the next save
+		// writes it as this one. A migration logs what it changed.
+		migrated, notes, err := migrateConfigJSON(data)
+		if errors.Is(err, errConfigTooNew) {
+			return nil, fmt.Errorf("config file %q: %w. Run that newer version again, or put back a config.json from before it (see docs/CONFIGURATION.md#version)", cfgPath, err)
+		}
+		if err != nil {
 			return nil, fmt.Errorf("parsing config file %q: %w", cfgPath, err)
 		}
-		notes, err := foldRetiredKeys(data, file)
-		if err != nil {
+		if err := json.Unmarshal(migrated, file); err != nil {
 			return nil, fmt.Errorf("parsing config file %q: %w", cfgPath, err)
 		}
 		for _, note := range notes {
 			log.Printf("config %s: %s", cfgPath, note)
 		}
-		warnUnknownKeys(cfgPath, data)
+		warnUnknownKeys(cfgPath, migrated)
 		warnOddChats(cfgPath, file)
 	} else if !os.IsNotExist(err) {
 		return nil, fmt.Errorf("reading config file %q: %w", cfgPath, err)
@@ -137,6 +142,8 @@ func (cs *ConfigStore) Update(etag string, mutate func(*Config) error) (restart 
 		cs.mu.Unlock()
 		return nil, err
 	}
+	// What is written is this version's file, whatever the edit made of it.
+	next.Version = currentConfigVersion
 	eff, err := effective(next)
 	if err != nil {
 		cs.mu.Unlock()
@@ -281,45 +288,28 @@ func warnLegacyDataDir(dataDir string) {
 // out a key that config.json always has, one without omitempty, at the top
 // or in a section: the replacement would reset it to its default, and a
 // partial body would turn the sandbox off and empty allowed_numbers
-// without a word. Retired keys are folded in as at startup, so a dashboard
-// tab opened before an upgrade keeps a model it still sends, and cannot
-// bring inline brains back.
+// without a word. It is migrated like config.json at startup: one without
+// a version, from a dashboard tab opened before an upgrade, keeps a model
+// it still sends and cannot bring inline brains back, and one from a newer
+// version is refused.
 func decodeConfigReplacement(data []byte) (*Config, error) {
 	if len(bytes.TrimSpace(data)) == 0 || string(bytes.TrimSpace(data)) == "null" {
 		return nil, errors.New("config required: send the whole config GET /api/config returns, with your changes")
 	}
-	dec := json.NewDecoder(bytes.NewReader(withoutRetiredKeys(data)))
+	migrated, _, err := migrateConfigJSON(data)
+	if err != nil {
+		return nil, fmt.Errorf("invalid config: %w", err)
+	}
+	dec := json.NewDecoder(bytes.NewReader(migrated))
 	dec.DisallowUnknownFields()
 	var c Config
 	if err := dec.Decode(&c); err != nil {
 		return nil, fmt.Errorf("invalid config: %w", err)
 	}
-	if missing := missingKeys(data, reflect.TypeOf(c), ""); len(missing) > 0 {
+	if missing := missingKeys(migrated, reflect.TypeOf(c), ""); len(missing) > 0 {
 		return nil, fmt.Errorf("the config leaves out %s: send the whole config GET /api/config returns, with your changes", strings.Join(missing, ", "))
 	}
-	if _, err := foldRetiredKeys(data, &c); err != nil {
-		return nil, fmt.Errorf("invalid config: %w", err)
-	}
 	return &c, nil
-}
-
-// withoutRetiredKeys returns the JSON object data without the retiredKeys,
-// which are no Config fields any more, so that the strict decode does not
-// call them unknown. Anything but an object comes back unchanged for the
-// decoder to refuse.
-func withoutRetiredKeys(data []byte) []byte {
-	var obj map[string]json.RawMessage
-	if json.Unmarshal(data, &obj) != nil || obj == nil {
-		return data
-	}
-	for _, rk := range retiredKeys {
-		delete(obj, rk.name)
-	}
-	out, err := json.Marshal(obj)
-	if err != nil {
-		return data
-	}
-	return out
 }
 
 var jsonUnmarshaler = reflect.TypeFor[json.Unmarshaler]()
@@ -423,8 +413,9 @@ func listDiff(a, b []string) string {
 
 // warnUnknownKeys logs top-level keys config.json has but the bridge does not
 // know — usually a typo, or a setting from another version. They are dropped
-// the next time the dashboard saves the file. Retired keys are known: they
-// get a line of their own, see foldRetiredKeys.
+// the next time the dashboard saves the file. data is the file migrated to
+// the current version: the retired keys of a version 1 file are gone from
+// it, and got a line of their own (see foldRetiredKeys).
 func warnUnknownKeys(path string, data []byte) {
 	var m map[string]json.RawMessage
 	if json.Unmarshal(data, &m) != nil {
@@ -435,9 +426,6 @@ func warnUnknownKeys(path string, data []byte) {
 	for i := 0; i < t.NumField(); i++ {
 		name, _, _ := strings.Cut(t.Field(i).Tag.Get("json"), ",")
 		known[name] = true
-	}
-	for _, rk := range retiredKeys {
-		known[rk.name] = true
 	}
 	var unknown []string
 	for k := range m {

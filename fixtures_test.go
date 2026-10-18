@@ -93,10 +93,14 @@ func TestGoldenConfigFixtures(t *testing.T) {
 
 // TestConfigV1HasEverySetting keeps config-v1.json complete: every JSON key
 // of Config, and of each of its sections, is set in it, so a key that is
-// added, renamed or dropped changes its golden files.
+// added, renamed or dropped changes its golden files. version is the one
+// key it lacks: it is a version 1 file, from before the key, and what a
+// save makes of it (config-v1-saved.golden) has it.
 func TestConfigV1HasEverySetting(t *testing.T) {
 	for _, key := range unsetKeys(t, reflect.TypeFor[Config](), fixture(t, "config-v1.json")) {
-		t.Errorf("config-v1.json has no %q", key)
+		if key != "version" {
+			t.Errorf("config-v1.json has no %q", key)
+		}
 	}
 }
 

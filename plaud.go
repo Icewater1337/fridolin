@@ -1720,8 +1720,7 @@ func (p *PlaudManager) poll(ctx context.Context) error {
 func (p *PlaudManager) noticeGivenUp(brain, jid, name, why string) {
 	ctx, cancel := context.WithTimeout(p.lifetime(), 30*time.Second)
 	defer cancel()
-	text := fmt.Sprintf("⚠️ Plaud: the recording “%s” was not handed to brain %s: %s. It is still in Plaud, and the dashboard lists it (Integrations → Plaud).", name, brain, why)
-	if err := p.notify(ctx, jid, text); err != nil {
+	if err := p.notify(ctx, jid, plaudGivenUpAlert(name, brain, why)); err != nil {
 		log.Printf("plaud: could not send the notice about a recording given up: %v", err)
 	}
 }
@@ -1785,7 +1784,7 @@ func (p *PlaudManager) notifyAuthExpired() {
 	if err != nil {
 		return
 	}
-	if err := p.notify(context.Background(), jid, "⚠️ Plaud: the login expired, so new recordings are not arriving. Reconnect in the Fridolin dashboard (Integrations → Plaud)."); err != nil {
+	if err := p.notify(context.Background(), jid, plaudExpiredAlert); err != nil {
 		log.Printf("plaud: could not send the expiry notice: %v", err)
 		return
 	}

@@ -206,6 +206,7 @@ func starterConfig() *Config {
 	f := false
 	return &Config{
 		Comment:                    "Edit this in the dashboard (fridolin open). Every option: docs/CONFIGURATION.md",
+		Version:                    currentConfigVersion,
 		AllowedNumbers:             []string{},
 		AllowAnyDM:                 &f,
 		AllowedGroups:              []string{},

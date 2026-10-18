@@ -1,0 +1,78 @@
+noBrainNotice
+	🧠 No brain is set up for this chat yet. Open the bridge dashboard and add one.
+heldBrainNotice
+	🧠 The brain for this chat cannot run right now. The Brains page of the bridge dashboard says why.
+resetReply(false)
+	✅ Cleared anything this chat had running or waiting.
+resetReply(true)
+	✅ Reset. I stopped what this chat had running or waiting, and the next message starts without its earlier messages. What I noted in my memory files stays.
+stopReply(true, 0)
+	🛑 Stopped, and cleared anything this chat had waiting.
+stopReply(false, 2)
+	🛑 Nothing was running for this chat; cleared what it had waiting.
+stopReply(false, 0)
+	🛑 Nothing was running for this chat.
+helpReply("")
+	🤖 *Fridolin*
+
+	Send a message to talk to Claude. Images, documents, audio, and video are passed along as files.
+
+	*Commands:*
+	• `!help` — show this help
+	• `!stop` — stop what I'm doing for this chat and drop its queued messages
+	• `!reset` — like `!stop`, and the next message starts without this chat's earlier messages
+helpReply("@claude")
+	🤖 *Fridolin*
+
+	Send a message to talk to Claude. Images, documents, audio, and video are passed along as files.
+
+	*Commands:*
+	• `!help` — show this help
+	• `!stop` — stop what I'm doing for this chat and drop its queued messages
+	• `!reset` — like `!stop`, and the next message starts without this chat's earlier messages
+
+	In this group, start your message with `@claude` or reply to one of mine to address me, commands included.
+queuedNotice(2)
+	⏳ Queued (#2) — I'll get to this right after the current task.
+queueFullNotice("@claude !stop")
+	⏳ I'm still busy with earlier messages and my queue is full. Try again in a bit, or send `@claude !stop` to drop what this chat has waiting.
+otpCaughtNotice
+	🔐 That looks like the one-time code this chat was asked for, so I kept it out of the conversation: the assistant does not see it.
+workingNotice
+	⏳ Working on it...
+questionPrefix
+	❓ Which day?
+chatErrNotSignedIn
+	🔑 Claude is not signed in on the bridge machine. Run `claude` there once and log in, then send your message again.
+chatErrLimit
+	⏳ Claude's usage limit is reached for now. Try again later.
+chatErrTimeout
+	⌛ That took too long and was stopped. Try again, perhaps with a smaller request.
+chatErrGeneric
+	❌ Something went wrong — details on the bridge dashboard.
+chatErrSandbox
+	❌ The sandbox could not be set up.
+chatErrClaude
+	❌ Claude: Credit balance is too low
+buildChatError
+	❌ brain queue is full
+viewOnceNotice
+	👁️ I don't open view-once photos, videos or voice notes: I would keep them. Send it as a normal one if I should see it.
+mediaTooLargeNotice
+	⚠️ That file is over the 100 MB limit, so I skipped it.
+mediaFailedNotice
+	⚠️ I couldn't download that file. Please send it again.
+pollAsText
+	📊 *Lunch on Friday?*
+	1. Pizza
+	2. Sushi
+startupCheckAlert
+	⚠️ Bridge startup check: missing ~/.fridolin/credentials/google_calendar_token_main.json
+backupRefusedAlert
+	⚠️ Backup of Notes: it would delete 12 of 40 files
+
+	Check the brain folder, then the Backup page in the Fridolin dashboard. Scheduled backups of this brain keep refusing until one succeeds; this is the only message about it.
+plaudGivenUpAlert
+	⚠️ Plaud: the recording “Team sync” was not handed to brain notes: brain notes is not configured. It is still in Plaud, and the dashboard lists it (Integrations → Plaud).
+plaudExpiredAlert
+	⚠️ Plaud: the login expired, so new recordings are not arriving. Reconnect in the Fridolin dashboard (Integrations → Plaud).

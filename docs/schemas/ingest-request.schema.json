@@ -1,0 +1,17 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "The body of POST /ingest",
+  "description": "Hands a brain files that arrived some other way, as docs/API.md describes it. paths or text must be given. Keys the bridge does not know are ignored, except scope, the old name of brain, which is refused unless it is empty or null; keys are added, never renamed or removed.",
+  "type": "object",
+  "properties": {
+    "brain": {"type": "string", "description": "The brain's id. A brain calling with its run's token may leave it out."},
+    "paths": {"type": ["array", "null"], "items": {"type": "string", "pattern": "^/"}, "description": "Absolute paths of regular files inside the media directory."},
+    "text": {"type": "string", "description": "The message that goes with them."},
+    "sender": {"type": "string", "description": "Who the brain is told it is from. Default upload."}
+  },
+  "not": {"required": ["scope"], "properties": {"scope": {"not": {"enum": ["", null]}}}},
+  "anyOf": [
+    {"required": ["paths"], "properties": {"paths": {"type": "array", "minItems": 1}}},
+    {"required": ["text"], "properties": {"text": {"pattern": "\\S"}}}
+  ]
+}

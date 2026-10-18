@@ -130,15 +130,26 @@ the version before: `fridolin service rollback`.
 - The golden files in `testdata/golden` pin what the bridge says and writes
   today: every GET of the API, config writes and their errors, the files the
   dashboard serves, sandbox profiles, prompts and the Claude CLI's
-  arguments, `fridolin check` and `init`, a new brain's folder, backup files
-  and the replies of `/send` and `/ingest`. Times, temp paths, PIDs and the
-  version are masked, so a second run writes the same bytes. A change meant
-  to change one rewrites it with `go test -run 'TestName' -update .`, and
+  arguments, `fridolin check` and `init`, a new brain's folder, backup files,
+  the service's launchd agent and systemd unit, the replies of `/send` and
+  `/ingest`, and every message the bridge itself sends into chats, which
+  live in `messages.go`. Times, temp paths, PIDs and the version are
+  masked, so a second run writes the same bytes. A change meant to change
+  one rewrites it with `go test -run 'TestName' -update .`, and
   the pull request says why. A new setting also goes into
-  `testdata/config-v1.json`, which sets every one, and a new route into
-  `routeInventory` (`routes_test.go`) with the guards it needs. End-to-end
-  tests drive a dev-mode bridge through what it offers from outside with
-  `newHarness` (`harness_test.go`) instead of reaching into the `Bridge`, so
+  `testdata/config-v1.json`, which sets every one, and into
+  `docs/schemas/config.schema.json` (a field of brain.json into
+  `brain.schema.json`), which `TestSchemasFollowTheGoTypes` holds to the
+  Go types, and `TestSchemaEnumsAreTheBridgesValues` to the values the
+  bridge takes for a setting with a fixed set of them (`validEfforts`
+  and the like); a new route goes into `routeInventory`
+  (`routes_test.go`) with the guards it needs. A setting renamed or
+  removed, or one that comes to mean something else, raises
+  `currentConfigVersion` and adds the step to `configMigrations`
+  (`config.go`), so that a file written before keeps its meaning.
+  End-to-end tests drive a dev-mode bridge
+  through what it offers from outside with `newHarness`
+  (`harness_test.go`) instead of reaching into the `Bridge`, so
   they keep working while code moves into packages; `knownbugs_test.go` pins
   bugs that stay as they are for now, and the fix that changes one rewrites
   its test. `testdata/coverage-baseline.txt` is each file's statement
@@ -226,4 +237,6 @@ the version before: `fridolin service rollback`.
 - Architecture notes are in the README ("How it works"); configuration in
   `docs/CONFIGURATION.md`; brains in `docs/BRAINS.md`; backups in
   `docs/BACKUP.md`; Google Calendar in `docs/CALENDAR.md`; the Plaud
-  recorder in `docs/PLAUD.md`; the site in `docs/SITE.md`.
+  recorder in `docs/PLAUD.md`; the site in `docs/SITE.md`; what stays
+  compatible between versions, and how something is retired, in
+  `docs/COMPATIBILITY.md`.

@@ -655,14 +655,14 @@ func (wa *WhatsAppClient) downloadAttachment(msg *events.Message, chatJID string
 	switch {
 	case errors.Is(err, errMediaTooLarge):
 		wa.log.Warnf("Skipped attachment from %s: %v", chatJID, err)
-		return "", att.caption, fmt.Sprintf("⚠️ That file is over the %d MB limit, so I skipped it.", maxBytes>>20)
+		return "", att.caption, mediaTooLargeNotice(maxBytes)
 	case err != nil:
 		wa.log.Errorf("Failed to download attachment from %s: %v", chatJID, err)
 		if wa.ctx.Err() != nil {
 			return "", att.caption, "" // shutting down, not the sender's problem
 		}
 		// Without a word, a file sent without a caption would get no reply.
-		return "", att.caption, "⚠️ I couldn't download that file. Please send it again."
+		return "", att.caption, mediaFailedNotice
 	}
 	return path, att.caption, ""
 }
