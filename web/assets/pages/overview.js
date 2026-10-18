@@ -3,12 +3,12 @@
 
 import { get, post, qs } from '../app/api.js';
 import { store } from '../app/store.js';
-import { resource } from '../app/resources.js';
+import { brainsResource, resource } from '../app/resources.js';
 import { h, mount, paint, reconcile } from '../lib/dom.js';
 import { fmtDuration, plural, parseTs } from '../lib/format.js';
 import { phone } from '../lib/jid.js';
 import { waKind, waLabel } from '../lib/whatsapp.js';
-import { routingSummary, issueLabel, backupOwner } from '../lib/brain.js';
+import { routingSummary, hasDMBrain, issueLabel, backupOwner } from '../lib/brain.js';
 import { icon } from '../components/icons.js';
 import { toast } from '../components/toast.js';
 import { btn } from '../components/buttons.js';
@@ -181,6 +181,9 @@ export default {
       ];
     });
 
+    // Which brain is the fallback, and whether a brain handles DMs, is in
+    // /api/brains rather than the status, and seldom changes.
+    let configured = null;
     const renderBrains = (s) => {
       const list = s.brains || [];
       // The first-brain card above says what to do then.
@@ -189,13 +192,20 @@ export default {
         return;
       }
       paint(brainsBox, 'list', () => brainList);
-      reconcile(brainList, list, (b) => b.id, (b) => h('a.brain-row.card.link-card', { href: `#/brains/${encodeURIComponent(b.id)}` },
+      const noDMBrain = !!configured && !hasDMBrain(configured);
+      const rows = list.map((b) => ({ b, fallback: !!configured && configured.some((x) => x.fallback && x.id === b.id), noDMBrain }));
+      reconcile(brainList, rows, ({ b }) => b.id, ({ b, ...where }) => h('a.brain-row.card.link-card', { href: `#/brains/${encodeURIComponent(b.id)}` },
         h('div.brain-row-main',
           h('div.brain-row-title', h('strong', b.name || b.id), h('code.mono.muted', b.id)),
-          h('div.muted.small', routingSummary(b.routing))),
+          h('div.muted.small', routingSummary(b.routing, where))),
         h('div.brain-row-state', runtimeSummary(b)),
         icon('right', 'row-chevron')));
     };
+    ctx.follow(brainsResource, (l) => {
+      configured = Array.isArray(l) ? l : [];
+      const s = store.get().status;
+      if (s) renderBrains(s);
+    }, 60000);
 
     const renderAll = (s) => {
       renderHealth(s);

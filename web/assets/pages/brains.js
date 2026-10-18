@@ -3,7 +3,7 @@
 import { del, qs } from '../app/api.js';
 import { brainsResource } from '../app/resources.js';
 import { h, mount, paint, reconcile } from '../lib/dom.js';
-import { routingSummary, issueLabel } from '../lib/brain.js';
+import { routingSummary, hasDMBrain, issueLabel } from '../lib/brain.js';
 import { icon } from '../components/icons.js';
 import { btn } from '../components/buttons.js';
 import { confirmDialog } from '../components/dialog.js';
@@ -28,13 +28,16 @@ export default {
         return;
       }
       paint(box, 'list', () => cards);
-      // An entry without an id (no approved brain.json) is known by its folder.
-      reconcile(cards, brains, (b) => b.id || `path:${b.path}`, brainCard);
+      // An entry without an id (no approved brain.json) is known by its
+      // folder. Whether a brain handles DMs is in each card, for the
+      // fallback brain's, which gets them when none does.
+      const noDMBrain = !hasDMBrain(brains);
+      reconcile(cards, brains.map((b) => ({ b, noDMBrain })), ({ b }) => b.id || `path:${b.path}`, brainCard);
     }, 3000);
   },
 };
 
-function brainCard(b) {
+function brainCard({ b, noDMBrain }) {
   const rt = b.runtime;
   const m = b.manifest || {};
   const routing = (rt && rt.routing) || m.routing;
@@ -47,7 +50,7 @@ function brainCard(b) {
       h('div.bc-pills', brainStatusPill(b.status))),
     h('div.bc-path', icon('folder'), mono(b.path)),
     h('div.bc-facts',
-      h('span', icon('chats'), routingSummary(routing)),
+      h('span', icon('chats'), routingSummary(routing, { fallback: b.fallback, noDMBrain })),
       m.model ? h('span', icon('sparkle'), m.model) : null,
       m.effort ? h('span', `effort: ${m.effort}`) : null,
       m.backup ? h('span', icon('backup'), m.backup.enabled ? 'Backed up' : 'No backup') : null),
