@@ -525,9 +525,7 @@ func TestRcloneGetsTheAllowlistedEnvironment(t *testing.T) {
 // (an rclone alias remote standing in for Google Drive), changes it, backs up
 // again, and restores into a new folder.
 func TestBackupRoundTripWithRealRclone(t *testing.T) {
-	if _, err := exec.LookPath("rclone"); err != nil {
-		t.Skip("rclone not installed")
-	}
+	needRclone(t)
 	tb := newTestBridge(t, `, "backup": {"keep_versions_days": 0}`)
 	remoteDir := filepath.Join(t.TempDir(), "drive")
 	_ = os.MkdirAll(filepath.Dir(tb.backup.rcloneConf()), 0o700)
@@ -689,14 +687,25 @@ func TestVersionNamesKeepTheirOrderWhenClocksGoBack(t *testing.T) {
 	}
 }
 
-// rcloneTestBridge is a bridge whose backup remote is a local folder (an
-// rclone alias remote standing in for Google Drive). It skips the test when
-// rclone is not installed.
-func rcloneTestBridge(t *testing.T, extra string) (*testBridge, string) {
+// needRclone skips a test that runs the real rclone when there is none,
+// unless FRIDOLIN_REQUIRE_RCLONE is set: CI installs rclone and sets it,
+// so that these tests cannot quietly go unrun there.
+func needRclone(t *testing.T) {
 	t.Helper()
 	if _, err := exec.LookPath("rclone"); err != nil {
+		if os.Getenv("FRIDOLIN_REQUIRE_RCLONE") != "" {
+			t.Fatalf("FRIDOLIN_REQUIRE_RCLONE is set, but there is no rclone: %v", err)
+		}
 		t.Skip("rclone not installed")
 	}
+}
+
+// rcloneTestBridge is a bridge whose backup remote is a local folder (an
+// rclone alias remote standing in for Google Drive). It skips the test when
+// rclone is not installed (see needRclone).
+func rcloneTestBridge(t *testing.T, extra string) (*testBridge, string) {
+	t.Helper()
+	needRclone(t)
 	tb := newTestBridge(t, extra)
 	remoteDir := filepath.Join(t.TempDir(), "drive")
 	_ = os.MkdirAll(filepath.Dir(tb.backup.rcloneConf()), 0o700)
