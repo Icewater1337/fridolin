@@ -1384,6 +1384,52 @@ func TestSandboxProfileProtectsTheBridgesPrograms(t *testing.T) {
 	})
 }
 
+// TestSandboxProfileKeepsProgramsInASharedClaudeDir: with
+// inherit_claude_user_config the allow for your config dir came after the
+// hard denies of the programs the bridge runs, and the last rule wins, so
+// the Claude CLI in ~/.claude/local and that folder on PATH were writable
+// again. Their denies now come again after that allow; those outside the
+// config dir do not, the profile goes inline on every run.
+func TestSandboxProfileKeepsProgramsInASharedClaudeDir(t *testing.T) {
+	home := canonicalDir(t.TempDir())
+	cfg := bridgeProgramsFixture(t, home)
+	local := home + "/.claude/local"
+	if err := os.MkdirAll(local, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(local+"/claude", []byte("#!/bin/sh\n"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", local+":"+os.Getenv("PATH"))
+	cfg.ClaudePath = local + "/claude"
+	cfg.InheritClaudeUserConfig = true
+	sp := NewSandboxProfiler(map[string][]string{"a": {home + "/a"}}, cfg)
+	rules := profileRules(mustProfile(t, sp, "a"))
+	allow := slices.Index(rules, `(allow file-write* (subpath "`+home+`/.claude"))`)
+	if allow < 0 {
+		t.Fatal("profile does not let brain a write the shared config dir")
+	}
+	last := func(rule string) int {
+		for i := len(rules) - 1; i >= 0; i-- {
+			if rules[i] == rule {
+				return i
+			}
+		}
+		return -1
+	}
+	for _, rule := range []string{
+		`(deny file-write* (literal "` + local + `/claude"))`,
+		`(deny file-write* (subpath "` + local + `"))`,
+	} {
+		if i := last(rule); i < allow {
+			t.Errorf("%s comes last at rule %d, before the config dir's allow at %d, which opens it", rule, i, allow)
+		}
+	}
+	if i := last(`(deny file-write* (subpath "` + home + `/.local/bin"))`); i > allow {
+		t.Errorf("a deny outside the config dir came again after its allow, at rule %d", i)
+	}
+}
+
 // TestSandboxRefusesBrainFoldersHoldingItsPrograms: a brain may write its
 // own folder, so a folder that is or holds one of the programs the bridge
 // runs outside the sandbox, or lies inside the npm package of one or nvm's

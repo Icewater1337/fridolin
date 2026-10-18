@@ -735,7 +735,11 @@ in this order, weakest first:
    own folder excepted, which the brain could not write otherwise, and
    one inside a brain's folder, which the bridge does not run from).
 5. What the bridge gives the brain inside those: its media inbox, its
-   state and, to read, its runs' brain API tokens.
+   state and, to read, its runs' brain API tokens; with
+   `plaud.brain_access` the shared Plaud login; and with
+   `inherit_claude_user_config` your Claude Code config folder, though
+   the denies of 4 inside it (a Claude CLI installed in `~/.claude/local`,
+   say) come again after it.
 6. What stays closed inside the brain's own places: a `deny_paths` entry
    inside its folder, the database, and the folders themselves.
 7. Starting code elsewhere, as above.
@@ -793,7 +797,9 @@ your keychain, which stays closed, so brains need a token in the bridge's
 environment as well (see [logging in](#writing)). Never the
 configuration itself: `settings.json`, `settings.local.json`, `CLAUDE.md`
 and the `hooks`, `rules`, `agents`, `commands`, `skills`, `plugins` and
-`output-styles` folders stay unwritable, and so does every project's
+`output-styles` folders stay unwritable, as do the programs the bridge
+runs from there (a Claude CLI installed in `~/.claude/local`, and that
+folder when it is on `PATH`), and so does every project's
 auto-memory,
 `projects/<project>/memory`, which every new session of that project
 loads, yours included. Other sessions' records (`projects` and `sessions`,

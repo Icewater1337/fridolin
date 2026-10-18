@@ -858,6 +858,49 @@ func TestSandboxKeepsTheBridgesProgramsFromBrains(t *testing.T) {
 	})
 }
 
+// TestSandboxKeepsTheBridgesProgramsInASharedClaudeDir: with
+// inherit_claude_user_config a brain may write the CLI's state in your
+// config dir, and that allow came after the hard denies of the programs
+// the bridge runs, so it opened those inside ~/.claude again: the Claude
+// CLI of an install in ~/.claude/local, which the bridge runs unsandboxed,
+// could be replaced, and a program planted next to it on PATH. Under the
+// real sandbox-exec they now stay closed, while the CLI's state is still
+// written.
+func TestSandboxKeepsTheBridgesProgramsInASharedClaudeDir(t *testing.T) {
+	requireSandboxExec(t)
+	home := canonicalDir(t.TempDir())
+	t.Setenv("HOME", home)
+	local := filepath.Join(home, ".claude", "local")
+	claude := filepath.Join(local, "claude")
+	if err := os.MkdirAll(local, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(claude, []byte("#!/bin/sh\necho ran\n"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", local+":/usr/bin:/bin")
+	sp, own := sandboxFixture(t, home, "b", "clients", map[string]any{"inherit_claude_user_config": true, "claude_path": claude})
+	cases := []struct {
+		name, cmd string // cmd runs in sh with $HOME set
+		allow     bool
+	}{
+		{"write the CLI's state", `mkdir -p "$HOME/.claude/todos" && printf '[]' > "$HOME/.claude/todos/t.json"`, true},
+		{"run the Claude CLI", `"$HOME/.claude/local/claude"`, true},
+		{"replace the Claude CLI", `printf '#!/bin/sh\necho pwned\n' > "$HOME/.claude/local/claude"`, false},
+		{"plant a program next to it, on PATH", `printf x > "$HOME/.claude/local/git"`, false},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			if allowed, out := sandboxRun(t, sp, own, "/bin/sh", "-c", c.cmd); allowed != c.allow {
+				t.Errorf("%s: allowed=%v, want %v (output %q)", c.cmd, allowed, c.allow, out)
+			}
+		})
+	}
+	if data, err := os.ReadFile(claude); err != nil || string(data) != "#!/bin/sh\necho ran\n" {
+		t.Errorf("the Claude CLI now holds %q (%v)", data, err)
+	}
+}
+
 // TestSandboxDeniesBridgeSecretsWhereverTheyLive: with db_path outside the
 // data dir, the WhatsApp session store (enough to take the account over
 // from another machine) used to be readable by every brain, and so was a

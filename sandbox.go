@@ -400,8 +400,10 @@ var launchers = []string{"/bin/launchctl", "/usr/bin/open", "/usr/bin/osascript"
 //     brain's folder. Nothing a brain or an allow_paths entry is given
 //     opens these again...
 //  5. ...but what the bridge gives this brain inside them: its media inbox,
-//     its state dir and its runs' brain API tokens (to read); and with
-//     plaud.brain_access the Plaud login, which the Plaud CLI refreshes.
+//     its state dir and its runs' brain API tokens (to read); with
+//     plaud.brain_access the Plaud login, which the Plaud CLI refreshes;
+//     and with inherit_claude_user_config your config dir, though not the
+//     write denies of 4 in it, which come again.
 //  6. What stays closed inside the brain's own places: deny_paths entries
 //     inside its folder, the database, and the folders themselves, which the
 //     brain may fill but not move, remove or swap for a symlink.
@@ -546,6 +548,9 @@ func (sp *SandboxProfiler) Profile(brainID string) (string, error) {
 
 	// ── 4. hard denies ───────────────────────────────────────────────────
 	b.WriteString(";; 4. Kept from every brain, whatever is allowed above\n")
+	// Its write denies are kept, for the allow of section 5 that may open
+	// some of them again (see hardWrite).
+	b.recording = true
 	var others []string
 	for id, dirs := range sp.workDirs {
 		if id != brainID {
@@ -685,6 +690,8 @@ func (sp *SandboxProfiler) Profile(brainID string) (string, error) {
 	}
 	b.WriteString("\n")
 
+	b.recording = false
+
 	// ── 5. what the bridge gives this brain ──────────────────────────────
 	b.WriteString(";; 5. This brain's media inbox, state and brain API tokens, and a shared Plaud login\n")
 	var pins []string
@@ -736,11 +743,16 @@ func (sp *SandboxProfiler) Profile(brainID string) (string, error) {
 	}
 	if sp.inheritUser {
 		// The CLI's state in your config dir, which brains share with you.
-		b.allow("file-write*", "subpath", sp.userClaudeDir(home))
+		dir := sp.userClaudeDir(home)
+		b.allow("file-write*", "subpath", dir)
 		if sp.claudeDir == "" {
 			b.allow("file-write*", "literal", filepath.Join(home, ".claude.json"))
 			b.allow("file-write*", "regex", "^"+regexp.QuoteMeta(home)+`/\.claude\.json\.[^/]*$`)
 		}
+		// But not what section 4 keeps from every brain there, such as the
+		// Claude CLI of an install in ~/.claude/local, which the bridge
+		// runs itself and the allow above would let a brain replace.
+		b.rewriteHardWritesIn(dir)
 	}
 	b.WriteString("\n")
 
@@ -1215,6 +1227,31 @@ type profileBuilder struct {
 	// denied holds every spelling of every path denied or pinned so far,
 	// for pinParents.
 	denied []string
+	// recording keeps every write deny written while it is set in
+	// hardWrites, for rewriteHardWritesIn.
+	recording  bool
+	hardWrites []hardWrite
+}
+
+// hardWrite is a write deny of the profile's hard denies: deny, or with a
+// pattern denyBelow.
+type hardWrite struct{ op, filter, path, pattern string }
+
+// rewriteHardWritesIn writes again the hard write denies (see recording)
+// of paths in dir, or below it in every spelling, after an allow for dir
+// that would open them: the last rule that matches wins.
+func (b *profileBuilder) rewriteHardWritesIn(dir string) {
+	dirs := b.spellings(dir, true)
+	for _, w := range b.hardWrites {
+		if !withinAny(w.path, dirs) && !withinAny(resolvePath(w.path), dirs) {
+			continue
+		}
+		if w.pattern != "" {
+			b.denyBelow(w.op, w.path, w.pattern)
+		} else {
+			b.deny(w.op, w.filter, w.path)
+		}
+	}
 }
 
 type pathAlias struct{ configured, real string }
@@ -1227,6 +1264,9 @@ type pathAlias struct{ configured, real string }
 // deny therefore emits the rule for every spelling (see spellings): a deny
 // that covers more only takes access away.
 func (b *profileBuilder) deny(op, filter, path string) {
+	if b.recording && strings.HasPrefix(op, "file-write") {
+		b.hardWrites = append(b.hardWrites, hardWrite{op: op, filter: filter, path: path})
+	}
 	// Reading a symlink is part of following it, so a read rule on the link
 	// itself would also block what is allowed behind it, such as an inbox
 	// under a symlinked data dir. Writes act on the link, so they need its
@@ -1240,6 +1280,9 @@ func (b *profileBuilder) deny(op, filter, path string) {
 // denyBelow emits "(deny op (regex "^<dir>pattern"))" for every spelling of
 // dir, for paths below it that cannot be listed in advance.
 func (b *profileBuilder) denyBelow(op, dir, pattern string) {
+	if b.recording && strings.HasPrefix(op, "file-write") {
+		b.hardWrites = append(b.hardWrites, hardWrite{op: op, path: dir, pattern: pattern})
+	}
 	for _, s := range b.spellings(dir, strings.HasPrefix(op, "file-write")) {
 		b.emit("deny "+op, "regex", "^"+regexp.QuoteMeta(s)+pattern)
 		b.denied = append(b.denied, s)
