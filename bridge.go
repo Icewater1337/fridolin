@@ -299,11 +299,24 @@ func newHTTPServer(h http.Handler) *http.Server {
 	}
 }
 
+// Connection retries: the first after connectFirstRetry, doubling up to
+// connectMaxRetry.
+const (
+	connectFirstRetry = 5 * time.Second
+	connectMaxRetry   = 2 * time.Minute
+)
+
 // connectLoop connects to WhatsApp, retrying while the network is down.
+// Once connected, whatsmeow reconnects by itself. An error that another
+// try cannot fix ends it: the dashboard's state says what to do.
 func (b *Bridge) connectLoop(ctx context.Context) {
-	for delay := 5 * time.Second; ; {
+	for delay := connectFirstRetry; ; delay = min(2*delay, connectMaxRetry) {
 		err := b.wa.Connect()
 		if err == nil {
+			return
+		}
+		if errors.Is(err, store.ErrDeviceDeleted) || errors.Is(err, errPairingLive) {
+			log.Printf("WhatsApp connect failed: %v", err)
 			return
 		}
 		log.Printf("WhatsApp connect failed: %v — retrying in %v", err, delay)
@@ -311,9 +324,6 @@ func (b *Bridge) connectLoop(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case <-time.After(delay):
-		}
-		if delay < 2*time.Minute {
-			delay *= 2
 		}
 	}
 }

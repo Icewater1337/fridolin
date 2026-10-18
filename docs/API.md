@@ -68,9 +68,10 @@ mode), `503` otherwise, both with
 {"ready": true, "whatsapp": "connected", "version": "…", "started_at": "…"}
 ```
 
-`whatsapp` is the connection state (`pairing`, `connecting`, `connected`,
-`logged-out`, `replaced`, …), so a script can tell a bridge that still
-needs pairing from one that was logged out.
+`whatsapp` is the connection state (`pairing`, `qr-expired`, `connecting`,
+`connected`, `disconnected`, `logged-out`, `replaced`, `outdated`,
+`banned`, `failed`, `disabled` in dev mode), so a script can tell a bridge
+that still needs pairing from one that was logged out.
 
 ## `POST /send`
 

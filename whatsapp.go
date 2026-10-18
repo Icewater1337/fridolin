@@ -15,7 +15,6 @@ import (
 	"time"
 	"unicode"
 
-	"github.com/mdp/qrterminal/v3"
 	"go.mau.fi/whatsmeow"
 	"go.mau.fi/whatsmeow/proto/waE2E"
 	"go.mau.fi/whatsmeow/store"
@@ -44,8 +43,9 @@ type Messenger interface {
 
 // WAState is the connection state shown on the dashboard.
 type WAState struct {
-	// Mode: disabled, connecting, pairing, qr-expired, connected,
-	// disconnected, logged-out, replaced.
+	// Mode: disabled (dev mode) or one of the mode constants in
+	// waconn.go: connecting, pairing, qr-expired, connected,
+	// disconnected, logged-out, replaced, outdated, banned, failed.
 	Mode      string    `json:"mode"`
 	OwnNumber string    `json:"own_number,omitempty"`
 	Detail    string    `json:"detail,omitempty"`
@@ -70,7 +70,6 @@ type IgnoredHandler func(kind, jid, name, sender, pushName string)
 
 // WhatsAppClient wraps a whatsmeow client.
 type WhatsAppClient struct {
-	client    *whatsmeow.Client
 	cfg       func() *Config
 	store     *Store
 	handler   InboundHandler
@@ -81,7 +80,7 @@ type WhatsAppClient struct {
 	// routing; nil means defaultGroupRules.
 	groupRules func(groupJID string) groupRules
 	log        waLog.Logger
-	media      mediaDownloader        // the client; tests swap in a fake
+	media      mediaDownloader        // nil: the client; tests set a fake
 	notify     func(jid, text string) // sendNotice; tests record instead
 
 	// ctx ends when the client disconnects for good. Attachment downloads
@@ -89,11 +88,27 @@ type WhatsAppClient struct {
 	ctx    context.Context
 	cancel context.CancelFunc
 
-	mu    sync.Mutex
-	state WAState
+	// pairMu serialises pairing; pairing is set while a pairing session's
+	// codes are followed (see StartPairing).
+	pairMu  sync.Mutex
+	pairing bool
+
+	mu sync.Mutex // guards the fields below, client included
+	// client is replaced when WhatsApp logged the device out (see
+	// newSession), so it is read with cl.
+	client *whatsmeow.Client
+	state  WAState
+	// own and ownLID are the bridge account's JIDs, as whatsmeow reported
+	// them when it connected or paired; empty while unpaired.
+	own, ownLID types.JID
 	// online is closed while the state is "connected", and replaced by an
 	// open one when it leaves it (see Connected).
 	online chan struct{}
+	// retry is the connection attempt the bridge scheduled itself
+	// (connectAfter), and retryWait the wait it chose after the last
+	// failure on WhatsApp's side, 0 once connected (failureRetryAfter).
+	retry     *time.Timer
+	retryWait time.Duration
 }
 
 // NewWhatsAppClient creates a client. It does NOT connect — call Connect.
@@ -115,135 +130,33 @@ func NewWhatsAppClient(cfg func() *Config, store *Store, handler InboundHandler,
 		handler:   handler,
 		onIgnored: onIgnored,
 		log:       logger,
-		media:     client,
 		ctx:       ctx,
 		cancel:    cancel,
 		state:     WAState{Mode: "connecting", Since: time.Now()},
+		// Nothing runs yet, so the device's own JIDs can be read here.
+		own:    deviceStore.GetJID().ToNonAD(),
+		ownLID: deviceStore.GetLID().ToNonAD(),
 	}
+	wa.state.OwnNumber = wa.own.User
 	wa.notify = wa.sendNotice
 
 	client.AddEventHandler(wa.eventHandler)
 	return wa, nil
 }
 
-func (wa *WhatsAppClient) setState(mode, detail string) {
+// cl returns the whatsmeow client.
+func (wa *WhatsAppClient) cl() *whatsmeow.Client {
 	wa.mu.Lock()
 	defer wa.mu.Unlock()
-	if wa.state.Mode != mode {
-		wa.state.Since = time.Now()
-	}
-	online := wa.onlineLocked()
-	select {
-	case <-online:
-		if mode != "connected" {
-			wa.online = make(chan struct{})
-		}
-	default:
-		if mode == "connected" {
-			close(online)
-		}
-	}
-	wa.state.Mode, wa.state.Detail = mode, detail
-	if mode != "pairing" {
-		wa.state.QRCode = ""
-	}
-	if id := wa.client.Store.ID; id != nil {
-		wa.state.OwnNumber = id.User
-	}
+	return wa.client
 }
 
-// Connected returns a channel closed while WhatsApp is connected.
-func (wa *WhatsAppClient) Connected() <-chan struct{} {
-	wa.mu.Lock()
-	defer wa.mu.Unlock()
-	return wa.onlineLocked()
-}
-
-func (wa *WhatsAppClient) onlineLocked() chan struct{} {
-	if wa.online == nil {
-		wa.online = make(chan struct{})
+// downloader is what attachments are downloaded with.
+func (wa *WhatsAppClient) downloader() mediaDownloader {
+	if wa.media != nil {
+		return wa.media
 	}
-	return wa.online
-}
-
-// State returns the current connection state.
-func (wa *WhatsAppClient) State() WAState {
-	wa.mu.Lock()
-	defer wa.mu.Unlock()
-	return wa.state
-}
-
-// Connect connects with the stored session, or starts QR pairing in the
-// background when there is none. It does not block on pairing: the code is
-// shown on the dashboard (and in the terminal, when there is one).
-func (wa *WhatsAppClient) Connect() error {
-	if wa.client.Store.ID != nil {
-		wa.setState("connecting", "")
-		if err := wa.client.Connect(); err != nil {
-			return fmt.Errorf("connecting: %w", err)
-		}
-		return nil
-	}
-	return wa.StartPairing()
-}
-
-// StartPairing begins (or restarts) QR pairing for an unpaired bridge.
-func (wa *WhatsAppClient) StartPairing() error {
-	if wa.client.Store.ID != nil {
-		return fmt.Errorf("already paired — this bridge has a stored WhatsApp session")
-	}
-	if wa.client.IsConnected() {
-		wa.client.Disconnect()
-	}
-	qrChan, err := wa.client.GetQRChannel(context.Background())
-	if err != nil {
-		return fmt.Errorf("getting QR channel: %w", err)
-	}
-	if err := wa.client.Connect(); err != nil {
-		return fmt.Errorf("connecting: %w", err)
-	}
-	wa.setState("pairing", "Scan the code: WhatsApp → Settings → Linked Devices → Link a Device")
-
-	tty := isTerminal(os.Stdout)
-	go func() {
-		for evt := range qrChan {
-			switch evt.Event {
-			case "code":
-				wa.mu.Lock()
-				wa.state.QRCode, wa.state.QRAt = evt.Code, time.Now()
-				wa.mu.Unlock()
-				if tty {
-					fmt.Println("Scan this code with WhatsApp (Settings → Linked Devices → Link a Device),")
-					fmt.Println("or open the dashboard:")
-					qrterminal.GenerateHalfBlock(evt.Code, qrterminal.L, os.Stdout)
-				} else {
-					log.Printf("WhatsApp pairing: new QR code available on the dashboard")
-				}
-			case "success":
-				wa.setState("connected", "Paired")
-			case "timeout":
-				wa.setState("qr-expired", "The pairing code expired — start pairing again from the dashboard")
-			default:
-				log.Printf("WhatsApp pairing: %s", evt.Event)
-				if evt.Error != nil {
-					wa.setState("qr-expired", evt.Error.Error())
-				}
-			}
-		}
-	}()
-	return nil
-}
-
-func isTerminal(f *os.File) bool {
-	st, err := f.Stat()
-	return err == nil && st.Mode()&os.ModeCharDevice != 0
-}
-
-// Disconnect disconnects the client for good: it also ends the attachment
-// downloads still running.
-func (wa *WhatsAppClient) Disconnect() {
-	wa.cancel()
-	wa.client.Disconnect()
+	return wa.cl()
 }
 
 // errOffline marks a send that failed because WhatsApp is not connected or
@@ -342,7 +255,7 @@ func (wa *WhatsAppClient) SendMessage(ctx context.Context, jid string, text stri
 	if err != nil {
 		return err
 	}
-	_, err = wa.client.SendMessage(ctx, recipient, &waE2E.Message{
+	_, err = wa.cl().SendMessage(ctx, recipient, &waE2E.Message{
 		Conversation: proto.String(text),
 	})
 	return classifySendErr(err)
@@ -365,8 +278,9 @@ func (wa *WhatsAppClient) SendPoll(ctx context.Context, jid string, question str
 	if err != nil {
 		return "", err
 	}
-	msg := wa.client.BuildPollCreation(question, options, maxSelectable)
-	resp, err := wa.client.SendMessage(ctx, recipient, msg)
+	cli := wa.cl()
+	msg := cli.BuildPollCreation(question, options, maxSelectable)
+	resp, err := cli.SendMessage(ctx, recipient, msg)
 	if err != nil {
 		return "", err
 	}
@@ -375,10 +289,11 @@ func (wa *WhatsAppClient) SendPoll(ctx context.Context, jid string, question str
 
 // JoinedGroups lists the groups the bridge account is in.
 func (wa *WhatsAppClient) JoinedGroups(ctx context.Context) ([]GroupInfo, error) {
-	if !wa.client.IsLoggedIn() {
+	cli := wa.cl()
+	if !cli.IsLoggedIn() {
 		return nil, fmt.Errorf("not connected to WhatsApp")
 	}
-	groups, err := wa.client.GetJoinedGroups(ctx)
+	groups, err := cli.GetJoinedGroups(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -389,35 +304,23 @@ func (wa *WhatsAppClient) JoinedGroups(ctx context.Context) ([]GroupInfo, error)
 	return out, nil
 }
 
-// eventHandler handles all whatsmeow events.
+// eventHandler handles all whatsmeow events: messages here, the
+// connection's in connectionEvent.
 func (wa *WhatsAppClient) eventHandler(rawEvt interface{}) {
-	switch evt := rawEvt.(type) {
-	case *events.Message:
+	if evt, ok := rawEvt.(*events.Message); ok {
 		if evt.Message.GetPollUpdateMessage() != nil {
 			wa.handlePollVote(evt)
 		} else {
 			wa.handleMessage(evt)
 		}
-	case *events.Connected:
-		wa.log.Infof("Connected to WhatsApp")
-		wa.setState("connected", "")
-	case *events.PairSuccess:
-		wa.log.Infof("Paired with WhatsApp as %s", evt.ID.User)
-		wa.setState("connected", "Paired")
-	case *events.Disconnected:
-		wa.setState("disconnected", "Connection lost — reconnecting automatically")
-	case *events.StreamReplaced:
-		wa.log.Warnf("Another client took over this WhatsApp session")
-		wa.setState("replaced", "Another program is using this WhatsApp session — is a second bridge running?")
-	case *events.LoggedOut:
-		wa.log.Warnf("Logged out from WhatsApp (reason %v)", evt.Reason)
-		wa.setState("logged-out", "WhatsApp logged this device out. Remove it under Linked Devices on your phone, move bridge.db aside and pair again.")
+		return
 	}
+	wa.connectionEvent(rawEvt)
 }
 
 // handlePollVote decrypts a poll vote and records it (see recordVote).
 func (wa *WhatsAppClient) handlePollVote(evt *events.Message) {
-	pollVote, err := wa.client.DecryptPollVote(wa.ctx, evt)
+	pollVote, err := wa.cl().DecryptPollVote(wa.ctx, evt)
 	if err != nil {
 		wa.log.Errorf("Failed to decrypt poll vote from %s: %v", evt.Info.Sender, err)
 		return
@@ -620,7 +523,7 @@ func (wa *WhatsAppClient) handleGroupMessage(msg *events.Message) {
 	senderNumber := canonicalUser(wa.ctx, wa.lidStore(), msg.Info.Sender, msg.Info.SenderAlt).User
 
 	groupName := ""
-	if info, err := wa.client.GetGroupInfo(context.Background(), msg.Info.Chat); err == nil && info != nil {
+	if info, err := wa.cl().GetGroupInfo(context.Background(), msg.Info.Chat); err == nil && info != nil {
 		groupName = info.Name
 	}
 
@@ -722,7 +625,7 @@ func (wa *WhatsAppClient) downloadAttachment(msg *events.Message, chatJID string
 	maxBytes := cfg.MaxMediaBytes()
 	ctx, cancel := context.WithTimeout(wa.ctx, mediaDownloadTimeout)
 	defer cancel()
-	path, err := saveAttachment(ctx, wa.media, cfg.MediaDir, att, maxBytes)
+	path, err := saveAttachment(ctx, wa.downloader(), cfg.MediaDir, att, maxBytes)
 	switch {
 	case errors.Is(err, errMediaTooLarge):
 		wa.log.Warnf("Skipped attachment from %s: %v", chatJID, err)
@@ -1059,31 +962,19 @@ func (wa *WhatsAppClient) isAllowedGroup(jid string) bool {
 // ownMentionJIDs returns every JID form the bridge account may be mentioned as.
 // WhatsApp emits either the phone-number JID or the linked LID form.
 func (wa *WhatsAppClient) ownMentionJIDs() []types.JID {
-	if wa.client == nil || wa.client.Store.ID == nil {
+	wa.mu.Lock()
+	own, lid := wa.own, wa.ownLID
+	wa.mu.Unlock()
+	if own.User == "" {
 		return nil
 	}
-
-	ctx := context.Background()
-	seen := make(map[string]struct{}, 2)
-	out := make([]types.JID, 0, 2)
-	add := func(jid types.JID) {
-		jid = jid.ToNonAD()
-		if jid.User == "" || jid.Server == "" {
-			return
-		}
-		key := jid.String()
-		if _, ok := seen[key]; ok {
-			return
-		}
-		seen[key] = struct{}{}
-		out = append(out, jid)
+	if lid.User == "" {
+		lid = lidOf(wa.ctx, wa.lidStore(), own)
 	}
-
-	add(*wa.client.Store.ID)
-	if alt, err := wa.client.Store.GetAltJID(ctx, *wa.client.Store.ID); err == nil {
-		add(alt)
+	out := []types.JID{own}
+	if lid.User != "" && lid != own {
+		out = append(out, lid)
 	}
-
 	return out
 }
 
@@ -1117,10 +1008,11 @@ func stripMentions(text string, jids []types.JID) string {
 // lidStore is whatsmeow's map between LIDs and phone numbers, or nil
 // without a client.
 func (wa *WhatsAppClient) lidStore() store.LIDStore {
-	if wa.client == nil || wa.client.Store == nil {
+	cli := wa.cl()
+	if cli == nil || cli.Store == nil {
 		return nil
 	}
-	return wa.client.Store.LIDs
+	return cli.Store.LIDs
 }
 
 // quoteOf is quoteOf with the quoted message's author by number when the

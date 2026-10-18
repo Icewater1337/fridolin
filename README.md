@@ -679,10 +679,21 @@ that variable must be in the bridge's process environment: the bridge reads
 no `.env` file, and says so in its log when one lies next to the config
 ([details](docs/CONFIGURATION.md#environment-variables)).
 
-**Logged out of WhatsApp** — remove the device under *Linked Devices* on the
-phone, stop the bridge, move `bridge.db` out of your data directory (keep it
-until the new pairing works), start the bridge and pair again from the
-dashboard. This also clears the poll history.
+**Logged out of WhatsApp** — pair again with *Start pairing* on the
+dashboard's Overview; no restart is needed, and `bridge.db` can stay (the
+bridge starts a new session in it and keeps the poll history). Remove the old
+entry under *Linked Devices* on the phone if it is still there. Only if
+pairing keeps failing, stop the bridge and move `bridge.db` out of your data
+directory, keeping it until the new pairing works; that also clears the poll
+history.
+
+**"Fridolin needs an update"**, **"Temporarily banned"**, **"WhatsApp refused
+the connection"** — the Overview says what WhatsApp answered and what to do:
+update and rebuild (`git pull && ./setup.sh`) when WhatsApp no longer accepts
+the bridge's WhatsApp library; wait for a ban to end, when the bridge
+connects again by itself. After a refusal on WhatsApp's side it tries again
+by itself too, waiting longer each time, up to half an hour; after any other
+refusal, restart the bridge.
 
 **"another bridge is already running"** — only one bridge may use a data
 directory; two bridges on one WhatsApp session knock each other offline.

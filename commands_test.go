@@ -60,6 +60,8 @@ func (tb *testBridge) whatsAppOffline(dev *store.Device) *WhatsAppClient {
 	wa := tb.whatsApp()
 	wa.client = whatsmeow.NewClient(dev, waLog.Noop)
 	wa.media = wa.client
+	// As whatsmeow reports them once connected.
+	wa.setOwn(dev.GetJID(), dev.GetLID())
 	return wa
 }
 
