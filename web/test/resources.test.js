@@ -183,6 +183,39 @@ test('a 304 brings the answer whose ETag went out, whatever came in meanwhile', 
   await settle();
 });
 
+test('a resource can take a 404 for something missing', async (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout', 'Date'] });
+  const net = stubFetch(t);
+  const res = resource('/api/brains/gone', { missing: null });
+  const seen = [];
+  t.after(res.follow((d) => seen.push(d), 3000));
+  net.answer(0, { error: 'no such brain' }, 404);
+  await settle();
+  assert.deepEqual(seen, [null], 'the 404 is told as missing, not an error');
+
+  t.mock.timers.tick(3000);
+  net.answer(1, { id: 'gone' }, 200, { ETag: '"e1"' });
+  await settle();
+  t.mock.timers.tick(3000);
+  assert.equal(net.calls[2].init.headers['If-None-Match'], '"e1"');
+  net.answer(2, { error: 'no such brain' }, 404);
+  await settle();
+  assert.deepEqual(seen, [null, { id: 'gone' }, null]);
+  t.mock.timers.tick(3000);
+  assert.equal(net.calls[3].init.headers['If-None-Match'], undefined, 'nothing is kept of what went');
+  net.answer(3, { error: 'no such brain' }, 404);
+  await settle();
+});
+
+test('what a 404 stands for is the first caller’s, and another throws', () => {
+  const r = resource('/api/brains/asked', { missing: null });
+  assert.equal(resource('/api/brains/asked'), r, 'a caller that only wants the resource gets it');
+  assert.equal(resource('/api/brains/asked', { missing: null }), r);
+  assert.throws(() => resource('/api/brains/asked', { missing: undefined }), /another missing/);
+  resource('/api/brains/plain');
+  assert.throws(() => resource('/api/brains/plain', { missing: null }), /another missing/, 'there a 404 is an error already');
+});
+
 test('one resource per path', () => {
   assert.equal(resource('/api/brains'), resource('/api/brains'));
   assert.notEqual(resource('/api/activity?limit=10'), resource('/api/activity?limit=30'));

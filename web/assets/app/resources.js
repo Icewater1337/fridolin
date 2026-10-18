@@ -70,16 +70,26 @@ export function createResource(load) {
   };
 }
 
-const all = new Map();
+const all = new Map(); // path → {r: the resource, options: the ones it was made with}
 
-/** The one resource for GET path (with its query); options.timeout for a slow endpoint. */
-export function resource(path, { timeout } = {}) {
-  let r = all.get(path);
-  if (!r) {
-    r = createResource(revalidating(path, timeout));
-    all.set(path, r);
+/**
+ * The one resource for GET path (with its query); the options of the
+ * first call make it. options.timeout is for a slow endpoint;
+ * options.missing, when given, is what a 404 stands for (null for a brain
+ * that is not there, say) instead of an error. A later call may leave
+ * the options out, to refresh the resource say, but one that gives
+ * another missing throws: every follower gets the same answers, so a 404
+ * cannot be data for one and an error for another.
+ */
+export function resource(path, options = {}) {
+  let e = all.get(path);
+  if (!e) {
+    e = { r: createResource(revalidating(path, options)), options };
+    all.set(path, e);
+  } else if ('missing' in options && (!('missing' in e.options) || options.missing !== e.options.missing)) {
+    throw new Error(`resource(${path}) was made with another missing`);
   }
-  return r;
+  return e.r;
 }
 
 // The loader of resource(path). It keeps the last answer that came with
@@ -89,11 +99,20 @@ export function resource(path, { timeout } = {}) {
 // with any other answer. A 304 answers the ETag that went out, so it
 // brings the data of that one, not of an answer a dropped fetch took in
 // while it was on its way.
-function revalidating(path, timeout) {
+function revalidating(path, { timeout, ...options }) {
   let last = null; // {data, etag}
   return async (signal) => {
     const sent = last;
-    const answer = await getIfChanged(path, sent ? sent.etag : '', { signal, timeout });
+    let answer;
+    try {
+      answer = await getIfChanged(path, sent ? sent.etag : '', { signal, timeout });
+    } catch (e) {
+      if (e && e.status === 404 && 'missing' in options) {
+        last = null;
+        return options.missing;
+      }
+      throw e;
+    }
     if (answer === NOT_MODIFIED) {
       last = sent;
       return sent.data;

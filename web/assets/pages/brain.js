@@ -28,8 +28,10 @@ export default {
   title: (params) => `Brain ${params.id}`,
   render(root, ctx) {
     const id = ctx.params.id;
-    let brain = null;
-    let brains = null; // the /api/brains list, once it is in
+    // The brain, followed on its own; null when there is none.
+    const one = resource(`/api/brains/${encodeURIComponent(id)}`, { missing: null });
+    let brain; // undefined until it is in
+    let brains = null; // the /api/brains list, once it is in: the other brains' routing
     let cfg = null;
 
     const head = h('div');
@@ -51,7 +53,7 @@ export default {
     ];
     mount(root, head, issuesBox, driftBox, sections, dangerBox);
 
-    const refresh = () => brainsResource.refresh();
+    const refresh = () => Promise.all([one.refresh(), brainsResource.refresh()]);
     const settings = liveForm({
       build: buildForm,
       edits: (d) => d.manifest,
@@ -66,14 +68,21 @@ export default {
       paintAll();
     }, 60000);
 
+    // The page shows its brain's runs as they happen, and only the routing
+    // of the others, for the form, which changes when someone edits them.
+    // A brain that is not there is asked after every 30 s only: the
+    // browser logs each 404 as an error, and someone has to add it first.
+    ctx.follow(one, (b) => {
+      brain = b;
+      paintAll();
+    }, () => (brain === null ? 30000 : 3000));
     ctx.follow(brainsResource, (list) => {
       brains = list || [];
-      brain = brains.find((x) => x.id === id) || null;
       paintAll();
-    }, 3000);
+    }, 60000);
 
     function paintAll() {
-      if (!brains) return;
+      if (brain === undefined) return;
       if (!brain) {
         if (settings.dirty()) settings.discard(); // its form is gone from the page, and so are the edits
         paint(head, { missing: id }, () => h('header.page-header', h('div.page-heading', h('a.back-link', { href: '#/brains' }, icon('left'), 'Brains'), h('h1', id))));
@@ -238,6 +247,7 @@ export default {
     // What the form shows: the approved manifest it edits, and what it needs
     // to explain it (the inherited settings, the other brains' routing).
     function paintForm() {
+      if (!brains) return; // it says which groups the other brains have
       const m = brain.manifest;
       if (!m) {
         if (settings.dirty()) settings.discard(); // nothing left on the page to save
