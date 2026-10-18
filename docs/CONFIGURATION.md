@@ -634,6 +634,13 @@ in the log at every start: set `data_dir` to it to keep it for good.
 except the `media/` inbox and their own runs' brain API tokens in
 `run-tokens/<id>/`; a `db_path` elsewhere is denied to them too.
 
+`runs/` in it lists the brain runs going on. Each run has a process group
+of its own, which launchd's or systemd's cleanup does not reach, so when
+the bridge crashes or is killed, the next start stops what is left of the
+runs listed there, with the commands they started, before any brain runs.
+It checks that each group's leader is still the process that ran, by its
+start time, so a process that got the same PID since is left alone.
+
 The lock that keeps a second bridge off the same WhatsApp session is
 `bridge.lock` in `data_dir`. It does not cover a `db_path` outside
 `data_dir`, so never point `db_path` at another bridge's `bridge.db`: a

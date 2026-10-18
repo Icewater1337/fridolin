@@ -90,6 +90,9 @@ func NewBridge(cfgs *ConfigStore, opts BridgeOptions) (_ *Bridge, err error) {
 	}()
 	protectDataDir(cfg)
 	pruneRunTokens(cfg.DataDir)
+	// With the lock held no other bridge runs here, so any run the last one
+	// recorded that is still going was left behind by a crash.
+	reapOrphanedRuns(cfg.DataDir)
 	store, err := NewStore(cfg)
 	if err != nil {
 		return nil, fmt.Errorf("creating store: %w", err)

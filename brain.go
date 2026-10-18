@@ -1173,6 +1173,11 @@ func (br *Brain) invoke(run *brainRun, ctx context.Context, s *brainSettings, m 
 		return RunResult{Err: fmt.Errorf("starting claude: %w", err)}
 	}
 	br.setRunPID(run, cmd.Process.Pid)
+	// Removed once Wait has returned and the run is over; a bridge that
+	// crashes before leaves it to the next start (reapOrphanedRuns).
+	if rec := recordRun(s.dataDir, br.id, cmd.Process.Pid); rec != "" {
+		defer os.Remove(rec)
+	}
 
 	// Parse the stream in a goroutine so we can race it against the 10s timer.
 	parseDone := make(chan RunResult, 1)
