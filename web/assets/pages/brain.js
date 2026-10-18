@@ -10,13 +10,14 @@ import { calendarCard } from '../components/calendar.js';
 import { h, mount, paint } from '../lib/dom.js';
 import { fmtDuration, plural, prettyJSON } from '../lib/format.js';
 import { phoneish, isGroupJid } from '../lib/jid.js';
-import { EFFORTS, issueLabel } from '../lib/brain.js';
+import { issueLabel } from '../lib/brain.js';
 import { sortKeys, fieldDiff, lineDiff } from '../lib/diff.js';
 import { icon } from '../components/icons.js';
 import { toast } from '../components/toast.js';
 import { btn, runBusy } from '../components/buttons.js';
 import { confirmDialog } from '../components/dialog.js';
-import { field, textInput, select, toggle, linesArea, linesOf } from '../components/fields.js';
+import { field, textInput, toggle } from '../components/fields.js';
+import { brainSettingsFields } from '../components/brain-fields.js';
 import { pill, badge, callout, timeAgo, mono, empty, loading } from '../components/common.js';
 import { chatEl, chatName } from '../components/chat.js';
 import { outcomePill, brainStatusPill } from '../components/brain.js';
@@ -257,8 +258,7 @@ export default {
     function buildForm({ manifest: m, drift, eff, allowedGroups, others }, changed) {
       const nameIn = textInput({ value: m.name || '', spellcheck: 'true' });
       const routing = routingEditor({ routing: m.routing || {}, selfId: id, brains: others, allowedGroups, onChange: changed, signal: ctx.signal });
-      const modelIn = textInput({ value: m.model || '', class: 'mono', placeholder: eff.brain_model ? `inherit (${eff.brain_model})` : 'inherit' });
-      const effortSel = select(EFFORTS.map(([v, l]) => [v, v === '' && eff.brain_effort ? `Inherit (${eff.brain_effort})` : l]), m.effort || '');
+      const fields = brainSettingsFields(m, eff);
       const override = Array.isArray(m.disallowed_tools);
       const globalTools = eff.disallowed_tools.length ? eff.disallowed_tools.join(', ') : 'none';
       const toolsIn = textInput({ value: override ? m.disallowed_tools.join(', ') : '', class: 'mono', placeholder: 'e.g. WebFetch, Bash', disabled: !override });
@@ -269,8 +269,6 @@ export default {
       });
       const promptIn = textInput({ value: m.prompt_file || '', class: 'mono', placeholder: 'brain-prompt.md' });
       const replyIn = textInput({ value: m.reply_chat || '', class: 'mono', placeholder: 'derived from routing' });
-      const backupSw = toggle({ checked: m.backup ? !!m.backup.enabled : true, label: 'Include in Google Drive backups' });
-      const excludes = linesArea((m.backup && m.backup.exclude) || [], { rows: 5, placeholder: 'node_modules/\n*.log' });
 
       // The manifest a save would write.
       const value = () => {
@@ -278,11 +276,9 @@ export default {
           ...m,
           name: nameIn.value.trim(),
           routing: routing.getValue(),
-          model: modelIn.value.trim(),
-          effort: effortSel.value,
+          ...fields.value(),
           prompt_file: promptIn.value.trim(),
           reply_chat: replyIn.value.trim(),
-          backup: { enabled: backupSw.input.checked, exclude: linesOf(excludes) },
         };
         if (toolsSw.input.checked) manifest.disallowed_tools = toolsIn.value.split(',').map((t) => t.trim()).filter(Boolean);
         else delete manifest.disallowed_tools;
@@ -298,18 +294,14 @@ export default {
           field({ label: 'Id', control: h('div.static', mono(m.id)), help: 'Ids cannot change. To use a new id, remove the brain and add the folder again.' })),
         h('fieldset.fieldset', h('legend', 'Chats'), routing),
         h('fieldset.fieldset', h('legend', 'Model and tools'),
-          h('div.form-grid',
-            field({ label: 'Model', control: modelIn, help: 'Empty uses the global brain model.' }),
-            field({ label: 'Effort', control: effortSel })),
+          fields.model,
           h('div.field', toolsSw, h('div.help', `Off: use the global list of blocked tools (${globalTools}).`)),
           field({ label: 'Blocked tools', control: toolsIn, help: 'Comma-separated tool names this brain may not use. Leave empty to allow every tool.' })),
         h('fieldset.fieldset', h('legend', 'Files and replies'),
           h('div.form-grid',
             field({ label: 'Prompt file', control: promptIn, help: 'The brain’s instructions, relative to its folder.' }),
             field({ label: 'Reply chat', control: replyIn, help: 'Where replies go for files handed in through /ingest. This brain handles the files even when that chat belongs to another brain. Default: your first allowed number for the brain that gets DMs (the DM brain, or the fallback brain when none handles DMs), else its first group.' }))),
-        h('fieldset.fieldset', h('legend', 'Backup'),
-          h('div.field', backupSw),
-          field({ label: 'Leave out of backups', control: excludes, help: 'One pattern per line, relative to the brain folder. A trailing / means a folder.' })),
+        h('fieldset.fieldset', h('legend', 'Backup'), fields.backup),
         bar);
       form.addEventListener('submit', (e) => {
         e.preventDefault();

@@ -5,11 +5,12 @@ import { folderBrowser } from '../components/folder-browser.js';
 import { routingEditor } from '../components/routing-editor.js';
 import { h, mount } from '../lib/dom.js';
 import { prettyJSON } from '../lib/format.js';
-import { routingSummary, slugify, BRAIN_ID_RE, EFFORTS, DEFAULT_BACKUP_EXCLUDES } from '../lib/brain.js';
+import { routingSummary, slugify, BRAIN_ID_RE, DEFAULT_BACKUP_EXCLUDES } from '../lib/brain.js';
 import { icon } from '../components/icons.js';
 import { toast, toastError } from '../components/toast.js';
 import { btn, runBusy } from '../components/buttons.js';
-import { field, textInput, select, toggle, linesArea, linesOf } from '../components/fields.js';
+import { field, textInput } from '../components/fields.js';
+import { brainSettingsFields } from '../components/brain-fields.js';
 import { tabs } from '../components/tabs.js';
 import { callout, mono, spinner, loading } from '../components/common.js';
 
@@ -246,10 +247,7 @@ export default {
         allowedGroups,
         signal: ctx.signal,
       });
-      const modelIn = textInput({ placeholder: eff.brain_model ? `inherit (${eff.brain_model})` : 'inherit', class: 'mono' });
-      const effortSel = select(EFFORTS.map(([v, l]) => [v, v === '' && eff.brain_effort ? `Inherit (${eff.brain_effort})` : l]), '');
-      const backupSw = toggle({ checked: true, label: 'Include in Google Drive backups' });
-      const excludes = linesArea(DEFAULT_BACKUP_EXCLUDES, { rows: 5 });
+      const fields = brainSettingsFields({ backup: { enabled: true, exclude: DEFAULT_BACKUP_EXCLUDES } }, eff);
 
       // The manifest the brain is added with.
       const value = () => ({
@@ -257,9 +255,7 @@ export default {
         id: idIn.value,
         name: nameIn.value.trim(),
         routing: routing.getValue(),
-        model: modelIn.value.trim(),
-        effort: effortSel.value,
-        backup: { enabled: backupSw.input.checked, exclude: linesOf(excludes) },
+        ...fields.value(),
       });
       const form = h('form.wizard-card.card.form',
         h('h2', 'Configure the brain'),
@@ -268,14 +264,8 @@ export default {
           field({ label: 'Name', control: nameIn, help: 'Shown in the dashboard.' }),
           h('div', field({ label: 'Id', control: idIn, help: 'Permanent. Used for history, logs, sandbox rules and backups.' }), idErr)),
         h('fieldset.fieldset', h('legend', 'Which chats does it answer?'), routing),
-        h('fieldset.fieldset', h('legend', 'Model'),
-          h('div.form-grid',
-            field({ label: 'Model', control: modelIn, help: 'e.g. sonnet, opus, or a full model id. Empty uses the global brain model.' }),
-            field({ label: 'Effort', control: effortSel, help: 'How hard the model thinks. Inherit uses the global setting.' }))),
-        h('fieldset.fieldset', h('legend', 'Backup'),
-          h('div.field', backupSw, h('div.help', 'Backs up this folder with the daily backup, once Google Drive is connected.')),
-          h('details.details', h('summary', 'Files to leave out of backups'),
-            field({ label: 'Exclude patterns', control: excludes, help: 'One per line, relative to the brain folder. A trailing / means a folder.' }))),
+        h('fieldset.fieldset', h('legend', 'Model'), fields.model),
+        h('fieldset.fieldset', h('legend', 'Backup'), fields.backup),
         h('div.actions.wizard-actions',
           btn('Back', { icon: 'left', onClick: () => go('inspect') }),
           btn('Add brain', { kind: 'primary', type: 'submit', icon: 'check' })));
