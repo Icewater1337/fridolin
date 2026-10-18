@@ -118,6 +118,39 @@ func (m Inbound) ownParts() []Inbound {
 	return []Inbound{m}
 }
 
+// withMediaMoved returns m with each file in moved (see claimMedia) named
+// by its new path, in m.Media and in the Media of each of its parts: the
+// history has a line per part, and an edit or a deletion of one part
+// merges the others again from theirs (see applyChange). With only
+// m.Media changed, those named where the files had been.
+func (m Inbound) withMediaMoved(moved map[string]string) Inbound {
+	if len(moved) == 0 {
+		return m
+	}
+	m.Media = movedPaths(m.Media, moved)
+	if len(m.parts) > 0 {
+		parts := make([]Inbound, len(m.parts))
+		for i, p := range m.parts {
+			p.Media = movedPaths(p.Media, moved)
+			parts[i] = p
+		}
+		m.parts = parts
+	}
+	return m
+}
+
+// movedPaths returns a copy of paths with each one in moved replaced by
+// where it went.
+func movedPaths(paths []string, moved map[string]string) []string {
+	out := slices.Clone(paths)
+	for i, p := range out {
+		if to, ok := moved[p]; ok {
+			out[i] = to
+		}
+	}
+	return out
+}
+
 // changes reports whether c changes one of m's parts: the message c
 // names, in the same chat, from the same sender. A client can put any ID
 // in an edit or a deletion, and one group member must not rewrite or

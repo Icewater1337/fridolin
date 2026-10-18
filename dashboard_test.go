@@ -450,9 +450,49 @@ func TestIngestConfinedToMediaDir(t *testing.T) {
 		}
 	}
 	h.WaitFor("ingest reply", func() bool { return len(h.Outbox()) > 0 })
+	// The file moved into the brain's inbox, where its sandbox lets it read.
+	inbox := filepath.Join(canonicalDir(media), "personal", "scan.pdf")
 	hist, _ := os.ReadFile(filepath.Join(dir, "conversation-history.jsonl"))
-	if !strings.Contains(string(hist), "[attachment: "+canonicalDir(inside)+"]") {
-		t.Errorf("history does not record the ingested file:\n%s", hist)
+	if !strings.Contains(string(hist), "[attachment: "+inbox+"]") {
+		t.Errorf("history does not record the ingested file in the inbox:\n%s", hist)
+	}
+	if _, err := os.Stat(inbox); err != nil {
+		t.Errorf("the file is not in the inbox: %v", err)
+	}
+}
+
+// TestIngestKeepsOtherBrainsFiles: the brain /ingest names takes the files
+// into its inbox, so a file in another brain's inbox would move to it; a
+// brain could ask for that itself (it can reach /ingest) and read what was
+// sent to another chat. Nor may it take an attachment still on its way to
+// the brain of its chat. A file already in its own inbox is fine.
+func TestIngestKeepsOtherBrainsFiles(t *testing.T) {
+	tb := newTestBridge(t, `, "ingest": {"enabled": true}`)
+	tb.addFolderBrain(t, BrainManifest{ID: "personal", Name: "Personal", Routing: BrainRouting{HandlesDMs: true}})
+	tb.addFolderBrain(t, BrainManifest{ID: "team", Name: "Team", Routing: BrainRouting{Groups: []string{"120363000000000000@g.us"}}})
+	media := tb.cfgs.Get().MediaDir
+	cases := []struct {
+		name, file string // file relative to the media folder
+		code       int
+	}{
+		{"another brain's inbox", "personal/dm.pdf", 400},
+		{"an attachment not yet routed", incomingMediaDir + "/voice.ogg", 400},
+		{"its own inbox", "team/notes.pdf", 202},
+		{"a folder no brain owns", "upload/scan.pdf", 202},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			p := writeTestFile(t, filepath.Join(media, tc.file), "x")
+			w := tb.ingest(`{"brain":"team","paths":["` + p + `"]}`)
+			if w.Code != tc.code {
+				t.Errorf("ingest of %s: %d %s, want %d", tc.file, w.Code, w.Body.String(), tc.code)
+			}
+			if tc.code == 400 {
+				if _, err := os.Stat(p); err != nil {
+					t.Errorf("the refused file moved: %v", err)
+				}
+			}
+		})
 	}
 }
 

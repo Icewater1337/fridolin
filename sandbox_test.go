@@ -314,7 +314,7 @@ func TestSandboxProfileCoversRealPaths(t *testing.T) {
 	for _, want := range []string{
 		`(deny file-read* (subpath "` + filepath.Join(home, ".fridolin") + `"))`,
 		`(deny file-read* (subpath "` + filepath.Join(root, "elsewhere", "data") + `"))`,
-		`(allow file-read* (subpath "` + filepath.Join(root, "elsewhere", "data", "media") + `"))`,
+		`(allow file-read* (subpath "` + filepath.Join(root, "elsewhere", "data", "media", "a") + `"))`,
 		`(deny file-read* (subpath "` + filepath.Join(root, "elsewhere", "creds") + `"))`,
 		`(deny file-read* (subpath "` + filepath.Join(root, "elsewhere", "clients") + `"))`,
 		`(deny file-read* (subpath "` + filepath.Join(home, ".ssh") + `"))`,
@@ -328,14 +328,15 @@ func TestSandboxProfileCoversRealPaths(t *testing.T) {
 }
 
 // TestSandboxAllowsDoNotFollowSymlinks: a brain can swap its own folder,
-// the media dir or a writable allow_paths folder for a symlink. Allow
-// rules resolve only HOME and the data and credentials dirs, never such a
+// the media dir or a writable allow_paths folder for a symlink, and one
+// could swap its media inbox when that was not pinned. Allow rules resolve
+// only HOME and the data, credentials and media dirs, never such a
 // symlink, or the brain would be allowed into its target.
 func TestSandboxAllowsDoNotFollowSymlinks(t *testing.T) {
 	root := canonicalDir(t.TempDir())
 	home := filepath.Join(root, "home")
 	secret := filepath.Join(root, "secret")
-	for _, d := range []string{"home-real/.fridolin", "home-real/Documents", "secret"} {
+	for _, d := range []string{"home-real/.fridolin/media", "home-real/Documents", "secret"} {
 		if err := os.MkdirAll(filepath.Join(root, d), 0o700); err != nil {
 			t.Fatal(err)
 		}
@@ -343,8 +344,8 @@ func TestSandboxAllowsDoNotFollowSymlinks(t *testing.T) {
 	for link, target := range map[string]string{
 		home:                                  filepath.Join(root, "home-real"),
 		filepath.Join(root, "home-real", "a"): secret,
-		filepath.Join(root, "home-real", ".fridolin", "media"): secret,
-		filepath.Join(root, "home-real", "Documents", "share"): secret,
+		filepath.Join(root, "home-real", ".fridolin", "media", "a"): secret,
+		filepath.Join(root, "home-real", "Documents", "share"):      secret,
 	} {
 		if err := os.Symlink(target, link); err != nil {
 			t.Fatal(err)
@@ -363,7 +364,7 @@ func TestSandboxAllowsDoNotFollowSymlinks(t *testing.T) {
 	}
 	// The trusted roots still resolve, so the rules match real paths.
 	for _, want := range []string{
-		`(allow file-read* (subpath "` + filepath.Join(root, "home-real", ".fridolin", "media") + `"))`,
+		`(allow file-read* (subpath "` + filepath.Join(root, "home-real", ".fridolin", "media", "a") + `"))`,
 		`(allow file-read* (subpath "` + filepath.Join(root, "home-real", "a") + `"))`,
 	} {
 		if !strings.Contains(profile, want) {
@@ -1185,7 +1186,7 @@ func TestSandboxProfileDeniesBridgeSecrets(t *testing.T) {
 		{"custom data dir still denies both default names", home + "/fd", home + "/fd/bridge.db",
 			append(append(both("subpath", home+"/fd"), both("subpath", home+"/.fridolin")...), both("subpath", home+"/.whatsapp-claude-bridge")...), nil},
 		{"legacy data dir active", home + "/.whatsapp-claude-bridge", home + "/.whatsapp-claude-bridge/bridge.db",
-			append(both("subpath", home+"/.fridolin"), `(allow file-read* (subpath "`+home+`/.whatsapp-claude-bridge/media"))`), nil},
+			append(both("subpath", home+"/.fridolin"), `(allow file-read* (subpath "`+home+`/.whatsapp-claude-bridge/media/a"))`), nil},
 		{"bridge logs", home + "/.fridolin", home + "/.fridolin/bridge.db",
 			append(both("subpath", home+"/Library/Logs/fridolin"), both("subpath", home+"/Library/Logs/whatsapp-claude-bridge")...), nil},
 		// Where a dashboard session, or an older dashboard's token, lives.
@@ -1369,7 +1370,7 @@ func boxFixture(t *testing.T, home string) (*SandboxProfiler, string) {
 	t.Setenv("PATH", box+"/bin:/usr/bin:/bin")
 	for _, f := range []string{
 		"notes.md", "b/diary.md", "team/c/notes.md", "bin/mytool",
-		".fridolin/dashboard.token", ".fridolin/media/photo.jpg", "wa/bridge.db",
+		".fridolin/dashboard.token", ".fridolin/media/a/photo.jpg", "wa/bridge.db",
 		"creds/google_calendar_token_a.json", "creds/google_calendar_token_b.json",
 		"etc/config.json", "fridolin/fridolin", "fridolin/tools/calendar_tool.py",
 		"clients/contract.txt", "clients/share/ok.txt",
@@ -1446,7 +1447,7 @@ func TestSandboxOwnFolderOpensNothingInside(t *testing.T) {
 	cases := []struct{ name, rule string }{
 		{"another brain", q("deny file-read*", "subpath", box+"/b")},
 		{"the data dir", q("deny file-read*", "subpath", box+"/.fridolin")},
-		{"media, re-opened", q("allow file-read*", "subpath", box+"/.fridolin/media")},
+		{"its media inbox, re-opened", q("allow file-read*", "subpath", box+"/.fridolin/media/a")},
 		{"the database", q("deny file-read*", "literal", box+"/wa/bridge.db")},
 		{"the database's folder", q("deny file-read*", "subpath", box+"/wa")},
 		{"the credentials dir", q("deny file-read*", "subpath", box+"/creds")},

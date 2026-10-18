@@ -11,9 +11,9 @@ The 10 messages before the new one in this chat, oldest first (for context, not 
 {"at":"<WHEN>","from":"Script (via /send)","text":"The parcel is out for delivery."}
 {"at":"<WHEN>","from":"You (15551234567)","text":"What is on tomorrow?"}
 {"at":"<WHEN>","from":"You (main)","text":"echo:<HOME>/main:You (15551234567) says: What is on tomorrow?"}
-{"at":"<WHEN>","from":"You (15551234567)","text":"what is this?\n[attachment: <HOME>/.fridolin/media/a/photo.jpg]"}
+{"at":"<WHEN>","from":"You (15551234567)","text":"what is this?\n[attachment: <HOME>/.fridolin/media/main/photo.jpg]"}
 {"at":"<WHEN>","from":"You (main)","text":"echo:<HOME>/main:You (15551234567) says: what is this?"}
-{"at":"<WHEN>","from":"You (15551234567)","text":"file these\n[attachment: <HOME>/.fridolin/media/a/scan-1.pdf]\n[attachment: <HOME>/.fridolin/media/a/scan-2.pdf]"}
+{"at":"<WHEN>","from":"You (15551234567)","text":"file these\n[attachment: <HOME>/.fridolin/media/main/scan-1.pdf]\n[attachment: <HOME>/.fridolin/media/main/scan-2.pdf]"}
 {"at":"<WHEN>","from":"You (main)","text":"echo:<HOME>/main:You (15551234567) says: file these"}
 </chat_history>
 

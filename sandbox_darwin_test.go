@@ -128,7 +128,7 @@ func TestSandboxIgnoresPlantedSymlinks(t *testing.T) {
 		name, link, target, read string // relative to HOME
 	}{
 		{"own folder", "assistant/a", ".ssh", "assistant/a/id_ed25519"},
-		{"media dir", ".fridolin/media", ".ssh", ".fridolin/media/id_ed25519"},
+		{"own media inbox", ".fridolin/media/a", ".ssh", ".fridolin/media/a/id_ed25519"},
 		{"allow_paths folder", "Documents/share", ".ssh", "Documents/share/id_ed25519"},
 	}
 	for _, h := range homes {
@@ -212,8 +212,12 @@ func TestSandboxEnforcesProfile(t *testing.T) {
 		{"data dir token", false, ".fridolin/dashboard.token", false},
 		{"data dir database", false, ".fridolin/bridge.db", false},
 		{"data dir write", true, ".fridolin/planted", false},
-		{"media read", false, ".fridolin/media/photo.jpg", true},
-		{"media write", true, ".fridolin/media/new.jpg", true},
+		{"own media inbox read", false, ".fridolin/media/a/photo.jpg", true},
+		{"own media inbox write", true, ".fridolin/media/a/new.jpg", true},
+		{"other brain's media inbox read", false, ".fridolin/media/b/dm.pdf", false},
+		{"other brain's media inbox write", true, ".fridolin/media/b/planted.pdf", false},
+		{"attachment not yet routed", false, ".fridolin/media/.incoming/voice.ogg", false},
+		{"media folder write", true, ".fridolin/media/planted.jpg", false},
 		// The bridge makes a brain's calendar calls with it.
 		{"own calendar token", false, "creds/google_calendar_token_a.json", false},
 		{"other brain's calendar token", false, "creds/google_calendar_token_b.json", false},
@@ -269,7 +273,9 @@ func TestSandboxRefusesRenames(t *testing.T) {
 		{"other brain's folder", "assistant/{b}", "b2", false},
 		{"other brain's parent", "assistant", "as2", false},
 		{"data dir", ".fridolin", "f2", false},
-		{"file out of the data dir", ".fridolin/dashboard.token", ".fridolin/media/token", false},
+		{"file out of the data dir", ".fridolin/dashboard.token", ".fridolin/media/a/token", false},
+		{"file out of another brain's media inbox", ".fridolin/media/b/dm.pdf", "assistant/a/dm.pdf", false},
+		{"its own media inbox", ".fridolin/media/a", ".fridolin/media/a2", false},
 		{"credentials dir", "creds", "c2", false},
 		{"other brain's calendar token", "creds/google_calendar_token_b.json", "t.json", false},
 		{"deny_paths entry", "{deny}", "d2", false},
@@ -279,7 +285,8 @@ func TestSandboxRefusesRenames(t *testing.T) {
 		{"the folder above the transcripts", ".claude", "c3", false},
 		{"own file", "assistant/a/notes.md", "assistant/a/renamed.md", true},
 		{"own subfolder", "assistant/a/sub", "assistant/a/sub2", true},
-		{"media file", ".fridolin/media/photo.jpg", ".fridolin/media/p2.jpg", true},
+		{"file in its own media inbox", ".fridolin/media/a/photo.jpg", ".fridolin/media/a/p2.jpg", true},
+		{"file out of its own media inbox", ".fridolin/media/a/photo.jpg", "assistant/a/photo.jpg", true},
 	}
 	for _, l := range sandboxLayouts() {
 		t.Run(l.name, func(t *testing.T) {
@@ -790,7 +797,7 @@ func TestSandboxAllowPathsKeepBridgeSecrets(t *testing.T) {
 	requireSandboxExec(t)
 	home := canonicalDir(t.TempDir())
 	t.Setenv("HOME", home)
-	for _, f := range []string{".fridolin/dashboard.token", ".fridolin/bridge.db", ".fridolin/media/photo.jpg", "Documents/share/ok.txt", "a/notes.md", "team/b/diary.md"} {
+	for _, f := range []string{".fridolin/dashboard.token", ".fridolin/bridge.db", ".fridolin/media/a/photo.jpg", "Documents/share/ok.txt", "a/notes.md", "team/b/diary.md"} {
 		p := filepath.Join(home, f)
 		if err := os.MkdirAll(filepath.Dir(p), 0o700); err != nil {
 			t.Fatal(err)
@@ -813,7 +820,7 @@ func TestSandboxAllowPathsKeepBridgeSecrets(t *testing.T) {
 		{".fridolin/bridge.db", false, false},
 		{"team/b/diary.md", false, false},
 		{"team/b/planted.md", true, false},
-		{".fridolin/media/photo.jpg", false, true},
+		{".fridolin/media/a/photo.jpg", false, true},
 		{"Documents/share/ok.txt", false, true},
 	} {
 		if allowed, out := sandboxTry(t, sp, filepath.Join(home, "a"), c.write, filepath.Join(home, c.path)); allowed != c.allow {
@@ -936,7 +943,7 @@ func TestSandboxOwnFolderKeepsWhatIsInsideIt(t *testing.T) {
 	}{
 		{"read its own notes", `cat "$B/notes.md"`, true},
 		{"write a file of its own", `printf x > "$B/new.md"`, true},
-		{"read media", `cat "$B/.fridolin/media/photo.jpg"`, true},
+		{"read its own media inbox", `cat "$B/.fridolin/media/a/photo.jpg"`, true},
 		{"read an allow_paths folder", `cat "$B/clients/share/ok.txt"`, true},
 		{"install a tool of its own on PATH", `printf x > "$B/bin/mytool2"`, true},
 		{"read another brain's files", `cat "$B/b/diary.md"`, false},
@@ -1142,7 +1149,9 @@ func sandboxFixture(t *testing.T, home, otherBrain, denyDir string, extra ...map
 		"assistant/a/notes.md",
 		"assistant/" + otherBrain + "/diary.md",
 		".fridolin/dashboard.token",
-		".fridolin/media/photo.jpg",
+		".fridolin/media/a/photo.jpg",
+		".fridolin/media/b/dm.pdf",
+		".fridolin/media/.incoming/voice.ogg",
 		"creds/google_calendar_token_a.json",
 		"creds/google_calendar_token_b.json",
 		".ssh/id_ed25519",

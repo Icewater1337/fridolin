@@ -535,10 +535,23 @@ Brains can neither read nor write:
 - the profiles of Safari, Chrome (all of `Application Support/Google`),
   Firefox, Brave, Edge, Arc, Chromium, Vivaldi and Opera, with the release
   channels kept beside them (Edge Beta, Vivaldi Snapshot, Opera GX, …)
-- the bridge's data directory — except `media/`, and a brain's own
-  `run-tokens/<id>/` to read — under both names it has had, `~/.fridolin`
-  and `~/.whatsapp-claude-bridge`, whichever is in use (an old one left
-  behind can still hold the WhatsApp keys and tokens)
+- the bridge's data directory — except the brain's own media inbox
+  (`media/<brain id>/`), and its own `run-tokens/<id>/` to read — under
+  both names it has had, `~/.fridolin` and `~/.whatsapp-claude-bridge`,
+  whichever is in use (an old one left behind can still hold the WhatsApp
+  keys and tokens)
+- the media folder, wherever `media_dir` puts it, except the brain's own
+  inbox in it: attachments are downloaded into `media/.incoming/`, and the
+  brain that takes the message moves them into its inbox, so no brain sees
+  the files sent to another brain's chats. A brain cannot rename or
+  replace its inbox folder itself, only what is inside it. Before the
+  first inbox, the bridge moves every folder older versions left in the
+  media folder, such as `media/plaud/` with every brain's Plaud
+  transcripts, into `media/.old/`, so that none becomes the inbox of a
+  brain with its name, and with them every file at its top from before
+  the bridge started: older versions downloaded every chat's attachments
+  there, where `/ingest` would hand them to any brain that guessed a
+  name. A folder `media/.inboxes/` says it has done so.
 - the database (`db_path`, with its `-wal`, `-shm` and `-journal` files)
   wherever it is, and its folder when that lies outside the data directory,
   unless the folder is your home folder or a temp folder
@@ -757,7 +770,7 @@ for the paths listed above. A manipulated brain can therefore still:
   profile leaves readable), what `launchctl print` shows of the job, and
   the bridge's own process environment (`ps eww`); and use your ssh-agent,
   through the socket that `launchctl getenv SSH_AUTH_SOCK` names
-- write to the shared media inbox, and reach the network
+- reach the network
 
 Later changes give each brain its own Claude Code state folder and make
 writes deny-by-default.
@@ -777,8 +790,9 @@ in the log at every start: set `data_dir` to it to keep it for good. A new
 config, from `fridolin init`, `setup.sh` or the first start, gets the folder
 chosen then (written with `~`), so later starts do not choose again.
 `db_path` and `media_dir` override individually. Brains cannot read it,
-except the `media/` inbox and their own runs' brain API tokens in
-`run-tokens/<id>/`; a `db_path` elsewhere is denied to them too.
+except their own inbox in `media/` (`media/<brain id>/`) and their own
+runs' brain API tokens in `run-tokens/<id>/`; a `db_path` elsewhere is
+denied to them too.
 
 `runs/` in it lists the brain runs going on. Each run has a process group
 of its own, which launchd's or systemd's cleanup does not reach, so when
@@ -835,8 +849,11 @@ commands do not work.
 
 Enables `POST /ingest {"brain","paths","text","sender"}`. A request that
 still sends `scope`, the old name of `brain`, is refused with 400 and told
-to use `brain`. Paths must be files inside the media directory. The
-named brain receives them like WhatsApp attachments and answers in its
+to use `brain`. Paths must be files inside the media directory, but not in
+another brain's inbox nor in `media/.incoming/`, where WhatsApp attachments
+wait for their brain. The named brain takes them into its own inbox
+(`media/<brain id>/`), receives them like WhatsApp attachments and answers
+in its
 `reply_chat`, even when that chat belongs to another brain (your DM, say).
 Off by default; see [API.md](API.md#post-ingest). It always needs a token:
 yours in `<data_dir>/scripts.token`, or a brain's run's, which hands files

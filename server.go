@@ -24,8 +24,8 @@ type sendRequest struct {
 }
 
 // ingestRequest is the JSON body expected by POST /ingest. Brain names the
-// brain; Paths are files already written inside the media directory; Text
-// is the message that goes with them.
+// brain; Paths are files already written inside the media directory, which
+// move into the brain's inbox; Text is the message that goes with them.
 type ingestRequest struct {
 	Brain  string   `json:"brain"`
 	Paths  []string `json:"paths"`
@@ -302,6 +302,16 @@ func (b *Bridge) httpIngest(w http.ResponseWriter, r *http.Request) {
 		}
 		if st, err := os.Stat(resolved); err != nil || !st.Mode().IsRegular() {
 			writeErr(w, http.StatusBadRequest, "not a regular file: "+filepath.Base(p))
+			return
+		}
+		// The brain takes the file into its inbox (see claimMedia), so a
+		// file in another brain's inbox would move to this one: a brain
+		// could ask for that itself, and read the files sent to another
+		// chat. Nor may it take an attachment still on its way to the
+		// brain of its chat.
+		rel, _ := mediaRel(media, resolved)
+		if owner := mediaOwner(rel); strings.HasPrefix(owner, ".") || (owner != br.ID() && b.brainMgr.Get(owner) != nil) {
+			http.Error(w, "not a file for this brain: "+filepath.Base(p)+" is in another brain's inbox or on its way to one", http.StatusBadRequest)
 			return
 		}
 		paths = append(paths, resolved)

@@ -36,9 +36,10 @@ policy describes what that copy does with data.
 - Backups go to **your own Google Drive**.
 - Plaud transcripts are saved as text files on your computer and handed to the
   brain you chose, so they reach Anthropic like any message the brain answers.
-  Each is written to the media inbox first (`<media_dir>/plaud/`), which every
-  brain may read under the sandbox, until the brain files it in its own
-  folder; from there it goes into that brain's backups too.
+  Each is written to that brain's media inbox first
+  (`<media_dir>/<brain id>/plaud/`), which no other brain may read under the
+  sandbox, until the brain files it in its own folder; from there it goes
+  into that brain's backups too.
 - A message deleted for everyone on WhatsApp is taken out of the brain's
   chat history (`conversation-history.jsonl`), and is not answered if it was
   still waiting; a file it carried stays in the media inbox, or where the

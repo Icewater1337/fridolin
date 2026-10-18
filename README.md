@@ -46,7 +46,8 @@ not in this repository. Link Google Drive in the dashboard and each brain is
 backed up incrementally every night, with old versions kept.
 
 **Files.** Photos, PDFs, documents, voice notes, and video are downloaded and
-handed over as file paths. The assistant opens them and does whatever you asked.
+handed over as file paths, in an inbox of the brain's own that no other brain
+can open. The assistant opens them and does whatever you asked.
 A file over 100 MB (`max_media_mb`) is skipped, and so is one that cannot be
 downloaded within two minutes; the sender is told either way. View-once photos,
 videos and voice notes are not opened (the sender is asked to send a normal
@@ -401,7 +402,9 @@ and the bridge's version.
 
 To hand a brain files that arrived some other way (a web upload, a recorder
 sync), write them under `~/.fridolin/media/` and turn on
-`ingest.enabled`:
+`ingest.enabled`. The brain takes them into its own inbox,
+`~/.fridolin/media/<brain id>/`; a file in another brain's inbox is
+refused:
 
 ```bash
 curl -X POST http://127.0.0.1:8765/ingest \
@@ -631,6 +634,10 @@ a group event or a reconnect, once it is ten minutes old, or when you press
 Refresh on the Chats page. **`polls.go`** — the `[POLL]` blocks in replies,
 sending them, and matching votes to options (WhatsApp sends SHA-256 hashes of
 option names, which are matched against the stored options).
+
+**`media.go`** — the media inbox: each brain's own folder in the media
+directory, and moving a message's files into the inbox of the brain that
+takes it.
 
 **`debounce.go`** — merges a burst of messages from one person into one run.
 

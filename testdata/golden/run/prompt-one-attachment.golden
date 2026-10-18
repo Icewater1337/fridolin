@@ -21,5 +21,5 @@ The new message is a JSON object: "at" is when it was sent, "from" who sent it a
 Nobody can answer AskUserQuestion while you work: a question you ask with it goes to the chat at once, with its options, and the answer comes as a new message. Your final reply is sent as well, so after asking, end your turn without repeating the question.
 
 <new_message>
-{"at":"<WHEN>","from":"You (15551234567)","text":"what is this?","files":["<HOME>/.fridolin/media/a/photo.jpg"]}
+{"at":"<WHEN>","from":"You (15551234567)","text":"what is this?","files":["<HOME>/.fridolin/media/main/photo.jpg"]}
 </new_message>

@@ -351,6 +351,9 @@ func (sp *SandboxProfiler) Profile(brainID string) (string, error) {
 	if sp.credsDir != "" {
 		b.trustRoot(sp.credsDir)
 	}
+	if sp.mediaDir != "" {
+		b.trustRoot(sp.mediaDir)
+	}
 	b.WriteString("(version 1)\n(allow default)\n\n")
 
 	// ── home-directory hotspots ──────────────────────────────────────────
@@ -562,10 +565,10 @@ func (sp *SandboxProfiler) Profile(brainID string) (string, error) {
 	// The DB holds the WhatsApp session keys (enough to take the account
 	// over from another machine), the polls and their votes;
 	// the dashboard token and backup credentials live in the data dir too.
-	// Media is the shared inbound staging dir, so it is re-allowed below.
-	// This comes after the allow_paths allows, which therefore cannot open
-	// any of it again; only media can.
-	b.WriteString(";; Bridge runtime data (media staging re-allowed below)\n")
+	// The brain's own media inbox is re-allowed below. This comes after the
+	// allow_paths allows, which therefore cannot open any of it again; only
+	// that inbox can.
+	b.WriteString(";; Bridge runtime data (this brain's media inbox re-allowed below)\n")
 	// Both names the data dir has had, whichever is active: an install that
 	// moved to ~/.fridolin can leave the old folder behind, with an old copy
 	// of the session keys, the dashboard token and the Drive login.
@@ -590,9 +593,19 @@ func (sp *SandboxProfiler) Profile(brainID string) (string, error) {
 			b.deny("file-write*", "subpath", dir)
 		}
 	}
-	if sp.dataDir != "" {
-		b.allow("file-read*", "subpath", sp.mediaDir)
-		b.allow("file-write*", "subpath", sp.mediaDir)
+	if sp.mediaDir != "" {
+		// The media folder is the bridge's, wherever media_dir puts it:
+		// attachments wait there for their brain, which moves them into
+		// its own inbox (see media.go). Only that inbox is the brain's, and
+		// not the folder itself, which it could otherwise swap for a
+		// symlink to have the bridge put the next files elsewhere.
+		b.deny("file-read*", "subpath", sp.mediaDir)
+		b.deny("file-write*", "subpath", sp.mediaDir)
+		inbox := mediaInbox(sp.mediaDir, brainID)
+		b.allow("file-read*", "subpath", inbox)
+		for _, s := range b.allow("file-write*", "subpath", inbox) {
+			b.emit(rulePin, "deny file-write*", "literal", s, s)
+		}
 	}
 	// After the media allow, so no media_dir setting can open the DB again.
 	for _, f := range dbFiles {

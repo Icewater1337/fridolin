@@ -211,6 +211,7 @@ type brainSettings struct {
 	maxPending      int
 	observe         string // BrainManifest.Observe
 	credsDir        string // where per-brain credential files live
+	mediaDir        string // the media folder, which holds the brain's inbox
 	envPassthrough  []string
 	toolsDir        string // the bridge's Python helpers, or ""
 	dataDir         string // the data dir, absolute
@@ -358,13 +359,24 @@ func historyTime(t time.Time) string {
 // brains' runs that take every run slot. A run it interrupts does not
 // count.
 func (br *Brain) Submit(m Inbound) (pos int, busy bool, err error) {
+	return br.submit(&m)
+}
+
+// submit is Submit, and leaves in m (its Media, and its parts') where the
+// message's files are now. A brain removed while it takes the message
+// (errBrainRetired after the history) has moved them into its inbox by
+// then, and BrainManager.Submit hands m on to the next brain with those
+// paths, whose claimMedia moves the files on into its own inbox. With the
+// paths they had before, the next brain got files that were no longer
+// there, and they stayed in the removed brain's inbox.
+func (br *Brain) submit(m *Inbound) (pos int, busy bool, err error) {
 	if m.At.IsZero() {
 		m.At = time.Now()
 	}
 	s := br.settings.Load()
 	// Untagged chatter needs nothing more than the history, unless the
 	// brain observes it with runs: the next run in the chat reads it there.
-	queues := !m.Silent || observeRuns(s.observe, m)
+	queues := !m.Silent || observeRuns(s.observe, *m)
 
 	// Turned away before anything is written: a message the brain does not
 	// take is not in its history, where the sender's retry after "queue is
@@ -375,7 +387,7 @@ func (br *Brain) Submit(m Inbound) (pos int, busy bool, err error) {
 		br.mu.Unlock()
 		return 0, false, errBrainRetired
 	}
-	if queues && !br.hasRoomLocked(m, s) {
+	if queues && !br.hasRoomLocked(*m, s) {
 		if !m.Silent {
 			br.mu.Unlock()
 			return 0, true, errQueueFull
@@ -387,9 +399,13 @@ func (br *Brain) Submit(m Inbound) (pos int, busy bool, err error) {
 	}
 	br.mu.Unlock()
 
+	// The files go into this brain's inbox, the only part of the media
+	// folder its sandbox opens, before the history names where they are.
+	*m = m.withMediaMoved(claimMedia(s.mediaDir, br.id, m.Media))
+
 	// History first, so that later runs see the message even when it is
 	// merged into a queue that is already moving.
-	m = br.logInbound(m)
+	*m = br.logInbound(*m)
 	if !queues {
 		return 0, false, nil
 	}
@@ -408,7 +424,7 @@ func (br *Brain) Submit(m Inbound) (pos int, busy bool, err error) {
 	// chatter never interrupts a run. Nor do ingested files interrupt a
 	// request, or get replaced: each is a job of its own, not a correction of
 	// the last one. Observe-only runs are another matter, see below.
-	interrupting, replaces := supersedes(m, s)
+	interrupting, replaces := supersedes(*m, s)
 	var gone []Inbound
 	kept := br.pending[:0]
 	for _, p := range br.pending {
@@ -443,7 +459,7 @@ func (br *Brain) Submit(m Inbound) (pos int, busy bool, err error) {
 	if cur := br.current; cur != nil && (interrupting && replaces(cur.msg) || !m.Silent && cur.msg.Silent) {
 		interrupt = cur
 	}
-	br.pending = append(br.pending, m)
+	br.pending = append(br.pending, *m)
 	pos = slices.Index(br.queueOrderLocked(), len(br.pending)-1) + 1
 	busy = pos > 1 || (br.current != nil && interrupt == nil) || br.slots.busy(!m.Silent)
 	start := !br.working
@@ -2165,6 +2181,15 @@ func (bm *BrainManager) reload(specs []BrainSpec, issues []BrainIssue, cfg *Conf
 	if err := ValidateBrainSet(specs); err != nil {
 		return err
 	}
+	// Before any brain gets an inbox in the media folder: one named like a
+	// folder an older version left there would read it (see
+	// retireLegacyMedia). A failure here leaves it to the first inbox, which
+	// fails until it is done.
+	if cfg.MediaDir != "" {
+		if err := retireLegacyMedia(cfg.MediaDir); err != nil {
+			log.Printf("media: readying %s for inboxes: %v", cfg.MediaDir, err)
+		}
+	}
 
 	bm.mu.RLock()
 	old := bm.brains
@@ -2295,6 +2320,7 @@ func settingsFor(cfg *Config, sp BrainSpec) *brainSettings {
 		maxPending:      cfg.Queue.MaxPending,
 		observe:         m.Observe,
 		credsDir:        credentialsDirOf(cfg),
+		mediaDir:        cfg.MediaDir,
 		envPassthrough:  append([]string(nil), cfg.ChildEnvPassthrough...),
 		toolsDir:        ownLayout().Tools,
 		// Absolute: brains run in their own folder, where a relative
@@ -2373,7 +2399,8 @@ func (bm *BrainManager) Route(m Inbound) *Brain {
 }
 
 // Submit routes a message to its brain. A message that lands on a brain being
-// removed at that moment is routed again once.
+// removed at that moment is routed again once, with its files where that
+// brain left them (see Brain.submit).
 func (bm *BrainManager) Submit(m Inbound) (br *Brain, pos int, busy bool, err error) {
 	for attempt := 0; attempt < 2; attempt++ {
 		br = bm.Route(m)
@@ -2383,7 +2410,7 @@ func (bm *BrainManager) Submit(m Inbound) (br *Brain, pos int, busy bool, err er
 		if br == nil {
 			return nil, 0, false, fmt.Errorf("no brain configured for %s", m.JID)
 		}
-		pos, busy, err = br.Submit(m)
+		pos, busy, err = br.submit(&m)
 		if !errors.Is(err, errBrainRetired) {
 			return br, pos, busy, err
 		}

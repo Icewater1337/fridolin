@@ -153,6 +153,11 @@ func TestPlaudRunsInThePickedBrain(t *testing.T) {
 	if hist, _ := os.ReadFile(filepath.Join(gDir, "conversation-history.jsonl")); !strings.Contains(string(hist), "[Plaud]") {
 		t.Errorf("g's history lacks the recording:\n%s", hist)
 	}
+	// The transcript is in g's inbox, which the DM brain cannot read.
+	media := tb.cfgs.Get().MediaDir
+	if files, _ := filepath.Glob(filepath.Join(media, "*", "plaud", "*.txt")); len(files) != 1 || filepath.Dir(files[0]) != filepath.Join(media, "g", "plaud") {
+		t.Errorf("transcripts = %v, want one in g's inbox", files)
+	}
 	waitFor(t, 10*time.Second, "the run to be noted", func() bool {
 		last := tb.plaud.Status().LastForwarded
 		return last != nil && last.Brain == "g" && last.Status == plaudRunDone
@@ -221,7 +226,7 @@ func TestPlaudWithoutAPrivateChatWaits(t *testing.T) {
 	if st, _ := tb.plaud.loadState(); st.Pending[plaudNew] == nil || slices.Contains(st.Seen, plaudNew) {
 		t.Errorf("state = %+v, want the recording still pending", st)
 	}
-	if files, _ := filepath.Glob(filepath.Join(tb.cfgs.Get().MediaDir, "plaud", "*")); len(files) != 0 {
+	if files, _ := filepath.Glob(filepath.Join(tb.cfgs.Get().MediaDir, "*", "plaud", "*")); len(files) != 0 {
 		t.Errorf("files written without a destination: %v", files)
 	}
 	var status map[string]any
@@ -851,7 +856,7 @@ func TestPlaudFirstSyncThenForwardsNewRecordings(t *testing.T) {
 	}
 	// Seen once the brain's run answered it.
 	tb.waitPlaudSeen(t, plaudNew)
-	files, _ := filepath.Glob(filepath.Join(tb.cfgs.Get().MediaDir, "plaud", "* - Team sync - "+plaudNew+".txt"))
+	files, _ := filepath.Glob(filepath.Join(tb.cfgs.Get().MediaDir, plaudDMBrain.ID, "plaud", "* - Team sync - "+plaudNew+".txt"))
 	if len(files) != 1 {
 		t.Fatalf("transcript files = %v", files)
 	}
@@ -1689,7 +1694,7 @@ func TestPlaudFailedFirstSyncForwardsNothingOld(t *testing.T) {
 			if err := tb.plaud.Poll(context.Background()); err != nil {
 				t.Fatal(err)
 			}
-			if files, _ := filepath.Glob(filepath.Join(tb.cfgs.Get().MediaDir, "plaud", "*")); len(files) != 0 {
+			if files, _ := filepath.Glob(filepath.Join(tb.cfgs.Get().MediaDir, "*", "plaud", "*")); len(files) != 0 {
 				t.Errorf("old recordings were written out: %v", files)
 			}
 			if strings.Contains(fp.calls(), " file ") {
@@ -1707,7 +1712,7 @@ func TestPlaudFailedFirstSyncForwardsNothingOld(t *testing.T) {
 
 // plaudForwarded reports whether a recording was written out for a brain.
 func (tb *testBridge) plaudForwarded() bool {
-	files, _ := filepath.Glob(filepath.Join(tb.cfgs.Get().MediaDir, "plaud", "*.txt"))
+	files, _ := filepath.Glob(filepath.Join(tb.cfgs.Get().MediaDir, "*", "plaud", "*.txt"))
 	return len(files) > 0
 }
 
@@ -1870,7 +1875,7 @@ func TestPlaudLoginChangingDuringAPollSendsNothing(t *testing.T) {
 // plaudDelivered returns the transcript file written for recording id.
 func (tb *testBridge) plaudDelivered(t *testing.T, id string) string {
 	t.Helper()
-	files, _ := filepath.Glob(filepath.Join(tb.cfgs.Get().MediaDir, "plaud", "* - "+id+".txt"))
+	files, _ := filepath.Glob(filepath.Join(tb.cfgs.Get().MediaDir, "*", "plaud", "* - "+id+".txt"))
 	if len(files) != 1 {
 		t.Fatalf("transcript files for %s = %v, want one", id, files)
 	}
@@ -2310,7 +2315,7 @@ func TestPlaudRetryRewritesTheSameTranscript(t *testing.T) {
 	}
 	waitFor(t, 10*time.Second, "second brain reply", func() bool { return len(tb.dev.Outbox()) == 2 })
 
-	files, _ := filepath.Glob(filepath.Join(tb.cfgs.Get().MediaDir, "plaud", "*"))
+	files, _ := filepath.Glob(filepath.Join(tb.cfgs.Get().MediaDir, "*", "plaud", "*"))
 	if len(files) != 1 || !strings.HasSuffix(files[0], " - "+plaudNew+".txt") {
 		t.Fatalf("transcript files = %v, want one named after the recording id", files)
 	}
@@ -2319,7 +2324,7 @@ func TestPlaudRetryRewritesTheSameTranscript(t *testing.T) {
 	}
 }
 
-// Brains may write to the media folder, so one can put a symlink where a
+// A brain may write to its own media inbox, so it can put a symlink where a
 // recording's transcript will go. The transcript replaces the link instead
 // of being written through it to the file it points to.
 func TestPlaudTranscriptReplacesASymlink(t *testing.T) {
@@ -2328,7 +2333,7 @@ func TestPlaudTranscriptReplacesASymlink(t *testing.T) {
 	if err := os.WriteFile(target, []byte("keep me"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	dir := filepath.Join(tb.cfgs.Get().MediaDir, "plaud")
+	dir := filepath.Join(tb.cfgs.Get().MediaDir, plaudDMBrain.ID, "plaud")
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		t.Fatal(err)
 	}
@@ -2353,6 +2358,39 @@ func TestPlaudTranscriptReplacesASymlink(t *testing.T) {
 	}
 	if data, _ := os.ReadFile(link); !strings.Contains(string(data), "=== Transcript ===\n[00:00 - 00:04] Speaker 1: Let's ship on Friday.") {
 		t.Errorf("the file lacks the transcript:\n%s", data)
+	}
+}
+
+// A brain can also swap the plaud folder in its inbox for a symlink, to
+// another brain's inbox or anywhere else the bridge may write. The bridge
+// writes the transcript only through the inbox, never out of it: the
+// recording waits for another try, and nothing lands where the link
+// points.
+func TestPlaudTranscriptStaysInTheInbox(t *testing.T) {
+	tb, fp := plaudBridge(t, "")
+	media := tb.cfgs.Get().MediaDir
+	elsewhere := t.TempDir()
+	for name, target := range map[string]string{"out of the media folder": elsewhere, "into another brain's inbox": filepath.Join(media, "other")} {
+		t.Run(name, func(t *testing.T) {
+			if err := os.MkdirAll(target, 0o700); err != nil {
+				t.Fatal(err)
+			}
+			inbox := filepath.Join(media, plaudDMBrain.ID)
+			if err := os.MkdirAll(inbox, 0o700); err != nil {
+				t.Fatal(err)
+			}
+			link := filepath.Join(inbox, "plaud")
+			_ = os.RemoveAll(link)
+			if err := os.Symlink(target, link); err != nil {
+				t.Fatal(err)
+			}
+			if err := plaudDeliver(t, tb, fp); err == nil {
+				t.Error("the recording was delivered through the link")
+			}
+			if names := dirNames(t, target); len(names) != 0 {
+				t.Errorf("written through the link: %q", names)
+			}
+		})
 	}
 }
 

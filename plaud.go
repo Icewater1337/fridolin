@@ -1005,18 +1005,17 @@ func (p *PlaudManager) forward(ctx context.Context, cfg *Config, id string, item
 		duration = "?"
 	}
 
-	dir := filepath.Join(cfg.MediaDir, "plaud")
-	if err := os.MkdirAll(dir, 0o700); err != nil {
-		return nil, err
-	}
-	path := plaudTranscriptPath(dir, day, name, id)
+	// Into the plaud folder of the brain's own inbox: no other brain may
+	// read the recording.
+	file := plaudTranscriptPath(filepath.Join(mediaInbox(cfg.MediaDir, br.ID()), "plaud"), day, name, id)
 	var body strings.Builder
 	fmt.Fprintf(&body, "Plaud recording: %s\nRecorded: %s\nDuration: %s\nPlaud ID: %s\n%s\n", name, when, duration, id, note)
 	if summary != "" {
 		body.WriteString("=== Plaud AI summary ===\n" + summary + "\n\n")
 	}
 	body.WriteString("=== Transcript ===\n" + strings.TrimSpace(transcript) + "\n")
-	if err := writeFileAtomic(path, []byte(body.String()), 0o600, false); err != nil {
+	path, err := writeInboxFile(cfg.MediaDir, br.ID(), filepath.Join("plaud", filepath.Base(file)), []byte(body.String()))
+	if err != nil {
 		return nil, err
 	}
 
@@ -1153,8 +1152,8 @@ func (p *PlaudManager) runEnded(id string) func(error) {
 // The name ends in the Plaud id, so a retry finds the file it wrote before,
 // even after the recording was renamed, and rewrites it instead of adding
 // a copy. (Writing it atomically also replaces, rather than follows, a
-// symlink a brain may have put there.) The folder is read rather than
-// globbed, since media_dir may contain '[' or '*'.
+// symlink a brain may have put there; see writeInboxFile.) The folder is
+// read rather than globbed, since media_dir may contain '[' or '*'.
 func plaudTranscriptPath(dir, day, name, id string) string {
 	entries, _ := os.ReadDir(dir)
 	for _, e := range entries {

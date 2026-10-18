@@ -254,7 +254,8 @@ nothing says so: copy such a file into the brain's folder instead.
 
 With `sandbox.enabled` (macOS), every run is wrapped in `sandbox-exec`: the
 brain cannot read or write any other brain's folder, the bridge's data folder
-(except the shared media inbox), or the usual secrets (SSH keys, cloud
+(except its own media inbox, `media/<brain id>/`, where the files sent to
+its chats land), or the usual secrets (SSH keys, cloud
 credentials, browser and mail data, shell history), and it cannot rename or
 delete the folders above them, which would move them out from under the
 sandbox's rules. Nor can it read your own Claude Code instructions, unless

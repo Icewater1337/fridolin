@@ -52,7 +52,8 @@ and the private chat summaries go to (see below) gets one notice. A
 recording deleted in Plaud meanwhile is given up at once, without a notice.
 Once it is ready, Fridolin
 writes a `.txt` with the details, Plaud's summary and the timestamped
-transcript to `~/.fridolin/media/plaud/` (as
+transcript to the `plaud` folder of that brain's media inbox,
+`~/.fridolin/media/<brain id>/plaud/` (as
 `YYYY-MM-DD - <name> - <Plaud ID>.txt`, by the day it was recorded; a
 recording handed over again rewrites its file rather than adding a copy),
 and gives it to the brain like a WhatsApp attachment. The message with it
@@ -87,9 +88,10 @@ summaries go, and warns when that chat belongs to another brain.
 
 New brains get a `skills/plaud.md` that tells them how to file recordings.
 
-The transcript sits in the media inbox (`<media_dir>/plaud/`, by default
-`~/.fridolin/media/plaud/`) until the brain files it; under the sandbox every
-brain may read the inbox. **Disconnect** signs out and stops the checks; the
+The transcript sits in the picked brain's media inbox
+(`<media_dir>/<brain id>/plaud/`, by default
+`~/.fridolin/media/<brain id>/plaud/`) until the brain files it; under the
+sandbox no other brain can read it. **Disconnect** signs out and stops the checks; the
 transcripts already written, the brains' filed copies and the list of
 recordings Fridolin has seen (`~/.fridolin/plaud/state.json`) stay, so
 connecting the same account again sends nothing twice.
