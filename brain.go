@@ -263,10 +263,10 @@ type BrainHooks struct {
 	// its message: of use only now.
 	Notice func(jid, text string)
 	// Question sends the chat jid a question br asks mid-run, marked as
-	// one, and reports whether it is on its way: the run sends nothing
-	// else, so it must arrive. br's history records it once it did, like
-	// an answer: the reply to it comes as a new message, whose run must
-	// see what it answers. A silent run asks nothing (see readStream).
+	// one, and reports whether it is on its way, ahead of the run's final
+	// reply. br's history records it once it arrived, like an answer: the
+	// reply to it comes as a new message, whose run must see what it
+	// answers. A silent run asks nothing (see readStream).
 	Question func(br *Brain, jid, text string) bool
 	// Deliver receives every finished run. It records the answer in the
 	// brain's history once it is sent.
@@ -299,10 +299,12 @@ var workingNoticeAfter = 10 * time.Second
 
 // RunResult is the outcome of one brain run.
 type RunResult struct {
-	Text        string
-	AlreadySent bool // a question was forwarded mid-run; don't send Text too
-	Err         error
-	Duration    time.Duration
+	Text string
+	// Asked is set when the run forwarded a question mid-run. Its answer
+	// comes as a new message; Text, the run's own final reply, is sent too.
+	Asked    bool
+	Err      error
+	Duration time.Duration
 }
 
 // RunInfo summarises the last finished run, for the dashboard.
@@ -558,7 +560,7 @@ func (br *Brain) recordLast(m Inbound, res RunResult) {
 		info.Outcome = outcomeInterrupted
 	case res.Err != nil:
 		info.Outcome, info.Error = outcomeError, res.Err.Error()
-	case res.AlreadySent:
+	case res.Asked:
 		info.Outcome = outcomeQuestion
 	}
 	br.mu.Lock()
@@ -1487,6 +1489,11 @@ func outboundSender(id string, entry historyEntry) string {
 	return "Script without a token (via /send)"
 }
 
+// askUserQuestionNote tells the model what becomes of AskUserQuestion in a
+// run nobody can answer mid-way: the question goes to the chat (see
+// extractAskQuestion), and its final reply follows it there.
+const askUserQuestionNote = "Nobody can answer AskUserQuestion while you work: a question you ask with it goes to the chat at once, with its options, and the answer comes as a new message. Your final reply is sent as well, so after asking, end your turn without repeating the question."
+
 // buildPrompt constructs the -p prompt: the prompt file, chat-history
 // preface, attachments, then the new message.
 func (br *Brain) buildPrompt(s *brainSettings, m Inbound) string {
@@ -1528,6 +1535,7 @@ func (br *Brain) buildPrompt(s *brainSettings, m Inbound) string {
 		sb.WriteString("Handle them together as one request.\n\n")
 	}
 
+	sb.WriteString(askUserQuestionNote + "\n\n")
 	sb.WriteString("<new_message>\n")
 	sb.WriteString(fmt.Sprintf("%s says: %s\n", m.Sender, m.textWithQuote()))
 	sb.WriteString("</new_message>")
@@ -1601,7 +1609,7 @@ func (br *Brain) readStream(m Inbound, reader io.Reader, heading string, onResul
 	writeLog(heading)
 
 	var finalResult, lastText string
-	questionSent := false
+	asked := false
 
 	for scanner.Scan() {
 		line := strings.TrimSpace(scanner.Text())
@@ -1634,7 +1642,7 @@ func (br *Brain) readStream(m Inbound, reader io.Reader, heading string, onResul
 						// question on its way counts as asked.
 						question := extractAskQuestion(content.Input)
 						if question != "" && !m.Silent && br.hooks != nil && br.hooks.Question != nil && br.hooks.Question(br, m.JID, questionPrefix+question) {
-							questionSent = true
+							asked = true
 						}
 					}
 				}
@@ -1655,7 +1663,7 @@ func (br *Brain) readStream(m Inbound, reader io.Reader, heading string, onResul
 					errMsg = "(claude exited with an error but no message)"
 				}
 				writeLog("❌ Error: " + errMsg)
-				return RunResult{Err: &cliError{msg: errMsg}}
+				return RunResult{Err: &cliError{msg: errMsg}, Asked: asked}
 			}
 			finalResult = event.Result
 			writeLog("✅ Result: " + truncate(finalResult, 2000))
@@ -1672,17 +1680,15 @@ func (br *Brain) readStream(m Inbound, reader io.Reader, heading string, onResul
 		return RunResult{Err: fmt.Errorf("reading claude output: %w", err)}
 	}
 
-	if questionSent {
-		// The question already went to WhatsApp; sending the final text too
-		// would duplicate it.
-		return RunResult{AlreadySent: true}
-	}
-
-	if finalResult == "" {
+	// A -p run is stateless and nobody answers its AskUserQuestion, so the
+	// model goes on after asking, often to an answer of its own ("I booked
+	// Monday"), which the chat must get too. A run that only asked has said
+	// what it had to say.
+	if finalResult == "" && !asked {
 		return RunResult{Err: errNoResult}
 	}
 
-	return RunResult{Text: finalResult}
+	return RunResult{Text: finalResult, Asked: asked}
 }
 
 // truncate shortens s to at most n bytes without splitting a UTF-8 rune.

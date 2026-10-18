@@ -612,9 +612,9 @@ func (b *Bridge) deliver(br *Brain, m Inbound, res RunResult) {
 		return
 	}
 
-	// An empty response means a question was already forwarded mid-stream.
-	// Silent runs never reply at all.
-	if res.AlreadySent || res.Text == "" || m.Silent {
+	// An empty response follows a question forwarded mid-run, which said
+	// it all. Silent runs never reply at all.
+	if res.Text == "" || m.Silent {
 		return
 	}
 	log.Printf("brain %s: sending response (%d chars) to %s after %s", br.ID(), len(res.Text), m.JID, res.Duration.Round(time.Second))

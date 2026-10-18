@@ -179,3 +179,25 @@ func TestMidRunMessagesOnlyForAddressedMessages(t *testing.T) {
 		})
 	}
 }
+
+// A run that asks with AskUserQuestion and then answers anyway gets both to
+// the chat: the question with its options first, then the reply, and the
+// history holds both in that order.
+func TestQuestionAndFinalReplyBothReachTheChat(t *testing.T) {
+	tb, br := newMainBridge(t, "")
+	t.Setenv("FRIDOLIN_FAKE_ASK", `{"questions":[{"header":"Day","question":"Which day?","options":[{"label":"Monday"},{"label":"Tuesday"}]}]}`)
+	tb.handleInbound(context.Background(), Inbound{JID: testDMChat, Sender: "15551234567", Text: "book a table", Source: sourceWhatsApp})
+	waitFor(t, 10*time.Second, "the reply", func() bool { return len(tb.sentTo(testDMChat)) == 2 })
+	waitFor(t, 5*time.Second, "the reply in the history", func() bool { return len(outbound(t, br)[testDMChat]) == 2 })
+
+	sent := tb.sentTo(testDMChat)
+	if sent[0] != "❓ Day: Which day?\n1. Monday\n2. Tuesday" || !strings.HasSuffix(sent[1], "says: book a table") {
+		t.Errorf("sent %q, want the question with its options, then the reply", sent)
+	}
+	if got := outbound(t, br)[testDMChat]; !slices.Equal(got, sent) {
+		t.Errorf("outbound history = %q, want what was sent, %q", got, sent)
+	}
+	if last := br.Snapshot().Last; last == nil || last.Outcome != outcomeQuestion {
+		t.Errorf("last run = %+v, want the outcome %q", last, outcomeQuestion)
+	}
+}

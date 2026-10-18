@@ -617,14 +617,15 @@ option names, which are matched against the stored options).
 **`brain.go`** — the multi-brain runner. Each brain has a queue and one
 worker; each message spawns `claude -p` with `--output-format stream-json`,
 seeded with the brain's prompt file and recent chat history. Events are
-parsed live, so an `AskUserQuestion` reaches WhatsApp immediately and a run
-over 10 seconds gets a "working on it" notice (the event types are in
-`stream.go`). A run is stopped at `run_timeout_minutes`, and five seconds
-after its result when something it started holds its output open. Runs
-are listed in `<data_dir>/runs/` while they last, so that a bridge that
-crashed stops what is left of them when it starts again.
-`BrainManager.Apply` swaps the brain set at runtime without touching
-brains that did not change.
+parsed live, so an `AskUserQuestion` reaches WhatsApp immediately, with its
+options numbered (the answer comes as the next message, and the run's final
+reply is sent too), and a run over 10 seconds gets a "working on it" notice
+(the event types are in `stream.go`). A run is stopped at
+`run_timeout_minutes`, and five seconds after its result when something it
+started holds its output open. Runs are listed in `<data_dir>/runs/` while
+they last, so that a bridge that crashed stops what is left of them when it
+starts again. `BrainManager.Apply` swaps the brain set at runtime without
+touching brains that did not change.
 
 **`manifest.go`, `brainreg.go`** — `brain.json`, the brain registry, path
 checks and scaffolding. **`configstore.go`** — the live configuration.
