@@ -186,6 +186,8 @@ The folder name is the module's `id`.
 | `capabilities.files` | Named paths the server code uses, `{ "path", "access": "read" \| "write" }`, same path rules. A path ending in `/` (or one that is a folder) covers everything below it. |
 | `capabilities.commands` | Programs the server code runs: a name on the site's `PATH`, an absolute or `~/…` path, or a path in the module folder. |
 | `capabilities.secrets` | Secrets it needs, by name: a letter, then up to 63 letters, digits, `_` or `-`. |
+| `capabilities.ingest` | Brains it may hand files to with `ctx.ingest`, by id (see *Handing files to a brain*). |
+| `capabilities.search` | Brains whose folder it may search with `ctx.search`, by id (see *Searching a brain's folder*). |
 
 A module needs `app`, `server` or both. Everything is behind sign-in and the
 module's `access`; there is no public module, only public files.
@@ -211,8 +213,11 @@ export default function finance(ctx: ModuleContext): express.Router {
 }
 ```
 
-`ctx` has `id`, `dir` (the module folder), `file(name)`, `secret(name)` and
-`log(...)`.
+`ctx` has `id`, `dir` (the module folder), `file(name)`, `secret(name)`,
+`dataDir`, `ingest(...)`, `search(...)` and `log(...)`. `dataDir` is a folder of the module's
+own that survives deploys (`<data_dir>/site/data/<id>` on the live site, one in
+the builder's workspace in a preview), for logs, state and uploads on their way
+to a brain: nothing needs declaring for it.
 `req.user` is the signed-in account: `{ id, email, name, role, authType }`
 (for a password account, `email` is the username). TypeScript runs as is. The
 site repository's `package.json` must say `"type": "module"` and list what
@@ -242,8 +247,9 @@ readable too, since the site serves it.
 **What the site itself needs** is readable, and no more: the system's libraries
 and programs, Node.js, the software in Homebrew's folders (not its `var/` or
 `etc/`), the site process (`shell/`), the live deploy and the files Fridolin
-writes for it. The only other place it writes is its temp folder (`tmp/`, its
-`TMPDIR`).
+writes for it. The only other places it writes are its temp folder (`tmp/`, its
+`TMPDIR`), the modules' data folders (`data/<id>`, `ctx.dataDir`) and the
+handoff folder to brains (`spool/`, `ctx.ingest`).
 
 **Programs.** Only node, the programs of its dependencies (in `node_modules`,
 such as esbuild), a shell (`sh`, `bash`, `zsh`, `/usr/bin/env`) and
@@ -296,6 +302,45 @@ dependency's install script or a build command reaches what you can.
 **Linux** has no `sandbox-exec`: there the site runs without a sandbox, and
 module code reaches every file the bridge's user can. The dashboard's Site page
 says which applies (*Sandbox: On* or *Off*).
+
+### Handing files to a brain
+
+The site cannot reach Fridolin's media folder or the bridge's `/ingest`, so a
+module that takes uploads hands them over with `ctx.ingest`, for the brains its
+`module.json` lists in `capabilities.ingest`:
+
+```ts
+// files the module wrote, e.g. an upload saved into ctx.dataDir
+await ctx.ingest({ brain: 'office', files: [path], text: 'File this under documents/', sender: user.email })
+```
+
+The site moves the files and a request into a folder of its own
+(`<data_dir>/site/spool/`); the bridge picks it up within a second, checks
+that the live commit's module lists that brain, moves the files into its media
+folder and hands them to the brain like a WhatsApp attachment: the brain's
+answer goes to its reply chat. `ctx.ingest` resolves once the brain has taken
+them, and throws for a brain the module does not list, when the brain's queue
+is full, when `ingest.enabled` is off, and in previews and checks.
+
+### Searching a brain's folder
+
+A module cannot run Claude itself: the site's sandbox keeps the keychain and
+`~/.claude` closed, and every module in the one site process reaches what any
+of them declares. `ctx.search` has the bridge run it instead, for the brains
+the module lists in `capabilities.search`:
+
+```ts
+for await (const event of ctx.search({ brain: 'office', prompt, signal })) {
+  // Claude Code's stream-json events, as they come
+}
+```
+
+The bridge runs a read-only agent (`--tools Read,Grep,Glob`) in the brain's
+folder, with only that folder's own Claude Code setup and the bridge's login,
+under **that brain's sandbox**: it reaches what the brain reaches and nothing
+of another brain's folder, whatever the site process can read. At most four
+searches run at once, each for up to three minutes; aborting `signal` stops
+one.
 
 ### Secrets
 

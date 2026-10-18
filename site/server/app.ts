@@ -80,7 +80,7 @@ export async function createSite(rt: Runtime, opts: SiteOptions = {}): Promise<e
 
   // Only the live site has secrets; a preview runs unapproved code.
   const secrets = opts.secrets ?? (rt.secrets_fd !== undefined && !rt.preview_token ? readSecrets(rt.secrets_fd) : undefined)
-  await mountModules(app, loadModules(rt.modules_dir), auth.requireAuth, secrets)
+  await mountModules(app, loadModules(rt.modules_dir), auth.requireAuth, secrets, { dataDir: rt.data_dir, spoolDir: rt.spool_dir })
 
   app.get('/', shell, (_req, res) => {
     res.setHeader('Cache-Control', 'no-cache')

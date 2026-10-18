@@ -114,7 +114,9 @@ type SiteManager struct {
 	tokens   map[string]string // builder token → brain id
 	hooks    builderHooks
 	chats    *siteChats
-	ctx      context.Context
+	// searchSlots limits the searches the bridge runs for the site at once.
+	searchSlots chan struct{}
+	ctx         context.Context
 
 	warnNoSandbox sync.Once
 }
@@ -132,6 +134,7 @@ func NewSiteManager(dataDir string, googleClient func() string) *SiteManager {
 	m.npmInstall = m.runNpmInstall
 	m.workspaceInstall = m.npmInstallAsBrain
 	m.chats = &siteChats{m: m}
+	m.searchSlots = make(chan struct{}, spoolSearchLimit)
 	m.settings = m.loadSettings()
 	m.users = m.loadUsers()
 	return m
@@ -487,6 +490,7 @@ func (m *SiteManager) Start(ctx context.Context) {
 	m.mu.Lock()
 	m.ctx = ctx
 	m.mu.Unlock()
+	go m.watchSpool(ctx)
 	m.reconcile(false)
 }
 
@@ -557,6 +561,10 @@ type siteRuntime struct {
 	// SecretsFD is the file descriptor the live site reads its modules'
 	// secrets from at startup (site_secrets.go).
 	SecretsFD int `json:"secrets_fd,omitempty"`
+	// DataDir holds one folder per module (ctx.dataDir); SpoolDir is the
+	// handoff to brains (ctx.ingest, site_ingest.go). The live site only.
+	DataDir  string `json:"data_dir,omitempty"`
+	SpoolDir string `json:"spool_dir,omitempty"`
 }
 
 // googleClientFile is the site's own Google client if one is saved, else
@@ -614,6 +622,19 @@ func (m *SiteManager) processCommand(ctx context.Context, name, listen, modulesD
 		}
 		mods = readModuleCaps(modulesDir, homeDir())
 		rt.SecretsFD = 3
+		rt.DataDir, rt.SpoolDir = m.dir("data"), m.spoolDir()
+		for _, d := range []string{rt.SpoolDir, rt.DataDir} {
+			if err := os.MkdirAll(d, 0o700); err != nil {
+				return nil, err
+			}
+		}
+		// The site may write in them but not make them: the sandbox opens
+		// data/ and what is below it, not data/ itself.
+		for _, mod := range mods {
+			if err := os.MkdirAll(filepath.Join(rt.DataDir, mod.ID), 0o700); err != nil {
+				return nil, err
+			}
+		}
 	}
 	if !fileExists(rt.UsersFile) {
 		m.mu.Lock()

@@ -37,6 +37,10 @@ export type Runtime = {
    * JSON, read once at startup and closed (readSecrets).
    */
   secrets_fd?: number
+  /** The live site: holds one data folder per module (ctx.dataDir). A preview has its own. */
+  data_dir?: string
+  /** The live site: the handoff folder Fridolin watches for ctx.ingest. */
+  spool_dir?: string
 }
 
 export function readRuntime(path: string): Runtime {
@@ -57,6 +61,9 @@ export function readRuntime(path: string): Runtime {
     preview_token: raw.preview_token || undefined,
     previews_file: raw.previews_file || undefined,
     secrets_fd: typeof raw.secrets_fd === 'number' ? raw.secrets_fd : undefined,
+    data_dir: raw.data_dir || undefined,
+    // Only the live site hands files to brains.
+    spool_dir: raw.preview_token ? undefined : raw.spool_dir || undefined,
   }
 }
 
