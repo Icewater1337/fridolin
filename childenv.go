@@ -92,8 +92,8 @@ var childEnvAllowlist = []childEnvVar{
 	{"XDG_CONFIG_DIRS", desktopChild},          // where it finds the system-wide default apps (mimeapps.list)
 	{"BROWSER", desktopChild},                  // a browser you chose over the desktop's
 
-	// Settings of the tools in tools/ that brains run (docs/CONFIGURATION.md).
-	{"CALENDAR_TZ", claudeChild},         // calendar_tool.py's timezone
+	// Settings of the tools brains run (docs/CONFIGURATION.md).
+	{"CALENDAR_TZ", claudeChild},         // fridolin calendar's timezone
 	{"TRANSCRIBE_MODEL", claudeChild},    // transcribe.py's model
 	{"TRANSCRIBE_LANGUAGE", claudeChild}, // transcribe.py's language
 }

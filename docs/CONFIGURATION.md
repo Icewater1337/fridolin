@@ -867,23 +867,23 @@ variables of the bridge's environment:
 | `DO_NOT_TRACK`, `TMUX_TMPDIR` | the telemetry opt-out many tools honour; where tmux keeps its socket |
 | `CLAUDE_CODE_*`, `ANTHROPIC_*`, `CLAUDE_CONFIG_DIR` | the Claude CLI's login (`CLAUDE_CODE_OAUTH_TOKEN`, `ANTHROPIC_API_KEY`), provider and gateway (`ANTHROPIC_BASE_URL`) |
 | `DISABLE_AUTOUPDATER`, `DISABLE_TELEMETRY`, `DISABLE_ERROR_REPORTING` | the CLI's update check and reports |
-| `CALENDAR_TZ`, `TRANSCRIBE_MODEL`, `TRANSCRIBE_LANGUAGE` | the tools in [tools/](../tools/): the calendar's timezone, the transcription model and language |
+| `CALENDAR_TZ`, `TRANSCRIBE_MODEL`, `TRANSCRIBE_LANGUAGE` | the tools brains run: the timezone of `fridolin calendar`, and the model and language of [tools/transcribe.py](../tools/transcribe.py) |
 
 On top, the bridge sets `FRIDOLIN_BRAIN_ID`, the brain's id; `FRIDOLIN_BIN`
 and `FRIDOLIN_TOOLS_DIR`, its own binary and the folder of its Python
 helpers ([BRAINS.md](BRAINS.md#what-a-brain-loads)); `FRIDOLIN_API` and
 `FRIDOLIN_BRAIN_TOKEN_FILE`, where the brain API is and the file with the
 run's token for it (see [`http_listen`](#http_listen-restart));
-`BRIDGE_DATA_DIR` and `BRIDGE_DB_PATH`, the data directory and database it
-runs with (absolute, wherever `data_dir` and `db_path` put them), which the
-tools read; `BRIDGE_BRAIN_ID`, `BRIDGE_CREDENTIALS_DIR`, `BRIDGE_CALENDARS`
-and `BRIDGE_CALENDAR_DEFAULT` for the calendar tool;
 `PLAUD_TELEMETRY_DISABLED=1` and `PLAUD_NO_UPDATE_NOTIFIER=1` for
 [Plaud](PLAUD.md)'s CLI, with `plaud.brain_access` a `PATH` that starts
-with that CLI's folder; and `DISABLE_AUTOUPDATER=1` in the sandbox. What
-the bridge's own environment has under these names does not reach brains.
-Run by hand, outside a brain, the tools default to `~/.fridolin`; set
-`BRIDGE_DATA_DIR` for another data directory. The list lives in one place,
+with that CLI's folder; and `DISABLE_AUTOUPDATER=1` in the sandbox. It
+also sets `BRIDGE_DATA_DIR` and `BRIDGE_DB_PATH`, the data directory and
+database it runs with (absolute, wherever `data_dir` and `db_path` put
+them), for a brain's own scripts; and, for one release, `BRIDGE_BRAIN_ID`,
+`BRIDGE_CREDENTIALS_DIR`, `BRIDGE_CALENDARS` and
+`BRIDGE_CALENDAR_DEFAULT`, which the calendar tool used to read. Nothing
+in `tools/` reads any of these any more. What the bridge's own environment
+has under these names does not reach brains. The list lives in one place,
 `childEnvAllowlist` in `childenv.go`.
 
 Brains are not handed anything else, for example `GROQ_API_KEY`,

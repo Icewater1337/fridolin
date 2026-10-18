@@ -174,13 +174,16 @@ helpers such as `transcribe.py`, which the bridge finds in `tools/` next to
 its binary, or in the checkout above `bin/` for a development build
 (without one, the log says so and the variable is not set);
 `FRIDOLIN_API` with `FRIDOLIN_BRAIN_TOKEN_FILE`, how those commands reach
-the bridge during this run; `BRIDGE_DATA_DIR` and `BRIDGE_DB_PATH`, the data
-directory and database the bridge runs with; and the `BRIDGE_*` variables
-the calendar tool reads. The starter prompt and the example skills name the
-commands and helpers by these variables, never by a path, so a brain folder
-keeps working when it or the bridge moves. Prompts written by older
-versions name the checkout's `tools/` by its full path, which keeps working
-while the checkout is there.
+the bridge during this run; and `BRIDGE_DATA_DIR`, `BRIDGE_DB_PATH` and the
+other `BRIDGE_*` variables the older Python tools read. The starter prompt
+and the example skills name the commands and helpers by these variables,
+never by a path, so a brain folder keeps working when it or the bridge
+moves. Prompts written by older versions run `calendar_tool.py`,
+`poll_results.py` and `history_search.py` from the checkout's `tools/` by
+its full path. For one release those are wrappers that run the commands
+above with the same arguments, so such a prompt keeps working while the
+checkout is there; change it to the commands (the starter prompt in
+`examples/brain-prompt.example.md` shows them).
 
 It does not load your own setup: not your user settings in
 `~/.claude/settings.json` (their hooks, plugins and permissions, so neither

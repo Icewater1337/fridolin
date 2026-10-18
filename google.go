@@ -775,8 +775,11 @@ func (b *Bridge) apiCalendarDisconnect(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]string{"status": "disconnected"})
 }
 
-// calendarEnv tells the calendar tool which brain is running and which
-// calendars it may use.
+// calendarEnv tells a run which brain it is and which calendars it may use.
+//
+// compat: calendar_tool.py read these to find the brain's token and keep to
+// its calendars; nothing in tools/ reads them now that the bridge makes the
+// calls, but a brain's own scripts may. Kept for one release, then removed.
 func calendarEnv(id string, m BrainManifest, credsDir string) []string {
 	env := []string{"BRIDGE_BRAIN_ID=" + id, "BRIDGE_CREDENTIALS_DIR=" + credsDir}
 	if m.Calendar != nil && len(m.Calendar.Calendars) > 0 {

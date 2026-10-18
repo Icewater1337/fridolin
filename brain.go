@@ -32,7 +32,8 @@ type historyEntry struct {
 }
 
 // The history entry types. They are written to every brain's history file,
-// which tools/history_search.py reads, so their values must not change.
+// which `fridolin history` and a brain's own scripts read, so their values
+// must not change.
 const (
 	historyIn  = "in"  // a message to the brain
 	historyOut = "out" // a message the brain sent, or one sent on its behalf
@@ -1671,11 +1672,10 @@ func settingsFor(cfg *Config, sp BrainSpec) *brainSettings {
 	}
 }
 
-// dataEnv tells the tools in tools/ where the bridge keeps its data, so they
-// need not guess: poll_results.py opens the DB at BRIDGE_DB_PATH.
-// calendar_tool.py read BRIDGE_DATA_DIR until the bridge made its calls.
-// compat: brains and their scripts rely on these names, as on the other
-// BRIDGE_ variables.
+// dataEnv tells brains where the bridge keeps its data. The tools in
+// tools/ read these until the bridge answered them (brainapi.go); compat:
+// brains and their scripts rely on these names, as on the other BRIDGE_
+// variables.
 func dataEnv(s *brainSettings) []string {
 	return []string{"BRIDGE_DATA_DIR=" + s.dataDir, "BRIDGE_DB_PATH=" + s.dbPath}
 }
