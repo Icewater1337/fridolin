@@ -107,7 +107,8 @@ disk) and `memories/people/whatsapp-identity-map.md`, appends every message
 to `conversation-history.jsonl` and reads it back, and logs what each run
 did in `claude-stream.log`, each run under a line naming its chat, sender,
 process and model, and after it the end of what the CLI wrote to stderr,
-under a line naming the run. A history line has the type `in`, `out` for an
+under a line naming the run. A history line (see
+[below](#conversation-historyjsonl)) has the type `in`, `out` for an
 answer, written once all of it reached WhatsApp as what the chat got (a
 poll as its question and numbered options), `event` for a vote in one
 of the brain's polls or an edit of a message a run already read, or
@@ -132,6 +133,31 @@ through that handle from then on (`brain.json` excepted, which it reads for
 brains that are not running too), so a folder you put in a brain's place
 takes a reload; see [Moving a brain](#moving-a-brain). Copy a file into the
 folder rather than link it.
+
+### `conversation-history.jsonl`
+
+The history is one JSON object per line, in UTF-8, appended as things
+happen. `fridolin history` searches it, and a brain's own scripts may read
+it too. A line has these fields
+([`schemas/history-line.schema.json`](schemas/history-line.schema.json)):
+
+| Field | Meaning |
+| --- | --- |
+| `ts` | For an `in` line when the message was sent, for the others when the line was written: an RFC 3339 time to the second, with the offset of the bridge's time zone (`2026-01-02T09:00:00+01:00`), or `Z` when the offset is zero (UTC, or for example London in winter). Python before 3.11 reads one with `datetime.fromisoformat` only after a final `Z` is replaced by `+00:00`. |
+| `from` | For `in`, `event` and `reset`, who wrote it, did it or sent `!reset`: their phone number, or the sender an `/ingest` named. For `out`, the brain's id; for a line sent through `/send`, the brain that sent it or `script`. |
+| `chat` | The chat's JID: `<number>@s.whatsapp.net` for a person, `…@g.us` for a group. |
+| `text` | What was said. A quoted message and the paths of attachments are lines of their own in it; for an `event`, what happened, said after the name in `from`; empty for a `reset`. |
+| `type` | `in`, a message to the brain; `out`, one it sent or that was sent for it; `event`, something that happened in the chat without a message; `reset`, where `!reset` started the chat afresh. |
+| `via` | Only on an `out` line that came in through [`/send`](API.md#post-send): `brain`, `script` or `api` (no token). |
+| `id` | Only on a message from WhatsApp: its id, which an edit or a deletion names. |
+| `otp_request` | Only on the `out` line of a `/send` that asked for a one-time code: the id `/send` answered with, which the [hand-off of the code](CONFIGURATION.md#otp_guard-and-otp_markers) repeats. |
+
+Fields and types are added, never renamed or removed, so a reader ignores
+the fields it does not know and the lines of a type it does not know.
+Lines carry no version of their own. The schema describes exactly the
+lines this version writes, and refuses any other field or type, which
+keeps it to the code: a reader that checks lines against it should let
+unknown fields and types through, since later versions add them.
 
 ## Moving a brain
 

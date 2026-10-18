@@ -25,6 +25,9 @@ import (
 )
 
 // historyEntry is one line in a brain's conversation-history.jsonl file.
+// Brains' own scripts read the file too, so docs/BRAINS.md and
+// docs/schemas/history-line.schema.json describe the line: fields are
+// added, never renamed or removed.
 type historyEntry struct {
 	TS   string `json:"ts"`
 	From string `json:"from"`

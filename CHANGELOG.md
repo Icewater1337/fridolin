@@ -159,8 +159,10 @@ yet, so everything is under Unreleased until the first one.
   the dashboard refuses to save one, instead of dropping the settings it
   does not know. In a version 2 config, the version 1 keys `model`,
   `work_dir` and `brains` are unknown settings.
-- `docs/schemas` has JSON Schemas of `config.json` and `brain.json`, for an
-  editor or a script to check a file against.
+- `docs/schemas` has JSON Schemas of `config.json`, `brain.json` and a
+  line of a brain's `conversation-history.jsonl`, for an editor or a
+  script to check a file against. docs/BRAINS.md describes the history
+  line, whose fields are added but never renamed or removed.
 - `fridolin paths` prints the config file and the data dir in use, and
   where each came from (`--json` for programs).
 - `fridolin check --redact` masks phone numbers, JIDs, email addresses and

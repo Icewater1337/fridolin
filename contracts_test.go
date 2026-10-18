@@ -38,6 +38,7 @@ type schemaType struct {
 var schemaTypes = []schemaType{
 	{schema: "config.schema.json", typ: reflect.TypeFor[Config](), closed: true, extra: retiredKeyNames()},
 	{schema: "brain.schema.json", typ: reflect.TypeFor[BrainManifest](), closed: true},
+	{schema: "history-line.schema.json", typ: reflect.TypeFor[historyEntry](), closed: true},
 }
 
 func retiredKeyNames() []string {
@@ -629,5 +630,43 @@ func TestBrainSchemaRefusesWhatTheBridgeRefuses(t *testing.T) {
 				t.Error("the schema takes it")
 			}
 		})
+	}
+}
+
+// TestHistoryLinesFollowTheSchema: every line of history-v1.jsonl, and the
+// lines a brain writes for a message, its answer and a !reset, follow
+// history-line.schema.json.
+func TestHistoryLinesFollowTheSchema(t *testing.T) {
+	set := newSchemaSet(t)
+	for i, line := range strings.Split(strings.TrimSpace(string(fixture(t, "history-v1.jsonl"))), "\n") {
+		assertValid(t, set, "history-line.schema.json", fmt.Sprintf("line %d of history-v1.jsonl", i+1), []byte(line))
+	}
+
+	h := newHarness(t, "")
+	dir := h.AddBrain(BrainManifest{ID: "main", Name: "Main", Routing: BrainRouting{HandlesDMs: true}})
+	h.Answer(inbound{JID: harnessDM, Sender: "15551234567", Text: "hello"})
+	h.WaitFor("the answer in the history", func() bool { return len(historyLines(t, dir)) == 2 })
+	h.Answer(inbound{JID: harnessDM, Sender: "15551234567", Text: "!reset"})
+	h.WaitFor("the reset in the history", func() bool { return len(historyLines(t, dir)) == 3 })
+	for i, line := range historyLines(t, dir) {
+		assertValid(t, set, "history-line.schema.json", fmt.Sprintf("history line %d", i+1), []byte(line))
+	}
+}
+
+// readerSchemas are the schemas of what the bridge writes for other
+// programs to read.
+var readerSchemas = []string{"history-line.schema.json"}
+
+// TestReaderSchemasSayTheyAreClosed: a schema of what other programs read
+// refuses what it does not list, which keeps it to the code, while those
+// programs are to ignore what a later version adds. So its description
+// tells a reader that validates against it to allow that.
+func TestReaderSchemasSayTheyAreClosed(t *testing.T) {
+	set := newSchemaSet(t)
+	for _, name := range readerSchemas {
+		desc, _ := set.file(name).(map[string]any)["description"].(string)
+		if !strings.Contains(desc, "should allow unknown") {
+			t.Errorf("%s does not tell a reader that validates against it to allow what is new: %q", name, desc)
+		}
 	}
 }
