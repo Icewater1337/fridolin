@@ -6,6 +6,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"github.com/Icewater1337/fridolin/internal/otp"
 	"image/png"
 	"io"
 	"log"
@@ -1978,9 +1979,9 @@ func TestOTPGuardHandsCodeToLocalScripts(t *testing.T) {
 	if w := h.Do("POST", "/api/dev/inbound", map[string]any{"jid": "15551234567@s.whatsapp.net", "text": " 483920 "}); w.Code != 202 {
 		t.Fatal(w.Body.String())
 	}
-	otp := filepath.Join(h.DataDir(), "otp", "p.json")
-	waitFor(t, 3*time.Second, "otp file", func() bool { _, err := os.Stat(otp); return err == nil })
-	data, _ := os.ReadFile(otp)
+	otpPath := filepath.Join(h.DataDir(), "otp", "p.json")
+	waitFor(t, 3*time.Second, "otp file", func() bool { _, err := os.Stat(otpPath); return err == nil })
+	data, _ := os.ReadFile(otpPath)
 	var got otpHandoff
 	_ = json.Unmarshal(data, &got)
 	if got.Code != "483920" || got.Chat != "15551234567@s.whatsapp.net" || got.Brain != "p" || got.Sender == "" || got.Received == "" {
@@ -1994,13 +1995,13 @@ func TestOTPGuardHandsCodeToLocalScripts(t *testing.T) {
 	if got.Request != answer.OTPRequest || got.RequestedUnixMS < asked-5000 || got.RequestedUnixMS > got.ReceivedUnixMS {
 		t.Errorf("request %q at %d, want %q around %d", got.Request, got.RequestedUnixMS, answer.OTPRequest, asked)
 	}
-	if want := got.ReceivedUnixMS + otpHandoffTTL.Milliseconds(); got.ExpiresUnixMS != want {
+	if want := got.ReceivedUnixMS + otp.HandoffTTL.Milliseconds(); got.ExpiresUnixMS != want {
 		t.Errorf("expires_unix_ms = %d, want %d", got.ExpiresUnixMS, want)
 	}
-	if st, _ := os.Stat(otp); st.Mode().Perm() != 0o600 {
+	if st, _ := os.Stat(otpPath); st.Mode().Perm() != 0o600 {
 		t.Errorf("otp file mode %v", st.Mode().Perm())
 	}
-	if st, _ := os.Stat(filepath.Dir(otp)); st.Mode().Perm() != 0o700 {
+	if st, _ := os.Stat(filepath.Dir(otpPath)); st.Mode().Perm() != 0o700 {
 		t.Errorf("otp folder mode %v", st.Mode().Perm())
 	}
 	hist, _ := os.ReadFile(filepath.Join(dir, "conversation-history.jsonl"))

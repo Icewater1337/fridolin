@@ -1,4 +1,4 @@
-package main
+package otp
 
 import (
 	"encoding/json"
@@ -44,7 +44,7 @@ func TestOTPCode(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.text, func(t *testing.T) {
-			code, ok := otpCode(c.text)
+			code, ok := Code(c.text)
 			if ok != c.ok || (ok && code != c.code) {
 				t.Errorf("otpCode(%q) = %q, %v; want %q, %v", c.text, code, ok, c.code, c.ok)
 			}
@@ -76,7 +76,7 @@ func TestHasMarker(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.text+"/"+c.marker, func(t *testing.T) {
-			if got := hasMarker(c.text, c.marker); got != c.want {
+			if got := HasMarker(c.text, c.marker); got != c.want {
 				t.Errorf("hasMarker(%q, %q) = %v, want %v", c.text, c.marker, got, c.want)
 			}
 		})
@@ -163,11 +163,11 @@ func TestCodeRequest(t *testing.T) {
 			if chats == nil {
 				chats = []string{"15551234567@s.whatsapp.net"}
 			}
-			req, ok := otpRequested(root, "a", chats, c.markers, now)
+			req, ok := Requested(root, "a", chats, c.markers, now)
 			if ok != c.want {
 				t.Fatalf("codeRequest = %v, want %v", ok, c.want)
 			}
-			if ok && (req.At.Before(now.Add(-otpWindow)) || req.At.After(now)) {
+			if ok && (req.At.Before(now.Add(-Window)) || req.At.After(now)) {
 				t.Errorf("request at %v, want within the window", req.At)
 			}
 			if req.ID != c.id {
@@ -190,12 +190,12 @@ func TestOTPHandoffExpires(t *testing.T) {
 	path := filepath.Join(dir, "a.json")
 	// Each received a millisecond after the one before.
 	received := time.Now().UnixMilli()
-	handoff := func(code string, ttl time.Duration) otpHandoff {
+	handoff := func(code string, ttl time.Duration) Record {
 		received++
-		return otpHandoff{Brain: "a", Code: code, ReceivedUnixMS: received, ExpiresUnixMS: time.Now().Add(ttl).UnixMilli()}
+		return Record{Brain: "a", Code: code, ReceivedUnixMS: received, ExpiresUnixMS: time.Now().Add(ttl).UnixMilli()}
 	}
 	read := func() string {
-		var h otpHandoff
+		var h Record
 		data, err := os.ReadFile(path)
 		if err != nil {
 			return ""
@@ -203,10 +203,10 @@ func TestOTPHandoffExpires(t *testing.T) {
 		_ = json.Unmarshal(data, &h)
 		return h.Code
 	}
-	var o otpHandoffs
-	t.Cleanup(o.stop)
+	var o Handoff
+	t.Cleanup(o.Stop)
 
-	if err := o.write(dir, handoff("111111", 150*time.Millisecond)); err != nil {
+	if err := o.Write(dir, handoff("111111", 150*time.Millisecond)); err != nil {
 		t.Fatal(err)
 	}
 	if read() != "111111" {
@@ -216,10 +216,10 @@ func TestOTPHandoffExpires(t *testing.T) {
 
 	// A newer code is not taken away at the older one's expiry.
 	older := handoff("222222", time.Hour)
-	if err := o.write(dir, older); err != nil {
+	if err := o.Write(dir, older); err != nil {
 		t.Fatal(err)
 	}
-	if err := o.write(dir, handoff("333333", time.Hour)); err != nil {
+	if err := o.Write(dir, handoff("333333", time.Hour)); err != nil {
 		t.Fatal(err)
 	}
 	o.expire(path, older.ReceivedUnixMS)
@@ -271,7 +271,7 @@ func TestSweepOTPHandoffs(t *testing.T) {
 	if err := os.Chtimes(other, old, old); err != nil {
 		t.Fatal(err)
 	}
-	sweepOTPHandoffs(dir, now)
+	Sweep(dir, now)
 	for i, c := range cases {
 		_, err := os.Stat(filepath.Join(dir, fmt.Sprintf("b%d.json", i)))
 		if kept := err == nil; kept != c.kept {

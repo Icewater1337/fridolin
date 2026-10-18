@@ -430,7 +430,7 @@ func (b *Bridge) stop() {
 	// After the brains, whose last runs may still reply; what does not go
 	// out stays in bridge.db for the next start.
 	b.outbox.Stop()
-	b.otp.stop()
+	b.otp.Stop()
 	b.wa.Disconnect()
 	// The connect loop ends with Start's context, unless it is connecting
 	// still, which Disconnect cuts short.

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"github.com/Icewater1337/fridolin/internal/otp"
 	"log"
 	"path/filepath"
 	"slices"
@@ -51,7 +52,7 @@ func (br *Brain) asksForCode(text string) bool {
 	s := br.settings.Load()
 	markers := s.otpMarkers
 	if len(markers) == 0 {
-		markers = defaultOTPMarkers
+		markers = otp.DefaultMarkers
 	}
 	return s.otpGuard && slices.ContainsFunc(markers, func(m string) bool { return hasMarker(text, m) })
 }
@@ -68,9 +69,9 @@ func (b *Bridge) handOffCode(br *Brain, m Inbound, c otpCatch) {
 		Brain: br.ID(), Chat: m.JID, Sender: m.Sender, Code: c.Code, Typed: c.Typed,
 		Received: now.Format(time.RFC3339), ReceivedUnixMS: now.UnixMilli(),
 		Request: c.Request.ID, RequestedUnixMS: c.Request.At.UnixMilli(),
-		ExpiresUnixMS: now.Add(otpHandoffTTL).UnixMilli(),
+		ExpiresUnixMS: now.Add(otp.HandoffTTL).UnixMilli(),
 	}
-	if err := b.otp.write(filepath.Join(b.cfgs.Get().DataDir, "otp"), h); err != nil {
+	if err := b.otp.Write(filepath.Join(b.cfgs.Get().DataDir, "otp"), h); err != nil {
 		log.Printf("brain %s: handing over a one-time code: %v", br.ID(), err)
 	}
 }
