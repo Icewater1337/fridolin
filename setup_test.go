@@ -10,11 +10,16 @@ import (
 )
 
 // fakeBridgeScript stands in for the build setup.sh makes: it answers
-// init, check, service status, service install and open from the FAKE_*
-// variables, and notes every call in FAKE_LOG.
+// paths, init, check, service status, service install and open from the
+// FAKE_* variables, and notes every call in FAKE_LOG. paths names the
+// --config given, else FRIDOLIN_CONFIG, else FAKE_CONFIG or the default,
+// and FAKE_DATA_DIR or the default data dir.
 const fakeBridgeScript = `#!/bin/sh
 echo "$*" >> "$FAKE_LOG"
 case "$1 $2" in
+  "paths "|"paths --config")
+    config="${3:-${FRIDOLIN_CONFIG:-${FAKE_CONFIG:-$HOME/.fridolin/config.json}}}"
+    printf 'config=%s\nconfig_source=fake\ndata_dir=%s\ndata_dir_source=fake\n' "$config" "${FAKE_DATA_DIR:-$HOME/.fridolin}" ;;
   "init --config")
     mkdir -p "$(dirname "$3")" && echo '{}' > "$3" ;;
   "check --config")
@@ -293,4 +298,118 @@ func TestSetupBuildsAndTestsWithTheMakefile(t *testing.T) {
 			t.Errorf("setup.sh built without make; calls:\n%s", calls)
 		}
 	})
+}
+
+func TestSetupTakesItsFoldersFromFridolinVariables(t *testing.T) {
+	// setup.sh read DATA_DIR and INSTALL_DIR, names other software exports
+	// too, and kept its own copy of the bridge's data-dir rules. It reads
+	// FRIDOLIN_DATA_DIR and FRIDOLIN_INSTALL_DIR, and asks the build for
+	// the config file and the data folder. An old name is ignored, but one
+	// that names this install's config or binary stops it, as CONFIG_FILE
+	// does: going on would set the service up with another config, or
+	// install a second copy. $HOME stands for the home folder.
+	h := newSetupHarness(t)
+	const (
+		defaultConfig  = "--config $HOME/.fridolin/config.json"
+		defaultInstall = "--dir $HOME/.local/lib/fridolin "
+	)
+	cases := []struct {
+		name  string
+		env   []string
+		files []string // made in the home folder first
+		exit  int
+		// calls lists parts of the calls setup.sh makes, in order;
+		// notCalls must be in none of them.
+		calls, notCalls []string
+		want, notWant   []string // in the output
+		dirs            []string // folders setup.sh must have made
+	}{
+		{"the defaults", nil, nil, 0,
+			[]string{"paths\n", "init " + defaultConfig, "check " + defaultConfig, "service install " + defaultConfig + " " + defaultInstall},
+			[]string{"--data-dir"}, []string{"wrote a starter config to $HOME/.fridolin/config.json"}, []string{"ignored"},
+			[]string{".fridolin"}},
+		{"FRIDOLIN_DATA_DIR for a new config", []string{"FRIDOLIN_DATA_DIR=$HOME/data"}, nil, 0,
+			[]string{"paths --config $HOME/data/config.json\n", "init --config $HOME/data/config.json", "--data-dir $HOME/data", "service install --config $HOME/data/config.json " + defaultInstall},
+			nil, nil, nil, []string{"data"}},
+		{"FRIDOLIN_DATA_DIR with FRIDOLIN_CONFIG", []string{"FRIDOLIN_DATA_DIR=$HOME/data", "FRIDOLIN_CONFIG=$HOME/cfg/config.json"}, nil, 0,
+			[]string{"paths\n", "init --config $HOME/cfg/config.json", "--data-dir $HOME/data", "service install --config $HOME/cfg/config.json"},
+			nil, nil, nil, []string{"data"}},
+		{"FRIDOLIN_DATA_DIR for a config that has one", []string{"FRIDOLIN_DATA_DIR=$HOME/data", "FAKE_DATA_DIR=$HOME/its-own"}, []string{"data/config.json"}, 0,
+			[]string{"check --config $HOME/data/config.json", "service install --config $HOME/data/config.json"},
+			[]string{"init "}, []string{"FRIDOLIN_DATA_DIR only goes into a new config: this one keeps its data folder, $HOME/its-own."}, nil,
+			[]string{"its-own"}},
+		{"the folders the build names", []string{"FAKE_CONFIG=$HOME/.whatsapp-claude-bridge/config.json", "FAKE_DATA_DIR=$HOME/.whatsapp-claude-bridge"}, nil, 0,
+			[]string{"init --config $HOME/.whatsapp-claude-bridge/config.json", "service install --config $HOME/.whatsapp-claude-bridge/config.json"},
+			[]string{"--data-dir"}, nil, nil, []string{".whatsapp-claude-bridge"}},
+		{"FRIDOLIN_INSTALL_DIR", []string{"FRIDOLIN_INSTALL_DIR=$HOME/opt/fridolin"}, nil, 0,
+			[]string{"service install " + defaultConfig + " --dir $HOME/opt/fridolin "},
+			nil, []string{"$HOME/opt/fridolin/fridolin open"}, nil, nil},
+		{"DATA_DIR is ignored", []string{"DATA_DIR=$HOME/other-software"}, nil, 0,
+			[]string{"init " + defaultConfig, "service install " + defaultConfig},
+			[]string{"--data-dir", "other-software"}, []string{"DATA_DIR is ignored; set FRIDOLIN_DATA_DIR"}, nil, nil},
+		{"DATA_DIR naming the config in use", []string{"DATA_DIR=$HOME/.fridolin"}, []string{".fridolin/config.json"}, 0,
+			[]string{"service install " + defaultConfig},
+			nil, []string{"DATA_DIR is ignored"}, nil, nil},
+		{"DATA_DIR holding another config", []string{"DATA_DIR=$HOME/data"}, []string{"data/config.json"}, 1,
+			nil, []string{"init ", "check ", "service "},
+			[]string{"DATA_DIR is no longer read, and $HOME/data holds a config.json", `FRIDOLIN_DATA_DIR="$HOME/data" $REPO/setup.sh --yes`, "env -u DATA_DIR $REPO/setup.sh --yes"}, nil, nil},
+		{"DATA_DIR next to FRIDOLIN_DATA_DIR", []string{"DATA_DIR=$HOME/data", "FRIDOLIN_DATA_DIR=$HOME/new"}, []string{"data/config.json"}, 0,
+			[]string{"service install --config $HOME/new/config.json"},
+			nil, []string{"DATA_DIR is ignored"}, nil, []string{"new"}},
+		{"INSTALL_DIR is ignored", []string{"INSTALL_DIR=$HOME/other-software"}, nil, 0,
+			[]string{"service install " + defaultConfig + " " + defaultInstall},
+			[]string{"other-software"}, []string{"INSTALL_DIR is ignored; set FRIDOLIN_INSTALL_DIR"}, nil, nil},
+		{"INSTALL_DIR naming an install", []string{"INSTALL_DIR=$HOME/opt"}, []string{"opt/fridolin"}, 1,
+			nil, []string{"paths", "service "},
+			[]string{"INSTALL_DIR is no longer read, and Fridolin is installed in $HOME/opt", `FRIDOLIN_INSTALL_DIR="$HOME/opt" $REPO/setup.sh --yes`, "env -u INSTALL_DIR $REPO/setup.sh --yes"}, nil, nil},
+		{"INSTALL_DIR next to FRIDOLIN_INSTALL_DIR", []string{"INSTALL_DIR=$HOME/opt", "FRIDOLIN_INSTALL_DIR=$HOME/new"}, []string{"opt/fridolin"}, 0,
+			[]string{"service install " + defaultConfig + " --dir $HOME/new "},
+			nil, []string{"INSTALL_DIR is ignored"}, nil, nil},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			home := canonicalDir(t.TempDir())
+			expand := strings.NewReplacer("$HOME", home, "$REPO", h.repo).Replace
+			if len(c.files) > 0 {
+				makeFiles(t, home, c.files...)
+			}
+			env := []string{}
+			for _, e := range c.env {
+				env = append(env, expand(e))
+			}
+			out, exit, calls := h.run(t, home, []string{"--yes"}, env)
+			if exit != c.exit {
+				t.Fatalf("setup.sh exited %d, want %d:\n%s", exit, c.exit, out)
+			}
+			rest := calls
+			for _, w := range c.calls {
+				i := strings.Index(rest, expand(w))
+				if i < 0 {
+					t.Fatalf("no call with %q after the ones before it; calls:\n%s", expand(w), calls)
+				}
+				rest = rest[i+len(expand(w)):]
+			}
+			for _, w := range c.notCalls {
+				if strings.Contains(calls, expand(w)) {
+					t.Errorf("a call has %q; calls:\n%s", expand(w), calls)
+				}
+			}
+			for _, w := range c.want {
+				if !strings.Contains(out, expand(w)) {
+					t.Errorf("setup.sh does not say %q:\n%s", expand(w), out)
+				}
+			}
+			for _, w := range c.notWant {
+				if strings.Contains(out, expand(w)) {
+					t.Errorf("setup.sh says %q:\n%s", expand(w), out)
+				}
+			}
+			for _, d := range c.dirs {
+				st, err := os.Stat(filepath.Join(home, d))
+				if err != nil || !st.IsDir() || st.Mode().Perm() != 0o700 {
+					t.Errorf("%s: %v, want a folder only you can open", d, err)
+				}
+			}
+		})
+	}
 }

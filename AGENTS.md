@@ -180,8 +180,8 @@ the version before: `fridolin service rollback`.
 - The project was called whatsapp-claude-bridge before. Names from then
   that are on disk or that others rely on stay, each marked `compat:` in
   the code: the data dir `~/.whatsapp-claude-bridge`, which the bridge
-  still uses when `~/.fridolin` does not exist (`defaultDataDir`, and
-  `setup.sh` for the config it installs), the launchd label
+  still uses when `~/.fridolin` does not exist (`defaultDataDir`, which
+  `setup.sh` asks through `fridolin paths`), the launchd label
   `com.whatsapp-claude-bridge`, whose agent `fridolin service install`
   retires, and the sandbox's denies of the old `~/.config` and
   `~/Library/Logs` folders.

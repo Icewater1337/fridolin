@@ -991,6 +991,16 @@ service up with another config. If it points at Fridolin's config, re-run
 `setup.sh` with `FRIDOLIN_CONFIG` set to it; if it belongs to other
 software, re-run it as `env -u CONFIG_FILE ./setup.sh`.
 
+`setup.sh` also reads `FRIDOLIN_DATA_DIR`, the data folder it writes into
+a new config (whose file is then `config.json` in that folder, unless
+`FRIDOLIN_CONFIG` names another), and `FRIDOLIN_INSTALL_DIR`, the folder it
+installs to (default `~/.local/lib/fridolin`). It asks the build for the
+config file and the data folder (`fridolin paths`) rather than work them
+out itself. `DATA_DIR` and `INSTALL_DIR`, their old names, are ignored with
+a warning, since other software exports them too; when one names the
+config or the install this would leave behind, `setup.sh` stops and says
+how to re-run, as for `CONFIG_FILE`.
+
 ### What reaches brains
 
 Brains are not handed the bridge's whole environment: anyone who may

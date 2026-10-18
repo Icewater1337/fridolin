@@ -32,9 +32,10 @@ Options:
   -h, --help      show this help
 
 Environment:
-  DATA_DIR        data folder for a new config (default ~/.fridolin)
-  FRIDOLIN_CONFIG config file (default $DATA_DIR/config.json)
-  INSTALL_DIR     install folder (default ~/.local/lib/fridolin)
+  FRIDOLIN_DATA_DIR     data folder for a new config (default ~/.fridolin)
+  FRIDOLIN_CONFIG       config file (default config.json in that folder)
+  FRIDOLIN_INSTALL_DIR  install folder (default ~/.local/lib/fridolin)
+DATA_DIR, INSTALL_DIR and CONFIG_FILE, the old names, are not read.
 
 Afterwards:
   ~/.local/lib/fridolin/fridolin service status     what runs, and is it up
@@ -43,18 +44,15 @@ EOF
 }
 
 REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-INSTALL_DIR="${INSTALL_DIR:-$HOME/.local/lib/fridolin}"
+# The variables read here are FRIDOLIN_*: other software exports names such
+# as DATA_DIR too. The old names are only looked at to say so, below.
+OLD_DATA_DIR="${DATA_DIR:-}"
+OLD_INSTALL_DIR="${INSTALL_DIR:-}"
+INSTALL_DIR="${FRIDOLIN_INSTALL_DIR:-$HOME/.local/lib/fridolin}"
 # A data folder given by the caller goes into a new config: the service
-# never sees this script's environment.
-DATA_DIR_GIVEN="${DATA_DIR:-}"
-# Installs from before the rename keep their data folder (compat: the
-# bridge's defaultDataDir makes the same choice).
-if [ -z "${DATA_DIR:-}" ] && [ ! -d "$HOME/.fridolin" ] && [ -d "$HOME/.whatsapp-claude-bridge" ]; then
-  DATA_DIR="$HOME/.whatsapp-claude-bridge"
-fi
-DATA_DIR="${DATA_DIR:-$HOME/.fridolin}"
-# The config file the service is given: FRIDOLIN_CONFIG, else the data dir's.
-CONFIG="${FRIDOLIN_CONFIG:-$DATA_DIR/config.json}"
+# never sees this script's environment. The config file and the data
+# folder are otherwise the build's to name, once it is built.
+DATA_DIR_GIVEN="${FRIDOLIN_DATA_DIR:-}"
 
 ASSUME_YES=false
 NO_SERVICE=false
@@ -87,6 +85,16 @@ fail() { printf '\n%s✗ %s%s\n\n' "$RED" "$*" "$RESET" >&2; exit 1; }
 # knows which of the two it is, so stop and name both ways on.
 if [ -n "${CONFIG_FILE:-}" ]; then
   fail "CONFIG_FILE is no longer read. If it points at Fridolin's config, re-run as FRIDOLIN_CONFIG=\"$CONFIG_FILE\" $0 $*; if it belongs to other software, re-run as env -u CONFIG_FILE $0 $*"
+fi
+
+# INSTALL_DIR was the old name of FRIDOLIN_INSTALL_DIR and is ignored. When
+# it names a folder Fridolin is installed in, though, going on would leave
+# that install behind and set the service up with a second one, so stop.
+if [ -n "$OLD_INSTALL_DIR" ]; then
+  if [ -z "${FRIDOLIN_INSTALL_DIR:-}" ] && [ -e "$OLD_INSTALL_DIR/fridolin" ] && ! [ "$OLD_INSTALL_DIR" -ef "$INSTALL_DIR" ]; then
+    fail "INSTALL_DIR is no longer read, and Fridolin is installed in $OLD_INSTALL_DIR. To upgrade that install, re-run as FRIDOLIN_INSTALL_DIR=\"$OLD_INSTALL_DIR\" $0 $*; to install to $INSTALL_DIR instead, re-run as env -u INSTALL_DIR $0 $*"
+  fi
+  warn "INSTALL_DIR is ignored; set FRIDOLIN_INSTALL_DIR to choose the install folder ($INSTALL_DIR)."
 fi
 
 # confirm PROMPT DEFAULT(y|n)
@@ -176,6 +184,31 @@ NEW="$BUILD_DIR/fridolin"
 ( cd "$REPO_DIR" && make -s build VERSION="$VERSION" BINARY="$NEW" ) || fail "Build failed — see the Go errors above. Nothing was installed."
 ok "built $VERSION"
 
+# The build names the config file: FRIDOLIN_CONFIG, which it reads itself,
+# else config.json in the data folder given, else its default. It names the
+# data folder too: the one that config sets, or else the one the bridge
+# would pick, which a data folder given replaces in a new config. fridolin
+# paths prints both as name=value lines.
+ASK_CONFIG=""
+if [ -z "${FRIDOLIN_CONFIG:-}" ] && [ -n "$DATA_DIR_GIVEN" ]; then ASK_CONFIG="$DATA_DIR_GIVEN/config.json"; fi
+PATHS="$("$NEW" paths ${ASK_CONFIG:+--config "$ASK_CONFIG"})" || fail "This build cannot read the config (see the error above). Nothing was installed."
+CONFIG="$(printf '%s\n' "$PATHS" | sed -n 's/^config=//p')"
+DATA_DIR="$(printf '%s\n' "$PATHS" | sed -n 's/^data_dir=//p')"
+{ [ -n "$CONFIG" ] && [ -n "$DATA_DIR" ]; } || fail "The build named no config file or data folder (fridolin paths printed: $PATHS). Nothing was installed."
+if [ ! -f "$CONFIG" ] && [ -n "$DATA_DIR_GIVEN" ]; then DATA_DIR="$DATA_DIR_GIVEN"; fi
+
+# DATA_DIR was the old name of FRIDOLIN_DATA_DIR and is ignored. When it
+# holds a config.json other than the one above, it may be the one the
+# service was set up with: going on would set it up with another, and only
+# the person running this knows, so stop and name both ways on, as for
+# CONFIG_FILE.
+if [ -n "$OLD_DATA_DIR" ]; then
+  if [ -z "$DATA_DIR_GIVEN" ] && [ -z "${FRIDOLIN_CONFIG:-}" ] && [ -f "$OLD_DATA_DIR/config.json" ] && ! [ "$OLD_DATA_DIR/config.json" -ef "$CONFIG" ]; then
+    fail "DATA_DIR is no longer read, and $OLD_DATA_DIR holds a config.json. If it is Fridolin's data folder, re-run as FRIDOLIN_DATA_DIR=\"$OLD_DATA_DIR\" $0 $*; if it belongs to other software, re-run as env -u DATA_DIR $0 $*"
+  fi
+  warn "DATA_DIR is ignored; set FRIDOLIN_DATA_DIR to choose the data folder of a new config."
+fi
+
 if ! $SKIP_TESTS && confirm "Run the test suite before installing (recommended, about a minute)?" y; then
   # A name of its own: two runs, or another user's file in a shared /tmp,
   # must not meet.
@@ -202,6 +235,9 @@ mkdir -p "$(dirname "$DATA_DIR")"
 [ -d "$DATA_DIR" ] || mkdir -m 700 "$DATA_DIR"
 if [ -f "$CONFIG" ]; then
   ok "using $CONFIG"
+  if [ -n "$DATA_DIR_GIVEN" ] && ! [ "$DATA_DIR_GIVEN" -ef "$DATA_DIR" ]; then
+    warn "FRIDOLIN_DATA_DIR only goes into a new config: this one keeps its data folder, $DATA_DIR."
+  fi
 else
   # Seed the CLI path so brains work under launchd/systemd's minimal PATH.
   "$NEW" init --config "$CONFIG" ${CLAUDE_BIN:+--claude-path "$CLAUDE_BIN"} ${DATA_DIR_GIVEN:+--data-dir "$DATA_DIR_GIVEN"}
