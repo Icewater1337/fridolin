@@ -11,6 +11,7 @@ import (
 	"runtime"
 	"strconv"
 	"strings"
+	"sync"
 	"syscall"
 	"testing"
 	"time"
@@ -466,5 +467,164 @@ func TestKillRunsAfterCLIExit(t *testing.T) {
 	case <-stopped:
 	case <-time.After(time.Second):
 		t.Fatal("force-exit waited for delivery after the CLI had exited")
+	}
+}
+
+func TestKillRunsIncludesRetiringBrains(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	proc := &claudeProcess{stopped: make(chan struct{})}
+	proc.acknowledgeStop()
+	old := &Brain{current: &brainRun{cancel: cancel, process: proc}}
+	mgr := &BrainManager{retired: map[*Brain]struct{}{old: {}}}
+	mgr.KillRuns()
+	if ctx.Err() == nil {
+		t.Fatal("force-exit missed the run removed from the current brain set")
+	}
+	if !old.retired {
+		t.Fatal("force-exit left the retired brain's queue open")
+	}
+}
+
+func TestKillRunsFreezesQueuedAndNewRuns(t *testing.T) {
+	for _, provider := range []string{"claude", "codex"} {
+		t.Run(provider, func(t *testing.T) {
+			mgr, d, home := queueTestManager(t, 30000, "")
+			br := mgr.Get("a")
+			settings := *br.settings.Load()
+			settings.provider, settings.codexPath = provider, settings.claudePath
+			br.settings.Store(&settings)
+			pidLog := filepath.Join(home, "run-pids")
+			t.Setenv("FRIDOLIN_FAKE_PID_LOG", pidLog)
+			delivering, release := make(chan struct{}), make(chan struct{})
+			var once sync.Once
+			releaseDelivery := sync.OnceFunc(func() { close(release) })
+			defer releaseDelivery()
+			mgr.SetHooks(BrainHooks{Deliver: func(br *Brain, m Inbound, res RunResult) {
+				once.Do(func() { close(delivering) })
+				<-release
+				d.add(br, m, res)
+			}})
+			if _, _, _, err := mgr.Submit(dm("first")); err != nil {
+				t.Fatal(err)
+			}
+			waitFor(t, 5*time.Second, "the CLI to start", func() bool {
+				data, _ := os.ReadFile(pidLog)
+				return len(strings.Fields(string(data))) == 1
+			})
+			if _, _, _, err := mgr.Submit(dm("queued")); err != nil {
+				t.Fatal(err)
+			}
+			stopped := make(chan struct{})
+			go func() { mgr.KillRuns(); close(stopped) }()
+			select {
+			case <-stopped:
+			case <-time.After(5 * time.Second):
+				t.Fatal("force-stop waited for delivery")
+			}
+			select {
+			case <-delivering:
+			case <-time.After(5 * time.Second):
+				t.Fatal("cancelled run did not reach delivery")
+			}
+			if _, _, _, err := mgr.Submit(dm("new")); !errors.Is(err, errBrainsStopped) {
+				t.Errorf("new message after force-stop: %v", err)
+			}
+			if _, _, err := br.Submit(dm("direct")); !errors.Is(err, errBrainRetired) {
+				t.Errorf("direct message after force-stop: %v", err)
+			}
+			releaseDelivery()
+			waitFor(t, 5*time.Second, "the worker to finish without another turn", func() bool {
+				br.mu.Lock()
+				defer br.mu.Unlock()
+				return !br.working
+			})
+			data, _ := os.ReadFile(pidLog)
+			if len(strings.Fields(string(data))) != 1 {
+				t.Errorf("started more runs after force-stop: %s", data)
+			}
+			waiting := br.closeQueue()
+			if len(waiting) != 1 || waiting[0].Text != "queued" {
+				t.Errorf("pending message was lost: %+v", waiting)
+			}
+		})
+	}
+}
+
+func TestKillRunsRejectsReloadAlreadyInProgress(t *testing.T) {
+	mgr, _, home := queueTestManager(t, 0, "")
+	cfg, err := LoadConfig(writeConfig(t, `{"data_dir": "`+home+`/data", "claude_path": "`+os.Args[0]+`"}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Block reload after its initial stopped check, before publication.
+	// Force-stop must not wait for reloadMu or allow that reload to publish.
+	mgr.profiler.mu.Lock()
+	release := sync.OnceFunc(mgr.profiler.mu.Unlock)
+	defer release()
+	reloaded := make(chan error, 1)
+	go func() { reloaded <- mgr.reload(nil, nil, cfg, nil) }()
+	waitFor(t, 5*time.Second, "reload to hold its serialization lock", func() bool {
+		if mgr.reloadMu.TryLock() {
+			mgr.reloadMu.Unlock()
+			return false
+		}
+		return true
+	})
+	stopped := make(chan struct{})
+	go func() { mgr.KillRuns(); close(stopped) }()
+	select {
+	case <-stopped:
+	case <-time.After(5 * time.Second):
+		t.Fatal("force-stop waited for a blocked reload")
+	}
+	release()
+	if err := <-reloaded; !errors.Is(err, errBrainsStopped) {
+		t.Fatalf("in-flight reload after force-stop = %v", err)
+	}
+	if mgr.Get("a") == nil {
+		t.Fatal("reload published its replacement set after force-stop")
+	}
+}
+
+func TestReloadTracksRetirementUntilDeliveryFinishes(t *testing.T) {
+	mgr, _, home := queueTestManager(t, 0, "")
+	old := mgr.Get("a")
+	delivering, release := make(chan struct{}), make(chan struct{})
+	releaseDelivery := sync.OnceFunc(func() { close(release) })
+	defer releaseDelivery()
+	mgr.SetHooks(BrainHooks{Deliver: func(*Brain, Inbound, RunResult) {
+		close(delivering)
+		<-release
+	}})
+	if _, _, _, err := mgr.Submit(dm("finish before reload")); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-delivering:
+	case <-time.After(5 * time.Second):
+		t.Fatal("run did not reach delivery")
+	}
+	cfg, err := LoadConfig(writeConfig(t, `{"data_dir": "`+home+`/data", "claude_path": "`+os.Args[0]+`"}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := mgr.reload(nil, nil, cfg, nil); err != nil {
+		t.Fatal(err)
+	}
+	mgr.mu.RLock()
+	_, tracked := mgr.retired[old]
+	mgr.mu.RUnlock()
+	if !tracked {
+		t.Error("removed brain disappeared before its worker finished")
+	}
+	mgr.KillRuns() // Must return despite the blocked retirement/delivery.
+	releaseDelivery()
+	mgr.retiring.Wait()
+	mgr.mu.RLock()
+	_, tracked = mgr.retired[old]
+	mgr.mu.RUnlock()
+	if tracked {
+		t.Error("completed retirement remained in the force-stop set")
 	}
 }

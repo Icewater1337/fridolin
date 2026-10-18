@@ -734,7 +734,9 @@ are listed in `<data_dir>/runs/` while they last, so that a bridge that
 crashed stops what is left of them when it starts again. A second shutdown
 signal waits for the process supervisor to acknowledge the group kill before
 exiting, without waiting for output readers or reply delivery; a run still
-preparing cannot start a CLI after that force-stop.
+preparing cannot start a CLI after that force-stop. It freezes admission,
+queue turns and reload publication, and also stops runs in removed brains
+whose retirement has not finished.
 `BrainManager.Apply` swaps the brain set at runtime without touching
 brains that did not change, and hands what a brain it takes out
 had waiting to the brain that takes it now.

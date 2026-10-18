@@ -1002,13 +1002,19 @@ func (br *Brain) shutdown(grace time.Duration) {
 func (br *Brain) closeQueue() []Inbound {
 	br.mu.Lock()
 	defer br.mu.Unlock()
-	br.retired = true
+	br.freezeQueueLocked()
 	gone := br.pending
 	br.pending = nil
+	return gone
+}
+
+// freezeQueueLocked stops admission and further turns, retaining pending
+// messages for shutdown persistence. br.mu is held.
+func (br *Brain) freezeQueueLocked() {
+	br.retired = true
 	if br.slotWait != nil {
 		br.slots.giveUp(br.slotWait)
 	}
-	return gone
 }
 
 // retire stops the brain for good after a reload took it out, removed
@@ -2289,9 +2295,13 @@ type BrainManager struct {
 	// retiring are the brains reloads took out, while they stop and hand
 	// on what they had waiting (see requeue); Stop waits for them.
 	retiring sync.WaitGroup
+	// forced stops admission and publication without waiting for reloadMu,
+	// which may be held by filesystem work during a reload.
+	forced atomic.Bool
 
 	mu       sync.RWMutex // guards the fields below; never held while calling into a Brain
 	brains   map[string]*Brain
+	retired  map[*Brain]struct{} // removed from order, until retirement finishes
 	order    []*Brain
 	byGroup  map[string]*Brain
 	dmBrain  *Brain // brain with handles_dms; nil falls through to fallback
@@ -2342,7 +2352,7 @@ func (bm *BrainManager) reload(specs []BrainSpec, issues []BrainIssue, cfg *Conf
 	bm.reloadMu.Lock()
 	defer bm.reloadMu.Unlock()
 
-	if bm.stopped {
+	if bm.stopped || bm.forced.Load() {
 		return errBrainsStopped
 	}
 	if err := ValidateBrainSet(specs); err != nil {
@@ -2431,6 +2441,18 @@ func (bm *BrainManager) reload(specs []BrainSpec, issues []BrainIssue, cfg *Conf
 	bm.slots.setLimit(cfg.RunLimit())
 
 	bm.mu.Lock()
+	// KillRuns publishes its latch under this same lock, so its snapshot
+	// cannot miss a newly published brain or one about to retire.
+	if bm.forced.Load() {
+		bm.mu.Unlock()
+		return errBrainsStopped
+	}
+	if bm.retired == nil {
+		bm.retired = make(map[*Brain]struct{})
+	}
+	for _, br := range removed {
+		bm.retired[br] = struct{}{}
+	}
 	bm.brains, bm.order, bm.byGroup, bm.dmBrain, bm.fallback, bm.issues, bm.held = next, order, byGroup, dm, def, issues, held
 	bm.mu.Unlock()
 	applied = true
@@ -2447,6 +2469,11 @@ func (bm *BrainManager) reload(specs []BrainSpec, issues []BrainIssue, cfg *Conf
 		// folder while the old run still works there.
 		waiting := br.closeQueue()
 		bm.retiring.Go(func() {
+			defer func() {
+				bm.mu.Lock()
+				delete(bm.retired, br)
+				bm.mu.Unlock()
+			}()
 			br.retire(!moved)
 			bm.requeue(br, waiting)
 		})
@@ -2686,6 +2713,9 @@ func (bm *BrainManager) Route(m Inbound) *Brain {
 // brain left them (see Brain.submit).
 func (bm *BrainManager) Submit(m Inbound) (br *Brain, pos int, busy bool, err error) {
 	for attempt := 0; attempt < 2; attempt++ {
+		if bm.forced.Load() {
+			return nil, 0, false, errBrainsStopped
+		}
 		br = bm.Route(m)
 		if br == nil && m.Brain != "" {
 			return nil, 0, false, fmt.Errorf("brain %s is not configured", m.Brain)
@@ -2719,9 +2749,20 @@ func (bm *BrainManager) StopHandOffs(jid string) (stopped bool, dropped int) {
 // kill, never for the runs' output or delivery. Cancellation alone could
 // return before os/exec's watcher had a chance to signal the process group.
 func (bm *BrainManager) KillRuns() {
+	bm.mu.Lock()
+	bm.forced.Store(true)
+	brains := append([]*Brain(nil), bm.order...)
+	for br := range bm.retired {
+		brains = append(brains, br)
+	}
+	bm.mu.Unlock()
+
 	var runs []*brainRun
-	for _, br := range bm.Brains() {
+	for _, br := range brains {
 		br.mu.Lock()
+		// Freeze admission and the worker's next turn before capturing
+		// current. Keep pending intact for concurrent graceful shutdown.
+		br.freezeQueueLocked()
 		cur := br.current
 		br.mu.Unlock()
 		if cur != nil {
