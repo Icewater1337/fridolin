@@ -179,6 +179,11 @@ with its tools, as `fridolin.prev`. To go back to it:
 fridolin service rollback     # run it again to undo
 ```
 
+[docs/COMPATIBILITY.md](docs/COMPATIBILITY.md) lists what an upgrade
+keeps working (`config.json`, `brain.json`, the history files,
+`bridge.db`, `/send` and `/ingest`, the commands) and how something is
+retired; [CHANGELOG.md](CHANGELOG.md) what changed.
+
 **Coming from a version without API tokens** (one whose `/ingest` took
 none): `POST /ingest` now refuses a call without a token with `401`, so an
 upload handler or recorder sync written for the old version stops working

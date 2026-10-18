@@ -235,4 +235,6 @@ the version before: `fridolin service rollback`.
 - Architecture notes are in the README ("How it works"); configuration in
   `docs/CONFIGURATION.md`; brains in `docs/BRAINS.md`; backups in
   `docs/BACKUP.md`; Google Calendar in `docs/CALENDAR.md`; the Plaud
-  recorder in `docs/PLAUD.md`; the site in `docs/SITE.md`.
+  recorder in `docs/PLAUD.md`; the site in `docs/SITE.md`; what stays
+  compatible between versions, and how something is retired, in
+  `docs/COMPATIBILITY.md`.

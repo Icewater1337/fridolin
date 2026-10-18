@@ -9,9 +9,11 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"regexp"
 	"slices"
 	"strings"
 	"testing"
+	"unicode"
 )
 
 // The schemas in docs/schemas are kept to the code in two ways. Each lists
@@ -770,4 +772,89 @@ func TestScriptAPISchemasRefuseBadRequests(t *testing.T) {
 			}
 		})
 	}
+}
+
+// TestContractDocsLinkWhatExists: every schema in docs/schemas is checked
+// by these tests and linked from the docs, and the links of
+// docs/COMPATIBILITY.md, which names the contracts, lead to a file and,
+// with a #, to a heading in it.
+func TestContractDocsLinkWhatExists(t *testing.T) {
+	schemas, err := filepath.Glob(filepath.Join(repoDir, "docs", "schemas", "*.json"))
+	if err != nil || len(schemas) == 0 {
+		t.Fatalf("no schemas: %v", err)
+	}
+	tests, err := os.ReadFile(filepath.Join(repoDir, "contracts_test.go"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var docs strings.Builder
+	mds, _ := filepath.Glob(filepath.Join(repoDir, "docs", "*.md"))
+	for _, md := range mds {
+		data, err := os.ReadFile(md)
+		if err != nil {
+			t.Fatal(err)
+		}
+		docs.Write(data)
+	}
+	for _, path := range schemas {
+		name := filepath.Base(path)
+		stem := strings.TrimSuffix(name, ".schema.json")
+		if !strings.Contains(string(tests), `"`+name) && !strings.Contains(string(tests), `"`+strings.TrimSuffix(stem, "-response")+`"`) {
+			t.Errorf("no test checks %s", name)
+		}
+		if !strings.Contains(docs.String(), "schemas/"+name) {
+			t.Errorf("no doc in docs/ links schemas/%s", name)
+		}
+	}
+
+	doc := filepath.Join(repoDir, "docs", "COMPATIBILITY.md")
+	data, err := os.ReadFile(doc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	links := regexp.MustCompile(`\]\(([^)#]*)(#[^)]*)?\)`).FindAllStringSubmatch(string(data), -1)
+	if len(links) == 0 {
+		t.Fatal("COMPATIBILITY.md links nothing")
+	}
+	for _, l := range links {
+		target, anchor := l[1], strings.TrimPrefix(l[2], "#")
+		if strings.Contains(target, "://") {
+			continue
+		}
+		file := doc
+		if target != "" {
+			file = filepath.Join(filepath.Dir(doc), filepath.FromSlash(target))
+		}
+		body, err := os.ReadFile(file)
+		if err != nil {
+			t.Errorf("COMPATIBILITY.md links %s, which is not there: %v", l[0], err)
+			continue
+		}
+		if anchor != "" && !slices.Contains(headingAnchors(string(body)), anchor) {
+			t.Errorf("COMPATIBILITY.md links %s, but %s has no heading #%s", l[0], target, anchor)
+		}
+	}
+}
+
+// headingAnchors are the anchors GitHub gives the headings of a Markdown
+// document: lower case, without punctuation but - and _, spaces made -.
+func headingAnchors(md string) []string {
+	var out []string
+	for _, line := range strings.Split(md, "\n") {
+		text, ok := strings.CutPrefix(strings.TrimLeft(line, "#"), " ")
+		if !ok || !strings.HasPrefix(line, "#") {
+			continue
+		}
+		anchor := strings.Map(func(r rune) rune {
+			switch {
+			case r == ' ':
+				return '-'
+			case r == '-' || r == '_' || unicode.IsLetter(r) || unicode.IsDigit(r):
+				return unicode.ToLower(r)
+			}
+			return -1
+		}, strings.TrimSpace(text))
+		out = append(out, anchor)
+	}
+	return out
 }

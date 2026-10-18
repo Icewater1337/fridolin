@@ -2,6 +2,9 @@
 
 What changes for people who run Fridolin. There are no tagged releases
 yet, so everything is under Unreleased until the first one.
+[docs/COMPATIBILITY.md](docs/COMPATIBILITY.md) says what stays the same
+from one version to the next, and how something that goes is first kept
+for compatibility.
 
 ## Unreleased
 
