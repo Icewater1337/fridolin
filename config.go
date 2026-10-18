@@ -92,6 +92,13 @@ type Config struct {
 	// as it takes.
 	RunTimeoutMinutes *int `json:"run_timeout_minutes,omitempty"`
 
+	// MaxConcurrentRuns is how many Claude runs may go at once, all brains
+	// together; others wait for one to end, requests ahead of untagged
+	// chatter. Each run is a full Claude Code agent, so this bounds the
+	// load and the use of the account's rate limits. Default 2; 0 for no
+	// limit.
+	MaxConcurrentRuns *int `json:"max_concurrent_runs,omitempty"`
+
 	// InheritClaudeUserConfig lets brains load your own Claude Code setup,
 	// as they did before this setting existed: your user settings (with
 	// their hooks, plugins and permissions), skills, agents and commands,
@@ -374,6 +381,8 @@ const (
 	// Agentic runs can take a while; a day is far more than any should.
 	defaultRunTimeoutMinutes = 30
 	maxRunTimeoutMinutes     = 24 * 60
+	defaultConcurrentRuns    = 2
+	maxConcurrentRuns        = 64
 )
 
 // runTimeoutUnit is what one of run_timeout_minutes is, a variable so that
@@ -384,6 +393,9 @@ var runTimeoutUnit = time.Minute
 func (c *Config) RunTimeout() time.Duration {
 	return time.Duration(intOr(c.RunTimeoutMinutes, defaultRunTimeoutMinutes)) * runTimeoutUnit
 }
+
+// RunLimit is how many Claude runs may go at once, 0 for no limit.
+func (c *Config) RunLimit() int { return intOr(c.MaxConcurrentRuns, defaultConcurrentRuns) }
 
 func boolOr(p *bool, def bool) bool {
 	if p == nil {
@@ -601,6 +613,10 @@ func effective(file *Config) (*Config, error) {
 		rt := defaultRunTimeoutMinutes
 		cfg.RunTimeoutMinutes = &rt
 	}
+	if cfg.MaxConcurrentRuns == nil {
+		n := defaultConcurrentRuns
+		cfg.MaxConcurrentRuns = &n
+	}
 	if cfg.ScriptAPI.TokenlessSend == nil {
 		cfg.ScriptAPI.TokenlessSend = &t
 	}
@@ -783,6 +799,9 @@ func (c *Config) validate() error {
 	}
 	if n := intOr(c.RunTimeoutMinutes, defaultRunTimeoutMinutes); n < 0 || n > maxRunTimeoutMinutes {
 		return fmt.Errorf("run_timeout_minutes must be between 0 (no limit) and %d, not %d", maxRunTimeoutMinutes, n)
+	}
+	if n := c.RunLimit(); n < 0 || n > maxConcurrentRuns {
+		return fmt.Errorf("max_concurrent_runs must be between 0 (no limit) and %d, not %d", maxConcurrentRuns, n)
 	}
 	if c.MaxMediaMB < 1 || c.MaxMediaMB > maxMaxMediaMB {
 		return fmt.Errorf("max_media_mb must be between 1 and %d, not %d", maxMaxMediaMB, c.MaxMediaMB)

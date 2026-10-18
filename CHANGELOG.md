@@ -61,6 +61,11 @@ yet, so everything is under Unreleased until the first one.
   backed-up files lost more than half of them, so that a wiped
   `memories/` is no longer mirrored. "Mirror the deletion…" on the
   backup card goes ahead with one that was meant.
+- At most two Claude runs go at once, all brains together
+  (`max_concurrent_runs`, Settings → Claude); a brain whose turn it is
+  waits for a free one, requests ahead of untagged chatter, and a request
+  that has to wait gets the "Queued" notice. Set it to 0 for runs without
+  a limit, as before.
 - A brain's queue takes each chat's messages in order and the chats in
   turn, so a busy chat no longer keeps the brain's other chats waiting
   behind all of its messages. "Queued (#n)" counts the same way.

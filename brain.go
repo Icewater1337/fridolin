@@ -210,6 +210,9 @@ type Brain struct {
 	settings atomic.Pointer[brainSettings]
 	sandbox  *SandboxProfiler
 	hooks    *BrainHooks
+	// slots are the run slots all brains share (max_concurrent_runs); nil
+	// for no limit.
+	slots *runSlots
 
 	// historyMu serialises the bridge's writes to the history file: an
 	// append must not land in a copy that a rewrite then drops (see
@@ -230,6 +233,8 @@ type Brain struct {
 	working bool // a worker goroutine is draining pending
 	retired bool // removed from the configuration
 	last    *RunInfo
+	// slotWait is set while the worker waits for a run slot.
+	slotWait *slotWait
 
 	// tmuxViewer is an optional Terminal window tailing this brain's
 	// activity log. A run starts it in the background and a reload can close
@@ -424,8 +429,9 @@ func historyTime(t time.Time) string {
 // Submit hands a message to the brain: it goes into the history and, unless
 // it is untagged chatter that gets no run (see observeRuns), into the
 // queue. It returns the message's position in the queue (1 = next, 0 for
-// none) and whether it has to wait for other work; a run it interrupts
-// does not count.
+// none) and whether it has to wait for other work: the brain's, or other
+// brains' runs that take every run slot. A run it interrupts does not
+// count.
 func (br *Brain) Submit(m Inbound) (pos int, busy bool, err error) {
 	if m.At.IsZero() {
 		m.At = time.Now()
@@ -514,13 +520,22 @@ func (br *Brain) Submit(m Inbound) (pos int, busy bool, err error) {
 	}
 	br.pending = append(br.pending, m)
 	pos = slices.Index(br.queueOrderLocked(), len(br.pending)-1) + 1
-	busy = pos > 1 || (br.current != nil && interrupt == nil)
+	busy = pos > 1 || (br.current != nil && interrupt == nil) || br.slots.busy(!m.Silent)
 	start := !br.working
 	br.working = true
+	// A worker that waits for a slot for chatter now waits for one for a
+	// request, which goes first.
+	var stopOther func()
+	if br.slotWait != nil && !m.Silent {
+		stopOther = br.slots.upgrade(br.slotWait)
+	}
 	br.mu.Unlock()
 
 	if interrupt != nil {
 		br.interruptRun(interrupt)
+	}
+	if stopOther != nil {
+		stopOther()
 	}
 	if start {
 		go br.worker()
@@ -630,7 +645,8 @@ func (br *Brain) hasRoomLocked(m Inbound, s *brainSettings) bool {
 	return n < s.maxPending || silent
 }
 
-// worker drains the queue one message at a time.
+// worker drains the queue one message at a time, each in a run slot (see
+// runSlots).
 func (br *Brain) worker() {
 	for {
 		br.mu.Lock()
@@ -639,9 +655,27 @@ func (br *Brain) worker() {
 			br.mu.Unlock()
 			return
 		}
+		slot, ok := br.waitForSlotLocked()
+		if !ok || br.retired || len(br.pending) == 0 {
+			// Retired, or what waited was dropped meanwhile.
+			br.mu.Unlock()
+			if ok {
+				slot.release()
+			}
+			continue
+		}
 		i := nextIn(br.pending, br.turns)
 		m := br.pending[i]
 		br.pending = slices.Delete(br.pending, i, i+1)
+		if slot != nil && !slot.running(!m.Silent) {
+			// A request in another brain took this slot's place before
+			// the run began: the chatter is in the history, as for an
+			// observe-only run it stops.
+			br.mu.Unlock()
+			slot.release()
+			dropped([]Inbound{m})
+			continue
+		}
 		br.takeTurnLocked(m.JID)
 		s := br.settings.Load()
 		ctx, cancel := runContext(s.runTimeout)
@@ -658,8 +692,51 @@ func (br *Brain) worker() {
 		// Outbox), not here: the next run must not read as said what
 		// never reached the chat.
 		br.finishRun(run)
+		if slot != nil {
+			slot.release()
+		}
 		br.recordLast(m, res)
 		br.deliverGuarded(m, res)
+	}
+}
+
+// waitForSlotLocked waits for a run slot for what runs next, with br.mu
+// held on entry and again on return, though not while it waits: messages
+// keep coming in, and a request among them makes the wait one for a
+// request (see Submit). It returns a nil slot without a limit, and false
+// when the brain was retired while it waited.
+func (br *Brain) waitForSlotLocked() (*runSlot, bool) {
+	if br.slots == nil {
+		return nil, true
+	}
+	request := !br.pending[nextIn(br.pending, br.turns)].Silent
+	w, stopOther := br.slots.wait(request, br.stopObservation)
+	br.slotWait = w
+	br.mu.Unlock()
+	if stopOther != nil {
+		stopOther()
+	}
+	select {
+	case <-w.ready:
+	default:
+		log.Printf("brain %s: waiting for a run slot: other brains' runs take all of max_concurrent_runs", br.id)
+		<-w.ready
+	}
+	slot, ok := br.slots.take(w)
+	br.mu.Lock()
+	br.slotWait = nil
+	return slot, ok
+}
+
+// stopObservation stops the brain's observe-only run, for a request in
+// another brain that waits for its run slot.
+func (br *Brain) stopObservation() {
+	br.mu.Lock()
+	cur := br.current
+	br.mu.Unlock()
+	if cur != nil && cur.msg.Silent {
+		log.Printf("brain %s: stopping the observe-only run in %s: a request waits for its run slot", br.id, cur.msg.JID)
+		br.interruptRun(cur)
 	}
 }
 
@@ -834,6 +911,9 @@ func (br *Brain) retire(closeViewer bool) {
 	br.retired = true
 	gone := br.pending
 	br.pending = nil
+	if br.slotWait != nil {
+		br.slots.giveUp(br.slotWait)
+	}
 	br.mu.Unlock()
 	dropped(gone)
 	br.StopCurrent(true)
@@ -2113,6 +2193,8 @@ type BrainManager struct {
 
 	profiler *SandboxProfiler
 	hooks    *BrainHooks
+	// slots bound the runs of every brain together, across reloads.
+	slots *runSlots
 }
 
 // NewBrainManager builds the configured brains.
@@ -2122,6 +2204,7 @@ func NewBrainManager(cfg *Config) (*BrainManager, error) {
 		byGroup:  map[string]*Brain{},
 		profiler: NewSandboxProfiler(nil, cfg),
 		hooks:    &BrainHooks{},
+		slots:    newRunSlots(cfg.RunLimit()),
 	}
 	if err := bm.Apply(cfg); err != nil {
 		return nil, err
@@ -2190,6 +2273,7 @@ func (bm *BrainManager) reload(specs []BrainSpec, issues []BrainIssue, cfg *Conf
 				root:    root,
 				sandbox: bm.profiler,
 				hooks:   bm.hooks,
+				slots:   bm.slots,
 			}
 			created = append(created, br)
 		}
@@ -2222,6 +2306,7 @@ func (bm *BrainManager) reload(specs []BrainSpec, issues []BrainIssue, cfg *Conf
 	}
 
 	bm.profiler.Update(workDirs, cfg)
+	bm.slots.setLimit(cfg.RunLimit())
 
 	bm.mu.Lock()
 	bm.brains, bm.order, bm.byGroup, bm.dmBrain, bm.fallback, bm.issues = next, order, byGroup, dm, def, issues

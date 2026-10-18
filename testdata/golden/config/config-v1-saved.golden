@@ -39,6 +39,7 @@
   ],
   "dangerously_skip_permissions": true,
   "run_timeout_minutes": 45,
+  "max_concurrent_runs": 3,
   "child_env_passthrough": [
     "GROQ_API_KEY"
   ],

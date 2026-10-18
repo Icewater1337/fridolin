@@ -279,6 +279,25 @@ CLI's output open is stopped then, rather than keeping the brain busy for
 as long as it runs. The answer goes out either way, also when the limit
 above comes within those five seconds.
 
+### `max_concurrent_runs`
+
+How many Claude runs may go at once, all brains together. Default 2, at
+most 64; `0` lets every brain run whenever it has work, as before this
+setting. A brain runs one message at a time anyway, so this matters once
+more than two brains are busy at the same time: each run is a full Claude
+Code agent with tools, on your CPU and on your account's rate limits, and
+the next request needs them as much. A brain whose turn it is waits for
+a free run, and the log says so; the sender of a request that has to
+wait for one is told "⏳ Queued (#1)" (with [`queue`](#queue)'s
+`notify`), as when it waits behind the brain's own work. Work addressed
+to a brain gets the next free run before untagged chatter (an
+observe-only run, see [`observe`](BRAINS.md)), and among them the brain
+that asked first, so a brain that just had a run asks again behind the
+others. A request that finds every run taken by observe-only runs stops
+one of them, as it would in its own brain: the chatter is already in the
+history. A change applies at once; with a lower limit, runs going on
+finish and the next waits.
+
 ### `inherit_claude_user_config`
 
 The dashboard has no field for it, but its overview warns while it is on.

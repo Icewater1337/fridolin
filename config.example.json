@@ -15,6 +15,7 @@
   "brain_effort": "",
   "disallowed_tools": [],
   "run_timeout_minutes": 30,
+  "max_concurrent_runs": 2,
   "brain_dirs": [
     {
       "path": "~/assistant/personal",
