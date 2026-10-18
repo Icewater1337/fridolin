@@ -162,6 +162,9 @@ func (cs *ConfigStore) Update(etag string, mutate func(*Config) error) (restart 
 type UpdateResult struct {
 	// Restart is RestartRequired as of the new configuration.
 	Restart []string
+	// ETag is the etag of the config.json the update wrote. ETag() may
+	// already be a later update's.
+	ETag string
 }
 
 // UpdateTx is Update for an edit that writes brain.json files too: mutate
@@ -173,7 +176,7 @@ func (cs *ConfigStore) UpdateTx(etag string, mutate func(c *Config, tx *Tx) erro
 		return UpdateResult{}, err
 	}
 	cs.notify(prev, next)
-	return UpdateResult{Restart: restartRequired(cs.startup, next.Effective)}, nil
+	return UpdateResult{Restart: restartRequired(cs.startup, next.Effective), ETag: next.ETag}, nil
 }
 
 // notify tells the subscribers that next replaced prev, and gives back

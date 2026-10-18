@@ -834,7 +834,7 @@ func (b *Bridge) apiPutConfig(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	restart, err := b.cfgs.Update(req.ETag, func(c *Config) error {
+	res, err := b.cfgs.UpdateTx(req.ETag, func(c *Config, _ *Tx) error {
 		incoming.BrainDirs = c.BrainDirs
 		*c = *incoming
 		return nil
@@ -847,7 +847,9 @@ func (b *Bridge) apiPutConfig(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusUnprocessableEntity, err.Error())
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"etag": b.cfgs.ETag(), "restart_required": nonNil(restart)})
+	// The etag of what this save wrote, not ETag(), which may be a later
+	// save's: the page would take that write for the one it saved.
+	writeJSON(w, http.StatusOK, map[string]any{"etag": res.ETag, "restart_required": nonNil(res.Restart)})
 }
 
 // apiRestart re-executes the bridge in place (same binary, same arguments).

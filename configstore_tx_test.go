@@ -287,3 +287,46 @@ func TestBridgeAppliesTheLatestConfigOnALateNotification(t *testing.T) {
 		t.Errorf("after a late notification the brain runs as %q, want Second", got)
 	}
 }
+
+// PUT /api/config answers with the etag of the config.json it wrote, also
+// when another update has written one since: with that one's etag, the
+// page would take the other write for its own and save over it.
+func TestPutConfigSendsItsOwnETag(t *testing.T) {
+	tb := newTestBridge(t, "")
+	var once sync.Once
+	var putETag string
+	later := make(chan error, 1)
+	tb.cfgs.Subscribe(func(_, next *Config) {
+		if next.LogLevel != "debug" {
+			return
+		}
+		// Heard of the PUT's update: another one commits before the PUT
+		// answers. It waits to tell its subscribers until this returns.
+		once.Do(func() {
+			putETag = tb.cfgs.ETag()
+			go func() {
+				_, err := tb.cfgs.Update("", func(c *Config) error { c.Comment = "later"; return nil })
+				later <- err
+			}()
+			waitFor(t, 5*time.Second, "the later update", func() bool { return tb.cfgs.Get().Comment == "later" })
+		})
+	})
+	w := tb.editConfig(t, func(c map[string]any) { c["log_level"] = "debug" })
+	if err := <-later; err != nil {
+		t.Fatal(err)
+	}
+	var resp struct {
+		ETag string `json:"etag"`
+	}
+	if w.Code != 200 || json.Unmarshal(w.Body.Bytes(), &resp) != nil {
+		t.Fatalf("PUT /api/config: %d %s", w.Code, w.Body.String())
+	}
+	if resp.ETag != putETag || resp.ETag == tb.cfgs.ETag() {
+		t.Errorf("PUT answered etag %s; it wrote %s, the later update %s", resp.ETag, putETag, tb.cfgs.ETag())
+	}
+	// Saving again with it is a conflict: the page has not seen the later
+	// write.
+	if w := tb.do("PUT", "/api/config", map[string]any{"etag": resp.ETag, "config": tb.cfgs.FileCopy()}); w.Code != 409 {
+		t.Errorf("save with the PUT's etag after a later write: %d %s, want 409", w.Code, w.Body.String())
+	}
+}
