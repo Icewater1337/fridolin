@@ -10,4 +10,7 @@
 {"ts":"<TIME>","from":"main","chat":"15551234567@s.whatsapp.net","text":"echo:<HOME>/main:You (15551234567) says: [reply to 15559876543: \"Lunch at 12?\"]\nyes, book it","type":"out"}
 {"ts":"<TIME>","from":"upload","chat":"15551234567@s.whatsapp.net","text":"New files were uploaded.\n[attachment: <HOME>/.fridolin/media/a/upload.txt]","type":"in"}
 {"ts":"<TIME>","from":"main","chat":"15551234567@s.whatsapp.net","text":"echo:<HOME>/main:upload says: New files were uploaded.","type":"out"}
+{"ts":"<TIME>","from":"15559876543","chat":"120363000000000000@g.us","text":"the cake is chocolate","type":"in"}
+{"ts":"<TIME>","from":"15551234567","chat":"120363000000000000@g.us","text":"and the candles?","type":"in"}
+{"ts":"<TIME>","from":"main","chat":"120363000000000000@g.us","text":"echo:<HOME>/main:You (15551234567) says: and the candles?","type":"out"}
 {"ts":"<TIME>","from":"script","chat":"15551234567@s.whatsapp.net","text":"Sent by a script.","type":"out","via":"script"}

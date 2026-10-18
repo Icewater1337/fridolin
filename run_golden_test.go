@@ -120,10 +120,11 @@ Answer in one sentence.
 `
 
 // TestGoldenRuns pins what a brain's run gets: the prompt for a DM, a group
-// message, one and several attachments and a quoted reply, with the chat
-// history and the names from the identity map; the Claude CLI's arguments
-// with the global settings and with a brain's own; and the history lines
-// the bridge writes for each kind of message.
+// message, one and several attachments, a quoted reply and an addressed
+// group message after an untagged one, with the chat history and the
+// names from the identity map; the Claude CLI's arguments with the global
+// settings and with a brain's own; and the history lines the bridge writes
+// for each kind of message.
 func TestGoldenRuns(t *testing.T) {
 	runs := fakeRuns(t)
 	h := newHarness(t, `{"brain_model": "sonnet", "brain_effort": "high", "disallowed_tools": ["WebFetch"], "dangerously_skip_permissions": true, "ingest": {"enabled": true}}`)
@@ -228,6 +229,24 @@ func TestGoldenRuns(t *testing.T) {
 			}
 		})
 	}
+
+	// An untagged group message runs no brain: nothing is sent, and the
+	// message goes into the history, where the next run in the chat sees
+	// it.
+	t.Run("chatter", func(t *testing.T) {
+		before, lines, sent := len(runs()), len(historyLines(t, dir)), len(h.SentTo(harnessGroup))
+		h.Inject(inbound{JID: harnessGroup, Sender: "15559876543", Text: "the cake is chocolate"})
+		h.WaitFor("the message in the history", func() bool { return len(historyLines(t, dir)) >= lines+1 })
+		answer := h.Answer(inbound{JID: harnessGroup, Sender: "15551234567", Text: "@claude and the candles?"})
+		h.WaitFor("the answer in the history", func() bool { return recorded(answer) })
+		if got := h.SentTo(harnessGroup); len(got) != sent+1 {
+			t.Errorf("sent %q, want only the answer to the addressed message", got[sent:])
+		}
+		if n := len(runs()) - before; n != 1 {
+			t.Errorf("%d runs, want one: the untagged message runs no brain", n)
+		}
+		assertGolden(t, "run/prompt-after-chatter.golden", []byte(clockRE.ReplaceAllString(s.text(runs()[len(runs())-1].Prompt), "<WHEN>")+"\n"))
+	})
 
 	// /send writes the message into the history of the brain that owns the
 	// chat, as if the brain had said it.
