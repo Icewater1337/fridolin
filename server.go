@@ -115,12 +115,17 @@ func (b *Bridge) httpSend(w http.ResponseWriter, r *http.Request) {
 	}
 	// Refused before sending: a script gets a 400 for its own mistake rather
 	// than a failed send, and dev mode, whose messenger takes any JID,
-	// refuses it too.
-	if err := checkSendJID(req.JID); err != nil {
+	// refuses it too. A bare number is the DM with it.
+	to, err := chatJID(req.JID)
+	if err == nil {
+		err = checkRecipient(to)
+	}
+	if err != nil {
 		writeErr(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	if err := b.maySend(who, req.JID, b.cfgs.Get()); err != nil {
+	jid := to.String()
+	if err := b.maySend(who, jid, b.cfgs.Get()); err != nil {
 		status := http.StatusForbidden
 		if errors.Is(err, errTokenRequired) {
 			status = http.StatusUnauthorized
@@ -129,18 +134,20 @@ func (b *Bridge) httpSend(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := b.wa.SendChunked(r.Context(), req.JID, req.Text); err != nil {
-		log.Printf("HTTP send error to %s: %v", req.JID, err)
+	// Under the chat's JID as inbound messages have it, whatever form the
+	// request used, so the brain's next run sees it in the chat's history.
+	if err := b.wa.SendChunked(r.Context(), jid, req.Text); err != nil {
+		log.Printf("HTTP send error to %s: %v", jid, err)
 		// What did go out is in the chat, so it goes in the history too.
 		var partial *partialSendError
 		if errors.As(err, &partial) {
-			b.appendHTTPMessageToHistory(who, req.JID, strings.Join(partial.sent, "\n"))
+			b.appendHTTPMessageToHistory(who, jid, strings.Join(partial.sent, "\n"))
 		}
 		writeErr(w, sendErrStatus(err), "send failed: "+err.Error())
 		return
 	}
 
-	b.appendHTTPMessageToHistory(who, req.JID, req.Text)
+	b.appendHTTPMessageToHistory(who, jid, req.Text)
 	writeJSON(w, http.StatusOK, map[string]string{"status": "sent"})
 }
 
@@ -187,24 +194,6 @@ func allowedChat(jid string, cfg *Config) bool {
 		return slices.Contains(cfg.AllowedGroups, jid)
 	}
 	return strings.HasSuffix(jid, "@"+types.DefaultUserServer) && slices.Contains(cfg.AllowedNumbers, normalizeJID(jid))
-}
-
-// checkSendJID refuses a /send to anything but a chat: a phone number or
-// LID (…@s.whatsapp.net, …@lid) or a group (…@g.us), with a user part.
-// whatsmeow parses almost any string as some JID and would only refuse it
-// mid-send. Status, broadcast lists and channels are refused as for every
-// send (see checkRecipient).
-func checkSendJID(jid string) error {
-	if _, err := parseRecipient(jid); errors.Is(err, errRefusedRecipient) {
-		return err
-	}
-	user, server, _ := strings.Cut(jid, "@")
-	switch {
-	case user == "" || strings.TrimSpace(jid) != jid:
-	case server == "s.whatsapp.net", server == "lid", server == "g.us":
-		return nil
-	}
-	return fmt.Errorf("%q is not a chat JID (…@s.whatsapp.net, …@lid or …@g.us)", jid)
 }
 
 // sendErrStatus is the status for a send that failed with err: 503 while

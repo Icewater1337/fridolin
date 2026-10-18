@@ -975,15 +975,15 @@ func TestAllowListEntries(t *testing.T) {
 	}
 	for _, c := range numbers {
 		t.Run("number "+c.in, func(t *testing.T) {
-			got, err := allowListNumber(c.in)
+			got, err := phoneNumber(c.in)
 			if c.want == "" {
 				if err == nil {
-					t.Errorf("allowListNumber(%q) = %q, want an error", c.in, got)
+					t.Errorf("phoneNumber(%q) = %q, want an error", c.in, got)
 				}
 				return
 			}
 			if err != nil || got != c.want {
-				t.Errorf("allowListNumber(%q) = %q, %v; want %q", c.in, got, err, c.want)
+				t.Errorf("phoneNumber(%q) = %q, %v; want %q", c.in, got, err, c.want)
 			}
 		})
 	}
@@ -1016,20 +1016,20 @@ func TestAllowListEntries(t *testing.T) {
 	}
 }
 
-// FuzzAllowListNumber: whatever is typed into the dashboard's "Add number"
+// FuzzPhoneNumber: whatever is typed into the dashboard's "Add number"
 // box, what reaches allowed_numbers is 6 to 15 digits, all of them from
 // the input, and it goes in unchanged a second time.
-func FuzzAllowListNumber(f *testing.F) {
+func FuzzPhoneNumber(f *testing.F) {
 	for _, s := range []string{"15551234567", "+1 (555) 123-4567", "15551234567@s.whatsapp.net", "", "+", "1-2", "١٥٥٥١٢٣٤٥٦٧"} {
 		f.Add(s)
 	}
 	f.Fuzz(func(t *testing.T, in string) {
-		n, err := allowListNumber(in)
+		n, err := phoneNumber(in)
 		if err != nil {
 			return
 		}
 		if !phoneNumberRE.MatchString(n) {
-			t.Fatalf("allowListNumber(%q) = %q, not 6 to 15 digits", in, n)
+			t.Fatalf("phoneNumber(%q) = %q, not 6 to 15 digits", in, n)
 		}
 		digits := strings.Map(func(r rune) rune {
 			if '0' <= r && r <= '9' {
@@ -1038,10 +1038,10 @@ func FuzzAllowListNumber(f *testing.F) {
 			return -1
 		}, in)
 		if !strings.Contains(digits, n) {
-			t.Errorf("allowListNumber(%q) = %q, digits that are not in the input", in, n)
+			t.Errorf("phoneNumber(%q) = %q, digits that are not in the input", in, n)
 		}
-		if again, err := allowListNumber(n); err != nil || again != n {
-			t.Errorf("allowListNumber(%q) = %q, %v; want it unchanged", n, again, err)
+		if again, err := phoneNumber(n); err != nil || again != n {
+			t.Errorf("phoneNumber(%q) = %q, %v; want it unchanged", n, again, err)
 		}
 	})
 }

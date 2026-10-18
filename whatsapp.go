@@ -943,11 +943,18 @@ func (wa *WhatsAppClient) isAllowed(number string) bool {
 	return numberAllowed(wa.cfg(), number)
 }
 
+// numberAllowed compares number and the list as phone numbers, digits
+// only, so that "+1 555 123 4567" in a config the bridge did not write
+// still lets 15551234567 in. Anything that is no phone number is compared
+// as it is.
 func numberAllowed(cfg *Config, number string) bool {
 	if len(cfg.AllowedNumbers) == 0 {
 		return cfg.AllowsAnyDM()
 	}
-	return slices.Contains(cfg.AllowedNumbers, number)
+	if n, err := phoneNumber(number); err == nil {
+		number = n
+	}
+	return slices.Contains(allowedNumbersAsNumbers(cfg.AllowedNumbers), number)
 }
 
 // isAllowedGroup reports whether the group JID is in allowed_groups.

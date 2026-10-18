@@ -908,7 +908,8 @@ func TestListLimitsClampToTheMaximum(t *testing.T) {
 }
 
 // A config that lists a number or group that can match no chat still
-// loads, with a warning that names the entries.
+// loads, with a warning that names the entries. A number written with a
+// "+" and spaces matches its chat, and is not named.
 func TestConfigWarnsAboutOddChats(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 	logged := captureLog(t)
@@ -918,7 +919,6 @@ func TestConfigWarnsAboutOddChats(t *testing.T) {
 	}
 	got := strings.Join(logged(), "\n")
 	for _, want := range []string{
-		`allowed_numbers "+1 555 987 6543" (write it as 15559876543)`,
 		`allowed_numbers "call me" (digits`,
 		`allowed_groups " 120363000000000001@g.us" (write it as 120363000000000001@g.us)`,
 		`allowed_groups "@g.us" (digits@g.us)`,
@@ -927,7 +927,7 @@ func TestConfigWarnsAboutOddChats(t *testing.T) {
 			t.Errorf("log lacks %q:\n%s", want, got)
 		}
 	}
-	if strings.Contains(got, `"15551234567"`) || strings.Contains(got, `"120363000000000000@g.us"`) {
+	if strings.Contains(got, `"15551234567"`) || strings.Contains(got, `"+1 555 987 6543"`) || strings.Contains(got, `"120363000000000000@g.us"`) {
 		t.Errorf("log names a valid entry:\n%s", got)
 	}
 }

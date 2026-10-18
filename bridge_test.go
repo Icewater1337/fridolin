@@ -1151,6 +1151,7 @@ func TestParseIdentityMap(t *testing.T) {
 | 15551234567     | Alex   | work  |
 | +15559876543    | Sam    | --- see the 2024 notes |
 | :-------------- | :----: | ----: |
+| (424) 242-4242  | Kim    |       |
 `))
 	if ids["15551234567"] != "Alex" {
 		t.Errorf("got %q for Alex", ids["15551234567"])
@@ -1163,9 +1164,13 @@ func TestParseIdentityMap(t *testing.T) {
 	if _, ok := ids["WhatsApp Number"]; ok {
 		t.Error("header row was parsed as an entry")
 	}
+	// A number is read the way people write it, spaces and dashes and all.
+	if ids["4242424242"] != "Kim" {
+		t.Errorf("got %q for Kim", ids["4242424242"])
+	}
 	// The line under the header, in any alignment, is no entry.
-	if len(ids) != 2 {
-		t.Errorf("got %d entries, want 2: %v", len(ids), ids)
+	if len(ids) != 3 {
+		t.Errorf("got %d entries, want 3: %v", len(ids), ids)
 	}
 	if name, ok := parseIdentityMap([]byte("| + | Nobody |\n"))[""]; ok {
 		t.Errorf("a row without a number was read as %q", name)
@@ -1176,12 +1181,13 @@ func TestParseIdentityMap(t *testing.T) {
 }
 
 // FuzzParseIdentityMap: the brain writes its contact map itself, so it can
-// hold anything. Every entry that comes out is a normalised number and a
+// hold anything. Every entry that comes out is an identityKey and a
 // name, each a trimmed cell; and a row with a number and a name in its first
 // two cells is read back, whatever its notes say.
 func FuzzParseIdentityMap(f *testing.F) {
 	table := "# People\n\n| WhatsApp Number | Person | Notes |\n| --------------- | ------ | ----- |\n| 15551234567     | Alex   | work  |\n"
 	f.Add([]byte(table), "+15559876543", "Sam", "")
+	f.Add([]byte(table), "+1 (555) 987-6543", "Sam", "written as people write it")
 	f.Add([]byte(table), "15551234567", "Alex Again", "replaces the first row")
 	f.Add([]byte(""), "15551234567@s.whatsapp.net", "Sam", "met in 2024")
 	f.Add([]byte("|a|b|\n|:--|--:|\r\n| x |"), "WhatsApp Number", "Person", "Notes")
@@ -1189,7 +1195,7 @@ func FuzzParseIdentityMap(f *testing.F) {
 	f.Fuzz(func(t *testing.T, table []byte, number, name, notes string) {
 		check := func(ids map[string]string) {
 			for k, v := range ids {
-				if k == "" || strings.ContainsAny(k, "@|\n") || normalizeJID(k) != k || k != strings.TrimSpace(k) {
+				if k == "" || strings.ContainsAny(k, "@|\n") || identityKey(k) != k || k != strings.TrimSpace(k) {
 					t.Errorf("key %q is not a normalised number", k)
 				}
 				if v == "" || strings.ContainsAny(v, "|\n") || v != strings.TrimSpace(v) {
@@ -1207,10 +1213,10 @@ func FuzzParseIdentityMap(f *testing.F) {
 		ids := parseIdentityMap([]byte(string(table) + "\n| " + number + " | " + name + " | " + notes + " |\n"))
 		check(ids)
 		// Nothing to read back, or the header and the line under it.
-		if number == "" || normalizeJID(number) == "" || name == "" || number == "WhatsApp Number" || strings.Trim(number+name+notes, "-: \t") == "" {
+		if number == "" || identityKey(number) == "" || name == "" || number == "WhatsApp Number" || strings.Trim(number+name+notes, "-: \t") == "" {
 			return
 		}
-		if got := ids[normalizeJID(number)]; got != name {
+		if got := ids[identityKey(number)]; got != name {
 			t.Errorf("row | %s | %s | %s | read back as %q, want %q", number, name, notes, got, name)
 		}
 	})

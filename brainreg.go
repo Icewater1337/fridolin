@@ -319,7 +319,8 @@ func ScaffoldBrain(dir string, m *BrainManifest) ([]string, error) {
 const identityMapTemplate = `# WhatsApp identity map
 
 Who is who in this brain's chats. The bridge reads this table to show names
-instead of raw numbers in the chat history it gives the brain.
+instead of raw numbers in the chat history it gives the brain. Write numbers
+with the country code, any way you like: +1 555 123-4567 works.
 
 | WhatsApp Number | Person | Notes |
 | --------------- | ------ | ----- |

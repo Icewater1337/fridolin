@@ -60,8 +60,8 @@ func normalizeJID(jid string) string {
 // identityMapFile is the brain's contact map, in its folder.
 const identityMapFile = "memories/people/whatsapp-identity-map.md"
 
-// parseIdentityMap parses a brain's contact map and returns normalized
-// JID → name.
+// parseIdentityMap parses a brain's contact map and returns name by
+// identityKey.
 //
 // The map is a markdown table at identityMapFile in the brain's folder:
 //
@@ -89,8 +89,9 @@ func parseIdentityMap(data []byte) map[string]string {
 		if jid == "" || name == "" || jid == "WhatsApp Number" {
 			continue
 		}
-		// A cell like "+" or "@lid" holds no number to look up.
-		number := normalizeJID(jid)
+		// A cell like "+" or "@lid" holds no number to look up. A number
+		// is read however it was written: "+1 555 123 4567" is 15551234567.
+		number := identityKey(jid)
 		if number == "" {
 			continue
 		}
@@ -1422,7 +1423,7 @@ func (br *Brain) composePreface(chatJID string, isGroup bool) string {
 		var senderDisplay string
 		if entry.Type == historyOut {
 			senderDisplay = outboundSender(br.id, entry)
-		} else if name, found := identities[normalizeJID(entry.From)]; found {
+		} else if name, found := identities[identityKey(entry.From)]; found {
 			senderDisplay = fmt.Sprintf("%s (%s)", name, entry.From)
 		} else {
 			senderDisplay = entry.From

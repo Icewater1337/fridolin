@@ -373,7 +373,8 @@ sends its run's, from the file `$FRIDOLIN_BRAIN_TOKEN_FILE` names, and may
 send only to its own chats.
 Without a token, `/send` reaches only your allowed chats, and only while
 [`script_api.tokenless_send`](docs/CONFIGURATION.md#script_apitokenless_send)
-is on.
+is on. `jid` may also be a phone number with the country code, for the
+direct chat with it.
 
 `curl -fsS http://127.0.0.1:8765/ready` succeeds only while WhatsApp is
 connected, so a script can check first; its JSON names the connection state
@@ -647,9 +648,11 @@ On macOS the desktop app keeps it at
 shows up there with an *Allow* button. Otherwise check which brain the group
 routes to, and that you used a trigger keyword.
 
-**No reply to a DM** — the sender's number must be allowed (*Settings →
-Access*), with country code and no `+`. An empty list allows nobody unless
-`allow_any_dm` is `true`. Blocked senders appear under *Chats*.
+**No reply to a DM** — the sender's number must be allowed (*Chats →
+Allowed numbers*), with the country code; a `+`, spaces and dashes are fine.
+An empty list allows nobody unless `allow_any_dm` is `true`. Blocked senders
+appear under *Chats*, and the Overview warns about an entry that is no
+number.
 
 **"Not logged in" from the CLI** — run `claude` once in a terminal to
 authenticate. Under launchd, check that `HOME` is set correctly in the plist.

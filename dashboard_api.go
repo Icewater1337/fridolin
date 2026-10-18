@@ -26,7 +26,6 @@ import (
 	"unicode"
 	"unicode/utf8"
 
-	"go.mau.fi/whatsmeow/types"
 	"rsc.io/qr"
 )
 
@@ -208,6 +207,9 @@ func (b *Bridge) apiStatus(w http.ResponseWriter, r *http.Request) {
 		Pending:    b.deb.Pending(),
 
 		RestartRequired: nonNil(b.cfgs.RestartRequired()),
+	}
+	if bad := badAllowedNumbers(cfg.AllowedNumbers); len(bad) > 0 {
+		resp.Warnings = append(resp.Warnings, fmt.Sprintf("allowed_numbers holds %q, which lets nobody in: each entry must be a phone number, digits with the country code. Fix it under Chats → Allowed numbers.", bad))
 	}
 	if cfg.AnyoneCanDM() {
 		resp.Warnings = append(resp.Warnings, "allowed_numbers is empty, so anyone who can message this WhatsApp account can use the assistant. Add your number under Chats → Allowed numbers.")
@@ -392,34 +394,10 @@ func (b *Bridge) apiIgnored(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, chats)
 }
 
-// The forms allowed_numbers and allowed_groups hold. Every edit of the
-// allow lists goes through allowListNumber and allowListGroup, so the
-// dashboard's add boxes and its Allow buttons agree on what they accept.
-var (
-	phoneNumberRE = regexp.MustCompile(`^[0-9]{6,15}$`)
-	groupJIDRE    = regexp.MustCompile(`^[0-9]+(-[0-9]+)?@g\.us$`)
-)
-
-// allowListNumber is s as allowed_numbers holds it: digits with the country
-// code. It takes the ways people write a number (a +, spaces, dashes,
-// dots, brackets, a WhatsApp JID) and refuses anything else, a @lid JID
-// too: its digits are WhatsApp's internal id for the sender, not a number.
-func allowListNumber(s string) (string, error) {
-	if _, server, ok := strings.Cut(strings.TrimSpace(s), "@"); ok && server != types.DefaultUserServer {
-		return "", fmt.Errorf("%q holds no phone number: send the number with the country code, e.g. 15551234567", strings.TrimSpace(s))
-	}
-	n := strings.Map(func(r rune) rune {
-		switch r {
-		case ' ', '\u00a0', '-', '.', '(', ')':
-			return -1
-		}
-		return r
-	}, normalizeJID(s))
-	if !phoneNumberRE.MatchString(n) {
-		return "", fmt.Errorf("%q is not a phone number: use digits with the country code, e.g. 15551234567", strings.TrimSpace(s))
-	}
-	return n, nil
-}
+// The form allowed_groups holds. Every edit of the allow lists goes
+// through phoneNumber and allowListGroup, so the dashboard's add boxes and
+// its Allow buttons agree on what they accept.
+var groupJIDRE = regexp.MustCompile(`^[0-9]+(-[0-9]+)?@g\.us$`)
 
 // allowListGroup is s as allowed_groups holds it: a group JID.
 func allowListGroup(s string) (string, error) {
@@ -455,7 +433,7 @@ func (req chatRequest) listEntry() (dm bool, entry string, err error) {
 		entry, err = allowListGroup(req.sent())
 		return false, entry, err
 	case "dm":
-		entry, err = allowListNumber(req.sent())
+		entry, err = phoneNumber(req.sent())
 		return true, entry, err
 	default:
 		return false, "", errors.New("kind must be group or dm")
@@ -530,7 +508,7 @@ func (b *Bridge) apiRevokeChat(w http.ResponseWriter, r *http.Request) {
 	}
 	canon, name := allowListGroup, "allowed_groups"
 	if dm {
-		canon, name = allowListNumber, "allowed_numbers"
+		canon, name = phoneNumber, "allowed_numbers"
 	}
 	var removed []string
 	_, err := b.cfgs.Update("", func(c *Config) error {

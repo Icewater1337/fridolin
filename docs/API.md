@@ -81,16 +81,20 @@ Sends a WhatsApp message.
 ```
 
 - `jid`: the chat. A phone-number chat (`…@s.whatsapp.net`), a LID chat
-  (`…@lid`) or a group (`…@g.us`), with something before the `@`.
+  (`…@lid`) or a group (`…@g.us`), with something before the `@`, or a
+  phone number with the country code, written any way
+  (`"+1 555 123 4567"`), for the direct chat with it. A device part
+  (`…:12@s.whatsapp.net`) is dropped.
 - `text`: sent as it is, split into numbered parts when it is longer than
   `max_chunk_size`. A `[POLL]` block is not turned into a poll here.
 
-The message is appended to the history of the brain that owns the chat, so
-the brain knows what went out in its chat; a code request sent this way arms
-the OTP guard (see [`otp_guard`](CONFIGURATION.md#otp_guard-and-otp_markers)).
-The line is marked with how it came in (`"via"`: `"script"`, `"brain"` or
-`"api"` for no token), and the brain's chat history shows it as sent by a
-script or the brain that sent it, not as the brain's own words.
+The message is appended to the history of the brain that owns the chat,
+under the chat's JID whatever form `jid` had, so the brain knows what went
+out in its chat; a code request sent this way arms the OTP guard (see
+[`otp_guard`](CONFIGURATION.md#otp_guard-and-otp_markers)). The line is
+marked with how it came in (`"via"`: `"script"`, `"brain"` or `"api"` for no
+token), and the brain's chat history shows it as sent by a script or the
+brain that sent it, not as the brain's own words.
 
 | Status | Body | When |
 | --- | --- | --- |

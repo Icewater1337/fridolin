@@ -26,7 +26,10 @@ Paths may start with `~`, which expands to your home directory.
 
 ### `allowed_numbers`
 
-Phone numbers permitted to DM the bridge. Country code, no `+`, no spaces.
+Phone numbers permitted to DM the bridge, with the country code. The bridge
+compares digits only, so `"+1 555 123-4567"` written into the file by hand
+lets 15551234567 in; an entry that is not 6 to 15 digits, or a `@lid` JID,
+lets nobody in, and the Overview and the log at startup name it.
 
 ```json
 "allowed_numbers": ["15551234567", "15559876543"]
@@ -39,10 +42,10 @@ not 6 to 15 of them, or a `@lid` JID (WhatsApp's internal ID for a sender,
 not a number); a group must be a group JID.
 
 An empty list means nobody may DM until you add a number, unless
-`allow_any_dm` (below) is `true`. The bridge compares entries exactly as
-they are written, so one written by hand with a `+` or spaces matches
-nobody; it names such entries in the log when it starts, with the form to
-write them in.
+`allow_any_dm` (below) is `true`. `allowed_groups` entries are compared
+exactly as they are written, so one written by hand with a typo or spaces
+matches no group; the log names such entries when the bridge starts, with
+the form to write them in.
 
 Newer WhatsApp clients identify senders by an internal ID rather than a phone
 number; the bridge resolves that back to the number before checking, so plain
