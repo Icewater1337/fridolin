@@ -172,11 +172,16 @@ func fakeClaude() {
 		fmt.Println(testedClaudeVersion + " (Claude Code)")
 		return
 	}
+	// Like the CLI, it reads the prompt from stdin when -p comes last.
 	prompt := ""
 	for i, a := range args {
 		if a == "-p" && i+1 < len(args) {
 			prompt = args[i+1]
 		}
+	}
+	if len(args) > 0 && args[len(args)-1] == "-p" {
+		data, _ := io.ReadAll(os.Stdin)
+		prompt = string(data)
 	}
 	if log := os.Getenv("FRIDOLIN_FAKE_PID_LOG"); log != "" {
 		// One line a run, so that a test can look for the process later.
@@ -217,7 +222,7 @@ func fakeClaude() {
 	if log := os.Getenv("FRIDOLIN_FAKE_ARGS_LOG"); log != "" {
 		f, err := os.OpenFile(log, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600)
 		if err == nil {
-			fmt.Fprintln(f, strings.Join(args[:len(args)-1], " "))
+			fmt.Fprintln(f, strings.Join(args, " "))
 			f.Close()
 		}
 	}

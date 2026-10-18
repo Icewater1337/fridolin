@@ -536,8 +536,8 @@ func TestReloadRefusesAClashingSet(t *testing.T) {
 // TestClaudeArgs: a brain loads only its own folder's Claude Code setup,
 // with the folder's .mcp.json passed explicitly and the instructions above
 // it excluded, unless inherit_claude_user_config asks for the old
-// behaviour. The other settings map to their flags, and the prompt comes
-// last.
+// behaviour. The other settings map to their flags, and -p comes last,
+// without the prompt, which goes on stdin.
 func TestClaudeArgs(t *testing.T) {
 	const mcp = "/brains/a/.mcp.json"
 	const settings = `{"claudeMdExcludes":["/brains/CLAUDE.md"]}`
@@ -561,7 +561,7 @@ func TestClaudeArgs(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			args := claudeArgs(&tc.s, tc.mcpConfig, tc.settings, "hi")
+			args := claudeArgs(&tc.s, tc.mcpConfig, tc.settings)
 			got := strings.Join(args, " ")
 			for _, w := range tc.want {
 				if !strings.Contains(got, w) {
@@ -573,13 +573,44 @@ func TestClaudeArgs(t *testing.T) {
 					t.Errorf("args %q have %q", got, w)
 				}
 			}
-			if !strings.HasSuffix(got, " -p hi") {
-				t.Errorf("args %q: the prompt must come last", got)
+			if !strings.HasSuffix(got, " -p") {
+				t.Errorf("args %q: -p must come last, the prompt goes on stdin", got)
 			}
 			// --mcp-config takes several files, so the CLI would take
 			// anything after the file that is not an option for another.
 			if i := slices.Index(args, "--mcp-config"); i >= 0 && !strings.HasPrefix(args[i+2], "-") {
 				t.Errorf("args %q: %q follows --mcp-config's file", got, args[i+2])
+			}
+		})
+	}
+}
+
+// The prompt reaches the CLI on stdin, not in its arguments, where every
+// process listing shows it and ARG_MAX bounds it: a message of a megabyte
+// and more, a few long pasted texts, still runs.
+func TestPromptGoesOnStdin(t *testing.T) {
+	cases := []struct {
+		name string
+		text string
+	}{
+		{"a short message", "MSG-ON-STDIN"},
+		{"over ARG_MAX", "MSG-ON-STDIN " + strings.Repeat("all of this was pasted in. ", 50000)},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			mgr, d, home := queueTestManager(t, 0, "")
+			argsLog := filepath.Join(home, "args.log")
+			t.Setenv("FRIDOLIN_FAKE_ARGS_LOG", argsLog)
+			if _, _, _, err := mgr.Submit(dm(c.text)); err != nil {
+				t.Fatal(err)
+			}
+			waitFor(t, 10*time.Second, "the run", func() bool { return d.count() == 1 })
+			if res := d.all()[0].res; res.Err != nil || !strings.HasSuffix(res.Text, "says: "+c.text) {
+				t.Errorf("run = %v, %.80q; want the message echoed from stdin", res.Err, res.Text)
+			}
+			args, _ := os.ReadFile(argsLog)
+			if strings.Contains(string(args), "MSG-ON-STDIN") || !strings.HasSuffix(strings.TrimSpace(string(args)), " -p") {
+				t.Errorf("args = %.200q, want them to end in -p, without the prompt", args)
 			}
 		})
 	}

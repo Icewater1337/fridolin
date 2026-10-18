@@ -862,8 +862,9 @@ func (br *Brain) streamLogPath() string {
 
 // claudeArgs builds the CLI arguments for one run. mcpConfig is what
 // mcpConfigOf returned for the brain's folder, or "" for none; settings is
-// the brain's excludeInstructionsAbove.
-func claudeArgs(s *brainSettings, mcpConfig, settings, prompt string) []string {
+// the brain's excludeInstructionsAbove. They end in -p: the prompt goes on
+// stdin (see invoke).
+func claudeArgs(s *brainSettings, mcpConfig, settings string) []string {
 	args := []string{"--output-format", "stream-json", "--verbose"}
 	if !s.inheritUser {
 		// Only the brain folder's own Claude Code setup. Your user settings
@@ -893,18 +894,18 @@ func claudeArgs(s *brainSettings, mcpConfig, settings, prompt string) []string {
 	if len(s.disallowedTools) > 0 {
 		args = append(args, "--disallowed-tools", strings.Join(s.disallowedTools, ","))
 	}
-	return append(args, "-p", prompt)
+	return append(args, "-p")
 }
 
-// withArgsBeforePrompt puts extra before the trailing "-p <prompt>" that
-// claudeArgs ends with, where an option list such as --mcp-config's ends.
-func withArgsBeforePrompt(args, extra []string) []string {
-	if len(extra) == 0 || len(args) < 2 {
+// withArgsBeforePrint puts extra before the trailing -p that claudeArgs
+// ends with, which ends an option list such as --mcp-config's.
+func withArgsBeforePrint(args, extra []string) []string {
+	if len(extra) == 0 || len(args) < 1 {
 		return args
 	}
-	out := append([]string{}, args[:len(args)-2]...)
+	out := append([]string{}, args[:len(args)-1]...)
 	out = append(out, extra...)
-	return append(out, args[len(args)-2:]...)
+	return append(out, args[len(args)-1:]...)
 }
 
 // excludeInstructionsAbove returns the --settings for a brain in dir that
@@ -1108,7 +1109,7 @@ func jsonObject(data []byte) (map[string]json.RawMessage, error) {
 // write: its .mcp.json, settings, prompt, identity map and calendar token.
 // That is far more than any real one holds, so that a brain cannot make
 // the bridge load gigabytes into memory on every run, and little enough to
-// pass a .mcp.json or the prompt on the command line.
+// pass a .mcp.json on the command line.
 const maxBrainFile = 256 << 10
 
 // readAtMost reads r to the end, and refuses it when that is more than
@@ -1201,9 +1202,9 @@ func (br *Brain) invoke(run *brainRun, ctx context.Context, s *brainSettings, m 
 		mcpConfig = mcpConfigOf(br.id, br.workDir)
 		settings = excludeInstructionsAbove(br.workDir)
 	}
-	args := claudeArgs(s, mcpConfig, settings, prompt)
+	args := claudeArgs(s, mcpConfig, settings)
 	if br.hooks != nil && br.hooks.ExtraArgs != nil {
-		args = withArgsBeforePrompt(args, br.hooks.ExtraArgs(br.id))
+		args = withArgsBeforePrint(args, br.hooks.ExtraArgs(br.id))
 	}
 
 	// Wrap the spawn in sandbox-exec so prompt injection in an incoming message
@@ -1256,13 +1257,15 @@ func (br *Brain) invoke(run *brainRun, ctx context.Context, s *brainSettings, m 
 	cmd.Env = env
 	isolateProcessGroup(cmd)
 
-	// stdin must be /dev/null or the CLI blocks waiting for input.
-	devNull, err := os.Open(os.DevNull)
+	// The prompt goes on stdin, which -p reads to its end, rather than in
+	// argv: argv is bounded by ARG_MAX, about 1 MiB on macOS with the
+	// environment, and on Linux one argument by 128 KiB, which a long
+	// prompt file and a few pasted texts reach; and every process listing
+	// shows it. The CLI takes 10 MB on stdin.
+	stdin, err := cmd.StdinPipe()
 	if err != nil {
-		return RunResult{Err: fmt.Errorf("opening /dev/null: %w", err)}
+		return RunResult{Err: fmt.Errorf("stdin pipe: %w", err)}
 	}
-	defer devNull.Close()
-	cmd.Stdin = devNull
 
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
@@ -1297,6 +1300,12 @@ func (br *Brain) invoke(run *brainRun, ctx context.Context, s *brainSettings, m 
 			_ = killProcessGroup(cmd.Process.Pid)
 			_ = cmd.Wait()
 		}
+	}()
+	go func() {
+		// Nothing waits for this: Wait closes the pipe once the CLI has
+		// exited, which ends a write it never read.
+		_, _ = io.WriteString(stdin, prompt)
+		stdin.Close()
 	}()
 
 	// Parse the stream in a goroutine so we can race it against the 10s timer.

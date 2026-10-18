@@ -177,11 +177,14 @@ still waits to go out to WhatsApp (the reply to the message before it,
 say), and the new message; Claude Code adds its own system prompt. Each
 message is one line of JSON with its time, sender and text, so that
 nothing someone writes can pass for the prompt's own structure or for
-another sender. From the brain's folder it also loads the Claude Code
-setup a session started there would: `CLAUDE.md` and `CLAUDE.local.md`,
-the settings, skills, agents, commands and rules in `.claude/`, and the
-MCP servers in `.mcp.json`, except those its `.claude` settings turn off
-with `disabledMcpjsonServers`.
+another sender. The prompt reaches the CLI on stdin, not among its
+arguments, which process listings show and the system limits in size
+(about a megabyte in all on macOS, 128 KiB for one argument on Linux).
+From the brain's folder it also loads the Claude Code setup a session
+started there would: `CLAUDE.md` and `CLAUDE.local.md`, the settings,
+skills, agents, commands and rules in `.claude/`, and the MCP servers in
+`.mcp.json`, except those its `.claude` settings turn off with
+`disabledMcpjsonServers`.
 
 Every run gets the bridge's environment (see [what reaches
 brains](CONFIGURATION.md#what-reaches-brains)) plus variables of its own:
