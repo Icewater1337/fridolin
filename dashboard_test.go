@@ -15,6 +15,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -79,11 +80,13 @@ func (tb *testBridge) do(method, path string, body any, mutate ...func(*http.Req
 	return w
 }
 
-// ingest posts to /ingest the way a local script does: no dashboard token.
+// ingest posts to /ingest the way a local script does: no dashboard token,
+// the scripts token.
 func (tb *testBridge) ingest(body string) *httptest.ResponseRecorder {
 	r := httptest.NewRequest("POST", "http://127.0.0.1:8765/ingest", strings.NewReader(body))
 	r.Host = "127.0.0.1:8765"
 	r.Header.Set("Content-Type", "application/json")
+	r.Header.Set("Authorization", "Bearer "+tb.scriptAuth.scripts.Value())
 	w := httptest.NewRecorder()
 	tb.h.ServeHTTP(w, r)
 	return w
@@ -100,7 +103,7 @@ func (tb *testBridge) addFolderBrain(t *testing.T, m BrainManifest) string {
 }
 
 func TestDashboardGuards(t *testing.T) {
-	tb := newTestBridge(t, "")
+	h := newHarness(t, "")
 	cases := []struct {
 		name   string
 		method string
@@ -127,15 +130,48 @@ func TestDashboardGuards(t *testing.T) {
 		if c.mutate != nil {
 			muts = append(muts, c.mutate)
 		}
-		if w := tb.do(c.method, c.path, body, muts...); w.Code != c.want {
+		if w := h.Do(c.method, c.path, body, muts...); w.Code != c.want {
 			t.Errorf("%s: status %d, want %d (%s)", c.name, w.Code, c.want, w.Body.String())
 		}
 	}
 
 	// The page itself loads with the strict CSP.
-	w := tb.do("GET", "/", nil, func(r *http.Request) { r.Header.Del("X-Bridge-Token") })
+	w := h.Do("GET", "/", nil, func(r *http.Request) { r.Header.Del("X-Bridge-Token") })
 	if w.Code != 200 || !strings.Contains(w.Header().Get("Content-Security-Policy"), "default-src 'self'") {
 		t.Errorf("index: %d, CSP %q", w.Code, w.Header().Get("Content-Security-Policy"))
+	}
+}
+
+// Every answer carries the dashboard's CSP: scripts and styles from the
+// bridge only, no plugins, and Trusted Types without a policy, so no
+// string is ever parsed into the page as HTML or run as script.
+func TestDashboardCSP(t *testing.T) {
+	tb := newTestBridge(t, "")
+	want := map[string]string{
+		"default-src":               "'self'",
+		"script-src":                "'self'",
+		"style-src":                 "'self'",
+		"object-src":                "'none'",
+		"base-uri":                  "'none'",
+		"form-action":               "'none'",
+		"frame-ancestors":           "'none'",
+		"require-trusted-types-for": "'script'",
+		"trusted-types":             "'none'",
+	}
+	for _, path := range []string{"/", "/assets/app/main.js", "/api/status", "/api/nothing-here"} {
+		t.Run(path, func(t *testing.T) {
+			csp := tb.do("GET", path, nil).Header().Get("Content-Security-Policy")
+			got := map[string]string{}
+			for _, d := range strings.Split(csp, ";") {
+				name, value, _ := strings.Cut(strings.TrimSpace(d), " ")
+				got[name] = value
+			}
+			for name, value := range want {
+				if got[name] != value {
+					t.Errorf("%s is %q, want %q (CSP %q)", name, got[name], value, csp)
+				}
+			}
+		})
 	}
 }
 
@@ -143,7 +179,7 @@ func TestDashboardGuards(t *testing.T) {
 // module scripts. The JavaScript tests and the package.json that marks the
 // modules for node sit in web/ too, but are not part of the page.
 func TestDashboardServesOnlyThePage(t *testing.T) {
-	tb := newTestBridge(t, "")
+	h := newHarness(t, "")
 	cases := []struct {
 		path string
 		want int
@@ -157,7 +193,7 @@ func TestDashboardServesOnlyThePage(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.path, func(t *testing.T) {
-			w := tb.do("GET", c.path, nil)
+			w := h.Do("GET", c.path, nil)
 			if w.Code != c.want {
 				t.Fatalf("GET %s: %d, want %d", c.path, w.Code, c.want)
 			}
@@ -176,9 +212,9 @@ func TestDashboardServesOnlyThePage(t *testing.T) {
 // changed instead of downloading all of them on every visit, and a
 // folder is not listed.
 func TestDashboardStaticFilesHaveValidatorsAndNoListings(t *testing.T) {
-	tb := newTestBridge(t, "")
+	h := newHarness(t, "")
 	get := func(path string, mutate ...func(*http.Request)) *httptest.ResponseRecorder {
-		return tb.do("GET", path, nil, append([]func(*http.Request){func(r *http.Request) { r.Header.Del("X-Bridge-Token") }}, mutate...)...)
+		return h.Do("GET", path, nil, append([]func(*http.Request){func(r *http.Request) { r.Header.Del("X-Bridge-Token") }}, mutate...)...)
 	}
 	for _, path := range []string{"/assets/", "/assets", "/assets/app/", "/assets/css/", "/nope.js"} {
 		t.Run("no listing "+path, func(t *testing.T) {
@@ -226,17 +262,19 @@ func TestDashboardStaticFilesHaveValidatorsAndNoListings(t *testing.T) {
 // has no dashboard field, so the status says when it is on.
 func TestStatusWarnsWhenBrainsInheritYourClaudeSetup(t *testing.T) {
 	cases := []struct {
-		name, extra string
-		want        bool
+		name, config string
+		want         bool
 	}{
 		{"off", "", false},
-		{"on", `, "inherit_claude_user_config": true`, true},
+		{"on", `{"inherit_claude_user_config": true}`, true},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			tb := newTestBridge(t, tc.extra)
-			w := tb.do("GET", "/api/status", nil)
-			var st statusResponse
+			h := newHarness(t, tc.config)
+			w := h.Do("GET", "/api/status", nil)
+			var st struct {
+				Warnings []string `json:"warnings"`
+			}
 			if err := json.Unmarshal(w.Body.Bytes(), &st); err != nil {
 				t.Fatal(err)
 			}
@@ -254,25 +292,17 @@ func TestStatusWarnsWhenBrainsInheritYourClaudeSetup(t *testing.T) {
 }
 
 func TestSendKeepsScriptContractButBlocksBrowsers(t *testing.T) {
-	tb := newTestBridge(t, "")
-	send := func(mutate func(*http.Request)) int {
-		r := httptest.NewRequest("POST", "http://127.0.0.1:8765/send", strings.NewReader(`{"jid":"15551234567@s.whatsapp.net","text":"hello"}`))
-		r.Host = "127.0.0.1:8765"
-		r.Header.Set("Content-Type", "application/json")
-		if mutate != nil {
-			mutate(r)
-		}
-		w := httptest.NewRecorder()
-		tb.h.ServeHTTP(w, r)
-		return w.Code
+	h := newHarness(t, "")
+	send := func(mutate ...func(*http.Request)) int {
+		return h.Script("POST", "/send", `{"jid":"15551234567@s.whatsapp.net","text":"hello"}`, mutate...).Code
 	}
-	if code := send(nil); code != 200 {
+	if code := send(); code != 200 {
 		t.Errorf("script /send: %d, want 200 without any token", code)
 	}
 	if code := send(func(r *http.Request) { r.Header.Set("Origin", "https://evil.example.com") }); code != 403 {
 		t.Errorf("cross-site /send: %d, want 403", code)
 	}
-	if out := tb.dev.Outbox(); len(out) != 1 || out[0].Text != "hello" {
+	if out := h.Outbox(); len(out) != 1 || out[0].Text != "hello" {
 		t.Errorf("outbox = %+v", out)
 	}
 }
@@ -280,16 +310,11 @@ func TestSendKeepsScriptContractButBlocksBrowsers(t *testing.T) {
 // POST /send refuses Status, broadcast lists and channels with a JSON
 // error: a script must not be able to post a Status in the bridge's name.
 func TestHTTPSendRefusesStatusBroadcastAndChannels(t *testing.T) {
-	tb := newTestBridge(t, "")
+	h := newHarness(t, "")
 	for _, jid := range []string{"status@broadcast", "1700000000@broadcast", "120363000000000000@newsletter"} {
 		t.Run(jid, func(t *testing.T) {
 			body, _ := json.Marshal(sendRequest{JID: jid, Text: "hello"})
-			r := httptest.NewRequest("POST", "http://127.0.0.1:8765/send", bytes.NewReader(body))
-			r.Host = "127.0.0.1:8765"
-			r.Header.Set("Content-Type", "application/json")
-			w := httptest.NewRecorder()
-			tb.h.ServeHTTP(w, r)
-
+			w := h.Script("POST", "/send", string(body))
 			var resp map[string]string
 			if w.Code != http.StatusBadRequest || w.Header().Get("Content-Type") != "application/json" ||
 				json.Unmarshal(w.Body.Bytes(), &resp) != nil || !strings.Contains(resp["error"], "refusing to send") {
@@ -297,7 +322,7 @@ func TestHTTPSendRefusesStatusBroadcastAndChannels(t *testing.T) {
 			}
 		})
 	}
-	if out := tb.dev.Outbox(); len(out) != 0 {
+	if out := h.Outbox(); len(out) != 0 {
 		t.Errorf("sent anyway: %+v", out)
 	}
 }
@@ -305,8 +330,8 @@ func TestHTTPSendRefusesStatusBroadcastAndChannels(t *testing.T) {
 func TestSendRefusesMissingJIDOrText(t *testing.T) {
 	// Blank text gives no chunks, so it used to send nothing while still
 	// answering "sent" and writing the blank text to the brain's history.
-	tb := newTestBridge(t, "")
-	dir := tb.addFolderBrain(t, BrainManifest{ID: "p", Name: "P", Routing: BrainRouting{HandlesDMs: true}})
+	h := newHarness(t, "")
+	dir := h.AddBrain(BrainManifest{ID: "p", Name: "P", Routing: BrainRouting{HandlesDMs: true}})
 	cases := []struct {
 		name string
 		body string
@@ -318,17 +343,12 @@ func TestSendRefusesMissingJIDOrText(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			r := httptest.NewRequest("POST", "http://127.0.0.1:8765/send", strings.NewReader(c.body))
-			r.Host = "127.0.0.1:8765"
-			r.Header.Set("Content-Type", "application/json")
-			w := httptest.NewRecorder()
-			tb.h.ServeHTTP(w, r)
-			if w.Code != http.StatusBadRequest {
+			if w := h.Script("POST", "/send", c.body); w.Code != http.StatusBadRequest {
 				t.Errorf("status %d, want 400 (%s)", w.Code, w.Body.String())
 			}
 		})
 	}
-	if out := tb.dev.Outbox(); len(out) != 0 {
+	if out := h.Outbox(); len(out) != 0 {
 		t.Errorf("outbox = %+v, want nothing sent", out)
 	}
 	if hist, _ := os.ReadFile(filepath.Join(dir, "conversation-history.jsonl")); len(hist) != 0 {
@@ -403,18 +423,18 @@ func TestReadyReportsWhetherMessagesCanGoOut(t *testing.T) {
 }
 
 func TestIngestConfinedToMediaDir(t *testing.T) {
-	tb := newTestBridge(t, `, "ingest": {"enabled": true}`)
-	dir := tb.addFolderBrain(t, BrainManifest{ID: "personal", Name: "Personal", Routing: BrainRouting{HandlesDMs: true}})
-	cfg := tb.cfgs.Get()
-	inside := filepath.Join(cfg.MediaDir, "upload", "scan.pdf")
+	h := newHarness(t, `{"ingest": {"enabled": true}}`)
+	dir := h.AddBrain(BrainManifest{ID: "personal", Name: "Personal", Routing: BrainRouting{HandlesDMs: true}})
+	media := filepath.Join(h.DataDir(), "media")
+	inside := filepath.Join(media, "upload", "scan.pdf")
 	_ = os.MkdirAll(filepath.Dir(inside), 0o700)
 	_ = os.WriteFile(inside, []byte("%PDF"), 0o600)
-	outside := filepath.Join(tb.home, "secret.txt")
+	outside := filepath.Join(h.Home(), "secret.txt")
 	_ = os.WriteFile(outside, []byte("x"), 0o600)
-	link := filepath.Join(cfg.MediaDir, "link.txt")
+	link := filepath.Join(media, "link.txt")
 	_ = os.Symlink(outside, link)
 
-	ingest := tb.ingest
+	ingest := func(body string) *httptest.ResponseRecorder { return h.Script("POST", "/ingest", body) }
 	w := ingest(`{"brain":"personal","paths":["` + inside + `"],"text":"file this"}`)
 	if w.Code != 202 || !strings.Contains(w.Body.String(), `"status":"accepted"`) || !strings.Contains(w.Body.String(), "15551234567@s.whatsapp.net") {
 		t.Fatalf("ingest: %d %s", w.Code, w.Body.String())
@@ -429,23 +449,25 @@ func TestIngestConfinedToMediaDir(t *testing.T) {
 			t.Errorf("%s: %d, want 400", name, w.Code)
 		}
 	}
-	waitFor(t, 5*time.Second, "ingest reply", func() bool { return len(tb.dev.Outbox()) > 0 })
+	h.WaitFor("ingest reply", func() bool { return len(h.Outbox()) > 0 })
 	hist, _ := os.ReadFile(filepath.Join(dir, "conversation-history.jsonl"))
 	if !strings.Contains(string(hist), "[attachment: "+canonicalDir(inside)+"]") {
 		t.Errorf("history does not record the ingested file:\n%s", hist)
 	}
 }
 
-// An unknown brain is named as it was sent, in Go quotes: these errors are
-// plain text, where JSON's escapes of <, > and & would only garble it.
+// An unknown brain is named as it was sent, in Go quotes.
 func TestUnknownBrainIsQuotedAsSent(t *testing.T) {
-	tb := newTestBridge(t, `, "ingest": {"enabled": true}`)
+	h := newHarness(t, `{"ingest": {"enabled": true}}`)
 	const want = `unknown brain "<a&b>"`
-	if w := tb.ingest(`{"brain":"<a&b>","text":"x"}`); w.Code != http.StatusBadRequest || !strings.Contains(w.Body.String(), want) {
-		t.Errorf("ingest: %d %q, want 400 saying %s", w.Code, w.Body.String(), want)
-	}
-	w := tb.do("POST", "/api/dev/inbound", map[string]any{"jid": "15551234567@s.whatsapp.net", "brain": "<a&b>", "text": "x"})
 	var body struct{ Error string }
+	w := h.Script("POST", "/ingest", `{"brain":"<a&b>","text":"x"}`)
+	_ = json.Unmarshal(w.Body.Bytes(), &body)
+	if w.Code != http.StatusBadRequest || body.Error != want {
+		t.Errorf("ingest: %d %q, want 400 saying %s", w.Code, body.Error, want)
+	}
+	w = h.Do("POST", "/api/dev/inbound", map[string]any{"jid": "15551234567@s.whatsapp.net", "brain": "<a&b>", "text": "x"})
+	body.Error = ""
 	_ = json.Unmarshal(w.Body.Bytes(), &body)
 	if w.Code != http.StatusBadRequest || body.Error != want {
 		t.Errorf("dev inbound: %d %q, want 400 saying %s", w.Code, body.Error, want)
@@ -456,24 +478,26 @@ func TestUnknownBrainIsQuotedAsSent(t *testing.T) {
 // told the field to use, even when it names a brain that exists, and
 // nothing is handed to any brain.
 func TestIngestRefusesScope(t *testing.T) {
-	tb := newTestBridge(t, `, "ingest": {"enabled": true}`)
-	dir := tb.addFolderBrain(t, BrainManifest{ID: "personal", Name: "Personal", Routing: BrainRouting{HandlesDMs: true}})
+	h := newHarness(t, `{"ingest": {"enabled": true}}`)
+	dir := h.AddBrain(BrainManifest{ID: "personal", Name: "Personal", Routing: BrainRouting{HandlesDMs: true}})
 	for name, body := range map[string]string{
 		"scope only":         `{"scope":"personal","text":"file this"}`,
 		"scope and brain":    `{"scope":"personal","brain":"personal","text":"file this"}`,
 		"scope, other brain": `{"scope":"nobody","brain":"personal","text":"file this"}`,
 	} {
 		t.Run(name, func(t *testing.T) {
-			w := tb.ingest(body)
-			if w.Code != http.StatusBadRequest || !strings.Contains(w.Body.String(), `name the brain in "brain"`) {
+			w := h.Script("POST", "/ingest", body)
+			var got struct{ Error string }
+			_ = json.Unmarshal(w.Body.Bytes(), &got)
+			if w.Code != http.StatusBadRequest || !strings.Contains(got.Error, `name the brain in "brain"`) {
 				t.Errorf("%d %q, want 400 naming the brain field", w.Code, w.Body.String())
 			}
 		})
 	}
-	if w := tb.ingest(`{"brain":"personal","text":"file this"}`); w.Code != http.StatusAccepted {
+	if w := h.Script("POST", "/ingest", `{"brain":"personal","text":"file this"}`); w.Code != http.StatusAccepted {
 		t.Fatalf("with brain: %d %s, want 202", w.Code, w.Body.String())
 	}
-	waitFor(t, 5*time.Second, "the reply to the one accepted request", func() bool { return len(tb.dev.Outbox()) > 0 })
+	h.WaitFor("the reply to the one accepted request", func() bool { return len(h.Outbox()) > 0 })
 	hist, _ := os.ReadFile(filepath.Join(dir, "conversation-history.jsonl"))
 	if n := strings.Count(string(hist), `"type":"in"`); n != 1 {
 		t.Errorf("history has %d ingested messages, want only the accepted one:\n%s", n, hist)
@@ -486,16 +510,16 @@ func TestIngestRefusesScope(t *testing.T) {
 // sandbox and history.
 func TestIngestRunsInTheNamedBrain(t *testing.T) {
 	const dm = "15551234567@s.whatsapp.net"
-	tb := newTestBridge(t, `, "ingest": {"enabled": true}`)
-	dmDir := tb.addFolderBrain(t, BrainManifest{ID: "dm", Name: "DM", Routing: BrainRouting{HandlesDMs: true}})
-	upDir := tb.addFolderBrain(t, BrainManifest{ID: "up", Name: "Uploads", ReplyChat: dm})
+	h := newHarness(t, `{"ingest": {"enabled": true}}`)
+	dmDir := h.AddBrain(BrainManifest{ID: "dm", Name: "DM", Routing: BrainRouting{HandlesDMs: true}})
+	upDir := h.AddBrain(BrainManifest{ID: "up", Name: "Uploads", ReplyChat: dm})
 
-	w := tb.ingest(`{"brain":"up","text":"file this"}`)
+	w := h.Script("POST", "/ingest", `{"brain":"up","text":"file this"}`)
 	if w.Code != 202 || !strings.Contains(w.Body.String(), dm) {
 		t.Fatalf("ingest: %d %s", w.Code, w.Body.String())
 	}
-	waitFor(t, 5*time.Second, "ingest reply", func() bool { return len(tb.dev.Outbox()) > 0 })
-	out := tb.dev.Outbox()[0]
+	h.WaitFor("ingest reply", func() bool { return len(h.Outbox()) > 0 })
+	out := h.Outbox()[0]
 	if out.JID != dm || !strings.Contains(out.Text, "echo:"+upDir+":upload says: file this") {
 		t.Errorf("reply = %+v, want it from %s in %s", out, upDir, dm)
 	}
@@ -689,31 +713,42 @@ func TestReplyChatFor(t *testing.T) {
 // "!help" is text for the named brain, not a command for the chat's owner.
 func TestDevInboundCanNameABrain(t *testing.T) {
 	const dm = "15551234567@s.whatsapp.net"
-	tb := newTestBridge(t, "")
-	tb.addFolderBrain(t, BrainManifest{ID: "dm", Name: "DM", Routing: BrainRouting{HandlesDMs: true}})
-	upDir := tb.addFolderBrain(t, BrainManifest{ID: "up", Name: "Uploads"})
+	h := newHarness(t, "")
+	h.AddBrain(BrainManifest{ID: "dm", Name: "DM", Routing: BrainRouting{HandlesDMs: true}})
+	upDir := h.AddBrain(BrainManifest{ID: "up", Name: "Uploads"})
 
-	if w := tb.do("POST", "/api/dev/inbound", map[string]any{"jid": dm, "brain": "nobody", "text": "x"}); w.Code != 400 {
+	if w := h.Do("POST", "/api/dev/inbound", map[string]any{"jid": dm, "brain": "nobody", "text": "x"}); w.Code != 400 {
 		t.Errorf("unknown brain: %d, want 400", w.Code)
 	}
 	for i, text := range []string{"hello up", "!help"} {
 		t.Run(text, func(t *testing.T) {
-			if w := tb.do("POST", "/api/dev/inbound", map[string]any{"jid": dm, "brain": " Up ", "text": text}); w.Code != 202 {
+			if w := h.Do("POST", "/api/dev/inbound", map[string]any{"jid": dm, "brain": " Up ", "text": text}); w.Code != 202 {
 				t.Fatalf("dev inbound: %d %s", w.Code, w.Body.String())
 			}
-			waitFor(t, 5*time.Second, "reply", func() bool { return len(tb.dev.Outbox()) > i })
-			if out := tb.dev.Outbox()[0]; out.JID != dm || !strings.Contains(out.Text, "echo:"+upDir+":") || !strings.Contains(out.Text, text) {
-				t.Errorf("reply = %+v, want an echo of %q from %s", out, text, upDir)
+			h.WaitFor("reply", func() bool { return len(h.Outbox()) > i })
+			out := h.Outbox()
+			if last := out[len(out)-1]; last.JID != dm || !strings.Contains(last.Text, "echo:"+upDir+":") || !strings.Contains(last.Text, text) {
+				t.Errorf("reply = %+v, want an echo of %q from %s", last, text, upDir)
 			}
 		})
 	}
 }
 
 func TestAddBrainAllowChatAndRoute(t *testing.T) {
-	tb := newTestBridge(t, "")
-	dir := filepath.Join(tb.home, "family")
+	const club = "120363000000000001@g.us"
+	h := newHarness(t, "")
+	dir := filepath.Join(h.Home(), "family")
+	brains := func() []string {
+		var views []struct{ ID string }
+		_ = json.Unmarshal(h.Do("GET", "/api/brains", nil).Body.Bytes(), &views)
+		var out []string
+		for _, v := range views {
+			out = append(out, v.ID)
+		}
+		return out
+	}
 
-	w := tb.do("POST", "/api/brains/inspect", map[string]string{"path": "~/family"})
+	w := h.Do("POST", "/api/brains/inspect", map[string]string{"path": "~/family"})
 	var insp map[string]any
 	_ = json.Unmarshal(w.Body.Bytes(), &insp)
 	if w.Code != 200 || insp["exists"] != false {
@@ -721,64 +756,66 @@ func TestAddBrainAllowChatAndRoute(t *testing.T) {
 	}
 
 	m := BrainManifest{ID: "family", Name: "Family", Routing: BrainRouting{HandlesDMs: true}}
-	w = tb.do("POST", "/api/brains", map[string]any{"path": "~/family", "manifest": m, "create_dir": true})
+	w = h.Do("POST", "/api/brains", map[string]any{"path": "~/family", "manifest": m, "create_dir": true})
 	if w.Code != 200 {
 		t.Fatalf("add brain: %d %s", w.Code, w.Body.String())
 	}
 	if _, err := os.Stat(filepath.Join(dir, ManifestFile)); err != nil {
 		t.Error("brain.json not written")
 	}
-	if br := tb.brainMgr.BrainFor("15551234567@s.whatsapp.net", false); br == nil || br.ID() != "family" {
-		t.Fatal("the new brain must take DMs immediately, without a restart")
+	if got := h.Answer(inbound{JID: harnessDM, Text: "hello brain"}); !strings.Contains(got, "echo:"+dir+":") || !strings.Contains(got, "hello brain") {
+		t.Fatalf("reply %q not from the family brain: the new brain must take DMs immediately, without a restart", got)
 	}
-	if f := tb.cfgs.FileCopy(); len(f.BrainDirs) != 1 || f.BrainDirs[0].Path != "~/family" {
-		t.Errorf("brain_dirs = %+v", f.BrainDirs)
+	// config.json keeps the folder as typed.
+	var file struct {
+		BrainDirs []BrainRef `json:"brain_dirs"`
+	}
+	if data, err := os.ReadFile(h.Config().Path); err != nil || json.Unmarshal(data, &file) != nil || len(file.BrainDirs) != 1 || file.BrainDirs[0].Path != "~/family" {
+		t.Errorf("brain_dirs = %+v (%v)", file.BrainDirs, err)
 	}
 
 	// A second DM brain is refused.
 	m2 := BrainManifest{ID: "work", Name: "Work", Routing: BrainRouting{HandlesDMs: true}}
-	if w := tb.do("POST", "/api/brains", map[string]any{"path": "~/work", "manifest": m2, "create_dir": true}); w.Code != 422 {
+	if w := h.Do("POST", "/api/brains", map[string]any{"path": "~/work", "manifest": m2, "create_dir": true}); w.Code != 422 {
 		t.Errorf("second DM brain: %d, want 422", w.Code)
 	}
 
 	// A group that wrote while not allowed can be allowed and assigned in one go.
-	_ = tb.store.RecordIgnored("group", "120363000000000001@g.us", "Book club", "15559876543", "")
-	w = tb.do("POST", "/api/chats/allow", map[string]string{"jid": "120363000000000001@g.us", "kind": "group", "brain": "family"})
+	if w := h.Do("POST", "/api/dev/inbound", inbound{JID: club, Sender: "15559876543", Text: "hi"}); w.Code != 202 || !strings.Contains(w.Body.String(), "ignored") {
+		t.Fatalf("a group that is not allowed: %d %s", w.Code, w.Body.String())
+	}
+	w = h.Do("POST", "/api/chats/allow", map[string]string{"jid": club, "kind": "group", "brain": "family"})
 	if w.Code != 200 {
 		t.Fatalf("allow: %d %s", w.Code, w.Body.String())
 	}
-	if !slices.Contains(tb.cfgs.Get().AllowedGroups, "120363000000000001@g.us") {
+	var eff struct {
+		AllowedGroups []string `json:"allowed_groups"`
+	}
+	_ = json.Unmarshal(h.Config().Effective, &eff)
+	if !slices.Contains(eff.AllowedGroups, club) {
 		t.Error("group not allowed")
 	}
-	if br := tb.brainMgr.BrainFor("120363000000000001@g.us", true); br == nil || br.ID() != "family" {
-		t.Error("group not routed to the chosen brain")
+	if got := h.Answer(inbound{JID: club, Sender: "15551234567", Text: "@claude hello club"}); !strings.Contains(got, "echo:"+dir+":") {
+		t.Errorf("group not routed to the chosen brain: %q", got)
 	}
-	if disk, _ := ReadManifest(dir); !slices.Contains(disk.Routing.Groups, "120363000000000001@g.us") {
+	if disk, _ := ReadManifest(dir); !slices.Contains(disk.Routing.Groups, club) {
 		t.Error("the group must be saved in the brain's own brain.json")
 	}
-	if ign, _ := tb.store.ListIgnored(); len(ign) != 0 {
-		t.Errorf("allowed chat still listed as ignored: %+v", ign)
+	if ign := h.Do("GET", "/api/chats/ignored", nil).Body.String(); strings.TrimSpace(ign) != "[]" {
+		t.Errorf("allowed chat still listed as ignored: %s", ign)
 	}
-
-	// Message round trip in dev mode.
-	w = tb.do("POST", "/api/dev/inbound", map[string]any{"jid": "15551234567@s.whatsapp.net", "text": "hello brain"})
-	if w.Code != 202 {
-		t.Fatalf("dev inbound: %d", w.Code)
-	}
-	waitFor(t, 5*time.Second, "reply", func() bool { return len(tb.dev.Outbox()) > 0 })
-	if out := tb.dev.Outbox()[0].Text; !strings.Contains(out, dir) || !strings.Contains(out, "hello brain") {
-		t.Errorf("reply %q not from the family brain", out)
-	}
-	if acts := tb.activity.Recent(10, "family"); len(acts) < 2 {
-		t.Errorf("activity = %+v", acts)
-	}
+	// The answer reaches the history, and the feed, once it went out.
+	h.WaitFor("the answer in the activity feed", func() bool {
+		var acts []any
+		return json.Unmarshal(h.Do("GET", "/api/activity?brain=family", nil).Body.Bytes(), &acts) == nil && len(acts) >= 2
+	})
 
 	// Removing a brain unregisters it and leaves the folder alone.
-	if w := tb.do("DELETE", "/api/brains/family", nil); w.Code != 200 {
+	if w := h.Do("DELETE", "/api/brains/family", nil); w.Code != 200 {
 		t.Fatalf("remove: %d %s", w.Code, w.Body.String())
 	}
-	if tb.brainMgr.Get("family") != nil {
-		t.Error("brain still active")
+	if ids := brains(); len(ids) != 0 {
+		t.Errorf("brains still listed: %v", ids)
 	}
 	if _, err := os.Stat(filepath.Join(dir, "brain-prompt.md")); err != nil {
 		t.Error("removing a brain must not delete its files")
@@ -786,28 +823,110 @@ func TestAddBrainAllowChatAndRoute(t *testing.T) {
 }
 
 func TestApproveDrift(t *testing.T) {
-	tb := newTestBridge(t, "")
+	h := newHarness(t, "")
 	m := BrainManifest{ID: "notes", Name: "Notes"}
-	if w := tb.do("POST", "/api/brains", map[string]any{"path": "~/notes", "manifest": m, "create_dir": true}); w.Code != 200 {
-		t.Fatal(w.Body.String())
-	}
+	dir := h.AddBrain(m)
 	edited := m
 	edited.Name, edited.Routing.Default = "Notes 2", true
-	_ = WriteManifest(filepath.Join(tb.home, "notes"), &edited, true)
+	if err := WriteManifest(dir, &edited, true); err != nil {
+		t.Fatal(err)
+	}
 
 	var views []brainView
-	_ = json.Unmarshal(tb.do("GET", "/api/brains", nil).Body.Bytes(), &views)
+	_ = json.Unmarshal(h.Do("GET", "/api/brains", nil).Body.Bytes(), &views)
 	if len(views) != 1 || views[0].Status != "drift" || views[0].Disk == nil {
 		t.Fatalf("views = %+v", views)
 	}
-	if tb.brainMgr.Get("notes").Name() != "Notes" {
-		t.Error("drift must not apply before approval")
+	// The name the running brain has, as GET /api/status reports it.
+	running := func() string {
+		t.Helper()
+		var st struct {
+			Brains []struct{ ID, Name string } `json:"brains"`
+		}
+		if w := h.Do("GET", "/api/status", nil); w.Code != 200 || json.Unmarshal(w.Body.Bytes(), &st) != nil {
+			t.Fatalf("GET /api/status: %d %s", w.Code, w.Body)
+		}
+		for _, b := range st.Brains {
+			if b.ID == "notes" {
+				return b.Name
+			}
+		}
+		t.Fatalf("GET /api/status lists no brain notes")
+		return ""
 	}
-	if w := tb.do("POST", "/api/brains/notes/approve", nil); w.Code != 200 {
+	if got := running(); got != "Notes" {
+		t.Errorf("the running brain is named %q before approval, want Notes: drift must not apply", got)
+	}
+	if w := h.Do("POST", "/api/brains/notes/approve", map[string]any{"manifest": views[0].Disk}); w.Code != 200 {
 		t.Fatal(w.Body.String())
 	}
-	if tb.brainMgr.Get("notes").Name() != "Notes 2" {
-		t.Error("approval did not apply")
+	if got := running(); got != "Notes 2" {
+		t.Errorf("the running brain is named %q after approval, want Notes 2", got)
+	}
+}
+
+// TestStopRunFromTheDashboard: the dashboard's Stop ends the run in
+// progress, and the chat hears nothing about it. The message waiting behind
+// it runs next, or with clear_queue is dropped without a word to the chat
+// that was told it is queued. With nothing running, Stop stops nothing. A
+// third message, sent once the run has ended, shows that nothing else came.
+func TestStopRunFromTheDashboard(t *testing.T) {
+	for _, c := range []struct {
+		name   string
+		clear  bool
+		golden string
+	}{
+		{"keep the queue", false, "run/stop-keeps-the-queue.golden"},
+		{"clear the queue", true, "run/stop-clears-the-queue.golden"},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			h := newHarness(t, "")
+			h.AddBrain(BrainManifest{ID: "main", Name: "Main", Routing: BrainRouting{HandlesDMs: true}})
+			pids := filepath.Join(t.TempDir(), "pids")
+			t.Setenv("FRIDOLIN_FAKE_PID_LOG", pids)
+			t.Setenv("FRIDOLIN_FAKE_SLEEP_MS", "30000")
+			h.Inject(inbound{JID: harnessDM, Text: "first"})
+			// The CLI writes its PID once it runs, with the sleep in its
+			// environment; the runs after it answer at once.
+			h.WaitFor("the first run's CLI", func() bool {
+				data, _ := os.ReadFile(pids)
+				return len(data) > 0
+			})
+			t.Setenv("FRIDOLIN_FAKE_SLEEP_MS", "0")
+			h.Inject(inbound{JID: harnessDM, Text: "second"})
+			h.WaitSent(harnessDM, "Queued")
+
+			stop := func() bool {
+				t.Helper()
+				var resp struct {
+					Stopped bool `json:"stopped"`
+				}
+				w := h.Do("POST", "/api/brains/main/stop", map[string]any{"clear_queue": c.clear})
+				if w.Code != http.StatusOK || json.Unmarshal(w.Body.Bytes(), &resp) != nil {
+					t.Fatalf("stop: %d %s", w.Code, w.Body)
+				}
+				return resp.Stopped
+			}
+			if !stop() {
+				t.Error("Stop stopped nothing while a run was in progress")
+			}
+			if !c.clear {
+				h.WaitSent(harnessDM, "says: second")
+			}
+			h.WaitFor("the brain to be idle", func() bool { return !h.Running("main") })
+			if stop() {
+				t.Error("Stop stopped something with nothing running")
+			}
+			h.Inject(inbound{JID: harnessDM, Text: "third"})
+			h.WaitSent(harnessDM, "says: third")
+
+			s := h.scrubber()
+			var sb strings.Builder
+			for _, m := range h.Outbox() {
+				sb.WriteString(m.JID + " " + strconv.Quote(s.text(m.Text)) + "\n")
+			}
+			assertGolden(t, c.golden, []byte(sb.String()))
+		})
 	}
 }
 
@@ -817,35 +936,32 @@ func TestApproveDrift(t *testing.T) {
 // another brain is refused and leaves config.json and every brain.json as
 // they were.
 func TestUpdateBrain(t *testing.T) {
-	const group = "120363000000000000@g.us"
-	tb := newTestBridge(t, "")
-	dir := tb.addFolderBrain(t, BrainManifest{ID: "a", Name: "A", Routing: BrainRouting{HandlesDMs: true}})
-	dirB := tb.addFolderBrain(t, BrainManifest{ID: "b", Name: "B"})
+	h := newHarness(t, "")
+	dir := h.AddBrain(BrainManifest{ID: "a", Name: "A", Routing: BrainRouting{HandlesDMs: true}})
+	dirB := h.AddBrain(BrainManifest{ID: "b", Name: "B"})
 
-	edited := BrainManifest{ID: "a", Name: "Assistant", Model: "opus", Routing: BrainRouting{HandlesDMs: true, Groups: []string{group}}}
-	if w := tb.do("PUT", "/api/brains/a", map[string]any{"manifest": edited}); w.Code != 200 {
+	edited := BrainManifest{ID: "a", Name: "Assistant", Model: "opus", Routing: BrainRouting{HandlesDMs: true, Groups: []string{harnessGroup}}}
+	if w := h.Do("PUT", "/api/brains/a", map[string]any{"manifest": edited}); w.Code != 200 {
 		t.Fatalf("save: %d %s", w.Code, w.Body)
 	}
 	disk, err := ReadManifest(dir)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if disk.Name != "Assistant" || disk.Model != "opus" || !slices.Contains(disk.Routing.Groups, group) {
+	if disk.Name != "Assistant" || disk.Model != "opus" || !slices.Contains(disk.Routing.Groups, harnessGroup) {
 		t.Errorf("brain.json = %+v, want the edit", disk)
 	}
-	var approved *BrainManifest
-	for _, ref := range tb.cfgs.Get().BrainDirs {
-		if ref.Approved != nil && ref.Approved.ID == "a" {
-			approved = ref.Approved
-		}
-	}
-	if approved == nil || !approved.Equal(*disk) {
+	if approved, ok := h.Approved()["a"]; !ok || !approved.Equal(*disk) {
 		t.Errorf("approved = %+v, want what brain.json has", approved)
 	}
-	if br := tb.brainMgr.BrainFor(group, true); br == nil || br.ID() != "a" || br.Name() != "Assistant" {
-		t.Errorf("the group goes to %v, want the edited brain a", br)
+	if got := h.Answer(inbound{JID: harnessGroup, Sender: "15559876543", Text: "@claude hello"}); !strings.Contains(got, "echo:"+dir+":") {
+		t.Errorf("the group got %q, want the answer of the edited brain a", got)
 	}
-	if issues := tb.brainMgr.Issues(); len(issues) != 0 {
+	var views []struct{ ID, Name string }
+	if err := json.Unmarshal(h.Do("GET", "/api/brains", nil).Body.Bytes(), &views); err != nil || !slices.Contains(views, struct{ ID, Name string }{"a", "Assistant"}) {
+		t.Errorf("brains = %+v (%v), want a named Assistant", views, err)
+	}
+	if issues := h.Issues(); len(issues) != 0 {
 		t.Errorf("issues = %+v, want none", issues)
 	}
 
@@ -860,13 +976,13 @@ func TestUpdateBrain(t *testing.T) {
 		{"second DM brain", "b", BrainManifest{ID: "b", Name: "B", Routing: BrainRouting{HandlesDMs: true}}, "both handle DMs"},
 	} {
 		t.Run(c.name, func(t *testing.T) {
-			etag := tb.cfgs.ETag()
+			etag := h.Config().ETag
 			before := manifestFiles(t, dir, dirB)
-			w := tb.do("PUT", "/api/brains/"+c.id, map[string]any{"manifest": c.m})
+			w := h.Do("PUT", "/api/brains/"+c.id, map[string]any{"manifest": c.m})
 			if w.Code != 422 || !strings.Contains(w.Body.String(), c.want) {
 				t.Errorf("%d %s, want 422 saying %s", w.Code, w.Body, c.want)
 			}
-			if tb.cfgs.ETag() != etag {
+			if h.Config().ETag != etag {
 				t.Error("the refused edit changed config.json")
 			}
 			if !reflect.DeepEqual(manifestFiles(t, dir, dirB), before) {
@@ -896,25 +1012,24 @@ func manifestFiles(t *testing.T, dirs ...string) []string {
 // shows drift. A brain that is not there is refused before any brain.json
 // is written.
 func TestAssignGroup(t *testing.T) {
-	const group = "120363000000000000@g.us"
 	cases := []struct {
 		name, to string
 		want     map[string][]string // brain → its groups after the request
 		code     int
 	}{
-		{"to another brain", "b", map[string][]string{"a": {}, "b": {group}}, 200},
-		{"to the brain that has it", "a", map[string][]string{"a": {group}, "b": {}}, 200},
-		{"to no brain", "nobody", map[string][]string{"a": {group}, "b": {}}, 422},
+		{"to another brain", "b", map[string][]string{"a": {}, "b": {harnessGroup}}, 200},
+		{"to the brain that has it", "a", map[string][]string{"a": {harnessGroup}, "b": {}}, 200},
+		{"to no brain", "nobody", map[string][]string{"a": {harnessGroup}, "b": {}}, 422},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			tb := newTestBridge(t, "")
+			h := newHarness(t, "")
 			dirs := map[string]string{
-				"a": tb.addFolderBrain(t, BrainManifest{ID: "a", Name: "A", Routing: BrainRouting{Groups: []string{group}}}),
-				"b": tb.addFolderBrain(t, BrainManifest{ID: "b", Name: "B"}),
+				"a": h.AddBrain(BrainManifest{ID: "a", Name: "A", Routing: BrainRouting{Groups: []string{harnessGroup}}}),
+				"b": h.AddBrain(BrainManifest{ID: "b", Name: "B"}),
 			}
 			before := manifestFiles(t, dirs["a"], dirs["b"])
-			w := tb.do("POST", "/api/chats/allow", map[string]string{"jid": group, "kind": "group", "brain": c.to})
+			w := h.Do("POST", "/api/chats/allow", map[string]string{"jid": harnessGroup, "kind": "group", "brain": c.to})
 			if w.Code != c.code {
 				t.Fatalf("allow: %d %s, want %d", w.Code, w.Body, c.code)
 			}
@@ -933,15 +1048,15 @@ func TestAssignGroup(t *testing.T) {
 					t.Errorf("%s's brain.json has groups %q, want %q", id, disk.Routing.Groups, want)
 				}
 			}
-			for _, ref := range tb.cfgs.Get().BrainDirs {
-				if want := c.want[ref.Approved.ID]; !reflect.DeepEqual(ref.Approved.Routing.Groups, want) {
-					t.Errorf("%s's approved groups are %q, want %q", ref.Approved.ID, ref.Approved.Routing.Groups, want)
+			for id, approved := range h.Approved() {
+				if want := c.want[id]; !reflect.DeepEqual(approved.Routing.Groups, want) {
+					t.Errorf("%s's approved groups are %q, want %q", id, approved.Routing.Groups, want)
 				}
 			}
-			if br := tb.brainMgr.BrainFor(group, true); br == nil || br.ID() != c.to {
-				t.Errorf("the group goes to %v, want %s", br, c.to)
+			if got := h.Answer(inbound{JID: harnessGroup, Sender: "15559876543", Text: "@claude hello"}); !strings.Contains(got, "echo:"+dirs[c.to]+":") {
+				t.Errorf("the group got %q, want the answer of %s", got, c.to)
 			}
-			if issues := tb.brainMgr.Issues(); len(issues) != 0 {
+			if issues := h.Issues(); len(issues) != 0 {
 				t.Errorf("issues = %+v, want none", issues)
 			}
 		})
@@ -962,20 +1077,22 @@ func TestAllowListEntries(t *testing.T) {
 		{"1555123456789012", ""},
 		{"1555abc4567", ""},
 		{"15551234567:12@s.whatsapp.net", ""},
+		{"15551234567@lid", ""}, // WhatsApp's id for the sender, not a number
+		{"120363000000000000@g.us", ""},
 		{"", ""},
 		{"+", ""},
 	}
 	for _, c := range numbers {
 		t.Run("number "+c.in, func(t *testing.T) {
-			got, err := allowListNumber(c.in)
+			got, err := phoneNumber(c.in)
 			if c.want == "" {
 				if err == nil {
-					t.Errorf("allowListNumber(%q) = %q, want an error", c.in, got)
+					t.Errorf("phoneNumber(%q) = %q, want an error", c.in, got)
 				}
 				return
 			}
 			if err != nil || got != c.want {
-				t.Errorf("allowListNumber(%q) = %q, %v; want %q", c.in, got, err, c.want)
+				t.Errorf("phoneNumber(%q) = %q, %v; want %q", c.in, got, err, c.want)
 			}
 		})
 	}
@@ -1008,20 +1125,20 @@ func TestAllowListEntries(t *testing.T) {
 	}
 }
 
-// FuzzAllowListNumber: whatever is typed into the dashboard's "Add number"
+// FuzzPhoneNumber: whatever is typed into the dashboard's "Add number"
 // box, what reaches allowed_numbers is 6 to 15 digits, all of them from
 // the input, and it goes in unchanged a second time.
-func FuzzAllowListNumber(f *testing.F) {
+func FuzzPhoneNumber(f *testing.F) {
 	for _, s := range []string{"15551234567", "+1 (555) 123-4567", "15551234567@s.whatsapp.net", "", "+", "1-2", "١٥٥٥١٢٣٤٥٦٧"} {
 		f.Add(s)
 	}
 	f.Fuzz(func(t *testing.T, in string) {
-		n, err := allowListNumber(in)
+		n, err := phoneNumber(in)
 		if err != nil {
 			return
 		}
 		if !phoneNumberRE.MatchString(n) {
-			t.Fatalf("allowListNumber(%q) = %q, not 6 to 15 digits", in, n)
+			t.Fatalf("phoneNumber(%q) = %q, not 6 to 15 digits", in, n)
 		}
 		digits := strings.Map(func(r rune) rune {
 			if '0' <= r && r <= '9' {
@@ -1030,10 +1147,10 @@ func FuzzAllowListNumber(f *testing.F) {
 			return -1
 		}, in)
 		if !strings.Contains(digits, n) {
-			t.Errorf("allowListNumber(%q) = %q, digits that are not in the input", in, n)
+			t.Errorf("phoneNumber(%q) = %q, digits that are not in the input", in, n)
 		}
-		if again, err := allowListNumber(n); err != nil || again != n {
-			t.Errorf("allowListNumber(%q) = %q, %v; want it unchanged", n, again, err)
+		if again, err := phoneNumber(n); err != nil || again != n {
+			t.Errorf("phoneNumber(%q) = %q, %v; want it unchanged", n, again, err)
 		}
 	})
 }
@@ -1042,7 +1159,7 @@ func TestAllowAndRevokeChats(t *testing.T) {
 	const group = "120363000000000001@g.us"
 	cases := []struct {
 		name    string
-		extra   string // config fields that replace the test bridge's
+		config  string // settings that replace the harness's
 		path    string
 		body    map[string]string
 		code    int
@@ -1055,6 +1172,10 @@ func TestAllowAndRevokeChats(t *testing.T) {
 			[]string{"15551234567"}, []string{"120363000000000000@g.us"}},
 		{"refuse a number that is none", "", "/api/chats/allow", map[string]string{"kind": "dm", "number": "call me"}, 400,
 			[]string{"15551234567"}, []string{"120363000000000000@g.us"}},
+		{"refuse a @lid JID without its number", "", "/api/chats/allow", map[string]string{"kind": "dm", "jid": "15559876543@lid"}, 400,
+			[]string{"15551234567"}, []string{"120363000000000000@g.us"}},
+		{"allow a @lid JID's number", "", "/api/chats/allow", map[string]string{"kind": "dm", "jid": "15551234567@lid", "number": "15559876543"}, 200,
+			[]string{"15551234567", "15559876543"}, []string{"120363000000000000@g.us"}},
 		{"allow a typed group", "", "/api/chats/allow", map[string]string{"kind": "group", "jid": group}, 200,
 			[]string{"15551234567"}, []string{"120363000000000000@g.us", group}},
 		{"refuse a group that is none", "", "/api/chats/allow", map[string]string{"kind": "group", "jid": "120363000000000001@g.us/x"}, 400,
@@ -1073,33 +1194,39 @@ func TestAllowAndRevokeChats(t *testing.T) {
 			[]string{"15551234567"}, []string{"120363000000000000@g.us"}},
 		// Entries written into config.json by hand, as the Chats page shows
 		// and sends them.
-		{"revoke a hand-written number as it is stored", `, "allowed_numbers": ["+15559876543", "15551234567"]`,
+		{"revoke a hand-written number as it is stored", `{"allowed_numbers": ["+15559876543", "15551234567"]}`,
 			"/api/chats/revoke", map[string]string{"kind": "dm", "number": "+15559876543"}, 200,
 			[]string{"15551234567"}, []string{"120363000000000000@g.us"}},
-		{"revoke a group stored with a space", `, "allowed_groups": [" ` + group + `", "120363000000000000@g.us"]`,
+		{"revoke a group stored with a space", `{"allowed_groups": [" ` + group + `", "120363000000000000@g.us"]}`,
 			"/api/chats/revoke", map[string]string{"kind": "group", "jid": " " + group}, 200,
 			[]string{"15551234567"}, []string{"120363000000000000@g.us"}},
-		{"revoke a number the bridge would refuse", `, "allowed_numbers": ["12345", "15551234567"]`,
+		{"revoke a number the bridge would refuse", `{"allowed_numbers": ["12345", "15551234567"]}`,
 			"/api/chats/revoke", map[string]string{"kind": "dm", "number": "12345"}, 200,
 			[]string{"15551234567"}, []string{"120363000000000000@g.us"}},
-		{"revoke a group the bridge would refuse", `, "allowed_groups": ["family@g.us", "120363000000000000@g.us"]`,
+		{"revoke a group the bridge would refuse", `{"allowed_groups": ["family@g.us", "120363000000000000@g.us"]}`,
 			"/api/chats/revoke", map[string]string{"kind": "group", "jid": "family@g.us"}, 200,
 			[]string{"15551234567"}, []string{"120363000000000000@g.us"}},
-		{"revoke every form of a number typed another way", `, "allowed_numbers": ["+15551234567", "15559876543", "1 555 123 4567"]`,
+		{"revoke every form of a number typed another way", `{"allowed_numbers": ["+15551234567", "15559876543", "1 555 123 4567"]}`,
 			"/api/chats/revoke", map[string]string{"kind": "dm", "number": "15551234567"}, 200,
 			[]string{"15559876543"}, []string{"120363000000000000@g.us"}},
-		{"revoke only the stored form that was sent", `, "allowed_numbers": ["+15551234567", "15551234567"]`,
+		{"revoke only the stored form that was sent", `{"allowed_numbers": ["+15551234567", "15551234567"]}`,
 			"/api/chats/revoke", map[string]string{"kind": "dm", "number": "+15551234567"}, 200,
 			[]string{"15551234567"}, []string{"120363000000000000@g.us"}},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			tb := newTestBridge(t, c.extra)
-			w := tb.do("POST", c.path, c.body)
+			h := newHarness(t, c.config)
+			w := h.Do("POST", c.path, c.body)
 			if w.Code != c.code {
 				t.Fatalf("%s: %d %s, want %d", c.path, w.Code, w.Body, c.code)
 			}
-			f := tb.cfgs.FileCopy()
+			var f struct {
+				AllowedNumbers []string `json:"allowed_numbers"`
+				AllowedGroups  []string `json:"allowed_groups"`
+			}
+			if err := json.Unmarshal(h.Config().Config, &f); err != nil {
+				t.Fatal(err)
+			}
 			if !slices.Equal(f.AllowedNumbers, c.numbers) {
 				t.Errorf("allowed_numbers = %q, want %q", f.AllowedNumbers, c.numbers)
 			}
@@ -1111,42 +1238,45 @@ func TestAllowAndRevokeChats(t *testing.T) {
 }
 
 func TestRevokedGroupKeepsItsBrain(t *testing.T) {
-	const group = "120363000000000000@g.us"
-	tb := newTestBridge(t, "")
-	dir := tb.addFolderBrain(t, BrainManifest{ID: "family", Name: "Family", Routing: BrainRouting{Groups: []string{group}}})
-	if w := tb.do("POST", "/api/chats/revoke", map[string]string{"kind": "group", "jid": group}); w.Code != 200 {
+	h := newHarness(t, "")
+	dir := h.AddBrain(BrainManifest{ID: "family", Name: "Family", Routing: BrainRouting{Groups: []string{harnessGroup}}})
+	if w := h.Do("POST", "/api/chats/revoke", map[string]string{"kind": "group", "jid": harnessGroup}); w.Code != 200 {
 		t.Fatalf("revoke: %d %s", w.Code, w.Body)
 	}
-	if disk, _ := ReadManifest(dir); !slices.Contains(disk.Routing.Groups, group) {
+	if disk, _ := ReadManifest(dir); !slices.Contains(disk.Routing.Groups, harnessGroup) {
 		t.Error("revoking the group took it out of the brain's routing")
 	}
-	if w := tb.do("POST", "/api/chats/allow", map[string]string{"kind": "group", "jid": group}); w.Code != 200 {
+	if w := h.Do("POST", "/api/chats/allow", map[string]string{"kind": "group", "jid": harnessGroup}); w.Code != 200 {
 		t.Fatalf("allow: %d %s", w.Code, w.Body)
 	}
-	if br := tb.brainMgr.BrainFor(group, true); br == nil || br.ID() != "family" {
-		t.Errorf("allowed again, the group goes to %v, want family", br)
+	if got := h.Answer(inbound{JID: harnessGroup, Sender: "15559876543", Text: "@claude hello"}); !strings.Contains(got, "echo:"+dir+":") {
+		t.Errorf("allowed again, the group got %q, want family's answer", got)
 	}
 }
 
 func TestAllowingATypedChatClearsItsWaitingChat(t *testing.T) {
 	cases := []struct {
-		name string
-		kind string
-		jid  string // the waiting chat
-		body map[string]string
+		name  string
+		wrote inbound // what the chat sent while it was not allowed
+		body  map[string]string
 	}{
-		{"a number", "dm", "15559876543@s.whatsapp.net", map[string]string{"kind": "dm", "number": "+1 555 987 6543"}},
-		{"a group with spaces around it", "group", "120363000000000001@g.us", map[string]string{"kind": "group", "jid": " 120363000000000001@g.us "}},
+		{"a number", inbound{JID: "15559876543@s.whatsapp.net", Text: "hi"}, map[string]string{"kind": "dm", "number": "+1 555 987 6543"}},
+		{"a group with spaces around it", inbound{JID: "120363000000000001@g.us", Sender: "15559876543", Text: "hi"}, map[string]string{"kind": "group", "jid": " 120363000000000001@g.us "}},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			tb := newTestBridge(t, "")
-			_ = tb.store.RecordIgnored(c.kind, c.jid, "", "15559876543", "")
-			if w := tb.do("POST", "/api/chats/allow", c.body); w.Code != 200 {
+			h := newHarness(t, "")
+			if w := h.Do("POST", "/api/dev/inbound", c.wrote); w.Code != 202 || !strings.Contains(w.Body.String(), "ignored") {
+				t.Fatalf("a chat that is not allowed: %d %s", w.Code, w.Body.String())
+			}
+			if ign := h.Do("GET", "/api/chats/ignored", nil).Body.String(); !strings.Contains(ign, c.wrote.JID) {
+				t.Fatalf("the chat does not wait: %s", ign)
+			}
+			if w := h.Do("POST", "/api/chats/allow", c.body); w.Code != 200 {
 				t.Fatalf("allow: %d %s", w.Code, w.Body)
 			}
-			if ign, _ := tb.store.ListIgnored(); len(ign) != 0 {
-				t.Errorf("the allowed chat still waits: %+v", ign)
+			if ign := h.Do("GET", "/api/chats/ignored", nil).Body.String(); strings.TrimSpace(ign) != "[]" {
+				t.Errorf("the allowed chat still waits: %s", ign)
 			}
 		})
 	}
@@ -1175,8 +1305,7 @@ func TestBridgeStartupWarnsWhenAnyoneCanDM(t *testing.T) {
 	var logs lockedBuffer
 	defer log.SetOutput(log.Writer())
 	log.SetOutput(&logs)
-	// A later "allowed_numbers" overrides the helper's own.
-	newTestBridge(t, `, "allowed_numbers": [], "allow_any_dm": true`)
+	newHarness(t, `{"allowed_numbers": [], "allow_any_dm": true}`)
 	if !strings.Contains(logs.String(), "WARNING: anyone") {
 		t.Errorf("startup log has no warning: %q", logs.String())
 	}
@@ -1184,23 +1313,23 @@ func TestBridgeStartupWarnsWhenAnyoneCanDM(t *testing.T) {
 
 func TestEmptyingTheAllowlistWarnsOnlyWithAllowAnyDM(t *testing.T) {
 	tests := []struct {
-		name  string
-		extra string
-		open  bool
+		name   string
+		config string
+		open   bool
 	}{
 		{"flag unset", "", false},
-		{"explicit false", `, "allow_any_dm": false`, false},
-		{"explicit true", `, "allow_any_dm": true`, true},
+		{"explicit false", `{"allow_any_dm": false}`, false},
+		{"explicit true", `{"allow_any_dm": true}`, true},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			tb := newTestBridge(t, tc.extra)
+			h := newHarness(t, tc.config)
 			var logs lockedBuffer
 			defer log.SetOutput(log.Writer())
 			log.SetOutput(&logs)
-			// What the dashboard does when you remove the last number.
-			if _, err := tb.cfgs.Update("", func(c *Config) error { c.AllowedNumbers = []string{}; return nil }); err != nil {
-				t.Fatal(err)
+			// Removing the last number on the Chats page.
+			if w := h.Do("POST", "/api/chats/revoke", map[string]string{"kind": "dm", "number": normalizeJID(harnessDM)}); w.Code != http.StatusOK {
+				t.Fatalf("revoke: %d %s", w.Code, w.Body.String())
 			}
 			if got := strings.Contains(logs.String(), "WARNING: anyone"); got != tc.open {
 				t.Errorf("log warns = %v, want %v (log: %q)", got, tc.open, logs.String())
@@ -1208,7 +1337,7 @@ func TestEmptyingTheAllowlistWarnsOnlyWithAllowAnyDM(t *testing.T) {
 			var st struct {
 				Warnings []string `json:"warnings"`
 			}
-			if err := json.Unmarshal(tb.do("GET", "/api/status", nil).Body.Bytes(), &st); err != nil {
+			if err := json.Unmarshal(h.Do("GET", "/api/status", nil).Body.Bytes(), &st); err != nil {
 				t.Fatal(err)
 			}
 			if got := strings.Contains(strings.Join(st.Warnings, "\n"), "anyone"); got != tc.open {
@@ -1220,10 +1349,10 @@ func TestEmptyingTheAllowlistWarnsOnlyWithAllowAnyDM(t *testing.T) {
 
 func TestAPINeverReturnsSecrets(t *testing.T) {
 	t.Setenv("CLAUDE_CODE_OAUTH_TOKEN", "sk-"+"ant-oat01-very-secret-value")
-	tb := newTestBridge(t, "")
+	h := newHarness(t, "")
 	for _, p := range []string{"/api/status", "/api/config", "/api/brains", "/api/logs", "/api/backup/status"} {
-		body := tb.do("GET", p, nil).Body.String()
-		if strings.Contains(body, "very-secret-value") || strings.Contains(body, tb.token.Value()) {
+		body := h.Do("GET", p, nil).Body.String()
+		if strings.Contains(body, "very-secret-value") || strings.Contains(body, h.token()) {
 			t.Errorf("%s leaks a secret", p)
 		}
 	}
@@ -1234,9 +1363,9 @@ func TestGetConfigLocksNoSettings(t *testing.T) {
 	// named the settings they locked, so the dashboard could disable them.
 	// Now the file is all there is: what it says is what runs.
 	t.Setenv("ALLOWED_GROUPS", "120363000000000001@g.us")
-	tb := newTestBridge(t, "")
+	h := newHarness(t, "")
 	var got map[string]json.RawMessage
-	if err := json.Unmarshal(tb.do("GET", "/api/config", nil).Body.Bytes(), &got); err != nil {
+	if err := json.Unmarshal(h.Do("GET", "/api/config", nil).Body.Bytes(), &got); err != nil {
 		t.Fatal(err)
 	}
 	keys := slices.Sorted(maps.Keys(got))
@@ -1247,34 +1376,34 @@ func TestGetConfigLocksNoSettings(t *testing.T) {
 	if err := json.Unmarshal(got["effective"], &eff); err != nil {
 		t.Fatal(err)
 	}
-	if want := []string{"120363000000000000@g.us"}; !slices.Equal(eff.AllowedGroups, want) {
+	if want := []string{harnessGroup}; !slices.Equal(eff.AllowedGroups, want) {
 		t.Errorf("effective allowed_groups = %v, want config.json's %v", eff.AllowedGroups, want)
 	}
 }
 
 func TestPutConfigKeepsBrainsAndReportsRestart(t *testing.T) {
-	tb := newTestBridge(t, "")
-	tb.addFolderBrain(t, BrainManifest{ID: "p", Name: "P"})
-	var got struct {
-		ETag   string          `json:"etag"`
-		Config json.RawMessage `json:"config"`
-	}
-	_ = json.Unmarshal(tb.do("GET", "/api/config", nil).Body.Bytes(), &got)
+	h := newHarness(t, "")
+	h.AddBrain(BrainManifest{ID: "p", Name: "P"})
+	got := h.Config()
 	var c map[string]any
 	_ = json.Unmarshal(got.Config, &c)
 	c["log_level"] = "debug"
 	c["triggers"] = []any{"@claude", map[string]string{"text": "@c", "match": "start"}}
-	w := tb.do("PUT", "/api/config", map[string]any{"etag": got.ETag, "config": c})
+	w := h.Do("PUT", "/api/config", map[string]any{"etag": got.ETag, "config": c})
 	if w.Code != 200 || !strings.Contains(w.Body.String(), "log_level") {
 		t.Fatalf("put: %d %s", w.Code, w.Body.String())
 	}
-	if len(tb.cfgs.FileCopy().BrainDirs) != 1 {
+	if len(h.Approved()) != 1 {
 		t.Error("saving settings must not drop brains")
 	}
-	if !tb.cfgs.Get().Triggers.Matches("@c hi") || tb.cfgs.Get().Triggers.Matches("@carla") {
+	var eff Config
+	if err := json.Unmarshal(h.Config().Effective, &eff); err != nil {
+		t.Fatal(err)
+	}
+	if !eff.Triggers.Matches("@c hi") || eff.Triggers.Matches("@carla") {
 		t.Error("trigger change not applied live")
 	}
-	if w := tb.do("PUT", "/api/config", map[string]any{"etag": got.ETag, "config": c}); w.Code != 409 {
+	if w := h.Do("PUT", "/api/config", map[string]any{"etag": got.ETag, "config": c}); w.Code != 409 {
 		t.Errorf("stale etag: %d, want 409", w.Code)
 	}
 }
@@ -1284,13 +1413,13 @@ func TestPutConfigKeepsBrainsAndReportsRestart(t *testing.T) {
 // every tab. Set back to the value the bridge started with, it is not
 // pending any more.
 func TestStatusReportsSettingsWaitingForRestart(t *testing.T) {
-	tb := newTestBridge(t, "")
+	h := newHarness(t, "")
 	status := func(t *testing.T) []string {
 		t.Helper()
 		var st struct {
 			RestartRequired []string `json:"restart_required"`
 		}
-		if err := json.Unmarshal(tb.do("GET", "/api/status", nil).Body.Bytes(), &st); err != nil || st.RestartRequired == nil {
+		if err := json.Unmarshal(h.Do("GET", "/api/status", nil).Body.Bytes(), &st); err != nil || st.RestartRequired == nil {
 			t.Fatalf("status restart_required = %v (%v), want a list", st.RestartRequired, err)
 		}
 		return st.RestartRequired
@@ -1312,9 +1441,9 @@ func TestStatusReportsSettingsWaitingForRestart(t *testing.T) {
 				ETag   string         `json:"etag"`
 				Config map[string]any `json:"config"`
 			}
-			_ = json.Unmarshal(tb.do("GET", "/api/config", nil).Body.Bytes(), &cur)
+			_ = json.Unmarshal(h.Do("GET", "/api/config", nil).Body.Bytes(), &cur)
 			cur.Config["log_level"] = s.logLevel
-			w := tb.do("PUT", "/api/config", map[string]any{"etag": cur.ETag, "config": cur.Config})
+			w := h.Do("PUT", "/api/config", map[string]any{"etag": cur.ETag, "config": cur.Config})
 			var put struct {
 				RestartRequired []string `json:"restart_required"`
 			}
@@ -1334,21 +1463,21 @@ func TestStatusReportsSettingsWaitingForRestart(t *testing.T) {
 // The settings page sends brain_mode back as it got it, true. A request
 // that turns it off is refused, not saved: the next start would fail on it.
 func TestPutConfigRefusesClassicMode(t *testing.T) {
-	tb := newTestBridge(t, "")
-	var got struct {
-		ETag   string         `json:"etag"`
-		Config map[string]any `json:"config"`
+	h := newHarness(t, "")
+	got := h.Config()
+	var config map[string]any
+	if err := json.Unmarshal(got.Config, &config); err != nil {
+		t.Fatal(err)
 	}
-	_ = json.Unmarshal(tb.do("GET", "/api/config", nil).Body.Bytes(), &got)
-	if got.Config["brain_mode"] != true {
-		t.Errorf("GET /api/config: brain_mode = %v, want true", got.Config["brain_mode"])
+	if config["brain_mode"] != true {
+		t.Errorf("GET /api/config: brain_mode = %v, want true", config["brain_mode"])
 	}
-	got.Config["brain_mode"] = false
-	w := tb.do("PUT", "/api/config", map[string]any{"etag": got.ETag, "config": got.Config})
+	config["brain_mode"] = false
+	w := h.Do("PUT", "/api/config", map[string]any{"etag": got.ETag, "config": config})
 	if w.Code != http.StatusBadRequest || !strings.Contains(w.Body.String(), "classic mode, which was removed") {
 		t.Errorf("put brain_mode false: %d %s, want 400 saying classic mode was removed", w.Code, w.Body.String())
 	}
-	if tb.cfgs.ETag() != got.ETag {
+	if h.Config().ETag != got.ETag {
 		t.Error("the refused request changed config.json")
 	}
 }
@@ -1357,21 +1486,21 @@ func TestPutConfigRefusesClassicMode(t *testing.T) {
 // refused like a config.json that still has them, and the config the
 // dashboard loads has no brains key to send back.
 func TestPutConfigRefusesInlineBrains(t *testing.T) {
-	tb := newTestBridge(t, "")
-	var got struct {
-		ETag   string         `json:"etag"`
-		Config map[string]any `json:"config"`
+	h := newHarness(t, "")
+	got := h.Config()
+	var config map[string]any
+	if err := json.Unmarshal(got.Config, &config); err != nil {
+		t.Fatal(err)
 	}
-	_ = json.Unmarshal(tb.do("GET", "/api/config", nil).Body.Bytes(), &got)
-	if _, ok := got.Config["brains"]; ok {
-		t.Errorf("GET /api/config has a brains key: %v", got.Config["brains"])
+	if _, ok := config["brains"]; ok {
+		t.Errorf("GET /api/config has a brains key: %v", config["brains"])
 	}
-	got.Config["brains"] = []map[string]any{{"name": "a", "work_dir": "~/a"}}
-	w := tb.do("PUT", "/api/config", map[string]any{"etag": got.ETag, "config": got.Config})
+	config["brains"] = []map[string]any{{"name": "a", "work_dir": "~/a"}}
+	w := h.Do("PUT", "/api/config", map[string]any{"etag": got.ETag, "config": config})
 	if w.Code != http.StatusBadRequest || !strings.Contains(w.Body.String(), "no longer runs") {
 		t.Errorf("put inline brains: %d %s, want 400 saying they no longer run", w.Code, w.Body.String())
 	}
-	if tb.cfgs.ETag() != got.ETag {
+	if h.Config().ETag != got.ETag {
 		t.Error("the refused request changed config.json")
 	}
 }
@@ -1380,11 +1509,11 @@ func TestPutConfigRefusesInlineBrains(t *testing.T) {
 // in both brain.json files, and leaves that brain's other groups alone.
 func TestAllowGroupMovesItBetweenBrains(t *testing.T) {
 	const moved, kept = "120363000000000001@g.us", "120363000000000002@g.us"
-	tb := newTestBridge(t, `, "allowed_groups": ["`+moved+`", "`+kept+`"]`)
-	fromDir := tb.addFolderBrain(t, BrainManifest{ID: "from", Name: "From", Routing: BrainRouting{Groups: []string{kept, moved}}})
-	toDir := tb.addFolderBrain(t, BrainManifest{ID: "to", Name: "To"})
+	h := newHarness(t, `{"allowed_groups": ["`+moved+`", "`+kept+`"]}`)
+	fromDir := h.AddBrain(BrainManifest{ID: "from", Name: "From", Routing: BrainRouting{Groups: []string{kept, moved}}})
+	toDir := h.AddBrain(BrainManifest{ID: "to", Name: "To"})
 
-	if w := tb.do("POST", "/api/chats/allow", map[string]string{"jid": moved, "kind": "group", "brain": "to"}); w.Code != 200 {
+	if w := h.Do("POST", "/api/chats/allow", map[string]string{"jid": moved, "kind": "group", "brain": "to"}); w.Code != 200 {
 		t.Fatalf("allow: %d %s", w.Code, w.Body.String())
 	}
 	if from, _ := ReadManifest(fromDir); !slices.Equal(from.Routing.Groups, []string{kept}) {
@@ -1393,11 +1522,11 @@ func TestAllowGroupMovesItBetweenBrains(t *testing.T) {
 	if to, _ := ReadManifest(toDir); !slices.Equal(to.Routing.Groups, []string{moved}) {
 		t.Errorf("to has groups %q, want %q", to.Routing.Groups, moved)
 	}
-	if br := tb.brainMgr.BrainFor(moved, true); br == nil || br.ID() != "to" {
-		t.Errorf("the group routes to %v, want to", br)
+	if got := h.Answer(inbound{JID: moved, Sender: "15559876543", Text: "@claude hello"}); !strings.Contains(got, "echo:"+toDir+":") {
+		t.Errorf("the group got %q, want to's answer", got)
 	}
-	if br := tb.brainMgr.BrainFor(kept, true); br == nil || br.ID() != "from" {
-		t.Errorf("the other group routes to %v, want from", br)
+	if got := h.Answer(inbound{JID: kept, Sender: "15559876543", Text: "@claude hello"}); !strings.Contains(got, "echo:"+fromDir+":") {
+		t.Errorf("the other group got %q, want from's answer", got)
 	}
 }
 
@@ -1463,62 +1592,75 @@ func TestQRCodeIsServedAsAPNG(t *testing.T) {
 // retired model key shows its value there, and a save from a tab opened
 // before the upgrade, which still sends model, keeps it the same way.
 func TestConfigPageFoldsTheRetiredModel(t *testing.T) {
-	tb := newTestBridge(t, `, "model": "sonnet"`)
-	var got struct {
-		ETag   string         `json:"etag"`
-		Config map[string]any `json:"config"`
+	h := newHarness(t, `{"model": "sonnet"}`)
+	got := h.Config()
+	var config map[string]any
+	if err := json.Unmarshal(got.Config, &config); err != nil {
+		t.Fatal(err)
 	}
-	_ = json.Unmarshal(tb.do("GET", "/api/config", nil).Body.Bytes(), &got)
-	if _, ok := got.Config["model"]; ok {
-		t.Errorf("GET /api/config has a model key: %v", got.Config["model"])
+	if _, ok := config["model"]; ok {
+		t.Errorf("GET /api/config has a model key: %v", config["model"])
 	}
-	if got.Config["brain_model"] != "sonnet" {
-		t.Errorf("GET /api/config: brain_model %v, want sonnet", got.Config["brain_model"])
+	if config["brain_model"] != "sonnet" {
+		t.Errorf("GET /api/config: brain_model %v, want sonnet", config["brain_model"])
 	}
 
 	// An old tab: brain_model as an older bridge served it, and model.
-	got.Config["brain_model"], got.Config["model"] = "", "haiku"
-	if w := tb.do("PUT", "/api/config", map[string]any{"etag": got.ETag, "config": got.Config}); w.Code != http.StatusOK {
+	config["brain_model"], config["model"] = "", "haiku"
+	if w := h.Do("PUT", "/api/config", map[string]any{"etag": got.ETag, "config": config}); w.Code != http.StatusOK {
 		t.Fatalf("put: %d %s", w.Code, w.Body.String())
 	}
-	if m := tb.cfgs.Get().BrainModel; m != "haiku" {
-		t.Errorf("brain_model after the save = %q, want haiku", m)
+	var eff Config
+	if err := json.Unmarshal(h.Config().Effective, &eff); err != nil {
+		t.Fatal(err)
 	}
-	if raw, ok := readRawConfig(t, tb.cfgs.Path())["model"]; ok {
+	if eff.BrainModel != "haiku" {
+		t.Errorf("brain_model after the save = %q, want haiku", eff.BrainModel)
+	}
+	if raw, ok := readRawConfig(t, h.Config().Path)["model"]; ok {
 		t.Errorf("the save wrote model: %s", raw)
 	}
 }
 
 func TestAddBrainBackupDefaults(t *testing.T) {
-	tb := newTestBridge(t, "")
+	h := newHarness(t, "")
 	// No backup settings given: backed up, with the default exclusions.
-	_ = tb.do("POST", "/api/brains", map[string]any{"path": "~/a", "create_dir": true, "manifest": BrainManifest{ID: "a", Name: "A"}})
+	_ = h.Do("POST", "/api/brains", map[string]any{"path": "~/a", "create_dir": true, "manifest": map[string]any{"id": "a", "name": "A"}})
 	// Explicitly off stays off.
 	off := BrainManifest{ID: "b", Name: "B", Backup: BrainBackup{Enabled: false, Exclude: []string{"*.log"}}}
-	_ = tb.do("POST", "/api/brains", map[string]any{"path": "~/b", "create_dir": true, "manifest": off})
-	a, _ := ReadManifest(filepath.Join(tb.home, "a"))
-	b, _ := ReadManifest(filepath.Join(tb.home, "b"))
+	_ = h.Do("POST", "/api/brains", map[string]any{"path": "~/b", "create_dir": true, "manifest": off})
+	// Off without an exclude list stays off too, with the default
+	// exclusions should it be turned on.
+	if w := h.Do("POST", "/api/brains", map[string]any{"path": "~/c", "create_dir": true, "manifest": map[string]any{"id": "c", "name": "C", "backup": map[string]any{"enabled": false}}}); w.Code != 200 {
+		t.Fatalf("add c: %d %s", w.Code, w.Body.String())
+	}
+	a, _ := ReadManifest(filepath.Join(h.Home(), "a"))
+	b, _ := ReadManifest(filepath.Join(h.Home(), "b"))
+	c, _ := ReadManifest(filepath.Join(h.Home(), "c"))
 	if !a.Backup.Enabled || len(a.Backup.Exclude) == 0 {
 		t.Errorf("a.backup = %+v, want on with defaults", a.Backup)
 	}
 	if b.Backup.Enabled || len(b.Backup.Exclude) != 1 {
 		t.Errorf("b.backup = %+v, want off as requested", b.Backup)
 	}
+	if c.Backup.Enabled || !slices.Equal(c.Backup.Exclude, DefaultBackupExcludes) {
+		t.Errorf("c.backup = %+v, want off with the default exclusions", c.Backup)
+	}
 }
 
 func TestOTPGuardHandsCodeToLocalScripts(t *testing.T) {
-	tb := newTestBridge(t, `, "otp_guard": true, "otp_markers": ["Examplebank 2FA"]`)
-	dir := tb.addFolderBrain(t, BrainManifest{ID: "p", Name: "P", Routing: BrainRouting{HandlesDMs: true}})
+	h := newHarness(t, `{"otp_guard": true, "otp_markers": ["Examplebank 2FA"]}`)
+	dir := h.AddBrain(BrainManifest{ID: "p", Name: "P", Routing: BrainRouting{HandlesDMs: true}})
 	// A local script asks for a code through /send...
-	r := httptest.NewRequest("POST", "http://127.0.0.1:8765/send", strings.NewReader(`{"jid":"15551234567@s.whatsapp.net","text":"Examplebank 2FA: reply with the code"}`))
-	r.Host = "127.0.0.1:8765"
-	tb.h.ServeHTTP(httptest.NewRecorder(), r)
+	if w := h.Script("POST", "/send", `{"jid":"15551234567@s.whatsapp.net","text":"Examplebank 2FA: reply with the code"}`); w.Code != http.StatusOK {
+		t.Fatalf("send: %d %s", w.Code, w.Body.String())
+	}
 	// ...and the reply arrives.
-	if w := tb.do("POST", "/api/dev/inbound", map[string]any{"jid": "15551234567@s.whatsapp.net", "text": " 483920 "}); w.Code != 202 {
+	if w := h.Do("POST", "/api/dev/inbound", map[string]any{"jid": "15551234567@s.whatsapp.net", "text": " 483920 "}); w.Code != 202 {
 		t.Fatal(w.Body.String())
 	}
 	asked := time.Now().UnixMilli()
-	otp := filepath.Join(tb.cfgs.Get().DataDir, "otp", "p.json")
+	otp := filepath.Join(h.DataDir(), "otp", "p.json")
 	waitFor(t, 3*time.Second, "otp file", func() bool { _, err := os.Stat(otp); return err == nil })
 	data, _ := os.ReadFile(otp)
 	var got struct {
@@ -1541,7 +1683,7 @@ func TestOTPGuardHandsCodeToLocalScripts(t *testing.T) {
 		t.Error("the code must not be written to the conversation history")
 	}
 	time.Sleep(200 * time.Millisecond)
-	if out := tb.dev.Outbox(); len(out) != 1 || !strings.Contains(out[0].Text, "Examplebank 2FA") {
+	if out := h.Outbox(); len(out) != 1 || !strings.Contains(out[0].Text, "Examplebank 2FA") {
 		t.Errorf("outbox = %+v — only the script's own request may be there; the brain must not run on a caught code", out)
 	}
 }

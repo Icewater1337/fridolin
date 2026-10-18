@@ -36,13 +36,13 @@ func newTestBuilderSite(t *testing.T) (*SiteManager, string) {
 	return m, brainDir
 }
 
-func TestWithArgsBeforePrompt(t *testing.T) {
-	args := []string{"--output-format", "stream-json", "--mcp-config", "a.json", "-p", "hello"}
-	got := strings.Join(withArgsBeforePrompt(args, []string{"--plugin-dir", "x", "--mcp-config", "b.json"}), " ")
-	if got != "--output-format stream-json --mcp-config a.json --plugin-dir x --mcp-config b.json -p hello" {
+func TestWithArgsBeforePrint(t *testing.T) {
+	args := []string{"--output-format", "stream-json", "--mcp-config", "a.json", "-p"}
+	got := strings.Join(withArgsBeforePrint(args, []string{"--plugin-dir", "x", "--mcp-config", "b.json"}), " ")
+	if got != "--output-format stream-json --mcp-config a.json --plugin-dir x --mcp-config b.json -p" {
 		t.Errorf("got %s", got)
 	}
-	if got := withArgsBeforePrompt(args, nil); len(got) != len(args) {
+	if got := withArgsBeforePrint(args, nil); len(got) != len(args) {
 		t.Errorf("nothing to add changed the args: %v", got)
 	}
 }

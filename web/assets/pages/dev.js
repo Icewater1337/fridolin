@@ -23,7 +23,7 @@ export default {
     const senderIn = textInput({ placeholder: 'defaults to the number in the JID', class: 'mono' });
     const brainIn = textInput({ placeholder: 'the brain that owns the chat', class: 'mono' });
     const textIn = h('textarea', { rows: 4, placeholder: 'Message text — in a group, include a trigger such as @claude to get a reply' });
-    const silentSw = toggle({ label: 'Silent — like an untagged group message: the brain reads along but does not reply' });
+    const silentSw = toggle({ label: 'Silent — like an untagged group message: it goes into the brain’s history, gets a run only if the brain runs on untagged messages, and no reply' });
     const sendBtn = btn('Send to the bridge', { kind: 'primary', icon: 'send', type: 'submit' });
     const form = h('form.card.form',
       h('div.form-grid',
@@ -75,7 +75,7 @@ export default {
       try {
         items = await get('/api/dev/outbox', { signal });
       } catch (e) {
-        if (e.status === 404) { paint(outbox, { unavailable: e.message }, () => empty('Not available', e.message)); return; }
+        if (e.status === 404) { paint(outbox, 'unavailable', () => empty('Not available', 'Only in dev mode: start the bridge with --no-whatsapp.')); return; }
         throw e;
       }
       paintOutbox();

@@ -84,6 +84,32 @@ test('the broad-access warning says when Disconnect leaves the old access', asyn
   assert.ok(card.textContent.includes('unless another brain is signed in to the same Google account'), card.textContent);
 });
 
+test('files like old copies of the OAuth client are named, connected or not', async (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  const document = installDom();
+  const net = stubFetch(t);
+  const copies = ['google_calendar_credentials_a.json', 'google_calendar_credentials_old.json'];
+  for (const [i, status] of [connected, { connected: false, client_configured: true }, { connected: false, client_configured: false }].entries()) {
+    const card = calendarCard('work');
+    document.body.append(card);
+    net.answer(i, { ...status, leftover_client_copies: copies });
+    await tick();
+    const text = card.textContent;
+    assert.ok(text.includes('Client secrets in the credentials folder'), text);
+    assert.ok(copies.every((n) => text.includes(n)), text);
+    // The bridge knows a name and a secret, not that a file is such a copy.
+    assert.ok(text.includes('Files named like the copies of the OAuth client'), text);
+    assert.ok(!text.includes('Nothing reads them'), text);
+    // The bridge deletes none itself: one may be yours, in use elsewhere.
+    assert.ok(text.includes('delete them by hand, unless something else of yours uses them'), text);
+  }
+  const card = calendarCard('work');
+  document.body.append(card);
+  net.answer(3, { ...connected, leftover_client_copies: [] });
+  await tick();
+  assert.ok(!card.textContent.includes('Client secrets in the credentials folder'), 'no copies, no warning');
+});
+
 test('a reload error reaches the button instead of an unhandled rejection', async (t) => {
   t.mock.timers.enable({ apis: ['setTimeout'] });
   const document = installDom();

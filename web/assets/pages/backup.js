@@ -1,26 +1,19 @@
 // Backup: Google Drive via rclone — connect, schedule, per-brain settings,
 // run now, progress, and restore into a new folder.
 
-import { get, post, put, qs } from '../app/api.js';
+import { get, post, put } from '../app/api.js';
 import { resource } from '../app/resources.js';
 import { folderBrowser } from '../components/folder-browser.js';
 import { liveForm } from '../components/live-form.js';
 import { h, mount, paint, reconcile, syncOptions } from '../lib/dom.js';
-import { fmtDuration, fmtBytes, plural, absTime } from '../lib/format.js';
-import { brainLabel } from '../lib/brain.js';
+import { fmtDuration, fmtBytes, plural, absTime, stamp } from '../lib/format.js';
+import { brainLabel, backupOwner } from '../lib/brain.js';
 import { icon } from '../components/icons.js';
 import { toast } from '../components/toast.js';
 import { btn, copyButton, runBusy } from '../components/buttons.js';
 import { openDialog, confirmDialog } from '../components/dialog.js';
 import { field, textInput, toggle, select, linesArea, linesOf, nextId } from '../components/fields.js';
 import { pill, callout, timeAgo, mono, empty, pageHeader, spinner, loading } from '../components/common.js';
-
-// What a backup job is working on, as the progress card names it.
-const jobLabel = (id, brains) => {
-  if (id === '_bridge') return 'Bridge settings';
-  const b = (brains || []).find((x) => x.id === id);
-  return b ? (b.name || b.id) : id;
-};
 
 // A version folder is named after its run's time: in UTC with a Z, or in
 // the bridge's local time for folders made before.
@@ -29,11 +22,6 @@ function versionDate(v) {
   if (!m) return null;
   const parts = [+m[1], +m[2] - 1, +m[3], +m[4], +m[5], +m[6]];
   return m[7] ? new Date(Date.UTC(...parts)) : new Date(...parts);
-}
-
-function stamp(d = new Date()) {
-  const p = (n) => String(n).padStart(2, '0');
-  return `${d.getFullYear()}${p(d.getMonth() + 1)}${p(d.getDate())}-${p(d.getHours())}${p(d.getMinutes())}`;
 }
 
 export default {
@@ -120,7 +108,7 @@ export default {
           h('div.hero-body',
             h('h2', 'The configured rclone does not work'),
             callout('bad', null, rc.error),
-            h('p', 'Fix ', mono('backup.rclone_path'), ' in config.json, or remove it to use the rclone on this computer’s PATH.'),
+            h('p', 'Fix ', mono('backup.rclone_path'), ' in config.json, or remove it to use the rclone in the helper folders of this computer’s PATH (see Helper programs in docs/CONFIGURATION.md).'),
             h('div.actions', btn('Check again', { kind: 'primary', icon: 'refresh', onClick: () => refresh() }))));
       }
       const hint = rc.install_hint || 'See https://rclone.org/install/';
@@ -215,7 +203,7 @@ export default {
       const restoring = j.kind === 'restore';
       return h('div.card.job-card',
         h('div.card-head',
-          h('div.card-title', spinner(), h('h2', restoring ? `Restoring ${jobLabel(j.brain, brains)}` : 'Backing up…')),
+          h('div.card-title', spinner(), h('h2', restoring ? `Restoring ${backupOwner(j.brain, brains)}` : 'Backing up…')),
           btn('Cancel', {
             small: true, icon: 'stop',
             onClick: async () => { await post('/api/backup/cancel'); toast('Cancelling…', 'info'); await refresh(); },
@@ -223,9 +211,9 @@ export default {
         restoring ? h('p.muted', 'Copying files from Google Drive into ', mono(j.target), '. Large folders can take a while.') : [
           bar,
           h('div.job-items',
-            done.map((id) => h('span.job-item.done', icon('check'), jobLabel(id, brains))),
-            j.current ? h('span.job-item.current', spinner(), jobLabel(j.current, brains)) : null,
-            queue.map((id) => h('span.job-item.queued', icon('clock'), jobLabel(id, brains)))),
+            done.map((id) => h('span.job-item.done', icon('check'), backupOwner(id, brains))),
+            j.current ? h('span.job-item.current', spinner(), backupOwner(j.current, brains)) : null,
+            queue.map((id) => h('span.job-item.queued', icon('clock'), backupOwner(id, brains)))),
         ],
         h('p.muted.small', timeAgo(j.started, 'Started ')));
     }
@@ -296,7 +284,7 @@ export default {
         onChange: async (v, input) => {
           input.disabled = true;
           try {
-            await put('/api/backup/settings', { brain: b.id, brain_enabled: v });
+            await put(`/api/brains/${encodeURIComponent(b.id)}/backup`, { enabled: v });
             toast(`${b.name || b.id}: backups ${v ? 'on' : 'off'}`, 'ok');
             await refresh();
           } catch (e) {
@@ -352,7 +340,7 @@ export default {
       const ok = await confirmDialog({
         title: `Mirror the deletion in ${name}?`,
         message: h('div',
-          h('p', 'Most of the files backed up from ', mono(b.dir), ' are gone from that folder. Check it first: a brain, a disk that is not mounted or a moved folder can empty it by accident.'),
+          h('p', 'Many of the files backed up from ', mono(b.dir), ', or most of one of its folders, are gone from it. Check it first: a brain, a disk that is not mounted or a moved folder can empty it by accident.'),
           h('p', 'Mirroring removes the missing files from the latest copy in Google Drive. ',
             days > 0 ? `Their previous copies stay in the older versions for ${plural(days, 'day')}.` : 'Their previous copies stay in the older versions.')),
         confirm: 'Mirror the deletion', danger: true,
@@ -373,7 +361,7 @@ export default {
           h('p.muted.small', 'Examples: ', mono('node_modules/'), ' ', mono('*.log'), ' ', mono('/big-exports/'))),
         actions: [
           { label: 'Cancel', value: null },
-          { label: 'Save', kind: 'primary', onClick: async () => { await put('/api/backup/settings', { brain: b.id, brain_exclude: linesOf(ta) }); return true; } },
+          { label: 'Save', kind: 'primary', onClick: async () => { await put(`/api/brains/${encodeURIComponent(b.id)}/backup`, { exclude: linesOf(ta) }); return true; } },
         ],
       });
       if (saved) { toast('Saved', 'ok'); await refresh(); }
@@ -413,7 +401,7 @@ export default {
         mount(versionsBox, h('div.muted', loading('Asking Google Drive for the versions…')));
         try {
           // rclone may take up to a minute to list them.
-          const r = await get(`/api/backup/versions${qs({ brain: id })}`, { signal: ctx.signal, timeout: 90000 });
+          const r = await get(`/api/brains/${encodeURIComponent(id)}/backup/versions`, { signal: ctx.signal, timeout: 90000 });
           if (currentId() !== id) return;
           versions = r.versions || [];
           paintVersions();

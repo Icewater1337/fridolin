@@ -1,0 +1,10 @@
+GET /ready
+200 OK
+Content-Type: application/json
+
+{
+  "ready": true,
+  "started_at": "<TIME>",
+  "version": "<VERSION>",
+  "whatsapp": "disabled"
+}

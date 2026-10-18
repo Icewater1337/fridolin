@@ -16,10 +16,10 @@ export function stubFetch(t) {
   t.after(() => { globalThis.fetch = real; });
   return {
     calls,
-    /** Answers request i with body as JSON (status 200 unless given). */
-    answer(i, body, status = 200) {
+    /** Answers request i with body as JSON (status 200 unless given) and the response headers given. */
+    answer(i, body, status = 200, headers = {}) {
       const text = body === undefined ? '' : JSON.stringify(body);
-      calls[i].resolve({ ok: status >= 200 && status < 300, status, statusText: '', text: async () => text });
+      calls[i].resolve({ ok: status >= 200 && status < 300, status, statusText: '', headers: new Headers(headers), text: async () => text });
     },
   };
 }

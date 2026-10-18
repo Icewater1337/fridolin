@@ -10,18 +10,20 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
-	"regexp"
-	"strconv"
+	"slices"
 	"strings"
 	"sync"
 	"time"
 	"unicode"
+
+	"go.mau.fi/whatsmeow/store"
+	"go.mau.fi/whatsmeow/types"
 )
 
 // isJunkMessage reports whether a message is too trivial to be worth a Claude
 // invocation — a bare emoji, a single character, or a one-word acknowledgement.
 // Only applied to untagged group chatter, never to a message addressed to the
-// bridge.
+// bridge, and such a message still goes into the history (see observeRuns).
 func isJunkMessage(text string) bool {
 	trimmed := strings.TrimSpace(text)
 	if len([]rune(trimmed)) <= 1 {
@@ -47,11 +49,18 @@ type Bridge struct {
 	logs     *LogRing
 	activity *Activity
 	token    *DashboardToken
-	backup   *BackupManager
-	google   *GoogleAuth
-	plaud    *PlaudManager
-	site     *SiteManager
-	started  time.Time
+	// tokenAtStart is dashboard.require_token as the bridge started.
+	tokenAtStart bool
+	sessions     *dashSessions
+	// sessionCookie names the session cookie for the address served on.
+	sessionCookie string
+	scriptAuth    *scriptAuth
+	backup        *BackupManager
+	google        *GoogleAuth
+	plaud         *PlaudManager
+	site          *SiteManager
+	outbox        *Outbox
+	started       time.Time
 
 	// listen is the address the HTTP server binds, "" when it is off;
 	// runs reach the brain API there with a token from runTokens.
@@ -59,11 +68,15 @@ type Bridge struct {
 	runTokens runTokens
 	// exe is the binary brains run (see brainRunEnv).
 	exe string
+	// lids is whatsmeow's map between LIDs and phone numbers, nil in dev
+	// mode, for what knows a person by LID outside an event: a /send to
+	// one.
+	lids func() store.LIDStore
 
 	httpSrv *http.Server
 
-	mu       sync.Mutex
-	warnings []string // from startup checks
+	// addMu makes adding a brain one step at a time (apiAddBrain).
+	addMu sync.Mutex
 }
 
 // BridgeOptions are the run-time switches from the command line.
@@ -150,19 +163,33 @@ func NewBridge(cfgs *ConfigStore, opts BridgeOptions) (_ *Bridge, err error) {
 		if err != nil {
 			return nil, fmt.Errorf("creating whatsapp client: %w", err)
 		}
+		wa.onVote = b.recordVote
+		wa.onChange = b.handleChange
+		wa.groupRules = b.groupRules
 		b.wa = wa
+		b.lids = wa.lidStore
 	}
 
 	b.brainMgr.SetHooks(BrainHooks{
-		Intermediate: func(jid, text string) {
-			if err := b.wa.SendChunked(context.Background(), jid, text); err != nil {
-				log.Printf("failed to send brain intermediate message to %s: %v", jid, err)
+		Notice: func(jid, text string) {
+			// At once or not at all: a notice that arrives after the
+			// answer would only confuse.
+			if err := b.wa.SendMessage(context.Background(), jid, text); err != nil {
+				log.Printf("failed to send the working notice to %s: %v", jid, err)
 			}
 		},
-		Deliver:   b.deliver,
-		OnHistory: b.activity.Add,
-		ExtraArgs: func(id string) []string { return b.site.BuilderArgs(id) },
-		RunEnv:    b.brainRunEnv,
+		Question: func(br *Brain, jid, text string) bool {
+			if err := b.outbox.Question(context.Background(), br.ID(), jid, text, b.cfgs.Get().MaxChunkSize); err != nil {
+				log.Printf("brain %s: question to %s: %v", br.ID(), jid, err)
+				return false
+			}
+			return true
+		},
+		Deliver:     b.deliver,
+		Undelivered: b.undelivered,
+		OnHistory:   b.activity.Add,
+		ExtraArgs:   func(id string) []string { return b.site.BuilderArgs(id) },
+		RunEnv:      b.brainRunEnv,
 	})
 	for _, br := range b.brainMgr.Brains() {
 		b.activity.Seed(br)
@@ -174,6 +201,7 @@ func NewBridge(cfgs *ConfigStore, opts BridgeOptions) (_ *Bridge, err error) {
 			log.Printf("applying configuration: %v", err)
 		}
 		logDMAccess(prev, next)
+		logSecurityChanges(prev, next)
 		for _, br := range b.brainMgr.Brains() {
 			b.activity.Seed(br)
 		}
@@ -184,6 +212,16 @@ func NewBridge(cfgs *ConfigStore, opts BridgeOptions) (_ *Bridge, err error) {
 		return nil, err
 	}
 	b.token = tok
+	b.tokenAtStart = cfg.DashboardRequiresToken()
+	if b.sessions, err = loadDashSessions(cfg.DataDir); err != nil {
+		return nil, err
+	}
+	if b.scriptAuth, err = newScriptAuth(cfg.DataDir, b.runTokens.brainOf, func(id string) bool { return b.brainMgr.Get(id) != nil }); err != nil {
+		return nil, err
+	}
+	if !b.tokenAtStart {
+		log.Printf("warning: dashboard.require_token is off: any program on this computer, brains included, can change every setting through the dashboard API")
+	}
 	b.backup = NewBackupManager(cfgs, b.brainMgr)
 	// A refused scheduled backup goes to the brain's chat, like Plaud's
 	// expired-login notice: the owner may not open the dashboard for weeks.
@@ -202,6 +240,11 @@ func NewBridge(cfgs *ConfigStore, opts BridgeOptions) (_ *Bridge, err error) {
 	b.site.hooks = b.siteBuilderHooks()
 	// What builder brains say in the Build page's chats goes there, not to WhatsApp.
 	b.wa = siteChatMessenger{Messenger: b.wa, chats: b.site.chats}
+	pace := outboxPace
+	if opts.NoWhatsApp {
+		pace = 0
+	}
+	b.outbox = newOutbox(store, func() Messenger { return b.wa }, pace, b.delivered)
 	return b, nil
 }
 
@@ -216,10 +259,7 @@ func (b *Bridge) Start(ctx context.Context) error {
 		if err != nil {
 			return fmt.Errorf("listening on %s (is another bridge running?): %w", b.listen, err)
 		}
-		b.httpSrv = &http.Server{
-			Handler:           b.newHTTPHandler(b.listen),
-			ReadHeaderTimeout: 10 * time.Second,
-		}
+		b.httpSrv = newHTTPServer(b.newHTTPHandler(b.listen))
 		go func() {
 			if err := b.httpSrv.Serve(ln); err != nil && err != http.ErrServerClosed {
 				log.Printf("HTTP server error: %v", err)
@@ -231,21 +271,54 @@ func (b *Bridge) Start(ctx context.Context) error {
 	}
 
 	go b.connectLoop(ctx)
-	go b.runStartupChecks(ctx)
+	// Waited for: it queues alerts in the outbox, which Stop closes.
+	var wg sync.WaitGroup
+	wg.Go(func() { b.watchRequiredFiles(ctx, requiredFilesEvery) })
 	b.backup.Start(ctx)
 	b.plaud.Start(ctx)
 	b.site.Start(ctx)
 
 	log.Println("Bridge started. Waiting for messages…")
 	<-ctx.Done()
+	wg.Wait()
 	return nil
 }
 
+// newHTTPServer is the server for the dashboard, /send, /ingest and
+// /brain/. Any local program can connect, so none may hold a connection
+// for ever: reading a request (headers and body, which is 1 MiB at most)
+// is cut off after 30 seconds and an idle keep-alive connection after two
+// minutes. There is no write timeout, because some handlers rightly take
+// minutes: a folder picker waits for you, rclone lists versions, a sign-in
+// checks back with Google.
+func newHTTPServer(h http.Handler) *http.Server {
+	return &http.Server{
+		Handler:           h,
+		ReadHeaderTimeout: 10 * time.Second,
+		ReadTimeout:       30 * time.Second,
+		IdleTimeout:       2 * time.Minute,
+		MaxHeaderBytes:    64 << 10,
+	}
+}
+
+// Connection retries: the first after connectFirstRetry, doubling up to
+// connectMaxRetry.
+const (
+	connectFirstRetry = 5 * time.Second
+	connectMaxRetry   = 2 * time.Minute
+)
+
 // connectLoop connects to WhatsApp, retrying while the network is down.
+// Once connected, whatsmeow reconnects by itself. An error that another
+// try cannot fix ends it: the dashboard's state says what to do.
 func (b *Bridge) connectLoop(ctx context.Context) {
-	for delay := 5 * time.Second; ; {
+	for delay := connectFirstRetry; ; delay = min(2*delay, connectMaxRetry) {
 		err := b.wa.Connect()
 		if err == nil {
+			return
+		}
+		if errors.Is(err, store.ErrDeviceDeleted) || errors.Is(err, errPairingLive) {
+			log.Printf("WhatsApp connect failed: %v", err)
 			return
 		}
 		log.Printf("WhatsApp connect failed: %v — retrying in %v", err, delay)
@@ -253,9 +326,6 @@ func (b *Bridge) connectLoop(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case <-time.After(delay):
-		}
-		if delay < 2*time.Minute {
-			delay *= 2
 		}
 	}
 }
@@ -272,12 +342,55 @@ func (b *Bridge) Stop() {
 	b.site.Stop()
 	b.deb.DropAll()
 	b.brainMgr.Stop()
+	// After the brains, whose last runs may still reply; what does not go
+	// out stays in bridge.db for the next start.
+	b.outbox.Stop()
 	b.wa.Disconnect()
 	if err := b.store.Close(); err != nil {
 		log.Printf("closing store: %v", err)
 	}
 	b.lock.release()
 	log.Println("Bridge stopped.")
+}
+
+// handleChange applies an edit or a deletion of a WhatsApp message: to
+// the debouncer's batch that holds it, which then reaches the brain as
+// changed, or else to the brain's queue, its run and its history.
+func (b *Bridge) handleChange(c messageChange) {
+	br := b.brainMgr.BrainFor(c.Chat, isGroupJID(c.Chat))
+	// An edit to a one-time code is caught like the code itself
+	// (handleInbound), before anything else sees it: a sender who corrects
+	// a code hands the new one to the script that asked for it, and the
+	// message edited stays as it was.
+	if c.Kind == changeEdit && br != nil && br.DropsOTP(strings.TrimSpace(c.Text)) {
+		log.Printf("brain %s: kept an edited one-time code out of the conversation (OTP guard)", br.ID())
+		b.recordOTP(br, Inbound{JID: c.Chat, Sender: c.Sender, Text: c.Text})
+		return
+	}
+	if b.deb.Change(c) {
+		return
+	}
+	if br == nil {
+		return
+	}
+	waiting, edited := br.Change(c)
+	br.recordChange(c, waiting, edited)
+	// The dashboard's feed shows the history's lines: a deleted message
+	// must not linger there either.
+	text := ""
+	if edited != nil {
+		text = historyTextWithMedia(edited.textWithQuote(), edited.Media)
+	}
+	b.activity.Change(br.ID(), c, text)
+}
+
+// groupRules is what addresses the bridge in the group jid: what the
+// routing of the brain that answers there says.
+func (b *Bridge) groupRules(jid string) groupRules {
+	if br := b.brainMgr.BrainFor(jid, true); br != nil {
+		return br.settings.Load().manifest.Routing.groupRules()
+	}
+	return defaultGroupRules
 }
 
 // recordIgnored notes a chat that wrote without being allowed.
@@ -289,7 +402,8 @@ func (b *Bridge) recordIgnored(kind, jid, name, sender, pushName string) {
 
 // handleInbound is the entry point for every allowed message. Access control
 // already happened: groups against allowed_groups, DMs against
-// allowed_numbers. Group messages without the trigger arrive Silent.
+// allowed_numbers. Group messages without the trigger arrive Silent, and go
+// on to their brain like the rest: it keeps them in its history.
 func (b *Bridge) handleInbound(ctx context.Context, m Inbound) {
 	m.Text = strings.TrimSpace(m.Text)
 	cfg := b.cfgs.Get()
@@ -303,12 +417,6 @@ func (b *Bridge) handleInbound(ctx context.Context, m Inbound) {
 		return
 	}
 	if m.Text == "" && len(m.Media) == 0 && m.Quoted == nil {
-		return
-	}
-
-	// Untagged group chatter that carries no content is not worth a run.
-	if m.Silent && len(m.Media) == 0 && isJunkMessage(m.Text) {
-		log.Printf("Junk message from %s: skipping Claude invocation", m.Sender)
 		return
 	}
 
@@ -403,7 +511,7 @@ func (b *Bridge) handleCommand(ctx context.Context, m Inbound, cfg *Config) bool
 			"• `!reset` — like `!stop`; I still see the recent chat history afterwards"
 		if m.IsGroup() {
 			if t := cfg.Triggers.First(); t != "" {
-				help += "\n\nIn this group, start your message with `" + t + "` to address me, commands included."
+				help += "\n\nIn this group, start your message with `" + t + "` or reply to one of mine to address me, commands included."
 			}
 		}
 		_ = b.wa.SendMessage(ctx, m.JID, help)
@@ -439,13 +547,20 @@ func (b *Bridge) stopChat(m Inbound) (stopped bool, dropped int) {
 	return stopped, dropped
 }
 
-// chatJIDs lists the JIDs m's chat goes by: the chat and, for a DM, the
-// sender's phone number. WhatsApp may address a DM by LID, while a hand-off
-// that answers there (a reply_chat, the owner's DM) names the number.
+// chatJIDs lists the JIDs m's chat goes by: the chat and, for a DM, its
+// other JID and the sender's phone number. The bridge keys a DM by the
+// number, but WhatsApp may address it by LID, history from before may be
+// under the LID, and a hand-off that answers there (a reply_chat, the
+// owner's DM) may name either.
 func chatJIDs(m Inbound) []string {
 	jids := []string{m.JID}
-	if pn := userJID(m.Sender); !m.IsGroup() && m.Sender != "" && pn != m.JID {
-		jids = append(jids, pn)
+	if m.IsGroup() {
+		return jids
+	}
+	for _, jid := range []string{m.ChatAlt, userJID(m.Sender)} {
+		if jid != "@"+types.DefaultUserServer && jid != "" && !slices.Contains(jids, jid) {
+			jids = append(jids, jid)
+		}
 	}
 	return jids
 }
@@ -483,100 +598,56 @@ func (b *Bridge) deliver(br *Brain, m Inbound, res RunResult) {
 			log.Printf("brain %s: run for %s was stopped", br.ID(), m.JID)
 			return
 		}
+		// The error in full goes to the log and the dashboard only: it can
+		// hold the CLI's stderr, and a group's members read the chat.
 		log.Printf("brain %s: error for %s: %v", br.ID(), m.JID, res.Err)
-		if !m.Silent {
-			_ = b.wa.SendMessage(ctx, m.JID, fmt.Sprintf("❌ Error: %v", res.Err))
+		if text := chatErrorText(res.Err, !m.IsGroup()); text != "" && !m.Silent {
+			_ = b.wa.SendMessage(ctx, m.JID, text)
 		}
 		return
 	}
 
-	// An empty response means a question was already forwarded mid-stream.
-	// Silent runs never reply at all.
-	if res.AlreadySent || res.Text == "" || m.Silent {
+	// An empty response follows a question forwarded mid-run, which said
+	// it all. Silent runs never reply at all.
+	if res.Text == "" || m.Silent {
 		return
 	}
 	log.Printf("brain %s: sending response (%d chars) to %s after %s", br.ID(), len(res.Text), m.JID, res.Duration.Round(time.Second))
-	b.sendResponse(ctx, m.JID, res.Text)
-}
-
-// sendResponse parses Claude's response for [POLL]…[/POLL] blocks, sends each
-// as a real WhatsApp poll, and sends the remaining text normally.
-func (b *Bridge) sendResponse(ctx context.Context, jid, text string) {
-	polls, remaining := extractPolls(text)
-
-	for _, p := range polls {
-		log.Printf("Sending poll to %s: %q (%d options)", jid, p.Question, len(p.Options))
-		msgID, err := b.wa.SendPoll(ctx, jid, p.Question, p.Options, p.MaxSelectable)
-		if err != nil {
-			log.Printf("failed to send poll to %s: %v — falling back to text", jid, err)
-			fallback := "📊 *" + p.Question + "*\n"
-			for i, opt := range p.Options {
-				fallback += fmt.Sprintf("%d. %s\n", i+1, opt)
-			}
-			_ = b.wa.SendMessage(ctx, jid, strings.TrimSpace(fallback))
-			continue
-		}
-		// Store the option names so incoming vote hashes can be matched back.
-		if err := b.store.SavePoll(msgID, jid, p.Question, p.Options); err != nil {
-			log.Printf("failed to save poll %s to DB: %v", msgID, err)
-		}
-	}
-
-	if remaining != "" {
-		if err := b.wa.SendChunked(ctx, jid, remaining); err != nil {
-			log.Printf("failed to send response to %s: %v", jid, err)
-		}
+	if err := b.outbox.Reply(ctx, br.ID(), m.JID, res.Text, b.cfgs.Get().MaxChunkSize); err != nil {
+		log.Printf("brain %s: %v", br.ID(), err)
 	}
 }
 
-// ── startup checks ────────────────────────────────────────────────────────
+// delivered takes a reply that went out in full out of the outbox and
+// records it in the history of the brain that wrote it: only now is it
+// something the brain said. The history gets it only once its row is gone,
+// so the retry after a failed removal does not record it twice.
+func (b *Bridge) delivered(ctx context.Context, r outboxRow) error {
+	remove := func() error { return b.store.OutboxDelivered(ctx, r.ID) }
+	if r.Brain == "" || r.History == "" {
+		return remove()
+	}
+	br := b.brainMgr.Get(r.Brain)
+	if br == nil {
+		log.Printf("brain %s: delivered a reply to %s, but the brain is gone", r.Brain, r.Chat)
+		return remove()
+	}
+	return br.recordDelivered(r.Chat, r.History, remove)
+}
 
-// runStartupChecks reports configured files that are missing — typically
-// credentials a brain's tools need. The alert goes to the log and the
-// dashboard, and to WhatsApp once connected when configured.
-func (b *Bridge) runStartupChecks(ctx context.Context) {
-	cfg := b.cfgs.Get()
-	var missing []string
-	for _, f := range cfg.StartupChecks.RequiredFiles {
-		if !fileExists(f) {
-			missing = append(missing, f)
-		}
+// undelivered is what brainID answered that waits in the outbox, as its
+// history will record it (BrainHooks.Undelivered).
+func (b *Bridge) undelivered(brainID string) []historyEntry {
+	rows, err := b.store.UndeliveredReplies(context.Background(), brainID)
+	if err != nil {
+		log.Printf("brain %s: reading its replies in the outbox: %v", brainID, err)
+		return nil
 	}
-	if len(missing) == 0 {
-		return
+	out := make([]historyEntry, 0, len(rows))
+	for _, r := range rows {
+		out = append(out, historyEntry{TS: r.CreatedAt.Local().Format(time.RFC3339), From: brainID, Chat: r.Chat, Text: r.History, Type: historyOut})
 	}
-	msg := fmt.Sprintf("%d required file(s) are missing: %s", len(missing), strings.Join(missing, ", "))
-	if cfg.StartupChecks.Hint != "" {
-		msg += " — " + cfg.StartupChecks.Hint
-	}
-	log.Printf("STARTUP CHECK FAILED: %s", msg)
-	b.mu.Lock()
-	b.warnings = append(b.warnings, msg)
-	b.mu.Unlock()
-
-	if !cfg.StartupChecks.NotifyWhatsApp {
-		return
-	}
-	jid := cfg.StartupChecks.NotifyJID
-	if jid == "" && len(cfg.AllowedNumbers) > 0 {
-		jid = userJID(cfg.AllowedNumbers[0])
-	}
-	if jid == "" {
-		return
-	}
-	deadline := time.Now().Add(2 * time.Minute)
-	for b.wa.State().Mode != "connected" {
-		if time.Now().After(deadline) {
-			return
-		}
-		select {
-		case <-ctx.Done():
-			return
-		case <-time.After(2 * time.Second):
-		}
-	}
-	time.Sleep(3 * time.Second)
-	_ = b.wa.SendMessage(ctx, jid, "⚠️ Bridge startup check: "+msg)
+	return out
 }
 
 // logDMAccess says in the log who may DM the bridge: at startup (prev nil),
@@ -590,94 +661,4 @@ func logDMAccess(prev, next *Config) {
 	case prev == nil && len(next.AllowedNumbers) == 0:
 		log.Printf("allowed_numbers is empty, so nobody can send the bridge direct messages yet. Add your number under Chats → Allowed numbers.")
 	}
-}
-
-// Warnings returns the startup-check findings.
-func (b *Bridge) Warnings() []string {
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	return append([]string(nil), b.warnings...)
-}
-
-// ── poll parsing ──────────────────────────────────────────────────────────
-
-// pollData represents a parsed [POLL]…[/POLL] block.
-type pollData struct {
-	Question      string
-	Options       []string
-	MaxSelectable int // 1 = single choice, 0 = unlimited
-}
-
-// maxPollOptions is WhatsApp's own limit on options per poll.
-const maxPollOptions = 12
-
-// pollHeaderRe matches [POLL] or [POLL max=N], and pollCloseRe the [/POLL]
-// that ends the block, both in any letter case.
-var (
-	pollHeaderRe = regexp.MustCompile(`(?i)\[POLL(?:\s+max=(\d+))?\]`)
-	pollCloseRe  = regexp.MustCompile(`(?i)\[/POLL\]`)
-)
-
-// extractPolls finds all [POLL]…[/POLL] blocks in text, parses them, and
-// returns the remaining text with the blocks removed.
-func extractPolls(text string) ([]pollData, string) {
-	var polls []pollData
-	remaining := text
-
-	for {
-		loc := pollHeaderRe.FindStringIndex(remaining)
-		if loc == nil {
-			break
-		}
-		closing := pollCloseRe.FindStringIndex(remaining[loc[1]:])
-		if closing == nil {
-			break
-		}
-		end := loc[1] + closing[0] // absolute position of "[/POLL]"
-
-		maxSelectable := 1
-		headerMatch := pollHeaderRe.FindStringSubmatch(remaining[loc[0]:loc[1]])
-		if len(headerMatch) > 1 && headerMatch[1] != "" {
-			if n, err := strconv.Atoi(headerMatch[1]); err == nil {
-				maxSelectable = n
-			}
-		}
-
-		block := remaining[loc[1]:end]
-		remaining = remaining[:loc[0]] + remaining[loc[1]+closing[1]:]
-
-		var question string
-		var options []string
-		for _, line := range strings.Split(block, "\n") {
-			line = strings.TrimSpace(line)
-			if line == "" {
-				continue
-			}
-			if strings.HasPrefix(strings.ToLower(line), "question:") {
-				question = strings.TrimSpace(line[len("question:"):])
-			} else if strings.HasPrefix(line, "- ") {
-				if opt := strings.TrimSpace(line[2:]); opt != "" {
-					options = append(options, opt)
-				}
-			}
-		}
-
-		if len(options) > maxPollOptions {
-			log.Printf("poll %q had %d options; truncating to WhatsApp's limit of %d", question, len(options), maxPollOptions)
-			options = options[:maxPollOptions]
-		}
-		if maxSelectable > len(options) {
-			maxSelectable = len(options)
-		}
-
-		if question != "" && len(options) >= 2 {
-			polls = append(polls, pollData{
-				Question:      question,
-				Options:       options,
-				MaxSelectable: maxSelectable,
-			})
-		}
-	}
-
-	return polls, strings.TrimSpace(remaining)
 }

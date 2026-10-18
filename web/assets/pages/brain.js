@@ -10,13 +10,14 @@ import { calendarCard } from '../components/calendar.js';
 import { h, mount, paint } from '../lib/dom.js';
 import { fmtDuration, plural, prettyJSON } from '../lib/format.js';
 import { phoneish, isGroupJid } from '../lib/jid.js';
-import { EFFORTS, issueLabel } from '../lib/brain.js';
+import { OBSERVE, issueLabel } from '../lib/brain.js';
 import { sortKeys, fieldDiff, lineDiff } from '../lib/diff.js';
 import { icon } from '../components/icons.js';
 import { toast } from '../components/toast.js';
 import { btn, runBusy } from '../components/buttons.js';
 import { confirmDialog } from '../components/dialog.js';
-import { field, textInput, select, toggle, linesArea, linesOf } from '../components/fields.js';
+import { field, textInput, select, toggle } from '../components/fields.js';
+import { brainSettingsFields } from '../components/brain-fields.js';
 import { pill, badge, callout, timeAgo, mono, empty, loading } from '../components/common.js';
 import { chatEl, chatName } from '../components/chat.js';
 import { outcomePill, brainStatusPill } from '../components/brain.js';
@@ -27,8 +28,10 @@ export default {
   title: (params) => `Brain ${params.id}`,
   render(root, ctx) {
     const id = ctx.params.id;
-    let brain = null;
-    let brains = null; // the /api/brains list, once it is in
+    // The brain, followed on its own; null when there is none.
+    const one = resource(`/api/brains/${encodeURIComponent(id)}`, { missing: null });
+    let brain; // undefined until it is in
+    let brains = null; // the /api/brains list, once it is in: the other brains' routing
     let cfg = null;
 
     const head = h('div');
@@ -50,7 +53,7 @@ export default {
     ];
     mount(root, head, issuesBox, driftBox, sections, dangerBox);
 
-    const refresh = () => brainsResource.refresh();
+    const refresh = () => Promise.all([one.refresh(), brainsResource.refresh()]);
     const settings = liveForm({
       build: buildForm,
       edits: (d) => d.manifest,
@@ -65,14 +68,21 @@ export default {
       paintAll();
     }, 60000);
 
+    // The page shows its brain's runs as they happen, and only the routing
+    // of the others, for the form, which changes when someone edits them.
+    // A brain that is not there is asked after every 30 s only: the
+    // browser logs each 404 as an error, and someone has to add it first.
+    ctx.follow(one, (b) => {
+      brain = b;
+      paintAll();
+    }, () => (brain === null ? 30000 : 3000));
     ctx.follow(brainsResource, (list) => {
       brains = list || [];
-      brain = brains.find((x) => x.id === id) || null;
       paintAll();
-    }, 3000);
+    }, 60000);
 
     function paintAll() {
-      if (!brains) return;
+      if (brain === undefined) return;
       if (!brain) {
         if (settings.dirty()) settings.discard(); // its form is gone from the page, and so are the edits
         paint(head, { missing: id }, () => h('header.page-header', h('div.page-heading', h('a.back-link', { href: '#/brains' }, icon('left'), 'Brains'), h('h1', id))));
@@ -149,7 +159,17 @@ export default {
             const ok = await confirmDialog({ title: 'Approve these changes?', message: 'They change which chats reach this brain or what it may do. Only approve changes you or someone you trust made.', confirm: 'Approve', danger: false });
             if (!ok) return;
           }
-          await post(`/api/brains/${encodeURIComponent(id)}/approve`);
+          // The bridge approves only the brain.json shown here: if the brain
+          // changed it again meanwhile, it answers 409 and the page shows
+          // the new changes.
+          try {
+            await post(`/api/brains/${encodeURIComponent(id)}/approve`, { manifest: disk });
+          } catch (e) {
+            if (e.status !== 409) throw e;
+            toast(e.message, 'warn');
+            await refresh();
+            return;
+          }
           toast('Changes approved — the brain now runs the new brain.json', 'ok');
           await refresh();
         },
@@ -195,7 +215,7 @@ export default {
             const ok = await confirmDialog({ title: 'Stop and clear the queue?', message: `The current run stops and ${plural(queue.length, 'waiting message')} will not be answered.`, confirm: 'Stop & clear', danger: true });
             if (!ok) return;
           }
-          const r = await post(`/api/runs/${encodeURIComponent(id)}/stop`, { clear_queue: clear });
+          const r = await post(`/api/brains/${encodeURIComponent(id)}/stop`, { clear_queue: clear });
           toast(r && r.stopped ? 'Stopped' : 'Nothing was running', r && r.stopped ? 'ok' : 'info');
           await refresh();
         },
@@ -204,7 +224,7 @@ export default {
         h('div.card',
           h('div.card-head', h('div.card-title', h('h3', 'Current run')), run ? pill('Working', 'info', { pulse: true }) : pill('Idle', 'neutral')),
           run ? h('div.card-body',
-            h('div.run-meta', h('span', 'From ', h('strong', run.sender ? phoneish(run.sender) : 'someone')), isGroupJid(run.chat) ? [h('span', 'in'), chatEl(run.chat)] : h('span.muted', '(direct message)'), run.silent ? badge('silent', 'neutral', 'Untagged group message: the brain reads along but does not reply') : null),
+            h('div.run-meta', h('span', 'From ', h('strong', run.sender ? phoneish(run.sender) : 'someone')), isGroupJid(run.chat) ? [h('span', 'in'), chatEl(run.chat)] : h('span.muted', '(direct message)'), run.silent ? badge('silent', 'neutral', 'Untagged group message: an observe-only run, which sends nothing') : null),
             run.preview ? h('blockquote.preview', run.preview) : null,
             h('div.muted.small', timeAgo(run.started, 'Started '), run.pid ? ` · pid ${run.pid}` : ''),
             h('div.actions', stop(false), stop(true)))
@@ -227,6 +247,7 @@ export default {
     // What the form shows: the approved manifest it edits, and what it needs
     // to explain it (the inherited settings, the other brains' routing).
     function paintForm() {
+      if (!brains) return; // it says which groups the other brains have
       const m = brain.manifest;
       if (!m) {
         if (settings.dirty()) settings.discard(); // nothing left on the page to save
@@ -247,8 +268,8 @@ export default {
     function buildForm({ manifest: m, drift, eff, allowedGroups, others }, changed) {
       const nameIn = textInput({ value: m.name || '', spellcheck: 'true' });
       const routing = routingEditor({ routing: m.routing || {}, selfId: id, brains: others, allowedGroups, onChange: changed, signal: ctx.signal });
-      const modelIn = textInput({ value: m.model || '', class: 'mono', placeholder: eff.brain_model ? `inherit (${eff.brain_model})` : 'inherit' });
-      const effortSel = select(EFFORTS.map(([v, l]) => [v, v === '' && eff.brain_effort ? `Inherit (${eff.brain_effort})` : l]), m.effort || '');
+      const fields = brainSettingsFields(m, eff);
+      const observeSel = select(OBSERVE, m.observe || 'history', { name: 'observe' });
       const override = Array.isArray(m.disallowed_tools);
       const globalTools = eff.disallowed_tools.length ? eff.disallowed_tools.join(', ') : 'none';
       const toolsIn = textInput({ value: override ? m.disallowed_tools.join(', ') : '', class: 'mono', placeholder: 'e.g. WebFetch, Bash', disabled: !override });
@@ -259,8 +280,6 @@ export default {
       });
       const promptIn = textInput({ value: m.prompt_file || '', class: 'mono', placeholder: 'brain-prompt.md' });
       const replyIn = textInput({ value: m.reply_chat || '', class: 'mono', placeholder: 'derived from routing' });
-      const backupSw = toggle({ checked: m.backup ? !!m.backup.enabled : true, label: 'Include in Google Drive backups' });
-      const excludes = linesArea((m.backup && m.backup.exclude) || [], { rows: 5, placeholder: 'node_modules/\n*.log' });
 
       // The manifest a save would write.
       const value = () => {
@@ -268,11 +287,10 @@ export default {
           ...m,
           name: nameIn.value.trim(),
           routing: routing.getValue(),
-          model: modelIn.value.trim(),
-          effort: effortSel.value,
+          ...fields.value(),
+          observe: observeSel.value,
           prompt_file: promptIn.value.trim(),
           reply_chat: replyIn.value.trim(),
-          backup: { enabled: backupSw.input.checked, exclude: linesOf(excludes) },
         };
         if (toolsSw.input.checked) manifest.disallowed_tools = toolsIn.value.split(',').map((t) => t.trim()).filter(Boolean);
         else delete manifest.disallowed_tools;
@@ -286,20 +304,17 @@ export default {
         h('div.form-grid',
           field({ label: 'Name', control: nameIn }),
           field({ label: 'Id', control: h('div.static', mono(m.id)), help: 'Ids cannot change. To use a new id, remove the brain and add the folder again.' })),
-        h('fieldset.fieldset', h('legend', 'Chats'), routing),
+        h('fieldset.fieldset', h('legend', 'Chats'), routing,
+          field({ label: 'Untagged group messages', control: observeSel, help: 'Messages in a group that nobody addressed to the brain. They go into its history either way, for its next run there, and get no reply. A run of its own for each lets the brain take notes as the conversation goes, but costs a full Claude run, with tools, on whatever anyone in the group writes; a message addressed to the brain stops it.' })),
         h('fieldset.fieldset', h('legend', 'Model and tools'),
-          h('div.form-grid',
-            field({ label: 'Model', control: modelIn, help: 'Empty uses the global brain model.' }),
-            field({ label: 'Effort', control: effortSel })),
+          fields.model,
           h('div.field', toolsSw, h('div.help', `Off: use the global list of blocked tools (${globalTools}).`)),
           field({ label: 'Blocked tools', control: toolsIn, help: 'Comma-separated tool names this brain may not use. Leave empty to allow every tool.' })),
         h('fieldset.fieldset', h('legend', 'Files and replies'),
           h('div.form-grid',
             field({ label: 'Prompt file', control: promptIn, help: 'The brain’s instructions, relative to its folder.' }),
-            field({ label: 'Reply chat', control: replyIn, help: 'Where replies go for files handed in through /ingest. This brain handles the files even when that chat belongs to another brain. Default: your first allowed number for the brain that gets DMs, else its first group.' }))),
-        h('fieldset.fieldset', h('legend', 'Backup'),
-          h('div.field', backupSw),
-          field({ label: 'Leave out of backups', control: excludes, help: 'One pattern per line, relative to the brain folder. A trailing / means a folder.' })),
+            field({ label: 'Reply chat', control: replyIn, help: 'Where replies go for files handed in through /ingest. This brain handles the files even when that chat belongs to another brain. Default: your first allowed number for the brain that gets DMs (the DM brain, or the fallback brain when none handles DMs), else its first group.' }))),
+        h('fieldset.fieldset', h('legend', 'Backup'), fields.backup),
         bar);
       form.addEventListener('submit', (e) => {
         e.preventDefault();

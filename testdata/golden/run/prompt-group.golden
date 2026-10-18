@@ -1,0 +1,24 @@
+# Test brain
+
+Answer in one sentence.
+
+<chat_history>
+The 6 messages before the new one in this chat, oldest first (for context, not action), each a JSON object like the new message, or with "did" in place of "text" for something its sender did without writing, such as a vote in a poll. You do NOT have prior turns in your working memory — the only context you have about previous conversation is what's in this block. Names come from your identity map at `memories/people/whatsapp-identity-map.md`; the JID in parens is the raw WhatsApp identifier, and "You (main)" is you. For anything older or more detailed, search `conversation-history.jsonl` with `"$FRIDOLIN_BIN" history QUERY`.
+
+{"at":"<WHEN>","from":"Sam (15559876543)","text":"Who brings the cake on Sunday?"}
+{"at":"<WHEN>","from":"You (15551234567)","text":"This one, from the bakery.\n[attachment: /Users/you/.fridolin/media/cake.jpg]"}
+{"at":"<WHEN>","from":"You (main)","text":"Sunday's cake: the one from the bakery."}
+{"at":"<WHEN>","from":"Sam (15559876543)","text":"Who drives on Sunday?"}
+{"at":"<WHEN>","from":"Sam (15559876543)","did":"edited a message to: \"Who drives us on Sunday?\""}
+{"at":"<WHEN>","from":"You (15551234567)","did":"voted \"Pizza\" in the poll \"Lunch on Friday?\""}
+</chat_history>
+
+It is now <WHEN>. This chat is the WhatsApp group "120363000000000000@g.us".
+
+The new message is a JSON object: "at" is when it was sent, "from" who sent it and "text" what it said.
+
+Nobody can answer AskUserQuestion while you work: a question you ask with it goes to the chat at once, with its options, and the answer comes as a new message. Your final reply is sent as well, so after asking, end your turn without repeating the question.
+
+<new_message>
+{"at":"<WHEN>","from":"Sam (15559876543)","text":"who brings the cake?"}
+</new_message>

@@ -209,10 +209,18 @@ fi
 
 # ── personal denylist ──────────────────────────────────────────────────────
 
+# compat: ~/.config/whatsapp-claude-bridge/personal-denylist is where the
+# denylist was before the project was renamed. It is read after the new
+# place, with a note to move it; drop it from the list once a release has
+# shipped with the note.
+old_denylist="$HOME/.config/whatsapp-claude-bridge/personal-denylist"
 denylist=""
-for cand in "${PERSONAL_DENYLIST:-}" "$HOME/.config/fridolin/personal-denylist" "$HOME/.config/whatsapp-claude-bridge/personal-denylist" "$root/.personal-denylist"; do
+for cand in "${PERSONAL_DENYLIST:-}" "$HOME/.config/fridolin/personal-denylist" "$old_denylist" "$root/.personal-denylist"; do
   if [ -n "$cand" ] && [ -f "$cand" ]; then denylist="$cand"; break; fi
 done
+if [ "$denylist" = "$old_denylist" ]; then
+  printf 'check-personal-data: %s is the denylist'"'"'s old place; move it to ~/.config/fridolin/personal-denylist, where the next release looks.\n' "$denylist" >&2
+fi
 if git ls-files --error-unmatch .personal-denylist >/dev/null 2>&1; then
   printf '\n.personal-denylist is tracked by git — remove it from the index immediately.\n'
   findings=$((findings + 1))

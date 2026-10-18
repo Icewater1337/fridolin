@@ -13,6 +13,11 @@
 # this checkout has.
 MAIN_PKG := $(if $(wildcard cmd/fridolin/*.go),./cmd/fridolin,.)
 BINARY   ?= bin/fridolin
+# The version `fridolin version` and the log's first line report; without
+# git (a checkout from an archive) it is "dev".
+VERSION  ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
+# Lazy (=), so only a target that builds runs git describe.
+VERSION_LDFLAGS = -X main.version=$(VERSION)
 
 GO     ?= go
 PYTHON ?= python3
@@ -47,18 +52,18 @@ FUZZTIME ?= 10s
 
 .DEFAULT_GOAL := build
 .PHONY: help build install test race vet fmt fmt-check tidy-check \
-	lint lint-go lint-sh lint-py lint-actions \
+	lint lint-go lint-sh lint-py lint-actions lint-web \
 	test-py test-web test-sh smoke fuzz-short check clean
 
 help: ## list the targets
 	@awk -F':.*## ' '/^[a-z-]+:.*## / { printf "  %-14s %s\n", $$1, $$2 }' $(MAKEFILE_LIST)
 
-build: ## build bin/fridolin
-	$(GO) build -o $(BINARY) $(MAIN_PKG)
+build: ## build bin/fridolin, stamped with VERSION (default: git describe)
+	$(GO) build -trimpath -ldflags "$(VERSION_LDFLAGS)" -o "$(BINARY)" $(MAIN_PKG)
 
 install: build ## copy the binary to BINDIR (default ~/.local/bin)
 	install -d "$(DESTDIR)$(BINDIR)"
-	install -m 0755 $(BINARY) "$(DESTDIR)$(BINDIR)/fridolin"
+	install -m 0755 "$(BINARY)" "$(DESTDIR)$(BINDIR)/fridolin"
 
 test: ## Go tests
 	$(GO) test -count=1 ./...
@@ -80,7 +85,7 @@ fmt-check: ## fail if a Go file needs gofmt
 tidy-check: ## fail if go.mod or go.sum is not tidy
 	$(GO) mod tidy -diff
 
-lint: lint-go lint-sh lint-py lint-actions ## every linter
+lint: lint-go lint-sh lint-py lint-actions lint-web ## every linter
 
 lint-go: ## staticcheck
 	$(STATICCHECK) ./...
@@ -108,18 +113,35 @@ test-web: ## syntax-check the dashboard JS and run its unit tests
 	@tests="$$($(WEB_FIND) \( -name '*.test.js' -o -name '*.test.mjs' \) -print | sort)"; \
 	if [ -n "$$tests" ]; then $(NODE) --test $$tests; else echo "no web unit tests (web/**/*.test.js)"; fi
 
+# ESLint on the dashboard's JS, with web/eslint.config.js. npx fetches the
+# pinned version into its own cache the first time (that needs the
+# network), so nothing is installed into the checkout and a local run and
+# CI run the same ESLint. Only ESLint itself is pinned: npm resolves
+# its dependencies afresh for each new cache, within the ranges ESLint
+# allows, and runs none of their install scripts. Dependabot does not see
+# this pin either, so move it by hand; 10.12.0 was two weeks old when it
+# was pinned. It needs Node 20.19+, 22.13+ or 24+.
+ESLINT_VERSION := 10.12.0
+NPX    ?= npx
+ESLINT ?= $(NPX) --yes eslint@$(ESLINT_VERSION)
+lint-web: ## ESLint on the dashboard's JS (npx fetches it)
+	cd web && NPM_CONFIG_IGNORE_SCRIPTS=true $(ESLINT) .
+
 test-sh: ## tests for the personal-data and action-pin checks and the Makefile
 	scripts/test-check-personal-data.sh
 	scripts/test-check-action-pins.sh
 	scripts/test-makefile.sh
 
 # A temp dir, not the binary: a check must not replace a build in use.
-# -race makes a data race at start or shutdown fail the run.
+# -race makes a data race at start or shutdown fail the run. The build is
+# stamped as make build stamps it, and smoke.sh checks that fridolin
+# version prints the stamp: the linker skips an -X whose variable does not
+# exist, so a stamp that stopped working would go unnoticed otherwise.
 smoke: ## build with -race in a temp dir, start it in dev mode and stop it
 	@set -e; tmp="$$(mktemp -d)"; trap 'rm -rf "$$tmp"' EXIT; \
-	echo "$(GO) build -race -o $$tmp/fridolin $(MAIN_PKG)"; \
-	$(GO) build -race -o "$$tmp/fridolin" $(MAIN_PKG); \
-	scripts/smoke.sh "$$tmp/fridolin"
+	echo "$(GO) build -race -ldflags \"$(VERSION_LDFLAGS)\" -o $$tmp/fridolin $(MAIN_PKG)"; \
+	$(GO) build -race -ldflags "$(VERSION_LDFLAGS)" -o "$$tmp/fridolin" $(MAIN_PKG); \
+	scripts/smoke.sh "$$tmp/fridolin" "$(VERSION)"
 
 # go test -fuzz takes one target in one package at a time. Listing the
 # targets first makes a package that does not compile fail here too.
@@ -137,4 +159,4 @@ fuzz-short: ## run every fuzz target for FUZZTIME (default 10s)
 check: fmt-check vet tidy-check race lint test-py test-web test-sh smoke ## what CI's build, lint and test jobs run
 
 clean: ## remove the binary
-	rm -f $(BINARY)
+	rm -f "$(BINARY)"

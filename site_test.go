@@ -42,6 +42,7 @@ func gitT(t *testing.T, dir string, args ...string) string {
 	t.Helper()
 	cmd := exec.Command("git", append([]string{"-c", "user.name=Test", "-c", "user.email=test@example.com", "-c", "init.defaultBranch=main"}, args...)...)
 	cmd.Dir = dir
+	cmd.Env = gitEnv(os.Environ())
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		t.Fatalf("git %v: %v\n%s", args, err, out)
@@ -620,5 +621,45 @@ func TestSiteAPI(t *testing.T) {
 	}
 	if code, out := call("GET", "/api/site/users", ""); code != 200 || len(out["users"].([]any)) != 1 {
 		t.Errorf("users: %d %v", code, out)
+	}
+}
+
+// Run from a git hook or `git rebase -x`, the bridge inherits GIT_DIR and
+// GIT_INDEX_FILE. The site's commits and pushes must still go to the
+// site's own repository, never to the one those variables name.
+func TestSiteGitIgnoresInheritedGitVariables(t *testing.T) {
+	ctx := context.Background()
+	decoy := t.TempDir()
+	gitT(t, decoy, "init", "-q", "-b", "main")
+	gitT(t, decoy, "commit", "-q", "--allow-empty", "-m", "decoy")
+	before := gitT(t, decoy, "rev-parse", "HEAD")
+	t.Setenv("GIT_DIR", filepath.Join(decoy, ".git"))
+	t.Setenv("GIT_WORK_TREE", decoy)
+	t.Setenv("GIT_INDEX_FILE", filepath.Join(decoy, ".git", "index"))
+
+	m := newTestSite(t)
+	remote := newBareRepo(t)
+	if err := m.ConnectRepo(ctx, SiteRepo{URL: remote, Branch: "main"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := m.AddStarter(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if after := gitT(t, decoy, "rev-parse", "HEAD"); after != before {
+		t.Errorf("the site committed into the repository GIT_DIR names: HEAD %s, was %s", after, before)
+	}
+	if n := gitT(t, decoy, "rev-list", "--all", "--count"); n != "1" {
+		t.Errorf("the repository GIT_DIR names has %s commits, want 1", n)
+	}
+	if log := gitT(t, remote, "log", "--oneline", "main"); log == "" {
+		t.Error("the starter did not reach the site's own remote")
+	}
+}
+
+func TestGitEnv(t *testing.T) {
+	got := gitEnv([]string{"HOME=/Users/you", "GIT_DIR=/x/.git", "GIT_INDEX_FILE=/x/.git/index", "GITHUB_TOKEN=t", "PATH=/bin"})
+	want := []string{"HOME=/Users/you", "GITHUB_TOKEN=t", "PATH=/bin"}
+	if !slices.Equal(got, want) {
+		t.Errorf("gitEnv = %q, want %q", got, want)
 	}
 }

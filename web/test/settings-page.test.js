@@ -7,14 +7,14 @@ import { createPage } from '../assets/app/page.js';
 import { configResource } from '../assets/app/resources.js';
 import page from '../assets/pages/settings.js';
 
-async function openPage(t, { params, focusAt } = {}) {
+async function openPage(t, { params, focusAt, config = { claude_path: 'claude', brain_model: '', allowed_numbers: ['15551234567'] } } = {}) {
   t.mock.timers.enable({ apis: ['setTimeout', 'Date'] });
   installDom();
   noConsoleErrors(t);
   const scrolled = [];
   globalThis.window = { scrollTo: (to) => scrolled.push(to) };
   t.after(() => { delete globalThis.window; });
-  const bridge = { etag: 'e1', config: { claude_path: 'claude', brain_model: '', allowed_numbers: ['15551234567'] }, puts: [], conflicts: 0 };
+  const bridge = { etag: 'e1', config, puts: [], conflicts: 0 };
   serve(t, (path, init) => {
     if (path === '/api/config' && init.method === 'PUT') {
       const body = JSON.parse(init.body);
@@ -110,6 +110,32 @@ test('a save refused twice without a clash says to save again, not that it clash
 
   await save();
   assert.equal(bridge.config.claude_path, '/usr/local/bin/claude');
+});
+
+// Settings such as queue.max_pending live in objects of config.json: an
+// edit goes into its object, made if it is missing, beside what is there.
+test('an edited nested setting is saved inside its object, beside the others', async (t) => {
+  const { bridge, inputFor, save } = await openPage(t, { config: { claude_path: 'claude', queue: { mode: 'interrupt', notify: false } } });
+  type(inputFor('Waiting messages per brain'), '5');
+  const sandbox = inputFor('Sandbox brains');
+  sandbox.checked = true;
+  sandbox.dispatchEvent(new Event('change', { bubbles: true }));
+  await save();
+  assert.equal(bridge.puts.length, 1);
+  assert.deepEqual(bridge.puts[0].config, {
+    claude_path: 'claude',
+    queue: { mode: 'interrupt', notify: false, max_pending: 5 },
+    sandbox: { enabled: true },
+  });
+});
+
+test('a dangerous setting says why in a warning beside it', async (t) => {
+  const { inputFor } = await openPage(t);
+  const field = inputFor('Let brains use tools without asking').closest('.field');
+  const warn = field.querySelector('.callout.warn.inline-callout');
+  assert.ok(warn, 'the help is a warning');
+  assert.match(warn.textContent, /the sandbox \(below\) is the safety net/);
+  assert.equal(field.querySelector('.help'), null, 'and is not repeated as plain help');
 });
 
 test('a link to a section gives the focus to its heading', async (t) => {

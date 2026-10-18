@@ -28,7 +28,9 @@ your own once, and every brain uses it to sign in.
 A *Desktop app* client is the right type: Google lets it return to the bridge
 on `http://127.0.0.1:<port>/` without any further setup. A *Web application*
 client also works if you add the bridge's address
-(`http://127.0.0.1:8765/` by default) to its authorised redirect URIs.
+(`http://127.0.0.1:8765/` by default) to its authorised redirect URIs. The
+address is the one the bridge is serving on: a changed `http_listen` counts
+for sign-ins only after the restart that moves the dashboard there.
 
 The client file is stored in `~/.fridolin/google/`, which brains
 cannot read.
@@ -73,8 +75,15 @@ calls (below), lists the calendars on the brain's page, refreshes the
 token and revokes it on disconnect. So a brain never sees a refresh token
 or the OAuth client's secret, and cannot call Google itself with them.
 Older versions let each brain read and rewrite its token, and copied the
-OAuth client next to it as `google_calendar_credentials_<brain>.json`;
-nothing reads that copy any more, and you can delete it.
+OAuth client, its secret included, next to it as
+`google_calendar_credentials_<brain>.json`. The bridge no longer reads
+that copy. It names the files of that name that hold a client secret in a
+warning in its log when it starts, and on every brain's page, but deletes
+none itself: going by the name and the secret only, it cannot tell such a
+copy from a file of yours that something else uses. A symlink of that
+name is not followed, so it is not named either. Delete the copies by
+hand. That matters most on Linux or with the sandbox off, where a brain
+can read the folder.
 
 The bridge takes only a regular file as a token: a brain the sandbox does
 not hold (on Linux, or with the sandbox off) could otherwise put a symlink

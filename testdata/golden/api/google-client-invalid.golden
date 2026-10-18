@@ -1,0 +1,8 @@
+PUT /api/google/client
+{"json":"{}"}
+422 Unprocessable Entity
+Content-Type: application/json
+
+{
+  "error": "expected a Google OAuth client file with an \"installed\" (Desktop app) or \"web\" section"
+}

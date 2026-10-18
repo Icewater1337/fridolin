@@ -97,3 +97,18 @@ test('chat names', async (t) => {
   assert.equal(chatName('15551234567@s.whatsapp.net'), '');
   assert.equal(seen.length, before + 2);
 });
+
+test('a fresh load of the groups waits for one on its way, then asks for a fresh list', async (t) => {
+  const net = stubFetch(t);
+  const plain = loadGroups(true);
+  const fresh = loadGroups(true, { fresh: true });
+  const shared = loadGroups(true);
+  assert.deepEqual(net.calls.map((c) => c.url), ['/api/whatsapp/groups'], 'a plain load shares the one on its way');
+  net.answer(0, [{ jid: '120363000000000000@g.us', name: 'Family' }]);
+  await Promise.all([plain, shared]);
+  await new Promise((r) => setImmediate(r));
+  assert.deepEqual(net.calls.map((c) => c.url), ['/api/whatsapp/groups', '/api/whatsapp/groups?fresh=1']);
+  net.answer(1, [{ jid: '120363000000000000@g.us', name: 'Family (renamed)' }]);
+  await fresh;
+  assert.equal(chatName('120363000000000000@g.us'), 'Family (renamed)');
+});

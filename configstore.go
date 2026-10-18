@@ -11,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -64,6 +65,7 @@ func OpenConfigStore(cfgPath string) (*ConfigStore, error) {
 			log.Printf("config %s: %s", cfgPath, note)
 		}
 		warnUnknownKeys(cfgPath, data)
+		warnOddChats(cfgPath, file)
 	} else if !os.IsNotExist(err) {
 		return nil, fmt.Errorf("reading config file %q: %w", cfgPath, err)
 	}
@@ -174,19 +176,27 @@ func (cs *ConfigStore) RestartRequired() []string {
 var restartFields = []struct {
 	name string
 	get  func(*Config) string
+	// waits, when set, decides instead of get whether a change from the
+	// value at the start waits for a restart.
+	waits func(start, now *Config) bool
 }{
-	{"http_listen", func(c *Config) string { return c.HTTPListen }},
-	{"data_dir", func(c *Config) string { return c.DataDir }},
-	{"db_path", func(c *Config) string { return c.DBPath }},
-	{"media_dir", func(c *Config) string { return c.MediaDir }},
-	{"log_level", func(c *Config) string { return c.LogLevel }},
-	{"dashboard.disabled", func(c *Config) string { return fmt.Sprint(c.Dashboard.Disabled) }},
+	{name: "http_listen", get: func(c *Config) string { return c.HTTPListen }},
+	{name: "data_dir", get: func(c *Config) string { return c.DataDir }},
+	{name: "db_path", get: func(c *Config) string { return c.DBPath }},
+	{name: "media_dir", get: func(c *Config) string { return c.MediaDir }},
+	{name: "log_level", get: func(c *Config) string { return c.LogLevel }},
+	{name: "dashboard.disabled", get: func(c *Config) string { return fmt.Sprint(c.Dashboard.Disabled) }},
+	// Turning the token off waits for a restart (see apiGuard); turning it
+	// on applies at once.
+	{name: "dashboard.require_token", waits: func(start, now *Config) bool {
+		return start.DashboardRequiresToken() && !now.DashboardRequiresToken()
+	}},
 }
 
 func restartRequired(old, new *Config) []string {
 	var out []string
 	for _, f := range restartFields {
-		if f.get(old) != f.get(new) {
+		if f.waits != nil && f.waits(old, new) || f.waits == nil && f.get(old) != f.get(new) {
 			out = append(out, f.name)
 		}
 	}
@@ -260,6 +270,151 @@ func warnLegacyDataDir(dataDir string) {
 		return
 	}
 	log.Printf("warning: data dir %s has the name from before the rename and is used because %s does not exist; set the data folder to it (Settings → Advanced) to keep it once the bridge no longer looks for that name", dataDir, filepath.Join(home, dataDirName))
+}
+
+// decodeConfigReplacement decodes data, a whole configuration that is to
+// replace the file layer (PUT /api/config). It is strict. A key the bridge
+// does not know is an error, not a setting dropped on save. So is leaving
+// out a key that config.json always has, one without omitempty, at the top
+// or in a section: the replacement would reset it to its default, and a
+// partial body would turn the sandbox off and empty allowed_numbers
+// without a word. Retired keys are folded in as at startup, so a dashboard
+// tab opened before an upgrade keeps a model it still sends, and cannot
+// bring inline brains back.
+func decodeConfigReplacement(data []byte) (*Config, error) {
+	if len(bytes.TrimSpace(data)) == 0 || string(bytes.TrimSpace(data)) == "null" {
+		return nil, errors.New("config required: send the whole config GET /api/config returns, with your changes")
+	}
+	dec := json.NewDecoder(bytes.NewReader(withoutRetiredKeys(data)))
+	dec.DisallowUnknownFields()
+	var c Config
+	if err := dec.Decode(&c); err != nil {
+		return nil, fmt.Errorf("invalid config: %w", err)
+	}
+	if missing := missingKeys(data, reflect.TypeOf(c), ""); len(missing) > 0 {
+		return nil, fmt.Errorf("the config leaves out %s: send the whole config GET /api/config returns, with your changes", strings.Join(missing, ", "))
+	}
+	if _, err := foldRetiredKeys(data, &c); err != nil {
+		return nil, fmt.Errorf("invalid config: %w", err)
+	}
+	return &c, nil
+}
+
+// withoutRetiredKeys returns the JSON object data without the retiredKeys,
+// which are no Config fields any more, so that the strict decode does not
+// call them unknown. Anything but an object comes back unchanged for the
+// decoder to refuse.
+func withoutRetiredKeys(data []byte) []byte {
+	var obj map[string]json.RawMessage
+	if json.Unmarshal(data, &obj) != nil || obj == nil {
+		return data
+	}
+	for _, rk := range retiredKeys {
+		delete(obj, rk.name)
+	}
+	out, err := json.Marshal(obj)
+	if err != nil {
+		return data
+	}
+	return out
+}
+
+var jsonUnmarshaler = reflect.TypeFor[json.Unmarshaler]()
+
+// missingKeys lists the keys of the struct type t that the JSON object data
+// lacks although they have no omitempty, each with prefix in front. It
+// looks into sections (struct fields) the same way, but not into types that
+// decode themselves.
+func missingKeys(data []byte, t reflect.Type, prefix string) []string {
+	var obj map[string]json.RawMessage
+	if json.Unmarshal(data, &obj) != nil || obj == nil {
+		return nil // not an object: Decode has said what it thinks of it
+	}
+	var out []string
+	for i := 0; i < t.NumField(); i++ {
+		f := t.Field(i)
+		name, opts, _ := strings.Cut(f.Tag.Get("json"), ",")
+		if !f.IsExported() || name == "" || name == "-" {
+			continue
+		}
+		raw, ok := obj[name]
+		if !ok {
+			if !slices.Contains(strings.Split(opts, ","), "omitempty") {
+				out = append(out, prefix+name)
+			}
+			continue
+		}
+		if f.Type.Kind() == reflect.Struct && !reflect.PointerTo(f.Type).Implements(jsonUnmarshaler) {
+			out = append(out, missingKeys(raw, f.Type, prefix+name+".")...)
+		}
+	}
+	return out
+}
+
+// securitySettings are the settings that decide who may use the bridge and
+// what brains may reach. logSecurityChanges logs every change to them.
+var securitySettings = []struct {
+	name string
+	get  func(*Config) any // a string, or a []string for a list
+}{
+	{"allowed_numbers", func(c *Config) any { return c.AllowedNumbers }},
+	{"allow_any_dm", func(c *Config) any { return fmt.Sprint(c.AllowsAnyDM()) }},
+	{"allowed_groups", func(c *Config) any { return c.AllowedGroups }},
+	{"dangerously_skip_permissions", func(c *Config) any { return fmt.Sprint(c.DangerouslySkipPermissions) }},
+	{"inherit_claude_user_config", func(c *Config) any { return fmt.Sprint(c.InheritClaudeUserConfig) }},
+	{"child_env_passthrough", func(c *Config) any { return c.ChildEnvPassthrough }},
+	{"sandbox.enabled", func(c *Config) any { return fmt.Sprint(c.Sandbox.Enabled) }},
+	{"sandbox.deny_paths", func(c *Config) any { return c.Sandbox.DenyPaths }},
+	{"sandbox.allow_paths", func(c *Config) any { return c.Sandbox.AllowPaths }},
+	{"sandbox.git_config", func(c *Config) any { return c.Sandbox.GitConfig }},
+	{"sandbox.credentials_dir", func(c *Config) any { return c.Sandbox.CredentialsDir }},
+	{"dashboard.require_token", func(c *Config) any { return fmt.Sprint(c.DashboardRequiresToken()) }},
+	{"ingest.enabled", func(c *Config) any { return fmt.Sprint(c.Ingest.Enabled) }},
+	{"script_api.tokenless_send", func(c *Config) any { return fmt.Sprint(c.TokenlessSend()) }},
+	{"http_listen", func(c *Config) any { return c.HTTPListen }},
+	{"data_dir", func(c *Config) any { return c.DataDir }},
+	{"db_path", func(c *Config) any { return c.DBPath }},
+}
+
+// logSecurityChanges logs, in one line, how an update changed the security
+// settings, so the log shows afterwards when the sandbox went off or who
+// was let in. A list shows what was added (+) and removed (-).
+func logSecurityChanges(prev, next *Config) {
+	var changes []string
+	for _, s := range securitySettings {
+		switch a, b := s.get(prev), s.get(next); a := a.(type) {
+		case string:
+			if b := b.(string); a != b {
+				changes = append(changes, fmt.Sprintf("%s %q → %q", s.name, a, b))
+			}
+		case []string:
+			if b := b.([]string); !slices.Equal(a, b) {
+				changes = append(changes, s.name+" "+listDiff(a, b))
+			}
+		}
+	}
+	if len(changes) > 0 {
+		log.Printf("config: security settings changed: %s", strings.Join(changes, "; "))
+	}
+}
+
+// listDiff says what b adds to a (+) and drops from it (-).
+func listDiff(a, b []string) string {
+	var diff []string
+	for _, x := range b {
+		if !slices.Contains(a, x) {
+			diff = append(diff, "+"+x)
+		}
+	}
+	for _, x := range a {
+		if !slices.Contains(b, x) {
+			diff = append(diff, "-"+x)
+		}
+	}
+	if len(diff) == 0 {
+		return "reordered"
+	}
+	return strings.Join(diff, " ")
 }
 
 // warnUnknownKeys logs top-level keys config.json has but the bridge does not

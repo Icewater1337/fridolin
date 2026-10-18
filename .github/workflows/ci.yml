@@ -160,14 +160,23 @@ jobs:
           path: '**/testdata/fuzz/**'
 
   scripts:
-    runs-on: ubuntu-latest
+    # The git hooks run the personal-data check on macOS, with BSD awk,
+    # grep and sed; CI's own scan runs it on Linux with GNU's. Its tests
+    # run on both.
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
 
+      # Once is enough: shellcheck reports the same on both.
       - name: shellcheck
+        if: matrix.os == 'ubuntu-latest'
         run: make lint-sh
 
       - name: personal-data check, action-pin check and Makefile tests
@@ -225,6 +234,10 @@ jobs:
       # dashboard blank. node --test then runs web/test (web/**/*.test.js).
       - name: dashboard modules and unit tests
         run: make test-web
+
+      # ESLint at the version the Makefile pins, which npx fetches.
+      - name: ESLint
+        run: make lint-web
 
   site:
     # The site process (site/, docs/SITE.md): its own tests, then the Go

@@ -1,9 +1,7 @@
 package main
 
 import (
-	"bytes"
 	"context"
-	"crypto/sha256"
 	"errors"
 	"fmt"
 	"io"
@@ -17,9 +15,9 @@ import (
 	"time"
 	"unicode"
 
-	"github.com/mdp/qrterminal/v3"
 	"go.mau.fi/whatsmeow"
 	"go.mau.fi/whatsmeow/proto/waE2E"
+	"go.mau.fi/whatsmeow/store"
 	"go.mau.fi/whatsmeow/types"
 	"go.mau.fi/whatsmeow/types/events"
 	waLog "go.mau.fi/whatsmeow/util/log"
@@ -36,14 +34,18 @@ type Messenger interface {
 	SendChunked(ctx context.Context, jid, text string) error
 	SendPoll(ctx context.Context, jid, question string, options []string, maxSelectable int) (string, error)
 	State() WAState
+	// Connected returns a channel that is closed while the messenger can
+	// send: at once when it is connected, else when it next connects.
+	Connected() <-chan struct{}
 	StartPairing() error
 	JoinedGroups(ctx context.Context) ([]GroupInfo, error)
 }
 
 // WAState is the connection state shown on the dashboard.
 type WAState struct {
-	// Mode: disabled, connecting, pairing, qr-expired, connected,
-	// disconnected, logged-out, replaced.
+	// Mode: disabled (dev mode) or one of the mode constants in
+	// waconn.go: connecting, pairing, qr-expired, connected,
+	// disconnected, logged-out, replaced, outdated, banned, failed.
 	Mode      string    `json:"mode"`
 	OwnNumber string    `json:"own_number,omitempty"`
 	Detail    string    `json:"detail,omitempty"`
@@ -68,22 +70,48 @@ type IgnoredHandler func(kind, jid, name, sender, pushName string)
 
 // WhatsAppClient wraps a whatsmeow client.
 type WhatsAppClient struct {
-	client    *whatsmeow.Client
 	cfg       func() *Config
 	store     *Store
 	handler   InboundHandler
 	onIgnored IgnoredHandler
-	log       waLog.Logger
-	media     mediaDownloader        // the client; tests swap in a fake
-	notify    func(jid, text string) // sendNotice; tests record instead
+	onVote    func(pollVote)      // a vote was recorded; may be nil
+	onChange  func(messageChange) // an edit or a deletion; may be nil
+	// groupRules is what addresses the bridge in a group, by its brain's
+	// routing; nil means defaultGroupRules.
+	groupRules func(groupJID string) groupRules
+	log        waLog.Logger
+	media      mediaDownloader        // nil: the client; tests set a fake
+	lister     groupLister            // nil: the client; tests set a fake
+	notify     func(jid, text string) // sendNotice; tests record instead
 
 	// ctx ends when the client disconnects for good. Attachment downloads
 	// run under it, so shutting down does not wait for them.
 	ctx    context.Context
 	cancel context.CancelFunc
 
-	mu    sync.Mutex
-	state WAState
+	// pairMu serialises pairing; pairing is set while a pairing session's
+	// codes are followed (see StartPairing).
+	pairMu  sync.Mutex
+	pairing bool
+
+	groups groupCache // what JoinedGroups answers with
+
+	mu sync.Mutex // guards the fields below, client included
+	// client is replaced when WhatsApp logged the device out (see
+	// newSession), so it is read with cl.
+	client *whatsmeow.Client
+	state  WAState
+	// own and ownLID are the bridge account's JIDs, as whatsmeow reported
+	// them when it connected or paired; empty while unpaired.
+	own, ownLID types.JID
+	// online is closed while the state is "connected", and replaced by an
+	// open one when it leaves it (see Connected).
+	online chan struct{}
+	// retry is the connection attempt the bridge scheduled itself
+	// (connectAfter), and retryWait the wait it chose after the last
+	// failure on WhatsApp's side, 0 once connected (failureRetryAfter).
+	retry     *time.Timer
+	retryWait time.Duration
 }
 
 // NewWhatsAppClient creates a client. It does NOT connect — call Connect.
@@ -105,110 +133,93 @@ func NewWhatsAppClient(cfg func() *Config, store *Store, handler InboundHandler,
 		handler:   handler,
 		onIgnored: onIgnored,
 		log:       logger,
-		media:     client,
 		ctx:       ctx,
 		cancel:    cancel,
 		state:     WAState{Mode: "connecting", Since: time.Now()},
+		// Nothing runs yet, so the device's own JIDs can be read here.
+		own:    deviceStore.GetJID().ToNonAD(),
+		ownLID: deviceStore.GetLID().ToNonAD(),
 	}
+	wa.state.OwnNumber = wa.own.User
 	wa.notify = wa.sendNotice
 
 	client.AddEventHandler(wa.eventHandler)
 	return wa, nil
 }
 
-func (wa *WhatsAppClient) setState(mode, detail string) {
+// cl returns the whatsmeow client.
+func (wa *WhatsAppClient) cl() *whatsmeow.Client {
 	wa.mu.Lock()
 	defer wa.mu.Unlock()
-	if wa.state.Mode != mode {
-		wa.state.Since = time.Now()
-	}
-	wa.state.Mode, wa.state.Detail = mode, detail
-	if mode != "pairing" {
-		wa.state.QRCode = ""
-	}
-	if id := wa.client.Store.ID; id != nil {
-		wa.state.OwnNumber = id.User
-	}
+	return wa.client
 }
 
-// State returns the current connection state.
-func (wa *WhatsAppClient) State() WAState {
-	wa.mu.Lock()
-	defer wa.mu.Unlock()
-	return wa.state
+// downloader is what attachments are downloaded with.
+func (wa *WhatsAppClient) downloader() mediaDownloader {
+	if wa.media != nil {
+		return wa.media
+	}
+	return wa.cl()
 }
 
-// Connect connects with the stored session, or starts QR pairing in the
-// background when there is none. It does not block on pairing: the code is
-// shown on the dashboard (and in the terminal, when there is one).
-func (wa *WhatsAppClient) Connect() error {
-	if wa.client.Store.ID != nil {
-		wa.setState("connecting", "")
-		if err := wa.client.Connect(); err != nil {
-			return fmt.Errorf("connecting: %w", err)
-		}
-		return nil
+// errOffline marks a send that failed because WhatsApp is not connected or
+// not paired: worth trying again later, and not the caller's mistake.
+var errOffline = errors.New("WhatsApp is not connected")
+
+// errBadRecipient marks a send to an address WhatsApp has no chat for.
+var errBadRecipient = errors.New("not a chat WhatsApp can send to")
+
+// classifySendErr marks err, from whatsmeow, with errOffline or
+// errBadRecipient where it is one, so callers can tell them apart without
+// knowing whatsmeow.
+func classifySendErr(err error) error {
+	switch {
+	case errors.Is(err, whatsmeow.ErrNotConnected), errors.Is(err, whatsmeow.ErrNotLoggedIn):
+		return fmt.Errorf("%w: %w", errOffline, err)
+	case errors.Is(err, whatsmeow.ErrUnknownServer):
+		return fmt.Errorf("%w: %w", errBadRecipient, err)
 	}
-	return wa.StartPairing()
+	return err
 }
 
-// StartPairing begins (or restarts) QR pairing for an unpaired bridge.
-func (wa *WhatsAppClient) StartPairing() error {
-	if wa.client.Store.ID != nil {
-		return fmt.Errorf("already paired — this bridge has a stored WhatsApp session")
-	}
-	if wa.client.IsConnected() {
-		wa.client.Disconnect()
-	}
-	qrChan, err := wa.client.GetQRChannel(context.Background())
-	if err != nil {
-		return fmt.Errorf("getting QR channel: %w", err)
-	}
-	if err := wa.client.Connect(); err != nil {
-		return fmt.Errorf("connecting: %w", err)
-	}
-	wa.setState("pairing", "Scan the code: WhatsApp → Settings → Linked Devices → Link a Device")
+// partialSendError is a chunked send that failed after some chunks went
+// out: sent holds those, as the chat shows them.
+type partialSendError struct {
+	sent  []string
+	total int
+	err   error
+}
 
-	tty := isTerminal(os.Stdout)
-	go func() {
-		for evt := range qrChan {
-			switch evt.Event {
-			case "code":
-				wa.mu.Lock()
-				wa.state.QRCode, wa.state.QRAt = evt.Code, time.Now()
-				wa.mu.Unlock()
-				if tty {
-					fmt.Println("Scan this code with WhatsApp (Settings → Linked Devices → Link a Device),")
-					fmt.Println("or open the dashboard:")
-					qrterminal.GenerateHalfBlock(evt.Code, qrterminal.L, os.Stdout)
-				} else {
-					log.Printf("WhatsApp pairing: new QR code available on the dashboard")
-				}
-			case "success":
-				wa.setState("connected", "Paired")
-			case "timeout":
-				wa.setState("qr-expired", "The pairing code expired — start pairing again from the dashboard")
-			default:
-				log.Printf("WhatsApp pairing: %s", evt.Event)
-				if evt.Error != nil {
-					wa.setState("qr-expired", evt.Error.Error())
-				}
+func (e *partialSendError) Error() string {
+	return fmt.Sprintf("sent %d of %d parts, then: %v", len(e.sent), e.total, e.err)
+}
+
+func (e *partialSendError) Unwrap() error { return e.err }
+
+// sendChunks sends chunks one by one with send, pausing between them
+// unless ctx ends. A failure after the first chunk is a *partialSendError
+// naming what went out.
+func sendChunks(ctx context.Context, chunks []string, pause time.Duration, send func(chunk string) error) error {
+	for i, chunk := range chunks {
+		err := ctx.Err()
+		if i > 0 && pause > 0 && err == nil {
+			select {
+			case <-ctx.Done():
+				err = ctx.Err()
+			case <-time.After(pause):
 			}
 		}
-	}()
+		if err == nil {
+			err = send(chunk)
+		}
+		if err != nil {
+			if i > 0 {
+				return &partialSendError{sent: chunks[:i], total: len(chunks), err: err}
+			}
+			return err
+		}
+	}
 	return nil
-}
-
-func isTerminal(f *os.File) bool {
-	st, err := f.Stat()
-	return err == nil && st.Mode()&os.ModeCharDevice != 0
-}
-
-// Disconnect disconnects the client for good: it also ends the attachment
-// downloads still running.
-func (wa *WhatsAppClient) Disconnect() {
-	wa.cancel()
-	wa.client.Disconnect()
 }
 
 // errRefusedRecipient marks a send the bridge refuses because of where it
@@ -247,25 +258,20 @@ func (wa *WhatsAppClient) SendMessage(ctx context.Context, jid string, text stri
 	if err != nil {
 		return err
 	}
-	_, err = wa.client.SendMessage(ctx, recipient, &waE2E.Message{
+	_, err = wa.cl().SendMessage(ctx, recipient, &waE2E.Message{
 		Conversation: proto.String(text),
 	})
-	return err
+	return classifySendErr(err)
 }
 
-// SendChunked splits text into chunks and sends each as a separate message.
+// SendChunked splits text into chunks and sends each as a separate message,
+// with a small delay between them so they arrive in order, for /send,
+// whose caller hears of a failure; brains' replies go through the Outbox.
+// A failure part of the way is a *partialSendError.
 func (wa *WhatsAppClient) SendChunked(ctx context.Context, jid string, text string) error {
-	chunks := ChunkMessage(text, wa.cfg().MaxChunkSize)
-	for _, chunk := range chunks {
-		if err := wa.SendMessage(ctx, jid, chunk); err != nil {
-			return err
-		}
-		// Small delay between chunks so they arrive in order.
-		if len(chunks) > 1 {
-			time.Sleep(300 * time.Millisecond)
-		}
-	}
-	return nil
+	return sendChunks(ctx, ChunkMessage(text, wa.cfg().MaxChunkSize), outboxPace, func(chunk string) error {
+		return wa.SendMessage(ctx, jid, chunk)
+	})
 }
 
 // SendPoll sends a WhatsApp poll and returns the message ID.
@@ -275,96 +281,87 @@ func (wa *WhatsAppClient) SendPoll(ctx context.Context, jid string, question str
 	if err != nil {
 		return "", err
 	}
-	msg := wa.client.BuildPollCreation(question, options, maxSelectable)
-	resp, err := wa.client.SendMessage(ctx, recipient, msg)
+	cli := wa.cl()
+	msg := cli.BuildPollCreation(question, options, maxSelectable)
+	resp, err := cli.SendMessage(ctx, recipient, msg)
 	if err != nil {
 		return "", err
 	}
 	return string(resp.ID), nil
 }
 
-// JoinedGroups lists the groups the bridge account is in.
+// JoinedGroups lists the groups the bridge account is in, as WhatsApp
+// said last: kept until an event changes them or groupsTTL passes.
 func (wa *WhatsAppClient) JoinedGroups(ctx context.Context) ([]GroupInfo, error) {
-	if !wa.client.IsLoggedIn() {
+	cli := wa.groupsFrom()
+	if !cli.IsLoggedIn() {
 		return nil, fmt.Errorf("not connected to WhatsApp")
 	}
-	groups, err := wa.client.GetJoinedGroups(ctx)
-	if err != nil {
-		return nil, err
-	}
-	out := make([]GroupInfo, 0, len(groups))
-	for _, g := range groups {
-		out = append(out, GroupInfo{JID: g.JID.String(), Name: g.Name, Participants: len(g.Participants)})
-	}
-	return out, nil
+	return wa.groups.get(ctx, func(ctx context.Context) ([]GroupInfo, error) {
+		groups, err := cli.GetJoinedGroups(ctx)
+		if err != nil {
+			return nil, err
+		}
+		out := make([]GroupInfo, 0, len(groups))
+		for _, g := range groups {
+			out = append(out, GroupInfo{JID: g.JID.String(), Name: g.Name, Participants: len(g.Participants)})
+		}
+		return out, nil
+	})
 }
 
-// eventHandler handles all whatsmeow events.
+// eventHandler handles all whatsmeow events: messages here, the
+// connection's in connectionEvent. The group list sees each first, as
+// group and connection events are what drop it.
 func (wa *WhatsAppClient) eventHandler(rawEvt interface{}) {
-	switch evt := rawEvt.(type) {
-	case *events.Message:
+	wa.groups.observe(rawEvt)
+	if evt, ok := rawEvt.(*events.Message); ok {
 		if evt.Message.GetPollUpdateMessage() != nil {
 			wa.handlePollVote(evt)
 		} else {
 			wa.handleMessage(evt)
 		}
-	case *events.Connected:
-		wa.log.Infof("Connected to WhatsApp")
-		wa.setState("connected", "")
-	case *events.PairSuccess:
-		wa.log.Infof("Paired with WhatsApp as %s", evt.ID.User)
-		wa.setState("connected", "Paired")
-	case *events.Disconnected:
-		wa.setState("disconnected", "Connection lost — reconnecting automatically")
-	case *events.StreamReplaced:
-		wa.log.Warnf("Another client took over this WhatsApp session")
-		wa.setState("replaced", "Another program is using this WhatsApp session — is a second bridge running?")
-	case *events.LoggedOut:
-		wa.log.Warnf("Logged out from WhatsApp (reason %v)", evt.Reason)
-		wa.setState("logged-out", "WhatsApp logged this device out. Remove it under Linked Devices on your phone, move bridge.db aside and pair again.")
+		return
 	}
+	wa.connectionEvent(rawEvt)
 }
 
-// handlePollVote decrypts a poll vote and stores the voter's selections.
+// handlePollVote decrypts a poll vote and records it (see recordVote).
 func (wa *WhatsAppClient) handlePollVote(evt *events.Message) {
-	ctx := context.Background()
-
-	pollVote, err := wa.client.DecryptPollVote(ctx, evt)
+	pollVote, err := wa.cl().DecryptPollVote(wa.ctx, evt)
 	if err != nil {
 		wa.log.Errorf("Failed to decrypt poll vote from %s: %v", evt.Info.Sender, err)
 		return
 	}
-
 	pollMsgID := evt.Message.GetPollUpdateMessage().GetPollCreationMessageKey().GetID()
 	if pollMsgID == "" {
 		wa.log.Warnf("Poll vote has no creation message key — skipping")
 		return
 	}
+	// One voter, however WhatsApp addressed them: a vote changed later
+	// must replace the first, not count as a second voter's.
+	voter := canonicalUser(wa.ctx, wa.lidStore(), evt.Info.Sender, evt.Info.SenderAlt)
+	wa.recordVote(pollMsgID, voter, pollVote.GetSelectedOptions())
+}
 
-	_, options, err := wa.store.GetPollOptions(pollMsgID)
+// recordVote stores voter's choice in the poll sent as pollMsgID, given
+// as WhatsApp sends it, the hashes of the chosen options, and tells
+// onVote. A vote for a poll the bridge did not keep is dropped.
+func (wa *WhatsAppClient) recordVote(pollMsgID string, voter types.JID, hashes [][]byte) {
+	poll, err := wa.store.SentPoll(wa.ctx, pollMsgID)
 	if err != nil {
 		// Not necessarily an error: the poll may predate vote tracking.
 		log.Printf("Poll vote for unknown poll %s (not in DB) — skipping", pollMsgID)
 		return
 	}
-
-	// WhatsApp sends SHA-256 hashes of the chosen option names, not the names.
-	var selected []string
-	for _, hash := range pollVote.GetSelectedOptions() {
-		for _, opt := range options {
-			h := sha256.Sum256([]byte(opt))
-			if bytes.Equal(hash, h[:]) {
-				selected = append(selected, opt)
-				break
-			}
-		}
+	selected := matchVote(hashes, poll.Options)
+	log.Printf("Poll vote recorded: poll=%s voter=%s options=%v", pollMsgID, voter, selected)
+	if err := wa.store.SavePollVote(pollMsgID, voter.String(), selected); err != nil {
+		wa.log.Errorf("Failed to save poll vote from %s: %v", voter, err)
+		return
 	}
-
-	voterJID := evt.Info.Sender.String()
-	log.Printf("Poll vote recorded: poll=%s voter=%s options=%v", pollMsgID, voterJID, selected)
-
-	if err := wa.store.SavePollVote(pollMsgID, voterJID, selected); err != nil {
-		wa.log.Errorf("Failed to save poll vote from %s: %v", voterJID, err)
+	if wa.onVote != nil {
+		wa.onVote(pollVote{Poll: poll, Voter: voter, Selected: selected})
 	}
 }
 
@@ -420,34 +417,70 @@ func (wa *WhatsAppClient) handleMessage(msg *events.Message) {
 		return
 	}
 
-	senderJID := msg.Info.Sender
-	senderNumber := senderJID.User
-	// Newer WhatsApp clients address senders by LID rather than phone number;
-	// resolve it so the allowlist can be written in plain phone numbers.
-	if senderJID.Server == types.HiddenUserServer {
-		if pnJID, err := wa.client.Store.LIDs.GetPNForLID(context.Background(), senderJID); err == nil {
-			senderNumber = pnJID.User
-		} else {
-			log.Printf("DM: could not resolve LID %s: %v (using LID as fallback)", senderJID, err)
-		}
+	// Newer WhatsApp clients address senders by LID rather than phone
+	// number. One person is one number and one chat either way: the
+	// allowlist is written in numbers, and the chat's history must not
+	// split in two.
+	sender := msg.Info.Sender
+	if sender.IsEmpty() {
+		sender = msg.Info.Chat
+	}
+	sender = canonicalUser(wa.ctx, wa.lidStore(), sender, msg.Info.SenderAlt)
+	if sender.Server == types.HiddenUserServer {
+		log.Printf("DM: could not resolve LID %s (using LID as fallback)", sender)
 	}
 
-	if !wa.isAllowed(senderNumber) {
-		log.Printf("DM from %s: ignored (not in allowed_numbers)", senderNumber)
+	if !wa.isAllowed(sender.User) {
+		log.Printf("DM from %s: ignored (not in allowed_numbers)", sender.User)
 		if wa.onIgnored != nil {
-			wa.onIgnored("dm", msg.Info.Chat.String(), "", senderNumber, msg.Info.PushName)
+			wa.onIgnored("dm", sender.String(), "", sender.User, msg.Info.PushName)
 		}
 		return
 	}
 
-	wa.handleDMMessage(msg, senderNumber)
+	switch kind, target, content := classify(msg); kind {
+	case kindEdit, kindRevoke:
+		alt := ""
+		if a := msg.Info.Chat.ToNonAD(); a != sender {
+			alt = a.String()
+		}
+		wa.change(kind, target, sender.String(), alt, sender.User, extractText(content))
+	case kindViewOnce:
+		go wa.notify(sender.String(), viewOnceNotice)
+	case kindOther:
+		wa.log.Debugf("DM %s from %s: nothing the bridge reads (a reaction, a sticker, …)", msg.Info.ID, sender.User)
+	default:
+		wa.handleDMMessage(msg, sender)
+	}
 }
 
-// handleDMMessage handles an allowed direct message.
-func (wa *WhatsAppClient) handleDMMessage(msg *events.Message, senderNumber string) {
-	chatJID := msg.Info.Chat.String()
+// change hands an edit or a deletion of the message target, by sender,
+// in chat (with its other JID alt, for a DM), to the bridge (onChange).
+// text is an edit's new text, as the message's own path would read it.
+func (wa *WhatsAppClient) change(kind msgKind, target, chat, alt, sender, text string) {
+	c := messageChange{Kind: changeRevoke, Chat: chat, ChatAlt: alt, Target: target, Sender: sender, Text: text}
+	if kind == kindEdit {
+		c.Kind = changeEdit
+	}
+	log.Printf("%s of message %s in %s by %s", c.Kind, target, chat, sender)
+	if wa.onChange != nil && target != "" {
+		wa.onChange(c)
+	}
+}
+
+// handleDMMessage handles an allowed direct message from sender, the
+// person as canonicalUser has them.
+func (wa *WhatsAppClient) handleDMMessage(msg *events.Message, sender types.JID) {
+	chatJID := sender.String()
+	// The chat's other JID: history from before DMs were keyed by number
+	// may be under the LID WhatsApp addressed them by.
+	alt := msg.Info.Chat.ToNonAD()
+	if alt == sender {
+		alt = lidOf(wa.ctx, wa.lidStore(), sender)
+	}
+	senderNumber := sender.User
 	text := extractText(msg.Message)
-	quoted := quoteOf(msg.Message)
+	quoted := wa.quoteOf(msg.Message)
 
 	mediaPath, caption, notice := wa.downloadAttachment(msg, chatJID)
 	if notice != "" {
@@ -465,10 +498,14 @@ func (wa *WhatsAppClient) handleDMMessage(msg *events.Message, senderNumber stri
 		return
 	}
 
-	go wa.handler(context.Background(), Inbound{
+	m := Inbound{
 		JID: chatJID, Sender: senderNumber, Text: text, Media: mediaList(mediaPath),
-		Quoted: quoted, Source: sourceWhatsApp, At: msg.Info.Timestamp,
-	})
+		Quoted: quoted, Source: sourceWhatsApp, At: msg.Info.Timestamp, ID: string(msg.Info.ID),
+	}
+	if !alt.IsEmpty() {
+		m.ChatAlt = alt.String()
+	}
+	go wa.handler(context.Background(), m)
 }
 
 func mediaList(p string) []string {
@@ -480,17 +517,21 @@ func mediaList(p string) []string {
 
 // handleGroupMessage processes messages from allowed groups.
 //
-// A message is "tagged" — and so gets a visible reply — when it carries a file,
-// matches a configured trigger keyword, @-mentions the bridge account, or is
-// forwarded. Untagged text still runs through the brain so it stays aware of
-// the conversation, but produces no reply.
+// A message is "tagged" — and so gets a visible reply — when it addresses
+// the bridge (see addressGroup): a trigger keyword, an @-mention of the
+// bridge account, a quote-reply to one of its messages, and, unless the
+// group's brain turns them off, a file or a forward. Untagged text still
+// reaches the brain, whose history keeps it so that it stays aware of the
+// conversation, but produces no reply.
 func (wa *WhatsAppClient) handleGroupMessage(msg *events.Message) {
 	cfg := wa.cfg()
 	groupJID := msg.Info.Chat.String()
-	senderNumber := msg.Info.Sender.User
+	// In groups that address members by LID, the number is what the
+	// identity map knows them by.
+	senderNumber := canonicalUser(wa.ctx, wa.lidStore(), msg.Info.Sender, msg.Info.SenderAlt).User
 
 	groupName := ""
-	if info, err := wa.client.GetGroupInfo(context.Background(), msg.Info.Chat); err == nil && info != nil {
+	if info, err := wa.cl().GetGroupInfo(context.Background(), msg.Info.Chat); err == nil && info != nil {
 		groupName = info.Name
 	}
 
@@ -504,60 +545,59 @@ func (wa *WhatsAppClient) handleGroupMessage(msg *events.Message) {
 		return
 	}
 
+	own := wa.ownMentionJIDs()
+	kind, target, content := classify(msg)
+	switch kind {
+	case kindEdit, kindRevoke:
+		// An edit is read like the message it replaces: its trigger and
+		// the bridge's mention go.
+		wa.change(kind, target, groupJID, "", senderNumber, stripMentions(cfg.Triggers.Strip(extractText(content)), own))
+		return
+	case kindOther:
+		wa.log.Debugf("Group message %s in %s: nothing the bridge reads (a reaction, a sticker, …)", msg.Info.ID, groupJID)
+		return
+	}
+
 	text := extractText(msg.Message)
-
-	// GIF-playback videos are WhatsApp GIF reactions, not content: they must
-	// not count as a file upload.
-	hasVideo := false
-	if vid := msg.Message.GetVideoMessage(); vid != nil && !vid.GetGifPlayback() {
-		hasVideo = true
-	}
-	hasFile := msg.Message.GetImageMessage() != nil ||
-		msg.Message.GetDocumentMessage() != nil ||
-		msg.Message.GetAudioMessage() != nil ||
-		hasVideo
-
-	// Image and document captions can carry the trigger. Video captions cannot:
-	// they are metadata of the video, and the video itself is already a trigger.
-	attachmentCaption := ""
-	if img := msg.Message.GetImageMessage(); img != nil {
-		attachmentCaption = img.GetCaption()
-	} else if doc := msg.Message.GetDocumentMessage(); doc != nil {
-		attachmentCaption = doc.GetCaption()
-	}
-
-	isForwarded := false
-	if ext := msg.Message.GetExtendedTextMessage(); ext != nil {
-		if ci := ext.GetContextInfo(); ci != nil {
-			isForwarded = ci.GetIsForwarded() || ci.GetForwardingScore() > 0
+	addr := addressGroup(msg.Message, text, cfg.Triggers, own, wa.rulesFor(groupJID))
+	// Untagged: the brain's history, no reply.
+	silent := !addr.tagged
+	if kind == kindViewOnce {
+		if !silent {
+			go wa.notify(groupJID, viewOnceNotice)
 		}
+		return
 	}
 
-	textMatches := cfg.Triggers.Matches(text)
-	captionMatches := cfg.Triggers.Matches(attachmentCaption)
-	isMentioned := wa.isBotMentioned(msg.Message)
-	isTagged := hasFile || textMatches || captionMatches || isMentioned || isForwarded
-
-	// Untagged plain text: run the brain, send nothing.
-	silent := !isTagged && text != ""
-
-	if captionMatches && !textMatches {
-		text = attachmentCaption
+	if addr.byCaption {
+		if img := msg.Message.GetImageMessage(); img != nil {
+			text = img.GetCaption()
+		} else {
+			text = msg.Message.GetDocumentMessage().GetCaption()
+		}
 	}
 	// An @-mention is written into the text as "@" and the bridge's number
 	// (or LID). Like a trigger keyword, it only addresses the bridge, so it
 	// goes too: "@Fridolin !stop" must be the command "!stop".
 	var ownMentions []types.JID
-	if isMentioned {
-		ownMentions = wa.ownMentionJIDs()
+	if addr.mentioned {
+		ownMentions = own
 	}
 	text = stripMentions(cfg.Triggers.Strip(text), ownMentions)
-	quoted := quoteOf(msg.Message)
+	quoted := wa.quoteOf(msg.Message)
 
-	mediaPath, caption, notice := wa.downloadAttachment(msg, groupJID)
-	// Untagged chatter gets no reply. A file always tags a group message,
-	// so this only guards against that rule changing.
-	if notice != "" && !silent {
+	// A file is fetched only for a message that addresses the bridge. In
+	// a group whose brain does not answer files, a photo is chatter, and
+	// its caption is all the brain reads of it.
+	var mediaPath, caption, notice string
+	if silent {
+		if att, ok := attachmentOf(msg.Message, msg.Info.ID); ok {
+			caption = att.caption
+		}
+	} else {
+		mediaPath, caption, notice = wa.downloadAttachment(msg, groupJID)
+	}
+	if notice != "" {
 		go wa.notify(groupJID, notice)
 	}
 	if caption != "" {
@@ -577,7 +617,7 @@ func (wa *WhatsAppClient) handleGroupMessage(msg *events.Message) {
 	log.Printf("Group message from %s (%q) by %s: processing (silent=%v)", groupJID, groupName, senderNumber, silent)
 	go wa.handler(context.Background(), Inbound{
 		JID: groupJID, Sender: senderNumber, Text: text, Media: mediaList(mediaPath),
-		Quoted: quoted, Silent: silent, Source: sourceWhatsApp, At: msg.Info.Timestamp,
+		Quoted: quoted, Silent: silent, Source: sourceWhatsApp, At: msg.Info.Timestamp, ID: string(msg.Info.ID),
 	})
 }
 
@@ -593,7 +633,7 @@ func (wa *WhatsAppClient) downloadAttachment(msg *events.Message, chatJID string
 	maxBytes := cfg.MaxMediaBytes()
 	ctx, cancel := context.WithTimeout(wa.ctx, mediaDownloadTimeout)
 	defer cancel()
-	path, err := saveAttachment(ctx, wa.media, cfg.MediaDir, att, maxBytes)
+	path, err := saveAttachment(ctx, wa.downloader(), cfg.MediaDir, att, maxBytes)
 	switch {
 	case errors.Is(err, errMediaTooLarge):
 		wa.log.Warnf("Skipped attachment from %s: %v", chatJID, err)
@@ -898,11 +938,27 @@ func (wa *WhatsAppClient) isAllowed(number string) bool {
 	return numberAllowed(wa.cfg(), number)
 }
 
+// numberAllowed compares number and the list as phone numbers, digits
+// only, so that "+1 555 123 4567" in a config the bridge did not write
+// still lets 15551234567 in. Anything that is no phone number is compared
+// as it is.
 func numberAllowed(cfg *Config, number string) bool {
 	if len(cfg.AllowedNumbers) == 0 {
 		return cfg.AllowsAnyDM()
 	}
-	return slices.Contains(cfg.AllowedNumbers, number)
+	if n, err := phoneNumber(number); err == nil {
+		number = n
+	}
+	return slices.Contains(allowedNumbersAsNumbers(cfg.AllowedNumbers), number)
+}
+
+// rulesFor returns what addresses the bridge in the group jid, as its
+// brain's routing says.
+func (wa *WhatsAppClient) rulesFor(jid string) groupRules {
+	if wa.groupRules == nil {
+		return defaultGroupRules
+	}
+	return wa.groupRules(jid)
 }
 
 // isAllowedGroup reports whether the group JID is in allowed_groups.
@@ -911,74 +967,22 @@ func (wa *WhatsAppClient) isAllowedGroup(jid string) bool {
 	return slices.Contains(wa.cfg().AllowedGroups, jid)
 }
 
-// isBotMentioned reports whether the bridge's own JID appears in the message's
-// mention list, i.e. someone @-tagged the bridge account by name.
-func (wa *WhatsAppClient) isBotMentioned(msg *waE2E.Message) bool {
-	if msg == nil || wa.client.Store.ID == nil {
-		return false
-	}
-	ownJIDs := wa.ownMentionJIDs()
-	if len(ownJIDs) == 0 {
-		return false
-	}
-
-	// Mentions usually ride on ExtendedTextMessage, but some clients attach
-	// ContextInfo to the media message instead.
-	var mentioned []string
-	collect := func(ci *waE2E.ContextInfo) {
-		if ci != nil {
-			mentioned = append(mentioned, ci.GetMentionedJID()...)
-		}
-	}
-	collect(msg.GetExtendedTextMessage().GetContextInfo())
-	collect(msg.GetImageMessage().GetContextInfo())
-	collect(msg.GetVideoMessage().GetContextInfo())
-	collect(msg.GetDocumentMessage().GetContextInfo())
-	collect(msg.GetAudioMessage().GetContextInfo())
-
-	for _, mentionedJID := range mentioned {
-		parsed, err := types.ParseJID(mentionedJID)
-		if err != nil {
-			continue
-		}
-		parsed = parsed.ToNonAD()
-		for _, own := range ownJIDs {
-			if parsed == own {
-				return true
-			}
-		}
-	}
-	return false
-}
-
 // ownMentionJIDs returns every JID form the bridge account may be mentioned as.
 // WhatsApp emits either the phone-number JID or the linked LID form.
 func (wa *WhatsAppClient) ownMentionJIDs() []types.JID {
-	if wa.client.Store.ID == nil {
+	wa.mu.Lock()
+	own, lid := wa.own, wa.ownLID
+	wa.mu.Unlock()
+	if own.User == "" {
 		return nil
 	}
-
-	ctx := context.Background()
-	seen := make(map[string]struct{}, 2)
-	out := make([]types.JID, 0, 2)
-	add := func(jid types.JID) {
-		jid = jid.ToNonAD()
-		if jid.User == "" || jid.Server == "" {
-			return
-		}
-		key := jid.String()
-		if _, ok := seen[key]; ok {
-			return
-		}
-		seen[key] = struct{}{}
-		out = append(out, jid)
+	if lid.User == "" {
+		lid = lidOf(wa.ctx, wa.lidStore(), own)
 	}
-
-	add(*wa.client.Store.ID)
-	if alt, err := wa.client.Store.GetAltJID(ctx, *wa.client.Store.ID); err == nil {
-		add(alt)
+	out := []types.JID{own}
+	if lid.User != "" && lid != own {
+		out = append(out, lid)
 	}
-
 	return out
 }
 
@@ -1007,6 +1011,30 @@ func stripMentions(text string, jids []types.JID) string {
 		}
 	}
 	return strings.TrimSpace(text)
+}
+
+// lidStore is whatsmeow's map between LIDs and phone numbers, or nil
+// without a client.
+func (wa *WhatsAppClient) lidStore() store.LIDStore {
+	cli := wa.cl()
+	if cli == nil || cli.Store == nil {
+		return nil
+	}
+	return cli.Store.LIDs
+}
+
+// quoteOf is quoteOf with the quoted message's author by number when the
+// reply names them by LID, so the identity map finds them.
+func (wa *WhatsAppClient) quoteOf(msg *waE2E.Message) *Quote {
+	q := quoteOf(msg)
+	if q == nil {
+		return nil
+	}
+	p, err := types.ParseJID(msg.GetExtendedTextMessage().GetContextInfo().GetParticipant())
+	if err == nil && p.Server == types.HiddenUserServer {
+		q.From = canonicalUser(wa.ctx, wa.lidStore(), p, types.EmptyJID).User
+	}
+	return q
 }
 
 // quoteOf returns the message a text reply quotes, or nil.
@@ -1043,7 +1071,10 @@ func extractQuote(contextInfo *waE2E.ContextInfo) *Quote {
 	return &Quote{From: senderJID, Text: quotedText}
 }
 
-// extractText returns the plain text content of a message.
+// extractText returns the plain text content of a message. A shared
+// location or contact card has none, so it is written as a line the model
+// can read (see locationText and contactText): without it, the message
+// would get no answer at all.
 func extractText(msg *waE2E.Message) string {
 	if msg == nil {
 		return ""
@@ -1053,6 +1084,24 @@ func extractText(msg *waE2E.Message) string {
 	}
 	if ext := msg.GetExtendedTextMessage(); ext != nil {
 		return ext.GetText()
+	}
+	if loc := msg.GetLocationMessage(); loc != nil {
+		return locationText(loc.GetDegreesLatitude(), loc.GetDegreesLongitude(), loc.GetName(), loc.GetAddress(), loc.GetURL())
+	}
+	if loc := msg.GetLiveLocationMessage(); loc != nil {
+		return locationText(loc.GetDegreesLatitude(), loc.GetDegreesLongitude(), loc.GetCaption(), "", "")
+	}
+	if c := msg.GetContactMessage(); c != nil {
+		return contactText(c.GetDisplayName(), c.GetVcard())
+	}
+	if cs := msg.GetContactsArrayMessage(); cs != nil {
+		var cards []string
+		for _, c := range cs.GetContacts() {
+			if t := contactText(c.GetDisplayName(), c.GetVcard()); t != "" {
+				cards = append(cards, t)
+			}
+		}
+		return strings.Join(cards, "\n")
 	}
 	return ""
 }
@@ -1076,8 +1125,12 @@ type DevMessage struct {
 	Poll []string  `json:"poll,omitempty"`
 }
 
-func (d *devMessenger) Connect() error { return nil }
-func (d *devMessenger) Disconnect()    {}
+// devConnected is always closed: dev mode can always send.
+var devConnected = func() chan struct{} { c := make(chan struct{}); close(c); return c }()
+
+func (d *devMessenger) Connected() <-chan struct{} { return devConnected }
+func (d *devMessenger) Connect() error             { return nil }
+func (d *devMessenger) Disconnect()                {}
 func (d *devMessenger) State() WAState {
 	return WAState{Mode: "disabled", Detail: "Dev mode (--no-whatsapp): messages are simulated"}
 }

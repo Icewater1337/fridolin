@@ -84,9 +84,14 @@ Question: When should we meet?
 ```
 
 Add `max=N` for multi-select: `[POLL max=3]`. Two options minimum, twelve
-maximum. Poll and text can go in the same reply — the poll is sent first.
+maximum; an option given twice counts once. Poll and text can go in the same
+reply — the poll is sent first. A block without a question or two options is
+no poll: it is sent as text, just as you wrote it.
 
-Votes are recorded automatically. Read them with:
+Votes are recorded automatically. Each one also shows in the chat history you
+get, as a line from the voter whose `did` says, for instance, `voted "Monday
+2pm" in the poll "When should we meet?"`, so the next message in that chat
+tells you who voted since. For the full tally:
 
 ```bash
 "$FRIDOLIN_BIN" polls               # your newest polls and their votes
@@ -115,9 +120,12 @@ invitation unless you add `--send-updates none`, so confirm first.
 
 ## Group chats
 
-In a group you see every message, but only reply when addressed — by trigger
-keyword, by @-mention, or when someone sends a file. The rest is context: read
-it, remember what matters, stay quiet.
+In a group you run only for messages addressed to you — by trigger keyword,
+by @-mention, by a reply to one of your messages, or when someone sends a
+file. The rest of the conversation is in your chat history: context, not
+requests. If this brain also runs on the messages nobody addressed to you,
+those runs come marked `<observe_only>`: nothing you write is sent, so do
+not act on them; note what matters and stop.
 
 Several people are talking. Names come from the identity map; a raw number
 means someone you have not met yet.

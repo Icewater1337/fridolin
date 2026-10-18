@@ -1,0 +1,7 @@
+PUT /api/config
+400 Bad Request
+Content-Type: application/json
+
+{
+  "error": "invalid config: json: cannot unmarshal string into Go value of type main.Config"
+}

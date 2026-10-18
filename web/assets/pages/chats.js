@@ -33,7 +33,8 @@ export default {
     const numbersList = h('ul.plain-list');
     const allowedGroupsBox = h('div');
     const allowedGroupsList = h('ul.plain-list');
-    const refreshGroups = btn('Refresh', { small: true, kind: 'ghost', icon: 'refresh', onClick: () => loadGroups(true) });
+    // Refresh has the bridge ask WhatsApp; the other reloads take its list.
+    const refreshGroups = btn('Refresh', { small: true, kind: 'ghost', icon: 'refresh', onClick: () => loadGroups(true, { fresh: true }) });
 
     // The add boxes are built once, so what is typed in them stays while
     // the lists refresh.

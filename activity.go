@@ -23,8 +23,9 @@ type ActivityEntry struct {
 	Brain string    `json:"brain"`
 	Chat  string    `json:"chat"`
 	From  string    `json:"from"`
-	Type  string    `json:"type"` // in or out
+	Type  string    `json:"type"` // in, out or event
 	Text  string    `json:"text"`
+	id    string    // the WhatsApp message's, for an edit or a deletion of it
 }
 
 // NewActivity keeps up to max entries.
@@ -42,10 +43,31 @@ func (a *Activity) addLocked(brainID string, e historyEntry) {
 	if err != nil {
 		ts = time.Now()
 	}
-	a.entries = append(a.entries, ActivityEntry{TS: ts, Brain: brainID, Chat: e.Chat, From: e.From, Type: e.Type, Text: truncate(e.Text, 600)})
+	a.entries = append(a.entries, ActivityEntry{TS: ts, Brain: brainID, Chat: e.Chat, From: e.From, Type: e.Type, Text: truncate(e.Text, 600), id: e.ID})
 	if over := len(a.entries) - a.max; over > 0 {
 		a.entries = append([]ActivityEntry(nil), a.entries[over:]...)
 	}
+}
+
+// Change does to the feed what recordChange did to brainID's history: the
+// message c deletes leaves it, and the one an edit changed while it waited
+// gets text, its new history text; "" leaves it as it was.
+func (a *Activity) Change(brainID string, c messageChange, text string) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	kept := a.entries[:0]
+	for _, e := range a.entries {
+		is := e.Brain == brainID && e.id != "" && e.id == c.Target && e.Type == historyIn && e.From == c.Sender &&
+			(e.Chat == c.Chat || (c.ChatAlt != "" && e.Chat == c.ChatAlt))
+		switch {
+		case is && c.Kind == changeRevoke:
+			continue
+		case is && text != "":
+			e.Text = truncate(text, 600)
+		}
+		kept = append(kept, e)
+	}
+	a.entries = kept
 }
 
 // Seed loads the last messages of a brain's history once per brain.

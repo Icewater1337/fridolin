@@ -1,0 +1,8 @@
+POST /api/chats/allow
+{"jid":"nope"}
+400 Bad Request
+Content-Type: application/json
+
+{
+  "error": "kind must be group or dm"
+}

@@ -1,0 +1,17 @@
+GET /api/brains/main/calendar?list=0
+200 OK
+Content-Type: application/json
+
+{
+  "account": "you@example.com",
+  "calendars": [],
+  "client_configured": true,
+  "connected": true,
+  "default": "you@example.com",
+  "leftover_client_copies": [],
+  "selected": [
+    "you@example.com",
+    "team@example.com"
+  ],
+  "token_path": "<HOME>/.fridolin/google_calendar_token_main.json"
+}

@@ -1,0 +1,11 @@
+POST /ingest
+{"brain": "main"}
+400 Bad Request
+Content-Type: application/json
+
+{
+  "error": "paths or text required"
+}
+
+sent:
+history:

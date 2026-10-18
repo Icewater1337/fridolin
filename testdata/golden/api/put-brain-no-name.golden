@@ -1,0 +1,8 @@
+PUT /api/brains/main
+{"manifest":{"id":"main"}}
+422 Unprocessable Entity
+Content-Type: application/json
+
+{
+  "error": "brain \"main\" needs a name"
+}

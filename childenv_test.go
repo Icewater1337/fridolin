@@ -161,6 +161,9 @@ func TestBrainGetsOnlyTheAllowlistedEnvironment(t *testing.T) {
 		"BRIDGE_BRAIN_ID": "not-a",
 		"BRIDGE_DATA_DIR": "/elsewhere",
 		"BRIDGE_DB_PATH":  "/elsewhere/bridge.db",
+		// Older versions set this for every run, naming the folder of the
+		// calendar tokens; now no run gets it.
+		"BRIDGE_CREDENTIALS_DIR": "/elsewhere/creds",
 	}
 	env := maps.Clone(listed)
 	maps.Copy(env, unlisted)
@@ -168,12 +171,11 @@ func TestBrainGetsOnlyTheAllowlistedEnvironment(t *testing.T) {
 
 	want := maps.Clone(listed)
 	maps.Copy(want, map[string]string{
-		"HOME":                   home,
-		"FRIDOLIN_BRAIN_ID":      "a",
-		"BRIDGE_BRAIN_ID":        "a",
-		"BRIDGE_CREDENTIALS_DIR": filepath.Join(home, "data"),
-		"BRIDGE_DATA_DIR":        filepath.Join(home, "data"),
-		"BRIDGE_DB_PATH":         filepath.Join(home, "data", "bridge.db"),
+		"HOME":              home,
+		"FRIDOLIN_BRAIN_ID": "a",
+		"BRIDGE_BRAIN_ID":   "a",
+		"BRIDGE_DATA_DIR":   filepath.Join(home, "data"),
+		"BRIDGE_DB_PATH":    filepath.Join(home, "data", "bridge.db"),
 		// Plaud's CLI stays quiet in every brain's run (plaudOptOut).
 		"PLAUD_TELEMETRY_DISABLED": "1",
 		"PLAUD_NO_UPDATE_NOTIFIER": "1",

@@ -1,0 +1,8 @@
+POST /api/dev/inbound
+{"brain":"nope","jid":"15551234567@s.whatsapp.net","text":"x"}
+400 Bad Request
+Content-Type: application/json
+
+{
+  "error": "unknown brain \"nope\""
+}

@@ -47,6 +47,7 @@
   "queue": {"mode": "queue", "max_pending": 10, "notify": true},
   "debounce": {"quiet_ms": 2000, "max_wait_ms": 10000},
   "ingest": {"enabled": false},
+  "script_api": {"tokenless_send": false},
 
   "backup": {"enabled": false, "daily_at": "03:30", "keep_versions_days": 30},
 

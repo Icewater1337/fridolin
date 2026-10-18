@@ -1,0 +1,11 @@
+POST /ingest
+{"brain": "main", "text": "x"}
+404 Not Found
+Content-Type: application/json
+
+{
+  "error": "ingest is disabled (set ingest.enabled in the dashboard)"
+}
+
+sent:
+history:

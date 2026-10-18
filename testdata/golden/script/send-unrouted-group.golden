@@ -1,0 +1,13 @@
+POST /send
+{"jid": "120363000000000001@g.us", "text": "to the club"}
+200 OK
+Content-Type: application/json
+
+{
+  "status": "sent"
+}
+
+sent:
+  120363000000000001@g.us "to the club"
+history:
+  main: {"ts":"<TIME>","from":"script","chat":"120363000000000001@g.us","text":"to the club","type":"out","via":"script"}

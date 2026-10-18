@@ -1,0 +1,15 @@
+POST /ingest
+{"brain": "Main ", "text": "Just text."}
+202 Accepted
+Content-Type: application/json
+
+{
+  "jid": "15551234567@s.whatsapp.net",
+  "status": "accepted"
+}
+
+sent:
+  15551234567@s.whatsapp.net "echo:<HOME>/main:upload says: Just text."
+history:
+  main: {"ts":"<TIME>","from":"upload","chat":"15551234567@s.whatsapp.net","text":"Just text.","type":"in"}
+  main: {"ts":"<TIME>","from":"main","chat":"15551234567@s.whatsapp.net","text":"echo:<HOME>/main:upload says: Just text.","type":"out"}

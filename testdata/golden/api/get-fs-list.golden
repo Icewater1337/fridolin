@@ -1,0 +1,17 @@
+GET /api/fs/list
+200 OK
+Content-Type: application/json
+
+{
+  "entries": [
+    {
+      "is_brain": true,
+      "is_git": false,
+      "name": "main",
+      "path": "<HOME>/main"
+    }
+  ],
+  "home": "<HOME>",
+  "parent": "",
+  "path": "<HOME>"
+}

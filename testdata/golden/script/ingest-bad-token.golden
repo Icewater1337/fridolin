@@ -1,0 +1,11 @@
+POST /ingest
+{"brain": "main", "text": "x"}
+401 Unauthorized
+Content-Type: application/json
+
+{
+  "error": "unknown token: send the one in <data_dir>/scripts.token, or in a brain's run the one in the file FRIDOLIN_BRAIN_TOKEN_FILE names, as Authorization: Bearer …"
+}
+
+sent:
+history:

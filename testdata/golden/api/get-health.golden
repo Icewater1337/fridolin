@@ -1,0 +1,5 @@
+GET /health
+200 OK
+Content-Type: text/plain; charset=utf-8
+
+ok

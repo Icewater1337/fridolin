@@ -1,22 +1,24 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { installDom } from './fake-dom.js';
+import { runThemeScript } from './theme-script.js';
 import { createShell, pageFailed } from '../assets/app/shell.js';
 import { setStatus, setIgnoredCount } from '../assets/app/store.js';
 
-function shellInPage() {
+function shellInPage(t, theme) {
   installDom();
+  const storage = runThemeScript(t, theme);
   let restarts = 0;
   let reloads = 0;
   const shell = createShell({ onRestart: () => { restarts++; }, onReload: () => { reloads++; } });
   const app = document.createElement('div');
   app.append(...shell.nodes);
   document.body.append(app);
-  return { shell, app, restarts: () => restarts, reloads: () => reloads };
+  return { shell, app, storage, restarts: () => restarts, reloads: () => reloads };
 }
 
-test('the restart banner shows what the bridge says is waiting for a restart', () => {
-  const { app, restarts } = shellInPage();
+test('the restart banner shows what the bridge says is waiting for a restart', (t) => {
+  const { app, restarts } = shellInPage(t);
   const banner = () => app.querySelector('.banner.warn');
   setStatus({ restart_required: ['log_level', 'http_listen'] });
   assert.equal(banner().hidden, false);
@@ -27,8 +29,8 @@ test('the restart banner shows what the bridge says is waiting for a restart', (
   assert.equal(banner().hidden, true, 'gone once nothing waits, e.g. after the restart');
 });
 
-test('the sidebar follows the status', () => {
-  const { app } = shellInPage();
+test('the sidebar follows the status', (t) => {
+  const { app } = shellInPage(t);
   const link = (label) => app.querySelectorAll('.nav-link').find((a) => a.textContent.startsWith(label));
   setStatus({ dev_mode: true, version: '1.2.3', whatsapp: { mode: 'disabled' }, issues: [{ kind: 'drift' }] });
   assert.equal(link('Dev').hidden, false);
@@ -44,17 +46,17 @@ test('the sidebar follows the status', () => {
   assert.equal(link('Chats').querySelector('.nav-badge').title, '2 chats waiting for access');
 });
 
-test('setActive highlights one entry', () => {
-  const { shell, app } = shellInPage();
+test('setActive highlights one entry', (t) => {
+  const { shell, app } = shellInPage(t);
   shell.setActive('brains');
   assert.deepEqual(app.querySelectorAll('[aria-current]').map((a) => a.getAttribute('href')), ['#/brains']);
   shell.setActive('');
   assert.equal(app.querySelectorAll('[aria-current]').length, 0);
 });
 
-test('a new bridge version asks for a reload', () => {
+test('a new bridge version asks for a reload', (t) => {
   setStatus(null);
-  const { app, reloads } = shellInPage();
+  const { app, reloads } = shellInPage(t);
   const banner = () => app.querySelector('.banner.info');
   setStatus({ version: '1.2.3' });
   assert.equal(banner().hidden, true, 'the version the page started with');
@@ -78,8 +80,8 @@ test('a page that failed to load offers a reload', () => {
   assert.equal(reloads, 1);
 });
 
-test('focusPage puts the focus on the heading given, the page heading, or the page area until there is one', () => {
-  const { shell } = shellInPage();
+test('focusPage puts the focus on the heading given, the page heading, or the page area until there is one', (t) => {
+  const { shell } = shellInPage(t);
   assert.equal(shell.focusPage(), shell.page);
   assert.equal(document.activeElement, shell.page);
   assert.equal(shell.page.getAttribute('tabindex'), '-1', 'the page area takes the focus without joining the Tab order');
@@ -94,8 +96,8 @@ test('focusPage puts the focus on the heading given, the page heading, or the pa
   assert.equal(part.getAttribute('tabindex'), '-1');
 });
 
-test('the skip link comes first and moves the focus to the page', () => {
-  const { shell, app } = shellInPage();
+test('the skip link comes first and moves the focus to the page', (t) => {
+  const { shell, app } = shellInPage(t);
   const skip = app.firstChild;
   assert.equal(skip.tagName, 'A');
   assert.equal(skip.textContent, 'Skip to content');
@@ -107,8 +109,8 @@ test('the skip link comes first and moves the focus to the page', () => {
   assert.equal(document.activeElement, heading);
 });
 
-test('Escape closes the phone menu and gives the focus back to its button', () => {
-  const { app } = shellInPage();
+test('Escape closes the phone menu and gives the focus back to its button', (t) => {
+  const { app } = shellInPage(t);
   const sidebar = app.querySelector('.sidebar');
   const menu = app.querySelector('.menu-btn');
   const link = app.querySelector('.nav-link');
@@ -125,4 +127,29 @@ test('Escape closes the phone menu and gives the focus back to its button', () =
   link.focus();
   escape();
   assert.equal(document.activeElement, link, 'a closed menu leaves the focus alone');
+});
+
+// theme.js applies the saved theme before the page paints and keeps the
+// one key and the one way to apply it; the buttons only ask it.
+test('the theme buttons show and change the theme theme.js applied', async (t) => {
+  const label = { auto: 'Theme: follows your system (click to change)', light: 'Theme: light (click to change)', dark: 'Theme: dark (click to change)' };
+  const cases = [
+    { name: 'saved dark', saved: 'dark', order: ['dark', 'auto', 'light', 'dark'] },
+    { name: 'nothing saved', saved: null, order: ['auto', 'light', 'dark', 'auto'] },
+    // Changed for this page only, and the buttons still say which.
+    { name: 'storage blocked', blocked: true, order: ['auto', 'light', 'dark', 'auto'] },
+  ];
+  for (const c of cases) {
+    await t.test(c.name, (t) => {
+      const { app, storage } = shellInPage(t, { saved: c.saved, blocked: c.blocked });
+      const buttons = app.querySelectorAll('.theme-toggle');
+      assert.equal(buttons.length, 2, 'one in the brand row, one in the sidebar foot');
+      c.order.forEach((want, i) => {
+        if (i) buttons[i % 2].click();
+        assert.equal(document.documentElement.getAttribute('data-theme'), want === 'auto' ? null : want);
+        assert.deepEqual(buttons.map((b) => b.title), [label[want], label[want]], `step ${i}: both buttons follow`);
+        if (!c.blocked && i) assert.equal(storage.get('bridgeTheme'), want, 'saved for the next visit');
+      });
+    });
+  }
 });

@@ -48,10 +48,13 @@ backed up incrementally every night, with old versions kept.
 **Files.** Photos, PDFs, documents, voice notes, and video are downloaded and
 handed over as file paths. The assistant opens them and does whatever you asked.
 A file over 100 MB (`max_media_mb`) is skipped, and so is one that cannot be
-downloaded within two minutes; the sender is told either way.
+downloaded within two minutes; the sender is told either way. View-once photos,
+videos and voice notes are not opened (the sender is asked to send a normal
+one); a shared location or contact card reaches the assistant as text.
 
 **Real polls.** The assistant can send native WhatsApp polls and read the votes
-back:
+back; each vote lands in its chat history, so it sees new votes the next time
+someone writes:
 
 ```
 [POLL]
@@ -61,13 +64,21 @@ Question: When should we meet?
 [/POLL]
 ```
 
-**Group awareness.** In a group it reads everything but replies only when
-addressed — by keyword, by @-mention, or when you send it a file.
+**Group awareness.** In a group it keeps up with everything, through its chat
+history, but runs and replies only when addressed — by keyword, by
+@-mention, by a reply to one of its messages, or when you send it a file
+(each brain can turn files and forwards off).
 
 **Orderly.** Messages that arrive while the assistant is busy wait their turn
 (or, if you prefer, a newer request replaces the one you sent before it). A
 photo album or a file plus "what is this?" sent in quick succession becomes
-one request. `!stop` stops whatever it is doing for that chat.
+one request. `!stop` stops whatever it is doing for that chat. A reply written
+while the connection is down goes out once it is back, even after a restart,
+and the next message is answered knowing it. A message you delete for everyone
+is not answered, even while it is being answered, and leaves the chat history
+(an answer already written, waiting for the connection, still goes out); an
+edit of one still waiting changes what is answered, and an edit of one already
+answered is noted for the next message, without a second run.
 
 **Calendar.** Each brain can sign in to a Google account from the dashboard
 and use the calendars you pick: list events, find free time, create events.
@@ -146,6 +157,11 @@ Reopen the dashboard any time with:
 fridolin open
 ```
 
+It asks the running bridge for a link that signs your browser in and works
+once, within a minute; the browser then stays signed in for 30 days.
+*Settings → Dashboard sign-in* signs it out, or signs out every browser and
+replaces the dashboard token (`fridolin rotate-token` does the same).
+
 ### Upgrading and rolling back
 
 ```bash
@@ -159,6 +175,38 @@ with its tools, as `fridolin.prev`. To go back to it:
 ```bash
 fridolin service rollback     # run it again to undo
 ```
+
+**Coming from a version without API tokens** (one whose `/ingest` took
+none): `POST /ingest` now refuses a call without a token with `401`, so an
+upload handler or recorder sync written for the old version stops working
+until it sends yours:
+
+```bash
+curl -X POST http://127.0.0.1:8765/ingest \
+  -H "Authorization: Bearer $(cat ~/.fridolin/scripts.token)" …
+```
+
+`/send` without a token keeps reaching your allowed chats while
+[`script_api.tokenless_send`](docs/CONFIGURATION.md#script_apitokenless_send)
+is on, which it is in a config written before tokens. Before you turn it
+off, give your scripts that header too, and change brain instructions that
+`curl …/send` without one to send their run's token to
+`"$FRIDOLIN_API/send"`, as [Isolation](docs/BRAINS.md#isolation) shows.
+
+**Coming from a version without dashboard sign-in** (one whose
+`fridolin open` put the token in the link): the token stays the same, and
+copies of it may still sit in your browser's history and storage, where a
+brain could read them (see [Dashboard](docs/CONFIGURATION.md#dashboard)).
+Once the new build runs, replace it once:
+
+```bash
+fridolin rotate-token     # or Settings → Dashboard sign-in → Sign out everywhere
+```
+
+Scripts that send the old token in `X-Bridge-Token` are refused from then
+on; give them the new one from `~/.fridolin/dashboard.token`. The upgrade
+does not rotate it for you, so that those scripts do not stop without
+warning.
 
 `fridolin version`, the dashboard's Overview and the `Starting fridolin …`
 line each start writes to the log say which version runs (on macOS:
@@ -301,15 +349,23 @@ Whisper model or the Groq API (sending 16 kHz mono FLAC, retried with backoff
 by Groq's SDK).
 
 ```bash
-python3 tools/transcribe.py voice-note.ogg --output-dir ~/assistant/personal/transcripts
+~/.local/share/fridolin/venv/bin/python tools/transcribe.py voice-note.ogg --output-dir ~/assistant/personal/transcripts
 ```
 
-Neither engine is installed by default — pick one:
+Neither engine is installed by default. Pick one and install it into a venv
+of its own, the one the transcription skill runs the tool with; Homebrew's
+and Debian's Python refuse a plain `pip install` (PEP 668). Keep it out of
+`~/.fridolin`, which brains cannot read:
 
 ```bash
-pip install -r tools/requirements-transcription.txt   # local: private, ~1.5 GB model
-pip install groq && export GROQ_API_KEY=...           # API: light, needs a key
+python3 -m venv ~/.local/share/fridolin/venv
+~/.local/share/fridolin/venv/bin/pip install -r tools/requirements-transcription.txt   # local: private, ~1.5 GB model
+~/.local/share/fridolin/venv/bin/pip install groq && export GROQ_API_KEY=...           # API: light, needs a key
 ```
+
+With [uv](https://docs.astral.sh/uv/), `uv run --script tools/transcribe.py
+voice-note.ogg …` does without the venv: it installs both engines, as the
+script's own metadata lists them, into uv's cache.
 
 Brains get `GROQ_API_KEY` from the bridge's process environment, and only
 when [`child_env_passthrough`](docs/CONFIGURATION.md#child_env_passthrough)
@@ -326,9 +382,18 @@ by a wide margin.
 
 ```bash
 curl -X POST http://127.0.0.1:8765/send \
+  -H "Authorization: Bearer $(cat ~/.fridolin/scripts.token)" \
   -H 'Content-Type: application/json' \
   -d '{"jid":"120363000000000000@g.us","text":"Deploy finished ✅"}'
 ```
+
+The token in `~/.fridolin/scripts.token` is your scripts'. A brain
+sends its run's, from the file `$FRIDOLIN_BRAIN_TOKEN_FILE` names, and may
+send only to its own chats.
+Without a token, `/send` reaches only your allowed chats, and only while
+[`script_api.tokenless_send`](docs/CONFIGURATION.md#script_apitokenless_send)
+is on. `jid` may also be a phone number with the country code, for the
+direct chat with it.
 
 `curl -fsS http://127.0.0.1:8765/ready` succeeds only while WhatsApp is
 connected, so a script can check first; its JSON names the connection state
@@ -340,6 +405,7 @@ sync), write them under `~/.fridolin/media/` and turn on
 
 ```bash
 curl -X POST http://127.0.0.1:8765/ingest \
+  -H "Authorization: Bearer $(cat ~/.fridolin/scripts.token)" \
   -H 'Content-Type: application/json' \
   -d '{"brain":"personal","paths":["/Users/you/.fridolin/media/upload/scan.pdf"],"text":"File this"}'
 ```
@@ -348,7 +414,7 @@ The brain you name handles it like a WhatsApp attachment and replies in its
 reply chat (`reply_chat`, or the default described in
 [docs/BRAINS.md](docs/BRAINS.md)), even when that chat belongs to another
 brain. Both endpoints only listen on localhost and refuse requests a web page
-sends.
+sends. [docs/API.md](docs/API.md) is their full contract.
 
 ### Google Calendar
 
@@ -374,8 +440,9 @@ permission, so it can see nothing in your Drive except the files it creates.
 Every night (or when you click *Back up now*) each brain folder is synced
 incrementally to `fridolin-backup/<brain>/current/`; files that changed or
 were deleted move to `versions/<timestamp>/` and are kept for 30 days after
-that run. A run that would mirror a mass deletion (an empty brain folder, or
-more than half of its files gone) is refused until you force it, and the first
+that run. A run that would mirror a mass deletion (an empty brain folder, many
+of its files gone, or most of one of its folders, such as a wiped
+`memories/`) is refused until you force it, and the first
 nightly refusal tells you on WhatsApp. Exclude patterns per brain keep out
 what you can rebuild. The WhatsApp session, tokens and `.env` files are never
 uploaded. Restores go into a new folder and never overwrite a brain. Details:
@@ -479,14 +546,28 @@ What the bridge does about it:
   [what a brain loads](docs/BRAINS.md#what-a-brain-loads)).
 - **A guarded dashboard.** It only listens on localhost, rejects requests
   from web pages on other sites (and DNS-rebinding tricks), and requires a
-  token from `~/.fridolin/dashboard.token` — a file the sandbox
-  keeps away from brains, so a manipulated brain cannot reconfigure the bridge.
+  token from `~/.fridolin/dashboard.token`. Browsers never hold the token:
+  they sign in with a link that works once and keep a session, a cookie
+  page scripts cannot read that counts only together with a key the
+  dashboard page keeps for its own address. On macOS the sandbox keeps
+  the token file away from brains, so a manipulated brain cannot
+  reconfigure the bridge; the browser's files, where a session is kept,
+  it denies them only for the common browsers
+  ([which ones](docs/CONFIGURATION.md#dashboard)). On Linux, or with the
+  sandbox off, a brain that runs with all permissions can read the token
+  like any other file of yours; the dashboard warns about it.
+- **Tokens for `/send` and `/ingest`.** Each brain's run gets a token of
+  its own, which works while the run lasts: with it, a brain sends only to
+  its own chats and hands files only to itself, so it cannot make another
+  brain run with that brain's memories and credentials. Your scripts use
+  `~/.fridolin/scripts.token`;
+  see [docs/API.md](docs/API.md#who-may-call).
 - **You approve brain settings.** A brain that edits its own `brain.json` to
   claim your DMs or another group changes nothing until you approve it.
 - **OTP guard.** A message that is only a numeric code, arriving right after
   the assistant asked for one, is dropped before it reaches history or the model
-  — also when it is sent as a reply to the request — and kept in
-  `<data_dir>/otp/` for the local script that asked for it.
+  — also when it is sent as a reply to the request or corrected by an edit —
+  and kept in `<data_dir>/otp/` for the local script that asked for it.
 
 What it does not do:
 
@@ -506,7 +587,10 @@ What it does not do:
   `sudo machinectl shell fridolin@`; `sudo -u` gives `systemctl --user` no
   session) and run `./setup.sh` there. The unit sets `NoNewPrivileges=yes`,
   so nothing a brain starts can gain privileges through `sudo` or another
-  setuid program.
+  setuid program. That keeps brains out of your own files, but not out of
+  the bridge's: brains run as that user too, so they can read and change
+  its token, `config.json` and WhatsApp session, and with them every
+  setting.
 - Every file sent to the bridge lands in your data directory, and the assistant
   reads it.
 
@@ -522,22 +606,27 @@ folders of their own rather than your home directory, and
 
 **`whatsapp.go`** — [whatsmeow](https://github.com/tulir/whatsmeow) client.
 Handles pairing, allowlists, trigger matching, attachment downloads, and poll
-vote decryption (WhatsApp sends SHA-256 hashes of option names, which are
-matched against the stored options).
+vote decryption. It keeps the list of the account's groups that the
+dashboard shows (`groupcache.go`), and asks WhatsApp for it again only after
+a group event or a reconnect, once it is ten minutes old, or when you press
+Refresh on the Chats page. **`polls.go`** — the `[POLL]` blocks in replies,
+sending them, and matching votes to options (WhatsApp sends SHA-256 hashes of
+option names, which are matched against the stored options).
 
 **`debounce.go`** — merges a burst of messages from one person into one run.
 
 **`brain.go`** — the multi-brain runner. Each brain has a queue and one
 worker; each message spawns `claude -p` with `--output-format stream-json`,
-seeded with the brain's prompt file and recent chat history. Events are
-parsed live, so an `AskUserQuestion` reaches WhatsApp immediately and a run
-over 10 seconds gets a "working on it" notice (the event types are in
-`stream.go`). A run is stopped at `run_timeout_minutes`, and five seconds
-after its result when something it started holds its output open. Runs
-are listed in `<data_dir>/runs/` while they last, so that a bridge that
-crashed stops what is left of them when it starts again.
-`BrainManager.Apply` swaps the brain set at runtime without touching
-brains that did not change.
+seeded on stdin with the brain's prompt file and recent chat history. Events
+are parsed live, so an `AskUserQuestion` reaches WhatsApp immediately, with
+its options numbered (the answer comes as the next message, and the run's
+final reply is sent too), and a run over 10 seconds gets a "working on it"
+notice (the event types are in `stream.go`). A run is stopped at
+`run_timeout_minutes`, and five seconds after its result when something it
+started holds its output open. Runs are listed in `<data_dir>/runs/` while
+they last, so that a bridge that crashed stops what is left of them when it
+starts again. `BrainManager.Apply` swaps the brain set at runtime without
+touching brains that did not change.
 
 **`manifest.go`, `brainreg.go`** — `brain.json`, the brain registry, path
 checks and scaffolding. **`configstore.go`** — the live configuration.
@@ -563,6 +652,14 @@ chats that wrote without being allowed.
 **`chunks.go`** — splits long replies at paragraph, line, sentence, then word
 boundaries so messages break somewhere readable, and numbers the parts.
 
+**`outbox.go`** — brains' replies, and the questions they ask mid-run,
+wait in `bridge.db` until WhatsApp took every message of them, are tried
+again with backoff (from the message that failed, and at once when
+WhatsApp reconnects, after a restart too), and go into the brain's history
+only once delivered, as what the chat got (a poll as its question and
+numbered options); until then a run reads them from the outbox. One that
+cannot go out within an hour is given up on, and the Overview says so.
+
 **`server.go`** — the localhost `/send` and `/ingest` endpoints.
 
 **`brainapi.go`** — `/brain/`, what the tools a brain runs ask the bridge
@@ -584,9 +681,11 @@ On macOS the desktop app keeps it at
 shows up there with an *Allow* button. Otherwise check which brain the group
 routes to, and that you used a trigger keyword.
 
-**No reply to a DM** — the sender's number must be allowed (*Settings →
-Access*), with country code and no `+`. An empty list allows nobody unless
-`allow_any_dm` is `true`. Blocked senders appear under *Chats*.
+**No reply to a DM** — the sender's number must be allowed (*Chats →
+Allowed numbers*), with the country code; a `+`, spaces and dashes are fine.
+An empty list allows nobody unless `allow_any_dm` is `true`. Blocked senders
+appear under *Chats*, and the Overview warns about an entry that is no
+number.
 
 **"Not logged in" from the CLI** — run `claude` once in a terminal to
 authenticate. Under launchd, check that `HOME` is set correctly in the plist.
@@ -595,10 +694,21 @@ that variable must be in the bridge's process environment: the bridge reads
 no `.env` file, and says so in its log when one lies next to the config
 ([details](docs/CONFIGURATION.md#environment-variables)).
 
-**Logged out of WhatsApp** — remove the device under *Linked Devices* on the
-phone, stop the bridge, move `bridge.db` out of your data directory (keep it
-until the new pairing works), start the bridge and pair again from the
-dashboard. This also clears the poll history.
+**Logged out of WhatsApp** — pair again with *Start pairing* on the
+dashboard's Overview; no restart is needed, and `bridge.db` can stay (the
+bridge starts a new session in it and keeps the poll history). Remove the old
+entry under *Linked Devices* on the phone if it is still there. Only if
+pairing keeps failing, stop the bridge and move `bridge.db` out of your data
+directory, keeping it until the new pairing works; that also clears the poll
+history.
+
+**"Fridolin needs an update"**, **"Temporarily banned"**, **"WhatsApp refused
+the connection"** — the Overview says what WhatsApp answered and what to do:
+update and rebuild (`git pull && ./setup.sh`) when WhatsApp no longer accepts
+the bridge's WhatsApp library; wait for a ban to end, when the bridge
+connects again by itself. After a refusal on WhatsApp's side it tries again
+by itself too, waiting longer each time, up to half an hour; after any other
+refusal, restart the bridge.
 
 **"another bridge is already running"** — only one bridge may use a data
 directory; two bridges on one WhatsApp session knock each other offline.
@@ -629,16 +739,17 @@ your name, your numbers, your company). CI runs the same check.
 `make check` runs what CI's build, lint and test jobs run: gofmt, `go vet`,
 `go mod tidy -diff`, the race tests, staticcheck, shellcheck, ruff,
 actionlint, a check that every workflow action is pinned to a commit SHA,
-the Python, dashboard, personal-data-check, action-pin-check and Makefile
-tests, and a smoke test that starts a race-enabled build in dev mode on a
-scratch config (`make help` lists every target). staticcheck and actionlint
-run through `go run` at pinned versions; ruff comes from
-`pip install -r tools/requirements-dev.txt`, shellcheck from your package
-manager. `make check` builds into a temp dir. `make build` writes
-`bin/fridolin`, and `make install` also copies it to `~/.local/bin` (set
-`PREFIX` or `BINDIR` to change that) to run by hand. Neither changes the
-service, which runs its own copy in `~/.local/lib/fridolin/`: `./setup.sh`
-installs one.
+ESLint on the dashboard, the Python, dashboard, personal-data-check,
+action-pin-check and Makefile tests, and a smoke test that starts a
+race-enabled build in dev mode on a scratch config (`make help` lists every
+target). staticcheck and actionlint run through `go run` at pinned
+versions, and ESLint through `npx` at a pinned version, which it fetches
+the first time; ruff comes from `pip install -r tools/requirements-dev.txt`,
+shellcheck from your package manager. `make check` builds into a temp dir.
+`make build` writes `bin/fridolin`, and `make install` also copies it to
+`~/.local/bin` (set `PREFIX` or `BINDIR` to change that) to run by hand.
+Neither changes the service, which runs its own copy in
+`~/.local/lib/fridolin/`: `./setup.sh` installs one.
 
 CI also installs the site's npm packages and runs its own tests
 (`cd site && npm install && npm test`; [docs/SITE.md](docs/SITE.md));

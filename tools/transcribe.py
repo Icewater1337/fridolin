@@ -1,4 +1,15 @@
 #!/usr/bin/env python3
+# What `uv run --script` installs (PEP 723); the same as
+# requirements-transcription.txt, which tools/tests holds it to.
+# /// script
+# requires-python = ">=3.9"
+# dependencies = [
+#     "torch>=2.1.0,<3",
+#     "transformers>=4.57.0,<5",
+#     "accelerate>=0.27.0,<2",
+#     "groq>=0.11.0,<2",
+# ]
+# ///
 """Transcribe an audio or video file to text.
 
 Handles the things that go wrong with long recordings so the assistant does
@@ -41,14 +52,24 @@ model that cannot be loaded at all is not retried for every chunk). `local`
 and `groq` force one engine. `--prompt` reaches the model with either; keep
 it to a few sentences, since Whisper reads only the last 223 tokens of it.
 
-    Local:  pip install -r tools/requirements-transcription.txt
+Install them into a venv of their own, outside the bridge's data folder,
+which brains cannot read; Homebrew's and Debian's Python refuse a plain pip
+install (PEP 668). The transcription skill runs the tool with its python:
+
+    python3 -m venv ~/.local/share/fridolin/venv
+
+    Local:  ~/.local/share/fridolin/venv/bin/pip install -r tools/requirements-transcription.txt
             First run downloads the model (~1.5 GB for large-v3-turbo).
-    Groq:   pip install groq          (no local model needed, much lighter)
-            and set GROQ_API_KEY: in the bridge's environment, listed in its
-            config's child_env_passthrough, or brains do not get it
+    Groq:   ~/.local/share/fridolin/venv/bin/pip install groq
+            (no local model needed, much lighter) and set GROQ_API_KEY: in
+            the bridge's environment, listed in its config's
+            child_env_passthrough, or brains do not get it
             (docs/CONFIGURATION.md#child_env_passthrough). Each file goes up
             as 16 kHz mono FLAC, as Groq recommends, which keeps a chunk of
             the default ten minutes well under Groq's upload limit.
+
+Or, with uv, `uv run --script tools/transcribe.py ...` installs the list at
+the top of this file, both engines, into uv's cache and runs the tool.
 
 `--model` takes any Whisper-compatible model ID from the Hugging Face hub.
 A dialect- or language-specific fine-tune usually beats the base model by a
@@ -94,6 +115,8 @@ PROMPT_TOKENS = 448 // 2 - 1
 # Brains run this tool from their own folder, so an install hint names the
 # requirements file next to it rather than a path relative to the repo.
 LOCAL_REQUIREMENTS = Path(__file__).resolve().parent / "requirements-transcription.txt"
+# The venv the docs and the transcription skill use, as a hint writes it.
+VENV = "~/.local/share/fridolin/venv"
 # A key exported in some shell does not reach a brain: the bridge hands
 # brains only the variables on its own list and those its config names.
 GROQ_KEY_HINT = ("set GROQ_API_KEY in the bridge's environment and list it in the bridge config's "
@@ -331,12 +354,14 @@ def choose_engines(engine: str) -> Engines:
     use_local = engine in ("auto", "local") and local_available()
     use_groq = engine in ("auto", "groq") and groq_available()
 
-    install_local = f"pip install -r {shlex.quote(str(LOCAL_REQUIREMENTS))}"
+    # A plain pip install fails on Homebrew's and Debian's Python (PEP 668).
+    install_local = (f"python3 -m venv {VENV} && {VENV}/bin/pip install -r {shlex.quote(str(LOCAL_REQUIREMENTS))}, "
+                     f"then run this tool with {VENV}/bin/python")
     if engine == "local" and not use_local:
         fail(f"--engine local, but transformers/torch are not installed. Run: {install_local}")
     if engine == "groq" and not use_groq:
         fail("--engine groq, but GROQ_API_KEY is unset or the groq package is missing. "
-            f"Run: pip install groq, and {GROQ_KEY_HINT}.")
+            f"Run: python3 -m venv {VENV} && {VENV}/bin/pip install groq, and {GROQ_KEY_HINT}.")
     if not use_local and not use_groq:
         fail(f"No transcription engine available. Either install the local model "
             f"({install_local}) or install the groq package and {GROQ_KEY_HINT}.")

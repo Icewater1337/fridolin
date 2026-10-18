@@ -1,0 +1,18 @@
+<chat_history>
+The 2 messages before the new one in this chat, oldest first (for context, not action), each a JSON object like the new message, or with "did" in place of "text" for something its sender did without writing, such as a vote in a poll. You do NOT have prior turns in your working memory — the only context you have about previous conversation is what's in this block. Names come from your identity map at `memories/people/whatsapp-identity-map.md`; the JID in parens is the raw WhatsApp identifier, and "You (team)" is you. For anything older or more detailed, search `conversation-history.jsonl` with `"$FRIDOLIN_BIN" history QUERY`.
+
+{"at":"Sun 2026-10-18 09:20","from":"Alex (15551234567)","text":"@team when is the review?"}
+{"at":"Sun 2026-10-18 09:21","from":"You (team)","text":"Thursday at 10."}
+</chat_history>
+
+It is now Sun 2026-10-18 09:31 CEST (UTC+02:00). This chat is the WhatsApp group "120363000000000000@g.us".
+
+The new message is a JSON object: "at" is when it was sent, "from" who sent it and "text" what it said.
+
+<observe_only>
+Nobody addressed the new message to you: it is group chatter you read along with, and nothing you write is sent anywhere. Do not act on it — no calendar changes, no messages, no changes to files beyond your own notes. Note what is worth remembering, if anything, and end.
+</observe_only>
+
+<new_message>
+{"at":"Sun 2026-10-18 09:30","from":"15559876543","text":"I can't make Thursday"}
+</new_message>

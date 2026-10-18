@@ -82,6 +82,28 @@ func (d *Debouncer) fire(key string, b *pendingBatch) {
 	d.flush(msg)
 }
 
+// Change applies an edit or a deletion to the open batch that holds the
+// message it changes, and reports whether one did. A batch left empty by
+// a deletion is dropped: nothing of it reaches a brain.
+func (d *Debouncer) Change(c messageChange) bool {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	for k, b := range d.batches {
+		if !b.msg.changes(c) {
+			continue
+		}
+		msg, _, keep := b.msg.applyChange(c)
+		if !keep {
+			b.timer.Stop()
+			delete(d.batches, k)
+			return true
+		}
+		b.msg = msg
+		return true
+	}
+	return false
+}
+
 // Drop discards every open batch for a chat (after !reset or !stop).
 func (d *Debouncer) Drop(jid string) {
 	d.mu.Lock()

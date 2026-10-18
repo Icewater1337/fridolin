@@ -380,7 +380,7 @@ func TestHistoryIsNotFollowedOutOfTheFolder(t *testing.T) {
 			logged := captureLog(t)
 
 			br.appendHistory("15551234567@s.whatsapp.net", "15551234567", "NEW-MESSAGE", historyIn)
-			preface := br.composePreface("15551234567@s.whatsapp.net", false)
+			preface := br.buildPrompt(br.settings.Load(), dm("hello"))
 			drops := br.DropsOTP("123456")
 			feed := NewActivity(10)
 			feed.Seed(br)
@@ -515,7 +515,7 @@ func TestStreamLogIsNotFollowedOutOfTheFolder(t *testing.T) {
 				plant(t, logPath, tc.target(home))
 			}
 			logged := captureLog(t)
-			if res := br.parseStream("x", strings.NewReader(stream)); res.Text != "done" {
+			if res := br.parseStream(Inbound{JID: "x"}, strings.NewReader(stream)); res.Text != "done" {
 				t.Errorf("run = %+v, want it to finish", res)
 			}
 			if tc.target == nil {
@@ -575,15 +575,16 @@ func TestIdentityMapIsNotFollowedOutOfTheFolder(t *testing.T) {
 			}
 			br.appendHistory("15551234567@s.whatsapp.net", "15551234567", "hi", historyIn)
 			logged := captureLog(t)
-			preface := br.composePreface("15551234567@s.whatsapp.net", false)
+			preface := br.buildPrompt(br.settings.Load(), dm("hello"))
 			lines := logged()
 			if tc.target == nil {
-				if !strings.Contains(preface, "Alex (15551234567): hi") || len(lines) > 0 {
+				if !strings.Contains(preface, `"from":"Alex (15551234567)","text":"hi"`) || len(lines) > 0 {
 					t.Errorf("preface = %q, log = %q; want the name from the map and no log", preface, lines)
 				}
 				return
 			}
-			if strings.Contains(preface, "Alex") || !strings.Contains(preface, "15551234567: hi") {
+			// The starter prompt names Alex too, in an example.
+			if history := promptBlock(preface, "chat_history"); strings.Contains(history, "Alex") || !strings.Contains(history, `"from":"15551234567","text":"hi"`) {
 				t.Errorf("preface = %q, want the raw number", preface)
 			}
 			if len(lines) != 1 || !strings.Contains(lines[0], "brain a: could not read identity map "+identityMapFile+": "+errSymlink.Error()) {
@@ -701,7 +702,7 @@ func TestBrainFilesAreReadUpToALimit(t *testing.T) {
 			got := br.buildPrompt(br.settings.Load(), dm("hello"))
 			lines := logged()
 			if tc.ok {
-				if !strings.HasPrefix(got, "BIG PROMPT") || !strings.Contains(got, "Alex (15551234567): hi") || len(lines) > 0 {
+				if !strings.HasPrefix(got, "BIG PROMPT") || !strings.Contains(got, `"from":"Alex (15551234567)","text":"hi"`) || len(lines) > 0 {
 					t.Errorf("prompt starts %.40q, log = %q; want both files read", got, lines)
 				}
 				return

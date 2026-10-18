@@ -26,15 +26,16 @@ import (
 // cannot widen that by changing its environment or writing its own client.
 //
 // Each run gets a token of its own, bound to the brain, and the token
-// stops working when the run's CLI has exited. It opens nothing but
-// /brain/: the dashboard API needs the dashboard token, which brains
-// cannot read. The token is in a file that only its brain's sandbox
+// stops working when the run's CLI has exited. It opens /brain/, and
+// /send and /ingest for the brain's own chats and itself (scripttoken.go),
+// and nothing else: the dashboard API needs the dashboard token, which
+// brains cannot read. The token is in a file that only its brain's sandbox
 // profile can read, and the run's environment names the file
 // (FRIDOLIN_BRAIN_TOKEN_FILE). The token itself stays out of the
 // environment: macOS shows a process's environment to every process of
 // the same user (sysctl KERN_PROCARGS2, as `ps eww` reads it), sandboxed
 // or not, so a brain could read the token of another brain's run in
-// progress and call /brain/ as that brain.
+// progress and call the bridge as that brain.
 
 // runTokens are the brain API tokens of the runs in progress.
 type runTokens struct {
@@ -206,7 +207,7 @@ func (b *Bridge) brainCall(fn func(w http.ResponseWriter, r *http.Request, br *B
 // or the one it replies in. A brain sees only the polls of those, since a
 // poll's voters are the people of the chat it was sent to.
 func (b *Bridge) ownsChat(br *Brain, chat string) bool {
-	return b.brainMgr.BrainFor(chat, strings.HasSuffix(chat, "@g.us")) == br || b.replyChatFor(br, b.cfgs.Get()) == chat
+	return b.brainMgr.BrainFor(chat, isGroupJID(chat)) == br || b.replyChatFor(br, b.cfgs.Get()) == chat
 }
 
 // brainPolls answers GET /brain/polls: ?id=MSG_ID for one poll, else the

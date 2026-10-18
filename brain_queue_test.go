@@ -48,7 +48,8 @@ func (d *deliveries) all() []delivered {
 }
 
 // queueTestManager builds a manager with folder brains a (DMs) and b (a
-// group) running the fake CLI.
+// group) running the fake CLI. b observes its group with runs, so that
+// untagged chatter there queues like the rest.
 func queueTestManager(t *testing.T, sleepMS int, extra string) (*BrainManager, *deliveries, string) {
 	t.Helper()
 	home := canonicalDir(t.TempDir())
@@ -59,7 +60,7 @@ func queueTestManager(t *testing.T, sleepMS int, extra string) (*BrainManager, *
 		"data_dir": "`+home+`/data",
 		"claude_path": "`+claude+`"`+brainDirsJSON(t,
 		brainFolder(t, home+"/a", BrainManifest{ID: "a", Routing: BrainRouting{HandlesDMs: true}}),
-		brainFolder(t, home+"/b", BrainManifest{ID: "b", Routing: BrainRouting{Groups: []string{"120363000000000000@g.us"}}}),
+		brainFolder(t, home+"/b", BrainManifest{ID: "b", Routing: BrainRouting{Groups: []string{"120363000000000000@g.us"}}, Observe: observeRun}),
 	)+extra+`
 	}`))
 	if err != nil {
@@ -93,8 +94,10 @@ func TestBrainRunsAndDeliversInOrder(t *testing.T) {
 			t.Errorf("run %d = %q, want an echo of %q from brain a's folder", i, r.res.Text, want)
 		}
 	}
+	// The answers go into the history once they are delivered, which is
+	// the bridge's part (see TestReplyIsRecordedOnceDelivered).
 	hist, _ := os.ReadFile(filepath.Join(home, "a", "conversation-history.jsonl"))
-	if strings.Count(string(hist), `"type":"in"`) != 3 || strings.Count(string(hist), `"type":"out"`) != 3 {
+	if strings.Count(string(hist), `"type":"in"`) != 3 || strings.Count(string(hist), `"type":"out"`) != 0 {
 		t.Errorf("history:\n%s", hist)
 	}
 }
@@ -533,8 +536,8 @@ func TestReloadRefusesAClashingSet(t *testing.T) {
 // TestClaudeArgs: a brain loads only its own folder's Claude Code setup,
 // with the folder's .mcp.json passed explicitly and the instructions above
 // it excluded, unless inherit_claude_user_config asks for the old
-// behaviour. The other settings map to their flags, and the prompt comes
-// last.
+// behaviour. The other settings map to their flags, and -p comes last,
+// without the prompt, which goes on stdin.
 func TestClaudeArgs(t *testing.T) {
 	const mcp = "/brains/a/.mcp.json"
 	const settings = `{"claudeMdExcludes":["/brains/CLAUDE.md"]}`
@@ -558,7 +561,7 @@ func TestClaudeArgs(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			args := claudeArgs(&tc.s, tc.mcpConfig, tc.settings, "hi")
+			args := claudeArgs(&tc.s, tc.mcpConfig, tc.settings)
 			got := strings.Join(args, " ")
 			for _, w := range tc.want {
 				if !strings.Contains(got, w) {
@@ -570,13 +573,44 @@ func TestClaudeArgs(t *testing.T) {
 					t.Errorf("args %q have %q", got, w)
 				}
 			}
-			if !strings.HasSuffix(got, " -p hi") {
-				t.Errorf("args %q: the prompt must come last", got)
+			if !strings.HasSuffix(got, " -p") {
+				t.Errorf("args %q: -p must come last, the prompt goes on stdin", got)
 			}
 			// --mcp-config takes several files, so the CLI would take
 			// anything after the file that is not an option for another.
 			if i := slices.Index(args, "--mcp-config"); i >= 0 && !strings.HasPrefix(args[i+2], "-") {
 				t.Errorf("args %q: %q follows --mcp-config's file", got, args[i+2])
+			}
+		})
+	}
+}
+
+// The prompt reaches the CLI on stdin, not in its arguments, where every
+// process listing shows it and ARG_MAX bounds it: a message of a megabyte
+// and more, a few long pasted texts, still runs.
+func TestPromptGoesOnStdin(t *testing.T) {
+	cases := []struct {
+		name string
+		text string
+	}{
+		{"a short message", "MSG-ON-STDIN"},
+		{"over ARG_MAX", "MSG-ON-STDIN " + strings.Repeat("all of this was pasted in. ", 50000)},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			mgr, d, home := queueTestManager(t, 0, "")
+			argsLog := filepath.Join(home, "args.log")
+			t.Setenv("FRIDOLIN_FAKE_ARGS_LOG", argsLog)
+			if _, _, _, err := mgr.Submit(dm(c.text)); err != nil {
+				t.Fatal(err)
+			}
+			waitFor(t, 10*time.Second, "the run", func() bool { return d.count() == 1 })
+			if res := d.all()[0].res; res.Err != nil || !strings.HasSuffix(res.Text, "says: "+c.text) {
+				t.Errorf("run = %v, %.80q; want the message echoed from stdin", res.Err, res.Text)
+			}
+			args, _ := os.ReadFile(argsLog)
+			if strings.Contains(string(args), "MSG-ON-STDIN") || !strings.HasSuffix(strings.TrimSpace(string(args)), " -p") {
+				t.Errorf("args = %.200q, want them to end in -p, without the prompt", args)
 			}
 		})
 	}
@@ -1040,7 +1074,7 @@ func TestMCPConfigOfStaysInTheBrainFolder(t *testing.T) {
 func TestBuildPromptListsAllAttachments(t *testing.T) {
 	br := bareBrain(t)
 	p := br.buildPrompt(&brainSettings{}, Inbound{JID: "x@s.whatsapp.net", Sender: "1", Text: "file these", Media: []string{"/m/1.jpg", "/m/2.pdf"}})
-	if !strings.Contains(p, "2 files were shared together") || !strings.Contains(p, "- /m/2.pdf") {
+	if !strings.Contains(p, `The 2 files in its "files" came with it`) || !strings.Contains(p, `"files":["/m/1.jpg","/m/2.pdf"]`) {
 		t.Errorf("prompt:\n%s", p)
 	}
 	if got := historyTextWithMedia("hi", []string{"/m/1.jpg"}); got != "hi\n[attachment: /m/1.jpg]" {
@@ -1079,7 +1113,7 @@ func TestParseStreamReportsErrorText(t *testing.T) {
 	stream := `{"type":"assistant","message":{"content":[{"type":"text","text":"Failed to authenticate. API Error: 401"}]}}
 {"type":"result","is_error":true}
 `
-	res := br.parseStream("x", strings.NewReader(stream))
+	res := br.parseStream(Inbound{JID: "x"}, strings.NewReader(stream))
 	if res.Err == nil || !strings.Contains(res.Err.Error(), "Failed to authenticate") {
 		t.Errorf("err = %v, want the CLI's own message", res.Err)
 	}
@@ -1277,14 +1311,15 @@ func TestPanicsInARunAreContained(t *testing.T) {
 		}},
 		{"while claude runs", map[string]string{"FRIDOLIN_FAKE_SLEEP_MS": "1000"}, 100 * time.Millisecond, true, func(d *deliveries, first *sync.Once) BrainHooks {
 			// The working notice comes from invoke itself.
-			return BrainHooks{Deliver: d.add, Intermediate: func(string, string) {
+			return BrainHooks{Deliver: d.add, Notice: func(string, string) {
 				first.Do(func() { panic("boom in the working notice") })
 			}}
 		}},
 		{"while its output is read", map[string]string{"FRIDOLIN_FAKE_ASK_ON": "says: one"}, 0, true, func(d *deliveries, first *sync.Once) BrainHooks {
 			// The question goes out from the goroutine that reads the output.
-			return BrainHooks{Deliver: d.add, Intermediate: func(string, string) {
+			return BrainHooks{Deliver: d.add, Question: func(*Brain, string, string) bool {
 				first.Do(func() { panic("boom in sending the question") })
+				return true
 			}}
 		}},
 		{"while it is delivered", nil, 0, false, func(d *deliveries, first *sync.Once) BrainHooks {
@@ -1378,10 +1413,14 @@ func TestRunTimeoutStopsAStuckRun(t *testing.T) {
 			}
 			var mu sync.Mutex
 			var sent []string
-			mgr.SetHooks(BrainHooks{Deliver: d.add, Intermediate: func(_, text string) {
+			say := func(_, text string) {
 				mu.Lock()
 				defer mu.Unlock()
 				sent = append(sent, text)
+			}
+			mgr.SetHooks(BrainHooks{Deliver: d.add, Notice: say, Question: func(_ *Brain, jid, text string) bool {
+				say(jid, text)
+				return true
 			}})
 			start := time.Now()
 			if _, _, _, err := mgr.Submit(dm("stuck")); err != nil {

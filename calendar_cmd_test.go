@@ -298,7 +298,7 @@ func TestCalendarDefaultIsOneOfTheBrainsCalendars(t *testing.T) {
 			if err := WriteManifest(dir, m, true); err != nil {
 				t.Fatal(err)
 			}
-			if w := tb.do("POST", "/api/brains/a/approve", nil); w.Code != 200 {
+			if w := tb.do("POST", "/api/brains/a/approve", map[string]any{"manifest": m}); w.Code != 200 {
 				t.Fatal(w.Body.String())
 			}
 			if got := tb.brainMgr.Get("a").settings.Load().manifest.Calendar; got.Default != def {

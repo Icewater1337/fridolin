@@ -1,0 +1,7 @@
+PUT /api/config
+428 Precondition Required
+Content-Type: application/json
+
+{
+  "error": "etag required: send the etag GET /api/config returned along with the config"
+}

@@ -1,0 +1,5 @@
+GET /api/whatsapp/groups
+200 OK
+Content-Type: application/json
+
+[]
