@@ -93,13 +93,17 @@ func (m *SiteManager) DeployKey(ctx context.Context) (string, error) {
 	return strings.TrimSpace(string(pub)), err
 }
 
-// githubRepo is "owner/name" for a GitHub URL, or "".
+// githubRepo is "owner/name" for a GitHub URL, or "". An owner starts with a
+// letter or digit on GitHub, so the result never reads as a flag to gh.
 func githubRepo(u string) string {
 	for _, re := range []*regexp.Regexp{
-		regexp.MustCompile(`^git@github\.com:([\w.-]+/[\w.-]+?)(\.git)?$`),
-		regexp.MustCompile(`^(?:ssh://git@|https://)github\.com/([\w.-]+/[\w.-]+?)(\.git)?/?$`),
+		regexp.MustCompile(`^git@github\.com:([[:alnum:]][\w.-]*/[\w.-]+?)(\.git)?$`),
+		regexp.MustCompile(`^(?:ssh://git@|https://)github\.com/([[:alnum:]][\w.-]*/[\w.-]+?)(\.git)?/?$`),
 	} {
 		if mm := re.FindStringSubmatch(u); mm != nil {
+			if _, name, _ := strings.Cut(mm[1], "/"); name == "." || name == ".." {
+				return ""
+			}
 			return mm[1]
 		}
 	}
@@ -107,24 +111,42 @@ func githubRepo(u string) string {
 }
 
 // AddDeployKeyWithGH adds the deploy key to the GitHub repository with write
-// access, using the GitHub CLI's own login.
-func (m *SiteManager) AddDeployKeyWithGH(ctx context.Context) error {
-	repo := githubRepo(m.Settings().Repo.URL)
+// access, using the GitHub CLI's own login, and returns the repository's
+// "owner/name". Once a repository is connected that is the connected one.
+// Before, it is addr, the address typed for Connect: the key has to be on a
+// private repository before Connect can clone it.
+func (m *SiteManager) AddDeployKeyWithGH(ctx context.Context, addr string) (string, error) {
+	addr = strings.TrimSpace(addr)
+	u := m.Settings().Repo.URL
+	if fileExists(m.repoDir()) {
+		if addr != "" && addr != u {
+			return "", errors.New("another repository is connected; disconnect it first")
+		}
+	} else {
+		if addr == "" {
+			return "", errors.New("enter the repository's SSH address first, e.g. git@github.com:you/site.git, so gh knows where to add the key")
+		}
+		if !validRepoURL(addr) {
+			return "", errors.New("enter the repository's SSH address, e.g. git@github.com:you/site.git")
+		}
+		u = addr
+	}
+	repo := githubRepo(u)
 	if repo == "" {
-		return errors.New("the repository is not on GitHub; add the key in its settings by hand")
+		return "", errors.New("the repository is not on GitHub; add the key in its settings by hand")
 	}
 	gh, err := findTool("gh")
 	if err != nil {
-		return errors.New("the GitHub CLI (gh) is not installed")
+		return "", errors.New("the GitHub CLI (gh) is not installed")
 	}
 	if _, err := m.DeployKey(ctx); err != nil {
-		return err
+		return "", err
 	}
 	cmd := exec.CommandContext(ctx, gh, "repo", "deploy-key", "add", m.dir("deploy_key.pub"), "--repo", repo, "--allow-write", "--title", "Fridolin site")
 	if out, err := cmd.CombinedOutput(); err != nil && !strings.Contains(string(out), "already in use") {
-		return fmt.Errorf("gh: %s", tail(string(out), 400))
+		return "", fmt.Errorf("gh: %s", tail(string(out), 400))
 	}
-	return nil
+	return repo, nil
 }
 
 // CreateGitHubRepo creates a private repository with the GitHub CLI and
