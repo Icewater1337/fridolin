@@ -63,6 +63,7 @@ func TestMain(m *testing.M) {
 			os.Exit(1)
 		}
 	}
+	goToolHome = os.Getenv("HOME")
 	removeHome, err := useEmptyHome()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "giving the tests an empty HOME: %v\n", err)
@@ -88,6 +89,11 @@ var testChildEnv = []childEnvVar{
 
 // testHome is the HOME the tests start with.
 var testHome string
+
+// goToolHome is the HOME the tests were started with, for the go command
+// TestSmoke builds the bridge with: its build and module caches are there
+// by default. Nothing else may use it.
+var goToolHome string
 
 // useEmptyHome points HOME at a new, empty temp directory and returns a
 // function that removes it. Tests set their own HOME with t.Setenv; one that

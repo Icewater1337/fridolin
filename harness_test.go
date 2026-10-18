@@ -24,6 +24,12 @@ import (
 // API moves between packages. Tests of a component's insides use
 // newTestBridge, which hands out the Bridge itself.
 //
+// The harness never calls Bridge.Start: there is no listener, no WhatsApp
+// connect loop, no startup checks and no backup, Plaud or site schedulers.
+// The goldens therefore show a bridge before any background job has run,
+// which keeps them the same from run to run; TestSmoke is the test that
+// starts one.
+//
 // Two places still reach inside, and the moves that change what they use
 // must change them too: newHarness builds the bridge with NewBridge and
 // newHTTPHandler, and WhatsApp hands an event to a WhatsAppClient built
