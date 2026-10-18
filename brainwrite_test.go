@@ -4,12 +4,47 @@ import (
 	"encoding/json"
 	"net/http/httptest"
 	"os"
+	"os/exec"
+	"os/signal"
 	"path/filepath"
 	"slices"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 )
+
+// A short write must not publish part of a new manifest: a transaction
+// cannot roll back a file whose creation never reported success.
+func TestNewManifestWriteFailureLeavesNoFile(t *testing.T) {
+	const child = "FRIDOLIN_TEST_PARTIAL_MANIFEST"
+	if os.Getenv(child) != "1" {
+		cmd := exec.Command(os.Args[0], "-test.run=^TestNewManifestWriteFailureLeavesNoFile$")
+		cmd.Env = append(os.Environ(), child+"=1")
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("limited writer: %v\n%s", err, out)
+		}
+		return
+	}
+	dir := t.TempDir()
+	var limit syscall.Rlimit
+	if err := syscall.Getrlimit(syscall.RLIMIT_FSIZE, &limit); err != nil {
+		t.Fatal(err)
+	}
+	limit.Cur = 1024
+	signal.Ignore(syscall.SIGXFSZ)
+	if err := syscall.Setrlimit(syscall.RLIMIT_FSIZE, &limit); err != nil {
+		t.Fatal(err)
+	}
+	err := WriteManifest(dir, &BrainManifest{ID: "new", Name: strings.Repeat("n", 4096)}, false)
+	if err == nil {
+		t.Fatal("manifest write exceeded the file-size limit without failing")
+	}
+	entries, err := os.ReadDir(dir)
+	if err != nil || len(entries) != 0 {
+		t.Fatalf("failed creation left files: %v, %v", entries, err)
+	}
+}
 
 // brainViews returns GET /api/brains.
 func (h *harness) brainViews() []brainView {

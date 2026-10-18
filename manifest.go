@@ -275,18 +275,32 @@ func writeManifestData(dir string, data []byte, overwrite bool) error {
 		}
 	}
 	if !overwrite {
-		f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
-		if errors.Is(err, os.ErrExist) {
-			return errManifestExists
-		}
+		// Publish only a complete file. A direct O_EXCL write could leave
+		// a truncated brain.json when the write or close failed, before
+		// the config transaction knew it had anything to roll back.
+		f, err := os.CreateTemp(dir, ".brain.json.*.tmp")
 		if err != nil {
 			return err
 		}
+		defer os.Remove(f.Name())
 		if _, err := f.Write(data); err != nil {
 			f.Close()
 			return err
 		}
-		return f.Close()
+		if err := f.Sync(); err != nil {
+			f.Close()
+			return err
+		}
+		if err := f.Close(); err != nil {
+			return err
+		}
+		// Link publishes atomically and refuses to replace a manifest
+		// another writer created while the temp file was being written.
+		if err := os.Link(f.Name(), path); errors.Is(err, os.ErrExist) {
+			return errManifestExists
+		} else {
+			return err
+		}
 	}
 	return writeFileAtomic(path, data, 0o600, false)
 }
