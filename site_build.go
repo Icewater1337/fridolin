@@ -9,6 +9,7 @@ package main
 // Whatever the brain sends to such a JID lands here instead of WhatsApp.
 
 import (
+	"bufio"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -275,7 +276,7 @@ func (b *Bridge) apiBuildStop(w http.ResponseWriter, r *http.Request) {
 }
 
 // runLogWindow is how much of the end of the activity log currentRunLog
-// reads.
+// returns. Earlier lines are scanned only when needed to verify its run.
 const runLogWindow = 64 * 1024
 
 // currentRunLog is the brain's activity log since the run in flight, the
@@ -294,14 +295,16 @@ func currentRunLog(path string, pid int) []string {
 		return []string{}
 	}
 	defer f.Close()
-	cut := false
+	var offset int64
 	if st, err := f.Stat(); err == nil && st.Size() > runLogWindow {
-		_, _ = f.Seek(st.Size()-runLogWindow, io.SeekStart)
-		cut = true
+		offset = st.Size() - runLogWindow
+		if _, err := f.Seek(offset, io.SeekStart); err != nil {
+			return []string{}
+		}
 	}
 	data, _ := io.ReadAll(f)
 	lines := strings.Split(strings.TrimRight(string(data), "\n"), "\n")
-	if cut {
+	if offset > 0 {
 		lines = lines[1:] // most likely the end of a line
 	}
 	start, end, headings := -1, len(lines), 0
@@ -320,8 +323,15 @@ func currentRunLog(path string, pid int) []string {
 	}
 	switch {
 	case start >= 0:
-	case cut && headings == 0:
-		// A run that wrote more than the window: its heading is further up.
+	case offset > 0 && headings == 0:
+		// The visible tail alone cannot distinguish a long current run from
+		// an earlier run whose successor has not written its heading yet.
+		// Include the first, discarded line in the search: the window may
+		// have split a heading in two.
+		before := offset + int64(strings.IndexByte(string(data), '\n')+1)
+		if precedingRunPID(io.NewSectionReader(f, 0, before)) != pid {
+			return []string{}
+		}
 		start = 0
 	default:
 		return []string{}
@@ -331,4 +341,28 @@ func currentRunLog(path string, pid int) []string {
 		out = out[len(out)-40:]
 	}
 	return out
+}
+
+// precedingRunPID reads headings without retaining the log. Oversized lines
+// cannot establish ownership; skip all their fragments rather than interpreting
+// a fragment as a heading. Ordinary tool output may be arbitrarily long.
+func precedingRunPID(r io.Reader) int {
+	reader := bufio.NewReaderSize(r, runLogWindow)
+	pid := 0
+	fragment := false
+	for {
+		line, err := reader.ReadSlice('\n')
+		if !fragment && err != bufio.ErrBufferFull {
+			if p, ok := runHeadingPID(strings.TrimSuffix(string(line), "\n")); ok {
+				pid = p
+			}
+		}
+		fragment = err == bufio.ErrBufferFull
+		if err != nil && err != bufio.ErrBufferFull {
+			if err != io.EOF {
+				return 0
+			}
+			return pid
+		}
+	}
 }

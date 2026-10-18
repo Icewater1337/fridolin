@@ -248,6 +248,8 @@ func TestCurrentRunLogIsTheRunsOwn(t *testing.T) {
 		}
 		return lines
 	}
+	crossing := []string{heading(101), heading(303), strings.Repeat("y", runLogWindow-20), "tail"}
+	oversized := []string{heading(303), strings.Repeat("y", 2*runLogWindow), "tail"}
 	cases := []struct {
 		name  string
 		lines []string
@@ -260,7 +262,11 @@ func TestCurrentRunLogIsTheRunsOwn(t *testing.T) {
 		{"a run without its process yet", twoRuns, 0, []string{}},
 		{"its last 40 lines", busy, 303, busy[len(busy)-40:]},
 		{"a run longer than what is read", long, 303, long[len(long)-40:]},
+		{"a new run after a long previous run", long, 404, []string{}},
+		{"a long log without a run heading", tools(2000), 303, []string{}},
 		{"its whole lines only", wide, 303, whole(wide)},
+		{"heading split by the window", crossing, 303, crossing[2:]},
+		{"oversized tool line", oversized, 303, []string{"tail"}},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
