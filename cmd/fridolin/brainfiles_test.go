@@ -393,7 +393,7 @@ func TestHistoryIsNotFollowedOutOfTheFolder(t *testing.T) {
 			preface := br.buildPrompt(br.settings.Load(), dm("hello"))
 			_, drops := br.catchesCode(dm("123456"), time.Now())
 			feed := NewActivity(10)
-			feed.Seed(br)
+			seedActivity(feed, br)
 			var seeded []string
 			for _, e := range feed.Recent(10, "") {
 				seeded = append(seeded, e.Text)

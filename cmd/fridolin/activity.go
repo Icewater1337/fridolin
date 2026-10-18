@@ -5,7 +5,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/Icewater1337/fridolin/internal/chat"
 	"github.com/Icewater1337/fridolin/internal/history"
 	"github.com/Icewater1337/fridolin/internal/textx"
 )
@@ -55,10 +54,17 @@ func (a *Activity) addLocked(brainID string, e history.Entry) {
 	}
 }
 
+// ActivityChange identifies an incoming message to edit or remove from the feed.
+// The caller supplies the replacement history text separately.
+type ActivityChange struct {
+	Target, Sender, Chat, ChatAlt string
+	Revoke                        bool
+}
+
 // Change does to the feed what recordChange did to brainID's history: the
 // message c deletes leaves it, and the one an edit changed while it waited
 // gets text, its new history text; "" leaves it as it was.
-func (a *Activity) Change(brainID string, c chat.Change, text string) {
+func (a *Activity) Change(brainID string, c ActivityChange, text string) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	kept := a.entries[:0]
@@ -66,7 +72,7 @@ func (a *Activity) Change(brainID string, c chat.Change, text string) {
 		is := e.Brain == brainID && e.id != "" && e.id == c.Target && e.Type == history.In && e.From == c.Sender &&
 			(e.Chat == c.Chat || (c.ChatAlt != "" && e.Chat == c.ChatAlt))
 		switch {
-		case is && c.Kind == chat.ChangeRevoke:
+		case is && c.Revoke:
 			continue
 		case is && text != "":
 			e.Text = textx.Truncate(text, 600)
@@ -77,15 +83,15 @@ func (a *Activity) Change(brainID string, c chat.Change, text string) {
 }
 
 // Seed loads the last messages of a brain's history once per brain.
-func (a *Activity) Seed(br *Brain) {
+// load runs while the feed is locked and must not call back into the feed.
+func (a *Activity) Seed(brainID string, load func() []history.Entry) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	brainID := br.ID()
 	if a.seeded[brainID] {
 		return
 	}
 	a.seeded[brainID] = true
-	for _, e := range br.recentHistory(50, 128<<10) {
+	for _, e := range load() {
 		a.addLocked(brainID, e)
 	}
 	sort.SliceStable(a.entries, func(i, j int) bool { return a.entries[i].TS.Before(a.entries[j].TS) })

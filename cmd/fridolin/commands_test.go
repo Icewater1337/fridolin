@@ -698,7 +698,7 @@ func TestResetStartsOnlyThatChatAfresh(t *testing.T) {
 	}
 
 	seeded := NewActivity(100)
-	seeded.Seed(br)
+	seedActivity(seeded, br)
 	for name, feed := range map[string][]ActivityEntry{"live": tb.activity.Recent(100, ""), "seeded": seeded.Recent(100, "")} {
 		for _, e := range feed {
 			if e.Type == history.Reset {

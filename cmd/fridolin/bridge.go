@@ -235,7 +235,7 @@ func NewBridge(cfgs *ConfigStore, opts BridgeOptions) (_ *Bridge, err error) {
 		RunEnv:      b.brainRunEnv,
 	})
 	for _, br := range b.brainMgr.Brains() {
-		b.activity.Seed(br)
+		seedActivity(b.activity, br)
 	}
 
 	// Configuration edits (from the dashboard) apply to the brains at once.
@@ -252,7 +252,7 @@ func NewBridge(cfgs *ConfigStore, opts BridgeOptions) (_ *Bridge, err error) {
 		logDMAccess(prev, next)
 		logSecurityChanges(prev, next)
 		for _, br := range b.brainMgr.Brains() {
-			b.activity.Seed(br)
+			seedActivity(b.activity, br)
 		}
 	})
 
@@ -683,7 +683,10 @@ func (b *Bridge) handleChange(c chat.Change) {
 	if edited != nil {
 		text = chat.HistoryText(edited.TextWithQuote(), edited.Media)
 	}
-	b.activity.Change(br.ID(), c, text)
+	b.activity.Change(br.ID(), ActivityChange{
+		Target: c.Target, Sender: c.Sender, Chat: c.Chat, ChatAlt: c.ChatAlt,
+		Revoke: c.Kind == chat.ChangeRevoke,
+	}, text)
 }
 
 // groupRules is what addresses the bridge in the group jid: what the
