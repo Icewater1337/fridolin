@@ -183,8 +183,10 @@ the version before: `fridolin service rollback`.
   still uses when `~/.fridolin` does not exist (`defaultDataDir`, which
   `setup.sh` asks through `fridolin paths`), the launchd label
   `com.whatsapp-claude-bridge`, whose agent `fridolin service install`
-  retires, and the sandbox's denies of the old `~/.config` and
-  `~/Library/Logs` folders.
+  retires, the sandbox's denies of the old `~/.config` and
+  `~/Library/Logs` folders, and the personal-data check's old denylist
+  place, `~/.config/whatsapp-claude-bridge/personal-denylist`, which it
+  reads with a note to move it.
   *Bridge* is still the product's own word: `bridge.db`, `bridge.lock`,
   the `X-Bridge-Token` header and the `BRIDGE_*` variables brains read
   keep it. Mark a new shim like these the same way.

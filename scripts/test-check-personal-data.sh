@@ -181,6 +181,15 @@ for planted in \
   esac
 done
 
+# The denylist's place from before the rename is still read, and named.
+old_place="$HOME/.config/whatsapp-claude-bridge/personal-denylist"
+mkdir -p "$(dirname "$old_place")"
+cp "$PERSONAL_DENYLIST" "$old_place"
+stage notes.txt "call $secret tomorrow"
+PERSONAL_DENYLIST="" expect "the denylist's old place is read" 1 "$staged" --staged
+expect_output "the denylist's old place is named, with the new one" "move it to ~/.config/fridolin/personal-denylist"
+rm -r "$HOME/.config/whatsapp-claude-bridge"
+
 if [ "$failed" -gt 0 ]; then
   printf '\n%d case(s) failed\n' "$failed" >&2
   exit 1
