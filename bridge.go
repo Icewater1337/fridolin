@@ -166,6 +166,7 @@ func NewBridge(cfgs *ConfigStore, opts BridgeOptions) (_ *Bridge, err error) {
 			return nil, fmt.Errorf("creating whatsapp client: %w", err)
 		}
 		wa.onVote = b.recordVote
+		wa.onChange = b.handleChange
 		wa.groupRules = b.groupRules
 		b.wa = wa
 		b.lids = wa.lidStore
@@ -321,6 +322,37 @@ func (b *Bridge) Stop() {
 	}
 	b.lock.release()
 	log.Println("Bridge stopped.")
+}
+
+// handleChange applies an edit or a deletion of a WhatsApp message: to
+// the debouncer's batch that holds it, which then reaches the brain as
+// changed, or else to the brain's queue, its run and its history.
+func (b *Bridge) handleChange(c messageChange) {
+	br := b.brainMgr.BrainFor(c.Chat, isGroupJID(c.Chat))
+	// An edit to a one-time code is caught like the code itself
+	// (handleInbound), before anything else sees it: a sender who corrects
+	// a code hands the new one to the script that asked for it, and the
+	// message edited stays as it was.
+	if c.Kind == changeEdit && br != nil && br.DropsOTP(strings.TrimSpace(c.Text)) {
+		log.Printf("brain %s: kept an edited one-time code out of the conversation (OTP guard)", br.ID())
+		b.recordOTP(br, Inbound{JID: c.Chat, Sender: c.Sender, Text: c.Text})
+		return
+	}
+	if b.deb.Change(c) {
+		return
+	}
+	if br == nil {
+		return
+	}
+	waiting, edited := br.Change(c)
+	br.recordChange(c, waiting, edited)
+	// The dashboard's feed shows the history's lines: a deleted message
+	// must not linger there either.
+	text := ""
+	if edited != nil {
+		text = historyTextWithMedia(edited.textWithQuote(), edited.Media)
+	}
+	b.activity.Change(br.ID(), c, text)
 }
 
 // groupRules is what addresses the bridge in the group jid: what the

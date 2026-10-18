@@ -72,7 +72,8 @@ type WhatsAppClient struct {
 	store     *Store
 	handler   InboundHandler
 	onIgnored IgnoredHandler
-	onVote    func(pollVote) // a vote was recorded; may be nil
+	onVote    func(pollVote)      // a vote was recorded; may be nil
+	onChange  func(messageChange) // an edit or a deletion; may be nil
 	// groupRules is what addresses the bridge in a group, by its brain's
 	// routing; nil means defaultGroupRules.
 	groupRules func(groupJID string) groupRules
@@ -485,7 +486,34 @@ func (wa *WhatsAppClient) handleMessage(msg *events.Message) {
 		return
 	}
 
-	wa.handleDMMessage(msg, sender)
+	switch kind, target, content := classify(msg); kind {
+	case kindEdit, kindRevoke:
+		alt := ""
+		if a := msg.Info.Chat.ToNonAD(); a != sender {
+			alt = a.String()
+		}
+		wa.change(kind, target, sender.String(), alt, sender.User, extractText(content))
+	case kindViewOnce:
+		go wa.notify(sender.String(), viewOnceNotice)
+	case kindOther:
+		wa.log.Debugf("DM %s from %s: nothing the bridge reads (a reaction, a sticker, …)", msg.Info.ID, sender.User)
+	default:
+		wa.handleDMMessage(msg, sender)
+	}
+}
+
+// change hands an edit or a deletion of the message target, by sender,
+// in chat (with its other JID alt, for a DM), to the bridge (onChange).
+// text is an edit's new text, as the message's own path would read it.
+func (wa *WhatsAppClient) change(kind msgKind, target, chat, alt, sender, text string) {
+	c := messageChange{Kind: changeRevoke, Chat: chat, ChatAlt: alt, Target: target, Sender: sender, Text: text}
+	if kind == kindEdit {
+		c.Kind = changeEdit
+	}
+	log.Printf("%s of message %s in %s by %s", c.Kind, target, chat, sender)
+	if wa.onChange != nil && target != "" {
+		wa.onChange(c)
+	}
 }
 
 // handleDMMessage handles an allowed direct message from sender, the
@@ -520,7 +548,7 @@ func (wa *WhatsAppClient) handleDMMessage(msg *events.Message, sender types.JID)
 
 	m := Inbound{
 		JID: chatJID, Sender: senderNumber, Text: text, Media: mediaList(mediaPath),
-		Quoted: quoted, Source: sourceWhatsApp, At: msg.Info.Timestamp,
+		Quoted: quoted, Source: sourceWhatsApp, At: msg.Info.Timestamp, ID: string(msg.Info.ID),
 	}
 	if !alt.IsEmpty() {
 		m.ChatAlt = alt.String()
@@ -565,11 +593,29 @@ func (wa *WhatsAppClient) handleGroupMessage(msg *events.Message) {
 		return
 	}
 
-	text := extractText(msg.Message)
 	own := wa.ownMentionJIDs()
+	kind, target, content := classify(msg)
+	switch kind {
+	case kindEdit, kindRevoke:
+		// An edit is read like the message it replaces: its trigger and
+		// the bridge's mention go.
+		wa.change(kind, target, groupJID, "", senderNumber, stripMentions(cfg.Triggers.Strip(extractText(content)), own))
+		return
+	case kindOther:
+		wa.log.Debugf("Group message %s in %s: nothing the bridge reads (a reaction, a sticker, …)", msg.Info.ID, groupJID)
+		return
+	}
+
+	text := extractText(msg.Message)
 	addr := addressGroup(msg.Message, text, cfg.Triggers, own, wa.rulesFor(groupJID))
 	// Untagged: run the brain, send nothing.
 	silent := !addr.tagged
+	if kind == kindViewOnce {
+		if !silent {
+			go wa.notify(groupJID, viewOnceNotice)
+		}
+		return
+	}
 
 	if addr.byCaption {
 		if img := msg.Message.GetImageMessage(); img != nil {
@@ -619,7 +665,7 @@ func (wa *WhatsAppClient) handleGroupMessage(msg *events.Message) {
 	log.Printf("Group message from %s (%q) by %s: processing (silent=%v)", groupJID, groupName, senderNumber, silent)
 	go wa.handler(context.Background(), Inbound{
 		JID: groupJID, Sender: senderNumber, Text: text, Media: mediaList(mediaPath),
-		Quoted: quoted, Silent: silent, Source: sourceWhatsApp, At: msg.Info.Timestamp,
+		Quoted: quoted, Silent: silent, Source: sourceWhatsApp, At: msg.Info.Timestamp, ID: string(msg.Info.ID),
 	})
 }
 
@@ -1084,7 +1130,10 @@ func extractQuote(contextInfo *waE2E.ContextInfo) *Quote {
 	return &Quote{From: senderJID, Text: quotedText}
 }
 
-// extractText returns the plain text content of a message.
+// extractText returns the plain text content of a message. A shared
+// location or contact card has none, so it is written as a line the model
+// can read (see locationText and contactText): without it, the message
+// would get no answer at all.
 func extractText(msg *waE2E.Message) string {
 	if msg == nil {
 		return ""
@@ -1094,6 +1143,24 @@ func extractText(msg *waE2E.Message) string {
 	}
 	if ext := msg.GetExtendedTextMessage(); ext != nil {
 		return ext.GetText()
+	}
+	if loc := msg.GetLocationMessage(); loc != nil {
+		return locationText(loc.GetDegreesLatitude(), loc.GetDegreesLongitude(), loc.GetName(), loc.GetAddress(), loc.GetURL())
+	}
+	if loc := msg.GetLiveLocationMessage(); loc != nil {
+		return locationText(loc.GetDegreesLatitude(), loc.GetDegreesLongitude(), loc.GetCaption(), "", "")
+	}
+	if c := msg.GetContactMessage(); c != nil {
+		return contactText(c.GetDisplayName(), c.GetVcard())
+	}
+	if cs := msg.GetContactsArrayMessage(); cs != nil {
+		var cards []string
+		for _, c := range cs.GetContacts() {
+			if t := contactText(c.GetDisplayName(), c.GetVcard()); t != "" {
+				cards = append(cards, t)
+			}
+		}
+		return strings.Join(cards, "\n")
 	}
 	return ""
 }

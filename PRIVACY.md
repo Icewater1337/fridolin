@@ -39,6 +39,12 @@ policy describes what that copy does with data.
   Each is written to the media inbox first (`<media_dir>/plaud/`), which every
   brain may read under the sandbox, until the brain files it in its own
   folder; from there it goes into that brain's backups too.
+- A message deleted for everyone on WhatsApp is taken out of the brain's
+  chat history (`conversation-history.jsonl`), and is not answered if it was
+  still waiting; a file it carried stays in the media inbox, or where the
+  brain filed it. Backups made before the deletion keep their copy. View-once
+  photos, videos and voice notes are never downloaded. Messages in chats with
+  disappearing messages turned on are kept in the history like any others.
 - Nothing is sent to the authors of this project or to anyone else.
 
 ## Google user data

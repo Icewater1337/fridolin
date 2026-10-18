@@ -35,6 +35,9 @@ type historyEntry struct {
 	// the brain that sent it), "script" (the scripts token) or "api" (no
 	// token). A brain's own replies have none.
 	Via string `json:"via,omitempty"`
+	// ID is the WhatsApp message's ID for a message from WhatsApp, which an
+	// edit or a deletion of it names (see recordChange).
+	ID string `json:"id,omitempty"`
 }
 
 // The history entry types. They are written to every brain's history file,
@@ -205,6 +208,11 @@ type Brain struct {
 	sandbox  *SandboxProfiler
 	hooks    *BrainHooks
 
+	// historyMu serialises the bridge's writes to the history file: an
+	// append must not land in a copy that a rewrite then drops (see
+	// rewriteHistory).
+	historyMu sync.Mutex
+
 	mu      sync.Mutex
 	current *brainRun
 	pending []Inbound
@@ -366,8 +374,11 @@ func (br *Brain) Submit(m Inbound) (pos int, busy bool, err error) {
 	s := br.settings.Load()
 
 	// History first, so the run (and any later run) sees the message even when
-	// it is merged into a queue that is already moving.
-	br.appendHistory(m.JID, m.Sender, historyTextWithMedia(m.textWithQuote(), m.Media), historyIn)
+	// it is merged into a queue that is already moving. A line for each part
+	// of a merged message, with its ID: one deleted later is taken out alone.
+	for _, p := range m.ownParts() {
+		br.appendEntry(historyEntry{Chat: m.JID, From: p.Sender, Text: historyTextWithMedia(p.textWithQuote(), p.Media), Type: historyIn, ID: p.ID})
+	}
 
 	br.mu.Lock()
 	if br.retired {
@@ -1734,27 +1745,30 @@ func (br *Brain) appendHistory(chatJID, from, text, typ string) {
 // appendHistoryVia is appendHistory for a line marked with how it came in
 // (see historyEntry.Via).
 func (br *Brain) appendHistoryVia(chatJID, from, text, typ, via string) {
-	entry := historyEntry{
-		TS:   time.Now().Format(time.RFC3339),
-		From: from,
-		Chat: chatJID,
-		Text: text,
-		Type: typ,
-		Via:  via,
-	}
+	br.appendEntry(historyEntry{From: from, Chat: chatJID, Text: text, Type: typ, Via: via})
+}
+
+// appendEntry appends entry to the brain's history file, stamped with the
+// time now.
+func (br *Brain) appendEntry(entry historyEntry) {
+	entry.TS = time.Now().Format(time.RFC3339)
 	data, err := json.Marshal(entry)
 	if err != nil {
 		return
 	}
 	// Through the folder: appending through a symlink would let a brain
 	// write to files its sandbox denies it, another brain's among them.
+	br.historyMu.Lock()
 	f, err := openInFolder(br.root, historyFileName, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600)
+	if err == nil {
+		_, _ = f.Write(append(data, '\n'))
+		f.Close()
+	}
+	br.historyMu.Unlock()
 	if err != nil {
 		log.Printf("brain %s: failed to open history file %s: %v", br.id, filepath.Join(br.workDir, historyFileName), err)
 		return
 	}
-	_, _ = f.Write(append(data, '\n'))
-	f.Close()
 	if br.hooks != nil && br.hooks.OnHistory != nil {
 		br.hooks.OnHistory(br.id, entry)
 	}

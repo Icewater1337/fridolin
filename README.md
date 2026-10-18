@@ -48,7 +48,9 @@ backed up incrementally every night, with old versions kept.
 **Files.** Photos, PDFs, documents, voice notes, and video are downloaded and
 handed over as file paths. The assistant opens them and does whatever you asked.
 A file over 100 MB (`max_media_mb`) is skipped, and so is one that cannot be
-downloaded within two minutes; the sender is told either way.
+downloaded within two minutes; the sender is told either way. View-once photos,
+videos and voice notes are not opened (the sender is asked to send a normal
+one); a shared location or contact card reaches the assistant as text.
 
 **Real polls.** The assistant can send native WhatsApp polls and read the votes
 back; each vote lands in its chat history, so it sees new votes the next time
@@ -69,7 +71,11 @@ when you send it a file (each brain can turn files and forwards off).
 **Orderly.** Messages that arrive while the assistant is busy wait their turn
 (or, if you prefer, a newer request replaces the one you sent before it). A
 photo album or a file plus "what is this?" sent in quick succession becomes
-one request. `!stop` stops whatever it is doing for that chat.
+one request. `!stop` stops whatever it is doing for that chat. A message you
+delete for everyone is not answered, even while it is being answered, and
+leaves the chat history; an edit of one still waiting changes what is
+answered, and an edit of one already answered is noted for the next message,
+without a second run.
 
 **Calendar.** Each brain can sign in to a Google account from the dashboard
 and use the calendars you pick: list events, find free time, create events.
@@ -548,8 +554,8 @@ What the bridge does about it:
   claim your DMs or another group changes nothing until you approve it.
 - **OTP guard.** A message that is only a numeric code, arriving right after
   the assistant asked for one, is dropped before it reaches history or the model
-  — also when it is sent as a reply to the request — and kept in
-  `<data_dir>/otp/` for the local script that asked for it.
+  — also when it is sent as a reply to the request or corrected by an edit —
+  and kept in `<data_dir>/otp/` for the local script that asked for it.
 
 What it does not do:
 
