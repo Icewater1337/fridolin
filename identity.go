@@ -158,7 +158,8 @@ func canonicalUser(ctx context.Context, lids store.LIDStore, jid, alt types.JID)
 			return pn.ToNonAD()
 		}
 		if err != nil {
-			log.Printf("could not look up the number of %s: %v", jid, err)
+			// Masked: the log goes along with bug reports.
+			log.Printf("could not look up the number of %s: %v", maskJID(jid.User, "", jid.Server), err)
 		}
 	}
 	return jid

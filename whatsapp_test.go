@@ -1289,3 +1289,52 @@ func TestGroupMessageReadsOneConfig(t *testing.T) {
 		t.Errorf("a stranger reached the brains under two configs: %+v", m)
 	}
 }
+
+// dmEventFrom is dmEvent from number.
+func dmEventFrom(number, id string, msg *waE2E.Message) *events.Message {
+	evt := dmEvent(id, msg)
+	jid := types.NewJID(number, types.DefaultUserServer)
+	evt.Info.Chat, evt.Info.Sender = jid, jid
+	return evt
+}
+
+// Whoever writes without being allowed is in the log masked, as a group
+// member group_members does not admit is; the dashboard, which offers to
+// allow them, still gets their number.
+func TestIgnoredSendersAreMaskedInTheLog(t *testing.T) {
+	stranger := types.NewJID(otherNumber, types.DefaultUserServer)
+	unknown := types.NewJID("272727", types.HiddenUserServer)
+	byLID := dmEvent("3EB0LID", textMsg("hi"))
+	byLID.Info.Chat, byLID.Info.Sender = unknown, unknown
+	cases := []struct {
+		name   string
+		evt    *events.Message
+		log    []string
+		sender string // as the dashboard is told, and nowhere in the log
+	}{
+		{"a DM", dmEventFrom(otherNumber, "3EB0DM", textMsg("hi")), []string{"DM from " + maskPhone(otherNumber) + ": ignored (not in allowed_numbers)"}, otherNumber},
+		{"a DM by a LID nobody knows", byLID, []string{"DM: could not resolve …27@lid to a phone number", "DM from …27@lid: ignored (not in allowed_numbers)"}, "272727"},
+		{"a group", groupMessage(stranger, types.EmptyJID, groupChatter()), []string{"by " + maskPhone(otherNumber) + ": ignored (not in allowed_groups)"}, otherNumber},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			logged := captureLog(t)
+			tw := newTestWhatsApp(t)
+			var senders []string
+			tw.onIgnored = func(_, _, _, sender, _ string) { senders = append(senders, sender) }
+			tw.handle(t, c.evt)
+			got := strings.Join(logged(), "\n")
+			for _, want := range c.log {
+				if !strings.Contains(got, want) {
+					t.Errorf("log %q, want %q", got, want)
+				}
+			}
+			if strings.Contains(got, c.sender) {
+				t.Errorf("log %q names %s", got, c.sender)
+			}
+			if !slices.Equal(senders, []string{c.sender}) {
+				t.Errorf("the dashboard was told of %v, want %s", senders, c.sender)
+			}
+		})
+	}
+}

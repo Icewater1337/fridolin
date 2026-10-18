@@ -330,7 +330,9 @@ func (wa *WhatsAppClient) eventHandler(rawEvt interface{}) {
 func (wa *WhatsAppClient) handlePollVote(evt *events.Message) {
 	pollVote, err := wa.cl().DecryptPollVote(wa.ctx, evt)
 	if err != nil {
-		wa.log.Errorf("Failed to decrypt poll vote from %s: %v", evt.Info.Sender, err)
+		// Masked, in whatsmeow's error too, which names the voter: the
+		// main log names no voter (see recordVote).
+		wa.log.Errorf("Failed to decrypt poll vote from %s: %v", maskJID(evt.Info.Sender.User, "", evt.Info.Sender.Server), (&redactor{}).text(err.Error()))
 		return
 	}
 	pollMsgID := evt.Message.GetPollUpdateMessage().GetPollCreationMessageKey().GetID()
@@ -355,9 +357,11 @@ func (wa *WhatsAppClient) recordVote(pollMsgID string, voter types.JID, hashes [
 		return
 	}
 	selected := matchVote(hashes, poll.Options)
-	log.Printf("Poll vote recorded: poll=%s voter=%s options=%v", pollMsgID, voter, selected)
+	// Who chose what is for the debug log only: the main log is kept, and
+	// sent along with bug reports.
+	wa.log.Debugf("Poll vote recorded: poll=%s voter=%s options=%v", pollMsgID, voter, selected)
 	if err := wa.store.SavePollVote(pollMsgID, voter.String(), selected); err != nil {
-		wa.log.Errorf("Failed to save poll vote from %s: %v", voter, err)
+		wa.log.Errorf("Failed to save poll vote from %s: %v", maskJID(voter.User, "", voter.Server), err)
 		return
 	}
 	if wa.onVote != nil {
@@ -426,12 +430,17 @@ func (wa *WhatsAppClient) handleMessage(msg *events.Message) {
 		src.Sender = src.Chat
 	}
 	sender, resolved := wa.senderOf(src)
+	// Masked, as a refused group member is: anyone may write to the
+	// bridge's number, and the dashboard, which offers to allow them,
+	// shows it whole. A LID nothing resolves is no number allowed_numbers
+	// lists, so its line is followed by the one that ignores it.
+	who := groupSender{Number: sender.User, Resolved: resolved, Server: sender.Server}.masked()
 	if !resolved {
-		log.Printf("DM: could not resolve %s to a phone number (using it as it is)", sender)
+		log.Printf("DM: could not resolve %s to a phone number (using it as it is)", who)
 	}
 
 	if !wa.isAllowed(sender.User) {
-		log.Printf("DM from %s: ignored (not in allowed_numbers)", sender.User)
+		log.Printf("DM from %s: ignored (not in allowed_numbers)", who)
 		if wa.onIgnored != nil {
 			wa.onIgnored("dm", sender.String(), "", sender.User, msg.Info.PushName)
 		}
@@ -531,6 +540,7 @@ func (wa *WhatsAppClient) handleGroupMessage(msg *events.Message) {
 	// identity map and group_members know them by.
 	sender, resolved := wa.senderOf(msg.Info.MessageSource)
 	senderNumber := sender.User
+	who := groupSender{Number: senderNumber, Resolved: resolved, Server: sender.Server, FromMe: msg.Info.IsFromMe}
 
 	// Unknown groups are logged and offered on the dashboard: that is how you
 	// find a group's JID to allow it. Both checks read the one snapshot cfg:
@@ -538,7 +548,7 @@ func (wa *WhatsAppClient) handleGroupMessage(msg *events.Message) {
 	// that neither config admits.
 	if !isAllowedGroup(cfg, groupJID) {
 		groupName := wa.groupName(msg.Info.Chat)
-		log.Printf("Group message from %s (%q) by %s: ignored (not in allowed_groups)", groupJID, groupName, senderNumber)
+		log.Printf("Group message from %s (%q) by %s: ignored (not in allowed_groups)", groupJID, groupName, who.masked())
 		if wa.onIgnored != nil {
 			wa.onIgnored("group", groupJID, groupName, senderNumber, msg.Info.PushName)
 		}
@@ -547,7 +557,6 @@ func (wa *WhatsAppClient) handleGroupMessage(msg *events.Message) {
 	// A member group_members does not admit is not read at all: no run,
 	// no command, no download, no edit, not even a line in the history.
 	// The group is allowed, so it is not offered on the dashboard again.
-	who := groupSender{Number: senderNumber, Resolved: resolved, Server: sender.Server, FromMe: msg.Info.IsFromMe}
 	if !groupSenderAllowed(cfg, groupJID, who) {
 		// A reaction or a sticker would not have been read anyway, and a
 		// busy group sends many: they go to the debug log, as they would
