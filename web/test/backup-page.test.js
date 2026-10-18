@@ -148,3 +148,30 @@ test('a restore shows while it runs and how it went once it ended', async (t) =>
   assert.ok(text.includes('directory not found'), 'the error is shown');
   assert.ok(!text.includes('Restoring Work'), 'the progress card is gone');
 });
+
+test('version folders named in UTC or in local time both show as dates', async (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout', 'Date'] });
+  installDom();
+  noConsoleErrors(t);
+  serve(t, (path) => {
+    if (path.startsWith('/api/backup/status')) return connected();
+    if (path.startsWith('/api/backup/versions')) return { versions: ['20261018-093000Z', '20261001-120000', 'manual-copy'] };
+    return {};
+  });
+  const root = h('div');
+  document.body.append(root);
+  const ctx = createPage();
+  t.after(() => ctx.destroy());
+  page.render(root, ctx);
+  await settle();
+  const restore = root.querySelectorAll('form').at(-1);
+  const sel = restore.querySelector('select');
+  sel.value = 'work';
+  sel.dispatchEvent(new Event('change'));
+  await settle();
+  const labels = restore.querySelectorAll('label.version-opt').map((l) => l.textContent);
+  const dated = labels.filter((l) => l.includes('files replaced or deleted in that run'));
+  assert.equal(dated.length, 2, labels.join(' | '));
+  assert.ok(!labels.some((l) => l.includes('20261018-093000Z')), 'the UTC name is shown as a date');
+  assert.ok(labels.some((l) => l.includes('manual-copy')), 'other names as they are');
+});

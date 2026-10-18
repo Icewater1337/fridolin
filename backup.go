@@ -1315,16 +1315,26 @@ func (m *BackupManager) stageBridge(stage string) error {
 	return errors.Join(errs...)
 }
 
-// versionLayout names a version folder after the local time of its run.
-// The folders already in Drive use it, so keep it: prune and the restore
-// list read the run time back out of the name.
-const versionLayout = "20060102-150405"
+// versionLayout names a version folder after the time of its run, in UTC
+// (versionName). Local time comes twice in the hour the clocks go back, and
+// would sort a later run's folder before an earlier one's or give two runs
+// one name. legacyVersionLayout is the local time the folders made before
+// are named in. Prune and the restore list read the run time back out of
+// either.
+const (
+	versionLayout       = "20060102-150405Z"
+	legacyVersionLayout = "20060102-150405"
+)
+
+// versionName is the version folder name of a run that started at t.
+func versionName(t time.Time) string { return t.UTC().Format(versionLayout) }
 
 // syncDir runs one incremental sync with versioning into base
 // (remote:root/<id>). With maxDelete >= 0, rclone stops after that many
 // deletions and the run is refused as a mass deletion.
 func (m *BackupManager) syncDir(ctx context.Context, src, base, filterFile, trigger string, maxDelete int) *BackupResult {
-	res := &BackupResult{Started: time.Now(), Trigger: trigger, Version: time.Now().Format(versionLayout)}
+	res := &BackupResult{Started: time.Now(), Trigger: trigger}
+	res.Version = versionName(res.Started)
 	args := []string{"sync", src + "/", base + "/current",
 		"--backup-dir", base + "/versions/" + res.Version,
 		"--links", "--use-json-log", "--stats", "15s", "--stats-log-level", "NOTICE", "-v",
@@ -1464,9 +1474,13 @@ func (m *BackupManager) prune(ctx context.Context, targets []*Brain) {
 	}
 }
 
-// parseVersion reads the run time out of a version folder name.
+// parseVersion reads the run time out of a version folder name, of
+// either layout.
 func parseVersion(name string) (time.Time, bool) {
-	t, err := time.ParseInLocation(versionLayout, name, time.Local)
+	if t, err := time.Parse(versionLayout, name); err == nil {
+		return t, true
+	}
+	t, err := time.ParseInLocation(legacyVersionLayout, name, time.Local)
 	return t, err == nil
 }
 
@@ -1554,8 +1568,9 @@ func backupNameOK(id string) bool {
 }
 
 // restoreVersionRe matches what a restore may copy: the latest copy, or a
-// version folder named as the runs name them (versionLayout).
-var restoreVersionRe = regexp.MustCompile(`^(current|\d{8}-\d{6})$`)
+// version folder named as the runs name them, in either layout (see
+// versionLayout).
+var restoreVersionRe = regexp.MustCompile(`^(current|\d{8}-\d{6}Z?)$`)
 
 func (b *Bridge) apiBackupVersions(w http.ResponseWriter, r *http.Request) {
 	id := r.URL.Query().Get("brain")

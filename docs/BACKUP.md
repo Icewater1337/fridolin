@@ -49,12 +49,14 @@ fridolin-backup/        (backup.root)
 
 Each run is an incremental `rclone sync`: only changed files upload. When a
 file changes or disappears, the previous copy moves to `versions/<timestamp>/`
-instead of being lost. The timestamp is the local time of that run
-(`YYYYMMDD-HHMMSS`), and the whole folder is deleted `keep_versions_days`
-(default 30, `0` keeps them forever) after that run, however old the files in
-it are. A version folder holds only what changed in that run, not a full
-snapshot. Folders in `versions/` whose name is not such a timestamp are never
-deleted.
+instead of being lost. The timestamp is the time of that run in UTC
+(`YYYYMMDD-HHMMSSZ`), so that the hour the clocks go back cannot reorder
+runs or give two the same name; folders from before are in local time,
+without the `Z`, and are read as such. The whole folder is deleted
+`keep_versions_days` (default 30, `0` keeps them forever) after that run,
+however old the files in it are. A version folder holds only what changed
+in that run, not a full snapshot. Folders in `versions/` whose name is not
+such a timestamp are never deleted.
 
 **Never uploaded:** the WhatsApp session (`bridge.db`), `.env` files, the
 dashboard token, the rclone config, downloaded media in the data folder.

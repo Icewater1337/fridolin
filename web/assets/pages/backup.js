@@ -22,10 +22,13 @@ const jobLabel = (id, brains) => {
   return b ? (b.name || b.id) : id;
 };
 
+// A version folder is named after its run's time: in UTC with a Z, or in
+// the bridge's local time for folders made before.
 function versionDate(v) {
-  const m = /^(\d{4})(\d{2})(\d{2})-(\d{2})(\d{2})(\d{2})$/.exec(v || '');
+  const m = /^(\d{4})(\d{2})(\d{2})-(\d{2})(\d{2})(\d{2})(Z?)$/.exec(v || '');
   if (!m) return null;
-  return new Date(+m[1], +m[2] - 1, +m[3], +m[4], +m[5], +m[6]);
+  const parts = [+m[1], +m[2] - 1, +m[3], +m[4], +m[5], +m[6]];
+  return m[7] ? new Date(Date.UTC(...parts)) : new Date(...parts);
 }
 
 function stamp(d = new Date()) {

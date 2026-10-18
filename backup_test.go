@@ -615,7 +615,7 @@ func TestBackupRoundTripWithRealRclone(t *testing.T) {
 
 func TestExpiredVersions(t *testing.T) {
 	now := time.Date(2026, 10, 17, 12, 0, 0, 0, time.Local)
-	stamp := func(days int) string { return now.AddDate(0, 0, -days).Format(versionLayout) }
+	stamp := func(days int) string { return versionName(now.AddDate(0, 0, -days)) }
 	cases := []struct {
 		name  string
 		names []string
@@ -625,7 +625,10 @@ func TestExpiredVersions(t *testing.T) {
 		{"older than the window", []string{stamp(31), stamp(29)}, 30, []string{stamp(31)}},
 		{"exactly on the cutoff stays", []string{stamp(30)}, 30, nil},
 		{"one day window", []string{stamp(2), stamp(0)}, 1, []string{stamp(2)}},
-		{"names that are not version stamps stay", []string{"keep-me", "2025", "20250101-0000", stamp(90)}, 30, []string{stamp(90)}},
+		{"names that are not version stamps stay", []string{"keep-me", "2025", "20250101-0000", "20250101-000000X", stamp(90)}, 30, []string{stamp(90)}},
+		// Folders named before the names were in UTC are in local time.
+		{"local-time names", []string{now.AddDate(0, 0, -31).Format(legacyVersionLayout), now.AddDate(0, 0, -29).Format(legacyVersionLayout)}, 30,
+			[]string{now.AddDate(0, 0, -31).Format(legacyVersionLayout)}},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -643,7 +646,7 @@ func TestBackupVersionsNewestFirst(t *testing.T) {
 	tb := newTestBridge(t, "")
 	connectAlias(t, tb)
 	tb.backup.runner = func(_ context.Context, args []string, _ io.Writer) ([]byte, error) {
-		return []byte(`[{"Name":"20261001-120000"},{"Name":"manual-copy"},{"Name":"20261015-080000"},{"Name":"20250101-000000"}]`), nil
+		return []byte(`[{"Name":"20261001-120000"},{"Name":"manual-copy"},{"Name":"20261016-080000Z"},{"Name":"20261015-080000"},{"Name":"20250101-000000"}]`), nil
 	}
 	w := tb.do("GET", "/api/backup/versions?brain=notes", nil)
 	if w.Code != 200 {
@@ -653,9 +656,36 @@ func TestBackupVersionsNewestFirst(t *testing.T) {
 		Versions []string `json:"versions"`
 	}
 	_ = json.Unmarshal(w.Body.Bytes(), &resp)
-	want := []string{"20261015-080000", "20261001-120000", "20250101-000000", "manual-copy"}
+	want := []string{"20261016-080000Z", "20261015-080000", "20261001-120000", "20250101-000000", "manual-copy"}
 	if fmt.Sprint(resp.Versions) != fmt.Sprint(want) {
 		t.Errorf("versions = %v, want %v", resp.Versions, want)
+	}
+}
+
+// TestVersionNamesKeepTheirOrderWhenClocksGoBack: version folders are
+// named in UTC, so a run in the hour the clocks go back sorts after the run
+// an hour of local time "later" that came before it, and neither name can
+// come twice.
+func TestVersionNamesKeepTheirOrderWhenClocksGoBack(t *testing.T) {
+	zurich, err := time.LoadLocation("Europe/Zurich")
+	if err != nil {
+		t.Fatal(err)
+	}
+	// 2026-10-25: 02:30 summer time, then 02:15 winter time 45 minutes later.
+	first := time.Date(2026, 10, 25, 0, 30, 0, 0, time.UTC).In(zurich)
+	second := first.Add(45 * time.Minute)
+	names := []string{versionName(first), versionName(second)}
+	sortVersions(names)
+	if names[0] != versionName(second) {
+		t.Errorf("versions = %v, want the later run first", names)
+	}
+	for _, n := range names {
+		if !restoreVersionRe.MatchString(n) {
+			t.Errorf("%s cannot be restored", n)
+		}
+		if got, ok := parseVersion(n); !ok || !(got.Equal(first) || got.Equal(second)) {
+			t.Errorf("parseVersion(%s) = %v, %v", n, got, ok)
+		}
 	}
 }
 
@@ -738,8 +768,8 @@ func TestBackupPruneKeepsVersionsByRunDate(t *testing.T) {
 		_ = os.MkdirAll(filepath.Dir(p), 0o700)
 		_ = os.WriteFile(p, []byte("older"), 0o600)
 	}
-	expired := time.Now().AddDate(0, 0, -40).Format(versionLayout)
-	recent := time.Now().AddDate(0, 0, -10).Format(versionLayout)
+	expired := versionName(time.Now().AddDate(0, 0, -40))
+	recent := versionName(time.Now().AddDate(0, 0, -10))
 	seed(expired)
 	seed(recent)
 	seed("not-a-version")
@@ -773,8 +803,8 @@ func TestBackupPruneKeepsVersionsByRunDate(t *testing.T) {
 // never filters files by their age.
 func TestPrunePurgesExpiredVersionFolders(t *testing.T) {
 	tb := newTestBridge(t, `, "backup": {"keep_versions_days": 30}`)
-	expired := time.Now().AddDate(0, 0, -31).Format(versionLayout)
-	recent := time.Now().AddDate(0, 0, -29).Format(versionLayout)
+	expired := versionName(time.Now().AddDate(0, 0, -31))
+	recent := versionName(time.Now().AddDate(0, 0, -29))
 	var mu sync.Mutex
 	var calls [][]string
 	tb.backup.runner = func(_ context.Context, args []string, stderr io.Writer) ([]byte, error) {
@@ -812,8 +842,8 @@ func TestPrunePurgesExpiredVersionFolders(t *testing.T) {
 // one prune all use the config it started with, and a cancelled job stops
 // it at once instead of trying (and logging) every remaining id.
 func TestPruneKeepsItsConfigAndStopsWhenCancelled(t *testing.T) {
-	listing := []byte(`[{"Name":"` + time.Now().AddDate(0, 0, -31).Format(versionLayout) + `"},` +
-		`{"Name":"` + time.Now().AddDate(0, 0, -60).Format(versionLayout) + `"}]`)
+	listing := []byte(`[{"Name":"` + versionName(time.Now().AddDate(0, 0, -31)) + `"},` +
+		`{"Name":"` + versionName(time.Now().AddDate(0, 0, -60)) + `"}]`)
 	brains := []*Brain{{id: "notes"}, {id: "work"}}
 
 	t.Run("backup.root changed mid-run", func(t *testing.T) {
@@ -2144,7 +2174,8 @@ func TestBackupRestoreRecordsItsResult(t *testing.T) {
 		wantSrc string
 	}{
 		{"latest copy", "current", false, notesBase + "/current"},
-		{"a version", "20261001-120000", false, notesBase + "/versions/20261001-120000"},
+		{"a version", "20261018-093000Z", false, notesBase + "/versions/20261018-093000Z"},
+		{"a version named in local time", "20261001-120000", false, notesBase + "/versions/20261001-120000"},
 		{"failed", "current", true, notesBase + "/current"},
 	}
 	for _, tc := range cases {
