@@ -2617,6 +2617,17 @@ func (bm *BrainManager) StopHandOffs(jid string) (stopped bool, dropped int) {
 	return stopped, dropped
 }
 
+// KillRuns kills every brain's run in flight at once, for a second signal
+// while the bridge stops: nothing waits for the runs to end.
+func (bm *BrainManager) KillRuns() {
+	for _, br := range bm.Brains() {
+		br.mu.Lock()
+		cur := br.current
+		br.mu.Unlock()
+		br.interruptRun(cur)
+	}
+}
+
 // Stop interrupts every run and drops every queue.
 func (bm *BrainManager) Stop() {
 	var wg sync.WaitGroup

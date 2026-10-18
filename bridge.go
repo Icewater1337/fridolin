@@ -60,6 +60,8 @@ type Bridge struct {
 	outbox        *Outbox
 	otp           otpHandoffs
 	started       time.Time
+	// restart is BridgeOptions.Restart.
+	restart func()
 
 	// listen is the address the HTTP server binds, "" when it is off;
 	// runs reach the brain API there with a token from runTokens.
@@ -90,6 +92,10 @@ type Bridge struct {
 type BridgeOptions struct {
 	NoWhatsApp bool
 	Logs       *LogRing
+	// Restart asks whoever runs the bridge to stop it and run it again
+	// (POST /api/restart): runCmd ends its context with errRestart. Nil
+	// leaves the bridge unable to restart itself.
+	Restart func()
 }
 
 // NewBridge creates and wires up all components. It holds the data
@@ -151,6 +157,7 @@ func NewBridge(cfgs *ConfigStore, opts BridgeOptions) (_ *Bridge, err error) {
 		logs:     opts.Logs,
 		activity: NewActivity(500),
 		started:  time.Now(),
+		restart:  opts.Restart,
 	}
 	if cfg.HTTPEnabled() {
 		// A change to http_listen waits for a restart: until then the

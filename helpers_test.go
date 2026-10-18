@@ -55,7 +55,7 @@ import (
 // executed again in place, and fails at once, see reexecutedInPlace.
 func TestMain(m *testing.M) {
 	if reexecutedInPlace() {
-		fmt.Fprintln(os.Stderr, "TestMain: a handler re-executed the bridge, and with it this test binary in place (POST /api/restart in a test?): the tests that were running never finished")
+		fmt.Fprintln(os.Stderr, "TestMain: a restart re-executed the bridge, and with it this test binary in place (serve in a test, with the real execSelf?): the tests that were running never finished")
 		os.Exit(2)
 	}
 	if os.Getenv("FRIDOLIN_TEST_RUN_MAIN") == "1" {
@@ -125,7 +125,7 @@ var testChildEnv = []childEnvVar{
 const testPIDVariable = "FRIDOLIN_TEST_PID"
 
 // reexecutedInPlace reports whether this process is the test binary
-// executed again in place. exec keeps the process ID: POST /api/restart
+// executed again in place. exec keeps the process ID: a restart (serve)
 // re-executes os.Args[0], which in a test is this binary, with the test
 // flags and the environment of the test that was running. Playing the
 // fake CLI, as that environment says, or running the tests again, it would
@@ -135,17 +135,21 @@ func reexecutedInPlace() bool {
 	return os.Getenv(testPIDVariable) == strconv.Itoa(os.Getpid())
 }
 
-// TestRestartInATestFailsTheRun: POST /api/restart re-executes the process
-// in place, which in a test is the test binary. Its guards stop a request
-// before the handler runs; should one let it through, the run must fail
-// rather than end as the fake CLI with exit 0, which go test would report
-// as a pass of the whole package (reexecutedInPlace). Both are checked in a
-// test binary of its own, since the restart replaces the process that
-// makes it.
+// TestRestartInATestFailsTheRun: a restart runs the bridge again in place
+// (serve), which in a test is the test binary. The guards of POST
+// /api/restart stop a request before it asks for one; and should a test
+// restart a bridge through serve without replacing execSelf, the run must
+// fail rather than end as the fake CLI with exit 0, which go test would
+// report as a pass of the whole package (reexecutedInPlace). Both are
+// checked in a test binary of its own, since the restart replaces the
+// process that makes it.
 func TestRestartInATestFailsTheRun(t *testing.T) {
 	const child, held = "FRIDOLIN_TEST_RESTART_CHILD", "the guards held: this is still the test"
 	if os.Getenv(child) == "1" {
-		h := newHarness(t, "")
+		tb := newTestBridge(t, `, "http_listen": "127.0.0.1:0"`)
+		ctx, cancel := context.WithCancelCause(context.Background())
+		tb.restart = func() { cancel(errRestart) }
+		go serve(ctx, tb.Bridge, func() bool { return false })
 		for _, c := range []struct {
 			name   string
 			mutate func(*http.Request)
@@ -156,18 +160,19 @@ func TestRestartInATestFailsTheRun(t *testing.T) {
 			{"a form body", func(r *http.Request) { r.Header.Set("Content-Type", "text/plain") }, http.StatusUnsupportedMediaType},
 			{"from another site", func(r *http.Request) { r.Header.Set("Origin", "https://evil.example.com") }, http.StatusForbidden},
 		} {
-			if w := h.Do("POST", "/api/restart", map[string]any{}, c.mutate); w.Code != c.want {
+			if w := tb.do("POST", "/api/restart", map[string]any{}, c.mutate); w.Code != c.want {
 				t.Errorf("%s: %d, want %d", c.name, w.Code, c.want)
 			}
 		}
-		// The handler re-executes the process 300 ms after it answers.
-		time.Sleep(time.Second)
+		if ctx.Err() != nil {
+			t.Fatalf("a refused POST /api/restart asked for a restart: %v", context.Cause(ctx))
+		}
 		fmt.Println(held)
-		if w := h.Do("POST", "/api/restart", nil); w.Code != http.StatusAccepted {
+		if w := tb.do("POST", "/api/restart", nil); w.Code != http.StatusAccepted {
 			t.Fatalf("POST /api/restart: %d %s", w.Code, w.Body.String())
 		}
 		time.Sleep(10 * time.Second)
-		t.Fatal("POST /api/restart did not re-execute the process")
+		t.Fatal("the restart did not re-execute the process")
 	}
 	cmd := exec.Command(os.Args[0], "-test.run=^TestRestartInATestFailsTheRun$", "-test.count=1", "-test.v")
 	// The child's temp folders inside this test's: replaced by the restart,

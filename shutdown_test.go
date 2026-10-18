@@ -3,12 +3,18 @@ package main
 import (
 	"bufio"
 	"context"
+	"encoding/json"
 	"errors"
+	"io"
 	"log"
 	"net"
+	"net/http"
 	"os"
+	"os/exec"
+	"path/filepath"
 	"strings"
 	"sync"
+	"syscall"
 	"testing"
 	"time"
 )
@@ -127,4 +133,210 @@ func TestStopEndsTheRequestsInFlight(t *testing.T) {
 	if _, err := conn.Read(make([]byte, 1)); errors.Is(err, os.ErrDeadlineExceeded) {
 		t.Errorf("the request was still connected %v after Stop began", time.Since(stopped).Round(time.Second))
 	}
+}
+
+// errExecStub is what the stand-in for execSelf returns: exec returns
+// only when it fails.
+var errExecStub = errors.New("exec: not in a test")
+
+// serve stops the bridge once however it ends, and runs it again only for
+// a restart that no signal overtook, once the instance lock is free for
+// the process that takes over.
+func TestServe(t *testing.T) {
+	tests := []struct {
+		name      string
+		end       func(t *testing.T, tb *testBridge, cancel context.CancelCauseFunc)
+		signalled bool
+		broken    bool // Start's HTTP server fails
+		code      int
+		execs     int
+	}{
+		{"restart", func(t *testing.T, tb *testBridge, _ context.CancelCauseFunc) {
+			if w := tb.do("POST", "/api/restart", nil); w.Code != 202 {
+				t.Errorf("POST /api/restart: %d %s", w.Code, w.Body.String())
+			}
+		}, false, false, 1, 1},
+		{"signal during a restart", func(_ *testing.T, tb *testBridge, _ context.CancelCauseFunc) {
+			tb.do("POST", "/api/restart", nil)
+		}, true, false, 0, 0},
+		{"signal", func(_ *testing.T, _ *testBridge, cancel context.CancelCauseFunc) {
+			cancel(errors.New("received signal terminated"))
+		}, true, false, 0, 0},
+		{"server fails", func(*testing.T, *testBridge, context.CancelCauseFunc) {}, false, true, 1, 0},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			tb := newTestBridge(t, `, "http_listen": "127.0.0.1:0"`)
+			dataDir := tb.cfgs.Get().DataDir
+			var logs lockedBuffer
+			defer log.SetOutput(log.Writer())
+			log.SetOutput(&logs)
+			prevExec, prevListen := execSelf, listenHTTP
+			t.Cleanup(func() { execSelf, listenHTTP = prevExec, prevListen })
+			if tc.broken {
+				listenHTTP = func(network, addr string) (net.Listener, error) {
+					ln, err := prevListen(network, addr)
+					return brokenListener{ln}, err
+				}
+			}
+			var execs []string
+			var lockErr error
+			execSelf = func(argv0 string, argv, env []string) error {
+				execs = append(execs, argv0)
+				// What the new process's NewBridge takes first.
+				lock, err := acquireInstanceLock(dataDir)
+				if lockErr = err; err == nil {
+					lock.release()
+				}
+				return errExecStub
+			}
+			ctx, cancel := context.WithCancelCause(context.Background())
+			defer cancel(nil)
+			tb.restart = func() { cancel(errRestart) }
+			code := make(chan int, 1)
+			go func() { code <- serve(ctx, tb.Bridge, func() bool { return tc.signalled }) }()
+			tc.end(t, tb, cancel)
+			select {
+			case got := <-code:
+				if got != tc.code {
+					t.Errorf("exit code %d, want %d", got, tc.code)
+				}
+			case <-time.After(20 * time.Second):
+				t.Fatal("serve did not return")
+			}
+			if len(execs) != tc.execs {
+				t.Errorf("executed %v, want %d run", execs, tc.execs)
+			}
+			if exe, _ := os.Executable(); len(execs) > 0 && execs[0] != exe {
+				t.Errorf("executed %s, want this binary %s", execs[0], exe)
+			}
+			if lockErr != nil {
+				t.Errorf("the instance lock was still held when the bridge ran again: %v", lockErr)
+			}
+			if n := strings.Count(logs.String(), "Bridge stopped."); n != 1 {
+				t.Errorf("the bridge stopped %d times, want once:\n%s", n, logs.String())
+			}
+		})
+	}
+}
+
+// Without a way to restart, as in check or a test, the restart button
+// says so instead of answering that it restarts.
+func TestRestartNeedsSomeoneToRestart(t *testing.T) {
+	tb := newTestBridge(t, "")
+	if w := tb.do("POST", "/api/restart", nil); w.Code != http.StatusServiceUnavailable {
+		t.Errorf("POST /api/restart: %d %s, want 503", w.Code, w.Body.String())
+	}
+}
+
+// A second SIGTERM while the bridge stops, here waiting for a request
+// still in flight, stops the brain's run and the bridge at once, with exit
+// code 1. The bridge runs as its own process, the test binary as main.
+func TestASecondSignalStopsAtOnce(t *testing.T) {
+	addr := freePort(t)
+	root, cfg := cliFixture(t, `"http_listen": "`+addr+`", "debounce": {"quiet_ms": 0}`, func(home string) []BrainRef {
+		return []BrainRef{brainFolder(t, "~/main", BrainManifest{ID: "main", Name: "Main", Routing: BrainRouting{HandlesDMs: true}})}
+	})
+	home := filepath.Join(root, "home")
+	cmd := exec.Command(filepath.Join(root, "bin", "fridolin"), "--no-whatsapp", "--config", cfg)
+	cmd.Dir = root
+	cmd.Env = []string{
+		"FRIDOLIN_TEST_RUN_MAIN=1", "FRIDOLIN_FAKE_CLAUDE=1", "FRIDOLIN_FAKE_SLEEP_MS=60000",
+		"HOME=" + home, "PATH=/usr/bin:/bin", "GORACE=atexit_sleep_ms=0", "GOCOVERDIR=" + t.TempDir(),
+	}
+	var out lockedBuffer
+	cmd.Stdout, cmd.Stderr = &out, &out
+	if err := cmd.Start(); err != nil {
+		t.Fatal(err)
+	}
+	exited := make(chan error, 1)
+	go func() { exited <- cmd.Wait() }()
+	t.Cleanup(func() {
+		_ = cmd.Process.Kill()
+		<-exited
+	})
+
+	client := &http.Client{Timeout: 5 * time.Second}
+	call := func(method, path, token string, body string) (int, string) {
+		req, _ := http.NewRequest(method, "http://"+addr+path, strings.NewReader(body))
+		if token != "" {
+			req.Header.Set("X-Bridge-Token", token)
+			req.Header.Set("X-Bridge-Dashboard", "1")
+			req.Header.Set("Content-Type", "application/json")
+		}
+		resp, err := client.Do(req)
+		if err != nil {
+			return 0, err.Error()
+		}
+		defer resp.Body.Close()
+		data, _ := io.ReadAll(resp.Body)
+		return resp.StatusCode, string(data)
+	}
+	waitFor(t, 20*time.Second, "the bridge to serve", func() bool { code, _ := call("GET", "/health", "", ""); return code == 200 })
+	data, err := os.ReadFile(filepath.Join(home, ".fridolin", "dashboard.token"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	token := strings.TrimSpace(string(data))
+	if code, body := call("POST", "/api/dev/inbound", token, `{"jid": "`+harnessDM+`", "text": "take your time"}`); code != http.StatusAccepted {
+		t.Fatalf("dev inbound: %d %s", code, body)
+	}
+	var pid int
+	waitFor(t, 20*time.Second, "the run to start", func() bool {
+		_, body := call("GET", "/api/status", token, "")
+		var st struct {
+			Brains []struct {
+				Running *RunView `json:"running"`
+			} `json:"brains"`
+		}
+		if json.Unmarshal([]byte(body), &st) == nil && len(st.Brains) == 1 && st.Brains[0].Running != nil {
+			pid = st.Brains[0].Running.PID
+		}
+		return pid > 0
+	})
+
+	// A request whose body never comes in full holds the stop up for
+	// httpStopWait (see TestStopEndsTheRequestsInFlight).
+	conn, err := net.Dial("tcp", addr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close()
+	req := "POST /api/dev/inbound HTTP/1.1\r\nHost: " + addr + "\r\nX-Bridge-Token: " + token +
+		"\r\nX-Bridge-Dashboard: 1\r\nContent-Type: application/json\r\nContent-Length: 100\r\nExpect: 100-continue\r\n\r\n"
+	if _, err := conn.Write([]byte(req)); err != nil {
+		t.Fatal(err)
+	}
+	if line, err := bufio.NewReader(conn).ReadString('\n'); !strings.Contains(line, "100 Continue") {
+		t.Fatalf("the server answered %q (%v), want 100 Continue", line, err)
+	}
+
+	if err := cmd.Process.Signal(syscall.SIGTERM); err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, 10*time.Second, "the stop to begin", func() bool { return strings.Contains(out.String(), "shutting down") })
+	time.Sleep(200 * time.Millisecond)
+	select {
+	case err := <-exited:
+		exited <- err
+		t.Fatalf("the bridge exited (%v) before its run was over or its grace was:\n%s", err, out.String())
+	default:
+	}
+	sent := time.Now()
+	if err := cmd.Process.Signal(syscall.SIGTERM); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case err := <-exited:
+		exited <- err
+		var exit *exec.ExitError
+		if !errors.As(err, &exit) || exit.ExitCode() != 1 {
+			t.Errorf("after the second signal the bridge exited with %v, want exit status 1:\n%s", err, out.String())
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatalf("the bridge was still stopping 5s after the second signal:\n%s", out.String())
+	}
+	t.Logf("exited %v after the second signal", time.Since(sent).Round(time.Millisecond))
+	// The run's process group is gone, though its 60 seconds are not.
+	waitFor(t, 5*time.Second, "the run to be killed", func() bool { return syscall.Kill(pid, 0) == syscall.ESRCH })
 }

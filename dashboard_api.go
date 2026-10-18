@@ -23,7 +23,6 @@ import (
 	"strconv"
 	"strings"
 	"sync"
-	"syscall"
 	"time"
 	"unicode"
 	"unicode/utf8"
@@ -852,22 +851,18 @@ func (b *Bridge) apiPutConfig(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"etag": res.ETag, "restart_required": nonNil(res.Restart)})
 }
 
-// apiRestart re-executes the bridge in place (same binary, same arguments).
+// apiRestart restarts the bridge in place (same binary, same arguments): it
+// answers, then asks whoever runs the bridge to stop it and run it again
+// (BridgeOptions.Restart). The stop is the one SIGTERM makes, in main, and
+// main runs the bridge again once it is over.
 func (b *Bridge) apiRestart(w http.ResponseWriter, r *http.Request) {
-	exe, err := os.Executable()
-	if err != nil {
-		writeErr(w, http.StatusInternalServerError, err.Error())
+	if b.restart == nil {
+		writeErr(w, http.StatusServiceUnavailable, "this bridge cannot restart itself")
 		return
 	}
+	log.Printf("Restarting on request from the dashboard…")
 	writeJSON(w, http.StatusAccepted, map[string]string{"status": "restarting"})
-	go func() {
-		time.Sleep(300 * time.Millisecond)
-		log.Printf("Restarting on request from the dashboard…")
-		b.Stop() // releases the instance lock for the new process
-		if err := syscall.Exec(exe, os.Args, os.Environ()); err != nil {
-			log.Fatalf("restart failed: %v", err)
-		}
-	}()
+	b.restart()
 }
 
 // ── brains ───────────────────────────────────────────────────────────────

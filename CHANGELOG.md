@@ -175,6 +175,10 @@ for compatibility.
   running, and no edit or approval writes over the file. Unknown fields in
   `brain.json`, and unknown keys inside a section of `config.json`, are
   logged by their path.
+- A second Ctrl-C or SIGTERM while the bridge stops ends it at once: it
+  kills the brains' runs still going and exits with code 1. Restart in
+  the dashboard stops the bridge as SIGTERM does, and a SIGTERM while
+  it restarts leaves it stopped.
 
 ### Added
 
