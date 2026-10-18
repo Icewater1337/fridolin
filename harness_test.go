@@ -129,12 +129,16 @@ func (h *harness) Do(method, path string, body any, mutate ...func(*http.Request
 }
 
 // Script sends a request the way a local script does: a JSON body and the
-// scripts token from the data dir, no dashboard token or header.
-func (h *harness) Script(method, path, body string) *httptest.ResponseRecorder {
+// scripts token from the data dir, no dashboard token or header. mutate
+// adjusts it first.
+func (h *harness) Script(method, path, body string, mutate ...func(*http.Request)) *httptest.ResponseRecorder {
 	h.t.Helper()
 	r := httptest.NewRequest(method, "http://"+defaultHTTPListen+path, strings.NewReader(body))
 	r.Header.Set("Content-Type", "application/json")
 	r.Header.Set("Authorization", "Bearer "+h.readToken("scripts.token"))
+	for _, m := range mutate {
+		m(r)
+	}
 	w := httptest.NewRecorder()
 	h.h.ServeHTTP(w, r)
 	return w
@@ -251,6 +255,49 @@ func (h *harness) AddBrain(m BrainManifest) string {
 		h.t.Fatalf("add brain %s: %d %s", m.ID, w.Code, w.Body.String())
 	}
 	return filepath.Join(h.home, m.ID)
+}
+
+// Answer hands the bridge m and returns the next message the bridge sends
+// to m's chat. The fake CLI's answer starts with echo:<folder>:, which says
+// which brain ran.
+func (h *harness) Answer(m inbound) string {
+	h.t.Helper()
+	n := len(h.SentTo(m.JID))
+	h.Inject(m)
+	h.WaitFor("the answer in "+m.JID, func() bool { return len(h.SentTo(m.JID)) > n })
+	return h.SentTo(m.JID)[n]
+}
+
+// Approved returns the approved copy of each brain's brain.json, by id, as
+// config.json holds them.
+func (h *harness) Approved() map[string]BrainManifest {
+	h.t.Helper()
+	var file struct {
+		BrainDirs []BrainRef `json:"brain_dirs"`
+	}
+	data, err := os.ReadFile(h.cfg)
+	if err != nil || json.Unmarshal(data, &file) != nil {
+		h.t.Fatalf("config.json: %v\n%s", err, data)
+	}
+	out := map[string]BrainManifest{}
+	for _, ref := range file.BrainDirs {
+		if ref.Approved != nil {
+			out[ref.Approved.ID] = *ref.Approved
+		}
+	}
+	return out
+}
+
+// Issues returns the problems with brains that GET /api/status reports.
+func (h *harness) Issues() []BrainIssue {
+	h.t.Helper()
+	var st struct {
+		Issues []BrainIssue `json:"issues"`
+	}
+	if w := h.Do("GET", "/api/status", nil); w.Code != http.StatusOK || json.Unmarshal(w.Body.Bytes(), &st) != nil {
+		h.t.Fatalf("GET /api/status: %d %s", w.Code, w.Body.String())
+	}
+	return st.Issues
 }
 
 // WaitFor polls cond until it holds, for up to ten seconds.
