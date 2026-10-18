@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"io/fs"
@@ -59,12 +60,93 @@ func TestCheckBrainPath(t *testing.T) {
 		{"~/brains", false},             // contains another brain
 		{"~/.fridolin/x", false},
 		{"relative/path", false},
+		// What the sandbox keeps from brains: a brain may write its own
+		// folder, so one inside ~/.claude/skills writes what your own
+		// sessions load, one at ~/.ssh opens your keys.
+		{"~/.claude/skills/x", false},
+		{"~/.ssh", false},
+		{"~/.config", false}, // holds ~/.config/gh
+		{"~/Library/LaunchAgents/x", false},
+		{"~/Library/Keychains/x", false},
+		{"~/creds/x", false},
+		{"~/linked/new", false}, // ~/linked is a symlink out of HOME
+		{"~/Documents/assistant", true},
+	}
+	cfg.Sandbox.CredentialsDir = filepath.Join(home, "creds")
+	if err := os.MkdirAll(filepath.Join(home, ".ssh"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	// A folder the dashboard is to create is checked where MkdirAll would
+	// create it: through the symlink, out of HOME.
+	if err := os.Symlink(canonicalDir(t.TempDir()), filepath.Join(home, "linked")); err != nil {
+		t.Fatal(err)
 	}
 	for _, c := range cases {
 		_, problems, _ := CheckBrainPath(c.path, cfg, others)
 		if (len(problems) == 0) != c.ok {
 			t.Errorf("CheckBrainPath(%q): problems=%v, want ok=%v", c.path, problems, c.ok)
 		}
+	}
+	// macOS guards ~/Documents from the bridge itself, not the sandbox.
+	if _, _, warnings := CheckBrainPath("~/Documents/assistant", cfg, others); len(warnings) != 1 || !strings.Contains(warnings[0], "Privacy & Security") {
+		t.Errorf("warnings for ~/Documents = %q, want one naming the privacy settings", warnings)
+	}
+}
+
+// TestResolveBrainsRefusesFoldersTheSandboxProtects: the dashboard refuses
+// a brain folder the sandbox could not keep apart, but brain_dirs can be
+// edited by hand, and a folder can change after it was added. ResolveBrains
+// used to accept any of them, and the brain's profile then opened what the
+// folder held: a brain at your home folder read the data dir and ~/.ssh.
+// Now each is left out with an issue, and the others still run.
+func TestResolveBrainsRefusesFoldersTheSandboxProtects(t *testing.T) {
+	home := canonicalDir(t.TempDir())
+	t.Setenv("HOME", home)
+	if err := os.MkdirAll(filepath.Join(home, "elsewhere"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	cases := []struct {
+		name, path string
+		want       string // in the issue's detail, "" for a brain that runs
+	}{
+		{"your home folder", "~", "your home folder"},
+		{"a folder holding the data folder", "~/box", "holds the bridge's data folder"},
+		{"inside ~/.claude", "~/.claude/skills/x", "inside your Claude Code folder"},
+		{"your ssh keys", "~/.ssh", "is ~/.ssh"},
+		{"inside LaunchAgents", "~/Library/LaunchAgents/x", "inside ~/Library/LaunchAgents"},
+		// The bridge takes ~/tools/bin off its PATH instead.
+		{"a folder holding one on the bridge's PATH", "~/tools", ""},
+		{"a folder of its own", "~/assistant/a", ""},
+	}
+	t.Setenv("PATH", home+"/tools/bin:/usr/bin:/bin")
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			ref := brainFolder(t, tc.path, BrainManifest{ID: "x", Routing: BrainRouting{HandlesDMs: true}})
+			other := brainFolder(t, "~/elsewhere/y", BrainManifest{ID: "y"})
+			// x second: the dashboard shows an issue on the entry it
+			// names, which was the first one for these.
+			cfg := &Config{DataDir: filepath.Join(home, "box", ".fridolin"), BrainDirs: []BrainRef{other, ref}}
+			for i := range cfg.BrainDirs {
+				cfg.BrainDirs[i].Path = expandHome(cfg.BrainDirs[i].Path, home)
+			}
+			specs, issues := ResolveBrains(cfg)
+			var ids []string
+			for _, s := range specs {
+				ids = append(ids, s.Manifest.ID)
+			}
+			if tc.want == "" {
+				if !slices.Equal(ids, []string{"y", "x"}) || len(issues) != 0 {
+					t.Errorf("brains %v, issues %+v; want both to run", ids, issues)
+				}
+				return
+			}
+			if !slices.Equal(ids, []string{"y"}) {
+				t.Errorf("brains %v, want only y", ids)
+			}
+			if len(issues) != 1 || issues[0].ID != "x" || issues[0].Kind != "invalid" || !strings.Contains(issues[0].Detail, tc.want) || issues[0].entry != 1 {
+				t.Errorf("issues = %+v, want one for x, on its entry 1, saying %q", issues, tc.want)
+			}
+		})
 	}
 }
 
@@ -466,4 +548,114 @@ func TestBrainTemplatesNameNoPaths(t *testing.T) {
 			t.Errorf("%s as written differs from the rendered template (%v)", name, err)
 		}
 	}
+}
+
+// TestLeftOutBrainsKeepTheirChats: a brain left out (its folder missing or
+// one that cannot hold a brain) used to hand its chats to the default
+// brain: with the DM brain's folder refused, your DMs, and the Plaud
+// recordings sent as DMs, went to the work brain. The chats of a brain
+// left out now go to no brain, check says whose they are, and the chat is
+// told the brain cannot run; chats no brain left out claims still go to
+// the default brain. A default brain left out keeps what it would take.
+func TestLeftOutBrainsKeepTheirChats(t *testing.T) {
+	const otherGroup = "120363000000000009@g.us"
+	cases := []struct {
+		name            string
+		brains          func(home string) []BrainRef
+		dm, group, rest string // who takes a DM, testGroup and otherGroup; "!id" for held by brain id
+	}{
+		{"every brain runs", func(home string) []BrainRef {
+			return []BrainRef{
+				brainFolder(t, home+"/personal", BrainManifest{ID: "personal", Routing: BrainRouting{HandlesDMs: true}}),
+				brainFolder(t, home+"/team", BrainManifest{ID: "team", Routing: BrainRouting{Groups: []string{testGroup}}}),
+				brainFolder(t, home+"/work", BrainManifest{ID: "work", Routing: BrainRouting{Default: true}}),
+			}
+		}, "personal", "team", "work"},
+		{"the DM brain's folder cannot hold a brain", func(home string) []BrainRef {
+			return []BrainRef{
+				brainFolder(t, home+"/data/personal", BrainManifest{ID: "personal", Routing: BrainRouting{HandlesDMs: true}}),
+				brainFolder(t, home+"/team", BrainManifest{ID: "team", Routing: BrainRouting{Groups: []string{testGroup}}}),
+				brainFolder(t, home+"/work", BrainManifest{ID: "work", Routing: BrainRouting{Default: true}}),
+			}
+		}, "!personal", "team", "work"},
+		{"a group brain's folder is gone", func(home string) []BrainRef {
+			return []BrainRef{
+				brainFolder(t, home+"/personal", BrainManifest{ID: "personal", Routing: BrainRouting{HandlesDMs: true}}),
+				{Path: home + "/gone", Approved: &BrainManifest{ID: "team", Name: "team", Routing: BrainRouting{Groups: []string{testGroup}}}},
+				brainFolder(t, home+"/work", BrainManifest{ID: "work", Routing: BrainRouting{Default: true}}),
+			}
+		}, "personal", "!team", "work"},
+		{"the default brain's folder is gone", func(home string) []BrainRef {
+			return []BrainRef{
+				brainFolder(t, home+"/team", BrainManifest{ID: "team", Routing: BrainRouting{Groups: []string{testGroup}}}),
+				{Path: home + "/gone", Approved: &BrainManifest{ID: "work", Name: "work", Routing: BrainRouting{Default: true}}},
+			}
+		}, "!work", "team", "!work"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			home := canonicalDir(t.TempDir())
+			t.Setenv("HOME", home)
+			path := writeConfig(t, `{"brain_mode": true, "data_dir": "`+home+`/data", "claude_path": "`+home+`/no-claude", "allowed_groups": ["`+testGroup+`", "`+otherGroup+`"]`+brainDirsJSON(t, c.brains(home)...)+`}`)
+			cfg, err := LoadConfig(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			mgr := newTestManager(t, cfg)
+			t.Cleanup(mgr.Stop)
+			var report bytes.Buffer
+			_ = checkReport(&report, path, cfg, checkOptions{routes: []string{testDMChat, testGroup, otherGroup}})
+			for jid, want := range map[string]string{testDMChat: c.dm, testGroup: c.group, otherGroup: c.rest} {
+				isGroup := isGroupJID(jid)
+				got := ""
+				if br := mgr.BrainFor(jid, isGroup); br != nil {
+					got = br.ID()
+				} else if id := mgr.HeldFor(jid, isGroup); id != "" {
+					got = "!" + id
+				}
+				if got != want {
+					t.Errorf("%s goes to %q, want %q", jid, got, want)
+				}
+				line := "route " + jid + " → " + want
+				if id, held := strings.CutPrefix(want, "!"); held {
+					line = "route " + jid + " → no brain: " + id + " handles it but cannot run"
+				}
+				if !strings.Contains(report.String(), line) {
+					t.Errorf("check lacks %q:\n%s", line, report.String())
+				}
+			}
+		})
+	}
+	t.Run("Plaud recordings wait", func(t *testing.T) {
+		home := canonicalDir(t.TempDir())
+		t.Setenv("HOME", home)
+		cfg, err := LoadConfig(writeConfig(t, `{"brain_mode": true, "data_dir": "`+home+`/data", "allowed_numbers": ["15551234567"]`+brainDirsJSON(t,
+			BrainRef{Path: home + "/gone", Approved: &BrainManifest{ID: "personal", Name: "personal", Routing: BrainRouting{HandlesDMs: true}}},
+			brainFolder(t, home+"/work", BrainManifest{ID: "work", Routing: BrainRouting{Default: true}}),
+		)+`}`))
+		if err != nil {
+			t.Fatal(err)
+		}
+		mgr := newTestManager(t, cfg)
+		t.Cleanup(mgr.Stop)
+		br, _, err := (&PlaudManager{brains: mgr}).destination(cfg)
+		if br != nil || err == nil || !strings.Contains(err.Error(), "brain personal, which gets Plaud recordings, cannot run") {
+			t.Errorf("recordings go to %v (%v), want them to wait for brain personal", br, err)
+		}
+	})
+	t.Run("the chat is told", func(t *testing.T) {
+		brains := canonicalDir(t.TempDir())
+		tb := newTestBridge(t, brainDirsJSON(t,
+			BrainRef{Path: brains + "/personal", Approved: &BrainManifest{ID: "personal", Name: "personal", Routing: BrainRouting{HandlesDMs: true}}},
+			brainFolder(t, brains+"/work", BrainManifest{ID: "work", Routing: BrainRouting{Default: true}}),
+		))
+		tb.handleInbound(t.Context(), Inbound{JID: testDMChat, Sender: "15551234567", Text: "hi", Source: sourceWhatsApp})
+		sent := tb.sentTo(testDMChat)
+		if len(sent) != 1 || !strings.Contains(sent[0], "cannot run right now") {
+			t.Errorf("the chat got %q, want to hear its brain cannot run", sent)
+		}
+		if h := readHistory(t, tb.brainMgr.Get("work")); len(h) != 0 {
+			t.Errorf("brain work got the DM: %+v", h)
+		}
+	})
 }

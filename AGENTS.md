@@ -24,7 +24,12 @@ The person's data lives in brain folders they choose and in
      --install` brings both.
    - Claude Code 2.1.302 or newer, logged in (`claude --version`; `claude
      update` updates it; if `claude -p hi` says it is not logged in, ask the
-     person to run `claude` once and log in).
+     person to run `claude` once and log in). On macOS brains run in the
+     sandbox, where they log in with a token instead: once the service is
+     installed, ask the person to run `claude setup-token` and add the
+     token as `CLAUDE_CODE_OAUTH_TOKEN` to the service's environment
+     (docs/CONFIGURATION.md, "Where to set them"). Never ask for the token
+     in chat.
    - Optional, for backups: rclone (`brew install rclone` or
      https://rclone.org/install/).
    - Optional, for transcribing voice notes: python3 and ffmpeg (`brew

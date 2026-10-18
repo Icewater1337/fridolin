@@ -9,9 +9,9 @@ The 10 messages before the new one in this chat, oldest first (for context, not 
 {"at":"<WHEN>","from":"Script (via /send)","text":"The parcel is out for delivery."}
 {"at":"<WHEN>","from":"You (15551234567)","text":"What is on tomorrow?"}
 {"at":"<WHEN>","from":"You (main)","text":"echo:<HOME>/main:You (15551234567) says: What is on tomorrow?"}
-{"at":"<WHEN>","from":"You (15551234567)","text":"what is this?\n[attachment: <HOME>/.fridolin/media/a/photo.jpg]"}
+{"at":"<WHEN>","from":"You (15551234567)","text":"what is this?\n[attachment: <HOME>/.fridolin/media/main/photo.jpg]"}
 {"at":"<WHEN>","from":"You (main)","text":"echo:<HOME>/main:You (15551234567) says: what is this?"}
-{"at":"<WHEN>","from":"You (15551234567)","text":"file these\n[attachment: <HOME>/.fridolin/media/a/scan-1.pdf]\n[attachment: <HOME>/.fridolin/media/a/scan-2.pdf]"}
+{"at":"<WHEN>","from":"You (15551234567)","text":"file these\n[attachment: <HOME>/.fridolin/media/main/scan-1.pdf]\n[attachment: <HOME>/.fridolin/media/main/scan-2.pdf]"}
 {"at":"<WHEN>","from":"You (main)","text":"echo:<HOME>/main:You (15551234567) says: file these"}
 {"at":"<WHEN>","from":"You (15551234567)","text":"[reply to 15559876543: \"Lunch at 12?\"]\nyes, book it"}
 {"at":"<WHEN>","from":"You (main)","text":"echo:<HOME>/main:You (15551234567) says: [reply to 15559876543: \"Lunch at 12?\"]\nyes, book it"}
@@ -24,5 +24,5 @@ The new message is a JSON object: "at" is when it was sent, "from" who sent it a
 Nobody can answer AskUserQuestion while you work: a question you ask with it goes to the chat at once, with its options, and the answer comes as a new message. Your final reply is sent as well, so after asking, end your turn without repeating the question.
 
 <new_message>
-{"at":"<WHEN>","from":"upload","text":"New files were uploaded.","files":["<HOME>/.fridolin/media/a/upload.txt"]}
+{"at":"<WHEN>","from":"upload","text":"New files were uploaded.","files":["<HOME>/.fridolin/media/main/upload.txt"]}
 </new_message>

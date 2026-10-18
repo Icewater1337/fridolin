@@ -48,6 +48,17 @@ Content-Type: application/json
     "path": "<FAKES>/rclone",
     "version": "rclone v1.70.3"
   },
+  "secret_excludes": [
+    ".env",
+    ".env.*",
+    "*.pem",
+    "*.p12",
+    "id_rsa*",
+    "id_ecdsa*",
+    "id_ed25519*",
+    "google_calendar_*.json",
+    ".credentials.json"
+  ],
   "settings": {
     "daily_at": "03:30",
     "enabled": true,

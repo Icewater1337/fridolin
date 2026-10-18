@@ -80,8 +80,8 @@ var clockRE = regexp.MustCompile(`\b(?:Mon|Tue|Wed|Thu|Fri|Sat|Sun) \d{4}-\d\d-\
 
 // scrubArgs masks the paths in the CLI's arguments. --settings is JSON that
 // lists a pattern for every folder above the brain's, up to /; once those
-// above the test's root are <ABOVE>, each pattern is listed once, with how
-// many times it came (collapseAbove).
+// between / and the test's root are <ABOVE>, each pattern is listed once,
+// with how many times it came (collapseAbove).
 func scrubArgs(t *testing.T, s *scrubber, args []string) []byte {
 	t.Helper()
 	out := make([]string, len(args))
@@ -145,20 +145,16 @@ func TestGoldenRuns(t *testing.T) {
 		history:                                  fixture(t, "history-v1.jsonl"),
 		filepath.Join(dir, identityMapFile):      []byte(goldenIdentityMap),
 		filepath.Join(dir, ".mcp.json"):          []byte(`{"mcpServers": {"notes": {"command": "notes-mcp"}}}`),
-		filepath.Join(h.DataDir(), "media", "a"): nil,
 	} {
-		if data == nil {
-			if err := os.MkdirAll(path, 0o700); err != nil {
-				t.Fatal(err)
-			}
-			continue
-		}
 		if err := os.WriteFile(path, data, 0o600); err != nil {
 			t.Fatal(err)
 		}
 	}
+	// media leaves a file at the top of the media folder, where a script
+	// hands one to /ingest; the brain that takes it, as an attachment or
+	// through /ingest, moves it into its inbox.
 	media := func(name string) string {
-		p := filepath.Join(h.DataDir(), "media", "a", name)
+		p := filepath.Join(h.DataDir(), "media", name)
 		if err := os.WriteFile(p, []byte("x"), 0o600); err != nil {
 			t.Fatal(err)
 		}

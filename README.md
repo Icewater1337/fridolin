@@ -46,7 +46,8 @@ not in this repository. Link Google Drive in the dashboard and each brain is
 backed up incrementally every night, with old versions kept.
 
 **Files.** Photos, PDFs, documents, voice notes, and video are downloaded and
-handed over as file paths. The assistant opens them and does whatever you asked.
+handed over as file paths, in an inbox of the brain's own that no other brain
+can open. The assistant opens them and does whatever you asked.
 A file over 100 MB (`max_media_mb`) is skipped, and so is one that cannot be
 downloaded within two minutes; the sender is told either way. View-once photos,
 videos and voice notes are not opened (the sender is asked to send a normal
@@ -98,7 +99,9 @@ See [docs/SITE.md](docs/SITE.md).
 
 - **macOS or Linux.** The sandbox layer is macOS-only; everything else is portable.
 - **[Claude Code](https://claude.com/claude-code)** 2.1.302 or newer, installed
-  and logged in.
+  and logged in. With the sandbox (macOS), brains log in with a token in the
+  bridge's environment instead: `claude setup-token` prints one (see
+  [where to set it](docs/CONFIGURATION.md#where-to-set-them)).
 - **Go 1.26+** and a C compiler to build (`xcode-select --install` on macOS).
 - **Python 3.9+** for the helper tools.
 - **A current browser** for the dashboard: Chrome or Edge 123+, Firefox 120+
@@ -207,6 +210,29 @@ Scripts that send the old token in `X-Bridge-Token` are refused from then
 on; give them the new one from `~/.fridolin/dashboard.token`. The upgrade
 does not rotate it for you, so that those scripts do not stop without
 warning.
+
+**Coming from a version whose sandbox let brains write outside their
+folders** (one without media inboxes): sandboxed brains now write only
+their own folder, their inbox and their own state in
+`~/.fridolin/brains/<id>/`, and cannot read your keychain, so the login
+you made with `claude` no longer reaches them. Before you upgrade, run
+`claude setup-token` and set the token as `CLAUDE_CODE_OAUTH_TOKEN` in the
+service's environment
+([where to set them](docs/CONFIGURATION.md#where-to-set-them)); until
+then brains answer "Not logged in", and the dashboard warns. Unless
+`inherit_claude_user_config` is on, each brain starts with an empty Claude
+Code config folder of its own: its CLI settings, todos and the
+transcripts of its earlier runs stay in `~/.claude`, where it can no
+longer read them, while its folder, memory and conversation history are
+untouched. A skill that writes to `/tmp`, or installs programs or global
+packages, fails now: `$TMPDIR` is the brain's own temp folder
+([details](docs/CONFIGURATION.md#writing)). On the first start what
+older versions left in the media folder moves to `media/.old/`, which no
+brain can read: its folders, `media/plaud/` with every brain's Plaud
+transcripts and a script's own folder among them, and the files at its
+top, every chat's attachments. A script that hands files to `/ingest`
+writes them to the top of the media folder; one it left there before the
+upgrade is in `media/.old/` too.
 
 `fridolin version`, the dashboard's Overview and the `Starting fridolin …`
 line each start writes to the log say which version runs (on macOS:
@@ -400,14 +426,19 @@ connected, so a script can check first; its JSON names the connection state
 and the bridge's version.
 
 To hand a brain files that arrived some other way (a web upload, a recorder
-sync), write them under `~/.fridolin/media/` and turn on
-`ingest.enabled`:
+sync), write them to `~/.fridolin/media/` itself, not to a folder in it,
+and turn on `ingest.enabled`. The brain takes them into its own inbox,
+`~/.fridolin/media/<brain id>/`. A file in any folder of the media folder
+is refused, unless it is already in that brain's own inbox: those folders
+hold files for brains (another brain's inbox, one a removed brain left),
+which a brain could otherwise ask for itself. A brain that calls with its
+own run's token hands in only what is in its own inbox:
 
 ```bash
 curl -X POST http://127.0.0.1:8765/ingest \
   -H "Authorization: Bearer $(cat ~/.fridolin/scripts.token)" \
   -H 'Content-Type: application/json' \
-  -d '{"brain":"personal","paths":["/Users/you/.fridolin/media/upload/scan.pdf"],"text":"File this"}'
+  -d '{"brain":"personal","paths":["/Users/you/.fridolin/media/scan.pdf"],"text":"File this"}'
 ```
 
 The brain you name handles it like a WhatsApp attachment and replies in its
@@ -444,8 +475,8 @@ that run. A run that would mirror a mass deletion (an empty brain folder, many
 of its files gone, or most of one of its folders, such as a wiped
 `memories/`) is refused until you force it, and the first
 nightly refusal tells you on WhatsApp. Exclude patterns per brain keep out
-what you can rebuild. The WhatsApp session, tokens and `.env` files are never
-uploaded. Restores go into a new folder and never overwrite a brain. Details:
+what you can rebuild. The WhatsApp session and tokens are never uploaded,
+nor `.env` files and private keys in brain folders. Restores go into a new folder and never overwrite a brain. Details:
 [docs/BACKUP.md](docs/BACKUP.md).
 
 ### Running in the background
@@ -523,18 +554,18 @@ What the bridge does about it:
 - **No Status or channels.** WhatsApp Status updates and channels are ignored,
   and the bridge refuses to send to Status, broadcast lists or channels, so
   nothing the assistant writes can end up in your public Status.
-- **Sandbox (macOS).** Each Claude run is wrapped in `sandbox-exec`. Brains
-  can neither read nor write SSH keys, cloud credentials, shell history,
-  browser and mail data, your Documents/Downloads/Desktop, the bridge's own
-  database — or any other brain's directory — and cannot rename the folders
-  above them to get around that. Other Claude sessions' transcripts are
-  unreadable, and so are your own Claude Code instructions (`~/CLAUDE.md`,
-  `~/.claude/CLAUDE.md` and every `CLAUDE.md` above a brain's folder)
-  unless `inherit_claude_user_config` is on. Files that run outside the
-  sandbox — Claude Code's settings and hooks (and the `CLAUDE.md` files
-  above brain folders), its auto-memory, `~/Library/LaunchAgents`, shell
-  startup files, the bridge's own binary, install folder and checkout, the
-  Claude CLI and the other tools the bridge runs — are never writable. Add
+- **Sandbox (macOS).** Each Claude run is wrapped in `sandbox-exec`.
+  Brains may write only their own folder, their own media inbox and the
+  state the bridge keeps for each of them (a Claude Code config folder,
+  `TMPDIR` and caches of its own), so nothing they write runs outside the
+  sandbox: not Claude Code's settings and hooks, a `CLAUDE.md`, a
+  LaunchAgent, a shell startup file, your apps' preferences, a program on
+  your `PATH`, nor the bridge's own binary, install folder and checkout. They cannot read SSH
+  keys, the keychains, cloud credentials, shell history, browser and mail
+  data, your Documents/Downloads/Desktop, the bridge's own database, any other
+  brain's folder or inbox, nor your Claude Code setup and transcripts and
+  your instructions above their folder (`~/CLAUDE.md` and every
+  `CLAUDE.md` up to `/`) unless `inherit_claude_user_config` is on. Add
   your own paths under `sandbox.deny_paths`. When the sandbox is on but
   cannot be set up, the brain refuses the message with an error instead of
   running without it.
@@ -591,14 +622,14 @@ What it does not do:
   later. `group_members` is what limits who: keep it to people you would
   let DM the bridge.
 - The sandbox is containment, not a jail. It raises the cost of a prompt
-  injection; it does not stop code execution. It denies writing only where
-  listed, so a brain can still write elsewhere in your home folder,
-  including the Claude Code state all brains and your own sessions share
-  (`~/.claude.json` and its MCP servers) and the files your shell startup
-  files load (such as `~/.nvm/nvm.sh`), and it can ask launchd, `crontab`,
-  `at`, `open`, `osascript` or a running tmux server (the activity viewer's,
-  or your own) to start a program outside the sandbox. See
-  [what the sandbox does not cover yet](docs/CONFIGURATION.md#what-the-sandbox-does-not-cover-yet).
+  injection; it does not stop code execution. It denies reading only where
+  listed, so a brain can still read the rest of your home folder. It keeps
+  brains from `launchctl`, `open`, `osascript`, Apple events, Docker and
+  tmux sockets, but a determined program can still talk to launchd or other
+  system services directly. What a brain leaves in its own folder (git
+  hooks, a `.envrc`) runs when you work there yourself. For real isolation,
+  run the bridge or each brain as a macOS user of its own. See
+  [what the sandbox does not cover](docs/CONFIGURATION.md#what-the-sandbox-does-not-cover).
 - On Linux there is no sandbox layer at all (the bridge refuses to start with
   `sandbox.enabled` on). Run the bridge as a dedicated user: create one
   (`sudo useradd -m fridolin`), let its services run without a login
@@ -631,6 +662,10 @@ a group event or a reconnect, once it is ten minutes old, or when you press
 Refresh on the Chats page. **`polls.go`** — the `[POLL]` blocks in replies,
 sending them, and matching votes to options (WhatsApp sends SHA-256 hashes of
 option names, which are matched against the stored options).
+
+**`media.go`** — the media inbox: each brain's own folder in the media
+directory, and moving a message's files into the inbox of the brain that
+takes it.
 
 **`debounce.go`** — merges a burst of messages from one person into one run.
 
@@ -667,7 +702,9 @@ API; the page is plain HTML/CSS/JS compiled into the binary. In `web/assets`,
 `sandbox-exec -p` on each run (never written to a file).
 
 **`childenv.go`** — the one list of the bridge's environment variables that
-brains, rclone, the Plaud CLI and the activity viewer get.
+brains, rclone, the Plaud CLI and the activity viewer get, and the state
+the bridge creates for each sandboxed brain before its run: its Claude Code
+config folder, `TMPDIR` and caches.
 
 **`store.go`** — SQLite: the whatsmeow device store, polls, votes, and the
 chats that wrote without being allowed.
@@ -714,11 +751,14 @@ An empty list allows nobody unless `allow_any_dm` is `true`. Blocked senders
 appear under *Chats*, and the Overview warns about an entry that is no
 number.
 
-**"Not logged in" from the CLI** — run `claude` once in a terminal to
-authenticate. Under launchd, check that `HOME` is set correctly in the plist.
-If the CLI logs in through `ANTHROPIC_API_KEY` or `CLAUDE_CODE_OAUTH_TOKEN`,
-that variable must be in the bridge's process environment: the bridge reads
-no `.env` file, and says so in its log when one lies next to the config
+**"Not logged in" from the CLI** — with the sandbox on, brains cannot read
+your keychain, where the login you made with `claude` lives: run
+`claude setup-token` and set `CLAUDE_CODE_OAUTH_TOKEN`
+(or `ANTHROPIC_API_KEY`) in the bridge's process environment (the
+dashboard warns while neither is there). Without the sandbox, run `claude`
+once in a terminal to authenticate; under launchd, check that `HOME` is
+set correctly in the plist. The bridge reads no `.env` file, and says so in
+its log when one lies next to the config
 ([details](docs/CONFIGURATION.md#environment-variables)).
 
 **Logged out of WhatsApp** — pair again with *Start pairing* on the
@@ -741,7 +781,11 @@ refusal, restart the bridge.
 directory; two bridges on one WhatsApp session knock each other offline.
 
 **Everything times out with the sandbox on** — set `sandbox.enabled` to `false`
-to confirm it's the cause, then add the path it needs to `sandbox.allow_paths`.
+to confirm it's the cause, then add the path it needs to read to
+`sandbox.allow_paths`. That opens reading only: a brain writes nowhere but
+its own folder, inbox and state. A tool that fails with "Operation not
+permitted" writing to `/tmp`, or a bare `mktemp`, needs `$TMPDIR` named
+([temporary files](docs/CONFIGURATION.md#writing)).
 
 **"the sandbox could not be set up"** — the sandbox is on, but the bridge
 could not build the profile or find `/usr/bin/sandbox-exec`, so it did not run

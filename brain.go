@@ -211,11 +211,16 @@ type brainSettings struct {
 	maxPending      int
 	observe         string // BrainManifest.Observe
 	credsDir        string // where per-brain credential files live
+	mediaDir        string // the media folder, which holds the brain's inbox
 	envPassthrough  []string
 	toolsDir        string // the bridge's Python helpers, or ""
 	dataDir         string // the data dir, absolute
 	dbPath          string // the bridge's DB, absolute
 	plaudPATH       string // the PATH to run with when brains may use Plaud's CLI
+	// ownPATH are the folders of the bridge's PATH inside this brain's
+	// folder, which setBridgePATH took out of the bridge's: they go first
+	// on the PATH of this brain's runs, and of no one else's.
+	ownPATH []string
 }
 
 // BrainHooks connect brains to the rest of the bridge.
@@ -358,13 +363,24 @@ func historyTime(t time.Time) string {
 // brains' runs that take every run slot. A run it interrupts does not
 // count.
 func (br *Brain) Submit(m Inbound) (pos int, busy bool, err error) {
+	return br.submit(&m)
+}
+
+// submit is Submit, and leaves in m (its Media, and its parts') where the
+// message's files are now. A brain removed while it takes the message
+// (errBrainRetired after the history) has moved them into its inbox by
+// then, and BrainManager.Submit hands m on to the next brain with those
+// paths, whose claimMedia moves the files on into its own inbox. With the
+// paths they had before, the next brain got files that were no longer
+// there, and they stayed in the removed brain's inbox.
+func (br *Brain) submit(m *Inbound) (pos int, busy bool, err error) {
 	if m.At.IsZero() {
 		m.At = time.Now()
 	}
 	s := br.settings.Load()
 	// Untagged chatter needs nothing more than the history, unless the
 	// brain observes it with runs: the next run in the chat reads it there.
-	queues := !m.Silent || observeRuns(s.observe, m)
+	queues := !m.Silent || observeRuns(s.observe, *m)
 
 	// Turned away before anything is written: a message the brain does not
 	// take is not in its history, where the sender's retry after "queue is
@@ -375,7 +391,7 @@ func (br *Brain) Submit(m Inbound) (pos int, busy bool, err error) {
 		br.mu.Unlock()
 		return 0, false, errBrainRetired
 	}
-	if queues && !br.hasRoomLocked(m, s) {
+	if queues && !br.hasRoomLocked(*m, s) {
 		if !m.Silent {
 			br.mu.Unlock()
 			return 0, true, errQueueFull
@@ -387,9 +403,13 @@ func (br *Brain) Submit(m Inbound) (pos int, busy bool, err error) {
 	}
 	br.mu.Unlock()
 
+	// The files go into this brain's inbox, the only part of the media
+	// folder its sandbox opens, before the history names where they are.
+	*m = m.withMediaMoved(claimMedia(s.mediaDir, br.id, m.Media))
+
 	// History first, so that later runs see the message even when it is
 	// merged into a queue that is already moving.
-	m = br.logInbound(m)
+	*m = br.logInbound(*m)
 	if !queues {
 		return 0, false, nil
 	}
@@ -408,7 +428,7 @@ func (br *Brain) Submit(m Inbound) (pos int, busy bool, err error) {
 	// chatter never interrupts a run. Nor do ingested files interrupt a
 	// request, or get replaced: each is a job of its own, not a correction of
 	// the last one. Observe-only runs are another matter, see below.
-	interrupting, replaces := supersedes(m, s)
+	interrupting, replaces := supersedes(*m, s)
 	var gone []Inbound
 	kept := br.pending[:0]
 	for _, p := range br.pending {
@@ -443,7 +463,7 @@ func (br *Brain) Submit(m Inbound) (pos int, busy bool, err error) {
 	if cur := br.current; cur != nil && (interrupting && replaces(cur.msg) || !m.Silent && cur.msg.Silent) {
 		interrupt = cur
 	}
-	br.pending = append(br.pending, m)
+	br.pending = append(br.pending, *m)
 	pos = slices.Index(br.queueOrderLocked(), len(br.pending)-1) + 1
 	busy = pos > 1 || (br.current != nil && interrupt == nil) || br.slots.busy(!m.Silent)
 	start := !br.working
@@ -726,6 +746,38 @@ func dropped(ms []Inbound) {
 	for _, m := range ms {
 		if m.Done != nil {
 			m.Done(errBrainDropped)
+		}
+	}
+}
+
+// waitIdle waits until the brain has nothing running or queued, for at
+// most max, and reports whether it got there. A backup asks before it
+// copies the brain's folder (see backupBrain). Between two queued runs no
+// run is current for a moment, so it waits for the worker to stop.
+func (br *Brain) waitIdle(ctx context.Context, max time.Duration) bool {
+	deadline := time.NewTimer(max)
+	defer deadline.Stop()
+	for {
+		br.mu.Lock()
+		run, working := br.current, br.working
+		br.mu.Unlock()
+		if !working {
+			return true
+		}
+		var done <-chan struct{}
+		var next <-chan time.Time
+		if run != nil {
+			done = run.done
+		} else {
+			next = time.After(50 * time.Millisecond)
+		}
+		select {
+		case <-done:
+		case <-next:
+		case <-deadline.C:
+			return false
+		case <-ctx.Done():
+			return false
 		}
 	}
 }
@@ -1385,8 +1437,12 @@ func (br *Brain) invoke(run *brainRun, ctx context.Context, s *brainSettings, m 
 		// wherever the bridge is installed.
 		extraEnv = append(extraEnv, "FRIDOLIN_TOOLS_DIR="+s.toolsDir)
 	}
-	if s.plaudPATH != "" {
-		extraEnv = append(extraEnv, "PATH="+s.plaudPATH) // replaces the bridge's
+	if path := s.plaudPATH; path != "" || len(s.ownPATH) > 0 {
+		if path == "" {
+			path = os.Getenv("PATH")
+		}
+		dirs := append(slices.Clone(s.ownPATH), filepath.SplitList(path)...)
+		extraEnv = append(extraEnv, "PATH="+strings.Join(dirs, string(filepath.ListSeparator))) // replaces the bridge's
 	}
 	if br.hooks != nil && br.hooks.RunEnv != nil {
 		env, done := br.hooks.RunEnv(br.id)
@@ -1396,12 +1452,22 @@ func (br *Brain) invoke(run *brainRun, ctx context.Context, s *brainSettings, m 
 		extraEnv = append(extraEnv, env...)
 	}
 	if br.sandbox != nil && br.sandbox.Enabled() {
-		sbBinary, sbArgs, sbErr := br.sandbox.Command(br.id, s.claudePath, args)
-		if sbErr != nil {
-			log.Printf("brain %s: sandbox unavailable, refusing to run: %v", br.id, sbErr)
+		// The brain's own Claude Code config dir, TMPDIR and caches, the
+		// only places outside its folder and inbox the profile lets it
+		// write, made before the profile pins them. With a config dir of
+		// its own the CLI no longer finds your login in the keychain,
+		// which the profile closes anyway: brains log in with
+		// CLAUDE_CODE_OAUTH_TOKEN or ANTHROPIC_API_KEY from the bridge's
+		// environment.
+		stateEnv, err := prepareBrainState(s.dataDir, s.mediaDir, br.id, s.inheritUser)
+		if err == nil {
+			binary, finalArgs, err = br.sandbox.Command(br.id, s.claudePath, args)
+		}
+		if err != nil {
+			log.Printf("brain %s: sandbox unavailable, refusing to run: %v", br.id, err)
 			return RunResult{Err: errSandboxUnavailable}
 		}
-		binary, finalArgs = sbBinary, sbArgs
+		extraEnv = append(extraEnv, stateEnv...)
 		// The profile denies writes to the CLI's own install, so its
 		// auto-updater could download a new version on every run and never
 		// switch to it. This replaces the bridge's own value.
@@ -2127,6 +2193,11 @@ type BrainManager struct {
 	dmBrain  *Brain // brain with handles_dms; nil falls through to fallback
 	fallback *Brain // brain marked default, else the first brain
 	issues   []BrainIssue
+	// held routes what an approved brain left out (see
+	// BrainIssue.leavesOut) would take to that brain's id, so that no
+	// other brain gets it meanwhile: your DMs from a DM brain whose
+	// folder has a problem went to the default brain. See heldRoutes.
+	held heldRoutes
 
 	profiler *SandboxProfiler
 	hooks    *BrainHooks
@@ -2152,13 +2223,18 @@ func NewBrainManager(cfg *Config) (*BrainManager, error) {
 // SetHooks wires the brains to the bridge. Call before the first message.
 func (bm *BrainManager) SetHooks(h BrainHooks) { *bm.hooks = h }
 
-// Apply makes the running brains match cfg.
+// Apply makes the running brains match cfg. The bridge's PATH goes first,
+// before any brain folder is checked against it: the folders of it inside
+// a brain's folder leave it for that brain's runs (see setBridgePATH).
 func (bm *BrainManager) Apply(cfg *Config) error {
+	ownPATH := setBridgePATH(cfg)
 	specs, issues := ResolveBrains(cfg)
-	return bm.reload(specs, issues, cfg)
+	return bm.reload(specs, issues, cfg, ownPATH)
 }
 
-func (bm *BrainManager) reload(specs []BrainSpec, issues []BrainIssue, cfg *Config) error {
+// reload runs the brains specs, with issues the problems ResolveBrains
+// found and ownPATH each brain's own PATH folders (see setBridgePATH).
+func (bm *BrainManager) reload(specs []BrainSpec, issues []BrainIssue, cfg *Config, ownPATH map[string][]string) error {
 	bm.reloadMu.Lock()
 	defer bm.reloadMu.Unlock()
 
@@ -2196,12 +2272,13 @@ func (bm *BrainManager) reload(specs []BrainSpec, issues []BrainIssue, cfg *Conf
 			workDirs[m.ID] = []string{sp.Path, sp.Dir}
 		}
 		s := settingsFor(cfg, sp)
+		s.ownPATH = ownPATH[m.ID]
 		br, ok := old[m.ID]
 		if !ok || br.workDir != sp.Dir || !br.holdsFolder(sp.Dir) {
 			root, err := os.OpenRoot(sp.Dir)
 			if err != nil {
 				log.Printf("brain %s: leaving it out: %v", m.ID, err)
-				issues = append(issues, BrainIssue{ID: m.ID, Path: sp.Dir, Kind: "missing", Detail: "the folder cannot be opened: " + err.Error(), atLoad: true, entry: sp.entry})
+				issues = append(issues, BrainIssue{ID: m.ID, Path: sp.Dir, Kind: "missing", Detail: "the folder cannot be opened: " + err.Error(), atLoad: true, entry: sp.entry, routing: m.Routing})
 				continue
 			}
 			br = &Brain{
@@ -2231,7 +2308,8 @@ func (bm *BrainManager) reload(specs []BrainSpec, issues []BrainIssue, cfg *Conf
 			def = br
 		}
 	}
-	if def == nil && len(order) > 0 {
+	held := heldRoutesOf(issues, dm, byGroup)
+	if def == nil && len(order) > 0 && held.fallback == "" {
 		def = order[0]
 	}
 
@@ -2246,7 +2324,7 @@ func (bm *BrainManager) reload(specs []BrainSpec, issues []BrainIssue, cfg *Conf
 	bm.slots.setLimit(cfg.RunLimit())
 
 	bm.mu.Lock()
-	bm.brains, bm.order, bm.byGroup, bm.dmBrain, bm.fallback, bm.issues = next, order, byGroup, dm, def, issues
+	bm.brains, bm.order, bm.byGroup, bm.dmBrain, bm.fallback, bm.issues, bm.held = next, order, byGroup, dm, def, issues, held
 	bm.mu.Unlock()
 	applied = true
 
@@ -2295,6 +2373,7 @@ func settingsFor(cfg *Config, sp BrainSpec) *brainSettings {
 		maxPending:      cfg.Queue.MaxPending,
 		observe:         m.Observe,
 		credsDir:        credentialsDirOf(cfg),
+		mediaDir:        cfg.MediaDir,
 		envPassthrough:  append([]string(nil), cfg.ChildEnvPassthrough...),
 		toolsDir:        ownLayout().Tools,
 		// Absolute: brains run in their own folder, where a relative
@@ -2321,7 +2400,40 @@ func credentialsDirOf(cfg *Config) string {
 	return cfg.DataDir
 }
 
-// BrainFor returns the brain that handles the given chat, or nil.
+// heldRoutes are the chats of approved brains that are left out, by the
+// id of the brain that would take them.
+type heldRoutes struct {
+	dms      string            // the DM brain's
+	groups   map[string]string // by group JID
+	fallback string            // the default brain's: what no other brain takes
+}
+
+// heldRoutesOf returns what the brains issues leaves out would take, of
+// what no brain that runs (dm, the DM brain, and byGroup) takes instead.
+func heldRoutesOf(issues []BrainIssue, dm *Brain, byGroup map[string]*Brain) heldRoutes {
+	h := heldRoutes{groups: map[string]string{}}
+	for _, is := range issues {
+		if !is.leavesOut() {
+			continue
+		}
+		if is.routing.HandlesDMs && dm == nil && h.dms == "" {
+			h.dms = is.ID
+		}
+		for _, g := range is.routing.Groups {
+			if _, ok := byGroup[g]; !ok && h.groups[g] == "" {
+				h.groups[g] = is.ID
+			}
+		}
+		if is.routing.Default && h.fallback == "" {
+			h.fallback = is.ID
+		}
+	}
+	return h
+}
+
+// BrainFor returns the brain that handles the given chat, or nil: also
+// when the brain that would is left out (see HeldFor), rather than the
+// default brain.
 func (bm *BrainManager) BrainFor(jid string, isGroup bool) *Brain {
 	bm.mu.RLock()
 	defer bm.mu.RUnlock()
@@ -2329,12 +2441,45 @@ func (bm *BrainManager) BrainFor(jid string, isGroup bool) *Brain {
 		if br, ok := bm.byGroup[jid]; ok {
 			return br
 		}
+		if bm.held.groups[jid] != "" {
+			return nil
+		}
 		return bm.fallback
 	}
 	if bm.dmBrain != nil {
 		return bm.dmBrain
 	}
+	if bm.held.dms != "" {
+		return nil
+	}
 	return bm.fallback
+}
+
+// HeldFor returns the id of the brain left out (see BrainIssue.leavesOut)
+// that would handle the given chat, which therefore goes to no brain, or
+// "" when BrainFor answers for it.
+func (bm *BrainManager) HeldFor(jid string, isGroup bool) string {
+	bm.mu.RLock()
+	defer bm.mu.RUnlock()
+	if isGroup {
+		if _, ok := bm.byGroup[jid]; ok {
+			return ""
+		}
+		if id := bm.held.groups[jid]; id != "" {
+			return id
+		}
+	} else {
+		if bm.dmBrain != nil {
+			return ""
+		}
+		if bm.held.dms != "" {
+			return bm.held.dms
+		}
+	}
+	if bm.fallback == nil {
+		return bm.held.fallback
+	}
+	return ""
 }
 
 // DMBrain returns the brain that gets direct messages: the one with
@@ -2373,7 +2518,8 @@ func (bm *BrainManager) Route(m Inbound) *Brain {
 }
 
 // Submit routes a message to its brain. A message that lands on a brain being
-// removed at that moment is routed again once.
+// removed at that moment is routed again once, with its files where that
+// brain left them (see Brain.submit).
 func (bm *BrainManager) Submit(m Inbound) (br *Brain, pos int, busy bool, err error) {
 	for attempt := 0; attempt < 2; attempt++ {
 		br = bm.Route(m)
@@ -2383,7 +2529,7 @@ func (bm *BrainManager) Submit(m Inbound) (br *Brain, pos int, busy bool, err er
 		if br == nil {
 			return nil, 0, false, fmt.Errorf("no brain configured for %s", m.JID)
 		}
-		pos, busy, err = br.Submit(m)
+		pos, busy, err = br.submit(&m)
 		if !errors.Is(err, errBrainRetired) {
 			return br, pos, busy, err
 		}

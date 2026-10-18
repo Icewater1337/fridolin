@@ -106,6 +106,18 @@ func NewBridge(cfgs *ConfigStore, opts BridgeOptions) (_ *Bridge, err error) {
 	// With the lock held no other bridge runs here, so any run the last one
 	// recorded that is still going was left behind by a crash.
 	reapOrphanedRuns(cfg.DataDir)
+	// What older versions left in the media folder goes aside before any
+	// brain has an inbox there, one named like it would read it (see
+	// retireLegacyMedia). Here, with the lock held, and not wherever the
+	// brains are loaded: check loads them too, and run with a new build
+	// against the config of a bridge still running, it reorganised that
+	// bridge's media folder under it. A failure here leaves it to the
+	// first inbox.
+	if cfg.MediaDir != "" {
+		if err := retireLegacyMedia(cfg.MediaDir); err != nil {
+			log.Printf("media: readying %s for inboxes: %v", cfg.MediaDir, err)
+		}
+	}
 	store, err := NewStore(cfg)
 	if err != nil {
 		return nil, fmt.Errorf("creating store: %w", err)
@@ -432,9 +444,17 @@ func (b *Bridge) handleInbound(ctx context.Context, m Inbound) {
 		return
 	}
 	if br == nil {
-		log.Printf("No brain configured for %s — add one in the dashboard", m.JID)
+		reply := "🧠 No brain is set up for this chat yet. Open the bridge dashboard and add one."
+		if id := b.brainMgr.HeldFor(m.JID, m.IsGroup()); id != "" {
+			// Not the default brain instead: what was meant for this
+			// brain, your DMs say, must not land in another one.
+			log.Printf("brain %s, which handles %s, cannot run (see its issue on the Brains page); the message goes to no other brain", id, m.JID)
+			reply = "🧠 The brain for this chat cannot run right now. The Brains page of the bridge dashboard says why."
+		} else {
+			log.Printf("No brain configured for %s — add one in the dashboard", m.JID)
+		}
 		if !m.Silent && m.Source != sourceIngest {
-			_ = b.wa.SendMessage(ctx, m.JID, "🧠 No brain is set up for this chat yet. Open the bridge dashboard and add one.")
+			_ = b.wa.SendMessage(ctx, m.JID, reply)
 		}
 		return
 	}

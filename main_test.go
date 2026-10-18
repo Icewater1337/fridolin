@@ -857,3 +857,78 @@ func TestRedactorText(t *testing.T) {
 		t.Errorf("a home of / redacted %q", got)
 	}
 }
+
+// TestCheckExitsWhenABrainCannotRun: check printed an approved brain it
+// would leave out as an issue and exited 0, and setup.sh keeps only its
+// claude line, so a DM brain left out went unnoticed while its DMs went
+// to the default brain. check now exits 3 for such a brain, still 0 for
+// one that only drifted, and 1 for a config that does not load.
+func TestCheckExitsWhenABrainCannotRun(t *testing.T) {
+	if path := os.Getenv("FRIDOLIN_TEST_CHECK"); path != "" {
+		args := []string{"--config", path}
+		if jid := os.Getenv("FRIDOLIN_TEST_CHECK_ROUTE"); jid != "" {
+			args = append(args, "--route", jid)
+		}
+		if os.Getenv("FRIDOLIN_TEST_CHECK_REDACT") != "" {
+			args = append(args, "--redact")
+		}
+		checkCmd(args)
+		os.Exit(0)
+	}
+	home := canonicalDir(t.TempDir())
+	t.Setenv("HOME", home)
+	// No CLI to ask for its version: the fake would take the place of
+	// the test in the process check runs in.
+	data := home + `/data", "claude_path": "` + home + `/no-claude`
+	main := brainFolder(t, home+"/main", BrainManifest{ID: "main", Routing: BrainRouting{HandlesDMs: true}})
+	drifted := brainFolder(t, home+"/notes", BrainManifest{ID: "notes"})
+	renamed := *drifted.Approved
+	renamed.Name = "Notes, approved before"
+	drifted.Approved = &renamed
+	inData := brainFolder(t, home+"/data/inside", BrainManifest{ID: "inside"})
+	gone := brainDirsJSON(t, main, BrainRef{Path: home + "/gone", Approved: &BrainManifest{ID: "gone", Name: "gone"}})
+	cases := []struct {
+		name   string
+		config string
+		route  string // for --route
+		redact bool   // for --redact
+		exit   int
+		says   string // on stderr
+	}{
+		{"every brain runs", `{"brain_mode": true, "data_dir": "` + data + `"` + brainDirsJSON(t, main) + `}`, "", false, 0, ""},
+		{"a brain drifted", `{"brain_mode": true, "data_dir": "` + data + `"` + brainDirsJSON(t, main, drifted) + `}`, "", false, 0, ""},
+		{"a brain in the data folder", `{"brain_mode": true, "data_dir": "` + data + `"` + brainDirsJSON(t, main, inData) + `}`, "", false, checkBrainsLeftOut, "brain inside cannot run"},
+		{"a brain in the data folder, with a route", `{"brain_mode": true, "data_dir": "` + data + `"` + brainDirsJSON(t, main, inData) + `}`, "15551234567@s.whatsapp.net", false, checkBrainsLeftOut, "brain inside cannot run"},
+		{"a brain whose folder is gone", `{"brain_mode": true, "data_dir": "` + data + `"` + gone + `}`, "", false, checkBrainsLeftOut, "brain gone cannot run"},
+		// --redact used to make every error a new one, and check then
+		// exited 1 for a brain that cannot run.
+		{"a brain whose folder is gone, redacted", `{"brain_mode": true, "data_dir": "` + data + `"` + gone + `}`, "", true, checkBrainsLeftOut, "brain gone cannot run"},
+		{"a config that does not load", `{"brain_mode": true, "brains": [{"id": "old"}]}`, "", false, 1, ""},
+		{"a config that does not load, redacted", `{"brain_mode": true, "brains": [{"id": "old"}]}`, "", true, 1, ""},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			cmd := exec.Command(os.Args[0], "-test.run=^TestCheckExitsWhenABrainCannotRun$", "-test.count=1")
+			cmd.Env = append(os.Environ(), "FRIDOLIN_TEST_CHECK="+writeConfig(t, c.config), "FRIDOLIN_TEST_CHECK_ROUTE="+c.route)
+			if c.redact {
+				cmd.Env = append(cmd.Env, "FRIDOLIN_TEST_CHECK_REDACT=1")
+			}
+			var stderr bytes.Buffer
+			cmd.Stderr = &stderr
+			err := cmd.Run()
+			exit := 0
+			var ee *exec.ExitError
+			if errors.As(err, &ee) {
+				exit = ee.ExitCode()
+			} else if err != nil {
+				t.Fatal(err)
+			}
+			if exit != c.exit {
+				t.Errorf("check exited %d, want %d:\n%s", exit, c.exit, stderr.String())
+			}
+			if !strings.Contains(stderr.String(), c.says) {
+				t.Errorf("check said %q, want %q", stderr.String(), c.says)
+			}
+		})
+	}
+}

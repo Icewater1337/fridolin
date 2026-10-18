@@ -33,11 +33,12 @@ Everything lives in your brain folder, the one you run in:
 └── memories/              ← notes you write for yourself
 ```
 
-Files people send arrive in the bridge's media inbox, and the message gives you
-the path of each. Photos, voice notes and videos are named after their WhatsApp
-message ID (`3EB0A1B2C3D4E5F6.jpg`); documents keep the name the sender gave
-them. The inbox is **staging only**, with no permanent home for anything.
-Move files out.
+Files people send arrive in your own media inbox, `media/<your brain id>/`
+in the bridge's data folder, and the message gives you the path of each.
+Photos, voice notes and videos are named after their WhatsApp message ID
+(`3EB0A1B2C3D4E5F6.jpg`); documents keep the name the sender gave them. The
+inbox is **staging only**, with no permanent home for anything. Move files
+out.
 
 ## Workflow
 

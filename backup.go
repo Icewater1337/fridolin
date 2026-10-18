@@ -71,6 +71,27 @@ type BackupConfig struct {
 	// IncludeBridgeConfig also backs up config.json and the brain list
 	// (default true). Never included: the WhatsApp session, .env, tokens.
 	IncludeBridgeConfig *bool `json:"include_bridge_config,omitempty"`
+	// IncludeSecretFiles also uploads the files of backupSecretExcludes
+	// from brain folders, which are otherwise left out whatever a brain's
+	// excludes say. Off by default; config.json only.
+	IncludeSecretFiles bool `json:"include_secret_files,omitempty"`
+}
+
+// backupSecretExcludes are the files of a brain folder a backup leaves out
+// whatever the brain's exclude list says, unless include_secret_files is on:
+// a brain may keep API keys in a .env, private keys, and a calendar token
+// or CLI login copied into its folder, and a copy in Drive is one more
+// place they can leak from. Every '+' line of an exclude list is dropped
+// (see filterLines), so none can include them again. "*.key" is not among
+// them: it is also Keynote's extension. docs/BACKUP.md and the dashboard's
+// Backup page list them; TestBackupSecretExcludesAreDocumented keeps the
+// docs in step.
+var backupSecretExcludes = []string{
+	".env", ".env.*",
+	"*.pem", "*.p12",
+	"id_rsa*", "id_ecdsa*", "id_ed25519*",
+	"google_calendar_*.json",
+	".credentials.json",
 }
 
 var (
@@ -198,7 +219,22 @@ type BackupManager struct {
 	// notify sends a WhatsApp message about a brain to its owner. The bridge
 	// sets it; nil sends nothing.
 	notify func(ctx context.Context, br *Brain, text string) error
+	// idleWait is how long a brain's backup waits for the brain to finish
+	// what it is running; see backupBrain.
+	idleWait time.Duration
 }
+
+// backupIdleWait is how long a brain's backup waits for the brain to go
+// idle by default.
+const backupIdleWait = 2 * time.Minute
+
+// syncRetries and syncRetrySleep are how often, and after how long, rclone
+// tries a sync again that ended with errors, such as a file that changed
+// while it was copied ("source file is being updated").
+const (
+	syncRetries    = 3
+	syncRetrySleep = 10 * time.Second
+)
 
 // refusalNoticeTimeout bounds the WhatsApp send of a refusal notice. It runs
 // inside the backup job, so a send that hangs would keep the job running and
@@ -210,7 +246,7 @@ var refusalNoticeTimeout = 30 * time.Second
 // last results and the day of the last scheduled run are gone then, and the
 // log says so rather than leaving it to the next scheduled run to show.
 func NewBackupManager(cfgs *ConfigStore, bm *BrainManager) *BackupManager {
-	m := &BackupManager{cfgs: cfgs, bm: bm, now: time.Now}
+	m := &BackupManager{cfgs: cfgs, bm: bm, now: time.Now, idleWait: backupIdleWait}
 	m.runner = m.runRclone
 	data, err := os.ReadFile(m.statePath())
 	switch {
@@ -281,7 +317,8 @@ func (m *BackupManager) rclonePath() (string, error) {
 }
 
 // findRclone finds the rclone binary, given backup.rclone_path. The sandbox
-// profile uses it too, to keep brains from replacing the binary.
+// profile uses it too, to keep brains from replacing the binary (see
+// bridgeProgramsOf).
 //
 // A configured path must work as it is: falling back would quietly run
 // another rclone, maybe another version, than the one you named, and hide
@@ -579,6 +616,7 @@ func (b *Bridge) apiBackupStatus(w http.ResponseWriter, r *http.Request) {
 		"connect":               copyOf(m.connect),
 		"settings":              cfg.Backup,
 		"include_bridge_config": cfg.Backup.includeBridge(),
+		"secret_excludes":       backupSecretExcludes,
 		"brains":                rows,
 		"bridge":                copyOf(m.state.Bridge),
 		"job":                   job,
@@ -1164,20 +1202,41 @@ func filterLines(excludes []string) string {
 	return sb.String()
 }
 
+// brainFilter is the rclone filter file for a brain folder: the secret
+// files first, unless includeSecrets, then the brain's own excludes. rclone
+// stops at the first rule that matches.
+func brainFilter(excludes []string, includeSecrets bool) string {
+	if includeSecrets {
+		return filterLines(excludes)
+	}
+	return filterLines(backupSecretExcludes) + filterLines(excludes)
+}
+
 func (m *BackupManager) backupBrain(ctx context.Context, br *Brain, trigger string, force bool) *BackupResult {
 	started := time.Now()
 	fail := func(msg string) *BackupResult {
 		now := time.Now()
 		return &BackupResult{Started: started, Finished: now, Seconds: now.Sub(started).Seconds(), Error: msg, Trigger: trigger}
 	}
+	// A run changes the brain's folder as it goes: the bridge appends to its
+	// history, Claude edits memories and maybe a git repository. A sync of
+	// a folder mid-run copies some files before the change and some after,
+	// a .git index newer than its objects, say. So wait for the brain to
+	// finish, but not for ever: a brain busy for hours must still be backed
+	// up, and an append that comes in during the sync is what rclone's
+	// retries are for (see syncDir).
+	if !br.waitIdle(ctx, m.idleWait) && ctx.Err() == nil {
+		log.Printf("backup %s: the brain is still running after %v, so its folder is copied while it changes", br.ID(), m.idleWait)
+	}
 	s := br.settings.Load()
+	// One config snapshot for the filter, the check and the sync, so a
+	// backup.root changed mid-run cannot count one folder and sync into
+	// another.
+	cfg := m.cfgs.Get()
 	filter := filepath.Join(m.dir(), "filters-"+br.ID()+".txt")
-	if err := writeFileAtomic(filter, []byte(filterLines(s.manifest.Backup.Exclude)), 0o600, false); err != nil {
+	if err := writeFileAtomic(filter, []byte(brainFilter(s.manifest.Backup.Exclude, cfg.Backup.IncludeSecretFiles)), 0o600, false); err != nil {
 		return fail(err.Error())
 	}
-	// One config snapshot for the check and the sync, so a backup.root
-	// changed mid-run cannot count one folder and sync into another.
-	cfg := m.cfgs.Get()
 	base := backupPath(cfg.Backup, br.ID())
 	if force {
 		return m.syncDir(ctx, br.Dir(), base, filter, trigger, -1)
@@ -1439,6 +1498,7 @@ func (m *BackupManager) syncDir(ctx context.Context, src, base, filterFile, trig
 		"--backup-dir", base + "/versions/" + res.Version,
 		"--links", "--use-json-log", "--stats", "15s", "--stats-log-level", "NOTICE", "-v",
 		"--transfers", "4", "--checkers", "8", "--drive-chunk-size", "32M",
+		"--retries", strconv.Itoa(syncRetries), "--retries-sleep", syncRetrySleep.String(),
 	}
 	if filterFile != "" {
 		args = append(args, "--filter-from", filterFile)
@@ -1451,6 +1511,9 @@ func (m *BackupManager) syncDir(ctx context.Context, src, base, filterFile, trig
 	res.Finished = time.Now()
 	res.Seconds = res.Finished.Sub(res.Started).Seconds()
 	res.Bytes, res.Files = stderr.bytes, stderr.files
+	if n := stderr.failedAttempts(); n > 0 {
+		log.Printf("backup to %s: rclone tried %d more time(s), most likely because files changed while it copied them", base, n)
+	}
 	switch {
 	case ctx.Err() != nil:
 		res.Error = "cancelled"
@@ -1482,6 +1545,7 @@ type jsonStats struct {
 	files     int64
 	errs      []string
 	maxDelete bool
+	attempts  int // failed attempts rclone tried again or gave up after
 }
 
 func (j *jsonStats) Write(p []byte) (int, error) {
@@ -1506,6 +1570,11 @@ func (j *jsonStats) Write(p []byte) (int, error) {
 			j.bytes, j.files = e.Stats.Bytes, e.Stats.Transfers
 		}
 		if e.Level == "error" || e.Level == "critical" {
+			// "Attempt 1/3 failed with 1 errors and: …", once per try that
+			// ended with errors.
+			if strings.HasPrefix(e.Msg, "Attempt ") && strings.Contains(e.Msg, " failed with ") {
+				j.attempts++
+			}
 			j.errs = append(j.errs, e.Msg)
 			if len(j.errs) > 5 {
 				j.errs = j.errs[1:]
@@ -1516,6 +1585,13 @@ func (j *jsonStats) Write(p []byte) (int, error) {
 		}
 	}
 	return len(p), nil
+}
+
+// failedAttempts is how many of rclone's tries ended with errors.
+func (j *jsonStats) failedAttempts() int {
+	j.mu.Lock()
+	defer j.mu.Unlock()
+	return j.attempts
 }
 
 // hitMaxDelete reports whether rclone stopped at the --max-delete limit.
@@ -1715,6 +1791,30 @@ func resolveExisting(p string) string {
 	}
 }
 
+// checkRestoreTarget reports why target, a folder by its real path, lies
+// in what the sandbox keeps from brains ("is inside …", like
+// checkBrainDir), or nil. The bridge writes the copy outside any sandbox,
+// so where a brain folder may still live, inside ~/.ssh or a deny_paths
+// entry, no restore needs to write. The folders of your own files are the
+// exception, ~/Documents and the rest of userFileFolders: brains live
+// there, and so may a restored one, as CheckBrainPath lets a new one.
+func checkRestoreTarget(target string, cfg *Config, home string) error {
+	var denied []protectedPath
+	for _, p := range sandboxPolicyOf(cfg).protected(home, ownLayout()) {
+		if !slices.ContainsFunc(userFileFolders, func(sub string) bool { return p.path == filepath.Join(home, sub) }) {
+			p.inside = true
+		}
+		denied = append(denied, p)
+	}
+	for _, p := range cfg.Sandbox.DenyPaths {
+		denied = append(denied, protectedPath{expandHome(p, home), true, "the deny_paths entry " + p})
+	}
+	if what, ok := protectedIn(target, denied); ok {
+		return fmt.Errorf("%s, which the sandbox keeps from brains", what)
+	}
+	return nil
+}
+
 // restoreTarget checks the folder a restore copies into, as for a new brain
 // (CheckBrainPath): inside your home folder, neither the data dir nor in or
 // around a brain, and not the credentials folder either; and new or empty.
@@ -1724,6 +1824,11 @@ func (b *Bridge) restoreTarget(p string) (string, error) {
 	target, problems, _ := CheckBrainPath(resolveExisting(expandHome(strings.TrimSpace(p), homeDir())), cfg, brainDirs(cfg))
 	if creds := canonicalDir(cfg.Sandbox.CredentialsDir); len(problems) == 0 && creds != "" && (isWithin(target, creds) || isWithin(creds, target)) {
 		problems = append(problems, "the credentials folder cannot be (or contain) the restore folder")
+	}
+	if len(problems) == 0 {
+		if err := checkRestoreTarget(target, cfg, homeDir()); err != nil {
+			problems = append(problems, "the restore folder "+err.Error()+" — pick a new folder")
+		}
 	}
 	if len(problems) > 0 {
 		return "", errors.New(strings.Join(problems, "; "))

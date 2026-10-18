@@ -101,6 +101,52 @@ yet, so everything is under Unreleased until the first one.
   seconds later. The line is written once the brain took the message: one
   its full queue turned away ("Try again in a bit") is no longer recorded,
   so the sender's retry is no longer in the history twice.
+- On macOS a brain writes only its own places: its folder, its media
+  inbox (`media/<brain id>/`) and its own state in
+  `<data_dir>/brains/<brain id>/`, with a Claude Code config folder
+  (`CLAUDE_CONFIG_DIR`), a temp folder (`TMPDIR`) and a cache. Writing
+  anywhere else is denied, `/tmp` included, and so is writing your
+  preferences (`defaults write`), so a skill that writes there or
+  installs programs or global packages fails
+  ([Writing](docs/CONFIGURATION.md#writing)).
+- Brains no longer read your keychains, so the login you made with
+  `claude` does not reach them: run `claude setup-token` and set
+  `CLAUDE_CODE_OAUTH_TOKEN` in the service's environment before you
+  upgrade. Unless `inherit_claude_user_config` is on, each brain starts
+  with an empty Claude Code config folder of its own; its earlier CLI
+  settings and transcripts stay in `~/.claude`, which brains no longer
+  read. Its folder, memory and conversation history stay as they are.
+- Each brain has a media inbox of its own, and no brain reads another's.
+  On the first start what older versions left in the media folder, its
+  folders (`media/plaud/` among them) and the attachments at its top,
+  moves to `media/.old/`, which no brain can read.
+- `/ingest` takes files only at the top of the media folder or in the
+  named brain's own inbox, and from a brain's own run token only those in
+  its inbox.
+- Brains cannot start code outside the sandbox through `launchctl`,
+  `open`, `osascript`, Apple events or the sockets of Docker and tmux, and
+  runs start without a terminal.
+- `sandbox.git_config` `"deny"` hides `~/.config/git` too, and both modes
+  protect every file `~/.gitconfig` includes.
+- A brain folder that is, holds or lies inside a path the sandbox protects
+  is left out with an issue, also when `brain_dirs` was edited by hand;
+  restores refuse such a target too.
+- `fridolin check` exits with status 3 when a brain you approved will not
+  run, and `setup.sh` shows check's issues and stops before it installs
+  then. The chats of such a brain go to no other brain until you fix it:
+  a DM brain left out used to hand your DMs to the default brain.
+- The bridge runs no program from a folder of its `PATH` inside a brain's
+  folder (a `bin/` there, say): it takes it off its own `PATH`, logs it,
+  and hands it to that brain's runs only, first on their `PATH`.
+  `fridolin service install` writes such folders to `FRIDOLIN_BRAIN_PATH`
+  in the service file instead of `PATH`.
+- Backups never upload a brain folder's `.env` files, private keys or
+  calendar tokens unless `backup.include_secret_files` is on, and wait up
+  to two minutes for a busy brain before they copy its folder.
+- With `plaud.brain_access`, brains may rewrite the shared Plaud login
+  but not remove or replace it, and the bridge no longer runs the Plaud
+  CLI with a `~/.plaud/tokens.json` that is a symlink or a hard link, or a
+  `~/.plaud` that is a symlink: remove the link and connect again.
 
 ### Added
 

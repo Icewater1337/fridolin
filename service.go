@@ -79,7 +79,10 @@ type serviceHost struct {
 	home string
 	uid  int
 	path string // the installer's PATH; the service gets it too
-	out  io.Writer
+	// brainPath is the installer's brainPATHVar, the folders a bridge
+	// that installs itself took off its PATH; see servicePath.
+	brainPath string
+	out       io.Writer
 
 	// run runs launchctl or systemctl and returns what it printed.
 	run   func(name string, args ...string) (string, error)
@@ -93,11 +96,12 @@ func newServiceHost() *serviceHost {
 	home := homeDir()
 	client := &http.Client{Timeout: 2 * time.Second}
 	return &serviceHost{
-		goos: runtime.GOOS,
-		home: home,
-		uid:  os.Getuid(),
-		path: os.Getenv("PATH"),
-		out:  os.Stdout,
+		goos:      runtime.GOOS,
+		home:      home,
+		uid:       os.Getuid(),
+		path:      os.Getenv("PATH"),
+		brainPath: os.Getenv(brainPATHVar),
+		out:       os.Stdout,
 		run: func(name string, args ...string) (string, error) {
 			// systemctl restart waits for the old bridge to stop, which
 			// takes seconds; a minute means something is stuck.
@@ -258,19 +262,35 @@ func (h *serviceHost) launchdTarget() string {
 // servicePath is the PATH the service runs with: the installer's own, so
 // brains find what you find in your shell (claude, uv, node, ffmpeg), then
 // the usual folders it may lack. launchd and systemd start with a minimal
-// PATH of their own. Relative entries and missing folders are left out.
-func servicePath(installer, home, goos string) string {
-	var out []string
-	add := func(dir string, mustExist bool) {
+// PATH of their own. Relative entries and missing folders are left out,
+// and so are the folders inside the brain folders owners name, from which
+// the bridge runs nothing: they go into brainPath, the service's
+// brainPATHVar, with those of the installer's own brainPATHVar (a bridge
+// that installs itself), and the bridge hands each to the runs of the
+// brain whose folder holds it (see setBridgePATH).
+func servicePath(installer, installerBrain, home, goos string, owners []pathOwner) (path, brainPath string) {
+	var out, brain []string
+	add := func(dir string, mustExist, inBrain bool) {
 		dir = filepath.Clean(dir)
-		if !filepath.IsAbs(dir) || slices.Contains(out, dir) || (mustExist && !isDir(dir)) {
+		if !filepath.IsAbs(dir) || (mustExist && !isDir(dir)) {
 			return
 		}
-		out = append(out, dir)
+		list := &out
+		if _, in := pathOwnerOf(dir, owners); in || inBrain {
+			list = &brain
+		}
+		if !slices.Contains(*list, dir) {
+			*list = append(*list, dir)
+		}
+	}
+	for _, dir := range filepath.SplitList(installerBrain) {
+		if dir != "" {
+			add(dir, true, true)
+		}
 	}
 	for _, dir := range filepath.SplitList(installer) {
 		if dir != "" {
-			add(dir, true)
+			add(dir, true, false)
 		}
 	}
 	defaults := []string{filepath.Join(home, ".local", "bin"), "/usr/local/bin", "/usr/bin", "/bin", "/usr/sbin", "/sbin"}
@@ -278,9 +298,10 @@ func servicePath(installer, home, goos string) string {
 		defaults = append([]string{"/opt/homebrew/bin"}, defaults...)
 	}
 	for _, dir := range defaults {
-		add(dir, false)
+		add(dir, false, false)
 	}
-	return strings.Join(out, string(filepath.ListSeparator))
+	sep := string(filepath.ListSeparator)
+	return strings.Join(out, sep), strings.Join(brain, sep)
 }
 
 // ── the unit files ──────────────────────────────────────────────────────
@@ -295,7 +316,7 @@ type unitData struct {
 	Config  string
 	WorkDir string
 	LogDir  string
-	Env     []envVar // HOME and PATH first; launchd only gets more
+	Env     []envVar // HOME and PATH first, then brainPATHVar if set; launchd only gets more
 }
 
 const launchdTemplate = `<?xml version="1.0" encoding="UTF-8"?>
@@ -805,7 +826,11 @@ func (h *serviceHost) planInstall(o installOptions) (*installPlan, error) {
 		Config:  cfgPath,
 		WorkDir: dataDir,
 		LogDir:  h.logDir(),
-		Env:     []envVar{{"HOME", h.home}, {"PATH", servicePath(h.path, h.home, h.goos)}},
+	}
+	path, brainPath := servicePath(h.path, h.brainPath, h.home, h.goos, pathOwners(cfg))
+	p.data.Env = []envVar{{"HOME", h.home}, {"PATH", path}}
+	if brainPath != "" {
+		p.data.Env = append(p.data.Env, envVar{brainPATHVar, brainPath})
 	}
 	old, err := os.ReadFile(unitPath)
 	switch {
@@ -824,7 +849,9 @@ func (h *serviceHost) planInstall(o installOptions) (*installPlan, error) {
 			return nil, fmt.Errorf("%s cannot be read (%v), so the variables added to it would be lost: fix it, or move it aside to install a new one", unitPath, err)
 		}
 		for k := range u.Env {
-			if k != "HOME" && k != "PATH" {
+			// Install writes these itself, brainPATHVar only while a
+			// folder of PATH lies in a brain folder.
+			if k != "HOME" && k != "PATH" && k != brainPATHVar {
 				p.kept = append(p.kept, k)
 			}
 		}

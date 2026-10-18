@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"fmt"
 	"image/png"
 	"io"
 	"log"
@@ -426,7 +427,7 @@ func TestIngestConfinedToMediaDir(t *testing.T) {
 	h := newHarness(t, `{"ingest": {"enabled": true}}`)
 	dir := h.AddBrain(BrainManifest{ID: "personal", Name: "Personal", Routing: BrainRouting{HandlesDMs: true}})
 	media := filepath.Join(h.DataDir(), "media")
-	inside := filepath.Join(media, "upload", "scan.pdf")
+	inside := filepath.Join(media, "scan.pdf")
 	_ = os.MkdirAll(filepath.Dir(inside), 0o700)
 	_ = os.WriteFile(inside, []byte("%PDF"), 0o600)
 	outside := filepath.Join(h.Home(), "secret.txt")
@@ -442,7 +443,7 @@ func TestIngestConfinedToMediaDir(t *testing.T) {
 	for name, body := range map[string]string{
 		"outside media": `{"brain":"personal","paths":["` + outside + `"]}`,
 		"symlink out":   `{"brain":"personal","paths":["` + link + `"]}`,
-		"relative":      `{"brain":"personal","paths":["upload/scan.pdf"]}`,
+		"relative":      `{"brain":"personal","paths":["scan.pdf"]}`,
 		"unknown brain": `{"brain":"nobody","paths":["` + inside + `"]}`,
 	} {
 		if w := ingest(body); w.Code != 400 {
@@ -450,9 +451,150 @@ func TestIngestConfinedToMediaDir(t *testing.T) {
 		}
 	}
 	h.WaitFor("ingest reply", func() bool { return len(h.Outbox()) > 0 })
+	// The file moved into the brain's inbox, where its sandbox lets it read.
+	inbox := filepath.Join(canonicalDir(media), "personal", "scan.pdf")
 	hist, _ := os.ReadFile(filepath.Join(dir, "conversation-history.jsonl"))
-	if !strings.Contains(string(hist), "[attachment: "+canonicalDir(inside)+"]") {
-		t.Errorf("history does not record the ingested file:\n%s", hist)
+	if !strings.Contains(string(hist), "[attachment: "+inbox+"]") {
+		t.Errorf("history does not record the ingested file in the inbox:\n%s", hist)
+	}
+	if _, err := os.Stat(inbox); err != nil {
+		t.Errorf("the file is not in the inbox: %v", err)
+	}
+}
+
+// TestIngestKeepsOtherBrainsFiles: the brain /ingest names takes the files
+// into its inbox, and a brain can ask for that itself (it can reach
+// /ingest), so a file it may take must be one handed in for it: at the top
+// of the media folder, or in its own inbox. It used to take a file from any
+// folder but a running brain's inbox: the inbox a removed brain or one left
+// out (its folder gone) had left, or media/plaud/, where older versions
+// kept every brain's Plaud transcripts. Nor may it take another brain's
+// files, or an attachment still on its way to the brain of its chat.
+func TestIngestKeepsOtherBrainsFiles(t *testing.T) {
+	tb := newTestBridge(t, `, "ingest": {"enabled": true}`)
+	tb.addFolderBrain(t, BrainManifest{ID: "personal", Name: "Personal", Routing: BrainRouting{HandlesDMs: true}})
+	tb.addFolderBrain(t, BrainManifest{ID: "team", Name: "Team", Routing: BrainRouting{Groups: []string{"120363000000000000@g.us"}}})
+	tb.addFolderBrain(t, BrainManifest{ID: "old", Name: "Old"})
+	left := tb.addFolderBrain(t, BrainManifest{ID: "left", Name: "Left"})
+	media := tb.cfgs.Get().MediaDir
+	for _, p := range []string{"old/dm.pdf", "left/dm.pdf"} {
+		writeTestFile(t, filepath.Join(media, p), "x")
+	}
+	if w := tb.do("DELETE", "/api/brains/old", nil); w.Code != 200 {
+		t.Fatalf("removing brain old: %d %s", w.Code, w.Body.String())
+	}
+	if err := os.RemoveAll(left); err != nil {
+		t.Fatal(err)
+	}
+	if err := tb.brainMgr.Apply(tb.cfgs.Get()); err != nil {
+		t.Fatal(err)
+	}
+	if tb.brainMgr.Get("old") != nil || tb.brainMgr.Get("left") != nil || tb.brainMgr.Get("team") == nil {
+		t.Fatalf("brains %v, want old and left gone and team running", tb.brainMgr.Brains())
+	}
+	// team's own run token may hand in only what is in its inbox: it cannot
+	// write the top of the media folder, so a file there, left by a script
+	// for another brain, was never its own. It used to claim any of them.
+	tok, revoke := tb.runTokens.mint("team")
+	t.Cleanup(revoke)
+	cases := []struct {
+		name, file string // file relative to the media folder
+		code       int    // with the scripts token
+		brainCode  int    // with team's own run token
+	}{
+		{"another brain's inbox", "personal/dm.pdf", 400, 400},
+		{"a removed brain's inbox", "old/dm.pdf", 400, 400},
+		{"the inbox of a brain left out", "left/dm.pdf", 400, 400},
+		{"Plaud transcripts older versions kept", "plaud/2026-01-15 standup.txt", 400, 400},
+		{"a folder no brain owns", "upload/scan.pdf", 400, 400},
+		{"an attachment not yet routed", incomingMediaDir + "/voice.ogg", 400, 400},
+		{"its own inbox", "team/notes.pdf", 202, 202},
+		{"a folder in its own inbox", "team/plaud/notes.txt", 202, 202},
+		{"the top of the media folder", "scan.pdf", 202, 400},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			for _, by := range []struct {
+				name string
+				code int
+				do   func(body string) *httptest.ResponseRecorder
+			}{
+				{"brain team", tc.brainCode, func(body string) *httptest.ResponseRecorder { return tb.script("POST", "/ingest", body, tok) }},
+				{"a script", tc.code, tb.ingest},
+			} {
+				p := writeTestFile(t, filepath.Join(media, tc.file), "x")
+				w := by.do(`{"brain":"team","paths":["` + p + `"]}`)
+				if w.Code != by.code {
+					t.Errorf("ingest of %s by %s: %d %s, want %d", tc.file, by.name, w.Code, w.Body.String(), by.code)
+				}
+				if by.code == 400 {
+					if _, err := os.Stat(p); err != nil {
+						t.Errorf("the file refused to %s moved: %v", by.name, err)
+					}
+				}
+			}
+		})
+	}
+	// Nor does the answer say whether a name it guessed is there.
+	there := writeTestFile(t, filepath.Join(media, "payroll.pdf"), "x")
+	answer := func(p string) string {
+		w := tb.script("POST", "/ingest", `{"brain":"team","paths":["`+p+`"]}`, tok)
+		return fmt.Sprint(w.Code, " ", w.Body.String())
+	}
+	if a, b := answer(there), answer(filepath.Join(media, "nothing.pdf")); a != b {
+		t.Errorf("brain team is told %q for a file there and %q for none", a, b)
+	}
+	// Nor can it get past that with a symlink in its inbox: the sandbox
+	// lets it make one to a file it cannot read, and /ingest used to
+	// follow it, and move payroll.pdf into the inbox for it.
+	inbox := filepath.Join(media, "team")
+	writeTestFile(t, filepath.Join(inbox, "real.pdf"), "x")
+	if err := os.MkdirAll(filepath.Join(inbox, "sub"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	for name, target := range map[string]string{
+		"there.pdf":     "../payroll.pdf",
+		"none.pdf":      "../nothing.pdf",
+		"abs-there.pdf": there,
+		"abs-none.pdf":  filepath.Join(media, "nothing.pdf"),
+		"other.pdf":     "../personal/dm.pdf",
+		"own.pdf":       "real.pdf",
+		"sub/up.pdf":    "../real.pdf",
+	} {
+		if err := os.Symlink(target, filepath.Join(inbox, name)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	refused := answer(filepath.Join(inbox, "nothing.pdf"))
+	for _, c := range []struct{ name, path, want string }{
+		{"a link to a file at the top", filepath.Join(inbox, "there.pdf"), refused},
+		{"a link to no file at the top", filepath.Join(inbox, "none.pdf"), refused},
+		{"an absolute link to a file at the top", filepath.Join(inbox, "abs-there.pdf"), refused},
+		{"an absolute link to no file at the top", filepath.Join(inbox, "abs-none.pdf"), refused},
+		{"a link into another brain's inbox", filepath.Join(inbox, "other.pdf"), refused},
+		{"a path through a folder that is there", inbox + "/../personal/../team/real.pdf", ""},
+		{"a path through a folder that is not there", inbox + "/../nobody/../team/real.pdf", ""},
+		{"a link to a file in its inbox", filepath.Join(inbox, "own.pdf"), ""},
+		{"a link in a folder to a file in its inbox", filepath.Join(inbox, "sub", "up.pdf"), ""},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			got := answer(c.path)
+			if c.want == "" {
+				if !strings.HasPrefix(got, "202 ") {
+					t.Errorf("brain team is told %q, want 202", got)
+				}
+				return
+			}
+			if got != c.want {
+				t.Errorf("brain team is told %q, want %q as for any file it may not hand in", got, c.want)
+			}
+		})
+	}
+	if _, err := os.Stat(there); err != nil {
+		t.Errorf("payroll.pdf, which brain team may not take, moved: %v", err)
+	}
+	if _, err := os.Lstat(filepath.Join(inbox, "payroll.pdf")); err == nil {
+		t.Error("payroll.pdf reached team's inbox")
 	}
 }
 

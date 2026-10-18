@@ -2,7 +2,11 @@ package main
 
 import (
 	"context"
+	"errors"
+	"fmt"
+	"log"
 	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 )
@@ -44,7 +48,7 @@ var childEnvAllowlist = []childEnvVar{
 	{"LOGNAME", anyChild}, // the same, under the name older tools ask for
 	{"PATH", anyChild},    // finds what a program runs by name; the sandbox profile reasons about this PATH
 	{"SHELL", anyChild},   // the shell the CLI's Bash tool starts
-	{"TMPDIR", anyChild},  // the per-user temp folder on macOS, which the sandbox lets brains write
+	{"TMPDIR", anyChild},  // the per-user temp folder on macOS; sandboxed brains get one of their own
 	{"LANG", anyChild},    // language and character set, so non-ASCII text and file names survive
 	{"LC_*", anyChild},    // the same per category (LC_ALL, LC_CTYPE, ...)
 	{"TERM", anyChild},    // the terminal type, set only when the bridge was started in one
@@ -73,7 +77,7 @@ var childEnvAllowlist = []childEnvVar{
 	// ANTHROPIC_API_KEY or ANTHROPIC_AUTH_TOKEN log it in; ANTHROPIC_BASE_URL
 	// points it at a gateway.
 	{"ANTHROPIC_*", claudeChild},
-	{"CLAUDE_CONFIG_DIR", claudeChild},       // its login and state, when they are not in ~/.claude
+	{"CLAUDE_CONFIG_DIR", claudeChild},       // its login and state, when they are not in ~/.claude; sandboxed brains get their own
 	{"DISABLE_AUTOUPDATER", claudeChild},     // its update check; sandboxed runs set it to 1 whatever this says (see invoke)
 	{"DISABLE_TELEMETRY", claudeChild},       // its usage telemetry, if you turned it off
 	{"DISABLE_ERROR_REPORTING", claudeChild}, // its error reports, the same
@@ -167,4 +171,97 @@ func validEnvName(name string) bool {
 		}
 	}
 	return true
+}
+
+// brainStatesDirName is the folder of the data dir that holds every brain's
+// own state, one folder per brain id (see brainStateOf).
+const brainStatesDirName = "brains"
+
+// brainState is where the bridge keeps one brain's own state, the only
+// places outside its folder and inbox its sandbox lets it write: its Claude
+// Code config dir (CLAUDE_CONFIG_DIR: settings, transcripts, todos, the
+// CLI's own .claude.json), its TMPDIR and its caches. A brain therefore
+// shares none of them with your own Claude Code sessions or with other
+// brains.
+type brainState struct {
+	dir                string // <data_dir>/brains/<id>, which holds the rest
+	claude, tmp, cache string
+}
+
+// brainStateOf is the state of brain id in the data dir dataDir.
+func brainStateOf(dataDir, id string) brainState {
+	dir := filepath.Join(dataDir, brainStatesDirName, id)
+	return brainState{
+		dir:    dir,
+		claude: filepath.Join(dir, "claude"),
+		tmp:    filepath.Join(dir, "tmp"),
+		cache:  filepath.Join(dir, "cache"),
+	}
+}
+
+// folders are the folders of the state, which the sandbox pins.
+func (s brainState) folders() []string { return []string{s.claude, s.tmp, s.cache} }
+
+// prepareBrainState creates brain id's media inbox in mediaDir (when set)
+// and its state in dataDir, which its sandbox profile pins and so must
+// exist as real folders before the brain runs, and returns what a
+// sandboxed run adds to its environment to use them:
+//
+//   - CLAUDE_CONFIG_DIR, the CLI's settings, transcripts and .claude.json,
+//     unless inheritUser (inherit_claude_user_config) shares yours;
+//   - TMPDIR and CLAUDE_CODE_TMPDIR, where the CLI (its Bash tool's output
+//     among others) and every other program keep temporary files, and
+//     TMPPREFIX for zsh, the shell the Bash tool usually runs, which
+//     ignores TMPDIR and failed every here-document in /tmp;
+//   - XDG_CACHE_HOME and npm_config_cache, the caches of the tools brains
+//     run, such as transcribe.py's model and the site builder's npm.
+//
+// A brain may write nowhere else outside its folder and inbox, and shares
+// none of these with your own sessions or another brain. Programs that
+// ignore TMPDIR, macOS's mktemp without a template among them, fail to
+// write their temp files (see "Temporary files" in docs/CONFIGURATION.md).
+func prepareBrainState(dataDir, mediaDir, id string, inheritUser bool) ([]string, error) {
+	if dataDir == "" {
+		return nil, errors.New("the sandbox needs the data folder, which holds each brain's own state")
+	}
+	if !brainIDRe.MatchString(id) {
+		return nil, fmt.Errorf("brain id %q cannot name a folder", id)
+	}
+	if mediaDir != "" {
+		// The profile opens the inbox by its path, so what is there and is
+		// no inbox refuses the run. Any other failure leaves the run without
+		// an inbox: the files sent to it stay where they are (see
+		// claimMedia), and the brain runs, as it used to fail every run.
+		switch inbox, err := openInbox(mediaDir, id); {
+		case errors.Is(err, errNotTheInbox):
+			return nil, err
+		case err != nil:
+			log.Printf("brain %s: no media inbox for this run: %v", id, err)
+		default:
+			inbox.Close()
+		}
+	}
+	st := brainStateOf(dataDir, id)
+	for _, dir := range st.folders() {
+		if err := os.MkdirAll(dir, 0o700); err != nil {
+			return nil, fmt.Errorf("creating the state of brain %s: %w", id, err)
+		}
+		// The data dir is the bridge's alone, but check anyway: the
+		// profile allows these folders by name, and a symlink there would
+		// open whatever it points to.
+		if fi, err := os.Lstat(dir); err != nil || !fi.IsDir() {
+			return nil, fmt.Errorf("the state folder %s of brain %s is not a folder", dir, id)
+		}
+	}
+	env := []string{
+		"TMPDIR=" + st.tmp,
+		"CLAUDE_CODE_TMPDIR=" + st.tmp,
+		"TMPPREFIX=" + filepath.Join(st.tmp, "zsh"),
+		"XDG_CACHE_HOME=" + st.cache,
+		"npm_config_cache=" + filepath.Join(st.cache, "npm"),
+	}
+	if !inheritUser {
+		env = append(env, "CLAUDE_CONFIG_DIR="+st.claude)
+	}
+	return env, nil
 }

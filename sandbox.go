@@ -2,6 +2,7 @@ package main
 
 import (
 	"bufio"
+	"cmp"
 	"errors"
 	"fmt"
 	"io/fs"
@@ -22,18 +23,18 @@ const sandboxExecPath = "/usr/bin/sandbox-exec"
 
 // SandboxProfiler generates a macOS sandbox-exec profile per brain.
 //
-// The profile is allow-by-default with an explicit denylist. That is a
-// containment measure, not a jail: it stops a prompt-injected brain from
-// reading the *other* brains' trees, your cross-session Claude state and your
-// own Claude Code instructions, and the usual home-directory hotspots (keys,
-// mail, browser data). It does not stop a determined attacker with code
-// execution.
-//
-// Brains keep write access by default, so a brain can still maintain its own
-// notes and files. Everything denied is denied for writes as well, and the
-// folders above it cannot be renamed, nor created while missing: the
-// sandbox matches paths, not files, so a brain that moved ~/.ssh (or the
-// folder holding another brain) to a new name could read it there. Add
+// Writing is denied by default: a brain may write only its own folder, its
+// own media inbox, and its own state the bridge keeps for it (a Claude
+// Code config dir, TMPDIR and caches; see brainState). Everything else
+// your user may write stays closed, so a prompt-injected brain cannot plant
+// code that runs outside its sandbox: in ~/.claude, which your own sessions
+// load, in a LaunchAgent, a shell startup file, your apps' preferences, a
+// program on PATH or the bridge's own install. Reading is allowed by
+// default, with an explicit denylist: the other brains' folders, the
+// bridge's own files, your Claude Code setup and instructions, the
+// keychains, and the usual home-directory hotspots (keys, mail, browser
+// data). That is a containment measure, not a jail: "What the sandbox does
+// not cover" in docs/CONFIGURATION.md lists what it leaves open. Add
 // anything else that must stay unreadable to sandbox.deny_paths in
 // config.json.
 type SandboxProfiler struct {
@@ -47,16 +48,29 @@ type SandboxProfiler struct {
 	// denies the others' both ways.
 	workDirs map[string][]string
 
-	// dataDir is the bridge's runtime dir, denied wholesale except for media.
+	sandboxPolicy
+
+	// configFile is the config.json the bridge runs with; see SetConfigFile.
+	configFile string
+
+	// execPath is sandboxExecPath; tests point it at a missing file.
+	execPath string
+
+	// bridgeExe is the running bridge binary; tests point it elsewhere.
+	bridgeExe string
+}
+
+// sandboxPolicy is what the profiles take from the config, with its paths
+// made absolute.
+type sandboxPolicy struct {
+	// dataDir is the bridge's runtime dir, denied wholesale except for this
+	// brain's media inbox and state.
 	dataDir  string
 	mediaDir string
 
 	// dbPath is the WhatsApp session and chat database, which db_path can
 	// put outside the data dir.
 	dbPath string
-
-	// configFile is the config.json the bridge runs with; see SetConfigFile.
-	configFile string
 
 	// credsDir holds per-brain credential files; see SandboxConfig.CredentialsDir.
 	credsDir string
@@ -68,23 +82,71 @@ type SandboxProfiler struct {
 	plaudShared bool
 
 	// inheritUser: inherit_claude_user_config lets brains load your own
-	// Claude Code instructions, the CLAUDE.md files above their folders.
+	// Claude Code setup and share its state, rather than keep their own.
 	inheritUser bool
 
+	// claudeDir is the bridge's own CLAUDE_CONFIG_DIR, where your Claude
+	// Code keeps its setup and state instead of ~/.claude, or "".
+	claudeDir string
+
 	// claudePath, rclonePath, plaudCLIPath and viewer name the programs the
-	// bridge itself runs outside the sandbox; see outsidePrograms.
+	// bridge itself runs outside the sandbox; see bridgeProgramsOf.
 	claudePath, rclonePath, plaudCLIPath string
 	viewer                               bool
+
+	// inbox and state name what the bridge keeps for brain id outside its
+	// folder, the only places there the brain may write: its media inbox
+	// (see mediaInbox) and its own state (see brainStateOf). Each is nil
+	// without a media or data folder. The bridge creates them before a run
+	// (see prepareBrainState); the profile only names them.
+	inbox func(id string) string
+	state func(id string) brainState
 
 	// extraDeny and extraAllow come from config.
 	extraDeny  []string
 	extraAllow []string
 
-	// execPath is sandboxExecPath; tests point it at a missing file.
-	execPath string
+	// brainDirs are the configured brain folders, as configured and by
+	// their real paths: the bridge runs nothing from a folder of its PATH
+	// inside one (see setBridgePATH).
+	brainDirs []string
+}
 
-	// bridgeExe is the running bridge binary; tests point it elsewhere.
-	bridgeExe string
+// sandboxPolicyOf takes the profiles' settings from cfg.
+func sandboxPolicyOf(cfg *Config) sandboxPolicy {
+	// These may be relative, and the bridge opens them relative to its
+	// working directory; the comparisons need them absolute.
+	p := sandboxPolicy{
+		dataDir:      absPath(cfg.DataDir),
+		dbPath:       absPath(cfg.DBPath),
+		mediaDir:     absPath(cfg.MediaDir),
+		credsDir:     cfg.Sandbox.CredentialsDir,
+		gitConfig:    cfg.Sandbox.GitConfig,
+		plaudShared:  cfg.Plaud.BrainAccess,
+		inheritUser:  cfg.InheritClaudeUserConfig,
+		claudePath:   cfg.ClaudePath,
+		rclonePath:   cfg.Backup.RclonePath,
+		plaudCLIPath: cfg.Plaud.CLIPath,
+		viewer:       cfg.Viewer,
+		extraDeny:    append([]string(nil), cfg.Sandbox.DenyPaths...),
+		extraAllow:   append([]string(nil), cfg.Sandbox.AllowPaths...),
+	}
+	if p.mediaDir == "" && p.dataDir != "" {
+		p.mediaDir = filepath.Join(p.dataDir, "media")
+	}
+	if media := p.mediaDir; media != "" {
+		p.inbox = func(id string) string { return mediaInbox(media, id) }
+	}
+	if data := p.dataDir; data != "" {
+		p.state = func(id string) brainState { return brainStateOf(data, id) }
+	}
+	if dir := os.Getenv("CLAUDE_CONFIG_DIR"); filepath.IsAbs(dir) {
+		p.claudeDir = filepath.Clean(dir)
+	}
+	for _, o := range pathOwners(cfg) {
+		p.brainDirs = append(p.brainDirs, o.dirs...)
+	}
+	return p
 }
 
 // NewSandboxProfiler builds a profiler for the configured brains.
@@ -109,24 +171,10 @@ func (sp *SandboxProfiler) Update(workDirs map[string][]string, cfg *Config) {
 	defer sp.mu.Unlock()
 	sp.enabled = cfg.Sandbox.Enabled
 	sp.workDirs = wd
-	// These may be relative, and the bridge opens them relative to its
-	// working directory; the comparisons below need them absolute.
-	sp.dataDir = absPath(cfg.DataDir)
-	sp.dbPath = absPath(cfg.DBPath)
-	sp.mediaDir = absPath(cfg.MediaDir)
-	if sp.mediaDir == "" && sp.dataDir != "" {
-		sp.mediaDir = filepath.Join(sp.dataDir, "media")
+	sp.sandboxPolicy = sandboxPolicyOf(cfg)
+	for _, dirs := range wd {
+		sp.brainDirs = append(sp.brainDirs, dirs...)
 	}
-	sp.credsDir = cfg.Sandbox.CredentialsDir
-	sp.gitConfig = cfg.Sandbox.GitConfig
-	sp.plaudShared = cfg.Plaud.BrainAccess
-	sp.inheritUser = cfg.InheritClaudeUserConfig
-	sp.claudePath = cfg.ClaudePath
-	sp.rclonePath = cfg.Backup.RclonePath
-	sp.plaudCLIPath = cfg.Plaud.CLIPath
-	sp.viewer = cfg.Viewer
-	sp.extraDeny = append([]string(nil), cfg.Sandbox.DenyPaths...)
-	sp.extraAllow = append([]string(nil), cfg.Sandbox.AllowPaths...)
 }
 
 // SetConfigFile names the config.json the bridge runs with. It lives in the
@@ -184,10 +232,7 @@ func (sp *SandboxProfiler) sitePaths() (deny, noWrite []string) {
 	return deny, noWrite
 }
 
-// defaultDenySubpaths are home-relative directories no brain may read or
-// write. Keychains are deliberately absent: the Claude CLI reads its
-// credentials from the macOS keychain, and denying it breaks the CLI with
-// "Not logged in".
+// defaultDenySubpaths are home-relative directories no brain may read.
 var defaultDenySubpaths = []string{
 	".ssh",
 	".gnupg",
@@ -230,6 +275,12 @@ var defaultDenySubpaths = []string{
 	"Library/Group Containers",
 }
 
+// userFileFolders are the folders of defaultDenySubpaths that hold your own
+// files rather than secrets: a brain's folder may lie in one, where the
+// sandbox opens that folder alone, and so may a restore (see
+// checkRestoreTarget).
+var userFileFolders = []string{"Documents", "Downloads", "Desktop", "Movies", "Music", "Pictures"}
+
 // browserProfilePrefixes are browsers that keep each release channel in a
 // folder of its own beside the stable one in ~/Library/Application Support
 // ("Microsoft Edge Beta", "Vivaldi Snapshot", "com.operasoftware.OperaGX"),
@@ -257,26 +308,14 @@ func inBrowserProfile(home, p string) bool {
 	return regexp.MustCompile("^" + regexp.QuoteMeta(appSupport) + browserProfilePattern()).MatchString(p)
 }
 
-// defaultDenyLiterals are individual home-relative files to deny, for
-// reading and writing.
-var defaultDenyLiterals = []string{
-	".claude/history.jsonl",
-	".git-credentials",
-	".netrc",
-	".zsh_history",
-	".bash_history",
-}
-
 // defaultWriteDenySubpaths and defaultWriteDenyLiterals are home-relative
-// paths brains may read but never write. Each one is loaded or run by
-// something outside this brain's sandbox: your own Claude Code sessions
-// and, with inherit_claude_user_config, every other brain's next run
-// (settings and their hooks, CLAUDE.md, rules, agents, commands, skills,
-// plugins, output styles), launchd at your next login, your own shells,
-// the tmux server the activity viewer starts. A brain that could write one
-// would carry a prompt injection out of its sandbox. Claude Code state the
-// CLI writes on every run (~/.claude.json, projects, todos, shell
-// snapshots) is not in this list.
+// paths that are loaded or run by something outside any sandbox: your own
+// Claude Code sessions (settings and their hooks, CLAUDE.md, rules, agents,
+// commands, skills, plugins, output styles), launchd at your next login,
+// your own shells, the tmux server the activity viewer starts. A brain's
+// profile denies every write outside its own places and so needs no list;
+// the live site's sandbox (site_sandbox.go) keeps the paths a module
+// declares off these.
 var defaultWriteDenySubpaths = []string{
 	".claude/hooks",
 	".claude/rules",
@@ -306,19 +345,76 @@ var defaultWriteDenyLiterals = []string{
 	".tmux.conf",
 }
 
-// memoryFiles are the files Claude Code loads from its working directory and
-// every folder above it, next to that folder's .claude/ (its CLAUDE.md, rules
-// and settings), whichever brain or session runs there.
-var memoryFiles = []string{"CLAUDE.md", "CLAUDE.local.md", ".mcp.json"}
+// defaultDenyLiterals are individual home-relative files no brain may read.
+var defaultDenyLiterals = []string{
+	".claude/history.jsonl",
+	".git-credentials",
+	// git's credential store also looks here.
+	".config/git/credentials",
+	".netrc",
+	".zsh_history",
+	".bash_history",
+}
+
+// claudeConfigSubpaths and claudeConfigLiterals are what Claude Code loads
+// from its config dir as configuration: settings and their hooks, CLAUDE.md,
+// rules, agents, commands, skills, plugins, output styles. With
+// inherit_claude_user_config, brains share your config dir, ~/.claude, and
+// write the CLI's state there, but never these: your own sessions and every
+// other brain's next run would load them.
+var claudeConfigSubpaths = []string{"hooks", "rules", "agents", "commands", "skills", "plugins", "output-styles"}
+
+var claudeConfigLiterals = []string{"settings.json", "settings.local.json", "CLAUDE.md"}
 
 // instructionFiles are the memory files Claude Code reads as instructions,
-// whatever --setting-sources says; it skips .mcp.json under
-// --strict-mcp-config.
+// whatever --setting-sources says, from every folder above its working
+// directory.
 var instructionFiles = []string{"CLAUDE.md", "CLAUDE.local.md"}
+
+// writableDevices are the devices any program writes to: discarded output,
+// its own file descriptors. They lead nowhere a brain could keep anything.
+// The controlling terminal is not among them: runs start without one (see
+// isolateProcessGroup), and one that reached yours could type into it.
+var writableDevices = []struct{ filter, path string }{
+	{"literal", "/dev/null"},
+	{"literal", "/dev/zero"},
+	{"literal", "/dev/dtracehelper"},
+	{"subpath", "/dev/fd"},
+}
+
+// launchers are the programs that hand a command to something running
+// outside the sandbox: launchd (launchctl submit, bootstrap), LaunchServices
+// (open, which runs a .command file in Terminal) and other apps' scripting
+// (osascript telling Terminal to do script). Apple events and LaunchServices
+// opens are denied as well, whichever program asks for them.
+var launchers = []string{"/bin/launchctl", "/usr/bin/open", "/usr/bin/osascript"}
 
 // Profile returns the sandbox profile source for the brain with this id. It
 // fails when a path cannot be written into the profile: a profile that
 // silently skipped a rule would protect less than the config says.
+//
+// The sandbox applies the last rule that matches, so the order of the
+// sections is the precedence model, from weakest to strongest:
+//
+//  1. Writing is denied everywhere, but for a few devices, and so is
+//     writing preferences, which cfprefsd does on the brain's behalf.
+//  2. Soft denies: reading private home folders, your Claude Code setup,
+//     deny_paths entries. The allows below may open them.
+//  3. Allows: the brain's own folder (read and write), allow_paths (read).
+//  4. Hard denies: other brains' folders, the bridge's own files and the
+//     programs it runs, the keychains and your instructions above the
+//     brain's folder. Nothing a brain or an allow_paths entry is given
+//     opens these again...
+//  5. ...but what the bridge gives this brain inside them: its media inbox,
+//     its state dir and its runs' brain API tokens (to read); with
+//     plaud.brain_access the Plaud login, which the Plaud CLI refreshes;
+//     and with inherit_claude_user_config your config dir, though not the
+//     write denies of 4 in it, which come again.
+//  6. What stays closed inside the brain's own places: deny_paths entries
+//     inside its folder, the database, and the folders themselves, which the
+//     brain may fill but not move, remove or swap for a symlink.
+//  7. Starting code outside the sandbox: launchd, LaunchServices, Apple
+//     events, and the unix sockets of programs that run commands.
 func (sp *SandboxProfiler) Profile(brainID string) (string, error) {
 	sp.mu.RLock()
 	defer sp.mu.RUnlock()
@@ -327,8 +423,9 @@ func (sp *SandboxProfiler) Profile(brainID string) (string, error) {
 		// Every home-relative deny would silently become a relative path.
 		return "", fmt.Errorf("HOME %q is not an absolute path", home)
 	}
-	// A brain's own folder wins over the denies above it (see below), so a
-	// folder that holds HOME would open all of it, ~/CLAUDE.md included.
+	// Every profile denies every other brain's folder, so a folder that
+	// holds HOME would close all of it to the others, and open everything
+	// the sandbox protects there to itself.
 	ids := make([]string, 0, len(sp.workDirs))
 	for id := range sp.workDirs {
 		ids = append(ids, id)
@@ -341,207 +438,125 @@ func (sp *SandboxProfiler) Profile(brainID string) (string, error) {
 			}
 		}
 	}
+	own := sp.workDirs[brainID]
+	var layout bridgeLayout
+	if sp.bridgeExe != "" {
+		layout = layoutOf(sp.bridgeExe)
+	}
+	protected := sp.protected(home, layout)
+	for id, dirs := range sp.workDirs {
+		if id != brainID {
+			for _, dir := range dirs {
+				protected = append(protected, protectedPath{dir, true, "brain " + id + "'s folder"})
+			}
+		}
+	}
+	for _, dir := range own {
+		if p, ok := protectedIn(dir, protected); ok {
+			return "", fmt.Errorf("brain %s: its folder %s %s, which the sandbox keeps from brains; give the brain a folder of its own", brainID, dir, p)
+		}
+	}
 
 	var b profileBuilder
-	b.creatable = b.spellings(filepath.Join(home, ".claude"), true)
+	b.creatable = b.spellings(sp.userClaudeDir(home), true)
 	b.trustRoot(home)
-	if sp.dataDir != "" {
-		b.trustRoot(sp.dataDir)
-	}
-	if sp.credsDir != "" {
-		b.trustRoot(sp.credsDir)
+	for _, dir := range []string{sp.dataDir, sp.credsDir, sp.mediaDir} {
+		if dir != "" {
+			b.trustRoot(dir)
+		}
 	}
 	b.WriteString("(version 1)\n(allow default)\n\n")
 
-	// ── home-directory hotspots ──────────────────────────────────────────
-	b.WriteString(";; Cross-session state, credentials, and personal data stores\n")
+	// ── 1. writing ───────────────────────────────────────────────────────
+	b.WriteString(";; 1. Writing is denied everywhere; this brain's own places are allowed below\n")
+	b.WriteString("(deny file-write* (subpath \"/\"))\n")
+	for _, d := range writableDevices {
+		b.allow("file-write*", d.filter, d.path)
+	}
+	// Preferences are written by cfprefsd, outside the sandbox, so the file
+	// deny above does not reach them: `defaults write com.apple.Terminal`
+	// changed the command a Terminal profile runs when you open a window.
+	// A program writing a preferences file by its path, in the brain's own
+	// folder say, writes it itself and stays under the file rules.
+	b.WriteString("(deny user-preference-write)\n")
+	b.WriteString("\n")
+
+	// ── 2. soft denies ───────────────────────────────────────────────────
+	b.WriteString(";; 2. Private places: not readable, unless allowed below\n")
 	for _, sub := range defaultDenySubpaths {
 		b.deny("file-read*", "subpath", filepath.Join(home, sub))
-		b.deny("file-write*", "subpath", filepath.Join(home, sub))
 	}
-	appSupport := filepath.Join(home, "Library", "Application Support")
-	b.denyBelow("file-read*", appSupport, browserProfilePattern())
-	b.denyBelow("file-write*", appSupport, browserProfilePattern())
+	b.denyBelow("file-read*", filepath.Join(home, "Library", "Application Support"), browserProfilePattern())
 	for _, lit := range defaultDenyLiterals {
 		b.deny("file-read*", "literal", filepath.Join(home, lit))
-		b.deny("file-write*", "literal", filepath.Join(home, lit))
 	}
-	// Claude Code's record of every session, yours included: transcripts in
-	// projects/, one file per running CLI in sessions/. The CLI writes its
-	// own run's files there, so only reading is denied, and moving files
-	// out: a rename is checked as file-write-unlink on its source, and a
-	// transcript moved elsewhere could be read there. The CLI deletes its
-	// sessions/<pid>.json on exit, so sessions/ keeps unlink and only the
-	// folder itself is pinned.
-	projects := filepath.Join(home, ".claude", "projects")
-	sessions := filepath.Join(home, ".claude", "sessions")
-	b.deny("file-read*", "subpath", projects)
-	b.deny("file-write-unlink", "subpath", projects)
-	b.deny("file-read*", "subpath", sessions)
-	b.pin(sessions)
-	// Nor may a brain plant a symlink in either. One that linked a project
-	// folder the CLI had not created yet into its own folder got that
-	// project's later transcripts, yours included: the CLI wrote them
-	// through the link, to where the brain reads. The CLI creates real
-	// folders and files there, which stay allowed.
-	b.denySymlinksIn(projects)
-	b.denySymlinksIn(sessions)
+	if !sp.inheritUser {
+		// Your Claude Code setup and state: settings and their hooks,
+		// plugins, skills, every session's transcript, and ~/.claude.json
+		// with its MCP servers and the backups the CLI keeps of it. A
+		// brain has a config dir of its own (see brainState).
+		for _, dir := range sp.userClaudeDirs(home) {
+			b.deny("file-read*", "subpath", dir)
+		}
+		b.deny("file-read*", "literal", filepath.Join(home, ".claude.json"))
+		b.denyBelow("file-read*", home, `/\.claude\.json\.[^/]*$`)
+	} else {
+		// Brains share your config dir; they still read no other session's
+		// records: transcripts in projects/, one file per running CLI in
+		// sessions/.
+		dir := sp.userClaudeDir(home)
+		b.deny("file-read*", "subpath", filepath.Join(dir, "projects"))
+		b.deny("file-read*", "subpath", filepath.Join(dir, "sessions"))
+	}
 	if !sp.plaudShared {
 		// The Plaud CLI's login, unless plaud.brain_access shares it.
 		b.deny("file-read*", "subpath", filepath.Join(home, ".plaud"))
-		b.deny("file-write*", "subpath", filepath.Join(home, ".plaud"))
 	}
-	b.WriteString("\n")
-
-	// ── code that runs outside the sandbox ───────────────────────────────
-	b.WriteString(";; Loaded or run outside this sandbox: readable, never writable\n")
-	for _, sub := range defaultWriteDenySubpaths {
-		b.deny("file-write*", "subpath", filepath.Join(home, sub))
-	}
-	for _, lit := range defaultWriteDenyLiterals {
-		b.deny("file-write*", "literal", filepath.Join(home, lit))
-	}
-	// Above a brain's folder: what one brain wrote there would reach every
-	// brain below it, and your own sessions in your home folder. ~/.claude
-	// itself is the CLI's state; what it loads from there is denied above.
-	homes := []string{home, resolvePath(home)}
-	for _, dir := range memoryFolders(sp.workDirs, brainID, homes) {
-		for _, f := range memoryFiles {
-			b.deny("file-write*", "literal", filepath.Join(dir, f))
-		}
-		if !slices.Contains(homes, dir) {
-			b.deny("file-write*", "subpath", filepath.Join(dir, ".claude"))
-		}
-	}
-	// Auto-memory: Claude Code loads projects/<project>/memory/MEMORY.md into
-	// every new session in that project, yours included. The CLI writes the
-	// rest of projects/ on every run, and a project folder it has not
-	// created yet cannot be listed, hence a pattern.
-	b.denyBelow("file-write*", projects, `/[^/]+/memory(/.*)?$`)
-	b.WriteString("\n")
-
-	// ── the bridge and the programs it runs ──────────────────────────────
-	// launchd runs the bridge outside any sandbox, and the bridge runs its
-	// helpers unsandboxed too, so a brain that replaced one of them would
-	// run code outside its sandbox the next time it starts.
-	b.WriteString(";; The bridge, its tools, its checkout and the programs it runs: never writable\n")
-	if sp.bridgeExe != "" {
-		b.deny("file-write*", "literal", sp.bridgeExe)
-		l := layoutOf(sp.bridgeExe)
-		if l.Dir != "" {
-			b.deny("file-write*", "subpath", l.Dir)
-		}
-		if l.Source != "" && l.Source != l.Dir {
-			b.deny("file-write*", "subpath", l.Source)
-		}
-	}
-	// Only those under HOME for now: a later change makes writes
-	// deny-by-default everywhere.
-	inHome := func(p string) bool { return withinAny(p, homes) || withinAny(resolvePath(p), homes) }
-	for _, p := range sp.outsidePrograms() {
-		if !inHome(p) {
-			continue
-		}
-		if st, err := os.Stat(p); err == nil && st.IsDir() {
-			b.deny("file-write*", "subpath", p)
-		} else {
-			b.deny("file-write*", "literal", p)
-		}
-	}
-	// Nor may a brain plant a program the bridge would find next.
-	files, dirs := sp.plantablePrograms(home)
-	for _, p := range files {
-		if inHome(p) {
-			b.deny("file-write*", "literal", p)
-		}
-	}
-	for _, p := range dirs {
-		if inHome(p) {
-			b.deny("file-write*", "subpath", p)
-		}
-	}
-	b.WriteString("\n")
-
-	// ── git configuration ────────────────────────────────────────────────
 	// Reading git config lets a brain commit in its own folder (name, email,
-	// signing settings). Writing it would let a brain change how *you* use
-	// git, so that stays denied. Credentials stay denied either way.
+	// signing settings); git_config "deny" hides it.
 	gitFiles := gitConfigChain(home)
 	xdgGit := filepath.Join(home, ".config", "git")
 	if sp.gitConfig == "deny" {
-		b.WriteString(";; Git configuration (denied by sandbox.git_config)\n")
 		for _, f := range gitFiles {
 			b.deny("file-read*", "literal", f)
 		}
 		b.deny("file-read*", "subpath", xdgGit)
-	} else {
-		b.WriteString(";; Git configuration: readable, never writable\n")
 	}
-	// Never writable in either mode; denied files must not be renamable
-	// either, or a brain could read them under their new name.
-	for _, f := range gitFiles {
-		b.deny("file-write*", "literal", f)
+	// A deny_paths entry inside this brain's folder comes in section 6,
+	// where it wins over the folder; one that holds the folder leaves the
+	// folder itself open to this brain and closes it to every other.
+	var innerDeny []string
+	for _, p := range sp.extraDeny {
+		if withinAny(absPath(p), own) || withinAny(resolvePath(absPath(p)), own) {
+			innerDeny = append(innerDeny, p)
+			continue
+		}
+		b.deny("file-read*", "subpath", p)
 	}
-	b.deny("file-write*", "subpath", xdgGit)
 	b.WriteString("\n")
 
-	// ── user-supplied extras ─────────────────────────────────────────────
-	if len(sp.extraDeny) > 0 {
-		b.WriteString(";; Extra denies from config\n")
-		b.ownable = true
-		for _, p := range sp.extraDeny {
-			b.deny("file-read*", "subpath", p)
-			b.deny("file-write*", "subpath", p)
-		}
-		b.ownable = false
-		b.WriteString("\n")
+	// ── 3. allows ────────────────────────────────────────────────────────
+	b.WriteString(";; 3. This brain's own folder, and allow_paths\n")
+	// Both ways: allow follows no symlink, and the brain runs in the real
+	// path, which a folder linked from a default-denied one, such as
+	// ~/assistant → ~/Documents/assistant, would otherwise leave denied.
+	var owns []string
+	for _, dir := range own {
+		owns = append(owns, b.allow("file-read*", "subpath", dir)...)
+		b.allow("file-write*", "subpath", dir)
 	}
-	if len(sp.extraAllow) > 0 {
-		b.WriteString(";; Extra allows from config (override the denies above, not those below)\n")
-		for _, p := range sp.extraAllow {
-			b.allow("file-read*", "subpath", p)
-		}
-		b.WriteString("\n")
+	// Reading only: an allow_paths entry re-opens what the defaults closed
+	// for reading, never for writing.
+	for _, p := range sp.extraAllow {
+		b.allow("file-read*", "subpath", p)
 	}
+	b.WriteString("\n")
 
-	// ── your instructions above the brain's folder ───────────────────────
-	// Claude Code reads CLAUDE.md, CLAUDE.local.md and .claude/ (its
-	// CLAUDE.md, rules, skills, agents and commands) in every folder above
-	// its working directory as part of the project, whatever
-	// --setting-sources says, so a brain in HOME read ~/CLAUDE.md,
-	// ~/.claude/CLAUDE.md and ~/.claude/rules: your instructions, not the
-	// brain's. ~/.claude is also the CLI's state, so only those two are
-	// denied there; they are your user memory too, so for brains outside
-	// HOME as well. The claudeMdExcludes a brain runs with (see
-	// excludeInstructionsAbove) skip the CLAUDE.md files and rules, but
-	// neither the skills, agents and commands nor the brain's own tools.
-	// Writes are denied too, so that nothing here can be renamed and read
-	// under another name. After the allow_paths allows, which cannot open
-	// them again; inherit_claude_user_config does.
-	if !sp.inheritUser {
-		b.WriteString(";; Your Claude Code instructions above this brain's folder\n")
-		for _, dir := range foldersAbove(sp.workDirs[brainID]...) {
-			for _, f := range instructionFiles {
-				b.deny("file-read*", "literal", filepath.Join(dir, f))
-				b.deny("file-write*", "literal", filepath.Join(dir, f))
-			}
-			if resolvePath(dir) != resolvePath(home) {
-				b.deny("file-read*", "subpath", filepath.Join(dir, ".claude"))
-				b.deny("file-write*", "subpath", filepath.Join(dir, ".claude"))
-			}
-		}
-		userMemory, userRules := filepath.Join(home, ".claude", "CLAUDE.md"), filepath.Join(home, ".claude", "rules")
-		b.deny("file-read*", "literal", userMemory)
-		b.deny("file-write*", "literal", userMemory)
-		b.deny("file-read*", "subpath", userRules)
-		b.deny("file-write*", "subpath", userRules)
-		b.WriteString("\n")
-	}
-
-	// ── other brains' working trees ──────────────────────────────────────
-	// After the allow_paths allows, like the bridge's data below, so that
-	// an entry covering the folder that holds the brains (~/assistant, say)
-	// cannot open them again.
+	// ── 4. hard denies ───────────────────────────────────────────────────
+	b.WriteString(";; 4. Kept from every brain, whatever is allowed above\n")
+	// Its write denies are kept, for the allow of section 5 that may open
+	// some of them again (see hardWrite).
+	b.recording = true
 	var others []string
 	for id, dirs := range sp.workDirs {
 		if id != brainID {
@@ -549,52 +564,35 @@ func (sp *SandboxProfiler) Profile(brainID string) (string, error) {
 		}
 	}
 	sort.Strings(others)
-	if len(others) > 0 {
-		b.WriteString(";; Other brains' working trees\n")
-		for _, dir := range others {
-			b.deny("file-read*", "subpath", dir)
-			b.deny("file-write*", "subpath", dir)
-		}
-		b.WriteString("\n")
+	for _, dir := range others {
+		b.deny("file-read*", "subpath", dir)
+		b.deny("file-write*", "subpath", dir)
 	}
-
-	// ── bridge runtime dir ───────────────────────────────────────────────
 	// The DB holds the WhatsApp session keys (enough to take the account
-	// over from another machine), the polls and their votes;
-	// the dashboard token and backup credentials live in the data dir too.
-	// Media is the shared inbound staging dir, so it is re-allowed below.
-	// This comes after the allow_paths allows, which therefore cannot open
-	// any of it again; only media can.
-	b.WriteString(";; Bridge runtime data (media staging re-allowed below)\n")
-	// Both names the data dir has had, whichever is active: an install that
-	// moved to ~/.fridolin can leave the old folder behind, with an old copy
-	// of the session keys, the dashboard token and the Drive login.
-	dataDirs := []string{filepath.Join(home, dataDirName), filepath.Join(home, legacyDataDirName)}
-	if sp.dataDir != "" && !slices.Contains(dataDirs, filepath.Clean(sp.dataDir)) {
-		dataDirs = append(dataDirs, sp.dataDir)
-	}
+	// over from another machine), the polls and their votes; the dashboard
+	// token and backup credentials live in the data dir too. Both names the
+	// data dir has had, whichever is active: an install that moved to
+	// ~/.fridolin can leave the old folder behind, with an old copy of the
+	// session keys, the dashboard token and the Drive login.
+	dataDirs := sp.dataDirs(home)
 	for _, dir := range dataDirs {
 		b.deny("file-read*", "subpath", dir)
 		b.deny("file-write*", "subpath", dir)
 	}
+	// The media folder, wherever media_dir puts it: attachments wait there
+	// for their brain, which moves them into its own inbox (see media.go).
+	if sp.mediaDir != "" {
+		b.deny("file-read*", "subpath", sp.mediaDir)
+		b.deny("file-write*", "subpath", sp.mediaDir)
+	}
 	// db_path can put the DB anywhere. Its folder goes too, unless it is a
 	// folder the brain needs (HOME or above, a temp dir), where denying it
 	// would take the brain's home or scratch space away.
-	var dbFiles []string
-	if sp.dbPath != "" {
-		for _, suffix := range []string{"", "-wal", "-shm", "-journal"} {
-			dbFiles = append(dbFiles, sp.dbPath+suffix)
-		}
-		if dir := filepath.Dir(sp.dbPath); !withinAny(sp.dbPath, dataDirs) && !sharedDir(dir, home) {
-			b.deny("file-read*", "subpath", dir)
-			b.deny("file-write*", "subpath", dir)
-		}
+	dbFiles := sp.dbFiles()
+	if dir := sp.dbFolder(home); dir != "" {
+		b.deny("file-read*", "subpath", dir)
+		b.deny("file-write*", "subpath", dir)
 	}
-	if sp.dataDir != "" {
-		b.allow("file-read*", "subpath", sp.mediaDir)
-		b.allow("file-write*", "subpath", sp.mediaDir)
-	}
-	// After the media allow, so no media_dir setting can open the DB again.
 	for _, f := range dbFiles {
 		b.deny("file-read*", "literal", f)
 		b.deny("file-write*", "literal", f)
@@ -605,8 +603,7 @@ func (sp *SandboxProfiler) Profile(brainID string) (string, error) {
 	// working directory when there was none there. The bridge reads
 	// neither any more, but either may still hold settings and secrets.
 	if sp.configFile != "" {
-		files := []string{sp.configFile, sp.configFile + ".bak", dotEnvPath(sp.configFile), ".env"}
-		for _, f := range files {
+		for _, f := range []string{sp.configFile, sp.configFile + ".bak", dotEnvPath(sp.configFile), ".env"} {
 			if abs, err := filepath.Abs(f); err == nil && !withinAny(abs, dataDirs) {
 				b.deny("file-read*", "literal", abs)
 				b.deny("file-write*", "literal", abs)
@@ -614,85 +611,233 @@ func (sp *SandboxProfiler) Profile(brainID string) (string, error) {
 		}
 		// Every save writes the whole config to a temp file next to it
 		// first (writeFileAtomic), which is readable until the rename.
-		if dir := filepath.Dir(sp.configFile); !withinAny(sp.configFile, dataDirs) {
+		if !withinAny(sp.configFile, dataDirs) {
 			tmp := "/" + regexp.QuoteMeta("."+filepath.Base(sp.configFile)+".") + `[^/]*\.tmp$`
-			b.denyBelow("file-read*", dir, tmp)
-			b.denyBelow("file-write*", dir, tmp)
+			b.denyBelow("file-read*", filepath.Dir(sp.configFile), tmp)
+			b.denyBelow("file-write*", filepath.Dir(sp.configFile), tmp)
 		}
 	}
-	b.WriteString("\n")
-	// No brain reads its calendar token: the bridge makes its calendar
-	// calls (google_calendar.go), so the files stay with the bridge.
 	if sp.credsDir != "" {
-		b.WriteString(";; Shared credentials dir: the bridge's alone\n")
 		b.deny("file-read*", "subpath", sp.credsDir)
 		b.deny("file-write*", "subpath", sp.credsDir)
-		b.WriteString("\n")
 	}
-	// The brain API tokens of this brain's runs (see brainRunEnv), to read
-	// and no more; every other brain's stay denied with the data dir. After
-	// the credentials dir, which may hold the data dir.
-	if sp.dataDir != "" {
-		b.WriteString(";; This brain's brain API tokens\n")
-		b.allow("file-read*", "subpath", runTokenDir(sp.dataDir, brainID))
-		b.WriteString("\n")
+	// The keychains: an item whose access list trusts a program a brain can
+	// run is readable without a prompt, such as the tokens gh and the Claude
+	// CLI store through /usr/bin/security, or what git's credential helper
+	// keeps. The keychain files are read by the program asking, so this
+	// closes them to any of them, copies included. Brains log in with a
+	// token from the bridge's environment instead (see prepareBrainState),
+	// and here so that no allow_paths entry for ~/Library opens them.
+	b.deny("file-read*", "subpath", filepath.Join(home, "Library", "Keychains"))
+	// Claude Code reads CLAUDE.md, CLAUDE.local.md and .claude/ (its
+	// CLAUDE.md, rules, skills, agents and commands) in every folder above
+	// its working directory as part of the project, whatever
+	// --setting-sources says, so a brain in HOME read ~/CLAUDE.md: your
+	// instructions, not the brain's. The claudeMdExcludes a brain runs with
+	// (see excludeInstructionsAbove) skip the CLAUDE.md files and rules,
+	// but neither the skills, agents and commands nor the brain's own tools.
+	// inherit_claude_user_config opens them again.
+	if !sp.inheritUser {
+		// The user memory and rules in your config dir, denied with the
+		// rest of it above, again here so that no allow_paths entry for
+		// ~/.claude opens them.
+		for _, dir := range sp.userClaudeDirs(home) {
+			b.deny("file-read*", "literal", filepath.Join(dir, "CLAUDE.md"))
+			b.deny("file-read*", "subpath", filepath.Join(dir, "rules"))
+		}
+		for _, dir := range foldersAbove(own...) {
+			for _, f := range instructionFiles {
+				b.deny("file-read*", "literal", filepath.Join(dir, f))
+			}
+			if resolvePath(dir) != resolvePath(home) {
+				b.deny("file-read*", "subpath", filepath.Join(dir, ".claude"))
+			}
+		}
 	}
-
-	// ── the folders above every denied path ──────────────────────────────
-	b.WriteString(";; Folders above the denied paths: not renamable or removable\n")
-	b.pinParents(home, resolvePath(home))
+	// What runs or loads outside the sandbox and lies where a brain may
+	// write: git's configuration (core.fsmonitor and aliases run in your
+	// own git), the bridge's binary, its install and its checkout. Writing
+	// is denied everywhere anyway; this keeps them closed when one of them
+	// sits in a brain's folder.
+	for _, f := range gitFiles {
+		b.deny("file-write*", "literal", f)
+	}
+	b.deny("file-write*", "subpath", xdgGit)
+	if sp.bridgeExe != "" {
+		b.deny("file-write*", "literal", sp.bridgeExe)
+	}
+	for _, p := range sp.bridgeDirs() {
+		b.deny("file-write*", "subpath", p)
+	}
+	// The same goes for the programs the bridge runs outside the sandbox and
+	// the folders it looks them up in by name: a brain that replaced one,
+	// or planted one ahead of it, would run code outside its sandbox the
+	// next time the bridge starts it. A PATH folder that holds one of this
+	// brain's own places (HOME on PATH, say) keeps only what the default
+	// deny gives it, or the brain could not write its own folder.
+	progs := sp.bridgeProgramsOf(home)
+	for _, f := range progs.files {
+		b.deny("file-write*", "literal", f)
+	}
+	for _, d := range progs.dirs {
+		b.deny("file-write*", "subpath", d)
+	}
+	places := slices.Clone(own) // the brain's own places: its folder, inbox and state
+	if sp.inbox != nil {
+		places = append(places, sp.inbox(brainID))
+	}
+	if sp.state != nil {
+		places = append(places, sp.state(brainID).dir)
+	}
+	for _, d := range progs.path {
+		if !slices.ContainsFunc(places, func(p string) bool { return isWithin(p, d) || isWithin(resolvePath(p), resolvePath(d)) }) {
+			b.deny("file-write*", "subpath", d)
+		}
+	}
 	b.WriteString("\n")
 
-	// ── the brain's own folder ───────────────────────────────────────────
-	// After the denies, so it wins over those on the folder and above it: a
-	// brain always reaches its own files, even when its folder sits inside
-	// a default-denied directory. It must not open what is denied inside
-	// the folder, though (another brain, the data dir, a db_path folder,
-	// the bridge's checkout), so every rule for a path in the folder is
-	// written again after it, in order. A folder that is itself denied,
-	// other than a deny_paths entry, is refused: opening it would give the
-	// brain what it protects.
-	if own := sp.workDirs[brainID]; len(own) > 0 {
-		before := b.rules
-		b.WriteString(";; This brain's own folder\n")
-		// Both ways: allow follows no symlink, and the brain runs in the
-		// real path, which a folder linked from a default-denied one, such
-		// as ~/assistant → ~/Documents/assistant, would otherwise leave
-		// denied.
-		var owns, pins []string
-		for _, dir := range own {
-			owns = append(owns, b.allow("file-read*", "subpath", dir)...)
-			b.allow("file-write*", "subpath", dir)
+	b.recording = false
+
+	// ── 5. what the bridge gives this brain ──────────────────────────────
+	b.WriteString(";; 5. This brain's media inbox, state and brain API tokens, and a shared Plaud login\n")
+	var pins []string
+	if sp.inbox != nil {
+		inbox := sp.inbox(brainID)
+		b.allow("file-read*", "subpath", inbox)
+		pins = append(pins, b.allow("file-write*", "subpath", inbox)...)
+	}
+	var state brainState
+	if sp.state != nil {
+		state = sp.state(brainID)
+		b.allow("file-read*", "subpath", state.dir)
+		pins = append(pins, b.allow("file-write*", "subpath", state.dir)...)
+		for _, f := range state.folders() {
+			pins = append(pins, b.spellings(f, true)...)
 		}
-		// The folder itself stays put, in every spelling. A brain that moved
-		// it aside and left a symlink in its place pointed it at another
-		// brain's folder, whose profile then failed (its folder had become
-		// one this profile denies), or at HOME, which failed every profile;
-		// and the bridge, outside the sandbox, followed the link to read and
-		// write what it keeps there for this brain.
-		for _, dir := range own {
-			pins = append(pins, b.spellings(dir, true)...)
+	}
+	// The brain API tokens of this brain's runs (see brainRunEnv), to read
+	// and no more; every other brain's stay denied with the data dir. No
+	// brain reads its calendar token: the bridge makes its calendar calls
+	// (google_calendar.go), so the files stay with the bridge.
+	if sp.dataDir != "" {
+		b.allow("file-read*", "subpath", runTokenDir(sp.dataDir, brainID))
+	}
+	// plaud.brain_access shares your Plaud login with brains, and the Plaud
+	// CLI rewrites it in place when it refreshes a login about to expire,
+	// after it sets the modes of ~/.plaud and of the file. A refresh it could
+	// not save failed the brain's command as not logged in, and when Plaud
+	// had rotated the refresh token, left the revoked one behind, which
+	// signed Plaud out at the bridge's next check. The file's contents and
+	// mode and the folder's mode, and nothing else there: not removing,
+	// renaming or creating the file. A brain that could have deleted the
+	// login and put a symlink in its place (to ~/.zshrc, say) had the
+	// bridge's own Plaud CLI, which runs outside the sandbox, write your
+	// next sign-in through it, and chmod what it points to.
+	if sp.plaudShared {
+		plaud := filepath.Join(home, ".plaud")
+		tokens := filepath.Join(plaud, "tokens.json")
+		b.allow("file-write-data", "literal", tokens)
+		b.allow("file-write-mode", "literal", tokens)
+		b.allow("file-write-mode", "literal", plaud)
+	}
+	// The folders above those places, and above the brain's folder, may be
+	// looked at, though not listed: programs stat every folder on the way
+	// to a path (mkdir -p, realpath), and failed in their own state below
+	// the denied data dir, or in a brain folder below ~/Documents. By their
+	// real paths too, which foldersAbove may not give (it names a folder
+	// once, ~/assistant for ~/Documents/assistant), and which is safe to
+	// resolve here: the brain can change none of these folders.
+	for _, dir := range foldersAbove(places...) {
+		b.allow("file-read-metadata", "literal", dir)
+		if real := resolvePath(dir); real != dir {
+			b.allow("file-read-metadata", "literal", real)
 		}
-		for _, s := range pins {
-			b.emit(rulePin, "deny file-write*", "literal", s, s)
+	}
+	if sp.inheritUser {
+		// The CLI's state in your config dir, which brains share with you.
+		dir := sp.userClaudeDir(home)
+		b.allow("file-write*", "subpath", dir)
+		if sp.claudeDir == "" {
+			b.allow("file-write*", "literal", filepath.Join(home, ".claude.json"))
+			b.allow("file-write*", "regex", "^"+regexp.QuoteMeta(home)+`/\.claude\.json\.[^/]*$`)
 		}
-		var again []profileRule
-		for _, r := range before {
-			switch {
-			case r.kind == ruleDeny && slices.Contains(owns, r.path):
-				return "", fmt.Errorf("brain %s: its folder %s is one the sandbox keeps from brains; give the brain a folder of its own", brainID, r.path)
-			case r.kind == rulePin && slices.Contains(pins, r.path):
-				// Pinned just above.
-			case withinAny(r.path, owns) && (r.kind == rulePin || !slices.Contains(owns, r.path)):
-				again = append(again, r)
+		// But not what section 4 keeps from every brain there, such as the
+		// Claude CLI of an install in ~/.claude/local, which the bridge
+		// runs itself and the allow above would let a brain replace.
+		b.rewriteHardWritesIn(dir)
+	}
+	b.WriteString("\n")
+
+	// ── 6. kept inside this brain's own places ───────────────────────────
+	b.WriteString(";; 6. Inside this brain's own places: what stays closed, and the folders themselves\n")
+	for _, p := range innerDeny {
+		b.deny("file-read*", "subpath", p)
+		b.deny("file-write*", "subpath", p)
+	}
+	// An allow_paths entry inside one opens it for reading again, as it
+	// does with a deny_paths entry anywhere else.
+	for _, p := range sp.extraAllow {
+		if withinAny(absPath(p), innerDeny) {
+			b.allow("file-read*", "subpath", p)
+		}
+	}
+	// The folders between the brain's folder and such an entry stay put:
+	// a brain that renamed one would take the entry out from under its
+	// rule (the sandbox matches paths) and read it under the new name.
+	for _, p := range innerDeny {
+		for _, s := range b.spellings(p, true) {
+			for dir := filepath.Dir(s); withinAny(dir, owns) && !slices.Contains(owns, dir); dir = filepath.Dir(dir) {
+				pins = append(pins, b.spellings(dir, true)...)
 			}
 		}
-		if len(again) > 0 {
-			b.WriteString("\n;; Inside this brain's folder, the rules above apply again\n")
-			for _, r := range again {
-				b.add(r.kind, r.path, r.text)
-			}
-		}
+	}
+	// No allow above can open the database again.
+	for _, f := range dbFiles {
+		b.deny("file-read*", "literal", f)
+		b.deny("file-write*", "literal", f)
+	}
+	// The brain's folder, inbox and state folders themselves, in every
+	// spelling. A brain that moved its folder aside and left a symlink in
+	// its place pointed it at another brain's folder, whose profile then
+	// failed (its folder had become one this profile denies), or at HOME,
+	// which failed every profile; and the bridge, outside the sandbox,
+	// followed the link to read and write what it keeps there for this
+	// brain. The same goes for the inbox the bridge moves files into and
+	// the state folders it creates.
+	for _, dir := range own {
+		pins = append(pins, b.spellings(dir, true)...)
+	}
+	slices.Sort(pins)
+	for _, s := range slices.Compact(pins) {
+		b.emit("deny file-write*", "literal", s)
+	}
+	if sp.inheritUser {
+		sp.sharedClaudeDirRules(&b, home)
+	}
+	b.WriteString("\n")
+
+	// ── 7. starting code outside the sandbox ─────────────────────────────
+	b.WriteString(";; 7. Starting code outside the sandbox\n")
+	for _, p := range launchers {
+		b.emit("deny process-exec", "literal", p)
+	}
+	b.WriteString("(deny appleevent-send)\n(deny lsopen)\n")
+	// The unix sockets of servers that run what they are sent, outside the
+	// sandbox: Docker (docker run -v ~:/h), whose sockets live in your home
+	// folder (~/.docker/run, Colima, OrbStack; /var/run/docker.sock links
+	// there, and the sandbox goes by the real path), every tmux server
+	// (tmux run-shell), the activity viewer's and your own, and what your
+	// apps keep in your own temp folder, such as an editor's command
+	// socket. The brain's own folder and state stay open: the CLI talks to
+	// itself over a socket in its TMPDIR.
+	b.emitSocket("deny", home)
+	b.emitSocket("deny", filepath.Join(cmp.Or(os.Getenv("TMUX_TMPDIR"), "/tmp"), fmt.Sprintf("tmux-%d", os.Getuid())))
+	b.emitSocket("deny", os.TempDir())
+	for _, dir := range own {
+		b.emitSocket("allow", dir)
+	}
+	if state.dir != "" {
+		b.emitSocket("allow", state.dir)
 	}
 
 	if b.err != nil {
@@ -701,43 +846,292 @@ func (sp *SandboxProfiler) Profile(brainID string) (string, error) {
 	return b.String(), nil
 }
 
-// memoryFolders returns the folders above every brain's folder whose
-// memory files and .claude/ Claude Code loads for the brains below: up to
-// and including HOME (either spelling), or up to / for a folder outside
-// HOME, and HOME itself, which your own sessions load. They are walked
-// up from each spelling of a brain's folder, as configured and its real
-// path, which differ below a symlink, and each spelling of a folder comes
-// once. The brain's own folder is its own to write, so it is left out
-// when it holds another one.
-func memoryFolders(workDirs map[string][]string, brainID string, homes []string) []string {
-	var own []string
-	for _, dir := range workDirs[brainID] {
-		own = append(own, resolvePath(dir))
+// sharedClaudeDirRules writes the rules for a config dir brains share with
+// you (inherit_claude_user_config), after the allow that lets them write the
+// CLI's state there.
+func (sp *SandboxProfiler) sharedClaudeDirRules(b *profileBuilder, home string) {
+	dir := sp.userClaudeDir(home)
+	for _, sub := range claudeConfigSubpaths {
+		b.deny("file-write*", "subpath", filepath.Join(dir, sub))
 	}
-	seen := map[string]bool{}
+	for _, lit := range claudeConfigLiterals {
+		b.deny("file-write*", "literal", filepath.Join(dir, lit))
+	}
+	// Claude Code's record of every session, yours included: transcripts in
+	// projects/, one file per running CLI in sessions/. The CLI writes its
+	// own run's files there, and reading is denied above; so is moving files
+	// out, since a rename is checked as file-write-unlink on its source and
+	// a transcript moved elsewhere could be read there. The CLI deletes its
+	// sessions/<pid>.json on exit, so sessions/ keeps unlink and only the
+	// folder itself is pinned.
+	projects := filepath.Join(dir, "projects")
+	sessions := filepath.Join(dir, "sessions")
+	b.deny("file-write-unlink", "subpath", projects)
+	// Nor may a brain plant a symlink in either. One that linked a project
+	// folder the CLI had not created yet into its own folder got that
+	// project's later transcripts, yours included: the CLI wrote them
+	// through the link, to where the brain reads. The CLI creates real
+	// folders and files there, which stay allowed.
+	b.denySymlinksIn(projects)
+	b.denySymlinksIn(sessions)
+	// Auto-memory: Claude Code loads projects/<project>/memory/MEMORY.md into
+	// every new session in that project, yours included. A project folder
+	// the CLI has not created yet cannot be listed, hence a pattern.
+	b.denyBelow("file-write*", projects, `/[^/]+/memory(/.*)?$`)
+	// The config dir and its two record folders stay put; the CLI creates
+	// them on its first run (see pin).
+	b.pin(dir)
+	b.pin(projects)
+	b.pin(sessions)
+	if sp.claudeDir == "" {
+		b.pin(home)
+	}
+}
+
+// userClaudeDir is the config dir of your own Claude Code: the bridge's
+// CLAUDE_CONFIG_DIR, or ~/.claude.
+func (sp *SandboxProfiler) userClaudeDir(home string) string {
+	if sp.claudeDir != "" {
+		return sp.claudeDir
+	}
+	return filepath.Join(home, ".claude")
+}
+
+// userClaudeDirs is ~/.claude, and the bridge's CLAUDE_CONFIG_DIR when it
+// names another folder: both can hold your setup.
+func (sp *SandboxProfiler) userClaudeDirs(home string) []string {
+	dirs := []string{filepath.Join(home, ".claude")}
+	if sp.claudeDir != "" && sp.claudeDir != dirs[0] {
+		dirs = append(dirs, sp.claudeDir)
+	}
+	return dirs
+}
+
+// dataDirs is the data dir and both names it has had in HOME.
+func (p sandboxPolicy) dataDirs(home string) []string {
+	dirs := []string{filepath.Join(home, dataDirName), filepath.Join(home, legacyDataDirName)}
+	if p.dataDir != "" && !slices.Contains(dirs, filepath.Clean(p.dataDir)) {
+		dirs = append(dirs, p.dataDir)
+	}
+	return dirs
+}
+
+// dbFiles is the database and the files SQLite keeps next to it.
+func (p sandboxPolicy) dbFiles() []string {
+	if p.dbPath == "" {
+		return nil
+	}
 	var out []string
-	walk := func(dir string) {
-		for {
-			if !seen[dir] {
-				seen[dir] = true
-				if !slices.Contains(own, resolvePath(dir)) {
-					out = append(out, dir)
+	for _, suffix := range []string{"", "-wal", "-shm", "-journal"} {
+		out = append(out, p.dbPath+suffix)
+	}
+	return out
+}
+
+// dbFolder is the folder of a database outside the data dir, which the
+// profile denies with it, or "": it is left open when it is HOME or above,
+// or a temp dir, which a brain needs.
+func (p sandboxPolicy) dbFolder(home string) string {
+	if p.dbPath == "" || withinAny(p.dbPath, p.dataDirs(home)) {
+		return ""
+	}
+	if dir := filepath.Dir(p.dbPath); !sharedDir(dir, home) {
+		return dir
+	}
+	return ""
+}
+
+// bridgeDirs are the folder the bridge was installed in and the checkout it
+// was built from: launchd runs the bridge outside any sandbox, it runs its
+// tools from there, and setup.sh builds what is in the checkout.
+func (sp *SandboxProfiler) bridgeDirs() []string {
+	if sp.bridgeExe == "" {
+		return nil
+	}
+	l := layoutOf(sp.bridgeExe)
+	var out []string
+	for _, d := range []string{l.Dir, l.Source} {
+		if d != "" && !slices.Contains(out, d) {
+			out = append(out, d)
+		}
+	}
+	return out
+}
+
+// protectedPath is a path the sandbox keeps from brains, which a brain's
+// folder must therefore neither be nor hold: the folder's allow would open
+// it. A brain folder may not lie inside one marked inside either: what the
+// bridge keeps for itself, and the folders whose files run or load outside
+// the sandbox.
+type protectedPath struct {
+	path   string
+	inside bool
+	what   string // what it is, for the error
+}
+
+// protected lists the protected paths for brain folders in HOME home, with
+// l the layout of the bridge's own files.
+func (p sandboxPolicy) protected(home string, l bridgeLayout) []protectedPath {
+	var out []protectedPath
+	add := func(path string, inside bool, what string) {
+		if path != "" {
+			out = append(out, protectedPath{filepath.Clean(absPath(path)), inside, what})
+		}
+	}
+	for _, sub := range defaultDenySubpaths {
+		add(filepath.Join(home, sub), false, "~/"+sub)
+	}
+	for _, lit := range defaultDenyLiterals {
+		add(filepath.Join(home, lit), false, "~/"+lit)
+	}
+	add(filepath.Join(home, ".claude.json"), false, "~/.claude.json")
+	add(filepath.Join(home, ".gitconfig"), false, "~/.gitconfig")
+	add(filepath.Join(home, ".config", "git"), false, "~/.config/git")
+	if !p.plaudShared {
+		add(filepath.Join(home, ".plaud"), false, "~/.plaud")
+	}
+	add(filepath.Join(home, ".claude"), true, "your Claude Code folder ~/.claude")
+	add(p.claudeDir, true, "your Claude Code folder (CLAUDE_CONFIG_DIR)")
+	add(filepath.Join(home, "Library", "Keychains"), true, "the keychains")
+	add(filepath.Join(home, "Library", "LaunchAgents"), true, "~/Library/LaunchAgents")
+	for _, dir := range p.dataDirs(home) {
+		add(dir, true, "the bridge's data folder")
+	}
+	add(p.mediaDir, true, "the media folder")
+	add(p.credsDir, true, "the credentials folder")
+	add(p.dbPath, true, "the database")
+	add(p.dbFolder(home), true, "the database's folder")
+	add(l.Source, true, "the bridge's source checkout")
+	add(l.Dir, true, "the folder the bridge is installed in")
+	progs := p.bridgeProgramsOf(home)
+	for _, f := range progs.files {
+		add(f, false, "the program "+f+" the bridge runs")
+	}
+	for _, d := range progs.dirs {
+		add(d, true, d+", which holds programs the bridge runs")
+	}
+	// A brain inside a PATH folder cannot put a program into it, only into
+	// its own folder below. A PATH folder inside a brain's folder is none
+	// of these: the bridge runs nothing from it (see bridgeProgramsOf).
+	for _, d := range progs.path {
+		add(d, false, "the folder "+d+" the bridge runs programs from")
+	}
+	return out
+}
+
+// bridgePrograms is what the bridge runs outside any sandbox, and where it
+// finds it: a brain that changed any of it would run code outside its
+// sandbox the next time the bridge starts that program.
+type bridgePrograms struct {
+	// files are the programs as the bridge finds them now, and the files
+	// they resolve to: the Claude CLI (claude --version for the dashboard),
+	// rclone for backups, the Plaud CLI, tmux for the viewer and node for
+	// the site, and the node that runs a node script among them.
+	files []string
+	// dirs are folders every file of which counts: the npm package of a
+	// node script, all of which node loads, and nvm's node versions, where
+	// the bridge looks for node and the Plaud CLI off its PATH and takes
+	// the newest.
+	dirs []string
+	// path are the folders the bridge looks programs up in by name (git,
+	// gh, npm, open and the rest as well): its PATH, the Plaud CLI's, and
+	// the folders it falls back on, Homebrew's and ~/.local/bin.
+	path []string
+}
+
+// bridgeProgramsOf finds the bridge's programs as it would find them now.
+func (p sandboxPolicy) bridgeProgramsOf(home string) bridgePrograms {
+	var found []string
+	if c, err := exec.LookPath(cmp.Or(p.claudePath, "claude")); err == nil {
+		found = append(found, c)
+	}
+	if r, err := findRclone(p.rclonePath); err == nil {
+		found = append(found, r)
+	}
+	plaud, plaudErr := findPlaudCLI(p.plaudCLIPath)
+	if plaudErr == nil {
+		found = append(found, plaud)
+	}
+	if p.viewer {
+		if t := findTmux(); t != "" {
+			found = append(found, t)
+		}
+	}
+	var out bridgePrograms
+	var path []string
+	path = append(path, filepath.SplitList(os.Getenv("PATH"))...)
+	if plaudErr == nil {
+		path = append(path, filepath.SplitList(plaudPATH(plaud))...)
+	}
+	// A folder of the bridge's PATH inside a brain folder is one it runs
+	// nothing from: setBridgePATH takes it out, and only that brain's runs
+	// get it. Before it has (the brain is being added, say), it still
+	// counts as out. The folders the bridge falls back on, and those of
+	// the programs it found, count wherever they are.
+	fromPATH := map[string]bool{}
+	for _, d := range filepath.SplitList(os.Getenv("PATH")) {
+		fromPATH[filepath.Clean(d)] = true
+	}
+	path = slices.DeleteFunc(path, func(d string) bool {
+		d = filepath.Clean(d)
+		return fromPATH[d] && filepath.IsAbs(d) && (withinAny(d, p.brainDirs) || withinAny(resolvePath(d), p.brainDirs))
+	})
+	path = append(path, toolFallbackDirs()...)
+	if n, err := findNode(); err == nil {
+		// The site's processes run with node's folder first on PATH.
+		found = append(found, n)
+		path = append(path, filepath.Dir(n))
+	}
+	for _, f := range found {
+		abs := absPath(f)
+		out.files = append(out.files, abs, resolvePath(abs))
+		if pkg := nodePackage(resolvePath(abs)); pkg != "" {
+			out.dirs = append(out.dirs, pkg)
+			// #!/usr/bin/env node: the bridge runs the Plaud CLI with its
+			// own folder first on PATH, everything else with its own PATH.
+			for _, pp := range []string{plaudPATH(abs), os.Getenv("PATH")} {
+				if node := lookPathIn("node", pp); node != "" {
+					out.files = append(out.files, node, resolvePath(node))
 				}
 			}
-			if slices.Contains(homes, dir) || filepath.Dir(dir) == dir {
-				return
-			}
-			dir = filepath.Dir(dir)
 		}
 	}
-	walk(homes[0])
-	for _, dirs := range workDirs {
-		for _, dir := range dirs {
-			walk(filepath.Dir(filepath.Clean(dir)))
+	out.files = append(out.files, rcloneFallbacks()...)
+	out.dirs = append(out.dirs, filepath.Join(home, nvmNodeVersions))
+	for _, d := range path {
+		// exec.LookPath skips relative entries.
+		if d = filepath.Clean(d); filepath.IsAbs(d) {
+			out.path = append(out.path, d)
 		}
 	}
-	sort.Strings(out)
+	for _, s := range []*[]string{&out.files, &out.dirs, &out.path} {
+		slices.Sort(*s)
+		*s = slices.Compact(*s)
+	}
 	return out
+}
+
+// protectedIn reports the first protected path that dir is, holds or (for
+// one marked inside) lies in, by either spelling, described for an error.
+func protectedIn(dir string, protected []protectedPath) (string, bool) {
+	spell := func(p string) []string {
+		return slices.Compact([]string{filepath.Clean(absPath(p)), resolvePath(absPath(p))})
+	}
+	for _, pp := range protected {
+		for _, d := range spell(dir) {
+			for _, p := range spell(pp.path) {
+				switch {
+				case d == p:
+					return "is " + pp.what, true
+				case isWithin(p, d):
+					return "holds " + pp.what, true
+				case pp.inside && isWithin(d, p):
+					return "is inside " + pp.what, true
+				}
+			}
+		}
+	}
+	return "", false
 }
 
 // foldersAbove returns every folder above each of dirs up to /, along its
@@ -765,84 +1159,6 @@ func foldersAbove(dirs ...string) []string {
 	return out
 }
 
-// outsidePrograms returns the programs the bridge itself starts outside any
-// sandbox: the Claude CLI (claude --version for the dashboard), rclone for
-// backups, the Plaud CLI, tmux for the activity viewer, each as the bridge
-// would find it now. A node script comes with its npm package folder, all
-// of which node loads, and the node that runs it.
-func (sp *SandboxProfiler) outsidePrograms() []string {
-	var found []string
-	if p, err := exec.LookPath(sp.claudePath); err == nil {
-		found = append(found, p)
-	}
-	if p, err := findRclone(sp.rclonePath); err == nil {
-		found = append(found, p)
-	}
-	if p, err := findPlaudCLI(sp.plaudCLIPath); err == nil {
-		found = append(found, p)
-	}
-	if p := findTmux(); sp.viewer && p != "" {
-		found = append(found, p)
-	}
-	var out []string
-	for _, p := range found {
-		out = append(out, p)
-		if pkg := nodePackage(resolvePath(p)); pkg != "" {
-			// #!/usr/bin/env node: the bridge runs the Plaud CLI with its own
-			// folder first on PATH, everything else with its own PATH.
-			out = append(out, pkg)
-			for _, path := range []string{plaudPATH(p), os.Getenv("PATH")} {
-				if node := lookPathIn("node", path); node != "" {
-					out = append(out, node)
-				}
-			}
-		}
-	}
-	return out
-}
-
-// programsRunByName are the programs the bridge starts by name, so from the
-// first folder on its PATH that has one: the Claude CLI, rclone and the
-// Plaud CLI unless configured with a path, the node the Plaud CLI's
-// #!/usr/bin/env node finds, tmux and the sh and tail it runs for the
-// viewer, touch, osascript (the viewer, the folder picker) and open.
-var programsRunByName = []string{"claude", "rclone", "plaud", "node", "tmux", "sh", "tail", "touch", "osascript", "open"}
-
-// plantablePrograms returns where a brain could plant a program for the
-// bridge to run outside the sandbox later, ahead of the one it finds now:
-// every name it runs by name in every folder of its PATH and the Plaud
-// CLI's, whether that file exists yet or not, and rclone's fallbacks off
-// PATH. Without plaud.cli_path it also returns nvm's node versions, since
-// the bridge takes the Plaud CLI of the newest node version that has one.
-func (sp *SandboxProfiler) plantablePrograms(home string) (files, dirs []string) {
-	names := slices.Clone(programsRunByName)
-	for _, p := range []string{sp.claudePath, sp.rclonePath} {
-		if p != "" && !strings.Contains(p, "/") && !slices.Contains(names, p) {
-			names = append(names, p)
-		}
-	}
-	path := filepath.SplitList(os.Getenv("PATH"))
-	if p, err := findPlaudCLI(sp.plaudCLIPath); err == nil {
-		path = append(path, filepath.SplitList(plaudPATH(p))...)
-	}
-	seen := map[string]bool{}
-	for _, dir := range path {
-		// exec.LookPath skips relative entries.
-		if dir = filepath.Clean(dir); !filepath.IsAbs(dir) || seen[dir] {
-			continue
-		}
-		seen[dir] = true
-		for _, name := range names {
-			files = append(files, filepath.Join(dir, name))
-		}
-	}
-	files = append(files, rcloneFallbacks()...)
-	if sp.plaudCLIPath == "" {
-		dirs = append(dirs, filepath.Join(home, nvmNodeVersions))
-	}
-	return files, dirs
-}
-
 // nodePackage returns the npm package folder that holds the file p
 // (…/node_modules/<name> or …/node_modules/@scope/<name>), or "".
 func nodePackage(p string) string {
@@ -860,6 +1176,20 @@ func nodePackage(p string) string {
 		return ""
 	}
 	return p[:i+len(nm)] + strings.Join(rest[:n], "/")
+}
+
+// lookPathIn is exec.LookPath for name in the list of folders path.
+func lookPathIn(name, path string) string {
+	for _, dir := range filepath.SplitList(path) {
+		if dir == "" {
+			continue
+		}
+		p := filepath.Join(dir, name)
+		if st, err := os.Stat(p); err == nil && !st.IsDir() && st.Mode()&0o111 != 0 {
+			return p
+		}
+	}
+	return ""
 }
 
 // absPath is p made absolute against the working directory, or p itself
@@ -891,20 +1221,6 @@ func withinAny(p string, dirs []string) bool {
 	return slices.ContainsFunc(dirs, func(dir string) bool { return isWithin(p, dir) })
 }
 
-// lookPathIn is exec.LookPath for name in the list of folders path.
-func lookPathIn(name, path string) string {
-	for _, dir := range filepath.SplitList(path) {
-		if dir == "" {
-			continue
-		}
-		p := filepath.Join(dir, name)
-		if st, err := os.Stat(p); err == nil && !st.IsDir() && st.Mode()&0o111 != 0 {
-			return p
-		}
-	}
-	return ""
-}
-
 // profileBuilder writes SBPL. Every path goes through deny or allow, so each
 // one is quoted and canonicalized the same way; the first path that cannot be
 // written is kept in err and fails the whole profile.
@@ -913,52 +1229,44 @@ type profileBuilder struct {
 	err error
 	// roots are folders a brain cannot replace, with their real paths.
 	roots []pathAlias
-	// denied holds every spelling of every path denied so far, so that
-	// pinParents can protect the folders above them.
-	denied []string
-	// rules holds every rule written so far, for the brain's own folder;
-	// see Profile.
-	rules []profileRule
-	// ownable marks the denies written while it is set as ones a brain's
-	// folder may itself be.
-	ownable bool
-	// creatable holds every spelling of ~/.claude, the folder a pin lets
-	// a brain create (with the folders in it) while missing; see pin.
+	// creatable holds every spelling of your Claude Code config dir, the
+	// folder a pin lets a brain create (with the folders in it) while
+	// missing; see pin.
 	creatable []string
 	// denies holds the text of every deny written since the last allow;
 	// see add.
 	denies map[string]bool
+	// denied holds every spelling of every path denied or pinned so far,
+	// for pinParents.
+	denied []string
+	// recording keeps every write deny written while it is set in
+	// hardWrites, for rewriteHardWritesIn.
+	recording  bool
+	hardWrites []hardWrite
+}
+
+// hardWrite is a write deny of the profile's hard denies: deny, or with a
+// pattern denyBelow.
+type hardWrite struct{ op, filter, path, pattern string }
+
+// rewriteHardWritesIn writes again the hard write denies (see recording)
+// of paths in dir, or below it in every spelling, after an allow for dir
+// that would open them: the last rule that matches wins.
+func (b *profileBuilder) rewriteHardWritesIn(dir string) {
+	dirs := b.spellings(dir, true)
+	for _, w := range b.hardWrites {
+		if !withinAny(w.path, dirs) && !withinAny(resolvePath(w.path), dirs) {
+			continue
+		}
+		if w.pattern != "" {
+			b.denyBelow(w.op, w.path, w.pattern)
+		} else {
+			b.deny(w.op, w.filter, w.path)
+		}
+	}
 }
 
 type pathAlias struct{ configured, real string }
-
-// profileRule is one rule as written, with the path it covers (for a
-// pattern, the folder it matches below).
-type profileRule struct {
-	text, path string
-	kind       ruleKind
-}
-
-type ruleKind int
-
-const (
-	// ruleDeny denies a path no brain's folder may be.
-	ruleDeny ruleKind = iota
-	// ruleOwnable denies a sandbox.deny_paths entry, which a brain's folder
-	// may be: that keeps the folder from every other brain.
-	ruleOwnable
-	// rulePin keeps a folder from being renamed or removed.
-	rulePin
-	ruleAllow
-)
-
-// denyKind is the kind of the denies written now.
-func (b *profileBuilder) denyKind() ruleKind {
-	if b.ownable {
-		return ruleOwnable
-	}
-	return ruleDeny
-}
 
 // deny emits "(deny op (filter "path"))", e.g. deny("file-read*", "subpath", dir).
 //
@@ -968,21 +1276,27 @@ func (b *profileBuilder) denyKind() ruleKind {
 // deny therefore emits the rule for every spelling (see spellings): a deny
 // that covers more only takes access away.
 func (b *profileBuilder) deny(op, filter, path string) {
+	if b.recording && strings.HasPrefix(op, "file-write") {
+		b.hardWrites = append(b.hardWrites, hardWrite{op: op, filter: filter, path: path})
+	}
 	// Reading a symlink is part of following it, so a read rule on the link
-	// itself would also block what is allowed behind it, such as media under
-	// a symlinked data dir. Writes act on the link, so they need its entry.
+	// itself would also block what is allowed behind it, such as an inbox
+	// under a symlinked data dir. Writes act on the link, so they need its
+	// entry.
 	for _, s := range b.spellings(path, strings.HasPrefix(op, "file-write")) {
-		b.emit(b.denyKind(), "deny "+op, filter, s, s)
+		b.emit("deny "+op, filter, s)
 		b.denied = append(b.denied, s)
 	}
 }
 
 // denyBelow emits "(deny op (regex "^<dir>pattern"))" for every spelling of
-// dir, for paths below it that cannot be listed in advance. The folders
-// above dir are pinned like those above any denied path.
+// dir, for paths below it that cannot be listed in advance.
 func (b *profileBuilder) denyBelow(op, dir, pattern string) {
+	if b.recording && strings.HasPrefix(op, "file-write") {
+		b.hardWrites = append(b.hardWrites, hardWrite{op: op, path: dir, pattern: pattern})
+	}
 	for _, s := range b.spellings(dir, strings.HasPrefix(op, "file-write")) {
-		b.emit(b.denyKind(), "deny "+op, "regex", s, "^"+regexp.QuoteMeta(s)+pattern)
+		b.emit("deny "+op, "regex", "^"+regexp.QuoteMeta(s)+pattern)
 		b.denied = append(b.denied, s)
 	}
 }
@@ -991,7 +1305,7 @@ func (b *profileBuilder) denyBelow(op, dir, pattern string) {
 // every spelling of dir; see emitNoSymlink.
 func (b *profileBuilder) denySymlinksIn(dir string) {
 	for _, s := range b.spellings(dir, true) {
-		b.emitNoSymlink(b.denyKind(), "regex", s, "^"+regexp.QuoteMeta(s)+"(/.*)?$")
+		b.emitNoSymlink("regex", "^"+regexp.QuoteMeta(s)+"(/.*)?$")
 		b.denied = append(b.denied, s)
 	}
 }
@@ -1018,20 +1332,15 @@ func (b *profileBuilder) spellings(path string, entry bool) []string {
 }
 
 // pin stops a brain from renaming or removing the folder dir while leaving
-// it free to create and change files inside. A brain that renamed a folder
-// above a denied path took the path out from under its rule (the sandbox
-// matches paths) and read it under the new name; one that replaced such a
-// folder with a symlink redirected what other programs write there.
+// it free to create and change files inside, where it may write. A brain
+// that renamed a folder above a denied path took the path out from under
+// its rule (the sandbox matches paths) and read it under the new name; one
+// that replaced such a folder with a symlink redirected what other programs
+// write there.
 //
 // The folder is pinned for every write to the folder itself: rename,
 // delete, chmod, swapping it for a symlink, and creating it while it does
-// not exist yet. A brain that created a missing one as a symlink into its
-// own folder redirected what lies below it, such as a missing ~/.config,
-// where your git looks for its config, or a PATH folder, where the bridge
-// looks for the programs it runs. Refusing only symlinks would not do: a
-// brain can as well move a folder it prepared into place, with symlinks
-// or files of its own inside, and the sandbox checks where a rename lands
-// the same way as a new folder. The exception is ~/.claude and the
+// not exist yet. The exception is your Claude Code config dir and the
 // folders in it, which the Claude CLI creates on its first run: a missing
 // one may still be created as a folder, though not as a symlink, and not
 // renamed or removed afterwards; the next run's profile pins it fully.
@@ -1046,17 +1355,19 @@ func (b *profileBuilder) pinSpelling(dir string) {
 	if _, err := os.Lstat(dir); err != nil && withinAny(dir, b.creatable) {
 		// file-write-unlink is what the sandbox checks on the source of a
 		// rename, and on a delete.
-		b.emit(rulePin, "deny file-write-unlink", "literal", dir, dir)
-		b.emitNoSymlink(rulePin, "literal", dir, dir)
+		b.emit("deny file-write-unlink", "literal", dir)
+		b.emitNoSymlink("literal", dir)
 	} else {
-		b.emit(rulePin, "deny file-write*", "literal", dir, dir)
+		b.emit("deny file-write*", "literal", dir)
 	}
 }
 
 // pinParents pins every folder above a denied path, up to and including
-// HOME (either spelling), or up to / for a path outside HOME. Each folder
-// is pinned in every spelling, so a symlink on the way (a brains folder
-// linked from another volume) cannot be renamed either.
+// HOME (either spelling), or up to / for a path outside HOME, in every
+// spelling. A brain's profile has no need of it: it denies every write
+// outside the brain's own places, folders above them included. The live
+// site's sandbox does, since what a module declares it may write can hold
+// such a folder (see site_sandbox.go).
 func (b *profileBuilder) pinParents(homes ...string) {
 	seen := map[string]bool{}
 	var dirs []string
@@ -1087,14 +1398,18 @@ func (b *profileBuilder) pinParents(homes ...string) {
 
 // allow emits "(allow op (filter "path"))" for path, and again with its
 // longest trusted root (see trustRoot) replaced by that root's real path.
-// Unlike deny it follows no other symlink: a brain can replace its own
-// folder or the media dir with a symlink, and an allow that followed it
+// Unlike deny it follows no other symlink: a brain can replace what is in
+// its own folder or inbox with a symlink, and an allow that followed it
 // would open whatever the symlink points to. It returns the spellings it
-// allowed.
+// allowed. A regex filter is written as given.
 func (b *profileBuilder) allow(op, filter, path string) []string {
+	if filter == "regex" {
+		b.emit("allow "+op, filter, path)
+		return nil
+	}
 	out := b.allowSpellings(path)
 	for _, s := range out {
-		b.emit(ruleAllow, "allow "+op, filter, s, s)
+		b.emit("allow "+op, filter, s)
 	}
 	return out
 }
@@ -1123,8 +1438,8 @@ func (b *profileBuilder) allowSpellings(path string) []string {
 }
 
 // trustRoot lets allow rules under dir resolve through dir's real path. Only
-// for folders a brain cannot swap for a symlink: HOME, and the data and
-// credentials dirs, which the profile denies writes to.
+// for folders a brain cannot swap for a symlink: HOME, and the data,
+// credentials and media dirs, which the profile denies writes to.
 func (b *profileBuilder) trustRoot(dir string) {
 	p, ok := b.absolute(dir)
 	if !ok {
@@ -1155,20 +1470,36 @@ func (b *profileBuilder) absolute(path string) (string, bool) {
 	return wd + string(filepath.Separator) + path, true
 }
 
-// emit writes "(rule (filter "value"))", a rule of this kind for path.
-func (b *profileBuilder) emit(kind ruleKind, rule, filter, path, value string) {
+// emit writes "(rule (filter "value"))".
+func (b *profileBuilder) emit(rule, filter, value string) {
 	if q, ok := b.quote(value); ok {
-		b.add(kind, path, fmt.Sprintf("(%s (%s %s))\n", rule, filter, q))
+		b.add(strings.HasPrefix(rule, "allow"), fmt.Sprintf("(%s (%s %s))\n", rule, filter, q))
 	}
 }
 
-// emitNoSymlink writes a rule of this kind for path that refuses a new
-// symlink wherever filter matches. The sandbox checks the type of what is
-// created, and checks a symlink moved there the same way, so files and
-// folders may still be created where no symlink can.
-func (b *profileBuilder) emitNoSymlink(kind ruleKind, filter, path, value string) {
+// emitNoSymlink writes a rule that refuses a new symlink wherever filter
+// matches. The sandbox checks the type of what is created, and checks a
+// symlink moved there the same way, so files and folders may still be
+// created where no symlink can.
+func (b *profileBuilder) emitNoSymlink(filter, value string) {
 	if q, ok := b.quote(value); ok {
-		b.add(kind, path, fmt.Sprintf("(deny file-write-create (require-all (%s %s) (vnode-type SYMLINK)))\n", filter, q))
+		b.add(false, fmt.Sprintf("(deny file-write-create (require-all (%s %s) (vnode-type SYMLINK)))\n", filter, q))
+	}
+}
+
+// emitSocket writes a rule that denies or allows connecting to the unix
+// sockets below dir, in every spelling of dir.
+func (b *profileBuilder) emitSocket(action, dir string) {
+	var spellings []string
+	if action == "allow" {
+		spellings = b.allowSpellings(dir)
+	} else {
+		spellings = b.spellings(dir, false)
+	}
+	for _, s := range spellings {
+		if q, ok := b.quote(s); ok {
+			b.add(action == "allow", fmt.Sprintf("(%s network-outbound (remote unix-socket (subpath %s)))\n", action, q))
+		}
 	}
 }
 
@@ -1182,16 +1513,14 @@ func (b *profileBuilder) quote(value string) (string, bool) {
 	return q, true
 }
 
-// add writes the rule text, a rule of this kind for path. A deny written
-// already since the last allow changes nothing, so it is written once:
-// the same paths come from several places (a program the bridge runs is
-// also one it runs by name), and the profile goes inline on every run.
-// After an allow it is written again, since the last matching rule wins.
-// Every rule is kept in rules either way.
-func (b *profileBuilder) add(kind ruleKind, path, text string) {
-	b.rules = append(b.rules, profileRule{text, path, kind})
+// add writes the rule text. A deny written already since the last allow
+// changes nothing, so it is written once: the same paths come from several
+// places (a git config file is also a protected one), and the profile goes
+// inline on every run. After an allow it is written again, since the last
+// matching rule wins.
+func (b *profileBuilder) add(allow bool, text string) {
 	switch {
-	case kind == ruleAllow:
+	case allow:
 		clear(b.denies)
 	case b.denies[text]:
 		return
@@ -1209,7 +1538,6 @@ func (b *profileBuilder) fail(err error) {
 	}
 }
 
-// maxSymlinks bounds resolvePath on a symlink loop.
 const maxSymlinks = 64
 
 // resolvePath returns the real path of the absolute path p. Every symlink in
@@ -1271,40 +1599,123 @@ func sbplString(s string) (string, error) {
 
 var sbplEscaper = strings.NewReplacer(`\`, `\\`, `"`, `\"`)
 
-// gitConfigChain returns ~/.gitconfig plus every file it includes
-// ([include] / [includeIf] path = …), one level deep.
+// maxGitIncludeDepth is how deep gitConfigChain follows includes; git
+// itself refuses more than 10.
+const maxGitIncludeDepth = 10
+
+// gitConfigChain returns your git configuration files: ~/.gitconfig and
+// ~/.config/git/config, and every file they include ([include] and
+// [includeIf] path = …, whatever the condition), followed as git does: a
+// relative path is relative to the including file's folder, ~/ is HOME,
+// and an include in an included file counts too, up to
+// maxGitIncludeDepth levels and each file once. Each one can set
+// core.fsmonitor or an alias, which your own git then runs.
 func gitConfigChain(home string) []string {
-	main := filepath.Join(home, ".gitconfig")
-	out := []string{main}
-	f, err := os.Open(main)
+	var out []string
+	seen := map[string]bool{}
+	var walk func(file string, depth int)
+	walk = func(file string, depth int) {
+		file = filepath.Clean(file)
+		if seen[file] {
+			return
+		}
+		seen[file] = true
+		out = append(out, file)
+		if depth >= maxGitIncludeDepth {
+			return
+		}
+		for _, inc := range gitIncludes(file, home) {
+			walk(inc, depth+1)
+		}
+	}
+	walk(filepath.Join(home, ".gitconfig"), 0)
+	walk(filepath.Join(home, ".config", "git", "config"), 0)
+	return out
+}
+
+// gitIncludes returns the files the git config file includes, made
+// absolute, or nothing when it cannot be read.
+func gitIncludes(file, home string) []string {
+	f, err := os.Open(file)
 	if err != nil {
-		return out
+		return nil
 	}
 	defer f.Close()
+	var out []string
 	inInclude := false
 	sc := bufio.NewScanner(f)
 	for sc.Scan() {
 		line := strings.TrimSpace(sc.Text())
 		if strings.HasPrefix(line, "[") {
-			sec := strings.ToLower(line)
-			inInclude = strings.HasPrefix(sec, "[include]") || strings.HasPrefix(sec, "[includeif")
+			// [include], or [includeIf "gitdir:~/work/"]; a variable may
+			// follow on the same line.
+			end := strings.IndexByte(line, ']')
+			if end < 0 {
+				inInclude = false
+				continue
+			}
+			name, _, _ := strings.Cut(strings.TrimSpace(line[1:end]), " ")
+			name, _, _ = strings.Cut(name, "\t")
+			name, _, _ = strings.Cut(name, `"`)
+			inInclude = strings.EqualFold(name, "include") || strings.EqualFold(name, "includeIf")
+			line = strings.TrimSpace(line[end+1:])
+		}
+		if !inInclude || line == "" || line[0] == '#' || line[0] == ';' {
 			continue
 		}
-		if !inInclude {
+		key, value, ok := strings.Cut(line, "=")
+		if !ok || !strings.EqualFold(strings.TrimSpace(key), "path") {
 			continue
 		}
-		k, v, ok := strings.Cut(line, "=")
-		if !ok || strings.TrimSpace(strings.ToLower(k)) != "path" {
+		p := gitConfigValue(value)
+		if p == "" {
 			continue
 		}
-		p := strings.Trim(strings.TrimSpace(v), `"`)
 		p = expandHome(p, home)
 		if !filepath.IsAbs(p) {
-			p = filepath.Join(home, p)
+			p = filepath.Join(filepath.Dir(file), p)
 		}
 		out = append(out, p)
 	}
 	return out
+}
+
+// gitConfigValue is a git config value as git reads it: a ; or # outside
+// double quotes starts a comment, the quotes themselves go, \" \\ \n and
+// \t are escapes, and whitespace around the value outside quotes goes.
+// "path = extra ; comment" names the file "extra", not "extra ; comment".
+func gitConfigValue(v string) string {
+	v = strings.TrimSpace(v)
+	var b strings.Builder
+	quoted := false
+	keep := 0 // what to keep of b: not the whitespace before a comment
+	for i := 0; i < len(v); i++ {
+		c := v[i]
+		switch {
+		case c == '\\' && i+1 < len(v):
+			i++
+			switch v[i] {
+			case 'n':
+				b.WriteByte('\n')
+			case 't':
+				b.WriteByte('\t')
+			default:
+				b.WriteByte(v[i])
+			}
+			keep = b.Len()
+		case c == '"':
+			quoted = !quoted
+			keep = b.Len()
+		case (c == ';' || c == '#') && !quoted:
+			i = len(v)
+		default:
+			b.WriteByte(c)
+			if quoted || (c != ' ' && c != '\t') {
+				keep = b.Len()
+			}
+		}
+	}
+	return b.String()[:keep]
 }
 
 // Available reports why brain runs cannot be sandboxed on this machine, or
@@ -1319,11 +1730,13 @@ func (sp *SandboxProfiler) Available() error {
 	return nil
 }
 
-// Command returns the program and arguments that run claudePath with args
-// under the brain's profile. The profile goes inline (-p): a profile file in
-// the shared TMPDIR could be swapped by another brain between being written
-// and being read, and a brain that made TMPDIR unwritable broke the sandbox.
-func (sp *SandboxProfiler) Command(brainID, claudePath string, args []string) (string, []string, error) {
+// Command returns the program and arguments that run prog with args as
+// brain brainID under its profile. The profile goes inline (-p): a profile
+// file in a shared TMPDIR could be swapped by another brain between being
+// written and being read, and a brain that made TMPDIR unwritable broke
+// the sandbox. The caller creates the brain's own state first, which the
+// profile pins, and points the run at it (see prepareBrainState).
+func (sp *SandboxProfiler) Command(brainID, prog string, args []string) (string, []string, error) {
 	if err := sp.Available(); err != nil {
 		return "", nil, err
 	}
@@ -1331,5 +1744,5 @@ func (sp *SandboxProfiler) Command(brainID, claudePath string, args []string) (s
 	if err != nil {
 		return "", nil, err
 	}
-	return sp.execPath, append([]string{"-p", profile, claudePath}, args...), nil
+	return sp.execPath, append([]string{"-p", profile, prog}, args...), nil
 }

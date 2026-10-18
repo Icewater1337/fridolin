@@ -58,8 +58,23 @@ however old the files in it are. A version folder holds only what changed
 in that run, not a full snapshot. Folders in `versions/` whose name is not
 such a timestamp are never deleted.
 
-**Never uploaded:** the WhatsApp session (`bridge.db`), `.env` files, the
-dashboard token, the rclone config, downloaded media in the data folder.
+A backup is a copy of a live folder, not an atomic snapshot. While a brain
+runs, it changes its folder (its history, its memories, a git repository
+in it), so a brain's backup waits for the brain to finish what it is
+running, up to two minutes, and then copies the folder anyway; the log says
+when it did. A file that changes while rclone copies it fails that try, and
+rclone tries the sync again up to three times, ten seconds apart, which the
+log notes too.
+
+**Never uploaded:** the WhatsApp session (`bridge.db`), the dashboard token,
+the rclone config, downloaded media and every brain's own state in the data
+folder. Nor, from brain folders, whatever their excludes say: `.env`,
+`.env.*`, `*.pem`, `*.p12`, `id_rsa*`, `id_ecdsa*`, `id_ed25519*`,
+`google_calendar_*.json` and `.credentials.json` files, in any folder of
+the brain. Set `backup.include_secret_files` to `true` in `config.json` to
+upload them too (the dashboard has no field for it). Files a version from
+before this rule uploaded stay in Drive's `current/` and `versions/` until
+you delete them there.
 
 ## Excluding things
 
@@ -146,9 +161,16 @@ be listed, the run fails without syncing.
 
 Backup → Restore: choose a brain, `current` or a version, and a **new, empty**
 folder. The bridge never restores over an existing brain. The folder must
-pass the checks a new brain's folder does: inside your home folder, not in
-or around a brain, and not in the bridge's data folder or the credentials
-folder, also where a symlink on the way leads. The restore runs in the background (one at a time, and not while a
+pass the checks a new brain's folder does (see [adding a brain](BRAINS.md)):
+inside your home folder, not in or around a brain, and not in the bridge's
+data folder or the credentials folder. Nor may it lie inside what the
+sandbox keeps from brains, such as `~/.claude`, `~/.ssh`, `~/Library/Mail`
+or a `deny_paths` entry, since the bridge writes the copy outside any
+sandbox. The folders of your own files (`~/Documents`, `~/Desktop`,
+`~/Downloads`, `~/Movies`, `~/Music`, `~/Pictures`) are fine, as they are
+for a new brain. Each check
+looks where the folder really is, through any symlink on the way. The
+restore runs in the background (one at a time, and not while a
 backup runs), and the Backup page shows how the last one went, a failure
 included, with what rclone said. Inspect the result, then add it as a brain
 (the dashboard picks up its `brain.json`) or swap folders yourself, which

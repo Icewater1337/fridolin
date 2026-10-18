@@ -277,21 +277,104 @@ func TestRenderUnitRefusesWhatItCannotHold(t *testing.T) {
 	}
 }
 
+// TestServicePath: the service runs with the installer's PATH, then the
+// usual folders. A folder of it inside a brain's folder (a bin/ with the
+// scripts that brain's prompt runs by name) went into the service's PATH
+// too, where the bridge ran programs from it unsandboxed, and the sandbox
+// then refused the brain. It now goes into brainPATHVar instead, by the
+// brain folder as configured or by its real path, with what a bridge that
+// installs itself kept there.
 func TestServicePath(t *testing.T) {
 	home := canonicalDir(t.TempDir())
-	makeFiles(t, home, "bin/", "tools/bin/")
-	installer := strings.Join([]string{home + "/bin", "relative/bin", "", home + "/missing", home + "/tools/bin", home + "/bin", "/usr/bin"}, ":")
+	makeFiles(t, home, "bin/", "tools/bin/", "brains/p/bin/", "brains/p/tools/", "real/q/bin/", "kept/bin/")
+	if err := os.Symlink(home+"/real/q", home+"/q"); err != nil {
+		t.Fatal(err)
+	}
+	owners := []pathOwner{
+		{id: "p", dirs: []string{home + "/brains/p"}},
+		{id: "q", dirs: []string{home + "/q", home + "/real/q"}},
+	}
+	installer := strings.Join([]string{home + "/brains/p/bin", home + "/bin", "relative/bin", "", home + "/missing", home + "/tools/bin", home + "/bin", "/usr/bin", home + "/q/bin", home + "/real/q/bin", home + "/brains/p/tools/"}, ":")
 	cases := []struct {
-		goos string
-		want []string
+		name, goos      string
+		owners          []pathOwner
+		installerBrain  string
+		want, wantBrain []string
 	}{
-		{"linux", []string{home + "/bin", home + "/tools/bin", "/usr/bin", home + "/.local/bin", "/usr/local/bin", "/bin", "/usr/sbin", "/sbin"}},
-		{"darwin", []string{home + "/bin", home + "/tools/bin", "/usr/bin", "/opt/homebrew/bin", home + "/.local/bin", "/usr/local/bin", "/bin", "/usr/sbin", "/sbin"}},
+		{"linux", "linux", nil, "", []string{home + "/brains/p/bin", home + "/bin", home + "/tools/bin", "/usr/bin", home + "/q/bin", home + "/real/q/bin", home + "/brains/p/tools", home + "/.local/bin", "/usr/local/bin", "/bin", "/usr/sbin", "/sbin"}, nil},
+		{"darwin", "darwin", nil, "", []string{home + "/brains/p/bin", home + "/bin", home + "/tools/bin", "/usr/bin", home + "/q/bin", home + "/real/q/bin", home + "/brains/p/tools", "/opt/homebrew/bin", home + "/.local/bin", "/usr/local/bin", "/bin", "/usr/sbin", "/sbin"}, nil},
+		{"brain folders", "darwin", owners, "",
+			[]string{home + "/bin", home + "/tools/bin", "/usr/bin", "/opt/homebrew/bin", home + "/.local/bin", "/usr/local/bin", "/bin", "/usr/sbin", "/sbin"},
+			[]string{home + "/brains/p/bin", home + "/q/bin", home + "/real/q/bin", home + "/brains/p/tools"}},
+		{"what a bridge installing itself kept for brains", "darwin", owners, home + "/kept/bin:" + home + "/missing",
+			[]string{home + "/bin", home + "/tools/bin", "/usr/bin", "/opt/homebrew/bin", home + "/.local/bin", "/usr/local/bin", "/bin", "/usr/sbin", "/sbin"},
+			[]string{home + "/kept/bin", home + "/brains/p/bin", home + "/q/bin", home + "/real/q/bin", home + "/brains/p/tools"}},
 	}
 	for _, c := range cases {
-		t.Run(c.goos, func(t *testing.T) {
-			if got := servicePath(installer, home, c.goos); got != strings.Join(c.want, ":") {
+		t.Run(c.name, func(t *testing.T) {
+			got, gotBrain := servicePath(installer, c.installerBrain, home, c.goos, c.owners)
+			if got != strings.Join(c.want, ":") {
 				t.Errorf("servicePath =\n  %s\nwant\n  %s", got, strings.Join(c.want, ":"))
+			}
+			if gotBrain != strings.Join(c.wantBrain, ":") {
+				t.Errorf("brain PATH =\n  %s\nwant\n  %s", gotBrain, strings.Join(c.wantBrain, ":"))
+			}
+		})
+	}
+}
+
+// TestServiceInstallKeepsBrainFoldersOffThePATH: installed from a shell
+// whose PATH names a folder in a brain's folder, the service ran with it
+// on PATH, so the bridge ran programs a brain could write there outside
+// the sandbox. The folder now goes into the unit's brainPATHVar instead,
+// for that brain's runs, and a later install without one drops the
+// variable rather than keeping it as one you added.
+func TestServiceInstallKeepsBrainFoldersOffThePATH(t *testing.T) {
+	for _, goos := range []string{"darwin", "linux"} {
+		t.Run(goos, func(t *testing.T) {
+			f := newFakeService(t, goos)
+			makeFiles(t, f.home, "bin/", "assistant/personal/bin/")
+			ref := brainFolder(t, f.home+"/assistant/personal", BrainManifest{ID: "personal", Routing: BrainRouting{HandlesDMs: true}})
+			f.cfg = writeConfig(t, `{"brain_mode": true, "data_dir": "`+f.home+`/.fridolin", "http_listen": "127.0.0.1:18765"`+brainDirsJSON(t, ref)+`}`)
+			f.h.path = f.home + "/assistant/personal/bin:" + f.home + "/bin:/usr/bin"
+			unitPath, _ := f.h.unitFile()
+			env := func() (path, brainPath string) {
+				t.Helper()
+				data := readFile(t, unitPath)
+				if goos == "linux" {
+					for _, line := range strings.Split(data, "\n") {
+						if v, ok := strings.CutPrefix(line, `Environment="PATH=`); ok {
+							path = strings.TrimSuffix(v, `"`)
+						}
+						if v, ok := strings.CutPrefix(line, `Environment="`+brainPATHVar+`=`); ok {
+							brainPath = strings.TrimSuffix(v, `"`)
+						}
+					}
+					return path, brainPath
+				}
+				u, err := readUnit(goos, []byte(data))
+				if err != nil {
+					t.Fatal(err)
+				}
+				return u.Env["PATH"], u.Env[brainPATHVar]
+			}
+			if err := f.install(f.exe("build one")); err != nil {
+				t.Fatalf("%v\n%s", err, f.out)
+			}
+			path, brainPath := env()
+			if strings.Contains(path, "/assistant/personal/") || !strings.HasPrefix(path, f.home+"/bin:/usr/bin") {
+				t.Errorf("PATH = %q, want it without the brain's folder", path)
+			}
+			if brainPath != f.home+"/assistant/personal/bin" {
+				t.Errorf("%s = %q, want the brain's folder", brainPATHVar, brainPath)
+			}
+			f.cfg = writeConfig(t, `{"brain_mode": true, "data_dir": "`+f.home+`/.fridolin", "http_listen": "127.0.0.1:18765"}`)
+			f.h.path = f.home + "/bin:/usr/bin"
+			if err := f.install(f.exe("build two")); err != nil {
+				t.Fatalf("%v\n%s", err, f.out)
+			}
+			if _, brainPath := env(); brainPath != "" {
+				t.Errorf("%s = %q after an install without brain folders on PATH, want it gone", brainPATHVar, brainPath)
 			}
 		})
 	}
@@ -509,7 +592,8 @@ func TestServiceInstallKeepsVariablesAddedToTheAgent(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			want := map[string]string{"HOME": f.home, "PATH": servicePath(f.h.path, f.home, "darwin"), "CLAUDE_CODE_OAUTH_TOKEN": "secret & value", "GROQ_API_KEY": "gsk-test"}
+			path, _ := servicePath(f.h.path, "", f.home, "darwin", nil)
+			want := map[string]string{"HOME": f.home, "PATH": path, "CLAUDE_CODE_OAUTH_TOKEN": "secret & value", "GROQ_API_KEY": "gsk-test"}
 			if c.agent == byHand {
 				want["GROQ_API_KEY"] = byHandValue
 			}

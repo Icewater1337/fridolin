@@ -864,12 +864,19 @@ func findTool(name string) (string, error) {
 	if p, err := exec.LookPath(name); err == nil {
 		return p, nil
 	}
-	for _, dir := range []string{"/opt/homebrew/bin", "/usr/local/bin", filepath.Join(homeDir(), ".local/bin")} {
+	for _, dir := range toolFallbackDirs() {
 		if p := filepath.Join(dir, name); fileExists(p) {
 			return p, nil
 		}
 	}
 	return "", fmt.Errorf("%s not found", name)
+}
+
+// toolFallbackDirs are where findTool looks for a program that is not on
+// PATH, which under the service it often is not. The sandbox keeps them
+// from brains like the PATH folders.
+func toolFallbackDirs() []string {
+	return []string{"/opt/homebrew/bin", "/usr/local/bin", filepath.Join(homeDir(), ".local/bin")}
 }
 
 // ensureShell unpacks the embedded site process into <data_dir>/site/shell

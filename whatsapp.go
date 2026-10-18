@@ -649,7 +649,9 @@ func (wa *WhatsAppClient) downloadAttachment(msg *events.Message, chatJID string
 	maxBytes := cfg.MaxMediaBytes()
 	ctx, cancel := context.WithTimeout(wa.ctx, mediaDownloadTimeout)
 	defer cancel()
-	path, err := saveAttachment(ctx, wa.downloader(), cfg.MediaDir, att, maxBytes)
+	// Into the media folder's incoming folder, which no brain can read:
+	// the brain that takes the message moves it into its own inbox.
+	path, err := saveAttachment(ctx, wa.downloader(), filepath.Join(cfg.MediaDir, incomingMediaDir), att, maxBytes)
 	switch {
 	case errors.Is(err, errMediaTooLarge):
 		wa.log.Warnf("Skipped attachment from %s: %v", chatJID, err)
@@ -778,6 +780,9 @@ func saveAttachment(ctx context.Context, dl mediaDownloader, dir string, att att
 	if att.size > uint64(maxBytes) {
 		return "", fmt.Errorf("%w: the %s is %d bytes, over the limit of %d", errMediaTooLarge, att.kind, att.size, maxBytes)
 	}
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return "", fmt.Errorf("saving %s: %w", att.kind, err)
+	}
 	tmp, err := os.CreateTemp(dir, ".download-*")
 	if err != nil {
 		return "", fmt.Errorf("saving %s: %w", att.kind, err)
@@ -872,10 +877,10 @@ func (c *cappedFile) Stat() (os.FileInfo, error)                { return c.f.Sta
 
 // placeMedia renames the finished download at tmp into dir. It first claims
 // a free name with O_EXCL, which fails when anything is there, even a
-// dangling symlink, so a file a brain left in the shared media directory is
-// neither overwritten nor followed. A taken name moves on to "-2", "-3" and
-// so on, so two documents called "scan.pdf" both survive. The rename then
-// replaces only the empty file it just created.
+// dangling symlink, so a file already there is neither overwritten nor
+// followed. A taken name moves on to "-2", "-3" and so on, so two
+// documents called "scan.pdf" both survive. The rename then replaces only
+// the empty file it just created.
 func placeMedia(tmp, dir, name string) (string, error) {
 	name = sanitizeMediaName(name)
 	for i := 1; ; i++ {

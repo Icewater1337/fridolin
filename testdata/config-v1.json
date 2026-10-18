@@ -114,7 +114,8 @@
     "daily_at": "04:15",
     "rclone_path": "~/bin/rclone",
     "keep_versions_days": 14,
-    "include_bridge_config": false
+    "include_bridge_config": false,
+    "include_secret_files": true
   },
   "plaud": {
     "enabled": true,

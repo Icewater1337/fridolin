@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"log"
 	"net"
 	"net/http"
@@ -21,6 +22,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 
 	"go.mau.fi/whatsmeow/types"
@@ -490,9 +492,10 @@ func (p *PlaudManager) cliPath() (string, error) {
 const nvmNodeVersions = ".nvm/versions/node"
 
 // findPlaudCLI finds the plaud binary, given plaud.cli_path. The sandbox
-// profile uses it too, to keep brains from replacing the CLI. Without
-// cli_path it looks only in the PATH folders helperPath keeps, since the
-// CLI runs outside the sandbox, then in nvm and the usual prefixes.
+// profile uses it too, to keep brains from replacing the CLI (see
+// bridgeProgramsOf). Without cli_path it looks only in the PATH folders
+// helperPath keeps, since the CLI runs outside the sandbox, then in nvm
+// and the usual prefixes.
 func findPlaudCLI(c string) (string, error) {
 	if c != "" {
 		if _, err := os.Stat(c); err != nil {
@@ -527,7 +530,8 @@ func findPlaudCLI(c string) (string, error) {
 // CLI's #!/usr/bin/env node needs, as in plaudPATH. Any other comes last:
 // brains find `plaud` there all the same, and nothing a brain put there
 // runs in place of a program on the bridge's PATH, such as the claude that
-// sandbox-exec starts for every brain's run.
+// sandbox-exec starts for every brain's run. The sandbox also keeps brains
+// from writing to every folder on that PATH (see bridgeProgramsOf).
 func brainPlaudPATH(cfg *Config) string {
 	if !cfg.Plaud.BrainAccess {
 		return ""
@@ -688,6 +692,11 @@ func (p *PlaudManager) runCLIIn(ctx context.Context, home string, out io.Writer,
 	if home == "" {
 		home = p.cliHome()
 	}
+	if args[0] != "logout" {
+		if err := checkPlaudLogin(home); err != nil {
+			return "", err
+		}
+	}
 	if err := os.MkdirAll(home, 0o700); err != nil {
 		return "", err
 	}
@@ -712,6 +721,42 @@ func (p *PlaudManager) runCLIIn(ctx context.Context, home string, out io.Writer,
 		return text, plaudRunError(args[0], err, ansiRe.ReplaceAllString(stderr.String(), ""))
 	}
 	return text, nil
+}
+
+// checkPlaudLogin refuses a login in the CLI home home that is there but
+// not a regular file of its own. With plaud.brain_access brains share
+// ~/.plaud/tokens.json, which their sandbox lets them rewrite but not
+// replace (see Profile); one an older version's sandbox let a brain swap
+// for a symlink would have the CLI, which runs here outside the sandbox,
+// write your next sign-in wherever the link points, and chmod it there.
+// So would ~/.plaud swapped for a symlink, and a hard link to the file
+// from elsewhere gets every rewrite of it. A sign-out still runs: it
+// removes the link, not what the link points to.
+func checkPlaudLogin(home string) error {
+	dir := filepath.Join(home, ".plaud")
+	if fi, err := os.Lstat(dir); err == nil && !fi.IsDir() {
+		return plaudLoginRefused(dir, fi, "not a folder")
+	}
+	p := filepath.Join(dir, "tokens.json")
+	fi, err := os.Lstat(p)
+	if err != nil {
+		return nil
+	}
+	if !fi.Mode().IsRegular() {
+		return plaudLoginRefused(p, fi, "not a regular file")
+	}
+	if st, ok := fi.Sys().(*syscall.Stat_t); ok && st.Nlink != 1 {
+		return plaudLoginRefused(p, fi, "a file with another name too (a hard link)")
+	}
+	return nil
+}
+
+// plaudLoginRefused is checkPlaudLogin's error for p, which is what.
+func plaudLoginRefused(p string, fi fs.FileInfo, what string) error {
+	if fi.Mode()&os.ModeSymlink != 0 {
+		what = "a symlink"
+	}
+	return fmt.Errorf("%s is %s, through which the Plaud CLI would write your login: remove it, then connect Plaud again", p, what)
 }
 
 // plaudRunError says why `plaud cmd` failed. The CLI's exit status names
@@ -1005,18 +1050,17 @@ func (p *PlaudManager) forward(ctx context.Context, cfg *Config, id string, item
 		duration = "?"
 	}
 
-	dir := filepath.Join(cfg.MediaDir, "plaud")
-	if err := os.MkdirAll(dir, 0o700); err != nil {
-		return nil, err
-	}
-	path := plaudTranscriptPath(dir, day, name, id)
+	// Into the plaud folder of the brain's own inbox: no other brain may
+	// read the recording.
+	file := plaudTranscriptPath(filepath.Join(mediaInbox(cfg.MediaDir, br.ID()), "plaud"), day, name, id)
 	var body strings.Builder
 	fmt.Fprintf(&body, "Plaud recording: %s\nRecorded: %s\nDuration: %s\nPlaud ID: %s\n%s\n", name, when, duration, id, note)
 	if summary != "" {
 		body.WriteString("=== Plaud AI summary ===\n" + summary + "\n\n")
 	}
 	body.WriteString("=== Transcript ===\n" + strings.TrimSpace(transcript) + "\n")
-	if err := writeFileAtomic(path, []byte(body.String()), 0o600, false); err != nil {
+	path, err := writeInboxFile(cfg.MediaDir, br.ID(), filepath.Join("plaud", filepath.Base(file)), []byte(body.String()))
+	if err != nil {
 		return nil, err
 	}
 
@@ -1153,8 +1197,8 @@ func (p *PlaudManager) runEnded(id string) func(error) {
 // The name ends in the Plaud id, so a retry finds the file it wrote before,
 // even after the recording was renamed, and rewrites it instead of adding
 // a copy. (Writing it atomically also replaces, rather than follows, a
-// symlink a brain may have put there.) The folder is read rather than
-// globbed, since media_dir may contain '[' or '*'.
+// symlink a brain may have put there; see writeInboxFile.) The folder is
+// read rather than globbed, since media_dir may contain '[' or '*'.
 func plaudTranscriptPath(dir, day, name, id string) string {
 	entries, _ := os.ReadDir(dir)
 	for _, e := range entries {
@@ -1207,6 +1251,10 @@ func (p *PlaudManager) destination(cfg *Config) (*Brain, string, error) {
 	if br == nil {
 		if id := cfg.Plaud.Brain; id != "" {
 			return nil, "", fmt.Errorf("brain %s, picked for Plaud recordings, was removed or is not approved — pick another one under Integrations → Plaud", id)
+		}
+		if id := p.brains.HeldFor("", false); id != "" {
+			// Not the default brain meanwhile: recordings are private.
+			return nil, "", fmt.Errorf("brain %s, which gets Plaud recordings, cannot run — its issue is on the Brains page", id)
 		}
 		return nil, "", errors.New("no brain to send Plaud recordings to")
 	}

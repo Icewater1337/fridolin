@@ -47,8 +47,10 @@ type builderHooks struct {
 	// brainDir returns a brain's folder, or "" for no such brain.
 	brainDir func(id string) string
 	// sandbox wraps bin+args to run under the brain's sandbox profile (or
-	// returns them unchanged when sandboxing is off).
-	sandbox func(brainID, bin string, args []string) (string, []string, error)
+	// returns them unchanged when sandboxing is off), with the variables
+	// that point the command at the brain's own TMPDIR and caches, the only
+	// places outside its folder it may write.
+	sandbox func(brainID, bin string, args []string) (string, []string, []string, error)
 	// bridgeURL is the bridge's own HTTP address, for the MCP server.
 	bridgeURL func() string
 	// executable is the fridolin binary the MCP server runs from.
@@ -232,17 +234,20 @@ func (m *SiteManager) sandboxed(ctx context.Context, brainID, dir string, timeou
 	if m.hooks.sandbox == nil {
 		return "", errors.New("no sandbox hook")
 	}
-	sbBin, sbArgs, err := m.hooks.sandbox(brainID, bin, args)
+	sbBin, sbArgs, sbEnv, err := m.hooks.sandbox(brainID, bin, args)
 	if err != nil {
 		return "", fmt.Errorf("the brain's sandbox is not available: %w", err)
 	}
 	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, sbBin, sbArgs...)
+	// Like a brain's run: no terminal to type into, and a timeout stops
+	// whatever the command started too.
+	isolateProcessGroup(cmd)
 	cmd.Dir = dir
 	node, _ := findNode()
-	cmd.Env = siteEnv(node, "GIT_TERMINAL_PROMPT=0", "GIT_AUTHOR_NAME=Fridolin ("+brainID+")", "GIT_COMMITTER_NAME=Fridolin ("+brainID+")",
-		"GIT_AUTHOR_EMAIL="+siteGitEmail, "GIT_COMMITTER_EMAIL="+siteGitEmail)
+	cmd.Env = append(siteEnv(node, "GIT_TERMINAL_PROMPT=0", "GIT_AUTHOR_NAME=Fridolin ("+brainID+")", "GIT_COMMITTER_NAME=Fridolin ("+brainID+")",
+		"GIT_AUTHOR_EMAIL="+siteGitEmail, "GIT_COMMITTER_EMAIL="+siteGitEmail), sbEnv...)
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		return string(out), fmt.Errorf("%s %s: %v\n%s", filepath.Base(bin), strings.Join(args, " "), err, tail(string(out), 1500))
@@ -641,13 +646,13 @@ func (m *SiteManager) BuilderPreview(ctx context.Context, brainID string) (map[s
 		if err != nil {
 			return nil, err
 		}
-		bin, args, err := m.hooks.sandbox(brainID, node, []string{"--import", "tsx/esm", filepath.Join(shell, "server", "main.ts")})
+		bin, args, sbEnv, err := m.hooks.sandbox(brainID, node, []string{"--import", "tsx/esm", filepath.Join(shell, "server", "main.ts")})
 		if err != nil {
 			return nil, err
 		}
 		cmd := exec.CommandContext(ctx, bin, args...)
 		cmd.Dir = shell
-		cmd.Env = siteEnv(node, "FRIDOLIN_SITE_RUNTIME="+rtFile, "NODE_ENV=production")
+		cmd.Env = append(siteEnv(node, "FRIDOLIN_SITE_RUNTIME="+rtFile, "NODE_ENV=production"), sbEnv...)
 		return cmd, nil
 	}
 	p.proc.ensure(m.baseContext(), build)
@@ -756,12 +761,18 @@ func (b *Bridge) siteBuilderHooks() builderHooks {
 			}
 			return ""
 		},
-		sandbox: func(brainID, bin string, args []string) (string, []string, error) {
+		sandbox: func(brainID, bin string, args []string) (string, []string, []string, error) {
 			sp := b.brainMgr.profiler
 			if sp == nil || !sp.Enabled() {
-				return bin, args, nil
+				return bin, args, nil, nil
 			}
-			return sp.Command(brainID, bin, args)
+			cfg := b.cfgs.Get()
+			env, err := prepareBrainState(absPath(cfg.DataDir), cfg.MediaDir, brainID, cfg.InheritClaudeUserConfig)
+			if err != nil {
+				return "", nil, nil, err
+			}
+			sbBin, sbArgs, err := sp.Command(brainID, bin, args)
+			return sbBin, sbArgs, env, err
 		},
 		bridgeURL: func() string { return "http://" + b.cfgs.Get().HTTPListen },
 		executable: func() (string, error) {

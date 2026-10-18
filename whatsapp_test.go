@@ -711,8 +711,10 @@ func TestSaveAttachment(t *testing.T) {
 	}
 }
 
-// An attachment reaches the brain as the path it was saved under. Its
-// download has a deadline, and disconnecting ends it.
+// An attachment reaches the brain as the path it was saved under, in the
+// media folder's incoming folder, which no brain can read: the brain that
+// takes the message moves it into its own inbox. Its download has a
+// deadline, and disconnecting ends it.
 func TestHandleMessageSavesAttachment(t *testing.T) {
 	contact := mustJID(t, "15551234567@s.whatsapp.net")
 	docEvent := func() *events.Message {
@@ -730,7 +732,7 @@ func TestHandleMessageSavesAttachment(t *testing.T) {
 		start := time.Now()
 		tw.handle(t, docEvent())
 		m, ok := tw.next(2 * time.Second)
-		want := filepath.Join(tw.cfg().MediaDir, "scan.pdf")
+		want := filepath.Join(tw.cfg().MediaDir, incomingMediaDir, "scan.pdf")
 		if !ok || m.Text != "file this" || len(m.Media) != 1 || m.Media[0] != want {
 			t.Fatalf("got %+v (delivered %v), want the caption and %s", m, ok, want)
 		}
@@ -760,7 +762,7 @@ func TestHandleMessageSavesAttachment(t *testing.T) {
 		if !ok || m.Text != "file this" || len(m.Media) != 0 {
 			t.Errorf("got %+v (delivered %v), want the caption without the file", m, ok)
 		}
-		if names := dirNames(t, tw.cfg().MediaDir); len(names) != 0 {
+		if names := dirNames(t, filepath.Join(tw.cfg().MediaDir, incomingMediaDir)); len(names) != 0 {
 			t.Errorf("left behind %q", names)
 		}
 		select {

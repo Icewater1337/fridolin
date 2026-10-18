@@ -126,7 +126,7 @@ export default {
     function renderConnect(c) {
       const privacy = h('ul.facts',
         h('li', icon('shield'), h('span', 'The bridge asks only for access to files it creates (Google’s “drive.file” permission). It cannot see anything else in your Drive.')),
-        h('li', icon('lock'), h('span', 'Your WhatsApp session, tokens and .env files are never uploaded.')),
+        h('li', icon('lock'), h('span', 'Your WhatsApp session and the bridge’s tokens are never uploaded, nor .env files, private keys and tokens in brain folders.')),
         h('li', icon('backup'), h('span', 'Each brain folder is copied to a folder in your Drive. Older versions of changed files are kept for 30 days by default.')));
       if (c && c.state === 'running') {
         return h('div.card.wizard-card.waiting',
@@ -353,12 +353,18 @@ export default {
 
     async function editExcludes(b) {
       const ta = linesArea(b.exclude || [], { rows: 8, placeholder: 'node_modules/\n*.log' });
+      // Left out of every brain folder by the bridge itself (backupSecretExcludes).
+      const secretExcludes = (backupStatus && backupStatus.secret_excludes) || [];
+      const includeSecrets = !!(backupStatus && backupStatus.settings && backupStatus.settings.include_secret_files);
       const saved = await openDialog({
         title: `Leave out of ${b.name || b.id}’s backup`,
         body: h('div',
           h('p.muted', 'One pattern per line, relative to the brain folder. A trailing / means a folder; * matches anything in a name.'),
           field({ label: 'Patterns', control: ta }),
-          h('p.muted.small', 'Examples: ', mono('node_modules/'), ' ', mono('*.log'), ' ', mono('/big-exports/'))),
+          h('p.muted.small', 'Examples: ', mono('node_modules/'), ' ', mono('*.log'), ' ', mono('/big-exports/')),
+          secretExcludes.length && !includeSecrets
+            ? h('p.muted.small', 'Always left out, whatever you list here: ', ...secretExcludes.flatMap((p, i) => [i ? ' ' : '', mono(p)]))
+            : null),
         actions: [
           { label: 'Cancel', value: null },
           { label: 'Save', kind: 'primary', onClick: async () => { await put(`/api/brains/${encodeURIComponent(b.id)}/backup`, { exclude: linesOf(ta) }); return true; } },

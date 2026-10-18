@@ -153,6 +153,11 @@ func TestPlaudRunsInThePickedBrain(t *testing.T) {
 	if hist, _ := os.ReadFile(filepath.Join(gDir, "conversation-history.jsonl")); !strings.Contains(string(hist), "[Plaud]") {
 		t.Errorf("g's history lacks the recording:\n%s", hist)
 	}
+	// The transcript is in g's inbox, which the DM brain cannot read.
+	media := tb.cfgs.Get().MediaDir
+	if files, _ := filepath.Glob(filepath.Join(media, "*", "plaud", "*.txt")); len(files) != 1 || filepath.Dir(files[0]) != filepath.Join(media, "g", "plaud") {
+		t.Errorf("transcripts = %v, want one in g's inbox", files)
+	}
 	waitFor(t, 10*time.Second, "the run to be noted", func() bool {
 		last := tb.plaud.Status().LastForwarded
 		return last != nil && last.Brain == "g" && last.Status == plaudRunDone
@@ -221,7 +226,7 @@ func TestPlaudWithoutAPrivateChatWaits(t *testing.T) {
 	if st, _ := tb.plaud.loadState(); st.Pending[plaudNew] == nil || slices.Contains(st.Seen, plaudNew) {
 		t.Errorf("state = %+v, want the recording still pending", st)
 	}
-	if files, _ := filepath.Glob(filepath.Join(tb.cfgs.Get().MediaDir, "plaud", "*")); len(files) != 0 {
+	if files, _ := filepath.Glob(filepath.Join(tb.cfgs.Get().MediaDir, "*", "plaud", "*")); len(files) != 0 {
 		t.Errorf("files written without a destination: %v", files)
 	}
 	var status map[string]any
@@ -851,7 +856,7 @@ func TestPlaudFirstSyncThenForwardsNewRecordings(t *testing.T) {
 	}
 	// Seen once the brain's run answered it.
 	tb.waitPlaudSeen(t, plaudNew)
-	files, _ := filepath.Glob(filepath.Join(tb.cfgs.Get().MediaDir, "plaud", "* - Team sync - "+plaudNew+".txt"))
+	files, _ := filepath.Glob(filepath.Join(tb.cfgs.Get().MediaDir, plaudDMBrain.ID, "plaud", "* - Team sync - "+plaudNew+".txt"))
 	if len(files) != 1 {
 		t.Fatalf("transcript files = %v", files)
 	}
@@ -1689,7 +1694,7 @@ func TestPlaudFailedFirstSyncForwardsNothingOld(t *testing.T) {
 			if err := tb.plaud.Poll(context.Background()); err != nil {
 				t.Fatal(err)
 			}
-			if files, _ := filepath.Glob(filepath.Join(tb.cfgs.Get().MediaDir, "plaud", "*")); len(files) != 0 {
+			if files, _ := filepath.Glob(filepath.Join(tb.cfgs.Get().MediaDir, "*", "plaud", "*")); len(files) != 0 {
 				t.Errorf("old recordings were written out: %v", files)
 			}
 			if strings.Contains(fp.calls(), " file ") {
@@ -1707,7 +1712,7 @@ func TestPlaudFailedFirstSyncForwardsNothingOld(t *testing.T) {
 
 // plaudForwarded reports whether a recording was written out for a brain.
 func (tb *testBridge) plaudForwarded() bool {
-	files, _ := filepath.Glob(filepath.Join(tb.cfgs.Get().MediaDir, "plaud", "*.txt"))
+	files, _ := filepath.Glob(filepath.Join(tb.cfgs.Get().MediaDir, "*", "plaud", "*.txt"))
 	return len(files) > 0
 }
 
@@ -1870,7 +1875,7 @@ func TestPlaudLoginChangingDuringAPollSendsNothing(t *testing.T) {
 // plaudDelivered returns the transcript file written for recording id.
 func (tb *testBridge) plaudDelivered(t *testing.T, id string) string {
 	t.Helper()
-	files, _ := filepath.Glob(filepath.Join(tb.cfgs.Get().MediaDir, "plaud", "* - "+id+".txt"))
+	files, _ := filepath.Glob(filepath.Join(tb.cfgs.Get().MediaDir, "*", "plaud", "* - "+id+".txt"))
 	if len(files) != 1 {
 		t.Fatalf("transcript files for %s = %v, want one", id, files)
 	}
@@ -2310,7 +2315,7 @@ func TestPlaudRetryRewritesTheSameTranscript(t *testing.T) {
 	}
 	waitFor(t, 10*time.Second, "second brain reply", func() bool { return len(tb.dev.Outbox()) == 2 })
 
-	files, _ := filepath.Glob(filepath.Join(tb.cfgs.Get().MediaDir, "plaud", "*"))
+	files, _ := filepath.Glob(filepath.Join(tb.cfgs.Get().MediaDir, "*", "plaud", "*"))
 	if len(files) != 1 || !strings.HasSuffix(files[0], " - "+plaudNew+".txt") {
 		t.Fatalf("transcript files = %v, want one named after the recording id", files)
 	}
@@ -2319,7 +2324,7 @@ func TestPlaudRetryRewritesTheSameTranscript(t *testing.T) {
 	}
 }
 
-// Brains may write to the media folder, so one can put a symlink where a
+// A brain may write to its own media inbox, so it can put a symlink where a
 // recording's transcript will go. The transcript replaces the link instead
 // of being written through it to the file it points to.
 func TestPlaudTranscriptReplacesASymlink(t *testing.T) {
@@ -2328,7 +2333,7 @@ func TestPlaudTranscriptReplacesASymlink(t *testing.T) {
 	if err := os.WriteFile(target, []byte("keep me"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	dir := filepath.Join(tb.cfgs.Get().MediaDir, "plaud")
+	dir := filepath.Join(tb.cfgs.Get().MediaDir, plaudDMBrain.ID, "plaud")
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		t.Fatal(err)
 	}
@@ -2353,6 +2358,39 @@ func TestPlaudTranscriptReplacesASymlink(t *testing.T) {
 	}
 	if data, _ := os.ReadFile(link); !strings.Contains(string(data), "=== Transcript ===\n[00:00 - 00:04] Speaker 1: Let's ship on Friday.") {
 		t.Errorf("the file lacks the transcript:\n%s", data)
+	}
+}
+
+// A brain can also swap the plaud folder in its inbox for a symlink, to
+// another brain's inbox or anywhere else the bridge may write. The bridge
+// writes the transcript only through the inbox, never out of it: the
+// recording waits for another try, and nothing lands where the link
+// points.
+func TestPlaudTranscriptStaysInTheInbox(t *testing.T) {
+	tb, fp := plaudBridge(t, "")
+	media := tb.cfgs.Get().MediaDir
+	elsewhere := t.TempDir()
+	for name, target := range map[string]string{"out of the media folder": elsewhere, "into another brain's inbox": filepath.Join(media, "other")} {
+		t.Run(name, func(t *testing.T) {
+			if err := os.MkdirAll(target, 0o700); err != nil {
+				t.Fatal(err)
+			}
+			inbox := filepath.Join(media, plaudDMBrain.ID)
+			if err := os.MkdirAll(inbox, 0o700); err != nil {
+				t.Fatal(err)
+			}
+			link := filepath.Join(inbox, "plaud")
+			_ = os.RemoveAll(link)
+			if err := os.Symlink(target, link); err != nil {
+				t.Fatal(err)
+			}
+			if err := plaudDeliver(t, tb, fp); err == nil {
+				t.Error("the recording was delivered through the link")
+			}
+			if names := dirNames(t, target); len(names) != 0 {
+				t.Errorf("written through the link: %q", names)
+			}
+		})
 	}
 }
 
@@ -2796,12 +2834,116 @@ func TestPlaudBrainAccessSharesTheLogin(t *testing.T) {
 	if !strings.Contains(fp.calls(), "HOME="+tb.home+" ") {
 		t.Errorf("with brain_access the CLI must use the real home:\n%s", fp.calls())
 	}
-	if strings.Contains(mustProfile(t, tb.brainMgr.profiler, "p"), filepath.Join(tb.home, ".plaud")) {
+	// Brains read the login, and save it when the CLI refreshes it, but
+	// cannot remove it or put anything else in its place.
+	denyRead := func(home string) string { return `(deny file-read* (subpath "` + filepath.Join(home, ".plaud") + `"))` }
+	profile := mustProfile(t, tb.brainMgr.profiler, "p")
+	if strings.Contains(profile, denyRead(tb.home)) {
 		t.Error("with brain_access brains must be able to read ~/.plaud")
 	}
+	tokens := filepath.Join(tb.home, ".plaud", "tokens.json")
+	for _, op := range []string{"file-write-data", "file-write-mode"} {
+		if !strings.Contains(profile, `(allow `+op+` (literal "`+tokens+`"))`) {
+			t.Errorf("with brain_access brains must be able to save a refreshed login (%s)", op)
+		}
+	}
+	if strings.Contains(profile, `(allow file-write* (literal "`+tokens+`"))`) {
+		t.Error("with brain_access brains may rewrite the Plaud login, not remove or replace it")
+	}
 	tb2, _ := plaudBridge(t, "")
-	if !strings.Contains(mustProfile(t, tb2.brainMgr.profiler, "p"), filepath.Join(tb2.home, ".plaud")) {
+	profile = mustProfile(t, tb2.brainMgr.profiler, "p")
+	if !strings.Contains(profile, denyRead(tb2.home)) {
 		t.Error("without brain_access the sandbox must deny ~/.plaud")
+	}
+	if strings.Contains(profile, "tokens.json") {
+		t.Error("without brain_access brains must not write the Plaud login")
+	}
+}
+
+// A shared login that is a symlink, which an older version's sandbox let a
+// brain put in its place, is not used: the CLI, which runs outside the
+// sandbox, would write your next sign-in through it (into ~/.zshrc, say),
+// and chmod what it points to. A sign-out still runs, and removes only the
+// link.
+func TestPlaudRefusesALoginThatIsASymlink(t *testing.T) {
+	tb, fp := plaudBridge(t, `, "brain_access": true`)
+	fp.files()
+	const rcText = "export PATH=/usr/bin\n"
+	rc := writeTestFile(t, filepath.Join(tb.home, ".zshrc"), rcText)
+	if err := os.MkdirAll(filepath.Dir(tb.plaud.tokenPath()), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(rc, tb.plaud.tokenPath()); err != nil {
+		t.Fatal(err)
+	}
+	for _, cmd := range []string{"files", "login"} {
+		if _, err := tb.plaud.runCLIOut(context.Background(), nil, cmd); err == nil || !strings.Contains(err.Error(), "is a symlink") {
+			t.Errorf("plaud %s: %v, want it refused", cmd, err)
+		}
+	}
+	if calls := fp.calls(); calls != "" {
+		t.Errorf("the CLI ran:\n%s", calls)
+	}
+	if _, err := tb.plaud.runCLIOut(context.Background(), nil, "logout"); err != nil {
+		t.Errorf("plaud logout: %v", err)
+	}
+	if _, err := os.Lstat(tb.plaud.tokenPath()); !os.IsNotExist(err) {
+		t.Errorf("the link is still there: %v", err)
+	}
+	if data, _ := os.ReadFile(rc); string(data) != rcText {
+		t.Errorf("~/.zshrc = %q, want it untouched", data)
+	}
+}
+
+// TestPlaudRefusesALoginElsewhere: only a symlinked tokens.json was
+// refused, but a brain under an older sandbox could also have swapped
+// ~/.plaud itself for a symlink, or left a hard link to the login, which
+// the bridge's CLI, outside the sandbox, then wrote through. Both are
+// refused now as the symlink is; a login of its own is not.
+func TestPlaudRefusesALoginElsewhere(t *testing.T) {
+	cases := []struct {
+		name  string
+		setup func(t *testing.T, home, elsewhere string)
+		says  string // "" for a login that is fine
+	}{
+		{"a login of its own", func(t *testing.T, home, _ string) {
+			writeTestFile(t, filepath.Join(home, ".plaud", "tokens.json"), "{}")
+		}, ""},
+		{"no login yet", func(t *testing.T, home, _ string) {}, ""},
+		{"a symlinked folder", func(t *testing.T, home, elsewhere string) {
+			writeTestFile(t, filepath.Join(elsewhere, "tokens.json"), "{}")
+			if err := os.Symlink(elsewhere, filepath.Join(home, ".plaud")); err != nil {
+				t.Fatal(err)
+			}
+		}, ".plaud is a symlink"},
+		{"a file where the folder goes", func(t *testing.T, home, _ string) {
+			writeTestFile(t, filepath.Join(home, ".plaud"), "x")
+		}, ".plaud is not a folder"},
+		{"a hard link", func(t *testing.T, home, elsewhere string) {
+			other := writeTestFile(t, filepath.Join(elsewhere, "zshrc"), "x")
+			if err := os.MkdirAll(filepath.Join(home, ".plaud"), 0o700); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.Link(other, filepath.Join(home, ".plaud", "tokens.json")); err != nil {
+				t.Fatal(err)
+			}
+		}, "tokens.json is a file with another name too"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			home, elsewhere := t.TempDir(), t.TempDir()
+			c.setup(t, home, elsewhere)
+			err := checkPlaudLogin(home)
+			if c.says == "" {
+				if err != nil {
+					t.Errorf("checkPlaudLogin = %v, want nil", err)
+				}
+				return
+			}
+			if err == nil || !strings.Contains(err.Error(), c.says) {
+				t.Errorf("checkPlaudLogin = %v, want it saying %q", err, c.says)
+			}
+		})
 	}
 }
 
@@ -3136,14 +3278,14 @@ func TestPlaudPATH(t *testing.T) {
 
 // TestBrainPlaudPATH: brains that may use the Plaud CLI find it on their
 // PATH also where the bridge's PATH does not have it. Its folder comes
-// ahead of the bridge's PATH only when it holds the CLI's node (nvm), and
-// in HOME the sandbox then keeps brains from planting the programs the
-// bridge runs by name there: sandbox-exec starts claude by name on that
-// PATH for every brain's run, and the CLI's #!/usr/bin/env node looks up
-// node on it. Any other CLI folder comes last, so that nothing a brain put
-// there runs in place of a program on the bridge's PATH in another
-// brain's run. The sandbox covers a CLI folder in HOME either way, so that
-// no brain can put a node in it that would move it first.
+// ahead of the bridge's PATH only when it holds the CLI's node (nvm):
+// sandbox-exec starts claude by name on that PATH for every brain's run,
+// and the CLI's #!/usr/bin/env node looks up node on it. Any other CLI
+// folder comes last, so that nothing in it runs in place of a program on
+// the bridge's PATH in another brain's run. The sandbox keeps brains from
+// writing in any of these folders, as anywhere outside their own places,
+// and a brain folder may not hold one (see bridgeProgramsOf), so that no
+// brain can put a node in the CLI's folder that would move it first.
 func TestBrainPlaudPATH(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
@@ -3157,7 +3299,6 @@ func TestBrainPlaudPATH(t *testing.T) {
 	outside := filepath.Join(t.TempDir(), "bin")
 	writeExecutables(t, filepath.Join(nvmBin, "plaud"), filepath.Join(nvmBin, "node"),
 		filepath.Join(inHome, "plaud"), filepath.Join(outside, "plaud"))
-	homes := []string{home, resolvePath(home)}
 	cases := []struct {
 		name, cliPath, dir string
 		first              bool // the CLI's folder comes first, else last
@@ -3181,17 +3322,14 @@ func TestBrainPlaudPATH(t *testing.T) {
 			if i < 0 {
 				t.Fatalf("brainPlaudPATH = %s, which lacks the bridge's PATH", got)
 			}
-			files, _ := NewSandboxProfiler(nil, cfg).plantablePrograms(home)
-			covered := func(dir string) bool {
-				return slices.Contains(files, filepath.Join(dir, "claude")) && slices.Contains(files, filepath.Join(dir, "node")) &&
-					slices.Contains(files, filepath.Join(dir, "sh"))
-			}
+			progs := NewSandboxProfiler(nil, cfg).bridgeProgramsOf(home)
+			covered := func(dir string) bool { return slices.Contains(progs.path, dir) || withinAny(dir, progs.dirs) }
 			for _, d := range filepath.SplitList(strings.TrimSuffix(got[:i], ":")) {
-				if withinAny(d, homes) && !covered(d) {
-					t.Errorf("brainPlaudPATH = %s, whose %s comes ahead of the bridge's PATH but is not protected from planted programs", got, d)
+				if !covered(d) {
+					t.Errorf("brainPlaudPATH = %s, whose %s comes ahead of the bridge's PATH but is not kept from brains", got, d)
 				}
 			}
-			if withinAny(tc.dir, homes) && !covered(tc.dir) {
+			if !covered(tc.dir) {
 				t.Errorf("the sandbox does not keep brains from planting a node in %s", tc.dir)
 			}
 		})

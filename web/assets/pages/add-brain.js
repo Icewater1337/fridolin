@@ -104,7 +104,7 @@ export default {
       });
       mount(body, h('div.card.wizard-card',
         h('h2', 'Choose a folder'),
-        h('p.muted', 'Use a folder of its own, inside your home folder — for example ', h('code.mono', '~/assistant/personal'), '. Avoid Documents, Desktop and Downloads: macOS protects them and the sandbox blocks them.'),
+        h('p.muted', 'Use a folder of its own, inside your home folder — for example ', h('code.mono', '~/assistant/personal'), '. Avoid Documents, Desktop and Downloads: macOS protects them, and the bridge can work there only with your permission under Privacy & Security.'),
         caps.picker ? h('div.choose-row',
           btn('Choose folder…', { kind: 'primary', icon: 'folder', onClick: () => nativePick() }),
           h('span.muted.small', `Opens ${pickerName} on the computer running the bridge.`)) : null,

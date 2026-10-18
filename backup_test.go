@@ -561,6 +561,9 @@ func TestBackupRoundTripWithRealRclone(t *testing.T) {
 	write("node_modules/x/index.js", "skip me")
 	write("run.log", "skip me")
 	write("private/secret.md", "skip me")
+	// Never uploaded, whatever the excludes say.
+	write(".env", "skip me")
+	write("keys/id_ed25519", "skip me")
 
 	run := func() {
 		t.Helper()
@@ -576,7 +579,7 @@ func TestBackupRoundTripWithRealRclone(t *testing.T) {
 	if data, _ := os.ReadFile(filepath.Join(cur, "memories/a.md")); string(data) != "version 1" {
 		t.Fatalf("file not backed up")
 	}
-	for _, skip := range []string{"node_modules", "run.log", "private"} {
+	for _, skip := range []string{"node_modules", "run.log", "private", ".env", "keys/id_ed25519"} {
 		if _, err := os.Stat(filepath.Join(cur, skip)); err == nil {
 			t.Errorf("%s should have been excluded", skip)
 		}
@@ -2158,9 +2161,11 @@ func connectAlias(t *testing.T, tb *testBridge) {
 
 // TestBackupRestoreChecksWhatItIsGiven: the brain and version name one
 // folder of the backup, and the target is a new or empty folder of yours
-// that is neither a brain's nor the bridge's.
+// that is neither a brain's nor the bridge's, nor inside what the sandbox
+// keeps from brains: the copy is written outside any sandbox, so
+// ~/.claude/skills/x would be loaded by your own Claude Code sessions.
 func TestBackupRestoreChecksWhatItIsGiven(t *testing.T) {
-	tb := newTestBridge(t, `, "sandbox": {"credentials_dir": "~/creds"}`)
+	tb := newTestBridge(t, `, "sandbox": {"credentials_dir": "~/creds", "deny_paths": ["~/clients"]}`)
 	connectAlias(t, tb)
 	addBackupBrain(t, tb, "notes")
 	var mu sync.Mutex
@@ -2206,6 +2211,10 @@ func TestBackupRestoreChecksWhatItIsGiven(t *testing.T) {
 		{"into a brain through a symlink", "notes", "current", "~/to-notes/restored", 422},
 		{"into the data dir through a symlink", "notes", "current", "~/to-data/a/restored", 422},
 		{"into the credentials folder through a symlink", "notes", "current", "~/to-creds/restored", 422},
+		{"into ~/.claude", "notes", "current", "~/.claude/skills/restored", 422},
+		{"into ~/.ssh", "notes", "current", "~/.ssh/restored", 422},
+		{"into LaunchAgents", "notes", "current", "~/Library/LaunchAgents/restored", 422},
+		{"into a deny_paths entry", "notes", "current", "~/clients/restored", 422},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -2229,6 +2238,35 @@ func TestBackupRestoreChecksWhatItIsGiven(t *testing.T) {
 	defer mu.Unlock()
 	if len(calls) != 0 {
 		t.Errorf("rclone ran %v", calls)
+	}
+}
+
+// TestBackupRestoreIntoYourOwnFilesFolders: a restore refused every folder
+// inside what the sandbox denies brains, ~/Documents too, where brain
+// folders may live and a new one is accepted: restoring a brain to
+// ~/Documents/assistant, where it used to be, failed. Only the folders of
+// your own files are open to a restore now; secrets and deny_paths
+// entries stay refused.
+func TestBackupRestoreIntoYourOwnFilesFolders(t *testing.T) {
+	tb := newTestBridge(t, `, "sandbox": {"deny_paths": ["~/clients"]}`)
+	cases := []struct {
+		target string
+		ok     bool
+	}{
+		{"~/Documents/assistant/restored", true},
+		{"~/Desktop/restored", true},
+		{"~/Music/restored", true},
+		{"~/.ssh/restored", false},
+		{"~/.config/gh/restored", false},
+		{"~/Library/Mail/restored", false},
+		{"~/clients/restored", false},
+	}
+	for _, c := range cases {
+		t.Run(c.target, func(t *testing.T) {
+			if _, err := tb.restoreTarget(c.target); (err == nil) != c.ok {
+				t.Errorf("restoreTarget(%s) = %v, want ok=%v", c.target, err, c.ok)
+			}
+		})
 	}
 }
 
@@ -2368,5 +2406,152 @@ func TestBackupCancel(t *testing.T) {
 	}
 	if res := waitBackup(t, tb, "notes"); res.OK || res.Error != "cancelled" {
 		t.Errorf("result = %+v, want cancelled", res)
+	}
+}
+
+// TestBackupLeavesSecretsOut: a brain folder was synced with only the
+// brain's own excludes, and the defaults hold no secret patterns, so a
+// .env, a private key or a copied calendar token went to Drive although
+// the docs said .env files never do. The filter now starts with the secret
+// files, which no exclude list can include again ('+' lines are dropped),
+// even an empty one; include_secret_files leaves them to the brain's list.
+func TestBackupLeavesSecretsOut(t *testing.T) {
+	for _, tc := range []struct {
+		name           string
+		excludes       []string
+		includeSecrets bool
+	}{
+		{"no excludes", nil, false},
+		{"its own excludes", []string{"node_modules/", "*.log"}, false},
+		{"an exclude list that tries to include them", []string{"+ .env", "+ *.pem"}, false},
+		{"include_secret_files", []string{"*.log"}, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			filter := brainFilter(tc.excludes, tc.includeSecrets)
+			lines := strings.Split(strings.TrimSpace(filter), "\n")
+			for _, p := range backupSecretExcludes {
+				if got := slices.Contains(lines, "- "+p); got == tc.includeSecrets {
+					t.Errorf("filter has - %s: %v, want %v:\n%s", p, got, !tc.includeSecrets, filter)
+				}
+			}
+			for _, l := range lines {
+				if strings.HasPrefix(l, "+") {
+					t.Errorf("filter includes %q", l)
+				}
+			}
+			if !tc.includeSecrets && lines[0] != "- "+backupSecretExcludes[0] {
+				t.Errorf("filter starts with %q, want the secret files first", lines[0])
+			}
+		})
+	}
+
+	t.Run("a run writes it", func(t *testing.T) {
+		tb := newTestBridge(t, "")
+		addBackupBrain(t, tb, "notes")
+		var filters []string
+		tb.backup.runner = func(_ context.Context, args []string, _ io.Writer) ([]byte, error) {
+			if i := slices.Index(args, "--filter-from"); i >= 0 && args[0] == "sync" {
+				data, _ := os.ReadFile(args[i+1])
+				filters = append(filters, string(data))
+			}
+			return []byte("[]"), nil
+		}
+		tb.backup.backupBrain(t.Context(), tb.brainMgr.Get("notes"), "manual", true)
+		if len(filters) != 1 || !strings.HasPrefix(filters[0], "- .env\n") {
+			t.Errorf("sync filters = %q, want one starting with the secret files", filters)
+		}
+	})
+}
+
+// TestBackupSecretExcludesAreDocumented: docs/BACKUP.md promises what is
+// never uploaded, so it must name every pattern backupSecretExcludes holds.
+func TestBackupSecretExcludesAreDocumented(t *testing.T) {
+	doc, err := os.ReadFile(filepath.Join(repoDir, "docs", "BACKUP.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, p := range backupSecretExcludes {
+		if !strings.Contains(string(doc), "`"+p+"`") {
+			t.Errorf("docs/BACKUP.md does not name %s", p)
+		}
+	}
+}
+
+// TestSyncDirRetriesFilesThatChange: rclone fails a file whose size changes
+// while it copies it ("source file is being updated"), and a brain's
+// history gets a line whenever a message comes in. The sync asks rclone to
+// try again after a pause, and the log says when it had to.
+func TestSyncDirRetriesFilesThatChange(t *testing.T) {
+	tb := newTestBridge(t, "")
+	var got []string
+	tb.backup.runner = func(_ context.Context, args []string, stderr io.Writer) ([]byte, error) {
+		got = args
+		fmt.Fprintln(stderr, `{"level":"error","msg":"conversation-history.jsonl: Failed to copy: can't copy - source file is being updated (size changed from 10 to 12)","object":"conversation-history.jsonl"}`)
+		fmt.Fprintln(stderr, `{"level":"error","msg":"Attempt 1/3 failed with 1 errors and: can't copy - source file is being updated"}`)
+		fmt.Fprintln(stderr, `{"level":"notice","msg":"Attempt 2/3 succeeded"}`)
+		return nil, nil
+	}
+	logged := captureLog(t)
+
+	res := tb.backup.syncDir(t.Context(), t.TempDir(), notesBase, "", "manual", -1)
+	if !res.OK {
+		t.Errorf("result = %+v, want OK", res)
+	}
+	if flagValue(got, "--retries") != "3" || flagValue(got, "--retries-sleep") != "10s" {
+		t.Errorf("sync args %q, want --retries 3 --retries-sleep 10s", got)
+	}
+	if all := strings.Join(logged(), "\n"); !strings.Contains(all, "rclone tried 1 more time(s)") {
+		t.Errorf("log = %q, want it to say rclone retried", all)
+	}
+}
+
+// TestBackupWaitsForTheBrainToFinish: a brain's folder was synced while a
+// run changed it, so the backup could hold a mix of before and after (a
+// .git index newer than its objects). The backup now waits for the run to
+// end before it copies the folder, but only so long: then it copies it
+// anyway, and the log says so.
+func TestBackupWaitsForTheBrainToFinish(t *testing.T) {
+	cases := []struct {
+		name        string
+		wait        time.Duration
+		wantRunning bool // the brain still runs when the sync starts
+	}{
+		{"until the run ends", 20 * time.Second, false},
+		{"not for ever", 50 * time.Millisecond, true},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			tb := newTestBridge(t, "")
+			addBackupBrain(t, tb, "notes")
+			br := tb.brainMgr.Get("notes")
+			tb.backup.idleWait = c.wait
+			running := func() bool {
+				br.mu.Lock()
+				defer br.mu.Unlock()
+				return br.current != nil
+			}
+			var syncedWhileRunning []bool
+			tb.backup.runner = func(_ context.Context, args []string, _ io.Writer) ([]byte, error) {
+				if args[0] == "sync" {
+					syncedWhileRunning = append(syncedWhileRunning, running())
+				}
+				return []byte("[]"), nil
+			}
+			logged := captureLog(t)
+
+			t.Setenv("FRIDOLIN_FAKE_SLEEP_MS", "1500")
+			if _, _, err := br.Submit(Inbound{JID: "15551234567@s.whatsapp.net", Sender: "15551234567", Text: "hello", Source: "whatsapp", At: time.Now()}); err != nil {
+				t.Fatal(err)
+			}
+			waitFor(t, 10*time.Second, "the run to start", running)
+			tb.backup.backupBrain(t.Context(), br, "manual", true)
+			if !slices.Equal(syncedWhileRunning, []bool{c.wantRunning}) {
+				t.Errorf("synced while the brain ran: %v, want [%v]", syncedWhileRunning, c.wantRunning)
+			}
+			if all := strings.Join(logged(), "\n"); strings.Contains(all, "the brain is still running") != c.wantRunning {
+				t.Errorf("log says it copied a running brain: %v, want %v (log %q)", !c.wantRunning, c.wantRunning, all)
+			}
+			waitFor(t, 10*time.Second, "the run to end", func() bool { return !running() })
+		})
 	}
 }

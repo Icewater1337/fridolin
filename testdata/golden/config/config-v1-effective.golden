@@ -13,6 +13,7 @@
     "daily_at": "04:15",
     "enabled": true,
     "include_bridge_config": false,
+    "include_secret_files": true,
     "keep_versions_days": 14,
     "rclone_path": "<HOME>/bin/rclone",
     "remote": "brain-gdrive",
