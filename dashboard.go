@@ -216,17 +216,24 @@ func (b *Bridge) signedIn(r *http.Request) bool {
 // startSession signs the browser in: a new session, in a cookie scripts on
 // the page cannot read and other sites do not get sent. It returns the
 // session's binding, for the page to keep and send in sessionHeader.
-func (b *Bridge) startSession(w http.ResponseWriter) (string, error) {
+func (b *Bridge) startSession(w http.ResponseWriter, r *http.Request) (string, error) {
 	id, binding, exp, err := b.sessions.create()
 	if err != nil {
 		return "", err
 	}
 	http.SetCookie(w, &http.Cookie{
 		Name: b.sessionCookie, Value: id, Path: "/", Expires: exp, MaxAge: int(sessionLifetime / time.Second),
-		HttpOnly: true, SameSite: http.SameSiteStrictMode,
+		HttpOnly: true, SameSite: http.SameSiteStrictMode, Secure: secureCookie(r),
 	})
 	return binding, nil
 }
+
+// secureCookie reports whether the session cookie for r may be marked
+// Secure: only when r came over TLS. The bridge serves the dashboard over
+// plain HTTP on a loopback address, and not every browser keeps a Secure
+// cookie that plain HTTP set, even there; a Secure cookie would leave
+// those browsers unable to sign in.
+func secureCookie(r *http.Request) bool { return r.TLS != nil }
 
 // apiLogin trades a login code (from `fridolin open`) or the dashboard
 // token (pasted on the connect screen) for a session. It is the one API call
@@ -252,7 +259,7 @@ func (b *Bridge) apiLogin(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusUnauthorized, "that link was already used or has expired, or the token is wrong — run fridolin open for a new link")
 		return
 	}
-	binding, err := b.startSession(w)
+	binding, err := b.startSession(w, r)
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, "signing in: "+err.Error())
 		return
@@ -276,7 +283,7 @@ func (b *Bridge) apiLogout(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	http.SetCookie(w, &http.Cookie{Name: b.sessionCookie, Value: "", Path: "/", MaxAge: -1, HttpOnly: true, SameSite: http.SameSiteStrictMode})
+	http.SetCookie(w, &http.Cookie{Name: b.sessionCookie, Value: "", Path: "/", MaxAge: -1, HttpOnly: true, SameSite: http.SameSiteStrictMode, Secure: secureCookie(r)})
 	writeJSON(w, http.StatusOK, map[string]string{"status": "signed out"})
 }
 
@@ -304,7 +311,7 @@ func (b *Bridge) apiRotateToken(w http.ResponseWriter, r *http.Request) {
 	log.Printf("dashboard token rotated: every dashboard was signed out, and scripts with the old token are refused")
 	resp := map[string]string{"status": "rotated"}
 	if resign {
-		binding, err := b.startSession(w)
+		binding, err := b.startSession(w, r)
 		if err != nil {
 			writeErr(w, http.StatusInternalServerError, "signing in again: "+err.Error())
 			return

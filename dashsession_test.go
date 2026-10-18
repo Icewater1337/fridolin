@@ -1,6 +1,7 @@
 package main
 
 import (
+	"crypto/tls"
 	"encoding/json"
 	"errors"
 	"net"
@@ -296,6 +297,47 @@ func TestRotateForgetsLoginCodes(t *testing.T) {
 func TestSessionCookieNamePerPort(t *testing.T) {
 	if a, b := sessionCookieName("127.0.0.1:8765"), sessionCookieName("127.0.0.1:9999"); a == b || a != "fridolin_session_8765" {
 		t.Fatalf("%q, %q", a, b)
+	}
+}
+
+// The session cookie is Secure on a TLS connection only: over the plain
+// HTTP the bridge serves, a Secure cookie would not be kept by every
+// browser.
+func TestSessionCookieSecureOnlyOverTLS(t *testing.T) {
+	overTLS := func(r *http.Request) { r.TLS = &tls.ConnectionState{} }
+	cases := []struct {
+		name, path string
+		mutate     []func(*http.Request)
+		want       bool
+	}{
+		{"sign in", "/api/login", nil, false},
+		{"sign in over TLS", "/api/login", []func(*http.Request){overTLS}, true},
+		{"sign out", "/api/logout", nil, false},
+		{"sign out over TLS", "/api/logout", []func(*http.Request){overTLS}, true},
+		{"rotate the token", "/api/token/rotate", nil, false},
+		{"rotate the token over TLS", "/api/token/rotate", []func(*http.Request){overTLS}, true},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			tb := newTestBridge(t, "")
+			s := sessionOf(tb.login(map[string]string{"token": tb.token.Value()}))
+			if s == nil {
+				t.Fatal("no session")
+			}
+			var w *httptest.ResponseRecorder
+			if c.path == "/api/login" {
+				w = tb.login(map[string]string{"token": tb.token.Value()}, c.mutate...)
+			} else {
+				w = tb.do("POST", c.path, nil, append([]func(*http.Request){withSession(s)}, c.mutate...)...)
+			}
+			cookies := w.Result().Cookies()
+			if w.Code != 200 || len(cookies) != 1 {
+				t.Fatalf("%d %s, cookies %v", w.Code, w.Body.String(), cookies)
+			}
+			if cookies[0].Secure != c.want {
+				t.Errorf("cookie %+v, want Secure=%v", cookies[0], c.want)
+			}
+		})
 	}
 }
 
