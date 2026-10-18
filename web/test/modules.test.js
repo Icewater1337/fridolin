@@ -91,3 +91,46 @@ test('index.html loads files that exist', () => {
   assert.ok(refs.includes('assets/app/main.js'), 'the entry module is not loaded');
   for (const r of refs) assert.ok(fs.existsSync(path.join(WEB, r)), `${r} does not exist`);
 });
+
+// The bridge serves the dashboard with a Content-Security-Policy that
+// allows no inline script or style: one in the page would be refused, and
+// what it does would silently not happen. inlineCode lists what in html
+// the policy would refuse.
+function inlineCode(html) {
+  const found = [];
+  // A browser ends a script at </script followed by anything up to the >,
+  // such as </script foo>, so the end tag allows that too.
+  for (const m of html.matchAll(/<script\b([^>]*)>([\s\S]*?)<\/script\b[^>]*>/gi)) {
+    if (!/\ssrc="/.test(m[1])) found.push(`a script without src: ${m[0]}`);
+    if (m[2].trim() !== '') found.push(`a script with a body: ${m[0]}`);
+  }
+  if (/<style\b/i.test(html)) found.push('a <style> element');
+  for (const m of html.matchAll(/<[a-z][\w-]*\b([^>]*)>/gi)) {
+    if (/(^|\s)style\s*=/i.test(m[1])) found.push(`a style attribute: ${m[0]}`);
+    if (/(^|\s)on[a-z]+\s*=/i.test(m[1])) found.push(`an event handler attribute: ${m[0]}`);
+  }
+  return found;
+}
+
+test('index.html has no inline script or style', () => {
+  assert.deepEqual(inlineCode(fs.readFileSync(path.join(WEB, 'index.html'), 'utf8')), []);
+});
+
+// The check on pages that break each rule, so a check that misses one
+// fails here rather than passing index.html.
+test('inlineCode finds each kind of inline script and style', async (t) => {
+  const cases = [
+    ['scripts loaded by src', '<script src="/a.js"></script>\n<script type="module" src="/b.js"></script>', []],
+    ['an inline script', '<script>run()</script>', ['a script without src', 'a script with a body']],
+    ['a body beside src', '<script src="/a.js">run()</script>', ['a script with a body']],
+    ['an end tag with attributes', '<script>run()</script\tfoo>', ['a script without src', 'a script with a body']],
+    ['upper case and a newline', '<SCRIPT>run()</SCRIPT\n>', ['a script without src', 'a script with a body']],
+    ['a style element', '<style>p { color: red }</style>', ['a <style> element']],
+    ['a style attribute', '<p style="color: red">x</p>', ['a style attribute']],
+    ['an event handler attribute', '<button onclick="go()">Go</button>', ['an event handler attribute']],
+    ['names that only contain style or on', '<p data-style="a" data-onclick="b" class="onward">x</p>', []],
+  ];
+  for (const [name, html, want] of cases) {
+    await t.test(name, () => assert.deepEqual(inlineCode(html).map((f) => f.split(':')[0]), want));
+  }
+});
