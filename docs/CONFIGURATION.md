@@ -161,10 +161,11 @@ with a key that is no group JID, an entry for a group that is not in
 dashes are fine and dropped), or `"*"` together with numbers. The error
 names a number that is none by its place in the group's list ("entry 2")
 and does not repeat it, nor a key that is no group JID, so that it can go
-into a bug report as `fridolin check --redact` prints it. The dashboard
-has no form for the lists yet, and keeps them as they are when it saves:
-write them into `config.json` and restart the bridge (`fridolin service
-restart`). `fridolin check` tells you whether the file loads.
+into a bug report as `fridolin check --redact` prints it. Revoking a group
+on the **Chats** page removes its entry too. The dashboard has no form for
+the lists yet, and keeps them as they are when it saves: write them into
+`config.json` and restart the bridge (`fridolin service restart`).
+`fridolin check` tells you whether the file loads.
 
 ### `triggers`
 

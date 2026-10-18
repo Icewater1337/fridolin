@@ -606,6 +606,13 @@ func (b *Bridge) apiRevokeChat(w http.ResponseWriter, r *http.Request) {
 			return errNotListed
 		}
 		*list = kept
+		// A group no longer allowed takes its group_members entry along:
+		// one left behind would be refused (validateGroupMembers).
+		if !dm {
+			for _, g := range removed {
+				delete(c.GroupMembers, g)
+			}
+		}
 		return nil
 	})
 	switch {
