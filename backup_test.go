@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -1342,5 +1343,90 @@ func TestBackupPartlyReadableFolderWithRealRclone(t *testing.T) {
 		if _, err := os.Stat(filepath.Join(cur, rel)); err != nil {
 			t.Errorf("current/%s: %v; %s", rel, err, why)
 		}
+	}
+}
+
+// TestRcloneIsInterruptedWhenCancelled: a cancelled rclone gets an
+// interrupt first, as from Ctrl-C, so that it can end its transfers and
+// remove its partial files, and is killed only if it does not exit.
+func TestRcloneIsInterruptedWhenCancelled(t *testing.T) {
+	bin := t.TempDir()
+	script := filepath.Join(bin, "rclone")
+	fake := "#!/bin/sh\ndir=$(dirname \"$0\")\ntrap 'echo interrupted > \"$dir/signal\"; exit 1' INT\n" +
+		"touch \"$dir/started\"\nwhile :; do sleep 0.05; done\n"
+	if err := os.WriteFile(script, []byte(fake), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	tb := newTestBridge(t, `, "backup": {"rclone_path": "`+script+`"}`)
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() {
+		_, err := tb.backup.runRclone(ctx, []string{"copy", "x:", "y"}, nil)
+		done <- err
+	}()
+	waitFor(t, 10*time.Second, "rclone to start", func() bool { return fileExists(filepath.Join(bin, "started")) })
+	cancel()
+	select {
+	case <-done:
+	case <-time.After(rcloneStopGrace + 5*time.Second):
+		t.Fatal("runRclone did not return after the cancel")
+	}
+	if data, err := os.ReadFile(filepath.Join(bin, "signal")); err != nil || strings.TrimSpace(string(data)) != "interrupted" {
+		t.Errorf("rclone was not interrupted (%v), so it could not clean up", err)
+	}
+}
+
+// TestBackupStopWaitsForTheRun: Stop cancels a running backup and waits
+// for it, so its result is saved before the bridge closes down, and nothing
+// starts after it.
+func TestBackupStopWaitsForTheRun(t *testing.T) {
+	tb := newTestBridge(t, "")
+	m := tb.backup
+	_ = os.MkdirAll(filepath.Dir(m.rcloneConf()), 0o700)
+	_ = os.WriteFile(m.rcloneConf(), []byte("[brain-gdrive]\ntype = alias\nremote = /nowhere\n"), 0o600)
+	addBackupBrain(t, tb, "notes")
+	syncing := make(chan struct{})
+	m.runner = func(ctx context.Context, args []string, stderr io.Writer) ([]byte, error) {
+		if args[0] != "sync" {
+			return []byte("[]"), nil
+		}
+		close(syncing)
+		<-ctx.Done()
+		time.Sleep(300 * time.Millisecond) // rclone winding down
+		return nil, ctx.Err()
+	}
+	if err := m.StartRun([]string{"notes"}, false, "manual", true); err != nil {
+		t.Fatal(err)
+	}
+	<-syncing
+	m.Stop()
+	m.mu.Lock()
+	res, job := m.state.Brains["notes"], m.job
+	m.mu.Unlock()
+	if res == nil || res.Error != "cancelled" || job != nil {
+		t.Errorf("after Stop: result %+v, job %+v; want the cancelled run recorded and done", res, job)
+	}
+	if err := m.StartRun([]string{"notes"}, false, "manual", true); !errors.Is(err, errBackupStopped) {
+		t.Errorf("StartRun after Stop = %v, want errBackupStopped", err)
+	}
+}
+
+// TestUnreadableBackupStateIsKept: a state file that cannot be parsed is
+// kept as state.json.corrupt rather than overwritten by the next save.
+func TestUnreadableBackupStateIsKept(t *testing.T) {
+	tb := newTestBridge(t, "")
+	path := tb.backup.statePath()
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte(`{"brains": {"notes": tru`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	m := NewBackupManager(tb.cfgs, tb.brainMgr)
+	if data, err := os.ReadFile(path + ".corrupt"); err != nil || string(data) != `{"brains": {"notes": tru` {
+		t.Errorf("state.json.corrupt = %q, %v; want the unreadable file", data, err)
+	}
+	if m.state.Brains == nil || len(m.state.Brains) != 0 {
+		t.Errorf("state = %+v, want an empty one", m.state)
 	}
 }

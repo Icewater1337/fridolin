@@ -145,7 +145,13 @@ type BackupManager struct {
 	job     *backupJob
 	connect *connectJob
 	stop    context.CancelFunc
-	runner  func(ctx context.Context, args []string, stderr io.Writer) ([]byte, error)
+	// stopped is set by Stop: nothing new starts after it, so that wg is
+	// not added to while Stop waits on it.
+	stopped bool
+	// wg counts the goroutines of the scheduler, a backup or restore job
+	// and a Drive sign-in, for Stop to wait on.
+	wg     sync.WaitGroup
+	runner func(ctx context.Context, args []string, stderr io.Writer) ([]byte, error)
 	// notify sends a WhatsApp message about a brain to its owner. The bridge
 	// sets it; nil sends nothing.
 	notify func(ctx context.Context, br *Brain, text string) error
@@ -156,15 +162,29 @@ type BackupManager struct {
 // Back up now disabled.
 var refusalNoticeTimeout = 30 * time.Second
 
-// NewBackupManager loads the saved backup state.
+// NewBackupManager loads the saved backup state. A state file that cannot
+// be read is kept as state.json.corrupt and the bridge starts with none: the
+// last results and the day of the last scheduled run are gone then, and the
+// log says so rather than leaving it to the next scheduled run to show.
 func NewBackupManager(cfgs *ConfigStore, bm *BrainManager) *BackupManager {
-	m := &BackupManager{cfgs: cfgs, bm: bm, state: backupState{Brains: map[string]*BackupResult{}}}
+	m := &BackupManager{cfgs: cfgs, bm: bm}
 	m.runner = m.runRclone
-	if data, err := os.ReadFile(m.statePath()); err == nil {
-		_ = json.Unmarshal(data, &m.state)
-		if m.state.Brains == nil {
-			m.state.Brains = map[string]*BackupResult{}
+	data, err := os.ReadFile(m.statePath())
+	switch {
+	case err == nil:
+		if jerr := json.Unmarshal(data, &m.state); jerr != nil {
+			m.state = backupState{}
+			kept := m.statePath() + ".corrupt"
+			if werr := writeFileAtomic(kept, data, 0o600, false); werr != nil {
+				kept = "not kept: " + werr.Error()
+			}
+			log.Printf("backup: %s is unreadable (%v); starting without the last results and schedule (the old file: %s)", m.statePath(), jerr, kept)
 		}
+	case !errors.Is(err, fs.ErrNotExist):
+		log.Printf("backup: reading %s: %v; starting without the last results and schedule", m.statePath(), err)
+	}
+	if m.state.Brains == nil {
+		m.state.Brains = map[string]*BackupResult{}
 	}
 	return m
 }
@@ -178,9 +198,29 @@ func (m *BackupManager) rcloneConf() string {
 func (m *BackupManager) saveStateLocked() {
 	data, err := json.MarshalIndent(m.state, "", "  ")
 	if err == nil {
-		_ = writeFileAtomic(m.statePath(), data, 0o600, false)
+		err = writeFileAtomic(m.statePath(), data, 0o600, false)
+	}
+	if err != nil {
+		log.Printf("backup: saving %s: %v", m.statePath(), err)
 	}
 }
+
+// goLocked runs fn in a goroutine that Stop waits for, unless Stop already
+// ran. Hold m.mu.
+func (m *BackupManager) goLocked(fn func()) error {
+	if m.stopped {
+		return errBackupStopped
+	}
+	m.wg.Add(1)
+	go func() {
+		defer m.wg.Done()
+		fn()
+	}()
+	return nil
+}
+
+// errBackupStopped refuses work asked for while the bridge stops.
+var errBackupStopped = errors.New("the bridge is stopping")
 
 // rclonePath finds the rclone binary.
 func (m *BackupManager) rclonePath() (string, error) {
@@ -253,6 +293,12 @@ func (m *BackupManager) runRclone(ctx context.Context, args []string, stderr io.
 		return nil, err
 	}
 	cmd := exec.CommandContext(ctx, bin, append([]string{"--config", m.rcloneConf()}, args...)...)
+	// A cancel interrupts rclone as Ctrl-C would, so that it ends its
+	// transfers and removes the partial files they leave (a restore's in
+	// the target folder above all). It is killed only if it is still
+	// there rcloneStopGrace later.
+	cmd.Cancel = func() error { return cmd.Process.Signal(os.Interrupt) }
+	cmd.WaitDelay = rcloneStopGrace
 	cmd.Env = m.rcloneEnv(helperScope(ctx))
 	cmd.Stdin = nil
 	var out bytes.Buffer
@@ -265,6 +311,14 @@ func (m *BackupManager) runRclone(ctx context.Context, args []string, stderr io.
 	err = cmd.Run()
 	return out.Bytes(), err
 }
+
+// rcloneStopGrace is how long a cancelled rclone has to exit after its
+// interrupt; backupStopWait is how long Stop waits for the cancelled work,
+// a little more, so that a run's result is saved after its rclone is gone.
+var (
+	rcloneStopGrace = 5 * time.Second
+	backupStopWait  = rcloneStopGrace + 3*time.Second
+)
 
 // connected reports whether the isolated rclone config has a usable remote:
 // a Drive remote with a token, or any other kind of remote someone set up by
@@ -514,10 +568,7 @@ func (b *Bridge) apiBackupConnect(w http.ResponseWriter, r *http.Request) {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
 	job := &connectJob{State: "running", cancel: cancel}
-	m.connect = job
-	m.mu.Unlock()
-
-	go func() {
+	err := m.goLocked(func() {
 		defer cancel()
 		err := m.connectDrive(ctx, job)
 		m.mu.Lock()
@@ -529,7 +580,15 @@ func (b *Bridge) apiBackupConnect(w http.ResponseWriter, r *http.Request) {
 		}
 		job.State, job.AuthURL = "done", ""
 		log.Printf("backup: Google Drive connected")
-	}()
+	})
+	if err != nil {
+		m.mu.Unlock()
+		cancel()
+		writeErr(w, http.StatusServiceUnavailable, err.Error())
+		return
+	}
+	m.connect = job
+	m.mu.Unlock()
 	writeJSON(w, http.StatusAccepted, map[string]string{"status": "connecting"})
 }
 
@@ -749,10 +808,7 @@ func (m *BackupManager) StartRun(ids []string, includeBridge bool, trigger strin
 	if includeBridge {
 		job.queue = append(job.queue, bridgeBackupID)
 	}
-	m.job = job
-	m.mu.Unlock()
-
-	go func() {
+	err := m.goLocked(func() {
 		defer cancel()
 		for _, br := range targets {
 			if res := m.runOne(ctx, job, br.ID(), func() *BackupResult { return m.backupBrain(ctx, br, trigger, force) }); res != nil {
@@ -768,7 +824,14 @@ func (m *BackupManager) StartRun(ids []string, includeBridge bool, trigger strin
 		m.mu.Lock()
 		m.job = nil
 		m.mu.Unlock()
-	}()
+	})
+	if err != nil {
+		m.mu.Unlock()
+		cancel()
+		return err
+	}
+	m.job = job
+	m.mu.Unlock()
 	return nil
 }
 
@@ -1323,9 +1386,7 @@ func (b *Bridge) apiBackupRestore(w http.ResponseWriter, r *http.Request) {
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	job := &backupJob{started: time.Now(), cancel: cancel, current: "restore:" + req.Brain}
-	m.job = job
-	m.mu.Unlock()
-	go func() {
+	err := m.goLocked(func() {
 		defer cancel()
 		_ = os.MkdirAll(target, 0o700)
 		stderr := &jsonStats{}
@@ -1338,7 +1399,15 @@ func (b *Bridge) apiBackupRestore(w http.ResponseWriter, r *http.Request) {
 		m.mu.Lock()
 		m.job = nil
 		m.mu.Unlock()
-	}()
+	})
+	if err != nil {
+		m.mu.Unlock()
+		cancel()
+		writeErr(w, http.StatusServiceUnavailable, err.Error())
+		return
+	}
+	m.job = job
+	m.mu.Unlock()
 	writeJSON(w, http.StatusAccepted, map[string]string{"status": "restoring", "target": target})
 }
 
@@ -1349,9 +1418,9 @@ func (b *Bridge) apiBackupRestore(w http.ResponseWriter, r *http.Request) {
 func (m *BackupManager) Start(ctx context.Context) {
 	ctx, cancel := context.WithCancel(ctx)
 	m.mu.Lock()
+	defer m.mu.Unlock()
 	m.stop = cancel
-	m.mu.Unlock()
-	go func() {
+	_ = m.goLocked(func() {
 		t := time.NewTicker(time.Minute)
 		defer t.Stop()
 		for {
@@ -1362,7 +1431,7 @@ func (m *BackupManager) Start(ctx context.Context) {
 				m.tick(now)
 			}
 		}
-	}()
+	})
 }
 
 func (m *BackupManager) tick(now time.Time) {
@@ -1404,10 +1473,14 @@ func (m *BackupManager) skipTodayIfPastDue(current string, next *string) {
 	}
 }
 
-// Stop ends the scheduler and cancels a running backup.
+// Stop ends the scheduler, cancels a running backup, restore or Drive
+// sign-in, and waits up to backupStopWait for them: for rclone to exit and
+// a cancelled run's result to be saved. Otherwise both could still be going
+// on after the bridge closed everything else, or be cut off half-way when
+// the process exits. Nothing starts after Stop.
 func (m *BackupManager) Stop() {
 	m.mu.Lock()
-	defer m.mu.Unlock()
+	m.stopped = true
 	if m.stop != nil {
 		m.stop()
 	}
@@ -1416,5 +1489,16 @@ func (m *BackupManager) Stop() {
 	}
 	if m.connect != nil && m.connect.cancel != nil {
 		m.connect.cancel()
+	}
+	m.mu.Unlock()
+	done := make(chan struct{})
+	go func() {
+		m.wg.Wait()
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-time.After(backupStopWait):
+		log.Printf("backup: rclone has not stopped after %v; stopping without it", backupStopWait)
 	}
 }
