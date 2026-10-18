@@ -90,7 +90,7 @@ type serviceHost struct {
 }
 
 func newServiceHost() *serviceHost {
-	home, _ := os.UserHomeDir()
+	home := homeDir()
 	client := &http.Client{Timeout: 2 * time.Second}
 	return &serviceHost{
 		goos: runtime.GOOS,
