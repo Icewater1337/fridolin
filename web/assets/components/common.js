@@ -56,10 +56,6 @@ export function kv(rows) {
   return dl;
 }
 
-export function section(title, ...children) {
-  return h('section.section', title ? h('h2.section-title', title) : null, children);
-}
-
 /** The page's h1, a subtitle (text or nodes) and buttons on the right. */
 export function pageHeader(title, subtitle, ...actions) {
   return h('header.page-header',

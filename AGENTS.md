@@ -170,7 +170,8 @@ the version before: `fridolin service rollback`.
   `web/**/*.test.js` files (`web/test`). They cover the pure helpers, run
   pages against a stubbed bridge in a fake DOM (`web/test/serve.js`,
   `web/test/fake-dom.js`), check that every import resolves and keeps
-  those layers, and hold the stylesheet to its layout.
+  those layers and that every export is imported, and hold the
+  stylesheet to its layout.
 - The project was called whatsapp-claude-bridge before. Names from then
   that are on disk or that others rely on stay, each marked `compat:` in
   the code: the data dir `~/.whatsapp-claude-bridge`, which the bridge

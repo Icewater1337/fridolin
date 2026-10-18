@@ -2,7 +2,8 @@
 // broken import before a browser does, and one broken module stops the
 // whole page. These tests read every module and check the imports resolve,
 // are used, and keep the layers: lib/ stands alone, components/ never reach
-// into pages/, and pages never import each other.
+// into pages/, and pages never import each other. Every export is imported
+// somewhere, so none is left behind by code that is gone.
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
@@ -60,6 +61,35 @@ test('every imported name is used', async (t) => {
         for (const local of im[1].split(',').map((n) => n.trim().split(/\s+as\s+/).pop()).filter(Boolean)) {
           assert.match(body, new RegExp(`\\b${escapeRegExp(local)}\\b`), `${local} is imported but not used`);
         }
+      }
+    });
+  }
+});
+
+// The tests import from the modules too: an export only a test uses is a
+// pure helper kept apart so it can be tested.
+const testImports = fs.readdirSync(path.join(WEB, 'test')).filter((f) => f.endsWith('.js')).flatMap((f) => {
+  const file = path.join(WEB, 'test', f);
+  const src = fs.readFileSync(file, 'utf8');
+  return [...src.matchAll(/^import\s*(?:\{([^}]*)\}|([\w$]+))\s*from\s*'([^']+)';/gm)]
+    .map((m) => ({ target: path.resolve(path.dirname(file), m[3]), names: m[1] ? m[1].split(',').map((n) => n.trim().split(/\s+as\s+/)[0]).filter(Boolean) : ['default'] }));
+});
+
+// Modules nothing imports, which the page loads itself (index.html).
+const ENTRY_POINTS = new Set([path.join('app', 'main.js')]);
+
+test('every export is imported somewhere', async (t) => {
+  const used = new Map(modules.map((m) => [m.file, new Set()]));
+  const all = [
+    ...modules.flatMap((m) => m.imports.map(({ spec, names }) => ({ target: path.resolve(path.dirname(m.file), spec), names }))),
+    ...testImports,
+  ];
+  for (const { target, names } of all) if (used.has(target)) names.forEach((n) => used.get(target).add(n));
+  for (const m of modules) {
+    if (ENTRY_POINTS.has(m.rel)) continue;
+    await t.test(m.rel, () => {
+      for (const name of m.exports) {
+        assert.ok(used.get(m.file).has(name), `${name} is exported but no module or test imports it: drop the export, or the code`);
       }
     });
   }
