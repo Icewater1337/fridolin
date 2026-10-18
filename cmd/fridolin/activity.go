@@ -5,6 +5,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/Icewater1337/fridolin/internal/history"
 	"github.com/Icewater1337/fridolin/internal/textx"
 )
 
@@ -33,8 +34,8 @@ type ActivityEntry struct {
 func NewActivity(max int) *Activity { return &Activity{max: max, seeded: map[string]bool{}} }
 
 // Add records a history line. A reset marker is no message and stays out.
-func (a *Activity) Add(brainID string, e historyEntry) {
-	if e.Type == historyReset {
+func (a *Activity) Add(brainID string, e history.Entry) {
+	if e.Type == history.Reset {
 		return
 	}
 	a.mu.Lock()
@@ -42,7 +43,7 @@ func (a *Activity) Add(brainID string, e historyEntry) {
 	a.addLocked(brainID, e)
 }
 
-func (a *Activity) addLocked(brainID string, e historyEntry) {
+func (a *Activity) addLocked(brainID string, e history.Entry) {
 	ts, err := time.Parse(time.RFC3339, e.TS)
 	if err != nil {
 		ts = time.Now()
@@ -61,7 +62,7 @@ func (a *Activity) Change(brainID string, c messageChange, text string) {
 	defer a.mu.Unlock()
 	kept := a.entries[:0]
 	for _, e := range a.entries {
-		is := e.Brain == brainID && e.id != "" && e.id == c.Target && e.Type == historyIn && e.From == c.Sender &&
+		is := e.Brain == brainID && e.id != "" && e.id == c.Target && e.Type == history.In && e.From == c.Sender &&
 			(e.Chat == c.Chat || (c.ChatAlt != "" && e.Chat == c.ChatAlt))
 		switch {
 		case is && c.Kind == changeRevoke:

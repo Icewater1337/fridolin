@@ -17,10 +17,12 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/Icewater1337/fridolin/internal/fsx"
-	"github.com/Icewater1337/fridolin/internal/trigger"
 	"go.mau.fi/whatsmeow/proto/waAdv"
 	"go.mau.fi/whatsmeow/types"
+
+	"github.com/Icewater1337/fridolin/internal/fsx"
+	"github.com/Icewater1337/fridolin/internal/history"
+	"github.com/Icewater1337/fridolin/internal/trigger"
 )
 
 // The fixtures in testdata are files as this version reads and writes
@@ -252,7 +254,7 @@ func TestHistoryV1Fixture(t *testing.T) {
 	kinds := map[string]bool{}
 	keys := map[string]json.RawMessage{}
 	for sc.Scan() {
-		var e historyEntry
+		var e history.Entry
 		if err := json.Unmarshal(sc.Bytes(), &e); err != nil {
 			t.Fatalf("%s: %v", sc.Bytes(), err)
 		}
@@ -268,14 +270,14 @@ func TestHistoryV1Fixture(t *testing.T) {
 			t.Errorf("line written again as\n%s\nwant\n%s", out, sc.Bytes())
 		}
 	}
-	if !kinds[historyIn] || !kinds[historyOut] || !kinds[historyEvent] || !kinds[historyReset] || len(kinds) != 4 {
-		t.Errorf("history-v1.jsonl has the types %v, want %q, %q, %q and %q", kinds, historyIn, historyOut, historyEvent, historyReset)
+	if !kinds[history.In] || !kinds[history.Out] || !kinds[history.Event] || !kinds[history.Reset] || len(kinds) != 4 {
+		t.Errorf("history-v1.jsonl has the types %v, want %q, %q, %q and %q", kinds, history.In, history.Out, history.Event, history.Reset)
 	}
 	all, err := json.Marshal(keys)
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, key := range unsetKeys(t, reflect.TypeFor[historyEntry](), all) {
+	for _, key := range unsetKeys(t, reflect.TypeFor[history.Entry](), all) {
 		t.Errorf("no line of history-v1.jsonl sets %q", key)
 	}
 }

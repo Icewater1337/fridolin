@@ -7,6 +7,8 @@ import (
 	"time"
 
 	"go.mau.fi/whatsmeow/types"
+
+	"github.com/Icewater1337/fridolin/internal/history"
 )
 
 // Inbound is one message on its way to a brain: from WhatsApp, from the
@@ -45,7 +47,7 @@ type Inbound struct {
 	// message; a merged message's parts each keep their own. Its prompt
 	// shows the chat's history before the first of them, and what the
 	// brain sent there after it (see Brain.historyBefore).
-	logged historyEntry
+	logged history.Entry
 	// Done, when set, hears how the message ended once its brain took it:
 	// nil after a run that answered it, else why not (the run failed or
 	// was stopped, or the message was dropped before it ran). A refused

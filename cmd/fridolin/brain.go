@@ -23,6 +23,7 @@ import (
 	"unicode"
 
 	"github.com/Icewater1337/fridolin/internal/fsx"
+	"github.com/Icewater1337/fridolin/internal/history"
 	"github.com/Icewater1337/fridolin/internal/platform"
 	"github.com/Icewater1337/fridolin/internal/textx"
 )
@@ -220,9 +221,9 @@ type BrainHooks struct {
 	// WhatsApp, as its history will record them once they arrived. A
 	// chat gets them before anything a later run says there, so that run
 	// reads them as said (see undelivered).
-	Undelivered func(brainID string) []historyEntry
+	Undelivered func(brainID string) []history.Entry
 	// OnHistory sees every line written to a brain's history.
-	OnHistory func(brainID string, e historyEntry)
+	OnHistory func(brainID string, e history.Entry)
 	// ExtraArgs adds CLI arguments to a brain's runs (the site builder's
 	// plugin and MCP server, for brains allowed to build the site).
 	ExtraArgs func(brainID string) []string
@@ -326,7 +327,7 @@ func (br *Brain) logInbound(m Inbound) Inbound {
 		if at.IsZero() {
 			at = m.At
 		}
-		parts[i].logged = br.appendEntry(historyEntry{TS: historyTime(at), Chat: m.JID, From: p.Sender, Text: historyTextWithMedia(p.textWithQuote(), p.Media), Type: historyIn, ID: p.ID})
+		parts[i].logged = br.appendEntry(history.Entry{TS: historyTime(at), Chat: m.JID, From: p.Sender, Text: historyTextWithMedia(p.textWithQuote(), p.Media), Type: history.In, ID: p.ID})
 	}
 	if len(m.parts) > 0 {
 		m.parts = parts
@@ -339,10 +340,10 @@ func (br *Brain) logInbound(m Inbound) Inbound {
 // wrote for m (Inbound.logged), the first of them at least: it has when
 // it wrote them, or when its folder is the one of the brain that did.
 func (br *Brain) holdsLines(m Inbound) bool {
-	if m.logged == (historyEntry{}) {
+	if m.logged == (history.Entry{}) {
 		return false
 	}
-	return m.loggedIn(historyForChat(br.root, br.id, chatJIDs(m), promptHistoryBudget, m.enoughBefore(1))) >= 0
+	return m.loggedIn(history.ForChat(br.root, br.id, chatJIDs(m), promptHistoryBudget, m.enoughBefore(1))) >= 0
 }
 
 // historyTime is t as a history line has it, "" for none: the time the
@@ -847,7 +848,7 @@ func (br *Brain) StopChat(jid string) (stopped bool, n int) {
 // sent !reset.
 func (br *Brain) ResetChat(chats []string, by string) {
 	for _, jid := range chats {
-		br.appendEntry(historyEntry{Chat: jid, From: by, Type: historyReset})
+		br.appendEntry(history.Entry{Chat: jid, From: by, Type: history.Reset})
 	}
 }
 
@@ -1014,7 +1015,7 @@ func (br *Brain) holdsFolder(dir string) bool {
 // readFile reads the file name in the brain's folder (see openInFolder),
 // at most maxBrainFile of it.
 func (br *Brain) readFile(name string) ([]byte, error) {
-	f, err := openInFolder(br.root, name, os.O_RDONLY, 0)
+	f, err := fsx.OpenInFolder(br.root, name, os.O_RDONLY, 0)
 	if err != nil {
 		return nil, err
 	}
@@ -1125,7 +1126,7 @@ func (br *Brain) startViewerUnlessAlive(tv *platform.Viewer, s *brainSettings) *
 	// tail fails on a log that does not exist yet, so create it first,
 	// through the folder as a run opens it: touch would have followed a
 	// dangling symlink there and created the file it points to.
-	f, err := openInFolder(br.root, streamLogName, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600)
+	f, err := fsx.OpenInFolder(br.root, streamLogName, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600)
 	if err != nil {
 		log.Printf("brain %s: no tmux viewer: could not open stream log: %v", br.id, err)
 		return nil
@@ -1425,7 +1426,7 @@ func readBrainFile(dir, name string) ([]byte, error) {
 
 // readBrainFileRoot keeps a transaction's reads on its already pinned folder.
 func readBrainFileRoot(root *os.Root, name string) ([]byte, error) {
-	f, err := openInFolder(root, name, os.O_RDONLY, 0)
+	f, err := fsx.OpenInFolder(root, name, os.O_RDONLY, 0)
 	if err != nil {
 		return nil, err
 	}
@@ -1710,7 +1711,7 @@ func (br *Brain) logStderr(m Inbound, pid int, stderr string) {
 	if stderr == "" {
 		return
 	}
-	f, err := openInFolder(br.root, streamLogName, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600)
+	f, err := fsx.OpenInFolder(br.root, streamLogName, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600)
 	if err != nil {
 		log.Printf("brain %s: could not open stream log: %v", br.id, err)
 		return
@@ -1749,19 +1750,19 @@ var promptHistoryBudget int64 = 16 << 20
 // chat's last entries, with those in the outbox among them, and since is
 // empty; when the history cannot be read (see openInFolder), only the
 // outbox's are left.
-func (br *Brain) historyBefore(m Inbound, limit int) (before, since []historyEntry) {
+func (br *Brain) historyBefore(m Inbound, limit int) (before, since []history.Entry) {
 	chats := chatJIDs(m)
 	// The answers on their way first, then the history: one delivered in
 	// between is in both, and withUndelivered takes it once.
 	pending := br.undelivered(chats)
-	entries := historyForChat(br.root, br.id, chats, promptHistoryBudget, m.enoughBefore(limit))
+	entries := history.ForChat(br.root, br.id, chats, promptHistoryBudget, m.enoughBefore(limit))
 	at := m.loggedIn(entries)
 	if at < 0 {
 		before = withUndelivered(entries, pending)
 	} else {
 		before = entries[:at]
 		for _, e := range entries[at+1:] {
-			if e.Type == historyOut {
+			if e.Type == history.Out {
 				since = append(since, e)
 			}
 		}
@@ -1778,18 +1779,18 @@ func (br *Brain) historyBefore(m Inbound, limit int) (before, since []historyEnt
 // Inbound.logged) and limit entries before the first of them, or for a
 // message without lines, limit entries. A line deleted since is not
 // found, and the reading goes on as far as it may.
-func (m Inbound) enoughBefore(limit int) func(e historyEntry) bool {
-	var lines []historyEntry
+func (m Inbound) enoughBefore(limit int) func(e history.Entry) bool {
+	var lines []history.Entry
 	for _, p := range m.ownParts() {
-		if p.logged != (historyEntry{}) {
+		if p.logged != (history.Entry{}) {
 			lines = append(lines, p.logged)
 		}
 	}
 	older := 0
-	return func(e historyEntry) bool {
+	return func(e history.Entry) bool {
 		if len(lines) > 0 {
 			// Newest first: the first of m's lines is the last found.
-			if i := slices.IndexFunc(lines, func(l historyEntry) bool { return l.SameLine(e) }); i >= 0 {
+			if i := slices.IndexFunc(lines, func(l history.Entry) bool { return l.SameLine(e) }); i >= 0 {
 				lines = slices.Delete(lines, i, i+1)
 			}
 			return false
@@ -1804,9 +1805,9 @@ func (m Inbound) enoughBefore(limit int) func(e historyEntry) bool {
 // still there (see Inbound.logged), or -1 for none. A part deleted since
 // took its line along; one edited while it waited has its line rewritten,
 // with the new text.
-func (m Inbound) loggedIn(entries []historyEntry) int {
+func (m Inbound) loggedIn(entries []history.Entry) int {
 	for _, p := range m.ownParts() {
-		if p.logged == (historyEntry{}) {
+		if p.logged == (history.Entry{}) {
 			continue
 		}
 		for i := len(entries) - 1; i >= 0; i-- {
@@ -1938,7 +1939,7 @@ func (br *Brain) readAgentStream(m Inbound, reader io.Reader, heading string, on
 	br.rotateStreamLog()
 	// Through the folder, like the history: a brain can swap the log for a
 	// symlink to a file its sandbox denies it writing.
-	streamLog, err := openInFolder(br.root, streamLogName, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600)
+	streamLog, err := fsx.OpenInFolder(br.root, streamLogName, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600)
 	if err != nil {
 		log.Printf("brain %s: could not open stream log: %v", br.id, err)
 	} else {
@@ -2013,19 +2014,19 @@ func (br *Brain) appendHistory(chatJID, from, text, typ string) {
 // appendHistoryVia is appendHistory for a line marked with how it came in
 // (see historyEntry.Via).
 func (br *Brain) appendHistoryVia(chatJID, from, text, typ, via string) {
-	br.appendEntry(historyEntry{From: from, Chat: chatJID, Text: text, Type: typ, Via: via})
+	br.appendEntry(history.Entry{From: from, Chat: chatJID, Text: text, Type: typ, Via: via})
 }
 
 // appendEntry appends entry to the brain's history file, stamped with the
 // time now unless it has a time. It returns the line as it reads back, or
 // none when the file could not be opened.
-func (br *Brain) appendEntry(entry historyEntry) historyEntry {
+func (br *Brain) appendEntry(entry history.Entry) history.Entry {
 	br.historyMu.Lock()
-	entry, err := appendHistoryEntry(br.root, entry)
+	entry, err := history.Append(br.root, entry)
 	br.historyMu.Unlock()
 	br.entryWritten(entry, err)
 	if err != nil {
-		return historyEntry{}
+		return history.Entry{}
 	}
 	return entry
 }
@@ -2042,7 +2043,7 @@ func (br *Brain) recordDelivered(chat, text string, remove func() error) error {
 		br.historyMu.Unlock()
 		return err
 	}
-	entry, err := appendHistoryEntry(br.root, historyEntry{From: br.id, Chat: chat, Text: text, Type: historyOut})
+	entry, err := history.Append(br.root, history.Entry{From: br.id, Chat: chat, Text: text, Type: history.Out})
 	br.historyMu.Unlock()
 	br.entryWritten(entry, err)
 	return nil
@@ -2050,9 +2051,9 @@ func (br *Brain) recordDelivered(chat, text string, remove func() error) error {
 
 // entryWritten logs an entry that could not be written, or hands one that
 // was to OnHistory, outside historyMu.
-func (br *Brain) entryWritten(entry historyEntry, err error) {
+func (br *Brain) entryWritten(entry history.Entry, err error) {
 	if err != nil {
-		log.Printf("brain %s: failed to open history file %s: %v", br.id, filepath.Join(br.workDir, historyFileName), err)
+		log.Printf("brain %s: failed to open history file %s: %v", br.id, filepath.Join(br.workDir, history.FileName), err)
 		return
 	}
 	if br.hooks != nil && br.hooks.OnHistory != nil {
@@ -2065,14 +2066,14 @@ func (br *Brain) entryWritten(entry historyEntry, err error) {
 // under historyMu, which recordDelivered moves an answer from the outbox
 // into the history under: the history, read after, holds every answer
 // this did not return.
-func (br *Brain) undelivered(chats []string) []historyEntry {
+func (br *Brain) undelivered(chats []string) []history.Entry {
 	if br.hooks == nil || br.hooks.Undelivered == nil {
 		return nil
 	}
 	br.historyMu.Lock()
 	all := br.hooks.Undelivered(br.id)
 	br.historyMu.Unlock()
-	var out []historyEntry
+	var out []history.Entry
 	for _, e := range all {
 		if slices.Contains(chats, e.Chat) {
 			out = append(out, e)
@@ -2085,15 +2086,15 @@ func (br *Brain) undelivered(chats []string) []historyEntry {
 // entries, each after the last entry no later than it. One the history
 // holds already, delivered after pending was read, is left out: the same
 // answer, in the same chat, recorded no earlier than it was written.
-func withUndelivered(entries, pending []historyEntry) []historyEntry {
-	at := func(e historyEntry) time.Time {
+func withUndelivered(entries, pending []history.Entry) []history.Entry {
+	at := func(e history.Entry) time.Time {
 		t, _ := time.Parse(time.RFC3339, e.TS)
 		return t
 	}
 	for _, p := range pending {
 		pt := at(p)
-		if slices.ContainsFunc(entries, func(e historyEntry) bool {
-			return e.Type == historyOut && e.Chat == p.Chat && e.Text == p.Text && !at(e).Before(pt)
+		if slices.ContainsFunc(entries, func(e history.Entry) bool {
+			return e.Type == history.Out && e.Chat == p.Chat && e.Text == p.Text && !at(e).Before(pt)
 		}) {
 			continue
 		}

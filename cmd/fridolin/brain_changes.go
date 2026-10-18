@@ -4,6 +4,8 @@ import (
 	"log"
 	"slices"
 	"strconv"
+
+	"github.com/Icewater1337/fridolin/internal/history"
 )
 
 // Edits and deletions of WhatsApp messages a brain has received. A message
@@ -69,17 +71,17 @@ func (br *Brain) Change(c messageChange) (waiting bool, edited *Inbound) {
 // A message deleted after a run read it (not waiting) leaves an event too,
 // so the next run knows why it no longer sees what it answered.
 func (br *Brain) recordChange(c messageChange, waiting bool, edited *Inbound) {
-	is := func(e historyEntry) bool {
-		return e.ID == c.Target && e.Type == historyIn && e.From == c.Sender &&
+	is := func(e history.Entry) bool {
+		return e.ID == c.Target && e.Type == history.In && e.From == c.Sender &&
 			(e.Chat == c.Chat || (c.ChatAlt != "" && e.Chat == c.ChatAlt))
 	}
 	var n int
 	var err error
 	switch {
 	case c.Kind == changeRevoke:
-		n, err = br.rewriteHistory(c.Target, is, func(historyEntry) *historyEntry { return nil })
+		n, err = br.rewriteHistory(c.Target, is, func(history.Entry) *history.Entry { return nil })
 	case edited != nil:
-		n, err = br.rewriteHistory(c.Target, is, func(e historyEntry) *historyEntry {
+		n, err = br.rewriteHistory(c.Target, is, func(e history.Entry) *history.Entry {
 			e.Text = historyTextWithMedia(edited.textWithQuote(), edited.Media)
 			return &e
 		})
@@ -93,7 +95,7 @@ func (br *Brain) recordChange(c messageChange, waiting bool, edited *Inbound) {
 			log.Printf("brain %s: could not look for the edited message in %s in the history: %v", br.id, c.Chat, err)
 		}
 		if held {
-			br.appendHistory(c.Chat, c.Sender, "edited a message to: "+strconv.Quote(c.Text), historyEvent)
+			br.appendHistory(c.Chat, c.Sender, "edited a message to: "+strconv.Quote(c.Text), history.Event)
 		}
 		return
 	}
@@ -102,19 +104,19 @@ func (br *Brain) recordChange(c messageChange, waiting bool, edited *Inbound) {
 		return
 	}
 	if c.Kind == changeRevoke && n > 0 && !waiting {
-		br.appendHistory(c.Chat, c.Sender, "deleted a message they had sent", historyEvent)
+		br.appendHistory(c.Chat, c.Sender, "deleted a message they had sent", history.Event)
 	}
 }
 
 // rewriteHistory serializes file rewrites with append and outbox delivery.
-func (br *Brain) rewriteHistory(id string, match func(historyEntry) bool, replace func(historyEntry) *historyEntry) (int, error) {
+func (br *Brain) rewriteHistory(id string, match func(history.Entry) bool, replace func(history.Entry) *history.Entry) (int, error) {
 	br.historyMu.Lock()
 	defer br.historyMu.Unlock()
-	return rewriteHistoryFile(br.root, id, match, replace)
+	return history.Rewrite(br.root, id, match, replace)
 }
 
-func (br *Brain) holdsEntry(id string, match func(historyEntry) bool) (bool, error) {
+func (br *Brain) holdsEntry(id string, match func(history.Entry) bool) (bool, error) {
 	br.historyMu.Lock()
 	defer br.historyMu.Unlock()
-	return holdsEntryFile(br.root, id, match)
+	return history.HoldsEntry(br.root, id, match)
 }

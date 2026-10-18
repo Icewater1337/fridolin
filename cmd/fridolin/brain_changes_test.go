@@ -15,6 +15,8 @@ import (
 	"go.mau.fi/whatsmeow/types"
 	"go.mau.fi/whatsmeow/types/events"
 	"google.golang.org/protobuf/proto"
+
+	"github.com/Icewater1337/fridolin/internal/history"
 )
 
 // dmEvent is a DM from the allowed number, with the message ID id.
@@ -67,10 +69,10 @@ func TestDeletedMessageIsNotAnsweredAndLeavesTheHistory(t *testing.T) {
 		if q := br.Snapshot().Queue; len(q) != 0 {
 			t.Errorf("queue = %+v, want the deleted message gone", q)
 		}
-		if got := historyTexts(t, br, historyIn); !slices.Equal(got, []string{"a long report"}) {
+		if got := historyTexts(t, br, history.In); !slices.Equal(got, []string{"a long report"}) {
 			t.Errorf("history holds %q, want the deleted message out", got)
 		}
-		if ev := historyTexts(t, br, historyEvent); len(ev) != 0 {
+		if ev := historyTexts(t, br, history.Event); len(ev) != 0 {
 			t.Errorf("events = %q, want none for a message no run read", ev)
 		}
 	})
@@ -87,10 +89,10 @@ func TestDeletedMessageIsNotAnsweredAndLeavesTheHistory(t *testing.T) {
 		if sent := tb.sentTo(testDMChat); len(sent) != 0 {
 			t.Errorf("sent %q for a deleted message", sent)
 		}
-		if got := historyTexts(t, br, historyIn); len(got) != 0 {
+		if got := historyTexts(t, br, history.In); len(got) != 0 {
 			t.Errorf("history holds %q, want the deleted message out", got)
 		}
-		if ev := historyTexts(t, br, historyEvent); !slices.Equal(ev, []string{"deleted a message they had sent"}) {
+		if ev := historyTexts(t, br, history.Event); !slices.Equal(ev, []string{"deleted a message they had sent"}) {
 			t.Errorf("events = %q, want the deletion noted", ev)
 		}
 	})
@@ -100,15 +102,15 @@ func TestDeletedMessageIsNotAnsweredAndLeavesTheHistory(t *testing.T) {
 		wa := tb.whatsApp()
 		wa.handleMessage(dmEvent("3EB0DONE", textMsg("what is my PIN again")))
 		waitFor(t, 10*time.Second, "the answer", func() bool { return len(tb.sentTo(testDMChat)) == 1 })
-		waitFor(t, 5*time.Second, "the answer in the history", func() bool { return len(historyTexts(t, br, historyOut)) == 1 })
+		waitFor(t, 5*time.Second, "the answer in the history", func() bool { return len(historyTexts(t, br, history.Out)) == 1 })
 		wa.handleMessage(dmEvent("3EB0DEL", revokeMsg("3EB0DONE")))
-		if got := historyTexts(t, br, historyIn); len(got) != 0 {
+		if got := historyTexts(t, br, history.In); len(got) != 0 {
 			t.Errorf("history holds %q, want the deleted message out", got)
 		}
-		if ev := historyTexts(t, br, historyEvent); !slices.Equal(ev, []string{"deleted a message they had sent"}) {
+		if ev := historyTexts(t, br, history.Event); !slices.Equal(ev, []string{"deleted a message they had sent"}) {
 			t.Errorf("events = %q, want the deletion noted", ev)
 		}
-		if out := historyTexts(t, br, historyOut); len(out) != 1 {
+		if out := historyTexts(t, br, history.Out); len(out) != 1 {
 			t.Errorf("the brain's answer = %q, want it kept", out)
 		}
 	})
@@ -121,7 +123,7 @@ func TestDeletedMessageIsNotAnsweredAndLeavesTheHistory(t *testing.T) {
 		if q := br.Snapshot().Queue; len(q) != 1 {
 			t.Errorf("queue = %+v: another member's deletion took the message", q)
 		}
-		if got := historyTexts(t, br, historyIn); !slices.Contains(got, "book Tuesday") {
+		if got := historyTexts(t, br, history.In); !slices.Contains(got, "book Tuesday") {
 			t.Errorf("history holds %q, want the message kept", got)
 		}
 	})
@@ -141,7 +143,7 @@ func TestEditedMessage(t *testing.T) {
 		if q := br.Snapshot().Queue; len(q) != 1 || q[0].Preview != "book Wednesday" {
 			t.Errorf("queue = %+v, want the edited text waiting", q)
 		}
-		if got := historyTexts(t, br, historyIn); !slices.Equal(got, []string{"a long report", "book Wednesday"}) {
+		if got := historyTexts(t, br, history.In); !slices.Equal(got, []string{"a long report", "book Wednesday"}) {
 			t.Errorf("history holds %q, want the edit in place", got)
 		}
 		t.Setenv("FRIDOLIN_FAKE_SLEEP_MS", "10")
@@ -162,10 +164,10 @@ func TestEditedMessage(t *testing.T) {
 		if sent := tb.sentTo(testDMChat); len(sent) != 1 {
 			t.Errorf("sent %q: the edit started a run", sent)
 		}
-		if got := historyTexts(t, br, historyIn); !slices.Equal(got, []string{"book Tuesday"}) {
+		if got := historyTexts(t, br, history.In); !slices.Equal(got, []string{"book Tuesday"}) {
 			t.Errorf("history holds %q, want what the run read", got)
 		}
-		if ev := historyTexts(t, br, historyEvent); !slices.Equal(ev, []string{`edited a message to: "book Wednesday"`}) {
+		if ev := historyTexts(t, br, history.Event); !slices.Equal(ev, []string{`edited a message to: "book Wednesday"`}) {
 			t.Errorf("events = %q, want the edit noted", ev)
 		}
 		if preface := br.buildPrompt(br.settings.Load(), Inbound{JID: testDMChat, Sender: "15551234567", Text: "next"}); !strings.Contains(preface, `"from":"15551234567","did":"edited a message to: \"book Wednesday\""`) {
@@ -203,13 +205,13 @@ func TestEditOfAMessageTheHistoryLacks(t *testing.T) {
 			if c.alt != "" {
 				askIn = c.alt
 			}
-			br.appendHistory(askIn, "main", "🔐 Please send me the verification code", historyOut)
+			br.appendHistory(askIn, "main", "🔐 Please send me the verification code", history.Out)
 			if c.code {
 				tb.handleInbound(t.Context(), Inbound{JID: testDMChat, ChatAlt: c.alt, Sender: "15551234567", Text: "483920", Source: sourceWhatsApp, ID: "3EB0OTP"})
 			}
 			tb.handleChange(messageChange{Kind: changeEdit, Chat: testDMChat, ChatAlt: c.alt, Sender: "15551234567", Target: "3EB0OTP", Text: c.edit})
 
-			if h := readHistory(t, br); len(h) != 1 || h[0].Type != historyOut {
+			if h := readHistory(t, br); len(h) != 1 || h[0].Type != history.Out {
 				t.Errorf("history = %+v, want only the request", h)
 			}
 			if preface := br.buildPrompt(br.settings.Load(), Inbound{JID: testDMChat, Sender: "15551234567", Text: "next"}); strings.Contains(preface, "4839") || strings.Contains(preface, c.edit) {
@@ -328,16 +330,16 @@ func TestChangeOfAMessageTheHistoryLacksWritesNothing(t *testing.T) {
 		t.Skip("root writes into a folder whatever its mode")
 	}
 	_, br := newMainBridge(t, "")
-	br.appendEntry(historyEntry{From: "15551234567", Chat: testDMChat, Text: "hi", Type: historyIn, ID: "3EB0A"})
+	br.appendEntry(history.Entry{From: "15551234567", Chat: testDMChat, Text: "hi", Type: history.In, ID: "3EB0A"})
 	if err := os.Chmod(br.Dir(), 0o500); err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = os.Chmod(br.Dir(), 0o700) })
-	drop := func(historyEntry) *historyEntry { return nil }
-	if n, err := br.rewriteHistory("3EB0B", func(e historyEntry) bool { return e.ID == "3EB0B" }, drop); n != 0 || err != nil {
+	drop := func(history.Entry) *history.Entry { return nil }
+	if n, err := br.rewriteHistory("3EB0B", func(e history.Entry) bool { return e.ID == "3EB0B" }, drop); n != 0 || err != nil {
 		t.Errorf("rewriteHistory for an absent ID = %d, %v; want 0, nil without writing", n, err)
 	}
-	if _, err := br.rewriteHistory("3EB0A", func(e historyEntry) bool { return e.ID == "3EB0A" }, drop); err == nil {
+	if _, err := br.rewriteHistory("3EB0A", func(e history.Entry) bool { return e.ID == "3EB0A" }, drop); err == nil {
 		t.Errorf("rewriteHistory for a present ID wrote into a folder it cannot write to")
 	}
 }

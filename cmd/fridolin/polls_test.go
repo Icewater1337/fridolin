@@ -19,6 +19,7 @@ import (
 	"go.mau.fi/whatsmeow/types/events"
 	waLog "go.mau.fi/whatsmeow/util/log"
 
+	"github.com/Icewater1337/fridolin/internal/history"
 	"github.com/Icewater1337/fridolin/internal/store"
 )
 
@@ -361,7 +362,7 @@ func TestPollVoteBecomesAHistoryEvent(t *testing.T) {
 					}
 					continue
 				}
-				want := historyEntry{From: "15551234567", Chat: testGroup, Type: historyEvent, Text: `voted "Tuesday 3pm" in the poll "When should we meet?"`}
+				want := history.Entry{From: "15551234567", Chat: testGroup, Type: history.Event, Text: `voted "Tuesday 3pm" in the poll "When should we meet?"`}
 				if len(h) != 1 || h[0].From != want.From || h[0].Chat != want.Chat || h[0].Type != want.Type || h[0].Text != want.Text {
 					t.Fatalf("brain %s history = %+v, want [%+v]", br.ID(), h, want)
 				}

@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Icewater1337/fridolin/internal/history"
 	"github.com/Icewater1337/fridolin/internal/store"
 	"github.com/Icewater1337/fridolin/internal/textx"
 )
@@ -137,7 +138,7 @@ func TestReplyIsRecordedOnceDelivered(t *testing.T) {
 		defer wa.mu.Unlock()
 		return wa.tries >= 2
 	})
-	if out := historyTexts(t, br, historyOut); len(out) != 0 {
+	if out := historyTexts(t, br, history.Out); len(out) != 0 {
 		t.Errorf("history holds %q before the reply went out", out)
 	}
 	if got := wa.sent(testDMChat); len(got) != 1 || !strings.HasPrefix(got[0], "[1/") {
@@ -145,7 +146,7 @@ func TestReplyIsRecordedOnceDelivered(t *testing.T) {
 	}
 
 	wa.setOnline(true)
-	waitFor(t, 10*time.Second, "the history line", func() bool { return len(historyTexts(t, br, historyOut)) == 1 })
+	waitFor(t, 10*time.Second, "the history line", func() bool { return len(historyTexts(t, br, history.Out)) == 1 })
 	got := wa.sent(testDMChat)
 	n := len(got)
 	for i, c := range got {
@@ -209,23 +210,23 @@ func TestQueuedRunReadsTheAnswerBeforeIt(t *testing.T) {
 // the history holds by then, delivered after they were read, only once.
 func TestWithUndelivered(t *testing.T) {
 	at := func(hhmmss string) string { return "2026-10-18T" + hhmmss + "+02:00" }
-	in := func(ts, text string) historyEntry {
-		return historyEntry{TS: at(ts), Chat: testDMChat, From: "15551234567", Text: text, Type: historyIn}
+	in := func(ts, text string) history.Entry {
+		return history.Entry{TS: at(ts), Chat: testDMChat, From: "15551234567", Text: text, Type: history.In}
 	}
-	out := func(ts, text string) historyEntry {
-		return historyEntry{TS: at(ts), Chat: testDMChat, From: "main", Text: text, Type: historyOut}
+	out := func(ts, text string) history.Entry {
+		return history.Entry{TS: at(ts), Chat: testDMChat, From: "main", Text: text, Type: history.Out}
 	}
 	cases := []struct {
 		name             string
-		history, pending []historyEntry
+		history, pending []history.Entry
 		want             []string
 	}{
-		{"nothing waits", []historyEntry{in("10:00:00", "a")}, nil, []string{"a"}},
-		{"after what came before it", []historyEntry{in("10:00:00", "a"), in("10:00:01", "b")}, []historyEntry{out("10:00:02", "A")}, []string{"a", "b", "A"}},
-		{"before what came after it", []historyEntry{in("10:00:00", "a"), in("10:00:05", "c")}, []historyEntry{out("10:00:02", "A")}, []string{"a", "A", "c"}},
-		{"in order among themselves", []historyEntry{in("10:00:00", "a")}, []historyEntry{out("10:00:02", "A"), out("10:00:03", "B")}, []string{"a", "A", "B"}},
-		{"delivered meanwhile", []historyEntry{in("10:00:00", "a"), out("10:00:04", "A")}, []historyEntry{out("10:00:02", "A")}, []string{"a", "A"}},
-		{"the same words said before", []historyEntry{out("09:00:00", "OK"), in("10:00:00", "a")}, []historyEntry{out("10:00:02", "OK")}, []string{"OK", "a", "OK"}},
+		{"nothing waits", []history.Entry{in("10:00:00", "a")}, nil, []string{"a"}},
+		{"after what came before it", []history.Entry{in("10:00:00", "a"), in("10:00:01", "b")}, []history.Entry{out("10:00:02", "A")}, []string{"a", "b", "A"}},
+		{"before what came after it", []history.Entry{in("10:00:00", "a"), in("10:00:05", "c")}, []history.Entry{out("10:00:02", "A")}, []string{"a", "A", "c"}},
+		{"in order among themselves", []history.Entry{in("10:00:00", "a")}, []history.Entry{out("10:00:02", "A"), out("10:00:03", "B")}, []string{"a", "A", "B"}},
+		{"delivered meanwhile", []history.Entry{in("10:00:00", "a"), out("10:00:04", "A")}, []history.Entry{out("10:00:02", "A")}, []string{"a", "A"}},
+		{"the same words said before", []history.Entry{out("09:00:00", "OK"), in("10:00:00", "a")}, []history.Entry{out("10:00:02", "OK")}, []string{"OK", "a", "OK"}},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -257,17 +258,17 @@ func TestReplyIsRecordedOnceWhenItsRowStays(t *testing.T) {
 		err := db.QueryRow(`SELECT COUNT(*) FROM outbox WHERE state = 'pending' AND next_part = 1`).Scan(&left)
 		return err == nil && left == 1
 	})
-	if out := historyTexts(t, br, historyOut); len(out) != 0 {
+	if out := historyTexts(t, br, history.Out); len(out) != 0 {
 		t.Errorf("history holds %q while the reply is still in the outbox", out)
 	}
 	if _, err := db.Exec(`DROP TRIGGER keep_outbox`); err != nil {
 		t.Fatal(err)
 	}
 	tb.outbox.Wake()
-	waitFor(t, 15*time.Second, "the history line", func() bool { return len(historyTexts(t, br, historyOut)) == 1 })
+	waitFor(t, 15*time.Second, "the history line", func() bool { return len(historyTexts(t, br, history.Out)) == 1 })
 	tb.outbox.Wake()
 	time.Sleep(200 * time.Millisecond)
-	if out := historyTexts(t, br, historyOut); len(out) != 1 {
+	if out := historyTexts(t, br, history.Out); len(out) != 1 {
 		t.Errorf("history holds the reply %d times, want once", len(out))
 	}
 	if sent := tb.sentTo(testDMChat); len(sent) != 1 {

@@ -18,6 +18,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/Icewater1337/fridolin/internal/fsx"
+	"github.com/Icewater1337/fridolin/internal/history"
 )
 
 // The OTP guard. A local script that logs in somewhere for you asks a chat
@@ -128,15 +129,15 @@ func (br *Brain) codeRequest(chats, markers []string, now time.Time) (req otpReq
 		markers = defaultOTPMarkers
 	}
 	since := now.Add(-otpWindow)
-	br.scanHistory(otpRequestBudget, nil, func(e historyEntry) bool {
+	br.scanHistory(otpRequestBudget, nil, func(e history.Entry) bool {
 		at, err := time.Parse(time.RFC3339, e.TS)
 		if err != nil {
 			return true
 		}
-		if e.Type != historyIn && at.Before(since) {
+		if e.Type != history.In && at.Before(since) {
 			return false // older than the window, and everything before it too
 		}
-		if e.Type != historyOut || (e.From != br.id && e.Via == "") || !slices.Contains(chats, e.Chat) || at.Before(since) {
+		if e.Type != history.Out || (e.From != br.id && e.Via == "") || !slices.Contains(chats, e.Chat) || at.Before(since) {
 			return true
 		}
 		if !slices.ContainsFunc(markers, func(m string) bool { return hasMarker(e.Text, m) }) {

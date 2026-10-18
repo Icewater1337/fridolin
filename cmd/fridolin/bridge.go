@@ -4,8 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"github.com/Icewater1337/fridolin/internal/logx"
-	"github.com/Icewater1337/fridolin/internal/store"
 	"log"
 	"net"
 	"net/http"
@@ -16,9 +14,13 @@ import (
 	"time"
 	"unicode"
 
-	"github.com/Icewater1337/fridolin/internal/platform"
 	wastore "go.mau.fi/whatsmeow/store"
 	"go.mau.fi/whatsmeow/types"
+
+	"github.com/Icewater1337/fridolin/internal/history"
+	"github.com/Icewater1337/fridolin/internal/logx"
+	"github.com/Icewater1337/fridolin/internal/platform"
+	"github.com/Icewater1337/fridolin/internal/store"
 )
 
 // isJunkMessage reports whether a message is too trivial to be worth a Claude
@@ -930,15 +932,15 @@ func (b *Bridge) delivered(ctx context.Context, r store.OutboxRow) error {
 
 // undelivered is what brainID answered that waits in the outbox, as its
 // history will record it (BrainHooks.Undelivered).
-func (b *Bridge) undelivered(brainID string) []historyEntry {
+func (b *Bridge) undelivered(brainID string) []history.Entry {
 	rows, err := b.store.UndeliveredReplies(context.Background(), brainID)
 	if err != nil {
 		log.Printf("brain %s: reading its replies in the outbox: %v", brainID, err)
 		return nil
 	}
-	out := make([]historyEntry, 0, len(rows))
+	out := make([]history.Entry, 0, len(rows))
 	for _, r := range rows {
-		out = append(out, historyEntry{TS: r.CreatedAt.Local().Format(time.RFC3339), From: brainID, Chat: r.Chat, Text: r.History, Type: historyOut})
+		out = append(out, history.Entry{TS: r.CreatedAt.Local().Format(time.RFC3339), From: brainID, Chat: r.Chat, Text: r.History, Type: history.Out})
 	}
 	return out
 }

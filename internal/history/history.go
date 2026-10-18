@@ -115,7 +115,7 @@ func scanHistoryBackward(r io.ReaderAt, size, budget int64, visit func(line []by
 
 // Scan hands visit the entries of the brain's history, newest
 // first, as scanHistoryBackward reads them back from its end, until visit
-// returns false: through the folder (see openInFolder), and none when the
+// returns false: through the folder (see fsx.OpenInFolder), and none when the
 // history cannot be read, as when there is none yet. Only the lines want
 // takes, as written, are decoded, a quick look that most lines of a busy
 // brain's other chats fail; nil takes them all. A line that is no history
@@ -196,7 +196,7 @@ type Entry struct {
 	From string `json:"from"`
 	Chat string `json:"chat"` // JID of the chat (DM participant or group)
 	Text string `json:"text"`
-	Type string `json:"type"` // historyIn, historyOut, historyEvent or historyReset
+	Type string `json:"type"` // In, Out, Event or Reset
 	// Via marks an "out" line that came in through /send: "brain" (From is
 	// the brain that sent it), "script" (the scripts token) or "api" (no
 	// token). A brain's own replies have none.
@@ -243,7 +243,7 @@ func (l Entry) SameLine(e Entry) bool {
 // brain's history, oldest first. It reads them back from the end of the
 // file, each newest first to enough, until enough reports that it has
 // what it needs, or it reaches the chat's newest reset marker (see
-// historyReset), or promptHistoryBudget is read, or the file's start is
+// Reset), or budget bytes are read, or the file's start is
 // reached. A DM's lines may be under its LID or its number, and both are
 // the one chat. It returns none when the history cannot be read (see
 // openInFolder).
@@ -265,7 +265,7 @@ func ForChat(root *os.Root, brainID string, chats []string, budget int64, enough
 
 // Append appends entry to the history file, stamped with the
 // time now unless it has a time, and returns it as it reads back, which
-// historyBefore looks for: invalid UTF-8 in its text is written as U+FFFD.
+// the caller can identify: invalid UTF-8 in its text is written as U+FFFD.
 // The caller owns serialization with other history writes.
 func Append(root *os.Root, entry Entry) (Entry, error) {
 	if entry.TS == "" {

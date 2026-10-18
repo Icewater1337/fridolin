@@ -5,11 +5,13 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Icewater1337/fridolin/internal/trigger"
 	"go.mau.fi/whatsmeow/proto/waE2E"
 	"go.mau.fi/whatsmeow/store"
 	"go.mau.fi/whatsmeow/types"
 	"google.golang.org/protobuf/proto"
+
+	"github.com/Icewater1337/fridolin/internal/history"
+	"github.com/Icewater1337/fridolin/internal/trigger"
 )
 
 func TestAddressGroup(t *testing.T) {
@@ -108,7 +110,7 @@ func TestGroupFilesAndForwardsCanBeChatter(t *testing.T) {
 	inbound := func() []string {
 		var texts []string
 		for _, e := range readHistory(t, br) {
-			if e.Type == historyIn {
+			if e.Type == history.In {
 				texts = append(texts, e.Text)
 			}
 		}

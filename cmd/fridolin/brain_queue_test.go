@@ -3,7 +3,6 @@ package main
 import (
 	"encoding/json"
 	"errors"
-	"github.com/Icewater1337/fridolin/internal/logx"
 	"log"
 	"maps"
 	"os"
@@ -18,6 +17,8 @@ import (
 	"time"
 
 	"github.com/Icewater1337/fridolin/internal/fsx"
+	"github.com/Icewater1337/fridolin/internal/history"
+	"github.com/Icewater1337/fridolin/internal/logx"
 )
 
 // deliveries records what brains hand back to the bridge.
@@ -1196,8 +1197,8 @@ func TestBuildPromptListsAllAttachments(t *testing.T) {
 // brain's folder, where there is no tools/.
 func TestBuildPromptNamesTheHistorySearch(t *testing.T) {
 	br := bareBrain(t)
-	line, _ := json.Marshal(historyEntry{TS: "2026-01-15T10:00:00Z", From: "15551234567", Chat: "15551234567@s.whatsapp.net", Text: "earlier", Type: "in"})
-	if err := os.WriteFile(filepath.Join(br.workDir, historyFileName), append(line, '\n'), 0o600); err != nil {
+	line, _ := json.Marshal(history.Entry{TS: "2026-01-15T10:00:00Z", From: "15551234567", Chat: "15551234567@s.whatsapp.net", Text: "earlier", Type: "in"})
+	if err := os.WriteFile(filepath.Join(br.workDir, history.FileName), append(line, '\n'), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	p := br.buildPrompt(&brainSettings{}, dm("hello"))

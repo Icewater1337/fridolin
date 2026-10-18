@@ -3,8 +3,6 @@ package main
 import (
 	"encoding/json"
 	"errors"
-	"github.com/Icewater1337/fridolin/internal/logx"
-	"github.com/Icewater1337/fridolin/internal/platform"
 	"log"
 	"os"
 	"path/filepath"
@@ -14,6 +12,9 @@ import (
 	"time"
 
 	"github.com/Icewater1337/fridolin/internal/fsx"
+	"github.com/Icewater1337/fridolin/internal/history"
+	"github.com/Icewater1337/fridolin/internal/logx"
+	"github.com/Icewater1337/fridolin/internal/platform"
 )
 
 // The bridge reads and writes files in a brain's folder outside the
@@ -156,7 +157,7 @@ func TestPromptFileIsNotFollowedOutOfTheFolder(t *testing.T) {
 				}
 				return
 			}
-			if len(lines) != 1 || !strings.Contains(lines[0], "brain a: could not read prompt file brain-prompt.md: "+errSymlink.Error()) {
+			if len(lines) != 1 || !strings.Contains(lines[0], "brain a: could not read prompt file brain-prompt.md: "+fsx.ErrSymlink.Error()) {
 				t.Errorf("log = %q, want one line refusing the symlink", lines)
 			}
 		})
@@ -319,8 +320,8 @@ func TestReplacedFolderIsOpenedOnReload(t *testing.T) {
 			if got := br.buildPrompt(br.settings.Load(), dm("hello")); !strings.HasPrefix(got, want) {
 				t.Errorf("prompt = %q, want it to start with %q", got, want)
 			}
-			br.appendHistory("15551234567@s.whatsapp.net", "15551234567", "AFTER-RELOAD", historyIn)
-			if data, _ := os.ReadFile(filepath.Join(dir, historyFileName)); !strings.Contains(string(data), "AFTER-RELOAD") {
+			br.appendHistory("15551234567@s.whatsapp.net", "15551234567", "AFTER-RELOAD", history.In)
+			if data, _ := os.ReadFile(filepath.Join(dir, history.FileName)); !strings.Contains(string(data), "AFTER-RELOAD") {
 				t.Errorf("history at %s = %q, want the message", dir, data)
 			}
 			lines := logged()
@@ -330,7 +331,7 @@ func TestReplacedFolderIsOpenedOnReload(t *testing.T) {
 				}
 				return
 			}
-			if data, _ := os.ReadFile(filepath.Join(dir+".old", historyFileName)); strings.Contains(string(data), "AFTER-RELOAD") {
+			if data, _ := os.ReadFile(filepath.Join(dir+".old", history.FileName)); strings.Contains(string(data), "AFTER-RELOAD") {
 				t.Errorf("the message went to the folder moved aside: %q", data)
 			}
 			if len(lines) != 1 || !strings.Contains(lines[0], "brain a: now in the folder at "+dir+"; stopping it in the old one") {
@@ -357,8 +358,8 @@ func TestHistoryIsNotFollowedOutOfTheFolder(t *testing.T) {
 		target func(home string) string // what the history points to; "" for a regular file
 	}{
 		{"regular file", nil},
-		{"another brain's history", func(home string) string { return filepath.Join(home, "b", historyFileName) }},
-		{"relative symlink up and out", func(string) string { return filepath.Join("..", "b", historyFileName) }},
+		{"another brain's history", func(home string) string { return filepath.Join(home, "b", history.FileName) }},
+		{"relative symlink up and out", func(string) string { return filepath.Join("..", "b", history.FileName) }},
 		{"symlink inside the folder", func(string) string { return "notes.jsonl" }},
 		{"dangling symlink out", func(home string) string { return filepath.Join(home, ".ssh", "authorized_keys") }},
 	}
@@ -369,8 +370,8 @@ func TestHistoryIsNotFollowedOutOfTheFolder(t *testing.T) {
 			s.otpGuard = true
 			br.settings.Store(&s)
 			dir := filepath.Join(home, "a")
-			hist := filepath.Join(dir, historyFileName)
-			for _, p := range []string{filepath.Join(home, "b", historyFileName), filepath.Join(dir, "notes.jsonl")} {
+			hist := filepath.Join(dir, history.FileName)
+			for _, p := range []string{filepath.Join(home, "b", history.FileName), filepath.Join(dir, "notes.jsonl")} {
 				if err := os.MkdirAll(filepath.Dir(p), 0o700); err != nil {
 					t.Fatal(err)
 				}
@@ -387,7 +388,7 @@ func TestHistoryIsNotFollowedOutOfTheFolder(t *testing.T) {
 			}
 			logged := captureLog(t)
 
-			br.appendHistory("15551234567@s.whatsapp.net", "15551234567", "NEW-MESSAGE", historyIn)
+			br.appendHistory("15551234567@s.whatsapp.net", "15551234567", "NEW-MESSAGE", history.In)
 			preface := br.buildPrompt(br.settings.Load(), dm("hello"))
 			_, drops := br.catchesCode(dm("123456"), time.Now())
 			feed := NewActivity(10)
@@ -414,7 +415,7 @@ func TestHistoryIsNotFollowedOutOfTheFolder(t *testing.T) {
 				}
 				return
 			}
-			for _, p := range []string{filepath.Join(home, "b", historyFileName), filepath.Join(dir, "notes.jsonl")} {
+			for _, p := range []string{filepath.Join(home, "b", history.FileName), filepath.Join(dir, "notes.jsonl")} {
 				if data, _ := os.ReadFile(p); string(data) != otherLines {
 					t.Errorf("%s was written through the symlink:\n%s", p, data)
 				}
@@ -429,7 +430,7 @@ func TestHistoryIsNotFollowedOutOfTheFolder(t *testing.T) {
 				t.Errorf("read through the symlink: preface %q, code caught %v, activity %q", preface, drops, seeded)
 			}
 			lines := logged()
-			if len(lines) != 1 || !strings.Contains(lines[0], "brain a: failed to open history file "+hist+": "+errSymlink.Error()) {
+			if len(lines) != 1 || !strings.Contains(lines[0], "brain a: failed to open history file "+hist+": "+fsx.ErrSymlink.Error()) {
 				t.Errorf("log = %q, want one line refusing the symlink", lines)
 			}
 		})
@@ -488,7 +489,7 @@ func TestViewerCreatesTheStreamLogInTheFolder(t *testing.T) {
 			if _, err := os.Lstat(filepath.Join(outside, "authorized_keys")); !os.IsNotExist(err) {
 				t.Errorf("the dangling symlink's target was created (%v)", err)
 			}
-			if lines := logged(); len(lines) != 1 || !strings.Contains(lines[0], "brain a: no tmux viewer: could not open stream log: "+errSymlink.Error()) {
+			if lines := logged(); len(lines) != 1 || !strings.Contains(lines[0], "brain a: no tmux viewer: could not open stream log: "+fsx.ErrSymlink.Error()) {
 				t.Errorf("log = %q, want one line refusing the symlink", lines)
 			}
 		})
@@ -545,7 +546,7 @@ func TestStreamLogIsNotFollowedOutOfTheFolder(t *testing.T) {
 				t.Errorf("the dangling symlink's target was created (%v)", err)
 			}
 			lines := logged()
-			if len(lines) != 1 || !strings.Contains(lines[0], "brain a: could not open stream log: "+errSymlink.Error()) {
+			if len(lines) != 1 || !strings.Contains(lines[0], "brain a: could not open stream log: "+fsx.ErrSymlink.Error()) {
 				t.Errorf("log = %q, want one line refusing the symlink", lines)
 			}
 		})
@@ -581,7 +582,7 @@ func TestIdentityMapIsNotFollowedOutOfTheFolder(t *testing.T) {
 			if tc.target != nil {
 				plant(t, mapPath, tc.target(home))
 			}
-			br.appendHistory("15551234567@s.whatsapp.net", "15551234567", "hi", historyIn)
+			br.appendHistory("15551234567@s.whatsapp.net", "15551234567", "hi", history.In)
 			logged := captureLog(t)
 			preface := br.buildPrompt(br.settings.Load(), dm("hello"))
 			lines := logged()
@@ -595,7 +596,7 @@ func TestIdentityMapIsNotFollowedOutOfTheFolder(t *testing.T) {
 			if history := promptBlock(preface, "chat_history"); strings.Contains(history, "Alex") || !strings.Contains(history, `"from":"15551234567","text":"hi"`) {
 				t.Errorf("preface = %q, want the raw number", preface)
 			}
-			if len(lines) != 1 || !strings.Contains(lines[0], "brain a: could not read identity map "+identityMapFile+": "+errSymlink.Error()) {
+			if len(lines) != 1 || !strings.Contains(lines[0], "brain a: could not read identity map "+identityMapFile+": "+fsx.ErrSymlink.Error()) {
 				t.Errorf("log = %q, want one line refusing the symlink", lines)
 			}
 		})
@@ -615,10 +616,10 @@ func TestManifestIsNotFollowedOutOfTheFolder(t *testing.T) {
 	}{
 		{"symlink to a manifest outside", func(t *testing.T, home string) {
 			plant(t, filepath.Join(home, "a", ManifestFile), filepath.Join(home, "b", ManifestFile))
-		}, errSymlink.Error()},
+		}, fsx.ErrSymlink.Error()},
 		{"symlink inside the folder", func(t *testing.T, home string) {
 			plant(t, filepath.Join(home, "a", ManifestFile), "copy.json")
-		}, errSymlink.Error()},
+		}, fsx.ErrSymlink.Error()},
 		{"FIFO", func(t *testing.T, home string) {
 			p := filepath.Join(home, "a", ManifestFile)
 			if err := os.Remove(p); err != nil {
@@ -705,7 +706,7 @@ func TestBrainFilesAreReadUpToALimit(t *testing.T) {
 					t.Fatal(err)
 				}
 			}
-			br.appendHistory("15551234567@s.whatsapp.net", "15551234567", "hi", historyIn)
+			br.appendHistory("15551234567@s.whatsapp.net", "15551234567", "hi", history.In)
 			logged := captureLog(t)
 			got := br.buildPrompt(br.settings.Load(), dm("hello"))
 			lines := logged()

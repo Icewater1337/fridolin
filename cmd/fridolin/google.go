@@ -621,7 +621,7 @@ func readCredentialFile(path string) ([]byte, error) { return readRegularFile(pa
 func readRegularFile(path string, singleLink bool) ([]byte, error) {
 	f, err := os.OpenFile(path, os.O_RDONLY|syscall.O_NOFOLLOW|syscall.O_NONBLOCK, 0)
 	if errors.Is(err, syscall.ELOOP) {
-		return nil, fmt.Errorf("%s: %w", path, errSymlink)
+		return nil, fmt.Errorf("%s: %w", path, fsx.ErrSymlink)
 	}
 	if err != nil {
 		return nil, err

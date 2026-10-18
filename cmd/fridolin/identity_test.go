@@ -18,6 +18,8 @@ import (
 	"go.mau.fi/whatsmeow/types"
 	waLog "go.mau.fi/whatsmeow/util/log"
 	"google.golang.org/protobuf/proto"
+
+	"github.com/Icewater1337/fridolin/internal/history"
 )
 
 func TestChatJID(t *testing.T) {
@@ -127,7 +129,7 @@ func TestHTTPSendTakesANumber(t *testing.T) {
 		t.Errorf("sent to %s: %q", testDMChat, got)
 	}
 	h := readHistory(t, br)
-	if len(h) != 1 || h[0].Chat != testDMChat || h[0].Type != historyOut {
+	if len(h) != 1 || h[0].Chat != testDMChat || h[0].Type != history.Out {
 		t.Errorf("history = %+v, want one outbound line in %s", h, testDMChat)
 	}
 	for _, bad := range []string{"12345", "alex@s.whatsapp.net", "15551234567@example.com"} {
@@ -355,9 +357,9 @@ func TestGroupSenderAndQuoteByNumber(t *testing.T) {
 func TestPrefaceReadsADMsLIDHistory(t *testing.T) {
 	br := bareBrain(t)
 	lid := types.NewJID(personLID, types.HiddenUserServer).String()
-	br.appendHistory(lid, "15551234567", "OLD-UNDER-LID", historyIn)
-	br.appendHistory(testDMChat, "15551234567", "NEW-UNDER-NUMBER", historyIn)
-	br.appendHistory("15559876543@s.whatsapp.net", "15559876543", "SOMEONE-ELSE", historyIn)
+	br.appendHistory(lid, "15551234567", "OLD-UNDER-LID", history.In)
+	br.appendHistory(testDMChat, "15551234567", "NEW-UNDER-NUMBER", history.In)
+	br.appendHistory("15559876543@s.whatsapp.net", "15559876543", "SOMEONE-ELSE", history.In)
 	preface := br.buildPrompt(&brainSettings{}, Inbound{JID: testDMChat, ChatAlt: lid, Sender: "15551234567", Text: "next"})
 	if !strings.Contains(preface, "OLD-UNDER-LID") || !strings.Contains(preface, "NEW-UNDER-NUMBER") {
 		t.Errorf("preface = %q, want both parts of the chat", preface)

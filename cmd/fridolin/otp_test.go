@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/Icewater1337/fridolin/internal/fsx"
+	"github.com/Icewater1337/fridolin/internal/history"
 )
 
 // A code is recognised as people send one: digits, in groups or not, or
@@ -93,56 +94,56 @@ func TestCodeRequest(t *testing.T) {
 	now := time.Now()
 	ago := func(d time.Duration) string { return now.Add(-d).Format(time.RFC3339) }
 	const lid = "15559876543@lid"
-	ask := func(chat, from, via, text string, d time.Duration) historyEntry {
-		return historyEntry{TS: ago(d), Chat: chat, From: from, Via: via, Text: text, Type: historyOut}
+	ask := func(chat, from, via, text string, d time.Duration) history.Entry {
+		return history.Entry{TS: ago(d), Chat: chat, From: from, Via: via, Text: text, Type: history.Out}
 	}
 	// askFor is a script's request in the DM, which /send answered with id.
-	askFor := func(id, text string, d time.Duration) historyEntry {
+	askFor := func(id, text string, d time.Duration) history.Entry {
 		e := ask(testDMChat, "script", "script", text, d)
 		e.OTPRequest = id
 		return e
 	}
 	cases := []struct {
 		name    string
-		lines   []historyEntry
+		lines   []history.Entry
 		chats   []string
 		markers []string
 		want    bool
 		id      string // the request's id, "" for the brain's own words
 	}{
-		{"its own request", []historyEntry{ask(testDMChat, "a", "", "🔐 Send me the code", time.Minute)}, nil, nil, true, ""},
-		{"in another chat", []historyEntry{ask(testGroup, "a", "", "🔐 Send me the code", time.Minute)}, nil, nil, false, ""},
-		{"longer ago than the window", []historyEntry{ask(testDMChat, "a", "", "🔐 Send me the code", 11*time.Minute)}, nil, nil, false, ""},
-		{"a person's words", []historyEntry{{TS: ago(time.Minute), Chat: testDMChat, From: "15551234567", Text: "what is an OTP?", Type: historyIn}}, nil, nil, false, ""},
-		{"another brain's own words", []historyEntry{ask(testDMChat, "b", "", "🔐 Send me the code", time.Minute)}, nil, nil, false, ""},
-		{"a script's request", []historyEntry{ask(testDMChat, "script", "script", "your OTP please", time.Minute)}, nil, nil, true, ""},
-		{"a request without a token", []historyEntry{ask(testDMChat, "script", "api", "your OTP please", time.Minute)}, nil, nil, true, ""},
-		{"its own /send", []historyEntry{ask(testDMChat, "a", "brain", "your OTP please", time.Minute)}, nil, nil, true, ""},
-		{"no marker", []historyEntry{ask(testDMChat, "a", "", "here is your summary", time.Minute)}, nil, nil, false, ""},
-		{"a marker inside a word", []historyEntry{ask(testDMChat, "a", "", "hotpot tonight?", time.Minute)}, nil, nil, false, ""},
-		{"a bank's name by default", []historyEntry{ask(testDMChat, "a", "", "Please send the Examplebank code", time.Minute)}, nil, nil, false, ""},
-		{"a bank's name configured", []historyEntry{ask(testDMChat, "a", "", "Please send the Examplebank code", time.Minute)}, nil, []string{"Examplebank"}, true, ""},
-		{"followed by other words", []historyEntry{
+		{"its own request", []history.Entry{ask(testDMChat, "a", "", "🔐 Send me the code", time.Minute)}, nil, nil, true, ""},
+		{"in another chat", []history.Entry{ask(testGroup, "a", "", "🔐 Send me the code", time.Minute)}, nil, nil, false, ""},
+		{"longer ago than the window", []history.Entry{ask(testDMChat, "a", "", "🔐 Send me the code", 11*time.Minute)}, nil, nil, false, ""},
+		{"a person's words", []history.Entry{{TS: ago(time.Minute), Chat: testDMChat, From: "15551234567", Text: "what is an OTP?", Type: history.In}}, nil, nil, false, ""},
+		{"another brain's own words", []history.Entry{ask(testDMChat, "b", "", "🔐 Send me the code", time.Minute)}, nil, nil, false, ""},
+		{"a script's request", []history.Entry{ask(testDMChat, "script", "script", "your OTP please", time.Minute)}, nil, nil, true, ""},
+		{"a request without a token", []history.Entry{ask(testDMChat, "script", "api", "your OTP please", time.Minute)}, nil, nil, true, ""},
+		{"its own /send", []history.Entry{ask(testDMChat, "a", "brain", "your OTP please", time.Minute)}, nil, nil, true, ""},
+		{"no marker", []history.Entry{ask(testDMChat, "a", "", "here is your summary", time.Minute)}, nil, nil, false, ""},
+		{"a marker inside a word", []history.Entry{ask(testDMChat, "a", "", "hotpot tonight?", time.Minute)}, nil, nil, false, ""},
+		{"a bank's name by default", []history.Entry{ask(testDMChat, "a", "", "Please send the Examplebank code", time.Minute)}, nil, nil, false, ""},
+		{"a bank's name configured", []history.Entry{ask(testDMChat, "a", "", "Please send the Examplebank code", time.Minute)}, nil, []string{"Examplebank"}, true, ""},
+		{"followed by other words", []history.Entry{
 			ask(testDMChat, "a", "", "🔐 Send me the code", 3*time.Minute),
 			ask(testDMChat, "a", "", "Still waiting for it", 2*time.Minute),
-			{TS: ago(time.Minute), Chat: testDMChat, From: "15551234567", Text: "one moment", Type: historyIn},
+			{TS: ago(time.Minute), Chat: testDMChat, From: "15551234567", Text: "one moment", Type: history.In},
 		}, nil, nil, true, ""},
-		{"behind a late message sent long ago", []historyEntry{
+		{"behind a late message sent long ago", []history.Entry{
 			ask(testDMChat, "a", "", "🔐 Send me the code", time.Minute),
-			{TS: ago(3 * time.Hour), Chat: testDMChat, From: "15551234567", Text: "sent while offline", Type: historyIn},
+			{TS: ago(3 * time.Hour), Chat: testDMChat, From: "15551234567", Text: "sent while offline", Type: history.In},
 		}, nil, nil, true, ""},
-		{"by the DM's LID", []historyEntry{ask(lid, "a", "", "🔐 Send me the code", time.Minute)}, []string{testDMChat, lid}, nil, true, ""},
-		{"a script's request names its id", []historyEntry{askFor("abc123", "your OTP please", time.Minute)}, nil, nil, true, "abc123"},
-		{"a script's request, then the brain's own words", []historyEntry{
+		{"by the DM's LID", []history.Entry{ask(lid, "a", "", "🔐 Send me the code", time.Minute)}, []string{testDMChat, lid}, nil, true, ""},
+		{"a script's request names its id", []history.Entry{askFor("abc123", "your OTP please", time.Minute)}, nil, nil, true, "abc123"},
+		{"a script's request, then the brain's own words", []history.Entry{
 			askFor("abc123", "your OTP please", 2*time.Minute),
 			ask(testDMChat, "a", "", "That is your Examplebank login asking for the 2FA code", time.Minute),
 		}, nil, nil, true, "abc123"},
-		{"the newest of two scripts' requests", []historyEntry{
+		{"the newest of two scripts' requests", []history.Entry{
 			askFor("abc123", "your OTP please", 3*time.Minute),
 			askFor("def456", "your OTP please", 2*time.Minute),
 			ask(testDMChat, "a", "", "🔐 Send me the code", time.Minute),
 		}, nil, nil, true, "def456"},
-		{"the brain's own words after a script's request ran out", []historyEntry{
+		{"the brain's own words after a script's request ran out", []history.Entry{
 			askFor("abc123", "your OTP please", 11*time.Minute),
 			ask(testDMChat, "a", "", "🔐 Send me the code", time.Minute),
 		}, nil, nil, true, ""},
@@ -316,7 +317,7 @@ func TestBridgeStartRemovesExpiredOTPHandoffs(t *testing.T) {
 func TestHandOffOfACodeTheBrainAskedFor(t *testing.T) {
 	tb, br := newMainBridge(t, "")
 	asked := time.Now().Add(-2 * time.Minute).Truncate(time.Second)
-	br.appendEntry(historyEntry{TS: asked.Format(time.RFC3339), Chat: testDMChat, From: "main", Text: "🔐 Please send me the verification code", Type: historyOut})
+	br.appendEntry(history.Entry{TS: asked.Format(time.RFC3339), Chat: testDMChat, From: "main", Text: "🔐 Please send me the verification code", Type: history.Out})
 	tb.handleInbound(t.Context(), Inbound{JID: testDMChat, Sender: "15551234567", Text: "483920", Source: sourceWhatsApp})
 	var h otpHandoff
 	data, err := os.ReadFile(filepath.Join(tb.cfgs.Get().DataDir, "otp", "main.json"))

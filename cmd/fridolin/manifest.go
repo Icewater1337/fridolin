@@ -13,6 +13,8 @@ import (
 	"regexp"
 	"strings"
 	"sync"
+
+	"github.com/Icewater1337/fridolin/internal/fsx"
 )
 
 // ManifestFile is the file that turns a folder into a brain.
@@ -334,7 +336,7 @@ func writeManifestDataRoot(root *os.Root, data []byte, overwrite bool) (*os.File
 	}
 	// Keep a read handle before closing the writer. A failed write/sync/close
 	// must leave no partial manifest at the published name.
-	retained, err := openInFolder(root, name, os.O_RDONLY, 0)
+	retained, err := fsx.OpenInFolder(root, name, os.O_RDONLY, 0)
 	if err != nil {
 		return nil, nil, err
 	}

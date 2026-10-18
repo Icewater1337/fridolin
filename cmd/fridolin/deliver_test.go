@@ -8,6 +8,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/Icewater1337/fridolin/internal/history"
 )
 
 // pollRefuser is the dev messenger in front of a WhatsApp that is
@@ -23,7 +25,7 @@ func outbound(t *testing.T, br *Brain) map[string][]string {
 	t.Helper()
 	out := map[string][]string{}
 	for _, e := range readHistory(t, br) {
-		if e.Type == historyOut {
+		if e.Type == history.Out {
 			if e.From != br.ID() {
 				t.Errorf("outbound line %+v is not from brain %s", e, br.ID())
 			}
