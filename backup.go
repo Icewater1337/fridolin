@@ -46,9 +46,10 @@ import (
 
 // bridgeBackupID stands for the bridge's own settings wherever backups
 // list brains by id: in a job, in the backup state, and in Drive, where it
-// is the folder name above, so it must not change. The dashboard's Backup
-// page shows it as "Bridge settings". It cannot clash with a brain: brain
-// ids start with a letter or digit.
+// is the folder name above, so it must not change. The dashboard holds it
+// as BRIDGE_BACKUP_ID (web/assets/lib/brain.js) and shows it as "Bridge
+// settings". It cannot clash with a brain: brain ids start with a letter
+// or digit.
 const bridgeBackupID = "_bridge"
 
 // BackupConfig controls Google Drive backups.

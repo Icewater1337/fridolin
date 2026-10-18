@@ -8,7 +8,7 @@ import { h, mount, paint, reconcile } from '../lib/dom.js';
 import { fmtDuration, plural, parseTs } from '../lib/format.js';
 import { phone } from '../lib/jid.js';
 import { waKind, waLabel } from '../lib/whatsapp.js';
-import { routingSummary, issueLabel } from '../lib/brain.js';
+import { routingSummary, issueLabel, backupOwner } from '../lib/brain.js';
 import { icon } from '../components/icons.js';
 import { toast } from '../components/toast.js';
 import { btn } from '../components/buttons.js';
@@ -155,13 +155,11 @@ export default {
     });
 
     // Whose backup failed: the bridge's settings, or a brain by its name.
-    const backupOwner = (s, id) => {
-      if (!id) return '';
-      if (id === '_bridge') return 'Bridge settings';
-      const br = (s.brains || []).find((x) => x.id === id);
-      return br ? (br.name || br.id) : id;
+    const failedOwner = (s) => {
+      const id = (s.backup || {}).last_error_brain;
+      return id ? backupOwner(id, s.brains) : '';
     };
-    const renderBackup = (s) => paint(backupCard, { ...(s.backup || {}), owner: backupOwner(s, (s.backup || {}).last_error_brain) }, (b) => {
+    const renderBackup = (s) => paint(backupCard, { ...(s.backup || {}), owner: failedOwner(s) }, (b) => {
       let p;
       // Daily backups that lost their Drive link would otherwise just stop.
       const stranded = !b.connected && b.enabled;
