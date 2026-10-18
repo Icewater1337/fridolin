@@ -1,4 +1,4 @@
-package main
+package store
 
 import (
 	"context"
@@ -12,7 +12,7 @@ import (
 // holds one reply as the messages it goes out as, how many of them went
 // out already, and when to try the rest again. A delivered reply's row
 // is deleted. One given up on keeps only what the dashboard says about
-// it, not its text, for outboxFailedKeep.
+// it, not its text, for OutboxFailedKeep.
 
 // migrateV3 adds the outbox.
 func migrateV3(tx *sql.Tx) error {
@@ -21,7 +21,7 @@ func migrateV3(tx *sql.Tx) error {
 		chat_jid    TEXT NOT NULL,
 		brain       TEXT NOT NULL DEFAULT '', -- whose history records it once delivered
 		history     TEXT NOT NULL DEFAULT '', -- what that history records; '' nothing
-		parts       TEXT NOT NULL,            -- JSON array of outboxPart
+		parts       TEXT NOT NULL,            -- JSON array of OutboxPart
 		next_part   INTEGER NOT NULL DEFAULT 0,
 		state       TEXT NOT NULL DEFAULT 'pending', -- or 'failed'
 		attempts    INTEGER NOT NULL DEFAULT 0,
@@ -32,8 +32,8 @@ func migrateV3(tx *sql.Tx) error {
 	return err
 }
 
-// outboxPart is one message of a reply: a text, or a poll.
-type outboxPart struct {
+// OutboxPart is one message of a reply: a text, or a poll.
+type OutboxPart struct {
 	Text     string   `json:"text,omitempty"`
 	Question string   `json:"question,omitempty"`
 	Options  []string `json:"options,omitempty"`
@@ -41,15 +41,15 @@ type outboxPart struct {
 }
 
 // IsPoll reports whether this part carries a poll rather than text.
-func (p outboxPart) IsPoll() bool { return p.Question != "" }
+func (p OutboxPart) IsPoll() bool { return p.Question != "" }
 
-// outboxRow is a reply waiting in the outbox.
-type outboxRow struct {
+// OutboxRow is a reply waiting in the outbox.
+type OutboxRow struct {
 	ID        int64
 	Chat      string
 	Brain     string
 	History   string
-	Parts     []outboxPart
+	Parts     []OutboxPart
 	NextPart  int // the first part not sent yet
 	Attempts  int
 	CreatedAt time.Time
@@ -58,7 +58,7 @@ type outboxRow struct {
 }
 
 // AddOutbox puts a reply into the outbox, due now.
-func (s *Store) AddOutbox(ctx context.Context, r outboxRow) (int64, error) {
+func (s *Store) AddOutbox(ctx context.Context, r OutboxRow) (int64, error) {
 	parts, err := json.Marshal(r.Parts)
 	if err != nil {
 		return 0, err
@@ -73,16 +73,16 @@ func (s *Store) AddOutbox(ctx context.Context, r outboxRow) (int64, error) {
 }
 
 // PendingOutbox returns the replies waiting, oldest first.
-func (s *Store) PendingOutbox(ctx context.Context) ([]outboxRow, error) {
+func (s *Store) PendingOutbox(ctx context.Context) ([]OutboxRow, error) {
 	rows, err := s.db.QueryContext(ctx, `SELECT id, chat_jid, brain, history, parts, next_part, attempts, created_at, next_try_at, last_error
 		FROM outbox WHERE state = 'pending' ORDER BY id`)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	var out []outboxRow
+	var out []OutboxRow
 	for rows.Next() {
-		var r outboxRow
+		var r OutboxRow
 		var parts string
 		if err := rows.Scan(&r.ID, &r.Chat, &r.Brain, &r.History, &parts, &r.NextPart, &r.Attempts, &r.CreatedAt, &r.NextTryAt, &r.LastError); err != nil {
 			return nil, err
@@ -97,16 +97,16 @@ func (s *Store) PendingOutbox(ctx context.Context) ([]outboxRow, error) {
 
 // UndeliveredReplies returns the replies of brain that wait in the outbox,
 // oldest first, with only what its history will record of them.
-func (s *Store) UndeliveredReplies(ctx context.Context, brain string) ([]outboxRow, error) {
+func (s *Store) UndeliveredReplies(ctx context.Context, brain string) ([]OutboxRow, error) {
 	rows, err := s.db.QueryContext(ctx, `SELECT id, chat_jid, history, created_at
 		FROM outbox WHERE state = 'pending' AND brain = ? AND history != '' ORDER BY id`, brain)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	var out []outboxRow
+	var out []OutboxRow
 	for rows.Next() {
-		r := outboxRow{Brain: brain}
+		r := OutboxRow{Brain: brain}
 		if err := rows.Scan(&r.ID, &r.Chat, &r.History, &r.CreatedAt); err != nil {
 			return nil, err
 		}
@@ -142,11 +142,11 @@ func (s *Store) OutboxGiveUp(ctx context.Context, id int64, lastErr string, now 
 	return err
 }
 
-// outboxFailedKeep is how long the dashboard hears of a reply given up on.
-const outboxFailedKeep = 7 * 24 * time.Hour
+// OutboxFailedKeep is how long the dashboard hears of a reply given up on.
+const OutboxFailedKeep = 7 * 24 * time.Hour
 
-// outboxSummary is what the dashboard shows of the outbox.
-type outboxSummary struct {
+// OutboxSummary is what the dashboard shows of the outbox.
+type OutboxSummary struct {
 	Waiting       int       // replies not delivered yet
 	OldestWaiting time.Time // when the oldest of them was written
 	WaitingError  string    // why the last attempt failed, if one did
@@ -163,15 +163,15 @@ func (s *Store) PruneOutbox(ctx context.Context, before time.Time) error {
 }
 
 // OutboxSummary counts the replies waiting and those given up on within
-// outboxFailedKeep of now. It only reads, since the dashboard asks for it
+// OutboxFailedKeep of now. It only reads, since the dashboard asks for it
 // every few seconds; the outbox prunes older ones (PruneOutbox).
 //
 // Its queries read in one transaction, so that they see the outbox as it
 // was at one moment: a reply given up on between two of them would
 // otherwise count both as waiting and as given up on.
-func (s *Store) OutboxSummary(ctx context.Context, now time.Time) (outboxSummary, error) {
-	var sum outboxSummary
-	since := now.Add(-outboxFailedKeep).UTC()
+func (s *Store) OutboxSummary(ctx context.Context, now time.Time) (OutboxSummary, error) {
+	var sum OutboxSummary
+	since := now.Add(-OutboxFailedKeep).UTC()
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return sum, err

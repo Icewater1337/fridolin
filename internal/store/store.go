@@ -1,4 +1,4 @@
-package main
+package store
 
 import (
 	"context"
@@ -22,12 +22,12 @@ type Store struct {
 	Container *sqlstore.Container
 }
 
-// NewStore opens (or creates) the SQLite database and initialises both the
+// Open opens (or creates) the SQLite database and initialises both the
 // whatsmeow device container and the bridge's own tables. When it fails it
 // closes whatever it had opened, since the caller gets no store to close:
 // NewBridge gives the instance lock back on that error, and whoever takes it
 // next must be the only one with bridge.db open.
-func NewStore(dbPath, logLevel string) (*Store, error) {
+func Open(dbPath, logLevel string) (*Store, error) {
 	if err := makePrivateDB(dbPath); err != nil {
 		return nil, fmt.Errorf("creating database file: %w", err)
 	}
@@ -217,8 +217,8 @@ func (s *Store) SavePoll(msgID, chatJID, brain, question string, options []strin
 	return err
 }
 
-// sentPoll is what the bridge keeps of a poll it sent, for its votes.
-type sentPoll struct {
+// SentPoll is what the bridge keeps of a poll it sent, for its votes.
+type SentPoll struct {
 	Chat     string
 	Brain    string // "" for a poll from before polls recorded it
 	Question string
@@ -226,13 +226,13 @@ type sentPoll struct {
 }
 
 // SentPoll returns the poll sent as message msgID, or sql.ErrNoRows.
-func (s *Store) SentPoll(ctx context.Context, msgID string) (sentPoll, error) {
-	var p sentPoll
+func (s *Store) SentPoll(ctx context.Context, msgID string) (SentPoll, error) {
+	var p SentPoll
 	var optJSON string
 	err := s.db.QueryRowContext(ctx, `SELECT chat_jid, brain, question, options FROM polls WHERE msg_id = ?`, msgID).
 		Scan(&p.Chat, &p.Brain, &p.Question, &optJSON)
 	if err != nil {
-		return sentPoll{}, err
+		return SentPoll{}, err
 	}
 	p.Options = jsonStrings(optJSON)
 	return p, nil

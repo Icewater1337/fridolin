@@ -1,6 +1,6 @@
 //go:build unix
 
-package main
+package store
 
 import (
 	"database/sql"
@@ -209,7 +209,7 @@ func TestStoreMigratesAnUnversionedDatabase(t *testing.T) {
 	db.Close()
 
 	for i := 0; i < 2; i++ { // and opening it again changes nothing
-		s, err := NewStore(dbPath, "error")
+		s, err := Open(dbPath, "error")
 		if err != nil {
 			t.Fatalf("open %d: %v", i+1, err)
 		}
