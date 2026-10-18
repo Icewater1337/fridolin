@@ -11,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"runtime/debug"
 	"slices"
 	"sort"
 	"strings"
@@ -128,44 +129,10 @@ func (cs *ConfigStore) Subscribe(fn func(old, new *Config)) {
 // skips the conflict check. It returns RestartRequired as of the new
 // configuration.
 func (cs *ConfigStore) Update(etag string, mutate func(*Config) error) (restart []string, err error) {
-	cs.mu.Lock()
-	if etag != "" && etag != cs.ETag() {
-		cs.mu.Unlock()
-		return nil, ErrConfigConflict
-	}
-	next, err := cs.file.clone()
+	old, eff, subs, err := cs.commit(etag, mutate)
 	if err != nil {
-		cs.mu.Unlock()
 		return nil, err
 	}
-	if err := mutate(next); err != nil {
-		cs.mu.Unlock()
-		return nil, err
-	}
-	// What is written is this version's file, whatever the edit made of it.
-	next.Version = currentConfigVersion
-	eff, err := effective(next)
-	if err != nil {
-		cs.mu.Unlock()
-		return nil, err
-	}
-	data, err := json.MarshalIndent(next, "", "  ")
-	if err != nil {
-		cs.mu.Unlock()
-		return nil, err
-	}
-	data = append(data, '\n')
-	if err := writeFileAtomic(cs.path, data, 0o600, true); err != nil {
-		cs.mu.Unlock()
-		return nil, err
-	}
-
-	old := cs.eff.Load()
-	cs.file = next
-	cs.eff.Store(eff)
-	cs.etag.Store(etagOf(data))
-	subs := append([]func(old, new *Config){}, cs.subs...)
-	cs.mu.Unlock()
 
 	warnGroupsWithoutMembers(old, eff)
 
@@ -173,6 +140,54 @@ func (cs *ConfigStore) Update(etag string, mutate func(*Config) error) (restart 
 		fn(old, eff)
 	}
 	return restartRequired(cs.startup, eff), nil
+}
+
+// commit is the part of Update that holds the lock: it writes the new
+// configuration and swaps it in, and returns it with the one it replaced
+// and the subscribers to tell. A panic on the way, in mutate or in deriving,
+// encoding or writing the configuration, comes back as an error, with the
+// lock given back and the configuration as it was: net/http recovers a
+// handler's panic and the bridge runs on, and a lock left held would stop
+// every later save, brain edit and calendar sign-in for good.
+func (cs *ConfigStore) commit(etag string, mutate func(*Config) error) (old, eff *Config, subs []func(old, new *Config), err error) {
+	cs.mu.Lock()
+	defer cs.mu.Unlock()
+	defer func() {
+		if r := recover(); r != nil {
+			log.Printf("config: an update panicked, nothing was changed: %v\n%s", r, debug.Stack())
+			old, eff, subs, err = nil, nil, nil, fmt.Errorf("the config update failed: %v", r)
+		}
+	}()
+	if etag != "" && etag != cs.ETag() {
+		return nil, nil, nil, ErrConfigConflict
+	}
+	next, err := cs.file.clone()
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	if err := mutate(next); err != nil {
+		return nil, nil, nil, err
+	}
+	// What is written is this version's file, whatever the edit made of it.
+	next.Version = currentConfigVersion
+	eff, err = effective(next)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	data, err := json.MarshalIndent(next, "", "  ")
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	data = append(data, '\n')
+	if err := writeFileAtomic(cs.path, data, 0o600, true); err != nil {
+		return nil, nil, nil, err
+	}
+
+	old = cs.eff.Load()
+	cs.file = next
+	cs.eff.Store(eff)
+	cs.etag.Store(etagOf(data))
+	return old, eff, append([]func(old, new *Config){}, cs.subs...), nil
 }
 
 // RestartRequired lists the settings that are read once at startup and now
