@@ -100,3 +100,23 @@ test('a running backup says how far it is in a progress bar', async (t) => {
   assert.equal(bar.getAttribute('aria-label'), 'Backup progress');
   assert.equal(bar.getAttribute('aria-valuetext'), '2 of 4 done');
 });
+
+test('a backup.rclone_path that does not work is named, not offered for install', async (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout', 'Date'] });
+  installDom();
+  noConsoleErrors(t);
+  const error = 'backup.rclone_path /Users/you/bin/rclone: exec: "/Users/you/bin/rclone": stat /Users/you/bin/rclone: no such file or directory';
+  serve(t, (path) => (path.startsWith('/api/backup/status')
+    ? { rclone: { found: false, install_hint: 'brew install rclone', error }, connected: false }
+    : {}));
+  const root = h('div');
+  document.body.append(root);
+  const ctx = createPage();
+  t.after(() => ctx.destroy());
+  page.render(root, ctx);
+  await settle();
+  const text = root.textContent;
+  assert.ok(text.includes('The configured rclone does not work'), text);
+  assert.ok(text.includes(error), 'the error is shown');
+  assert.ok(!text.includes('brew install rclone'), 'no install hint for a path that is set');
+});

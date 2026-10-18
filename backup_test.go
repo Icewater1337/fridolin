@@ -160,6 +160,112 @@ func TestRunRcloneUsesIsolatedConfig(t *testing.T) {
 	}
 }
 
+// TestFindRclone: a configured rclone_path is used as it is, and one that
+// does not work is an error that names it, never a quiet fallback to another
+// rclone. Without one, PATH comes first, then the fallbacks, of which only an
+// executable file counts.
+func TestFindRclone(t *testing.T) {
+	dir := t.TempDir()
+	write := func(name string, mode os.FileMode) string {
+		p := filepath.Join(dir, name)
+		if err := os.WriteFile(p, []byte("#!/bin/sh\n"), mode); err != nil {
+			t.Fatal(err)
+		}
+		return p
+	}
+	onPath := filepath.Join(dir, "path")
+	if err := os.Mkdir(onPath, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	pathRclone := filepath.Join(onPath, "rclone")
+	if err := os.WriteFile(pathRclone, []byte("#!/bin/sh\n"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	configured := write("my-rclone", 0o700)
+	plain := write("plain-file", 0o600)
+	fallback := write("fallback-rclone", 0o700)
+	missing := filepath.Join(dir, "missing")
+
+	cases := []struct {
+		name      string
+		path      string   // backup.rclone_path
+		pathDirs  string   // PATH
+		fallbacks []string // rcloneFallbacks
+		want      string
+		wantErr   string // in the error; "" for none
+	}{
+		{"configured", configured, onPath, []string{fallback}, configured, ""},
+		{"configured but missing", missing, onPath, []string{fallback}, "", "backup.rclone_path " + missing},
+		{"configured but not executable", plain, onPath, []string{fallback}, "", "backup.rclone_path " + plain},
+		{"on PATH", "", onPath, []string{fallback}, pathRclone, ""},
+		{"fallback", "", dir, []string{missing, plain, fallback}, fallback, ""},
+		{"none", "", dir, []string{missing, plain}, "", "rclone is not installed"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Setenv("PATH", tc.pathDirs)
+			prev := rcloneFallbacks
+			rcloneFallbacks = func() []string { return tc.fallbacks }
+			t.Cleanup(func() { rcloneFallbacks = prev })
+			got, err := findRclone(tc.path)
+			switch {
+			case tc.wantErr == "" && err != nil:
+				t.Fatalf("findRclone(%q) failed: %v", tc.path, err)
+			case tc.wantErr != "" && (err == nil || !strings.Contains(err.Error(), tc.wantErr)):
+				t.Fatalf("findRclone(%q) = %q, %v; want an error with %q", tc.path, got, err, tc.wantErr)
+			case got != tc.want:
+				t.Errorf("findRclone(%q) = %q, want %q", tc.path, got, tc.want)
+			}
+		})
+	}
+}
+
+// TestBackupStatusNamesABrokenRclonePath: the Backup page says what is
+// wrong with a configured rclone_path, and Connect refuses with that rather
+// than an install hint.
+func TestBackupStatusNamesABrokenRclonePath(t *testing.T) {
+	missing := filepath.Join(t.TempDir(), "rclone")
+	tb := newTestBridge(t, `, "backup": {"rclone_path": "`+missing+`"}`)
+	var st struct {
+		Rclone struct {
+			Found bool   `json:"found"`
+			Error string `json:"error"`
+		} `json:"rclone"`
+	}
+	_ = json.Unmarshal(tb.do("GET", "/api/backup/status", nil).Body.Bytes(), &st)
+	if st.Rclone.Found || !strings.Contains(st.Rclone.Error, "backup.rclone_path "+missing) {
+		t.Errorf("rclone status = %+v, want the broken path named", st.Rclone)
+	}
+	w := tb.do("POST", "/api/backup/connect", nil)
+	if w.Code != 412 || !strings.Contains(w.Body.String(), "backup.rclone_path") || strings.Contains(w.Body.String(), "install") {
+		t.Errorf("connect = %d %s, want the broken path named", w.Code, w.Body.String())
+	}
+}
+
+// TestRcloneVersionNoticesAnUpgrade: the version is asked once per build,
+// so the dashboard shows the new one after rclone was upgraded in place.
+func TestRcloneVersionNoticesAnUpgrade(t *testing.T) {
+	script := filepath.Join(t.TempDir(), "rclone")
+	install := func(version string, mod time.Time) {
+		t.Helper()
+		if err := os.WriteFile(script, []byte("#!/bin/sh\necho rclone "+version+"\n"), 0o700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Chtimes(script, mod, mod); err != nil {
+			t.Fatal(err)
+		}
+	}
+	day := time.Date(2026, 10, 1, 12, 0, 0, 0, time.UTC)
+	install("v1.70.0", day)
+	if v := rcloneVersion(script, nil); v != "rclone v1.70.0" {
+		t.Fatalf("version = %q", v)
+	}
+	install("v1.71.0", day.Add(24*time.Hour))
+	if v := rcloneVersion(script, nil); v != "rclone v1.71.0" {
+		t.Errorf("version after the upgrade = %q, want v1.71.0", v)
+	}
+}
+
 // TestRcloneGetsTheAllowlistedEnvironment: rclone, for a backup, for the
 // version the dashboard shows and while it connects Google Drive, gets what
 // childEnv gives a helper program: no RCLONE_* setting of yours, not the

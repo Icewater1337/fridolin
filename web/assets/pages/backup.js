@@ -108,6 +108,17 @@ export default {
 
     // ── rclone missing ──
     function renderRclone(rc) {
+      if (rc.error) {
+        // backup.rclone_path names an rclone that cannot run; the bridge
+        // uses no other one instead.
+        return h('div.card.hero',
+          h('div.hero-icon', icon('download')),
+          h('div.hero-body',
+            h('h2', 'The configured rclone does not work'),
+            callout('bad', null, rc.error),
+            h('p', 'Fix ', mono('backup.rclone_path'), ' in config.json, or remove it to use the rclone on this computer’s PATH.'),
+            h('div.actions', btn('Check again', { kind: 'primary', icon: 'refresh', onClick: () => refresh() }))));
+      }
       const hint = rc.install_hint || 'See https://rclone.org/install/';
       const isCmd = !/^see /i.test(hint);
       return h('div.card.hero',

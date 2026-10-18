@@ -177,25 +177,49 @@ func (m *BackupManager) rclonePath() (string, error) {
 
 // findRclone finds the rclone binary, given backup.rclone_path. The sandbox
 // profile uses it too, to keep brains from replacing the binary.
+//
+// A configured path must work as it is: falling back would quietly run
+// another rclone, maybe another version, than the one you named, and hide
+// the typo. Only without one does it look further than PATH, where
+// launchd's PATH lacks Homebrew's folder and rclone's installer's.
 func findRclone(p string) (string, error) {
-	if p == "" {
-		p = "rclone"
-	}
-	found, err := exec.LookPath(p)
-	if err != nil {
-		for _, c := range rcloneFallbacks() {
-			if fileExists(c) {
-				return c, nil
-			}
+	if p != "" {
+		found, err := exec.LookPath(p)
+		if err != nil {
+			return "", fmt.Errorf("backup.rclone_path %s: %w", p, err)
 		}
-		return "", errors.New("rclone is not installed")
+		return found, nil
 	}
-	return found, nil
+	if found, err := exec.LookPath("rclone"); err == nil {
+		return found, nil
+	}
+	for _, c := range rcloneFallbacks() {
+		// For an absolute path LookPath only checks that it is an
+		// executable file: one that merely exists would fail to run.
+		if found, err := exec.LookPath(c); err == nil {
+			return found, nil
+		}
+	}
+	return "", errRcloneMissing
 }
 
-// rcloneFallbacks are where findRclone looks when rclone is not on PATH.
-func rcloneFallbacks() []string {
+// errRcloneMissing is findRclone's error when no rclone_path is set and no
+// rclone is found.
+var errRcloneMissing = errors.New("rclone is not installed")
+
+// rcloneFallbacks are where findRclone looks when rclone is not on PATH, a
+// variable so tests can point it at their own files.
+var rcloneFallbacks = func() []string {
 	return []string{"/opt/homebrew/bin/rclone", "/usr/local/bin/rclone", filepath.Join(homeDir(), ".local/bin/rclone")}
+}
+
+// rcloneMissingHint says what to do about findRclone's error: install
+// rclone, or fix backup.rclone_path, whose error names the path.
+func rcloneMissingHint(err error) string {
+	if errors.Is(err, errRcloneMissing) {
+		return err.Error() + " — " + rcloneInstallHint()
+	}
+	return err.Error()
 }
 
 // rcloneEnv is the environment for rclone run as scope (see helperScope):
@@ -345,6 +369,8 @@ func (b *Bridge) apiBackupStatus(w http.ResponseWriter, r *http.Request) {
 	rc := map[string]any{"found": false, "install_hint": rcloneInstallHint()}
 	if p, err := m.rclonePath(); err == nil {
 		rc["found"], rc["path"], rc["version"] = true, p, rcloneVersion(p, m.rcloneEnv(anyChild))
+	} else if !errors.Is(err, errRcloneMissing) {
+		rc["error"] = err.Error() // backup.rclone_path names one that does not work
 	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -382,17 +408,28 @@ func (b *Bridge) apiBackupStatus(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, resp)
 }
 
-var (
-	rcloneVersionMu    sync.Mutex
-	rcloneVersionCache = map[string]string{}
-)
+// rcloneVersionKey names one build of rclone: an upgrade in place (brew
+// upgrade) keeps the path but changes the file.
+type rcloneVersionKey struct {
+	path    string
+	modTime time.Time
+	size    int64
+}
 
-// rcloneVersion runs `rclone version` once per binary, with env.
+// rcloneVersions caches rcloneVersion's answers by rcloneVersionKey.
+var rcloneVersions sync.Map
+
+// rcloneVersion runs `rclone version` once per build of rclone at p, with
+// env. No lock is held while it runs: the status page asks on every poll,
+// and a slow first run must not hold up the others.
 func rcloneVersion(p string, env []string) string {
-	rcloneVersionMu.Lock()
-	defer rcloneVersionMu.Unlock()
-	if v, ok := rcloneVersionCache[p]; ok {
-		return v
+	fi, err := os.Stat(p)
+	if err != nil {
+		return ""
+	}
+	key := rcloneVersionKey{path: p, modTime: fi.ModTime(), size: fi.Size()}
+	if v, ok := rcloneVersions.Load(key); ok {
+		return v.(string)
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
@@ -403,7 +440,7 @@ func rcloneVersion(p string, env []string) string {
 	if err == nil {
 		v = strings.SplitN(strings.TrimSpace(string(out)), "\n", 2)[0]
 	}
-	rcloneVersionCache[p] = v
+	rcloneVersions.Store(key, v)
 	return v
 }
 
@@ -454,7 +491,7 @@ func answerFor(q rcloneQuestion) string {
 func (b *Bridge) apiBackupConnect(w http.ResponseWriter, r *http.Request) {
 	m := b.backup
 	if _, err := m.rclonePath(); err != nil {
-		writeErr(w, http.StatusPreconditionFailed, "rclone is not installed — "+rcloneInstallHint())
+		writeErr(w, http.StatusPreconditionFailed, rcloneMissingHint(err))
 		return
 	}
 	m.mu.Lock()
