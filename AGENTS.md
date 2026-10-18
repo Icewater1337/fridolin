@@ -152,7 +152,9 @@ the version before: `fridolin service rollback`.
   `app/routes.js`), so once the bridge runs another version an open tab
   asks for a reload instead of mixing two builds. A page follows the data
   it shows through `app/resources.js` (one poll per endpoint, shared with
-  the shell and other parts of the page) instead of polling it itself,
+  the shell and other parts of the page, which sends back the ETag of the
+  answer it has, so that an endpoint answering with `writeJSONIfChanged`
+  sends a bodyless 304 while nothing changed) instead of polling it itself,
   repaints with `paint()` and `reconcile()` from `lib/dom.js`, which keep
   the nodes of what did not change (and with them focus, typed text and
   open panels), and builds an editable form with `components/live-form.js`,

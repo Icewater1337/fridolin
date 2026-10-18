@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { stubFetch } from './stub-fetch.js';
-import { api, get, post, on, signIn, signOut, rotateToken, ApiError } from '../assets/app/api.js';
+import { api, get, getIfChanged, NOT_MODIFIED, post, on, signIn, signOut, rotateToken, ApiError } from '../assets/app/api.js';
 import { withDeadline } from '../assets/lib/abort.js';
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -74,6 +74,33 @@ test('answers and refusals', async (t) => {
       assert.deepEqual(got, want);
     });
   }
+});
+
+test('getIfChanged sends the ETag back, and a 304 means the answer held', async (t) => {
+  const cases = [
+    // name, the ETag sent, the answer, what it resolves with
+    ['first poll', '', [{ n: 1 }, 200, { ETag: '"e1"' }], { data: { n: 1 }, etag: '"e1"' }],
+    ['unchanged', '"e1"', [undefined, 304, { ETag: '"e1"' }], NOT_MODIFIED],
+    ['changed', '"e1"', [{ n: 2 }, 200, { ETag: '"e2"' }], { data: { n: 2 }, etag: '"e2"' }],
+    ['an endpoint without ETags', '', [{ n: 1 }], { data: { n: 1 }, etag: '' }],
+  ];
+  for (const [name, etag, answer, want] of cases) {
+    await t.test(name, async (t) => {
+      const net = stubFetch(t);
+      const p = getIfChanged('/api/activity', etag);
+      net.answer(0, ...answer);
+      assert.deepEqual(await p, want);
+      assert.equal(net.calls[0].init.headers['If-None-Match'], etag || undefined);
+    });
+  }
+
+  await t.test('a 304 nobody asked for is an error', async (t) => {
+    const net = stubFetch(t);
+    const p = get('/api/activity');
+    net.answer(0, undefined, 304);
+    await assert.rejects(p, { status: 304 });
+    assert.equal(net.calls[0].init.headers['If-None-Match'], undefined, 'get sends no ETag');
+  });
 });
 
 test('a 401 tells the app to ask for the token', async (t) => {

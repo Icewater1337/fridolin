@@ -1,10 +1,11 @@
 // A stand-in for the bridge's API in page tests: fetch answers at once with
-// what route(path, init) returns for the path (a body, or {status, body}
-// for another status or a body that has a status field of its own), so a
-// test sets up what the bridge holds and lets the page poll it. A route
-// that returns a promise answers once it resolves, e.g. to answer a poll
-// late with what the bridge held when it was asked; until then, the
-// request fails once its signal aborts, as fetch does.
+// what route(path, init) returns for the path (a body, or {status, body,
+// headers} for another status, response headers, or a body that has a
+// status field of its own), so a test sets up what the bridge holds and
+// lets the page poll it. A route that returns a promise answers once it
+// resolves, e.g. to answer a poll late with what the bridge held when it
+// was asked; until then, the request fails once its signal aborts, as
+// fetch does.
 
 export function serve(t, route) {
   const real = globalThis.fetch;
@@ -13,7 +14,7 @@ export function serve(t, route) {
   globalThis.fetch = async (url, init = {}) => {
     if (init.signal && init.signal.aborted) throw aborted();
     const path = String(url);
-    calls.push({ path, method: init.method || 'GET', body: init.body ? JSON.parse(init.body) : undefined });
+    calls.push({ path, method: init.method || 'GET', headers: init.headers || {}, body: init.body ? JSON.parse(init.body) : undefined });
     let r = route(path, init);
     if (r && typeof r.then === 'function') {
       const { signal } = init;
@@ -21,7 +22,7 @@ export function serve(t, route) {
     }
     if (!r || typeof r !== 'object' || !('status' in r)) r = { status: 200, body: r };
     const text = r.body === undefined ? '' : JSON.stringify(r.body);
-    return { ok: r.status >= 200 && r.status < 300, status: r.status, statusText: '', text: async () => text };
+    return { ok: r.status >= 200 && r.status < 300, status: r.status, statusText: '', headers: new Headers(r.headers), text: async () => text };
   };
   t.after(() => { globalThis.fetch = real; });
   return calls;
