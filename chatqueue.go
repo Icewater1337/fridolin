@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"errors"
 	"log"
 	"runtime/debug"
@@ -166,4 +167,29 @@ func maskChatJID(chat string) string {
 		return chat
 	}
 	return maskJID(jid.User, "", jid.Server)
+}
+
+// maxDownloads is how many attachments are downloaded at once, all chats
+// together. A chat downloads one at a time anyway, as its worker handles
+// one message at a time; this bounds what many chats sending files at
+// once take of memory, disk and bandwidth.
+const maxDownloads = 3
+
+// downloadSlots limits the downloads running at once to maxDownloads. The
+// zero value is ready.
+type downloadSlots struct {
+	once  sync.Once
+	slots chan struct{}
+}
+
+// acquire waits for a free slot, and returns the function that frees it.
+// ok is false when ctx ended first: there is no slot to free then.
+func (s *downloadSlots) acquire(ctx context.Context) (release func(), ok bool) {
+	s.once.Do(func() { s.slots = make(chan struct{}, maxDownloads) })
+	select {
+	case s.slots <- struct{}{}:
+		return func() { <-s.slots }, true
+	case <-ctx.Done():
+		return nil, false
+	}
 }

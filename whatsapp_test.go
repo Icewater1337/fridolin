@@ -1811,3 +1811,63 @@ func TestQueueChat(t *testing.T) {
 		})
 	}
 }
+
+// At most maxDownloads attachments are downloaded at once, all chats
+// together; the others wait for a slot, and go on once one is free.
+func TestDownloadsAreBoundedAcrossChats(t *testing.T) {
+	tw, dl := newGroupTestWhatsApp(t, nil)
+	dl.hold = make(chan struct{})
+	a := recordArrivals(tw, "")
+	member := types.NewJID("15551234567", types.DefaultUserServer)
+	var evts []*events.Message
+	for i := range maxDownloads + 2 {
+		group := types.NewJID(fmt.Sprintf("1203630000000000%02d", 10+i), types.GroupServer)
+		tw.cfg().AllowedGroups = append(tw.cfg().AllowedGroups, group.String())
+		evt := groupMessage(member, types.EmptyJID, groupFile())
+		evt.Info.Chat = group
+		evts = append(evts, evt)
+	}
+	tw.feed(evts...)
+	waitFor(t, time.Second, "the downloads to start", func() bool { return dl.callCount() >= maxDownloads })
+	time.Sleep(50 * time.Millisecond)
+	if n := dl.callCount(); n != maxDownloads {
+		t.Errorf("%d downloads at once, want %d", n, maxDownloads)
+	}
+	close(dl.hold)
+	waitFor(t, 2*time.Second, "every photo", func() bool { return len(a.list()) == len(evts) })
+	for _, m := range a.messages() {
+		if len(m.Media) != 1 {
+			t.Errorf("%s arrived without its photo: %+v", m.JID, m)
+		}
+	}
+}
+
+// A file over max_media_mb is refused before any download, so it takes no
+// slot: its sender is told at once, while other chats hold every slot.
+func TestOversizedFileDoesNotWaitForASlot(t *testing.T) {
+	tw, dl := newGroupTestWhatsApp(t, nil)
+	dl.hold = make(chan struct{})
+	defer close(dl.hold)
+	member := types.NewJID("15551234567", types.DefaultUserServer)
+	var evts []*events.Message
+	for i := range maxDownloads {
+		group := types.NewJID(fmt.Sprintf("1203630000000000%02d", 10+i), types.GroupServer)
+		tw.cfg().AllowedGroups = append(tw.cfg().AllowedGroups, group.String())
+		evt := groupMessage(member, types.EmptyJID, groupFile())
+		evt.Info.Chat = group
+		evts = append(evts, evt)
+	}
+	tw.feed(evts...)
+	waitFor(t, time.Second, "every slot to be taken", func() bool { return dl.callCount() == maxDownloads })
+	tw.feed(dmEvent("3EB0BIG", &waE2E.Message{DocumentMessage: &waE2E.DocumentMessage{
+		FileName: proto.String("backup.zip"), FileLength: proto.Uint64(101 << 20),
+	}}))
+	select {
+	case n := <-tw.notices:
+		if want := testDMChat + ": ⚠️ That file is over the 100 MB limit, so I skipped it."; n != want {
+			t.Errorf("notice %q, want %q", n, want)
+		}
+	case <-time.After(time.Second):
+		t.Error("the sender was not told while the slots were taken")
+	}
+}

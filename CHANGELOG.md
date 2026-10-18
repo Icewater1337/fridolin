@@ -275,7 +275,8 @@ for compatibility.
   round, `!stop` no longer runs before the message it is to stop, and an
   edit or a deletion comes after the message it changes. A file that
   takes long to download holds up only the messages its own chat sent
-  after it, no longer every chat's.
+  after it, no longer every chat's, and at most three files download at
+  once.
 - A group the bridge does not allow is looked up on WhatsApp, for its
   name in the log and on the Chats page, at most once an hour instead of
   for every message it sends, and an allowed group not at all. A lookup

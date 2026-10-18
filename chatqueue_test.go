@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"errors"
 	"slices"
 	"strings"
@@ -231,4 +232,54 @@ func TestMaskChatJID(t *testing.T) {
 			t.Errorf("maskChatJID(%q) = %q, want %q", chat, got, want)
 		}
 	}
+}
+
+// At most maxDownloads downloads run at once, all chats together; one
+// waiting for a slot gives up when its context ends.
+func TestDownloadSlots(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		var s downloadSlots
+		var running, most atomic.Int32
+		release := make(chan struct{})
+		for range maxDownloads + 2 {
+			go func() {
+				free, ok := s.acquire(context.Background())
+				if !ok {
+					t.Error("no slot without the context ending")
+					return
+				}
+				defer free()
+				n := running.Add(1)
+				for {
+					m := most.Load()
+					if n <= m || most.CompareAndSwap(m, n) {
+						break
+					}
+				}
+				<-release
+				running.Add(-1)
+			}()
+		}
+		synctest.Wait()
+		if n := running.Load(); n != maxDownloads {
+			t.Errorf("%d downloads at once, want %d", n, maxDownloads)
+		}
+
+		ctx, cancel := context.WithCancel(context.Background())
+		gaveUp := make(chan bool)
+		go func() {
+			_, ok := s.acquire(ctx)
+			gaveUp <- !ok
+		}()
+		synctest.Wait()
+		cancel()
+		if !<-gaveUp {
+			t.Error("acquire did not give up when its context ended")
+		}
+		close(release)
+		synctest.Wait()
+		if n := most.Load(); n != maxDownloads {
+			t.Errorf("at most %d downloads at once, want %d", n, maxDownloads)
+		}
+	})
 }

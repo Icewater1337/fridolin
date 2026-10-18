@@ -704,14 +704,15 @@ folders of their own rather than your home directory, and
 Handles pairing, allowlists, trigger matching, attachment downloads, and poll
 vote decryption. Each chat's messages, edits, deletions and votes wait on a
 queue of their own (`chatqueue.go`), whose worker hands them on in the order
-they came, so a slow download holds up only its own chat. It keeps the list of
-the account's groups that the dashboard shows (`groupcache.go`), and asks
-WhatsApp for it again only after a group event or a reconnect, once it is ten
-minutes old, or when you press Refresh on the Chats page. Group names come from
-that list and from rename events; only a group that is not allowed is looked
-up, at most once an hour. **`polls.go`** — the `[POLL]` blocks in replies,
-sending them, and matching votes to options (WhatsApp sends SHA-256 hashes of
-option names, which are matched against the stored options).
+they came, so a slow download holds up only its own chat; at most three files
+download at once, all chats together. It keeps the list of the account's groups
+that the dashboard shows (`groupcache.go`), and asks WhatsApp for it again only
+after a group event or a reconnect, once it is ten minutes old, or when you
+press Refresh on the Chats page. Group names come from that list and from
+rename events; only a group that is not allowed is looked up, at most once an
+hour. **`polls.go`** — the `[POLL]` blocks in replies, sending them, and
+matching votes to options (WhatsApp sends SHA-256 hashes of option names, which
+are matched against the stored options).
 
 **`media.go`** — the media inbox: each brain's own folder in the media
 directory, and moving a message's files into the inbox of the brain that

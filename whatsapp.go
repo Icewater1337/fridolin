@@ -92,8 +92,10 @@ type WhatsAppClient struct {
 	cancel context.CancelFunc
 
 	// intake holds each chat's message events until its worker handles
-	// them, in the order they came (see chatQueues).
-	intake chatQueues
+	// them, in the order they came (see chatQueues); downloads bounds the
+	// attachments downloaded at once.
+	intake    chatQueues
+	downloads downloadSlots
 
 	// pairMu serialises pairing; pairing is set while a pairing session's
 	// codes are followed (see StartPairing).
@@ -541,7 +543,7 @@ func (wa *WhatsAppClient) handleDMMessage(msg *events.Message, sender types.JID)
 	text := extractText(msg.Message)
 	quoted := wa.quoteOf(msg.Message)
 
-	mediaPath, caption, notice := wa.downloadAttachment(msg, chatJID)
+	mediaPath, caption, notice := wa.fetchAttachment(msg, chatJID)
 	if notice != "" {
 		go wa.notify(chatJID, notice)
 	}
@@ -673,7 +675,7 @@ func (wa *WhatsAppClient) handleGroupMessage(msg *events.Message) {
 			caption = att.caption
 		}
 	} else {
-		mediaPath, caption, notice = wa.downloadAttachment(msg, groupJID)
+		mediaPath, caption, notice = wa.fetchAttachment(msg, groupJID)
 	}
 	if notice != "" {
 		go wa.notify(groupJID, notice)
@@ -697,6 +699,23 @@ func (wa *WhatsAppClient) handleGroupMessage(msg *events.Message) {
 		JID: groupJID, Sender: senderNumber, Text: text, Media: mediaList(mediaPath),
 		Quoted: quoted, Silent: silent, Source: sourceWhatsApp, At: msg.Info.Timestamp, ID: string(msg.Info.ID),
 	})
+}
+
+// fetchAttachment is downloadAttachment once one of the download slots
+// all chats share is free (see maxDownloads). A message without a file
+// needs none, and nor does one whose file declares more than max_media_mb:
+// it is refused before any download, and its sender need not wait for
+// the downloads of others to be told so. One that waits while the client
+// disconnects goes on without a slot: its download fails at once, and the
+// message goes on without the file and without a notice, as one the
+// disconnect cut off.
+func (wa *WhatsAppClient) fetchAttachment(msg *events.Message, chatJID string) (path, caption, notice string) {
+	if att, ok := attachmentOf(msg.Message, msg.Info.ID); ok && att.size <= uint64(wa.cfg().MaxMediaBytes()) {
+		if release, ok := wa.downloads.acquire(wa.ctx); ok {
+			defer release()
+		}
+	}
+	return wa.downloadAttachment(msg, chatJID)
 }
 
 // downloadAttachment saves whichever attachment the message carries and
@@ -741,7 +760,7 @@ func (wa *WhatsAppClient) sendNotice(jid, text string) {
 
 // mediaDownloadTimeout bounds one attachment download. Downloads run on
 // their chat's worker, so a stalled one holds up the messages its chat
-// sent after it.
+// sent after it, and one of the maxDownloads slots.
 const mediaDownloadTimeout = 2 * time.Minute
 
 // mediaDownloader is what saveAttachment needs from whatsmeow.Client; tests
