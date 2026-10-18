@@ -1628,6 +1628,16 @@ func (b *Bridge) restoreTarget(p string) (string, error) {
 	if len(problems) > 0 {
 		return "", errors.New(strings.Join(problems, "; "))
 	}
+	// The folder comes from the request, and CheckBrainPath only reports
+	// on it. Build what is listed, made and copied into from your home
+	// folder and a part of it that stays inside, so that it is there by
+	// construction and not only by that report.
+	home := canonicalDir(homeDir())
+	rel, err := filepath.Rel(home, target)
+	if err != nil || rel == "." || !filepath.IsLocal(rel) {
+		return "", errors.New("restore into a new folder inside your home folder")
+	}
+	target = filepath.Join(home, rel)
 	entries, err := os.ReadDir(target)
 	switch {
 	case err == nil && len(entries) > 0:
