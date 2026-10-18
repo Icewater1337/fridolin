@@ -2895,6 +2895,58 @@ func TestPlaudRefusesALoginThatIsASymlink(t *testing.T) {
 	}
 }
 
+// TestPlaudRefusesALoginElsewhere: only a symlinked tokens.json was
+// refused, but a brain under an older sandbox could also have swapped
+// ~/.plaud itself for a symlink, or left a hard link to the login, which
+// the bridge's CLI, outside the sandbox, then wrote through. Both are
+// refused now as the symlink is; a login of its own is not.
+func TestPlaudRefusesALoginElsewhere(t *testing.T) {
+	cases := []struct {
+		name  string
+		setup func(t *testing.T, home, elsewhere string)
+		says  string // "" for a login that is fine
+	}{
+		{"a login of its own", func(t *testing.T, home, _ string) {
+			writeTestFile(t, filepath.Join(home, ".plaud", "tokens.json"), "{}")
+		}, ""},
+		{"no login yet", func(t *testing.T, home, _ string) {}, ""},
+		{"a symlinked folder", func(t *testing.T, home, elsewhere string) {
+			writeTestFile(t, filepath.Join(elsewhere, "tokens.json"), "{}")
+			if err := os.Symlink(elsewhere, filepath.Join(home, ".plaud")); err != nil {
+				t.Fatal(err)
+			}
+		}, ".plaud is a symlink"},
+		{"a file where the folder goes", func(t *testing.T, home, _ string) {
+			writeTestFile(t, filepath.Join(home, ".plaud"), "x")
+		}, ".plaud is not a folder"},
+		{"a hard link", func(t *testing.T, home, elsewhere string) {
+			other := writeTestFile(t, filepath.Join(elsewhere, "zshrc"), "x")
+			if err := os.MkdirAll(filepath.Join(home, ".plaud"), 0o700); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.Link(other, filepath.Join(home, ".plaud", "tokens.json")); err != nil {
+				t.Fatal(err)
+			}
+		}, "tokens.json is a file with another name too"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			home, elsewhere := t.TempDir(), t.TempDir()
+			c.setup(t, home, elsewhere)
+			err := checkPlaudLogin(home)
+			if c.says == "" {
+				if err != nil {
+					t.Errorf("checkPlaudLogin = %v, want nil", err)
+				}
+				return
+			}
+			if err == nil || !strings.Contains(err.Error(), c.says) {
+				t.Errorf("checkPlaudLogin = %v, want it saying %q", err, c.says)
+			}
+		})
+	}
+}
+
 func TestPlaudConnectShowsTheSignInLinkWhileWaiting(t *testing.T) {
 	tb, fp := plaudBridge(t, "")
 	fp.write("login_wait", "")

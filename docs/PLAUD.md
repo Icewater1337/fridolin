@@ -154,8 +154,9 @@ the file: one that put a symlink in its place would have had Fridolin's
 own `plaud`, which runs outside the sandbox, write your next sign-in
 wherever the link points. Older versions' sandbox did not stop that, so
 Fridolin also checks before each run of the tool: if `tokens.json` is a
-symlink, it does not run it (a sign-out aside, which removes only the
-link), and the Plaud card says to remove the link and connect again. A
+symlink or has a second name (a hard link), or `~/.plaud` is a symlink, it
+does not run it (a sign-out aside, which removes only the link), and the
+Plaud card says to remove the link and connect again. A
 brain's `plaud logout` still revokes the login at Plaud, as anything
 holding the token can, though the file stays: Fridolin's next check then
 finds the login refused.

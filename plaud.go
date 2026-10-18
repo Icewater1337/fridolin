@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"log"
 	"net"
 	"net/http"
@@ -21,6 +22,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 
 	"go.mau.fi/whatsmeow/types"
@@ -722,19 +724,35 @@ func (p *PlaudManager) runCLIIn(ctx context.Context, home string, out io.Writer,
 }
 
 // checkPlaudLogin refuses a login in the CLI home home that is there but
-// not a regular file. With plaud.brain_access brains share
+// not a regular file of its own. With plaud.brain_access brains share
 // ~/.plaud/tokens.json, which their sandbox lets them rewrite but not
 // replace (see Profile); one an older version's sandbox let a brain swap
 // for a symlink would have the CLI, which runs here outside the sandbox,
-// write your next sign-in wherever the link points, and chmod it there. A
-// sign-out still runs: it removes the link, not what the link points to.
+// write your next sign-in wherever the link points, and chmod it there.
+// So would ~/.plaud swapped for a symlink, and a hard link to the file
+// from elsewhere gets every rewrite of it. A sign-out still runs: it
+// removes the link, not what the link points to.
 func checkPlaudLogin(home string) error {
-	p := filepath.Join(home, ".plaud", "tokens.json")
+	dir := filepath.Join(home, ".plaud")
+	if fi, err := os.Lstat(dir); err == nil && !fi.IsDir() {
+		return plaudLoginRefused(dir, fi, "not a folder")
+	}
+	p := filepath.Join(dir, "tokens.json")
 	fi, err := os.Lstat(p)
-	if err != nil || fi.Mode().IsRegular() {
+	if err != nil {
 		return nil
 	}
-	what := "not a regular file"
+	if !fi.Mode().IsRegular() {
+		return plaudLoginRefused(p, fi, "not a regular file")
+	}
+	if st, ok := fi.Sys().(*syscall.Stat_t); ok && st.Nlink != 1 {
+		return plaudLoginRefused(p, fi, "a file with another name too (a hard link)")
+	}
+	return nil
+}
+
+// plaudLoginRefused is checkPlaudLogin's error for p, which is what.
+func plaudLoginRefused(p string, fi fs.FileInfo, what string) error {
 	if fi.Mode()&os.ModeSymlink != 0 {
 		what = "a symlink"
 	}
