@@ -2109,6 +2109,30 @@ func TestPlaudStopEndsCheckNow(t *testing.T) {
 	}
 }
 
+// A fetch the bridge was killed in leaves its folder, with the recording's
+// text, in the data folder. The next start removes it, and nothing else.
+func TestPlaudStartRemovesUnfinishedFetches(t *testing.T) {
+	tb, _ := plaudBridge(t, "")
+	left := filepath.Join(tb.plaud.dir(), plaudFetchPrefix+"123")
+	if err := os.MkdirAll(left, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(left, "transcript.txt"), []byte("[00:00 - 00:04] Speaker 1: Let's ship on Friday."), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := tb.plaud.saveState(plaudSeededState("u_1", plaudOld1)); err != nil {
+		t.Fatal(err)
+	}
+	tb.plaud.Start(context.Background())
+	tb.plaud.Stop()
+	if _, err := os.Stat(left); !errors.Is(err, os.ErrNotExist) {
+		t.Errorf("the unfinished fetch is still there: %v", err)
+	}
+	if st, err := tb.plaud.loadState(); err != nil || !st.Seeded {
+		t.Errorf("the state = %+v, %v; want it kept", st, err)
+	}
+}
+
 // Turning plaud.brain_access on or off moves where the CLI keeps its
 // login. Fridolin does not take over the login it finds there, which may
 // be your terminal's, of another account: it waits, without running the

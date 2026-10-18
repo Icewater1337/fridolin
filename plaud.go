@@ -893,7 +893,7 @@ func (p *PlaudManager) forward(ctx context.Context, cfg *Config, id string, item
 	if d["transcript"] != "available" {
 		return nil, nil
 	}
-	tmp, err := os.MkdirTemp(p.dir(), "fetch-")
+	tmp, err := os.MkdirTemp(p.dir(), plaudFetchPrefix)
 	if err != nil {
 		return nil, err
 	}
@@ -1527,8 +1527,30 @@ func (p *PlaudManager) notifyAuthExpired() {
 	}
 }
 
-// Start runs the poller.
+// plaudFetchPrefix starts the folders in the data folder that a fetch
+// writes a recording's transcript and summary to (see forward).
+const plaudFetchPrefix = "fetch-"
+
+// removeFetchFolders removes the folders of fetches that never ended: a
+// fetch removes its own, but not when the bridge is killed during it, and
+// what it wrote is the recording's text.
+func (p *PlaudManager) removeFetchFolders() {
+	entries, _ := os.ReadDir(p.dir())
+	for _, e := range entries {
+		if e.IsDir() && strings.HasPrefix(e.Name(), plaudFetchPrefix) {
+			if err := os.RemoveAll(filepath.Join(p.dir(), e.Name())); err != nil {
+				log.Printf("plaud: %v", err)
+			}
+		}
+	}
+}
+
+// Start runs the poller, after removing what fetches that never ended left
+// behind. The dashboard may already be serving then, but a check it
+// started meanwhile has not reached a fetch yet: it looks up the account
+// and lists the recordings first, each a run of the CLI.
 func (p *PlaudManager) Start(ctx context.Context) {
+	p.removeFetchFolders()
 	ctx, cancel := context.WithCancel(ctx)
 	p.mu.Lock()
 	p.stop, p.life = cancel, ctx
