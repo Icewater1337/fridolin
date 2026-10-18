@@ -347,7 +347,7 @@ export default {
       const ok = await confirmDialog({
         title: `Mirror the deletion in ${name}?`,
         message: h('div',
-          h('p', 'Most of the files backed up from ', mono(b.dir), ' are gone from that folder. Check it first: a brain, a disk that is not mounted or a moved folder can empty it by accident.'),
+          h('p', 'Many of the files backed up from ', mono(b.dir), ', or most of one of its folders, are gone from it. Check it first: a brain, a disk that is not mounted or a moved folder can empty it by accident.'),
           h('p', 'Mirroring removes the missing files from the latest copy in Google Drive. ',
             days > 0 ? `Their previous copies stay in the older versions for ${plural(days, 'day')}.` : 'Their previous copies stay in the older versions.')),
         confirm: 'Mirror the deletion', danger: true,

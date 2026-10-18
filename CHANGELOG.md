@@ -43,6 +43,12 @@ yet, so everything is under Unreleased until the first one.
   it into `~/.local/bin` or `/opt/homebrew/bin`
   (`brew link --force node@22`). Brains that `plaud.brain_access` lets
   use the CLI get its folder last on `PATH` unless it holds a `node`.
+- A brain's backup refuses to mirror a deletion also when more than a
+  fifth of its backed-up files are gone (once that is ten or more), when
+  250 or more are gone, or when a top-level folder with at least five
+  backed-up files lost more than half of them, so that a wiped
+  `memories/` is no longer mirrored. "Mirror the deletion…" on the
+  backup card goes ahead with one that was meant.
 
 ### Added
 
