@@ -25,15 +25,19 @@
   --accent-soft: light-dark(#e2f3ed, #11352c);
   --accent-text: light-dark(#ffffff, #052119);
   --focus: light-dark(#0f7b62, #62d8b4);
-  --ok: light-dark(#18803d, #4cc777);
+  --ok: light-dark(#177c3b, #4cc777);
   --ok-soft: light-dark(#e5f4ea, #13301f);
   --ok-border: light-dark(#b9dfc6, #25573a);
   --warn: light-dark(#965a00, #e6ae4a);
   --warn-soft: light-dark(#fdf2dd, #33260f);
   --warn-border: light-dark(#efd29d, #5e461f);
   --bad: light-dark(#c22d2d, #f2756b);
+  --bad-strong: light-dark(#a82626, #f68f86);
   --bad-soft: light-dark(#fcebea, #391a19);
   --bad-border: light-dark(#f1c1bd, #67302c);
+  /* Text on a --bad background, like --accent-text: the dark theme's
+     light red needs dark text. */
+  --bad-text: light-dark(#ffffff, #2a0a08);
   --info: light-dark(#2458c6, #7ea9ff);
   --info-soft: light-dark(#e8effc, #172744);
   --info-border: light-dark(#c5d5f5, #2b4572);
@@ -46,7 +50,7 @@
   --backdrop: light-dark(rgba(15, 20, 28, 0.42), rgba(0, 0, 0, 0.6));
   --log-bg: light-dark(#fbfcfd, #0b0e13);
   --log-text: light-dark(#1f2933, #d5dae1);
-  --log-muted: light-dark(#7b8794, #6c7786);
+  --log-muted: light-dark(#687380, #7a8594);
   --log-err: light-dark(#c22d2d, #ff7b72);
   --log-warn: light-dark(#965a00, #e3b341);
   --log-dev: light-dark(#2458c6, #79c0ff);

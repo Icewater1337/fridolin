@@ -272,8 +272,8 @@ a.badge:hover { color: var(--accent); }
 .btn .icon { width: 16px; height: 16px; }
 .btn.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-text); }
 .btn.primary:hover { background: var(--accent-strong); border-color: var(--accent-strong); color: var(--accent-text); }
-.btn.danger { background: var(--bad); border-color: var(--bad); color: #fff; }
-.btn.danger:hover { filter: brightness(1.08); background: var(--bad); color: #fff; }
+.btn.danger { background: var(--bad); border-color: var(--bad); color: var(--bad-text); }
+.btn.danger:hover { background: var(--bad-strong); border-color: var(--bad-strong); color: var(--bad-text); }
 .btn.ghost { background: transparent; border-color: transparent; color: var(--text-2); }
 .btn.ghost:hover { background: var(--surface-2); color: var(--text); }
 .btn.small { min-height: 30px; padding: 0 10px; font-size: 13px; }
