@@ -1,4 +1,4 @@
-package main
+package history
 
 import (
 	"bytes"
@@ -25,7 +25,7 @@ func (c *countingReader) ReadAt(p []byte, off int64) (int, error) {
 // The backward reader hands each line over once, newest first, however the
 // blocks cut the file, and keeps going past a line too long to take.
 func TestScanHistoryBackward(t *testing.T) {
-	long := strings.Repeat("x", maxHistoryLine+1)
+	long := strings.Repeat("x", MaxLine+1)
 	block := strings.Repeat("y", historyBlock-3) // with "\n", it ends a byte short of a block
 	// several is a line across four blocks whose parts read differently,
 	// so that parts joined out of order show.
@@ -112,7 +112,7 @@ func TestMentionsChat(t *testing.T) {
 // crosses: that cost about 136 MB for a line of 4 MB, on every reading
 // that went past it.
 func TestScanHistoryBackwardCopiesALongLineOnce(t *testing.T) {
-	line := strings.Repeat("x", maxHistoryLine-historyBlock)
+	line := strings.Repeat("x", MaxLine-historyBlock)
 	file := []byte("old\n" + line + "\nnew\n")
 	var before, after runtime.MemStats
 	runtime.GC()

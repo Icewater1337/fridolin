@@ -24,10 +24,11 @@ import (
 // edge is a change to this table, made and reviewed in the same pull
 // request. Imports from outside the module are not checked here.
 var imports = map[string][]string{
-	"cmd/fridolin":      {"examples", "internal/fsx", "internal/logx", "internal/platform", "internal/store", "internal/textx", "internal/trigger", "internal/version", "site", "web"},
+	"cmd/fridolin":      {"examples", "internal/fsx", "internal/history", "internal/logx", "internal/platform", "internal/store", "internal/textx", "internal/trigger", "internal/version", "site", "web"},
 	"examples":          nil,
 	"internal/archtest": nil,
 	"internal/fsx":      nil,
+	"internal/history":  {"internal/fsx"},
 	"internal/logx":     nil,
 	"internal/platform": nil,
 	"internal/store":    {"internal/fsx", "internal/logx"},

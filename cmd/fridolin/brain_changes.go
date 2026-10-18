@@ -110,11 +110,11 @@ func (br *Brain) recordChange(c messageChange, waiting bool, edited *Inbound) {
 func (br *Brain) rewriteHistory(id string, match func(historyEntry) bool, replace func(historyEntry) *historyEntry) (int, error) {
 	br.historyMu.Lock()
 	defer br.historyMu.Unlock()
-	return rewriteHistory(br.root, id, match, replace)
+	return rewriteHistoryFile(br.root, id, match, replace)
 }
 
 func (br *Brain) holdsEntry(id string, match func(historyEntry) bool) (bool, error) {
 	br.historyMu.Lock()
 	defer br.historyMu.Unlock()
-	return holdsEntry(br.root, id, match)
+	return holdsEntryFile(br.root, id, match)
 }

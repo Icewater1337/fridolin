@@ -1,4 +1,4 @@
-package main
+package fsx
 
 import (
 	"errors"
@@ -7,11 +7,11 @@ import (
 	"syscall"
 )
 
-// errSymlink is why the bridge refuses a file that a brain could have
+// ErrSymlink is why the bridge refuses a file that a brain could have
 // replaced with a symlink.
-var errSymlink = errors.New("it is a symlink, which the bridge does not follow")
+var ErrSymlink = errors.New("it is a symlink, which the bridge does not follow")
 
-// openInFolder opens the file name, relative to the brain folder root, for
+// OpenInFolder opens the file name, relative to the brain folder root, for
 // the bridge, which works on it outside the sandbox while the brain
 // controls what is there: a brain may replace any file in its folder with
 // a symlink to ~/.ssh, to another brain's history or to a file the sandbox
@@ -23,7 +23,7 @@ var errSymlink = errors.New("it is a symlink, which the bridge does not follow")
 // that nothing swapped in between gets through. The open does not block,
 // so a FIFO cannot hang the bridge either. With os.O_CREATE it creates
 // the file when there is none, never through a symlink.
-func openInFolder(root *os.Root, name string, flag int, perm os.FileMode) (*os.File, error) {
+func OpenInFolder(root *os.Root, name string, flag int, perm os.FileMode) (*os.File, error) {
 	for tries := 0; ; tries++ {
 		fi, err := root.Lstat(name)
 		if errors.Is(err, fs.ErrNotExist) && flag&os.O_CREATE != 0 {
@@ -39,7 +39,7 @@ func openInFolder(root *os.Root, name string, flag int, perm os.FileMode) (*os.F
 			return nil, err
 		}
 		if fi.Mode()&fs.ModeSymlink != 0 {
-			return nil, errSymlink
+			return nil, ErrSymlink
 		}
 		if !fi.Mode().IsRegular() {
 			return nil, errors.New("not a regular file")

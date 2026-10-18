@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"github.com/Icewater1337/fridolin/internal/history"
 	"os"
 	"path/filepath"
 	"strings"
@@ -13,9 +14,9 @@ import (
 // a line too long to take does not hide what came after it, and what lies
 // further back than the budget is not read at all.
 func TestPromptHistoryIsReadFromTheEnd(t *testing.T) {
-	prevBudget, prevLine := promptHistoryBudget, maxHistoryLine
-	promptHistoryBudget, maxHistoryLine = 4<<20, 256<<10
-	t.Cleanup(func() { promptHistoryBudget, maxHistoryLine = prevBudget, prevLine })
+	prevBudget, prevLine := promptHistoryBudget, history.MaxLine
+	promptHistoryBudget, history.MaxLine = 4<<20, 256<<10
+	t.Cleanup(func() { promptHistoryBudget, history.MaxLine = prevBudget, prevLine })
 	filler := strings.Repeat("chatter ", 128)
 	other := func(br *Brain, bytes int) {
 		for range bytes / len(filler) {
@@ -34,7 +35,7 @@ func TestPromptHistoryIsReadFromTheEnd(t *testing.T) {
 		{"after a line too long to take", func(br *Brain) {
 			br.appendHistory(testDMChat, "15551234567", "old", historyIn)
 			// JSON writes each < as \u003c, six bytes.
-			br.appendHistory(testDMChat, "15551234567", strings.Repeat("<", maxHistoryLine/2), historyIn)
+			br.appendHistory(testDMChat, "15551234567", strings.Repeat("<", history.MaxLine/2), historyIn)
 			br.appendHistory(testDMChat, "15551234567", "newest", historyIn)
 		}, "old newest"},
 		{"after a line that is no JSON", func(br *Brain) {

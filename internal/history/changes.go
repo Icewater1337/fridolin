@@ -1,4 +1,4 @@
-package main
+package history
 
 import (
 	"bufio"
@@ -8,19 +8,20 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/Icewater1337/fridolin/internal/fsx"
 	"io"
 	"os"
 )
 
-// rewriteHistory rewrites the brain's history file: each line match
+// Rewrite rewrites the brain's history file: each line match
 // accepts, which must be one of the message id's, is replaced by what
 // replace returns for it, or left out when that is nil. Every other line,
 // one that does not decode included, stays as it was. It returns how many
 // lines matched. The new file is written next to the old one in the
 // brain's folder and renamed over it, through the folder's root like
 // every other access, so that a crash leaves one or the other.
-func rewriteHistory(root *os.Root, id string, match func(historyEntry) bool, replace func(historyEntry) *historyEntry) (int, error) {
-	in, err := openInFolder(root, historyFileName, os.O_RDONLY, 0)
+func Rewrite(root *os.Root, id string, match func(Entry) bool, replace func(Entry) *Entry) (int, error) {
+	in, err := fsx.OpenInFolder(root, FileName, os.O_RDONLY, 0)
 	if errors.Is(err, os.ErrNotExist) {
 		return 0, nil
 	}
@@ -41,8 +42,8 @@ func rewriteHistory(root *os.Root, id string, match func(historyEntry) bool, rep
 
 	var suffix [8]byte
 	_, _ = rand.Read(suffix[:])
-	tmpName := "." + historyFileName + ".tmp-" + hex.EncodeToString(suffix[:])
-	out, err := openInFolder(root, tmpName, os.O_WRONLY|os.O_CREATE, 0o600)
+	tmpName := "." + FileName + ".tmp-" + hex.EncodeToString(suffix[:])
+	out, err := fsx.OpenInFolder(root, tmpName, os.O_WRONLY|os.O_CREATE, 0o600)
 	if err != nil {
 		return 0, err
 	}
@@ -57,7 +58,7 @@ func rewriteHistory(root *os.Root, id string, match func(historyEntry) bool, rep
 	for {
 		line, rerr := r.ReadBytes('\n')
 		if len(line) > 0 {
-			var e historyEntry
+			var e Entry
 			if json.Unmarshal(bytes.TrimSpace(line), &e) == nil && match(e) {
 				n++
 				repl := replace(e)
@@ -87,17 +88,17 @@ func rewriteHistory(root *os.Root, id string, match func(historyEntry) bool, rep
 	if err := out.Sync(); err != nil {
 		return 0, err
 	}
-	if err := root.Rename(tmpName, historyFileName); err != nil {
+	if err := root.Rename(tmpName, FileName); err != nil {
 		return 0, fmt.Errorf("replacing the history: %w", err)
 	}
 	return n, nil
 }
 
-// holdsEntry reports whether the brain's history has a line match
+// HoldsEntry reports whether the brain's history has a line match
 // accepts, which must be one of the message id's. Like rewriteHistory, it
 // decodes the lines only of a file that holds id at all.
-func holdsEntry(root *os.Root, id string, match func(historyEntry) bool) (bool, error) {
-	f, err := openInFolder(root, historyFileName, os.O_RDONLY, 0)
+func HoldsEntry(root *os.Root, id string, match func(Entry) bool) (bool, error) {
+	f, err := fsx.OpenInFolder(root, FileName, os.O_RDONLY, 0)
 	if errors.Is(err, os.ErrNotExist) {
 		return false, nil
 	}
@@ -114,7 +115,7 @@ func holdsEntry(root *os.Root, id string, match func(historyEntry) bool) (bool, 
 	r := bufio.NewReader(f)
 	for {
 		line, rerr := r.ReadBytes('\n')
-		var e historyEntry
+		var e Entry
 		if len(line) > 0 && json.Unmarshal(bytes.TrimSpace(line), &e) == nil && match(e) {
 			return true, nil
 		}

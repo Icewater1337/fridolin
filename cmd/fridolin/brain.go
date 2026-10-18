@@ -1789,7 +1789,7 @@ func (m Inbound) enoughBefore(limit int) func(e historyEntry) bool {
 	return func(e historyEntry) bool {
 		if len(lines) > 0 {
 			// Newest first: the first of m's lines is the last found.
-			if i := slices.IndexFunc(lines, func(l historyEntry) bool { return l.sameLine(e) }); i >= 0 {
+			if i := slices.IndexFunc(lines, func(l historyEntry) bool { return l.SameLine(e) }); i >= 0 {
 				lines = slices.Delete(lines, i, i+1)
 			}
 			return false
@@ -1810,7 +1810,7 @@ func (m Inbound) loggedIn(entries []historyEntry) int {
 			continue
 		}
 		for i := len(entries) - 1; i >= 0; i-- {
-			if p.logged.sameLine(entries[i]) {
+			if p.logged.SameLine(entries[i]) {
 				return i
 			}
 		}
