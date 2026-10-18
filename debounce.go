@@ -1,6 +1,7 @@
 package main
 
 import (
+	"slices"
 	"sync"
 	"time"
 )
@@ -16,6 +17,12 @@ type Debouncer struct {
 
 	mu      sync.Mutex
 	batches map[string]*pendingBatch
+	// drained is set by Drain: the batches are gone, and Add flushes at
+	// once from then on.
+	drained bool
+	// flushing counts the flushes a timer has begun, which Drain waits
+	// for.
+	flushing sync.WaitGroup
 }
 
 type pendingBatch struct {
@@ -43,11 +50,12 @@ func batchKey(m Inbound) string { return m.Brain + "|" + m.JID + "|" + m.Sender 
 // Add queues m, merging it into the sender's open batch for the chat.
 func (d *Debouncer) Add(m Inbound) {
 	quiet := d.quiet()
-	if quiet <= 0 {
+	d.mu.Lock()
+	if quiet <= 0 || d.drained {
+		d.mu.Unlock()
 		d.flush(m)
 		return
 	}
-	d.mu.Lock()
 	msg, due := d.addLocked(m, quiet, time.Now())
 	d.mu.Unlock()
 	if due {
@@ -95,7 +103,9 @@ func (d *Debouncer) fire(key string, b *pendingBatch, gen uint64) {
 	}
 	delete(d.batches, key)
 	msg := b.msg
+	d.flushing.Add(1)
 	d.mu.Unlock()
+	defer d.flushing.Done()
 	d.flush(msg)
 }
 
@@ -133,14 +143,27 @@ func (d *Debouncer) Drop(jid string) {
 	}
 }
 
-// DropAll discards every open batch (on shutdown).
-func (d *Debouncer) DropAll() {
+// Drain takes out every open batch and returns their messages, the oldest
+// batch first, for the bridge's stop to keep (Bridge.Stop). It waits for
+// a flush a timer has begun: that message is in a brain's queue once Drain
+// returns. From then on, Add flushes each message at once.
+func (d *Debouncer) Drain() []Inbound {
 	d.mu.Lock()
-	defer d.mu.Unlock()
+	d.drained = true
+	batches := make([]*pendingBatch, 0, len(d.batches))
 	for k, b := range d.batches {
 		b.timer.Stop()
 		delete(d.batches, k)
+		batches = append(batches, b)
 	}
+	d.mu.Unlock()
+	d.flushing.Wait()
+	slices.SortFunc(batches, func(a, b *pendingBatch) int { return a.started.Compare(b.started) })
+	out := make([]Inbound, len(batches))
+	for i, b := range batches {
+		out[i] = b.msg
+	}
+	return out
 }
 
 // Pending returns how many batches are waiting.

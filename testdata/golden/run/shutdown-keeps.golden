@@ -1,0 +1,8 @@
+sent:
+  15551234567@s.whatsapp.net "⏳ Queued (#1) — I'll get to this right after the current task."
+  15551234567@s.whatsapp.net "🔄 I restarted while I was working on your message. Send it again if you still need an answer."
+  15551234567@s.whatsapp.net "echo:<HOME>/main:15551234567 says: second"
+history:
+  {"ts":"<TIME>","from":"15551234567","chat":"15551234567@s.whatsapp.net","text":"first","type":"in","id":"3EB0FIRST"}
+  {"ts":"<TIME>","from":"15551234567","chat":"15551234567@s.whatsapp.net","text":"second","type":"in","id":"3EB0SECOND"}
+  {"ts":"<TIME>","from":"main","chat":"15551234567@s.whatsapp.net","text":"echo:<HOME>/main:15551234567 says: second","type":"out"}

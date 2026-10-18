@@ -80,9 +80,11 @@ history, but runs and replies only when addressed — by keyword, by
 (or, if you prefer, a newer request replaces the one you sent before it). A
 photo album or a file plus "what is this?" sent in quick succession becomes
 one request. `!stop` stops whatever it is doing for that chat. When the
-bridge stops or restarts, an answer in progress gets 15 seconds to finish.
-A reply written while the connection is down goes out once it is back, even
-after a restart, and the next message is answered knowing it. A message you
+bridge stops or restarts, an answer in progress gets 15 seconds to finish,
+and the messages still waiting are answered once it is back; a chat whose
+answer the restart cut short is asked to send its message again. A reply
+written while the connection is down goes out once it is back, even after
+a restart, and the next message is answered knowing it. A message you
 delete for everyone is not answered, even while it is being answered, and
 leaves the chat history (an answer already written, waiting for the
 connection, still goes out); an edit of one still waiting changes what is
@@ -752,7 +754,9 @@ the bridge creates for each sandboxed brain before its run: its Claude Code
 config folder, `TMPDIR` and caches.
 
 **`store.go`** — SQLite: the whatsmeow device store, polls, votes, and the
-chats that wrote without being allowed.
+chats that wrote without being allowed. **`inbound_store.go`** — the WhatsApp
+messages no brain had started on when the bridge stopped, which the next
+start answers, and the runs the stop cut short, whose chats it tells.
 
 **`chunks.go`** — splits long replies at paragraph, line, sentence, then word
 boundaries so messages break somewhere readable, and numbers the parts.

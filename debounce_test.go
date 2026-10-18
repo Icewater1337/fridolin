@@ -147,3 +147,43 @@ func TestDebounceTimerThatFiredDuringAddDoesNotFlushEarly(t *testing.T) {
 	}
 	d.Drop("c")
 }
+
+// Drain takes out every batch, the oldest first, for the bridge's stop to
+// keep, and nothing of them flushes after. It waits for a flush a timer has
+// begun, and a message added after it flushes at once.
+func TestDebounceDrain(t *testing.T) {
+	release := make(chan struct{})
+	f := &flushes{}
+	d := NewDebouncer(func() time.Duration { return 50 * time.Millisecond }, func() time.Duration { return 0 }, func(m Inbound) {
+		if m.Text == "slow" {
+			<-release
+		}
+		f.add(m)
+	})
+	d.Add(Inbound{JID: "c", Sender: "1", Text: "slow"})
+	waitFor(t, time.Second, "the flush to begin", func() bool { return d.Pending() == 0 })
+	d.Add(Inbound{JID: "c", Sender: "2", Text: "older"})
+	time.Sleep(5 * time.Millisecond)
+	d.Add(Inbound{JID: "c", Sender: "3", Text: "newer"})
+
+	drained := make(chan []Inbound, 1)
+	go func() { drained <- d.Drain() }()
+	select {
+	case <-drained:
+		t.Fatal("Drain returned while a flush was under way")
+	case <-time.After(100 * time.Millisecond):
+	}
+	close(release)
+	got := <-drained
+	if len(got) != 2 || got[0].Text != "older" || got[1].Text != "newer" {
+		t.Errorf("drained %+v, want the two batches, oldest first", got)
+	}
+	time.Sleep(100 * time.Millisecond)
+	if f.n() != 1 {
+		t.Errorf("%d flushes, want only the one under way", f.n())
+	}
+	d.Add(Inbound{JID: "c", Sender: "4", Text: "after"})
+	if f.n() != 2 {
+		t.Error("a message added after Drain did not flush at once")
+	}
+}

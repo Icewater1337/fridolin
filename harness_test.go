@@ -32,11 +32,12 @@ import (
 // which keeps them the same from run to run; TestSmoke is the test that
 // starts one.
 //
-// Two places still reach inside, and the moves that change what they use
-// must change them too: newHarness builds the bridge with NewBridge and
-// newHTTPHandler, and WhatsApp hands an event to a WhatsAppClient built
-// from its unexported fields, with the bridge's handleInbound and dev
-// transport.
+// Three places still reach inside, and the moves that change what they
+// use must change them too: newHarness and Reopen build the bridge with
+// NewBridge and newHTTPHandler, Reopen takes up what the last stop kept
+// with Bridge.resume, as Start does, and WhatsApp hands an event to a
+// WhatsAppClient built from its unexported fields, with the bridge's
+// handleInbound and dev transport.
 type harness struct {
 	t *testing.T
 	// b is the bridge, for the harness's own setup and shutdown only.
@@ -120,8 +121,9 @@ func (h *harness) Restart() {
 }
 
 // Reopen starts a new bridge on the config and data dir of the one
-// Shutdown stopped. Outbox and SentTo go on to list what the stopped
-// bridges sent, then what the new one sends.
+// Shutdown stopped, and takes up what that one kept for the next start,
+// as Bridge.Start does before WhatsApp connects. Outbox and SentTo go on
+// to list what the stopped bridges sent, then what the new one sends.
 func (h *harness) Reopen() {
 	h.t.Helper()
 	h.sentBefore = h.Outbox()
@@ -135,6 +137,7 @@ func (h *harness) Reopen() {
 	}
 	h.b, h.h, h.stop = b, b.newHTTPHandler(defaultHTTPListen), sync.OnceFunc(b.Stop)
 	h.t.Cleanup(h.stop)
+	b.resume(context.Background())
 }
 
 // Do sends a request the way the dashboard does: with the token, and on

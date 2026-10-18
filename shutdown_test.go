@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"log"
 	"net"
@@ -12,6 +13,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -405,5 +407,127 @@ func TestStopWaitsForTheDelivery(t *testing.T) {
 	mgr.Stop()
 	if !delivered.Load() {
 		t.Error("Stop returned before the run's reply was delivered")
+	}
+}
+
+// TestShutdownKeepsWhatItHolds: stopping the bridge, as SIGTERM and a
+// restart do, keeps what no brain has started on for the next start, and
+// tells the chat whose run it cut short. A run is in flight past its grace
+// and a second message waits behind it: after the restart the second is
+// answered, once, its line in the history once, and the chat hears that
+// the restart cut the first one's run short.
+func TestShutdownKeepsWhatItHolds(t *testing.T) {
+	setShutdownGrace(t, 200*time.Millisecond)
+	h := newHarness(t, "")
+	dir := h.AddBrain(BrainManifest{ID: "main", Name: "Main", Routing: BrainRouting{HandlesDMs: true}})
+	t.Setenv("FRIDOLIN_FAKE_SLEEP_MS", "30000")
+	h.WhatsApp(dmEvent("3EB0FIRST", textMsg("first")))
+	h.WaitFor("the first run", func() bool { return h.Running("main") })
+	h.WhatsApp(dmEvent("3EB0SECOND", textMsg("second")))
+	h.WaitSent(harnessDM, "Queued")
+	t.Setenv("FRIDOLIN_FAKE_SLEEP_MS", "10")
+	h.Restart()
+	h.WaitSent(harnessDM, "says: second")
+	h.WaitFor("the answer in the history", func() bool {
+		return slices.ContainsFunc(historyLines(t, dir), func(l string) bool { return strings.Contains(l, `"type":"out"`) })
+	})
+
+	s := h.scrubber()
+	var sb strings.Builder
+	sb.WriteString("sent:\n")
+	for _, m := range h.Outbox() {
+		fmt.Fprintf(&sb, "  %s %q\n", m.JID, s.text(m.Text))
+	}
+	sb.WriteString("history:\n")
+	for _, l := range historyLines(t, dir) {
+		fmt.Fprintf(&sb, "  %s\n", s.text(l))
+	}
+	assertGolden(t, "run/shutdown-keeps.golden", []byte(sb.String()))
+}
+
+// A stop that begins while the start takes up what the last one kept, a
+// SIGTERM right after the start say, does not cut that short: TakeInbound
+// has taken it out of bridge.db, so a notice not queued then would be
+// lost.
+func TestResumeOutlivesItsContext(t *testing.T) {
+	tb := newTestBridge(t, "")
+	m := Inbound{JID: harnessDM, Sender: "15551234567", Text: "summarise", Source: sourceWhatsApp, At: time.Now(), ID: "3EB0CUT"}
+	if err := tb.store.KeepInterrupted(t.Context(), "main", m); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	tb.resume(ctx)
+	waitFor(t, 5*time.Second, "the notice", func() bool { return slices.Contains(tb.sentTo(harnessDM), restartedNotice) })
+}
+
+// waitBatched waits until the debouncer holds one batch of n messages.
+func waitBatched(h *harness, n int) {
+	h.t.Helper()
+	d := h.b.deb
+	h.WaitFor(fmt.Sprintf("a batch of %d", n), func() bool {
+		d.mu.Lock()
+		defer d.mu.Unlock()
+		for _, b := range d.batches {
+			return len(d.batches) == 1 && len(b.msg.ownParts()) == n
+		}
+		return false
+	})
+}
+
+// A batch the debouncer holds when the bridge stops is answered after the
+// next start, as the one message it was, each of its parts in the history
+// once.
+func TestShutdownKeepsTheDebouncedBatch(t *testing.T) {
+	h := newHarness(t, `{"debounce": {"quiet_ms": 60000, "max_wait_ms": 120000}}`)
+	dir := h.AddBrain(BrainManifest{ID: "main", Name: "Main", Routing: BrainRouting{HandlesDMs: true}})
+	h.WhatsApp(dmEvent("3EB0ONE", textMsg("part one")))
+	waitBatched(h, 1)
+	h.WhatsApp(dmEvent("3EB0TWO", textMsg("part two")))
+	waitBatched(h, 2)
+	h.Restart()
+	if got := h.WaitSent(harnessDM, "says: part one"); !strings.HasSuffix(got, "part one\n\npart two") {
+		t.Errorf("answered %q, want both parts in one run", got)
+	}
+	for _, part := range []string{"part one", "part two"} {
+		n := 0
+		for _, l := range historyLines(t, dir) {
+			if strings.Contains(l, `"text":"`+part+`"`) {
+				n++
+			}
+		}
+		if n != 1 {
+			t.Errorf("%q is in the history %d times, want once", part, n)
+		}
+	}
+}
+
+// What a stop kept longer than outboxTTL ago is dropped at the next start,
+// with a line in the log: an answer that late would only confuse. What it
+// kept since is answered.
+func TestShutdownDropsWhatIsKeptTooLong(t *testing.T) {
+	setShutdownGrace(t, 200*time.Millisecond)
+	h := newHarness(t, "")
+	h.AddBrain(BrainManifest{ID: "main", Name: "Main", Routing: BrainRouting{HandlesDMs: true}})
+	t.Setenv("FRIDOLIN_FAKE_SLEEP_MS", "30000")
+	h.WhatsApp(dmEvent("3EB0RUN", textMsg("a long one")))
+	h.WaitFor("the run", func() bool { return h.Running("main") })
+	old := dmEvent("3EB0OLD", textMsg("from long ago"))
+	old.Info.Timestamp = time.Now().Add(-outboxTTL - time.Minute)
+	h.WhatsApp(old)
+	h.WaitSent(harnessDM, "Queued (#1)")
+	h.WhatsApp(dmEvent("3EB0NEW", textMsg("from just now")))
+	h.WaitSent(harnessDM, "Queued (#2)")
+	t.Setenv("FRIDOLIN_FAKE_SLEEP_MS", "10")
+	var logs lockedBuffer
+	defer log.SetOutput(log.Writer())
+	log.SetOutput(&logs)
+	h.Restart()
+	h.WaitSent(harnessDM, "says: from just now")
+	if slices.ContainsFunc(h.SentTo(harnessDM), func(s string) bool { return strings.Contains(s, "from long ago") }) {
+		t.Error("the message older than outboxTTL was answered")
+	}
+	if !strings.Contains(logs.String(), "dropping a message for "+harnessDM+" that the last stop kept: it came in 1h1m0s ago") {
+		t.Errorf("the log does not say the old message was dropped:\n%s", logs.String())
 	}
 }

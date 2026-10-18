@@ -247,6 +247,13 @@ type BrainHooks struct {
 	// Deliver receives every finished run. It records the answer in the
 	// brain's history once it is sent.
 	Deliver func(br *Brain, m Inbound, res RunResult)
+	// Waiting gets, as the bridge stops, what br had waiting, which never
+	// ran, before its run in flight gets its grace (see shutdown). Nil
+	// drops it.
+	Waiting func(br *Brain, ms []Inbound)
+	// Interrupted gets, as the bridge stops, the message whose run br
+	// stopped once its grace was over.
+	Interrupted func(br *Brain, m Inbound)
 	// Undelivered returns the brain's answers still on their way to
 	// WhatsApp, as its history will record them once they arrived. A
 	// chat gets them before anything a later run says there, so that run
@@ -929,13 +936,19 @@ func (br *Brain) stopRun(run *brainRun) bool {
 var shutdownGrace = 15 * time.Second
 
 // shutdown stops the brain for good as the bridge stops. It takes no new
-// message and starts no new run, and drops what was waiting. The run in
-// flight gets grace to finish and be delivered, and is interrupted after
-// that. shutdown returns once the worker has ended, its last delivery
-// done, or stopRunWait after the interrupt. The activity viewer stays,
-// for the next start to replace.
+// message and starts no new run, and hands what was waiting, which never
+// ran, to the Waiting hook at once. The run in flight gets grace to finish
+// and be delivered, and is interrupted after that, which the Interrupted
+// hook hears of. shutdown returns once the worker has ended, its last
+// delivery done, or stopRunWait after the interrupt. The activity viewer
+// stays, for the next start to replace.
 func (br *Brain) shutdown(grace time.Duration) {
-	dropped(br.closeQueue())
+	waiting := br.closeQueue()
+	if br.hooks != nil && br.hooks.Waiting != nil {
+		br.hooks.Waiting(br, waiting)
+	} else {
+		dropped(waiting)
+	}
 	idle := make(chan struct{})
 	go func() {
 		br.workers.Wait()
@@ -943,6 +956,7 @@ func (br *Brain) shutdown(grace time.Duration) {
 	}()
 	graceOver := time.NewTimer(grace)
 	defer graceOver.Stop()
+	var cut *brainRun
 	select {
 	case <-idle:
 	case <-graceOver.C:
@@ -955,9 +969,20 @@ func (br *Brain) shutdown(grace time.Duration) {
 		}
 		select {
 		case <-idle:
+			// The run may have answered as it was stopped, and then it
+			// was delivered like any other.
+			br.mu.Lock()
+			if cur != nil && br.last != nil && br.last.Outcome == outcomeInterrupted {
+				cut = cur
+			}
+			br.mu.Unlock()
 		case <-time.After(stopRunWait):
 			log.Printf("brain %s: run did not stop within %v", br.id, stopRunWait)
+			cut = cur
 		}
+	}
+	if cut != nil && br.hooks != nil && br.hooks.Interrupted != nil {
+		br.hooks.Interrupted(br, cut.msg)
 	}
 	// Done with the folder. A run that would not stop finds it closed.
 	br.root.Close()
