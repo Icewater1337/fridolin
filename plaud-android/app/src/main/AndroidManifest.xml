@@ -11,7 +11,8 @@
     <application
         android:label="Plaud Sync"
         android:icon="@android:drawable/ic_btn_speak_now"
-        android:theme="@android:style/Theme.Material.Light">
+        android:theme="@android:style/Theme.Material.Light"
+        android:usesCleartextTraffic="${cleartext}">
 
         <activity
             android:name=".MainActivity"

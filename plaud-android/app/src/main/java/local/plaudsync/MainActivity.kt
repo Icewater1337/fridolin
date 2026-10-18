@@ -14,6 +14,7 @@ import android.widget.Button
 import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.TextView
+import java.io.File
 
 /** Status, a few buttons and the log. All the work happens in [SyncService]. */
 class MainActivity : Activity() {
@@ -76,6 +77,11 @@ class MainActivity : Activity() {
             appendLine(if (bleAllowed()) SyncService.status else "Bluetooth permission missing: allow 'Nearby devices'")
             appendLine("Background: ${if (unrestricted) "allowed" else "NOT allowed, tap the button below"}")
             appendLine("Transcripts: ${if (BuildConfig.API_KEY.isEmpty()) "off (no api_key in build)" else "on"}")
+            if (Fridolin.enabled) {
+                val waiting = File(filesDir, "outbox").list()?.size ?: 0
+                appendLine("Fridolin: ${if (Fridolin.device(this@MainActivity) == null) "not paired yet" else "paired"}" +
+                    if (waiting > 0) ", $waiting transcript(s) waiting to be sent" else "")
+            }
             append("Files: Documents/PlaudSync")
         }
         logView.text = AppLog.tail(200).asReversed().joinToString("\n")
