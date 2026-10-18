@@ -528,7 +528,8 @@ func TestStopAndResetAreScopedToTheChat(t *testing.T) {
 	}{
 		{"!stop from the running chat", testDMChat, "!stop", "group 1", nil, "🛑 Stopped"},
 		{"!stop from a chat with only a waiting message", testGroup, "!stop", "dm 1", []string{"dm 2"}, "🛑 Nothing was running for this chat; cleared"},
-		{"!stop from a chat with nothing going", otherDM, "!stop", "dm 1", []string{"dm 2", "group 1"}, "Nothing was running for this chat."},
+		// The DM had its turn with dm 1, so the group goes first.
+		{"!stop from a chat with nothing going", otherDM, "!stop", "dm 1", []string{"group 1", "dm 2"}, "Nothing was running for this chat."},
 		{"!reset from another chat", testGroup, "!reset", "dm 1", []string{"dm 2"}, "✅ Cleared"},
 	}
 	for _, c := range cases {

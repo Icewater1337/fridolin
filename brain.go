@@ -10,6 +10,7 @@ import (
 	"io"
 	"io/fs"
 	"log"
+	"maps"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -192,7 +193,9 @@ func tailLines(f *os.File, maxBytes int64) []string {
 // A brain does not keep a Claude process alive between messages. Each message
 // spawns a fresh `claude -p` run seeded with the recent chat history. Messages
 // for a brain run one at a time from its queue (or, in interrupt mode, a newer
-// request from the same person in the same chat stops the run in flight).
+// request from the same person in the same chat stops the run in flight),
+// each chat's in order and the chats in turn, so that one busy chat does not
+// keep the others waiting behind all of its messages.
 type Brain struct {
 	// Fixed for the brain's lifetime. Changing a brain's folder replaces the
 	// Brain; everything else is in settings and changes live.
@@ -215,7 +218,15 @@ type Brain struct {
 
 	mu      sync.Mutex
 	current *brainRun
+	// pending holds what waits, in the order it came in. Each chat's
+	// messages in it are that chat's lane, which runs in order; which
+	// lane goes next is nextIn's choice.
 	pending []Inbound
+	// turns is, by chat, when its last run started, counted by turn: the
+	// chat whose turn is longest ago goes next. Chats with nothing waiting
+	// are forgotten once that no longer decides anything (takeTurnLocked).
+	turns   map[string]uint64
+	turn    uint64
 	working bool // a worker goroutine is draining pending
 	retired bool // removed from the configuration
 	last    *RunInfo
@@ -501,15 +512,9 @@ func (br *Brain) Submit(m Inbound) (pos int, busy bool, err error) {
 	if cur := br.current; cur != nil && (interrupting && replaces(cur.msg) || !m.Silent && cur.msg.Silent) {
 		interrupt = cur
 	}
-	at := len(br.pending)
-	if !m.Silent {
-		if i := slices.IndexFunc(br.pending, func(p Inbound) bool { return p.Silent }); i >= 0 {
-			at = i
-		}
-	}
-	br.pending = slices.Insert(br.pending, at, m)
-	pos = at + 1
-	busy = at > 0 || (br.current != nil && interrupt == nil)
+	br.pending = append(br.pending, m)
+	pos = slices.Index(br.queueOrderLocked(), len(br.pending)-1) + 1
+	busy = pos > 1 || (br.current != nil && interrupt == nil)
 	start := !br.working
 	br.working = true
 	br.mu.Unlock()
@@ -521,6 +526,83 @@ func (br *Brain) Submit(m Inbound) (pos int, busy bool, err error) {
 		go br.worker()
 	}
 	return pos, busy, nil
+}
+
+// nextIn returns where in pending, waiting messages in the order they came
+// in, the one to run next is. Work addressed to the brain goes before
+// untagged chatter, then the chat whose last turn (see Brain.turns) is
+// longest ago, one that never had one first, and among chats alike the one
+// whose message came in first. A chat's own messages run in the order they
+// came in: they share a turn, and the earliest of them wins the tie.
+func nextIn(pending []Inbound, turns map[string]uint64) int {
+	best := -1
+	for i, p := range pending {
+		if best < 0 {
+			best = i
+			continue
+		}
+		b := pending[best]
+		if p.Silent != b.Silent {
+			if !p.Silent {
+				best = i
+			}
+			continue
+		}
+		if turns[p.JID] < turns[b.JID] {
+			best = i
+		}
+	}
+	return best
+}
+
+// takeTurnLocked records that a run for chat starts now. A chat with
+// nothing waiting whose turn came before every waiting chat's is
+// forgotten: it would go before all of them anyway, as one that never had
+// a turn does, so the record is no longer needed. br.mu is held.
+func (br *Brain) takeTurnLocked(chat string) {
+	if br.turns == nil {
+		br.turns = map[string]uint64{}
+	}
+	br.turn++
+	br.turns[chat] = br.turn
+	low := br.turn
+	waiting := map[string]bool{}
+	for _, p := range br.pending {
+		waiting[p.JID] = true
+		low = min(low, br.turns[p.JID])
+	}
+	for c, t := range br.turns {
+		if !waiting[c] && t < low {
+			delete(br.turns, c)
+		}
+	}
+}
+
+// queueOrderLocked returns the indexes of pending in the order the
+// messages will run as things stand (see nextIn). Messages that come
+// later can still go before some of them, in a chat whose turn comes
+// first. br.mu is held.
+func (br *Brain) queueOrderLocked() []int {
+	idx := make([]int, len(br.pending))
+	for i := range idx {
+		idx[i] = i
+	}
+	rest := slices.Clone(br.pending)
+	turns := maps.Clone(br.turns)
+	if turns == nil {
+		turns = map[string]uint64{}
+	}
+	turn := br.turn
+	order := make([]int, 0, len(rest))
+	for len(rest) > 0 {
+		i := nextIn(rest, turns)
+		order = append(order, idx[i])
+		turn++
+		turns[rest[i].JID] = turn
+		rest = slices.Delete(rest, i, i+1)
+		idx = slices.Delete(idx, i, i+1)
+	}
+	return order
 }
 
 // supersedes says what m replaces when it joins the queue (see Submit):
@@ -557,8 +639,10 @@ func (br *Brain) worker() {
 			br.mu.Unlock()
 			return
 		}
-		m := br.pending[0]
-		br.pending = br.pending[1:]
+		i := nextIn(br.pending, br.turns)
+		m := br.pending[i]
+		br.pending = slices.Delete(br.pending, i, i+1)
+		br.takeTurnLocked(m.JID)
 		s := br.settings.Load()
 		ctx, cancel := runContext(s.runTimeout)
 		run := &brainRun{cancel: cancel, done: make(chan struct{}), msg: m, started: time.Now()}
@@ -818,7 +902,8 @@ type QueuedView struct {
 	Queued  time.Time `json:"queued"`
 }
 
-// Snapshot returns the brain's live state.
+// Snapshot returns the brain's live state, the queue in the order it will
+// run.
 func (br *Brain) Snapshot() BrainRuntime {
 	s := br.settings.Load()
 	rt := BrainRuntime{
@@ -832,7 +917,8 @@ func (br *Brain) Snapshot() BrainRuntime {
 		rt.Running = &RunView{Chat: cur.msg.JID, Sender: cur.msg.Sender, Preview: truncate(cur.msg.textWithQuote(), 160),
 			Silent: cur.msg.Silent, Started: cur.started, PID: cur.pid}
 	}
-	for _, p := range br.pending {
+	for _, i := range br.queueOrderLocked() {
+		p := br.pending[i]
 		rt.Queue = append(rt.Queue, QueuedView{Chat: p.JID, Sender: p.Sender, Preview: truncate(p.textWithQuote(), 160), Silent: p.Silent, Queued: p.At})
 	}
 	if br.last != nil {

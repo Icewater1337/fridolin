@@ -1623,3 +1623,87 @@ func TestHistoryLineIsWrittenOnceTakenAtItsOwnTime(t *testing.T) {
 		})
 	}
 }
+
+// Each chat's messages wait in a lane of their own, which runs in order,
+// and the chats take turns: the chat whose last run started longest ago
+// goes next, one that never had a run first. Work addressed to the brain
+// goes before untagged chatter whatever the turns.
+func TestQueueOrderGivesEachChatItsTurn(t *testing.T) {
+	const x, y, z = "x@s.whatsapp.net", "y@s.whatsapp.net", "z@g.us"
+	msg := func(chat, text string) Inbound { return Inbound{JID: chat, Text: text} }
+	chatter := func(chat, text string) Inbound { return Inbound{JID: chat, Text: text, Silent: true} }
+	cases := []struct {
+		name    string
+		turns   map[string]uint64
+		pending []Inbound
+		want    string
+	}{
+		{"one chat runs in order", nil, []Inbound{msg(x, "x1"), msg(x, "x2"), msg(x, "x3")}, "x1 x2 x3"},
+		{"chats alternate", nil, []Inbound{msg(x, "x1"), msg(x, "x2"), msg(y, "y1"), msg(y, "y2")}, "x1 y1 x2 y2"},
+		{"the chat that just ran goes last", map[string]uint64{x: 3}, []Inbound{msg(x, "x2"), msg(y, "y1"), msg(z, "z1")}, "y1 z1 x2"},
+		{"the longest ago goes first", map[string]uint64{x: 3, y: 1, z: 2}, []Inbound{msg(x, "x1"), msg(z, "z1"), msg(y, "y1")}, "y1 z1 x1"},
+		{"requests before chatter", nil, []Inbound{chatter(z, "z1"), msg(x, "x1"), msg(x, "x2"), msg(y, "y1")}, "x1 y1 x2 z1"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			br := &Brain{pending: c.pending, turns: maps.Clone(c.turns), turn: 10}
+			var got []string
+			for _, i := range br.queueOrderLocked() {
+				got = append(got, c.pending[i].Text)
+			}
+			if strings.Join(got, " ") != c.want {
+				t.Errorf("order %q, want %q", got, c.want)
+			}
+			// The worker takes them in that order.
+			got = nil
+			for len(br.pending) > 0 {
+				i := nextIn(br.pending, br.turns)
+				got = append(got, br.pending[i].Text)
+				chat := br.pending[i].JID
+				br.pending = slices.Delete(br.pending, i, i+1)
+				br.takeTurnLocked(chat)
+			}
+			if strings.Join(got, " ") != c.want {
+				t.Errorf("ran %q, want %q", got, c.want)
+			}
+			if len(br.turns) != 1 {
+				t.Errorf("turns = %v once all ran, want only the last chat's", br.turns)
+			}
+		})
+	}
+}
+
+// Through the brain: a chat that sends three messages while the brain
+// works does not keep another chat's one waiting behind all three, and
+// Submit says where each waits.
+func TestBusyChatDoesNotHoldUpAnother(t *testing.T) {
+	mgr, d, _ := queueTestManager(t, 400, "")
+	br := mgr.Get("a")
+	other := Inbound{JID: otherNumber + "@s.whatsapp.net", Sender: otherNumber, Text: "other 1"}
+	if _, _, err := br.Submit(dm("dm 1")); err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, 5*time.Second, "the first run", func() bool { r := br.Snapshot().Running; return r != nil && r.PID > 0 })
+	var pos []int
+	for _, m := range []Inbound{dm("dm 2"), dm("dm 3"), other} {
+		p, busy, err := br.Submit(m)
+		if err != nil || !busy {
+			t.Fatalf("%s: busy %v, %v", m.Text, busy, err)
+		}
+		pos = append(pos, p)
+	}
+	if !slices.Equal(pos, []int{1, 2, 1}) {
+		t.Errorf("positions %v, want dm 2 and 3 at #1 and #2, then the other chat's at #1, ahead of them", pos)
+	}
+	if q := queuePreviews(br); strings.Join(q, "|") != "other 1|dm 2|dm 3" {
+		t.Errorf("queue = %q, want the other chat's message first", q)
+	}
+	waitFor(t, 20*time.Second, "four runs", func() bool { return d.count() == 4 })
+	var ran []string
+	for _, r := range d.all() {
+		ran = append(ran, r.msg.Text)
+	}
+	if strings.Join(ran, "|") != "dm 1|other 1|dm 2|dm 3" {
+		t.Errorf("ran %q, want the other chat's message right after the run in flight", ran)
+	}
+}

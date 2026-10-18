@@ -61,6 +61,9 @@ yet, so everything is under Unreleased until the first one.
   backed-up files lost more than half of them, so that a wiped
   `memories/` is no longer mirrored. "Mirror the deletion…" on the
   backup card goes ahead with one that was meant.
+- A brain's queue takes each chat's messages in order and the chats in
+  turn, so a busy chat no longer keeps the brain's other chats waiting
+  behind all of its messages. "Queued (#n)" counts the same way.
 - A run's prompt looks for the chat's last messages in the last 16 MB of
   the brain's history, read back from its end, instead of reading the
   whole file for every run. A chat that was quiet behind more than 16 MB

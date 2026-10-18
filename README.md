@@ -632,7 +632,8 @@ option names, which are matched against the stored options).
 **`debounce.go`** — merges a burst of messages from one person into one run.
 
 **`brain.go`** — the multi-brain runner. Each brain has a queue and one
-worker; each message spawns `claude -p` with `--output-format stream-json`,
+worker, which takes each chat's messages in order and the chats in turn;
+each message spawns `claude -p` with `--output-format stream-json`,
 seeded on stdin with the brain's prompt file and recent chat history. Events
 are parsed live, so an `AskUserQuestion` reaches WhatsApp immediately, with
 its options numbered (the answer comes as the next message, and the run's

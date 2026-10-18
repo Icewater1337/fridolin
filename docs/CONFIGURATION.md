@@ -845,7 +845,10 @@ send their run's token; see [API.md](API.md#who-may-call).
 ```
 
 `mode: "queue"` (default) runs a brain's messages one after another and, with
-`notify`, tells the sender "⏳ Queued (#2)". `mode: "interrupt"` lets a newer
+`notify`, tells the sender "⏳ Queued (#2)". Each chat's messages run in the
+order they came, and the chats take turns: the chat whose last run started
+longest ago goes next, so a chat that sends five messages does not keep
+another chat's one waiting behind all five. `mode: "interrupt"` lets a newer
 request replace the sender's own: it stops their run in flight in that chat (or
 a run on the chat's untagged chatter) and drops their earlier waiting request.
 The newer request then waits behind the requests already queued (though ahead
