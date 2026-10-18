@@ -219,6 +219,12 @@ for compatibility.
   out first, giving the sign-out up to 30 seconds. Before, it took the
   CLI's "Already logged in" for a new sign-in and showed Connected until
   the next check was refused again.
+- A brain's settings saved while `config.json` could not be written, or
+  refused by a later check, no longer leave its `brain.json` edited and
+  the brain shown as changed on disk: `brain.json` is written only once
+  the edit passed its checks, and put back when the save fails.
+  Allowing a group for a brain puts back every `brain.json` it changed
+  when one of them cannot be written.
 
 ### Kept for compatibility
 

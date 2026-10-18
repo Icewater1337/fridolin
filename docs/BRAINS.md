@@ -97,7 +97,11 @@ edit its own `brain.json` — for instance after reading a document with
 instructions hidden in it — to claim your direct messages or another brain's
 group. Such a change has no effect: the dashboard marks the brain as
 *changed on disk* and shows the difference, and you approve it or not.
-Edits you make in the dashboard update both copies.
+Edits you make in the dashboard update both copies, together: `brain.json`
+is written once the edit has passed its checks, just before the bridge's
+config, and when the config then cannot be written, the save fails and
+`brain.json` is put back as it was. An edit of a brain whose `brain.json`
+is not a file the bridge reads (see below) fails rather than replace it.
 
 ## Files the bridge reads and writes
 

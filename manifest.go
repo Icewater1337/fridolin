@@ -213,6 +213,12 @@ func WriteManifest(dir string, m *BrainManifest, overwrite bool) error {
 	if err != nil {
 		return err
 	}
+	return writeManifestData(dir, data, overwrite)
+}
+
+// writeManifestData writes data, a brain.json encodeManifest made, as
+// WriteManifest does.
+func writeManifestData(dir string, data []byte, overwrite bool) error {
 	path := filepath.Join(dir, ManifestFile)
 	if !overwrite {
 		f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)

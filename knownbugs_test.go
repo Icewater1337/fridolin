@@ -1,9 +1,9 @@
 package main
 
 import (
-	"encoding/json"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -44,18 +44,19 @@ func TestShutdownDropsTheMessagesItHolds(t *testing.T) {
 	assertGolden(t, "run/shutdown-drops.golden", []byte(sb.String()))
 }
 
-// TestABrainEditOutlivesAFailedConfigWrite: saving a brain's settings writes
-// its brain.json from inside the config update, before config.json is
-// written. When that write fails, the dashboard shows the error, but
-// brain.json keeps the edit while the approved copy in config.json does
-// not, so the brain shows as changed on disk and waits for an approval.
-// Writing brain.json only once config.json is written changes this.
-func TestABrainEditOutlivesAFailedConfigWrite(t *testing.T) {
+// TestAFailedConfigWriteLeavesBrainJSONAsItWas: saving a brain's settings
+// writes its brain.json, once the edit has passed its checks, just before
+// config.json, which approves it. This pinned a bug: brain.json was
+// written from inside the config update, and kept the edit when
+// config.json then could not be written, so the brain showed as changed
+// on disk. Now the failed save puts brain.json back as it was.
+func TestAFailedConfigWriteLeavesBrainJSONAsItWas(t *testing.T) {
 	if os.Geteuid() == 0 {
 		t.Skip("root can write into a read-only folder")
 	}
 	h := newHarness(t, "")
 	dir := h.AddBrain(BrainManifest{ID: "main", Name: "Main", Routing: BrainRouting{HandlesDMs: true}})
+	before := readFile(t, filepath.Join(dir, ManifestFile))
 	// config.json is replaced through a temp file beside it, which a
 	// read-only folder refuses. HOME, below it, stays writable.
 	if err := os.Chmod(h.Root(), 0o500); err != nil {
@@ -73,17 +74,16 @@ func TestABrainEditOutlivesAFailedConfigWrite(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if disk.Name != "Renamed" {
-		t.Errorf("brain.json names the brain %q: the edit was not written before config.json", disk.Name)
+	if disk.Name != "Main" {
+		t.Errorf("brain.json names the brain %q, want Main as before the failed save", disk.Name)
+	}
+	if after := readFile(t, filepath.Join(dir, ManifestFile)); after != before {
+		t.Errorf("brain.json changed:\n%s\nwas\n%s", after, before)
 	}
 	if got := h.Approved()["main"].Name; got != "Main" {
 		t.Errorf("config.json approves %q, want the name before the edit", got)
 	}
-	var views []brainView
-	if w := h.Do("GET", "/api/brains", nil); w.Code != 200 || json.Unmarshal(w.Body.Bytes(), &views) != nil {
-		t.Fatalf("GET /api/brains: %d %s", w.Code, w.Body.String())
-	}
-	if len(views) != 1 || views[0].Status != "drift" {
-		t.Errorf("GET /api/brains = %+v, want main changed on disk", views)
+	if views := h.brainViews(); len(views) != 1 || views[0].Status != "ok" || views[0].Disk != nil {
+		t.Errorf("GET /api/brains = %+v, want main without drift", views)
 	}
 }

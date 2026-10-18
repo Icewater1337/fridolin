@@ -577,7 +577,7 @@ func (b *Bridge) apiAllowChat(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	_, err = b.cfgs.Update("", func(c *Config) error {
+	_, err = b.cfgs.UpdateTx("", func(c *Config, tx *Tx) error {
 		if dm {
 			if !slices.Contains(c.AllowedNumbers, entry) {
 				c.AllowedNumbers = append(c.AllowedNumbers, entry)
@@ -590,7 +590,7 @@ func (b *Bridge) apiAllowChat(w http.ResponseWriter, r *http.Request) {
 		if req.Brain == "" {
 			return nil
 		}
-		return assignGroup(c, entry, req.Brain)
+		return assignGroup(c, tx, entry, req.Brain)
 	})
 	if err != nil {
 		writeErr(w, http.StatusUnprocessableEntity, err.Error())
@@ -745,11 +745,11 @@ func revokeEntry(list []string, sent, entry string, valid bool, canon func(strin
 }
 
 // assignGroup routes a group to a brain, taking it away from any other brain,
-// in their manifests (brain.json and the approved copy). The chosen brain
-// goes first, so that one that is not there is refused before the others'
-// brain.json are written.
-func assignGroup(c *Config, jid, brainID string) error {
-	if err := updateManifestIn(c, brainID, func(m *BrainManifest) error {
+// in their manifests (brain.json, staged in tx, and the approved copy). The
+// chosen brain goes first, so that one that is not there is refused before
+// the others are looked at.
+func assignGroup(c *Config, tx *Tx, jid, brainID string) error {
+	if err := updateManifestIn(c, tx, brainID, func(m *BrainManifest) error {
 		if !slices.Contains(m.Routing.Groups, jid) {
 			m.Routing.Groups = append(m.Routing.Groups, jid)
 		}
@@ -759,7 +759,7 @@ func assignGroup(c *Config, jid, brainID string) error {
 	}
 	for _, ref := range c.BrainDirs {
 		if a := ref.Approved; a != nil && a.ID != brainID && slices.Contains(a.Routing.Groups, jid) {
-			if err := updateManifestIn(c, a.ID, func(m *BrainManifest) error {
+			if err := updateManifestIn(c, tx, a.ID, func(m *BrainManifest) error {
 				m.Routing.Groups = slices.DeleteFunc(slices.Clone(m.Routing.Groups), func(g string) bool { return g == jid })
 				return nil
 			}); err != nil {
@@ -1131,12 +1131,16 @@ func (b *Bridge) apiAddBrain(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	created, err := ScaffoldBrain(abs, &m)
+	// Everything but brain.json, which goes with the update that registers
+	// the brain: written only once the checks there pass, and taken away
+	// again if config.json then cannot be written.
+	created, err := scaffoldFolder(abs, &m)
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	if _, err := b.cfgs.Update("", func(c *Config) error {
+	writesManifest := false
+	if _, err := b.cfgs.UpdateTx("", func(c *Config, tx *Tx) error {
 		// Again, against the config this update changes. addMu keeps adds
 		// apart, but not the other config writers: a brain saved or
 		// approved since the check above may claim the same group or the
@@ -1148,6 +1152,14 @@ func (b *Bridge) apiAddBrain(w http.ResponseWriter, r *http.Request) {
 		if err := checkNewBrain(eff, m, abs); err != nil {
 			return err
 		}
+		// A brain.json the folder has, one that does not load say, stays
+		// as ScaffoldBrain would leave it.
+		if _, err := os.Lstat(filepath.Join(abs, ManifestFile)); !req.UseExisting && errors.Is(err, fs.ErrNotExist) {
+			if err := tx.CreateManifest(abs, &m); err != nil {
+				return err
+			}
+			writesManifest = true
+		}
 		approved := m
 		c.BrainDirs = append(c.BrainDirs, BrainRef{Path: tildePath(abs), Approved: &approved})
 		return nil
@@ -1155,6 +1167,10 @@ func (b *Bridge) apiAddBrain(w http.ResponseWriter, r *http.Request) {
 		unscaffold(abs, created, made)
 		writeErr(w, http.StatusUnprocessableEntity, err.Error())
 		return
+	}
+	if writesManifest {
+		created = append(created, ManifestFile)
+		sort.Strings(created)
 	}
 	log.Printf("brain %s: added (%s), created %v", m.ID, abs, created)
 	writeJSON(w, http.StatusOK, map[string]any{"id": m.ID, "path": abs, "created": nonNil(created)})
@@ -1243,13 +1259,12 @@ func (b *Bridge) apiUpdateBrain(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusUnprocessableEntity, err.Error())
 		return
 	}
-	_, err := b.cfgs.Update("", func(c *Config) error {
-		// Check the brains with the edit before it is written: a refused
-		// edit must leave brain.json as it was, not show up as drift.
+	_, err := b.cfgs.UpdateTx("", func(c *Config, tx *Tx) error {
+		// The brains with the edit must not clash.
 		if err := checkSet(withApproved(c, id, m)); err != nil {
 			return err
 		}
-		return updateManifestIn(c, id, func(cur *BrainManifest) error {
+		return updateManifestIn(c, tx, id, func(cur *BrainManifest) error {
 			*cur = m
 			return nil
 		})

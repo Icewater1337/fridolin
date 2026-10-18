@@ -797,8 +797,9 @@ func TestAddBrainRechecksAgainstOtherWriters(t *testing.T) {
 		m := BrainManifest{ID: "b", Name: "B", Routing: BrainRouting{Groups: []string{group}}}
 		added <- tb.do("POST", "/api/brains", map[string]any{"path": "~/b", "manifest": m, "create_dir": true})
 	}()
-	// It scaffolds only after its first check passed.
-	waitFor(t, 5*time.Second, "the add's scaffold", func() bool { return fileExists(filepath.Join(tb.home, "b", "brain.json")) })
+	// It scaffolds only after its first check passed; brain.json waits for
+	// the update that registers the brain.
+	waitFor(t, 5*time.Second, "the add's scaffold", func() bool { return fileExists(filepath.Join(tb.home, "b", defaultPromptFile)) })
 	close(release)
 	if err := <-saved; err != nil {
 		t.Fatal(err)

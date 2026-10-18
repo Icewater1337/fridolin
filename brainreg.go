@@ -286,16 +286,16 @@ func inHome(p string) (string, bool) {
 
 // UpdateManifest changes one brain's manifest, see updateManifestIn.
 func (cs *ConfigStore) UpdateManifest(id string, mutate func(m *BrainManifest) error) error {
-	_, err := cs.Update("", func(c *Config) error { return updateManifestIn(c, id, mutate) })
+	_, err := cs.UpdateTx("", func(c *Config, tx *Tx) error { return updateManifestIn(c, tx, id, mutate) })
 	return err
 }
 
 // updateManifestIn changes brain id's manifest in c: mutate edits a copy of
-// the approved one, which goes to brain.json in the brain's folder and
-// becomes the approved copy, together, so the change is not reported as
-// drift. It is the one way the bridge changes a manifest; an error from
-// mutate leaves both as they were.
-func updateManifestIn(c *Config, id string, mutate func(m *BrainManifest) error) error {
+// the approved one, which becomes the approved copy and is staged in tx as
+// brain.json in the brain's folder, so that the two change together and
+// the change is not reported as drift. It is the one way the bridge
+// changes a manifest; an error from mutate leaves both as they were.
+func updateManifestIn(c *Config, tx *Tx, id string, mutate func(m *BrainManifest) error) error {
 	for i := range c.BrainDirs {
 		ref := &c.BrainDirs[i]
 		if ref.Approved == nil || ref.Approved.ID != id {
@@ -308,7 +308,7 @@ func updateManifestIn(c *Config, id string, mutate func(m *BrainManifest) error)
 		if m.ID != id {
 			return fmt.Errorf("a brain's id cannot change")
 		}
-		if err := WriteManifest(ref.Dir(), &m, true); err != nil {
+		if err := tx.WriteManifest(ref.Dir(), &m); err != nil {
 			return err
 		}
 		n := m.normalized()
@@ -323,6 +323,22 @@ func updateManifestIn(c *Config, id string, mutate func(m *BrainManifest) error)
 // a file that already exists, so adopting a folder with content is safe. It
 // returns the files it created.
 func ScaffoldBrain(dir string, m *BrainManifest) ([]string, error) {
+	created, err := scaffoldFolder(dir, m)
+	if err != nil {
+		return created, err
+	}
+	if err := WriteManifest(dir, m, false); err == nil {
+		created = append(created, ManifestFile)
+	} else if !errors.Is(err, errManifestExists) {
+		return created, err
+	}
+	sort.Strings(created)
+	return created, nil
+}
+
+// scaffoldFolder is ScaffoldBrain without brain.json, which the dashboard
+// writes with the update that adds the brain (see apiAddBrain).
+func scaffoldFolder(dir string, m *BrainManifest) ([]string, error) {
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return nil, err
 	}
@@ -368,11 +384,6 @@ func ScaffoldBrain(dir string, m *BrainManifest) ([]string, error) {
 		if err := write(f.rel, f.content); err != nil {
 			return created, err
 		}
-	}
-	if err := WriteManifest(dir, m, false); err == nil {
-		created = append(created, ManifestFile)
-	} else if !errors.Is(err, errManifestExists) {
-		return created, err
 	}
 	sort.Strings(created)
 	return created, nil

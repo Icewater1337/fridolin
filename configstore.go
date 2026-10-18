@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io/fs"
 	"log"
 	"os"
 	"path/filepath"
@@ -153,12 +154,26 @@ func (cs *ConfigStore) Subscribe(fn func(old, new *Config)) {
 // skips the conflict check. It returns RestartRequired as of the new
 // configuration.
 func (cs *ConfigStore) Update(etag string, mutate func(*Config) error) (restart []string, err error) {
+	res, err := cs.UpdateTx(etag, func(c *Config, _ *Tx) error { return mutate(c) })
+	return res.Restart, err
+}
+
+// UpdateResult is what an update saved.
+type UpdateResult struct {
+	// Restart is RestartRequired as of the new configuration.
+	Restart []string
+}
+
+// UpdateTx is Update for an edit that writes brain.json files too: mutate
+// edits the file layer and stages those in tx, which UpdateTx writes only
+// once the new configuration has passed its checks (see Tx).
+func (cs *ConfigStore) UpdateTx(etag string, mutate func(c *Config, tx *Tx) error) (UpdateResult, error) {
 	prev, next, err := cs.commit(etag, mutate)
 	if err != nil {
-		return nil, err
+		return UpdateResult{}, err
 	}
 	cs.notify(prev, next)
-	return restartRequired(cs.startup, next.Effective), nil
+	return UpdateResult{Restart: restartRequired(cs.startup, next.Effective)}, nil
 }
 
 // notify tells the subscribers that next replaced prev, and gives back
@@ -190,7 +205,7 @@ func (cs *ConfigStore) notify(prev, next *ConfigSnapshot) {
 // lock given back and the configuration as it was: net/http recovers a
 // handler's panic and the bridge runs on, and a lock left held would stop
 // every later save, brain edit and calendar sign-in for good.
-func (cs *ConfigStore) commit(etag string, mutate func(*Config) error) (prev, next *ConfigSnapshot, err error) {
+func (cs *ConfigStore) commit(etag string, mutate func(*Config, *Tx) error) (prev, next *ConfigSnapshot, err error) {
 	cs.mu.Lock()
 	defer cs.mu.Unlock()
 	defer func() {
@@ -207,7 +222,8 @@ func (cs *ConfigStore) commit(etag string, mutate func(*Config) error) (prev, ne
 	if err != nil {
 		return nil, nil, err
 	}
-	if err := mutate(file); err != nil {
+	tx := &Tx{}
+	if err := mutate(file, tx); err != nil {
 		return nil, nil, err
 	}
 	// What is written is this version's file, whatever the edit made of it.
@@ -221,14 +237,131 @@ func (cs *ConfigStore) commit(etag string, mutate func(*Config) error) (prev, ne
 		return nil, nil, err
 	}
 	data = append(data, '\n')
+
+	// The brain.json files go first and config.json last, which is what
+	// makes the edit count. Until it is written, a failure, or a panic,
+	// puts back what they held.
+	committed := false
+	defer func() {
+		if !committed {
+			tx.rollback()
+		}
+	}()
+	if err := tx.write(); err != nil {
+		return nil, nil, err
+	}
 	if err := writeFileAtomic(cs.path, data, 0o600, true); err != nil {
 		return nil, nil, err
 	}
+	committed = true
 
 	next = &ConfigSnapshot{File: file, Effective: eff, ETag: etagOf(data), Version: prev.Version + 1}
 	cs.snap.Store(next)
 	cs.notifyMu.Lock()
 	return prev, next, nil
+}
+
+// Tx holds the brain.json files an update writes besides config.json.
+// mutate only stages them. The update writes them once the new
+// configuration has passed its checks, each one atomically, and then
+// config.json. When a write fails after the first, config.json's
+// included, it puts back what each file it wrote held before, or removes
+// one that was not there: a refused or failed save never leaves a
+// brain.json changed that config.json does not approve, which the
+// dashboard would show as changed on disk.
+type Tx struct {
+	writes []*stagedManifest
+}
+
+// stagedManifest is a brain.json a transaction writes.
+type stagedManifest struct {
+	dir  string
+	data []byte
+	// create is for a new brain's folder, which must have no brain.json.
+	create bool
+
+	// written says the file is written; existed and prev say whether it
+	// was there before and what it held.
+	written bool
+	existed bool
+	prev    []byte
+}
+
+// WriteManifest stages m as the brain.json of the folder dir. m is checked
+// and encoded at once, so an invalid one fails the update before anything
+// is written. A later write for the same folder replaces this one.
+func (tx *Tx) WriteManifest(dir string, m *BrainManifest) error {
+	return tx.stage(dir, m, false)
+}
+
+// CreateManifest stages m as the brain.json of dir, a new brain's folder.
+// The update fails if the folder has one by the time it is written.
+func (tx *Tx) CreateManifest(dir string, m *BrainManifest) error {
+	return tx.stage(dir, m, true)
+}
+
+func (tx *Tx) stage(dir string, m *BrainManifest, create bool) error {
+	data, err := encodeManifest(m)
+	if err != nil {
+		return err
+	}
+	dir = filepath.Clean(dir)
+	for _, w := range tx.writes {
+		if w.dir == dir {
+			w.data, w.create = data, create
+			return nil
+		}
+	}
+	tx.writes = append(tx.writes, &stagedManifest{dir: dir, data: data, create: create})
+	return nil
+}
+
+// write writes the staged files in the order they were staged, and stops
+// at the first that fails. Each one's contents are read first, the way
+// the bridge reads a brain's files (readBrainFile), so they can be put
+// back: one that is no regular file, such as a symlink the brain put
+// there, could not be, and is not replaced.
+func (tx *Tx) write() error {
+	for _, w := range tx.writes {
+		path := filepath.Join(w.dir, ManifestFile)
+		prev, err := readBrainFile(w.dir, ManifestFile)
+		switch {
+		case errors.Is(err, fs.ErrNotExist):
+			w.existed, w.prev = false, nil
+		case err != nil:
+			return fmt.Errorf("%s: %w", path, err)
+		default:
+			w.existed, w.prev = true, prev
+		}
+		if err := writeManifestData(w.dir, w.data, !w.create); err != nil {
+			return err
+		}
+		w.written = true
+	}
+	return nil
+}
+
+// rollback puts back what the files write wrote held before, the last
+// one first. It logs what it cannot put back: the dashboard then shows
+// that brain's brain.json as changed on disk.
+func (tx *Tx) rollback() {
+	for i := len(tx.writes) - 1; i >= 0; i-- {
+		w := tx.writes[i]
+		if !w.written {
+			continue
+		}
+		path := filepath.Join(w.dir, ManifestFile)
+		var err error
+		if w.existed {
+			err = writeFileAtomic(path, w.prev, 0o600, false)
+		} else {
+			err = os.Remove(path)
+		}
+		if err != nil {
+			log.Printf("config: putting back %s after the update failed: %v", path, err)
+		}
+		w.written = false
+	}
 }
 
 // RestartRequired lists the settings that are read once at startup and now
