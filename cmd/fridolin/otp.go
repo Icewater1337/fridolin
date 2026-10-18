@@ -17,7 +17,6 @@ import (
 	"unicode"
 	"unicode/utf8"
 
-	"github.com/Icewater1337/fridolin/internal/chat"
 	"github.com/Icewater1337/fridolin/internal/fsx"
 	"github.com/Icewater1337/fridolin/internal/history"
 )
@@ -125,12 +124,12 @@ const otpRequestBudget = 1 << 20
 // history is read back from its end, and only as far as the lines the
 // bridge stamps when it writes them (all but a message's own, which has
 // the time it was sent) are recent.
-func (br *Brain) codeRequest(chats, markers []string, now time.Time) (req otpRequest, ok bool) {
+func otpRequested(root *os.Root, brainID string, chats, markers []string, now time.Time) (req otpRequest, ok bool) {
 	if len(markers) == 0 {
 		markers = defaultOTPMarkers
 	}
 	since := now.Add(-otpWindow)
-	br.scanHistory(otpRequestBudget, nil, func(e history.Entry) bool {
+	history.Scan(root, brainID, otpRequestBudget, nil, func(e history.Entry) bool {
 		at, err := time.Parse(time.RFC3339, e.TS)
 		if err != nil {
 			return true
@@ -138,7 +137,7 @@ func (br *Brain) codeRequest(chats, markers []string, now time.Time) (req otpReq
 		if e.Type != history.In && at.Before(since) {
 			return false // older than the window, and everything before it too
 		}
-		if e.Type != history.Out || (e.From != br.id && e.Via == "") || !slices.Contains(chats, e.Chat) || at.Before(since) {
+		if e.Type != history.Out || (e.From != brainID && e.Via == "") || !slices.Contains(chats, e.Chat) || at.Before(since) {
 			return true
 		}
 		if !slices.ContainsFunc(markers, func(m string) bool { return hasMarker(e.Text, m) }) {
@@ -152,52 +151,6 @@ func (br *Brain) codeRequest(chats, markers []string, now time.Time) (req otpReq
 		return e.OTPRequest == ""
 	})
 	return req, ok
-}
-
-// otpCatch is a code the guard caught, and the request it answers.
-type otpCatch struct {
-	Code    string // the code, without spaces and dashes
-	Typed   string // the message as it was typed
-	Request otpRequest
-}
-
-// catchesCode reports whether m is a one-time code that its chat asked for
-// (see codeRequest), which must not be written to history or sent to the
-// model. Only a message from the chat counts, from WhatsApp or the dev
-// page: what /ingest and Plaud hand a brain comes from a program, and
-// treating it as a code would let one plant a code for the script that
-// waits for it.
-func (br *Brain) catchesCode(m Inbound, now time.Time) (otpCatch, bool) {
-	s := br.settings.Load()
-	if !s.otpGuard || len(m.Media) > 0 || !fromChat(m) {
-		return otpCatch{}, false
-	}
-	code, ok := otpCode(m.Text)
-	if !ok {
-		return otpCatch{}, false
-	}
-	req, ok := br.codeRequest(chatJIDs(m), s.otpMarkers, now)
-	if !ok {
-		return otpCatch{}, false
-	}
-	return otpCatch{Code: code, Typed: strings.TrimSpace(m.Text), Request: req}, true
-}
-
-// fromChat reports whether m came from a chat, from WhatsApp or the dev
-// page, rather than being handed to a brain by a program (/ingest, Plaud,
-// a dev message that names a brain).
-func fromChat(m Inbound) bool { return m.Source != chat.SourceIngest && m.Brain == "" }
-
-// asksForCode reports whether text, going out to one of the brain's chats,
-// asks for a one-time code that the guard would catch: the guard is on and
-// text holds one of its markers.
-func (br *Brain) asksForCode(text string) bool {
-	s := br.settings.Load()
-	markers := s.otpMarkers
-	if len(markers) == 0 {
-		markers = defaultOTPMarkers
-	}
-	return s.otpGuard && slices.ContainsFunc(markers, func(m string) bool { return hasMarker(text, m) })
 }
 
 // newOTPRequestID names a request for a code made through /send, which
@@ -328,24 +281,5 @@ func sweepOTPHandoffs(dir string, now time.Time) {
 				log.Printf("otp: removing an expired code: %v", err)
 			}
 		}
-	}
-}
-
-// handOffCode hands a code the OTP guard caught in m to the local script
-// that asked for it: it is written to <data_dir>/otp/<brain>.json,
-// readable only by this user, until it expires (otpHandoffTTL). Brains
-// cannot read it (the sandbox denies the data folder), and it never
-// reaches the history or the model. A newer code for the brain replaces
-// it.
-func (b *Bridge) handOffCode(br *Brain, m Inbound, c otpCatch) {
-	now := time.Now()
-	h := otpHandoff{
-		Brain: br.ID(), Chat: m.JID, Sender: m.Sender, Code: c.Code, Typed: c.Typed,
-		Received: now.Format(time.RFC3339), ReceivedUnixMS: now.UnixMilli(),
-		Request: c.Request.ID, RequestedUnixMS: c.Request.At.UnixMilli(),
-		ExpiresUnixMS: now.Add(otpHandoffTTL).UnixMilli(),
-	}
-	if err := b.otp.write(filepath.Join(b.cfgs.Get().DataDir, "otp"), h); err != nil {
-		log.Printf("brain %s: handing over a one-time code: %v", br.ID(), err)
 	}
 }
