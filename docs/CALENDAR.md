@@ -75,8 +75,15 @@ calls (below), lists the calendars on the brain's page, refreshes the
 token and revokes it on disconnect. So a brain never sees a refresh token
 or the OAuth client's secret, and cannot call Google itself with them.
 Older versions let each brain read and rewrite its token, and copied the
-OAuth client next to it as `google_calendar_credentials_<brain>.json`;
-nothing reads that copy any more, and you can delete it.
+OAuth client, its secret included, next to it as
+`google_calendar_credentials_<brain>.json`. The bridge no longer reads
+that copy. It names the files of that name that hold a client secret in a
+warning in its log when it starts, and on every brain's page, but deletes
+none itself: going by the name and the secret only, it cannot tell such a
+copy from a file of yours that something else uses. A symlink of that
+name is not followed, so it is not named either. Delete the copies by
+hand. That matters most on Linux or with the sandbox off, where a brain
+can read the folder.
 
 The bridge takes only a regular file as a token: a brain the sandbox does
 not hold (on Linux, or with the sandbox off) could otherwise put a symlink

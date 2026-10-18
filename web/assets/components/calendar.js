@@ -121,11 +121,25 @@ export function calendarCard(brainId, { signal } = {}) {
     return b;
   }
 
+  // Files named like the copies of the OAuth client that older versions
+  // wrote next to the tokens, each holding a client secret. The bridge
+  // goes by name and secret only, so it cannot tell such a copy from a
+  // file of the owner's: it names them, but deletes none itself.
+  function copiesBox(s) {
+    const names = s.leftover_client_copies || [];
+    if (!names.length) return null;
+    return callout('warn', 'Client secrets in the credentials folder',
+      'Files named like the copies of the OAuth client that older versions wrote for the calendar tool, each holding a client secret: ',
+      names.flatMap((n, i) => (i ? [', ', mono(n)] : [mono(n)])),
+      '. The bridge no longer reads them, and a brain the sandbox does not hold (on Linux, or with the sandbox off) can: delete them by hand, unless something else of yours uses them.');
+  }
+
   function render(s) {
     const errBox = s.last_error ? callout('bad', 'Sign-in did not finish', s.last_error) : null;
     if (!s.client_configured && !s.connected) {
       mount(el,
         h('div.card-head', h('div.card-title', icon('clock'), h('h3', 'Google Calendar')), pill('Not set up', 'neutral')),
+        copiesBox(s),
         h('p.muted', 'Before a brain can sign in, the bridge needs a Google OAuth client — a one-time setup for all brains.'),
         googleClientSetup({ onSaved: () => refresh() }));
       return;
@@ -134,6 +148,7 @@ export function calendarCard(brainId, { signal } = {}) {
       mount(el,
         h('div.card-head', h('div.card-title', icon('clock'), h('h3', 'Google Calendar')), pill('Not connected', 'neutral')),
         errBox,
+        copiesBox(s),
         h('p.muted', 'Sign in with the Google account this brain should use. Afterwards you choose which of its calendars the brain may read and write.'),
         h('div.actions', connectButton()));
       return;
@@ -204,6 +219,7 @@ export function calendarCard(brainId, { signal } = {}) {
     mount(el,
       h('div.card-head', h('div.card-title', icon('clock'), h('h3', 'Google Calendar')), pill('Connected', 'ok')),
       errBox,
+      copiesBox(s),
       h('p', 'Signed in as ', h('strong', s.account || 'unknown account'), '.'),
       s.broad_access ? callout('warn', 'More access than the calendar needs',
         'This brain signed in with full access to the account’s calendars, which older versions asked for and which includes deleting calendars and changing who they are shared with. Disconnect, then connect again, to grant only what the calendar uses: its events, free and busy times, and the list of calendars. Disconnecting revokes the old access at Google, every copy of it included, unless another brain is signed in to the same Google account: disconnect that one too, or the old access stays.') : null,

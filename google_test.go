@@ -1471,3 +1471,133 @@ func TestSignInIsNotUndoneByARefresh(t *testing.T) {
 		t.Errorf("calendar settings = %+v, want the new account", m.Calendar)
 	}
 }
+
+// TestLeftoverClientCopiesAreReported: older versions copied the OAuth
+// client, secret and all, next to each brain's token as
+// google_calendar_credentials_<brain>.json, where a brain the sandbox does
+// not hold can read it. The bridge names the files of that name that hold
+// a secret, in one warning when it starts and on every brain's page, for
+// you to delete, a hard link to a file kept elsewhere included. It deletes
+// none itself, a Disconnect included: a file of that name may be one of
+// yours that something else uses.
+func TestLeftoverClientCopiesAreReported(t *testing.T) {
+	// In place of a file's content: a FIFO, or a hard link or a symlink to
+	// a file outside the folder with the content that follows.
+	const fifo, hardLink, symlink = "\x00fifo", "\x00hard link to ", "\x00symlink to "
+	linkedContent := func(content string) string {
+		content = strings.TrimPrefix(content, hardLink)
+		return strings.TrimPrefix(content, symlink)
+	}
+	desktop := fmt.Sprintf(testClientJSON, "https://oauth2.googleapis.com")
+	web := `{"web":{"client_id":"123-abc.apps.googleusercontent.com","client_secret":"TEST-CLIENT-SECRET"}}`
+	cases := []struct {
+		name  string
+		files map[string]string // in the credentials dir, beside brain a's token
+		want  []string
+	}{
+		{"none", nil, nil},
+		{"a copy of a Desktop app client", map[string]string{"google_calendar_credentials_a.json": desktop}, []string{"google_calendar_credentials_a.json"}},
+		{"copies for two brains", map[string]string{"google_calendar_credentials_old.json": web, "google_calendar_credentials_a.json": desktop},
+			[]string{"google_calendar_credentials_a.json", "google_calendar_credentials_old.json"}},
+		{"a copy without a secret", map[string]string{"google_calendar_credentials_a.json": `{"installed":{"client_id":"123-abc.apps.googleusercontent.com","client_secret":""}}`}, nil},
+		{"a copy that is not JSON", map[string]string{"google_calendar_credentials_a.json": "original"}, nil},
+		{"another brain's token", map[string]string{"google_calendar_token_b.json": `{"refresh_token":"RT-B","client_id":"123-abc.apps.googleusercontent.com","client_secret":"TEST-CLIENT-SECRET"}`}, nil},
+		{"another name", map[string]string{"google_calendar_credentials_a.json.bak": desktop}, nil},
+		{"a FIFO", map[string]string{"google_calendar_credentials_a.json": fifo}, nil},
+		{"a hard link to a copy", map[string]string{"google_calendar_credentials_a.json": hardLink + desktop}, []string{"google_calendar_credentials_a.json"}},
+		{"a symlink to a copy", map[string]string{"google_calendar_credentials_a.json": symlink + desktop}, nil},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			srv, _ := fakeGoogle(t)
+			tb := newTestBridge(t, `, "sandbox": {"credentials_dir": "~/creds"}`)
+			_ = tb.do("PUT", "/api/google/client", map[string]string{"json": fmt.Sprintf(testClientJSON, srv.URL)})
+			tb.addFolderBrain(t, BrainManifest{ID: "a", Name: "A"})
+			writeCalendarToken(t, tb, "a", "you@example.com", "RT-A")
+			dir := tb.google.credsDir()
+			for name, content := range tc.files {
+				path := filepath.Join(dir, name)
+				var err error
+				switch {
+				case content == fifo:
+					err = syscall.Mkfifo(path, 0o600)
+				case strings.HasPrefix(content, hardLink), strings.HasPrefix(content, symlink):
+					elsewhere := filepath.Join(t.TempDir(), name)
+					if err := os.WriteFile(elsewhere, []byte(linkedContent(content)), 0o600); err != nil {
+						t.Fatal(err)
+					}
+					if strings.HasPrefix(content, hardLink) {
+						err = os.Link(elsewhere, path)
+					} else {
+						err = os.Symlink(elsewhere, path)
+					}
+				default:
+					err = os.WriteFile(path, []byte(content), 0o600)
+				}
+				if err != nil {
+					t.Fatal(err)
+				}
+			}
+
+			// At start: one warning, naming the files but not the folder.
+			logs := captureLog(t)
+			started := make(chan struct{})
+			go func() { defer close(started); NewGoogleAuth(tb.cfgs) }()
+			if !within(started, 5*time.Second) {
+				t.Fatal("looking for copies hangs")
+			}
+			var warnings []string
+			for _, l := range logs() {
+				if strings.Contains(l, "copies of the Google OAuth client") {
+					warnings = append(warnings, l)
+				}
+			}
+			if len(warnings) != min(len(tc.want), 1) {
+				t.Errorf("warnings at start = %q, want one naming %q", warnings, tc.want)
+			}
+			for _, w := range warnings {
+				for _, name := range tc.want {
+					if !strings.Contains(w, name) {
+						t.Errorf("the warning does not name %s: %s", name, w)
+					}
+				}
+				if strings.Contains(w, dir) {
+					t.Errorf("the warning names the folder: %s", w)
+				}
+				// It knows a name and a secret, not that nothing else uses the file.
+				if !strings.Contains(w, "files named like the copies") || strings.Contains(w, "Nothing reads them") {
+					t.Errorf("the warning claims more than the bridge knows: %s", w)
+				}
+			}
+
+			var st struct {
+				Copies []string `json:"leftover_client_copies"`
+			}
+			_ = json.Unmarshal(tb.do("GET", "/api/brains/a/calendar?list=0", nil).Body.Bytes(), &st)
+			if st.Copies == nil || !slices.Equal(st.Copies, tc.want) {
+				t.Errorf("leftover_client_copies = %#v, want %q", st.Copies, tc.want)
+			}
+
+			if w := tb.do("DELETE", "/api/brains/a/calendar", nil); w.Code != 200 {
+				t.Fatalf("disconnect = %d %s", w.Code, w.Body.String())
+			}
+			for name, content := range tc.files {
+				fi, err := os.Lstat(filepath.Join(dir, name))
+				if err != nil {
+					t.Errorf("%s is gone after the disconnect: %v", name, err)
+					continue
+				}
+				wantMode := os.FileMode(0)
+				switch {
+				case content == fifo:
+					continue // a read would wait for a writer
+				case strings.HasPrefix(content, symlink):
+					wantMode = os.ModeSymlink
+				}
+				if data, _ := os.ReadFile(filepath.Join(dir, name)); fi.Mode().Type() != wantMode || string(data) != linkedContent(content) {
+					t.Errorf("%s changed:\n%s", name, data)
+				}
+			}
+		})
+	}
+}

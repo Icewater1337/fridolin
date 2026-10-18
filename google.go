@@ -151,9 +151,16 @@ type GoogleAuth struct {
 	tokenLocks map[string]chan struct{} // brain id → its token's lock; see lockToken
 }
 
-// NewGoogleAuth creates the manager.
+// NewGoogleAuth creates the manager, and logs the files in the credentials
+// dir that look like the copies of the OAuth client older versions left.
 func NewGoogleAuth(cfgs *ConfigStore) *GoogleAuth {
-	return &GoogleAuth{cfgs: cfgs, pending: map[string]oauthPending{}, lastError: map[string]string{}, tokenLocks: map[string]chan struct{}{}}
+	g := &GoogleAuth{cfgs: cfgs, pending: map[string]oauthPending{}, lastError: map[string]string{}, tokenLocks: map[string]chan struct{}{}}
+	if copies := g.leftoverClientCopies(); len(copies) > 0 {
+		log.Printf("WARNING: the credentials folder holds files named like the copies of the Google OAuth client that older versions wrote for the calendar tool, "+
+			"each holding a client secret: %s. The bridge no longer reads them, and a brain the sandbox does not hold (on Linux, or with the sandbox off) can: "+
+			"delete them by hand, unless something else of yours uses them.", strings.Join(copies, ", "))
+	}
+	return g
 }
 
 // lockToken takes brainID's token lock, which a refresh, a disconnect and
@@ -200,6 +207,63 @@ func calendarTokenFile(dir, brainID string) string {
 // calendarTokenPrefix and calendarTokenSuffix make up a token file's name
 // around the brain id, for calendarTokenFile and calendarTokenBrain alike.
 const calendarTokenPrefix, calendarTokenSuffix = "google_calendar_token_", ".json"
+
+// calendarClientCopyPrefix starts the name of the copy of the OAuth client
+// that older versions wrote next to a brain's token for the calendar tool
+// in the brain, google_calendar_credentials_<brain>.json.
+const calendarClientCopyPrefix = "google_calendar_credentials_"
+
+// leftoverClientCopies names the files in the credentials dir that are
+// named like those copies and hold a client secret. The bridge no longer
+// reads them, but a brain the sandbox does not hold (on Linux, or with the
+// sandbox off) can, so they are reported for you to delete. Going by name
+// and secret only, the bridge cannot tell such a copy from a file of
+// yours that something else uses, so it deletes none; one may be
+// write-protected as well. A file is read only when it is a regular one,
+// so a FIFO cannot hang the bridge's start, but unlike a token it may
+// have more than one link: a hard link to a file kept elsewhere exposes
+// the secret all the same. A symlink is not followed, so one is not
+// reported. The names are returned without the folder.
+func (g *GoogleAuth) leftoverClientCopies() []string {
+	dir := g.credsDir()
+	entries, _ := os.ReadDir(dir) // sorted by name
+	var out []string
+	for _, e := range entries {
+		name := e.Name()
+		if !strings.HasPrefix(name, calendarClientCopyPrefix) || !strings.HasSuffix(name, ".json") {
+			continue
+		}
+		if data, err := readRegularFile(filepath.Join(dir, name), false); err == nil && holdsClientSecret(data) {
+			out = append(out, name)
+		}
+	}
+	return out
+}
+
+// holdsClientSecret reports whether data, a JSON object, has a client
+// secret: in a section of an OAuth client file ("installed" or "web"), or
+// at the top, as a token has it.
+func holdsClientSecret(data []byte) bool {
+	has := func(raw []byte) bool {
+		var o struct {
+			ClientSecret string `json:"client_secret"`
+		}
+		return json.Unmarshal(raw, &o) == nil && o.ClientSecret != ""
+	}
+	var sections map[string]json.RawMessage
+	if json.Unmarshal(data, &sections) != nil {
+		return false
+	}
+	if has(data) {
+		return true
+	}
+	for _, s := range sections {
+		if has(s) {
+			return true
+		}
+	}
+	return false
+}
 
 // calendarTokenBrain turns the name of a token file back into its brain's
 // id, the inverse of calendarTokenFile; ok is false for any other name.
@@ -547,7 +611,12 @@ func (g *GoogleAuth) configured(brainID string) bool {
 // here as well. The open does not block, so a FIFO cannot hang the
 // dashboard, and a file larger than maxBrainFile is refused rather than
 // loaded.
-func readCredentialFile(path string) ([]byte, error) {
+func readCredentialFile(path string) ([]byte, error) { return readRegularFile(path, true) }
+
+// readRegularFile is readCredentialFile's read. singleLink refuses a file
+// with more than one link, which matters only for a file the bridge acts
+// on, not for one it only reports.
+func readRegularFile(path string, singleLink bool) ([]byte, error) {
 	f, err := os.OpenFile(path, os.O_RDONLY|syscall.O_NOFOLLOW|syscall.O_NONBLOCK, 0)
 	if errors.Is(err, syscall.ELOOP) {
 		return nil, fmt.Errorf("%s: %w", path, errSymlink)
@@ -563,7 +632,7 @@ func readCredentialFile(path string) ([]byte, error) {
 	if !fi.Mode().IsRegular() {
 		return nil, fmt.Errorf("%s: not a regular file", path)
 	}
-	if st, ok := fi.Sys().(*syscall.Stat_t); ok && st.Nlink != 1 {
+	if st, ok := fi.Sys().(*syscall.Stat_t); ok && singleLink && st.Nlink != 1 {
 		return nil, fmt.Errorf("%s: it has more than one link, which the bridge does not trust", path)
 	}
 	data, err := readAtMost(f)
@@ -950,6 +1019,9 @@ func (b *Bridge) apiCalendarStatus(w http.ResponseWriter, r *http.Request) {
 		"token_path":        g.tokenPath(br.ID()),
 		"calendars":         []CalendarEntry{},
 		"selected":          []string{},
+		// Of every brain, not only this one: any brain the sandbox does not
+		// hold can read them.
+		"leftover_client_copies": nonNil(g.leftoverClientCopies()),
 	}
 	if m.Calendar != nil {
 		resp["account"], resp["selected"], resp["default"] = m.Calendar.Account, nonNil(m.Calendar.Calendars), m.Calendar.Default
