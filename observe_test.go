@@ -111,3 +111,44 @@ func TestUntaggedChatterRunsOnlyWhenObserved(t *testing.T) {
 		})
 	}
 }
+
+// Work addressed to a brain does not wait for observe-only runs: it stops
+// the one in flight, whose message is in the history already, and goes
+// ahead of the chatter that waits for one.
+func TestAddressedWorkGoesAheadOfObserveRuns(t *testing.T) {
+	t.Run("the run in flight stops", func(t *testing.T) {
+		tb, br := newObservingBridge(t, `, "queue": {"notify": false}`)
+		startLongRun(t, tb, br, Inbound{JID: testGroup, Sender: otherNumber, Text: "long chatter", Silent: true, Source: sourceWhatsApp})
+		t.Setenv("FRIDOLIN_FAKE_SLEEP_MS", "10")
+		tb.handleInbound(context.Background(), Inbound{JID: testDMChat, Sender: "15551234567", Text: "hello", Source: sourceWhatsApp})
+		// The observe-only run would sleep for 30 seconds.
+		waitFor(t, 10*time.Second, "the DM's answer", func() bool { return len(tb.sentTo(testDMChat)) == 1 })
+		if sent := tb.sentTo(testGroup); len(sent) > 0 {
+			t.Errorf("sent %q to the group", sent)
+		}
+	})
+	t.Run("the queue", func(t *testing.T) {
+		tb, br := newObservingBridge(t, "")
+		startLongRun(t, tb, br, Inbound{JID: testDMChat, Sender: "15551234567", Text: "long task", Source: sourceWhatsApp})
+		for _, g := range []string{"120363000000000001@g.us", "120363000000000002@g.us"} {
+			if _, _, err := br.Submit(Inbound{JID: g, Sender: otherNumber, Text: "chatter in " + g, Silent: true}); err != nil {
+				t.Fatal(err)
+			}
+		}
+		pos, busy, err := br.Submit(Inbound{JID: testGroup, Sender: otherNumber, Text: "a question"})
+		if err != nil || pos != 1 || !busy {
+			t.Errorf("Submit = #%d, busy %v, %v; want #1 behind the run in flight", pos, busy, err)
+		}
+		var queued []string
+		for _, q := range br.Snapshot().Queue {
+			queued = append(queued, q.Preview)
+		}
+		want := "a question|chatter in 120363000000000001@g.us|chatter in 120363000000000002@g.us"
+		if strings.Join(queued, "|") != want {
+			t.Errorf("queue = %q, want %q", queued, want)
+		}
+		if r := br.Snapshot().Running; r == nil || r.Preview != "long task" {
+			t.Errorf("running = %+v, want the DM's run untouched", r)
+		}
+	})
+}

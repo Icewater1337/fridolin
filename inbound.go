@@ -58,7 +58,8 @@ type Inbound struct {
 const (
 	sourceWhatsApp = "whatsapp"
 	// sourceIngest is files handed in outside WhatsApp, through /ingest or
-	// the Plaud integration: never a command, and never interrupting.
+	// the Plaud integration: never a command, and never interrupting a
+	// request (an observe-only run gives way to it like to any message).
 	sourceIngest = "ingest"
 	// sourceDev is the dashboard's dev page (--no-whatsapp).
 	sourceDev = "dev"

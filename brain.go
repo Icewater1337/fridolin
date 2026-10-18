@@ -408,15 +408,15 @@ func (br *Brain) Submit(m Inbound) (pos int, busy bool, err error) {
 		br.mu.Unlock()
 		return 0, false, nil
 	}
-	busy = br.current != nil || len(br.pending) > 0
 
 	// A newer message from the same chat supersedes queued untagged chatter:
 	// it is already in the history the next run reads. In interrupt mode, a
 	// tagged message also replaces its sender's own earlier request in that
-	// chat, waiting or running. Nothing else is touched: other chats, and
-	// other people's requests in a group, keep their place, and untagged
-	// chatter never interrupts a run. Neither do ingested files, nor are they
-	// replaced: each is a job of its own, not a correction of the last one.
+	// chat, waiting or running. No other request is touched: other chats,
+	// and other people's requests in a group, keep their place, and untagged
+	// chatter never interrupts a run. Nor do ingested files interrupt a
+	// request, or get replaced: each is a job of its own, not a correction of
+	// the last one. Observe-only runs are another matter, see below.
 	interrupting := s.queueMode == queueModeInterrupt && !m.Silent && m.Source != sourceIngest
 	replaces := func(p Inbound) bool {
 		return p.JID == m.JID && (p.Silent || (interrupting && p.Sender == m.Sender && p.Source != sourceIngest))
@@ -443,16 +443,25 @@ func (br *Brain) Submit(m Inbound) (pos int, busy bool, err error) {
 		}
 		if !dropped {
 			br.mu.Unlock()
-			return 0, busy, errQueueFull
+			return 0, true, errQueueFull
 		}
 	}
+	// Work addressed to the brain does not wait for an observe-only run: it
+	// stops the one in flight and goes ahead of those waiting. Their chatter
+	// is in the history, where the next run in its chat reads it.
 	var interrupt *brainRun
-	if interrupting && br.current != nil && replaces(br.current.msg) {
-		interrupt = br.current
-		busy = len(br.pending) > 0
+	if cur := br.current; cur != nil && (interrupting && replaces(cur.msg) || !m.Silent && cur.msg.Silent) {
+		interrupt = cur
 	}
-	br.pending = append(br.pending, m)
-	pos = len(br.pending)
+	at := len(br.pending)
+	if !m.Silent {
+		if i := slices.IndexFunc(br.pending, func(p Inbound) bool { return p.Silent }); i >= 0 {
+			at = i
+		}
+	}
+	br.pending = slices.Insert(br.pending, at, m)
+	pos = at + 1
+	busy = at > 0 || (br.current != nil && interrupt == nil)
 	start := !br.working
 	br.working = true
 	br.mu.Unlock()
