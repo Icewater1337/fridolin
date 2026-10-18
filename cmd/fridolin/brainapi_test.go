@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"fridolin/internal/fsx"
+	"fridolin/internal/platform"
 )
 
 const (
@@ -259,7 +260,7 @@ func TestBridgePrunesStaleRunTokens(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	running, err := acquireInstanceLock(data)
+	running, err := platform.AcquireLock(data)
 	if err != nil {
 		t.Fatal(err)
 	}

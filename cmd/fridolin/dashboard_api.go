@@ -28,6 +28,7 @@ import (
 	"unicode/utf8"
 
 	"fridolin/internal/fsx"
+	"fridolin/internal/platform"
 	"fridolin/internal/textx"
 	"fridolin/internal/version"
 	"rsc.io/qr"
@@ -1365,14 +1366,14 @@ var pickMu sync.Mutex
 func (b *Bridge) apiFSCaps(w http.ResponseWriter, r *http.Request) {
 	home := homeDir()
 	picker := ""
-	if p := folderPicker(home); p != nil {
+	if p := platform.FolderPicker(home); p != nil {
 		picker = filepath.Base(p[0])
 	}
 	writeJSON(w, http.StatusOK, map[string]string{"picker": picker, "home": home})
 }
 
 func (b *Bridge) apiFSPick(w http.ResponseWriter, r *http.Request) {
-	argv := folderPicker(homeDir())
+	argv := platform.FolderPicker(homeDir())
 	if argv == nil {
 		writeErr(w, http.StatusNotImplemented, "no native folder picker on this system — browse or type the path instead")
 		return

@@ -14,6 +14,7 @@ import (
 	"testing"
 
 	"fridolin/internal/fsx"
+	"fridolin/internal/platform"
 )
 
 func TestNewBridgeTakesTheInstanceLock(t *testing.T) {
@@ -28,7 +29,7 @@ func TestNewBridgeTakesTheInstanceLock(t *testing.T) {
 	}
 	requireTestDataDir(t, cfgs.Get())
 
-	running, err := acquireInstanceLock(dataDir)
+	running, err := platform.AcquireLock(dataDir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -45,12 +46,12 @@ func TestNewBridgeTakesTheInstanceLock(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if l, err := acquireInstanceLock(dataDir); err == nil {
+	if l, err := platform.AcquireLock(dataDir); err == nil {
 		l.Release()
 		t.Error("a bridge must hold the lock until Stop")
 	}
 	b.Stop()
-	l, err := acquireInstanceLock(dataDir)
+	l, err := platform.AcquireLock(dataDir)
 	if err != nil {
 		t.Fatalf("Stop must release the lock: %v", err)
 	}
@@ -69,7 +70,7 @@ func TestNewBridgeTakesTheInstanceLock(t *testing.T) {
 		b.Stop()
 		t.Fatal("NewBridge must fail without a usable dashboard token")
 	}
-	l, err = acquireInstanceLock(dataDir)
+	l, err = platform.AcquireLock(dataDir)
 	if err != nil {
 		t.Fatalf("a failed NewBridge must release the lock: %v", err)
 	}

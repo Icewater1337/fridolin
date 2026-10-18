@@ -14,6 +14,7 @@ import (
 	"time"
 	"unicode"
 
+	"fridolin/internal/platform"
 	"go.mau.fi/whatsmeow/store"
 	"go.mau.fi/whatsmeow/types"
 )
@@ -38,7 +39,7 @@ func isJunkMessage(text string) bool {
 // Bridge connects WhatsApp to the brains, and serves the dashboard.
 type Bridge struct {
 	cfgs     *ConfigStore
-	lock     *instanceLock
+	lock     *platform.Lock
 	store    *Store
 	wa       Messenger
 	dev      *devMessenger // non-nil in --no-whatsapp mode
@@ -111,7 +112,7 @@ func NewBridge(cfgs *ConfigStore, opts BridgeOptions) (_ *Bridge, err error) {
 	// Taken before the store opens: a second bridge on the same data dir, dev
 	// mode or a test included, must not open the live WhatsApp session's
 	// database, let alone run whatsmeow's migrations on it.
-	lock, err := acquireInstanceLock(cfg.DataDir)
+	lock, err := platform.AcquireLock(cfg.DataDir)
 	if err != nil {
 		return nil, err
 	}

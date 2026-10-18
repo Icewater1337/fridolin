@@ -8,6 +8,7 @@ import (
 	"os"
 	"time"
 
+	"fridolin/internal/platform"
 	"github.com/mdp/qrterminal/v3"
 	"go.mau.fi/whatsmeow"
 	"go.mau.fi/whatsmeow/types"
@@ -188,7 +189,7 @@ func (wa *WhatsAppClient) followPairing(ctx context.Context, cancel context.Canc
 		wa.pairing = false
 		wa.pairMu.Unlock()
 	}()
-	tty := isTerminal(os.Stdout)
+	tty := platform.IsTerminal(os.Stdout)
 	for {
 		var item whatsmeow.QRChannelItem
 		var ok bool

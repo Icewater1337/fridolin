@@ -20,6 +20,7 @@ import (
 	"syscall"
 
 	"fridolin/internal/fsx"
+	"fridolin/internal/platform"
 	"fridolin/internal/trigger"
 	"fridolin/internal/version"
 )
@@ -333,7 +334,7 @@ func runCmd(args []string) {
 
 	signalled := stopOnSignals(cancel, bridge.brainMgr)
 
-	if isTerminal(os.Stdout) && cfg.HTTPEnabled() && !cfg.Dashboard.Disabled {
+	if platform.IsTerminal(os.Stdout) && cfg.HTTPEnabled() && !cfg.Dashboard.Disabled {
 		// Only on an interactive terminal: even a code that works once
 		// must not end up in a log file.
 		code, _ := bridge.sessions.newCode()
@@ -341,7 +342,7 @@ func runCmd(args []string) {
 	}
 	if opts.open && cfg.HTTPEnabled() {
 		code, _ := bridge.sessions.newCode()
-		go func() { _ = openBrowser(loginURL(cfg.HTTPListen, code)) }()
+		go func() { _ = platform.OpenBrowser(loginURL(cfg.HTTPListen, code)) }()
 	}
 
 	os.Exit(serve(ctx, bridge, signalled))
@@ -477,7 +478,7 @@ func openCmd(args []string) {
 		fmt.Println(url)
 		return
 	}
-	if err := openBrowser(url); err != nil {
+	if err := platform.OpenBrowser(url); err != nil {
 		fmt.Println(url)
 		return
 	}
@@ -547,7 +548,7 @@ func rotateToken(cfg *Config) error {
 	// No bridge answers. The instance lock says whether one runs anyway
 	// (with its server off, say); only without one are the files changed
 	// here, since a running bridge keeps the token in memory.
-	lock, err := acquireInstanceLock(cfg.DataDir)
+	lock, err := platform.AcquireLock(cfg.DataDir)
 	if err != nil {
 		return fmt.Errorf("the bridge runs but does not answer, so the token was not replaced: %w", err)
 	}

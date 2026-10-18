@@ -23,6 +23,7 @@ import (
 	"unsafe"
 
 	"fridolin/internal/fsx"
+	"fridolin/internal/platform"
 )
 
 // TestMain lets the test binary stand in for the Claude CLI: with
@@ -552,7 +553,7 @@ func fakeTTY() int {
 
 // fakeTTYParent plays the bridge in a terminal: it checks that it has one,
 // then runs the command spec describes (JSON: argv, dir, env, and isolate
-// for isolateProcessGroup, as a brain's run gets it) and prints its output.
+// for platform.IsolateProcessGroup, as a brain's run gets it) and prints its output.
 func fakeTTYParent(spec string) int {
 	var s struct {
 		Argv, Env []string
@@ -576,7 +577,7 @@ func fakeTTYParent(spec string) int {
 	cmd := exec.CommandContext(ctx, s.Argv[0], s.Argv[1:]...)
 	cmd.Dir, cmd.Env = s.Dir, s.Env
 	if s.Isolate {
-		isolateProcessGroup(cmd)
+		platform.IsolateProcessGroup(cmd)
 	}
 	out, err := cmd.CombinedOutput()
 	os.Stdout.Write(out)

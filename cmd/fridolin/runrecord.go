@@ -17,7 +17,7 @@ import (
 	"fridolin/internal/fsx"
 )
 
-// A brain run gets a process group of its own (isolateProcessGroup), so a
+// A brain run gets a process group of its own (platform.IsolateProcessGroup), so a
 // stop reaches everything Claude started. That also keeps the service
 // manager's cleanup from reaching it: when the bridge crashes or is killed,
 // the run and the commands it started go on unsupervised, with

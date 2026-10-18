@@ -26,6 +26,7 @@ import (
 	"time"
 
 	"fridolin/internal/fsx"
+	"fridolin/internal/platform"
 	"fridolin/internal/textx"
 	"go.mau.fi/whatsmeow/types"
 )
@@ -741,7 +742,7 @@ func (p *PlaudManager) runCLIIn(ctx context.Context, home string, out io.Writer,
 	cmd.Dir = home
 	// Like a brain run: its own process group, all of which a cancel
 	// kills, and a bounded wait for anything still holding its output.
-	isolateProcessGroup(cmd)
+	platform.IsolateProcessGroup(cmd)
 	stdout, stderr := &cappedBuffer{limit: plaudOutputLimit}, &cappedBuffer{limit: plaudErrorLimit}
 	cmd.Stdout, cmd.Stderr = stdout, stderr
 	if out != nil {

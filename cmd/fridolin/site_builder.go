@@ -33,6 +33,7 @@ import (
 	"time"
 
 	"fridolin/internal/fsx"
+	"fridolin/internal/platform"
 	"fridolin/internal/textx"
 	"fridolin/site"
 )
@@ -286,7 +287,7 @@ func (m *SiteManager) sandboxed(ctx context.Context, brainID, dir string, timeou
 	cmd := exec.CommandContext(ctx, sbBin, sbArgs...)
 	// Like a brain's run: no terminal to type into, and a timeout stops
 	// whatever the command started too.
-	isolateProcessGroup(cmd)
+	platform.IsolateProcessGroup(cmd)
 	cmd.Dir = dir
 	node, _ := findNode()
 	cmd.Env = append(siteEnv(node, "GIT_TERMINAL_PROMPT=0", "GIT_AUTHOR_NAME=Fridolin ("+brainID+")", "GIT_COMMITTER_NAME=Fridolin ("+brainID+")",

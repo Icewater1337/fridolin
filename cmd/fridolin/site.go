@@ -37,6 +37,7 @@ import (
 	"time"
 
 	"fridolin/internal/fsx"
+	"fridolin/internal/platform"
 	"fridolin/internal/textx"
 	"fridolin/site"
 )
@@ -1090,7 +1091,7 @@ func (p *siteProc) runOnce(ctx context.Context, build func(context.Context) (*ex
 		p.logLine("! " + err.Error())
 		return err
 	}
-	isolateProcessGroup(cmd)
+	platform.IsolateProcessGroup(cmd)
 	cmd.Cancel = func() error {
 		// Ask nicely first; WaitDelay escalates to SIGKILL.
 		_ = cmd.Process.Signal(os.Interrupt)
@@ -1119,7 +1120,7 @@ func (p *siteProc) runOnce(ctx context.Context, build func(context.Context) (*ex
 	err = cmd.Wait()
 	pw.Close()
 	if cmd.Process != nil {
-		_ = killProcessGroup(cmd.Process.Pid)
+		_ = platform.KillProcessGroup(cmd.Process.Pid)
 	}
 	return err
 }
