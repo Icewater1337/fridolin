@@ -62,6 +62,19 @@ type BrainRouting struct {
 	HandlesDMs bool     `json:"handles_dms"`
 	Default    bool     `json:"default"`
 	Groups     []string `json:"groups"`
+	// AnswerFiles and AnswerForwards say whether, in the brain's groups, a
+	// file (a photo, document, voice note or video) and a forwarded
+	// message address the bridge, which then answers them. Unset is true,
+	// as it always was. False makes them chatter the brain reads without
+	// answering; a file is then not even downloaded, and only its caption
+	// is read.
+	AnswerFiles    *bool `json:"answer_files,omitempty"`
+	AnswerForwards *bool `json:"answer_forwards,omitempty"`
+}
+
+// groupRules is what addresses the bridge in the brain's groups.
+func (r BrainRouting) groupRules() groupRules {
+	return groupRules{files: boolOr(r.AnswerFiles, true), forwards: boolOr(r.AnswerForwards, true)}
 }
 
 // BrainBackup controls this brain's Google Drive backup.

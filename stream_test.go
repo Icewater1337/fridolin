@@ -6,6 +6,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 	"unicode/utf8"
 )
 
@@ -37,7 +38,7 @@ func TestExtractAskQuestion(t *testing.T) {
 func TestParseStreamForwardsAskUserQuestion(t *testing.T) {
 	br := bareBrain(t)
 	var sent []string
-	br.hooks = &BrainHooks{Intermediate: func(jid, text string) { sent = append(sent, jid+" "+text) }}
+	br.hooks = &BrainHooks{Question: func(jid, text string) { sent = append(sent, jid+" "+text) }}
 	stream := `{"type":"assistant","message":{"content":[{"type":"tool_use","name":"AskUserQuestion","input":{"questions":[{"header":"Meeting","question":"Which day suits you?"}]}}]}}
 {"type":"result","result":"I asked which day suits you."}
 `
@@ -55,7 +56,7 @@ func TestParseStreamForwardsAskUserQuestion(t *testing.T) {
 func TestParseStreamSkipsBlankQuestions(t *testing.T) {
 	br := bareBrain(t)
 	var sent []string
-	br.hooks = &BrainHooks{Intermediate: func(jid, text string) { sent = append(sent, text) }}
+	br.hooks = &BrainHooks{Question: func(jid, text string) { sent = append(sent, text) }}
 	stream := `{"type":"assistant","message":{"content":[{"type":"tool_use","name":"AskUserQuestion","input":{"questions":[{},{"question":" "}]}}]}}
 {"type":"result","result":"Done."}
 `
@@ -136,7 +137,7 @@ func FuzzParseStream(f *testing.F) {
 	br := bareBrain(f)
 	run := func(stream string) (RunResult, []string) {
 		var sent []string
-		br.hooks = &BrainHooks{Intermediate: func(_, text string) { sent = append(sent, text) }}
+		br.hooks = &BrainHooks{Question: func(_, text string) { sent = append(sent, text) }}
 		return br.parseStream("chat", strings.NewReader(stream)), sent
 	}
 	f.Fuzz(func(t *testing.T, stream, junk string) {
@@ -185,12 +186,11 @@ func TestMidRunMessagesReachTheChatMarked(t *testing.T) {
 {"type":"result","result":"asked"}
 `
 	br.parseStream(dm, strings.NewReader(stream))
-	br.hooks.Intermediate(dm, workingNotice)
-	var sent []string
-	for _, m := range tb.dev.Outbox() {
-		sent = append(sent, m.Text)
-	}
-	slices.Sort(sent) // the outbox lists the newest first
+	br.hooks.Notice(dm, workingNotice)
+	// The question goes through the outbox, after the notice.
+	waitFor(t, 5*time.Second, "both messages", func() bool { return len(tb.sentTo(dm)) == 2 })
+	sent := tb.sentTo(dm)
+	slices.Sort(sent)
 	if want := []string{"⏳ Working on it...", "❓ ⏳ Wait for the delivery?"}; !slices.Equal(sent, want) {
 		t.Errorf("sent %q, want %q", sent, want)
 	}

@@ -17,8 +17,9 @@ import (
 type Config struct {
 	Comment string `json:"_comment,omitempty"`
 
-	// AllowedNumbers lists phone numbers (country code, no "+") allowed to DM
-	// the bridge.
+	// AllowedNumbers lists phone numbers allowed to DM the bridge: digits
+	// with the country code. The running config has each in that form,
+	// however it was written in the file (see allowedNumbersAsNumbers).
 	AllowedNumbers []string `json:"allowed_numbers"`
 
 	// AllowAnyDM decides what an empty allowed_numbers means. Unset or false:
@@ -320,7 +321,7 @@ type IngestConfig struct {
 
 // StartupChecksConfig lists files that must exist for the assistant to work —
 // credentials, typically. Missing ones are logged loudly, shown on the
-// dashboard and optionally sent to you over WhatsApp.
+// dashboard and optionally sent to you over WhatsApp (see health.go).
 type StartupChecksConfig struct {
 	RequiredFiles  []string `json:"required_files,omitempty"`
 	NotifyWhatsApp bool     `json:"notify_whatsapp,omitempty"`
@@ -423,17 +424,16 @@ func (c *Config) AllowsAnyDM() bool { return boolOr(c.AllowAnyDM, false) }
 func (c *Config) AnyoneCanDM() bool { return len(c.AllowedNumbers) == 0 && c.AllowsAnyDM() }
 
 // warnOddChats logs entries of allowed_numbers and allowed_groups that can
-// never match a chat, since the bridge compares them as they are: a typo,
-// a "+" or spaces in a number, a JID where a number belongs. They are
-// logged rather than refused, so a config that ran before still starts.
+// never match a chat: an entry that is no phone number, and a group the
+// bridge compares as it is written, with a typo or spaces. A number is
+// read however it was written (phoneNumber), so only one that is none is
+// named. They are logged rather than refused, so a config that ran
+// before still starts.
 func warnOddChats(path string, c *Config) {
 	var odd []string
 	for _, n := range c.AllowedNumbers {
-		switch want, err := allowListNumber(n); {
-		case err != nil:
-			odd = append(odd, fmt.Sprintf("allowed_numbers %q (digits with the country code, no +)", n))
-		case want != n:
-			odd = append(odd, fmt.Sprintf("allowed_numbers %q (write it as %s)", n, want))
+		if _, err := phoneNumber(n); err != nil {
+			odd = append(odd, fmt.Sprintf("allowed_numbers %q (digits with the country code)", n))
 		}
 	}
 	for _, g := range c.AllowedGroups {
@@ -589,6 +589,9 @@ func effective(file *Config) (*Config, error) {
 	}
 	cfg.Backup.RclonePath = expandHome(cfg.Backup.RclonePath, home)
 
+	// Compared with senders as digits, however they were typed into the
+	// file. The dashboard writes them so; a hand edit may not have.
+	cfg.AllowedNumbers = allowedNumbersAsNumbers(cfg.AllowedNumbers)
 	for i := range cfg.BrainDirs {
 		cfg.BrainDirs[i].Path = expandHome(cfg.BrainDirs[i].Path, home)
 	}

@@ -7,8 +7,9 @@ import { icon } from './icons.js';
 import { chatEl, chatName } from './chat.js';
 import { timeAgo, longText } from './common.js';
 
-/** One message row. */
+/** One message row, or one event row (see eventItem). */
 export function activityItem(e, { compact = false, showBrain = true } = {}) {
+  if (e.type === 'event') return eventItem(e, { compact, showBrain });
   const out = e.type === 'out';
   const who = out
     ? h('span.act-who', 'Reply')
@@ -22,6 +23,25 @@ export function activityItem(e, { compact = false, showBrain = true } = {}) {
         showBrain && e.brain ? h('a.badge.neutral.act-brain', { href: `#/brains/${encodeURIComponent(e.brain)}`, title: 'Brain' }, e.brain) : null,
         h('span.act-time', timeAgo(e.ts))),
       longText(e.text, { limit: compact ? 200 : 360, lines: compact ? 3 : 6 })));
+}
+
+/**
+ * Something that happened to a chat's messages rather than a message: a
+ * vote in a poll, an edit or a deletion of a message a run had read. Its
+ * text says what the person did ("voted …", "deleted a message they had
+ * sent"), so it reads after their name, muted, beside an icon of its own:
+ * shown as a received message, it would look as if they had typed it.
+ */
+function eventItem(e, { compact, showBrain }) {
+  return h(`article.act-item.event${compact ? '.compact' : ''}`,
+    h('div.act-icon', { title: 'Event' }, icon('event')),
+    h('div.act-body',
+      h('div.act-meta',
+        isGroupJid(e.chat) || senderLabel(e.from, e.chat) !== shortJid(e.chat) ? [h('span.act-sep', 'in'), chatEl(e.chat)] : h('span.act-sep', 'direct message'),
+        showBrain && e.brain ? h('a.badge.neutral.act-brain', { href: `#/brains/${encodeURIComponent(e.brain)}`, title: 'Brain' }, e.brain) : null,
+        h('span.act-time', timeAgo(e.ts))),
+      h('div.msg-text.act-event',
+        h('span.act-who', { title: e.from || '' }, senderLabel(e.from, e.chat)), ' ', e.text || '')));
 }
 
 const itemKey = (e) => `${e.ts}|${e.chat}|${e.type}|${(e.text || '').length}`;

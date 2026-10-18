@@ -573,6 +573,7 @@ dialog.dialog::backdrop { background: var(--backdrop); }
 }
 .act-icon .icon { width: 16px; height: 16px; }
 .act-item.out .act-icon { background: var(--accent-soft); color: var(--accent); }
+.act-item.event .act-icon { background: var(--neutral-soft); color: var(--neutral); }
 .act-body { min-width: 0; }
 .act-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 2px 8px; font-size: 13px; color: var(--muted); }
 .act-who { font-weight: 650; color: var(--text); }
@@ -590,6 +591,7 @@ dialog.dialog::backdrop { background: var(--backdrop); }
   mask-image: linear-gradient(to bottom, black 60%, transparent);
 }
 .act-item.compact .msg-wrap.collapsed .msg-text { max-height: 4.5em; }
+.act-event { color: var(--muted); }
 
 /* ── tabs ───────────────────────────────────────────────────────────────── */
 

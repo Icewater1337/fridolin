@@ -26,7 +26,10 @@ Paths may start with `~`, which expands to your home directory.
 
 ### `allowed_numbers`
 
-Phone numbers permitted to DM the bridge. Country code, no `+`, no spaces.
+Phone numbers permitted to DM the bridge, with the country code. The bridge
+compares digits only, so `"+1 555 123-4567"` written into the file by hand
+lets 15551234567 in; an entry that is not 6 to 15 digits, or a `@lid` JID,
+lets nobody in, and the Overview and the log at startup name it.
 
 ```json
 "allowed_numbers": ["15551234567", "15559876543"]
@@ -39,14 +42,18 @@ not 6 to 15 of them, or a `@lid` JID (WhatsApp's internal ID for a sender,
 not a number); a group must be a group JID.
 
 An empty list means nobody may DM until you add a number, unless
-`allow_any_dm` (below) is `true`. The bridge compares entries exactly as
-they are written, so one written by hand with a `+` or spaces matches
-nobody; it names such entries in the log when it starts, with the form to
-write them in.
+`allow_any_dm` (below) is `true`. `allowed_groups` entries are compared
+exactly as they are written, so one written by hand with a typo or spaces
+matches no group; the log names such entries when the bridge starts, with
+the form to write them in.
 
-Newer WhatsApp clients identify senders by an internal ID rather than a phone
-number; the bridge resolves that back to the number before checking, so plain
-numbers here are correct.
+Newer WhatsApp clients identify senders by an internal ID (a LID) rather than
+a phone number; the bridge resolves that back to the number before checking,
+so plain numbers here are correct. It knows each person by their number
+everywhere: a DM's history is kept under the number's JID however WhatsApp
+addressed it (older lines under the LID still count as the same chat), group
+members and the authors of quoted messages appear by number, so the identity
+map names them, and a poll vote counts once per person.
 
 A message someone sends to a broadcast list you are on counts as a DM from
 them and is answered in your direct chat with them, which is where WhatsApp
@@ -103,7 +110,12 @@ message; an object can restrict it:
 
 An @-mention of the bridge's own account always counts, whatever this list
 says, and is stripped the same way: `@Fridolin !stop` is the command `!stop`.
-So does sending a file, and so does forwarding a message.
+So does a reply to any message the bridge's account sent. Sending a file
+(photo, document, voice note, video; a GIF is none) and forwarding a message
+count too, unless the group's brain turns them off with `routing.answer_files`
+or `routing.answer_forwards` (docs/BRAINS.md, or the brain's page in the
+dashboard): then a file is chatter whose caption the brain reads, and it is not
+downloaded, and a forward is chatter like any other.
 
 Untagged group messages still run through the brain — so it keeps up with the
 conversation — but produce no reply. Very short messages ("ok", "👍") are
@@ -780,9 +792,12 @@ brains answer in the same chat. A batch never waits longer than
 }
 ```
 
-Files the assistant's tools need. Missing ones are logged loudly, shown on the
-dashboard and, with `notify_whatsapp`, sent to `notify_jid` (default: the
-first allowed number) once WhatsApp is connected.
+Files the assistant's tools need. They are checked while the bridge runs, not
+only at startup: the dashboard shows the ones missing when it asks, and the
+bridge looks every five minutes. It logs each change loudly and, with
+`notify_whatsapp`, sends the list to `notify_jid` (default: the first allowed
+number) whenever the files missing change, once WhatsApp is connected; a file
+restored and lost again is reported again. Edits to the list apply at once.
 
 ### `backup`
 
@@ -871,7 +886,8 @@ last 50 outbound messages contains one of `otp_markers` — by default `🔐`,
 `OTP`, `2FA`, `one-time code`, `verification code`. Add your own (a bank's
 name in its code prompt, say); setting the list replaces the defaults, so
 include them if you still want them. Only what was typed counts: a code sent
-as a reply to the request is caught too.
+as a reply to the request is caught too, and so is a corrected code, when
+its sender edits the message.
 
 The code is never written to history or sent to the model — the assistant
 never sees it. It is kept for local scripts instead:
@@ -905,7 +921,8 @@ leaves room for text; the bridge refuses to start with a smaller value.
 Longer replies are split and numbered `[1/3]`, `[2/3]`, … They are cut at
 paragraphs first, then lines, sentence ends and spaces, each finer level only
 for a part that is still too long; a word longer than a whole message is cut
-between characters. Only the whitespace at a cut is dropped.
+between characters. Only the whitespace at a cut is dropped. The Build page
+has no such limit and shows a builder brain's answer whole.
 
 ### `max_media_mb`
 

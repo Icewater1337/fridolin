@@ -58,7 +58,7 @@ func brainTool(t *testing.T, cmd func([]string, toolIO) int, url, token string, 
 
 func savePoll(t *testing.T, tb *testBridge, id, chat, question string, options []string, votes map[string][]string) {
 	t.Helper()
-	if err := tb.store.SavePoll(id, chat, question, options); err != nil {
+	if err := tb.store.SavePoll(id, chat, "", question, options); err != nil {
 		t.Fatal(err)
 	}
 	for voter, chosen := range votes {

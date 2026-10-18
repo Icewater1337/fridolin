@@ -48,10 +48,13 @@ backed up incrementally every night, with old versions kept.
 **Files.** Photos, PDFs, documents, voice notes, and video are downloaded and
 handed over as file paths. The assistant opens them and does whatever you asked.
 A file over 100 MB (`max_media_mb`) is skipped, and so is one that cannot be
-downloaded within two minutes; the sender is told either way.
+downloaded within two minutes; the sender is told either way. View-once photos,
+videos and voice notes are not opened (the sender is asked to send a normal
+one); a shared location or contact card reaches the assistant as text.
 
 **Real polls.** The assistant can send native WhatsApp polls and read the votes
-back:
+back; each vote lands in its chat history, so it sees new votes the next time
+someone writes:
 
 ```
 [POLL]
@@ -62,12 +65,19 @@ Question: When should we meet?
 ```
 
 **Group awareness.** In a group it reads everything but replies only when
-addressed — by keyword, by @-mention, or when you send it a file.
+addressed — by keyword, by @-mention, by a reply to one of its messages, or
+when you send it a file (each brain can turn files and forwards off).
 
 **Orderly.** Messages that arrive while the assistant is busy wait their turn
 (or, if you prefer, a newer request replaces the one you sent before it). A
 photo album or a file plus "what is this?" sent in quick succession becomes
-one request. `!stop` stops whatever it is doing for that chat.
+one request. `!stop` stops whatever it is doing for that chat. A reply written
+while the connection is down goes out once it is back, even after a restart,
+and the next message is answered knowing it. A message you delete for everyone
+is not answered, even while it is being answered, and leaves the chat history
+(an answer already written, waiting for the connection, still goes out); an
+edit of one still waiting changes what is answered, and an edit of one already
+answered is noted for the next message, without a second run.
 
 **Calendar.** Each brain can sign in to a Google account from the dashboard
 and use the calendars you pick: list events, find free time, create events.
@@ -373,7 +383,8 @@ sends its run's, from the file `$FRIDOLIN_BRAIN_TOKEN_FILE` names, and may
 send only to its own chats.
 Without a token, `/send` reaches only your allowed chats, and only while
 [`script_api.tokenless_send`](docs/CONFIGURATION.md#script_apitokenless_send)
-is on.
+is on. `jid` may also be a phone number with the country code, for the
+direct chat with it.
 
 `curl -fsS http://127.0.0.1:8765/ready` succeeds only while WhatsApp is
 connected, so a script can check first; its JSON names the connection state
@@ -545,8 +556,8 @@ What the bridge does about it:
   claim your DMs or another group changes nothing until you approve it.
 - **OTP guard.** A message that is only a numeric code, arriving right after
   the assistant asked for one, is dropped before it reaches history or the model
-  — also when it is sent as a reply to the request — and kept in
-  `<data_dir>/otp/` for the local script that asked for it.
+  — also when it is sent as a reply to the request or corrected by an edit —
+  and kept in `<data_dir>/otp/` for the local script that asked for it.
 
 What it does not do:
 
@@ -585,8 +596,9 @@ folders of their own rather than your home directory, and
 
 **`whatsapp.go`** — [whatsmeow](https://github.com/tulir/whatsmeow) client.
 Handles pairing, allowlists, trigger matching, attachment downloads, and poll
-vote decryption (WhatsApp sends SHA-256 hashes of option names, which are
-matched against the stored options).
+vote decryption. **`polls.go`** — the `[POLL]` blocks in replies, sending
+them, and matching votes to options (WhatsApp sends SHA-256 hashes of option
+names, which are matched against the stored options).
 
 **`debounce.go`** — merges a burst of messages from one person into one run.
 
@@ -626,6 +638,13 @@ chats that wrote without being allowed.
 **`chunks.go`** — splits long replies at paragraph, line, sentence, then word
 boundaries so messages break somewhere readable, and numbers the parts.
 
+**`outbox.go`** — brains' replies wait in `bridge.db` until WhatsApp took
+every message of them, are tried again with backoff (from the message that
+failed, and at once when WhatsApp reconnects, after a restart too), and go
+into the brain's history only once delivered; until then a run reads them
+from the outbox. One that cannot go out within an hour is given up on, and
+the Overview says so.
+
 **`server.go`** — the localhost `/send` and `/ingest` endpoints.
 
 **`brainapi.go`** — `/brain/`, what the tools a brain runs ask the bridge
@@ -647,9 +666,11 @@ On macOS the desktop app keeps it at
 shows up there with an *Allow* button. Otherwise check which brain the group
 routes to, and that you used a trigger keyword.
 
-**No reply to a DM** — the sender's number must be allowed (*Settings →
-Access*), with country code and no `+`. An empty list allows nobody unless
-`allow_any_dm` is `true`. Blocked senders appear under *Chats*.
+**No reply to a DM** — the sender's number must be allowed (*Chats →
+Allowed numbers*), with the country code; a `+`, spaces and dashes are fine.
+An empty list allows nobody unless `allow_any_dm` is `true`. Blocked senders
+appear under *Chats*, and the Overview warns about an entry that is no
+number.
 
 **"Not logged in" from the CLI** — run `claude` once in a terminal to
 authenticate. Under launchd, check that `HOME` is set correctly in the plist.
@@ -658,10 +679,21 @@ that variable must be in the bridge's process environment: the bridge reads
 no `.env` file, and says so in its log when one lies next to the config
 ([details](docs/CONFIGURATION.md#environment-variables)).
 
-**Logged out of WhatsApp** — remove the device under *Linked Devices* on the
-phone, stop the bridge, move `bridge.db` out of your data directory (keep it
-until the new pairing works), start the bridge and pair again from the
-dashboard. This also clears the poll history.
+**Logged out of WhatsApp** — pair again with *Start pairing* on the
+dashboard's Overview; no restart is needed, and `bridge.db` can stay (the
+bridge starts a new session in it and keeps the poll history). Remove the old
+entry under *Linked Devices* on the phone if it is still there. Only if
+pairing keeps failing, stop the bridge and move `bridge.db` out of your data
+directory, keeping it until the new pairing works; that also clears the poll
+history.
+
+**"Fridolin needs an update"**, **"Temporarily banned"**, **"WhatsApp refused
+the connection"** — the Overview says what WhatsApp answered and what to do:
+update and rebuild (`git pull && ./setup.sh`) when WhatsApp no longer accepts
+the bridge's WhatsApp library; wait for a ban to end, when the bridge
+connects again by itself. After a refusal on WhatsApp's side it tries again
+by itself too, waiting longer each time, up to half an hour; after any other
+refusal, restart the bridge.
 
 **"another bridge is already running"** — only one bridge may use a data
 directory; two bridges on one WhatsApp session knock each other offline.

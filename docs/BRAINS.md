@@ -58,6 +58,8 @@ restart.
 | `routing.handles_dms` | This brain answers direct messages. At most one brain. |
 | `routing.default` | This brain answers allowed groups no brain claims. At most one; without one, the first brain is the fallback. |
 | `routing.groups` | Group JIDs this brain answers. The group must also be allowed in the global settings. |
+| `routing.answer_files` | In this brain's groups, a file someone sends (photo, document, voice note, video) addresses the bridge, which answers it. Default `true`; `false` makes it chatter: the brain reads its caption without answering, and the file is not downloaded. The trigger, an @-mention or a reply to the bridge still address it. |
+| `routing.answer_forwards` | The same for a forwarded message. Default `true`. |
 | `model`, `effort` | Override the global `brain_model` / `brain_effort`. |
 | `disallowed_tools` | Override the global list; omit to inherit, `[]` to allow every tool. |
 | `prompt_file` | The prompt sent ahead of every message, relative to the folder. It must stay inside the folder, and be a file rather than a symlink (see [Files the bridge reads and writes](#files-the-bridge-reads-and-writes)). |
@@ -84,20 +86,25 @@ folder: it reads the prompt file, `brain.json` (to tell when it changed on
 disk) and `memories/people/whatsapp-identity-map.md`, appends every message
 to `conversation-history.jsonl` and reads it back, and logs what each run
 did in `claude-stream.log`, each run under a line naming its chat, sender,
-process and model. A run that finds the log over 5 MB first moves it to
-`claude-stream.1.log`, replacing the one before. A brain can change any
-file in its folder, and put a symlink to `~/.ssh` or to another brain's
-history in place of one of them, so the bridge never leaves the folder
-through a symlink, and takes only a regular file there: not a symlink at
-the file itself, even one to another file in the folder. Nor does it take
-a prompt file, `brain.json` or identity map larger than 256 KiB. It treats
-such a file as missing and writes nothing through it; its log says why,
-and the dashboard shows a `brain.json` it cannot read. It opens the folder
-once when it loads the brain and goes through that handle from then on
-(`brain.json` excepted, which it reads for brains that are not running
-too), so a folder you put in a brain's place takes a reload; see
-[Moving a brain](#moving-a-brain). Copy a file into the folder rather than
-link it.
+process and model, and after it the end of what the CLI wrote to stderr,
+under a line naming the run. A history line has the type `in`, `out` for an
+answer, written once all of it reached WhatsApp, or `event` for a vote in
+one of the brain's polls or an edit of a message a run already read, and a
+message from WhatsApp carries its `id`. A message deleted for everyone is
+taken out of the history again, by rewriting the file. A run that finds the
+log over 5 MB first moves it to `claude-stream.1.log`, replacing the one
+before. A brain can change any file in its folder, and put a symlink to
+`~/.ssh` or to another brain's history in place of one of them, so the
+bridge never leaves the folder through a symlink, and takes only a regular
+file there: not a symlink at the file itself, even one to another file in
+the folder. Nor does it take a prompt file, `brain.json` or identity map
+larger than 256 KiB. It treats such a file as missing and writes nothing
+through it; its log says why, and the dashboard shows a `brain.json` it
+cannot read. It opens the folder once when it loads the brain and goes
+through that handle from then on (`brain.json` excepted, which it reads for
+brains that are not running too), so a folder you put in a brain's place
+takes a reload; see [Moving a brain](#moving-a-brain). Copy a file into the
+folder rather than link it.
 
 ## Moving a brain
 
@@ -161,7 +168,8 @@ dashboard refuses to save any brain's settings.
 
 Each message is one `claude -p` run in the brain's folder. Its prompt is
 the brain's prompt file (`brain-prompt.md`) followed by the recent chat
-history and the new message; Claude Code adds its own system prompt. From
+history, with the brain's answers that still wait to go out to WhatsApp,
+and the new message; Claude Code adds its own system prompt. From
 the brain's folder it also loads the Claude Code setup a session started
 there would: `CLAUDE.md` and `CLAUDE.local.md`, the settings, skills,
 agents, commands and rules in `.claude/`, and the MCP servers in

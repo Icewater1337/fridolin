@@ -26,7 +26,6 @@ import (
 	"unicode"
 	"unicode/utf8"
 
-	"go.mau.fi/whatsmeow/types"
 	"rsc.io/qr"
 )
 
@@ -209,6 +208,10 @@ func (b *Bridge) apiStatus(w http.ResponseWriter, r *http.Request) {
 
 		RestartRequired: nonNil(b.cfgs.RestartRequired()),
 	}
+	resp.Warnings = append(resp.Warnings, b.outboxWarnings(r.Context())...)
+	if bad := badAllowedNumbers(cfg.AllowedNumbers); len(bad) > 0 {
+		resp.Warnings = append(resp.Warnings, fmt.Sprintf("allowed_numbers holds %q, which lets nobody in: each entry must be a phone number, digits with the country code. Fix it under Chats → Allowed numbers.", bad))
+	}
 	if cfg.AnyoneCanDM() {
 		resp.Warnings = append(resp.Warnings, "allowed_numbers is empty, so anyone who can message this WhatsApp account can use the assistant. Add your number under Chats → Allowed numbers.")
 	}
@@ -261,6 +264,43 @@ func (b *Bridge) tokenWarnings(cfg *Config, goos string) []string {
 		}
 	}
 	return out
+}
+
+// outboxWaitWarning is how long a reply may wait before the Overview
+// mentions it: a reconnect usually takes seconds.
+const outboxWaitWarning = time.Minute
+
+// outboxWarnings says what the outbox holds that the owner should know:
+// replies that have waited a while, and replies given up on, which the
+// chats never got.
+func (b *Bridge) outboxWarnings(ctx context.Context) []string {
+	sum, err := b.store.OutboxSummary(ctx, time.Now())
+	if err != nil {
+		return []string{fmt.Sprintf("Cannot read the outbox of replies: %v", err)}
+	}
+	var out []string
+	if sum.Waiting > 0 && time.Since(sum.OldestWaiting) > outboxWaitWarning {
+		w := fmt.Sprintf("%d %s waiting to go out to WhatsApp, the oldest since %s; the bridge keeps trying for an hour.",
+			sum.Waiting, plural(sum.Waiting, "reply is", "replies are"), sum.OldestWaiting.Local().Format("15:04"))
+		if sum.WaitingError != "" {
+			w += " Last error: " + truncate(sum.WaitingError, 200)
+		}
+		out = append(out, w)
+	}
+	if sum.Failed > 0 {
+		out = append(out, fmt.Sprintf("%d %s could not be delivered to WhatsApp and %s given up on, the last at %s: %s. The chats never got them, and the brains' history does not hold them.",
+			sum.Failed, plural(sum.Failed, "reply", "replies"), plural(sum.Failed, "was", "were"),
+			sum.LastFailed.Local().Format("Jan 2 15:04"), truncate(sum.FailedError, 200)))
+	}
+	return out
+}
+
+// plural is one when n is 1, else many.
+func plural(n int, one, many string) string {
+	if n == 1 {
+		return one
+	}
+	return many
 }
 
 // sandboxProfileWarning names the brains whose profile cannot be built, or
@@ -392,34 +432,10 @@ func (b *Bridge) apiIgnored(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, chats)
 }
 
-// The forms allowed_numbers and allowed_groups hold. Every edit of the
-// allow lists goes through allowListNumber and allowListGroup, so the
-// dashboard's add boxes and its Allow buttons agree on what they accept.
-var (
-	phoneNumberRE = regexp.MustCompile(`^[0-9]{6,15}$`)
-	groupJIDRE    = regexp.MustCompile(`^[0-9]+(-[0-9]+)?@g\.us$`)
-)
-
-// allowListNumber is s as allowed_numbers holds it: digits with the country
-// code. It takes the ways people write a number (a +, spaces, dashes,
-// dots, brackets, a WhatsApp JID) and refuses anything else, a @lid JID
-// too: its digits are WhatsApp's internal id for the sender, not a number.
-func allowListNumber(s string) (string, error) {
-	if _, server, ok := strings.Cut(strings.TrimSpace(s), "@"); ok && server != types.DefaultUserServer {
-		return "", fmt.Errorf("%q holds no phone number: send the number with the country code, e.g. 15551234567", strings.TrimSpace(s))
-	}
-	n := strings.Map(func(r rune) rune {
-		switch r {
-		case ' ', '\u00a0', '-', '.', '(', ')':
-			return -1
-		}
-		return r
-	}, normalizeJID(s))
-	if !phoneNumberRE.MatchString(n) {
-		return "", fmt.Errorf("%q is not a phone number: use digits with the country code, e.g. 15551234567", strings.TrimSpace(s))
-	}
-	return n, nil
-}
+// The form allowed_groups holds. Every edit of the allow lists goes
+// through phoneNumber and allowListGroup, so the dashboard's add boxes and
+// its Allow buttons agree on what they accept.
+var groupJIDRE = regexp.MustCompile(`^[0-9]+(-[0-9]+)?@g\.us$`)
 
 // allowListGroup is s as allowed_groups holds it: a group JID.
 func allowListGroup(s string) (string, error) {
@@ -455,7 +471,7 @@ func (req chatRequest) listEntry() (dm bool, entry string, err error) {
 		entry, err = allowListGroup(req.sent())
 		return false, entry, err
 	case "dm":
-		entry, err = allowListNumber(req.sent())
+		entry, err = phoneNumber(req.sent())
 		return true, entry, err
 	default:
 		return false, "", errors.New("kind must be group or dm")
@@ -530,7 +546,7 @@ func (b *Bridge) apiRevokeChat(w http.ResponseWriter, r *http.Request) {
 	}
 	canon, name := allowListGroup, "allowed_groups"
 	if dm {
-		canon, name = allowListNumber, "allowed_numbers"
+		canon, name = phoneNumber, "allowed_numbers"
 	}
 	var removed []string
 	_, err := b.cfgs.Update("", func(c *Config) error {
@@ -1401,8 +1417,12 @@ func (b *Bridge) apiDevInbound(w http.ResponseWriter, r *http.Request) {
 			writeJSON(w, http.StatusAccepted, map[string]string{"status": "ignored", "reason": "group not allowed"})
 			return
 		}
-		if !cfg.Triggers.Matches(m.Text) && len(m.Media) == 0 {
+		files := len(m.Media) > 0 && b.groupRules(m.JID).files
+		if !cfg.Triggers.Matches(m.Text) && !files {
 			m.Silent = true
+			// As on WhatsApp, a file that does not address the bridge is
+			// chatter, and not fetched.
+			m.Media = nil
 		}
 		m.Text = cfg.Triggers.Strip(m.Text)
 	} else if !numberAllowed(cfg, m.Sender) {

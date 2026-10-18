@@ -78,7 +78,8 @@ the version before: `fridolin service rollback`.
 ## Rules
 
 - **Never delete or recreate `~/.fridolin/bridge.db`.** It holds
-  the WhatsApp pairing; losing it means re-pairing and losing poll history.
+  the WhatsApp pairing; losing it means re-pairing and losing poll history
+  and the replies still waiting to go out.
   If a repair seems to need it, stop and ask; move it aside rather than delete.
 - **Never run two bridges on one data directory or WhatsApp session.** The
   binary refuses (lock file + port), but do not try to work around it. To

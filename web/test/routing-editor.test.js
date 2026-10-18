@@ -35,3 +35,19 @@ test('an editor follows the groups while it is shown, and stops once replaced', 
   assert.deepEqual(names(second), ['Family and friends']);
   assert.deepEqual(names(first), ['Family'], 'the replaced editor no longer paints');
 });
+
+test('files and forwards answer in groups until turned off, and only off is written', () => {
+  installDom();
+  const switches = (el) => el.querySelectorAll('input').filter((i) => i.getAttribute('role') === 'switch');
+  const on = routingEditor({ routing: { groups: [GROUP] } });
+  assert.deepEqual(on.getValue(), { handles_dms: false, default: false, groups: [GROUP] });
+
+  const off = routingEditor({ routing: { groups: [GROUP], answer_files: false, answer_forwards: false } });
+  const [, , files, forwards] = switches(off);
+  assert.equal(files.checked, false);
+  assert.equal(forwards.checked, false);
+  assert.deepEqual(off.getValue(), { handles_dms: false, default: false, groups: [GROUP], answer_files: false, answer_forwards: false });
+
+  files.checked = true;
+  assert.deepEqual(off.getValue(), { handles_dms: false, default: false, groups: [GROUP], answer_forwards: false });
+});

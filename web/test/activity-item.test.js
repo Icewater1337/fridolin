@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { installDom } from './fake-dom.js';
 import { h } from '../assets/lib/dom.js';
-import { showActivity } from '../assets/components/activity-item.js';
+import { activityItem, showActivity } from '../assets/components/activity-item.js';
 import { setChatNames } from '../assets/components/chat.js';
 
 const GROUP = '120363000000000000@g.us';
@@ -33,4 +33,17 @@ test('a refresh keeps the rows of messages already shown', () => {
 
   showActivity(feed, [older], { showBrain: false });
   assert.doesNotMatch(feed.firstChild.textContent, /work/, 'other options draw it again too');
+});
+
+test('an event reads as what its person did, not as a message they sent', () => {
+  installDom();
+  setChatNames(() => '');
+  const row = activityItem({ ts: '2026-10-18T10:00:00Z', chat: GROUP, type: 'event', from: '15551234567', text: 'deleted a message they had sent', brain: 'work' });
+  assert.ok(row.classList.contains('event'), 'an event row');
+  assert.ok(!row.classList.contains('in'), 'not a received message');
+  assert.equal(row.querySelector('.act-icon').getAttribute('title'), 'Event');
+  assert.equal(row.querySelector('.act-event').textContent, '+15551234567 deleted a message they had sent');
+
+  const msgRow = activityItem(msg('2026-10-18T10:00:00Z', 'hello'));
+  assert.equal(msgRow.querySelector('.act-icon').getAttribute('title'), 'Received');
 });

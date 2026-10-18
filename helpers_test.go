@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bufio"
 	"bytes"
 	"encoding/json"
 	"errors"
@@ -23,8 +24,10 @@ import (
 // FRIDOLIN_FAKE_ENV the value of that environment variable, and with
 // FRIDOLIN_FAKE_POLLS=1 what `fridolin polls` answers in the run. With
 // FRIDOLIN_FAKE_ASK_ON a message ending in that asks a question first (and
-// with FRIDOLIN_FAKE_HANG_AFTER_ASK=1 never answers), and
-// FRIDOLIN_FAKE_PID_LOG gets each run's process ID. Asked for
+// with FRIDOLIN_FAKE_HANG_AFTER_ASK=1 never answers),
+// FRIDOLIN_FAKE_PID_LOG gets each run's process ID and
+// FRIDOLIN_FAKE_PROMPT_LOG its prompt, and with
+// FRIDOLIN_FAKE_STDERR_BYTES it floods stderr and fails instead. Asked for
 // --version, it answers testedClaudeVersion. Tests point
 // claude_path at os.Args[0], so no script or real CLI is needed.
 //
@@ -166,6 +169,14 @@ func fakeClaude() {
 			f.Close()
 		}
 	}
+	if log := os.Getenv("FRIDOLIN_FAKE_PROMPT_LOG"); log != "" {
+		// Each run's prompt after a line of its own (fakePromptsIn).
+		f, err := os.OpenFile(log, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600)
+		if err == nil {
+			fmt.Fprintf(f, "%s\n%s\n", fakePromptMark, prompt)
+			f.Close()
+		}
+	}
 	if os.Getenv("FRIDOLIN_FAKE_CHILD") == "1" {
 		// A grandchild that inherits stdout, like a shell command Claude ran.
 		child := exec.Command("sleep", "30")
@@ -174,6 +185,17 @@ func fakeClaude() {
 	}
 	if ms, _ := strconv.Atoi(os.Getenv("FRIDOLIN_FAKE_SLEEP_MS")); ms > 0 {
 		time.Sleep(time.Duration(ms) * time.Millisecond)
+	}
+	if n, _ := strconv.Atoi(os.Getenv("FRIDOLIN_FAKE_STDERR_BYTES")); n > 0 {
+		// A CLI that floods stderr and fails without a result: n bytes of
+		// filler, then the line that says what went wrong.
+		w := bufio.NewWriter(os.Stderr)
+		for i := 0; i < n; i++ {
+			_ = w.WriteByte('x')
+		}
+		fmt.Fprintln(w, "\nfatal: the last thing the CLI said")
+		_ = w.Flush()
+		os.Exit(1)
 	}
 	if log := os.Getenv("FRIDOLIN_FAKE_ARGS_LOG"); log != "" {
 		f, err := os.OpenFile(log, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600)
@@ -231,6 +253,23 @@ func fakeClaude() {
 }
 
 // fakeClaudeEnv makes brains in this test spawn the fake CLI.
+// fakePromptMark starts each prompt in FRIDOLIN_FAKE_PROMPT_LOG.
+const fakePromptMark = "=====PROMPT====="
+
+// fakePromptsIn returns the prompts the fake CLI logged to path, oldest
+// first.
+func fakePromptsIn(t *testing.T, path string) []string {
+	t.Helper()
+	data, err := os.ReadFile(path)
+	if errors.Is(err, fs.ErrNotExist) {
+		return nil
+	}
+	if err != nil {
+		t.Fatal(err)
+	}
+	return strings.Split(string(data), fakePromptMark+"\n")[1:]
+}
+
 func fakeClaudeEnv(t *testing.T, sleepMS int) string {
 	t.Helper()
 	t.Setenv("FRIDOLIN_FAKE_CLAUDE", "1")
