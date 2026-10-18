@@ -14,6 +14,7 @@ import (
 	"sync"
 	"time"
 
+	mediafiles "github.com/Icewater1337/fridolin/internal/media"
 	"github.com/Icewater1337/fridolin/internal/textx"
 	"github.com/Icewater1337/fridolin/internal/trigger"
 	"go.mau.fi/whatsmeow"
@@ -718,9 +719,9 @@ func (wa *WhatsAppClient) downloadAttachment(msg *events.Message, chatJID string
 	defer cancel()
 	// Into the media folder's incoming folder, which no brain can read:
 	// the brain that takes the message moves it into its own inbox.
-	path, err := saveAttachment(ctx, wa.downloader(), filepath.Join(cfg.MediaDir, incomingMediaDir), att, maxBytes)
+	path, err := saveAttachment(ctx, wa.downloader(), filepath.Join(cfg.MediaDir, mediafiles.IncomingDir), att, maxBytes)
 	switch {
-	case errors.Is(err, errMediaTooLarge):
+	case errors.Is(err, mediafiles.ErrTooLarge):
 		wa.log.Warnf("Skipped attachment from %s: %v", chatJID, err)
 		return "", att.caption, mediaTooLargeNotice(maxBytes)
 	case err != nil:
@@ -834,7 +835,7 @@ func mediaExt(mimeType, def string) string {
 
 // saveAttachment adapts whatsmeow to the media inbox's bounded file writer.
 func saveAttachment(ctx context.Context, dl mediaDownloader, dir string, att attachment, maxBytes int64) (string, error) {
-	return mediaInboxAt(dir).Save(ctx, att.kind, att.name, att.size, maxBytes, func(ctx context.Context, f mediaFile) error {
+	return mediaInboxAt(dir).Save(ctx, att.kind, att.name, att.size, maxBytes, func(ctx context.Context, f mediafiles.File) error {
 		return dl.DownloadToFile(ctx, att.media, f)
 	})
 }

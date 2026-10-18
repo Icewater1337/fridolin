@@ -46,6 +46,9 @@ behaviour unless its title says so. The steps so far:
 - **R4, OTP slice**: `otp` owns code recognition, recent request lookup,
   handoff records and expiry. The command keeps runtime settings, inbound
   source checks and bridge callbacks.
+- **R4 (media)**: the `media` package owns bounded attachment creation,
+  per-brain inboxes, path confinement and the legacy media migration. Its
+  caller supplies the shared migration lifecycle and working directory.
 
 Everything else is still `package main` in `cmd/fridolin`, one file per
 subject (section 3 names the file each package will come from). A package
@@ -227,14 +230,19 @@ responsibility and says what it must not do.
   connections to their scratch databases for assertions and failure injection.
   *Planned (R19):* one `*sql.DB` shared by the whatsmeow device container
   and Fridolin's tables.
-- **`media`** *(to come, R4; `media.go`)*: the media folder and each
+- **`media`**: the media folder and each
   brain's inbox in it, `<media_dir>/<brain id>/`, the one part of it that
   brain can open. Attachments arrive in `.incoming/`, which no brain can
   read, and move into the inbox of the brain that takes their message
-  (`claimMedia`), through the media folder's `os.Root`, under a sanitised
+  (`Inbox.Claim`), through the media folder's `os.Root`, under a sanitised
   name that never replaces a file. `/ingest` takes files only from the top
   of the media folder or the named brain's own inbox: absolute paths only,
-  symlinks resolved, regular files only.
+  symlinks resolved, regular files only. `Inbox.Resolve` preserves both the
+  script and brain-token rules. `Inbox.Save` gives the transport a bounded
+  random-access `File`; WhatsApp types stay in its adapter. `Migration`
+  holds the process-start cutoff and mutex shared by every inbox; the
+  command constructs it once and passes it with the working directory.
+  Name shortening reuses `textx.Truncate`, so this leaf also imports `textx`.
 
 ### Configuration and brain set
 
@@ -399,7 +407,7 @@ plaud  ─► media, platform, chat, fsx, textx, apperr
 activity ─► history, textx
 store    ─► fsx, logx
 history  ─► fsx
-media    ─► fsx
+media    ─► fsx, textx
 manifest ─► fsx, apperr
 
 leaves (standard library only): fsx, textx, version, apperr, trigger, chat,
@@ -407,7 +415,8 @@ leaves (standard library only): fsx, textx, version, apperr, trigger, chat,
 ```
 
 Today `cmd/fridolin` imports `web`, `examples`, `site`, `fsx`, `textx`,
-`version`, `trigger` and `platform`, and those import nothing of the module.
+`version`, `trigger`, `platform` and `media`. The foundation packages import
+nothing of the module; `media` imports only `fsx` and `textx`.
 
 The rules:
 

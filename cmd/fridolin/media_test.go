@@ -17,6 +17,7 @@ import (
 	"github.com/Icewater1337/fridolin/internal/chat"
 	"github.com/Icewater1337/fridolin/internal/fsx"
 	"github.com/Icewater1337/fridolin/internal/history"
+	mediafiles "github.com/Icewater1337/fridolin/internal/media"
 )
 
 // TestBrainTakesItsFilesIntoItsInbox: a message's files move into the inbox
@@ -27,7 +28,7 @@ func TestBrainTakesItsFilesIntoItsInbox(t *testing.T) {
 	dmDir := tb.addFolderBrain(t, BrainManifest{ID: "dm", Name: "DM", Routing: BrainRouting{HandlesDMs: true}})
 	tb.addFolderBrain(t, BrainManifest{ID: "g", Name: "Group", Routing: BrainRouting{Groups: []string{"120363000000000000@g.us"}}})
 	media := tb.cfgs.Get().MediaDir
-	p := writeTestFile(t, filepath.Join(media, incomingMediaDir, "voice.ogg"), "OggS")
+	p := writeTestFile(t, filepath.Join(media, mediafiles.IncomingDir, "voice.ogg"), "OggS")
 
 	tb.handleInbound(t.Context(), Inbound{Inbound: chat.Inbound{JID: "15551234567@s.whatsapp.net", Sender: "15551234567", Text: "listen", Media: []string{p}, Source: "whatsapp", At: time.Now()}})
 	waitFor(t, 10*time.Second, "the reply", func() bool { return len(tb.dev.Outbox()) > 0 })
@@ -82,7 +83,7 @@ func TestRemovedBrainHandsItsFilesOn(t *testing.T) {
 		})
 	}})
 	media := next.MediaDir
-	p := writeTestFile(t, filepath.Join(media, incomingMediaDir, "voice.ogg"), "OggS")
+	p := writeTestFile(t, filepath.Join(media, mediafiles.IncomingDir, "voice.ogg"), "OggS")
 	m := dm("listen")
 	m.Media = []string{p}
 	br, _, _, err := mgr.Submit(m)
@@ -134,7 +135,7 @@ func TestMergedMessageNamesItsFilesInTheInbox(t *testing.T) {
 			part := func(id, file string) Inbound {
 				m := dm("")
 				m.ID = id
-				m.Media = []string{writeTestFile(t, filepath.Join(media, incomingMediaDir, file), file)}
+				m.Media = []string{writeTestFile(t, filepath.Join(media, mediafiles.IncomingDir, file), file)}
 				return m
 			}
 			m := part("3EB0ONE", "one.jpg").merge(part("3EB0TWO", "two.jpg"))
@@ -241,7 +242,7 @@ func TestCheckLeavesTheMediaFolderAlone(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(b.Stop)
-	if names := dirNames(t, media); !slices.Contains(names, mediaInboxesMarker) || slices.Contains(names, "old.jpg") || slices.Contains(names, "plaud") {
+	if names := dirNames(t, media); !slices.Contains(names, mediafiles.InboxesMarker) || slices.Contains(names, "old.jpg") || slices.Contains(names, "plaud") {
 		t.Errorf("after the bridge started the media folder holds %q, want what was there moved aside", names)
 	}
 }
@@ -274,17 +275,17 @@ func TestLegacyMediaThatCannotMoveStays(t *testing.T) {
 	if _, err := prepareBrainState(data, media, "a", false); err != nil {
 		t.Fatalf("brain a's run was refused: %v", err)
 	}
-	if names := dirNames(t, media); !slices.Equal(names, []string{mediaInboxesMarker, legacyMediaDir, "a", "legacy"}) {
+	if names := dirNames(t, media); !slices.Equal(names, []string{mediafiles.InboxesMarker, mediafiles.LegacyDir, "a", "legacy"}) {
 		t.Errorf("the media folder holds %q, want all but legacy moved aside", names)
 	}
-	if names := dirNames(t, filepath.Join(media, legacyMediaDir)); !slices.Equal(names, []string{"old.jpg", "plaud"}) {
-		t.Errorf("%s holds %q", legacyMediaDir, names)
+	if names := dirNames(t, filepath.Join(media, mediafiles.LegacyDir)); !slices.Equal(names, []string{"old.jpg", "plaud"}) {
+		t.Errorf("%s holds %q", mediafiles.LegacyDir, names)
 	}
-	if _, err := mediaInboxAt(media).Open("legacy"); !errors.Is(err, errNotTheInbox) {
-		t.Errorf("mediaInboxAt(legacy).Open() = %v, want %v", err, errNotTheInbox)
+	if _, err := mediaInboxAt(media).Open("legacy"); !errors.Is(err, mediafiles.ErrNotTheInbox) {
+		t.Errorf("mediaInboxAt(legacy).Open() = %v, want %v", err, mediafiles.ErrNotTheInbox)
 	}
-	if _, err := prepareBrainState(data, media, "legacy", false); !errors.Is(err, errNotTheInbox) {
-		t.Errorf("brain legacy's run: %v, want it refused with %v", err, errNotTheInbox)
+	if _, err := prepareBrainState(data, media, "legacy", false); !errors.Is(err, mediafiles.ErrNotTheInbox) {
+		t.Errorf("brain legacy's run: %v, want it refused with %v", err, mediafiles.ErrNotTheInbox)
 	}
 	if data, err := os.ReadFile(filepath.Join(locked, "kept.txt")); err != nil || string(data) != "content of legacy/kept.txt" {
 		t.Errorf("what stayed: %q, %v", data, err)
@@ -304,7 +305,7 @@ func TestLegacyMediaThatCannotMoveStays(t *testing.T) {
 	if names := dirNames(t, filepath.Join(media, "legacy")); len(names) != 0 {
 		t.Errorf("brain legacy's new inbox holds %q", names)
 	}
-	if _, err := os.Stat(filepath.Join(media, mediaInboxesMarker, mediaStuckFile)); !errors.Is(err, fs.ErrNotExist) {
+	if _, err := os.Stat(filepath.Join(media, mediafiles.InboxesMarker, mediafiles.StuckFile)); !errors.Is(err, fs.ErrNotExist) {
 		t.Errorf("the list of what stayed is still there: %v", err)
 	}
 
@@ -318,7 +319,7 @@ func TestLegacyMediaThatCannotMoveStays(t *testing.T) {
 			t.Fatal(err)
 		}
 		t.Cleanup(func() { _ = os.Chmod(media, 0o700) })
-		if _, err := mediaInboxAt(media).Open("a"); err == nil || errors.Is(err, errNotTheInbox) {
+		if _, err := mediaInboxAt(media).Open("a"); err == nil || errors.Is(err, mediafiles.ErrNotTheInbox) {
 			t.Fatalf("openInbox = %v, want it to fail readying the folder", err)
 		}
 		env, err := prepareBrainState(data, media, "a", false)

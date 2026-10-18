@@ -19,6 +19,7 @@ import (
 	"time"
 
 	"github.com/Icewater1337/fridolin/internal/fsx"
+	mediafiles "github.com/Icewater1337/fridolin/internal/media"
 )
 
 // These tests run generated profiles under the real sandbox-exec, so they
@@ -1437,7 +1438,7 @@ func TestSandboxKeepsAMediaFolderOutsideTheDataDir(t *testing.T) {
 	home := fsx.Canonical(t.TempDir())
 	t.Setenv("HOME", home)
 	sp, own := sandboxFixture(t, home, "b", "clients", map[string]any{"media_dir": "~/media"})
-	for _, f := range []string{"media/a/photo.jpg", "media/b/dm.pdf", "media/" + incomingMediaDir + "/voice.ogg", "media/top.pdf"} {
+	for _, f := range []string{"media/a/photo.jpg", "media/b/dm.pdf", "media/" + mediafiles.IncomingDir + "/voice.ogg", "media/top.pdf"} {
 		writeTestFile(t, filepath.Join(home, f), "content of "+f)
 	}
 	t.Setenv("M", filepath.Join(home, "media"))
@@ -1449,7 +1450,7 @@ func TestSandboxKeepsAMediaFolderOutsideTheDataDir(t *testing.T) {
 		{"write its own inbox", `printf x > "$M/a/new.jpg"`, true},
 		{"read another brain's inbox", `cat "$M/b/dm.pdf"`, false},
 		{"write another brain's inbox", `printf x > "$M/b/planted.pdf"`, false},
-		{"read an attachment not yet routed", `cat "$M/` + incomingMediaDir + `/voice.ogg"`, false},
+		{"read an attachment not yet routed", `cat "$M/` + mediafiles.IncomingDir + `/voice.ogg"`, false},
 		{"read a file at the top", `cat "$M/top.pdf"`, false},
 		{"write at the top", `printf x > "$M/planted.pdf"`, false},
 		{"list the media folder", `ls "$M"`, false},

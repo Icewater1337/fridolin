@@ -25,6 +25,7 @@ import (
 	"github.com/Icewater1337/fridolin/internal/chat"
 	"github.com/Icewater1337/fridolin/internal/fsx"
 	"github.com/Icewater1337/fridolin/internal/history"
+	mediafiles "github.com/Icewater1337/fridolin/internal/media"
 	"github.com/Icewater1337/fridolin/internal/otp"
 	"github.com/Icewater1337/fridolin/internal/textx"
 	"github.com/Icewater1337/fridolin/internal/version"
@@ -514,7 +515,7 @@ func TestIngestKeepsOtherBrainsFiles(t *testing.T) {
 		{"the inbox of a brain left out", "left/dm.pdf", 400, 400},
 		{"Plaud transcripts older versions kept", "plaud/2026-01-15 standup.txt", 400, 400},
 		{"a folder no brain owns", "upload/scan.pdf", 400, 400},
-		{"an attachment not yet routed", incomingMediaDir + "/voice.ogg", 400, 400},
+		{"an attachment not yet routed", mediafiles.IncomingDir + "/voice.ogg", 400, 400},
 		{"its own inbox", "team/notes.pdf", 202, 202},
 		{"a folder in its own inbox", "team/plaud/notes.txt", 202, 202},
 		{"the top of the media folder", "scan.pdf", 202, 400},

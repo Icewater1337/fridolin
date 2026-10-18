@@ -23,7 +23,7 @@ import (
 // brain reads and writes only its own inbox in it, <media_dir>/<brain id>/,
 // so a group brain cannot open the files sent to the DM brain, nor replace
 // them. A file moves into an inbox once the bridge knows which brain takes
-// it (see claimMedia): WhatsApp downloads a file before the message is
+// it (see Inbox.Claim): WhatsApp downloads a file before the message is
 // routed, and scripts drop theirs at the top of the media folder before
 // they hand it to a brain with /ingest.
 
@@ -56,7 +56,8 @@ const InboxesMarker = ".inboxes"
 const LegacyDir = ".old"
 
 // Migration shares the startup cutoff and lock across inboxes. Its
-// owner constructs it once when the process starts, before accepting files.
+// owner constructs it once when the process starts, before accepting files,
+// and never changes Started afterward.
 type Migration struct {
 	Started time.Time
 	mu      sync.Mutex
@@ -85,8 +86,8 @@ func (in Inbox) absolute(p string) string {
 var validInboxID = regexp.MustCompile(`^[a-z0-9][a-z0-9_-]{0,39}$`)
 
 // StuckFile, in the InboxesMarker folder, names what
-// retireLegacyMedia could not move aside, one name a line: none of them
-// becomes an inbox while it is there (see openInbox).
+// RetireLegacy could not move aside, one name a line: none of them
+// becomes an inbox while it is there (see Inbox.Open).
 const StuckFile = "stuck"
 
 // ErrNotTheInbox is why a brain gets no inbox: what is at its inbox's path
@@ -102,7 +103,7 @@ var ErrNotTheInbox = errors.New("not the brain's inbox")
 // the top, where /ingest would hand any of them to a brain that names it,
 // and a document keeps its sender's file name (scan.pdf), which is easy
 // to guess. A file a script put there for /ingest once the bridge was
-// running stays. It runs before any inbox is opened (see openInbox) and
+// running stays. It runs before any inbox is opened (see Inbox.Open) and
 // when the bridge starts (see NewBridge), so it moves only what older
 // versions left, never an inbox: once the marker is there, every folder
 // that appears is an inbox. Nothing else runs it: check, say, must leave
@@ -211,7 +212,7 @@ func (in Inbox) moveLegacyMedia(media *os.Root, e fs.DirEntry) (string, error) {
 	}
 }
 
-// stuckMedia reports whether retireLegacyMedia left name in the media
+// stuckMedia reports whether RetireLegacy left name in the media
 // folder because it could not move it, and that is still there. A name
 // whose entry is gone is taken off the list.
 func stuckMedia(media *os.Root, name string) (bool, error) {
@@ -282,7 +283,7 @@ func (in Inbox) Open(id string) (*os.Root, error) {
 	return media.OpenRoot(id)
 }
 
-// mediaRel returns p relative to the media folder, by the folder as
+// relative returns p relative to the media folder, by the folder as
 // configured or by its real path, and whether p lies inside it. The folder
 // itself does not count.
 func (in Inbox) relative(p string) (string, bool) {
@@ -310,7 +311,7 @@ func mediaOwner(rel string) string {
 	return first
 }
 
-// errNotInOwnInbox is what ownInboxFile answers for any p that is not a
+// errNotInOwnInbox is what OwnFile answers for any p that is not a
 // regular file in the brain's inbox, whatever the reason, so that the
 // answer says nothing of what is outside the inbox.
 var errNotInOwnInbox = errors.New("not a file in the brain's own inbox")
@@ -509,7 +510,7 @@ func (in Inbox) Resolve(id string, requested []string, ownOnly bool) ([]string, 
 		if st, err := os.Stat(resolved); err != nil || !st.Mode().IsRegular() {
 			return nil, errors.New("not a regular file: " + filepath.Base(p))
 		}
-		// The brain takes the file into its inbox (see claimMedia), and a
+		// The brain takes the file into its inbox (see Inbox.Claim), and a
 		// brain can ask /ingest for that itself, so only a file handed in
 		// for it may move: one at the top of the media folder, where
 		// scripts drop their files, or one already in its own inbox. Every
@@ -517,7 +518,7 @@ func (in Inbox) Resolve(id string, requested []string, ownOnly bool) ([]string, 
 		// would then read them: another brain's inbox, the inbox left by
 		// a brain that was removed or is left out (whose id may come
 		// back), .old/ with the folders older versions left there, every
-		// brain's Plaud transcripts among them (see retireLegacyMedia), and
+		// brain's Plaud transcripts among them (see Inbox.RetireLegacy), and
 		// .incoming/ with attachments on their way to the brain of their
 		// chat.
 		rel, _ := in.relative(resolved)

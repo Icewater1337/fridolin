@@ -9,6 +9,8 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+
+	mediafiles "github.com/Icewater1337/fridolin/internal/media"
 )
 
 // childScope says which of the programs the bridge starts get a variable.
@@ -239,7 +241,7 @@ func prepareBrainState(dataDir, mediaDir, id string, inheritUser bool) ([]string
 		// an inbox: the files sent to it stay where they are (see
 		// claimMedia), and the brain runs, as it used to fail every run.
 		switch inbox, err := mediaInboxAt(mediaDir).Open(id); {
-		case errors.Is(err, errNotTheInbox):
+		case errors.Is(err, mediafiles.ErrNotTheInbox):
 			return nil, err
 		case err != nil:
 			log.Printf("brain %s: no media inbox for this run: %v", id, err)

@@ -19,6 +19,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/Icewater1337/fridolin/internal/chat"
+	mediafiles "github.com/Icewater1337/fridolin/internal/media"
 	"github.com/Icewater1337/fridolin/internal/trigger"
 	"go.mau.fi/whatsmeow"
 	"go.mau.fi/whatsmeow/proto/waE2E"
@@ -670,7 +671,7 @@ func TestHandleMessageSavesAttachment(t *testing.T) {
 		start := time.Now()
 		tw.handle(t, docEvent())
 		m, ok := tw.next(2 * time.Second)
-		want := filepath.Join(tw.cfg().MediaDir, incomingMediaDir, "scan.pdf")
+		want := filepath.Join(tw.cfg().MediaDir, mediafiles.IncomingDir, "scan.pdf")
 		if !ok || m.Text != "file this" || len(m.Media) != 1 || m.Media[0] != want {
 			t.Fatalf("got %+v (delivered %v), want the caption and %s", m, ok, want)
 		}
@@ -700,7 +701,7 @@ func TestHandleMessageSavesAttachment(t *testing.T) {
 		if !ok || m.Text != "file this" || len(m.Media) != 0 {
 			t.Errorf("got %+v (delivered %v), want the caption without the file", m, ok)
 		}
-		if names := dirNames(t, filepath.Join(tw.cfg().MediaDir, incomingMediaDir)); len(names) != 0 {
+		if names := dirNames(t, filepath.Join(tw.cfg().MediaDir, mediafiles.IncomingDir)); len(names) != 0 {
 			t.Errorf("left behind %q", names)
 		}
 		select {
@@ -775,16 +776,16 @@ func TestSaveAttachmentSizeLimit(t *testing.T) {
 				t.Errorf("downloaded %d times, want %d", dl.callCount(), c.calls)
 			}
 			if !c.saved {
-				if !errors.Is(err, errMediaTooLarge) {
+				if !errors.Is(err, mediafiles.ErrTooLarge) {
 					t.Errorf("err = %v, want errMediaTooLarge", err)
 				}
 				if names := dirNames(t, dir); len(names) != 0 {
 					t.Errorf("left behind %q", names)
 				}
-				if dl.copied > limit+mediaCipherOverhead {
+				if dl.copied > limit+mediafiles.CipherOverhead {
 					t.Errorf("the file took %d bytes, more than the limit allows", dl.copied)
 				}
-				if dl.sent > limit+mediaCipherOverhead && !dl.stopped {
+				if dl.sent > limit+mediafiles.CipherOverhead && !dl.stopped {
 					t.Error("the download was not cancelled when the file passed the cap")
 				}
 				return
