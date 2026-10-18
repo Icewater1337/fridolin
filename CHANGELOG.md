@@ -236,6 +236,10 @@ for compatibility.
 
 ### Fixed
 
+- Manifest transactions keep their brain folder open through reads, writes
+  and rollback, so a moved or replaced folder cannot redirect those operations.
+  Rollback preserves a manifest replaced or edited by another writer.
+
 - Adding a brain no longer creates starter files through directory symlinks
   that leave its folder. The dashboard's folder browser and inspector keep
   file metadata checks inside your home folder, including child symlinks

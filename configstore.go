@@ -264,6 +264,7 @@ func (cs *ConfigStore) commit(etag string, mutate func(*Config, *Tx) error) (pre
 		return prev, next, err
 	}
 	tx := &Tx{}
+	defer tx.close()
 	if err := mutate(file, tx); err != nil {
 		return prev, next, err
 	}
@@ -358,6 +359,9 @@ func (tx *Tx) CheckBrains() { tx.checkBrains = true }
 type stagedManifest struct {
 	dir  string
 	data []byte
+	root *os.Root
+	file *os.File
+	info fs.FileInfo
 	// create is for a new brain's folder, which must have no brain.json.
 	create bool
 
@@ -406,7 +410,12 @@ func (tx *Tx) stage(dir string, m *BrainManifest, create bool) error {
 func (tx *Tx) write() error {
 	for _, w := range tx.writes {
 		path := filepath.Join(w.dir, ManifestFile)
-		prev, err := readBrainFile(w.dir, ManifestFile)
+		root, err := openManifestRoot(w.dir, !w.create)
+		if err != nil {
+			return err
+		}
+		w.root = root
+		prev, err := readBrainFileRoot(root, ManifestFile)
 		switch {
 		case errors.Is(err, fs.ErrNotExist):
 			w.existed, w.prev = false, nil
@@ -415,10 +424,11 @@ func (tx *Tx) write() error {
 		default:
 			w.existed, w.prev = true, prev
 		}
-		if err := writeManifestData(w.dir, w.data, !w.create); err != nil {
+		file, info, err := writeManifestDataRoot(root, w.data, !w.create)
+		if err != nil {
 			return err
 		}
-		w.written = true
+		w.file, w.info, w.written = file, info, true
 	}
 	return nil
 }
@@ -432,17 +442,53 @@ func (tx *Tx) rollback() {
 		if !w.written {
 			continue
 		}
+		w.written = false
 		path := filepath.Join(w.dir, ManifestFile)
-		var err error
-		if w.existed {
-			err = writeFileAtomic(path, w.prev, 0o600, false)
-		} else {
-			err = os.Remove(path)
+		info, err := w.root.Lstat(ManifestFile)
+		if errors.Is(err, fs.ErrNotExist) {
+			continue
+		}
+		if err == nil && (!os.SameFile(w.info, info) || w.info.Mode() != info.Mode() ||
+			w.info.Size() != info.Size() || !w.info.ModTime().Equal(info.ModTime())) {
+			continue // The current entry belongs to another writer.
+		}
+		if err == nil {
+			var current []byte
+			current, err = readBrainFileRoot(w.root, ManifestFile)
+			if err == nil && !bytes.Equal(current, w.data) {
+				continue
+			}
+		}
+		// This comparison and mutation are not an atomic compare-and-unlink.
+		// The retained root still confines the operation if its path moves.
+		if err == nil {
+			if w.existed {
+				var restored *os.File
+				restored, _, err = writeManifestDataRoot(w.root, w.prev, true)
+				if restored != nil {
+					restored.Close()
+				}
+			} else {
+				err = w.root.Remove(ManifestFile)
+			}
 		}
 		if err != nil {
 			log.Printf("config: putting back %s after the update failed: %v", path, err)
 		}
-		w.written = false
+	}
+}
+
+// close releases every retained handle after commit, rollback or an error.
+func (tx *Tx) close() {
+	for _, w := range tx.writes {
+		if w.file != nil {
+			w.file.Close()
+			w.file = nil
+		}
+		if w.root != nil {
+			w.root.Close()
+			w.root = nil
+		}
 	}
 }
 
