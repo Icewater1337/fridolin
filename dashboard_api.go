@@ -946,9 +946,28 @@ func checkSet(c *Config) error {
 	return nil
 }
 
-// apiApproveBrain accepts the brain.json currently on disk.
+// errReviewedManifestChanged refuses an approval of a brain.json that is no
+// longer the one on disk.
+var errReviewedManifestChanged = errors.New("brain.json changed again since you reviewed it — look at the new changes and approve those")
+
+// apiApproveBrain accepts the brain.json on disk, provided it is still the
+// one the dashboard showed you: the request carries that manifest. A brain
+// can rewrite its own brain.json at any moment, and approving whatever is
+// on disk when the click arrives would grant it a change, routing say, that
+// you never saw, without the confirmation such a change asks for.
 func (b *Bridge) apiApproveBrain(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
+	var req struct {
+		Manifest *BrainManifest `json:"manifest"`
+	}
+	if err := decodeJSON(r, &req); err != nil {
+		writeErr(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	if req.Manifest == nil {
+		writeErr(w, http.StatusBadRequest, "manifest required: send the brain.json you reviewed")
+		return
+	}
 	_, err := b.cfgs.Update("", func(c *Config) error {
 		for i := range c.BrainDirs {
 			ref := &c.BrainDirs[i]
@@ -958,6 +977,9 @@ func (b *Bridge) apiApproveBrain(w http.ResponseWriter, r *http.Request) {
 			disk, err := ReadManifest(ref.Dir())
 			if err != nil {
 				return err
+			}
+			if !disk.Equal(*req.Manifest) {
+				return errReviewedManifestChanged
 			}
 			if disk.ID != id {
 				return fmt.Errorf("the brain.json on disk changed the id to %q — ids cannot change", disk.ID)
@@ -970,7 +992,11 @@ func (b *Bridge) apiApproveBrain(w http.ResponseWriter, r *http.Request) {
 		}
 		return fmt.Errorf("no brain %q", id)
 	})
-	if err != nil {
+	switch {
+	case errors.Is(err, errReviewedManifestChanged):
+		writeErr(w, http.StatusConflict, err.Error())
+		return
+	case err != nil:
 		writeErr(w, http.StatusUnprocessableEntity, err.Error())
 		return
 	}

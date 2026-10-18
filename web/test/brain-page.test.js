@@ -10,12 +10,15 @@ import page from '../assets/pages/brain.js';
 const manifest = (name) => ({ version: 1, id: 'work', name, routing: { handles_dms: true, default: false, groups: [] }, model: '', effort: '' });
 const view = (name, runtime = null) => ({ id: 'work', name, path: '/Users/you/work', status: 'ok', manifest: manifest(name), issues: [], runtime });
 
-async function openPage(t) {
+// opts.brains is what the bridge holds at first, opts.approve what it
+// answers POST /api/brains/work/approve with.
+async function openPage(t, opts = {}) {
   t.mock.timers.enable({ apis: ['setTimeout', 'Date'] });
   installDom();
   noConsoleErrors(t);
-  const bridge = { brains: [view('Work')] };
-  serve(t, (path) => {
+  const bridge = { brains: opts.brains || [view('Work')] };
+  const calls = serve(t, (path, init) => {
+    if (path === '/api/brains/work/approve' && init.method === 'POST') return opts.approve;
     if (path.startsWith('/api/brains/work/calendar')) return { client_configured: false, connected: false };
     if (path.startsWith('/api/brains')) return bridge.brains;
     if (path.startsWith('/api/config')) return { etag: 'e1', path: '/Users/you/.fridolin/config.json', config: {}, effective: {} };
@@ -33,7 +36,7 @@ async function openPage(t) {
   const note = () => root.querySelector('.live-form').firstChild; // the "changed elsewhere" note
   const bar = () => root.querySelector('.save-bar');
   const poll = async (brains) => { bridge.brains = brains; await brainsResource.refresh(); await settle(); };
-  return { root, ctx, nameIn, note, bar, poll };
+  return { root, ctx, nameIn, note, bar, poll, calls };
 }
 
 test('typed settings survive a refresh, and a change elsewhere is flagged', async (t) => {
@@ -99,4 +102,31 @@ test('a brain that does not exist shows only that', async (t) => {
   assert.deepEqual(shown(), [], 'no empty sections of a brain that is not there');
   await poll([view('Work')]);
   assert.deepEqual(shown(), all, 'back once it is');
+});
+
+test('approving drift sends the brain.json shown', async (t) => {
+  // A rename only, so no confirmation dialog stands in the way.
+  const drifted = { ...view('Work'), status: 'drift', disk_manifest: manifest('Office'), issues: [{ kind: 'drift', detail: 'brain.json changed on disk' }] };
+  const cases = [
+    // name, the bridge's answer, the toast it gives
+    ['the bridge approves it', { status: 200, body: { status: 'approved' } }, ['ok', /Changes approved/]],
+    ['brain.json changed again meanwhile', { status: 409, body: { error: 'brain.json changed again since you reviewed it' } }, ['warn', /changed again since you reviewed it/]],
+  ];
+  for (const [name, approve, [kind, message]] of cases) {
+    await t.test(name, async (t) => {
+      const { root, calls } = await openPage(t, { brains: [drifted], approve });
+      const button = root.querySelectorAll('button').find((b) => b.textContent.includes('Approve changes'));
+      assert.ok(button, 'the drift card offers approval');
+      button.click();
+      await settle();
+      const posts = calls.filter((c) => c.method === 'POST');
+      assert.deepEqual(posts.map((c) => c.path), ['/api/brains/work/approve']);
+      assert.deepEqual(posts[0].body, { manifest: drifted.disk_manifest }, 'exactly the manifest the page showed');
+      const toasts = (k) => document.querySelectorAll(`.toast.${k}`).map((el) => el.textContent);
+      assert.deepEqual(toasts('error'), []);
+      assert.ok(toasts(kind).some((m) => message.test(m)), `${kind} toasts: ${toasts(kind)}`);
+      const after = calls.slice(calls.indexOf(posts[0]) + 1);
+      assert.ok(after.some((c) => c.method === 'GET' && c.path.startsWith('/api/brains')), 'and the page asks for the brains again');
+    });
+  }
 });

@@ -803,7 +803,7 @@ func TestApproveDrift(t *testing.T) {
 	if tb.brainMgr.Get("notes").Name() != "Notes" {
 		t.Error("drift must not apply before approval")
 	}
-	if w := tb.do("POST", "/api/brains/notes/approve", nil); w.Code != 200 {
+	if w := tb.do("POST", "/api/brains/notes/approve", map[string]any{"manifest": views[0].Disk}); w.Code != 200 {
 		t.Fatal(w.Body.String())
 	}
 	if tb.brainMgr.Get("notes").Name() != "Notes 2" {

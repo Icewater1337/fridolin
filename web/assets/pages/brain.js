@@ -149,7 +149,17 @@ export default {
             const ok = await confirmDialog({ title: 'Approve these changes?', message: 'They change which chats reach this brain or what it may do. Only approve changes you or someone you trust made.', confirm: 'Approve', danger: false });
             if (!ok) return;
           }
-          await post(`/api/brains/${encodeURIComponent(id)}/approve`);
+          // The bridge approves only the brain.json shown here: if the brain
+          // changed it again meanwhile, it answers 409 and the page shows
+          // the new changes.
+          try {
+            await post(`/api/brains/${encodeURIComponent(id)}/approve`, { manifest: disk });
+          } catch (e) {
+            if (e.status !== 409) throw e;
+            toast(e.message, 'warn');
+            await refresh();
+            return;
+          }
           toast('Changes approved — the brain now runs the new brain.json', 'ok');
           await refresh();
         },

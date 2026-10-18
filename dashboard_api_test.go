@@ -82,6 +82,7 @@ func TestDashboardRequestBodiesDecode(t *testing.T) {
 			"model":   "", "effort": "", "backup": map[string]any{"enabled": true, "exclude": []string{}},
 		}, "create_dir": true, "use_existing": false}},
 		{"PUT", "/api/brains/notes", map[string]any{"manifest": manifest}},
+		{"POST", "/api/brains/notes/approve", map[string]any{"manifest": manifest}},
 		{"POST", "/api/brains/notes/stop", map[string]any{"clear_queue": true}},
 		{"POST", "/api/chats/allow", map[string]any{"jid": "15559876543@s.whatsapp.net", "kind": "dm", "number": "15559876543"}},
 		{"POST", "/api/chats/allow", map[string]any{"jid": "120363000000000001@g.us", "kind": "group", "brain": "notes"}},
@@ -516,5 +517,49 @@ func TestConfigUpdateLogsSecurityChanges(t *testing.T) {
 	}
 	if strings.Contains(got, "log_level") {
 		t.Errorf("log names a setting that is not a security one:\n%s", got)
+	}
+}
+
+// Approving a drift approves the brain.json the dashboard showed: if the
+// brain rewrote it since, the approval is refused and nothing changes.
+func TestApproveBindsToTheReviewedManifest(t *testing.T) {
+	tb := newTestBridge(t, "")
+	m := BrainManifest{ID: "notes", Name: "Notes"}
+	dir := tb.addFolderBrain(t, m)
+	harmless := m
+	harmless.Name = "Notes 2"
+	if err := WriteManifest(dir, &harmless, true); err != nil {
+		t.Fatal(err)
+	}
+	var views []brainView
+	_ = json.Unmarshal(tb.do("GET", "/api/brains", nil).Body.Bytes(), &views)
+	if len(views) != 1 || views[0].Disk == nil {
+		t.Fatalf("views = %+v", views)
+	}
+	reviewed := views[0].Disk
+
+	// Between the page load and the click, the brain claims your DMs.
+	grab := harmless
+	grab.Routing.HandlesDMs = true
+	if err := WriteManifest(dir, &grab, true); err != nil {
+		t.Fatal(err)
+	}
+	before := tb.cfgs.ETag()
+	if w := tb.do("POST", "/api/brains/notes/approve", map[string]any{"manifest": reviewed}); w.Code != http.StatusConflict || !strings.Contains(w.Body.String(), "changed again") {
+		t.Fatalf("approve the stale review: %d %s", w.Code, w.Body.String())
+	}
+	if tb.cfgs.ETag() != before || tb.brainMgr.Get("notes").settings.Load().manifest.Routing.HandlesDMs {
+		t.Fatal("the refused approval changed the approved manifest")
+	}
+	if w := tb.do("POST", "/api/brains/notes/approve", nil); w.Code != http.StatusBadRequest {
+		t.Fatalf("approve without a manifest: %d %s", w.Code, w.Body.String())
+	}
+
+	// Approving what is on disk now works.
+	if w := tb.do("POST", "/api/brains/notes/approve", map[string]any{"manifest": grab}); w.Code != 200 {
+		t.Fatalf("approve the current file: %d %s", w.Code, w.Body.String())
+	}
+	if !tb.brainMgr.Get("notes").settings.Load().manifest.Routing.HandlesDMs {
+		t.Fatal("approval did not apply")
 	}
 }
