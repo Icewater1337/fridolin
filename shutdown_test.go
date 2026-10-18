@@ -416,6 +416,74 @@ func TestStopWaitsForTheDelivery(t *testing.T) {
 	}
 }
 
+// Finishing the grace and the kill wait must not close the store beneath
+// an answer already being delivered. A second signal remains the way to
+// abandon a stuck shutdown.
+func TestStopWaitsForDeliveryAfterTheKillTimeout(t *testing.T) {
+	setShutdownGrace(t, time.Millisecond)
+	mgr, _, _ := queueTestManager(t, 10, "")
+	entered, release := make(chan struct{}), make(chan struct{})
+	releaseDelivery := sync.OnceFunc(func() { close(release) })
+	defer releaseDelivery()
+	mgr.SetHooks(BrainHooks{Deliver: func(*Brain, Inbound, RunResult) {
+		close(entered)
+		<-release
+	}})
+	if _, _, _, err := mgr.Submit(dm("hello")); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-entered:
+	case <-time.After(5 * time.Second):
+		t.Fatal("run did not reach delivery")
+	}
+	stopped := make(chan struct{})
+	go func() { mgr.Stop(); close(stopped) }()
+	select {
+	case <-stopped:
+		t.Fatal("Stop returned while delivery still needed the store")
+	case <-time.After(stopRunWait + 200*time.Millisecond):
+	}
+	releaseDelivery()
+	select {
+	case <-stopped:
+	case <-time.After(5 * time.Second):
+		t.Fatal("Stop did not return after delivery finished")
+	}
+}
+
+// A deletion received while stopping must be applied before the replayed
+// message can start a run and make side effects, even when replaying the
+// intervening messages takes long enough to schedule a worker.
+func TestResumeAppliesChangesBeforeStartingQueuedRuns(t *testing.T) {
+	tb := newTestBridge(t, "")
+	tb.addFolderBrain(t, BrainManifest{ID: "a", Name: "A", Routing: BrainRouting{HandlesDMs: true}})
+	var started atomic.Int32
+	tb.brainMgr.SetHooks(BrainHooks{RunEnv: func(string) ([]string, func()) {
+		started.Add(1)
+		return nil, func() {}
+	}})
+	m := Inbound{JID: harnessDM, Sender: "15551234567", Text: "must not run", Source: sourceWhatsApp, At: time.Now(), ID: "3EB0DELETED"}
+	if err := tb.store.KeepInbound(t.Context(), inboundQueued, "a", m); err != nil {
+		t.Fatal(err)
+	}
+	for i := range 128 {
+		help := m
+		help.Text, help.ID = "!help", fmt.Sprintf("3EB0HELP%d", i)
+		if err := tb.store.KeepInbound(t.Context(), inboundLate, "", help); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := tb.store.KeepChange(t.Context(), messageChange{Kind: changeRevoke, Chat: m.JID, Sender: m.Sender, Target: m.ID}, time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	tb.resume(t.Context())
+	time.Sleep(100 * time.Millisecond)
+	if n := started.Load(); n != 0 {
+		t.Fatalf("deleted queued message started %d runs during replay", n)
+	}
+}
+
 // TestShutdownKeepsWhatItHolds: stopping the bridge, as SIGTERM and a
 // restart do, keeps what no brain has started on for the next start, and
 // tells the chat whose run it cut short. A run is in flight past its grace

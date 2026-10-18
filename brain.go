@@ -940,7 +940,7 @@ var shutdownGrace = 15 * time.Second
 // ran, to the Waiting hook at once. The run in flight gets grace to finish
 // and be delivered, and is interrupted after that, which the Interrupted
 // hook hears of. shutdown returns once the worker has ended, its last
-// delivery done, or stopRunWait after the interrupt. The activity viewer
+// delivery done. A second signal can abandon a stuck shutdown. The activity viewer
 // stays, for the next start to replace.
 func (br *Brain) shutdown(grace time.Duration) {
 	waiting := br.closeQueue()
@@ -969,22 +969,25 @@ func (br *Brain) shutdown(grace time.Duration) {
 		}
 		select {
 		case <-idle:
-			// The run may have answered as it was stopped, and then it
-			// was delivered like any other.
-			br.mu.Lock()
-			if cur != nil && br.last != nil && br.last.Outcome == outcomeInterrupted {
-				cut = cur
-			}
-			br.mu.Unlock()
 		case <-time.After(stopRunWait):
-			log.Printf("brain %s: run did not stop within %v", br.id, stopRunWait)
+			log.Printf("brain %s: worker still finishing %v after the interrupt; waiting for its delivery", br.id, stopRunWait)
+			// Closing the store now would lose an answer the worker is
+			// still handing to the outbox. The grace bounds the run, not
+			// the hand-off of its result.
+			<-idle
+		}
+		// The run may have answered as it was stopped, and then it was
+		// delivered like any other.
+		br.mu.Lock()
+		if cur != nil && br.last != nil && br.last.Outcome == outcomeInterrupted {
 			cut = cur
 		}
+		br.mu.Unlock()
 	}
 	if cut != nil && br.hooks != nil && br.hooks.Interrupted != nil {
 		br.hooks.Interrupted(br, cut.msg)
 	}
-	// Done with the folder. A run that would not stop finds it closed.
+	// Done with the folder after every worker has released it.
 	br.root.Close()
 }
 

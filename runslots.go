@@ -24,6 +24,7 @@ import (
 type runSlots struct {
 	mu      sync.Mutex
 	limit   int // 0 for no limit
+	paused  int // replay holds grants until queued edits/deletions apply
 	held    []*runSlot
 	waiting []*slotWait
 }
@@ -56,6 +57,21 @@ const (
 )
 
 func newRunSlots(limit int) *runSlots { return &runSlots{limit: limit} }
+
+// pause holds new grants until the returned function is called. Replay
+// uses it so restoring a queued message cannot start a run before a later
+// persisted deletion or edit has been applied to that message.
+func (rs *runSlots) pause() func() {
+	rs.mu.Lock()
+	rs.paused++
+	rs.mu.Unlock()
+	return sync.OnceFunc(func() {
+		rs.mu.Lock()
+		defer rs.mu.Unlock()
+		rs.paused--
+		rs.grantLocked()
+	})
+}
 
 // setLimit changes the limit. More slots go to those waiting at once; with
 // fewer, runs going on finish and the next waits until one is free. On no
@@ -184,6 +200,9 @@ func (rs *runSlots) releaseLocked(s *runSlot) {
 // grantLocked hands free slots to those waiting: requests first, then
 // chatter, each in the order they asked.
 func (rs *runSlots) grantLocked() {
+	if rs.paused > 0 {
+		return
+	}
 	for len(rs.waiting) > 0 && (rs.limit <= 0 || len(rs.held) < rs.limit) {
 		i := 0
 		for j, w := range rs.waiting {

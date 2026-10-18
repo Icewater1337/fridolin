@@ -493,6 +493,8 @@ const (
 // change is not, since a deletion must take its message out of the
 // history however late.
 func (b *Bridge) resume(ctx context.Context) {
+	resumeRuns := b.brainMgr.slots.pause()
+	defer resumeRuns()
 	// Taken out of bridge.db, what was kept is handed on whole: a stop
 	// that begins meanwhile keeps what is still waiting again, but a
 	// notice it cut off would be lost.
