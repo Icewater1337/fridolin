@@ -538,7 +538,8 @@ cause, and Claude never starts unsandboxed. `fridolin check --print-sandbox
 **Writing is denied everywhere**, except in a brain's own places:
 
 - its own folder;
-- its media inbox, `media/<brain id>/` in the data directory (see
+- its media inbox, `<brain id>/` in the media folder (`media/` in the
+  data directory unless `media_dir` puts it elsewhere, see
   [`data_dir`](#data_dir-restart)), where the files sent to its chats land;
 - its own state, `brains/<brain id>/` in the data directory, which the
   bridge creates before each run: `claude/`, the brain's own Claude Code
@@ -554,7 +555,7 @@ cause, and Claude never starts unsandboxed. `fridolin check --print-sandbox
   file and of `~/.plaud`. A brain cannot remove, rename or replace the
   file (with a symlink, through which the bridge's own Plaud CLI would
   write your next sign-in), nor write anything else in `~/.plaud`;
-- `/dev/null`, `/dev/zero`, `/dev/fd`.
+- `/dev/null`, `/dev/zero`, `/dev/dtracehelper`, `/dev/fd`.
 
 Writing preferences by their domain (`defaults write com.apple.Terminal
 …`) is denied too: cfprefsd writes them outside the sandbox, and some apps
@@ -857,6 +858,11 @@ everything but files alone. A manipulated brain can therefore still:
 - read whatever else your user can read: other projects in your home
   folder, configuration under `~/.config` and `~/Library` not listed above,
   and the files the bridge runs (its tools, the Claude CLI)
+- find out whether a name it guesses is there in a folder it may not read
+  (the top of the media folder, another brain's inbox, `~/.ssh`): the
+  sandbox refuses a name that exists with "Operation not permitted" and one
+  that does not with "No such file or directory", so it hides what a file
+  holds, not that it is there
 - leave files in its own folder that run or load when you work there
   yourself, outside the sandbox: git hooks and settings in `.git/`
   (`hooks/`, `core.fsmonitor`, `core.hooksPath`), a `.envrc` for direnv,
@@ -920,12 +926,14 @@ chosen then (written with `~`), so later starts do not choose again.
 the bridge's alone: on the first start of a version with media inboxes,
 every folder in it and every file at its top moves to `.old/` in it (see
 [reading](#reading)). Brains cannot read it,
-except their own inbox in `media/` (`media/<brain id>/`) and their own
-runs' brain API tokens in `run-tokens/<id>/`; a `db_path` elsewhere is
-denied to them too.
+except their own inbox in `media/` (`media/<brain id>/`), their own state
+in `brains/<id>/`, which they also write (see [writing](#writing)), and
+their own runs' brain API tokens in `run-tokens/<id>/`; a `db_path` or
+`media_dir` elsewhere is denied to them too, but for the inbox.
 
-`runs/` in it lists the brain runs going on. Each run has a process group
-of its own, which launchd's or systemd's cleanup does not reach, so when
+`runs/` in it lists the brain runs going on. Each run has a session and
+process group of its own, which launchd's or systemd's cleanup does not
+reach, so when
 the bridge crashes or is killed, the next start stops what is left of the
 runs listed there, with the commands they started, before any brain runs.
 It checks that each group's leader is still the process that ran, by its
