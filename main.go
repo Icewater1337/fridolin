@@ -645,6 +645,8 @@ func checkReport(w io.Writer, path string, cfg *Config, o checkOptions) error {
 		}
 		if br := mgr.BrainFor(jid, isGroup); br != nil {
 			fmt.Fprintf(w, "  route %s → %s%s\n", jid, br.ID(), allowed)
+		} else if id := mgr.HeldFor(jid, isGroup); id != "" {
+			fmt.Fprintf(w, "  route %s → no brain: %s handles it but cannot run%s\n", jid, id, allowed)
 		} else {
 			fmt.Fprintf(w, "  route %s → no brain%s\n", jid, allowed)
 		}

@@ -1234,6 +1234,10 @@ func (p *PlaudManager) destination(cfg *Config) (*Brain, string, error) {
 		if id := cfg.Plaud.Brain; id != "" {
 			return nil, "", fmt.Errorf("brain %s, picked for Plaud recordings, was removed or is not approved — pick another one under Integrations → Plaud", id)
 		}
+		if id := p.brains.HeldFor("", false); id != "" {
+			// Not the default brain meanwhile: recordings are private.
+			return nil, "", fmt.Errorf("brain %s, which gets Plaud recordings, cannot run — its issue is on the Brains page", id)
+		}
 		return nil, "", errors.New("no brain to send Plaud recordings to")
 	}
 	jid := p.summaryChat(cfg, br)

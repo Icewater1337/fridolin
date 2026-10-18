@@ -2193,6 +2193,11 @@ type BrainManager struct {
 	dmBrain  *Brain // brain with handles_dms; nil falls through to fallback
 	fallback *Brain // brain marked default, else the first brain
 	issues   []BrainIssue
+	// held routes what an approved brain left out (see
+	// BrainIssue.leavesOut) would take to that brain's id, so that no
+	// other brain gets it meanwhile: your DMs from a DM brain whose
+	// folder has a problem went to the default brain. See heldRoutes.
+	held heldRoutes
 
 	profiler *SandboxProfiler
 	hooks    *BrainHooks
@@ -2282,7 +2287,7 @@ func (bm *BrainManager) reload(specs []BrainSpec, issues []BrainIssue, cfg *Conf
 			root, err := os.OpenRoot(sp.Dir)
 			if err != nil {
 				log.Printf("brain %s: leaving it out: %v", m.ID, err)
-				issues = append(issues, BrainIssue{ID: m.ID, Path: sp.Dir, Kind: "missing", Detail: "the folder cannot be opened: " + err.Error(), atLoad: true, entry: sp.entry})
+				issues = append(issues, BrainIssue{ID: m.ID, Path: sp.Dir, Kind: "missing", Detail: "the folder cannot be opened: " + err.Error(), atLoad: true, entry: sp.entry, routing: m.Routing})
 				continue
 			}
 			br = &Brain{
@@ -2312,7 +2317,8 @@ func (bm *BrainManager) reload(specs []BrainSpec, issues []BrainIssue, cfg *Conf
 			def = br
 		}
 	}
-	if def == nil && len(order) > 0 {
+	held := heldRoutesOf(issues, dm, byGroup)
+	if def == nil && len(order) > 0 && held.fallback == "" {
 		def = order[0]
 	}
 
@@ -2327,7 +2333,7 @@ func (bm *BrainManager) reload(specs []BrainSpec, issues []BrainIssue, cfg *Conf
 	bm.slots.setLimit(cfg.RunLimit())
 
 	bm.mu.Lock()
-	bm.brains, bm.order, bm.byGroup, bm.dmBrain, bm.fallback, bm.issues = next, order, byGroup, dm, def, issues
+	bm.brains, bm.order, bm.byGroup, bm.dmBrain, bm.fallback, bm.issues, bm.held = next, order, byGroup, dm, def, issues, held
 	bm.mu.Unlock()
 	applied = true
 
@@ -2403,7 +2409,40 @@ func credentialsDirOf(cfg *Config) string {
 	return cfg.DataDir
 }
 
-// BrainFor returns the brain that handles the given chat, or nil.
+// heldRoutes are the chats of approved brains that are left out, by the
+// id of the brain that would take them.
+type heldRoutes struct {
+	dms      string            // the DM brain's
+	groups   map[string]string // by group JID
+	fallback string            // the default brain's: what no other brain takes
+}
+
+// heldRoutesOf returns what the brains issues leaves out would take, of
+// what no brain that runs (dm, the DM brain, and byGroup) takes instead.
+func heldRoutesOf(issues []BrainIssue, dm *Brain, byGroup map[string]*Brain) heldRoutes {
+	h := heldRoutes{groups: map[string]string{}}
+	for _, is := range issues {
+		if !is.leavesOut() {
+			continue
+		}
+		if is.routing.HandlesDMs && dm == nil && h.dms == "" {
+			h.dms = is.ID
+		}
+		for _, g := range is.routing.Groups {
+			if _, ok := byGroup[g]; !ok && h.groups[g] == "" {
+				h.groups[g] = is.ID
+			}
+		}
+		if is.routing.Default && h.fallback == "" {
+			h.fallback = is.ID
+		}
+	}
+	return h
+}
+
+// BrainFor returns the brain that handles the given chat, or nil: also
+// when the brain that would is left out (see HeldFor), rather than the
+// default brain.
 func (bm *BrainManager) BrainFor(jid string, isGroup bool) *Brain {
 	bm.mu.RLock()
 	defer bm.mu.RUnlock()
@@ -2411,12 +2450,45 @@ func (bm *BrainManager) BrainFor(jid string, isGroup bool) *Brain {
 		if br, ok := bm.byGroup[jid]; ok {
 			return br
 		}
+		if bm.held.groups[jid] != "" {
+			return nil
+		}
 		return bm.fallback
 	}
 	if bm.dmBrain != nil {
 		return bm.dmBrain
 	}
+	if bm.held.dms != "" {
+		return nil
+	}
 	return bm.fallback
+}
+
+// HeldFor returns the id of the brain left out (see BrainIssue.leavesOut)
+// that would handle the given chat, which therefore goes to no brain, or
+// "" when BrainFor answers for it.
+func (bm *BrainManager) HeldFor(jid string, isGroup bool) string {
+	bm.mu.RLock()
+	defer bm.mu.RUnlock()
+	if isGroup {
+		if _, ok := bm.byGroup[jid]; ok {
+			return ""
+		}
+		if id := bm.held.groups[jid]; id != "" {
+			return id
+		}
+	} else {
+		if bm.dmBrain != nil {
+			return ""
+		}
+		if bm.held.dms != "" {
+			return bm.held.dms
+		}
+	}
+	if bm.fallback == nil {
+		return bm.held.fallback
+	}
+	return ""
 }
 
 // DMBrain returns the brain that gets direct messages: the one with

@@ -26,7 +26,10 @@ it and hands it to this brain's runs only (see
 The bridge checks configured brains the same way whenever it loads them,
 also those you add to `brain_dirs` by hand, and leaves out one that fails,
 with an issue on the Brains page; `fridolin check` then exits with status
-3, and `setup.sh` stops before it installs. Then it writes what is missing:
+3, and `setup.sh` stops before it installs. Until you fix the folder, the
+chats such a brain would take go to no other brain: a DM brain left out
+does not hand your DMs to the default brain, nor a default brain left out
+its chats to the first one. The chat is told that its brain cannot run. Then it writes what is missing:
 
 ```
 <folder>/
@@ -69,7 +72,7 @@ restart.
 | `id` | Stable identifier (lowercase, digits, `-`, `_`). Used for history attribution, the sandbox profile and per-brain credential file names. It cannot be changed; remove the brain and add the folder again under a new id instead. |
 | `name` | Display name. |
 | `routing.handles_dms` | This brain answers direct messages. At most one brain. |
-| `routing.default` | This brain answers allowed groups no brain claims. At most one; without one, the first brain is the fallback. |
+| `routing.default` | This brain answers allowed groups no brain claims. At most one; without one, the first brain is the fallback. A default brain that cannot run (see above) is replaced by no other. |
 | `routing.groups` | Group JIDs this brain answers. The group must also be allowed in the global settings. |
 | `routing.answer_files` | In this brain's groups, a file someone sends (photo, document, voice note, video) addresses the bridge, which answers it. Default `true`; `false` makes it chatter: the brain reads its caption without answering, and the file is not downloaded. The trigger, an @-mention or a reply to the bridge still address it. |
 | `routing.answer_forwards` | The same for a forwarded message. Default `true`. |

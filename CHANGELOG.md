@@ -132,7 +132,8 @@ yet, so everything is under Unreleased until the first one.
   restores refuse such a target too.
 - `fridolin check` exits with status 3 when a brain you approved will not
   run, and `setup.sh` shows check's issues and stops before it installs
-  then.
+  then. The chats of such a brain go to no other brain until you fix it:
+  a DM brain left out used to hand your DMs to the default brain.
 - The bridge runs no program from a folder of its `PATH` inside a brain's
   folder (a `bin/` there, say): it takes it off its own `PATH`, logs it,
   and hands it to that brain's runs only, first on their `PATH`.

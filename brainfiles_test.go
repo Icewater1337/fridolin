@@ -161,7 +161,9 @@ func TestPromptFileIsNotFollowedOutOfTheFolder(t *testing.T) {
 
 // TestBrainWhoseFolderCannotBeOpenedIsLeftOut: a brain whose folder the
 // bridge cannot open has nothing to reach its files through. It is left
-// out and reported, and the other brains run, its chats falling back.
+// out and reported, and the other brains run. Its chats go to no brain:
+// they used to fall back to the default brain, which then read a group
+// meant for another (see TestLeftOutBrainsKeepTheirChats).
 func TestBrainWhoseFolderCannotBeOpenedIsLeftOut(t *testing.T) {
 	if os.Geteuid() == 0 {
 		t.Skip("root opens any folder")
@@ -191,8 +193,8 @@ func TestBrainWhoseFolderCannotBeOpenedIsLeftOut(t *testing.T) {
 	if mgr.Get("a") == nil || mgr.Get("b") != nil {
 		t.Fatalf("brains = %v, want a without b", mgr.Brains())
 	}
-	if br := mgr.BrainFor("120363000000000000@g.us", true); br != mgr.Get("a") {
-		t.Errorf("b's group went to %v, want the default brain a", br)
+	if br, held := mgr.BrainFor("120363000000000000@g.us", true), mgr.HeldFor("120363000000000000@g.us", true); br != nil || held != "b" {
+		t.Errorf("b's group went to %v (held for %q), want it held for b", br, held)
 	}
 	// The drift check cannot read b's brain.json either, and says so too.
 	reported := false

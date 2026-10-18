@@ -56,6 +56,9 @@ type BrainIssue struct {
 	// The dashboard shows an issue on that entry, not on every entry with
 	// the same folder.
 	entry int
+	// routing is what the approved manifest routes to the brain, whose
+	// chats no other brain takes while it is left out (see leavesOut).
+	routing BrainRouting
 }
 
 // leavesOut reports whether the issue keeps an approved brain from running:
@@ -80,18 +83,18 @@ func ResolveBrains(cfg *Config) ([]BrainSpec, []BrainIssue) {
 		}
 		m := ref.Approved.normalized()
 		if err := m.Validate(); err != nil {
-			issues = append(issues, BrainIssue{ID: m.ID, Path: ref.Path, Kind: "invalid", Detail: err.Error(), entry: i})
+			issues = append(issues, BrainIssue{ID: m.ID, Path: ref.Path, Kind: "invalid", Detail: err.Error(), entry: i, routing: m.Routing})
 			continue
 		}
 		if st, err := os.Stat(dir); err != nil || !st.IsDir() {
-			issues = append(issues, BrainIssue{ID: m.ID, Path: ref.Path, Kind: "missing", Detail: "folder not found", entry: i})
+			issues = append(issues, BrainIssue{ID: m.ID, Path: ref.Path, Kind: "missing", Detail: "folder not found", entry: i, routing: m.Routing})
 			continue
 		}
 		// The dashboard refuses such a folder, but brain_dirs can be edited
 		// by hand, and a folder can be moved, or a symlink on its way
 		// changed, after it was added.
 		if err := checkBrainDir(dir, ref.Path, cfg, homeDir()); err != nil {
-			issues = append(issues, BrainIssue{ID: m.ID, Path: ref.Path, Kind: "invalid", Detail: "the folder " + err.Error() + ", so it cannot hold a brain; move the brain to a folder of its own"})
+			issues = append(issues, BrainIssue{ID: m.ID, Path: ref.Path, Kind: "invalid", Detail: "the folder " + err.Error() + ", so it cannot hold a brain; move the brain to a folder of its own", routing: m.Routing})
 			continue
 		}
 		if disk, err := ReadManifest(dir); err == nil && !disk.Equal(m) {
@@ -108,7 +111,7 @@ func ResolveBrains(cfg *Config) ([]BrainSpec, []BrainIssue) {
 	var ok []BrainSpec
 	for _, s := range specs {
 		if err := ValidateBrainSet(append(append([]BrainSpec{}, ok...), s)); err != nil {
-			issues = append(issues, BrainIssue{ID: s.Manifest.ID, Path: s.Dir, Kind: "invalid", Detail: err.Error(), entry: s.entry})
+			issues = append(issues, BrainIssue{ID: s.Manifest.ID, Path: s.Dir, Kind: "invalid", Detail: err.Error(), entry: s.entry, routing: s.Manifest.Routing})
 			continue
 		}
 		ok = append(ok, s)

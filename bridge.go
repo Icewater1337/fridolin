@@ -432,9 +432,17 @@ func (b *Bridge) handleInbound(ctx context.Context, m Inbound) {
 		return
 	}
 	if br == nil {
-		log.Printf("No brain configured for %s — add one in the dashboard", m.JID)
+		reply := "🧠 No brain is set up for this chat yet. Open the bridge dashboard and add one."
+		if id := b.brainMgr.HeldFor(m.JID, m.IsGroup()); id != "" {
+			// Not the default brain instead: what was meant for this
+			// brain, your DMs say, must not land in another one.
+			log.Printf("brain %s, which handles %s, cannot run (see its issue on the Brains page); the message goes to no other brain", id, m.JID)
+			reply = "🧠 The brain for this chat cannot run right now. The Brains page of the bridge dashboard says why."
+		} else {
+			log.Printf("No brain configured for %s — add one in the dashboard", m.JID)
+		}
 		if !m.Silent && m.Source != sourceIngest {
-			_ = b.wa.SendMessage(ctx, m.JID, "🧠 No brain is set up for this chat yet. Open the bridge dashboard and add one.")
+			_ = b.wa.SendMessage(ctx, m.JID, reply)
 		}
 		return
 	}
