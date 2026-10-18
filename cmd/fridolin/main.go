@@ -495,11 +495,11 @@ func openCmd(args []string) {
 // agent runs and pastes into a chat.
 func dashboardLink(cfg *Config) (string, error) {
 	tokenPath := filepath.Join(cfg.DataDir, "dashboard.token")
-	data, err := os.ReadFile(tokenPath)
+	token, err := readDashboardToken(cfg.DataDir)
 	if err != nil {
 		return "", fmt.Errorf("no dashboard token yet — start the bridge first (%w)", err)
 	}
-	code, err := askLoginCode(cfg.HTTPListen, strings.TrimSpace(string(data)))
+	code, err := askLoginCode(cfg.HTTPListen, token)
 	if errors.Is(err, errOlderBridge) {
 		return "", fmt.Errorf("%w. Restart it on this build (./setup.sh installs it and restarts the bridge), or open its dashboard with the fridolin that runs it, or at http://%s/ with the token from %s", err, cfg.HTTPListen, tokenPath)
 	}
@@ -527,13 +527,13 @@ func rotateTokenCmd(args []string) {
 
 // rotateToken does rotateTokenCmd's work for cfg.
 func rotateToken(cfg *Config) error {
-	data, err := os.ReadFile(filepath.Join(cfg.DataDir, "dashboard.token"))
+	token, err := readDashboardToken(cfg.DataDir)
 	if err != nil {
 		return fmt.Errorf("no dashboard token yet — start the bridge first (%w)", err)
 	}
 	if cfg.HTTPEnabled() {
 		var resp struct{ Status string }
-		err := callBridge(cfg.HTTPListen, strings.TrimSpace(string(data)), "/api/token/rotate", &resp)
+		err := callBridge(cfg.HTTPListen, token, "/api/token/rotate", &resp)
 		if errors.Is(err, errOlderBridge) && cfg.Dashboard.Disabled {
 			// It serves no dashboard API, so it answers 404 whatever its
 			// build. Nothing takes the token until the dashboard is on.
