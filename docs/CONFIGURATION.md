@@ -162,6 +162,23 @@ conversation-only assistant with no tool access.
 
 Read [Security](../README.md#security) before running with this on.
 
+### `run_timeout_minutes`
+
+How long one brain run may take, in minutes. Default 30, at most 1440 (a
+day); `0` lets a run take as long as it takes. A brain answers one message
+at a time, so a run that hangs (a tool that waits for input, a network
+stall) would otherwise hold up every later message of that brain until
+someone sends `!stop`. At the limit the bridge stops the run, with every
+command it started, and the chat gets an error that says so; the next
+message runs. Long agentic tasks can take a while, so raise it rather
+than turn it off if yours do.
+
+Once a run has given its answer, the bridge waits five seconds for it to
+end. A command it left running in the background that still holds the
+CLI's output open is stopped then, rather than keeping the brain busy for
+as long as it runs. The answer goes out either way, also when the limit
+above comes within those five seconds.
+
 ### `inherit_claude_user_config`
 
 The dashboard has no field for it, but its overview warns while it is on.

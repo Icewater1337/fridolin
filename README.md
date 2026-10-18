@@ -532,7 +532,8 @@ worker; each message spawns `claude -p` with `--output-format stream-json`,
 seeded with the brain's prompt file and recent chat history. Events are
 parsed live, so an `AskUserQuestion` reaches WhatsApp immediately and a run
 over 10 seconds gets a "working on it" notice (the event types are in
-`stream.go`). `BrainManager.Apply` swaps the brain set at runtime without
+`stream.go`). A run is stopped at `run_timeout_minutes`, and five seconds
+after its result when something it started holds its output open. `BrainManager.Apply` swaps the brain set at runtime without
 touching brains that did not change.
 
 **`manifest.go`, `brainreg.go`** — `brain.json`, the brain registry, path

@@ -1313,3 +1313,104 @@ func TestPanicsInARunAreContained(t *testing.T) {
 		})
 	}
 }
+
+// TestRunTimeoutStopsAStuckRun: a run that takes longer than
+// run_timeout_minutes is stopped, process group and all, and ends with an
+// error that says so, so that its brain goes on with the next message.
+func TestRunTimeoutStopsAStuckRun(t *testing.T) {
+	prev := runTimeoutUnit
+	runTimeoutUnit = 100 * time.Millisecond
+	t.Cleanup(func() { runTimeoutUnit = prev })
+	mgr, d, _ := queueTestManager(t, 30000, `, "run_timeout_minutes": 3`)
+	t.Setenv("FRIDOLIN_FAKE_CHILD", "1") // a command holding the output open too
+	start := time.Now()
+	if _, _, _, err := mgr.Submit(dm("stuck")); err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, 10*time.Second, "the run to be stopped", func() bool { return d.count() == 1 })
+	res := d.all()[0].res
+	if !errors.Is(res.Err, errRunTimedOut) || !strings.Contains(res.Err.Error(), "run_timeout_minutes") {
+		t.Errorf("result = %+v, want errRunTimedOut", res)
+	}
+	if el := time.Since(start); el > 5*time.Second {
+		t.Errorf("the run took %v to stop", el)
+	}
+	if last := mgr.Get("a").Snapshot().Last; last == nil || last.Outcome != outcomeError {
+		t.Errorf("last run = %+v, want outcome error", last)
+	}
+}
+
+// TestRunEndsSoonAfterItsResult: a command Claude left running with the
+// output open does not keep the brain busy once the result is in: after
+// postResultGrace the rest of the run is stopped, and the answer goes out.
+func TestRunEndsSoonAfterItsResult(t *testing.T) {
+	prev := postResultGrace
+	postResultGrace = 300 * time.Millisecond
+	t.Cleanup(func() { postResultGrace = prev })
+	mgr, d, _ := queueTestManager(t, 10, "")
+	t.Setenv("FRIDOLIN_FAKE_CHILD", "1") // sleeps 30 s holding the output open
+	start := time.Now()
+	if _, _, _, err := mgr.Submit(dm("quick answer")); err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, 10*time.Second, "the answer", func() bool { return d.count() == 1 })
+	if res := d.all()[0].res; res.Err != nil || !strings.HasSuffix(res.Text, "says: quick answer") {
+		t.Errorf("result = %+v, want the answer", res)
+	}
+	if el := time.Since(start); el > 5*time.Second {
+		t.Errorf("the run took %v, held open by the command it left", el)
+	}
+}
+
+// TestRunTimeoutKeepsAnAnswerThatCame: a deadline that comes in the grace
+// after the result stops what is left of the run, but the answer that is
+// in still goes out.
+func TestRunTimeoutKeepsAnAnswerThatCame(t *testing.T) {
+	prevUnit, prevGrace := runTimeoutUnit, postResultGrace
+	runTimeoutUnit, postResultGrace = 100*time.Millisecond, 10*time.Second
+	t.Cleanup(func() { runTimeoutUnit, postResultGrace = prevUnit, prevGrace })
+	mgr, d, _ := queueTestManager(t, 0, `, "run_timeout_minutes": 20`)
+	t.Setenv("FRIDOLIN_FAKE_CHILD", "1") // sleeps 30 s holding the output open
+	if _, _, _, err := mgr.Submit(dm("answer in time")); err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, 10*time.Second, "the run", func() bool { return d.count() == 1 })
+	if res := d.all()[0].res; res.Err != nil || !strings.HasSuffix(res.Text, "says: answer in time") {
+		t.Errorf("result = %+v, want the answer that came before the deadline", res)
+	}
+}
+
+// TestRunTimeoutSetting: run_timeout_minutes defaults to 30, takes 0 for no
+// limit, and refuses what makes no sense.
+func TestRunTimeoutSetting(t *testing.T) {
+	cases := []struct {
+		json    string
+		want    time.Duration
+		wantErr bool
+	}{
+		{``, 30 * time.Minute, false},
+		{`, "run_timeout_minutes": 0`, 0, false},
+		{`, "run_timeout_minutes": 90`, 90 * time.Minute, false},
+		{`, "run_timeout_minutes": -1`, 0, true},
+		{`, "run_timeout_minutes": 100000`, 0, true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.json, func(t *testing.T) {
+			home := canonicalDir(t.TempDir())
+			t.Setenv("HOME", home)
+			cfg, err := LoadConfig(writeConfig(t, `{"brain_mode": true, "data_dir": "`+home+`/data"`+tc.json+`}`))
+			if tc.wantErr {
+				if err == nil || !strings.Contains(err.Error(), "run_timeout_minutes") {
+					t.Errorf("err = %v, want run_timeout_minutes refused", err)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got := cfg.RunTimeout(); got != tc.want {
+				t.Errorf("RunTimeout = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}

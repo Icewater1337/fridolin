@@ -10,6 +10,7 @@ import (
 	"runtime"
 	"strings"
 	"syscall"
+	"time"
 )
 
 // Config holds all configuration for the bridge.
@@ -75,6 +76,12 @@ type Config struct {
 	// Claude CLI so it can use tools without an interactive prompt. Required
 	// for unattended operation; see the security notes in the README.
 	DangerouslySkipPermissions bool `json:"dangerously_skip_permissions"`
+
+	// RunTimeoutMinutes stops a brain's run that takes longer, so that one
+	// stuck run (a hung tool, a network stall) cannot hold up its brain's
+	// queue until someone sends !stop. Default 30; 0 lets a run take as long
+	// as it takes.
+	RunTimeoutMinutes *int `json:"run_timeout_minutes,omitempty"`
 
 	// InheritClaudeUserConfig lets brains load your own Claude Code setup,
 	// as they did before this setting existed: your user settings (with
@@ -344,7 +351,19 @@ const (
 	defaultKeepVersions  = 30
 	defaultMaxMediaMB    = 100
 	maxMaxMediaMB        = 2048
+	// Agentic runs can take a while; a day is far more than any should.
+	defaultRunTimeoutMinutes = 30
+	maxRunTimeoutMinutes     = 24 * 60
 )
+
+// runTimeoutUnit is what one of run_timeout_minutes is, a variable so that
+// tests need not wait a minute.
+var runTimeoutUnit = time.Minute
+
+// RunTimeout is how long a brain's run may take, 0 for no limit.
+func (c *Config) RunTimeout() time.Duration {
+	return time.Duration(intOr(c.RunTimeoutMinutes, defaultRunTimeoutMinutes)) * runTimeoutUnit
+}
 
 func boolOr(p *bool, def bool) bool {
 	if p == nil {
@@ -498,6 +517,10 @@ func effective(file *Config) (*Config, error) {
 	}
 	if cfg.Dashboard.RequireToken == nil {
 		cfg.Dashboard.RequireToken = &t
+	}
+	if cfg.RunTimeoutMinutes == nil {
+		rt := defaultRunTimeoutMinutes
+		cfg.RunTimeoutMinutes = &rt
 	}
 	if cfg.Backup.IncludeBridgeConfig == nil {
 		inc := defaultIncludeBridgeConfig
@@ -671,6 +694,9 @@ func (c *Config) validate() error {
 	}
 	if c.MaxChunkSize < minChunkSize {
 		return fmt.Errorf("max_chunk_size %d is too small: use at least %d, or 0 for the default of %d", c.MaxChunkSize, minChunkSize, defaultChunkSize)
+	}
+	if n := intOr(c.RunTimeoutMinutes, defaultRunTimeoutMinutes); n < 0 || n > maxRunTimeoutMinutes {
+		return fmt.Errorf("run_timeout_minutes must be between 0 (no limit) and %d, not %d", maxRunTimeoutMinutes, n)
 	}
 	if c.MaxMediaMB < 1 || c.MaxMediaMB > maxMaxMediaMB {
 		return fmt.Errorf("max_media_mb must be between 1 and %d, not %d", maxMaxMediaMB, c.MaxMediaMB)

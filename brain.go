@@ -223,6 +223,7 @@ type brainSettings struct {
 	otpGuard        bool
 	otpMarkers      []string
 	viewer          bool
+	runTimeout      time.Duration // 0 for none
 	queueMode       string
 	maxPending      int
 	credsDir        string // where per-brain credential files live
@@ -299,6 +300,8 @@ var (
 	errBrainDropped     = errors.New("dropped before it ran")
 	errBrainRetired     = errors.New("brain was removed")
 	errQueueFull        = errors.New("brain queue is full")
+	// errRunTimedOut is a run that took longer than run_timeout_minutes.
+	errRunTimedOut = errors.New("the run took too long and was stopped")
 	// errSandboxUnavailable is what the chat sees. The cause goes to the log
 	// only, because it can name private paths.
 	errSandboxUnavailable = errors.New("the sandbox could not be set up, so this message was not run (details in the bridge log)")
@@ -422,12 +425,12 @@ func (br *Brain) worker() {
 		}
 		m := br.pending[0]
 		br.pending = br.pending[1:]
-		ctx, cancel := context.WithCancel(context.Background())
+		s := br.settings.Load()
+		ctx, cancel := runContext(s.runTimeout)
 		run := &brainRun{cancel: cancel, done: make(chan struct{}), msg: m, started: time.Now()}
 		br.current = run
 		br.mu.Unlock()
 
-		s := br.settings.Load()
 		if m.Silent {
 			log.Printf("brain %s: running silently for untagged message from %s", br.id, m.Sender)
 		}
@@ -478,6 +481,24 @@ func (br *Brain) deliverGuarded(m Inbound, res RunResult) {
 	if m.Done != nil {
 		guard("finishing", func() { m.Done(res.Err) })
 	}
+}
+
+// runContext is a run's context, which a stop cancels and which ends after
+// timeout too, unless that is 0.
+func runContext(timeout time.Duration) (context.Context, context.CancelFunc) {
+	if timeout > 0 {
+		return context.WithTimeout(context.Background(), timeout)
+	}
+	return context.WithCancel(context.Background())
+}
+
+// runTimedOut is the error of a run stopped at run_timeout_minutes.
+func runTimedOut(timeout time.Duration) error {
+	after := timeout.String()
+	if timeout%time.Minute == 0 {
+		after = fmt.Sprintf("%d minutes", int(timeout/time.Minute))
+	}
+	return fmt.Errorf("%w after %s (run_timeout_minutes)", errRunTimedOut, after)
 }
 
 // dropped tells the messages in ms that will not run, outside br.mu.
@@ -1155,24 +1176,42 @@ func (br *Brain) invoke(run *brainRun, ctx context.Context, s *brainSettings, m 
 
 	// Parse the stream in a goroutine so we can race it against the 10s timer.
 	parseDone := make(chan RunResult, 1)
+	resultIn := make(chan struct{})
+	var resultOnce sync.Once
 	go func() {
-		parseDone <- br.parseStream(m.JID, stdout)
+		parseDone <- br.readStream(m.JID, stdout, func() { resultOnce.Do(func() { close(resultIn) }) })
 	}()
 
-	timer := time.NewTimer(workingNoticeAfter)
-	defer timer.Stop()
+	notice := time.NewTimer(workingNoticeAfter)
+	defer notice.Stop()
 
 	invocationStart := time.Now()
 	var res RunResult
-	select {
-	case res = <-parseDone:
-	case <-timer.C:
-		// Untagged (silent) messages never produce a visible reply, so they
-		// must not produce a visible "working" notice either.
-		if !m.Silent && br.hooks != nil && br.hooks.Intermediate != nil {
-			br.hooks.Intermediate(m.JID, workingNotice)
+	var grace <-chan time.Time
+	for parsing := true; parsing; {
+		select {
+		case res = <-parseDone:
+			parsing = false
+		case <-notice.C:
+			// Untagged (silent) messages never produce a visible reply, so they
+			// must not produce a visible "working" notice either.
+			if !m.Silent && br.hooks != nil && br.hooks.Intermediate != nil {
+				br.hooks.Intermediate(m.JID, workingNotice)
+			}
+		case <-resultIn:
+			// The answer is in, and the CLI exits right after it, unless
+			// something it started still holds its output open, a command
+			// left running in the background, say. That gets
+			// postResultGrace, or the brain would stay busy as long as it ran.
+			resultIn, grace = nil, time.After(postResultGrace)
+			notice.Stop()
+		case <-grace:
+			grace = nil
+			log.Printf("brain %s: claude's output was still open %v after its result; stopping what is left of the run", br.id, postResultGrace)
+			if err := killProcessGroup(cmd.Process.Pid); err != nil {
+				log.Printf("brain %s: failed to kill process group %d: %v", br.id, cmd.Process.Pid, err)
+			}
 		}
-		res = <-parseDone
 	}
 
 	if elapsed := time.Since(invocationStart); elapsed > 5*time.Minute && res.Text != "" {
@@ -1196,20 +1235,30 @@ func (br *Brain) invoke(run *brainRun, ctx context.Context, s *brainSettings, m 
 		_ = cmd.Process.Signal(os.Interrupt)
 	}
 
-	if waitErr := cmd.Wait(); waitErr != nil {
-		if ctx.Err() != nil {
+	waitErr := cmd.Wait()
+	switch {
+	case errors.Is(ctx.Err(), context.DeadlineExceeded):
+		// The deadline may come in the grace after the result, which is
+		// the run's answer then all the same.
+		if res.Err != nil || res.Text == "" && !res.AlreadySent {
+			return RunResult{Err: runTimedOut(s.runTimeout)}
+		}
+	case ctx.Err() != nil:
+		if waitErr != nil || res.Text == "" {
 			return RunResult{Err: errBrainInterrupted}
 		}
+	case waitErr != nil:
 		stderr := strings.TrimSpace(stderrBuf.String())
 		if res.Err == nil && res.Text == "" && !res.AlreadySent {
 			return RunResult{Err: fmt.Errorf("claude exited: %w — stderr: %s", waitErr, truncate(stderr, 500))}
 		}
 	}
-	if ctx.Err() != nil && res.Text == "" {
-		return RunResult{Err: errBrainInterrupted}
-	}
 	return res
 }
+
+// postResultGrace is how long a run may keep its output open after its
+// result, a variable so tests need not wait for it.
+var postResultGrace = 5 * time.Second
 
 // composePreface reads the chat history for chatJID and formats recent messages:
 // the last 10 for a DM, the last 20 for a group.
@@ -1322,6 +1371,12 @@ func (br *Brain) buildPrompt(s *brainSettings, m Inbound) string {
 // parseStream reads the stream-json output from the Claude CLI and returns
 // the result, writing a human-readable activity log alongside it.
 func (br *Brain) parseStream(jid string, reader io.Reader) RunResult {
+	return br.readStream(jid, reader, nil)
+}
+
+// readStream is parseStream that calls onResult, when set, as soon as the
+// result is in, while the stream may still go on.
+func (br *Brain) readStream(jid string, reader io.Reader, onResult func()) RunResult {
 	scanner := bufio.NewScanner(reader)
 	scanner.Buffer(make([]byte, 4*1024*1024), 4*1024*1024)
 
@@ -1401,6 +1456,9 @@ func (br *Brain) parseStream(jid string, reader io.Reader) RunResult {
 			}
 			finalResult = event.Result
 			writeLog("✅ Result: " + truncate(finalResult, 2000))
+			if onResult != nil {
+				onResult()
+			}
 		}
 	}
 
@@ -1692,6 +1750,7 @@ func settingsFor(cfg *Config, sp BrainSpec) *brainSettings {
 		otpGuard:        cfg.OTPGuard,
 		otpMarkers:      append([]string(nil), cfg.OTPMarkers...),
 		viewer:          cfg.Viewer,
+		runTimeout:      cfg.RunTimeout(),
 		queueMode:       cfg.Queue.Mode,
 		maxPending:      cfg.Queue.MaxPending,
 		credsDir:        credentialsDirOf(cfg),
