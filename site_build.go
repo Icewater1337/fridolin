@@ -200,7 +200,7 @@ func (b *Bridge) apiBuildChat(w http.ResponseWriter, r *http.Request) {
 	}
 	resp := map[string]any{"messages": ch.Messages, "thread": ch.Thread, "running": running, "queued": queued, "activity": []string{}}
 	if running {
-		resp["activity"] = currentRunLog(br.streamLogPath())
+		resp["activity"] = currentRunLog(br.streamLogPath(), rt.Running.PID)
 	}
 	if p := b.site.previewOf(br.ID()); p != nil {
 		resp["preview"] = b.site.previewURLs(br.ID(), p)
@@ -274,27 +274,59 @@ func (b *Bridge) apiBuildStop(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
 }
 
-// currentRunLog is the brain's activity log since the run in flight began:
-// "🔧 Tool: …" and "💬 …" lines, the last 40.
-func currentRunLog(path string) []string {
+// runLogWindow is how much of the end of the activity log currentRunLog
+// reads.
+const runLogWindow = 64 * 1024
+
+// currentRunLog is the brain's activity log since the run in flight, the
+// one with process pid, began: "🔧 Tool: …" and "💬 …" lines, the last 40.
+// Its part starts at the heading that names its pid (runHeading) and ends
+// at the next run's. A run whose heading is not in the log yet has nothing
+// to show: what is there belongs to the runs before it.
+func currentRunLog(path string, pid int) []string {
+	// A run without its process yet has no heading to look for. The Build
+	// page asks while the run starts, so nothing is opened for it.
+	if pid <= 0 {
+		return []string{}
+	}
 	f, err := os.Open(path)
 	if err != nil {
 		return []string{}
 	}
 	defer f.Close()
-	const window = 64 * 1024
-	if st, err := f.Stat(); err == nil && st.Size() > window {
-		_, _ = f.Seek(st.Size()-window, io.SeekStart)
+	cut := false
+	if st, err := f.Stat(); err == nil && st.Size() > runLogWindow {
+		_, _ = f.Seek(st.Size()-runLogWindow, io.SeekStart)
+		cut = true
 	}
 	data, _ := io.ReadAll(f)
 	lines := strings.Split(strings.TrimRight(string(data), "\n"), "\n")
-	start := 0
+	if cut {
+		lines = lines[1:] // most likely the end of a line
+	}
+	start, end, headings := -1, len(lines), 0
 	for i, l := range lines {
-		if strings.Contains(l, "New invocation") {
-			start = i + 1
+		p, ok := runHeadingPID(l)
+		if !ok {
+			continue
+		}
+		headings++
+		switch {
+		case p == pid:
+			start, end = i+1, len(lines)
+		case start >= 0 && end == len(lines):
+			end = i
 		}
 	}
-	out := slices.Clone(lines[start:])
+	switch {
+	case start >= 0:
+	case cut && headings == 0:
+		// A run that wrote more than the window: its heading is further up.
+		start = 0
+	default:
+		return []string{}
+	}
+	out := slices.Clone(lines[start:end])
 	if len(out) > 40 {
 		out = out[len(out)-40:]
 	}
