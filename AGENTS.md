@@ -21,8 +21,9 @@ The person's data lives in brain folders they choose and in
 1. **Prerequisites.** Check, and install what is missing with the person's OK:
    - Go 1.26+ (`go version`); macOS: `brew install go`.
    - A C compiler (SQLite needs cgo); macOS: `xcode-select --install`.
-   - Claude Code, logged in (`claude --version`; if `claude -p hi` says it is
-     not logged in, ask the person to run `claude` once and log in).
+   - Claude Code 2.1.302 or newer, logged in (`claude --version`; `claude
+     update` updates it; if `claude -p hi` says it is not logged in, ask the
+     person to run `claude` once and log in).
    - Optional, for backups: rclone (`brew install rclone` or
      https://rclone.org/install/).
 
@@ -32,12 +33,15 @@ The person's data lives in brain folders they choose and in
    ./setup.sh --yes
    ```
 
-   This builds `./fridolin`, runs the tests, writes a starter
-   config to `~/.fridolin/config.json`, installs a launchd agent
-   (macOS) or systemd user unit (Linux), starts it, and opens the dashboard.
-   Use `./setup.sh --no-service` if the person does not want it to start at
-   login; then run `./fridolin --open` yourself (it runs in the
-   foreground — start it in the background or a separate terminal).
+   This builds the bridge, runs the tests on the build, writes a starter
+   config to `~/.fridolin/config.json`, installs the build to
+   `~/.local/lib/fridolin/` with a launchd agent (macOS) or systemd user
+   unit (Linux), restarts it, waits for the new version to answer and opens
+   the dashboard. Use `./setup.sh --no-service` if the person does not want
+   it to start at login; it then builds `bin/fridolin`, which you run with
+   `bin/fridolin --open` (it runs in the foreground — start it in the
+   background or a separate terminal). Below, `fridolin` means
+   `~/.local/lib/fridolin/fridolin` (or `bin/fridolin` without the service).
 
 3. **Hand over to the dashboard.** Tell the person to:
    - **Pair WhatsApp**: scan the QR code shown on the Overview page with the
@@ -58,10 +62,13 @@ The person's data lives in brain folders they choose and in
    You cannot scan QR codes or approve Google or Plaud sign-ins for them.
 
 4. **Verify:** `curl -s http://127.0.0.1:8765/health` prints `ok`;
-   `./fridolin check` shows the brains and routing. Ask the
+   `curl -s http://127.0.0.1:8765/ready` shows `"whatsapp":"connected"` once
+   the phone is paired; `fridolin service status` shows what is installed
+   and running; `fridolin check` shows the brains and routing. Ask the
    person to send the bridge a DM and confirm a reply arrives.
 
-Reopen the dashboard with `./fridolin open`.
+Reopen the dashboard with `fridolin open`. To upgrade later: `git pull &&
+./setup.sh`; to go back to the version before: `fridolin service rollback`.
 
 ## Rules
 
@@ -71,8 +78,11 @@ Reopen the dashboard with `./fridolin open`.
 - **Never run two bridges on one data directory or WhatsApp session.** The
   binary refuses (lock file + port), but do not try to work around it. To
   experiment, use dev mode with a scratch config:
-  `./fridolin --no-whatsapp --config /tmp/try/config.json`
+  `bin/fridolin --no-whatsapp --config /tmp/try/config.json`
   (set a different `http_listen` port and `data_dir` in that config).
+- **`./setup.sh` and `fridolin service install` restart the running
+  bridge**, cutting off replies in progress. Ask before running them on a
+  machine where the bridge is in use.
 - **Never print or paste** `~/.fridolin/dashboard.token`, the
   rclone config in `~/.fridolin/rclone/`, or anything that looks
   like a credential into chat or logs. `fridolin open` passes
@@ -91,8 +101,10 @@ Reopen the dashboard with `./fridolin open`.
   smoke test (`make help` lists the targets).
   CI also runs the site's tests and the fuzz targets (both below),
   govulncheck, CodeQL and the personal-data scan of the pushed commits.
-  `make check` never rewrites `./fridolin`, which the installed service
-  runs; `make build` and `make install` do. While iterating,
+  `make check` builds only into temp dirs; `make build` writes
+  `bin/fridolin`, and `make install` also copies it to `~/.local/bin`.
+  None of them touches the service, which runs the copy in
+  `~/.local/lib/fridolin/` that `./setup.sh` installs. While iterating,
   `go vet ./... && go test -race ./...` is enough; `gofmt` everything.
   The tests run in an empty temp directory, with an empty temp `HOME` and
   the variables the bridge reads (`FRIDOLIN_CONFIG`, `BRAIN_MODE`) unset,
@@ -117,6 +129,9 @@ Reopen the dashboard with `./fridolin open`.
 - The site process in `site/` (Node, TypeScript run by tsx; docs/SITE.md) has
   its own tests: `cd site && npm install && npm test`. The Go end-to-end
   tests of the site run it too and skip without its `node_modules`.
+- Build with `make build` (into `bin/`, which git ignores) and try changes in
+  dev mode. A build in the checkout never reaches the service; `./setup.sh`
+  installs one.
 - The dashboard is plain HTML/CSS/JS in `web/` (no build step), embedded into
   the binary — rebuild after changing it. It runs under a strict CSP: no
   inline scripts or styles. Its ES modules live in `web/assets`: `app/` (the

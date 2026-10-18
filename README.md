@@ -86,7 +86,8 @@ See [docs/SITE.md](docs/SITE.md).
 ## Requirements
 
 - **macOS or Linux.** The sandbox layer is macOS-only; everything else is portable.
-- **[Claude Code](https://claude.com/claude-code)**, installed and logged in.
+- **[Claude Code](https://claude.com/claude-code)** 2.1.302 or newer, installed
+  and logged in.
 - **Go 1.26+** and a C compiler to build (`xcode-select --install` on macOS).
 - **Python 3.9+** for the helper tools.
 - **[rclone](https://rclone.org/install/)** — only for Google Drive backups.
@@ -116,10 +117,15 @@ cd fridolin
 Or open the folder in Claude Code (or any coding assistant) and say *"set this
 up"* — [AGENTS.md](AGENTS.md) tells it exactly what to do.
 
-`setup.sh` checks the prerequisites, builds the bridge, runs the tests,
-installs a background service (launchd on macOS, systemd on Linux) and opens
-the dashboard. Re-run it any time; it leaves your configuration and brains
-alone.
+`setup.sh` checks the prerequisites, builds the bridge and runs the tests on
+the build. Only then does it install it, to `~/.local/lib/fridolin/`, with a
+background service (launchd on macOS, a systemd user unit on Linux) that runs
+it from there, and open the dashboard. The checkout only builds, so working in
+it never changes the running bridge. Re-run it any time; it leaves your
+configuration and brains alone. `./setup.sh --help` lists its options.
+
+The commands below are `~/.local/lib/fridolin/fridolin`, shortened to
+`fridolin`: put that folder on your `PATH`, or type the full path.
 
 Then, in the dashboard:
 
@@ -135,8 +141,28 @@ Then, in the dashboard:
 Reopen the dashboard any time with:
 
 ```bash
-./fridolin open
+fridolin open
 ```
+
+### Upgrading and rolling back
+
+```bash
+git pull && ./setup.sh
+```
+
+builds and tests the new version, installs it and restarts the bridge, which
+cuts off any reply it is working on. The version it replaced stays next to it,
+with its tools, as `fridolin.prev`. To go back to it:
+
+```bash
+fridolin service rollback     # run it again to undo
+```
+
+`fridolin version`, the dashboard's Overview and the `Starting fridolin …`
+line each start writes to the log say which version runs (on macOS:
+`grep 'Starting fridolin' ~/Library/Logs/fridolin/stderr.log | tail -1`).
+`fridolin service status` shows what is installed, what the service runs
+and whether the bridge answers.
 
 ### Adding a group
 
@@ -172,15 +198,19 @@ The dashboard writes `~/.fridolin/config.json`; you can edit it
 too. Every option is documented in [docs/CONFIGURATION.md](docs/CONFIGURATION.md).
 
 ```bash
-./fridolin check                         # validate and show DM access and routing
-./fridolin check --route 15551234567@s.whatsapp.net
+fridolin check                           # validate and show DM access and routing
+fridolin check --route 15551234567@s.whatsapp.net
 ```
 
 ### Trying it without WhatsApp
 
 ```bash
-./fridolin --no-whatsapp --config /tmp/try/config.json --open
+make build && bin/fridolin --no-whatsapp --config /tmp/try/config.json --open
 ```
+
+A build in `bin/` finds the tools in the checkout and leaves the installed
+bridge alone. Give the scratch config its own `http_listen` port and
+`data_dir`.
 
 Dev mode runs the dashboard and brains with a simulated chat: inject messages
 on the **Dev** page and read the replies there.
@@ -281,7 +311,7 @@ when [`child_env_passthrough`](docs/CONFIGURATION.md#child_env_passthrough)
 names it: `"child_env_passthrough": ["GROQ_API_KEY"]`. The bridge reads no
 `.env` file. [Environment
 variables](docs/CONFIGURATION.md#environment-variables) says where to keep it
-so that re-running `setup.sh` does not drop it.
+so that the next install does not drop it.
 
 `ffmpeg` is required either way. `--model` accepts any Whisper-compatible model
 ID, so a fine-tune matching your language or dialect usually beats the default
@@ -294,6 +324,10 @@ curl -X POST http://127.0.0.1:8765/send \
   -H 'Content-Type: application/json' \
   -d '{"jid":"120363000000000000@g.us","text":"Deploy finished ✅"}'
 ```
+
+`curl -fsS http://127.0.0.1:8765/ready` succeeds only while WhatsApp is
+connected, so a script can check first; its JSON names the connection state
+and the bridge's version.
 
 To hand a brain files that arrived some other way (a web upload, a recorder
 sync), write them under `~/.fridolin/media/` and turn on
@@ -344,12 +378,51 @@ uploaded. Restores go into a new folder and never overwrite a brain. Details:
 
 ### Running in the background
 
-`setup.sh` installs a launchd agent (macOS) or a systemd user unit (Linux)
-from the templates in [deploy/](deploy/). Pairing happens in the dashboard, so
-the service can be started before WhatsApp is linked. Re-running `setup.sh`
-rewrites both files, so keep extra environment variables where it does not
-overwrite them: see [Environment
-variables](docs/CONFIGURATION.md#environment-variables).
+`setup.sh` runs `fridolin service install`, which you can also run yourself.
+It copies the binary and the Python tools to
+`~/.local/lib/fridolin/` and writes a launchd agent
+(`~/Library/LaunchAgents/ai.fridolin.bridge.plist`) or a systemd user unit
+(`~/.config/systemd/user/fridolin.service`) that runs it with your shell's
+`PATH`, then restarts it and checks that the new version answers. Pairing
+happens in the dashboard, so the service can start before WhatsApp is linked.
+
+```bash
+fridolin service status       # what is installed and running
+fridolin service restart
+fridolin service install --dry-run   # show the unit without writing it
+fridolin service uninstall    # remove the service and the install, not your data
+```
+
+Each install rewrites the unit. Variables you add to the launchd agent's
+`EnvironmentVariables` are kept (a dry run names them, but does not show
+their values); on Linux keep them in a drop-in: see
+[Environment variables](docs/CONFIGURATION.md#environment-variables). The
+macOS log is `~/Library/Logs/fridolin/stderr.log` (`tail -F` it), private to
+you; past 10 MB it moves to `stderr.log.1`, replacing the one before. On
+Linux, `journalctl --user -u fridolin -f`.
+
+### Releases
+
+Each version tag (`v1.2.3`) builds archives for macOS (arm64, amd64) and Linux
+(amd64, arm64) on the project's GitHub releases page, with a `SHA256SUMS`
+file. To run one without building it yourself, download the archive for your
+machine and `SHA256SUMS`, then:
+
+```bash
+shasum -a 256 -c SHA256SUMS --ignore-missing     # Linux: sha256sum -c --ignore-missing SHA256SUMS
+tar -xzf fridolin_v1.2.3_darwin_arm64.tar.gz && cd fridolin_v1.2.3_darwin_arm64
+./fridolin init                                   # a starter config, if you have none
+./fridolin service install                        # installs the binary and tools/ next to it
+```
+
+The macOS archives are not signed or notarized, so Gatekeeper blocks a
+`./fridolin` from an archive your browser downloaded: download with `curl -LO`,
+or run `xattr -d com.apple.quarantine fridolin` after unpacking. The Linux
+archives are built on Ubuntu 22.04 and need its glibc (2.35) or newer: Ubuntu
+22.04, Debian 12 and later run them; on an older system, build from source.
+
+`scripts/build-release.sh` builds the same archive locally. A maintainer
+releases by pushing a tag: `git tag v1.2.3 && git push origin v1.2.3`.
 
 ---
 
@@ -380,10 +453,11 @@ What the bridge does about it:
   unless `inherit_claude_user_config` is on. Files that run outside the
   sandbox — Claude Code's settings and hooks (and the `CLAUDE.md` files
   above brain folders), its auto-memory, `~/Library/LaunchAgents`, shell
-  startup files, the bridge's own binary and checkout, the Claude CLI and
-  the other tools the bridge runs — are never writable. Add your own paths
-  under `sandbox.deny_paths`. When the sandbox is on but cannot be set up,
-  the brain refuses the message with an error instead of running without it.
+  startup files, the bridge's own binary, install folder and checkout, the
+  Claude CLI and the other tools the bridge runs — are never writable. Add
+  your own paths under `sandbox.deny_paths`. When the sandbox is on but
+  cannot be set up, the brain refuses the message with an error instead of
+  running without it.
 - **An explicit environment.** Brains are handed only the variables of the
   bridge's environment they need to run, such as the Claude CLI's login,
   not every key in the service file or the shell that started it. That is
@@ -420,7 +494,13 @@ What it does not do:
   or your own) to start a program outside the sandbox. See
   [what the sandbox does not cover yet](docs/CONFIGURATION.md#what-the-sandbox-does-not-cover-yet).
 - On Linux there is no sandbox layer at all (the bridge refuses to start with
-  `sandbox.enabled` on). Run the bridge as a dedicated user.
+  `sandbox.enabled` on). Run the bridge as a dedicated user: create one
+  (`sudo useradd -m fridolin`), let its services run without a login
+  (`sudo loginctl enable-linger fridolin`), then log in as it (over SSH, or
+  `sudo machinectl shell fridolin@`; `sudo -u` gives `systemctl --user` no
+  session) and run `./setup.sh` there. The unit sets `NoNewPrivileges=yes`,
+  so nothing a brain starts can gain privileges through `sudo` or another
+  setuid program.
 - Every file sent to the bridge lands in your data directory, and the assistant
   reads it.
 
@@ -537,11 +617,11 @@ tests, and a smoke test that starts a race-enabled build in dev mode on a
 scratch config (`make help` lists every target). staticcheck and actionlint
 run through `go run` at pinned versions; ruff comes from
 `pip install -r tools/requirements-dev.txt`, shellcheck from your package
-manager. `make check` builds into a temp dir and leaves `./fridolin` alone:
-the service `setup.sh` installs runs that file from the checkout and starts
-whatever is there on its next restart. `make build` writes it, and
-`make install` also copies it to `~/.local/bin` (set `PREFIX` or `BINDIR` to
-change that).
+manager. `make check` builds into a temp dir. `make build` writes
+`bin/fridolin`, and `make install` also copies it to `~/.local/bin` (set
+`PREFIX` or `BINDIR` to change that) to run by hand. Neither changes the
+service, which runs its own copy in `~/.local/lib/fridolin/`: `./setup.sh`
+installs one.
 
 CI also installs the site's npm packages and runs its own tests
 (`cd site && npm install && npm test`; [docs/SITE.md](docs/SITE.md));

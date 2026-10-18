@@ -23,8 +23,12 @@ Usage:
   fridolin open              open the dashboard in your browser
   fridolin check [--route JID ...]
                                            validate the configuration and show routing
-  fridolin init [--claude-path PATH]
+  fridolin init [--claude-path PATH] [--data-dir DIR]
                                            write a starter config (if there is none)
+  fridolin service install|rollback|restart|status|uninstall
+                                           run the bridge in the background (launchd or
+                                           systemd) from a copy outside the checkout;
+                                           fridolin service --help for more
   fridolin version
 
 Common flags:
@@ -34,6 +38,8 @@ Common flags:
 Run flags:
   --no-whatsapp     dev mode: dashboard and brains without a WhatsApp connection
   --open            open the dashboard once the bridge is up
+  --log-file PATH   the file stderr goes to, kept under 10 MiB (PATH.1 holds the
+                    one before); the launchd agent passes it
 `
 
 func main() {
@@ -54,6 +60,8 @@ func main() {
 		initCmd(args)
 	case "mcp-site":
 		mcpSiteCmd()
+	case "service":
+		serviceCmd(args)
 	case "version":
 		fmt.Println(bridgeVersion())
 	case "help", "-h", "--help":
@@ -104,15 +112,19 @@ func starterConfig() *Config {
 }
 
 func ensureConfigFile(path string) error {
-	return writeStarterConfig(path, "")
+	return writeStarterConfig(path, "", "")
 }
 
-func writeStarterConfig(path, claudePath string) error {
+// writeStarterConfig writes the starter config to path unless there is a
+// file there. dataDir is written into it when set: a data folder given only
+// in the environment of setup.sh would not reach the service.
+func writeStarterConfig(path, claudePath, dataDir string) error {
 	if _, err := os.Stat(path); err == nil || !os.IsNotExist(err) {
 		return err
 	}
 	cfg := starterConfig()
 	cfg.ClaudePath = claudePath
+	cfg.DataDir = dataDir
 	data, err := json.MarshalIndent(cfg, "", "  ")
 	if err != nil {
 		return err
@@ -127,6 +139,7 @@ func runCmd(args []string) {
 	noWA := fs.Bool("no-whatsapp", false, "dev mode: run without connecting to WhatsApp")
 	dashOnly := fs.Bool("dashboard-only", false, "alias for --no-whatsapp")
 	openDash := fs.Bool("open", false, "open the dashboard in the browser once started")
+	logFile := fs.String("log-file", "", "the file stderr goes to, rotated at 10 MiB (the launchd agent passes it)")
 	legacyCheck := fs.Bool("check", false, "validate the configuration and exit (same as `check`)")
 	_ = fs.Parse(args)
 
@@ -135,7 +148,20 @@ func runCmd(args []string) {
 		return
 	}
 
-	ring, path := runLog(os.Stderr, *cfgPath)
+	// Under launchd stderr is a file, which --log-file keeps small.
+	var console io.Writer = os.Stderr
+	var logErr error
+	if *logFile != "" {
+		var lf *rotatingLog
+		if lf, logErr = openRotatingLog(*logFile, int(os.Stderr.Fd()), maxLogBytes); logErr == nil {
+			console = lf
+		}
+	}
+	ring, path := runLog(console, *cfgPath)
+	if logErr != nil {
+		// Once the log reaches the dashboard too.
+		log.Printf("%v; logging to stderr without rotating it", logErr)
+	}
 	if err := ensureConfigFile(path); err != nil {
 		log.Fatalf("creating config: %v", err)
 	}
@@ -151,6 +177,7 @@ func runCmd(args []string) {
 	if err != nil {
 		log.Fatalf("creating bridge: %v", err)
 	}
+	go logClaudeCLI(cfg.ClaudePath, cfg.ChildEnvPassthrough)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -180,13 +207,16 @@ func runCmd(args []string) {
 	bridge.Stop()
 }
 
-// runLog sends the log to console and to a ring the dashboard shows, then
-// picks the config file. In that order: a warning configPath logs, such as
-// the one about CONFIG_FILE, must reach the dashboard's log too, the only
-// one many people read.
+// runLog sends the log to console and to a ring the dashboard shows, logs
+// the version, then picks the config file. In that order: a warning
+// configPath logs, such as the one about CONFIG_FILE, must reach the
+// dashboard's log too, the only one many people read, and the version line
+// comes first even when the bridge then refuses to start (no config, one
+// that does not load, another bridge on the data dir).
 func runLog(console io.Writer, configFlag string) (*LogRing, string) {
 	ring := NewLogRing(2000)
 	log.SetOutput(io.MultiWriter(console, ring))
+	log.Printf("Starting %s", versionLine())
 	return ring, configPath(configFlag)
 }
 
@@ -194,13 +224,14 @@ func initCmd(args []string) {
 	fs := flag.NewFlagSet("init", flag.ExitOnError)
 	cfgPath := fs.String("config", "", configFlagHelp)
 	claudePath := fs.String("claude-path", "", "path to the Claude Code CLI")
+	dataDir := fs.String("data-dir", "", "data folder to write into the config (default ~/.fridolin)")
 	_ = fs.Parse(args)
 	path := configPath(*cfgPath)
 	if _, err := os.Stat(path); err == nil {
 		fmt.Printf("%s already exists — leaving it alone.\n", path)
 		return
 	}
-	if err := writeStarterConfig(path, *claudePath); err != nil {
+	if err := writeStarterConfig(path, *claudePath, *dataDir); err != nil {
 		log.Fatalf("writing %s: %v", path, err)
 	}
 	if _, err := LoadConfig(path); err != nil {
@@ -264,7 +295,7 @@ func checkCmd(args []string) {
 	}
 
 	fmt.Printf("Config OK: %s\n", path)
-	fmt.Printf("  claude:    %s\n", cfg.ClaudePath)
+	fmt.Printf("  claude:    %s\n", claudeSummary(cfg.ClaudePath, cfg.ChildEnvPassthrough))
 	fmt.Printf("  data dir:  %s\n", cfg.DataDir)
 	fmt.Printf("  dashboard: http://%s/\n", cfg.HTTPListen)
 	fmt.Printf("  DM allow:  %s\n", dmAllowSummary(cfg))
@@ -313,6 +344,23 @@ func checkCmd(args []string) {
 			fmt.Print(profile)
 		}
 	}
+}
+
+// claudeSummary is the CLI brains run and its version, with a warning when
+// it is missing or older than the release the bridge was tested with.
+func claudeSummary(path string, passthrough []string) string {
+	st := claudeInfo(path, passthrough)
+	switch {
+	case !st.Found:
+		return path + " — not found, so brains cannot run"
+	case st.Version == "":
+		return st.Path + " (`--version` gave no answer)"
+	}
+	s := st.Path + " (" + st.Version + ")"
+	if claudeVersionWarning(st) != "" {
+		s += " — older than " + testedClaudeVersion + ", the oldest release tested; update it (claude update)"
+	}
+	return s
 }
 
 // dmAllowSummary says who may DM the bridge. A bare empty list would read

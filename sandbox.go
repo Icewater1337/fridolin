@@ -162,7 +162,8 @@ var defaultDenySubpaths = []string{
 	// under both names the project has had.
 	".config/fridolin",
 	".config/whatsapp-claude-bridge",
-	// The bridge's own logs (setup.sh), which name every chat.
+	// The bridge's own logs (the launchd agent's, see service.go), which
+	// name every chat.
 	"Library/Logs/fridolin",
 	"Library/Logs/whatsapp-claude-bridge",
 	"Documents",
@@ -348,11 +349,15 @@ func (sp *SandboxProfiler) Profile(brainID string) (string, error) {
 	// launchd runs the bridge outside any sandbox, and the bridge runs its
 	// helpers unsandboxed too, so a brain that replaced one of them would
 	// run code outside its sandbox the next time it starts.
-	b.WriteString(";; The bridge, its checkout and the programs it runs: never writable\n")
+	b.WriteString(";; The bridge, its tools, its checkout and the programs it runs: never writable\n")
 	if sp.bridgeExe != "" {
 		b.deny("file-write*", "literal", sp.bridgeExe)
-		if repo := checkoutOf(sp.bridgeExe); repo != "" {
-			b.deny("file-write*", "subpath", repo)
+		l := layoutOf(sp.bridgeExe)
+		if l.Dir != "" {
+			b.deny("file-write*", "subpath", l.Dir)
+		}
+		if l.Source != "" && l.Source != l.Dir {
+			b.deny("file-write*", "subpath", l.Source)
 		}
 	}
 	// Only those under HOME for now: a later change makes writes

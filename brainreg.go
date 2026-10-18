@@ -168,8 +168,11 @@ func CheckBrainPath(path string, cfg *Config, otherDirs []string) (abs string, p
 			problems = append(problems, "this folder contains another brain ("+o+")")
 		}
 	}
-	if exe, err := os.Executable(); err == nil && isWithin(abs, canonicalDir(filepath.Dir(exe))) {
+	switch l := ownLayout(); {
+	case l.Source != "" && isWithin(abs, canonicalDir(l.Source)):
 		warnings = append(warnings, "this folder is inside the bridge's source checkout — keep brain data out of the git repo")
+	case l.Dir != "" && isWithin(abs, canonicalDir(l.Dir)):
+		warnings = append(warnings, "this folder is inside the folder the bridge is installed in — keep brain data out of it")
 	}
 	for _, sub := range []string{"Documents", "Desktop", "Downloads"} {
 		if isWithin(abs, filepath.Join(canonicalDir(home), sub)) {
@@ -298,36 +301,14 @@ instead of raw numbers in the chat history it gives the brain.
 | --------------- | ------ | ----- |
 `
 
-// starterPrompt fills the example brain prompt for a new brain.
+// starterPrompt fills the example brain prompt for a new brain. It names
+// the tools by $FRIDOLIN_TOOLS_DIR, which every run sets, so the prompt
+// keeps working when the bridge is installed somewhere else.
 func starterPrompt(m *BrainManifest) string {
 	tpl := examplePromptTemplate()
-	repo := bridgeRepoDir()
 	r := strings.NewReplacer(
 		"{{BRAIN_NAME}}", m.Name,
-		"<bridge-repo>", repo,
 		"{{CREATED}}", time.Now().Format("2006-01-02"),
 	)
 	return r.Replace(tpl)
-}
-
-// bridgeRepoDir guesses where the bridge's tools/ live: next to the binary
-// when it was built in the checkout.
-func bridgeRepoDir() string {
-	exe, err := os.Executable()
-	if err != nil {
-		return "<bridge-repo>"
-	}
-	if dir := checkoutOf(exe); dir != "" {
-		return dir
-	}
-	return "<bridge-repo>"
-}
-
-// checkoutOf is the source checkout the binary exe was built in, or "".
-func checkoutOf(exe string) string {
-	dir := filepath.Dir(exe)
-	if st, err := os.Stat(filepath.Join(dir, "tools")); err == nil && st.IsDir() {
-		return dir
-	}
-	return ""
 }

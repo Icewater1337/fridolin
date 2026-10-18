@@ -136,36 +136,6 @@ type sandboxStatus struct {
 	Supported bool `json:"supported"`
 }
 
-var (
-	claudeVersionMu    sync.Mutex
-	claudeVersionCache = map[string]claudeStatus{}
-)
-
-// claudeInfo finds the CLI and its version, cached per path. It runs the CLI
-// with a brain's environment: a claude_path wrapper may run what a brain
-// can change.
-func claudeInfo(path string, passthrough []string) claudeStatus {
-	claudeVersionMu.Lock()
-	defer claudeVersionMu.Unlock()
-	if c, ok := claudeVersionCache[path]; ok {
-		return c
-	}
-	st := claudeStatus{Path: path}
-	if p, err := exec.LookPath(path); err == nil {
-		st.Found, st.Path = true, p
-		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		cmd := exec.CommandContext(ctx, p, "--version")
-		cmd.Env = childEnv(claudeChild, passthrough)
-		out, err := cmd.Output()
-		cancel()
-		if err == nil {
-			st.Version = strings.TrimSpace(string(out))
-		}
-	}
-	claudeVersionCache[path] = st
-	return st
-}
-
 func (b *Bridge) apiStatus(w http.ResponseWriter, r *http.Request) {
 	cfg := b.cfgs.Get()
 	wa := b.wa.State()
@@ -202,6 +172,9 @@ func (b *Bridge) apiStatus(w http.ResponseWriter, r *http.Request) {
 	}
 	if cfg.DangerouslySkipPermissions && !cfg.Sandbox.Enabled && runtime.GOOS == "darwin" {
 		resp.Warnings = append(resp.Warnings, "Brains run with all permissions and the sandbox is off. Turn the sandbox on under Settings → Sandbox.")
+	}
+	if w := claudeVersionWarning(resp.Claude); w != "" {
+		resp.Warnings = append(resp.Warnings, w)
 	}
 	if cfg.InheritClaudeUserConfig {
 		// Set in config.json only, so the dashboard shows it nowhere else.

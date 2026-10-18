@@ -72,14 +72,15 @@ The chosen calendars are stored in the brain's `brain.json`:
 ```
 
 When the bridge runs a brain, it tells `tools/calendar_tool.py` which brain is
-running and which calendars it chose, so inside a brain:
+running and which calendars it chose, and `$FRIDOLIN_TOOLS_DIR` says where the
+tools are, so inside a brain:
 
 ```bash
-python3 <bridge-repo>/tools/calendar_tool.py calendars                 # what it may use
-python3 <bridge-repo>/tools/calendar_tool.py list --from 2026-01-05     # all chosen calendars
-python3 <bridge-repo>/tools/calendar_tool.py free --date 2026-01-06     # busy across all of them
-python3 <bridge-repo>/tools/calendar_tool.py create --title "Dentist" \
-    --start 2026-01-06T14:00:00 --end 2026-01-06T15:00:00               # into the default
+python3 "$FRIDOLIN_TOOLS_DIR/calendar_tool.py" calendars                 # what it may use
+python3 "$FRIDOLIN_TOOLS_DIR/calendar_tool.py" list --from 2026-01-05     # all chosen calendars
+python3 "$FRIDOLIN_TOOLS_DIR/calendar_tool.py" free --date 2026-01-06     # busy across all of them
+python3 "$FRIDOLIN_TOOLS_DIR/calendar_tool.py" create --title "Dentist" \
+    --start 2026-01-06T14:00:00 --end 2026-01-06T15:00:00                 # into the default
 ```
 
 `--calendar-id` selects one of the chosen calendars; others are refused.

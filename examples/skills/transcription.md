@@ -52,7 +52,7 @@ If the tool errors, read the error and fix the cause. Don't route around it.
 One command, whatever the format or length:
 
 ```bash
-python3 <bridge-repo>/tools/transcribe.py <file> --output-dir <work_dir>/transcripts
+python3 "$FRIDOLIN_TOOLS_DIR/transcribe.py" <file> --output-dir <work_dir>/transcripts
 ```
 
 Useful flags:
@@ -93,7 +93,7 @@ you'd be annoyed to have forgotten it in a month.
 Someone sends a voice note. You receive the file path in the message:
 
 ```bash
-python3 <bridge-repo>/tools/transcribe.py \
+python3 "$FRIDOLIN_TOOLS_DIR/transcribe.py" \
   ~/.fridolin/media/3EB0A1B2C3.ogg \
   --output-dir <work_dir>/transcripts \
   --language en
@@ -107,7 +107,7 @@ Transcription needs extra dependencies — they are not installed by default:
 
 ```bash
 # Local model: private, no API key, large download
-pip install -r <bridge-repo>/tools/requirements-transcription.txt
+pip install -r "$FRIDOLIN_TOOLS_DIR/requirements-transcription.txt"
 
 # Or the API: light, needs a key
 pip install groq && export GROQ_API_KEY=...
@@ -115,10 +115,10 @@ pip install groq && export GROQ_API_KEY=...
 
 `GROQ_API_KEY` must be set in the bridge's process environment and named in
 the bridge's config, `"child_env_passthrough": ["GROQ_API_KEY"]`, or brains
-do not get it; the bridge reads no `.env` file. Re-running `setup.sh`
-rewrites the launchd plist and the systemd unit, so keep the key where it
-survives that: see "Environment variables" in
-`<bridge-repo>/docs/CONFIGURATION.md`. The same goes for `HF_HOME` if you
+do not get it; the bridge reads no `.env` file. Each install rewrites the
+launchd plist and the systemd unit, so keep the key where it survives
+that: see "Environment variables" in
+Fridolin's `docs/CONFIGURATION.md`. The same goes for `HF_HOME` if you
 moved the local model's cache: otherwise a brain downloads the model again
 into the default cache.
 

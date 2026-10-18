@@ -5,23 +5,25 @@
 # here), govulncheck, CodeQL and the personal-data scan of the pushed
 # commits; make check does not.
 #
-#   make build        ./fridolin
+#   make build        bin/fridolin
 #   make check        what CI's build, lint and test jobs run
 #   make help         every target
 
 # The main package is at the repo root or in ./cmd/fridolin; build whichever
 # this checkout has.
 MAIN_PKG := $(if $(wildcard cmd/fridolin/*.go),./cmd/fridolin,.)
-BINARY   ?= fridolin
+BINARY   ?= bin/fridolin
 
 GO     ?= go
 PYTHON ?= python3
 NODE   ?= node
 
-# make install copies the binary here; the service setup.sh installs keeps
-# running ./fridolin from the checkout. build and install are the only
-# targets that write ./fridolin, which that service then starts on its next
-# restart (scripts/test-makefile.sh holds the other targets to that).
+# make install copies the binary here, to run it by hand. The service
+# setup.sh installs runs its own copy in ~/.local/lib/fridolin (`fridolin
+# service install`), which no target touches. Builds go to bin/, not
+# ./fridolin, which a service set up by an older setup.sh still starts on
+# its next restart; build and install are the only targets that write the
+# binary at all (scripts/test-makefile.sh holds the other targets to that).
 PREFIX ?= $(HOME)/.local
 BINDIR ?= $(PREFIX)/bin
 
@@ -51,7 +53,7 @@ FUZZTIME ?= 10s
 help: ## list the targets
 	@awk -F':.*## ' '/^[a-z-]+:.*## / { printf "  %-14s %s\n", $$1, $$2 }' $(MAKEFILE_LIST)
 
-build: ## build ./fridolin
+build: ## build bin/fridolin
 	$(GO) build -o $(BINARY) $(MAIN_PKG)
 
 install: build ## copy the binary to BINDIR (default ~/.local/bin)
@@ -111,8 +113,8 @@ test-sh: ## tests for the personal-data and action-pin checks and the Makefile
 	scripts/test-check-action-pins.sh
 	scripts/test-makefile.sh
 
-# A temp dir, not ./fridolin: a check must not replace the binary the
-# service runs. -race makes a data race at start or shutdown fail the run.
+# A temp dir, not the binary: a check must not replace a build in use.
+# -race makes a data race at start or shutdown fail the run.
 smoke: ## build with -race in a temp dir, start it in dev mode and stop it
 	@set -e; tmp="$$(mktemp -d)"; trap 'rm -rf "$$tmp"' EXIT; \
 	echo "$(GO) build -race -o $$tmp/fridolin $(MAIN_PKG)"; \
@@ -130,8 +132,8 @@ fuzz-short: ## run every fuzz target for FUZZTIME (default 10s)
 	  done; \
 	done
 
-# No build: smoke compiles the binary into a temp dir, and ./fridolin, which
-# the service runs, stays as it was.
+# No build: smoke compiles the binary into a temp dir, and bin/fridolin stays
+# as it was.
 check: fmt-check vet tidy-check race lint test-py test-web test-sh smoke ## what CI's build, lint and test jobs run
 
 clean: ## remove the binary

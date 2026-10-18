@@ -1,5 +1,5 @@
 {
-  "_comment": "You normally never edit this: the dashboard (./fridolin open) does. Every option: docs/CONFIGURATION.md",
+  "_comment": "You normally never edit this: the dashboard (fridolin open) does. Every option: docs/CONFIGURATION.md",
 
   "allowed_numbers": ["15551234567"],
   "allow_any_dm": false,

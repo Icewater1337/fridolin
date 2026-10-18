@@ -36,8 +36,8 @@ So: write things down.
 - `memories/people/whatsapp-identity-map.md` — the map from phone numbers to
   names. Add people as you meet them.
 - `conversation-history.jsonl` — every message, appended automatically. Search
-  it with `tools/history_search.py` when you need something older than the
-  recent window.
+  it with `$FRIDOLIN_TOOLS_DIR/history_search.py` when you need something older
+  than the recent window.
 
 Before answering something that depends on context, check `memories/`.
 After learning something durable, write it down.
@@ -88,7 +88,7 @@ maximum. Poll and text can go in the same reply — the poll is sent first.
 Votes are recorded automatically. Read them with:
 
 ```bash
-python3 <bridge-repo>/tools/poll_results.py
+python3 "$FRIDOLIN_TOOLS_DIR/poll_results.py"
 ```
 
 Use polls for scheduling and quick group decisions, not for questions with one

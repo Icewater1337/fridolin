@@ -54,8 +54,10 @@ func TestCheckShowsWhoMayDM(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			home := t.TempDir()
 			t.Setenv("HOME", home)
+			// check runs the CLI for its version: the fake, not one on PATH.
 			path := writeConfig(t, `{
 				"brain_mode": true,
+				"claude_path": "`+fakeClaudeEnv(t, 0)+`",
 				"data_dir": "`+home+`/data"`+brainDirsJSON(t,
 				brainFolder(t, home+"/main", BrainManifest{ID: "main", Routing: BrainRouting{HandlesDMs: true}}),
 			)+`,
@@ -355,5 +357,33 @@ func TestShellBridgeVariablesDoNotReachTests(t *testing.T) {
 	}
 	if !strings.Contains(string(out), "--- PASS: TestShellBridgeVariablesDoNotReachTests") {
 		t.Fatalf("the check did not run:\n%s", out)
+	}
+}
+
+func TestInitWritesTheDataDirItIsGiven(t *testing.T) {
+	// setup.sh takes DATA_DIR from its environment, which the service
+	// never sees: the folder must be in the config.
+	cases := []struct{ name, flag, want string }{
+		{"default", "", "/.fridolin"},
+		{"given", "/elsewhere/data", "/elsewhere/data"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			home := canonicalDir(t.TempDir())
+			t.Setenv("HOME", home)
+			path := filepath.Join(home, "cfg", "config.json")
+			args := []string{"--config", path}
+			if c.flag != "" {
+				args = append(args, "--data-dir", home+c.flag)
+			}
+			captureStdout(t, func() { initCmd(args) })
+			cfg, err := LoadConfig(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if cfg.DataDir != home+c.want {
+				t.Errorf("data_dir = %q, want %q", cfg.DataDir, home+c.want)
+			}
+		})
 	}
 }

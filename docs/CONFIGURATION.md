@@ -1,6 +1,6 @@
 # Configuration
 
-The dashboard edits all of this for you (`./fridolin open`).
+The dashboard edits all of this for you (`fridolin open`).
 This page is the reference behind it.
 
 The configuration is `~/.fridolin/config.json`, or wherever `--config` or
@@ -15,7 +15,7 @@ the bridge restarts or the setting is changed back.
 Validate at any time:
 
 ```bash
-./fridolin check
+fridolin check
 ```
 
 Paths may start with `~`, which expands to your home directory.
@@ -60,7 +60,7 @@ Older versions treated an unset value as `true`. A config that relied on that
 now refuses every DM: add the numbers, or set `"allow_any_dm": true` on
 purpose. While anyone may DM, the dashboard says so and the bridge logs a
 warning at startup and whenever an edit opens DMs to everyone.
-`./fridolin check` prints who may DM on its `DM allow:` line: the numbers,
+`fridolin check` prints who may DM on its `DM allow:` line: the numbers,
 `nobody` or `anyone`.
 
 ### `allowed_groups`
@@ -120,6 +120,12 @@ On macOS the desktop app keeps it at:
 That path contains a version number and changes when Claude updates. Either
 point `claude_path` at a stable `claude` on your PATH, or re-run `setup.sh`
 after an update.
+
+Brains need Claude Code 2.1.302 or newer, the oldest release the bridge was
+tested with: they rely on its flags and on the shape of its `stream-json`
+output. The bridge logs the CLI's path and version when it starts, and the
+log, `fridolin check` and the dashboard warn when it is older or missing. The
+CLI normally updates itself; `claude update` does it by hand.
 
 ### `model` and `brain_model`
 
@@ -527,13 +533,13 @@ for the paths listed above. A manipulated brain can therefore still:
   `~/.oh-my-zsh`, `~/.p10k.zsh`, or a `ZDOTDIR` like `~/.config/zsh`), the
   scripts and programs a `claude_path` wrapper script runs or sources
   (only the wrapper itself is protected, and the bridge runs it outside
-  the sandbox, with a brain's environment, for the dashboard's
-  `claude --version`), a new program in a
-  folder on your `PATH` that shadows another one (other than the names the
-  bridge runs, in folders under your home folder), and programs outside
-  your home folder such as `/opt/homebrew` (user-writable on Apple Silicon)
-  and `/usr/local`, including a `plaud`, `rclone` or `node` there that the
-  bridge would run next, since launchd's `PATH` lists them first
+  the sandbox, with a brain's environment, for `claude --version`), a new
+  program in a folder on your `PATH` that shadows another one (other than
+  the names the bridge runs, in folders under your home folder), and
+  programs outside your home folder such as `/opt/homebrew` (user-writable
+  on Apple Silicon) and `/usr/local`, including a `plaud`, `rclone` or
+  `node` there that the bridge would run next, since they are on the
+  service's `PATH`
 - leave files in its own folder that run or load when you work there
   yourself, outside the sandbox: git hooks and settings in `.git/`
   (`hooks/`, `core.fsmonitor`, `core.hooksPath`), a `.envrc` for direnv,
@@ -614,7 +620,12 @@ the owning brain's history, so the assistant knows what went out under its
 name. Text that is empty or only whitespace is refused with 400, since there
 would be nothing to send. Status, broadcast-list and channel JIDs
 (`…@broadcast`, `…@newsletter`) are refused with `400 {"error": …}`.
-`GET /health` returns `ok`. Both work without the dashboard token but refuse
+`GET /health` returns `ok` while the bridge runs, paired or not. `GET /ready`
+says whether `/send` can deliver: `200` once WhatsApp is connected (or in dev
+mode), `503` otherwise, both with
+`{"ready", "whatsapp", "version", "started_at"}`, where `whatsapp` is the
+connection state (`pairing`, `connecting`, `connected`, `logged-out`,
+`replaced`, …). None of these need the dashboard token, and all of them refuse
 requests sent by web pages.
 
 ### `ingest.enabled`
@@ -857,17 +868,24 @@ environment:
 - Keys a brain's tools need, such as `GROQ_API_KEY` for transcription,
   together with their names in `child_env_passthrough`.
 
-Re-running `setup.sh` rewrites the launchd plist and the systemd unit from the
-templates in [deploy/](../deploy/), which drops anything added to them. Keep
-these variables where it does not:
+Every `fridolin service install` (which `setup.sh` runs) rewrites the
+launchd agent or the systemd unit. Keep these variables where it does not
+drop them:
 
 - **Linux (systemd):** `systemctl --user edit fridolin` opens a drop-in that
-  `setup.sh` leaves alone. Add the keys under `[Service]`, one
+  the install leaves alone. Add the keys under `[Service]`, one
   `Environment=GROQ_API_KEY=...` line each, then run
-  `systemctl --user restart fridolin`.
-- **macOS (launchd):** there is no drop-in. Add the keys under
-  `EnvironmentVariables` in `~/Library/LaunchAgents/ai.fridolin.bridge.plist`,
-  reload the agent with `launchctl bootout gui/$(id -u)/ai.fridolin.bridge`
-  and `launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/ai.fridolin.bridge.plist`,
-  and add them again after every `setup.sh` run.
-- **Started by hand:** export them in the shell that runs `./fridolin`.
+  `fridolin service restart`.
+- **macOS (launchd):** add the keys under `EnvironmentVariables` in
+  `~/Library/LaunchAgents/ai.fridolin.bridge.plist` and run
+  `fridolin service restart`, which reloads the agent. Later installs keep
+  every variable there except `HOME` and `PATH`, which they set (and name
+  the ones they kept; `--dry-run` does not show their values). An agent
+  saved as a binary plist is converted with `plutil`; one that cannot be
+  read stops the install, which leaves it as it is. The file is readable
+  by you only.
+- **Started by hand:** export them in the shell that runs `fridolin`.
+
+The service's `PATH` is the one of the shell that ran the install, plus
+`~/.local/bin` and the usual system folders, so brains find the same `claude`,
+`uv`, `node` or `ffmpeg` you do. Install again after you change it.

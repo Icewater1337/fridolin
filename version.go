@@ -1,8 +1,14 @@
 package main
 
-import "runtime/debug"
+import (
+	"fmt"
+	"runtime"
+	"runtime/debug"
+)
 
-// version is set at build time with -ldflags "-X main.version=v1.2.3".
+// version is set at build time with -ldflags "-X main.version=v1.2.3":
+// setup.sh passes `git describe --tags --always --dirty`, release builds
+// the tag (scripts/build-release.sh).
 var version = "dev"
 
 // bridgeVersion returns the release version, or the git commit for a local build.
@@ -33,4 +39,10 @@ func bridgeVersion() string {
 		rev += "+dirty"
 	}
 	return "dev-" + rev
+}
+
+// versionLine names the build, the Go release and the platform, so a log
+// excerpt in a bug report says which binary wrote it.
+func versionLine() string {
+	return fmt.Sprintf("fridolin %s (%s, %s/%s)", bridgeVersion(), runtime.Version(), runtime.GOOS, runtime.GOARCH)
 }

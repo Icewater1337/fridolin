@@ -148,7 +148,7 @@ version, go through what it printed:
 - **warning: the prompt file is outside the brain folder**: the brain now
   reads `brain-prompt.md` in its folder, so copy the prompt file there.
 
-Then run `./fridolin check` with this version. It must load the config,
+Then run `fridolin check` with this version. It must load the config,
 and a brain whose folder was in `brain_dirs` already may now be listed
 twice, which it reports as two brains with the same id: remove one of the
 two entries from `brain_dirs` in `config.json`. Until you do, the
@@ -164,6 +164,18 @@ there would: `CLAUDE.md` and `CLAUDE.local.md`, the settings, skills,
 agents, commands and rules in `.claude/`, and the MCP servers in
 `.mcp.json`, except those its `.claude` settings turn off with
 `disabledMcpjsonServers`.
+
+Every run gets the bridge's environment plus a few variables of its own:
+`FRIDOLIN_TOOLS_DIR`, the folder with the bridge's Python helpers
+(`history_search.py`, `poll_results.py`, `transcribe.py`,
+`calendar_tool.py`), and the `BRIDGE_*` variables the calendar tool reads.
+The starter prompt and the example skills run the helpers as
+`python3 "$FRIDOLIN_TOOLS_DIR/<tool>.py"`, so they keep working wherever the
+bridge is installed. The bridge finds the helpers in `tools/` next to its
+binary, or in the checkout above `bin/` for a development build; without
+them the variable is not set. Prompts written by older versions name the
+checkout's `tools/` folder by its full path, which keeps working while the
+checkout is there.
 
 It does not load your own setup: not your user settings in
 `~/.claude/settings.json` (their hooks, plugins and permissions, so neither
@@ -216,7 +228,8 @@ Claude Code's own state, which a brain's run needs). It can read but not
 change the other files that run outside its sandbox: Claude Code's
 settings, hooks, skills and plugins (which your own sessions load), Claude
 Code's auto-memory, `~/Library/LaunchAgents`, your shell startup files, and
-the bridge's own binary and the tools it runs. It can still write most other
+the bridge's own binary, its helpers and source checkout, and the tools it
+runs. It can still write most other
 places your user can, including the Claude Code state all brains share;
 [the sandbox section](CONFIGURATION.md#what-the-sandbox-does-not-cover-yet)
 lists what that leaves open. Its own folder is always readable and
