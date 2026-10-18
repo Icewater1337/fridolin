@@ -28,6 +28,25 @@ func TestTriggerListJSONRoundTrip(t *testing.T) {
 	}
 }
 
+// First names the trigger in help texts ("send @claude …"): the first one
+// that has a text, or none.
+func TestFirstIsTheFirstTriggerWithAText(t *testing.T) {
+	cases := []struct {
+		tl   List
+		want string
+	}{
+		{nil, ""},
+		{List{{Text: ""}}, ""},
+		{List{{Text: ""}, {Text: "@c", Match: MatchStart}, {Text: "bot"}}, "@c"},
+		{FromStrings([]string{"hey bot", "@claude"}), "hey bot"},
+	}
+	for _, c := range cases {
+		if got := c.tl.First(); got != c.want {
+			t.Errorf("%v.First() = %q, want %q", c.tl, got, c.want)
+		}
+	}
+}
+
 func TestTriggerStartMatch(t *testing.T) {
 	tl := List{{Text: "@c", Match: MatchStart}, {Text: "©", Match: MatchStart}}
 	cases := []struct {
