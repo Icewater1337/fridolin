@@ -195,6 +195,8 @@ func TestGoldenConfigWrites(t *testing.T) {
 	if err := json.Unmarshal(cfg.Config, &file); err != nil {
 		t.Fatal(err)
 	}
+	// with is the config GET returned with changes; a key changed to nil
+	// is left out.
 	with := func(changes map[string]any) map[string]any {
 		out := map[string]any{}
 		for k, v := range file {
@@ -202,6 +204,9 @@ func TestGoldenConfigWrites(t *testing.T) {
 		}
 		for k, v := range changes {
 			out[k] = v
+			if v == nil {
+				delete(out, k)
+			}
 		}
 		return out
 	}
@@ -227,8 +232,14 @@ func TestGoldenConfigWrites(t *testing.T) {
 		}},
 		{"put-config-not-json", "PUT", "/api/config", func() any { return map[string]any{"etag": h.Config().ETag, "config": "nope"} }},
 		{"put-config-no-etag", "PUT", "/api/config", func() any { return map[string]any{"config": with(nil)} }},
+		// From a tab opened before the upgrade, so without a version.
 		{"put-config-inline-brains", "PUT", "/api/config", func() any {
-			return map[string]any{"etag": h.Config().ETag, "config": with(map[string]any{"brains": []map[string]string{{"id": "x"}}})}
+			return map[string]any{"etag": h.Config().ETag, "config": with(map[string]any{"version": nil, "brains": []map[string]string{{"id": "x"}}})}
+		}},
+		// From a newer bridge's dashboard, which this one would save without
+		// the settings it does not know.
+		{"put-config-newer-version", "PUT", "/api/config", func() any {
+			return map[string]any{"etag": h.Config().ETag, "config": with(map[string]any{"version": currentConfigVersion + 1})}
 		}},
 		{"put-brain-unknown", "PUT", "/api/brains/nope", func() any { return map[string]any{"manifest": map[string]string{"id": "nope", "name": "Nope"}} }},
 		{"put-brain-no-name", "PUT", "/api/brains/main", func() any { return map[string]any{"manifest": map[string]string{"id": "main"}} }},

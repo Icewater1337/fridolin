@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -16,6 +17,11 @@ import (
 // Config holds all configuration for the bridge.
 type Config struct {
 	Comment string `json:"_comment,omitempty"`
+
+	// Version is the version of config.json the file was written in, see
+	// currentConfigVersion. A file without it is version 1. Every save
+	// writes currentConfigVersion.
+	Version int `json:"version,omitempty"`
 
 	// AllowedNumbers lists phone numbers allowed to DM the bridge: digits
 	// with the country code. The running config has each in that form,
@@ -188,19 +194,95 @@ func (*retiredBrainMode) UnmarshalJSON(data []byte) error {
 // write-back drops no setting.
 const migrateBuild = "2592376"
 
-// retiredKeys are the top-level keys older versions wrote that this one has
-// no setting for. A config.json with one still loads: each is logged once,
-// saying what became of it, and the next save leaves it out, since saves
-// write the Config, which has no field for it. brain_mode is not one of
-// them: saves keep writing it, see retiredBrainMode.
+// currentConfigVersion is the version of config.json this bridge reads
+// and writes, in its "version" key. A file without the key is version 1,
+// as every config.json was before the key existed. The version goes up
+// when a key is renamed or removed or comes to mean something else, so
+// that a file written before needs a migration to keep its meaning; a key
+// that is only added needs none, as an older file simply lacks it.
+const currentConfigVersion = 2
+
+// configMigrations take config.json from one version to the next: the one
+// at index i reads version i+1 and makes it version i+2. Each works on the
+// file's top-level keys before they are decoded and returns a line for the
+// log about each key it changed. None writes the file: the next save
+// writes what it made, as currentConfigVersion.
+//
+// compat: a version 1 config.json, from before the key existed, is read
+// with its retired keys folded in (foldRetiredKeys). Unlike the other
+// compat: shims, migrations stay for good, so that a config.json of any
+// earlier version loads.
+var configMigrations = []func(obj map[string]json.RawMessage) ([]string, error){
+	// Version 2 is the file after classic mode and inline brains were
+	// removed: the keys only they read are retired.
+	foldRetiredKeys,
+}
+
+// errConfigTooNew means a config.json, or a dashboard save, is of a version
+// newer than this bridge reads.
+var errConfigTooNew = errors.New("a newer Fridolin wrote it, and this one could drop the settings it does not know")
+
+// migrateConfig brings obj, the top-level keys of a config.json, to
+// currentConfigVersion and returns the version it was written in and the
+// lines the migrations it applied logged. A version newer than this
+// bridge reads is refused: the file may have settings this one does not
+// know, which a save would drop, or keys that mean something else now.
+func migrateConfig(obj map[string]json.RawMessage) (from int, notes []string, err error) {
+	from = 1
+	if raw, ok := obj["version"]; ok {
+		if err := json.Unmarshal(raw, &from); err != nil || from < 1 {
+			return 0, nil, fmt.Errorf("version %s: must be a whole number from 1 to %d", raw, currentConfigVersion)
+		}
+	}
+	if from > currentConfigVersion {
+		return from, nil, fmt.Errorf("version %d is newer than the version %d this build of Fridolin reads: %w", from, currentConfigVersion, errConfigTooNew)
+	}
+	for v := from; v < currentConfigVersion; v++ {
+		n, err := configMigrations[v-1](obj)
+		if err != nil {
+			return from, nil, err
+		}
+		notes = append(notes, n...)
+	}
+	obj["version"] = json.RawMessage(strconv.Itoa(currentConfigVersion))
+	return from, notes, nil
+}
+
+// migrateConfigJSON returns data, a config.json or a whole configuration
+// the dashboard saves, migrated to currentConfigVersion (see
+// migrateConfig), with the lines to log. Anything but a JSON object comes
+// back as it is, for the decoder to refuse; null is an empty file.
+func migrateConfigJSON(data []byte) (migrated []byte, notes []string, err error) {
+	var obj map[string]json.RawMessage
+	if json.Unmarshal(data, &obj) != nil {
+		return data, nil, nil
+	}
+	if obj == nil {
+		obj = map[string]json.RawMessage{}
+	}
+	if _, notes, err = migrateConfig(obj); err != nil {
+		return nil, nil, err
+	}
+	if migrated, err = json.Marshal(obj); err != nil {
+		return nil, nil, err
+	}
+	return migrated, notes, nil
+}
+
+// retiredKeys are the top-level keys version 1 had that version 2 has no
+// setting for. Migrating a version 1 file folds each into what it still
+// means and takes it out, logging what became of it, so the next save
+// leaves it out. In a version 2 file they are unknown keys. brain_mode is
+// not one of them: saves keep writing it, see retiredBrainMode.
 var retiredKeys = []struct {
 	name string
-	// fold carries over what the value still means into the file layer and
-	// says what became of it, or refuses a value this version cannot honour.
-	fold func(file *Config, value json.RawMessage) (string, error)
+	// fold carries over what the value still means into the other keys of
+	// obj and says what became of it, or refuses a value this version
+	// cannot honour.
+	fold func(obj map[string]json.RawMessage, value json.RawMessage) (string, error)
 }{
 	{"model", foldModel},
-	{"work_dir", func(*Config, json.RawMessage) (string, error) {
+	{"work_dir", func(map[string]json.RawMessage, json.RawMessage) (string, error) {
 		return "it named the folder classic mode ran in, and brains run in their own", nil
 	}},
 	{"brains", foldInlineBrains},
@@ -209,19 +291,24 @@ var retiredKeys = []struct {
 // foldModel takes over model, the classic-mode model that brains fell back
 // to while brain_model was empty, so those brains keep the model they ran
 // with.
-func foldModel(file *Config, value json.RawMessage) (string, error) {
-	var model string
+func foldModel(obj map[string]json.RawMessage, value json.RawMessage) (string, error) {
+	var model, brainModel string
 	if err := json.Unmarshal(value, &model); err != nil {
 		return "", fmt.Errorf("model: %w", err)
+	}
+	if raw, ok := obj["brain_model"]; ok {
+		if err := json.Unmarshal(raw, &brainModel); err != nil {
+			return "", fmt.Errorf("brain_model: %w", err)
+		}
 	}
 	switch {
 	case model == "":
 		return "it was empty", nil
-	case file.BrainModel == "":
-		file.BrainModel = model
+	case brainModel == "":
+		obj["brain_model"], _ = json.Marshal(model)
 		return fmt.Sprintf("brain_model is now %q, the model brains fell back to", model), nil
 	}
-	return fmt.Sprintf("brains use brain_model %q, so %q went unused", file.BrainModel, model), nil
+	return fmt.Sprintf("brains use brain_model %q, so %q went unused", brainModel, model), nil
 }
 
 // foldInlineBrains checks brains, where brains were configured before they
@@ -229,7 +316,7 @@ func foldModel(file *Config, value json.RawMessage) (string, error) {
 // `fridolin migrate`. A list with brains in it is refused: running without
 // them would leave their chats unanswered, or answered by whichever brain
 // is the default. An empty list or null loads.
-func foldInlineBrains(_ *Config, value json.RawMessage) (string, error) {
+func foldInlineBrains(_ map[string]json.RawMessage, value json.RawMessage) (string, error) {
 	var brains []json.RawMessage
 	if err := json.Unmarshal(value, &brains); err != nil {
 		return "", fmt.Errorf("brains: %w", err)
@@ -240,23 +327,21 @@ func foldInlineBrains(_ *Config, value json.RawMessage) (string, error) {
 	return "it listed no brains, and brains live in their folders (brain_dirs)", nil
 }
 
-// foldRetiredKeys applies retiredKeys to file, which was decoded from data,
-// and returns a note for each retired key data has, in table order.
-func foldRetiredKeys(data []byte, file *Config) ([]string, error) {
-	var m map[string]json.RawMessage
-	if err := json.Unmarshal(data, &m); err != nil {
-		return nil, err
-	}
+// foldRetiredKeys is the migration from version 1 to 2: it applies
+// retiredKeys to obj, takes them out of it, and returns a line for each
+// retired key obj had, in table order.
+func foldRetiredKeys(obj map[string]json.RawMessage) ([]string, error) {
 	var notes []string
 	for _, rk := range retiredKeys {
-		value, ok := m[rk.name]
+		value, ok := obj[rk.name]
 		if !ok {
 			continue
 		}
-		what, err := rk.fold(file, value)
+		what, err := rk.fold(obj, value)
 		if err != nil {
 			return nil, err
 		}
+		delete(obj, rk.name)
 		notes = append(notes, fmt.Sprintf("%q is retired and is dropped the next time the dashboard saves: %s", rk.name, what))
 	}
 	return notes, nil

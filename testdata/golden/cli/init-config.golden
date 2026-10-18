@@ -34,5 +34,6 @@
   "triggers": [
     "@claude"
   ],
+  "version": 2,
   "viewer": false
 }

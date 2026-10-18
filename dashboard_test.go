@@ -1652,24 +1652,41 @@ func TestPutConfigRefusesClassicMode(t *testing.T) {
 
 // Inline brains were removed. A dashboard save that brings some back is
 // refused like a config.json that still has them, and the config the
-// dashboard loads has no brains key to send back.
+// dashboard loads has no brains key to send back. From a tab opened before
+// the upgrade, which sends no version, the save is migrated like a version
+// 1 file and says why; in a version 2 save, brains is an unknown key.
 func TestPutConfigRefusesInlineBrains(t *testing.T) {
-	h := newHarness(t, "")
-	got := h.Config()
-	var config map[string]any
-	if err := json.Unmarshal(got.Config, &config); err != nil {
-		t.Fatal(err)
-	}
-	if _, ok := config["brains"]; ok {
-		t.Errorf("GET /api/config has a brains key: %v", config["brains"])
-	}
-	config["brains"] = []map[string]any{{"name": "a", "work_dir": "~/a"}}
-	w := h.Do("PUT", "/api/config", map[string]any{"etag": got.ETag, "config": config})
-	if w.Code != http.StatusBadRequest || !strings.Contains(w.Body.String(), "no longer runs") {
-		t.Errorf("put inline brains: %d %s, want 400 saying they no longer run", w.Code, w.Body.String())
-	}
-	if h.Config().ETag != got.ETag {
-		t.Error("the refused request changed config.json")
+	for _, tc := range []struct {
+		name    string
+		version any // the save's version, nil for none
+		want    string
+	}{
+		{"from a tab opened before the upgrade", nil, "no longer runs"},
+		{"version 2", 2, `unknown field \"brains\"`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			h := newHarness(t, "")
+			got := h.Config()
+			var config map[string]any
+			if err := json.Unmarshal(got.Config, &config); err != nil {
+				t.Fatal(err)
+			}
+			if _, ok := config["brains"]; ok {
+				t.Errorf("GET /api/config has a brains key: %v", config["brains"])
+			}
+			delete(config, "version")
+			if tc.version != nil {
+				config["version"] = tc.version
+			}
+			config["brains"] = []map[string]any{{"name": "a", "work_dir": "~/a"}}
+			w := h.Do("PUT", "/api/config", map[string]any{"etag": got.ETag, "config": config})
+			if w.Code != http.StatusBadRequest || !strings.Contains(w.Body.String(), tc.want) {
+				t.Errorf("put inline brains: %d %s, want 400 saying %s", w.Code, w.Body.String(), tc.want)
+			}
+			if h.Config().ETag != got.ETag {
+				t.Error("the refused request changed config.json")
+			}
+		})
 	}
 }
 
@@ -1773,8 +1790,10 @@ func TestConfigPageFoldsTheRetiredModel(t *testing.T) {
 		t.Errorf("GET /api/config: brain_model %v, want sonnet", config["brain_model"])
 	}
 
-	// An old tab: brain_model as an older bridge served it, and model.
+	// An old tab: brain_model as an older bridge served it, and model,
+	// with no version, which older bridges did not have.
 	config["brain_model"], config["model"] = "", "haiku"
+	delete(config, "version")
 	if w := h.Do("PUT", "/api/config", map[string]any{"etag": got.ETag, "config": config}); w.Code != http.StatusOK {
 		t.Fatalf("put: %d %s", w.Code, w.Body.String())
 	}

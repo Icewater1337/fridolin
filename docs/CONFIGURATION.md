@@ -36,6 +36,28 @@ Paths may start with `~`, which expands to your home directory.
 
 ---
 
+## `version`
+
+`config.json` says which version of the file it is: `"version": 2` today.
+The bridge writes it on every save, and you never set it. A file without
+it is version 1, as every config was before the key existed. The bridge
+reads one as version 2, folding in the [retired keys](#retired-keys) of
+version 1, and its next save writes it as version 2; starting does not
+rewrite the file. The version goes up only when a key is renamed, removed
+or comes to mean something else, never for a new key, which an older file
+simply lacks.
+
+A bridge refuses to start with a `config.json` of a newer version than it
+reads, and the dashboard refuses to save one, since a save would drop the
+settings it does not know. That happens when you go back to an older
+build (`fridolin service rollback`) after a newer one has saved the
+config: run the newer one again, or put back a copy of `config.json` from
+before it (each save keeps the file before it as `config.json.bak`). A
+build from before the key exists reads a version 2 file as it is, logs
+`version` as an unknown setting and leaves it out when it saves.
+
+---
+
 ## Access control
 
 ### `allowed_numbers`
@@ -487,9 +509,10 @@ start while that list has a brain in it; an empty list is a
 
 ### Retired keys
 
-Older versions wrote a few top-level keys this one has no setting for. A
-config that still has them loads; the log says once per start what became
-of each, and the next dashboard save leaves them out:
+Version 1 configs, from older versions, may have a few top-level keys
+that version 2 has no setting for. A version 1 config that still has them
+loads; the log says once per start what became of each, and the next
+dashboard save, which writes version 2, leaves them out:
 
 | Key | What became of it |
 |---|---|
@@ -497,8 +520,8 @@ of each, and the next dashboard save leaves them out:
 | `work_dir` | The folder classic mode ran in. Brains run in their own folders. |
 | `brains` | Inline brains, when the list is empty or `null`. One that lists brains is refused, see [Inline brains](#inline-brains). |
 
-Any other key the bridge does not know is logged as an unknown setting and
-dropped the same way.
+In a version 2 config they are unknown keys. Any key the bridge does not
+know is logged as an unknown setting and dropped the same way.
 
 ### `brain_mode`
 

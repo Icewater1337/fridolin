@@ -1,5 +1,6 @@
 {
   "_comment": "A config with every setting this version reads, for the tests. Synthetic values only.",
+  "version": 2,
   "allowed_numbers": [
     "15551234567",
     "15559876543"

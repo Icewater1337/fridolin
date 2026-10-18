@@ -41,6 +41,7 @@ Content-Type: application/json
     "script_api": {},
     "startup_checks": {},
     "triggers": [],
+    "version": 2,
     "viewer": false
   },
   "effective": {
@@ -106,6 +107,7 @@ Content-Type: application/json
     "triggers": [
       "@claude"
     ],
+    "version": 2,
     "viewer": false
   },
   "etag": "<ETAG>",

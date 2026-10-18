@@ -136,7 +136,10 @@ the version before: `fridolin service rollback`.
   to change one rewrites it with `go test -run 'TestName' -update .`, and
   the pull request says why. A new setting also goes into
   `testdata/config-v1.json`, which sets every one, and a new route into
-  `routeInventory` (`routes_test.go`) with the guards it needs. End-to-end
+  `routeInventory` (`routes_test.go`) with the guards it needs. A setting
+  renamed or removed, or one that comes to mean something else, raises
+  `currentConfigVersion` and adds the step to `configMigrations`
+  (`config.go`), so that a file written before keeps its meaning. End-to-end
   tests drive a dev-mode bridge through what it offers from outside with
   `newHarness` (`harness_test.go`) instead of reaching into the `Bridge`, so
   they keep working while code moves into packages; `knownbugs_test.go` pins

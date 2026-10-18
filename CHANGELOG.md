@@ -152,6 +152,13 @@ yet, so everything is under Unreleased until the first one.
 
 - `group_members`: who in each allowed group reaches its brain, by phone
   number, or `["*"]` for everyone (docs/CONFIGURATION.md).
+- `config.json` has a `version`, 2 today, which every save writes. A
+  config without one is version 1 and is read as version 2, its retired
+  keys folded in as before; starting does not rewrite it. A bridge
+  refuses to start with a config of a newer version than it reads, and
+  the dashboard refuses to save one, instead of dropping the settings it
+  does not know. In a version 2 config, the version 1 keys `model`,
+  `work_dir` and `brains` are unknown settings.
 - `fridolin paths` prints the config file and the data dir in use, and
   where each came from (`--json` for programs).
 - `fridolin check --redact` masks phone numbers, JIDs, email addresses and
@@ -203,6 +210,10 @@ because they are on disk or because scripts rely on them:
 
 From earlier versions of the bridge:
 
+- A `config.json` without `version`, version 1, which is read with its
+  retired keys `model`, `work_dir` and `brains` folded in. It stays, as
+  every migration of `config.json` does, so that a config of any earlier
+  version loads.
 - The calendar variables `BRIDGE_BRAIN_ID`, `BRIDGE_CALENDARS` and
   `BRIDGE_CALENDAR_DEFAULT`, which nothing in `tools/` reads now that the
   bridge makes the calendar calls; they go after one release.
