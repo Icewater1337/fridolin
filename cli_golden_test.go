@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strconv"
+	"strings"
 	"testing"
 )
 
@@ -145,6 +146,75 @@ func TestGoldenCheck(t *testing.T) {
 			out, code := runBridgeCLI(t, root, append([]string{"check", "--config", cfg}, tc.args...)...)
 			s := newScrubber(root)
 			assertGolden(t, "cli/check-"+tc.name+".golden", []byte(s.text(out)+"exit "+strconv.Itoa(code)+"\n"))
+		})
+	}
+}
+
+// TestGoldenSandboxProfiles pins the sandbox profile, as `fridolin check
+// --print-sandbox` prints it, for each part of the profile that settings
+// change: the brain's own folder and the others', the data dir, media and
+// database elsewhere, the calendar files in a credentials dir, deny_paths
+// and allow_paths, and git's config readable or denied. The folders above
+// the test's root differ between systems; they are <ABOVE>, once a block.
+func TestGoldenSandboxProfiles(t *testing.T) {
+	gitconfig := func(home string) {
+		if err := os.WriteFile(filepath.Join(home, ".gitconfig"), []byte("[user]\n\tname = You\n[include]\n\tpath = ~/.gitconfig-work\n"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	one := func(home string) []BrainRef {
+		gitconfig(home)
+		return []BrainRef{brainFolder(t, "~/main", BrainManifest{ID: "main", Routing: BrainRouting{HandlesDMs: true}})}
+	}
+	several := func(home string) []BrainRef {
+		gitconfig(home)
+		return []BrainRef{
+			brainFolder(t, "~/brains/main", BrainManifest{ID: "main", Routing: BrainRouting{HandlesDMs: true}}),
+			brainFolder(t, "~/brains/family", BrainManifest{ID: "family", Routing: BrainRouting{Groups: []string{harnessGroup}}}),
+			// Outside HOME.
+			brainFolder(t, filepath.Join(filepath.Dir(home), "elsewhere", "work"), BrainManifest{ID: "work"}),
+		}
+	}
+	tests := []struct {
+		name, config string
+		brains       func(home string) []BrainRef
+	}{
+		{"own-brain", "", one},
+		{"other-brains", "", several},
+		{"data-elsewhere", `"data_dir": "<ROOT>/data", "db_path": "<ROOT>/db/bridge.db", "media_dir": "<ROOT>/inbox"`, one},
+		{"credentials-dir", `"sandbox": {"credentials_dir": "~/creds"}`, several},
+		// One deny inside the brain's own folder, which applies again after
+		// the folder's allow.
+		{"deny-allow-paths", `"sandbox": {"deny_paths": ["~/clients", "<ROOT>/private", "~/main/private"], "allow_paths": ["~/Documents/shared", "~/.ssh/known_hosts"]}`, one},
+		{"git-deny", `"sandbox": {"git_config": "deny"}`, one},
+		{"inherit-user-config", `"inherit_claude_user_config": true`, several},
+		{"plaud-brain-access", `"plaud": {"brain_access": true}`, one},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// <ROOT> in the settings is the test's folder, known only now.
+			root, cfg := cliFixture(t, "", tc.brains)
+			if tc.config != "" {
+				data, err := os.ReadFile(cfg)
+				if err != nil {
+					t.Fatal(err)
+				}
+				data = bytes.TrimSuffix(data, []byte("}"))
+				data = append(data, ", "+strings.ReplaceAll(tc.config, "<ROOT>", root)+"}"...)
+				if err := os.WriteFile(cfg, data, 0o600); err != nil {
+					t.Fatal(err)
+				}
+			}
+			out, code := runBridgeCLI(t, root, "check", "--config", cfg, "--print-sandbox", "main")
+			if code != 0 {
+				t.Fatalf("check --print-sandbox: exit %d\n%s", code, out)
+			}
+			// Only the profile, after the summary and a blank line.
+			_, profile, ok := strings.Cut(out, "\n\n")
+			if !ok {
+				t.Fatalf("no profile in:\n%s", out)
+			}
+			assertGolden(t, "sandbox/"+tc.name+".sb", []byte(newScrubber(root).lines(profile)))
 		})
 	}
 }
