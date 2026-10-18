@@ -475,15 +475,6 @@ func (b *Bridge) keepInterrupted(br *Brain, m Inbound) {
 	}
 }
 
-// What the bridge tells a chat about its own restart.
-const (
-	// restartedNotice tells a chat, once the bridge is back, that a stop
-	// cut short the run for its message. The run is not made again: it
-	// may have done some of what it was asked already, an event created or
-	// a message sent, and would do it twice.
-	restartedNotice = "🔄 I restarted while I was working on your message. Send it again if you still need an answer."
-)
-
 // resume takes up what the bridge kept as it last stopped (see Stop),
 // before WhatsApp connects: each chat whose run the stop cut short is told
 // so, the messages no brain had started on go to the brains that take
