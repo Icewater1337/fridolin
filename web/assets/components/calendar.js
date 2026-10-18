@@ -206,7 +206,7 @@ export function calendarCard(brainId, { signal } = {}) {
       errBox,
       h('p', 'Signed in as ', h('strong', s.account || 'unknown account'), '.'),
       s.broad_access ? callout('warn', 'More access than the calendar needs',
-        'This brain signed in with full access to the account’s calendars, which older versions asked for and which includes deleting calendars and changing who they are shared with. Disconnect, then connect again, to grant only what the calendar uses: its events, free and busy times, and the list of calendars. Disconnecting revokes the old access at Google, every copy of it included.') : null,
+        'This brain signed in with full access to the account’s calendars, which older versions asked for and which includes deleting calendars and changing who they are shared with. Disconnect, then connect again, to grant only what the calendar uses: its events, free and busy times, and the list of calendars. Disconnecting revokes the old access at Google, every copy of it included, unless another brain is signed in to the same Google account: disconnect that one too, or the old access stays.') : null,
       s.list_error ? callout('bad', s.reconnect_needed ? 'Google no longer accepts this sign-in' : 'Could not load the calendars', s.list_error, h('div.actions', connectButton('Sign in again'))) : null,
       cals.length ? h('div.table-wrap', h('table.table',
         h('thead', h('tr', h('th', ''), h('th', 'Calendar'), h('th', ''), h('th', 'New events'))),

@@ -309,7 +309,7 @@ func (g *GoogleAuth) HandleCallback(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if extra := extraScopes(tok.Scopes); len(extra) > 0 {
-		log.Printf("brain %s: Google granted more than the bridge asked for (%s); to narrow it, disconnect the brain's calendar and connect it again", p.brainID, strings.Join(extra, ", "))
+		log.Printf("brain %s: Google granted more than the bridge asked for (%s); to narrow it, disconnect the brain's calendar, and every other brain signed in to the same account, and connect it again", p.brainID, strings.Join(extra, ", "))
 	}
 	account, err := g.primaryAccount(ctx, tok)
 	if err != nil {

@@ -57,8 +57,11 @@ and the brain's page says which was missing.
 A brain connected with an older version has the full `calendar` scope,
 which includes both. It keeps working, and its page says so: **Disconnect**
 it and connect again to narrow it. Signing in again without disconnecting
-first is not enough, since Google keeps the old grant until it is revoked,
-and Disconnect revokes it.
+first is not enough, since Google keeps the old grant until it is revoked.
+Disconnect revokes it, but not while another brain is signed in to the same
+account (see below): disconnect that brain too, or remove the access at
+[myaccount.google.com/permissions](https://myaccount.google.com/permissions),
+before you connect again.
 
 ## What the brain gets
 

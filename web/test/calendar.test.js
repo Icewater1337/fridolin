@@ -71,6 +71,19 @@ test('a sign-in Google no longer accepts says so', async (t) => {
   assert.ok(button(card, 'Sign in again'));
 });
 
+test('the broad-access warning says when Disconnect leaves the old access', async (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  const document = installDom();
+  const net = stubFetch(t);
+  const card = calendarCard('work');
+  document.body.append(card);
+  net.answer(0, { ...connected, broad_access: true });
+  await tick();
+  assert.ok(card.textContent.includes('More access than the calendar needs'), card.textContent);
+  // Google keeps a grant another brain shares, so one Disconnect is not enough.
+  assert.ok(card.textContent.includes('unless another brain is signed in to the same Google account'), card.textContent);
+});
+
 test('a reload error reaches the button instead of an unhandled rejection', async (t) => {
   t.mock.timers.enable({ apis: ['setTimeout'] });
   const document = installDom();
