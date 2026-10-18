@@ -1216,7 +1216,7 @@ func (br *Brain) invoke(run *brainRun, ctx context.Context, s *brainSettings, m 
 	resultIn := make(chan struct{})
 	var resultOnce sync.Once
 	go func() {
-		parseDone <- br.readStream(m.JID, stdout, func() { resultOnce.Do(func() { close(resultIn) }) })
+		parseDone <- br.readStream(m.JID, stdout, runHeading(m, s, cmd.Process.Pid), func() { resultOnce.Do(func() { close(resultIn) }) })
 	}()
 
 	notice := time.NewTimer(workingNoticeAfter)
@@ -1408,15 +1408,49 @@ func (br *Brain) buildPrompt(s *brainSettings, m Inbound) string {
 // parseStream reads the stream-json output from the Claude CLI and returns
 // the result, writing a human-readable activity log alongside it.
 func (br *Brain) parseStream(jid string, reader io.Reader) RunResult {
-	return br.readStream(jid, reader, nil)
+	return br.readStream(jid, reader, "── New invocation ──", nil)
 }
 
-// readStream is parseStream that calls onResult, when set, as soon as the
-// result is in, while the stream may still go on.
-func (br *Brain) readStream(jid string, reader io.Reader, onResult func()) RunResult {
+// runHeading starts a run's part of the activity log: what it answers and
+// with what, so that it can be told from the others and matched to the
+// run the dashboard shows.
+func runHeading(m Inbound, s *brainSettings, pid int) string {
+	model := s.model
+	if model == "" {
+		model = "the CLI's default"
+	}
+	return fmt.Sprintf("── Run for %s from %s, pid %d, model %s ──", m.JID, m.Sender, pid, model)
+}
+
+// streamLogMax is the size at which the activity log is rotated when a run
+// starts: it becomes streamLogOld, replacing the one before, so the two
+// hold about twice this at most. Named *.log, the old one is left out of
+// backups too.
+const (
+	streamLogMax = 5 << 20
+	streamLogOld = "claude-stream.1.log"
+)
+
+// rotateStreamLog moves a full activity log aside, through the folder: a
+// rename replaces a symlink at streamLogOld itself, never what it points to.
+func (br *Brain) rotateStreamLog() {
+	fi, err := br.root.Lstat(streamLogName)
+	if err != nil || !fi.Mode().IsRegular() || fi.Size() < streamLogMax {
+		return
+	}
+	if err := br.root.Rename(streamLogName, streamLogOld); err != nil {
+		log.Printf("brain %s: could not rotate its stream log: %v", br.id, err)
+	}
+}
+
+// readStream is parseStream with heading as the first line of the run in
+// the activity log, calling onResult, when set, as soon as the result is
+// in, while the stream may still go on.
+func (br *Brain) readStream(jid string, reader io.Reader, heading string, onResult func()) RunResult {
 	scanner := bufio.NewScanner(reader)
 	scanner.Buffer(make([]byte, 4*1024*1024), 4*1024*1024)
 
+	br.rotateStreamLog()
 	// Through the folder, like the history: a brain can swap the log for a
 	// symlink to a file its sandbox denies it writing.
 	streamLog, logErr := openInFolder(br.root, streamLogName, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600)
@@ -1434,7 +1468,7 @@ func (br *Brain) readStream(jid string, reader io.Reader, onResult func()) RunRe
 		}
 	}()
 
-	writeLog("── New invocation ──")
+	writeLog(heading)
 
 	var finalResult, lastText string
 	questionSent := false

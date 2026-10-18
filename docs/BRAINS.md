@@ -83,18 +83,21 @@ The bridge itself, outside the sandbox, works on these files in a brain's
 folder: it reads the prompt file, `brain.json` (to tell when it changed on
 disk) and `memories/people/whatsapp-identity-map.md`, appends every message
 to `conversation-history.jsonl` and reads it back, and logs what each run
-did in `claude-stream.log`. A brain can change any file in its folder, and
-put a symlink to `~/.ssh` or to another brain's history in place of one of
-them, so the bridge never leaves the folder through a symlink, and takes
-only a regular file there: not a symlink at the file itself, even one to
-another file in the folder. Nor does it take a prompt file, `brain.json`
-or identity map larger than 256 KiB. It treats such a file as missing and
-writes nothing through it; its log says why, and the dashboard shows a
-`brain.json` it cannot read. It opens the folder once when it loads the
-brain and goes through that handle from then on (`brain.json` excepted,
-which it reads for brains that are not running too), so a folder you put
-in a brain's place takes a reload; see [Moving a brain](#moving-a-brain).
-Copy a file into the folder rather than link it.
+did in `claude-stream.log`, each run under a line naming its chat, sender,
+process and model. A run that finds the log over 5 MB first moves it to
+`claude-stream.1.log`, replacing the one before. A brain can change any
+file in its folder, and put a symlink to `~/.ssh` or to another brain's
+history in place of one of them, so the bridge never leaves the folder
+through a symlink, and takes only a regular file there: not a symlink at
+the file itself, even one to another file in the folder. Nor does it take
+a prompt file, `brain.json` or identity map larger than 256 KiB. It treats
+such a file as missing and writes nothing through it; its log says why,
+and the dashboard shows a `brain.json` it cannot read. It opens the folder
+once when it loads the brain and goes through that handle from then on
+(`brain.json` excepted, which it reads for brains that are not running
+too), so a folder you put in a brain's place takes a reload; see
+[Moving a brain](#moving-a-brain). Copy a file into the folder rather than
+link it.
 
 ## Moving a brain
 

@@ -1414,3 +1414,34 @@ func TestRunTimeoutSetting(t *testing.T) {
 		})
 	}
 }
+
+// TestStreamLogIsRotatedAndNamesEachRun: a full activity log is moved to
+// claude-stream.1.log when the next run starts, and each run's part of it
+// starts with the chat, the sender, the process and the model.
+func TestStreamLogIsRotatedAndNamesEachRun(t *testing.T) {
+	mgr, d, home := queueTestManager(t, 10, `, "brain_model": "sonnet"`)
+	logPath := filepath.Join(home, "a", streamLogName)
+	f, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY, 0o600)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := f.Truncate(streamLogMax); err != nil { // sparse: takes no room
+		t.Fatal(err)
+	}
+	f.Close()
+	if _, _, _, err := mgr.Submit(dm("hello")); err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, 10*time.Second, "the run", func() bool { return d.count() == 1 })
+	if fi, err := os.Stat(filepath.Join(home, "a", streamLogOld)); err != nil || fi.Size() != streamLogMax {
+		t.Errorf("rotated log: %v, %v; want the full one", fi, err)
+	}
+	data, err := os.ReadFile(logPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	first, _, _ := strings.Cut(string(data), "\n")
+	if len(data) > 4096 || !strings.Contains(first, "Run for 15551234567@s.whatsapp.net from 15551234567, pid ") || !strings.Contains(first, "model sonnet") {
+		t.Errorf("new log starts %q (%d bytes), want the run named", first, len(data))
+	}
+}
