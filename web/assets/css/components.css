@@ -509,6 +509,7 @@ pre.code {
   width: min(420px, calc(100vw - 32px));
   pointer-events: none;
 }
+.toast-region { display: flex; flex-direction: column; gap: 8px; }
 .toast {
   pointer-events: auto;
   display: flex;

@@ -39,3 +39,42 @@ test('toastError stays quiet about a 401 and an abort', (t) => {
   assert.equal(shown('Brain id taken').length, 1);
   t.mock.timers.tick(10000);
 });
+
+test('errors are announced as alerts, the rest politely', (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  const err = toast('Could not save', 'error');
+  const ok = toast('Saved the brain', 'ok');
+  assert.equal(err.parentNode.getAttribute('role'), 'alert');
+  assert.equal(ok.parentNode.getAttribute('role'), 'status');
+  assert.equal(ok.parentNode.getAttribute('aria-live'), 'polite');
+  assert.equal(err.parentNode.parentNode, ok.parentNode.parentNode, 'both in the same corner');
+  t.mock.timers.tick(10000);
+});
+
+test('a toast under the pointer or with the focus stays until they leave', async (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout', 'Date'] });
+  const fire = (el, type) => el.dispatchEvent(new Event(type));
+  const cases = [['pointer', 'mouseenter', 'mouseleave'], ['focus', 'focusin', 'focusout']];
+  for (const [name, enter, leave] of cases) {
+    await t.test(name, () => {
+      const el = toast(`Held by the ${name}`, 'error');
+      t.mock.timers.tick(6000);
+      fire(el, enter);
+      t.mock.timers.tick(60000);
+      assert.equal(shown(`Held by the ${name}`).length, 1, 'held past its 9 s');
+      fire(el, leave);
+      t.mock.timers.tick(2900);
+      assert.equal(shown(`Held by the ${name}`).length, 1, 'then gets the 3 s it had left');
+      t.mock.timers.tick(200);
+      assert.equal(shown(`Held by the ${name}`).length, 0);
+    });
+  }
+  const late = toast('Held at the end', 'ok');
+  t.mock.timers.tick(4900);
+  fire(late, 'mouseenter');
+  fire(late, 'mouseleave');
+  t.mock.timers.tick(1400);
+  assert.equal(shown('Held at the end').length, 1, 'at least 1.5 s to move away');
+  t.mock.timers.tick(200);
+  assert.equal(shown('Held at the end').length, 0);
+});
