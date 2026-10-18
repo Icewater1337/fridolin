@@ -11,6 +11,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
@@ -232,6 +233,21 @@ func fakeClaude() {
 		f, err := os.OpenFile(log, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600)
 		if err == nil {
 			fmt.Fprintln(f, strings.Join(args, " "))
+			f.Close()
+		}
+	}
+	if log := os.Getenv("FRIDOLIN_FAKE_RUN_LOG"); log != "" {
+		// Each run as one JSON line: the arguments, with a prompt that
+		// follows -p set apart, the prompt, from there or from stdin, and
+		// the working directory.
+		wd, _ := os.Getwd()
+		argv := slices.Clone(args)
+		if i := slices.Index(argv, "-p"); i >= 0 && i+1 < len(argv) {
+			argv[i+1] = "<prompt>"
+		}
+		line, _ := json.Marshal(map[string]any{"args": argv, "prompt": prompt, "dir": wd})
+		if f, err := os.OpenFile(log, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600); err == nil {
+			fmt.Fprintf(f, "%s\n", line)
 			f.Close()
 		}
 	}

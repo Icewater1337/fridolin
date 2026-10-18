@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"io"
 	"maps"
@@ -12,6 +13,9 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"go.mau.fi/whatsmeow/types/events"
+	waLog "go.mau.fi/whatsmeow/util/log"
 )
 
 // harness is a dev-mode bridge driven through what it offers from outside:
@@ -164,6 +168,21 @@ func (h *harness) Inject(m inbound) {
 	if w := h.Do("POST", "/api/dev/inbound", m); w.Code != http.StatusAccepted {
 		h.t.Fatalf("dev inbound %+v: %d %s", m, w.Code, w.Body.String())
 	}
+}
+
+// WhatsApp hands the bridge a message event as whatsmeow delivers one, to
+// the bridge's WhatsApp handling without a connection: what the dev inbound
+// cannot carry, such as a quoted reply, goes this way. Attachments cannot
+// be downloaded; what the bridge tells the chat about that is sent through
+// the dev outbox.
+func (h *harness) WhatsApp(ev *events.Message) {
+	h.t.Helper()
+	ctx, cancel := context.WithCancel(context.Background())
+	h.t.Cleanup(cancel)
+	wa := &WhatsAppClient{cfg: h.b.cfgs.Get, log: waLog.Noop, handler: h.b.handleInbound, ctx: ctx, cancel: cancel}
+	wa.media = wa.client // nil: every download fails with ErrClientIsNil
+	wa.notify = func(jid, text string) { _ = h.b.dev.SendMessage(ctx, jid, text) }
+	wa.handleMessage(ev)
 }
 
 // sent is a message the dev-mode bridge sent, as GET /api/dev/outbox lists

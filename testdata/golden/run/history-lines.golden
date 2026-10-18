@@ -1,0 +1,13 @@
+{"ts":"<TIME>","from":"15551234567","chat":"15551234567@s.whatsapp.net","text":"What is on tomorrow?","type":"in"}
+{"ts":"<TIME>","from":"main","chat":"15551234567@s.whatsapp.net","text":"echo:<HOME>/main:You (15551234567) says: What is on tomorrow?","type":"out"}
+{"ts":"<TIME>","from":"15559876543","chat":"120363000000000000@g.us","text":"who brings the cake?","type":"in"}
+{"ts":"<TIME>","from":"main","chat":"120363000000000000@g.us","text":"echo:<HOME>/main:Sam (15559876543) says: who brings the cake?","type":"out"}
+{"ts":"<TIME>","from":"15551234567","chat":"15551234567@s.whatsapp.net","text":"what is this?\n[attachment: <HOME>/.fridolin/media/a/photo.jpg]","type":"in"}
+{"ts":"<TIME>","from":"main","chat":"15551234567@s.whatsapp.net","text":"echo:<HOME>/main:You (15551234567) says: what is this?","type":"out"}
+{"ts":"<TIME>","from":"15551234567","chat":"15551234567@s.whatsapp.net","text":"file these\n[attachment: <HOME>/.fridolin/media/a/scan-1.pdf]\n[attachment: <HOME>/.fridolin/media/a/scan-2.pdf]","type":"in"}
+{"ts":"<TIME>","from":"main","chat":"15551234567@s.whatsapp.net","text":"echo:<HOME>/main:You (15551234567) says: file these","type":"out"}
+{"ts":"<TIME>","from":"15551234567","chat":"15551234567@s.whatsapp.net","text":"[reply to 15559876543: \"Lunch at 12?\"]\nyes, book it","type":"in","id":"3EB0REPLY"}
+{"ts":"<TIME>","from":"main","chat":"15551234567@s.whatsapp.net","text":"echo:<HOME>/main:You (15551234567) says: [reply to 15559876543: \"Lunch at 12?\"]\nyes, book it","type":"out"}
+{"ts":"<TIME>","from":"upload","chat":"15551234567@s.whatsapp.net","text":"New files were uploaded.\n[attachment: <HOME>/.fridolin/media/a/upload.txt]","type":"in"}
+{"ts":"<TIME>","from":"main","chat":"15551234567@s.whatsapp.net","text":"echo:<HOME>/main:upload says: New files were uploaded.","type":"out"}
+{"ts":"<TIME>","from":"script","chat":"15551234567@s.whatsapp.net","text":"Sent by a script.","type":"out","via":"script"}
