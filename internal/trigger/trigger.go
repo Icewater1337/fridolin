@@ -1,4 +1,9 @@
-package main
+// Package trigger holds the keywords that address the bridge in a group
+// chat: how config.json writes them, and where in a message each must
+// appear. Matching is Unicode-aware and reports byte offsets in the
+// original text. It knows nothing of the rest of the bridge and reads no
+// process state.
+package trigger
 
 import (
 	"encoding/json"
@@ -8,18 +13,18 @@ import (
 	"unicode/utf8"
 )
 
-// TriggerMatch says where in a group message a trigger keyword must appear.
-type TriggerMatch string
+// Match says where in a group message a trigger keyword must appear.
+type Match string
 
 const (
 	// MatchAnywhere fires on the keyword anywhere in the message. Good for
 	// distinctive words ("@claude", a bot's name).
-	MatchAnywhere TriggerMatch = "anywhere"
+	MatchAnywhere Match = "anywhere"
 	// MatchStart fires only when the message begins with the keyword. Use it
 	// for short shorthands: "@c" at the start addresses the bot, "@carla" does not.
-	MatchStart TriggerMatch = "start"
+	MatchStart Match = "start"
 	// MatchWord fires on the keyword as a whole word anywhere in the message.
-	MatchWord TriggerMatch = "word"
+	MatchWord Match = "word"
 )
 
 // validTriggerMatches are the values a trigger's match takes; one left
@@ -28,21 +33,21 @@ var validTriggerMatches = map[TriggerMatch]bool{MatchAnywhere: true, MatchStart:
 
 // Trigger is one keyword that makes the bridge answer in a group.
 type Trigger struct {
-	Text  string       `json:"text"`
-	Match TriggerMatch `json:"match,omitempty"`
+	Text  string `json:"text"`
+	Match Match  `json:"match,omitempty"`
 }
 
-// TriggerList is the configured triggers. In JSON each entry is either a plain
+// List is the configured triggers. In JSON each entry is either a plain
 // string (matched anywhere) or {"text": "…", "match": "start"|"word"|"anywhere"}.
-type TriggerList []Trigger
+type List []Trigger
 
 // UnmarshalJSON accepts both the string and the object form for each entry.
-func (tl *TriggerList) UnmarshalJSON(data []byte) error {
+func (tl *List) UnmarshalJSON(data []byte) error {
 	var raw []json.RawMessage
 	if err := json.Unmarshal(data, &raw); err != nil {
 		return fmt.Errorf("triggers must be a list: %w", err)
 	}
-	out := make(TriggerList, 0, len(raw))
+	out := make(List, 0, len(raw))
 	for _, r := range raw {
 		var s string
 		if err := json.Unmarshal(r, &s); err == nil {
@@ -66,7 +71,7 @@ func (tl *TriggerList) UnmarshalJSON(data []byte) error {
 }
 
 // MarshalJSON writes "anywhere" triggers as plain strings, the others as objects.
-func (tl TriggerList) MarshalJSON() ([]byte, error) {
+func (tl List) MarshalJSON() ([]byte, error) {
 	out := make([]any, 0, len(tl))
 	for _, t := range tl {
 		if t.Match == "" || t.Match == MatchAnywhere {
@@ -78,9 +83,9 @@ func (tl TriggerList) MarshalJSON() ([]byte, error) {
 	return json.Marshal(out)
 }
 
-// TriggersFromStrings builds a list of match-anywhere triggers.
-func TriggersFromStrings(ss []string) TriggerList {
-	out := make(TriggerList, 0, len(ss))
+// FromStrings builds a list of match-anywhere triggers.
+func FromStrings(ss []string) List {
+	out := make(List, 0, len(ss))
 	for _, s := range ss {
 		out = append(out, Trigger{Text: s, Match: MatchAnywhere})
 	}
@@ -88,7 +93,7 @@ func TriggersFromStrings(ss []string) TriggerList {
 }
 
 // First returns the first trigger's text, for help messages.
-func (tl TriggerList) First() string {
+func (tl List) First() string {
 	for _, t := range tl {
 		if t.Text != "" {
 			return t.Text
@@ -98,7 +103,7 @@ func (tl TriggerList) First() string {
 }
 
 // Matches reports whether text addresses the bridge through any trigger.
-func (tl TriggerList) Matches(text string) bool {
+func (tl List) Matches(text string) bool {
 	for _, t := range tl {
 		if _, _, ok := t.find(text); ok {
 			return true
@@ -109,7 +114,7 @@ func (tl TriggerList) Matches(text string) bool {
 
 // Strip removes trigger keywords from text and trims the result. A start
 // trigger is removed only from the beginning; the others everywhere they match.
-func (tl TriggerList) Strip(text string) string {
+func (tl List) Strip(text string) string {
 	for _, t := range tl {
 		if t.Text == "" {
 			continue
@@ -147,7 +152,7 @@ func (t Trigger) find(text string) (int, int, bool) {
 			return 0, 0, false
 		}
 		end += lead
-		if needsBoundary(t.Text) && !boundaryAt(text, end) {
+		if needsBoundary(t.Text) && !BoundaryAt(text, end) {
 			return 0, 0, false
 		}
 		return lead, end, true
@@ -155,7 +160,7 @@ func (t Trigger) find(text string) (int, int, bool) {
 		for i := 0; i < len(text); {
 			if end, ok := hasFoldPrefix(text[i:], t.Text); ok {
 				end += i
-				if t.Match != MatchWord || ((i == 0 || boundaryBefore(text, i)) && boundaryAt(text, end)) {
+				if t.Match != MatchWord || ((i == 0 || BoundaryBefore(text, i)) && BoundaryAt(text, end)) {
 					return i, end, true
 				}
 			}
@@ -190,7 +195,11 @@ func needsBoundary(word string) bool {
 	return unicode.IsLetter(r) || unicode.IsDigit(r)
 }
 
-func boundaryAt(text string, i int) bool {
+// BoundaryAt reports whether a word ends at byte i of text: at its end, or
+// before a rune that is no letter or digit. A word trigger needs one on
+// both sides, and so does an @-mention, which must not be the start of a
+// longer number.
+func BoundaryAt(text string, i int) bool {
 	if i >= len(text) {
 		return true
 	}
@@ -198,7 +207,9 @@ func boundaryAt(text string, i int) bool {
 	return !unicode.IsLetter(r) && !unicode.IsDigit(r)
 }
 
-func boundaryBefore(text string, i int) bool {
+// BoundaryBefore reports whether the rune before byte i of text, which
+// must be past its start, is no letter or digit.
+func BoundaryBefore(text string, i int) bool {
 	r, _ := utf8.DecodeLastRuneInString(text[:i])
 	return !unicode.IsLetter(r) && !unicode.IsDigit(r)
 }

@@ -1,4 +1,4 @@
-package main
+package trigger
 
 import (
 	"encoding/json"
@@ -10,7 +10,7 @@ import (
 )
 
 func TestTriggerListJSONRoundTrip(t *testing.T) {
-	var tl TriggerList
+	var tl List
 	in := `["@claude", {"text":"@c","match":"start"}, {"text":"bot","match":"word"}, {"text":"x"}]`
 	if err := json.Unmarshal([]byte(in), &tl); err != nil {
 		t.Fatal(err)
@@ -29,7 +29,7 @@ func TestTriggerListJSONRoundTrip(t *testing.T) {
 }
 
 func TestTriggerStartMatch(t *testing.T) {
-	tl := TriggerList{{Text: "@c", Match: MatchStart}, {Text: "©", Match: MatchStart}}
+	tl := List{{Text: "@c", Match: MatchStart}, {Text: "©", Match: MatchStart}}
 	cases := []struct {
 		text string
 		want bool
@@ -54,7 +54,7 @@ func TestTriggerStartMatch(t *testing.T) {
 }
 
 func TestTriggerWordMatch(t *testing.T) {
-	tl := TriggerList{{Text: "bot", Match: MatchWord}}
+	tl := List{{Text: "bot", Match: MatchWord}}
 	if !tl.Matches("hey bot, help") || !tl.Matches("BOT") {
 		t.Error("word trigger should match the whole word")
 	}
@@ -66,7 +66,7 @@ func TestTriggerWordMatch(t *testing.T) {
 func TestTriggerStripKeepsByteOffsetsWithUnicode(t *testing.T) {
 	// "İ" lowercases to a longer byte sequence; offsets must come from the
 	// original text, not a lowercased copy.
-	tl := TriggersFromStrings([]string{"@claude"})
+	tl := FromStrings([]string{"@claude"})
 	if got := tl.Strip("İİ @CLAUDE ok"); got != "İİ  ok" {
 		t.Errorf("Strip = %q", got)
 	}
@@ -88,7 +88,7 @@ func FuzzTriggerListJSON(f *testing.F) {
 		f.Add([]byte(s))
 	}
 	f.Fuzz(func(t *testing.T, data []byte) {
-		var tl TriggerList
+		var tl List
 		if err := json.Unmarshal(data, &tl); err != nil {
 			return
 		}
@@ -103,7 +103,7 @@ func FuzzTriggerListJSON(f *testing.F) {
 		if err != nil {
 			t.Fatalf("encoding %+v: %v", tl, err)
 		}
-		var back TriggerList
+		var back List
 		if err := json.Unmarshal(out, &back); err != nil {
 			t.Fatalf("decoding %s again: %v", out, err)
 		}
@@ -114,7 +114,7 @@ func FuzzTriggerListJSON(f *testing.F) {
 }
 
 // matchModes are the match modes a fuzzed byte picks from.
-var matchModes = []TriggerMatch{MatchAnywhere, MatchStart, MatchWord}
+var matchModes = []Match{MatchAnywhere, MatchStart, MatchWord}
 
 // FuzzTriggerStrip: group messages are anyone's text, and a trigger is any
 // text the operator picked. Strip only removes whole characters and never
@@ -144,7 +144,7 @@ func FuzzTriggerStrip(f *testing.F) {
 		f.Add(s.text, s.t1, s.m1, s.t2, s.m2)
 	}
 	f.Fuzz(func(t *testing.T, text, t1 string, m1 uint8, t2 string, m2 uint8) {
-		tl := TriggerList{{Text: t1, Match: matchModes[int(m1)%len(matchModes)]}, {Text: t2, Match: matchModes[int(m2)%len(matchModes)]}}
+		tl := List{{Text: t1, Match: matchModes[int(m1)%len(matchModes)]}, {Text: t2, Match: matchModes[int(m2)%len(matchModes)]}}
 		got := tl.Strip(text)
 		trimmed := strings.TrimSpace(text)
 		if len(got) > len(trimmed) {
@@ -160,7 +160,7 @@ func FuzzTriggerStrip(f *testing.F) {
 		if !matches && got != trimmed {
 			t.Errorf("Strip(%q) = %q, but no trigger matches it", text, got)
 		}
-		if one := (TriggerList{tl[0]}.Matches(text) || TriggerList{tl[1]}.Matches(text)); one != matches {
+		if one := (List{tl[0]}.Matches(text) || List{tl[1]}.Matches(text)); one != matches {
 			t.Errorf("Matches(%q) = %v, but %v for the triggers one by one", text, matches, one)
 		}
 		swapped := swapASCIICase(text)
@@ -174,7 +174,7 @@ func FuzzTriggerStrip(f *testing.F) {
 			if tr.Match == MatchStart {
 				continue
 			}
-			one := TriggerList{tr}
+			one := List{tr}
 			if s := one.Strip(text); one.Matches(s) {
 				t.Errorf("%+v still matches %q, what Strip(%q) left", tr, s, text)
 			}
@@ -200,7 +200,7 @@ func TestMatchesTrigger(t *testing.T) {
 	}
 
 	for _, c := range cases {
-		if got := TriggersFromStrings(triggers).Matches(c.text); got != c.want {
+		if got := FromStrings(triggers).Matches(c.text); got != c.want {
 			t.Errorf("matchesTrigger(%q) = %v, want %v", c.text, got, c.want)
 		}
 	}
@@ -208,7 +208,7 @@ func TestMatchesTrigger(t *testing.T) {
 
 func TestMatchesTriggerEmptyTriggerIgnored(t *testing.T) {
 	// An empty trigger would otherwise match every message.
-	if TriggersFromStrings([]string{""}).Matches("anything at all") {
+	if FromStrings([]string{""}).Matches("anything at all") {
 		t.Error("an empty trigger must not match")
 	}
 }
@@ -227,7 +227,7 @@ func TestStripTriggers(t *testing.T) {
 	}
 
 	for _, c := range cases {
-		if got := TriggersFromStrings(triggers).Strip(c.in); got != c.want {
+		if got := FromStrings(triggers).Strip(c.in); got != c.want {
 			t.Errorf("stripTriggers(%q) = %q, want %q", c.in, got, c.want)
 		}
 	}
@@ -236,7 +236,7 @@ func TestStripTriggers(t *testing.T) {
 func TestStripTriggersTerminates(t *testing.T) {
 	// Repeated occurrences must all be removed without the strip loop spinning.
 	done := make(chan string, 1)
-	go func() { done <- TriggersFromStrings([]string{"a"}).Strip("aaaa") }()
+	go func() { done <- FromStrings([]string{"a"}).Strip("aaaa") }()
 	select {
 	case got := <-done:
 		if got != "" {
@@ -245,4 +245,20 @@ func TestStripTriggersTerminates(t *testing.T) {
 	case <-time.After(5 * time.Second):
 		t.Fatal("stripTriggers did not terminate")
 	}
+}
+
+// swapASCIICase turns ASCII lowercase letters into uppercase and back,
+// leaving every other byte as it is. The junk filter's fuzz test in
+// cmd/fridolin has the same helper.
+func swapASCIICase(s string) string {
+	b := []byte(s)
+	for i, c := range b {
+		switch {
+		case 'a' <= c && c <= 'z':
+			b[i] = c - 'a' + 'A'
+		case 'A' <= c && c <= 'Z':
+			b[i] = c - 'A' + 'a'
+		}
+	}
+	return string(b)
 }
