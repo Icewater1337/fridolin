@@ -593,14 +593,20 @@ What the bridge does about it:
 
 - **DM allowlist.** Only numbers in `allowed_numbers` are answered; an empty
   list answers nobody unless you set `allow_any_dm` to `true`.
-- **Group allowlist, per member.** Groups are deny-by-default: unlisted
-  groups are ignored entirely. In an allowed group only the members
-  `group_members` admits are read: the numbers it lists for that group, or
-  everyone for `["*"]`, and without an entry whoever may DM the bridge
-  (`allowed_numbers`). Anyone else can neither start a run nor stop one, and
-  what they write is not read, not even into the brain's history, unless an
-  admitted member quotes or forwards it. A member WhatsApp names only by an
-  internal ID, without their number, gets in only where everyone does
+- **Group allowlist, per member.** Groups are deny-by-default: what an
+  unlisted group says reaches no brain and is not kept. The bridge does
+  note the chat for *Chats → Waiting for access*, as it does a number that
+  is not allowed: the chat's JID and, for a group, its name, the sender's
+  number and WhatsApp name, and how many messages came when. That stays in
+  its database until you allow the chat on the Chats page (*Dismiss* only
+  hides it), and its log names the chat, a group's name and the sender's
+  number. In an allowed group only the members `group_members` admits are
+  read: the numbers it lists for that group, or everyone for `["*"]`, and
+  without an entry whoever may DM the bridge (`allowed_numbers`). Anyone
+  else can neither start a run nor stop one, and what they write is not
+  read, not even into the brain's history, unless an admitted member
+  quotes or forwards it. A member WhatsApp names only by an internal ID,
+  without their number, gets in only where everyone does
   ([details](docs/CONFIGURATION.md#group_members)).
 - **No Status or channels.** WhatsApp Status updates and channels are ignored,
   and the bridge refuses to send to Status, broadcast lists or channels, so
