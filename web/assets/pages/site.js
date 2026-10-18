@@ -232,7 +232,7 @@ export default {
       const s = st.settings;
       const connected = !!st.repo.connected;
       paint(repoHead, connected, (c) => h('div.card-head', h('div.card-title', icon('backup'), h('h2', 'Repository')), c ? pill('Connected', 'ok') : pill('Not connected', 'neutral')));
-      paint(keyBox, { key: st.deploy_key || '', github: !!st.repo.github, gh: !!st.runtime.gh }, renderDeployKey);
+      paint(keyBox, { key: st.deploy_key || '', github: !!st.repo.github, gh: !!st.runtime.gh, connected }, renderDeployKey);
       if (connected) {
         // The clone's folder is there as soon as git starts, before the
         // settings name the repository. Until they do, the form keeps what
@@ -249,13 +249,34 @@ export default {
       repoForm.set({ url: s.repo.url || '', branch: s.repo.branch || 'main', subdir: s.repo.subdir || '' });
     }
 
-    function renderDeployKey({ key, github, gh }) {
+    // The key has to be on a private repository before Connect can clone
+    // it, so until a repository is connected gh adds it to the address
+    // typed in the form below.
+    function renderDeployKey({ key, github, gh, connected }) {
       const keyRow = key
-        ? h('div', h('p.small', 'Fridolin’s deploy key for this repository. It needs write access, so Fridolin can push the starter files and, later, approved changes.'),
+        ? h('div', h('p.small', connected
+          ? 'Fridolin’s deploy key for this repository. It needs write access, so Fridolin can push the starter files and, later, approved changes.'
+          : 'Fridolin’s deploy key for the repository below. Add it with write access before you connect, so Fridolin can clone a private repository, push the starter files and, later, approved changes.'),
           h('div.site-key', mono(key), copyButton(key)),
-          github && gh ? h('div.actions', btn('Add it to GitHub with gh', { small: true, icon: 'key', onClick: async () => { await post('/api/site/deploy-key/github', undefined, { timeout: GIT_TIMEOUT_MS }); toast('Deploy key added on GitHub', 'ok'); } })) : null)
+          gh && (github || !connected) ? h('div.actions', btn('Add it to GitHub with gh', { small: true, icon: 'key', onClick: () => addKeyWithGH(connected) })) : null)
         : h('div.actions', btn('Create a deploy key', { icon: 'key', onClick: async () => { await post('/api/site/deploy-key'); await refresh(); } }));
       return h('div.site-block', h('h3', 'Deploy key'), keyRow);
+    }
+
+    async function addKeyWithGH(connected) {
+      let body;
+      if (!connected) {
+        const form = repoForm.form();
+        const url = form ? form.value().url.trim() : '';
+        if (!url) {
+          toast('Enter the repository’s SSH address below first (e.g. git@github.com:you/my-site.git), so gh knows where to add the key.', 'warn');
+          if (form) form.focusURL();
+          return;
+        }
+        body = { url };
+      }
+      const r = await post('/api/site/deploy-key/github', body, { timeout: GIT_TIMEOUT_MS });
+      toast(`Deploy key added to ${r.repo} on GitHub`, 'ok');
     }
 
     function renderDisconnect({ enabled }) {
@@ -308,7 +329,7 @@ export default {
             await checkUpdates();
           },
         })));
-      return { el, value, setURL(u) { urlIn.value = u; changed(); } };
+      return { el, value, setURL(u) { urlIn.value = u; changed(); }, focusURL() { urlIn.focus(); } };
     }
 
     // ── deploys ────────────────────────────────────────────────────────

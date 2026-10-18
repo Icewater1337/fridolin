@@ -148,12 +148,23 @@ func (b *Bridge) apiSiteDeployKey(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]string{"deploy_key": pub})
 }
 
+// apiSiteDeployKeyGH adds the deploy key with gh. Before a repository is
+// connected the page sends the address typed for Connect as "url"; once one
+// is, it sends no body.
 func (b *Bridge) apiSiteDeployKeyGH(w http.ResponseWriter, r *http.Request) {
-	if err := b.site.AddDeployKeyWithGH(r.Context()); err != nil {
+	var req struct {
+		URL string `json:"url"`
+	}
+	if err := decodeOptionalJSON(r, &req); err != nil {
 		writeErr(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
+	repo, err := b.site.AddDeployKeyWithGH(r.Context(), req.URL)
+	if err != nil {
+		writeErr(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "repo": repo})
 }
 
 func (b *Bridge) apiSiteCreateGitHubRepo(w http.ResponseWriter, r *http.Request) {

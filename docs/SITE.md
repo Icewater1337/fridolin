@@ -35,12 +35,13 @@ Dashboard → **Site**. In order:
    unpacks the site process into `<data_dir>/site/shell` and installs its
    dependencies on first start.
 2. **Repository.** A private repository on GitHub (or any git host). With the
-   GitHub CLI (`gh`) logged in, *Create a private GitHub repository* makes one.
-   *Create a deploy key* makes a key just for this repository; add it with
-   **write access** (*Add it to GitHub with gh*, or the repository's
-   Settings → Deploy keys). Then *Connect* with the SSH address
+   GitHub CLI (`gh`) logged in, *Create a private GitHub repository* makes one
+   and fills in its address. Enter the SSH address
    (`git@github.com:you/my-site.git`), the branch, and — if the modules do not
-   sit at the top — the folder that holds `modules/`.
+   sit at the top — the folder that holds `modules/`. *Create a deploy key*
+   makes a key just for this repository; add it with **write access** before
+   connecting (*Add it to GitHub with gh* adds it to the address you entered,
+   or use the repository's Settings → Deploy keys). Then *Connect*.
 3. **Starter.** For an empty repository, *Add the starter files* commits a
    welcome module, a `package.json`, types for module code and a `CLAUDE.md`
    for the site's conventions, and pushes them.

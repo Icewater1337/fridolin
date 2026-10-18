@@ -45,6 +45,7 @@ async function openPage(t, first = siteStatus(), { proposals = [], brains = [{ i
     proposals,
     holdNext: null, // a promise the next GET /api/site waits for
     holdBuilder: null, // a promise the next PUT /api/site/builders/{id} waits for
+    github: { ok: true, repo: 'you/my-site' }, // what POST /api/site/deploy-key/github answers
   };
   const calls = serve(t, (path, init) => {
     const method = init.method || 'GET';
@@ -85,6 +86,7 @@ async function openPage(t, first = siteStatus(), { proposals = [], brains = [{ i
     if (path === '/api/site/proposals') return { proposals: bridge.proposals };
     if (path === '/api/site/secrets') return { modules: secrets };
     if (path === '/api/site/github-repo' && method === 'POST') return { url: `git@github.com:you/${body.name}.git` };
+    if (path === '/api/site/deploy-key/github' && method === 'POST') return bridge.github;
     return { ok: true };
   });
   const root = h('div');
@@ -402,4 +404,85 @@ test('the deploy and the proposals keep updating while a card has edits', async 
   assert.match(root.textContent, /Events page/, 'the proposal shows');
   assert.equal(inputFor(root, 'Domain'), domain);
   assert.equal(domain.value, 'example.org', 'and the draft is still there');
+});
+
+// ── the deploy key, added with gh ──────────────────────────────────────
+
+// A site with gh and a deploy key, but no repository connected yet.
+function notConnectedYet({ key = true } = {}) {
+  const s = siteStatus();
+  s.repo = { connected: false, github: '' };
+  s.runtime = { ...s.runtime, gh: true };
+  s.settings = { ...s.settings, enabled: false, approved: '', history: [], repo: { url: '', branch: 'main', subdir: '' } };
+  if (!key) delete s.deploy_key;
+  return s;
+}
+
+const toasts = (kind) => document.querySelectorAll(`.toast.${kind}`).map((el) => el.textContent);
+const ghCalls = (calls) => calls.filter((c) => c.path === '/api/site/deploy-key/github').map((c) => [c.method, c.body]);
+
+test('before Connect, gh adds the key to the address typed for Connect', async (t) => {
+  const { root, ctx, calls } = await openPage(t, notConnectedYet());
+  const url = inputFor(root, 'Repository (SSH address)');
+  type(url, '  git@github.com:you/my-site.git ');
+  button(root, 'Add it to GitHub with gh').click();
+  await settle();
+  assert.deepEqual(ghCalls(calls), [['POST', { url: 'git@github.com:you/my-site.git' }]]);
+  assert.deepEqual(toasts('ok'), ['Deploy key added to you/my-site on GitHub']);
+  assert.ok(!calls.some((c) => c.path === '/api/site/repo'), 'adding the key does not connect');
+  assert.equal(inputFor(root, 'Repository (SSH address)'), url);
+  assert.equal(url.value, '  git@github.com:you/my-site.git ', 'the form keeps the address for Connect');
+  assert.equal(ctx.dirty(), true);
+});
+
+test('with no address typed, the gh button says what is missing and asks the bridge nothing', async (t) => {
+  const { root, calls } = await openPage(t, notConnectedYet());
+  type(inputFor(root, 'Repository (SSH address)'), '   ');
+  button(root, 'Add it to GitHub with gh').click();
+  await settle();
+  assert.deepEqual(ghCalls(calls), []);
+  assert.equal(toasts('warn').length, 1);
+  assert.match(toasts('warn')[0], /Enter the repository’s SSH address below first.*git@github\.com:you\/my-site\.git/);
+  assert.equal(document.activeElement, inputFor(root, 'Repository (SSH address)'), 'the address field gets the focus');
+});
+
+test('an address the bridge refuses for gh shows its reason', async (t) => {
+  const { root, bridge, calls } = await openPage(t, notConnectedYet());
+  bridge.github = { status: 400, body: { error: 'the repository is not on GitHub; add the key in its settings by hand' } };
+  type(inputFor(root, 'Repository (SSH address)'), 'git@example.com:you/my-site.git');
+  button(root, 'Add it to GitHub with gh').click();
+  await settle();
+  assert.deepEqual(ghCalls(calls), [['POST', { url: 'git@example.com:you/my-site.git' }]]);
+  assert.ok(toasts('error').some((m) => /not on GitHub/.test(m)), `toasts: ${toasts('error')}`);
+  assert.deepEqual(toasts('ok'), []);
+});
+
+test('a key made after typing the address goes to that address', async (t) => {
+  const { root, calls } = await openPage(t, notConnectedYet({ key: false }));
+  assert.equal(button(root, 'Add it to GitHub with gh'), undefined, 'no key to add yet');
+  type(inputFor(root, 'Repository (SSH address)'), 'git@github.com:you/my-site.git');
+  button(root, 'Create a deploy key').click();
+  await settle();
+  button(root, 'Add it to GitHub with gh').click();
+  await settle();
+  assert.deepEqual(ghCalls(calls), [['POST', { url: 'git@github.com:you/my-site.git' }]]);
+});
+
+test('once connected, gh adds the key to the connected repository as before', async (t) => {
+  const connected = siteStatus();
+  connected.runtime = { ...connected.runtime, gh: true };
+  const { root, calls } = await openPage(t, connected);
+  button(root, 'Add it to GitHub with gh').click();
+  await settle();
+  assert.deepEqual(ghCalls(calls), [['POST', undefined]]);
+  assert.deepEqual(toasts('ok'), ['Deploy key added to you/my-site on GitHub']);
+});
+
+test('without gh there is no gh button, before or after Connect', async (t) => {
+  for (const st of [notConnectedYet(), siteStatus()]) {
+    st.runtime = { ...st.runtime, gh: false };
+    const { root } = await openPage(t, st);
+    assert.equal(button(root, 'Add it to GitHub with gh'), undefined);
+    t.mock.timers.reset();
+  }
 });

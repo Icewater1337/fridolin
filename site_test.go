@@ -262,6 +262,8 @@ func TestSiteRepoURLs(t *testing.T) {
 		"https://github.com/you/site":    "you/site",
 		"ssh://git@github.com/you/s.git": "you/s",
 		"git@example.com:you/site.git":   "",
+		"git@github.com:-you/site.git":   "",
+		"git@github.com:you/..":          "",
 	} {
 		if got := githubRepo(u); got != want {
 			t.Errorf("githubRepo(%q) = %q, want %q", u, got, want)
@@ -621,6 +623,117 @@ func TestSiteAPI(t *testing.T) {
 	}
 	if code, out := call("GET", "/api/site/users", ""); code != 200 || len(out["users"].([]any)) != 1 {
 		t.Errorf("users: %d %v", code, out)
+	}
+}
+
+// The deploy key goes on the repository before Connect can clone it, so
+// until a repository is connected gh adds it to the address typed for
+// Connect, checked as Connect checks it; afterwards to the connected one.
+func TestSiteDeployKeyWithGH(t *testing.T) {
+	if _, err := exec.LookPath("ssh-keygen"); err != nil {
+		t.Skip("no ssh-keygen")
+	}
+	bin := t.TempDir()
+	argsLog := filepath.Join(bin, "args")
+	fake := "#!/bin/sh\necho \"$@\" >> \"$(dirname \"$0\")/args\"\n[ -n \"$FRIDOLIN_FAKE_GH_FAIL\" ] && { echo \"$FRIDOLIN_FAKE_GH_FAIL\" >&2; exit 1; }\nexit 0\n"
+	if err := os.WriteFile(filepath.Join(bin, "gh"), []byte(fake), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
+	t.Setenv("FRIDOLIN_FAKE_GH_FAIL", "")
+
+	m := newTestSite(t)
+	b := &Bridge{site: m}
+	mux := http.NewServeMux()
+	b.siteAPI(mux)
+	call := func(body string) (int, map[string]any) {
+		req := httptest.NewRequest("POST", "/api/site/deploy-key/github", strings.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		rec := httptest.NewRecorder()
+		mux.ServeHTTP(rec, req)
+		var out map[string]any
+		json.Unmarshal(rec.Body.Bytes(), &out)
+		return rec.Code, out
+	}
+	ghCalls := func() []string {
+		data, _ := os.ReadFile(argsLog)
+		if len(data) == 0 {
+			return nil
+		}
+		return strings.Split(strings.TrimSpace(string(data)), "\n")
+	}
+
+	// A fresh site: nothing connected, so the address has to come with the request.
+	for body, want := range map[string]string{
+		"":                                      "SSH address first",
+		`{"url": "  "}`:                         "SSH address first",
+		`{"url": "--upload-pack=evil"}`:         "SSH address, e.g.",
+		`{"url": "git@github.com:you/a b.git"}`: "SSH address, e.g.",
+		`{"url": "git@example.com:you/site.git"}`: "not on GitHub",
+		`{"url": "git@github.com:-you/site.git"}`: "not on GitHub",
+		`{"url": "git@github.com:you/...git"}`:    "not on GitHub",
+		`{"url": 7}`:                              "cannot unmarshal",
+	} {
+		if code, out := call(body); code != 400 || !strings.Contains(fmt.Sprint(out["error"]), want) {
+			t.Errorf("%s: %d %v, want 400 %q", body, code, out, want)
+		}
+	}
+	if got := ghCalls(); len(got) != 0 {
+		t.Fatalf("gh ran for a refused address: %v", got)
+	}
+
+	code, out := call(`{"url": " git@github.com:you/my-site.git "}`)
+	if code != 200 || out["repo"] != "you/my-site" {
+		t.Fatalf("add before connecting: %d %v", code, out)
+	}
+	pub := m.dir("deploy_key.pub")
+	if !fileExists(pub) {
+		t.Fatal("no deploy key was made")
+	}
+	want := "repo deploy-key add " + pub + " --repo you/my-site --allow-write --title Fridolin site"
+	if got := ghCalls(); len(got) != 1 || got[0] != want {
+		t.Errorf("gh ran with %v, want %s", got, want)
+	}
+	if u := m.Settings().Repo.URL; u != "" {
+		t.Errorf("adding the key connected %q", u)
+	}
+
+	// gh's own failure comes back; a key GitHub already has is no failure.
+	t.Setenv("FRIDOLIN_FAKE_GH_FAIL", "HTTP 404: Not Found")
+	if code, out := call(`{"url": "git@github.com:you/my-site.git"}`); code != 400 || !strings.Contains(fmt.Sprint(out["error"]), "gh: HTTP 404") {
+		t.Errorf("gh failing: %d %v", code, out)
+	}
+	t.Setenv("FRIDOLIN_FAKE_GH_FAIL", "key is already in use")
+	if code, out := call(`{"url": "git@github.com:you/my-site.git"}`); code != 200 {
+		t.Errorf("a key GitHub already has: %d %v", code, out)
+	}
+	t.Setenv("FRIDOLIN_FAKE_GH_FAIL", "")
+
+	// Connected: the connected repository, as before; another address is refused.
+	m.mu.Lock()
+	m.settings.Repo = SiteRepo{URL: "git@github.com:you/my-site.git", Branch: "main"}
+	m.mu.Unlock()
+	if err := os.MkdirAll(m.repoDir(), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	os.Remove(argsLog)
+	for _, body := range []string{"", `{"url": "git@github.com:you/my-site.git"}`} {
+		if code, out := call(body); code != 200 || out["repo"] != "you/my-site" {
+			t.Errorf("connected, %q: %d %v", body, code, out)
+		}
+	}
+	if code, out := call(`{"url": "git@github.com:someone/else.git"}`); code != 400 || !strings.Contains(fmt.Sprint(out["error"]), "another repository is connected") {
+		t.Errorf("connected, another address: %d %v", code, out)
+	}
+	if got := ghCalls(); len(got) != 2 || got[0] != want || got[1] != want {
+		t.Errorf("gh ran with %v, want %s twice", got, want)
+	}
+
+	m.mu.Lock()
+	m.settings.Repo = SiteRepo{URL: newBareRepo(t), Branch: "main"}
+	m.mu.Unlock()
+	if code, out := call(""); code != 400 || !strings.Contains(fmt.Sprint(out["error"]), "not on GitHub") {
+		t.Errorf("connected to a repository elsewhere: %d %v", code, out)
 	}
 }
 
