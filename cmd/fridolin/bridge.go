@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"github.com/Icewater1337/fridolin/internal/logx"
+	"github.com/Icewater1337/fridolin/internal/store"
 	"log"
 	"net"
 	"net/http"
@@ -41,7 +42,7 @@ func isJunkMessage(text string) bool {
 type Bridge struct {
 	cfgs     *ConfigStore
 	lock     *platform.Lock
-	store    *Store
+	store    *store.Store
 	wa       Messenger
 	dev      *devMessenger // non-nil in --no-whatsapp mode
 	brainMgr *BrainManager
@@ -140,7 +141,7 @@ func NewBridge(cfgs *ConfigStore, opts BridgeOptions) (_ *Bridge, err error) {
 			log.Printf("media: readying %s for inboxes: %v", cfg.MediaDir, err)
 		}
 	}
-	store, err := NewStore(cfg.DBPath, cfg.LogLevel)
+	store, err := store.Open(cfg.DBPath, cfg.LogLevel)
 	if err != nil {
 		return nil, fmt.Errorf("creating store: %w", err)
 	}
@@ -914,7 +915,7 @@ func (b *Bridge) deliver(br *Brain, m Inbound, res RunResult) {
 // records it in the history of the brain that wrote it: only now is it
 // something the brain said. The history gets it only once its row is gone,
 // so the retry after a failed removal does not record it twice.
-func (b *Bridge) delivered(ctx context.Context, r outboxRow) error {
+func (b *Bridge) delivered(ctx context.Context, r store.OutboxRow) error {
 	remove := func() error { return b.store.OutboxDelivered(ctx, r.ID) }
 	if r.Brain == "" || r.History == "" {
 		return remove()

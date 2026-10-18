@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"github.com/Icewater1337/fridolin/internal/logx"
+	"github.com/Icewater1337/fridolin/internal/store"
 	"io"
 	"io/fs"
 	"log"
@@ -74,7 +75,7 @@ type IgnoredHandler func(kind, jid, name, sender, pushName string)
 // WhatsAppClient wraps a whatsmeow client.
 type WhatsAppClient struct {
 	cfg       func() *Config
-	store     *Store
+	store     *store.Store
 	handler   InboundHandler
 	onIgnored IgnoredHandler
 	onVote    func(pollVote)      // a vote was recorded; may be nil
@@ -126,7 +127,7 @@ type WhatsAppClient struct {
 }
 
 // NewWhatsAppClient creates a client. It does NOT connect — call Connect.
-func NewWhatsAppClient(cfg func() *Config, store *Store, handler InboundHandler, onIgnored IgnoredHandler) (*WhatsAppClient, error) {
+func NewWhatsAppClient(cfg func() *Config, store *store.Store, handler InboundHandler, onIgnored IgnoredHandler) (*WhatsAppClient, error) {
 	logger := logx.NewWaLogger("WhatsApp", cfg().LogLevel)
 
 	deviceStore, err := store.Container.GetFirstDevice(context.Background())

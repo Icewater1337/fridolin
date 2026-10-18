@@ -4,6 +4,7 @@ package main
 
 import (
 	"errors"
+	"github.com/Icewater1337/fridolin/internal/store"
 	"io/fs"
 	"os"
 	"os/exec"
@@ -82,7 +83,7 @@ func TestBridgeClosesTheStoreWhenItGivesUpTheLock(t *testing.T) {
 	// means the database is closed, whether the bridge stopped or failed to
 	// start while or after opening it. This checks what is still open
 	// afterwards, not the order of the steps inside Stop, NewBridge and
-	// NewStore.
+	// store.Open.
 	tests := []struct {
 		name string
 		run  func(t *testing.T, cfgs *ConfigStore, dataDir string)
@@ -123,7 +124,7 @@ func TestBridgeClosesTheStoreWhenItGivesUpTheLock(t *testing.T) {
 			if err := cfg.EnsureDirs(); err != nil {
 				t.Fatal(err)
 			}
-			s, err := NewStore(cfg.DBPath, cfg.LogLevel)
+			s, err := store.Open(cfg.DBPath, cfg.LogLevel)
 			if err != nil {
 				t.Fatal(err)
 			}

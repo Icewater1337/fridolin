@@ -2,12 +2,13 @@ package main
 
 import (
 	"database/sql"
+	"github.com/Icewater1337/fridolin/internal/store"
 	"testing"
 )
 
-func openTestStore(t *testing.T, dbPath string) *Store {
+func openTestStore(t *testing.T, dbPath string) *store.Store {
 	t.Helper()
-	s, err := NewStore(dbPath, "error")
+	s, err := store.Open(dbPath, "error")
 	if err != nil {
 		t.Fatal(err)
 	}

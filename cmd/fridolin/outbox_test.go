@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/Icewater1337/fridolin/internal/store"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -281,8 +282,8 @@ func TestOutboxSummaryOnlyReads(t *testing.T) {
 	s := openOutboxStore(t, dir)
 	db := testStoreSQL(t, filepath.Join(dir, "bridge.db"))
 	ctx := context.Background()
-	old := time.Now().Add(-outboxFailedKeep - time.Hour)
-	id, err := s.AddOutbox(ctx, outboxRow{Chat: testDMChat, Parts: []outboxPart{{Text: "x"}}, CreatedAt: old})
+	old := time.Now().Add(-store.OutboxFailedKeep - time.Hour)
+	id, err := s.AddOutbox(ctx, store.OutboxRow{Chat: testDMChat, Parts: []store.OutboxPart{{Text: "x"}}, CreatedAt: old})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -322,9 +323,9 @@ func TestQuestionsWaitAndNoticesDoNot(t *testing.T) {
 }
 
 // openOutboxStore opens a bridge.db in dir.
-func openOutboxStore(t *testing.T, dir string) *Store {
+func openOutboxStore(t *testing.T, dir string) *store.Store {
 	t.Helper()
-	s, err := NewStore(filepath.Join(dir, "bridge.db"), "error")
+	s, err := store.Open(filepath.Join(dir, "bridge.db"), "error")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -339,7 +340,7 @@ func TestOutboxSurvivesARestart(t *testing.T) {
 	cfg := func() *Config { return &Config{MaxChunkSize: 4000} }
 	s := openOutboxStore(t, dir)
 	down := newFlakyMessenger(cfg, false)
-	first := newOutbox(s, func() Messenger { return down }, 0, func(context.Context, outboxRow) error {
+	first := newOutbox(s, func() Messenger { return down }, 0, func(context.Context, store.OutboxRow) error {
 		t.Error("delivered while offline")
 		return nil
 	})
@@ -356,8 +357,8 @@ func TestOutboxSurvivesARestart(t *testing.T) {
 
 	s = openOutboxStore(t, dir)
 	up := newFlakyMessenger(cfg, true)
-	got := make(chan outboxRow, 1)
-	second := newOutbox(s, func() Messenger { return up }, 0, func(ctx context.Context, r outboxRow) error {
+	got := make(chan store.OutboxRow, 1)
+	second := newOutbox(s, func() Messenger { return up }, 0, func(ctx context.Context, r store.OutboxRow) error {
 		got <- r
 		return s.OutboxDelivered(ctx, r.ID)
 	})
@@ -389,13 +390,13 @@ func TestOutboxGivesUp(t *testing.T) {
 	m := newFlakyMessenger(func() *Config { return &Config{} }, true)
 	o := newOutbox(s, func() Messenger { return m }, 0, nil)
 	defer o.Stop()
-	if _, err := s.AddOutbox(context.Background(), outboxRow{Chat: testDMChat, Brain: "main", History: "stale", Parts: []outboxPart{{Text: "stale"}}, CreatedAt: time.Now().Add(-2 * outboxTTL)}); err != nil {
+	if _, err := s.AddOutbox(context.Background(), store.OutboxRow{Chat: testDMChat, Brain: "main", History: "stale", Parts: []store.OutboxPart{{Text: "stale"}}, CreatedAt: time.Now().Add(-2 * outboxTTL)}); err != nil {
 		t.Fatal(err)
 	}
 	if err := o.Text(context.Background(), "status@broadcast", "to everyone", 0); err != nil {
 		t.Fatal(err)
 	}
-	var sum outboxSummary
+	var sum store.OutboxSummary
 	waitFor(t, 5*time.Second, "both given up", func() bool {
 		sum, _ = s.OutboxSummary(context.Background(), time.Now())
 		return sum.Failed == 2
@@ -448,10 +449,10 @@ func TestStatusWarnsAboutTheOutbox(t *testing.T) {
 	tb := newTestBridge(t, "")
 	tb.wa = newFlakyMessenger(tb.cfgs.Get, false)
 	ctx := context.Background()
-	if _, err := tb.store.AddOutbox(ctx, outboxRow{Chat: testDMChat, Parts: []outboxPart{{Text: "late"}}, CreatedAt: time.Now().Add(-10 * time.Minute)}); err != nil {
+	if _, err := tb.store.AddOutbox(ctx, store.OutboxRow{Chat: testDMChat, Parts: []store.OutboxPart{{Text: "late"}}, CreatedAt: time.Now().Add(-10 * time.Minute)}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := tb.store.AddOutbox(ctx, outboxRow{Chat: testGroup, Parts: []outboxPart{{Text: "too late"}}, CreatedAt: time.Now().Add(-2 * outboxTTL)}); err != nil {
+	if _, err := tb.store.AddOutbox(ctx, store.OutboxRow{Chat: testGroup, Parts: []store.OutboxPart{{Text: "too late"}}, CreatedAt: time.Now().Add(-2 * outboxTTL)}); err != nil {
 		t.Fatal(err)
 	}
 	tb.outbox.Wake()

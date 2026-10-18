@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"fmt"
+	"github.com/Icewater1337/fridolin/internal/store"
 	"reflect"
 	"regexp"
 	"slices"
@@ -485,7 +486,7 @@ func TestSentPollRemembersItsBrain(t *testing.T) {
 	if err := tb.outbox.Reply(context.Background(), "main", testDMChat, "[POLL]\nQuestion: Lunch?\n- yes\n- no\n[/POLL]", 0); err != nil {
 		t.Fatal(err)
 	}
-	var polls []PollResult
+	var polls []store.PollResult
 	waitFor(t, 5*time.Second, "the poll", func() bool {
 		polls, _ = tb.store.RecentPolls(context.Background(), "", 10, func(string) bool { return true })
 		return len(polls) == 1

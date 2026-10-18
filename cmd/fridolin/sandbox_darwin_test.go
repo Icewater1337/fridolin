@@ -7,6 +7,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/Icewater1337/fridolin/internal/store"
 	"net"
 	"os"
 	"os/exec"
@@ -1600,7 +1601,7 @@ func sandboxFixture(t *testing.T, home, otherBrain, denyDir string, extra ...map
 	if err := cfg.EnsureDirs(); err != nil {
 		t.Fatal(err)
 	}
-	store, err := NewStore(cfg.DBPath, cfg.LogLevel)
+	store, err := store.Open(cfg.DBPath, cfg.LogLevel)
 	if err != nil {
 		t.Fatal(err)
 	}
