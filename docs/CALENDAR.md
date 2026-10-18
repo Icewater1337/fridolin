@@ -46,6 +46,20 @@ come back to the brain's page, where the account's calendars are listed:
 Brains can use different accounts (a personal brain your personal account, a
 work brain the work account), or the same account with different calendars.
 
+The sign-in asks Google for three things, and nothing more: to see and edit
+the events on the account's calendars (`calendar.events`), to see when its
+calendars are busy (`calendar.events.freebusy`), and to see the list of its
+calendars (`calendar.calendarlist.readonly`). None of them lets a brain
+delete a calendar or change who it is shared with. Leave every box ticked
+on Google's consent screen: a sign-in without one of them does not finish,
+and the brain's page says which was missing.
+
+A brain connected with an older version has the full `calendar` scope,
+which includes both. It keeps working, and its page says so: **Disconnect**
+it and connect again to narrow it. Signing in again without disconnecting
+first is not enough, since Google keeps the old grant until it is revoked,
+and Disconnect revokes it.
+
 ## What the brain gets
 
 The sign-in is saved as the brain's token,

@@ -76,7 +76,13 @@ from time import sleep
 from typing import Any, NoReturn
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
-SCOPES = ["https://www.googleapis.com/auth/calendar"]
+# The bridge's sign-in asks for the same (calendarScopes in google.go): a
+# refresh that asked for others would fail with invalid_scope.
+SCOPES = [
+    "https://www.googleapis.com/auth/calendar.events",
+    "https://www.googleapis.com/auth/calendar.events.freebusy",
+    "https://www.googleapis.com/auth/calendar.calendarlist.readonly",
+]
 
 # Brains run this tool from their own folder, so an install hint names the
 # requirements file next to it rather than a path relative to the repo.

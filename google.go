@@ -40,7 +40,39 @@ import (
 // standard "authorized user" format the Google libraries read. Only that
 // brain's sandbox profile can read it.
 
-const calendarScope = "https://www.googleapis.com/auth/calendar"
+// calendarScopes are what a brain's sign-in asks Google for: the narrowest
+// grants the calendar commands work with. None of them lets a brain delete
+// a calendar or change who it is shared with, which the full calendar
+// scope older versions asked for does.
+var calendarScopes = []string{
+	"https://www.googleapis.com/auth/calendar.events",                // list, create and delete events
+	"https://www.googleapis.com/auth/calendar.events.freebusy",       // free: the busy times of the brain's calendars
+	"https://www.googleapis.com/auth/calendar.calendarlist.readonly", // the account's calendars, for the brain's page and `calendars`
+}
+
+// missingScopes are the calendarScopes granted lacks. Google's consent
+// screen lets the person untick some of them.
+func missingScopes(granted []string) []string {
+	var out []string
+	for _, s := range calendarScopes {
+		if !slices.Contains(granted, s) {
+			out = append(out, s)
+		}
+	}
+	return out
+}
+
+// extraScopes are the scopes in granted beyond calendarScopes: the full
+// calendar scope of a brain that connected with an older version, say.
+func extraScopes(granted []string) []string {
+	var out []string
+	for _, s := range granted {
+		if !slices.Contains(calendarScopes, s) {
+			out = append(out, s)
+		}
+	}
+	return out
+}
 
 // Endpoints, variables so tests can point them at a fake server. Token
 // requests always go to googleTokenEndpoint, never to a token_uri from a
@@ -199,17 +231,18 @@ func (g *GoogleAuth) StartSignIn(brainID string) (string, error) {
 	delete(g.lastError, brainID)
 	g.mu.Unlock()
 
+	// No include_granted_scopes: it would fold whatever else this client
+	// was ever granted into the brain's token.
 	q := url.Values{
-		"client_id":              {c.ClientID},
-		"redirect_uri":           {g.redirectURI()},
-		"response_type":          {"code"},
-		"scope":                  {calendarScope},
-		"access_type":            {"offline"},
-		"prompt":                 {"consent select_account"},
-		"include_granted_scopes": {"true"},
-		"state":                  {state},
-		"code_challenge":         {base64.RawURLEncoding.EncodeToString(sum[:])},
-		"code_challenge_method":  {"S256"},
+		"client_id":             {c.ClientID},
+		"redirect_uri":          {g.redirectURI()},
+		"response_type":         {"code"},
+		"scope":                 {strings.Join(calendarScopes, " ")},
+		"access_type":           {"offline"},
+		"prompt":                {"consent select_account"},
+		"state":                 {state},
+		"code_challenge":        {base64.RawURLEncoding.EncodeToString(sum[:])},
+		"code_challenge_method": {"S256"},
 	}
 	return googleAuthEndpoint + "?" + q.Encode(), nil
 }
@@ -258,6 +291,13 @@ func (g *GoogleAuth) HandleCallback(w http.ResponseWriter, r *http.Request) {
 		fail("Google did not return a refresh token — remove the bridge's access at myaccount.google.com/permissions and connect again")
 		return
 	}
+	if missing := missingScopes(tok.Scopes); len(missing) > 0 {
+		fail("Google granted only part of the calendar access the brain needs (missing " + strings.Join(missing, ", ") + ") — connect again and leave every box ticked")
+		return
+	}
+	if extra := extraScopes(tok.Scopes); len(extra) > 0 {
+		log.Printf("brain %s: Google granted more than the bridge asked for (%s); to narrow it, disconnect the brain's calendar and connect it again", p.brainID, strings.Join(extra, ", "))
+	}
 	account, err := g.primaryAccount(ctx, tok)
 	if err != nil {
 		fail("signed in, but reading the calendar list failed: " + err.Error())
@@ -293,6 +333,7 @@ type tokenResponse struct {
 	AccessToken  string `json:"access_token"`
 	RefreshToken string `json:"refresh_token"`
 	ExpiresIn    int    `json:"expires_in"`
+	Scope        string `json:"scope"` // what Google granted, space-separated
 	Error        string `json:"error"`
 	ErrorDesc    string `json:"error_description"`
 }
@@ -342,9 +383,18 @@ func (g *GoogleAuth) exchange(ctx context.Context, code, verifier string) (*goog
 	}
 	return &googleToken{
 		Token: tr.AccessToken, RefreshToken: tr.RefreshToken, TokenURI: googleTokenEndpoint,
-		ClientID: c.ClientID, ClientSecret: c.ClientSecret, Scopes: []string{calendarScope},
+		ClientID: c.ClientID, ClientSecret: c.ClientSecret, Scopes: tr.grantedScopes(calendarScopes),
 		Expiry: time.Now().Add(time.Duration(tr.ExpiresIn) * time.Second).UTC().Format("2006-01-02T15:04:05.000000Z"),
 	}, nil
+}
+
+// grantedScopes are the scopes Google says it granted, else asked: an
+// answer without a scope field grants what was requested.
+func (tr *tokenResponse) grantedScopes(asked []string) []string {
+	if granted := strings.Fields(tr.Scope); len(granted) > 0 {
+		return granted
+	}
+	return slices.Clone(asked)
 }
 
 // saveToken writes the brain's token, plus a copy of the client as its
@@ -448,6 +498,7 @@ func (g *GoogleAuth) accessToken(ctx context.Context, brainID string) (*googleTo
 		return nil, err
 	}
 	t.Token = tr.AccessToken
+	t.Scopes = tr.grantedScopes(t.Scopes)
 	t.Expiry = time.Now().Add(time.Duration(tr.ExpiresIn) * time.Second).UTC().Format("2006-01-02T15:04:05.000000Z")
 	if data, err := json.MarshalIndent(t, "", "  "); err == nil {
 		// A rename: a symlink planted since the read is replaced, not followed.
@@ -642,6 +693,13 @@ func (b *Bridge) apiCalendarStatus(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	resp["connected"] = true
+	if t, err := g.loadToken(br.ID()); err == nil && len(extraScopes(t.Scopes)) > 0 {
+		// Connected with an older version, which asked for every calendar
+		// right there is. Signing in again alone keeps that grant alive at
+		// Google; Disconnect revokes it, and the next sign-in asks for
+		// calendarScopes only.
+		resp["broad_access"] = true
+	}
 	if r.URL.Query().Get("list") != "0" {
 		ctx, cancel := context.WithTimeout(r.Context(), 20*time.Second)
 		defer cancel()
