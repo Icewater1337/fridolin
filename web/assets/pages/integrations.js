@@ -49,6 +49,25 @@ export default {
       pill(state, kind));
     // A CLI version Fridolin does not read, and what to install instead.
     const cliWarn = (warning) => (warning ? callout('warn', 'Plaud’s CLI version', warning) : null);
+    // A sign-in under way or one that failed. The connected card shows it
+    // only while the login expired, when Connect again can fail and keep
+    // the old login: on a login that works, a failed attempt is old news
+    // (one from before a sign-in outside the dashboard, say).
+    const connectNotes = (connect) => [
+      connect && connect.state === 'running' ? callout('info', 'Approve access in the browser tab Plaud just opened.',
+        // The bridge passes on only the link Plaud's tool printed for
+        // its sign-in; the host shows where it leads.
+        connect.auth_url
+          ? h('div', 'No tab opened? ', h('a', { href: connect.auth_url, target: '_blank', rel: 'noopener noreferrer' }, 'Open Plaud’s sign-in'), ` (${new URL(connect.auth_url).host})`)
+          : h('div', 'Use the tab Plaud’s tool opened in your browser.')) : null,
+      connect && connect.state === 'error' ? callout('bad', 'Sign-in did not finish', connect.error) : null,
+    ];
+    const startSignIn = async () => {
+      await post('/api/plaud/connect');
+      // The sign-in starts now; whether a browser tab opens, the card says.
+      toast('Starting Plaud’s sign-in…', 'info');
+      await refresh();
+    };
 
     // A status known from an earlier visit paints at once, so everything
     // render() uses is defined above.
@@ -85,19 +104,12 @@ export default {
             ? callout('warn', 'Connect Plaud again', '“Let brains use the Plaud CLI” changed where the login lives, and Fridolin does not take over a login it did not make. Connect again to use the one in ', mono(loginDir), ', or disconnect.')
             : null,
           cliWarn(cliWarning),
-          connecting ? callout('info', 'Approve access in the browser tab Plaud just opened.',
-            // The bridge passes on only the link Plaud's tool printed for
-            // its sign-in; the host shows where it leads.
-            connect.auth_url
-              ? h('div', 'No tab opened? ', h('a', { href: connect.auth_url, target: '_blank', rel: 'noopener noreferrer' }, 'Open Plaud’s sign-in'), ` (${new URL(connect.auth_url).host})`)
-              : h('div', 'Use the tab Plaud’s tool opened in your browser.')) : null,
-          connect && connect.state === 'error' ? callout('bad', 'Sign-in did not finish', connect.error) : null,
+          connectNotes(connect),
           h('p.muted.small', access
             ? 'The login goes to ~/.plaud/, where brains can use it (“Let brains use the Plaud CLI” is on). Plaud’s tool runs with its usage statistics turned off.'
             : 'Fridolin keeps the Plaud login in its own data folder, out of the brains’ reach. Plaud’s tool runs with its usage statistics turned off.'),
           h('div.actions', btn(connecting ? 'Waiting for Plaud…' : expired ? 'Connect again' : 'Connect Plaud', {
-            kind: 'primary', icon: 'external', disabled: connecting,
-            onClick: async () => { await post('/api/plaud/connect'); toast('Plaud’s sign-in opened in your browser', 'ok'); await refresh(); },
+            kind: 'primary', icon: 'external', disabled: connecting, onClick: startSignIn,
           }),
           // Fridolin still has a login on record: you may rather stop here.
           expired || moved ? disconnectButton({ connected: false, expired, moved, access }) : null),
@@ -114,9 +126,10 @@ export default {
       // A destination problem only blocks anything while Plaud is on.
       const blocked = st.enabled && s.summary_error;
       paint(alertsBox, {
-        expired: !!s.expired, blocked: blocked || '', lastError: s.last_error && !s.expired && s.last_error !== s.summary_error ? s.last_error : '',
-        cliWarning: s.cli.warning || '',
+        expired: !!s.expired, connect: (s.expired && s.connect) || null, blocked: blocked || '',
+        lastError: s.last_error && !s.expired && s.last_error !== s.summary_error ? s.last_error : '', cliWarning: s.cli.warning || '',
       }, (a) => [
+        connectNotes(a.connect),
         a.expired ? callout('bad', 'Plaud’s login expired', 'Recordings are not arriving. Connect again — it takes one approval in the browser.') : null,
         a.blocked ? callout('bad', 'Recordings cannot be delivered', a.blocked) : null,
         a.lastError ? callout('warn', 'Last check failed', a.lastError) : null,
@@ -136,7 +149,7 @@ export default {
       // still loading), so Save does not quietly switch to Automatic.
       if (st.brain && !brains.some((b) => b.id === st.brain)) options.push([st.brain, missing(st.brain)]);
       settings.set({ st, options, defaultMessage: s.default_message || '', interval: s.interval_seconds || 60 });
-      paint(actionsBox, { enabled: !!st.enabled, expired: !!s.expired, access: !!st.brain_access }, renderActions);
+      paint(actionsBox, { enabled: !!st.enabled, expired: !!s.expired, connecting: !!(s.connect && s.connect.state === 'running'), access: !!st.brain_access }, renderActions);
       paint(loginBox, s.login_dir || '', (dir) => ['Login stored in ', mono(dir), '.']);
     }
 
@@ -209,7 +222,7 @@ export default {
       return { el, value };
     }
 
-    function renderActions({ enabled, expired, access }) {
+    function renderActions({ enabled, expired, connecting, access }) {
       return [
         btn('Save', {
           kind: 'primary', icon: 'check',
@@ -229,7 +242,7 @@ export default {
             ctx.timeout(() => refresh(), 3000);
           },
         }) : null,
-        expired ? btn('Connect again', { icon: 'external', onClick: async () => { await post('/api/plaud/connect'); await refresh(); } }) : null,
+        expired ? btn(connecting ? 'Waiting for Plaud…' : 'Connect again', { icon: 'external', disabled: connecting, onClick: startSignIn }) : null,
         disconnectButton({ connected: true, expired, moved: false, access }),
       ];
     }
@@ -248,6 +261,7 @@ export default {
           if (!ok) return;
           // Plaud's logout may take the bridge's 30 s.
           await post('/api/plaud/disconnect', undefined, { timeout: 60000 });
+          toast('Plaud disconnected', 'ok');
           await refresh();
         },
       });

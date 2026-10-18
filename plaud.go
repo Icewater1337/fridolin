@@ -1875,7 +1875,15 @@ func (p *PlaudManager) Connect() error {
 			}
 		})
 		// The CLI opens the sign-in page in your browser itself.
+		before := p.loginStamp()
 		_, err := p.runCLIOut(withDesktop(ctx), out, "login")
+		// A CLI that fails after it wrote a new login signed in all the
+		// same; its error would sit on a card whose login works. One that
+		// fails and leaves the old login did not.
+		if err != nil && p.hasLogin() && p.loginStamp() != before {
+			log.Printf("plaud: sign-in wrote a new login, then failed: %v", err)
+			err = nil
+		}
 		if err == nil && !p.hasLogin() {
 			err = errors.New("the sign-in did not finish: Plaud's tool left no login")
 		}

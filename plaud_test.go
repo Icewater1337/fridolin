@@ -2732,6 +2732,47 @@ func TestPlaudSignInSaysWhyItFailed(t *testing.T) {
 	}
 }
 
+// A sign-in is judged by the login it leaves: the CLI may fail after it
+// wrote a new one, which signed in all the same, while a failure that
+// leaves the old login in place did not.
+func TestPlaudConnectJudgesTheSignInByTheLogin(t *testing.T) {
+	for _, c := range []struct {
+		name, fixture string
+		oldLogin      bool
+		want          string
+	}{
+		{"signed in", "", false, "done"},
+		{"failed after writing a new login", "login_then_fail", false, "done"},
+		{"failed, the old login stays", "fail_login", true, "error"},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			tb, fp := plaudBridge(t, "")
+			if c.oldLogin {
+				if err := os.MkdirAll(filepath.Dir(tb.plaud.tokenPath()), 0o700); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.WriteFile(tb.plaud.tokenPath(), []byte(`{"old":true}`), 0o600); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if c.fixture != "" {
+				fp.write(c.fixture, "")
+			}
+			if rec := tb.do("POST", "/api/plaud/connect", nil); rec.Code != 202 {
+				t.Fatalf("connect: %d %s", rec.Code, rec.Body)
+			}
+			var job connectJob
+			waitFor(t, 10*time.Second, "the sign-in to end", func() bool {
+				job = *tb.plaud.Status().Connect
+				return job.State != "running"
+			})
+			if job.State != c.want {
+				t.Errorf("sign-in %s (%s), want %s", job.State, job.Error, c.want)
+			}
+		})
+	}
+}
+
 // The card offers the sign-in link the CLI prints when it cannot open a
 // browser, and no other: not a link from a line before it, not one that is
 // not https (or http to this machine), and not one still arriving.
