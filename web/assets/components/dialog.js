@@ -7,7 +7,7 @@ import { btn, runBusy } from './buttons.js';
 
 const openDialogs = new Set();
 
-/** Closes every open dialog (used when the page changes). */
+/** Closes every open dialog of the page (used when the page changes). */
 export function closeAllDialogs() {
   [...openDialogs].forEach((fn) => fn(null));
 }
@@ -18,9 +18,13 @@ export function closeAllDialogs() {
  * dismissed. An action with onClick(dialog) shows a spinner while it runs
  * and closes the dialog with what it resolves to; when that is false or
  * undefined, or it throws (shown as a toast), the dialog stays open.
+ * dismissible false gives it no close button and keeps Escape and a click
+ * beside it from closing it. A dialog that outlivesPage is the app's, not
+ * the page's: a page change leaves it open.
  */
-export function openDialog({ title, body, actions = [{ label: 'Close', value: null }], wide = false, dismissible = true }) {
+export function openDialog({ title, body, actions = [{ label: 'Close', value: null }], wide = false, dismissible = true, outlivesPage = false }) {
   let finishFn = null;
+  let setActionsFn = null;
   const promise = new Promise((resolve) => {
     const dlg = h(`dialog.dialog${wide ? '.wide' : ''}`, { 'aria-label': title });
     let done = false;
@@ -33,9 +37,9 @@ export function openDialog({ title, body, actions = [{ label: 'Close', value: nu
       resolve(v);
     };
     finishFn = finish;
-    openDialogs.add(finish);
+    if (!outlivesPage) openDialogs.add(finish);
     const footer = h('div.dialog-actions');
-    for (const a of actions) {
+    const button = (a) => {
       const b = btn(a.label, { kind: a.kind || '', icon: a.icon });
       b.addEventListener('click', async (e) => {
         e.preventDefault();
@@ -43,8 +47,10 @@ export function openDialog({ title, body, actions = [{ label: 'Close', value: nu
         const r = await runBusy(b, () => a.onClick(dlg));
         if (r !== false && r !== undefined) finish(r);
       });
-      footer.appendChild(b);
-    }
+      return b;
+    };
+    setActionsFn = (list) => footer.replaceChildren(...list.map(button));
+    setActionsFn(actions);
     const closeBtn = dismissible ? h('button.icon-btn.dialog-close', { type: 'button', 'aria-label': 'Close' }, icon('x')) : null;
     if (closeBtn) closeBtn.addEventListener('click', () => finish(null));
     append(dlg, [
@@ -59,6 +65,8 @@ export function openDialog({ title, body, actions = [{ label: 'Close', value: nu
   });
   /** Closes the dialog from outside; the promise resolves with v. */
   promise.close = (v = null) => { if (finishFn) finishFn(v); };
+  /** Replaces the dialog's buttons with these actions, e.g. once what it waited for is over. */
+  promise.setActions = (list) => { if (setActionsFn) setActionsFn(list); };
   return promise;
 }
 
