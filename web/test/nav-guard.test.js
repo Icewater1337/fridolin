@@ -1,56 +1,9 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { guardNavigation } from '../assets/app/nav-guard.js';
+import { fakeWindow } from './fake-window.js';
 
 const settle = async () => { for (let i = 0; i < 6; i++) await new Promise((r) => setImmediate(r)); };
-
-// A window with just enough history: entries with a hash and a state, a
-// position, and the events a browser fires, later, as a browser does.
-function fakeWindow(start = ['#/overview']) {
-  const listeners = { hashchange: [], popstate: [], click: [] };
-  const entries = start.map((hash) => ({ hash, state: null }));
-  let at = entries.length - 1;
-  const fire = (type, e = { type }) => [...listeners[type]].forEach((fn) => fn(e));
-  const later = (fn) => setImmediate(fn);
-  const history = {
-    get state() { return entries[at].state; },
-    replaceState(state, _title, url) { entries[at] = { hash: url === undefined ? entries[at].hash : url, state }; },
-    go(n) {
-      later(() => {
-        const to = at + n;
-        if (to < 0 || to >= entries.length || n === 0) return;
-        const from = entries[at].hash;
-        at = to;
-        fire('popstate');
-        if (entries[at].hash !== from) fire('hashchange');
-      });
-    },
-  };
-  const location = {
-    get hash() { return entries[at].hash; },
-    set hash(v) {
-      if (v === entries[at].hash) return;
-      entries.splice(at + 1);
-      entries.push({ hash: v, state: null });
-      at += 1;
-      later(() => { fire('popstate'); fire('hashchange'); });
-    },
-  };
-  const on = (type, fn) => listeners[type].push(fn);
-  const win = { history, location, document: { addEventListener: on }, addEventListener: on };
-  return {
-    win,
-    hashes: () => entries.map((e) => e.hash),
-    at: () => at,
-    // A click on a link: the browser follows it unless a listener prevented that.
-    click(href, mods = {}) {
-      const a = { getAttribute: (k) => (k === 'href' ? href : null) };
-      const e = { type: 'click', button: 0, ...mods, target: { closest: () => a }, defaultPrevented: false, preventDefault() { this.defaultPrevented = true; } };
-      fire('click', e);
-      if (!e.defaultPrevented) location.hash = href;
-    },
-  };
-}
 
 // The tab loads the first address and visits the others by links, the way
 // its history comes about: every entry of a page's history was visited in
@@ -160,6 +113,16 @@ test('a link opened in a new tab is not held', async () => {
   page.dirty = true;
   w.click('#/brains', { metaKey: true });
   assert.equal(page.asked, 0);
+});
+
+test('a link within the page is no navigation', async () => {
+  const { w, page } = await setup();
+  page.dirty = true;
+  w.click('#main', { handled: true }); // the skip link, which moves the focus itself
+  await settle();
+  assert.equal(page.asked, 0, 'nothing to confirm');
+  assert.deepEqual(w.hashes(), ['#/overview']);
+  assert.deepEqual(page.rendered, []);
 });
 
 test('an address typed while there are unsaved changes is put back unless confirmed', async () => {

@@ -7,7 +7,7 @@ import { createPage } from '../assets/app/page.js';
 import { configResource } from '../assets/app/resources.js';
 import page from '../assets/pages/settings.js';
 
-async function openPage(t) {
+async function openPage(t, { params, focusAt } = {}) {
   t.mock.timers.enable({ apis: ['setTimeout', 'Date'] });
   installDom();
   noConsoleErrors(t);
@@ -33,7 +33,7 @@ async function openPage(t) {
   });
   const root = h('div');
   document.body.append(root);
-  const ctx = createPage();
+  const ctx = createPage({ params, focusAt });
   t.after(() => ctx.destroy());
   page.render(root, ctx);
   await settle();
@@ -110,4 +110,15 @@ test('a save refused twice without a clash says to save again, not that it clash
 
   await save();
   assert.equal(bridge.config.claude_path, '/usr/local/bin/claude');
+});
+
+test('a link to a section gives the focus to its heading', async (t) => {
+  for (const params of [{ section: 'claude' }, { section: 'google' }, { section: 'nope' }, {}]) {
+    await t.test(params.section || 'no section', async (t) => {
+      const asked = [];
+      await openPage(t, { params, focusAt: (el) => asked.push(el.textContent) });
+      const want = { claude: ['Claude'], google: ['Google sign-in'] }[params.section] || [];
+      assert.deepEqual(asked, want);
+    });
+  }
 });

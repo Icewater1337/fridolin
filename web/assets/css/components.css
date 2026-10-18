@@ -3,6 +3,21 @@
 
 /* ── shell ──────────────────────────────────────────────────────────────── */
 
+.skip-link {
+  position: absolute;
+  top: -60px;
+  left: 12px;
+  z-index: 100;
+  padding: 8px 14px;
+  border-radius: var(--radius-sm);
+  background: var(--accent);
+  color: var(--accent-text);
+  font-weight: 600;
+  text-decoration: none;
+}
+.skip-link:focus { top: 12px; }
+.skip-link:hover { color: var(--accent-text); }
+
 .shell { display: grid; grid-template-columns: var(--sidebar-w) minmax(0, 1fr); min-height: 100dvh; }
 
 .sidebar {
@@ -81,6 +96,10 @@
    rest of the screen to one part (the log view) without knowing how tall
    the header and the banners are. */
 .main { flex: 1 0 auto; display: flex; flex-direction: column; width: 100%; max-width: 1120px; margin: 0 auto; padding: 28px 32px 80px; }
+/* The focus lands here (or on the page's h1, or the h2 of the section a
+   link names) after a route change: a ring around it would only
+   distract. */
+.main:focus, .main h1:focus, .main h2:focus { outline: none; }
 
 /* ── page structure ─────────────────────────────────────────────────────── */
 

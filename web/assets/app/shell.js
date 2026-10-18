@@ -45,9 +45,11 @@ function themeButton() {
 
 /**
  * createShell({onRestart, onReload}) builds the shell. It returns {nodes,
- * page, setActive(navId), closeNav(), setOffline(bool)}: mount nodes into
- * #app, render pages into page. onRestart runs from the restart banner's
- * button, onReload (location.reload) from the update banner's.
+ * page, setActive(navId), closeNav(), focusPage(heading),
+ * setOffline(bool)}: mount nodes into #app, render pages into page.
+ * focusPage returns the element it focused. onRestart runs from the
+ * restart banner's button, onReload (location.reload) from the update
+ * banner's.
  */
 export function createShell({ onRestart, onReload = () => location.reload() }) {
   const links = new Map();
@@ -80,7 +82,21 @@ export function createShell({ onRestart, onReload = () => location.reload() }) {
     icon('info'), h('span', 'Fridolin was updated. Reload the page to use the new dashboard.'),
     btn('Reload', { kind: 'primary', small: true, onClick: () => onReload() }));
   banners.append(offline, restartBanner, updateBanner);
-  const page = h('main.main', { id: 'main' });
+  const page = h('main.main', { id: 'main', tabindex: '-1' });
+
+  // The keyboard's way into a page: the heading given, else the page's
+  // own, or the page area until it has one. A screen reader then reads
+  // the new page from there, not on from the link that was followed.
+  const focusPage = (target) => {
+    const heading = target || page.querySelector('h1');
+    if (heading) heading.setAttribute('tabindex', '-1');
+    const el = heading || page;
+    el.focus({ preventScroll: true });
+    return el;
+  };
+  // Past the sidebar's links, for keyboard users; shown once focused.
+  const skip = h('a.skip-link', { href: '#main' }, 'Skip to content');
+  skip.addEventListener('click', (e) => { e.preventDefault(); focusPage(); });
 
   menuBtn.addEventListener('click', () => {
     const open = !sidebar.classList.contains('nav-open');
@@ -129,7 +145,7 @@ export function createShell({ onRestart, onReload = () => location.reload() }) {
   });
 
   return {
-    nodes: [sidebar, h('div.content', banners, page)],
+    nodes: [skip, sidebar, h('div.content', banners, page)],
     page,
     setActive(id) {
       links.forEach((a, key) => {
@@ -138,6 +154,7 @@ export function createShell({ onRestart, onReload = () => location.reload() }) {
       });
     },
     closeNav() { sidebar.classList.remove('nav-open'); menuBtn.setAttribute('aria-expanded', 'false'); },
+    focusPage,
     setOffline(off) { offline.hidden = !off; },
   };
 }

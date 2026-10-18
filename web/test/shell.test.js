@@ -77,3 +77,32 @@ test('a page that failed to load offers a reload', () => {
   el.querySelector('button').click();
   assert.equal(reloads, 1);
 });
+
+test('focusPage puts the focus on the heading given, the page heading, or the page area until there is one', () => {
+  const { shell } = shellInPage();
+  assert.equal(shell.focusPage(), shell.page);
+  assert.equal(document.activeElement, shell.page);
+  assert.equal(shell.page.getAttribute('tabindex'), '-1', 'the page area takes the focus without joining the Tab order');
+  const heading = document.createElement('h1');
+  const part = document.createElement('h2');
+  shell.page.append(heading, part);
+  assert.equal(shell.focusPage(), heading);
+  assert.equal(document.activeElement, heading);
+  assert.equal(heading.getAttribute('tabindex'), '-1');
+  assert.equal(shell.focusPage(part), part);
+  assert.equal(document.activeElement, part);
+  assert.equal(part.getAttribute('tabindex'), '-1');
+});
+
+test('the skip link comes first and moves the focus to the page', () => {
+  const { shell, app } = shellInPage();
+  const skip = app.firstChild;
+  assert.equal(skip.tagName, 'A');
+  assert.equal(skip.textContent, 'Skip to content');
+  const heading = document.createElement('h1');
+  shell.page.append(heading);
+  const e = new Event('click', { bubbles: true, cancelable: true });
+  skip.dispatchEvent(e);
+  assert.equal(e.defaultPrevented, true, 'the address stays the page’s');
+  assert.equal(document.activeElement, heading);
+});

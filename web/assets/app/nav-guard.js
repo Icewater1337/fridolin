@@ -66,11 +66,12 @@ export function guardNavigation({ win, isDirty, confirm, onDiscard, onNavigate }
     history.go(delta);
   });
 
-  // A link is held before the browser follows it, so it adds no entry
-  // until the person agreed.
+  // A link to a page (#/…) is held before the browser follows it, so it
+  // adds no entry until the person agreed. Other # links stay on the page
+  // (the skip link), so leaving is not what they do.
   document.addEventListener('click', (e) => {
     if (e.defaultPrevented || e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
-    const a = e.target && e.target.closest ? e.target.closest('a[href^="#"]') : null;
+    const a = e.target && e.target.closest ? e.target.closest('a[href^="#/"]') : null;
     if (!a || a.getAttribute('target')) return;
     if (!asking && !isDirty()) return;
     e.preventDefault();
