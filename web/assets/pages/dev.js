@@ -2,13 +2,12 @@
 
 import { get, post } from '../app/api.js';
 import { store } from '../app/store.js';
-import { h, mount } from '../lib/dom.js';
-import { changed } from '../lib/memo.js';
+import { h, mount, paint, reconcile } from '../lib/dom.js';
 import { toast } from '../components/toast.js';
 import { btn, runBusy } from '../components/buttons.js';
 import { field, textInput, toggle } from '../components/fields.js';
 import { timeAgo, empty, pageHeader, callout, longText } from '../components/common.js';
-import { chatEl } from '../components/chat.js';
+import { chatEl, chatName } from '../components/chat.js';
 
 const DM = '15551234567@s.whatsapp.net';
 const GROUP = '120363000000000000@g.us';
@@ -16,9 +15,9 @@ const GROUP = '120363000000000000@g.us';
 export default {
   title: 'Dev',
   render(root, ctx) {
-    const memo = {};
     const notice = h('div');
-    const outbox = h('div.outbox');
+    const outbox = h('div');
+    const sent = h('div.outbox');
 
     const jidIn = textInput({ value: DM, class: 'mono', required: true });
     const senderIn = textInput({ placeholder: 'defaults to the number in the JID', class: 'mono' });
@@ -57,29 +56,28 @@ export default {
       h('section.section', h('div.section-head', h('h2.section-title', 'Outbox'), h('span.muted.small', 'What the bridge would have sent, newest first')), outbox));
 
     ctx.watch(store, (s) => s.status, (s) => {
-      if (!s || !changed(memo, 'dev', s.dev_mode)) return;
-      mount(notice, s.dev_mode ? null : callout('warn', 'Dev mode is off', 'This page only works when the bridge was started with --no-whatsapp.'));
+      if (!s) return;
+      paint(notice, !!s.dev_mode, (dev) => (dev ? null : callout('warn', 'Dev mode is off', 'This page only works when the bridge was started with --no-whatsapp.')));
     });
 
     let items = null;
     const paintOutbox = () => {
       if (!items) return;
-      if (!items.length) { mount(outbox, h('div.card', empty('Nothing sent yet', 'Replies and polls the bridge sends appear here.'))); return; }
-      mount(outbox, items.map((m) => h('article.card.outbox-item',
+      if (!items.length) { paint(outbox, 'none', () => h('div.card', empty('Nothing sent yet', 'Replies and polls the bridge sends appear here.'))); return; }
+      paint(outbox, 'list', () => sent);
+      // A message keeps its card, so one that was unfolded stays unfolded.
+      reconcile(sent, items.map((m) => ({ ...m, chat_name: chatName(m.jid) })), (m) => `${m.ts}|${m.jid}|${(m.text || '').length}`, (m) => h('article.card.outbox-item',
         h('div.act-meta', h('span.act-who', m.poll ? 'Poll' : 'Message'), h('span.act-sep', 'to'), chatEl(m.jid), h('span.act-time', timeAgo(m.ts))),
         longText(m.text, { limit: 600, lines: 10 }),
-        m.poll ? h('ul.poll-options', m.poll.map((o) => h('li', o))) : null)));
+        m.poll ? h('ul.poll-options', m.poll.map((o) => h('li', o))) : null));
     };
     const outboxPoll = ctx.poll(async (signal) => {
-      let data;
       try {
-        data = await get('/api/dev/outbox', { signal });
+        items = await get('/api/dev/outbox', { signal });
       } catch (e) {
-        if (e.status === 404) { mount(outbox, empty('Not available', e.message)); return; }
+        if (e.status === 404) { paint(outbox, { unavailable: e.message }, () => empty('Not available', e.message)); return; }
         throw e;
       }
-      if (!changed(memo, 'out', data)) return;
-      items = data;
       paintOutbox();
     }, 2000);
     // Chat labels show group names once the groups have loaded.

@@ -65,3 +65,82 @@ export function mount(el, ...children) {
   append(el, children);
   return el;
 }
+
+// What reconcile() knows about the nodes it made: the key and the JSON of
+// the item each shows. paint() remembers the JSON of what a region shows.
+const items = new WeakMap();
+const regions = new WeakMap();
+
+/**
+ * reconcile(container, list, key, render) makes container's children one
+ * node per item of list, in order, and returns container. key(item) names
+ * an item from one call to the next; render(item) builds its node. A node
+ * stays as long as its item is unchanged (compared as JSON), so focus,
+ * typed text, an open <details> and the chosen <option> inside it survive
+ * a refresh. A changed item goes to the node's update(item) when it has
+ * one, which refreshes it in place; otherwise render(item) replaces the
+ * node. Nodes of items that are gone, and anything else in container (a
+ * spinner, an empty state), are removed first, so the nodes that stay
+ * move only when the order changed.
+ */
+export function reconcile(container, list, key, render) {
+  const wanted = new Set(list.map((item) => String(key(item))));
+  const keep = new Map();
+  for (const n of [...container.childNodes]) {
+    const was = items.get(n);
+    if (was && wanted.has(was.key) && !keep.has(was.key)) keep.set(was.key, n);
+    else n.remove();
+  }
+  list.forEach((item, i) => {
+    const k = String(key(item));
+    const sig = JSON.stringify(item);
+    let n = keep.get(k);
+    keep.delete(k); // an item with the same key again gets a node of its own
+    if (n && items.get(n).sig !== sig) {
+      if (typeof n.update === 'function') {
+        n.update(item);
+        items.get(n).sig = sig;
+      } else {
+        n.remove();
+        n = null;
+      }
+    }
+    if (!n) {
+      n = render(item);
+      items.set(n, { key: k, sig });
+    }
+    const at = container.childNodes[i] || null;
+    if (at !== n) container.insertBefore(n, at);
+  });
+  return container;
+}
+
+/**
+ * paint(container, data, render) shows render(data) (nodes, text or an
+ * array of them) in container, and builds it again only when data changed
+ * since container was last painted (compared as JSON). Returns whether it
+ * painted. Everything render shows must come from data, so a change to it
+ * is a change to data.
+ */
+export function paint(container, data, render) {
+  const sig = JSON.stringify(data);
+  if (regions.get(container) === sig) return false;
+  regions.set(container, sig);
+  mount(container, render(data));
+  return true;
+}
+
+/**
+ * Gives a <select> these [value, label] options, keeping the choice while
+ * it is still offered (else fallback, or the first option). An unchanged
+ * list leaves the select alone.
+ */
+export function syncOptions(sel, options, fallback) {
+  const now = [...sel.querySelectorAll('option')].map((o) => [o.value, o.textContent]);
+  if (JSON.stringify(now) === JSON.stringify(options)) return sel;
+  const v = sel.value;
+  sel.replaceChildren(...options.map(([value, label]) => h('option', { value }, label)));
+  const offered = (x) => options.some(([o]) => o === x);
+  sel.value = offered(v) ? v : (fallback !== undefined && offered(fallback) ? fallback : (options[0] ? options[0][0] : ''));
+  return sel;
+}

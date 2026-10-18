@@ -135,7 +135,7 @@ Then, in the dashboard:
 2. **Add a brain.** Choose a folder (an empty one, or one you already keep
    notes in). The bridge writes a `brain.json` and a starter prompt into it and
    never overwrites existing files. Decide whether it answers your DMs.
-3. **Allow your number** under *Settings → Access*, then DM the bridge.
+3. **Allow your number** under *Chats → Allowed numbers*, then DM the bridge.
 4. **Optional:** *Backup → Connect Google Drive*.
 
 Reopen the dashboard any time with:

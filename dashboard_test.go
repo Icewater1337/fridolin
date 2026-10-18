@@ -848,6 +848,210 @@ func TestAssignGroup(t *testing.T) {
 	}
 }
 
+func TestAllowListEntries(t *testing.T) {
+	numbers := []struct {
+		in, want string // want "" = refused
+	}{
+		{"15551234567", "15551234567"},
+		{"+1 555 123 4567", "15551234567"},
+		{"+1 (555) 123-4567", "15551234567"},
+		{"1.555.123.4567", "15551234567"},
+		{" 15551234567\u00a0", "15551234567"},
+		{"15551234567@s.whatsapp.net", "15551234567"},
+		{"12345", ""},
+		{"1555123456789012", ""},
+		{"1555abc4567", ""},
+		{"15551234567:12@s.whatsapp.net", ""},
+		{"", ""},
+		{"+", ""},
+	}
+	for _, c := range numbers {
+		t.Run("number "+c.in, func(t *testing.T) {
+			got, err := allowListNumber(c.in)
+			if c.want == "" {
+				if err == nil {
+					t.Errorf("allowListNumber(%q) = %q, want an error", c.in, got)
+				}
+				return
+			}
+			if err != nil || got != c.want {
+				t.Errorf("allowListNumber(%q) = %q, %v; want %q", c.in, got, err, c.want)
+			}
+		})
+	}
+	groups := []struct {
+		in, want string
+	}{
+		{"120363000000000000@g.us", "120363000000000000@g.us"},
+		{" 120363000000000000@g.us ", "120363000000000000@g.us"},
+		{"15551234567-1400000000@g.us", "15551234567-1400000000@g.us"}, // personal-data:ignore (an old-style group JID made of placeholders)
+		{"120363000000000000@g.us/x", ""},
+		{"x@g.us", ""},
+		{"@g.us", ""},
+		{"-1@g.us", ""},
+		{"120363000000000000@s.whatsapp.net", ""},
+		{"", ""},
+	}
+	for _, c := range groups {
+		t.Run("group "+c.in, func(t *testing.T) {
+			got, err := allowListGroup(c.in)
+			if c.want == "" {
+				if err == nil {
+					t.Errorf("allowListGroup(%q) = %q, want an error", c.in, got)
+				}
+				return
+			}
+			if err != nil || got != c.want {
+				t.Errorf("allowListGroup(%q) = %q, %v; want %q", c.in, got, err, c.want)
+			}
+		})
+	}
+}
+
+// FuzzAllowListNumber: whatever is typed into the dashboard's "Add number"
+// box, what reaches allowed_numbers is 6 to 15 digits, all of them from
+// the input, and it goes in unchanged a second time.
+func FuzzAllowListNumber(f *testing.F) {
+	for _, s := range []string{"15551234567", "+1 (555) 123-4567", "15551234567@s.whatsapp.net", "", "+", "1-2", "١٥٥٥١٢٣٤٥٦٧"} {
+		f.Add(s)
+	}
+	f.Fuzz(func(t *testing.T, in string) {
+		n, err := allowListNumber(in)
+		if err != nil {
+			return
+		}
+		if !phoneNumberRE.MatchString(n) {
+			t.Fatalf("allowListNumber(%q) = %q, not 6 to 15 digits", in, n)
+		}
+		digits := strings.Map(func(r rune) rune {
+			if '0' <= r && r <= '9' {
+				return r
+			}
+			return -1
+		}, in)
+		if !strings.Contains(digits, n) {
+			t.Errorf("allowListNumber(%q) = %q, digits that are not in the input", in, n)
+		}
+		if again, err := allowListNumber(n); err != nil || again != n {
+			t.Errorf("allowListNumber(%q) = %q, %v; want it unchanged", n, again, err)
+		}
+	})
+}
+
+func TestAllowAndRevokeChats(t *testing.T) {
+	const group = "120363000000000001@g.us"
+	cases := []struct {
+		name    string
+		extra   string // config fields that replace the test bridge's
+		path    string
+		body    map[string]string
+		code    int
+		numbers []string // allowed_numbers afterwards
+		groups  []string // allowed_groups afterwards
+	}{
+		{"allow a typed number", "", "/api/chats/allow", map[string]string{"kind": "dm", "number": "+1 555 987-6543"}, 200,
+			[]string{"15551234567", "15559876543"}, []string{"120363000000000000@g.us"}},
+		{"allow a number twice", "", "/api/chats/allow", map[string]string{"kind": "dm", "number": "15551234567"}, 200,
+			[]string{"15551234567"}, []string{"120363000000000000@g.us"}},
+		{"refuse a number that is none", "", "/api/chats/allow", map[string]string{"kind": "dm", "number": "call me"}, 400,
+			[]string{"15551234567"}, []string{"120363000000000000@g.us"}},
+		{"allow a typed group", "", "/api/chats/allow", map[string]string{"kind": "group", "jid": group}, 200,
+			[]string{"15551234567"}, []string{"120363000000000000@g.us", group}},
+		{"refuse a group that is none", "", "/api/chats/allow", map[string]string{"kind": "group", "jid": "120363000000000001@g.us/x"}, 400,
+			[]string{"15551234567"}, []string{"120363000000000000@g.us"}},
+		{"revoke a number, written as typed", "", "/api/chats/revoke", map[string]string{"kind": "dm", "number": "+1 555 123 4567"}, 200,
+			[]string{}, []string{"120363000000000000@g.us"}},
+		{"revoke a group", "", "/api/chats/revoke", map[string]string{"kind": "group", "jid": "120363000000000000@g.us"}, 200,
+			[]string{"15551234567"}, []string{}},
+		{"revoke what is not there", "", "/api/chats/revoke", map[string]string{"kind": "group", "jid": group}, 404,
+			[]string{"15551234567"}, []string{"120363000000000000@g.us"}},
+		{"revoke what is not there and not a number", "", "/api/chats/revoke", map[string]string{"kind": "dm", "number": "call me"}, 404,
+			[]string{"15551234567"}, []string{"120363000000000000@g.us"}},
+		{"refuse to revoke nothing", "", "/api/chats/revoke", map[string]string{"kind": "dm", "number": " "}, 400,
+			[]string{"15551234567"}, []string{"120363000000000000@g.us"}},
+		{"refuse another kind", "", "/api/chats/revoke", map[string]string{"kind": "channel", "jid": group}, 400,
+			[]string{"15551234567"}, []string{"120363000000000000@g.us"}},
+		// Entries written into config.json by hand, as the Chats page shows
+		// and sends them.
+		{"revoke a hand-written number as it is stored", `, "allowed_numbers": ["+15559876543", "15551234567"]`,
+			"/api/chats/revoke", map[string]string{"kind": "dm", "number": "+15559876543"}, 200,
+			[]string{"15551234567"}, []string{"120363000000000000@g.us"}},
+		{"revoke a group stored with a space", `, "allowed_groups": [" ` + group + `", "120363000000000000@g.us"]`,
+			"/api/chats/revoke", map[string]string{"kind": "group", "jid": " " + group}, 200,
+			[]string{"15551234567"}, []string{"120363000000000000@g.us"}},
+		{"revoke a number the bridge would refuse", `, "allowed_numbers": ["12345", "15551234567"]`,
+			"/api/chats/revoke", map[string]string{"kind": "dm", "number": "12345"}, 200,
+			[]string{"15551234567"}, []string{"120363000000000000@g.us"}},
+		{"revoke a group the bridge would refuse", `, "allowed_groups": ["family@g.us", "120363000000000000@g.us"]`,
+			"/api/chats/revoke", map[string]string{"kind": "group", "jid": "family@g.us"}, 200,
+			[]string{"15551234567"}, []string{"120363000000000000@g.us"}},
+		{"revoke every form of a number typed another way", `, "allowed_numbers": ["+15551234567", "15559876543", "1 555 123 4567"]`,
+			"/api/chats/revoke", map[string]string{"kind": "dm", "number": "15551234567"}, 200,
+			[]string{"15559876543"}, []string{"120363000000000000@g.us"}},
+		{"revoke only the stored form that was sent", `, "allowed_numbers": ["+15551234567", "15551234567"]`,
+			"/api/chats/revoke", map[string]string{"kind": "dm", "number": "+15551234567"}, 200,
+			[]string{"15551234567"}, []string{"120363000000000000@g.us"}},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			tb := newTestBridge(t, c.extra)
+			w := tb.do("POST", c.path, c.body)
+			if w.Code != c.code {
+				t.Fatalf("%s: %d %s, want %d", c.path, w.Code, w.Body, c.code)
+			}
+			f := tb.cfgs.FileCopy()
+			if !slices.Equal(f.AllowedNumbers, c.numbers) {
+				t.Errorf("allowed_numbers = %q, want %q", f.AllowedNumbers, c.numbers)
+			}
+			if !slices.Equal(f.AllowedGroups, c.groups) {
+				t.Errorf("allowed_groups = %q, want %q", f.AllowedGroups, c.groups)
+			}
+		})
+	}
+}
+
+func TestRevokedGroupKeepsItsBrain(t *testing.T) {
+	const group = "120363000000000000@g.us"
+	tb := newTestBridge(t, "")
+	dir := tb.addFolderBrain(t, BrainManifest{ID: "family", Name: "Family", Routing: BrainRouting{Groups: []string{group}}})
+	if w := tb.do("POST", "/api/chats/revoke", map[string]string{"kind": "group", "jid": group}); w.Code != 200 {
+		t.Fatalf("revoke: %d %s", w.Code, w.Body)
+	}
+	if disk, _ := ReadManifest(dir); !contains(disk.Routing.Groups, group) {
+		t.Error("revoking the group took it out of the brain's routing")
+	}
+	if w := tb.do("POST", "/api/chats/allow", map[string]string{"kind": "group", "jid": group}); w.Code != 200 {
+		t.Fatalf("allow: %d %s", w.Code, w.Body)
+	}
+	if br := tb.brainMgr.BrainFor(group, true); br == nil || br.ID() != "family" {
+		t.Errorf("allowed again, the group goes to %v, want family", br)
+	}
+}
+
+func TestAllowingATypedChatClearsItsWaitingChat(t *testing.T) {
+	cases := []struct {
+		name string
+		kind string
+		jid  string // the waiting chat
+		body map[string]string
+	}{
+		{"a number", "dm", "15559876543@s.whatsapp.net", map[string]string{"kind": "dm", "number": "+1 555 987 6543"}},
+		{"a group with spaces around it", "group", "120363000000000001@g.us", map[string]string{"kind": "group", "jid": " 120363000000000001@g.us "}},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			tb := newTestBridge(t, "")
+			_ = tb.store.RecordIgnored(c.kind, c.jid, "", "15559876543", "")
+			if w := tb.do("POST", "/api/chats/allow", c.body); w.Code != 200 {
+				t.Fatalf("allow: %d %s", w.Code, w.Body)
+			}
+			if ign, _ := tb.store.ListIgnored(); len(ign) != 0 {
+				t.Errorf("the allowed chat still waits: %+v", ign)
+			}
+		})
+	}
+}
+
 // lockedBuffer collects log output that the bridge's goroutines may write
 // while the test reads it.
 type lockedBuffer struct {

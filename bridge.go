@@ -563,9 +563,9 @@ func (b *Bridge) runStartupChecks(ctx context.Context) {
 func logDMAccess(prev, next *Config) {
 	switch {
 	case next.AnyoneCanDM() && (prev == nil || !prev.AnyoneCanDM()):
-		log.Printf("WARNING: anyone who can message this WhatsApp account can use the assistant: allowed_numbers is empty and allow_any_dm is true. Add your number under Settings → Access, or turn allow_any_dm off.")
+		log.Printf("WARNING: anyone who can message this WhatsApp account can use the assistant: allowed_numbers is empty and allow_any_dm is true. Add your number under Chats → Allowed numbers, or turn allow_any_dm off.")
 	case prev == nil && len(next.AllowedNumbers) == 0:
-		log.Printf("allowed_numbers is empty, so nobody can send the bridge direct messages yet. Add your number under Settings → Access.")
+		log.Printf("allowed_numbers is empty, so nobody can send the bridge direct messages yet. Add your number under Chats → Allowed numbers.")
 	}
 }
 

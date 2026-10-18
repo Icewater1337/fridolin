@@ -2,10 +2,12 @@
 // run now, progress, and restore into a new folder.
 
 import { get, post, put, qs } from '../app/api.js';
+import { resource } from '../app/resources.js';
 import { folderBrowser } from '../components/folder-browser.js';
-import { h, mount } from '../lib/dom.js';
+import { liveForm } from '../components/live-form.js';
+import { h, mount, paint, reconcile, syncOptions } from '../lib/dom.js';
 import { fmtDuration, fmtBytes, plural, absTime } from '../lib/format.js';
-import { changed } from '../lib/memo.js';
+import { brainLabel } from '../lib/brain.js';
 import { icon } from '../components/icons.js';
 import { toast } from '../components/toast.js';
 import { btn, copyButton, runBusy } from '../components/buttons.js';
@@ -35,27 +37,36 @@ function stamp(d = new Date()) {
 export default {
   title: 'Backup',
   render(root, ctx) {
-    const memo = {};
+    const statusRes = resource('/api/backup/status');
     let backupStatus = null;
     let mode = '';
-    let scheduleDirty = false;
     const regions = {};
     const main = h('div.page-stack', h('div.card', loading('Checking backup status…')));
     mount(root, pageHeader('Backup', 'Daily backups of your brains to your own Google Drive, with older versions kept for a while.'), main);
 
-    ctx.dirty = () => scheduleDirty;
+    // The schedule exists only while Drive is connected; its edits go when
+    // the connection does, so leaving the page asks only about edits that
+    // are on screen, and a reconnect shows the schedule again.
+    const schedule = liveForm({ build: buildSchedule, onChange: ({ dirty }) => { const f = schedule.form(); if (f) f.bar.hidden = !dirty; } });
+    ctx.dirty = () => schedule.dirty();
 
-    const poller = ctx.poll(async (signal) => {
-      const s = await get('/api/backup/status', { signal });
+    // Polls faster while a backup, a restore or the Drive sign-in runs.
+    const busy = () => !!(backupStatus && (backupStatus.job || (backupStatus.connect && backupStatus.connect.state === 'running')));
+    ctx.follow(statusRes, (s) => {
       backupStatus = s;
       const nextMode = !s.rclone || !s.rclone.found ? 'norclone' : s.connected ? 'connected' : 'connect';
-      if (nextMode !== mode) { mode = nextMode; Object.keys(memo).forEach((k) => delete memo[k]); layout(); }
-      paint();
-    }, () => (backupStatus && (backupStatus.job || (backupStatus.connect && backupStatus.connect.state === 'running')) ? 2000 : 8000));
+      if (nextMode !== mode) {
+        if (mode === 'connected') schedule.discard();
+        mode = nextMode;
+        layout();
+      }
+      paintMode();
+    }, () => (busy() ? 2000 : 8000));
 
     // Resolves once the page shows what the server has now.
-    const refresh = () => poller.kick();
+    const refresh = () => statusRes.refresh();
 
+    // A new layout has new, empty regions, which paint() fills.
     function layout() {
       for (const k of Object.keys(regions)) delete regions[k];
       if (mode === 'norclone') {
@@ -67,63 +78,62 @@ export default {
       } else {
         regions.status = h('div');
         regions.job = h('div');
-        regions.schedule = h('div');
         regions.brains = h('div');
-        regions.restore = h('div');
+        regions.brainRows = h('tbody');
+        regions.restore = restoreForm();
         mount(main,
           regions.status,
           regions.job,
           h('section.section', h('h2.section-title', 'What gets backed up'), regions.brains),
-          h('section.section', h('h2.section-title', 'Schedule'), regions.schedule),
+          h('section.section', h('h2.section-title', 'Schedule'), schedule.el),
           h('section.section', h('h2.section-title', 'Restore'), regions.restore));
       }
     }
 
-    function paint() {
-      if (mode === 'norclone') paintRclone();
-      else if (mode === 'connect') paintConnect();
+    function paintMode() {
+      const st = backupStatus;
+      if (mode === 'norclone') paint(regions.rclone, st.rclone || {}, renderRclone);
+      else if (mode === 'connect') paint(regions.connect, st.connect || null, renderConnect);
       else {
-        paintStatus();
-        paintJob();
-        paintSchedule();
+        paint(regions.status, {
+          settings: st.settings || {}, next: st.next_run || '', rclone: st.rclone, running: !!st.job,
+          brains: (st.brains || []).map((b) => ({ enabled: b.enabled, last: b.last || null })), bridge: st.bridge || null,
+        }, renderStatus);
+        paint(regions.job, st.job ? { job: st.job, names: (st.brains || []).map((b) => [b.id, b.name]) } : null, renderJob);
+        schedule.set({ settings: st.settings || {}, inc: st.include_bridge_config });
         paintBrains();
-        paintRestore();
+        regions.restore.setBrains(st.brains || []);
       }
     }
 
     // ── rclone missing ──
-    function paintRclone() {
-      const rc = backupStatus.rclone || {};
-      if (!changed(memo, 'rc', rc)) return;
+    function renderRclone(rc) {
       const hint = rc.install_hint || 'See https://rclone.org/install/';
       const isCmd = !/^see /i.test(hint);
-      mount(regions.rclone, h('div.card.hero',
+      return h('div.card.hero',
         h('div.hero-icon', icon('download')),
         h('div.hero-body',
           h('h2', 'Install rclone first'),
           h('p', 'Backups use rclone, a free open-source tool that copies files to Google Drive. Install it on the computer running the bridge:'),
           isCmd ? h('div.code-line', h('code.mono', hint), copyButton(hint)) : h('p', mono(hint)),
-          h('div.actions', btn('Check again', { kind: 'primary', icon: 'refresh', onClick: () => refresh() })))));
+          h('div.actions', btn('Check again', { kind: 'primary', icon: 'refresh', onClick: () => refresh() }))));
     }
 
     // ── connecting ──
-    function paintConnect() {
-      const c = backupStatus.connect;
-      if (!changed(memo, 'connect', c)) return;
+    function renderConnect(c) {
       const privacy = h('ul.facts',
         h('li', icon('shield'), h('span', 'The bridge asks only for access to files it creates (Google’s “drive.file” permission). It cannot see anything else in your Drive.')),
         h('li', icon('lock'), h('span', 'Your WhatsApp session, tokens and .env files are never uploaded.')),
         h('li', icon('backup'), h('span', 'Each brain folder is copied to a folder in your Drive. Older versions of changed files are kept for 30 days by default.')));
       if (c && c.state === 'running') {
-        mount(regions.connect, h('div.card.wizard-card.waiting',
+        return h('div.card.wizard-card.waiting',
           spinner('large'),
           h('h2', 'Approve access in the browser tab that just opened'),
           h('p.muted', 'Sign in to Google and allow access. This page notices by itself when you are done.'),
           c.auth_url ? h('p', 'If no tab opened, ', h('a', { href: c.auth_url, target: '_blank', rel: 'noopener noreferrer' }, 'open this link', icon('external')), ' on the computer running the bridge.') : h('p.muted.small', 'Starting rclone…'),
-          privacy));
-        return;
+          privacy);
       }
-      mount(regions.connect, h('div.card.hero',
+      return h('div.card.hero',
         h('div.hero-icon', icon('backup')),
         h('div.hero-body',
           h('h2', 'Connect Google Drive'),
@@ -136,18 +146,15 @@ export default {
               await post('/api/backup/connect');
               await refresh();
             },
-          })))));
+          }))));
     }
 
     // ── connected: status ──
-    function paintStatus() {
-      const key = { s: backupStatus.settings, next: backupStatus.next_run, rc: backupStatus.rclone, running: !!backupStatus.job, brains: (backupStatus.brains || []).map((b) => [b.id, b.enabled]), bridge: backupStatus.bridge };
-      if (!changed(memo, 'status', key)) return;
-      const s = backupStatus.settings || {};
-      const anyEnabled = (backupStatus.brains || []).some((b) => b.enabled);
-      const results = [...(backupStatus.brains || []).map((b) => b.last), backupStatus.bridge].filter(Boolean);
+    function renderStatus({ settings: s, next, rclone, running, brains, bridge }) {
+      const anyEnabled = brains.some((b) => b.enabled);
+      const results = [...brains.map((b) => b.last), bridge].filter(Boolean);
       const lastOK = results.filter((r) => r.ok).sort((a, b) => new Date(b.finished) - new Date(a.finished))[0];
-      mount(regions.status, h('div.card.backup-status',
+      return h('div.card.backup-status',
         h('div.card-head',
           h('div.card-title', icon('backup'), h('h2', 'Google Drive')),
           pill('Connected', 'ok')),
@@ -155,13 +162,13 @@ export default {
           h('p', 'Backups go to the folder ', h('strong', s.root || 'fridolin-backup'), ' in your Google Drive.'),
           h('dl.kv',
             h('dt', 'Schedule'), h('dd', s.enabled ? `Every day at ${s.daily_at || '03:30'}` : 'Off — only when you click “Back up now”'),
-            backupStatus.next_run ? [h('dt', 'Next run'), h('dd', timeAgo(backupStatus.next_run))] : null,
+            next ? [h('dt', 'Next run'), h('dd', timeAgo(next))] : null,
             h('dt', 'Last good backup'), h('dd', lastOK ? timeAgo(lastOK.finished) : h('span.muted', 'none yet')),
-            h('dt', 'rclone'), h('dd', h('span.muted.small', backupStatus.rclone.version || backupStatus.rclone.path || 'found'))),
-          !anyEnabled && (backupStatus.brains || []).length ? callout('warn', null, 'No brain has backups turned on. Turn them on below.') : null,
+            h('dt', 'rclone'), h('dd', h('span.muted.small', rclone.version || rclone.path || 'found'))),
+          !anyEnabled && brains.length ? callout('warn', null, 'No brain has backups turned on. Turn them on below.') : null,
           h('div.actions',
             btn('Back up now', {
-              kind: 'primary', icon: 'backup', disabled: !!backupStatus.job,
+              kind: 'primary', icon: 'backup', disabled: running,
               onClick: async () => { await post('/api/backup/run', {}); toast('Backup started', 'ok'); await refresh(); },
             }),
             btn('Disconnect…', {
@@ -177,14 +184,14 @@ export default {
                 toast('Google Drive disconnected', 'ok');
                 await refresh();
               },
-            })))));
+            }))));
     }
 
     // ── job progress ──
-    function paintJob() {
-      const j = backupStatus.job;
-      if (!changed(memo, 'job', j)) return;
-      if (!j) { mount(regions.job); return; }
+    function renderJob(shown) {
+      if (!shown) return null;
+      const { job: j } = shown;
+      const brains = shown.names.map(([id, name]) => ({ id, name }));
       const done = j.done || [];
       const queue = j.queue || [];
       const total = done.length + queue.length + (j.current ? 1 : 0);
@@ -192,7 +199,7 @@ export default {
       const bar = h('div.progress', h('div.progress-bar'));
       bar.firstChild.style.width = `${Math.max(4, pct)}%`;
       const restoring = j.current && j.current.startsWith('restore:');
-      mount(regions.job, h('div.card.job-card',
+      return h('div.card.job-card',
         h('div.card-head',
           h('div.card-title', spinner(), h('h2', restoring ? jobLabel(j.current) : 'Backing up…')),
           btn('Cancel', {
@@ -202,27 +209,29 @@ export default {
         restoring ? h('p.muted', 'Copying files from Google Drive. Large folders can take a while.') : [
           bar,
           h('div.job-items',
-            done.map((id) => h('span.job-item.done', icon('check'), jobLabel(id, backupStatus.brains))),
-            j.current ? h('span.job-item.current', spinner(), jobLabel(j.current, backupStatus.brains)) : null,
-            queue.map((id) => h('span.job-item.queued', icon('clock'), jobLabel(id, backupStatus.brains)))),
+            done.map((id) => h('span.job-item.done', icon('check'), jobLabel(id, brains))),
+            j.current ? h('span.job-item.current', spinner(), jobLabel(j.current, brains)) : null,
+            queue.map((id) => h('span.job-item.queued', icon('clock'), jobLabel(id, brains)))),
         ],
-        h('p.muted.small', timeAgo(j.started, 'Started '))));
+        h('p.muted.small', timeAgo(j.started, 'Started ')));
     }
 
     // ── schedule ──
-    function paintSchedule() {
-      const s = backupStatus.settings || {};
-      const inc = backupStatus.include_bridge_config;
-      const key = { s, inc };
-      if (!changed(memo, 'schedule', key) && regions.schedule.firstChild) return;
-      if (scheduleDirty) return;
+    function buildSchedule({ settings: s, inc }) {
       const enabled = toggle({ checked: !!s.enabled, label: 'Back up every day' });
       const time = h('input', { type: 'time', id: nextId('t'), value: s.daily_at || '03:30', step: 60, required: true });
       const rootIn = textInput({ value: s.root || '', placeholder: 'fridolin-backup', class: 'mono' });
       const keep = textInput({ value: String(s.keep_versions_days ?? 30), inputmode: 'numeric', class: 'num' });
       const incSw = toggle({ checked: inc !== false, label: 'Also back up the bridge’s settings' });
       const saveBtn = btn('Save schedule', { kind: 'primary', type: 'submit', icon: 'check' });
-      const bar = h('div.actions', { hidden: true }, btn('Discard', { onClick: () => { scheduleDirty = false; memo.schedule = ''; paintSchedule(); } }), saveBtn);
+      const bar = h('div.actions', { hidden: true }, btn('Discard', { onClick: () => schedule.discard() }), saveBtn);
+      const value = () => ({
+        enabled: enabled.input.checked,
+        daily_at: time.value,
+        root: rootIn.value.trim(),
+        keep_versions_days: keep.value.trim(),
+        include_bridge_config: incSw.input.checked,
+      });
       const form = h('form.card.form',
         h('div.field', enabled, h('div.help', 'Runs at the time below while the computer is awake. A run missed while it slept happens as soon as it wakes.')),
         h('div.form-grid',
@@ -231,80 +240,80 @@ export default {
           field({ label: 'Folder in Google Drive', control: rootIn, help: 'A plain folder name. Changing it starts a fresh backup in the new folder.' })),
         h('div.field', incSw, h('div.help', 'config.json and the approved brain settings — enough to set up the bridge again on a new computer. Never the WhatsApp session or tokens.')),
         bar);
-      const dirty = () => { scheduleDirty = true; bar.hidden = false; };
-      form.addEventListener('input', dirty);
-      form.addEventListener('change', dirty);
       form.addEventListener('submit', (e) => {
         e.preventDefault();
-        const days = keep.value.trim();
-        if (!/^\d+$/.test(days)) { toast('Days must be a whole number (0 = keep forever)'); keep.focus(); return; }
-        if (!/^\d{2}:\d{2}$/.test(time.value)) { toast('Pick a time of day'); time.focus(); return; }
-        if (/[:\\]|^\/|\.\./.test(rootIn.value)) { toast('Use a plain folder name for the Drive folder'); rootIn.focus(); return; }
+        const v = value();
+        if (!/^\d+$/.test(v.keep_versions_days)) { toast('Days must be a whole number (0 = keep forever)'); keep.focus(); return; }
+        if (!/^\d{2}:\d{2}$/.test(v.daily_at)) { toast('Pick a time of day'); time.focus(); return; }
+        if (/[:\\]|^\/|\.\./.test(v.root)) { toast('Use a plain folder name for the Drive folder'); rootIn.focus(); return; }
         runBusy(saveBtn, async () => {
-          await put('/api/backup/settings', {
-            enabled: enabled.input.checked,
-            daily_at: time.value,
-            root: rootIn.value.trim(),
-            keep_versions_days: Number(days),
-            include_bridge_config: incSw.input.checked,
-          });
-          scheduleDirty = false;
-          memo.schedule = ''; // rebuilds the form even if nothing changed, hiding its buttons
+          await put('/api/backup/settings', { ...v, keep_versions_days: Number(v.keep_versions_days) });
+          schedule.saved();
           toast('Backup schedule saved', 'ok');
           await refresh();
         });
       });
-      mount(regions.schedule, form);
+      return { el: form, value, bar };
     }
 
     // ── per-brain ──
     function paintBrains() {
-      const brains = backupStatus.brains || [];
-      if (!changed(memo, 'brains', { brains, bridge: backupStatus.bridge, job: !!backupStatus.job, inc: backupStatus.include_bridge_config })) return;
+      const st = backupStatus;
+      const brains = st.brains || [];
       if (!brains.length) {
-        mount(regions.brains, h('div.card', empty('No brains yet', 'Add a brain first; its folder can then be backed up.', btn('Add a brain', { href: '#/add-brain', kind: 'primary', icon: 'plus' }))));
+        paint(regions.brains, 'none', () => h('div.card', empty('No brains yet', 'Add a brain first; its folder can then be backed up.', btn('Add a brain', { href: '#/add-brain', kind: 'primary', icon: 'plus' }))));
         return;
       }
-      const rows = brains.map((b) => {
-        const sw = toggle({
-          checked: b.enabled,
-          label: b.enabled ? 'On' : 'Off',
-          onChange: async (v, input) => {
-            input.disabled = true;
-            try {
-              await put('/api/backup/settings', { brain: b.id, brain_enabled: v });
-              toast(`${b.name || b.id}: backups ${v ? 'on' : 'off'}`, 'ok');
-              await refresh();
-            } catch (e) {
-              input.checked = !v;
-              toast(e.message);
-            } finally {
-              input.disabled = false;
-            }
-          },
-        });
-        return h('tr',
-          h('td', h('div', h('strong', b.name || b.id)), h('div.small', mono(b.dir))),
-          h('td', sw),
-          h('td', resultCell(b.last, b)),
-          h('td.right.nowrap',
-            btn(`Excludes${b.exclude && b.exclude.length ? ` (${b.exclude.length})` : ''}`, { small: true, kind: 'ghost', icon: 'edit', onClick: () => editExcludes(b) }),
-            btn('Back up', {
-              small: true, icon: 'backup', disabled: !!backupStatus.job, title: 'Back up only this brain now',
-              onClick: async () => { await post('/api/backup/run', { brains: [b.id], include_bridge: false }); toast(`Backing up ${b.name || b.id}`, 'ok'); await refresh(); },
-            })));
-      });
-      rows.push(h('tr.muted-row',
-        h('td', h('div', h('strong', 'Bridge settings')), h('div.small.muted', 'config.json and approved brain.json files')),
-        h('td', backupStatus.include_bridge_config === false ? pill('Off', 'neutral') : pill('On', 'ok')),
-        h('td', resultCell(backupStatus.bridge)),
-        h('td')));
-      mount(regions.brains, h('div.card.flush.table-wrap', h('table.table.backup-table',
+      paint(regions.brains, 'table', () => h('div.card.flush.table-wrap', h('table.table.backup-table',
         h('thead', h('tr', h('th', 'Brain'), h('th', 'Backup'), h('th', 'Last result'), h('th.right', ''))),
-        h('tbody', rows))));
+        regions.brainRows)));
+      const running = !!st.job;
+      const rows = [
+        ...brains.map((b) => ({ brain: b, running })),
+        { bridge: st.bridge || null, inc: st.include_bridge_config !== false },
+      ];
+      reconcile(regions.brainRows, rows, (r) => (r.brain ? `brain:${r.brain.id}` : 'bridge'), (r) => (r.brain ? brainRow(r) : bridgeRow(r)));
     }
 
-    function resultCell(r, b) {
+    function brainRow({ brain: b, running }) {
+      const sw = toggle({
+        checked: b.enabled,
+        label: b.enabled ? 'On' : 'Off',
+        onChange: async (v, input) => {
+          input.disabled = true;
+          try {
+            await put('/api/backup/settings', { brain: b.id, brain_enabled: v });
+            toast(`${b.name || b.id}: backups ${v ? 'on' : 'off'}`, 'ok');
+            await refresh();
+          } catch (e) {
+            input.checked = !v;
+            toast(e.message);
+          } finally {
+            input.disabled = false;
+          }
+        },
+      });
+      return h('tr',
+        h('td', h('div', h('strong', b.name || b.id)), h('div.small', mono(b.dir))),
+        h('td', sw),
+        h('td', resultCell(b.last, b, running)),
+        h('td.right.nowrap',
+          btn(`Excludes${b.exclude && b.exclude.length ? ` (${b.exclude.length})` : ''}`, { small: true, kind: 'ghost', icon: 'edit', onClick: () => editExcludes(b) }),
+          btn('Back up', {
+            small: true, icon: 'backup', disabled: running, title: 'Back up only this brain now',
+            onClick: async () => { await post('/api/backup/run', { brains: [b.id], include_bridge: false }); toast(`Backing up ${b.name || b.id}`, 'ok'); await refresh(); },
+          })));
+    }
+
+    function bridgeRow({ bridge, inc }) {
+      return h('tr.muted-row',
+        h('td', h('div', h('strong', 'Bridge settings')), h('div.small.muted', 'config.json and approved brain.json files')),
+        h('td', inc ? pill('On', 'ok') : pill('Off', 'neutral')),
+        h('td', resultCell(bridge)),
+        h('td'));
+    }
+
+    function resultCell(r, b, running) {
       if (!r) return h('span.muted', 'Not backed up yet');
       let state;
       if (r.ok) state = pill('OK', 'ok');
@@ -316,7 +325,7 @@ export default {
         h('div.muted.small', r.ok ? `${fmtBytes(r.bytes)} in ${plural(r.files, 'file')} · ${fmtDuration(r.seconds)}${r.trigger === 'scheduled' ? ' · scheduled' : ''}` : fmtDuration(r.seconds)),
         r.error && r.error !== 'cancelled' ? h('div.error-text.small', r.error) : null,
         r.refused && b ? h('div', btn('Mirror the deletion…', {
-          small: true, icon: 'backup', disabled: !!backupStatus.job, title: 'Back up this brain including the deletion',
+          small: true, icon: 'backup', disabled: running, title: 'Back up this brain including the deletion',
           onClick: () => mirrorDeletion(b),
         })) : null);
     }
@@ -357,20 +366,18 @@ export default {
     }
 
     // ── restore ──
-    function paintRestore() {
-      const ids = (backupStatus.brains || []).map((b) => b.id);
-      if (regions.restore.firstChild && !changed(memo, 'restoreIds', ids)) return;
-      memo.restoreIds = JSON.stringify(ids);
+    // Built once per connected layout, so a brain chosen and a folder typed
+    // stay while the status refreshes; setBrains() only updates the choice.
+    function restoreForm() {
       let versions = null;
       let version = 'current';
-      const brainSel = select([['', 'Choose a brain…'], ...(backupStatus.brains || []).map((b) => [b.id, b.name && b.name !== b.id ? `${b.name} (${b.id})` : b.id]), ['__other', 'Another id…']], '');
+      const brainSel = select([['', 'Choose a brain…'], ['__other', 'Another id…']], '');
       const otherIn = textInput({ placeholder: 'brain id', class: 'mono', hidden: true, 'aria-label': 'Brain id' });
       const versionsBox = h('div.versions', h('p.muted.small', 'Choose a brain to see its backups.'));
       const targetIn = textInput({ placeholder: '~/restored/brain-name', class: 'mono' });
       const browse = btn('Browse…', { icon: 'folder', onClick: () => pickTarget() });
       const go = btn('Restore', { kind: 'primary', icon: 'download', type: 'submit' });
       const currentId = () => (brainSel.value === '__other' ? otherIn.value.trim() : brainSel.value);
-
       const loadVersions = async () => {
         const id = currentId();
         versions = null;
@@ -449,7 +456,10 @@ export default {
           await refresh();
         });
       });
-      mount(regions.restore, form);
+      form.setBrains = (brains) => {
+        syncOptions(brainSel, [['', 'Choose a brain…'], ...brains.map((b) => [b.id, brainLabel(b)]), ['__other', 'Another id…']]);
+      };
+      return form;
     }
   },
 };

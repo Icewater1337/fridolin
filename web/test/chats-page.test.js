@@ -1,0 +1,141 @@
+import { test } from 'node:test';
+import assert from 'node:assert/strict';
+import { installDom } from './fake-dom.js';
+import { serve, settle, type, noConsoleErrors } from './serve.js';
+import { h } from '../assets/lib/dom.js';
+import { createPage } from '../assets/app/page.js';
+import { ignoredResource, configResource, brainsResource } from '../assets/app/resources.js';
+import { loadGroups } from '../assets/app/store.js';
+import page from '../assets/pages/chats.js';
+
+const GROUP = '120363000000000000@g.us';
+const WAITING = '120363000000000001@g.us';
+const brain = (id, routing = {}) => ({ id, name: id, status: 'ok', manifest: { id, name: id, routing: { groups: [], ...routing } } });
+
+async function openPage(t, { brains = [brain('work', { default: true }), brain('family')] } = {}) {
+  t.mock.timers.enable({ apis: ['setTimeout', 'Date'] });
+  installDom();
+  noConsoleErrors(t);
+  const bridge = {
+    numbers: ['15551234567'],
+    ignored: [{ kind: 'group', jid: WAITING, name: 'Book club', count: 1, last_seen: '2026-10-18T10:00:00Z' }],
+    brains,
+    groups: [{ jid: GROUP, name: 'Family', participants: 4, allowed: true, brain: 'work' }],
+  };
+  const calls = serve(t, (path, init) => {
+    if (path === '/api/chats/allow' && init.method === 'POST') {
+      const body = JSON.parse(init.body);
+      if (body.number === 'call me') return { status: 400, body: { error: '"call me" is not a phone number' } };
+      return { status: 200, body: { status: 'allowed' } };
+    }
+    if (path === '/api/chats/revoke' && init.method === 'POST') {
+      const body = JSON.parse(init.body);
+      if (body.kind === 'dm' && !bridge.numbers.includes(body.number)) return { status: 404, body: { error: `${body.number} is not in allowed_numbers` } };
+      bridge.numbers = bridge.numbers.filter((n) => n !== body.number);
+      return { status: 200, body: { status: 'revoked' } };
+    }
+    if (path.startsWith('/api/chats/ignored')) return bridge.ignored;
+    if (path.startsWith('/api/brains')) return bridge.brains;
+    if (path.startsWith('/api/config')) return { etag: 'e', config: { allowed_numbers: bridge.numbers, allowed_groups: [GROUP] }, effective: {} };
+    if (path.startsWith('/api/whatsapp/groups')) return bridge.groups;
+    return {};
+  });
+  const root = h('div');
+  document.body.append(root);
+  const ctx = createPage();
+  t.after(() => ctx.destroy());
+  page.render(root, ctx);
+  await settle();
+  const addNumber = () => root.querySelectorAll('form.add-form')[0];
+  const waitingSelect = () => root.querySelector('.waiting-row select');
+  const groupSelect = () => root.querySelector('.groups-table select');
+  return { root, bridge, calls, addNumber, waitingSelect, groupSelect };
+}
+
+const toasts = (kind) => document.querySelectorAll(`.toast.${kind}`).map((el) => el.textContent);
+
+test('typed text and a picked brain survive refreshes', async (t) => {
+  const { root, bridge, addNumber, waitingSelect } = await openPage(t);
+  const input = addNumber().querySelector('input');
+  type(input, '+1 555 987');
+  const sel = waitingSelect();
+  sel.value = 'family';
+
+  bridge.numbers = ['15551234567', '15559876543']; // added in another tab
+  bridge.ignored = [{ ...bridge.ignored[0], count: 2 }]; // the group wrote again
+  await Promise.all([configResource.refresh(), ignoredResource.refresh()]);
+  await settle();
+  assert.match(root.textContent, /2 messages/, 'the waiting row shows the new count');
+  assert.match(root.textContent, /\+15559876543/, 'the list shows the new number');
+  assert.equal(addNumber().querySelector('input'), input);
+  assert.equal(input.value, '+1 555 987', 'the half-typed number is still there');
+  assert.equal(waitingSelect(), sel);
+  assert.equal(sel.value, 'family', 'the picked brain is still picked');
+});
+
+test('the bridge checks a number, and its refusal shows under the box', async (t) => {
+  const { calls, addNumber } = await openPage(t);
+  const form = addNumber();
+  const input = form.querySelector('input');
+  type(input, 'call me');
+  form.dispatchEvent(new Event('submit', { cancelable: true }));
+  await settle();
+  const err = form.querySelector('.form-error');
+  assert.equal(err.hidden, false);
+  assert.match(err.textContent, /not a phone number/);
+  assert.equal(input.value, 'call me', 'kept for fixing');
+  assert.deepEqual(calls.filter((c) => c.method === 'POST').map((c) => [c.path, c.body]), [['/api/chats/allow', { kind: 'dm', number: 'call me' }]]);
+
+  type(input, '+1 555 987 6543');
+  assert.equal(err.hidden, true, 'typing clears the refusal');
+  form.dispatchEvent(new Event('submit', { cancelable: true }));
+  await settle();
+  assert.equal(input.value, '', 'an accepted number clears the box');
+});
+
+test('removing a number asks the bridge to revoke it', async (t) => {
+  const { root, calls } = await openPage(t);
+  root.querySelector('.plain-list button').click();
+  await settle();
+  document.querySelectorAll('dialog button').find((b) => b.textContent === 'Remove').click();
+  await settle();
+  assert.deepEqual(calls.filter((c) => c.method === 'POST').map((c) => [c.path, c.body]), [['/api/chats/revoke', { kind: 'dm', number: '15551234567' }]]);
+});
+
+test('a brain picked for a group survives a refresh, and follows a change elsewhere', async (t) => {
+  const { root, bridge, groupSelect } = await openPage(t, {
+    brains: [brain('work', { default: true }), brain('family', { groups: [GROUP] }), brain('club')],
+  });
+  await loadGroups(true);
+  await settle();
+  const sel = groupSelect();
+  assert.equal(sel.value, 'family', 'it shows the brain the group goes to');
+  sel.value = 'club';
+
+  bridge.groups = [{ ...bridge.groups[0], participants: 5 }]; // someone joined
+  bridge.brains = [...bridge.brains, brain('garden')]; // a brain was added
+  await Promise.all([loadGroups(true), brainsResource.refresh()]);
+  await settle();
+  assert.match(root.querySelector('.groups-table tbody').textContent, /5/, 'the row shows the new count');
+  assert.equal(groupSelect(), sel);
+  assert.equal(sel.value, 'club', 'the picked brain is still picked');
+
+  // Routed to another brain elsewhere: the row shows where it goes now.
+  bridge.brains = [brain('work', { default: true, groups: [GROUP] }), brain('family'), brain('club'), brain('garden')];
+  await brainsResource.refresh();
+  await settle();
+  assert.equal(groupSelect(), sel);
+  assert.equal(sel.value, 'work');
+});
+
+test('removing a number that is gone already says so, not that it was removed', async (t) => {
+  const { root, bridge } = await openPage(t);
+  bridge.numbers = []; // removed in another tab, before the page's next poll
+  root.querySelector('.plain-list button').click();
+  await settle();
+  document.querySelectorAll('dialog button').find((b) => b.textContent === 'Remove').click();
+  await settle();
+  assert.deepEqual(toasts('ok'), []);
+  assert.deepEqual(toasts('info'), ['15551234567 is not in allowed_numbers']);
+  assert.match(root.textContent, /nobody can send direct messages yet/, 'the list shows it is gone');
+});

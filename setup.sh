@@ -298,7 +298,7 @@ cat <<EOS
       account (Settings → Linked Devices → Link a Device). Use a second number,
       not your personal one.
    2. ${BOLD}Add a brain${RESET} — pick a folder; it gets a brain.json and a starter prompt.
-   3. ${BOLD}Allow your number${RESET} under Settings → Access, then DM the bridge.
+   3. ${BOLD}Allow your number${RESET} under Chats → Allowed numbers, then DM the bridge.
    4. Optional: ${BOLD}Backup${RESET} → Connect Google Drive.
 
 EOS

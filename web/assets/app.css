@@ -401,6 +401,8 @@ a.badge:hover { color: var(--accent); }
 .callout.ok .callout-icon { color: var(--ok); }
 .callout .actions { margin-top: 6px; }
 .inline-callout { margin-top: 2px; font-size: 13px; }
+/* liveForm's "changed elsewhere" note, above the form it is about. */
+.live-form > .callout { margin-bottom: 12px; }
 
 .empty { text-align: center; padding: 28px 16px; color: var(--muted); }
 .empty-title { font-weight: 650; color: var(--text); font-size: 15px; margin-bottom: 4px; }
@@ -762,7 +764,7 @@ dialog.dialog::backdrop { background: var(--backdrop); }
 .brain-row-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
 .brain-row-title { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; }
 .brain-row-state { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; justify-content: flex-end; }
-.brain-row-last { display: inline-flex; align-items: center; gap: 6px; }
+.run-last { display: inline-flex; align-items: center; gap: 6px; }
 
 /* ── activity ───────────────────────────────────────────────────────────── */
 

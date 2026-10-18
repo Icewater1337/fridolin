@@ -32,6 +32,11 @@ Phone numbers permitted to DM the bridge. Country code, no `+`, no spaces.
 "allowed_numbers": ["15551234567", "15559876543"]
 ```
 
+In the dashboard both allow lists are edited on the **Chats** page (Settings
+only counts them). It takes a number the way you would write it, with a `+`,
+spaces, dashes or brackets, stores its digits, and refuses anything that is
+not 6 to 15 of them; a group must be a group JID.
+
 An empty list means nobody may DM until you add a number, unless
 `allow_any_dm` (below) is `true`.
 

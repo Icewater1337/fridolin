@@ -421,7 +421,7 @@ func TestPlaudStatusShowsWhereSummariesGo(t *testing.T) {
 		{"group brain: your DM, which the DM brain answers", "", `, "brain": "g"`,
 			map[string]any{"summary_chat": dm, "summary_to_you": true, "summary_chat_brain": "p", "summary_error": nil}},
 		{"no private chat", `, "allowed_numbers": []`, `, "brain": "g"`,
-			map[string]any{"summary_chat": nil, "summary_error": "no private chat for Plaud summaries — add your number under Settings → Access, or set brain g's reply chat to a direct chat"}},
+			map[string]any{"summary_chat": nil, "summary_error": "no private chat for Plaud summaries — add your number under Chats → Allowed numbers, or set brain g's reply chat to a direct chat"}},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			tb, _ := plaudBridgeWith(t, c.top, c.plaud, plaudDMBrain, plaudGroupBrain("g"))

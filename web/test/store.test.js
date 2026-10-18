@@ -57,6 +57,7 @@ test('a status poll from before a save cannot hide its restart', async (t) => {
       const seen = [];
       const poll = pollStatus((s) => seen.push(s.restart_required));
       t.after(() => poll.stop());
+      const told = seen.length; // the status known from before, if any
       net.answer(0, { restart_required: [] });
       await tick();
       t.mock.timers.tick(3000); // the next poll starts (call 1), then the save lands
@@ -69,7 +70,7 @@ test('a status poll from before a save cannot hide its restart', async (t) => {
       assert.equal(net.calls.length, 3, 'the status is asked for again');
       net.answer(2, { restart_required: ['log_level'] });
       await tick();
-      assert.deepEqual(seen, [[], ['log_level']]);
+      assert.deepEqual(seen.slice(told), [[], ['log_level']]);
     });
   }
 });

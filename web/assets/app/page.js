@@ -1,16 +1,18 @@
 // A page's context. Everything a page starts — polls, requests, timers,
-// listeners, store subscriptions — belongs to it and ends when the user
-// leaves, so nothing keeps fetching or painting into a page that is gone.
+// listeners, store subscriptions, the resources it follows — belongs to it
+// and ends when the user leaves, so nothing keeps fetching or painting into
+// a page that is gone.
 
 import { makePoll } from './poll.js';
 
 /**
- * createPage({params, replaceHash, setTitle}) returns the ctx a page's
- * render(root, ctx) gets. The router supplies replaceHash(hash), which
- * changes the address without leaving the page, and setTitle(title), which
- * names the page in the browser tab.
+ * createPage({params, navigate, replaceHash, setTitle}) returns the ctx a
+ * page's render(root, ctx) gets. The router supplies navigate(hash), which
+ * goes to another page as a link does (asking first about unsaved
+ * changes), replaceHash(hash), which changes the address without leaving
+ * the page, and setTitle(title), which names the page in the browser tab.
  */
-export function createPage({ params = {}, replaceHash = () => {}, setTitle = () => {} } = {}) {
+export function createPage({ params = {}, navigate = (hash) => { location.hash = hash; }, replaceHash = () => {}, setTitle = () => {} } = {}) {
   const abort = new AbortController();
   const polls = [];
   const timers = new Set();
@@ -45,6 +47,15 @@ export function createPage({ params = {}, replaceHash = () => {}, setTitle = () 
       };
     },
 
+    /**
+     * resource.follow(fn, interval) until the page goes: fn gets the data
+     * now (when known) and whenever it changes; interval (ms, or a function
+     * returning them) is how fresh this page wants it.
+     */
+    follow(resource, fn, interval = 3000) {
+      cleanups.push(resource.follow(fn, interval));
+    },
+
     /** store.subscribe(select, fn) until the page goes: fn gets the value now and on every change. */
     watch(store, select, fn) {
       cleanups.push(store.subscribe(select, fn));
@@ -53,7 +64,7 @@ export function createPage({ params = {}, replaceHash = () => {}, setTitle = () 
     /** Runs fn when the page goes, e.g. an unsubscribe. */
     onCleanup(fn) { cleanups.push(fn); },
 
-    navigate(hash) { location.hash = hash; },
+    navigate(hash) { if (!ctx.dead) navigate(hash); },
 
     replaceHash(hash) { if (!ctx.dead) replaceHash(hash); },
 

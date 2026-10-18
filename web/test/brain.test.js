@@ -1,7 +1,9 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { BRAIN_ID_RE, slugify, routingSummary } from '../assets/lib/brain.js';
-import { changed } from '../assets/lib/memo.js';
+import { BRAIN_ID_RE, slugify, routingSummary, brainLabel, issueLabel } from '../assets/lib/brain.js';
+import { installDom } from './fake-dom.js';
+import { brainStatusPill, runtimeSummary } from '../assets/components/brain.js';
+import { h } from '../assets/lib/dom.js';
 
 test('slugify', async (t) => {
   const cases = [
@@ -42,10 +44,45 @@ test('routingSummary', async (t) => {
   }
 });
 
-test('changed remembers the last value per key', () => {
-  const memo = {};
-  assert.equal(changed(memo, 'a', { x: 1 }), true);
-  assert.equal(changed(memo, 'a', { x: 1 }), false);
-  assert.equal(changed(memo, 'b', { x: 1 }), true);
-  assert.equal(changed(memo, 'a', { x: 2 }), true);
+test('brainLabel', async (t) => {
+  const cases = [
+    ['a name of its own', { id: 'work', name: 'Office' }, 'Office (work)'],
+    ['the name is the id', { id: 'work', name: 'work' }, 'work'],
+    ['no name', { id: 'work' }, 'work'],
+  ];
+  for (const [name, b, want] of cases) {
+    await t.test(name, () => assert.equal(brainLabel(b), want));
+  }
+});
+
+test('one name per issue kind, short on a pill', async (t) => {
+  installDom();
+  const cases = [
+    // kind, long, short (the status pill)
+    ['drift', 'brain.json changed on disk', 'Changed on disk'],
+    ['missing', 'Brain folder missing', 'Folder missing'],
+    ['invalid', 'Invalid brain configuration', 'Invalid'],
+    ['unapproved', 'Brain not approved', 'Not approved'],
+    ['someday', 'someday', 'someday'],
+  ];
+  for (const [kind, long, short] of cases) {
+    await t.test(kind, () => {
+      assert.equal(issueLabel(kind), long);
+      assert.equal(issueLabel(kind, { short: true }), short);
+      assert.equal(brainStatusPill(kind).textContent, short);
+    });
+  }
+  assert.equal(brainStatusPill('ok').textContent, 'Active');
+});
+
+test('runtimeSummary', async (t) => {
+  installDom();
+  const cases = [
+    ['idle, never ran', {}, 'IdleNo runs yet'],
+    ['working with a queue', { running: { preview: 'hi' }, queue: [{}, {}], last: { outcome: 'ok', finished: '' } }, 'Working2 queuedRepliednever'],
+    ['the last run failed', { last: { outcome: 'error', error: 'exit 1' } }, 'IdleFailednever'],
+  ];
+  for (const [name, rt, want] of cases) {
+    await t.test(name, () => assert.equal(h('div', runtimeSummary(rt)).textContent, want));
+  }
 });

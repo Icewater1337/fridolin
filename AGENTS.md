@@ -50,8 +50,8 @@ The person's data lives in brain folders they choose and in
      the bridge answers as whichever account it is linked to.
    - **Add a brain** (Brains → Add brain): pick or create a folder; decide
      whether it handles direct messages.
-   - **Allow their own number** (Settings → Access): digits with country
-     code, no `+`.
+   - **Allow their own number** (Chats → Allowed numbers): with the
+     country code; a `+`, spaces and dashes are fine.
    - Optional: **Backup → Connect Google Drive**.
    - Optional: **Google Calendar** per brain. Needs a one-time Google OAuth
      client (docs/CALENDAR.md walks through it); the person creates it in
@@ -141,11 +141,20 @@ Reopen the dashboard with `fridolin open`. To upgrade later: `git pull &&
   `app/`, `components/` and `lib/`, never from each other; `lib/` imports
   nothing outside itself. Pages load on first visit (the route table is
   `app/routes.js`), so once the bridge runs another version an open tab
-  asks for a reload instead of mixing two builds. Its tests need Node 22+
-  and nothing installed: `make test-web` syntax-checks every module and
-  runs `node --test` on `web/**/*.test.js` files (`web/test`). They cover
-  the pure helpers and check that every import resolves and keeps those
-  layers.
+  asks for a reload instead of mixing two builds. A page follows the data
+  it shows through `app/resources.js` (one poll per endpoint, shared with
+  the shell and other parts of the page) instead of polling it itself,
+  repaints with `paint()` and `reconcile()` from `lib/dom.js`, which keep
+  the nodes of what did not change (and with them focus, typed text and
+  open panels), and builds an editable form with `components/live-form.js`,
+  which keeps edits across refreshes and says when the data changed
+  elsewhere. Leaving a page with unsaved changes asks first
+  (`app/nav-guard.js`). Its tests need Node 22+ and nothing installed:
+  `make test-web` syntax-checks every module and runs `node --test` on
+  `web/**/*.test.js` files (`web/test`). They cover the pure helpers, run
+  pages against a stubbed bridge in a fake DOM (`web/test/serve.js`,
+  `web/test/fake-dom.js`), and check that every import resolves and keeps
+  those layers.
 - Run `scripts/install-hooks.sh` before committing. The hooks refuse commits
   and pushes containing phone numbers, WhatsApp JIDs, emails, home paths or
   tokens. Use placeholders: `15551234567`, `120363000000000000@g.us`,

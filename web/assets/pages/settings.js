@@ -2,9 +2,10 @@
 // everything else in the file (including fields this page does not show) is
 // sent back exactly as received.
 
-import { get, put } from '../app/api.js';
+import { put } from '../app/api.js';
 import { setRestartRequired } from '../app/store.js';
-import { h, mount } from '../lib/dom.js';
+import { configResource } from '../app/resources.js';
+import { h, mount, paint } from '../lib/dom.js';
 import { plural } from '../lib/format.js';
 import { EFFORTS } from '../lib/brain.js';
 import { icon } from '../components/icons.js';
@@ -12,12 +13,11 @@ import { toast } from '../components/toast.js';
 import { btn } from '../components/buttons.js';
 import { confirmDialog } from '../components/dialog.js';
 import { field, toggle, select, textInput, listEditor } from '../components/fields.js';
-import { callout, mono, pageHeader, loading } from '../components/common.js';
+import { mono, pageHeader, loading } from '../components/common.js';
 import { googleClientCard } from '../components/calendar.js';
 import { saveBar } from '../components/save-bar.js';
+import { liveForm } from '../components/live-form.js';
 
-const digits = (v) => (/^\d{6,15}$/.test(v) ? '' : 'Digits only, with country code, no + (e.g. 15551234567)');
-const groupJid = (v) => (/@g\.us$/.test(v) ? '' : 'A group JID ends in @g.us');
 // The bridge refuses a relative sandbox path: as a rule it would match nothing.
 const absPath = (v) => (/^(\/|~(\/|$))/.test(v) ? '' : 'Absolute, or starting with ~/');
 
@@ -27,9 +27,8 @@ const SECTIONS = [
     title: 'Access',
     intro: 'Who may talk to the bridge. Everyone else is ignored and shows up on the Chats page.',
     fields: [
-      { key: 'allowed_numbers', type: 'list', label: 'Allowed numbers', placeholder: '15551234567', validate: digits, addLabel: 'Add number', help: 'Phone numbers that may send direct messages. Digits with the country code, no + or spaces.' },
-      { key: 'allow_any_dm', type: 'bool', label: 'Let anyone message while the list is empty', help: 'Only matters while “Allowed numbers” is empty. Off (the default): nobody can send direct messages until you add a number. On: anyone who knows the account’s number can use the assistant.' },
-      { key: 'allowed_groups', type: 'list', label: 'Allowed groups', placeholder: '120363000000000000@g.us', validate: groupJid, addLabel: 'Add group', help: 'Group JIDs the bridge answers in. Every other group is ignored. Easier: allow groups on the Chats page.' },
+      { type: 'allowLists', label: 'Allowed numbers and groups' },
+      { key: 'allow_any_dm', type: 'bool', label: 'Let anyone message while the list is empty', help: 'Only matters while the allowed numbers (on the Chats page) are none. Off (the default): nobody can send direct messages until you add a number. On: anyone who knows the account’s number can use the assistant.' },
       { key: 'triggers', type: 'triggers', label: 'Group triggers', help: 'Words that address the bridge in a group; they are removed before the brain sees the message. An @-mention of the bridge’s account always counts, and direct messages never need a trigger. “Start” fits short shorthands like @c.' },
     ],
   },
@@ -118,30 +117,46 @@ function setPath(obj, key, value) {
 export default {
   title: 'Settings',
   render(root, ctx) {
-    let data = null; // GET /api/config response the form was built from
-    let conflict = false; // a stale/conflict banner is showing
-    let controls = [];
-    const top = h('div');
-    const body = h('div.page-stack', h('div.card', loading('Loading settings…')));
-    const bar = saveBar({ save: btn('Save', { kind: 'primary', icon: 'check', onClick: () => save() }), onDiscard: () => build(data), floating: true });
+    const body = h('div', h('div.card', loading('Loading settings…')));
+    const bar = saveBar({ save: btn('Save', { kind: 'primary', icon: 'check', onClick: () => save() }), onDiscard: () => form.discard(), floating: true });
     const where = h('span'); // the file, once the settings have loaded
-
     const googleCard = googleClientCard({ signal: ctx.signal });
-    mount(root, pageHeader('Settings', where), top, body, bar);
+    mount(root, pageHeader('Settings', where), body, bar);
 
-    const dirtyCount = () => controls.filter((c) => c.isDirty()).length;
-    ctx.dirty = () => dirtyCount() > 0;
-    const onChange = () => {
-      const n = dirtyCount();
-      if (n) bar.show(plural(n, 'unsaved change'));
-      else bar.hide();
-    };
+    // Only the settings edited here count as a conflict: one changed
+    // elsewhere that is not edited here is saved as it now is.
+    const edited = (built) => built.controls.filter((c) => c.isDirty());
+    const form = liveForm({
+      build,
+      edits: (d, built) => edited(built).map((c) => [c.key, getPath(d.config || {}, c.key)]),
+      onChange: () => {
+        const built = form.form();
+        const n = built ? edited(built).length : 0;
+        if (n) bar.show(plural(n, 'unsaved change'));
+        else bar.hide();
+      },
+      staleNote: {
+        title: 'The settings changed somewhere else',
+        text: 'A setting you changed here was also changed in config.json (another tab, the command line or a brain action). Reload to see the current settings — your unsaved edits will be lost.',
+        action: 'Reload settings',
+      },
+    });
+    ctx.dirty = () => form.dirty();
 
-    function build(d) {
-      data = d;
+    ctx.follow(configResource, (d) => {
+      const first = !form.form();
+      form.set(d);
+      paint(where, d.path, (path) => ['Saved to ', mono(path, { copy: true }), '. Brains are configured on the Brains page, backups on the Backup page.']);
+      if (!first) return;
+      mount(body, form.el);
+      const target = ctx.params.section && document.getElementById(`sec-${ctx.params.section}`);
+      if (target) target.scrollIntoView({ block: 'start' });
+    }, 5000);
+
+    function build(d, changed) {
       const cfg = d.config || {};
       const eff = d.effective || {};
-      controls = [];
+      const controls = [];
       const nav = h('nav.section-nav', { 'aria-label': 'Settings sections' });
       // A chip scrolls to its section and names it in the address, so
       // #/settings/<section> links (the overview has some) land there too.
@@ -158,7 +173,7 @@ export default {
           h('h2', sec.title),
           sec.intro ? h('p.muted.section-intro', sec.intro) : null,
           h('div.settings-fields', sec.fields.map((f) => {
-            const c = makeControl(f, cfg, eff, onChange);
+            const c = makeControl(f, cfg, eff, changed);
             controls.push(c);
             return c.el;
           })));
@@ -166,53 +181,48 @@ export default {
         return el;
       });
       chip('Google sign-in', 'google', googleCard);
-      mount(body, nav, sections, googleCard);
-      mount(where, 'Saved to ', mono(d.path, { copy: true }), '. Brains are configured on the Brains page, backups on the Backup page.');
-      onChange();
-      conflict = false;
-      mount(top);
+      return {
+        el: h('div.page-stack', nav, sections, googleCard),
+        value: () => controls.map((c) => c.value()),
+        controls,
+      };
     }
 
-    async function save() {
-      const invalid = controls.find((c) => c.isDirty() && !c.isValid());
+    // The edits go onto the newest settings the page has, so what changed
+    // elsewhere meanwhile is kept. When config.json changed after that, the
+    // page fetches it and saves once more, unless the change was to a
+    // setting edited here. Such a clash is never saved over: the note
+    // about it may be scrolled out of sight. A second refusal without a
+    // clash (the file changed again, or could not be fetched) is no clash
+    // either, and saving again is worth a try.
+    const clash = () => {
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+      toast('A setting you changed was also changed somewhere else. Nothing was saved; see the note at the top.');
+    };
+    async function save(again = true) {
+      const built = form.form();
+      if (form.stale()) { clash(); return; }
+      const invalid = built.controls.find((c) => c.isDirty() && !c.isValid());
       if (invalid) { toast(`Check “${invalid.label}” — it has an invalid entry`); invalid.el.scrollIntoView({ block: 'center' }); return; }
-      const next = JSON.parse(JSON.stringify(data.config || {}));
-      for (const c of controls) if (c.isDirty()) setPath(next, c.key, c.serialize());
+      const latest = form.data();
+      const next = JSON.parse(JSON.stringify(latest.config || {}));
+      for (const c of edited(built)) setPath(next, c.key, c.serialize());
+      let r;
       try {
-        const r = await put('/api/config', { etag: data.etag, config: next });
-        const fresh = await get('/api/config');
-        build(fresh);
-        toast('Settings saved', 'ok');
-        if (r) setRestartRequired(r.restart_required);
+        r = await put('/api/config', { etag: latest.etag, config: next });
       } catch (e) {
-        if (e.status === 409) {
-          conflict = true;
-          mount(top, callout('bad', 'The settings changed somewhere else',
-            'config.json was changed while you were editing (another tab, the command line or a brain action). Reload to see the current settings — your unsaved edits will be lost.',
-            h('div.actions', btn('Reload settings', { kind: 'primary', icon: 'refresh', onClick: async () => build(await get('/api/config')) }))));
-          window.scrollTo({ top: 0, behavior: 'smooth' });
-          return;
-        }
-        throw e;
-      }
-    }
-
-    ctx.poll(async (signal) => {
-      const d = await get('/api/config', { signal });
-      if (!data) {
-        build(d);
-        const target = ctx.params.section && document.getElementById(`sec-${ctx.params.section}`);
-        if (target) target.scrollIntoView({ block: 'start' });
+        if (e.status !== 409) throw e;
+        await configResource.refresh();
+        if (form.stale()) clash();
+        else if (again) await save(false);
+        else toast('config.json changed again while saving, so nothing was saved. Save once more.', 'warn');
         return;
       }
-      if (d.etag === data.etag) return;
-      if (!ctx.dirty()) { build(d); return; }
-      if (conflict) return;
-      conflict = true;
-      mount(top, callout('warn', 'The settings changed somewhere else',
-        'Saving now would fail. Reload to see the current settings — your unsaved edits will be lost.',
-        h('div.actions', btn('Reload settings', { icon: 'refresh', onClick: async () => build(await get('/api/config')) }))));
-    }, 5000);
+      form.saved();
+      toast('Settings saved', 'ok');
+      if (r) setRestartRequired(r.restart_required);
+      await configResource.refresh();
+    }
 
     ctx.onCleanup(() => bar.remove());
   },
@@ -221,6 +231,7 @@ export default {
 // ── controls ─────────────────────────────────────────────────────────────
 
 function makeControl(f, cfg, eff, onChange) {
+  if (f.type === 'allowLists') return allowLists(f, cfg);
   const fileVal = getPath(cfg, f.key);
   const effVal = getPath(eff, f.key);
   const tag = f.restart ? 'restart' : null;
@@ -325,6 +336,7 @@ function makeControl(f, cfg, eff, onChange) {
       key: f.key,
       label: f.label,
       el,
+      value: read,
       isDirty: () => read() !== initial,
       isValid,
       serialize,
@@ -332,10 +344,20 @@ function makeControl(f, cfg, eff, onChange) {
   }
 }
 
+// The allow lists are edited on the Chats page only, through the bridge's
+// checks; Settings says how many there are. It never has unsaved changes.
+function allowLists(f, cfg) {
+  const n = (cfg.allowed_numbers || []).length;
+  const g = (cfg.allowed_groups || []).length;
+  const el = field({
+    label: f.label,
+    control: h('div.static', h('span', `${plural(n, 'number')} and ${plural(g, 'group')} may talk to the bridge. `, h('a', { href: '#/chats' }, 'Edit them on the Chats page'), '.')),
+  });
+  return { key: null, label: f.label, el, value: () => null, isDirty: () => false, isValid: () => true, serialize: () => undefined };
+}
+
 function emptyListText(f, effVal) {
   if (f.key === 'otp_markers') return 'Using the built-in phrases';
-  if (f.key === 'allowed_numbers') return 'Empty — see the switch below';
-  if (f.key === 'allowed_groups') return 'No groups allowed';
   if (f.key === 'disallowed_tools') return 'No tools blocked';
   if (Array.isArray(effVal) && effVal.length) return `Default: ${effVal.join(', ')}`;
   return 'None';
