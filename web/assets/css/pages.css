@@ -177,7 +177,9 @@ blockquote.preview {
 /* ── site ───────────────────────────────────────────────────────────────── */
 
 .site-block { display: flex; flex-direction: column; gap: 8px; padding-top: 12px; border-top: 1px solid var(--border); }
-.site-block > h3, .card > h3 { margin: 0; font-size: 14px; }
+/* A form of its own in a card (liveForm), spaced as the card's parts. */
+.site-form { display: flex; flex-direction: column; gap: 12px; }
+.site-block > h3, .card > h3, .card > .region > h3 { margin: 0; font-size: 14px; }
 .site-block > summary { cursor: pointer; font-weight: 600; font-size: 14px; }
 .site-key { display: flex; align-items: center; gap: 6px; min-width: 0; }
 .site-key .mono { overflow-wrap: anywhere; white-space: normal; font-size: 12px; }
