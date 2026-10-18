@@ -1,0 +1,11 @@
+POST /send
+{"text": "hello"}
+400 Bad Request
+Content-Type: application/json
+
+{
+  "error": "jid and text are required"
+}
+
+sent:
+history:

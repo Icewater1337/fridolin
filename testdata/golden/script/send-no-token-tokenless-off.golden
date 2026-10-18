@@ -1,0 +1,11 @@
+POST /send
+{"jid": "15551234567@s.whatsapp.net", "text": "hello"}
+401 Unauthorized
+Content-Type: application/json
+
+{
+  "error": "a token is required: send the one in <data_dir>/scripts.token as Authorization: Bearer … (script_api.tokenless_send is off)"
+}
+
+sent:
+history:

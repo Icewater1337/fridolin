@@ -1,0 +1,11 @@
+POST /ingest
+{"brain": "main", "paths": ["notes.txt"]}
+400 Bad Request
+Content-Type: application/json
+
+{
+  "error": "every path must be an existing file inside the media directory"
+}
+
+sent:
+history:

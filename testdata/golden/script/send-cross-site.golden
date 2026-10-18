@@ -1,0 +1,9 @@
+POST /send
+{"jid": "15551234567@s.whatsapp.net", "text": "hello"}
+403 Forbidden
+Content-Type: text/plain; charset=utf-8
+
+cross-site request refused
+
+sent:
+history:

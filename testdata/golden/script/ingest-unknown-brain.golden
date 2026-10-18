@@ -1,0 +1,11 @@
+POST /ingest
+{"brain": "nope", "text": "x"}
+400 Bad Request
+Content-Type: application/json
+
+{
+  "error": "unknown brain \"nope\""
+}
+
+sent:
+history:
