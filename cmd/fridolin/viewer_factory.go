@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"github.com/Icewater1337/fridolin/internal/platform"
 	"sync"
 	"time"
 )
@@ -24,11 +25,11 @@ func findTmux() string {
 
 // NewTmuxViewer creates a detached tmux session tailing the brain's activity
 // log and opens a Terminal window attached to it, running both with env.
-func NewTmuxViewer(name, streamLog, cwd string, env []string) (*TmuxViewer, error) {
+func NewTmuxViewer(name, streamLog, cwd string, env []string) (*platform.Viewer, error) {
 	if findTmux() == "" {
 		return nil, fmt.Errorf("tmux not found (looked in %q)", helperPath())
 	}
-	tv := &TmuxViewer{Name: name, StreamLog: streamLog, CWD: cwd, Env: env, TmuxPath: findTmux(), Osascript: osascript, Timeout: viewerTimeout}
+	tv := &platform.Viewer{Name: name, StreamLog: streamLog, CWD: cwd, Env: env, TmuxPath: findTmux(), Osascript: osascript, Timeout: viewerTimeout}
 	if err := tv.Start(); err != nil {
 		return nil, err
 	}

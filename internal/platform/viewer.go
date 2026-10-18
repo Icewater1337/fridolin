@@ -21,7 +21,7 @@ type Viewer struct {
 	Name      string // tmux session name, e.g. "claude-personal"
 	StreamLog string // path to the brain's claude-stream.log, which must exist
 	CWD       string
-	// Env is what tmux and osascript run with (see childEnv), with PATH
+	// Env is the allowlisted environment tmux and osascript run with, with PATH
 	// replaced by SystemPATH (see run). A tmux server this starts keeps it,
 	// and any brain can read it from there, so it must never be the
 	// bridge's whole environment. Every tmux call gets the same, so that
@@ -33,7 +33,7 @@ type Viewer struct {
 	Timeout   time.Duration
 }
 
-// run runs name args… with the viewer's environment and viewerTimeout.
+// run runs name args… with the viewer's environment and timeout.
 // tmux runs the session's sh, and sh its tail, by name, outside the
 // sandbox, and a tmux server passes the PATH it gets on to its windows: so
 // whatever PATH the environment has (a nil Env is the bridge's own, as for

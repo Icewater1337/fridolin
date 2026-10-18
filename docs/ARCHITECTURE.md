@@ -171,9 +171,10 @@ responsibility and says what it must not do.
   kill, `Exec` for the re-exec on restart, `OpenBrowser`, `FolderPicker`
   and `IsTerminal`. `unsupported.go`, built alone on every system that is
   not Unix, stops the build with a clear message.
-  *Planned:* the optional tmux activity viewer (`tmux_session.go`, which
-  needs the helper lookup of `helperbin.go` passed in first) and the process
-  start times of `procstart_*.go`.
+  `Viewer` owns the optional tmux activity window; the caller supplies its
+  resolved helper path, allowlisted environment and timeout. Trusted helper
+  lookup stays in the composition code. *Planned:* process start times
+  from `procstart_*.go`.
 - **`logx`** *(to come, R4; `logbuf.go`, `logfile*.go`)*: the in-memory log
   ring the dashboard reads, the whatsmeow logger adapter, and the process
   logger setup.

@@ -195,7 +195,7 @@ type Brain struct {
 	// under way, and viewerGen, which closeViewer moves on so that a start
 	// that ends after it knows to close what it opened.
 	viewerMu       sync.Mutex
-	tmuxViewer     *TmuxViewer
+	tmuxViewer     *platform.Viewer
 	viewerStarting bool
 	viewerGen      int
 }
@@ -1160,7 +1160,7 @@ func (br *Brain) ensureViewer(s *brainSettings) {
 
 // startViewerUnlessAlive starts a viewer unless tv still runs. It returns
 // the new viewer, or nil when tv runs or none could start.
-func (br *Brain) startViewerUnlessAlive(tv *TmuxViewer, s *brainSettings) *TmuxViewer {
+func (br *Brain) startViewerUnlessAlive(tv *platform.Viewer, s *brainSettings) *platform.Viewer {
 	if tv != nil && tv.IsAlive() {
 		return nil
 	}

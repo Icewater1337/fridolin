@@ -1,6 +1,7 @@
 package main
 
 import (
+	"github.com/Icewater1337/fridolin/internal/platform"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -88,7 +89,7 @@ func TestViewerGetsTheAllowlistedEnvironment(t *testing.T) {
 // runs by name and the osascript that opens Terminal all run outside the
 // sandbox, so none of them may come from a PATH folder a brain can write
 // to. Terminal is opened with /usr/bin/osascript, and every tmux and
-// osascript call gets SystemPATH and no other PATH, whatever the viewer's
+// osascript call gets platform.SystemPATH and no other PATH, whatever the viewer's
 // environment says.
 func TestViewerRunsOnlySystemPrograms(t *testing.T) {
 	if osascript != "/usr/bin/osascript" {
@@ -109,7 +110,7 @@ func TestViewerRunsOnlySystemPrograms(t *testing.T) {
 	osascript = filepath.Join(fakes, "osascript")
 	t.Cleanup(func() { osascript = oldOsascript })
 
-	tv := &TmuxViewer{TmuxPath: findTmux(), Osascript: osascript, Timeout: viewerTimeout, Name: "claude-a", StreamLog: filepath.Join(home, streamLogName), CWD: home,
+	tv := &platform.Viewer{TmuxPath: findTmux(), Osascript: osascript, Timeout: viewerTimeout, Name: "claude-a", StreamLog: filepath.Join(home, streamLogName), CWD: home,
 		Env: []string{"HOME=" + home, "PATH=" + planted + ":/usr/bin:/bin", "TMUX_TMPDIR=" + filepath.Join(logs, "tmux")}}
 	if err := tv.Start(); err != nil {
 		t.Fatal(err)
@@ -135,7 +136,7 @@ func TestViewerRunsOnlySystemPrograms(t *testing.T) {
 					paths = append(paths, kv)
 				}
 			}
-			if want := "PATH=" + SystemPATH; len(paths) != 1 || paths[0] != want {
+			if want := "PATH=" + platform.SystemPATH; len(paths) != 1 || paths[0] != want {
 				t.Errorf("%s ran with %q, want only %s", call, paths, want)
 			}
 		})
@@ -183,10 +184,10 @@ func TestViewerClosedWhileItStarts(t *testing.T) {
 			t.Cleanup(func() { tmuxPath, tmuxOnce = oldTmux, sync.Once{} })
 			starting, release := make(chan struct{}), make(chan struct{})
 			prev := startViewer
-			startViewer = func(name, streamLog, cwd string, env []string) (*TmuxViewer, error) {
+			startViewer = func(name, streamLog, cwd string, env []string) (*platform.Viewer, error) {
 				close(starting)
 				<-release
-				return &TmuxViewer{TmuxPath: findTmux(), Osascript: osascript, Timeout: viewerTimeout, Name: name, StreamLog: streamLog, CWD: cwd, Env: env}, nil
+				return &platform.Viewer{TmuxPath: findTmux(), Osascript: osascript, Timeout: viewerTimeout, Name: name, StreamLog: streamLog, CWD: cwd, Env: env}, nil
 			}
 			t.Cleanup(func() { startViewer = prev })
 
@@ -301,7 +302,7 @@ func TestViewerWithRealTmux(t *testing.T) {
 			viewerEnv = append(viewerEnv, kv)
 		}
 	}
-	tv := &TmuxViewer{TmuxPath: findTmux(), Osascript: osascript, Timeout: viewerTimeout, Name: "claude-work", StreamLog: logPath, CWD: dir, Env: viewerEnv}
+	tv := &platform.Viewer{TmuxPath: findTmux(), Osascript: osascript, Timeout: viewerTimeout, Name: "claude-work", StreamLog: logPath, CWD: dir, Env: viewerEnv}
 	if tv.IsAlive() {
 		t.Error("claude-work-archive counts as claude-work's viewer")
 	}

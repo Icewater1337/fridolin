@@ -2,7 +2,8 @@
 
 // Package platform is what the bridge asks of the operating system beyond
 // files: the instance lock, process groups, replacing its own process on
-// a restart, opening a browser, telling a terminal and a folder dialog.
+// a restart, opening a browser, telling a terminal, a folder dialog and
+// the optional tmux activity viewer.
 // It builds on macOS and Linux only (unsupported.go), and it is the one
 // package below internal/ that may read the process's environment.
 package platform

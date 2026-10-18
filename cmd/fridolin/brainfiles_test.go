@@ -3,6 +3,7 @@ package main
 import (
 	"encoding/json"
 	"errors"
+	"github.com/Icewater1337/fridolin/internal/platform"
 	"log"
 	"os"
 	"path/filepath"
@@ -461,7 +462,7 @@ func TestViewerCreatesTheStreamLogInTheFolder(t *testing.T) {
 			}
 			var started []string
 			prev := startViewer
-			startViewer = func(_, streamLog, _ string, _ []string) (*TmuxViewer, error) {
+			startViewer = func(_, streamLog, _ string, _ []string) (*platform.Viewer, error) {
 				started = append(started, streamLog)
 				return nil, errors.New("no tmux in tests")
 			}

@@ -3,6 +3,7 @@ package main
 import (
 	"errors"
 	"fmt"
+	"github.com/Icewater1337/fridolin/internal/platform"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -1575,7 +1576,7 @@ func TestViewerClosesWithItsBrain(t *testing.T) {
 			mgr := newTestManager(t, cfg)
 			t.Cleanup(mgr.Stop)
 			br := mgr.Get("a")
-			br.tmuxViewer = &TmuxViewer{Name: "claude-a", TmuxPath: findTmux()} // as if it had started
+			br.tmuxViewer = &platform.Viewer{Name: "claude-a", TmuxPath: findTmux()} // as if it had started
 			logs := captureLog(t)
 
 			c.change(t, mgr, cfg, home)
