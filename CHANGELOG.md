@@ -225,6 +225,13 @@ for compatibility.
   the edit passed its checks, and put back when the save fails.
   Allowing a group for a brain puts back every `brain.json` it changed
   when one of them cannot be written.
+- A `config.json` edited by hand, or put back from a backup, while the
+  bridge runs is no longer written over by the next save from the
+  dashboard, a calendar sign-in or a Plaud sync: the bridge reads the
+  file before each save, runs on it from then on, and makes the change
+  on top of it. Saving the whole Settings page over it asks you to
+  reload first, and a file that does not load makes the save fail
+  instead of being written over (docs/CONFIGURATION.md).
 
 ### Kept for compatibility
 

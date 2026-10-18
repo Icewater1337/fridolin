@@ -330,3 +330,134 @@ func TestPutConfigSendsItsOwnETag(t *testing.T) {
 		t.Errorf("save with the PUT's etag after a later write: %d %s, want 409", w.Code, w.Body.String())
 	}
 }
+
+// editByHand rewrites config.json the way an editor would, with edit
+// applied to its keys.
+func editByHand(t *testing.T, path string, edit func(c map[string]any)) {
+	t.Helper()
+	var c map[string]any
+	if err := json.Unmarshal([]byte(readFile(t, path)), &c); err != nil {
+		t.Fatal(err)
+	}
+	edit(c)
+	data, err := json.MarshalIndent(c, "", "\t")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, data, 0o600); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// A config.json changed by hand while the bridge runs is not written over
+// by the next save. A save of the whole config made from the one before
+// is a conflict; once reloaded, the page shows the hand edit and saves.
+func TestHandEditThenSaveWithTheOldETagConflicts(t *testing.T) {
+	tb := newTestBridge(t, "")
+	var page struct {
+		ETag   string         `json:"etag"`
+		Config map[string]any `json:"config"`
+	}
+	if err := json.Unmarshal(tb.do("GET", "/api/config", nil).Body.Bytes(), &page); err != nil {
+		t.Fatal(err)
+	}
+	logs := captureLog(t)
+	editByHand(t, tb.cfgs.Path(), func(c map[string]any) { c["max_chunk_size"] = 1234 })
+	edited := readFile(t, tb.cfgs.Path())
+
+	page.Config["log_level"] = "debug"
+	w := tb.do("PUT", "/api/config", map[string]any{"etag": page.ETag, "config": page.Config})
+	if w.Code != 409 {
+		t.Fatalf("save over a hand edit: %d %s, want 409", w.Code, w.Body.String())
+	}
+	if got := readFile(t, tb.cfgs.Path()); got != edited {
+		t.Errorf("the refused save changed config.json:\n%s", got)
+	}
+	if !logContains(logs, "changed on disk since the bridge read it") {
+		t.Errorf("the hand edit was not logged: %q", logs())
+	}
+	// The bridge runs on the hand edit now, and the page gets it on reload.
+	if got := tb.cfgs.Get().MaxChunkSize; got != 1234 {
+		t.Errorf("max_chunk_size = %d after the hand edit was found, want 1234", got)
+	}
+	w = tb.editConfig(t, func(c map[string]any) {
+		if c["max_chunk_size"] != float64(1234) {
+			t.Errorf("the reloaded page has max_chunk_size %v, want the hand edit", c["max_chunk_size"])
+		}
+		c["log_level"] = "debug"
+	})
+	if w.Code != 200 {
+		t.Fatalf("save after reloading: %d %s", w.Code, w.Body.String())
+	}
+	if c := tb.cfgs.FileCopy(); c.MaxChunkSize != 1234 || c.LogLevel != "debug" {
+		t.Errorf("after the save: max_chunk_size %d, log_level %q, want both edits", c.MaxChunkSize, c.LogLevel)
+	}
+}
+
+// A save that changes one thing, as allowing a chat does, goes on top of a
+// hand edit of config.json: both stay.
+func TestHandEditThenDeltaUpdateKeepsBoth(t *testing.T) {
+	tb := newTestBridge(t, "")
+	editByHand(t, tb.cfgs.Path(), func(c map[string]any) { c["max_chunk_size"] = 1234 })
+	if w := tb.do("POST", "/api/chats/allow", chatRequest{Kind: "dm", Number: "15559876543"}); w.Code != 200 {
+		t.Fatalf("allow: %d %s", w.Code, w.Body.String())
+	}
+	var file Config
+	if err := json.Unmarshal([]byte(readFile(t, tb.cfgs.Path())), &file); err != nil {
+		t.Fatal(err)
+	}
+	if file.MaxChunkSize != 1234 || !slices.Contains(file.AllowedNumbers, "15559876543") {
+		t.Errorf("config.json has max_chunk_size %d and allowed_numbers %v, want the hand edit and the allowed number", file.MaxChunkSize, file.AllowedNumbers)
+	}
+	if cfg := tb.cfgs.Get(); cfg.MaxChunkSize != 1234 || !slices.Contains(cfg.AllowedNumbers, "15559876543") {
+		t.Errorf("the bridge runs with max_chunk_size %d and allowed_numbers %v", cfg.MaxChunkSize, cfg.AllowedNumbers)
+	}
+}
+
+// A hand edit that leaves config.json unloadable, half typed say, makes a
+// save fail instead of writing over it; the bridge runs on what it had.
+func TestHandEditThatDoesNotLoadIsNotWrittenOver(t *testing.T) {
+	cases := []struct {
+		name, body, want string
+	}{
+		{"not JSON", `{"allowed_numbers": [`, "parsing config file"},
+		{"invalid", `{"brain_effort": "extreme"}`, "effort"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			cs := openTxStore(t, `{"allowed_numbers":["15551234567"]}`)
+			if err := os.WriteFile(cs.Path(), []byte(tc.body), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			_, err := cs.Update("", func(c *Config) error { c.LogLevel = "debug"; return nil })
+			if err == nil || !strings.Contains(err.Error(), "changed on disk and does not load") || !strings.Contains(err.Error(), tc.want) {
+				t.Errorf("save over an unloadable hand edit: %v", err)
+			}
+			if got := readFile(t, cs.Path()); got != tc.body {
+				t.Errorf("config.json was written over:\n%s", got)
+			}
+			if got := cs.Get().AllowedNumbers; !slices.Equal(got, []string{"15551234567"}) {
+				t.Errorf("the bridge runs with allowed_numbers %v", got)
+			}
+		})
+	}
+}
+
+// A config.json that is gone is written again by the next save, from the
+// configuration the bridge runs with.
+func TestConfigFileGoneIsWrittenAgain(t *testing.T) {
+	cs := openTxStore(t, `{"allowed_numbers":["15551234567"]}`)
+	if err := os.Remove(cs.Path()); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := cs.Update("", func(c *Config) error { c.LogLevel = "debug"; return nil }); err != nil {
+		t.Fatal(err)
+	}
+	var file Config
+	if err := json.Unmarshal([]byte(readFile(t, cs.Path())), &file); err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Equal(file.AllowedNumbers, []string{"15551234567"}) || file.LogLevel != "debug" {
+		t.Errorf("config.json written again: allowed_numbers %v, log_level %q", file.AllowedNumbers, file.LogLevel)
+	}
+}

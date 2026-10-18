@@ -74,23 +74,9 @@ func OpenConfigStore(cfgPath string) (*ConfigStore, error) {
 	var raw []byte
 	if data, err := os.ReadFile(cfgPath); err == nil {
 		raw = data
-		// An older version is migrated in memory only, and the next save
-		// writes it as this one. A migration logs what it changed.
-		migrated, notes, err := migrateConfigJSON(data)
-		if errors.Is(err, errConfigTooNew) {
-			return nil, fmt.Errorf("config file %q: %w. Run that newer version again, or put back a config.json from before it (see docs/CONFIGURATION.md#version)", cfgPath, err)
+		if file, err = decodeConfigFile(cfgPath, data); err != nil {
+			return nil, err
 		}
-		if err != nil {
-			return nil, fmt.Errorf("parsing config file %q: %w", cfgPath, err)
-		}
-		if err := json.Unmarshal(migrated, file); err != nil {
-			return nil, fmt.Errorf("parsing config file %q: %w", cfgPath, err)
-		}
-		for _, note := range notes {
-			log.Printf("config %s: %s", cfgPath, note)
-		}
-		warnUnknownKeys(cfgPath, migrated)
-		warnOddChats(cfgPath, file)
 	} else if !os.IsNotExist(err) {
 		return nil, fmt.Errorf("reading config file %q: %w", cfgPath, err)
 	}
@@ -106,6 +92,31 @@ func OpenConfigStore(cfgPath string) (*ConfigStore, error) {
 	cs := &ConfigStore{path: cfgPath, startup: eff}
 	cs.snap.Store(&ConfigSnapshot{File: file, Effective: eff, ETag: etagOf(raw), Version: 1})
 	return cs, nil
+}
+
+// decodeConfigFile decodes data, what the config file path holds, into the
+// file layer, and logs what is odd about it: retired keys, unknown ones,
+// chats no entry can match.
+func decodeConfigFile(path string, data []byte) (*Config, error) {
+	// Migrate in memory on startup and external edits; the next save writes
+	// this version while the snapshot ETag still identifies the original bytes.
+	migrated, notes, err := migrateConfigJSON(data)
+	if errors.Is(err, errConfigTooNew) {
+		return nil, fmt.Errorf("config file %q: %w. Run that newer version again, or put back a config.json from before it (see docs/CONFIGURATION.md#version)", path, err)
+	}
+	if err != nil {
+		return nil, fmt.Errorf("parsing config file %q: %w", path, err)
+	}
+	file := &Config{Version: currentConfigVersion}
+	if err := json.Unmarshal(migrated, file); err != nil {
+		return nil, fmt.Errorf("parsing config file %q: %w", path, err)
+	}
+	for _, note := range notes {
+		log.Printf("config %s: %s", path, note)
+	}
+	warnUnknownKeys(path, migrated)
+	warnOddChats(path, file)
+	return file, nil
 }
 
 // Path is the config file this store reads and writes.
@@ -152,7 +163,8 @@ func (cs *ConfigStore) Subscribe(fn func(old, new *Config)) {
 // Update applies mutate to a copy of the file layer, validates the result,
 // writes it atomically and swaps in the new effective configuration. etag ""
 // skips the conflict check. It returns RestartRequired as of the new
-// configuration.
+// configuration. UpdateTx says what happens when config.json was changed
+// by hand.
 func (cs *ConfigStore) Update(etag string, mutate func(*Config) error) (restart []string, err error) {
 	res, err := cs.UpdateTx(etag, func(c *Config, _ *Tx) error { return mutate(c) })
 	return res.Restart, err
@@ -170,12 +182,21 @@ type UpdateResult struct {
 // UpdateTx is Update for an edit that writes brain.json files too: mutate
 // edits the file layer and stages those in tx, which UpdateTx writes only
 // once the new configuration has passed its checks (see Tx).
+//
+// It reads config.json first. When the file changed since the store last
+// read or wrote it, by hand or by a restore, that is the configuration
+// from then on, decoded as at startup, and the update starts from it: with
+// etag "" mutate edits the file as it is now, so the change by hand
+// stays; with an etag the update is refused with ErrConfigConflict, since
+// the caller sends a whole configuration made from the one before.
 func (cs *ConfigStore) UpdateTx(etag string, mutate func(c *Config, tx *Tx) error) (UpdateResult, error) {
 	prev, next, err := cs.commit(etag, mutate)
+	if next != nil {
+		cs.notify(prev, next)
+	}
 	if err != nil {
 		return UpdateResult{}, err
 	}
-	cs.notify(prev, next)
 	return UpdateResult{Restart: restartRequired(cs.startup, next.Effective), ETag: next.ETag}, nil
 }
 
@@ -201,43 +222,60 @@ func (cs *ConfigStore) notify(prev, next *ConfigSnapshot) {
 }
 
 // commit is the part of Update that holds the lock: it writes the new
-// configuration and swaps it in, and returns its snapshot with the one it
-// replaced. Once it has swapped one in, it returns with notifyMu held, for
-// notify to give back. A panic on the way, in mutate or in deriving,
-// encoding or writing the configuration, comes back as an error, with the
-// lock given back and the configuration as it was: net/http recovers a
-// handler's panic and the bridge runs on, and a lock left held would stop
-// every later save, brain edit and calendar sign-in for good.
+// configuration and swaps it in. It returns the snapshot it found, and the
+// one it swapped in last, nil if none: a config.json changed by hand is
+// swapped in even when the update is then refused. With one swapped in it
+// returns with notifyMu held, for notify to give back. A panic on the way,
+// in mutate or in deriving, encoding or writing the configuration, comes
+// back as an error, with the lock given back and nothing of the update
+// saved: net/http recovers a handler's panic and the bridge runs on, and a
+// lock left held would stop every later save, brain edit and calendar
+// sign-in for good.
 func (cs *ConfigStore) commit(etag string, mutate func(*Config, *Tx) error) (prev, next *ConfigSnapshot, err error) {
 	cs.mu.Lock()
 	defer cs.mu.Unlock()
+	// Before the unlock: the subscribers hear of this snapshot before the
+	// next update can swap in another.
+	defer func() {
+		if next != nil {
+			cs.notifyMu.Lock()
+		}
+	}()
 	defer func() {
 		if r := recover(); r != nil {
-			log.Printf("config: an update panicked, nothing was changed: %v\n%s", r, debug.Stack())
-			prev, next, err = nil, nil, fmt.Errorf("the config update failed: %v", r)
+			log.Printf("config: an update panicked and was not saved: %v\n%s", r, debug.Stack())
+			err = fmt.Errorf("the config update failed: %v", r)
 		}
 	}()
 	prev = cs.snap.Load()
-	if etag != "" && etag != prev.ETag {
-		return nil, nil, ErrConfigConflict
-	}
-	file, err := prev.File.clone()
+	base, err := cs.reread(prev)
 	if err != nil {
-		return nil, nil, err
+		return prev, nil, err
+	}
+	if base != prev {
+		cs.snap.Store(base)
+		next = base
+	}
+	if etag != "" && etag != base.ETag {
+		return prev, next, ErrConfigConflict
+	}
+	file, err := base.File.clone()
+	if err != nil {
+		return prev, next, err
 	}
 	tx := &Tx{}
 	if err := mutate(file, tx); err != nil {
-		return nil, nil, err
+		return prev, next, err
 	}
 	// What is written is this version's file, whatever the edit made of it.
 	file.Version = currentConfigVersion
 	eff, err := effective(file)
 	if err != nil {
-		return nil, nil, err
+		return prev, next, err
 	}
 	data, err := json.MarshalIndent(file, "", "  ")
 	if err != nil {
-		return nil, nil, err
+		return prev, next, err
 	}
 	data = append(data, '\n')
 
@@ -251,17 +289,45 @@ func (cs *ConfigStore) commit(etag string, mutate func(*Config, *Tx) error) (pre
 		}
 	}()
 	if err := tx.write(); err != nil {
-		return nil, nil, err
+		return prev, next, err
 	}
 	if err := writeFileAtomic(cs.path, data, 0o600, true); err != nil {
-		return nil, nil, err
+		return prev, next, err
 	}
 	committed = true
 
-	next = &ConfigSnapshot{File: file, Effective: eff, ETag: etagOf(data), Version: prev.Version + 1}
-	cs.snap.Store(next)
-	cs.notifyMu.Lock()
+	saved := &ConfigSnapshot{File: file, Effective: eff, ETag: etagOf(data), Version: base.Version + 1}
+	cs.snap.Store(saved)
+	next = saved
 	return prev, next, nil
+}
+
+// reread returns the snapshot of config.json as it is now. That is cur
+// unless the file changed since the store last read or wrote it; a
+// changed file is decoded and derived as at startup, and one that does
+// not load is an error, so that no update writes over it. A file that is
+// gone is written again by the update, from the configuration that runs.
+func (cs *ConfigStore) reread(cur *ConfigSnapshot) (*ConfigSnapshot, error) {
+	data, err := os.ReadFile(cs.path)
+	switch {
+	case errors.Is(err, fs.ErrNotExist):
+		return cur, nil
+	case err != nil:
+		return nil, fmt.Errorf("reading config file %q: %w", cs.path, err)
+	}
+	etag := etagOf(data)
+	if etag == cur.ETag {
+		return cur, nil
+	}
+	file, err := decodeConfigFile(cs.path, data)
+	if err == nil {
+		var eff *Config
+		if eff, err = effective(file); err == nil {
+			log.Printf("config: %s changed on disk since the bridge read it, and applies from now on", cs.path)
+			return &ConfigSnapshot{File: file, Effective: eff, ETag: etag, Version: cur.Version + 1}, nil
+		}
+	}
+	return nil, fmt.Errorf("%s changed on disk and does not load, so nothing was saved; fix the file (fridolin check says what is wrong): %w", cs.path, err)
 }
 
 // Tx holds the brain.json files an update writes besides config.json.

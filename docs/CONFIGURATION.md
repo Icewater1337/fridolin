@@ -12,6 +12,19 @@ the dashboard offers: once one differs from the value the bridge started
 with, every dashboard tab shows a "Restart the bridge to apply" banner until
 the bridge restarts or the setting is changed back.
 
+You can also edit `config.json` by hand, or put back one from a backup,
+while the bridge runs. The bridge does not notice at once: it reads the file
+again before every change it saves (from the dashboard, a calendar sign-in,
+a Plaud sync and so on), and when the file changed since it last read or
+wrote it, it logs so and runs on the file as it is now, as if the edit had
+been made in the dashboard. The change being saved then goes on top of your
+edit, so both stay; only a save of the whole Settings page, made from the
+config as it was before, is refused, and the page asks you to reload, which
+shows your edit. A file that does not load, with a typo say, makes every
+save fail, and nothing is written over it, until you fix it (`fridolin
+check` says what is wrong). To apply a hand edit straight away, restart the
+bridge (`fridolin service restart`).
+
 Validate at any time:
 
 ```bash
