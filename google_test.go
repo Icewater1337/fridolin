@@ -681,19 +681,24 @@ func writeCalendarToken(t *testing.T, tb *testBridge, id, account, refreshToken 
 // TestCalendarDisconnectRevokesOnlyAnUnsharedGrant: Google revokes an app's
 // whole grant for an account, so Disconnect revokes only when no other
 // token from the same client is signed in to the same account, or may be.
-// Either way this brain's token goes, and the answer says why access stayed.
+// Either way this brain's token goes, and the answer says why access stayed:
+// another brain, or a token no configured brain uses, which can be deleted.
 func TestCalendarDisconnectRevokesOnlyAnUnsharedGrant(t *testing.T) {
+	const shared, leftover = "brain b signs in", "a token for b, which is not a configured brain"
 	cases := []struct {
 		name           string
-		account, other string // the brain's and another brain's account; "-" for no other token
+		account, other string // the brain's and the other token's account; "-" for no other token
+		otherBrain     bool   // the other token is a configured brain's
 		revoked        bool
+		note           string // what the note says when not revoked
 	}{
-		{"no other brain", "you@example.com", "-", true},
-		{"another brain, same account", "you@example.com", "you@example.com", false},
-		{"another brain, same account in other case", "you@example.com", "YOU@example.com", false},
-		{"another brain, another account", "you@example.com", "team@example.com", true},
-		{"another brain, account unknown", "you@example.com", "", false},
-		{"this brain's account unknown", "", "team@example.com", false},
+		{"no other brain", "you@example.com", "-", false, true, ""},
+		{"another brain, same account", "you@example.com", "you@example.com", true, false, shared},
+		{"another brain, same account in other case", "you@example.com", "YOU@example.com", true, false, shared},
+		{"another brain, another account", "you@example.com", "team@example.com", true, true, ""},
+		{"another brain, account unknown", "you@example.com", "", true, false, shared},
+		{"this brain's account unknown", "", "team@example.com", true, false, shared},
+		{"a token left by a removed brain, same account", "you@example.com", "you@example.com", false, false, leftover},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -701,6 +706,9 @@ func TestCalendarDisconnectRevokesOnlyAnUnsharedGrant(t *testing.T) {
 			tb := newTestBridge(t, "")
 			_ = tb.do("PUT", "/api/google/client", map[string]string{"json": fmt.Sprintf(testClientJSON, srv.URL)})
 			tb.addFolderBrain(t, BrainManifest{ID: "a", Name: "A"})
+			if tc.otherBrain {
+				tb.addFolderBrain(t, BrainManifest{ID: "b", Name: "B"})
+			}
 			writeCalendarToken(t, tb, "a", tc.account, "RT-A")
 			if tc.other != "-" {
 				writeCalendarToken(t, tb, "b", tc.other, "RT-B")
@@ -717,8 +725,8 @@ func TestCalendarDisconnectRevokesOnlyAnUnsharedGrant(t *testing.T) {
 			if resp.Revoked != tc.revoked || ((*got)["revoked"] == "RT-A") != tc.revoked {
 				t.Errorf("revoked = %v (at Google: %q), want %v", resp.Revoked, (*got)["revoked"], tc.revoked)
 			}
-			if !tc.revoked && !strings.Contains(resp.Note, "brain b") {
-				t.Errorf("note = %q, want it to name brain b", resp.Note)
+			if !tc.revoked && !strings.Contains(resp.Note, tc.note) {
+				t.Errorf("note = %q, want %q", resp.Note, tc.note)
 			}
 			if _, err := os.Lstat(tb.google.tokenPath("a")); !os.IsNotExist(err) {
 				t.Error("a's token was not deleted")

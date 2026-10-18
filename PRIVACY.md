@@ -55,11 +55,12 @@ including the Limited Use requirements.
 
 - **Disconnect** a brain's calendar in the dashboard: the bridge revokes the
   brain's access at Google and deletes its token. Google keeps one grant per
-  app and account, so when another brain signs in to the same account with
-  the same OAuth client (or the bridge cannot tell), only this brain's token
-  is deleted, and the page says that the access stayed. When Google does
-  not confirm a revocation, the token stays unless you choose to delete it
-  here only. You can also remove access at
+  app and account, so when another brain, or a token file left by a brain
+  removed without a disconnect, signs in to the same account with the same
+  OAuth client (or the bridge cannot tell), only this brain's token is
+  deleted, and the page says that the access stayed and names that brain or
+  file. When Google does not confirm a revocation, the token stays unless
+  you choose to delete it here only. You can also remove access at
   [myaccount.google.com/permissions](https://myaccount.google.com/permissions).
 - Disconnect Google Drive on the dashboard's Backup page.
 - Disconnect Plaud under Integrations: Fridolin signs out of Plaud and stops

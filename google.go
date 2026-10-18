@@ -713,8 +713,16 @@ func (g *GoogleAuth) Disconnect(ctx context.Context, brainID string, localOnly b
 		note = "the access was not revoked at Google: remove it at myaccount.google.com/permissions"
 	default:
 		if other := g.sharingGrant(brainID, t); other != "" {
-			note = fmt.Sprintf("the access was not revoked at Google, since %s signs in to the same Google account with the same client "+
+			note = fmt.Sprintf("the access was not revoked at Google, since brain %s signs in to the same Google account with the same client "+
 				"and would lose its access too; once neither needs it, remove it at myaccount.google.com/permissions", other)
+			if !g.configured(other) {
+				// Left by a brain removed without a disconnect, say: it
+				// keeps the grant from being revoked until it goes.
+				note = fmt.Sprintf("the access was not revoked at Google, since the credentials folder holds a token for %s, "+
+					"which is not a configured brain, from the same client for the same Google account (%s); "+
+					"if nothing uses that file, delete it and remove the access at myaccount.google.com/permissions",
+					other, filepath.Base(g.tokenPath(other)))
+			}
 			break
 		}
 		if err := g.revoke(ctx, t.RefreshToken); err != nil {
@@ -763,8 +771,9 @@ func (g *GoogleAuth) revoke(ctx context.Context, refreshToken string) error {
 // sharingGrant names another holder of the grant t belongs to: a token in
 // the credentials dir, other than brainID's, from the same OAuth client for
 // the same Google account. Without an account in both, it cannot tell, and
-// counts the other token as sharing it. It returns "" for none, else that
-// token's brain ("brain x").
+// counts the other token as sharing it. It returns "" for none, else the
+// brain that token is for, which need not be a configured one: a token
+// file outlives a brain removed without a disconnect.
 func (g *GoogleAuth) sharingGrant(brainID string, t *googleToken) string {
 	entries, _ := os.ReadDir(g.credsDir()) // sorted by name
 	for _, e := range entries {
@@ -781,7 +790,7 @@ func (g *GoogleAuth) sharingGrant(brainID string, t *googleToken) string {
 			continue
 		}
 		if o.Account == "" || t.Account == "" || strings.EqualFold(o.Account, t.Account) {
-			return "brain " + other
+			return other
 		}
 	}
 	return ""
