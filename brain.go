@@ -228,6 +228,7 @@ type brainSettings struct {
 	toolsDir        string // the bridge's Python helpers, or ""
 	dataDir         string // the data dir, absolute
 	dbPath          string // the bridge's DB, absolute
+	plaudPATH       string // the PATH to run with when brains may use Plaud's CLI
 }
 
 // BrainHooks connect brains to the rest of the bridge.
@@ -289,6 +290,7 @@ type brainRun struct {
 
 var (
 	errBrainInterrupted = errors.New("brain run interrupted")
+	errBrainDropped     = errors.New("dropped before it ran")
 	errBrainRetired     = errors.New("brain was removed")
 	errQueueFull        = errors.New("brain queue is full")
 	// errSandboxUnavailable is what the chat sees. The cause goes to the log
@@ -358,13 +360,17 @@ func (br *Brain) Submit(m Inbound) (pos int, busy bool, err error) {
 	replaces := func(p Inbound) bool {
 		return p.JID == m.JID && (p.Silent || (interrupting && p.Sender == m.Sender && p.Source != sourceIngest))
 	}
+	var gone []Inbound
 	kept := br.pending[:0]
 	for _, p := range br.pending {
-		if !replaces(p) {
+		if replaces(p) {
+			gone = append(gone, p)
+		} else {
 			kept = append(kept, p)
 		}
 	}
 	br.pending = kept
+	defer dropped(gone)
 	if len(br.pending) >= s.maxPending {
 		dropped := false
 		for i, p := range br.pending {
@@ -430,6 +436,18 @@ func (br *Brain) worker() {
 		if br.hooks != nil && br.hooks.Deliver != nil {
 			br.hooks.Deliver(br, m, res)
 		}
+		if m.Done != nil {
+			m.Done(res.Err)
+		}
+	}
+}
+
+// dropped tells the messages in ms that will not run, outside br.mu.
+func dropped(ms []Inbound) {
+	for _, m := range ms {
+		if m.Done != nil {
+			m.Done(errBrainDropped)
+		}
 	}
 }
 
@@ -453,11 +471,13 @@ func (br *Brain) recordLast(m Inbound, res RunResult) {
 // a chat's own !stop uses StopChat. It reports whether a run was stopped.
 func (br *Brain) StopCurrent(clearQueue bool) bool {
 	br.mu.Lock()
+	var gone []Inbound
 	if clearQueue {
-		br.pending = nil
+		gone, br.pending = br.pending, nil
 	}
 	cur := br.current
 	br.mu.Unlock()
+	dropped(gone)
 	return br.stopRun(cur)
 }
 
@@ -465,12 +485,13 @@ func (br *Brain) StopCurrent(clearQueue bool) bool {
 // is that chat's, and the chat's waiting messages. One brain serves several
 // chats, so nothing another chat asked for is touched. It reports whether a
 // run was stopped and how many waiting messages were dropped.
-func (br *Brain) StopChat(jid string) (stopped bool, dropped int) {
+func (br *Brain) StopChat(jid string) (stopped bool, n int) {
 	br.mu.Lock()
+	var gone []Inbound
 	kept := br.pending[:0]
 	for _, p := range br.pending {
 		if p.JID == jid {
-			dropped++
+			gone = append(gone, p)
 			continue
 		}
 		kept = append(kept, p)
@@ -481,7 +502,8 @@ func (br *Brain) StopChat(jid string) (stopped bool, dropped int) {
 		cur = nil
 	}
 	br.mu.Unlock()
-	return br.stopRun(cur), dropped
+	dropped(gone)
+	return br.stopRun(cur), len(gone)
 }
 
 // StopHandOffs stops the messages handed to this brain (/ingest, Plaud) that
@@ -489,13 +511,14 @@ func (br *Brain) StopChat(jid string) (stopped bool, dropped int) {
 // of the brain's work goes on: jid may well be another brain's chat. It
 // reports whether a run was stopped and how many waiting messages were
 // dropped.
-func (br *Brain) StopHandOffs(jid string) (stopped bool, dropped int) {
+func (br *Brain) StopHandOffs(jid string) (stopped bool, n int) {
 	handOff := func(m Inbound) bool { return m.Brain != "" && m.JID == jid }
 	br.mu.Lock()
+	var gone []Inbound
 	kept := br.pending[:0]
 	for _, p := range br.pending {
 		if handOff(p) {
-			dropped++
+			gone = append(gone, p)
 			continue
 		}
 		kept = append(kept, p)
@@ -506,7 +529,8 @@ func (br *Brain) StopHandOffs(jid string) (stopped bool, dropped int) {
 		cur = nil
 	}
 	br.mu.Unlock()
-	return br.stopRun(cur), dropped
+	dropped(gone)
+	return br.stopRun(cur), len(gone)
 }
 
 // stopRun kills run, if there is one, and waits for it to end.
@@ -531,8 +555,10 @@ func (br *Brain) stopRun(run *brainRun) bool {
 func (br *Brain) retire(closeViewer bool) {
 	br.mu.Lock()
 	br.retired = true
+	gone := br.pending
 	br.pending = nil
 	br.mu.Unlock()
+	dropped(gone)
 	br.StopCurrent(true)
 	if closeViewer {
 		br.closeViewer()
@@ -1027,10 +1053,14 @@ func (br *Brain) invoke(run *brainRun, ctx context.Context, s *brainSettings, m 
 	binary := s.claudePath
 	finalArgs := args
 	extraEnv := append(dataEnv(s), calendarEnv(br.id, s.manifest, s.credsDir)...)
+	extraEnv = append(extraEnv, plaudOptOut...)
 	if s.toolsDir != "" {
 		// Prompts and skills run the helpers as $FRIDOLIN_TOOLS_DIR/<tool>,
 		// wherever the bridge is installed.
 		extraEnv = append(extraEnv, "FRIDOLIN_TOOLS_DIR="+s.toolsDir)
+	}
+	if s.plaudPATH != "" {
+		extraEnv = append(extraEnv, "PATH="+s.plaudPATH) // replaces the bridge's
 	}
 	if br.sandbox != nil && br.sandbox.Enabled() {
 		sbBinary, sbArgs, sbErr := br.sandbox.Command(br.id, s.claudePath, args)
@@ -1623,8 +1653,9 @@ func settingsFor(cfg *Config, sp BrainSpec) *brainSettings {
 		toolsDir:        ownLayout().Tools,
 		// Absolute: brains run in their own folder, where a relative
 		// data_dir would name another one.
-		dataDir: absPath(cfg.DataDir),
-		dbPath:  absPath(cfg.DBPath),
+		dataDir:   absPath(cfg.DataDir),
+		dbPath:    absPath(cfg.DBPath),
+		plaudPATH: brainPlaudPATH(cfg),
 	}
 }
 

@@ -464,7 +464,7 @@ their sandbox, so a manipulated brain cannot plant code there:
   `touch`, `osascript`, `open`), whether they exist there yet or not;
   `~/.local/bin/rclone`, where it looks when rclone is not on `PATH`; and,
   unless `plaud.cli_path` is set, all of `~/.nvm/versions/node`, because
-  the bridge takes the Plaud CLI of whichever node version sorts last.
+  the bridge takes the Plaud CLI of the newest node version that has one.
   Brains therefore cannot install node versions or global npm packages with
   nvm.
 
@@ -674,7 +674,9 @@ keeps correcting themselves cannot push other chats back. Requests from other
 chats, and other people's in a group, still wait their turn (with the same
 notice). Untagged group chatter never interrupts a run, and files sent through
 `/ingest` neither interrupt nor replace one another: each is a job of its own.
-`max_pending` applies in both modes.
+`max_pending` applies in both modes. [Plaud](PLAUD.md) recordings take at
+most five places, and half of a smaller queue (at least one), so your own
+messages still get in.
 
 Untagged group chatter waiting in the queue is dropped when a newer message
 from that chat arrives — it is already in the history the next run reads.
@@ -743,12 +745,24 @@ include them if you still want them. Only what was typed counts: a code sent
 as a reply to the request is caught too.
 
 The code is never written to history or sent to the model — the assistant
-never sees it. It is handed to whatever local script asked for it instead:
-`<data_dir>/otp/<brain>.json` holds the latest caught code
-(`{"code", "chat", "sender", "received"}`), readable only by your user and
-denied to brains by the sandbox. A script that requested a code through
-`/send` (with one of the `otp_markers` in its message) polls that file for a
-`received` time after its request.
+never sees it. It is kept for local scripts instead:
+`<data_dir>/otp/<brain>.json` holds the latest code the guard caught for
+that brain, readable only by your user and denied to brains by the sandbox:
+
+```json
+{"brain": "main", "chat": "15551234567@s.whatsapp.net", "sender": "15551234567",
+ "code": "483920", "received": "2026-10-18T09:30:12+02:00", "received_unix_ms": 1792308612345}
+```
+
+Each caught code replaces the one before, and the file stays until then, so
+a script deletes it once it has used the code if it wants it gone. The
+guard reacts to any message the brain sent with a marker, not only to a
+`/send`, and the file carries no request id. A script that asked for a code
+through `/send` (with one of the `otp_markers` in its message) therefore
+polls the file for one whose `chat` (and `sender`) are the chat it asked in,
+and whose `received_unix_ms` is later than the time of its request; that
+field needs no time zone, unlike `received`, which ends in `Z` on a host
+set to UTC.
 
 ### `max_chunk_size`
 
@@ -845,10 +859,13 @@ directory and database it runs with (absolute, wherever `data_dir` and
 `db_path` put them), which the tools read; `FRIDOLIN_TOOLS_DIR`, the
 folder with the tools (see [BRAINS.md](BRAINS.md)); `BRIDGE_BRAIN_ID`,
 `BRIDGE_CREDENTIALS_DIR`, `BRIDGE_CALENDARS` and `BRIDGE_CALENDAR_DEFAULT`
-for the calendar tool; and `DISABLE_AUTOUPDATER=1` in the sandbox. What
-the bridge's own environment has under these names does not reach brains.
-Run by hand, outside a brain, the tools default to `~/.fridolin`; set
-`BRIDGE_DATA_DIR` for another data directory. The list lives in one place,
+for the calendar tool; `PLAUD_TELEMETRY_DISABLED=1` and
+`PLAUD_NO_UPDATE_NOTIFIER=1` for [Plaud](PLAUD.md)'s CLI, with
+`plaud.brain_access` a `PATH` that starts with that CLI's folder; and
+`DISABLE_AUTOUPDATER=1` in the sandbox. What the bridge's own environment
+has under these names does not reach brains. Run by hand, outside a
+brain, the tools default to `~/.fridolin`; set `BRIDGE_DATA_DIR` for
+another data directory. The list lives in one place,
 `childEnvAllowlist` in `childenv.go`.
 
 Brains are not handed anything else, for example `GROQ_API_KEY`,

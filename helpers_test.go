@@ -276,68 +276,6 @@ func isPlaudCommand(c string) bool {
 	return false
 }
 
-// fakePlaud plays Plaud's CLI from fixture files in FRIDOLIN_FAKE_PLAUD_DIR:
-// files.txt, file_<id>.txt, transcript_<id>.txt, summary_<id>.txt, and
-// "account" (the id `me` reports). Like @plaud-ai/cli 0.3.15 it prints its
-// spinner line to stderr and exits 2 only when the login is rejected: an
-// "expired" file makes every call do that, "offline" makes every call exit 3
-// (Plaud unreachable), and fail_<command> makes that command exit 1. Each
-// call is logged with HOME, and the last call's environment is in env.log.
-func fakePlaud(args []string) int {
-	dir := os.Getenv("FRIDOLIN_FAKE_PLAUD_DIR")
-	if f, err := os.OpenFile(dir+"/calls.log", os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600); err == nil {
-		fmt.Fprintf(f, "HOME=%s %s\n", os.Getenv("HOME"), strings.Join(args, " "))
-		f.Close()
-	}
-	_ = os.WriteFile(dir+"/env.log", []byte(strings.Join(os.Environ(), "\n")+"\n"), 0o600)
-	token := os.Getenv("HOME") + "/.plaud/tokens.json"
-	exists := func(name string) bool { _, err := os.Stat(dir + "/" + name); return err == nil }
-	read := func(name string) string { b, _ := os.ReadFile(dir + "/" + name); return string(b) }
-	if args[0] != "login" && args[0] != "logout" {
-		fmt.Fprintf(os.Stderr, "- Fetching %s...\n", args[0])
-		switch {
-		case exists("expired"):
-			fmt.Fprintln(os.Stderr, "✗ [AUTH_FAILED] Token invalid or expired. Run `plaud login`.")
-			return 2
-		case exists("offline"):
-			fmt.Fprintln(os.Stderr, "✗ [UNREACHABLE] Cannot reach Plaud servers. Check your network.")
-			return 3
-		case exists("fail_" + args[0]):
-			fmt.Fprintf(os.Stderr, "✗ [FETCH_FAILED] Failed to fetch %s.\n", args[0])
-			return 1
-		}
-	}
-	switch args[0] {
-	case "login":
-		if _, err := os.Stat(dir + "/login_wait"); err == nil {
-			// Like the real CLI without a browser: print the URL, wait for the approval.
-			fmt.Println("Could not open browser. Open this URL manually: https://example.com/oauth?client=x")
-			for i := 0; i < 200; i++ {
-				if _, err := os.Stat(dir + "/login_go"); err == nil {
-					break
-				}
-				time.Sleep(50 * time.Millisecond)
-			}
-		}
-		_ = os.MkdirAll(os.Getenv("HOME")+"/.plaud", 0o700)
-		_ = os.WriteFile(token, []byte(`{"fake":true}`), 0o600)
-		fmt.Println("Logged in")
-	case "logout":
-		_ = os.Remove(token)
-	case "me":
-		id := strings.TrimSpace(read("account"))
-		if id == "" {
-			id = "u_1"
-		}
-		fmt.Printf("\nUser Info:\n\n  id: %s\n  nickname: You\n  email: you@example.com\n\n", id)
-	case "files":
-		fmt.Print(read("files.txt"))
-	case "file", "transcript", "summary":
-		fmt.Print(read(args[0] + "_" + args[1] + ".txt"))
-	}
-	return 0
-}
-
 func TestCheckTestDataDir(t *testing.T) {
 	root := t.TempDir()
 	in := filepath.Join(root, "data")

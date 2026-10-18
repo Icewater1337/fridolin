@@ -103,7 +103,9 @@ you created a new subfolder, say why.
 ## Notes
 
 - Never leave files in the staging directory. It has no owner and no cleanup.
-- Don't duplicate into `transcripts/` for a file you didn't transcribe.
+- Don't duplicate into `transcripts/` for a file you didn't transcribe. A
+  Plaud recording is the exception: it arrives as a finished transcript,
+  and `skills/plaud.md` files it there.
 - Don't file something under `documents/` just because it's a file.
 - For a borderline case — a voice memo that might get transcribed later —
   default to `media/voice-memos/` and move it once a transcript actually exists.

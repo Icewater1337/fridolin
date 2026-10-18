@@ -480,7 +480,8 @@ What the bridge does about it:
   claim your DMs or another group changes nothing until you approve it.
 - **OTP guard.** A message that is only a numeric code, arriving right after
   the assistant asked for one, is dropped before it reaches history or the model
-  — also when it is sent as a reply to the request.
+  — also when it is sent as a reply to the request — and kept in
+  `<data_dir>/otp/` for the local script that asked for it.
 
 What it does not do:
 

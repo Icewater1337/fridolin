@@ -123,13 +123,6 @@ type backupJob struct {
 	cancel  context.CancelFunc
 }
 
-type connectJob struct {
-	State   string `json:"state"` // running, done, error
-	AuthURL string `json:"auth_url,omitempty"`
-	Error   string `json:"error,omitempty"`
-	cancel  context.CancelFunc
-}
-
 // BackupManager runs and schedules backups.
 type BackupManager struct {
 	cfgs *ConfigStore

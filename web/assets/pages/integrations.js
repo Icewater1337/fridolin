@@ -16,6 +16,9 @@ import { liveForm } from '../components/live-form.js';
 
 const every = (sec) => (sec % 60 === 0 ? (sec === 60 ? 'minute' : `${sec / 60} minutes`) : `${sec} seconds`);
 
+// What a recording's run is up to, as the status names it.
+const runState = { handed: 'with the brain', done: 'answered', stopped: 'stopped', failed: 'its run failed, trying again' };
+
 export default {
   title: 'Integrations',
   render(root, ctx) {
@@ -24,8 +27,9 @@ export default {
       pageHeader('Integrations', 'Services that hand things to your brains on their own.'),
       h('div.page-stack', card));
 
-    // It asks Plaud for the account, which may take 30 s.
-    const plaud = resource('/api/plaud/status', { timeout: 60000 });
+    // The status never waits for Plaud: who is signed in is what the
+    // bridge asked last.
+    const plaud = resource('/api/plaud/status');
     const refresh = () => plaud.refresh();
     let status = null;
     let brains = [];
@@ -43,6 +47,8 @@ export default {
     const head = (state, kind) => h('div.card-head',
       h('div.card-title', icon('inbox'), h('h2', 'Plaud recorder')),
       pill(state, kind));
+    // A CLI version Fridolin does not read, and what to install instead.
+    const cliWarn = (warning) => (warning ? callout('warn', 'Plaud’s CLI version', warning) : null);
 
     // A status known from an earlier visit paints at once, so everything
     // render() uses is defined above.
@@ -64,17 +70,37 @@ export default {
       if (!s.connected) {
         if (settings.dirty()) settings.discard(); // nothing to edit until it is connected again
         const connecting = s.connect && s.connect.state === 'running';
-        paint(card, { connect: s.connect || null }, ({ connect }) => [
-          head(connecting ? 'Signing in…' : 'Not connected', connecting ? 'warn' : 'neutral'),
-          h('p', 'Sign in with your Plaud account. New recordings then reach the brain you choose as finished transcripts, with Plaud’s AI summary.'),
+        // Plaud's tool deletes a login that expired; Fridolin remembers it
+        // had one.
+        const signIn = {
+          connect: s.connect || null, expired: !!s.expired && !connecting, moved: !!s.login_moved && !connecting,
+          loginDir: s.login_dir || '', access: !!(s.settings || {}).brain_access, cliWarning: s.cli.warning || '',
+        };
+        paint(card, signIn, ({ connect, expired, moved, loginDir, access, cliWarning }) => [
+          head(connecting ? 'Signing in…' : expired ? 'Login expired' : 'Not connected', connecting ? 'warn' : expired ? 'bad' : 'neutral'),
+          expired
+            ? callout('bad', 'Plaud’s login expired', 'Recordings are not arriving, and the chat gets a reminder once a day. Connect again — it takes one approval in the browser — or disconnect to stop the reminders.')
+            : h('p', 'Sign in with your Plaud account. New recordings then reach the brain you choose as finished transcripts, with Plaud’s AI summary.'),
+          moved
+            ? callout('warn', 'Connect Plaud again', '“Let brains use the Plaud CLI” changed where the login lives, and Fridolin does not take over a login it did not make. Connect again to use the one in ', mono(loginDir), ', or disconnect.')
+            : null,
+          cliWarn(cliWarning),
           connecting ? callout('info', 'Approve access in the browser tab Plaud just opened.',
-            connect.auth_url ? h('div', 'No tab opened? ', h('a', { href: connect.auth_url, target: '_blank', rel: 'noopener noreferrer' }, 'Open Plaud’s sign-in')) : null) : null,
+            // The bridge passes on only the link Plaud's tool printed for
+            // its sign-in; the host shows where it leads.
+            connect.auth_url
+              ? h('div', 'No tab opened? ', h('a', { href: connect.auth_url, target: '_blank', rel: 'noopener noreferrer' }, 'Open Plaud’s sign-in'), ` (${new URL(connect.auth_url).host})`)
+              : h('div', 'Use the tab Plaud’s tool opened in your browser.')) : null,
           connect && connect.state === 'error' ? callout('bad', 'Sign-in did not finish', connect.error) : null,
-          h('p.muted.small', 'Fridolin keeps the Plaud login in its own data folder, out of the brains’ reach. Plaud’s tool runs with its usage statistics turned off.'),
-          h('div.actions', btn(connecting ? 'Waiting for Plaud…' : 'Connect Plaud', {
+          h('p.muted.small', access
+            ? 'The login goes to ~/.plaud/, where brains can use it (“Let brains use the Plaud CLI” is on). Plaud’s tool runs with its usage statistics turned off.'
+            : 'Fridolin keeps the Plaud login in its own data folder, out of the brains’ reach. Plaud’s tool runs with its usage statistics turned off.'),
+          h('div.actions', btn(connecting ? 'Waiting for Plaud…' : expired ? 'Connect again' : 'Connect Plaud', {
             kind: 'primary', icon: 'external', disabled: connecting,
             onClick: async () => { await post('/api/plaud/connect'); toast('Plaud’s sign-in opened in your browser', 'ok'); await refresh(); },
-          })),
+          }),
+          // Fridolin still has a login on record: you may rather stop here.
+          expired || moved ? disconnectButton({ connected: false, expired, moved, access }) : null),
         ]);
         return;
       }
@@ -87,14 +113,19 @@ export default {
       ]);
       // A destination problem only blocks anything while Plaud is on.
       const blocked = st.enabled && s.summary_error;
-      paint(alertsBox, { expired: !!s.expired, blocked: blocked || '', lastError: s.last_error && !s.expired && s.last_error !== s.summary_error ? s.last_error : '' }, (a) => [
+      paint(alertsBox, {
+        expired: !!s.expired, blocked: blocked || '', lastError: s.last_error && !s.expired && s.last_error !== s.summary_error ? s.last_error : '',
+        cliWarning: s.cli.warning || '',
+      }, (a) => [
         a.expired ? callout('bad', 'Plaud’s login expired', 'Recordings are not arriving. Connect again — it takes one approval in the browser.') : null,
         a.blocked ? callout('bad', 'Recordings cannot be delivered', a.blocked) : null,
         a.lastError ? callout('warn', 'Last check failed', a.lastError) : null,
+        cliWarn(a.cliWarning),
       ]);
       paint(factsBox, {
         chat: s.summary_chat || '', chatName: chatName(s.summary_chat || ''), toYou: !!s.summary_to_you, chatBrain: s.summary_chat_brain || '', target: s.target_brain || '',
-        last: s.last_forwarded || null, poll: s.last_poll || '', pending: s.pending || 0, waiting: !!(blocked || s.last_error), seen: s.seen,
+        last: s.last_forwarded || null, givenUp: (s.given_up || []).slice(-3).reverse(), handed: s.handed || 0,
+        poll: s.last_poll || '', pending: s.pending || 0, waiting: !!(blocked || s.last_error), seen: s.seen, cliVersion: s.cli.version || '',
       }, renderFacts);
       // The picked brain is marked when it cannot take recordings: gone,
       // or listed but not running (not approved, or it has an issue).
@@ -103,8 +134,8 @@ export default {
       // The picked brain keeps its option while it is gone (or the list is
       // still loading), so Save does not quietly switch to Automatic.
       if (st.brain && !brains.some((b) => b.id === st.brain)) options.push([st.brain, missing(st.brain)]);
-      settings.set({ st, options });
-      paint(actionsBox, { enabled: !!st.enabled, expired: !!s.expired }, renderActions);
+      settings.set({ st, options, defaultMessage: s.default_message || '', interval: s.interval_seconds || 60 });
+      paint(actionsBox, { enabled: !!st.enabled, expired: !!s.expired, access: !!st.brain_access }, renderActions);
       paint(loginBox, s.login_dir || '', (dir) => ['Login stored in ', mono(dir), '.']);
     }
 
@@ -114,33 +145,70 @@ export default {
         facts.push(h('div', 'Summaries go to ', chatEl(f.chat), f.toYou ? ' (your DM)' : '', '.'));
         if (f.chatBrain) facts.push(h('div.muted.small', `What you write back in that chat goes to the ${f.chatBrain} brain, not to ${f.target}.`));
       }
-      if (f.last) facts.push(h('div', 'Last recording: ', h('strong', f.last.name), ' → ', f.last.brain, ' ', timeAgo(f.last.at)));
+      // "Send again" hands a recording over once more.
+      const again = (id) => btn('Send again', {
+        small: true, icon: 'refresh',
+        onClick: async () => { await post('/api/plaud/resend', { id }); toast('It goes to the brain with the next check', 'ok'); await refresh(); },
+      });
+      if (f.last) {
+        facts.push(h('div', 'Last recording: ', h('strong', f.last.name), ' → ', f.last.brain, ' ', timeAgo(f.last.at),
+          runState[f.last.status] ? ` · ${runState[f.last.status]}` : '', f.last.status === 'stopped' ? again(f.last.id) : null));
+      }
+      // Recordings Fridolin stopped trying, newest first.
+      for (const g of f.givenUp) facts.push(h('div.muted', 'Not sent: ', h('strong', g.name || g.id), ` — ${g.reason} `, timeAgo(g.at), again(g.id)));
+      if (f.handed) facts.push(h('div.muted', f.handed === 1 ? '1 recording with the brain' : `${f.handed} recordings with the brain`));
       if (f.poll) facts.push(h('div.muted', 'Checked ', timeAgo(f.poll), f.pending ? ` · ${f.pending} ${f.waiting ? 'waiting to be delivered' : 'waiting for Plaud’s transcript'}` : ''));
       if (typeof f.seen === 'number') facts.push(h('div.muted.small', f.seen === 1 ? '1 recording known' : `${f.seen} recordings known`));
+      if (f.cliVersion) facts.push(h('div.muted.small', `Plaud CLI ${f.cliVersion}`));
       return facts.length ? h('div.facts', facts) : null;
     }
 
-    function buildSettings({ st, options }) {
+    function buildSettings({ st, options, defaultMessage, interval }, changed) {
       const enabled = toggle({ checked: !!st.enabled, label: 'Send new recordings to a brain' });
       const brainSel = select(options, st.brain || '');
       const polished = toggle({ checked: !!st.polished, label: 'Use Plaud’s AI-cleaned transcript' });
-      const access = toggle({ checked: !!st.brain_access, label: 'Let brains use the Plaud CLI themselves' });
-      const msg = h('textarea', { id: nextId('pmsg'), rows: 4, placeholder: 'Built-in instruction: file it under transcripts/, note what matters, reply with a summary and action items. {name}, {when} and {duration} are filled in.' });
+      const accessWarn = h('div.help.warn-text', 'Brains can read the Plaud login while this is on.');
+      const showAccessWarn = () => { accessWarn.hidden = !access.input.checked; };
+      // The setting moves the login, so saving it means connecting again.
+      const access = toggle({
+        checked: !!st.brain_access, label: 'Let brains use the Plaud CLI themselves',
+        onChange: async (on, input) => {
+          const ok = await confirmDialog({
+            title: on ? 'Let brains use the Plaud CLI?' : 'Keep the Plaud login from brains?',
+            message: on
+              ? 'Plaud’s login then lives in ~/.plaud/, where brains can read it. The login Fridolin has now does not move: after saving, connect Plaud again. If your own terminal is signed in to Plaud, that login is used once you connect.'
+              : 'Plaud’s login then lives in Fridolin’s data folder, out of the brains’ reach. The one in ~/.plaud/ stays for your terminal: after saving, connect Plaud again.',
+            confirm: on ? 'Turn on' : 'Turn off',
+          });
+          // Cancelled, the switch is back as it was, and so is the form.
+          if (!ok) {
+            input.checked = !on;
+            changed();
+          }
+          showAccessWarn();
+        },
+      });
+      showAccessWarn();
+      const accessField = field({ control: access, help: h('span', 'On: the login lives in ', mono('~/.plaud/'), ' and brains may run ', mono('plaud search'), ', ', mono('plaud transcript'), ' … themselves. Off: only Fridolin can use it. Either way the login does not move: connect again after changing this.') });
+      accessField.append(accessWarn);
+      // The built-in instruction comes from the bridge, the one place it is
+      // written down.
+      const msg = h('textarea', { id: nextId('pmsg'), rows: 4, placeholder: defaultMessage ? `Built in: ${defaultMessage}` : '' });
       msg.value = st.message || '';
       const value = () => ({
         enabled: enabled.input.checked, brain: brainSel.value, polished: polished.input.checked,
         brain_access: access.input.checked, message: msg.value,
       });
       const el = h('div.settings-fields',
-        field({ control: enabled, help: `Every ${every(st.interval_seconds || 60)} Fridolin looks for new recordings and waits until Plaud has transcribed them. The first check — also the first after signing in with another Plaud account — only remembers what already exists, so old recordings are not sent. Recordings made while this is off are sent when you turn it back on (up to the latest 20).` }),
+        field({ control: enabled, help: `Every ${every(interval)} Fridolin looks for new recordings and waits until Plaud has transcribed them. The first check — also the first after signing in with another Plaud account — only remembers what already exists, so old recordings are not sent. Recordings made while this is off are sent when you turn it back on, oldest first, at most five with the brain at once.` }),
         field({ label: 'Brain', control: brainSel, help: 'Recordings run in this brain. Its answer is private: it goes to the brain’s reply chat when that is a direct chat, otherwise to your DM — never to a group.' }),
-        field({ control: polished }),
-        field({ control: access, warn: access.input.checked ? 'Brains can read the Plaud login while this is on.' : null, help: h('span', 'On: the login lives in ', mono('~/.plaud/'), ' and brains may run ', mono('plaud search'), ', ', mono('plaud transcript'), ' … themselves. Off: only Fridolin can use it.') }),
-        field({ label: 'Instruction sent with each recording', control: msg, wide: true }));
+        field({ control: polished, help: 'Plaud makes the cleaned-up transcript after the raw one, and not always. When it has none an hour after the recording showed up, the raw one is sent, with a note saying so.' }),
+        accessField,
+        field({ label: 'Instruction sent with each recording', control: msg, wide: true, help: h('span', 'It follows a first line that says what arrived. ', mono('{name}'), ', ', mono('{when}'), ' and ', mono('{duration}'), ' are filled in. How a brain files recordings belongs in its ', mono('skills/plaud.md'), '.') }));
       return { el, value };
     }
 
-    function renderActions({ enabled, expired }) {
+    function renderActions({ enabled, expired, access }) {
       return [
         btn('Save', {
           kind: 'primary', icon: 'check',
@@ -161,17 +229,27 @@ export default {
           },
         }) : null,
         expired ? btn('Connect again', { icon: 'external', onClick: async () => { await post('/api/plaud/connect'); await refresh(); } }) : null,
-        btn('Disconnect', {
-          kind: 'danger', icon: 'x', small: true,
-          onClick: async () => {
-            const ok = await confirmDialog({ title: 'Disconnect Plaud?', message: 'Fridolin signs out of Plaud and stops checking for recordings. Your recordings stay in Plaud.', confirm: 'Disconnect', danger: true });
-            if (!ok) return;
-            // Plaud's logout may take the bridge's 30 s.
-            await post('/api/plaud/disconnect', undefined, { timeout: 60000 });
-            await refresh();
-          },
-        }),
+        disconnectButton({ connected: true, expired, moved: false, access }),
       ];
+    }
+
+    // Disconnect, on the connected card and on one that waits for you to
+    // connect again; what it signs out depends on which.
+    function disconnectButton({ connected, expired, moved, access }) {
+      return btn('Disconnect', {
+        kind: 'danger', icon: 'x', small: true,
+        onClick: async () => {
+          let note = '';
+          if (moved) note = ' The login in ~/.plaud/ stays: the plaud command in your terminal may use it.';
+          else if (access && connected) note = ' The login is the one in ~/.plaud/, so this also signs out the plaud command in your terminal.';
+          if (expired) note += ' The daily reminder in the chat stops.';
+          const ok = await confirmDialog({ title: 'Disconnect Plaud?', message: `Fridolin signs out of Plaud and stops checking for recordings.${note} Your recordings stay in Plaud, and the transcripts already filed stay where they are.`, confirm: 'Disconnect', danger: true });
+          if (!ok) return;
+          // Plaud's logout may take the bridge's 30 s.
+          await post('/api/plaud/disconnect', undefined, { timeout: 60000 });
+          await refresh();
+        },
+      });
     }
   },
 };

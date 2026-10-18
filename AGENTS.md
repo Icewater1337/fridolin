@@ -172,4 +172,5 @@ Reopen the dashboard with `fridolin open`. To upgrade later: `git pull &&
   `you@example.com`, `/Users/you`.
 - Architecture notes are in the README ("How it works"); configuration in
   `docs/CONFIGURATION.md`; brains in `docs/BRAINS.md`; backups in
-  `docs/BACKUP.md`.
+  `docs/BACKUP.md`; Google Calendar in `docs/CALENDAR.md`; the Plaud
+  recorder in `docs/PLAUD.md`; the site in `docs/SITE.md`.

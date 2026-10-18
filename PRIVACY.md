@@ -16,14 +16,19 @@ policy describes what that copy does with data.
   brain folders to your own Drive, and can only see the files it created there
   (the `drive.file` permission).
 - **Plaud recordings**, if you connect a Plaud account: the name, date and
-  length of new recordings, Plaud's transcript and AI summary. Fridolin fetches
+  length of new recordings, Plaud's transcript and AI summary, and the
+  account's email or nickname, which the dashboard shows. Fridolin fetches
   them with Plaud's own command-line tool, with its usage statistics turned off.
+  Brains get the same setting, for when they may run the tool themselves;
+  runs you start in your own terminal follow your own settings.
 
 ## Where it goes
 
 - Everything is stored **on your own computer**: messages, history, memories,
   downloaded files, and the sign-in tokens for Google (readable only by the
-  brain they belong to).
+  brain they belong to). A one-time code the OTP guard catches is kept in
+  `<data_dir>/otp/` for the local script that asked for it, readable only by
+  your user, until the next code replaces it.
 - To answer a message, the bridge runs **Claude Code** on your computer. Claude
   Code sends the prompt — which can include the message, recent chat history
   and any calendar details the brain looked up — to **Anthropic** to generate
@@ -31,6 +36,9 @@ policy describes what that copy does with data.
 - Backups go to **your own Google Drive**.
 - Plaud transcripts are saved as text files on your computer and handed to the
   brain you chose, so they reach Anthropic like any message the brain answers.
+  Each is written to the media inbox first (`<media_dir>/plaud/`), which every
+  brain may read under the sandbox, until the brain files it in its own
+  folder; from there it goes into that brain's backups too.
 - Nothing is sent to the authors of this project or to anyone else.
 
 ## Google user data
@@ -50,9 +58,15 @@ including the Limited Use requirements.
   [myaccount.google.com/permissions](https://myaccount.google.com/permissions).
 - Disconnect Google Drive on the dashboard's Backup page.
 - Disconnect Plaud under Integrations: Fridolin signs out of Plaud and stops
-  fetching recordings.
+  fetching recordings. The transcripts already written (in the media inbox
+  and where brains filed them) and the list of recordings it has seen
+  (`~/.fridolin/plaud/state.json`) stay. With "Let brains use the Plaud CLI"
+  on, the login is the one in `~/.plaud/`, and disconnecting also signs out
+  the `plaud` command in your terminal (unless the card asks you to connect
+  again after that setting changed: then `~/.plaud/` is left alone).
 - Deleting a brain folder and `~/.fridolin/` removes everything
-  the bridge stored locally.
+  the bridge stored locally, except a Plaud login in `~/.plaud/` (with "Let
+  brains use the Plaud CLI" on), which belongs to Plaud's tool.
 
 ## Contact
 

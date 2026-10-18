@@ -1,0 +1,336 @@
+{
+  "expired": {
+    "login": "expired",
+    "offline": false,
+    "args": [
+      "files",
+      "--page",
+      "1",
+      "--page-size",
+      "100"
+    ],
+    "stdout": "",
+    "stderr": "- Fetching files...\n✗ [AUTH_FAILED] Token invalid or expired. Run `plaud login`.\n",
+    "exit": 2,
+    "token_kept": false
+  },
+  "file": {
+    "login": "ok",
+    "offline": false,
+    "args": [
+      "file",
+      "of_0000000000000000000003"
+    ],
+    "stdout": "\nFile Details:\n\n  id:           of_0000000000000000000003\n  name:         Team sync\n  created_at:   2026-10-16T18:00:00\n  start_at:     -\n  duration:     5m00s\n  serial_number: -\n  audio:        unknown (run `plaud audio` to check)\n  transcript:   available\n  summary:      available\n\n",
+    "stderr": "- Fetching file...\n",
+    "exit": 0,
+    "token_kept": true
+  },
+  "file_404": {
+    "login": "ok",
+    "offline": false,
+    "args": [
+      "file",
+      "of_00000000000000000000ff"
+    ],
+    "stdout": "",
+    "stderr": "- Fetching file...\n✗ [NOT_FOUND] File not found: of_00000000000000000000ff\n",
+    "exit": 1,
+    "token_kept": true
+  },
+  "file_notr": {
+    "login": "ok",
+    "offline": false,
+    "args": [
+      "file",
+      "of_00000000000000000000ae"
+    ],
+    "stdout": "\nFile Details:\n\n  id:           of_00000000000000000000ae\n  name:         Still transcribing\n  created_at:   2026-10-16T18:00:00\n  start_at:     2026-10-15T07:30:00\n  duration:     5m00s\n  serial_number: -\n  audio:        unknown (run `plaud audio` to check)\n  transcript:   unavailable\n  summary:      unavailable\n\n",
+    "stderr": "- Fetching file...\n",
+    "exit": 0,
+    "token_kept": true
+  },
+  "file_start": {
+    "login": "ok",
+    "offline": false,
+    "args": [
+      "file",
+      "of_0000000000000000000002"
+    ],
+    "stdout": "\nFile Details:\n\n  id:           of_0000000000000000000002\n  name:         Doctor: Fetching results\n  created_at:   2026-10-16T18:00:00\n  start_at:     2026-10-15T07:30:00\n  duration:     5m00s\n  serial_number: -\n  audio:        unknown (run `plaud audio` to check)\n  transcript:   available\n  summary:      available\n\n",
+    "stderr": "- Fetching file...\n",
+    "exit": 0,
+    "token_kept": true
+  },
+  "files": {
+    "login": "ok",
+    "offline": false,
+    "args": [
+      "files",
+      "--page",
+      "1",
+      "--page-size",
+      "100"
+    ],
+    "stdout": "\nFiles on this page: 3\n\n  ID                                  NAME                                  DATE          DURATION\n  ──────────────────────────────────────────────────────────────────────────────────────────────────\n  of_0000000000000000000003           Team sync                             2026-10-16    5m00s\n  of_0000000000000000000002           Doctor: Fetching results              2026-10-16    5m00s\n  of_0000000000000000000001           Old one                               2026-10-16    5m00s\n\nPage 1\n",
+    "stderr": "- Fetching files...\n",
+    "exit": 0,
+    "token_kept": true
+  },
+  "files_p2": {
+    "login": "ok",
+    "offline": false,
+    "args": [
+      "files",
+      "--page",
+      "2",
+      "--page-size",
+      "100"
+    ],
+    "stdout": "\nFiles on this page: 0\n\n  ID                                  NAME                                  DATE          DURATION\n  ──────────────────────────────────────────────────────────────────────────────────────────────────\n\nPage 2\n",
+    "stderr": "- Fetching files...\n",
+    "exit": 0,
+    "token_kept": true
+  },
+  "logout": {
+    "login": "ok",
+    "offline": false,
+    "args": [
+      "logout"
+    ],
+    "stdout": "Logged out and revoked authorization.\n",
+    "stderr": "",
+    "exit": 0,
+    "token_kept": false
+  },
+  "logout_none": {
+    "login": "none",
+    "offline": false,
+    "args": [
+      "logout"
+    ],
+    "stdout": "Not logged in.\n",
+    "stderr": "",
+    "exit": 0,
+    "token_kept": false
+  },
+  "me": {
+    "login": "ok",
+    "offline": false,
+    "args": [
+      "me"
+    ],
+    "stdout": "\nUser Info:\n\n  id: u_1\n  nickname: You\n  email: you@example.com\n\n",
+    "stderr": "- Fetching user info...\n",
+    "exit": 0,
+    "token_kept": true
+  },
+  "nologin": {
+    "login": "none",
+    "offline": false,
+    "args": [
+      "me"
+    ],
+    "stdout": "",
+    "stderr": "- Fetching user info...\n✗ [AUTH_FAILED] Token invalid or expired. Run `plaud login`.\n",
+    "exit": 2,
+    "token_kept": false
+  },
+  "offline": {
+    "login": "ok",
+    "offline": true,
+    "args": [
+      "files",
+      "--page",
+      "1",
+      "--page-size",
+      "100"
+    ],
+    "stdout": "",
+    "stderr": "- Fetching files...\n✗ [UNREACHABLE] Cannot reach Plaud servers. Check your network.\nTypeError: fetch failed | cause: Error: bad port\n",
+    "exit": 3,
+    "token_kept": true
+  },
+  "polished_empty_o": {
+    "login": "ok",
+    "offline": false,
+    "args": [
+      "transcript",
+      "of_00000000000000000000ab",
+      "--polished",
+      "-o",
+      "@OUT@"
+    ],
+    "stdout": "The cleaned-up (polished) transcript hasn't been generated for this recording yet.\n",
+    "stderr": "- Fetching transcript...\n",
+    "exit": 0,
+    "token_kept": true
+  },
+  "polished_missing": {
+    "login": "ok",
+    "offline": false,
+    "args": [
+      "transcript",
+      "of_00000000000000000000aa",
+      "--polished"
+    ],
+    "stdout": "No \"transaction_polish\" transcript for this recording. Available: transaction.\n",
+    "stderr": "- Fetching transcript...\n",
+    "exit": 0,
+    "token_kept": true
+  },
+  "polished_missing_o": {
+    "login": "ok",
+    "offline": false,
+    "args": [
+      "transcript",
+      "of_00000000000000000000aa",
+      "--polished",
+      "-o",
+      "@OUT@"
+    ],
+    "stdout": "No \"transaction_polish\" transcript for this recording. Available: transaction.\n",
+    "stderr": "- Fetching transcript...\n",
+    "exit": 0,
+    "token_kept": true
+  },
+  "polished_o": {
+    "login": "ok",
+    "offline": false,
+    "args": [
+      "transcript",
+      "of_0000000000000000000002",
+      "--polished",
+      "-o",
+      "@OUT@"
+    ],
+    "stdout": "Transcript saved to @OUT@\n",
+    "stderr": "- Fetching transcript...\n",
+    "exit": 0,
+    "token_kept": true,
+    "output_file": "[00:00 - 00:04] Speaker 1: Let us ship on Friday."
+  },
+  "rejected": {
+    "login": "rejected",
+    "offline": false,
+    "args": [
+      "files",
+      "--page",
+      "1",
+      "--page-size",
+      "100"
+    ],
+    "stdout": "",
+    "stderr": "- Fetching files...\n✗ [AUTH_FAILED] Token invalid or expired. Run `plaud login`.\n",
+    "exit": 2,
+    "token_kept": false
+  },
+  "revoked": {
+    "login": "revoked",
+    "offline": false,
+    "args": [
+      "me"
+    ],
+    "stdout": "",
+    "stderr": "- Fetching user info...\n✗ [AUTH_FAILED] Token invalid or expired. Run `plaud login`.\n",
+    "exit": 2,
+    "token_kept": true
+  },
+  "summary": {
+    "login": "ok",
+    "offline": false,
+    "args": [
+      "summary",
+      "of_0000000000000000000003"
+    ],
+    "stdout": "\nSummary: Team sync\n\n## Team sync\n\nDecisions: ship Friday.\nFetching the release notes is Anna's job.\nBudget: 10k approved.\n\n",
+    "stderr": "- Fetching summary...\n",
+    "exit": 0,
+    "token_kept": true
+  },
+  "summary_empty_o": {
+    "login": "ok",
+    "offline": false,
+    "args": [
+      "summary",
+      "of_00000000000000000000ad",
+      "-o",
+      "@OUT@"
+    ],
+    "stdout": "Summary saved to @OUT@\n",
+    "stderr": "- Fetching summary...\n",
+    "exit": 0,
+    "token_kept": true,
+    "output_file": "(this note has no content yet — nothing was returned for \"auto_sum_note\")"
+  },
+  "summary_none_o": {
+    "login": "ok",
+    "offline": false,
+    "args": [
+      "summary",
+      "of_00000000000000000000ac",
+      "-o",
+      "@OUT@"
+    ],
+    "stdout": "Summary not available for this recording.\n",
+    "stderr": "- Fetching summary...\n",
+    "exit": 0,
+    "token_kept": true
+  },
+  "summary_o": {
+    "login": "ok",
+    "offline": false,
+    "args": [
+      "summary",
+      "of_0000000000000000000003",
+      "-o",
+      "@OUT@"
+    ],
+    "stdout": "Summary saved to @OUT@\n",
+    "stderr": "- Fetching summary...\n",
+    "exit": 0,
+    "token_kept": true,
+    "output_file": "## Team sync\n\nDecisions: ship Friday.\nFetching the release notes is Anna's job.\nBudget: 10k approved."
+  },
+  "transcript": {
+    "login": "ok",
+    "offline": false,
+    "args": [
+      "transcript",
+      "of_0000000000000000000003"
+    ],
+    "stdout": "\nTranscript: Team sync\n\n[00:00 - 00:04] Speaker 1: Let's ship on Friday.\n[00:04 - 00:09] Speaker 2: Fetching the release notes is Anna's job.\n\n",
+    "stderr": "- Fetching transcript...\n",
+    "exit": 0,
+    "token_kept": true
+  },
+  "transcript_notr_o": {
+    "login": "ok",
+    "offline": false,
+    "args": [
+      "transcript",
+      "of_00000000000000000000ae",
+      "-o",
+      "@OUT@"
+    ],
+    "stdout": "No \"transaction\" transcript for this recording. Available: (none).\n",
+    "stderr": "- Fetching transcript...\n",
+    "exit": 0,
+    "token_kept": true
+  },
+  "transcript_o": {
+    "login": "ok",
+    "offline": false,
+    "args": [
+      "transcript",
+      "of_0000000000000000000003",
+      "-o",
+      "@OUT@"
+    ],
+    "stdout": "Transcript saved to @OUT@\n",
+    "stderr": "- Fetching transcript...\n",
+    "exit": 0,
+    "token_kept": true,
+    "output_file": "[00:00 - 00:04] Speaker 1: Let's ship on Friday.\n[00:04 - 00:09] Speaker 2: Fetching the release notes is Anna's job."
+  }
+}
