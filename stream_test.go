@@ -34,20 +34,38 @@ func TestExtractAskQuestion(t *testing.T) {
 }
 
 // A brain that asks with AskUserQuestion gets the question to the chat while
-// it runs, and the final result, which restates it, is not sent again.
+// it runs, and the final result, which restates it, is not sent again. A
+// silent run asks nobody, and a question that is not on its way leaves the
+// final result to be sent.
 func TestParseStreamForwardsAskUserQuestion(t *testing.T) {
-	br := bareBrain(t)
-	var sent []string
-	br.hooks = &BrainHooks{Question: func(jid, text string) { sent = append(sent, jid+" "+text) }}
-	stream := `{"type":"assistant","message":{"content":[{"type":"tool_use","name":"AskUserQuestion","input":{"questions":[{"header":"Meeting","question":"Which day suits you?"}]}}]}}
+	const stream = `{"type":"assistant","message":{"content":[{"type":"tool_use","name":"AskUserQuestion","input":{"questions":[{"header":"Meeting","question":"Which day suits you?"}]}}]}}
 {"type":"result","result":"I asked which day suits you."}
 `
-	res := br.parseStream("chat", strings.NewReader(stream))
-	if res.Err != nil || !res.AlreadySent || res.Text != "" {
-		t.Errorf("result = %+v, want AlreadySent and no text", res)
+	const question = "chat ❓ Meeting: Which day suits you?"
+	cases := []struct {
+		name   string
+		silent bool
+		onWay  bool // what the hook answers
+		sent   []string
+		want   RunResult
+	}{
+		{"asked", false, true, []string{question}, RunResult{AlreadySent: true}},
+		{"by a silent run", true, true, nil, RunResult{Text: "I asked which day suits you."}},
+		{"not on its way", false, false, []string{question}, RunResult{Text: "I asked which day suits you."}},
 	}
-	if want := []string{"chat ❓ Meeting: Which day suits you?"}; strings.Join(sent, "|") != strings.Join(want, "|") {
-		t.Errorf("sent %q mid-run, want %q", sent, want)
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			br := bareBrain(t)
+			var sent []string
+			br.hooks = &BrainHooks{Question: func(_ *Brain, jid, text string) bool { sent = append(sent, jid+" "+text); return c.onWay }}
+			res := br.parseStream(Inbound{JID: "chat", Silent: c.silent}, strings.NewReader(stream))
+			if fmt.Sprint(res) != fmt.Sprint(c.want) {
+				t.Errorf("result = %+v, want %+v", res, c.want)
+			}
+			if strings.Join(sent, "|") != strings.Join(c.sent, "|") {
+				t.Errorf("sent %q mid-run, want %q", sent, c.sent)
+			}
+		})
 	}
 }
 
@@ -56,11 +74,11 @@ func TestParseStreamForwardsAskUserQuestion(t *testing.T) {
 func TestParseStreamSkipsBlankQuestions(t *testing.T) {
 	br := bareBrain(t)
 	var sent []string
-	br.hooks = &BrainHooks{Question: func(jid, text string) { sent = append(sent, text) }}
+	br.hooks = &BrainHooks{Question: func(_ *Brain, _, text string) bool { sent = append(sent, text); return true }}
 	stream := `{"type":"assistant","message":{"content":[{"type":"tool_use","name":"AskUserQuestion","input":{"questions":[{},{"question":" "}]}}]}}
 {"type":"result","result":"Done."}
 `
-	res := br.parseStream("chat", strings.NewReader(stream))
+	res := br.parseStream(Inbound{JID: "chat"}, strings.NewReader(stream))
 	if res.Err != nil || res.AlreadySent || res.Text != "Done." {
 		t.Errorf("result = %+v, want the reply", res)
 	}
@@ -137,8 +155,8 @@ func FuzzParseStream(f *testing.F) {
 	br := bareBrain(f)
 	run := func(stream string) (RunResult, []string) {
 		var sent []string
-		br.hooks = &BrainHooks{Question: func(_, text string) { sent = append(sent, text) }}
-		return br.parseStream("chat", strings.NewReader(stream)), sent
+		br.hooks = &BrainHooks{Question: func(_ *Brain, _, text string) bool { sent = append(sent, text); return true }}
+		return br.parseStream(Inbound{JID: "chat"}, strings.NewReader(stream)), sent
 	}
 	f.Fuzz(func(t *testing.T, stream, junk string) {
 		res, sent := run(stream)
@@ -185,7 +203,7 @@ func TestMidRunMessagesReachTheChatMarked(t *testing.T) {
 	stream := `{"type":"assistant","message":{"content":[{"type":"tool_use","name":"AskUserQuestion","input":{"questions":[{"question":"⏳ Wait for the delivery?"}]}}]}}
 {"type":"result","result":"asked"}
 `
-	br.parseStream(dm, strings.NewReader(stream))
+	br.parseStream(Inbound{JID: dm}, strings.NewReader(stream))
 	br.hooks.Notice(dm, workingNotice)
 	// The question goes through the outbox, after the notice.
 	waitFor(t, 5*time.Second, "both messages", func() bool { return len(tb.sentTo(dm)) == 2 })

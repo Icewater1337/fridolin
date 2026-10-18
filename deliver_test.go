@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"errors"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -108,5 +109,73 @@ func TestSilentRunLeavesNoReplyInTheHistory(t *testing.T) {
 	}
 	if sent := tb.sentTo(testGroup); len(sent) != 0 {
 		t.Errorf("sent %q to the group", sent)
+	}
+}
+
+// What a run says before it ends reaches the chat only when the message was
+// addressed to the brain: a silent run sends no working notice and asks no
+// question, and the dashboard does not show it as having asked. A question
+// goes into the history as the brain's once it went out, so that the run
+// for the answer sees what it answers; while WhatsApp is down it waits in
+// the outbox, and the run has asked. One the outbox could not take is on
+// its way to nobody, and the run did not ask.
+func TestMidRunMessagesOnlyForAddressedMessages(t *testing.T) {
+	prev := workingNoticeAfter
+	workingNoticeAfter = 50 * time.Millisecond
+	t.Cleanup(func() { workingNoticeAfter = prev })
+	dm := Inbound{JID: testDMChat, Sender: "15551234567", Text: "book a table", Source: sourceWhatsApp}
+	cases := []struct {
+		name    string
+		m       Inbound
+		refused bool // bridge.db refuses to add to the outbox
+		offline bool // WhatsApp is down
+		sent    bool // the question reached the chat and the history
+		asked   bool // the run ended as one that asked
+		notice  bool // the working notice reached the chat
+	}{
+		{name: "a DM", m: dm, sent: true, asked: true, notice: true},
+		{name: "a DM, the outbox refusing it", m: dm, refused: true, notice: true},
+		{name: "a DM while WhatsApp is down", m: dm, offline: true, asked: true},
+		{name: "untagged group chatter", m: Inbound{JID: testGroup, Sender: "15551234567", Text: "we meet at noon", Silent: true, Source: sourceWhatsApp}},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			tb, br := newMainBridge(t, "")
+			t.Setenv("FRIDOLIN_FAKE_ASK", `{"questions":[{"question":"Which day?"}]}`)
+			t.Setenv("FRIDOLIN_FAKE_SLEEP_MS", "300") // time for the working notice
+			if c.refused {
+				if _, err := tb.store.db.Exec(`CREATE TRIGGER refuse_outbox BEFORE INSERT ON outbox BEGIN SELECT RAISE(FAIL, 'disk full'); END`); err != nil {
+					t.Fatal(err)
+				}
+			}
+			chat := func() []string { return tb.sentTo(c.m.JID) }
+			if c.offline {
+				wa := newFlakyMessenger(tb.cfgs.Get, false)
+				tb.wa = wa
+				chat = func() []string { return wa.sent(c.m.JID) }
+			}
+			tb.handleInbound(context.Background(), c.m)
+			waitFor(t, 10*time.Second, "the run", func() bool { return br.Snapshot().Last != nil })
+			if c.sent {
+				waitFor(t, 5*time.Second, "the question in the history", func() bool { return len(outbound(t, br)[c.m.JID]) > 0 })
+			}
+			if c.offline {
+				if sum, err := tb.store.OutboxSummary(context.Background(), time.Now()); err != nil || sum.Waiting == 0 {
+					t.Errorf("outbox = %+v, %v; want the question waiting", sum, err)
+				}
+			}
+
+			sent := slices.Contains(chat(), "❓ Which day?")
+			recorded := slices.Contains(outbound(t, br)[c.m.JID], "❓ Which day?")
+			if sent != c.sent || recorded != c.sent {
+				t.Errorf("question sent %v, in the history %v; want %v", sent, recorded, c.sent)
+			}
+			if last := br.Snapshot().Last; (last.Outcome == outcomeQuestion) != c.asked {
+				t.Errorf("the run ended %q, want it to have asked: %v", last.Outcome, c.asked)
+			}
+			if notice := slices.Contains(chat(), workingNotice); notice != c.notice {
+				t.Errorf("working notice sent %v, want %v", notice, c.notice)
+			}
+		})
 	}
 }

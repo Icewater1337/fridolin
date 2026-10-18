@@ -247,6 +247,10 @@ func fakeClaude() {
 			return
 		}
 	}
+	if ask := os.Getenv("FRIDOLIN_FAKE_ASK"); ask != "" {
+		// An AskUserQuestion call, its input as given, which nobody answers.
+		fmt.Printf(`{"type":"assistant","message":{"content":[{"type":"tool_use","name":"AskUserQuestion","input":%s}]}}`+"\n", ask)
+	}
 	q := strconv.Quote(out)
 	fmt.Printf(`{"type":"assistant","message":{"content":[{"type":"text","text":%s}]}}`+"\n", q)
 	fmt.Printf(`{"type":"result","result":%s}`+"\n", q)

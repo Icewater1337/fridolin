@@ -178,10 +178,12 @@ func NewBridge(cfgs *ConfigStore, opts BridgeOptions) (_ *Bridge, err error) {
 				log.Printf("failed to send the working notice to %s: %v", jid, err)
 			}
 		},
-		Question: func(jid, text string) {
-			if err := b.outbox.Text(context.Background(), jid, text, b.cfgs.Get().MaxChunkSize); err != nil {
-				log.Printf("brain question to %s: %v", jid, err)
+		Question: func(br *Brain, jid, text string) bool {
+			if err := b.outbox.Question(context.Background(), br.ID(), jid, text, b.cfgs.Get().MaxChunkSize); err != nil {
+				log.Printf("brain %s: question to %s: %v", br.ID(), jid, err)
+				return false
 			}
+			return true
 		},
 		Deliver:     b.deliver,
 		Undelivered: b.undelivered,

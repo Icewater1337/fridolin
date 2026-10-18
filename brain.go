@@ -262,9 +262,12 @@ type BrainHooks struct {
 	// Notice tells the chat jid, ready to send, that a run is working on
 	// its message: of use only now.
 	Notice func(jid, text string)
-	// Question sends the chat jid a question its brain asks mid-run,
-	// marked as one: the run sends nothing else, so it must arrive.
-	Question func(jid, text string)
+	// Question sends the chat jid a question br asks mid-run, marked as
+	// one, and reports whether it is on its way: the run sends nothing
+	// else, so it must arrive. br's history records it once it did, like
+	// an answer: the reply to it comes as a new message, whose run must
+	// see what it answers. A silent run asks nothing (see readStream).
+	Question func(br *Brain, jid, text string) bool
 	// Deliver receives every finished run. It records the answer in the
 	// brain's history once it is sent.
 	Deliver func(br *Brain, m Inbound, res RunResult)
@@ -1277,7 +1280,7 @@ func (br *Brain) invoke(run *brainRun, ctx context.Context, s *brainSettings, m 
 				parseDone <- RunResult{Err: errRunPanicked}
 			}
 		}()
-		parseDone <- br.readStream(m.JID, stdout, runHeading(m, s, cmd.Process.Pid), func() { resultOnce.Do(func() { close(resultSeen) }) })
+		parseDone <- br.readStream(m, stdout, runHeading(m, s, cmd.Process.Pid), func() { resultOnce.Do(func() { close(resultSeen) }) })
 	}()
 
 	notice := time.NewTimer(workingNoticeAfter)
@@ -1531,10 +1534,11 @@ func (br *Brain) buildPrompt(s *brainSettings, m Inbound) string {
 	return sb.String()
 }
 
-// parseStream reads the stream-json output from the Claude CLI and returns
-// the result, writing a human-readable activity log alongside it.
-func (br *Brain) parseStream(jid string, reader io.Reader) RunResult {
-	return br.readStream(jid, reader, "── New invocation ──", nil)
+// parseStream reads the stream-json output of m's run from the Claude CLI
+// and returns the result, writing a human-readable activity log alongside
+// it.
+func (br *Brain) parseStream(m Inbound, reader io.Reader) RunResult {
+	return br.readStream(m, reader, "── New invocation ──", nil)
 }
 
 // runHeading starts a run's part of the activity log: what it answers and
@@ -1572,7 +1576,7 @@ func (br *Brain) rotateStreamLog() {
 // readStream is parseStream with heading as the first line of the run in
 // the activity log, calling onResult, when set, as soon as the result is
 // in, while the stream may still go on.
-func (br *Brain) readStream(jid string, reader io.Reader, heading string, onResult func()) RunResult {
+func (br *Brain) readStream(m Inbound, reader io.Reader, heading string, onResult func()) RunResult {
 	scanner := bufio.NewScanner(reader)
 	scanner.Buffer(make([]byte, 4*1024*1024), 4*1024*1024)
 
@@ -1625,9 +1629,11 @@ func (br *Brain) readStream(jid string, reader io.Reader, heading string, onResu
 				case "tool_use":
 					writeLog("🔧 Tool: " + content.Name)
 					if content.Name == "AskUserQuestion" {
+						// Untagged (silent) messages never produce a visible
+						// reply, so they must not ask anything either. Only a
+						// question on its way counts as asked.
 						question := extractAskQuestion(content.Input)
-						if question != "" && br.hooks != nil && br.hooks.Question != nil {
-							br.hooks.Question(jid, questionPrefix+question)
+						if question != "" && !m.Silent && br.hooks != nil && br.hooks.Question != nil && br.hooks.Question(br, m.JID, questionPrefix+question) {
 							questionSent = true
 						}
 					}

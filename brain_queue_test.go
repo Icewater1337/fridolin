@@ -1081,7 +1081,7 @@ func TestParseStreamReportsErrorText(t *testing.T) {
 	stream := `{"type":"assistant","message":{"content":[{"type":"text","text":"Failed to authenticate. API Error: 401"}]}}
 {"type":"result","is_error":true}
 `
-	res := br.parseStream("x", strings.NewReader(stream))
+	res := br.parseStream(Inbound{JID: "x"}, strings.NewReader(stream))
 	if res.Err == nil || !strings.Contains(res.Err.Error(), "Failed to authenticate") {
 		t.Errorf("err = %v, want the CLI's own message", res.Err)
 	}
@@ -1285,8 +1285,9 @@ func TestPanicsInARunAreContained(t *testing.T) {
 		}},
 		{"while its output is read", map[string]string{"FRIDOLIN_FAKE_ASK_ON": "says: one"}, 0, true, func(d *deliveries, first *sync.Once) BrainHooks {
 			// The question goes out from the goroutine that reads the output.
-			return BrainHooks{Deliver: d.add, Question: func(string, string) {
+			return BrainHooks{Deliver: d.add, Question: func(*Brain, string, string) bool {
 				first.Do(func() { panic("boom in sending the question") })
+				return true
 			}}
 		}},
 		{"while it is delivered", nil, 0, false, func(d *deliveries, first *sync.Once) BrainHooks {
@@ -1385,7 +1386,10 @@ func TestRunTimeoutStopsAStuckRun(t *testing.T) {
 				defer mu.Unlock()
 				sent = append(sent, text)
 			}
-			mgr.SetHooks(BrainHooks{Deliver: d.add, Notice: say, Question: say})
+			mgr.SetHooks(BrainHooks{Deliver: d.add, Notice: say, Question: func(_ *Brain, jid, text string) bool {
+				say(jid, text)
+				return true
+			}})
 			start := time.Now()
 			if _, _, _, err := mgr.Submit(dm("stuck")); err != nil {
 				t.Fatal(err)

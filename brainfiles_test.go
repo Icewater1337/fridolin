@@ -515,7 +515,7 @@ func TestStreamLogIsNotFollowedOutOfTheFolder(t *testing.T) {
 				plant(t, logPath, tc.target(home))
 			}
 			logged := captureLog(t)
-			if res := br.parseStream("x", strings.NewReader(stream)); res.Text != "done" {
+			if res := br.parseStream(Inbound{JID: "x"}, strings.NewReader(stream)); res.Text != "done" {
 				t.Errorf("run = %+v, want it to finish", res)
 			}
 			if tc.target == nil {
