@@ -256,6 +256,24 @@ func TestDMIsKeyedByNumber(t *testing.T) {
 	}
 }
 
+// A DM from a LID nothing maps to a number is checked and offered on the
+// dashboard as that LID, as before group senders were resolved by the same
+// helper.
+func TestDMFromAnUnknownLID(t *testing.T) {
+	unknown := types.NewJID("272727", types.HiddenUserServer)
+	tw := newTestWhatsApp(t)
+	tw.client = whatsmeow.NewClient(&store.Device{LIDs: personLIDs{}}, waLog.Noop)
+	tw.handle(t, textEvent(types.MessageSource{Chat: unknown, Sender: unknown}, "hello"))
+	if m, ok := tw.next(100 * time.Millisecond); ok {
+		t.Errorf("reached the brains: %+v", m)
+	}
+	tw.mu.Lock()
+	defer tw.mu.Unlock()
+	if len(tw.ignored) != 1 || tw.ignored[0] != unknown.String() {
+		t.Errorf("dashboard was offered %v, want the LID's chat", tw.ignored)
+	}
+}
+
 // A group member addressed by LID is known by their number, so the identity
 // map names them; so is the author of a message a reply quotes.
 func TestGroupSenderAndQuoteByNumber(t *testing.T) {

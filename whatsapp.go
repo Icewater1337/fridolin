@@ -421,13 +421,13 @@ func (wa *WhatsAppClient) handleMessage(msg *events.Message) {
 	// number. One person is one number and one chat either way: the
 	// allowlist is written in numbers, and the chat's history must not
 	// split in two.
-	sender := msg.Info.Sender
-	if sender.IsEmpty() {
-		sender = msg.Info.Chat
+	src := msg.Info.MessageSource
+	if src.Sender.IsEmpty() {
+		src.Sender = src.Chat
 	}
-	sender = canonicalUser(wa.ctx, wa.lidStore(), sender, msg.Info.SenderAlt)
-	if sender.Server == types.HiddenUserServer {
-		log.Printf("DM: could not resolve LID %s (using LID as fallback)", sender)
+	sender, resolved := wa.senderOf(src)
+	if !resolved {
+		log.Printf("DM: could not resolve %s to a phone number (using it as it is)", sender)
 	}
 
 	if !wa.isAllowed(sender.User) {
@@ -528,7 +528,8 @@ func (wa *WhatsAppClient) handleGroupMessage(msg *events.Message) {
 	groupJID := msg.Info.Chat.String()
 	// In groups that address members by LID, the number is what the
 	// identity map knows them by.
-	senderNumber := canonicalUser(wa.ctx, wa.lidStore(), msg.Info.Sender, msg.Info.SenderAlt).User
+	sender, _ := wa.senderOf(msg.Info.MessageSource)
+	senderNumber := sender.User
 
 	groupName := ""
 	if info, err := wa.cl().GetGroupInfo(context.Background(), msg.Info.Chat); err == nil && info != nil {
@@ -1011,6 +1012,15 @@ func stripMentions(text string, jids []types.JID) string {
 		}
 	}
 	return strings.TrimSpace(text)
+}
+
+// senderOf is who sent src, as canonicalUser has them: by phone number
+// where the message carries it (SenderAlt) or the LID store knows it.
+// resolved is false for a LID nothing maps to a number, whose digits are
+// WhatsApp's internal id and must match no number on a list.
+func (wa *WhatsAppClient) senderOf(src types.MessageSource) (sender types.JID, resolved bool) {
+	sender = canonicalUser(wa.ctx, wa.lidStore(), src.Sender, src.SenderAlt)
+	return sender, sender.Server == types.DefaultUserServer
 }
 
 // lidStore is whatsmeow's map between LIDs and phone numbers, or nil
