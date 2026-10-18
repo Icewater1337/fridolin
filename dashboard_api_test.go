@@ -571,6 +571,72 @@ func TestApproveBindsToTheReviewedManifest(t *testing.T) {
 	}
 }
 
+// TestBrainsMarkTheFallback: the chats no brain claims, and the DMs while
+// no brain handles them, go to the default brain, else to the first one,
+// which no brain.json names. /api/brains marks that brain, and no other,
+// so the dashboard can say whose those chats are: not a second folder that
+// claims its id, which does not run.
+func TestBrainsMarkTheFallback(t *testing.T) {
+	cases := []struct {
+		name   string
+		brains []BrainManifest
+		want   string // the fallback's folder
+	}{
+		{"the first brain, without a default", []BrainManifest{
+			{ID: "family", Routing: BrainRouting{Groups: []string{testGroup}}},
+			{ID: "work"},
+		}, "family"},
+		{"the default brain", []BrainManifest{
+			{ID: "family", Routing: BrainRouting{HandlesDMs: true}},
+			{ID: "work", Routing: BrainRouting{Default: true}},
+		}, "work"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			tb := newTestBridge(t, "")
+			for _, m := range c.brains {
+				m.Name = m.ID
+				tb.addFolderBrain(t, m)
+			}
+			// A second folder with the fallback's brain.json, left out.
+			m := BrainManifest{ID: c.want, Name: c.want}
+			copyDir := filepath.Join(tb.home, "copy")
+			if err := os.MkdirAll(copyDir, 0o700); err != nil {
+				t.Fatal(err)
+			}
+			if err := WriteManifest(copyDir, &m, false); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := tb.cfgs.Update("", func(c *Config) error {
+				c.BrainDirs = append(c.BrainDirs, BrainRef{Path: "~/copy", Approved: &m})
+				return nil
+			}); err != nil {
+				t.Fatal(err)
+			}
+
+			var views []struct {
+				Path     string `json:"path"`
+				Fallback bool   `json:"fallback"`
+			}
+			if err := json.Unmarshal(tb.do("GET", "/api/brains", nil).Body.Bytes(), &views); err != nil || len(views) != len(c.brains)+1 {
+				t.Fatalf("GET /api/brains: %d entries, %v", len(views), err)
+			}
+			var marked []string
+			for _, v := range views {
+				if v.Fallback {
+					marked = append(marked, filepath.Base(v.Path))
+				}
+			}
+			if !slices.Equal(marked, []string{c.want}) {
+				t.Errorf("marked as the fallback: %q, want %q only", marked, c.want)
+			}
+			if fb := tb.brainMgr.Fallback(); fb == nil || fb.ID() != c.want {
+				t.Errorf("Fallback() = %v, want %s", fb, c.want)
+			}
+		})
+	}
+}
+
 // GET /api/brains/{id} is that brain's entry of /api/brains, whatever
 // state it is in, so the Brain page that follows it shows what the list
 // showed; with two folders claiming the id, the first one's.
