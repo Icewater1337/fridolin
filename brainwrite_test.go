@@ -222,3 +222,111 @@ func TestUnknownBrainJSONFieldsAreLogged(t *testing.T) {
 		t.Errorf("logged %q, want one line naming nmae and routing.handles_dm", lines)
 	}
 }
+
+// breakApproved changes brain id's approved manifest in config.json with
+// edit, as a hand edit of the file can, past the checks of the dashboard.
+func breakApproved(t *testing.T, tb *testBridge, id string, edit func(m *BrainManifest)) {
+	t.Helper()
+	if _, err := tb.cfgs.Update("", func(c *Config) error {
+		for _, ref := range c.BrainDirs {
+			if ref.Approved != nil && ref.Approved.ID == id {
+				edit(ref.Approved)
+			}
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// A brain that is broken already, its approved manifest invalid say, does
+// not block edits and approvals of the other brains with its own error;
+// an edit that makes brains clash is still refused.
+func TestOneBrokenBrainDoesNotBlockTheOthers(t *testing.T) {
+	tb := newTestBridge(t, "")
+	a := tb.addFolderBrain(t, BrainManifest{ID: "a", Name: "A", Routing: BrainRouting{HandlesDMs: true}})
+	tb.addFolderBrain(t, BrainManifest{ID: "b", Name: "B"})
+	tb.addFolderBrain(t, BrainManifest{ID: "c", Name: "C", Routing: BrainRouting{Default: true}})
+	breakApproved(t, tb, "b", func(m *BrainManifest) { m.Effort = "huge" })
+	if _, issues := ResolveBrains(tb.cfgs.Get()); !slices.ContainsFunc(issues, func(is BrainIssue) bool { return is.ID == "b" && is.Kind == "invalid" }) {
+		t.Fatalf("b is not invalid: %+v", issues)
+	}
+
+	steps := []struct {
+		name     string
+		do       func() *httptest.ResponseRecorder
+		code     int
+		contains string
+	}{
+		{"saving a", func() *httptest.ResponseRecorder {
+			return tb.do("PUT", "/api/brains/a", map[string]any{"manifest": BrainManifest{ID: "a", Name: "A2", Routing: BrainRouting{HandlesDMs: true}}})
+		}, 200, ""},
+		{"approving a's brain.json", func() *httptest.ResponseRecorder {
+			m := BrainManifest{ID: "a", Name: "A3", Routing: BrainRouting{HandlesDMs: true}}
+			if err := WriteManifest(a, &m, true); err != nil {
+				t.Fatal(err)
+			}
+			return tb.do("POST", "/api/brains/a/approve", map[string]any{"manifest": m})
+		}, 200, ""},
+		{"allowing a group for a", func() *httptest.ResponseRecorder {
+			return tb.do("POST", "/api/chats/allow", chatRequest{JID: "120363000000000000@g.us", Kind: "group", Brain: "a"})
+		}, 200, ""},
+		{"a clash", func() *httptest.ResponseRecorder {
+			return tb.do("PUT", "/api/brains/a", map[string]any{"manifest": BrainManifest{ID: "a", Name: "A3", Routing: BrainRouting{HandlesDMs: true, Default: true}}})
+		}, 422, `brains \"a\" and \"c\" are both marked default`},
+	}
+	for _, st := range steps {
+		before := readFile(t, filepath.Join(a, ManifestFile))
+		w := st.do()
+		if w.Code != st.code || !strings.Contains(w.Body.String(), st.contains) {
+			t.Errorf("%s: %d %s, want %d %s", st.name, w.Code, w.Body.String(), st.code, st.contains)
+		}
+		if st.code != 200 {
+			if got := readFile(t, filepath.Join(a, ManifestFile)); got != before {
+				t.Errorf("%s: the refused edit changed a's brain.json:\n%s", st.name, got)
+			}
+		}
+	}
+	for _, ref := range tb.cfgs.Get().BrainDirs {
+		if m := ref.Approved; m.ID == "a" && (m.Name != "A3" || !slices.Contains(m.Routing.Groups, "120363000000000000@g.us") || m.Routing.Default) {
+			t.Errorf("a's approved manifest: %+v", *m)
+		}
+	}
+}
+
+// Allowing a group for a brain checks the brain set as an edit of a brain
+// does. Here b was left out for claiming a's group, so c had the DMs b
+// claims too; moving the group to c would let b run again, and take the
+// DMs from c without a word.
+func TestAllowingAGroupChecksTheBrains(t *testing.T) {
+	const group = "120363000000000000@g.us"
+	tb := newTestBridge(t, "")
+	a := tb.addFolderBrain(t, BrainManifest{ID: "a", Name: "A", Routing: BrainRouting{Groups: []string{group}}})
+	b := tb.addFolderBrain(t, BrainManifest{ID: "b", Name: "B"})
+	c := tb.addFolderBrain(t, BrainManifest{ID: "c", Name: "C", Routing: BrainRouting{HandlesDMs: true}})
+	breakApproved(t, tb, "b", func(m *BrainManifest) { m.Routing = BrainRouting{HandlesDMs: true, Groups: []string{group}} })
+	if br := tb.brainMgr.BrainFor("15551234567@s.whatsapp.net", false); br == nil || br.ID() != "c" {
+		t.Fatalf("the DMs go to %v, want c", br)
+	}
+	var before []string
+	for _, dir := range []string{a, b, c} {
+		before = append(before, readFile(t, filepath.Join(dir, ManifestFile)))
+	}
+	cfgBefore := readFile(t, tb.cfgs.Path())
+
+	w := tb.do("POST", "/api/chats/allow", chatRequest{JID: group, Kind: "group", Brain: "c"})
+	if w.Code != 422 || !strings.Contains(w.Body.String(), `brains \"b\" and \"c\" both handle DMs`) {
+		t.Errorf("allow: %d %s, want the 422 for the DMs b and c would both claim", w.Code, w.Body.String())
+	}
+	for i, dir := range []string{a, b, c} {
+		if got := readFile(t, filepath.Join(dir, ManifestFile)); got != before[i] {
+			t.Errorf("the refused allow changed %s:\n%s", dir, got)
+		}
+	}
+	if got := readFile(t, tb.cfgs.Path()); got != cfgBefore {
+		t.Errorf("the refused allow changed config.json:\n%s", got)
+	}
+	if br := tb.brainMgr.BrainFor("15551234567@s.whatsapp.net", false); br == nil || br.ID() != "c" {
+		t.Errorf("the DMs go to %v, want c still", br)
+	}
+}

@@ -1261,11 +1261,9 @@ func (b *Bridge) apiUpdateBrain(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusUnprocessableEntity, err.Error())
 		return
 	}
+	// The brain.json the update stages has it check the brain set with
+	// the edit before anything is written (see checkSet).
 	_, err := b.cfgs.UpdateTx("", func(c *Config, tx *Tx) error {
-		// The brains with the edit must not clash.
-		if err := checkSet(withApproved(c, id, m)); err != nil {
-			return err
-		}
 		return updateManifestIn(c, tx, id, func(cur *BrainManifest) error {
 			*cur = m
 			return nil
@@ -1278,31 +1276,31 @@ func (b *Bridge) apiUpdateBrain(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]string{"status": "saved"})
 }
 
-// withApproved returns a copy of c in which brain id runs m, for checkSet.
-func withApproved(c *Config, id string, m BrainManifest) *Config {
-	probe := *c
-	probe.BrainDirs = append([]BrainRef(nil), c.BrainDirs...)
-	for i, ref := range probe.BrainDirs {
-		if ref.Approved != nil && ref.Approved.ID == id {
-			probe.BrainDirs[i].Approved = &m
-		}
+// checkSet refuses an edit that makes brains clash, or leaves one that
+// cannot run: before and after are the effective configurations without
+// and with the edit, and an "invalid" issue of after's brains that
+// before's do not have refuses it. One that was there already, a brain a
+// hand edit broke say, is not the edit's doing, and does not keep the
+// other brains from being edited or approved. Issues are told apart by
+// brain, kind and detail.
+func checkSet(before, after *Config) error {
+	_, was := ResolveBrains(before)
+	seen := map[string]bool{}
+	for _, is := range was {
+		seen[issueKey(is)] = true
 	}
-	return &probe
-}
-
-// checkSet rejects an edit that would make two brains clash.
-func checkSet(c *Config) error {
-	eff, err := effective(c)
-	if err != nil {
-		return err
-	}
-	_, issues := ResolveBrains(eff)
+	_, issues := ResolveBrains(after)
 	for _, is := range issues {
-		if is.Kind == "invalid" {
+		if is.Kind == "invalid" && !seen[issueKey(is)] {
 			return errors.New(is.Detail)
 		}
 	}
 	return nil
+}
+
+// issueKey tells brain issues apart for checkSet.
+func issueKey(is BrainIssue) string {
+	return is.ID + "\x00" + is.Kind + "\x00" + is.Detail
 }
 
 // errReviewedManifestChanged refuses an approval of a brain.json that is no
@@ -1327,7 +1325,7 @@ func (b *Bridge) apiApproveBrain(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, "manifest required: send the brain.json you reviewed")
 		return
 	}
-	_, err := b.cfgs.Update("", func(c *Config) error {
+	_, err := b.cfgs.UpdateTx("", func(c *Config, tx *Tx) error {
 		for i := range c.BrainDirs {
 			ref := &c.BrainDirs[i]
 			if ref.Approved == nil || ref.Approved.ID != id {
@@ -1347,7 +1345,8 @@ func (b *Bridge) apiApproveBrain(w http.ResponseWriter, r *http.Request) {
 				return err
 			}
 			ref.Approved = disk
-			return checkSet(c)
+			tx.CheckBrains()
+			return nil
 		}
 		return fmt.Errorf("no brain %q", id)
 	})

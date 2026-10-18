@@ -108,6 +108,10 @@ is written once the edit has passed its checks, just before the bridge's
 config, and when the config then cannot be written, the save fails and
 `brain.json` is put back as it was. An edit of a brain whose `brain.json`
 is not a file the bridge reads (see below) fails rather than replace it.
+An edit or approval is refused when it would make brains clash (two
+brains for your DMs, one group for two brains and so on) or leave one that
+cannot run; a brain that cannot run already, after a hand edit of
+`config.json` say, keeps none of the others from being edited.
 
 ## Files the bridge reads and writes
 
@@ -234,8 +238,8 @@ version, go through what it printed:
 Then run `fridolin check` with this version. It must load the config,
 and a brain whose folder was in `brain_dirs` already may now be listed
 twice, which it reports as two brains with the same id: remove one of the
-two entries from `brain_dirs` in `config.json`. Until you do, the
-dashboard refuses to save any brain's settings.
+two entries from `brain_dirs` in `config.json`. Until you do, the bridge
+runs only the first of the two.
 
 ## What a brain loads
 

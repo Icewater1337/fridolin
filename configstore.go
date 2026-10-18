@@ -273,6 +273,11 @@ func (cs *ConfigStore) commit(etag string, mutate func(*Config, *Tx) error) (pre
 	if err != nil {
 		return prev, next, err
 	}
+	if tx.checkBrains {
+		if err := checkSet(base.Effective, eff); err != nil {
+			return prev, next, err
+		}
+	}
 	data, err := json.MarshalIndent(file, "", "  ")
 	if err != nil {
 		return prev, next, err
@@ -340,7 +345,14 @@ func (cs *ConfigStore) reread(cur *ConfigSnapshot) (*ConfigSnapshot, error) {
 // dashboard would show as changed on disk.
 type Tx struct {
 	writes []*stagedManifest
+	// checkBrains has the update check the brain set, see CheckBrains.
+	checkBrains bool
 }
+
+// CheckBrains has the update refused when it makes brains clash, as
+// checkSet decides, once mutate is done and before anything is written.
+// Staging a brain.json asks for it too: it changes a brain.
+func (tx *Tx) CheckBrains() { tx.checkBrains = true }
 
 // stagedManifest is a brain.json a transaction writes.
 type stagedManifest struct {
@@ -374,6 +386,7 @@ func (tx *Tx) stage(dir string, m *BrainManifest, create bool) error {
 	if err != nil {
 		return err
 	}
+	tx.checkBrains = true
 	dir = filepath.Clean(dir)
 	for _, w := range tx.writes {
 		if w.dir == dir {

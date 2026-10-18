@@ -243,6 +243,11 @@ for compatibility.
   on top of it. Saving the whole Settings page over it asks you to
   reload first, and a file that does not load makes the save fail
   instead of being written over (docs/CONFIGURATION.md).
+- A brain that cannot run, after a hand edit of `config.json` say, no
+  longer keeps every other brain from being saved or approved with its
+  own error: an edit is refused only for a clash it brings in. Allowing a
+  group for a brain is checked the same way, so it can no longer move
+  your DMs to another brain without a word.
 
 ### Kept for compatibility
 
