@@ -63,6 +63,7 @@ func TestIdentityKey(t *testing.T) {
 		"+1\u00a0555\u00a0123\u00a04567": "15551234567", // no-break spaces
 		"15551234567@s.whatsapp.net":     "15551234567",
 		bridgeLID + "@lid":               bridgeLID,
+		"1 555 123 4567@lid":             "15551234567", // keys as its key does
 		"Alex":                           "Alex",
 	}
 	for in, want := range cases {
