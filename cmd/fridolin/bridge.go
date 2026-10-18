@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/Icewater1337/fridolin/internal/logx"
 	"log"
 	"net"
 	"net/http"
@@ -45,7 +46,7 @@ type Bridge struct {
 	dev      *devMessenger // non-nil in --no-whatsapp mode
 	brainMgr *BrainManager
 	deb      *Debouncer
-	logs     *LogRing
+	logs     *logx.Ring
 	activity *Activity
 	token    *DashboardToken
 	// tokenAtStart is dashboard.require_token as the bridge started.
@@ -94,7 +95,7 @@ type Bridge struct {
 // BridgeOptions are the run-time switches from the command line.
 type BridgeOptions struct {
 	NoWhatsApp bool
-	Logs       *LogRing
+	Logs       *logx.Ring
 	// Restart asks whoever runs the bridge to stop it and run it again
 	// (POST /api/restart): runCmd ends its context with errRestart. Nil
 	// leaves the bridge unable to restart itself.
@@ -169,7 +170,7 @@ func NewBridge(cfgs *ConfigStore, opts BridgeOptions) (_ *Bridge, err error) {
 	}
 	b.exe = bridgeBinary()
 	if b.logs == nil {
-		b.logs = NewLogRing(logRingLines)
+		b.logs = logx.NewRing(logRingLines)
 	}
 
 	mgr, err := NewBrainManager(cfg)

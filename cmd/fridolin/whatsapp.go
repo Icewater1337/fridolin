@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/Icewater1337/fridolin/internal/logx"
 	"io"
 	"io/fs"
 	"log"
@@ -126,7 +127,7 @@ type WhatsAppClient struct {
 
 // NewWhatsAppClient creates a client. It does NOT connect — call Connect.
 func NewWhatsAppClient(cfg func() *Config, store *Store, handler InboundHandler, onIgnored IgnoredHandler) (*WhatsAppClient, error) {
-	logger := newWaLogger("WhatsApp", cfg().LogLevel)
+	logger := logx.NewWaLogger("WhatsApp", cfg().LogLevel)
 
 	deviceStore, err := store.Container.GetFirstDevice(context.Background())
 	if err != nil {

@@ -29,6 +29,8 @@ behaviour unless its title says so. The steps so far:
 - **R3**: the foundation packages `fsx`, `textx`, `version`, `trigger` and
   `platform` below `internal/`, and `internal/archtest`, which enforces the
   rules of section 4 that already apply.
+- **R4, first slice**: `logx` owns the log ring and whatsmeow logger adapter.
+  The process logger setup and file rotation remain in `cmd/fridolin`.
 
 Everything else is still `package main` in `cmd/fridolin`, one file per
 subject (section 3 names the file each package will come from). A package
@@ -175,9 +177,9 @@ responsibility and says what it must not do.
   resolved helper path, allowlisted environment and timeout. Trusted helper
   lookup stays in the composition code. *Planned:* process start times
   from `procstart_*.go`.
-- **`logx`** *(to come, R4; `logbuf.go`, `logfile*.go`)*: the in-memory log
-  ring the dashboard reads, the whatsmeow logger adapter, and the process
-  logger setup.
+- **`logx`**: the in-memory `Ring` and `Line` the dashboard reads, and
+  `NewWaLogger`, the whatsmeow logger adapter. The process logger setup,
+  configured ring capacity and file rotation remain in `cmd/fridolin`.
 
 ### Formats and storage
 

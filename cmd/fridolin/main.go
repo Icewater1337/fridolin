@@ -7,6 +7,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"github.com/Icewater1337/fridolin/internal/logx"
 	"io"
 	"log"
 	"os"
@@ -419,8 +420,8 @@ func stopOnSignals(cancel context.CancelCauseFunc, brains *BrainManager) func() 
 // read, and the version line comes first even when the bridge then refuses
 // to start (no config, one that does not load, another bridge on the data
 // dir).
-func runLog(console io.Writer, configFlag string) (*LogRing, string) {
-	ring := NewLogRing(logRingLines)
+func runLog(console io.Writer, configFlag string) (*logx.Ring, string) {
+	ring := logx.NewRing(logRingLines)
 	log.SetOutput(io.MultiWriter(console, ring))
 	log.Printf("Starting %s", version.Line())
 	path, source := configPathFrom(configFlag)

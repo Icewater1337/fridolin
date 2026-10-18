@@ -3,6 +3,7 @@ package main
 import (
 	"encoding/json"
 	"errors"
+	"github.com/Icewater1337/fridolin/internal/logx"
 	"github.com/Icewater1337/fridolin/internal/platform"
 	"log"
 	"os"
@@ -23,7 +24,7 @@ import (
 // captureLog collects what the bridge logs until the test ends.
 func captureLog(t *testing.T) func() []string {
 	t.Helper()
-	ring := NewLogRing(50)
+	ring := logx.NewRing(50)
 	prev := log.Writer()
 	log.SetOutput(ring)
 	t.Cleanup(func() { log.SetOutput(prev) })

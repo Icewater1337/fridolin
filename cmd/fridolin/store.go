@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/Icewater1337/fridolin/internal/logx"
 	"io/fs"
 	"log"
 	"os"
@@ -32,7 +33,7 @@ func NewStore(cfg *Config) (*Store, error) {
 	}
 	dbURL := "file:" + cfg.DBPath + "?_foreign_keys=on"
 
-	logger := newWaLogger("Store", cfg.LogLevel)
+	logger := logx.NewWaLogger("Store", cfg.LogLevel)
 
 	container, err := sqlstore.New(context.Background(), "sqlite3", dbURL, logger)
 	if err != nil {
