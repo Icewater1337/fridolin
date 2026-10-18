@@ -5,6 +5,8 @@ import (
 	"net/http"
 	"path/filepath"
 	"strings"
+
+	"github.com/Icewater1337/fridolin/internal/httpapi"
 )
 
 // Capability tokens for the script API, /send and /ingest (docs/API.md).
@@ -64,7 +66,7 @@ var errBadToken = errors.New("unknown token: send the one in <data_dir>/scripts.
 
 // scriptAuth holds the script API's tokens.
 type scriptAuth struct {
-	scripts *DashboardToken // <data_dir>/scripts.token
+	scripts *httpapi.Token // <data_dir>/scripts.token
 	// brainOf is the brain a run's token belongs to, "" for none: the
 	// bridge's runTokens, so the token is gone once the run is over.
 	brainOf func(tok string) string
@@ -75,7 +77,7 @@ type scriptAuth struct {
 // names the brain of a run's token; exists reports whether that brain is
 // still configured, so a removed brain's run cannot call.
 func newScriptAuth(dataDir string, brainOf func(tok string) string, exists func(id string) bool) (*scriptAuth, error) {
-	tok, err := loadTokenFile(filepath.Join(dataDir, "scripts.token"))
+	tok, err := httpapi.LoadToken(filepath.Join(dataDir, "scripts.token"))
 	if err != nil {
 		return nil, err
 	}

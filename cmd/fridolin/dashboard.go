@@ -10,6 +10,7 @@ import (
 	"path"
 	"time"
 
+	"github.com/Icewater1337/fridolin/internal/httpapi"
 	"github.com/Icewater1337/fridolin/web"
 )
 
@@ -68,15 +69,15 @@ func secureCookie(r *http.Request) bool { return r.TLS != nil }
 // that needs neither, so it sits outside apiGuard, with its write checks.
 func (b *Bridge) apiLogin(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Cache-Control", "no-store")
-	if !checkWrite(w, r) {
+	if !httpapi.CheckWrite(w, r) {
 		return
 	}
 	var req struct {
 		Code  string `json:"code"`
 		Token string `json:"token"`
 	}
-	if err := decodeJSON(r, &req); err != nil {
-		writeErr(w, http.StatusBadRequest, err.Error())
+	if err := httpapi.DecodeJSON(r, &req); err != nil {
+		httpapi.WriteErr(w, http.StatusBadRequest, err.Error())
 		return
 	}
 	// The token first: a request with both does not use up a code it
@@ -84,12 +85,12 @@ func (b *Bridge) apiLogin(w http.ResponseWriter, r *http.Request) {
 	ok := req.Token != "" && b.token.Matches(req.Token)
 	ok = ok || req.Code != "" && b.sessions.useCode(req.Code)
 	if !ok {
-		writeErr(w, http.StatusUnauthorized, "that link was already used or has expired, or the token is wrong — run fridolin open for a new link")
+		httpapi.WriteErr(w, http.StatusUnauthorized, "that link was already used or has expired, or the token is wrong — run fridolin open for a new link")
 		return
 	}
 	binding, err := b.startSession(w, r)
 	if err != nil {
-		writeErr(w, http.StatusInternalServerError, "signing in: "+err.Error())
+		httpapi.WriteErr(w, http.StatusInternalServerError, "signing in: "+err.Error())
 		return
 	}
 	// The new session replaces the one this browser's cookie named, which
@@ -100,26 +101,26 @@ func (b *Bridge) apiLogin(w http.ResponseWriter, r *http.Request) {
 			log.Printf("dashboard sign-in: ending the session it replaces: %v", err)
 		}
 	}
-	writeJSON(w, http.StatusOK, map[string]string{"status": "signed in", "binding": binding})
+	httpapi.WriteJSON(w, http.StatusOK, map[string]string{"status": "signed in", "binding": binding})
 }
 
 // apiLogout ends this browser's session.
 func (b *Bridge) apiLogout(w http.ResponseWriter, r *http.Request) {
 	if c, err := r.Cookie(b.sessionCookie); err == nil {
 		if err := b.sessions.drop(c.Value); err != nil {
-			writeErr(w, http.StatusInternalServerError, err.Error())
+			httpapi.WriteErr(w, http.StatusInternalServerError, err.Error())
 			return
 		}
 	}
 	http.SetCookie(w, &http.Cookie{Name: b.sessionCookie, Value: "", Path: "/", MaxAge: -1, HttpOnly: true, SameSite: http.SameSiteStrictMode, Secure: secureCookie(r)})
-	writeJSON(w, http.StatusOK, map[string]string{"status": "signed out"})
+	httpapi.WriteJSON(w, http.StatusOK, map[string]string{"status": "signed out"})
 }
 
 // apiLoginCode makes a login code, for `fridolin open`, which calls it with
 // the token from the data dir.
 func (b *Bridge) apiLoginCode(w http.ResponseWriter, r *http.Request) {
 	code, exp := b.sessions.newCode()
-	writeJSON(w, http.StatusOK, map[string]any{"code": code, "expires_at": exp})
+	httpapi.WriteJSON(w, http.StatusOK, map[string]any{"code": code, "expires_at": exp})
 }
 
 // apiRotateToken replaces the dashboard token and ends every session: sign
@@ -129,11 +130,11 @@ func (b *Bridge) apiLoginCode(w http.ResponseWriter, r *http.Request) {
 func (b *Bridge) apiRotateToken(w http.ResponseWriter, r *http.Request) {
 	resign := b.signedIn(r)
 	if err := b.token.Rotate(); err != nil {
-		writeErr(w, http.StatusInternalServerError, "writing a new token: "+err.Error())
+		httpapi.WriteErr(w, http.StatusInternalServerError, "writing a new token: "+err.Error())
 		return
 	}
 	if err := b.sessions.dropAll(); err != nil {
-		writeErr(w, http.StatusInternalServerError, "ending the sessions: "+err.Error())
+		httpapi.WriteErr(w, http.StatusInternalServerError, "ending the sessions: "+err.Error())
 		return
 	}
 	log.Printf("dashboard token rotated: every dashboard was signed out, and scripts with the old token are refused")
@@ -141,12 +142,12 @@ func (b *Bridge) apiRotateToken(w http.ResponseWriter, r *http.Request) {
 	if resign {
 		binding, err := b.startSession(w, r)
 		if err != nil {
-			writeErr(w, http.StatusInternalServerError, "signing in again: "+err.Error())
+			httpapi.WriteErr(w, http.StatusInternalServerError, "signing in again: "+err.Error())
 			return
 		}
 		resp["binding"] = binding
 	}
-	writeJSON(w, http.StatusOK, resp)
+	httpapi.WriteJSON(w, http.StatusOK, resp)
 }
 
 // requiresToken reports whether API calls need the token. Turning
@@ -207,8 +208,8 @@ func staticHandler(root fs.FS) http.Handler {
 
 // newHTTPHandler builds the whole HTTP surface.
 func (b *Bridge) newHTTPHandler(listen string) http.Handler {
-	hosts := allowedHosts(listen)
-	b.sessionCookie = sessionCookieName(listen)
+	hosts := httpapi.AllowedHosts(listen)
+	b.sessionCookie = httpapi.SessionCookieName(listen)
 	mux := http.NewServeMux()
 
 	mux.HandleFunc("GET /health", func(w http.ResponseWriter, r *http.Request) {
@@ -241,8 +242,8 @@ func (b *Bridge) newHTTPHandler(listen string) http.Handler {
 			static.ServeHTTP(w, r)
 		}))
 		mux.HandleFunc("POST /api/login", b.apiLogin)
-		mux.Handle("/api/", apiGuard(b.token, b.requiresToken, b.signedIn, b.apiMux()))
+		mux.Handle("/api/", httpapi.APIGuard(b.token, b.requiresToken, b.signedIn, b.apiMux()))
 	}
 
-	return securityHeaders(hostGuard(hosts, originGuard(hosts, mux)))
+	return httpapi.SecurityHeaders(httpapi.HostGuard(hosts, httpapi.OriginGuard(hosts, mux)))
 }

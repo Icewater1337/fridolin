@@ -18,6 +18,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/Icewater1337/fridolin/internal/httpapi"
+
 	"github.com/Icewater1337/fridolin/internal/chat"
 )
 
@@ -182,7 +184,7 @@ func (b *Bridge) brainAPIHandler() http.Handler {
 	mux.HandleFunc("DELETE /brain/calendar/events/{id}", b.brainCall(b.calendarCall(b.brainCalendarDelete)))
 	mux.HandleFunc("POST /brain/calendar/freebusy", b.brainCall(b.calendarCall(b.brainCalendarBusy)))
 	mux.HandleFunc("/brain/", func(w http.ResponseWriter, r *http.Request) {
-		writeErr(w, http.StatusNotFound, "no such brain API call: "+r.Method+" "+r.URL.Path)
+		httpapi.WriteErr(w, http.StatusNotFound, "no such brain API call: "+r.Method+" "+r.URL.Path)
 	})
 	return mux
 }
@@ -194,7 +196,7 @@ func (b *Bridge) brainCall(fn func(w http.ResponseWriter, r *http.Request, br *B
 		tok, _ := strings.CutPrefix(r.Header.Get("Authorization"), "Bearer ")
 		br := b.brainMgr.Get(b.runTokens.brainOf(tok))
 		if br == nil {
-			writeErr(w, http.StatusUnauthorized, "the bridge does not know this run's token (FRIDOLIN_BRAIN_TOKEN_FILE): it works only inside the run it was made for")
+			httpapi.WriteErr(w, http.StatusUnauthorized, "the bridge does not know this run's token (FRIDOLIN_BRAIN_TOKEN_FILE): it works only inside the run it was made for")
 			return
 		}
 		w.Header().Set("Cache-Control", "no-store")
@@ -220,36 +222,36 @@ func (b *Bridge) brainPolls(w http.ResponseWriter, r *http.Request, br *Brain) {
 	if id := q.Get("id"); id != "" {
 		p, err := b.store.Poll(r.Context(), id)
 		if errors.Is(err, sql.ErrNoRows) || (err == nil && !owns(p.ChatJID)) {
-			writeErr(w, http.StatusNotFound, fmt.Sprintf("poll %q not found in this brain's chats", id))
+			httpapi.WriteErr(w, http.StatusNotFound, fmt.Sprintf("poll %q not found in this brain's chats", id))
 			return
 		}
 		if err != nil {
-			writeErr(w, http.StatusInternalServerError, "reading the poll: "+err.Error())
+			httpapi.WriteErr(w, http.StatusInternalServerError, "reading the poll: "+err.Error())
 			return
 		}
-		writeJSON(w, http.StatusOK, p)
+		httpapi.WriteJSON(w, http.StatusOK, p)
 		return
 	}
 	recent := 10
 	if s := q.Get("recent"); s != "" {
 		n, err := strconv.Atoi(s)
 		if err != nil || n < 1 || n > 100 {
-			writeErr(w, http.StatusBadRequest, "recent must be a number from 1 to 100")
+			httpapi.WriteErr(w, http.StatusBadRequest, "recent must be a number from 1 to 100")
 			return
 		}
 		recent = n
 	}
 	chatJID := q.Get("chat")
 	if chatJID != "" && !owns(chatJID) {
-		writeErr(w, http.StatusForbidden, fmt.Sprintf("chat %q is not one of this brain's chats", chatJID))
+		httpapi.WriteErr(w, http.StatusForbidden, fmt.Sprintf("chat %q is not one of this brain's chats", chatJID))
 		return
 	}
 	polls, err := b.store.RecentPolls(r.Context(), chatJID, recent, owns)
 	if err != nil {
-		writeErr(w, http.StatusInternalServerError, "reading the polls: "+err.Error())
+		httpapi.WriteErr(w, http.StatusInternalServerError, "reading the polls: "+err.Error())
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"polls": polls, "count": len(polls)})
+	httpapi.WriteJSON(w, http.StatusOK, map[string]any{"polls": polls, "count": len(polls)})
 }
 
 // callError is a brain API call the bridge refuses before doing anything,
@@ -280,14 +282,14 @@ func (b *Bridge) calendarCall(fn calendarHandler) func(w http.ResponseWriter, r 
 		if err != nil {
 			var ce *callError
 			if errors.As(err, &ce) {
-				writeErr(w, ce.status, ce.msg)
+				httpapi.WriteErr(w, ce.status, ce.msg)
 				return
 			}
 			status, msg := calendarCallProblem(err)
-			writeErr(w, status, msg)
+			httpapi.WriteErr(w, status, msg)
 			return
 		}
-		writeJSON(w, http.StatusOK, out)
+		httpapi.WriteJSON(w, http.StatusOK, out)
 	}
 }
 

@@ -18,6 +18,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/Icewater1337/fridolin/internal/httpapi"
 )
 
 // What @plaud-ai/cli prints, recorded from the real CLI against a stand-in
@@ -243,7 +245,7 @@ func plaudStubAPI(list []string, recs []fakePlaudRecording) http.Handler {
 	}
 	mux.HandleFunc("GET /open/third-party/users/current", auth(func(w http.ResponseWriter, r *http.Request) {
 		// `plaud me` prints the fields in the order Plaud sends them.
-		writeJSON(w, http.StatusOK, struct {
+		httpapi.WriteJSON(w, http.StatusOK, struct {
 			ID       string `json:"id"`
 			Nickname string `json:"nickname"`
 			Email    string `json:"email"`
@@ -257,7 +259,7 @@ func plaudStubAPI(list []string, recs []fakePlaudRecording) http.Handler {
 			rec := byID[list[i]]
 			data = append(data, map[string]any{"id": rec.ID, "name": rec.Name, "created_at": rec.CreatedAt, "duration": rec.Duration})
 		}
-		writeJSON(w, http.StatusOK, map[string]any{"data": data, "page": page})
+		httpapi.WriteJSON(w, http.StatusOK, map[string]any{"data": data, "page": page})
 	}))
 	mux.HandleFunc("GET /open/third-party/files/{id}", auth(func(w http.ResponseWriter, r *http.Request) {
 		rec, ok := byID[r.PathValue("id")]
@@ -265,10 +267,10 @@ func plaudStubAPI(list []string, recs []fakePlaudRecording) http.Handler {
 			http.Error(w, `{"detail":"not found"}`, http.StatusNotFound)
 			return
 		}
-		writeJSON(w, http.StatusOK, rec)
+		httpapi.WriteJSON(w, http.StatusOK, rec)
 	}))
 	mux.HandleFunc("POST /open/third-party/users/current/revoke", auth(func(w http.ResponseWriter, r *http.Request) {
-		writeJSON(w, http.StatusOK, map[string]string{})
+		httpapi.WriteJSON(w, http.StatusOK, map[string]string{})
 	}))
 	mux.HandleFunc("POST /refresh", func(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, `{"detail":"refresh token revoked"}`, http.StatusUnauthorized)
