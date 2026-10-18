@@ -1519,15 +1519,21 @@ func (b *Bridge) apiDevInbound(w http.ResponseWriter, r *http.Request) {
 	if req.Sender == "" {
 		req.Sender = normalizeJID(req.JID)
 	}
-	// Apply the same allow lists and trigger handling as WhatsApp messages,
-	// except group_members: a dev message's sender is whoever the request
-	// names, the group's own digits unless it names one.
+	// Apply the same allow lists, group_members and trigger handling as
+	// WhatsApp messages, on one config snapshot as handleGroupMessage does.
 	cfg := b.cfgs.Get()
 	m := Inbound{JID: req.JID, Brain: req.Brain, Sender: req.Sender, Text: req.Text, Media: req.Media, Silent: req.Silent, Source: sourceDev, At: time.Now()}
 	if m.IsGroup() {
-		if !slices.Contains(cfg.AllowedGroups, m.JID) {
+		if !isAllowedGroup(cfg, m.JID) {
 			b.recordIgnored("group", m.JID, "", m.Sender, "")
 			writeJSON(w, http.StatusAccepted, map[string]string{"status": "ignored", "reason": "group not allowed"})
+			return
+		}
+		// A member group_members does not admit is not read at all, and
+		// the group, which is allowed, is not offered on the dashboard.
+		if who := devGroupSender(m.Sender); !groupSenderAllowed(cfg, m.JID, who) {
+			log.Printf("Dev group message in %s by %s: ignored (not admitted by group_members)", m.JID, who.masked())
+			writeJSON(w, http.StatusAccepted, map[string]string{"status": "ignored", "reason": "sender not admitted by group_members"})
 			return
 		}
 		files := len(m.Media) > 0 && b.groupRules(m.JID).files
@@ -1545,6 +1551,19 @@ func (b *Bridge) apiDevInbound(w http.ResponseWriter, r *http.Request) {
 	}
 	go b.handleInbound(context.Background(), m)
 	writeJSON(w, http.StatusAccepted, map[string]string{"status": "accepted"})
+}
+
+// devGroupSender is the member a dev message to a group comes from, as
+// groupSenderAllowed sees a WhatsApp sender: their number when sender is
+// one, written in any way phoneNumber takes. Anything else, a LID or the
+// group's own digits when the request names no sender, is no number, like
+// a member WhatsApp names only by a LID nothing maps to a number.
+func devGroupSender(sender string) groupSender {
+	if n, err := phoneNumber(sender); err == nil {
+		return groupSender{Number: n, Resolved: true}
+	}
+	user, server, _ := strings.Cut(strings.TrimSpace(sender), "@")
+	return groupSender{Number: normalizeJID(user), Server: server}
 }
 
 func (b *Bridge) apiDevOutbox(w http.ResponseWriter, r *http.Request) {

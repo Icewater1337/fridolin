@@ -300,7 +300,10 @@ bridge alone. Give the scratch config its own `http_listen` port and
 `data_dir`.
 
 Dev mode runs the dashboard and brains with a simulated chat: inject messages
-on the **Dev** page and read the replies there.
+on the **Dev** page and read the replies there. They pass the same allow
+lists, `group_members` and triggers as WhatsApp messages, so a message to a
+group needs a sender the group admits; the page says when the bridge
+ignored one, and why.
 
 ---
 

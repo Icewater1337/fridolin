@@ -159,6 +159,10 @@ for compatibility.
   but not remove or replace it, and the bridge no longer runs the Plaud
   CLI with a `~/.plaud/tokens.json` that is a symlink or a hard link, or a
   `~/.plaud` that is a symlink: remove the link and connect again.
+- In dev mode, a group message from the **Dev** page or
+  `/api/dev/inbound` passes `group_members` as one from WhatsApp does: from
+  a member the group's entry does not admit, or with no sender, it is
+  ignored, and the Dev page says why instead of "Message injected".
 
 ### Added
 

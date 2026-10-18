@@ -884,6 +884,64 @@ func TestDevInboundCanNameABrain(t *testing.T) {
 	}
 }
 
+// The dev inbound hears in a group whom group_members admits, as WhatsApp
+// messages are: the numbers an entry lists, written in any way a number
+// is, everyone for ["*"], and without an entry whom allowed_numbers
+// admits. A LID, or no sender at all (the group's own digits), is no
+// number. A member it refuses reaches no brain, and the group, which is
+// allowed, does not wait for access.
+func TestDevInboundHearsWhomGroupMembersAdmits(t *testing.T) {
+	const (
+		listed   = `{"group_members": {"` + harnessGroup + `": ["15551234567"]}}`
+		everyone = `{"group_members": {"` + harnessGroup + `": ["*"]}}`
+		anyone   = `{"allowed_numbers": [], "allow_any_dm": true}`
+	)
+	cases := []struct {
+		name   string
+		cfg    string
+		sender string
+		heard  bool
+	}{
+		{"listed", listed, "15551234567", true},
+		{"listed, written as people write it", listed, "+1 (555) 123-4567", true},
+		{"listed, as a JID", listed, "15551234567@s.whatsapp.net", true},
+		{"listed, by LID", listed, "15551234567@lid", false},
+		{"not listed", listed, "15559876543", false},
+		{"everyone, a stranger", everyone, "15559876543", true},
+		{"everyone, by LID", everyone, personLID + "@lid", true},
+		{"no entry, in allowed_numbers", "", "15551234567", true},
+		{"no entry, a stranger", "", "15559876543", false},
+		{"no entry, no sender", "", "", false},
+		{"no entry, anyone may DM", anyone, "15559876543", true},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			h := newHarness(t, c.cfg)
+			dir := h.AddBrain(BrainManifest{ID: "main", Name: "Main", Routing: BrainRouting{Groups: []string{harnessGroup}}})
+			w := h.Do("POST", "/api/dev/inbound", inbound{JID: harnessGroup, Sender: c.sender, Text: "untagged chatter"})
+			var resp struct{ Status, Reason string }
+			if err := json.Unmarshal(w.Body.Bytes(), &resp); w.Code != 202 || err != nil {
+				t.Fatalf("dev inbound: %d %s", w.Code, w.Body.String())
+			}
+			if !c.heard {
+				if resp.Status != "ignored" || resp.Reason != "sender not admitted by group_members" {
+					t.Errorf("answer = %+v, want it ignored for group_members", resp)
+				}
+				if ign := h.Do("GET", "/api/chats/ignored", nil).Body.String(); strings.TrimSpace(ign) != "[]" {
+					t.Errorf("the allowed group waits for access: %s", ign)
+				}
+				return
+			}
+			if resp.Status != "accepted" {
+				t.Fatalf("answer = %+v, want it accepted", resp)
+			}
+			h.WaitFor("the chatter in the history", func() bool {
+				return slices.ContainsFunc(historyLines(t, dir), func(l string) bool { return strings.Contains(l, "untagged chatter") })
+			})
+		})
+	}
+}
+
 func TestAddBrainAllowChatAndRoute(t *testing.T) {
 	const club = "120363000000000001@g.us"
 	h := newHarness(t, "")
@@ -1104,7 +1162,7 @@ func TestUpdateBrain(t *testing.T) {
 	if approved, ok := h.Approved()["a"]; !ok || !approved.Equal(*disk) {
 		t.Errorf("approved = %+v, want what brain.json has", approved)
 	}
-	if got := h.Answer(inbound{JID: harnessGroup, Sender: "15559876543", Text: "@claude hello"}); !strings.Contains(got, "echo:"+dir+":") {
+	if got := h.Answer(inbound{JID: harnessGroup, Sender: normalizeJID(harnessDM), Text: "@claude hello"}); !strings.Contains(got, "echo:"+dir+":") {
 		t.Errorf("the group got %q, want the answer of the edited brain a", got)
 	}
 	var views []struct{ ID, Name string }
@@ -1203,7 +1261,7 @@ func TestAssignGroup(t *testing.T) {
 					t.Errorf("%s's approved groups are %q, want %q", id, approved.Routing.Groups, want)
 				}
 			}
-			if got := h.Answer(inbound{JID: harnessGroup, Sender: "15559876543", Text: "@claude hello"}); !strings.Contains(got, "echo:"+dirs[c.to]+":") {
+			if got := h.Answer(inbound{JID: harnessGroup, Sender: normalizeJID(harnessDM), Text: "@claude hello"}); !strings.Contains(got, "echo:"+dirs[c.to]+":") {
 				t.Errorf("the group got %q, want the answer of %s", got, c.to)
 			}
 			if issues := h.Issues(); len(issues) != 0 {
@@ -1417,7 +1475,7 @@ func TestRevokedGroupKeepsItsBrain(t *testing.T) {
 	if w := h.Do("POST", "/api/chats/allow", map[string]string{"kind": "group", "jid": harnessGroup}); w.Code != 200 {
 		t.Fatalf("allow: %d %s", w.Code, w.Body)
 	}
-	if got := h.Answer(inbound{JID: harnessGroup, Sender: "15559876543", Text: "@claude hello"}); !strings.Contains(got, "echo:"+dir+":") {
+	if got := h.Answer(inbound{JID: harnessGroup, Sender: normalizeJID(harnessDM), Text: "@claude hello"}); !strings.Contains(got, "echo:"+dir+":") {
 		t.Errorf("allowed again, the group got %q, want family's answer", got)
 	}
 }
@@ -1707,10 +1765,10 @@ func TestAllowGroupMovesItBetweenBrains(t *testing.T) {
 	if to, _ := ReadManifest(toDir); !slices.Equal(to.Routing.Groups, []string{moved}) {
 		t.Errorf("to has groups %q, want %q", to.Routing.Groups, moved)
 	}
-	if got := h.Answer(inbound{JID: moved, Sender: "15559876543", Text: "@claude hello"}); !strings.Contains(got, "echo:"+toDir+":") {
+	if got := h.Answer(inbound{JID: moved, Sender: normalizeJID(harnessDM), Text: "@claude hello"}); !strings.Contains(got, "echo:"+toDir+":") {
 		t.Errorf("the group got %q, want to's answer", got)
 	}
-	if got := h.Answer(inbound{JID: kept, Sender: "15559876543", Text: "@claude hello"}); !strings.Contains(got, "echo:"+fromDir+":") {
+	if got := h.Answer(inbound{JID: kept, Sender: normalizeJID(harnessDM), Text: "@claude hello"}); !strings.Contains(got, "echo:"+fromDir+":") {
 		t.Errorf("the other group got %q, want from's answer", got)
 	}
 }
