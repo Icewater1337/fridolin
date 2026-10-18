@@ -48,8 +48,9 @@ import (
 // Before the tests run it unsets the variables the bridge reads: a shell
 // that exports FRIDOLIN_CONFIG for a real bridge would otherwise point the
 // tests at that bridge's config. It also gives them an empty HOME, see
-// useEmptyHome, moves them out of the checkout, see runInEmptyDir, and
-// passes testChildEnv on to the programs the bridge starts.
+// useEmptyHome, moves them out of the checkout, see runInEmptyDir, passes
+// testChildEnv on to the programs the bridge starts, and has the bridges
+// they start stop without a grace for their runs (shutdownGrace).
 //
 // A test binary that finds its own process ID in testPIDVariable has been
 // executed again in place, and fails at once, see reexecutedInPlace.
@@ -96,6 +97,8 @@ func TestMain(m *testing.M) {
 		os.Exit(1)
 	}
 	goToolHome = os.Getenv("HOME")
+	// The tests of the stop set a grace of their own.
+	shutdownGrace = 0
 	removeHome, err := useEmptyHome()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "giving the tests an empty HOME: %v\n", err)

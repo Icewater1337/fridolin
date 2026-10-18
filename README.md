@@ -79,13 +79,15 @@ history, but runs and replies only when addressed — by keyword, by
 **Orderly.** Messages that arrive while the assistant is busy wait their turn
 (or, if you prefer, a newer request replaces the one you sent before it). A
 photo album or a file plus "what is this?" sent in quick succession becomes
-one request. `!stop` stops whatever it is doing for that chat. A reply written
-while the connection is down goes out once it is back, even after a restart,
-and the next message is answered knowing it. A message you delete for everyone
-is not answered, even while it is being answered, and leaves the chat history
-(an answer already written, waiting for the connection, still goes out); an
-edit of one still waiting changes what is answered, and an edit of one already
-answered is noted for the next message, without a second run.
+one request. `!stop` stops whatever it is doing for that chat. When the
+bridge stops or restarts, an answer in progress gets 15 seconds to finish.
+A reply written while the connection is down goes out once it is back, even
+after a restart, and the next message is answered knowing it. A message you
+delete for everyone is not answered, even while it is being answered, and
+leaves the chat history (an answer already written, waiting for the
+connection, still goes out); an edit of one still waiting changes what is
+answered, and an edit of one already answered is noted for the next
+message, without a second run.
 
 **Calendar.** Each brain can sign in to a Google account from the dashboard
 and use the calendars you pick: list events, find free time, create events.

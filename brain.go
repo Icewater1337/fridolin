@@ -180,7 +180,10 @@ type Brain struct {
 	turns   map[string]uint64
 	turn    uint64
 	working bool // a worker goroutine is draining pending
-	retired bool // removed from the configuration
+	// workers counts the worker goroutines until they have returned,
+	// their last delivery done: a stop waits for them (shutdown).
+	workers sync.WaitGroup
+	retired bool // removed from the configuration, or the bridge stops
 	last    *RunInfo
 	// slotWait is set while the worker waits for a run slot.
 	slotWait *slotWait
@@ -490,6 +493,9 @@ func (br *Brain) submit(m *Inbound) (pos int, busy bool, err error) {
 	busy = pos > 1 || (br.current != nil && interrupt == nil) || br.slots.busy(!m.Silent)
 	start := !br.working
 	br.working = true
+	if start {
+		br.workers.Add(1)
+	}
 	// A worker that waits for a slot for chatter now waits for one for a
 	// request, which goes first.
 	var stopOther func()
@@ -615,6 +621,7 @@ func (br *Brain) hasRoomLocked(m Inbound, s *brainSettings) bool {
 // worker drains the queue one message at a time, each in a run slot (see
 // runSlots).
 func (br *Brain) worker() {
+	defer br.workers.Done()
 	for {
 		br.mu.Lock()
 		if br.retired || len(br.pending) == 0 {
@@ -898,6 +905,9 @@ func (br *Brain) StopHandOffs(jid string) (stopped bool, n int) {
 	return br.stopRun(cur), len(gone)
 }
 
+// stopRunWait is how long a stop waits for a run it killed to end.
+const stopRunWait = 10 * time.Second
+
 // stopRun kills run, if there is one, and waits for it to end.
 func (br *Brain) stopRun(run *brainRun) bool {
 	if run == nil {
@@ -906,10 +916,51 @@ func (br *Brain) stopRun(run *brainRun) bool {
 	br.interruptRun(run)
 	select {
 	case <-run.done:
-	case <-time.After(10 * time.Second):
-		log.Printf("brain %s: run did not stop within 10s", br.id)
+	case <-time.After(stopRunWait):
+		log.Printf("brain %s: run did not stop within %v", br.id, stopRunWait)
 	}
 	return true
+}
+
+// shutdownGrace is how long the run in flight gets to finish and be
+// delivered when the bridge stops: most answers come within it, and a
+// service manager loses patience not long after (launchd kills the bridge
+// 20 seconds after SIGTERM). A variable so tests need not wait for it.
+var shutdownGrace = 15 * time.Second
+
+// shutdown stops the brain for good as the bridge stops. It takes no new
+// message and starts no new run, and drops what was waiting. The run in
+// flight gets grace to finish and be delivered, and is interrupted after
+// that. shutdown returns once the worker has ended, its last delivery
+// done, or stopRunWait after the interrupt. The activity viewer stays,
+// for the next start to replace.
+func (br *Brain) shutdown(grace time.Duration) {
+	dropped(br.closeQueue())
+	idle := make(chan struct{})
+	go func() {
+		br.workers.Wait()
+		close(idle)
+	}()
+	graceOver := time.NewTimer(grace)
+	defer graceOver.Stop()
+	select {
+	case <-idle:
+	case <-graceOver.C:
+		br.mu.Lock()
+		cur := br.current
+		br.mu.Unlock()
+		if cur != nil {
+			log.Printf("brain %s: the run for %s is not done %v into the stop; stopping it", br.id, cur.msg.JID, grace)
+			br.interruptRun(cur)
+		}
+		select {
+		case <-idle:
+		case <-time.After(stopRunWait):
+			log.Printf("brain %s: run did not stop within %v", br.id, stopRunWait)
+		}
+	}
+	// Done with the folder. A run that would not stop finds it closed.
+	br.root.Close()
 }
 
 // closeQueue stops the brain taking messages and starting runs, and
@@ -927,13 +978,12 @@ func (br *Brain) closeQueue() []Inbound {
 	return gone
 }
 
-// retire stops the brain for good after it was removed from the
-// configuration, or when the bridge stops: it takes nothing more, drops
-// what is still waiting (a reload took that out first, see closeQueue)
-// and stops the run in flight. With closeViewer it also ends the activity
-// viewer: not when the bridge stops, so the window stays until the next
-// start replaces it, nor when the brain moved to another folder, where the
-// brain that runs there replaces the tmux session of that name.
+// retire stops the brain for good after a reload took it out, removed
+// from the configuration or moved to another folder: it takes nothing
+// more, drops what is still waiting (the reload took that out first, see
+// closeQueue) and stops the run in flight. With closeViewer it also ends
+// the activity viewer: not when the brain moved, where the brain that runs
+// in the new folder replaces the tmux session of that name.
 func (br *Brain) retire(closeViewer bool) {
 	dropped(br.closeQueue())
 	br.StopCurrent(false)
@@ -2691,8 +2741,10 @@ func (bm *BrainManager) KillRuns() {
 	}
 }
 
-// Stop interrupts every run and drops every queue, once the brains reloads
-// took out have handed on what they had waiting.
+// Stop stops every brain for good as the bridge stops (see
+// Brain.shutdown), all at once, after the brains reloads took out have
+// handed on what they had waiting. Each run in flight gets shutdownGrace
+// to finish and be delivered.
 func (bm *BrainManager) Stop() {
 	bm.reloadMu.Lock()
 	bm.stopped = true
@@ -2700,11 +2752,7 @@ func (bm *BrainManager) Stop() {
 	bm.retiring.Wait()
 	var wg sync.WaitGroup
 	for _, br := range bm.Brains() {
-		wg.Add(1)
-		go func(br *Brain) {
-			defer wg.Done()
-			br.retire(false)
-		}(br)
+		wg.Go(func() { br.shutdown(shutdownGrace) })
 	}
 	wg.Wait()
 }

@@ -14,6 +14,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"syscall"
 	"testing"
 	"time"
@@ -229,9 +230,10 @@ func TestRestartNeedsSomeoneToRestart(t *testing.T) {
 	}
 }
 
-// A second SIGTERM while the bridge stops, here waiting for a request
-// still in flight, stops the brain's run and the bridge at once, with exit
-// code 1. The bridge runs as its own process, the test binary as main.
+// A second SIGTERM while the bridge stops, here giving a brain's run its
+// grace to finish, stops the run and the bridge at once, with exit code 1.
+// The bridge runs as its own process, the test binary as main, with the
+// grace a bridge has outside the tests.
 func TestASecondSignalStopsAtOnce(t *testing.T) {
 	addr := freePort(t)
 	root, cfg := cliFixture(t, `"http_listen": "`+addr+`", "debounce": {"quiet_ms": 0}`, func(home string) []BrainRef {
@@ -295,22 +297,6 @@ func TestASecondSignalStopsAtOnce(t *testing.T) {
 		return pid > 0
 	})
 
-	// A request whose body never comes in full holds the stop up for
-	// httpStopWait (see TestStopEndsTheRequestsInFlight).
-	conn, err := net.Dial("tcp", addr)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer conn.Close()
-	req := "POST /api/dev/inbound HTTP/1.1\r\nHost: " + addr + "\r\nX-Bridge-Token: " + token +
-		"\r\nX-Bridge-Dashboard: 1\r\nContent-Type: application/json\r\nContent-Length: 100\r\nExpect: 100-continue\r\n\r\n"
-	if _, err := conn.Write([]byte(req)); err != nil {
-		t.Fatal(err)
-	}
-	if line, err := bufio.NewReader(conn).ReadString('\n'); !strings.Contains(line, "100 Continue") {
-		t.Fatalf("the server answered %q (%v), want 100 Continue", line, err)
-	}
-
 	if err := cmd.Process.Signal(syscall.SIGTERM); err != nil {
 		t.Fatal(err)
 	}
@@ -339,4 +325,85 @@ func TestASecondSignalStopsAtOnce(t *testing.T) {
 	t.Logf("exited %v after the second signal", time.Since(sent).Round(time.Millisecond))
 	// The run's process group is gone, though its 60 seconds are not.
 	waitFor(t, 5*time.Second, "the run to be killed", func() bool { return syscall.Kill(pid, 0) == syscall.ESRCH })
+}
+
+// setShutdownGrace gives the runs in flight d to finish when the test's
+// bridges stop.
+func setShutdownGrace(t *testing.T, d time.Duration) {
+	t.Helper()
+	prev := shutdownGrace
+	shutdownGrace = d
+	t.Cleanup(func() { shutdownGrace = prev })
+}
+
+// The run in flight when the bridge stops gets the grace to finish: one
+// that does is delivered, its reply in the outbox before the store closes
+// and sent once, before the stop or after the next start. One that does
+// not is stopped once the grace is over, and the stop goes on.
+func TestStopGivesTheRunInFlightItsGrace(t *testing.T) {
+	tests := []struct {
+		name    string
+		runMS   string
+		grace   time.Duration
+		replies int // how often the reply goes out
+	}{
+		{"finishes within it", "1500", 20 * time.Second, 1},
+		{"outlasts it", "30000", 300 * time.Millisecond, 0},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			setShutdownGrace(t, tc.grace)
+			h := newHarness(t, "")
+			dir := h.AddBrain(BrainManifest{ID: "main", Name: "Main", Routing: BrainRouting{HandlesDMs: true}})
+			t.Setenv("FRIDOLIN_FAKE_SLEEP_MS", tc.runMS)
+			h.Inject(inbound{JID: harnessDM, Text: "almost done"})
+			h.WaitFor("the run", func() bool { return h.Running("main") })
+			began := time.Now()
+			h.Shutdown()
+			if took := time.Since(began); took > tc.grace+stopRunWait {
+				t.Errorf("the stop took %v, more than the grace and the wait for the stopped run", took)
+			}
+			h.Reopen()
+			count := func() (replies, lines int) {
+				for _, text := range h.SentTo(harnessDM) {
+					if strings.Contains(text, "says: almost done") {
+						replies++
+					}
+				}
+				for _, l := range historyLines(t, dir) {
+					if strings.Contains(l, "says: almost done") {
+						lines++
+					}
+				}
+				return replies, lines
+			}
+			// The history records the reply once it went out.
+			h.WaitFor("the reply in the history", func() bool { _, lines := count(); return lines >= tc.replies })
+			time.Sleep(500 * time.Millisecond)
+			if replies, lines := count(); replies != tc.replies || lines != tc.replies {
+				t.Errorf("the reply went out %d times and is in the history %d times, want %d", replies, lines, tc.replies)
+			}
+		})
+	}
+}
+
+// A stop waits for the run's delivery too, not only for the run: the
+// bridge closes the outbox and the store once the brains have stopped, and
+// a reply handed over after that would be lost.
+func TestStopWaitsForTheDelivery(t *testing.T) {
+	setShutdownGrace(t, 10*time.Second)
+	mgr, _, _ := queueTestManager(t, 300, "")
+	var delivered atomic.Bool
+	mgr.SetHooks(BrainHooks{Deliver: func(br *Brain, m Inbound, res RunResult) {
+		time.Sleep(500 * time.Millisecond) // the outbox's write, slowed down
+		delivered.Store(true)
+	}})
+	if _, _, _, err := mgr.Submit(dm("hello")); err != nil {
+		t.Fatal(err)
+	}
+	hasRun(t, mgr.Get("a"))
+	mgr.Stop()
+	if !delivered.Load() {
+		t.Error("Stop returned before the run's reply was delivered")
+	}
 }

@@ -179,6 +179,9 @@ for compatibility.
   kills the brains' runs still going and exits with code 1. Restart in
   the dashboard stops the bridge as SIGTERM does, and a SIGTERM while
   it restarts leaves it stopped.
+- When the bridge stops or restarts, a brain's run in progress gets 15
+  seconds to finish, and its answer goes out. One that takes longer is
+  stopped then. Before, every run in progress was stopped at once.
 
 ### Added
 

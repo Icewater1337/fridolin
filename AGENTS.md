@@ -100,8 +100,9 @@ rollback`.
   `bin/fridolin --no-whatsapp --config /tmp/try/config.json`
   (set a different `http_listen` port and `data_dir` in that config).
 - **`./setup.sh` and `fridolin service install` restart the running
-  bridge**, cutting off replies in progress. Ask before running them on a
-  machine where the bridge is in use.
+  bridge**, which gives a reply in progress 15 seconds and cuts it off
+  after that. Ask before running them on a machine where the bridge is in
+  use.
 - **Never print or paste** `~/.fridolin/dashboard.token`,
   `~/.fridolin/scripts.token`, the rclone config in
   `~/.fridolin/rclone/`, or anything that looks like a credential into

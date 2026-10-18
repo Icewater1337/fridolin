@@ -10,6 +10,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -46,6 +47,8 @@ type harness struct {
 	cfg  string
 	// stop stops the bridge once, whether a test or the cleanup asks.
 	stop func()
+	// sentBefore is what the bridges before a Reopen sent, oldest first.
+	sentBefore []sent
 }
 
 // harnessGroup is the group the harness's config allows, and harnessDM the
@@ -107,6 +110,32 @@ func newHarness(t *testing.T, cfgJSON string) *harness {
 // Shutdown stops the bridge as SIGTERM does. The API still answers what it
 // can from memory afterwards, such as the dev outbox.
 func (h *harness) Shutdown() { h.stop() }
+
+// Restart stops the bridge as SIGTERM does, then starts a new one on the
+// same config and data dir, as the service does after it (Reopen).
+func (h *harness) Restart() {
+	h.t.Helper()
+	h.Shutdown()
+	h.Reopen()
+}
+
+// Reopen starts a new bridge on the config and data dir of the one
+// Shutdown stopped. Outbox and SentTo go on to list what the stopped
+// bridges sent, then what the new one sends.
+func (h *harness) Reopen() {
+	h.t.Helper()
+	h.sentBefore = h.Outbox()
+	cfgs, err := OpenConfigStore(h.cfg)
+	if err != nil {
+		h.t.Fatal(err)
+	}
+	b, err := NewBridge(cfgs, BridgeOptions{NoWhatsApp: true})
+	if err != nil {
+		h.t.Fatal(err)
+	}
+	h.b, h.h, h.stop = b, b.newHTTPHandler(defaultHTTPListen), sync.OnceFunc(b.Stop)
+	h.t.Cleanup(h.stop)
+}
 
 // Do sends a request the way the dashboard does: with the token, and on
 // writes the dashboard header and a JSON body. mutate adjusts it first.
@@ -212,7 +241,8 @@ type sent struct {
 	Poll []string  `json:"poll"`
 }
 
-// Outbox returns what the bridge has sent, oldest first.
+// Outbox returns what the bridge has sent, oldest first, after what the
+// bridges before a Reopen sent.
 func (h *harness) Outbox() []sent {
 	h.t.Helper()
 	w := h.Do("GET", "/api/dev/outbox", nil)
@@ -221,10 +251,8 @@ func (h *harness) Outbox() []sent {
 		h.t.Fatalf("dev outbox: %d %s", w.Code, w.Body.String())
 	}
 	// The API lists the newest first.
-	for i, j := 0, len(out)-1; i < j; i, j = i+1, j-1 {
-		out[i], out[j] = out[j], out[i]
-	}
-	return out
+	slices.Reverse(out)
+	return append(slices.Clone(h.sentBefore), out...)
 }
 
 // SentTo returns the texts sent to jid, oldest first.
