@@ -33,6 +33,7 @@ import (
 	"time"
 
 	"fridolin/internal/fsx"
+	"fridolin/internal/textx"
 	"fridolin/site"
 )
 
@@ -292,7 +293,7 @@ func (m *SiteManager) sandboxed(ctx context.Context, brainID, dir string, timeou
 		"GIT_AUTHOR_EMAIL="+siteGitEmail, "GIT_COMMITTER_EMAIL="+siteGitEmail), sbEnv...)
 	out, err := cmd.CombinedOutput()
 	if err != nil {
-		return string(out), fmt.Errorf("%s %s: %v\n%s", filepath.Base(bin), strings.Join(args, " "), err, tail(string(out), 1500))
+		return string(out), fmt.Errorf("%s %s: %v\n%s", filepath.Base(bin), strings.Join(args, " "), err, textx.Tail(string(out), 1500))
 	}
 	return string(out), nil
 }
@@ -444,7 +445,7 @@ func (m *SiteManager) BuilderCheck(ctx context.Context, brainID string) (CheckRe
 	// The report is the last line; module code may have printed before it.
 	lines := strings.Split(strings.TrimSpace(out), "\n")
 	if err := json.Unmarshal([]byte(lines[len(lines)-1]), &res); err != nil {
-		return res, fmt.Errorf("the check printed no report: %s", tail(out, 600))
+		return res, fmt.Errorf("the check printed no report: %s", textx.Tail(out, 600))
 	}
 	res.Mounted = nonNil(res.Mounted)
 	res.Broken = nonNil(res.Broken)

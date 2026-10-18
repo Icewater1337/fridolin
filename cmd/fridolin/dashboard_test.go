@@ -23,6 +23,7 @@ import (
 	"time"
 
 	"fridolin/internal/fsx"
+	"fridolin/internal/textx"
 )
 
 type testBridge struct {
@@ -1879,7 +1880,7 @@ func TestQRCodeIsServedAsAPNG(t *testing.T) {
 	}
 	b64, ok := strings.CutPrefix(body.DataURL, "data:image/png;base64,")
 	if !ok {
-		t.Fatalf("data_url %q is not a base64 PNG", truncate(body.DataURL, 40))
+		t.Fatalf("data_url %q is not a base64 PNG", textx.Truncate(body.DataURL, 40))
 	}
 	data, err := base64.StdEncoding.DecodeString(b64)
 	if err != nil {

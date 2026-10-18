@@ -15,6 +15,7 @@ import (
 	"time"
 	"unicode"
 
+	"fridolin/internal/textx"
 	"go.mau.fi/whatsmeow"
 	"go.mau.fi/whatsmeow/proto/waE2E"
 	"go.mau.fi/whatsmeow/store"
@@ -1038,8 +1039,8 @@ func sanitizeMediaName(name string) string {
 	if len(ext) > 16 {
 		ext = "" // not an extension, just a dot in a long name
 	}
-	// truncate appends "…" (3 bytes) and never splits a character.
-	return truncate(strings.TrimSuffix(name, ext), maxMediaNameBytes-len(ext)-len("…")) + ext
+	// textx.Truncate appends "…" (3 bytes) and never splits a character.
+	return textx.Truncate(strings.TrimSuffix(name, ext), maxMediaNameBytes-len(ext)-len("…")) + ext
 }
 
 // isAllowed reports whether the phone number may DM the bridge.
@@ -1209,7 +1210,7 @@ func extractQuote(contextInfo *waE2E.ContextInfo) *Quote {
 
 	const maxQuoteLen = 200
 	if len(quotedText) > maxQuoteLen {
-		quotedText = truncate(quotedText, maxQuoteLen)
+		quotedText = textx.Truncate(quotedText, maxQuoteLen)
 	}
 
 	return &Quote{From: senderJID, Text: quotedText}
@@ -1291,7 +1292,7 @@ func (d *devMessenger) record(m DevMessage) {
 	if len(d.outbox) > 200 {
 		d.outbox = d.outbox[len(d.outbox)-200:]
 	}
-	log.Printf("[dev] → %s: %s", m.JID, truncate(m.Text, 200))
+	log.Printf("[dev] → %s: %s", m.JID, textx.Truncate(m.Text, 200))
 }
 
 func (d *devMessenger) SendMessage(_ context.Context, jid, text string) error {

@@ -4,6 +4,8 @@ import (
 	"sort"
 	"sync"
 	"time"
+
+	"fridolin/internal/textx"
 )
 
 // Activity is the dashboard's feed of recent messages across all brains. It is
@@ -45,7 +47,7 @@ func (a *Activity) addLocked(brainID string, e historyEntry) {
 	if err != nil {
 		ts = time.Now()
 	}
-	a.entries = append(a.entries, ActivityEntry{TS: ts, Brain: brainID, Chat: e.Chat, From: e.From, Type: e.Type, Text: truncate(e.Text, 600), id: e.ID})
+	a.entries = append(a.entries, ActivityEntry{TS: ts, Brain: brainID, Chat: e.Chat, From: e.From, Type: e.Type, Text: textx.Truncate(e.Text, 600), id: e.ID})
 	if over := len(a.entries) - a.max; over > 0 {
 		a.entries = append([]ActivityEntry(nil), a.entries[over:]...)
 	}
@@ -65,7 +67,7 @@ func (a *Activity) Change(brainID string, c messageChange, text string) {
 		case is && c.Kind == changeRevoke:
 			continue
 		case is && text != "":
-			e.Text = truncate(text, 600)
+			e.Text = textx.Truncate(text, 600)
 		}
 		kept = append(kept, e)
 	}

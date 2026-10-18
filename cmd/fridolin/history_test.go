@@ -9,6 +9,8 @@ import (
 	"slices"
 	"strings"
 	"testing"
+
+	"fridolin/internal/textx"
 )
 
 // countingReader counts what is read of the history.
@@ -70,7 +72,7 @@ func TestScanHistoryBackward(t *testing.T) {
 				short := func(ss []string) []string {
 					var out []string
 					for _, s := range ss {
-						out = append(out, truncate(s, 20))
+						out = append(out, textx.Truncate(s, 20))
 					}
 					return out
 				}

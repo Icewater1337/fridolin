@@ -13,6 +13,7 @@ import (
 	"testing"
 
 	"fridolin/internal/fsx"
+	"fridolin/internal/textx"
 )
 
 func testManifest(id string) BrainManifest {
@@ -457,7 +458,7 @@ func TestEmbeddedTemplatesAreTheExamples(t *testing.T) {
 		t.Fatal(err)
 	}
 	if got := examplePromptTemplate(); got != string(prompt) || !strings.Contains(got, "{{BRAIN_NAME}}") {
-		t.Errorf("the prompt template is %q, want examples/brain-prompt.example.md with {{BRAIN_NAME}}", truncate(got, 80))
+		t.Errorf("the prompt template is %q, want examples/brain-prompt.example.md with {{BRAIN_NAME}}", textx.Truncate(got, 80))
 	}
 	files, err := filepath.Glob(filepath.Join(repoDir, "examples", "skills", "*.md"))
 	if err != nil || len(files) == 0 {

@@ -10,6 +10,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"fridolin/internal/textx"
 )
 
 func TestOutboxDelay(t *testing.T) {
@@ -193,10 +195,10 @@ func TestQueuedRunReadsTheAnswerBeforeIt(t *testing.T) {
 				return strings.Contains(line, `"from":"You (main)","text":"echo:`) && strings.Contains(line, "first question")
 			})
 			if !answered {
-				t.Errorf("the second run's prompt lacks the first answer:\n%s", tail(second, 600))
+				t.Errorf("the second run's prompt lacks the first answer:\n%s", textx.Tail(second, 600))
 			}
 			if strings.Count(second, `"from":"You (main)"`) != 1 {
-				t.Errorf("the second run's prompt holds the first answer more than once:\n%s", tail(second, 600))
+				t.Errorf("the second run's prompt holds the first answer more than once:\n%s", textx.Tail(second, 600))
 			}
 		})
 	}

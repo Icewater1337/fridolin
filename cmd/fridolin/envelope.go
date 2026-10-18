@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strings"
 
+	"fridolin/internal/textx"
 	"go.mau.fi/whatsmeow/proto/waE2E"
 	"go.mau.fi/whatsmeow/types/events"
 )
@@ -97,5 +98,5 @@ func contactText(name, vcard string) string {
 // space, at most n bytes: a name or an address the sender chose must not
 // break the "[…]" line it goes in.
 func singleLine(s string, n int) string {
-	return truncate(strings.Join(strings.Fields(s), " "), n)
+	return textx.Truncate(strings.Join(strings.Fields(s), " "), n)
 }

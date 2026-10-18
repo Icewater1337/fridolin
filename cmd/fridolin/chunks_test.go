@@ -9,6 +9,8 @@ import (
 	"testing"
 	"unicode"
 	"unicode/utf8"
+
+	"fridolin/internal/textx"
 )
 
 func TestChunkMessage(t *testing.T) {
@@ -299,7 +301,7 @@ func checkChunks(t *testing.T, text string, maxSize int, chunks []string) {
 	for i, b := range bodies {
 		rest = strings.TrimLeftFunc(rest, unicode.IsSpace)
 		if !strings.HasPrefix(rest, b) {
-			t.Errorf("chunk %d is not the next part of the input:\nchunk %q\ninput %q", i, b, truncate(rest, len(b)+20))
+			t.Errorf("chunk %d is not the next part of the input:\nchunk %q\ninput %q", i, b, textx.Truncate(rest, len(b)+20))
 			return
 		}
 		start := len(input) - len(rest)
@@ -328,7 +330,7 @@ func checkChunks(t *testing.T, text string, maxSize int, chunks []string) {
 			continue
 		}
 		if !slices.ContainsFunc(spans, func(s [2]int) bool { return s[0] <= start && end <= s[1] }) {
-			t.Errorf("a paragraph of %d characters fits a chunk but was cut: %q", utf8.RuneCountInString(core), truncate(core, 80))
+			t.Errorf("a paragraph of %d characters fits a chunk but was cut: %q", utf8.RuneCountInString(core), textx.Truncate(core, 80))
 		}
 	}
 }

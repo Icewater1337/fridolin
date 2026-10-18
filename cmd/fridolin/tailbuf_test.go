@@ -7,6 +7,8 @@ import (
 	"testing"
 	"time"
 	"unicode/utf8"
+
+	"fridolin/internal/textx"
 )
 
 func TestTailBuffer(t *testing.T) {
@@ -92,10 +94,10 @@ func TestRunStderrIsBounded(t *testing.T) {
 	}
 	// The block names its run, as the run's heading does.
 	if !strings.Contains(string(data), "stderr of the run for "+testDMChat+" from 15551234567, pid ") {
-		t.Errorf("activity log = %q, want the stderr block to name its run", tail(string(data), 300))
+		t.Errorf("activity log = %q, want the stderr block to name its run", textx.Tail(string(data), 300))
 	}
 	if !strings.Contains(string(data), ":\n…") || !strings.Contains(string(data), "fatal: the last thing the CLI said") {
-		t.Errorf("activity log = %q, want the end of stderr", tail(string(data), 300))
+		t.Errorf("activity log = %q, want the end of stderr", textx.Tail(string(data), 300))
 	}
 	if len(data) > 2*stderrLogBytes {
 		t.Errorf("activity log holds %d bytes, want at most the last %d of stderr", len(data), stderrLogBytes)

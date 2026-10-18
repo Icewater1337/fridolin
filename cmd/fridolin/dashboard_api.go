@@ -28,6 +28,7 @@ import (
 	"unicode/utf8"
 
 	"fridolin/internal/fsx"
+	"fridolin/internal/textx"
 	"rsc.io/qr"
 )
 
@@ -346,14 +347,14 @@ func (b *Bridge) outboxWarnings(ctx context.Context) []string {
 		w := fmt.Sprintf("%d %s waiting to go out to WhatsApp, the oldest since %s; the bridge keeps trying for an hour.",
 			sum.Waiting, plural(sum.Waiting, "reply is", "replies are"), sum.OldestWaiting.Local().Format("15:04"))
 		if sum.WaitingError != "" {
-			w += " Last error: " + truncate(sum.WaitingError, 200)
+			w += " Last error: " + textx.Truncate(sum.WaitingError, 200)
 		}
 		out = append(out, w)
 	}
 	if sum.Failed > 0 {
 		out = append(out, fmt.Sprintf("%d %s could not be delivered to WhatsApp and %s given up on, the last at %s: %s. The chats never got them, and the brains' history does not hold them.",
 			sum.Failed, plural(sum.Failed, "reply", "replies"), plural(sum.Failed, "was", "were"),
-			sum.LastFailed.Local().Format("Jan 2 15:04"), truncate(sum.FailedError, 200)))
+			sum.LastFailed.Local().Format("Jan 2 15:04"), textx.Truncate(sum.FailedError, 200)))
 	}
 	return out
 }

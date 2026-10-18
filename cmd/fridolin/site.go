@@ -37,6 +37,7 @@ import (
 	"time"
 
 	"fridolin/internal/fsx"
+	"fridolin/internal/textx"
 	"fridolin/site"
 )
 
@@ -964,7 +965,7 @@ func (m *SiteManager) runNpmInstall(ctx context.Context, dir string, prod bool) 
 	cmd.Env = siteEnv(node)
 	out, err := cmd.CombinedOutput()
 	if err != nil {
-		return fmt.Errorf("npm %s: %v\n%s", args[0], err, tail(string(out), 1500))
+		return fmt.Errorf("npm %s: %v\n%s", args[0], err, textx.Tail(string(out), 1500))
 	}
 	return nil
 }

@@ -24,6 +24,7 @@ import (
 	"unicode"
 
 	"fridolin/internal/fsx"
+	"fridolin/internal/textx"
 	"golang.org/x/text/unicode/norm"
 )
 
@@ -849,7 +850,7 @@ func (a *authURLWatcher) Write(p []byte) (int, error) {
 func (a *authURLWatcher) tail() string {
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	return tail(a.buf.String(), 400)
+	return textx.Tail(a.buf.String(), 400)
 }
 
 // errDisconnecting refuses what would start on the Drive link while
@@ -1393,7 +1394,7 @@ func (m *BackupManager) listFiles(ctx context.Context, path, filterFile string) 
 		if strings.Contains(strings.ToLower(stderr.String()), "directory not found") {
 			return nil, errDirNotFound
 		}
-		msg := truncate(strings.TrimSpace(stderr.String()), 300)
+		msg := textx.Truncate(strings.TrimSpace(stderr.String()), 300)
 		if msg == "" {
 			return nil, err
 		}
@@ -1602,7 +1603,7 @@ func (j *jsonStats) lastError() string {
 	if len(j.errs) == 0 {
 		return ""
 	}
-	return truncate(j.errs[len(j.errs)-1], 300)
+	return textx.Truncate(j.errs[len(j.errs)-1], 300)
 }
 
 // prune deletes the version folders whose run is older than
@@ -1695,7 +1696,7 @@ func (m *BackupManager) listVersions(ctx context.Context, versions string) ([]st
 		if strings.Contains(strings.ToLower(stderr.String()), "not found") {
 			return []string{}, nil
 		}
-		msg := truncate(strings.TrimSpace(stderr.String()), 300)
+		msg := textx.Truncate(strings.TrimSpace(stderr.String()), 300)
 		if msg == "" {
 			return nil, err
 		}

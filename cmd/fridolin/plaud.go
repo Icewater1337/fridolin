@@ -26,6 +26,7 @@ import (
 	"time"
 
 	"fridolin/internal/fsx"
+	"fridolin/internal/textx"
 	"go.mau.fi/whatsmeow/types"
 )
 
@@ -807,7 +808,7 @@ func plaudRunError(cmd string, err error, stderr string) error {
 			lines = append(lines, l)
 		}
 	}
-	detail := truncate(strings.Join(lines, " "), 300)
+	detail := textx.Truncate(strings.Join(lines, " "), 300)
 	switch {
 	case cmd == "login" && code == 2:
 		return fmt.Errorf("access was not granted: it was denied on Plaud's page, or the sign-in failed (%s)", detail)
@@ -1353,7 +1354,7 @@ func plaudTranscriptPath(dir, day, name, id string) string {
 }
 
 func safePlaudName(s string) string {
-	s = truncate(strings.TrimSpace(strings.NewReplacer("/", "-", "\\", "-", ":", "-", "\n", " ", "\r", " ", "\t", " ").Replace(s)), 120)
+	s = textx.Truncate(strings.TrimSpace(strings.NewReplacer("/", "-", "\\", "-", ":", "-", "\n", " ", "\r", " ", "\t", " ").Replace(s)), 120)
 	if s == "" {
 		s = "Plaud recording"
 	}

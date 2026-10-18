@@ -35,6 +35,8 @@ import (
 	"slices"
 	"strings"
 	"time"
+
+	"fridolin/internal/textx"
 )
 
 // spoolRequest is a module's request.json (ctx.ingest).
@@ -433,5 +435,5 @@ func (b *Bridge) runBrainSearch(ctx context.Context, brainID, prompt string, out
 	case proc == nil:
 		return fmt.Errorf("claude: %w", err)
 	}
-	return fmt.Errorf("claude: %w: %s", err, tail(proc.stderrTail(), 400))
+	return fmt.Errorf("claude: %w: %s", err, textx.Tail(proc.stderrTail(), 400))
 }

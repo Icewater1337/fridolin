@@ -24,6 +24,7 @@ import (
 	"unicode"
 
 	"fridolin/internal/fsx"
+	"fridolin/internal/textx"
 )
 
 // historyEntry is one line in a brain's conversation-history.jsonl file.
@@ -1109,12 +1110,12 @@ func (br *Brain) Snapshot() BrainRuntime {
 	br.mu.Lock()
 	defer br.mu.Unlock()
 	if cur := br.current; cur != nil {
-		rt.Running = &RunView{Chat: cur.msg.JID, Sender: cur.msg.Sender, Preview: truncate(cur.msg.textWithQuote(), 160),
+		rt.Running = &RunView{Chat: cur.msg.JID, Sender: cur.msg.Sender, Preview: textx.Truncate(cur.msg.textWithQuote(), 160),
 			Silent: cur.msg.Silent, Started: cur.started, PID: cur.pid}
 	}
 	for _, i := range br.queueOrderLocked() {
 		p := br.pending[i]
-		rt.Queue = append(rt.Queue, QueuedView{Chat: p.JID, Sender: p.Sender, Preview: truncate(p.textWithQuote(), 160), Silent: p.Silent, Queued: p.At})
+		rt.Queue = append(rt.Queue, QueuedView{Chat: p.JID, Sender: p.Sender, Preview: textx.Truncate(p.textWithQuote(), 160), Silent: p.Silent, Queued: p.At})
 	}
 	if br.last != nil {
 		l := *br.last
@@ -1784,7 +1785,7 @@ func (br *Brain) invoke(run *brainRun, ctx context.Context, s *brainSettings, m 
 		// Without a result, what the CLI wrote to stderr is the only
 		// account of what went wrong.
 		if errors.Is(res.Err, errNoResult) {
-			return RunResult{Err: fmt.Errorf("%s exited: %w — stderr: %s", agentName(s.provider), waitErr, tail(stderr, 500))}
+			return RunResult{Err: fmt.Errorf("%s exited: %w — stderr: %s", agentName(s.provider), waitErr, textx.Tail(stderr, 500))}
 		}
 	}
 	return res
@@ -1810,7 +1811,7 @@ func (br *Brain) logStderr(m Inbound, pid int, stderr string) {
 	}
 	defer f.Close()
 	_, _ = fmt.Fprintf(f, "[%s] stderr of the run for %s from %s, pid %d:\n%s\n",
-		time.Now().Format("15:04:05"), m.JID, m.Sender, pid, tail(stderr, stderrLogBytes))
+		time.Now().Format("15:04:05"), m.JID, m.Sender, pid, textx.Tail(stderr, stderrLogBytes))
 }
 
 // stderrLogBytes is how much of a run's stderr goes to its activity log.

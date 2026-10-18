@@ -30,6 +30,7 @@ import (
 	"time"
 
 	"fridolin/internal/fsx"
+	"fridolin/internal/textx"
 	"fridolin/site"
 )
 
@@ -71,7 +72,7 @@ func (m *SiteManager) git(ctx context.Context, dir string, args ...string) (stri
 		if msg == "" {
 			msg = err.Error()
 		}
-		return "", fmt.Errorf("git %s: %s", args[0], tail(msg, 800))
+		return "", fmt.Errorf("git %s: %s", args[0], textx.Tail(msg, 800))
 	}
 	return strings.TrimSpace(out.String()), nil
 }
@@ -162,7 +163,7 @@ func (m *SiteManager) AddDeployKeyWithGH(ctx context.Context, addr string) (stri
 	}
 	cmd := exec.CommandContext(ctx, gh, "repo", "deploy-key", "add", m.dir("deploy_key.pub"), "--repo", repo, "--allow-write", "--title", "Fridolin site")
 	if out, err := cmd.CombinedOutput(); err != nil && !strings.Contains(string(out), "already in use") {
-		return "", fmt.Errorf("gh: %s", tail(string(out), 400))
+		return "", fmt.Errorf("gh: %s", textx.Tail(string(out), 400))
 	}
 	return repo, nil
 }
@@ -179,7 +180,7 @@ func (m *SiteManager) CreateGitHubRepo(ctx context.Context, name string) (string
 	}
 	out, err := exec.CommandContext(ctx, gh, "repo", "create", name, "--private", "--description", "My website's modules, served by Fridolin").CombinedOutput()
 	if err != nil {
-		return "", fmt.Errorf("gh: %s", tail(string(out), 400))
+		return "", fmt.Errorf("gh: %s", textx.Tail(string(out), 400))
 	}
 	owner, err := exec.CommandContext(ctx, gh, "api", "user", "--jq", ".login").Output()
 	if err != nil {
@@ -717,7 +718,7 @@ func (m *SiteManager) runBuild(ctx context.Context, moduleDir, cwd string, run [
 	cmd.Env = siteEnv(node)
 	out, err := cmd.CombinedOutput()
 	if err != nil {
-		return fmt.Errorf("%v\n%s", err, tail(string(out), 1500))
+		return fmt.Errorf("%v\n%s", err, textx.Tail(string(out), 1500))
 	}
 	return nil
 }
