@@ -207,7 +207,7 @@ func (b *Bridge) brainCall(fn func(w http.ResponseWriter, r *http.Request, br *B
 // or the one it replies in. A brain sees only the polls of those, since a
 // poll's voters are the people of the chat it was sent to.
 func (b *Bridge) ownsChat(br *Brain, chat string) bool {
-	return b.brainMgr.BrainFor(chat, strings.HasSuffix(chat, "@g.us")) == br || b.replyChatFor(br, b.cfgs.Get()) == chat
+	return b.brainMgr.BrainFor(chat, isGroupJID(chat)) == br || b.replyChatFor(br, b.cfgs.Get()) == chat
 }
 
 // brainPolls answers GET /brain/polls: ?id=MSG_ID for one poll, else the
