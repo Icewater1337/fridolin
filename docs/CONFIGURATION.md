@@ -207,7 +207,8 @@ into a bug report as `fridolin check --redact` prints it. Revoking a group
 on the **Chats** page removes its entry too. The dashboard has no form for
 the lists yet, and keeps them as they are when it saves: write them into
 `config.json` and restart the bridge (`fridolin service restart`).
-`fridolin check` tells you whether the file loads.
+`fridolin check` tells you whether the file loads, and its `heard in` line
+for each allowed group says whose messages there are read.
 
 ### `triggers`
 

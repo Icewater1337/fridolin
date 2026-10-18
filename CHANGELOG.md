@@ -167,7 +167,8 @@ for compatibility.
 ### Added
 
 - `group_members`: who in each allowed group reaches its brain, by phone
-  number, or `["*"]` for everyone (docs/CONFIGURATION.md).
+  number, or `["*"]` for everyone (docs/CONFIGURATION.md). `fridolin
+  check` says for each allowed group whose messages are read there.
 - `config.json` has a `version`, 2 today, which every save writes. A
   config without one is version 1 and is read as version 2, its retired
   keys folded in as before; starting does not rewrite it. A bridge

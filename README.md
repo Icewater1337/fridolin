@@ -285,7 +285,7 @@ The dashboard writes `~/.fridolin/config.json`; you can edit it
 too. Every option is documented in [docs/CONFIGURATION.md](docs/CONFIGURATION.md).
 
 ```bash
-fridolin check                           # validate and show DM access and routing
+fridolin check                           # validate; show who is heard, and the routing
 fridolin check --route 15551234567@s.whatsapp.net
 ```
 

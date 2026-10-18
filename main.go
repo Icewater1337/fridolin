@@ -598,6 +598,7 @@ func writeCheck(w io.Writer, o checkOptions) error {
 	}
 	red.addChats(cfg.AllowedNumbers...)
 	red.addGroups(cfg.AllowedGroups...)
+	red.addGroupMembers(cfg.GroupMembers)
 	var buf bytes.Buffer
 	err = checkReport(&buf, path, cfg, o)
 	if _, werr := io.WriteString(w, red.text(buf.String())); werr != nil && err == nil {
@@ -619,6 +620,9 @@ func checkReport(w io.Writer, path string, cfg *Config, o checkOptions) error {
 	fmt.Fprintf(w, "  dashboard: http://%s/\n", cfg.HTTPListen)
 	fmt.Fprintf(w, "  DM allow:  %s\n", dmAllowSummary(cfg))
 	fmt.Fprintf(w, "  groups:    %v\n", cfg.AllowedGroups)
+	for _, g := range cfg.AllowedGroups {
+		fmt.Fprintf(w, "  heard in %s: %s\n", g, groupHeardSummary(cfg, g))
+	}
 	trig, _ := json.Marshal(cfg.Triggers)
 	fmt.Fprintf(w, "  triggers:  %s\n", trig)
 	// As the bridge does before it loads the brains, so that the brains
@@ -767,18 +771,29 @@ func newRedactor(home string) *redactor {
 	return r
 }
 
-// addConfig adds the allowed numbers and groups of the config file at
-// path as they are written, read before it loads: loading logs the
-// entries it finds odd, a number with a note after it say, as they are.
-// A file that does not parse adds nothing.
+// addConfig adds the allowed numbers and groups and group_members of the
+// config file at path as they are written, read before it loads: loading
+// logs the entries it finds odd, a number with a note after it say, as
+// they are. A file that does not parse adds nothing.
 func (r *redactor) addConfig(path string) {
 	var file struct {
-		AllowedNumbers []string `json:"allowed_numbers"`
-		AllowedGroups  []string `json:"allowed_groups"`
+		AllowedNumbers []string            `json:"allowed_numbers"`
+		AllowedGroups  []string            `json:"allowed_groups"`
+		GroupMembers   map[string][]string `json:"group_members"`
 	}
 	if data, err := os.ReadFile(path); err == nil && json.Unmarshal(data, &file) == nil {
 		r.addChats(file.AllowedNumbers...)
 		r.addGroups(file.AllowedGroups...)
+		r.addGroupMembers(file.GroupMembers)
+	}
+}
+
+// addGroupMembers adds the groups of group_members and the numbers each
+// lists, which check prints as digits alone.
+func (r *redactor) addGroupMembers(members map[string][]string) {
+	for g, list := range members {
+		r.addGroups(g)
+		r.addChats(list...)
 	}
 }
 
