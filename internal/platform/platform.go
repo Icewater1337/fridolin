@@ -1,4 +1,11 @@
-package main
+//go:build unix
+
+// Package platform is what the bridge asks of the operating system beyond
+// files: the instance lock, process groups, replacing its own process on
+// a restart, opening a browser, telling a terminal and a folder dialog.
+// It builds on macOS and Linux only (unsupported.go), and it is the one
+// package below internal/ that may read the process's environment.
+package platform
 
 import (
 	"fmt"
@@ -8,12 +15,8 @@ import (
 	"syscall"
 )
 
-// What the bridge asks of the operating system beyond files: opening a
-// browser, telling a terminal, a folder dialog and replacing its own
-// process.
-
-// openBrowser opens url in the user's browser.
-func openBrowser(url string) error {
+// OpenBrowser opens url in the user's browser.
+func OpenBrowser(url string) error {
 	switch runtime.GOOS {
 	case "darwin":
 		return exec.Command("open", url).Run()
@@ -23,17 +26,17 @@ func openBrowser(url string) error {
 	return fmt.Errorf("don't know how to open a browser on %s", runtime.GOOS)
 }
 
-// isTerminal reports whether f is a terminal, or at least a character
+// IsTerminal reports whether f is a terminal, or at least a character
 // device, so that a QR code or a login link is shown to a person.
-func isTerminal(f *os.File) bool {
+func IsTerminal(f *os.File) bool {
 	st, err := f.Stat()
 	return err == nil && st.Mode()&os.ModeCharDevice != 0
 }
 
-// folderPicker returns the command that shows a native folder chooser,
+// FolderPicker returns the command that shows a native folder chooser,
 // or nil when the system has none. kdialog starts in home, the user's
 // home folder.
-func folderPicker(home string) []string {
+func FolderPicker(home string) []string {
 	switch runtime.GOOS {
 	case "darwin":
 		return []string{"osascript", "-e", "activate", "-e", `POSIX path of (choose folder with prompt "Choose a folder for this brain")`}
@@ -51,8 +54,8 @@ func folderPicker(home string) []string {
 	return nil
 }
 
-// execInPlace replaces the running process with argv0, run with argv and
+// Exec replaces the running process with argv0, run with argv and
 // envv. It returns only when that fails.
-func execInPlace(argv0 string, argv, envv []string) error {
+func Exec(argv0 string, argv, envv []string) error {
 	return syscall.Exec(argv0, argv, envv)
 }

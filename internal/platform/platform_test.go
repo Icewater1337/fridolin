@@ -1,12 +1,14 @@
 //go:build unix
 
-package main
+package platform
 
 import (
 	"fmt"
+	"go/build"
 	"os"
 	"os/exec"
 	"runtime"
+	"slices"
 	"strings"
 	"syscall"
 	"testing"
@@ -36,17 +38,17 @@ func runAgain(t *testing.T, test string, env ...string) string {
 
 func TestInstanceLockRefusesASecondHolder(t *testing.T) {
 	dir := t.TempDir()
-	first, err := acquireInstanceLock(dir)
+	first, err := AcquireLock(dir)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if second, err := acquireInstanceLock(dir); err == nil {
+	if second, err := AcquireLock(dir); err == nil {
 		second.Release()
 		t.Fatal("a second lock on the same data dir must fail")
 	} else if !strings.Contains(err.Error(), "another bridge is already running") {
 		t.Errorf("err = %v", err)
 	}
-	other, err := acquireInstanceLock(t.TempDir())
+	other, err := AcquireLock(t.TempDir())
 	if err != nil {
 		t.Fatalf("another data dir must still lock: %v", err)
 	}
@@ -54,7 +56,7 @@ func TestInstanceLockRefusesASecondHolder(t *testing.T) {
 
 	first.Release()
 	first.Release() // a second release is harmless
-	again, err := acquireInstanceLock(dir)
+	again, err := AcquireLock(dir)
 	if err != nil {
 		t.Fatalf("after release the lock must be free: %v", err)
 	}
@@ -67,7 +69,7 @@ func TestInstanceLockRefusesASecondHolder(t *testing.T) {
 // go.
 func TestInstanceLockRefusesAnotherProcess(t *testing.T) {
 	if dir := os.Getenv(lockChildVar); dir != "" {
-		l, err := acquireInstanceLock(dir)
+		l, err := AcquireLock(dir)
 		if err != nil {
 			fmt.Println("refused:", err)
 			return
@@ -77,7 +79,7 @@ func TestInstanceLockRefusesAnotherProcess(t *testing.T) {
 		return
 	}
 	dir := t.TempDir()
-	l, err := acquireInstanceLock(dir)
+	l, err := AcquireLock(dir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -89,7 +91,7 @@ func TestInstanceLockRefusesAnotherProcess(t *testing.T) {
 	if out := runAgain(t, "TestInstanceLockRefusesAnotherProcess", lockChildVar+"="+dir); !strings.Contains(out, "acquired") {
 		t.Errorf("after release another process must get the lock:\n%s", out)
 	}
-	again, err := acquireInstanceLock(dir)
+	again, err := AcquireLock(dir)
 	if err != nil {
 		t.Fatalf("after the other process the lock must be free: %v", err)
 	}
@@ -100,7 +102,7 @@ func TestInstanceLockRefusesAnotherProcess(t *testing.T) {
 // and the environment it is given.
 func TestExecInPlaceReplacesTheProcess(t *testing.T) {
 	if os.Getenv(execChildVar) == "1" {
-		err := execInPlace("/bin/sh", []string{"sh", "-c", `echo "replaced by $0, with $WORD"`}, []string{"WORD=its own environment"})
+		err := Exec("/bin/sh", []string{"sh", "-c", `echo "replaced by $0, with $WORD"`}, []string{"WORD=its own environment"})
 		fmt.Println("exec failed:", err)
 		os.Exit(1)
 	}
@@ -113,7 +115,7 @@ func TestExecInPlaceReplacesTheProcess(t *testing.T) {
 // shell command still holding its output.
 func TestKillProcessGroupKillsWhatTheProcessStarted(t *testing.T) {
 	cmd := exec.CommandContext(t.Context(), "/bin/sh", "-c", "sleep 60 & echo $!; wait")
-	isolateProcessGroup(cmd)
+	IsolateProcessGroup(cmd)
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
 		t.Fatal(err)
@@ -125,7 +127,7 @@ func TestKillProcessGroupKillsWhatTheProcessStarted(t *testing.T) {
 	if _, err := fmt.Fscan(stdout, &child); err != nil {
 		t.Fatal(err)
 	}
-	if err := killProcessGroup(cmd.Process.Pid); err != nil {
+	if err := KillProcessGroup(cmd.Process.Pid); err != nil {
 		t.Fatal(err)
 	}
 	_ = cmd.Wait()
@@ -135,11 +137,11 @@ func TestKillProcessGroupKillsWhatTheProcessStarted(t *testing.T) {
 		}
 	}
 	// A group that is gone, and no process at all, are no error.
-	if err := killProcessGroup(cmd.Process.Pid); err != nil {
+	if err := KillProcessGroup(cmd.Process.Pid); err != nil {
 		t.Errorf("killing a group that is gone: %v", err)
 	}
-	if err := killProcessGroup(0); err != nil {
-		t.Errorf("killProcessGroup(0) = %v", err)
+	if err := KillProcessGroup(0); err != nil {
+		t.Errorf("KillProcessGroup(0) = %v", err)
 	}
 }
 
@@ -161,7 +163,7 @@ func TestIsolateProcessGroupStartsASessionOfItsOwn(t *testing.T) {
 	}
 	cmd := exec.CommandContext(t.Context(), os.Args[0], "-test.run=^TestIsolateProcessGroupStartsASessionOfItsOwn$", "-test.count=1")
 	cmd.Env = append(os.Environ(), sessionChildVar+"=1")
-	isolateProcessGroup(cmd)
+	IsolateProcessGroup(cmd)
 	out, err := cmd.Output()
 	if err != nil {
 		t.Fatalf("%v: %s", err, out)
@@ -181,7 +183,7 @@ func TestIsTerminal(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer f.Close()
-	if isTerminal(f) {
+	if IsTerminal(f) {
 		t.Error("a regular file is no terminal")
 	}
 	null, err := os.Open(os.DevNull)
@@ -190,7 +192,7 @@ func TestIsTerminal(t *testing.T) {
 	}
 	defer null.Close()
 	// A character device counts, so this is a best guess.
-	if !isTerminal(null) {
+	if !IsTerminal(null) {
 		t.Errorf("%s is a character device", os.DevNull)
 	}
 }
@@ -198,14 +200,38 @@ func TestIsTerminal(t *testing.T) {
 func TestFolderPicker(t *testing.T) {
 	switch runtime.GOOS {
 	case "darwin":
-		if argv := folderPicker("/Users/you"); len(argv) == 0 || argv[0] != "osascript" {
-			t.Errorf("folderPicker() = %q, want osascript's dialog", argv)
+		if argv := FolderPicker("/Users/you"); len(argv) == 0 || argv[0] != "osascript" {
+			t.Errorf("FolderPicker() = %q, want osascript's dialog", argv)
 		}
 	case "linux":
 		t.Setenv("DISPLAY", "")
 		t.Setenv("WAYLAND_DISPLAY", "")
-		if argv := folderPicker("/Users/you"); argv != nil {
-			t.Errorf("folderPicker() = %q without a display, want none", argv)
+		if argv := FolderPicker("/Users/you"); argv != nil {
+			t.Errorf("FolderPicker() = %q without a display, want none", argv)
+		}
+	}
+}
+
+// On a system that is not Unix the package builds from unsupported.go
+// alone, whose undefined name stops the build with a message, and on
+// macOS and Linux it leaves that file out.
+func TestOnlyUnixBuildsThePackage(t *testing.T) {
+	for _, c := range []struct {
+		goos        string
+		unsupported bool
+	}{{"darwin", false}, {"linux", false}, {"windows", true}, {"plan9", true}} {
+		ctx := build.Default
+		ctx.GOOS = c.goos
+		pkg, err := ctx.ImportDir(".", 0)
+		if err != nil {
+			t.Fatalf("%s: %v", c.goos, err)
+		}
+		if c.unsupported {
+			if !slices.Equal(pkg.GoFiles, []string{"unsupported.go"}) {
+				t.Errorf("%s builds %v, want unsupported.go alone", c.goos, pkg.GoFiles)
+			}
+		} else if slices.Contains(pkg.GoFiles, "unsupported.go") {
+			t.Errorf("%s builds %v, unsupported.go among them", c.goos, pkg.GoFiles)
 		}
 	}
 }

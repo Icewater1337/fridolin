@@ -24,10 +24,11 @@ import (
 // edge is a change to this table, made and reviewed in the same pull
 // request. Imports from outside the module are not checked here.
 var imports = map[string][]string{
-	"cmd/fridolin":      {"examples", "internal/fsx", "internal/textx", "internal/trigger", "internal/version", "site", "web"},
+	"cmd/fridolin":      {"examples", "internal/fsx", "internal/platform", "internal/textx", "internal/trigger", "internal/version", "site", "web"},
 	"examples":          nil,
 	"internal/archtest": nil,
 	"internal/fsx":      nil,
+	"internal/platform": nil,
 	"internal/textx":    nil,
 	"internal/trigger":  nil,
 	"internal/version":  nil,
@@ -38,7 +39,9 @@ var imports = map[string][]string{
 // ambientAllowed are the packages below internal/ that may read the
 // process's environment, home folder, executable or working directory
 // (TestNoAmbientEnv).
-var ambientAllowed = map[string]bool{}
+var ambientAllowed = map[string]bool{
+	"internal/platform": true,
+}
 
 // ambient are the calls that read process-wide state. Code below internal/
 // gets these values passed in, computed once at startup.

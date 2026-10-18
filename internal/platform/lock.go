@@ -1,6 +1,6 @@
 //go:build unix
 
-package main
+package platform
 
 import (
 	"fmt"
@@ -10,18 +10,18 @@ import (
 	"syscall"
 )
 
-// instanceLock is held by the bridge that uses a data directory.
-type instanceLock struct {
+// Lock is held by the bridge that uses a data directory.
+type Lock struct {
 	mu sync.Mutex
 	f  *os.File
 }
 
-// acquireInstanceLock makes sure only one bridge uses a data directory. Two
+// AcquireLock makes sure only one bridge uses a data directory. Two
 // bridges on one WhatsApp session knock each other offline and can get the
 // device logged out. The flock belongs to the open file, so a second bridge
 // in the same process is refused too, and the kernel drops it when the
 // process dies.
-func acquireInstanceLock(dataDir string) (*instanceLock, error) {
+func AcquireLock(dataDir string) (*Lock, error) {
 	if err := os.MkdirAll(dataDir, 0o700); err != nil {
 		return nil, err
 	}
@@ -35,12 +35,12 @@ func acquireInstanceLock(dataDir string) (*instanceLock, error) {
 	}
 	_ = f.Truncate(0)
 	_, _ = fmt.Fprintf(f, "%d\n", os.Getpid())
-	return &instanceLock{f: f}, nil
+	return &Lock{f: f}, nil
 }
 
 // Release lets a restarted bridge take the lock again. Calling it twice is
 // harmless.
-func (l *instanceLock) Release() {
+func (l *Lock) Release() {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	if l.f != nil {
