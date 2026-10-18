@@ -15,6 +15,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -861,6 +862,71 @@ func TestApproveDrift(t *testing.T) {
 	}
 	if got := running(); got != "Notes 2" {
 		t.Errorf("the running brain is named %q after approval, want Notes 2", got)
+	}
+}
+
+// TestStopRunFromTheDashboard: the dashboard's Stop ends the run in
+// progress, and the chat hears nothing about it. The message waiting behind
+// it runs next, or with clear_queue is dropped without a word to the chat
+// that was told it is queued. With nothing running, Stop stops nothing. A
+// third message, sent once the run has ended, shows that nothing else came.
+func TestStopRunFromTheDashboard(t *testing.T) {
+	for _, c := range []struct {
+		name   string
+		clear  bool
+		golden string
+	}{
+		{"keep the queue", false, "run/stop-keeps-the-queue.golden"},
+		{"clear the queue", true, "run/stop-clears-the-queue.golden"},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			h := newHarness(t, "")
+			h.AddBrain(BrainManifest{ID: "main", Name: "Main", Routing: BrainRouting{HandlesDMs: true}})
+			pids := filepath.Join(t.TempDir(), "pids")
+			t.Setenv("FRIDOLIN_FAKE_PID_LOG", pids)
+			t.Setenv("FRIDOLIN_FAKE_SLEEP_MS", "30000")
+			h.Inject(inbound{JID: harnessDM, Text: "first"})
+			// The CLI writes its PID once it runs, with the sleep in its
+			// environment; the runs after it answer at once.
+			h.WaitFor("the first run's CLI", func() bool {
+				data, _ := os.ReadFile(pids)
+				return len(data) > 0
+			})
+			t.Setenv("FRIDOLIN_FAKE_SLEEP_MS", "0")
+			h.Inject(inbound{JID: harnessDM, Text: "second"})
+			h.WaitSent(harnessDM, "Queued")
+
+			stop := func() bool {
+				t.Helper()
+				var resp struct {
+					Stopped bool `json:"stopped"`
+				}
+				w := h.Do("POST", "/api/brains/main/stop", map[string]any{"clear_queue": c.clear})
+				if w.Code != http.StatusOK || json.Unmarshal(w.Body.Bytes(), &resp) != nil {
+					t.Fatalf("stop: %d %s", w.Code, w.Body)
+				}
+				return resp.Stopped
+			}
+			if !stop() {
+				t.Error("Stop stopped nothing while a run was in progress")
+			}
+			if !c.clear {
+				h.WaitSent(harnessDM, "says: second")
+			}
+			h.WaitFor("the brain to be idle", func() bool { return !h.Running("main") })
+			if stop() {
+				t.Error("Stop stopped something with nothing running")
+			}
+			h.Inject(inbound{JID: harnessDM, Text: "third"})
+			h.WaitSent(harnessDM, "says: third")
+
+			s := h.scrubber()
+			var sb strings.Builder
+			for _, m := range h.Outbox() {
+				sb.WriteString(m.JID + " " + strconv.Quote(s.text(m.Text)) + "\n")
+			}
+			assertGolden(t, c.golden, []byte(sb.String()))
+		})
 	}
 }
 
