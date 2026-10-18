@@ -149,12 +149,18 @@ Reopen the dashboard with `fridolin open`. To upgrade later: `git pull &&
   open panels), and builds an editable form with `components/live-form.js`,
   which keeps edits across refreshes and says when the data changed
   elsewhere. Leaving a page with unsaved changes asks first
-  (`app/nav-guard.js`). Its tests need Node 22+ and nothing installed:
-  `make test-web` syntax-checks every module and runs `node --test` on
-  `web/**/*.test.js` files (`web/test`). They cover the pure helpers, run
-  pages against a stubbed bridge in a fake DOM (`web/test/serve.js`,
-  `web/test/fake-dom.js`), and check that every import resolves and keeps
-  those layers.
+  (`app/nav-guard.js`). Its styles are in `web/assets/css`, one cascade
+  layer per file, which `app.css` puts in order: `tokens.css` (the
+  colours, each as `light-dark(light, dark)`, so the dark theme is no
+  second list), `base.css` (elements and utilities), `components.css`
+  (the shell and shared pieces) and `pages.css`. A later layer wins over
+  an earlier one whatever the selectors, so change a rule where it lives
+  rather than overriding it further down. Its tests need Node 22+ and
+  nothing installed: `make test-web` syntax-checks every module and runs
+  `node --test` on `web/**/*.test.js` files (`web/test`). They cover the
+  pure helpers, run pages against a stubbed bridge in a fake DOM
+  (`web/test/serve.js`, `web/test/fake-dom.js`), check that every import
+  resolves and keeps those layers, and hold the stylesheet to its layout.
 - The project was called whatsapp-claude-bridge before. Names from then
   that are on disk or that others rely on stay, each marked `compat:` in
   the code: the data dir `~/.whatsapp-claude-bridge`, which the bridge
