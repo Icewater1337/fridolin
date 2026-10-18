@@ -12,9 +12,16 @@ In the dashboard: **Brains → Add brain**, then pick a folder. You can
 - browse your home folder inside the dashboard (and name a new folder there),
 - or type a path (`~/assistant/family`).
 
-The bridge checks the folder (it must be inside your home folder, must not be
-inside or contain another brain, and must not be the bridge's data folder),
-then writes what is missing:
+The bridge checks the folder, by where it really is (through any symlink on
+the way, also for a folder it is about to create): it must be inside your
+home folder, must not be inside or contain another brain, and must not be,
+hold or lie inside what the sandbox keeps from brains, such as the
+bridge's data, media or credentials folder, `~/.claude`,
+`~/Library/LaunchAgents`, the keychains, the bridge's install folder or
+checkout, or must not be or hold a folder like `~/.ssh` or `~/.config`.
+The bridge checks configured brains the same way whenever it loads them,
+also those you add to `brain_dirs` by hand, and leaves out one that fails,
+with an issue on the Brains page. Then it writes what is missing:
 
 ```
 <folder>/

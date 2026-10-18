@@ -80,6 +80,13 @@ func ResolveBrains(cfg *Config) ([]BrainSpec, []BrainIssue) {
 			issues = append(issues, BrainIssue{ID: m.ID, Path: ref.Path, Kind: "missing", Detail: "folder not found", entry: i})
 			continue
 		}
+		// The dashboard refuses such a folder, but brain_dirs can be edited
+		// by hand, and a folder can be moved, or a symlink on its way
+		// changed, after it was added.
+		if err := checkBrainDir(dir, ref.Path, cfg, homeDir()); err != nil {
+			issues = append(issues, BrainIssue{ID: m.ID, Path: ref.Path, Kind: "invalid", Detail: "the folder " + err.Error() + ", so it cannot hold a brain; move the brain to a folder of its own"})
+			continue
+		}
 		if disk, err := ReadManifest(dir); err == nil && !disk.Equal(m) {
 			issues = append(issues, BrainIssue{ID: m.ID, Path: ref.Path, Kind: "drift", Detail: "brain.json changed on disk — review and approve it in the dashboard", entry: i})
 		} else if err != nil && !errors.Is(err, fs.ErrNotExist) {
@@ -162,10 +169,10 @@ func CheckBrainPath(path string, cfg *Config, otherDirs []string) (abs string, p
 		problems = append(problems, "a brain cannot be your whole home folder — pick or create a folder for it")
 	case !isWithin(abs, canonicalDir(home)):
 		problems = append(problems, "brain folders must be inside your home folder")
-	}
-	data := canonicalDir(cfg.DataDir)
-	if isWithin(abs, data) || isWithin(data, abs) {
-		problems = append(problems, "the bridge's data folder cannot be (or contain) a brain")
+	default:
+		if err := checkBrainDir(abs, abs, cfg, home); err != nil {
+			problems = append(problems, "this folder "+err.Error()+", so it cannot hold a brain — pick or create another one")
+		}
 	}
 	for _, o := range otherDirs {
 		o = canonicalDir(o)
@@ -178,22 +185,47 @@ func CheckBrainPath(path string, cfg *Config, otherDirs []string) (abs string, p
 			problems = append(problems, "this folder contains another brain ("+o+")")
 		}
 	}
-	switch l := ownLayout(); {
-	case l.Source != "" && isWithin(abs, canonicalDir(l.Source)):
-		warnings = append(warnings, "this folder is inside the bridge's source checkout — keep brain data out of the git repo")
-	case l.Dir != "" && isWithin(abs, canonicalDir(l.Dir)):
-		warnings = append(warnings, "this folder is inside the folder the bridge is installed in — keep brain data out of it")
-	}
+	// The sandbox opens a brain's own folder wherever it is, but macOS
+	// itself guards these folders (privacy settings), also from the bridge.
 	for _, sub := range []string{"Documents", "Desktop", "Downloads"} {
 		if isWithin(abs, filepath.Join(canonicalDir(home), sub)) {
-			warnings = append(warnings, "macOS protects ~/"+sub+": the sandbox denies it to brains by default, so this brain may not be able to read its own files")
+			warnings = append(warnings, "macOS protects ~/"+sub+": the bridge (and so this brain) can work there only while it has your permission under System Settings → Privacy & Security → Files and Folders (or Full Disk Access), which a service started at login may not have")
 		}
 	}
 	return abs, problems, warnings
 }
 
-// canonicalDir cleans p and resolves symlinks when it exists (on macOS /tmp is
-// a symlink to /private/tmp, and the sandbox compares real paths).
+// checkBrainDir reports why dir, a brain's folder by its real path, cannot
+// be one ("is …", to follow "the folder"), with configured the folder as
+// configured; nil when it can. The
+// sandbox lets a brain read and write its own folder, so the folder must not
+// be your home folder or hold it, nor be, hold or lie inside what the
+// sandbox keeps from brains (see sandboxPolicy.protected): a brain in
+// ~/.claude/skills would write what your own sessions load, one holding the
+// data folder would read the WhatsApp session. The dashboard asks before it
+// adds a brain (CheckBrainPath), ResolveBrains for every configured brain,
+// a hand-edited brain_dirs included, and each sandbox profile again.
+func checkBrainDir(dir, configured string, cfg *Config, home string) error {
+	for _, d := range []string{dir, configured} {
+		if d == "" {
+			continue
+		}
+		if isWithin(home, d) || isWithin(canonicalDir(home), canonicalDir(d)) {
+			return errors.New("is your home folder or holds it")
+		}
+		if what, ok := protectedIn(d, sandboxPolicyOf(cfg).protected(home, ownLayout())); ok {
+			return fmt.Errorf("%s, which the sandbox keeps from brains", what)
+		}
+	}
+	return nil
+}
+
+// canonicalDir cleans p and resolves its symlinks (on macOS /tmp is a
+// symlink to /private/tmp, and the sandbox compares real paths). For an
+// absolute path that does not exist yet, such as a folder the dashboard is
+// about to create, it resolves the part that does: ~/link/new, with ~/link
+// a symlink out of HOME, lies where the link points, and that is where
+// MkdirAll would create it.
 func canonicalDir(p string) string {
 	if p == "" {
 		return ""
@@ -201,6 +233,9 @@ func canonicalDir(p string) string {
 	p = filepath.Clean(p)
 	if r, err := filepath.EvalSymlinks(p); err == nil {
 		return r
+	}
+	if filepath.IsAbs(p) {
+		return resolvePath(p)
 	}
 	return p
 }

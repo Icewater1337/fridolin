@@ -112,7 +112,11 @@ func TestBrainRunsKnowWhereTheToolsAre(t *testing.T) {
 	}
 }
 
-func TestCheckBrainPathWarnsAboutTheBridgesOwnFolders(t *testing.T) {
+// TestCheckBrainPathRefusesTheBridgesOwnFolders: a brain may write its own
+// folder, so one inside the checkout could plant a test file that the next
+// make check runs outside the sandbox, and one inside the install folder a
+// tool the bridge runs. Both used to be only a warning.
+func TestCheckBrainPathRefusesTheBridgesOwnFolders(t *testing.T) {
 	home := canonicalDir(t.TempDir())
 	t.Setenv("HOME", home)
 	src, lib := home+"/src/fridolin", home+"/.local/lib/fridolin"
@@ -125,7 +129,7 @@ func TestCheckBrainPathWarnsAboutTheBridgesOwnFolders(t *testing.T) {
 		name   string
 		layout bridgeLayout
 		path   string
-		want   string // "" for neither warning
+		want   string // "" for neither problem
 	}{
 		{"in the checkout of a dev build", bridgeLayout{Dir: src, Tools: src + "/tools", Source: src}, src + "/brains/a", checkout},
 		{"in the checkout an install came from", bridgeLayout{Dir: lib, Tools: lib + "/tools", Source: src}, src + "/a", checkout},
@@ -136,14 +140,11 @@ func TestCheckBrainPathWarnsAboutTheBridgesOwnFolders(t *testing.T) {
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			useLayout(t, c.layout)
-			_, problems, warnings := CheckBrainPath(c.path, cfg, nil)
-			if len(problems) != 0 {
-				t.Fatalf("problems: %v", problems)
-			}
-			all := strings.Join(warnings, "\n")
+			_, problems, _ := CheckBrainPath(c.path, cfg, nil)
+			all := strings.Join(problems, "\n")
 			for _, w := range []string{checkout, install} {
 				if got := strings.Contains(all, w); got != (w == c.want) {
-					t.Errorf("warnings %q: %q present = %v, want %v", warnings, w, got, w == c.want)
+					t.Errorf("problems %q: %q present = %v, want %v", problems, w, got, w == c.want)
 				}
 			}
 		})

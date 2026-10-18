@@ -1462,8 +1462,12 @@ func TestStatusWarnsWhenSandboxDoesNotApply(t *testing.T) {
 		// b's folder is in a's profile too, so both brains are refused.
 		{"brain folder the profile cannot hold", false,
 			func(sp *SandboxProfiler) { sp.workDirs["b"] = []string{sp.workDirs["b"][0] + "\nx"} }, true, "line break), so brains a, b refuse every message"},
-		// config.json accepts a brain at ~, which the dashboard refuses.
-		{"brain folder at the home folder", true, nil, true, "is your home folder or holds it"},
+		// config.json accepts a brain at ~, which the dashboard refuses;
+		// so does a profile built for one (see
+		// TestSandboxRefusesBrainFoldersItCannotProtect), but the brain is
+		// left out before, with an issue of its own (see
+		// TestResolveBrainsRefusesFoldersTheSandboxProtects).
+		{"brain folder at the home folder", true, nil, true, ""},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

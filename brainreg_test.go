@@ -59,12 +59,88 @@ func TestCheckBrainPath(t *testing.T) {
 		{"~/brains", false},             // contains another brain
 		{"~/.fridolin/x", false},
 		{"relative/path", false},
+		// What the sandbox keeps from brains: a brain may write its own
+		// folder, so one inside ~/.claude/skills writes what your own
+		// sessions load, one at ~/.ssh opens your keys.
+		{"~/.claude/skills/x", false},
+		{"~/.ssh", false},
+		{"~/.config", false}, // holds ~/.config/gh
+		{"~/Library/LaunchAgents/x", false},
+		{"~/Library/Keychains/x", false},
+		{"~/creds/x", false},
+		{"~/linked/new", false}, // ~/linked is a symlink out of HOME
+		{"~/Documents/assistant", true},
+	}
+	cfg.Sandbox.CredentialsDir = filepath.Join(home, "creds")
+	if err := os.MkdirAll(filepath.Join(home, ".ssh"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	// A folder the dashboard is to create is checked where MkdirAll would
+	// create it: through the symlink, out of HOME.
+	if err := os.Symlink(canonicalDir(t.TempDir()), filepath.Join(home, "linked")); err != nil {
+		t.Fatal(err)
 	}
 	for _, c := range cases {
 		_, problems, _ := CheckBrainPath(c.path, cfg, others)
 		if (len(problems) == 0) != c.ok {
 			t.Errorf("CheckBrainPath(%q): problems=%v, want ok=%v", c.path, problems, c.ok)
 		}
+	}
+	// macOS guards ~/Documents from the bridge itself, not the sandbox.
+	if _, _, warnings := CheckBrainPath("~/Documents/assistant", cfg, others); len(warnings) != 1 || !strings.Contains(warnings[0], "Privacy & Security") {
+		t.Errorf("warnings for ~/Documents = %q, want one naming the privacy settings", warnings)
+	}
+}
+
+// TestResolveBrainsRefusesFoldersTheSandboxProtects: the dashboard refuses
+// a brain folder the sandbox could not keep apart, but brain_dirs can be
+// edited by hand, and a folder can change after it was added. ResolveBrains
+// used to accept any of them, and the brain's profile then opened what the
+// folder held: a brain at your home folder read the data dir and ~/.ssh.
+// Now each is left out with an issue, and the others still run.
+func TestResolveBrainsRefusesFoldersTheSandboxProtects(t *testing.T) {
+	home := canonicalDir(t.TempDir())
+	t.Setenv("HOME", home)
+	if err := os.MkdirAll(filepath.Join(home, "elsewhere"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	cases := []struct {
+		name, path string
+		want       string // in the issue's detail, "" for a brain that runs
+	}{
+		{"your home folder", "~", "your home folder"},
+		{"a folder holding the data folder", "~/box", "holds the bridge's data folder"},
+		{"inside ~/.claude", "~/.claude/skills/x", "inside your Claude Code folder"},
+		{"your ssh keys", "~/.ssh", "is ~/.ssh"},
+		{"inside LaunchAgents", "~/Library/LaunchAgents/x", "inside ~/Library/LaunchAgents"},
+		{"a folder of its own", "~/assistant/a", ""},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			ref := brainFolder(t, tc.path, BrainManifest{ID: "x", Routing: BrainRouting{HandlesDMs: true}})
+			other := brainFolder(t, "~/elsewhere/y", BrainManifest{ID: "y"})
+			cfg := &Config{DataDir: filepath.Join(home, "box", ".fridolin"), BrainDirs: []BrainRef{ref, other}}
+			for i := range cfg.BrainDirs {
+				cfg.BrainDirs[i].Path = expandHome(cfg.BrainDirs[i].Path, home)
+			}
+			specs, issues := ResolveBrains(cfg)
+			var ids []string
+			for _, s := range specs {
+				ids = append(ids, s.Manifest.ID)
+			}
+			if tc.want == "" {
+				if !slices.Equal(ids, []string{"x", "y"}) || len(issues) != 0 {
+					t.Errorf("brains %v, issues %+v; want both to run", ids, issues)
+				}
+				return
+			}
+			if !slices.Equal(ids, []string{"y"}) {
+				t.Errorf("brains %v, want only y", ids)
+			}
+			if len(issues) != 1 || issues[0].ID != "x" || issues[0].Kind != "invalid" || !strings.Contains(issues[0].Detail, tc.want) {
+				t.Errorf("issues = %+v, want one for x saying %q", issues, tc.want)
+			}
+		})
 	}
 }
 

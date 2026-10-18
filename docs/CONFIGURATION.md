@@ -716,10 +716,11 @@ one whose folder is or holds something it protects (another brain's
 folder, a default-denied folder such as `~/.ssh`, `~/.claude`,
 `~/.gitconfig`), and one whose folder lies inside what the bridge keeps for
 itself (the data, media, database or credentials folder, `~/.claude`,
-`~/Library/LaunchAgents`, the bridge's install folder or checkout). Its
-runs fail until you move it. Other tools a brain runs may still need paths
-the defaults deny, so keeping brains somewhere like `~/assistant/<name>` is
-simplest.
+`~/Library/LaunchAgents`, the keychains, the bridge's install folder or
+checkout). The dashboard refuses such a folder, and the bridge leaves a
+configured one out, with an issue on the Brains page, until you move it.
+Other tools a brain runs may still need paths the defaults deny, so keeping
+brains somewhere like `~/assistant/<name>` is simplest.
 
 ### With `inherit_claude_user_config`
 

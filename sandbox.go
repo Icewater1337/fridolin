@@ -407,7 +407,11 @@ func (sp *SandboxProfiler) Profile(brainID string) (string, error) {
 		}
 	}
 	own := sp.workDirs[brainID]
-	protected := sp.protected(home, sp.bridgeExe)
+	var layout bridgeLayout
+	if sp.bridgeExe != "" {
+		layout = layoutOf(sp.bridgeExe)
+	}
+	protected := sp.protected(home, layout)
 	for id, dirs := range sp.workDirs {
 		if id != brainID {
 			for _, dir := range dirs {
@@ -890,8 +894,8 @@ type protectedPath struct {
 }
 
 // protected lists the protected paths for brain folders in HOME home, with
-// the bridge binary exe ("" for none).
-func (p sandboxPolicy) protected(home, exe string) []protectedPath {
+// l the layout of the bridge's own files.
+func (p sandboxPolicy) protected(home string, l bridgeLayout) []protectedPath {
 	var out []protectedPath
 	add := func(path string, inside bool, what string) {
 		if path != "" {
@@ -921,11 +925,8 @@ func (p sandboxPolicy) protected(home, exe string) []protectedPath {
 	add(p.credsDir, true, "the credentials folder")
 	add(p.dbPath, true, "the database")
 	add(p.dbFolder(home), true, "the database's folder")
-	if exe != "" {
-		l := layoutOf(exe)
-		add(l.Dir, true, "the folder the bridge is installed in")
-		add(l.Source, true, "the bridge's source checkout")
-	}
+	add(l.Source, true, "the bridge's source checkout")
+	add(l.Dir, true, "the folder the bridge is installed in")
 	return out
 }
 
