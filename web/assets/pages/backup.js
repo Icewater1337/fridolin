@@ -191,7 +191,7 @@ export default {
               onClick: async () => {
                 const ok = await confirmDialog({
                   title: 'Disconnect Google Drive?',
-                  message: 'Backups stop until you connect again. Everything already in your Drive stays there.',
+                  message: 'Backups stop until you connect again. Everything already in your Drive stays there. The bridge removes only its own link: rclone keeps its access to your Google account until you remove it at myaccount.google.com/permissions.',
                   confirm: 'Disconnect', danger: true,
                 });
                 if (!ok) return;

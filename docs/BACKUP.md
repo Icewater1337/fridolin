@@ -29,10 +29,10 @@ one), and both are refused while a backup or restore runs. Disconnect
 stops a sign-in that is still waiting for the browser before it removes
 the link, refuses backups, restores and a new sign-in until it is done, and
 says so when the link could not be removed. It removes only the
-bridge's own link: to take away rclone's access entirely, remove it in
-your Google Account under Security → Third-party connections. While daily
-backups are on but Drive is not connected, the overview says so and the
-log repeats it once a day.
+bridge's own link: to take away rclone's access entirely, remove it at
+[myaccount.google.com/permissions](https://myaccount.google.com/permissions),
+as the Disconnect dialog says. While daily backups are on but Drive is
+not connected, the overview says so and the log repeats it once a day.
 
 ## What is backed up
 

@@ -175,3 +175,21 @@ test('version folders named in UTC or in local time both show as dates', async (
   assert.ok(!labels.some((l) => l.includes('20261018-093000Z')), 'the UTC name is shown as a date');
   assert.ok(labels.some((l) => l.includes('manual-copy')), 'other names as they are');
 });
+
+test('the Disconnect dialog says where to take away rclone\'s access at Google', async (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout', 'Date'] });
+  installDom();
+  noConsoleErrors(t);
+  serve(t, (path) => (path.startsWith('/api/backup/status') ? connected() : {}));
+  const root = h('div');
+  document.body.append(root);
+  const ctx = createPage();
+  t.after(() => ctx.destroy());
+  page.render(root, ctx);
+  await settle();
+  root.querySelectorAll('button').find((b) => b.textContent === 'Disconnect…').click();
+  await settle();
+  const dialog = document.querySelector('dialog');
+  assert.ok(dialog, 'a confirm dialog');
+  assert.ok(dialog.textContent.includes('myaccount.google.com/permissions'), dialog.textContent);
+});

@@ -62,7 +62,11 @@ including the Limited Use requirements.
   file. When Google does not confirm a revocation, the token stays unless
   you choose to delete it here only. You can also remove access at
   [myaccount.google.com/permissions](https://myaccount.google.com/permissions).
-- Disconnect Google Drive on the dashboard's Backup page.
+- **Disconnect** Google Drive on the dashboard's Backup page: the bridge
+  removes its own rclone link, and backups stop. What is already in your
+  Drive stays there, and rclone keeps the access Google gave it until you
+  remove it at
+  [myaccount.google.com/permissions](https://myaccount.google.com/permissions).
 - Disconnect Plaud under Integrations: Fridolin signs out of Plaud and stops
   fetching recordings. The transcripts already written (in the media inbox
   and where brains filed them) and the list of recordings it has seen
