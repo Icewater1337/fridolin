@@ -22,6 +22,12 @@ type pendingBatch struct {
 	msg     Inbound
 	started time.Time
 	timer   *time.Timer
+	// gen counts the messages merged into the batch, and each timer knows
+	// the one it was armed for. A timer that went off while Add held d.mu
+	// finds the batch moved on and leaves it to the timer Add armed:
+	// stopping it is too late by then, and it would flush the batch with
+	// the message just merged before that message's quiet period.
+	gen uint64
 }
 
 // NewDebouncer creates a debouncer. quiet and maxWait are read for every
@@ -41,10 +47,20 @@ func (d *Debouncer) Add(m Inbound) {
 		d.flush(m)
 		return
 	}
-	key := batchKey(m)
-	now := time.Now()
-
 	d.mu.Lock()
+	msg, due := d.addLocked(m, quiet, time.Now())
+	d.mu.Unlock()
+	if due {
+		d.flush(msg)
+	}
+}
+
+// addLocked merges m into its batch and arms the batch's timer for quiet
+// from now, or takes the batch out when its max wait is over: it returns
+// the batch's message then, for Add to flush once d.mu is free. d.mu is
+// held.
+func (d *Debouncer) addLocked(m Inbound, quiet time.Duration, now time.Time) (Inbound, bool) {
+	key := batchKey(m)
 	b, ok := d.batches[key]
 	if ok {
 		b.msg = b.msg.merge(m)
@@ -53,6 +69,7 @@ func (d *Debouncer) Add(m Inbound) {
 		b = &pendingBatch{msg: m, started: now}
 		d.batches[key] = b
 	}
+	b.gen++
 	wait := quiet
 	if limit := d.maxWait(); limit > 0 {
 		if left := b.started.Add(limit).Sub(now); left < wait {
@@ -61,18 +78,18 @@ func (d *Debouncer) Add(m Inbound) {
 	}
 	if wait <= 0 {
 		delete(d.batches, key)
-		msg := b.msg
-		d.mu.Unlock()
-		d.flush(msg)
-		return
+		return b.msg, true
 	}
-	b.timer = time.AfterFunc(wait, func() { d.fire(key, b) })
-	d.mu.Unlock()
+	gen := b.gen
+	b.timer = time.AfterFunc(wait, func() { d.fire(key, b, gen) })
+	return Inbound{}, false
 }
 
-func (d *Debouncer) fire(key string, b *pendingBatch) {
+// fire flushes the batch b whose timer for its gen-th message went off,
+// unless something else took it out or a later message moved it on.
+func (d *Debouncer) fire(key string, b *pendingBatch, gen uint64) {
 	d.mu.Lock()
-	if d.batches[key] != b {
+	if d.batches[key] != b || b.gen != gen {
 		d.mu.Unlock()
 		return
 	}
