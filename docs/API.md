@@ -84,7 +84,8 @@ Sends a WhatsApp message.
   (`…@lid`) or a group (`…@g.us`), with something before the `@`, or a
   phone number with the country code, written any way
   (`"+1 555 123 4567"`), for the direct chat with it. A device part
-  (`…:12@s.whatsapp.net`) is dropped.
+  (`…:12@s.whatsapp.net`) is dropped, and a LID chat goes to the person's
+  number when WhatsApp has told the bridge which it is.
 - `text`: sent as it is, split into numbered parts when it is longer than
   `max_chunk_size`. A `[POLL]` block is not turned into a poll here.
 

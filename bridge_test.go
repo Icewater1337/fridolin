@@ -950,8 +950,9 @@ func TestRouteHonoursTheNamedBrain(t *testing.T) {
 	}
 }
 
-// A DM goes by its chat JID and the sender's phone number, which WhatsApp
-// may use instead of each other; a group goes by its JID only.
+// A DM goes by its chat JID, its other JID and the sender's phone number,
+// which WhatsApp may use instead of each other; a group goes by its JID
+// only.
 func TestChatJIDs(t *testing.T) {
 	const (
 		pn    = "15551234567@s.whatsapp.net"
@@ -966,6 +967,7 @@ func TestChatJIDs(t *testing.T) {
 		{"DM by number", Inbound{JID: pn, Sender: "15551234567"}, pn},
 		{"DM by LID", Inbound{JID: lid, Sender: "15551234567"}, lid + "," + pn},
 		{"DM without a sender", Inbound{JID: lid}, lid},
+		{"DM by number, its LID known", Inbound{JID: pn, ChatAlt: lid, Sender: "15551234567"}, pn + "," + lid},
 		{"group", Inbound{JID: group, Sender: "15551234567"}, group},
 	} {
 		t.Run(c.name, func(t *testing.T) {

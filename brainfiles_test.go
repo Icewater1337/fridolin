@@ -380,7 +380,7 @@ func TestHistoryIsNotFollowedOutOfTheFolder(t *testing.T) {
 			logged := captureLog(t)
 
 			br.appendHistory("15551234567@s.whatsapp.net", "15551234567", "NEW-MESSAGE", historyIn)
-			preface := br.composePreface("15551234567@s.whatsapp.net", false)
+			preface := br.composePreface([]string{"15551234567@s.whatsapp.net"}, false)
 			drops := br.DropsOTP("123456")
 			feed := NewActivity(10)
 			feed.Seed(br)
@@ -575,7 +575,7 @@ func TestIdentityMapIsNotFollowedOutOfTheFolder(t *testing.T) {
 			}
 			br.appendHistory("15551234567@s.whatsapp.net", "15551234567", "hi", historyIn)
 			logged := captureLog(t)
-			preface := br.composePreface("15551234567@s.whatsapp.net", false)
+			preface := br.composePreface([]string{"15551234567@s.whatsapp.net"}, false)
 			lines := logged()
 			if tc.target == nil {
 				if !strings.Contains(preface, "Alex (15551234567): hi") || len(lines) > 0 {

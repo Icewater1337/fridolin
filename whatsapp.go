@@ -20,6 +20,7 @@ import (
 	"github.com/mdp/qrterminal/v3"
 	"go.mau.fi/whatsmeow"
 	"go.mau.fi/whatsmeow/proto/waE2E"
+	"go.mau.fi/whatsmeow/store"
 	"go.mau.fi/whatsmeow/types"
 	"go.mau.fi/whatsmeow/types/events"
 	waLog "go.mau.fi/whatsmeow/util/log"
@@ -405,7 +406,9 @@ func (wa *WhatsAppClient) handlePollVote(evt *events.Message) {
 		}
 	}
 
-	voterJID := evt.Info.Sender.String()
+	// One voter, however WhatsApp addressed them: a vote changed later
+	// must replace the first, not count as a second voter's.
+	voterJID := canonicalUser(ctx, wa.lidStore(), evt.Info.Sender, evt.Info.SenderAlt).String()
 	log.Printf("Poll vote recorded: poll=%s voter=%s options=%v", pollMsgID, voterJID, selected)
 
 	if err := wa.store.SavePollVote(pollMsgID, voterJID, selected); err != nil {
@@ -465,34 +468,43 @@ func (wa *WhatsAppClient) handleMessage(msg *events.Message) {
 		return
 	}
 
-	senderJID := msg.Info.Sender
-	senderNumber := senderJID.User
-	// Newer WhatsApp clients address senders by LID rather than phone number;
-	// resolve it so the allowlist can be written in plain phone numbers.
-	if senderJID.Server == types.HiddenUserServer {
-		if pnJID, err := wa.client.Store.LIDs.GetPNForLID(context.Background(), senderJID); err == nil {
-			senderNumber = pnJID.User
-		} else {
-			log.Printf("DM: could not resolve LID %s: %v (using LID as fallback)", senderJID, err)
-		}
+	// Newer WhatsApp clients address senders by LID rather than phone
+	// number. One person is one number and one chat either way: the
+	// allowlist is written in numbers, and the chat's history must not
+	// split in two.
+	sender := msg.Info.Sender
+	if sender.IsEmpty() {
+		sender = msg.Info.Chat
+	}
+	sender = canonicalUser(wa.ctx, wa.lidStore(), sender, msg.Info.SenderAlt)
+	if sender.Server == types.HiddenUserServer {
+		log.Printf("DM: could not resolve LID %s (using LID as fallback)", sender)
 	}
 
-	if !wa.isAllowed(senderNumber) {
-		log.Printf("DM from %s: ignored (not in allowed_numbers)", senderNumber)
+	if !wa.isAllowed(sender.User) {
+		log.Printf("DM from %s: ignored (not in allowed_numbers)", sender.User)
 		if wa.onIgnored != nil {
-			wa.onIgnored("dm", msg.Info.Chat.String(), "", senderNumber, msg.Info.PushName)
+			wa.onIgnored("dm", sender.String(), "", sender.User, msg.Info.PushName)
 		}
 		return
 	}
 
-	wa.handleDMMessage(msg, senderNumber)
+	wa.handleDMMessage(msg, sender)
 }
 
-// handleDMMessage handles an allowed direct message.
-func (wa *WhatsAppClient) handleDMMessage(msg *events.Message, senderNumber string) {
-	chatJID := msg.Info.Chat.String()
+// handleDMMessage handles an allowed direct message from sender, the
+// person as canonicalUser has them.
+func (wa *WhatsAppClient) handleDMMessage(msg *events.Message, sender types.JID) {
+	chatJID := sender.String()
+	// The chat's other JID: history from before DMs were keyed by number
+	// may be under the LID WhatsApp addressed them by.
+	alt := msg.Info.Chat.ToNonAD()
+	if alt == sender {
+		alt = lidOf(wa.ctx, wa.lidStore(), sender)
+	}
+	senderNumber := sender.User
 	text := extractText(msg.Message)
-	quoted := quoteOf(msg.Message)
+	quoted := wa.quoteOf(msg.Message)
 
 	mediaPath, caption, notice := wa.downloadAttachment(msg, chatJID)
 	if notice != "" {
@@ -510,10 +522,14 @@ func (wa *WhatsAppClient) handleDMMessage(msg *events.Message, senderNumber stri
 		return
 	}
 
-	go wa.handler(context.Background(), Inbound{
+	m := Inbound{
 		JID: chatJID, Sender: senderNumber, Text: text, Media: mediaList(mediaPath),
 		Quoted: quoted, Source: sourceWhatsApp, At: msg.Info.Timestamp,
-	})
+	}
+	if !alt.IsEmpty() {
+		m.ChatAlt = alt.String()
+	}
+	go wa.handler(context.Background(), m)
 }
 
 func mediaList(p string) []string {
@@ -532,7 +548,9 @@ func mediaList(p string) []string {
 func (wa *WhatsAppClient) handleGroupMessage(msg *events.Message) {
 	cfg := wa.cfg()
 	groupJID := msg.Info.Chat.String()
-	senderNumber := msg.Info.Sender.User
+	// In groups that address members by LID, the number is what the
+	// identity map knows them by.
+	senderNumber := canonicalUser(wa.ctx, wa.lidStore(), msg.Info.Sender, msg.Info.SenderAlt).User
 
 	groupName := ""
 	if info, err := wa.client.GetGroupInfo(context.Background(), msg.Info.Chat); err == nil && info != nil {
@@ -597,7 +615,7 @@ func (wa *WhatsAppClient) handleGroupMessage(msg *events.Message) {
 		ownMentions = wa.ownMentionJIDs()
 	}
 	text = stripMentions(cfg.Triggers.Strip(text), ownMentions)
-	quoted := quoteOf(msg.Message)
+	quoted := wa.quoteOf(msg.Message)
 
 	mediaPath, caption, notice := wa.downloadAttachment(msg, groupJID)
 	// Untagged chatter gets no reply. A file always tags a group message,
@@ -1059,6 +1077,29 @@ func stripMentions(text string, jids []types.JID) string {
 		}
 	}
 	return strings.TrimSpace(text)
+}
+
+// lidStore is whatsmeow's map between LIDs and phone numbers, or nil
+// without a client.
+func (wa *WhatsAppClient) lidStore() store.LIDStore {
+	if wa.client == nil || wa.client.Store == nil {
+		return nil
+	}
+	return wa.client.Store.LIDs
+}
+
+// quoteOf is quoteOf with the quoted message's author by number when the
+// reply names them by LID, so the identity map finds them.
+func (wa *WhatsAppClient) quoteOf(msg *waE2E.Message) *Quote {
+	q := quoteOf(msg)
+	if q == nil {
+		return nil
+	}
+	p, err := types.ParseJID(msg.GetExtendedTextMessage().GetContextInfo().GetParticipant())
+	if err == nil && p.Server == types.HiddenUserServer {
+		q.From = canonicalUser(wa.ctx, wa.lidStore(), p, types.EmptyJID).User
+	}
+	return q
 }
 
 // quoteOf returns the message a text reply quotes, or nil.

@@ -15,6 +15,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"runtime/debug"
+	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -1373,9 +1374,11 @@ func (br *Brain) logStderr(m Inbound, pid int, stderr string) {
 // stderrLogBytes is how much of a run's stderr goes to its activity log.
 const stderrLogBytes = 4000
 
-// composePreface reads the chat history for chatJID and formats recent messages:
-// the last 10 for a DM, the last 20 for a group.
-func (br *Brain) composePreface(chatJID string, isGroup bool) string {
+// composePreface reads the chat history for the chat that goes by chats
+// (see chatJIDs) and formats recent messages: the last 10 for a DM, the
+// last 20 for a group. A DM's lines may be under its LID or its number,
+// and both are the one chat.
+func (br *Brain) composePreface(chats []string, isGroup bool) string {
 	histFile, err := openInFolder(br.root, historyFileName, os.O_RDONLY, 0)
 	if err != nil {
 		return ""
@@ -1390,7 +1393,7 @@ func (br *Brain) composePreface(chatJID string, isGroup bool) string {
 		if err := json.Unmarshal(scanner.Bytes(), &entry); err != nil {
 			continue
 		}
-		if entry.Chat != chatJID {
+		if !slices.Contains(chats, entry.Chat) {
 			continue
 		}
 		entries = append(entries, entry)
@@ -1467,7 +1470,7 @@ func (br *Brain) buildPrompt(s *brainSettings, m Inbound) string {
 		}
 	}
 
-	if preface := br.composePreface(m.JID, isGroup); preface != "" {
+	if preface := br.composePreface(chatJIDs(m), isGroup); preface != "" {
 		count := "10 messages"
 		if isGroup {
 			count = "20 messages"

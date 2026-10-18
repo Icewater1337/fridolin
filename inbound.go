@@ -13,10 +13,15 @@ import (
 // quick succession (an album, a caption plus files) are merged into one
 // Inbound by the debouncer before they reach a brain.
 type Inbound struct {
-	JID    string   // chat: the DM partner's JID or the group JID
-	Sender string   // phone number (or LID) of the person who wrote it
-	Text   string   // message text as typed, triggers already stripped
-	Media  []string // downloaded attachments, in arrival order
+	// JID is the chat: the group's JID, or for a DM the partner's phone
+	// number's JID (their LID's when the number is not known).
+	JID string
+	// ChatAlt is the DM's other JID, the partner's LID, when known: what
+	// the chat may have gone by before, in the history and in hand-offs.
+	ChatAlt string
+	Sender  string   // phone number (or LID) of the person who wrote it
+	Text    string   // message text as typed, triggers already stripped
+	Media   []string // downloaded attachments, in arrival order
 	// Brain is the id of the brain the message was handed to (/ingest, Plaud,
 	// a dev message that names one). It wins over routing by chat: such a
 	// message answers in JID, which may be a chat that belongs to another

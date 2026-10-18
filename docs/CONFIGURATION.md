@@ -47,9 +47,13 @@ exactly as they are written, so one written by hand with a typo or spaces
 matches no group; the log names such entries when the bridge starts, with
 the form to write them in.
 
-Newer WhatsApp clients identify senders by an internal ID rather than a phone
-number; the bridge resolves that back to the number before checking, so plain
-numbers here are correct.
+Newer WhatsApp clients identify senders by an internal ID (a LID) rather than
+a phone number; the bridge resolves that back to the number before checking,
+so plain numbers here are correct. It knows each person by their number
+everywhere: a DM's history is kept under the number's JID however WhatsApp
+addressed it (older lines under the LID still count as the same chat), group
+members and the authors of quoted messages appear by number, so the identity
+map names them, and a poll vote counts once per person.
 
 A message someone sends to a broadcast list you are on counts as a DM from
 them and is answered in your direct chat with them, which is where WhatsApp

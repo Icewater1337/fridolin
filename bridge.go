@@ -11,11 +11,15 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
 	"time"
 	"unicode"
+
+	"go.mau.fi/whatsmeow/store"
+	"go.mau.fi/whatsmeow/types"
 )
 
 // isJunkMessage reports whether a message is too trivial to be worth a Claude
@@ -65,6 +69,10 @@ type Bridge struct {
 	runTokens runTokens
 	// exe is the binary brains run (see brainRunEnv).
 	exe string
+	// lids is whatsmeow's map between LIDs and phone numbers, nil in dev
+	// mode, for what knows a person by LID outside an event: a /send to
+	// one.
+	lids func() store.LIDStore
 
 	httpSrv *http.Server
 
@@ -160,6 +168,7 @@ func NewBridge(cfgs *ConfigStore, opts BridgeOptions) (_ *Bridge, err error) {
 			return nil, fmt.Errorf("creating whatsapp client: %w", err)
 		}
 		b.wa = wa
+		b.lids = wa.lidStore
 	}
 
 	b.brainMgr.SetHooks(BrainHooks{
@@ -473,13 +482,20 @@ func (b *Bridge) stopChat(m Inbound) (stopped bool, dropped int) {
 	return stopped, dropped
 }
 
-// chatJIDs lists the JIDs m's chat goes by: the chat and, for a DM, the
-// sender's phone number. WhatsApp may address a DM by LID, while a hand-off
-// that answers there (a reply_chat, the owner's DM) names the number.
+// chatJIDs lists the JIDs m's chat goes by: the chat and, for a DM, its
+// other JID and the sender's phone number. The bridge keys a DM by the
+// number, but WhatsApp may address it by LID, history from before may be
+// under the LID, and a hand-off that answers there (a reply_chat, the
+// owner's DM) may name either.
 func chatJIDs(m Inbound) []string {
 	jids := []string{m.JID}
-	if pn := userJID(m.Sender); !m.IsGroup() && m.Sender != "" && pn != m.JID {
-		jids = append(jids, pn)
+	if m.IsGroup() {
+		return jids
+	}
+	for _, jid := range []string{m.ChatAlt, userJID(m.Sender)} {
+		if jid != "@"+types.DefaultUserServer && jid != "" && !slices.Contains(jids, jid) {
+			jids = append(jids, jid)
+		}
 	}
 	return jids
 }

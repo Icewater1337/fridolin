@@ -1,11 +1,14 @@
 package main
 
 import (
+	"context"
 	"errors"
 	"fmt"
+	"log"
 	"regexp"
 	"strings"
 
+	"go.mau.fi/whatsmeow/store"
 	"go.mau.fi/whatsmeow/types"
 )
 
@@ -112,4 +115,57 @@ func chatJID(s string) (types.JID, error) {
 		return types.JID{}, fmt.Errorf("%q is %w", s, errNotAChat)
 	}
 	return jid.ToNonAD(), nil
+}
+
+// ownerChat is the direct chat with the bridge's owner, as far as the
+// bridge can tell: the first phone number in allowed_numbers. Replies to
+// what did not come from a chat (an /ingest, a Plaud recording, a startup
+// alert) go there when nothing else is set. "" when the list holds no
+// number.
+func ownerChat(cfg *Config) string {
+	for _, n := range cfg.AllowedNumbers {
+		if p, err := phoneNumber(n); err == nil {
+			return userJID(p)
+		}
+	}
+	return ""
+}
+
+// canonicalUser is the one JID the bridge knows a person by: their phone
+// number's, without a device. WhatsApp addresses people by LID more and
+// more, in DMs and in groups alike. alt is the other form WhatsApp sent
+// along (MessageSource.SenderAlt); without it, whatsmeow's LID store maps
+// a LID to the number, which it learns from the traffic it sees. A LID
+// neither knows stays a LID. lids may be nil.
+func canonicalUser(ctx context.Context, lids store.LIDStore, jid, alt types.JID) types.JID {
+	jid, alt = jid.ToNonAD(), alt.ToNonAD()
+	if jid.Server != types.HiddenUserServer {
+		return jid
+	}
+	if alt.Server == types.DefaultUserServer && alt.User != "" {
+		return alt
+	}
+	if lids != nil {
+		pn, err := lids.GetPNForLID(ctx, jid)
+		if err == nil && pn.User != "" {
+			return pn.ToNonAD()
+		}
+		if err != nil {
+			log.Printf("could not look up the number of %s: %v", jid, err)
+		}
+	}
+	return jid
+}
+
+// lidOf is the LID of the person whose phone number's JID is pn, or the
+// empty JID when it is not known. lids may be nil.
+func lidOf(ctx context.Context, lids store.LIDStore, pn types.JID) types.JID {
+	if lids == nil || pn.Server != types.DefaultUserServer {
+		return types.EmptyJID
+	}
+	lid, err := lids.GetLIDForPN(ctx, pn.ToNonAD())
+	if err != nil || lid.User == "" {
+		return types.EmptyJID
+	}
+	return lid.ToNonAD()
 }

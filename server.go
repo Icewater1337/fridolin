@@ -124,6 +124,12 @@ func (b *Bridge) httpSend(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, err.Error())
 		return
 	}
+	// A person is their number to the bridge (canonicalUser): sent to a
+	// LID, the message would go into a history the chat's runs, which
+	// look under the number, find only when they know the LID too.
+	if to.Server == types.HiddenUserServer && b.lids != nil {
+		to = canonicalUser(r.Context(), b.lids(), to, types.EmptyJID)
+	}
 	jid := to.String()
 	if err := b.maySend(who, jid, b.cfgs.Get()); err != nil {
 		status := http.StatusForbidden
@@ -350,13 +356,4 @@ func (b *Bridge) replyChatFor(br *Brain, cfg *Config) string {
 		return m.Routing.Groups[0]
 	}
 	return ""
-}
-
-// ownerChat is your own DM, the first allowed number's chat, where the
-// bridge tells you things no chat asked for; "" without allowed numbers.
-func ownerChat(cfg *Config) string {
-	if len(cfg.AllowedNumbers) == 0 {
-		return ""
-	}
-	return userJID(cfg.AllowedNumbers[0])
 }
