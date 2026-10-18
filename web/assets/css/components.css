@@ -612,7 +612,9 @@ dialog.dialog::backdrop { background: var(--backdrop); }
 .crumb:hover { background: var(--surface-3); }
 .crumb.current { color: var(--text); font-weight: 650; cursor: default; }
 .crumb-sep { color: var(--muted); }
-.fb-list { max-height: 320px; overflow: auto; display: flex; flex-direction: column; }
+.fb-list { max-height: 320px; overflow: auto; }
+.fb-entries { list-style: none; margin: 0; padding: 0; }
+.fb-entries > li + li { border-top: 1px solid var(--border); }
 .fb-item {
   display: flex;
   align-items: center;
@@ -620,14 +622,14 @@ dialog.dialog::backdrop { background: var(--backdrop); }
   padding: 9px 14px;
   background: none;
   border: 0;
-  border-bottom: 1px solid var(--border);
   text-align: left;
   color: var(--text);
   cursor: pointer;
   width: 100%;
 }
-.fb-item:last-child { border-bottom: 0; }
 .fb-item:hover { background: var(--surface-2); }
+/* Inside the scrolling list, an outer ring would be cut off. */
+.fb-item:focus-visible { outline-offset: -2px; }
 .fb-item > .icon { color: var(--muted); }
 .fb-item > .icon:first-child { color: var(--accent); }
 .fb-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

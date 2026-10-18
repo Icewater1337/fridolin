@@ -63,3 +63,20 @@ test('opening folders adds no listeners to the page', async (t) => {
   el.reload();
   assert.equal(api.calls.length, 6, 'and nothing loads after');
 });
+
+test('folders are a list of buttons', async (t) => {
+  installDom();
+  const api = stubFetch(t);
+  const el = folderBrowser({ start: HOME, onPick: () => {} });
+  api.answer(0, listing(HOME, ['notes', 'work']));
+  await tick();
+  const items = el.querySelectorAll('.fb-item');
+  assert.equal(items.length, 2);
+  for (const b of items) {
+    assert.equal(b.tagName, 'BUTTON');
+    assert.equal(b.getAttribute('role'), null, 'a role on the button would hide that it is one');
+    assert.equal(b.parentNode.tagName, 'LI');
+    assert.equal(b.parentNode.parentNode.tagName, 'UL');
+  }
+  assert.equal(el.querySelector('[role=listitem]'), null);
+});
