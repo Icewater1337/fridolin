@@ -6,7 +6,7 @@ import { resource } from '../app/resources.js';
 import { folderBrowser } from '../components/folder-browser.js';
 import { liveForm } from '../components/live-form.js';
 import { h, mount, paint, reconcile, syncOptions } from '../lib/dom.js';
-import { fmtDuration, fmtBytes, plural, absTime } from '../lib/format.js';
+import { fmtDuration, fmtBytes, plural, absTime, stamp } from '../lib/format.js';
 import { brainLabel } from '../lib/brain.js';
 import { icon } from '../components/icons.js';
 import { toast } from '../components/toast.js';
@@ -29,11 +29,6 @@ function versionDate(v) {
   if (!m) return null;
   const parts = [+m[1], +m[2] - 1, +m[3], +m[4], +m[5], +m[6]];
   return m[7] ? new Date(Date.UTC(...parts)) : new Date(...parts);
-}
-
-function stamp(d = new Date()) {
-  const p = (n) => String(n).padStart(2, '0');
-  return `${d.getFullYear()}${p(d.getMonth() + 1)}${p(d.getDate())}-${p(d.getHours())}${p(d.getMinutes())}`;
 }
 
 export default {

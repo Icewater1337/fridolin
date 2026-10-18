@@ -42,6 +42,15 @@ export function hhmmss(ts) {
   return `${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`;
 }
 
+/**
+ * A local date and time as YYYYMMDD-HHMM, for folder names such as a
+ * restore's target: sorts by time, and has no characters a path cannot hold.
+ */
+export function stamp(d = new Date()) {
+  const p = (n) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}${p(d.getMonth() + 1)}${p(d.getDate())}-${p(d.getHours())}${p(d.getMinutes())}`;
+}
+
 export function fmtDuration(seconds) {
   if (seconds === null || seconds === undefined || Number.isNaN(seconds)) return '';
   const s = Math.round(seconds);

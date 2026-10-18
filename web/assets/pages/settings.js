@@ -7,6 +7,7 @@ import { setRestartRequired } from '../app/store.js';
 import { configResource } from '../app/resources.js';
 import { h, mount, paint } from '../lib/dom.js';
 import { plural } from '../lib/format.js';
+import { getPath, setPath } from '../lib/keypath.js';
 import { EFFORTS } from '../lib/brain.js';
 import { icon } from '../components/icons.js';
 import { toast } from '../components/toast.js';
@@ -127,21 +128,6 @@ function dashboardSignInCard() {
           toast('Every other browser was signed out, and the dashboard token replaced', 'ok');
         },
       })));
-}
-
-function getPath(obj, key) {
-  return key.split('.').reduce((o, k) => (o && typeof o === 'object' ? o[k] : undefined), obj);
-}
-
-function setPath(obj, key, value) {
-  const parts = key.split('.');
-  let o = obj;
-  for (const p of parts.slice(0, -1)) {
-    if (!o[p] || typeof o[p] !== 'object') o[p] = {};
-    o = o[p];
-  }
-  if (value === undefined) delete o[parts[parts.length - 1]];
-  else o[parts[parts.length - 1]] = value;
 }
 
 export default {
