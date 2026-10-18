@@ -31,6 +31,7 @@ import (
 	"regexp"
 	"runtime"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -328,6 +329,10 @@ type SiteUserInput struct {
 	Name     string `json:"name"`
 	Role     string `json:"role"`
 	Password string `json:"password"`
+	// PasswordHash moves a password account over from another app with the
+	// password its owner had there: a bcrypt hash, which the site checks as
+	// it is. Only when adding an account, instead of Password.
+	PasswordHash string `json:"password_hash"`
 }
 
 func (m *SiteManager) checkRoleLocked(kind, role string) error {
@@ -367,7 +372,7 @@ func (m *SiteManager) AddUser(in SiteUserInput) (SiteUser, error) {
 				return SiteUser{}, fmt.Errorf("the username %s is taken", u.Username)
 			}
 		}
-		h, err := hashSitePassword(in.Password)
+		h, err := newSitePasswordHash(in)
 		if err != nil {
 			return SiteUser{}, err
 		}
@@ -474,6 +479,41 @@ func hashSitePassword(pw string) (string, error) {
 		return "", err
 	}
 	return fmt.Sprintf("pbkdf2-sha256$%d$%s$%s", sitePBKDF2Iter, base64.StdEncoding.EncodeToString(salt), base64.StdEncoding.EncodeToString(key)), nil
+}
+
+// newSitePasswordHash is what a new password account keeps: Fridolin's hash
+// of its password, or a bcrypt hash brought over from another app.
+func newSitePasswordHash(in SiteUserInput) (string, error) {
+	switch {
+	case in.PasswordHash == "":
+		return hashSitePassword(in.Password)
+	case in.Password != "":
+		return "", errors.New("give a password or a password_hash, not both")
+	}
+	return checkBroughtHash(in.PasswordHash)
+}
+
+// siteBcryptRE is a bcrypt hash as Node's bcrypt and bcryptjs, Python's
+// bcrypt, PHP and htpasswd -B write it: version, two-digit cost, then 22
+// characters of salt and 31 of hash.
+var siteBcryptRE = regexp.MustCompile(`^\$2[aby]\$([0-9]{2})\$[./A-Za-z0-9]{53}$`)
+
+// Bcrypt costs the site takes: below 10 is quick to crack; each step up
+// doubles the time a sign-in takes, and above 14 that is seconds.
+const (
+	siteBcryptMinCost = 10
+	siteBcryptMaxCost = 14
+)
+
+func checkBroughtHash(h string) (string, error) {
+	m := siteBcryptRE.FindStringSubmatch(h)
+	if m == nil {
+		return "", errors.New("password_hash must be a bcrypt hash ($2a$, $2b$ or $2y$)")
+	}
+	if cost, _ := strconv.Atoi(m[1]); cost < siteBcryptMinCost || cost > siteBcryptMaxCost {
+		return "", fmt.Errorf("password_hash has cost %d; the site takes bcrypt costs %d to %d", cost, siteBcryptMinCost, siteBcryptMaxCost)
+	}
+	return h, nil
 }
 
 func randomToken(n int) string {

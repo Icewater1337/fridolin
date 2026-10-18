@@ -71,6 +71,26 @@ Dashboard → **Site**. In order:
    (`https://example.com/auth/callback`) to the client's *Authorized redirect
    URIs* in Google Cloud Console.
 
+### Bringing password accounts from another app
+
+An account from an app that kept bcrypt hashes (Node's `bcrypt` or
+`bcryptjs`, Python's `bcrypt`, PHP, `htpasswd -B`) can move over with its
+password: its owner signs in as before, and nobody has to know or retype it.
+The dashboard's API takes the hash instead of a password when adding the
+account:
+
+```bash
+curl -s -X POST http://127.0.0.1:8765/api/site/users \
+  -H "X-Bridge-Token: $(cat ~/.fridolin/dashboard.token)" -H "X-Bridge-Dashboard: 1" \
+  -H "Content-Type: application/json" \
+  -d '{"kind":"password","username":"sam","name":"Sam","role":"member","password_hash":"$2b$12$…"}'
+```
+
+The hash must be `$2a$`, `$2b$` or `$2y$` with a cost from 10 to 14. The
+10-character minimum applies to passwords set in Fridolin, not to a password
+brought over this way. Setting a new password later replaces the hash with
+Fridolin's own.
+
 ## Approving changes
 
 For every module that changes, the dashboard lists the fields of
@@ -367,7 +387,7 @@ Everything lives in `<data_dir>/site/` (`~/.fridolin/site/`), readable only by y
 | Path | What |
 | --- | --- |
 | `settings.json` | repository, domain, roles, the approved commit and earlier deploys |
-| `users.json` | accounts; password accounts as PBKDF2-SHA256 hashes |
+| `users.json` | accounts; password accounts as PBKDF2-SHA256 hashes, or the bcrypt hashes they were brought over with |
 | `session.key` | signs the site's sign-in cookies; replacing it signs everyone out |
 | `deploy_key`, `deploy_key.pub`, `known_hosts` | the repository's deploy key |
 | `tunnel.token`, `google_client.json` | the Cloudflare tunnel token; the site's own Google client, if any |

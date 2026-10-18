@@ -155,6 +155,32 @@ test('password guessing is slowed down', async (t) => {
   assert.equal((await login(url, 'sam', 'correct horse')).status, 429)
 })
 
+// 'correct horse' as Node's bcrypt package ($2b$) and htpasswd -B ($2y$) write it.
+const BCRYPT_HASHES = [
+  '$2b$10$F48X9LFXjtA2Te5nMw.Y/emwxyBEOJIqP85ZEYE.5adtF22W1jdn2',
+  '$2y$10$EnO0mXYizI2nJfRSqXElNO33lcLFrcqB5dz8Nd9xmKfPn6jYf3mZq',
+]
+const brought = (i: number) => ({ id: `u_old${i}`, kind: 'password', username: `old${i}`, name: 'Old', role: 'member', password_hash: BCRYPT_HASHES[i] })
+
+test('an account brought over with a bcrypt hash signs in with its old password', async (t) => {
+  const { url, writeUsers } = await startSite(t)
+  writeUsers([ADMIN, brought(0), brought(1)])
+  for (const name of ['old0', 'old1']) {
+    assert.equal((await login(url, name, 'wrong horse')).status, 401)
+    const ok = await login(url, name, 'correct horse')
+    assert.equal(ok.status, 200)
+    assert.ok(ok.cookie)
+  }
+})
+
+test('guesses sent at once are all counted, though checking a hash waits', async (t) => {
+  const { url, writeUsers } = await startSite(t)
+  writeUsers([ADMIN, brought(0)])
+  const all = await Promise.all(Array.from({ length: 8 }, (_, i) => login(url, 'old0', `nope${i}`)))
+  assert.deepEqual(all.map(r => r.status).sort(), [401, 401, 401, 401, 401, 429, 429, 429])
+  assert.equal((await login(url, 'old0', 'correct horse')).status, 429)
+})
+
 test('Google sign-in: state, PKCE, verified email, known account only', async (t) => {
   const { url, googleCalls } = await startSite(t)
   const start = await fetch(`${url}/auth/google?next=%2Fteam%2F`, { redirect: 'manual' })
