@@ -10,9 +10,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
-	"regexp"
 	"slices"
-	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -551,29 +549,11 @@ func (b *Bridge) deliver(br *Brain, m Inbound, res RunResult) {
 	b.sendResponse(ctx, m.JID, res.Text)
 }
 
-// sendResponse parses Claude's response for [POLL]…[/POLL] blocks, sends each
-// as a real WhatsApp poll, and sends the remaining text normally.
+// sendResponse sends a brain's reply: each [POLL]…[/POLL] block as a real
+// WhatsApp poll (see sendPolls), then the rest as text.
 func (b *Bridge) sendResponse(ctx context.Context, jid, text string) {
 	polls, remaining := extractPolls(text)
-
-	for _, p := range polls {
-		log.Printf("Sending poll to %s: %q (%d options)", jid, p.Question, len(p.Options))
-		msgID, err := b.wa.SendPoll(ctx, jid, p.Question, p.Options, p.MaxSelectable)
-		if err != nil {
-			log.Printf("failed to send poll to %s: %v — falling back to text", jid, err)
-			fallback := "📊 *" + p.Question + "*\n"
-			for i, opt := range p.Options {
-				fallback += fmt.Sprintf("%d. %s\n", i+1, opt)
-			}
-			_ = b.wa.SendMessage(ctx, jid, strings.TrimSpace(fallback))
-			continue
-		}
-		// Store the option names so incoming vote hashes can be matched back.
-		if err := b.store.SavePoll(msgID, jid, p.Question, p.Options); err != nil {
-			log.Printf("failed to save poll %s to DB: %v", msgID, err)
-		}
-	}
-
+	b.sendPolls(ctx, jid, polls)
 	if remaining != "" {
 		if err := b.wa.SendChunked(ctx, jid, remaining); err != nil {
 			log.Printf("failed to send response to %s: %v", jid, err)
@@ -649,87 +629,4 @@ func (b *Bridge) Warnings() []string {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	return append([]string(nil), b.warnings...)
-}
-
-// ── poll parsing ──────────────────────────────────────────────────────────
-
-// pollData represents a parsed [POLL]…[/POLL] block.
-type pollData struct {
-	Question      string
-	Options       []string
-	MaxSelectable int // 1 = single choice, 0 = unlimited
-}
-
-// maxPollOptions is WhatsApp's own limit on options per poll.
-const maxPollOptions = 12
-
-// pollHeaderRe matches [POLL] or [POLL max=N], and pollCloseRe the [/POLL]
-// that ends the block, both in any letter case.
-var (
-	pollHeaderRe = regexp.MustCompile(`(?i)\[POLL(?:\s+max=(\d+))?\]`)
-	pollCloseRe  = regexp.MustCompile(`(?i)\[/POLL\]`)
-)
-
-// extractPolls finds all [POLL]…[/POLL] blocks in text, parses them, and
-// returns the remaining text with the blocks removed.
-func extractPolls(text string) ([]pollData, string) {
-	var polls []pollData
-	remaining := text
-
-	for {
-		loc := pollHeaderRe.FindStringIndex(remaining)
-		if loc == nil {
-			break
-		}
-		closing := pollCloseRe.FindStringIndex(remaining[loc[1]:])
-		if closing == nil {
-			break
-		}
-		end := loc[1] + closing[0] // absolute position of "[/POLL]"
-
-		maxSelectable := 1
-		headerMatch := pollHeaderRe.FindStringSubmatch(remaining[loc[0]:loc[1]])
-		if len(headerMatch) > 1 && headerMatch[1] != "" {
-			if n, err := strconv.Atoi(headerMatch[1]); err == nil {
-				maxSelectable = n
-			}
-		}
-
-		block := remaining[loc[1]:end]
-		remaining = remaining[:loc[0]] + remaining[loc[1]+closing[1]:]
-
-		var question string
-		var options []string
-		for _, line := range strings.Split(block, "\n") {
-			line = strings.TrimSpace(line)
-			if line == "" {
-				continue
-			}
-			if strings.HasPrefix(strings.ToLower(line), "question:") {
-				question = strings.TrimSpace(line[len("question:"):])
-			} else if strings.HasPrefix(line, "- ") {
-				if opt := strings.TrimSpace(line[2:]); opt != "" {
-					options = append(options, opt)
-				}
-			}
-		}
-
-		if len(options) > maxPollOptions {
-			log.Printf("poll %q had %d options; truncating to WhatsApp's limit of %d", question, len(options), maxPollOptions)
-			options = options[:maxPollOptions]
-		}
-		if maxSelectable > len(options) {
-			maxSelectable = len(options)
-		}
-
-		if question != "" && len(options) >= 2 {
-			polls = append(polls, pollData{
-				Question:      question,
-				Options:       options,
-				MaxSelectable: maxSelectable,
-			})
-		}
-	}
-
-	return polls, strings.TrimSpace(remaining)
 }

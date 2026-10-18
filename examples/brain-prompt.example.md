@@ -84,7 +84,9 @@ Question: When should we meet?
 ```
 
 Add `max=N` for multi-select: `[POLL max=3]`. Two options minimum, twelve
-maximum. Poll and text can go in the same reply — the poll is sent first.
+maximum; an option given twice counts once. Poll and text can go in the same
+reply — the poll is sent first. A block without a question or two options is
+no poll: it is sent as text, just as you wrote it.
 
 Votes are recorded automatically. Read them with:
 

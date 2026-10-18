@@ -1,9 +1,7 @@
 package main
 
 import (
-	"bytes"
 	"context"
-	"crypto/sha256"
 	"errors"
 	"fmt"
 	"io"
@@ -394,17 +392,7 @@ func (wa *WhatsAppClient) handlePollVote(evt *events.Message) {
 		return
 	}
 
-	// WhatsApp sends SHA-256 hashes of the chosen option names, not the names.
-	var selected []string
-	for _, hash := range pollVote.GetSelectedOptions() {
-		for _, opt := range options {
-			h := sha256.Sum256([]byte(opt))
-			if bytes.Equal(hash, h[:]) {
-				selected = append(selected, opt)
-				break
-			}
-		}
-	}
+	selected := matchVote(pollVote.GetSelectedOptions(), options)
 
 	// One voter, however WhatsApp addressed them: a vote changed later
 	// must replace the first, not count as a second voter's.
