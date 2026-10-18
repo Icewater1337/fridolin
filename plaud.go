@@ -815,12 +815,16 @@ func (p *PlaudManager) me(ctx context.Context) (map[string]string, error) {
 		name = d["nickname"]
 	}
 	err = p.update(func(st *plaudState) error {
-		if st.Disconnected {
+		switch {
+		case st.Disconnected:
 			return nil // signed out while `me` ran
-		}
-		if st.Login == nil || st.Login.Dir != p.cliHome() {
+		case st.Login == nil:
 			// A sign-in from before they were recorded.
 			st.Login = &plaudLogin{Dir: p.cliHome(), Since: time.Now()}
+		case st.Login.Dir != p.cliHome():
+			// brain_access moved the login while `me` ran. The login in the
+			// new home is not Fridolin's until you connect again.
+			return nil
 		}
 		st.Login.Account, st.Login.Checked = name, time.Now()
 		return nil

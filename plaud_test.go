@@ -2169,6 +2169,44 @@ func TestPlaudBrainAccessNeedsConnectingAgain(t *testing.T) {
 	}
 }
 
+// A look-up of the account that is still running when brain_access is
+// saved does not take over the login in the new home, which may be your
+// terminal's: the login stays moved until you connect again.
+func TestPlaudAccountLookUpLeavesAMovedLoginAlone(t *testing.T) {
+	tb, _ := plaudBridge(t, "")
+	plaudSignIn(t, tb)
+	if err := tb.plaud.saveState(plaudRecordLogin(tb, plaudSeededState("u_1", plaudOld1))); err != nil {
+		t.Fatal(err)
+	}
+	private := tb.plaud.cliHome()
+	shared := filepath.Join(tb.home, ".plaud", "tokens.json")
+	if err := os.MkdirAll(filepath.Dir(shared), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(shared, []byte("{}"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	run := tb.plaud.run
+	tb.plaud.run = func(ctx context.Context, args ...string) (string, error) {
+		out, err := run(ctx, args...)
+		if args[0] == "me" {
+			if _, err := tb.cfgs.Update("", func(c *Config) error { c.Plaud.BrainAccess = true; return nil }); err != nil {
+				t.Error(err)
+			}
+		}
+		return out, err
+	}
+	if _, err := tb.plaud.me(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if got := tb.plaud.loginStatus(); got != plaudMoved {
+		t.Errorf("login %s, want moved", got)
+	}
+	if st, _ := tb.plaud.loadState(); st.Login == nil || st.Login.Dir != private || st.Login.Account != "" {
+		t.Errorf("login = %+v, want Fridolin's sign-in in %s, untouched", st.Login, private)
+	}
+}
+
 // Disconnect fails, rather than claim it signed out, when the login is
 // still there afterwards (brains and your terminal would go on using it).
 // Fridolin itself no longer does.
