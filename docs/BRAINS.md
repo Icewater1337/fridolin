@@ -269,14 +269,15 @@ state in the bridge's data folder (`brains/<brain id>/`: a Claude Code
 config folder, `TMPDIR` and caches), so nothing it writes runs or loads
 outside its sandbox, in another brain or in your own Claude Code sessions.
 It cannot read any other brain's folder or inbox, the rest of the bridge's
-data folder, or the usual secrets (SSH keys, cloud credentials, browser and
-mail data, shell history). Nor can it read your own Claude Code setup and
-instructions, unless `inherit_claude_user_config` is on: all of
-`~/.claude` and `~/.claude.json`, and the `CLAUDE.md` and `CLAUDE.local.md`
-files and the `.claude` folders above its folder, up to `/`. Because it
-keeps a config folder of its own, it logs in with a token in the bridge's
-environment (`claude setup-token`; see
-[the sandbox section](CONFIGURATION.md#writing)), not with yours.
+data folder, or the usual secrets (SSH keys, the keychains, cloud
+credentials, browser and mail data, shell history). Nor can it read your
+own Claude Code setup and instructions, unless
+`inherit_claude_user_config` is on: all of `~/.claude` and
+`~/.claude.json`, and the `CLAUDE.md` and `CLAUDE.local.md` files and the
+`.claude` folders above its folder, up to `/`. Since your login lives in
+the keychain, it logs in with a token in the bridge's environment
+(`claude setup-token`; see [the sandbox section](CONFIGURATION.md#writing)),
+with `inherit_claude_user_config` too.
 [What the sandbox does not cover](CONFIGURATION.md#what-the-sandbox-does-not-cover)
 lists what that leaves open. Its own folder is always readable and
 writable, even if it lives somewhere the defaults deny, but it cannot move

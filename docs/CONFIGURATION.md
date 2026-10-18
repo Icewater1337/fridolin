@@ -571,14 +571,16 @@ each brain downloads such a model once for itself. Point a tool that does
 not at its own folder, for example in the brain folder's
 `.claude/settings.json`: `{ "env": { "HF_HOME": "/Users/you/assistant/a/.cache/hf" } }`.
 
-**Logging in.** With a Claude Code config folder of its own, a sandboxed
-brain does not see the login you made with `claude`, which lives in your
-keychain and your own config folder. Run `claude setup-token` and set the
-token it prints as `CLAUDE_CODE_OAUTH_TOKEN` in the bridge's environment,
-or set `ANTHROPIC_API_KEY`, or a Bedrock or Vertex setup (see [where to
-set them](#where-to-set-them)). The dashboard warns while none of them is
-set. A brain's own Claude Code state starts empty; the transcripts of its
-earlier runs stay in `~/.claude/projects`, which it can no longer read.
+**Logging in.** The login you made with `claude` lives in your keychain,
+which the sandbox closes to brains (see [reading](#reading)), with
+`inherit_claude_user_config` too. So a sandboxed brain needs a login from
+the bridge's environment: run `claude setup-token` and set the token it
+prints as `CLAUDE_CODE_OAUTH_TOKEN` there, or set `ANTHROPIC_API_KEY`, or
+a Bedrock or Vertex setup (see [where to set them](#where-to-set-them)).
+The dashboard warns while none of them is set. A brain with a config
+folder of its own starts with empty Claude Code state; the transcripts of
+its earlier runs stay in `~/.claude/projects`, which it can no longer
+read.
 
 ### Reading
 
@@ -631,8 +633,13 @@ Reading is allowed by default. Brains cannot read:
   `CLAUDE.local.md` in every folder above it, up to `/`, and the `.claude`
   folder in each of them below your home folder; unless
   `inherit_claude_user_config` is on, which makes them readable again
-
-`~/Library/Keychains` is deliberately **not** denied yet.
+- `~/Library/Keychains`, even for an `allow_paths` entry that covers it.
+  An item whose access list trusts a program a brain can run is readable
+  without a prompt: the tokens `gh` and the Claude CLI itself store
+  through `/usr/bin/security`, what git's credential helper keeps. The
+  program that asks reads the keychain file, so this closes them to every
+  program, copies included. It is also why brains log in with a token
+  (see [writing](#writing)).
 
 The folders above a brain's own places may still be looked at, though not
 listed: programs check every folder on the way to a path (`mkdir -p`,
@@ -650,9 +657,9 @@ in this order, weakest first:
 3. The brain's own folder (reading and writing) and `allow_paths`
    (reading) open what is above.
 4. Other brains' folders, the bridge's data directory, media folder,
-   database, config file and credentials folder, your instructions above
-   the brain's folder and `~/.claude/CLAUDE.md` and `rules` are denied
-   again, whatever 3 opened.
+   database, config file and credentials folder, the keychains, your
+   instructions above the brain's folder and `~/.claude/CLAUDE.md` and
+   `rules` are denied again, whatever 3 opened.
 5. What the bridge gives the brain inside those: its media inbox, its
    state and, to read, its runs' brain API tokens.
 6. What stays closed inside the brain's own places: a `deny_paths` entry
@@ -661,8 +668,8 @@ in this order, weakest first:
 So `deny_paths` adds your own read denies, and `allow_paths` re-opens
 reading something the defaults or `deny_paths` closed; writing there stays
 denied. Neither the brain's folder nor an `allow_paths` entry can open
-another brain's folder, the bridge's own files or your instructions above
-the folder. Entries must be absolute or start with `~/`; the bridge refuses
+another brain's folder, the bridge's own files, the keychains or your
+instructions above the folder. Entries must be absolute or start with `~/`; the bridge refuses
 a config with a relative one, which would protect nothing.
 
 The sandbox compares real paths, so every deny, brain folders included,
@@ -703,10 +710,13 @@ simplest.
 Brains then share your Claude Code config folder (`~/.claude`, or the
 bridge's `CLAUDE_CONFIG_DIR`) instead of keeping their own, so they load
 your setup, and the sandbox lets them read it and write the state the CLI
-keeps there and in `~/.claude.json`. Never the configuration itself:
-`settings.json`, `settings.local.json`, `CLAUDE.md` and the `hooks`,
-`rules`, `agents`, `commands`, `skills`, `plugins` and `output-styles`
-folders stay unwritable, and so does every project's auto-memory,
+keeps there and in `~/.claude.json`. Not your login, though: it lives in
+your keychain, which stays closed, so brains need a token in the bridge's
+environment as well (see [logging in](#writing)). Never the
+configuration itself: `settings.json`, `settings.local.json`, `CLAUDE.md`
+and the `hooks`, `rules`, `agents`, `commands`, `skills`, `plugins` and
+`output-styles` folders stay unwritable, and so does every project's
+auto-memory,
 `projects/<project>/memory`, which every new session of that project
 loads, yours included. Other sessions' records (`projects` and `sessions`,
 yours included) stay unreadable; transcripts cannot be moved or deleted,
@@ -773,9 +783,10 @@ everything but files alone. A manipulated brain can therefore still:
   `~/.claude/projects` for a project that has none yet, or into a missing
   `~/.claude` (a symlink there is refused), which then holds what the brain
   put there
-- read the keychains: items whose access list trusts a program a brain can
-  run, such as `/usr/bin/security` (which `gh` stores its token through)
-  or git's credential helper, are readable without a prompt
+- ask the system's keychain service for an item of the data-protection
+  keychain (where apps keep items with `kSecUseDataProtectionKeychain`, and
+  iCloud Keychain) that trusts a program it can run: the service reads that
+  keychain, not the brain, so the file deny above does not apply
 - ask launchd (`launchctl`), cron (`crontab`), `at`, LaunchServices
   (`open`), another app (`osascript`) or a tmux server that runs outside
   the sandbox (the activity viewer's, or your own) to start a program
@@ -1301,8 +1312,8 @@ environment:
 - The Claude CLI's own login and network settings: `CLAUDE_CODE_OAUTH_TOKEN`
   (which `claude setup-token` prints) or `ANTHROPIC_API_KEY`, and
   `HTTPS_PROXY`, `NODE_EXTRA_CA_CERTS`. Sandboxed brains need the login
-  here: they have a Claude Code config folder of their own, so the one you
-  made with `claude` does not reach them. Without the sandbox, logging in
+  here: the sandbox closes your keychain to them, so the one you made with
+  `claude` does not reach them. Without the sandbox, logging in
   once with `claude` is enough. Left in a `.env`, these do not reach
   `claude`, and every brain fails with "Not logged in" (or cannot get
   through the proxy).

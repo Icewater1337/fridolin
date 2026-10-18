@@ -259,6 +259,8 @@ func TestSandboxEnforcesProfile(t *testing.T) {
 		{"other brain's calendar token", false, "creds/google_calendar_token_b.json", false},
 		{"credentials dir write", true, "creds/planted.json", false},
 		{"ssh key", false, ".ssh/id_ed25519", false},
+		{"login keychain", false, "Library/Keychains/login.keychain-db", false},
+		{"keychain folder write", true, "Library/Keychains/planted.keychain-db", false},
 		{"deny_paths entry", false, "{deny}/contract.txt", false},
 		{"default-denied Documents", false, "Documents/private.txt", false},
 		{"your Claude Code settings", false, ".claude/settings.json", false},
@@ -852,9 +854,10 @@ func TestSandboxDeniesTheConfigFile(t *testing.T) {
 
 // TestSandboxAllowPathsKeepBridgeSecrets: under the real sandbox-exec, an
 // allow_paths entry covering the data dir opens neither the dashboard token
-// nor the database, and one covering the folder that holds the brains opens
-// no other brain, while media stays readable and an entry inside a
-// default-denied home folder still works.
+// nor the database, one covering the folder that holds the brains opens no
+// other brain, and one covering ~/Library opens no keychain, while the
+// brain's inbox stays readable and an entry inside a default-denied home
+// folder still works.
 func TestSandboxAllowPathsKeepBridgeSecrets(t *testing.T) {
 	requireSandboxExec(t)
 	home := canonicalDir(t.TempDir())
@@ -864,7 +867,7 @@ func TestSandboxAllowPathsKeepBridgeSecrets(t *testing.T) {
 	if err := retireLegacyMedia(filepath.Join(home, ".fridolin", "media")); err != nil {
 		t.Fatal(err)
 	}
-	for _, f := range []string{".fridolin/dashboard.token", ".fridolin/bridge.db", ".fridolin/media/a/photo.jpg", "Documents/share/ok.txt", "a/notes.md", "team/b/diary.md"} {
+	for _, f := range []string{".fridolin/dashboard.token", ".fridolin/bridge.db", ".fridolin/media/a/photo.jpg", "Documents/share/ok.txt", "a/notes.md", "team/b/diary.md", "Library/Keychains/login.keychain-db", "Library/Preferences/x.plist"} {
 		p := filepath.Join(home, f)
 		if err := os.MkdirAll(filepath.Dir(p), 0o700); err != nil {
 			t.Fatal(err)
@@ -876,7 +879,7 @@ func TestSandboxAllowPathsKeepBridgeSecrets(t *testing.T) {
 	cfg := &Config{
 		DataDir: filepath.Join(home, ".fridolin"),
 		DBPath:  filepath.Join(home, ".fridolin", "bridge.db"),
-		Sandbox: SandboxConfig{AllowPaths: []string{filepath.Join(home, ".fridolin"), filepath.Join(home, "team"), filepath.Join(home, "Documents", "share")}},
+		Sandbox: SandboxConfig{AllowPaths: []string{filepath.Join(home, ".fridolin"), filepath.Join(home, "team"), filepath.Join(home, "Documents", "share"), filepath.Join(home, "Library")}},
 	}
 	sp := NewSandboxProfiler(map[string][]string{"a": {filepath.Join(home, "a")}, "b": {filepath.Join(home, "team", "b")}}, cfg)
 	for _, c := range []struct {
@@ -889,6 +892,8 @@ func TestSandboxAllowPathsKeepBridgeSecrets(t *testing.T) {
 		{"team/b/planted.md", true, false},
 		{".fridolin/media/a/photo.jpg", false, true},
 		{"Documents/share/ok.txt", false, true},
+		{"Library/Preferences/x.plist", false, true},
+		{"Library/Keychains/login.keychain-db", false, false},
 	} {
 		if allowed, out := sandboxTry(t, sp, filepath.Join(home, "a"), c.write, filepath.Join(home, c.path)); allowed != c.allow {
 			t.Errorf("%s (write %v): allowed=%v, want %v (output %q)", c.path, c.write, allowed, c.allow, out)
@@ -1351,6 +1356,7 @@ func sandboxFixture(t *testing.T, home, otherBrain, denyDir string, extra ...map
 		"creds/google_calendar_token_a.json",
 		"creds/google_calendar_token_b.json",
 		".ssh/id_ed25519",
+		"Library/Keychains/login.keychain-db",
 		denyDir + "/contract.txt",
 		"Documents/private.txt",
 		"Documents/share/ok.txt",

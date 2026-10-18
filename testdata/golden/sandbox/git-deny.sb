@@ -81,6 +81,7 @@
 (deny file-write* (literal "<ROOT>/.env"))
 (deny file-read* (regex "^<ROOT>/\\.config\\.json\\.[^/]*\\.tmp$"))
 (deny file-write* (regex "^<ROOT>/\\.config\\.json\\.[^/]*\\.tmp$"))
+(deny file-read* (subpath "<HOME>/Library/Keychains"))
 (deny file-read* (literal "<HOME>/.claude/CLAUDE.md"))
 (deny file-read* (subpath "<HOME>/.claude/rules"))
 (deny file-read* (literal "<HOME>/CLAUDE.md"))

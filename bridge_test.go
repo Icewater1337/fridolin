@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strings"
 	"syscall"
 	"testing"
@@ -787,21 +788,28 @@ func TestSandboxProfileIsolatesBrains(t *testing.T) {
 	}
 }
 
-func TestSandboxProfileDeniesSecretsAndAllowsKeychain(t *testing.T) {
+// TestSandboxProfileDeniesSecretsAndTheKeychains: the keychains used to stay
+// readable for the Claude CLI's own login, and with them every item that
+// trusts /usr/bin/security, gh's token among them. Brains log in with a
+// token now, so the keychains are denied like the other secrets, after the
+// allow_paths allows, which therefore cannot open them.
+func TestSandboxProfileDeniesSecretsAndTheKeychains(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 
-	sp := NewSandboxProfiler(map[string][]string{"a": {"/tmp/a"}}, &Config{DataDir: filepath.Join(home, "data")})
-	profile := mustProfile(t, sp, "a")
+	cfg := &Config{DataDir: filepath.Join(home, "data"), Sandbox: SandboxConfig{AllowPaths: []string{filepath.Join(home, "Library")}}}
+	profile := mustProfile(t, NewSandboxProfiler(map[string][]string{"a": {"/tmp/a"}}, cfg), "a")
 
-	for _, secret := range []string{".ssh", ".aws", ".gnupg", "Library/Mail", ".git-credentials"} {
+	for _, secret := range []string{".ssh", ".aws", ".gnupg", "Library/Mail", ".git-credentials", "Library/Keychains"} {
 		if !strings.Contains(profile, filepath.Join(home, secret)) {
 			t.Errorf("profile does not deny %s", secret)
 		}
 	}
-	// Denying the keychain breaks the Claude CLI's own authentication.
-	if strings.Contains(profile, "Library/Keychains") {
-		t.Error("profile denies Library/Keychains, which breaks the Claude CLI")
+	lines := strings.Split(profile, "\n")
+	allow := slices.Index(lines, `(allow file-read* (subpath "`+filepath.Join(home, "Library")+`"))`)
+	deny := slices.Index(lines, `(deny file-read* (subpath "`+filepath.Join(home, "Library", "Keychains")+`"))`)
+	if allow < 0 || deny < allow {
+		t.Errorf("the keychain deny (line %d) does not follow the allow_paths allow (line %d)", deny, allow)
 	}
 }
 

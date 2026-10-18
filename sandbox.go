@@ -564,6 +564,14 @@ func (sp *SandboxProfiler) Profile(brainID string) (string, error) {
 		b.deny("file-read*", "subpath", sp.credsDir)
 		b.deny("file-write*", "subpath", sp.credsDir)
 	}
+	// The keychains: an item whose access list trusts a program a brain can
+	// run is readable without a prompt, such as the tokens gh and the Claude
+	// CLI store through /usr/bin/security, or what git's credential helper
+	// keeps. The keychain files are read by the program asking, so this
+	// closes them to any of them, copies included. Brains log in with a
+	// token from the bridge's environment instead (see prepareBrainState),
+	// and here so that no allow_paths entry for ~/Library opens them.
+	b.deny("file-read*", "subpath", filepath.Join(home, "Library", "Keychains"))
 	// Claude Code reads CLAUDE.md, CLAUDE.local.md and .claude/ (its
 	// CLAUDE.md, rules, skills, agents and commands) in every folder above
 	// its working directory as part of the project, whatever
@@ -868,6 +876,7 @@ func (p sandboxPolicy) protected(home, exe string) []protectedPath {
 	}
 	add(filepath.Join(home, ".claude"), true, "your Claude Code folder ~/.claude")
 	add(p.claudeDir, true, "your Claude Code folder (CLAUDE_CONFIG_DIR)")
+	add(filepath.Join(home, "Library", "Keychains"), true, "the keychains")
 	add(filepath.Join(home, "Library", "LaunchAgents"), true, "~/Library/LaunchAgents")
 	for _, dir := range p.dataDirs(home) {
 		add(dir, true, "the bridge's data folder")

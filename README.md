@@ -535,8 +535,8 @@ What the bridge does about it:
   sandbox: not Claude Code's settings and hooks, a `CLAUDE.md`, a
   LaunchAgent, a shell startup file, a program on your `PATH`, nor the
   bridge's own binary, install folder and checkout. They cannot read SSH
-  keys, cloud credentials, shell history, browser and mail data, your
-  Documents/Downloads/Desktop, the bridge's own database, any other
+  keys, the keychains, cloud credentials, shell history, browser and mail
+  data, your Documents/Downloads/Desktop, the bridge's own database, any other
   brain's folder or inbox, nor your Claude Code setup and transcripts and
   your instructions above their folder (`~/CLAUDE.md` and every
   `CLAUDE.md` up to `/`) unless `inherit_claude_user_config` is on. Add
@@ -724,9 +724,9 @@ An empty list allows nobody unless `allow_any_dm` is `true`. Blocked senders
 appear under *Chats*, and the Overview warns about an entry that is no
 number.
 
-**"Not logged in" from the CLI** — with the sandbox on, brains have a
-Claude Code config folder of their own and do not see the login you made
-with `claude`: run `claude setup-token` and set `CLAUDE_CODE_OAUTH_TOKEN`
+**"Not logged in" from the CLI** — with the sandbox on, brains cannot read
+your keychain, where the login you made with `claude` lives: run
+`claude setup-token` and set `CLAUDE_CODE_OAUTH_TOKEN`
 (or `ANTHROPIC_API_KEY`) in the bridge's process environment (the
 dashboard warns while neither is there). Without the sandbox, run `claude`
 once in a terminal to authenticate; under launchd, check that `HOME` is

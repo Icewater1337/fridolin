@@ -81,6 +81,7 @@
 (deny file-write* (literal "<ROOT>/.env"))
 (deny file-read* (regex "^<ROOT>/\\.config\\.json\\.[^/]*\\.tmp$"))
 (deny file-write* (regex "^<ROOT>/\\.config\\.json\\.[^/]*\\.tmp$"))
+(deny file-read* (subpath "<HOME>/Library/Keychains"))
 (deny file-write* (literal "<HOME>/.gitconfig"))
 (deny file-write* (literal "<HOME>/.gitconfig-work"))
 (deny file-write* (subpath "<HOME>/.config/git"))

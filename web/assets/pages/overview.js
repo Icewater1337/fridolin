@@ -147,7 +147,7 @@ export default {
     const renderSandbox = (s) => paint(sandboxCard, s.sandbox || {}, (sb) => {
       let p;
       let text;
-      if (!sb.supported) { p = pill('Not available', 'neutral'); text = 'The sandbox uses macOS sandbox-exec. Here brains can read everything the bridge’s user can, the dashboard token included. A separate user for the bridge keeps them out of your own files, not out of the bridge’s.'; } else if (sb.enabled) { p = pill('On', 'ok'); text = 'Brains write only their own folders, and cannot read other brains’ folders, your keys, mail or documents.'; } else { p = pill('Off', 'warn'); text = 'Brains can read everything your user account can. Turn the sandbox on in Settings.'; }
+      if (!sb.supported) { p = pill('Not available', 'neutral'); text = 'The sandbox uses macOS sandbox-exec. Here brains can read everything the bridge’s user can, the dashboard token included. A separate user for the bridge keeps them out of your own files, not out of the bridge’s.'; } else if (sb.enabled) { p = pill('On', 'ok'); text = 'Brains write only their own folders, and cannot read other brains’ folders, your keys, keychains, mail or documents.'; } else { p = pill('Off', 'warn'); text = 'Brains can read everything your user account can. Turn the sandbox on in Settings.'; }
       return [
         h('div.card-head', h('div.card-title', icon('shield'), h('h2', 'Sandbox')), p),
         h('div.card-body', h('p.muted', text), sb.supported ? h('a.small', { href: '#/settings/sandbox' }, 'Sandbox settings') : null),

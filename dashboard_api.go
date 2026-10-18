@@ -273,7 +273,7 @@ func (b *Bridge) apiStatus(w http.ResponseWriter, r *http.Request) {
 			resp.Warnings = append(resp.Warnings, w)
 		}
 		if !brainLoginInEnv() {
-			resp.Warnings = append(resp.Warnings, "Sandboxed brains have a Claude Code config folder of their own, so the login you made with `claude` does not reach them, and the bridge's environment has no CLAUDE_CODE_OAUTH_TOKEN or ANTHROPIC_API_KEY for them either: they fail with \"Not logged in\" unless their own settings log them in. Run `claude setup-token` and set the token in the bridge's environment (docs/CONFIGURATION.md, \"Where to set them\").")
+			resp.Warnings = append(resp.Warnings, "Sandboxed brains cannot read your keychain, where the login you made with `claude` lives, and the bridge's environment has no CLAUDE_CODE_OAUTH_TOKEN or ANTHROPIC_API_KEY for them either: they fail with \"Not logged in\" unless their own settings log them in. Run `claude setup-token` and set the token in the bridge's environment (docs/CONFIGURATION.md, \"Where to set them\").")
 		}
 	}
 	for _, br := range b.brainMgr.Brains() {
@@ -347,7 +347,7 @@ func plural(n int, one, many string) string {
 // brainLoginVars are the variables of the bridge's environment that log a
 // brain's Claude CLI in, or point it at a provider that needs no login of
 // Anthropic's: sandboxed brains get them (see childEnvAllowlist), but not
-// your keychain login, which belongs to your own config dir.
+// your keychain login, since the sandbox closes the keychains to them.
 var brainLoginVars = []string{
 	"CLAUDE_CODE_OAUTH_TOKEN", "ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN",
 	"CLAUDE_CODE_USE_BEDROCK", "CLAUDE_CODE_USE_VERTEX", "CLAUDE_CODE_USE_FOUNDRY",
