@@ -608,7 +608,9 @@ type siteRuntime struct {
 }
 
 // googleClientFile is the site's own Google client if one is saved, else
-// Fridolin's shared one.
+// Fridolin's shared one. It goes into runtime.json when the site starts, so
+// saving or removing the site's own client restarts the site; the site reads
+// the file at each sign-in, so a changed shared client needs no restart.
 func (m *SiteManager) googleClientFile() string {
 	if p := m.dir("google_client.json"); fileExists(p) {
 		return p

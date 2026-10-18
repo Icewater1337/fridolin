@@ -69,7 +69,8 @@ Dashboard → **Site**. In order:
    create a Web application client and paste it under *Use a separate Google
    client for the site*. Either way, add the redirect URI the page shows
    (`https://example.com/auth/callback`) to the client's *Authorized redirect
-   URIs* in Google Cloud Console.
+   URIs* in Google Cloud Console. Saving or removing the site's own client
+   restarts the site; a change to Fridolin's client reaches it without one.
 
 ### Bringing password accounts from another app
 

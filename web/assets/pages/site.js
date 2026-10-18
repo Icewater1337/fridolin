@@ -577,6 +577,9 @@ export default {
       return { el, value };
     }
 
+    // Saving or removing the site's own client restarts the site (site_api.go).
+    const restarting = (what) => (st.settings.enabled ? `${what}; restarting the site` : what);
+
     function renderGoogle(g) {
       const clientNote = g.source === 'none'
         ? callout('warn', 'Google sign-in is off', 'Add a Google OAuth client — under Settings → Google sign-in for all of Fridolin, or a separate one for the site below.')
@@ -589,8 +592,8 @@ export default {
         h('details', h('summary', g.source === 'site' ? 'Replace or remove the site’s Google client' : 'Use a separate Google client for the site'),
           field({ label: 'Client JSON (as downloaded from Google Cloud Console)', control: clientJSON, wide: true }),
           h('div.actions',
-            btn('Save client', { small: true, onClick: async () => { await put('/api/site/google-client', { json: clientJSON.value }); clientJSON.value = ''; toast('Google client saved', 'ok'); await refresh(); } }),
-            g.source === 'site' ? btn('Remove', { small: true, onClick: async () => { await del('/api/site/google-client'); await refresh(); } }) : null)));
+            btn('Save client', { small: true, onClick: async () => { await put('/api/site/google-client', { json: clientJSON.value }); clientJSON.value = ''; toast(restarting('Google client saved'), 'ok'); await refresh(); } }),
+            g.source === 'site' ? btn('Remove', { small: true, onClick: async () => { await del('/api/site/google-client'); toast(restarting('Google client removed'), 'ok'); await refresh(); } }) : null)));
     }
 
     function renderTunnelSetup({ listen, saved, cloudflared }) {

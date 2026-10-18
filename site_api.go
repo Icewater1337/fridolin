@@ -296,6 +296,9 @@ func (b *Bridge) apiSiteTunnel(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
 }
 
+// apiSiteGoogleClient saves the site's own Google client and restarts the
+// site. Its runtime.json names the client file it reads, chosen when it
+// starts (googleClientFile): without a restart it keeps the shared client.
 func (b *Bridge) apiSiteGoogleClient(w http.ResponseWriter, r *http.Request) {
 	data, err := io.ReadAll(io.LimitReader(r.Body, 64*1024))
 	if err != nil {
@@ -313,14 +316,18 @@ func (b *Bridge) apiSiteGoogleClient(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, err.Error())
 		return
 	}
+	go b.site.Restart()
 	writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
 }
 
+// apiSiteGoogleClientDelete removes the site's own Google client and restarts
+// the site, which then uses Fridolin's shared one.
 func (b *Bridge) apiSiteGoogleClientDelete(w http.ResponseWriter, r *http.Request) {
 	if err := b.site.SetGoogleClient(nil); err != nil {
 		writeErr(w, http.StatusInternalServerError, err.Error())
 		return
 	}
+	go b.site.Restart()
 	writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
 }
 
