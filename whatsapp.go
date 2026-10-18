@@ -343,7 +343,7 @@ func (wa *WhatsAppClient) eventHandler(rawEvt interface{}) {
 // enqueue puts evt on its chat's queue. One in no chat the bridge handles
 // (see incomingChat) is dropped at once, which costs nothing.
 func (wa *WhatsAppClient) enqueue(evt *events.Message) {
-	chat, ok := queueChat(evt.Info.MessageSource)
+	chat, ok := wa.queueChat(evt.Info.MessageSource)
 	if !ok {
 		wa.handleMessage(evt)
 		return
@@ -354,17 +354,24 @@ func (wa *WhatsAppClient) enqueue(evt *events.Message) {
 }
 
 // queueChat is the queue src's message goes on: its chat, as incomingChat
-// finds it. A person WhatsApp names by LID, with their number along, goes
-// by the number, so that their messages share one queue however WhatsApp
-// addresses them. ok is false for a message in no chat the bridge handles.
-func queueChat(src types.MessageSource) (string, bool) {
+// finds it. Resolve a LID through the number WhatsApp sent along or the
+// local identity store before choosing the queue, just as the worker
+// chooses the message's chat. Otherwise a LID-only photo and text sent by
+// number could overtake each other. This lookup never contacts WhatsApp;
+// downloads and group queries stay on the workers. ok is false for a
+// message in no chat the bridge handles.
+func (wa *WhatsAppClient) queueChat(src types.MessageSource) (string, bool) {
 	chat, ok := incomingChat(src)
 	if !ok {
 		return "", false
 	}
 	chat = chat.ToNonAD()
-	if chat.Server == types.HiddenUserServer && !src.IsFromMe && src.Sender.ToNonAD() == chat && src.SenderAlt.Server == types.DefaultUserServer {
-		chat = src.SenderAlt.ToNonAD()
+	if chat.Server == types.HiddenUserServer {
+		alt := types.EmptyJID
+		if !src.IsFromMe && (src.Sender.IsEmpty() || src.Sender.ToNonAD() == chat) {
+			alt = src.SenderAlt
+		}
+		chat = canonicalUser(wa.storeCtx(), wa.lidStore(), chat, alt)
 	}
 	return chat.String(), true
 }

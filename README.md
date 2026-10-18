@@ -705,7 +705,8 @@ Handles pairing, allowlists, trigger matching, attachment downloads, and poll
 vote decryption. Each chat's messages, edits, deletions and votes wait on a
 queue of their own (`chatqueue.go`), whose worker hands them on in the order
 they came, so a slow download holds up only its own chat; at most three files
-download at once, all chats together. It keeps the list of the account's groups
+download at once, all chats together. A contact's LID and phone-number messages
+share that queue whenever WhatsApp's local identity store knows the mapping. It keeps the list of the account's groups
 that the dashboard shows (`groupcache.go`), and asks WhatsApp for it again only
 after a group event or a reconnect, once it is ten minutes old, or when you
 press Refresh on the Chats page. Group names come from that list and from

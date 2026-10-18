@@ -1723,7 +1723,7 @@ func TestDisconnectHandsOnWhatIsQueued(t *testing.T) {
 				a.seen = append(a.seen, "vote "+strings.Join(v.Selected, ","))
 			}
 			evts := c.evts(t)
-			chat, _ := queueChat(evts[1].Info.MessageSource)
+			chat, _ := tw.queueChat(evts[1].Info.MessageSource)
 			tw.feed(evts...)
 			waitFor(t, time.Second, "the download to start", func() bool { return dl.callCount() == 1 })
 			waitFor(t, time.Second, "the next to be queued behind it", func() bool {
@@ -1801,7 +1801,8 @@ func TestQueueChat(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			got, ok := queueChat(c.src)
+			tw := newTestWhatsApp(t)
+			got, ok := tw.queueChat(c.src)
 			if !ok {
 				got = ""
 			}
@@ -1869,5 +1870,47 @@ func TestOversizedFileDoesNotWaitForASlot(t *testing.T) {
 		}
 	case <-time.After(time.Second):
 		t.Error("the sender was not told while the slots were taken")
+	}
+}
+
+// WhatsApp may omit SenderAlt after learning a contact's LID mapping.
+// Those messages must share the phone-number queue so text and edits
+// cannot overtake an earlier photo addressed only by LID.
+func TestStoredLIDMessagesShareThePhoneQueue(t *testing.T) {
+	for _, edit := range []bool{false, true} {
+		name := "text"
+		if edit {
+			name = "edit"
+		}
+		t.Run(name, func(t *testing.T) {
+			synctest.Test(t, func(t *testing.T) {
+				tw := newTestWhatsApp(t)
+				tw.client = whatsmeow.NewClient(&store.Device{LIDs: personLIDs{}}, waLog.Noop)
+				dl := &fakeDownloader{body: "JPEG", hold: make(chan struct{})}
+				tw.media = dl
+				a := recordArrivals(tw, "")
+				first := dmEvent("3EB0PHOTO", photoMsg("look"))
+				first.Info.Chat = types.NewJID(personLID, types.HiddenUserServer)
+				first.Info.Sender = first.Info.Chat
+				tw.eventHandler(first)
+				synctest.Wait()
+				second := dmEvent("3EB0TEXT", textMsg("what is this?"))
+				want := []string{"3EB0PHOTO", "3EB0TEXT"}
+				if edit {
+					second = dmEvent("3EB0EDIT", editMsg("3EB0PHOTO", "new caption"))
+					want[1] = "edit 3EB0PHOTO"
+				}
+				tw.eventHandler(second)
+				synctest.Wait()
+				if got := a.list(); len(got) != 0 {
+					t.Errorf("later event overtook the LID photo: %v", got)
+				}
+				close(dl.hold)
+				synctest.Wait()
+				if got := a.list(); !slices.Equal(got, want) {
+					t.Errorf("arrived %v, want %v", got, want)
+				}
+			})
+		})
 	}
 }
