@@ -103,29 +103,36 @@ func TestDetachedChildDoesNotHoldTheBrain(t *testing.T) {
 // The bridge kept reading that output once the CLI was killed, and the
 // stop gave up after 10 seconds with the brain still busy.
 func TestStopWhileOutputIsHeld(t *testing.T) {
-	prevDelay := runWaitDelay
-	runWaitDelay = 300 * time.Millisecond
-	t.Cleanup(func() { runWaitDelay = prevDelay })
-	mgr, d, home := queueTestManager(t, 30000, "")
-	setsidChildren(t, home, "stdout")
-	if _, _, _, err := mgr.Submit(dm("long task")); err != nil {
-		t.Fatal(err)
-	}
-	br := mgr.Get("a")
-	waitFor(t, 5*time.Second, "the run's grandchild", func() bool {
-		data, _ := os.ReadFile(filepath.Join(home, "pids"))
-		return len(strings.Fields(string(data))) == 2
-	})
-	start := time.Now()
-	if !br.StopCurrent(false) {
-		t.Fatal("StopCurrent found no run")
-	}
-	if el := time.Since(start); el > 3*time.Second {
-		t.Errorf("the stop took %v", el)
-	}
-	waitFor(t, 5*time.Second, "the stopped run", func() bool { return d.count() == 1 })
-	if res := d.all()[0].res; !errors.Is(res.Err, errBrainInterrupted) {
-		t.Errorf("result = %+v, want interrupted", res)
+	for _, provider := range []string{"claude", "codex"} {
+		t.Run(provider, func(t *testing.T) {
+			prevDelay := runWaitDelay
+			runWaitDelay = 300 * time.Millisecond
+			t.Cleanup(func() { runWaitDelay = prevDelay })
+			mgr, d, home := queueTestManager(t, 30000, "")
+			br := mgr.Get("a")
+			settings := *br.settings.Load()
+			settings.provider, settings.codexPath = provider, settings.claudePath
+			br.settings.Store(&settings)
+			setsidChildren(t, home, "stdout")
+			if _, _, _, err := mgr.Submit(dm("long task")); err != nil {
+				t.Fatal(err)
+			}
+			waitFor(t, 5*time.Second, "the run's grandchild", func() bool {
+				data, _ := os.ReadFile(filepath.Join(home, "pids"))
+				return len(strings.Fields(string(data))) == 2
+			})
+			start := time.Now()
+			if !br.StopCurrent(false) {
+				t.Fatal("StopCurrent found no run")
+			}
+			if el := time.Since(start); el > 3*time.Second {
+				t.Errorf("the stop took %v", el)
+			}
+			waitFor(t, 5*time.Second, "the stopped run", func() bool { return d.count() == 1 })
+			if res := d.all()[0].res; !errors.Is(res.Err, errBrainInterrupted) {
+				t.Errorf("result = %+v, want interrupted", res)
+			}
+		})
 	}
 }
 
@@ -281,55 +288,77 @@ func TestCancellationKeepsTheRecordedResult(t *testing.T) {
 		{"stop after error", "API quota exhausted", false, false},
 		{"timeout after error", "API quota exhausted", true, false},
 	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			prevGrace, prevDelay := postResultGrace, runWaitDelay
-			postResultGrace, runWaitDelay = 30*time.Second, 3*time.Second
-			t.Cleanup(func() { postResultGrace, runWaitDelay = prevGrace, prevDelay })
-			mgr, _, home := queueTestManager(t, 0, "")
-			setsidChildren(t, home, "stdout,stderr")
-			if tc.empty {
-				t.Setenv("FRIDOLIN_FAKE_RESULT", `{"type":"result","result":""}`)
-			} else if tc.cliError != "" {
-				t.Setenv("FRIDOLIN_FAKE_RESULT", `{"type":"result","is_error":true,"result":`+strconv.Quote(tc.cliError)+`}`)
-			}
-			br := mgr.Get("a")
-			ctx, cancel := context.WithCancel(context.Background())
-			if tc.timeout {
-				cancel()
-				ctx, cancel = context.WithTimeout(context.Background(), 2*time.Second)
-			}
-			defer cancel()
-			m := dm("answer before stopping")
-			run := &brainRun{cancel: cancel, done: make(chan struct{}), msg: m}
-			result := make(chan RunResult, 1)
-			go func() { result <- br.invokeGuarded(run, ctx, br.settings.Load(), m) }()
-			waitFor(t, 5*time.Second, "the recorded result", func() bool {
-				data, _ := os.ReadFile(filepath.Join(br.workDir, streamLogName))
-				return strings.Contains(string(data), "✅ Result:") || strings.Contains(string(data), "❌ Error:")
-			})
-			if !tc.timeout {
-				cancel()
-			}
-			select {
-			case res := <-result:
-				if tc.empty {
-					if !errors.Is(res.Err, errNoResult) {
-						t.Errorf("result = %+v, want errNoResult", res)
-					}
-				} else if tc.cliError == "" {
-					if res.Err != nil || !strings.HasSuffix(res.Text, "says: answer before stopping") {
-						t.Errorf("result = %+v, want the recorded answer", res)
+	for _, provider := range []string{"claude", "codex"} {
+		for _, tc := range cases {
+			t.Run(provider+"/"+tc.name, func(t *testing.T) {
+				prevGrace, prevDelay := postResultGrace, runWaitDelay
+				postResultGrace, runWaitDelay = 30*time.Second, 3*time.Second
+				t.Cleanup(func() { postResultGrace, runWaitDelay = prevGrace, prevDelay })
+				mgr, _, home := queueTestManager(t, 0, "")
+				setsidChildren(t, home, "stdout,stderr")
+				const answer = "The recorded answer"
+				br := mgr.Get("a")
+				settings := *br.settings.Load()
+				settings.provider = provider
+				settings.codexPath = settings.claudePath // the same fake prints either stream below
+				var output string
+				if provider == "codex" {
+					switch {
+					case tc.empty:
+						output = `{"type":"turn.completed"}`
+					case tc.cliError != "":
+						output = `{"type":"turn.failed","error":{"message":` + strconv.Quote(tc.cliError) + `}}`
+					default:
+						output = `{"type":"item.completed","item":{"type":"agent_message","text":` + strconv.Quote(answer) + `}}` + "\n" + `{"type":"turn.completed"}`
 					}
 				} else {
-					var cliErr *cliError
-					if !errors.As(res.Err, &cliErr) || cliErr.msg != tc.cliError {
-						t.Errorf("result = %+v, want CLI error %q", res, tc.cliError)
+					switch {
+					case tc.empty:
+						output = `{"type":"result","result":""}`
+					case tc.cliError != "":
+						output = `{"type":"result","is_error":true,"result":` + strconv.Quote(tc.cliError) + `}`
+					default:
+						output = `{"type":"result","result":` + strconv.Quote(answer) + `}`
 					}
 				}
-			case <-time.After(10 * time.Second):
-				t.Fatal("the cancelled run kept waiting for inherited output")
-			}
-		})
+				t.Setenv("FRIDOLIN_FAKE_RESULT", output)
+				ctx, cancel := context.WithCancel(context.Background())
+				if tc.timeout {
+					cancel()
+					ctx, cancel = context.WithTimeout(context.Background(), 2*time.Second)
+				}
+				defer cancel()
+				m := dm("answer before stopping")
+				run := &brainRun{cancel: cancel, done: make(chan struct{}), msg: m}
+				result := make(chan RunResult, 1)
+				go func() { result <- br.invokeGuarded(run, ctx, &settings, m) }()
+				waitFor(t, 5*time.Second, "the recorded result", func() bool {
+					data, _ := os.ReadFile(filepath.Join(br.workDir, streamLogName))
+					return strings.Contains(string(data), "✅ Result:") || strings.Contains(string(data), "❌ Error:")
+				})
+				if !tc.timeout {
+					cancel()
+				}
+				select {
+				case res := <-result:
+					if tc.empty {
+						if !errors.Is(res.Err, errNoResult) {
+							t.Errorf("result = %+v, want errNoResult", res)
+						}
+					} else if tc.cliError == "" {
+						if res.Err != nil || res.Text != answer {
+							t.Errorf("result = %+v, want the recorded answer", res)
+						}
+					} else {
+						var cliErr *cliError
+						if !errors.As(res.Err, &cliErr) || cliErr.msg != tc.cliError || cliErr.provider != provider {
+							t.Errorf("result = %+v, want CLI error %q", res, tc.cliError)
+						}
+					}
+				case <-time.After(10 * time.Second):
+					t.Fatal("the cancelled run kept waiting for inherited output")
+				}
+			})
+		}
 	}
 }

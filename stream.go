@@ -126,6 +126,8 @@ func parseStream(r io.Reader, sink StreamSink) RunResult {
 	return parseAgentStream(r, sink, "claude")
 }
 
+// parseAgentStream shares line limits and terminal-result handling across both
+// providers; codexStream translates Codex JSONL into the common events.
 func parseAgentStream(r io.Reader, sink StreamSink, provider string) RunResult {
 	in := bufio.NewReaderSize(r, 64<<10)
 	p := streamParser{sink: sink, provider: provider}
@@ -204,6 +206,9 @@ func (p *streamParser) event(line []byte) {
 	var event streamEvent
 	if p.provider == "codex" {
 		event = p.codex.event(line)
+		if event.Type == "" {
+			return // Codex progress, retries, and malformed JSON carry no common event.
+		}
 	} else if err := json.Unmarshal(line, &event); err != nil {
 		return
 	}

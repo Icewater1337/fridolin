@@ -401,8 +401,8 @@ the run had asked the chat a question before it hung; the next message
 runs. Long agentic tasks can take a while, so raise it rather than turn
 it off if yours do.
 
-Once a run has given its answer, or its error, the bridge waits five
-seconds for it to end. A command it left running in the background that
+For both Claude and Codex, once a run has given its answer or its error,
+the bridge waits five seconds for it to end. A command it left running in the background that
 still holds the CLI's output open is stopped then, rather than keeping the
 brain busy for as long as it runs. One that left the run's process group
 (a daemon, or a command started with `setsid`) is out of the bridge's
