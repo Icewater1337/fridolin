@@ -233,6 +233,10 @@ for compatibility.
 - A build chat on the Site's Build page shows that Claude's usage limit is
   reached, that its message is queued, or that the queue is full. It left
   out every notice that starts with ⏳, to leave out "Working on it".
+- Messages waiting for a brain that you remove, or move to another
+  folder, are answered by the brain that takes them now: the brain in
+  its new folder, or the one its chat falls back to. Before, they were
+  dropped without a word.
 - An HTTP server that fails after the bridge started stops the bridge
   (exit 1, which the service manager restarts). Before, the bridge ran on
   without the dashboard, `/send` and `/ingest`, and looked healthy.

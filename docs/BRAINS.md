@@ -185,13 +185,17 @@ say, move the old one aside, put the new one in its place, then restart the
 bridge or save a setting in the dashboard. Until it loads its brains again,
 the bridge goes on reading the prompt and writing the history in the folder
 it opened, the one you moved aside, while runs start in the new one. The
-reload stops the brain's run in progress, drops the messages waiting for
-it, and starts it afresh in the new folder.
+reload stops the brain's run in progress and starts it afresh in the new
+folder, which then answers the messages that were waiting for it. Their
+lines go into the new folder's history, unless it has them already: a
+folder you moved, rather than swapped, keeps its history.
 
 ## Removing a brain
 
-*Remove* unregisters the brain: its runs stop and its chats fall back to the
-default brain. The folder is left exactly as it was.
+*Remove* unregisters the brain: its run in progress stops and its chats
+fall back to the default brain, which also answers the messages that were
+waiting for it (files and recordings handed to the removed brain are
+dropped). The folder is left exactly as it was.
 
 So are the brain's media inbox (`<brain id>/` in the media folder, which is
 `media/` in the data folder unless `media_dir` puts it elsewhere) and its

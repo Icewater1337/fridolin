@@ -337,6 +337,13 @@ const historyFileName = "conversation-history.jsonl"
 // (Inbound.logged), so that its own run shows the message once, as the
 // new message, after the chat's history before those lines.
 func (br *Brain) logInbound(m Inbound) Inbound {
+	// A message taken up again, by the brain in its brain's new folder
+	// say, has its lines in that history already, where they stay:
+	// written again, it would be there twice. A brain whose history does
+	// not have them, one the message was routed to anew, writes its own.
+	if br.holdsLines(m) {
+		return m
+	}
 	parts := m.ownParts()
 	for i, p := range parts {
 		at := p.At
@@ -350,6 +357,16 @@ func (br *Brain) logInbound(m Inbound) Inbound {
 	}
 	m.logged = parts[0].logged
 	return m
+}
+
+// holdsLines reports whether the brain's history has the lines a brain
+// wrote for m (Inbound.logged), the first of them at least: it has when
+// it wrote them, or when its folder is the one of the brain that did.
+func (br *Brain) holdsLines(m Inbound) bool {
+	if m.logged == (historyEntry{}) {
+		return false
+	}
+	return m.loggedIn(br.chatHistory(chatJIDs(m), m.enoughBefore(1))) >= 0
 }
 
 // historyTime is t as a history line has it, "" for none: the time the
@@ -895,22 +912,31 @@ func (br *Brain) stopRun(run *brainRun) bool {
 	return true
 }
 
-// retire stops the brain for good after it was removed from the
-// configuration, or when the bridge stops. With closeViewer it also ends
-// the activity viewer: not when the bridge stops, so the window stays until
-// the next start replaces it, nor when the brain moved to another folder,
-// where the brain that runs there replaces the tmux session of that name.
-func (br *Brain) retire(closeViewer bool) {
+// closeQueue stops the brain taking messages and starting runs, and
+// returns what it had waiting, which never ran. A worker that waits for a
+// run slot gives up its place.
+func (br *Brain) closeQueue() []Inbound {
 	br.mu.Lock()
+	defer br.mu.Unlock()
 	br.retired = true
 	gone := br.pending
 	br.pending = nil
 	if br.slotWait != nil {
 		br.slots.giveUp(br.slotWait)
 	}
-	br.mu.Unlock()
-	dropped(gone)
-	br.StopCurrent(true)
+	return gone
+}
+
+// retire stops the brain for good after it was removed from the
+// configuration, or when the bridge stops: it takes nothing more, drops
+// what is still waiting (a reload took that out first, see closeQueue)
+// and stops the run in flight. With closeViewer it also ends the activity
+// viewer: not when the bridge stops, so the window stays until the next
+// start replaces it, nor when the brain moved to another folder, where the
+// brain that runs there replaces the tmux session of that name.
+func (br *Brain) retire(closeViewer bool) {
+	dropped(br.closeQueue())
+	br.StopCurrent(false)
 	if closeViewer {
 		br.closeViewer()
 	}
@@ -2247,6 +2273,12 @@ func withUndelivered(entries, pending []historyEntry) []historyEntry {
 // removed brains finish being stopped in the background.
 type BrainManager struct {
 	reloadMu sync.Mutex // serialises Apply
+	// stopped is set by Stop, under reloadMu: the brains are stopped for
+	// good, and a reload would start new ones.
+	stopped bool
+	// retiring are the brains reloads took out, while they stop and hand
+	// on what they had waiting (see requeue); Stop waits for them.
+	retiring sync.WaitGroup
 
 	mu       sync.RWMutex // guards the fields below; never held while calling into a Brain
 	brains   map[string]*Brain
@@ -2300,6 +2332,9 @@ func (bm *BrainManager) reload(specs []BrainSpec, issues []BrainIssue, cfg *Conf
 	bm.reloadMu.Lock()
 	defer bm.reloadMu.Unlock()
 
+	if bm.stopped {
+		return errBrainsStopped
+	}
 	if err := ValidateBrainSet(specs); err != nil {
 		return err
 	}
@@ -2397,9 +2432,37 @@ func (bm *BrainManager) reload(specs []BrainSpec, issues []BrainIssue, cfg *Conf
 			log.Printf("brain %s: removed from configuration; stopping it", br.id)
 		}
 		_, moved := next[br.id]
-		go br.retire(!moved)
+		// In the background, since the run in flight may take a while to
+		// stop. What waits goes on once it has: not to a brain in the same
+		// folder while the old run still works there.
+		waiting := br.closeQueue()
+		bm.retiring.Go(func() {
+			br.retire(!moved)
+			bm.requeue(br, waiting)
+		})
 	}
 	return nil
+}
+
+// errBrainsStopped is a reload after Stop.
+var errBrainsStopped = errors.New("the brains are stopped")
+
+// requeue hands what from had waiting when a reload took it out, which
+// never ran, to the brains that take it now: the brain in its new folder,
+// or the one its chat goes to. A message keeps its history lines where
+// that brain's history has them (see Brain.logInbound). One no brain takes
+// is dropped.
+func (bm *BrainManager) requeue(from *Brain, ms []Inbound) {
+	for _, m := range ms {
+		to, _, _, err := bm.Submit(m)
+		switch {
+		case err != nil:
+			log.Printf("brain %s: dropping a message for %s that waited for it: %v", from.id, m.JID, err)
+			dropped([]Inbound{m})
+		case to.id != from.id:
+			log.Printf("brain %s: handed a message for %s that waited for it to brain %s", from.id, m.JID, to.id)
+		}
+	}
 }
 
 // settingsFor combines global settings with a brain's own.
@@ -2628,8 +2691,13 @@ func (bm *BrainManager) KillRuns() {
 	}
 }
 
-// Stop interrupts every run and drops every queue.
+// Stop interrupts every run and drops every queue, once the brains reloads
+// took out have handed on what they had waiting.
 func (bm *BrainManager) Stop() {
+	bm.reloadMu.Lock()
+	bm.stopped = true
+	bm.reloadMu.Unlock()
+	bm.retiring.Wait()
 	var wg sync.WaitGroup
 	for _, br := range bm.Brains() {
 		wg.Add(1)

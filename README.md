@@ -726,7 +726,8 @@ seconds gets a "working on it" notice (the event types are in
 started holds its output open. Runs are listed in `<data_dir>/runs/` while
 they last, so that a bridge that crashed stops what is left of them when it
 starts again. `BrainManager.Apply` swaps the brain set at runtime without
-touching brains that did not change.
+touching brains that did not change, and hands what a brain it takes out
+had waiting to the brain that takes it now.
 
 **`manifest.go`, `brainreg.go`** — `brain.json`, the brain registry, path
 checks and scaffolding. **`configstore.go`** — the live configuration.

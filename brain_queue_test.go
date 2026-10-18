@@ -473,6 +473,99 @@ func TestReloadKeepsRunningBrainAndRetiresRemoved(t *testing.T) {
 	}
 }
 
+// What a brain had waiting when a reload took it out goes on: in the brain
+// in its new folder, or in the brain its chat goes to once it is removed.
+// Its history line is there once, whether the new folder has the old
+// history (moved) or not (a copy, or another brain).
+func TestReloadHandsOnWhatWaited(t *testing.T) {
+	tests := []struct {
+		name string
+		// reload changes the brains, the DM brain a among them, and
+		// returns the folder whose brain should answer.
+		reload func(t *testing.T, home string) (brains []BrainRef, answers string)
+	}{
+		{"moved", func(t *testing.T, home string) ([]BrainRef, string) {
+			if err := os.Rename(filepath.Join(home, "a"), filepath.Join(home, "a-moved")); err != nil {
+				t.Fatal(err)
+			}
+			return []BrainRef{
+				brainFolder(t, home+"/a-moved", BrainManifest{ID: "a", Routing: BrainRouting{HandlesDMs: true}}),
+				brainFolder(t, home+"/b", BrainManifest{ID: "b", Routing: BrainRouting{Default: true}}),
+			}, filepath.Join(home, "a-moved")
+		}},
+		{"another folder", func(t *testing.T, home string) ([]BrainRef, string) {
+			return []BrainRef{
+				brainFolder(t, home+"/a-copy", BrainManifest{ID: "a", Routing: BrainRouting{HandlesDMs: true}}),
+				brainFolder(t, home+"/b", BrainManifest{ID: "b", Routing: BrainRouting{Default: true}}),
+			}, filepath.Join(home, "a-copy")
+		}},
+		{"removed", func(t *testing.T, home string) ([]BrainRef, string) {
+			return []BrainRef{
+				brainFolder(t, home+"/b", BrainManifest{ID: "b", Routing: BrainRouting{Default: true}}),
+			}, filepath.Join(home, "b")
+		}},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			home := canonicalDir(t.TempDir())
+			t.Setenv("HOME", home)
+			claude := fakeClaudeEnv(t, 30000)
+			config := func(refs ...BrainRef) *Config {
+				cfg, err := LoadConfig(writeConfig(t, `{
+					"data_dir": "`+home+`/data",
+					"claude_path": "`+claude+`"`+brainDirsJSON(t, refs...)+`
+				}`))
+				if err != nil {
+					t.Fatal(err)
+				}
+				return cfg
+			}
+			mgr := newTestManager(t, config(
+				brainFolder(t, home+"/a", BrainManifest{ID: "a", Routing: BrainRouting{HandlesDMs: true}}),
+				brainFolder(t, home+"/b", BrainManifest{ID: "b", Routing: BrainRouting{Default: true}}),
+			))
+			d := &deliveries{}
+			mgr.SetHooks(BrainHooks{Deliver: d.add})
+			t.Cleanup(mgr.Stop)
+			if _, _, _, err := mgr.Submit(dm("first")); err != nil {
+				t.Fatal(err)
+			}
+			hasRun(t, mgr.Get("a"))
+			t.Setenv("FRIDOLIN_FAKE_SLEEP_MS", "10")
+			if _, _, _, err := mgr.Submit(dm("second")); err != nil {
+				t.Fatal(err)
+			}
+
+			refs, answers := tc.reload(t, home)
+			if err := mgr.Apply(config(refs...)); err != nil {
+				t.Fatal(err)
+			}
+			waitFor(t, 10*time.Second, "both runs to end", func() bool { return d.count() == 2 })
+			for _, r := range d.all() {
+				switch r.msg.Text {
+				case "first":
+					if !errors.Is(r.res.Err, errBrainInterrupted) {
+						t.Errorf("first: %q %v, want its run stopped", r.res.Text, r.res.Err)
+					}
+				case "second":
+					if r.res.Err != nil || !strings.HasPrefix(r.res.Text, "echo:"+answers+":") {
+						t.Errorf("second: %q %v, want it answered in %s", r.res.Text, r.res.Err, answers)
+					}
+				}
+			}
+			var lines int
+			for _, l := range historyLines(t, answers) {
+				if strings.Contains(l, `"text":"second"`) {
+					lines++
+				}
+			}
+			if lines != 1 {
+				t.Errorf("the history in %s has %d lines for the second message, want one:\n%s", answers, lines, strings.Join(historyLines(t, answers), "\n"))
+			}
+		})
+	}
+}
+
 // A reload runs the manifests you approved: brain b that gives itself the
 // DMs in its own brain.json keeps its routing, and the change shows as
 // drift until you approve it.
