@@ -1,4 +1,4 @@
-package main
+package logx
 
 import (
 	"bytes"
@@ -13,7 +13,7 @@ import (
 
 func TestLogRingKeepsCompleteLinesAndCursor(t *testing.T) {
 	t.Parallel()
-	r := NewLogRing(3)
+	r := NewRing(3)
 	for _, p := range []string{"one\nt", "wo\nthree", "\nfour\npartial"} {
 		if n, err := r.Write([]byte(p)); err != nil || n != len(p) {
 			t.Fatalf("Write = %d, %v; want %d, nil", n, err, len(p))
@@ -54,7 +54,7 @@ func TestLogRingKeepsCompleteLinesAndCursor(t *testing.T) {
 
 func TestLogRingConcurrentWriters(t *testing.T) {
 	t.Parallel()
-	r := NewLogRing(100)
+	r := NewRing(100)
 	var wg sync.WaitGroup
 	for range 100 {
 		wg.Go(func() { _, _ = r.Write([]byte("line\n")); _, _ = r.Since(0, 0) })
@@ -73,7 +73,7 @@ func TestLogRingConcurrentWriters(t *testing.T) {
 
 func TestLogLineJSON(t *testing.T) {
 	t.Parallel()
-	line := LogLine{Seq: 7, TS: time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC), Text: "ready"}
+	line := Line{Seq: 7, TS: time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC), Text: "ready"}
 	got, err := json.Marshal(line)
 	if want := `{"seq":7,"ts":"2026-01-02T03:04:05Z","text":"ready"}`; err != nil || string(got) != want {
 		t.Fatalf("JSON = %s, %v; want %s", got, err, want)
@@ -93,7 +93,7 @@ func TestWaLoggerLevelsAndSubmodules(t *testing.T) {
 		t.Run(tc.level, func(t *testing.T) {
 			var out bytes.Buffer
 			log.SetOutput(&out)
-			logger := newWaLogger("WhatsApp", tc.level).Sub("Socket")
+			logger := NewWaLogger("WhatsApp", tc.level).Sub("Socket")
 			logger.Debugf("event %d", 1)
 			logger.Infof("event %d", 2)
 			logger.Warnf("event %d", 3)

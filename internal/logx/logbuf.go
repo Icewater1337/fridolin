@@ -1,4 +1,4 @@
-package main
+package logx
 
 import (
 	"fmt"
@@ -10,48 +10,48 @@ import (
 	waLog "go.mau.fi/whatsmeow/util/log"
 )
 
-// LogRing keeps the most recent log lines in memory for the dashboard. It is
+// Ring keeps the most recent log lines in memory for the dashboard. It is
 // an io.Writer installed next to stderr with log.SetOutput.
-type LogRing struct {
+type Ring struct {
 	mu      sync.Mutex
-	lines   []LogLine
+	lines   []Line
 	max     int
 	nextSeq int64
 	partial string
 }
 
-// LogLine is one line of log output.
-type LogLine struct {
+// Line is one line of log output.
+type Line struct {
 	Seq  int64     `json:"seq"`
 	TS   time.Time `json:"ts"`
 	Text string    `json:"text"`
 }
 
-// NewLogRing keeps up to max lines.
-func NewLogRing(max int) *LogRing { return &LogRing{max: max, nextSeq: 1} }
+// NewRing keeps up to max lines.
+func NewRing(max int) *Ring { return &Ring{max: max, nextSeq: 1} }
 
-func (r *LogRing) Write(p []byte) (int, error) {
+func (r *Ring) Write(p []byte) (int, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	text := r.partial + string(p)
 	parts := strings.Split(text, "\n")
 	r.partial = parts[len(parts)-1]
 	for _, line := range parts[:len(parts)-1] {
-		r.lines = append(r.lines, LogLine{Seq: r.nextSeq, TS: time.Now(), Text: line})
+		r.lines = append(r.lines, Line{Seq: r.nextSeq, TS: time.Now(), Text: line})
 		r.nextSeq++
 	}
 	if over := len(r.lines) - r.max; over > 0 {
-		r.lines = append([]LogLine(nil), r.lines[over:]...)
+		r.lines = append([]Line(nil), r.lines[over:]...)
 	}
 	return len(p), nil
 }
 
 // Since returns up to limit lines with Seq > after, oldest first, and the seq
 // to ask for next time.
-func (r *LogRing) Since(after int64, limit int) ([]LogLine, int64) {
+func (r *Ring) Since(after int64, limit int) ([]Line, int64) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	var out []LogLine
+	var out []Line
 	for _, l := range r.lines {
 		if l.Seq > after {
 			out = append(out, l)
@@ -76,7 +76,9 @@ type stdWaLogger struct {
 
 var waLevels = map[string]int{"DEBUG": 0, "INFO": 1, "WARN": 2, "ERROR": 3}
 
-func newWaLogger(module, level string) waLog.Logger {
+// NewWaLogger routes messages at level or above through the process logger.
+// Unknown levels use INFO, and child loggers keep their parent's threshold.
+func NewWaLogger(module, level string) waLog.Logger {
 	lv, ok := waLevels[strings.ToUpper(level)]
 	if !ok {
 		lv = 1
