@@ -1,4 +1,4 @@
-package main
+package httpapi
 
 import (
 	"net"
@@ -6,26 +6,26 @@ import (
 	"strings"
 )
 
-// loginURL is the address to open, with a login code in the fragment
+// LoginURL is the address to open, with a login code in the fragment
 // (which browsers never send to the server or put in logs). The code works
 // once, within a minute (see dashsession.go), so the browser history keeps
 // nothing that signs in.
-func loginURL(listen, code string) string {
+func LoginURL(listen, code string) string {
 	return "http://" + listen + "/#login=" + code
 }
 
-// sessionCookieName is the cookie that holds a dashboard session. Cookies
+// SessionCookieName is the cookie that holds a dashboard session. Cookies
 // belong to a host, not a port, so the port is in the name: a second bridge
 // on this computer, in dev mode say, keeps its own.
-func sessionCookieName(listen string) string {
+func SessionCookieName(listen string) string {
 	_, port, _ := net.SplitHostPort(listen)
 	return "fridolin_session_" + port
 }
 
-// allowedHosts returns the Host header values that may reach the server.
+// AllowedHosts returns the Host header values that may reach the server.
 // listen has a port: validate refuses an http_listen that isLoopbackAddr
 // cannot split.
-func allowedHosts(listen string) map[string]bool {
+func AllowedHosts(listen string) map[string]bool {
 	_, port, _ := net.SplitHostPort(listen)
 	return map[string]bool{
 		listen:              true,
@@ -35,8 +35,8 @@ func allowedHosts(listen string) map[string]bool {
 	}
 }
 
-// hostGuard rejects requests whose Host is not this machine (DNS rebinding).
-func hostGuard(allowed map[string]bool, next http.Handler) http.Handler {
+// HostGuard rejects requests whose Host is not this machine (DNS rebinding).
+func HostGuard(allowed map[string]bool, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if !allowed[strings.ToLower(r.Host)] {
 			http.Error(w, "misdirected request", http.StatusMisdirectedRequest)
@@ -46,9 +46,9 @@ func hostGuard(allowed map[string]bool, next http.Handler) http.Handler {
 	})
 }
 
-// originGuard rejects state-changing requests that a browser sent on behalf
+// OriginGuard rejects state-changing requests that a browser sent on behalf
 // of another site. Scripts (curl, Python, Node) send no Origin and pass.
-func originGuard(allowed map[string]bool, next http.Handler) http.Handler {
+func OriginGuard(allowed map[string]bool, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet && r.Method != http.MethodHead {
 			if o := strings.ToLower(r.Header.Get("Origin")); o != "" {
@@ -69,38 +69,38 @@ func originGuard(allowed map[string]bool, next http.Handler) http.Handler {
 	})
 }
 
-// apiGuard requires the dashboard token or a dashboard session on every API
+// APIGuard requires the dashboard token or a dashboard session on every API
 // call, plus a custom header and a JSON body on writes (which a cross-site
 // form cannot send).
-func apiGuard(token *DashboardToken, requiresToken func() bool, signedIn func(*http.Request) bool, next http.Handler) http.Handler {
+func APIGuard(token *Token, requiresToken func() bool, signedIn func(*http.Request) bool, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// First, so the refusals below are not cached either.
 		w.Header().Set("Cache-Control", "no-store")
 		// compat: scripts that call the API send the token under this name;
 		// the dashboard itself signs in with a session (see dashsession.go).
 		if requiresToken() && !token.Matches(r.Header.Get("X-Bridge-Token")) && !signedIn(r) {
-			writeErr(w, http.StatusUnauthorized, "missing or wrong dashboard token")
+			WriteErr(w, http.StatusUnauthorized, "missing or wrong dashboard token")
 			return
 		}
-		if checkWrite(w, r) {
+		if CheckWrite(w, r) {
 			next.ServeHTTP(w, r)
 		}
 	})
 }
 
-// checkWrite holds a write to what apiGuard asks of one, the dashboard
+// CheckWrite holds a write to what APIGuard asks of one, the dashboard
 // header and a JSON body of at most 1 MiB, and answers it when it falls
 // short. It reports whether the request may go on.
-func checkWrite(w http.ResponseWriter, r *http.Request) bool {
+func CheckWrite(w http.ResponseWriter, r *http.Request) bool {
 	if r.Method == http.MethodGet || r.Method == http.MethodHead {
 		return true
 	}
 	if r.Header.Get("X-Bridge-Dashboard") != "1" {
-		writeErr(w, http.StatusForbidden, "missing X-Bridge-Dashboard header")
+		WriteErr(w, http.StatusForbidden, "missing X-Bridge-Dashboard header")
 		return false
 	}
 	if r.ContentLength != 0 && !strings.HasPrefix(r.Header.Get("Content-Type"), "application/json") {
-		writeErr(w, http.StatusUnsupportedMediaType, "send JSON")
+		WriteErr(w, http.StatusUnsupportedMediaType, "send JSON")
 		return false
 	}
 	r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
@@ -117,7 +117,7 @@ const dashboardCSP = "default-src 'self'; img-src 'self' data: blob:; style-src 
 	"frame-src http://127.0.0.1:* http://localhost:*; frame-ancestors 'none'; base-uri 'none'; form-action 'none'; " +
 	"object-src 'none'; require-trusted-types-for 'script'; trusted-types 'none'"
 
-func securityHeaders(next http.Handler) http.Handler {
+func SecurityHeaders(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		h := w.Header()
 		h.Set("Content-Security-Policy", dashboardCSP)

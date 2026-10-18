@@ -1,4 +1,4 @@
-package main
+package httpapi
 
 import (
 	"net/http/httptest"
@@ -38,9 +38,9 @@ func TestDecodeJSONIsStrict(t *testing.T) {
 			var v body
 			var err error
 			if c.optional {
-				err = decodeOptionalJSON(r, &v)
+				err = DecodeOptionalJSON(r, &v)
 			} else {
-				err = decodeJSON(r, &v)
+				err = DecodeJSON(r, &v)
 			}
 			switch {
 			case c.want == "" && err != nil:

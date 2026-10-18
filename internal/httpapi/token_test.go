@@ -1,4 +1,4 @@
-package main
+package httpapi
 
 import (
 	"os"
@@ -50,7 +50,7 @@ func TestLoadDashboardToken(t *testing.T) {
 
 func TestHTTPTokenReadAndRotate(t *testing.T) {
 	dir := t.TempDir()
-	if _, err := readDashboardToken(dir); !os.IsNotExist(err) {
+	if _, err := ReadToken(dir); !os.IsNotExist(err) {
 		t.Fatalf("missing read=%v", err)
 	}
 	if _, err := os.Stat(filepath.Join(dir, "dashboard.token")); !os.IsNotExist(err) {
@@ -67,7 +67,7 @@ func TestHTTPTokenReadAndRotate(t *testing.T) {
 	if token.Matches(old) || !token.Matches(token.Value()) {
 		t.Fatal("rotation did not replace the active token")
 	}
-	got, err := readDashboardToken(dir)
+	got, err := ReadToken(dir)
 	if err != nil || got != token.Value() {
 		t.Fatalf("persisted token disagrees: %v", err)
 	}

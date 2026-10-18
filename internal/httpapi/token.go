@@ -1,4 +1,4 @@
-package main
+package httpapi
 
 import (
 	"crypto/rand"
@@ -15,30 +15,30 @@ import (
 	"github.com/Icewater1337/fridolin/internal/fsx"
 )
 
-// DashboardToken is a secret kept in a file of the data dir: the
+// Token is a secret kept in a file of the data dir: the
 // dashboard's, or the one scripts send to /send and /ingest.
-type DashboardToken struct {
+type Token struct {
 	path string
 	v    atomic.Value // string
 }
 
-// minTokenLen is the shortest token loadTokenFile accepts; Rotate writes 48
+// minTokenLen is the shortest token LoadToken accepts; Rotate writes 48
 // hex digits.
 const minTokenLen = 32
 
 // LoadDashboardToken reads <dataDir>/dashboard.token, creating it on first
-// run (see loadTokenFile).
-func LoadDashboardToken(dataDir string) (*DashboardToken, error) {
-	return loadTokenFile(filepath.Join(dataDir, "dashboard.token"))
+// run (see LoadToken).
+func LoadDashboardToken(dataDir string) (*Token, error) {
+	return LoadToken(filepath.Join(dataDir, "dashboard.token"))
 }
 
-// loadTokenFile reads the token in path, creating the file when there is
+// LoadToken reads the token in path, creating the file when there is
 // none. Only a missing file makes a new token: one that cannot be read or
 // holds something too short to be a token is an error, since quietly
 // replacing it would lock out every dashboard and script that uses it, and
 // hide whatever broke the file.
-func loadTokenFile(path string) (*DashboardToken, error) {
-	t := &DashboardToken{path: path}
+func LoadToken(path string) (*Token, error) {
+	t := &Token{path: path}
 	data, err := os.ReadFile(t.path)
 	switch {
 	case errors.Is(err, fs.ErrNotExist):
@@ -58,11 +58,11 @@ func loadTokenFile(path string) (*DashboardToken, error) {
 }
 
 // Value returns the token.
-func (t *DashboardToken) Value() string { return t.v.Load().(string) }
+func (t *Token) Value() string { return t.v.Load().(string) }
 
 // Rotate replaces the token and its file: whoever sends the old one is
 // refused from then on. apiRotateToken also ends every dashboard session.
-func (t *DashboardToken) Rotate() error {
+func (t *Token) Rotate() error {
 	buf := make([]byte, 24)
 	if _, err := rand.Read(buf); err != nil {
 		return err
@@ -76,12 +76,12 @@ func (t *DashboardToken) Rotate() error {
 }
 
 // Matches compares in constant time.
-func (t *DashboardToken) Matches(s string) bool {
+func (t *Token) Matches(s string) bool {
 	return subtle.ConstantTimeCompare([]byte(s), []byte(t.Value())) == 1
 }
 
-// readDashboardToken reads the existing dashboard token without creating it.
-func readDashboardToken(dataDir string) (string, error) {
+// ReadToken reads the existing dashboard token without creating it.
+func ReadToken(dataDir string) (string, error) {
 	data, err := os.ReadFile(filepath.Join(dataDir, "dashboard.token"))
 	return strings.TrimSpace(string(data)), err
 }

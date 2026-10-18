@@ -1,4 +1,4 @@
-package main
+package httpapi
 
 import (
 	"io"
@@ -9,7 +9,7 @@ import (
 )
 
 func TestHTTPHostGuard(t *testing.T) {
-	hosts := allowedHosts("127.0.0.1:8765")
+	hosts := AllowedHosts("127.0.0.1:8765")
 	for _, tc := range []struct {
 		host string
 		want int
@@ -21,7 +21,7 @@ func TestHTTPHostGuard(t *testing.T) {
 			r := httptest.NewRequest("GET", "/", nil)
 			r.Host = tc.host
 			w := httptest.NewRecorder()
-			hostGuard(hosts, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(204) })).ServeHTTP(w, r)
+			HostGuard(hosts, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(204) })).ServeHTTP(w, r)
 			if w.Code != tc.want {
 				t.Fatalf("status=%d body=%q", w.Code, w.Body.String())
 			}
@@ -45,7 +45,7 @@ func TestHTTPOriginGuard(t *testing.T) {
 			r.Header.Set("Origin", tc.origin)
 			r.Header.Set("Sec-Fetch-Site", tc.site)
 			w := httptest.NewRecorder()
-			originGuard(allowedHosts("127.0.0.1:8765"), http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(204) })).ServeHTTP(w, r)
+			OriginGuard(AllowedHosts("127.0.0.1:8765"), http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(204) })).ServeHTTP(w, r)
 			if w.Code != tc.want {
 				t.Fatalf("status=%d body=%q", w.Code, w.Body.String())
 			}
@@ -80,7 +80,7 @@ func TestHTTPAPIGuard(t *testing.T) {
 			r.Header.Set("X-Bridge-Dashboard", tc.header)
 			r.Header.Set("Content-Type", tc.contentType)
 			w := httptest.NewRecorder()
-			apiGuard(token, func() bool { return tc.required }, func(*http.Request) bool { return tc.session }, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(204) })).ServeHTTP(w, r)
+			APIGuard(token, func() bool { return tc.required }, func(*http.Request) bool { return tc.session }, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(204) })).ServeHTTP(w, r)
 			if w.Code != tc.want || w.Header().Get("Cache-Control") != "no-store" {
 				t.Fatalf("status=%d headers=%v body=%q", w.Code, w.Header(), w.Body.String())
 			}
@@ -94,7 +94,7 @@ func TestHTTPAPIGuardReadsCurrentPolicy(t *testing.T) {
 		t.Fatal(err)
 	}
 	required, session := false, false
-	handler := apiGuard(token, func() bool { return required }, func(*http.Request) bool { return session }, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(204) }))
+	handler := APIGuard(token, func() bool { return required }, func(*http.Request) bool { return session }, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(204) }))
 	for _, tc := range []struct {
 		required, session bool
 		want              int
@@ -113,7 +113,7 @@ func TestHTTPWriteBodyLimit(t *testing.T) {
 	r.Header.Set("X-Bridge-Dashboard", "1")
 	r.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
-	if !checkWrite(w, r) {
+	if !CheckWrite(w, r) {
 		t.Fatal("valid write headers refused")
 	}
 	data, err := io.ReadAll(r.Body)
@@ -124,7 +124,7 @@ func TestHTTPWriteBodyLimit(t *testing.T) {
 
 func TestHTTPSecurityHeaders(t *testing.T) {
 	w := httptest.NewRecorder()
-	securityHeaders(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(204) })).ServeHTTP(w, httptest.NewRequest("GET", "/", nil))
+	SecurityHeaders(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(204) })).ServeHTTP(w, httptest.NewRequest("GET", "/", nil))
 	for k, v := range map[string]string{
 		"Content-Security-Policy": dashboardCSP, "X-Content-Type-Options": "nosniff", "Referrer-Policy": "no-referrer",
 		"X-Frame-Options": "DENY", "Cross-Origin-Opener-Policy": "same-origin", "Cross-Origin-Resource-Policy": "same-origin",
