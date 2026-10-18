@@ -58,6 +58,8 @@ restart.
 | `routing.handles_dms` | This brain answers direct messages. At most one brain. |
 | `routing.default` | This brain answers allowed groups no brain claims. At most one; without one, the first brain is the fallback. |
 | `routing.groups` | Group JIDs this brain answers. The group must also be allowed in the global settings. |
+| `routing.answer_files` | In this brain's groups, a file someone sends (photo, document, voice note, video) addresses the bridge, which answers it. Default `true`; `false` makes it chatter: the brain reads its caption without answering, and the file is not downloaded. The trigger, an @-mention or a reply to the bridge still address it. |
+| `routing.answer_forwards` | The same for a forwarded message. Default `true`. |
 | `model`, `effort` | Override the global `brain_model` / `brain_effort`. |
 | `disallowed_tools` | Override the global list; omit to inherit, `[]` to allow every tool. |
 | `prompt_file` | The prompt sent ahead of every message, relative to the folder. It must stay inside the folder, and be a file rather than a symlink (see [Files the bridge reads and writes](#files-the-bridge-reads-and-writes)). |

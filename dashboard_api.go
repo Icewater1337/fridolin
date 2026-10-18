@@ -1379,8 +1379,12 @@ func (b *Bridge) apiDevInbound(w http.ResponseWriter, r *http.Request) {
 			writeJSON(w, http.StatusAccepted, map[string]string{"status": "ignored", "reason": "group not allowed"})
 			return
 		}
-		if !cfg.Triggers.Matches(m.Text) && len(m.Media) == 0 {
+		files := len(m.Media) > 0 && b.groupRules(m.JID).files
+		if !cfg.Triggers.Matches(m.Text) && !files {
 			m.Silent = true
+			// As on WhatsApp, a file that does not address the bridge is
+			// chatter, and not fetched.
+			m.Media = nil
 		}
 		m.Text = cfg.Triggers.Strip(m.Text)
 	} else if !numberAllowed(cfg, m.Sender) {

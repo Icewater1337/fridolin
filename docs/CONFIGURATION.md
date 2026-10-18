@@ -110,7 +110,12 @@ message; an object can restrict it:
 
 An @-mention of the bridge's own account always counts, whatever this list
 says, and is stripped the same way: `@Fridolin !stop` is the command `!stop`.
-So does sending a file, and so does forwarding a message.
+So does a reply to any message the bridge's account sent. Sending a file
+(photo, document, voice note, video; a GIF is none) and forwarding a message
+count too, unless the group's brain turns them off with `routing.answer_files`
+or `routing.answer_forwards` (docs/BRAINS.md, or the brain's page in the
+dashboard): then a file is chatter whose caption the brain reads, and it is not
+downloaded, and a forward is chatter like any other.
 
 Untagged group messages still run through the brain — so it keeps up with the
 conversation — but produce no reply. Very short messages ("ok", "👍") are

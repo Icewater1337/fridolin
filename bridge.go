@@ -166,6 +166,7 @@ func NewBridge(cfgs *ConfigStore, opts BridgeOptions) (_ *Bridge, err error) {
 			return nil, fmt.Errorf("creating whatsapp client: %w", err)
 		}
 		wa.onVote = b.recordVote
+		wa.groupRules = b.groupRules
 		b.wa = wa
 		b.lids = wa.lidStore
 	}
@@ -322,6 +323,15 @@ func (b *Bridge) Stop() {
 	log.Println("Bridge stopped.")
 }
 
+// groupRules is what addresses the bridge in the group jid: what the
+// routing of the brain that answers there says.
+func (b *Bridge) groupRules(jid string) groupRules {
+	if br := b.brainMgr.BrainFor(jid, true); br != nil {
+		return br.settings.Load().manifest.Routing.groupRules()
+	}
+	return defaultGroupRules
+}
+
 // recordIgnored notes a chat that wrote without being allowed.
 func (b *Bridge) recordIgnored(kind, jid, name, sender, pushName string) {
 	if err := b.store.RecordIgnored(kind, jid, name, sender, pushName); err != nil {
@@ -445,7 +455,7 @@ func (b *Bridge) handleCommand(ctx context.Context, m Inbound, cfg *Config) bool
 			"• `!reset` — like `!stop`; I still see the recent chat history afterwards"
 		if m.IsGroup() {
 			if t := cfg.Triggers.First(); t != "" {
-				help += "\n\nIn this group, start your message with `" + t + "` to address me, commands included."
+				help += "\n\nIn this group, start your message with `" + t + "` or reply to one of mine to address me, commands included."
 			}
 		}
 		_ = b.wa.SendMessage(ctx, m.JID, help)

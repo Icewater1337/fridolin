@@ -73,9 +73,12 @@ type WhatsAppClient struct {
 	handler   InboundHandler
 	onIgnored IgnoredHandler
 	onVote    func(pollVote) // a vote was recorded; may be nil
-	log       waLog.Logger
-	media     mediaDownloader        // the client; tests swap in a fake
-	notify    func(jid, text string) // sendNotice; tests record instead
+	// groupRules is what addresses the bridge in a group, by its brain's
+	// routing; nil means defaultGroupRules.
+	groupRules func(groupJID string) groupRules
+	log        waLog.Logger
+	media      mediaDownloader        // the client; tests swap in a fake
+	notify     func(jid, text string) // sendNotice; tests record instead
 
 	// ctx ends when the client disconnects for good. Attachment downloads
 	// run under it, so shutting down does not wait for them.
@@ -534,10 +537,12 @@ func mediaList(p string) []string {
 
 // handleGroupMessage processes messages from allowed groups.
 //
-// A message is "tagged" — and so gets a visible reply — when it carries a file,
-// matches a configured trigger keyword, @-mentions the bridge account, or is
-// forwarded. Untagged text still runs through the brain so it stays aware of
-// the conversation, but produces no reply.
+// A message is "tagged" — and so gets a visible reply — when it addresses
+// the bridge (see addressGroup): a trigger keyword, an @-mention of the
+// bridge account, a quote-reply to one of its messages, and, unless the
+// group's brain turns them off, a file or a forward. Untagged text still
+// runs through the brain so it stays aware of the conversation, but
+// produces no reply.
 func (wa *WhatsAppClient) handleGroupMessage(msg *events.Message) {
 	cfg := wa.cfg()
 	groupJID := msg.Info.Chat.String()
@@ -561,59 +566,40 @@ func (wa *WhatsAppClient) handleGroupMessage(msg *events.Message) {
 	}
 
 	text := extractText(msg.Message)
+	own := wa.ownMentionJIDs()
+	addr := addressGroup(msg.Message, text, cfg.Triggers, own, wa.rulesFor(groupJID))
+	// Untagged: run the brain, send nothing.
+	silent := !addr.tagged
 
-	// GIF-playback videos are WhatsApp GIF reactions, not content: they must
-	// not count as a file upload.
-	hasVideo := false
-	if vid := msg.Message.GetVideoMessage(); vid != nil && !vid.GetGifPlayback() {
-		hasVideo = true
-	}
-	hasFile := msg.Message.GetImageMessage() != nil ||
-		msg.Message.GetDocumentMessage() != nil ||
-		msg.Message.GetAudioMessage() != nil ||
-		hasVideo
-
-	// Image and document captions can carry the trigger. Video captions cannot:
-	// they are metadata of the video, and the video itself is already a trigger.
-	attachmentCaption := ""
-	if img := msg.Message.GetImageMessage(); img != nil {
-		attachmentCaption = img.GetCaption()
-	} else if doc := msg.Message.GetDocumentMessage(); doc != nil {
-		attachmentCaption = doc.GetCaption()
-	}
-
-	isForwarded := false
-	if ext := msg.Message.GetExtendedTextMessage(); ext != nil {
-		if ci := ext.GetContextInfo(); ci != nil {
-			isForwarded = ci.GetIsForwarded() || ci.GetForwardingScore() > 0
+	if addr.byCaption {
+		if img := msg.Message.GetImageMessage(); img != nil {
+			text = img.GetCaption()
+		} else {
+			text = msg.Message.GetDocumentMessage().GetCaption()
 		}
-	}
-
-	textMatches := cfg.Triggers.Matches(text)
-	captionMatches := cfg.Triggers.Matches(attachmentCaption)
-	isMentioned := wa.isBotMentioned(msg.Message)
-	isTagged := hasFile || textMatches || captionMatches || isMentioned || isForwarded
-
-	// Untagged plain text: run the brain, send nothing.
-	silent := !isTagged && text != ""
-
-	if captionMatches && !textMatches {
-		text = attachmentCaption
 	}
 	// An @-mention is written into the text as "@" and the bridge's number
 	// (or LID). Like a trigger keyword, it only addresses the bridge, so it
 	// goes too: "@Fridolin !stop" must be the command "!stop".
 	var ownMentions []types.JID
-	if isMentioned {
-		ownMentions = wa.ownMentionJIDs()
+	if addr.mentioned {
+		ownMentions = own
 	}
 	text = stripMentions(cfg.Triggers.Strip(text), ownMentions)
 	quoted := wa.quoteOf(msg.Message)
 
-	mediaPath, caption, notice := wa.downloadAttachment(msg, groupJID)
-	// Untagged chatter gets no reply. A file always tags a group message,
-	// so this only guards against that rule changing.
-	if notice != "" && !silent {
+	// A file is fetched only for a message that addresses the bridge. In
+	// a group whose brain does not answer files, a photo is chatter, and
+	// its caption is all the brain reads of it.
+	var mediaPath, caption, notice string
+	if silent {
+		if att, ok := attachmentOf(msg.Message, msg.Info.ID); ok {
+			caption = att.caption
+		}
+	} else {
+		mediaPath, caption, notice = wa.downloadAttachment(msg, groupJID)
+	}
+	if notice != "" {
 		go wa.notify(groupJID, notice)
 	}
 	if caption != "" {
@@ -968,56 +954,25 @@ func numberAllowed(cfg *Config, number string) bool {
 	return slices.Contains(allowedNumbersAsNumbers(cfg.AllowedNumbers), number)
 }
 
+// rulesFor returns what addresses the bridge in the group jid, as its
+// brain's routing says.
+func (wa *WhatsAppClient) rulesFor(jid string) groupRules {
+	if wa.groupRules == nil {
+		return defaultGroupRules
+	}
+	return wa.groupRules(jid)
+}
+
 // isAllowedGroup reports whether the group JID is in allowed_groups.
 // Unlike DMs, groups are deny-by-default: an empty list means no groups.
 func (wa *WhatsAppClient) isAllowedGroup(jid string) bool {
 	return slices.Contains(wa.cfg().AllowedGroups, jid)
 }
 
-// isBotMentioned reports whether the bridge's own JID appears in the message's
-// mention list, i.e. someone @-tagged the bridge account by name.
-func (wa *WhatsAppClient) isBotMentioned(msg *waE2E.Message) bool {
-	if msg == nil || wa.client.Store.ID == nil {
-		return false
-	}
-	ownJIDs := wa.ownMentionJIDs()
-	if len(ownJIDs) == 0 {
-		return false
-	}
-
-	// Mentions usually ride on ExtendedTextMessage, but some clients attach
-	// ContextInfo to the media message instead.
-	var mentioned []string
-	collect := func(ci *waE2E.ContextInfo) {
-		if ci != nil {
-			mentioned = append(mentioned, ci.GetMentionedJID()...)
-		}
-	}
-	collect(msg.GetExtendedTextMessage().GetContextInfo())
-	collect(msg.GetImageMessage().GetContextInfo())
-	collect(msg.GetVideoMessage().GetContextInfo())
-	collect(msg.GetDocumentMessage().GetContextInfo())
-	collect(msg.GetAudioMessage().GetContextInfo())
-
-	for _, mentionedJID := range mentioned {
-		parsed, err := types.ParseJID(mentionedJID)
-		if err != nil {
-			continue
-		}
-		parsed = parsed.ToNonAD()
-		for _, own := range ownJIDs {
-			if parsed == own {
-				return true
-			}
-		}
-	}
-	return false
-}
-
 // ownMentionJIDs returns every JID form the bridge account may be mentioned as.
 // WhatsApp emits either the phone-number JID or the linked LID form.
 func (wa *WhatsAppClient) ownMentionJIDs() []types.JID {
-	if wa.client.Store.ID == nil {
+	if wa.client == nil || wa.client.Store.ID == nil {
 		return nil
 	}
 
