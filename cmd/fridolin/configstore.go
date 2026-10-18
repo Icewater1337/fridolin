@@ -530,43 +530,6 @@ func restartRequired(old, new *Config) []string {
 	return out
 }
 
-// writeFileAtomic writes data to a temp file in the same directory, syncs it
-// and renames it over path, so a crash never leaves a half-written file. With
-// backup, the previous version is kept as path.bak.
-func writeFileAtomic(path string, data []byte, perm os.FileMode, backup bool) error {
-	dir := filepath.Dir(path)
-	if err := os.MkdirAll(dir, 0o700); err != nil {
-		return err
-	}
-	tmp, err := os.CreateTemp(dir, "."+filepath.Base(path)+".*.tmp")
-	if err != nil {
-		return err
-	}
-	tmpName := tmp.Name()
-	defer os.Remove(tmpName)
-	if _, err := tmp.Write(data); err != nil {
-		tmp.Close()
-		return err
-	}
-	if err := tmp.Chmod(perm); err != nil {
-		tmp.Close()
-		return err
-	}
-	if err := tmp.Sync(); err != nil {
-		tmp.Close()
-		return err
-	}
-	if err := tmp.Close(); err != nil {
-		return err
-	}
-	if backup {
-		if prev, err := os.ReadFile(path); err == nil && !bytes.Equal(prev, data) {
-			_ = os.WriteFile(path+".bak", prev, perm)
-		}
-	}
-	return os.Rename(tmpName, path)
-}
-
 func etagOf(data []byte) string {
 	sum := sha256.Sum256(data)
 	return hex.EncodeToString(sum[:8])

@@ -5,7 +5,6 @@ import (
 	"cmp"
 	"errors"
 	"fmt"
-	"io/fs"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -1543,48 +1542,6 @@ func (b *profileBuilder) fail(err error) {
 	if b.err == nil {
 		b.err = err
 	}
-}
-
-const maxSymlinks = 64
-
-// resolvePath returns the real path of the absolute path p. Every symlink in
-// the part that exists is resolved, including a dangling one (it resolves to
-// its target), and the part that does not exist yet is kept as written, so
-// a rule still matches a folder created later. ".." is applied to the
-// resolved path, as the kernel does. On a symlink loop p comes back as is.
-func resolvePath(p string) string {
-	resolved := string(filepath.Separator)
-	rest := strings.Split(p, string(filepath.Separator))
-	links := 0
-	for len(rest) > 0 {
-		name := rest[0]
-		rest = rest[1:]
-		switch name {
-		case "", ".":
-			continue
-		case "..":
-			resolved = filepath.Dir(resolved)
-			continue
-		}
-		next := filepath.Join(resolved, name)
-		fi, err := os.Lstat(next)
-		if err != nil || fi.Mode()&fs.ModeSymlink == 0 {
-			// A real entry, or one that does not exist (yet): nothing to resolve.
-			resolved = next
-			continue
-		}
-		target, err := os.Readlink(next)
-		if links++; err != nil || links > maxSymlinks {
-			return filepath.Clean(p)
-		}
-		if !filepath.IsAbs(target) {
-			target = resolved + string(filepath.Separator) + target
-		}
-		// Walk the target from the root: it may hold symlinks and ".." too.
-		rest = append(strings.Split(target, string(filepath.Separator)), rest...)
-		resolved = string(filepath.Separator)
-	}
-	return resolved
 }
 
 // sbplString quotes s as an SBPL string literal. Go's %q is not one: it

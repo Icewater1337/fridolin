@@ -240,35 +240,6 @@ func checkBrainDir(dir, configured string, cfg *Config, home string) error {
 	return nil
 }
 
-// canonicalDir cleans p and resolves its symlinks (on macOS /tmp is a
-// symlink to /private/tmp, and the sandbox compares real paths). For an
-// absolute path that does not exist yet, such as a folder the dashboard is
-// about to create, it resolves the part that does: ~/link/new, with ~/link
-// a symlink out of HOME, lies where the link points, and that is where
-// MkdirAll would create it.
-func canonicalDir(p string) string {
-	if p == "" {
-		return ""
-	}
-	p = filepath.Clean(p)
-	if r, err := filepath.EvalSymlinks(p); err == nil {
-		return r
-	}
-	if filepath.IsAbs(p) {
-		return resolvePath(p)
-	}
-	return p
-}
-
-// isWithin reports whether p is dir or inside it.
-func isWithin(p, dir string) bool {
-	rel, err := filepath.Rel(dir, p)
-	if err != nil {
-		return false
-	}
-	return rel == "." || (rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)))
-}
-
 // inHome builds p, an absolute path a request named, again from your home
 // folder and the part of p below it. CheckBrainPath decides whether such a
 // folder may be used, but it only reports: the folder it hands back is still

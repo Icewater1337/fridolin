@@ -223,62 +223,6 @@ func TestSandboxProfileRefusesUnquotablePaths(t *testing.T) {
 	}
 }
 
-// TestResolvePath: the sandbox matches real paths, so every profile path is
-// resolved through symlinks, including the parts that do not exist yet.
-func TestResolvePath(t *testing.T) {
-	root := canonicalDir(t.TempDir())
-	for _, d := range []string{"real/sub", "other"} {
-		if err := os.MkdirAll(filepath.Join(root, d), 0o700); err != nil {
-			t.Fatal(err)
-		}
-	}
-	for link, target := range map[string]string{
-		"link":       filepath.Join(root, "real"),
-		"deep":       filepath.Join(root, "real", "sub"),
-		"rel":        "real",
-		"real/up":    "../other",
-		"chain":      "link",
-		"dangling":   filepath.Join(root, "nowhere", "sub"),
-		"loop1":      "loop2",
-		"loop2":      "loop1",
-		"other/back": "../link/sub",
-	} {
-		if err := os.Symlink(target, filepath.Join(root, link)); err != nil {
-			t.Fatal(err)
-		}
-	}
-	cases := []struct{ name, in, want string }{
-		{"real path", "real/sub", "real/sub"},
-		{"missing tail", "real/missing/deeper", "real/missing/deeper"},
-		{"symlinked parent", "link/sub", "real/sub"},
-		{"missing tail under a symlink", "link/missing/deeper", "real/missing/deeper"},
-		{"the symlink itself", "link", "real"},
-		{"relative symlink", "rel/sub", "real/sub"},
-		{"relative symlink with ..", "real/up", "other"},
-		{"symlink to a symlink", "chain/sub", "real/sub"},
-		{"dangling symlink", "dangling/f", "nowhere/sub/f"},
-		{".. after a symlink is physical", "deep/../x", "real/x"},
-		{".. inside the missing part", "real/missing/../sub", "real/sub"},
-		{"symlink inside a symlink target", "other/back", "real/sub"},
-		{"symlink loop is left alone", "loop1/x", "loop1/x"},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			// Not filepath.Join: it would apply ".." before resolvePath sees it.
-			if got, want := resolvePath(root+"/"+tc.in), filepath.Join(root, tc.want); got != want {
-				t.Errorf("resolvePath(%s) = %s, want %s", tc.in, got, want)
-			}
-		})
-	}
-	t.Run("temp dir spelling", func(t *testing.T) {
-		// On macOS t.TempDir() is under /var, a symlink to /private/var.
-		dir := t.TempDir()
-		if got, want := resolvePath(dir), canonicalDir(dir); got != want {
-			t.Errorf("resolvePath(%s) = %s, want %s", dir, got, want)
-		}
-	})
-}
-
 // TestSandboxProfileCoversRealPaths: with HOME, the data dir, the
 // credentials dir and a deny path all reached through symlinks, the profile
 // carries each rule for the configured and for the real path.

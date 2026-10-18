@@ -1164,7 +1164,7 @@ func (b *Bridge) apiAddBrain(w http.ResponseWriter, r *http.Request) {
 			writesManifest = true
 		}
 		approved := m
-		c.BrainDirs = append(c.BrainDirs, BrainRef{Path: tildePath(abs), Approved: &approved})
+		c.BrainDirs = append(c.BrainDirs, BrainRef{Path: tildePath(abs, homeDir()), Approved: &approved})
 		return nil
 	}); err != nil {
 		scaffold.rollback()
@@ -1633,20 +1633,3 @@ func (b *Bridge) apiDevOutbox(w http.ResponseWriter, r *http.Request) {
 }
 
 // ── helpers ──────────────────────────────────────────────────────────────
-
-// tildePath writes paths under the home folder as ~/…, so config.json and
-// backups stay valid on a machine with a different user name.
-func tildePath(p string) string {
-	home := homeDir()
-	if home == "" {
-		return p
-	}
-	home = canonicalDir(home)
-	if rel, err := filepath.Rel(home, p); err == nil && !strings.HasPrefix(rel, "..") {
-		if rel == "." {
-			return "~"
-		}
-		return "~/" + rel
-	}
-	return p
-}

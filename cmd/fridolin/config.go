@@ -1005,20 +1005,6 @@ func homeDir() string {
 	return home
 }
 
-// expandHome rewrites a leading "~" to home, the user's home directory. It
-// is the one ~ expansion: effective applies it to every path setting, so
-// only code that works on the file layer, or on a path from a request,
-// calls it itself.
-func expandHome(path, home string) string {
-	if path == "~" {
-		return home
-	}
-	if strings.HasPrefix(path, "~/") {
-		return filepath.Join(home, path[2:])
-	}
-	return path
-}
-
 // isTruthy reports whether v reads as true: true, 1, yes or on.
 func isTruthy(v string) bool {
 	switch strings.ToLower(strings.TrimSpace(v)) {

@@ -676,10 +676,6 @@ func rcloneInstallHint() string {
 	}
 }
 
-// fileExists reports whether p names a file or folder that exists (and can
-// be looked at), following symlinks.
-func fileExists(p string) bool { _, err := os.Stat(p); return err == nil }
-
 // ── connecting Google Drive ──────────────────────────────────────────────
 
 var authURLRe = regexp.MustCompile(`http://127\.0\.0\.1:\d+/auth\?state=[A-Za-z0-9_-]+`)
