@@ -348,7 +348,7 @@ The brain you name handles it like a WhatsApp attachment and replies in its
 reply chat (`reply_chat`, or the default described in
 [docs/BRAINS.md](docs/BRAINS.md)), even when that chat belongs to another
 brain. Both endpoints only listen on localhost and refuse requests a web page
-sends.
+sends. [docs/API.md](docs/API.md) is their full contract.
 
 ### Google Calendar
 

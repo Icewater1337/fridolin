@@ -436,16 +436,18 @@ func TestIngestConfinedToMediaDir(t *testing.T) {
 	}
 }
 
-// An unknown brain is named as it was sent, in Go quotes: these errors are
-// plain text, where JSON's escapes of <, > and & would only garble it.
+// An unknown brain is named as it was sent, in Go quotes.
 func TestUnknownBrainIsQuotedAsSent(t *testing.T) {
 	tb := newTestBridge(t, `, "ingest": {"enabled": true}`)
 	const want = `unknown brain "<a&b>"`
-	if w := tb.ingest(`{"brain":"<a&b>","text":"x"}`); w.Code != http.StatusBadRequest || !strings.Contains(w.Body.String(), want) {
-		t.Errorf("ingest: %d %q, want 400 saying %s", w.Code, w.Body.String(), want)
-	}
-	w := tb.do("POST", "/api/dev/inbound", map[string]any{"jid": "15551234567@s.whatsapp.net", "brain": "<a&b>", "text": "x"})
 	var body struct{ Error string }
+	w := tb.ingest(`{"brain":"<a&b>","text":"x"}`)
+	_ = json.Unmarshal(w.Body.Bytes(), &body)
+	if w.Code != http.StatusBadRequest || body.Error != want {
+		t.Errorf("ingest: %d %q, want 400 saying %s", w.Code, body.Error, want)
+	}
+	w = tb.do("POST", "/api/dev/inbound", map[string]any{"jid": "15551234567@s.whatsapp.net", "brain": "<a&b>", "text": "x"})
+	body.Error = ""
 	_ = json.Unmarshal(w.Body.Bytes(), &body)
 	if w.Code != http.StatusBadRequest || body.Error != want {
 		t.Errorf("dev inbound: %d %q, want 400 saying %s", w.Code, body.Error, want)
@@ -465,7 +467,9 @@ func TestIngestRefusesScope(t *testing.T) {
 	} {
 		t.Run(name, func(t *testing.T) {
 			w := tb.ingest(body)
-			if w.Code != http.StatusBadRequest || !strings.Contains(w.Body.String(), `name the brain in "brain"`) {
+			var got struct{ Error string }
+			_ = json.Unmarshal(w.Body.Bytes(), &got)
+			if w.Code != http.StatusBadRequest || !strings.Contains(got.Error, `name the brain in "brain"`) {
 				t.Errorf("%d %q, want 400 naming the brain field", w.Code, w.Body.String())
 			}
 		})

@@ -1901,6 +1901,10 @@ func (bm *BrainManager) BrainFor(jid string, isGroup bool) *Brain {
 	return bm.fallback
 }
 
+// DMBrain returns the brain that gets direct messages: the one with
+// handles_dms, else the fallback brain, or nil.
+func (bm *BrainManager) DMBrain() *Brain { return bm.BrainFor("", false) }
+
 // Get returns a brain by id.
 func (bm *BrainManager) Get(id string) *Brain {
 	bm.mu.RLock()

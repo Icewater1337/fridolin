@@ -582,8 +582,8 @@ func (b *Bridge) runStartupChecks(ctx context.Context) {
 		return
 	}
 	jid := cfg.StartupChecks.NotifyJID
-	if jid == "" && len(cfg.AllowedNumbers) > 0 {
-		jid = userJID(cfg.AllowedNumbers[0])
+	if jid == "" {
+		jid = ownerChat(cfg)
 	}
 	if jid == "" {
 		return

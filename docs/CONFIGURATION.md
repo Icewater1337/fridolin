@@ -676,18 +676,12 @@ Address of the dashboard and the local APIs. Default `"127.0.0.1:8765"`;
 binds it before connecting to WhatsApp and exits if it is taken — usually a
 sign another bridge is running.
 
-`POST /send {"jid","text"}` sends a message (see the README); it is appended to
-the owning brain's history, so the assistant knows what went out under its
-name. Text that is empty or only whitespace is refused with 400, since there
-would be nothing to send. Status, broadcast-list and channel JIDs
-(`…@broadcast`, `…@newsletter`) are refused with `400 {"error": …}`.
-`GET /health` returns `ok` while the bridge runs, paired or not. `GET /ready`
-says whether `/send` can deliver: `200` once WhatsApp is connected (or in dev
-mode), `503` otherwise, both with
-`{"ready", "whatsapp", "version", "started_at"}`, where `whatsapp` is the
-connection state (`pairing`, `connecting`, `connected`, `logged-out`,
-`replaced`, …). None of these need the dashboard token, and all of them refuse
-requests sent by web pages.
+`POST /send {"jid","text"}` sends a message; it is appended to the owning
+brain's history, so the assistant knows what went out under its name.
+`GET /health` returns `ok` while the bridge runs, paired or not; `GET /ready`
+says whether `/send` can deliver. None of these need the dashboard token, and
+all of them refuse requests sent by web pages. [API.md](API.md) has their
+contract and that of `/ingest`: request bodies, answers, every status code.
 
 Brains reach `/brain/` there, which `fridolin polls` asks for the brain's
 poll results and `fridolin calendar` for its calendar calls. It takes no
@@ -707,7 +701,7 @@ still sends `scope`, the old name of `brain`, is refused with 400 and told
 to use `brain`. Paths must be files inside the media directory. The
 named brain receives them like WhatsApp attachments and answers in its
 `reply_chat`, even when that chat belongs to another brain (your DM, say).
-Off by default.
+Off by default; see [API.md](API.md#post-ingest).
 
 ### `queue`
 

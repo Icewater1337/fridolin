@@ -1147,10 +1147,7 @@ func (p *PlaudManager) summaryChat(cfg *Config, br *Brain) string {
 	if rc := br.settings.Load().manifest.ReplyChat; isDirectChat(rc) {
 		return rc
 	}
-	if len(cfg.AllowedNumbers) > 0 {
-		return userJID(cfg.AllowedNumbers[0])
-	}
-	return ""
+	return ownerChat(cfg)
 }
 
 // isDirectChat reports whether jid is a one-to-one chat (a phone number or a
@@ -1794,7 +1791,7 @@ func (p *PlaudManager) Status() PlaudStatus {
 		s.SummaryError = err.Error()
 	} else {
 		s.SummaryChat = jid
-		s.SummaryToYou = len(cfg.AllowedNumbers) > 0 && jid == userJID(cfg.AllowedNumbers[0])
+		s.SummaryToYou = jid != "" && jid == ownerChat(cfg)
 		if owner := p.brains.BrainFor(jid, false); owner != nil && owner != br {
 			s.SummaryChatBrain = owner.ID()
 		}
