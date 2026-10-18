@@ -431,7 +431,7 @@ and Debian's Python refuse a plain `pip install` (PEP 668). Keep it out of
 
 ```bash
 python3 -m venv ~/.local/share/fridolin/venv
-~/.local/share/fridolin/venv/bin/pip install -r tools/requirements-transcription.txt   # local: private, ~1.5 GB model
+~/.local/share/fridolin/venv/bin/pip install -r tools/requirements-transcription.txt   # local, ~1.5 GB model
 ~/.local/share/fridolin/venv/bin/pip install groq && export GROQ_API_KEY=...           # API: light, needs a key
 ```
 
@@ -441,8 +441,11 @@ script's own metadata lists them, into uv's cache.
 
 Brains get `GROQ_API_KEY` from the bridge's process environment, and only
 when [`child_env_passthrough`](docs/CONFIGURATION.md#child_env_passthrough)
-names it: `"child_env_passthrough": ["GROQ_API_KEY"]`. The bridge reads no
-`.env` file. [Environment
+names it: `"child_env_passthrough": ["GROQ_API_KEY"]`. The local engine
+keeps the audio on your computer, but once a brain has the key, the
+default engine (`--engine auto`) sends it to Groq whenever the local model
+is not installed or fails ([PRIVACY.md](PRIVACY.md#who-else-gets-data)).
+The bridge reads no `.env` file. [Environment
 variables](docs/CONFIGURATION.md#environment-variables) says where to keep it
 so that the next install does not drop it.
 
