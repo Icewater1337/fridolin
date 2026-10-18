@@ -4,7 +4,8 @@
 Handles the things that go wrong with long recordings so the assistant does
 not have to: video audio extraction, splitting long files into chunks the
 model can actually hold, running a local Whisper model when one is installed,
-and falling back to the Groq API per chunk with rate-limit backoff.
+and falling back to the Groq API per chunk, which the Groq SDK retries with
+backoff.
 
 Usage
 -----
@@ -15,7 +16,8 @@ Usage
     transcribe.py interview.m4a --engine groq --output-dir ./transcripts
 
 Output is JSON on stdout: transcript, transcript_file, audio_file, language,
-engine, duration_seconds.
+engine, duration_seconds. An error is {"error": ...} on stdout with exit
+status 1, whatever failed.
 
 Both the transcript and a copy of the original media are written to the output
 directory under the same stem, so they stay paired:
@@ -39,38 +41,47 @@ it to a few sentences, since Whisper reads only the last 223 tokens of it.
     Groq:   pip install groq          (no local model needed, much lighter)
             and set GROQ_API_KEY: in the bridge's environment, listed in its
             config's child_env_passthrough, or brains do not get it
-            (docs/CONFIGURATION.md#child_env_passthrough)
+            (docs/CONFIGURATION.md#child_env_passthrough). Each file goes up
+            as 16 kHz mono FLAC, as Groq recommends, which keeps a chunk of
+            the default ten minutes well under Groq's upload limit.
 
 `--model` takes any Whisper-compatible model ID from the Hugging Face hub.
 A dialect- or language-specific fine-tune usually beats the base model by a
 wide margin — worth searching for one that matches how people actually speak
 in your recordings.
 
-Requires ffmpeg and ffprobe on PATH for video input and for chunking.
+Requires ffmpeg on PATH for every run: each Groq upload is converted with
+it, and the local model reads audio through it. ffprobe is needed for video
+input and to split a long file into chunks; without it a file goes whole.
 """
 
 from __future__ import annotations
 
 import argparse
-import json
 import os
 import re
 import shlex
 import shutil
 import subprocess
-import sys
 import tempfile
-import time
+import traceback
 from dataclasses import dataclass
 from datetime import date
 from pathlib import Path
-from typing import Any, NoReturn
+from typing import Any
+
+from toolkit import ArgumentParser, emit_json, fail, log
 
 DEFAULT_MODEL = os.environ.get("TRANSCRIBE_MODEL", "openai/whisper-large-v3-turbo")
 VIDEO_EXTS = {".mp4", ".mov", ".webm", ".3gp", ".mkv", ".avi", ".m4v"}
 DEFAULT_CHUNK_SECONDS = 600  # split anything longer than ~10 minutes
 GROQ_MODEL = "whisper-large-v3"
-GROQ_MIN_INTERVAL = 6.0      # seconds between Groq calls, to stay under the rate limit
+# The SDK retries a request that hit the rate limit, a 5xx or a timeout,
+# with exponential backoff and Groq's retry-after; its default is 2.
+GROQ_RETRIES = 5
+# Groq refuses uploads over 25 MB (on its free tier). Ten minutes of 16 kHz
+# mono FLAC are a few MB, so only a much longer --chunk-seconds gets there.
+GROQ_MAX_UPLOAD = 25 * 1000 * 1000
 # Whisper's decoder holds 448 tokens in all: the prompt, a few start tokens
 # and the text of one 30 s window. Like openai-whisper, give the prompt at
 # most half.
@@ -84,19 +95,9 @@ GROQ_KEY_HINT = ("set GROQ_API_KEY in the bridge's environment and list it in th
                  "child_env_passthrough (docs/CONFIGURATION.md#child_env_passthrough)")
 
 
-def die(msg: str) -> NoReturn:
-    print(json.dumps({"error": msg}))
-    sys.exit(1)
-
-
-def log(msg: str) -> None:
-    """Progress goes to stderr so stdout stays parseable JSON."""
-    print(msg, file=sys.stderr)
-
-
 def require_binary(name: str) -> None:
     if shutil.which(name) is None:
-        die(f"{name} not found on PATH. Install ffmpeg (macOS: brew install ffmpeg).")
+        fail(f"{name} not found on PATH. Install ffmpeg (macOS: brew install ffmpeg).")
 
 
 # ── media preparation ─────────────────────────────────────────────────────
@@ -135,7 +136,7 @@ def extract_audio(video_path: Path) -> Path:
     )
     if r.returncode != 0:
         tmp.unlink(missing_ok=True)
-        die(f"ffmpeg could not extract audio: {r.stderr[-500:]}")
+        fail(f"ffmpeg could not extract audio: {r.stderr[-500:]}")
     return tmp
 
 
@@ -145,25 +146,17 @@ def split_audio(audio_path: Path, chunk_seconds: int) -> list[Path]:
     tmpdir = Path(tempfile.mkdtemp(prefix="transcribe-chunks-"))
     pattern = str(tmpdir / "chunk-%03d.wav")
 
-    # Stream copy is fast and lossless, and safe for PCM because samples are
-    # independently decodable. Re-encode only if that fails.
+    # Decoded to 16 kHz mono PCM, which both engines take: a stream copy of
+    # a compressed format would cut it where it cannot be decoded.
     r = subprocess.run(
         ["ffmpeg", "-y", "-i", str(audio_path), "-f", "segment",
-         "-segment_time", str(chunk_seconds), "-c", "copy", pattern],
+         "-segment_time", str(chunk_seconds), "-acodec", "pcm_s16le",
+         "-ac", "1", "-ar", "16000", pattern],
         capture_output=True, text=True,
     )
-    if r.returncode != 0 or not list(tmpdir.glob("chunk-*.wav")):
-        for f in tmpdir.glob("chunk-*.wav"):
-            f.unlink(missing_ok=True)
-        r = subprocess.run(
-            ["ffmpeg", "-y", "-i", str(audio_path), "-f", "segment",
-             "-segment_time", str(chunk_seconds), "-acodec", "pcm_s16le",
-             "-ac", "1", "-ar", "16000", pattern],
-            capture_output=True, text=True,
-        )
-        if r.returncode != 0:
-            shutil.rmtree(tmpdir, ignore_errors=True)
-            die(f"ffmpeg could not split the audio: {r.stderr[-500:]}")
+    if r.returncode != 0:
+        shutil.rmtree(tmpdir, ignore_errors=True)
+        fail(f"ffmpeg could not split the audio: {r.stderr[-500:]}")
 
     return sorted(tmpdir.glob("chunk-*.wav"))
 
@@ -254,7 +247,7 @@ def fit_prompt(ids: Any) -> Any:
 
 # ── Groq engine ───────────────────────────────────────────────────────────
 
-_LAST_GROQ_CALL = 0.0
+_GROQ: Any = None  # one client for the whole run
 
 
 def groq_available() -> bool:
@@ -267,44 +260,57 @@ def groq_available() -> bool:
         return False
 
 
+def groq_client() -> Any:
+    """The run's Groq client, made on first use.
+
+    The SDK retries what is worth retrying (rate limits, 5xx, timeouts) and
+    waits as long as Groq's retry-after says, so nothing here retries again.
+    """
+    global _GROQ
+    if _GROQ is None:
+        api_key = os.environ.get("GROQ_API_KEY")
+        if not api_key:
+            raise RuntimeError("GROQ_API_KEY is not set")
+        from groq import Groq
+        _GROQ = Groq(api_key=api_key, max_retries=GROQ_RETRIES)
+    return _GROQ
+
+
+def to_flac(audio_path: Path) -> Path:
+    """A 16 kHz mono FLAC copy of audio_path, which Groq recommends: it is
+    what the model hears anyway, and far smaller than the WAV chunks or a
+    stereo recording."""
+    require_binary("ffmpeg")
+    fd, tmp_name = tempfile.mkstemp(suffix=".flac", prefix="transcribe-")
+    os.close(fd)
+    tmp = Path(tmp_name)
+    r = subprocess.run(
+        ["ffmpeg", "-y", "-i", str(audio_path), "-vn", "-ac", "1", "-ar", "16000", "-c:a", "flac", str(tmp)],
+        capture_output=True, text=True,
+    )
+    if r.returncode != 0:
+        tmp.unlink(missing_ok=True)
+        raise RuntimeError(f"ffmpeg could not convert the audio for Groq: {r.stderr[-500:]}")
+    return tmp
+
+
 def transcribe_groq(audio_path: Path, language: str | None, prompt: str | None) -> str:
-    """Transcribe via the Groq API, paced and retried on rate limits."""
-    global _LAST_GROQ_CALL
-
-    api_key = os.environ.get("GROQ_API_KEY")
-    if not api_key:
-        raise RuntimeError("GROQ_API_KEY is not set")
-
-    from groq import Groq
-    client = Groq(api_key=api_key)
-
-    # Groq limits audio-seconds per minute, so pace calls rather than firing
-    # every chunk at once and eating a wall of 429s.
-    delta = time.monotonic() - _LAST_GROQ_CALL
-    if delta < GROQ_MIN_INTERVAL:
-        time.sleep(GROQ_MIN_INTERVAL - delta)
-
-    attempts, delay = 5, 10
-    for i in range(attempts):
-        try:
-            with open(audio_path, "rb") as f:
-                kwargs = {"file": (audio_path.name, f.read()), "model": GROQ_MODEL}
-                if language:
-                    kwargs["language"] = language
-                if prompt:
-                    kwargs["prompt"] = prompt
-                transcription = client.audio.transcriptions.create(**kwargs)
-            _LAST_GROQ_CALL = time.monotonic()
-            return transcription.text.strip()
-        except Exception as e:
-            msg = str(e).lower()
-            if ("rate" in msg or "429" in msg) and i < attempts - 1:
-                log(f"Groq rate-limited; retrying in {delay}s (attempt {i + 1}/{attempts})")
-                time.sleep(delay)
-                delay = min(delay * 2, 120)
-                continue
-            raise
-    return ""
+    """Transcribe via the Groq API."""
+    client = groq_client()
+    upload = to_flac(audio_path)
+    try:
+        size = upload.stat().st_size
+        if size > GROQ_MAX_UPLOAD:
+            raise RuntimeError(f"the audio is {size / 1e6:.0f} MB as FLAC, over Groq's "
+                               f"{GROQ_MAX_UPLOAD / 1e6:.0f} MB; pass a smaller --chunk-seconds")
+        kwargs = {"file": (upload.name, upload.read_bytes()), "model": GROQ_MODEL}
+        if language:
+            kwargs["language"] = language
+        if prompt:
+            kwargs["prompt"] = prompt
+        return client.audio.transcriptions.create(**kwargs).text.strip()
+    finally:
+        upload.unlink(missing_ok=True)
 
 
 # ── orchestration ─────────────────────────────────────────────────────────
@@ -322,12 +328,12 @@ def choose_engines(engine: str) -> Engines:
 
     install_local = f"pip install -r {shlex.quote(str(LOCAL_REQUIREMENTS))}"
     if engine == "local" and not use_local:
-        die(f"--engine local, but transformers/torch are not installed. Run: {install_local}")
+        fail(f"--engine local, but transformers/torch are not installed. Run: {install_local}")
     if engine == "groq" and not use_groq:
-        die("--engine groq, but GROQ_API_KEY is unset or the groq package is missing. "
+        fail("--engine groq, but GROQ_API_KEY is unset or the groq package is missing. "
             f"Run: pip install groq, and {GROQ_KEY_HINT}.")
     if not use_local and not use_groq:
-        die(f"No transcription engine available. Either install the local model "
+        fail(f"No transcription engine available. Either install the local model "
             f"({install_local}) or install the groq package and {GROQ_KEY_HINT}.")
     return Engines(local=use_local, groq=use_groq)
 
@@ -339,7 +345,7 @@ def transcribe_chunk(path: Path, args: argparse.Namespace, available: Engines) -
             load_local_pipeline(args.model)
         except Exception as e:
             if not available.groq:
-                die(f"The local model could not be loaded and no fallback is configured: {e}")
+                fail(f"The local model could not be loaded and no fallback is configured: {e}")
             # Loading again for every chunk would only fail again, slowly.
             log(f"The local model could not be loaded ({e}); using Groq for the rest")
             available.local = False
@@ -348,13 +354,13 @@ def transcribe_chunk(path: Path, args: argparse.Namespace, available: Engines) -
             return transcribe_local(path, args.model, args.language, args.prompt), f"local:{args.model}"
         except Exception as e:
             if not available.groq:
-                die(f"Local transcription failed and no fallback is configured: {e}")
+                fail(f"Local transcription failed and no fallback is configured: {e}")
             log(f"Local model failed ({e}); falling back to Groq")
 
     try:
         return transcribe_groq(path, args.language, args.prompt), f"groq:{GROQ_MODEL}"
     except Exception as e:
-        die(f"Groq transcription failed: {e}")
+        fail(f"Groq transcription failed: {e}")
 
 
 def build_filename(text: str, when: str) -> str:
@@ -415,7 +421,7 @@ def claim_paths(output_dir: Path, stem: str, media_suffix: str | None) -> tuple[
 
 
 def main() -> None:
-    ap = argparse.ArgumentParser(
+    ap = ArgumentParser(
         description="Transcribe an audio or video file to text.",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=__doc__,
@@ -440,10 +446,19 @@ def main() -> None:
     ap.add_argument("--keep-original", action=argparse.BooleanOptionalAction, default=True,
                     help="copy the source media next to the transcript")
     args = ap.parse_args()
+    # The one exception boundary: whatever goes wrong, stdout is a JSON error
+    # the assistant can read, never just a traceback on stderr.
+    try:
+        run(args)
+    except Exception as e:
+        traceback.print_exc()
+        fail(f"Transcription failed: {type(e).__name__}: {e}")
 
+
+def run(args: argparse.Namespace) -> None:
     source = Path(args.file).expanduser()
     if not source.exists():
-        die(f"File not found: {source}")
+        fail(f"File not found: {source}")
 
     output_dir = Path(args.output_dir).expanduser()
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -473,7 +488,7 @@ def main() -> None:
         if duration > args.chunk_seconds * 1.1:
             chunks = split_audio(working, args.chunk_seconds)
             if not chunks:
-                die("Splitting produced no chunks")
+                fail("Splitting produced no chunks")
             chunk_dir = chunks[0].parent
 
             segments = []
@@ -493,7 +508,7 @@ def main() -> None:
             shutil.rmtree(chunk_dir, ignore_errors=True)
 
     if not text:
-        die("Transcription produced no text")
+        fail("Transcription produced no text")
 
     stem = build_filename(text, date.today().strftime("%Y-%m-%d"))
     media_suffix = media_suffix_of(source) if args.keep_original else None
@@ -503,14 +518,14 @@ def main() -> None:
     if audio_dest is not None:
         shutil.copy2(source, audio_dest)
 
-    print(json.dumps({
+    emit_json({
         "transcript": text,
         "transcript_file": str(transcript_path),
         "audio_file": str(audio_dest) if audio_dest else None,
         "language": args.language or "auto-detected",
         "engine": "+".join(sorted(used)),
         "duration_seconds": round(duration, 1) if duration else None,
-    }, ensure_ascii=False, indent=2))
+    })
 
 
 if __name__ == "__main__":

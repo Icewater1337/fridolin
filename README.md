@@ -296,8 +296,9 @@ They're starting points. Edit them, and add your own.
 ### Transcription
 
 `tools/transcribe.py` handles voice notes and recordings of any length: it
-pulls audio out of video, splits long files into chunks, runs a local Whisper
-model or the Groq API, and retries with backoff on rate limits.
+pulls audio out of video, splits long files into chunks, and runs a local
+Whisper model or the Groq API (sending 16 kHz mono FLAC, retried with backoff
+by Groq's SDK).
 
 ```bash
 python3 tools/transcribe.py voice-note.ogg --output-dir ~/assistant/personal/transcripts

@@ -10,12 +10,22 @@
 #
 # ffmpeg is required either way (macOS: brew install ffmpeg).
 
-torch>=2.1.0
+#
+# Each line is a floor that was checked and a ceiling at the next major
+# release, which may break what the tool calls (transformers 5 drops the
+# torch_dtype argument it passes); Dependabot proposes moving them. pip
+# picks the newest release in range for the Python it runs on. Brains run
+# the first python3 on the service's PATH, which may be macOS's own
+# /usr/bin/python3 (3.9, where torch stops at 2.8) or Homebrew's: install
+# into that one.
+
+torch>=2.1.0,<3
 # --prompt (Whisper prompt_ids under the pipeline's 30 s chunking) was checked
 # with 4.57, so that is the floor; older releases were not checked.
-transformers>=4.57.0
-accelerate>=0.27.0
+transformers>=4.57.0,<5
+accelerate>=0.27.0,<2
 
 # Fallback engine — useful alongside the local model too, since `--engine auto`
-# uses it whenever a local run fails.
-groq>=0.11.0
+# uses it whenever a local run fails. The tool lets the SDK retry
+# (max_retries), which every release in range has.
+groq>=0.11.0,<2

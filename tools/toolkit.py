@@ -11,6 +11,7 @@ for one release so that prompts and scripts written for them keep working.
 
 from __future__ import annotations
 
+import argparse
 import json
 import os
 import shutil
@@ -63,3 +64,12 @@ def run_fridolin(old: str, args: list[str]) -> NoReturn:
         os.execv(exe, [exe, *args])
     except OSError as e:
         fail(f"Cannot run {exe}: {e}")
+
+
+class ArgumentParser(argparse.ArgumentParser):
+    """Reports a usage mistake like every other error: the usage on stderr,
+    the error as JSON on stdout with exit status 1."""
+
+    def error(self, message: str) -> NoReturn:
+        self.print_usage(sys.stderr)
+        fail(f"{self.prog}: {message}")
