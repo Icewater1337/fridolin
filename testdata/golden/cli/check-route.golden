@@ -15,4 +15,5 @@ Config OK: <ROOT>/config.json
   route 120363000000000000@g.us → family
   route 120363000000000001@g.us → main (not in allowed_groups: ignored)
 <TIME> config: group 120363000000000000@g.us has no group_members entry: only allowed_numbers can start runs there, and what other members write is not read; an entry of ["*"] for it lets every member in, as before, or list their numbers
-exit 0
+<TIME> brain missing cannot run; see the issue above
+exit 3

@@ -244,10 +244,20 @@ else
   ok "wrote a starter config to $CONFIG"
 fi
 # A config this build does not load (inline brains, say) stops here,
-# before anything is installed, with check's error above. Its claude line
-# is the CLI brains will run, with the version checked against the
-# release the bridge was tested with.
-CHECK_OUT="$("$NEW" check --config "$CONFIG")" || fail "This build cannot load $CONFIG (see the error above). Nothing was installed."
+# before anything is installed, with check's error above, and so does
+# one with a brain this build would leave out (check exits 3): the
+# bridge would run without it, and a DM brain left out takes no DMs.
+# The issues check found with brains are shown either way, since only
+# its claude line is used otherwise: the CLI brains will run, with the
+# version checked against the release the bridge was tested with.
+CHECK_RC=0
+CHECK_OUT="$("$NEW" check --config "$CONFIG")" || CHECK_RC=$?
+printf '%s\n' "$CHECK_OUT" | sed -n 's/^  ! *//p' | while IFS= read -r issue; do warn "$issue"; done
+case $CHECK_RC in
+  0) ;;
+  3) fail "A brain in $CONFIG cannot run with this build (see above): fix its folder, or remove the brain in the dashboard, then run setup.sh again. Nothing was installed." ;;
+  *) fail "This build cannot load $CONFIG (see the error above). Nothing was installed." ;;
+esac
 CLAUDE_LINE="$(printf '%s\n' "$CHECK_OUT" | sed -n 's/^  claude: *//p')"
 case "$CLAUDE_LINE" in
   "") ;;

@@ -58,6 +58,13 @@ type BrainIssue struct {
 	entry int
 }
 
+// leavesOut reports whether the issue keeps an approved brain from running:
+// its folder is missing or cannot hold a brain, or it clashes with another
+// brain. Drift does not; the approved manifest still runs.
+func (is BrainIssue) leavesOut() bool {
+	return is.ID != "" && (is.Kind == "invalid" || is.Kind == "missing")
+}
+
 // ResolveBrains turns the brain folders in the configuration into runnable
 // brains. Brains with problems are left out and reported, so one broken
 // folder never takes the others down.

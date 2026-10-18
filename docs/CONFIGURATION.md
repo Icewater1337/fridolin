@@ -18,6 +18,12 @@ Validate at any time:
 fridolin check
 ```
 
+It lists the brains and the issues of those it leaves out, and exits with
+status 3 when a brain you approved will not run (its folder is missing or
+cannot hold a brain, or it clashes with another), 1 when the config does
+not load. `setup.sh` shows those issues and stops before it installs in
+either case.
+
 For a bug report, `fridolin check --redact` prints the same with phone
 numbers, group JIDs, LIDs and email addresses masked and `~` for your home
 folder, its log lines and any `--print-sandbox` profile included.

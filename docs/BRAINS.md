@@ -25,7 +25,8 @@ it and hands it to this brain's runs only (see
 [writing](CONFIGURATION.md#writing)).
 The bridge checks configured brains the same way whenever it loads them,
 also those you add to `brain_dirs` by hand, and leaves out one that fails,
-with an issue on the Brains page. Then it writes what is missing:
+with an issue on the Brains page; `fridolin check` then exits with status
+3, and `setup.sh` stops before it installs. Then it writes what is missing:
 
 ```
 <folder>/

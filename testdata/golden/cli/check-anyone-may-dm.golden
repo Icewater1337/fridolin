@@ -10,4 +10,5 @@ Config OK: <ROOT>/config.json
   brain drifted        → <HOME>/drifted (dms=false default=false groups=[])
   ! drift <HOME>/drifted: brain.json changed on disk — review and approve it in the dashboard
   ! missing <HOME>/missing: folder not found
-exit 0
+<TIME> brain missing cannot run; see the issue above
+exit 3

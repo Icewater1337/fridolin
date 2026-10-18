@@ -24,7 +24,9 @@ case "$1 $2" in
     mkdir -p "$(dirname "$3")" && echo '{}' > "$3" ;;
   "check --config")
     if [ -n "$FAKE_CHECK_FAIL" ]; then echo "loading config: $FAKE_CHECK_FAIL" >&2; exit 1; fi
-    printf 'Config OK: %s\n  claude:    /opt/claude (2.1.400 (Claude Code))\n' "$3" ;;
+    printf 'Config OK: %s\n  claude:    /opt/claude (2.1.400 (Claude Code))\n' "$3"
+    if [ -n "$FAKE_CHECK_ISSUE" ]; then printf '  ! %s\n' "$FAKE_CHECK_ISSUE"; fi
+    if [ -n "$FAKE_CHECK_LEFT_OUT" ]; then echo "brain personal cannot run; see the issue above" >&2; exit 3; fi ;;
   "service status")
     exit "${FAKE_STATUS:-3}" ;;
   "service install")
@@ -166,6 +168,12 @@ func TestSetupSaysWhatHappened(t *testing.T) {
 			[]string{"Setup complete", "The dashboard is open in your browser (or run: $HOME/.local/lib/fridolin/fridolin open)", "go back to the previous build"}, nil},
 		{"a config this build does not load", nil, []string{"FAKE_CHECK_FAIL=inline brains no longer load"}, true, 1, false,
 			[]string{"loading config: inline brains no longer load", "This build cannot load $HOME/.fridolin/config.json", "Nothing was installed"}, []string{"rollback"}},
+		// check's issues used to be thrown away with the rest of its
+		// report, and a brain it would leave out did not stop the install.
+		{"a brain has drifted", nil, []string{"FAKE_CHECK_ISSUE=drift ~/notes: brain.json changed on disk"}, true, 0, true,
+			[]string{"! drift ~/notes: brain.json changed on disk", "Setup complete"}, nil},
+		{"a brain would be left out", nil, []string{"FAKE_CHECK_ISSUE=invalid ~/assistant/personal: the folder is ~/.ssh", "FAKE_CHECK_LEFT_OUT=1"}, true, 1, false,
+			[]string{"! invalid ~/assistant/personal: the folder is ~/.ssh", "brain personal cannot run", "A brain in $HOME/.fridolin/config.json cannot run with this build", "Nothing was installed"}, []string{"This build cannot load", "rollback"}},
 		{"the install is refused", nil, []string{"FAKE_INSTALL=refuse"}, true, 1, true,
 			[]string{"(nothing was changed)", "The install was refused", "Nothing was installed"}, []string{"rollback"}},
 		{"the install fails before the binary changes", nil, []string{"FAKE_INSTALL=fail-before"}, true, 1, true,

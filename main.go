@@ -28,7 +28,8 @@ Usage:
   fridolin rotate-token      replace the dashboard token and sign out every browser
   fridolin check [--route JID ...] [--redact]
                                            validate the configuration and show routing;
-                                           --redact masks numbers, JIDs, emails and home paths
+                                           --redact masks numbers, JIDs, emails and home paths;
+                                           exits 3 when a configured brain cannot run
   fridolin init [--claude-path PATH] [--data-dir DIR]
                                            write a starter config (if there is none)
   fridolin paths [--json]                  the config file and data dir in use, and
@@ -533,8 +534,36 @@ func checkCmd(args []string) {
 	_ = fs.Parse(args)
 	o.routes = routes
 	if err := writeCheck(os.Stdout, o); err != nil {
+		if errors.Is(err, errBrainsLeftOut) {
+			log.Print(err)
+			os.Exit(checkBrainsLeftOut)
+		}
 		log.Fatal(err)
 	}
+}
+
+// checkBrainsLeftOut is check's exit status when the config loads but a
+// brain in it will not run, so that setup.sh stops before it installs a
+// bridge that leaves the brain out; 1 is for a config that does not load.
+const checkBrainsLeftOut = 3
+
+// errBrainsLeftOut is what check ends with when an approved brain cannot
+// run: its folder is missing or cannot hold a brain, or it clashes with
+// another. The bridge runs the others, and the issue is shown on the
+// Brains page, but that was easy to miss: the DM brain left out like that
+// used to hand your DMs to the default brain.
+var errBrainsLeftOut = errors.New("cannot run")
+
+// leftOutBrains returns the ids of the approved brains issues leaves out,
+// each once, in their order.
+func leftOutBrains(issues []BrainIssue) []string {
+	var ids []string
+	for _, is := range issues {
+		if is.leavesOut() && !slices.Contains(ids, is.ID) {
+			ids = append(ids, is.ID)
+		}
+	}
+	return ids
 }
 
 // writeCheck writes check's report to w. With o.redact the report, what
@@ -598,7 +627,7 @@ func checkReport(w io.Writer, path string, cfg *Config, o checkOptions) error {
 	}
 
 	if len(o.routes) == 0 && o.sandboxFor == "" {
-		return nil
+		return leftOutError(issues)
 	}
 	mgr := &BrainManager{brains: map[string]*Brain{}, byGroup: map[string]*Brain{}, profiler: NewSandboxProfiler(nil, cfg), hooks: &BrainHooks{}}
 	mgr.profiler.SetConfigFile(path)
@@ -628,7 +657,19 @@ func checkReport(w io.Writer, path string, cfg *Config, o checkOptions) error {
 		fmt.Fprintln(w)
 		fmt.Fprint(w, profile)
 	}
-	return nil
+	return leftOutError(issues)
+}
+
+// leftOutError is errBrainsLeftOut for the brains issues leaves out, or nil.
+func leftOutError(issues []BrainIssue) error {
+	switch ids := leftOutBrains(issues); len(ids) {
+	case 0:
+		return nil
+	case 1:
+		return fmt.Errorf("brain %s %w; see the issue above", ids[0], errBrainsLeftOut)
+	default:
+		return fmt.Errorf("brains %s %w; see the issues above", strings.Join(ids, ", "), errBrainsLeftOut)
+	}
 }
 
 // claudeSummary is the CLI brains run and its version, with a warning when
@@ -801,13 +842,25 @@ func isWhatsAppServer(domain string) bool {
 	return domain == "s.whatsapp.net" || domain == "g.us" || domain == "lid"
 }
 
-// err returns err redacted, or err itself without a redactor.
+// err returns err redacted, or err itself without a redactor. The
+// redacted error still wraps err, so that what check exits with is the
+// same with --redact: errors.Is still finds errBrainsLeftOut in it.
 func (r *redactor) err(err error) error {
 	if r == nil || err == nil {
 		return err
 	}
-	return errors.New(r.text(err.Error()))
+	return redactedError{r.text(err.Error()), err}
 }
+
+// redactedError is an error whose text is redacted; it unwraps to the
+// error it was made from.
+type redactedError struct {
+	text string
+	err  error
+}
+
+func (e redactedError) Error() string { return e.text }
+func (e redactedError) Unwrap() error { return e.err }
 
 // redactingWriter writes what it is given redacted. The log package writes
 // each entry whole, so a number is never split between two writes.
