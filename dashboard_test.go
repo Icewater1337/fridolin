@@ -168,6 +168,56 @@ func TestDashboardServesOnlyThePage(t *testing.T) {
 	}
 }
 
+// The page's files carry a validator, so a browser asks whether each
+// changed instead of downloading all of them on every visit, and a
+// folder is not listed.
+func TestDashboardStaticFilesHaveValidatorsAndNoListings(t *testing.T) {
+	tb := newTestBridge(t, "")
+	get := func(path string, mutate ...func(*http.Request)) *httptest.ResponseRecorder {
+		return tb.do("GET", path, nil, append([]func(*http.Request){func(r *http.Request) { r.Header.Del("X-Bridge-Token") }}, mutate...)...)
+	}
+	for _, path := range []string{"/assets/", "/assets", "/assets/app/", "/assets/css/", "/nope.js"} {
+		t.Run("no listing "+path, func(t *testing.T) {
+			w := get(path)
+			if w.Code != http.StatusNotFound || strings.Contains(w.Body.String(), "<a href") {
+				t.Errorf("GET %s: %d %q, want 404 without a listing", path, w.Code, w.Body.String())
+			}
+		})
+	}
+	etags := map[string]string{}
+	for _, path := range []string{"/", "/assets/app.css", "/assets/app/main.js"} {
+		t.Run("validator "+path, func(t *testing.T) {
+			w := get(path)
+			etag := w.Header().Get("ETag")
+			if w.Code != 200 || !strings.HasPrefix(etag, `"`) || w.Header().Get("Cache-Control") != "no-cache" {
+				t.Fatalf("GET %s: %d, ETag %q, Cache-Control %q; want 200, an ETag and no-cache", path, w.Code, etag, w.Header().Get("Cache-Control"))
+			}
+			etags[path] = etag
+			if w := get(path, func(r *http.Request) { r.Header.Set("If-None-Match", etag) }); w.Code != http.StatusNotModified || w.Body.Len() != 0 {
+				t.Errorf("GET %s with its ETag: %d with %d bytes, want 304 and no body", path, w.Code, w.Body.Len())
+			}
+			if w := get(path, func(r *http.Request) { r.Header.Set("If-None-Match", `"stale"`) }); w.Code != 200 || w.Body.Len() == 0 {
+				t.Errorf("GET %s with another ETag: %d, want the file", path, w.Code)
+			}
+		})
+	}
+	if etags["/"] == etags["/assets/app.css"] {
+		t.Errorf("files with different content share the ETag %s", etags["/"])
+	}
+	// A redirect to the file is not the file, so it carries no validator.
+	for _, c := range []struct{ path, to string }{{"/index.html", "./"}, {"/assets/app.css/", "../app.css"}} {
+		t.Run("redirect "+c.path, func(t *testing.T) {
+			w := get(c.path)
+			if w.Code != http.StatusMovedPermanently || w.Header().Get("Location") != c.to {
+				t.Fatalf("GET %s: %d to %q, want a redirect to %s", c.path, w.Code, w.Header().Get("Location"), c.to)
+			}
+			if etag := w.Header().Get("ETag"); etag != "" {
+				t.Errorf("GET %s: the redirect carries the ETag %s", c.path, etag)
+			}
+		})
+	}
+}
+
 // TestStatusWarnsWhenBrainsInheritYourClaudeSetup: inherit_claude_user_config
 // has no dashboard field, so the status says when it is on.
 func TestStatusWarnsWhenBrainsInheritYourClaudeSetup(t *testing.T) {
