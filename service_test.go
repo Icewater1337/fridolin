@@ -238,6 +238,40 @@ func TestRenderSystemdUnitEscapesEveryValue(t *testing.T) {
 	}
 }
 
+// TestGoldenServiceUnits pins the launchd agent and the systemd unit that
+// "fridolin service install" writes for a usual install, so that a change
+// to either shows in review.
+func TestGoldenServiceUnits(t *testing.T) {
+	for _, tc := range []struct{ goos, golden string }{
+		{"darwin", "service/launchd.plist"},
+		{"linux", "service/fridolin.service"},
+	} {
+		t.Run(tc.goos, func(t *testing.T) {
+			d := unitData{
+				Label:   serviceLabel,
+				Binary:  "/Users/you/.local/lib/fridolin/fridolin",
+				Config:  "/Users/you/.fridolin/config.json",
+				WorkDir: "/Users/you/.fridolin",
+				LogDir:  "/Users/you/Library/Logs/fridolin",
+				Env:     []envVar{{"HOME", "/Users/you"}, {"PATH", "/Users/you/.local/bin:/opt/homebrew/bin:/usr/bin:/bin"}},
+			}
+			if tc.goos == "darwin" {
+				// The personal-data check reads the placeholder home
+				// folder and the plist's closing tag after it as one path;
+				// a / ends it.
+				d.Env[0].Value = "/Users/you/"
+				// An agent keeps what was added to it, a key for a tool say.
+				d.Env = append(d.Env, envVar{"GROQ_API_KEY", "<KEY>"})
+			}
+			unit, err := renderUnit(tc.goos, d)
+			if err != nil {
+				t.Fatal(err)
+			}
+			assertGolden(t, tc.golden, unit)
+		})
+	}
+}
+
 func TestRenderUnitRefusesWhatItCannotHold(t *testing.T) {
 	ok := unitData{Label: serviceLabel, Binary: "/b/fridolin", Config: "/c/config.json", WorkDir: "/d", LogDir: "/l"}
 	// A variable's value may be a credential kept from the agent: the
