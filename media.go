@@ -20,8 +20,8 @@ import (
 // so a group brain cannot open the files sent to the DM brain, nor replace
 // them. A file moves into an inbox once the bridge knows which brain takes
 // it (see claimMedia): WhatsApp downloads a file before the message is
-// routed, and scripts drop theirs anywhere in the media folder before they
-// hand it to a brain with /ingest.
+// routed, and scripts drop theirs at the top of the media folder before
+// they hand it to a brain with /ingest.
 
 // incomingMediaDir is the folder in the media folder where WhatsApp
 // attachments are downloaded before their message is routed. Brain ids

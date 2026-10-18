@@ -91,10 +91,14 @@ New brains get a `skills/plaud.md` that tells them how to file recordings.
 The transcript sits in the picked brain's media inbox
 (`<media_dir>/<brain id>/plaud/`, by default
 `~/.fridolin/media/<brain id>/plaud/`) until the brain files it; under the
-sandbox no other brain can read it. **Disconnect** signs out and stops the checks; the
-transcripts already written, the brains' filed copies and the list of
-recordings Fridolin has seen (`~/.fridolin/plaud/state.json`) stay, so
-connecting the same account again sends nothing twice.
+sandbox no other brain can read it. Older versions wrote every brain's
+transcripts to `media/plaud/`. Before the first inbox, the bridge moves
+that folder to `media/.old/plaud/`, where no brain can read it, not even
+one called `plaud`, whose inbox `media/plaud/` would otherwise have been,
+and `/ingest` takes nothing from it. **Disconnect** signs out and stops
+the checks; the transcripts already written, the brains' filed copies and
+the list of recordings Fridolin has seen (`~/.fridolin/plaud/state.json`)
+stay, so connecting the same account again sends nothing twice.
 
 If Plaud's login expires, that private chat gets one notice a day until you
 connect again or disconnect (the card offers both); without one, only the

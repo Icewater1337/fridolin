@@ -24,8 +24,9 @@ type sendRequest struct {
 }
 
 // ingestRequest is the JSON body expected by POST /ingest. Brain names the
-// brain; Paths are files already written inside the media directory, which
-// move into the brain's inbox; Text is the message that goes with them.
+// brain; Paths are files already written at the top of the media directory
+// (or in the brain's own inbox), which move into the brain's inbox; Text is
+// the message that goes with them.
 type ingestRequest struct {
 	Brain  string   `json:"brain"`
 	Paths  []string `json:"paths"`
@@ -304,14 +305,20 @@ func (b *Bridge) httpIngest(w http.ResponseWriter, r *http.Request) {
 			writeErr(w, http.StatusBadRequest, "not a regular file: "+filepath.Base(p))
 			return
 		}
-		// The brain takes the file into its inbox (see claimMedia), so a
-		// file in another brain's inbox would move to this one: a brain
-		// could ask for that itself, and read the files sent to another
-		// chat. Nor may it take an attachment still on its way to the
-		// brain of its chat.
+		// The brain takes the file into its inbox (see claimMedia), and a
+		// brain can ask /ingest for that itself, so only a file handed in
+		// for it may move: one at the top of the media folder, where
+		// scripts drop their files, or one already in its own inbox. Every
+		// folder below the media folder holds files for a brain, which
+		// would then read them: another brain's inbox, the inbox left by
+		// a brain that was removed or is left out (whose id may come
+		// back), .old/ with the folders older versions left there, every
+		// brain's Plaud transcripts among them (see retireLegacyMedia), and
+		// .incoming/ with attachments on their way to the brain of their
+		// chat.
 		rel, _ := mediaRel(media, resolved)
-		if owner := mediaOwner(rel); strings.HasPrefix(owner, ".") || (owner != br.ID() && b.brainMgr.Get(owner) != nil) {
-			http.Error(w, "not a file for this brain: "+filepath.Base(p)+" is in another brain's inbox or on its way to one", http.StatusBadRequest)
+		if owner := mediaOwner(rel); owner != "" && owner != br.ID() {
+			writeErr(w, http.StatusBadRequest, fmt.Sprintf("not a file for brain %s: %s is in %s/ in the media directory; /ingest takes files at its top or in the brain's own inbox", br.ID(), filepath.Base(p), owner))
 			return
 		}
 		paths = append(paths, resolved)

@@ -934,15 +934,28 @@ commands do not work.
 
 Enables `POST /ingest {"brain","paths","text","sender"}`. A request that
 still sends `scope`, the old name of `brain`, is refused with 400 and told
-to use `brain`. Paths must be files inside the media directory, but not in
-another brain's inbox nor in `media/.incoming/`, where WhatsApp attachments
-wait for their brain. The named brain takes them into its own inbox
-(`media/<brain id>/`), receives them like WhatsApp attachments and answers
-in its
-`reply_chat`, even when that chat belongs to another brain (your DM, say).
-Off by default; see [API.md](API.md#post-ingest). It always needs a token:
-yours in `<data_dir>/scripts.token`, or a brain's run's, which hands files
-only to that brain.
+to use `brain`. Paths must be files at the top of the media directory, or
+already in the named brain's own inbox. A file in any other folder of the
+media directory is refused, since those hold files for brains, which a
+brain could otherwise ask `/ingest` for itself: another brain's inbox, the
+inbox a removed brain or one that is left out left behind,
+`media/.incoming/`, where WhatsApp attachments wait for their brain, and
+`media/.old/`, where the bridge moved the folders older versions kept in
+the media directory (see [the sandbox](#reading)), such as
+`media/plaud/` with every brain's Plaud transcripts. A script that wrote
+to a folder of its own in the media directory must write to its top
+instead; its folder is in `media/.old/` now. Older versions downloaded
+every WhatsApp attachment to the top as well; the bridge moved those into
+`media/.old/` too, with every other file that was at the top before it
+first started with inboxes, so `/ingest` cannot hand them to a brain that
+guesses a name. A file a script left there for `/ingest` before that
+start is in `media/.old/` as well: write it again. The named brain takes
+the files into its own inbox (`media/<brain id>/`), receives them like
+WhatsApp attachments and answers in its `reply_chat`, even when that chat
+belongs to another brain (your DM, say). Off by default; see
+[API.md](API.md#post-ingest). It always needs a token: yours in
+`<data_dir>/scripts.token`, or a brain's run's, which hands files only to
+that brain.
 
 ### `script_api.tokenless_send`
 

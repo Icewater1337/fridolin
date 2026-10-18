@@ -61,7 +61,7 @@ const SECTIONS = [
       { key: 'max_media_mb', type: 'int', def: 100, min: 1, max: 2048, label: 'Largest attachment (MB)', help: 'Bigger files are not downloaded, and the sender is told. A download also has two minutes to finish. At most 2048.' },
       { key: 'otp_guard', type: 'bool', label: 'Hold back one-time codes', help: 'For ten minutes after the assistant or a script asked a chat for a code, a message there that is only a code (4–8 digits, also as 483 920, or letters and digits such as G-483920) is dropped before the model sees it, and kept in the data folder’s otp/ for the local script that asked for it. The sender is told.' },
       { key: 'otp_markers', type: 'list', label: 'Phrases that ask for a code', placeholder: 'verification code', addLabel: 'Add phrase', help: 'Matched in any letter case, as whole words. Empty uses the built-in list: 🔐, OTP, 2FA, one-time code, verification code.' },
-      { key: 'ingest.enabled', type: 'bool', label: 'Accept files through /ingest', help: 'Lets local programs (a web upload, a recorder sync) hand files to a brain with POST /ingest. Every call needs a token: your programs send the one in scripts.token in the data folder (Authorization: Bearer …); a brain sends its own, and may hand files only to itself.' },
+      { key: 'ingest.enabled', type: 'bool', label: 'Accept files through /ingest', help: 'Lets local programs (a web upload, a recorder sync) hand files they write to the top of the media folder to a brain with POST /ingest. Every call needs a token: your programs send the one in scripts.token in the data folder (Authorization: Bearer …); a brain sends its own, and may hand files only to itself.' },
     ],
   },
   {

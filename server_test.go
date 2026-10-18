@@ -41,6 +41,7 @@ func TestScriptAPIContract(t *testing.T) {
 	if err := os.WriteFile(inside, []byte("%PDF"), 0o600); err != nil {
 		t.Fatal(err)
 	}
+	inFolder := writeTestFile(t, filepath.Join(media, "upload", "scan.pdf"), "%PDF")
 	outside := filepath.Join(tb.home, "secret.txt")
 	if err := os.WriteFile(outside, []byte("x"), 0o600); err != nil {
 		t.Fatal(err)
@@ -69,6 +70,7 @@ func TestScriptAPIContract(t *testing.T) {
 		{"ingest outside media", "/ingest", `{"brain":"personal","paths":["` + outside + `"]}`, 400, map[string]string{"error": "inside the media directory"}},
 		{"ingest relative path", "/ingest", `{"brain":"personal","paths":["scan.pdf"]}`, 400, map[string]string{"error": "inside the media directory"}},
 		{"ingest a folder", "/ingest", `{"brain":"personal","paths":["` + media + `"]}`, 400, map[string]string{"error": "not a regular file"}},
+		{"ingest from a folder of the media directory", "/ingest", `{"brain":"personal","paths":["` + inFolder + `"]}`, 400, map[string]string{"error": "takes files at its top or in the brain's own inbox"}},
 		{"ingest not JSON", "/ingest", `{`, 400, map[string]string{"error": "invalid JSON"}},
 	}
 	for _, c := range cases {

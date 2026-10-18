@@ -426,7 +426,7 @@ func TestIngestConfinedToMediaDir(t *testing.T) {
 	h := newHarness(t, `{"ingest": {"enabled": true}}`)
 	dir := h.AddBrain(BrainManifest{ID: "personal", Name: "Personal", Routing: BrainRouting{HandlesDMs: true}})
 	media := filepath.Join(h.DataDir(), "media")
-	inside := filepath.Join(media, "upload", "scan.pdf")
+	inside := filepath.Join(media, "scan.pdf")
 	_ = os.MkdirAll(filepath.Dir(inside), 0o700)
 	_ = os.WriteFile(inside, []byte("%PDF"), 0o600)
 	outside := filepath.Join(h.Home(), "secret.txt")
@@ -442,7 +442,7 @@ func TestIngestConfinedToMediaDir(t *testing.T) {
 	for name, body := range map[string]string{
 		"outside media": `{"brain":"personal","paths":["` + outside + `"]}`,
 		"symlink out":   `{"brain":"personal","paths":["` + link + `"]}`,
-		"relative":      `{"brain":"personal","paths":["upload/scan.pdf"]}`,
+		"relative":      `{"brain":"personal","paths":["scan.pdf"]}`,
 		"unknown brain": `{"brain":"nobody","paths":["` + inside + `"]}`,
 	} {
 		if w := ingest(body); w.Code != 400 {
@@ -462,23 +462,48 @@ func TestIngestConfinedToMediaDir(t *testing.T) {
 }
 
 // TestIngestKeepsOtherBrainsFiles: the brain /ingest names takes the files
-// into its inbox, so a file in another brain's inbox would move to it; a
-// brain could ask for that itself (it can reach /ingest) and read what was
-// sent to another chat. Nor may it take an attachment still on its way to
-// the brain of its chat. A file already in its own inbox is fine.
+// into its inbox, and a brain can ask for that itself (it can reach
+// /ingest), so a file it may take must be one handed in for it: at the top
+// of the media folder, or in its own inbox. It used to take a file from any
+// folder but a running brain's inbox: the inbox a removed brain or one left
+// out (its folder gone) had left, or media/plaud/, where older versions
+// kept every brain's Plaud transcripts. Nor may it take another brain's
+// files, or an attachment still on its way to the brain of its chat.
 func TestIngestKeepsOtherBrainsFiles(t *testing.T) {
 	tb := newTestBridge(t, `, "ingest": {"enabled": true}`)
 	tb.addFolderBrain(t, BrainManifest{ID: "personal", Name: "Personal", Routing: BrainRouting{HandlesDMs: true}})
 	tb.addFolderBrain(t, BrainManifest{ID: "team", Name: "Team", Routing: BrainRouting{Groups: []string{"120363000000000000@g.us"}}})
+	tb.addFolderBrain(t, BrainManifest{ID: "old", Name: "Old"})
+	left := tb.addFolderBrain(t, BrainManifest{ID: "left", Name: "Left"})
 	media := tb.cfgs.Get().MediaDir
+	for _, p := range []string{"old/dm.pdf", "left/dm.pdf"} {
+		writeTestFile(t, filepath.Join(media, p), "x")
+	}
+	if w := tb.do("DELETE", "/api/brains/old", nil); w.Code != 200 {
+		t.Fatalf("removing brain old: %d %s", w.Code, w.Body.String())
+	}
+	if err := os.RemoveAll(left); err != nil {
+		t.Fatal(err)
+	}
+	if err := tb.brainMgr.Apply(tb.cfgs.Get()); err != nil {
+		t.Fatal(err)
+	}
+	if tb.brainMgr.Get("old") != nil || tb.brainMgr.Get("left") != nil || tb.brainMgr.Get("team") == nil {
+		t.Fatalf("brains %v, want old and left gone and team running", tb.brainMgr.Brains())
+	}
 	cases := []struct {
 		name, file string // file relative to the media folder
 		code       int
 	}{
 		{"another brain's inbox", "personal/dm.pdf", 400},
+		{"a removed brain's inbox", "old/dm.pdf", 400},
+		{"the inbox of a brain left out", "left/dm.pdf", 400},
+		{"Plaud transcripts older versions kept", "plaud/2026-01-15 standup.txt", 400},
+		{"a folder no brain owns", "upload/scan.pdf", 400},
 		{"an attachment not yet routed", incomingMediaDir + "/voice.ogg", 400},
 		{"its own inbox", "team/notes.pdf", 202},
-		{"a folder no brain owns", "upload/scan.pdf", 202},
+		{"a folder in its own inbox", "team/plaud/notes.txt", 202},
+		{"the top of the media folder", "scan.pdf", 202},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

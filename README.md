@@ -403,16 +403,18 @@ connected, so a script can check first; its JSON names the connection state
 and the bridge's version.
 
 To hand a brain files that arrived some other way (a web upload, a recorder
-sync), write them under `~/.fridolin/media/` and turn on
-`ingest.enabled`. The brain takes them into its own inbox,
-`~/.fridolin/media/<brain id>/`; a file in another brain's inbox is
-refused:
+sync), write them to `~/.fridolin/media/` itself, not to a folder in it,
+and turn on `ingest.enabled`. The brain takes them into its own inbox,
+`~/.fridolin/media/<brain id>/`. A file in any folder of the media folder
+is refused, unless it is already in that brain's own inbox: those folders
+hold files for brains (another brain's inbox, one a removed brain left),
+which a brain could otherwise ask for itself:
 
 ```bash
 curl -X POST http://127.0.0.1:8765/ingest \
   -H "Authorization: Bearer $(cat ~/.fridolin/scripts.token)" \
   -H 'Content-Type: application/json' \
-  -d '{"brain":"personal","paths":["/Users/you/.fridolin/media/upload/scan.pdf"],"text":"File this"}'
+  -d '{"brain":"personal","paths":["/Users/you/.fridolin/media/scan.pdf"],"text":"File this"}'
 ```
 
 The brain you name handles it like a WhatsApp attachment and replies in its

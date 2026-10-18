@@ -120,15 +120,19 @@ sync), as if they were sent in its chat. Off until
 [`ingest.enabled`](CONFIGURATION.md#ingestenabled) is on.
 
 ```json
-{"brain": "personal", "paths": ["/Users/you/.fridolin/media/upload/scan.pdf"], "text": "File this", "sender": "upload"}
+{"brain": "personal", "paths": ["/Users/you/.fridolin/media/scan.pdf"], "text": "File this", "sender": "upload"}
 ```
 
 - `brain`: the brain that handles it. `scope`, its old name, is refused
   with `400`, so a script that still sends it learns the name to use. A
   brain calling with its run's token may leave it out.
-- `paths`: files already written inside the media directory
-  (`<data_dir>/media` by default). Each must be an absolute path to a
-  regular file there, also after symlinks are resolved.
+- `paths`: files already written at the top of the media directory
+  (`<data_dir>/media` by default), or already in the named brain's own
+  inbox (`media/<brain id>/`); the brain takes them into its inbox. A file
+  in any other folder of the media directory is refused, since those hold
+  files for brains (see
+  [`ingest.enabled`](CONFIGURATION.md#ingestenabled)). Each must be an
+  absolute path to a regular file there, also after symlinks are resolved.
 - `text`: the message that goes with them; without one the brain is told
   "New files were uploaded." `paths` or `text` must be given.
 - `sender`: who the brain is told it is from. Default `upload`.
@@ -140,7 +144,7 @@ brain. The request returns at once; the run happens afterwards.
 | Status | Body | When |
 | --- | --- | --- |
 | `202` | `{"status": "accepted", "jid": …}` | Queued; `jid` is the chat the answer goes to. |
-| `400` | `{"error": …}` | The body is not JSON, it has `scope`, nothing to hand over, an unknown brain, a path outside the media directory or not a regular file, or a brain with no chat to answer in. |
+| `400` | `{"error": …}` | The body is not JSON, it has `scope`, nothing to hand over, an unknown brain, a path outside the media directory, in another folder of it or not a regular file, or a brain with no chat to answer in. |
 | `401` | `{"error": …}` | No token, or one the bridge did not give out. |
 | `403` | `{"error": …}` | A brain named another brain. |
 | `404` | `{"error": …}` | `ingest.enabled` is off. |
