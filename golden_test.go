@@ -149,7 +149,10 @@ type pathMask struct{ path, placeholder string }
 // newScrubber masks root, the test's own temp folder, as <ROOT> and the
 // folders above it as <ABOVE>, HOME, which the tests put at <root>/home,
 // as <HOME>, and the test binary, which stands in for the Claude and Plaud
-// CLIs, as <TEST_BINARY>.
+// CLIs, as <TEST_BINARY>. / is above the root on every system and stays as
+// it is: a rule for / covers the whole file system, such as the sandbox's
+// deny of every write, and as <ABOVE> it would read as one for a folder
+// above the root, with a count that differs between systems.
 func newScrubber(root string) *scrubber {
 	s := &scrubber{keys: map[string]bool{}, values: map[string]string{bridgeVersion(): "<VERSION>"}}
 	s.addPath(root, "<ROOT>")
@@ -157,11 +160,8 @@ func newScrubber(root string) *scrubber {
 	if exe, err := filepath.Abs(os.Args[0]); err == nil {
 		s.addPath(exe, "<TEST_BINARY>")
 	}
-	for d := filepath.Dir(canonicalDir(root)); ; d = filepath.Dir(d) {
+	for d := filepath.Dir(canonicalDir(root)); d != filepath.Dir(d); d = filepath.Dir(d) {
 		s.above = append(s.above, d)
-		if d == filepath.Dir(d) {
-			break
-		}
 	}
 	return s
 }
@@ -226,7 +226,7 @@ var aboveRE = regexp.MustCompile(`"(\^?)(/[^"]*)"`)
 // names: the folder itself, or a memory file or .claude in it, which the
 // sandbox and the CLI's settings list for every folder above a brain's.
 // That chain is /tmp on Linux and /private/var/folders/… on macOS, so it
-// becomes <ABOVE> on both. Other paths, such as /usr/bin, stay.
+// becomes <ABOVE> on both. Other paths, such as /usr/bin or / itself, stay.
 func (s *scrubber) scrubAbove(in string) string {
 	return aboveRE.ReplaceAllStringFunc(in, func(q string) string {
 		m := aboveRE.FindStringSubmatch(q)
@@ -246,11 +246,7 @@ func (s *scrubber) scrubAbove(in string) string {
 			}
 		}
 		for _, sub := range []string{"/.claude/CLAUDE.md", "/.claude/rules/**", "/.claude/rules"} {
-			d, ok := strings.CutSuffix(plain, sub)
-			if d == "" {
-				d = "/"
-			}
-			if ok && slices.Contains(s.above, d) {
+			if d, ok := strings.CutSuffix(plain, sub); ok && slices.Contains(s.above, d) {
 				return `"` + anchor + "<ABOVE>" + sub + `"`
 			}
 		}
@@ -451,11 +447,8 @@ func TestScrubberAbove(t *testing.T) {
 	root := canonicalDir(t.TempDir())
 	s := newScrubber(root)
 	var above []string
-	for d := filepath.Dir(root); ; d = filepath.Dir(d) {
+	for d := filepath.Dir(root); d != "/"; d = filepath.Dir(d) {
 		above = append(above, d)
-		if d == filepath.Dir(d) {
-			break
-		}
 	}
 	// rule is a deny of file in each of dirs.
 	rule := func(op, file string, dirs []string) []string {
@@ -484,6 +477,14 @@ func TestScrubberAbove(t *testing.T) {
 		)},
 		{"blocks count apart", lines(rule("file-read*", "CLAUDE.md", above), []string{""}, rule("file-read*", "CLAUDE.md", above)), lines(
 			[]string{`(deny file-read* (literal "<ABOVE>/CLAUDE.md"))  [×each folder above]`, "", `(deny file-read* (literal "<ABOVE>/CLAUDE.md"))  [×each folder above]`},
+		)},
+		// A rule for / covers everything, and a deeper folder in its place
+		// would change the golden file.
+		{"the root of the file system stays", lines([]string{`(deny file-write* (subpath "/"))`}, rule("file-read*", "CLAUDE.md", append(slices.Clone(above), "/")), rule("file-read*", ".claude/CLAUDE.md", []string{"/"})), lines(
+			[]string{`(deny file-write* (subpath "/"))`, `(deny file-read* (literal "<ABOVE>/CLAUDE.md"))  [×each folder above]`, `(deny file-read* (literal "/CLAUDE.md"))`, `(deny file-read* (literal "/.claude/CLAUDE.md"))`},
+		)},
+		{"a deeper folder in its place", lines([]string{`(deny file-write* (subpath "` + above[len(above)-1] + `"))`}), lines(
+			[]string{`(deny file-write* (subpath "<ABOVE>"))  ` + fmt.Sprintf("[×1 of the %d folders above]", len(above))},
 		)},
 	}
 	for _, tc := range tests {

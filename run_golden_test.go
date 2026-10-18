@@ -80,8 +80,8 @@ var clockRE = regexp.MustCompile(`\b(?:Mon|Tue|Wed|Thu|Fri|Sat|Sun) \d{4}-\d\d-\
 
 // scrubArgs masks the paths in the CLI's arguments. --settings is JSON that
 // lists a pattern for every folder above the brain's, up to /; once those
-// above the test's root are <ABOVE>, each pattern is listed once, with how
-// many times it came (collapseAbove).
+// between / and the test's root are <ABOVE>, each pattern is listed once,
+// with how many times it came (collapseAbove).
 func scrubArgs(t *testing.T, s *scrubber, args []string) []byte {
 	t.Helper()
 	out := make([]string, len(args))

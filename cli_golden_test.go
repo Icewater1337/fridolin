@@ -154,8 +154,9 @@ func TestGoldenCheck(t *testing.T) {
 // --print-sandbox` prints it, for each part of the profile that settings
 // change: the brain's own folder and the others', the data dir, media and
 // database elsewhere, the calendar files in a credentials dir, deny_paths
-// and allow_paths, and git's config readable or denied. The folders above
-// the test's root differ between systems; they are <ABOVE>, once a block.
+// and allow_paths, and git's config readable or denied. The folders between
+// / and the test's root differ between systems; they are <ABOVE>, once a
+// block.
 func TestGoldenSandboxProfiles(t *testing.T) {
 	gitconfig := func(home string) {
 		if err := os.WriteFile(filepath.Join(home, ".gitconfig"), []byte("[user]\n\tname = You\n[include]\n\tpath = ~/.gitconfig-work\n"), 0o600); err != nil {

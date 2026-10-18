@@ -108,6 +108,10 @@
 (deny file-write* (literal "<HOME>/.bashrc"))
 (deny file-write* (literal "<HOME>/.profile"))
 (deny file-write* (literal "<HOME>/.tmux.conf"))
+(deny file-write* (literal "/CLAUDE.md"))
+(deny file-write* (literal "/CLAUDE.local.md"))
+(deny file-write* (literal "/.mcp.json"))
+(deny file-write* (subpath "/.claude"))
 (deny file-write* (literal "<ABOVE>/CLAUDE.md"))  [×each folder above]
 (deny file-write* (literal "<ABOVE>/CLAUDE.local.md"))  [×each folder above]
 (deny file-write* (literal "<ABOVE>/.mcp.json"))  [×each folder above]
@@ -151,6 +155,9 @@
 (deny file-read* (literal "<ABOVE>/CLAUDE.md"))  [×each folder above]
 (deny file-read* (literal "<ABOVE>/CLAUDE.local.md"))  [×each folder above]
 (deny file-read* (subpath "<ABOVE>/.claude"))  [×each folder above]
+(deny file-read* (literal "/CLAUDE.md"))
+(deny file-read* (literal "/CLAUDE.local.md"))
+(deny file-read* (subpath "/.claude"))
 (deny file-read* (literal "<HOME>/.claude/CLAUDE.md"))
 (deny file-read* (subpath "<HOME>/.claude/rules"))
 
@@ -188,6 +195,7 @@
 (allow file-read* (subpath "<HOME>/.fridolin/run-tokens/main"))
 
 ;; Folders above the denied paths: not renamable or removable
+(deny file-write* (literal "/"))
 (deny file-write* (literal "<ABOVE>"))  [×each folder above]
 (deny file-write* (literal "<ROOT>"))
 (deny file-write* (literal "<ROOT>/bin"))
