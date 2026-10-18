@@ -11,9 +11,10 @@ usage() {
 Usage: ./setup.sh [--yes] [--no-service] [--skip-tests]
 
 Sets up Fridolin on this machine, or upgrades it after `git pull`:
-  1. checks the prerequisites (Go, a C compiler, the Claude CLI; rclone,
-     python3 and ffmpeg optional)
+  1. checks the prerequisites (Go, a C compiler, make, the Claude CLI;
+     rclone, python3 and ffmpeg optional)
   2. builds the bridge from this checkout and runs the tests on the build
+     (make build, make test)
   3. writes a starter config if there is none
   4. installs the build to ~/.local/lib/fridolin, keeping the one it replaces
      as fridolin.prev, installs the background service (a launchd agent on
@@ -126,6 +127,10 @@ elif ! command -v cc >/dev/null 2>&1 && ! command -v gcc >/dev/null 2>&1 && ! co
 fi
 ok "C compiler"
 
+# The build and the tests are the Makefile's, as in CI. The Command Line
+# Tools above bring make on macOS.
+command -v make >/dev/null 2>&1 || fail "make is not installed. Install build-essential (Debian/Ubuntu) or make, then re-run."
+
 CLAUDE_BIN="$(command -v claude 2>/dev/null || true)"
 if [ -z "$CLAUDE_BIN" ]; then
   for c in "$HOME/.local/bin/claude" "$HOME/.claude/local/claude" /opt/homebrew/bin/claude /usr/local/bin/claude; do
@@ -164,19 +169,18 @@ fi
 step "Building"
 BUILD_DIR="$(mktemp -d "${TMPDIR:-/tmp}/fridolin-setup.XXXXXX")"
 trap 'rm -rf "$BUILD_DIR"' EXIT
+# Given to make, so that a VERSION exported in this shell for other
+# software does not end up in the build.
 VERSION="$(git -C "$REPO_DIR" describe --tags --always --dirty 2>/dev/null || echo dev)"
 NEW="$BUILD_DIR/fridolin"
-# The main package is at the repo root or in ./cmd/fridolin.
-PKG=.
-if [ -d "$REPO_DIR/cmd/fridolin" ]; then PKG=./cmd/fridolin; fi
-( cd "$REPO_DIR" && go build -trimpath -ldflags "-X main.version=$VERSION" -o "$NEW" "$PKG" ) || fail "Build failed — see the Go errors above. Nothing was installed."
+( cd "$REPO_DIR" && make -s build VERSION="$VERSION" BINARY="$NEW" ) || fail "Build failed — see the Go errors above. Nothing was installed."
 ok "built $VERSION"
 
 if ! $SKIP_TESTS && confirm "Run the test suite before installing (recommended, about a minute)?" y; then
   # A name of its own: two runs, or another user's file in a shared /tmp,
   # must not meet.
   TEST_LOG="$(mktemp "${TMPDIR:-/tmp}/fridolin-setup-tests.XXXXXX")"
-  if ( cd "$REPO_DIR" && go test -count=1 ./... ) >"$TEST_LOG" 2>&1; then
+  if ( cd "$REPO_DIR" && make -s test ) >"$TEST_LOG" 2>&1; then
     rm -f "$TEST_LOG"
     ok "tests pass"
   else

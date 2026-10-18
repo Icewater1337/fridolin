@@ -43,8 +43,8 @@ expect() {
 }
 
 # Without these the cases below would pass even if BINARY were ignored.
-expect "build writes the binary" has build "-o $bin( |$)"
-expect "install builds the binary it copies" has install "-o $bin( |$)"
+expect "build writes the binary" has build "-o \"$bin\"( |$)"
+expect "install builds the binary it copies" has install "-o \"$bin\"( |$)"
 
 # Every other target, as make help lists them; clean removes the binary.
 targets="$(make -C "$root" -s help | awk '{ print $1 }')"

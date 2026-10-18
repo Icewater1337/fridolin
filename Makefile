@@ -59,11 +59,11 @@ help: ## list the targets
 	@awk -F':.*## ' '/^[a-z-]+:.*## / { printf "  %-14s %s\n", $$1, $$2 }' $(MAKEFILE_LIST)
 
 build: ## build bin/fridolin, stamped with VERSION (default: git describe)
-	$(GO) build -trimpath -ldflags "$(VERSION_LDFLAGS)" -o $(BINARY) $(MAIN_PKG)
+	$(GO) build -trimpath -ldflags "$(VERSION_LDFLAGS)" -o "$(BINARY)" $(MAIN_PKG)
 
 install: build ## copy the binary to BINDIR (default ~/.local/bin)
 	install -d "$(DESTDIR)$(BINDIR)"
-	install -m 0755 $(BINARY) "$(DESTDIR)$(BINDIR)/fridolin"
+	install -m 0755 "$(BINARY)" "$(DESTDIR)$(BINDIR)/fridolin"
 
 test: ## Go tests
 	$(GO) test -count=1 ./...
@@ -159,4 +159,4 @@ fuzz-short: ## run every fuzz target for FUZZTIME (default 10s)
 check: fmt-check vet tidy-check race lint test-py test-web test-sh smoke ## what CI's build, lint and test jobs run
 
 clean: ## remove the binary
-	rm -f $(BINARY)
+	rm -f "$(BINARY)"

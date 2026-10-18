@@ -36,8 +36,9 @@ esac
 `
 
 // fakeGoScript builds fakeBridgeScript and runs the tests as FAKE_TESTS_FAIL
-// says.
+// says. It notes its builds and test runs in FAKE_LOG, as "go ARGS".
 const fakeGoScript = `#!/bin/sh
+[ "$1" = env ] || echo "go $*" >> "$FAKE_LOG"
 case "$1" in
   env) echo go1.99.0 ;;
   build)
@@ -48,58 +49,104 @@ case "$1" in
 esac
 `
 
-func TestSetupSaysWhatHappened(t *testing.T) {
-	// setup.sh used to offer a rollback after an install that changed
-	// nothing, which would swap a working install for the one before, and
-	// to tell someone with a bridge running to start a second one.
+// setupHarness runs a copy of setup.sh with only what it needs on PATH:
+// the real tools, the real make, and stand-ins for go, the compiler check
+// and systemd. The bridge itself is fakeBridgeScript, so nothing reaches
+// launchctl, systemctl or a real bridge.
+type setupHarness struct {
+	bash, repo, bin, bridge string
+	// optional holds what transcription needs, on PATH only for the cases
+	// that add it.
+	optional string
+}
+
+func newSetupHarness(t *testing.T) *setupHarness {
+	t.Helper()
 	bash, err := exec.LookPath("bash")
 	if err != nil {
 		t.Skip("bash is not installed")
 	}
-	// Only what setup.sh runs: the real tools it needs, and stand-ins for
-	// go, the compiler check and systemd. The bridge itself is the script
-	// above, so nothing reaches launchctl, systemctl or a real bridge.
-	bin := t.TempDir()
+	makeBin, err := exec.LookPath("make")
+	if err != nil {
+		t.Skip("make is not installed")
+	}
+	h := &setupHarness{bash: bash, bin: t.TempDir(), optional: t.TempDir(), repo: t.TempDir()}
 	for _, tool := range []string{"cat", "chmod", "cmp", "cp", "dirname", "id", "mkdir", "mktemp", "mv", "rm", "sed", "tail", "tr", "uname"} {
 		p, err := exec.LookPath(tool)
 		if err != nil {
 			t.Fatal(err)
 		}
-		if err := os.Symlink(p, filepath.Join(bin, tool)); err != nil {
+		if err := os.Symlink(p, filepath.Join(h.bin, tool)); err != nil {
 			t.Fatal(err)
 		}
 	}
-	scripts := map[string]string{"go": fakeGoScript, "xcode-select": "#!/bin/sh\n", "cc": "#!/bin/sh\n", "systemctl": "#!/bin/sh\n"}
+	scripts := map[string]string{
+		"go":           fakeGoScript,
+		"xcode-select": "#!/bin/sh\n",
+		"cc":           "#!/bin/sh\n",
+		"systemctl":    "#!/bin/sh\n",
+		// The real make, with each call noted in FAKE_LOG.
+		"make": "#!/bin/sh\necho \"make $*\" >> \"$FAKE_LOG\"\nexec '" + makeBin + "' \"$@\"\n",
+	}
 	for name, body := range scripts {
-		if err := os.WriteFile(filepath.Join(bin, name), []byte(body), 0o755); err != nil {
+		if err := os.WriteFile(filepath.Join(h.bin, name), []byte(body), 0o755); err != nil {
 			t.Fatal(err)
 		}
 	}
-	// What transcription needs, on PATH only for the cases that name it.
-	optional := t.TempDir()
 	for _, name := range []string{"python3", "ffmpeg"} {
-		if err := os.WriteFile(filepath.Join(optional, name), []byte("#!/bin/sh\n"), 0o755); err != nil {
+		if err := os.WriteFile(filepath.Join(h.optional, name), []byte("#!/bin/sh\n"), 0o755); err != nil {
 			t.Fatal(err)
 		}
 	}
-	withOptional := "PATH=" + bin + string(os.PathListSeparator) + optional
-	bridge := filepath.Join(t.TempDir(), "fridolin")
-	if err := os.WriteFile(bridge, []byte(fakeBridgeScript), 0o755); err != nil {
+	h.bridge = filepath.Join(t.TempDir(), "fridolin")
+	if err := os.WriteFile(h.bridge, []byte(fakeBridgeScript), 0o755); err != nil {
 		t.Fatal(err)
 	}
 	// A copy of the checkout with no .git: the version is "dev" and no git
 	// runs.
-	repo := t.TempDir()
-	for _, f := range []string{"setup.sh", "go.mod"} {
+	for _, f := range []string{"setup.sh", "go.mod", "Makefile"} {
 		data, err := os.ReadFile(filepath.Join(repoDir, f))
 		if err != nil {
 			t.Fatal(err)
 		}
-		if err := os.WriteFile(filepath.Join(repo, f), data, 0o755); err != nil {
+		if err := os.WriteFile(filepath.Join(h.repo, f), data, 0o755); err != nil {
 			t.Fatal(err)
 		}
 	}
+	return h
+}
 
+// withOptional is the PATH entry that also puts python3 and ffmpeg on PATH.
+func (h *setupHarness) withOptional() string {
+	return "PATH=" + h.bin + string(os.PathListSeparator) + h.optional
+}
+
+// run runs setup.sh with args and HOME home, in an environment of nothing
+// but the harness's variables and env, and returns its output, its exit
+// status and the calls the stand-ins noted. The output names its TMPDIR
+// as $TMPDIR.
+func (h *setupHarness) run(t *testing.T, home string, args, env []string) (out string, exit int, calls string) {
+	t.Helper()
+	tmp := canonicalDir(t.TempDir())
+	log := filepath.Join(t.TempDir(), "calls")
+	cmd := exec.Command(h.bash, append([]string{filepath.Join(h.repo, "setup.sh")}, args...)...)
+	cmd.Env = append([]string{"HOME=" + home, "PATH=" + h.bin, "TMPDIR=" + tmp, "FAKE_LOG=" + log, "FAKE_BRIDGE=" + h.bridge}, env...)
+	b, err := cmd.CombinedOutput()
+	var ee *exec.ExitError
+	if errors.As(err, &ee) {
+		exit = ee.ExitCode()
+	} else if err != nil {
+		t.Fatal(err)
+	}
+	logged, _ := os.ReadFile(log)
+	return strings.ReplaceAll(string(b), tmp, "$TMPDIR"), exit, string(logged)
+}
+
+func TestSetupSaysWhatHappened(t *testing.T) {
+	// setup.sh used to offer a rollback after an install that changed
+	// nothing, which would swap a working install for the one before, and
+	// to tell someone with a bridge running to start a second one.
+	h := newSetupHarness(t)
 	cases := []struct {
 		name     string
 		args     []string
@@ -142,7 +189,7 @@ func TestSetupSaysWhatHappened(t *testing.T) {
 		// Transcription's needs are named, and missing ones do not stop it.
 		{"python3 and ffmpeg are missing", nil, nil, true, 0, true,
 			[]string{"python3 not installed — only needed to transcribe voice notes", "ffmpeg not installed — only needed to transcribe voice notes", "Setup complete"}, nil},
-		{"python3 and ffmpeg are there", nil, []string{withOptional}, true, 0, true,
+		{"python3 and ffmpeg are there", nil, []string{h.withOptional()}, true, 0, true,
 			[]string{"✓ python3 (for transcribing voice notes)", "✓ ffmpeg (for transcribing voice notes)"}, []string{"not installed — only needed to transcribe"}},
 		// The test log gets a name of its own, not a fixed one in /tmp.
 		{"the tests fail", nil, []string{"FAKE_TESTS_FAIL=1"}, true, 1, false,
@@ -150,39 +197,100 @@ func TestSetupSaysWhatHappened(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			home, tmp := canonicalDir(t.TempDir()), canonicalDir(t.TempDir())
-			calls := filepath.Join(t.TempDir(), "calls")
+			home := canonicalDir(t.TempDir())
 			if c.oldBuild {
 				makeFiles(t, home, ".local/lib/fridolin/fridolin")
 			}
-			cmd := exec.Command(bash, append([]string{filepath.Join(repo, "setup.sh")}, c.args...)...)
-			cmd.Env = append([]string{"HOME=" + home, "PATH=" + bin, "TMPDIR=" + tmp, "FAKE_LOG=" + calls, "FAKE_BRIDGE=" + bridge}, c.env...)
-			out, err := cmd.CombinedOutput()
-			exit := 0
-			var ee *exec.ExitError
-			if errors.As(err, &ee) {
-				exit = ee.ExitCode()
-			} else if err != nil {
-				t.Fatal(err)
-			}
+			out, exit, calls := h.run(t, home, c.args, c.env)
 			if exit != c.exit {
 				t.Errorf("setup.sh exited %d, want %d:\n%s", exit, c.exit, out)
 			}
-			expand := strings.NewReplacer("$HOME", home, "$TMPDIR", tmp).Replace
+			expand := strings.NewReplacer("$HOME", home).Replace
 			for _, w := range c.want {
-				if !strings.Contains(string(out), expand(w)) {
+				if !strings.Contains(out, expand(w)) {
 					t.Errorf("setup.sh does not say %q:\n%s", expand(w), out)
 				}
 			}
 			for _, w := range c.notWant {
-				if strings.Contains(string(out), w) {
+				if strings.Contains(out, w) {
 					t.Errorf("setup.sh says %q:\n%s", w, out)
 				}
 			}
-			logged, _ := os.ReadFile(calls)
-			if got := strings.Contains(string(logged), "service install"); got != c.installs {
-				t.Errorf("ran service install: %v, want %v; calls:\n%s", got, c.installs, logged)
+			if got := strings.Contains(calls, "service install"); got != c.installs {
+				t.Errorf("ran service install: %v, want %v; calls:\n%s", got, c.installs, calls)
 			}
 		})
 	}
+}
+
+func TestSetupBuildsAndTestsWithTheMakefile(t *testing.T) {
+	// setup.sh had a go build and a go test of its own, which could drift
+	// from the Makefile's that CI runs. It runs make build, stamped with
+	// the version it names (this copy has no git, so "dev"), and make test.
+	h := newSetupHarness(t)
+	cases := []struct {
+		name    string
+		args    []string
+		want    []string // calls, in order
+		notWant []string
+	}{
+		{"with the tests", []string{"--no-service"}, []string{
+			"make -s build VERSION=dev BINARY=",
+			`go build -trimpath -ldflags -X main.version=dev -o `,
+			"make -s test",
+			"go test -count=1 ./...",
+		}, nil},
+		{"--skip-tests", []string{"--no-service", "--skip-tests"}, []string{
+			"make -s build VERSION=dev BINARY=",
+			`go build -trimpath -ldflags -X main.version=dev -o `,
+		}, []string{"make -s test", "go test"}},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			// An exported VERSION is some other software's: the build gets
+			// the checkout's.
+			out, exit, calls := h.run(t, canonicalDir(t.TempDir()), c.args, []string{"VERSION=9.9-not-ours"})
+			if exit != 0 {
+				t.Fatalf("setup.sh exited %d:\n%s", exit, out)
+			}
+			rest := calls
+			for _, w := range c.want {
+				i := strings.Index(rest, w)
+				if i < 0 {
+					t.Fatalf("no call %q after the ones before it; calls:\n%s", w, calls)
+				}
+				rest = rest[i+len(w):]
+			}
+			for _, w := range append(c.notWant, "9.9-not-ours") {
+				if strings.Contains(calls, w) {
+					t.Errorf("a call has %q; calls:\n%s", w, calls)
+				}
+			}
+			if !strings.Contains(out, "built dev") {
+				t.Errorf("setup.sh does not name the version it built:\n%s", out)
+			}
+		})
+	}
+
+	t.Run("make is missing", func(t *testing.T) {
+		noMake := t.TempDir()
+		entries, err := os.ReadDir(h.bin)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, e := range entries {
+			if e.Name() != "make" {
+				if err := os.Symlink(filepath.Join(h.bin, e.Name()), filepath.Join(noMake, e.Name())); err != nil {
+					t.Fatal(err)
+				}
+			}
+		}
+		out, exit, calls := h.run(t, canonicalDir(t.TempDir()), []string{"--no-service"}, []string{"PATH=" + noMake})
+		if exit != 1 || !strings.Contains(out, "make is not installed") {
+			t.Errorf("setup.sh exited %d, want 1 and a word about make:\n%s", exit, out)
+		}
+		if strings.Contains(calls, "go build") {
+			t.Errorf("setup.sh built without make; calls:\n%s", calls)
+		}
+	})
 }

@@ -20,7 +20,8 @@ The person's data lives in brain folders they choose and in
 
 1. **Prerequisites.** Check, and install what is missing with the person's OK:
    - Go 1.26+ (`go version`); macOS: `brew install go`.
-   - A C compiler (SQLite needs cgo); macOS: `xcode-select --install`.
+   - A C compiler (SQLite needs cgo) and make; macOS: `xcode-select
+     --install` brings both.
    - Claude Code 2.1.302 or newer, logged in (`claude --version`; `claude
      update` updates it; if `claude -p hi` says it is not logged in, ask the
      person to run `claude` once and log in).
