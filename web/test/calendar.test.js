@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { installDom } from './fake-dom.js';
 import { stubFetch } from './stub-fetch.js';
-import { calendarCard } from '../assets/components/calendar.js';
+import { calendarCard, googleClientSetup } from '../assets/components/calendar.js';
 
 // setImmediate, because the tests mock setTimeout (the toasts' and the
 // requests' timers) so nothing waits for them.
@@ -51,4 +51,11 @@ test('a reload error reaches the button instead of an unhandled rejection', asyn
   await tick();
   await tick();
   assert.ok(document.querySelectorAll('.toast').some((el) => el.textContent.includes('Google did not answer')), 'shown as a toast by the button');
+});
+
+test('the client file picker has a name', () => {
+  installDom();
+  const setup = googleClientSetup();
+  const file = setup.querySelector('input[type=file]');
+  assert.equal(file.getAttribute('aria-label'), 'OAuth client JSON file', 'a screen reader says what the file is for');
 });

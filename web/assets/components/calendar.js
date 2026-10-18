@@ -19,7 +19,7 @@ export function googleClientSetup({ redirectUri, onSaved, compact = false } = {}
     id: nextId('gclient'), rows: compact ? 4 : 6, spellcheck: 'false', autocomplete: 'off',
     placeholder: '{"installed":{"client_id":"….apps.googleusercontent.com","client_secret":"…", …}}',
   });
-  const file = h('input', { type: 'file', accept: '.json,application/json' });
+  const file = h('input', { type: 'file', accept: '.json,application/json', 'aria-label': 'OAuth client JSON file' });
   file.addEventListener('change', async () => {
     const f = file.files && file.files[0];
     if (f) area.value = await f.text();
