@@ -311,6 +311,7 @@ var (
 	errBrainDropped     = errors.New("dropped before it ran")
 	errBrainRetired     = errors.New("brain was removed")
 	errQueueFull        = errors.New("brain queue is full")
+	errNoResult         = errors.New("no result from claude (empty output)")
 	// errRunTimedOut is a run that took longer than run_timeout_minutes.
 	errRunTimedOut = errors.New("the run took too long and was stopped")
 	// errSandboxUnavailable is what the chat sees. The cause goes to the log
@@ -1205,8 +1206,14 @@ func (br *Brain) invoke(run *brainRun, ctx context.Context, s *brainSettings, m 
 		return RunResult{Err: fmt.Errorf("stdout pipe: %w", err)}
 	}
 
-	var stderrBuf bytes.Buffer
-	cmd.Stderr = &stderrBuf
+	// Only the end of stderr is kept: the CLI, or something it started that
+	// holds on to its stderr, could otherwise make the bridge hold any
+	// amount of it, and only the last error is of use.
+	stderrBuf := newTailBuffer(stderrTailBytes)
+	cmd.Stderr = stderrBuf
+	// Wait waits for that copy to end, which a background process holding
+	// stderr could put off for good; after this long it stops waiting.
+	cmd.WaitDelay = runWaitDelay
 
 	if err := cmd.Start(); err != nil {
 		return RunResult{Err: fmt.Errorf("starting claude: %w", err)}
@@ -1303,6 +1310,8 @@ func (br *Brain) invoke(run *brainRun, ctx context.Context, s *brainSettings, m 
 
 	waitErr := cmd.Wait()
 	waited = true
+	stderr := strings.TrimSpace(stderrBuf.String())
+	br.logStderr(m, cmd.Process.Pid, stderr)
 	// Whether the result event came: readStream has returned, so it would
 	// have closed resultSeen by now.
 	gotResult := false
@@ -1324,9 +1333,10 @@ func (br *Brain) invoke(run *brainRun, ctx context.Context, s *brainSettings, m 
 			return RunResult{Err: errBrainInterrupted}
 		}
 	case waitErr != nil:
-		stderr := strings.TrimSpace(stderrBuf.String())
-		if res.Err == nil && res.Text == "" && !res.AlreadySent {
-			return RunResult{Err: fmt.Errorf("claude exited: %w — stderr: %s", waitErr, truncate(stderr, 500))}
+		// Without a result, what the CLI wrote to stderr is the only
+		// account of what went wrong.
+		if errors.Is(res.Err, errNoResult) {
+			return RunResult{Err: fmt.Errorf("claude exited: %w — stderr: %s", waitErr, tail(stderr, 500))}
 		}
 	}
 	return res
@@ -1335,6 +1345,32 @@ func (br *Brain) invoke(run *brainRun, ctx context.Context, s *brainSettings, m 
 // postResultGrace is how long a run may keep its output open after its
 // result, a variable so tests need not wait for it.
 var postResultGrace = 5 * time.Second
+
+// runWaitDelay is how long Wait waits, once the CLI has exited, for the
+// copy of its stderr to end.
+const runWaitDelay = 5 * time.Second
+
+// logStderr adds what the CLI wrote to stderr to the brain's activity log,
+// the end of it when there is much, where a failed run can be looked into
+// even when the run succeeded or its error kept only a little of it. The
+// block names the run, the run for m with process pid, as its heading
+// does (runHeading): runs can end out of the order they started in.
+func (br *Brain) logStderr(m Inbound, pid int, stderr string) {
+	if stderr == "" {
+		return
+	}
+	f, err := openInFolder(br.root, streamLogName, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600)
+	if err != nil {
+		log.Printf("brain %s: could not open stream log: %v", br.id, err)
+		return
+	}
+	defer f.Close()
+	_, _ = fmt.Fprintf(f, "[%s] stderr of the run for %s from %s, pid %d:\n%s\n",
+		time.Now().Format("15:04:05"), m.JID, m.Sender, pid, tail(stderr, stderrLogBytes))
+}
+
+// stderrLogBytes is how much of a run's stderr goes to its activity log.
+const stderrLogBytes = 4000
 
 // composePreface reads the chat history for chatJID and formats recent messages:
 // the last 10 for a DM, the last 20 for a group.
@@ -1604,7 +1640,7 @@ func (br *Brain) readStream(jid string, reader io.Reader, heading string, onResu
 	}
 
 	if finalResult == "" {
-		return RunResult{Err: fmt.Errorf("no result from claude (empty output)")}
+		return RunResult{Err: errNoResult}
 	}
 
 	return RunResult{Text: finalResult}

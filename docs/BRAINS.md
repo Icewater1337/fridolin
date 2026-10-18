@@ -84,9 +84,10 @@ folder: it reads the prompt file, `brain.json` (to tell when it changed on
 disk) and `memories/people/whatsapp-identity-map.md`, appends every message
 to `conversation-history.jsonl` and reads it back, and logs what each run
 did in `claude-stream.log`, each run under a line naming its chat, sender,
-process and model. A run that finds the log over 5 MB first moves it to
-`claude-stream.1.log`, replacing the one before. A brain can change any
-file in its folder, and put a symlink to `~/.ssh` or to another brain's
+process and model, and after it the end of what the CLI wrote to stderr,
+under a line naming the run. A run that finds the log over 5 MB first moves
+it to `claude-stream.1.log`, replacing the one before. A brain can change
+any file in its folder, and put a symlink to `~/.ssh` or to another brain's
 history in place of one of them, so the bridge never leaves the folder
 through a symlink, and takes only a regular file there: not a symlink at
 the file itself, even one to another file in the folder. Nor does it take
