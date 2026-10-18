@@ -55,8 +55,8 @@ description: The module format of a Fridolin site — module.json fields, apps (
 | `server.entry` | file in the module; default export returns an Express router |
 | `server.mount` | default `<route>/api`; must be under the route or `/api/<id>` |
 | `server.access` | default: `access` |
-| `capabilities.files` | every path the server code uses, named, with `read` or `write` |
-| `capabilities.commands`, `.secrets` | programs it runs; secrets it needs, by name |
+| `capabilities.files` | every path the server code uses, named, with `read` or `write`; a path ending in `/` is a folder and everything in it |
+| `capabilities.commands`, `.secrets` | programs it runs (a name on PATH or a path); secrets it needs, by name (`OPENAI_API_KEY`) |
 
 Everything is behind sign-in and `access`. There are no public pages.
 
@@ -108,6 +108,17 @@ export default function expenses(ctx: ModuleContext): express.Router {
 - TypeScript runs as is (no build). ES modules only.
 - `ctx.file(name)` returns a declared path and throws for any other name.
   Never hard-code paths.
+- `ctx.secret(name)` returns a declared secret's value, set by the user in
+  Fridolin's dashboard (Site → Secrets). It throws for an undeclared name, for
+  one not set yet, and always in previews and `site_check`, which get no
+  secrets: call it in a request handler and answer 503 with "not set up yet"
+  when it throws, so the module still loads.
+- On the live site (macOS) the code runs in a sandbox built from
+  `capabilities`: it reads and writes only the declared paths (a file declared
+  `write` includes SQLite's `-journal`/`-wal`/`-shm`; declare the folder to
+  replace a file by renaming), runs only declared programs, and cannot reach
+  Fridolin's local API. Write data outside the repository, e.g.
+  `~/site-data/<id>/` (Fridolin creates a declared folder that is missing).
 - Anything the code imports must be in the repository's `package.json`
   (`npm install <pkg>` in the repository root, then commit `package.json` and
   the lock file). Node built-ins (`node:fs`, `node:sqlite`, …) need nothing.

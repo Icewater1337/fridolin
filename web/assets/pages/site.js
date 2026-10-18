@@ -40,11 +40,12 @@ export default {
     const deployCard = h('section.card');
     const proposalsCard = h('section.card');
     const buildersCard = h('section.card');
+    const secretsCard = h('section.card');
     const domainCard = h('section.card');
     const peopleCard = h('section.card');
     mount(root,
       pageHeader('Site', 'Your own website: people sign in with Google or a password, and every page is a module in your own repository.'),
-      h('div.page-stack', statusCard, repoCard, deployCard, proposalsCard, buildersCard, domainCard, peopleCard));
+      h('div.page-stack', statusCard, repoCard, deployCard, proposalsCard, buildersCard, secretsCard, domainCard, peopleCard));
 
     let st = null;
     let updates = null;
@@ -58,13 +59,14 @@ export default {
     let statusSig = '';
     let deploySig = '';
     let proposalSig = '';
+    let secretsFor = null; // the live commit the secrets card shows
     const sig = (...v) => JSON.stringify(v);
     const poller = ctx.poll(async (signal) => {
       st = await get('/api/site', { signal });
       const s1 = sig(st.settings, st.site, st.accounts, st.runtime, st.public_url);
       if (s1 !== statusSig) renderStatus();
       const s2 = sig(st.deploy, st.settings.approved, st.settings.history, st.repo);
-      if (!editing && s2 !== deploySig) renderDeploy();
+      if (!editing && s2 !== deploySig) { renderDeploy(); if (st.settings.approved !== secretsFor) renderSecrets(); }
       if (!editing && sig(st.settings.proposals, st.settings.builders) !== proposalSig) { renderProposals(); renderBuilders(); }
     }, () => (st && st.deploy && st.deploy.state === 'running' ? 1500 : 5000));
 
@@ -72,7 +74,7 @@ export default {
 
     function renderAll() {
       editing = false;
-      renderStatus(); renderRepo(); renderDeploy(); renderProposals(); renderBuilders(); renderDomain(); renderPeople();
+      renderStatus(); renderRepo(); renderDeploy(); renderProposals(); renderBuilders(); renderSecrets(); renderDomain(); renderPeople();
     }
 
     // ── status ─────────────────────────────────────────────────────────
@@ -101,6 +103,7 @@ export default {
           ['Public address', st.public_url ? h('a', { href: st.public_url, target: '_blank', rel: 'noopener noreferrer' }, st.public_url) : h('span.muted', 'no domain yet')],
           ['Live commit', s.approved ? h('span', mono(short(s.approved)), ' ', (history.at(-1) || {}).subject || '') : null],
           ['Accounts', `${st.accounts.total} (${st.accounts.admins} admin${st.accounts.admins === 1 ? '' : 's'})`],
+          ['Sandbox', site.sandbox ? h('span', pill(site.sandbox.on ? 'On' : 'Off', site.sandbox.on ? 'ok' : 'warn'), ' ', h('span.small.muted', site.sandbox.note)) : null],
         ]),
         site.process.error ? callout('bad', 'The site stopped', site.process.error) : null,
         h('div.actions', sw, s.enabled ? btn('Restart', { icon: 'refresh', small: true, onClick: async () => { await post('/api/site/restart'); toast('Restarting the site', 'ok'); await poller.kick(); } }) : null),
@@ -305,6 +308,40 @@ export default {
             } catch (e) { input.checked = !on; toastError(e); } finally { input.disabled = false; }
           },
         }))) : h('p.muted', 'No brains yet.'));
+    }
+
+    // ── secrets the modules declare ───────────────────────────────────
+    async function renderSecrets() {
+      secretsFor = st.settings.approved;
+      const head = h('div.card-head', h('div.card-title', icon('key'), h('h2', 'Secrets')));
+      const { modules } = await get('/api/site/secrets', { signal: ctx.signal });
+      const intro = h('p.small', 'API keys and passwords a module needs, by the names its ', mono('module.json'), ' lists in ', mono('capabilities.secrets'), '. A value is never shown again. Only the module that declares a secret gets it, through ', mono('ctx.secret(name)'), ', when the site starts; saving one restarts the site.');
+      if (!modules.length) {
+        mount(secretsCard, head, intro, h('p.muted', 'No live module declares a secret.'));
+        return;
+      }
+      const row = (m, name) => {
+        const isSet = m.set.includes(name);
+        const declared = m.declared.includes(name);
+        const value = h('input', { type: 'password', autocomplete: 'off', placeholder: isSet ? 'set — enter a new value to replace it' : 'value', 'aria-label': `Value of ${name}` });
+        const path = `/api/site/secrets/${encodeURIComponent(m.module)}/${encodeURIComponent(name)}`;
+        return h('li',
+          mono(name),
+          isSet ? pill('set', 'ok') : pill('not set', declared ? 'warn' : 'neutral'),
+          declared ? null : pill('not declared', 'neutral', { title: 'No live module.json lists it, so no module gets it.' }),
+          declared ? h('span.site-secret-input', value, btn(isSet ? 'Replace' : 'Save', {
+            small: true, onClick: async () => { await put(path, { value: value.value }); toast(`Saved ${name}; restarting the site`, 'ok'); await renderSecrets(); },
+          })) : null,
+          isSet ? btn('', {
+            small: true, icon: 'trash', title: `Remove ${name}`, onClick: async () => {
+              if (!await confirmDialog({ title: `Remove ${name}?`, message: `${m.title} no longer gets it once the site restarts.`, confirm: 'Remove', danger: true })) return;
+              await del(path); await renderSecrets();
+            },
+          }) : null);
+      };
+      mount(secretsCard, head, intro, modules.map((m) => h('div.site-block',
+        h('h3', m.title, m.title !== m.module ? h('span.muted.small', ' ', mono(m.module)) : null, m.live ? null : h('span.muted.small', ' — not in the live commit')),
+        h('ul.site-secrets', [...new Set([...m.declared, ...m.set])].map((name) => row(m, name))))));
     }
 
     // ── domain and sign-in ─────────────────────────────────────────────

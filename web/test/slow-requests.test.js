@@ -34,6 +34,7 @@ const siteAnswers = (status) => ({
   '/api/site/users': { users: [], roles: ['admin', 'member'] },
   '/api/site/builders': { brains: [{ id: 'work', name: 'Work', builder: status.settings.builders.includes('work') }] },
   '/api/site/proposals': { proposals: status.settings.proposals.map((p) => ({ proposal: p, changes: [] })) },
+  '/api/site/secrets': { modules: [{ module: 'finance', title: 'Finance', live: true, declared: ['API_KEY'], set: [] }] },
 });
 
 const plaudStatus = {

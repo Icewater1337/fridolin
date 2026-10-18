@@ -456,6 +456,7 @@ func reviewManifest(oldM, newM map[string]any) []ReviewItem {
 		{"capabilities.files", "files its code may use"},
 		{"capabilities.commands", "programs its code runs"},
 		{"capabilities.secrets", "secrets it needs"},
+		{"app.dist", "the files it serves"},
 		{"app.public", "files anyone can fetch without signing in"},
 		{"app.build", "a command Fridolin runs when deploying"},
 		{"invalid", "the manifest does not parse"},

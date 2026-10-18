@@ -61,7 +61,13 @@ features:
 
 What a module may not do: call Fridolin's local API, send WhatsApp messages,
 read another module's files without declaring them, or reach anything that
-needs a secret it did not declare. When a feature needs one of those, say so
+needs a secret it did not declare. On macOS the live site enforces this: it
+runs in a sandbox built from the modules' `capabilities`, where an undeclared
+file or program fails with `EPERM`, Fridolin's data folder and the usual
+secrets (`~/.ssh`, keychains, …) stay closed whatever a module declares, and
+Fridolin's own HTTP port cannot be reached. Secrets reach a module only
+through `ctx.secret(name)`, with the values the user sets in the dashboard;
+previews and checks get none. When a feature needs something closed, say so
 and let the user decide.
 
 ## When something is off

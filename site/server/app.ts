@@ -2,9 +2,9 @@
 
 import express from 'express'
 import { fileURLToPath } from 'node:url'
-import { readGoogleClient, UserStore, type Runtime } from './config.ts'
+import { readGoogleClient, readSecrets, UserStore, type Runtime } from './config.ts'
 import { createAuth, loadSessionKey, page, type Auth } from './auth.ts'
-import { loadModules, mountModules } from './modules.ts'
+import { loadModules, mountModules, type ModuleSecrets } from './modules.ts'
 import { createPreviewAuth, previewForwarding, PreviewList } from './preview.ts'
 
 const WEB_DIR = fileURLToPath(new URL('../web/', import.meta.url))
@@ -24,6 +24,8 @@ const SHELL_CSP = [
 export type SiteOptions = {
   /** Swappable for tests. */
   googleFetch?: typeof fetch
+  /** For tests: the modules' secrets, instead of reading rt.secrets_fd. */
+  secrets?: ModuleSecrets
 }
 
 export async function createSite(rt: Runtime, opts: SiteOptions = {}): Promise<express.Express> {
@@ -74,7 +76,9 @@ export async function createSite(rt: Runtime, opts: SiteOptions = {}): Promise<e
     app.use(forwarding.forward)
   }
 
-  await mountModules(app, loadModules(rt.modules_dir), auth.requireAuth)
+  // Only the live site has secrets; a preview runs unapproved code.
+  const secrets = opts.secrets ?? (rt.secrets_fd !== undefined && !rt.preview_token ? readSecrets(rt.secrets_fd) : undefined)
+  await mountModules(app, loadModules(rt.modules_dir), auth.requireAuth, secrets)
 
   app.get('/', shell, (_req, res) => {
     res.setHeader('Cache-Control', 'no-cache')

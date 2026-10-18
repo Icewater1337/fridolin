@@ -4,10 +4,13 @@
  * Every folder in the site repository's modules/ that holds a module.json is
  * one part of the site — an app, a page, an API — and the server mounts it at
  * startup.
- * The manifest says where the module lives, who may open it and which files
- * it touches. Its server code gets those paths from the manifest (ctx.file),
- * never from constants of its own, so the manifest is the one place to review
- * what a module can reach. Format and examples: docs/SITE.md.
+ * The manifest says where the module lives, who may open it and which files,
+ * programs and secrets it uses. Its server code gets those paths from the
+ * manifest (ctx.file) and its secrets through ctx.secret, never from
+ * constants of its own, so the manifest is the one place to review what a
+ * module can reach. On macOS the live site runs in a sandbox Fridolin builds
+ * from the manifests, which holds module code to what they declare. Format
+ * and examples: docs/SITE.md.
  *
  * A module whose manifest is invalid, or whose server code fails to load, is
  * skipped and reported (log + /api/modules for admins); the rest of the site
@@ -79,6 +82,8 @@ export type ModuleManifest = {
 export const RESERVED_ROUTES = ['auth', 'api']
 
 const ID_RE = /^[a-z0-9][a-z0-9-]*$/
+/** A secret's name; Fridolin's dashboard checks the same (site_secrets.go). */
+const SECRET_RE = /^[A-Za-z][A-Za-z0-9_-]{0,63}$/
 
 /** Checks a parsed module.json; throws an Error saying what is wrong. */
 export function validateManifest(raw: unknown, folder: string): ModuleManifest {
@@ -157,6 +162,12 @@ export function validateManifest(raw: unknown, folder: string): ModuleManifest {
     for (const k of ['commands', 'secrets'] as const) {
       if (c[k] !== undefined && !isStringArray(c[k])) fail(`"capabilities.${k}" must be a list of strings`)
     }
+    for (const cmd of (c.commands ?? []) as string[]) {
+      if (!cmd.trim()) fail('"capabilities.commands" entries must not be empty')
+    }
+    for (const name of (c.secrets ?? []) as string[]) {
+      if (!SECRET_RE.test(name)) fail(`"capabilities.secrets" entry "${name}" must be a letter, then up to 63 letters, digits, _ or -`)
+    }
   }
 
   return m as unknown as ModuleManifest
@@ -231,8 +242,20 @@ export type ModuleContext = {
   dir: string
   /** A path declared in capabilities.files. Throws for a name the manifest does not declare. */
   file: (name: string) => string
+  /**
+   * A secret declared in capabilities.secrets, as set in Fridolin's dashboard
+   * (Site → Secrets). Throws for a name the manifest does not declare, and for
+   * one that has no value yet.
+   */
+  secret: (name: string) => string
   log: (...args: unknown[]) => void
 }
+
+/**
+ * Secret values by module id and name: what Fridolin hands the live site at
+ * startup, only the names each module declares. Previews and checks get none.
+ */
+export type ModuleSecrets = Record<string, Record<string, string>>
 
 /** Default export of a module's server entry. */
 export type ModuleServer = (ctx: ModuleContext) => express.Router | Promise<express.Router>
@@ -286,6 +309,7 @@ export async function mountModules(
   app: express.Express,
   loaded: { modules: SiteModule[]; broken: BrokenModule[] },
   requireAuth: express.RequestHandler,
+  secrets?: ModuleSecrets,
 ): Promise<{ mounted: string[]; broken: BrokenModule[] }> {
   const mounted: SiteModule[] = []
   const broken = [...loaded.broken]
@@ -293,7 +317,7 @@ export async function mountModules(
   for (const mod of loaded.modules) {
     try {
       // Load the server code first: if it fails, nothing of the module is mounted.
-      const router = mod.manifest.server ? await loadServer(mod) : undefined
+      const router = mod.manifest.server ? await loadServer(mod, secrets) : undefined
       mountModule(app, mod, router, requireAuth)
       mounted.push(mod)
     } catch (err) {
@@ -334,8 +358,15 @@ function explain(err: unknown): string {
   return msg
 }
 
-async function loadServer(mod: SiteModule): Promise<express.Router> {
+async function loadServer(mod: SiteModule, secrets: ModuleSecrets | undefined): Promise<express.Router> {
   const { id } = mod.manifest
+  // Only this module's own, kept here: no other module's ctx can name them.
+  const declared = new Set(mod.manifest.capabilities?.secrets ?? [])
+  const own = new Map<string, string>()
+  for (const name of declared) {
+    const v = secrets?.[id]?.[name]
+    if (typeof v === 'string') own.set(name, v)
+  }
   const entry = resolve(mod.dir, mod.manifest.server!.entry)
   if (!entry.startsWith(mod.dir + sep)) throw new Error('"server.entry" points outside the module folder')
   const exported = (await import(pathToFileURL(entry).href)).default as ModuleServer | undefined
@@ -347,6 +378,13 @@ async function loadServer(mod: SiteModule): Promise<express.Router> {
       const p = mod.files[name]
       if (!p) throw new Error(`module "${id}" uses file "${name}", which its module.json does not declare in capabilities.files`)
       return p
+    },
+    secret: (name) => {
+      if (!declared.has(name)) throw new Error(`module "${id}" uses secret "${name}", which its module.json does not declare in capabilities.secrets`)
+      const v = own.get(name)
+      if (v !== undefined) return v
+      if (!secrets) throw new Error(`secret "${name}": previews and checks get no secrets, only the live site does`)
+      throw new Error(`secret "${name}" of module "${id}" is not set: set it in Fridolin's dashboard (Site → Secrets)`)
     },
     log: (...args) => console.log(`[module:${id}]`, ...args),
   }

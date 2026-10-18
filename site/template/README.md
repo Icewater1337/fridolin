@@ -12,4 +12,7 @@ parts of the site, one folder per module in `modules/`.
 - `CLAUDE.md` holds this site's conventions for whoever builds modules here.
 
 Never commit secrets: modules declare the secrets they need by name in
-`capabilities.secrets`, and the values stay in Fridolin.
+`capabilities.secrets`, the values are set in Fridolin's dashboard (Site →
+Secrets), and server code reads them with `ctx.secret(name)`. On macOS the
+live site runs in a sandbox that holds module code to what `capabilities`
+declares.

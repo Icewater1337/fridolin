@@ -57,8 +57,12 @@ If `site_context` or a failed proposal says the branch moved on, run
 - **Never put secrets in the repository** — no API keys, tokens or passwords,
   not even "for now". A module that needs one lists its name in
   `capabilities.secrets` and you tell the user it must be set up.
-- **Declare honestly** in `capabilities` every file your server code reads or
-  writes and every program it runs. The approver relies on it.
+- **Declare** in `capabilities` every file your server code reads or writes,
+  every program it runs and every secret it needs. The approver relies on it,
+  and on the live site (macOS) the sandbox enforces it: anything undeclared
+  fails with `EPERM`. Previews and checks run in your own sandbox, so a
+  missing declaration may only show once the site is live — read the list
+  again before you propose.
 - **No personal data in the repository** either: no real names, phone numbers,
   or the user's documents. Modules read data at run time from the paths they
   declare; they do not carry it.

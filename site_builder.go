@@ -52,6 +52,10 @@ type builderHooks struct {
 	bridgeURL func() string
 	// executable is the fridolin binary the MCP server runs from.
 	executable func() (string, error)
+	// siteLimits is what the live site's sandbox keeps from module code
+	// beyond its own list: the bridge's files (SandboxProfiler.sitePaths)
+	// and its HTTP port.
+	siteLimits func() siteBridgeLimits
 }
 
 func (m *SiteManager) builderBase(brainID string) string {
@@ -754,6 +758,18 @@ func (b *Bridge) siteBuilderHooks() builderHooks {
 				return "", err
 			}
 			return filepath.EvalSymlinks(exe)
+		},
+		siteLimits: func() siteBridgeLimits {
+			var l siteBridgeLimits
+			if sp := b.brainMgr.profiler; sp != nil {
+				l.deny, l.noWrite = sp.sitePaths()
+			}
+			if cfg := b.cfgs.Get(); cfg.HTTPEnabled() {
+				if _, port, err := net.SplitHostPort(cfg.HTTPListen); err == nil {
+					l.bridgePort = port
+				}
+			}
+			return l
 		},
 	}
 }

@@ -9,6 +9,12 @@ export type ModuleContext = {
   dir: string
   /** A path declared in module.json's capabilities.files. Throws for any other name. */
   file: (name: string) => string
+  /**
+   * A secret declared in module.json's capabilities.secrets, with the value
+   * set in Fridolin's dashboard (Site → Secrets). Throws for any other name,
+   * for one without a value yet, and in previews and checks, which get none.
+   */
+  secret: (name: string) => string
   log: (...args: unknown[]) => void
 }
 

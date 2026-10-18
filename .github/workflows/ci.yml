@@ -208,7 +208,12 @@ jobs:
   site:
     # The site process (site/, docs/SITE.md): its own tests, then the Go
     # end-to-end tests that run it, which skip without its node_modules.
-    runs-on: ubuntu-latest
+    # On macOS too, where the live site runs under its sandbox.
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
