@@ -162,7 +162,7 @@
       "additionalProperties": false,
       "properties": {
         "disabled": {"type": "boolean", "description": "Needs a restart."},
-        "require_token": {"type": "boolean"}
+        "require_token": {"type": "boolean", "description": "Default true. Turning it off needs a restart; turning it on applies at once."}
       }
     },
     "script_api": {

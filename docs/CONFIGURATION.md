@@ -957,12 +957,12 @@ Default `~/.fridolin`; an install from before the project was renamed keeps
 in the log at every start: set `data_dir` to it to keep it for good. A new
 config, from `fridolin init`, `setup.sh` or the first start, gets the folder
 chosen then (written with `~`), so later starts do not choose again.
-`db_path` and `media_dir` override individually. A `media_dir` must be
-the bridge's alone: on the first start of a version with media inboxes,
-every folder in it and every file at its top moves to `.old/` in it (see
-[reading](#reading)). Brains cannot read it,
-except their own inbox in `media/` (`media/<brain id>/`), their own state
-in `brains/<id>/`, which they also write (see [writing](#writing)), and
+`db_path` and `media_dir` override individually, each also *(restart)*.
+A `media_dir` must be the bridge's alone: on the first start of a version
+with media inboxes, every folder in it and every file at its top moves to
+`.old/` in it (see [reading](#reading)). Brains cannot read it, except
+their own inbox in `media/` (`media/<brain id>/`), their own state in
+`brains/<id>/`, which they also write (see [writing](#writing)), and
 their own runs' brain API tokens in `run-tokens/<id>/`; a `db_path` or
 `media_dir` elsewhere is denied to them too, but for the inbox.
 

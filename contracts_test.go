@@ -858,3 +858,62 @@ func headingAnchors(md string) []string {
 	}
 	return out
 }
+
+// TestRestartSettingsAreMarked: the settings that wait for a restart
+// (restartFields) are the ones config.schema.json says need one, and
+// docs/CONFIGURATION.md says so for each: in a heading marked *(restart)*,
+// or in a paragraph that names it and the restart. A heading marked so
+// names one of them.
+func TestRestartSettingsAreMarked(t *testing.T) {
+	set := newSchemaSet(t)
+	restart := map[string]bool{}
+	for _, f := range restartFields {
+		restart[f.name] = true
+	}
+
+	var described func(at schemaAt, path string)
+	described = func(at schemaAt, path string) {
+		sch, _ := at.schema.(map[string]any)
+		props, _ := sch["properties"].(map[string]any)
+		for _, key := range slices.Sorted(maps.Keys(props)) {
+			name := strings.TrimPrefix(path+"."+key, ".")
+			prop, _ := props[key].(map[string]any)
+			says := strings.Contains(strings.ToLower(fmt.Sprint(prop["description"])), "restart")
+			if says != restart[name] {
+				t.Errorf("config.schema.json: %s says it needs a restart: %v; restartFields: %v", name, says, restart[name])
+			}
+			described(schemaAt{at.file, prop}, name)
+		}
+	}
+	described(schemaAt{"config.schema.json", set.file("config.schema.json")}, "")
+
+	data, err := os.ReadFile(filepath.Join(repoDir, "docs", "CONFIGURATION.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	key := regexp.MustCompile("`([a-z_.]+)`")
+	marked := map[string]bool{}
+	for _, para := range strings.Split(string(data), "\n\n") {
+		if strings.HasPrefix(para, "#") {
+			if strings.Contains(para, "*(restart)*") {
+				k := key.FindStringSubmatch(para)
+				if k == nil || !restart[k[1]] {
+					t.Errorf("CONFIGURATION.md marks %q as needing a restart, which restartFields does not list", para)
+					continue
+				}
+				marked[k[1]] = true
+			}
+			continue
+		}
+		for name := range restart {
+			if strings.Contains(para, "`"+name+"`") && strings.Contains(strings.ToLower(para), "restart") {
+				marked[name] = true
+			}
+		}
+	}
+	for _, f := range restartFields {
+		if !marked[f.name] {
+			t.Errorf("CONFIGURATION.md does not say that %s needs a restart", f.name)
+		}
+	}
+}
