@@ -22,7 +22,7 @@
 torch>=2.1.0,<3
 # --prompt (Whisper prompt_ids under the pipeline's 30 s chunking) was checked
 # with 4.57, so that is the floor; older releases were not checked.
-transformers>=4.57.0,<5
+transformers>=4.57.0,<6
 accelerate>=0.27.0,<2
 
 # Fallback engine — useful alongside the local model too, since `--engine auto`
