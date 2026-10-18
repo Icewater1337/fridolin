@@ -131,4 +131,15 @@
 (deny file-write* (literal "<HOME>/main"))
 (deny file-write* (literal "<ROOT>/inbox/main"))
 
+;; 7. Starting code outside the sandbox
+(deny process-exec (literal "/bin/launchctl"))
+(deny process-exec (literal "/usr/bin/open"))
+(deny process-exec (literal "/usr/bin/osascript"))
+(deny appleevent-send)
+(deny lsopen)
+(deny network-outbound (remote unix-socket (subpath "<HOME>")))
+(deny network-outbound (remote unix-socket (subpath "<ROOT>/tmp/tmux-<UID>")))
+(deny network-outbound (remote unix-socket (subpath "<ROOT>/tmp")))
+(allow network-outbound (remote unix-socket (subpath "<HOME>/main")))
+(allow network-outbound (remote unix-socket (subpath "<ROOT>/data/brains/main")))
 <TIME> config: group 120363000000000000@g.us has no group_members entry: only allowed_numbers can start runs there, and what other members write is not read; an entry of ["*"] for it lets every member in, as before, or list their numbers

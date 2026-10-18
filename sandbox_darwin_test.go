@@ -7,6 +7,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -1541,6 +1542,118 @@ func TestStatusWarnsWhenBrainsCannotLogIn(t *testing.T) {
 			got := strings.Contains(strings.Join(st.Warnings, "\n"), "claude setup-token")
 			if got != tc.want {
 				t.Errorf("warns about the login = %v, want %v (warnings %q)", got, tc.want, st.Warnings)
+			}
+		})
+	}
+}
+
+// TestSandboxStopsStartingCodeOutsideIt: a brain could hand a command to
+// something that runs it outside the sandbox: launchd (launchctl submit),
+// another app (osascript telling Terminal to do script), a Docker daemon
+// (docker run -v ~:/h) or a tmux server (tmux run-shell), the activity
+// viewer's or your own. Under the real sandbox-exec it can run neither
+// launchctl nor osascript, and connect to no unix socket in your home
+// folder, your temp folder or tmux's, except its own in its folder and
+// state, where the CLI keeps one. Each holds where your home folder is not
+// in your temp folder either, as under launchd, whose TMPDIR is
+// /var/folders/…: a test HOME in the temp folder would let that folder's
+// deny hide a missing one for HOME. Apple events and LaunchServices opens
+// are denied in the profile too, but not tried here: either would act on
+// your desktop if the deny failed.
+func TestSandboxStopsStartingCodeOutsideIt(t *testing.T) {
+	requireSandboxExec(t)
+	layouts := []struct {
+		name   string
+		tmpDir string // the bridge's TMPDIR, relative to the test's folder that holds HOME
+	}{
+		{"your home folder in your temp folder", "."},
+		{"your temp folder outside your home folder, as under launchd", "tmp"},
+	}
+	for _, l := range layouts {
+		t.Run(l.name, func(t *testing.T) {
+			base := canonicalDir(t.TempDir())
+			home := filepath.Join(base, "home")
+			tmp := filepath.Join(base, l.tmpDir)
+			for _, dir := range []string{home, tmp} {
+				if err := os.MkdirAll(dir, 0o700); err != nil {
+					t.Fatal(err)
+				}
+			}
+			t.Setenv("HOME", home)
+			t.Setenv("TMPDIR", tmp)
+			t.Setenv("TMUX_TMPDIR", filepath.Join(home, "tmuxdir"))
+			sp, own := sandboxFixture(t, home, "b", "clients")
+			// Unix socket paths are short, so the servers listen, and the
+			// brain connects, by paths relative to HOME and to its folder.
+			t.Chdir(home)
+			tmpRel, err := filepath.Rel(home, tmp)
+			if err != nil {
+				t.Fatal(err)
+			}
+			uid := fmt.Sprint(os.Getuid())
+			sockets := map[string]string{
+				"docker": ".docker/run/docker.sock",
+				"tmux":   "tmuxdir/tmux-" + uid + "/default",
+				"temp":   filepath.Join(tmpRel, "editor.sock"),
+				"own":    "assistant/a/s.sock",
+				"state":  ".fridolin/brains/a/tmp/cc.sock",
+			}
+			sandboxStateEnv(t, sp, "a") // creates the state folders
+			for _, rel := range sockets {
+				if err := os.MkdirAll(filepath.Dir(rel), 0o700); err != nil {
+					t.Fatal(err)
+				}
+				ln, err := net.Listen("unix", rel)
+				if err != nil {
+					t.Fatal(err)
+				}
+				t.Cleanup(func() { ln.Close() })
+				go func() {
+					for {
+						c, err := ln.Accept()
+						if err != nil {
+							return
+						}
+						c.Close()
+					}
+				}()
+			}
+			fromOwn := func(rel string) string { return filepath.Join("../..", rel) }
+			cases := []struct {
+				name    string
+				cmd     string // runs in sh, or
+				connect string // the socket this test binary connects to
+				allow   bool
+			}{
+				{"run launchctl", `/bin/launchctl managerpid`, "", false},
+				{"run osascript", `/usr/bin/osascript -e 'return 1'`, "", false},
+				{"run a program", `/bin/echo ok`, "", true},
+				{"connect to Docker in your home folder", "", fromOwn(sockets["docker"]), false},
+				{"connect to a tmux server", "", fromOwn(sockets["tmux"]), false},
+				{"connect to a socket in your temp folder", "", fromOwn(sockets["temp"]), false},
+				{"connect to a socket in its own folder", "", "s.sock", true},
+				{"connect to a socket in its state", "", fromOwn(sockets["state"]), true},
+			}
+			for _, c := range cases {
+				t.Run(c.name, func(t *testing.T) {
+					var allowed bool
+					var out string
+					if c.cmd != "" {
+						allowed, out = sandboxRun(t, sp, own, "/bin/sh", "-c", c.cmd)
+					} else {
+						t.Setenv("FRIDOLIN_FAKE_CONNECT", c.connect)
+						allowed, out = sandboxRun(t, sp, own, os.Args[0])
+					}
+					if allowed != c.allow {
+						t.Errorf("%s%s: allowed=%v, want %v (output %q)", c.cmd, c.connect, allowed, c.allow, out)
+					}
+				})
+			}
+			profile := mustProfile(t, sp, "a")
+			for _, rule := range []string{"(deny appleevent-send)", "(deny lsopen)", `(deny process-exec (literal "/usr/bin/open"))`} {
+				if !strings.Contains(profile, rule) {
+					t.Errorf("profile lacks %s", rule)
+				}
 			}
 		})
 	}

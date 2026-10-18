@@ -50,18 +50,28 @@ func linkBridgeBinary(t *testing.T, root string) string {
 }
 
 // runBridgeCLI runs `fridolin args...` from <root>/bin/fridolin, in root,
-// with HOME at <root>/home and nothing else of the test's environment but
-// PATH's system folders and the fake Claude CLI's switch. It returns what
-// the command printed, stdout then stderr, and its exit code.
+// with HOME at <root>/home, its temp folders (TMPDIR, tmux's TMUX_TMPDIR)
+// in <root>/tmp, and nothing else of the test's environment but PATH's
+// system folders and the fake Claude CLI's switch. It returns what the
+// command printed, stdout then stderr, and its exit code.
 func runBridgeCLI(t *testing.T, root string, args ...string) (string, int) {
 	t.Helper()
 	cmd := exec.Command(linkBridgeBinary(t, root), args...)
 	cmd.Dir = root
+	// The sandbox profile closes the unix sockets in the temp folders; in
+	// /tmp, which is /private/tmp on macOS only, it would name them
+	// differently on each system.
+	tmp := filepath.Join(canonicalDir(root), "tmp")
+	if err := os.MkdirAll(tmp, 0o700); err != nil {
+		t.Fatal(err)
+	}
 	cmd.Env = []string{
 		"FRIDOLIN_TEST_RUN_MAIN=1",
 		"FRIDOLIN_FAKE_CLAUDE=1",
 		"HOME=" + filepath.Join(root, "home"),
 		"PATH=/usr/bin:/bin",
+		"TMPDIR=" + tmp,
+		"TMUX_TMPDIR=" + tmp,
 		"GORACE=atexit_sleep_ms=0",
 		// Where a binary built with -cover writes its counters; without it,
 		// `go test -cover` would add a warning to what the command prints.
@@ -215,6 +225,8 @@ func TestGoldenSandboxProfiles(t *testing.T) {
 			if !ok {
 				t.Fatalf("no profile in:\n%s", out)
 			}
+			// tmux names its folder after the user's id.
+			profile = strings.ReplaceAll(profile, "/tmux-"+strconv.Itoa(os.Getuid()), "/tmux-<UID>")
 			assertGolden(t, "sandbox/"+tc.name+".sb", []byte(newScrubber(root).lines(profile)))
 		})
 	}

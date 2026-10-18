@@ -597,11 +597,12 @@ What it does not do:
   let DM the bridge.
 - The sandbox is containment, not a jail. It raises the cost of a prompt
   injection; it does not stop code execution. It denies reading only where
-  listed, so a brain can still read the rest of your home folder, and it
-  can ask launchd, `crontab`, `at`, `open`, `osascript` or a running tmux
-  server (the activity viewer's, or your own) to start a program outside
-  the sandbox. What it leaves in its own folder (git hooks, a `.envrc`)
-  runs when you work there yourself. See
+  listed, so a brain can still read the rest of your home folder. It keeps
+  brains from `launchctl`, `open`, `osascript`, Apple events, Docker and
+  tmux sockets, but a determined program can still talk to launchd or other
+  system services directly. What a brain leaves in its own folder (git
+  hooks, a `.envrc`) runs when you work there yourself. For real isolation,
+  run the bridge or each brain as a macOS user of its own. See
   [what the sandbox does not cover](docs/CONFIGURATION.md#what-the-sandbox-does-not-cover).
 - On Linux there is no sandbox layer at all (the bridge refuses to start with
   `sandbox.enabled` on). Run the bridge as a dedicated user: create one

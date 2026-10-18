@@ -2,6 +2,7 @@ package main
 
 import (
 	"bufio"
+	"cmp"
 	"errors"
 	"fmt"
 	"io/fs"
@@ -351,6 +352,13 @@ var writableDevices = []struct{ filter, path string }{
 	{"subpath", "/dev/fd"},
 }
 
+// launchers are the programs that hand a command to something running
+// outside the sandbox: launchd (launchctl submit, bootstrap), LaunchServices
+// (open, which runs a .command file in Terminal) and other apps' scripting
+// (osascript telling Terminal to do script). Apple events and LaunchServices
+// opens are denied as well, whichever program asks for them.
+var launchers = []string{"/bin/launchctl", "/usr/bin/open", "/usr/bin/osascript"}
+
 // Profile returns the sandbox profile source for the brain with this id. It
 // fails when a path cannot be written into the profile: a profile that
 // silently skipped a rule would protect less than the config says.
@@ -371,6 +379,8 @@ var writableDevices = []struct{ filter, path string }{
 //  6. What stays closed inside the brain's own places: deny_paths entries
 //     inside its folder, the database, and the folders themselves, which the
 //     brain may fill but not move, remove or swap for a symlink.
+//  7. Starting code outside the sandbox: launchd, LaunchServices, Apple
+//     events, and the unix sockets of programs that run commands.
 func (sp *SandboxProfiler) Profile(brainID string) (string, error) {
 	sp.mu.RLock()
 	defer sp.mu.RUnlock()
@@ -723,6 +733,30 @@ func (sp *SandboxProfiler) Profile(brainID string) (string, error) {
 		sp.sharedClaudeDirRules(&b, home)
 	}
 	b.WriteString("\n")
+
+	// ── 7. starting code outside the sandbox ─────────────────────────────
+	b.WriteString(";; 7. Starting code outside the sandbox\n")
+	for _, p := range launchers {
+		b.emit("deny process-exec", "literal", p)
+	}
+	b.WriteString("(deny appleevent-send)\n(deny lsopen)\n")
+	// The unix sockets of servers that run what they are sent, outside the
+	// sandbox: Docker (docker run -v ~:/h), whose sockets live in your home
+	// folder (~/.docker/run, Colima, OrbStack; /var/run/docker.sock links
+	// there, and the sandbox goes by the real path), every tmux server
+	// (tmux run-shell), the activity viewer's and your own, and what your
+	// apps keep in your own temp folder, such as an editor's command
+	// socket. The brain's own folder and state stay open: the CLI talks to
+	// itself over a socket in its TMPDIR.
+	b.emitSocket("deny", home)
+	b.emitSocket("deny", filepath.Join(cmp.Or(os.Getenv("TMUX_TMPDIR"), "/tmp"), fmt.Sprintf("tmux-%d", os.Getuid())))
+	b.emitSocket("deny", os.TempDir())
+	for _, dir := range own {
+		b.emitSocket("allow", dir)
+	}
+	if state.dir != "" {
+		b.emitSocket("allow", state.dir)
+	}
 
 	if b.err != nil {
 		return "", b.err
@@ -1235,6 +1269,22 @@ func (b *profileBuilder) emit(rule, filter, value string) {
 func (b *profileBuilder) emitNoSymlink(filter, value string) {
 	if q, ok := b.quote(value); ok {
 		b.add(false, fmt.Sprintf("(deny file-write-create (require-all (%s %s) (vnode-type SYMLINK)))\n", filter, q))
+	}
+}
+
+// emitSocket writes a rule that denies or allows connecting to the unix
+// sockets below dir, in every spelling of dir.
+func (b *profileBuilder) emitSocket(action, dir string) {
+	var spellings []string
+	if action == "allow" {
+		spellings = b.allowSpellings(dir)
+	} else {
+		spellings = b.spellings(dir, false)
+	}
+	for _, s := range spellings {
+		if q, ok := b.quote(s); ok {
+			b.add(action == "allow", fmt.Sprintf("(%s network-outbound (remote unix-socket (subpath %s)))\n", action, q))
+		}
 	}
 }
 

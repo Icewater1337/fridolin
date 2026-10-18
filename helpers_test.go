@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
+	"net"
 	"net/http"
 	"os"
 	"os/exec"
@@ -34,8 +35,9 @@ import (
 // FRIDOLIN_FAKE_STDERR_BYTES it floods stderr and fails instead. Asked for
 // --version, it answers testedClaudeVersion. Tests point claude_path at
 // os.Args[0], so no script or real CLI is needed. With
-// FRIDOLIN_TEST_RUN_MAIN=1 it is the bridge itself instead, see
-// runBridgeCLI.
+// FRIDOLIN_FAKE_CONNECT it connects to that unix socket instead (see
+// fakeConnect), and with FRIDOLIN_TEST_RUN_MAIN=1 it is the bridge itself,
+// see runBridgeCLI.
 //
 // Before the tests run it unsets the variables the bridge reads: a shell
 // that exports FRIDOLIN_CONFIG for a real bridge would otherwise point the
@@ -63,6 +65,9 @@ func TestMain(m *testing.M) {
 	if os.Getenv("FRIDOLIN_FAKE_CLAUDE") == "1" {
 		fakeClaude()
 		return
+	}
+	if p := os.Getenv("FRIDOLIN_FAKE_CONNECT"); p != "" {
+		os.Exit(fakeConnect(p))
 	}
 	childEnvAllowlist = append(childEnvAllowlist, testChildEnv...)
 	for _, k := range bridgeVariables() {
@@ -395,6 +400,23 @@ func loggedPrompts(t *testing.T, path string) map[string]string {
 		out[fakeNewMessage(p)] = p
 	}
 	return out
+}
+
+// fakeConnect connects to the unix socket p, as a brain's tool would, for
+// the sandbox tests: it exits 0 when it could, and says when the sandbox
+// refused, in the words sandboxRun looks for.
+func fakeConnect(p string) int {
+	c, err := net.Dial("unix", p)
+	if err != nil {
+		if errors.Is(err, fs.ErrPermission) {
+			fmt.Println("connect: Operation not permitted")
+		} else {
+			fmt.Println("connect:", err)
+		}
+		return 1
+	}
+	c.Close()
+	return 0
 }
 
 // fakeClaudeEnv makes brains in this test spawn the fake CLI.

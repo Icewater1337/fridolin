@@ -646,6 +646,21 @@ listed: programs check every folder on the way to a path (`mkdir -p`,
 `realpath`), and would fail in a brain's state below the data directory,
 or in a brain folder below `~/Documents`.
 
+### Starting code elsewhere
+
+A brain could also hand a command to something that runs it outside the
+sandbox. It cannot run `launchctl` (launchd would start the program),
+`open` (LaunchServices; a `.command` file runs in Terminal) or `osascript`
+(another app, such as Terminal's `do script`), and sending Apple events or
+opening anything through LaunchServices is denied whichever program
+tries. `crontab` and `at` are setuid programs, which no sandboxed process
+may run. Nor can it connect to a unix socket in your home folder (a Docker
+daemon's: `docker run -v ~:/h`, under `~/.docker`, Colima or OrbStack; the
+sandbox goes by the real path, so `/var/run/docker.sock` counts), in your
+own temp folder (an editor's command socket) or in tmux's folder
+(`tmux run-shell` on the activity viewer's server or your own), except
+the sockets in its own folder and state, where the CLI keeps one.
+
 ### What wins
 
 The sandbox applies the last rule that matches, so the profile is written
@@ -664,6 +679,7 @@ in this order, weakest first:
    state and, to read, its runs' brain API tokens.
 6. What stays closed inside the brain's own places: a `deny_paths` entry
    inside its folder, the database, and the folders themselves.
+7. Starting code elsewhere, as above.
 
 So `deny_paths` adds your own read denies, and `allow_paths` re-opens
 reading something the defaults or `deny_paths` closed; writing there stays
@@ -787,10 +803,17 @@ everything but files alone. A manipulated brain can therefore still:
   keychain (where apps keep items with `kSecUseDataProtectionKeychain`, and
   iCloud Keychain) that trusts a program it can run: the service reads that
   keychain, not the brain, so the file deny above does not apply
-- ask launchd (`launchctl`), cron (`crontab`), `at`, LaunchServices
-  (`open`), another app (`osascript`) or a tmux server that runs outside
-  the sandbox (the activity viewer's, or your own) to start a program
-  (`tmux run-shell`), which then runs outside the sandbox
+- run programs it wrote itself, in its own folder or `TMPDIR`: the sandbox
+  refuses only `launchctl`, `open` and `osascript`, because an interpreter
+  (`python3`, `sh`, `node`) runs any script a brain writes anyway, and a
+  brain's folder holds programs it needs (`node_modules/.bin`, a virtual
+  environment, the site builder's workspace)
+- ask launchd to start a program through its own interface, the one
+  `launchctl` uses, from a program of its own (Python's `ctypes`, say), or
+  run a copy of `launchctl` where macOS still runs one; and talk to other
+  system services, unix sockets outside the folders above, and servers on
+  localhost (a notebook or dev server you run) that may do what they are
+  told
 - read what the bridge was started with, although a brain's run is handed
   only [part of it](#what-reaches-brains): the variables in the service
   file (`~/Library/LaunchAgents/ai.fridolin.bridge.plist`, which the
@@ -1142,10 +1165,10 @@ the [helper folders](#helper-programs) of the bridge's `PATH` — without
 tmux the bridge logs a warning and carries on. Nor does a viewer
 start for a brain whose `claude-stream.log` the bridge refuses, a symlink say
 (see [BRAINS.md](BRAINS.md#files-the-bridge-reads-and-writes)). The bridge
-starts these sessions on tmux's default server, outside the sandbox, and any
-brain can send that server commands (`tmux run-shell`), which then run
-unsandboxed. The same goes for a tmux you run yourself; see
-[what the sandbox does not cover](#what-the-sandbox-does-not-cover).
+starts these sessions on tmux's default server, outside the sandbox. The
+sandbox keeps brains off its socket, as off that of a tmux you run
+yourself, so they cannot send it commands (`tmux run-shell`); see
+[starting code elsewhere](#starting-code-elsewhere).
 A server the bridge starts keeps the environment it started with, which
 any brain can read, so it gets only a few of the bridge's variables,
 never the Claude CLI's login (see
