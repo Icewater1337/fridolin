@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { ROUTES } from '../assets/app/routes.js';
-import { matchRoute, routeHref, activeNav, docTitle, tokenFromHash } from '../assets/app/router.js';
+import { matchRoute, routeHref, activeNav, docTitle, credentialFromHash } from '../assets/app/router.js';
 
 test('matchRoute finds the page and its parameters', async (t) => {
   const cases = [
@@ -73,15 +73,16 @@ test('every title names the product the same way', async (t) => {
   await t.test('no title', () => assert.equal(docTitle(''), 'Fridolin'));
 });
 
-test('tokenFromHash', async (t) => {
+test('credentialFromHash', async (t) => {
   const cases = [
     ['no hash', '', null],
     ['a page', '#/overview', null],
-    ['a token', '#token=abc123', 'abc123'],
-    ['an escaped token', '#token=a%2Bb', 'a+b'],
-    ['a malformed escape is kept, not thrown', '#token=abc%E0%A4%A', 'abc%E0%A4%A'],
+    ['a login code', '#login=abc123', { code: 'abc123' }],
+    ['an escaped code', '#login=a%2Bb', { code: 'a+b' }],
+    ['an older link with the token', '#token=abc123', { token: 'abc123' }],
+    ['a malformed escape is kept, not thrown', '#token=abc%E0%A4%A', { token: 'abc%E0%A4%A' }],
   ];
   for (const [name, hash, want] of cases) {
-    await t.test(name, () => assert.equal(tokenFromHash(hash), want));
+    await t.test(name, () => assert.deepEqual(credentialFromHash(hash), want));
   }
 });

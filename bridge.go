@@ -49,12 +49,15 @@ type Bridge struct {
 	token    *DashboardToken
 	// tokenAtStart is dashboard.require_token as the bridge started.
 	tokenAtStart bool
-	scriptAuth   *scriptAuth
-	backup       *BackupManager
-	google       *GoogleAuth
-	plaud        *PlaudManager
-	site         *SiteManager
-	started      time.Time
+	sessions     *dashSessions
+	// sessionCookie names the session cookie for the address served on.
+	sessionCookie string
+	scriptAuth    *scriptAuth
+	backup        *BackupManager
+	google        *GoogleAuth
+	plaud         *PlaudManager
+	site          *SiteManager
+	started       time.Time
 
 	// listen is the address the HTTP server binds, "" when it is off;
 	// runs reach the brain API there with a token from runTokens.
@@ -192,6 +195,9 @@ func NewBridge(cfgs *ConfigStore, opts BridgeOptions) (_ *Bridge, err error) {
 	}
 	b.token = tok
 	b.tokenAtStart = cfg.DashboardRequiresToken()
+	if b.sessions, err = loadDashSessions(cfg.DataDir); err != nil {
+		return nil, err
+	}
 	if b.scriptAuth, err = newScriptAuth(cfg.DataDir, b.runTokens.brainOf, func(id string) bool { return b.brainMgr.Get(id) != nil }); err != nil {
 		return nil, err
 	}

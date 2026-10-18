@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"log"
 	"net"
 	"net/http"
 	"os"
@@ -15,6 +16,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync/atomic"
+	"time"
 )
 
 // The dashboard and its API are served by the bridge on http_listen, which is
@@ -79,7 +81,8 @@ func loadTokenFile(path string) (*DashboardToken, error) {
 // Value returns the token.
 func (t *DashboardToken) Value() string { return t.v.Load().(string) }
 
-// Rotate replaces the token; open dashboards must log in again.
+// Rotate replaces the token and its file: whoever sends the old one is
+// refused from then on. apiRotateToken also ends every dashboard session.
 func (t *DashboardToken) Rotate() error {
 	buf := make([]byte, 24)
 	if _, err := rand.Read(buf); err != nil {
@@ -98,10 +101,20 @@ func (t *DashboardToken) Matches(s string) bool {
 	return subtle.ConstantTimeCompare([]byte(s), []byte(t.Value())) == 1
 }
 
-// dashboardURL is the address to open, with the token in the fragment (which
-// browsers never send to the server or put in logs).
-func dashboardURL(listen, token string) string {
-	return "http://" + listen + "/#token=" + token
+// loginURL is the address to open, with a login code in the fragment
+// (which browsers never send to the server or put in logs). The code works
+// once, within a minute (see dashsession.go), so the browser history keeps
+// nothing that signs in.
+func loginURL(listen, code string) string {
+	return "http://" + listen + "/#login=" + code
+}
+
+// sessionCookieName is the cookie that holds a dashboard session. Cookies
+// belong to a host, not a port, so the port is in the name: a second bridge
+// on this computer, in dev mode say, keeps its own.
+func sessionCookieName(listen string) string {
+	_, port, _ := net.SplitHostPort(listen)
+	return "fridolin_session_" + port
 }
 
 // allowedHosts returns the Host header values that may reach the server.
@@ -151,31 +164,154 @@ func originGuard(allowed map[string]bool, next http.Handler) http.Handler {
 	})
 }
 
-// apiGuard requires the dashboard token on every API call, plus a custom
-// header and a JSON body on writes (which a cross-site form cannot send).
+// apiGuard requires the dashboard token or a dashboard session on every API
+// call, plus a custom header and a JSON body on writes (which a cross-site
+// form cannot send).
 func (b *Bridge) apiGuard(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// First, so the refusals below are not cached either.
 		w.Header().Set("Cache-Control", "no-store")
-		// compat: the dashboard, and any script that calls the API, sends
-		// the token under this name.
-		if b.requiresToken() && !b.token.Matches(r.Header.Get("X-Bridge-Token")) {
+		// compat: scripts that call the API send the token under this name;
+		// the dashboard itself signs in with a session (see dashsession.go).
+		if b.requiresToken() && !b.token.Matches(r.Header.Get("X-Bridge-Token")) && !b.signedIn(r) {
 			writeErr(w, http.StatusUnauthorized, "missing or wrong dashboard token")
 			return
 		}
-		if r.Method != http.MethodGet && r.Method != http.MethodHead {
-			if r.Header.Get("X-Bridge-Dashboard") != "1" {
-				writeErr(w, http.StatusForbidden, "missing X-Bridge-Dashboard header")
-				return
-			}
-			if r.ContentLength != 0 && !strings.HasPrefix(r.Header.Get("Content-Type"), "application/json") {
-				writeErr(w, http.StatusUnsupportedMediaType, "send JSON")
-				return
-			}
-			r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
+		if checkWrite(w, r) {
+			next.ServeHTTP(w, r)
 		}
-		next.ServeHTTP(w, r)
 	})
+}
+
+// checkWrite holds a write to what apiGuard asks of one, the dashboard
+// header and a JSON body of at most 1 MiB, and answers it when it falls
+// short. It reports whether the request may go on.
+func checkWrite(w http.ResponseWriter, r *http.Request) bool {
+	if r.Method == http.MethodGet || r.Method == http.MethodHead {
+		return true
+	}
+	if r.Header.Get("X-Bridge-Dashboard") != "1" {
+		writeErr(w, http.StatusForbidden, "missing X-Bridge-Dashboard header")
+		return false
+	}
+	if r.ContentLength != 0 && !strings.HasPrefix(r.Header.Get("Content-Type"), "application/json") {
+		writeErr(w, http.StatusUnsupportedMediaType, "send JSON")
+		return false
+	}
+	r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
+	return true
+}
+
+// sessionHeader carries a session's binding, which the page keeps in its
+// own storage. Without it the cookie signs nothing in (see dashsession.go).
+const sessionHeader = "X-Bridge-Session"
+
+// signedIn reports whether r carries a dashboard session that has not
+// ended, in its cookie, together with that session's binding.
+func (b *Bridge) signedIn(r *http.Request) bool {
+	c, err := r.Cookie(b.sessionCookie)
+	return err == nil && b.sessions.valid(c.Value, r.Header.Get(sessionHeader))
+}
+
+// startSession signs the browser in: a new session, in a cookie scripts on
+// the page cannot read and other sites do not get sent. It returns the
+// session's binding, for the page to keep and send in sessionHeader.
+func (b *Bridge) startSession(w http.ResponseWriter) (string, error) {
+	id, binding, exp, err := b.sessions.create()
+	if err != nil {
+		return "", err
+	}
+	http.SetCookie(w, &http.Cookie{
+		Name: b.sessionCookie, Value: id, Path: "/", Expires: exp, MaxAge: int(sessionLifetime / time.Second),
+		HttpOnly: true, SameSite: http.SameSiteStrictMode,
+	})
+	return binding, nil
+}
+
+// apiLogin trades a login code (from `fridolin open`) or the dashboard
+// token (pasted on the connect screen) for a session. It is the one API call
+// that needs neither, so it sits outside apiGuard, with its write checks.
+func (b *Bridge) apiLogin(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Cache-Control", "no-store")
+	if !checkWrite(w, r) {
+		return
+	}
+	var req struct {
+		Code  string `json:"code"`
+		Token string `json:"token"`
+	}
+	if err := decodeJSON(r, &req); err != nil {
+		writeErr(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	// The token first: a request with both does not use up a code it
+	// did not need.
+	ok := req.Token != "" && b.token.Matches(req.Token)
+	ok = ok || req.Code != "" && b.sessions.useCode(req.Code)
+	if !ok {
+		writeErr(w, http.StatusUnauthorized, "that link was already used or has expired, or the token is wrong — run fridolin open for a new link")
+		return
+	}
+	binding, err := b.startSession(w)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, "signing in: "+err.Error())
+		return
+	}
+	// The new session replaces the one this browser's cookie named, which
+	// would otherwise stay until maxSessions pushed it out: every `fridolin
+	// open` signs in again.
+	if c, err := r.Cookie(b.sessionCookie); err == nil {
+		if err := b.sessions.drop(c.Value); err != nil {
+			log.Printf("dashboard sign-in: ending the session it replaces: %v", err)
+		}
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"status": "signed in", "binding": binding})
+}
+
+// apiLogout ends this browser's session.
+func (b *Bridge) apiLogout(w http.ResponseWriter, r *http.Request) {
+	if c, err := r.Cookie(b.sessionCookie); err == nil {
+		if err := b.sessions.drop(c.Value); err != nil {
+			writeErr(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+	}
+	http.SetCookie(w, &http.Cookie{Name: b.sessionCookie, Value: "", Path: "/", MaxAge: -1, HttpOnly: true, SameSite: http.SameSiteStrictMode})
+	writeJSON(w, http.StatusOK, map[string]string{"status": "signed out"})
+}
+
+// apiLoginCode makes a login code, for `fridolin open`, which calls it with
+// the token from the data dir.
+func (b *Bridge) apiLoginCode(w http.ResponseWriter, r *http.Request) {
+	code, exp := b.sessions.newCode()
+	writeJSON(w, http.StatusOK, map[string]any{"code": code, "expires_at": exp})
+}
+
+// apiRotateToken replaces the dashboard token and ends every session: sign
+// out everywhere. A browser that asked gets a new session, so the tab
+// stays signed in; `fridolin rotate-token` calls with the token and has no
+// use for one.
+func (b *Bridge) apiRotateToken(w http.ResponseWriter, r *http.Request) {
+	resign := b.signedIn(r)
+	if err := b.token.Rotate(); err != nil {
+		writeErr(w, http.StatusInternalServerError, "writing a new token: "+err.Error())
+		return
+	}
+	if err := b.sessions.dropAll(); err != nil {
+		writeErr(w, http.StatusInternalServerError, "ending the sessions: "+err.Error())
+		return
+	}
+	log.Printf("dashboard token rotated: every dashboard was signed out, and scripts with the old token are refused")
+	resp := map[string]string{"status": "rotated"}
+	if resign {
+		binding, err := b.startSession(w)
+		if err != nil {
+			writeErr(w, http.StatusInternalServerError, "signing in again: "+err.Error())
+			return
+		}
+		resp["binding"] = binding
+	}
+	writeJSON(w, http.StatusOK, resp)
 }
 
 // requiresToken reports whether API calls need the token. Turning
@@ -261,6 +397,7 @@ func staticHandler(root fs.FS) http.Handler {
 // newHTTPHandler builds the whole HTTP surface.
 func (b *Bridge) newHTTPHandler(listen string) http.Handler {
 	hosts := allowedHosts(listen)
+	b.sessionCookie = sessionCookieName(listen)
 	mux := http.NewServeMux()
 
 	mux.HandleFunc("GET /health", func(w http.ResponseWriter, r *http.Request) {
@@ -292,6 +429,7 @@ func (b *Bridge) newHTTPHandler(listen string) http.Handler {
 			}
 			static.ServeHTTP(w, r)
 		}))
+		mux.HandleFunc("POST /api/login", b.apiLogin)
 		mux.Handle("/api/", b.apiGuard(b.apiMux()))
 	}
 

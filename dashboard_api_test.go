@@ -115,6 +115,8 @@ func TestDashboardRequestBodiesDecode(t *testing.T) {
 		{"PUT", "/api/site/users/u_none", map[string]any{"role": "admin"}},
 		{"PUT", "/api/site/users/u_none", map[string]any{"password": "x"}},
 		{"PUT", "/api/site/builders/notes", map[string]any{"on": false}},
+		{"POST", "/api/login", map[string]any{"code": "used"}},
+		{"POST", "/api/login", map[string]any{"token": "wrong"}},
 	}
 	for _, c := range cases {
 		t.Run(c.method+" "+c.path, func(t *testing.T) {

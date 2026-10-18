@@ -146,6 +146,11 @@ Reopen the dashboard any time with:
 fridolin open
 ```
 
+It asks the running bridge for a link that signs your browser in and works
+once, within a minute; the browser then stays signed in for 30 days.
+*Settings → Dashboard sign-in* signs it out, or signs out every browser and
+replaces the dashboard token (`fridolin rotate-token` does the same).
+
 ### Upgrading and rolling back
 
 ```bash
@@ -176,6 +181,21 @@ is on, which it is in a config written before tokens. Before you turn it
 off, give your scripts that header too, and change brain instructions that
 `curl …/send` without one to send their run's token to
 `"$FRIDOLIN_API/send"`, as [Isolation](docs/BRAINS.md#isolation) shows.
+
+**Coming from a version without dashboard sign-in** (one whose
+`fridolin open` put the token in the link): the token stays the same, and
+copies of it may still sit in your browser's history and storage, where a
+brain could read them (see [Dashboard](docs/CONFIGURATION.md#dashboard)).
+Once the new build runs, replace it once:
+
+```bash
+fridolin rotate-token     # or Settings → Dashboard sign-in → Sign out everywhere
+```
+
+Scripts that send the old token in `X-Bridge-Token` are refused from then
+on; give them the new one from `~/.fridolin/dashboard.token`. The upgrade
+does not rotate it for you, so that those scripts do not stop without
+warning.
 
 `fridolin version`, the dashboard's Overview and the `Starting fridolin …`
 line each start writes to the log say which version runs (on macOS:
@@ -505,11 +525,16 @@ What the bridge does about it:
   [what a brain loads](docs/BRAINS.md#what-a-brain-loads)).
 - **A guarded dashboard.** It only listens on localhost, rejects requests
   from web pages on other sites (and DNS-rebinding tricks), and requires a
-  token from `~/.fridolin/dashboard.token`. On macOS the sandbox keeps
-  that file away from brains, so a manipulated brain cannot reconfigure the
-  bridge. On Linux, or with the sandbox off, a brain that runs with all
-  permissions can read the token like any other file of yours; the
-  dashboard warns about it.
+  token from `~/.fridolin/dashboard.token`. Browsers never hold the token:
+  they sign in with a link that works once and keep a session, a cookie
+  page scripts cannot read that counts only together with a key the
+  dashboard page keeps for its own address. On macOS the sandbox keeps
+  the token file away from brains, so a manipulated brain cannot
+  reconfigure the bridge; the browser's files, where a session is kept,
+  it denies them only for the common browsers
+  ([which ones](docs/CONFIGURATION.md#dashboard)). On Linux, or with the
+  sandbox off, a brain that runs with all permissions can read the token
+  like any other file of yours; the dashboard warns about it.
 - **Tokens for `/send` and `/ingest`.** Each brain's run gets a token of
   its own, which works while the run lasts: with it, a brain sends only to
   its own chats and hands files only to itself, so it cannot make another

@@ -798,6 +798,52 @@ The Plaud recorder integration; see [PLAUD.md](PLAUD.md) for every setting.
 ### `dashboard`
 
 `dashboard.disabled` turns the web dashboard off (*restart*).
+
+Browsers sign in rather than keep the token. `fridolin open`, and the line
+the bridge prints when it starts in a terminal, give the browser a link with
+a login code that works once, within a minute; the page trades it (or a
+token you paste) for a session that lasts 30 days, which replaces the one
+the browser had. A bridge older than the `fridolin` you run `open` from
+has no login codes: `open` then says so and how to open its dashboard,
+rather than putting the token in the link. A session is two
+halves: an HttpOnly, SameSite=Strict cookie, and a binding the page keeps
+in the browser's storage for the dashboard's address and sends with every
+call (`X-Bridge-Session`). The bridge takes neither alone. Cookies are not
+kept apart by port, so the browser sends the cookie to every server on
+`127.0.0.1`, a brain's [site preview](SITE.md) among them; that server
+cannot read the dashboard's storage, which belongs to its own port.
+
+The binding is in the browser's files on disk too, so this keeps a session
+out of a brain's reach only in a browser whose profile the macOS sandbox
+denies to brains: Safari, Chrome (every channel), Chromium, Brave, Arc,
+Edge, Vivaldi, Opera and Firefox. In another Chromium browser (Thorium,
+Yandex, Comet and others) a brain can read the binding, and gets the cookie
+once you open a server it runs on `127.0.0.1` in that browser, such as its
+site preview, which the Build page shows too; Chromium keeps cookies
+encrypted on disk, so it needs that request. Firefox forks (Zen, LibreWolf,
+Waterfox, Floorp) keep cookies unencrypted, so there a brain can read both
+halves without one. Use one of the listed browsers for the dashboard, or at
+least open no brain's server, the Build page included, in the one you sign
+in with.
+
+Sessions are kept, as hashes, in `<data_dir>/dashboard-sessions.json`, so a
+restart keeps you signed in. *Settings → Dashboard sign-in* signs this
+browser out, or every browser, which also replaces the token: scripts that
+send the old one in `X-Bridge-Token` are refused from then on.
+`fridolin rotate-token` does the same from a terminal, also while the
+bridge is stopped. A bridge that runs with `dashboard.disabled` has no
+dashboard API to replace the token through: run it while the bridge is
+stopped, or once the dashboard is back on.
+
+Versions before sign-in put the token in the link `fridolin open` opened
+and kept it in the browser's storage, so after upgrading from one,
+copies of the token may still be in the browser's history and in the
+leftovers of that storage on disk, which a brain could read in a browser
+the sandbox does not deny. They work until the token changes: run
+`fridolin rotate-token` (or *Sign out everywhere*) once the new build runs,
+and give scripts that send `X-Bridge-Token` the new one. The upgrade does
+not do it for you, since that would cut those scripts off without warning.
+
 `dashboard.require_token` (default `true`) requires the token from
 `<data_dir>/dashboard.token` on every API call. Brains run on this machine and
 could otherwise reach the dashboard with `curl`; leave it on. Turning it off

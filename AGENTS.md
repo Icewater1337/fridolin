@@ -72,8 +72,8 @@ The person's data lives in brain folders they choose and in
 Reopen the dashboard with `fridolin open`. To upgrade later: `git pull &&
 ./setup.sh`, then do what README's "Upgrading and rolling back" says for
 the version you came from (scripts and brains that call `/send` or
-`/ingest` without a token). To go back to the version before:
-`fridolin service rollback`.
+`/ingest` without a token, rotating the dashboard token). To go back to
+the version before: `fridolin service rollback`.
 
 ## Rules
 
@@ -91,7 +91,8 @@ the version you came from (scripts and brains that call `/send` or
 - **Never print or paste** `~/.fridolin/dashboard.token`,
   `~/.fridolin/scripts.token`, the rclone config in
   `~/.fridolin/rclone/`, or anything that looks like a credential into
-  chat or logs. `fridolin open` passes the token to the browser directly.
+  chat or logs. `fridolin open` signs the browser in with a link that
+  works once, so the token never goes into a URL.
 - Do not commit the person's data. `config.json`, brain folders, databases,
   media and tokens are not part of this repository.
 - Do not weaken security defaults (sandbox, dashboard token, allowlists)

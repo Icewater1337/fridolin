@@ -2,7 +2,7 @@
 // everything else in the file (including fields this page does not show) is
 // sent back exactly as received.
 
-import { put } from '../app/api.js';
+import { put, rotateToken, signOut } from '../app/api.js';
 import { setRestartRequired } from '../app/store.js';
 import { configResource } from '../app/resources.js';
 import { h, mount, paint } from '../lib/dom.js';
@@ -100,6 +100,35 @@ const SECTIONS = [
   },
 ];
 
+// Signing out this browser, or every browser and script that holds the
+// dashboard token, which `fridolin rotate-token` does too.
+function dashboardSignInCard() {
+  return h('section.card.settings-section', { id: 'sec-signin' },
+    h('h2', 'Dashboard sign-in'),
+    h('p.muted.section-intro', 'This browser stays signed in for 30 days: a cookie page scripts cannot read, which counts only with a key this page keeps for its own address. Signing out everywhere also replaces the dashboard token, so a copy of it that got out stops working.'),
+    h('div.actions',
+      btn('Sign out', {
+        icon: 'lock',
+        onClick: async () => { await signOut(); location.reload(); },
+      }),
+      btn('Sign out everywhere…', {
+        kind: 'danger', icon: 'key',
+        onClick: async () => {
+          const ok = await confirmDialog({
+            title: 'Sign out everywhere?',
+            message: h('div',
+              h('p', 'Every other browser is signed out, and the dashboard token is replaced: scripts that send the old one are refused. This browser stays signed in.'),
+              h('p.muted', 'Open the dashboard elsewhere again with fridolin open.')),
+            confirm: 'Sign out everywhere',
+            danger: true,
+          });
+          if (!ok) return;
+          await rotateToken();
+          toast('Every other browser was signed out, and the dashboard token replaced', 'ok');
+        },
+      })));
+}
+
 function getPath(obj, key) {
   return key.split('.').reduce((o, k) => (o && typeof o === 'object' ? o[k] : undefined), obj);
 }
@@ -122,6 +151,7 @@ export default {
     const bar = saveBar({ save: btn('Save', { kind: 'primary', icon: 'check', onClick: () => save() }), onDiscard: () => form.discard(), floating: true });
     const where = h('span'); // the file, once the settings have loaded
     const googleCard = googleClientCard({ signal: ctx.signal });
+    const signInCard = dashboardSignInCard();
     mount(root, pageHeader('Settings', where), body, bar);
 
     // Only the settings edited here count as a conflict: one changed
@@ -183,8 +213,9 @@ export default {
         return el;
       });
       chip('Google sign-in', 'google', googleCard);
+      chip('Dashboard sign-in', 'signin', signInCard);
       return {
-        el: h('div.page-stack', nav, sections, googleCard),
+        el: h('div.page-stack', nav, sections, googleCard, signInCard),
         value: () => controls.map((c) => c.value()),
         controls,
       };

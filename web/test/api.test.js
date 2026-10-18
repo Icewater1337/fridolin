@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { stubFetch } from './stub-fetch.js';
-import { api, get, post, on, ApiError } from '../assets/app/api.js';
+import { api, get, post, on, signIn, signOut, rotateToken, ApiError } from '../assets/app/api.js';
 import { withDeadline } from '../assets/lib/abort.js';
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -96,6 +96,97 @@ test('writes carry the dashboard header and a JSON body', async (t) => {
   assert.equal(init.headers['X-Bridge-Dashboard'], '1');
   assert.equal(init.headers['Content-Type'], 'application/json');
   assert.equal(init.body, '{"id":"work"}');
+});
+
+test('requests carry no token: the session signs them', async (t) => {
+  const net = stubFetch(t);
+  const p = get('/api/status');
+  net.answer(0, {});
+  await p;
+  const { init } = net.calls[0];
+  assert.equal(init.headers['X-Bridge-Token'], undefined);
+  assert.equal(init.credentials, 'same-origin');
+});
+
+test('signIn trades a login code for a session', async (t) => {
+  const net = stubFetch(t);
+  const p = signIn({ code: 'abc' });
+  net.answer(0, { status: 'signed in' });
+  await p;
+  assert.equal(net.calls[0].url, '/api/login');
+  assert.equal(net.calls[0].init.method, 'POST');
+  assert.equal(net.calls[0].init.body, '{"code":"abc"}');
+});
+
+// answered runs call() and answers its one request with body.
+async function answered(net, call, body) {
+  const n = net.calls.length;
+  const p = call();
+  net.answer(n, body);
+  return p;
+}
+
+test('every call carries the binding the sign-in returned, until sign-out', async (t) => {
+  const net = stubFetch(t);
+  await answered(net, () => signIn({ code: 'abc' }), { status: 'signed in', binding: 'bind-1' });
+  await answered(net, () => get('/api/status'), {});
+  await answered(net, () => post('/api/restart'), {});
+  assert.equal(net.calls[1].init.headers['X-Bridge-Session'], 'bind-1', 'on reads');
+  assert.equal(net.calls[2].init.headers['X-Bridge-Session'], 'bind-1', 'and on writes');
+
+  await answered(net, () => rotateToken(), { status: 'rotated', binding: 'bind-2' });
+  await answered(net, () => get('/api/status'), {});
+  assert.equal(net.calls[4].init.headers['X-Bridge-Session'], 'bind-2', 'rotating signs this browser in again');
+
+  await answered(net, () => signOut(), { status: 'signed out' });
+  await answered(net, () => get('/api/status'), {});
+  assert.equal(net.calls[6].init.headers['X-Bridge-Session'], undefined, 'gone after signing out');
+});
+
+test('the binding is kept in localStorage, where every tab finds it', async (t) => {
+  const store = new Map();
+  globalThis.localStorage = {
+    getItem: (k) => (store.has(k) ? store.get(k) : null),
+    setItem: (k, v) => store.set(k, String(v)),
+    removeItem: (k) => store.delete(k),
+  };
+  t.after(() => { delete globalThis.localStorage; });
+  const net = stubFetch(t);
+  await answered(net, () => signIn({ token: 'pasted' }), { status: 'signed in', binding: 'bind-1' });
+  assert.equal(store.get('fridolin.session'), 'bind-1');
+  assert.ok(![...store.values()].includes('pasted'), 'the token is not stored');
+
+  store.set('fridolin.session', 'bind-from-another-tab');
+  await answered(net, () => get('/api/status'), {});
+  assert.equal(net.calls[1].init.headers['X-Bridge-Session'], 'bind-from-another-tab');
+
+  await answered(net, () => signOut(), {});
+  assert.equal(store.has('fridolin.session'), false);
+});
+
+test('a refused sign-in does not sign the app out', async (t) => {
+  const net = stubFetch(t);
+  let told = 0;
+  t.after(on('unauthorized', () => { told++; }));
+  const p = signIn({ code: 'used' });
+  net.answer(0, { error: 'that link was already used' }, 401);
+  await assert.rejects(p, { status: 401 });
+  assert.equal(told, 0, 'the session the browser has may still be good');
+});
+
+test('the token an older dashboard kept in localStorage is removed', async () => {
+  const removed = [];
+  globalThis.localStorage = {
+    getItem: () => 'old-token',
+    setItem: () => { throw new Error('nothing may be stored'); },
+    removeItem: (k) => removed.push(k),
+  };
+  try {
+    await import('../assets/app/api.js?with-storage');
+  } finally {
+    delete globalThis.localStorage;
+  }
+  assert.deepEqual(removed, ['bridgeToken']);
 });
 
 test('withDeadline', async (t) => {

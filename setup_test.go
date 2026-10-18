@@ -122,8 +122,12 @@ func TestSetupSaysWhatHappened(t *testing.T) {
 			[]string{"The new build is installed", "Go back to the build that ran before with: $HOME/.local/lib/fridolin/fridolin service rollback"}, []string{"Setup complete"}},
 		{"the first install does not come up", nil, []string{"FAKE_INSTALL=fail-after"}, false, 1, true,
 			[]string{"The install or the restart failed"}, []string{"rollback"}},
+		// This build's open needs a bridge of its own version, which the
+		// one left running may not be; the installed build's works.
 		{"a bridge runs and the service is left alone", []string{"--no-service"}, []string{"FAKE_STATUS=0"}, true, 0, false,
-			[]string{"the running bridge keeps its old build", "bin/fridolin open"}, []string{"--open"}},
+			[]string{"the running bridge keeps its old build", "Open its dashboard: $HOME/.local/lib/fridolin/fridolin open"}, []string{"--open", "bin/fridolin open"}},
+		{"a bridge runs, nothing is installed, and the service is left alone", []string{"--no-service"}, []string{"FAKE_STATUS=0"}, false, 0, false,
+			[]string{"the running bridge keeps its old build", "bin/fridolin open (if the bridge is older than this"}, []string{"--open"}},
 		{"no bridge runs and the service is left alone", []string{"--no-service"}, nil, false, 0, false,
 			[]string{"Start the bridge:", "bin/fridolin --open"}, []string{"keeps its old build"}},
 		// It cannot tell, so it does not say to start one regardless.
