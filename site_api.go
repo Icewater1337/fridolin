@@ -149,12 +149,13 @@ func (b *Bridge) apiSiteDeployKey(w http.ResponseWriter, r *http.Request) {
 }
 
 // apiSiteDeployKeyGH adds the deploy key with gh. Before a repository is
-// connected the page sends the address typed for Connect as "url".
+// connected the page sends the address typed for Connect as "url"; once one
+// is, it sends no body.
 func (b *Bridge) apiSiteDeployKeyGH(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		URL string `json:"url"`
 	}
-	if err := decodeJSON(r, &req); err != nil {
+	if err := decodeOptionalJSON(r, &req); err != nil {
 		writeErr(w, http.StatusBadRequest, err.Error())
 		return
 	}
