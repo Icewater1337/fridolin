@@ -263,11 +263,6 @@ func (wa *WhatsAppClient) newSession() *whatsmeow.Client {
 	return cli
 }
 
-func isTerminal(f *os.File) bool {
-	st, err := f.Stat()
-	return err == nil && st.Mode()&os.ModeCharDevice != 0
-}
-
 // intakeDrainWarning is when Disconnect warns about a slow drain.
 const intakeDrainWarning = 5 * time.Second
 

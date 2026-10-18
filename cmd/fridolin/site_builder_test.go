@@ -4,12 +4,14 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"fridolin/internal/fsx"
 )
@@ -265,6 +267,30 @@ export default (ctx) => express.Router().get('/note', (_req, res) => res.json({ 
 	}
 	if !fsx.Exists(filepath.Join(ws, "modules", "team")) {
 		t.Error("the workspace was removed")
+	}
+}
+
+// TestSiteBuilderCommandsLeadASessionOfTheirOwn: the commands the site
+// builder runs as a brain lead a session of their own, without a terminal,
+// as brain runs do (platform_test.go checks those): one that shared the
+// session of a bridge started in your terminal could push keystrokes into
+// your shell. They used to share the bridge's process group too, so a
+// timeout left what the command started running.
+func TestSiteBuilderCommandsLeadASessionOfTheirOwn(t *testing.T) {
+	m, dir := newTestBuilderSite(t)
+	m.hooks.sandbox = func(_, bin string, args []string) (string, []string, []string, error) {
+		return bin, args, []string{"FRIDOLIN_FAKE_SESSION=1"}, nil
+	}
+	out, err := m.sandboxed(context.Background(), "web", dir, 30*time.Second, os.Args[0])
+	if err != nil {
+		t.Fatalf("%v: %s", err, out)
+	}
+	var pid, sid int
+	if _, err := fmt.Sscanf(out, "pid=%d sid=%d", &pid, &sid); err != nil {
+		t.Fatalf("output %q: %v", out, err)
+	}
+	if sid != pid {
+		t.Errorf("the command ran in session %d, want one of its own (%d)", sid, pid)
 	}
 }
 

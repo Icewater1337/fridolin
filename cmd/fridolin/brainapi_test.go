@@ -270,7 +270,7 @@ func TestBridgePrunesStaleRunTokens(t *testing.T) {
 	if _, err := os.Stat(stale); err != nil {
 		t.Errorf("a bridge that could not start took the running one's token file: %v", err)
 	}
-	running.release()
+	running.Release()
 
 	b, err := NewBridge(cfgs, BridgeOptions{NoWhatsApp: true})
 	if err != nil {

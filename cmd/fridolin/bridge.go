@@ -117,7 +117,7 @@ func NewBridge(cfgs *ConfigStore, opts BridgeOptions) (_ *Bridge, err error) {
 	}
 	defer func() {
 		if err != nil {
-			lock.release()
+			lock.Release()
 		}
 	}()
 	protectDataDir(cfg)
@@ -435,7 +435,7 @@ func (b *Bridge) stop() {
 	if err := b.store.Close(); err != nil {
 		log.Printf("closing store: %v", err)
 	}
-	b.lock.release()
+	b.lock.Release()
 	log.Println("Bridge stopped.")
 }
 

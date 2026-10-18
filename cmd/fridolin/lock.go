@@ -38,9 +38,9 @@ func acquireInstanceLock(dataDir string) (*instanceLock, error) {
 	return &instanceLock{f: f}, nil
 }
 
-// release lets a restarted bridge take the lock again. Calling it twice is
+// Release lets a restarted bridge take the lock again. Calling it twice is
 // harmless.
-func (l *instanceLock) release() {
+func (l *instanceLock) Release() {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	if l.f != nil {

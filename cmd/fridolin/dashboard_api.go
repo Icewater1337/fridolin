@@ -1362,36 +1362,17 @@ func (b *Bridge) apiRemoveBrainDir(w http.ResponseWriter, r *http.Request) {
 
 var pickMu sync.Mutex
 
-// nativePicker returns the command that shows a native folder chooser.
-func nativePicker() []string {
-	switch runtime.GOOS {
-	case "darwin":
-		return []string{"osascript", "-e", "activate", "-e", `POSIX path of (choose folder with prompt "Choose a folder for this brain")`}
-	case "linux":
-		if os.Getenv("DISPLAY") == "" && os.Getenv("WAYLAND_DISPLAY") == "" {
-			return nil
-		}
-		if p, err := exec.LookPath("zenity"); err == nil {
-			return []string{p, "--file-selection", "--directory", "--title=Choose a folder for this brain"}
-		}
-		if p, err := exec.LookPath("kdialog"); err == nil {
-			return []string{p, "--getexistingdirectory", homeDir()}
-		}
-	}
-	return nil
-}
-
 func (b *Bridge) apiFSCaps(w http.ResponseWriter, r *http.Request) {
 	home := homeDir()
 	picker := ""
-	if p := nativePicker(); p != nil {
+	if p := folderPicker(home); p != nil {
 		picker = filepath.Base(p[0])
 	}
 	writeJSON(w, http.StatusOK, map[string]string{"picker": picker, "home": home})
 }
 
 func (b *Bridge) apiFSPick(w http.ResponseWriter, r *http.Request) {
-	argv := nativePicker()
+	argv := folderPicker(homeDir())
 	if argv == nil {
 		writeErr(w, http.StatusNotImplemented, "no native folder picker on this system — browse or type the path instead")
 		return

@@ -10,7 +10,6 @@ import (
 	"io"
 	"log"
 	"os"
-	"os/exec"
 	"os/signal"
 	"path/filepath"
 	"regexp"
@@ -552,7 +551,7 @@ func rotateToken(cfg *Config) error {
 	if err != nil {
 		return fmt.Errorf("the bridge runs but does not answer, so the token was not replaced: %w", err)
 	}
-	defer lock.release()
+	defer lock.Release()
 	tok, err := LoadDashboardToken(cfg.DataDir)
 	if err != nil {
 		return err
@@ -565,16 +564,6 @@ func rotateToken(cfg *Config) error {
 		return err
 	}
 	return sessions.dropAll()
-}
-
-func openBrowser(url string) error {
-	switch runtime.GOOS {
-	case "darwin":
-		return exec.Command("open", url).Run()
-	case "linux":
-		return exec.Command("xdg-open", url).Run()
-	}
-	return fmt.Errorf("don't know how to open a browser on %s", runtime.GOOS)
 }
 
 // checkOptions are the check command's flags.
