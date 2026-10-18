@@ -6,6 +6,22 @@ import (
 	"testing"
 )
 
+func TestScaffoldRejectsEmptyDirectory(t *testing.T) {
+	m := testManifest("candidate")
+	before, err := os.ReadDir(".")
+	if err != nil {
+		t.Fatal(err)
+	}
+	created, err := ScaffoldBrain("", &m)
+	if err == nil || len(created) != 0 {
+		t.Fatalf("empty folder scaffold = %v, %v", created, err)
+	}
+	after, err := os.ReadDir(".")
+	if err != nil || len(after) != len(before) {
+		t.Fatalf("empty folder scaffold changed the working directory: %v, %v", after, err)
+	}
+}
+
 func scaffoldForRollback(t *testing.T, dir string) func() {
 	t.Helper()
 	m := testManifest("candidate")

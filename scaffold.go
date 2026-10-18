@@ -26,6 +26,9 @@ type scaffoldEntry struct {
 
 func newScaffold(dir string) (*scaffoldTx, error) {
 	s := &scaffoldTx{}
+	if dir == "" {
+		return s, &os.PathError{Op: "mkdir", Path: dir, Err: fs.ErrInvalid}
+	}
 	abs, err := filepath.Abs(dir)
 	if err != nil {
 		return s, err
