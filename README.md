@@ -879,8 +879,9 @@ your name, your numbers, your company). CI runs the same check.
 `make check` runs what CI's build, lint and test jobs run: gofmt, `go vet`,
 `go mod tidy -diff`, the race tests, staticcheck, shellcheck, ruff,
 actionlint, a check that every workflow action is pinned to a commit SHA,
-ESLint on the dashboard, the Python, dashboard, personal-data-check,
-action-pin-check and Makefile tests, and a smoke test that starts a
+a check that `THIRD_PARTY_NOTICES` is current, ESLint on the dashboard,
+the Python, dashboard, personal-data-check, action-pin-check, notices and
+Makefile tests, and a smoke test that starts a
 race-enabled build in dev mode on a scratch config (`make help` lists every
 target). staticcheck and actionlint run through `go run` at pinned
 versions, and ESLint through `npx` at a pinned version, which it fetches
@@ -908,7 +909,17 @@ messages, model output, files a brain writes) for 20 seconds each;
 
 ## License
 
-MIT — see [LICENSE](LICENSE). Privacy: [PRIVACY.md](PRIVACY.md).
+Fridolin's source code is MIT — see [LICENSE](LICENSE). A binary built
+from it also contains the Go modules it links, among them whatsmeow and
+go.mau.fi/util under MPL-2.0 and go.mau.fi/libsignal under GPL-3.0, so a
+binary, such as the one in a release archive, may be distributed only
+under the terms of GPL-3.0 as a whole; the source stays MIT, which both
+allow combining with. [THIRD_PARTY_NOTICES](THIRD_PARTY_NOTICES) lists
+every module the binary links with its licence, and their licence texts.
+After changing dependencies, `make notices` writes it again: `make check`
+and CI fail while it is out of date.
+
+Privacy: [PRIVACY.md](PRIVACY.md).
 
 Built on [whatsmeow](https://github.com/tulir/whatsmeow). Not affiliated with
 or endorsed by WhatsApp or Meta. Automating a WhatsApp account may conflict

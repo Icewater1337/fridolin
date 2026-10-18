@@ -11,3 +11,4 @@
 # Generated: GitHub collapses it in diffs and leaves it out of the language
 # statistics.
 go.sum linguist-generated=true
+THIRD_PARTY_NOTICES linguist-generated=true

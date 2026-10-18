@@ -112,6 +112,12 @@ jobs:
         if: matrix.go == 'stable' && matrix.os == 'ubuntu-latest' && matrix.shard == fromJSON(env.SHARDS)
         run: make tidy-check
 
+      # It lists what every release platform links, so one run covers
+      # them all. A dependency update fails here until make notices ran.
+      - name: THIRD_PARTY_NOTICES is current
+        if: matrix.go == 'stable' && matrix.os == 'ubuntu-latest'
+        run: make notices-check
+
       - name: actionlint and action pins
         if: matrix.go == 'stable' && matrix.os == 'ubuntu-latest' && matrix.shard == fromJSON(env.SHARDS)
         run: make lint-actions
@@ -194,7 +200,7 @@ jobs:
         if: matrix.os == 'ubuntu-latest'
         run: make lint-sh
 
-      - name: personal-data check, action-pin check and Makefile tests
+      - name: tests of the personal-data, action-pin and notices scripts and the Makefile
         run: make test-sh
 
   python:
