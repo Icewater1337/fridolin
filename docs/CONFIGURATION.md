@@ -550,6 +550,12 @@ cause, and Claude never starts unsandboxed. `fridolin check --print-sandbox
   write your next sign-in), nor write anything else in `~/.plaud`;
 - `/dev/null`, `/dev/zero`, `/dev/fd`.
 
+Writing preferences by their domain (`defaults write com.apple.Terminal
+…`) is denied too: cfprefsd writes them outside the sandbox, and some apps
+run what their preferences say, such as the command a Terminal profile
+starts when you open a window. A program may still read preferences, and
+write a preferences file by its path in the brain's own places.
+
 So a manipulated brain cannot leave anything that runs or loads outside its
 sandbox: not in `~/.claude` (settings and their hooks, `CLAUDE.md`, skills,
 plugins, auto-memory), which your own sessions load, nor in another
@@ -691,7 +697,8 @@ shell (`TIOCSTI`), and `/dev/tty` is not writable either.
 The sandbox applies the last rule that matches, so the profile is written
 in this order, weakest first:
 
-1. Writing is denied everywhere, but for the devices above.
+1. Writing is denied everywhere, but for the devices above, and so is
+   writing preferences.
 2. The home-folder defaults above and `deny_paths` entries outside the
    brain's folder deny reading.
 3. The brain's own folder (reading and writing) and `allow_paths`
@@ -848,7 +855,10 @@ everything but files alone. A manipulated brain can therefore still:
   run a copy of `launchctl` where macOS still runs one; and talk to other
   system services, unix sockets outside the folders above, and servers on
   localhost (a notebook or dev server you run) that may do what they are
-  told
+  told. Some of them write on the brain's behalf, outside the sandbox:
+  from a program of its own a brain may still ask to add a login item
+  (Service Management or the shared file lists) or an item to the
+  data-protection keychain
 - read what the bridge was started with, although a brain's run is handed
   only [part of it](#what-reaches-brains): the variables in the service
   file (`~/Library/LaunchAgents/ai.fridolin.bridge.plist`, which the

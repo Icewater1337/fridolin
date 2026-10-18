@@ -28,14 +28,15 @@ const sandboxExecPath = "/usr/bin/sandbox-exec"
 // Code config dir, TMPDIR and caches; see brainState). Everything else
 // your user may write stays closed, so a prompt-injected brain cannot plant
 // code that runs outside its sandbox: in ~/.claude, which your own sessions
-// load, in a LaunchAgent, a shell startup file, a program on PATH or the
-// bridge's own install. Reading is allowed by default, with an explicit
-// denylist: the other brains' folders, the bridge's own files, your Claude
-// Code setup and instructions, the keychains, and the usual home-directory
-// hotspots (keys, mail, browser data). That is a containment measure, not a
-// jail: "What the sandbox does not cover" in docs/CONFIGURATION.md lists
-// what it leaves open. Add anything else that must stay unreadable to
-// sandbox.deny_paths in config.json.
+// load, in a LaunchAgent, a shell startup file, your apps' preferences, a
+// program on PATH or the bridge's own install. Reading is allowed by
+// default, with an explicit denylist: the other brains' folders, the
+// bridge's own files, your Claude Code setup and instructions, the
+// keychains, and the usual home-directory hotspots (keys, mail, browser
+// data). That is a containment measure, not a jail: "What the sandbox does
+// not cover" in docs/CONFIGURATION.md lists what it leaves open. Add
+// anything else that must stay unreadable to sandbox.deny_paths in
+// config.json.
 type SandboxProfiler struct {
 	mu sync.RWMutex
 
@@ -378,7 +379,8 @@ var launchers = []string{"/bin/launchctl", "/usr/bin/open", "/usr/bin/osascript"
 // The sandbox applies the last rule that matches, so the order of the
 // sections is the precedence model, from weakest to strongest:
 //
-//  1. Writing is denied everywhere, but for a few devices.
+//  1. Writing is denied everywhere, but for a few devices, and so is
+//     writing preferences, which cfprefsd does on the brain's behalf.
 //  2. Soft denies: reading private home folders, your Claude Code setup,
 //     deny_paths entries. The allows below may open them.
 //  3. Allows: the brain's own folder (read and write), allow_paths (read).
@@ -452,6 +454,12 @@ func (sp *SandboxProfiler) Profile(brainID string) (string, error) {
 	for _, d := range writableDevices {
 		b.allow("file-write*", d.filter, d.path)
 	}
+	// Preferences are written by cfprefsd, outside the sandbox, so the file
+	// deny above does not reach them: `defaults write com.apple.Terminal`
+	// changed the command a Terminal profile runs when you open a window.
+	// A program writing a preferences file by its path, in the brain's own
+	// folder say, writes it itself and stays under the file rules.
+	b.WriteString("(deny user-preference-write)\n")
 	b.WriteString("\n")
 
 	// ── 2. soft denies ───────────────────────────────────────────────────

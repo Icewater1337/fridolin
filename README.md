@@ -558,8 +558,8 @@ What the bridge does about it:
   state the bridge keeps for each of them (a Claude Code config folder,
   `TMPDIR` and caches of its own), so nothing they write runs outside the
   sandbox: not Claude Code's settings and hooks, a `CLAUDE.md`, a
-  LaunchAgent, a shell startup file, a program on your `PATH`, nor the
-  bridge's own binary, install folder and checkout. They cannot read SSH
+  LaunchAgent, a shell startup file, your apps' preferences, a program on
+  your `PATH`, nor the bridge's own binary, install folder and checkout. They cannot read SSH
   keys, the keychains, cloud credentials, shell history, browser and mail
   data, your Documents/Downloads/Desktop, the bridge's own database, any other
   brain's folder or inbox, nor your Claude Code setup and transcripts and

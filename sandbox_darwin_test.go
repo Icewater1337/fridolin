@@ -10,6 +10,7 @@ import (
 	"net"
 	"os"
 	"os/exec"
+	"os/user"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -651,6 +652,58 @@ func TestSandboxWritesOnlyItsOwnPlaces(t *testing.T) {
 				t.Errorf("%s: allowed=%v, want %v (output %q)", c.cmd, allowed, c.allow, out)
 			}
 		})
+	}
+}
+
+// TestSandboxKeepsBrainsFromWritingYourPreferences: writes were denied
+// everywhere, but preferences are written by cfprefsd, outside the
+// sandbox, so `defaults write` changed any of your user's preference
+// domains, such as the command a Terminal profile runs when you open a
+// window. Under the real sandbox-exec a brain now cannot write a domain,
+// checked from outside, while it still reads preferences and writes a
+// preferences file in its own folder by its path. Preferences are your
+// user's, not HOME's, so the domain is a throwaway one, removed after.
+func TestSandboxKeepsBrainsFromWritingYourPreferences(t *testing.T) {
+	requireSandboxExec(t)
+	home := canonicalDir(t.TempDir())
+	t.Setenv("HOME", home)
+	sp, own := sandboxFixture(t, home, "b", "clients")
+	domain := fmt.Sprintf("com.example.fridolin-test.%d.%d", os.Getpid(), time.Now().UnixNano())
+	t.Cleanup(func() {
+		// defaults delete leaves an empty plist behind, in your user's
+		// home folder, not the test's HOME.
+		_ = exec.Command("/usr/bin/defaults", "delete", domain).Run()
+		if u, err := user.Current(); err == nil {
+			_ = os.Remove(filepath.Join(u.HomeDir, "Library", "Preferences", domain+".plist"))
+		}
+	})
+	env := sandboxStateEnv(t, sp, "a")
+	cases := []struct {
+		name  string
+		args  []string // for /usr/bin/defaults
+		allow bool
+	}{
+		{"write a preference domain", []string{"write", domain, "planted", "-string", "by a brain"}, false},
+		{"read your preferences", []string{"read", "-g"}, true},
+		{"write a preferences file in its own folder", []string{"write", filepath.Join(own, "own-prefs"), "k", "-string", "v"}, true},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			bin, argv, err := sp.Command("a", "/usr/bin/defaults", c.args)
+			if err != nil {
+				t.Fatal(err)
+			}
+			cmd := exec.Command(bin, argv...)
+			cmd.Dir = own
+			cmd.Env = append(os.Environ(), env...)
+			out, err := cmd.CombinedOutput()
+			if allowed := err == nil; allowed != c.allow {
+				t.Errorf("defaults %q: allowed=%v, want %v (output %q)", c.args, allowed, c.allow, out)
+			}
+		})
+	}
+	if out, err := exec.Command("/usr/bin/defaults", "read", domain).CombinedOutput(); err == nil {
+		t.Errorf("the brain wrote the preference domain %s: %s", domain, out)
 	}
 }
 

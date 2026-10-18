@@ -7,6 +7,7 @@
 (allow file-write* (literal "/dev/zero"))
 (allow file-write* (literal "/dev/dtracehelper"))
 (allow file-write* (subpath "/dev/fd"))
+(deny user-preference-write)
 
 ;; 2. Private places: not readable, unless allowed below
 (deny file-read* (subpath "<HOME>/.ssh"))

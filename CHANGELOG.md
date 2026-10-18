@@ -105,8 +105,9 @@ yet, so everything is under Unreleased until the first one.
   inbox (`media/<brain id>/`) and its own state in
   `<data_dir>/brains/<brain id>/`, with a Claude Code config folder
   (`CLAUDE_CONFIG_DIR`), a temp folder (`TMPDIR`) and a cache. Writing
-  anywhere else is denied, `/tmp` included, so a skill that writes there
-  or installs programs or global packages fails
+  anywhere else is denied, `/tmp` included, and so is writing your
+  preferences (`defaults write`), so a skill that writes there or
+  installs programs or global packages fails
   ([Writing](docs/CONFIGURATION.md#writing)).
 - Brains no longer read your keychains, so the login you made with
   `claude` does not reach them: run `claude setup-token` and set
