@@ -9,9 +9,8 @@
 #   make check        what CI's build, lint and test jobs run
 #   make help         every target
 
-# The main package is at the repo root or in ./cmd/fridolin; build whichever
-# this checkout has.
-MAIN_PKG := $(if $(wildcard cmd/fridolin/*.go),./cmd/fridolin,.)
+# The main package. The repository's root has no Go files (root-check).
+MAIN_PKG := ./cmd/fridolin
 BINARY   ?= bin/fridolin
 # The version `fridolin version` and the log's first line report; without
 # git (a checkout from an archive) it is "dev".
@@ -51,7 +50,7 @@ SHELLCHECK  ?= shellcheck
 FUZZTIME ?= 10s
 
 .DEFAULT_GOAL := build
-.PHONY: help build install test race race-shard vet fmt fmt-check tidy-check \
+.PHONY: help build install test race race-shard vet fmt fmt-check tidy-check root-check \
 	notices notices-check \
 	lint lint-go lint-sh lint-py lint-actions lint-web \
 	test-py test-web test-sh smoke fuzz-short check clean
@@ -97,6 +96,16 @@ notices: ## write THIRD_PARTY_NOTICES from the modules the binary links
 
 notices-check: ## fail if THIRD_PARTY_NOTICES is out of date
 	GO="$(GO)" scripts/third-party-notices.sh --check
+
+# With a Go file at the root, `go build -o fridolin .` there would build
+# (a non-main package into an ar archive) over the ./fridolin a service
+# set up by an older setup.sh still runs. With none it must fail, and with
+# "no Go files". -o /dev/null: should it build, nothing is written.
+root-check: ## fail unless go build at the repo root refuses to build
+	@if out="$$($(GO) build -o /dev/null . 2>&1)"; then \
+	  echo "go build . at the repository's root built a package: Go code belongs in cmd/fridolin or internal/"; exit 1; \
+	fi; \
+	case "$$out" in *"no Go files"*) ;; *) printf 'go build . at the root failed, but not for want of Go files:\n%s\n' "$$out"; exit 1 ;; esac
 
 lint: lint-go lint-sh lint-py lint-actions lint-web ## every linter
 
@@ -171,7 +180,7 @@ fuzz-short: ## run every fuzz target for FUZZTIME (default 10s)
 
 # No build: smoke compiles the binary into a temp dir, and bin/fridolin stays
 # as it was.
-check: fmt-check vet tidy-check notices-check race lint test-py test-web test-sh smoke ## what CI's build, lint and test jobs run
+check: fmt-check vet tidy-check notices-check root-check race lint test-py test-web test-sh smoke ## what CI's build, lint and test jobs run
 
 clean: ## remove the binary
 	rm -f "$(BINARY)"

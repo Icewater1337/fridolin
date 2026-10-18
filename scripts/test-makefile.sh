@@ -55,6 +55,9 @@ for target in $targets; do
 done
 
 expect "smoke builds with the race detector into its temp dir" has smoke 'build -race .*-o "\$tmp/fridolin"'
+# The main package is in cmd/fridolin, and the root has no Go files.
+expect "build builds cmd/fridolin" has build "-o \"$bin\" \./cmd/fridolin$"
+expect "smoke builds cmd/fridolin" has smoke ' \./cmd/fridolin; '
 
 # fridolin version names the build: what it is given (setup.sh passes
 # its own), else what git describe says of the checkout.

@@ -20,8 +20,7 @@ if [ $# -ne 4 ]; then
 fi
 version="$1" goos="$2" goarch="$3" out="$4"
 repo="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-pkg=.
-[ -d "$repo/cmd/fridolin" ] && pkg=./cmd/fridolin
+pkg=./cmd/fridolin
 
 name="fridolin_${version}_${goos}_${goarch}"
 stage="$(mktemp -d)"

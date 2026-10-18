@@ -32,6 +32,11 @@ for compatibility.
   ["*"]}` keeps the old behaviour, or list their numbers. The log names
   every allowed group without an entry at startup. Nothing changes while
   `allowed_numbers` is empty and `allow_any_dm` is `true`.
+- The bridge's Go code is in `cmd/fridolin`. `./setup.sh` and
+  `make build` build it as before; a build by hand is
+  `go build -o bin/fridolin ./cmd/fridolin`. `go build .` at the
+  checkout's root now fails with "no Go files" and leaves an existing
+  `./fridolin` as it was.
 - `setup.sh` reads `FRIDOLIN_DATA_DIR` and `FRIDOLIN_INSTALL_DIR`.
   `DATA_DIR` and `INSTALL_DIR`, the names it read before, are ignored with
   a warning, since other software exports them too. When one of them names

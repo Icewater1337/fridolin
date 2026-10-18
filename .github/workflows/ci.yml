@@ -72,6 +72,11 @@ jobs:
         if: matrix.shard == fromJSON(env.SHARDS)
         run: make build
 
+      # The main package is in cmd/fridolin. An old `go build -o fridolin .`
+      # at the root must fail rather than write something over the binary.
+      - name: no Go files at the root
+        run: make root-check
+
       # The backup tests that run the real rclone skip without it. Linux
       # gets a pinned release, checked against its published checksum
       # (Ubuntu's own package is years older), and FRIDOLIN_REQUIRE_RCLONE
@@ -295,7 +300,7 @@ jobs:
         run: npm test
 
       - name: Go end-to-end tests of the site
-        run: go test -count=1 -run 'TestSite|TestBuilder' .
+        run: go test -count=1 -run 'TestSite|TestBuilder' ./cmd/fridolin
 
   personal-data:
     runs-on: ubuntu-latest

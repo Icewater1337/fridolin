@@ -3,7 +3,7 @@
 The bridge's HTTP server (`http_listen`, default `127.0.0.1:8765`) has four
 endpoints for programs on this computer: `GET /health`, `GET /ready`,
 `POST /send` and `POST /ingest`. This page is their contract; tests pin
-every part of it (`server_test.go`, `script_contract_test.go`). The JSON
+every part of it (`cmd/fridolin/server_test.go`, `cmd/fridolin/script_contract_test.go`). The JSON
 of `/send` and `/ingest` has schemas, which the tests check every answer,
 and every request the bridge takes, against:
 [`send-request`](schemas/send-request.schema.json),
