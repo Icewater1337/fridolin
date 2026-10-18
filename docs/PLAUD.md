@@ -99,6 +99,14 @@ connect again or disconnect (the card offers both); without one, only the
 dashboard shows it.
 Plaud's tool deletes a login once it has expired. Fridolin remembers that it
 signed in, so the card says **Login expired** rather than *Not connected*.
+It says so too while Plaud refuses a login the tool still has (revoked on
+Plaud's side). **Connect again** then signs that login out first, since the
+tool's sign-in would otherwise just keep it ("Already logged in"). A
+sign-in that still finds that login, because the sign-out could not
+remove it (Plaud unreachable, say), fails, and so does one whose new login
+Plaud refuses as well; the card and the notices then stay as they were.
+A first sign-in whose login Plaud refuses right away fails too, and the
+card shows **Login expired**.
 A login that goes because you disconnected, or changed where it lives (see
 below), while a check ran gets no notice: it did not expire.
 

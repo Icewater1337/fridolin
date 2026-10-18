@@ -64,6 +64,13 @@ yet, so everything is under Unreleased until the first one.
 - Brain runs no longer get `BRIDGE_CREDENTIALS_DIR`, which named the
   folder of the calendar tokens; nothing in `tools/` read it any more.
 
+### Fixed
+
+- "Connect again" on a Plaud login that Plaud refuses signs that login
+  out first, giving the sign-out up to 30 seconds. Before, it took the
+  CLI's "Already logged in" for a new sign-in and showed Connected until
+  the next check was refused again.
+
 ### Kept for compatibility
 
 What is still read or sent under an older name or in an older format,

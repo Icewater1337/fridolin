@@ -1190,6 +1190,232 @@ func TestPlaudRefusedLoginShowsExpired(t *testing.T) {
 	}
 }
 
+// Connect again after Plaud refused a login whose tokens.json stays: with
+// a login in place `plaud login` only says "Already logged in", so Connect
+// signs the refused login out first, as Disconnect does, then signs in
+// afresh, and the card shows the new login connected. A sign-in that keeps
+// the refused login, because the sign-out could not remove it, fails, and
+// so does one whose new login Plaud refuses as well; the card then shows
+// the login expired, and the chat, told once already, is not told again.
+// A first sign-in signs nothing out; one whose login Plaud refuses right
+// away shows it expired too, and the check after it tells the chat once.
+func TestPlaudConnectAgainAfterARefusedLogin(t *testing.T) {
+	cases := []struct {
+		name    string
+		access  bool     // plaud.brain_access
+		refused bool     // Plaud refuses the login when Connect starts
+		keeps   bool     // `plaud logout` leaves the login (logout_keeps)
+		again   bool     // Plaud refuses the sign-in's new login too (login_refused)
+		cmds    []string // the CLI commands the sign-in runs, in order
+		want    string   // how the sign-in ends
+		says    string   // what its error says
+	}{
+		{"refused login", false, true, false, false, []string{"logout", "login", "me"}, "done", ""},
+		{"refused login shared with brains", true, true, false, false, []string{"logout", "login", "me"}, "done", ""},
+		// Fridolin's private copy goes even when the CLI keeps it.
+		{"refused login the sign-out leaves", false, true, true, false, []string{"logout", "login", "me"}, "done", ""},
+		{"refused login the sign-out leaves, shared with brains", true, true, true, false, []string{"logout", "login"}, "error", "could not be signed out"},
+		{"refused again right after the sign-in", false, true, false, true, []string{"logout", "login", "me"}, "error", "Plaud refuses the login it left"},
+		{"refused again right after the sign-in, shared with brains", true, true, false, true, []string{"logout", "login", "me"}, "error", "Plaud refuses the login it left"},
+		{"first sign-in", false, false, false, false, []string{"login", "me"}, "done", ""},
+		{"first sign-in Plaud refuses right away", false, false, false, true, []string{"login", "me"}, "error", "Plaud refuses the login it left"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			tb, fp := plaudBridge(t, fmt.Sprintf(`, "brain_access": %v`, tc.access))
+			ctx := context.Background()
+			notices := func() int {
+				n := 0
+				for _, m := range tb.dev.Outbox() {
+					if strings.Contains(m.Text, "Plaud: the login expired") {
+						n++
+					}
+				}
+				return n
+			}
+			if tc.refused {
+				plaudRefuseLogin(t, tb, fp)
+				if s := tb.plaud.Status(); !s.Expired || !s.Connected || notices() != 1 {
+					t.Fatalf("before connecting: expired=%v connected=%v notices=%d, want expired, connected and one notice", s.Expired, s.Connected, notices())
+				}
+			}
+			if tc.again {
+				fp.write("login_refused", "")
+				fp.write("revoked", "")
+			}
+			if tc.keeps {
+				fp.write("logout_keeps", "")
+			}
+			before, told := fp.calls(), notices()
+			st, _ := tb.plaud.loadState()
+			var notified time.Time
+			if st != nil {
+				notified = st.AuthNotified
+			}
+
+			if err := tb.plaud.Connect(); err != nil {
+				t.Fatal(err)
+			}
+			var job connectJob
+			var refused bool
+			// Not through Status: once the sign-in ended, that may ask who
+			// is signed in, a command of its own.
+			waitFor(t, 10*time.Second, "the sign-in to end", func() bool {
+				tb.plaud.mu.Lock()
+				defer tb.plaud.mu.Unlock()
+				job, refused = *tb.plaud.connect, tb.plaud.refused
+				return job.State != "running"
+			})
+			if n := notices(); n != told {
+				t.Errorf("%d expiry notices after connecting, want %d", n, told)
+			}
+			var cmds []string
+			for _, line := range strings.Split(strings.TrimSpace(strings.TrimPrefix(fp.calls(), before)), "\n") {
+				if f := strings.Fields(line); len(f) > 2 {
+					cmds = append(cmds, f[2])
+				}
+			}
+			if !slices.Equal(cmds, tc.cmds) {
+				t.Errorf("the sign-in ran %q, want %q", cmds, tc.cmds)
+			}
+			if job.State != tc.want {
+				t.Fatalf("sign-in %s (%s), want %s", job.State, job.Error, tc.want)
+			}
+			st, _ = tb.plaud.loadState()
+			s := tb.plaud.Status()
+			if tc.want == "done" {
+				if refused || !s.Connected || s.Expired || s.Account != "you@example.com" || !st.AuthNotified.IsZero() {
+					t.Errorf("after the sign-in: refused=%v connected=%v expired=%v account=%q notified=%v; want connected as you@example.com, the notice armed again",
+						refused, s.Connected, s.Expired, s.Account, st.AuthNotified)
+				}
+				if err := tb.plaud.Poll(ctx); err != nil {
+					t.Errorf("the check after the sign-in: %v", err)
+				}
+			} else {
+				if !strings.Contains(job.Error, tc.says) || !refused || !s.Expired || !st.AuthNotified.Equal(notified) {
+					t.Errorf("after the sign-in: error %q, refused=%v expired=%v notified=%v (was %v); want it to say so, refused and expired, notified as before",
+						job.Error, refused, s.Expired, st.AuthNotified, notified)
+				}
+				if err := tb.plaud.Poll(ctx); !errors.Is(err, errPlaudAuth) {
+					t.Errorf("the check after the sign-in = %v, want the login still refused", err)
+				}
+			}
+			// After a sign-in Plaud refused, the chat has heard of it once:
+			// before the sign-in, or from the check after a first one.
+			want := told
+			if tc.want == "error" {
+				want = max(told, 1)
+			}
+			if n := notices(); n != want {
+				t.Errorf("%d expiry notices after the check, want %d", n, want)
+			}
+		})
+	}
+}
+
+// plaudRefuseLogin signs in, as a login from an earlier check, and has
+// Plaud refuse it while its tokens.json stays (revoked on Plaud's side): a
+// check gets the refusal, and the chat its one expiry notice.
+func plaudRefuseLogin(t *testing.T, tb *testBridge, fp *fakePlaudFixture) {
+	t.Helper()
+	plaudSignIn(t, tb)
+	st := plaudRecordLogin(tb, plaudSeededState("u_1", plaudOld1))
+	// Who signed in was asked just now, so that the status does not ask
+	// again.
+	st.Login.Checked = time.Now()
+	if err := tb.plaud.saveState(st); err != nil {
+		t.Fatal(err)
+	}
+	fp.files(plaudOld1)
+	fp.write("revoked", "")
+	if err := tb.plaud.Poll(context.Background()); !errors.Is(err, errPlaudAuth) {
+		t.Fatalf("poll = %v, want the login refused", err)
+	}
+}
+
+// Connect signs the refused login out in the CLI home it was refused in,
+// taken when Connect starts: brain_access turned on before the sign-out
+// runs must not have it sign out ~/.plaud instead, the login your
+// terminal's plaud uses.
+func TestPlaudConnectSignsOutTheRefusedLoginWhereItIs(t *testing.T) {
+	tb, fp := plaudBridge(t, "")
+	plaudRefuseLogin(t, tb, fp)
+	terminal := filepath.Join(tb.home, ".plaud", "tokens.json")
+	if err := os.MkdirAll(filepath.Dir(terminal), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	const yours = `{"access_token":"terminal"}`
+	if err := os.WriteFile(terminal, []byte(yours), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	before := fp.calls()
+	// The sign-out waits for the CLI, which this holds, until brain_access
+	// is on.
+	tb.plaud.cliMu.Lock()
+	err := tb.plaud.Connect()
+	if err == nil {
+		_, err = tb.cfgs.Update("", func(c *Config) error { c.Plaud.BrainAccess = true; return nil })
+	}
+	tb.plaud.cliMu.Unlock()
+	if err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, 10*time.Second, "the sign-in to end", func() bool {
+		tb.plaud.mu.Lock()
+		defer tb.plaud.mu.Unlock()
+		return tb.plaud.connect.State != "running"
+	})
+	var logouts []string
+	for _, line := range strings.Split(strings.TrimSpace(strings.TrimPrefix(fp.calls(), before)), "\n") {
+		if f := strings.Fields(line); len(f) > 2 && f[2] == "logout" {
+			logouts = append(logouts, strings.TrimPrefix(f[0], "HOME="))
+		}
+	}
+	if want := tb.plaud.privateHome(); !slices.Equal(logouts, []string{want}) {
+		t.Errorf("the sign-out ran with HOME %q, want %s once", logouts, want)
+	}
+	// The sign-in after it may adopt that login ("Already logged in"), as
+	// any Connect after brain_access changed does, but not replace it.
+	if got, _ := os.ReadFile(terminal); string(got) != yours {
+		t.Errorf("the login in ~/.plaud is now %q, want yours, which the sign-out must not have removed", got)
+	}
+}
+
+// The sign-out before the sign-in gets as long as Disconnect gives one,
+// not the sign-in's ten minutes: a Plaud that hangs on it must not keep
+// the card running for that long before `plaud login` prints its link.
+// Fridolin's private copy of the login goes all the same, so the sign-in
+// after it signs in afresh.
+func TestPlaudConnectGivesTheSignOutItsOwnTime(t *testing.T) {
+	tb, fp := plaudBridge(t, "")
+	plaudRefuseLogin(t, tb, fp)
+	old := plaudSignOutTimeout
+	plaudSignOutTimeout = 300 * time.Millisecond
+	t.Cleanup(func() { plaudSignOutTimeout = old })
+	fp.write("hang_logout", "")
+	before := fp.calls()
+	if err := tb.plaud.Connect(); err != nil {
+		t.Fatal(err)
+	}
+	// Well below the 30 s the fake's logout hangs for.
+	var job connectJob
+	waitFor(t, 10*time.Second, "the sign-in to end", func() bool {
+		tb.plaud.mu.Lock()
+		defer tb.plaud.mu.Unlock()
+		job = *tb.plaud.connect
+		return job.State != "running"
+	})
+	var cmds []string
+	for _, line := range strings.Split(strings.TrimSpace(strings.TrimPrefix(fp.calls(), before)), "\n") {
+		if f := strings.Fields(line); len(f) > 2 {
+			cmds = append(cmds, f[2])
+		}
+	}
+	if want := []string{"logout", "login", "me"}; !slices.Equal(cmds, want) || job.State != "done" {
+		t.Errorf("the sign-in ran %q and ended %s (%s), want %q and done", cmds, job.State, job.Error, want)
+	}
+}
+
 // A check that loses its login because you disconnected, or moved it with
 // brain_access, while it ran tells the chat nothing: only a login that
 // lapsed gets the expiry notice. Nor does it record the login again, which

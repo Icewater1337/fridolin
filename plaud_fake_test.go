@@ -60,17 +60,22 @@ func fakePlaudTranscript(segs ...fakePlaudSegment) string {
 //	account            the user id `plaud me` reports (default u_1)
 //	expired            the login lapsed: like the real CLI, the call deletes
 //	                   tokens.json and exits 2
-//	revoked            Plaud refuses the login: exit 2, tokens.json stays
+//	revoked            Plaud refuses the login: exit 2, tokens.json stays;
+//	                   a sign-in that writes a new login is granted afresh
+//	                   and removes it
 //	offline            Plaud is unreachable: exit 3
 //	fail_<command>     that command fails: exit 1 (login before it looks
 //	                   for a login it has)
 //	login_wait         `plaud login` prints the link and waits for login_go
 //	login_then_fail    `plaud login` writes the login, then exits 1
 //	login_deny         `plaud login` is denied: exit 2
+//	login_refused      `plaud login` writes a login, which Plaud refuses
+//	                   all the same: revoked stays
 //	login_timeout      `plaud login` times out: exit 4
 //	logout_keeps       `plaud logout` says it signed out, and leaves the login
 //	hang               the command starts a child that holds its output,
 //	                   writes the child's pid to child.pid, and hangs
+//	hang_<command>     only that command hangs, as with hang
 //	flood              the command prints 8 MiB
 //	slow               the command takes 200 ms, and adds a line to
 //	                   overlap.log when another one runs meanwhile
@@ -151,7 +156,7 @@ func hasFlag(args []string, name string) bool {
 
 func (f fakePlaudCLI) run(args []string) int {
 	switch {
-	case f.exists("hang"):
+	case f.exists("hang") || f.exists("hang_"+args[0]):
 		child := exec.Command("sleep", "30")
 		child.Stdout = os.Stdout
 		if err := child.Start(); err == nil {
@@ -256,6 +261,9 @@ func (f fakePlaudCLI) login() int {
 	}
 	_ = os.MkdirAll(filepath.Dir(f.token), 0o700)
 	_ = os.WriteFile(f.token, []byte(`{"access_token":"test-access","refresh_token":"fake","token_type":"Bearer"}`), 0o600)
+	if !f.exists("login_refused") {
+		_ = os.Remove(filepath.Join(f.dir, "revoked"))
+	}
 	fmt.Fprintln(os.Stderr, "✔ Logged in successfully!")
 	if f.exists("login_then_fail") {
 		return fail(1, "LOGIN_FAILED", "Login failed.")

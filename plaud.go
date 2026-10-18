@@ -384,8 +384,9 @@ type PlaudManager struct {
 	checkedLogin string
 
 	// run executes the CLI in the CLI home in use, for everything but the
-	// sign-in and the sign-out of the private login (see Disconnect). It is
-	// runCLI; tests wrap it to act between two commands.
+	// sign-in, the sign-out of a refused login before it (see Connect) and
+	// the sign-out of the private login (see Disconnect). It is runCLI;
+	// tests wrap it to act between two commands.
 	run func(ctx context.Context, args ...string) (string, error)
 }
 
@@ -1880,6 +1881,14 @@ func (p *PlaudManager) Status() PlaudStatus {
 // Connect starts Plaud's sign-in in the background: the CLI opens Plaud's
 // page in the browser and waits for the approval. Status reports how it
 // goes.
+//
+// A login Plaud refuses while its tokens.json is still there (see refused)
+// is signed out first, as Disconnect does: with a login in place `plaud
+// login` only says "Already logged in", which would count as a sign-in
+// that worked and leave the refused login in use. A sign-in that leaves
+// that very login, because the sign-out could not remove it, fails, and so
+// does one whose login Plaud refuses right away, also a first one; both
+// show the login expired and leave the time of its notice as it was.
 func (p *PlaudManager) Connect() error {
 	bin, err := p.cliPath()
 	if err != nil {
@@ -1896,6 +1905,15 @@ func (p *PlaudManager) Connect() error {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
 	job := &connectJob{State: "running", cancel: cancel}
 	p.connect = job
+	// Only a login that is Fridolin's and in use: not one brain_access
+	// moved away from, nor your terminal's in ~/.plaud. Its home is taken
+	// now too, so that a brain_access changed meanwhile cannot have the
+	// sign-out remove another login than the one refused.
+	refused := p.refused && p.loginStatus() == plaudConnected
+	home, refusedLogin := p.cliHome(), ""
+	if refused {
+		refusedLogin = p.loginStamp()
+	}
 	p.mu.Unlock()
 
 	// Stop cancels it and waits for its end: it records the sign-in in the
@@ -1904,6 +1922,19 @@ func (p *PlaudManager) Connect() error {
 	go func() {
 		defer p.bg.Done()
 		defer cancel()
+		if refused {
+			// As long as Disconnect gives it: a Plaud that hangs must not
+			// keep the card running for minutes before the sign-in's link.
+			octx, ocancel := context.WithTimeout(ctx, plaudSignOutTimeout)
+			_, err := p.runCLIIn(octx, home, nil, "logout")
+			ocancel()
+			if err != nil && !errors.Is(err, errPlaudAuth) {
+				log.Printf("plaud: signing out the refused login: %v", err)
+			}
+			if home == p.privateHome() {
+				_ = os.Remove(filepath.Join(home, ".plaud", "tokens.json")) // our private copy, as in Disconnect
+			}
+		}
 		var seen bytes.Buffer
 		out := writerFunc(func(b []byte) {
 			p.mu.Lock()
@@ -1914,7 +1945,7 @@ func (p *PlaudManager) Connect() error {
 			}
 		})
 		// The CLI opens the sign-in page in your browser itself.
-		before := p.loginStamp()
+		before, refusedNow := p.loginStamp(), false
 		_, err := p.runCLIOut(withDesktop(ctx), out, "login")
 		// A CLI that fails after it wrote a new login signed in all the
 		// same; its error would sit on a card whose login works. One that
@@ -1926,26 +1957,45 @@ func (p *PlaudManager) Connect() error {
 		if err == nil && !p.hasLogin() {
 			err = errors.New("the sign-in did not finish: Plaud's tool left no login")
 		}
+		if err == nil && refused && p.loginStamp() == refusedLogin {
+			// A sign-out that failed (Plaud unreachable, say) left the
+			// refused login, and the sign-in only said "Already logged in".
+			err = errors.New("the login Plaud refuses could not be signed out, so the sign-in kept it: disconnect, then connect again")
+		}
 		if err == nil {
 			// The login in this CLI home is Fridolin's now, also one the CLI
 			// already had ("Already logged in"): you asked for it.
 			err = p.update(func(st *plaudState) error {
 				st.Login = &plaudLogin{Dir: p.cliHome(), Since: time.Now()}
-				st.AuthNotified, st.Disconnected = time.Time{}, false
+				st.Disconnected = false
 				return nil
 			})
 		}
 		if err == nil {
-			// Who signed in, for the card; a check asks again if this fails.
-			if _, merr := p.me(ctx); merr != nil {
+			// Who signed in, for the card; a check asks again if this fails
+			// for another reason than Plaud refusing the login.
+			if _, merr := p.me(ctx); errors.Is(merr, errPlaudAuth) {
+				refusedNow = true
+				err = errors.New("the sign-in finished, but Plaud refuses the login it left: disconnect, then connect again")
+			} else if merr != nil {
 				log.Printf("plaud: could not ask who signed in: %v", merr)
 			}
+		}
+		if err == nil {
+			// The next lapse gets its notice again.
+			err = p.update(func(st *plaudState) error { st.AuthNotified = time.Time{}; return nil })
 		}
 		p.mu.Lock()
 		defer p.mu.Unlock()
 		if err != nil {
 			job.State, job.Error = "error", err.Error()
 			log.Printf("plaud: sign-in failed: %s", job.Error)
+			if refusedNow {
+				// As refreshAccount does: the card shows the login expired
+				// beside the error, also after a first sign-in, and the
+				// next Connect signs it out first.
+				p.refused = p.loginStatus() == plaudConnected
+			}
 			return
 		}
 		p.refused = false
@@ -1954,6 +2004,10 @@ func (p *PlaudManager) Connect() error {
 	}()
 	return nil
 }
+
+// plaudSignOutTimeout is how long `plaud logout` may take, in Disconnect
+// and before Connect signs in again. A variable so tests can shorten it.
+var plaudSignOutTimeout = 30 * time.Second
 
 // writerFunc is an io.Writer that hands what is written to a function.
 type writerFunc func([]byte)
@@ -1976,7 +2030,7 @@ func (f writerFunc) Write(b []byte) (int, error) { f(b); return len(b), nil }
 // The state says so first: a check still running finds its login gone
 // from then on, and must take that for a sign-out rather than an expiry.
 func (p *PlaudManager) Disconnect() error {
-	ctx, cancel := context.WithTimeout(p.lifetime(), 30*time.Second)
+	ctx, cancel := context.WithTimeout(p.lifetime(), plaudSignOutTimeout)
 	defer cancel()
 	login := p.loginStatus()
 	shared := p.cfg().Plaud.BrainAccess && (login == plaudConnected || login == plaudExpired)
