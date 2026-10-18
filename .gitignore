@@ -1,6 +1,5 @@
 # ── secrets and live config — never commit ────────────────────────────────
 config.json
-config.json.backup.*
 config.json.bak*
 .env
 .env.*
@@ -13,7 +12,6 @@ dashboard.token
 *.db
 *.db-shm
 *.db-wal
-qrcode.png
 media/
 *.log
 conversation-history.jsonl

@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"encoding/json"
 	"errors"
 	"flag"
 	"io"
@@ -10,6 +11,8 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -183,6 +186,83 @@ func TestRunLogsConfigWarningsToTheDashboard(t *testing.T) {
 	}
 	if !strings.Contains(console.String(), want) {
 		t.Errorf("the console does not say %q: %q", want, console.String())
+	}
+}
+
+func TestRunLogNamesTheConfigFile(t *testing.T) {
+	// A log excerpt must say which config the bridge ran on, and why that
+	// one: a service passes --config, a shell may export FRIDOLIN_CONFIG.
+	home, other := canonicalDir(t.TempDir()), canonicalDir(t.TempDir())
+	t.Setenv("HOME", home)
+	tests := []struct {
+		name, flag, env string // "" means none
+		path, source    string
+	}{
+		{"default", "", "", home + "/.fridolin/config.json", "default"},
+		{"FRIDOLIN_CONFIG", "", other + "/env.json", other + "/env.json", "FRIDOLIN_CONFIG"},
+		{"--config", other + "/flag.json", other + "/env.json", other + "/flag.json", "--config"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			clearEnv(t, "FRIDOLIN_CONFIG", "CONFIG_FILE")
+			if tc.env != "" {
+				t.Setenv("FRIDOLIN_CONFIG", tc.env)
+			}
+			prev := log.Writer()
+			t.Cleanup(func() { log.SetOutput(prev) })
+			var console strings.Builder
+			ring, path := runLog(&console, tc.flag)
+			if path != tc.path {
+				t.Errorf("runLog picked %s, want %s", path, tc.path)
+			}
+			want := "Config file: " + tc.path + " (" + tc.source + ")"
+			lines, _ := ring.Since(0, 50)
+			if len(lines) != 2 || !strings.Contains(lines[0].Text, "Starting fridolin ") || !strings.HasSuffix(lines[1].Text, want) {
+				t.Errorf("logged %+v, want the version and then %q", lines, want)
+			}
+			if !strings.Contains(console.String(), want) {
+				t.Errorf("the console does not say %q: %q", want, console.String())
+			}
+		})
+	}
+}
+
+func TestRunLogsTheDataDir(t *testing.T) {
+	// Without data_dir in the config the data dir, and with it the
+	// WhatsApp session, depends on which folders exist; the log says which
+	// one the bridge took, and why.
+	tests := []struct {
+		name    string
+		config  string   // the config file; HOME stands for the home folder
+		dirs    []string // folders in the home folder before it starts
+		dataDir string   // relative to the home folder
+		source  string
+	}{
+		{"set in the config", `{"data_dir": "~/data"}`, []string{".whatsapp-claude-bridge"}, "data", "config"},
+		{"the default", `{}`, nil, ".fridolin", "default"},
+		{"the folder from before the rename", `{}`, []string{".whatsapp-claude-bridge"}, ".whatsapp-claude-bridge", "legacy"},
+		{"that folder named in the config", `{"data_dir": "HOME/.whatsapp-claude-bridge"}`, []string{".whatsapp-claude-bridge"}, ".whatsapp-claude-bridge", "config"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			home := canonicalDir(t.TempDir())
+			t.Setenv("HOME", home)
+			for _, d := range tc.dirs {
+				if err := os.Mkdir(filepath.Join(home, d), 0o700); err != nil {
+					t.Fatal(err)
+				}
+			}
+			logs := captureLog(t)
+			cfgs, err := OpenConfigStore(writeConfig(t, strings.ReplaceAll(tc.config, "HOME", home)))
+			if err != nil {
+				t.Fatal(err)
+			}
+			logDataDir(cfgs)
+			want := "Data dir: " + filepath.Join(home, tc.dataDir) + " (" + tc.source + ")"
+			if !logContains(logs, want) {
+				t.Errorf("the log does not say %q: %q", want, logs())
+			}
+		})
 	}
 }
 
@@ -362,31 +442,68 @@ func TestShellBridgeVariablesDoNotReachTests(t *testing.T) {
 	}
 }
 
-func TestInitWritesTheDataDirItIsGiven(t *testing.T) {
-	// setup.sh takes DATA_DIR from its environment, which the service
-	// never sees: the folder must be in the config.
-	cases := []struct{ name, flag, want string }{
-		{"default", "", "/.fridolin"},
-		{"given", "/elsewhere/data", "/elsewhere/data"},
+func TestNewConfigsHoldTheirDataDir(t *testing.T) {
+	// A data folder given to setup.sh in its environment never reaches the
+	// service, so it goes into the config. Without one the config gets the
+	// folder the bridge picks now: left out, every start would pick it
+	// again by which folders exist, and a ~/.fridolin made later by
+	// something else would move a bridge off the folder from before the
+	// rename. Written with ~, it holds under another home folder too. HOME
+	// stands for the home folder.
+	cases := []struct {
+		name    string
+		write   func(t *testing.T, path string) // writes a new config to path
+		dirs    []string                        // folders in the home folder first
+		raw     string                          // data_dir as written
+		dataDir string                          // the data dir it loads as
+	}{
+		{"init", initWith(), nil, "~/.fridolin", "HOME/.fridolin"},
+		{"init, before the rename", initWith(), []string{".whatsapp-claude-bridge"}, "~/.whatsapp-claude-bridge", "HOME/.whatsapp-claude-bridge"},
+		{"init with both folders", initWith(), []string{".fridolin", ".whatsapp-claude-bridge"}, "~/.fridolin", "HOME/.fridolin"},
+		{"init --data-dir", initWith("--data-dir", "HOME/elsewhere/data"), nil, "HOME/elsewhere/data", "HOME/elsewhere/data"},
+		{"the first start", func(t *testing.T, path string) {
+			if err := ensureConfigFile(path); err != nil {
+				t.Fatal(err)
+			}
+		}, nil, "~/.fridolin", "HOME/.fridolin"},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			home := canonicalDir(t.TempDir())
 			t.Setenv("HOME", home)
-			path := filepath.Join(home, "cfg", "config.json")
-			args := []string{"--config", path}
-			if c.flag != "" {
-				args = append(args, "--data-dir", home+c.flag)
+			expand := strings.NewReplacer("HOME", home).Replace
+			for _, d := range c.dirs {
+				if err := os.Mkdir(filepath.Join(home, d), 0o700); err != nil {
+					t.Fatal(err)
+				}
 			}
-			captureStdout(t, func() { initCmd(args) })
+			path := filepath.Join(home, "cfg", "config.json")
+			c.write(t, path)
+			var raw string
+			if err := json.Unmarshal(readRawConfig(t, path)["data_dir"], &raw); err != nil || raw != expand(c.raw) {
+				t.Errorf("data_dir written as %q (%v), want %q", raw, err, expand(c.raw))
+			}
 			cfg, err := LoadConfig(path)
 			if err != nil {
 				t.Fatal(err)
 			}
-			if cfg.DataDir != home+c.want {
-				t.Errorf("data_dir = %q, want %q", cfg.DataDir, home+c.want)
+			if cfg.DataDir != expand(c.dataDir) {
+				t.Errorf("data_dir = %q, want %q", cfg.DataDir, expand(c.dataDir))
 			}
 		})
+	}
+}
+
+// initWith returns a writer for TestNewConfigsHoldTheirDataDir that runs
+// init with flags, where HOME stands for the home folder.
+func initWith(flags ...string) func(t *testing.T, path string) {
+	return func(t *testing.T, path string) {
+		args := []string{"--config", path}
+		home, _ := os.UserHomeDir()
+		for _, f := range flags {
+			args = append(args, strings.ReplaceAll(f, "HOME", home))
+		}
+		captureStdout(t, func() { initCmd(args) })
 	}
 }
 
@@ -425,5 +542,318 @@ func TestRunFlags(t *testing.T) {
 				t.Errorf("printed %q, want the usage text", out.String())
 			}
 		})
+	}
+}
+
+func TestPaths(t *testing.T) {
+	// setup.sh asks the build for the config file and the data dir instead
+	// of keeping its own copy of the rules, the legacy folder among them.
+	// "home/" and "other/" stand for two temp dirs; the files and folders
+	// listed are made first.
+	tests := []struct {
+		name        string
+		flag, env   string // --config and FRIDOLIN_CONFIG; "" means none
+		config      string // the config file's contents; "" means none
+		dirs        []string
+		want        resolvedPaths
+		wantMissing []string // made by nothing, so still missing after
+	}{
+		{"a fresh install", "", "", "", nil,
+			resolvedPaths{"home/.fridolin/config.json", "default", "home/.fridolin", "default"},
+			[]string{"home/.fridolin"}},
+		{"an install from before the rename", "", "", "", []string{"home/.whatsapp-claude-bridge/"},
+			resolvedPaths{"home/.whatsapp-claude-bridge/config.json", "default", "home/.whatsapp-claude-bridge", "legacy"},
+			[]string{"home/.fridolin"}},
+		{"both folders", "", "", "", []string{"home/.fridolin/", "home/.whatsapp-claude-bridge/"},
+			resolvedPaths{"home/.fridolin/config.json", "default", "home/.fridolin", "default"}, nil},
+		{"FRIDOLIN_CONFIG with a data_dir", "", "other/env.json", `{"data_dir": "~/data"}`, nil,
+			resolvedPaths{"other/env.json", "FRIDOLIN_CONFIG", "home/data", "config"},
+			[]string{"home/data", "home/.fridolin"}},
+		{"--config wins over FRIDOLIN_CONFIG", "other/flag.json", "other/env.json", `{"data_dir": "other/data"}`, nil,
+			resolvedPaths{"other/flag.json", "--config", "other/data", "config"}, []string{"other/data"}},
+		{"a config without data_dir", "other/flag.json", "", `{"allowed_numbers": []}`, nil,
+			resolvedPaths{"other/flag.json", "--config", "home/.fridolin", "default"}, []string{"home/.fridolin"}},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			home, other := canonicalDir(t.TempDir()), canonicalDir(t.TempDir())
+			t.Setenv("HOME", home)
+			abs := func(p string) string {
+				if rest, ok := strings.CutPrefix(p, "home/"); ok {
+					return filepath.Join(home, rest)
+				}
+				return filepath.Join(other, strings.TrimPrefix(p, "other/"))
+			}
+			clearEnv(t, "FRIDOLIN_CONFIG", "CONFIG_FILE")
+			if tc.env != "" {
+				t.Setenv("FRIDOLIN_CONFIG", abs(tc.env))
+			}
+			for _, d := range tc.dirs {
+				if err := os.MkdirAll(abs(d), 0o700); err != nil {
+					t.Fatal(err)
+				}
+			}
+			var args []string
+			if tc.flag != "" {
+				args = []string{"--config", abs(tc.flag)}
+			}
+			if tc.config != "" {
+				src := tc.flag
+				if src == "" {
+					src = tc.env
+				}
+				body := strings.ReplaceAll(tc.config, `"other/`, `"`+other+`/`)
+				if err := os.WriteFile(abs(src), []byte(body), 0o600); err != nil {
+					t.Fatal(err)
+				}
+			}
+			want := resolvedPaths{abs(tc.want.Config), tc.want.ConfigSource, abs(tc.want.DataDir), tc.want.DataDirSource}
+
+			var out, errs bytes.Buffer
+			if code := pathsCmd(args, &out, &errs); code != 0 {
+				t.Fatalf("exit %d: %s", code, errs.String())
+			}
+			wantLines := "config=" + want.Config + "\nconfig_source=" + want.ConfigSource +
+				"\ndata_dir=" + want.DataDir + "\ndata_dir_source=" + want.DataDirSource + "\n"
+			if out.String() != wantLines {
+				t.Errorf("printed\n%s\nwant\n%s", out.String(), wantLines)
+			}
+
+			out.Reset()
+			if code := pathsCmd(append(args, "--json"), &out, &errs); code != 0 {
+				t.Fatalf("--json: exit %d: %s", code, errs.String())
+			}
+			var got resolvedPaths
+			if err := json.Unmarshal(out.Bytes(), &got); err != nil || got != want {
+				t.Errorf("--json printed %s (%v), want %+v", out.String(), err, want)
+			}
+			for _, p := range tc.wantMissing {
+				if _, err := os.Stat(abs(p)); !errors.Is(err, fs.ErrNotExist) {
+					t.Errorf("%s exists after paths (%v), which must create nothing", abs(p), err)
+				}
+			}
+		})
+	}
+}
+
+func TestPathsAgreesWithTheLoadedConfig(t *testing.T) {
+	// What paths reports is the data dir the bridge then runs on. HOME
+	// stands for the test's home folder.
+	for _, c := range []struct{ name, dataDir string }{
+		{"no data_dir", ""},
+		{"one under ~", "~/elsewhere"},
+		{"an absolute one", "HOME/abs-data"},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			home := canonicalDir(t.TempDir())
+			t.Setenv("HOME", home)
+			dataDir := strings.Replace(c.dataDir, "HOME", home, 1)
+			path := writeConfig(t, `{"data_dir": "`+dataDir+`"}`)
+			p, err := resolvePaths(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			cfg, err := LoadConfig(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if p.DataDir != cfg.DataDir {
+				t.Errorf("paths says %s, the bridge runs on %s", p.DataDir, cfg.DataDir)
+			}
+		})
+	}
+}
+
+func TestPathsRefuses(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	clearEnv(t, "FRIDOLIN_CONFIG", "CONFIG_FILE")
+	cases := []struct {
+		name string
+		args []string
+		code int
+		want string
+	}{
+		{"a config that is no JSON", []string{"--config", writeConfig(t, `{"data_dir": `)}, 1, "parsing config file"},
+		{"an argument", []string{"data_dir"}, 2, "takes no arguments"},
+		{"an unknown flag", []string{"--data-dir", "x"}, 2, "flag provided but not defined"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			var out, errs bytes.Buffer
+			if code := pathsCmd(c.args, &out, &errs); code != c.code || !strings.Contains(errs.String(), c.want) {
+				t.Errorf("exit %d, stderr %q; want exit %d and %q", code, errs.String(), c.code, c.want)
+			}
+			if out.Len() > 0 {
+				t.Errorf("printed %q on a refusal", out.String())
+			}
+		})
+	}
+}
+
+func TestCheckRedact(t *testing.T) {
+	// check's output goes into public bug reports. With --redact it shows
+	// no configured number, JID or home folder, in the report, the log
+	// lines of loading the config and the sandbox profile alike; without
+	// it, it shows them as they are. The home folder has a dot in its
+	// name, which a sandbox profile's regular expressions write escaped.
+	home := filepath.Join(canonicalDir(t.TempDir()), "first.last")
+	if err := os.Mkdir(home, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("HOME", home)
+	clearEnv(t, "FRIDOLIN_CONFIG", "CONFIG_FILE")
+	// otherWritten has a note after the number, which makes it no number
+	// to the bridge, and oddGroup has no @g.us, so loading the config
+	// logs both as they are written.
+	const (
+		owner, other  = "15551234567", "15559876543"
+		otherWritten  = "+1 555 987 6543 (mobile)"
+		oddGroup      = "120363000000000004"
+		allowedGroup  = "120363000000000001@g.us"
+		brainGroup    = "120363000000000002@g.us"
+		ownerJID      = owner + "@s.whatsapp.net"
+		strangerGroup = "120363000000000003@g.us"
+	)
+	lid := strings.Repeat("7", 15) + "@lid"
+	path := filepath.Join(home, ".fridolin", "config.json")
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	cfg := `{
+		"claude_path": "` + fakeClaudeEnv(t, 0) + `",
+		"data_dir": "~/.fridolin",
+		"allowed_numbers": ["` + owner + `", "` + otherWritten + `"],
+		"allowed_groups": ["` + allowedGroup + `", "` + oddGroup + `"],
+		"not_a_setting": true` + brainDirsJSON(t,
+		brainFolder(t, home+"/brains/main", BrainManifest{ID: "main", Routing: BrainRouting{HandlesDMs: true, Groups: []string{brainGroup}}}),
+	) + `}`
+	if err := os.WriteFile(path, []byte(cfg), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	o := checkOptions{routes: []string{ownerJID, allowedGroup, strangerGroup, lid}, sandboxFor: "main"}
+	if runtime.GOOS != "darwin" {
+		o.sandboxFor = "" // the profile is sandbox-exec's
+	}
+
+	report := func(t *testing.T, redact bool) (string, []string) {
+		t.Helper()
+		logs := captureLog(t)
+		o.redact = redact
+		var out bytes.Buffer
+		if err := writeCheck(&out, o); err != nil {
+			t.Fatal(err)
+		}
+		return out.String(), logs()
+	}
+	secrets := []string{home, resolvePath(home), regexp.QuoteMeta(home), owner, other, otherWritten, oddGroup,
+		"120363000000000001", "120363000000000002", "120363000000000003", strings.Repeat("7", 15)}
+
+	t.Run("redacted", func(t *testing.T) {
+		out, logs := report(t, true)
+		all := out + strings.Join(logs, "\n")
+		for _, s := range secrets {
+			if strings.Contains(all, s) {
+				t.Errorf("%q is in the redacted output:\n%s", s, all)
+			}
+		}
+		want := []string{
+			"Config OK: ~/.fridolin/config.json\n",
+			"  data dir:  ~/.fridolin\n",
+			"  DM allow:  [1…67 +1…43]\n",
+			"  groups:    […01@g.us …04]\n",
+			"→ ~/brains/main (dms=true default=false groups=[…02@g.us])\n",
+			"  route 1…67@s.whatsapp.net → main\n",
+			"  route …01@g.us → ",
+			"  route …03@g.us → main (not in allowed_groups: ignored)\n",
+			"  route …77@lid → ",
+		}
+		if o.sandboxFor != "" {
+			want = append(want, `"~/.fridolin"`, `"^~/`)
+		}
+		for _, w := range want {
+			if !strings.Contains(out, w) {
+				t.Errorf("no %q in:\n%s", w, out)
+			}
+		}
+		for _, w := range []string{"config ~/.fridolin/config.json: ignoring unknown settings", `allowed_numbers "+1…43" (digits with the country code)`, `allowed_groups "…04"`} {
+			if !logContains(func() []string { return logs }, w) {
+				t.Errorf("the log of loading the config does not say %q: %q", w, logs)
+			}
+		}
+	})
+
+	t.Run("as it is", func(t *testing.T) {
+		out, logs := report(t, false)
+		for _, s := range append([]string{home}, owner, otherWritten, oddGroup, allowedGroup, brainGroup, strangerGroup, lid, "Config OK: "+path+"\n", "  DM allow:  ["+owner+" "+otherWritten+"]\n") {
+			if !strings.Contains(out, s) {
+				t.Errorf("no %q in:\n%s", s, out)
+			}
+		}
+		if strings.Contains(out, "…") || strings.Contains(out, "~/") {
+			t.Errorf("the output is redacted without --redact:\n%s", out)
+		}
+		if !logContains(func() []string { return logs }, "config "+path+": ignoring unknown settings") {
+			t.Errorf("the log of loading the config changed: %q", logs)
+		}
+		// The same report, only masked.
+		red, _ := report(t, true)
+		if got, want := strings.Count(red, "\n"), strings.Count(out, "\n"); got != want {
+			t.Errorf("the redacted report has %d lines, the plain one %d", got, want)
+		}
+	})
+
+	t.Run("an error", func(t *testing.T) {
+		broken := filepath.Join(home, "broken", "config.json")
+		makeFiles(t, home, "broken/config.json")
+		for _, redact := range []bool{true, false} {
+			captureLog(t)
+			err := writeCheck(io.Discard, checkOptions{config: broken, redact: redact})
+			if err == nil {
+				t.Fatal("a config that is no JSON loaded")
+			}
+			if got := strings.Contains(err.Error(), home); got == redact {
+				t.Errorf("redact=%v: the error names the home folder: %v", redact, got)
+			}
+		}
+	})
+}
+
+func TestRedactorText(t *testing.T) {
+	// Made-up numbers outside the placeholders' country carry
+	// personal-data:ignore.
+	r := newRedactor("/srv/first.last")
+	r.addChats("15551234567", "+15559876543", "15559876543@s.whatsapp.net")
+	r.addGroups("120363000000000001@g.us", "120363000000000009")
+	cases := []struct{ in, want string }{
+		{"15551234567@s.whatsapp.net", "1…67@s.whatsapp.net"},
+		{"15551234567:12@s.whatsapp.net", "1…67@s.whatsapp.net"},           // a device's JID
+		{"491701234567@s.whatsapp.net", "49…67@s.whatsapp.net"},            // a two-digit country code; personal-data:ignore
+		{"3530000000099@s.whatsapp.net", "353…99@s.whatsapp.net"},          // a three-digit one; personal-data:ignore
+		{"120363000000000001@g.us", "…01@g.us"},                            // a group
+		{"15551234567-1600000000@g.us", "…00@g.us"},                        // a group named by its creator's number; personal-data:ignore
+		{strings.Repeat("7", 15) + "@lid", "…77@lid"},                      // a LID
+		{"[15551234567 15559876543]", "[1…67 1…43]"},                       // numbers configured or routed
+		{`"120363000000000009" (digits@g.us)`, `"…09" (digits@g.us)`},      // a group written without @g.us
+		{"+15559876543 and +4917012345678", "+1…43 and +49…78"},            // international format; personal-data:ignore
+		{"you@example.com", "y…@example.com"},                              // as maskEmail
+		{"/srv/first.last/.fridolin", "~/.fridolin"},                       // a path
+		{`(subpath "/srv/first.last")`, `(subpath "~")`},                   // the folder itself
+		{`(regex "^/srv/first\\.last/x(/.*)?$")`, `(regex "^~/x(/.*)?$")`}, // in a sandbox profile's regular expression
+		{"/srv/first.lastname/x", "/srv/first.lastname/x"},                 // another folder
+		{"127.0.0.1:8765 and 2.1.400", "127.0.0.1:8765 and 2.1.400"},       // what is no number
+		{"12345@g.us", "…@g.us"},                                           // too short to keep any digit
+		{"allowed_groups (digits@g.us)", "allowed_groups (digits@g.us)"},   // no JID, and no address either
+		{"brain-120363000000000005@g.us", "brain-…05@g.us"},                // a JID right after a name
+		{"main.120363000000000005@g.us", "main.…05@g.us"},                  // or a word
+		{"x15550001111@s.whatsapp.net", "x1…11@s.whatsapp.net"},            // a number's; personal-data:ignore
+		{"x" + strings.Repeat("6", 15) + "@lid", "x…66@lid"},               // a LID's
+	}
+	for _, c := range cases {
+		if got := r.text(c.in); got != c.want {
+			t.Errorf("text(%q) = %q, want %q", c.in, got, c.want)
+		}
+	}
+	if got := newRedactor("/").text("/usr/bin"); got != "/usr/bin" {
+		t.Errorf("a home of / redacted %q", got)
 	}
 }

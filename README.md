@@ -348,15 +348,23 @@ Whisper model or the Groq API (sending 16 kHz mono FLAC, retried with backoff
 by Groq's SDK).
 
 ```bash
-python3 tools/transcribe.py voice-note.ogg --output-dir ~/assistant/personal/transcripts
+~/.local/share/fridolin/venv/bin/python tools/transcribe.py voice-note.ogg --output-dir ~/assistant/personal/transcripts
 ```
 
-Neither engine is installed by default — pick one:
+Neither engine is installed by default. Pick one and install it into a venv
+of its own, the one the transcription skill runs the tool with; Homebrew's
+and Debian's Python refuse a plain `pip install` (PEP 668). Keep it out of
+`~/.fridolin`, which brains cannot read:
 
 ```bash
-pip install -r tools/requirements-transcription.txt   # local: private, ~1.5 GB model
-pip install groq && export GROQ_API_KEY=...           # API: light, needs a key
+python3 -m venv ~/.local/share/fridolin/venv
+~/.local/share/fridolin/venv/bin/pip install -r tools/requirements-transcription.txt   # local: private, ~1.5 GB model
+~/.local/share/fridolin/venv/bin/pip install groq && export GROQ_API_KEY=...           # API: light, needs a key
 ```
+
+With [uv](https://docs.astral.sh/uv/), `uv run --script tools/transcribe.py
+voice-note.ogg …` does without the venv: it installs both engines, as the
+script's own metadata lists them, into uv's cache.
 
 Brains get `GROQ_API_KEY` from the bridge's process environment, and only
 when [`child_env_passthrough`](docs/CONFIGURATION.md#child_env_passthrough)

@@ -1,20 +1,24 @@
 #!/usr/bin/env bash
 #
 # Smoke test for a built binary: start it in dev mode (no WhatsApp) with a
-# scratch HOME, config and data dir on a free port, check that it answers,
-# then stop it with SIGTERM and check that it shuts down cleanly. It never
-# reads your config or data dir and never talks to a running bridge.
+# scratch HOME, config and data dir on a free port, check that it answers
+# and that its log names the config file and the data dir, then stop it
+# with SIGTERM and check that it shuts down cleanly. It never reads your
+# config or data dir and never talks to a running bridge.
 #
-#   scripts/smoke.sh [BINARY]      # default bin/fridolin
+#   scripts/smoke.sh [BINARY [VERSION]]   # default bin/fridolin
 #
 # `make smoke` builds the binary with -race into a temp dir and runs this on
-# it, so a data race at start or shutdown fails the run.
+# it, so a data race at start or shutdown fails the run. VERSION, when
+# given, is what `fridolin version` must print: make smoke passes the
+# version it stamps the build with.
 #
 # Exit status: 0 when every step passed, 1 when one failed, 2 on bad usage.
 
 set -euo pipefail
 
 bin="${1:-bin/fridolin}"
+want_version="${2:-}"
 [ -x "$bin" ] || { printf 'smoke: no executable at %s (run make build)\n' "$bin" >&2; exit 2; }
 bin="$(cd "$(dirname "$bin")" && pwd)/$(basename "$bin")"
 command -v curl >/dev/null 2>&1 || { printf 'smoke: curl is needed\n' >&2; exit 2; }
@@ -68,6 +72,9 @@ EOF
 
 version="$("${clean_env[@]}" "$bin" version)" || fail "fridolin version"
 [ -n "$version" ] || fail "fridolin version prints a version"
+if [ -n "$want_version" ] && [ "$version" != "$want_version" ]; then
+  fail "fridolin version prints the stamped $want_version, not $version"
+fi
 pass "fridolin version ($version)"
 
 "${clean_env[@]}" "$bin" check --config "$cfg" >"$work/check.txt" 2>&1 || { cat "$work/check.txt"; fail "fridolin check"; }
@@ -85,6 +92,11 @@ for _ in $(seq 1 100); do
 done
 [ "$health" = ok ] || fail "GET /health says ok"
 pass "GET /health"
+
+# Both are logged before the bridge is made, so they are in the log by now.
+grep -qF "Config file: $cfg (--config)" "$log" || fail "the log names the config file, from --config"
+grep -qF "Data dir: $data (config)" "$log" || fail "the log names the data dir, from the config"
+pass "the log names the config file and the data dir"
 
 code="$(curl -s -o "$work/index.html" -w '%{http_code}' "$base/")"
 if [ "$code" != 200 ] || ! grep -q '<html' "$work/index.html"; then fail "GET / serves the dashboard (status $code)"; fi

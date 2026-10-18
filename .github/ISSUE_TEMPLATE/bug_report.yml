@@ -42,8 +42,10 @@ body:
   - type: textarea
     id: check
     attributes:
-      label: Output of `fridolin check`, redacted
-      description: It lists the numbers and groups you allowed; replace them with placeholders.
+      label: Output of `fridolin check --redact`
+      description: >-
+        --redact masks phone numbers, group JIDs, email addresses and your
+        home folder. Read what is left before you paste it.
       render: text
   - type: textarea
     id: logs

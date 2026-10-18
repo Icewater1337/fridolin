@@ -20,7 +20,8 @@ The person's data lives in brain folders they choose and in
 
 1. **Prerequisites.** Check, and install what is missing with the person's OK:
    - Go 1.26+ (`go version`); macOS: `brew install go`.
-   - A C compiler (SQLite needs cgo); macOS: `xcode-select --install`.
+   - A C compiler (SQLite needs cgo) and make; macOS: `xcode-select
+     --install` brings both.
    - Claude Code 2.1.302 or newer, logged in (`claude --version`; `claude
      update` updates it; if `claude -p hi` says it is not logged in, ask the
      person to run `claude` once and log in).
@@ -179,14 +180,17 @@ the version before: `fridolin service rollback`.
 - The project was called whatsapp-claude-bridge before. Names from then
   that are on disk or that others rely on stay, each marked `compat:` in
   the code: the data dir `~/.whatsapp-claude-bridge`, which the bridge
-  still uses when `~/.fridolin` does not exist (`defaultDataDir`, and
-  `setup.sh` for the config it installs), the launchd label
+  still uses when `~/.fridolin` does not exist (`defaultDataDir`, which
+  `setup.sh` asks through `fridolin paths`), the launchd label
   `com.whatsapp-claude-bridge`, whose agent `fridolin service install`
-  retires, and the sandbox's denies of the old `~/.config` and
-  `~/Library/Logs` folders.
+  retires, the sandbox's denies of the old `~/.config` and
+  `~/Library/Logs` folders, and the personal-data check's old denylist
+  place, `~/.config/whatsapp-claude-bridge/personal-denylist`, which it
+  reads with a note to move it.
   *Bridge* is still the product's own word: `bridge.db`, `bridge.lock`,
   the `X-Bridge-Token` header and the `BRIDGE_*` variables brains read
-  keep it. Mark a new shim like these the same way.
+  keep it. Mark a new shim like these the same way, and list it in
+  `CHANGELOG.md`, which says what changes for people who run Fridolin.
 - Run `scripts/install-hooks.sh` before committing. The hooks refuse commits
   and pushes containing phone numbers, WhatsApp JIDs, emails, home paths or
   tokens. Use placeholders: `15551234567`, `120363000000000000@g.us`,

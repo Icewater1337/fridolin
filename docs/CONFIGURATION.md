@@ -18,6 +18,14 @@ Validate at any time:
 fridolin check
 ```
 
+For a bug report, `fridolin check --redact` prints the same with phone
+numbers, group JIDs, LIDs and email addresses masked and `~` for your home
+folder, its log lines and any `--print-sandbox` profile included.
+
+`fridolin paths` prints the config file and the data dir the other
+commands use, and where each came from (`--json` for a program to read).
+The bridge's log names both, and where each came from, at every start.
+
 Paths may start with `~`, which expands to your home directory.
 
 ---
@@ -663,7 +671,9 @@ token, the scripts token for `/send` and `/ingest` (`scripts.token`),
 backup state, the bridge's rclone config and calendar credentials.
 Default `~/.fridolin`; an install from before the project was renamed keeps
 `~/.whatsapp-claude-bridge` while `~/.fridolin` does not exist, and says so
-in the log at every start: set `data_dir` to it to keep it for good.
+in the log at every start: set `data_dir` to it to keep it for good. A new
+config, from `fridolin init`, `setup.sh` or the first start, gets the folder
+chosen then (written with `~`), so later starts do not choose again.
 `db_path` and `media_dir` override individually. Brains cannot read it,
 except the `media/` inbox and their own runs' brain API tokens in
 `run-tokens/<id>/`; a `db_path` elsewhere is denied to them too.
@@ -984,6 +994,16 @@ logs a warning when it is set, and `setup.sh` stops rather than set the
 service up with another config. If it points at Fridolin's config, re-run
 `setup.sh` with `FRIDOLIN_CONFIG` set to it; if it belongs to other
 software, re-run it as `env -u CONFIG_FILE ./setup.sh`.
+
+`setup.sh` also reads `FRIDOLIN_DATA_DIR`, the data folder it writes into
+a new config (whose file is then `config.json` in that folder, unless
+`FRIDOLIN_CONFIG` names another), and `FRIDOLIN_INSTALL_DIR`, the folder it
+installs to (default `~/.local/lib/fridolin`). It asks the build for the
+config file and the data folder (`fridolin paths`) rather than work them
+out itself. `DATA_DIR` and `INSTALL_DIR`, their old names, are ignored with
+a warning, since other software exports them too; when one names the
+config or the install this would leave behind, `setup.sh` stops and says
+how to re-run, as for `CONFIG_FILE`.
 
 ### What reaches brains
 
