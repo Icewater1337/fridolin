@@ -91,6 +91,20 @@ test('colours come only from the tokens', async (t) => {
   }
 });
 
+// A field type that the base styles leave out looks like the browser's
+// own small box, unlike every other field (the site's password fields did).
+test('every kind of text field the pages make has the field style', () => {
+  const walk = (dir) => fs.readdirSync(dir, { withFileTypes: true }).flatMap((e) => {
+    const p = path.join(dir, e.name);
+    return e.isDirectory() ? walk(p) : p.endsWith('.js') ? [p] : [];
+  });
+  const textTypes = new Set(['text', 'search', 'password', 'email', 'url', 'tel', 'number', 'time', 'date']);
+  const used = new Set(walk(ASSETS).flatMap((f) => [...read(f).matchAll(/\btype: '(\w+)'/g)].map((m) => m[1])).filter((t) => textTypes.has(t)));
+  assert.ok(used.has('password'), 'the scan finds the field types');
+  const base = read(path.join(CSS, 'base.css'));
+  for (const type of used) assert.ok(base.includes(`input[type="${type}"]`), `base.css does not style input[type="${type}"]`);
+});
+
 // 100vh is the height with the browser's toolbars hidden, so on a phone
 // the bottom of a full-height layout sits under them; dvh follows them.
 test('heights follow the visible viewport', async (t) => {
