@@ -393,13 +393,13 @@ func TestPrepareBrainState(t *testing.T) {
 			if !slices.Equal(env, want) {
 				t.Errorf("env = %q, want %q", env, want)
 			}
-			for _, dir := range []string{state + "/claude", state + "/tmp", state + "/cache", data + "/media/a"} {
+			for _, dir := range []string{state + "/claude", state + "/codex", state + "/tmp", state + "/cache", data + "/media/a"} {
 				if fi, err := os.Lstat(dir); err != nil || !fi.IsDir() {
 					t.Errorf("%s: %v, %v", dir, fi, err)
 				}
 			}
 			// The folders the sandbox profile names are these.
-			if st := brainStateOf(data, "a"); !slices.Equal(st.folders(), []string{state + "/claude", state + "/tmp", state + "/cache"}) || st.dir != state {
+			if st := brainStateOf(data, "a"); !slices.Equal(st.folders(), []string{state + "/claude", state + "/codex", state + "/tmp", state + "/cache"}) || st.dir != state {
 				t.Errorf("brainStateOf = %+v", st)
 			}
 		})

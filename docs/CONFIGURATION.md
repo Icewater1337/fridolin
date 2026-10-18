@@ -246,6 +246,67 @@ DMs never need a trigger.
 
 ---
 
+## AI mode
+
+### `agent_provider`
+
+`"claude"` (default) or `"codex"`. Change it in **Settings → AI mode →
+Mode**, then Save. It applies to the next run of every brain without a
+restart. A running turn keeps its provider, model and effort. Both modes
+use the same brain prompt, files, chat history, routing and delivery queue.
+
+### `codex_path`, `codex_model`, `codex_effort`
+
+The Codex CLI executable (default `"codex"` on PATH), model (default
+`"gpt-6.1-sol"`) and reasoning effort (default `"high"`). Effort can be
+`low`, `medium`, `high`, `xhigh` or `max`. Empty fields use these defaults.
+Install Codex CLI 0.163.0 or newer and use a model your account can access.
+See the [Codex CLI guide](https://learn.chatgpt.com/docs/codex/cli).
+
+These are separate from Claude's `brain_model`, `brain_effort`, and the
+`model` / `effort` overrides in `brain.json`. Those settings apply only in
+Claude mode and are preserved when switching. Codex uses the global Codex
+model and effort for every brain.
+
+Each brain has its own `CODEX_HOME` at `<data_dir>/brains/<id>/codex`, even
+when Fridolin's sandbox is off. Sign in once for each brain from Terminal,
+replacing the data folder and brain ID below as appropriate:
+
+```sh
+mkdir -p ~/.fridolin/brains/main/codex
+CODEX_HOME=~/.fridolin/brains/main/codex codex -c 'cli_auth_credentials_store="file"' login
+```
+
+The dashboard's Overview shows the sign-in command when that brain has no
+login file. The normal `codex login` in your personal home does not sign in
+these isolated brains. The bridge never copies your personal credentials,
+configuration, plugins or chats. An alternative is `CODEX_API_KEY` in the
+service environment; it is passed only to Codex runs. Anyone allowed to
+message a brain can use its account and read the credentials given to it.
+Never paste credentials into chat or commit them.
+
+Codex runs `codex exec --json` with its prompt on stdin, without saved
+sessions or inherited user configuration, rules, or ancestor AGENTS.md
+instructions. Put shared instructions in the brain's prompt file. Its
+final completed answer becomes the WhatsApp reply; progress stays in the
+activity log. Failed or incomplete turns do not send a partial answer.
+
+Fridolin's macOS sandbox wraps Codex and every child process just as it
+wraps Claude. When tools are enabled and that outer sandbox is active,
+Codex's own sandbox is bypassed to avoid nested macOS sandboxes. Otherwise
+Codex uses `workspace-write` when tools are enabled, or `read-only` when
+they are not, always without interactive approvals. Fridolin refuses to
+run when a configured outer sandbox cannot be applied. The timeout,
+concurrency limit and `!stop` work in both modes.
+
+Blocking `WebFetch` or `WebSearch` disables Codex's combined web tool
+(`web_search = "disabled"`). Other Claude blocked-tool names have no safe
+equivalent: a brain with any other effective `disallowed_tools` entry refuses
+Codex runs rather than silently dropping that restriction. User Claude
+plugins and `.mcp.json` are not imported. Fridolin's built-in site builder supplies its own skills
+and MCP tools in Codex format. The site's separate read-only search helper
+continues to use Claude's Read/Grep/Glob tools.
+
 ## Claude
 
 ### `claude_path`

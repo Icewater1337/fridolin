@@ -1,5 +1,6 @@
 {
   "_comment": "A config as versions before the legacy removal wrote it: the retired keys model, work_dir, brain_mode and an empty brains list. Synthetic values only.",
+  "agent_provider": "claude",
   "allow_any_dm": false,
   "allowed_groups": [],
   "allowed_numbers": [
@@ -16,6 +17,9 @@
   "brain_mode": true,
   "brain_model": "opus",
   "claude_path": "claude",
+  "codex_effort": "high",
+  "codex_model": "gpt-6.1-sol",
+  "codex_path": "codex",
   "dangerously_skip_permissions": false,
   "dashboard": {
     "require_token": true

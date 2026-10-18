@@ -44,6 +44,10 @@
       }
     },
     "claude_path": {"type": "string", "description": "The Claude Code CLI; \"claude\" looks it up on PATH."},
+    "agent_provider": {"enum": ["", "claude", "codex"], "description": "The CLI for new brain runs; empty defaults to claude. Changes apply to the next run."},
+    "codex_path": {"type": "string", "description": "The Codex CLI; empty defaults to codex on PATH."},
+    "codex_model": {"type": "string", "description": "The model for all Codex runs; empty defaults to gpt-6.1-sol."},
+    "codex_effort": {"enum": ["", "low", "medium", "high", "xhigh", "max"], "description": "Codex reasoning effort; empty defaults to high."},
     "data_dir": {"type": "string", "description": "The bridge's own data: bridge.db, media, tokens. Needs a restart."},
     "db_path": {"type": "string", "description": "Default <data_dir>/bridge.db. Needs a restart."},
     "media_dir": {"type": "string", "description": "Default <data_dir>/media. Needs a restart."},

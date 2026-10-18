@@ -10,6 +10,8 @@
 (deny user-preference-write)
 
 ;; 2. Private places: not readable, unless allowed below
+(deny file-read* (subpath "<HOME>/.codex"))
+(deny file-read* (subpath "<HOME>/.agents"))
 (deny file-read* (subpath "<HOME>/.ssh"))
 (deny file-read* (subpath "<HOME>/.gnupg"))
 (deny file-read* (subpath "<HOME>/.aws"))
@@ -134,6 +136,7 @@
 (deny file-write* (literal "<HOME>/.fridolin/brains/main"))
 (deny file-write* (literal "<HOME>/.fridolin/brains/main/cache"))
 (deny file-write* (literal "<HOME>/.fridolin/brains/main/claude"))
+(deny file-write* (literal "<HOME>/.fridolin/brains/main/codex"))
 (deny file-write* (literal "<HOME>/.fridolin/brains/main/tmp"))
 (deny file-write* (literal "<HOME>/.fridolin/media/main"))
 (deny file-write* (literal "<HOME>/main"))

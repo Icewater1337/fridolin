@@ -109,6 +109,16 @@ func TestSiteBuilderFlow(t *testing.T) {
 	if srv.Args[0] != "mcp-site" || token == "" || m.brainForToken(token) != "web" || m.brainForToken("wrong") != "" {
 		t.Fatalf("mcp.json = %s", data)
 	}
+	codexArgs, codexEnv, codexPrompt, err := m.CodexBuilder("web")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(strings.Join(codexArgs, " "), "mcp_servers.fridolin-site.command=") || strings.Contains(strings.Join(codexArgs, " "), token) {
+		t.Fatal("Codex must receive the MCP server but no token in argv")
+	}
+	if !strings.Contains(strings.Join(codexEnv, "\n"), "FRIDOLIN_BUILDER_TOKEN="+token) || !strings.Contains(codexPrompt, "site-builder") {
+		t.Fatal("Codex builder is missing its tools or instructions")
+	}
 	ws := filepath.Join(base, "workspace")
 	if branch := gitT(t, ws, "rev-parse", "--abbrev-ref", "HEAD"); branch != "builder/web" {
 		t.Errorf("workspace branch = %s", branch)

@@ -4,7 +4,7 @@
 
 # Fridolin
 
-Talk to [Claude Code](https://claude.com/claude-code) over WhatsApp.
+Talk to [Claude Code](https://claude.com/claude-code) or [Codex](https://learn.chatgpt.com/docs/codex/cli) over WhatsApp.
 
 Message it like you'd message a person. It reads and writes files, runs
 commands, and remembers things between conversations. Send it a PDF and it
@@ -28,6 +28,12 @@ messages.
 ---
 
 ## What it does
+
+**Choose the assistant.** Settings → AI mode switches all brains between
+Claude (the default) and Codex. Codex defaults to GPT-6.1 Sol with high
+reasoning effort. Each brain needs its own Codex sign-in; see
+[AI mode](docs/CONFIGURATION.md#ai-mode). Switching keeps its files and chat
+history, and preserves your Claude model settings.
 
 **Conversations that continue.** Each chat keeps its own history. The
 assistant sees the recent part of it and can search the full log.

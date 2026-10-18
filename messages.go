@@ -85,10 +85,12 @@ const (
 // CLI's stderr, with local paths and sandbox denials, and in a group every
 // member would read it.
 const (
-	chatErrNotSignedIn = "🔑 Claude is not signed in on the bridge machine. Run `claude` there once and log in, then send your message again."
-	chatErrLimit       = "⏳ Claude's usage limit is reached for now. Try again later."
-	chatErrTimeout     = "⌛ That took too long and was stopped. Try again, perhaps with a smaller request."
-	chatErrGeneric     = "❌ Something went wrong — details on the bridge dashboard."
+	chatErrCodexNotSignedIn = "🔑 Codex is not signed in for this brain. See the bridge dashboard for its sign-in command, then send your message again."
+	chatErrCodexLimit       = "⏳ Codex's usage limit is reached for now. Try again later."
+	chatErrNotSignedIn      = "🔑 Claude is not signed in on the bridge machine. Run `claude` there once and log in, then send your message again."
+	chatErrLimit            = "⏳ Claude's usage limit is reached for now. Try again later."
+	chatErrTimeout          = "⌛ That took too long and was stopped. Try again, perhaps with a smaller request."
+	chatErrGeneric          = "❌ Something went wrong — details on the bridge dashboard."
 )
 
 // chatErrSandbox is what a chat is told about a run its sandbox kept from
@@ -98,6 +100,9 @@ func chatErrSandbox(err error) string { return "❌ " + capitalize(err.Error()) 
 // chatErrClaude is the CLI's own short account of a failed run, msg, as a
 // direct chat is told it.
 func chatErrClaude(msg string) string { return "❌ Claude: " + truncate(msg, 300) }
+
+// chatErrCodex is Codex's own short account, shown only in a direct chat.
+func chatErrCodex(msg string) string { return "❌ Codex: " + truncate(msg, 300) }
 
 // buildChatError is what a build chat on the Site's Build page shows for
 // a message the builder brain could not take.

@@ -191,22 +191,24 @@ func decodeBody(r *http.Request, v any, optional bool) error {
 // ── status ───────────────────────────────────────────────────────────────
 
 type statusResponse struct {
-	Version    string         `json:"version"`
-	StartedAt  time.Time      `json:"started_at"`
-	UptimeS    int64          `json:"uptime_s"`
-	ConfigPath string         `json:"config_path"`
-	DataDir    string         `json:"data_dir"`
-	DevMode    bool           `json:"dev_mode"`
-	Platform   string         `json:"platform"`
-	WhatsApp   waStatus       `json:"whatsapp"`
-	Claude     claudeStatus   `json:"claude"`
-	Sandbox    sandboxStatus  `json:"sandbox"`
-	Brains     []BrainRuntime `json:"brains"`
-	Issues     []BrainIssue   `json:"issues"`
-	Warnings   []string       `json:"warnings"`
-	Backup     backupSummary  `json:"backup"`
-	Ingest     bool           `json:"ingest"`
-	Pending    int            `json:"debouncing"`
+	Version       string         `json:"version"`
+	StartedAt     time.Time      `json:"started_at"`
+	UptimeS       int64          `json:"uptime_s"`
+	ConfigPath    string         `json:"config_path"`
+	DataDir       string         `json:"data_dir"`
+	DevMode       bool           `json:"dev_mode"`
+	Platform      string         `json:"platform"`
+	WhatsApp      waStatus       `json:"whatsapp"`
+	Claude        claudeStatus   `json:"claude"`
+	AgentProvider string         `json:"agent_provider"`
+	Codex         *claudeStatus  `json:"codex,omitempty"`
+	Sandbox       sandboxStatus  `json:"sandbox"`
+	Brains        []BrainRuntime `json:"brains"`
+	Issues        []BrainIssue   `json:"issues"`
+	Warnings      []string       `json:"warnings"`
+	Backup        backupSummary  `json:"backup"`
+	Ingest        bool           `json:"ingest"`
+	Pending       int            `json:"debouncing"`
 	// Settings saved since the start that only apply after a restart. The
 	// dashboard shows its restart banner from this, in every tab.
 	RestartRequired []string `json:"restart_required"`
@@ -232,23 +234,38 @@ func (b *Bridge) apiStatus(w http.ResponseWriter, r *http.Request) {
 	cfg := b.cfgs.Get()
 	wa := b.wa.State()
 	resp := statusResponse{
-		Version:    bridgeVersion(),
-		StartedAt:  b.started,
-		UptimeS:    int64(time.Since(b.started).Seconds()),
-		ConfigPath: b.cfgs.Path(),
-		DataDir:    cfg.DataDir,
-		DevMode:    b.dev != nil,
-		Platform:   runtime.GOOS,
-		WhatsApp:   waStatus{WAState: wa, QRAvailable: wa.QRCode != ""},
-		Claude:     claudeInfo(cfg.ClaudePath, cfg.ChildEnvPassthrough),
-		Sandbox:    sandboxStatus{Enabled: cfg.Sandbox.Enabled, Supported: runtime.GOOS == "darwin"},
-		Issues:     nonNil(b.brainIssues(cfg)),
-		Warnings:   nonNil(b.Warnings()),
-		Backup:     b.backup.Summary(),
-		Ingest:     cfg.Ingest.Enabled,
-		Pending:    b.deb.Pending(),
+		Version:       bridgeVersion(),
+		StartedAt:     b.started,
+		UptimeS:       int64(time.Since(b.started).Seconds()),
+		ConfigPath:    b.cfgs.Path(),
+		DataDir:       cfg.DataDir,
+		DevMode:       b.dev != nil,
+		Platform:      runtime.GOOS,
+		WhatsApp:      waStatus{WAState: wa, QRAvailable: wa.QRCode != ""},
+		Claude:        claudeInfo(cfg.ClaudePath, cfg.ChildEnvPassthrough),
+		AgentProvider: cfg.AgentProvider,
+		Sandbox:       sandboxStatus{Enabled: cfg.Sandbox.Enabled, Supported: runtime.GOOS == "darwin"},
+		Issues:        nonNil(b.brainIssues(cfg)),
+		Warnings:      nonNil(b.Warnings()),
+		Backup:        b.backup.Summary(),
+		Ingest:        cfg.Ingest.Enabled,
+		Pending:       b.deb.Pending(),
 
 		RestartRequired: nonNil(b.cfgs.RestartRequired()),
+	}
+	if cfg.AgentProvider == "codex" {
+		st := codexInfo(cfg.CodexPath, cfg.ChildEnvPassthrough)
+		resp.Codex = &st
+		if !st.Found {
+			resp.Warnings = append(resp.Warnings, "Codex CLI was not found. Set its path under Settings → AI mode.")
+		}
+		if os.Getenv("CODEX_API_KEY") == "" {
+			for _, br := range b.brainMgr.Brains() {
+				if !fileExists(filepath.Join(brainStateOf(cfg.DataDir, br.id).codex, "auth.json")) {
+					resp.Warnings = append(resp.Warnings, "Sign Codex in for brain "+br.id+" from Terminal: "+codexLoginHint(cfg.DataDir, br.id))
+				}
+			}
+		}
 	}
 	resp.Warnings = append(resp.Warnings, b.outboxWarnings(r.Context())...)
 	if bad := badAllowedNumbers(cfg.AllowedNumbers); len(bad) > 0 {
@@ -258,13 +275,13 @@ func (b *Bridge) apiStatus(w http.ResponseWriter, r *http.Request) {
 		resp.Warnings = append(resp.Warnings, "allowed_numbers is empty, so anyone who can message this WhatsApp account can use the assistant. Add your number under Chats → Allowed numbers.")
 	}
 	resp.Warnings = append(resp.Warnings, b.tokenWarnings(cfg, runtime.GOOS)...)
-	if w := claudeVersionWarning(resp.Claude); w != "" {
+	if w := claudeVersionWarning(resp.Claude); cfg.AgentProvider != "codex" && w != "" {
 		resp.Warnings = append(resp.Warnings, w)
 	}
 	if cfg.TokenlessSend() {
 		resp.Warnings = append(resp.Warnings, "/send works without a token (script_api.tokenless_send), so any program on this computer, brains included, can message your allowed chats. Have your scripts send the token in scripts.token in the data folder, then turn it off under Settings → Advanced.")
 	}
-	if cfg.InheritClaudeUserConfig {
+	if cfg.AgentProvider != "codex" && cfg.InheritClaudeUserConfig {
 		// Set in config.json only, so the dashboard shows it nowhere else.
 		resp.Warnings = append(resp.Warnings, "Brains load your own Claude Code setup (inherit_claude_user_config in config.json): they run your hooks, read your instructions and can use your MCP servers for anyone who may message them.")
 	}
@@ -276,7 +293,7 @@ func (b *Bridge) apiStatus(w http.ResponseWriter, r *http.Request) {
 		} else if w := sandboxProfileWarning(b.brainMgr); w != "" {
 			resp.Warnings = append(resp.Warnings, w)
 		}
-		if !brainLoginInEnv() {
+		if cfg.AgentProvider != "codex" && !brainLoginInEnv() {
 			resp.Warnings = append(resp.Warnings, "Sandboxed brains cannot read your keychain, where the login you made with `claude` lives, and the bridge's environment has no CLAUDE_CODE_OAUTH_TOKEN or ANTHROPIC_API_KEY for them either: they fail with \"Not logged in\" unless their own settings log them in. Run `claude setup-token` and set the token in the bridge's environment (docs/CONFIGURATION.md, \"Where to set them\").")
 		}
 	}

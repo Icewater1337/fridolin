@@ -41,6 +41,14 @@ var (
 // brain's environment: a claude_path wrapper may run what a brain can
 // change.
 func claudeInfo(path string, passthrough []string) claudeStatus {
+	return cliInfo(path, passthrough, claudeChild)
+}
+
+func codexInfo(path string, passthrough []string) claudeStatus {
+	return cliInfo(path, passthrough, codexChild)
+}
+
+func cliInfo(path string, passthrough []string, scope childScope) claudeStatus {
 	p, err := exec.LookPath(path)
 	if err != nil {
 		return claudeStatus{Path: path}
@@ -63,7 +71,7 @@ func claudeInfo(path string, passthrough []string) claudeStatus {
 	st := claudeStatus{Path: p, Found: true}
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	cmd := exec.CommandContext(ctx, p, "--version")
-	cmd.Env = childEnv(claudeChild, passthrough)
+	cmd.Env = childEnv(scope, passthrough)
 	out, err := cmd.Output()
 	cancel()
 	if err == nil {

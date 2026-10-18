@@ -23,6 +23,7 @@ const (
 	// desktopChild is a helper that opens your browser for a sign-in:
 	// rclone connecting Google Drive, `plaud login` (see withDesktop).
 	desktopChild
+	codexChild
 )
 
 // childEnvVar names one variable of the bridge's environment that a program
@@ -100,6 +101,10 @@ var childEnvAllowlist = []childEnvVar{
 	{"CALENDAR_TZ", claudeChild},         // fridolin calendar's timezone
 	{"TRANSCRIBE_MODEL", claudeChild},    // transcribe.py's model
 	{"TRANSCRIBE_LANGUAGE", claudeChild}, // transcribe.py's language
+	{"CODEX_API_KEY", codexChild},
+	{"CALENDAR_TZ", codexChild},
+	{"TRANSCRIBE_MODEL", codexChild},
+	{"TRANSCRIBE_LANGUAGE", codexChild},
 }
 
 // childEnv is the environment for a program of scope: the variables of the
@@ -184,8 +189,8 @@ const brainStatesDirName = "brains"
 // shares none of them with your own Claude Code sessions or with other
 // brains.
 type brainState struct {
-	dir                string // <data_dir>/brains/<id>, which holds the rest
-	claude, tmp, cache string
+	dir                       string // <data_dir>/brains/<id>, which holds the rest
+	claude, codex, tmp, cache string
 }
 
 // brainStateOf is the state of brain id in the data dir dataDir.
@@ -194,13 +199,14 @@ func brainStateOf(dataDir, id string) brainState {
 	return brainState{
 		dir:    dir,
 		claude: filepath.Join(dir, "claude"),
+		codex:  filepath.Join(dir, "codex"),
 		tmp:    filepath.Join(dir, "tmp"),
 		cache:  filepath.Join(dir, "cache"),
 	}
 }
 
 // folders are the folders of the state, which the sandbox pins.
-func (s brainState) folders() []string { return []string{s.claude, s.tmp, s.cache} }
+func (s brainState) folders() []string { return []string{s.claude, s.codex, s.tmp, s.cache} }
 
 // prepareBrainState creates brain id's media inbox in mediaDir (when set)
 // and its state in dataDir, which its sandbox profile pins and so must

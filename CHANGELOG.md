@@ -8,6 +8,15 @@ for compatibility.
 
 ## Unreleased
 
+### Added
+
+- Settings → AI mode switches new brain runs between Claude (default) and
+  Codex. Codex defaults to `gpt-6.1-sol` with high reasoning effort, with
+  separate model settings, isolated per-brain sign-in, streamed activity,
+  the existing sandbox and cancellation, and Fridolin site-builder tools.
+  See [AI mode](docs/CONFIGURATION.md#ai-mode) for sign-in and the
+  Claude-specific settings that do not transfer.
+
 ### Changed
 
 - **In an allowed group, only the numbers in `allowed_numbers` reach the

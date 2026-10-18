@@ -136,12 +136,12 @@ export default {
     ]);
 
     // ── cards ──
-    const renderClaude = (s) => paint(claudeCard, s.claude || {}, (c) => [
-      h('div.card-head', h('div.card-title', icon('terminal'), h('h2', 'Claude CLI')), c.found ? pill('Found', 'ok') : pill('Not found', 'bad')),
+    const renderClaude = (s) => paint(claudeCard, { ...(s.agent_provider === 'codex' ? s.codex : s.claude), provider: s.agent_provider || 'claude' }, (c) => [
+      h('div.card-head', h('div.card-title', icon('terminal'), h('h2', c.provider === 'codex' ? 'Codex CLI' : 'Claude CLI')), c.found ? pill('Found', 'ok') : pill('Not found', 'bad')),
       h('div.card-body',
         c.path ? h('p', mono(c.path)) : null,
         c.version ? h('p.muted', c.version) : null,
-        !c.found ? h('p.muted', 'Install Claude Code and log in once with ', h('code.mono', 'claude'), ', or point ', h('a', { href: '#/settings/claude' }, 'Settings → Claude'), ' at the right binary.') : null),
+        !c.found ? h('p.muted', 'Install the CLI and log in with ', h('code.mono', c.provider), ', or point ', h('a', { href: '#/settings/claude' }, 'Settings → AI mode'), ' at the right binary.') : null),
     ]);
 
     const renderSandbox = (s) => paint(sandboxCard, s.sandbox || {}, (sb) => {
