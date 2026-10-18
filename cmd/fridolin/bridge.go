@@ -460,7 +460,7 @@ func (b *Bridge) keep(kind, brain string, m Inbound) {
 		dropped([]Inbound{m})
 		return
 	}
-	if err := b.store.KeepInbound(context.Background(), kind, brain, m); err != nil {
+	if err := keepInbound(context.Background(), b.store, kind, brain, m); err != nil {
 		log.Printf("%v; it is lost", err)
 	}
 }
@@ -473,7 +473,7 @@ func (b *Bridge) keepInterrupted(br *Brain, m Inbound) {
 	if m.Source != sourceWhatsApp || m.Silent {
 		return
 	}
-	if err := b.store.KeepInterrupted(context.Background(), br.ID(), m); err != nil {
+	if err := keepInterrupted(context.Background(), b.store, br.ID(), m); err != nil {
 		log.Printf("brain %s: %v", br.ID(), err)
 	}
 }
@@ -493,7 +493,7 @@ func (b *Bridge) resume(ctx context.Context) {
 	// that begins meanwhile keeps what is still waiting again, but a
 	// notice it cut off would be lost.
 	ctx = context.WithoutCancel(ctx)
-	rows, err := b.store.TakeInbound(ctx)
+	rows, err := takeInbound(ctx, b.store)
 	if err != nil {
 		log.Printf("taking up what the last stop kept: %v", err)
 	}
@@ -642,7 +642,7 @@ func (b *Bridge) keepLate(m Inbound) {
 func (b *Bridge) handleChange(c messageChange) {
 	if !b.intake.enter() {
 		kept := b.intake.keep(func() {
-			if err := b.store.KeepChange(context.Background(), c, time.Now()); err != nil {
+			if err := keepChange(context.Background(), b.store, c, time.Now()); err != nil {
 				log.Printf("%v; it is lost", err)
 			}
 		})

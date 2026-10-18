@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"github.com/Icewater1337/fridolin/internal/store"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -12,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Icewater1337/fridolin/internal/store"
 	"github.com/Icewater1337/fridolin/internal/textx"
 )
 
@@ -466,9 +466,11 @@ func TestStatusWarnsAboutTheOutbox(t *testing.T) {
 // reads counts as waiting or as given up on, never as both or neither.
 // TestOutboxGivesUp saw one counted twice on CI.
 func TestOutboxSummaryIsOneMoment(t *testing.T) {
-	s := openOutboxStore(t, t.TempDir())
+	dir := t.TempDir()
+	s := openOutboxStore(t, dir)
+	db := testStoreSQL(t, filepath.Join(dir, "bridge.db"))
 	ctx := context.Background()
-	if _, err := s.AddOutbox(ctx, outboxRow{Chat: testDMChat, Parts: []outboxPart{{Text: "hi"}}, CreatedAt: time.Now()}); err != nil {
+	if _, err := s.AddOutbox(ctx, store.OutboxRow{Chat: testDMChat, Parts: []store.OutboxPart{{Text: "hi"}}, CreatedAt: time.Now()}); err != nil {
 		t.Fatal(err)
 	}
 	// The reply goes back and forth between waiting and given up on.
@@ -482,7 +484,7 @@ func TestOutboxSummaryIsOneMoment(t *testing.T) {
 				return
 			default:
 			}
-			if _, err := s.db.ExecContext(ctx, `UPDATE outbox SET state = CASE state WHEN 'pending' THEN 'failed' ELSE 'pending' END, next_try_at = ?`, time.Now().UTC()); err != nil {
+			if _, err := db.ExecContext(ctx, `UPDATE outbox SET state = CASE state WHEN 'pending' THEN 'failed' ELSE 'pending' END, next_try_at = ?`, time.Now().UTC()); err != nil {
 				flipped <- err
 				return
 			}

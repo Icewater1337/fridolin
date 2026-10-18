@@ -4,7 +4,6 @@ import (
 	"context"
 	"crypto/sha256"
 	"fmt"
-	"github.com/Icewater1337/fridolin/internal/store"
 	"reflect"
 	"regexp"
 	"slices"
@@ -15,10 +14,12 @@ import (
 
 	"go.mau.fi/whatsmeow"
 	"go.mau.fi/whatsmeow/proto/waE2E"
-	"go.mau.fi/whatsmeow/store"
+	wastore "go.mau.fi/whatsmeow/store"
 	"go.mau.fi/whatsmeow/types"
 	"go.mau.fi/whatsmeow/types/events"
 	waLog "go.mau.fi/whatsmeow/util/log"
+
+	"github.com/Icewater1337/fridolin/internal/store"
 )
 
 func TestExtractPolls(t *testing.T) {
@@ -405,7 +406,7 @@ func TestPollVoteIsLoggedAtDebug(t *testing.T) {
 // key as every poll's. Like the SQL store, it fails under a context that
 // ended.
 type pollSecrets struct {
-	store.MsgSecretStore
+	wastore.MsgSecretStore
 	key []byte
 }
 
@@ -420,7 +421,7 @@ func (s pollSecrets) GetMessageSecret(ctx context.Context, _, sender types.JID, 
 // voter as pollID, encrypted with key the way the voter's phone does.
 func pollVoteEvent(t *testing.T, key []byte, voter types.JID, pollID string, options ...string) *events.Message {
 	t.Helper()
-	phone := whatsmeow.NewClient(&store.Device{ID: &voter, MsgSecrets: pollSecrets{key: key}}, waLog.Noop)
+	phone := whatsmeow.NewClient(&wastore.Device{ID: &voter, MsgSecrets: pollSecrets{key: key}}, waLog.Noop)
 	// The poll as the phone has it: in the chat with the bridge, from it.
 	poll := types.MessageInfo{MessageSource: types.MessageSource{Chat: bridgeAccount, Sender: bridgeAccount}, ID: types.MessageID(pollID)}
 	vote, err := phone.EncryptPollVote(context.Background(), &poll, &waE2E.PollVoteMessage{SelectedOptions: whatsmeow.HashPollOptions(options)})
@@ -442,11 +443,11 @@ func TestPollVoteFailuresMaskTheVoter(t *testing.T) {
 	}{
 		{"not decrypted", func(t *testing.T, _ *testBridge, wa *WhatsAppClient) {
 			// The bridge keeps another secret than the phone used.
-			wa.client = whatsmeow.NewClient(&store.Device{MsgSecrets: pollSecrets{key: make([]byte, 32)}}, waLog.Noop)
+			wa.client = whatsmeow.NewClient(&wastore.Device{MsgSecrets: pollSecrets{key: make([]byte, 32)}}, waLog.Noop)
 			wa.handlePollVote(pollVoteEvent(t, []byte("0123456789abcdef0123456789abcdef"), voter, "3EB0POLL", "Tuesday 3pm"))
 		}, "ERROR Failed to decrypt poll vote from " + maskPhone(otherNumber) + "@s.whatsapp.net: "},
 		{"not saved", func(t *testing.T, tb *testBridge, wa *WhatsAppClient) {
-			if _, err := tb.store.db.Exec(`CREATE TRIGGER refuse_votes BEFORE INSERT ON poll_votes BEGIN SELECT RAISE(ABORT, 'the disk is full'); END`); err != nil {
+			if _, err := testStoreSQL(t, tb.cfgs.Get().DBPath).Exec(`CREATE TRIGGER refuse_votes BEFORE INSERT ON poll_votes BEGIN SELECT RAISE(ABORT, 'the disk is full'); END`); err != nil {
 				t.Fatal(err)
 			}
 			hash := sha256.Sum256([]byte("Tuesday 3pm"))

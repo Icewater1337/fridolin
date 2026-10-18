@@ -2,8 +2,9 @@ package main
 
 import (
 	"database/sql"
-	"github.com/Icewater1337/fridolin/internal/store"
 	"testing"
+
+	"github.com/Icewater1337/fridolin/internal/store"
 )
 
 func openTestStore(t *testing.T, dbPath string) *store.Store {

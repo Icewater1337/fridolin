@@ -3,6 +3,8 @@ package logx
 import (
 	"fmt"
 	"log"
+	"maps"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -75,6 +77,9 @@ type stdWaLogger struct {
 }
 
 var waLevels = map[string]int{"DEBUG": 0, "INFO": 1, "WARN": 2, "ERROR": 3}
+
+// Levels returns the accepted log levels without exposing the validation map.
+func Levels() []string { return slices.Sorted(maps.Keys(waLevels)) }
 
 // NewWaLogger routes messages at level or above through the process logger.
 // Unknown levels use INFO, and child loggers keep their parent's threshold.
