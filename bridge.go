@@ -201,6 +201,7 @@ func NewBridge(cfgs *ConfigStore, opts BridgeOptions) (_ *Bridge, err error) {
 		Undelivered: b.undelivered,
 		OnHistory:   b.activity.Add,
 		ExtraArgs:   func(id string) []string { return b.site.BuilderArgs(id) },
+		CodexSetup:  func(id string) ([]string, []string, string, error) { return b.site.CodexBuilder(id) },
 		RunEnv:      b.brainRunEnv,
 	})
 	for _, br := range b.brainMgr.Brains() {

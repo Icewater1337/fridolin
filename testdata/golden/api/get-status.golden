@@ -3,6 +3,7 @@ GET /api/status
 Content-Type: application/json
 
 {
+  "agent_provider": "claude",
   "backup": {
     "connected": true,
     "enabled": true,

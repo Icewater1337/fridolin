@@ -45,6 +45,7 @@ Content-Type: application/json
     "viewer": false
   },
   "effective": {
+    "agent_provider": "claude",
     "allow_any_dm": false,
     "allowed_groups": [
       "120363000000000000@g.us"
@@ -64,6 +65,9 @@ Content-Type: application/json
     "brain_mode": true,
     "brain_model": "",
     "claude_path": "<TEST_BINARY>",
+    "codex_effort": "high",
+    "codex_model": "gpt-6.1-sol",
+    "codex_path": "codex",
     "dangerously_skip_permissions": false,
     "dashboard": {
       "require_token": true

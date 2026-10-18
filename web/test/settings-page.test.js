@@ -143,8 +143,26 @@ test('a link to a section gives the focus to its heading', async (t) => {
     await t.test(params.section || 'no section', async (t) => {
       const asked = [];
       await openPage(t, { params, focusAt: (el) => asked.push(el.textContent) });
-      const want = { claude: ['Claude'], google: ['Google sign-in'] }[params.section] || [];
+      const want = { claude: ['AI mode'], google: ['Google sign-in'] }[params.section] || [];
       assert.deepEqual(asked, want);
     });
   }
+});
+
+test('AI mode defaults to Claude and preserves separate model settings when switching', async (t) => {
+  const { bridge, inputFor, save } = await openPage(t, { config: { claude_path: 'claude', brain_model: 'opus', brain_effort: 'max' } });
+  assert.equal(inputFor('Mode').value, 'claude');
+  assert.equal(inputFor('Codex model').getAttribute('placeholder'), 'gpt-6.1-sol');
+  assert.equal(inputFor('Codex effort').value, 'high');
+  const mode = inputFor('Mode');
+  mode.value = 'codex';
+  mode.dispatchEvent(new Event('change'));
+  await save();
+  assert.equal(bridge.config.agent_provider, 'codex');
+  assert.equal(bridge.config.brain_model, 'opus');
+  assert.equal(bridge.config.brain_effort, 'max');
+  inputFor('Mode').value = 'claude';
+  inputFor('Mode').dispatchEvent(new Event('change'));
+  await save();
+  assert.equal(bridge.config.agent_provider, 'claude');
 });

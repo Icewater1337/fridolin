@@ -91,8 +91,8 @@ type sandboxPolicy struct {
 
 	// claudePath, rclonePath, plaudCLIPath and viewer name the programs the
 	// bridge itself runs outside the sandbox; see bridgeProgramsOf.
-	claudePath, rclonePath, plaudCLIPath string
-	viewer                               bool
+	claudePath, codexPath, rclonePath, plaudCLIPath string
+	viewer                                          bool
 
 	// inbox and state name what the bridge keeps for brain id outside its
 	// folder, the only places there the brain may write: its media inbox
@@ -125,6 +125,7 @@ func sandboxPolicyOf(cfg *Config) sandboxPolicy {
 		plaudShared:  cfg.Plaud.BrainAccess,
 		inheritUser:  cfg.InheritClaudeUserConfig,
 		claudePath:   cfg.ClaudePath,
+		codexPath:    cfg.CodexPath,
 		rclonePath:   cfg.Backup.RclonePath,
 		plaudCLIPath: cfg.Plaud.CLIPath,
 		viewer:       cfg.Viewer,
@@ -234,6 +235,8 @@ func (sp *SandboxProfiler) sitePaths() (deny, noWrite []string) {
 
 // defaultDenySubpaths are home-relative directories no brain may read.
 var defaultDenySubpaths = []string{
+	".codex",
+	".agents",
 	".ssh",
 	".gnupg",
 	".aws",
@@ -317,6 +320,7 @@ func inBrowserProfile(home, p string) bool {
 // the live site's sandbox (site_sandbox.go) keeps the paths a module
 // declares off these.
 var defaultWriteDenySubpaths = []string{
+	".codex",
 	".claude/hooks",
 	".claude/rules",
 	".claude/agents",
@@ -1043,6 +1047,9 @@ type bridgePrograms struct {
 func (p sandboxPolicy) bridgeProgramsOf(home string) bridgePrograms {
 	var found []string
 	if c, err := exec.LookPath(cmp.Or(p.claudePath, "claude")); err == nil {
+		found = append(found, c)
+	}
+	if c, err := exec.LookPath(cmp.Or(p.codexPath, "codex")); err == nil {
 		found = append(found, c)
 	}
 	if r, err := findRclone(p.rclonePath); err == nil {

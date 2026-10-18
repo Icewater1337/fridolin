@@ -426,6 +426,8 @@ func TestConfigSchemaRefusesWhatTheBridgeRefuses(t *testing.T) {
 		`{"triggers": "@claude"}`,
 		`{"triggers": [{"text": "@c", "match": "end"}]}`,
 		`{"brain_effort": "extreme"}`,
+		`{"agent_provider": "other"}`,
+		`{"codex_effort": "extreme"}`,
 		`{"max_chunk_size": 50}`,
 		`{"max_media_mb": 5000}`,
 		`{"max_media_mb": -1}`,
@@ -526,6 +528,8 @@ func TestSchemaEnumsAreTheBridgesValues(t *testing.T) {
 		file    string // a file that sets it, %s for the value as JSON
 	}{
 		{"brain_effort", "config.schema.json#/properties/brain_effort", keys(validEfforts), `{"brain_effort": %s}`},
+		{"agent_provider", "config.schema.json#/properties/agent_provider", []string{"", "claude", "codex"}, `{"agent_provider": %s}`},
+		{"codex_effort", "config.schema.json#/properties/codex_effort", keys(validEfforts), `{"codex_effort": %s}`},
 		{"queue.mode", "config.schema.json#/properties/queue/properties/mode", keys(validQueueModes), `{"queue": {"mode": %s}}`},
 		{"sandbox.git_config", "config.schema.json#/properties/sandbox/properties/git_config", keys(validGitConfigs), `{"sandbox": {"git_config": %s}}`},
 		{"triggers match", "config.schema.json#/properties/triggers/items/oneOf/1/properties/match", matches, `{"triggers": [{"text": "@c", "match": %s}]}`},

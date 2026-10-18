@@ -200,6 +200,8 @@ type brainSettings struct {
 	name            string
 	manifest        BrainManifest
 	claudePath      string
+	provider        string
+	codexPath       string
 	model           string
 	effort          string
 	disallowedTools []string
@@ -250,6 +252,9 @@ type BrainHooks struct {
 	// ExtraArgs adds CLI arguments to a brain's runs (the site builder's
 	// plugin and MCP server, for brains allowed to build the site).
 	ExtraArgs func(brainID string) []string
+	// CodexSetup supplies the site builder's instructions and MCP settings
+	// using Codex's format; credentials travel in the environment, not argv.
+	CodexSetup func(brainID string) (args, env []string, prompt string, err error)
 	// RunEnv adds variables to one run's environment (the brain API's
 	// address and a token for the run), and returns what to call once the
 	// run is over.
@@ -303,7 +308,7 @@ var (
 	errBrainDropped     = errors.New("dropped before it ran")
 	errBrainRetired     = errors.New("brain was removed")
 	errQueueFull        = errors.New("brain queue is full")
-	errNoResult         = errors.New("no result from claude (empty output)")
+	errNoResult         = errors.New("no result from the agent (empty output)")
 	// errRunTimedOut is a run that took longer than run_timeout_minutes.
 	errRunTimedOut = errors.New("the run took too long and was stopped")
 	// errSandboxUnavailable is what the chat sees. The cause goes to the log
@@ -1405,18 +1410,36 @@ func readBrainFile(dir, name string) ([]byte, error) {
 	return readAtMost(f)
 }
 
-// invoke runs the Claude CLI once for m.
+// invoke runs the selected CLI once for m.
 func (br *Brain) invoke(run *brainRun, ctx context.Context, s *brainSettings, m Inbound) RunResult {
 	prompt := br.buildPrompt(s, m)
 
 	mcpConfig, settings := "", ""
-	if !s.inheritUser {
+	if s.provider != "codex" && !s.inheritUser {
 		mcpConfig = mcpConfigOf(br.id, br.workDir)
 		settings = excludeInstructionsAbove(br.workDir)
 	}
 	args := claudeArgs(s, mcpConfig, settings)
-	if br.hooks != nil && br.hooks.ExtraArgs != nil {
-		args = withArgsBeforePrint(args, br.hooks.ExtraArgs(br.id))
+	if s.provider == "codex" {
+		if err := validateCodexTools(s.disallowedTools); err != nil {
+			return RunResult{Err: err}
+		}
+		args = codexArgs(s, br.workDir, br.sandbox != nil && br.sandbox.Enabled())
+		prompt = strings.ReplaceAll(prompt, askUserQuestionNote, "If you need clarification, ask in your final reply and end the turn. The answer arrives as a new message.")
+	}
+	var providerEnv []string
+	if s.provider == "codex" && br.hooks != nil && br.hooks.CodexSetup != nil {
+		extra, env, instructions, err := br.hooks.CodexSetup(br.id)
+		if err != nil {
+			return RunResult{Err: err}
+		}
+		args = withArgsBeforePrint(args, extra)
+		providerEnv = env
+		prompt = instructions + prompt
+	}
+	if s.provider != "codex" && br.hooks != nil && br.hooks.ExtraArgs != nil {
+		extra := br.hooks.ExtraArgs(br.id)
+		args = withArgsBeforePrint(args, extra)
 	}
 
 	// Wrap the spawn in sandbox-exec so prompt injection in an incoming message
@@ -1426,8 +1449,13 @@ func (br *Brain) invoke(run *brainRun, ctx context.Context, s *brainSettings, m 
 	// why a sandbox that cannot be set up refuses the run instead of spawning
 	// without it: the fallback would quietly drop the only barrier left.
 	binary := s.claudePath
+	if s.provider == "codex" {
+		binary = s.codexPath
+	}
+	agentBinary := binary
 	finalArgs := args
 	extraEnv := append([]string{"FRIDOLIN_BRAIN_ID=" + br.id}, dataEnv(s)...)
+	extraEnv = append(extraEnv, providerEnv...)
 	extraEnv = append(extraEnv, calendarEnv(br.id, s.manifest, s.credsDir)...)
 	extraEnv = append(extraEnv, plaudOptOut...)
 	if s.toolsDir != "" {
@@ -1449,7 +1477,7 @@ func (br *Brain) invoke(run *brainRun, ctx context.Context, s *brainSettings, m 
 		defer done()
 		extraEnv = append(extraEnv, env...)
 	}
-	if br.sandbox != nil && br.sandbox.Enabled() {
+	if s.provider == "codex" || (br.sandbox != nil && br.sandbox.Enabled()) {
 		// The brain's own Claude Code config dir, TMPDIR and caches, the
 		// only places outside its folder and inbox the profile lets it
 		// write, made before the profile pins them. With a config dir of
@@ -1458,14 +1486,17 @@ func (br *Brain) invoke(run *brainRun, ctx context.Context, s *brainSettings, m 
 		// CLAUDE_CODE_OAUTH_TOKEN or ANTHROPIC_API_KEY from the bridge's
 		// environment.
 		stateEnv, err := prepareBrainState(s.dataDir, s.mediaDir, br.id, s.inheritUser)
-		if err == nil {
-			binary, finalArgs, err = br.sandbox.Command(br.id, s.claudePath, args)
+		if err == nil && br.sandbox != nil && br.sandbox.Enabled() {
+			binary, finalArgs, err = br.sandbox.Command(br.id, agentBinary, args)
 		}
 		if err != nil {
 			log.Printf("brain %s: sandbox unavailable, refusing to run: %v", br.id, err)
 			return RunResult{Err: errSandboxUnavailable}
 		}
 		extraEnv = append(extraEnv, stateEnv...)
+		if s.provider == "codex" {
+			extraEnv = append(extraEnv, "CODEX_HOME="+brainStateOf(s.dataDir, br.id).codex)
+		}
 		// The profile denies writes to the CLI's own install, so its
 		// auto-updater could download a new version on every run and never
 		// switch to it. This replaces the bridge's own value.
@@ -1473,7 +1504,11 @@ func (br *Brain) invoke(run *brainRun, ctx context.Context, s *brainSettings, m 
 	}
 	// Only the variables on childEnvAllowlist: anyone who may message the
 	// brain can ask it to print its environment.
-	env := childEnv(claudeChild, s.envPassthrough, extraEnv...)
+	scope := claudeChild
+	if s.provider == "codex" {
+		scope = codexChild
+	}
+	env := childEnv(scope, s.envPassthrough, extraEnv...)
 
 	// Only once the sandbox is settled: a refused run starts no process.
 	br.ensureViewer(s)
@@ -1508,7 +1543,7 @@ func (br *Brain) invoke(run *brainRun, ctx context.Context, s *brainSettings, m 
 	cmd.WaitDelay = runWaitDelay
 
 	if err := cmd.Start(); err != nil {
-		return RunResult{Err: fmt.Errorf("starting claude: %w", err)}
+		return RunResult{Err: fmt.Errorf("starting %s: %w", agentName(s.provider), err)}
 	}
 	br.setRunPID(run, cmd.Process.Pid)
 	// Removed once Wait has returned and the run is over; a bridge that
@@ -1549,7 +1584,7 @@ func (br *Brain) invoke(run *brainRun, ctx context.Context, s *brainSettings, m 
 				parseDone <- RunResult{Err: errRunPanicked}
 			}
 		}()
-		parseDone <- br.readStream(m, stdout, runHeading(m, s, cmd.Process.Pid), func() { resultOnce.Do(func() { close(resultSeen) }) })
+		parseDone <- br.readAgentStream(m, stdout, runHeading(m, s, cmd.Process.Pid), func() { resultOnce.Do(func() { close(resultSeen) }) }, s.provider)
 	}()
 
 	notice := time.NewTimer(workingNoticeAfter)
@@ -1578,7 +1613,7 @@ func (br *Brain) invoke(run *brainRun, ctx context.Context, s *brainSettings, m 
 			notice.Stop()
 		case <-grace:
 			grace = nil
-			log.Printf("brain %s: claude's output was still open %v after its result; stopping what is left of the run", br.id, postResultGrace)
+			log.Printf("brain %s: %s's output was still open %v after its result; stopping what is left of the run", br.id, agentName(s.provider), postResultGrace)
 			if err := killProcessGroup(cmd.Process.Pid); err != nil {
 				log.Printf("brain %s: failed to kill process group %d: %v", br.id, cmd.Process.Pid, err)
 			}
@@ -1599,7 +1634,7 @@ func (br *Brain) invoke(run *brainRun, ctx context.Context, s *brainSettings, m 
 			case <-exited:
 			case <-time.After(5 * time.Second):
 				if err := killProcessGroup(cmd.Process.Pid); err == nil {
-					log.Printf("brain %s: killed claude process group %d", br.id, cmd.Process.Pid)
+					log.Printf("brain %s: killed %s process group %d", br.id, agentName(s.provider), cmd.Process.Pid)
 				}
 			}
 		}()
@@ -1634,7 +1669,7 @@ func (br *Brain) invoke(run *brainRun, ctx context.Context, s *brainSettings, m 
 		// Without a result, what the CLI wrote to stderr is the only
 		// account of what went wrong.
 		if errors.Is(res.Err, errNoResult) {
-			return RunResult{Err: fmt.Errorf("claude exited: %w — stderr: %s", waitErr, tail(stderr, 500))}
+			return RunResult{Err: fmt.Errorf("%s exited: %w — stderr: %s", agentName(s.provider), waitErr, tail(stderr, 500))}
 		}
 	}
 	return res
@@ -1874,6 +1909,10 @@ func (br *Brain) rotateStreamLog() {
 // the activity log, calling onResult, when set, as soon as the result is
 // in, while the stream may still go on.
 func (br *Brain) readStream(m Inbound, reader io.Reader, heading string, onResult func()) RunResult {
+	return br.readAgentStream(m, reader, heading, onResult, "claude")
+}
+
+func (br *Brain) readAgentStream(m Inbound, reader io.Reader, heading string, onResult func(), provider string) RunResult {
 	scanner := bufio.NewScanner(reader)
 	scanner.Buffer(make([]byte, 4*1024*1024), 4*1024*1024)
 
@@ -1899,6 +1938,7 @@ func (br *Brain) readStream(m Inbound, reader io.Reader, heading string, onResul
 
 	var finalResult, lastText string
 	asked := false
+	var codex codexStream
 
 	for scanner.Scan() {
 		line := strings.TrimSpace(scanner.Text())
@@ -1907,7 +1947,9 @@ func (br *Brain) readStream(m Inbound, reader io.Reader, heading string, onResul
 		}
 
 		var event streamEvent
-		if err := json.Unmarshal([]byte(line), &event); err != nil {
+		if provider == "codex" {
+			event = codex.event([]byte(line))
+		} else if err := json.Unmarshal([]byte(line), &event); err != nil {
 			continue
 		}
 
@@ -1952,7 +1994,7 @@ func (br *Brain) readStream(m Inbound, reader io.Reader, heading string, onResul
 					errMsg = "(claude exited with an error but no message)"
 				}
 				writeLog("❌ Error: " + errMsg)
-				return RunResult{Err: &cliError{msg: errMsg}, Asked: asked}
+				return RunResult{Err: &cliError{msg: errMsg, provider: provider}, Asked: asked}
 			}
 			finalResult = event.Result
 			writeLog("✅ Result: " + truncate(finalResult, 2000))
@@ -1966,7 +2008,7 @@ func (br *Brain) readStream(m Inbound, reader io.Reader, heading string, onResul
 		if errors.Is(err, os.ErrClosed) {
 			return RunResult{Err: errBrainInterrupted}
 		}
-		return RunResult{Err: fmt.Errorf("reading claude output: %w", err)}
+		return RunResult{Err: fmt.Errorf("reading %s output: %w", agentName(provider), err)}
 	}
 
 	// A -p run is stateless and nobody answers its AskUserQuestion, so the
@@ -1974,6 +2016,9 @@ func (br *Brain) readStream(m Inbound, reader io.Reader, heading string, onResul
 	// Monday"), which the chat must get too. A run that only asked has said
 	// what it had to say.
 	if finalResult == "" && !asked {
+		if provider == "codex" && codex.err != "" {
+			return RunResult{Err: &cliError{msg: codex.err, provider: "codex"}}
+		}
 		return RunResult{Err: errNoResult}
 	}
 
@@ -2353,10 +2398,15 @@ func settingsFor(cfg *Config, sp BrainSpec) *brainSettings {
 	if m.DisallowedTools != nil {
 		tools = *m.DisallowedTools
 	}
+	if cfg.AgentProvider == "codex" {
+		model, effort = cfg.CodexModel, cfg.CodexEffort
+	}
 	return &brainSettings{
 		name:            m.Name,
 		manifest:        m,
 		claudePath:      cfg.ClaudePath,
+		provider:        cfg.AgentProvider,
+		codexPath:       cfg.CodexPath,
 		model:           model,
 		effort:          effort,
 		disallowedTools: append([]string(nil), tools...),

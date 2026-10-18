@@ -51,3 +51,10 @@ test('a failed backup says whose it was', async (t) => {
   });
   assert.ok(root.textContent.includes('Notes: quota exceeded'), root.textContent);
 });
+
+test('the CLI card follows the selected mode', async (t) => {
+  const root = await openOverview(t, { agent_provider: 'codex', codex: { found: true, path: '/bin/codex', version: 'codex-cli 0.163.0' } });
+  assert.ok(root.textContent.includes('Codex CLI'));
+  assert.ok(root.textContent.includes('codex-cli 0.163.0'));
+  assert.ok(!root.textContent.includes('Claude CLI'));
+});

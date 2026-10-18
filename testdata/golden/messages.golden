@@ -44,6 +44,10 @@ questionPrefix
 	❓ Which day?
 chatErrNotSignedIn
 	🔑 Claude is not signed in on the bridge machine. Run `claude` there once and log in, then send your message again.
+chatErrCodexNotSignedIn
+	🔑 Codex is not signed in for this brain. See the bridge dashboard for its sign-in command, then send your message again.
+chatErrCodexLimit
+	⏳ Codex's usage limit is reached for now. Try again later.
 chatErrLimit
 	⏳ Claude's usage limit is reached for now. Try again later.
 chatErrTimeout
@@ -54,6 +58,8 @@ chatErrSandbox
 	❌ The sandbox could not be set up.
 chatErrClaude
 	❌ Claude: Credit balance is too low
+chatErrCodex
+	❌ Codex: Something failed
 buildChatError
 	❌ brain queue is full
 viewOnceNotice

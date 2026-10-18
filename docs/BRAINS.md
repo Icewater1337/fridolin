@@ -76,7 +76,7 @@ restart.
 | `routing.groups` | Group JIDs this brain answers. The group must also be allowed in the global settings. |
 | `routing.answer_files` | In this brain's groups, a file someone sends (photo, document, voice note, video) addresses the bridge, which answers it. Default `true`; `false` makes it chatter: the brain reads its caption without answering, and the file is not downloaded. The trigger, an @-mention or a reply to the bridge still address it. |
 | `routing.answer_forwards` | The same for a forwarded message. Default `true`. |
-| `model`, `effort` | Override the global `brain_model` / `brain_effort`. |
+| `model`, `effort` | Override the global `brain_model` / `brain_effort` in Claude mode. Codex uses the separate global `codex_model` / `codex_effort`. |
 | `disallowed_tools` | Override the global list; omit to inherit, `[]` to allow every tool. |
 | `prompt_file` | The prompt sent ahead of every message, relative to the folder. It must stay inside the folder, and be a file rather than a symlink (see [Files the bridge reads and writes](#files-the-bridge-reads-and-writes)). |
 | `reply_chat` | Where answers go for files handed in through `/ingest`. The files are handled by this brain even when the chat belongs to another one, so a brain without chats can answer in your DM. `!stop` and `!reset` in that chat also stop this brain's work on them, and `!reset` starts the chat afresh for this brain too. Default: the first allowed number for the brain that gets DMs (the DM brain, or the fallback brain when none handles DMs), else the brain's first group. |
@@ -342,3 +342,14 @@ curl -X POST "$FRIDOLIN_API/send" \
   -H 'Content-Type: application/json' \
   -d '{"jid":"15551234567@s.whatsapp.net","text":"The report is ready"}'
 ```
+
+### Codex mode
+
+[Settings → AI mode](CONFIGURATION.md#ai-mode) selects the provider for new
+runs of every brain. Both providers read this brain's prompt and chat
+history. Codex keeps a separate login and state in
+`<data_dir>/brains/<id>/codex`; sign-in instructions are in the configuration
+guide. Claude-specific model overrides and user plugins do not transfer
+to Codex. Blocking `WebFetch` or `WebSearch` disables Codex's web tool;
+other blocked-tool names refuse Codex runs because they have no safe
+equivalent.

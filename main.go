@@ -317,7 +317,11 @@ func runCmd(args []string) {
 	if err != nil {
 		log.Fatalf("creating bridge: %v", err)
 	}
-	go logClaudeCLI(cfg.ClaudePath, cfg.ChildEnvPassthrough)
+	if cfg.AgentProvider == "codex" {
+		go func() { log.Printf("Codex CLI: %+v", codexInfo(cfg.CodexPath, cfg.ChildEnvPassthrough)) }()
+	} else {
+		go logClaudeCLI(cfg.ClaudePath, cfg.ChildEnvPassthrough)
+	}
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -605,7 +609,12 @@ func writeCheck(w io.Writer, o checkOptions) error {
 // checkReport writes what check says of cfg, the config loaded from path.
 func checkReport(w io.Writer, path string, cfg *Config, o checkOptions) error {
 	fmt.Fprintf(w, "Config OK: %s\n", path)
-	fmt.Fprintf(w, "  claude:    %s\n", claudeSummary(cfg.ClaudePath, cfg.ChildEnvPassthrough))
+	if cfg.AgentProvider == "codex" {
+		st := codexInfo(cfg.CodexPath, cfg.ChildEnvPassthrough)
+		fmt.Fprintf(w, "  codex:     %s (found: %t, %s), model %s, effort %s\n", st.Path, st.Found, st.Version, cfg.CodexModel, cfg.CodexEffort)
+	} else {
+		fmt.Fprintf(w, "  claude:    %s\n", claudeSummary(cfg.ClaudePath, cfg.ChildEnvPassthrough))
+	}
 	fmt.Fprintf(w, "  data dir:  %s\n", cfg.DataDir)
 	fmt.Fprintf(w, "  dashboard: http://%s/\n", cfg.HTTPListen)
 	fmt.Fprintf(w, "  DM allow:  %s\n", dmAllowSummary(cfg))

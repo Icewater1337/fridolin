@@ -1,5 +1,6 @@
 {
   "_comment": "A config with every setting this version reads, for the tests. Synthetic values only.",
+  "agent_provider": "claude",
   "allow_any_dm": false,
   "allowed_groups": [
     "120363000000000000@g.us",
@@ -50,6 +51,9 @@
     "GROQ_API_KEY"
   ],
   "claude_path": "<HOME>/bin/claude",
+  "codex_effort": "high",
+  "codex_model": "gpt-6.1-sol",
+  "codex_path": "codex",
   "dangerously_skip_permissions": true,
   "dashboard": {
     "require_token": true

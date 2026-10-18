@@ -8,7 +8,8 @@ whenever a step needs their decision or their phone.
 ## What this is
 
 A Go program that links a WhatsApp account (as a companion device, like
-WhatsApp Web) to Claude Code. Each incoming message runs `claude -p` inside a
+WhatsApp Web) to Claude Code or Codex. Each incoming message runs `claude -p` (default)
+or `codex exec` inside a
 *brain*: a folder with its own prompt, memory and history. Everything after
 installation — pairing WhatsApp, adding brains, allowing chats, Google Drive
 backups — is done in a local web dashboard.
@@ -30,6 +31,11 @@ The person's data lives in brain folders they choose and in
      token as `CLAUDE_CODE_OAUTH_TOKEN` to the service's environment
      (docs/CONFIGURATION.md, "Where to set them"). Never ask for the token
      in chat.
+   - Optional, for Codex mode: Codex CLI 0.163.0+, with a separate sign-in
+     for each brain under `<data_dir>/brains/<id>/codex` (see
+     docs/CONFIGURATION.md, "AI mode"). Settings → AI mode selects it;
+     its defaults are `gpt-6.1-sol` and high effort. Never print Codex
+     credentials or disable the sandbox to make a login work.
    - Optional, for backups: rclone (`brew install rclone` or
      https://rclone.org/install/).
    - Optional, for transcribing voice notes: python3 and ffmpeg (`brew

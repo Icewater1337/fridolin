@@ -55,6 +55,14 @@ type Config struct {
 	// ClaudePath is the path to the Claude Code CLI binary ("claude" uses PATH).
 	ClaudePath string `json:"claude_path"`
 
+	// AgentProvider selects the CLI for new runs; omission keeps Claude.
+	AgentProvider string `json:"agent_provider,omitempty"`
+	// Codex settings are separate so changing mode preserves Claude models,
+	// including model/effort overrides in brain.json.
+	CodexPath   string `json:"codex_path,omitempty"`
+	CodexModel  string `json:"codex_model,omitempty"`
+	CodexEffort string `json:"codex_effort,omitempty"`
+
 	// DataDir holds runtime state: SQLite DB, downloaded media, dashboard
 	// token, backup state.
 	DataDir string `json:"data_dir"`
@@ -647,6 +655,19 @@ func effective(file *Config) (*Config, error) {
 		cfg.ClaudePath = "claude"
 	}
 	cfg.ClaudePath = expandHome(cfg.ClaudePath, home)
+	if cfg.AgentProvider == "" {
+		cfg.AgentProvider = "claude"
+	}
+	if cfg.CodexPath == "" {
+		cfg.CodexPath = "codex"
+	}
+	cfg.CodexPath = expandHome(cfg.CodexPath, home)
+	if cfg.CodexModel == "" {
+		cfg.CodexModel = defaultCodexModel
+	}
+	if cfg.CodexEffort == "" {
+		cfg.CodexEffort = "high"
+	}
 	cfg.DataDir, _ = resolveDataDir(cfg.DataDir, home)
 	if cfg.DBPath == "" {
 		cfg.DBPath = filepath.Join(cfg.DataDir, "bridge.db")
@@ -872,6 +893,12 @@ var validGitConfigs = map[string]bool{"read": true, "deny": true}
 // another out instead of stopping them all. Zero brains is fine: a fresh
 // install adds its first brain from the dashboard.
 func (c *Config) validate() error {
+	if c.AgentProvider != "claude" && c.AgentProvider != "codex" {
+		return fmt.Errorf("agent_provider must be claude or codex, not %q", c.AgentProvider)
+	}
+	if !validEfforts[c.CodexEffort] {
+		return fmt.Errorf("codex_effort %q must be one of low, medium, high, xhigh, max", c.CodexEffort)
+	}
 	if !validEfforts[c.BrainEffort] {
 		return fmt.Errorf("brain_effort %q must be one of low, medium, high, xhigh, max", c.BrainEffort)
 	}

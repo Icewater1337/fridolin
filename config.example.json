@@ -8,6 +8,10 @@
   "group_members": {"120363000000000000@g.us": ["15551234567", "15559876543"]},
   "triggers": ["@claude", {"text": "@c", "match": "start"}],
 
+  "agent_provider": "claude",
+  "codex_path": "codex",
+  "codex_model": "gpt-6.1-sol",
+  "codex_effort": "high",
   "claude_path": "claude",
   "data_dir": "~/.fridolin",
 

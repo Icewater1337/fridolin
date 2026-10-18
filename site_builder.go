@@ -28,6 +28,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -127,6 +128,41 @@ func (m *SiteManager) BuilderArgs(brainID string) []string {
 	}
 	base := m.builderBase(brainID)
 	return []string{"--plugin-dir", filepath.Join(base, "plugin"), "--mcp-config", filepath.Join(base, "mcp.json")}
+}
+
+// CodexBuilder exposes the same site tools through Codex's MCP configuration.
+// Its instructions come from the embedded, reviewed skills; no personal
+// Claude plugins or user MCP configuration is carried into Codex.
+func (m *SiteManager) CodexBuilder(brainID string) ([]string, []string, string, error) {
+	if !m.IsBuilder(brainID) {
+		return nil, nil, "", nil
+	}
+	if m.hooks.executable == nil || m.hooks.bridgeURL == nil {
+		return nil, nil, "", errors.New("site builder is missing its bridge connection")
+	}
+	if err := m.ensureBuilder(m.baseContext(), brainID); err != nil {
+		return nil, nil, "", err
+	}
+	exe, err := m.hooks.executable()
+	if err != nil {
+		return nil, nil, "", err
+	}
+	args := []string{
+		"-c", "mcp_servers.fridolin-site.command=" + strconv.Quote(exe),
+		"-c", `mcp_servers.fridolin-site.args=["mcp-site"]`,
+		"-c", `mcp_servers.fridolin-site.env_vars=["FRIDOLIN_BUILDER_URL","FRIDOLIN_BUILDER_TOKEN"]`,
+	}
+	env := []string{"FRIDOLIN_BUILDER_URL=" + m.hooks.bridgeURL(), "FRIDOLIN_BUILDER_TOKEN=" + m.builderToken(brainID)}
+	var prompt strings.Builder
+	for _, skill := range []string{"fridolin-site-platform", "site-builder", "site-modules"} {
+		data, err := siteShellFS.ReadFile("site/builder/skills/" + skill + "/SKILL.md")
+		if err != nil {
+			return nil, nil, "", err
+		}
+		prompt.Write(data)
+		prompt.WriteString("\n\n")
+	}
+	return args, env, prompt.String(), nil
 }
 
 // ensureBuilder writes the plugin and MCP config and, the first time, the
