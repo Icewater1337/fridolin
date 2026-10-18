@@ -229,6 +229,9 @@ for compatibility.
 - A build chat on the Site's Build page shows that Claude's usage limit is
   reached, that its message is queued, or that the queue is full. It left
   out every notice that starts with ⏳, to leave out "Working on it".
+- An HTTP server that fails after the bridge started stops the bridge
+  (exit 1, which the service manager restarts). Before, the bridge ran on
+  without the dashboard, `/send` and `/ingest`, and looked healthy.
 - "Connect again" on a Plaud login that Plaud refuses signs that login
   out first, giving the sign-out up to 30 seconds. Before, it took the
   CLI's "Already logged in" for a new sign-in and showed Connected until

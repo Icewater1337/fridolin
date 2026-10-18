@@ -73,6 +73,11 @@ type Bridge struct {
 	lids func() store.LIDStore
 
 	httpSrv *http.Server
+	// loops are the goroutines Start leaves running past its return,
+	// the WhatsApp connect loop: Stop waits for them.
+	loops sync.WaitGroup
+	// stopOnce makes Stop run once, whoever calls it how often.
+	stopOnce sync.Once
 
 	// addMu makes adding a brain one step at a time (apiAddBrain).
 	addMu sync.Mutex
@@ -280,21 +285,35 @@ func NewBridge(cfgs *ConfigStore, opts BridgeOptions) (_ *Bridge, err error) {
 	return b, nil
 }
 
+// listenHTTP binds the HTTP server's address, a variable so that a test
+// can hand Start a listener that fails.
+var listenHTTP = net.Listen
+
 // Start serves the dashboard, connects to WhatsApp and blocks until ctx is
-// cancelled. The HTTP port is bound first and failing to bind is fatal: an
-// already-running bridge holds it, and two bridges must never share one
-// WhatsApp session.
+// cancelled, or until the HTTP server fails: it returns that error then,
+// and the caller stops the bridge. The HTTP port is bound first and
+// failing to bind is fatal: an already-running bridge holds it, and two
+// bridges must never share one WhatsApp session.
 func (b *Bridge) Start(ctx context.Context) error {
 	cfg := b.cfgs.Get()
+	run, fail := context.WithCancelCause(ctx)
+	defer fail(nil)
 	if b.listen != "" {
-		ln, err := net.Listen("tcp", b.listen)
+		ln, err := listenHTTP("tcp", b.listen)
 		if err != nil {
 			return fmt.Errorf("listening on %s (is another bridge running?): %w", b.listen, err)
 		}
 		b.httpSrv = newHTTPServer(b.newHTTPHandler(b.listen))
+		// Requests end with the bridge: one that waits for you or for
+		// Google (a folder picker, a sign-in) gives up once the bridge
+		// stops, rather than hold up Stop.
+		b.httpSrv.BaseContext = func(net.Listener) context.Context { return run }
 		go func() {
-			if err := b.httpSrv.Serve(ln); err != nil && err != http.ErrServerClosed {
-				log.Printf("HTTP server error: %v", err)
+			// Serve ends with ErrServerClosed when Stop shuts it down. Any
+			// other end leaves /send and the dashboard dead while the
+			// bridge would run on and look healthy, so it stops instead.
+			if err := b.httpSrv.Serve(ln); !errors.Is(err, http.ErrServerClosed) {
+				fail(fmt.Errorf("HTTP server: %w", err))
 			}
 		}()
 		if !cfg.Dashboard.Disabled {
@@ -302,17 +321,20 @@ func (b *Bridge) Start(ctx context.Context) error {
 		}
 	}
 
-	go b.connectLoop(ctx)
+	b.loops.Go(func() { b.connectLoop(run) })
 	// Waited for: it queues alerts in the outbox, which Stop closes.
 	var wg sync.WaitGroup
-	wg.Go(func() { b.watchRequiredFiles(ctx, requiredFilesEvery) })
-	b.backup.Start(ctx)
-	b.plaud.Start(ctx)
-	b.site.Start(ctx)
+	wg.Go(func() { b.watchRequiredFiles(run, requiredFilesEvery) })
+	b.backup.Start(run)
+	b.plaud.Start(run)
+	b.site.Start(run)
 
 	log.Println("Bridge started. Waiting for messages…")
-	<-ctx.Done()
+	<-run.Done()
 	wg.Wait()
+	if ctx.Err() == nil {
+		return context.Cause(run)
+	}
 	return nil
 }
 
@@ -344,7 +366,7 @@ const (
 // Once connected, whatsmeow reconnects by itself. An error that another
 // try cannot fix ends it: the dashboard's state says what to do.
 func (b *Bridge) connectLoop(ctx context.Context) {
-	for delay := connectFirstRetry; ; delay = min(2*delay, connectMaxRetry) {
+	for delay := connectFirstRetry; ctx.Err() == nil; delay = min(2*delay, connectMaxRetry) {
 		err := b.wa.Connect()
 		if err == nil {
 			return
@@ -362,13 +384,13 @@ func (b *Bridge) connectLoop(ctx context.Context) {
 	}
 }
 
-// Stop shuts everything down in dependency order.
-func (b *Bridge) Stop() {
-	if b.httpSrv != nil {
-		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		_ = b.httpSrv.Shutdown(ctx)
-		cancel()
-	}
+// Stop shuts everything down in dependency order, once: a restart and a
+// signal that come together, or a test and its cleanup, stop the bridge
+// one time between them.
+func (b *Bridge) Stop() { b.stopOnce.Do(b.stop) }
+
+func (b *Bridge) stop() {
+	b.stopHTTP()
 	b.backup.Stop()
 	b.plaud.Stop()
 	b.site.Stop()
@@ -379,11 +401,57 @@ func (b *Bridge) Stop() {
 	b.outbox.Stop()
 	b.otp.stop()
 	b.wa.Disconnect()
+	// The connect loop ends with Start's context, unless it is connecting
+	// still, which Disconnect cuts short.
+	if !waitWithin(&b.loops, connectStopWait) {
+		log.Printf("WhatsApp: still connecting %v after the disconnect; stopping without waiting for it", connectStopWait)
+	}
 	if err := b.store.Close(); err != nil {
 		log.Printf("closing store: %v", err)
 	}
 	b.lock.release()
 	log.Println("Bridge stopped.")
+}
+
+// httpStopWait is how long Stop waits for the requests in flight to end
+// before it cuts them off, a variable so tests need not wait for it.
+var httpStopWait = 5 * time.Second
+
+// connectStopWait is how long Stop waits for a WhatsApp connect under way.
+const connectStopWait = 5 * time.Second
+
+// stopHTTP stops the HTTP server, if Start began one: it takes no more
+// requests, and those in flight get httpStopWait to end.
+func (b *Bridge) stopHTTP() {
+	if b.httpSrv == nil {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), httpStopWait)
+	defer cancel()
+	if err := b.httpSrv.Shutdown(ctx); err != nil {
+		// Shutdown leaves the connections it did not see end open: Close
+		// ends them, and the handlers still running find out on their
+		// next write.
+		log.Printf("HTTP server: requests still running %v after the stop began (%v); cutting them off", httpStopWait, err)
+		_ = b.httpSrv.Close()
+	}
+}
+
+// waitWithin waits for wg for at most d, and reports whether it ended.
+func waitWithin(wg *sync.WaitGroup, d time.Duration) bool {
+	done := make(chan struct{})
+	go func() {
+		wg.Wait()
+		close(done)
+	}()
+	t := time.NewTimer(d)
+	defer t.Stop()
+	select {
+	case <-done:
+		return true
+	case <-t.C:
+		return false
+	}
 }
 
 // handleChange applies an edit or a deletion of a WhatsApp message: to
