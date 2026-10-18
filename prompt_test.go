@@ -321,3 +321,26 @@ func TestPromptSaysWhatChatItIs(t *testing.T) {
 		})
 	}
 }
+
+// The person a run answers is named as the history names them, from the
+// brain's identity map, with the number they wrote from; someone the map
+// does not know is their number.
+func TestNewMessageNamesTheSender(t *testing.T) {
+	br, home := folderBrain(t)
+	table := "| WhatsApp Number | Person | Notes |\n| --- | --- | --- |\n| +15551234567 | Alex | |\n"
+	if err := os.WriteFile(filepath.Join(home, "a", identityMapFile), []byte(table), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cases := []struct{ sender, want string }{
+		{"15551234567", "Alex (15551234567) says: hello"},
+		{"15559876543", "15559876543 says: hello"},
+	}
+	for _, c := range cases {
+		t.Run(c.sender, func(t *testing.T) {
+			m := Inbound{JID: c.sender + "@s.whatsapp.net", Sender: c.sender, Text: "hello"}
+			if got := br.buildPrompt(br.settings.Load(), m); !strings.Contains(got, "<new_message>\n"+c.want+"\n</new_message>") {
+				t.Errorf("prompt:\n%s\nwant the new message %q", got, c.want)
+			}
+		})
+	}
+}

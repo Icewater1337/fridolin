@@ -12,5 +12,5 @@ It is now Sun 2026-10-18 09:31 CEST (UTC+02:00). This chat is a direct chat on W
 Nobody can answer AskUserQuestion while you work: a question you ask with it goes to the chat at once, with its options, and the answer comes as a new message. Your final reply is sent as well, so after asking, end your turn without repeating the question.
 
 <new_message>
-15551234567 says: Tuesday at 3?
+Alex (15551234567) says: Tuesday at 3?
 </new_message>

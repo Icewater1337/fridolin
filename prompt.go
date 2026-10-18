@@ -102,7 +102,7 @@ func renderPrompt(in promptInput) string {
 
 	sb.WriteString(askUserQuestionNote + "\n\n")
 	sb.WriteString("<new_message>\n")
-	fmt.Fprintf(&sb, "%s says: %s\n", m.Sender, m.textWithQuote())
+	fmt.Fprintf(&sb, "%s says: %s\n", in.name(m.Sender), m.textWithQuote())
 	sb.WriteString("</new_message>")
 	return sb.String()
 }
@@ -135,16 +135,21 @@ func (in promptInput) line(e historyEntry) string {
 }
 
 // from is who wrote the history entry e, as the prompt names them: the
-// brain itself, a name from the identity map with the raw identifier, or
-// that alone.
+// brain itself, or the sender as name gives them.
 func (in promptInput) from(e historyEntry) string {
 	if e.Type == historyOut {
 		return outboundSender(in.BrainID, e)
 	}
-	if name, ok := in.Names[identityKey(e.From)]; ok {
-		return fmt.Sprintf("%s (%s)", name, e.From)
+	return in.name(e.From)
+}
+
+// name is sender with the name the identity map gives them, then the raw
+// identifier in parentheses, or that alone.
+func (in promptInput) name(sender string) string {
+	if name, ok := in.Names[identityKey(sender)]; ok {
+		return fmt.Sprintf("%s (%s)", name, sender)
 	}
-	return e.From
+	return sender
 }
 
 // outboundSender is who the chat history shows as the sender of entry, an

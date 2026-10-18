@@ -281,7 +281,8 @@ func TestGroupSenderAndQuoteByNumber(t *testing.T) {
 	evt.Info.AddressingMode = types.AddressingModeLID
 	wa.handleMessage(evt)
 	waitFor(t, 10*time.Second, "the answer", func() bool { return len(tb.sentTo(testGroup)) > 0 })
-	if got := tb.sentTo(testGroup)[0]; !strings.Contains(got, `15551234567 says: [reply to 15551234567: "I'm in"]`) {
+	// The new message names its sender from the map too.
+	if got := tb.sentTo(testGroup)[0]; !strings.Contains(got, `Alex (15551234567) says: [reply to 15551234567: "I'm in"]`) {
 		t.Errorf("answered %q, want the sender and the quote's author by number", got)
 	}
 	h := readHistory(t, br)

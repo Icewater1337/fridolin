@@ -1585,9 +1585,7 @@ func (br *Brain) buildPrompt(s *brainSettings, m Inbound) string {
 		limit = groupHistoryWindow
 	}
 	in.History, in.Since = br.historyBefore(m, limit)
-	if len(in.History) > 0 {
-		in.Names = br.identities()
-	}
+	in.Names = br.identities()
 	return renderPrompt(in)
 }
 
