@@ -77,6 +77,7 @@ func OpenConfigStore(cfgPath string) (*ConfigStore, error) {
 	if file.DataDir == "" {
 		warnLegacyDataDir(eff.DataDir)
 	}
+	warnGroupsWithoutMembers(nil, eff)
 	cs := &ConfigStore{path: cfgPath, file: file, startup: eff}
 	cs.eff.Store(eff)
 	cs.etag.Store(etagOf(raw))
@@ -158,6 +159,8 @@ func (cs *ConfigStore) Update(etag string, mutate func(*Config) error) (restart 
 	cs.etag.Store(etagOf(data))
 	subs := append([]func(old, new *Config){}, cs.subs...)
 	cs.mu.Unlock()
+
+	warnGroupsWithoutMembers(old, eff)
 
 	for _, fn := range subs {
 		fn(old, eff)
@@ -360,6 +363,7 @@ var securitySettings = []struct {
 	{"allowed_numbers", func(c *Config) any { return c.AllowedNumbers }},
 	{"allow_any_dm", func(c *Config) any { return fmt.Sprint(c.AllowsAnyDM()) }},
 	{"allowed_groups", func(c *Config) any { return c.AllowedGroups }},
+	{"group_members", func(c *Config) any { return groupMemberPairs(c.GroupMembers) }},
 	{"dangerously_skip_permissions", func(c *Config) any { return fmt.Sprint(c.DangerouslySkipPermissions) }},
 	{"inherit_claude_user_config", func(c *Config) any { return fmt.Sprint(c.InheritClaudeUserConfig) }},
 	{"child_env_passthrough", func(c *Config) any { return c.ChildEnvPassthrough }},

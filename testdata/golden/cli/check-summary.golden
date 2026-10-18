@@ -10,4 +10,5 @@ Config OK: <ROOT>/config.json
   brain drifted        → <HOME>/drifted (dms=false default=false groups=[])
   ! drift <HOME>/drifted: brain.json changed on disk — review and approve it in the dashboard
   ! missing <HOME>/missing: folder not found
+<TIME> config: group 120363000000000000@g.us has no group_members entry: only allowed_numbers can start runs there, and what other members write is not read; an entry of ["*"] for it lets every member in, as before, or list their numbers
 exit 0

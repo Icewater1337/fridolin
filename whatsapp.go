@@ -421,13 +421,13 @@ func (wa *WhatsAppClient) handleMessage(msg *events.Message) {
 	// number. One person is one number and one chat either way: the
 	// allowlist is written in numbers, and the chat's history must not
 	// split in two.
-	sender := msg.Info.Sender
-	if sender.IsEmpty() {
-		sender = msg.Info.Chat
+	src := msg.Info.MessageSource
+	if src.Sender.IsEmpty() {
+		src.Sender = src.Chat
 	}
-	sender = canonicalUser(wa.ctx, wa.lidStore(), sender, msg.Info.SenderAlt)
-	if sender.Server == types.HiddenUserServer {
-		log.Printf("DM: could not resolve LID %s (using LID as fallback)", sender)
+	sender, resolved := wa.senderOf(src)
+	if !resolved {
+		log.Printf("DM: could not resolve %s to a phone number (using it as it is)", sender)
 	}
 
 	if !wa.isAllowed(sender.User) {
@@ -515,7 +515,8 @@ func mediaList(p string) []string {
 	return []string{p}
 }
 
-// handleGroupMessage processes messages from allowed groups.
+// handleGroupMessage processes messages from allowed groups, by the
+// members group_members admits (groupSenderAllowed).
 //
 // A message is "tagged" — and so gets a visible reply — when it addresses
 // the bridge (see addressGroup): a trigger keyword, an @-mention of the
@@ -527,23 +528,38 @@ func (wa *WhatsAppClient) handleGroupMessage(msg *events.Message) {
 	cfg := wa.cfg()
 	groupJID := msg.Info.Chat.String()
 	// In groups that address members by LID, the number is what the
-	// identity map knows them by.
-	senderNumber := canonicalUser(wa.ctx, wa.lidStore(), msg.Info.Sender, msg.Info.SenderAlt).User
-
-	groupName := ""
-	if info, err := wa.cl().GetGroupInfo(context.Background(), msg.Info.Chat); err == nil && info != nil {
-		groupName = info.Name
-	}
+	// identity map and group_members know them by.
+	sender, resolved := wa.senderOf(msg.Info.MessageSource)
+	senderNumber := sender.User
 
 	// Unknown groups are logged and offered on the dashboard: that is how you
-	// find a group's JID to allow it.
-	if !wa.isAllowedGroup(groupJID) {
+	// find a group's JID to allow it. Both checks read the one snapshot cfg:
+	// with a fresh one here, an edit between them could let a message pass
+	// that neither config admits.
+	if !isAllowedGroup(cfg, groupJID) {
+		groupName := wa.groupName(msg.Info.Chat)
 		log.Printf("Group message from %s (%q) by %s: ignored (not in allowed_groups)", groupJID, groupName, senderNumber)
 		if wa.onIgnored != nil {
 			wa.onIgnored("group", groupJID, groupName, senderNumber, msg.Info.PushName)
 		}
 		return
 	}
+	// A member group_members does not admit is not read at all: no run,
+	// no command, no download, no edit, not even a line in the history.
+	// The group is allowed, so it is not offered on the dashboard again.
+	who := groupSender{Number: senderNumber, Resolved: resolved, Server: sender.Server, FromMe: msg.Info.IsFromMe}
+	if !groupSenderAllowed(cfg, groupJID, who) {
+		// A reaction or a sticker would not have been read anyway, and a
+		// busy group sends many: they go to the debug log, as they would
+		// from a member.
+		if kind, _, _ := classify(msg); kind == kindOther {
+			wa.log.Debugf("Group message %s in %s by %s: ignored (not admitted by group_members, and nothing the bridge reads)", msg.Info.ID, groupJID, who.masked())
+			return
+		}
+		log.Printf("Group message in %s by %s: ignored (not admitted by group_members)", groupJID, who.masked())
+		return
+	}
+	groupName := wa.groupName(msg.Info.Chat)
 
 	own := wa.ownMentionJIDs()
 	kind, target, content := classify(msg)
@@ -961,10 +977,10 @@ func (wa *WhatsAppClient) rulesFor(jid string) groupRules {
 	return wa.groupRules(jid)
 }
 
-// isAllowedGroup reports whether the group JID is in allowed_groups.
+// isAllowedGroup reports whether the group JID is in cfg's allowed_groups.
 // Unlike DMs, groups are deny-by-default: an empty list means no groups.
-func (wa *WhatsAppClient) isAllowedGroup(jid string) bool {
-	return slices.Contains(wa.cfg().AllowedGroups, jid)
+func isAllowedGroup(cfg *Config, jid string) bool {
+	return slices.Contains(cfg.AllowedGroups, jid)
 }
 
 // ownMentionJIDs returns every JID form the bridge account may be mentioned as.
@@ -1011,6 +1027,24 @@ func stripMentions(text string, jids []types.JID) string {
 		}
 	}
 	return strings.TrimSpace(text)
+}
+
+// senderOf is who sent src, as canonicalUser has them: by phone number
+// where the message carries it (SenderAlt) or the LID store knows it.
+// resolved is false for a LID nothing maps to a number, whose digits are
+// WhatsApp's internal id and must match no number on a list.
+func (wa *WhatsAppClient) senderOf(src types.MessageSource) (sender types.JID, resolved bool) {
+	sender = canonicalUser(wa.ctx, wa.lidStore(), src.Sender, src.SenderAlt)
+	return sender, sender.Server == types.DefaultUserServer
+}
+
+// groupName is the group's subject as WhatsApp has it, or "" when it
+// cannot be looked up.
+func (wa *WhatsAppClient) groupName(jid types.JID) string {
+	if info, err := wa.cl().GetGroupInfo(context.Background(), jid); err == nil && info != nil {
+		return info.Name
+	}
+	return ""
 }
 
 // lidStore is whatsmeow's map between LIDs and phone numbers, or nil

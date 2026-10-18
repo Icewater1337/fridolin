@@ -606,6 +606,13 @@ func (b *Bridge) apiRevokeChat(w http.ResponseWriter, r *http.Request) {
 			return errNotListed
 		}
 		*list = kept
+		// A group no longer allowed takes its group_members entry along:
+		// one left behind would be refused (validateGroupMembers).
+		if !dm {
+			for _, g := range removed {
+				delete(c.GroupMembers, g)
+			}
+		}
 		return nil
 	})
 	switch {
@@ -1473,7 +1480,9 @@ func (b *Bridge) apiDevInbound(w http.ResponseWriter, r *http.Request) {
 	if req.Sender == "" {
 		req.Sender = normalizeJID(req.JID)
 	}
-	// Apply the same access rules and trigger handling as WhatsApp messages.
+	// Apply the same allow lists and trigger handling as WhatsApp messages,
+	// except group_members: a dev message's sender is whoever the request
+	// names, the group's own digits unless it names one.
 	cfg := b.cfgs.Get()
 	m := Inbound{JID: req.JID, Brain: req.Brain, Sender: req.Sender, Text: req.Text, Media: req.Media, Silent: req.Silent, Source: sourceDev, At: time.Now()}
 	if m.IsGroup() {

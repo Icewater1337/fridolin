@@ -12,6 +12,7 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 	"unicode"
@@ -994,5 +995,295 @@ func TestExtractQuote(t *testing.T) {
 	long := strings.Repeat("é", 150)
 	if q := extractQuote(ctx("15559876543@s.whatsapp.net", long)); q == nil || len(q.Text) > 200+len("…") || !utf8.ValidString(q.Text) {
 		t.Errorf("a long quote is %q, want it cut to 200 bytes", q)
+	}
+}
+
+// bridgeAccount is the bridge's own WhatsApp account in the group tests.
+var bridgeAccount = types.NewJID("5550100", types.DefaultUserServer)
+
+// newGroupTestWhatsApp is newTestWhatsApp with the allowed group
+// testGroup, whose group_members entry is members (none for nil), the
+// trigger @claude, the bridge's account known so that a mention of it
+// addresses the bridge, and a download that counts its calls.
+func newGroupTestWhatsApp(t *testing.T, members []string) (*testWhatsApp, *fakeDownloader) {
+	t.Helper()
+	tw := newTestWhatsApp(t)
+	cfg := tw.cfg()
+	cfg.AllowedGroups = []string{testGroup}
+	cfg.Triggers = TriggersFromStrings([]string{"@claude"})
+	if members != nil {
+		cfg.GroupMembers = map[string][]string{testGroup: members}
+	}
+	tw.setOwn(bridgeAccount, types.EmptyJID)
+	dl := &fakeDownloader{body: "JPEG"}
+	tw.media = dl
+	return tw, dl
+}
+
+// groupMessage is msg in testGroup, from sender, and the sender's other
+// JID alt as WhatsApp sends it along (none when empty).
+func groupMessage(sender, alt types.JID, msg *waE2E.Message) *events.Message {
+	src := types.MessageSource{Chat: types.NewJID("120363000000000000", types.GroupServer), Sender: sender, SenderAlt: alt, IsGroup: true}
+	return &events.Message{Info: types.MessageInfo{MessageSource: src, ID: "3EB0GROUP", PushName: "Sam", Timestamp: time.Now()}, Message: msg}
+}
+
+// The ways a group message addresses the bridge, and one that does not.
+var (
+	groupTrigger = func() *waE2E.Message { return &waE2E.Message{Conversation: proto.String("@claude what's up")} }
+	groupMention = func() *waE2E.Message {
+		return &waE2E.Message{ExtendedTextMessage: &waE2E.ExtendedTextMessage{
+			Text:        proto.String("@" + bridgeAccount.User + " what's up"),
+			ContextInfo: &waE2E.ContextInfo{MentionedJID: []string{bridgeAccount.String()}},
+		}}
+	}
+	groupFile = func() *waE2E.Message {
+		return &waE2E.Message{ImageMessage: &waE2E.ImageMessage{Mimetype: proto.String("image/jpeg"), Caption: proto.String("look")}}
+	}
+	groupForward = func() *waE2E.Message {
+		return &waE2E.Message{ExtendedTextMessage: &waE2E.ExtendedTextMessage{
+			Text: proto.String("read this"), ContextInfo: &waE2E.ContextInfo{IsForwarded: proto.Bool(true)},
+		}}
+	}
+	groupChatter = func() *waE2E.Message { return &waE2E.Message{Conversation: proto.String("lunch at noon?")} }
+	groupStop    = func() *waE2E.Message { return &waE2E.Message{Conversation: proto.String("@claude !stop")} }
+)
+
+// A member group_members does not admit reaches no brain, however their
+// message addresses the bridge: no run, no command, no download, no edit
+// of what is waiting, and the group, which is allowed, is not offered on
+// the dashboard again. The log names them masked.
+func TestGroupNonMemberIsNotRead(t *testing.T) {
+	stranger := types.NewJID(otherNumber, types.DefaultUserServer)
+	cases := []struct {
+		name string
+		msg  *waE2E.Message
+	}{
+		{"trigger", groupTrigger()},
+		{"mention", groupMention()},
+		{"file", groupFile()},
+		{"forward", groupForward()},
+		{"untagged", groupChatter()},
+		{"!stop", groupStop()},
+		{"edit", editMsg("3EB0EARLIER", "@claude now do this")},
+		{"deletion", revokeMsg("3EB0EARLIER")},
+	}
+	entries := []struct {
+		name    string
+		members []string
+	}{{"no entry", nil}, {"a list", []string{"15551234567"}}, {"an empty list", []string{}}}
+	for _, e := range entries {
+		for _, c := range cases {
+			t.Run(e.name+", "+c.name, func(t *testing.T) {
+				logged := captureLog(t)
+				tw, dl := newGroupTestWhatsApp(t, e.members)
+				var changes []messageChange
+				tw.onChange = func(c messageChange) { changes = append(changes, c) }
+				tw.handle(t, groupMessage(stranger, types.EmptyJID, c.msg))
+				if m, ok := tw.next(100 * time.Millisecond); ok {
+					t.Errorf("reached the brains: %+v", m)
+				}
+				if len(changes) > 0 {
+					t.Errorf("changed a message: %+v", changes)
+				}
+				if n := dl.callCount(); n != 0 {
+					t.Errorf("downloaded the file %d times", n)
+				}
+				select {
+				case n := <-tw.notices:
+					t.Errorf("told the group %q", n)
+				default:
+				}
+				tw.mu.Lock()
+				defer tw.mu.Unlock()
+				if len(tw.ignored) > 0 {
+					t.Errorf("offered on the dashboard: %v", tw.ignored)
+				}
+				got := strings.Join(logged(), "\n")
+				if !strings.Contains(got, "by "+maskPhone(otherNumber)+": ignored (not admitted by group_members)") || strings.Contains(got, otherNumber) {
+					t.Errorf("log %q, want the ignore with the sender masked", got)
+				}
+			})
+		}
+	}
+}
+
+// Who group_members admits, allowed_numbers for a group without an entry,
+// reaches the brain under their phone number, also when WhatsApp names
+// them by LID: through the number it sends along, or the LID store's. A
+// LID nothing maps to a number gets in only where everyone does.
+func TestGroupMemberReachesTheBrain(t *testing.T) {
+	member := types.NewJID("15551234567", types.DefaultUserServer)
+	lid := types.NewJID(personLID, types.HiddenUserServer)
+	unknown := types.NewJID("272727", types.HiddenUserServer)
+	stranger := types.NewJID(otherNumber, types.DefaultUserServer)
+	cases := []struct {
+		name    string
+		members []string
+		numbers []string // allowed_numbers; nil keeps 15551234567
+		anyDM   bool
+		sender  types.JID
+		alt     types.JID
+		lids    store.LIDStore
+		fromMe  bool
+		want    string // Inbound.Sender; "" means not handed over
+	}{
+		{name: "listed by number", members: []string{"15551234567"}, sender: member, want: "15551234567"},
+		{name: "listed, by LID with the number along", members: []string{"15551234567"}, sender: lid, alt: member, want: "15551234567"},
+		{name: "listed, by LID the store knows", members: []string{"15551234567"}, sender: lid, lids: personLIDs{}, want: "15551234567"},
+		{name: "listed, by LID nobody knows", members: []string{"272727"}, sender: unknown, lids: personLIDs{}},
+		{name: "everyone, by LID nobody knows", members: []string{anyMember}, sender: unknown, lids: personLIDs{}, want: "272727"},
+		{name: "everyone, a stranger", members: []string{anyMember}, sender: stranger, want: otherNumber},
+		{name: "no entry, in allowed_numbers", sender: member, want: "15551234567"},
+		{name: "no entry, by LID the store knows", sender: lid, lids: personLIDs{}, want: "15551234567"},
+		{name: "no entry, a stranger", sender: stranger},
+		{name: "no entry, a LID nobody knows", numbers: []string{"272727"}, sender: unknown, lids: personLIDs{}},
+		{name: "no entry, anyone may DM", numbers: []string{}, anyDM: true, sender: stranger, want: otherNumber},
+		{name: "the bridge's own account, left off the list", members: []string{"15551234567"}, sender: bridgeAccount, fromMe: true, want: bridgeAccount.User},
+		{name: "the bridge's own account, nobody allowed", numbers: []string{}, sender: bridgeAccount, fromMe: true, want: bridgeAccount.User},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			tw, _ := newGroupTestWhatsApp(t, c.members)
+			cfg := tw.cfg()
+			if c.numbers != nil {
+				cfg.AllowedNumbers = c.numbers
+			}
+			cfg.AllowAnyDM = &c.anyDM
+			if c.lids != nil {
+				tw.client = whatsmeow.NewClient(&store.Device{LIDs: c.lids}, waLog.Noop)
+			}
+			evt := groupMessage(c.sender, c.alt, groupTrigger())
+			evt.Info.IsFromMe = c.fromMe
+			tw.handle(t, evt)
+			wait := 100 * time.Millisecond
+			if c.want != "" {
+				wait = 2 * time.Second
+			}
+			m, ok := tw.next(wait)
+			switch {
+			case c.want == "" && ok:
+				t.Errorf("reached the brains: %+v", m)
+			case c.want != "" && !ok:
+				t.Errorf("did not reach the brains, want it from %s", c.want)
+			case ok && (m.Sender != c.want || m.JID != testGroup || m.Text != "what's up" || m.Silent):
+				t.Errorf("got %+v, want an addressed message in %s from %s", m, testGroup, c.want)
+			}
+		})
+	}
+}
+
+// What an admitted member writes goes on as before: untagged chatter to
+// the history, a file that addresses the bridge downloaded, and an
+// addressed !stop to the bridge as the command.
+func TestGroupMemberMessagesGoOn(t *testing.T) {
+	member := types.NewJID("15551234567", types.DefaultUserServer)
+	t.Run("untagged", func(t *testing.T) {
+		tw, _ := newGroupTestWhatsApp(t, []string{"15551234567"})
+		tw.handle(t, groupMessage(member, types.EmptyJID, groupChatter()))
+		if m, ok := tw.next(2 * time.Second); !ok || !m.Silent || m.Sender != "15551234567" {
+			t.Errorf("got %+v (delivered %v), want silent chatter from 15551234567", m, ok)
+		}
+	})
+	t.Run("file", func(t *testing.T) {
+		tw, dl := newGroupTestWhatsApp(t, []string{"15551234567"})
+		tw.handle(t, groupMessage(member, types.EmptyJID, groupFile()))
+		if m, ok := tw.next(2 * time.Second); !ok || len(m.Media) != 1 || m.Silent {
+			t.Errorf("got %+v (delivered %v), want the photo", m, ok)
+		}
+		if dl.callCount() != 1 {
+			t.Errorf("downloaded %d times, want once", dl.callCount())
+		}
+	})
+	t.Run("!stop", func(t *testing.T) {
+		tw, _ := newGroupTestWhatsApp(t, []string{"15551234567"})
+		tw.handle(t, groupMessage(member, types.EmptyJID, groupStop()))
+		if m, ok := tw.next(2 * time.Second); !ok || m.Text != "!stop" || m.Silent {
+			t.Errorf("got %+v (delivered %v), want the command", m, ok)
+		}
+	})
+}
+
+// The log names a refused sender WhatsApp knows by no number with the
+// server of the JID that names them, masked like the number would be.
+func TestGroupRefusalNamesTheSendersServer(t *testing.T) {
+	cases := []struct {
+		name   string
+		sender types.JID
+		want   string
+	}{
+		{"by number", types.NewJID(otherNumber, types.DefaultUserServer), maskPhone(otherNumber)},
+		{"by a LID nobody knows", types.NewJID("272727", types.HiddenUserServer), "…27@lid"},
+		{"by a hosted account", types.NewJID("272727", types.HostedServer), "…27@hosted"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			logged := captureLog(t)
+			tw, _ := newGroupTestWhatsApp(t, []string{"15551234567"})
+			tw.client = whatsmeow.NewClient(&store.Device{LIDs: personLIDs{}}, waLog.Noop)
+			tw.handle(t, groupMessage(c.sender, types.EmptyJID, groupTrigger()))
+			if m, ok := tw.next(100 * time.Millisecond); ok {
+				t.Errorf("reached the brains: %+v", m)
+			}
+			if got := strings.Join(logged(), "\n"); !strings.Contains(got, "by "+c.want+": ignored (not admitted by group_members)") {
+				t.Errorf("log %q, want the sender as %s", got, c.want)
+			}
+		})
+	}
+}
+
+// A non-member's reaction or sticker would not have been read from a
+// member either, so its refusal goes to the debug log, not to the main
+// one, where a busy group would fill it.
+func TestGroupNonMemberReactionIsQuiet(t *testing.T) {
+	stranger := types.NewJID(otherNumber, types.DefaultUserServer)
+	for name, msg := range map[string]*waE2E.Message{
+		"reaction": {ReactionMessage: &waE2E.ReactionMessage{Text: proto.String("👍")}},
+		"sticker":  {StickerMessage: &waE2E.StickerMessage{}},
+	} {
+		t.Run(name, func(t *testing.T) {
+			logged := captureLog(t)
+			tw, _ := newGroupTestWhatsApp(t, []string{"15551234567"})
+			tw.handle(t, groupMessage(stranger, types.EmptyJID, msg))
+			if m, ok := tw.next(100 * time.Millisecond); ok {
+				t.Errorf("reached the brains: %+v", m)
+			}
+			if got := strings.Join(logged(), "\n"); strings.Contains(got, "not admitted") {
+				t.Errorf("logged %q, want it in the debug log only", got)
+			}
+			tw.mu.Lock()
+			defer tw.mu.Unlock()
+			if !slices.ContainsFunc(tw.logs, func(l string) bool {
+				return strings.HasPrefix(l, "DEBUG ") && strings.Contains(l, "by "+maskPhone(otherNumber)+": ignored (not admitted by group_members")
+			}) {
+				t.Errorf("debug log %q, want the refusal, masked", tw.logs)
+			}
+		})
+	}
+}
+
+// allowed_groups and group_members are read from one config: with an edit
+// in between, a message must not pass under the new allowed_groups and the
+// old members when neither config admits it. Here the first config allows
+// no group but would let anyone in, and the second allows the group but
+// only the owner.
+func TestGroupMessageReadsOneConfig(t *testing.T) {
+	tw, _ := newGroupTestWhatsApp(t, nil)
+	before := &Config{AllowedNumbers: []string{}, AllowAnyDM: proto.Bool(true), MediaDir: t.TempDir(), MaxChunkSize: 4000}
+	after := tw.cfg()
+	var reads atomic.Int32
+	tw.cfg = func() *Config {
+		if reads.Add(1) == 1 {
+			return before
+		}
+		return after
+	}
+	defer func() {
+		if r := recover(); r != nil {
+			t.Errorf("handleGroupMessage reached for WhatsApp: %v", r)
+		}
+	}()
+	tw.handleGroupMessage(groupMessage(types.NewJID(otherNumber, types.DefaultUserServer), types.EmptyJID, groupTrigger()))
+	if m, ok := tw.next(100 * time.Millisecond); ok {
+		t.Errorf("a stranger reached the brains under two configs: %+v", m)
 	}
 }

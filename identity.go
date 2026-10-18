@@ -46,12 +46,19 @@ func phoneNumber(s string) (string, error) {
 // identityKey is the form a person is looked up by in a brain's identity
 // map: the phone number for anything phoneNumber takes, so that a row
 // written "+1 555 123 4567" names the sender 15551234567, and otherwise s
-// normalised (a LID, say).
+// normalised (a LID, say). The user part of a JID phoneNumber refuses is
+// read as a number too when it is one: "0 00000@lid" would otherwise be
+// the key "0 00000", which itself keys as 000000, so no sender's key
+// could ever match it.
 func identityKey(s string) string {
 	if n, err := phoneNumber(s); err == nil {
 		return n
 	}
-	return normalizeJID(s)
+	k := normalizeJID(s)
+	if n, err := phoneNumber(k); err == nil {
+		return n
+	}
+	return k
 }
 
 // allowedNumbersAsNumbers is allowed_numbers with each entry in the form

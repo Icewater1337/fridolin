@@ -510,8 +510,16 @@ your machine**, and so can text inside any file they send it. Treat it that way.
 What the bridge does about it:
 
 - **DM allowlist.** Only numbers in `allowed_numbers` are answered; an empty
-  list answers nobody unless you set `allow_any_dm` to `true`. Groups are
-  deny-by-default: unlisted groups are ignored entirely.
+  list answers nobody unless you set `allow_any_dm` to `true`.
+- **Group allowlist, per member.** Groups are deny-by-default: unlisted
+  groups are ignored entirely. In an allowed group only the members
+  `group_members` admits are read: the numbers it lists for that group, or
+  everyone for `["*"]`, and without an entry whoever may DM the bridge
+  (`allowed_numbers`). Anyone else can neither start a run nor stop one, and
+  what they write is not read, not even into the brain's history, unless an
+  admitted member quotes or forwards it. A member WhatsApp names only by an
+  internal ID, without their number, gets in only where everyone does
+  ([details](docs/CONFIGURATION.md#group_members)).
 - **No Status or channels.** WhatsApp Status updates and channels are ignored,
   and the bridge refuses to send to Status, broadcast lists or channels, so
   nothing the assistant writes can end up in your public Status.
@@ -571,6 +579,14 @@ What the bridge does about it:
 
 What it does not do:
 
+- An admitted group member is trusted like an allowed number. Any message
+  of theirs that addresses the bridge (the trigger, an @-mention, a reply to
+  it, a file or a forward) starts a run with every permission the brain
+  has, and their untagged messages go into the history its later runs read,
+  or start a run of their own when the brain's `observe` is `run`. With
+  `["*"]` that is everyone in the group, including whoever its admins add
+  later. `group_members` is what limits who: keep it to people you would
+  let DM the bridge.
 - The sandbox is containment, not a jail. It raises the cost of a prompt
   injection; it does not stop code execution. It denies writing only where
   listed, so a brain can still write elsewhere in your home folder,

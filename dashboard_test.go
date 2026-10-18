@@ -1237,6 +1237,24 @@ func TestAllowAndRevokeChats(t *testing.T) {
 	}
 }
 
+// Revoking a group drops its group_members entry with it, which the
+// config would otherwise refuse, and leaves the other groups' alone.
+func TestRevokedGroupTakesItsMembers(t *testing.T) {
+	const other = "120363000000000001@g.us"
+	tb := newTestBridge(t, `, "allowed_groups": ["120363000000000000@g.us", "`+other+`"],
+		"group_members": {"120363000000000000@g.us": ["15559876543"], "`+other+`": ["*"]}`)
+	if w := tb.do("POST", "/api/chats/revoke", map[string]string{"kind": "group", "jid": testGroup}); w.Code != 200 {
+		t.Fatalf("revoke: %d %s", w.Code, w.Body)
+	}
+	f := tb.cfgs.FileCopy()
+	if !slices.Equal(f.AllowedGroups, []string{other}) {
+		t.Errorf("allowed_groups = %q, want %q", f.AllowedGroups, other)
+	}
+	if len(f.GroupMembers) != 1 || !slices.Equal(f.GroupMembers[other], []string{anyMember}) {
+		t.Errorf("group_members = %q, want only %s's entry", f.GroupMembers, other)
+	}
+}
+
 func TestRevokedGroupKeepsItsBrain(t *testing.T) {
 	h := newHarness(t, "")
 	dir := h.AddBrain(BrainManifest{ID: "family", Name: "Family", Routing: BrainRouting{Groups: []string{harnessGroup}}})

@@ -55,13 +55,18 @@ exactly as they are written, so one written by hand with a typo or spaces
 matches no group; the log names such entries when the bridge starts, with
 the form to write them in.
 
+In an allowed group without a [`group_members`](#group_members) entry,
+these numbers are also the only members whose messages are read: adding
+or removing one changes who is heard there too.
+
 Newer WhatsApp clients identify senders by an internal ID (a LID) rather than
 a phone number; the bridge resolves that back to the number before checking,
-so plain numbers here are correct. It knows each person by their number
-everywhere: a DM's history is kept under the number's JID however WhatsApp
-addressed it (older lines under the LID still count as the same chat), group
-members and the authors of quoted messages appear by number, so the identity
-map names them, and a poll vote counts once per person.
+so plain numbers here and in `group_members` are correct. It knows each
+person by their number everywhere: a DM's history is kept under the number's
+JID however WhatsApp addressed it (older lines under the LID still count as
+the same chat), group members and the authors of quoted messages appear by
+number, so the identity map names them, and a poll vote counts once per
+person.
 
 A message someone sends to a broadcast list you are on counts as a DM from
 them and is answered in your direct chat with them, which is where WhatsApp
@@ -74,7 +79,9 @@ What an empty `allowed_numbers` means. Unset or `false` (the default, and what
 new configs write): nobody may DM. `true`: **anyone** who can message the
 account may use the assistant — with every permission the brains have. It
 only matters while the list is empty; with numbers in it, only they are
-answered.
+answered. It counts in groups too: with an empty `allowed_numbers` and
+`allow_any_dm` `true`, every member of an allowed group without a
+[`group_members`](#group_members) entry is read.
 
 ```json
 "allow_any_dm": false
@@ -99,6 +106,68 @@ list means no groups at all.
 To find a JID: add the bridge to the group and send a message. The group shows
 up in the dashboard under **Chats → waiting for access**, with an *Allow*
 button that also assigns it to a brain.
+
+Allowing a group does not let everyone in it use the bridge: which of its
+members get through is up to `group_members` (below). Without an entry
+there, only the numbers in `allowed_numbers` do.
+
+### `group_members`
+
+Who in each allowed group reaches its brain: the group's JID and the phone
+numbers of the members whose messages are read, with the country code, like
+`allowed_numbers`. `["*"]` lets every member in.
+
+```json
+"group_members": {
+  "120363000000000000@g.us": ["15551234567", "15559876543"],
+  "120363000000000001@g.us": ["*"]
+}
+```
+
+A message from a member a group's entry does not admit is not read at all:
+it starts no run, a `!stop` or `!reset` from them does nothing, a file they
+send is not downloaded, their edits and deletions change nothing, and it is
+not even kept in the brain's history, so later runs see it only where an
+admitted member quotes or forwards it. The log notes each one, the sender
+masked; a reaction or a sticker, which the bridge does not read from
+anyone, only at [`log_level`](#log_level-restart) `debug`. The group is not
+offered on the dashboard again, since it is allowed. Votes in the bridge's
+own polls still count from everyone in the group: a vote only picks one of
+the poll's options.
+
+- **No entry** for an allowed group: the senders `allowed_numbers` admits,
+  and no one else. With an empty `allowed_numbers` and `allow_any_dm`
+  `true`, that is anyone. The bridge logs each allowed group without an
+  entry once at startup, and when an edit leaves one without, with the
+  entry that lets everyone in again.
+- **A list of numbers**: those members, and no one else. `allowed_numbers`
+  does not count here, so list your own number too. An empty list lets
+  nobody in.
+- **`["*"]`**: every member, as an allowed group did before
+  `group_members` existed. `"*"` stands on its own; next to numbers it is
+  refused.
+
+Whatever the entry, messages from the bridge's own account, sent from its
+phone or any other device linked to it, always get through.
+
+WhatsApp often names group members by LID instead of their number (see
+above). The bridge looks up the number that comes with the message, or the
+one WhatsApp told it before; a member whose number it cannot learn, which
+happens in groups that hide members' numbers, matches no number on a list,
+and only `["*"]` (or an open `allow_any_dm`, for a group without an entry)
+lets them in.
+
+The bridge refuses to start, and the dashboard to save, a `group_members`
+with a key that is no group JID, an entry for a group that is not in
+`allowed_groups`, a number that is none (6 to 15 digits; a `+`, spaces and
+dashes are fine and dropped), or `"*"` together with numbers. The error
+names a number that is none by its place in the group's list ("entry 2")
+and does not repeat it, nor a key that is no group JID, so that it can go
+into a bug report as `fridolin check --redact` prints it. Revoking a group
+on the **Chats** page removes its entry too. The dashboard has no form for
+the lists yet, and keeps them as they are when it saves: write them into
+`config.json` and restart the bridge (`fridolin service restart`).
+`fridolin check` tells you whether the file loads.
 
 ### `triggers`
 
@@ -125,8 +194,9 @@ or `routing.answer_forwards` (docs/BRAINS.md, or the brain's page in the
 dashboard): then a file is chatter whose caption the brain reads, and it is not
 downloaded, and a forward is chatter like any other.
 
-Untagged group messages go into the brain's history, so that its next run in
-the group sees the conversation, and produce no reply. They cost no Claude run
+Untagged group messages, from the members `group_members` admits, go into the
+brain's history, so that its next run in the group sees the conversation, and
+produce no reply. They cost no Claude run
 unless the brain's `observe` setting is `run` (see
 [BRAINS.md](BRAINS.md#brainjson)), which gives each one an observe-only run
 of its own; very short ones ("ok", "👍") never get one. An untagged message is

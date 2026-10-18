@@ -63,6 +63,7 @@ func TestIdentityKey(t *testing.T) {
 		"+1\u00a0555\u00a0123\u00a04567": "15551234567", // no-break spaces
 		"15551234567@s.whatsapp.net":     "15551234567",
 		bridgeLID + "@lid":               bridgeLID,
+		"1 555 123 4567@lid":             "15551234567", // keys as its key does
 		"Alex":                           "Alex",
 	}
 	for in, want := range cases {
@@ -252,6 +253,24 @@ func TestDMIsKeyedByNumber(t *testing.T) {
 				t.Errorf("got %+v (delivered %v), want chat %s, alt %s, sender 15551234567", m, ok, pn, lid)
 			}
 		})
+	}
+}
+
+// A DM from a LID nothing maps to a number is checked and offered on the
+// dashboard as that LID, as before group senders were resolved by the same
+// helper.
+func TestDMFromAnUnknownLID(t *testing.T) {
+	unknown := types.NewJID("272727", types.HiddenUserServer)
+	tw := newTestWhatsApp(t)
+	tw.client = whatsmeow.NewClient(&store.Device{LIDs: personLIDs{}}, waLog.Noop)
+	tw.handle(t, textEvent(types.MessageSource{Chat: unknown, Sender: unknown}, "hello"))
+	if m, ok := tw.next(100 * time.Millisecond); ok {
+		t.Errorf("reached the brains: %+v", m)
+	}
+	tw.mu.Lock()
+	defer tw.mu.Unlock()
+	if len(tw.ignored) != 1 || tw.ignored[0] != unknown.String() {
+		t.Errorf("dashboard was offered %v, want the LID's chat", tw.ignored)
 	}
 }
 
