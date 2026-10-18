@@ -1200,6 +1200,13 @@ Send it again if you still need an answer." Files sent through `/ingest`
 and messages from the dev page are not kept; a [Plaud](PLAUD.md)
 recording is handed over again after the restart.
 
+Shutdown waits for a finished run's answer to reach the outbox before
+closing the database, including when its brain was removed or moved.
+Edits and deletions saved during shutdown are applied before replayed
+messages can start new runs. This protects an orderly stop and restart;
+a forced exit, crash or power failure can still lose pending messages,
+including during startup replay.
+
 ### `debounce`
 
 ```json
