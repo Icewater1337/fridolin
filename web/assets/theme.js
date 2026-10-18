@@ -3,9 +3,26 @@
 // watches the boot, so a dashboard that fails to start says so instead of
 // showing "Loading dashboard…" for ever.
 (function () {
-  var t = 'auto';
-  try { t = localStorage.getItem('bridgeTheme') || 'auto'; } catch (e) { /* storage blocked */ }
-  if (t === 'light' || t === 'dark') document.documentElement.setAttribute('data-theme', t);
+  // The theme is light, dark or auto (the system's). The page's data-theme
+  // says which is in effect, and localStorage keeps it for the next visit.
+  // The shell's theme button (app/shell.js) changes it through
+  // window.fridolinTheme, as modules cannot import from a classic script.
+  var KEY = 'bridgeTheme';
+  var root = document.documentElement;
+  var apply = function (t) {
+    if (t === 'light' || t === 'dark') root.setAttribute('data-theme', t);
+    else root.removeAttribute('data-theme');
+  };
+  window.fridolinTheme = {
+    current: function () { return root.getAttribute('data-theme') || 'auto'; },
+    set: function (t) {
+      apply(t);
+      try { localStorage.setItem(KEY, t); } catch (e) { /* storage blocked: this page only */ }
+    },
+  };
+  var saved = 'auto';
+  try { saved = localStorage.getItem(KEY) || 'auto'; } catch (e) { /* storage blocked */ }
+  apply(saved);
 
   // The app sets data-ready once it shows something. Until then, a module
   // that fails to load (an error event on its <script>, which only a
