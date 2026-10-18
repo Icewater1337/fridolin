@@ -1,0 +1,463 @@
+package main
+
+import (
+	"encoding/json"
+	"io/fs"
+	"maps"
+	"net/http"
+	"net/http/httptest"
+	"os"
+	"path/filepath"
+	"regexp"
+	"slices"
+	"strings"
+	"testing"
+)
+
+// The route classes, by what guards a route.
+const (
+	// classPublic answers anyone on this machine: liveness and readiness.
+	classPublic = "public"
+	// classScript is for local scripts and brains: the scripts token or a
+	// run's, not the dashboard's, and the Host and Origin checks.
+	classScript = "script"
+	// classStatic is the dashboard page and its assets.
+	classStatic = "static"
+	// classAPI needs the dashboard token, and on writes the
+	// X-Bridge-Dashboard header and a JSON body.
+	classAPI = "api"
+	// classAPIMount is an unknown path under /api/: the token first, then
+	// the API mux's 404.
+	classAPIMount = "api-mount"
+	// classLogin signs the dashboard in: no token, since it is how the
+	// browser gets a session, but the X-Bridge-Dashboard header, a JSON
+	// body and the token or a one-time code in it.
+	classLogin = "login"
+	// classBuilder needs a builder brain's own token.
+	classBuilder = "builder"
+	// classBrainRun needs the token of a brain's run in progress.
+	classBrainRun = "brain-run"
+	// classNotFound is a catch-all for unknown paths under a prefix: a
+	// 404 for anyone, token or not.
+	classNotFound = "not-found"
+)
+
+// route is one registered pattern. probe is a concrete request path for it,
+// when the pattern has wildcards or a GET needs a query to stay off the
+// network.
+type route struct {
+	method, pattern, class, probe string
+}
+
+// routeInventory is every route the bridge serves, written out by hand so
+// that a route that appears, disappears or changes its guard is a decision.
+var routeInventory = []route{
+	{"GET", "/health", classPublic, ""},
+	{"GET", "/ready", classPublic, ""},
+	{"POST", "/send", classScript, ""},
+	{"POST", "/ingest", classScript, ""},
+	{"", "/", classStatic, ""},
+
+	// The builder's own routes, on a mux of their own mounted at
+	// /builder/. That mux has no catch-all, so this entry is the mount: an
+	// unknown call there gets the mux's plain 404.
+	{"", "/builder/", classNotFound, "/builder/nope"},
+	{"GET", "/builder/context", classBuilder, ""},
+	{"POST", "/builder/check", classBuilder, ""},
+	{"POST", "/builder/preview", classBuilder, ""},
+	{"POST", "/builder/sync", classBuilder, ""},
+	{"POST", "/builder/propose", classBuilder, ""},
+
+	// What a brain's tools ask the bridge for, on a mux of their own
+	// mounted at /brain/. Its catch-all makes an unknown call there a JSON
+	// 404.
+	{"", "/brain/", classNotFound, "/brain/nope"},
+	{"GET", "/brain/polls", classBrainRun, ""},
+	{"GET", "/brain/calendar/calendars", classBrainRun, ""},
+	{"GET", "/brain/calendar/events", classBrainRun, ""},
+	{"POST", "/brain/calendar/events", classBrainRun, ""},
+	{"DELETE", "/brain/calendar/events/{id}", classBrainRun, "/brain/calendar/events/e1"},
+	{"POST", "/brain/calendar/freebusy", classBrainRun, ""},
+
+	// Outside the API's guard, on the outer mux.
+	{"POST", "/api/login", classLogin, ""},
+
+	{"GET", "/api/status", classAPI, ""},
+	{"POST", "/api/logout", classAPI, ""},
+	{"POST", "/api/login/code", classAPI, ""},
+	{"POST", "/api/token/rotate", classAPI, ""},
+	{"GET", "/api/whatsapp/qr", classAPI, ""},
+	{"POST", "/api/whatsapp/pair", classAPI, ""},
+	{"GET", "/api/whatsapp/groups", classAPI, ""},
+	{"GET", "/api/activity", classAPI, ""},
+	{"GET", "/api/logs", classAPI, ""},
+	{"GET", "/api/chats/ignored", classAPI, ""},
+	{"POST", "/api/chats/allow", classAPI, ""},
+	{"POST", "/api/chats/revoke", classAPI, ""},
+	{"POST", "/api/chats/dismiss", classAPI, ""},
+	{"GET", "/api/config", classAPI, ""},
+	{"PUT", "/api/config", classAPI, ""},
+	{"POST", "/api/restart", classAPI, ""},
+	{"GET", "/api/brains", classAPI, ""},
+	{"GET", "/api/brains/{id}", classAPI, "/api/brains/main"},
+	{"POST", "/api/brains/inspect", classAPI, ""},
+	{"POST", "/api/brains", classAPI, ""},
+	{"PUT", "/api/brains/{id}", classAPI, "/api/brains/main"},
+	{"POST", "/api/brains/{id}/approve", classAPI, "/api/brains/main/approve"},
+	{"DELETE", "/api/brains/{id}", classAPI, "/api/brains/main"},
+	{"POST", "/api/brains/{id}/stop", classAPI, "/api/brains/main/stop"},
+	{"DELETE", "/api/brain-dirs", classAPI, ""},
+	{"GET", "/api/fs/capabilities", classAPI, ""},
+	{"POST", "/api/fs/pick", classAPI, ""},
+	{"GET", "/api/fs/list", classAPI, ""},
+	{"GET", "/api/backup/status", classAPI, ""},
+	{"POST", "/api/backup/connect", classAPI, ""},
+	{"POST", "/api/backup/disconnect", classAPI, ""},
+	{"PUT", "/api/backup/settings", classAPI, ""},
+	{"POST", "/api/backup/run", classAPI, ""},
+	{"POST", "/api/backup/cancel", classAPI, ""},
+	{"PUT", "/api/brains/{id}/backup", classAPI, "/api/brains/main/backup"},
+	{"GET", "/api/brains/{id}/backup/versions", classAPI, "/api/brains/main/backup/versions"},
+	{"POST", "/api/backup/restore", classAPI, ""},
+	{"GET", "/api/google/client", classAPI, ""},
+	{"PUT", "/api/google/client", classAPI, ""},
+	{"DELETE", "/api/google/client", classAPI, ""},
+	{"GET", "/api/brains/{id}/calendar", classAPI, "/api/brains/main/calendar?list=0"},
+	{"POST", "/api/brains/{id}/calendar/connect", classAPI, "/api/brains/main/calendar/connect"},
+	{"PUT", "/api/brains/{id}/calendar", classAPI, "/api/brains/main/calendar"},
+	{"DELETE", "/api/brains/{id}/calendar", classAPI, "/api/brains/main/calendar"},
+	{"GET", "/api/plaud/status", classAPI, ""},
+	{"POST", "/api/plaud/connect", classAPI, ""},
+	{"POST", "/api/plaud/disconnect", classAPI, ""},
+	{"PUT", "/api/plaud/settings", classAPI, ""},
+	{"POST", "/api/plaud/sync", classAPI, ""},
+	{"POST", "/api/plaud/resend", classAPI, ""},
+	{"GET", "/api/site", classAPI, ""},
+	{"PUT", "/api/site/settings", classAPI, ""},
+	{"POST", "/api/site/restart", classAPI, ""},
+	{"POST", "/api/site/deploy-key", classAPI, ""},
+	{"POST", "/api/site/deploy-key/github", classAPI, ""},
+	{"POST", "/api/site/github-repo", classAPI, ""},
+	{"PUT", "/api/site/repo", classAPI, ""},
+	{"DELETE", "/api/site/repo", classAPI, ""},
+	{"POST", "/api/site/repo/starter", classAPI, ""},
+	{"POST", "/api/site/fetch", classAPI, ""},
+	{"POST", "/api/site/deploy", classAPI, ""},
+	{"GET", "/api/site/users", classAPI, ""},
+	{"POST", "/api/site/users", classAPI, ""},
+	{"PUT", "/api/site/users/{id}", classAPI, "/api/site/users/u1"},
+	{"DELETE", "/api/site/users/{id}", classAPI, "/api/site/users/u1"},
+	{"PUT", "/api/site/roles", classAPI, ""},
+	{"PUT", "/api/site/tunnel", classAPI, ""},
+	{"PUT", "/api/site/google-client", classAPI, ""},
+	{"DELETE", "/api/site/google-client", classAPI, ""},
+	{"GET", "/api/site/secrets", classAPI, ""},
+	{"PUT", "/api/site/secrets/{module}/{name}", classAPI, "/api/site/secrets/m1/TOKEN"},
+	{"DELETE", "/api/site/secrets/{module}/{name}", classAPI, "/api/site/secrets/m1/TOKEN"},
+	{"GET", "/api/site/builders", classAPI, ""},
+	{"PUT", "/api/site/builders/{id}", classAPI, "/api/site/builders/main"},
+	{"GET", "/api/site/proposals", classAPI, ""},
+	{"POST", "/api/site/proposals/{id}/merge", classAPI, "/api/site/proposals/p1/merge"},
+	{"DELETE", "/api/site/proposals/{id}", classAPI, "/api/site/proposals/p1"},
+	{"POST", "/api/site/previews/{id}", classAPI, "/api/site/previews/main"},
+	{"GET", "/api/site/build/{id}", classAPI, "/api/site/build/main"},
+	{"POST", "/api/site/build/{id}", classAPI, "/api/site/build/main"},
+	{"POST", "/api/site/build/{id}/new", classAPI, "/api/site/build/main/new"},
+	{"POST", "/api/site/build/{id}/stop", classAPI, "/api/site/build/main/stop"},
+	{"POST", "/api/dev/inbound", classAPI, ""},
+	{"GET", "/api/dev/outbox", classAPI, ""},
+	// The mount: an unknown /api/ path is the API mux's 404, not the page.
+	{"", "/api/", classAPIMount, "/api/nope"},
+}
+
+// mountsWithCatchAll are the patterns registered twice: newHTTPHandler
+// hands the prefix to a mux of its own, which has a catch-all at the same
+// pattern. routeInventory lists the catch-all, and this the mount. Any
+// other pattern registered twice is a route on a second mux, outside the
+// guards of the first.
+var mountsWithCatchAll = []string{"/brain/"}
+
+// path is the request path to probe r with.
+func (r route) path() string {
+	if r.probe != "" {
+		return r.probe
+	}
+	return r.pattern
+}
+
+// handlerPatternRE finds a route registration in the source: the pattern
+// string given to HandleFunc or Handle.
+var handlerPatternRE = regexp.MustCompile(`\.Handle(?:Func)?\("((?:[A-Z]+ )?/[^"]*)"`)
+
+// TestRouteInventoryIsComplete compares the inventory with every route the
+// module's code registers, wherever its files are, so that a new route
+// has to be added there with its class. It counts each registration: the
+// same pattern registered again on another mux would answer there without
+// that mux's guards.
+func TestRouteInventoryIsComplete(t *testing.T) {
+	root := repoDir
+	for !fileExists(filepath.Join(root, "go.mod")) {
+		if filepath.Dir(root) == root {
+			t.Fatal("no go.mod above the package")
+		}
+		root = filepath.Dir(root)
+	}
+	var registered []string
+	err := filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if d.IsDir() && (d.Name() == "node_modules" || d.Name() == "testdata" || strings.HasPrefix(d.Name(), ".")) && path != root {
+			return filepath.SkipDir
+		}
+		if d.IsDir() || !strings.HasSuffix(path, ".go") || strings.HasSuffix(path, "_test.go") {
+			return nil
+		}
+		data, err := os.ReadFile(path)
+		if err != nil {
+			return err
+		}
+		for _, m := range handlerPatternRE.FindAllStringSubmatch(string(data), -1) {
+			registered = append(registered, m[1])
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	listed := slices.Clone(mountsWithCatchAll)
+	for _, r := range routeInventory {
+		listed = append(listed, strings.TrimSpace(r.method+" "+r.pattern))
+	}
+	times := func(patterns []string) map[string]int {
+		n := map[string]int{}
+		for _, p := range patterns {
+			n[p]++
+		}
+		return n
+	}
+	reg, lst := times(registered), times(listed)
+	for _, p := range slices.Sorted(maps.Keys(reg)) {
+		switch {
+		case lst[p] == 0:
+			t.Errorf("route %q is registered but not in routeInventory", p)
+		case lst[p] != reg[p]:
+			t.Errorf("route %q: %d registrations, %d in routeInventory and mountsWithCatchAll", p, reg[p], lst[p])
+		}
+	}
+	for _, p := range slices.Sorted(maps.Keys(lst)) {
+		if reg[p] == 0 {
+			t.Errorf("route %q is in routeInventory but nothing registers it", p)
+		}
+	}
+}
+
+// reachesOutside are the routes whose handlers act outside the test: they
+// re-execute the process, open a folder picker on the desktop, pair a
+// phone with WhatsApp, reach GitHub or a git remote, or restore a backup
+// over a brain's folder. TestRouteInventoryGuards only looks them up in
+// the API mux and never sends them a request, which a guard that stopped
+// working would let through.
+var reachesOutside = map[string]bool{
+	"POST /api/restart":                true,
+	"POST /api/fs/pick":                true,
+	"POST /api/whatsapp/pair":          true,
+	"PUT /api/site/repo":               true,
+	"POST /api/site/repo/starter":      true,
+	"POST /api/site/fetch":             true,
+	"POST /api/site/deploy":            true,
+	"POST /api/site/deploy-key/github": true,
+	"POST /api/site/github-repo":       true,
+	"POST /api/backup/restore":         true,
+}
+
+// TestRouteInventoryGuards probes every route of the inventory for the
+// guard its class promises. Each probe breaks one guard only, so a guard
+// that stopped working lets the probe through to the route's handler. The
+// guards are therefore checked first on routes whose handlers change
+// nothing, and the test stops there if one fails. The routes that reach
+// outside the test are only looked up in the API mux: the guards wrap that
+// mux as a whole (newHTTPHandler), the first check shows they hold, and
+// TestRouteInventoryIsComplete fails when a pattern is registered on a
+// second mux as well, outside them.
+func TestRouteInventoryGuards(t *testing.T) {
+	h, _, _ := goldenBridge(t)
+	api, ok := h.b.apiMux().(*http.ServeMux)
+	if !ok {
+		t.Fatal("the API handler is no ServeMux")
+	}
+	token := h.token()
+	// What a GET must never show: the dashboard token, and the secrets
+	// the golden bridge holds (the Google client's, the calendar token's).
+	secrets := []string{token, "TEST-CLIENT-SECRET", "golden-refresh-token", "golden-access-token"}
+
+	request := func(method, path, body string, mutate ...func(*http.Request)) *httptest.ResponseRecorder {
+		r := httptest.NewRequest(method, "http://"+defaultHTTPListen+path, strings.NewReader(body))
+		if body != "" {
+			r.Header.Set("Content-Type", "application/json")
+		}
+		for _, m := range mutate {
+			m(r)
+		}
+		w := httptest.NewRecorder()
+		h.h.ServeHTTP(w, r)
+		return w
+	}
+	withToken := func(r *http.Request) { r.Header.Set("X-Bridge-Token", token) }
+	asBearer := func(r *http.Request) { r.Header.Set("Authorization", "Bearer "+token) }
+	asScript := func(r *http.Request) { r.Header.Set("Authorization", "Bearer "+h.readToken("scripts.token")) }
+	asDashboard := func(r *http.Request) { r.Header.Set("X-Bridge-Dashboard", "1") }
+	asForm := func(r *http.Request) { r.Header.Set("Content-Type", "text/plain") }
+	fromElsewhere := func(r *http.Request) { r.Header.Set("Origin", "https://evil.example.com") }
+	underOtherHost := func(r *http.Request) { r.Host = "evil.example.com:8765" }
+
+	// Every guard on a route whose handler only reads or refuses: inspect
+	// looks at a folder, an empty /send is refused, the builder's context
+	// is read.
+	for _, c := range []struct {
+		guard, method, path, body string
+		mutate                    []func(*http.Request)
+		want                      int
+	}{
+		{"the token", "GET", "/api/status", "", nil, http.StatusUnauthorized},
+		{"X-Bridge-Dashboard", "POST", "/api/brains/inspect", "{}", []func(*http.Request){withToken}, http.StatusForbidden},
+		{"a JSON body", "POST", "/api/brains/inspect", "a=b", []func(*http.Request){withToken, asDashboard, asForm}, http.StatusUnsupportedMediaType},
+		{"the Origin, on the API", "POST", "/api/brains/inspect", "{}", []func(*http.Request){withToken, asDashboard, fromElsewhere}, http.StatusForbidden},
+		{"the Origin, for scripts", "POST", "/send", "{}", []func(*http.Request){fromElsewhere}, http.StatusForbidden},
+		{"the Host", "POST", "/send", "{}", []func(*http.Request){underOtherHost}, http.StatusMisdirectedRequest},
+		{"the builder's token", "GET", "/builder/context", "", nil, http.StatusUnauthorized},
+		{"the builder's token, not the dashboard's", "GET", "/builder/context", "", []func(*http.Request){withToken}, http.StatusUnauthorized},
+		{"a run's token", "GET", "/brain/polls", "", nil, http.StatusUnauthorized},
+		{"a run's token, not the dashboard's", "GET", "/brain/polls", "", []func(*http.Request){withToken, asBearer}, http.StatusUnauthorized},
+	} {
+		if w := request(c.method, c.path, c.body, c.mutate...); w.Code != c.want {
+			t.Errorf("guard %s: %s %s answered %d, want %d", c.guard, c.method, c.path, w.Code, c.want)
+		}
+	}
+	if t.Failed() {
+		t.Fatal("a guard does not hold on a route that changes nothing; the other routes are not probed, since their handlers would run")
+	}
+
+	for _, rt := range routeInventory {
+		method := rt.method
+		if method == "" {
+			method = "GET"
+		}
+		t.Run(strings.TrimSpace(rt.method+" "+rt.pattern), func(t *testing.T) {
+			switch rt.class {
+			case classAPI:
+				// The API mux says which pattern takes the request, without
+				// running it: a route missing from the mux would fall to
+				// the catch-all.
+				r := httptest.NewRequest(method, "http://"+defaultHTTPListen+rt.path(), nil)
+				if _, pattern := api.Handler(r); pattern != strings.TrimSpace(rt.method+" "+rt.pattern) {
+					t.Errorf("%s %s is served by %q", method, rt.path(), pattern)
+				}
+				if reachesOutside[rt.method+" "+rt.pattern] {
+					break
+				}
+				if w := request(method, rt.path(), ""); w.Code != http.StatusUnauthorized {
+					t.Errorf("without the token: %d, want 401", w.Code)
+				}
+				if method == "GET" {
+					break
+				}
+				if w := request(method, rt.path(), "{}", withToken); w.Code != http.StatusForbidden {
+					t.Errorf("without X-Bridge-Dashboard: %d, want 403", w.Code)
+				}
+				if w := request(method, rt.path(), "a=b", withToken, asDashboard, asForm); w.Code != http.StatusUnsupportedMediaType {
+					t.Errorf("a form body: %d, want 415", w.Code)
+				}
+				if w := request(method, rt.path(), "{}", withToken, asDashboard, fromElsewhere); w.Code != http.StatusForbidden {
+					t.Errorf("from another site: %d, want 403", w.Code)
+				}
+			case classScript:
+				if w := request(method, rt.path(), "{}", fromElsewhere); w.Code != http.StatusForbidden {
+					t.Errorf("from another site: %d, want 403", w.Code)
+				}
+				if w := request(method, rt.path(), "{}", underOtherHost); w.Code != http.StatusMisdirectedRequest {
+					t.Errorf("under another host name: %d, want 421", w.Code)
+				}
+				if w := request(method, rt.path(), "{}", asBearer); w.Code != http.StatusUnauthorized {
+					t.Errorf("with the dashboard token: %d, want 401", w.Code)
+				}
+				if w := request(method, rt.path(), "{}", asScript); w.Code != http.StatusBadRequest {
+					t.Errorf("an empty request with the scripts token: %d, want the handler's 400", w.Code)
+				}
+			case classBuilder:
+				if w := request(method, rt.path(), "{}"); w.Code != http.StatusUnauthorized {
+					t.Errorf("without a builder token: %d, want 401", w.Code)
+				}
+				if w := request(method, rt.path(), "{}", withToken); w.Code != http.StatusUnauthorized {
+					t.Errorf("with the dashboard token: %d, want 401", w.Code)
+				}
+			case classBrainRun:
+				if w := request(method, rt.path(), "{}"); w.Code != http.StatusUnauthorized {
+					t.Errorf("without a run's token: %d, want 401", w.Code)
+				}
+				if w := request(method, rt.path(), "{}", withToken, asBearer); w.Code != http.StatusUnauthorized {
+					t.Errorf("with the dashboard token: %d, want 401", w.Code)
+				}
+				if w := request(method, rt.path(), "{}", fromElsewhere); method != "GET" && w.Code != http.StatusForbidden {
+					t.Errorf("from another site: %d, want 403", w.Code)
+				}
+			case classAPIMount:
+				r := httptest.NewRequest(method, "http://"+defaultHTTPListen+rt.path(), nil)
+				if _, pattern := api.Handler(r); pattern != "" {
+					t.Errorf("%s %s is served by %q", method, rt.path(), pattern)
+				}
+				if w := request(method, rt.path(), ""); w.Code != http.StatusUnauthorized {
+					t.Errorf("without the token: %d, want 401", w.Code)
+				}
+				if w := request(method, rt.path(), "", withToken); w.Code != http.StatusNotFound {
+					t.Errorf("with the token: %d, want 404", w.Code)
+				}
+			case classLogin:
+				if w := request(method, rt.path(), "{}"); w.Code != http.StatusForbidden {
+					t.Errorf("without X-Bridge-Dashboard: %d, want 403", w.Code)
+				}
+				if w := request(method, rt.path(), "a=b", asDashboard, asForm); w.Code != http.StatusUnsupportedMediaType {
+					t.Errorf("a form body: %d, want 415", w.Code)
+				}
+				if w := request(method, rt.path(), "{}", asDashboard, fromElsewhere); w.Code != http.StatusForbidden {
+					t.Errorf("from another site: %d, want 403", w.Code)
+				}
+				if w := request(method, rt.path(), `{"code":"nope"}`, asDashboard); w.Code != http.StatusUnauthorized {
+					t.Errorf("a wrong code: %d, want 401", w.Code)
+				}
+			case classNotFound:
+				if w := request(method, rt.path(), ""); w.Code != http.StatusNotFound {
+					t.Errorf("without a token: %d, want 404", w.Code)
+				}
+				if w := request(method, rt.path(), "", withToken, asBearer); w.Code != http.StatusNotFound {
+					t.Errorf("with the dashboard token: %d, want 404", w.Code)
+				}
+			case classPublic, classStatic:
+				if w := request(method, rt.path(), ""); w.Code != http.StatusOK {
+					t.Errorf("without a token: %d, want 200", w.Code)
+				}
+				if w := request("POST", rt.path(), "{}"); rt.class == classStatic && w.Code != http.StatusMethodNotAllowed {
+					t.Errorf("POST: %d, want 405", w.Code)
+				}
+			default:
+				t.Fatalf("unknown class %q", rt.class)
+			}
+			if method == "GET" {
+				w := request("GET", rt.path(), "", withToken)
+				for _, secret := range secrets {
+					if strings.Contains(w.Body.String(), secret) {
+						t.Errorf("GET %s shows a secret: %s", rt.path(), w.Body.String())
+					}
+				}
+				if rt.class == classAPI && strings.HasPrefix(w.Header().Get("Content-Type"), "application/json") && !json.Valid(w.Body.Bytes()) {
+					t.Errorf("GET %s: not JSON: %s", rt.path(), w.Body.String())
+				}
+			}
+		})
+	}
+	for p := range reachesOutside {
+		if !slices.ContainsFunc(routeInventory, func(r route) bool { return r.method+" "+r.pattern == p }) {
+			t.Errorf("reachesOutside lists %q, which is not in routeInventory", p)
+		}
+	}
+}
