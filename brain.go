@@ -306,10 +306,12 @@ const (
 )
 
 type brainRun struct {
-	cancel  context.CancelFunc
-	done    chan struct{}
+	cancel context.CancelFunc
+	done   chan struct{}
+	// pid is the CLI's while it runs, and 0 once Wait has reaped it: for
+	// the dashboard, which shows it. Stopping a run takes no PID (see
+	// interruptRun).
 	pid     int
-	once    sync.Once // guards close(done) against a double close
 	msg     Inbound
 	started time.Time
 }
@@ -1677,6 +1679,8 @@ func (br *Brain) invoke(run *brainRun, ctx context.Context, s *brainSettings, m 
 		// What is left of the process group, a command the run left in
 		// the background say: nothing else stops it.
 		_ = killProcessGroup(pid)
+		// The PID is free for another process now.
+		br.setRunPID(run, 0)
 		// Everything the CLI wrote has reached the parser: this ends its
 		// output.
 		stdoutW.Close()
@@ -2122,7 +2126,7 @@ func (br *Brain) finishRun(run *brainRun) {
 	}
 	br.mu.Unlock()
 
-	run.once.Do(func() { close(run.done) })
+	close(run.done)
 }
 
 func (br *Brain) setRunPID(run *brainRun, pid int) {
@@ -2131,24 +2135,13 @@ func (br *Brain) setRunPID(run *brainRun, pid int) {
 	br.mu.Unlock()
 }
 
-// interruptRun cancels a run and kills its process.
+// interruptRun stops a run by cancelling its context, on which cmd.Cancel
+// kills the run's process group (see invoke): the one way a run is
+// stopped. It signals no process itself, so a stop that comes once the
+// CLI was reaped cannot hit another process that got its PID meanwhile.
 func (br *Brain) interruptRun(run *brainRun) {
-	if run == nil {
-		return
-	}
-
-	run.cancel()
-
-	br.mu.Lock()
-	pid := run.pid
-	br.mu.Unlock()
-
-	if pid <= 0 {
-		return
-	}
-	// The run's process group: Claude and anything it started.
-	if err := killProcessGroup(pid); err != nil {
-		log.Printf("brain %s: failed to kill process group %d: %v", br.id, pid, err)
+	if run != nil {
+		run.cancel()
 	}
 }
 
