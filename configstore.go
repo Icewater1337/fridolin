@@ -724,10 +724,10 @@ func unknownKeys(data []byte, t reflect.Type, path string) []string {
 				}
 			}
 			if !ok {
-				out = append(out, keyPath(path, k))
+				out = append(out, unknownKeyPath(path, k))
 				continue
 			}
-			out = append(out, unknownKeys(obj[k], ft, keyPath(path, k))...)
+			out = append(out, unknownKeys(obj[k], ft, unknownKeyPath(path, k))...)
 		}
 	case reflect.Slice, reflect.Array:
 		var arr []json.RawMessage
@@ -743,7 +743,7 @@ func unknownKeys(data []byte, t reflect.Type, path string) []string {
 			return nil
 		}
 		for _, k := range slices.Sorted(maps.Keys(obj)) {
-			out = append(out, unknownKeys(obj[k], t.Elem(), keyPath(path, k))...)
+			out = append(out, unknownKeys(obj[k], t.Elem(), unknownKeyPath(path, k))...)
 		}
 	}
 	return out
@@ -766,8 +766,8 @@ func jsonFieldsOf(t reflect.Type) map[string]reflect.Type {
 	return fields
 }
 
-// keyPath is the path of key k in the object at path.
-func keyPath(path, k string) string {
+// unknownKeyPath is the path of key k in the object at path.
+func unknownKeyPath(path, k string) string {
 	if path == "" {
 		return k
 	}

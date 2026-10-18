@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io/fs"
 	"os"
@@ -623,5 +624,64 @@ func TestUnknownKeysInMapsAndSlices(t *testing.T) {
 	want := []string{"by_name.x.extra", "items[1].nmae", "other", "ptr.bad"}
 	if !slices.Equal(got, want) {
 		t.Errorf("unknownKeys = %v, want %v", got, want)
+	}
+}
+
+// A hand edit follows the same version migration as startup, but its ETag
+// still names the exact bytes on disk until a successful delta saves v2.
+func TestConfigExternalEditMigrationKeepsItsETag(t *testing.T) {
+	cs := openTxStore(t, `{"version":2,"brain_model":"sonnet"}`)
+	old := cs.ETag()
+	const external = `{"model":"opus","log_level":"debug"}`
+	if err := os.WriteFile(cs.Path(), []byte(external), 0600); err != nil {
+		t.Fatal(err)
+	}
+	called := false
+	if _, err := cs.Update(old, func(c *Config) error { called = true; return nil }); !errors.Is(err, ErrConfigConflict) || called {
+		t.Fatalf("update = %v, mutation called %v; want conflict before mutation", err, called)
+	}
+	snap := cs.Snapshot()
+	if snap.File.Version != currentConfigVersion || snap.Effective.BrainModel != "opus" || snap.File.BrainModel != "opus" || snap.ETag != etagOf([]byte(external)) {
+		t.Fatalf("hand edit was not migrated into a consistent snapshot: %+v", snap)
+	}
+	if data, err := os.ReadFile(cs.Path()); err != nil || string(data) != external {
+		t.Fatalf("conflict rewrote external file: %s (%v)", data, err)
+	}
+	if _, err := cs.Update(snap.ETag, func(c *Config) error { c.Version = 0; c.LogLevel = "info"; return nil }); err != nil {
+		t.Fatal(err)
+	}
+	raw := readRawConfig(t, cs.Path())
+	if string(raw["version"]) != "2" || string(raw["brain_model"]) != `"opus"` || raw["model"] != nil {
+		t.Fatalf("saved migration = %v", raw)
+	}
+	data, err := os.ReadFile(cs.Path())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cs.ETag() != etagOf(data) {
+		t.Fatal("saved snapshot ETag does not identify the saved file")
+	}
+	if backup, err := os.ReadFile(cs.Path() + ".bak"); err != nil || string(backup) != external {
+		t.Fatalf("backup = %s (%v), want original external edit", backup, err)
+	}
+}
+
+// A newer hand edit must not be published or overwritten by an update.
+func TestConfigUpdateRefusesANewerExternalVersion(t *testing.T) {
+	cs := openTxStore(t, `{"version":2,"brain_model":"sonnet"}`)
+	before := cs.Snapshot()
+	const external = `{"version":3,"brain_model":"opus","a_new_setting":true}`
+	if err := os.WriteFile(cs.Path(), []byte(external), 0600); err != nil {
+		t.Fatal(err)
+	}
+	called := false
+	if _, err := cs.Update("", func(c *Config) error { called = true; return nil }); !errors.Is(err, errConfigTooNew) || called {
+		t.Fatalf("update = %v, mutation called %v; want future-version refusal", err, called)
+	}
+	if after := cs.Snapshot(); after != before {
+		t.Fatal("a refused future version changed the live snapshot")
+	}
+	if data, err := os.ReadFile(cs.Path()); err != nil || string(data) != external {
+		t.Fatalf("future file changed: %s (%v)", data, err)
 	}
 }
