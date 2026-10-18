@@ -172,9 +172,11 @@ dashboard refuses to save any brain's settings.
 Each message is one `claude -p` run in the brain's folder. Its prompt is
 the brain's prompt file (`brain-prompt.md`) followed by the messages of
 the chat before the new one (the last 10 of a direct chat, 20 of a
-group), what went out there while the new one waited for its run or
-still waits to go out to WhatsApp (the reply to the message before it,
-say), and the new message; Claude Code adds its own system prompt. Each
+group, looked for in the last 16 MB of the history, which the bridge
+reads back from its end, skipping a line longer than 4 MB), what went
+out there while the new one waited for its run or still waits to go
+out to WhatsApp (the reply to the message before it, say), and the new
+message; Claude Code adds its own system prompt. Each
 message is one line of JSON with its time, sender and text, so that
 nothing someone writes can pass for the prompt's own structure or for
 another sender. The prompt reaches the CLI on stdin, not among its

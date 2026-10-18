@@ -1,7 +1,6 @@
 package main
 
 import (
-	"encoding/json"
 	"sort"
 	"sync"
 	"time"
@@ -79,15 +78,8 @@ func (a *Activity) Seed(br *Brain) {
 		return
 	}
 	a.seeded[brainID] = true
-	lines := br.historyTail(128 * 1024)
-	if len(lines) > 50 {
-		lines = lines[len(lines)-50:]
-	}
-	for _, l := range lines {
-		var e historyEntry
-		if json.Unmarshal([]byte(l), &e) == nil {
-			a.addLocked(brainID, e)
-		}
+	for _, e := range br.recentHistory(50, 128<<10) {
+		a.addLocked(brainID, e)
 	}
 	sort.SliceStable(a.entries, func(i, j int) bool { return a.entries[i].TS.Before(a.entries[j].TS) })
 }

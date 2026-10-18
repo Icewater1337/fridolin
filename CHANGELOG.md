@@ -61,6 +61,12 @@ yet, so everything is under Unreleased until the first one.
   backed-up files lost more than half of them, so that a wiped
   `memories/` is no longer mirrored. "Mirror the deletion…" on the
   backup card goes ahead with one that was meant.
+- A run's prompt looks for the chat's last messages in the last 16 MB of
+  the brain's history, read back from its end, instead of reading the
+  whole file for every run. A chat that was quiet behind more than 16 MB
+  of other chats' messages starts without its earlier ones. A history
+  line longer than 4 MB is skipped; before, a line over 1 MB stopped the
+  reading, and every chat's prompt stayed at the messages before it.
 
 ### Added
 

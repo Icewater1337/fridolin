@@ -1450,9 +1450,11 @@ const (
 	groupHistoryWindow = 20
 )
 
-// promptHistoryTail is how much of the end of the history a run's prompt
-// is looked for in first: far more than a window of messages takes.
-const promptHistoryTail = 1 << 20
+// promptHistoryBudget is how far back from the end of the history a run's
+// prompt looks for its chat's messages: far more than a window of them
+// takes in a busy brain, so that a chat quiet while others talked still
+// gets its last messages, without reading years of history on every run.
+var promptHistoryBudget int64 = 16 << 20
 
 // historyBefore returns what m's run is shown of its chat, the one that
 // goes by chatJIDs(m), oldest first and at most limit entries in all.
@@ -1473,13 +1475,12 @@ func (br *Brain) historyBefore(m Inbound, limit int) (before, since []historyEnt
 	// The answers on their way first, then the history: one delivered in
 	// between is in both, and withUndelivered takes it once.
 	pending := br.undelivered(chats)
-	split := func(entries []historyEntry) {
-		at := m.loggedIn(entries)
-		if at < 0 {
-			before, since = withUndelivered(entries, pending), nil
-			return
-		}
-		before, since = entries[:at], nil
+	entries := br.chatHistory(chats, m.enoughBefore(limit))
+	at := m.loggedIn(entries)
+	if at < 0 {
+		before = withUndelivered(entries, pending)
+	} else {
+		before = entries[:at]
 		for _, e := range entries[at+1:] {
 			if e.Type == historyOut {
 				since = append(since, e)
@@ -1487,54 +1488,60 @@ func (br *Brain) historyBefore(m Inbound, limit int) (before, since []historyEnt
 		}
 		since = withUndelivered(since, pending)
 	}
-	entries, whole := br.chatHistory(chats, promptHistoryTail)
-	split(entries)
-	if len(before) < limit && !whole {
-		// A chat that was quiet while others were busy: its window is
-		// further back than the end of the file.
-		entries, _ = br.chatHistory(chats, 0)
-		split(entries)
-	}
 	// The newest count most: what was sent since, then what came before.
 	since = since[max(0, len(since)-limit):]
 	before = before[max(0, len(before)-(limit-len(since))):]
 	return before, since
 }
 
+// enoughBefore tells chatHistory, which reads the chat's history back from
+// its end, when it has what m's run needs: every line of m's (see
+// Inbound.logged) and limit entries before the first of them, or for a
+// message without lines, limit entries. A line deleted since is not
+// found, and the reading goes on as far as it may.
+func (m Inbound) enoughBefore(limit int) func(e historyEntry) bool {
+	var lines []historyEntry
+	for _, p := range m.ownParts() {
+		if p.logged != (historyEntry{}) {
+			lines = append(lines, p.logged)
+		}
+	}
+	older := 0
+	return func(e historyEntry) bool {
+		if len(lines) > 0 {
+			// Newest first: the first of m's lines is the last found.
+			if i := slices.IndexFunc(lines, func(l historyEntry) bool { return l.sameLine(e) }); i >= 0 {
+				lines = slices.Delete(lines, i, i+1)
+			}
+			return false
+		}
+		older++
+		return older >= limit
+	}
+}
+
 // chatHistory returns the entries of the chat that goes by chats in the
-// brain's history, oldest first: those in the last tail bytes of the file,
-// or all of them for a tail of 0, and whether that was all. A DM's lines
-// may be under its LID or its number, and both are the one chat. It
-// returns none when the history cannot be read (see openInFolder).
-func (br *Brain) chatHistory(chats []string, tail int64) (entries []historyEntry, whole bool) {
-	f, err := openInFolder(br.root, historyFileName, os.O_RDONLY, 0)
-	if err != nil {
-		return nil, true
-	}
-	defer f.Close()
-	keep := func(line []byte) {
+// brain's history, oldest first. It reads them back from the end of the
+// file, each newest first to enough, until enough reports that it has
+// what it needs, or promptHistoryBudget is read, or the file's start is
+// reached. A DM's lines may be under its LID or its number, and both are
+// the one chat. It returns none when the history cannot be read (see
+// openInFolder).
+func (br *Brain) chatHistory(chats []string, enough func(historyEntry) bool) []historyEntry {
+	var entries []historyEntry
+	br.scanHistory(promptHistoryBudget, func(line []byte) bool {
+		if !mentionsChat(line, chats) {
+			return true
+		}
 		var e historyEntry
-		if json.Unmarshal(line, &e) == nil && slices.Contains(chats, e.Chat) {
-			entries = append(entries, e)
+		if json.Unmarshal(line, &e) != nil || !slices.Contains(chats, e.Chat) {
+			return true
 		}
-	}
-	if st, err := f.Stat(); err == nil && tail > 0 && st.Size() > tail {
-		for _, line := range tailLines(f, tail) {
-			keep([]byte(line))
-		}
-		return entries, false
-	}
-	// A line at a time, however long one is.
-	r := bufio.NewReader(f)
-	for {
-		line, err := r.ReadBytes('\n')
-		if line = bytes.TrimSpace(line); len(line) > 0 {
-			keep(line)
-		}
-		if err != nil {
-			return entries, true
-		}
-	}
+		entries = append(entries, e)
+		return !enough(e)
+	})
+	slices.Reverse(entries)
+	return entries
 }
 
 // loggedIn returns where m's own lines begin in entries, the chat's
