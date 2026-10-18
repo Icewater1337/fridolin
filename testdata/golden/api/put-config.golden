@@ -1,0 +1,10 @@
+PUT /api/config
+200 OK
+Content-Type: application/json
+
+{
+  "etag": "<ETAG>",
+  "restart_required": [
+    "http_listen"
+  ]
+}

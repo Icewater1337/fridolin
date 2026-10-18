@@ -1,0 +1,8 @@
+POST /api/brains
+{"create_dir":true,"manifest":{"id":"Bad Id","name":"Bad"},"path":"~/bad"}
+422 Unprocessable Entity
+Content-Type: application/json
+
+{
+  "error": "brain id \"Bad Id\" must be 1–40 lowercase letters, digits, - or _"
+}

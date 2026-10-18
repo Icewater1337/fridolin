@@ -1,0 +1,9 @@
+GET /api/logs
+200 OK
+Content-Type: application/json
+
+{
+  "boot": "<BOOT>",
+  "lines": "<LINES>",
+  "next": "<NEXT>"
+}

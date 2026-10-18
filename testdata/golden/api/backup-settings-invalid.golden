@@ -1,0 +1,8 @@
+PUT /api/backup/settings
+{"daily_at":"25:00"}
+422 Unprocessable Entity
+Content-Type: application/json
+
+{
+  "error": "backup.daily_at \"25:00\" must be HH:MM (24h)"
+}

@@ -1,0 +1,8 @@
+PUT /api/plaud/settings
+{"interval_seconds":5}
+400 Bad Request
+Content-Type: application/json
+
+{
+  "error": "invalid JSON: json: unknown field \"interval_seconds\""
+}

@@ -1,0 +1,7 @@
+GET /api/site/build/main
+404 Not Found
+Content-Type: application/json
+
+{
+  "error": "no builder brain main (Site → Builders)"
+}

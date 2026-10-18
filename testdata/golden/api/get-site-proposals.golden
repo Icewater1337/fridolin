@@ -1,0 +1,7 @@
+GET /api/site/proposals
+200 OK
+Content-Type: application/json
+
+{
+  "proposals": []
+}

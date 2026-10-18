@@ -1,0 +1,103 @@
+GET /api/brains
+200 OK
+Content-Type: application/json
+
+[
+  {
+    "id": "main",
+    "issues": [],
+    "manifest": {
+      "backup": {
+        "enabled": true,
+        "exclude": [
+          "node_modules/",
+          "*.log",
+          "- private.txt"
+        ]
+      },
+      "calendar": {
+        "account": "you@example.com",
+        "calendars": [
+          "you@example.com",
+          "team@example.com"
+        ],
+        "default": "you@example.com"
+      },
+      "id": "main",
+      "name": "Main",
+      "observe": "history",
+      "prompt_file": "brain-prompt.md",
+      "routing": {
+        "default": true,
+        "groups": [
+          "120363000000000000@g.us"
+        ],
+        "handles_dms": true
+      },
+      "version": 1
+    },
+    "name": "Main",
+    "path": "<HOME>/main",
+    "runtime": {
+      "backup": {
+        "enabled": true,
+        "exclude": [
+          "node_modules/",
+          "*.log",
+          "- private.txt"
+        ]
+      },
+      "dir": "<HOME>/main",
+      "effort": "",
+      "id": "main",
+      "last": {
+        "chat": "15551234567@s.whatsapp.net",
+        "finished": "<TIME>",
+        "outcome": "ok",
+        "seconds": "<SECONDS>"
+      },
+      "manifest": {
+        "backup": {
+          "enabled": true,
+          "exclude": [
+            "node_modules/",
+            "*.log",
+            "- private.txt"
+          ]
+        },
+        "calendar": {
+          "account": "you@example.com",
+          "calendars": [
+            "you@example.com",
+            "team@example.com"
+          ],
+          "default": "you@example.com"
+        },
+        "id": "main",
+        "name": "Main",
+        "observe": "history",
+        "prompt_file": "brain-prompt.md",
+        "routing": {
+          "default": true,
+          "groups": [
+            "120363000000000000@g.us"
+          ],
+          "handles_dms": true
+        },
+        "version": 1
+      },
+      "model": "",
+      "name": "Main",
+      "queue": [],
+      "routing": {
+        "default": true,
+        "groups": [
+          "120363000000000000@g.us"
+        ],
+        "handles_dms": true
+      },
+      "running": null
+    },
+    "status": "ok"
+  }
+]

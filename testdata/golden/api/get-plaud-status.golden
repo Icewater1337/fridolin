@@ -1,0 +1,27 @@
+GET /api/plaud/status
+200 OK
+Content-Type: application/json
+
+{
+  "account": "you@example.com",
+  "auto_brain": "main",
+  "cli": {
+    "found": true,
+    "install_hint": "npm install -g @plaud-ai/cli",
+    "path": "<TEST_BINARY>"
+  },
+  "connect": {
+    "state": "done"
+  },
+  "connected": true,
+  "default_message": "Handle it as skills/plaud.md says. Without that skill: keep it with this brain's notes, then reply with a short summary and the action items.",
+  "interval_seconds": 60,
+  "login_dir": "<PLAUD_HOME>/.plaud",
+  "settings": {
+    "cli_path": "<TEST_BINARY>",
+    "enabled": true
+  },
+  "summary_chat": "15551234567@s.whatsapp.net",
+  "summary_to_you": true,
+  "target_brain": "main"
+}
