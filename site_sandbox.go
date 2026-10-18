@@ -45,6 +45,7 @@ type siteModuleCaps struct {
 	Commands  []string // as declared
 	Secrets   []string
 	Ingest    []string // brains it may hand files to (site_ingest.go)
+	Search    []string // brains whose folder it may search (site_ingest.go)
 	// Dist is the resolved app.dist, the files the site serves; "" without an app.
 	Dist string
 }
@@ -86,12 +87,13 @@ func readModuleCaps(modulesDir, home string) []siteModuleCaps {
 				Commands []string `json:"commands"`
 				Secrets  []string `json:"secrets"`
 				Ingest   []string `json:"ingest"`
+				Search   []string `json:"search"`
 			} `json:"capabilities"`
 		}
 		if json.Unmarshal(data, &mf) != nil || mf.ID != e.Name() {
 			continue
 		}
-		c := siteModuleCaps{ID: mf.ID, Title: mf.Title, Dir: dir, Commands: mf.Capabilities.Commands, Secrets: mf.Capabilities.Secrets, Ingest: mf.Capabilities.Ingest}
+		c := siteModuleCaps{ID: mf.ID, Title: mf.Title, Dir: dir, Commands: mf.Capabilities.Commands, Secrets: mf.Capabilities.Secrets, Ingest: mf.Capabilities.Ingest, Search: mf.Capabilities.Search}
 		if mf.App != nil && mf.App.Dist != "" {
 			c.Dist = resolveModulePath(mf.App.Dist, dir, home)
 		}

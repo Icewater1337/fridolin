@@ -1,22 +1,37 @@
 package main
 
-// Files the site hands to brains (docs/SITE.md, "Handing files to a brain").
+// What the site hands to the bridge (docs/SITE.md, "Handing files to a
+// brain" and "Searching a brain's folder").
 //
-// The live site's sandbox keeps it out of Fridolin's data folder and away from
-// the bridge's HTTP port, so a module cannot drop files into the media folder
-// or call /ingest. ctx.ingest instead puts the files and a request.json into a
-// folder of its own under <data_dir>/site/spool/. The bridge looks there every
-// second, checks that the module is live and lists that brain in
-// capabilities.ingest, moves the files into its media folder and hands them to
-// the brain as /ingest would. It answers in result.json next to the request.
+// The live site's sandbox keeps it out of Fridolin's data folder and away
+// from the bridge's HTTP port. A module therefore hands work over through a
+// folder of the site's own, <data_dir>/site/spool/, one folder per request:
+//
+//   - ctx.ingest writes files/ and request.json. The bridge checks that the
+//     live commit's module lists that brain in capabilities.ingest, moves the
+//     files into its media folder and hands them to the brain as /ingest
+//     would, then answers in result.json.
+//   - ctx.search writes search.json. The bridge checks capabilities.search,
+//     runs a read-only Claude agent (Read, Grep, Glob) in that brain's folder
+//     under that brain's sandbox, writes its output to stream.jsonl as it
+//     comes, and answers in result.json. A cancel file stops it.
+//
+// The bridge runs outside any sandbox and everything in the spool folder is
+// the site's to write. So the bridge reaches it only through an os.Root,
+// which refuses a symlink that leads out of the folder, trusts no name, and
+// creates what it writes with O_EXCL.
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"log"
 	"os"
+	"os/exec"
+	"path"
 	"path/filepath"
 	"regexp"
 	"slices"
@@ -24,7 +39,7 @@ import (
 	"time"
 )
 
-// spoolRequest is a module's request.json.
+// spoolRequest is a module's request.json (ctx.ingest).
 type spoolRequest struct {
 	Module string   `json:"module"`
 	Brain  string   `json:"brain"`
@@ -33,11 +48,23 @@ type spoolRequest struct {
 	Sender string   `json:"sender"`
 }
 
+// spoolSearch is a module's search.json (ctx.search).
+type spoolSearch struct {
+	Module string `json:"module"`
+	Brain  string `json:"brain"`
+	Prompt string `json:"prompt"`
+}
+
 var spoolEntryRE = regexp.MustCompile(`^[0-9a-f]{24}$`)
+
+const (
+	spoolSearchLimit   = 4 // searches at once
+	spoolSearchTimeout = 3 * time.Minute
+)
 
 func (m *SiteManager) spoolDir() string { return m.dir("spool") }
 
-// watchSpool handles the site's requests until ctx ends.
+// watchSpool answers the site's requests until ctx ends.
 func (m *SiteManager) watchSpool(ctx context.Context) {
 	t := time.NewTicker(time.Second)
 	defer t.Stop()
@@ -46,53 +73,116 @@ func (m *SiteManager) watchSpool(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case <-t.C:
-			m.processSpool()
+			m.processSpool(ctx)
 		}
 	}
 }
 
-// processSpool answers every request that has no answer yet, and clears
-// out what is old: answered requests after ten minutes, unfinished ones
-// after an hour.
-func (m *SiteManager) processSpool() {
+// processSpool answers every request that has no answer yet and clears out
+// what is old: answered requests after ten minutes, unfinished ones after an
+// hour.
+func (m *SiteManager) processSpool(ctx context.Context) {
+	root, err := os.OpenRoot(m.spoolDir())
+	if err != nil {
+		return
+	}
+	defer root.Close()
 	entries, err := os.ReadDir(m.spoolDir())
 	if err != nil {
 		return
 	}
 	for _, e := range entries {
-		dir := filepath.Join(m.spoolDir(), e.Name())
-		// The site writes these folders; anything that is not one is left alone.
-		if !e.IsDir() || !spoolEntryRE.MatchString(e.Name()) || e.Type()&os.ModeSymlink != 0 {
+		name := e.Name()
+		// The site makes these folders; anything that is not one is left alone.
+		if !spoolEntryRE.MatchString(name) {
 			continue
 		}
-		result := filepath.Join(dir, "result.json")
-		if st, err := os.Lstat(result); err == nil {
+		if st, err := root.Lstat(name); err != nil || !st.IsDir() {
+			continue
+		}
+		if st, err := root.Lstat(path.Join(name, "result.json")); err == nil {
 			if time.Since(st.ModTime()) > 10*time.Minute {
-				_ = os.RemoveAll(dir)
+				_ = root.RemoveAll(name)
 			}
 			continue
 		}
-		if _, err := os.Lstat(filepath.Join(dir, "request.json")); err != nil {
-			if st, err := os.Lstat(dir); err == nil && time.Since(st.ModTime()) > time.Hour {
-				_ = os.RemoveAll(dir)
+		switch {
+		case spoolHas(root, name, "request.json"):
+			spoolAnswer(root, name, m.takeSpoolEntry(root, name), nil)
+		case spoolHas(root, name, "search.json"):
+			m.startSpoolSearch(ctx, name)
+		default:
+			if st, err := root.Lstat(name); err == nil && time.Since(st.ModTime()) > time.Hour {
+				_ = root.RemoveAll(name)
 			}
-			continue
-		}
-		answer := map[string]any{"ok": true}
-		if err := m.takeSpoolEntry(dir); err != nil {
-			log.Printf("[site] refused files from the site: %v", err)
-			answer = map[string]any{"ok": false, "error": err.Error()}
-		}
-		data, _ := json.Marshal(answer)
-		if err := writeFileAtomic(result, data, 0o600, false); err != nil {
-			log.Printf("[site] could not answer %s: %v", dir, err)
 		}
 	}
 }
 
+func spoolHas(root *os.Root, entry, file string) bool {
+	_, err := root.Lstat(path.Join(entry, file))
+	return err == nil
+}
+
+// spoolRead reads a regular file of at most n bytes in the spool.
+func spoolRead(root *os.Root, name string, n int64) ([]byte, error) {
+	st, err := root.Lstat(name)
+	if err != nil {
+		return nil, err
+	}
+	if !st.Mode().IsRegular() || st.Size() > n {
+		return nil, fmt.Errorf("%s is not a regular file of at most %d bytes", path.Base(name), n)
+	}
+	return root.ReadFile(name)
+}
+
+// spoolAnswer writes result.json: {ok:true, …extra} or {ok:false, error}.
+func spoolAnswer(root *os.Root, entry string, err error, extra map[string]any) {
+	answer := map[string]any{"ok": true}
+	for k, v := range extra {
+		answer[k] = v
+	}
+	if err != nil {
+		log.Printf("[site] refused a request from the site: %v", err)
+		answer = map[string]any{"ok": false, "error": err.Error()}
+	}
+	data, _ := json.Marshal(answer)
+	part := path.Join(entry, "result.json."+randomToken(6))
+	f, ferr := root.OpenFile(part, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
+	if ferr == nil {
+		_, ferr = f.Write(data)
+		if cerr := f.Close(); ferr == nil {
+			ferr = cerr
+		}
+	}
+	if ferr == nil {
+		ferr = root.Rename(part, path.Join(entry, "result.json"))
+	}
+	if ferr != nil {
+		log.Printf("[site] could not answer %s: %v", entry, ferr)
+		_ = root.Remove(part)
+	}
+}
+
+// liveCaps is the live commit's capabilities of a module, or false.
+func (m *SiteManager) liveCaps(module string) (siteModuleCaps, error) {
+	s := m.Settings()
+	if s.Approved == "" {
+		return siteModuleCaps{}, errors.New("no commit of the site is live")
+	}
+	for _, mod := range readModuleCaps(m.modulesDirOf(s.Approved), homeDir()) {
+		if mod.ID == module {
+			return mod, nil
+		}
+	}
+	return siteModuleCaps{}, fmt.Errorf("module %q is not live", module)
+}
+
+// ── ctx.ingest ────────────────────────────────────────────────────────────
+
 // takeSpoolEntry checks one request and hands its files to the brain.
-func (m *SiteManager) takeSpoolEntry(dir string) error {
-	data, err := readAtMostFile(filepath.Join(dir, "request.json"), 256*1024)
+func (m *SiteManager) takeSpoolEntry(root *os.Root, entry string) error {
+	data, err := spoolRead(root, path.Join(entry, "request.json"), 256*1024)
 	if err != nil {
 		return fmt.Errorf("reading the request: %w", err)
 	}
@@ -100,23 +190,12 @@ func (m *SiteManager) takeSpoolEntry(dir string) error {
 	if err := json.Unmarshal(data, &req); err != nil {
 		return errors.New("the request is not valid JSON")
 	}
-	s := m.Settings()
-	if s.Approved == "" {
-		return errors.New("no commit of the site is live")
+	// The site's word on which module asked is checked against the live manifests.
+	mod, err := m.liveCaps(req.Module)
+	if err != nil {
+		return err
 	}
-	// Only what the approved commit's module declares: the site's own word
-	// on which module asked is checked against the live manifests.
-	var allowed []string
-	found := false
-	for _, mod := range readModuleCaps(m.modulesDirOf(s.Approved), homeDir()) {
-		if mod.ID == req.Module {
-			allowed, found = mod.Ingest, true
-		}
-	}
-	if !found {
-		return fmt.Errorf("module %q is not live", req.Module)
-	}
-	if !slices.Contains(allowed, req.Brain) {
+	if !slices.Contains(mod.Ingest, req.Brain) {
 		return fmt.Errorf("module %q does not list brain %q in capabilities.ingest", req.Module, req.Brain)
 	}
 	if len(req.Files) == 0 && strings.TrimSpace(req.Text) == "" {
@@ -129,24 +208,21 @@ func (m *SiteManager) takeSpoolEntry(dir string) error {
 	if err := os.MkdirAll(media, 0o700); err != nil {
 		return err
 	}
-	// Check every file before moving any.
-	var srcs []string
+	// Check every file before taking any.
 	for _, name := range req.Files {
 		if name == "" || name != filepath.Base(name) || strings.HasPrefix(name, ".") {
 			return fmt.Errorf("%q is not a plain file name", name)
 		}
-		src := filepath.Join(dir, "files", name)
-		st, err := os.Lstat(src)
+		st, err := root.Lstat(path.Join(entry, "files", name))
 		if err != nil || !st.Mode().IsRegular() {
 			return fmt.Errorf("%s is not a regular file", name)
 		}
-		srcs = append(srcs, src)
 	}
 	var paths []string
-	for _, src := range srcs {
-		dst := uniqueMediaPath(media, filepath.Base(src))
-		if err := os.Rename(src, dst); err != nil {
-			return fmt.Errorf("moving %s into the media folder: %w", filepath.Base(src), err)
+	for _, name := range req.Files {
+		dst, err := spoolTake(root, path.Join(entry, "files", name), media)
+		if err != nil {
+			return fmt.Errorf("taking %s: %w", name, err)
 		}
 		paths = append(paths, dst)
 	}
@@ -161,6 +237,36 @@ func (m *SiteManager) takeSpoolEntry(dir string) error {
 	return m.hooks.ingest(req.Brain, sender, text, paths)
 }
 
+// spoolTake copies a spool file into the media folder, as a new file, and
+// removes it from the spool. A copy, not a rename: the source is opened
+// through the root, so a symlink cannot make it a file from elsewhere.
+func spoolTake(root *os.Root, name, media string) (string, error) {
+	src, err := root.Open(name)
+	if err != nil {
+		return "", err
+	}
+	defer src.Close()
+	if st, err := src.Stat(); err != nil || !st.Mode().IsRegular() {
+		return "", errors.New("not a regular file")
+	}
+	dst := uniqueMediaPath(media, path.Base(name))
+	out, err := os.OpenFile(dst, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
+	if err != nil {
+		return "", err
+	}
+	if _, err := io.Copy(out, src); err != nil {
+		out.Close()
+		os.Remove(dst)
+		return "", err
+	}
+	if err := out.Close(); err != nil {
+		os.Remove(dst)
+		return "", err
+	}
+	_ = root.Remove(name)
+	return dst, nil
+}
+
 // uniqueMediaPath is name in media, with a time prefix if that is taken.
 func uniqueMediaPath(media, name string) string {
 	p := filepath.Join(media, name)
@@ -170,17 +276,128 @@ func uniqueMediaPath(media, name string) string {
 	return filepath.Join(media, fmt.Sprintf("%d_%s", time.Now().UnixNano(), name))
 }
 
-// readAtMostFile reads a file of at most n bytes, refusing a symlink.
-func readAtMostFile(path string, n int64) ([]byte, error) {
-	st, err := os.Lstat(path)
+// ── ctx.search ────────────────────────────────────────────────────────────
+
+// startSpoolSearch runs a search once: the started marker, made with O_EXCL,
+// keeps a second look at the folder from starting it again.
+func (m *SiteManager) startSpoolSearch(ctx context.Context, entry string) {
+	root, err := os.OpenRoot(m.spoolDir())
 	if err != nil {
-		return nil, err
+		return
 	}
-	if !st.Mode().IsRegular() {
-		return nil, errors.New("not a regular file")
+	f, err := root.OpenFile(path.Join(entry, "started"), os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
+	if err != nil {
+		root.Close()
+		return
 	}
-	if st.Size() > n {
-		return nil, fmt.Errorf("larger than %d bytes", n)
+	f.Close()
+	go func() {
+		defer root.Close()
+		started := time.Now()
+		err := m.runSpoolSearch(ctx, root, entry)
+		spoolAnswer(root, entry, err, map[string]any{"duration_ms": time.Since(started).Milliseconds()})
+	}()
+}
+
+func (m *SiteManager) runSpoolSearch(ctx context.Context, root *os.Root, entry string) error {
+	data, err := spoolRead(root, path.Join(entry, "search.json"), 64*1024)
+	if err != nil {
+		return fmt.Errorf("reading the search: %w", err)
 	}
-	return os.ReadFile(path)
+	var req spoolSearch
+	if err := json.Unmarshal(data, &req); err != nil {
+		return errors.New("the search is not valid JSON")
+	}
+	mod, err := m.liveCaps(req.Module)
+	if err != nil {
+		return err
+	}
+	if !slices.Contains(mod.Search, req.Brain) {
+		return fmt.Errorf("module %q does not list brain %q in capabilities.search", req.Module, req.Brain)
+	}
+	if strings.TrimSpace(req.Prompt) == "" || len(req.Prompt) > 20000 {
+		return errors.New("the prompt must be 1 to 20000 characters")
+	}
+	if m.hooks.search == nil {
+		return errors.New("this Fridolin cannot run searches")
+	}
+	select {
+	case m.searchSlots <- struct{}{}:
+		defer func() { <-m.searchSlots }()
+	default:
+		return errors.New("too many searches at once; try again in a moment")
+	}
+	out, err := root.OpenFile(path.Join(entry, "stream.jsonl"), os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
+	if err != nil {
+		return err
+	}
+	defer out.Close()
+
+	ctx, cancel := context.WithTimeout(ctx, spoolSearchTimeout)
+	defer cancel()
+	// The site asks to stop by writing a cancel file.
+	go func() {
+		t := time.NewTicker(500 * time.Millisecond)
+		defer t.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-t.C:
+				if spoolHas(root, entry, "cancel") {
+					cancel()
+					return
+				}
+			}
+		}
+	}()
+	err = m.hooks.search(ctx, req.Brain, req.Prompt, out)
+	if errors.Is(ctx.Err(), context.DeadlineExceeded) {
+		return fmt.Errorf("the search took longer than %v", spoolSearchTimeout)
+	}
+	if ctx.Err() != nil {
+		return errors.New("stopped")
+	}
+	return err
+}
+
+// runBrainSearch is the bridge's search hook: a read-only Claude agent in
+// the brain's folder, under the brain's sandbox, with the brain's login.
+func (b *Bridge) runBrainSearch(ctx context.Context, brainID, prompt string, out io.Writer) error {
+	br := b.brainMgr.Get(brainID)
+	if br == nil {
+		return fmt.Errorf("no brain %q", brainID)
+	}
+	cfg := b.cfgs.Get()
+	args := []string{"--output-format", "stream-json", "--verbose", "--tools", "Read,Grep,Glob",
+		// Only the brain folder's own setup, as for a brain's runs.
+		"--setting-sources", "project,local", "--strict-mcp-config"}
+	if s := excludeInstructionsAbove(br.Dir()); s != "" {
+		args = append(args, "--settings", s)
+	}
+	args = append(args, "-p", prompt)
+	bin := cfg.ClaudePath
+	env := childEnv(claudeChild, cfg.ChildEnvPassthrough)
+	if sp := b.brainMgr.profiler; sp != nil && sp.Enabled() {
+		sbBin, sbArgs, err := sp.Command(brainID, bin, args)
+		if err != nil {
+			return fmt.Errorf("the brain's sandbox: %w", err)
+		}
+		bin, args = sbBin, sbArgs
+		env = append(env, "DISABLE_AUTOUPDATER=1")
+	}
+	cmd := exec.CommandContext(ctx, bin, args...)
+	cmd.Dir = br.Dir()
+	cmd.Env = env
+	cmd.Stdout = out
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+	isolateProcessGroup(cmd)
+	if err := cmd.Run(); err != nil {
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
+		return fmt.Errorf("claude: %v: %s", err, tail(stderr.String(), 400))
+	}
+	return nil
 }

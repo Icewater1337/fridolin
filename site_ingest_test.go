@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"io"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -56,7 +57,7 @@ func spoolEntry(t *testing.T, m *SiteManager, id string, req spoolRequest, files
 	return dir
 }
 
-func spoolAnswer(t *testing.T, dir string) map[string]any {
+func readSpoolAnswer(t *testing.T, dir string) map[string]any {
 	t.Helper()
 	data, err := os.ReadFile(filepath.Join(dir, "result.json"))
 	if err != nil {
@@ -93,14 +94,20 @@ func TestSiteSpoolHandoff(t *testing.T) {
 	badName := spoolEntry(t, m, strings.Repeat("5", 24), spoolRequest{Module: "inbox", Brain: "web", Files: []string{"../escape.txt"}}, nil)
 	link := spoolEntry(t, m, strings.Repeat("6", 24), spoolRequest{Module: "inbox", Brain: "web", Files: []string{"link"}}, nil)
 	os.Symlink("/etc/hosts", filepath.Join(link, "files", "link"))
+	// files/ itself a symlink to a folder outside the spool: what is in it is not the site's to give.
+	secretDir := t.TempDir()
+	os.WriteFile(filepath.Join(secretDir, "id_ed25519"), []byte("PRIVATE"), 0o600)
+	swapped := spoolEntry(t, m, strings.Repeat("7", 24), spoolRequest{Module: "inbox", Brain: "web", Files: []string{"id_ed25519"}}, nil)
+	os.RemoveAll(filepath.Join(swapped, "files"))
+	os.Symlink(secretDir, filepath.Join(swapped, "files"))
 	// Not a folder ctx.ingest makes: left alone.
 	stray := filepath.Join(m.spoolDir(), "not-ours")
 	os.MkdirAll(stray, 0o700)
 	os.WriteFile(filepath.Join(stray, "request.json"), []byte(`{"module":"inbox","brain":"web","text":"x"}`), 0o600)
 
-	m.processSpool()
+	m.processSpool(context.Background())
 
-	if a := spoolAnswer(t, ok); a["ok"] != true {
+	if a := readSpoolAnswer(t, ok); a["ok"] != true {
 		t.Fatalf("the declared handoff was refused: %v", a)
 	}
 	if calls := got.list(); len(calls) != 1 || calls[0] != "web|sam|filed|Brief ü.pdf" {
@@ -115,14 +122,18 @@ func TestSiteSpoolHandoff(t *testing.T) {
 		notLive:     "is not live",
 		badName:     "not a plain file name",
 		link:        "not a regular file",
+		swapped:     "not a regular file",
 	} {
-		a := spoolAnswer(t, dir)
+		a := readSpoolAnswer(t, dir)
 		if a["ok"] != false || !strings.Contains(a["error"].(string), want) {
 			t.Errorf("%s: %v, want an error with %q", filepath.Base(dir), a, want)
 		}
 	}
 	if fileExists(filepath.Join(stray, "result.json")) {
 		t.Error("a folder ctx.ingest did not make was answered")
+	}
+	if !fileExists(filepath.Join(secretDir, "id_ed25519")) || fileExists(filepath.Join(media, "id_ed25519")) {
+		t.Error("a file outside the spool was taken through a symlinked files folder")
 	}
 	// A refused file stays where it was.
 	if !fileExists(filepath.Join(wrongBrain, "files", "a.txt")) {
@@ -132,7 +143,7 @@ func TestSiteSpoolHandoff(t *testing.T) {
 	// Answered requests go after ten minutes.
 	old := time.Now().Add(-11 * time.Minute)
 	os.Chtimes(filepath.Join(ok, "result.json"), old, old)
-	m.processSpool()
+	m.processSpool(context.Background())
 	if fileExists(ok) {
 		t.Error("an old answered request was kept")
 	}
@@ -153,6 +164,10 @@ func TestSiteModuleDataAndIngest(t *testing.T) {
 	os.MkdirAll(media, 0o700)
 	var got ingestCalls
 	m.hooks.ingest, m.hooks.mediaDir = got.hook, func() string { return media }
+	m.hooks.search = func(ctx context.Context, brainID, prompt string, out io.Writer) error {
+		_, err := io.WriteString(out, `{"type":"assistant","message":{"content":[{"type":"text","text":"`+brainID+` answers: `+prompt+`"}]}}`+"\n")
+		return err
+	}
 
 	remote := newBareRepo(t)
 	if err := m.ConnectRepo(ctx, SiteRepo{URL: remote}); err != nil {
@@ -163,7 +178,7 @@ func TestSiteModuleDataAndIngest(t *testing.T) {
 	}
 	work := filepath.Join(t.TempDir(), "work")
 	gitT(t, filepath.Dir(work), "clone", "-q", remote, work)
-	writeSiteModule(t, work, "inbox", map[string]any{"capabilities": map[string]any{"ingest": []string{"web"}}}, `import express from 'express'
+	writeSiteModule(t, work, "inbox", map[string]any{"capabilities": map[string]any{"ingest": []string{"web"}, "search": []string{"web"}}}, `import express from 'express'
 import { writeFileSync, readFileSync, readdirSync } from 'node:fs'
 import { join } from 'node:path'
 const attempt = async (f) => { try { return String(await f()).trim() } catch (e) { return 'error ' + (e.code ?? e.message) } }
@@ -173,6 +188,7 @@ export default (ctx) => express.Router().get('/probe', async (_req, res) => {
     data: await attempt(() => (writeFileSync(join(ctx.dataDir, 'state.json'), 'kept'), readFileSync(join(ctx.dataDir, 'state.json'), 'utf8'))),
     ingest: await attempt(async () => { writeFileSync(upload, 'pdf'); return (await ctx.ingest({ brain: 'web', files: [upload], text: 'file it', sender: 'sam' })).status }),
     otherBrain: await attempt(() => ctx.ingest({ brain: 'private', files: [], text: 'x' })),
+    search: await attempt(async () => { let s = ''; for await (const e of ctx.search({ brain: 'web', prompt: 'wo ist der Brief?' })) s += e.message.content[0].text; return s }),
     media: await attempt(() => readdirSync(`+jsString(media)+`).length),
   })
 })
@@ -222,7 +238,7 @@ export default (ctx) => express.Router().get('/probe', async (_req, res) => {
 	json.NewDecoder(r.Body).Decode(&out)
 	r.Body.Close()
 
-	if out["data"] != "kept" || out["ingest"] != "accepted" || !strings.Contains(out["otherBrain"], "capabilities.ingest") {
+	if out["data"] != "kept" || out["ingest"] != "accepted" || !strings.Contains(out["otherBrain"], "capabilities.ingest") || out["search"] != "web answers: wo ist der Brief?" {
 		t.Fatalf("probe = %v\n%s", out, strings.Join(m.site.status().Log, "\n"))
 	}
 	if runtime.GOOS == "darwin" && out["media"] != "error EPERM" {
@@ -236,5 +252,76 @@ export default (ctx) => express.Router().get('/probe', async (_req, res) => {
 	}
 	if data, _ := os.ReadFile(filepath.Join(m.dir("data"), "inbox", "state.json")); string(data) != "kept" {
 		t.Errorf("the module's data folder holds %q", data)
+	}
+}
+
+func TestSiteSpoolSearch(t *testing.T) {
+	m := newTestSite(t)
+	commit := strings.Repeat("b", 40)
+	m.settings.Approved = commit
+	mods := m.modulesDirOf(commit)
+	os.MkdirAll(filepath.Join(mods, "finder"), 0o700)
+	data, _ := json.Marshal(map[string]any{"version": 1, "id": "finder", "capabilities": map[string]any{"search": []string{"web"}}})
+	os.WriteFile(filepath.Join(mods, "finder", "module.json"), data, 0o600)
+
+	var mu sync.Mutex
+	var prompts []string
+	m.hooks.search = func(ctx context.Context, brainID, prompt string, out io.Writer) error {
+		mu.Lock()
+		prompts = append(prompts, brainID+": "+prompt)
+		mu.Unlock()
+		if prompt == "slow" {
+			<-ctx.Done() // until cancelled
+			return ctx.Err()
+		}
+		_, err := io.WriteString(out, `{"type":"assistant","message":{"content":[{"type":"text","text":"found Brief ü"}]}}`+"\n")
+		return err
+	}
+	write := func(id string, req spoolSearch) string {
+		dir := filepath.Join(m.spoolDir(), id)
+		os.MkdirAll(dir, 0o700)
+		data, _ := json.Marshal(req)
+		os.WriteFile(filepath.Join(dir, "search.json"), data, 0o600)
+		return dir
+	}
+	ok := write(strings.Repeat("a", 24), spoolSearch{Module: "finder", Brain: "web", Prompt: "where is the letter?"})
+	other := write(strings.Repeat("b", 24), spoolSearch{Module: "finder", Brain: "private", Prompt: "x"})
+	slow := write(strings.Repeat("c", 24), spoolSearch{Module: "finder", Brain: "web", Prompt: "slow"})
+	// stream.jsonl planted as a symlink: the bridge must not write through it.
+	planted := write(strings.Repeat("d", 24), spoolSearch{Module: "finder", Brain: "web", Prompt: "again"})
+	target := filepath.Join(t.TempDir(), "victim")
+	os.WriteFile(target, []byte("keep"), 0o600)
+	os.Symlink(target, filepath.Join(planted, "stream.jsonl"))
+
+	ctx := context.Background()
+	m.processSpool(ctx)
+	m.processSpool(ctx) // a second look starts nothing twice
+	waitFor(t, 5*time.Second, "the searches to answer", func() bool {
+		return fileExists(filepath.Join(ok, "result.json")) && fileExists(filepath.Join(other, "result.json")) && fileExists(filepath.Join(planted, "result.json"))
+	})
+	if a := readSpoolAnswer(t, ok); a["ok"] != true {
+		t.Fatalf("the search failed: %v", a)
+	}
+	if out, _ := os.ReadFile(filepath.Join(ok, "stream.jsonl")); !strings.Contains(string(out), "Brief ü") {
+		t.Errorf("stream = %s", out)
+	}
+	if a := readSpoolAnswer(t, other); a["ok"] != false || !strings.Contains(a["error"].(string), "capabilities.search") {
+		t.Errorf("an undeclared brain: %v", a)
+	}
+	if a := readSpoolAnswer(t, planted); a["ok"] != false {
+		t.Errorf("a planted stream.jsonl was written through: %v", a)
+	}
+	if data, _ := os.ReadFile(target); string(data) != "keep" {
+		t.Errorf("the symlink's target was written: %q", data)
+	}
+	os.WriteFile(filepath.Join(slow, "cancel"), nil, 0o600)
+	waitFor(t, 5*time.Second, "the cancelled search to answer", func() bool { return fileExists(filepath.Join(slow, "result.json")) })
+	if a := readSpoolAnswer(t, slow); a["ok"] != false || a["error"] != "stopped" {
+		t.Errorf("cancelled: %v", a)
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if len(prompts) != 2 { // ok and slow; other refused, planted failed before running
+		t.Errorf("searches run: %v", prompts)
 	}
 }

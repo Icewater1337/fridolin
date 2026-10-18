@@ -114,7 +114,9 @@ type SiteManager struct {
 	tokens   map[string]string // builder token → brain id
 	hooks    builderHooks
 	chats    *siteChats
-	ctx      context.Context
+	// searchSlots limits the searches the bridge runs for the site at once.
+	searchSlots chan struct{}
+	ctx         context.Context
 
 	warnNoSandbox sync.Once
 }
@@ -132,6 +134,7 @@ func NewSiteManager(dataDir string, googleClient func() string) *SiteManager {
 	m.npmInstall = m.runNpmInstall
 	m.workspaceInstall = m.npmInstallAsBrain
 	m.chats = &siteChats{m: m}
+	m.searchSlots = make(chan struct{}, spoolSearchLimit)
 	m.settings = m.loadSettings()
 	m.users = m.loadUsers()
 	return m

@@ -457,6 +457,7 @@ func reviewManifest(oldM, newM map[string]any) []ReviewItem {
 		{"capabilities.commands", "programs its code runs"},
 		{"capabilities.secrets", "secrets it needs"},
 		{"capabilities.ingest", "brains it may hand files to"},
+		{"capabilities.search", "brains whose folder it may search with a read-only Claude agent"},
 		{"app.dist", "the files it serves"},
 		{"app.public", "files anyone can fetch without signing in"},
 		{"app.build", "a command Fridolin runs when deploying"},

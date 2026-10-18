@@ -20,6 +20,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"log"
 	"net"
 	"net/http"
@@ -60,6 +61,9 @@ type builderHooks struct {
 	// /ingest does; mediaDir is that folder (site_ingest.go).
 	ingest   func(brainID, sender, text string, files []string) error
 	mediaDir func() string
+	// search runs a read-only Claude agent in a brain's folder, its
+	// stream-json output to out (site_ingest.go).
+	search func(ctx context.Context, brainID, prompt string, out io.Writer) error
 }
 
 func (m *SiteManager) builderBase(brainID string) string {
@@ -780,6 +784,7 @@ func (b *Bridge) siteBuilderHooks() builderHooks {
 			return l
 		},
 		mediaDir: func() string { return b.cfgs.Get().MediaDir },
+		search:   b.runBrainSearch,
 		// As /ingest: the brain's reply chat gets the answer, and the brain
 		// must take the files now (its queue is not full).
 		ingest: func(brainID, sender, text string, files []string) error {

@@ -23,7 +23,7 @@ import { tmpdir } from 'node:os'
 import { isAbsolute, join, resolve, sep } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { page, type SessionUser } from './auth.ts'
-import { makeIngest, type IngestRequest, type IngestResult } from './ingest.ts'
+import { makeIngest, makeSearch, type IngestRequest, type IngestResult, type SearchRequest } from './ingest.ts'
 
 // ── Manifest ──────────────────────────────────────────────────────────────────
 
@@ -75,6 +75,8 @@ export type ModuleManifest = {
     secrets?: string[]
     /** Brains the module may hand files to with ctx.ingest. */
     ingest?: string[]
+    /** Brains whose folder the module may search with ctx.search. */
+    search?: string[]
   }
 }
 
@@ -174,10 +176,11 @@ export function validateManifest(raw: unknown, folder: string): ModuleManifest {
     for (const name of (c.secrets ?? []) as string[]) {
       if (!SECRET_RE.test(name)) fail(`"capabilities.secrets" entry "${name}" must be a letter, then up to 63 letters, digits, _ or -`)
     }
-    if (c.ingest !== undefined) {
-      if (!isStringArray(c.ingest)) fail('"capabilities.ingest" must be a list of brain ids')
-      for (const b of c.ingest as string[]) {
-        if (!BRAIN_ID_RE.test(b)) fail(`"capabilities.ingest" entry "${b}" is not a brain id`)
+    for (const k of ['ingest', 'search'] as const) {
+      if (c[k] === undefined) continue
+      if (!isStringArray(c[k])) fail(`"capabilities.${k}" must be a list of brain ids`)
+      for (const b of c[k] as string[]) {
+        if (!BRAIN_ID_RE.test(b)) fail(`"capabilities.${k}" entry "${b}" is not a brain id`)
       }
     }
   }
@@ -271,6 +274,12 @@ export type ModuleContext = {
    * attachment would reach it. The files are moved. Only the live site can.
    */
   ingest: (req: IngestRequest) => Promise<IngestResult>
+  /**
+   * Runs a read-only Claude agent (Read, Grep, Glob) in the folder of a brain
+   * listed in capabilities.search, under that brain's sandbox, and yields its
+   * stream-json events. Only the live site can.
+   */
+  search: (req: SearchRequest) => AsyncGenerator<unknown>
   log: (...args: unknown[]) => void
 }
 
@@ -420,6 +429,7 @@ async function loadServer(mod: SiteModule, secrets: ModuleSecrets | undefined, h
     },
     dataDir: moduleDataDir(id, host),
     ingest: makeIngest(id, mod.manifest.capabilities?.ingest ?? [], host.spoolDir),
+    search: makeSearch(id, mod.manifest.capabilities?.search ?? [], host.spoolDir),
     log: (...args) => console.log(`[module:${id}]`, ...args),
   }
   return exported(ctx)

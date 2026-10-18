@@ -22,6 +22,11 @@ export type ModuleContext = {
    * attachment would reach it. The files are moved. Only the live site can.
    */
   ingest: (req: { brain: string; files: string[]; text?: string; sender?: string }) => Promise<{ status: 'accepted' }>
+  /**
+   * Runs a read-only Claude agent in the folder of a brain listed in
+   * capabilities.search, under that brain's sandbox; yields its stream-json events.
+   */
+  search: (req: { brain: string; prompt: string; signal?: AbortSignal }) => AsyncGenerator<unknown>
   log: (...args: unknown[]) => void
 }
 

@@ -9,8 +9,9 @@
 // brain like an upload. It answers with result.json next to the request.
 
 import { randomBytes } from 'node:crypto'
-import { copyFileSync, existsSync, lstatSync, mkdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from 'node:fs'
+import { closeSync, copyFileSync, existsSync, lstatSync, mkdirSync, openSync, readFileSync, readSync, renameSync, unlinkSync, writeFileSync } from 'node:fs'
 import { basename, join } from 'node:path'
+import { StringDecoder } from 'node:string_decoder'
 
 export type IngestRequest = {
   /** A brain listed in the module's capabilities.ingest. */
@@ -77,5 +78,83 @@ export function makeIngest(moduleId: string, allowed: string[], spoolDir: string
       throw new Error(r.error || 'Fridolin did not take the files')
     }
     throw new Error(`Fridolin did not take the files within ${ANSWER_MS / 1000} seconds; is the bridge running?`)
+  }
+}
+
+export type SearchRequest = {
+  /** A brain listed in the module's capabilities.search. */
+  brain: string
+  /** The whole prompt the agent gets: instructions and the question. */
+  prompt: string
+  /** Aborting it stops the search. */
+  signal?: AbortSignal
+}
+
+/** How long a search may take, a little over the bridge's own limit. */
+const SEARCH_MS = 200_000
+
+/**
+ * ctx.search for one module: the bridge runs a read-only Claude agent (Read,
+ * Grep, Glob) in the brain's folder, under the brain's sandbox, and this
+ * yields its stream-json events as they come. It throws when the bridge
+ * refuses or the agent fails.
+ */
+export function makeSearch(moduleId: string, allowed: string[], spoolDir: string | undefined) {
+  return async function* search(req: SearchRequest): AsyncGenerator<unknown> {
+    if (!spoolDir) throw new Error('previews and checks cannot search a brain; only the live site can')
+    if (!req || typeof req.brain !== 'string' || !allowed.includes(req.brain)) {
+      throw new Error(`module "${moduleId}" may not search brain "${req?.brain}": list it in capabilities.search`)
+    }
+    if (typeof req.prompt !== 'string' || !req.prompt.trim()) throw new Error('ctx.search needs a prompt')
+    const dir = join(spoolDir, randomBytes(12).toString('hex'))
+    mkdirSync(dir, { recursive: true })
+    writeFileSync(join(dir, 'search.json.part'), JSON.stringify({ module: moduleId, brain: req.brain, prompt: req.prompt }))
+    renameSync(join(dir, 'search.json.part'), join(dir, 'search.json'))
+    const cancel = () => { try { writeFileSync(join(dir, 'cancel'), '') } catch { /* gone already */ } }
+    req.signal?.addEventListener('abort', cancel, { once: true })
+
+    const stream = join(dir, 'stream.jsonl')
+    const result = join(dir, 'result.json')
+    let offset = 0
+    let partial = ''
+    // A character may be split between two reads.
+    const decoder = new StringDecoder('utf8')
+    const drain = function* () {
+      if (!existsSync(stream)) return
+      const fd = openSync(stream, 'r')
+      try {
+        const buf = Buffer.alloc(64 * 1024)
+        for (let n; (n = readSync(fd, buf, 0, buf.length, offset)) > 0;) {
+          offset += n
+          partial += decoder.write(buf.subarray(0, n))
+        }
+      } finally {
+        closeSync(fd)
+      }
+      for (let nl; (nl = partial.indexOf('\n')) >= 0;) {
+        const line = partial.slice(0, nl).trim()
+        partial = partial.slice(nl + 1)
+        if (!line) continue
+        try { yield JSON.parse(line) } catch { /* not an event */ }
+      }
+    }
+    try {
+      for (const deadline = Date.now() + SEARCH_MS; Date.now() < deadline;) {
+        // Read what is there before looking for the answer, so nothing written
+        // before result.json is missed.
+        const done = existsSync(result)
+        yield* drain()
+        if (done) {
+          const r = JSON.parse(readFileSync(result, 'utf8')) as { ok?: boolean; error?: string }
+          if (!r.ok) throw new Error(r.error || 'the search failed')
+          return
+        }
+        await new Promise(r => setTimeout(r, 150))
+      }
+      cancel()
+      throw new Error('the search did not finish in time')
+    } finally {
+      req.signal?.removeEventListener('abort', cancel)
+    }
   }
 }

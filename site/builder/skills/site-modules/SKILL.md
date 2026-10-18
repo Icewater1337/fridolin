@@ -58,6 +58,7 @@ description: The module format of a Fridolin site — module.json fields, apps (
 | `capabilities.files` | every path the server code uses, named, with `read` or `write`; a path ending in `/` is a folder and everything in it |
 | `capabilities.commands`, `.secrets` | programs it runs (a name on PATH or a path); secrets it needs, by name (`OPENAI_API_KEY`) |
 | `capabilities.ingest` | brains it may hand files to with `ctx.ingest` (their ids) |
+| `capabilities.search` | brains whose folder it may search with `ctx.search` (their ids) |
 
 Everything is behind sign-in and `access`. There are no public pages.
 
@@ -121,6 +122,10 @@ export default function expenses(ctx: ModuleContext): express.Router {
   a brain listed in `capabilities.ingest`, as a WhatsApp attachment would reach
   it (the brain files them and answers in its chat). It is the only way to
   give a brain work: modules cannot call Fridolin's API. It throws in previews.
+- `ctx.search({ brain, prompt, signal })` runs a read-only Claude agent in the
+  folder of a brain listed in `capabilities.search`, under that brain's
+  sandbox, and yields its stream-json events. Modules cannot start Claude
+  themselves. It throws in previews.
 - On the live site (macOS) the code runs in a sandbox built from
   `capabilities`: it reads and writes only the declared paths (a file declared
   `write` includes SQLite's `-journal`/`-wal`/`-shm`; declare the folder to
