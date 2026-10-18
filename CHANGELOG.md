@@ -169,6 +169,12 @@ for compatibility.
   instead of going on with the defaults, and make no `~/.fridolin`. The
   bridge makes its data folder and the folders of `db_path` and
   `media_dir` as it starts, not when one is saved in Settings.
+- A `brain.json` with a `version` newer than 1 is refused instead of being
+  read as version 1 and written back without the fields this version does
+  not know: the brain shows as changed on disk, its approved settings keep
+  running, and no edit or approval writes over the file. Unknown fields in
+  `brain.json`, and unknown keys inside a section of `config.json`, are
+  logged by their path.
 
 ### Added
 

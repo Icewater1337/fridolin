@@ -4,10 +4,13 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log"
 	"os"
 	"path/filepath"
+	"reflect"
 	"regexp"
 	"strings"
+	"sync"
 )
 
 // ManifestFile is the file that turns a folder into a brain.
@@ -93,7 +96,23 @@ type BrainBackup struct {
 // ephemeral files that only cost upload time.
 var DefaultBackupExcludes = []string{"node_modules/", "*.log", ".DS_Store", ".venv/", "__pycache__/"}
 
+// manifestVersion is the version of brain.json this bridge reads and
+// writes. A newer one is refused, see checkManifestVersion.
 const manifestVersion = 1
+
+// errManifestTooNew means a brain.json is of a version newer than this
+// bridge reads.
+var errManifestTooNew = errors.New("a newer Fridolin wrote it, and this one would drop the settings it does not know")
+
+// checkManifestVersion refuses a brain.json of version v when that is newer
+// than this bridge's: it may have fields this one does not know, which
+// writing it back would drop, or ones that mean something else now.
+func checkManifestVersion(v int) error {
+	if v > manifestVersion {
+		return fmt.Errorf("version %d is newer than the version %d this build of Fridolin reads: %w", v, manifestVersion, errManifestTooNew)
+	}
+	return nil
+}
 
 var brainIDRe = regexp.MustCompile(`^[a-z0-9][a-z0-9_-]{0,39}$`)
 
@@ -175,18 +194,42 @@ func ReadManifest(dir string) (*BrainManifest, error) {
 	if err != nil {
 		return nil, fmt.Errorf("%s: %w", path, err)
 	}
+	warnUnknownManifestKeys(path, data)
 	return m, nil
 }
 
 // decodeManifest decodes the contents of a brain.json, with defaults filled
-// in. It does not validate them.
+// in. It does not validate them, but refuses a newer version's.
 func decodeManifest(data []byte) (*BrainManifest, error) {
 	m := &BrainManifest{}
 	if err := json.Unmarshal(data, m); err != nil {
 		return nil, err
 	}
+	if err := checkManifestVersion(m.Version); err != nil {
+		return nil, err
+	}
 	n := m.normalized()
 	return &n, nil
+}
+
+// loggedManifestKeys holds, for each brain.json, the unknown keys last
+// logged for it: the dashboard reads every brain.json each time it asks
+// for the brains, and must not log the same ones each time.
+var loggedManifestKeys sync.Map // path → the keys, joined
+
+// warnUnknownManifestKeys logs the keys data, the brain.json at path, has
+// but no field takes, by their path, such as routing.handles_dm. They are
+// left out where the bridge uses the manifest, and dropped from the file
+// the next time the dashboard writes it.
+func warnUnknownManifestKeys(path string, data []byte) {
+	keys := unknownKeys(data, reflect.TypeOf(BrainManifest{}), "")
+	joined := strings.Join(keys, " ")
+	if prev, ok := loggedManifestKeys.Swap(path, joined); ok && prev == joined || !ok && joined == "" {
+		return
+	}
+	if len(keys) > 0 {
+		log.Printf("brain %s: ignoring unknown fields %v (an edit in the dashboard drops them)", path, keys)
+	}
 }
 
 // encodeManifest returns the contents WriteManifest writes for m, or why m
@@ -217,9 +260,20 @@ func WriteManifest(dir string, m *BrainManifest, overwrite bool) error {
 }
 
 // writeManifestData writes data, a brain.json encodeManifest made, as
-// WriteManifest does.
+// WriteManifest does. It refuses to replace a brain.json of a newer
+// version, whose fields this bridge would drop.
 func writeManifestData(dir string, data []byte, overwrite bool) error {
 	path := filepath.Join(dir, ManifestFile)
+	if prev, err := readBrainFile(dir, ManifestFile); overwrite && err == nil {
+		var v struct {
+			Version int `json:"version"`
+		}
+		if json.Unmarshal(prev, &v) == nil {
+			if err := checkManifestVersion(v.Version); err != nil {
+				return fmt.Errorf("%s: %w, so it is left as it is", path, err)
+			}
+		}
+	}
 	if !overwrite {
 		f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
 		if errors.Is(err, os.ErrExist) {

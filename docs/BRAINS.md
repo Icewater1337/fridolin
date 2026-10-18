@@ -69,6 +69,7 @@ restart.
 
 | Field | Meaning |
 | --- | --- |
+| `version` | The version of `brain.json` the file is written in, `1` today; a file without it is version 1. A bridge refuses a `brain.json` of a newer version than it reads, from a newer Fridolin before you went back to an older one say: the Brains page shows it as changed on disk, with both versions, the approved copy keeps running, and no edit or approval writes over the file, which would drop the settings the older bridge does not know. |
 | `id` | Stable identifier (lowercase, digits, `-`, `_`). Used for history attribution, the sandbox profile and per-brain credential file names. It cannot be changed; remove the brain and add the folder again under a new id instead. |
 | `name` | Display name. |
 | `routing.handles_dms` | This brain answers direct messages. At most one brain. |
@@ -86,6 +87,11 @@ restart.
 
 [`schemas/brain.schema.json`](schemas/brain.schema.json) is a JSON Schema
 of the file, version 1.
+
+A field the bridge does not know, a typo such as `routing.handles_dm` or
+one a newer version added, is logged by its path when the bridge reads the
+file; the brain loads without it, and the next edit in the dashboard drops
+it from the file.
 
 ## Approval
 

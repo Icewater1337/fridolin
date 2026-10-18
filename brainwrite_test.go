@@ -134,3 +134,91 @@ func TestAddWritesBrainJSONWithTheRegistration(t *testing.T) {
 		t.Errorf("brain.json after the add: %+v, %v", m, err)
 	}
 }
+
+// A brain.json of a newer version than this bridge reads, from a newer
+// Fridolin before a rollback say, is refused, and no edit writes over it:
+// writing it back would drop the settings this version does not know.
+func TestANewerBrainJSONIsRefusedAndKept(t *testing.T) {
+	h := newHarness(t, "")
+	dir := h.AddBrain(BrainManifest{ID: "main", Name: "Main", Routing: BrainRouting{HandlesDMs: true}})
+	path := filepath.Join(dir, ManifestFile)
+	newer := `{"version": 2, "id": "main", "name": "Main", "routing": {"handles_dms": true}, "voice": {"reply": "audio"}}` + "\n"
+	if err := os.WriteFile(path, []byte(newer), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	const why = "version 2 is newer than the version 1 this build of Fridolin reads"
+
+	if _, err := ReadManifest(dir); err == nil || !strings.Contains(err.Error(), why) {
+		t.Errorf("ReadManifest: %v, want the versions named", err)
+	}
+	views := h.brainViews()
+	if len(views) != 1 || views[0].Status != "drift" || len(views[0].Issues) != 1 || !strings.Contains(views[0].Issues[0].Detail, why) {
+		t.Errorf("GET /api/brains = %+v, want main changed on disk, with the versions named", views)
+	}
+	writes := []struct {
+		name string
+		do   func() (int, string)
+	}{
+		{"saving its settings", func() (int, string) {
+			w := h.Do("PUT", "/api/brains/main", map[string]any{"manifest": BrainManifest{ID: "main", Name: "Renamed", Routing: BrainRouting{HandlesDMs: true}}})
+			return w.Code, w.Body.String()
+		}},
+		{"its backup settings", func() (int, string) {
+			w := h.Do("PUT", "/api/brains/main/backup", map[string]any{"enabled": true})
+			return w.Code, w.Body.String()
+		}},
+		{"approving it", func() (int, string) {
+			var m BrainManifest
+			_ = json.Unmarshal([]byte(newer), &m)
+			w := h.Do("POST", "/api/brains/main/approve", map[string]any{"manifest": m})
+			return w.Code, w.Body.String()
+		}},
+		{"WriteManifest", func() (int, string) {
+			err := WriteManifest(dir, &BrainManifest{ID: "main", Name: "Main"}, true)
+			if err == nil {
+				return 200, ""
+			}
+			return 422, err.Error()
+		}},
+	}
+	for _, wr := range writes {
+		t.Run(wr.name, func(t *testing.T) {
+			if code, body := wr.do(); code != 422 || !strings.Contains(body, why) {
+				t.Errorf("%d %s, want a 422 that names the versions", code, body)
+			}
+			if got := readFile(t, path); got != newer {
+				t.Errorf("brain.json was written over:\n%s", got)
+			}
+		})
+	}
+	if got := h.Approved()["main"].Name; got != "Main" {
+		t.Errorf("config.json approves %q", got)
+	}
+}
+
+// A field brain.json has but this version does not know is logged by its
+// path, once, while the brain loads as before.
+func TestUnknownBrainJSONFieldsAreLogged(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	dir := t.TempDir()
+	body := `{"version": 1, "id": "a", "name": "A", "nmae": "x", "routing": {"handles_dm": true, "groups": []}}`
+	if err := os.WriteFile(filepath.Join(dir, ManifestFile), []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	logs := captureLog(t)
+	for range 3 {
+		m, err := ReadManifest(dir)
+		if err != nil || m.ID != "a" {
+			t.Fatalf("ReadManifest: %+v, %v", m, err)
+		}
+	}
+	var lines []string
+	for _, l := range logs() {
+		if strings.Contains(l, "ignoring unknown fields") {
+			lines = append(lines, l)
+		}
+	}
+	if len(lines) != 1 || !strings.Contains(lines[0], "[nmae routing.handles_dm]") || !strings.Contains(lines[0], filepath.Join(dir, ManifestFile)) {
+		t.Errorf("logged %q, want one line naming nmae and routing.handles_dm", lines)
+	}
+}
