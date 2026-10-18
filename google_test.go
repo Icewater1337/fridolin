@@ -985,3 +985,142 @@ func TestCalendarRefreshThatCannotBeSavedIsLogged(t *testing.T) {
 		t.Errorf("log = %s, want the failed save", all)
 	}
 }
+
+// signInCallback starts brain id's sign-in and has Google come back with a
+// good code, through a request whose context is ctx.
+func signInCallback(t *testing.T, tb *testBridge, id string, ctx context.Context, before func()) *httptest.ResponseRecorder {
+	t.Helper()
+	var start struct {
+		AuthURL string `json:"auth_url"`
+	}
+	_ = json.Unmarshal(tb.do("POST", "/api/brains/"+id+"/calendar/connect", nil).Body.Bytes(), &start)
+	u, err := url.Parse(start.AuthURL)
+	if err != nil || u.Query().Get("state") == "" {
+		t.Fatalf("auth url %q", start.AuthURL)
+	}
+	if before != nil {
+		before()
+	}
+	r := httptest.NewRequest("GET", "http://127.0.0.1:8765/?state="+url.QueryEscape(u.Query().Get("state"))+"&code=good-code", nil).WithContext(ctx)
+	r.Host = "127.0.0.1:8765"
+	w := httptest.NewRecorder()
+	tb.h.ServeHTTP(w, r)
+	return w
+}
+
+// TestCalendarSignInSurvivesTheBrowserLeaving: the code is spent once it
+// reaches Google, so the sign-in finishes even when the browser's request
+// is gone by then.
+func TestCalendarSignInSurvivesTheBrowserLeaving(t *testing.T) {
+	srv, _ := fakeGoogle(t)
+	tb := newTestBridge(t, "")
+	_ = tb.do("PUT", "/api/google/client", map[string]string{"json": fmt.Sprintf(testClientJSON, srv.URL)})
+	tb.addFolderBrain(t, BrainManifest{ID: "a", Name: "A"})
+	gone, cancel := context.WithCancel(context.Background())
+	cancel()
+	signInCallback(t, tb, "a", gone, nil)
+	if data, err := os.ReadFile(tb.google.tokenPath("a")); err != nil || !strings.Contains(string(data), "RT-1") {
+		t.Errorf("token = %s, %v; want the sign-in saved", data, err)
+	}
+}
+
+// TestCalendarSignInForARemovedBrain: a brain removed while it signed in
+// gets no token, which a later brain of the same id would otherwise show as
+// connected.
+func TestCalendarSignInForARemovedBrain(t *testing.T) {
+	srv, _ := fakeGoogle(t)
+	tb := newTestBridge(t, "")
+	_ = tb.do("PUT", "/api/google/client", map[string]string{"json": fmt.Sprintf(testClientJSON, srv.URL)})
+	tb.addFolderBrain(t, BrainManifest{ID: "a", Name: "A"})
+	signInCallback(t, tb, "a", context.Background(), func() {
+		if w := tb.do("DELETE", "/api/brains/a", nil); w.Code != 200 {
+			t.Fatalf("remove = %d %s", w.Code, w.Body.String())
+		}
+	})
+	if _, err := os.Lstat(tb.google.tokenPath("a")); !os.IsNotExist(err) {
+		t.Errorf("a token was written for the removed brain (%v)", err)
+	}
+	// Refused before anything is written, not taken back after the brain's
+	// settings could not be saved.
+	tb.google.mu.Lock()
+	msg := tb.google.lastError["a"]
+	tb.google.mu.Unlock()
+	if !strings.Contains(msg, "removed while it signed in") {
+		t.Errorf("sign-in error = %q, want it to say the brain was removed", msg)
+	}
+}
+
+// TestCalendarSignInThatCannotBeSaved: a sign-in whose token or brain
+// settings cannot be saved takes back what it wrote, puts back the token
+// it replaced, and revokes nothing, so that the brain keeps the access it
+// had.
+func TestCalendarSignInThatCannotBeSaved(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("root writes to read-only folders")
+	}
+	cases := []struct {
+		name     string
+		switched bool   // the brain had a token for another account
+		readOnly string // the folder that cannot be written: "credentials" or "brain"
+	}{
+		{"the token, first sign-in", false, "credentials"},
+		{"the token, another account", true, "credentials"},
+		{"the settings, first sign-in", false, "brain"},
+		{"the settings, another account", true, "brain"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			srv, got := fakeGoogle(t)
+			tb := newTestBridge(t, `, "sandbox": {"credentials_dir": "~/creds"}`)
+			_ = tb.do("PUT", "/api/google/client", map[string]string{"json": fmt.Sprintf(testClientJSON, srv.URL)})
+			dir := tb.addFolderBrain(t, BrainManifest{ID: "a", Name: "A"})
+			if err := os.MkdirAll(tb.google.credsDir(), 0o700); err != nil {
+				t.Fatal(err)
+			}
+			if tc.switched {
+				writeCalendarToken(t, tb, "a", "team@example.com", "RT-OLD")
+			}
+			if tc.readOnly == "credentials" {
+				dir = tb.google.credsDir()
+			}
+			signInCallback(t, tb, "a", context.Background(), func() {
+				if err := os.Chmod(dir, 0o500); err != nil {
+					t.Fatal(err)
+				}
+				t.Cleanup(func() { _ = os.Chmod(dir, 0o700) })
+			})
+			data, err := os.ReadFile(tb.google.tokenPath("a"))
+			if tc.switched && !strings.Contains(string(data), "RT-OLD") {
+				t.Errorf("token = %s, %v; want the old one", data, err)
+			}
+			if !tc.switched && !os.IsNotExist(err) {
+				t.Errorf("token = %s, %v; want none", data, err)
+			}
+			if (*got)["revoked"] != "" {
+				t.Errorf("revoked %q although the sign-in failed", (*got)["revoked"])
+			}
+		})
+	}
+}
+
+// TestCalendarRedirectIsTheAddressServed: Google sends the browser back to
+// the address the dashboard was started on, also after http_listen was
+// changed for the next start.
+func TestCalendarRedirectIsTheAddressServed(t *testing.T) {
+	srv, _ := fakeGoogle(t)
+	tb := newTestBridge(t, "")
+	served := "http://" + tb.cfgs.Get().HTTPListen + "/"
+	_ = tb.do("PUT", "/api/google/client", map[string]string{"json": fmt.Sprintf(testClientJSON, srv.URL)})
+	tb.addFolderBrain(t, BrainManifest{ID: "a", Name: "A"})
+	if _, err := tb.cfgs.Update("", func(c *Config) error { c.HTTPListen = "127.0.0.1:1"; return nil }); err != nil {
+		t.Fatal(err)
+	}
+	var start struct {
+		AuthURL string `json:"auth_url"`
+	}
+	_ = json.Unmarshal(tb.do("POST", "/api/brains/a/calendar/connect", nil).Body.Bytes(), &start)
+	u, _ := url.Parse(start.AuthURL)
+	if got := u.Query().Get("redirect_uri"); got != served {
+		t.Errorf("redirect_uri = %q, want %q", got, served)
+	}
+}

@@ -154,7 +154,8 @@ remove the access yourself. When Google does not confirm a revocation (it
 is down, the network is), the token is kept and the page offers to delete
 it here only. **Switch account** revokes the grant of the account the brain
 leaves, unless another brain uses it too; signing in to the same account
-again keeps it, since the new token belongs to it.
+again keeps it, since the new token belongs to it. It revokes only once the
+new sign-in is saved: one that fails keeps the brain's old token.
 
 ## Troubleshooting
 

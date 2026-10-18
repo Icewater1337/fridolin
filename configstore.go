@@ -84,6 +84,10 @@ func OpenConfigStore(cfgPath string) (*ConfigStore, error) {
 // Path is the config file this store reads and writes.
 func (cs *ConfigStore) Path() string { return cs.path }
 
+// Startup returns the effective configuration the process started with:
+// what the settings that need a restart still are.
+func (cs *ConfigStore) Startup() *Config { return cs.startup }
+
 // Get returns the effective configuration. Treat it as read-only: it is
 // shared by every goroutine until the next Update replaces it.
 func (cs *ConfigStore) Get() *Config { return cs.eff.Load() }

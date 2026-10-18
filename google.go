@@ -209,9 +209,11 @@ func (g *GoogleAuth) SetClient(data []byte) (*GoogleClient, error) {
 	return c, nil
 }
 
-// redirectURI is where Google sends the browser back: the dashboard itself.
+// redirectURI is where Google sends the browser back: the dashboard
+// itself, at the address it was started on. http_listen changes only with a
+// restart, and a sign-in started before it must come back here.
 func (g *GoogleAuth) redirectURI() string {
-	return "http://" + g.cfgs.Get().HTTPListen + "/"
+	return "http://" + g.cfgs.Startup().HTTPListen + "/"
 }
 
 func randomString(n int) string {
@@ -289,7 +291,9 @@ func (g *GoogleAuth) HandleCallback(w http.ResponseWriter, r *http.Request) {
 		}
 		return
 	}
-	ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
+	// Not the request's context: the code is spent once Google has it, and a
+	// browser that goes away meanwhile must not throw the sign-in away.
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(r.Context()), 30*time.Second)
 	defer cancel()
 	tok, err := g.exchange(ctx, q.Get("code"), p.verifier)
 	if err != nil {
@@ -313,16 +317,23 @@ func (g *GoogleAuth) HandleCallback(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	tok.Account = account
+	// A brain removed while it signed in gets no token: one left behind
+	// would count as connected for a later brain of the same id.
+	if !g.configured(p.brainID) {
+		fail("the brain was removed while it signed in")
+		return
+	}
 	// A switch to another account leaves the old one's grant behind, of use
 	// to nobody: revoke it, unless another brain signs in to that account
 	// too. Signing in to the same account again keeps its grant, which the
 	// new token belongs to as well, so revoking the old token would revoke
-	// the new one with it.
+	// the new one with it. The old token is read now, before the new one
+	// replaces it, and revoked last, once the new one is saved.
+	var revokeOld string
+	oldData, oldErr := readCredentialFile(g.tokenPath(p.brainID))
 	if old, err := g.loadToken(p.brainID); err == nil && old.RefreshToken != "" && old.Account != "" &&
 		!strings.EqualFold(old.Account, account) && g.sharingGrant(p.brainID, old) == "" {
-		if err := g.revoke(ctx, old.RefreshToken); err != nil {
-			log.Printf("brain %s: could not revoke the access of the Google account it switched from: %v", p.brainID, err)
-		}
+		revokeOld = old.RefreshToken
 	}
 	if err := g.saveToken(p.brainID, tok); err != nil {
 		fail("saving the token failed: " + err.Error())
@@ -334,10 +345,24 @@ func (g *GoogleAuth) HandleCallback(w http.ResponseWriter, r *http.Request) {
 		}
 		return nil
 	}); err != nil {
+		// The brain went in the meantime, say: take back what this sign-in
+		// wrote, and only that. The token it replaced goes back.
+		if oldErr == nil {
+			_ = writeFileAtomic(g.tokenPath(p.brainID), oldData, 0o600, false)
+		} else {
+			_ = os.Remove(g.tokenPath(p.brainID))
+		}
 		fail("saving the brain's calendar settings failed: " + err.Error())
 		return
 	}
 	log.Printf("brain %s: Google Calendar connected (%s)", p.brainID, maskEmail(account))
+	// Only now: a sign-in that failed above leaves the brain with the old
+	// token, which must still work.
+	if revokeOld != "" {
+		if err := g.revoke(ctx, revokeOld); err != nil {
+			log.Printf("brain %s: could not revoke the access of the Google account it switched from: %v", p.brainID, err)
+		}
+	}
 	http.Redirect(w, r, back, http.StatusFound)
 }
 
@@ -449,6 +474,16 @@ func (g *GoogleAuth) saveToken(brainID string, tok *googleToken) error {
 		return err
 	}
 	return writeFileAtomic(g.tokenPath(brainID), data, 0o600, false)
+}
+
+// configured reports whether brainID is one of the configured brains.
+func (g *GoogleAuth) configured(brainID string) bool {
+	for _, ref := range g.cfgs.Get().BrainDirs {
+		if ref.Approved != nil && ref.Approved.ID == brainID {
+			return true
+		}
+	}
+	return false
 }
 
 // readCredentialFile reads a brain's file in the credentials dir without
