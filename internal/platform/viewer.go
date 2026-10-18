@@ -1,4 +1,6 @@
-package main
+//go:build unix
+
+package platform
 
 import (
 	"context"
@@ -11,11 +13,11 @@ import (
 	"time"
 )
 
-// TmuxViewer is an optional monitoring window: a tmux session tailing one
+// Viewer is an optional monitoring window: a tmux session tailing one
 // brain's activity log, opened in Terminal.app so you can watch what the brain
 // is doing. It is read-only and has no part in the actual Claude interaction —
 // if tmux or Terminal.app is missing, the bridge runs exactly the same.
-type TmuxViewer struct {
+type Viewer struct {
 	Name      string // tmux session name, e.g. "claude-personal"
 	StreamLog string // path to the brain's claude-stream.log, which must exist
 	CWD       string
@@ -37,7 +39,7 @@ type TmuxViewer struct {
 // whatever PATH the environment has (a nil Env is the bridge's own, as for
 // exec.Cmd), they all get SystemPATH, which has no folder a brain can
 // write to.
-func (tv *TmuxViewer) run(name string, args ...string) error {
+func (tv *Viewer) run(name string, args ...string) error {
 	ctx, cancel := context.WithTimeout(context.Background(), tv.timeout())
 	defer cancel()
 	cmd := exec.CommandContext(ctx, name, args...)
@@ -51,7 +53,7 @@ func (tv *TmuxViewer) run(name string, args ...string) error {
 // target names the viewer's session to tmux exactly. A plain name also
 // matches a session it is the start of, so that a brain "work" would kill,
 // or take for its own, the viewer of a brain "work-archive".
-func (tv *TmuxViewer) target() string { return "=" + tv.Name }
+func (tv *Viewer) target() string { return "=" + tv.Name }
 
 // viewerScript is what the session runs: a heading, then the log. The
 // session name and the log's path reach it as $1 and $2, never as part of
@@ -64,7 +66,7 @@ const viewerScript = `printf '\033[1m=== %s — Claude activity ===\033[0m\n\n' 
 	`exec tail -n 100 -F "$2" 2>/dev/null`
 
 // Start creates the session and opens its optional terminal window.
-func (tv *TmuxViewer) Start() error {
+func (tv *Viewer) Start() error {
 	tmux := tv.TmuxPath
 
 	// Replace a stale session of the same name, and only that one.
@@ -95,7 +97,7 @@ func (tv *TmuxViewer) Start() error {
 }
 
 // IsAlive reports whether the tmux session still exists.
-func (tv *TmuxViewer) IsAlive() bool {
+func (tv *Viewer) IsAlive() bool {
 	tmux := tv.TmuxPath
 	if tmux == "" {
 		return false
@@ -104,7 +106,7 @@ func (tv *TmuxViewer) IsAlive() bool {
 }
 
 // Close ends the tmux session, and with it the Terminal window attached.
-func (tv *TmuxViewer) Close() {
+func (tv *Viewer) Close() {
 	if tmux := tv.TmuxPath; tmux != "" {
 		_ = tv.run(tmux, "kill-session", "-t", tv.target())
 		log.Printf("[viewer] closed %s", tv.Name)
@@ -114,14 +116,14 @@ func (tv *TmuxViewer) Close() {
 // SystemPATH is the fixed PATH for the system programs a viewer runs.
 const SystemPATH = "/usr/bin:/bin:/usr/sbin:/sbin"
 
-func (tv *TmuxViewer) timeout() time.Duration {
+func (tv *Viewer) timeout() time.Duration {
 	if tv.Timeout == 0 {
 		return 5 * time.Second
 	}
 	return tv.Timeout
 }
 
-func (tv *TmuxViewer) osascript() string {
+func (tv *Viewer) osascript() string {
 	if tv.Osascript == "" {
 		return "/usr/bin/osascript"
 	}
