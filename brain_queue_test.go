@@ -1250,3 +1250,66 @@ func TestDataEnvIsAbsolute(t *testing.T) {
 		t.Errorf("dataEnv = %q, want %q", got, want)
 	}
 }
+
+// TestPanicsInARunAreContained: a panic while a run is prepared, or while
+// its result is delivered, is logged and recorded as that run's failure;
+// the brain goes on with the next message and the bridge keeps running.
+func TestPanicsInARunAreContained(t *testing.T) {
+	cases := []struct {
+		name  string
+		hooks func(d *deliveries, first *sync.Once) BrainHooks
+	}{
+		{"while the run is prepared", func(d *deliveries, first *sync.Once) BrainHooks {
+			return BrainHooks{Deliver: d.add, ExtraArgs: func(string) []string {
+				panicked := false
+				first.Do(func() { panicked = true })
+				if panicked {
+					panic("boom in ExtraArgs")
+				}
+				return nil
+			}}
+		}},
+		{"while it is delivered", func(d *deliveries, first *sync.Once) BrainHooks {
+			return BrainHooks{Deliver: func(br *Brain, m Inbound, res RunResult) {
+				d.add(br, m, res)
+				first.Do(func() { panic("boom in Deliver") })
+			}}
+		}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			mgr, _, _ := queueTestManager(t, 10, "")
+			d := &deliveries{}
+			var first sync.Once
+			mgr.SetHooks(tc.hooks(d, &first))
+			logs := captureLog(t)
+			done := make(chan error, 2)
+			for _, text := range []string{"one", "two"} {
+				m := dm(text)
+				m.Done = func(err error) { done <- err }
+				if _, _, _, err := mgr.Submit(m); err != nil {
+					t.Fatal(err)
+				}
+			}
+			for range 2 {
+				select {
+				case <-done:
+				case <-time.After(10 * time.Second):
+					t.Fatal("a message was never finished")
+				}
+			}
+			runs := d.all()
+			if len(runs) != 2 || runs[1].res.Err != nil || !strings.HasSuffix(runs[1].res.Text, "says: two") {
+				t.Errorf("runs = %+v, want the second answered", runs)
+			}
+			if !strings.Contains(strings.Join(logs(), "\n"), "panicked: boom") {
+				t.Error("the panic was not logged")
+			}
+			if strings.Contains(tc.name, "prepared") {
+				if !errors.Is(runs[0].res.Err, errRunPanicked) {
+					t.Errorf("first run = %+v, want errRunPanicked", runs[0].res)
+				}
+			}
+		})
+	}
+}

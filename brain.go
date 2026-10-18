@@ -14,6 +14,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"runtime/debug"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -430,20 +431,52 @@ func (br *Brain) worker() {
 		if m.Silent {
 			log.Printf("brain %s: running silently for untagged message from %s", br.id, m.Sender)
 		}
-		res := br.invoke(run, ctx, s, m)
+		res := br.invokeGuarded(run, ctx, s, m)
 		res.Duration = time.Since(run.started)
 		if res.Err == nil && !res.AlreadySent && res.Text != "" {
 			br.appendHistory(m.JID, br.id, res.Text, historyOut)
 		}
 		br.finishRun(run)
 		br.recordLast(m, res)
+		br.deliverGuarded(m, res)
+	}
+}
 
-		if br.hooks != nil && br.hooks.Deliver != nil {
-			br.hooks.Deliver(br, m, res)
+// errRunPanicked is what a run that panicked inside the bridge ends with;
+// the panic and its stack go to the log only.
+var errRunPanicked = errors.New("the bridge failed while running this message (details in the bridge log)")
+
+// invokeGuarded is invoke with a panic in it turned into the run's error,
+// so that the run is finished and recorded like any failed one and the
+// worker goes on with the next message. Unrecovered, the panic would end
+// the whole bridge and leave every brain's running claude behind.
+func (br *Brain) invokeGuarded(run *brainRun, ctx context.Context, s *brainSettings, m Inbound) (res RunResult) {
+	defer func() {
+		if p := recover(); p != nil {
+			log.Printf("brain %s: the run for %s panicked: %v\n%s", br.id, m.JID, p, debug.Stack())
+			res = RunResult{Err: errRunPanicked}
 		}
-		if m.Done != nil {
-			m.Done(res.Err)
-		}
+	}()
+	return br.invoke(run, ctx, s, m)
+}
+
+// deliverGuarded hands a finished run to the bridge and then to whoever
+// waits for the message, each with a panic logged rather than ending the
+// worker, and the one waiting told even when the delivery panicked.
+func (br *Brain) deliverGuarded(m Inbound, res RunResult) {
+	guard := func(what string, fn func()) {
+		defer func() {
+			if p := recover(); p != nil {
+				log.Printf("brain %s: %s the run for %s panicked: %v\n%s", br.id, what, m.JID, p, debug.Stack())
+			}
+		}()
+		fn()
+	}
+	if br.hooks != nil && br.hooks.Deliver != nil {
+		guard("delivering", func() { br.hooks.Deliver(br, m, res) })
+	}
+	if m.Done != nil {
+		guard("finishing", func() { m.Done(res.Err) })
 	}
 }
 
