@@ -143,8 +143,11 @@ the version before: `fridolin service rollback`.
   installs one.
 - The dashboard is plain HTML/CSS/JS in `web/` (no build step), embedded into
   the binary — rebuild after changing it. It runs under a strict CSP: no
-  inline scripts or styles. Its ES modules live in `web/assets`: `app/` (the
-  entry point and the plumbing every page shares), `pages/` (one module per
+  inline scripts or styles, and Trusted Types without a policy, so the
+  browser refuses `innerHTML` and every other way of turning a string
+  into HTML or script; build elements with `h()` from `lib/dom.js`. Its
+  ES modules live in `web/assets`: `app/` (the entry point and the
+  plumbing every page shares), `pages/` (one module per
   page), `components/` (shared pieces of UI) and `lib/` (the element builder
   and pure helpers, which know nothing about the app). Pages import from
   `app/`, `components/` and `lib/`, never from each other; `lib/` imports
