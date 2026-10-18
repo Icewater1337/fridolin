@@ -98,6 +98,8 @@ If Plaud's login expires, that private chat gets one notice a day until you
 connect again (or disconnect); without one, only the dashboard shows it.
 Plaud's tool deletes a login once it has expired. Fridolin remembers that it
 signed in, so the card says **Login expired** rather than *Not connected*.
+A login that goes because you disconnected, or changed where it lives (see
+below), while a check ran gets no notice: it did not expire.
 
 ## Where the login lives
 
@@ -135,6 +137,9 @@ still collide with it, which at worst signs Plaud out (the card then says
 the login expired). With it on, **Disconnect** signs out the login in
 `~/.plaud/`, which your terminal's `plaud` uses too. If a login is still
 there after signing out, Disconnect says so instead of reporting success.
+Either way Fridolin uses no Plaud login after **Disconnect** until you
+connect again: not one still there, nor one your terminal's `plaud` makes
+in `~/.plaud/` meanwhile.
 
 Fridolin runs Plaud's tool with its usage statistics turned off
 (`DO_NOT_TRACK`), and with only a few variables of its own environment,

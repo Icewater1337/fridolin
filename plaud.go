@@ -167,6 +167,14 @@ type plaudState struct {
 	// refused it), so a login recorded here whose tokens.json is gone has
 	// expired, rather than never been made.
 	Login *plaudLogin `json:"login,omitempty"`
+	// Disconnected is set by Disconnect and cleared by the next sign-in.
+	// Until then no login counts that Fridolin did not record, and nothing
+	// records one, as a check or a look-up of the account otherwise would
+	// for a login from before sign-ins were recorded. A check still running
+	// when you disconnected must not bring the login back, as expired, and
+	// one your terminal's plaud makes in ~/.plaud (with brain_access) is
+	// not Fridolin's.
+	Disconnected bool `json:"disconnected,omitempty"`
 }
 
 // plaudLogin is a sign-in to Plaud.
@@ -413,7 +421,8 @@ const (
 // loginStatus says whether Plaud is connected. A login is there while
 // tokens.json is, and expired when it is gone but Fridolin's sign-in is
 // still on record (the CLI deleted it). A login from before sign-ins were
-// recorded counts while its tokens.json is there.
+// recorded counts while its tokens.json is there, unless you disconnected
+// since.
 //
 // A sign-in made with the other CLI home counts for nothing until you
 // connect again: plaud.brain_access moves where the CLI keeps its login,
@@ -422,13 +431,17 @@ const (
 func (p *PlaudManager) loginStatus() string {
 	st, _ := p.loadState()
 	var dir string
-	if st != nil && st.Login != nil {
-		dir = st.Login.Dir
+	disconnected := false
+	if st != nil {
+		disconnected = st.Disconnected
+		if st.Login != nil {
+			dir = st.Login.Dir
+		}
 	}
 	switch {
 	case dir != "" && dir != p.cliHome():
 		return plaudMoved
-	case p.hasLogin():
+	case p.hasLogin() && (dir != "" || !disconnected):
 		return plaudConnected
 	case dir != "":
 		return plaudExpired
@@ -789,6 +802,9 @@ func (p *PlaudManager) me(ctx context.Context) (map[string]string, error) {
 		name = d["nickname"]
 	}
 	err = p.update(func(st *plaudState) error {
+		if st.Disconnected {
+			return nil // signed out while `me` ran
+		}
 		if st.Login == nil || st.Login.Dir != p.cliHome() {
 			// A sign-in from before they were recorded.
 			st.Login = &plaudLogin{Dir: p.cliHome(), Since: time.Now()}
@@ -1310,7 +1326,7 @@ func (p *PlaudManager) poll(ctx context.Context) error {
 		}
 		// A login that works is not expired: the next expiry gets its notice.
 		st.AuthNotified = time.Time{}
-		if st.Login == nil {
+		if st.Login == nil && !st.Disconnected {
 			// A sign-in from before they were recorded.
 			st.Login = &plaudLogin{Dir: p.cliHome(), Since: time.Now()}
 		}
@@ -1454,8 +1470,8 @@ func (p *PlaudManager) seed(ctx context.Context, acct string) error {
 	return p.update(func(st *plaudState) error {
 		fresh := newPlaudState()
 		fresh.Seeded, fresh.Account, fresh.Seen = true, acct, listed
-		fresh.Forwarded, fresh.Login = st.Forwarded, st.Login
-		if fresh.Login == nil {
+		fresh.Forwarded, fresh.Login, fresh.Disconnected = st.Forwarded, st.Login, st.Disconnected
+		if fresh.Login == nil && !fresh.Disconnected {
 			fresh.Login = &plaudLogin{Dir: p.cliHome(), Since: time.Now()}
 		}
 		*st = *fresh
@@ -1467,13 +1483,18 @@ func (p *PlaudManager) seed(ctx context.Context, acct string) error {
 // needs a new sign-in. Without one only the dashboard shows it. The notice
 // time is kept in the state, also before the first sync: a state that is
 // not seeded still gets its first sync.
+//
+// It is only for a login that lapsed. A check that lost its login because
+// you disconnected, or moved it with brain_access, while it ran says
+// nothing: its next command failed for want of a login, which is no
+// expiry.
 func (p *PlaudManager) notifyAuthExpired() {
 	st, err := p.loadState()
 	if err != nil {
 		log.Printf("plaud: %v", err)
 		return
 	}
-	if st != nil && time.Since(st.AuthNotified) < 24*time.Hour {
+	if st != nil && (st.Disconnected || time.Since(st.AuthNotified) < 24*time.Hour) || p.loginStatus() == plaudMoved {
 		return
 	}
 	_, jid, err := p.destination(p.cfg())
@@ -1782,7 +1803,7 @@ func (p *PlaudManager) Connect() error {
 			// already had ("Already logged in"): you asked for it.
 			err = p.update(func(st *plaudState) error {
 				st.Login = &plaudLogin{Dir: p.cliHome(), Since: time.Now()}
-				st.AuthNotified = time.Time{}
+				st.AuthNotified, st.Disconnected = time.Time{}, false
 				return nil
 			})
 		}
@@ -1815,24 +1836,28 @@ func (f writerFunc) Write(b []byte) (int, error) { f(b); return len(b), nil }
 // whoever asked for it goes away: the CLI must not be stopped while it
 // rewrites its login. With plaud.brain_access on, that is the login in
 // ~/.plaud, which your terminal's plaud uses too. A login still there
-// afterwards is an error: Fridolin would go on using it.
+// afterwards is an error: Fridolin no longer uses it, but it is still
+// signed in.
+//
+// The state says so first: a check still running finds its login gone
+// from then on, and must take that for a sign-out rather than an expiry.
 func (p *PlaudManager) Disconnect() error {
 	ctx, cancel := context.WithTimeout(p.lifetime(), 30*time.Second)
 	defer cancel()
-	if _, err := p.run(ctx, "logout"); err != nil && !errors.Is(err, errPlaudAuth) {
-		log.Printf("plaud: logout: %v", err)
-	}
-	if !p.cfg().Plaud.BrainAccess {
-		_ = os.Remove(p.tokenPath()) // our private copy; the shared one is the CLI's to manage
-	}
 	// Signed out on purpose, not expired. What was seen stays, for the
 	// same account signing in again.
-	err := p.update(func(st *plaudState) error { st.Login = nil; return nil })
+	err := p.update(func(st *plaudState) error { st.Login, st.Disconnected = nil, true; return nil })
 	p.mu.Lock()
 	p.refused = false
 	p.mu.Unlock()
 	if err != nil {
 		return err
+	}
+	if _, err := p.run(ctx, "logout"); err != nil && !errors.Is(err, errPlaudAuth) {
+		log.Printf("plaud: logout: %v", err)
+	}
+	if !p.cfg().Plaud.BrainAccess {
+		_ = os.Remove(p.tokenPath()) // our private copy; the shared one is the CLI's to manage
 	}
 	if p.hasLogin() {
 		return fmt.Errorf("the sign-out did not remove %s, so Plaud's login is still there — run `plaud logout` in a terminal", p.tokenPath())

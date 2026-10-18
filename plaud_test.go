@@ -1096,6 +1096,50 @@ func TestPlaudExpiredLoginKeepsNotifying(t *testing.T) {
 	}
 }
 
+// Connecting again after a disconnect makes the login Fridolin's again:
+// the card shows who signed in, and once the login lapses the chat hears
+// so, as before the disconnect.
+func TestPlaudConnectingAfterADisconnectCountsAgain(t *testing.T) {
+	for _, access := range []bool{false, true} {
+		t.Run(fmt.Sprintf("brain_access=%v", access), func(t *testing.T) {
+			tb, fp := plaudBridge(t, fmt.Sprintf(`, "brain_access": %v`, access))
+			plaudSignIn(t, tb)
+			if err := tb.plaud.saveState(plaudRecordLogin(tb, plaudSeededState("u_1", plaudOld1))); err != nil {
+				t.Fatal(err)
+			}
+			fp.files(plaudOld1)
+			if err := tb.plaud.Disconnect(); err != nil {
+				t.Fatal(err)
+			}
+			if err := tb.plaud.Connect(); err != nil {
+				t.Fatal(err)
+			}
+			waitFor(t, 10*time.Second, "the sign-in", func() bool { c := tb.plaud.Status().Connect; return c != nil && c.State != "running" })
+			if c := tb.plaud.Status().Connect; c.State != "done" {
+				t.Fatalf("sign-in %s: %s", c.State, c.Error)
+			}
+			if st, _ := tb.plaud.loadState(); st == nil || st.Disconnected {
+				t.Errorf("state = %+v, want the disconnect forgotten", st)
+			}
+			if s := tb.plaud.Status(); !s.Connected || s.Account != "you@example.com" {
+				t.Errorf("connected=%v account=%q, want connected as you@example.com", s.Connected, s.Account)
+			}
+
+			fp.write("expired", "")
+			tb.plaud.tick(context.Background(), time.Now().Add(-time.Second))
+			n := 0
+			for _, m := range tb.dev.Outbox() {
+				if strings.Contains(m.Text, "Plaud: the login expired") {
+					n++
+				}
+			}
+			if n != 1 {
+				t.Errorf("%d expiry notices, want 1", n)
+			}
+		})
+	}
+}
+
 // A login Plaud refuses while its tokens.json stays (revoked on Plaud's
 // side) also shows as expired, until a check works again.
 func TestPlaudRefusedLoginShowsExpired(t *testing.T) {
@@ -1119,6 +1163,75 @@ func TestPlaudRefusedLoginShowsExpired(t *testing.T) {
 	}
 	if s := tb.plaud.Status(); s.Expired {
 		t.Error("still expired after a check that worked")
+	}
+}
+
+// A check that loses its login because you disconnected, or moved it with
+// brain_access, while it ran tells the chat nothing: only a login that
+// lapsed gets the expiry notice. Nor does it record the login again, which
+// would show it as expired and bring the daily notice back.
+func TestPlaudSigningOutDuringACheckIsNoExpiry(t *testing.T) {
+	disconnect := func(tb *testBridge) error { return tb.plaud.Disconnect() }
+	moveLogin := func(tb *testBridge) error {
+		_, err := tb.cfgs.Update("", func(c *Config) error { c.Plaud.BrainAccess = true; return nil })
+		return err
+	}
+	for _, c := range []struct {
+		name   string
+		seeded bool
+		cmd    string // the command before (or after) which it happens
+		after  bool
+		act    func(tb *testBridge) error
+		state  string
+	}{
+		{"disconnected before a recording is fetched", true, "file", false, disconnect, plaudSignedOut},
+		{"brain_access turned on before a recording is fetched", true, "file", false, moveLogin, plaudMoved},
+		{"disconnected while the account is looked up", true, "me", true, disconnect, plaudSignedOut},
+		{"disconnected during the first sync", false, "files", true, disconnect, plaudSignedOut},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			tb, fp := plaudBridge(t, "")
+			plaudSignIn(t, tb)
+			st := newPlaudState()
+			if c.seeded {
+				st = plaudSeededState("u_1", plaudOld1)
+			}
+			if err := tb.plaud.saveState(plaudRecordLogin(tb, st)); err != nil {
+				t.Fatal(err)
+			}
+			fp.files(plaudNew, plaudOld1)
+			fp.recording(plaudNew, true)
+			run := tb.plaud.run
+			var once sync.Once
+			act := func() {
+				once.Do(func() {
+					if err := c.act(tb); err != nil {
+						t.Error(err)
+					}
+				})
+			}
+			tb.plaud.run = func(ctx context.Context, args ...string) (string, error) {
+				if args[0] == c.cmd && !c.after {
+					act()
+				}
+				out, err := run(ctx, args...)
+				if args[0] == c.cmd && c.after {
+					act()
+				}
+				return out, err
+			}
+			ctx := context.Background()
+			if err := tb.plaud.Poll(ctx); err != nil && !errors.Is(err, errPlaudAuth) {
+				t.Fatal(err)
+			}
+			tb.plaud.tick(ctx, time.Now().Add(-time.Second))
+			if out := tb.dev.Outbox(); len(out) != 0 {
+				t.Errorf("sent %+v, want nothing", out)
+			}
+			if got := tb.plaud.loginStatus(); got != c.state {
+				t.Errorf("login %s, want %s", got, c.state)
+			}
+		})
 	}
 }
 
@@ -2057,7 +2170,8 @@ func TestPlaudBrainAccessNeedsConnectingAgain(t *testing.T) {
 }
 
 // Disconnect fails, rather than claim it signed out, when the login is
-// still there afterwards (Fridolin would go on using it).
+// still there afterwards (brains and your terminal would go on using it).
+// Fridolin itself no longer does.
 func TestPlaudDisconnectReportsALoginThatStays(t *testing.T) {
 	tb, fp := plaudBridge(t, `, "brain_access": true`)
 	plaudSignIn(t, tb)
@@ -2066,10 +2180,23 @@ func TestPlaudDisconnectReportsALoginThatStays(t *testing.T) {
 	if w.Code != http.StatusBadGateway || !strings.Contains(w.Body.String(), "still there") {
 		t.Errorf("disconnect = %d %s, want 502 saying the login is still there", w.Code, w.Body.String())
 	}
+	if s := tb.plaud.Status(); s.Connected || s.Expired {
+		t.Errorf("after disconnecting: connected=%v expired=%v, want neither: Fridolin signed out of it", s.Connected, s.Expired)
+	}
 	_ = os.Remove(filepath.Join(fp.dir, "logout_keeps"))
 	if w := tb.do("POST", "/api/plaud/disconnect", nil); w.Code != 200 || tb.plaud.connected() {
 		t.Errorf("disconnect = %d %s, connected = %v", w.Code, w.Body.String(), tb.plaud.connected())
 	}
+	// Your terminal signs in to ~/.plaud again: not Fridolin's login until
+	// you connect.
+	plaudSignIn(t, tb)
+	if tb.plaud.connected() {
+		t.Error("a login made after disconnecting counts without connecting")
+	}
+	if err := tb.plaud.Connect(); err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, 10*time.Second, "the sign-in", func() bool { return tb.plaud.connected() })
 }
 
 // Brains' runs get Plaud's telemetry opt-out too, whether or not brains may
