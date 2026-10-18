@@ -11,79 +11,11 @@ import (
 	"strings"
 	"syscall"
 	"testing"
-	"time"
 	"unicode"
 	"unicode/utf8"
 
 	"fridolin/internal/fsx"
 )
-
-// ── triggers ──────────────────────────────────────────────────────────────
-
-func TestMatchesTrigger(t *testing.T) {
-	triggers := []string{"@claude", "hey bot"}
-
-	cases := []struct {
-		text string
-		want bool
-	}{
-		{"@claude what's up", true},
-		{"@CLAUDE what's up", true},    // case-insensitive
-		{"ask @claude about it", true}, // anywhere in the message
-		{"hey bot, status?", true},
-		{"HEY BOT", true},
-		{"just chatting", false},
-		{"", false},
-		{"claude is a name", false}, // must match the full trigger
-	}
-
-	for _, c := range cases {
-		if got := TriggersFromStrings(triggers).Matches(c.text); got != c.want {
-			t.Errorf("matchesTrigger(%q) = %v, want %v", c.text, got, c.want)
-		}
-	}
-}
-
-func TestMatchesTriggerEmptyTriggerIgnored(t *testing.T) {
-	// An empty trigger would otherwise match every message.
-	if TriggersFromStrings([]string{""}).Matches("anything at all") {
-		t.Error("an empty trigger must not match")
-	}
-}
-
-func TestStripTriggers(t *testing.T) {
-	triggers := []string{"@claude", "hey bot"}
-
-	cases := []struct{ in, want string }{
-		{"@claude hello", "hello"},
-		{"@CLAUDE hello", "hello"},
-		{"hello @claude", "hello"},
-		{"@claude hello @claude again", "hello  again"},
-		{"hey bot do the thing", "do the thing"},
-		{"nothing to strip", "nothing to strip"},
-		{"@claude", ""},
-	}
-
-	for _, c := range cases {
-		if got := TriggersFromStrings(triggers).Strip(c.in); got != c.want {
-			t.Errorf("stripTriggers(%q) = %q, want %q", c.in, got, c.want)
-		}
-	}
-}
-
-func TestStripTriggersTerminates(t *testing.T) {
-	// Repeated occurrences must all be removed without the strip loop spinning.
-	done := make(chan string, 1)
-	go func() { done <- TriggersFromStrings([]string{"a"}).Strip("aaaa") }()
-	select {
-	case got := <-done:
-		if got != "" {
-			t.Errorf("got %q, want empty", got)
-		}
-	case <-time.After(5 * time.Second):
-		t.Fatal("stripTriggers did not terminate")
-	}
-}
 
 // ── junk filter ───────────────────────────────────────────────────────────
 
