@@ -26,6 +26,8 @@ The person's data lives in brain folders they choose and in
      person to run `claude` once and log in).
    - Optional, for backups: rclone (`brew install rclone` or
      https://rclone.org/install/).
+   - Optional, for transcribing voice notes: python3 and ffmpeg (`brew
+     install ffmpeg`); the engine is set up later (README, Transcription).
 
 2. **Build, test, install the service, open the dashboard:**
 

@@ -75,6 +75,14 @@ func TestSetupSaysWhatHappened(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
+	// What transcription needs, on PATH only for the cases that name it.
+	optional := t.TempDir()
+	for _, name := range []string{"python3", "ffmpeg"} {
+		if err := os.WriteFile(filepath.Join(optional, name), []byte("#!/bin/sh\n"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	withOptional := "PATH=" + bin + string(os.PathListSeparator) + optional
 	bridge := filepath.Join(t.TempDir(), "fridolin")
 	if err := os.WriteFile(bridge, []byte(fakeBridgeScript), 0o755); err != nil {
 		t.Fatal(err)
@@ -127,6 +135,11 @@ func TestSetupSaysWhatHappened(t *testing.T) {
 			[]string{"If a bridge is running, installing restarts it"}, []string{"A bridge is running"}},
 		{"a bridge is running", nil, []string{"FAKE_STATUS=0"}, true, 0, true,
 			[]string{"A bridge is running. Installing restarts it"}, nil},
+		// Transcription's needs are named, and missing ones do not stop it.
+		{"python3 and ffmpeg are missing", nil, nil, true, 0, true,
+			[]string{"python3 not installed — only needed to transcribe voice notes", "ffmpeg not installed — only needed to transcribe voice notes", "Setup complete"}, nil},
+		{"python3 and ffmpeg are there", nil, []string{withOptional}, true, 0, true,
+			[]string{"✓ python3 (for transcribing voice notes)", "✓ ffmpeg (for transcribing voice notes)"}, []string{"not installed — only needed to transcribe"}},
 		// The test log gets a name of its own, not a fixed one in /tmp.
 		{"the tests fail", nil, []string{"FAKE_TESTS_FAIL=1"}, true, 1, false,
 			[]string{"--- FAIL: TestSomething", "Tests failed, so nothing was installed. Full output: $TMPDIR/fridolin-setup-tests."}, []string{"fridolin-setup-tests.log"}},

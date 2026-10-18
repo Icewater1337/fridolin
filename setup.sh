@@ -11,7 +11,8 @@ usage() {
 Usage: ./setup.sh [--yes] [--no-service] [--skip-tests]
 
 Sets up Fridolin on this machine, or upgrades it after `git pull`:
-  1. checks the prerequisites (Go, a C compiler, the Claude CLI; rclone optional)
+  1. checks the prerequisites (Go, a C compiler, the Claude CLI; rclone,
+     python3 and ffmpeg optional)
   2. builds the bridge from this checkout and runs the tests on the build
   3. writes a starter config if there is none
   4. installs the build to ~/.local/lib/fridolin, keeping the one it replaces
@@ -141,6 +142,22 @@ if command -v rclone >/dev/null 2>&1; then
 else
   warn "rclone not installed — only needed for Google Drive backups."
   if [ "$OS" = Darwin ]; then info "${DIM}brew install rclone${RESET}"; else info "${DIM}https://rclone.org/install/${RESET}"; fi
+fi
+
+# Transcribing voice notes and recordings (tools/transcribe.py, which the
+# transcription skill runs) needs both; nothing else does, since the
+# calendar, polls and history are the bridge's own commands.
+if command -v python3 >/dev/null 2>&1; then
+  ok "python3 (for transcribing voice notes)"
+else
+  warn "python3 not installed — only needed to transcribe voice notes and recordings."
+  if [ "$OS" = Darwin ]; then info "${DIM}brew install python${RESET}"; else info "${DIM}sudo apt install python3 (or your distribution's package)${RESET}"; fi
+fi
+if command -v ffmpeg >/dev/null 2>&1; then
+  ok "ffmpeg (for transcribing voice notes)"
+else
+  warn "ffmpeg not installed — only needed to transcribe voice notes and recordings."
+  if [ "$OS" = Darwin ]; then info "${DIM}brew install ffmpeg${RESET}"; else info "${DIM}sudo apt install ffmpeg (or your distribution's package)${RESET}"; fi
 fi
 
 # ── 2. build and test ─────────────────────────────────────────────────────
