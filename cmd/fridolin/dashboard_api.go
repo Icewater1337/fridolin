@@ -29,6 +29,7 @@ import (
 
 	"fridolin/internal/fsx"
 	"fridolin/internal/textx"
+	"fridolin/internal/version"
 	"rsc.io/qr"
 )
 
@@ -236,7 +237,7 @@ func (b *Bridge) apiStatus(w http.ResponseWriter, r *http.Request) {
 	cfg := b.cfgs.Get()
 	wa := b.wa.State()
 	resp := statusResponse{
-		Version:       bridgeVersion(),
+		Version:       version.String(),
 		StartedAt:     b.started,
 		UptimeS:       int64(time.Since(b.started).Seconds()),
 		ConfigPath:    b.cfgs.Path(),

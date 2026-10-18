@@ -15,6 +15,8 @@ import (
 	"os"
 	"strings"
 	"time"
+
+	"fridolin/internal/version"
 )
 
 type mcpTool struct {
@@ -126,7 +128,7 @@ func serveSiteMCP(in io.Reader, out io.Writer, url, token string) {
 			resp.Result = map[string]any{
 				"protocolVersion": p.ProtocolVersion,
 				"capabilities":    map[string]any{"tools": map[string]any{}},
-				"serverInfo":      map[string]any{"name": "fridolin-site", "version": bridgeVersion()},
+				"serverInfo":      map[string]any{"name": "fridolin-site", "version": version.String()},
 				"instructions":    "Tools for building this Fridolin site's modules in your workspace. Start with site_context; the site-builder skill has the workflow.",
 			}
 		case "ping":

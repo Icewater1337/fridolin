@@ -24,6 +24,7 @@ import (
 
 	"fridolin/internal/fsx"
 	"fridolin/internal/textx"
+	"fridolin/internal/version"
 )
 
 type testBridge struct {
@@ -405,8 +406,8 @@ func TestReadyReportsWhetherMessagesCanGoOut(t *testing.T) {
 			if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil || w.Code != want {
 				t.Fatalf("status %d (%v) %s, want %d with JSON", w.Code, err, w.Body.String(), want)
 			}
-			if resp.Ready != c.ready || resp.WhatsApp != c.mode || resp.Version != bridgeVersion() || !resp.StartedAt.Equal(tb.started) {
-				t.Errorf("body %+v, want ready=%v whatsapp=%q version=%q started_at=%v", resp, c.ready, c.mode, bridgeVersion(), tb.started)
+			if resp.Ready != c.ready || resp.WhatsApp != c.mode || resp.Version != version.String() || !resp.StartedAt.Equal(tb.started) {
+				t.Errorf("body %+v, want ready=%v whatsapp=%q version=%q started_at=%v", resp, c.ready, c.mode, version.String(), tb.started)
 			}
 			if strings.Contains(w.Body.String(), "15551234567") {
 				t.Errorf("/ready names the account: %s", w.Body.String())

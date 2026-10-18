@@ -6,6 +6,8 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+
+	"fridolin/internal/version"
 )
 
 func TestRunLogsItsVersionFirst(t *testing.T) {
@@ -20,7 +22,7 @@ func TestRunLogsItsVersionFirst(t *testing.T) {
 	var console strings.Builder
 	ring, _ := runLog(&console, "")
 
-	want := "Starting fridolin " + bridgeVersion() + " (" + runtime.Version() + ", " + runtime.GOOS + "/" + runtime.GOARCH + ")"
+	want := "Starting fridolin " + version.String() + " (" + runtime.Version() + ", " + runtime.GOOS + "/" + runtime.GOARCH + ")"
 	lines := strings.Split(strings.TrimSpace(console.String()), "\n")
 	if len(lines) < 2 || !strings.Contains(lines[0], want) || !strings.Contains(lines[1], "CONFIG_FILE") {
 		t.Errorf("the console log does not start with %q, then the CONFIG_FILE warning:\n%s", want, console.String())

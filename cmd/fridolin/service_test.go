@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"fridolin/internal/fsx"
+	"fridolin/internal/version"
 )
 
 // fakeService is a serviceHost whose launchctl, systemctl and HTTP calls
@@ -39,7 +40,7 @@ func newFakeService(t *testing.T, goos string) *fakeService {
 	t.Setenv("HOME", home)
 	f := &fakeService{t: t, home: home, out: &strings.Builder{}, health: 200, clock: time.Now()}
 	f.ready = func() (int, []byte) {
-		data, _ := json.Marshal(readyResponse{Ready: false, WhatsApp: "pairing", Version: bridgeVersion(), StartedAt: time.Now()})
+		data, _ := json.Marshal(readyResponse{Ready: false, WhatsApp: "pairing", Version: version.String(), StartedAt: time.Now()})
 		return 503, data
 	}
 	f.cfg = writeConfig(t, `{"brain_mode": true, "data_dir": "`+home+`/.fridolin", "http_listen": "127.0.0.1:18765"}`)
@@ -447,7 +448,7 @@ func TestServiceInstallRunsACopyOutsideTheCheckout(t *testing.T) {
 				t.Errorf("tool modes %v %v", mode(t, filepath.Join(dir, "tools", "poll_results.py")), mode(t, filepath.Join(dir, "tools", "requirements.txt")))
 			}
 			m, err := readInstallManifest(dir)
-			if err != nil || m.Source != f.src || m.Version != bridgeVersion() || m.InstalledAt.IsZero() {
+			if err != nil || m.Source != f.src || m.Version != version.String() || m.InstalledAt.IsZero() {
 				t.Errorf("install.json = %+v, %v", m, err)
 			}
 			// The installed binary finds its tools and the checkout.
@@ -476,7 +477,7 @@ func TestServiceInstallRunsACopyOutsideTheCheckout(t *testing.T) {
 			if goos == "darwin" && mode(t, f.home+"/Library/Logs/fridolin") != 0o700 {
 				t.Errorf("log folder mode %v, want 0700", mode(t, f.home+"/Library/Logs/fridolin"))
 			}
-			if !strings.Contains(f.out.String(), "the bridge is running ("+bridgeVersion()+")") || !strings.Contains(f.out.String(), "pair it in the dashboard") {
+			if !strings.Contains(f.out.String(), "the bridge is running ("+version.String()+")") || !strings.Contains(f.out.String(), "pair it in the dashboard") {
 				t.Errorf("output:\n%s", f.out)
 			}
 
@@ -876,22 +877,22 @@ func TestServiceInstallChecksTheNewBridgeAnswers(t *testing.T) {
 		wantOut string
 	}{
 		{"new bridge, paired", 200, func() (int, []byte) {
-			return ready(readyResponse{Ready: true, WhatsApp: "connected", Version: bridgeVersion(), StartedAt: time.Now()})()
+			return ready(readyResponse{Ready: true, WhatsApp: "connected", Version: version.String(), StartedAt: time.Now()})()
 		}, "", "", "WhatsApp is connected"},
 		{"dev mode", 200, func() (int, []byte) {
-			return ready(readyResponse{Ready: true, WhatsApp: "disabled", Version: bridgeVersion(), StartedAt: time.Now()})()
+			return ready(readyResponse{Ready: true, WhatsApp: "disabled", Version: version.String(), StartedAt: time.Now()})()
 		}, "", "", "runs in dev mode"},
 		{"logged out", 200, func() (int, []byte) {
-			return ready(readyResponse{WhatsApp: "logged-out", Version: bridgeVersion(), StartedAt: time.Now()})()
+			return ready(readyResponse{WhatsApp: "logged-out", Version: version.String(), StartedAt: time.Now()})()
 		}, "", "", "pair again"},
-		{"the old bridge still answers", 200, ready(readyResponse{WhatsApp: "connected", Version: bridgeVersion(), StartedAt: time.Now().Add(-time.Hour)}), "", "is still the one started", ""},
+		{"the old bridge still answers", 200, ready(readyResponse{WhatsApp: "connected", Version: version.String(), StartedAt: time.Now().Add(-time.Hour)}), "", "is still the one started", ""},
 		{"the old bridge answers while it shuts down", 200, func() func() (int, []byte) {
 			calls := 0
 			return func() (int, []byte) {
 				if calls++; calls < 3 {
 					return ready(readyResponse{WhatsApp: "connected", Version: "v0.0.1", StartedAt: time.Now().Add(-time.Hour)})()
 				}
-				return ready(readyResponse{WhatsApp: "connected", Version: bridgeVersion(), StartedAt: time.Now()})()
+				return ready(readyResponse{WhatsApp: "connected", Version: version.String(), StartedAt: time.Now()})()
 			}
 		}(), "", "", "the bridge is running"},
 		{"another build answers", 200, func() (int, []byte) {
@@ -1035,7 +1036,7 @@ func TestServiceStatus(t *testing.T) {
 		t.Fatal(err)
 	}
 	out := f.out.String()
-	for _, want := range []string{"installed: " + f.dir() + "/fridolin (" + bridgeVersion(), "from " + f.src, "service:   running, pid 4242", "runs:      " + f.dir() + "/fridolin", "bridge:    answers on http://127.0.0.1:18765: " + bridgeVersion() + ", WhatsApp pairing"} {
+	for _, want := range []string{"installed: " + f.dir() + "/fridolin (" + version.String(), "from " + f.src, "service:   running, pid 4242", "runs:      " + f.dir() + "/fridolin", "bridge:    answers on http://127.0.0.1:18765: " + version.String() + ", WhatsApp pairing"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("output lacks %q:\n%s", want, out)
 		}

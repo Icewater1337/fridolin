@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"fridolin/internal/fsx"
+	"fridolin/internal/version"
 	"go.mau.fi/whatsmeow/types"
 )
 
@@ -81,7 +82,7 @@ func (b *Bridge) httpReady(w http.ResponseWriter, r *http.Request) {
 	resp := readyResponse{
 		Ready:     mode == "connected" || b.dev != nil,
 		WhatsApp:  mode,
-		Version:   bridgeVersion(),
+		Version:   version.String(),
 		StartedAt: b.started,
 	}
 	status := http.StatusOK

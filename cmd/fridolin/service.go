@@ -23,6 +23,7 @@ import (
 	"time"
 
 	"fridolin/internal/fsx"
+	"fridolin/internal/version"
 )
 
 // `fridolin service` installs the bridge outside its source checkout and
@@ -731,11 +732,11 @@ func (h *serviceHost) install(o installOptions) error {
 	}
 	switch {
 	case !changed:
-		h.printf("%s is already this build (%s)", binary, bridgeVersion())
+		h.printf("%s is already this build (%s)", binary, version.String())
 	case pathExists(binary + prevSuffix):
-		h.printf("installed %s (%s); the one it replaced is %s", binary, bridgeVersion(), installedBinary+prevSuffix)
+		h.printf("installed %s (%s); the one it replaced is %s", binary, version.String(), installedBinary+prevSuffix)
 	default:
-		h.printf("installed %s (%s)", binary, bridgeVersion())
+		h.printf("installed %s (%s)", binary, version.String())
 	}
 	// The tools that came with the binary it replaced stay with it in
 	// tools.prev; the same binary again only refreshes them.
@@ -779,7 +780,7 @@ func (h *serviceHost) install(o installOptions) error {
 	if h.goos == "darwin" {
 		h.retireLegacyAgent()
 	}
-	return h.restart(p.cfg, p.unitPath, bridgeVersion())
+	return h.restart(p.cfg, p.unitPath, version.String())
 }
 
 // planInstall checks everything an install needs and renders the unit,
@@ -1075,7 +1076,7 @@ func writeManifest(dir, source string, keepPrev bool) error {
 			return err
 		}
 	}
-	data, err := json.MarshalIndent(installManifest{Version: bridgeVersion(), Source: source, InstalledAt: time.Now().UTC().Truncate(time.Second)}, "", "  ")
+	data, err := json.MarshalIndent(installManifest{Version: version.String(), Source: source, InstalledAt: time.Now().UTC().Truncate(time.Second)}, "", "  ")
 	if err != nil {
 		return err
 	}

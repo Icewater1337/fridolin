@@ -21,6 +21,7 @@ import (
 	"syscall"
 
 	"fridolin/internal/fsx"
+	"fridolin/internal/version"
 )
 
 const usage = `fridolin — talk to Claude Code over WhatsApp
@@ -91,7 +92,7 @@ func main() {
 	case "calendar":
 		os.Exit(calendarCmd(args, processToolIO()))
 	case "version":
-		fmt.Println(bridgeVersion())
+		fmt.Println(version.String())
 	case "help":
 		fmt.Print(usage)
 	default:
@@ -420,7 +421,7 @@ func stopOnSignals(cancel context.CancelCauseFunc, brains *BrainManager) func() 
 func runLog(console io.Writer, configFlag string) (*LogRing, string) {
 	ring := NewLogRing(logRingLines)
 	log.SetOutput(io.MultiWriter(console, ring))
-	log.Printf("Starting %s", versionLine())
+	log.Printf("Starting %s", version.Line())
 	path, source := configPathFrom(configFlag)
 	log.Printf("Config file: %s (%s)", absPath(path), source)
 	return ring, path

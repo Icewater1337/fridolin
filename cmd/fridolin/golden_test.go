@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"fridolin/internal/fsx"
+	"fridolin/internal/version"
 )
 
 // The golden files in testdata/golden pin what the bridge says and writes
@@ -156,7 +157,7 @@ type pathMask struct{ path, placeholder string }
 // deny of every write, and as <ABOVE> it would read as one for a folder
 // above the root, with a count that differs between systems.
 func newScrubber(root string) *scrubber {
-	s := &scrubber{keys: map[string]bool{}, values: map[string]string{bridgeVersion(): "<VERSION>"}}
+	s := &scrubber{keys: map[string]bool{}, values: map[string]string{version.String(): "<VERSION>"}}
 	s.addPath(root, "<ROOT>")
 	s.addPath(filepath.Join(root, "home"), "<HOME>")
 	if exe, err := filepath.Abs(os.Args[0]); err == nil {
@@ -428,7 +429,7 @@ func TestScrubberJSON(t *testing.T) {
 		{"a masked key keeps its place", `{"pid":4242,"other":1}`, "{\n  \"other\": 1,\n  \"pid\": \"<PID>\"\n}\n"},
 		{"a masked key that is null stays null", `{"pid":null}`, "{\n  \"pid\": null\n}\n"},
 		{"a masked path", `{"a":[{"node":"x"}],"node":"y"}`, "{\n  \"a\": [\n    {\n      \"node\": \"<NODE>\"\n    }\n  ],\n  \"node\": \"y\"\n}\n"},
-		{"the version as a whole value", `{"version":"` + bridgeVersion() + `"}`, "{\n  \"version\": \"<VERSION>\"\n}\n"},
+		{"the version as a whole value", `{"version":"` + version.String() + `"}`, "{\n  \"version\": \"<VERSION>\"\n}\n"},
 		{"no HTML escaping", `{"m":"a → <b> & c"}`, "{\n  \"m\": \"a → <b> & c\"\n}\n"},
 		{"numbers stay as written", `{"n":1.50}`, "{\n  \"n\": 1.50\n}\n"},
 		{"version stamps are masked", `{"v":"20261018-090405Z","old":"20261018-110405"}`, "{\n  \"old\": \"<STAMP>\",\n  \"v\": \"<STAMP>\"\n}\n"},
