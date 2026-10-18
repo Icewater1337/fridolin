@@ -167,23 +167,30 @@ func (s *Store) PruneOutbox(ctx context.Context, before time.Time) error {
 func (s *Store) OutboxSummary(ctx context.Context, now time.Time) (outboxSummary, error) {
 	var sum outboxSummary
 	since := now.Add(-outboxFailedKeep).UTC()
+	// One transaction, so that the counts are of one moment: the outbox
+	// moves rows from waiting to failed while they are read.
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return sum, err
+	}
+	defer tx.Rollback()
 	// MIN and MAX would lose the column's type, which the driver reads
 	// times by, so the rows themselves are read.
-	if err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM outbox WHERE state = 'pending'`).Scan(&sum.Waiting); err != nil {
+	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM outbox WHERE state = 'pending'`).Scan(&sum.Waiting); err != nil {
 		return sum, err
 	}
-	err := s.db.QueryRowContext(ctx, `SELECT created_at FROM outbox WHERE state = 'pending' ORDER BY id LIMIT 1`).Scan(&sum.OldestWaiting)
+	err = tx.QueryRowContext(ctx, `SELECT created_at FROM outbox WHERE state = 'pending' ORDER BY id LIMIT 1`).Scan(&sum.OldestWaiting)
 	if err != nil && !errors.Is(err, sql.ErrNoRows) {
 		return sum, err
 	}
-	err = s.db.QueryRowContext(ctx, `SELECT last_error FROM outbox WHERE state = 'pending' AND last_error != '' ORDER BY id DESC LIMIT 1`).Scan(&sum.WaitingError)
+	err = tx.QueryRowContext(ctx, `SELECT last_error FROM outbox WHERE state = 'pending' AND last_error != '' ORDER BY id DESC LIMIT 1`).Scan(&sum.WaitingError)
 	if err != nil && !errors.Is(err, sql.ErrNoRows) {
 		return sum, err
 	}
-	if err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM outbox WHERE state = 'failed' AND next_try_at >= ?`, since).Scan(&sum.Failed); err != nil {
+	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM outbox WHERE state = 'failed' AND next_try_at >= ?`, since).Scan(&sum.Failed); err != nil {
 		return sum, err
 	}
-	err = s.db.QueryRowContext(ctx, `SELECT next_try_at, last_error FROM outbox WHERE state = 'failed' AND next_try_at >= ?
+	err = tx.QueryRowContext(ctx, `SELECT next_try_at, last_error FROM outbox WHERE state = 'failed' AND next_try_at >= ?
 		ORDER BY next_try_at DESC, id DESC LIMIT 1`, since).Scan(&sum.LastFailed, &sum.FailedError)
 	if err != nil && !errors.Is(err, sql.ErrNoRows) {
 		return sum, err

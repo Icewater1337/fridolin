@@ -33,12 +33,23 @@ jobs:
         # the old minimum, and go.mod and setup.sh, which reads it, would
         # still accept a release without security fixes.
         go: [oldstable, stable]
+        # The slowest job is what a pull request waits for, so the race
+        # tests run in slices, one job each (scripts/test-shard.sh): three
+        # on macOS, where they take about twice as long, two on Linux. The
+        # checks that run once per system and release go with the last
+        # slice, which has the fewest tests (SHARDS below).
+        shard: [1, 2, 3]
+        exclude:
+          - {os: ubuntu-latest, shard: 3}
+    name: go (${{ matrix.os }}, ${{ matrix.go }}, ${{ matrix.shard }}/${{ matrix.os == 'macos-latest' && 3 || 2 }})
     runs-on: ${{ matrix.os }}
     timeout-minutes: 30
     env:
       # Test the release setup-go installed. With the default (auto), a go
       # directive newer than it would quietly download a newer toolchain.
       GOTOOLCHAIN: local
+      # How many slices this system's race tests run in; see shard above.
+      SHARDS: ${{ matrix.os == 'macos-latest' && 3 || 2 }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -50,12 +61,15 @@ jobs:
 
       # The steps are Makefile targets, so `make check` runs the same.
       - name: gofmt
+        if: matrix.shard == fromJSON(env.SHARDS)
         run: make fmt-check
 
       - name: go vet
+        if: matrix.shard == fromJSON(env.SHARDS)
         run: make vet
 
       - name: build
+        if: matrix.shard == fromJSON(env.SHARDS)
         run: make build
 
       # The backup tests that run the real rclone skip without it. Linux
@@ -80,25 +94,26 @@ jobs:
           echo "FRIDOLIN_REQUIRE_RCLONE=1" >> "$GITHUB_ENV"
 
       - name: test
-        run: make race
+        run: make race-shard SHARD=${{ matrix.shard }}/${{ env.SHARDS }}
 
       # Builds the binary with -race in a temp dir, starts it in dev mode on
       # a scratch config and stops it.
       - name: smoke test
+        if: matrix.shard == fromJSON(env.SHARDS)
         run: make smoke
 
       # The linters need one Go release, but both systems: some files only
       # build on one of them.
       - name: staticcheck
-        if: matrix.go == 'stable'
+        if: matrix.go == 'stable' && matrix.shard == fromJSON(env.SHARDS)
         run: make lint-go
 
       - name: go.mod and go.sum are tidy
-        if: matrix.go == 'stable' && matrix.os == 'ubuntu-latest'
+        if: matrix.go == 'stable' && matrix.os == 'ubuntu-latest' && matrix.shard == fromJSON(env.SHARDS)
         run: make tidy-check
 
       - name: actionlint and action pins
-        if: matrix.go == 'stable' && matrix.os == 'ubuntu-latest'
+        if: matrix.go == 'stable' && matrix.os == 'ubuntu-latest' && matrix.shard == fromJSON(env.SHARDS)
         run: make lint-actions
 
   fuzz:
