@@ -571,8 +571,10 @@ brain read its own token, and copied the OAuth client next to it as
 
 This is containment, not a jail — it raises the cost of a prompt injection
 rather than eliminating it. Linux has no `sandbox-exec`: the bridge refuses a
-config with `sandbox.enabled` on there (the Linux default is off). Run the
-bridge as a dedicated user instead.
+config with `sandbox.enabled` on there (the Linux default is off). Running
+the bridge as a dedicated user keeps brains out of your own files, but not
+out of the bridge's data dir: brains run as that user too, so they can read
+the dashboard token and change any setting.
 
 ### What the sandbox does not cover yet
 

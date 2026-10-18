@@ -566,7 +566,10 @@ What it does not do:
   `sudo machinectl shell fridolin@`; `sudo -u` gives `systemctl --user` no
   session) and run `./setup.sh` there. The unit sets `NoNewPrivileges=yes`,
   so nothing a brain starts can gain privileges through `sudo` or another
-  setuid program.
+  setuid program. That keeps brains out of your own files, but not out of
+  the bridge's: brains run as that user too, so they can read and change
+  its token, `config.json` and WhatsApp session, and with them every
+  setting.
 - Every file sent to the bridge lands in your data directory, and the assistant
   reads it.
 
