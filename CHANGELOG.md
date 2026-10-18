@@ -24,6 +24,31 @@ yet, so everything is under Unreleased until the first one.
   `~/.local/share/fridolin/venv`, which the transcription skill runs the
   tool with; a plain `pip install` fails on Homebrew's and Debian's Python.
   `uv run --script tools/transcribe.py` works too.
+- The bridge looks up tmux, rclone and the Plaud CLI, which it runs
+  outside the sandbox, only in the folders of its `PATH` that are in your
+  home folder or one of `/usr/bin`, `/bin`, `/usr/sbin`, `/sbin`,
+  `/usr/local/bin`, `/opt/homebrew/bin` and `/opt/local/bin`, so that a
+  brain cannot plant one in a folder such as `/opt/homebrew/opt/go/bin`.
+  One that is only in another folder of `PATH` is no longer found there:
+  set `backup.rclone_path` or `plaud.cli_path` to it, or link tmux into
+  `~/.local/bin`.
+- The activity viewer runs `/usr/bin/osascript`, and its tmux and
+  osascript with `PATH=/usr/bin:/bin:/usr/sbin:/sbin`; a tmux server the
+  bridge starts keeps that `PATH` for windows you open in it.
+- The Plaud CLI gets its own folder first on `PATH` only when that holds
+  a `node`, as nvm installs them, and otherwise finds `node` in the
+  folders the helpers are looked up in. A `node` that is only elsewhere,
+  such as a keg-only Homebrew `node@22`, is no longer found, and every
+  Plaud command fails with "env: node: No such file or directory": link
+  it into `~/.local/bin` or `/opt/homebrew/bin`
+  (`brew link --force node@22`). Brains that `plaud.brain_access` lets
+  use the CLI get its folder last on `PATH` unless it holds a `node`.
+- A brain's backup refuses to mirror a deletion also when more than a
+  fifth of its backed-up files are gone (once that is ten or more), when
+  250 or more are gone, or when a top-level folder with at least five
+  backed-up files lost more than half of them, so that a wiped
+  `memories/` is no longer mirrored. "Mirror the deletion…" on the
+  backup card goes ahead with one that was meant.
 
 ### Added
 
@@ -38,6 +63,13 @@ yet, so everything is under Unreleased until the first one.
 
 - Brain runs no longer get `BRIDGE_CREDENTIALS_DIR`, which named the
   folder of the calendar tokens; nothing in `tools/` read it any more.
+
+### Fixed
+
+- "Connect again" on a Plaud login that Plaud refuses signs that login
+  out first, giving the sign-out up to 30 seconds. Before, it took the
+  CLI's "Already logged in" for a new sign-in and showed Connected until
+  the next check was refused again.
 
 ### Kept for compatibility
 

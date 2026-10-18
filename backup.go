@@ -9,6 +9,7 @@ import (
 	"io"
 	"io/fs"
 	"log"
+	"maps"
 	"net/http"
 	"os"
 	"os/exec"
@@ -38,9 +39,10 @@ import (
 //
 // Each run is an incremental `rclone sync`, so only changed files upload.
 // Version folders are pruned keep_versions_days after the run that made them.
-// A brain folder that lost most of its files is not mirrored without force
-// (see checkMassDeletion), and a scheduled run that refuses tells the owner
-// on WhatsApp (see noticeRefusal).
+// A brain folder that lost many of its files, or most of one of its
+// folders, is not mirrored without force (see checkMassDeletion), and a
+// scheduled run that refuses tells the owner on WhatsApp (see
+// noticeRefusal).
 
 // bridgeBackupID stands for the bridge's own settings wherever backups
 // list brains by id: in a job, in the backup state, and in Drive, where it
@@ -59,7 +61,8 @@ type BackupConfig struct {
 	Root string `json:"root,omitempty"`
 	// DailyAt is the local time of the scheduled backup, "HH:MM".
 	DailyAt string `json:"daily_at,omitempty"`
-	// RclonePath overrides the rclone binary (default: found on PATH).
+	// RclonePath overrides the rclone binary (default: found in the PATH
+	// folders helperPath keeps, else in rcloneFallbacks).
 	RclonePath string `json:"rclone_path,omitempty"`
 	// KeepVersionsDays is how long a version folder is kept after the run
 	// that made it (default 30; 0 keeps them forever).
@@ -281,17 +284,26 @@ func (m *BackupManager) rclonePath() (string, error) {
 //
 // A configured path must work as it is: falling back would quietly run
 // another rclone, maybe another version, than the one you named, and hide
-// the typo. Only without one does it look further than PATH, where
-// launchd's PATH lacks Homebrew's folder and rclone's installer's.
+// the typo. A name without a folder, and rclone itself when none is
+// configured, is looked up only in the PATH folders helperPath keeps:
+// rclone runs outside the sandbox. Only without a configured one does it
+// look further, where launchd's PATH lacks Homebrew's folder and rclone's
+// installer's.
 func findRclone(p string) (string, error) {
 	if p != "" {
+		if !strings.Contains(p, "/") {
+			if found := lookPathIn(p, helperPath()); found != "" {
+				return found, nil
+			}
+			return "", fmt.Errorf("backup.rclone_path %s: %w", p, exec.ErrNotFound)
+		}
 		found, err := exec.LookPath(p)
 		if err != nil {
 			return "", fmt.Errorf("backup.rclone_path %s: %w", p, err)
 		}
 		return found, nil
 	}
-	if found, err := exec.LookPath("rclone"); err == nil {
+	if found := lookPathIn("rclone", helperPath()); found != "" {
 		return found, nil
 	}
 	for _, c := range rcloneFallbacks() {
@@ -308,8 +320,9 @@ func findRclone(p string) (string, error) {
 // rclone is found.
 var errRcloneMissing = errors.New("rclone is not installed")
 
-// rcloneFallbacks are where findRclone looks when rclone is not on PATH, a
-// variable so tests can point it at their own files.
+// rcloneFallbacks are where findRclone looks when rclone is not in the
+// folders of PATH it looks in first, a variable so tests can point it at
+// their own files.
 var rcloneFallbacks = func() []string {
 	return []string{"/opt/homebrew/bin/rclone", "/usr/local/bin/rclone", filepath.Join(homeDir(), ".local/bin/rclone")}
 }
@@ -1168,7 +1181,13 @@ func (m *BackupManager) backupBrain(ctx context.Context, br *Brain, trigger stri
 	if force {
 		return m.syncDir(ctx, br.Dir(), base, filter, trigger, -1)
 	}
-	gone, backedUp, err := m.checkMassDeletion(ctx, br.Dir(), base, filter)
+	check, err := m.checkMassDeletion(ctx, br.Dir(), base, filter)
+	refuse := func(what string) *BackupResult {
+		res := fail(fmt.Sprintf("%s: %s, so the backup in Drive was left as it was. "+
+			"If the deletion was intended, mirror it with a forced backup of this brain.", massDeletionError, what))
+		res.Refused = true
+		return res
+	}
 	switch {
 	case ctx.Err() != nil:
 		return fail("cancelled")
@@ -1186,32 +1205,67 @@ func (m *BackupManager) backupBrain(ctx context.Context, br *Brain, trigger stri
 		return res
 	case err != nil:
 		return fail("checking the backup before syncing failed: " + err.Error())
-	case gone*2 > backedUp:
-		res := fail(fmt.Sprintf("%s: %d of %d backed-up files are gone from the brain folder, so the backup in Drive was left as it was. "+
-			"If the deletion was intended, mirror it with a forced backup of this brain.", massDeletionError, gone, backedUp))
-		res.Refused = true
-		return res
+	case check.gone > maxDeletions(check.backedUp):
+		return refuse(fmt.Sprintf("%d of %d backed-up files are gone from the brain folder", check.gone, check.backedUp))
+	case check.folder != "":
+		return refuse(fmt.Sprintf("%d of the %d backed-up files in %s/ are gone from the brain folder", check.folderGone, check.folderFiles, check.folder))
 	}
 	// The check and the sync are moments apart; --max-delete keeps a brain
 	// that deletes files in between from slipping past the limit.
-	return m.syncDir(ctx, br.Dir(), base, filter, trigger, backedUp/2)
+	return m.syncDir(ctx, br.Dir(), base, filter, trigger, maxDeletions(check.backedUp))
 }
 
 // massDeletionError starts the error of a run that refused to mirror a
 // mass deletion.
 const massDeletionError = "refusing to mirror a mass deletion"
 
+// What a brain's backup mirrors without being forced (see
+// checkMassDeletion). It refuses when more than half of the backed-up files
+// are gone, however few there are (an empty or missing brain folder
+// included); when more than a fifth are, once that is at least ten; when
+// 250 or more are; and when a folder at the top of the brain folder with at
+// least five backed-up files lost more than half of them. A wipe need not
+// empty the folder: a brain told to delete its memories/ leaves the rest,
+// which in a large folder is most of it. maxDeletions applies the counts,
+// which the sync also gets as --max-delete.
+const (
+	massDeletionShare      = 5   // more than 1/5 of the files gone…
+	massDeletionMinFiles   = 10  // …once at least this many are, is refused
+	massDeletionMaxFiles   = 250 // this many gone is refused however many there are
+	massDeletionFolderSize = 5   // a top folder this large may lose half, no more
+)
+
+// maxDeletions is the most of backedUp files that a brain's backup lets go
+// without being forced (see massDeletionShare).
+func maxDeletions(backedUp int) int {
+	return min(backedUp/2, max(massDeletionMinFiles-1, backedUp/massDeletionShare), massDeletionMaxFiles-1)
+}
+
+// deletionCheck is what checkMassDeletion found.
+type deletionCheck struct {
+	// gone of the backedUp files in current/ are no longer in the brain
+	// folder: the sync would delete them.
+	gone, backedUp int
+	// folder is the folder at the top of the brain folder that lost the
+	// most files of those with at least massDeletionFolderSize backed-up
+	// files that lost more than half: folderGone of its folderFiles. ""
+	// when none did.
+	folder                  string
+	folderGone, folderFiles int
+}
+
 // checkMassDeletion compares a brain folder with its backup under base
 // (remote:root/<brain-id>) before a sync.
-// A folder that suddenly lacks most of its files was more likely wiped (a
-// brain told to rm -rf, an unmounted disk, a botched move) than tidied, and
-// a plain sync would mirror that into current/ and report OK; the copies in
-// versions/ would then expire unnoticed. It returns how many backed-up files
-// the sync would delete and how many are backed up; the caller refuses when
-// more than half would go (an empty brain folder is the extreme case). Both
-// sides are listed with the sync's own filters and symlink handling, so
-// excluded files, which the sync never deletes, do not count.
-func (m *BackupManager) checkMassDeletion(ctx context.Context, src, base, filterFile string) (gone, backedUp int, err error) {
+// A folder that suddenly lacks many of its files, or most of one of its
+// folders, was more likely wiped (a brain told to rm -rf, an unmounted
+// disk, a botched move) than tidied, and a plain sync would mirror that
+// into current/ and report OK; the copies in versions/ would then expire
+// unnoticed. It counts the backed-up files the sync would delete, in all
+// and per top folder; the caller refuses above the limits of
+// maxDeletions and massDeletionFolderSize. Both sides are listed with the
+// sync's own filters and symlink handling, so excluded files, which the
+// sync never deletes, do not count.
+func (m *BackupManager) checkMassDeletion(ctx context.Context, src, base, filterFile string) (deletionCheck, error) {
 	// Only a brain folder that is not there at all counts as empty (all of
 	// it gone). One that rclone could only partly read (a subfolder it may
 	// not open, a folder removed while it was listed) is never reported as
@@ -1229,10 +1283,10 @@ func (m *BackupManager) checkMassDeletion(ctx context.Context, src, base, filter
 	// fail on it too.
 	remote, err := m.listFiles(ctx, base+"/current", filterFile)
 	if err != nil && !errors.Is(err, errDirNotFound) {
-		return 0, 0, fmt.Errorf("listing the backup: %w", err)
+		return deletionCheck{}, fmt.Errorf("listing the backup: %w", err)
 	}
 	if localErr != nil {
-		return 0, len(remote), localErr
+		return deletionCheck{backedUp: len(remote)}, localErr
 	}
 	// rclone sync matches names whatever their Unicode normalization (an
 	// "ü" stored decomposed on one side and composed on the other is the
@@ -1242,12 +1296,27 @@ func (m *BackupManager) checkMassDeletion(ctx context.Context, src, base, filter
 	for _, p := range local {
 		have[norm.NFC.String(p)] = true
 	}
+	c := deletionCheck{backedUp: len(remote)}
+	files, gone := map[string]int{}, map[string]int{}
 	for _, p := range remote {
-		if !have[norm.NFC.String(p)] {
-			gone++
+		p = norm.NFC.String(p)
+		top, _, inFolder := strings.Cut(p, "/")
+		if inFolder {
+			files[top]++
+		}
+		if !have[p] {
+			c.gone++
+			if inFolder {
+				gone[top]++
+			}
 		}
 	}
-	return gone, len(remote), nil
+	for _, top := range slices.Sorted(maps.Keys(gone)) {
+		if files[top] >= massDeletionFolderSize && gone[top]*2 > files[top] && gone[top] > c.folderGone {
+			c.folder, c.folderGone, c.folderFiles = top, gone[top], files[top]
+		}
+	}
+	return c, nil
 }
 
 // errDirNotFound is listFiles' error for a folder that does not exist.

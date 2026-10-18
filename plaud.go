@@ -48,8 +48,9 @@ type PlaudConfig struct {
 	// Brain receives the recordings (default: the brain that handles DMs,
 	// else the default brain).
 	Brain string `json:"brain,omitempty"`
-	// CLIPath overrides the plaud binary (default: found on PATH, else in
-	// the newest nvm node version, else in /opt/homebrew or /usr/local).
+	// CLIPath overrides the plaud binary (default: found in the PATH
+	// folders helperPath keeps, else in the newest nvm node version, else
+	// in /opt/homebrew or /usr/local).
 	CLIPath string `json:"cli_path,omitempty"`
 	// IntervalSeconds between polls (default 60, minimum 30).
 	IntervalSeconds int `json:"interval_seconds,omitempty"`
@@ -383,8 +384,9 @@ type PlaudManager struct {
 	checkedLogin string
 
 	// run executes the CLI in the CLI home in use, for everything but the
-	// sign-in and the sign-out of the private login (see Disconnect). It is
-	// runCLI; tests wrap it to act between two commands.
+	// sign-in, the sign-out of a refused login before it (see Connect) and
+	// the sign-out of the private login (see Disconnect). It is runCLI;
+	// tests wrap it to act between two commands.
 	run func(ctx context.Context, args ...string) (string, error)
 }
 
@@ -488,7 +490,9 @@ func (p *PlaudManager) cliPath() (string, error) {
 const nvmNodeVersions = ".nvm/versions/node"
 
 // findPlaudCLI finds the plaud binary, given plaud.cli_path. The sandbox
-// profile uses it too, to keep brains from replacing the CLI.
+// profile uses it too, to keep brains from replacing the CLI. Without
+// cli_path it looks only in the PATH folders helperPath keeps, since the
+// CLI runs outside the sandbox, then in nvm and the usual prefixes.
 func findPlaudCLI(c string) (string, error) {
 	if c != "" {
 		if _, err := os.Stat(c); err != nil {
@@ -496,7 +500,7 @@ func findPlaudCLI(c string) (string, error) {
 		}
 		return c, nil
 	}
-	if found, err := exec.LookPath("plaud"); err == nil {
+	if found := lookPathIn("plaud", helperPath()); found != "" {
 		return found, nil
 	}
 	candidates, _ := filepath.Glob(filepath.Join(homeDir(), nvmNodeVersions, "*/bin/plaud"))
@@ -515,12 +519,15 @@ func findPlaudCLI(c string) (string, error) {
 }
 
 // brainPlaudPATH is the PATH brains run with when plaud.brain_access lets
-// them use Plaud's CLI, or "" to keep the bridge's own. The bridge finds
+// them use Plaud's CLI, or "" to keep the bridge's own: the bridge's whole
+// PATH, which brains run with anyway (unlike the bridge's own runs of the
+// CLI, theirs are sandboxed), and the CLI's folder, since the bridge finds
 // the CLI in nvm when it is not on its PATH, which under the service it
-// often is not, so brains get the CLI's folder first, as the bridge's own
-// runs do: `plaud` and the node its #!/usr/bin/env node needs. The sandbox
-// already keeps brains from writing to every folder on that PATH (see
-// plantablePrograms).
+// often is not. That folder comes first only when it holds the node the
+// CLI's #!/usr/bin/env node needs, as in plaudPATH. Any other comes last:
+// brains find `plaud` there all the same, and nothing a brain put there
+// runs in place of a program on the bridge's PATH, such as the claude that
+// sandbox-exec starts for every brain's run.
 func brainPlaudPATH(cfg *Config) string {
 	if !cfg.Plaud.BrainAccess {
 		return ""
@@ -529,7 +536,21 @@ func brainPlaudPATH(cfg *Config) string {
 	if err != nil {
 		return ""
 	}
-	return plaudPATH(bin)
+	path := os.Getenv("PATH") + ":/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin"
+	if dir := cliNodeDir(bin); dir != "" {
+		return dir + ":" + path
+	}
+	return path + ":" + filepath.Dir(bin)
+}
+
+// cliNodeDir is the folder of the Plaud CLI at bin when that also holds a
+// node, as nvm installs them: the node the CLI was installed with. ""
+// otherwise.
+func cliNodeDir(bin string) string {
+	if dir := filepath.Dir(bin); filepath.IsAbs(dir) && lookPathIn("node", dir) != "" {
+		return filepath.Clean(dir)
+	}
+	return ""
 }
 
 // plaudOptOut keeps Plaud's CLI from sending usage statistics to Plaud's
@@ -602,10 +623,32 @@ func plaudCLIWarning(v string) string {
 	return fmt.Sprintf("Plaud's CLI %s is newer than %s, the version Fridolin was tested with, and may print things Fridolin does not read; if recordings stop arriving, install that one: npm install -g @plaud-ai/cli@%s", v, plaudCLITested, plaudCLITested)
 }
 
-// plaudPATH is the PATH the Plaud CLI runs with: its own folder first, so
-// that its #!/usr/bin/env node finds the node it was installed with.
+// plaudPATH is the PATH the Plaud CLI at bin runs with, outside the
+// sandbox, where its #!/usr/bin/env node looks node up: its own folder
+// first when that holds a node, as nvm installs them, so that it gets the
+// one it was installed with; then the folders of the bridge's PATH that
+// helperPath keeps, then helperDirs for a PATH that lacks them. Never the
+// whole PATH: a node a brain planted in a folder of it outside HOME would
+// run outside the sandbox. A CLI folder without a node comes last, and
+// still comes: the sandbox keeps brains from planting the names the bridge
+// runs in the folders of this PATH under HOME (see plantablePrograms), so
+// that none can put a node there that would move the folder first.
 func plaudPATH(bin string) string {
-	return filepath.Dir(bin) + ":" + os.Getenv("PATH") + ":/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin"
+	var dirs []string
+	first := cliNodeDir(bin)
+	if first != "" {
+		dirs = append(dirs, first)
+	}
+	rest := append(filepath.SplitList(helperPath()), helperDirs...)
+	if dir := filepath.Dir(bin); first == "" && filepath.IsAbs(dir) {
+		rest = append(rest, filepath.Clean(dir))
+	}
+	for _, dir := range rest {
+		if !slices.Contains(dirs, dir) {
+			dirs = append(dirs, dir)
+		}
+	}
+	return strings.Join(dirs, string(filepath.ListSeparator))
 }
 
 // plaudOutputLimit caps what Fridolin keeps of the CLI's stdout: a
@@ -1838,6 +1881,14 @@ func (p *PlaudManager) Status() PlaudStatus {
 // Connect starts Plaud's sign-in in the background: the CLI opens Plaud's
 // page in the browser and waits for the approval. Status reports how it
 // goes.
+//
+// A login Plaud refuses while its tokens.json is still there (see refused)
+// is signed out first, as Disconnect does: with a login in place `plaud
+// login` only says "Already logged in", which would count as a sign-in
+// that worked and leave the refused login in use. A sign-in that leaves
+// that very login, because the sign-out could not remove it, fails, and so
+// does one whose login Plaud refuses right away, also a first one; both
+// show the login expired and leave the time of its notice as it was.
 func (p *PlaudManager) Connect() error {
 	bin, err := p.cliPath()
 	if err != nil {
@@ -1854,6 +1905,15 @@ func (p *PlaudManager) Connect() error {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
 	job := &connectJob{State: "running", cancel: cancel}
 	p.connect = job
+	// Only a login that is Fridolin's and in use: not one brain_access
+	// moved away from, nor your terminal's in ~/.plaud. Its home is taken
+	// now too, so that a brain_access changed meanwhile cannot have the
+	// sign-out remove another login than the one refused.
+	refused := p.refused && p.loginStatus() == plaudConnected
+	home, refusedLogin := p.cliHome(), ""
+	if refused {
+		refusedLogin = p.loginStamp()
+	}
 	p.mu.Unlock()
 
 	// Stop cancels it and waits for its end: it records the sign-in in the
@@ -1862,6 +1922,19 @@ func (p *PlaudManager) Connect() error {
 	go func() {
 		defer p.bg.Done()
 		defer cancel()
+		if refused {
+			// As long as Disconnect gives it: a Plaud that hangs must not
+			// keep the card running for minutes before the sign-in's link.
+			octx, ocancel := context.WithTimeout(ctx, plaudSignOutTimeout)
+			_, err := p.runCLIIn(octx, home, nil, "logout")
+			ocancel()
+			if err != nil && !errors.Is(err, errPlaudAuth) {
+				log.Printf("plaud: signing out the refused login: %v", err)
+			}
+			if home == p.privateHome() {
+				_ = os.Remove(filepath.Join(home, ".plaud", "tokens.json")) // our private copy, as in Disconnect
+			}
+		}
 		var seen bytes.Buffer
 		out := writerFunc(func(b []byte) {
 			p.mu.Lock()
@@ -1872,7 +1945,7 @@ func (p *PlaudManager) Connect() error {
 			}
 		})
 		// The CLI opens the sign-in page in your browser itself.
-		before := p.loginStamp()
+		before, refusedNow := p.loginStamp(), false
 		_, err := p.runCLIOut(withDesktop(ctx), out, "login")
 		// A CLI that fails after it wrote a new login signed in all the
 		// same; its error would sit on a card whose login works. One that
@@ -1884,26 +1957,45 @@ func (p *PlaudManager) Connect() error {
 		if err == nil && !p.hasLogin() {
 			err = errors.New("the sign-in did not finish: Plaud's tool left no login")
 		}
+		if err == nil && refused && p.loginStamp() == refusedLogin {
+			// A sign-out that failed (Plaud unreachable, say) left the
+			// refused login, and the sign-in only said "Already logged in".
+			err = errors.New("the login Plaud refuses could not be signed out, so the sign-in kept it: disconnect, then connect again")
+		}
 		if err == nil {
 			// The login in this CLI home is Fridolin's now, also one the CLI
 			// already had ("Already logged in"): you asked for it.
 			err = p.update(func(st *plaudState) error {
 				st.Login = &plaudLogin{Dir: p.cliHome(), Since: time.Now()}
-				st.AuthNotified, st.Disconnected = time.Time{}, false
+				st.Disconnected = false
 				return nil
 			})
 		}
 		if err == nil {
-			// Who signed in, for the card; a check asks again if this fails.
-			if _, merr := p.me(ctx); merr != nil {
+			// Who signed in, for the card; a check asks again if this fails
+			// for another reason than Plaud refusing the login.
+			if _, merr := p.me(ctx); errors.Is(merr, errPlaudAuth) {
+				refusedNow = true
+				err = errors.New("the sign-in finished, but Plaud refuses the login it left: disconnect, then connect again")
+			} else if merr != nil {
 				log.Printf("plaud: could not ask who signed in: %v", merr)
 			}
+		}
+		if err == nil {
+			// The next lapse gets its notice again.
+			err = p.update(func(st *plaudState) error { st.AuthNotified = time.Time{}; return nil })
 		}
 		p.mu.Lock()
 		defer p.mu.Unlock()
 		if err != nil {
 			job.State, job.Error = "error", err.Error()
 			log.Printf("plaud: sign-in failed: %s", job.Error)
+			if refusedNow {
+				// As refreshAccount does: the card shows the login expired
+				// beside the error, also after a first sign-in, and the
+				// next Connect signs it out first.
+				p.refused = p.loginStatus() == plaudConnected
+			}
 			return
 		}
 		p.refused = false
@@ -1912,6 +2004,10 @@ func (p *PlaudManager) Connect() error {
 	}()
 	return nil
 }
+
+// plaudSignOutTimeout is how long `plaud logout` may take, in Disconnect
+// and before Connect signs in again. A variable so tests can shorten it.
+var plaudSignOutTimeout = 30 * time.Second
 
 // writerFunc is an io.Writer that hands what is written to a function.
 type writerFunc func([]byte)
@@ -1934,7 +2030,7 @@ func (f writerFunc) Write(b []byte) (int, error) { f(b); return len(b), nil }
 // The state says so first: a check still running finds its login gone
 // from then on, and must take that for a sign-out rather than an expiry.
 func (p *PlaudManager) Disconnect() error {
-	ctx, cancel := context.WithTimeout(p.lifetime(), 30*time.Second)
+	ctx, cancel := context.WithTimeout(p.lifetime(), plaudSignOutTimeout)
 	defer cancel()
 	login := p.loginStatus()
 	shared := p.cfg().Plaud.BrainAccess && (login == plaudConnected || login == plaudExpired)

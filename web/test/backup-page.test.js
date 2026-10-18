@@ -139,6 +139,8 @@ test('a backup.rclone_path that does not work is named, not offered for install'
   assert.ok(text.includes('The configured rclone does not work'), text);
   assert.ok(text.includes(error), 'the error is shown');
   assert.ok(!text.includes('brew install rclone'), 'no install hint for a path that is set');
+  // Without rclone_path, rclone is not taken from just anywhere on PATH.
+  assert.ok(text.includes('the rclone in the helper folders of this computer’s PATH'), text);
 });
 
 test('a restore shows while it runs and how it went once it ended', async (t) => {
@@ -194,6 +196,31 @@ test('version folders named in UTC or in local time both show as dates', async (
   assert.equal(dated.length, 2, labels.join(' | '));
   assert.ok(!labels.some((l) => l.includes('20261018-093000Z')), 'the UTC name is shown as a date');
   assert.ok(labels.some((l) => l.includes('manual-copy')), 'other names as they are');
+});
+
+test('the Mirror the deletion dialog does not say that most of the files are gone', async (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout', 'Date'] });
+  installDom();
+  noConsoleErrors(t);
+  // A wiped memories/ is refused although most of the brain is still there.
+  const status = connected();
+  status.brains[0].last = {
+    ok: false, refused: true, finished: '2026-10-18T03:30:00Z', seconds: 2,
+    error: 'refusing to mirror a mass deletion: 12 of the 12 backed-up files in memories/ are gone from the brain folder, so the backup in Drive was left as it was.',
+  };
+  serve(t, (path) => (path.startsWith('/api/backup/status') ? status : {}));
+  const root = h('div');
+  document.body.append(root);
+  const ctx = createPage();
+  t.after(() => ctx.destroy());
+  page.render(root, ctx);
+  await settle();
+  root.querySelectorAll('button').find((b) => b.textContent === 'Mirror the deletion…').click();
+  await settle();
+  const dialog = document.querySelector('dialog');
+  assert.ok(dialog, 'a confirm dialog');
+  assert.ok(dialog.textContent.includes('or most of one of its folders'), dialog.textContent);
+  assert.ok(!dialog.textContent.includes('Most of the files'), dialog.textContent);
 });
 
 test('the Disconnect dialog says where to take away rclone\'s access at Google', async (t) => {

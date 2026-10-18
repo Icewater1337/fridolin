@@ -92,13 +92,20 @@ while Google Drive is not connected.
 ## Mass deletions
 
 Before each brain's sync the bridge compares the brain folder with
-`current/`. If the folder is empty or missing, or more than half of the
-backed-up files are gone from it, it does **not** mirror that: the brain's
-result says "refusing to mirror a mass deletion", `current/` in Drive stays as
-it was, and the error shows on the Backup page and the overview. Otherwise a
+`current/`. If the folder is empty or missing, or too many of the backed-up
+files are gone from it (more than half; more than a fifth, once that is ten
+files or more; or 250 files or more), or more than half of those in one of
+its top-level folders that had at least five (a wiped `memories/`, say), it
+does **not** mirror that: the brain's result says "refusing to mirror a mass
+deletion" and what is gone, `current/` in Drive stays as it was, and the
+error shows on the Backup page and the overview. Otherwise a
 wiped folder (a brain told to delete everything, an unmounted disk, a botched
 move) would reach Drive in one run, and its files would leave `versions/`
 after `keep_versions_days` without anyone noticing.
+Ordinary housekeeping can be refused too: renaming a top-level folder, or
+a `git gc` in a brain folder that is a git repository, which packs its
+loose objects (`.git/` is backed up unless you exclude it). Mirror that
+with **Mirror the deletion…** (below), or exclude `.git/`.
 
 When a **scheduled** run refuses, the brain's chat also gets one WhatsApp
 message about it (your DM for the DM brain, or the brain's `reply_chat`, as
@@ -117,13 +124,14 @@ deletion. Scheduled runs never force; they keep refusing until you do.
 
 Only files that are gone count: changed files do not, and neither do excluded
 ones (a sync never deletes those from Drive). As a backstop for files that
-disappear while the backup runs, the sync gets rclone's `--max-delete` at half
-of the backed-up files. rclone deletes up to that limit and then stops, so in
-this rare case Drive is not left untouched: up to that many files have already
-moved from `current/` to `versions/<timestamp>/`, and the error names that
-folder. They expire with that folder after `keep_versions_days`, so restore
-them from there if the deletion was a mistake. The bridge settings (`_bridge`)
-are not checked; the bridge writes them itself.
+disappear while the backup runs, the sync gets rclone's `--max-delete` at the
+most files those counts let go. rclone deletes up to that limit and then
+stops, so in this rare case Drive is not left untouched: up to that many
+files have already moved from `current/` to `versions/<timestamp>/`, and the
+error names that folder. They expire with that folder after
+`keep_versions_days`, so restore them from there if the deletion was a
+mistake. The bridge settings (`_bridge`) are not checked; the bridge writes
+them itself.
 
 A brain folder that rclone can only partly read (a subfolder it may not open,
 a folder removed while it was being listed) is never taken for a wiped one.

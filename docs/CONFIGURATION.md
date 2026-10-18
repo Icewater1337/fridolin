@@ -513,11 +513,17 @@ their sandbox, so a manipulated brain cannot plant code there:
   that lies in your home folder, such as `~/.local/bin`, the names it runs
   by name (`claude`, `rclone`, `plaud`, `node`, `tmux`, `sh`, `tail`,
   `touch`, `osascript`, `open`), whether they exist there yet or not;
-  `~/.local/bin/rclone`, where it looks when rclone is not on `PATH`; and,
+  `~/.local/bin/rclone`, where it looks when rclone is not in the
+  [helper folders](#helper-programs) of `PATH`; and,
   unless `plaud.cli_path` is set, all of `~/.nvm/versions/node`, because
   the bridge takes the Plaud CLI of the newest node version that has one.
   Brains therefore cannot install node versions or global npm packages with
   nvm.
+
+Of its `PATH`, the bridge looks up tmux, rclone and the Plaud CLI only in
+those folders in your home folder and in a few system and package-manager
+folders, which the sandbox does not protect (see
+[helper programs](#helper-programs)).
 
 Renaming counts as writing. The sandbox matches paths, not files, so a brain
 that renamed `~/.ssh`, or the folder that holds another brain, used to read
@@ -618,9 +624,14 @@ for the paths listed above. A manipulated brain can therefore still:
   program in a folder on your `PATH` that shadows another one (other than
   the names the bridge runs, in folders under your home folder), and
   programs outside your home folder such as `/opt/homebrew` (user-writable
-  on Apple Silicon) and `/usr/local`, including a `plaud`, `rclone` or
-  `node` there that the bridge would run next, since they are on the
-  service's `PATH`
+  on Apple Silicon) and `/usr/local`, including a `plaud`, `rclone`,
+  `tmux` or `node` in `/opt/homebrew/bin` or `/usr/local/bin` that the
+  bridge would run next (it looks up its helpers there, see
+  [helper programs](#helper-programs)), and a `claude`, `osascript`,
+  `zenity`, `kdialog` or `open` in any folder of the service's `PATH`,
+  which the bridge still runs by name outside the sandbox
+  (`claude --version` for the dashboard, the dashboard's folder picker,
+  `--open`)
 - leave files in its own folder that run or load when you work there
   yourself, outside the sandbox: git hooks and settings in `.git/`
   (`hooks/`, `core.fsmonitor`, `core.hooksPath`), a `.envrc` for direnv,
@@ -821,7 +832,7 @@ Google Drive backups; see [BACKUP.md](BACKUP.md).
 | `remote` | `"brain-gdrive"` | rclone remote name in the bridge's own rclone config |
 | `keep_versions_days` | `30` | days a version folder is kept after the run that made it; `0` keeps them forever |
 | `include_bridge_config` | `true` | also back up `config.json` and the brain list |
-| `rclone_path` | found on PATH | the rclone to run; when set, only that one: one that is missing or not executable stops backups with an error naming it. Unset, rclone is looked for on PATH, then in `/opt/homebrew/bin`, `/usr/local/bin` and `~/.local/bin` |
+| `rclone_path` | found in the [helper folders](#helper-programs) of PATH | the rclone to run; when set, only that one: one that is missing or not executable stops backups with an error naming it. Unset, rclone is looked for in the folders of PATH the bridge takes its helpers from (see [helper programs](#helper-programs)), then in `/opt/homebrew/bin`, `/usr/local/bin` and `~/.local/bin`; a name without a folder is looked for in those PATH folders only |
 
 ### `plaud`
 
@@ -953,7 +964,8 @@ prompt; noisy otherwise. Turning it off, or removing the brain, ends the
 session and closes the window; one left open by a restart is replaced on
 the brain's next run. The viewer starts in the background, so a run never
 waits for tmux or Terminal (each of their calls gets five seconds), and
-Terminal does not come to the front. Requires tmux 3.0 or newer — without
+Terminal does not come to the front. Requires tmux 3.0 or newer, in one of
+the [helper folders](#helper-programs) of the bridge's `PATH` — without
 tmux the bridge logs a warning and carries on. Nor does a viewer
 start for a brain whose `claude-stream.log` the bridge refuses, a symlink say
 (see [BRAINS.md](BRAINS.md#files-the-bridge-reads-and-writes)). The bridge
@@ -964,7 +976,12 @@ unsandboxed. The same goes for a tmux you run yourself; see
 A server the bridge starts keeps the environment it started with, which
 any brain can read, so it gets only a few of the bridge's variables,
 never the Claude CLI's login (see
-[what reaches brains](#what-reaches-brains)).
+[what reaches brains](#what-reaches-brains)). tmux, and the `sh` and `tail`
+it runs, get `PATH=/usr/bin:/bin:/usr/sbin:/sbin`, and Terminal is opened
+with `/usr/bin/osascript`, so that no program a brain put in a folder on
+the bridge's `PATH` runs in their place. A server the bridge starts keeps
+that `PATH` for the windows you open in it; your shell's startup files set
+your own.
 
 ### `log_level` *(restart)*
 
@@ -1030,8 +1047,8 @@ run's token for it (see [`http_listen`](#http_listen-restart)), which
 also opens [`/send` and `/ingest`](API.md#who-may-call) to the brain's own
 chats and itself;
 `PLAUD_TELEMETRY_DISABLED=1` and `PLAUD_NO_UPDATE_NOTIFIER=1` for
-[Plaud](PLAUD.md)'s CLI, with `plaud.brain_access` a `PATH` that starts
-with that CLI's folder; and `DISABLE_AUTOUPDATER=1` in the sandbox. It
+[Plaud](PLAUD.md)'s CLI, with `plaud.brain_access` a `PATH` that also
+has that CLI's folder; and `DISABLE_AUTOUPDATER=1` in the sandbox. It
 also sets `BRIDGE_DATA_DIR` and `BRIDGE_DB_PATH`, the data directory and
 database it runs with (absolute, wherever `data_dir` and `db_path` put
 them), for a brain's own scripts; and, for one release, `BRIDGE_BRAIN_ID`,
@@ -1065,8 +1082,8 @@ only:
 - the [Plaud](PLAUD.md) CLI, whose `HOME`, `PATH` and `DO_NOT_TRACK` the
   bridge sets itself
 - tmux and `osascript` for the [`viewer`](#viewer), which also get the
-  names in `child_env_passthrough`: brains can read the viewer's tmux
-  server anyway
+  names in `child_env_passthrough` (brains can read the viewer's tmux
+  server anyway), and the system's `PATH` instead of the bridge's
 
 rclone and the Plaud CLI never get those names, which are for brains.
 
@@ -1077,6 +1094,39 @@ session that Linux needs to open one (macOS needs none of them):
 `DBUS_SESSION_BUS_ADDRESS`, `XDG_CURRENT_DESKTOP`, `KDE_SESSION_VERSION`,
 `XDG_DATA_DIRS` (where snap and Flatpak browsers are found),
 `XDG_CONFIG_DIRS` and `BROWSER`.
+
+### Helper programs
+
+The bridge runs tmux for the [`viewer`](#viewer), rclone for
+[backups](BACKUP.md) and the [Plaud](PLAUD.md) CLI itself, outside any
+sandbox. Unless `backup.rclone_path` or `plaud.cli_path` gives a path, it
+looks them up only in the folders of its `PATH` that lie in your home
+folder or are one of `/usr/bin`, `/bin`, `/usr/sbin`, `/sbin`,
+`/usr/local/bin`, `/opt/homebrew/bin` and `/opt/local/bin`, in `PATH`'s
+order. It leaves out every other folder of the service's `PATH`, which
+starts with the one you installed it from and may name a folder such as
+`/opt/homebrew/opt/go/bin` ahead of `/usr/bin`: a program a brain planted
+there would run outside the sandbox. On macOS the
+[sandbox](#sandbox-macos) keeps brains from planting these programs in the
+folders in your home folder; it does not protect the others it keeps (see
+[what the sandbox does not cover yet](#what-the-sandbox-does-not-cover-yet)).
+Brains themselves still get the whole `PATH`.
+
+The lookup is the same on Linux and with `sandbox.enabled` off, where it
+protects nothing. A helper installed in another folder, such as snap's
+`/snap/bin`, Homebrew's on Linux or nix's `/run/current-system/sw/bin`,
+is not found: set `backup.rclone_path` or `plaud.cli_path` to it, and
+link tmux, which has no such setting, from a folder of the service's
+`PATH` in your home folder, such as `~/.local/bin`.
+
+The Plaud CLI's `#!/usr/bin/env node` finds `node` the same way, or in
+the CLI's own folder when that holds one (as nvm installs them). A `node`
+that is only in another folder, such as a keg-only Homebrew `node@22` in
+`/opt/homebrew/opt/node@22/bin`, snap's or nix's, is not found, and every
+Plaud command fails with "env: node: No such file or directory"; setting
+`plaud.cli_path` does not help then. Link `node` into `~/.local/bin` or
+`/opt/homebrew/bin` (`brew link --force node@22`), or install the CLI
+with the `node` it should use, as nvm does.
 
 ### Where to set them
 

@@ -12,6 +12,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -341,7 +342,9 @@ func TestRunRcloneUsesIsolatedConfig(t *testing.T) {
 // TestFindRclone: a configured rclone_path is used as it is, and one that
 // does not work is an error that names it, never a quiet fallback to another
 // rclone. Without one, PATH comes first, then the fallbacks, of which only an
-// executable file counts.
+// executable file counts. Of PATH, only the folders helperPath keeps count,
+// also for an rclone_path that is a bare name: an rclone in another PATH
+// folder may be one a brain planted there.
 func TestFindRclone(t *testing.T) {
 	dir := t.TempDir()
 	write := func(name string, mode os.FileMode) string {
@@ -351,14 +354,18 @@ func TestFindRclone(t *testing.T) {
 		}
 		return p
 	}
-	onPath := filepath.Join(dir, "path")
-	if err := os.Mkdir(onPath, 0o700); err != nil {
-		t.Fatal(err)
+	// A PATH folder under HOME, and one outside it.
+	home := t.TempDir()
+	onPath, outside := filepath.Join(home, "path"), filepath.Join(dir, "path")
+	for _, d := range []string{onPath, outside} {
+		if err := os.Mkdir(d, 0o700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(d, "rclone"), []byte("#!/bin/sh\n"), 0o700); err != nil {
+			t.Fatal(err)
+		}
 	}
 	pathRclone := filepath.Join(onPath, "rclone")
-	if err := os.WriteFile(pathRclone, []byte("#!/bin/sh\n"), 0o700); err != nil {
-		t.Fatal(err)
-	}
 	configured := write("my-rclone", 0o700)
 	plain := write("plain-file", 0o600)
 	fallback := write("fallback-rclone", 0o700)
@@ -375,12 +382,17 @@ func TestFindRclone(t *testing.T) {
 		{"configured", configured, onPath, []string{fallback}, configured, ""},
 		{"configured but missing", missing, onPath, []string{fallback}, "", "backup.rclone_path " + missing},
 		{"configured but not executable", plain, onPath, []string{fallback}, "", "backup.rclone_path " + plain},
+		{"configured by name", "rclone", outside + ":" + onPath, []string{fallback}, pathRclone, ""},
+		{"configured by name, only outside HOME", "rclone", outside, []string{fallback}, "", "backup.rclone_path rclone"},
 		{"on PATH", "", onPath, []string{fallback}, pathRclone, ""},
+		{"on PATH outside HOME first", "", outside + ":" + onPath, []string{fallback}, pathRclone, ""},
+		{"on PATH only outside HOME", "", outside, []string{fallback}, fallback, ""},
 		{"fallback", "", dir, []string{missing, plain, fallback}, fallback, ""},
 		{"none", "", dir, []string{missing, plain}, "", "rclone is not installed"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Setenv("HOME", home)
 			t.Setenv("PATH", tc.pathDirs)
 			prev := rcloneFallbacks
 			rcloneFallbacks = func() []string { return tc.fallbacks }
@@ -525,8 +537,9 @@ func TestRcloneGetsTheAllowlistedEnvironment(t *testing.T) {
 // (an rclone alias remote standing in for Google Drive), changes it, backs up
 // again, and restores into a new folder.
 func TestBackupRoundTripWithRealRclone(t *testing.T) {
-	needRclone(t)
+	rclone := needRclone(t)
 	tb := newTestBridge(t, `, "backup": {"keep_versions_days": 0}`)
+	useRclone(t, tb, rclone)
 	remoteDir := filepath.Join(t.TempDir(), "drive")
 	_ = os.MkdirAll(filepath.Dir(tb.backup.rcloneConf()), 0o700)
 	_ = os.WriteFile(tb.backup.rcloneConf(), []byte("[brain-gdrive]\ntype = alias\nremote = "+remoteDir+"\n"), 0o600)
@@ -689,14 +702,27 @@ func TestVersionNamesKeepTheirOrderWhenClocksGoBack(t *testing.T) {
 
 // needRclone skips a test that runs the real rclone when there is none,
 // unless FRIDOLIN_REQUIRE_RCLONE is set: CI installs rclone and sets it,
-// so that these tests cannot quietly go unrun there.
-func needRclone(t *testing.T) {
+// so that these tests cannot quietly go unrun there. It returns the rclone
+// on PATH.
+func needRclone(t *testing.T) string {
 	t.Helper()
-	if _, err := exec.LookPath("rclone"); err != nil {
+	p, err := exec.LookPath("rclone")
+	if err != nil {
 		if os.Getenv("FRIDOLIN_REQUIRE_RCLONE") != "" {
 			t.Fatalf("FRIDOLIN_REQUIRE_RCLONE is set, but there is no rclone: %v", err)
 		}
 		t.Skip("rclone not installed")
+	}
+	return p
+}
+
+// useRclone sets tb's backup.rclone_path to rclone. The tests run with a
+// HOME of their own, so an rclone installed in your home folder (in
+// ~/.local/bin, say) is not under it, and the bridge would not look there.
+func useRclone(t *testing.T, tb *testBridge, rclone string) {
+	t.Helper()
+	if _, err := tb.cfgs.Update("", func(c *Config) error { c.Backup.RclonePath = rclone; return nil }); err != nil {
+		t.Fatal(err)
 	}
 }
 
@@ -705,8 +731,9 @@ func needRclone(t *testing.T) {
 // rclone is not installed (see needRclone).
 func rcloneTestBridge(t *testing.T, extra string) (*testBridge, string) {
 	t.Helper()
-	needRclone(t)
+	rclone := needRclone(t)
 	tb := newTestBridge(t, extra)
+	useRclone(t, tb, rclone)
 	remoteDir := filepath.Join(t.TempDir(), "drive")
 	_ = os.MkdirAll(filepath.Dir(tb.backup.rcloneConf()), 0o700)
 	_ = os.WriteFile(tb.backup.rcloneConf(), []byte("[brain-gdrive]\ntype = alias\nremote = "+remoteDir+"\n"), 0o600)
@@ -972,14 +999,29 @@ func flagValue(args []string, flag string) string {
 func syncMaxDelete(args []string) string { return flagValue(args, "--max-delete") }
 
 // TestBackupRefusesMassDeletion runs the check before a brain's sync: it
-// mirrors ordinary changes, and refuses an empty or missing brain folder or
-// one that lost more than half of its backed-up files, unless forced. A
-// folder rclone can only partly read is synced with no deletion allowed.
+// mirrors ordinary changes, and unless forced refuses an empty or missing
+// brain folder, one that lost more than half of its backed-up files, more
+// than a fifth once that is ten or more, or 250 or more, and one with a top
+// folder of five or more files that lost more than half of them, as a brain
+// that wiped its memories/ leaves it. The sync's --max-delete is the most
+// the counts allow. A folder rclone can only partly read is synced with no
+// deletion allowed.
 func TestBackupRefusesMassDeletion(t *testing.T) {
 	tb := newTestBridge(t, "")
 	dir := addBackupBrain(t, tb, "notes")
 	br := tb.brainMgr.Get("notes")
 	files := func(names ...string) []string { return append([]string{}, names...) }
+	// seq is n files, prefix0 to prefix<n-1>.
+	seq := func(prefix string, n int) []string {
+		out := make([]string, n)
+		for i := range out {
+			out[i] = prefix + strconv.Itoa(i)
+		}
+		return out
+	}
+	// A larger brain folder: 88 files of its own and a memories/ of 12.
+	notes, memories := seq("n", 88), seq("memories/m", 12)
+	large := append(slices.Clone(notes), memories...)
 	const unreadable = `ERROR : locked: failed to open directory "locked": open locked: permission denied`
 	cases := []struct {
 		name      string
@@ -990,6 +1032,7 @@ func TestBackupRefusesMassDeletion(t *testing.T) {
 		syncErr   string // the sync fails with this; refused and failed then expect it to have run
 		force     bool
 		refused   bool
+		says      string // a refusal's error says this
 		failed    string // the result's error contains this, no sync ran unless syncErr is set
 		maxDelete string // the sync's --max-delete, "" for none
 	}{
@@ -997,11 +1040,23 @@ func TestBackupRefusesMassDeletion(t *testing.T) {
 		{name: "first backup", src: files("a"), cur: nil, maxDelete: "0"},
 		{name: "empty folder, empty backup", src: files(), cur: files(), maxDelete: "0"},
 		{name: "half gone is allowed", src: files("a", "b"), cur: files("a", "b", "c", "d"), maxDelete: "2"},
-		{name: "more than half gone", src: files("a"), cur: files("a", "b", "c", "d"), refused: true},
+		{name: "more than half gone", src: files("a"), cur: files("a", "b", "c", "d"), refused: true, says: "3 of 4 backed-up files are gone"},
 		{name: "empty brain folder", src: files(), cur: files("a", "b"), refused: true},
 		{name: "missing brain folder", missing: true, cur: files("a"), refused: true},
 		{name: "new files do not offset deletions", src: files("v", "w", "x", "y", "z"), cur: files("a", "b", "c"), refused: true},
 		{name: "force mirrors anyway", src: files(), cur: files("a", "b"), force: true},
+		{name: "3 of 100 gone", src: seq("n", 97), cur: seq("n", 100), maxDelete: "20"},
+		{name: "a fifth gone", src: seq("n", 40), cur: seq("n", 50), maxDelete: "10"},
+		{name: "more than a fifth, fewer than ten gone", src: seq("n", 21), cur: seq("n", 30), maxDelete: "9"},
+		{name: "more than a fifth, ten or more gone", src: seq("n", 38), cur: seq("n", 50), refused: true, says: "12 of 50 backed-up files are gone"},
+		{name: "a few of a large folder gone", src: seq("n", 1990), cur: seq("n", 2000), maxDelete: "249"},
+		{name: "300 of 2000 gone", src: seq("n", 1700), cur: seq("n", 2000), refused: true, says: "300 of 2000 backed-up files are gone"},
+		{name: "a wiped memories/", src: notes, cur: large, refused: true, says: "12 of the 12 backed-up files in memories/ are gone"},
+		{name: "half of memories/ gone", src: append(slices.Clone(notes), memories[:6]...), cur: large, maxDelete: "20"},
+		{name: "a wiped top folder of four files", src: seq("n", 96), cur: append(seq("n", 96), seq("tmp/t", 4)...), maxDelete: "20"},
+		{name: "deeper folders count for their top folder", src: append(slices.Clone(notes), "memories/a/1", "memories/b/2"),
+			cur: append(slices.Clone(large), "memories/a/1", "memories/b/2"), refused: true, says: "12 of the 14 backed-up files in memories/"},
+		{name: "force mirrors a wiped memories/", src: notes, cur: large, force: true},
 		{name: "listing the backup fails", src: files("a"), listErr: "ERROR : couldn't connect", failed: "checking the backup before syncing failed"},
 		// The folder is there, so rclone failing to read it is no proof it
 		// is empty, and no reason to leave its readable files out either.
@@ -1035,8 +1090,8 @@ func TestBackupRefusesMassDeletion(t *testing.T) {
 			}
 			switch {
 			case c.refused:
-				if res.OK || !res.Refused || !strings.HasPrefix(res.Error, massDeletionError) || len(d.syncs) != synced {
-					t.Errorf("want a refusal after %d syncs, got %+v, syncs %v", synced, res, d.syncs)
+				if res.OK || !res.Refused || !strings.HasPrefix(res.Error, massDeletionError) || !strings.Contains(res.Error, c.says) || len(d.syncs) != synced {
+					t.Errorf("want a refusal saying %q after %d syncs, got %+v, syncs %v", c.says, synced, res, d.syncs)
 				}
 				if res.Seconds != res.Finished.Sub(res.Started).Seconds() {
 					t.Errorf("seconds = %v, want the time the run took", res.Seconds)
@@ -1383,14 +1438,18 @@ func TestSyncDirReportsMaxDelete(t *testing.T) {
 	}
 }
 
-// TestBackupMassDeletionWithRealRclone wipes most of a brain, then all of
-// it: both runs are refused and leave current/ alone, and a forced run from
-// the API mirrors the deletion with the files kept in versions/.
+// TestBackupMassDeletionWithRealRclone wipes a brain's memories/, which is
+// far less than half of it, then all of it: both runs are refused and leave
+// current/ alone, and a forced run from the API mirrors the deletion with
+// the files kept in versions/.
 func TestBackupMassDeletionWithRealRclone(t *testing.T) {
 	tb, remoteDir := rcloneTestBridge(t, "")
 	dir := addBackupBrain(t, tb, "notes")
 	for i := 0; i < 6; i++ {
 		_ = os.WriteFile(filepath.Join(dir, "memories", fmt.Sprintf("m%d.md", i)), []byte("memory"), 0o600)
+	}
+	for i := 0; i < 30; i++ {
+		_ = os.WriteFile(filepath.Join(dir, fmt.Sprintf("note%d.md", i)), []byte("note"), 0o600)
 	}
 	if res := runBackup(t, tb, "notes"); !res.OK {
 		t.Fatalf("first backup = %+v", res)
@@ -1421,6 +1480,9 @@ func TestBackupMassDeletionWithRealRclone(t *testing.T) {
 			res := runBackup(t, tb, "notes")
 			if res.OK || !res.Refused || !strings.HasPrefix(res.Error, massDeletionError) {
 				t.Errorf("result = %+v, want a refusal", res)
+			}
+			if wipe == "memories" && !strings.Contains(res.Error, "in memories/ are gone") {
+				t.Errorf("error = %q, want it to name memories/", res.Error)
 			}
 			if n := count(cur); n != backedUp {
 				t.Errorf("current/ has %d files after a refused run, want all %d", n, backedUp)

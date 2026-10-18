@@ -84,6 +84,69 @@ func TestViewerGetsTheAllowlistedEnvironment(t *testing.T) {
 	}
 }
 
+// TestViewerRunsOnlySystemPrograms: the viewer's tmux, the sh and tail it
+// runs by name and the osascript that opens Terminal all run outside the
+// sandbox, so none of them may come from a PATH folder a brain can write
+// to. Terminal is opened with /usr/bin/osascript, and every tmux and
+// osascript call gets systemPATH and no other PATH, whatever the viewer's
+// environment says.
+func TestViewerRunsOnlySystemPrograms(t *testing.T) {
+	if osascript != "/usr/bin/osascript" {
+		t.Errorf("osascript = %q, want /usr/bin/osascript", osascript)
+	}
+	planted, home := plantedOutsideHome(t)
+	logs, fakes := t.TempDir(), t.TempDir()
+	// Each call records its environment under its first argument.
+	fake := "#!/bin/sh\nenv > \"" + logs + "/$(basename \"$0\").$1\"\n"
+	for _, name := range []string{"tmux", "osascript"} {
+		if err := os.WriteFile(filepath.Join(fakes, name), []byte(fake), 0o700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	forgetTmux(t)
+	tmuxOnce.Do(func() { tmuxPath = filepath.Join(fakes, "tmux") })
+	oldOsascript := osascript
+	osascript = filepath.Join(fakes, "osascript")
+	t.Cleanup(func() { osascript = oldOsascript })
+
+	tv := &TmuxViewer{Name: "claude-a", StreamLog: filepath.Join(home, streamLogName), CWD: home,
+		Env: []string{"HOME=" + home, "PATH=" + planted + ":/usr/bin:/bin", "TMUX_TMPDIR=" + filepath.Join(logs, "tmux")}}
+	if err := tv.start(); err != nil {
+		t.Fatal(err)
+	}
+	if !tv.IsAlive() {
+		t.Fatal("the viewer is not alive")
+	}
+	tv.Close()
+
+	calls := []string{"tmux.kill-session", "tmux.new-session", "tmux.has-session"}
+	if runtime.GOOS == "darwin" {
+		calls = append(calls, "osascript.-e")
+	}
+	for _, call := range calls {
+		t.Run(call, func(t *testing.T) {
+			data, err := os.ReadFile(filepath.Join(logs, call))
+			if err != nil {
+				t.Fatal(err)
+			}
+			var paths []string
+			for _, kv := range strings.Split(string(data), "\n") {
+				if strings.HasPrefix(kv, "PATH=") {
+					paths = append(paths, kv)
+				}
+			}
+			if want := "PATH=" + systemPATH; len(paths) != 1 || paths[0] != want {
+				t.Errorf("%s ran with %q, want only %s", call, paths, want)
+			}
+		})
+	}
+	for _, name := range shadowingPrograms {
+		if _, err := os.Stat(filepath.Join(planted, name+".ran")); err == nil {
+			t.Errorf("the %s planted on PATH ran", name)
+		}
+	}
+}
+
 // viewerIdle waits for the start of br's viewer that ensureViewer began.
 func viewerIdle(t *testing.T, br *Brain) {
 	t.Helper()
@@ -192,7 +255,8 @@ func TestViewerStartDoesNotHoldUpTheRun(t *testing.T) {
 // TestViewerWithRealTmux runs the viewer on a tmux server of its own: a
 // folder name a shell would read as quotes, a format or a command goes
 // through untouched, and a session whose name merely starts with the
-// viewer's is neither taken for it nor replaced.
+// viewer's is neither taken for it nor replaced. The session's sh and tail
+// are the system's, not the ones first on the viewer's PATH.
 func TestViewerWithRealTmux(t *testing.T) {
 	tmux, err := exec.LookPath("tmux")
 	if err != nil {
@@ -228,7 +292,16 @@ func TestViewerWithRealTmux(t *testing.T) {
 		t.Fatalf("starting another session: %v %s", err, out)
 	}
 
-	tv := &TmuxViewer{Name: "claude-work", StreamLog: logPath, CWD: dir, Env: env}
+	// A PATH folder a brain could have planted sh and tail in comes first.
+	planted := t.TempDir()
+	plantPrograms(t, planted)
+	viewerEnv := []string{"PATH=" + planted + ":" + os.Getenv("PATH")}
+	for _, kv := range env {
+		if !strings.HasPrefix(kv, "PATH=") {
+			viewerEnv = append(viewerEnv, kv)
+		}
+	}
+	tv := &TmuxViewer{Name: "claude-work", StreamLog: logPath, CWD: dir, Env: viewerEnv}
 	if tv.IsAlive() {
 		t.Error("claude-work-archive counts as claude-work's viewer")
 	}
@@ -250,6 +323,11 @@ func TestViewerWithRealTmux(t *testing.T) {
 	for _, p := range []string{filepath.Join(dir, "PWNED"), filepath.Join(dir, "PWNED2"), "PWNED", "PWNED2"} {
 		if _, err := os.Stat(p); err == nil {
 			t.Errorf("the folder name ran a command: %s exists", p)
+		}
+	}
+	for _, name := range []string{"sh", "tail"} {
+		if _, err := os.Stat(filepath.Join(planted, name+".ran")); err == nil {
+			t.Errorf("the session ran the %s planted on its PATH", name)
 		}
 	}
 	if runtime.GOOS == "darwin" {
