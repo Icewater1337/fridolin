@@ -138,6 +138,7 @@ test('a dangerous setting says why in a warning beside it', async (t) => {
   // not wait forever for one.
   assert.match(warn.textContent, /Off: .*every tool that needs approval is refused/);
   assert.doesNotMatch(warn.textContent, /waits forever/);
+  assert.match(warn.textContent, /Codex mode uses its read-only sandbox/);
   assert.match(warn.textContent, /The sandbox \(below\) limits what a run can reach either way/);
   assert.equal(field.querySelector('.help'), null, 'and is not repeated as plain help');
 });

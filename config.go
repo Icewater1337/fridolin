@@ -99,7 +99,8 @@ type Config struct {
 	// DangerouslySkipPermissions passes --dangerously-skip-permissions to the
 	// Claude CLI so it can use tools without an interactive prompt. Without
 	// it a run, in -p mode with nobody to approve, is refused every tool
-	// that needs approval; see the security notes in the README.
+	// that needs approval. Codex instead uses its read-only sandbox without
+	// this flag; see the security notes in the README.
 	DangerouslySkipPermissions bool `json:"dangerously_skip_permissions"`
 
 	// RunTimeoutMinutes stops a brain's run that takes longer, so that one

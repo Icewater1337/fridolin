@@ -41,14 +41,16 @@ policy describes what that copy does with data.
   `<data_dir>/otp/` for the local script that asked for it, readable only by
   your user, for ten minutes. [What is stored where](#what-is-stored-where)
   lists it all.
-- To answer a message, the bridge runs **Claude Code** on your computer. Claude
-  Code sends the prompt — which can include the message, recent chat history
-  and any calendar details the brain looked up — to **Anthropic** to generate
-  the reply, under your own Claude account and Anthropic's terms (or to the
-  provider your Claude Code setup names instead, see below).
+- To answer a message, the bridge runs **Claude Code or Codex CLI**, as selected
+  by `agent_provider`, on your computer. The selected CLI sends the prompt —
+  which can include the message, recent chat history and any calendar details
+  the brain looked up — to its model provider under your account and that
+  provider's terms: **Anthropic** in Claude mode (or your configured Claude
+  provider), or **OpenAI** in Codex mode.
 - Backups go to **your own Google Drive**.
 - Plaud transcripts are saved as text files on your computer and handed to the
-  brain you chose, so they reach Anthropic like any message the brain answers.
+  brain you chose, so they reach the selected model provider like any message
+  the brain answers.
   Each is written to that brain's media inbox first
   (`<media_dir>/<brain id>/plaud/`), which no other brain may read under the
   sandbox, until the brain files it in its own folder; from there it goes
@@ -68,12 +70,17 @@ policy describes what that copy does with data.
 
 ## Who else gets data
 
-- **Anthropic**, for every run, or the provider your Claude Code login
+- **Anthropic**, for Claude runs, or the provider your Claude Code login
   names instead (Amazon Bedrock, Google Vertex AI, a gateway at
   `ANTHROPIC_BASE_URL`): the prompt (the message, the chat's recent
   history, the brain's instructions) and whatever the run reads with its
   tools, files and command output included, under that account and its
   provider's terms.
+- **OpenAI**, for Codex runs: the prompt and whatever the run reads with its
+  tools, under the account signed in to that brain's Codex home or supplied
+  through `CODEX_API_KEY`. Switching providers keeps the same brain files and
+  chat history, so earlier conversation context can reach the newly selected
+  provider. The site's separate search helper still uses Claude.
 - **Meta (WhatsApp)** carries every message the bridge receives and sends,
   as for any linked device, under WhatsApp's terms. Messages are end-to-end
   encrypted, so Meta does not see what they say, but it sees who the
@@ -111,8 +118,8 @@ policy describes what that copy does with data.
   - The **npm registry** serves the packages the site process installs
     on its first start, and those each deploy installs.
 - **Any website a run reaches.** Claude's web tools (WebFetch, WebSearch)
-  fetch and search what a run asks for, and a run that may use tools can
-  reach any address with its commands: the sandbox does not limit the
+  and Codex's web tool fetch and search what a run asks for. A run that may
+  use tools can reach any address with its commands: the sandbox does not limit the
   network. What a run sends there is whatever the model puts in the
   request; `disallowed_tools` can take the web tools away.
 
@@ -120,9 +127,9 @@ policy describes what that copy does with data.
 
 `~` is the home folder of the user the bridge runs as, and the data folder
 is `~/.fridolin/` unless `data_dir` says otherwise. *Brains* below means
-Claude runs, which can read what your user can on Linux or with the sandbox
-off; with the macOS sandbox on, they read of these only what the last
-column says.
+Claude or Codex runs. On Linux or with the Fridolin sandbox off, they can
+read what your user can; with the macOS sandbox on, they read of these
+only what the last column says.
 
 | What | Where | How long | Who can read it |
 | --- | --- | --- | --- |
@@ -140,10 +147,11 @@ column says.
 | Transcripts uploaded by paired phones | `plaud.phone_dir`, or `plaud/inbox/` in the data folder | Until you delete them; deleting a recording on the phone does not delete an uploaded copy | Your user; brains only if the configured folder permits it, or through their own media inbox after hand-off |
 | Paired phones' public keys and pairing-code hashes; Plaud developer keys and the built phone app | `plaud/devices.json`, `plaud/developer.json` and `plaud/app/` in the data folder, with a public-key copy in `site/devices.json`; copies of the APK wherever you download it | Until unpaired or deleted; used and expired pairing codes are dropped on the next device update | Your user; the site reads public keys; the APK contains developer keys, so anyone with a copy can extract them |
 | Sign-ins: each brain's Google token, the OAuth client, the Drive link (rclone), the Plaud login, the dashboard and scripts tokens | The data folder, or `sandbox.credentials_dir` for the Google tokens; the Plaud login is in `~/.plaud/` while "Let brains use the Plaud CLI" is on | Until you disconnect, or delete them | Your user and the bridge; not brains, except that Plaud login |
-| The keys you put in the service's environment, such as the Claude login sandboxed brains use (`CLAUDE_CODE_OAUTH_TOKEN`) or `GROQ_API_KEY` | macOS: `~/Library/LaunchAgents/ai.fridolin.bridge.plist`; Linux: the drop-in `systemctl --user edit fridolin` made | Until you remove them | Your user; brains get the login, and the keys `child_env_passthrough` names, in their environment, and can read the service file |
+| The keys you put in the service's environment, such as the Claude login sandboxed brains use (`CLAUDE_CODE_OAUTH_TOKEN`), the Codex API key (`CODEX_API_KEY`), or `GROQ_API_KEY` | macOS: `~/Library/LaunchAgents/ai.fridolin.bridge.plist`; Linux: the drop-in `systemctl --user edit fridolin` made | Until you remove them | Your user; the selected provider gets its login, and brains get the keys `child_env_passthrough` names, in their environment, and can read the service file |
 | The bridge's log: connections, routing, runs and errors, naming chats, senders' numbers, group names, poll questions and votes, but not what messages say | macOS: `~/Library/Logs/fridolin/`; Linux: your user journal (`journalctl --user -u fridolin`) | macOS: up to 10 MB a file, and one older file; Linux: as journald is set to keep it | Your user; not brains |
 | Claude Code's transcript of every run: the prompt, every tool call and its output, the reply | With the macOS sandbox, the brain's own Claude Code config folder, `brains/<brain id>/claude/` in the data folder; without it, or with `inherit_claude_user_config`, `~/.claude/projects/` | As Claude Code's `cleanupPeriodDays` says (30 days by default) | Your user and that brain; with `inherit_claude_user_config`, your user only: the macOS sandbox keeps every brain out of `~/.claude/projects/`, its own transcripts included |
-| A brain's temporary files and caches | With the macOS sandbox, `brains/<brain id>/tmp/` and `cache/` in the data folder | Until you delete them; they stay when the brain is removed, and a brain added later under the same id gets them | Your user and that brain |
+| Each brain's Codex login and CLI state | `brains/<brain id>/codex/` in the data folder, in both sandboxed and unsandboxed mode | Until you delete them; runs use `--ephemeral`, so the bridge does not ask Codex to save sessions | Your user and that brain; the personal `~/.codex/` is not copied or used |
+| A brain's temporary files and caches | With the macOS sandbox, or in Codex mode, `brains/<brain id>/tmp/` and `cache/` in the data folder | Until you delete them; they stay when the brain is removed, and a brain added later under the same id gets them | Your user and that brain |
 | Your site, if you turn it on: its visitors' accounts (`users.json`: Google addresses or usernames, names, roles, password hashes), the key that signs their sign-ins (`session.key`), the repository's deploy key, the tunnel token, the site's own Google client, the modules' secrets, what modules keep (`data/<module>/`) and the files they hand to a brain (`spool/`), the clone of the repository and its deploys | `site/` in the data folder | An account until you remove it; module data until a module or you delete it; a file for a brain until the bridge takes it, within a second; the live deploy and the last few | Your user and the site process: under the macOS sandbox it reads its own files (the accounts, the session key, the Google client, the live deploy) and the modules' data, but not the deploy key, the tunnel token or the secrets, which it gets once through a pipe (on Linux it has no sandbox and reads what your user can); not brains |
 | Backups of the brain folders and the settings | `fridolin-backup/` in your Google Drive | Until you delete them; the earlier copies of changed and deleted files for 30 days (`keep_versions_days`) | You, and Google under its terms |
 
@@ -191,8 +199,9 @@ including the Limited Use requirements.
      keys, `~/.config/systemd/user/fridolin.service.d/`.
   3. Delete the data folder, `~/.fridolin/` (or your `data_dir`), and
      `db_path`, `media_dir` and `sandbox.credentials_dir` if you put them
-     elsewhere. With it go your site's files in `site/`: its visitors'
-     accounts, the modules' data and secrets, the deploy key and the
+     elsewhere. Each brain's Codex login and CLI state under `brains/` go
+     with the data folder too. With it go your site's files in `site/`: its
+     visitors' accounts, the modules' data and secrets, the deploy key and the
      tunnel token.
   4. Delete each brain folder, or its `conversation-history.jsonl`,
      `claude-stream.log` (and `claude-stream.1.log`) and memories if you

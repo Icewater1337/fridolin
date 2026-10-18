@@ -1,8 +1,8 @@
 # Security policy
 
-Fridolin lets people on WhatsApp start Claude Code runs on your computer,
-so a flaw in it can reach your files, your accounts and your WhatsApp
-session. Please report one privately, as described below, and not in a
+Fridolin lets people on WhatsApp start Claude Code or Codex CLI runs on
+your computer, so a flaw in it can reach your files, your accounts and
+your WhatsApp session. Please report one privately, as described below, and not in a
 public issue, a pull request or a discussion.
 
 ## Supported versions
@@ -70,8 +70,8 @@ Out of scope:
   promised, and the other limits README lists under *What it does not do*.
   Authentication, API authorization and chat routing remain in scope on
   every supported platform.
-- Flaws in Claude Code, whatsmeow, WhatsApp or another dependency: report
-  those to their makers, and tell us if Fridolin has to change because of
+- Flaws in Claude Code, Codex CLI, whatsmeow, WhatsApp or another dependency:
+  report those to their makers, and tell us if Fridolin has to change because of
   one.
 
 ## What to expect

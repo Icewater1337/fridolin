@@ -378,8 +378,10 @@ Tools brains may not use, passed as `--disallowed-tools`, e.g.
 
 ### `dangerously_skip_permissions`
 
-Passes `--dangerously-skip-permissions`, so Claude uses every tool without
-asking. New configs turn it on.
+In Claude mode, passes `--dangerously-skip-permissions`, so Claude uses
+tools without asking. New configs turn it on. In Codex mode, this selects
+writable execution instead of the CLI's read-only sandbox, always without
+interactive approvals; see [AI mode](#agent_provider).
 
 Without it, nobody is there to approve a tool: a run is `claude -p`, which
 asks no one, so Claude Code refuses every tool that needs approval, such
