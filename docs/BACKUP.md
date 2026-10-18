@@ -22,6 +22,18 @@ desktop session's, so that it can open your browser
 The link uses Google's `drive.file` scope: rclone can only see files it
 created itself. Your other Drive files stay invisible to it.
 
+To link another Google account, **Disconnect** first, then connect again:
+connecting replaces the link, so the bridge refuses it while Drive is
+connected (an abandoned sign-in would otherwise leave backups without
+one), and both are refused while a backup or restore runs. Disconnect
+stops a sign-in that is still waiting for the browser before it removes
+the link, refuses backups, restores and a new sign-in until it is done, and
+says so when the link could not be removed. It removes only the
+bridge's own link: to take away rclone's access entirely, remove it in
+your Google Account under Security → Third-party connections. While daily
+backups are on but Drive is not connected, the overview says so and the
+log repeats it once a day.
+
 ## What is backed up
 
 ```

@@ -156,7 +156,10 @@ export default {
 
     const renderBackup = (s) => paint(backupCard, s.backup || {}, (b) => {
       let p;
-      if (!b.connected) p = pill('Not set up', 'neutral');
+      // Daily backups that lost their Drive link would otherwise just stop.
+      const stranded = !b.connected && b.enabled;
+      if (stranded) p = pill('Not connected', 'bad');
+      else if (!b.connected) p = pill('Not set up', 'neutral');
       else if (b.running) p = pill('Backing up…', 'info', { pulse: true });
       else if (b.last_error && !b.last_ok) p = pill('Failing', 'bad');
       else if (b.enabled) p = pill('Daily', 'ok');
@@ -164,11 +167,12 @@ export default {
       return [
         h('div.card-head', h('div.card-title', icon('backup'), h('h2', 'Backup')), p),
         h('div.card-body',
-          !b.connected ? h('p.muted', 'Back up your brains to Google Drive every day.') : null,
+          stranded ? h('p.error-text.small', 'Daily backups are on, but Google Drive is not connected, so none run. Connect it again on the Backup page.') : null,
+          !b.connected && !stranded ? h('p.muted', 'Back up your brains to Google Drive every day.') : null,
           b.connected ? h('p', 'Last good backup: ', b.last_ok ? timeAgo(b.last_ok) : h('span.muted', 'none yet')) : null,
           b.connected && b.next_run ? h('p.muted', 'Next: ', timeAgo(b.next_run)) : null,
           b.last_error ? h('p.error-text.small', b.last_error) : null,
-          h('a.small', { href: '#/backup' }, b.connected ? 'Backup settings' : 'Set up backups')),
+          h('a.small', { href: '#/backup' }, b.connected || stranded ? 'Backup settings' : 'Set up backups')),
       ];
     });
 

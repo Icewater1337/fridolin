@@ -144,7 +144,12 @@ type BackupManager struct {
 	state   backupState
 	job     *backupJob
 	connect *connectJob
-	stop    context.CancelFunc
+	// disconnecting is set while Disconnect removes the Drive link, so that
+	// no backup, restore or sign-in starts on a remote about to go.
+	disconnecting bool
+	stop          context.CancelFunc
+	// warnedDay is the day warnNotConnected last logged.
+	warnedDay string
 	// stopped is set by Stop: nothing new starts after it, so that wg is
 	// not added to while Stop waits on it.
 	stopped bool
@@ -560,15 +565,33 @@ func (b *Bridge) apiBackupConnect(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusPreconditionFailed, rcloneMissingHint(err))
 		return
 	}
+	// Connecting starts by deleting the remote, so it would throw away a
+	// working link, for good if the new sign-in is then abandoned, and a
+	// backup running on it would fail half-way. Disconnect comes first.
+	if m.connected() {
+		writeErr(w, http.StatusConflict, "Google Drive is already connected — disconnect it first to connect another account")
+		return
+	}
 	m.mu.Lock()
 	if m.connect != nil && m.connect.State == "running" {
 		m.mu.Unlock()
 		writeErr(w, http.StatusConflict, "already connecting — finish in the browser tab rclone opened")
 		return
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
-	job := &connectJob{State: "running", cancel: cancel}
+	if m.job != nil {
+		m.mu.Unlock()
+		writeErr(w, http.StatusConflict, "a backup or restore is running — wait for it or cancel it first")
+		return
+	}
+	if m.disconnecting {
+		m.mu.Unlock()
+		writeErr(w, http.StatusConflict, errDisconnecting.Error())
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), connectTimeout)
+	job := &connectJob{State: "running", cancel: cancel, done: make(chan struct{})}
 	err := m.goLocked(func() {
+		defer close(job.done)
 		defer cancel()
 		err := m.connectDrive(ctx, job)
 		m.mu.Lock()
@@ -592,28 +615,47 @@ func (b *Bridge) apiBackupConnect(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusAccepted, map[string]string{"status": "connecting"})
 }
 
+// connectTimeout is how long a Drive sign-in waits for you to approve it.
+const connectTimeout = 10 * time.Minute
+
+// connectSteps bounds rclone's config questions: a Drive remote takes a
+// handful, so more means rclone asks something answerFor does not know.
+const connectSteps = 10
+
 // connectDrive walks rclone's config questions. Answering config_is_local
 // starts rclone's local OAuth listener and opens the browser, which is why
 // its runs get your desktop session's variables; that step blocks until you
-// approve access (or the 10 minutes run out).
+// approve access (or connectTimeout runs out).
 func (m *BackupManager) connectDrive(ctx context.Context, job *connectJob) error {
 	ctx = withDesktop(ctx)
 	remote := m.cfgs.Get().Backup.Remote
-	_, _ = m.runner(ctx, []string{"config", "delete", remote}, nil)
+	// What is left of a remote that is not connected, one whose sign-in was
+	// abandoned say, would make config create fail. apiBackupConnect keeps
+	// a connected one from getting here.
+	if _, err := m.runner(ctx, []string{"config", "delete", remote}, nil); err != nil {
+		return fmt.Errorf("removing the unfinished Drive link: %w", err)
+	}
 
 	stderr := &authURLWatcher{onURL: func(u string) {
 		m.mu.Lock()
 		job.AuthURL = u
 		m.mu.Unlock()
 	}}
-	out, err := m.runner(ctx, []string{"config", "create", remote, "drive", "scope=drive.file", "--non-interactive"}, stderr)
-	for step := 0; step < 10; step++ {
+	args := []string{"config", "create", remote, "drive", "scope=drive.file", "--non-interactive"}
+	for step := 1; ; step++ {
+		out, err := m.runner(ctx, args, stderr)
 		if err != nil {
-			return fmt.Errorf("rclone: %v %s", err, stderr.tail())
+			switch {
+			case errors.Is(ctx.Err(), context.DeadlineExceeded):
+				return fmt.Errorf("access was not approved within %v — try again", connectTimeout)
+			case ctx.Err() != nil:
+				return errors.New("connecting was cancelled")
+			}
+			return fmt.Errorf("rclone: %w %s", err, stderr.tail())
 		}
 		var q rcloneQuestion
-		if jerr := json.Unmarshal(out, &q); jerr != nil {
-			return fmt.Errorf("unexpected rclone output")
+		if err := json.Unmarshal(out, &q); err != nil {
+			return fmt.Errorf("unexpected rclone output: %w %s", err, stderr.tail())
 		}
 		if q.Error != "" {
 			return errors.New(q.Error)
@@ -621,8 +663,10 @@ func (m *BackupManager) connectDrive(ctx context.Context, job *connectJob) error
 		if q.State == "" {
 			break
 		}
-		out, err = m.runner(ctx, []string{"config", "update", remote, "--continue", "--state", q.State,
-			"--result", answerFor(q), "--non-interactive"}, stderr)
+		if step >= connectSteps {
+			return fmt.Errorf("rclone asked more than %d questions; set the remote up by hand (docs/BACKUP.md, Other storage)", connectSteps)
+		}
+		args = []string{"config", "update", remote, "--continue", "--state", q.State, "--result", answerFor(q), "--non-interactive"}
 	}
 	if !m.connected() {
 		return errors.New("access to Google Drive was not authorised")
@@ -661,15 +705,54 @@ func (a *authURLWatcher) tail() string {
 	return tail(a.buf.String(), 400)
 }
 
+// errDisconnecting refuses what would start on the Drive link while
+// Disconnect removes it.
+var errDisconnecting = errors.New("the Google Drive link is being removed — wait for Disconnect to finish")
+
 func (b *Bridge) apiBackupDisconnect(w http.ResponseWriter, r *http.Request) {
 	m := b.backup
 	m.mu.Lock()
-	if m.connect != nil && m.connect.cancel != nil {
-		m.connect.cancel()
+	switch {
+	case m.job != nil:
+		m.mu.Unlock()
+		writeErr(w, http.StatusConflict, "a backup or restore is running — wait for it or cancel it first")
+		return
+	case m.disconnecting:
+		m.mu.Unlock()
+		writeErr(w, http.StatusConflict, errDisconnecting.Error())
+		return
 	}
-	m.connect = nil
+	m.disconnecting = true
+	job := m.connect
 	m.mu.Unlock()
-	_, _ = m.runner(r.Context(), []string{"config", "delete", b.cfgs.Get().Backup.Remote}, nil)
+	defer func() {
+		m.mu.Lock()
+		m.disconnecting = false
+		m.mu.Unlock()
+	}()
+	// A sign-in still running writes its token into the config when it
+	// ends. It has to be gone before the delete, or a token written after it
+	// would leave Drive connected behind the dashboard's back. It stays
+	// m.connect until it has ended, so that one that does not stop still
+	// shows on the status page and keeps another from starting next to it.
+	if job != nil && job.cancel != nil {
+		job.cancel()
+		select {
+		case <-job.done:
+		case <-time.After(backupStopWait):
+			writeErr(w, http.StatusInternalServerError, "the Google Drive sign-in did not stop — try again in a moment")
+			return
+		}
+	}
+	m.mu.Lock()
+	if m.connect == job {
+		m.connect = nil
+	}
+	m.mu.Unlock()
+	if _, err := m.runner(r.Context(), []string{"config", "delete", b.cfgs.Get().Backup.Remote}, nil); err != nil {
+		writeErr(w, http.StatusInternalServerError, "removing the Google Drive link failed: "+err.Error())
+		return
+	}
 	writeJSON(w, http.StatusOK, map[string]string{"status": "disconnected"})
 }
 
@@ -799,6 +882,10 @@ func (m *BackupManager) StartRun(ids []string, includeBridge bool, trigger strin
 	if m.job != nil {
 		m.mu.Unlock()
 		return errors.New("a backup is already running")
+	}
+	if m.disconnecting {
+		m.mu.Unlock()
+		return errDisconnecting
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	job := &backupJob{started: time.Now(), cancel: cancel}
@@ -1384,6 +1471,11 @@ func (b *Bridge) apiBackupRestore(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusConflict, "a backup or restore is already running")
 		return
 	}
+	if m.disconnecting {
+		m.mu.Unlock()
+		writeErr(w, http.StatusConflict, errDisconnecting.Error())
+		return
+	}
 	ctx, cancel := context.WithCancel(context.Background())
 	job := &backupJob{started: time.Now(), cancel: cancel, current: "restore:" + req.Brain}
 	err := m.goLocked(func() {
@@ -1436,13 +1528,17 @@ func (m *BackupManager) Start(ctx context.Context) {
 
 func (m *BackupManager) tick(now time.Time) {
 	cfg := m.cfgs.Get()
-	if !cfg.Backup.Enabled || !m.connected() {
+	if !cfg.Backup.Enabled {
+		return
+	}
+	if !m.connected() {
+		m.warnNotConnected(now)
 		return
 	}
 	today := now.Format("2006-01-02")
 	m.mu.Lock()
 	last := m.state.LastScheduledDay
-	busy := m.job != nil
+	busy := m.job != nil || m.disconnecting
 	m.mu.Unlock()
 	if now.Before(dueToday(cfg.Backup.DailyAt, now)) || last == today || busy {
 		return
@@ -1455,6 +1551,20 @@ func (m *BackupManager) tick(now time.Time) {
 	m.state.LastScheduledDay = today
 	m.saveStateLocked()
 	m.mu.Unlock()
+}
+
+// warnNotConnected logs, once a day, that the daily backup is on but has no
+// Drive link to run on: after an abandoned reconnect, say. The overview says
+// so too; without either, the backups would just stop.
+func (m *BackupManager) warnNotConnected(now time.Time) {
+	day := now.Format("2006-01-02")
+	m.mu.Lock()
+	warned := m.warnedDay == day
+	m.warnedDay = day
+	m.mu.Unlock()
+	if !warned {
+		log.Printf("backup: daily backups are on, but Google Drive is not connected, so none run — connect it on the Backup page")
+	}
 }
 
 // skipTodayIfPastDue makes a schedule switched on after today's time start
