@@ -22,11 +22,13 @@ bin="sentinel-not-the-binary"
 
 failed=0
 
-# expect NAME WANT TARGET PATTERN — WANT is "has" or "lacks": whether a line
-# of what make would run for TARGET matches the extended regexp PATTERN.
+# expect NAME WANT TARGET PATTERN [VAR=VALUE...] — WANT is "has" or "lacks":
+# whether a line of what make would run for TARGET (with the variables
+# given) matches the extended regexp PATTERN.
 expect() {
   local name="$1" want="$2" target="$3" pattern="$4" out got=lacks
-  if ! out="$(make -C "$root" -n "$target" BINARY="$bin" 2>&1)"; then
+  shift 4
+  if ! out="$(make -C "$root" -n "$target" BINARY="$bin" "$@" 2>&1)"; then
     printf 'FAIL  %s: make -n %s failed\n%s\n' "$name" "$target" "$out"
     failed=$((failed + 1))
     return
@@ -52,7 +54,17 @@ for target in $targets; do
   expect "$target leaves the binary alone" lacks "$target" "$bin"
 done
 
-expect "smoke builds with the race detector into its temp dir" has smoke 'build -race -o "\$tmp/fridolin"'
+expect "smoke builds with the race detector into its temp dir" has smoke 'build -race .*-o "\$tmp/fridolin"'
+
+# fridolin version names the build: what it is given (setup.sh passes
+# its own), else what git describe says of the checkout.
+expect "build stamps the version it is given" has build '-X main\.version=v0\.0\.0-sentinel"' VERSION=v0.0.0-sentinel
+described="$(git -C "$root" describe --tags --always --dirty 2>/dev/null || echo dev)"
+expect "build stamps git describe by default" has build "-X main\\.version=$described\""
+# The linker skips an -X it has no variable for: smoke.sh checks that the
+# stamp reaches the binary.
+expect "smoke stamps the version it is given" has smoke 'build -race -ldflags "-X main\.version=v0\.0\.0-sentinel"' VERSION=v0.0.0-sentinel
+expect "smoke has smoke.sh check the stamp" has smoke 'scripts/smoke\.sh "\$tmp/fridolin" "v0\.0\.0-sentinel"$' VERSION=v0.0.0-sentinel
 
 if [ "$failed" -gt 0 ]; then
   printf '\n%d case(s) failed\n' "$failed" >&2

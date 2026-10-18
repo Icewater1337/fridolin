@@ -13,6 +13,11 @@
 # this checkout has.
 MAIN_PKG := $(if $(wildcard cmd/fridolin/*.go),./cmd/fridolin,.)
 BINARY   ?= bin/fridolin
+# The version `fridolin version` and the log's first line report; without
+# git (a checkout from an archive) it is "dev".
+VERSION  ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
+# Lazy (=), so only a target that builds runs git describe.
+VERSION_LDFLAGS = -X main.version=$(VERSION)
 
 GO     ?= go
 PYTHON ?= python3
@@ -53,8 +58,8 @@ FUZZTIME ?= 10s
 help: ## list the targets
 	@awk -F':.*## ' '/^[a-z-]+:.*## / { printf "  %-14s %s\n", $$1, $$2 }' $(MAKEFILE_LIST)
 
-build: ## build bin/fridolin
-	$(GO) build -o $(BINARY) $(MAIN_PKG)
+build: ## build bin/fridolin, stamped with VERSION (default: git describe)
+	$(GO) build -trimpath -ldflags "$(VERSION_LDFLAGS)" -o $(BINARY) $(MAIN_PKG)
 
 install: build ## copy the binary to BINDIR (default ~/.local/bin)
 	install -d "$(DESTDIR)$(BINDIR)"
@@ -128,12 +133,15 @@ test-sh: ## tests for the personal-data and action-pin checks and the Makefile
 	scripts/test-makefile.sh
 
 # A temp dir, not the binary: a check must not replace a build in use.
-# -race makes a data race at start or shutdown fail the run.
+# -race makes a data race at start or shutdown fail the run. The build is
+# stamped as make build stamps it, and smoke.sh checks that fridolin
+# version prints the stamp: the linker skips an -X whose variable does not
+# exist, so a stamp that stopped working would go unnoticed otherwise.
 smoke: ## build with -race in a temp dir, start it in dev mode and stop it
 	@set -e; tmp="$$(mktemp -d)"; trap 'rm -rf "$$tmp"' EXIT; \
-	echo "$(GO) build -race -o $$tmp/fridolin $(MAIN_PKG)"; \
-	$(GO) build -race -o "$$tmp/fridolin" $(MAIN_PKG); \
-	scripts/smoke.sh "$$tmp/fridolin"
+	echo "$(GO) build -race -ldflags \"$(VERSION_LDFLAGS)\" -o $$tmp/fridolin $(MAIN_PKG)"; \
+	$(GO) build -race -ldflags "$(VERSION_LDFLAGS)" -o "$$tmp/fridolin" $(MAIN_PKG); \
+	scripts/smoke.sh "$$tmp/fridolin" "$(VERSION)"
 
 # go test -fuzz takes one target in one package at a time. Listing the
 # targets first makes a package that does not compile fail here too.
