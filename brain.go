@@ -249,6 +249,7 @@ type brainSettings struct {
 	runTimeout      time.Duration // 0 for none
 	queueMode       string
 	maxPending      int
+	observe         string // BrainManifest.Observe
 	credsDir        string // where per-brain credential files live
 	envPassthrough  []string
 	toolsDir        string // the bridge's Python helpers, or ""
@@ -378,9 +379,11 @@ func (br *Brain) historyTail(maxBytes int64) []string {
 	return tailLines(f, maxBytes)
 }
 
-// Submit queues a message for the brain. It returns the message's position in
-// the queue (1 = next) and whether it has to wait for other work; a run it
-// interrupts does not count.
+// Submit hands a message to the brain: it goes into the history and, unless
+// it is untagged chatter that gets no run (see observeRuns), into the
+// queue. It returns the message's position in the queue (1 = next, 0 for
+// none) and whether it has to wait for other work; a run it interrupts
+// does not count.
 func (br *Brain) Submit(m Inbound) (pos int, busy bool, err error) {
 	if m.At.IsZero() {
 		m.At = time.Now()
@@ -398,6 +401,12 @@ func (br *Brain) Submit(m Inbound) (pos int, busy bool, err error) {
 	if br.retired {
 		br.mu.Unlock()
 		return 0, false, errBrainRetired
+	}
+	// Untagged chatter needs nothing more, unless the brain observes it with
+	// runs: the next run in the chat reads it in the history.
+	if m.Silent && !observeRuns(s.observe, m) {
+		br.mu.Unlock()
+		return 0, false, nil
 	}
 	busy = br.current != nil || len(br.pending) > 0
 
@@ -2050,6 +2059,7 @@ func settingsFor(cfg *Config, sp BrainSpec) *brainSettings {
 		runTimeout:      cfg.RunTimeout(),
 		queueMode:       cfg.Queue.Mode,
 		maxPending:      cfg.Queue.MaxPending,
+		observe:         m.Observe,
 		credsDir:        credentialsDirOf(cfg),
 		envPassthrough:  append([]string(nil), cfg.ChildEnvPassthrough...),
 		toolsDir:        ownLayout().Tools,

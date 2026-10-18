@@ -125,10 +125,12 @@ or `routing.answer_forwards` (docs/BRAINS.md, or the brain's page in the
 dashboard): then a file is chatter whose caption the brain reads, and it is not
 downloaded, and a forward is chatter like any other.
 
-Untagged group messages still run through the brain — so it keeps up with the
-conversation — but produce no reply. Very short messages ("ok", "👍") are
-skipped entirely. An untagged message is never a command: in a group, `!stop`
-needs the trigger (`@claude !stop`).
+Untagged group messages go into the brain's history, so that its next run in
+the group sees the conversation, and produce no reply. They cost no Claude run
+unless the brain's `observe` setting is `run` (see
+[BRAINS.md](BRAINS.md#brainjson)), which gives each one an observe-only run
+of its own; very short ones ("ok", "👍") never get one. An untagged message is
+never a command: in a group, `!stop` needs the trigger (`@claude !stop`).
 
 DMs never need a trigger.
 

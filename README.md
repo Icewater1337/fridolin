@@ -64,9 +64,10 @@ Question: When should we meet?
 [/POLL]
 ```
 
-**Group awareness.** In a group it reads everything but replies only when
-addressed — by keyword, by @-mention, by a reply to one of its messages, or
-when you send it a file (each brain can turn files and forwards off).
+**Group awareness.** In a group it keeps up with everything, through its chat
+history, but runs and replies only when addressed — by keyword, by
+@-mention, by a reply to one of its messages, or when you send it a file
+(each brain can turn files and forwards off).
 
 **Orderly.** Messages that arrive while the assistant is busy wait their turn
 (or, if you prefer, a newer request replaces the one you sent before it). A

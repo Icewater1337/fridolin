@@ -170,7 +170,7 @@ test('the model, effort and backup settings are the wizard’s, and save with th
   await settle();
   const saved = calls.find((c) => c.path === '/api/brains/work' && c.method === 'PUT');
   assert.ok(saved, 'the settings were saved');
-  assert.deepEqual(saved.body.manifest, { ...m, model: 'opus', effort: '', backup: { enabled: false, exclude: ['node_modules/', '*.log'] } });
+  assert.deepEqual(saved.body.manifest, { ...m, model: 'opus', effort: '', observe: 'history', backup: { enabled: false, exclude: ['node_modules/', '*.log'] } });
   const toasts = (k) => document.querySelectorAll(`.toast.${k}`).map((el) => el.textContent);
   assert.deepEqual(toasts('error'), []);
   assert.ok(toasts('ok').includes('Settings saved'), `toasts: ${toasts('ok')}`);
@@ -207,4 +207,16 @@ test('a brain that is not there is asked after every 30 s, not every 3 s', async
   t.mock.timers.tick(3000);
   await settle();
   assert.equal(count(), before + 1, 'every 3 s again once it is there');
+});
+
+test('the settings say what untagged group messages get, and save it', async (t) => {
+  const { root, calls } = await openPage(t);
+  const observe = root.querySelector('.brain-form select[name=observe]');
+  assert.equal(observe.value, 'history', 'a brain.json without the setting keeps them in the history');
+  observe.value = 'run';
+  observe.dispatchEvent(new Event('change', { bubbles: true }));
+  root.querySelector('.brain-form').dispatchEvent(new Event('submit', { cancelable: true }));
+  await settle();
+  const saved = calls.filter((c) => c.method === 'PUT').map((c) => [c.path, c.body.manifest.observe]);
+  assert.deepEqual(saved, [['/api/brains/work', 'run']]);
 });

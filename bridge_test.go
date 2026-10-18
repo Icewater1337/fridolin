@@ -100,12 +100,13 @@ func TestIsJunkMessage(t *testing.T) {
 	}
 }
 
-// FuzzIsJunkMessage: untagged group messages the filter calls junk are
-// dropped unread, so it may only catch what carries nothing: a single
-// character, no letter or digit in any script, or one of the short
-// acknowledgements, which are ASCII once lowercased the way the filter
-// compares them. Whitespace around a message and its ASCII letter case
-// never change the verdict.
+// FuzzIsJunkMessage: untagged group messages the filter calls junk never
+// get a run, not even in a brain that observes with runs (observeRuns),
+// so it may only catch what carries nothing: a single character, no
+// letter or digit in any script, or one of the short acknowledgements,
+// which are ASCII once lowercased the way the filter compares them.
+// Whitespace around a message and its ASCII letter case never change the
+// verdict.
 func FuzzIsJunkMessage(f *testing.F) {
 	for _, s := range []string{"ok", "OK", "o\u212a", "than\u212a you", "thanks", "thank you", "👍", "...", "?", "a", "🎉🎉", "what time is it", "ok but why", "book it for 3pm", "PR 42?", "", " \n", "\xff\xfe"} {
 		f.Add(s)
@@ -1103,8 +1104,8 @@ func TestIsLoopbackAddr(t *testing.T) {
 }
 
 // Some names are read outside Go: the dashboard labels the run outcomes
-// and the bridge's backup and offers the queue modes. Only this test keeps
-// the two sides in step.
+// and the bridge's backup and offers the queue and observe modes. Only
+// this test keeps the two sides in step.
 func TestNamesReadOutsideGo(t *testing.T) {
 	cases := []struct {
 		file string
@@ -1112,7 +1113,8 @@ func TestNamesReadOutsideGo(t *testing.T) {
 	}{
 		{"web/assets/components/brain.js", []string{outcomeOK + ": [", outcomeError + ": [", outcomeInterrupted + ": [", outcomeQuestion + ": ["}},
 		{"web/assets/pages/settings.js", []string{"def: '" + queueModeQueue + "'", "['" + queueModeQueue + "', ", "['" + queueModeInterrupt + "', "}},
-		{"web/assets/lib/brain.js", []string{"export const BRIDGE_BACKUP_ID = '" + bridgeBackupID + "';"}},
+		{"web/assets/lib/brain.js", []string{"export const BRIDGE_BACKUP_ID = '" + bridgeBackupID + "';", "[['" + observeHistory + "', ", "['" + observeRun + "', "}},
+		{"web/assets/pages/brain.js", []string{"m.observe || '" + observeHistory + "'"}},
 	}
 	for _, c := range cases {
 		t.Run(c.file, func(t *testing.T) {

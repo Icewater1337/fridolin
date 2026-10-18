@@ -10,13 +10,13 @@ import { calendarCard } from '../components/calendar.js';
 import { h, mount, paint } from '../lib/dom.js';
 import { fmtDuration, plural, prettyJSON } from '../lib/format.js';
 import { phoneish, isGroupJid } from '../lib/jid.js';
-import { issueLabel } from '../lib/brain.js';
+import { OBSERVE, issueLabel } from '../lib/brain.js';
 import { sortKeys, fieldDiff, lineDiff } from '../lib/diff.js';
 import { icon } from '../components/icons.js';
 import { toast } from '../components/toast.js';
 import { btn, runBusy } from '../components/buttons.js';
 import { confirmDialog } from '../components/dialog.js';
-import { field, textInput, toggle } from '../components/fields.js';
+import { field, textInput, select, toggle } from '../components/fields.js';
 import { brainSettingsFields } from '../components/brain-fields.js';
 import { pill, badge, callout, timeAgo, mono, empty, loading } from '../components/common.js';
 import { chatEl, chatName } from '../components/chat.js';
@@ -224,7 +224,7 @@ export default {
         h('div.card',
           h('div.card-head', h('div.card-title', h('h3', 'Current run')), run ? pill('Working', 'info', { pulse: true }) : pill('Idle', 'neutral')),
           run ? h('div.card-body',
-            h('div.run-meta', h('span', 'From ', h('strong', run.sender ? phoneish(run.sender) : 'someone')), isGroupJid(run.chat) ? [h('span', 'in'), chatEl(run.chat)] : h('span.muted', '(direct message)'), run.silent ? badge('silent', 'neutral', 'Untagged group message: the brain reads along but does not reply') : null),
+            h('div.run-meta', h('span', 'From ', h('strong', run.sender ? phoneish(run.sender) : 'someone')), isGroupJid(run.chat) ? [h('span', 'in'), chatEl(run.chat)] : h('span.muted', '(direct message)'), run.silent ? badge('silent', 'neutral', 'Untagged group message: an observe-only run, which sends nothing') : null),
             run.preview ? h('blockquote.preview', run.preview) : null,
             h('div.muted.small', timeAgo(run.started, 'Started '), run.pid ? ` · pid ${run.pid}` : ''),
             h('div.actions', stop(false), stop(true)))
@@ -269,6 +269,7 @@ export default {
       const nameIn = textInput({ value: m.name || '', spellcheck: 'true' });
       const routing = routingEditor({ routing: m.routing || {}, selfId: id, brains: others, allowedGroups, onChange: changed, signal: ctx.signal });
       const fields = brainSettingsFields(m, eff);
+      const observeSel = select(OBSERVE, m.observe || 'history', { name: 'observe' });
       const override = Array.isArray(m.disallowed_tools);
       const globalTools = eff.disallowed_tools.length ? eff.disallowed_tools.join(', ') : 'none';
       const toolsIn = textInput({ value: override ? m.disallowed_tools.join(', ') : '', class: 'mono', placeholder: 'e.g. WebFetch, Bash', disabled: !override });
@@ -287,6 +288,7 @@ export default {
           name: nameIn.value.trim(),
           routing: routing.getValue(),
           ...fields.value(),
+          observe: observeSel.value,
           prompt_file: promptIn.value.trim(),
           reply_chat: replyIn.value.trim(),
         };
@@ -302,7 +304,8 @@ export default {
         h('div.form-grid',
           field({ label: 'Name', control: nameIn }),
           field({ label: 'Id', control: h('div.static', mono(m.id)), help: 'Ids cannot change. To use a new id, remove the brain and add the folder again.' })),
-        h('fieldset.fieldset', h('legend', 'Chats'), routing),
+        h('fieldset.fieldset', h('legend', 'Chats'), routing,
+          field({ label: 'Untagged group messages', control: observeSel, help: 'Messages in a group that nobody addressed to the brain. They go into its history either way, for its next run there, and get no reply. A run of its own for each lets the brain take notes as the conversation goes, but costs a full Claude run, with tools, on whatever anyone in the group writes.' })),
         h('fieldset.fieldset', h('legend', 'Model and tools'),
           fields.model,
           h('div.field', toolsSw, h('div.help', `Off: use the global list of blocked tools (${globalTools}).`)),

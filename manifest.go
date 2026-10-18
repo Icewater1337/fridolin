@@ -41,6 +41,10 @@ type BrainManifest struct {
 	// chat — files handed in through /ingest. Default: derived from routing.
 	ReplyChat string `json:"reply_chat,omitempty"`
 
+	// Observe is what the brain does with untagged group messages:
+	// observeHistory (the default) or observeRun, see observe.go.
+	Observe string `json:"observe,omitempty"`
+
 	Backup BrainBackup `json:"backup"`
 
 	// Calendar is the Google account this brain signed in with and the
@@ -104,6 +108,9 @@ func (m *BrainManifest) Validate() error {
 	if !validEfforts[m.Effort] {
 		return fmt.Errorf("brain %q: effort %q must be one of low, medium, high, xhigh, max", m.ID, m.Effort)
 	}
+	if !validObserve[m.Observe] {
+		return fmt.Errorf("brain %q: observe %q must be %q or %q", m.ID, m.Observe, observeHistory, observeRun)
+	}
 	if m.PromptFile != "" {
 		if filepath.IsAbs(m.PromptFile) || strings.HasPrefix(filepath.Clean(m.PromptFile), "..") {
 			return fmt.Errorf("brain %q: prompt_file must be a path inside the brain folder", m.ID)
@@ -137,6 +144,9 @@ func (m BrainManifest) normalized() BrainManifest {
 	}
 	if m.PromptFile == "" {
 		m.PromptFile = defaultPromptFile
+	}
+	if m.Observe == "" {
+		m.Observe = observeHistory
 	}
 	m.Routing.Groups = nonNil(m.Routing.Groups)
 	m.Backup.Exclude = nonNil(m.Backup.Exclude)

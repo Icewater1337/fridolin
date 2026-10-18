@@ -48,7 +48,8 @@ func (d *deliveries) all() []delivered {
 }
 
 // queueTestManager builds a manager with folder brains a (DMs) and b (a
-// group) running the fake CLI.
+// group) running the fake CLI. b observes its group with runs, so that
+// untagged chatter there queues like the rest.
 func queueTestManager(t *testing.T, sleepMS int, extra string) (*BrainManager, *deliveries, string) {
 	t.Helper()
 	home := canonicalDir(t.TempDir())
@@ -59,7 +60,7 @@ func queueTestManager(t *testing.T, sleepMS int, extra string) (*BrainManager, *
 		"data_dir": "`+home+`/data",
 		"claude_path": "`+claude+`"`+brainDirsJSON(t,
 		brainFolder(t, home+"/a", BrainManifest{ID: "a", Routing: BrainRouting{HandlesDMs: true}}),
-		brainFolder(t, home+"/b", BrainManifest{ID: "b", Routing: BrainRouting{Groups: []string{"120363000000000000@g.us"}}}),
+		brainFolder(t, home+"/b", BrainManifest{ID: "b", Routing: BrainRouting{Groups: []string{"120363000000000000@g.us"}}, Observe: observeRun}),
 	)+extra+`
 	}`))
 	if err != nil {

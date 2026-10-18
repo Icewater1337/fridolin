@@ -32,8 +32,9 @@ type Inbound struct {
 	// commands and the OTP guard see only what was typed: "!stop" or a
 	// one-time code sent as a reply must still be recognised.
 	Quoted *Quote
-	// Silent means untagged group chatter: the brain reads it to keep up with
-	// the conversation but sends nothing back.
+	// Silent means untagged group chatter: the brain keeps it in its history
+	// to keep up with the conversation, gives it an observe-only run only
+	// when it observes with runs (observeRuns), and sends nothing back.
 	Silent bool
 	Source string // sourceWhatsApp, sourceIngest or sourceDev
 	At     time.Time

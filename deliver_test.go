@@ -85,7 +85,7 @@ func TestRepliesAreRecordedAsSent(t *testing.T) {
 // when it was sent. An untagged group message's run is never sent, so its
 // answer is not in the history, while the DM's is.
 func TestSilentRunLeavesNoReplyInTheHistory(t *testing.T) {
-	tb, br := newMainBridge(t, `, "queue": {"notify": false}`)
+	tb, br := newObservingBridge(t, `, "queue": {"notify": false}`)
 	ctx := context.Background()
 	tb.handleInbound(ctx, Inbound{JID: testGroup, Sender: "15551234567", Text: "we meet at noon", Silent: true, Source: sourceWhatsApp})
 	// The silent run ends with an answer before the DM comes in, so that
@@ -140,7 +140,7 @@ func TestMidRunMessagesOnlyForAddressedMessages(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			tb, br := newMainBridge(t, "")
+			tb, br := newObservingBridge(t, "")
 			t.Setenv("FRIDOLIN_FAKE_ASK", `{"questions":[{"question":"Which day?"}]}`)
 			t.Setenv("FRIDOLIN_FAKE_SLEEP_MS", "300") // time for the working notice
 			if c.refused {

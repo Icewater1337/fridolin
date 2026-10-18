@@ -23,7 +23,7 @@ import (
 // isJunkMessage reports whether a message is too trivial to be worth a Claude
 // invocation — a bare emoji, a single character, or a one-word acknowledgement.
 // Only applied to untagged group chatter, never to a message addressed to the
-// bridge.
+// bridge, and such a message still goes into the history (see observeRuns).
 func isJunkMessage(text string) bool {
 	trimmed := strings.TrimSpace(text)
 	if len([]rune(trimmed)) <= 1 {
@@ -402,7 +402,8 @@ func (b *Bridge) recordIgnored(kind, jid, name, sender, pushName string) {
 
 // handleInbound is the entry point for every allowed message. Access control
 // already happened: groups against allowed_groups, DMs against
-// allowed_numbers. Group messages without the trigger arrive Silent.
+// allowed_numbers. Group messages without the trigger arrive Silent, and go
+// on to their brain like the rest: it keeps them in its history.
 func (b *Bridge) handleInbound(ctx context.Context, m Inbound) {
 	m.Text = strings.TrimSpace(m.Text)
 	cfg := b.cfgs.Get()
@@ -416,12 +417,6 @@ func (b *Bridge) handleInbound(ctx context.Context, m Inbound) {
 		return
 	}
 	if m.Text == "" && len(m.Media) == 0 && m.Quoted == nil {
-		return
-	}
-
-	// Untagged group chatter that carries no content is not worth a run.
-	if m.Silent && len(m.Media) == 0 && isJunkMessage(m.Text) {
-		log.Printf("Junk message from %s: skipping Claude invocation", m.Sender)
 		return
 	}
 
