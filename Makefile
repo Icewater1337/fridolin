@@ -16,7 +16,8 @@ BINARY   ?= bin/fridolin
 # git (a checkout from an archive) it is "dev".
 VERSION  ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
 # Lazy (=), so only a target that builds runs git describe.
-VERSION_LDFLAGS = -X main.version=$(VERSION)
+# The variable is version in internal/version.
+VERSION_LDFLAGS = -X fridolin/internal/version.version=$(VERSION)
 
 GO     ?= go
 PYTHON ?= python3
