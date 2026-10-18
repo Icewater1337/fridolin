@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"path/filepath"
 	"slices"
@@ -944,5 +945,68 @@ func TestRunPickerTellsCancelFromFailure(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// A sign-in finishes with the client and redirect URI it started with:
+// an http_listen saved since waits for a restart, and a client replaced
+// meanwhile did not issue the code.
+func TestSignInKeepsItsClientAndRedirect(t *testing.T) {
+	srv, got := fakeGoogle(t)
+	tb := newTestBridge(t, "")
+	tb.addFolderBrain(t, BrainManifest{ID: "fam", Name: "Fam"})
+	if w := tb.do("PUT", "/api/google/client", map[string]string{"json": fmt.Sprintf(testClientJSON, srv.URL)}); w.Code != 200 {
+		t.Fatal(w.Body.String())
+	}
+	var start struct {
+		AuthURL string `json:"auth_url"`
+	}
+	_ = json.Unmarshal(tb.do("POST", "/api/brains/fam/calendar/connect", nil).Body.Bytes(), &start)
+	u, err := url.Parse(start.AuthURL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	const served = "http://127.0.0.1:8765/"
+	if r := u.Query().Get("redirect_uri"); r != served {
+		t.Fatalf("redirect_uri %q, want the address served on, %q", r, served)
+	}
+
+	// Before Google sends the browser back: a new listen address (for
+	// the next start) and another client.
+	if w := tb.editConfig(t, func(c map[string]any) { c["http_listen"] = "127.0.0.1:9999" }); w.Code != 200 {
+		t.Fatal(w.Body.String())
+	}
+	other := strings.Replace(fmt.Sprintf(testClientJSON, srv.URL), "123-abc", "456-def", 1)
+	if w := tb.do("PUT", "/api/google/client", map[string]string{"json": other}); w.Code != 200 {
+		t.Fatal(w.Body.String())
+	}
+	var next struct {
+		AuthURL string `json:"auth_url"`
+	}
+	_ = json.Unmarshal(tb.do("POST", "/api/brains/fam/calendar/connect", nil).Body.Bytes(), &next)
+	if n, _ := url.Parse(next.AuthURL); n == nil || n.Query().Get("redirect_uri") != served {
+		t.Fatalf("a sign-in started after the edit redirects to %q, want %q", next.AuthURL, served)
+	}
+
+	r := httptest.NewRequest("GET", "http://127.0.0.1:8765/?state="+url.QueryEscape(u.Query().Get("state"))+"&code=good-code", nil)
+	r.Host = "127.0.0.1:8765"
+	w := httptest.NewRecorder()
+	tb.h.ServeHTTP(w, r)
+	if w.Code != 302 {
+		t.Fatalf("callback: %d %s", w.Code, w.Body.String())
+	}
+	if (*got)["redirect_uri"] != served || (*got)["client_id"] != "123-abc.apps.googleusercontent.com" {
+		t.Fatalf("exchange sent redirect_uri %q and client %q", (*got)["redirect_uri"], (*got)["client_id"])
+	}
+}
+
+func TestTokenLifetime(t *testing.T) {
+	for _, c := range []struct {
+		in   int
+		want time.Duration
+	}{{3599, 3599 * time.Second}, {0, time.Hour}, {-5, time.Hour}} {
+		if got := tokenLifetime(c.in); got != c.want {
+			t.Errorf("tokenLifetime(%d) = %v, want %v", c.in, got, c.want)
+		}
 	}
 }
