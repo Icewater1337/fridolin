@@ -3,6 +3,8 @@ package main
 import (
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
@@ -188,5 +190,75 @@ func TestBrainBackupRoute(t *testing.T) {
 	}
 	if w := tb.do("PUT", "/api/backup/settings", map[string]any{"brain": "notes", "brain_enabled": true}); w.Code != http.StatusBadRequest {
 		t.Fatalf("global settings with a brain: %d %s", w.Code, w.Body.String())
+	}
+}
+
+func TestLoadDashboardToken(t *testing.T) {
+	t.Run("made on first run, then kept", func(t *testing.T) {
+		dir := t.TempDir()
+		a, err := LoadDashboardToken(dir)
+		if err != nil {
+			t.Fatal(err)
+		}
+		b, err := LoadDashboardToken(dir)
+		if err != nil || b.Value() != a.Value() || len(a.Value()) < minTokenLen {
+			t.Fatalf("second load: %v, %q vs %q", err, b.Value(), a.Value())
+		}
+	})
+	cases := []struct {
+		name  string
+		setup func(path string) error
+		want  string
+	}{
+		{"too short", func(p string) error { return os.WriteFile(p, []byte("abc\n"), 0o600) }, "is not a token"},
+		{"two words", func(p string) error {
+			return os.WriteFile(p, []byte(strings.Repeat("a", 20)+" "+strings.Repeat("b", 20)), 0o600)
+		}, "is not a token"},
+		{"unreadable", func(p string) error { return os.Mkdir(p, 0o700) }, "reading dashboard token"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			dir := t.TempDir()
+			path := filepath.Join(dir, "dashboard.token")
+			if err := c.setup(path); err != nil {
+				t.Fatal(err)
+			}
+			before, _ := os.ReadFile(path)
+			if _, err := LoadDashboardToken(dir); err == nil || !strings.Contains(err.Error(), c.want) {
+				t.Fatalf("got %v, want %q", err, c.want)
+			}
+			if after, _ := os.ReadFile(path); string(after) != string(before) {
+				t.Fatal("the token file was replaced")
+			}
+		})
+	}
+}
+
+func TestOriginGuardAndNoStore(t *testing.T) {
+	tb := newTestBridge(t, "")
+	cases := []struct {
+		origin string
+		want   int
+	}{
+		{"http://127.0.0.1:8765", 200},
+		{"HTTP://LOCALHOST:8765", 200},
+		{"http://[::1]:8765", 200},
+		{"null", 403},
+		{"https://127.0.0.1:8765", 403},
+		{"http://127.0.0.1:8765.evil.example.com", 403},
+		{"http://127.0.0.1:9999", 403},
+	}
+	for _, c := range cases {
+		t.Run(c.origin, func(t *testing.T) {
+			w := tb.do("POST", "/api/brains/inspect", map[string]string{"path": "~/x"}, func(r *http.Request) { r.Header.Set("Origin", c.origin) })
+			if w.Code != c.want {
+				t.Fatalf("%d, want %d: %s", w.Code, c.want, w.Body.String())
+			}
+		})
+	}
+	// A refusal is not cached either.
+	w := tb.do("GET", "/api/status", nil, func(r *http.Request) { r.Header.Del("X-Bridge-Token") })
+	if w.Code != 401 || w.Header().Get("Cache-Control") != "no-store" {
+		t.Fatalf("%d, Cache-Control %q", w.Code, w.Header().Get("Cache-Control"))
 	}
 }

@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"crypto/subtle"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"io/fs"
 	"net"
@@ -37,17 +38,32 @@ type DashboardToken struct {
 	v    atomic.Value // string
 }
 
-// LoadDashboardToken reads <dataDir>/dashboard.token, creating it on first run.
+// minTokenLen is the shortest token file LoadDashboardToken accepts; Rotate
+// writes 48 hex digits.
+const minTokenLen = 32
+
+// LoadDashboardToken reads <dataDir>/dashboard.token, creating it on first
+// run. Only a missing file makes a new token: one that cannot be read or
+// holds something too short to be a token is an error, since quietly
+// replacing it would log out every dashboard and script that uses it, and
+// hide whatever broke the file.
 func LoadDashboardToken(dataDir string) (*DashboardToken, error) {
 	t := &DashboardToken{path: filepath.Join(dataDir, "dashboard.token")}
 	data, err := os.ReadFile(t.path)
-	if err == nil && len(strings.TrimSpace(string(data))) >= 32 {
-		t.v.Store(strings.TrimSpace(string(data)))
+	switch {
+	case errors.Is(err, fs.ErrNotExist):
+		if err := t.Rotate(); err != nil {
+			return nil, fmt.Errorf("creating dashboard token: %w", err)
+		}
 		return t, nil
+	case err != nil:
+		return nil, fmt.Errorf("reading dashboard token: %w", err)
 	}
-	if err := t.Rotate(); err != nil {
-		return nil, fmt.Errorf("creating dashboard token: %w", err)
+	tok := strings.TrimSpace(string(data))
+	if len(tok) < minTokenLen || strings.ContainsAny(tok, " \t\r\n") {
+		return nil, fmt.Errorf("dashboard token %s is not a token (delete the file and the bridge makes a new one)", t.path)
 	}
+	t.v.Store(tok)
 	return t, nil
 }
 
@@ -80,11 +96,10 @@ func dashboardURL(listen, token string) string {
 }
 
 // allowedHosts returns the Host header values that may reach the server.
+// listen has a port: validate refuses an http_listen that isLoopbackAddr
+// cannot split.
 func allowedHosts(listen string) map[string]bool {
-	_, port, err := net.SplitHostPort(listen)
-	if err != nil {
-		return map[string]bool{listen: true}
-	}
+	_, port, _ := net.SplitHostPort(listen)
 	return map[string]bool{
 		listen:              true,
 		"127.0.0.1:" + port: true,
@@ -109,9 +124,9 @@ func hostGuard(allowed map[string]bool, next http.Handler) http.Handler {
 func originGuard(allowed map[string]bool, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet && r.Method != http.MethodHead {
-			if o := r.Header.Get("Origin"); o != "" {
-				host := strings.TrimPrefix(strings.ToLower(o), "http://")
-				if !strings.HasPrefix(strings.ToLower(o), "http://") || !allowed[host] {
+			if o := strings.ToLower(r.Header.Get("Origin")); o != "" {
+				host, ok := strings.CutPrefix(o, "http://")
+				if !ok || !allowed[host] {
 					http.Error(w, "cross-site request refused", http.StatusForbidden)
 					return
 				}
@@ -131,6 +146,8 @@ func originGuard(allowed map[string]bool, next http.Handler) http.Handler {
 // header and a JSON body on writes (which a cross-site form cannot send).
 func (b *Bridge) apiGuard(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// First, so the refusals below are not cached either.
+		w.Header().Set("Cache-Control", "no-store")
 		// compat: the dashboard, and any script that calls the API, sends
 		// the token under this name.
 		if b.cfgs.Get().DashboardRequiresToken() && !b.token.Matches(r.Header.Get("X-Bridge-Token")) {
@@ -148,7 +165,6 @@ func (b *Bridge) apiGuard(next http.Handler) http.Handler {
 			}
 			r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
 		}
-		w.Header().Set("Cache-Control", "no-store")
 		next.ServeHTTP(w, r)
 	})
 }
