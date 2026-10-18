@@ -14,6 +14,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -238,15 +239,37 @@ func TestRestartNeedsSomeoneToRestart(t *testing.T) {
 // grace a bridge has outside the tests; it holds the data dir's instance
 // lock against this one.
 func TestASecondSignalStopsAtOnce(t *testing.T) {
+	for _, provider := range []string{"claude", "codex"} {
+		t.Run(provider, func(t *testing.T) { secondSignalStopsAtOnce(t, provider) })
+	}
+}
+
+func secondSignalStopsAtOnce(t *testing.T, provider string) {
+	t.Helper()
 	addr := freePort(t)
 	root, cfg := cliFixture(t, `"http_listen": "`+addr+`", "debounce": {"quiet_ms": 0}`, func(home string) []BrainRef {
 		return []BrainRef{brainFolder(t, "~/main", BrainManifest{ID: "main", Name: "Main", Routing: BrainRouting{HandlesDMs: true}})}
 	})
 	home := filepath.Join(root, "home")
+	configBytes, err := os.ReadFile(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var config map[string]any
+	if err := json.Unmarshal(configBytes, &config); err != nil {
+		t.Fatal(err)
+	}
+	config["agent_provider"] = provider
+	config["codex_path"] = filepath.Join(root, "bin", "fridolin")
+	if err := os.WriteFile(cfg, mustJSON(t, config), 0600); err != nil {
+		t.Fatal(err)
+	}
+	childLog := filepath.Join(root, "child-pid")
 	cmd := exec.Command(filepath.Join(root, "bin", "fridolin"), "--no-whatsapp", "--config", cfg)
 	cmd.Dir = root
 	cmd.Env = []string{
 		"FRIDOLIN_TEST_RUN_MAIN=1", "FRIDOLIN_FAKE_CLAUDE=1", "FRIDOLIN_FAKE_SLEEP_MS=60000",
+		"FRIDOLIN_FAKE_CHILD=1", "FRIDOLIN_FAKE_CHILD_PID_LOG=" + childLog,
 		"HOME=" + home, "PATH=/usr/bin:/bin", "GORACE=atexit_sleep_ms=0", "GOCOVERDIR=" + t.TempDir(),
 	}
 	var out lockedBuffer
@@ -305,6 +328,13 @@ func TestASecondSignalStopsAtOnce(t *testing.T) {
 		return pid > 0
 	})
 
+	var childPID int
+	waitFor(t, 5*time.Second, "the run's child", func() bool {
+		data, _ := os.ReadFile(childLog)
+		childPID, _ = strconv.Atoi(strings.TrimSpace(string(data)))
+		return childPID > 0
+	})
+	t.Cleanup(func() { _ = killProcessGroup(pid) })
 	if err := cmd.Process.Signal(syscall.SIGTERM); err != nil {
 		t.Fatal(err)
 	}
@@ -333,6 +363,7 @@ func TestASecondSignalStopsAtOnce(t *testing.T) {
 	t.Logf("exited %v after the second signal", time.Since(sent).Round(time.Millisecond))
 	// The run's process group is gone, though its 60 seconds are not.
 	waitFor(t, 5*time.Second, "the run to be killed", func() bool { return syscall.Kill(pid, 0) == syscall.ESRCH })
+	waitFor(t, 5*time.Second, "the run's child to be killed", func() bool { return syscall.Kill(childPID, 0) == syscall.ESRCH })
 }
 
 // setShutdownGrace gives the runs in flight d to finish when the test's

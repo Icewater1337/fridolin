@@ -253,6 +253,9 @@ for compatibility.
   Claude version, so a CLI planted there cannot run outside the sandbox
   during the check.
 
+- A second shutdown signal waits until each run's process supervisor has
+  acknowledged stopping its process group before the bridge exits. Merely
+  requesting cancellation could leave a Claude or Codex CLI running.
 - A site search starts Claude as brain runs do: its prompt goes on stdin
   instead of the command line, where every process listing showed it,
   only the end of what Claude writes to stderr is kept, and what the

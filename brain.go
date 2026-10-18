@@ -307,6 +307,11 @@ const (
 type brainRun struct {
 	cancel context.CancelFunc
 	done   chan struct{}
+	// processMu serialises starting a CLI with the second signal's stop.
+	// Once forceStopped is set, no process can start for this run.
+	processMu    sync.Mutex
+	process      *claudeProcess
+	forceStopped bool
 	// pid is the CLI's while it runs, and 0 once Wait has reaped it: for
 	// the dashboard, which shows it. Stopping a run takes no PID (see
 	// interruptRun).
@@ -1625,7 +1630,7 @@ func (br *Brain) invoke(run *brainRun, ctx context.Context, s *brainSettings, m 
 	// one that left the run's process group, holds the CLI's output open,
 	// and the parser gets all the CLI wrote before that.
 	stdout, stdoutW := io.Pipe()
-	proc, err := startClaude(cmdCtx, claudeRun{binary: binary, args: finalArgs, dir: br.workDir, env: env, prompt: prompt, stdout: stdoutW})
+	proc, err := run.startProcess(cmdCtx, claudeRun{binary: binary, args: finalArgs, dir: br.workDir, env: env, prompt: prompt, stdout: stdoutW})
 	if err != nil {
 		stdout.Close()
 		stdoutW.Close()
@@ -2103,6 +2108,34 @@ func (br *Brain) setRunPID(run *brainRun, pid int) {
 	br.mu.Lock()
 	run.pid = pid
 	br.mu.Unlock()
+}
+
+// startProcess publishes a started process before a force-stop can return.
+// Ordinary stops still use only context cancellation through os/exec.
+func (run *brainRun) startProcess(ctx context.Context, spec claudeRun) (*claudeProcess, error) {
+	run.processMu.Lock()
+	defer run.processMu.Unlock()
+	if run.forceStopped {
+		return nil, context.Canceled
+	}
+	proc, err := startClaude(ctx, spec)
+	if err == nil {
+		run.process = proc
+	}
+	return proc, err
+}
+
+// awaitProcessStop prevents a later start, then waits only for the supervisor
+// to acknowledge killing the process group (or finishing Wait). It does not
+// wait for output readers, hooks or reply delivery, which may be blocked.
+func (run *brainRun) awaitProcessStop() {
+	run.processMu.Lock()
+	run.forceStopped = true
+	proc := run.process
+	run.processMu.Unlock()
+	if proc != nil {
+		<-proc.stopped
+	}
 }
 
 // interruptRun stops a run by cancelling its context, on which cmd.Cancel
@@ -2681,14 +2714,23 @@ func (bm *BrainManager) StopHandOffs(jid string) (stopped bool, dropped int) {
 	return stopped, dropped
 }
 
-// KillRuns kills every brain's run in flight at once, for a second signal
-// while the bridge stops: nothing waits for the runs to end.
+// KillRuns cancels every brain's run in flight at once, for a second signal.
+// Before os.Exit it waits for each process supervisor to acknowledge the
+// kill, never for the runs' output or delivery. Cancellation alone could
+// return before os/exec's watcher had a chance to signal the process group.
 func (bm *BrainManager) KillRuns() {
+	var runs []*brainRun
 	for _, br := range bm.Brains() {
 		br.mu.Lock()
 		cur := br.current
 		br.mu.Unlock()
-		br.interruptRun(cur)
+		if cur != nil {
+			br.interruptRun(cur)
+			runs = append(runs, cur)
+		}
+	}
+	for _, run := range runs {
+		run.awaitProcessStop()
 	}
 }
 

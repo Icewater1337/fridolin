@@ -183,6 +183,10 @@ type claudeRun struct {
 type claudeProcess struct {
 	cmd    *exec.Cmd
 	stderr *tailBuffer
+	// stopped closes after the supervisor signalled the group, or Wait
+	// finished naturally. Force-exit waits for this, not for pipe copies.
+	stopped  chan struct{}
+	stopOnce sync.Once
 }
 
 // runWaitDelay is how long Wait waits, once the CLI has exited, for the
@@ -209,7 +213,12 @@ func startClaude(ctx context.Context, r claudeRun) (*claudeProcess, error) {
 	// Only the end of stderr is kept: the CLI, or something it started that
 	// holds on to its stderr, could otherwise make the bridge hold any
 	// amount of it, and only the last error is of use.
-	p := &claudeProcess{cmd: cmd, stderr: newTailBuffer(stderrTailBytes)}
+	p := &claudeProcess{cmd: cmd, stderr: newTailBuffer(stderrTailBytes), stopped: make(chan struct{})}
+	cancel := cmd.Cancel
+	cmd.Cancel = func() error {
+		defer p.acknowledgeStop()
+		return cancel()
+	}
 	cmd.Stderr = p.stderr
 	cmd.WaitDelay = runWaitDelay
 	if err := cmd.Start(); err != nil {
@@ -228,8 +237,11 @@ func (p *claudeProcess) pid() int { return p.cmd.Process.Pid }
 func (p *claudeProcess) wait() error {
 	err := p.cmd.Wait()
 	_ = killProcessGroup(p.pid())
+	p.acknowledgeStop()
 	return err
 }
+
+func (p *claudeProcess) acknowledgeStop() { p.stopOnce.Do(func() { close(p.stopped) }) }
 
 // stderrTail is the end of what the CLI wrote to stderr, without the space
 // around it.

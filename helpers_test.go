@@ -324,7 +324,11 @@ func fakeClaude() {
 		// A grandchild that inherits stdout, like a shell command Claude ran.
 		child := exec.Command("sleep", "30")
 		child.Stdout = os.Stdout
-		_ = child.Start()
+		if child.Start() == nil {
+			if path := os.Getenv("FRIDOLIN_FAKE_CHILD_PID_LOG"); path != "" {
+				_ = os.WriteFile(path, []byte(strconv.Itoa(child.Process.Pid)), 0600)
+			}
+		}
 	}
 	if holds := os.Getenv("FRIDOLIN_FAKE_SETSID_CHILD"); holds != "" {
 		// A grandchild that leaves the run's process group, as a daemon or
