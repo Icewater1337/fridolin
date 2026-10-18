@@ -6,6 +6,8 @@ import (
 	"strings"
 	"sync"
 	"testing"
+
+	"fridolin/internal/fsx"
 )
 
 // shadowingPrograms are the programs the bridge runs outside the sandbox,
@@ -56,8 +58,8 @@ func forgetTmux(t *testing.T) {
 // symlink to a folder of helperDirs; one that resolves into HOME counts as
 // under HOME, as for the sandbox.
 func TestHelperPath(t *testing.T) {
-	home := canonicalDir(t.TempDir())
-	outside := canonicalDir(t.TempDir())
+	home := fsx.Canonical(t.TempDir())
+	outside := fsx.Canonical(t.TempDir())
 	if err := os.MkdirAll(filepath.Join(home, "bin"), 0o700); err != nil {
 		t.Fatal(err)
 	}

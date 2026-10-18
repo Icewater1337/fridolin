@@ -20,6 +20,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"fridolin/internal/fsx"
 )
 
 const buildChatSuffix = "@fridolin.dashboard"
@@ -76,7 +78,7 @@ func (c *siteChats) saveLocked(brainID string, ch buildChat) error {
 		ch.Messages = ch.Messages[len(ch.Messages)-300:]
 	}
 	data, _ := json.MarshalIndent(ch, "", "  ")
-	return writeFileAtomic(p, data, 0o600, false)
+	return fsx.WriteFileAtomic(p, data, 0o600, false)
 }
 
 func (c *siteChats) get(brainID string) buildChat {

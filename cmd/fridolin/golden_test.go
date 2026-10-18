@@ -16,6 +16,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"fridolin/internal/fsx"
 )
 
 // The golden files in testdata/golden pin what the bridge says and writes
@@ -160,7 +162,7 @@ func newScrubber(root string) *scrubber {
 	if exe, err := filepath.Abs(os.Args[0]); err == nil {
 		s.addPath(exe, "<TEST_BINARY>")
 	}
-	for d := filepath.Dir(canonicalDir(root)); d != filepath.Dir(d); d = filepath.Dir(d) {
+	for d := filepath.Dir(fsx.Canonical(root)); d != filepath.Dir(d); d = filepath.Dir(d) {
 		s.above = append(s.above, d)
 	}
 	return s
@@ -169,7 +171,7 @@ func newScrubber(root string) *scrubber {
 // addPath masks path, in both spellings when it runs through a symlink
 // (/var and /private/var on macOS).
 func (s *scrubber) addPath(path, placeholder string) {
-	for _, p := range []string{filepath.Clean(path), canonicalDir(path)} {
+	for _, p := range []string{filepath.Clean(path), fsx.Canonical(path)} {
 		if !slices.ContainsFunc(s.paths, func(m pathMask) bool { return m.path == p }) {
 			s.paths = append(s.paths, pathMask{p, placeholder})
 		}
@@ -414,7 +416,7 @@ func (s *scrubber) response(t testing.TB, w *httptest.ResponseRecorder) []byte {
 }
 
 func TestScrubberJSON(t *testing.T) {
-	root := canonicalDir(t.TempDir())
+	root := fsx.Canonical(t.TempDir())
 	s := newScrubber(root).maskKeys("pid", "a.*.node")
 	tests := []struct {
 		name, in, want string
@@ -444,7 +446,7 @@ func TestScrubberAbove(t *testing.T) {
 	// The folders above the root differ between systems; once masked, the
 	// lines naming them are one per block on every system, with a count
 	// that shows whether each folder had its line.
-	root := canonicalDir(t.TempDir())
+	root := fsx.Canonical(t.TempDir())
 	s := newScrubber(root)
 	var above []string
 	for d := filepath.Dir(root); d != "/"; d = filepath.Dir(d) {
@@ -497,7 +499,7 @@ func TestScrubberAbove(t *testing.T) {
 }
 
 func TestScrubberWithLeavesTheOriginal(t *testing.T) {
-	root := canonicalDir(t.TempDir())
+	root := fsx.Canonical(t.TempDir())
 	// Room to append in place: a copy that shared the array would write
 	// its new mask into the original's.
 	s := &scrubber{paths: make([]pathMask, 0, 8), keys: map[string]bool{}}

@@ -15,6 +15,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"fridolin/internal/fsx"
 )
 
 func TestDecodeJSONIsStrict(t *testing.T) {
@@ -865,7 +867,7 @@ func TestAddBrainRechecksAgainstOtherWriters(t *testing.T) {
 	}()
 	// It scaffolds only after its first check passed; brain.json waits for
 	// the update that registers the brain.
-	waitFor(t, 5*time.Second, "the add's scaffold", func() bool { return fileExists(filepath.Join(tb.home, "b", defaultPromptFile)) })
+	waitFor(t, 5*time.Second, "the add's scaffold", func() bool { return fsx.Exists(filepath.Join(tb.home, "b", defaultPromptFile)) })
 	close(release)
 	if err := <-saved; err != nil {
 		t.Fatal(err)

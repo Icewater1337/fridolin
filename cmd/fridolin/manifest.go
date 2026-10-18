@@ -13,6 +13,8 @@ import (
 	"regexp"
 	"strings"
 	"sync"
+
+	"fridolin/internal/fsx"
 )
 
 // ManifestFile is the file that turns a folder into a brain.

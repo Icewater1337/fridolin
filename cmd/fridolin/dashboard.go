@@ -18,6 +18,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"fridolin/internal/fsx"
 	"fridolin/web"
 )
 
@@ -91,7 +92,7 @@ func (t *DashboardToken) Rotate() error {
 		return err
 	}
 	tok := hex.EncodeToString(buf)
-	if err := writeFileAtomic(t.path, []byte(tok+"\n"), 0o600, false); err != nil {
+	if err := fsx.WriteFileAtomic(t.path, []byte(tok+"\n"), 0o600, false); err != nil {
 		return err
 	}
 	t.v.Store(tok)

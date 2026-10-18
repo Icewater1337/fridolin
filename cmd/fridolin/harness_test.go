@@ -16,6 +16,7 @@ import (
 	"testing"
 	"time"
 
+	"fridolin/internal/fsx"
 	"go.mau.fi/whatsmeow/types/events"
 	waLog "go.mau.fi/whatsmeow/util/log"
 )
@@ -66,7 +67,7 @@ const (
 // the debounce off; "" or "{}" keeps the base config.
 func newHarness(t *testing.T, cfgJSON string) *harness {
 	t.Helper()
-	root := canonicalDir(t.TempDir())
+	root := fsx.Canonical(t.TempDir())
 	home := filepath.Join(root, "home")
 	if err := os.MkdirAll(home, 0o700); err != nil {
 		t.Fatal(err)

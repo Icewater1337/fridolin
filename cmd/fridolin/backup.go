@@ -23,6 +23,7 @@ import (
 	"time"
 	"unicode"
 
+	"fridolin/internal/fsx"
 	"golang.org/x/text/unicode/norm"
 )
 
@@ -254,7 +255,7 @@ func NewBackupManager(cfgs *ConfigStore, bm *BrainManager) *BackupManager {
 		if jerr := json.Unmarshal(data, &m.state); jerr != nil {
 			m.state = backupState{}
 			kept := m.statePath() + ".corrupt"
-			if werr := writeFileAtomic(kept, data, 0o600, false); werr != nil {
+			if werr := fsx.WriteFileAtomic(kept, data, 0o600, false); werr != nil {
 				kept = "not kept: " + werr.Error()
 			}
 			log.Printf("backup: %s is unreadable (%v); starting without the last results and schedule (the old file: %s)", m.statePath(), jerr, kept)
@@ -287,7 +288,7 @@ func (m *BackupManager) rcloneConf() string {
 func (m *BackupManager) saveStateLocked() {
 	data, err := json.MarshalIndent(m.state, "", "  ")
 	if err == nil {
-		err = writeFileAtomic(m.statePath(), data, 0o600, false)
+		err = fsx.WriteFileAtomic(m.statePath(), data, 0o600, false)
 	}
 	if err != nil {
 		log.Printf("backup: saving %s: %v", m.statePath(), err)
@@ -667,9 +668,9 @@ func rcloneVersion(p string, env []string) string {
 
 func rcloneInstallHint() string {
 	switch {
-	case fileExists("/opt/homebrew/bin/brew") || fileExists("/usr/local/bin/brew"):
+	case fsx.Exists("/opt/homebrew/bin/brew") || fsx.Exists("/usr/local/bin/brew"):
 		return "brew install rclone"
-	case fileExists("/usr/bin/apt-get"):
+	case fsx.Exists("/usr/bin/apt-get"):
 		return "sudo apt-get install rclone   (or: sudo -v ; curl https://rclone.org/install.sh | sudo bash)"
 	default:
 		return "See https://rclone.org/install/"
@@ -1228,7 +1229,7 @@ func (m *BackupManager) backupBrain(ctx context.Context, br *Brain, trigger stri
 	// another.
 	cfg := m.cfgs.Get()
 	filter := filepath.Join(m.dir(), "filters-"+br.ID()+".txt")
-	if err := writeFileAtomic(filter, []byte(brainFilter(s.manifest.Backup.Exclude, cfg.Backup.IncludeSecretFiles)), 0o600, false); err != nil {
+	if err := fsx.WriteFileAtomic(filter, []byte(brainFilter(s.manifest.Backup.Exclude, cfg.Backup.IncludeSecretFiles)), 0o600, false); err != nil {
 		return fail(err.Error())
 	}
 	base := backupPath(cfg.Backup, br.ID())
@@ -1801,7 +1802,7 @@ func checkRestoreTarget(target string, cfg *Config, home string) error {
 		denied = append(denied, p)
 	}
 	for _, p := range cfg.Sandbox.DenyPaths {
-		denied = append(denied, protectedPath{expandHome(p, home), true, "the deny_paths entry " + p})
+		denied = append(denied, protectedPath{fsx.ExpandHome(p, home), true, "the deny_paths entry " + p})
 	}
 	if what, ok := protectedIn(target, denied); ok {
 		return fmt.Errorf("%s, which the sandbox keeps from brains", what)
@@ -1815,8 +1816,8 @@ func checkRestoreTarget(target string, cfg *Config, home string) error {
 // It returns the folder, resolved.
 func (b *Bridge) restoreTarget(p string) (string, error) {
 	cfg := b.cfgs.Get()
-	target, problems, _ := CheckBrainPath(resolveExisting(expandHome(strings.TrimSpace(p), homeDir())), cfg, brainDirs(cfg))
-	if creds := canonicalDir(cfg.Sandbox.CredentialsDir); len(problems) == 0 && creds != "" && (isWithin(target, creds) || isWithin(creds, target)) {
+	target, problems, _ := CheckBrainPath(resolveExisting(fsx.ExpandHome(strings.TrimSpace(p), homeDir())), cfg, brainDirs(cfg))
+	if creds := fsx.Canonical(cfg.Sandbox.CredentialsDir); len(problems) == 0 && creds != "" && (fsx.Within(target, creds) || fsx.Within(creds, target)) {
 		problems = append(problems, "the credentials folder cannot be (or contain) the restore folder")
 	}
 	if len(problems) == 0 {
@@ -1831,7 +1832,7 @@ func (b *Bridge) restoreTarget(p string) (string, error) {
 	// on it. Build what is listed, made and copied into from your home
 	// folder and a part of it that stays inside, so that it is there by
 	// construction and not only by that report.
-	home := canonicalDir(homeDir())
+	home := fsx.Canonical(homeDir())
 	rel, err := filepath.Rel(home, target)
 	if err != nil || rel == "." || !filepath.IsLocal(rel) {
 		return "", errors.New("restore into a new folder inside your home folder")

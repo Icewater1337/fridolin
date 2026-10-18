@@ -13,6 +13,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"fridolin/internal/fsx"
 )
 
 // The media inbox. Attachments and transcripts arrive in the media folder
@@ -260,8 +262,8 @@ func openInbox(mediaDir, id string) (*os.Root, error) {
 // itself does not count.
 func mediaRel(mediaDir, p string) (string, bool) {
 	p = filepath.Clean(absPath(p))
-	for _, base := range []string{filepath.Clean(absPath(mediaDir)), canonicalDir(mediaDir)} {
-		if base == "" || !isWithin(p, base) {
+	for _, base := range []string{filepath.Clean(absPath(mediaDir)), fsx.Canonical(mediaDir)} {
+		if base == "" || !fsx.Within(p, base) {
 			continue
 		}
 		if rel, err := filepath.Rel(base, p); err == nil && rel != "." {
@@ -320,7 +322,7 @@ func ownInboxFile(mediaDir, id, p string) (string, error) {
 	if fi, err := inbox.Stat(inner); err != nil || !fi.Mode().IsRegular() {
 		return "", errNotInOwnInbox
 	}
-	return filepath.Join(canonicalDir(mediaDir), id, inner), nil
+	return filepath.Join(fsx.Canonical(mediaDir), id, inner), nil
 }
 
 // claimMedia moves each file in paths that lies in the media folder, but
@@ -406,7 +408,7 @@ func moveIntoInbox(media, inbox *os.Root, id, rel string) (string, error) {
 }
 
 // writeInboxFile writes data to rel inside brain id's inbox, replacing what
-// is there, and returns the file's path. Like writeFileAtomic it writes a
+// is there, and returns the file's path. Like fsx.WriteFileAtomic it writes a
 // temp file first and renames it into place, so the brain never reads half
 // a file; unlike it, every step goes through the inbox's root, because the
 // brain can replace any folder inside its inbox with a symlink.

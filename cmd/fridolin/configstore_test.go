@@ -8,6 +8,8 @@ import (
 	"slices"
 	"strings"
 	"testing"
+
+	"fridolin/internal/fsx"
 )
 
 func TestConfigStoreUpdateWritesAtomicallyAndKeepsTilde(t *testing.T) {
@@ -571,7 +573,7 @@ func TestDotEnvIsNotRead(t *testing.T) {
 			if strings.Contains(got, secret) {
 				t.Errorf("the log quotes the .env: %q", got)
 			}
-			resolved := filepath.Join(canonicalDir(filepath.Dir(dotenv)), ".env")
+			resolved := filepath.Join(fsx.Canonical(filepath.Dir(dotenv)), ".env")
 			n := strings.Count(got, dotenv+" is no longer read")
 			if resolved != dotenv {
 				n += strings.Count(got, resolved+" is no longer read")

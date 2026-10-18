@@ -13,6 +13,8 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+
+	"fridolin/internal/fsx"
 )
 
 // linkBridgeBinary links (or copies) the test binary to <root>/bin/fridolin.
@@ -62,7 +64,7 @@ func runBridgeCLI(t *testing.T, root string, args ...string) (string, int) {
 	// The sandbox profile closes the unix sockets in the temp folders; in
 	// /tmp, which is /private/tmp on macOS only, it would name them
 	// differently on each system.
-	tmp := filepath.Join(canonicalDir(root), "tmp")
+	tmp := filepath.Join(fsx.Canonical(root), "tmp")
 	if err := os.MkdirAll(tmp, 0o700); err != nil {
 		t.Fatal(err)
 	}

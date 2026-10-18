@@ -21,6 +21,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"fridolin/internal/fsx"
 )
 
 type testBridge struct {
@@ -33,7 +35,7 @@ type testBridge struct {
 // the config's JSON object.
 func newTestBridge(t *testing.T, extra string) *testBridge {
 	t.Helper()
-	home := canonicalDir(t.TempDir())
+	home := fsx.Canonical(t.TempDir())
 	t.Setenv("HOME", home)
 	claude := fakeClaudeEnv(t, 10)
 	path := writeConfig(t, `{
@@ -452,7 +454,7 @@ func TestIngestConfinedToMediaDir(t *testing.T) {
 	}
 	h.WaitFor("ingest reply", func() bool { return len(h.Outbox()) > 0 })
 	// The file moved into the brain's inbox, where its sandbox lets it read.
-	inbox := filepath.Join(canonicalDir(media), "personal", "scan.pdf")
+	inbox := filepath.Join(fsx.Canonical(media), "personal", "scan.pdf")
 	hist, _ := os.ReadFile(filepath.Join(dir, "conversation-history.jsonl"))
 	if !strings.Contains(string(hist), "[attachment: "+inbox+"]") {
 		t.Errorf("history does not record the ingested file in the inbox:\n%s", hist)

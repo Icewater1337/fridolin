@@ -21,6 +21,8 @@ import (
 	"sync"
 	"syscall"
 	"time"
+
+	"fridolin/internal/fsx"
 )
 
 // Google sign-in for calendars.
@@ -297,7 +299,7 @@ func (g *GoogleAuth) SetClient(data []byte) (*GoogleClient, error) {
 	if err != nil {
 		return nil, err
 	}
-	if err := writeFileAtomic(g.clientPath(), data, 0o600, false); err != nil {
+	if err := fsx.WriteFileAtomic(g.clientPath(), data, 0o600, false); err != nil {
 		return nil, err
 	}
 	return c, nil
@@ -462,7 +464,7 @@ func (g *GoogleAuth) HandleCallback(w http.ResponseWriter, r *http.Request) {
 		// The brain went in the meantime, say: take back what this sign-in
 		// wrote, and only that. The token it replaced goes back.
 		if oldErr == nil {
-			_ = writeFileAtomic(g.tokenPath(p.brainID), oldData, 0o600, false)
+			_ = fsx.WriteFileAtomic(g.tokenPath(p.brainID), oldData, 0o600, false)
 		} else {
 			_ = os.Remove(g.tokenPath(p.brainID))
 		}
@@ -577,7 +579,7 @@ func (tr *tokenResponse) grantedScopes(asked []string) []string {
 }
 
 // saveToken writes the brain's token. It does not follow a symlink:
-// writeFileAtomic renames a new file over the token, replacing whatever is
+// fsx.WriteFileAtomic renames a new file over the token, replacing whatever is
 // there. Older versions also copied the OAuth client, secret and all, next
 // to it as google_calendar_credentials_<brain>.json, for the calendar tool
 // in the brain; nothing reads that copy any more. The caller holds the
@@ -587,7 +589,7 @@ func (g *GoogleAuth) saveToken(brainID string, tok *googleToken) error {
 	if err != nil {
 		return err
 	}
-	return writeFileAtomic(g.tokenPath(brainID), data, 0o600, false)
+	return fsx.WriteFileAtomic(g.tokenPath(brainID), data, 0o600, false)
 }
 
 // configured reports whether brainID is one of the configured brains.
@@ -750,7 +752,7 @@ func writeTokenFields(path string, fields map[string]json.RawMessage, t *googleT
 		return err
 	}
 	// A rename: a symlink planted since the read is replaced, not followed.
-	return writeFileAtomic(path, data, 0o600, false)
+	return fsx.WriteFileAtomic(path, data, 0o600, false)
 }
 
 // CalendarEntry is one calendar of the signed-in account.

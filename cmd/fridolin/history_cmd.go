@@ -18,6 +18,8 @@ import (
 	"strings"
 	"time"
 	"unicode/utf8"
+
+	"fridolin/internal/fsx"
 )
 
 // `fridolin history` searches a brain's conversation-history.jsonl. A run
@@ -90,9 +92,9 @@ func historyCmd(args []string, t toolIO) int {
 	path := filepath.Join(t.dir, historyFileName)
 	switch home := t.getenv("HOME"); {
 	case *file != "":
-		path = expandHome(*file, home)
+		path = fsx.ExpandHome(*file, home)
 	case *brainDir != "":
-		path = filepath.Join(expandHome(*brainDir, home), historyFileName)
+		path = filepath.Join(fsx.ExpandHome(*brainDir, home), historyFileName)
 	}
 	f, err := os.Open(path)
 	if errors.Is(err, fs.ErrNotExist) {

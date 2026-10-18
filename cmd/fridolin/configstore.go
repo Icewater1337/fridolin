@@ -18,6 +18,8 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
+
+	"fridolin/internal/fsx"
 )
 
 // ConfigStore holds the configuration in two layers: what is written in
@@ -297,7 +299,7 @@ func (cs *ConfigStore) commit(etag string, mutate func(*Config, *Tx) error) (pre
 	if err := tx.write(); err != nil {
 		return prev, next, err
 	}
-	if err := writeFileAtomic(cs.path, data, 0o600, true); err != nil {
+	if err := fsx.WriteFileAtomic(cs.path, data, 0o600, true); err != nil {
 		return prev, next, err
 	}
 	committed = true

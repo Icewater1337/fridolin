@@ -16,6 +16,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"fridolin/internal/fsx"
 )
 
 // requireSiteRuntime skips a test that runs the live site without what it
@@ -27,7 +29,7 @@ func requireSiteRuntime(t *testing.T) {
 	if _, err := findNode(); err != nil {
 		t.Skip("node not installed")
 	}
-	if !fileExists(filepath.Join(repoDir, "site", "node_modules")) {
+	if !fsx.Exists(filepath.Join(repoDir, "site", "node_modules")) {
 		t.Skip("run npm install in site/ first")
 	}
 	if runtime.GOOS == "darwin" {
@@ -303,7 +305,7 @@ func TestSiteSecrets(t *testing.T) {
 	if err := m.RemoveSecret("orphan", "TOKEN"); err != nil {
 		t.Fatal(err)
 	}
-	if fileExists(m.secretsFile("orphan")) {
+	if fsx.Exists(m.secretsFile("orphan")) {
 		t.Error("an empty secrets file stays")
 	}
 	if err := m.RemoveSecret("orphan", "TOKEN"); err == nil {

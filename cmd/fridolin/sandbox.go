@@ -15,6 +15,8 @@ import (
 	"strings"
 	"sync"
 	"unicode/utf8"
+
+	"fridolin/internal/fsx"
 )
 
 // sandboxExecPath is the macOS sandbox wrapper used for brain spawns.
@@ -436,7 +438,7 @@ func (sp *SandboxProfiler) Profile(brainID string) (string, error) {
 	sort.Strings(ids)
 	for _, id := range ids {
 		for _, dir := range sp.workDirs[id] {
-			if isWithin(home, dir) || isWithin(resolvePath(home), resolvePath(dir)) {
+			if fsx.Within(home, dir) || fsx.Within(fsx.Resolve(home), fsx.Resolve(dir)) {
 				return "", fmt.Errorf("brain %s: its folder %s is your home folder or holds it, which the sandbox cannot protect; give the brain a folder of its own", id, dir)
 			}
 		}
@@ -530,7 +532,7 @@ func (sp *SandboxProfiler) Profile(brainID string) (string, error) {
 	// folder itself open to this brain and closes it to every other.
 	var innerDeny []string
 	for _, p := range sp.extraDeny {
-		if withinAny(absPath(p), own) || withinAny(resolvePath(absPath(p)), own) {
+		if withinAny(absPath(p), own) || withinAny(fsx.Resolve(absPath(p)), own) {
 			innerDeny = append(innerDeny, p)
 			continue
 		}
@@ -613,7 +615,7 @@ func (sp *SandboxProfiler) Profile(brainID string) (string, error) {
 			}
 		}
 		// Every save writes the whole config to a temp file next to it
-		// first (writeFileAtomic), which is readable until the rename.
+		// first (fsx.WriteFileAtomic), which is readable until the rename.
 		if !withinAny(sp.configFile, dataDirs) {
 			tmp := "/" + regexp.QuoteMeta("."+filepath.Base(sp.configFile)+".") + `[^/]*\.tmp$`
 			b.denyBelow("file-read*", filepath.Dir(sp.configFile), tmp)
@@ -652,7 +654,7 @@ func (sp *SandboxProfiler) Profile(brainID string) (string, error) {
 			for _, f := range instructionFiles {
 				b.deny("file-read*", "literal", filepath.Join(dir, f))
 			}
-			if resolvePath(dir) != resolvePath(home) {
+			if fsx.Resolve(dir) != fsx.Resolve(home) {
 				b.deny("file-read*", "subpath", filepath.Join(dir, ".claude"))
 			}
 		}
@@ -693,7 +695,7 @@ func (sp *SandboxProfiler) Profile(brainID string) (string, error) {
 		places = append(places, sp.state(brainID).dir)
 	}
 	for _, d := range progs.path {
-		if !slices.ContainsFunc(places, func(p string) bool { return isWithin(p, d) || isWithin(resolvePath(p), resolvePath(d)) }) {
+		if !slices.ContainsFunc(places, func(p string) bool { return fsx.Within(p, d) || fsx.Within(fsx.Resolve(p), fsx.Resolve(d)) }) {
 			b.deny("file-write*", "subpath", d)
 		}
 	}
@@ -752,7 +754,7 @@ func (sp *SandboxProfiler) Profile(brainID string) (string, error) {
 	// resolve here: the brain can change none of these folders.
 	for _, dir := range foldersAbove(places...) {
 		b.allow("file-read-metadata", "literal", dir)
-		if real := resolvePath(dir); real != dir {
+		if real := fsx.Resolve(dir); real != dir {
 			b.allow("file-read-metadata", "literal", real)
 		}
 	}
@@ -1080,7 +1082,7 @@ func (p sandboxPolicy) bridgeProgramsOf(home string) bridgePrograms {
 	}
 	path = slices.DeleteFunc(path, func(d string) bool {
 		d = filepath.Clean(d)
-		return fromPATH[d] && filepath.IsAbs(d) && (withinAny(d, p.brainDirs) || withinAny(resolvePath(d), p.brainDirs))
+		return fromPATH[d] && filepath.IsAbs(d) && (withinAny(d, p.brainDirs) || withinAny(fsx.Resolve(d), p.brainDirs))
 	})
 	path = append(path, toolFallbackDirs()...)
 	if n, err := findNode(); err == nil {
@@ -1090,14 +1092,14 @@ func (p sandboxPolicy) bridgeProgramsOf(home string) bridgePrograms {
 	}
 	for _, f := range found {
 		abs := absPath(f)
-		out.files = append(out.files, abs, resolvePath(abs))
-		if pkg := nodePackage(resolvePath(abs)); pkg != "" {
+		out.files = append(out.files, abs, fsx.Resolve(abs))
+		if pkg := nodePackage(fsx.Resolve(abs)); pkg != "" {
 			out.dirs = append(out.dirs, pkg)
 			// #!/usr/bin/env node: the bridge runs the Plaud CLI with its
 			// own folder first on PATH, everything else with its own PATH.
 			for _, pp := range []string{plaudPATH(abs), os.Getenv("PATH")} {
 				if node := lookPathIn("node", pp); node != "" {
-					out.files = append(out.files, node, resolvePath(node))
+					out.files = append(out.files, node, fsx.Resolve(node))
 				}
 			}
 		}
@@ -1121,7 +1123,7 @@ func (p sandboxPolicy) bridgeProgramsOf(home string) bridgePrograms {
 // one marked inside) lies in, by either spelling, described for an error.
 func protectedIn(dir string, protected []protectedPath) (string, bool) {
 	spell := func(p string) []string {
-		return slices.Compact([]string{filepath.Clean(absPath(p)), resolvePath(absPath(p))})
+		return slices.Compact([]string{filepath.Clean(absPath(p)), fsx.Resolve(absPath(p))})
 	}
 	for _, pp := range protected {
 		for _, d := range spell(dir) {
@@ -1129,9 +1131,9 @@ func protectedIn(dir string, protected []protectedPath) (string, bool) {
 				switch {
 				case d == p:
 					return "is " + pp.what, true
-				case isWithin(p, d):
+				case fsx.Within(p, d):
 					return "holds " + pp.what, true
-				case pp.inside && isWithin(d, p):
+				case pp.inside && fsx.Within(d, p):
 					return "is inside " + pp.what, true
 				}
 			}
@@ -1149,11 +1151,11 @@ func foldersAbove(dirs ...string) []string {
 	var out []string
 	var starts []string
 	for _, dir := range dirs {
-		starts = append(starts, absPath(dir), resolvePath(absPath(dir)))
+		starts = append(starts, absPath(dir), fsx.Resolve(absPath(dir)))
 	}
 	for _, start := range starts {
 		for d := filepath.Dir(filepath.Clean(start)); ; d = filepath.Dir(d) {
-			if real := resolvePath(d); !seen[real] {
+			if real := fsx.Resolve(d); !seen[real] {
 				seen[real] = true
 				out = append(out, d)
 			}
@@ -1213,9 +1215,9 @@ func absPath(p string) string {
 // sharedDir reports whether dir is HOME or a temp dir, or a folder above
 // one of them: a folder that holds much more than the bridge's files.
 func sharedDir(dir, home string) bool {
-	real := resolvePath(dir)
+	real := fsx.Resolve(dir)
 	for _, d := range []string{home, os.TempDir(), "/tmp"} {
-		if isWithin(resolvePath(d), real) {
+		if fsx.Within(fsx.Resolve(d), real) {
 			return true
 		}
 	}
@@ -1224,7 +1226,7 @@ func sharedDir(dir, home string) bool {
 
 // withinAny reports whether p is one of dirs or inside one.
 func withinAny(p string, dirs []string) bool {
-	return slices.ContainsFunc(dirs, func(dir string) bool { return isWithin(p, dir) })
+	return slices.ContainsFunc(dirs, func(dir string) bool { return fsx.Within(p, dir) })
 }
 
 // profileBuilder writes SBPL. Every path goes through deny or allow, so each
@@ -1261,7 +1263,7 @@ type hardWrite struct{ op, filter, path, pattern string }
 func (b *profileBuilder) rewriteHardWritesIn(dir string) {
 	dirs := b.spellings(dir, true)
 	for _, w := range b.hardWrites {
-		if !withinAny(w.path, dirs) && !withinAny(resolvePath(w.path), dirs) {
+		if !withinAny(w.path, dirs) && !withinAny(fsx.Resolve(w.path), dirs) {
 			continue
 		}
 		if w.pattern != "" {
@@ -1331,9 +1333,9 @@ func (b *profileBuilder) spellings(path string, entry bool) []string {
 	configured := filepath.Clean(p)
 	out := []string{configured}
 	if dir := filepath.Dir(configured); entry && dir != configured {
-		out = append(out, filepath.Join(resolvePath(dir), filepath.Base(configured)))
+		out = append(out, filepath.Join(fsx.Resolve(dir), filepath.Base(configured)))
 	}
-	out = append(out, resolvePath(p))
+	out = append(out, fsx.Resolve(p))
 	return slices.Compact(out)
 }
 
@@ -1451,7 +1453,7 @@ func (b *profileBuilder) trustRoot(dir string) {
 	if !ok {
 		return
 	}
-	if configured, real := filepath.Clean(p), resolvePath(p); real != configured {
+	if configured, real := filepath.Clean(p), fsx.Resolve(p); real != configured {
 		b.roots = append(b.roots, pathAlias{configured, real})
 	}
 }
@@ -1635,7 +1637,7 @@ func gitIncludes(file, home string) []string {
 		if p == "" {
 			continue
 		}
-		p = expandHome(p, home)
+		p = fsx.ExpandHome(p, home)
 		if !filepath.IsAbs(p) {
 			p = filepath.Join(filepath.Dir(file), p)
 		}

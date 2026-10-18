@@ -19,6 +19,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"fridolin/internal/fsx"
 )
 
 // newTestSite is a SiteManager in a temp data dir whose npm installs only
@@ -30,7 +32,7 @@ func newTestSite(t *testing.T) *SiteManager {
 	m := NewSiteManager(t.TempDir(), func() string { return "" })
 	m.npmInstall = func(ctx context.Context, dir string, prod bool) error {
 		src := filepath.Join(repoDir, "site", "node_modules")
-		if !fileExists(src) {
+		if !fsx.Exists(src) {
 			return nil
 		}
 		if out, err := exec.CommandContext(ctx, "cp", "-R", src, filepath.Join(dir, "node_modules")).CombinedOutput(); err != nil {
@@ -405,7 +407,7 @@ func TestSiteRepoStarterDeployAndReview(t *testing.T) {
 	if m.Settings().Approved != first {
 		t.Fatalf("approved = %q, want %s", m.Settings().Approved, first)
 	}
-	if !fileExists(filepath.Join(m.modulesDirOf(first), "welcome", "module.json")) {
+	if !fsx.Exists(filepath.Join(m.modulesDirOf(first), "welcome", "module.json")) {
 		t.Fatal("the deployed checkout has no welcome module")
 	}
 
@@ -758,7 +760,7 @@ func TestSiteDeployKeyWithGH(t *testing.T) {
 		t.Fatalf("add before connecting: %d %v", code, out)
 	}
 	pub := m.dir("deploy_key.pub")
-	if !fileExists(pub) {
+	if !fsx.Exists(pub) {
 		t.Fatal("no deploy key was made")
 	}
 	want := "repo deploy-key add " + pub + " --repo you/my-site --allow-write --title Fridolin site"

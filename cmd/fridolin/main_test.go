@@ -15,6 +15,8 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+
+	"fridolin/internal/fsx"
 )
 
 // captureStdout returns what fn prints to standard output.
@@ -250,7 +252,7 @@ func TestRunLogsConfigWarningsToTheDashboard(t *testing.T) {
 func TestRunLogNamesTheConfigFile(t *testing.T) {
 	// A log excerpt must say which config the bridge ran on, and why that
 	// one: a service passes --config, a shell may export FRIDOLIN_CONFIG.
-	home, other := canonicalDir(t.TempDir()), canonicalDir(t.TempDir())
+	home, other := fsx.Canonical(t.TempDir()), fsx.Canonical(t.TempDir())
 	t.Setenv("HOME", home)
 	tests := []struct {
 		name, flag, env string // "" means none
@@ -303,7 +305,7 @@ func TestRunLogsTheDataDir(t *testing.T) {
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			home := canonicalDir(t.TempDir())
+			home := fsx.Canonical(t.TempDir())
 			t.Setenv("HOME", home)
 			for _, d := range tc.dirs {
 				if err := os.Mkdir(filepath.Join(home, d), 0o700); err != nil {
@@ -399,7 +401,7 @@ func TestTestsDoNotRunInTheCheckout(t *testing.T) {
 	if _, err := os.Stat("go.mod"); err == nil {
 		t.Errorf("the tests run in the checkout (%s)", wd)
 	}
-	if tmp := canonicalDir(os.TempDir()); !isWithin(canonicalDir(wd), tmp) {
+	if tmp := fsx.Canonical(os.TempDir()); !fsx.Within(fsx.Canonical(wd), tmp) {
 		t.Errorf("working directory %s is not inside the temp dir %s", wd, tmp)
 	}
 	if _, err := os.Stat(filepath.Join(repoDir, "go.mod")); err != nil {
@@ -465,7 +467,7 @@ func TestTestsStartWithATempHome(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if tmp := canonicalDir(os.TempDir()); !isWithin(canonicalDir(home), tmp) {
+	if tmp := fsx.Canonical(os.TempDir()); !fsx.Within(fsx.Canonical(home), tmp) {
 		t.Errorf("home %s is not inside the temp dir %s", home, tmp)
 	}
 	if home != testHome {
@@ -527,7 +529,7 @@ func TestNewConfigsHoldTheirDataDir(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			home := canonicalDir(t.TempDir())
+			home := fsx.Canonical(t.TempDir())
 			t.Setenv("HOME", home)
 			expand := strings.NewReplacer("HOME", home).Replace
 			for _, d := range c.dirs {
@@ -634,7 +636,7 @@ func TestPaths(t *testing.T) {
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			home, other := canonicalDir(t.TempDir()), canonicalDir(t.TempDir())
+			home, other := fsx.Canonical(t.TempDir()), fsx.Canonical(t.TempDir())
 			t.Setenv("HOME", home)
 			abs := func(p string) string {
 				if rest, ok := strings.CutPrefix(p, "home/"); ok {
@@ -703,7 +705,7 @@ func TestPathsAgreesWithTheLoadedConfig(t *testing.T) {
 		{"an absolute one", "HOME/abs-data"},
 	} {
 		t.Run(c.name, func(t *testing.T) {
-			home := canonicalDir(t.TempDir())
+			home := fsx.Canonical(t.TempDir())
 			t.Setenv("HOME", home)
 			dataDir := strings.Replace(c.dataDir, "HOME", home, 1)
 			path := writeConfig(t, `{"data_dir": "`+dataDir+`"}`)
@@ -754,7 +756,7 @@ func TestCheckRedact(t *testing.T) {
 	// lines of loading the config and the sandbox profile alike; without
 	// it, it shows them as they are. The home folder has a dot in its
 	// name, which a sandbox profile's regular expressions write escaped.
-	home := filepath.Join(canonicalDir(t.TempDir()), "first.last")
+	home := filepath.Join(fsx.Canonical(t.TempDir()), "first.last")
 	if err := os.Mkdir(home, 0o700); err != nil {
 		t.Fatal(err)
 	}
@@ -807,7 +809,7 @@ func TestCheckRedact(t *testing.T) {
 		}
 		return out.String(), logs()
 	}
-	secrets := []string{home, resolvePath(home), regexp.QuoteMeta(home), owner, other, otherWritten, oddGroup, memberOnly,
+	secrets := []string{home, fsx.Resolve(home), regexp.QuoteMeta(home), owner, other, otherWritten, oddGroup, memberOnly,
 		"120363000000000001", "120363000000000002", "120363000000000003", strings.Repeat("7", 15)}
 
 	t.Run("redacted", func(t *testing.T) {
@@ -953,7 +955,7 @@ func TestCheckExitsWhenABrainCannotRun(t *testing.T) {
 		checkCmd(args)
 		os.Exit(0)
 	}
-	home := canonicalDir(t.TempDir())
+	home := fsx.Canonical(t.TempDir())
 	t.Setenv("HOME", home)
 	// No CLI to ask for its version: the fake would take the place of
 	// the test in the process check runs in.

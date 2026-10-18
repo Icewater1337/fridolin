@@ -14,6 +14,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"fridolin/internal/fsx"
 )
 
 // TestClaimMedia: a brain's files move from wherever they arrived in the
@@ -91,7 +93,7 @@ func TestClaimMedia(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			media := filepath.Join(canonicalDir(t.TempDir()), "media")
+			media := filepath.Join(fsx.Canonical(t.TempDir()), "media")
 			// Ready for inboxes, as the bridge has it before any message,
 			// so what the case puts there stays.
 			if err := retireLegacyMedia(media); err != nil {
@@ -121,7 +123,7 @@ func TestClaimMedia(t *testing.T) {
 	}
 
 	t.Run("the media folder by its real path", func(t *testing.T) {
-		root := canonicalDir(t.TempDir())
+		root := fsx.Canonical(t.TempDir())
 		real := filepath.Join(root, "real-media")
 		if err := os.MkdirAll(filepath.Join(real, incomingMediaDir), 0o700); err != nil {
 			t.Fatal(err)
@@ -173,7 +175,7 @@ func TestBrainTakesItsFilesIntoItsInbox(t *testing.T) {
 // can read; a file a script dropped there since and the bridge's own dot
 // folders stay, and so do the inboxes made after it.
 func TestLegacyMediaFoldersMoveAside(t *testing.T) {
-	media := filepath.Join(canonicalDir(t.TempDir()), "media")
+	media := filepath.Join(fsx.Canonical(t.TempDir()), "media")
 	for _, f := range []string{"plaud/2026-01-15 standup.txt", "upload/scan.pdf", "top.pdf", incomingMediaDir + "/voice.ogg", legacyMediaDir + "/upload/older.pdf"} {
 		writeTestFile(t, filepath.Join(media, f), "content of "+f)
 	}
@@ -395,7 +397,7 @@ func writeTestFile(t *testing.T, p, content string) string {
 // the new bridge never moved what the old one downloaded meanwhile. Now
 // only the bridge's start and a brain's first inbox do it.
 func TestCheckLeavesTheMediaFolderAlone(t *testing.T) {
-	home := canonicalDir(t.TempDir())
+	home := fsx.Canonical(t.TempDir())
 	t.Setenv("HOME", home)
 	path := writeConfig(t, `{
 		"brain_mode": true,
@@ -447,7 +449,7 @@ func TestLegacyMediaThatCannotMoveStays(t *testing.T) {
 	if os.Geteuid() == 0 {
 		t.Skip("root moves any folder")
 	}
-	root := canonicalDir(t.TempDir())
+	root := fsx.Canonical(t.TempDir())
 	data, media := filepath.Join(root, "data"), filepath.Join(root, "data", "media")
 	before := processStarted.Add(-time.Hour)
 	for _, f := range []string{"old.jpg", "plaud/standup.txt", "legacy/kept.txt"} {
@@ -499,7 +501,7 @@ func TestLegacyMediaThatCannotMoveStays(t *testing.T) {
 	}
 
 	t.Run("a media folder that cannot be readied", func(t *testing.T) {
-		root := canonicalDir(t.TempDir())
+		root := fsx.Canonical(t.TempDir())
 		data, media := filepath.Join(root, "data"), filepath.Join(root, "data", "media")
 		if err := os.MkdirAll(media, 0o700); err != nil {
 			t.Fatal(err)

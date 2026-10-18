@@ -12,6 +12,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"fridolin/internal/fsx"
 )
 
 // fakeService is a serviceHost whose launchctl, systemctl and HTTP calls
@@ -33,7 +35,7 @@ type fakeService struct {
 
 func newFakeService(t *testing.T, goos string) *fakeService {
 	t.Helper()
-	home := canonicalDir(t.TempDir())
+	home := fsx.Canonical(t.TempDir())
 	t.Setenv("HOME", home)
 	f := &fakeService{t: t, home: home, out: &strings.Builder{}, health: 200, clock: time.Now()}
 	f.ready = func() (int, []byte) {
@@ -319,7 +321,7 @@ func TestRenderUnitRefusesWhatItCannotHold(t *testing.T) {
 // brain folder as configured or by its real path, with what a bridge that
 // installs itself kept there.
 func TestServicePath(t *testing.T) {
-	home := canonicalDir(t.TempDir())
+	home := fsx.Canonical(t.TempDir())
 	makeFiles(t, home, "bin/", "tools/bin/", "brains/p/bin/", "brains/p/tools/", "real/q/bin/", "kept/bin/")
 	if err := os.Symlink(home+"/real/q", home+"/q"); err != nil {
 		t.Fatal(err)

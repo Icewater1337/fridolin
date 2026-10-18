@@ -33,6 +33,8 @@ import (
 	"slices"
 	"sort"
 	"strings"
+
+	"fridolin/internal/fsx"
 )
 
 // siteModuleCaps is what one module's module.json declares, as the sandbox
@@ -114,7 +116,7 @@ func readModuleCaps(modulesDir, home string) []siteModuleCaps {
 // relative path is in the module folder.
 func resolveModulePath(p, moduleDir, home string) string {
 	if p == "~" || strings.HasPrefix(p, "~/") {
-		return expandHome(p, home)
+		return fsx.ExpandHome(p, home)
 	}
 	if filepath.IsAbs(p) {
 		return filepath.Clean(p)
@@ -270,7 +272,7 @@ func siteSandboxProfile(in siteProfileInput) (string, error) {
 	if in.node != "" {
 		// Its own installation (nvm's and Homebrew's are folders of their
 		// own), or only the binary where it shares a prefix.
-		real := resolvePath(in.node)
+		real := fsx.Resolve(in.node)
 		allow("file-read*", "literal", in.node)
 		allow("file-read*", "literal", real)
 		if prefix := filepath.Dir(filepath.Dir(real)); filepath.Base(filepath.Dir(real)) == "bin" && !sharedSoftwarePrefix(prefix, in.home) {
@@ -395,7 +397,7 @@ func siteSandboxProfile(in siteProfileInput) (string, error) {
 	// what the rule protects under another name, or make the next start
 	// allow what the symlink points to.
 	b.WriteString(";; Folders above the denied paths and the declared ones: not renamable or removable\n")
-	b.pinParents(in.home, resolvePath(in.home))
+	b.pinParents(in.home, fsx.Resolve(in.home))
 	for _, mod := range in.modules {
 		for _, f := range mod.Files {
 			if f.Access != "write" || !usablePath("", "", f.Path) {
@@ -594,7 +596,7 @@ func prepareDeclaredFolders(mods []siteModuleCaps, closed func(string) bool) {
 			if !f.Folder {
 				dir = filepath.Dir(f.Path)
 			}
-			if closed(dir) || closed(resolvePath(dir)) {
+			if closed(dir) || closed(fsx.Resolve(dir)) {
 				continue
 			}
 			if !pathExists(dir) {

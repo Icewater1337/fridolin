@@ -11,6 +11,8 @@ import (
 	"slices"
 	"strings"
 	"testing"
+
+	"fridolin/internal/fsx"
 )
 
 func testManifest(id string) BrainManifest {
@@ -42,7 +44,7 @@ func TestManifestValidate(t *testing.T) {
 }
 
 func TestCheckBrainPath(t *testing.T) {
-	home := canonicalDir(t.TempDir())
+	home := fsx.Canonical(t.TempDir())
 	t.Setenv("HOME", home)
 	cfg := &Config{DataDir: filepath.Join(home, ".fridolin")}
 	others := []string{filepath.Join(home, "brains", "medical")}
@@ -78,7 +80,7 @@ func TestCheckBrainPath(t *testing.T) {
 	}
 	// A folder the dashboard is to create is checked where MkdirAll would
 	// create it: through the symlink, out of HOME.
-	if err := os.Symlink(canonicalDir(t.TempDir()), filepath.Join(home, "linked")); err != nil {
+	if err := os.Symlink(fsx.Canonical(t.TempDir()), filepath.Join(home, "linked")); err != nil {
 		t.Fatal(err)
 	}
 	for _, c := range cases {
@@ -100,7 +102,7 @@ func TestCheckBrainPath(t *testing.T) {
 // folder held: a brain at your home folder read the data dir and ~/.ssh.
 // Now each is left out with an issue, and the others still run.
 func TestResolveBrainsRefusesFoldersTheSandboxProtects(t *testing.T) {
-	home := canonicalDir(t.TempDir())
+	home := fsx.Canonical(t.TempDir())
 	t.Setenv("HOME", home)
 	if err := os.MkdirAll(filepath.Join(home, "elsewhere"), 0o700); err != nil {
 		t.Fatal(err)
@@ -127,7 +129,7 @@ func TestResolveBrainsRefusesFoldersTheSandboxProtects(t *testing.T) {
 			// names, which was the first one for these.
 			cfg := &Config{DataDir: filepath.Join(home, "box", ".fridolin"), BrainDirs: []BrainRef{other, ref}}
 			for i := range cfg.BrainDirs {
-				cfg.BrainDirs[i].Path = expandHome(cfg.BrainDirs[i].Path, home)
+				cfg.BrainDirs[i].Path = fsx.ExpandHome(cfg.BrainDirs[i].Path, home)
 			}
 			specs, issues := ResolveBrains(cfg)
 			var ids []string
@@ -153,7 +155,7 @@ func TestResolveBrainsRefusesFoldersTheSandboxProtects(t *testing.T) {
 // inHome gives back a folder below the home folder as it was, built from
 // the home folder, and refuses the home folder and everything else.
 func TestInHome(t *testing.T) {
-	home := canonicalDir(t.TempDir())
+	home := fsx.Canonical(t.TempDir())
 	t.Setenv("HOME", home)
 	cases := []struct {
 		name, path, want string
@@ -255,7 +257,7 @@ func folderBrainConfig(t *testing.T, home string, refs ...BrainRef) *Config {
 }
 
 func TestResolveBrainsUsesApprovedManifestAndReportsDrift(t *testing.T) {
-	home := canonicalDir(t.TempDir())
+	home := fsx.Canonical(t.TempDir())
 	t.Setenv("HOME", home)
 	dir := filepath.Join(home, "fam")
 	m := testManifest("fam")
@@ -286,7 +288,7 @@ func TestResolveBrainsUsesApprovedManifestAndReportsDrift(t *testing.T) {
 }
 
 func TestResolveBrainsSkipsMissingAndClashing(t *testing.T) {
-	home := canonicalDir(t.TempDir())
+	home := fsx.Canonical(t.TempDir())
 	t.Setenv("HOME", home)
 	a, b := testManifest("a"), testManifest("b")
 	a.Routing.HandlesDMs, b.Routing.HandlesDMs = true, true
@@ -340,7 +342,7 @@ func TestResolveBrainsLeavesOutBadBrains(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			home := canonicalDir(t.TempDir())
+			home := fsx.Canonical(t.TempDir())
 			t.Setenv("HOME", home)
 			first := BrainManifest{ID: "a", Name: "A", Routing: BrainRouting{HandlesDMs: true, Default: true, Groups: []string{group}}}
 			for _, d := range []string{"a", "a/b", "b"} {
@@ -594,7 +596,7 @@ func TestLeftOutBrainsKeepTheirChats(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			home := canonicalDir(t.TempDir())
+			home := fsx.Canonical(t.TempDir())
 			t.Setenv("HOME", home)
 			path := writeConfig(t, `{"brain_mode": true, "data_dir": "`+home+`/data", "claude_path": "`+home+`/no-claude", "allowed_groups": ["`+testGroup+`", "`+otherGroup+`"]`+brainDirsJSON(t, c.brains(home)...)+`}`)
 			cfg, err := LoadConfig(path)
@@ -627,7 +629,7 @@ func TestLeftOutBrainsKeepTheirChats(t *testing.T) {
 		})
 	}
 	t.Run("Plaud recordings wait", func(t *testing.T) {
-		home := canonicalDir(t.TempDir())
+		home := fsx.Canonical(t.TempDir())
 		t.Setenv("HOME", home)
 		cfg, err := LoadConfig(writeConfig(t, `{"brain_mode": true, "data_dir": "`+home+`/data", "allowed_numbers": ["15551234567"]`+brainDirsJSON(t,
 			BrainRef{Path: home + "/gone", Approved: &BrainManifest{ID: "personal", Name: "personal", Routing: BrainRouting{HandlesDMs: true}}},
@@ -644,7 +646,7 @@ func TestLeftOutBrainsKeepTheirChats(t *testing.T) {
 		}
 	})
 	t.Run("the chat is told", func(t *testing.T) {
-		brains := canonicalDir(t.TempDir())
+		brains := fsx.Canonical(t.TempDir())
 		tb := newTestBridge(t, brainDirsJSON(t,
 			BrainRef{Path: brains + "/personal", Approved: &BrainManifest{ID: "personal", Name: "personal", Routing: BrainRouting{HandlesDMs: true}}},
 			brainFolder(t, brains+"/work", BrainManifest{ID: "work", Routing: BrainRouting{Default: true}}),

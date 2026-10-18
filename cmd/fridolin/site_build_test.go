@@ -11,6 +11,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"fridolin/internal/fsx"
 )
 
 func TestBuildChatJIDs(t *testing.T) {
@@ -81,7 +83,7 @@ func TestSiteBuildChat(t *testing.T) {
 	tb.addFolderBrain(t, BrainManifest{ID: "web", Name: "Web"})
 	m := tb.site
 	link := func(ctx context.Context, dir string, _ bool) error {
-		if src := filepath.Join(repoDir, "site", "node_modules"); fileExists(src) {
+		if src := filepath.Join(repoDir, "site", "node_modules"); fsx.Exists(src) {
 			return os.Symlink(src, filepath.Join(dir, "node_modules"))
 		}
 		return nil

@@ -10,6 +10,8 @@ import (
 	"syscall"
 	"testing"
 	"time"
+
+	"fridolin/internal/fsx"
 )
 
 // The bridge reads and writes files in a brain's folder outside the
@@ -53,7 +55,7 @@ func folderBrain(t *testing.T) (*Brain, string) {
 // configuration and home.
 func brainASetup(t *testing.T) (*Config, string) {
 	t.Helper()
-	home := canonicalDir(t.TempDir())
+	home := fsx.Canonical(t.TempDir())
 	t.Setenv("HOME", home)
 	m := testManifest("a")
 	m.Routing.HandlesDMs = true
@@ -168,7 +170,7 @@ func TestBrainWhoseFolderCannotBeOpenedIsLeftOut(t *testing.T) {
 	if os.Geteuid() == 0 {
 		t.Skip("root opens any folder")
 	}
-	home := canonicalDir(t.TempDir())
+	home := fsx.Canonical(t.TempDir())
 	t.Setenv("HOME", home)
 	dirs := brainDirsJSON(t,
 		brainFolder(t, "~/a", BrainManifest{ID: "a", Routing: BrainRouting{HandlesDMs: true, Default: true}}),

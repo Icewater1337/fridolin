@@ -8,6 +8,8 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+
+	"fridolin/internal/fsx"
 )
 
 // BrainRef is one brain folder in config.json's brain_dirs. Approved is the
@@ -23,7 +25,7 @@ type BrainRef struct {
 // Dir is the brain's folder with ~ expanded, for code that works on the
 // file layer, where Path is kept as typed. The effective configuration has
 // Path expanded already.
-func (r BrainRef) Dir() string { return expandHome(r.Path, homeDir()) }
+func (r BrainRef) Dir() string { return fsx.ExpandHome(r.Path, homeDir()) }
 
 // BrainSpec is a brain ready to run.
 type BrainSpec struct {
@@ -76,7 +78,7 @@ func ResolveBrains(cfg *Config) ([]BrainSpec, []BrainIssue) {
 	var issues []BrainIssue
 
 	for i, ref := range cfg.BrainDirs {
-		dir := canonicalDir(ref.Path)
+		dir := fsx.Canonical(ref.Path)
 		if ref.Approved == nil {
 			issues = append(issues, BrainIssue{Path: ref.Path, Kind: "unapproved", Detail: "no approved manifest — remove this entry and add the folder again", entry: i})
 			continue
@@ -158,7 +160,7 @@ func ValidateBrainSet(specs []BrainSpec) error {
 			case i == j:
 			case a.Dir == b.Dir:
 				return fmt.Errorf("brains %q and %q use the same folder %s", a.Manifest.ID, b.Manifest.ID, a.Dir)
-			case isWithin(b.Dir, a.Dir):
+			case fsx.Within(b.Dir, a.Dir):
 				return fmt.Errorf("brain folder %s is inside brain folder %s", b.Dir, a.Dir)
 			}
 		}
@@ -170,14 +172,14 @@ func ValidateBrainSet(specs []BrainSpec) error {
 // warnings are shown but allowed.
 func CheckBrainPath(path string, cfg *Config, otherDirs []string) (abs string, problems, warnings []string) {
 	home := homeDir()
-	abs = canonicalDir(expandHome(strings.TrimSpace(path), home))
+	abs = fsx.Canonical(fsx.ExpandHome(strings.TrimSpace(path), home))
 	if !filepath.IsAbs(abs) {
 		return abs, []string{"enter an absolute path (or one starting with ~/)"}, nil
 	}
 	switch {
-	case abs == "/" || abs == canonicalDir(home):
+	case abs == "/" || abs == fsx.Canonical(home):
 		problems = append(problems, "a brain cannot be your whole home folder — pick or create a folder for it")
-	case !isWithin(abs, canonicalDir(home)):
+	case !fsx.Within(abs, fsx.Canonical(home)):
 		problems = append(problems, "brain folders must be inside your home folder")
 	default:
 		if err := checkBrainDir(abs, abs, cfg, home); err != nil {
@@ -185,20 +187,20 @@ func CheckBrainPath(path string, cfg *Config, otherDirs []string) (abs string, p
 		}
 	}
 	for _, o := range otherDirs {
-		o = canonicalDir(o)
+		o = fsx.Canonical(o)
 		switch {
 		case o == abs:
 			problems = append(problems, "this folder is already a brain")
-		case isWithin(abs, o):
+		case fsx.Within(abs, o):
 			problems = append(problems, "this folder is inside another brain ("+o+")")
-		case isWithin(o, abs):
+		case fsx.Within(o, abs):
 			problems = append(problems, "this folder contains another brain ("+o+")")
 		}
 	}
 	// The sandbox opens a brain's own folder wherever it is, but macOS
 	// itself guards these folders (privacy settings), also from the bridge.
 	for _, sub := range []string{"Documents", "Desktop", "Downloads"} {
-		if isWithin(abs, filepath.Join(canonicalDir(home), sub)) {
+		if fsx.Within(abs, filepath.Join(fsx.Canonical(home), sub)) {
 			warnings = append(warnings, "macOS protects ~/"+sub+": the bridge (and so this brain) can work there only while it has your permission under System Settings → Privacy & Security → Files and Folders (or Full Disk Access), which a service started at login may not have")
 		}
 	}
@@ -222,7 +224,7 @@ func checkBrainDir(dir, configured string, cfg *Config, home string) error {
 	p := sandboxPolicyOf(cfg)
 	for _, d := range []string{dir, configured} {
 		if d != "" {
-			p.brainDirs = append(p.brainDirs, d, canonicalDir(d))
+			p.brainDirs = append(p.brainDirs, d, fsx.Canonical(d))
 		}
 	}
 	protected := p.protected(home, ownLayout())
@@ -230,7 +232,7 @@ func checkBrainDir(dir, configured string, cfg *Config, home string) error {
 		if d == "" {
 			continue
 		}
-		if isWithin(home, d) || isWithin(canonicalDir(home), canonicalDir(d)) {
+		if fsx.Within(home, d) || fsx.Within(fsx.Canonical(home), fsx.Canonical(d)) {
 			return errors.New("is your home folder or holds it")
 		}
 		if what, ok := protectedIn(d, protected); ok {
@@ -247,7 +249,7 @@ func checkBrainDir(dir, configured string, cfg *Config, home string) error {
 // built this way, inside the home folder by construction. ok is false for
 // the home folder itself and for anything outside it.
 func inHome(p string) (string, bool) {
-	home := canonicalDir(homeDir())
+	home := fsx.Canonical(homeDir())
 	rel, err := filepath.Rel(home, p)
 	if home == "" || err != nil || rel == "." || !filepath.IsLocal(rel) {
 		return "", false

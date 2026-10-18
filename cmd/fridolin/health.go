@@ -7,6 +7,8 @@ import (
 	"slices"
 	"strings"
 	"time"
+
+	"fridolin/internal/fsx"
 )
 
 // The startup checks: files the assistant's tools need, configured in
@@ -23,7 +25,7 @@ const requiredFilesEvery = 5 * time.Minute
 func missingFiles(cfg *Config) []string {
 	var missing []string
 	for _, f := range cfg.StartupChecks.RequiredFiles {
-		if !fileExists(f) {
+		if !fsx.Exists(f) {
 			missing = append(missing, f)
 		}
 	}

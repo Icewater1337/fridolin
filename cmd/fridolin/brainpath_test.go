@@ -10,6 +10,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"fridolin/internal/fsx"
 )
 
 // TestSetBridgePATH: your shell's PATH may name a folder inside a brain's
@@ -22,7 +24,7 @@ import (
 // was removed, which stays out of the bridge's. The service file's
 // folders, kept out of PATH already, are logged with where they go.
 func TestSetBridgePATH(t *testing.T) {
-	home := canonicalDir(t.TempDir())
+	home := fsx.Canonical(t.TempDir())
 	t.Setenv("HOME", home)
 	for _, d := range []string{"real/q", "assistant/personal/bin", "assistant/personal/tools", "new/bin"} {
 		if err := os.MkdirAll(filepath.Join(home, d), 0o700); err != nil {
@@ -117,7 +119,7 @@ func TestSetBridgePATH(t *testing.T) {
 // the programs there first on PATH, while the bridge's own PATH and every
 // other brain's run lack it.
 func TestBrainRunsGetTheirOwnPATHFolders(t *testing.T) {
-	home := canonicalDir(t.TempDir())
+	home := fsx.Canonical(t.TempDir())
 	t.Setenv("HOME", home)
 	if err := os.MkdirAll(home+"/assistant/personal/bin", 0o700); err != nil {
 		t.Fatal(err)
@@ -172,7 +174,7 @@ func TestBrainRunsGetTheirOwnPATHFolders(t *testing.T) {
 // brain invalid and left it out, so DMs went to the default brain. It now
 // lists the brain with no issue, and prints its profile.
 func TestCheckRunsABrainWhoseFolderHoldsAPATHFolder(t *testing.T) {
-	home := canonicalDir(t.TempDir())
+	home := fsx.Canonical(t.TempDir())
 	t.Setenv("HOME", home)
 	if err := os.MkdirAll(home+"/assistant/personal/bin", 0o700); err != nil {
 		t.Fatal(err)

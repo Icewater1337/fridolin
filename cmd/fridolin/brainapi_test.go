@@ -13,6 +13,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"fridolin/internal/fsx"
 )
 
 const (
@@ -240,7 +242,7 @@ func TestRunTokenStaysOutOfTheEnvironment(t *testing.T) {
 // nothing else. One that cannot start, since another bridge holds the data
 // dir, leaves them alone: they are that bridge's runs'.
 func TestBridgePrunesStaleRunTokens(t *testing.T) {
-	home := canonicalDir(t.TempDir())
+	home := fsx.Canonical(t.TempDir())
 	t.Setenv("HOME", home)
 	data := filepath.Join(home, "data")
 	cfgs, err := OpenConfigStore(writeConfig(t, `{"data_dir": "`+data+`", "http_listen": "off"}`))

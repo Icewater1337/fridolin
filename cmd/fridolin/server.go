@@ -14,6 +14,7 @@ import (
 	"strings"
 	"time"
 
+	"fridolin/internal/fsx"
 	"go.mau.fi/whatsmeow/types"
 )
 
@@ -293,7 +294,7 @@ func (b *Bridge) httpIngest(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	media := canonicalDir(cfg.MediaDir)
+	media := fsx.Canonical(cfg.MediaDir)
 	var paths []string
 	for _, p := range req.Paths {
 		// A brain writes no part of the media folder but its own inbox, so
@@ -316,7 +317,7 @@ func (b *Bridge) httpIngest(w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 		resolved, err := filepath.EvalSymlinks(p)
-		if !filepath.IsAbs(p) || err != nil || !isWithin(resolved, media) {
+		if !filepath.IsAbs(p) || err != nil || !fsx.Within(resolved, media) {
 			writeErr(w, http.StatusBadRequest, "every path must be an existing file inside the media directory")
 			return
 		}

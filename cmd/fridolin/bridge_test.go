@@ -14,6 +14,8 @@ import (
 	"time"
 	"unicode"
 	"unicode/utf8"
+
+	"fridolin/internal/fsx"
 )
 
 // ── triggers ──────────────────────────────────────────────────────────────
@@ -293,7 +295,7 @@ func TestProtectDataDirMakesExistingDataDirPrivate(t *testing.T) {
 		{"relative path", 0o755, true, true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			home := canonicalDir(t.TempDir())
+			home := fsx.Canonical(t.TempDir())
 			t.Setenv("HOME", home)
 			data := filepath.Join(home, "data")
 			mkdirMode(t, data, tc.mode)
@@ -338,7 +340,7 @@ func TestProtectDataDirLeavesHomeAlone(t *testing.T) {
 		{"parent of home as relative path", func(_, _ string) string { return ".." }, 0o755, true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			root := canonicalDir(t.TempDir())
+			root := fsx.Canonical(t.TempDir())
 			home := filepath.Join(root, "home")
 			mkdirMode(t, home, tc.mode)
 			if err := os.Chmod(root, tc.mode); err != nil {
@@ -472,7 +474,7 @@ func TestProtectDataDirLeavesOtherUsersFolderAlone(t *testing.T) {
 func TestNewBridgeMakesDataDirPrivate(t *testing.T) {
 	// protectDataDir does not run on config loads, so starting the bridge
 	// is what must call it.
-	home := canonicalDir(t.TempDir())
+	home := fsx.Canonical(t.TempDir())
 	t.Setenv("HOME", home)
 	data := filepath.Join(home, "data")
 	mkdirMode(t, data, 0o755)

@@ -13,6 +13,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"fridolin/internal/fsx"
 )
 
 // ingestCalls records what the site handed to brains.
@@ -129,14 +131,14 @@ func TestSiteSpoolHandoff(t *testing.T) {
 			t.Errorf("%s: %v, want an error with %q", filepath.Base(dir), a, want)
 		}
 	}
-	if fileExists(filepath.Join(stray, "result.json")) {
+	if fsx.Exists(filepath.Join(stray, "result.json")) {
 		t.Error("a folder ctx.ingest did not make was answered")
 	}
-	if !fileExists(filepath.Join(secretDir, "id_ed25519")) || fileExists(filepath.Join(media, "id_ed25519")) {
+	if !fsx.Exists(filepath.Join(secretDir, "id_ed25519")) || fsx.Exists(filepath.Join(media, "id_ed25519")) {
 		t.Error("a file outside the spool was taken through a symlinked files folder")
 	}
 	// A refused file stays where it was.
-	if !fileExists(filepath.Join(wrongBrain, "files", "a.txt")) {
+	if !fsx.Exists(filepath.Join(wrongBrain, "files", "a.txt")) {
 		t.Error("a refused file was moved")
 	}
 
@@ -144,10 +146,10 @@ func TestSiteSpoolHandoff(t *testing.T) {
 	old := time.Now().Add(-11 * time.Minute)
 	os.Chtimes(filepath.Join(ok, "result.json"), old, old)
 	m.processSpool(context.Background())
-	if fileExists(ok) {
+	if fsx.Exists(ok) {
 		t.Error("an old answered request was kept")
 	}
-	if !fileExists(wrongBrain) {
+	if !fsx.Exists(wrongBrain) {
 		t.Error("a recent answered request was removed")
 	}
 }
@@ -297,7 +299,7 @@ func TestSiteSpoolSearch(t *testing.T) {
 	m.processSpool(ctx)
 	m.processSpool(ctx) // a second look starts nothing twice
 	waitFor(t, 5*time.Second, "the searches to answer", func() bool {
-		return fileExists(filepath.Join(ok, "result.json")) && fileExists(filepath.Join(other, "result.json")) && fileExists(filepath.Join(planted, "result.json"))
+		return fsx.Exists(filepath.Join(ok, "result.json")) && fsx.Exists(filepath.Join(other, "result.json")) && fsx.Exists(filepath.Join(planted, "result.json"))
 	})
 	if a := readSpoolAnswer(t, ok); a["ok"] != true {
 		t.Fatalf("the search failed: %v", a)
@@ -315,7 +317,7 @@ func TestSiteSpoolSearch(t *testing.T) {
 		t.Errorf("the symlink's target was written: %q", data)
 	}
 	os.WriteFile(filepath.Join(slow, "cancel"), nil, 0o600)
-	waitFor(t, 5*time.Second, "the cancelled search to answer", func() bool { return fileExists(filepath.Join(slow, "result.json")) })
+	waitFor(t, 5*time.Second, "the cancelled search to answer", func() bool { return fsx.Exists(filepath.Join(slow, "result.json")) })
 	if a := readSpoolAnswer(t, slow); a["ok"] != false || a["error"] != "stopped" {
 		t.Errorf("cancelled: %v", a)
 	}

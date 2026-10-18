@@ -14,6 +14,8 @@ import (
 	"sort"
 	"sync"
 	"time"
+
+	"fridolin/internal/fsx"
 )
 
 // Dashboard sign-ins.
@@ -220,5 +222,5 @@ func (s *dashSessions) saveLocked() error {
 	if err != nil {
 		return err
 	}
-	return writeFileAtomic(s.path, append(data, '\n'), 0o600, false)
+	return fsx.WriteFileAtomic(s.path, append(data, '\n'), 0o600, false)
 }

@@ -7,6 +7,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"fridolin/internal/fsx"
 )
 
 // useLayout makes the bridge believe its own files are laid out as l.
@@ -38,7 +40,7 @@ func makeFiles(t *testing.T, root string, paths ...string) {
 }
 
 func TestLayoutOf(t *testing.T) {
-	root := canonicalDir(t.TempDir())
+	root := fsx.Canonical(t.TempDir())
 	makeFiles(t, root,
 		"src/fridolin/go.mod", "src/fridolin/tools/poll_results.py", "src/fridolin/fridolin", "src/fridolin/bin/fridolin",
 		"lib/fridolin/fridolin", "lib/fridolin/tools/poll_results.py",
@@ -117,7 +119,7 @@ func TestBrainRunsKnowWhereTheToolsAre(t *testing.T) {
 // make check runs outside the sandbox, and one inside the install folder a
 // tool the bridge runs. Both used to be only a warning.
 func TestCheckBrainPathRefusesTheBridgesOwnFolders(t *testing.T) {
-	home := canonicalDir(t.TempDir())
+	home := fsx.Canonical(t.TempDir())
 	t.Setenv("HOME", home)
 	src, lib := home+"/src/fridolin", home+"/.local/lib/fridolin"
 	cfg := &Config{DataDir: home + "/.fridolin"}
@@ -154,7 +156,7 @@ func TestCheckBrainPathRefusesTheBridgesOwnFolders(t *testing.T) {
 func TestSandboxProfileProtectsTheBridgesOwnFiles(t *testing.T) {
 	// launchd runs the bridge outside the sandbox, and setup.sh in the
 	// checkout builds what it runs next: a brain must not write either.
-	home := canonicalDir(t.TempDir())
+	home := fsx.Canonical(t.TempDir())
 	t.Setenv("HOME", home)
 	makeFiles(t, home,
 		"src/fridolin/go.mod", "src/fridolin/tools/poll_results.py", "src/fridolin/fridolin", "src/fridolin/bin/fridolin",

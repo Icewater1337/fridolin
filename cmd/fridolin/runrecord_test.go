@@ -14,6 +14,8 @@ import (
 	"syscall"
 	"testing"
 	"time"
+
+	"fridolin/internal/fsx"
 )
 
 // groupOf starts script under sh in a process group of its own, as a run's
@@ -152,7 +154,7 @@ func TestBridgeReapsWhenItStarts(t *testing.T) {
 	if _, err := bootID(); err != nil {
 		t.Skip("no boot id on this system:", err)
 	}
-	home := canonicalDir(t.TempDir())
+	home := fsx.Canonical(t.TempDir())
 	t.Setenv("HOME", home)
 	data := filepath.Join(home, "data")
 	cmd, pids := groupOf(t, `sleep 60 & echo $!; wait`, 1)

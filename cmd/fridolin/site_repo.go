@@ -29,6 +29,7 @@ import (
 	"sync"
 	"time"
 
+	"fridolin/internal/fsx"
 	"fridolin/site"
 )
 
@@ -58,7 +59,7 @@ func (m *SiteManager) git(ctx context.Context, dir string, args ...string) (stri
 	cmd := exec.CommandContext(ctx, "git", full...)
 	cmd.Dir = dir
 	cmd.Env = append(gitEnv(os.Environ()), "GIT_TERMINAL_PROMPT=0", "GIT_ASKPASS=/bin/false")
-	if key := m.dir("deploy_key"); fileExists(key) {
+	if key := m.dir("deploy_key"); fsx.Exists(key) {
 		cmd.Env = append(cmd.Env, "GIT_SSH_COMMAND="+fmt.Sprintf(
 			"ssh -i %s -o IdentitiesOnly=yes -o BatchMode=yes -o StrictHostKeyChecking=accept-new -o UserKnownHostsFile=%s",
 			shellQuote(key), shellQuote(m.dir("known_hosts"))))
@@ -97,7 +98,7 @@ func shellQuote(s string) string { return "'" + strings.ReplaceAll(s, "'", `'\''
 // DeployKey returns the public deploy key, creating the key pair on first use.
 func (m *SiteManager) DeployKey(ctx context.Context) (string, error) {
 	priv := m.dir("deploy_key")
-	if !fileExists(priv) {
+	if !fsx.Exists(priv) {
 		if err := os.MkdirAll(m.dir(), 0o700); err != nil {
 			return "", err
 		}
@@ -135,7 +136,7 @@ func githubRepo(u string) string {
 func (m *SiteManager) AddDeployKeyWithGH(ctx context.Context, addr string) (string, error) {
 	addr = strings.TrimSpace(addr)
 	u := m.Settings().Repo.URL
-	if fileExists(m.repoDir()) {
+	if fsx.Exists(m.repoDir()) {
 		if addr != "" && addr != u {
 			return "", errors.New("another repository is connected; disconnect it first")
 		}
@@ -225,7 +226,7 @@ func (m *SiteManager) ConnectRepo(ctx context.Context, r SiteRepo) error {
 	m.mu.Lock()
 	cur := m.settings.Repo
 	m.mu.Unlock()
-	if fileExists(m.repoDir()) {
+	if fsx.Exists(m.repoDir()) {
 		if cur.URL != r.URL {
 			return errors.New("another repository is connected; disconnect it first")
 		}
@@ -256,7 +257,7 @@ func (m *SiteManager) DisconnectRepo() error {
 	if enabled {
 		return errors.New("turn the site off first")
 	}
-	if fileExists(m.repoDir()) {
+	if fsx.Exists(m.repoDir()) {
 		aside := m.dir(fmt.Sprintf("repo.disconnected-%s", time.Now().Format("20060102-150405")))
 		if err := os.Rename(m.repoDir(), aside); err != nil {
 			return err
@@ -274,7 +275,7 @@ func (m *SiteManager) DisconnectRepo() error {
 // empty repository or one without a modules folder yet.
 func (m *SiteManager) AddStarter(ctx context.Context) error {
 	s := m.Settings()
-	if !fileExists(m.repoDir()) {
+	if !fsx.Exists(m.repoDir()) {
 		return errors.New("connect a repository first")
 	}
 	if _, err := m.Fetch(ctx); err != nil {
@@ -307,7 +308,7 @@ func (m *SiteManager) AddStarter(ctx context.Context) error {
 		}
 	}
 	root := filepath.Join(work, filepath.FromSlash(s.Repo.Subdir))
-	if fileExists(filepath.Join(root, "modules")) {
+	if fsx.Exists(filepath.Join(root, "modules")) {
 		return errors.New("the repository already has a modules folder")
 	}
 	if err := copyEmbedded(site.FS, "template", root); err != nil {
@@ -382,7 +383,7 @@ type ReviewItem struct {
 // Fetch updates the clone and reports what the branch has beyond the approved commit.
 func (m *SiteManager) Fetch(ctx context.Context) (SiteUpdates, error) {
 	s := m.Settings()
-	if !fileExists(m.repoDir()) {
+	if !fsx.Exists(m.repoDir()) {
 		return SiteUpdates{}, errors.New("no repository connected")
 	}
 	if _, err := m.git(ctx, m.repoDir(), "fetch", "--prune", "origin"); err != nil {
@@ -582,7 +583,7 @@ func (m *SiteManager) Deploy(ctx context.Context, commit string) error {
 		return errors.New("name a commit by its full id")
 	}
 	s := m.Settings()
-	if !fileExists(m.repoDir()) {
+	if !fsx.Exists(m.repoDir()) {
 		return errors.New("no repository connected")
 	}
 	known := slices.ContainsFunc(s.History, func(d SiteDeploy) bool { return d.Commit == commit })
@@ -645,11 +646,11 @@ func (m *SiteManager) runDeploy(ctx context.Context, job *siteJob, commit string
 // builds its modules. A folder from an earlier deploy of the same commit is reused.
 func (m *SiteManager) prepareCheckout(ctx context.Context, job *siteJob, commit, dir string) error {
 	ready := filepath.Join(dir, ".fridolin-ready")
-	if fileExists(ready) {
+	if fsx.Exists(ready) {
 		job.step("Reusing the build of %s", commit[:12])
 		return nil
 	}
-	if fileExists(dir) {
+	if fsx.Exists(dir) {
 		_, _ = m.git(ctx, m.repoDir(), "worktree", "remove", "--force", dir)
 	}
 	job.step("Checking out %s", commit[:12])
@@ -657,7 +658,7 @@ func (m *SiteManager) prepareCheckout(ctx context.Context, job *siteJob, commit,
 		return err
 	}
 	root := filepath.Join(dir, filepath.FromSlash(m.Settings().Repo.Subdir))
-	if fileExists(filepath.Join(root, "package.json")) {
+	if fsx.Exists(filepath.Join(root, "package.json")) {
 		job.step("Installing dependencies (npm)")
 		if err := m.npmInstall(ctx, root, false); err != nil {
 			return err
@@ -696,7 +697,7 @@ func (m *SiteManager) prepareCheckout(ctx context.Context, job *siteJob, commit,
 // is the home folder, a relative path is inside the module folder).
 func (m *SiteManager) runBuild(ctx context.Context, moduleDir, cwd string, run []string) error {
 	dir := moduleDir
-	switch cwd = expandHome(cwd, homeDir()); {
+	switch cwd = fsx.ExpandHome(cwd, homeDir()); {
 	case filepath.IsAbs(cwd):
 		dir = cwd
 	case cwd != "":

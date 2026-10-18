@@ -11,6 +11,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"fridolin/internal/fsx"
 )
 
 // TestSandboxFailsClosed: with the sandbox on, a run whose sandbox cannot be
@@ -73,7 +75,7 @@ func TestSandboxFailsClosed(t *testing.T) {
 			}
 			waitFor(t, 10*time.Second, "the second run", func() bool { return d.count() == 2 })
 			// The viewer starts in the background.
-			waitFor(t, 10*time.Second, "the viewer to start", func() bool { return fileExists(tmuxCalls) })
+			waitFor(t, 10*time.Second, "the viewer to start", func() bool { return fsx.Exists(tmuxCalls) })
 		})
 	}
 }
@@ -227,7 +229,7 @@ func TestSandboxProfileRefusesUnquotablePaths(t *testing.T) {
 // credentials dir and a deny path all reached through symlinks, the profile
 // carries each rule for the configured and for the real path.
 func TestSandboxProfileCoversRealPaths(t *testing.T) {
-	root := canonicalDir(t.TempDir())
+	root := fsx.Canonical(t.TempDir())
 	realHome := filepath.Join(root, "home-real")
 	home := filepath.Join(root, "home")
 	for _, d := range []string{"home-real", "elsewhere/data", "elsewhere/creds", "elsewhere/clients", "elsewhere/ssh"} {
@@ -277,7 +279,7 @@ func TestSandboxProfileCoversRealPaths(t *testing.T) {
 // only HOME and the data, credentials and media dirs, never such a
 // symlink, or the brain would be allowed into its target.
 func TestSandboxAllowsDoNotFollowSymlinks(t *testing.T) {
-	root := canonicalDir(t.TempDir())
+	root := fsx.Canonical(t.TempDir())
 	home := filepath.Join(root, "home")
 	secret := filepath.Join(root, "secret")
 	for _, d := range []string{"home-real/.fridolin/media", "home-real/Documents", "secret"} {
@@ -381,7 +383,7 @@ func TestSandboxConfigRejectsUnusablePaths(t *testing.T) {
 // target alone does not cover. Read rules leave the link alone, because
 // following it reads it, and that would block what is allowed behind it.
 func TestSandboxDeniesEverySpelling(t *testing.T) {
-	root := canonicalDir(t.TempDir())
+	root := fsx.Canonical(t.TempDir())
 	home := filepath.Join(root, "home")
 	for _, d := range []string{"home", "dotfiles/config", "vault/gh", "vault/git"} {
 		if err := os.MkdirAll(filepath.Join(root, d), 0o700); err != nil {
@@ -429,7 +431,7 @@ func TestSandboxDeniesEverySpelling(t *testing.T) {
 // default deny on the way (~/Documents, say) won, and lost the denies on
 // the CLAUDE.md and .claude above the real folders of every brain.
 func TestSandboxProfileCoversBrainFoldersBothWays(t *testing.T) {
-	root := canonicalDir(t.TempDir())
+	root := fsx.Canonical(t.TempDir())
 	home := filepath.Join(root, "home")
 	volume := filepath.Join(root, "volume", "assistant") // ~/assistant
 	other := filepath.Join(root, "other", "ext")         // ~/ext
@@ -502,7 +504,7 @@ func TestSandboxProfileCoversBrainFoldersBothWays(t *testing.T) {
 // other brains' profiles must still deny it, which the folder as
 // configured no longer gives.
 func TestSandboxProfileCoversTheFolderABrainRunsIn(t *testing.T) {
-	root := canonicalDir(t.TempDir())
+	root := fsx.Canonical(t.TempDir())
 	home := filepath.Join(root, "home")
 	volume := filepath.Join(root, "volume", "assistant") // ~/assistant when loaded
 	moved := filepath.Join(root, "moved", "assistant")   // ~/assistant after
@@ -569,10 +571,10 @@ func TestSandboxProfileCoversTheFolderABrainRunsIn(t *testing.T) {
 // brain's own folder is its own. inherit_claude_user_config drops all of it
 // again.
 func TestSandboxProfileDeniesInstructionsAboveBrains(t *testing.T) {
-	root := canonicalDir(t.TempDir())
+	root := fsx.Canonical(t.TempDir())
 	home := filepath.Join(root, "home")
-	outside := canonicalDir(t.TempDir()) // a sibling of root, not inside it
-	vol := canonicalDir(t.TempDir())     // where ~/linked really is
+	outside := fsx.Canonical(t.TempDir()) // a sibling of root, not inside it
+	vol := fsx.Canonical(t.TempDir())     // where ~/linked really is
 	for _, d := range []string{home + "/assistant/a", home + "/assistant/b", outside + "/brains/d", vol + "/brains/l"} {
 		if err := os.MkdirAll(d, 0o700); err != nil {
 			t.Fatal(err)
@@ -651,7 +653,7 @@ func sbplRegex(p string) string {
 // allow it must be written again: the last matching rule wins, so leaving
 // it out there would let the allow open the path.
 func TestSandboxProfileWritesEachDenyOnce(t *testing.T) {
-	home := canonicalDir(t.TempDir())
+	home := fsx.Canonical(t.TempDir())
 	t.Run("no deny twice between allows", func(t *testing.T) {
 		sp, home, _ := precedenceFixture(t, false)
 		// ~/.gitconfig is a protected path and part of the git config.
@@ -761,9 +763,9 @@ func TestBrowserProfilesDenyEveryChannel(t *testing.T) {
 // moved to ~/.fridolin can leave the old ~/.whatsapp-claude-bridge behind
 // with older copies of the same keys and tokens.
 func TestSandboxProfileDeniesBridgeSecrets(t *testing.T) {
-	home := canonicalDir(t.TempDir())
+	home := fsx.Canonical(t.TempDir())
 	t.Setenv("HOME", home)
-	tmp := canonicalDir(os.TempDir())
+	tmp := fsx.Canonical(os.TempDir())
 	both := func(filter, p string) []string {
 		return []string{`(deny file-read* (` + filter + ` "` + p + `"))`, `(deny file-write* (` + filter + ` "` + p + `"))`}
 	}
@@ -823,7 +825,7 @@ func TestSandboxProfileDeniesBridgeSecrets(t *testing.T) {
 	// denied like any other, relative to that directory, not to "/".
 	for _, db := range []string{"wa/bridge.db", "bridge.db"} {
 		t.Run("relative db_path "+db, func(t *testing.T) {
-			wd := canonicalDir(t.TempDir())
+			wd := fsx.Canonical(t.TempDir())
 			t.Chdir(wd)
 			cfg := &Config{DataDir: home + "/.fridolin", DBPath: db}
 			lines := strings.Split(mustProfile(t, NewSandboxProfiler(map[string][]string{"a": {home + "/a"}}, cfg), "a"), "\n")
@@ -843,7 +845,7 @@ func TestSandboxProfileDeniesBridgeSecrets(t *testing.T) {
 // the dashboard token. Inside the data dir the data dir deny covers them
 // already.
 func TestSandboxProfileDeniesTheConfigFile(t *testing.T) {
-	home := canonicalDir(t.TempDir())
+	home := fsx.Canonical(t.TempDir())
 	t.Setenv("HOME", home)
 	wd, err := os.Getwd()
 	if err != nil {
@@ -870,7 +872,7 @@ func TestSandboxProfileDeniesTheConfigFile(t *testing.T) {
 					}
 				}
 			}
-			// The temp file writeFileAtomic saves through, .config.json.*.tmp.
+			// The temp file fsx.WriteFileAtomic saves through, .config.json.*.tmp.
 			for _, op := range []string{"file-read*", "file-write*"} {
 				rule := `(deny ` + op + ` (regex "^` + sbplRegex(dir) + `/\\.config\\.json\\.[^/]*\\.tmp$"))`
 				if got := slices.Contains(lines, rule); got != tc.want {
@@ -903,7 +905,7 @@ func TestBridgeTellsTheSandboxItsConfigFile(t *testing.T) {
 // the real file was neither protected nor hidden. ~/.config/git/config
 // counts as well.
 func TestGitConfigChain(t *testing.T) {
-	home := canonicalDir(t.TempDir())
+	home := fsx.Canonical(t.TempDir())
 	files := map[string]string{
 		".gitconfig": "[user]\n\tname = You\n" +
 			"[include]\n\tpath = .gitconfig-extra ; a comment\n" +
@@ -932,7 +934,7 @@ func TestGitConfigChain(t *testing.T) {
 	}
 
 	t.Run("depth", func(t *testing.T) {
-		home := canonicalDir(t.TempDir())
+		home := fsx.Canonical(t.TempDir())
 		writeTestFile(t, filepath.Join(home, ".gitconfig"), "[include]\npath = c1\n")
 		for i := 1; i <= maxGitIncludeDepth+3; i++ {
 			writeTestFile(t, filepath.Join(home, fmt.Sprintf("c%d", i)), fmt.Sprintf("[include]\npath = c%d\n", i+1))
@@ -971,7 +973,7 @@ func TestGitConfigValue(t *testing.T) {
 // "deny" used to write-protect nothing. git's credential file in
 // ~/.config/git is unreadable in both.
 func TestSandboxGitConfigModes(t *testing.T) {
-	home := canonicalDir(t.TempDir())
+	home := fsx.Canonical(t.TempDir())
 	t.Setenv("HOME", home)
 	writeTestFile(t, filepath.Join(home, ".gitconfig"), "[include]\n\tpath = .gitconfig-extra ; local settings\n")
 	for _, mode := range []string{"read", "deny"} {
@@ -1004,7 +1006,7 @@ func TestSandboxGitConfigModes(t *testing.T) {
 // that happens to cover the data dir, the credentials dir, the database or
 // the folder that holds the brains opens none of it.
 func TestSandboxAllowPathsCannotOpenBridgeSecrets(t *testing.T) {
-	home := canonicalDir(t.TempDir())
+	home := fsx.Canonical(t.TempDir())
 	t.Setenv("HOME", home)
 	cfg := &Config{
 		DataDir: home + "/.fridolin",
@@ -1056,7 +1058,7 @@ func profileRules(profile string) []string {
 // the data dir.
 func precedenceFixture(t *testing.T, inherit bool) (sp *SandboxProfiler, home, own string) {
 	t.Helper()
-	home = canonicalDir(t.TempDir())
+	home = fsx.Canonical(t.TempDir())
 	t.Setenv("HOME", home)
 	own = home + "/assistant/a"
 	cfg := &Config{
@@ -1275,7 +1277,7 @@ func bridgeProgramsFixture(t *testing.T, home string) *Config {
 // brain's own folder (HOME on PATH) is left to the default deny, or the
 // brain could not write its own folder.
 func TestSandboxProfileProtectsTheBridgesPrograms(t *testing.T) {
-	home := canonicalDir(t.TempDir())
+	home := fsx.Canonical(t.TempDir())
 	cfg := bridgeProgramsFixture(t, home)
 	own := home + "/a"
 	sp := NewSandboxProfiler(map[string][]string{"a": {own}}, cfg)
@@ -1335,7 +1337,7 @@ func TestSandboxProfileProtectsTheBridgesPrograms(t *testing.T) {
 // again. Their denies now come again after that allow; those outside the
 // config dir do not, the profile goes inline on every run.
 func TestSandboxProfileKeepsProgramsInASharedClaudeDir(t *testing.T) {
-	home := canonicalDir(t.TempDir())
+	home := fsx.Canonical(t.TempDir())
 	cfg := bridgeProgramsFixture(t, home)
 	local := home + "/.claude/local"
 	if err := os.MkdirAll(local, 0o700); err != nil {
@@ -1384,7 +1386,7 @@ func TestSandboxProfileKeepsProgramsInASharedClaudeDir(t *testing.T) {
 // any more, which used to be refused: the bridge runs nothing from it once
 // the folder is a brain's (see setBridgePATH).
 func TestSandboxRefusesBrainFoldersHoldingItsPrograms(t *testing.T) {
-	home := canonicalDir(t.TempDir())
+	home := fsx.Canonical(t.TempDir())
 	cfg := bridgeProgramsFixture(t, home)
 	nvm := home + "/.nvm/versions/node/v22.0.0"
 	cases := []struct{ name, dir, want string }{
@@ -1478,7 +1480,7 @@ func TestSandboxProfileKeepsYourClaudeSetup(t *testing.T) {
 // would open that. Both are refused rather than run with less protection,
 // except a folder that is a deny_paths entry: that keeps it from the others.
 func TestSandboxRefusesBrainFoldersItCannotProtect(t *testing.T) {
-	root := canonicalDir(t.TempDir())
+	root := fsx.Canonical(t.TempDir())
 	home := root + "/home"
 	t.Setenv("HOME", home)
 	cases := []struct {
@@ -1557,7 +1559,7 @@ func TestViewerClosesWithItsBrain(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			home := canonicalDir(t.TempDir())
+			home := fsx.Canonical(t.TempDir())
 			t.Setenv("HOME", home)
 			calls := fakeTmux(t)
 			cfg, err := LoadConfig(writeConfig(t, `{

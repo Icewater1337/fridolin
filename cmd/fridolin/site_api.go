@@ -11,6 +11,8 @@ import (
 	"os"
 	"slices"
 	"strings"
+
+	"fridolin/internal/fsx"
 )
 
 func (b *Bridge) siteAPI(mux *http.ServeMux) {
@@ -70,9 +72,9 @@ func (b *Bridge) apiSiteStatus(w http.ResponseWriter, r *http.Request) {
 	if s.Domain != "" {
 		resp["public_url"] = "https://" + s.Domain + "/"
 	}
-	resp["tunnel"] = map[string]any{"process": m.tunnel.status(), "token_saved": fileExists(m.dir("tunnel.token"))}
+	resp["tunnel"] = map[string]any{"process": m.tunnel.status(), "token_saved": fsx.Exists(m.dir("tunnel.token"))}
 
-	repo := map[string]any{"connected": fileExists(m.repoDir()), "github": githubRepo(s.Repo.URL)}
+	repo := map[string]any{"connected": fsx.Exists(m.repoDir()), "github": githubRepo(s.Repo.URL)}
 	resp["repo"] = repo
 	if pub, err := os.ReadFile(m.dir("deploy_key.pub")); err == nil {
 		resp["deploy_key"] = strings.TrimSpace(string(pub))

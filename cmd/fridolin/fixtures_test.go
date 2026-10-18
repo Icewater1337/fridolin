@@ -17,6 +17,7 @@ import (
 	"strings"
 	"testing"
 
+	"fridolin/internal/fsx"
 	"go.mau.fi/whatsmeow/proto/waAdv"
 	"go.mau.fi/whatsmeow/types"
 )
@@ -46,7 +47,7 @@ func fixture(t testing.TB, name string) []byte {
 // fixtures, whose paths start with ~, expect it.
 func fixtureHome(t *testing.T) (root, home string) {
 	t.Helper()
-	root = canonicalDir(t.TempDir())
+	root = fsx.Canonical(t.TempDir())
 	home = filepath.Join(root, "home")
 	if err := os.MkdirAll(home, 0o700); err != nil {
 		t.Fatal(err)

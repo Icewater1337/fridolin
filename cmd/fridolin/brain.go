@@ -22,6 +22,8 @@ import (
 	"syscall"
 	"time"
 	"unicode"
+
+	"fridolin/internal/fsx"
 )
 
 // historyEntry is one line in a brain's conversation-history.jsonl file.
@@ -1261,7 +1263,7 @@ func excludeInstructionsAbove(dir string) string {
 func instructionsAbove(dir, home string) []string {
 	var folders []string
 	seen := map[string]bool{}
-	for _, start := range []string{absPath(dir), resolvePath(absPath(dir))} {
+	for _, start := range []string{absPath(dir), fsx.Resolve(absPath(dir))} {
 		for d := filepath.Dir(filepath.Clean(start)); ; d = filepath.Dir(d) {
 			if !seen[d] {
 				seen[d] = true
@@ -1284,7 +1286,7 @@ func instructionsAbove(dir, home string) []string {
 		patterns(d, inDotClaude...)
 	}
 	if filepath.IsAbs(home) {
-		for _, h := range []string{home, resolvePath(home)} {
+		for _, h := range []string{home, fsx.Resolve(home)} {
 			if !seen[h] {
 				seen[h] = true
 				patterns(h, inDotClaude...)

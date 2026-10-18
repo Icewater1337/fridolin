@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"fridolin/internal/fsx"
 )
 
 // fakeBridgeScript stands in for the build setup.sh makes: it answers
@@ -134,7 +136,7 @@ func (h *setupHarness) withOptional() string {
 // as $TMPDIR.
 func (h *setupHarness) run(t *testing.T, home string, args, env []string) (out string, exit int, calls string) {
 	t.Helper()
-	tmp := canonicalDir(t.TempDir())
+	tmp := fsx.Canonical(t.TempDir())
 	log := filepath.Join(t.TempDir(), "calls")
 	cmd := exec.Command(h.bash, append([]string{filepath.Join(h.repo, "setup.sh")}, args...)...)
 	cmd.Env = append([]string{"HOME=" + home, "PATH=" + h.bin, "TMPDIR=" + tmp, "FAKE_LOG=" + log, "FAKE_BRIDGE=" + h.bridge}, env...)
@@ -210,7 +212,7 @@ func TestSetupSaysWhatHappened(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			home := canonicalDir(t.TempDir())
+			home := fsx.Canonical(t.TempDir())
 			if c.oldBuild {
 				makeFiles(t, home, ".local/lib/fridolin/fridolin")
 			}
@@ -262,7 +264,7 @@ func TestSetupBuildsAndTestsWithTheMakefile(t *testing.T) {
 		t.Run(c.name, func(t *testing.T) {
 			// An exported VERSION is some other software's: the build gets
 			// the checkout's.
-			out, exit, calls := h.run(t, canonicalDir(t.TempDir()), c.args, []string{"VERSION=9.9-not-ours"})
+			out, exit, calls := h.run(t, fsx.Canonical(t.TempDir()), c.args, []string{"VERSION=9.9-not-ours"})
 			if exit != 0 {
 				t.Fatalf("setup.sh exited %d:\n%s", exit, out)
 			}
@@ -298,7 +300,7 @@ func TestSetupBuildsAndTestsWithTheMakefile(t *testing.T) {
 				}
 			}
 		}
-		out, exit, calls := h.run(t, canonicalDir(t.TempDir()), []string{"--no-service"}, []string{"PATH=" + noMake})
+		out, exit, calls := h.run(t, fsx.Canonical(t.TempDir()), []string{"--no-service"}, []string{"PATH=" + noMake})
 		if exit != 1 || !strings.Contains(out, "make is not installed") {
 			t.Errorf("setup.sh exited %d, want 1 and a word about make:\n%s", exit, out)
 		}
@@ -376,7 +378,7 @@ func TestSetupTakesItsFoldersFromFridolinVariables(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			home := canonicalDir(t.TempDir())
+			home := fsx.Canonical(t.TempDir())
 			expand := strings.NewReplacer("$HOME", home, "$REPO", h.repo).Replace
 			if len(c.files) > 0 {
 				makeFiles(t, home, c.files...)

@@ -10,6 +10,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"fridolin/internal/fsx"
 )
 
 func TestChildGets(t *testing.T) {
@@ -321,7 +323,7 @@ func TestOnlyEnvRefusesParallelTests(t *testing.T) {
 // the fake CLI needs. It returns the environment the CLI got, and HOME.
 func brainRunEnv(t *testing.T, env map[string]string, config string) (map[string]string, string) {
 	t.Helper()
-	home := canonicalDir(t.TempDir())
+	home := fsx.Canonical(t.TempDir())
 	envLog := filepath.Join(t.TempDir(), "brain.env")
 	all := maps.Clone(env)
 	maps.Copy(all, map[string]string{"HOME": home, "FRIDOLIN_FAKE_CLAUDE": "1", "FRIDOLIN_FAKE_ENV_LOG": envLog})
@@ -377,7 +379,7 @@ func brainRunEnv(t *testing.T, env map[string]string, config string) (map[string
 func TestPrepareBrainState(t *testing.T) {
 	for _, inherit := range []bool{false, true} {
 		t.Run(fmt.Sprintf("inherit_claude_user_config=%v", inherit), func(t *testing.T) {
-			data := canonicalDir(t.TempDir())
+			data := fsx.Canonical(t.TempDir())
 			env, err := prepareBrainState(data, data+"/media", "a", inherit)
 			if err != nil {
 				t.Fatal(err)
@@ -405,7 +407,7 @@ func TestPrepareBrainState(t *testing.T) {
 		})
 	}
 	t.Run("a state folder that is a symlink", func(t *testing.T) {
-		data := canonicalDir(t.TempDir())
+		data := fsx.Canonical(t.TempDir())
 		state := data + "/brains/a"
 		if err := os.MkdirAll(state, 0o700); err != nil {
 			t.Fatal(err)

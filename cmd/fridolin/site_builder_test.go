@@ -10,6 +10,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"fridolin/internal/fsx"
 )
 
 // newTestBuilderSite is a test site whose one brain, "web", has a folder
@@ -51,7 +53,7 @@ func TestSiteBuilderFlow(t *testing.T) {
 	if _, err := findNode(); err != nil {
 		t.Skip("node not installed")
 	}
-	if !fileExists(filepath.Join(repoDir, "site", "node_modules")) {
+	if !fsx.Exists(filepath.Join(repoDir, "site", "node_modules")) {
 		t.Skip("run npm install in site/ first")
 	}
 	ctx, cancel := context.WithCancel(context.Background())
@@ -87,7 +89,7 @@ func TestSiteBuilderFlow(t *testing.T) {
 	}
 	base := filepath.Join(brainDir, ".fridolin-site")
 	for _, f := range []string{"plugin/.claude-plugin/plugin.json", "plugin/skills/site-builder/SKILL.md", "mcp.json", "shell/server/check.ts", "workspace/modules/welcome/module.json"} {
-		if !fileExists(filepath.Join(base, f)) {
+		if !fsx.Exists(filepath.Join(base, f)) {
 			t.Errorf("%s is missing", f)
 		}
 	}
@@ -237,7 +239,7 @@ export default (ctx) => express.Router().get('/note', (_req, res) => res.json({ 
 	if m.Settings().Approved != head || len(m.Settings().Proposals) != 0 {
 		t.Errorf("after merging: approved %s, main %s, proposals %v", m.Settings().Approved, head, m.Settings().Proposals)
 	}
-	if !fileExists(filepath.Join(m.modulesDirOf(head), "team", "module.json")) {
+	if !fsx.Exists(filepath.Join(m.modulesDirOf(head), "team", "module.json")) {
 		t.Error("the merged module is not deployed")
 	}
 
@@ -261,7 +263,7 @@ export default (ctx) => express.Router().get('/note', (_req, res) => res.json({ 
 	if m.brainForToken(token) != "" || m.BuilderArgs("web") != nil || m.previewOf("web") != nil {
 		t.Error("a former builder still has access")
 	}
-	if !fileExists(filepath.Join(ws, "modules", "team")) {
+	if !fsx.Exists(filepath.Join(ws, "modules", "team")) {
 		t.Error("the workspace was removed")
 	}
 }

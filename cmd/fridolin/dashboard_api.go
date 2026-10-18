@@ -27,6 +27,7 @@ import (
 	"unicode"
 	"unicode/utf8"
 
+	"fridolin/internal/fsx"
 	"rsc.io/qr"
 )
 
@@ -261,7 +262,7 @@ func (b *Bridge) apiStatus(w http.ResponseWriter, r *http.Request) {
 		}
 		if os.Getenv("CODEX_API_KEY") == "" {
 			for _, br := range b.brainMgr.Brains() {
-				if !fileExists(filepath.Join(brainStateOf(cfg.DataDir, br.id).codex, "auth.json")) {
+				if !fsx.Exists(filepath.Join(brainStateOf(cfg.DataDir, br.id).codex, "auth.json")) {
 					resp.Warnings = append(resp.Warnings, "Sign Codex in for brain "+br.id+" from Terminal: "+codexLoginHint(cfg.DataDir, br.id))
 				}
 			}
@@ -903,7 +904,7 @@ func (b *Bridge) brainViews() []brainView {
 	for _, is := range b.brainIssues(cfg) {
 		// One found at load is about the entry it had then; skip it if the
 		// entries changed since.
-		if is.atLoad && (is.entry >= len(cfg.BrainDirs) || canonicalDir(cfg.BrainDirs[is.entry].Path) != canonicalDir(is.Path)) {
+		if is.atLoad && (is.entry >= len(cfg.BrainDirs) || fsx.Canonical(cfg.BrainDirs[is.entry].Path) != fsx.Canonical(is.Path)) {
 			continue
 		}
 		byEntry[is.entry] = append(byEntry[is.entry], is)
@@ -915,7 +916,7 @@ func (b *Bridge) brainViews() []brainView {
 		if ref.Approved != nil {
 			v.ID, v.Name = ref.Approved.ID, ref.Approved.Name
 		}
-		if disk, err := ReadManifest(canonicalDir(ref.Path)); err == nil && (ref.Approved == nil || !disk.Equal(*ref.Approved)) {
+		if disk, err := ReadManifest(fsx.Canonical(ref.Path)); err == nil && (ref.Approved == nil || !disk.Equal(*ref.Approved)) {
 			v.Disk = disk
 		}
 		out = append(out, v)
@@ -927,7 +928,7 @@ func (b *Bridge) brainViews() []brainView {
 				out[i].Status = is.Kind
 			}
 		}
-		if br := b.brainMgr.Get(out[i].ID); br != nil && canonicalDir(br.Dir()) == canonicalDir(out[i].Path) {
+		if br := b.brainMgr.Get(out[i].ID); br != nil && fsx.Canonical(br.Dir()) == fsx.Canonical(out[i].Path) {
 			rt := br.Snapshot()
 			out[i].Runtime = &rt
 			out[i].Fallback = br == fallback
@@ -991,7 +992,7 @@ func (b *Bridge) apiInspectFolder(w http.ResponseWriter, r *http.Request) {
 	resp["exists"] = err == nil
 	resp["is_dir"] = err == nil && st.IsDir()
 	if err == nil && st.IsDir() {
-		root, err := os.OpenRoot(canonicalDir(homeDir()))
+		root, err := os.OpenRoot(fsx.Canonical(homeDir()))
 		if err != nil {
 			writeErr(w, http.StatusBadRequest, err.Error())
 			return
@@ -1164,7 +1165,7 @@ func (b *Bridge) apiAddBrain(w http.ResponseWriter, r *http.Request) {
 			writesManifest = true
 		}
 		approved := m
-		c.BrainDirs = append(c.BrainDirs, BrainRef{Path: tildePath(abs, homeDir()), Approved: &approved})
+		c.BrainDirs = append(c.BrainDirs, BrainRef{Path: fsx.Tilde(abs, homeDir()), Approved: &approved})
 		return nil
 	}); err != nil {
 		scaffold.rollback()
@@ -1338,10 +1339,10 @@ func (b *Bridge) apiRemoveBrainDir(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, "path required")
 		return
 	}
-	want := canonicalDir(expandHome(path, homeDir()))
+	want := fsx.Canonical(fsx.ExpandHome(path, homeDir()))
 	_, err := b.cfgs.Update("", func(c *Config) error {
 		for i, ref := range c.BrainDirs {
-			if ref.Approved == nil && canonicalDir(ref.Dir()) == want {
+			if ref.Approved == nil && fsx.Canonical(ref.Dir()) == want {
 				c.BrainDirs = slices.Delete(c.BrainDirs, i, i+1)
 				return nil
 			}
@@ -1467,13 +1468,13 @@ func textTail(s string, n int) string {
 // apiFSList lists folders inside your home folder, for the in-dashboard
 // folder browser. The bridge's data folder is hidden.
 func (b *Bridge) apiFSList(w http.ResponseWriter, r *http.Request) {
-	home := canonicalDir(homeDir())
+	home := fsx.Canonical(homeDir())
 	p := r.URL.Query().Get("path")
 	if p == "" {
 		p = home
 	}
-	p = canonicalDir(expandHome(p, home))
-	if !isWithin(p, home) {
+	p = fsx.Canonical(fsx.ExpandHome(p, home))
+	if !fsx.Within(p, home) {
 		writeErr(w, http.StatusForbidden, "only folders inside your home folder can be browsed")
 		return
 	}
@@ -1500,7 +1501,7 @@ func (b *Bridge) apiFSList(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	data := canonicalDir(b.cfgs.Get().DataDir)
+	data := fsx.Canonical(b.cfgs.Get().DataDir)
 	type entry struct {
 		Name    string `json:"name"`
 		Path    string `json:"path"`
@@ -1519,8 +1520,8 @@ func (b *Bridge) apiFSList(w http.ResponseWriter, r *http.Request) {
 		// Checking the parent is not enough: a child may be a symlink out
 		// of home. Resolve it before probing its type or marker files, then
 		// use the home root so a subsequent symlink swap cannot escape.
-		resolved := canonicalDir(full)
-		if !isWithin(resolved, home) || resolved == data {
+		resolved := fsx.Canonical(full)
+		if !fsx.Within(resolved, home) || resolved == data {
 			continue
 		}
 		child, err := filepath.Rel(home, resolved)
@@ -1544,7 +1545,7 @@ func (b *Bridge) apiFSList(w http.ResponseWriter, r *http.Request) {
 // absolute symlink to another allowed location works too; Root.Stat keeps
 // a later symlink replacement from redirecting the probe outside the root.
 func fileExistsInRoot(root *os.Root, p string) bool {
-	rel, err := filepath.Rel(root.Name(), canonicalDir(p))
+	rel, err := filepath.Rel(root.Name(), fsx.Canonical(p))
 	if err != nil || (rel != "." && !filepath.IsLocal(rel)) {
 		return false
 	}

@@ -12,6 +12,8 @@ import (
 	"slices"
 	"strings"
 	"testing"
+
+	"fridolin/internal/fsx"
 )
 
 // The route classes, by what guards a route.
@@ -201,7 +203,7 @@ var handlerPatternRE = regexp.MustCompile(`\.Handle(?:Func)?\("((?:[A-Z]+ )?/[^"
 // that mux's guards.
 func TestRouteInventoryIsComplete(t *testing.T) {
 	root := repoDir
-	for !fileExists(filepath.Join(root, "go.mod")) {
+	for !fsx.Exists(filepath.Join(root, "go.mod")) {
 		if filepath.Dir(root) == root {
 			t.Fatal("no go.mod above the package")
 		}

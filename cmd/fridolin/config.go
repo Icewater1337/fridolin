@@ -13,6 +13,8 @@ import (
 	"strings"
 	"syscall"
 	"time"
+
+	"fridolin/internal/fsx"
 )
 
 // Config holds all configuration for the bridge.
@@ -634,7 +636,7 @@ func resolveDataDir(value, home string) (dir, source string) {
 	if dir == "" {
 		dir = defaultDataDir(home)
 	}
-	dir = expandHome(dir, home)
+	dir = fsx.ExpandHome(dir, home)
 	return dir, dataDirSource(value, dir, home)
 }
 
@@ -668,14 +670,14 @@ func effective(file *Config) (*Config, error) {
 	if cfg.ClaudePath == "" {
 		cfg.ClaudePath = "claude"
 	}
-	cfg.ClaudePath = expandHome(cfg.ClaudePath, home)
+	cfg.ClaudePath = fsx.ExpandHome(cfg.ClaudePath, home)
 	if cfg.AgentProvider == "" {
 		cfg.AgentProvider = "claude"
 	}
 	if cfg.CodexPath == "" {
 		cfg.CodexPath = "codex"
 	}
-	cfg.CodexPath = expandHome(cfg.CodexPath, home)
+	cfg.CodexPath = fsx.ExpandHome(cfg.CodexPath, home)
 	if cfg.CodexModel == "" {
 		cfg.CodexModel = defaultCodexModel
 	}
@@ -689,8 +691,8 @@ func effective(file *Config) (*Config, error) {
 	if cfg.MediaDir == "" {
 		cfg.MediaDir = filepath.Join(cfg.DataDir, "media")
 	}
-	cfg.DBPath = expandHome(cfg.DBPath, home)
-	cfg.MediaDir = expandHome(cfg.MediaDir, home)
+	cfg.DBPath = fsx.ExpandHome(cfg.DBPath, home)
+	cfg.MediaDir = fsx.ExpandHome(cfg.MediaDir, home)
 	if cfg.MaxChunkSize == 0 {
 		cfg.MaxChunkSize = defaultChunkSize
 	}
@@ -751,7 +753,7 @@ func effective(file *Config) (*Config, error) {
 	if cfg.Sandbox.GitConfig == "" {
 		cfg.Sandbox.GitConfig = "read"
 	}
-	cfg.Sandbox.CredentialsDir = expandHome(cfg.Sandbox.CredentialsDir, home)
+	cfg.Sandbox.CredentialsDir = fsx.ExpandHome(cfg.Sandbox.CredentialsDir, home)
 	if cfg.Backup.Remote == "" {
 		cfg.Backup.Remote = defaultBackupRemote
 	}
@@ -765,24 +767,24 @@ func effective(file *Config) (*Config, error) {
 		n := defaultKeepVersions
 		cfg.Backup.KeepVersionsDays = &n
 	}
-	cfg.Backup.RclonePath = expandHome(cfg.Backup.RclonePath, home)
-	cfg.Plaud.PhoneDir = expandHome(cfg.Plaud.PhoneDir, home)
+	cfg.Backup.RclonePath = fsx.ExpandHome(cfg.Backup.RclonePath, home)
+	cfg.Plaud.PhoneDir = fsx.ExpandHome(cfg.Plaud.PhoneDir, home)
 
 	// Compared with senders as digits, however they were typed into the
 	// file. The dashboard writes them so; a hand edit may not have.
 	cfg.AllowedNumbers = allowedNumbersAsNumbers(cfg.AllowedNumbers)
 	cfg.GroupMembers = groupMembersAsNumbers(cfg.GroupMembers)
 	for i := range cfg.BrainDirs {
-		cfg.BrainDirs[i].Path = expandHome(cfg.BrainDirs[i].Path, home)
+		cfg.BrainDirs[i].Path = fsx.ExpandHome(cfg.BrainDirs[i].Path, home)
 	}
 	for i := range cfg.Sandbox.DenyPaths {
-		cfg.Sandbox.DenyPaths[i] = expandHome(cfg.Sandbox.DenyPaths[i], home)
+		cfg.Sandbox.DenyPaths[i] = fsx.ExpandHome(cfg.Sandbox.DenyPaths[i], home)
 	}
 	for i := range cfg.Sandbox.AllowPaths {
-		cfg.Sandbox.AllowPaths[i] = expandHome(cfg.Sandbox.AllowPaths[i], home)
+		cfg.Sandbox.AllowPaths[i] = fsx.ExpandHome(cfg.Sandbox.AllowPaths[i], home)
 	}
 	for i := range cfg.StartupChecks.RequiredFiles {
-		cfg.StartupChecks.RequiredFiles[i] = expandHome(cfg.StartupChecks.RequiredFiles[i], home)
+		cfg.StartupChecks.RequiredFiles[i] = fsx.ExpandHome(cfg.StartupChecks.RequiredFiles[i], home)
 	}
 
 	if err := cfg.validate(); err != nil {
@@ -827,13 +829,13 @@ func (c *Config) EnsureDirs() error {
 // working bridge from starting.
 func protectDataDir(cfg *Config) {
 	// Compare absolute, resolved paths: a relative data_dir such as "."
-	// depends on the folder the bridge was started from, and isWithin cannot
+	// depends on the folder the bridge was started from, and fsx.Within cannot
 	// relate it to the home folder, so it would get past the home check.
 	dataDir := absPath(cfg.DataDir)
 	dbDir := absPath(filepath.Dir(cfg.DBPath))
 	home := homeDir()
 	homeOrAbove := func(dir string) bool {
-		return home != "" && isWithin(canonicalDir(home), canonicalDir(dir))
+		return home != "" && fsx.Within(fsx.Canonical(home), fsx.Canonical(dir))
 	}
 
 	mode, open := openToOthers(dataDir)
@@ -852,7 +854,7 @@ func protectDataDir(cfg *Config) {
 		}
 	}
 
-	if !isWithin(canonicalDir(dbDir), canonicalDir(dataDir)) {
+	if !fsx.Within(fsx.Canonical(dbDir), fsx.Canonical(dataDir)) {
 		if mode, open := openToOthers(dbDir); open {
 			// Not for the home folder: making it 0700 is what the data dir
 			// rule above avoids.

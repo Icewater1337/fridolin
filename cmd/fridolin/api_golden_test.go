@@ -8,6 +8,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"fridolin/internal/fsx"
 )
 
 // fakeRclone writes a stand-in for rclone into dir and returns its path.
@@ -53,7 +55,7 @@ const goldenClientJSON = `{"installed":{"client_id":"123-abc.apps.googleusercont
 // the folder with the fake rclone and its calls.log.
 func goldenBridge(t *testing.T) (h *harness, s *scrubber, fakes string) {
 	t.Helper()
-	fakes = canonicalDir(t.TempDir())
+	fakes = fsx.Canonical(t.TempDir())
 	rclone := fakeRclone(t, fakes)
 	newFakePlaud(t)
 	h = newHarness(t, `{

@@ -36,6 +36,7 @@ import (
 	"sync"
 	"time"
 
+	"fridolin/internal/fsx"
 	"fridolin/site"
 )
 
@@ -174,7 +175,7 @@ func (m *SiteManager) loadSettings() SiteSettings {
 
 func (m *SiteManager) saveSettingsLocked() error {
 	data, _ := json.MarshalIndent(m.settings, "", "  ")
-	return writeFileAtomic(m.dir("settings.json"), append(data, '\n'), 0o600, true)
+	return fsx.WriteFileAtomic(m.dir("settings.json"), append(data, '\n'), 0o600, true)
 }
 
 // Settings returns a copy of the current settings.
@@ -241,7 +242,7 @@ func (m *SiteManager) UpdateSettings(u SiteSettingsUpdate) (SiteSettings, error)
 	}
 	if u.Tunnel != nil {
 		next.Tunnel = *u.Tunnel
-		if next.Tunnel && !fileExists(m.dir("tunnel.token")) {
+		if next.Tunnel && !fsx.Exists(m.dir("tunnel.token")) {
 			m.mu.Unlock()
 			return SiteSettings{}, errors.New("save a Cloudflare tunnel token first")
 		}
@@ -308,7 +309,7 @@ func (m *SiteManager) loadUsers() []SiteUser {
 
 func (m *SiteManager) saveUsersLocked() error {
 	data, _ := json.MarshalIndent(map[string]any{"version": 1, "users": m.users}, "", "  ")
-	return writeFileAtomic(m.dir("users.json"), append(data, '\n'), 0o600, true)
+	return fsx.WriteFileAtomic(m.dir("users.json"), append(data, '\n'), 0o600, true)
 }
 
 // Users returns the accounts without their password hashes.
@@ -617,7 +618,7 @@ type siteRuntime struct {
 // saving or removing the site's own client restarts the site; the site reads
 // the file at each sign-in, so a changed shared client needs no restart.
 func (m *SiteManager) googleClientFile() string {
-	if p := m.dir("google_client.json"); fileExists(p) {
+	if p := m.dir("google_client.json"); fsx.Exists(p) {
 		return p
 	}
 	if m.googleClient != nil {
@@ -628,14 +629,14 @@ func (m *SiteManager) googleClientFile() string {
 
 func (m *SiteManager) sessionKeyFile() (string, error) {
 	p := m.dir("session.key")
-	if fileExists(p) {
+	if fsx.Exists(p) {
 		return p, nil
 	}
 	key := make([]byte, 32)
 	if _, err := rand.Read(key); err != nil {
 		return "", err
 	}
-	return p, writeFileAtomic(p, []byte(hex.EncodeToString(key)+"\n"), 0o600, false)
+	return p, fsx.WriteFileAtomic(p, []byte(hex.EncodeToString(key)+"\n"), 0o600, false)
 }
 
 // processCommand builds the node command for a site process serving
@@ -683,7 +684,7 @@ func (m *SiteManager) processCommand(ctx context.Context, name, listen, modulesD
 			}
 		}
 	}
-	if !fileExists(rt.UsersFile) {
+	if !fsx.Exists(rt.UsersFile) {
 		m.mu.Lock()
 		err := m.saveUsersLocked()
 		m.mu.Unlock()
@@ -697,7 +698,7 @@ func (m *SiteManager) processCommand(ctx context.Context, name, listen, modulesD
 	}
 	data, _ := json.MarshalIndent(rt, "", "  ")
 	rtFile := m.dir(name + ".runtime.json")
-	if err := writeFileAtomic(rtFile, data, 0o600, false); err != nil {
+	if err := fsx.WriteFileAtomic(rtFile, data, 0o600, false); err != nil {
 		return nil, err
 	}
 	bin, args := node, []string{"--import", "tsx/esm", filepath.Join(shell, "server", "main.ts")}
@@ -782,7 +783,7 @@ func (m *SiteManager) SetTunnelToken(token string) error {
 	if strings.ContainsAny(token, " \t\n") || len(token) < 40 {
 		return errors.New("that does not look like a tunnel token (Cloudflare: Zero Trust → Networks → Tunnels → your tunnel → install command, the long value after --token)")
 	}
-	if err := writeFileAtomic(m.dir("tunnel.token"), []byte(token+"\n"), 0o600, false); err != nil {
+	if err := fsx.WriteFileAtomic(m.dir("tunnel.token"), []byte(token+"\n"), 0o600, false); err != nil {
 		return err
 	}
 	m.reconcile(true)
@@ -805,7 +806,7 @@ func (m *SiteManager) SetGoogleClient(data []byte) error {
 	if c.Type != "web" {
 		return errors.New(`the site needs a "Web application" client (this one is a Desktop app client)`)
 	}
-	return writeFileAtomic(m.dir("google_client.json"), data, 0o600, false)
+	return fsx.WriteFileAtomic(m.dir("google_client.json"), data, 0o600, false)
 }
 
 // siteEnv is the whole environment of a site process: nothing of the bridge's
@@ -870,7 +871,7 @@ func findTool(name string) (string, error) {
 		return p, nil
 	}
 	for _, dir := range toolFallbackDirs() {
-		if p := filepath.Join(dir, name); fileExists(p) {
+		if p := filepath.Join(dir, name); fsx.Exists(p) {
 			return p, nil
 		}
 	}
@@ -917,7 +918,7 @@ func (m *SiteManager) ensureShell(ctx context.Context) (string, error) {
 	}
 	sum := hex.EncodeToString(h.Sum(nil))
 	stamp := filepath.Join(dir, ".fridolin-shell")
-	if prev, err := os.ReadFile(stamp); err == nil && strings.TrimSpace(string(prev)) == sum && fileExists(filepath.Join(dir, "node_modules")) {
+	if prev, err := os.ReadFile(stamp); err == nil && strings.TrimSpace(string(prev)) == sum && fsx.Exists(filepath.Join(dir, "node_modules")) {
 		return dir, nil
 	}
 	for _, p := range files {
@@ -943,13 +944,13 @@ func (m *SiteManager) runNpmInstall(ctx context.Context, dir string, prod bool) 
 		return err
 	}
 	npm := filepath.Join(filepath.Dir(node), "npm")
-	if !fileExists(npm) {
+	if !fsx.Exists(npm) {
 		if npm, err = findTool("npm"); err != nil {
 			return errors.New("npm not found next to node")
 		}
 	}
 	args := []string{"install"}
-	if fileExists(filepath.Join(dir, "package-lock.json")) {
+	if fsx.Exists(filepath.Join(dir, "package-lock.json")) {
 		args = []string{"ci"}
 	}
 	args = append(args, "--no-audit", "--no-fund")

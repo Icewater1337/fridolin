@@ -12,6 +12,8 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+
+	"fridolin/internal/fsx"
 )
 
 func TestInstanceLockRefusesASecondHolder(t *testing.T) {
@@ -44,7 +46,7 @@ func TestInstanceLockRefusesASecondHolder(t *testing.T) {
 func TestNewBridgeTakesTheInstanceLock(t *testing.T) {
 	// The lock used to be taken only by `fridolin run`, so a test or any other
 	// caller of NewBridge opened bridge.db next to a running bridge.
-	home := canonicalDir(t.TempDir())
+	home := fsx.Canonical(t.TempDir())
 	t.Setenv("HOME", home)
 	dataDir := filepath.Join(home, "data")
 	cfgs, err := OpenConfigStore(writeConfig(t, `{"data_dir": "`+dataDir+`", "http_listen": "off"}`))
@@ -173,7 +175,7 @@ func TestBridgeClosesTheStoreWhenItGivesUpTheLock(t *testing.T) {
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			home := canonicalDir(t.TempDir())
+			home := fsx.Canonical(t.TempDir())
 			t.Setenv("HOME", home)
 			dataDir := filepath.Join(home, "data")
 			cfgs, err := OpenConfigStore(writeConfig(t, `{"data_dir": "`+dataDir+`", "http_listen": "off"}`))
@@ -221,7 +223,7 @@ func openFilesUnder(t *testing.T, dir string) []string {
 	}
 	var under []string
 	for _, p := range paths {
-		if isWithin(p, dir) {
+		if fsx.Within(p, dir) {
 			under = append(under, p)
 		}
 	}

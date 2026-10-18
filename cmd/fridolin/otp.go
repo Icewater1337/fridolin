@@ -16,6 +16,8 @@ import (
 	"time"
 	"unicode"
 	"unicode/utf8"
+
+	"fridolin/internal/fsx"
 )
 
 // The OTP guard. A local script that logs in somewhere for you asks a chat
@@ -252,7 +254,7 @@ func (o *otpHandoffs) write(dir string, h otpHandoff) error {
 	path := filepath.Join(dir, h.Brain+".json")
 	o.mu.Lock()
 	defer o.mu.Unlock()
-	if err := writeFileAtomic(path, data, 0o600, false); err != nil {
+	if err := fsx.WriteFileAtomic(path, data, 0o600, false); err != nil {
 		return err
 	}
 	if o.timers == nil {

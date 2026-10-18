@@ -21,6 +21,8 @@ import (
 	"strings"
 	"text/template"
 	"time"
+
+	"fridolin/internal/fsx"
 )
 
 // `fridolin service` installs the bridge outside its source checkout and
@@ -643,13 +645,13 @@ func checkInstallDir(dir, home, dataDir string, l bridgeLayout) error {
 	if !filepath.IsAbs(dir) {
 		return fmt.Errorf("the install folder %q is not an absolute path", dir)
 	}
-	cdir := canonicalDir(dir)
+	cdir := fsx.Canonical(dir)
 	switch {
-	case cdir == "/" || cdir == canonicalDir(home):
+	case cdir == "/" || cdir == fsx.Canonical(home):
 		return fmt.Errorf("the install folder cannot be %s; use a folder of its own such as %s", dir, defaultInstallDir(home))
-	case dataDir != "" && isWithin(cdir, canonicalDir(dataDir)):
+	case dataDir != "" && fsx.Within(cdir, fsx.Canonical(dataDir)):
 		return fmt.Errorf("the install folder cannot be inside the data folder %s: the sandbox keeps brains from reading the tools there", dataDir)
-	case l.Source != "" && isWithin(cdir, canonicalDir(l.Source)):
+	case l.Source != "" && fsx.Within(cdir, fsx.Canonical(l.Source)):
 		return fmt.Errorf("the install folder cannot be inside the source checkout %s: a build there would reach the service again", l.Source)
 	}
 	entries, err := os.ReadDir(dir)
@@ -762,7 +764,7 @@ func (h *serviceHost) install(o installOptions) error {
 	}
 	if p.old == nil || !bytes.Equal(p.old, p.unit) {
 		// 0600: the variables kept in a plist may be credentials.
-		if err := writeFileAtomic(p.unitPath, p.unit, 0o600, false); err != nil {
+		if err := fsx.WriteFileAtomic(p.unitPath, p.unit, 0o600, false); err != nil {
 			return fmt.Errorf("writing %s: %w", p.unitPath, err)
 		}
 		h.printf("wrote %s", p.unitPath)
@@ -821,7 +823,7 @@ func (h *serviceHost) planInstall(o installOptions) (*installPlan, error) {
 	p.binary = filepath.Join(p.dir, installedBinary)
 	// fridolin.prev installed over fridolin would keep the tools of the
 	// build it replaces, and a rollback would pair the wrong two.
-	if canonicalDir(filepath.Dir(o.Exe)) == canonicalDir(p.dir) && !sameFile(o.Exe, p.binary) {
+	if fsx.Canonical(filepath.Dir(o.Exe)) == fsx.Canonical(p.dir) && !sameFile(o.Exe, p.binary) {
 		return nil, fmt.Errorf("%s is part of the install in %s; to go back to it, run: %s service rollback", o.Exe, p.dir, p.binary)
 	}
 
@@ -1069,7 +1071,7 @@ func (h *serviceHost) installTools(src, dir string, keepPrev bool) error {
 func writeManifest(dir, source string, keepPrev bool) error {
 	p := filepath.Join(dir, installManifestFile)
 	if data, err := os.ReadFile(p); err == nil && keepPrev {
-		if err := writeFileAtomic(filepath.Join(dir, prevManifestFile), data, 0o644, false); err != nil {
+		if err := fsx.WriteFileAtomic(filepath.Join(dir, prevManifestFile), data, 0o644, false); err != nil {
 			return err
 		}
 	}
@@ -1077,7 +1079,7 @@ func writeManifest(dir, source string, keepPrev bool) error {
 	if err != nil {
 		return err
 	}
-	return writeFileAtomic(p, append(data, '\n'), 0o644, false)
+	return fsx.WriteFileAtomic(p, append(data, '\n'), 0o644, false)
 }
 
 // retireLegacyAgent stops the agent setup.sh installed before the rename,

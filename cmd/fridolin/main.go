@@ -19,6 +19,8 @@ import (
 	"strings"
 	"sync/atomic"
 	"syscall"
+
+	"fridolin/internal/fsx"
 )
 
 const usage = `fridolin — talk to Claude Code over WhatsApp
@@ -243,7 +245,7 @@ func writeStarterConfig(path, claudePath, dataDir string) error {
 		return err
 	}
 	log.Printf("No config found — writing a starter config to %s", path)
-	return writeFileAtomic(path, append(data, '\n'), 0o600, false)
+	return fsx.WriteFileAtomic(path, append(data, '\n'), 0o600, false)
 }
 
 // starterDataDir is the data dir a new config gets when none is given: the
@@ -440,7 +442,7 @@ func initCmd(args []string) {
 	dataDir := fs.String("data-dir", "", "data folder to write into the config (default ~/.fridolin, or the folder from before the rename when only that exists)")
 	_ = fs.Parse(args)
 	path := configPath(*cfgPath)
-	if fileExists(path) {
+	if fsx.Exists(path) {
 		fmt.Printf("%s already exists — leaving it alone.\n", path)
 		return
 	}
@@ -808,7 +810,7 @@ func newRedactor(home string) *redactor {
 		return r // every path would match
 	}
 	var spellings []string
-	for _, h := range []string{home, resolvePath(home)} {
+	for _, h := range []string{home, fsx.Resolve(home)} {
 		spellings = append(spellings, h, sbplEscaper.Replace(h), regexp.QuoteMeta(h), sbplEscaper.Replace(regexp.QuoteMeta(h)))
 	}
 	// The longest first, since one may begin with another; equal ones next

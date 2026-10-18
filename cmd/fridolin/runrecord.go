@@ -13,6 +13,8 @@ import (
 	"strings"
 	"syscall"
 	"time"
+
+	"fridolin/internal/fsx"
 )
 
 // A brain run gets a process group of its own (isolateProcessGroup), so a
@@ -56,7 +58,7 @@ func recordRun(dataDir, brain string, pid int) string {
 			if err == nil {
 				if err = os.MkdirAll(runsDir(dataDir), 0o700); err == nil {
 					p := filepath.Join(runsDir(dataDir), strconv.Itoa(pid)+".json")
-					if err = writeFileAtomic(p, data, 0o600, false); err == nil {
+					if err = fsx.WriteFileAtomic(p, data, 0o600, false); err == nil {
 						return p
 					}
 				}

@@ -19,6 +19,8 @@ import (
 	"testing/synctest"
 	"time"
 	_ "time/tzdata" // TestNextDue's time zone, on machines without one
+
+	"fridolin/internal/fsx"
 )
 
 func TestFilterLines(t *testing.T) {
@@ -1656,7 +1658,7 @@ func TestRcloneIsInterruptedWhenCancelled(t *testing.T) {
 		_, err := tb.backup.runRclone(ctx, []string{"copy", "x:", "y"}, nil)
 		done <- err
 	}()
-	waitFor(t, 10*time.Second, "rclone to start", func() bool { return fileExists(filepath.Join(bin, "started")) })
+	waitFor(t, 10*time.Second, "rclone to start", func() bool { return fsx.Exists(filepath.Join(bin, "started")) })
 	cancel()
 	select {
 	case <-done:

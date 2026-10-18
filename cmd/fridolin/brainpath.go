@@ -7,6 +7,8 @@ import (
 	"slices"
 	"strings"
 	"sync"
+
+	"fridolin/internal/fsx"
 )
 
 // A brain's own PATH folders. Your shell's PATH may name a folder inside a
@@ -43,7 +45,7 @@ func pathOwners(cfg *Config) []pathOwner {
 		if !filepath.IsAbs(dir) {
 			continue
 		}
-		o := pathOwner{dirs: slices.Compact([]string{filepath.Clean(dir), canonicalDir(dir)})}
+		o := pathOwner{dirs: slices.Compact([]string{filepath.Clean(dir), fsx.Canonical(dir)})}
 		if ref.Approved != nil {
 			o.id = ref.Approved.ID
 		}
@@ -59,7 +61,7 @@ func pathOwnerOf(dir string, owners []pathOwner) (pathOwner, bool) {
 		// exec.LookPath skips relative entries.
 		return pathOwner{}, false
 	}
-	spellings := slices.Compact([]string{filepath.Clean(dir), resolvePath(filepath.Clean(dir))})
+	spellings := slices.Compact([]string{filepath.Clean(dir), fsx.Resolve(filepath.Clean(dir))})
 	for _, o := range owners {
 		for _, s := range spellings {
 			if withinAny(s, o.dirs) {

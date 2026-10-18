@@ -25,6 +25,7 @@ import (
 	"syscall"
 	"time"
 
+	"fridolin/internal/fsx"
 	"go.mau.fi/whatsmeow/types"
 )
 
@@ -497,7 +498,7 @@ func (p *PlaudManager) loginStays(home string) bool {
 }
 
 // hasLogin reports whether the CLI has a login in the CLI home in use.
-func (p *PlaudManager) hasLogin() bool { return fileExists(p.tokenPath()) }
+func (p *PlaudManager) hasLogin() bool { return fsx.Exists(p.tokenPath()) }
 
 // loginStamp changes whenever the login file does: a sign-in, a sign-out, a
 // token refresh, or brain_access switching to the other login. "" means
@@ -544,7 +545,7 @@ func findPlaudCLI(c string) (string, error) {
 	})
 	candidates = append(candidates, "/opt/homebrew/bin/plaud", "/usr/local/bin/plaud")
 	for _, c := range candidates {
-		if fileExists(c) {
+		if fsx.Exists(c) {
 			return c, nil
 		}
 	}
@@ -621,7 +622,7 @@ const plaudCLITested = "0.3.15"
 // of the npm package it belongs to, without running it: `plaud version`
 // asks npm for updates. "" means it cannot tell (a wrapper script, say).
 func plaudCLIVersion(bin string) string {
-	pkg := nodePackage(resolvePath(bin))
+	pkg := nodePackage(fsx.Resolve(bin))
 	if pkg == "" {
 		return ""
 	}
@@ -1463,7 +1464,7 @@ func (p *PlaudManager) saveState(st *plaudState) error {
 	if err != nil {
 		return err
 	}
-	return writeFileAtomic(filepath.Join(p.dir(), "state.json"), data, 0o600, false)
+	return fsx.WriteFileAtomic(filepath.Join(p.dir(), "state.json"), data, 0o600, false)
 }
 
 // Poll checks for new recordings once. The first poll for an account only
@@ -2273,7 +2274,7 @@ func (p *PlaudManager) Disconnect() error {
 	if err != nil && !errors.Is(err, errPlaudAuth) {
 		log.Printf("plaud: logout: %v", err)
 	}
-	if fileExists(token) {
+	if fsx.Exists(token) {
 		return fmt.Errorf("the sign-out did not remove %s, so Plaud's login is still there — run `plaud logout` in a terminal", token)
 	}
 	return nil

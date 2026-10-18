@@ -14,6 +14,8 @@ import (
 	"syscall"
 	"testing"
 	"time"
+
+	"fridolin/internal/fsx"
 )
 
 // raceDetector is whether this test binary runs with the race detector
@@ -29,7 +31,7 @@ func TestSmoke(t *testing.T) {
 	if testing.Short() {
 		t.Skip("builds and runs the bridge")
 	}
-	root := canonicalDir(t.TempDir())
+	root := fsx.Canonical(t.TempDir())
 	home := filepath.Join(root, "home")
 	data := filepath.Join(home, ".fridolin")
 	if err := os.MkdirAll(data, 0o700); err != nil {

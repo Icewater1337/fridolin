@@ -32,6 +32,7 @@ import (
 	"strings"
 	"time"
 
+	"fridolin/internal/fsx"
 	"fridolin/site"
 )
 
@@ -99,7 +100,7 @@ func (m *SiteManager) SetBuilder(ctx context.Context, brainID string, on bool) e
 	if m.builderBase(brainID) == "" {
 		return fmt.Errorf("no brain %q", brainID)
 	}
-	if on && !fileExists(m.repoDir()) {
+	if on && !fsx.Exists(m.repoDir()) {
 		return errors.New("connect the site repository first")
 	}
 	m.mu.Lock()
@@ -191,7 +192,7 @@ func (m *SiteManager) ensureBuilder(ctx context.Context, brainID string) error {
 		return err
 	}
 	ws := filepath.Join(base, "workspace")
-	if fileExists(filepath.Join(ws, ".git")) {
+	if fsx.Exists(filepath.Join(ws, ".git")) {
 		return nil
 	}
 	return m.createWorkspace(ctx, brainID)
@@ -218,7 +219,7 @@ func (m *SiteManager) writeMCPConfig(brainID string) error {
 		},
 	}}
 	data, _ := json.MarshalIndent(cfg, "", "  ")
-	return writeFileAtomic(filepath.Join(m.builderBase(brainID), "mcp.json"), data, 0o600, false)
+	return fsx.WriteFileAtomic(filepath.Join(m.builderBase(brainID), "mcp.json"), data, 0o600, false)
 }
 
 // builderToken is the brain's token for /builder/, made once per bridge run.
@@ -339,7 +340,7 @@ func (m *SiteManager) createWorkspace(ctx context.Context, brainID string) error
 		return err
 	}
 	root := filepath.Join(ws, filepath.FromSlash(m.Settings().Repo.Subdir))
-	if fileExists(filepath.Join(root, "package.json")) {
+	if fsx.Exists(filepath.Join(root, "package.json")) {
 		return m.workspaceInstall(ctx, brainID, root)
 	}
 	return nil
@@ -678,7 +679,7 @@ func (m *SiteManager) BuilderPreview(ctx context.Context, brainID string) (map[s
 	}
 	data, _ := json.MarshalIndent(rt, "", "  ")
 	rtFile := filepath.Join(base, "preview.runtime.json")
-	if err := writeFileAtomic(rtFile, data, 0o600, false); err != nil {
+	if err := fsx.WriteFileAtomic(rtFile, data, 0o600, false); err != nil {
 		return nil, err
 	}
 	shell := filepath.Join(base, "shell")
@@ -736,7 +737,7 @@ func (m *SiteManager) writePreviewsFile() error {
 	}
 	m.mu.Unlock()
 	data, _ := json.MarshalIndent(list, "", "  ")
-	return writeFileAtomic(m.dir("previews.json"), data, 0o600, false)
+	return fsx.WriteFileAtomic(m.dir("previews.json"), data, 0o600, false)
 }
 
 // ── the HTTP side of the MCP server ────────────────────────────────────────

@@ -5,6 +5,8 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+
+	"fridolin/internal/fsx"
 )
 
 // The bridge runs a few helpers outside the sandbox: tmux for the activity
@@ -40,7 +42,7 @@ func helperPath() string {
 	var homes []string
 	// A HOME of "" or / would put every folder under it.
 	if home := homeDir(); home != "" && filepath.Dir(home) != home {
-		homes = []string{home, resolvePath(home)}
+		homes = []string{home, fsx.Resolve(home)}
 	}
 	var out []string
 	for _, dir := range filepath.SplitList(os.Getenv("PATH")) {
@@ -54,7 +56,7 @@ func helperPath() string {
 		}
 		// helperDirs by name only: a folder that merely resolves to one
 		// may be a symlink a brain can point elsewhere.
-		if slices.Contains(helperDirs, dir) || withinAny(dir, homes) || withinAny(resolvePath(dir), homes) {
+		if slices.Contains(helperDirs, dir) || withinAny(dir, homes) || withinAny(fsx.Resolve(dir), homes) {
 			out = append(out, dir)
 		}
 	}

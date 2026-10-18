@@ -18,6 +18,8 @@ import (
 	"sort"
 	"strings"
 	"unicode/utf8"
+
+	"fridolin/internal/fsx"
 )
 
 var (
@@ -75,7 +77,7 @@ func (m *SiteManager) saveSecretsLocked(module string, v map[string]string) erro
 		return nil
 	}
 	data, _ := json.MarshalIndent(v, "", "  ")
-	return writeFileAtomic(m.secretsFile(module), append(data, '\n'), 0o600, false)
+	return fsx.WriteFileAtomic(m.secretsFile(module), append(data, '\n'), 0o600, false)
 }
 
 // SetSecret saves a module's secret. The live site gets it when it next

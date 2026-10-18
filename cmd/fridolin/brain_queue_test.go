@@ -15,6 +15,8 @@ import (
 	"syscall"
 	"testing"
 	"time"
+
+	"fridolin/internal/fsx"
 )
 
 // deliveries records what brains hand back to the bridge.
@@ -52,7 +54,7 @@ func (d *deliveries) all() []delivered {
 // untagged chatter there queues like the rest.
 func queueTestManager(t *testing.T, sleepMS int, extra string) (*BrainManager, *deliveries, string) {
 	t.Helper()
-	home := canonicalDir(t.TempDir())
+	home := fsx.Canonical(t.TempDir())
 	t.Setenv("HOME", home)
 	claude := fakeClaudeEnv(t, sleepMS)
 	cfg, err := LoadConfig(writeConfig(t, `{
@@ -613,7 +615,7 @@ func TestReloadRunsTheApprovedManifest(t *testing.T) {
 // a set reaches the manager.
 func TestReloadRefusesAClashingSet(t *testing.T) {
 	const group = "120363000000000000@g.us"
-	home := canonicalDir(t.TempDir())
+	home := fsx.Canonical(t.TempDir())
 	t.Setenv("HOME", home)
 	cfg, err := LoadConfig(writeConfig(t, `{"data_dir": "`+home+`/data"`+brainDirsJSON(t,
 		brainFolder(t, "~/a", BrainManifest{ID: "a", Routing: BrainRouting{HandlesDMs: true}}),
@@ -768,7 +770,7 @@ func TestInstructionsAbove(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			root := canonicalDir(t.TempDir())
+			root := fsx.Canonical(t.TempDir())
 			dir, home := tc.layout(t, root)
 			got := instructionsAbove(dir, home)
 			for _, p := range got {
@@ -1227,7 +1229,7 @@ func TestBrainsDoNotSeeTheDotEnv(t *testing.T) {
 	// The bridge reads no .env. Older versions exported the one next to
 	// config.json into the bridge's environment, which every brain
 	// inherits, so any brain could read it with `env`.
-	home := canonicalDir(t.TempDir())
+	home := fsx.Canonical(t.TempDir())
 	t.Setenv("HOME", home)
 	clearEnv(t, "MODEL", "FRIDOLIN_TEST_DOTENV_ONLY")
 	envLog := filepath.Join(home, "brain.env")
@@ -1304,7 +1306,7 @@ func TestBrainsAreToldTheDataDir(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			home := canonicalDir(t.TempDir())
+			home := fsx.Canonical(t.TempDir())
 			t.Setenv("HOME", home)
 			t.Setenv("BRIDGE_DATA_DIR", "/from/the/bridge/env")
 			t.Setenv("BRIDGE_DB_PATH", "/from/the/bridge/env/bridge.db")
@@ -1361,7 +1363,7 @@ func TestBrainsAreToldTheDataDir(t *testing.T) {
 // A brain runs in its own folder, so a relative data_dir or db_path, which
 // the bridge opens relative to its working directory, reaches it absolute.
 func TestDataEnvIsAbsolute(t *testing.T) {
-	cwd := canonicalDir(t.TempDir())
+	cwd := fsx.Canonical(t.TempDir())
 	t.Chdir(cwd)
 	s := settingsFor(&Config{DataDir: "rel", DBPath: "rel/bridge.db"}, BrainSpec{})
 	want := []string{"BRIDGE_DATA_DIR=" + cwd + "/rel", "BRIDGE_DB_PATH=" + cwd + "/rel/bridge.db"}
@@ -1587,7 +1589,7 @@ func TestRunTimeoutSetting(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.json, func(t *testing.T) {
-			home := canonicalDir(t.TempDir())
+			home := fsx.Canonical(t.TempDir())
 			t.Setenv("HOME", home)
 			cfg, err := LoadConfig(writeConfig(t, `{"brain_mode": true, "data_dir": "`+home+`/data"`+tc.json+`}`))
 			if tc.wantErr {
@@ -1803,7 +1805,7 @@ func TestBusyChatDoesNotHoldUpAnother(t *testing.T) {
 // runs limited to limit at once.
 func limitTestManager(t *testing.T, sleepMS, limit int) (*BrainManager, *deliveries) {
 	t.Helper()
-	home := canonicalDir(t.TempDir())
+	home := fsx.Canonical(t.TempDir())
 	t.Setenv("HOME", home)
 	claude := fakeClaudeEnv(t, sleepMS)
 	cfg, err := LoadConfig(writeConfig(t, `{

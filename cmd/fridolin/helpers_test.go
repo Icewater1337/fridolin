@@ -21,6 +21,8 @@ import (
 	"testing"
 	"time"
 	"unsafe"
+
+	"fridolin/internal/fsx"
 )
 
 // TestMain lets the test binary stand in for the Claude CLI: with
@@ -627,7 +629,7 @@ func requireTestDataDir(t testing.TB, cfg *Config) {
 // may use root as given or with its symlinks resolved (/var and /private/var
 // on macOS).
 func checkTestDataDir(root string, cfg *Config) error {
-	roots := []string{filepath.Clean(root), canonicalDir(root)}
+	roots := []string{filepath.Clean(root), fsx.Canonical(root)}
 	for _, p := range []struct{ field, path string }{
 		{"data_dir", cfg.DataDir},
 		{"db_path", cfg.DBPath},
@@ -635,7 +637,7 @@ func checkTestDataDir(root string, cfg *Config) error {
 	} {
 		inside := false
 		for _, r := range roots {
-			inside = inside || isWithin(p.path, r)
+			inside = inside || fsx.Within(p.path, r)
 		}
 		if !inside {
 			return fmt.Errorf("%s %q is outside the test's temp dir %s: refusing to touch it", p.field, p.path, root)
@@ -687,7 +689,7 @@ func TestCheckTestDataDir(t *testing.T) {
 		wantErr         string // "" means the paths are accepted
 	}{
 		{"all inside", in, in + "/bridge.db", in + "/media", ""},
-		{"inside through the resolved root", canonicalDir(root) + "/data", canonicalDir(root) + "/data/bridge.db", canonicalDir(root) + "/data/media", ""},
+		{"inside through the resolved root", fsx.Canonical(root) + "/data", fsx.Canonical(root) + "/data/bridge.db", fsx.Canonical(root) + "/data/media", ""},
 		{"data dir outside", out, in + "/bridge.db", in + "/media", "data_dir"},
 		{"database outside", in, out + "/bridge.db", in + "/media", "db_path"},
 		{"media outside", in, in + "/bridge.db", out + "/media", "media_dir"},
@@ -772,7 +774,7 @@ func brainFolder(t testing.TB, path string, m BrainManifest) BrainRef {
 		m.Name = m.ID
 	}
 	m = m.normalized()
-	if _, err := ScaffoldBrain(expandHome(path, home), &m); err != nil {
+	if _, err := ScaffoldBrain(fsx.ExpandHome(path, home), &m); err != nil {
 		t.Fatal(err)
 	}
 	return BrainRef{Path: path, Approved: &m}

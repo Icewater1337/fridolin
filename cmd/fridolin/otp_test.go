@@ -8,6 +8,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"fridolin/internal/fsx"
 )
 
 // A code is recognised as people send one: digits, in groups or not, or
@@ -278,7 +280,7 @@ func TestSweepOTPHandoffs(t *testing.T) {
 // The bridge sweeps the hand-offs when it starts: a code that expired
 // while it was stopped is gone, one still valid stays for its script.
 func TestBridgeStartRemovesExpiredOTPHandoffs(t *testing.T) {
-	home := canonicalDir(t.TempDir())
+	home := fsx.Canonical(t.TempDir())
 	t.Setenv("HOME", home)
 	dir := filepath.Join(home, "data", "otp")
 	if err := os.MkdirAll(dir, 0o700); err != nil {

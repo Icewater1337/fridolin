@@ -15,6 +15,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"fridolin/internal/fsx"
 )
 
 // These tests run generated profiles under the real sandbox-exec, so they
@@ -139,7 +141,7 @@ func TestSandboxedSiteSearchGetsTheBrainsOwnState(t *testing.T) {
 // Allow rules must not follow such a symlink on the next run.
 //
 // It covers runs of the brain set as it was resolved. Resolving the brains
-// again (a config reload or a restart) runs canonicalDir on every folder,
+// again (a config reload or a restart) runs fsx.Canonical on every folder,
 // which follows a symlink planted in place of a brain's own folder. The
 // profile cannot tell that from a configured folder, so only brain
 // resolution can refuse it.
@@ -149,7 +151,7 @@ func TestSandboxIgnoresPlantedSymlinks(t *testing.T) {
 		name string
 		make func(t *testing.T) string
 	}{
-		{"canonical home", func(t *testing.T) string { return canonicalDir(t.TempDir()) }},
+		{"canonical home", func(t *testing.T) string { return fsx.Canonical(t.TempDir()) }},
 		{"home under /var", func(t *testing.T) string { return filepath.Join(t.TempDir(), "home") }},
 	}
 	plants := []struct {
@@ -202,11 +204,11 @@ type sandboxLayout struct {
 // sandboxLayouts are the fake homes the enforcement tests run in.
 func sandboxLayouts() []sandboxLayout {
 	return []sandboxLayout{
-		{name: "canonical home", home: func(t *testing.T) string { return canonicalDir(t.TempDir()) },
+		{name: "canonical home", home: func(t *testing.T) string { return fsx.Canonical(t.TempDir()) },
 			otherBrain: "b", denyDir: "clients"},
 		// No-break spaces, emoji joiners, quotes and backslashes in folder
 		// names. Go's %q quoting broke the first two silently.
-		{name: "unusual characters", home: func(t *testing.T) string { return canonicalDir(t.TempDir()) },
+		{name: "unusual characters", home: func(t *testing.T) string { return fsx.Canonical(t.TempDir()) },
 			otherBrain: "My\u00a0Brain \"q\" \\ \U0001F468\u200d\U0001F469\u200d\U0001F467",
 			denyDir:    "Screenshot 10.00\u202fAM"},
 		// t.TempDir() is under /var, a symlink to /private/var, so HOME and
@@ -218,7 +220,7 @@ func sandboxLayouts() []sandboxLayout {
 		// Regular-expression characters in HOME, for the rules that match a
 		// pattern below a folder.
 		{name: "pattern characters in home", home: func(t *testing.T) string {
-			home := filepath.Join(canonicalDir(t.TempDir()), "h.o+m(e)[1]{2}$^|*")
+			home := filepath.Join(fsx.Canonical(t.TempDir()), "h.o+m(e)[1]{2}$^|*")
 			if err := os.Mkdir(home, 0o700); err != nil {
 				t.Fatal(err)
 			}
@@ -591,9 +593,9 @@ func TestSandboxKeepsYourInstructionsFromBrains(t *testing.T) {
 // bridge runs, and read the bridge's tools.
 func TestSandboxWritesOnlyItsOwnPlaces(t *testing.T) {
 	requireSandboxExec(t)
-	home := canonicalDir(t.TempDir())
+	home := fsx.Canonical(t.TempDir())
 	t.Setenv("HOME", home)
-	outside := canonicalDir(t.TempDir()) // not in HOME, like /opt/homebrew
+	outside := fsx.Canonical(t.TempDir()) // not in HOME, like /opt/homebrew
 	t.Setenv("OUT", outside)
 	sp, own := sandboxFixture(t, home, "b", "clients")
 	for _, f := range []string{
@@ -665,7 +667,7 @@ func TestSandboxWritesOnlyItsOwnPlaces(t *testing.T) {
 // user's, not HOME's, so the domain is a throwaway one, removed after.
 func TestSandboxKeepsBrainsFromWritingYourPreferences(t *testing.T) {
 	requireSandboxExec(t)
-	home := canonicalDir(t.TempDir())
+	home := fsx.Canonical(t.TempDir())
 	t.Setenv("HOME", home)
 	sp, own := sandboxFixture(t, home, "b", "clients")
 	domain := fmt.Sprintf("com.example.fridolin-test.%d.%d", os.Getpid(), time.Now().UnixNano())
@@ -720,7 +722,7 @@ func TestSandboxedRunsCannotTypeIntoTheTerminal(t *testing.T) {
 	if _, err := os.Stat("/usr/bin/script"); err != nil {
 		t.Skip("no script(1):", err)
 	}
-	home := canonicalDir(t.TempDir())
+	home := fsx.Canonical(t.TempDir())
 	t.Setenv("HOME", home)
 	sp, own := sandboxFixture(t, home, "b", "clients")
 	state := sandboxStateEnv(t, sp, "a")
@@ -774,7 +776,7 @@ func TestSandboxedRunsCannotTypeIntoTheTerminal(t *testing.T) {
 // $TMPDIR; so does a fixed path in /tmp.
 func TestSandboxGivesBrainsTheirOwnTemporaryFiles(t *testing.T) {
 	requireSandboxExec(t)
-	home := canonicalDir(t.TempDir())
+	home := fsx.Canonical(t.TempDir())
 	t.Setenv("HOME", home)
 	sp, own := sandboxFixture(t, home, "b", "clients")
 	tmp := filepath.Join(home, ".fridolin", "brains", "a", "tmp")
@@ -822,7 +824,7 @@ EOF'`, true},
 // TestSetBridgePATH), and that brain used to be refused instead.
 func TestSandboxKeepsTheBridgesProgramsFromBrains(t *testing.T) {
 	requireSandboxExec(t)
-	home := canonicalDir(t.TempDir())
+	home := fsx.Canonical(t.TempDir())
 	t.Setenv("HOME", home)
 	sp, own := sandboxFixture(t, home, "b", "clients")
 	claude := filepath.Join(home, ".local", "bin", "claude")
@@ -868,7 +870,7 @@ func TestSandboxKeepsTheBridgesProgramsFromBrains(t *testing.T) {
 // written.
 func TestSandboxKeepsTheBridgesProgramsInASharedClaudeDir(t *testing.T) {
 	requireSandboxExec(t)
-	home := canonicalDir(t.TempDir())
+	home := fsx.Canonical(t.TempDir())
 	t.Setenv("HOME", home)
 	local := filepath.Join(home, ".claude", "local")
 	claude := filepath.Join(local, "claude")
@@ -1072,9 +1074,9 @@ func TestSandboxDeniesBrowserProfiles(t *testing.T) {
 // writable under the real sandbox-exec.
 func TestSandboxDeniesTheConfigFile(t *testing.T) {
 	requireSandboxExec(t)
-	home := canonicalDir(t.TempDir())
+	home := fsx.Canonical(t.TempDir())
 	t.Setenv("HOME", home)
-	// A save in progress: writeFileAtomic writes the whole config here first.
+	// A save in progress: fsx.WriteFileAtomic writes the whole config here first.
 	for _, f := range []string{"etc/config.json", "etc/.env", "etc/.config.json.123456.tmp", "a/notes.md"} {
 		p := filepath.Join(home, f)
 		if err := os.MkdirAll(filepath.Dir(p), 0o700); err != nil {
@@ -1108,7 +1110,7 @@ func TestSandboxDeniesTheConfigFile(t *testing.T) {
 // folder still works.
 func TestSandboxAllowPathsKeepBridgeSecrets(t *testing.T) {
 	requireSandboxExec(t)
-	home := canonicalDir(t.TempDir())
+	home := fsx.Canonical(t.TempDir())
 	t.Setenv("HOME", home)
 	// Ready for inboxes, as the bridge has it before any run, so that a's
 	// photo stays in a's inbox.
@@ -1224,7 +1226,7 @@ func TestSandboxRefusesLinksIntoSessionRecords(t *testing.T) {
 // Each step builds the profile afresh, as each run does.
 func TestSandboxLetsTheCLICreateItsState(t *testing.T) {
 	requireSandboxExec(t)
-	home := canonicalDir(t.TempDir())
+	home := fsx.Canonical(t.TempDir())
 	t.Setenv("HOME", home)
 	sp, ownDir := sandboxFixture(t, home, "b", "clients", map[string]any{"inherit_claude_user_config": true})
 	if _, err := os.Stat(filepath.Join(home, ".claude")); !os.IsNotExist(err) {
@@ -1265,7 +1267,7 @@ func TestSandboxLetsTheCLICreateItsState(t *testing.T) {
 // over every deny inside it.
 func TestSandboxOwnFolderKeepsWhatIsInsideIt(t *testing.T) {
 	requireSandboxExec(t)
-	home := canonicalDir(t.TempDir())
+	home := fsx.Canonical(t.TempDir())
 	t.Setenv("HOME", home)
 	box := filepath.Join(home, "box")
 	for _, f := range []string{"notes.md", "work/private/contract.txt", "work/private/share/ok.txt"} {
@@ -1376,7 +1378,7 @@ func TestSandboxPinsItsOwnFolder(t *testing.T) {
 // the other brain stay closed.
 func TestSandboxOpensItsOwnFolderThroughASymlink(t *testing.T) {
 	requireSandboxExec(t)
-	home := canonicalDir(t.TempDir())
+	home := fsx.Canonical(t.TempDir())
 	if err := os.MkdirAll(filepath.Join(home, "Documents", "assistant"), 0o700); err != nil {
 		t.Fatal(err)
 	}
@@ -1429,7 +1431,7 @@ func TestSandboxOpensItsOwnFolderThroughASymlink(t *testing.T) {
 // brain of its chat, not a file at the top, and it cannot list the folder.
 func TestSandboxKeepsAMediaFolderOutsideTheDataDir(t *testing.T) {
 	requireSandboxExec(t)
-	home := canonicalDir(t.TempDir())
+	home := fsx.Canonical(t.TempDir())
 	t.Setenv("HOME", home)
 	sp, own := sandboxFixture(t, home, "b", "clients", map[string]any{"media_dir": "~/media"})
 	for _, f := range []string{"media/a/photo.jpg", "media/b/dm.pdf", "media/" + incomingMediaDir + "/voice.ogg", "media/top.pdf"} {
@@ -1506,7 +1508,7 @@ const dir = path.join(os.homedir(), ".plaud"), file = path.join(dir, "tokens.jso
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			home := canonicalDir(t.TempDir())
+			home := fsx.Canonical(t.TempDir())
 			t.Setenv("HOME", home)
 			sp, own := sandboxFixture(t, home, "b", "clients", map[string]any{"plaud": map[string]any{"brain_access": c.access}})
 			if err := os.Mkdir(filepath.Join(home, ".plaud"), 0o755); err != nil {
@@ -1838,7 +1840,7 @@ func TestSandboxStopsStartingCodeOutsideIt(t *testing.T) {
 	}
 	for _, l := range layouts {
 		t.Run(l.name, func(t *testing.T) {
-			base := canonicalDir(t.TempDir())
+			base := fsx.Canonical(t.TempDir())
 			home := filepath.Join(base, "home")
 			tmp := filepath.Join(base, l.tmpDir)
 			for _, dir := range []string{home, tmp} {
@@ -1949,7 +1951,7 @@ func TestSandboxGitConfig(t *testing.T) {
 	}
 	for _, mode := range []string{"read", "deny"} {
 		t.Run(mode, func(t *testing.T) {
-			home := canonicalDir(t.TempDir())
+			home := fsx.Canonical(t.TempDir())
 			t.Setenv("HOME", home)
 			sp, own := sandboxFixture(t, home, "b", "clients", map[string]any{"sandbox": map[string]any{"enabled": true, "git_config": mode}})
 			for name, content := range map[string]string{
