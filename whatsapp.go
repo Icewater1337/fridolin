@@ -72,6 +72,7 @@ type WhatsAppClient struct {
 	store     *Store
 	handler   InboundHandler
 	onIgnored IgnoredHandler
+	onVote    func(pollVote) // a vote was recorded; may be nil
 	log       waLog.Logger
 	media     mediaDownloader        // the client; tests swap in a fake
 	notify    func(jid, text string) // sendNotice; tests record instead
@@ -369,38 +370,42 @@ func (wa *WhatsAppClient) eventHandler(rawEvt interface{}) {
 	}
 }
 
-// handlePollVote decrypts a poll vote and stores the voter's selections.
+// handlePollVote decrypts a poll vote and records it (see recordVote).
 func (wa *WhatsAppClient) handlePollVote(evt *events.Message) {
-	ctx := context.Background()
-
-	pollVote, err := wa.client.DecryptPollVote(ctx, evt)
+	pollVote, err := wa.client.DecryptPollVote(wa.ctx, evt)
 	if err != nil {
 		wa.log.Errorf("Failed to decrypt poll vote from %s: %v", evt.Info.Sender, err)
 		return
 	}
-
 	pollMsgID := evt.Message.GetPollUpdateMessage().GetPollCreationMessageKey().GetID()
 	if pollMsgID == "" {
 		wa.log.Warnf("Poll vote has no creation message key — skipping")
 		return
 	}
+	// One voter, however WhatsApp addressed them: a vote changed later
+	// must replace the first, not count as a second voter's.
+	voter := canonicalUser(wa.ctx, wa.lidStore(), evt.Info.Sender, evt.Info.SenderAlt)
+	wa.recordVote(pollMsgID, voter, pollVote.GetSelectedOptions())
+}
 
-	_, options, err := wa.store.GetPollOptions(pollMsgID)
+// recordVote stores voter's choice in the poll sent as pollMsgID, given
+// as WhatsApp sends it, the hashes of the chosen options, and tells
+// onVote. A vote for a poll the bridge did not keep is dropped.
+func (wa *WhatsAppClient) recordVote(pollMsgID string, voter types.JID, hashes [][]byte) {
+	poll, err := wa.store.SentPoll(wa.ctx, pollMsgID)
 	if err != nil {
 		// Not necessarily an error: the poll may predate vote tracking.
 		log.Printf("Poll vote for unknown poll %s (not in DB) — skipping", pollMsgID)
 		return
 	}
-
-	selected := matchVote(pollVote.GetSelectedOptions(), options)
-
-	// One voter, however WhatsApp addressed them: a vote changed later
-	// must replace the first, not count as a second voter's.
-	voterJID := canonicalUser(ctx, wa.lidStore(), evt.Info.Sender, evt.Info.SenderAlt).String()
-	log.Printf("Poll vote recorded: poll=%s voter=%s options=%v", pollMsgID, voterJID, selected)
-
-	if err := wa.store.SavePollVote(pollMsgID, voterJID, selected); err != nil {
-		wa.log.Errorf("Failed to save poll vote from %s: %v", voterJID, err)
+	selected := matchVote(hashes, poll.Options)
+	log.Printf("Poll vote recorded: poll=%s voter=%s options=%v", pollMsgID, voter, selected)
+	if err := wa.store.SavePollVote(pollMsgID, voter.String(), selected); err != nil {
+		wa.log.Errorf("Failed to save poll vote from %s: %v", voter, err)
+		return
+	}
+	if wa.onVote != nil {
+		wa.onVote(pollVote{Poll: poll, Voter: voter, Selected: selected})
 	}
 }
 

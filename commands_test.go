@@ -42,12 +42,12 @@ func newMainBridge(t *testing.T, extra string) (*testBridge, *Brain) {
 }
 
 // whatsApp is a WhatsApp client without a connection that hands allowed
-// messages to the test bridge, like the real one. It cannot download an
-// attachment, and sends what it tells a chat about one through the test
-// bridge.
+// messages and poll votes to the test bridge, like the real one. It
+// cannot download an attachment, and sends what it tells a chat about one
+// through the test bridge.
 func (tb *testBridge) whatsApp() *WhatsAppClient {
 	ctx, cancel := context.WithCancel(context.Background())
-	wa := &WhatsAppClient{cfg: tb.cfgs.Get, log: waLog.Noop, handler: tb.handleInbound, ctx: ctx, cancel: cancel}
+	wa := &WhatsAppClient{cfg: tb.cfgs.Get, store: tb.store, log: waLog.Noop, handler: tb.handleInbound, onVote: tb.recordVote, ctx: ctx, cancel: cancel}
 	wa.media = wa.client // nil: every download fails with ErrClientIsNil
 	wa.notify = func(jid, text string) { tb.dev.SendMessage(ctx, jid, text) }
 	return wa

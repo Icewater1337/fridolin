@@ -165,6 +165,7 @@ func NewBridge(cfgs *ConfigStore, opts BridgeOptions) (_ *Bridge, err error) {
 		if err != nil {
 			return nil, fmt.Errorf("creating whatsapp client: %w", err)
 		}
+		wa.onVote = b.recordVote
 		b.wa = wa
 		b.lids = wa.lidStore
 	}
@@ -546,14 +547,14 @@ func (b *Bridge) deliver(br *Brain, m Inbound, res RunResult) {
 		return
 	}
 	log.Printf("brain %s: sending response (%d chars) to %s after %s", br.ID(), len(res.Text), m.JID, res.Duration.Round(time.Second))
-	b.sendResponse(ctx, m.JID, res.Text)
+	b.sendResponse(ctx, br.ID(), m.JID, res.Text)
 }
 
-// sendResponse sends a brain's reply: each [POLL]…[/POLL] block as a real
+// sendResponse sends what brain replied in jid: each [POLL]…[/POLL] block as a real
 // WhatsApp poll (see sendPolls), then the rest as text.
-func (b *Bridge) sendResponse(ctx context.Context, jid, text string) {
+func (b *Bridge) sendResponse(ctx context.Context, brain, jid, text string) {
 	polls, remaining := extractPolls(text)
-	b.sendPolls(ctx, jid, polls)
+	b.sendPolls(ctx, brain, jid, polls)
 	if remaining != "" {
 		if err := b.wa.SendChunked(ctx, jid, remaining); err != nil {
 			log.Printf("failed to send response to %s: %v", jid, err)

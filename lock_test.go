@@ -138,7 +138,8 @@ func TestBridgeClosesTheStoreWhenItGivesUpTheLock(t *testing.T) {
 		{"failed while opening the store", func(t *testing.T, cfgs *ConfigStore, dataDir string) {
 			// whatsmeow's container opens on a read-only bridge.db whose
 			// schema is current, then the bridge's own migration fails on a
-			// table it has to create.
+			// table it has to create: one of a database from before the
+			// bridge versioned its migrations.
 			if os.Geteuid() == 0 {
 				t.Skip("root can write a read-only file")
 			}
@@ -148,6 +149,9 @@ func TestBridgeClosesTheStoreWhenItGivesUpTheLock(t *testing.T) {
 				t.Fatal(err)
 			}
 			_, err = s.db.Exec(`DROP TABLE ignored_chats`)
+			if err == nil {
+				_, err = s.db.Exec(`DROP TABLE fridolin_version`)
+			}
 			if err := errors.Join(err, s.Close()); err != nil {
 				t.Fatal(err)
 			}

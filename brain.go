@@ -30,7 +30,7 @@ type historyEntry struct {
 	From string `json:"from"`
 	Chat string `json:"chat"` // JID of the chat (DM participant or group)
 	Text string `json:"text"`
-	Type string `json:"type"` // historyIn or historyOut
+	Type string `json:"type"` // historyIn, historyOut or historyEvent
 	// Via marks an "out" line that came in through /send: "brain" (From is
 	// the brain that sent it), "script" (the scripts token) or "api" (no
 	// token). A brain's own replies have none.
@@ -43,6 +43,10 @@ type historyEntry struct {
 const (
 	historyIn  = "in"  // a message to the brain
 	historyOut = "out" // a message the brain sent, or one sent on its behalf
+	// historyEvent is something that happened in a chat without a message,
+	// such as a poll vote. Its From is who did it, and its text says what,
+	// after their name.
+	historyEvent = "event"
 )
 
 // normalizeJID strips the WhatsApp server suffix and a leading + from a JID,
@@ -1432,6 +1436,10 @@ func (br *Brain) composePreface(chats []string, isGroup bool) string {
 			senderDisplay = entry.From
 		}
 
+		if entry.Type == historyEvent {
+			sb.WriteString(fmt.Sprintf("[%s] %s %s\n", timeStr, senderDisplay, entry.Text))
+			continue
+		}
 		sb.WriteString(fmt.Sprintf("[%s] %s: %s\n", timeStr, senderDisplay, entry.Text))
 	}
 	return sb.String()

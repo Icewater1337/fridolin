@@ -117,7 +117,53 @@ func restrictToOwner(path string) error {
 	return nil
 }
 
+// appMigrations are the bridge's own schema changes, in order. The
+// version fridolin_version holds is how many of them a database has had.
+// whatsmeow keeps its own in whatsmeow_version, and PRAGMA user_version
+// stays unused, so that neither versioning can step on the other. Each
+// change only adds, so that an older bridge rolled back to still finds
+// the tables and columns it reads.
+var appMigrations = []func(*sql.Tx) error{
+	migrateV1,
+	migrateV2,
+}
+
+// migrate brings the bridge's tables to the newest version, one
+// migration per transaction.
 func (s *Store) migrate() error {
+	if _, err := s.db.Exec(`CREATE TABLE IF NOT EXISTS fridolin_version (version INTEGER NOT NULL)`); err != nil {
+		return err
+	}
+	var version int
+	err := s.db.QueryRow(`SELECT version FROM fridolin_version`).Scan(&version)
+	if errors.Is(err, sql.ErrNoRows) {
+		if _, err := s.db.Exec(`INSERT INTO fridolin_version (version) VALUES (0)`); err != nil {
+			return err
+		}
+	} else if err != nil {
+		return err
+	}
+	for v := version; v < len(appMigrations); v++ {
+		tx, err := s.db.Begin()
+		if err != nil {
+			return err
+		}
+		if err := appMigrations[v](tx); err != nil {
+			return errors.Join(fmt.Errorf("migration %d: %w", v+1, err), tx.Rollback())
+		}
+		if _, err := tx.Exec(`UPDATE fridolin_version SET version = ?`, v+1); err != nil {
+			return errors.Join(err, tx.Rollback())
+		}
+		if err := tx.Commit(); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// migrateV1 makes the tables from before the migrations were versioned. A
+// database from then has them already, so each is made only if missing.
+func migrateV1(tx *sql.Tx) error {
 	stmts := []string{
 		// sessions and process_state are written no more: classic mode kept
 		// each chat's Claude session in one, and runs kept their PID in the
@@ -165,35 +211,54 @@ func (s *Store) migrate() error {
 		)`,
 	}
 	for _, stmt := range stmts {
-		if _, err := s.db.Exec(stmt); err != nil {
+		if _, err := tx.Exec(stmt); err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
-// SavePoll stores poll metadata so votes can be matched back to option names.
-func (s *Store) SavePoll(msgID, chatJID, question string, options []string) error {
+// migrateV2 records which brain sent a poll, so that a vote goes to that
+// brain's history: one brain may send to a chat that another owns. Polls
+// from before have none and go to the brain that owns their chat.
+func migrateV2(tx *sql.Tx) error {
+	_, err := tx.Exec(`ALTER TABLE polls ADD COLUMN brain TEXT NOT NULL DEFAULT ''`)
+	return err
+}
+
+// SavePoll stores a poll brain sent, so votes can be matched back to
+// option names and reach that brain.
+func (s *Store) SavePoll(msgID, chatJID, brain, question string, options []string) error {
 	optJSON, err := json.Marshal(options)
 	if err != nil {
 		return err
 	}
 	_, err = s.db.Exec(
-		`INSERT OR REPLACE INTO polls (msg_id, chat_jid, question, options, created_at) VALUES (?, ?, ?, ?, ?)`,
-		msgID, chatJID, question, string(optJSON), time.Now().UTC(),
+		`INSERT OR REPLACE INTO polls (msg_id, chat_jid, brain, question, options, created_at) VALUES (?, ?, ?, ?, ?, ?)`,
+		msgID, chatJID, brain, question, string(optJSON), time.Now().UTC(),
 	)
 	return err
 }
 
-// GetPollOptions returns the question and option names for a poll by message ID.
-func (s *Store) GetPollOptions(msgID string) (question string, options []string, err error) {
+// sentPoll is what the bridge keeps of a poll it sent, for its votes.
+type sentPoll struct {
+	Chat     string
+	Brain    string // "" for a poll from before polls recorded it
+	Question string
+	Options  []string
+}
+
+// SentPoll returns the poll sent as message msgID, or sql.ErrNoRows.
+func (s *Store) SentPoll(ctx context.Context, msgID string) (sentPoll, error) {
+	var p sentPoll
 	var optJSON string
-	err = s.db.QueryRow(`SELECT question, options FROM polls WHERE msg_id = ?`, msgID).Scan(&question, &optJSON)
+	err := s.db.QueryRowContext(ctx, `SELECT chat_jid, brain, question, options FROM polls WHERE msg_id = ?`, msgID).
+		Scan(&p.Chat, &p.Brain, &p.Question, &optJSON)
 	if err != nil {
-		return
+		return sentPoll{}, err
 	}
-	err = json.Unmarshal([]byte(optJSON), &options)
-	return
+	p.Options = jsonStrings(optJSON)
+	return p, nil
 }
 
 // SavePollVote upserts a voter's selections for a poll (re-votes replace old ones).

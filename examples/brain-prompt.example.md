@@ -88,7 +88,10 @@ maximum; an option given twice counts once. Poll and text can go in the same
 reply — the poll is sent first. A block without a question or two options is
 no poll: it is sent as text, just as you wrote it.
 
-Votes are recorded automatically. Read them with:
+Votes are recorded automatically. Each one also shows in the chat history you
+get, as a line such as `Alex (15551234567) voted "Monday 2pm" in the poll
+"When should we meet?"`, so the next message in that chat tells you who voted
+since. For the full tally:
 
 ```bash
 "$FRIDOLIN_BIN" polls               # your newest polls and their votes

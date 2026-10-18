@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"crypto/sha256"
 	"fmt"
 	"reflect"
@@ -9,6 +10,8 @@ import (
 	"strings"
 	"testing"
 	"unicode/utf8"
+
+	"go.mau.fi/whatsmeow/types"
 )
 
 func TestExtractPolls(t *testing.T) {
@@ -302,4 +305,80 @@ func checkPolls(t *testing.T, text string) ([]pollData, string) {
 		t.Errorf("remaining text %q is not valid UTF-8", remaining)
 	}
 	return polls, remaining
+}
+
+func TestVoteText(t *testing.T) {
+	cases := []struct {
+		selected []string
+		want     string
+	}{
+		{[]string{"Monday 2pm"}, `voted "Monday 2pm" in the poll "When should we meet?"`},
+		{[]string{"Monday 2pm", "Tuesday 3pm"}, `voted "Monday 2pm", "Tuesday 3pm" in the poll "When should we meet?"`},
+		{nil, `took back their vote in the poll "When should we meet?"`},
+	}
+	for _, c := range cases {
+		if got := voteText("When should we meet?", c.selected); got != c.want {
+			t.Errorf("voteText(%q) = %q, want %q", c.selected, got, c.want)
+		}
+	}
+}
+
+// A vote reaches the brain that sent the poll, as an event in its
+// history: its next run in that chat sees who voted for what, and the
+// identity map names the voter. That is the brain that sent it, even in a
+// chat another brain owns.
+func TestPollVoteBecomesAHistoryEvent(t *testing.T) {
+	hash := func(s string) []byte { h := sha256.Sum256([]byte(s)); return h[:] }
+	voter := types.NewJID("15551234567", types.DefaultUserServer)
+	for _, c := range []struct {
+		name, sentBy, want string
+	}{
+		{"its own chat", "main", "main"},
+		{"a chat another brain owns", "files", "files"},
+		{"a poll from before polls kept their brain", "", "main"},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			tb, mainBrain := newMainBridge(t, "")
+			tb.addFolderBrain(t, BrainManifest{ID: "files", Name: "Files"})
+			if err := tb.store.SavePoll("3EB0POLL", testGroup, c.sentBy, "When should we meet?", []string{"Monday 2pm", "Tuesday 3pm"}); err != nil {
+				t.Fatal(err)
+			}
+			tb.whatsApp().recordVote("3EB0POLL", voter, [][]byte{hash("Tuesday 3pm")})
+
+			for _, br := range []*Brain{mainBrain, tb.brainMgr.Get("files")} {
+				h := readHistory(t, br)
+				if br.ID() != c.want {
+					if len(h) != 0 {
+						t.Errorf("brain %s got %+v, want nothing", br.ID(), h)
+					}
+					continue
+				}
+				want := historyEntry{From: "15551234567", Chat: testGroup, Type: historyEvent, Text: `voted "Tuesday 3pm" in the poll "When should we meet?"`}
+				if len(h) != 1 || h[0].From != want.From || h[0].Chat != want.Chat || h[0].Type != want.Type || h[0].Text != want.Text {
+					t.Fatalf("brain %s history = %+v, want [%+v]", br.ID(), h, want)
+				}
+				preface := br.composePreface([]string{testGroup}, true)
+				if !strings.Contains(preface, `15551234567 voted "Tuesday 3pm" in the poll "When should we meet?"`) {
+					t.Errorf("preface = %q, want the vote", preface)
+				}
+			}
+			if p, err := tb.store.Poll(context.Background(), "3EB0POLL"); err != nil || p.TotalVoters != 1 {
+				t.Errorf("stored poll = %+v, %v; want one voter", p, err)
+			}
+		})
+	}
+}
+
+// A poll a brain sends is kept with that brain's id.
+func TestSentPollRemembersItsBrain(t *testing.T) {
+	tb, _ := newMainBridge(t, "")
+	tb.sendResponse(context.Background(), "main", testDMChat, "[POLL]\nQuestion: Lunch?\n- yes\n- no\n[/POLL]")
+	polls, err := tb.store.RecentPolls(context.Background(), "", 10, func(string) bool { return true })
+	if err != nil || len(polls) != 1 {
+		t.Fatalf("polls = %+v, %v; want the one sent", polls, err)
+	}
+	p, err := tb.store.SentPoll(context.Background(), polls[0].MsgID)
+	if err != nil || p.Brain != "main" || p.Chat != testDMChat || p.Question != "Lunch?" {
+		t.Errorf("SentPoll = %+v, %v; want brain main's poll in %s", p, err, testDMChat)
+	}
 }

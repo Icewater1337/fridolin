@@ -37,7 +37,7 @@ func TestNewStoreCreatesPrivateDB(t *testing.T) {
 	setUmask(t, 0o022)
 	dbPath := filepath.Join(t.TempDir(), "bridge.db")
 	s := openTestStore(t, dbPath)
-	if err := s.SavePoll("m1", "a@s.whatsapp.net", "Lunch?", []string{"yes", "no"}); err != nil {
+	if err := s.SavePoll("m1", "a@s.whatsapp.net", "main", "Lunch?", []string{"yes", "no"}); err != nil {
 		t.Fatal(err)
 	}
 	if got := permOf(t, dbPath); got != 0o600 {
@@ -199,4 +199,42 @@ func modeOf(t *testing.T, path string, extra os.FileMode) os.FileMode {
 		t.Fatal(err)
 	}
 	return st.Mode() & (os.ModePerm | extra)
+}
+
+// A bridge.db from before the migrations were versioned gets the newer
+// ones, and what it held stays: a poll it kept still counts its votes.
+func TestStoreMigratesAnUnversionedDatabase(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "bridge.db")
+	db, err := sql.Open("sqlite3", "file:"+dbPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, stmt := range []string{
+		`CREATE TABLE polls (msg_id TEXT PRIMARY KEY, chat_jid TEXT NOT NULL, question TEXT NOT NULL, options TEXT NOT NULL, created_at DATETIME NOT NULL)`,
+		`CREATE TABLE poll_votes (poll_msg_id TEXT NOT NULL, voter_jid TEXT NOT NULL, selected_options TEXT NOT NULL, voted_at DATETIME NOT NULL, PRIMARY KEY (poll_msg_id, voter_jid))`,
+		`INSERT INTO polls VALUES ('old', '120363000000000000@g.us', 'Lunch?', '["yes","no"]', '2026-01-01 00:00:00')`,
+	} {
+		if _, err := db.Exec(stmt); err != nil {
+			t.Fatal(err)
+		}
+	}
+	db.Close()
+
+	for i := 0; i < 2; i++ { // and opening it again changes nothing
+		s, err := NewStore(&Config{DBPath: dbPath, LogLevel: "error"})
+		if err != nil {
+			t.Fatalf("open %d: %v", i+1, err)
+		}
+		var version int
+		if err := s.db.QueryRow(`SELECT version FROM fridolin_version`).Scan(&version); err != nil || version != len(appMigrations) {
+			t.Errorf("open %d: version %d, %v; want %d", i+1, version, err, len(appMigrations))
+		}
+		p, err := s.SentPoll(t.Context(), "old")
+		if err != nil || p.Brain != "" || p.Question != "Lunch?" || len(p.Options) != 2 {
+			t.Errorf("open %d: the old poll is %+v, %v", i+1, p, err)
+		}
+		if err := s.Close(); err != nil {
+			t.Fatal(err)
+		}
+	}
 }

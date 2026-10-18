@@ -51,7 +51,8 @@ A file over 100 MB (`max_media_mb`) is skipped, and so is one that cannot be
 downloaded within two minutes; the sender is told either way.
 
 **Real polls.** The assistant can send native WhatsApp polls and read the votes
-back:
+back; each vote lands in its chat history, so it sees new votes the next time
+someone writes:
 
 ```
 [POLL]

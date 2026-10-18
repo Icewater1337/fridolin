@@ -82,8 +82,9 @@ Edits you make in the dashboard update both copies.
 The bridge itself, outside the sandbox, works on these files in a brain's
 folder: it reads the prompt file, `brain.json` (to tell when it changed on
 disk) and `memories/people/whatsapp-identity-map.md`, appends every message
-to `conversation-history.jsonl` and reads it back, and logs what each run
-did in `claude-stream.log`, each run under a line naming its chat, sender,
+to `conversation-history.jsonl` (type `in` or `out`, and `event` for a vote
+in one of the brain's polls) and reads it back, and logs what each run did
+in `claude-stream.log`, each run under a line naming its chat, sender,
 process and model, and after it the end of what the CLI wrote to stderr,
 under a line naming the run. A run that finds the log over 5 MB first moves
 it to `claude-stream.1.log`, replacing the one before. A brain can change

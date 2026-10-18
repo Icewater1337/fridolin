@@ -10,6 +10,8 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+
+	"go.mau.fi/whatsmeow/types"
 )
 
 // Polls a brain sends. A reply marks one as a block:
@@ -116,11 +118,12 @@ func parsePollBlock(block string, maxSelectable int) (pollData, bool) {
 	return pollData{Question: question, Options: options, MaxSelectable: maxSelectable}, true
 }
 
-// sendPolls sends each poll to jid and keeps it, so the votes can be
-// matched back to its options. They go before the text of the reply,
-// as the example brain prompt tells brains: "the poll is sent first". A
-// poll WhatsApp refuses goes out as a numbered list instead.
-func (b *Bridge) sendPolls(ctx context.Context, jid string, polls []pollData) {
+// sendPolls sends each poll brain wrote to jid and keeps it, so the votes
+// can be matched back to its options and reach brain. They go before the
+// text of the reply, as the example brain prompt tells brains: "the poll
+// is sent first". A poll WhatsApp refuses goes out as a numbered list
+// instead.
+func (b *Bridge) sendPolls(ctx context.Context, brain, jid string, polls []pollData) {
 	for _, p := range polls {
 		log.Printf("Sending poll to %s: %q (%d options)", jid, p.Question, len(p.Options))
 		msgID, err := b.wa.SendPoll(ctx, jid, p.Question, p.Options, p.MaxSelectable)
@@ -129,7 +132,7 @@ func (b *Bridge) sendPolls(ctx context.Context, jid string, polls []pollData) {
 			_ = b.wa.SendMessage(ctx, jid, pollAsText(p))
 			continue
 		}
-		if err := b.store.SavePoll(msgID, jid, p.Question, p.Options); err != nil {
+		if err := b.store.SavePoll(msgID, jid, brain, p.Question, p.Options); err != nil {
 			log.Printf("failed to save poll %s to DB: %v", msgID, err)
 		}
 	}
@@ -159,4 +162,40 @@ func matchVote(hashes [][]byte, options []string) []string {
 		}
 	}
 	return selected
+}
+
+// pollVote is a vote the bridge recorded in one of its polls.
+type pollVote struct {
+	Poll     sentPoll
+	Voter    types.JID // as canonicalUser has them
+	Selected []string  // empty: the vote was taken back
+}
+
+// recordVote writes a vote into the history of the brain that sent the
+// poll, as an event: the brain's next run in that chat sees who voted
+// for what, without anyone asking it to look. Polls from before the
+// bridge kept their brain go to the brain that owns their chat.
+func (b *Bridge) recordVote(v pollVote) {
+	br := b.brainMgr.Get(v.Poll.Brain)
+	if br == nil {
+		br = b.brainMgr.BrainFor(v.Poll.Chat, isGroupJID(v.Poll.Chat))
+	}
+	if br == nil {
+		log.Printf("poll vote in %s: no brain to tell", v.Poll.Chat)
+		return
+	}
+	br.appendHistory(v.Poll.Chat, v.Voter.User, voteText(v.Poll.Question, v.Selected), historyEvent)
+}
+
+// voteText is how a vote reads in a brain's history, after the voter's
+// name: `voted "Monday 2pm" in the poll "When should we meet?"`.
+func voteText(question string, selected []string) string {
+	if len(selected) == 0 {
+		return fmt.Sprintf("took back their vote in the poll %q", question)
+	}
+	quoted := make([]string, len(selected))
+	for i, s := range selected {
+		quoted[i] = strconv.Quote(s)
+	}
+	return fmt.Sprintf("voted %s in the poll %q", strings.Join(quoted, ", "), question)
 }
