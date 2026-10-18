@@ -340,3 +340,29 @@ func TestParseStreamUnknownEvents(t *testing.T) {
 		})
 	}
 }
+
+// Result events are terminal. Output after the first is drained without
+// changing the outcome, and sinks see the same empty-result error as the
+// caller that waits for EOF.
+func TestParseStreamKeepsTheFirstResult(t *testing.T) {
+	cases := []struct {
+		name, stream, text string
+		err                error
+	}{
+		{"empty result", `{"type":"result","result":""}`, "", errNoResult},
+		{"answer then error", `{"type":"result","result":"done"}` + "\n" + `{"type":"result","is_error":true,"result":"late error"}`, "done", nil},
+		{"answer then answer", `{"type":"result","result":"done"}` + "\n" + `{"type":"result","result":"late answer"}`, "done", nil},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			var sink recordingSink
+			res := parseStream(strings.NewReader(tc.stream+"\n"), &sink)
+			if res.Text != tc.text || !errors.Is(res.Err, tc.err) {
+				t.Errorf("result = %+v, want text %q and error %v", res, tc.text, tc.err)
+			}
+			if len(sink.results) != 1 || sink.results[0].Text != res.Text || sink.results[0].Err != res.Err {
+				t.Errorf("sink results = %+v, want the same terminal result %+v", sink.results, res)
+			}
+		})
+	}
+}

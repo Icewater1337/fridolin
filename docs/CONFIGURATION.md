@@ -410,7 +410,9 @@ reach, but it no longer holds the brain either: the bridge stops waiting
 for the output it holds open five seconds after the CLI exited, also when
 the run was stopped or reached the limit above. The answer goes out
 either way, also when a stop or the limit above comes within those five
-seconds. A CLI error already reported is kept in the same way.
+seconds. The first result is final: a CLI error already reported is kept
+in the same way, and a result with no answer is still an empty-output
+error. Later output is drained without replacing that result.
 
 ### `max_concurrent_runs`
 

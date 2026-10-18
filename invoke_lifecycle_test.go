@@ -274,10 +274,12 @@ func TestCancellationKeepsTheRecordedResult(t *testing.T) {
 		name     string
 		cliError string
 		timeout  bool
+		empty    bool
 	}{
-		{"stop after answer", "", false},
-		{"stop after error", "API quota exhausted", false},
-		{"timeout after error", "API quota exhausted", true},
+		{"stop after answer", "", false, false},
+		{"stop after empty result", "", false, true},
+		{"stop after error", "API quota exhausted", false, false},
+		{"timeout after error", "API quota exhausted", true, false},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -286,7 +288,11 @@ func TestCancellationKeepsTheRecordedResult(t *testing.T) {
 			t.Cleanup(func() { postResultGrace, runWaitDelay = prevGrace, prevDelay })
 			mgr, _, home := queueTestManager(t, 0, "")
 			setsidChildren(t, home, "stdout,stderr")
-			t.Setenv("FRIDOLIN_FAKE_RESULT_ERROR", tc.cliError)
+			if tc.empty {
+				t.Setenv("FRIDOLIN_FAKE_RESULT", `{"type":"result","result":""}`)
+			} else if tc.cliError != "" {
+				t.Setenv("FRIDOLIN_FAKE_RESULT", `{"type":"result","is_error":true,"result":`+strconv.Quote(tc.cliError)+`}`)
+			}
 			br := mgr.Get("a")
 			ctx, cancel := context.WithCancel(context.Background())
 			if tc.timeout {
@@ -307,7 +313,11 @@ func TestCancellationKeepsTheRecordedResult(t *testing.T) {
 			}
 			select {
 			case res := <-result:
-				if tc.cliError == "" {
+				if tc.empty {
+					if !errors.Is(res.Err, errNoResult) {
+						t.Errorf("result = %+v, want errNoResult", res)
+					}
+				} else if tc.cliError == "" {
 					if res.Err != nil || !strings.HasSuffix(res.Text, "says: answer before stopping") {
 						t.Errorf("result = %+v, want the recorded answer", res)
 					}

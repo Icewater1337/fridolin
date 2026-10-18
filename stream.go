@@ -134,17 +134,17 @@ func parseAgentStream(r io.Reader, sink StreamSink, provider string) RunResult {
 		line, size, err := readStreamLine(in, buf)
 		buf = line
 		switch {
-		case p.err != nil:
-			// An error result is the run's last word. What comes after it
-			// is read all the same, to the end: a CLI left with output
-			// nobody reads would block writing it.
 		case size > maxStreamLine:
 			sink.Log(fmt.Sprintf("⚠️ Skipped a line of %d bytes, longer than the %d MiB the bridge reads", size, maxStreamLine>>20))
+		case p.done:
+			// A result is the run's last word. What comes after it
+			// is read all the same, to the end: a CLI left with output
+			// nobody reads would block writing it.
 		default:
 			p.event(line)
 		}
 		switch {
-		case p.err != nil && err != nil, err == io.EOF:
+		case p.done && err != nil, err == io.EOF:
 			return p.outcome()
 		case errors.Is(err, os.ErrClosed):
 			return RunResult{Err: errBrainInterrupted}
@@ -186,7 +186,8 @@ type streamParser struct {
 	provider string
 	codex    codexStream
 	sink     StreamSink
-	result   string          // the last result's
+	done     bool            // the first result arrived
+	result   string          // the first result's
 	lastText string          // the last text the model wrote
 	asked    bool            // a question went out
 	err      error           // the run's error result
@@ -231,6 +232,7 @@ func (p *streamParser) event(line []byte) {
 		}
 
 	case "result":
+		p.done = true
 		if event.IsError || event.Error != "" {
 			errMsg := event.Error
 			if errMsg == "" {
@@ -246,12 +248,12 @@ func (p *streamParser) event(line []byte) {
 			}
 			p.sink.Log("❌ Error: " + errMsg)
 			p.err = &cliError{msg: errMsg, provider: p.provider}
-			p.sink.Result(RunResult{Err: p.err, Asked: p.asked})
+			p.sink.Result(p.outcome())
 			return
 		}
 		p.result = event.Result
 		p.sink.Log("✅ Result: " + truncate(p.result, 2000))
-		p.sink.Result(RunResult{Text: p.result, Asked: p.asked})
+		p.sink.Result(p.outcome())
 
 	case "user", "system":
 		// Tool results, and the CLI's own notes (its settings, a
