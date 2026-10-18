@@ -518,12 +518,15 @@ func findPlaudCLI(c string) (string, error) {
 }
 
 // brainPlaudPATH is the PATH brains run with when plaud.brain_access lets
-// them use Plaud's CLI, or "" to keep the bridge's own. The bridge finds
+// them use Plaud's CLI, or "" to keep the bridge's own: the bridge's whole
+// PATH, which brains run with anyway (unlike the bridge's own runs of the
+// CLI, theirs are sandboxed), and the CLI's folder, since the bridge finds
 // the CLI in nvm when it is not on its PATH, which under the service it
-// often is not, so brains get the CLI's folder first, as the bridge's own
-// runs do: `plaud` and the node its #!/usr/bin/env node needs. The sandbox
-// already keeps brains from writing to every folder on that PATH (see
-// plantablePrograms).
+// often is not. That folder comes first only when it holds the node the
+// CLI's #!/usr/bin/env node needs, as in plaudPATH. Any other comes last:
+// brains find `plaud` there all the same, and nothing a brain put there
+// runs in place of a program on the bridge's PATH, such as the claude that
+// sandbox-exec starts for every brain's run.
 func brainPlaudPATH(cfg *Config) string {
 	if !cfg.Plaud.BrainAccess {
 		return ""
@@ -532,7 +535,21 @@ func brainPlaudPATH(cfg *Config) string {
 	if err != nil {
 		return ""
 	}
-	return plaudPATH(bin)
+	path := os.Getenv("PATH") + ":/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin"
+	if dir := cliNodeDir(bin); dir != "" {
+		return dir + ":" + path
+	}
+	return path + ":" + filepath.Dir(bin)
+}
+
+// cliNodeDir is the folder of the Plaud CLI at bin when that also holds a
+// node, as nvm installs them: the node the CLI was installed with. ""
+// otherwise.
+func cliNodeDir(bin string) string {
+	if dir := filepath.Dir(bin); filepath.IsAbs(dir) && lookPathIn("node", dir) != "" {
+		return filepath.Clean(dir)
+	}
+	return ""
 }
 
 // plaudOptOut keeps Plaud's CLI from sending usage statistics to Plaud's
@@ -605,10 +622,32 @@ func plaudCLIWarning(v string) string {
 	return fmt.Sprintf("Plaud's CLI %s is newer than %s, the version Fridolin was tested with, and may print things Fridolin does not read; if recordings stop arriving, install that one: npm install -g @plaud-ai/cli@%s", v, plaudCLITested, plaudCLITested)
 }
 
-// plaudPATH is the PATH the Plaud CLI runs with: its own folder first, so
-// that its #!/usr/bin/env node finds the node it was installed with.
+// plaudPATH is the PATH the Plaud CLI at bin runs with, outside the
+// sandbox, where its #!/usr/bin/env node looks node up: its own folder
+// first when that holds a node, as nvm installs them, so that it gets the
+// one it was installed with; then the folders of the bridge's PATH that
+// helperPath keeps, then helperDirs for a PATH that lacks them. Never the
+// whole PATH: a node a brain planted in a folder of it outside HOME would
+// run outside the sandbox. A CLI folder without a node comes last, and
+// still comes: the sandbox keeps brains from planting the names the bridge
+// runs in the folders of this PATH under HOME (see plantablePrograms), so
+// that none can put a node there that would move the folder first.
 func plaudPATH(bin string) string {
-	return filepath.Dir(bin) + ":" + os.Getenv("PATH") + ":/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin"
+	var dirs []string
+	first := cliNodeDir(bin)
+	if first != "" {
+		dirs = append(dirs, first)
+	}
+	rest := append(filepath.SplitList(helperPath()), helperDirs...)
+	if dir := filepath.Dir(bin); first == "" && filepath.IsAbs(dir) {
+		rest = append(rest, filepath.Clean(dir))
+	}
+	for _, dir := range rest {
+		if !slices.Contains(dirs, dir) {
+			dirs = append(dirs, dir)
+		}
+	}
+	return strings.Join(dirs, string(filepath.ListSeparator))
 }
 
 // plaudOutputLimit caps what Fridolin keeps of the CLI's stdout: a

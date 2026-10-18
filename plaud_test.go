@@ -2537,9 +2537,9 @@ func TestBrainRunsKeepPlaudTelemetryOff(t *testing.T) {
 	}
 }
 
-// With plaud.brain_access brains find the Plaud CLI, and the node next to
-// it, first on their PATH, as the bridge's own runs do; without it their
-// PATH is the bridge's.
+// With plaud.brain_access brains find the Plaud CLI on their PATH: its
+// folder comes last when it holds no node, as the test binary's does (see
+// TestBrainPlaudPATH); without it their PATH is the bridge's.
 func TestBrainsFindThePlaudCLIWhenTheyMayUseIt(t *testing.T) {
 	for _, access := range []bool{true, false} {
 		t.Run(fmt.Sprintf("brain_access=%v", access), func(t *testing.T) {
@@ -2556,8 +2556,8 @@ func TestBrainsFindThePlaudCLIWhenTheyMayUseIt(t *testing.T) {
 				}
 			}
 			cliDir := filepath.Dir(os.Args[0])
-			if first := filepath.SplitList(path)[0]; (first == cliDir) != access {
-				t.Errorf("PATH = %s, want %s first: %v", path, cliDir, access)
+			if dirs := filepath.SplitList(path); (dirs[len(dirs)-1] == cliDir) != access {
+				t.Errorf("PATH = %s, want %s last: %v", path, cliDir, access)
 			}
 		})
 	}
@@ -2858,6 +2858,130 @@ func TestFindPlaudCLIPrefersTheNewestNode(t *testing.T) {
 	got, err := findPlaudCLI("")
 	if want := filepath.Join(home, nvmNodeVersions, "v20.10.0", "bin", "plaud"); err != nil || got != want {
 		t.Errorf("findPlaudCLI = %s, %v; want %s", got, err, want)
+	}
+}
+
+// The Plaud CLI runs outside the sandbox, and its #!/usr/bin/env node
+// looks node up on the PATH it runs with. That PATH starts with the CLI's
+// own folder only when that holds the node it was installed with (nvm's
+// layout), and otherwise has that folder last, after the folders of the
+// bridge's PATH that helperPath keeps: none outside HOME, where a brain
+// may have planted a node.
+func TestPlaudPATH(t *testing.T) {
+	planted, home := plantedOutsideHome(t)
+	homeBin := filepath.Join(home, ".local", "bin")
+	t.Setenv("PATH", planted+":"+homeBin+":/usr/bin:/bin")
+	nvmBin := filepath.Join(home, nvmNodeVersions, "v22.0.0", "bin")
+	bare := filepath.Join(t.TempDir(), "bin")
+	writeExecutables(t, filepath.Join(nvmBin, "plaud"), filepath.Join(nvmBin, "node"), filepath.Join(bare, "plaud"))
+	cases := []struct {
+		name, bin, first, last string // last: "" for any
+		node                   string // the node the CLI's PATH finds first; "" for any but the planted one
+	}{
+		{"node next to the CLI", filepath.Join(nvmBin, "plaud"), nvmBin, "", filepath.Join(nvmBin, "node")},
+		{"no node next to the CLI", filepath.Join(bare, "plaud"), homeBin, bare, ""},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			path := plaudPATH(tc.bin)
+			dirs := filepath.SplitList(path)
+			if len(dirs) == 0 || dirs[0] != tc.first {
+				t.Errorf("plaudPATH = %s, want it to start with %s", path, tc.first)
+			}
+			if tc.last != "" && dirs[len(dirs)-1] != tc.last {
+				t.Errorf("plaudPATH = %s, want it to end with %s", path, tc.last)
+			}
+			for i, d := range dirs {
+				if d == planted || d == bare && i < len(dirs)-1 {
+					t.Errorf("plaudPATH = %s, which has %s", path, d)
+				}
+			}
+			for _, d := range []string{homeBin, "/usr/bin", "/bin"} {
+				if !slices.Contains(dirs, d) {
+					t.Errorf("plaudPATH = %s, which lacks %s", path, d)
+				}
+			}
+			if got := lookPathIn("node", path); tc.node != "" && got != tc.node || got == filepath.Join(planted, "node") {
+				t.Errorf("node on plaudPATH = %q, want %q", got, tc.node)
+			}
+		})
+	}
+}
+
+// TestBrainPlaudPATH: brains that may use the Plaud CLI find it on their
+// PATH also where the bridge's PATH does not have it. Its folder comes
+// ahead of the bridge's PATH only when it holds the CLI's node (nvm), and
+// in HOME the sandbox then keeps brains from planting the programs the
+// bridge runs by name there: sandbox-exec starts claude by name on that
+// PATH for every brain's run, and the CLI's #!/usr/bin/env node looks up
+// node on it. Any other CLI folder comes last, so that nothing a brain put
+// there runs in place of a program on the bridge's PATH in another
+// brain's run. The sandbox covers a CLI folder in HOME either way, so that
+// no brain can put a node in it that would move it first.
+func TestBrainPlaudPATH(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	homeBin := filepath.Join(home, ".local", "bin")
+	if err := os.MkdirAll(homeBin, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", homeBin+":/usr/bin:/bin")
+	nvmBin := filepath.Join(home, nvmNodeVersions, "v22.0.0", "bin")
+	inHome := filepath.Join(home, "tools", "plaud", "node_modules", ".bin")
+	outside := filepath.Join(t.TempDir(), "bin")
+	writeExecutables(t, filepath.Join(nvmBin, "plaud"), filepath.Join(nvmBin, "node"),
+		filepath.Join(inHome, "plaud"), filepath.Join(outside, "plaud"))
+	homes := []string{home, resolvePath(home)}
+	cases := []struct {
+		name, cliPath, dir string
+		first              bool // the CLI's folder comes first, else last
+	}{
+		{"nvm, with the CLI's node", "", nvmBin, true},
+		{"a cli_path in HOME without a node", filepath.Join(inHome, "plaud"), inHome, false},
+		{"a cli_path outside HOME without a node", filepath.Join(outside, "plaud"), outside, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg := &Config{Plaud: PlaudConfig{BrainAccess: true, CLIPath: tc.cliPath}}
+			got := brainPlaudPATH(cfg)
+			dirs := filepath.SplitList(got)
+			if want := filepath.Join(tc.dir, "plaud"); lookPathIn("plaud", got) != want {
+				t.Errorf("brainPlaudPATH = %s, on which brains do not find %s", got, want)
+			}
+			if tc.first && dirs[0] != tc.dir || !tc.first && dirs[len(dirs)-1] != tc.dir {
+				t.Errorf("brainPlaudPATH = %s, want %s first: %v", got, tc.dir, tc.first)
+			}
+			i := strings.Index(got, os.Getenv("PATH"))
+			if i < 0 {
+				t.Fatalf("brainPlaudPATH = %s, which lacks the bridge's PATH", got)
+			}
+			files, _ := NewSandboxProfiler(nil, cfg).plantablePrograms(home)
+			covered := func(dir string) bool {
+				return slices.Contains(files, filepath.Join(dir, "claude")) && slices.Contains(files, filepath.Join(dir, "node")) &&
+					slices.Contains(files, filepath.Join(dir, "sh"))
+			}
+			for _, d := range filepath.SplitList(strings.TrimSuffix(got[:i], ":")) {
+				if withinAny(d, homes) && !covered(d) {
+					t.Errorf("brainPlaudPATH = %s, whose %s comes ahead of the bridge's PATH but is not protected from planted programs", got, d)
+				}
+			}
+			if withinAny(tc.dir, homes) && !covered(tc.dir) {
+				t.Errorf("the sandbox does not keep brains from planting a node in %s", tc.dir)
+			}
+		})
+	}
+}
+
+// writeExecutables writes an executable shell script at each of paths.
+func writeExecutables(t *testing.T, paths ...string) {
+	t.Helper()
+	for _, f := range paths {
+		if err := os.MkdirAll(filepath.Dir(f), 0o700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(f, []byte("#!/bin/sh\n"), 0o700); err != nil {
+			t.Fatal(err)
+		}
 	}
 }
 

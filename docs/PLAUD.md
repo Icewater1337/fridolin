@@ -115,17 +115,26 @@ package and the `node` that runs it are read-only to brains. Unless
 `cli_path` is set, Fridolin takes the tool from the newest nvm node version
 that has it, so brains cannot write anywhere in `~/.nvm/versions/node`, and
 they cannot add a `plaud` or `node` to a `PATH` folder in your home folder
-either. One in
+either, nor to the tool's own folder when that is in your home folder.
+The tool's `#!/usr/bin/env node` finds `node` on a `PATH` of Fridolin's:
+the tool's own folder first when that holds a `node` (as with nvm), then
+only the folders of the service's `PATH` that Fridolin takes its helpers
+from (see [CONFIGURATION.md](CONFIGURATION.md#helper-programs)), and
+last the tool's folder when it holds none, so that no `node` a brain put
+in another folder of that `PATH` runs instead. One in
 `/opt/homebrew` or `/usr/local` is not protected yet; see
 [what the sandbox does not cover yet](CONFIGURATION.md#what-the-sandbox-does-not-cover-yet).
 
 **Let brains use the Plaud CLI** (`plaud.brain_access`) keeps the login in
 `~/.plaud/` instead, so brains can run `plaud search`, `plaud transcript` and
-so on themselves. Their `PATH` then starts with the tool's folder, as
-Fridolin's own runs do, so they find it, and the `node` it was installed
-with, also where the service's `PATH` does not have them. A brain could
-then also read the token — turn it on only if you want brains to look
-things up in Plaud directly.
+so on themselves. Their `PATH` then has the tool's folder as well as the
+service's whole `PATH`, so they find the tool also where the service's
+`PATH` does not have it: first when the folder holds the `node` the tool
+was installed with (as with nvm), so that they get that one, and
+otherwise last, so that nothing a brain put there runs in place of a
+program on the service's `PATH`, such as `claude` for another brain's
+run. A brain could then also read the token — turn it on only if you want
+brains to look things up in Plaud directly.
 
 Changing it does not move a login. Fridolin stops checking until you
 connect again (a check that is running ends there, and the recordings it

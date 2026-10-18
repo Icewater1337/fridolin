@@ -1047,8 +1047,8 @@ run's token for it (see [`http_listen`](#http_listen-restart)), which
 also opens [`/send` and `/ingest`](API.md#who-may-call) to the brain's own
 chats and itself;
 `PLAUD_TELEMETRY_DISABLED=1` and `PLAUD_NO_UPDATE_NOTIFIER=1` for
-[Plaud](PLAUD.md)'s CLI, with `plaud.brain_access` a `PATH` that starts
-with that CLI's folder; and `DISABLE_AUTOUPDATER=1` in the sandbox. It
+[Plaud](PLAUD.md)'s CLI, with `plaud.brain_access` a `PATH` that also
+has that CLI's folder; and `DISABLE_AUTOUPDATER=1` in the sandbox. It
 also sets `BRIDGE_DATA_DIR` and `BRIDGE_DB_PATH`, the data directory and
 database it runs with (absolute, wherever `data_dir` and `db_path` put
 them), for a brain's own scripts; and, for one release, `BRIDGE_BRAIN_ID`,
@@ -1118,6 +1118,15 @@ protects nothing. A helper installed in another folder, such as snap's
 is not found: set `backup.rclone_path` or `plaud.cli_path` to it, and
 link tmux, which has no such setting, from a folder of the service's
 `PATH` in your home folder, such as `~/.local/bin`.
+
+The Plaud CLI's `#!/usr/bin/env node` finds `node` the same way, or in
+the CLI's own folder when that holds one (as nvm installs them). A `node`
+that is only in another folder, such as a keg-only Homebrew `node@22` in
+`/opt/homebrew/opt/node@22/bin`, snap's or nix's, is not found, and every
+Plaud command fails with "env: node: No such file or directory"; setting
+`plaud.cli_path` does not help then. Link `node` into `~/.local/bin` or
+`/opt/homebrew/bin` (`brew link --force node@22`), or install the CLI
+with the `node` it should use, as nvm does.
 
 ### Where to set them
 

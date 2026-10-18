@@ -35,6 +35,14 @@ yet, so everything is under Unreleased until the first one.
 - The activity viewer runs `/usr/bin/osascript`, and its tmux and
   osascript with `PATH=/usr/bin:/bin:/usr/sbin:/sbin`; a tmux server the
   bridge starts keeps that `PATH` for windows you open in it.
+- The Plaud CLI gets its own folder first on `PATH` only when that holds
+  a `node`, as nvm installs them, and otherwise finds `node` in the
+  folders the helpers are looked up in. A `node` that is only elsewhere,
+  such as a keg-only Homebrew `node@22`, is no longer found, and every
+  Plaud command fails with "env: node: No such file or directory": link
+  it into `~/.local/bin` or `/opt/homebrew/bin`
+  (`brew link --force node@22`). Brains that `plaud.brain_access` lets
+  use the CLI get its folder last on `PATH` unless it holds a `node`.
 
 ### Added
 
