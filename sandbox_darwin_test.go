@@ -814,11 +814,12 @@ EOF'`, true},
 
 // TestSandboxKeepsTheBridgesProgramsFromBrains: the bridge runs the Claude
 // CLI, rclone and the rest outside any sandbox, found by name in the
-// folders of its PATH. A brain whose folder held such a folder could plant a
-// program there that the bridge then ran unsandboxed; under the real
-// sandbox-exec that brain does not run at all. A brain whose folder lies in
-// a PATH folder (~/assistant on PATH) still writes its own folder, and
-// nothing else there.
+// folders of its PATH, and under the real sandbox-exec no brain can change
+// them or plant one there. A brain whose folder lies in a PATH folder
+// (~/assistant on PATH) still writes its own folder, and nothing else
+// there. A brain whose folder holds a PATH folder writes it like the rest
+// of its folder: the bridge takes such a folder off its own PATH (see
+// TestSetBridgePATH), and that brain used to be refused instead.
 func TestSandboxKeepsTheBridgesProgramsFromBrains(t *testing.T) {
 	requireSandboxExec(t)
 	home := canonicalDir(t.TempDir())
@@ -851,11 +852,8 @@ func TestSandboxKeepsTheBridgesProgramsFromBrains(t *testing.T) {
 	}
 	t.Run("a brain whose folder holds a PATH folder", func(t *testing.T) {
 		t.Setenv("PATH", own+"/bin:/usr/bin:/bin")
-		if bin, args, err := sp.Command("a", "/bin/sh", []string{"-c", `mkdir -p bin && printf x > bin/rclone`}); err == nil {
-			cmd := exec.Command(bin, args...)
-			cmd.Dir = own
-			out, err := cmd.CombinedOutput()
-			t.Errorf("brain a ran (%v, %q), want it refused", err, out)
+		if allowed, out := sandboxRun(t, sp, own, "/bin/sh", "-c", `mkdir -p bin && printf x > bin/rclone`); !allowed {
+			t.Errorf("brain a could not write a program into its own bin/: %q", out)
 		}
 	})
 }

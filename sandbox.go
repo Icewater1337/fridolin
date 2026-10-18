@@ -105,6 +105,11 @@ type sandboxPolicy struct {
 	// extraDeny and extraAllow come from config.
 	extraDeny  []string
 	extraAllow []string
+
+	// brainDirs are the configured brain folders, as configured and by
+	// their real paths: the bridge runs nothing from a folder of its PATH
+	// inside one (see setBridgePATH).
+	brainDirs []string
 }
 
 // sandboxPolicyOf takes the profiles' settings from cfg.
@@ -138,6 +143,9 @@ func sandboxPolicyOf(cfg *Config) sandboxPolicy {
 	if dir := os.Getenv("CLAUDE_CONFIG_DIR"); filepath.IsAbs(dir) {
 		p.claudeDir = filepath.Clean(dir)
 	}
+	for _, o := range pathOwners(cfg) {
+		p.brainDirs = append(p.brainDirs, o.dirs...)
+	}
 	return p
 }
 
@@ -164,6 +172,9 @@ func (sp *SandboxProfiler) Update(workDirs map[string][]string, cfg *Config) {
 	sp.enabled = cfg.Sandbox.Enabled
 	sp.workDirs = wd
 	sp.sandboxPolicy = sandboxPolicyOf(cfg)
+	for _, dirs := range wd {
+		sp.brainDirs = append(sp.brainDirs, dirs...)
+	}
 }
 
 // SetConfigFile names the config.json the bridge runs with. It lives in the
@@ -976,7 +987,8 @@ func (p sandboxPolicy) protected(home string, l bridgeLayout) []protectedPath {
 		add(d, true, d+", which holds programs the bridge runs")
 	}
 	// A brain inside a PATH folder cannot put a program into it, only into
-	// its own folder below.
+	// its own folder below. A PATH folder inside a brain's folder is none
+	// of these: the bridge runs nothing from it (see bridgeProgramsOf).
 	for _, d := range progs.path {
 		add(d, false, "the folder "+d+" the bridge runs programs from")
 	}
@@ -1027,6 +1039,19 @@ func (p sandboxPolicy) bridgeProgramsOf(home string) bridgePrograms {
 	if plaudErr == nil {
 		path = append(path, filepath.SplitList(plaudPATH(plaud))...)
 	}
+	// A folder of the bridge's PATH inside a brain folder is one it runs
+	// nothing from: setBridgePATH takes it out, and only that brain's runs
+	// get it. Before it has (the brain is being added, say), it still
+	// counts as out. The folders the bridge falls back on, and those of
+	// the programs it found, count wherever they are.
+	fromPATH := map[string]bool{}
+	for _, d := range filepath.SplitList(os.Getenv("PATH")) {
+		fromPATH[filepath.Clean(d)] = true
+	}
+	path = slices.DeleteFunc(path, func(d string) bool {
+		d = filepath.Clean(d)
+		return fromPATH[d] && filepath.IsAbs(d) && (withinAny(d, p.brainDirs) || withinAny(resolvePath(d), p.brainDirs))
+	})
 	path = append(path, toolFallbackDirs()...)
 	if n, err := findNode(); err == nil {
 		// The site's processes run with node's folder first on PATH.

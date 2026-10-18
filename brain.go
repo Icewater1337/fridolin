@@ -217,6 +217,10 @@ type brainSettings struct {
 	dataDir         string // the data dir, absolute
 	dbPath          string // the bridge's DB, absolute
 	plaudPATH       string // the PATH to run with when brains may use Plaud's CLI
+	// ownPATH are the folders of the bridge's PATH inside this brain's
+	// folder, which setBridgePATH took out of the bridge's: they go first
+	// on the PATH of this brain's runs, and of no one else's.
+	ownPATH []string
 }
 
 // BrainHooks connect brains to the rest of the bridge.
@@ -1433,8 +1437,12 @@ func (br *Brain) invoke(run *brainRun, ctx context.Context, s *brainSettings, m 
 		// wherever the bridge is installed.
 		extraEnv = append(extraEnv, "FRIDOLIN_TOOLS_DIR="+s.toolsDir)
 	}
-	if s.plaudPATH != "" {
-		extraEnv = append(extraEnv, "PATH="+s.plaudPATH) // replaces the bridge's
+	if path := s.plaudPATH; path != "" || len(s.ownPATH) > 0 {
+		if path == "" {
+			path = os.Getenv("PATH")
+		}
+		dirs := append(slices.Clone(s.ownPATH), filepath.SplitList(path)...)
+		extraEnv = append(extraEnv, "PATH="+strings.Join(dirs, string(filepath.ListSeparator))) // replaces the bridge's
 	}
 	if br.hooks != nil && br.hooks.RunEnv != nil {
 		env, done := br.hooks.RunEnv(br.id)
@@ -2210,13 +2218,18 @@ func NewBrainManager(cfg *Config) (*BrainManager, error) {
 // SetHooks wires the brains to the bridge. Call before the first message.
 func (bm *BrainManager) SetHooks(h BrainHooks) { *bm.hooks = h }
 
-// Apply makes the running brains match cfg.
+// Apply makes the running brains match cfg. The bridge's PATH goes first,
+// before any brain folder is checked against it: the folders of it inside
+// a brain's folder leave it for that brain's runs (see setBridgePATH).
 func (bm *BrainManager) Apply(cfg *Config) error {
+	ownPATH := setBridgePATH(cfg)
 	specs, issues := ResolveBrains(cfg)
-	return bm.reload(specs, issues, cfg)
+	return bm.reload(specs, issues, cfg, ownPATH)
 }
 
-func (bm *BrainManager) reload(specs []BrainSpec, issues []BrainIssue, cfg *Config) error {
+// reload runs the brains specs, with issues the problems ResolveBrains
+// found and ownPATH each brain's own PATH folders (see setBridgePATH).
+func (bm *BrainManager) reload(specs []BrainSpec, issues []BrainIssue, cfg *Config, ownPATH map[string][]string) error {
 	bm.reloadMu.Lock()
 	defer bm.reloadMu.Unlock()
 
@@ -2263,6 +2276,7 @@ func (bm *BrainManager) reload(specs []BrainSpec, issues []BrainIssue, cfg *Conf
 			workDirs[m.ID] = []string{sp.Path, sp.Dir}
 		}
 		s := settingsFor(cfg, sp)
+		s.ownPATH = ownPATH[m.ID]
 		br, ok := old[m.ID]
 		if !ok || br.workDir != sp.Dir || !br.holdsFolder(sp.Dir) {
 			root, err := os.OpenRoot(sp.Dir)

@@ -582,6 +582,9 @@ func checkReport(w io.Writer, path string, cfg *Config, o checkOptions) error {
 	fmt.Fprintf(w, "  groups:    %v\n", cfg.AllowedGroups)
 	trig, _ := json.Marshal(cfg.Triggers)
 	fmt.Fprintf(w, "  triggers:  %s\n", trig)
+	// As the bridge does before it loads the brains, so that the brains
+	// and profiles are the ones it would run.
+	ownPATH := setBridgePATH(cfg)
 	specs, issues := ResolveBrains(cfg)
 	if len(specs) == 0 {
 		fmt.Fprintln(w, "  brains:    none yet — add one in the dashboard")
@@ -599,7 +602,7 @@ func checkReport(w io.Writer, path string, cfg *Config, o checkOptions) error {
 	}
 	mgr := &BrainManager{brains: map[string]*Brain{}, byGroup: map[string]*Brain{}, profiler: NewSandboxProfiler(nil, cfg), hooks: &BrainHooks{}}
 	mgr.profiler.SetConfigFile(path)
-	if err := mgr.reload(specs, issues, cfg); err != nil {
+	if err := mgr.reload(specs, issues, cfg, ownPATH); err != nil {
 		return err
 	}
 	for _, jid := range o.routes {

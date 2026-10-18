@@ -206,6 +206,16 @@ func CheckBrainPath(path string, cfg *Config, otherDirs []string) (abs string, p
 // adds a brain (CheckBrainPath), ResolveBrains for every configured brain,
 // a hand-edited brain_dirs included, and each sandbox profile again.
 func checkBrainDir(dir, configured string, cfg *Config, home string) error {
+	// A folder of the bridge's PATH inside this one is no reason: the
+	// bridge takes it off its PATH once the folder is a brain's (see
+	// setBridgePATH), as it does for every configured one.
+	p := sandboxPolicyOf(cfg)
+	for _, d := range []string{dir, configured} {
+		if d != "" {
+			p.brainDirs = append(p.brainDirs, d, canonicalDir(d))
+		}
+	}
+	protected := p.protected(home, ownLayout())
 	for _, d := range []string{dir, configured} {
 		if d == "" {
 			continue
@@ -213,7 +223,7 @@ func checkBrainDir(dir, configured string, cfg *Config, home string) error {
 		if isWithin(home, d) || isWithin(canonicalDir(home), canonicalDir(d)) {
 			return errors.New("is your home folder or holds it")
 		}
-		if what, ok := protectedIn(d, sandboxPolicyOf(cfg).protected(home, ownLayout())); ok {
+		if what, ok := protectedIn(d, protected); ok {
 			return fmt.Errorf("%s, which the sandbox keeps from brains", what)
 		}
 	}

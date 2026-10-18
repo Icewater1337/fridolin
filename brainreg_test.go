@@ -113,7 +113,8 @@ func TestResolveBrainsRefusesFoldersTheSandboxProtects(t *testing.T) {
 		{"inside ~/.claude", "~/.claude/skills/x", "inside your Claude Code folder"},
 		{"your ssh keys", "~/.ssh", "is ~/.ssh"},
 		{"inside LaunchAgents", "~/Library/LaunchAgents/x", "inside ~/Library/LaunchAgents"},
-		{"a folder holding one on the bridge's PATH", "~/tools", "the bridge runs programs from"},
+		// The bridge takes ~/tools/bin off its PATH instead.
+		{"a folder holding one on the bridge's PATH", "~/tools", ""},
 		{"a folder of its own", "~/assistant/a", ""},
 	}
 	t.Setenv("PATH", home+"/tools/bin:/usr/bin:/bin")

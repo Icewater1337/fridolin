@@ -569,10 +569,23 @@ rclone, the Plaud CLI with its npm package and node, tmux for the viewer,
 node for the site, and git, `gh`, npm and the rest it finds on its
 `PATH`). Nor can it change another brain's state or inbox. These stay
 unwritable even where a brain's own folder would cover one: a brain folder
-may not be or hold any of them, nor a folder on the bridge's `PATH`, the
-Plaud CLI's or `/opt/homebrew/bin`, `/usr/local/bin` and `~/.local/bin`,
-where it also looks, nor lie inside such a program's npm package or nvm's
-`~/.nvm/versions/node` (see [what wins](#what-wins)).
+may not be or hold any of them, nor a folder the Plaud CLI's `PATH` names
+or one of `/opt/homebrew/bin`, `/usr/local/bin` and `~/.local/bin`, where
+the bridge also looks, nor lie inside such a program's npm package or
+nvm's `~/.nvm/versions/node` (see [what wins](#what-wins)).
+
+A folder of the bridge's own `PATH` inside a brain's folder, such as a
+`bin/` with the scripts that brain's prompt runs by name, is no reason to
+refuse the brain: the bridge takes it off its own `PATH` when it loads
+the brains, and says so in its log, so it runs nothing from it, and hands
+it to that brain's runs only, first on their `PATH`. `fridolin service
+install` leaves such a folder out of the service's `PATH` too, and writes
+it to `FRIDOLIN_BRAIN_PATH` in the service file instead, from where the
+bridge hands it on the same way, and its log says which brain gets each
+of those folders (`PATH: <folder>, from FRIDOLIN_BRAIN_PATH, goes to
+brain <id>'s runs only`). A folder taken off stays off until the
+bridge restarts, also when its brain is removed: what that brain left
+there is still its own.
 
 That also means brains cannot update the Claude CLI (the bridge turns its
 auto-updater off for them, `DISABLE_AUTOUPDATER=1`; your own sessions
@@ -709,7 +722,8 @@ in this order, weakest first:
    `rules` are denied again, whatever 3 opened, and so is writing the
    bridge's binary, install folder and checkout, the programs it runs and
    the folders it finds them in (a `PATH` folder that holds the brain's
-   own folder excepted, which the brain could not write otherwise).
+   own folder excepted, which the brain could not write otherwise, and
+   one inside a brain's folder, which the bridge does not run from).
 5. What the bridge gives the brain inside those: its media inbox, its
    state and, to read, its runs' brain API tokens.
 6. What stays closed inside the brain's own places: a `deny_paths` entry
@@ -1317,6 +1331,10 @@ named the folder of the calendar tokens, is not set any more. What the
 bridge's own environment has under these names does not reach brains. The
 list lives in one place, `childEnvAllowlist` in `childenv.go`.
 
+A brain whose folder holds folders of the bridge's `PATH` gets them first
+on its `PATH` (see [writing](#writing)); no other brain's run, and nothing
+the bridge runs, gets them.
+
 Brains are not handed anything else, for example `GROQ_API_KEY`,
 `SSH_AUTH_SOCK` (your ssh-agent), the variables of a Bedrock or Vertex
 setup such as `AWS_REGION` and `CLOUD_ML_REGION`, the Claude CLI's
@@ -1413,7 +1431,8 @@ drop them:
 - **macOS (launchd):** add the keys under `EnvironmentVariables` in
   `~/Library/LaunchAgents/ai.fridolin.bridge.plist` and run
   `fridolin service restart`, which reloads the agent. Later installs keep
-  every variable there except `HOME` and `PATH`, which they set (and name
+  every variable there except `HOME`, `PATH` and `FRIDOLIN_BRAIN_PATH`,
+  which they set (and name
   the ones they kept; `--dry-run` does not show their values). An agent
   saved as a binary plist is converted with `plutil`; one that cannot be
   read stops the install, which leaves it as it is. The file is readable
@@ -1422,4 +1441,6 @@ drop them:
 
 The service's `PATH` is the one of the shell that ran the install, plus
 `~/.local/bin` and the usual system folders, so brains find the same `claude`,
-`uv`, `node` or `ffmpeg` you do. Install again after you change it.
+`uv`, `node` or `ffmpeg` you do. Its folders inside a brain's folder go to
+`FRIDOLIN_BRAIN_PATH` instead, for that brain's runs only (see
+[writing](#writing)). Install again after you change it.

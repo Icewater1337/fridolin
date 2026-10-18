@@ -525,7 +525,7 @@ func TestReloadRefusesAClashingSet(t *testing.T) {
 		t.Fatalf("specs = %+v, issues = %+v", specs, issues)
 	}
 	specs[1].Manifest.Routing.HandlesDMs = true
-	if err := mgr.reload(specs, issues, cfg); err == nil || !strings.Contains(err.Error(), "both handle DMs") {
+	if err := mgr.reload(specs, issues, cfg, nil); err == nil || !strings.Contains(err.Error(), "both handle DMs") {
 		t.Errorf("reload = %v, want the clash refused", err)
 	}
 	if mgr.Get("a") != a || mgr.Get("b") != b || mgr.BrainFor("15551234567@s.whatsapp.net", false) != a || mgr.BrainFor(group, true) != b {

@@ -20,6 +20,9 @@ bridge's data, media or credentials folder, `~/.claude`,
 `~/Library/LaunchAgents`, the keychains, the bridge's install folder or
 checkout, or must not be or hold a folder like `~/.ssh` or `~/.config`, a
 program the bridge runs or a folder it finds programs in (`~/.local/bin`).
+A folder of your `PATH` inside it is fine: the bridge runs nothing from
+it and hands it to this brain's runs only (see
+[writing](CONFIGURATION.md#writing)).
 The bridge checks configured brains the same way whenever it loads them,
 also those you add to `brain_dirs` by hand, and leaves out one that fails,
 with an issue on the Brains page. Then it writes what is missing:

@@ -1385,20 +1385,22 @@ func TestSandboxProfileProtectsTheBridgesPrograms(t *testing.T) {
 }
 
 // TestSandboxRefusesBrainFoldersHoldingItsPrograms: a brain may write its
-// own folder, so a folder that is or holds a PATH folder, or one of the
-// programs the bridge runs outside the sandbox, or lies inside the npm
-// package of one or nvm's node versions, would let it plant code there
-// that the bridge runs. Such a folder is refused, by every profile and when
-// the brains are loaded; a folder inside a PATH folder is not, since a
-// brain there writes only below it.
+// own folder, so a folder that is or holds one of the programs the bridge
+// runs outside the sandbox, or lies inside the npm package of one or nvm's
+// node versions, would let it plant code there that the bridge runs. Such
+// a folder is refused, by every profile and when the brains are loaded; a
+// folder inside a PATH folder is not, since a brain there writes only
+// below it. Nor is a folder that is or holds a folder of the bridge's PATH
+// any more, which used to be refused: the bridge runs nothing from it once
+// the folder is a brain's (see setBridgePATH).
 func TestSandboxRefusesBrainFoldersHoldingItsPrograms(t *testing.T) {
 	home := canonicalDir(t.TempDir())
 	cfg := bridgeProgramsFixture(t, home)
 	nvm := home + "/.nvm/versions/node/v22.0.0"
 	cases := []struct{ name, dir, want string }{
-		{"a PATH folder not there yet", home + "/bin2", "is the folder " + home + "/bin2 the bridge runs programs from"},
+		{"a PATH folder not there yet", home + "/bin2", ""},
 		{"a PATH folder with the Claude CLI", home + "/.local/bin", "holds the program " + home + "/.local/bin/claude the bridge runs"},
-		{"a folder holding a PATH folder not there yet", home + "/tools", "holds the folder " + home + "/tools/bin the bridge runs programs from"},
+		{"a folder holding a PATH folder not there yet", home + "/tools", ""},
 		// By the file the CLI on PATH resolves to.
 		{"the Claude CLI's install", home + "/.local/share/claude", "holds the program " + home + "/.local/bin/claude the bridge runs"},
 		{"the folder of rclone and tmux", home + "/bin", "holds the program " + home + "/bin/rclone the bridge runs"},

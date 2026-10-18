@@ -130,6 +130,11 @@ yet, so everything is under Unreleased until the first one.
 - A brain folder that is, holds or lies inside a path the sandbox protects
   is left out with an issue, also when `brain_dirs` was edited by hand;
   restores refuse such a target too.
+- The bridge runs no program from a folder of its `PATH` inside a brain's
+  folder (a `bin/` there, say): it takes it off its own `PATH`, logs it,
+  and hands it to that brain's runs only, first on their `PATH`.
+  `fridolin service install` writes such folders to `FRIDOLIN_BRAIN_PATH`
+  in the service file instead of `PATH`.
 - Backups never upload a brain folder's `.env` files, private keys or
   calendar tokens unless `backup.include_secret_files` is on, and wait up
   to two minutes for a busy brain before they copy its folder.
