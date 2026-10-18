@@ -91,4 +91,7 @@ including the Limited Use requirements.
 
 ## Contact
 
-Questions about this policy: open an issue in this repository.
+Questions about this policy: open an issue in this repository. A security
+problem, such as a way to read data this page says stays private, goes
+through [SECURITY.md](SECURITY.md) instead: it is reported privately, not
+in a public issue.

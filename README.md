@@ -876,10 +876,11 @@ Overview shows it too, with the brains it affects.
 
 ## Contributing
 
-Issues and pull requests welcome. Please don't include real phone numbers,
-group JIDs, or chat content in bug reports — redact them. The issue forms ask
-for `fridolin version`, your OS and a redacted `fridolin check`, and the pull
-request template has a short checklist.
+Issues and pull requests welcome; a security problem goes privately
+through [SECURITY.md](SECURITY.md) instead. Please don't include real
+phone numbers, group JIDs, or chat content in bug reports — redact them.
+The issue forms ask for `fridolin version`, your OS and a redacted
+`fridolin check`, and the pull request template has a short checklist.
 
 Run `scripts/install-hooks.sh` once: it blocks commits and pushes that contain
 phone numbers, WhatsApp JIDs, email addresses, home-directory paths or tokens,
@@ -935,7 +936,8 @@ from the modules' own repositories. After changing dependencies, `make
 notices` writes the file again: `make check` and CI fail while it is out
 of date, and so does the release workflow.
 
-Privacy: [PRIVACY.md](PRIVACY.md).
+Privacy: [PRIVACY.md](PRIVACY.md). Security reports:
+[SECURITY.md](SECURITY.md).
 
 Built on [whatsmeow](https://github.com/tulir/whatsmeow). Not affiliated with
 or endorsed by WhatsApp or Meta. Automating a WhatsApp account may conflict
