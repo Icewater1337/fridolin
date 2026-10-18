@@ -189,7 +189,8 @@ the version before: `fridolin service rollback`.
   reads with a note to move it.
   *Bridge* is still the product's own word: `bridge.db`, `bridge.lock`,
   the `X-Bridge-Token` header and the `BRIDGE_*` variables brains read
-  keep it. Mark a new shim like these the same way.
+  keep it. Mark a new shim like these the same way, and list it in
+  `CHANGELOG.md`, which says what changes for people who run Fridolin.
 - Run `scripts/install-hooks.sh` before committing. The hooks refuse commits
   and pushes containing phone numbers, WhatsApp JIDs, emails, home paths or
   tokens. Use placeholders: `15551234567`, `120363000000000000@g.us`,
