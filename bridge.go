@@ -91,6 +91,10 @@ type BridgeOptions struct {
 // directory's instance lock until Stop.
 func NewBridge(cfgs *ConfigStore, opts BridgeOptions) (_ *Bridge, err error) {
 	cfg := cfgs.Get()
+	// Before the lock, which is a file in the data dir.
+	if err := cfg.EnsureDirs(); err != nil {
+		return nil, err
+	}
 	// Taken before the store opens: a second bridge on the same data dir, dev
 	// mode or a test included, must not open the live WhatsApp session's
 	// database, let alone run whatsmeow's migrations on it.

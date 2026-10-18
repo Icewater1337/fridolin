@@ -164,6 +164,11 @@ for compatibility.
   `/api/dev/inbound` passes `group_members` as one from WhatsApp does: from
   a member the group's entry does not admit, or with no sender, it is
   ignored, and the Dev page says why instead of "Message injected".
+- `fridolin check`, `fridolin open` and `fridolin rotate-token` fail when
+  there is no config file where they look, a mistyped `--config` say,
+  instead of going on with the defaults, and make no `~/.fridolin`. The
+  bridge makes its data folder and the folders of `db_path` and
+  `media_dir` as it starts, not when one is saved in Settings.
 
 ### Added
 

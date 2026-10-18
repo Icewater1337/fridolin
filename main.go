@@ -405,11 +405,10 @@ func openCmd(args []string) {
 	_ = fs.Parse(args)
 	path := configPath(*cfgPath)
 
-	cfgs, err := OpenConfigStore(path)
+	cfg, err := LoadExistingConfig(path)
 	if err != nil {
 		log.Fatalf("loading config: %v", err)
 	}
-	cfg := cfgs.Get()
 	if !cfg.HTTPEnabled() || cfg.Dashboard.Disabled {
 		log.Fatalf("the dashboard is turned off in %s", path)
 	}
@@ -456,11 +455,11 @@ func rotateTokenCmd(args []string) {
 	fs := flag.NewFlagSet("rotate-token", flag.ExitOnError)
 	cfgPath := fs.String("config", "", configFlagHelp)
 	_ = fs.Parse(args)
-	cfgs, err := OpenConfigStore(configPath(*cfgPath))
+	cfg, err := LoadExistingConfig(configPath(*cfgPath))
 	if err != nil {
 		log.Fatalf("loading config: %v", err)
 	}
-	if err := rotateToken(cfgs.Get()); err != nil {
+	if err := rotateToken(cfg); err != nil {
 		log.Fatal(err)
 	}
 	fmt.Println("The dashboard token was replaced and every browser signed out. Open the dashboard again with: fridolin open")
@@ -589,7 +588,7 @@ func writeCheck(w io.Writer, o checkOptions) error {
 	if red != nil {
 		red.addConfig(path)
 	}
-	cfg, err := LoadConfig(path)
+	cfg, err := LoadExistingConfig(path)
 	if err != nil {
 		return red.err(fmt.Errorf("loading config: %w", err))
 	}

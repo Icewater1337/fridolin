@@ -37,6 +37,12 @@ cannot hold a brain, or it clashes with another), 1 when the config does
 not load. `setup.sh` shows those issues and stops before it installs in
 either case.
 
+`check`, like `fridolin open` and `fridolin rotate-token`, is about a
+bridge that is set up: with no config file where it looks, a mistyped
+`--config` say, it says so and exits with status 1, and makes nothing,
+instead of checking the defaults (`fridolin init` writes a starter
+config).
+
 For a bug report, `fridolin check --redact` prints the same with phone
 numbers, group JIDs, LIDs and email addresses masked and `~` for your home
 folder, its log lines and any `--print-sandbox` profile included.
@@ -1039,12 +1045,14 @@ Default `~/.fridolin`; an install from before the project was renamed keeps
 in the log at every start: set `data_dir` to it to keep it for good. A new
 config, from `fridolin init`, `setup.sh` or the first start, gets the folder
 chosen then (written with `~`), so later starts do not choose again.
-`db_path` and `media_dir` override individually, each also *(restart)*.
-A `media_dir` must be the bridge's alone: on the first start of a version
-with media inboxes, every folder in it and every file at its top moves to
-`.old/` in it (see [reading](#reading)). Brains cannot read it, except
-their own inbox in `media/` (`media/<brain id>/`), their own state in
-`brains/<id>/`, which they also write (see [writing](#writing)), and
+`db_path` and `media_dir` override individually, each also *(restart)*. The bridge makes the
+data dir and the folders of both as it starts, and no sooner: a folder typed
+into Settings is made by the restart that uses it. A `media_dir` must be
+the bridge's alone: on the first start of a version with media inboxes,
+every folder in it and every file at its top moves to `.old/` in it (see
+[reading](#reading)). Brains cannot read it,
+except their own inbox in `media/` (`media/<brain id>/`), their own state
+in `brains/<id>/`, which they also write (see [writing](#writing)), and
 their own runs' brain API tokens in `run-tokens/<id>/`; a `db_path` or
 `media_dir` elsewhere is denied to them too, but for the inbox.
 

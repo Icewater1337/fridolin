@@ -1,14 +1,19 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
+	"io/fs"
 	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 	"sync"
 	"testing"
 	"time"
+
+	"go.mau.fi/whatsmeow/proto/waE2E"
 )
 
 // openTxStore opens a config store on a config.json with body, in a temp
@@ -459,5 +464,111 @@ func TestConfigFileGoneIsWrittenAgain(t *testing.T) {
 	}
 	if !slices.Equal(file.AllowedNumbers, []string{"15551234567"}) || file.LogLevel != "debug" {
 		t.Errorf("config.json written again: allowed_numbers %v, log_level %q", file.AllowedNumbers, file.LogLevel)
+	}
+}
+
+// Loading and saving the configuration makes no folder: check and open
+// load it too, and must not make a ~/.fridolin for a config file that is
+// not there, and a folder typed into Settings waits for the restart that
+// uses it. The bridge makes them as it starts (EnsureDirs).
+func TestTheConfigMakesNoFolders(t *testing.T) {
+	root := t.TempDir()
+	home := filepath.Join(root, "home")
+	t.Setenv("HOME", home)
+	folders := []string{home, filepath.Join(root, "data"), filepath.Join(root, "db"), filepath.Join(root, "media"), filepath.Join(root, "new-media")}
+	noFolders := func(when string) {
+		t.Helper()
+		for _, d := range folders {
+			if _, err := os.Lstat(d); !os.IsNotExist(err) {
+				t.Errorf("%s: %s is there (%v)", when, d, err)
+			}
+		}
+	}
+
+	if _, err := LoadConfig(filepath.Join(root, "typo.json")); err != nil {
+		t.Fatal(err)
+	}
+	noFolders("loading a config file that is not there")
+
+	path := filepath.Join(root, "config.json")
+	body := fmt.Sprintf(`{"data_dir": %q, "db_path": %q, "media_dir": %q}`, folders[1], filepath.Join(folders[2], "bridge.db"), folders[3])
+	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cs, err := OpenConfigStore(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	noFolders("loading a config")
+	if _, err := cs.Update("", func(c *Config) error { c.MediaDir = folders[4]; return nil }); err != nil {
+		t.Fatal(err)
+	}
+	noFolders("saving a new media_dir")
+
+	if err := cs.Get().EnsureDirs(); err != nil {
+		t.Fatal(err)
+	}
+	for _, d := range []string{folders[1], folders[2], folders[4]} {
+		if st, err := os.Stat(d); err != nil || !st.IsDir() || st.Mode().Perm() != 0o700 {
+			t.Errorf("EnsureDirs: %s is %v, %v; want a 0700 folder", d, st, err)
+		}
+	}
+}
+
+// check, open and rotate-token on a config file that is not there, a
+// mistyped --config say, fail and make nothing, instead of reporting the
+// defaults as a config that is fine.
+func TestCommandsRefuseAMissingConfig(t *testing.T) {
+	for _, args := range [][]string{{"check"}, {"open", "--print"}, {"rotate-token"}} {
+		t.Run(args[0], func(t *testing.T) {
+			root, home := fixtureHome(t)
+			typo := filepath.Join(root, "typo.json")
+			before := treeOf(t, root)
+			out, code := runBridgeCLI(t, root, append(args, "--config", typo)...)
+			if code == 0 || !strings.Contains(out, "no config file at "+typo+" (run fridolin init)") {
+				t.Errorf("fridolin %s on a missing config: exit %d, %q", args[0], code, out)
+			}
+			if after := treeOf(t, root); !slices.Equal(after, before) {
+				t.Errorf("it made %v (before: %v)", after, before)
+			}
+			if _, err := os.Lstat(filepath.Join(home, ".fridolin")); !os.IsNotExist(err) {
+				t.Errorf("~/.fridolin is there: %v", err)
+			}
+		})
+	}
+}
+
+// treeOf lists what is below root, but the folders runBridgeCLI makes for
+// the command it runs: bin/, with the bridge binary, and tmp/, its TMPDIR.
+func treeOf(t *testing.T, root string) []string {
+	t.Helper()
+	var out []string
+	err := filepath.WalkDir(root, func(p string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		rel, _ := filepath.Rel(root, p)
+		if top, _, _ := strings.Cut(rel, string(filepath.Separator)); rel != "." && top != "bin" && top != "tmp" {
+			out = append(out, rel)
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return out
+}
+
+// A download makes the media folder when it is not there, as after a
+// media_dir saved in Settings and before the restart.
+func TestDownloadMakesTheMediaFolder(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "media")
+	doc := attachment{kind: "document", media: &waE2E.DocumentMessage{}, name: "scan.pdf"}
+	path, err := saveAttachment(context.Background(), &fakeDownloader{body: "%PDF-1.7"}, dir, doc, 1<<20)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if path != filepath.Join(dir, "scan.pdf") {
+		t.Errorf("saved as %q", path)
 	}
 }
