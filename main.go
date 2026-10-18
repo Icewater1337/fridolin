@@ -28,6 +28,8 @@ Usage:
                                            validate the configuration and show routing
   fridolin init [--claude-path PATH] [--data-dir DIR]
                                            write a starter config (if there is none)
+  fridolin paths [--json]                  the config file and data dir in use, and
+                                           where each came from
   fridolin service install|rollback|restart|status|uninstall
                                            run the bridge in the background (launchd or
                                            systemd) from a copy outside the checkout;
@@ -69,6 +71,8 @@ func main() {
 		rotateTokenCmd(args)
 	case "init":
 		initCmd(args)
+	case "paths":
+		os.Exit(pathsCmd(args, os.Stdout, os.Stderr))
 	case "mcp-site":
 		mcpSiteCmd()
 	case "service":
@@ -98,16 +102,98 @@ const configFlagHelp = "config file (default: $FRIDOLIN_CONFIG, else ~/.fridolin
 // project's config.json, and a dashboard save would rewrite it. CONFIG_FILE,
 // the variable's old name, is ignored, and said so.
 func configPath(flagValue string) string {
+	path, _ := configPathFrom(flagValue)
+	return path
+}
+
+// Where the config file came from, as the log and `fridolin paths` name it.
+const (
+	configFromFlag    = "--config"
+	configFromEnv     = "FRIDOLIN_CONFIG"
+	configFromDefault = "default"
+)
+
+// configPathFrom is configPath, and says where the file came from.
+func configPathFrom(flagValue string) (path, source string) {
 	if old := os.Getenv("CONFIG_FILE"); old != "" {
 		log.Printf("warning: CONFIG_FILE=%s is ignored: set FRIDOLIN_CONFIG instead, or pass --config", old)
 	}
 	if flagValue != "" {
-		return flagValue
+		return flagValue, configFromFlag
 	}
 	if p := os.Getenv("FRIDOLIN_CONFIG"); p != "" {
-		return p
+		return p, configFromEnv
 	}
-	return filepath.Join(defaultDataDir(homeDir()), "config.json")
+	return filepath.Join(defaultDataDir(homeDir()), "config.json"), configFromDefault
+}
+
+// resolvedPaths are the config file and the data dir a command uses, both
+// absolute, and where each came from.
+type resolvedPaths struct {
+	Config        string `json:"config"`
+	ConfigSource  string `json:"config_source"`
+	DataDir       string `json:"data_dir"`
+	DataDirSource string `json:"data_dir_source"`
+}
+
+// resolvePaths finds the config file as configPath does and the data dir it
+// names, as loading it would, without creating either.
+func resolvePaths(configFlag string) (resolvedPaths, error) {
+	home := homeDir()
+	if home == "" {
+		return resolvedPaths{}, errors.New("getting home dir: $HOME is not set")
+	}
+	path, source := configPathFrom(configFlag)
+	// A missing file is a fresh install, which gets the default data dir.
+	var file struct {
+		DataDir string `json:"data_dir"`
+	}
+	if data, err := os.ReadFile(path); err == nil {
+		if err := json.Unmarshal(data, &file); err != nil {
+			return resolvedPaths{}, fmt.Errorf("parsing config file %q: %w", path, err)
+		}
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return resolvedPaths{}, fmt.Errorf("reading config file %q: %w", path, err)
+	}
+	dir, dirSource := resolveDataDir(file.DataDir, home)
+	return resolvedPaths{Config: absPath(path), ConfigSource: source, DataDir: absPath(dir), DataDirSource: dirSource}, nil
+}
+
+// pathsCmd prints the config file and the data dir the other commands use
+// with this --config and environment, and where each came from, as
+// name=value lines, or with --json as one object. setup.sh asks it rather
+// than repeat the rules in shell.
+func pathsCmd(args []string, stdout, stderr io.Writer) int {
+	fs := flag.NewFlagSet("paths", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	cfgPath := fs.String("config", "", configFlagHelp)
+	asJSON := fs.Bool("json", false, "print one JSON object")
+	switch err := fs.Parse(args); {
+	case errors.Is(err, flag.ErrHelp):
+		return 0
+	case err != nil:
+		return 2 // the flag package has said what is wrong
+	case fs.NArg() > 0:
+		fmt.Fprintf(stderr, "fridolin paths takes no arguments, got %q\n", fs.Args())
+		return 2
+	}
+	p, err := resolvePaths(*cfgPath)
+	if err != nil {
+		fmt.Fprintf(stderr, "fridolin paths: %v\n", err)
+		return 1
+	}
+	if *asJSON {
+		enc := json.NewEncoder(stdout)
+		enc.SetEscapeHTML(false)
+		enc.SetIndent("", "  ")
+		if err := enc.Encode(p); err != nil {
+			fmt.Fprintf(stderr, "fridolin paths: %v\n", err)
+			return 1
+		}
+		return 0
+	}
+	fmt.Fprintf(stdout, "config=%s\nconfig_source=%s\ndata_dir=%s\ndata_dir_source=%s\n", p.Config, p.ConfigSource, p.DataDir, p.DataDirSource)
+	return 0
 }
 
 // starterConfig is written on the very first run, so the bridge can start and

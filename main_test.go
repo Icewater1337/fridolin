@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"encoding/json"
 	"errors"
 	"flag"
 	"io"
@@ -423,6 +424,151 @@ func TestRunFlags(t *testing.T) {
 			}
 			if c.wantErr != "" && !strings.Contains(out.String(), "fridolin check [--route JID ...]") {
 				t.Errorf("printed %q, want the usage text", out.String())
+			}
+		})
+	}
+}
+
+func TestPaths(t *testing.T) {
+	// setup.sh asks the build for the config file and the data dir instead
+	// of keeping its own copy of the rules, the legacy folder among them.
+	// "home/" and "other/" stand for two temp dirs; the files and folders
+	// listed are made first.
+	tests := []struct {
+		name        string
+		flag, env   string // --config and FRIDOLIN_CONFIG; "" means none
+		config      string // the config file's contents; "" means none
+		dirs        []string
+		want        resolvedPaths
+		wantMissing []string // made by nothing, so still missing after
+	}{
+		{"a fresh install", "", "", "", nil,
+			resolvedPaths{"home/.fridolin/config.json", "default", "home/.fridolin", "default"},
+			[]string{"home/.fridolin"}},
+		{"an install from before the rename", "", "", "", []string{"home/.whatsapp-claude-bridge/"},
+			resolvedPaths{"home/.whatsapp-claude-bridge/config.json", "default", "home/.whatsapp-claude-bridge", "legacy"},
+			[]string{"home/.fridolin"}},
+		{"both folders", "", "", "", []string{"home/.fridolin/", "home/.whatsapp-claude-bridge/"},
+			resolvedPaths{"home/.fridolin/config.json", "default", "home/.fridolin", "default"}, nil},
+		{"FRIDOLIN_CONFIG with a data_dir", "", "other/env.json", `{"data_dir": "~/data"}`, nil,
+			resolvedPaths{"other/env.json", "FRIDOLIN_CONFIG", "home/data", "config"},
+			[]string{"home/data", "home/.fridolin"}},
+		{"--config wins over FRIDOLIN_CONFIG", "other/flag.json", "other/env.json", `{"data_dir": "other/data"}`, nil,
+			resolvedPaths{"other/flag.json", "--config", "other/data", "config"}, []string{"other/data"}},
+		{"a config without data_dir", "other/flag.json", "", `{"allowed_numbers": []}`, nil,
+			resolvedPaths{"other/flag.json", "--config", "home/.fridolin", "default"}, []string{"home/.fridolin"}},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			home, other := canonicalDir(t.TempDir()), canonicalDir(t.TempDir())
+			t.Setenv("HOME", home)
+			abs := func(p string) string {
+				if rest, ok := strings.CutPrefix(p, "home/"); ok {
+					return filepath.Join(home, rest)
+				}
+				return filepath.Join(other, strings.TrimPrefix(p, "other/"))
+			}
+			clearEnv(t, "FRIDOLIN_CONFIG", "CONFIG_FILE")
+			if tc.env != "" {
+				t.Setenv("FRIDOLIN_CONFIG", abs(tc.env))
+			}
+			for _, d := range tc.dirs {
+				if err := os.MkdirAll(abs(d), 0o700); err != nil {
+					t.Fatal(err)
+				}
+			}
+			var args []string
+			if tc.flag != "" {
+				args = []string{"--config", abs(tc.flag)}
+			}
+			if tc.config != "" {
+				src := tc.flag
+				if src == "" {
+					src = tc.env
+				}
+				body := strings.ReplaceAll(tc.config, `"other/`, `"`+other+`/`)
+				if err := os.WriteFile(abs(src), []byte(body), 0o600); err != nil {
+					t.Fatal(err)
+				}
+			}
+			want := resolvedPaths{abs(tc.want.Config), tc.want.ConfigSource, abs(tc.want.DataDir), tc.want.DataDirSource}
+
+			var out, errs bytes.Buffer
+			if code := pathsCmd(args, &out, &errs); code != 0 {
+				t.Fatalf("exit %d: %s", code, errs.String())
+			}
+			wantLines := "config=" + want.Config + "\nconfig_source=" + want.ConfigSource +
+				"\ndata_dir=" + want.DataDir + "\ndata_dir_source=" + want.DataDirSource + "\n"
+			if out.String() != wantLines {
+				t.Errorf("printed\n%s\nwant\n%s", out.String(), wantLines)
+			}
+
+			out.Reset()
+			if code := pathsCmd(append(args, "--json"), &out, &errs); code != 0 {
+				t.Fatalf("--json: exit %d: %s", code, errs.String())
+			}
+			var got resolvedPaths
+			if err := json.Unmarshal(out.Bytes(), &got); err != nil || got != want {
+				t.Errorf("--json printed %s (%v), want %+v", out.String(), err, want)
+			}
+			for _, p := range tc.wantMissing {
+				if _, err := os.Stat(abs(p)); !errors.Is(err, fs.ErrNotExist) {
+					t.Errorf("%s exists after paths (%v), which must create nothing", abs(p), err)
+				}
+			}
+		})
+	}
+}
+
+func TestPathsAgreesWithTheLoadedConfig(t *testing.T) {
+	// What paths reports is the data dir the bridge then runs on. HOME
+	// stands for the test's home folder.
+	for _, c := range []struct{ name, dataDir string }{
+		{"no data_dir", ""},
+		{"one under ~", "~/elsewhere"},
+		{"an absolute one", "HOME/abs-data"},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			home := canonicalDir(t.TempDir())
+			t.Setenv("HOME", home)
+			dataDir := strings.Replace(c.dataDir, "HOME", home, 1)
+			path := writeConfig(t, `{"data_dir": "`+dataDir+`"}`)
+			p, err := resolvePaths(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			cfg, err := LoadConfig(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if p.DataDir != cfg.DataDir {
+				t.Errorf("paths says %s, the bridge runs on %s", p.DataDir, cfg.DataDir)
+			}
+		})
+	}
+}
+
+func TestPathsRefuses(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	clearEnv(t, "FRIDOLIN_CONFIG", "CONFIG_FILE")
+	cases := []struct {
+		name string
+		args []string
+		code int
+		want string
+	}{
+		{"a config that is no JSON", []string{"--config", writeConfig(t, `{"data_dir": `)}, 1, "parsing config file"},
+		{"an argument", []string{"data_dir"}, 2, "takes no arguments"},
+		{"an unknown flag", []string{"--data-dir", "x"}, 2, "flag provided but not defined"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			var out, errs bytes.Buffer
+			if code := pathsCmd(c.args, &out, &errs); code != c.code || !strings.Contains(errs.String(), c.want) {
+				t.Errorf("exit %d, stderr %q; want exit %d and %q", code, errs.String(), c.code, c.want)
+			}
+			if out.Len() > 0 {
+				t.Errorf("printed %q on a refusal", out.String())
 			}
 		})
 	}
