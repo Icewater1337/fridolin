@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"sync"
 	"testing"
 )
 
@@ -260,5 +261,77 @@ func TestOriginGuardAndNoStore(t *testing.T) {
 	w := tb.do("GET", "/api/status", nil, func(r *http.Request) { r.Header.Del("X-Bridge-Token") })
 	if w.Code != 401 || w.Header().Get("Cache-Control") != "no-store" {
 		t.Fatalf("%d, Cache-Control %q", w.Code, w.Header().Get("Cache-Control"))
+	}
+}
+
+func TestHTTPServerTimeouts(t *testing.T) {
+	s := newHTTPServer(http.NotFoundHandler())
+	if s.ReadHeaderTimeout <= 0 || s.ReadTimeout <= 0 || s.IdleTimeout <= 0 || s.MaxHeaderBytes <= 0 || s.MaxHeaderBytes > 1<<20 {
+		t.Fatalf("read header %v, read %v, idle %v, max header %d", s.ReadHeaderTimeout, s.ReadTimeout, s.IdleTimeout, s.MaxHeaderBytes)
+	}
+	// Handlers that wait for a person or for rclone must not be cut off.
+	if s.WriteTimeout != 0 {
+		t.Fatalf("write timeout %v", s.WriteTimeout)
+	}
+}
+
+func TestIsolationHeadersAndOAuthCallback(t *testing.T) {
+	tb := newTestBridge(t, "")
+	noToken := func(r *http.Request) { r.Header.Del("X-Bridge-Token") }
+	cases := []struct {
+		method, path string
+		want         int
+	}{
+		{"GET", "/", 200},
+		{"GET", "/assets/app.css", 200},
+		// A HEAD does not reach the callback, which would use up the state.
+		{"HEAD", "/?state=abc&code=x", 200},
+		{"GET", "/?state=abc&code=x", 400},
+	}
+	for _, c := range cases {
+		t.Run(c.method+" "+c.path, func(t *testing.T) {
+			w := tb.do(c.method, c.path, nil, noToken)
+			if w.Code != c.want {
+				t.Fatalf("%d, want %d: %.200s", w.Code, c.want, w.Body.String())
+			}
+			if got := w.Header().Get("Cross-Origin-Opener-Policy"); got != "same-origin" {
+				t.Fatalf("Cross-Origin-Opener-Policy %q", got)
+			}
+		})
+	}
+}
+
+// lockProbe is a ResponseWriter that, as the body is written, checks
+// whether mu is free.
+type lockProbe struct {
+	*httptest.ResponseRecorder
+	mu   *sync.Mutex
+	free bool
+}
+
+func (p *lockProbe) Write(b []byte) (int, error) {
+	if p.mu.TryLock() {
+		p.free = true
+		p.mu.Unlock()
+	}
+	return p.ResponseRecorder.Write(b)
+}
+
+// The backup status and cancel are written after the backup manager's lock
+// is released: a client that reads slowly must not hold up the job.
+func TestBackupStatusWritesWithoutTheLock(t *testing.T) {
+	tb := newTestBridge(t, "")
+	for _, c := range []struct {
+		method, path string
+		h            http.HandlerFunc
+	}{
+		{"GET", "/api/backup/status", tb.apiBackupStatus},
+		{"POST", "/api/backup/cancel", tb.apiBackupCancel},
+	} {
+		w := &lockProbe{ResponseRecorder: httptest.NewRecorder(), mu: &tb.backup.mu}
+		c.h(w, httptest.NewRequest(c.method, c.path, nil))
+		if !w.free {
+			t.Errorf("%s %s wrote its response holding the lock (%d)", c.method, c.path, w.Code)
+		}
 	}
 }

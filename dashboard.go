@@ -176,6 +176,10 @@ func securityHeaders(next http.Handler) http.Handler {
 		h.Set("X-Content-Type-Options", "nosniff")
 		h.Set("Referrer-Policy", "no-referrer")
 		h.Set("X-Frame-Options", "DENY")
+		// A site that opened the dashboard in a window gets no handle on
+		// it, and no other site may load its files.
+		h.Set("Cross-Origin-Opener-Policy", "same-origin")
+		h.Set("Cross-Origin-Resource-Policy", "same-origin")
 		next.ServeHTTP(w, r)
 	})
 }
@@ -261,8 +265,10 @@ func (b *Bridge) newHTTPHandler(listen string) http.Handler {
 			}
 			// Google sign-in returns here (the redirect URI is the dashboard
 			// itself). The one-time state ties it to a sign-in the dashboard
-			// started, so it needs no token.
-			if r.URL.Path == "/" && isOAuthCallback(r) {
+			// started, so it needs no token. Google sends the browser back
+			// with a GET; a HEAD, say from a link prefetcher, must not use
+			// up the state.
+			if r.Method == http.MethodGet && r.URL.Path == "/" && isOAuthCallback(r) {
 				b.google.HandleCallback(w, r)
 				return
 			}

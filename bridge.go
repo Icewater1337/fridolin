@@ -216,10 +216,7 @@ func (b *Bridge) Start(ctx context.Context) error {
 		if err != nil {
 			return fmt.Errorf("listening on %s (is another bridge running?): %w", b.listen, err)
 		}
-		b.httpSrv = &http.Server{
-			Handler:           b.newHTTPHandler(b.listen),
-			ReadHeaderTimeout: 10 * time.Second,
-		}
+		b.httpSrv = newHTTPServer(b.newHTTPHandler(b.listen))
 		go func() {
 			if err := b.httpSrv.Serve(ln); err != nil && err != http.ErrServerClosed {
 				log.Printf("HTTP server error: %v", err)
@@ -239,6 +236,23 @@ func (b *Bridge) Start(ctx context.Context) error {
 	log.Println("Bridge started. Waiting for messages…")
 	<-ctx.Done()
 	return nil
+}
+
+// newHTTPServer is the server for the dashboard, /send, /ingest and
+// /brain/. Any local program can connect, so none may hold a connection
+// for ever: reading a request (headers and body, which is 1 MiB at most)
+// is cut off after 30 seconds and an idle keep-alive connection after two
+// minutes. There is no write timeout, because some handlers rightly take
+// minutes: a folder picker waits for you, rclone lists versions, a sign-in
+// checks back with Google.
+func newHTTPServer(h http.Handler) *http.Server {
+	return &http.Server{
+		Handler:           h,
+		ReadHeaderTimeout: 10 * time.Second,
+		ReadTimeout:       30 * time.Second,
+		IdleTimeout:       2 * time.Minute,
+		MaxHeaderBytes:    64 << 10,
+	}
 }
 
 // connectLoop connects to WhatsApp, retrying while the network is down.
