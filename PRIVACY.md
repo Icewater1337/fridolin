@@ -54,7 +54,12 @@ including the Limited Use requirements.
 ## Removing access and data
 
 - **Disconnect** a brain's calendar in the dashboard: the bridge revokes the
-  token at Google and deletes it. You can also remove access at
+  brain's access at Google and deletes its token. Google keeps one grant per
+  app and account, so when another brain signs in to the same account with
+  the same OAuth client (or the bridge cannot tell), only this brain's token
+  is deleted, and the page says that the access stayed. When Google does
+  not confirm a revocation, the token stays unless you choose to delete it
+  here only. You can also remove access at
   [myaccount.google.com/permissions](https://myaccount.google.com/permissions).
 - Disconnect Google Drive on the dashboard's Backup page.
 - Disconnect Plaud under Integrations: Fridolin signs out of Plaud and stops

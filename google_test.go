@@ -44,7 +44,18 @@ func fakeGoogle(t *testing.T) (*httptest.Server, *map[string]string) {
 			}
 			fmt.Fprint(w, `{"items":[{"id":"team@example.com","summary":"Team","accessRole":"writer"},{"id":"you@example.com","summary":"you@example.com","primary":true,"accessRole":"owner"}]}`)
 		case "/revoke":
-			got["revoked"] = r.FormValue("token")
+			// Tokens named so steer the answer: Google failing, or one it
+			// revoked already.
+			switch tok := r.FormValue("token"); tok {
+			case "FAIL-REVOKE":
+				w.WriteHeader(503)
+			case "GONE-REVOKE":
+				got["revoked"] = tok
+				w.WriteHeader(400)
+				fmt.Fprint(w, `{"error":"invalid_token","error_description":"Token expired or revoked"}`)
+			default:
+				got["revoked"] = tok
+			}
 		default:
 			w.WriteHeader(404)
 		}
@@ -632,6 +643,220 @@ func TestCalendarRefreshRecordsGrantedScopes(t *testing.T) {
 			_ = json.Unmarshal(tb.do("GET", "/api/brains/a/calendar?list=0", nil).Body.Bytes(), &st)
 			if st.BroadAccess != tc.broad {
 				t.Errorf("broad_access = %v, want %v", st.BroadAccess, tc.broad)
+			}
+		})
+	}
+}
+
+// writeCalendarToken gives brain id a token file of the client in
+// testClientJSON, signed in to account with refreshToken.
+func writeCalendarToken(t *testing.T, tb *testBridge, id, account, refreshToken string) {
+	t.Helper()
+	data, _ := json.Marshal(googleToken{
+		Token: "ACCESS-" + id, RefreshToken: refreshToken, ClientID: "123-abc.apps.googleusercontent.com",
+		ClientSecret: "TEST-CLIENT-SECRET", Account: account, Expiry: "2099-01-01T00:00:00.000000Z",
+	})
+	if err := os.MkdirAll(tb.google.credsDir(), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(tb.google.tokenPath(id), data, 0o600); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// TestCalendarDisconnectRevokesOnlyAnUnsharedGrant: Google revokes an app's
+// whole grant for an account, so Disconnect revokes only when no other
+// token from the same client is signed in to the same account, or may be.
+// Either way this brain's token goes, and the answer says why access stayed.
+func TestCalendarDisconnectRevokesOnlyAnUnsharedGrant(t *testing.T) {
+	cases := []struct {
+		name           string
+		account, other string // the brain's and another brain's account; "-" for no other token
+		revoked        bool
+	}{
+		{"no other brain", "you@example.com", "-", true},
+		{"another brain, same account", "you@example.com", "you@example.com", false},
+		{"another brain, same account in other case", "you@example.com", "YOU@example.com", false},
+		{"another brain, another account", "you@example.com", "team@example.com", true},
+		{"another brain, account unknown", "you@example.com", "", false},
+		{"this brain's account unknown", "", "team@example.com", false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			srv, got := fakeGoogle(t)
+			tb := newTestBridge(t, "")
+			_ = tb.do("PUT", "/api/google/client", map[string]string{"json": fmt.Sprintf(testClientJSON, srv.URL)})
+			tb.addFolderBrain(t, BrainManifest{ID: "a", Name: "A"})
+			writeCalendarToken(t, tb, "a", tc.account, "RT-A")
+			if tc.other != "-" {
+				writeCalendarToken(t, tb, "b", tc.other, "RT-B")
+			}
+			w := tb.do("DELETE", "/api/brains/a/calendar", nil)
+			if w.Code != 200 {
+				t.Fatalf("disconnect = %d %s", w.Code, w.Body.String())
+			}
+			var resp struct {
+				Revoked bool   `json:"revoked"`
+				Note    string `json:"note"`
+			}
+			_ = json.Unmarshal(w.Body.Bytes(), &resp)
+			if resp.Revoked != tc.revoked || ((*got)["revoked"] == "RT-A") != tc.revoked {
+				t.Errorf("revoked = %v (at Google: %q), want %v", resp.Revoked, (*got)["revoked"], tc.revoked)
+			}
+			if !tc.revoked && !strings.Contains(resp.Note, "brain b") {
+				t.Errorf("note = %q, want it to name brain b", resp.Note)
+			}
+			if _, err := os.Lstat(tb.google.tokenPath("a")); !os.IsNotExist(err) {
+				t.Error("a's token was not deleted")
+			}
+			if tc.other != "-" {
+				if _, err := os.Stat(tb.google.tokenPath("b")); err != nil {
+					t.Errorf("b's token: %v", err)
+				}
+			}
+		})
+	}
+}
+
+// TestCalendarDisconnectWhenGoogleDoesNotRevoke: a revocation Google does
+// not confirm keeps the token, so that it can be tried again, and says so;
+// local_only then deletes it without asking Google. One Google calls
+// invalid is revoked already.
+func TestCalendarDisconnectWhenGoogleDoesNotRevoke(t *testing.T) {
+	srv, got := fakeGoogle(t)
+	tb := newTestBridge(t, "")
+	_ = tb.do("PUT", "/api/google/client", map[string]string{"json": fmt.Sprintf(testClientJSON, srv.URL)})
+	tb.addFolderBrain(t, BrainManifest{ID: "a", Name: "A"})
+	writeCalendarToken(t, tb, "a", "you@example.com", "FAIL-REVOKE")
+
+	w := tb.do("DELETE", "/api/brains/a/calendar", nil)
+	if w.Code != 502 || !strings.Contains(w.Body.String(), "not confirmed by Google") {
+		t.Errorf("disconnect = %d %s, want 502", w.Code, w.Body.String())
+	}
+	if _, err := os.Stat(tb.google.tokenPath("a")); err != nil {
+		t.Fatalf("the token was deleted although Google did not revoke it: %v", err)
+	}
+	w = tb.do("DELETE", "/api/brains/a/calendar?local_only=1", nil)
+	if w.Code != 200 || !strings.Contains(w.Body.String(), "not revoked") {
+		t.Errorf("local disconnect = %d %s", w.Code, w.Body.String())
+	}
+	if _, err := os.Lstat(tb.google.tokenPath("a")); !os.IsNotExist(err) {
+		t.Error("local_only kept the token")
+	}
+
+	writeCalendarToken(t, tb, "a", "you@example.com", "GONE-REVOKE")
+	if w := tb.do("DELETE", "/api/brains/a/calendar", nil); w.Code != 200 || !strings.Contains(w.Body.String(), `"revoked":true`) {
+		t.Errorf("disconnect of a token revoked already = %d %s", w.Code, w.Body.String())
+	}
+	if (*got)["revoked"] != "GONE-REVOKE" {
+		t.Errorf("revoked %q", (*got)["revoked"])
+	}
+}
+
+// TestCalendarTokenBrain: the brain a token file is for is read back from
+// the name calendarTokenFile gives it, and from no other file there.
+func TestCalendarTokenBrain(t *testing.T) {
+	cases := []struct {
+		name, id string
+		ok       bool
+	}{
+		{filepath.Base(calendarTokenFile("creds", "a")), "a", true},
+		{filepath.Base(calendarTokenFile("creds", "work-2")), "work-2", true},
+		{"google_calendar_credentials_a.json", "", false}, // an older version's copy of the client
+		{filepath.Base(calendarTokenFile("creds", "")), "", false},
+		{"google_calendar_token_a.json.bak", "", false},
+		{"rclone.conf", "", false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if id, ok := calendarTokenBrain(tc.name); id != tc.id || ok != tc.ok {
+				t.Errorf("calendarTokenBrain = %q, %v; want %q, %v", id, ok, tc.id, tc.ok)
+			}
+		})
+	}
+}
+
+// TestCalendarDisconnectEndsWhatTheBrainShows: a disconnect takes the
+// brain's last sign-in error with the token, and one whose brain settings
+// cannot be cleared says so rather than "disconnected".
+func TestCalendarDisconnectEndsWhatTheBrainShows(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("root writes to read-only folders")
+	}
+	cases := []struct {
+		name     string
+		readOnly bool // the brain's folder, so its brain.json cannot be written
+		code     int
+		want     string // in the answer
+	}{
+		{"a sign-in error before", false, 200, `"status":"disconnected"`},
+		{"settings that cannot be saved", true, 500, "saving the brain's calendar settings failed"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			srv, _ := fakeGoogle(t)
+			tb := newTestBridge(t, `, "sandbox": {"credentials_dir": "~/creds"}`)
+			_ = tb.do("PUT", "/api/google/client", map[string]string{"json": fmt.Sprintf(testClientJSON, srv.URL)})
+			dir := tb.addFolderBrain(t, BrainManifest{ID: "a", Name: "A"})
+			tb.google.mu.Lock()
+			tb.google.lastError["a"] = "sign-in cancelled"
+			tb.google.mu.Unlock()
+			writeCalendarToken(t, tb, "a", "you@example.com", "RT-A")
+			if tc.readOnly {
+				if err := os.Chmod(dir, 0o500); err != nil {
+					t.Fatal(err)
+				}
+				t.Cleanup(func() { _ = os.Chmod(dir, 0o700) })
+			}
+			w := tb.do("DELETE", "/api/brains/a/calendar", nil)
+			if w.Code != tc.code || !strings.Contains(w.Body.String(), tc.want) {
+				t.Errorf("disconnect = %d %s, want %d with %q", w.Code, w.Body.String(), tc.code, tc.want)
+			}
+			if s := tb.do("GET", "/api/brains/a/calendar", nil).Body.String(); strings.Contains(s, "last_error") {
+				t.Errorf("status after disconnect = %s, want no last_error", s)
+			}
+		})
+	}
+}
+
+// TestCalendarSwitchRevokesTheOldAccount: signing a brain in to another
+// account revokes the grant of the one it leaves, which nobody can use any
+// more, unless another brain shares it. Signing in to the same account
+// again revokes nothing: the new token belongs to the same grant.
+func TestCalendarSwitchRevokesTheOldAccount(t *testing.T) {
+	cases := []struct {
+		name, old string
+		shared    bool
+		revoked   bool
+	}{
+		{"another account", "team@example.com", false, true},
+		{"another account another brain uses", "team@example.com", true, false},
+		{"the same account", "you@example.com", false, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			srv, got := fakeGoogle(t)
+			tb := newTestBridge(t, "")
+			_ = tb.do("PUT", "/api/google/client", map[string]string{"json": fmt.Sprintf(testClientJSON, srv.URL)})
+			tb.addFolderBrain(t, BrainManifest{ID: "a", Name: "A"})
+			writeCalendarToken(t, tb, "a", tc.old, "RT-OLD")
+			if tc.shared {
+				writeCalendarToken(t, tb, "b", tc.old, "RT-B")
+			}
+			var start struct {
+				AuthURL string `json:"auth_url"`
+			}
+			_ = json.Unmarshal(tb.do("POST", "/api/brains/a/calendar/connect", nil).Body.Bytes(), &start)
+			u, _ := url.Parse(start.AuthURL)
+			r := httptest.NewRequest("GET", "http://127.0.0.1:8765/?state="+url.QueryEscape(u.Query().Get("state"))+"&code=good-code", nil)
+			r.Host = "127.0.0.1:8765"
+			tb.h.ServeHTTP(httptest.NewRecorder(), r)
+			if ((*got)["revoked"] == "RT-OLD") != tc.revoked {
+				t.Errorf("revoked %q, want the old token revoked: %v", (*got)["revoked"], tc.revoked)
+			}
+			data, _ := os.ReadFile(tb.google.tokenPath("a"))
+			if !strings.Contains(string(data), "RT-1") {
+				t.Errorf("token file = %s, want the new sign-in", data)
 			}
 		})
 	}

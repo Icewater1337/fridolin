@@ -177,11 +177,26 @@ export function calendarCard(brainId, { signal } = {}) {
       onClick: async () => {
         const ok = await confirmDialog({
           title: 'Disconnect Google Calendar?',
-          message: 'The bridge revokes this brain’s access at Google and deletes its token. The calendars themselves are not touched.',
+          message: 'The bridge revokes this brain’s access at Google and deletes its token, unless another brain is signed in to the same Google account: that brain would lose its access too, so the access then stays at Google. The calendars themselves are not touched.',
           confirm: 'Disconnect', danger: true,
         });
         if (!ok) return;
-        await del(`/api/brains/${encodeURIComponent(brainId)}/calendar`);
+        const url = `/api/brains/${encodeURIComponent(brainId)}/calendar`;
+        let r;
+        try {
+          r = await del(url);
+        } catch (e) {
+          // The revocation was not confirmed by Google, so the token was kept.
+          if (e.status !== 502) throw e;
+          const anyway = await confirmDialog({
+            title: 'Google did not revoke the access',
+            message: h('div', h('p', e.message), h('p', 'Delete the token here anyway? The access then stays at Google until you remove it at myaccount.google.com/permissions.')),
+            confirm: 'Delete the token', danger: true,
+          });
+          if (!anyway) return;
+          r = await del(`${url}?local_only=1`);
+        }
+        if (r && r.note) toast(`Disconnected; ${r.note}`, 'info');
         selection = null;
         await refresh();
       },

@@ -143,6 +143,17 @@ and `auth` points to the dashboard). It needs no Python packages any more.
 deletes its token. Your calendars are not touched. You can also remove access
 at [myaccount.google.com/permissions](https://myaccount.google.com/permissions).
 
+Google keeps one grant per app and account, and revoking any brain's token
+revokes that grant. So when another brain is signed in to the same account
+with the same OAuth client (or the bridge cannot tell, because a token does
+not record its account), Disconnect deletes only this brain's token and
+says that the access stayed at Google; disconnect the other brain too, or
+remove the access yourself. When Google does not confirm a revocation (it
+is down, the network is), the token is kept and the page offers to delete
+it here only. **Switch account** revokes the grant of the account the brain
+leaves, unless another brain uses it too; signing in to the same account
+again keeps it, since the new token belongs to it.
+
 ## Troubleshooting
 
 - **"redirect_uri_mismatch"** — you are using a *Web application* client; add
