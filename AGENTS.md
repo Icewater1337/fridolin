@@ -124,8 +124,9 @@ the version before: `fridolin service rollback`.
   longer loads.
 - The parsers of untrusted input (chunking, poll blocks, triggers, JIDs and
   the DM allowlist, the identity map, brain.json, stream-json, attachment
-  names, the junk filter) have fuzz targets beside their tests. Fuzz one
-  with `go test -run='^$' -fuzz='^FuzzExtractPolls$' -fuzztime=30s .`;
+  names, the junk filter) and the prompt that carries it to a run have fuzz
+  targets beside their tests. Fuzz one with
+  `go test -run='^$' -fuzz='^FuzzExtractPolls$' -fuzztime=30s .`;
   a failing input is saved under the package's `testdata/fuzz/` (make
   `testdata` first in a package that has none), where plain `go test`
   runs it from then on, so commit it with the fix. `make fuzz-short` runs

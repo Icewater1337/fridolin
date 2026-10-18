@@ -1,7 +1,6 @@
 package main
 
 import (
-	"bufio"
 	"context"
 	"encoding/json"
 	"os"
@@ -32,8 +31,22 @@ const (
 // several chats, as in most setups.
 func newMainBridge(t *testing.T, extra string) (*testBridge, *Brain) {
 	t.Helper()
+	return newMainBridgeWith(t, extra, BrainManifest{})
+}
+
+// newObservingBridge is newMainBridge with a brain that gives untagged
+// group messages observe-only runs of their own (observeRun).
+func newObservingBridge(t *testing.T, extra string) (*testBridge, *Brain) {
+	t.Helper()
+	return newMainBridgeWith(t, extra, BrainManifest{Observe: observeRun})
+}
+
+// newMainBridgeWith is newMainBridge with m's settings for the brain.
+func newMainBridgeWith(t *testing.T, extra string, m BrainManifest) (*testBridge, *Brain) {
+	t.Helper()
 	tb := newTestBridge(t, `, "otp_guard": true`+extra)
-	tb.addFolderBrain(t, BrainManifest{ID: "main", Name: "Main", Routing: BrainRouting{HandlesDMs: true}})
+	m.ID, m.Name, m.Routing = "main", "Main", BrainRouting{HandlesDMs: true}
+	tb.addFolderBrain(t, m)
 	br := tb.brainMgr.Get("main")
 	if br == nil {
 		t.Fatal("brain main is missing")
@@ -87,22 +100,24 @@ func (tb *testBridge) sentPrefix(jid, prefix string) bool {
 	return false
 }
 
+// readHistory returns the brain's history. A reply is written there just
+// after it was sent, maybe while a test reads, so a last line that is not
+// complete yet is left for the next read.
 func readHistory(t *testing.T, br *Brain) []historyEntry {
 	t.Helper()
-	f, err := os.Open(filepath.Join(br.Dir(), historyFileName))
+	data, err := os.ReadFile(filepath.Join(br.Dir(), historyFileName))
 	if os.IsNotExist(err) {
 		return nil
 	}
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer f.Close()
+	lines := strings.Split(string(data), "\n")
 	var out []historyEntry
-	sc := bufio.NewScanner(f)
-	for sc.Scan() {
+	for _, line := range lines[:len(lines)-1] {
 		var e historyEntry
-		if err := json.Unmarshal(sc.Bytes(), &e); err != nil {
-			t.Fatalf("history line %q: %v", sc.Text(), err)
+		if err := json.Unmarshal([]byte(line), &e); err != nil {
+			t.Fatalf("history line %q: %v", line, err)
 		}
 		out = append(out, e)
 	}
@@ -199,34 +214,36 @@ func TestOTPGuardDropsQuotedCode(t *testing.T) {
 	}
 }
 
-// The junk filter judges what was typed: an untagged "ok" is skipped whether
-// or not it quotes something, and real chatter keeps its quote in the history.
+// The junk filter judges what was typed: an untagged "ok" gets no run of its
+// own whether or not it quotes something, in a brain that runs on chatter.
+// Every untagged message goes into the history with its quote: a "yes" may
+// answer what the brain asked.
 func TestJunkFilterIgnoresTheQuote(t *testing.T) {
 	q := &Quote{From: otherNumber, Text: "Lunch at 12?"}
 	cases := []struct {
 		name string
 		text string
-		want string // the history line, "" when skipped
+		runs bool
 	}{
-		{"one-word reply", "ok", ""},
-		{"emoji reply", "👍", ""},
-		{"real reply", "sounds good", `[reply to ` + otherNumber + `: "Lunch at 12?"]` + "\nsounds good"},
+		{"one-word reply", "ok", false},
+		{"emoji reply", "👍", false},
+		{"real reply", "sounds good", true},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			tb, br := newMainBridge(t, "")
+			tb, br := newObservingBridge(t, "")
 			tb.handleInbound(context.Background(), Inbound{JID: testGroup, Sender: otherNumber, Text: c.text, Quoted: q, Silent: true, Source: sourceWhatsApp})
-			if c.want != "" {
-				waitFor(t, 5*time.Second, "the history line", func() bool { return len(readHistory(t, br)) > 0 })
-			} else {
-				time.Sleep(200 * time.Millisecond)
+			waitFor(t, 5*time.Second, "the history line", func() bool { return len(readHistory(t, br)) > 0 })
+			if want := `[reply to ` + otherNumber + `: "Lunch at 12?"]` + "\n" + c.text; readHistory(t, br)[0].Text != want {
+				t.Errorf("history = %q, want %q", readHistory(t, br)[0].Text, want)
 			}
-			var got string
-			if h := readHistory(t, br); len(h) > 0 {
-				got = h[0].Text
+			if c.runs {
+				waitFor(t, 5*time.Second, "the observe-only run", func() bool { return br.Snapshot().Last != nil })
+				return
 			}
-			if got != c.want {
-				t.Errorf("history = %q, want %q", got, c.want)
+			time.Sleep(200 * time.Millisecond)
+			if rt := br.Snapshot(); rt.Running != nil || rt.Last != nil || len(rt.Queue) > 0 {
+				t.Errorf("brain = %+v, want no run for %q", rt, c.text)
 			}
 		})
 	}
@@ -425,12 +442,12 @@ func TestGroupCommandsMustBeAddressed(t *testing.T) {
 				waitFor(t, 5*time.Second, "the help text", func() bool { return tb.sentPrefix(c.jid, "🤖 *Fridolin*") })
 				return
 			}
-			// Ordinary chatter: the brain reads it, nobody gets an answer.
+			// Ordinary chatter: the brain keeps it, nobody gets an answer.
 			waitFor(t, 5*time.Second, "the message in the history", func() bool {
 				h := readHistory(t, br)
 				return len(h) > 0 && h[0].Text == c.text
 			})
-			waitFor(t, 5*time.Second, "the silent run", func() bool { return br.Snapshot().Last != nil })
+			time.Sleep(200 * time.Millisecond)
 			if sent := tb.sentTo(c.jid); len(sent) > 0 {
 				t.Errorf("the bridge answered untagged chatter: %q", sent)
 			}
@@ -449,8 +466,8 @@ func TestUntaggedStopInGroupIsChatter(t *testing.T) {
 	if rt.Running == nil || rt.Running.Preview != "summarise the thread" {
 		t.Errorf("running = %+v, want the tagged run still going", rt.Running)
 	}
-	if len(rt.Queue) != 1 || !rt.Queue[0].Silent || rt.Queue[0].Preview != "!stop" {
-		t.Errorf("queue = %+v, want the untagged !stop waiting as chatter", rt.Queue)
+	if h := readHistory(t, br); len(rt.Queue) != 0 || h[len(h)-1].Text != "!stop" {
+		t.Errorf("queue = %+v, history = %+v, want the untagged !stop in the history as chatter", rt.Queue, h)
 	}
 	if sent := tb.sentTo(testGroup); len(sent) > 0 {
 		t.Errorf("the bridge answered untagged chatter: %q", sent)

@@ -281,15 +281,18 @@ func TestGroupSenderAndQuoteByNumber(t *testing.T) {
 	evt.Info.AddressingMode = types.AddressingModeLID
 	wa.handleMessage(evt)
 	waitFor(t, 10*time.Second, "the answer", func() bool { return len(tb.sentTo(testGroup)) > 0 })
-	if got := tb.sentTo(testGroup)[0]; !strings.Contains(got, `15551234567 says: [reply to 15551234567: "I'm in"]`) {
+	// The new message names its sender from the map too.
+	if got := tb.sentTo(testGroup)[0]; !strings.Contains(got, `Alex (15551234567) says: [reply to 15551234567: "I'm in"]`) {
 		t.Errorf("answered %q, want the sender and the quote's author by number", got)
 	}
 	h := readHistory(t, br)
 	if len(h) == 0 || h[0].From != "15551234567" {
 		t.Fatalf("history = %+v, want the message from 15551234567", h)
 	}
-	// The next run's history names them from the identity map.
-	if preface := br.composePreface([]string{testGroup}, true); !strings.Contains(preface, "Alex (15551234567)") {
+	// The next run's history names them from the identity map (the
+	// starter prompt names Alex too, in an example).
+	preface := br.buildPrompt(br.settings.Load(), Inbound{JID: testGroup, Sender: "15559876543", Text: "next"})
+	if !strings.Contains(promptBlock(preface, "chat_history"), "Alex (15551234567)") {
 		t.Errorf("preface = %q, want Alex named", preface)
 	}
 }
@@ -302,7 +305,7 @@ func TestPrefaceReadsADMsLIDHistory(t *testing.T) {
 	br.appendHistory(lid, "15551234567", "OLD-UNDER-LID", historyIn)
 	br.appendHistory(testDMChat, "15551234567", "NEW-UNDER-NUMBER", historyIn)
 	br.appendHistory("15559876543@s.whatsapp.net", "15559876543", "SOMEONE-ELSE", historyIn)
-	preface := br.composePreface(chatJIDs(Inbound{JID: testDMChat, ChatAlt: lid, Sender: "15551234567"}), false)
+	preface := br.buildPrompt(&brainSettings{}, Inbound{JID: testDMChat, ChatAlt: lid, Sender: "15551234567", Text: "next"})
 	if !strings.Contains(preface, "OLD-UNDER-LID") || !strings.Contains(preface, "NEW-UNDER-NUMBER") {
 		t.Errorf("preface = %q, want both parts of the chat", preface)
 	}

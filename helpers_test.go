@@ -24,12 +24,14 @@ import (
 // FRIDOLIN_FAKE_ENV the value of that environment variable, and with
 // FRIDOLIN_FAKE_POLLS=1 what `fridolin polls` answers in the run. With
 // FRIDOLIN_FAKE_ASK_ON a message ending in that asks a question first (and
-// with FRIDOLIN_FAKE_HANG_AFTER_ASK=1 never answers),
+// with FRIDOLIN_FAKE_HANG_AFTER_ASK=1 never answers, with
+// FRIDOLIN_FAKE_SLEEP_AFTER_ASK_MS answers that much later), with
+// FRIDOLIN_FAKE_ASK every run first calls AskUserQuestion with that input,
 // FRIDOLIN_FAKE_PID_LOG gets each run's process ID and
 // FRIDOLIN_FAKE_PROMPT_LOG its prompt, and with
 // FRIDOLIN_FAKE_STDERR_BYTES it floods stderr and fails instead. Asked for
-// --version, it answers testedClaudeVersion. Tests point
-// claude_path at os.Args[0], so no script or real CLI is needed.
+// --version, it answers testedClaudeVersion. Tests point claude_path at
+// os.Args[0], so no script or real CLI is needed.
 //
 // Before the tests run it unsets the variables the bridge reads: a shell
 // that exports FRIDOLIN_CONFIG for a real bridge would otherwise point the
@@ -148,6 +150,21 @@ func bridgeVariables() []string {
 	return []string{"FRIDOLIN_CONFIG", "BRAIN_MODE"}
 }
 
+// fakeNewMessage is the new message in prompt, as the fake CLI echoes it:
+// "<from> says: <text>".
+func fakeNewMessage(prompt string) string {
+	msg := prompt
+	if i := strings.LastIndex(prompt, "<new_message>\n"); i >= 0 {
+		msg = strings.TrimSuffix(strings.TrimSpace(prompt[i+len("<new_message>\n"):]), "</new_message>")
+		msg = strings.TrimSpace(msg)
+	}
+	var m promptMessage
+	if err := json.Unmarshal([]byte(msg), &m); err == nil {
+		return m.From + " says: " + m.Text
+	}
+	return msg
+}
+
 func fakeClaude() {
 	args := os.Args[1:]
 	if len(args) == 1 && args[0] == "--version" {
@@ -155,11 +172,16 @@ func fakeClaude() {
 		fmt.Println(testedClaudeVersion + " (Claude Code)")
 		return
 	}
+	// Like the CLI, it reads the prompt from stdin when -p comes last.
 	prompt := ""
 	for i, a := range args {
 		if a == "-p" && i+1 < len(args) {
 			prompt = args[i+1]
 		}
+	}
+	if len(args) > 0 && args[len(args)-1] == "-p" {
+		data, _ := io.ReadAll(os.Stdin)
+		prompt = string(data)
 	}
 	if log := os.Getenv("FRIDOLIN_FAKE_PID_LOG"); log != "" {
 		// One line a run, so that a test can look for the process later.
@@ -200,7 +222,7 @@ func fakeClaude() {
 	if log := os.Getenv("FRIDOLIN_FAKE_ARGS_LOG"); log != "" {
 		f, err := os.OpenFile(log, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600)
 		if err == nil {
-			fmt.Fprintln(f, strings.Join(args[:len(args)-1], " "))
+			fmt.Fprintln(f, strings.Join(args, " "))
 			f.Close()
 		}
 	}
@@ -208,11 +230,7 @@ func fakeClaude() {
 		// What a brain inherits, one VAR=value per line.
 		_ = os.WriteFile(log, []byte(strings.Join(os.Environ(), "\n")+"\n"), 0o600)
 	}
-	msg := prompt
-	if i := strings.LastIndex(prompt, "<new_message>\n"); i >= 0 {
-		msg = strings.TrimSuffix(strings.TrimSpace(prompt[i+len("<new_message>\n"):]), "</new_message>")
-		msg = strings.TrimSpace(msg)
-	}
+	msg := fakeNewMessage(prompt)
 	wd, _ := os.Getwd()
 	out := fmt.Sprintf("echo:%s:%s", wd, msg)
 	if p := os.Getenv("FRIDOLIN_FAKE_READ"); p != "" {
@@ -246,10 +264,30 @@ func fakeClaude() {
 			time.Sleep(30 * time.Second)
 			return
 		}
+		if ms, _ := strconv.Atoi(os.Getenv("FRIDOLIN_FAKE_SLEEP_AFTER_ASK_MS")); ms > 0 {
+			// A run that is still at work when the answer comes.
+			time.Sleep(time.Duration(ms) * time.Millisecond)
+		}
+	}
+	if ask := os.Getenv("FRIDOLIN_FAKE_ASK"); ask != "" {
+		// An AskUserQuestion call, its input as given, which nobody answers.
+		fmt.Printf(`{"type":"assistant","message":{"content":[{"type":"tool_use","name":"AskUserQuestion","input":%s}]}}`+"\n", ask)
 	}
 	q := strconv.Quote(out)
 	fmt.Printf(`{"type":"assistant","message":{"content":[{"type":"text","text":%s}]}}`+"\n", q)
 	fmt.Printf(`{"type":"result","result":%s}`+"\n", q)
+}
+
+// loggedPrompts returns the prompts the fake CLI logged to path, by the
+// text of their new message.
+func loggedPrompts(t *testing.T, path string) map[string]string {
+	t.Helper()
+	out := map[string]string{}
+	for _, p := range fakePromptsIn(t, path) {
+		p = strings.TrimSuffix(p, "\n")
+		out[fakeNewMessage(p)] = p
+	}
+	return out
 }
 
 // fakeClaudeEnv makes brains in this test spawn the fake CLI.

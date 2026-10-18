@@ -249,6 +249,7 @@ type brainSettings struct {
 	runTimeout      time.Duration // 0 for none
 	queueMode       string
 	maxPending      int
+	observe         string // BrainManifest.Observe
 	credsDir        string // where per-brain credential files live
 	envPassthrough  []string
 	toolsDir        string // the bridge's Python helpers, or ""
@@ -262,9 +263,12 @@ type BrainHooks struct {
 	// Notice tells the chat jid, ready to send, that a run is working on
 	// its message: of use only now.
 	Notice func(jid, text string)
-	// Question sends the chat jid a question its brain asks mid-run,
-	// marked as one: the run sends nothing else, so it must arrive.
-	Question func(jid, text string)
+	// Question sends the chat jid a question br asks mid-run, marked as
+	// one, and reports whether it is on its way, ahead of the run's final
+	// reply. br's history records it once it arrived, like an answer: the
+	// reply to it comes as a new message, whose run must see what it
+	// answers. A silent run asks nothing (see readStream).
+	Question func(br *Brain, jid, text string) bool
 	// Deliver receives every finished run. It records the answer in the
 	// brain's history once it is sent.
 	Deliver func(br *Brain, m Inbound, res RunResult)
@@ -296,10 +300,12 @@ var workingNoticeAfter = 10 * time.Second
 
 // RunResult is the outcome of one brain run.
 type RunResult struct {
-	Text        string
-	AlreadySent bool // a question was forwarded mid-run; don't send Text too
-	Err         error
-	Duration    time.Duration
+	Text string
+	// Asked is set when the run forwarded a question mid-run. Its answer
+	// comes as a new message; Text, the run's own final reply, is sent too.
+	Asked    bool
+	Err      error
+	Duration time.Duration
 }
 
 // RunInfo summarises the last finished run, for the dashboard.
@@ -373,36 +379,58 @@ func (br *Brain) historyTail(maxBytes int64) []string {
 	return tailLines(f, maxBytes)
 }
 
-// Submit queues a message for the brain. It returns the message's position in
-// the queue (1 = next) and whether it has to wait for other work; a run it
-// interrupts does not count.
+// logInbound writes m to the brain's history: a line for each part of a
+// merged message, with its ID, so that one deleted later is taken out
+// alone. It returns m with each part's line kept on it (Inbound.logged),
+// so that its own run shows the message once, as the new message, after
+// the chat's history before those lines.
+func (br *Brain) logInbound(m Inbound) Inbound {
+	parts := m.ownParts()
+	for i, p := range parts {
+		parts[i].logged = br.appendEntry(historyEntry{Chat: m.JID, From: p.Sender, Text: historyTextWithMedia(p.textWithQuote(), p.Media), Type: historyIn, ID: p.ID})
+	}
+	if len(m.parts) > 0 {
+		m.parts = parts
+	}
+	m.logged = parts[0].logged
+	return m
+}
+
+// Submit hands a message to the brain: it goes into the history and, unless
+// it is untagged chatter that gets no run (see observeRuns), into the
+// queue. It returns the message's position in the queue (1 = next, 0 for
+// none) and whether it has to wait for other work; a run it interrupts
+// does not count.
 func (br *Brain) Submit(m Inbound) (pos int, busy bool, err error) {
 	if m.At.IsZero() {
 		m.At = time.Now()
 	}
 	s := br.settings.Load()
 
-	// History first, so the run (and any later run) sees the message even when
-	// it is merged into a queue that is already moving. A line for each part
-	// of a merged message, with its ID: one deleted later is taken out alone.
-	for _, p := range m.ownParts() {
-		br.appendEntry(historyEntry{Chat: m.JID, From: p.Sender, Text: historyTextWithMedia(p.textWithQuote(), p.Media), Type: historyIn, ID: p.ID})
-	}
+	// History first, so that later runs see the message even when it is
+	// merged into a queue that is already moving.
+	m = br.logInbound(m)
 
 	br.mu.Lock()
 	if br.retired {
 		br.mu.Unlock()
 		return 0, false, errBrainRetired
 	}
-	busy = br.current != nil || len(br.pending) > 0
+	// Untagged chatter needs nothing more, unless the brain observes it with
+	// runs: the next run in the chat reads it in the history.
+	if m.Silent && !observeRuns(s.observe, m) {
+		br.mu.Unlock()
+		return 0, false, nil
+	}
 
 	// A newer message from the same chat supersedes queued untagged chatter:
 	// it is already in the history the next run reads. In interrupt mode, a
 	// tagged message also replaces its sender's own earlier request in that
-	// chat, waiting or running. Nothing else is touched: other chats, and
-	// other people's requests in a group, keep their place, and untagged
-	// chatter never interrupts a run. Neither do ingested files, nor are they
-	// replaced: each is a job of its own, not a correction of the last one.
+	// chat, waiting or running. No other request is touched: other chats,
+	// and other people's requests in a group, keep their place, and untagged
+	// chatter never interrupts a run. Nor do ingested files interrupt a
+	// request, or get replaced: each is a job of its own, not a correction of
+	// the last one. Observe-only runs are another matter, see below.
 	interrupting := s.queueMode == queueModeInterrupt && !m.Silent && m.Source != sourceIngest
 	replaces := func(p Inbound) bool {
 		return p.JID == m.JID && (p.Silent || (interrupting && p.Sender == m.Sender && p.Source != sourceIngest))
@@ -429,16 +457,25 @@ func (br *Brain) Submit(m Inbound) (pos int, busy bool, err error) {
 		}
 		if !dropped {
 			br.mu.Unlock()
-			return 0, busy, errQueueFull
+			return 0, true, errQueueFull
 		}
 	}
+	// Work addressed to the brain does not wait for an observe-only run: it
+	// stops the one in flight and goes ahead of those waiting. Their chatter
+	// is in the history, where the next run in its chat reads it.
 	var interrupt *brainRun
-	if interrupting && br.current != nil && replaces(br.current.msg) {
-		interrupt = br.current
-		busy = len(br.pending) > 0
+	if cur := br.current; cur != nil && (interrupting && replaces(cur.msg) || !m.Silent && cur.msg.Silent) {
+		interrupt = cur
 	}
-	br.pending = append(br.pending, m)
-	pos = len(br.pending)
+	at := len(br.pending)
+	if !m.Silent {
+		if i := slices.IndexFunc(br.pending, func(p Inbound) bool { return p.Silent }); i >= 0 {
+			at = i
+		}
+	}
+	br.pending = slices.Insert(br.pending, at, m)
+	pos = at + 1
+	busy = at > 0 || (br.current != nil && interrupt == nil)
 	start := !br.working
 	br.working = true
 	br.mu.Unlock()
@@ -555,7 +592,7 @@ func (br *Brain) recordLast(m Inbound, res RunResult) {
 		info.Outcome = outcomeInterrupted
 	case res.Err != nil:
 		info.Outcome, info.Error = outcomeError, res.Err.Error()
-	case res.AlreadySent:
+	case res.Asked:
 		info.Outcome = outcomeQuestion
 	}
 	br.mu.Lock()
@@ -825,8 +862,9 @@ func (br *Brain) streamLogPath() string {
 
 // claudeArgs builds the CLI arguments for one run. mcpConfig is what
 // mcpConfigOf returned for the brain's folder, or "" for none; settings is
-// the brain's excludeInstructionsAbove.
-func claudeArgs(s *brainSettings, mcpConfig, settings, prompt string) []string {
+// the brain's excludeInstructionsAbove. They end in -p: the prompt goes on
+// stdin (see invoke).
+func claudeArgs(s *brainSettings, mcpConfig, settings string) []string {
 	args := []string{"--output-format", "stream-json", "--verbose"}
 	if !s.inheritUser {
 		// Only the brain folder's own Claude Code setup. Your user settings
@@ -856,18 +894,18 @@ func claudeArgs(s *brainSettings, mcpConfig, settings, prompt string) []string {
 	if len(s.disallowedTools) > 0 {
 		args = append(args, "--disallowed-tools", strings.Join(s.disallowedTools, ","))
 	}
-	return append(args, "-p", prompt)
+	return append(args, "-p")
 }
 
-// withArgsBeforePrompt puts extra before the trailing "-p <prompt>" that
-// claudeArgs ends with, where an option list such as --mcp-config's ends.
-func withArgsBeforePrompt(args, extra []string) []string {
-	if len(extra) == 0 || len(args) < 2 {
+// withArgsBeforePrint puts extra before the trailing -p that claudeArgs
+// ends with, which ends an option list such as --mcp-config's.
+func withArgsBeforePrint(args, extra []string) []string {
+	if len(extra) == 0 || len(args) < 1 {
 		return args
 	}
-	out := append([]string{}, args[:len(args)-2]...)
+	out := append([]string{}, args[:len(args)-1]...)
 	out = append(out, extra...)
-	return append(out, args[len(args)-2:]...)
+	return append(out, args[len(args)-1:]...)
 }
 
 // excludeInstructionsAbove returns the --settings for a brain in dir that
@@ -1071,7 +1109,7 @@ func jsonObject(data []byte) (map[string]json.RawMessage, error) {
 // write: its .mcp.json, settings, prompt, identity map and calendar token.
 // That is far more than any real one holds, so that a brain cannot make
 // the bridge load gigabytes into memory on every run, and little enough to
-// pass a .mcp.json or the prompt on the command line.
+// pass a .mcp.json on the command line.
 const maxBrainFile = 256 << 10
 
 // readAtMost reads r to the end, and refuses it when that is more than
@@ -1164,9 +1202,9 @@ func (br *Brain) invoke(run *brainRun, ctx context.Context, s *brainSettings, m 
 		mcpConfig = mcpConfigOf(br.id, br.workDir)
 		settings = excludeInstructionsAbove(br.workDir)
 	}
-	args := claudeArgs(s, mcpConfig, settings, prompt)
+	args := claudeArgs(s, mcpConfig, settings)
 	if br.hooks != nil && br.hooks.ExtraArgs != nil {
-		args = withArgsBeforePrompt(args, br.hooks.ExtraArgs(br.id))
+		args = withArgsBeforePrint(args, br.hooks.ExtraArgs(br.id))
 	}
 
 	// Wrap the spawn in sandbox-exec so prompt injection in an incoming message
@@ -1219,13 +1257,15 @@ func (br *Brain) invoke(run *brainRun, ctx context.Context, s *brainSettings, m 
 	cmd.Env = env
 	isolateProcessGroup(cmd)
 
-	// stdin must be /dev/null or the CLI blocks waiting for input.
-	devNull, err := os.Open(os.DevNull)
+	// The prompt goes on stdin, which -p reads to its end, rather than in
+	// argv: argv is bounded by ARG_MAX, about 1 MiB on macOS with the
+	// environment, and on Linux one argument by 128 KiB, which a long
+	// prompt file and a few pasted texts reach; and every process listing
+	// shows it. The CLI takes 10 MB on stdin.
+	stdin, err := cmd.StdinPipe()
 	if err != nil {
-		return RunResult{Err: fmt.Errorf("opening /dev/null: %w", err)}
+		return RunResult{Err: fmt.Errorf("stdin pipe: %w", err)}
 	}
-	defer devNull.Close()
-	cmd.Stdin = devNull
 
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
@@ -1261,6 +1301,12 @@ func (br *Brain) invoke(run *brainRun, ctx context.Context, s *brainSettings, m 
 			_ = cmd.Wait()
 		}
 	}()
+	go func() {
+		// Nothing waits for this: Wait closes the pipe once the CLI has
+		// exited, which ends a write it never read.
+		_, _ = io.WriteString(stdin, prompt)
+		stdin.Close()
+	}()
 
 	// Parse the stream in a goroutine so we can race it against the 10s timer.
 	parseDone := make(chan RunResult, 1)
@@ -1277,7 +1323,7 @@ func (br *Brain) invoke(run *brainRun, ctx context.Context, s *brainSettings, m 
 				parseDone <- RunResult{Err: errRunPanicked}
 			}
 		}()
-		parseDone <- br.readStream(m.JID, stdout, runHeading(m, s, cmd.Process.Pid), func() { resultOnce.Do(func() { close(resultSeen) }) })
+		parseDone <- br.readStream(m, stdout, runHeading(m, s, cmd.Process.Pid), func() { resultOnce.Do(func() { close(resultSeen) }) })
 	}()
 
 	notice := time.NewTimer(workingNoticeAfter)
@@ -1398,143 +1444,165 @@ func (br *Brain) logStderr(m Inbound, pid int, stderr string) {
 // stderrLogBytes is how much of a run's stderr goes to its activity log.
 const stderrLogBytes = 4000
 
-// composePreface reads the chat history for the chat that goes by chats
-// (see chatJIDs) and formats recent messages: the last 10 for a DM, the
-// last 20 for a group. A DM's lines may be under its LID or its number,
-// and both are the one chat.
-func (br *Brain) composePreface(chats []string, isGroup bool) string {
+// The most of a chat's recent messages a run's prompt shows.
+const (
+	dmHistoryWindow    = 10
+	groupHistoryWindow = 20
+)
+
+// promptHistoryTail is how much of the end of the history a run's prompt
+// is looked for in first: far more than a window of messages takes.
+const promptHistoryTail = 1 << 20
+
+// historyBefore returns what m's run is shown of its chat, the one that
+// goes by chatJIDs(m), oldest first and at most limit entries in all.
+// before is the chat's history before m's own lines (Inbound.logged).
+// since is what went out to the chat after them, while m waited in the
+// queue, and what waits in the outbox to go out ahead of anything m's
+// run says (see Brain.undelivered): the brain's replies and questions,
+// and what came through /send. Those answer earlier messages (the run
+// before m's, or the question it asked), which m's sender had not seen
+// when they wrote, and m's run must know what they said. The messages
+// others sent after m are left out: each has a run of its own, or is for
+// the next one to see. Without m's lines in the history, before is the
+// chat's last entries, with those in the outbox among them, and since is
+// empty; when the history cannot be read (see openInFolder), only the
+// outbox's are left.
+func (br *Brain) historyBefore(m Inbound, limit int) (before, since []historyEntry) {
+	chats := chatJIDs(m)
 	// The answers on their way first, then the history: one delivered in
 	// between is in both, and withUndelivered takes it once.
 	pending := br.undelivered(chats)
-	var entries []historyEntry
-	if histFile, err := openInFolder(br.root, historyFileName, os.O_RDONLY, 0); err == nil {
-		scanner := bufio.NewScanner(histFile)
-		scanner.Buffer(make([]byte, 1024*1024), 1024*1024)
-		for scanner.Scan() {
-			var entry historyEntry
-			if err := json.Unmarshal(scanner.Bytes(), &entry); err != nil {
-				continue
-			}
-			if !slices.Contains(chats, entry.Chat) {
-				continue
-			}
-			entries = append(entries, entry)
+	split := func(entries []historyEntry) {
+		at := m.loggedIn(entries)
+		if at < 0 {
+			before, since = withUndelivered(entries, pending), nil
+			return
 		}
-		histFile.Close()
+		before, since = entries[:at], nil
+		for _, e := range entries[at+1:] {
+			if e.Type == historyOut {
+				since = append(since, e)
+			}
+		}
+		since = withUndelivered(since, pending)
 	}
-	entries = withUndelivered(entries, pending)
+	entries, whole := br.chatHistory(chats, promptHistoryTail)
+	split(entries)
+	if len(before) < limit && !whole {
+		// A chat that was quiet while others were busy: its window is
+		// further back than the end of the file.
+		entries, _ = br.chatHistory(chats, 0)
+		split(entries)
+	}
+	// The newest count most: what was sent since, then what came before.
+	since = since[max(0, len(since)-limit):]
+	before = before[max(0, len(before)-(limit-len(since))):]
+	return before, since
+}
 
-	limit := 10
-	if isGroup {
-		limit = 20
+// chatHistory returns the entries of the chat that goes by chats in the
+// brain's history, oldest first: those in the last tail bytes of the file,
+// or all of them for a tail of 0, and whether that was all. A DM's lines
+// may be under its LID or its number, and both are the one chat. It
+// returns none when the history cannot be read (see openInFolder).
+func (br *Brain) chatHistory(chats []string, tail int64) (entries []historyEntry, whole bool) {
+	f, err := openInFolder(br.root, historyFileName, os.O_RDONLY, 0)
+	if err != nil {
+		return nil, true
 	}
-	if len(entries) > limit {
-		entries = entries[len(entries)-limit:]
+	defer f.Close()
+	keep := func(line []byte) {
+		var e historyEntry
+		if json.Unmarshal(line, &e) == nil && slices.Contains(chats, e.Chat) {
+			entries = append(entries, e)
+		}
 	}
-	if len(entries) == 0 {
-		return ""
+	if st, err := f.Stat(); err == nil && tail > 0 && st.Size() > tail {
+		for _, line := range tailLines(f, tail) {
+			keep([]byte(line))
+		}
+		return entries, false
 	}
+	// A line at a time, however long one is.
+	r := bufio.NewReader(f)
+	for {
+		line, err := r.ReadBytes('\n')
+		if line = bytes.TrimSpace(line); len(line) > 0 {
+			keep(line)
+		}
+		if err != nil {
+			return entries, true
+		}
+	}
+}
 
-	// Through the folder: a map swapped for a symlink to another brain's
-	// would put that brain's contacts in this one's prompt.
+// loggedIn returns where m's own lines begin in entries, the chat's
+// history: at the last line that is the line of the first of m's parts
+// still there (see Inbound.logged), or -1 for none. A part deleted since
+// took its line along; one edited while it waited has its line rewritten,
+// with the new text.
+func (m Inbound) loggedIn(entries []historyEntry) int {
+	for _, p := range m.ownParts() {
+		if p.logged == (historyEntry{}) {
+			continue
+		}
+		for i := len(entries) - 1; i >= 0; i-- {
+			if p.logged.sameLine(entries[i]) {
+				return i
+			}
+		}
+	}
+	return -1
+}
+
+// sameLine reports whether e is the history line l: equal, or for a
+// message from WhatsApp, whose line an edit rewrites, equal but for the
+// text.
+func (l historyEntry) sameLine(e historyEntry) bool {
+	if l.ID != "" {
+		e.Text = l.Text
+	}
+	return e == l
+}
+
+// identities reads the brain's identity map, through the folder: a map
+// swapped for a symlink to another brain's would put that brain's contacts
+// in this one's prompt.
+func (br *Brain) identities() map[string]string {
 	idMap, err := br.readFile(identityMapFile)
 	if err != nil && !errors.Is(err, fs.ErrNotExist) {
 		log.Printf("brain %s: could not read identity map %s: %v", br.id, identityMapFile, err)
 	}
-	identities := parseIdentityMap(idMap)
-
-	var sb strings.Builder
-	for _, entry := range entries {
-		ts, _ := time.Parse(time.RFC3339, entry.TS)
-		timeStr := ts.Format("15:04")
-
-		var senderDisplay string
-		if entry.Type == historyOut {
-			senderDisplay = outboundSender(br.id, entry)
-		} else if name, found := identities[identityKey(entry.From)]; found {
-			senderDisplay = fmt.Sprintf("%s (%s)", name, entry.From)
-		} else {
-			senderDisplay = entry.From
-		}
-
-		if entry.Type == historyEvent {
-			sb.WriteString(fmt.Sprintf("[%s] %s %s\n", timeStr, senderDisplay, entry.Text))
-			continue
-		}
-		sb.WriteString(fmt.Sprintf("[%s] %s: %s\n", timeStr, senderDisplay, entry.Text))
-	}
-	return sb.String()
+	return parseIdentityMap(idMap)
 }
 
-// outboundSender is who the chat history shows as the sender of entry, an
-// "out" line in brain id's history. Only the brain's own replies, and what it
-// sent itself through /send, are "You": a line a script or another brain
-// sent through /send must not read as the brain's own words.
-func outboundSender(id string, entry historyEntry) string {
-	switch {
-	case entry.Via == "":
-		return fmt.Sprintf("You (%s)", id)
-	case entry.Via == "brain" && entry.From == id:
-		return fmt.Sprintf("You (%s, via /send)", id)
-	case entry.Via == "brain":
-		return fmt.Sprintf("Brain %s (via /send)", entry.From)
-	case entry.Via == "script":
-		return "Script (via /send)"
-	}
-	return "Script without a token (via /send)"
-}
-
-// buildPrompt constructs the -p prompt: the prompt file, chat-history
-// preface, attachments, then the new message.
+// buildPrompt gathers what m's run is told, through the brain's folder: its
+// prompt file, the chat's recent history and the identity map. renderPrompt
+// puts it into words.
 func (br *Brain) buildPrompt(s *brainSettings, m Inbound) string {
-	var sb strings.Builder
-	isGroup := m.IsGroup()
-
+	in := promptInput{Now: time.Now(), BrainID: br.id, Message: m, ObserveOnly: m.Silent}
 	if name := s.promptFile; name != "" {
-		if sysPrompt, err := br.readFile(name); err != nil {
+		if data, err := br.readFile(name); err != nil {
 			log.Printf("brain %s: could not read prompt file %s: %v", br.id, name, err)
 		} else {
-			sb.WriteString(strings.TrimSpace(string(sysPrompt)))
-			sb.WriteString("\n\n")
+			in.Instructions = strings.TrimSpace(string(data))
 		}
 	}
-
-	if preface := br.composePreface(chatJIDs(m), isGroup); preface != "" {
-		count := "10 messages"
-		if isGroup {
-			count = "20 messages"
-		}
-		sb.WriteString("<chat_history>\n")
-		sb.WriteString("The following is the last " + count + " in this WhatsApp chat (for context, not action). ")
-		sb.WriteString("You do NOT have prior turns in your working memory — the only context you have about previous conversation is what's in this block. ")
-		sb.WriteString("Names come from your identity map at `" + identityMapFile + "`; the JID in parens is the raw WhatsApp identifier. ")
-		sb.WriteString("For anything older or more detailed, search `" + historyFileName + "` with `\"$FRIDOLIN_BIN\" history QUERY`.\n\n")
-		sb.WriteString(preface)
-		sb.WriteString("</chat_history>\n\n")
+	limit := dmHistoryWindow
+	if m.IsGroup() {
+		limit = groupHistoryWindow
 	}
-
-	switch len(m.Media) {
-	case 0:
-	case 1:
-		sb.WriteString(fmt.Sprintf("A file was shared via WhatsApp and saved to: %s\n\n", m.Media[0]))
-	default:
-		sb.WriteString(fmt.Sprintf("%d files were shared together and saved to:\n", len(m.Media)))
-		for _, p := range m.Media {
-			sb.WriteString("- " + p + "\n")
-		}
-		sb.WriteString("Handle them together as one request.\n\n")
-	}
-
-	sb.WriteString("<new_message>\n")
-	sb.WriteString(fmt.Sprintf("%s says: %s\n", m.Sender, m.textWithQuote()))
-	sb.WriteString("</new_message>")
-	return sb.String()
+	in.History, in.Since = br.historyBefore(m, limit)
+	in.Names = br.identities()
+	return renderPrompt(in)
 }
 
-// parseStream reads the stream-json output from the Claude CLI and returns
-// the result, writing a human-readable activity log alongside it.
-func (br *Brain) parseStream(jid string, reader io.Reader) RunResult {
-	return br.readStream(jid, reader, "── New invocation ──", nil)
+// parseStream reads the stream-json output of m's run from the Claude CLI
+// and returns the result, writing a human-readable activity log alongside
+// it.
+func (br *Brain) parseStream(m Inbound, reader io.Reader) RunResult {
+	return br.readStream(m, reader, "── New invocation ──", nil)
 }
 
 // runHeading starts a run's part of the activity log: what it answers and
@@ -1572,7 +1640,7 @@ func (br *Brain) rotateStreamLog() {
 // readStream is parseStream with heading as the first line of the run in
 // the activity log, calling onResult, when set, as soon as the result is
 // in, while the stream may still go on.
-func (br *Brain) readStream(jid string, reader io.Reader, heading string, onResult func()) RunResult {
+func (br *Brain) readStream(m Inbound, reader io.Reader, heading string, onResult func()) RunResult {
 	scanner := bufio.NewScanner(reader)
 	scanner.Buffer(make([]byte, 4*1024*1024), 4*1024*1024)
 
@@ -1597,7 +1665,7 @@ func (br *Brain) readStream(jid string, reader io.Reader, heading string, onResu
 	writeLog(heading)
 
 	var finalResult, lastText string
-	questionSent := false
+	asked := false
 
 	for scanner.Scan() {
 		line := strings.TrimSpace(scanner.Text())
@@ -1625,10 +1693,12 @@ func (br *Brain) readStream(jid string, reader io.Reader, heading string, onResu
 				case "tool_use":
 					writeLog("🔧 Tool: " + content.Name)
 					if content.Name == "AskUserQuestion" {
+						// Untagged (silent) messages never produce a visible
+						// reply, so they must not ask anything either. Only a
+						// question on its way counts as asked.
 						question := extractAskQuestion(content.Input)
-						if question != "" && br.hooks != nil && br.hooks.Question != nil {
-							br.hooks.Question(jid, questionPrefix+question)
-							questionSent = true
+						if question != "" && !m.Silent && br.hooks != nil && br.hooks.Question != nil && br.hooks.Question(br, m.JID, questionPrefix+question) {
+							asked = true
 						}
 					}
 				}
@@ -1649,7 +1719,7 @@ func (br *Brain) readStream(jid string, reader io.Reader, heading string, onResu
 					errMsg = "(claude exited with an error but no message)"
 				}
 				writeLog("❌ Error: " + errMsg)
-				return RunResult{Err: &cliError{msg: errMsg}}
+				return RunResult{Err: &cliError{msg: errMsg}, Asked: asked}
 			}
 			finalResult = event.Result
 			writeLog("✅ Result: " + truncate(finalResult, 2000))
@@ -1666,17 +1736,15 @@ func (br *Brain) readStream(jid string, reader io.Reader, heading string, onResu
 		return RunResult{Err: fmt.Errorf("reading claude output: %w", err)}
 	}
 
-	if questionSent {
-		// The question already went to WhatsApp; sending the final text too
-		// would duplicate it.
-		return RunResult{AlreadySent: true}
-	}
-
-	if finalResult == "" {
+	// A -p run is stateless and nobody answers its AskUserQuestion, so the
+	// model goes on after asking, often to an answer of its own ("I booked
+	// Monday"), which the chat must get too. A run that only asked has said
+	// what it had to say.
+	if finalResult == "" && !asked {
 		return RunResult{Err: errNoResult}
 	}
 
-	return RunResult{Text: finalResult}
+	return RunResult{Text: finalResult, Asked: asked}
 }
 
 // truncate shortens s to at most n bytes without splitting a UTF-8 rune.
@@ -1759,12 +1827,17 @@ func (br *Brain) appendHistoryVia(chatJID, from, text, typ, via string) {
 }
 
 // appendEntry appends entry to the brain's history file, stamped with the
-// time now.
-func (br *Brain) appendEntry(entry historyEntry) {
+// time now. It returns the line as it reads back, or none when the file
+// could not be opened.
+func (br *Brain) appendEntry(entry historyEntry) historyEntry {
 	br.historyMu.Lock()
 	entry, err := br.writeEntryLocked(entry)
 	br.historyMu.Unlock()
 	br.entryWritten(entry, err)
+	if err != nil {
+		return historyEntry{}
+	}
+	return entry
 }
 
 // recordDelivered writes the brain's answer text to chat into its
@@ -1786,12 +1859,17 @@ func (br *Brain) recordDelivered(chat, text string, remove func() error) error {
 }
 
 // writeEntryLocked appends entry to the history file, stamped with the
-// time now, and returns it as written. historyMu is held.
+// time now, and returns it as it reads back, which historyBefore looks
+// for: invalid UTF-8 in its text is written as U+FFFD. historyMu is held.
 func (br *Brain) writeEntryLocked(entry historyEntry) (historyEntry, error) {
 	entry.TS = time.Now().Format(time.RFC3339)
 	data, err := json.Marshal(entry)
 	if err != nil {
 		return entry, err
+	}
+	var written historyEntry
+	if json.Unmarshal(data, &written) == nil {
+		entry = written
 	}
 	// Through the folder: appending through a symlink would let a brain
 	// write to files its sandbox denies it, another brain's among them.
@@ -2038,6 +2116,7 @@ func settingsFor(cfg *Config, sp BrainSpec) *brainSettings {
 		runTimeout:      cfg.RunTimeout(),
 		queueMode:       cfg.Queue.Mode,
 		maxPending:      cfg.Queue.MaxPending,
+		observe:         m.Observe,
 		credsDir:        credentialsDirOf(cfg),
 		envPassthrough:  append([]string(nil), cfg.ChildEnvPassthrough...),
 		toolsDir:        ownLayout().Tools,

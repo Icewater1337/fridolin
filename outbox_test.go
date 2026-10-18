@@ -190,12 +190,12 @@ func TestQueuedRunReadsTheAnswerBeforeIt(t *testing.T) {
 			waitFor(t, 20*time.Second, "the second run", func() bool { return len(fakePromptsIn(t, prompts)) == 2 })
 			second := fakePromptsIn(t, prompts)[1]
 			answered := slices.ContainsFunc(strings.Split(second, "\n"), func(line string) bool {
-				return strings.Contains(line, "You (main): echo:") && strings.Contains(line, "first question")
+				return strings.Contains(line, `"from":"You (main)","text":"echo:`) && strings.Contains(line, "first question")
 			})
 			if !answered {
 				t.Errorf("the second run's prompt lacks the first answer:\n%s", tail(second, 600))
 			}
-			if strings.Count(second, "You (main):") != 1 {
+			if strings.Count(second, `"from":"You (main)"`) != 1 {
 				t.Errorf("the second run's prompt holds the first answer more than once:\n%s", tail(second, 600))
 			}
 		})
@@ -308,7 +308,7 @@ func TestOutboxSummaryOnlyReads(t *testing.T) {
 func TestQuestionsWaitAndNoticesDoNot(t *testing.T) {
 	tb, br := newMainBridge(t, "")
 	tb.wa = newFlakyMessenger(tb.cfgs.Get, false)
-	br.hooks.Question(testDMChat, questionPrefix+"Which day suits you?")
+	br.hooks.Question(br, testDMChat, questionPrefix+"Which day suits you?")
 	br.hooks.Notice(testDMChat, "⏳ Still at it")
 	sum, err := tb.store.OutboxSummary(context.Background(), time.Now())
 	if err != nil || sum.Waiting != 1 {
@@ -359,7 +359,7 @@ func TestOutboxSurvivesARestart(t *testing.T) {
 	defer second.Stop()
 	select {
 	case r := <-got:
-		if r.Brain != "main" || r.Chat != testDMChat || !strings.HasPrefix(r.History, "hello") {
+		if r.Brain != "main" || r.Chat != testDMChat || r.History != "📊 *Lunch?*\n1. yes\n2. no\n\nhello" {
 			t.Errorf("delivered %+v", r)
 		}
 	case <-time.After(5 * time.Second):

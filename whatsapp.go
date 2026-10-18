@@ -521,8 +521,8 @@ func mediaList(p string) []string {
 // the bridge (see addressGroup): a trigger keyword, an @-mention of the
 // bridge account, a quote-reply to one of its messages, and, unless the
 // group's brain turns them off, a file or a forward. Untagged text still
-// runs through the brain so it stays aware of the conversation, but
-// produces no reply.
+// reaches the brain, whose history keeps it so that it stays aware of the
+// conversation, but produces no reply.
 func (wa *WhatsAppClient) handleGroupMessage(msg *events.Message) {
 	cfg := wa.cfg()
 	groupJID := msg.Info.Chat.String()
@@ -560,7 +560,7 @@ func (wa *WhatsAppClient) handleGroupMessage(msg *events.Message) {
 
 	text := extractText(msg.Message)
 	addr := addressGroup(msg.Message, text, cfg.Triggers, own, wa.rulesFor(groupJID))
-	// Untagged: run the brain, send nothing.
+	// Untagged: the brain's history, no reply.
 	silent := !addr.tagged
 	if kind == kindViewOnce {
 		if !silent {

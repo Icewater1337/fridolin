@@ -125,10 +125,12 @@ or `routing.answer_forwards` (docs/BRAINS.md, or the brain's page in the
 dashboard): then a file is chatter whose caption the brain reads, and it is not
 downloaded, and a forward is chatter like any other.
 
-Untagged group messages still run through the brain — so it keeps up with the
-conversation — but produce no reply. Very short messages ("ok", "👍") are
-skipped entirely. An untagged message is never a command: in a group, `!stop`
-needs the trigger (`@claude !stop`).
+Untagged group messages go into the brain's history, so that its next run in
+the group sees the conversation, and produce no reply. They cost no Claude run
+unless the brain's `observe` setting is `run` (see
+[BRAINS.md](BRAINS.md#brainjson)), which gives each one an observe-only run
+of its own; very short ones ("ok", "👍") never get one. An untagged message is
+never a command: in a group, `!stop` needs the trigger (`@claude !stop`).
 
 DMs never need a trigger.
 
@@ -776,17 +778,23 @@ send their run's token; see [API.md](API.md#who-may-call).
 `notify`, tells the sender "⏳ Queued (#2)". `mode: "interrupt"` lets a newer
 request replace the sender's own: it stops their run in flight in that chat (or
 a run on the chat's untagged chatter) and drops their earlier waiting request.
-The newer request then waits behind what is already queued, so someone who
-keeps correcting themselves cannot push other chats back. Requests from other
-chats, and other people's in a group, still wait their turn (with the same
-notice). Untagged group chatter never interrupts a run, and files sent through
-`/ingest` neither interrupt nor replace one another: each is a job of its own.
+The newer request then waits behind the requests already queued (though ahead
+of queued chatter, see below), so someone who keeps correcting themselves
+cannot push other chats back. Requests from other chats, and other people's in
+a group, still wait their turn (with the same notice). Untagged group chatter
+never interrupts a run. Files sent through `/ingest` never interrupt a request
+and never replace one another, each being a job of its own, though like any
+other message they stop an observe-only run (see below).
 `max_pending` applies in both modes. [Plaud](PLAUD.md) recordings take at
 most five places, and half of a smaller queue (at least one), so your own
 messages still get in.
 
-Untagged group chatter waiting in the queue is dropped when a newer message
-from that chat arrives — it is already in the history the next run reads.
+Untagged group chatter waiting in the queue (in a brain whose `observe` is
+`run`) is dropped when a newer message from that chat arrives — it is already
+in the history the next run reads. Any other message, from any chat (one
+addressed to the brain, a file through `/ingest`, a [Plaud](PLAUD.md)
+recording), stops the observe-only run in flight and goes ahead of those
+waiting, in both modes.
 `!stop` stops the run for the chat it was sent in and drops that chat's
 waiting messages; other chats keep theirs. It also stops files handed to
 another brain that answers in that chat (its `reply_chat`).

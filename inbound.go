@@ -32,14 +32,20 @@ type Inbound struct {
 	// commands and the OTP guard see only what was typed: "!stop" or a
 	// one-time code sent as a reply must still be recognised.
 	Quoted *Quote
-	// Silent means untagged group chatter: the brain reads it to keep up with
-	// the conversation but sends nothing back.
+	// Silent means untagged group chatter: the brain keeps it in its history
+	// to keep up with the conversation, gives it an observe-only run only
+	// when it observes with runs (observeRuns), and sends nothing back.
 	Silent bool
 	Source string // sourceWhatsApp, sourceIngest or sourceDev
 	At     time.Time
 	// ID is the WhatsApp message's ID, "" for one from elsewhere. An edit
 	// or a deletion on WhatsApp names the message it changes by it.
 	ID string
+	// logged is the line Brain.Submit wrote to the history for the
+	// message; a merged message's parts each keep their own. Its prompt
+	// shows the chat's history before the first of them, and what the
+	// brain sent there after it (see Brain.historyBefore).
+	logged historyEntry
 	// Done, when set, hears how the message ended once its brain took it:
 	// nil after a run that answered it, else why not (the run failed or
 	// was stopped, or the message was dropped before it ran). A refused
@@ -57,7 +63,8 @@ type Inbound struct {
 const (
 	sourceWhatsApp = "whatsapp"
 	// sourceIngest is files handed in outside WhatsApp, through /ingest or
-	// the Plaud integration: never a command, and never interrupting.
+	// the Plaud integration: never a command, and never interrupting a
+	// request (an observe-only run gives way to it like to any message).
 	sourceIngest = "ingest"
 	// sourceDev is the dashboard's dev page (--no-whatsapp).
 	sourceDev = "dev"

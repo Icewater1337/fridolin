@@ -204,17 +204,18 @@ func TestSendHistoryShowsWhoSentIt(t *testing.T) {
 			t.Errorf("line %d = %+v, want from %q via %q", i, got[i], w.from, w.via)
 		}
 	}
-	preface := tb.brainMgr.Get("a").composePreface([]string{tokenTestDM}, false)
+	br := tb.brainMgr.Get("a")
+	preface := br.buildPrompt(br.settings.Load(), Inbound{JID: tokenTestDM, Sender: "15551234567", Text: "next"})
 	for _, line := range []string{
-		"Script (via /send): from a script",
-		"Script without a token (via /send): from nobody",
-		"You (a, via /send): from a itself",
+		`"from":"Script (via /send)","text":"from a script"`,
+		`"from":"Script without a token (via /send)","text":"from nobody"`,
+		`"from":"You (a, via /send)","text":"from a itself"`,
 	} {
 		if !strings.Contains(preface, line) {
 			t.Errorf("preface lacks %q:\n%s", line, preface)
 		}
 	}
-	if strings.Contains(preface, "You (a): from a script") || strings.Contains(preface, "You (a): from nobody") {
+	if strings.Contains(preface, `"from":"You (a)","text":"from a script"`) || strings.Contains(preface, `"from":"You (a)","text":"from nobody"`) {
 		t.Errorf("preface shows a script's line as the brain's own:\n%s", preface)
 	}
 }

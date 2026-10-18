@@ -4,6 +4,8 @@ import { plural } from './format.js';
 
 export const BRAIN_ID_RE = /^[a-z0-9][a-z0-9_-]{0,39}$/;
 export const EFFORTS = [['', 'Inherit'], ['low', 'Low'], ['medium', 'Medium'], ['high', 'High'], ['xhigh', 'Extra high'], ['max', 'Max']];
+// What a brain does with untagged group messages (brain.json "observe").
+export const OBSERVE = [['history', 'Keep them in the history'], ['run', 'Also run the brain on each, observe-only']];
 export const DEFAULT_BACKUP_EXCLUDES = ['node_modules/', '*.log', '.DS_Store', '.venv/', '__pycache__/'];
 
 /** A brain id suggested from a name: lowercase, dashes, at most 40 characters. */

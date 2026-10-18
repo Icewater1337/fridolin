@@ -23,7 +23,7 @@ import (
 // isJunkMessage reports whether a message is too trivial to be worth a Claude
 // invocation — a bare emoji, a single character, or a one-word acknowledgement.
 // Only applied to untagged group chatter, never to a message addressed to the
-// bridge.
+// bridge, and such a message still goes into the history (see observeRuns).
 func isJunkMessage(text string) bool {
 	trimmed := strings.TrimSpace(text)
 	if len([]rune(trimmed)) <= 1 {
@@ -178,10 +178,12 @@ func NewBridge(cfgs *ConfigStore, opts BridgeOptions) (_ *Bridge, err error) {
 				log.Printf("failed to send the working notice to %s: %v", jid, err)
 			}
 		},
-		Question: func(jid, text string) {
-			if err := b.outbox.Text(context.Background(), jid, text, b.cfgs.Get().MaxChunkSize); err != nil {
-				log.Printf("brain question to %s: %v", jid, err)
+		Question: func(br *Brain, jid, text string) bool {
+			if err := b.outbox.Question(context.Background(), br.ID(), jid, text, b.cfgs.Get().MaxChunkSize); err != nil {
+				log.Printf("brain %s: question to %s: %v", br.ID(), jid, err)
+				return false
 			}
+			return true
 		},
 		Deliver:     b.deliver,
 		Undelivered: b.undelivered,
@@ -400,7 +402,8 @@ func (b *Bridge) recordIgnored(kind, jid, name, sender, pushName string) {
 
 // handleInbound is the entry point for every allowed message. Access control
 // already happened: groups against allowed_groups, DMs against
-// allowed_numbers. Group messages without the trigger arrive Silent.
+// allowed_numbers. Group messages without the trigger arrive Silent, and go
+// on to their brain like the rest: it keeps them in its history.
 func (b *Bridge) handleInbound(ctx context.Context, m Inbound) {
 	m.Text = strings.TrimSpace(m.Text)
 	cfg := b.cfgs.Get()
@@ -414,12 +417,6 @@ func (b *Bridge) handleInbound(ctx context.Context, m Inbound) {
 		return
 	}
 	if m.Text == "" && len(m.Media) == 0 && m.Quoted == nil {
-		return
-	}
-
-	// Untagged group chatter that carries no content is not worth a run.
-	if m.Silent && len(m.Media) == 0 && isJunkMessage(m.Text) {
-		log.Printf("Junk message from %s: skipping Claude invocation", m.Sender)
 		return
 	}
 
@@ -610,9 +607,9 @@ func (b *Bridge) deliver(br *Brain, m Inbound, res RunResult) {
 		return
 	}
 
-	// An empty response means a question was already forwarded mid-stream.
-	// Silent runs never reply at all.
-	if res.AlreadySent || res.Text == "" || m.Silent {
+	// An empty response follows a question forwarded mid-run, which said
+	// it all. Silent runs never reply at all.
+	if res.Text == "" || m.Silent {
 		return
 	}
 	log.Printf("brain %s: sending response (%d chars) to %s after %s", br.ID(), len(res.Text), m.JID, res.Duration.Round(time.Second))

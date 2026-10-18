@@ -64,9 +64,10 @@ Question: When should we meet?
 [/POLL]
 ```
 
-**Group awareness.** In a group it reads everything but replies only when
-addressed — by keyword, by @-mention, by a reply to one of its messages, or
-when you send it a file (each brain can turn files and forwards off).
+**Group awareness.** In a group it keeps up with everything, through its chat
+history, but runs and replies only when addressed — by keyword, by
+@-mention, by a reply to one of its messages, or when you send it a file
+(each brain can turn files and forwards off).
 
 **Orderly.** Messages that arrive while the assistant is busy wait their turn
 (or, if you prefer, a newer request replaces the one you sent before it). A
@@ -616,15 +617,16 @@ option names, which are matched against the stored options).
 
 **`brain.go`** — the multi-brain runner. Each brain has a queue and one
 worker; each message spawns `claude -p` with `--output-format stream-json`,
-seeded with the brain's prompt file and recent chat history. Events are
-parsed live, so an `AskUserQuestion` reaches WhatsApp immediately and a run
-over 10 seconds gets a "working on it" notice (the event types are in
-`stream.go`). A run is stopped at `run_timeout_minutes`, and five seconds
-after its result when something it started holds its output open. Runs
-are listed in `<data_dir>/runs/` while they last, so that a bridge that
-crashed stops what is left of them when it starts again.
-`BrainManager.Apply` swaps the brain set at runtime without touching
-brains that did not change.
+seeded on stdin with the brain's prompt file and recent chat history. Events
+are parsed live, so an `AskUserQuestion` reaches WhatsApp immediately, with
+its options numbered (the answer comes as the next message, and the run's
+final reply is sent too), and a run over 10 seconds gets a "working on it"
+notice (the event types are in `stream.go`). A run is stopped at
+`run_timeout_minutes`, and five seconds after its result when something it
+started holds its output open. Runs are listed in `<data_dir>/runs/` while
+they last, so that a bridge that crashed stops what is left of them when it
+starts again. `BrainManager.Apply` swaps the brain set at runtime without
+touching brains that did not change.
 
 **`manifest.go`, `brainreg.go`** — `brain.json`, the brain registry, path
 checks and scaffolding. **`configstore.go`** — the live configuration.
@@ -650,12 +652,13 @@ chats that wrote without being allowed.
 **`chunks.go`** — splits long replies at paragraph, line, sentence, then word
 boundaries so messages break somewhere readable, and numbers the parts.
 
-**`outbox.go`** — brains' replies wait in `bridge.db` until WhatsApp took
-every message of them, are tried again with backoff (from the message that
-failed, and at once when WhatsApp reconnects, after a restart too), and go
-into the brain's history only once delivered; until then a run reads them
-from the outbox. One that cannot go out within an hour is given up on, and
-the Overview says so.
+**`outbox.go`** — brains' replies, and the questions they ask mid-run,
+wait in `bridge.db` until WhatsApp took every message of them, are tried
+again with backoff (from the message that failed, and at once when
+WhatsApp reconnects, after a restart too), and go into the brain's history
+only once delivered, as what the chat got (a poll as its question and
+numbered options); until then a run reads them from the outbox. One that
+cannot go out within an hour is given up on, and the Overview says so.
 
 **`server.go`** — the localhost `/send` and `/ingest` endpoints.
 
