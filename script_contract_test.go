@@ -77,11 +77,14 @@ func scriptCall(t *testing.T, h *harness, s *scrubber, brains map[string]string,
 		fmt.Fprintf(&sb, "  %s %q\n", m.JID, s.text(m.Text))
 	}
 	sb.WriteString("history:\n")
+	var lines []string
 	for _, id := range ids {
 		for _, l := range historyLines(t, brains[id])[histBefore[id]:] {
 			fmt.Fprintf(&sb, "  %s: %s\n", id, s.text(l))
+			lines = append(lines, l)
 		}
 	}
+	assertScriptAPIContract(t, path, body, w, lines)
 	return []byte(sb.String())
 }
 

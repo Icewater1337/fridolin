@@ -2,9 +2,19 @@
 
 The bridge's HTTP server (`http_listen`, default `127.0.0.1:8765`) has four
 endpoints for programs on this computer: `GET /health`, `GET /ready`,
-`POST /send` and `POST /ingest`. This page is their contract; tests pin every part of it
-(`server_test.go`). The dashboard's own API under `/api/` is not a contract
-and changes with the dashboard.
+`POST /send` and `POST /ingest`. This page is their contract; tests pin
+every part of it (`server_test.go`, `script_contract_test.go`). The JSON
+of `/send` and `/ingest` has schemas, which the tests check every answer,
+and every request the bridge takes, against:
+[`send-request`](schemas/send-request.schema.json),
+[`send-response`](schemas/send-response.schema.json),
+[`ingest-request`](schemas/ingest-request.schema.json) and
+[`ingest-response`](schemas/ingest-response.schema.json). Keys are added
+to them, never renamed or removed. The response schemas describe exactly
+the answers this version gives, and refuse any other key, which keeps
+them to the code: a client that checks answers against them should let
+unknown keys through, since later versions add them. The dashboard's own
+API under `/api/` is not a contract and changes with the dashboard.
 
 All four answer on loopback only. They refuse a request whose `Host` is not
 the bridge's address (`421`, which stops DNS rebinding) and a write that a
@@ -124,8 +134,8 @@ sync), as if they were sent in its chat. Off until
 ```
 
 - `brain`: the brain that handles it. `scope`, its old name, is refused
-  with `400`, so a script that still sends it learns the name to use. A
-  brain calling with its run's token may leave it out.
+  with `400` unless it is empty, so a script that still sends it learns
+  the name to use. A brain calling with its run's token may leave it out.
 - `paths`: files already written at the top of the media directory
   (`<data_dir>/media` by default), or already in the named brain's own
   inbox (`media/<brain id>/`); the brain takes them into its inbox. A file
@@ -150,7 +160,7 @@ brain. The request returns at once; the run happens afterwards.
 | Status | Body | When |
 | --- | --- | --- |
 | `202` | `{"status": "accepted", "jid": …}` | Queued; `jid` is the chat the answer goes to. |
-| `400` | `{"error": …}` | The body is not JSON, it has `scope`, nothing to hand over, an unknown brain, a path outside the media directory, in another folder of it or not a regular file, or a brain with no chat to answer in. |
+| `400` | `{"error": …}` | The body is not JSON, it has a non-empty `scope`, nothing to hand over, an unknown brain, a path outside the media directory, in another folder of it or not a regular file, or a brain with no chat to answer in. |
 | `401` | `{"error": …}` | No token, or one the bridge did not give out. |
 | `403` | `{"error": …}` | A brain named another brain. |
 | `404` | `{"error": …}` | `ingest.enabled` is off. |

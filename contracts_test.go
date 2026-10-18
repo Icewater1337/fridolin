@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"maps"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -39,6 +41,8 @@ var schemaTypes = []schemaType{
 	{schema: "config.schema.json", typ: reflect.TypeFor[Config](), closed: true, extra: retiredKeyNames()},
 	{schema: "brain.schema.json", typ: reflect.TypeFor[BrainManifest](), closed: true},
 	{schema: "history-line.schema.json", typ: reflect.TypeFor[historyEntry](), closed: true},
+	{schema: "send-request.schema.json", typ: reflect.TypeFor[sendRequest]()},
+	{schema: "ingest-request.schema.json", typ: reflect.TypeFor[ingestRequest](), refused: []string{"scope"}},
 }
 
 func retiredKeyNames() []string {
@@ -655,7 +659,7 @@ func TestHistoryLinesFollowTheSchema(t *testing.T) {
 
 // readerSchemas are the schemas of what the bridge writes for other
 // programs to read.
-var readerSchemas = []string{"history-line.schema.json"}
+var readerSchemas = []string{"history-line.schema.json", "send-response.schema.json", "ingest-response.schema.json"}
 
 // TestReaderSchemasSayTheyAreClosed: a schema of what other programs read
 // refuses what it does not list, which keeps it to the code, while those
@@ -668,5 +672,102 @@ func TestReaderSchemasSayTheyAreClosed(t *testing.T) {
 		if !strings.Contains(desc, "should allow unknown") {
 			t.Errorf("%s does not tell a reader that validates against it to allow what is new: %q", name, desc)
 		}
+	}
+}
+
+// assertScriptAPIContract checks a call of /send or /ingest at path
+// against the schemas: a JSON answer follows the response schema, as the
+// success or the error its status says; a request the bridge took follows
+// the request schema; and the history lines it added follow theirs. The
+// guards in front of the API answer in plain text, which no schema
+// describes.
+func assertScriptAPIContract(t *testing.T, path, body string, w *httptest.ResponseRecorder, lines []string) {
+	t.Helper()
+	set := newSchemaSet(t)
+	endpoint := strings.TrimPrefix(path, "/")
+	if w.Header().Get("Content-Type") == "application/json" {
+		def := "#/$defs/error"
+		if w.Code < 300 {
+			def = map[string]string{"send": "#/$defs/sent", "ingest": "#/$defs/accepted"}[endpoint]
+		}
+		assertValid(t, set, endpoint+"-response.schema.json", "the answer", w.Body.Bytes())
+		assertValid(t, set, endpoint+"-response.schema.json"+def, fmt.Sprintf("the %d answer", w.Code), w.Body.Bytes())
+	}
+	if w.Code < 300 {
+		assertValid(t, set, endpoint+"-request.schema.json", "the request", []byte(body))
+	}
+	for i, line := range lines {
+		assertValid(t, set, "history-line.schema.json", fmt.Sprintf("history line %d", i+1), []byte(line))
+	}
+}
+
+// TestSendSchemaTakesTheOTPRequest: the answer of a /send that asks for a
+// one-time code, which carries an otp_request, follows the response
+// schema, and so does the history line it writes.
+func TestSendSchemaTakesTheOTPRequest(t *testing.T) {
+	h := newHarness(t, `{"otp_guard": true}`)
+	dir := h.AddBrain(BrainManifest{ID: "main", Name: "Main", Routing: BrainRouting{HandlesDMs: true}})
+	body := `{"jid": "` + harnessDM + `", "text": "Please send me the 6-digit verification code."}`
+	w := h.Script("POST", "/send", body)
+	if w.Code != 200 || !strings.Contains(w.Body.String(), `"otp_request"`) {
+		t.Fatalf("send: %d %s, want 200 with an otp_request", w.Code, w.Body.String())
+	}
+	assertScriptAPIContract(t, "/send", body, w, historyLines(t, dir))
+}
+
+// TestScriptAPISchemasTakeWhatTheBridgeTakes: requests the bridge takes,
+// written in ways the golden calls are not, and the history lines they
+// add, follow the schemas.
+func TestScriptAPISchemasTakeWhatTheBridgeTakes(t *testing.T) {
+	h := newHarness(t, `{"ingest": {"enabled": true}}`)
+	dir := h.AddBrain(BrainManifest{ID: "main", Name: "Main", Routing: BrainRouting{HandlesDMs: true}})
+	for _, tc := range []struct{ path, body string }{
+		{"/send", `{"jid": "15551234567", "text": "to a number", "comment": "ignored"}`},
+		{"/ingest", `{"brain": "main", "text": "an empty scope", "scope": ""}`},
+		{"/ingest", `{"brain": "main", "text": "a null scope", "scope": null}`},
+		{"/ingest", `{"brain": "main", "text": "no paths", "paths": null}`},
+	} {
+		t.Run(tc.path+" "+tc.body, func(t *testing.T) {
+			before := len(historyLines(t, dir))
+			w := h.Script("POST", tc.path, tc.body)
+			if w.Code >= 300 {
+				t.Fatalf("the bridge refuses it: %d %s", w.Code, w.Body.String())
+			}
+			if w.Code == http.StatusAccepted {
+				// /ingest answers at once and runs the brain afterwards.
+				h.WaitFor("the brain's answer", func() bool { return len(historyLines(t, dir)) >= before+2 })
+			}
+			assertScriptAPIContract(t, tc.path, tc.body, w, historyLines(t, dir)[before:])
+		})
+	}
+}
+
+// TestScriptAPISchemasRefuseBadRequests: the requests the bridge refuses
+// for what they are, rather than what they name, the request schemas
+// refuse too. One for a chat or a brain the bridge does not know is not
+// among them.
+func TestScriptAPISchemasRefuseBadRequests(t *testing.T) {
+	set := newSchemaSet(t)
+	for _, tc := range []struct{ endpoint, body string }{
+		{"send", `{"jid":`},
+		{"send", `["15551234567", "hello"]`},
+		{"send", `{"text": "hello"}`},
+		{"send", `{"jid": "", "text": "hello"}`},
+		{"send", `{"jid": "15551234567@s.whatsapp.net"}`},
+		{"send", `{"jid": "15551234567@s.whatsapp.net", "text": " \n\t"}`},
+		{"send", `{"jid": 15551234567, "text": "hello"}`},
+		{"ingest", `{"brain":`},
+		{"ingest", `{"scope": "main", "text": "x"}`},
+		{"ingest", `{"brain": "main"}`},
+		{"ingest", `{"brain": "main", "paths": []}`},
+		{"ingest", `{"brain": "main", "text": "  "}`},
+		{"ingest", `{"brain": "main", "paths": ["notes.txt"]}`},
+		{"ingest", `{"brain": "main", "paths": "/m/notes.txt"}`},
+	} {
+		t.Run(tc.endpoint+" "+tc.body, func(t *testing.T) {
+			if len(set.ValidateJSON(tc.endpoint+"-request.schema.json", []byte(tc.body))) == 0 {
+				t.Error("the schema takes it")
+			}
+		})
 	}
 }
