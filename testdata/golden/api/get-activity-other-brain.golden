@@ -1,0 +1,5 @@
+GET /api/activity?brain=other
+200 OK
+Content-Type: application/json
+
+[]

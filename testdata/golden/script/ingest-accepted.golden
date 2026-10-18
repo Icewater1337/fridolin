@@ -1,0 +1,15 @@
+POST /ingest
+{"brain": "main", "paths": ["<HOME>/.fridolin/media/notes.txt"], "text": "File these notes.", "sender": "recorder"}
+202 Accepted
+Content-Type: application/json
+
+{
+  "jid": "15551234567@s.whatsapp.net",
+  "status": "accepted"
+}
+
+sent:
+  15551234567@s.whatsapp.net "echo:<HOME>/main:recorder says: File these notes."
+history:
+  main: {"ts":"<TIME>","from":"recorder","chat":"15551234567@s.whatsapp.net","text":"File these notes.\n[attachment: <HOME>/.fridolin/media/notes.txt]","type":"in"}
+  main: {"ts":"<TIME>","from":"main","chat":"15551234567@s.whatsapp.net","text":"echo:<HOME>/main:recorder says: File these notes.","type":"out"}

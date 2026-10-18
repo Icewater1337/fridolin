@@ -1,0 +1,11 @@
+POST /send
+{"jid": "15551234567@s.whatsapp.net", "text": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx… (1048625 bytes)
+400 Bad Request
+Content-Type: application/json
+
+{
+  "error": "invalid JSON: http: request body too large"
+}
+
+sent:
+history:

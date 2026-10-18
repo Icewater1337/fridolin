@@ -1,0 +1,7 @@
+PUT /api/config
+400 Bad Request
+Content-Type: application/json
+
+{
+  "error": "invalid config: config.json lists brains inline under \"brains\", which this version no longer runs. Move them into their folders first: run \"fridolin migrate\" with a build from before this change (commit 2592376), then start this version again (see docs/BRAINS.md#configs-with-inline-brains)"
+}

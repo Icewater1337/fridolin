@@ -1,0 +1,11 @@
+GET /api/site/users
+200 OK
+Content-Type: application/json
+
+{
+  "roles": [
+    "admin",
+    "member"
+  ],
+  "users": []
+}

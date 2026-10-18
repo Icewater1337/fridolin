@@ -1,0 +1,11 @@
+{"ts":"2026-01-02T09:00:00+01:00","from":"15551234567","chat":"15551234567@s.whatsapp.net","text":"Remind me to call the plumber.","type":"in"}
+{"ts":"2026-01-02T09:00:05+01:00","from":"main","chat":"15551234567@s.whatsapp.net","text":"Noted: call the plumber. When?","type":"out"}
+{"ts":"2026-01-02T09:01:00+01:00","from":"15551234567","chat":"15551234567@s.whatsapp.net","text":"[reply to main: \"Noted: call the plumber. When?\"]\nTomorrow at 10.","type":"in"}
+{"ts":"2026-01-02T10:00:00Z","from":"15559876543","chat":"120363000000000000@g.us","text":"Who brings the cake on Sunday?","type":"in"}
+{"ts":"2026-01-02T10:00:30Z","from":"15551234567","chat":"120363000000000000@g.us","text":"This one, from the bakery.\n[attachment: /Users/you/.fridolin/media/cake.jpg]","type":"in"}
+{"ts":"2026-01-02T10:01:00Z","from":"main","chat":"120363000000000000@g.us","text":"Sunday's cake: the one from the bakery.","type":"out"}
+{"ts":"2026-01-02T11:00:00Z","from":"main","chat":"15551234567@s.whatsapp.net","text":"Please send me the 6-digit verification code.","type":"out"}
+{"ts":"2026-01-02T11:05:00Z","from":"15559876543","chat":"120363000000000000@g.us","text":"Who drives on Sunday?","type":"in","id":"3EB0C0FFEE0000000001"}
+{"ts":"2026-01-02T11:06:00Z","from":"15559876543","chat":"120363000000000000@g.us","text":"edited a message to: \"Who drives us on Sunday?\"","type":"event"}
+{"ts":"2026-01-02T11:07:00Z","from":"15551234567","chat":"120363000000000000@g.us","text":"voted \"Pizza\" in the poll \"Lunch on Friday?\"","type":"event"}
+{"ts":"2026-01-02T11:10:00Z","from":"script","chat":"15551234567@s.whatsapp.net","text":"The parcel is out for delivery.","type":"out","via":"script"}

@@ -1,0 +1,11 @@
+POST /send
+{"jid": "120363000000000000@newsletter", "text": "hello"}
+400 Bad Request
+Content-Type: application/json
+
+{
+  "error": "refusing to send to a Status, broadcast list or channel: 120363000000000000@newsletter"
+}
+
+sent:
+history:

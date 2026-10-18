@@ -212,7 +212,10 @@ func TestFakePlaudPrintsWhatTheRealCLIPrints(t *testing.T) {
 			}
 			out := filepath.Join(t.TempDir(), "out.txt")
 			cmd := exec.Command(os.Args[0], plaudGoldenArgs(want.Args, out)...)
-			cmd.Env = []string{"FRIDOLIN_FAKE_PLAUD=1", "FRIDOLIN_FAKE_PLAUD_DIR=" + dir, "HOME=" + home, "GORACE=atexit_sleep_ms=0", "TZ=UTC"}
+			// GOCOVERDIR is where a binary built with -cover writes its
+			// counters; without it, `go test -cover` would add a warning to
+			// what the fake prints on stderr.
+			cmd.Env = []string{"FRIDOLIN_FAKE_PLAUD=1", "FRIDOLIN_FAKE_PLAUD_DIR=" + dir, "HOME=" + home, "GORACE=atexit_sleep_ms=0", "TZ=UTC", "GOCOVERDIR=" + t.TempDir()}
 			for _, d := range runPlaudCall(t, cmd, home, out).diff(want) {
 				t.Error(d)
 			}

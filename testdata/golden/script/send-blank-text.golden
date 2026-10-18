@@ -1,0 +1,11 @@
+POST /send
+{"jid": "15551234567@s.whatsapp.net", "text": " \n\t"}
+400 Bad Request
+Content-Type: application/json
+
+{
+  "error": "jid and text are required"
+}
+
+sent:
+history:

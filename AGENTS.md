@@ -122,6 +122,23 @@ the version before: `fridolin service rollback`.
   bridge runs them, in folders with a `brain.json` listed in `brain_dirs`
   (`brainFolder`, `addFolderBrain`); a config with inline `"brains"` no
   longer loads.
+- The golden files in `testdata/golden` pin what the bridge says and writes
+  today: every GET of the API, config writes and their errors, the files the
+  dashboard serves, sandbox profiles, prompts and the Claude CLI's
+  arguments, `fridolin check` and `init`, a new brain's folder, backup files
+  and the replies of `/send` and `/ingest`. Times, temp paths, PIDs and the
+  version are masked, so a second run writes the same bytes. A change meant
+  to change one rewrites it with `go test -run 'TestName' -update .`, and
+  the pull request says why. A new setting also goes into
+  `testdata/config-v1.json`, which sets every one, and a new route into
+  `routeInventory` (`routes_test.go`) with the guards it needs. End-to-end
+  tests drive a dev-mode bridge through what it offers from outside with
+  `newHarness` (`harness_test.go`) instead of reaching into the `Bridge`, so
+  they keep working while code moves into packages; `knownbugs_test.go` pins
+  bugs that stay as they are for now, and the fix that changes one rewrites
+  its test. `testdata/coverage-baseline.txt` is each file's statement
+  coverage, which code that moves keeps. `TestSmoke` builds the bridge and
+  runs it in dev mode; `go test -short` skips it.
 - The parsers of untrusted input (chunking, poll blocks, triggers, JIDs and
   the DM allowlist, the identity map, brain.json, stream-json, attachment
   names, the junk filter) and the prompt that carries it to a run have fuzz

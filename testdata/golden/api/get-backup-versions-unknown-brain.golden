@@ -1,0 +1,8 @@
+GET /api/brains/nope/backup/versions
+200 OK
+Content-Type: application/json
+
+{
+  "brain": "nope",
+  "versions": []
+}

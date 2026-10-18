@@ -1,0 +1,3 @@
+<TIME> config <ROOT>/config.json: "model" is retired and is dropped the next time the dashboard saves: brain_model is now "opus", the model brains fell back to
+<TIME> config <ROOT>/config.json: "work_dir" is retired and is dropped the next time the dashboard saves: it named the folder classic mode ran in, and brains run in their own
+<TIME> config <ROOT>/config.json: "brains" is retired and is dropped the next time the dashboard saves: it listed no brains, and brains live in their folders (brain_dirs)

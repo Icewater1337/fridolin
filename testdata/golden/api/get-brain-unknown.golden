@@ -1,0 +1,7 @@
+GET /api/brains/nope
+404 Not Found
+Content-Type: application/json
+
+{
+  "error": "no such brain"
+}

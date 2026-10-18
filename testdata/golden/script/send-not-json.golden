@@ -1,0 +1,11 @@
+POST /send
+{"jid":
+400 Bad Request
+Content-Type: application/json
+
+{
+  "error": "invalid JSON: unexpected EOF"
+}
+
+sent:
+history:

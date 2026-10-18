@@ -8,9 +8,11 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
+	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
@@ -31,14 +33,30 @@ import (
 // FRIDOLIN_FAKE_PROMPT_LOG its prompt, and with
 // FRIDOLIN_FAKE_STDERR_BYTES it floods stderr and fails instead. Asked for
 // --version, it answers testedClaudeVersion. Tests point claude_path at
-// os.Args[0], so no script or real CLI is needed.
+// os.Args[0], so no script or real CLI is needed. With
+// FRIDOLIN_TEST_RUN_MAIN=1 it is the bridge itself instead, see
+// runBridgeCLI.
 //
 // Before the tests run it unsets the variables the bridge reads: a shell
 // that exports FRIDOLIN_CONFIG for a real bridge would otherwise point the
 // tests at that bridge's config. It also gives them an empty HOME, see
 // useEmptyHome, moves them out of the checkout, see runInEmptyDir, and
 // passes testChildEnv on to the programs the bridge starts.
+//
+// A test binary that finds its own process ID in testPIDVariable has been
+// executed again in place, and fails at once, see reexecutedInPlace.
 func TestMain(m *testing.M) {
+	if reexecutedInPlace() {
+		fmt.Fprintln(os.Stderr, "TestMain: a handler re-executed the bridge, and with it this test binary in place (POST /api/restart in a test?): the tests that were running never finished")
+		os.Exit(2)
+	}
+	if os.Getenv("FRIDOLIN_TEST_RUN_MAIN") == "1" {
+		// Not FRIDOLIN_FAKE_*, so the programs this bridge starts do not
+		// get it, and the fake CLIs among them stay fakes.
+		childEnvAllowlist = append(childEnvAllowlist, testChildEnv...)
+		main()
+		os.Exit(0)
+	}
 	if os.Getenv("FRIDOLIN_FAKE_PLAUD") == "1" && len(os.Args) > 1 && isPlaudCommand(os.Args[1]) {
 		os.Exit(fakePlaud(os.Args[1:]))
 	}
@@ -53,6 +71,11 @@ func TestMain(m *testing.M) {
 			os.Exit(1)
 		}
 	}
+	if err := os.Setenv(testPIDVariable, strconv.Itoa(os.Getpid())); err != nil {
+		fmt.Fprintf(os.Stderr, "setting %s: %v\n", testPIDVariable, err)
+		os.Exit(1)
+	}
+	goToolHome = os.Getenv("HOME")
 	removeHome, err := useEmptyHome()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "giving the tests an empty HOME: %v\n", err)
@@ -76,8 +99,77 @@ var testChildEnv = []childEnvVar{
 	{"GORACE", anyChild},
 }
 
+// testPIDVariable holds the process ID of the test binary that runs the
+// tests. The programs it starts have their own, so only a process that is
+// that binary executed again in place finds its own ID there.
+const testPIDVariable = "FRIDOLIN_TEST_PID"
+
+// reexecutedInPlace reports whether this process is the test binary
+// executed again in place. exec keeps the process ID: POST /api/restart
+// re-executes os.Args[0], which in a test is this binary, with the test
+// flags and the environment of the test that was running. Playing the
+// fake CLI, as that environment says, or running the tests again, it would
+// exit 0, and go test would report the package as passing although the
+// tests after that one never ran.
+func reexecutedInPlace() bool {
+	return os.Getenv(testPIDVariable) == strconv.Itoa(os.Getpid())
+}
+
+// TestRestartInATestFailsTheRun: POST /api/restart re-executes the process
+// in place, which in a test is the test binary. Its guards stop a request
+// before the handler runs; should one let it through, the run must fail
+// rather than end as the fake CLI with exit 0, which go test would report
+// as a pass of the whole package (reexecutedInPlace). Both are checked in a
+// test binary of its own, since the restart replaces the process that
+// makes it.
+func TestRestartInATestFailsTheRun(t *testing.T) {
+	const child, held = "FRIDOLIN_TEST_RESTART_CHILD", "the guards held: this is still the test"
+	if os.Getenv(child) == "1" {
+		h := newHarness(t, "")
+		for _, c := range []struct {
+			name   string
+			mutate func(*http.Request)
+			want   int
+		}{
+			{"without the token", func(r *http.Request) { r.Header.Del("X-Bridge-Token") }, http.StatusUnauthorized},
+			{"without X-Bridge-Dashboard", func(r *http.Request) { r.Header.Del("X-Bridge-Dashboard") }, http.StatusForbidden},
+			{"a form body", func(r *http.Request) { r.Header.Set("Content-Type", "text/plain") }, http.StatusUnsupportedMediaType},
+			{"from another site", func(r *http.Request) { r.Header.Set("Origin", "https://evil.example.com") }, http.StatusForbidden},
+		} {
+			if w := h.Do("POST", "/api/restart", map[string]any{}, c.mutate); w.Code != c.want {
+				t.Errorf("%s: %d, want %d", c.name, w.Code, c.want)
+			}
+		}
+		// The handler re-executes the process 300 ms after it answers.
+		time.Sleep(time.Second)
+		fmt.Println(held)
+		if w := h.Do("POST", "/api/restart", nil); w.Code != http.StatusAccepted {
+			t.Fatalf("POST /api/restart: %d %s", w.Code, w.Body.String())
+		}
+		time.Sleep(10 * time.Second)
+		t.Fatal("POST /api/restart did not re-execute the process")
+	}
+	cmd := exec.Command(os.Args[0], "-test.run=^TestRestartInATestFailsTheRun$", "-test.count=1", "-test.v")
+	// The child's temp folders inside this test's: replaced by the restart,
+	// it never removes its own.
+	cmd.Env = append(os.Environ(), child+"=1", "GORACE=atexit_sleep_ms=0", "TMPDIR="+t.TempDir())
+	out, err := cmd.CombinedOutput()
+	var exit *exec.ExitError
+	switch {
+	case !strings.Contains(string(out), held):
+		t.Fatalf("a probe of POST /api/restart got through its guards (%v):\n%s", err, out)
+	case !errors.As(err, &exit) || exit.ExitCode() != 2 || !strings.Contains(string(out), "re-executed the bridge"):
+		t.Fatalf("the test binary, re-executed by the restart, ended with %v instead of failing the run:\n%s", err, out)
+	}
+}
+
 // testHome is the HOME the tests start with.
 var testHome string
+
+// goToolHome is the HOME the tests were started with, for the go command
+// TestSmoke builds the bridge with: its build and module caches are there
+// by default. Nothing else may use it.
+var goToolHome string
 
 // useEmptyHome points HOME at a new, empty temp directory and returns a
 // function that removes it. Tests set their own HOME with t.Setenv; one that
@@ -223,6 +315,21 @@ func fakeClaude() {
 		f, err := os.OpenFile(log, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600)
 		if err == nil {
 			fmt.Fprintln(f, strings.Join(args, " "))
+			f.Close()
+		}
+	}
+	if log := os.Getenv("FRIDOLIN_FAKE_RUN_LOG"); log != "" {
+		// Each run as one JSON line: the arguments, with a prompt that
+		// follows -p set apart, the prompt, from there or from stdin, and
+		// the working directory.
+		wd, _ := os.Getwd()
+		argv := slices.Clone(args)
+		if i := slices.Index(argv, "-p"); i >= 0 && i+1 < len(argv) {
+			argv[i+1] = "<prompt>"
+		}
+		line, _ := json.Marshal(map[string]any{"args": argv, "prompt": prompt, "dir": wd})
+		if f, err := os.OpenFile(log, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600); err == nil {
+			fmt.Fprintf(f, "%s\n", line)
 			f.Close()
 		}
 	}

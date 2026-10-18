@@ -1,0 +1,7 @@
+GET /api/fs/list?path=/
+403 Forbidden
+Content-Type: application/json
+
+{
+  "error": "only folders inside your home folder can be browsed"
+}

@@ -1,0 +1,16 @@
+GET /api/chats/ignored
+200 OK
+Content-Type: application/json
+
+[
+  {
+    "count": 1,
+    "first_seen": "<TIME>",
+    "jid": "120363000000000001@g.us",
+    "kind": "group",
+    "last_seen": "<TIME>",
+    "name": "",
+    "push_name": "",
+    "sender": "15559876543"
+  }
+]

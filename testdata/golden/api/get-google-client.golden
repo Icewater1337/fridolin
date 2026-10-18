@@ -1,0 +1,10 @@
+GET /api/google/client
+200 OK
+Content-Type: application/json
+
+{
+  "client_id_hint": "123-…",
+  "configured": true,
+  "redirect_uri": "http://127.0.0.1:8765/",
+  "type": "installed"
+}

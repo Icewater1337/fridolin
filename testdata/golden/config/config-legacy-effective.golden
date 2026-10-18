@@ -1,0 +1,61 @@
+{
+  "_comment": "A config as versions before the legacy removal wrote it: the retired keys model, work_dir, brain_mode and an empty brains list. Synthetic values only.",
+  "allow_any_dm": false,
+  "allowed_groups": [],
+  "allowed_numbers": [
+    "15551234567"
+  ],
+  "backup": {
+    "daily_at": "03:30",
+    "enabled": false,
+    "include_bridge_config": true,
+    "keep_versions_days": 30,
+    "remote": "brain-gdrive",
+    "root": "fridolin-backup"
+  },
+  "brain_mode": true,
+  "brain_model": "opus",
+  "claude_path": "claude",
+  "dangerously_skip_permissions": false,
+  "dashboard": {
+    "require_token": true
+  },
+  "data_dir": "<HOME>/.fridolin",
+  "db_path": "<HOME>/.fridolin/bridge.db",
+  "debounce": {
+    "max_wait_ms": 10000,
+    "quiet_ms": 2000
+  },
+  "http_listen": "127.0.0.1:8765",
+  "ingest": {
+    "enabled": false
+  },
+  "log_level": "info",
+  "max_chunk_size": 3900,
+  "max_media_mb": 100,
+  "media_dir": "<HOME>/.fridolin/media",
+  "otp_guard": true,
+  "plaud": {
+    "enabled": false
+  },
+  "queue": {
+    "max_pending": 10,
+    "mode": "queue",
+    "notify": true
+  },
+  "run_timeout_minutes": 30,
+  "sandbox": {
+    "allow_paths": [],
+    "deny_paths": [],
+    "enabled": false,
+    "git_config": "read"
+  },
+  "script_api": {
+    "tokenless_send": true
+  },
+  "startup_checks": {},
+  "triggers": [
+    "@claude"
+  ],
+  "viewer": false
+}

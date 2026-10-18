@@ -1,0 +1,28 @@
+# Test brain
+
+Answer in one sentence.
+
+<chat_history>
+The 10 messages before the new one in this chat, oldest first (for context, not action), each a JSON object like the new message, or with "did" in place of "text" for something its sender did without writing, such as a vote in a poll. You do NOT have prior turns in your working memory — the only context you have about previous conversation is what's in this block. Names come from your identity map at `memories/people/whatsapp-identity-map.md`; the JID in parens is the raw WhatsApp identifier, and "You (main)" is you. For anything older or more detailed, search `conversation-history.jsonl` with `"$FRIDOLIN_BIN" history QUERY`.
+
+{"at":"<WHEN>","from":"You (main)","text":"Please send me the 6-digit verification code."}
+{"at":"<WHEN>","from":"Script (via /send)","text":"The parcel is out for delivery."}
+{"at":"<WHEN>","from":"You (15551234567)","text":"What is on tomorrow?"}
+{"at":"<WHEN>","from":"You (main)","text":"echo:<HOME>/main:You (15551234567) says: What is on tomorrow?"}
+{"at":"<WHEN>","from":"You (15551234567)","text":"what is this?\n[attachment: <HOME>/.fridolin/media/a/photo.jpg]"}
+{"at":"<WHEN>","from":"You (main)","text":"echo:<HOME>/main:You (15551234567) says: what is this?"}
+{"at":"<WHEN>","from":"You (15551234567)","text":"file these\n[attachment: <HOME>/.fridolin/media/a/scan-1.pdf]\n[attachment: <HOME>/.fridolin/media/a/scan-2.pdf]"}
+{"at":"<WHEN>","from":"You (main)","text":"echo:<HOME>/main:You (15551234567) says: file these"}
+{"at":"<WHEN>","from":"You (15551234567)","text":"[reply to 15559876543: \"Lunch at 12?\"]\nyes, book it"}
+{"at":"<WHEN>","from":"You (main)","text":"echo:<HOME>/main:You (15551234567) says: [reply to 15559876543: \"Lunch at 12?\"]\nyes, book it"}
+</chat_history>
+
+It is now <WHEN>. This chat is a direct chat on WhatsApp. The new message did not come from it: its files were handed to you outside WhatsApp, and your reply is sent to this chat.
+
+The new message is a JSON object: "at" is when it was sent, "from" who sent it and "text" what it said. The file in its "files" came with it, saved at that path.
+
+Nobody can answer AskUserQuestion while you work: a question you ask with it goes to the chat at once, with its options, and the answer comes as a new message. Your final reply is sent as well, so after asking, end your turn without repeating the question.
+
+<new_message>
+{"at":"<WHEN>","from":"upload","text":"New files were uploaded.","files":["<HOME>/.fridolin/media/a/upload.txt"]}
+</new_message>

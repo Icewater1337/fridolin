@@ -567,15 +567,7 @@ func TestBackupRoundTripWithRealRclone(t *testing.T) {
 		if err := tb.backup.StartRun(nil, true, "manual", false); err != nil {
 			t.Fatal(err)
 		}
-		waitFor(t, 60*time.Second, "backup", func() bool {
-			tb.backup.mu.Lock()
-			defer tb.backup.mu.Unlock()
-			return tb.backup.job == nil
-		})
-		tb.backup.mu.Lock()
-		res := tb.backup.state.Brains["notes"]
-		tb.backup.mu.Unlock()
-		if res == nil || !res.OK {
+		if res := waitBackup(t, tb, "notes"); !res.OK {
 			t.Fatalf("backup result = %+v", res)
 		}
 	}
@@ -762,20 +754,41 @@ func runBackup(t *testing.T, tb *testBridge, id string) *BackupResult {
 	return waitBackup(t, tb, id)
 }
 
+// waitBackup waits until no backup runs, as the Backup page sees it, and
+// returns the last result of brain id.
 func waitBackup(t *testing.T, tb *testBridge, id string) *BackupResult {
 	t.Helper()
+	var res *BackupResult
 	waitFor(t, 60*time.Second, "backup", func() bool {
-		tb.backup.mu.Lock()
-		defer tb.backup.mu.Unlock()
-		return tb.backup.job == nil
+		running, last := backupStatus(t, tb)
+		res = last[id]
+		return !running
 	})
-	tb.backup.mu.Lock()
-	defer tb.backup.mu.Unlock()
-	res := tb.backup.state.Brains[id]
 	if res == nil {
 		t.Fatalf("no backup result for %s", id)
 	}
 	return res
+}
+
+// backupStatus reports from GET /api/backup/status whether a backup runs,
+// and each brain's last result.
+func backupStatus(t *testing.T, tb *testBridge) (running bool, last map[string]*BackupResult) {
+	t.Helper()
+	var st struct {
+		Job    any `json:"job"`
+		Brains []struct {
+			ID   string        `json:"id"`
+			Last *BackupResult `json:"last"`
+		} `json:"brains"`
+	}
+	if w := tb.do("GET", "/api/backup/status", nil); w.Code != 200 || json.Unmarshal(w.Body.Bytes(), &st) != nil {
+		t.Fatalf("backup status: %d %s", w.Code, w.Body.String())
+	}
+	last = map[string]*BackupResult{}
+	for _, b := range st.Brains {
+		last[b.ID] = b.Last
+	}
+	return st.Job != nil, last
 }
 
 // TestBackupPruneKeepsVersionsByRunDate is the retention promise: a file
@@ -1220,10 +1233,7 @@ func TestBackupRunForceOverridesRefusal(t *testing.T) {
 			t.Errorf("%v: %d %s, want 400", body, w.Code, w.Body.String())
 		}
 	}
-	tb.backup.mu.Lock()
-	started := tb.backup.job != nil || tb.backup.state.Brains["notes"] != nil
-	tb.backup.mu.Unlock()
-	if started {
+	if running, last := backupStatus(t, tb); running || last["notes"] != nil {
 		t.Fatal("a rejected forced run must not start a backup")
 	}
 
