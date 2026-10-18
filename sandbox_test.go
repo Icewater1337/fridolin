@@ -1226,7 +1226,7 @@ func TestSandboxProfileWritesOnlyItsOwnPlaces(t *testing.T) {
 			sp.plaudShared = tc.plaud
 			q := func(filter, p string) string { return `(allow file-write* (` + filter + ` "` + p + `"))` }
 			want := []string{
-				q("literal", "/dev/null"), q("literal", "/dev/zero"), q("literal", "/dev/tty"), q("literal", "/dev/dtracehelper"), q("subpath", "/dev/fd"),
+				q("literal", "/dev/null"), q("literal", "/dev/zero"), q("literal", "/dev/dtracehelper"), q("subpath", "/dev/fd"),
 				q("subpath", own),
 				q("subpath", home+"/.fridolin/media/a"),
 				q("subpath", home+"/.fridolin/brains/a"),

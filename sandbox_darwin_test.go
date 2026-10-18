@@ -654,6 +654,62 @@ func TestSandboxWritesOnlyItsOwnPlaces(t *testing.T) {
 	}
 }
 
+// TestSandboxedRunsCannotTypeIntoTheTerminal: a bridge started in your
+// terminal (dev mode, or fridolin in the foreground) used to start runs in
+// its own session, so a run could open /dev/tty, which the profile let it
+// write, and push keystrokes into your shell with TIOCSTI: your shell ran
+// them outside any sandbox. Under script(1), which gives the bridge a
+// terminal, a run started as the bridge starts it now has none, and the
+// profile denies writing /dev/tty even to a run that has one (the control,
+// started the old way, which shows the terminal is there).
+func TestSandboxedRunsCannotTypeIntoTheTerminal(t *testing.T) {
+	requireSandboxExec(t)
+	if _, err := os.Stat("/usr/bin/script"); err != nil {
+		t.Skip("no script(1):", err)
+	}
+	home := canonicalDir(t.TempDir())
+	t.Setenv("HOME", home)
+	sp, own := sandboxFixture(t, home, "b", "clients")
+	state := sandboxStateEnv(t, sp, "a")
+	bin, argv, err := sp.Command("a", os.Args[0], nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	env := append(append(os.Environ(), state...), "FRIDOLIN_FAKE_TTY=1")
+	run := func(t *testing.T, isolate bool) string {
+		t.Helper()
+		spec, err := json.Marshal(map[string]any{"argv": append([]string{bin}, argv...), "dir": own, "env": env, "isolate": isolate})
+		if err != nil {
+			t.Fatal(err)
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+		defer cancel()
+		cmd := exec.CommandContext(ctx, "/usr/bin/script", "-q", "/dev/null", os.Args[0])
+		cmd.Env = append(os.Environ(), "FRIDOLIN_FAKE_TTY_PARENT="+string(spec))
+		out, err := cmd.CombinedOutput()
+		if err != nil && ctx.Err() != nil {
+			t.Fatalf("script: %v: %s", err, out)
+		}
+		return strings.ReplaceAll(string(out), "\r", "")
+	}
+	t.Run("a run started as the bridge starts it", func(t *testing.T) {
+		out := run(t, true)
+		if !strings.Contains(out, "read: open /dev/tty: device not configured") || strings.Contains(out, "inject: ok") {
+			t.Errorf("the run reached the terminal:\n%s", out)
+		}
+	})
+	t.Run("a run that shares the bridge's terminal", func(t *testing.T) {
+		out := run(t, false)
+		if !strings.Contains(out, "read: ok") {
+			t.Fatalf("script(1) gave the run no terminal, so this test shows nothing:\n%s", out)
+		}
+		if !strings.Contains(out, "write: open /dev/tty: operation not permitted") {
+			t.Errorf("the profile let the run write the terminal:\n%s", out)
+		}
+		t.Logf("sharing the terminal, under the profile:\n%s", out)
+	})
+}
+
 // TestSandboxGivesBrainsTheirOwnTemporaryFiles: writing is denied outside a
 // brain's own places, /tmp and your own temp folder included, so a brain
 // keeps temporary files in its own TMPDIR, which the bridge points every run

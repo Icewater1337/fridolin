@@ -354,12 +354,12 @@ var claudeConfigLiterals = []string{"settings.json", "settings.local.json", "CLA
 var instructionFiles = []string{"CLAUDE.md", "CLAUDE.local.md"}
 
 // writableDevices are the devices any program writes to: discarded output,
-// the controlling terminal, its own file descriptors. They lead nowhere a
-// brain could keep anything.
+// its own file descriptors. They lead nowhere a brain could keep anything.
+// The controlling terminal is not among them: runs start without one (see
+// isolateProcessGroup), and one that reached yours could type into it.
 var writableDevices = []struct{ filter, path string }{
 	{"literal", "/dev/null"},
 	{"literal", "/dev/zero"},
-	{"literal", "/dev/tty"},
 	{"literal", "/dev/dtracehelper"},
 	{"subpath", "/dev/fd"},
 }

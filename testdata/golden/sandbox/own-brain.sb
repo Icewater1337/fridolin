@@ -5,7 +5,6 @@
 (deny file-write* (subpath "/"))
 (allow file-write* (literal "/dev/null"))
 (allow file-write* (literal "/dev/zero"))
-(allow file-write* (literal "/dev/tty"))
 (allow file-write* (literal "/dev/dtracehelper"))
 (allow file-write* (subpath "/dev/fd"))
 

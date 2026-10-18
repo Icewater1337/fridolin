@@ -3,6 +3,7 @@ package main
 import (
 	"bufio"
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -16,8 +17,10 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
+	"unsafe"
 )
 
 // TestMain lets the test binary stand in for the Claude CLI: with
@@ -36,7 +39,10 @@ import (
 // --version, it answers testedClaudeVersion. Tests point claude_path at
 // os.Args[0], so no script or real CLI is needed. With
 // FRIDOLIN_FAKE_CONNECT it connects to that unix socket instead (see
-// fakeConnect), and with FRIDOLIN_TEST_RUN_MAIN=1 it is the bridge itself,
+// fakeConnect), with FRIDOLIN_FAKE_SESSION it reports its session (see
+// fakeSession), with FRIDOLIN_FAKE_TTY or FRIDOLIN_FAKE_TTY_PARENT it
+// plays a run that tries the terminal, or the bridge that starts it (see
+// fakeTTY), and with FRIDOLIN_TEST_RUN_MAIN=1 it is the bridge itself,
 // see runBridgeCLI.
 //
 // Before the tests run it unsets the variables the bridge reads: a shell
@@ -68,6 +74,15 @@ func TestMain(m *testing.M) {
 	}
 	if p := os.Getenv("FRIDOLIN_FAKE_CONNECT"); p != "" {
 		os.Exit(fakeConnect(p))
+	}
+	if os.Getenv("FRIDOLIN_FAKE_SESSION") == "1" {
+		os.Exit(fakeSession())
+	}
+	if os.Getenv("FRIDOLIN_FAKE_TTY") == "1" {
+		os.Exit(fakeTTY())
+	}
+	if spec := os.Getenv("FRIDOLIN_FAKE_TTY_PARENT"); spec != "" {
+		os.Exit(fakeTTYParent(spec))
 	}
 	childEnvAllowlist = append(childEnvAllowlist, testChildEnv...)
 	for _, k := range bridgeVariables() {
@@ -416,6 +431,83 @@ func fakeConnect(p string) int {
 		return 1
 	}
 	c.Close()
+	return 0
+}
+
+// fakeSession prints the process's pid and the session it is in: a process
+// that leads a session of its own prints the same number twice.
+func fakeSession() int {
+	// syscall has no Getsid on Linux.
+	sid, _, errno := syscall.Syscall(syscall.SYS_GETSID, 0, 0, 0)
+	if errno != 0 {
+		fmt.Println("getsid:", errno)
+		return 1
+	}
+	fmt.Printf("pid=%d sid=%d\n", os.Getpid(), sid)
+	return 0
+}
+
+// fakeTTY tries what a run could do to the terminal of the bridge that
+// started it, and prints how each went: open /dev/tty for reading, push a
+// character into its input with TIOCSTI (which only needs reading), and open
+// it for writing.
+func fakeTTY() int {
+	f, err := os.OpenFile("/dev/tty", os.O_RDONLY, 0)
+	if err != nil {
+		fmt.Println("read:", err)
+	} else {
+		fmt.Println("read: ok")
+		c := byte('#')
+		if _, _, errno := syscall.Syscall(syscall.SYS_IOCTL, f.Fd(), uintptr(syscall.TIOCSTI), uintptr(unsafe.Pointer(&c))); errno != 0 {
+			fmt.Println("inject:", errno)
+		} else {
+			fmt.Println("inject: ok")
+		}
+		f.Close()
+	}
+	if w, err := os.OpenFile("/dev/tty", os.O_WRONLY, 0); err != nil {
+		fmt.Println("write:", err)
+	} else {
+		fmt.Println("write: ok")
+		w.Close()
+	}
+	return 0
+}
+
+// fakeTTYParent plays the bridge in a terminal: it checks that it has one,
+// then runs the command spec describes (JSON: argv, dir, env, and isolate
+// for isolateProcessGroup, as a brain's run gets it) and prints its output.
+func fakeTTYParent(spec string) int {
+	var s struct {
+		Argv, Env []string
+		Dir       string
+		Isolate   bool
+	}
+	if err := json.Unmarshal([]byte(spec), &s); err != nil || len(s.Argv) == 0 {
+		fmt.Println("bad spec:", err)
+		return 1
+	}
+	tty, err := os.OpenFile("/dev/tty", os.O_RDONLY, 0)
+	if err != nil {
+		fmt.Println("the parent has no terminal:", err)
+		return 1
+	}
+	tty.Close()
+	// A run in the terminal's background process group that tries TIOCSTI
+	// is stopped (SIGTTOU), so it must not wait for that run forever.
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, s.Argv[0], s.Argv[1:]...)
+	cmd.Dir, cmd.Env = s.Dir, s.Env
+	if s.Isolate {
+		isolateProcessGroup(cmd)
+	}
+	out, err := cmd.CombinedOutput()
+	os.Stdout.Write(out)
+	if err != nil {
+		fmt.Println("child:", err)
+		return 1
+	}
 	return 0
 }
 

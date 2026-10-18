@@ -548,7 +548,7 @@ cause, and Claude never starts unsandboxed. `fridolin check --print-sandbox
   file and of `~/.plaud`. A brain cannot remove, rename or replace the
   file (with a symlink, through which the bridge's own Plaud CLI would
   write your next sign-in), nor write anything else in `~/.plaud`;
-- `/dev/null`, `/dev/zero`, `/dev/tty`, `/dev/fd`.
+- `/dev/null`, `/dev/zero`, `/dev/fd`.
 
 So a manipulated brain cannot leave anything that runs or loads outside its
 sandbox: not in `~/.claude` (settings and their hooks, `CLAUDE.md`, skills,
@@ -680,7 +680,11 @@ daemon's: `docker run -v ~:/h`, under `~/.docker`, Colima or OrbStack; the
 sandbox goes by the real path, so `/var/run/docker.sock` counts), in your
 own temp folder (an editor's command socket) or in tmux's folder
 (`tmux run-shell` on the activity viewer's server or your own), except
-the sockets in its own folder and state, where the CLI keeps one.
+the sockets in its own folder and state, where the CLI keeps one. Nor can
+it type into the terminal you started the bridge from (dev mode, or
+`fridolin` in the foreground): every run starts in a session of its own,
+without a controlling terminal, so it cannot push keystrokes into your
+shell (`TIOCSTI`), and `/dev/tty` is not writable either.
 
 ### What wins
 
