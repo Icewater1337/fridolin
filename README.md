@@ -160,7 +160,10 @@ Then, in the dashboard:
    pairing is stored, so this is a one-time step.
 2. **Add a brain.** Choose a folder (an empty one, or one you already keep
    notes in). The bridge writes a `brain.json` and a starter prompt into it and
-   never overwrites existing files. Decide whether it answers your DMs.
+   never overwrites existing files. Decide whether it answers your DMs. The
+   first brain is also the [fallback brain](docs/BRAINS.md#the-fallback-brain)
+   until you mark another one default: it answers the groups no other brain
+   claims, and your DMs as well while no brain handles them.
 3. **Allow your number** under *Chats → Allowed numbers*, then DM the bridge.
 4. **Optional:** *Backup → Connect Google Drive*.
 

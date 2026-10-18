@@ -72,8 +72,8 @@ restart.
 | `version` | The version of `brain.json` the file is written in, `1` today; a file without it is version 1. A bridge refuses a `brain.json` of a newer version than it reads, from a newer Fridolin before you went back to an older one say: the Brains page shows it as changed on disk, with both versions, the approved copy keeps running, and no edit or approval writes over the file, which would drop the settings the older bridge does not know. |
 | `id` | Stable identifier (lowercase, digits, `-`, `_`). Used for history attribution, the sandbox profile and per-brain credential file names. It cannot be changed; remove the brain and add the folder again under a new id instead. |
 | `name` | Display name. |
-| `routing.handles_dms` | This brain answers direct messages. At most one brain. |
-| `routing.default` | This brain answers allowed groups no brain claims. At most one; without one, the first brain is the fallback. A default brain that cannot run (see above) is replaced by no other. |
+| `routing.handles_dms` | This brain answers direct messages. At most one brain; without one, the [fallback brain](#the-fallback-brain) answers them. |
+| `routing.default` | This brain is the [fallback brain](#the-fallback-brain): it answers the allowed groups no brain claims, and direct messages while no brain handles them. At most one; without one, the first brain is the fallback. A default brain that cannot run (see above) is replaced by no other. |
 | `routing.groups` | Group JIDs this brain answers. The group must also be allowed in the global settings. |
 | `routing.answer_files` | In this brain's groups, a file someone sends (photo, document, voice note, video) addresses the bridge, which answers it. Default `true`; `false` makes it chatter: the brain reads its caption without answering, and the file is not downloaded. The trigger, an @-mention or a reply to the bridge still address it. |
 | `routing.answer_forwards` | The same for a forwarded message. Default `true`. |
@@ -92,6 +92,19 @@ A field the bridge does not know, a typo such as `routing.handles_dm` or
 one a newer version added, is logged by its path when the bridge reads the
 file; the brain loads without it, and the next edit in the dashboard drops
 it from the file.
+
+### The fallback brain
+
+The brain marked `routing.default`, or without one the first brain in
+`brain_dirs` that runs, is the fallback brain. It answers the allowed
+groups no brain claims, and your direct messages as well while no brain
+has `routing.handles_dms`: with a single brain, that brain answers your
+DMs whatever its `handles_dms` says. A brain that cannot run (see above)
+keeps its chats from it: a DM brain left out keeps your DMs, and a
+default brain left out leaves no fallback brain at all. The dashboard
+names the fallback brain on the Overview, the Brains page ("Fallback for
+other chats") and the Chats page (a group's *Default brain*), and *Add
+brain* says so when the brain it adds becomes it.
 
 ## Approval
 
@@ -195,10 +208,14 @@ folder you moved, rather than swapped, keeps its history.
 
 ## Removing a brain
 
-*Remove* unregisters the brain: its run in progress stops and its chats
-fall back to the default brain, which also answers the messages that were
-waiting for it (files and recordings handed to the removed brain are
-dropped). The folder is left exactly as it was.
+*Remove* unregisters the brain: its runs stop and its chats go to the
+[fallback brain](#the-fallback-brain), which also answers the messages
+that were waiting for it (files and recordings handed to the removed
+brain are dropped). When the brain you remove is the fallback, the next
+brain becomes it and takes the chats no brain claims, and your DMs while
+no brain handles them. The dialog names the brain that takes over, and
+warns when it would start answering your DMs. The folder is left exactly
+as it was.
 
 So are the brain's media inbox (`<brain id>/` in the media folder, which is
 `media/` in the data folder unless `media_dir` puts it elsewhere) and its
