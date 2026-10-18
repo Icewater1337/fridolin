@@ -440,31 +440,68 @@ func TestShellBridgeVariablesDoNotReachTests(t *testing.T) {
 	}
 }
 
-func TestInitWritesTheDataDirItIsGiven(t *testing.T) {
-	// setup.sh takes DATA_DIR from its environment, which the service
-	// never sees: the folder must be in the config.
-	cases := []struct{ name, flag, want string }{
-		{"default", "", "/.fridolin"},
-		{"given", "/elsewhere/data", "/elsewhere/data"},
+func TestNewConfigsHoldTheirDataDir(t *testing.T) {
+	// A data folder given to setup.sh in its environment never reaches the
+	// service, so it goes into the config. Without one the config gets the
+	// folder the bridge picks now: left out, every start would pick it
+	// again by which folders exist, and a ~/.fridolin made later by
+	// something else would move a bridge off the folder from before the
+	// rename. Written with ~, it holds under another home folder too. HOME
+	// stands for the home folder.
+	cases := []struct {
+		name    string
+		write   func(t *testing.T, path string) // writes a new config to path
+		dirs    []string                        // folders in the home folder first
+		raw     string                          // data_dir as written
+		dataDir string                          // the data dir it loads as
+	}{
+		{"init", initWith(), nil, "~/.fridolin", "HOME/.fridolin"},
+		{"init, before the rename", initWith(), []string{".whatsapp-claude-bridge"}, "~/.whatsapp-claude-bridge", "HOME/.whatsapp-claude-bridge"},
+		{"init with both folders", initWith(), []string{".fridolin", ".whatsapp-claude-bridge"}, "~/.fridolin", "HOME/.fridolin"},
+		{"init --data-dir", initWith("--data-dir", "HOME/elsewhere/data"), nil, "HOME/elsewhere/data", "HOME/elsewhere/data"},
+		{"the first start", func(t *testing.T, path string) {
+			if err := ensureConfigFile(path); err != nil {
+				t.Fatal(err)
+			}
+		}, nil, "~/.fridolin", "HOME/.fridolin"},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			home := canonicalDir(t.TempDir())
 			t.Setenv("HOME", home)
-			path := filepath.Join(home, "cfg", "config.json")
-			args := []string{"--config", path}
-			if c.flag != "" {
-				args = append(args, "--data-dir", home+c.flag)
+			expand := strings.NewReplacer("HOME", home).Replace
+			for _, d := range c.dirs {
+				if err := os.Mkdir(filepath.Join(home, d), 0o700); err != nil {
+					t.Fatal(err)
+				}
 			}
-			captureStdout(t, func() { initCmd(args) })
+			path := filepath.Join(home, "cfg", "config.json")
+			c.write(t, path)
+			var raw string
+			if err := json.Unmarshal(readRawConfig(t, path)["data_dir"], &raw); err != nil || raw != expand(c.raw) {
+				t.Errorf("data_dir written as %q (%v), want %q", raw, err, expand(c.raw))
+			}
 			cfg, err := LoadConfig(path)
 			if err != nil {
 				t.Fatal(err)
 			}
-			if cfg.DataDir != home+c.want {
-				t.Errorf("data_dir = %q, want %q", cfg.DataDir, home+c.want)
+			if cfg.DataDir != expand(c.dataDir) {
+				t.Errorf("data_dir = %q, want %q", cfg.DataDir, expand(c.dataDir))
 			}
 		})
+	}
+}
+
+// initWith returns a writer for TestNewConfigsHoldTheirDataDir that runs
+// init with flags, where HOME stands for the home folder.
+func initWith(flags ...string) func(t *testing.T, path string) {
+	return func(t *testing.T, path string) {
+		args := []string{"--config", path}
+		home, _ := os.UserHomeDir()
+		for _, f := range flags {
+			args = append(args, strings.ReplaceAll(f, "HOME", home))
+		}
+		captureStdout(t, func() { initCmd(args) })
 	}
 }
 

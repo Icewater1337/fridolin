@@ -667,7 +667,9 @@ token, the scripts token for `/send` and `/ingest` (`scripts.token`),
 backup state, the bridge's rclone config and calendar credentials.
 Default `~/.fridolin`; an install from before the project was renamed keeps
 `~/.whatsapp-claude-bridge` while `~/.fridolin` does not exist, and says so
-in the log at every start: set `data_dir` to it to keep it for good.
+in the log at every start: set `data_dir` to it to keep it for good. A new
+config, from `fridolin init`, `setup.sh` or the first start, gets the folder
+chosen then (written with `~`), so later starts do not choose again.
 `db_path` and `media_dir` override individually. Brains cannot read it,
 except the `media/` inbox and their own runs' brain API tokens in
 `run-tokens/<id>/`; a `db_path` elsewhere is denied to them too.

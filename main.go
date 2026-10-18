@@ -220,8 +220,8 @@ func ensureConfigFile(path string) error {
 }
 
 // writeStarterConfig writes the starter config to path unless there is a
-// file there. dataDir is written into it when set: a data folder given only
-// in the environment of setup.sh would not reach the service.
+// file there. Its data_dir is dataDir, else starterDataDir's: without one
+// every start would pick the data dir again, by which folders exist.
 func writeStarterConfig(path, claudePath, dataDir string) error {
 	if _, err := os.Stat(path); err == nil || !os.IsNotExist(err) {
 		return err
@@ -229,12 +229,25 @@ func writeStarterConfig(path, claudePath, dataDir string) error {
 	cfg := starterConfig()
 	cfg.ClaudePath = claudePath
 	cfg.DataDir = dataDir
+	if dataDir == "" {
+		cfg.DataDir = starterDataDir(homeDir())
+	}
 	data, err := json.MarshalIndent(cfg, "", "  ")
 	if err != nil {
 		return err
 	}
 	log.Printf("No config found — writing a starter config to %s", path)
 	return writeFileAtomic(path, append(data, '\n'), 0o600, false)
+}
+
+// starterDataDir is the data dir a new config gets when none is given: the
+// folder the bridge would pick now, written with ~ so that the config
+// still holds when a backup of it is restored under another home folder.
+func starterDataDir(home string) string {
+	if _, source := resolveDataDir("", home); source == dataDirFromLegacy {
+		return "~/" + legacyDataDirName
+	}
+	return "~/" + dataDirName
 }
 
 // runOptions are the run command's flags.
@@ -361,7 +374,7 @@ func initCmd(args []string) {
 	fs := flag.NewFlagSet("init", flag.ExitOnError)
 	cfgPath := fs.String("config", "", configFlagHelp)
 	claudePath := fs.String("claude-path", "", "path to the Claude Code CLI")
-	dataDir := fs.String("data-dir", "", "data folder to write into the config (default ~/.fridolin)")
+	dataDir := fs.String("data-dir", "", "data folder to write into the config (default ~/.fridolin, or the folder from before the rename when only that exists)")
 	_ = fs.Parse(args)
 	path := configPath(*cfgPath)
 	if fileExists(path) {
