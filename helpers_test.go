@@ -31,7 +31,9 @@ import (
 // FRIDOLIN_FAKE_PROMPT_LOG its prompt, and with
 // FRIDOLIN_FAKE_STDERR_BYTES it floods stderr and fails instead. Asked for
 // --version, it answers testedClaudeVersion. Tests point claude_path at
-// os.Args[0], so no script or real CLI is needed.
+// os.Args[0], so no script or real CLI is needed. With
+// FRIDOLIN_TEST_RUN_MAIN=1 it is the bridge itself instead, see
+// runBridgeCLI.
 //
 // Before the tests run it unsets the variables the bridge reads: a shell
 // that exports FRIDOLIN_CONFIG for a real bridge would otherwise point the
@@ -39,6 +41,13 @@ import (
 // useEmptyHome, moves them out of the checkout, see runInEmptyDir, and
 // passes testChildEnv on to the programs the bridge starts.
 func TestMain(m *testing.M) {
+	if os.Getenv("FRIDOLIN_TEST_RUN_MAIN") == "1" {
+		// Not FRIDOLIN_FAKE_*, so the programs this bridge starts do not
+		// get it, and the fake CLIs among them stay fakes.
+		childEnvAllowlist = append(childEnvAllowlist, testChildEnv...)
+		main()
+		os.Exit(0)
+	}
 	if os.Getenv("FRIDOLIN_FAKE_PLAUD") == "1" && len(os.Args) > 1 && isPlaudCommand(os.Args[1]) {
 		os.Exit(fakePlaud(os.Args[1:]))
 	}
