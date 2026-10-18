@@ -119,8 +119,8 @@ policy describes what that copy does with data.
     on its first start, and those each deploy installs.
 - **Any website a run reaches.** Claude's web tools (WebFetch, WebSearch)
   and Codex's web tool fetch and search what a run asks for. A run that may
-  use tools can reach any address with its commands: the sandbox does not limit the
-  network. What a run sends there is whatever the model puts in the
+  use network commands can reach any address: Fridolin's macOS sandbox does
+  not limit the network. What a run sends there is whatever the model puts in the
   request; `disallowed_tools` can take the web tools away.
 
 ## What is stored where
