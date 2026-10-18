@@ -1,7 +1,6 @@
 package main
 
 import (
-	"bufio"
 	"context"
 	"encoding/json"
 	"os"
@@ -87,22 +86,24 @@ func (tb *testBridge) sentPrefix(jid, prefix string) bool {
 	return false
 }
 
+// readHistory returns the brain's history. A reply is written there just
+// after it was sent, maybe while a test reads, so a last line that is not
+// complete yet is left for the next read.
 func readHistory(t *testing.T, br *Brain) []historyEntry {
 	t.Helper()
-	f, err := os.Open(filepath.Join(br.Dir(), historyFileName))
+	data, err := os.ReadFile(filepath.Join(br.Dir(), historyFileName))
 	if os.IsNotExist(err) {
 		return nil
 	}
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer f.Close()
+	lines := strings.Split(string(data), "\n")
 	var out []historyEntry
-	sc := bufio.NewScanner(f)
-	for sc.Scan() {
+	for _, line := range lines[:len(lines)-1] {
 		var e historyEntry
-		if err := json.Unmarshal(sc.Bytes(), &e); err != nil {
-			t.Fatalf("history line %q: %v", sc.Text(), err)
+		if err := json.Unmarshal([]byte(line), &e); err != nil {
+			t.Fatalf("history line %q: %v", line, err)
 		}
 		out = append(out, e)
 	}

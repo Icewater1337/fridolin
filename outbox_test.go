@@ -359,7 +359,7 @@ func TestOutboxSurvivesARestart(t *testing.T) {
 	defer second.Stop()
 	select {
 	case r := <-got:
-		if r.Brain != "main" || r.Chat != testDMChat || !strings.HasPrefix(r.History, "hello") {
+		if r.Brain != "main" || r.Chat != testDMChat || r.History != "📊 *Lunch?*\n1. yes\n2. no\n\nhello" {
 			t.Errorf("delivered %+v", r)
 		}
 	case <-time.After(5 * time.Second):

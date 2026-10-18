@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log"
 	"math"
+	"strings"
 	"sync"
 	"time"
 )
@@ -75,20 +76,27 @@ func (o *Outbox) Stop() {
 
 // Reply puts what brain answered in chat into the outbox: each [POLL]
 // block as a poll, then the rest as text in chunks of at most maxChunk
-// characters (see chunks). The brain's history records text once all of
-// it went out.
+// characters (see chunks). Once all of it went out, the brain's history
+// records what the chat got, in that order: each poll as its question and
+// numbered options, as it reads when WhatsApp refuses the poll, then the
+// text. The [POLL] markup never reached anyone.
 func (o *Outbox) Reply(ctx context.Context, brain, chat, text string, maxChunk int) error {
 	polls, remaining := extractPolls(text)
 	var parts []outboxPart
+	var said []string
 	// The polls go before the text that introduces them, as the example
 	// prompt promises (see sendPolls).
 	for _, p := range polls {
 		parts = append(parts, outboxPart{Question: p.Question, Options: p.Options, Max: p.MaxSelectable})
+		said = append(said, pollAsText(p))
 	}
 	for _, c := range o.chunks(chat, remaining, maxChunk) {
 		parts = append(parts, outboxPart{Text: c})
 	}
-	return o.add(ctx, outboxRow{Chat: chat, Brain: brain, History: text, Parts: parts})
+	if remaining != "" {
+		said = append(said, remaining)
+	}
+	return o.add(ctx, outboxRow{Chat: chat, Brain: brain, History: strings.Join(said, "\n\n"), Parts: parts})
 }
 
 // Text puts text into the outbox, in chunks of at most maxChunk

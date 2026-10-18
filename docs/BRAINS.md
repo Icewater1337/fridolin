@@ -88,8 +88,9 @@ to `conversation-history.jsonl` and reads it back, and logs what each run
 did in `claude-stream.log`, each run under a line naming its chat, sender,
 process and model, and after it the end of what the CLI wrote to stderr,
 under a line naming the run. A history line has the type `in`, `out` for an
-answer, written once all of it reached WhatsApp, or `event` for a vote in
-one of the brain's polls or an edit of a message a run already read, and a
+answer, written once all of it reached WhatsApp as what the chat got (a
+poll as its question and numbered options), or `event` for a vote in one
+of the brain's polls or an edit of a message a run already read, and a
 message from WhatsApp carries its `id`. A message deleted for everyone is
 taken out of the history again, by rewriting the file. A run that finds the
 log over 5 MB first moves it to `claude-stream.1.log`, replacing the one
