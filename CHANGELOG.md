@@ -249,6 +249,10 @@ for compatibility.
 - An HTTP server that fails after the bridge started stops the bridge
   (exit 1, which the service manager restarts). Before, the bridge ran on
   without the dashboard, `/send` and `/ingest`, and looked healthy.
+- `fridolin check` removes brain-owned PATH folders before probing the
+  Claude version, so a CLI planted there cannot run outside the sandbox
+  during the check.
+
 - A site search starts Claude as brain runs do: its prompt goes on stdin
   instead of the command line, where every process listing showed it,
   only the end of what Claude writes to stderr is kept, and what the
