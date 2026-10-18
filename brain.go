@@ -11,7 +11,6 @@ import (
 	"log"
 	"maps"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"regexp"
 	"runtime/debug"
@@ -1191,24 +1190,12 @@ func (br *Brain) streamLogPath() string {
 // claudeArgs builds the CLI arguments for one run. mcpConfig is what
 // mcpConfigOf returned for the brain's folder, or "" for none; settings is
 // the brain's excludeInstructionsAbove. They end in -p: the prompt goes on
-// stdin (see invoke).
+// stdin (see startClaude).
 func claudeArgs(s *brainSettings, mcpConfig, settings string) []string {
-	args := []string{"--output-format", "stream-json", "--verbose"}
-	if !s.inheritUser {
-		// Only the brain folder's own Claude Code setup. Your user settings
-		// (with their hooks, plugins and permissions), skills, agents,
-		// commands and the MCP servers in ~/.claude.json are yours, and a
-		// brain answers whoever may message it; under
-		// --dangerously-skip-permissions it would call those MCP tools
-		// without asking.
-		args = append(args, "--setting-sources", "project,local", "--strict-mcp-config")
-		if settings != "" {
-			args = append(args, "--settings", settings)
-		}
-		if mcpConfig != "" {
-			// --mcp-config takes several files: an option must follow.
-			args = append(args, "--mcp-config", mcpConfig)
-		}
+	var args []string
+	if !s.inheritUser && mcpConfig != "" {
+		// --mcp-config takes several files: an option must follow.
+		args = append(args, "--mcp-config", mcpConfig)
 	}
 	if s.dangerously {
 		args = append(args, "--dangerously-skip-permissions")
@@ -1222,7 +1209,7 @@ func claudeArgs(s *brainSettings, mcpConfig, settings string) []string {
 	if len(s.disallowedTools) > 0 {
 		args = append(args, "--disallowed-tools", strings.Join(s.disallowedTools, ","))
 	}
-	return append(args, "-p")
+	return claudeArgList(!s.inheritUser, settings, args...)
 }
 
 // withArgsBeforePrint puts extra before the trailing -p that claudeArgs
@@ -1631,19 +1618,6 @@ func (br *Brain) invoke(run *brainRun, ctx context.Context, s *brainSettings, m 
 	cmdCtx, stopCmd := context.WithCancel(ctx)
 	defer stopCmd()
 
-	cmd := exec.CommandContext(cmdCtx, binary, finalArgs...)
-	cmd.Dir = br.workDir
-	cmd.Env = env
-	isolateProcessGroup(cmd)
-
-	// The prompt goes on stdin, which -p reads to its end, rather than in
-	// argv: argv is bounded by ARG_MAX, about 1 MiB on macOS with the
-	// environment, and on Linux one argument by 128 KiB, which a long
-	// prompt file and a few pasted texts reach; and every process listing
-	// shows it. The CLI takes 10 MB on stdin. os/exec writes it, and Wait
-	// stops waiting for that once the CLI has exited.
-	cmd.Stdin = strings.NewReader(prompt)
-
 	// The output goes through a pipe of the bridge's own, which the parser
 	// reads: os/exec copies it there, and Wait waits for the copy, up to
 	// WaitDelay after the CLI exited. So Wait, which runs alongside the
@@ -1651,16 +1625,8 @@ func (br *Brain) invoke(run *brainRun, ctx context.Context, s *brainSettings, m 
 	// one that left the run's process group, holds the CLI's output open,
 	// and the parser gets all the CLI wrote before that.
 	stdout, stdoutW := io.Pipe()
-	cmd.Stdout = stdoutW
-
-	// Only the end of stderr is kept: the CLI, or something it started that
-	// holds on to its stderr, could otherwise make the bridge hold any
-	// amount of it, and only the last error is of use.
-	stderrBuf := newTailBuffer(stderrTailBytes)
-	cmd.Stderr = stderrBuf
-	cmd.WaitDelay = runWaitDelay
-
-	if err := cmd.Start(); err != nil {
+	proc, err := startClaude(cmdCtx, claudeRun{binary: binary, args: finalArgs, dir: br.workDir, env: env, prompt: prompt, stdout: stdoutW})
+	if err != nil {
 		if ctx.Err() != nil {
 			// Stopped before the CLI started, which Start then refuses: a
 			// stop like any other, no failure.
@@ -1668,7 +1634,7 @@ func (br *Brain) invoke(run *brainRun, ctx context.Context, s *brainSettings, m 
 		}
 		return RunResult{Err: fmt.Errorf("starting %s: %w", agentName(s.provider), err)}
 	}
-	pid := cmd.Process.Pid
+	pid := proc.pid()
 	br.setRunPID(run, pid)
 	// Removed once Wait has returned and the run is over; a bridge that
 	// crashes before leaves it to the next start (reapOrphanedRuns).
@@ -1680,10 +1646,7 @@ func (br *Brain) invoke(run *brainRun, ctx context.Context, s *brainSettings, m 
 	waited := make(chan struct{})
 	go func() {
 		defer close(waited)
-		waitErr = cmd.Wait()
-		// What is left of the process group, a command the run left in
-		// the background say: nothing else stops it.
-		_ = killProcessGroup(pid)
+		waitErr = proc.wait()
 		// The PID is free for another process now.
 		br.setRunPID(run, 0)
 		// Everything the CLI wrote has reached the parser: this ends its
@@ -1770,7 +1733,7 @@ func (br *Brain) invoke(run *brainRun, ctx context.Context, s *brainSettings, m 
 		log.Printf("brain %s: response took %v for %s (slow response)", br.id, elapsed, m.JID)
 	}
 
-	stderr := strings.TrimSpace(stderrBuf.String())
+	stderr := proc.stderrTail()
 	br.logStderr(m, pid, stderr)
 	// Whether the result event came: readStream has returned, so it would
 	// have closed resultSeen by now.
@@ -1805,11 +1768,6 @@ func (br *Brain) invoke(run *brainRun, ctx context.Context, s *brainSettings, m 
 // postResultGrace is how long a run may go on after its result, a
 // variable so tests need not wait for it.
 var postResultGrace = 5 * time.Second
-
-// runWaitDelay is how long Wait waits, once the CLI has exited, for the
-// copies of its output and stderr to end, a variable so tests need not
-// wait for it.
-var runWaitDelay = 5 * time.Second
 
 // logStderr adds what the CLI wrote to stderr to the brain's activity log,
 // the end of it when there is much, where a failed run can be looked into
