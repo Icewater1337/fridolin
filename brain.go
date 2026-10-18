@@ -2241,15 +2241,6 @@ func (bm *BrainManager) reload(specs []BrainSpec, issues []BrainIssue, cfg *Conf
 	if err := ValidateBrainSet(specs); err != nil {
 		return err
 	}
-	// Before any brain gets an inbox in the media folder: one named like a
-	// folder an older version left there would read it (see
-	// retireLegacyMedia). A failure here leaves it to the first inbox, which
-	// fails until it is done.
-	if cfg.MediaDir != "" {
-		if err := retireLegacyMedia(cfg.MediaDir); err != nil {
-			log.Printf("media: readying %s for inboxes: %v", cfg.MediaDir, err)
-		}
-	}
 
 	bm.mu.RLock()
 	old := bm.brains

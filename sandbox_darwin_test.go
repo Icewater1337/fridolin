@@ -1550,6 +1550,11 @@ func sandboxFixture(t *testing.T, home, otherBrain, denyDir string, extra ...map
 	t.Cleanup(func() { store.Close() })
 	mgr := newTestManager(t, cfg)
 	t.Cleanup(mgr.Stop)
+	// As the bridge does when it starts: the inboxes below are the
+	// brains' own, not what an older version left there.
+	if err := retireLegacyMedia(cfg.MediaDir); err != nil {
+		t.Fatal(err)
+	}
 
 	for _, f := range []string{
 		"assistant/a/notes.md",

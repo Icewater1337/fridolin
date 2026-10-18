@@ -1,10 +1,12 @@
 package main
 
 import (
+	"io"
 	"maps"
 	"os"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"slices"
 	"strings"
 	"sync"
@@ -381,4 +383,53 @@ func writeTestFile(t *testing.T, p, content string) string {
 		t.Fatal(err)
 	}
 	return p
+}
+
+// TestCheckLeavesTheMediaFolderAlone: check --print-sandbox and --route
+// load the brains as the bridge does, and that used to move what older
+// versions left in the media folder aside. Run with a new build against
+// the config of a bridge still running, as the upgrade notes say, it
+// reorganised that bridge's media folder under it, and set the marker, so
+// the new bridge never moved what the old one downloaded meanwhile. Now
+// only the bridge's start and a brain's first inbox do it.
+func TestCheckLeavesTheMediaFolderAlone(t *testing.T) {
+	home := canonicalDir(t.TempDir())
+	t.Setenv("HOME", home)
+	path := writeConfig(t, `{
+		"brain_mode": true,
+		"claude_path": "`+home+`/no-claude",
+		"data_dir": "`+home+`/data"`+brainDirsJSON(t,
+		brainFolder(t, home+"/personal", BrainManifest{ID: "personal", Routing: BrainRouting{HandlesDMs: true}}),
+	)+`}`)
+	media := filepath.Join(home, "data", "media")
+	before := processStarted.Add(-time.Hour)
+	for _, f := range []string{"old.jpg", "plaud/2026-01-15 standup.txt"} {
+		p := writeTestFile(t, filepath.Join(media, f), "content of "+f)
+		if err := os.Chtimes(p, before, before); err != nil {
+			t.Fatal(err)
+		}
+	}
+	o := checkOptions{config: path, routes: []string{"15551234567@s.whatsapp.net"}}
+	if runtime.GOOS == "darwin" {
+		o.sandboxFor = "personal"
+	}
+	if err := writeCheck(io.Discard, o); err != nil {
+		t.Fatal(err)
+	}
+	if names := dirNames(t, media); !slices.Equal(names, []string{"old.jpg", "plaud"}) {
+		t.Errorf("check left the media folder holding %q, want it as it was", names)
+	}
+	// The bridge itself still does it when it starts.
+	cfgs, err := OpenConfigStore(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, err := NewBridge(cfgs, BridgeOptions{NoWhatsApp: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(b.Stop)
+	if names := dirNames(t, media); !slices.Contains(names, mediaInboxesMarker) || slices.Contains(names, "old.jpg") || slices.Contains(names, "plaud") {
+		t.Errorf("after the bridge started the media folder holds %q, want what was there moved aside", names)
+	}
 }

@@ -67,9 +67,10 @@ var processStarted = time.Now()
 // and a document keeps its sender's file name (scan.pdf), which is easy
 // to guess. A file a script put there for /ingest once the bridge was
 // running stays. It runs before any inbox is opened (see openInbox) and
-// when the brains are loaded (see BrainManager.reload), so it moves only
-// what older versions left, never an inbox: once the marker is there,
-// every folder that appears is an inbox.
+// when the bridge starts (see NewBridge), so it moves only what older
+// versions left, never an inbox: once the marker is there, every folder
+// that appears is an inbox. Nothing else runs it: check, say, must leave
+// the media folder of a bridge that is still running alone.
 func retireLegacyMedia(mediaDir string) error {
 	legacyMediaMu.Lock()
 	defer legacyMediaMu.Unlock()

@@ -106,6 +106,18 @@ func NewBridge(cfgs *ConfigStore, opts BridgeOptions) (_ *Bridge, err error) {
 	// With the lock held no other bridge runs here, so any run the last one
 	// recorded that is still going was left behind by a crash.
 	reapOrphanedRuns(cfg.DataDir)
+	// What older versions left in the media folder goes aside before any
+	// brain has an inbox there, one named like it would read it (see
+	// retireLegacyMedia). Here, with the lock held, and not wherever the
+	// brains are loaded: check loads them too, and run with a new build
+	// against the config of a bridge still running, it reorganised that
+	// bridge's media folder under it. A failure here leaves it to the
+	// first inbox.
+	if cfg.MediaDir != "" {
+		if err := retireLegacyMedia(cfg.MediaDir); err != nil {
+			log.Printf("media: readying %s for inboxes: %v", cfg.MediaDir, err)
+		}
+	}
 	store, err := NewStore(cfg)
 	if err != nil {
 		return nil, fmt.Errorf("creating store: %w", err)
