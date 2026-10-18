@@ -214,6 +214,21 @@ func isWithin(p, dir string) bool {
 	return rel == "." || (rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)))
 }
 
+// inHome builds p, an absolute path a request named, again from your home
+// folder and the part of p below it. CheckBrainPath decides whether such a
+// folder may be used, but it only reports: the folder it hands back is still
+// the one the request named. What a handler then makes, lists or removes is
+// built this way, inside the home folder by construction. ok is false for
+// the home folder itself and for anything outside it.
+func inHome(p string) (string, bool) {
+	home := canonicalDir(homeDir())
+	rel, err := filepath.Rel(home, p)
+	if home == "" || err != nil || rel == "." || !filepath.IsLocal(rel) {
+		return "", false
+	}
+	return filepath.Join(home, rel), true
+}
+
 // UpdateManifest changes one brain's manifest, see updateManifestIn.
 func (cs *ConfigStore) UpdateManifest(id string, mutate func(m *BrainManifest) error) error {
 	_, err := cs.Update("", func(c *Config) error { return updateManifestIn(c, id, mutate) })

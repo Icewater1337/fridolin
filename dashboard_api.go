@@ -893,6 +893,11 @@ func (b *Bridge) apiAddBrain(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusUnprocessableEntity, strings.Join(problems, "; "))
 		return
 	}
+	abs, ok := inHome(abs)
+	if !ok {
+		writeErr(w, http.StatusUnprocessableEntity, "brain folders must be inside your home folder")
+		return
+	}
 	// The first folder ScaffoldBrain will make, so a failed add can undo
 	// them all: create_dir makes the parents too.
 	made := firstMissing(abs)
@@ -1002,6 +1007,12 @@ func firstMissing(path string) string {
 func unscaffold(dir string, created []string, made string) {
 	var dirs []string
 	for _, rel := range created {
+		// ScaffoldBrain writes below dir only (the manifest's prompt file
+		// must stay inside); a path that would leave it is none of its
+		// files, and nothing outside dir is removed for it.
+		if !filepath.IsLocal(rel) {
+			continue
+		}
 		if err := os.Remove(filepath.Join(dir, rel)); err != nil && !errors.Is(err, fs.ErrNotExist) {
 			log.Printf("removing %s after the brain was not added: %v", filepath.Join(dir, rel), err)
 		}
