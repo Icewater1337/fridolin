@@ -1134,8 +1134,13 @@ func (b *Bridge) apiCalendarDisconnect(w http.ResponseWriter, r *http.Request) {
 // compat: calendar_tool.py read these to find the brain's token and keep to
 // its calendars; nothing in tools/ reads them now that the bridge makes the
 // calls, but a brain's own scripts may. Kept for one release, then removed.
-func calendarEnv(id string, m BrainManifest, credsDir string) []string {
-	env := []string{"BRIDGE_BRAIN_ID=" + id, "BRIDGE_CREDENTIALS_DIR=" + credsDir}
+// BRIDGE_CREDENTIALS_DIR is no longer set: it told every run where the
+// tokens are, and with them the client copies older versions left
+// (leftoverClientCopies), which a brain the sandbox does not hold can
+// read. The last argument, that folder, is not used any more; it stays
+// until the caller in brain.go stops passing it.
+func calendarEnv(id string, m BrainManifest, _ string) []string {
+	env := []string{"BRIDGE_BRAIN_ID=" + id}
 	if m.Calendar != nil && len(m.Calendar.Calendars) > 0 {
 		env = append(env, "BRIDGE_CALENDARS="+strings.Join(m.Calendar.Calendars, ","), "BRIDGE_CALENDAR_DEFAULT="+m.Calendar.Default)
 	}

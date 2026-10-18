@@ -1601,3 +1601,27 @@ func TestLeftoverClientCopiesAreReported(t *testing.T) {
 		})
 	}
 }
+
+// TestCalendarEnv: a run is told its brain and its calendars, for a
+// brain's own scripts, but no longer the credentials folder, where older
+// versions left copies of the OAuth client a brain the sandbox does not
+// hold can read.
+func TestCalendarEnv(t *testing.T) {
+	cases := []struct {
+		name string
+		cal  *BrainCalendar
+		want []string
+	}{
+		{"no calendars chosen", nil, []string{"BRIDGE_BRAIN_ID=a"}},
+		{"none ticked", &BrainCalendar{Account: "you@example.com"}, []string{"BRIDGE_BRAIN_ID=a"}},
+		{"calendars chosen", &BrainCalendar{Account: "you@example.com", Calendars: []string{"you@example.com", "team@example.com"}, Default: "team@example.com"},
+			[]string{"BRIDGE_BRAIN_ID=a", "BRIDGE_CALENDARS=you@example.com,team@example.com", "BRIDGE_CALENDAR_DEFAULT=team@example.com"}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := calendarEnv("a", BrainManifest{ID: "a", Calendar: tc.cal}, "/Users/you/creds"); !slices.Equal(got, tc.want) {
+				t.Errorf("calendarEnv = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}

@@ -998,10 +998,11 @@ with that CLI's folder; and `DISABLE_AUTOUPDATER=1` in the sandbox. It
 also sets `BRIDGE_DATA_DIR` and `BRIDGE_DB_PATH`, the data directory and
 database it runs with (absolute, wherever `data_dir` and `db_path` put
 them), for a brain's own scripts; and, for one release, `BRIDGE_BRAIN_ID`,
-`BRIDGE_CREDENTIALS_DIR`, `BRIDGE_CALENDARS` and
-`BRIDGE_CALENDAR_DEFAULT`, which the calendar tool used to read. Nothing
-in `tools/` reads any of these any more. What the bridge's own environment
-has under these names does not reach brains. The list lives in one place,
+`BRIDGE_CALENDARS` and `BRIDGE_CALENDAR_DEFAULT`, which the calendar tool
+used to read. Nothing in `tools/` reads any of these any more.
+`BRIDGE_CREDENTIALS_DIR`, which named the folder of the calendar tokens,
+is not set any more. What the bridge's own environment has under these
+names does not reach brains. The list lives in one place,
 `childEnvAllowlist` in `childenv.go`.
 
 Brains are not handed anything else, for example `GROQ_API_KEY`,
