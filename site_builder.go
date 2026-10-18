@@ -56,6 +56,10 @@ type builderHooks struct {
 	// beyond its own list: the bridge's files (SandboxProfiler.sitePaths)
 	// and its HTTP port.
 	siteLimits func() siteBridgeLimits
+	// ingest hands files (already in the media folder) to a brain, as
+	// /ingest does; mediaDir is that folder (site_ingest.go).
+	ingest   func(brainID, sender, text string, files []string) error
+	mediaDir func() string
 }
 
 func (m *SiteManager) builderBase(brainID string) string {
@@ -619,6 +623,8 @@ func (m *SiteManager) BuilderPreview(ctx context.Context, brainID string) (map[s
 	rt := map[string]any{
 		"listen": listen, "title": m.Settings().Title + " (preview)",
 		"modules_dir": m.workspaceModules(brainID), "preview_label": p.Branch, "preview_token": p.Token,
+		// Its own data folders, in the brain's folder where its sandbox lets it write.
+		"data_dir": filepath.Join(base, "preview-data"),
 	}
 	data, _ := json.MarshalIndent(rt, "", "  ")
 	rtFile := filepath.Join(base, "preview.runtime.json")
@@ -772,6 +778,24 @@ func (b *Bridge) siteBuilderHooks() builderHooks {
 				}
 			}
 			return l
+		},
+		mediaDir: func() string { return b.cfgs.Get().MediaDir },
+		// As /ingest: the brain's reply chat gets the answer, and the brain
+		// must take the files now (its queue is not full).
+		ingest: func(brainID, sender, text string, files []string) error {
+			cfg := b.cfgs.Get()
+			if !cfg.Ingest.Enabled {
+				return errors.New("ingest is turned off (ingest.enabled)")
+			}
+			br := b.brainMgr.Get(brainID)
+			if br == nil {
+				return fmt.Errorf("no brain %q", brainID)
+			}
+			jid := b.replyChatFor(br, cfg)
+			if jid == "" {
+				return fmt.Errorf("brain %s has no chat to reply in; set its reply chat", brainID)
+			}
+			return b.submitHandOff(br, jid, sender, text, files, nil)
 		},
 	}
 }

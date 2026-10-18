@@ -15,6 +15,13 @@ export type ModuleContext = {
    * for one without a value yet, and in previews and checks, which get none.
    */
   secret: (name: string) => string
+  /** A folder of the module's own that survives deploys: logs, state, uploads on their way to a brain. */
+  dataDir: string
+  /**
+   * Hands files to a brain listed in capabilities.ingest, as a WhatsApp
+   * attachment would reach it. The files are moved. Only the live site can.
+   */
+  ingest: (req: { brain: string; files: string[]; text?: string; sender?: string }) => Promise<{ status: 'accepted' }>
   log: (...args: unknown[]) => void
 }
 
