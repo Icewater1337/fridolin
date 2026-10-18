@@ -2860,6 +2860,41 @@ func TestPlaudBrainAccessSharesTheLogin(t *testing.T) {
 	}
 }
 
+// A shared login that is a symlink, which an older version's sandbox let a
+// brain put in its place, is not used: the CLI, which runs outside the
+// sandbox, would write your next sign-in through it (into ~/.zshrc, say),
+// and chmod what it points to. A sign-out still runs, and removes only the
+// link.
+func TestPlaudRefusesALoginThatIsASymlink(t *testing.T) {
+	tb, fp := plaudBridge(t, `, "brain_access": true`)
+	fp.files()
+	const rcText = "export PATH=/usr/bin\n"
+	rc := writeTestFile(t, filepath.Join(tb.home, ".zshrc"), rcText)
+	if err := os.MkdirAll(filepath.Dir(tb.plaud.tokenPath()), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(rc, tb.plaud.tokenPath()); err != nil {
+		t.Fatal(err)
+	}
+	for _, cmd := range []string{"files", "login"} {
+		if _, err := tb.plaud.runCLIOut(context.Background(), nil, cmd); err == nil || !strings.Contains(err.Error(), "is a symlink") {
+			t.Errorf("plaud %s: %v, want it refused", cmd, err)
+		}
+	}
+	if calls := fp.calls(); calls != "" {
+		t.Errorf("the CLI ran:\n%s", calls)
+	}
+	if _, err := tb.plaud.runCLIOut(context.Background(), nil, "logout"); err != nil {
+		t.Errorf("plaud logout: %v", err)
+	}
+	if _, err := os.Lstat(tb.plaud.tokenPath()); !os.IsNotExist(err) {
+		t.Errorf("the link is still there: %v", err)
+	}
+	if data, _ := os.ReadFile(rc); string(data) != rcText {
+		t.Errorf("~/.zshrc = %q, want it untouched", data)
+	}
+}
+
 func TestPlaudConnectShowsTheSignInLinkWhileWaiting(t *testing.T) {
 	tb, fp := plaudBridge(t, "")
 	fp.write("login_wait", "")

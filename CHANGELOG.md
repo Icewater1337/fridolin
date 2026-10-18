@@ -132,6 +132,10 @@ yet, so everything is under Unreleased until the first one.
 - Backups never upload a brain folder's `.env` files, private keys or
   calendar tokens unless `backup.include_secret_files` is on, and wait up
   to two minutes for a busy brain before they copy its folder.
+- With `plaud.brain_access`, brains may rewrite the shared Plaud login
+  but not remove or replace it, and the bridge no longer runs the Plaud
+  CLI with a `~/.plaud/tokens.json` that is a symlink: remove the link and
+  connect again.
 
 ### Added
 

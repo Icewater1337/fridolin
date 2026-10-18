@@ -690,6 +690,11 @@ func (p *PlaudManager) runCLIIn(ctx context.Context, home string, out io.Writer,
 	if home == "" {
 		home = p.cliHome()
 	}
+	if args[0] != "logout" {
+		if err := checkPlaudLogin(home); err != nil {
+			return "", err
+		}
+	}
 	if err := os.MkdirAll(home, 0o700); err != nil {
 		return "", err
 	}
@@ -714,6 +719,26 @@ func (p *PlaudManager) runCLIIn(ctx context.Context, home string, out io.Writer,
 		return text, plaudRunError(args[0], err, ansiRe.ReplaceAllString(stderr.String(), ""))
 	}
 	return text, nil
+}
+
+// checkPlaudLogin refuses a login in the CLI home home that is there but
+// not a regular file. With plaud.brain_access brains share
+// ~/.plaud/tokens.json, which their sandbox lets them rewrite but not
+// replace (see Profile); one an older version's sandbox let a brain swap
+// for a symlink would have the CLI, which runs here outside the sandbox,
+// write your next sign-in wherever the link points, and chmod it there. A
+// sign-out still runs: it removes the link, not what the link points to.
+func checkPlaudLogin(home string) error {
+	p := filepath.Join(home, ".plaud", "tokens.json")
+	fi, err := os.Lstat(p)
+	if err != nil || fi.Mode().IsRegular() {
+		return nil
+	}
+	what := "not a regular file"
+	if fi.Mode()&os.ModeSymlink != 0 {
+		what = "a symlink"
+	}
+	return fmt.Errorf("%s is %s, through which the Plaud CLI would write your login: remove it, then connect Plaud again", p, what)
 }
 
 // plaudRunError says why `plaud cmd` failed. The CLI's exit status names
