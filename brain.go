@@ -1768,7 +1768,7 @@ func (bm *BrainManager) reload(specs []BrainSpec, issues []BrainIssue, cfg *Conf
 			root, err := os.OpenRoot(sp.Dir)
 			if err != nil {
 				log.Printf("brain %s: leaving it out: %v", m.ID, err)
-				issues = append(issues, BrainIssue{ID: m.ID, Path: sp.Dir, Kind: "missing", Detail: "the folder cannot be opened: " + err.Error(), atLoad: true})
+				issues = append(issues, BrainIssue{ID: m.ID, Path: sp.Dir, Kind: "missing", Detail: "the folder cannot be opened: " + err.Error(), atLoad: true, entry: sp.entry})
 				continue
 			}
 			br = &Brain{

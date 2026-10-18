@@ -1651,7 +1651,7 @@ func resolveExisting(p string) string {
 // It returns the folder, resolved.
 func (b *Bridge) restoreTarget(p string) (string, error) {
 	cfg := b.cfgs.Get()
-	target, problems, _ := CheckBrainPath(resolveExisting(expandHome(strings.TrimSpace(p), homeDir())), cfg, b.otherBrainDirs(""))
+	target, problems, _ := CheckBrainPath(resolveExisting(expandHome(strings.TrimSpace(p), homeDir())), cfg, brainDirs(cfg))
 	if creds := canonicalDir(cfg.Sandbox.CredentialsDir); len(problems) == 0 && creds != "" && (isWithin(target, creds) || isWithin(creds, target)) {
 		problems = append(problems, "the credentials folder cannot be (or contain) the restore folder")
 	}

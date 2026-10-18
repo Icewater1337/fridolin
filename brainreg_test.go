@@ -218,7 +218,7 @@ func TestResolveBrainsLeavesOutBadBrains(t *testing.T) {
 		{"the other brain's folder", "a", &BrainManifest{ID: "b", Name: "B"}, "invalid", `brains "a" and "b" use the same folder`},
 		{"id that is not a slug", "b", &BrainManifest{ID: "Work.Brain", Name: "B"}, "invalid", "must be 1–40 lowercase letters"},
 		{"no name", "b", &BrainManifest{ID: "b"}, "invalid", "needs a name"},
-		{"no approved manifest", "b", nil, "unapproved", "re-add this brain"},
+		{"no approved manifest", "b", nil, "unapproved", "remove this entry and add the folder again"},
 		{"no folder", "gone", &BrainManifest{ID: "b", Name: "B"}, "missing", "folder not found"},
 	}
 	for _, tc := range cases {

@@ -346,7 +346,10 @@ dashboard; see [BRAINS.md](BRAINS.md). In `config.json` they appear as:
 ]
 ```
 
-`approved` is the manifest you accepted — the version that runs.
+`approved` is the manifest you accepted — the version that runs. An entry
+without one (written by hand) does not run; the Brains page shows it with a
+Remove button, and a new brain cannot be added in, around or on its folder
+until it is gone.
 
 A brain whose settings clash with another (same id, a group claimed twice, two
 DM brains, the same folder or a folder inside another brain's) is left out

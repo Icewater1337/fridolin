@@ -563,3 +563,103 @@ func TestApproveBindsToTheReviewedManifest(t *testing.T) {
 		t.Fatal("approval did not apply")
 	}
 }
+
+// An entry of brain_dirs without an approved manifest still holds its
+// folder: a new brain or a restore cannot be put in it, around it or on it.
+// Its issues stay on that entry, and it can be removed through the API.
+func TestUnapprovedBrainEntries(t *testing.T) {
+	tb := newTestBridge(t, `, "brain_dirs": [{"path": "~/a", "approved": null}]`)
+	if err := os.MkdirAll(filepath.Join(tb.home, "a", "inner"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	for _, p := range []string{"~/a", "~/a/inner"} {
+		var got struct{ Problems []string }
+		_ = json.Unmarshal(tb.do("POST", "/api/brains/inspect", map[string]string{"path": p}).Body.Bytes(), &got)
+		if len(got.Problems) == 0 {
+			t.Errorf("inspect %s: no problems", p)
+		}
+		w := tb.do("POST", "/api/brains", map[string]any{"path": p, "manifest": BrainManifest{ID: "x", Name: "X"}})
+		if w.Code != http.StatusUnprocessableEntity {
+			t.Errorf("add %s: %d %s", p, w.Code, w.Body.String())
+		}
+	}
+	connectAlias(t, tb)
+	if w := tb.do("POST", "/api/backup/restore", map[string]string{"brain": "a", "version": "current", "target": "~/a/restored"}); w.Code != http.StatusUnprocessableEntity || !strings.Contains(w.Body.String(), "inside another brain") {
+		t.Errorf("restore into the unapproved folder: %d %s", w.Code, w.Body.String())
+	}
+
+	// A hand-edited duplicate of a brain's folder: the issue is the
+	// duplicate's, and the brain itself is fine.
+	tb.addFolderBrain(t, BrainManifest{ID: "notes", Name: "Notes"})
+	if _, err := tb.cfgs.Update("", func(c *Config) error {
+		c.BrainDirs = append(c.BrainDirs, BrainRef{Path: "~/notes"})
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	var views []brainView
+	_ = json.Unmarshal(tb.do("GET", "/api/brains", nil).Body.Bytes(), &views)
+	if len(views) != 3 || views[1].ID != "notes" || views[1].Status != "ok" || views[2].Status != "unapproved" {
+		t.Fatalf("views = %+v", views)
+	}
+
+	// The old way, a placeholder id with ?path=, removes nothing now.
+	if w := tb.do("DELETE", "/api/brains/_?path=~/a", nil); w.Code != http.StatusUnprocessableEntity {
+		t.Errorf("remove by placeholder id: %d %s", w.Code, w.Body.String())
+	}
+	if w := tb.do("DELETE", "/api/brain-dirs?path=~/notes", nil); w.Code != 200 {
+		t.Fatalf("remove the unapproved duplicate: %d %s", w.Code, w.Body.String())
+	}
+	if w := tb.do("DELETE", "/api/brain-dirs?path=~/notes", nil); w.Code != http.StatusUnprocessableEntity {
+		t.Errorf("remove the approved brain by path: %d %s", w.Code, w.Body.String())
+	}
+	if w := tb.do("DELETE", "/api/brain-dirs?path="+filepath.Join(tb.home, "a"), nil); w.Code != 200 {
+		t.Fatalf("remove ~/a: %d %s", w.Code, w.Body.String())
+	}
+	refs := tb.cfgs.FileCopy().BrainDirs
+	if len(refs) != 1 || refs[0].Approved == nil || refs[0].Approved.ID != "notes" {
+		t.Fatalf("brain_dirs = %+v", refs)
+	}
+	if !dirExists(filepath.Join(tb.home, "a", "inner")) {
+		t.Error("removing the entry touched its folder")
+	}
+}
+
+func dirExists(p string) bool {
+	st, err := os.Stat(p)
+	return err == nil && st.IsDir()
+}
+
+// /api/status and /api/brains report the same issues: a brain.json that
+// changed on disk shows in both at once, not only after the next reload.
+func TestStatusAndBrainsShareTheIssues(t *testing.T) {
+	tb := newTestBridge(t, "")
+	dir := tb.addFolderBrain(t, BrainManifest{ID: "notes", Name: "Notes"})
+	if err := WriteManifest(dir, &BrainManifest{ID: "notes", Name: "Changed"}, true); err != nil {
+		t.Fatal(err)
+	}
+	var st struct{ Issues []BrainIssue }
+	_ = json.Unmarshal(tb.do("GET", "/api/status", nil).Body.Bytes(), &st)
+	if len(st.Issues) != 1 || st.Issues[0].Kind != "drift" {
+		t.Fatalf("status issues = %+v", st.Issues)
+	}
+}
+
+// A folder that cannot be a brain is not looked into.
+func TestInspectDoesNotProbeRefusedFolders(t *testing.T) {
+	tb := newTestBridge(t, "")
+	outside := t.TempDir()
+	if err := os.Mkdir(filepath.Join(outside, ".git"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	var got map[string]any
+	_ = json.Unmarshal(tb.do("POST", "/api/brains/inspect", map[string]string{"path": outside}).Body.Bytes(), &got)
+	if probs, _ := got["problems"].([]any); len(probs) == 0 {
+		t.Fatalf("no problems for a folder outside home: %v", got)
+	}
+	for _, k := range []string{"exists", "is_dir", "entries", "is_git", "manifest", "suggested"} {
+		if _, ok := got[k]; ok {
+			t.Errorf("response has %q for a refused folder: %v", k, got)
+		}
+	}
+}

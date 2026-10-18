@@ -54,6 +54,7 @@ func (b *Bridge) apiMux() http.Handler {
 	mux.HandleFunc("POST /api/brains/{id}/approve", b.apiApproveBrain)
 	mux.HandleFunc("DELETE /api/brains/{id}", b.apiRemoveBrain)
 	mux.HandleFunc("POST /api/brains/{id}/stop", b.apiStopRun)
+	mux.HandleFunc("DELETE /api/brain-dirs", b.apiRemoveBrainDir)
 
 	mux.HandleFunc("GET /api/fs/capabilities", b.apiFSCaps)
 	mux.HandleFunc("POST /api/fs/pick", b.apiFSPick)
@@ -184,7 +185,7 @@ func (b *Bridge) apiStatus(w http.ResponseWriter, r *http.Request) {
 		WhatsApp:   waStatus{WAState: wa, QRAvailable: wa.QRCode != ""},
 		Claude:     claudeInfo(cfg.ClaudePath, cfg.ChildEnvPassthrough),
 		Sandbox:    sandboxStatus{Enabled: cfg.Sandbox.Enabled, Supported: runtime.GOOS == "darwin"},
-		Issues:     nonNil(b.brainMgr.Issues()),
+		Issues:     nonNil(b.brainIssues(cfg)),
 		Warnings:   nonNil(b.Warnings()),
 		Backup:     b.backup.Summary(),
 		Ingest:     cfg.Ingest.Enabled,
@@ -688,19 +689,31 @@ type brainView struct {
 	Runtime  *BrainRuntime  `json:"runtime,omitempty"`
 }
 
-func (b *Bridge) brainViews() []brainView {
-	cfg := b.cfgs.Get()
+// brainIssues is what is wrong with the configured brains, the one list
+// /api/status and /api/brains both show: the configuration read now, so a
+// drift shows as soon as a brain.json changes, plus the folders the brain
+// manager could not open when it last loaded the brains, which only it
+// knows of.
+func (b *Bridge) brainIssues(cfg *Config) []BrainIssue {
 	_, issues := ResolveBrains(cfg)
-	byPath := map[string][]BrainIssue{}
-	// A brain left out because its folder would not open is known only to
-	// the brain manager, until it loads the brains again.
 	for _, is := range b.brainMgr.Issues() {
 		if is.atLoad {
 			issues = append(issues, is)
 		}
 	}
-	for _, is := range issues {
-		byPath[canonicalDir(is.Path)] = append(byPath[canonicalDir(is.Path)], is)
+	return issues
+}
+
+func (b *Bridge) brainViews() []brainView {
+	cfg := b.cfgs.Get()
+	byEntry := map[int][]BrainIssue{}
+	for _, is := range b.brainIssues(cfg) {
+		// One found at load is about the entry it had then; skip it if the
+		// entries changed since.
+		if is.atLoad && (is.entry >= len(cfg.BrainDirs) || canonicalDir(cfg.BrainDirs[is.entry].Path) != canonicalDir(is.Path)) {
+			continue
+		}
+		byEntry[is.entry] = append(byEntry[is.entry], is)
 	}
 	var out []brainView
 	for _, ref := range cfg.BrainDirs {
@@ -714,7 +727,7 @@ func (b *Bridge) brainViews() []brainView {
 		out = append(out, v)
 	}
 	for i := range out {
-		out[i].Issues = nonNil(byPath[canonicalDir(out[i].Path)])
+		out[i].Issues = nonNil(byEntry[i])
 		for _, is := range out[i].Issues {
 			if out[i].Status == "ok" || is.Kind != "drift" {
 				out[i].Status = is.Kind
@@ -732,12 +745,13 @@ func (b *Bridge) apiBrains(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, b.brainViews())
 }
 
-func (b *Bridge) otherBrainDirs(exceptID string) []string {
+// brainDirs lists every folder in c's brain_dirs, ~ expanded, approved or
+// not: a new brain, or a restore, must not land in, around or on any of
+// them, an entry still waiting for approval included.
+func brainDirs(c *Config) []string {
 	var dirs []string
-	for _, v := range b.brainViews() {
-		if v.ID != exceptID {
-			dirs = append(dirs, v.Path) // expanded: brainViews reads the effective config
-		}
+	for _, ref := range c.BrainDirs {
+		dirs = append(dirs, ref.Dir())
 	}
 	return dirs
 }
@@ -750,8 +764,15 @@ func (b *Bridge) apiInspectFolder(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	abs, problems, warnings := CheckBrainPath(req.Path, b.cfgs.Get(), b.otherBrainDirs(""))
+	cfg := b.cfgs.Get()
+	abs, problems, warnings := CheckBrainPath(req.Path, cfg, brainDirs(cfg))
 	resp := map[string]any{"abs_path": abs, "problems": nonNil(problems), "warnings": nonNil(warnings)}
+	if len(problems) > 0 {
+		// A folder that cannot be a brain is not looked into: outside the
+		// home folder that would be a way to probe any path on disk.
+		writeJSON(w, http.StatusOK, resp)
+		return
+	}
 	st, err := os.Stat(abs)
 	resp["exists"] = err == nil
 	resp["is_dir"] = err == nil && st.IsDir()
@@ -767,8 +788,10 @@ func (b *Bridge) apiInspectFolder(w http.ResponseWriter, r *http.Request) {
 	}
 	id := slugify(filepath.Base(abs))
 	taken := map[string]bool{}
-	for _, v := range b.brainViews() {
-		taken[v.ID] = true
+	for _, ref := range cfg.BrainDirs {
+		if ref.Approved != nil {
+			taken[ref.Approved.ID] = true
+		}
 	}
 	for i := 2; taken[id]; i++ {
 		id = fmt.Sprintf("%s-%d", slugify(filepath.Base(abs)), i)
@@ -817,7 +840,7 @@ func (b *Bridge) apiAddBrain(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	cfg := b.cfgs.Get()
-	abs, problems, _ := CheckBrainPath(req.Path, cfg, b.otherBrainDirs(""))
+	abs, problems, _ := CheckBrainPath(req.Path, cfg, brainDirs(cfg))
 	if len(problems) > 0 {
 		writeErr(w, http.StatusUnprocessableEntity, strings.Join(problems, "; "))
 		return
@@ -1007,15 +1030,40 @@ func (b *Bridge) apiApproveBrain(w http.ResponseWriter, r *http.Request) {
 func (b *Bridge) apiRemoveBrain(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 	_, err := b.cfgs.Update("", func(c *Config) error {
-		path := r.URL.Query().Get("path")
 		for i, ref := range c.BrainDirs {
-			if (ref.Approved != nil && ref.Approved.ID == id) ||
-				(ref.Approved == nil && path != "" && canonicalDir(ref.Dir()) == canonicalDir(expandHome(path, homeDir()))) {
-				c.BrainDirs = append(c.BrainDirs[:i], c.BrainDirs[i+1:]...)
+			if ref.Approved != nil && ref.Approved.ID == id {
+				c.BrainDirs = slices.Delete(c.BrainDirs, i, i+1)
 				return nil
 			}
 		}
 		return fmt.Errorf("no brain %q", id)
+	})
+	if err != nil {
+		writeErr(w, http.StatusUnprocessableEntity, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"status": "removed"})
+}
+
+// apiRemoveBrainDir removes the brain_dirs entry for the folder ?path= that
+// has no approved manifest. Such an entry has no id, so it cannot be
+// removed as a brain; it comes from a hand-edited config.json. Its folder
+// is left exactly as it is.
+func (b *Bridge) apiRemoveBrainDir(w http.ResponseWriter, r *http.Request) {
+	path := strings.TrimSpace(r.URL.Query().Get("path"))
+	if path == "" {
+		writeErr(w, http.StatusBadRequest, "path required")
+		return
+	}
+	want := canonicalDir(expandHome(path, homeDir()))
+	_, err := b.cfgs.Update("", func(c *Config) error {
+		for i, ref := range c.BrainDirs {
+			if ref.Approved == nil && canonicalDir(ref.Dir()) == want {
+				c.BrainDirs = slices.Delete(c.BrainDirs, i, i+1)
+				return nil
+			}
+		}
+		return fmt.Errorf("no unapproved brain folder %s (remove an approved brain by its id)", path)
 	})
 	if err != nil {
 		writeErr(w, http.StatusUnprocessableEntity, err.Error())
