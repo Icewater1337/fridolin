@@ -46,6 +46,7 @@ func TestSiteSandboxEnforcesDeclarations(t *testing.T) {
 	undeclared := write(filepath.Join(files, "rw", "other.txt"), "other")
 	sshKey := write(filepath.Join(home, ".ssh", "id_test"), "key")
 	token := write(filepath.Join(home, ".example-token"), "tok")
+	edge := write(filepath.Join(home, "Library", "Application Support", "Microsoft Edge Beta", "Default", "Cookies"), "cookies")
 	secrets := write(filepath.Join(site, "secrets", "m.json"), `{"K":"v"}`)
 	users := write(filepath.Join(site, "users.json"), `{"users":[]}`)
 	shellFile := write(filepath.Join(site, "shell", "server", "main.ts"), "// shell")
@@ -70,6 +71,7 @@ func TestSiteSandboxEnforcesDeclarations(t *testing.T) {
 			// Declared, but out of every module's reach.
 			{Name: "key", Path: sshKey, Access: "read"},
 			{Name: "token", Path: token, Access: "read"},
+			{Name: "edge", Path: edge, Access: "read"},
 			{Name: "secrets", Path: secrets, Access: "read"},
 			{Name: "users", Path: users, Access: "write"},
 			{Name: "config", Path: config, Access: "read"},
@@ -93,7 +95,7 @@ func TestSiteSandboxEnforcesDeclarations(t *testing.T) {
 			t.Errorf("reading %s was denied: %v %s", p, err, out)
 		}
 	}
-	for _, p := range []string{undeclared, sshKey, token, secrets, config} {
+	for _, p := range []string{undeclared, sshKey, token, edge, secrets, config} {
 		if out, err := run("/bin/cat", p); err == nil {
 			t.Errorf("read %s: %s", p, out)
 		}

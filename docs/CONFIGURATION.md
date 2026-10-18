@@ -419,8 +419,11 @@ Brains can neither read nor write:
   `~/.config/rclone`
 - `~/.git-credentials`, `~/.netrc`, shell history files
 - `~/Documents`, `~/Downloads`, `~/Desktop`, `~/Movies`, `~/Music`, `~/Pictures`
-- `~/Library/Mail`, `Messages`, `Calendars`, `Safari`, Chrome and Firefox
-  profiles, `Containers`, `Group Containers`, Contacts, Notes
+- `~/Library/Mail`, `Messages`, `Calendars`, `Containers`,
+  `Group Containers`, Contacts, Notes
+- the profiles of Safari, Chrome (all of `Application Support/Google`),
+  Firefox, Brave, Edge, Arc, Chromium, Vivaldi and Opera, with the release
+  channels kept beside them (Edge Beta, Vivaldi Snapshot, Opera GX, …)
 - the bridge's data directory — except `media/`, and a brain's own
   `run-tokens/<id>/` to read — under both names it has had, `~/.fridolin`
   and `~/.whatsapp-claude-bridge`, whichever is in use (an old one left

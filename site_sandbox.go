@@ -360,6 +360,11 @@ func siteSandboxProfile(in siteProfileInput) (string, error) {
 	// ~/.something-token, ~/.something-api-key.
 	b.denyBelow("file-read*", in.home, `/\.[^/]*-(token|api-key)$`)
 	b.denyBelow("file-write*", in.home, `/\.[^/]*-(token|api-key)$`)
+	// The browsers whose every release channel has a folder of its own, by
+	// the start of its name; the others' profiles are in neverPaths.
+	appSupport := filepath.Join(in.home, "Library", "Application Support")
+	b.denyBelow("file-read*", appSupport, browserProfilePattern())
+	b.denyBelow("file-write*", appSupport, browserProfilePattern())
 	b.WriteString("\n")
 
 	b.WriteString(";; Loaded or run outside this sandbox: never writable\n")
@@ -451,6 +456,13 @@ func (in siteProfileInput) neverPaths() []string {
 		out = append(out, filepath.Join(in.home, p))
 	}
 	return out
+}
+
+// unwritable reports whether the profile keeps every module from writing
+// p, whatever it declares: never given, never writable, or a browser's
+// profile.
+func (in siteProfileInput) unwritable(p string) bool {
+	return withinAny(p, in.neverPaths()) || withinAny(p, in.neverWritable()) || inBrowserProfile(in.home, p)
 }
 
 // neverWritable are what no module may write: what runs outside the
@@ -572,7 +584,7 @@ func (m *SiteManager) sandboxInput(node, deploy, root, rtFile string, mods []sit
 // module itself could not, since the profile lets it write only below them.
 // Not where the profile would deny the module anyway (closed): a declared
 // ~/.aws/credentials leaves a missing ~/.aws missing.
-func prepareDeclaredFolders(mods []siteModuleCaps, closed []string) {
+func prepareDeclaredFolders(mods []siteModuleCaps, closed func(string) bool) {
 	for _, mod := range mods {
 		for _, f := range mod.Files {
 			if f.Access != "write" || !filepath.IsAbs(f.Path) {
@@ -582,7 +594,7 @@ func prepareDeclaredFolders(mods []siteModuleCaps, closed []string) {
 			if !f.Folder {
 				dir = filepath.Dir(f.Path)
 			}
-			if withinAny(dir, closed) || withinAny(resolvePath(dir), closed) {
+			if closed(dir) || closed(resolvePath(dir)) {
 				continue
 			}
 			if !pathExists(dir) {
