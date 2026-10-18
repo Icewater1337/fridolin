@@ -1,13 +1,14 @@
 // Tests for the site-module loader: npm test
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync, symlinkSync } from 'node:fs'
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync, symlinkSync, openSync, fstatSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import type { AddressInfo } from 'node:net'
 import express from 'express'
 import { validateManifest, canAccess, loadModules, mountModules, type SessionUser } from '../server/modules.ts'
+import { readSecrets } from '../server/config.ts'
 
 const SITE_DIR = join(dirname(fileURLToPath(import.meta.url)), '..')
 
@@ -46,6 +47,10 @@ test('validateManifest refuses what it must', () => {
   assert.throws(invalid({ server: { entry: 's.ts', mount: '/demo-other' } }), /"server.mount"/)
   assert.throws(invalid({ server: { entry: 's.ts', mount: '/api/other' } }), /"server.mount"/)
   assert.throws(invalid({ capabilities: { files: { db: { path: 'x' } } } }), /"read" or "write"/)
+  assert.throws(invalid({ capabilities: { secrets: ['API KEY'] } }), /"capabilities.secrets" entry "API KEY"/)
+  assert.throws(invalid({ capabilities: { secrets: ['_key'] } }), /"capabilities.secrets"/)
+  assert.throws(invalid({ capabilities: { commands: [' '] } }), /must not be empty/)
+  validateManifest({ ...base, capabilities: { secrets: ['OPENAI_API_KEY', 'stripe-key'], commands: ['sqlite3'] } }, 'demo')
   // Mounts under the route or /api/<id> are fine.
   validateManifest({ ...base, server: { entry: 's.ts', mount: '/demo/v2' } }, 'demo')
   validateManifest({ ...base, server: { entry: 's.ts', mount: '/api/demo' } }, 'demo')
@@ -188,4 +193,71 @@ export default (ctx) => {
 
   // The note file was only read through the manifest.
   assert.equal(readFileSync(join(root, 'alpha/data/note.txt'), 'utf8'), 'hello from the manifest')
+})
+
+// ── Secrets ───────────────────────────────────────────────────────────────────
+
+test('ctx.secret hands a module only the secrets it declares, and only its own', async (t) => {
+  const root = mkdtempSync(join(tmpdir(), 'site-secrets-'))
+  t.after(() => rmSync(root, { recursive: true, force: true }))
+  writeFileSync(join(root, 'package.json'), '{ "type": "module" }')
+  symlinkSync(join(SITE_DIR, 'node_modules'), join(root, 'node_modules'))
+  // Each server reports what ctx.secret gives it for every name it tries.
+  const probe = (names: string[]) => `import express from 'express'
+export default (ctx) => {
+  const r = express.Router()
+  const out = {}
+  for (const name of ${JSON.stringify(names)}) {
+    try { out[name] = ctx.secret(name) } catch (e) { out[name] = 'error: ' + e.message }
+  }
+  r.get('/probe', (_req, res) => res.json(out))
+  return r
+}
+`
+  const server = (secrets?: string[]) => ({ access: { roles: ['*'] }, server: { entry: 'server.ts' }, capabilities: { secrets } })
+  writeModule(root, 'keeper', server(['API_KEY', 'UNSET']), { 'server.ts': probe(['API_KEY', 'UNSET', 'EXTRA']) })
+  writeModule(root, 'snoop', server(), { 'server.ts': probe(['API_KEY']) })
+  writeModule(root, 'twin', server(['API_KEY']), { 'server.ts': probe(['API_KEY']) })
+
+  const requireAuth: express.RequestHandler = (req, _res, next) => {
+    ;(req as express.Request & { user?: SessionUser }).user = { id: 'u1', name: 'A', email: 'a@example.com', role: 'admin', authType: 'google' }
+    next()
+  }
+  const serve = async (secrets?: Record<string, Record<string, string>>) => {
+    const app = express()
+    const report = await mountModules(app, loadModules(root), requireAuth, secrets)
+    assert.deepEqual(report.broken, [])
+    const srv = app.listen(0)
+    t.after(() => { srv.close() })
+    const url = `http://127.0.0.1:${(srv.address() as AddressInfo).port}`
+    return async (id: string) => await (await fetch(`${url}/${id}/api/probe`)).json() as Record<string, string>
+  }
+
+  // As Fridolin hands them over: keeper's value, and one keeper does not declare.
+  const live = await serve({ keeper: { API_KEY: 'k-123', EXTRA: 'not declared' } })
+  const keeper = await live('keeper')
+  assert.equal(keeper.API_KEY, 'k-123')
+  assert.match(keeper.UNSET, /is not set: set it in Fridolin's dashboard/)
+  assert.match(keeper.EXTRA, /does not declare in capabilities.secrets/)
+  // Another module gets nothing of keeper's: not by asking for the same
+  // name undeclared, and not by declaring it.
+  assert.match((await live('snoop')).API_KEY, /does not declare in capabilities.secrets/)
+  assert.match((await live('twin')).API_KEY, /"API_KEY" of module "twin" is not set/)
+
+  // A preview or a check: no secrets at all.
+  assert.match((await (await serve())('keeper')).API_KEY, /previews and checks get no secrets/)
+})
+
+test('readSecrets reads the pipe once and closes it', (t) => {
+  const dir = mkdtempSync(join(tmpdir(), 'site-secrets-fd-'))
+  t.after(() => rmSync(dir, { recursive: true, force: true }))
+  const file = join(dir, 'secrets.json')
+  writeFileSync(file, JSON.stringify({ keeper: { API_KEY: 'k-123' } }))
+  const fd = openSync(file, 'r')
+  assert.deepEqual(readSecrets(fd), { keeper: { API_KEY: 'k-123' } })
+  assert.throws(() => fstatSync(fd), /EBADF/)
+
+  writeFileSync(file, JSON.stringify({ keeper: { API_KEY: 42 } }))
+  const bad = openSync(file, 'r')
+  assert.throws(() => readSecrets(bad), /is not a string/)
 })

@@ -189,6 +189,10 @@ blockquote.preview {
 .site-review .mono { overflow-wrap: anywhere; white-space: normal; }
 .site-builders { display: flex; flex-direction: column; gap: 10px; }
 .site-summary { white-space: pre-wrap; margin: 0; }
+.site-secrets { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 8px; }
+.site-secrets li { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.site-secret-input { display: flex; align-items: center; gap: 6px; flex: 1 1 16em; min-width: 0; }
+.site-secret-input input { flex: 1 1 auto; min-width: 0; }
 
 /* ── logs ───────────────────────────────────────────────────────────────── */
 

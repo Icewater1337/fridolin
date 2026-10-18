@@ -5,7 +5,8 @@
 // process only reads them. users.json is re-read when it changes, so adding a
 // user or changing a role takes effect without a restart.
 
-import { readFileSync, statSync } from 'node:fs'
+import { closeSync, readFileSync, statSync } from 'node:fs'
+import type { ModuleSecrets } from './modules.ts'
 
 export type Runtime = {
   /** host:port to listen on, normally 127.0.0.1:<port> behind a tunnel. */
@@ -31,6 +32,11 @@ export type Runtime = {
   preview_token?: string
   /** The live site: previews.json, the previews it may forward admins to. */
   previews_file?: string
+  /**
+   * The live site: a file descriptor (a pipe) holding its modules' secrets as
+   * JSON, read once at startup and closed (readSecrets).
+   */
+  secrets_fd?: number
 }
 
 export function readRuntime(path: string): Runtime {
@@ -50,7 +56,32 @@ export function readRuntime(path: string): Runtime {
     preview_label: raw.preview_label || undefined,
     preview_token: raw.preview_token || undefined,
     previews_file: raw.previews_file || undefined,
+    secrets_fd: typeof raw.secrets_fd === 'number' ? raw.secrets_fd : undefined,
   }
+}
+
+/**
+ * Reads the modules' secrets from the pipe Fridolin passed, then closes it:
+ * they are in no file and no environment variable module code could read.
+ */
+export function readSecrets(fd: number): ModuleSecrets {
+  let raw: unknown
+  try {
+    raw = JSON.parse(readFileSync(fd, 'utf8'))
+  } finally {
+    closeSync(fd)
+  }
+  const out: ModuleSecrets = {}
+  if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) throw new Error('the secrets Fridolin passed are not a JSON object')
+  for (const [id, values] of Object.entries(raw)) {
+    if (typeof values !== 'object' || values === null || Array.isArray(values)) throw new Error(`the secrets of module "${id}" are not an object`)
+    out[id] = {}
+    for (const [name, v] of Object.entries(values)) {
+      if (typeof v !== 'string') throw new Error(`secret "${name}" of module "${id}" is not a string`)
+      out[id][name] = v
+    }
+  }
+  return out
 }
 
 export type SiteUser = {

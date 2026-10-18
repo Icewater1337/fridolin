@@ -147,6 +147,43 @@ func (sp *SandboxProfiler) Enabled() bool {
 	return sp.enabled
 }
 
+// sitePaths returns what the site's sandbox keeps from module code as well
+// (site_sandbox.go), beyond the data dir and the usual secrets: deny, the
+// DB, the config file and its companions, the credentials dir and the
+// sandbox.deny_paths entries; noWrite, the bridge binary and its install
+// folder or checkout.
+func (sp *SandboxProfiler) sitePaths() (deny, noWrite []string) {
+	sp.mu.RLock()
+	defer sp.mu.RUnlock()
+	if sp.dataDir != "" {
+		deny = append(deny, sp.dataDir)
+	}
+	if sp.dbPath != "" {
+		for _, suffix := range []string{"", "-wal", "-shm", "-journal"} {
+			deny = append(deny, sp.dbPath+suffix)
+		}
+	}
+	if sp.configFile != "" {
+		deny = append(deny, sp.configFile, sp.configFile+".bak", dotEnvPath(sp.configFile))
+	}
+	if sp.credsDir != "" {
+		deny = append(deny, absPath(sp.credsDir))
+	}
+	for _, p := range sp.extraDeny {
+		deny = append(deny, absPath(p))
+	}
+	if sp.bridgeExe != "" {
+		noWrite = append(noWrite, sp.bridgeExe)
+		l := layoutOf(sp.bridgeExe)
+		for _, dir := range []string{l.Dir, l.Source} {
+			if dir != "" {
+				noWrite = append(noWrite, dir)
+			}
+		}
+	}
+	return deny, noWrite
+}
+
 // defaultDenySubpaths are home-relative directories no brain may read or
 // write. Keychains are deliberately absent: the Claude CLI reads its
 // credentials from the macOS keychain, and denying it breaks the CLI with
@@ -1010,6 +1047,17 @@ func (b *profileBuilder) pinParents(homes ...string) {
 // that followed it would open whatever the symlink points to. It returns
 // the spellings it allowed.
 func (b *profileBuilder) allow(op, filter, path string) []string {
+	out := b.allowSpellings(path)
+	for _, s := range out {
+		b.emit(ruleAllow, "allow "+op, filter, s, s)
+	}
+	return out
+}
+
+// allowSpellings returns the spellings allow writes a rule for: path as
+// configured, and with its longest trusted root replaced by that root's real
+// path.
+func (b *profileBuilder) allowSpellings(path string) []string {
 	p, ok := b.absolute(path)
 	if !ok {
 		return nil
@@ -1025,9 +1073,6 @@ func (b *profileBuilder) allow(op, filter, path string) []string {
 	}
 	if best.configured != "" {
 		out = append(out, best.real+strings.TrimPrefix(configured, best.configured))
-	}
-	for _, s := range out {
-		b.emit(ruleAllow, "allow "+op, filter, s, s)
 	}
 	return out
 }

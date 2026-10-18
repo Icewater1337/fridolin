@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -16,7 +17,9 @@ import (
 )
 
 // newTestSite is a SiteManager in a temp data dir whose npm installs only
-// link the site package's own node_modules (no network in tests).
+// copy the site package's own node_modules (no network in tests). A copy, not
+// a link: the live site's sandbox allows the deploy's real path, not the
+// checkout a link would lead to.
 func newTestSite(t *testing.T) *SiteManager {
 	t.Helper()
 	m := NewSiteManager(t.TempDir(), func() string { return "" })
@@ -25,7 +28,10 @@ func newTestSite(t *testing.T) *SiteManager {
 		if !fileExists(src) {
 			return nil
 		}
-		return os.Symlink(src, filepath.Join(dir, "node_modules"))
+		if out, err := exec.CommandContext(ctx, "cp", "-R", src, filepath.Join(dir, "node_modules")).CombinedOutput(); err != nil {
+			return fmt.Errorf("copying node_modules: %v %s", err, out)
+		}
+		return nil
 	}
 	return m
 }
@@ -350,12 +356,7 @@ func freePort(t *testing.T) string {
 // The whole thing: starter repository → deploy → the Node site process
 // serving it → sign in → the welcome tile.
 func TestSiteProcessEndToEnd(t *testing.T) {
-	if _, err := findNode(); err != nil {
-		t.Skip("node not installed")
-	}
-	if !fileExists(filepath.Join(repoDir, "site", "node_modules")) {
-		t.Skip("run npm install in site/ first")
-	}
+	requireSiteRuntime(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	m := newTestSite(t)

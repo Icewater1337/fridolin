@@ -29,6 +29,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"slices"
 	"strings"
 	"sync"
@@ -98,6 +99,10 @@ type SiteManager struct {
 	// into a builder brain's workspace (as that brain).
 	npmInstall       func(ctx context.Context, dir string, prod bool) error
 	workspaceInstall func(ctx context.Context, brainID, dir string) error
+	// sandboxExec runs the live site under its profile (site_sandbox.go).
+	sandboxExec string
+
+	secretsMu sync.Mutex // site_secrets.go
 
 	mu       sync.Mutex
 	settings SiteSettings
@@ -109,6 +114,8 @@ type SiteManager struct {
 	tokens   map[string]string // builder token → brain id
 	hooks    builderHooks
 	ctx      context.Context
+
+	warnNoSandbox sync.Once
 }
 
 // NewSiteManager loads the site's settings and accounts from dataDir/site.
@@ -119,6 +126,7 @@ func NewSiteManager(dataDir string, googleClient func() string) *SiteManager {
 		previews:     map[string]*sitePreview{},
 		site:         newSiteProc("site"),
 		tunnel:       newSiteProc("tunnel"),
+		sandboxExec:  sandboxExecPath,
 	}
 	m.npmInstall = m.runNpmInstall
 	m.workspaceInstall = m.npmInstallAsBrain
@@ -544,6 +552,9 @@ type siteRuntime struct {
 	GoogleClientFile string `json:"google_client_file"`
 	PreviewLabel     string `json:"preview_label,omitempty"`
 	PreviewsFile     string `json:"previews_file,omitempty"`
+	// SecretsFD is the file descriptor the live site reads its modules'
+	// secrets from at startup (site_secrets.go).
+	SecretsFD int `json:"secrets_fd,omitempty"`
 }
 
 // googleClientFile is the site's own Google client if one is saved, else
@@ -570,7 +581,9 @@ func (m *SiteManager) sessionKeyFile() (string, error) {
 	return p, writeFileAtomic(p, []byte(hex.EncodeToString(key)+"\n"), 0o600, false)
 }
 
-// processCommand builds the node command for a site process serving modulesDir.
+// processCommand builds the node command for a site process serving
+// modulesDir. The live site (no label) runs under its sandbox where there is
+// one, and gets its modules' secrets on file descriptor 3.
 func (m *SiteManager) processCommand(ctx context.Context, name, listen, modulesDir, label string) (*exec.Cmd, error) {
 	s := m.Settings()
 	shell, err := m.ensureShell(ctx)
@@ -590,11 +603,15 @@ func (m *SiteManager) processCommand(ctx context.Context, name, listen, modulesD
 		UsersFile: m.dir("users.json"), SessionKeyFile: keyFile,
 		GoogleClientFile: m.googleClientFile(), PreviewLabel: label,
 	}
-	if label == "" {
+	live := label == ""
+	var mods []siteModuleCaps
+	if live {
 		rt.PreviewsFile = m.dir("previews.json")
 		if s.Domain != "" {
 			rt.PublicOrigin = "https://" + s.Domain
 		}
+		mods = readModuleCaps(modulesDir, homeDir())
+		rt.SecretsFD = 3
 	}
 	if !fileExists(rt.UsersFile) {
 		m.mu.Lock()
@@ -604,14 +621,52 @@ func (m *SiteManager) processCommand(ctx context.Context, name, listen, modulesD
 			return nil, err
 		}
 	}
+	tmp := m.dir("tmp")
+	if err := os.MkdirAll(tmp, 0o700); err != nil {
+		return nil, err
+	}
 	data, _ := json.MarshalIndent(rt, "", "  ")
 	rtFile := m.dir(name + ".runtime.json")
 	if err := writeFileAtomic(rtFile, data, 0o600, false); err != nil {
 		return nil, err
 	}
-	cmd := exec.CommandContext(ctx, node, "--import", "tsx/esm", filepath.Join(shell, "server", "main.ts"))
+	bin, args := node, []string{"--import", "tsx/esm", filepath.Join(shell, "server", "main.ts")}
+	if live {
+		if s.Approved == "" {
+			return nil, errors.New("no commit is approved")
+		}
+		deploy := m.deployDir(s.Approved)
+		root := filepath.Join(deploy, filepath.FromSlash(s.Repo.Subdir))
+		in := m.sandboxInput(node, deploy, root, rtFile, mods)
+		prepareDeclaredFolders(mods, slices.Concat(in.neverPaths(), in.neverWritable()))
+		switch err := siteSandboxAvailable(m.sandboxExec); {
+		case err == nil:
+			profile, err := siteSandboxProfile(in)
+			if err != nil {
+				return nil, fmt.Errorf("the site's sandbox: %w", err)
+			}
+			bin, args = m.sandboxExec, append([]string{"-p", profile, node}, args...)
+		case runtime.GOOS == "darwin":
+			// Never run approved code unsandboxed where the sandbox should be.
+			return nil, err
+		default:
+			m.warnNoSandbox.Do(func() { log.Printf("[site] %v", err) })
+		}
+	}
+	cmd := exec.CommandContext(ctx, bin, args...)
 	cmd.Dir = shell
-	cmd.Env = siteEnv(node, "FRIDOLIN_SITE_RUNTIME="+rtFile, "NODE_ENV=production")
+	cmd.Env = siteEnv(node, "FRIDOLIN_SITE_RUNTIME="+rtFile, "NODE_ENV=production", "TMPDIR="+tmp+string(filepath.Separator))
+	if live {
+		secrets, err := m.secretsFor(mods)
+		if err != nil {
+			return nil, err
+		}
+		r, err := pipeWith(secrets)
+		if err != nil {
+			return nil, err
+		}
+		cmd.ExtraFiles = []*os.File{r} // fd 3; runOnce closes this end after Start
+	}
 	return cmd, nil
 }
 
@@ -688,7 +743,7 @@ func (m *SiteManager) SetGoogleClient(data []byte) error {
 func siteEnv(bin string, extra ...string) []string {
 	env := []string{
 		"HOME=" + homeDir(),
-		"PATH=" + filepath.Dir(bin) + ":/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin",
+		"PATH=" + siteEnvPath(bin),
 		"LANG=en_US.UTF-8",
 	}
 	for _, k := range []string{"USER", "LOGNAME", "TMPDIR"} {
@@ -697,6 +752,12 @@ func siteEnv(bin string, extra ...string) []string {
 		}
 	}
 	return append(env, extra...)
+}
+
+// siteEnvPath is the PATH of a site process: the folder of the program it
+// runs (node's, so npm and npx are found), then the usual ones.
+func siteEnvPath(bin string) string {
+	return filepath.Dir(bin) + ":/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin"
 }
 
 // findNode finds Node.js (the site needs 22 or newer): on PATH, in the usual
@@ -963,7 +1024,12 @@ func (p *siteProc) runOnce(ctx context.Context, build func(context.Context) (*ex
 			p.logLine(sc.Text())
 		}
 	}()
-	if err := cmd.Start(); err != nil {
+	err = cmd.Start()
+	// The child has its own copies now (the live site's secrets pipe).
+	for _, f := range cmd.ExtraFiles {
+		f.Close()
+	}
+	if err != nil {
 		pw.Close()
 		return err
 	}

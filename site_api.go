@@ -33,6 +33,9 @@ func (b *Bridge) siteAPI(mux *http.ServeMux) {
 	mux.HandleFunc("PUT /api/site/tunnel", b.apiSiteTunnel)
 	mux.HandleFunc("PUT /api/site/google-client", b.apiSiteGoogleClient)
 	mux.HandleFunc("DELETE /api/site/google-client", b.apiSiteGoogleClientDelete)
+	mux.HandleFunc("GET /api/site/secrets", b.apiSiteSecrets)
+	mux.HandleFunc("PUT /api/site/secrets/{module}/{name}", b.apiSiteSetSecret)
+	mux.HandleFunc("DELETE /api/site/secrets/{module}/{name}", b.apiSiteRemoveSecret)
 
 	mux.HandleFunc("GET /api/site/builders", b.apiSiteBuilders)
 	mux.HandleFunc("PUT /api/site/builders/{id}", b.apiSiteSetBuilder)
@@ -61,6 +64,7 @@ func (b *Bridge) apiSiteStatus(w http.ResponseWriter, r *http.Request) {
 		"process":   site,
 		"healthy":   site.State == "running" && siteHealthy(s.Listen),
 		"local_url": "http://" + s.Listen + "/",
+		"sandbox":   m.SandboxStatus(),
 	}
 	if s.Domain != "" {
 		resp["public_url"] = "https://" + s.Domain + "/"
@@ -379,4 +383,42 @@ func (b *Bridge) apiSiteStartPreview(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, urls)
+}
+
+// apiSiteSecrets lists the modules' secrets by name. Values never leave the
+// bridge except to the live site.
+func (b *Bridge) apiSiteSecrets(w http.ResponseWriter, r *http.Request) {
+	list, err := b.site.Secrets()
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"modules": list})
+}
+
+// apiSiteSetSecret saves a secret and restarts the site, which reads its
+// secrets only when it starts.
+func (b *Bridge) apiSiteSetSecret(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Value string `json:"value"`
+	}
+	if err := decodeJSON(r, &req); err != nil {
+		writeErr(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	if err := b.site.SetSecret(r.PathValue("module"), r.PathValue("name"), req.Value); err != nil {
+		writeErr(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	go b.site.Restart()
+	writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
+}
+
+func (b *Bridge) apiSiteRemoveSecret(w http.ResponseWriter, r *http.Request) {
+	if err := b.site.RemoveSecret(r.PathValue("module"), r.PathValue("name")); err != nil {
+		writeErr(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	go b.site.Restart()
+	writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
 }
