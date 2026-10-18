@@ -558,6 +558,11 @@ boundaries so messages break somewhere readable, and numbers the parts.
 
 **`server.go`** — the localhost `/send` and `/ingest` endpoints.
 
+**`brainapi.go`** — `/brain/`, what the tools a brain runs ask the bridge
+for, with a token that works only while that run lasts.
+**`toolcmd.go`, `history_cmd.go`, `polls_cmd.go`** — `fridolin history` and
+`fridolin polls`, which brains run.
+
 ---
 
 ## Troubleshooting

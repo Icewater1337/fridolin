@@ -53,6 +53,11 @@ type Bridge struct {
 	site     *SiteManager
 	started  time.Time
 
+	// listen is the address the HTTP server binds, "" when it is off;
+	// runs reach the brain API there with a token from runTokens.
+	listen    string
+	runTokens runTokens
+
 	httpSrv *http.Server
 
 	mu       sync.Mutex
@@ -82,6 +87,7 @@ func NewBridge(cfgs *ConfigStore, opts BridgeOptions) (_ *Bridge, err error) {
 		}
 	}()
 	protectDataDir(cfg)
+	pruneRunTokens(cfg.DataDir)
 	store, err := NewStore(cfg)
 	if err != nil {
 		return nil, fmt.Errorf("creating store: %w", err)
@@ -103,6 +109,11 @@ func NewBridge(cfgs *ConfigStore, opts BridgeOptions) (_ *Bridge, err error) {
 		logs:     opts.Logs,
 		activity: NewActivity(500),
 		started:  time.Now(),
+	}
+	if cfg.HTTPEnabled() {
+		// A change to http_listen waits for a restart: until then the
+		// server listens, and runs are told, where it started.
+		b.listen = cfg.HTTPListen
 	}
 	if b.logs == nil {
 		b.logs = NewLogRing(logRingLines)
@@ -145,6 +156,7 @@ func NewBridge(cfgs *ConfigStore, opts BridgeOptions) (_ *Bridge, err error) {
 		Deliver:   b.deliver,
 		OnHistory: b.activity.Add,
 		ExtraArgs: func(id string) []string { return b.site.BuilderArgs(id) },
+		RunEnv:    b.brainRunEnv,
 	})
 	for _, br := range b.brainMgr.Brains() {
 		b.activity.Seed(br)
@@ -193,13 +205,13 @@ func NewBridge(cfgs *ConfigStore, opts BridgeOptions) (_ *Bridge, err error) {
 // WhatsApp session.
 func (b *Bridge) Start(ctx context.Context) error {
 	cfg := b.cfgs.Get()
-	if cfg.HTTPEnabled() {
-		ln, err := net.Listen("tcp", cfg.HTTPListen)
+	if b.listen != "" {
+		ln, err := net.Listen("tcp", b.listen)
 		if err != nil {
-			return fmt.Errorf("listening on %s (is another bridge running?): %w", cfg.HTTPListen, err)
+			return fmt.Errorf("listening on %s (is another bridge running?): %w", b.listen, err)
 		}
 		b.httpSrv = &http.Server{
-			Handler:           b.newHTTPHandler(cfg.HTTPListen),
+			Handler:           b.newHTTPHandler(b.listen),
 			ReadHeaderTimeout: 10 * time.Second,
 		}
 		go func() {
@@ -208,7 +220,7 @@ func (b *Bridge) Start(ctx context.Context) error {
 			}
 		}()
 		if !cfg.Dashboard.Disabled {
-			log.Printf("Dashboard: http://%s/  (open it with: fridolin open)", cfg.HTTPListen)
+			log.Printf("Dashboard: http://%s/  (open it with: fridolin open)", b.listen)
 		}
 	}
 

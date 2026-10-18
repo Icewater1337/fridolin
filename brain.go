@@ -243,6 +243,10 @@ type BrainHooks struct {
 	// ExtraArgs adds CLI arguments to a brain's runs (the site builder's
 	// plugin and MCP server, for brains allowed to build the site).
 	ExtraArgs func(brainID string) []string
+	// RunEnv adds variables to one run's environment (the brain API's
+	// address and a token for the run), and returns what to call once the
+	// run is over.
+	RunEnv func(brainID string) (env []string, done func())
 }
 
 // A run that takes longer than workingNoticeAfter tells the chat it is
@@ -1052,7 +1056,8 @@ func (br *Brain) invoke(run *brainRun, ctx context.Context, s *brainSettings, m 
 	// without it: the fallback would quietly drop the only barrier left.
 	binary := s.claudePath
 	finalArgs := args
-	extraEnv := append(dataEnv(s), calendarEnv(br.id, s.manifest, s.credsDir)...)
+	extraEnv := append([]string{"FRIDOLIN_BRAIN_ID=" + br.id}, dataEnv(s)...)
+	extraEnv = append(extraEnv, calendarEnv(br.id, s.manifest, s.credsDir)...)
 	extraEnv = append(extraEnv, plaudOptOut...)
 	if s.toolsDir != "" {
 		// Prompts and skills run the helpers as $FRIDOLIN_TOOLS_DIR/<tool>,
@@ -1061,6 +1066,13 @@ func (br *Brain) invoke(run *brainRun, ctx context.Context, s *brainSettings, m 
 	}
 	if s.plaudPATH != "" {
 		extraEnv = append(extraEnv, "PATH="+s.plaudPATH) // replaces the bridge's
+	}
+	if br.hooks != nil && br.hooks.RunEnv != nil {
+		env, done := br.hooks.RunEnv(br.id)
+		// After Wait: the tools the run started have exited by then, or
+		// are left behind and lose the brain API with the run.
+		defer done()
+		extraEnv = append(extraEnv, env...)
 	}
 	if br.sandbox != nil && br.sandbox.Enabled() {
 		sbBinary, sbArgs, sbErr := br.sandbox.Command(br.id, s.claudePath, args)

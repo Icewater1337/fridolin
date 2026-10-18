@@ -35,6 +35,7 @@ Usage:
 
 Run by brains, inside a run (each prints JSON; -h shows its flags):
   fridolin history QUERY     search the brain's conversation history
+  fridolin polls             the results of the polls the brain sent
 
 Common flags:
   --config PATH     config file (default: $FRIDOLIN_CONFIG, else
@@ -69,6 +70,8 @@ func main() {
 		serviceCmd(args)
 	case "history":
 		os.Exit(historyCmd(args, processToolIO()))
+	case "polls":
+		os.Exit(pollsCmd(args, processToolIO()))
 	case "version":
 		fmt.Println(bridgeVersion())
 	case "help":

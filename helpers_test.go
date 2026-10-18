@@ -1,9 +1,11 @@
 package main
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"io/fs"
 	"os"
 	"os/exec"
@@ -17,8 +19,9 @@ import (
 // TestMain lets the test binary stand in for the Claude CLI: with
 // FRIDOLIN_FAKE_CLAUDE=1 it prints a stream-json result echoing its working
 // directory and the new message, after FRIDOLIN_FAKE_SLEEP_MS. With
-// FRIDOLIN_FAKE_READ it also reports whether it could read that file, and with
-// FRIDOLIN_FAKE_ENV the value of that environment variable. Asked for
+// FRIDOLIN_FAKE_READ it also reports whether it could read that file, with
+// FRIDOLIN_FAKE_ENV the value of that environment variable, and with
+// FRIDOLIN_FAKE_POLLS=1 what `fridolin polls` answers in the run. Asked for
 // --version, it answers testedClaudeVersion. Tests point
 // claude_path at os.Args[0], so no script or real CLI is needed.
 //
@@ -188,6 +191,12 @@ func fakeClaude() {
 		default:
 			out += " read=error: " + err.Error()
 		}
+	}
+	if os.Getenv("FRIDOLIN_FAKE_POLLS") == "1" {
+		// A tool the run starts, asking the bridge with the run's token.
+		var res bytes.Buffer
+		code := pollsCmd(nil, toolIO{stdout: &res, stderr: io.Discard, getenv: os.Getenv, now: time.Now()})
+		out += fmt.Sprintf(" polls=%d %s", code, strings.Join(strings.Fields(res.String()), " "))
 	}
 	if name := os.Getenv("FRIDOLIN_FAKE_ENV"); name != "" {
 		if v, ok := os.LookupEnv(name); ok {

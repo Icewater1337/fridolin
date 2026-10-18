@@ -592,6 +592,14 @@ func (sp *SandboxProfiler) Profile(brainID string) (string, error) {
 		b.calendarAllows(sp.credsDir, brainID)
 		b.WriteString("\n")
 	}
+	// The brain API tokens of this brain's runs (see brainRunEnv), to read
+	// and no more; every other brain's stay denied with the data dir. After
+	// the credentials dir, which may hold the data dir.
+	if sp.dataDir != "" {
+		b.WriteString(";; This brain's brain API tokens\n")
+		b.allow("file-read*", "subpath", runTokenDir(sp.dataDir, brainID))
+		b.WriteString("\n")
+	}
 
 	// ── the folders above every denied path ──────────────────────────────
 	b.WriteString(";; Folders above the denied paths: not renamable or removable\n")

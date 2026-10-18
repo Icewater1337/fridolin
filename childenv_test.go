@@ -166,6 +166,7 @@ func TestBrainGetsOnlyTheAllowlistedEnvironment(t *testing.T) {
 	want := maps.Clone(listed)
 	maps.Copy(want, map[string]string{
 		"HOME":                   home,
+		"FRIDOLIN_BRAIN_ID":      "a",
 		"BRIDGE_BRAIN_ID":        "a",
 		"BRIDGE_CREDENTIALS_DIR": filepath.Join(home, "data"),
 		"BRIDGE_DATA_DIR":        filepath.Join(home, "data"),
