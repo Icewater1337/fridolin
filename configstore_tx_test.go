@@ -586,7 +586,7 @@ func TestUnknownConfigKeysAreLoggedByPath(t *testing.T) {
 		{"in sections", `{"sandbox": {"enable": true}, "queue": {"notfy": false, "mode": "queue"}}`, "[queue.notfy sandbox.enable]"},
 		{"at the top", `{"alowed_numbers": []}`, "[alowed_numbers]"},
 		{"in a brain's approved manifest", `{"brain_dirs": [{"path": "~/a", "approved": {"id": "a", "name": "A", "nmae": "x", "routing": {"handles_dm": true}}}]}`, "[brain_dirs[0].approved.nmae brain_dirs[0].approved.routing.handles_dm]"},
-		{"in another case", `{"Sandbox": {"Enabled": true}}`, ""},
+		{"in another case", `{"Sandbox": {"Enabled": false}}`, ""},
 		{"a retired key", `{"work_dir": "~/w"}`, ""},
 		{"inside what decodes itself", `{"triggers": [{"text": "@c", "match": "word"}]}`, ""},
 	}
