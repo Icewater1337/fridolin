@@ -326,13 +326,20 @@ func ScaffoldBrain(dir string, m *BrainManifest) ([]string, error) {
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return nil, err
 	}
+	// An adopted folder may contain symlinks. Keep every nested directory
+	// and file creation in the folder even if a parent is replaced while
+	// scaffolding; O_EXCL alone only protects the final filename.
+	root, err := os.OpenRoot(dir)
+	if err != nil {
+		return nil, err
+	}
+	defer root.Close()
 	var created []string
 	write := func(rel, content string) error {
-		p := filepath.Join(dir, rel)
-		if err := os.MkdirAll(filepath.Dir(p), 0o700); err != nil {
+		if err := root.MkdirAll(filepath.Dir(rel), 0o700); err != nil {
 			return err
 		}
-		f, err := os.OpenFile(p, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
+		f, err := root.OpenFile(rel, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
 		if errors.Is(err, os.ErrExist) {
 			return nil
 		}
