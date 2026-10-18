@@ -265,3 +265,37 @@ func TestRootHasNoGoFiles(t *testing.T) {
 		}
 	}
 }
+
+// TestPublicModulePath keeps remote go install and version stamping on the
+// canonical repository module rather than a checkout-only import name.
+func TestPublicModulePath(t *testing.T) {
+	const want = "github.com/Icewater1337/fridolin"
+	if got := modulePath(t, moduleRoot(t)); got != want {
+		t.Errorf("module path = %q, want %q", got, want)
+	}
+}
+
+// TestPlatformHasNoMutableGlobals keeps process state on the owning value.
+// The unsupported-platform file only declares an intentional build error.
+func TestPlatformHasNoMutableGlobals(t *testing.T) {
+	root := moduleRoot(t)
+	files, err := filepath.Glob(filepath.Join(root, "internal", "platform", "*.go"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, file := range files {
+		if strings.HasSuffix(file, "_test.go") || filepath.Base(file) == "unsupported.go" {
+			continue
+		}
+		fset := token.NewFileSet()
+		f, err := parser.ParseFile(fset, file, nil, parser.SkipObjectResolution)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, decl := range f.Decls {
+			if gen, ok := decl.(*ast.GenDecl); ok && gen.Tok == token.VAR {
+				t.Errorf("%s:%d declares mutable package state; keep it on the owning value", filepath.Base(file), fset.Position(gen.Pos()).Line)
+			}
+		}
+	}
+}
