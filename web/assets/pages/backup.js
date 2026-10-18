@@ -196,8 +196,7 @@ export default {
       const queue = j.queue || [];
       const total = done.length + queue.length + (j.current ? 1 : 0);
       const pct = total ? Math.round((done.length / total) * 100) : 0;
-      const bar = h('div.progress', h('div.progress-bar'));
-      bar.firstChild.style.width = `${Math.max(4, pct)}%`;
+      const bar = h('progress.progress', { max: 100, value: pct, 'aria-label': 'Backup progress', 'aria-valuetext': `${done.length} of ${total} done` });
       const restoring = j.current && j.current.startsWith('restore:');
       return h('div.card.job-card',
         h('div.card-head',
