@@ -1,4 +1,4 @@
-package main
+package fsx
 
 import (
 	"os"
@@ -11,7 +11,7 @@ func TestWriteFileAtomic(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "sub", "config.json")
 	// The folder is made, private, when it is missing.
-	if err := writeFileAtomic(path, []byte("one"), 0o600, true); err != nil {
+	if err := WriteFileAtomic(path, []byte("one"), 0o600, true); err != nil {
 		t.Fatal(err)
 	}
 	if st, err := os.Stat(filepath.Dir(path)); err != nil || st.Mode().Perm() != 0o700 {
@@ -32,7 +32,7 @@ func TestWriteFileAtomic(t *testing.T) {
 	}
 	for _, s := range steps {
 		t.Run(s.name, func(t *testing.T) {
-			if err := writeFileAtomic(path, []byte(s.data), s.perm, s.backup); err != nil {
+			if err := WriteFileAtomic(path, []byte(s.data), s.perm, s.backup); err != nil {
 				t.Fatal(err)
 			}
 			got, err := os.ReadFile(path)
@@ -69,13 +69,13 @@ func TestExpandHome(t *testing.T) {
 		{"", ""},
 	}
 	for _, c := range cases {
-		if got := expandHome(c.in, home); got != c.want {
-			t.Errorf("expandHome(%q) = %q, want %q", c.in, got, c.want)
+		if got := ExpandHome(c.in, home); got != c.want {
+			t.Errorf("ExpandHome(%q) = %q, want %q", c.in, got, c.want)
 		}
 	}
 }
 
-func TestCanonicalDir(t *testing.T) {
+func TestCanonical(t *testing.T) {
 	dir := t.TempDir()
 	real := filepath.Join(dir, "real")
 	if err := os.MkdirAll(filepath.Join(real, "sub"), 0o700); err != nil {
@@ -102,17 +102,17 @@ func TestCanonicalDir(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			if got := canonicalDir(c.in); got != c.want {
-				t.Errorf("canonicalDir(%q) = %q, want %q", c.in, got, c.want)
+			if got := Canonical(c.in); got != c.want {
+				t.Errorf("Canonical(%q) = %q, want %q", c.in, got, c.want)
 			}
 		})
 	}
 }
 
-// TestResolvePath: the sandbox matches real paths, so every profile path is
+// TestResolve: the sandbox matches real paths, so every profile path is
 // resolved through symlinks, including the parts that do not exist yet.
-func TestResolvePath(t *testing.T) {
-	root := canonicalDir(t.TempDir())
+func TestResolve(t *testing.T) {
+	root := Canonical(t.TempDir())
 	for _, d := range []string{"real/sub", "other"} {
 		if err := os.MkdirAll(filepath.Join(root, d), 0o700); err != nil {
 			t.Fatal(err)
@@ -150,22 +150,22 @@ func TestResolvePath(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			// Not filepath.Join: it would apply ".." before resolvePath sees it.
-			if got, want := resolvePath(root+"/"+tc.in), filepath.Join(root, tc.want); got != want {
-				t.Errorf("resolvePath(%s) = %s, want %s", tc.in, got, want)
+			// Not filepath.Join: it would apply ".." before Resolve sees it.
+			if got, want := Resolve(root+"/"+tc.in), filepath.Join(root, tc.want); got != want {
+				t.Errorf("Resolve(%s) = %s, want %s", tc.in, got, want)
 			}
 		})
 	}
 	t.Run("temp dir spelling", func(t *testing.T) {
 		// On macOS t.TempDir() is under /var, a symlink to /private/var.
 		dir := t.TempDir()
-		if got, want := resolvePath(dir), canonicalDir(dir); got != want {
-			t.Errorf("resolvePath(%s) = %s, want %s", dir, got, want)
+		if got, want := Resolve(dir), Canonical(dir); got != want {
+			t.Errorf("Resolve(%s) = %s, want %s", dir, got, want)
 		}
 	})
 }
 
-func TestIsWithin(t *testing.T) {
+func TestWithin(t *testing.T) {
 	cases := []struct {
 		p, dir string
 		want   bool
@@ -180,13 +180,13 @@ func TestIsWithin(t *testing.T) {
 		{"/a/b", "a/b", false}, // one relative and one absolute path
 	}
 	for _, c := range cases {
-		if got := isWithin(c.p, c.dir); got != c.want {
-			t.Errorf("isWithin(%q, %q) = %v, want %v", c.p, c.dir, got, c.want)
+		if got := Within(c.p, c.dir); got != c.want {
+			t.Errorf("Within(%q, %q) = %v, want %v", c.p, c.dir, got, c.want)
 		}
 	}
 }
 
-func TestTildePath(t *testing.T) {
+func TestTilde(t *testing.T) {
 	home := t.TempDir()
 	if err := os.Mkdir(filepath.Join(home, "notes"), 0o700); err != nil {
 		t.Fatal(err)
@@ -205,14 +205,14 @@ func TestTildePath(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			if got := tildePath(c.p, c.home); got != c.want {
-				t.Errorf("tildePath(%q, %q) = %q, want %q", c.p, c.home, got, c.want)
+			if got := Tilde(c.p, c.home); got != c.want {
+				t.Errorf("Tilde(%q, %q) = %q, want %q", c.p, c.home, got, c.want)
 			}
 		})
 	}
 }
 
-func TestFileExists(t *testing.T) {
+func TestExists(t *testing.T) {
 	dir := t.TempDir()
 	file := filepath.Join(dir, "file")
 	if err := os.WriteFile(file, nil, 0o600); err != nil {
@@ -231,8 +231,8 @@ func TestFileExists(t *testing.T) {
 		{filepath.Join(dir, "dangling"), false}, // a symlink is followed
 	}
 	for _, c := range cases {
-		if got := fileExists(c.p); got != c.want {
-			t.Errorf("fileExists(%q) = %v, want %v", c.p, got, c.want)
+		if got := Exists(c.p); got != c.want {
+			t.Errorf("Exists(%q) = %v, want %v", c.p, got, c.want)
 		}
 	}
 }

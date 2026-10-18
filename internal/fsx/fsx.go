@@ -1,4 +1,8 @@
-package main
+// Package fsx holds file-system primitives that know nothing of the
+// bridge: an atomic write, ~ expansion and its reverse, symlink-resolved
+// paths and containment. The home folder is always a parameter; nothing
+// here reads the process's environment.
+package fsx
 
 import (
 	"bytes"
@@ -8,13 +12,10 @@ import (
 	"strings"
 )
 
-// File-system primitives that know nothing of the bridge. The home folder
-// is always a parameter.
-
-// writeFileAtomic writes data to a temp file in the same directory, syncs it
+// WriteFileAtomic writes data to a temp file in the same directory, syncs it
 // and renames it over path, so a crash never leaves a half-written file. With
 // backup, the previous version is kept as path.bak.
-func writeFileAtomic(path string, data []byte, perm os.FileMode, backup bool) error {
+func WriteFileAtomic(path string, data []byte, perm os.FileMode, backup bool) error {
 	dir := filepath.Dir(path)
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return err
@@ -48,11 +49,11 @@ func writeFileAtomic(path string, data []byte, perm os.FileMode, backup bool) er
 	return os.Rename(tmpName, path)
 }
 
-// expandHome rewrites a leading "~" to home, the user's home directory. It
-// is the one ~ expansion: effective applies it to every path setting, so
-// only code that works on the file layer, or on a path from a request,
-// calls it itself.
-func expandHome(path, home string) string {
+// ExpandHome rewrites a leading "~" to home, the user's home directory. It
+// is the bridge's one ~ expansion: loading the config applies it to every
+// path setting, so only code that works on the file layer, or on a path
+// from a request, calls it itself.
+func ExpandHome(path, home string) string {
 	if path == "~" {
 		return home
 	}
@@ -62,13 +63,13 @@ func expandHome(path, home string) string {
 	return path
 }
 
-// canonicalDir cleans p and resolves its symlinks (on macOS /tmp is a
+// Canonical cleans p and resolves its symlinks (on macOS /tmp is a
 // symlink to /private/tmp, and the sandbox compares real paths). For an
 // absolute path that does not exist yet, such as a folder the dashboard is
 // about to create, it resolves the part that does: ~/link/new, with ~/link
 // a symlink out of HOME, lies where the link points, and that is where
 // MkdirAll would create it.
-func canonicalDir(p string) string {
+func Canonical(p string) string {
 	if p == "" {
 		return ""
 	}
@@ -77,20 +78,20 @@ func canonicalDir(p string) string {
 		return r
 	}
 	if filepath.IsAbs(p) {
-		return resolvePath(p)
+		return Resolve(p)
 	}
 	return p
 }
 
 const maxSymlinks = 64
 
-// resolvePath returns the real path of the absolute path p. Every symlink in
+// Resolve returns the real path of the absolute path p. Every symlink in
 // the part that exists is resolved, including a dangling one (it resolves to
 // its target), and the part that does not exist yet is kept as written, so
 // the result still names a folder created there later. ".." is applied to
 // the resolved path, as the kernel does. On a symlink loop p comes back as
 // is.
-func resolvePath(p string) string {
+func Resolve(p string) string {
 	resolved := string(filepath.Separator)
 	rest := strings.Split(p, string(filepath.Separator))
 	links := 0
@@ -125,8 +126,8 @@ func resolvePath(p string) string {
 	return resolved
 }
 
-// isWithin reports whether p is dir or inside it.
-func isWithin(p, dir string) bool {
+// Within reports whether p is dir or inside it.
+func Within(p, dir string) bool {
 	rel, err := filepath.Rel(dir, p)
 	if err != nil {
 		return false
@@ -134,14 +135,14 @@ func isWithin(p, dir string) bool {
 	return rel == "." || (rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)))
 }
 
-// tildePath writes paths under home, the user's home folder, as ~/…, so
+// Tilde writes paths under home, the user's home folder, as ~/…, so
 // config.json and backups stay valid on a machine with a different user
 // name.
-func tildePath(p, home string) string {
+func Tilde(p, home string) string {
 	if home == "" {
 		return p
 	}
-	home = canonicalDir(home)
+	home = Canonical(home)
 	if rel, err := filepath.Rel(home, p); err == nil && !strings.HasPrefix(rel, "..") {
 		if rel == "." {
 			return "~"
@@ -151,6 +152,6 @@ func tildePath(p, home string) string {
 	return p
 }
 
-// fileExists reports whether p names a file or folder that exists (and can
+// Exists reports whether p names a file or folder that exists (and can
 // be looked at), following symlinks.
-func fileExists(p string) bool { _, err := os.Stat(p); return err == nil }
+func Exists(p string) bool { _, err := os.Stat(p); return err == nil }
