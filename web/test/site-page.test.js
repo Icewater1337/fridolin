@@ -35,7 +35,7 @@ function siteStatus() {
 
 const proposal = { proposal: { brain: 'web', title: 'Events page', summary: 'A page with this month’s events.', commit: commit('c'), at: '2026-10-18T10:00:00Z' }, changes: [], preview: null };
 
-async function openPage(t, first = siteStatus(), { proposals = [] } = {}) {
+async function openPage(t, first = siteStatus(), { proposals = [], brains = [{ id: 'web', name: 'Web' }] } = {}) {
   t.mock.timers.enable({ apis: ['setTimeout', 'Date'] });
   installDom();
   noConsoleErrors(t);
@@ -44,6 +44,7 @@ async function openPage(t, first = siteStatus(), { proposals = [] } = {}) {
     users: { users: [{ id: 'u1', kind: 'google', email: 'you@example.com', name: 'You', role: 'admin' }], roles: ['admin', 'member'] },
     proposals,
     holdNext: null, // a promise the next GET /api/site waits for
+    holdBuilder: null, // a promise the next PUT /api/site/builders/{id} waits for
   };
   const calls = serve(t, (path, init) => {
     const method = init.method || 'GET';
@@ -64,7 +65,23 @@ async function openPage(t, first = siteStatus(), { proposals = [] } = {}) {
     }
     if (path === '/api/site/deploy-key' && method === 'POST') { bridge.site.deploy_key = 'ssh-ed25519 AAAAnew fridolin-site'; return { ok: true }; }
     if (path === '/api/site/roles' && method === 'PUT') { bridge.users.roles = ['admin', ...body.roles.map((r) => r.trim()).filter(Boolean)]; return { ok: true }; }
-    if (path === '/api/site/builders') return { brains: [{ id: 'web', name: 'Web', builder: bridge.site.settings.builders.includes('web') }] };
+    if (path === '/api/site/builders') return { brains: brains.map((b) => ({ ...b, builder: bridge.site.settings.builders.includes(b.id) })) };
+    if (path.startsWith('/api/site/builders/') && method === 'PUT') {
+      const id = decodeURIComponent(path.split('/').pop());
+      const done = () => {
+        const s = bridge.site.settings;
+        s.builders = body.on ? [...s.builders.filter((x) => x !== id), id] : s.builders.filter((x) => x !== id);
+        return { ok: true };
+      };
+      const gate = bridge.holdBuilder;
+      bridge.holdBuilder = null;
+      // The gate resolves with how the save ends: 'ok', 'fails', or
+      // 'fails late', as one whose npm install fails, once the brain is
+      // listed as a builder (SiteManager.SetBuilder).
+      const failed = { status: 500, body: { error: 'npm install failed' } };
+      const end = { ok: done, fails: () => failed, 'fails late': () => { done(); return failed; } };
+      return gate ? gate.then((how) => end[how]()) : done();
+    }
     if (path === '/api/site/proposals') return { proposals: bridge.proposals };
     if (path === '/api/site/secrets') return { modules: [] };
     return { ok: true };
@@ -279,6 +296,46 @@ test('a deploy asks for the proposals again', async (t) => {
   assert.equal(asked(), before + 1);
   assert.equal(shown(), 0);
   assert.match(root.textContent, /No change to access, server code, files or commands\./);
+});
+
+test('a builder switch stays put while it saves', async (t) => {
+  const cases = [
+    { name: 'and then shows the saved state', ends: 'ok', builders: ['docs', 'web'] },
+    { name: 'and goes back when the save fails', ends: 'fails', builders: ['docs'] },
+    { name: 'or shows what a failed save changed', ends: 'fails late', builders: ['docs', 'web'] },
+  ];
+  for (const c of cases) {
+    await t.test(c.name, async (t) => {
+      const { root, bridge, calls, poll } = await openPage(t, siteStatus(), { brains: [{ id: 'web', name: 'Web' }, { id: 'docs', name: 'Docs' }] });
+      const switchOf = (label) => root.querySelectorAll('.site-builders label.switch').find((l) => l.textContent === label);
+      const web = switchOf('Web (web)');
+      const docs = switchOf('Docs (docs)');
+      let release;
+      bridge.holdBuilder = new Promise((resolve) => { release = resolve; });
+      web.input.checked = true; // npm install takes its time
+      web.input.dispatchEvent(new Event('change', { bubbles: true }));
+      await settle();
+      assert.ok(calls.some((x) => x.path === '/api/site/builders/web' && x.method === 'PUT'));
+      assert.equal(web.input.disabled, true);
+
+      // Meanwhile docs becomes a builder elsewhere, and the page notices.
+      const elsewhere = structuredClone(bridge.site);
+      elsewhere.settings.builders = ['docs'];
+      await poll(elsewhere);
+      assert.equal(switchOf('Docs (docs)'), docs, 'each switch keeps its node');
+      assert.equal(docs.input.checked, true, 'and shows what changed');
+      assert.equal(switchOf('Web (web)'), web);
+      assert.equal(web.input.disabled, true, 'the one saving stays disabled');
+      assert.equal(web.input.checked, true, 'and shows what you chose');
+
+      release(c.ends);
+      await settle();
+      assert.deepEqual(bridge.site.settings.builders, c.builders);
+      assert.equal(switchOf('Web (web)'), web);
+      assert.equal(web.input.disabled, false);
+      assert.equal(web.input.checked, c.builders.includes('web'));
+    });
+  }
 });
 
 test('the deploy and the proposals keep updating while a card has edits', async (t) => {

@@ -453,28 +453,53 @@ export default {
     }
 
     // ── which brains may build ─────────────────────────────────────────
+    // Setting a builder up can take minutes (npm install), and the list
+    // changes meanwhile (a preview starts, a poll comes). Each brain's
+    // switch is a node of its own that shows a newer state in place, so
+    // it is never replaced under the pointer, and one whose save is on its
+    // way stays disabled.
+    const builderSwitches = h('div.site-builders');
+
     function paintBuilders() {
       if (!st.repo.connected) { paint(buildersBox, 'not connected', () => h('p.muted', 'Connect a repository first.')); return; }
       const known = builders.data();
       if (!known) { paint(buildersBox, 'loading', () => loading('Loading the brains…')); return; }
-      paint(buildersBox, known.brains, renderBuilders);
+      paint(buildersBox, known.brains.length > 0, renderBuilders);
+      reconcile(builderSwitches, known.brains.map((br) => ({ id: br.id, name: br.name || br.id, label: brainLabel(br), on: br.builder })), (b) => b.id, builderSwitch);
     }
 
-    function renderBuilders(brains) {
+    function renderBuilders(any) {
       return [
         h('p.small', 'A brain you allow gets the site-builder skills and tools, and a workspace of its own (a clone of the repository in its folder, under .fridolin-site). It builds and previews inside its sandbox and can only propose; you merge and deploy here.'),
-        brains.length ? h('div.site-builders', brains.map((br) => toggle({
-          checked: br.builder, label: brainLabel(br),
-          onChange: async (on, input) => {
-            input.disabled = true;
-            try {
-              await put(`/api/site/builders/${encodeURIComponent(br.id)}`, { on }, { timeout: STEPS_TIMEOUT_MS });
-              toast(on ? `${br.name || br.id} may build the site` : `${br.name || br.id} no longer builds the site`, 'ok');
-              await Promise.all([refresh(), builders.refresh()]);
-            } catch (e) { input.checked = !on; toastError(e); } finally { input.disabled = false; }
-          },
-        }))) : h('p.muted', 'No brains yet.'),
+        any ? builderSwitches : h('p.muted', 'No brains yet.'),
       ];
+    }
+
+    function builderSwitch(b) {
+      let latest = b; // the newest state of this brain
+      let busy = false; // its save is on its way
+      const el = toggle({
+        checked: b.on, label: b.label,
+        onChange: async (on, input) => {
+          busy = true;
+          input.disabled = true;
+          try {
+            await put(`/api/site/builders/${encodeURIComponent(b.id)}`, { on }, { timeout: STEPS_TIMEOUT_MS });
+            toast(on ? `${latest.name} may build the site` : `${latest.name} no longer builds the site`, 'ok');
+          } catch (e) { toastError(e); }
+          // What the bridge says now: a save that failed during npm install
+          // has listed the brain already.
+          await Promise.all([refresh(), builders.refresh()]);
+          busy = false;
+          input.disabled = false;
+          show();
+        },
+      });
+      const label = el.querySelector('.switch-label');
+      const show = () => { el.input.checked = latest.on; label.textContent = latest.label; };
+      // While its save is on its way, the switch shows what you chose.
+      el.update = (next) => { latest = next; if (!busy) show(); };
+      return el;
     }
 
     // ── secrets the modules declare ───────────────────────────────────
