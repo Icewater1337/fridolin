@@ -64,6 +64,12 @@ type PlaudConfig struct {
 	Message string `json:"message,omitempty"`
 	// BrainAccess keeps the login in ~/.plaud/ so brains can use the CLI.
 	BrainAccess bool `json:"brain_access,omitempty"`
+	// PhoneDir, when set, is where recordings come from instead of Plaud's
+	// cloud: a folder that the Plaud Sync phone app's Documents/PlaudSync
+	// is synced to (plaud-android/). Its transcripts, one
+	// YYYY-MM-DD_HH-MM-SS.txt per recording, are handed over as the
+	// cloud's are; Plaud's CLI and its login are not used.
+	PhoneDir string `json:"phone_dir,omitempty"`
 }
 
 // interval is how often Plaud is checked.
@@ -80,6 +86,9 @@ func (pc PlaudConfig) validate() error {
 	}
 	if pc.IntervalSeconds != 0 && pc.IntervalSeconds < 30 {
 		return fmt.Errorf("plaud.interval_seconds must be at least 30")
+	}
+	if pc.PhoneDir != "" && !filepath.IsAbs(pc.PhoneDir) {
+		return fmt.Errorf("plaud.phone_dir %q must be an absolute path or start with ~/", pc.PhoneDir)
 	}
 	return nil
 }
@@ -438,6 +447,9 @@ const (
 // and ~/.plaud may hold your own terminal's login, maybe of another
 // account, which Fridolin must not take over unasked.
 func (p *PlaudManager) loginStatus() string {
+	if p.phoneDir() != "" {
+		return plaudConnected // no login: a missing folder fails the check instead
+	}
 	st, _ := p.loadState()
 	var dir string
 	disconnected := false
@@ -476,6 +488,9 @@ func (p *PlaudManager) hasLogin() bool { return fileExists(p.tokenPath()) }
 // token refresh, or brain_access switching to the other login. "" means
 // there is none.
 func (p *PlaudManager) loginStamp() string {
+	if dir := p.phoneDir(); dir != "" {
+		return "phone " + dir
+	}
 	fi, err := os.Stat(p.tokenPath())
 	if err != nil {
 		return ""
@@ -834,6 +849,9 @@ func plaudListedIDs(out string) []string {
 // the first page with one that known says it knows, a page that is not
 // full, or plaudListPages pages.
 func (p *PlaudManager) listUntil(ctx context.Context, known func(id string) bool) ([]string, error) {
+	if dir := p.phoneDir(); dir != "" {
+		return phoneIDs(dir)
+	}
 	var all []string
 	for page := 1; page <= plaudListPages; page++ {
 		ids, err := p.listIDs(ctx, page)
@@ -962,6 +980,9 @@ func (p *PlaudManager) refreshAccount(checked time.Time) {
 // accountID identifies the signed-in Plaud account: its user id, else its
 // email or nickname, else "" when the CLI does not say.
 func (p *PlaudManager) accountID(ctx context.Context) (string, error) {
+	if dir := p.phoneDir(); dir != "" {
+		return "phone " + dir, nil // another folder starts over, as another account does
+	}
 	d, err := p.me(ctx)
 	if err != nil {
 		return "", err
@@ -978,6 +999,60 @@ func (p *PlaudManager) accountID(ctx context.Context) (string, error) {
 // says what it handed over: nil while Plaud has not finished the
 // transcript. It notes the recording's name in item once Plaud said it.
 func (p *PlaudManager) forward(ctx context.Context, cfg *Config, id string, item *plaudPending, br *Brain, jid string) (*PlaudForward, error) {
+	fetch := p.fetchCloud
+	if cfg.Plaud.PhoneDir != "" {
+		fetch = fetchPhone
+	}
+	rec, err := fetch(ctx, cfg, id, item)
+	if rec == nil || err != nil {
+		return nil, err
+	}
+
+	// Into the plaud folder of the brain's own inbox: no other brain may
+	// read the recording.
+	file := plaudTranscriptPath(filepath.Join(mediaInbox(cfg.MediaDir, br.ID()), "plaud"), rec.day, rec.name, id)
+	var body strings.Builder
+	fmt.Fprintf(&body, "Plaud recording: %s\nRecorded: %s\nDuration: %s\nPlaud ID: %s\n%s\n", rec.name, rec.when, rec.duration, id, rec.note)
+	if rec.summary != "" {
+		body.WriteString("=== Plaud AI summary ===\n" + rec.summary + "\n\n")
+	}
+	body.WriteString("=== Transcript ===\n" + strings.TrimSpace(rec.transcript) + "\n")
+	path, err := writeInboxFile(cfg.MediaDir, br.ID(), filepath.Join("plaud", filepath.Base(file)), []byte(body.String()))
+	if err != nil {
+		return nil, err
+	}
+
+	instruction := cfg.Plaud.Message
+	if strings.TrimSpace(instruction) == "" {
+		instruction = defaultPlaudMessage
+	}
+	text := strings.NewReplacer("{name}", rec.name, "{when}", rec.when, "{duration}", rec.duration).Replace(plaudMessageHead + "\n\n" + strings.TrimSpace(instruction))
+	// Marked as handed before the brain gets it, so that a run that ends
+	// at once finds it so.
+	fw := PlaudForward{ID: id, Name: rec.name, Brain: br.ID(), At: time.Now(), Status: plaudRunHanded}
+	if err := p.markHanded(fw); err != nil {
+		return nil, err
+	}
+	if err := p.submit(br, jid, "plaud", text, []string{path}, p.runEnded(id)); err != nil {
+		p.unmarkHanded(id)
+		return nil, fmt.Errorf("brain %s did not take it: %w", br.ID(), err)
+	}
+	log.Printf("plaud %s: handed to brain %s", id, br.ID()) // its name is personal data, the id is not
+	return &fw, nil
+}
+
+// plaudRecording is a recording ready to be handed over. day and when are
+// local times, YYYY-MM-DD and YYYY-MM-DD HH:MM; note goes above the
+// transcript.
+type plaudRecording struct {
+	name, day, when, duration string
+	transcript, summary, note string
+}
+
+// fetchCloud fetches recording id from Plaud's cloud through the CLI: nil
+// while Plaud has not finished the transcript. It notes the recording's
+// name in item once Plaud said it.
+func (p *PlaudManager) fetchCloud(ctx context.Context, cfg *Config, id string, item *plaudPending) (*plaudRecording, error) {
 	since := item.FirstSeen
 	detailsOut, err := p.run(ctx, "file", id)
 	if err != nil {
@@ -1049,38 +1124,74 @@ func (p *PlaudManager) forward(ctx context.Context, cfg *Config, id string, item
 	if duration == "" {
 		duration = "?"
 	}
+	return &plaudRecording{name: name, day: day, when: when, duration: duration, transcript: transcript, summary: summary, note: note}, nil
+}
 
-	// Into the plaud folder of the brain's own inbox: no other brain may
-	// read the recording.
-	file := plaudTranscriptPath(filepath.Join(mediaInbox(cfg.MediaDir, br.ID()), "plaud"), day, name, id)
-	var body strings.Builder
-	fmt.Fprintf(&body, "Plaud recording: %s\nRecorded: %s\nDuration: %s\nPlaud ID: %s\n%s\n", name, when, duration, id, note)
-	if summary != "" {
-		body.WriteString("=== Plaud AI summary ===\n" + summary + "\n\n")
+// plaudPhonePrefix starts the id of a recording from the phone folder: the
+// rest is the name of its .txt there, the time the recording started.
+const plaudPhonePrefix = "phone_"
+
+const plaudPhoneLayout = "2006-01-02_15-04-05"
+
+// plaudPhoneEndRe is the end time of a transcript line the phone app
+// writes, "[00:00 - 00:12] Speaker 1: …"; the last one is the recording's
+// length, near enough.
+var plaudPhoneEndRe = regexp.MustCompile(`(?m)^\[[0-9:]+ - ([0-9:]+)\]`)
+
+// phoneDir is the folder recordings come from (plaud.phone_dir), "" for
+// Plaud's cloud.
+func (p *PlaudManager) phoneDir() string {
+	return p.cfg().Plaud.PhoneDir
+}
+
+// phoneIDs lists the recordings in the phone folder dir, newest first, at
+// most plaudSeenKeep of them, so one too old to be in the seen list any
+// more does not come back as new. All of them, not only those newer than
+// the last one handed over: a transcript that failed on the phone at first
+// arrives after newer ones. Only names the app gives count, so a sync
+// tool's temporary and conflict files are left alone.
+func phoneIDs(dir string) ([]string, error) {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return nil, fmt.Errorf("the phone folder: %w", err)
 	}
-	body.WriteString("=== Transcript ===\n" + strings.TrimSpace(transcript) + "\n")
-	path, err := writeInboxFile(cfg.MediaDir, br.ID(), filepath.Join("plaud", filepath.Base(file)), []byte(body.String()))
+	var ids []string
+	for _, e := range entries {
+		stem, ok := strings.CutSuffix(e.Name(), ".txt")
+		if _, err := time.ParseInLocation(plaudPhoneLayout, stem, time.Local); ok && err == nil && e.Type().IsRegular() {
+			ids = append(ids, plaudPhonePrefix+stem)
+		}
+	}
+	slices.Sort(ids) // the names are times, so this is the order they were made in
+	slices.Reverse(ids)
+	return ids[:min(len(ids), plaudSeenKeep)], nil
+}
+
+// fetchPhone reads recording id from the phone folder. The app writes a
+// transcript once Plaud finished it, so one that is there is ready.
+func fetchPhone(_ context.Context, cfg *Config, id string, item *plaudPending) (*plaudRecording, error) {
+	stem := strings.TrimPrefix(id, plaudPhonePrefix)
+	t, err := time.ParseInLocation(plaudPhoneLayout, stem, time.Local)
+	if err != nil {
+		return nil, fmt.Errorf("%s is not a recording of the phone app", id)
+	}
+	data, err := os.ReadFile(filepath.Join(cfg.Plaud.PhoneDir, stem+".txt"))
+	if errors.Is(err, os.ErrNotExist) {
+		return nil, errPlaudNotFound
+	}
 	if err != nil {
 		return nil, err
 	}
-
-	instruction := cfg.Plaud.Message
-	if strings.TrimSpace(instruction) == "" {
-		instruction = defaultPlaudMessage
+	transcript := strings.TrimSpace(string(data))
+	if transcript == "" {
+		transcript = "(Plaud heard no speech in this recording.)"
 	}
-	text := strings.NewReplacer("{name}", name, "{when}", when, "{duration}", duration).Replace(plaudMessageHead + "\n\n" + strings.TrimSpace(instruction))
-	// Marked as handed before the brain gets it, so that a run that ends
-	// at once finds it so.
-	fw := PlaudForward{ID: id, Name: name, Brain: br.ID(), At: time.Now(), Status: plaudRunHanded}
-	if err := p.markHanded(fw); err != nil {
-		return nil, err
+	duration := "?"
+	if m := plaudPhoneEndRe.FindAllStringSubmatch(transcript, -1); m != nil {
+		duration = m[len(m)-1][1]
 	}
-	if err := p.submit(br, jid, "plaud", text, []string{path}, p.runEnded(id)); err != nil {
-		p.unmarkHanded(id)
-		return nil, fmt.Errorf("brain %s did not take it: %w", br.ID(), err)
-	}
-	log.Printf("plaud %s: handed to brain %s", id, br.ID()) // its name is personal data, the id is not
-	return &fw, nil
+	item.Name = "Phone recording"
+	return &plaudRecording{name: item.Name, day: t.Format("2006-01-02"), when: t.Format("2006-01-02 15:04"), duration: duration, transcript: transcript}, nil
 }
 
 // markHanded notes that the recording fw.ID is about to go to a brain.
@@ -1454,7 +1565,7 @@ func (p *PlaudManager) poll(ctx context.Context) error {
 		}
 		// A login that works is not expired: the next expiry gets its notice.
 		st.AuthNotified = time.Time{}
-		if st.Login == nil && !st.Disconnected {
+		if st.Login == nil && !st.Disconnected && p.phoneDir() == "" {
 			// A sign-in from before they were recorded.
 			st.Login = &plaudLogin{Dir: p.cliHome(), Since: time.Now()}
 		}
@@ -1527,6 +1638,9 @@ func (p *PlaudManager) poll(ctx context.Context) error {
 			room--
 		case deleted:
 			why = "it was deleted in Plaud"
+			if p.phoneDir() != "" {
+				why = "its transcript left the phone folder"
+			}
 			log.Printf("plaud %s: deleted in Plaud, giving up", id)
 		case old && err != nil:
 			why = fmt.Sprintf("fetching it from Plaud failed for %s (%v)", maxAge, err)
@@ -1607,7 +1721,7 @@ func (p *PlaudManager) seed(ctx context.Context, acct string) error {
 		fresh := newPlaudState()
 		fresh.Seeded, fresh.Account, fresh.Seen = true, acct, listed
 		fresh.Forwarded, fresh.Login, fresh.Disconnected = st.Forwarded, st.Login, st.Disconnected
-		if fresh.Login == nil && !fresh.Disconnected {
+		if fresh.Login == nil && !fresh.Disconnected && p.phoneDir() == "" {
 			fresh.Login = &plaudLogin{Dir: p.cliHome(), Since: time.Now()}
 		}
 		*st = *fresh
@@ -1916,7 +2030,7 @@ func (p *PlaudManager) Status() PlaudStatus {
 	s.LastError = p.lastErr
 	s.Expired = s.Expired || p.refused && s.Connected
 	p.mu.Unlock()
-	if s.Connected && s.CLI.Found {
+	if s.Connected && s.CLI.Found && p.phoneDir() == "" {
 		var checked time.Time
 		if st, _ := p.loadState(); st != nil && st.Login != nil && st.Login.Dir == p.cliHome() {
 			s.Account, checked = st.Login.Account, st.Login.Checked

@@ -158,6 +158,11 @@ yet, so everything is under Unreleased until the first one.
   the home folder, for bug reports.
 - The bridge's log names the config file and the data dir at every start,
   and where each came from.
+- `plaud.phone_dir`: recordings can come from the Plaud Sync phone app
+  (`plaud-android/`) instead of Plaud's cloud. The app pulls each
+  recording off a NotePin as soon as it stops and has Plaud transcribe
+  it; Fridolin reads the transcripts from the folder the app's files are
+  synced to, with no Plaud CLI or login (docs/PLAUD.md).
 
 ### Removed
 

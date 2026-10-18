@@ -193,3 +193,16 @@ test('a finished sign-in slows the Plaud status down', async (t) => {
   await wait(1);
   assert.equal(asked(), n + 1, 'then once');
 });
+
+test('a phone folder needs no Plaud CLI or login on the card', async (t) => {
+  const s = status('2026-10-18T10:00:00Z');
+  const { root } = await openPage(t, {
+    ...s, cli: { found: false, install_hint: 'npm install -g @plaud-ai/cli' }, account: '',
+    settings: { ...s.settings, phone_dir: '/Users/you/PlaudSync' },
+  });
+  assert.match(root.textContent, /Phone folder/);
+  assert.match(root.textContent, /\/Users\/you\/PlaudSync/);
+  assert.doesNotMatch(root.textContent, /Install Plaud’s command-line tool|Login stored in|Let brains use|AI-cleaned/);
+  assert.equal(button(root, 'Disconnect'), undefined);
+  assert.ok(button(root, 'Save') && button(root, 'Check now'));
+});
