@@ -223,6 +223,9 @@ for compatibility.
   that leave its folder. The dashboard's folder browser and inspector keep
   file metadata checks inside your home folder, including child symlinks
   and symlinked marker files such as `.git`.
+- When adding a brain fails, cleanup stays in the folders it opened and
+  removes only unchanged files and directories it created. Replaced or
+  edited files and pre-existing empty directories are preserved.
 - A build chat on the Site's Build page shows that Claude's usage limit is
   reached, that its message is queued, or that the queue is full. It left
   out every notice that starts with ⏳, to leave out "Working on it".

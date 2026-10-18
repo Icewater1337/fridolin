@@ -912,28 +912,6 @@ func TestFailedAddRemovesTheScaffold(t *testing.T) {
 	}
 }
 
-// Undoing a scaffold removes files inside the brain's folder only, whatever
-// the list of created files says.
-func TestUnscaffoldStaysInTheFolder(t *testing.T) {
-	root := t.TempDir()
-	dir := filepath.Join(root, "brain")
-	if err := os.MkdirAll(filepath.Join(dir, "memories"), 0o700); err != nil {
-		t.Fatal(err)
-	}
-	for _, f := range []string{filepath.Join(root, "outside.md"), filepath.Join(dir, "memories", "README.md")} {
-		if err := os.WriteFile(f, []byte("x"), 0o600); err != nil {
-			t.Fatal(err)
-		}
-	}
-	unscaffold(dir, []string{"../outside.md", filepath.Join(root, "outside.md"), "memories/README.md"}, "")
-	if !fileExists(filepath.Join(root, "outside.md")) {
-		t.Error("a file outside the brain's folder was removed")
-	}
-	if dirExists(filepath.Join(dir, "memories")) {
-		t.Error("the scaffold inside the folder was left behind")
-	}
-}
-
 // The Chats page polls the groups and reloads them after each change on
 // it: those take the list the WhatsApp client keeps, and only its Refresh
 // button, with ?fresh=1, has the client ask WhatsApp again.

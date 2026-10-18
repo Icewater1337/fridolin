@@ -339,35 +339,15 @@ func ScaffoldBrain(dir string, m *BrainManifest) ([]string, error) {
 // scaffoldFolder is ScaffoldBrain without brain.json, which the dashboard
 // writes with the update that adds the brain (see apiAddBrain).
 func scaffoldFolder(dir string, m *BrainManifest) ([]string, error) {
-	if err := os.MkdirAll(dir, 0o700); err != nil {
-		return nil, err
-	}
-	// An adopted folder may contain symlinks. Keep every nested directory
-	// and file creation in the folder even if a parent is replaced while
-	// scaffolding; O_EXCL alone only protects the final filename.
-	root, err := os.OpenRoot(dir)
+	s, err := scaffoldFolderTx(dir, m)
+	defer s.close()
+	return s.created, err
+}
+
+func scaffoldFolderTx(dir string, m *BrainManifest) (*scaffoldTx, error) {
+	s, err := newScaffold(dir)
 	if err != nil {
-		return nil, err
-	}
-	defer root.Close()
-	var created []string
-	write := func(rel, content string) error {
-		if err := root.MkdirAll(filepath.Dir(rel), 0o700); err != nil {
-			return err
-		}
-		f, err := root.OpenFile(rel, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
-		if errors.Is(err, os.ErrExist) {
-			return nil
-		}
-		if err != nil {
-			return err
-		}
-		defer f.Close()
-		if _, err := f.WriteString(content); err != nil {
-			return err
-		}
-		created = append(created, rel)
-		return nil
+		return s, err
 	}
 
 	prompt := renderTemplate(examplePromptTemplate(), m)
@@ -381,12 +361,12 @@ func scaffoldFolder(dir string, m *BrainManifest) ([]string, error) {
 		files = append(files, struct{ rel, content string }{"skills/" + sk.name, renderTemplate(sk.content, m)})
 	}
 	for _, f := range files {
-		if err := write(f.rel, f.content); err != nil {
-			return created, err
+		if err := s.write(f.rel, f.content); err != nil {
+			return s, err
 		}
 	}
-	sort.Strings(created)
-	return created, nil
+	sort.Strings(s.created)
+	return s, nil
 }
 
 const identityMapTemplate = `# WhatsApp identity map
