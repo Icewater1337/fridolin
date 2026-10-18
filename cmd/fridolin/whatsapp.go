@@ -20,7 +20,7 @@ import (
 	"github.com/Icewater1337/fridolin/internal/trigger"
 	"go.mau.fi/whatsmeow"
 	"go.mau.fi/whatsmeow/proto/waE2E"
-	"go.mau.fi/whatsmeow/store"
+	wastore "go.mau.fi/whatsmeow/store"
 	"go.mau.fi/whatsmeow/types"
 	"go.mau.fi/whatsmeow/types/events"
 	waLog "go.mau.fi/whatsmeow/util/log"
@@ -1162,7 +1162,7 @@ func (wa *WhatsAppClient) groupName(jid types.JID) string {
 
 // lidStore is whatsmeow's map between LIDs and phone numbers, or nil
 // without a client.
-func (wa *WhatsAppClient) lidStore() store.LIDStore {
+func (wa *WhatsAppClient) lidStore() wastore.LIDStore {
 	cli := wa.cl()
 	if cli == nil || cli.Store == nil {
 		return nil

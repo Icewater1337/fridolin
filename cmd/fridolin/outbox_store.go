@@ -40,7 +40,8 @@ type outboxPart struct {
 	Max      int      `json:"max,omitempty"`
 }
 
-func (p outboxPart) isPoll() bool { return p.Question != "" }
+// IsPoll reports whether this part carries a poll rather than text.
+func (p outboxPart) IsPoll() bool { return p.Question != "" }
 
 // outboxRow is a reply waiting in the outbox.
 type outboxRow struct {

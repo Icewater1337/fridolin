@@ -16,7 +16,7 @@ import (
 	"unicode"
 
 	"github.com/Icewater1337/fridolin/internal/platform"
-	"go.mau.fi/whatsmeow/store"
+	wastore "go.mau.fi/whatsmeow/store"
 	"go.mau.fi/whatsmeow/types"
 )
 
@@ -74,7 +74,7 @@ type Bridge struct {
 	// lids is whatsmeow's map between LIDs and phone numbers, nil in dev
 	// mode, for what knows a person by LID outside an event: a /send to
 	// one.
-	lids func() store.LIDStore
+	lids func() wastore.LIDStore
 
 	httpSrv *http.Server
 	// loops are the goroutines Start leaves running past its return,
@@ -140,7 +140,7 @@ func NewBridge(cfgs *ConfigStore, opts BridgeOptions) (_ *Bridge, err error) {
 			log.Printf("media: readying %s for inboxes: %v", cfg.MediaDir, err)
 		}
 	}
-	store, err := NewStore(cfg)
+	store, err := NewStore(cfg.DBPath, cfg.LogLevel)
 	if err != nil {
 		return nil, fmt.Errorf("creating store: %w", err)
 	}
@@ -387,7 +387,7 @@ func (b *Bridge) connectLoop(ctx context.Context) {
 		if err == nil {
 			return
 		}
-		if errors.Is(err, store.ErrDeviceDeleted) || errors.Is(err, errPairingLive) {
+		if errors.Is(err, wastore.ErrDeviceDeleted) || errors.Is(err, errPairingLive) {
 			log.Printf("WhatsApp connect failed: %v", err)
 			return
 		}

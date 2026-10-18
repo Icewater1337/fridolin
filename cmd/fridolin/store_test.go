@@ -4,6 +4,7 @@ package main
 
 import (
 	"database/sql"
+	"github.com/Icewater1337/fridolin/internal/fsx"
 	"os"
 	"path/filepath"
 	"strings"
@@ -18,19 +19,6 @@ func setUmask(t *testing.T, mask int) {
 	t.Helper()
 	old := syscall.Umask(mask)
 	t.Cleanup(func() { syscall.Umask(old) })
-}
-
-func openTestStore(t *testing.T, dbPath string) *Store {
-	t.Helper()
-	s, err := NewStore(&Config{DBPath: dbPath, LogLevel: "error"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() {
-		s.Close()
-		s.Container.Close()
-	})
-	return s
 }
 
 func TestNewStoreCreatesPrivateDB(t *testing.T) {
@@ -172,7 +160,7 @@ func TestRestrictToOwner(t *testing.T) {
 				// user is not in.
 				t.Skipf("could not set mode %v, got %v", tc.mode, got)
 			}
-			if err := restrictToOwner(p); err != nil {
+			if err := fsx.RestrictToOwner(p); err != nil {
 				t.Fatal(err)
 			}
 			if got := modeOf(t, p, special); got != tc.want {
@@ -185,7 +173,7 @@ func TestRestrictToOwner(t *testing.T) {
 	}
 
 	t.Run("missing path", func(t *testing.T) {
-		if err := restrictToOwner(filepath.Join(dir, "missing")); err != nil {
+		if err := fsx.RestrictToOwner(filepath.Join(dir, "missing")); err != nil {
 			t.Errorf("missing path: %v", err)
 		}
 	})
@@ -221,7 +209,7 @@ func TestStoreMigratesAnUnversionedDatabase(t *testing.T) {
 	db.Close()
 
 	for i := 0; i < 2; i++ { // and opening it again changes nothing
-		s, err := NewStore(&Config{DBPath: dbPath, LogLevel: "error"})
+		s, err := NewStore(dbPath, "error")
 		if err != nil {
 			t.Fatalf("open %d: %v", i+1, err)
 		}

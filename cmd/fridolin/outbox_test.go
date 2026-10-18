@@ -244,21 +244,22 @@ func TestWithUndelivered(t *testing.T) {
 // line that the retry writes again, nor the chat get the reply twice.
 func TestReplyIsRecordedOnceWhenItsRowStays(t *testing.T) {
 	tb, br := newMainBridge(t, "")
+	db := testStoreSQL(t, tb.cfgs.Startup().DBPath)
 	// bridge.db refuses to delete from the outbox until the trigger goes.
-	if _, err := tb.store.db.Exec(`CREATE TRIGGER keep_outbox BEFORE DELETE ON outbox BEGIN SELECT RAISE(FAIL, 'disk I/O error'); END`); err != nil {
+	if _, err := db.Exec(`CREATE TRIGGER keep_outbox BEFORE DELETE ON outbox BEGIN SELECT RAISE(FAIL, 'disk I/O error'); END`); err != nil {
 		t.Fatal(err)
 	}
 	tb.handleInbound(context.Background(), Inbound{JID: testDMChat, Sender: "15551234567", Text: "hello", Source: sourceWhatsApp})
 	waitFor(t, 10*time.Second, "the reply", func() bool { return len(tb.sentTo(testDMChat)) == 1 })
 	waitFor(t, 5*time.Second, "the row, all of it sent", func() bool {
 		var left int
-		err := tb.store.db.QueryRow(`SELECT COUNT(*) FROM outbox WHERE state = 'pending' AND next_part = 1`).Scan(&left)
+		err := db.QueryRow(`SELECT COUNT(*) FROM outbox WHERE state = 'pending' AND next_part = 1`).Scan(&left)
 		return err == nil && left == 1
 	})
 	if out := historyTexts(t, br, historyOut); len(out) != 0 {
 		t.Errorf("history holds %q while the reply is still in the outbox", out)
 	}
-	if _, err := tb.store.db.Exec(`DROP TRIGGER keep_outbox`); err != nil {
+	if _, err := db.Exec(`DROP TRIGGER keep_outbox`); err != nil {
 		t.Fatal(err)
 	}
 	tb.outbox.Wake()
@@ -276,7 +277,9 @@ func TestReplyIsRecordedOnceWhenItsRowStays(t *testing.T) {
 // Asking for the summary, which the dashboard does every few seconds,
 // changes nothing; the outbox itself forgets replies given up on long ago.
 func TestOutboxSummaryOnlyReads(t *testing.T) {
-	s := openOutboxStore(t, t.TempDir())
+	dir := t.TempDir()
+	s := openOutboxStore(t, dir)
+	db := testStoreSQL(t, filepath.Join(dir, "bridge.db"))
 	ctx := context.Background()
 	old := time.Now().Add(-outboxFailedKeep - time.Hour)
 	id, err := s.AddOutbox(ctx, outboxRow{Chat: testDMChat, Parts: []outboxPart{{Text: "x"}}, CreatedAt: old})
@@ -288,7 +291,7 @@ func TestOutboxSummaryOnlyReads(t *testing.T) {
 	}
 	rows := func() int {
 		var n int
-		if err := s.db.QueryRow(`SELECT COUNT(*) FROM outbox`).Scan(&n); err != nil {
+		if err := db.QueryRow(`SELECT COUNT(*) FROM outbox`).Scan(&n); err != nil {
 			t.Fatal(err)
 		}
 		return n
@@ -321,7 +324,7 @@ func TestQuestionsWaitAndNoticesDoNot(t *testing.T) {
 // openOutboxStore opens a bridge.db in dir.
 func openOutboxStore(t *testing.T, dir string) *Store {
 	t.Helper()
-	s, err := NewStore(&Config{DBPath: filepath.Join(dir, "bridge.db"), LogLevel: "error"})
+	s, err := NewStore(filepath.Join(dir, "bridge.db"), "error")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -380,7 +383,9 @@ func TestOutboxSurvivesARestart(t *testing.T) {
 // text, and a recipient the bridge refuses is given up on at once. Either
 // way the dashboard hears of it.
 func TestOutboxGivesUp(t *testing.T) {
-	s := openOutboxStore(t, t.TempDir())
+	dir := t.TempDir()
+	s := openOutboxStore(t, dir)
+	db := testStoreSQL(t, filepath.Join(dir, "bridge.db"))
 	m := newFlakyMessenger(func() *Config { return &Config{} }, true)
 	o := newOutbox(s, func() Messenger { return m }, 0, nil)
 	defer o.Stop()
@@ -402,7 +407,7 @@ func TestOutboxGivesUp(t *testing.T) {
 		t.Errorf("sent %+v", sent)
 	}
 	var texts int
-	if err := s.db.QueryRow(`SELECT COUNT(*) FROM outbox WHERE parts != '[]' OR history != ''`).Scan(&texts); err != nil || texts != 0 {
+	if err := db.QueryRow(`SELECT COUNT(*) FROM outbox WHERE parts != '[]' OR history != ''`).Scan(&texts); err != nil || texts != 0 {
 		t.Errorf("%d rows still hold their text (%v)", texts, err)
 	}
 }

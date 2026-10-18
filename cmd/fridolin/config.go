@@ -851,7 +851,7 @@ func protectDataDir(cfg *Config) {
 			log.Printf("warning: data_dir %s belongs to another user, so its mode %04o stays as it is; a folder of your own, such as ~/.fridolin, keeps the bridge's files private", dataDir, uint32(mode))
 		}
 	default:
-		if err := restrictToOwner(dataDir); err != nil {
+		if err := fsx.RestrictToOwner(dataDir); err != nil {
 			log.Printf("warning: could not make %s private: %v", dataDir, err)
 		}
 	}

@@ -311,7 +311,7 @@ func (o *Outbox) finish(ctx context.Context, r outboxRow) error {
 func (o *Outbox) send(ctx context.Context, m Messenger, r *outboxRow, p outboxPart) error {
 	ctx, cancel := context.WithTimeout(ctx, outboxSendLimit)
 	defer cancel()
-	if !p.isPoll() {
+	if !p.IsPoll() {
 		return m.SendMessage(ctx, r.Chat, p.Text)
 	}
 	poll := pollData{Question: p.Question, Options: p.Options, MaxSelectable: p.Max}

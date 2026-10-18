@@ -731,7 +731,7 @@ func TestBrainRunsWriteNoSessionOrProcessRows(t *testing.T) {
 		t.Helper()
 		for _, table := range []string{"sessions", "process_state"} {
 			var n int
-			if err := tb.store.db.QueryRow(`SELECT COUNT(*) FROM ` + table).Scan(&n); err != nil {
+			if err := testStoreSQL(t, tb.cfgs.Startup().DBPath).QueryRow(`SELECT COUNT(*) FROM ` + table).Scan(&n); err != nil {
 				t.Fatalf("%s: %v", table, err)
 			}
 			if n != 0 {

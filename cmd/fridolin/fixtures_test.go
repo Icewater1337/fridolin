@@ -299,6 +299,7 @@ func TestGenerateFixtures(t *testing.T) {
 	}
 	dbPath := filepath.Join(t.TempDir(), "bridge.db")
 	s := openTestStore(t, dbPath)
+	db := testStoreSQL(t, dbPath)
 	ctx := context.Background()
 
 	dev := s.Container.NewDevice()
@@ -342,12 +343,12 @@ func TestGenerateFixtures(t *testing.T) {
 		`INSERT INTO sessions (jid, session_id, updated_at) VALUES ('15551234567@s.whatsapp.net', '00000000-0000-4000-8000-000000000001', '2026-01-02 09:00:00+00:00')`,
 		`INSERT INTO process_state (jid, pid, updated_at) VALUES ('15551234567@s.whatsapp.net', 4242, '2026-01-02 09:00:00+00:00')`,
 	} {
-		if _, err := s.db.Exec(stmt); err != nil {
+		if _, err := db.Exec(stmt); err != nil {
 			t.Fatal(err)
 		}
 	}
 
-	dump, err := dumpSQL(s.db)
+	dump, err := dumpSQL(db)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -464,6 +465,7 @@ func TestBridgeV1Fixture(t *testing.T) {
 	dbPath := filepath.Join(t.TempDir(), "bridge.db")
 	loadSQL(t, dbPath, fixture(t, "bridge-v1.sql"))
 	s := openTestStore(t, dbPath)
+	db := testStoreSQL(t, dbPath)
 
 	dev, err := s.Container.GetFirstDevice(context.Background())
 	if err != nil {
@@ -480,11 +482,11 @@ func TestBridgeV1Fixture(t *testing.T) {
 		t.Errorf("poll = %+v, %v", p, err)
 	}
 	var votes int
-	if err := s.db.QueryRow(`SELECT COUNT(*) FROM poll_votes WHERE poll_msg_id = ?`, fixturePollID).Scan(&votes); err != nil || votes != 2 {
+	if err := db.QueryRow(`SELECT COUNT(*) FROM poll_votes WHERE poll_msg_id = ?`, fixturePollID).Scan(&votes); err != nil || votes != 2 {
 		t.Errorf("votes = %d, %v; want 2", votes, err)
 	}
 	var picks string
-	if err := s.db.QueryRow(`SELECT selected_options FROM poll_votes WHERE voter_jid = ?`, fixtureVoter).Scan(&picks); err != nil || picks != `["Sushi"]` {
+	if err := db.QueryRow(`SELECT selected_options FROM poll_votes WHERE voter_jid = ?`, fixtureVoter).Scan(&picks); err != nil || picks != `["Sushi"]` {
 		t.Errorf("%s voted %s, %v", fixtureVoter, picks, err)
 	}
 
@@ -504,7 +506,7 @@ func TestBridgeV1Fixture(t *testing.T) {
 	// Kept for a rollback to an older bridge, which reads them.
 	for _, table := range []string{"sessions", "process_state"} {
 		var n int
-		if err := s.db.QueryRow(`SELECT COUNT(*) FROM ` + table).Scan(&n); err != nil || n != 1 {
+		if err := db.QueryRow(`SELECT COUNT(*) FROM ` + table).Scan(&n); err != nil || n != 1 {
 			t.Errorf("%s has %d rows, %v; want 1", table, n, err)
 		}
 	}

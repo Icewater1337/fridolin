@@ -123,15 +123,16 @@ func TestBridgeClosesTheStoreWhenItGivesUpTheLock(t *testing.T) {
 			if err := cfg.EnsureDirs(); err != nil {
 				t.Fatal(err)
 			}
-			s, err := NewStore(cfg)
+			s, err := NewStore(cfg.DBPath, cfg.LogLevel)
 			if err != nil {
 				t.Fatal(err)
 			}
-			_, err = s.db.Exec(`DROP TABLE ignored_chats`)
+			db := testStoreSQL(t, cfg.DBPath)
+			_, err = db.Exec(`DROP TABLE ignored_chats`)
 			if err == nil {
-				_, err = s.db.Exec(`DROP TABLE fridolin_version`)
+				_, err = db.Exec(`DROP TABLE fridolin_version`)
 			}
-			if err := errors.Join(err, s.Close()); err != nil {
+			if err := errors.Join(err, db.Close(), s.Close()); err != nil {
 				t.Fatal(err)
 			}
 			if err := os.Chmod(cfg.DBPath, 0o400); err != nil {
