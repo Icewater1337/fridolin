@@ -235,7 +235,8 @@ func TestRestartNeedsSomeoneToRestart(t *testing.T) {
 // A second SIGTERM while the bridge stops, here giving a brain's run its
 // grace to finish, stops the run and the bridge at once, with exit code 1.
 // The bridge runs as its own process, the test binary as main, with the
-// grace a bridge has outside the tests.
+// grace a bridge has outside the tests; it holds the data dir's instance
+// lock against this one.
 func TestASecondSignalStopsAtOnce(t *testing.T) {
 	addr := freePort(t)
 	root, cfg := cliFixture(t, `"http_listen": "`+addr+`", "debounce": {"quiet_ms": 0}`, func(home string) []BrainRef {
@@ -277,6 +278,11 @@ func TestASecondSignalStopsAtOnce(t *testing.T) {
 		return resp.StatusCode, string(data)
 	}
 	waitFor(t, 20*time.Second, "the bridge to serve", func() bool { code, _ := call("GET", "/health", "", ""); return code == 200 })
+	// While it runs, the data dir is its own, for this process too.
+	if lock, err := acquireInstanceLock(filepath.Join(home, ".fridolin")); err == nil {
+		lock.release()
+		t.Error("a bridge in another process got the instance lock of the one running")
+	}
 	data, err := os.ReadFile(filepath.Join(home, ".fridolin", "dashboard.token"))
 	if err != nil {
 		t.Fatal(err)
