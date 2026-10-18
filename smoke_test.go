@@ -42,7 +42,7 @@ func TestSmoke(t *testing.T) {
 		args = append(args, "-race")
 	}
 	build := exec.Command("go", append(args, ".")...)
-	build.Dir = repoDir
+	build.Dir = pkgDir
 	// The go command's caches are under the HOME the tests started with.
 	build.Env = append(os.Environ(), "HOME="+goToolHome)
 	if out, err := build.CombinedOutput(); err != nil {

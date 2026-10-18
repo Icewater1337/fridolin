@@ -412,7 +412,7 @@ func TestTestsDoNotRunInTheCheckout(t *testing.T) {
 // one the tests run in, that must still be the package's testdata.
 func TestFuzzCorpusIsThePackagesTestdata(t *testing.T) {
 	got, err := os.Readlink("testdata")
-	if want := filepath.Join(repoDir, "testdata"); err != nil || got != want {
+	if want := filepath.Join(pkgDir, "testdata"); err != nil || got != want {
 		t.Errorf("testdata in the working directory links to %q (%v), want %q", got, err, want)
 	}
 

@@ -219,8 +219,13 @@ func useEmptyHome() (func(), error) {
 	return func() { os.RemoveAll(dir) }, nil
 }
 
-// repoDir is the package directory the tests were started in. They run
-// elsewhere, so a test that reads a file of the checkout joins it to this.
+// pkgDir is the package directory the tests were started in, whose
+// testdata is the tests' own (see linkTestdata).
+var pkgDir string
+
+// repoDir is the checkout: the folder of the go.mod above pkgDir. The
+// tests run elsewhere, so a test that reads a file of the checkout joins
+// it to this.
 var repoDir string
 
 // runInEmptyDir runs the tests in a new, empty working directory. A relative
@@ -228,7 +233,15 @@ var repoDir string
 // config.json. Only the package's testdata is linked in, see linkTestdata.
 func runInEmptyDir(m *testing.M) (int, error) {
 	var err error
-	if repoDir, err = os.Getwd(); err != nil {
+	if pkgDir, err = os.Getwd(); err != nil {
+		return 0, err
+	}
+	// A test that runs this binary again starts it in the empty directory
+	// it runs in itself, whose testdata link leads back to the package.
+	if target, err := os.Readlink(filepath.Join(pkgDir, "testdata")); err == nil && filepath.IsAbs(target) {
+		pkgDir = filepath.Dir(target)
+	}
+	if repoDir, err = moduleRoot(pkgDir); err != nil {
 		return 0, err
 	}
 	// Tests run this binary again through os.Args[0], which must keep
@@ -249,10 +262,22 @@ func runInEmptyDir(m *testing.M) (int, error) {
 	if err := os.Setenv("PWD", wd); err != nil {
 		return 0, err
 	}
-	if err := linkTestdata(repoDir, wd); err != nil {
+	if err := linkTestdata(pkgDir, wd); err != nil {
 		return 0, err
 	}
 	return m.Run(), nil
+}
+
+// moduleRoot is the folder of the go.mod at or above dir.
+func moduleRoot(dir string) (string, error) {
+	for root := dir; ; root = filepath.Dir(root) {
+		if st, err := os.Stat(filepath.Join(root, "go.mod")); err == nil && st.Mode().IsRegular() {
+			return root, nil
+		}
+		if filepath.Dir(root) == root {
+			return "", fmt.Errorf("no go.mod at or above %s", dir)
+		}
+	}
 }
 
 // linkTestdata makes testdata in the working directory wd the package's own.

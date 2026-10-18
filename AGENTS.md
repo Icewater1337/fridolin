@@ -131,7 +131,8 @@ rollback`.
   The tests run in an empty temp directory, with an empty temp `HOME` and
   the variables the bridge reads (`FRIDOLIN_CONFIG`, `BRAIN_MODE`) unset,
   so they never see a `config.json` in the checkout or a real data dir;
-  read a repository file through `repoDir`. Tests set up brains as the
+  read a repository file through `repoDir` (the checkout's root) and the
+  package's own `testdata` through `pkgDir`. Tests set up brains as the
   bridge runs them, in folders with a `brain.json` listed in `brain_dirs`
   (`brainFolder`, `addFolderBrain`); a config with inline `"brains"` no
   longer loads.

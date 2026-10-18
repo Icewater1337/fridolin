@@ -35,7 +35,7 @@ var generate = flag.Bool("generate", false, "regenerate testdata/bridge-v1.sql f
 // fixture reads a file of the package's testdata.
 func fixture(t testing.TB, name string) []byte {
 	t.Helper()
-	data, err := os.ReadFile(filepath.Join(repoDir, "testdata", name))
+	data, err := os.ReadFile(filepath.Join(pkgDir, "testdata", name))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -349,7 +349,7 @@ func TestGenerateFixtures(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(repoDir, "testdata", "bridge-v1.sql"), dump, 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(pkgDir, "testdata", "bridge-v1.sql"), dump, 0o644); err != nil {
 		t.Fatal(err)
 	}
 }

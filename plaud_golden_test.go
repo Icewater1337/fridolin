@@ -52,7 +52,7 @@ type plaudGoldenRun struct {
 
 func loadPlaudGolden(t *testing.T) map[string]plaudGoldenRun {
 	t.Helper()
-	data, err := os.ReadFile(filepath.Join(repoDir, plaudGoldenFile))
+	data, err := os.ReadFile(filepath.Join(pkgDir, plaudGoldenFile))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -366,7 +366,7 @@ func TestPlaudCLIContract(t *testing.T) {
 	}
 	if *updatePlaudGolden {
 		data, _ := json.MarshalIndent(runs, "", "  ")
-		if err := os.WriteFile(filepath.Join(repoDir, plaudGoldenFile), append(data, '\n'), 0o644); err != nil {
+		if err := os.WriteFile(filepath.Join(pkgDir, plaudGoldenFile), append(data, '\n'), 0o644); err != nil {
 			t.Fatal(err)
 		}
 	}

@@ -40,7 +40,7 @@ func assertGolden(t testing.TB, name string, got []byte) {
 	t.Helper()
 	// The tests run in an empty directory whose testdata links to the
 	// package's (linkTestdata), so the path is the same either way.
-	path := filepath.Join(repoDir, goldenDir, filepath.FromSlash(name))
+	path := filepath.Join(pkgDir, goldenDir, filepath.FromSlash(name))
 	if *update {
 		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 			t.Fatal(err)
