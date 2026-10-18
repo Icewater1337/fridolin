@@ -35,6 +35,20 @@ func fakeGoogle(t *testing.T) (*httptest.Server, *map[string]string) {
 				fmt.Fprint(w, `{"error":"invalid_grant","error_description":"Bad Request"}`)
 				return
 			}
+			switch r.PostForm.Get("refresh_token") {
+			case "REVOKED":
+				w.WriteHeader(400)
+				fmt.Fprint(w, `{"error":"invalid_grant","error_description":"Token has been expired or revoked."}`)
+				return
+			case "GOOGLE-DOWN":
+				w.WriteHeader(503)
+				fmt.Fprint(w, `{"error":"backend_error"}`)
+				return
+			case "CLIENT-GONE":
+				w.WriteHeader(401)
+				fmt.Fprint(w, `{"error":"invalid_client","error_description":"The OAuth client was not found."}`)
+				return
+			}
 			fmt.Fprint(w, `{"access_token":"ACCESS-1","refresh_token":"RT-1","expires_in":3600}`)
 		case "/calendar/v3/users/me/calendarList":
 			if r.Header.Get("Authorization") != "Bearer ACCESS-1" {
@@ -859,5 +873,115 @@ func TestCalendarSwitchRevokesTheOldAccount(t *testing.T) {
 				t.Errorf("token file = %s, want the new sign-in", data)
 			}
 		})
+	}
+}
+
+// expiredCalendarToken writes brain a's token file as the Google library of
+// an older version's calendar tool left it: expired, with a field of the
+// library's own.
+func expiredCalendarToken(t *testing.T, tb *testBridge, refreshToken string) {
+	t.Helper()
+	data, _ := json.Marshal(map[string]any{
+		"token": "OLD", "refresh_token": refreshToken, "token_uri": "https://oauth2.googleapis.com/token",
+		"client_id": "123-abc.apps.googleusercontent.com", "client_secret": "TEST-CLIENT-SECRET",
+		"scopes": calendarScopes, "universe_domain": "googleapis.com",
+		"account": "you@example.com", "expiry": "2020-01-01T00:00:00.000000Z",
+	})
+	if err := os.MkdirAll(tb.google.credsDir(), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(tb.google.tokenPath("a"), data, 0o600); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// TestCalendarRefreshKeepsTheToken: a refresh saves the new access token
+// and the refresh token Google handed out with it, and keeps the fields an
+// older calendar tool's library wrote.
+func TestCalendarRefreshKeepsTheToken(t *testing.T) {
+	srv, got := fakeGoogle(t)
+	tb := newTestBridge(t, "")
+	_ = tb.do("PUT", "/api/google/client", map[string]string{"json": fmt.Sprintf(testClientJSON, srv.URL)})
+	tb.addFolderBrain(t, BrainManifest{ID: "a", Name: "A"})
+	expiredCalendarToken(t, tb, "A-REFRESH")
+
+	var st struct {
+		Calendars []CalendarEntry `json:"calendars"`
+		ListError string          `json:"list_error"`
+	}
+	_ = json.Unmarshal(tb.do("GET", "/api/brains/a/calendar", nil).Body.Bytes(), &st)
+	if st.ListError != "" || len(st.Calendars) != 2 || (*got)["refresh_token"] != "A-REFRESH" {
+		t.Fatalf("status = %+v after refreshing with %v", st, *got)
+	}
+	data, _ := os.ReadFile(tb.google.tokenPath("a"))
+	var saved map[string]any
+	if err := json.Unmarshal(data, &saved); err != nil {
+		t.Fatal(err)
+	}
+	exp, _ := time.Parse(time.RFC3339Nano, fmt.Sprint(saved["expiry"]))
+	if saved["token"] != "ACCESS-1" || saved["refresh_token"] != "RT-1" || saved["universe_domain"] != "googleapis.com" ||
+		saved["account"] != "you@example.com" || time.Until(exp) < 30*time.Minute {
+		t.Errorf("saved token = %s", data)
+	}
+}
+
+// TestCalendarRevokedSignInAsksToReconnect: a refresh Google refuses with
+// invalid_grant tells the brain's card to say that the sign-in no longer
+// works; one Google could not answer just now does not, nor one refusing
+// the OAuth client, which signing in again does not mend.
+func TestCalendarRevokedSignInAsksToReconnect(t *testing.T) {
+	cases := []struct {
+		name, refreshToken string
+		want               string // in list_error
+		reconnect          bool
+	}{
+		{"revoked", "REVOKED", "Token has been expired or revoked.", true},
+		{"Google down", "GOOGLE-DOWN", "backend_error", false},
+		{"client deleted", "CLIENT-GONE", "The OAuth client was not found.", false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			srv, _ := fakeGoogle(t)
+			tb := newTestBridge(t, "")
+			_ = tb.do("PUT", "/api/google/client", map[string]string{"json": fmt.Sprintf(testClientJSON, srv.URL)})
+			tb.addFolderBrain(t, BrainManifest{ID: "a", Name: "A"})
+			expiredCalendarToken(t, tb, tc.refreshToken)
+			var st struct {
+				ListError       string `json:"list_error"`
+				ReconnectNeeded bool   `json:"reconnect_needed"`
+			}
+			_ = json.Unmarshal(tb.do("GET", "/api/brains/a/calendar", nil).Body.Bytes(), &st)
+			if st.ReconnectNeeded != tc.reconnect || !strings.Contains(st.ListError, tc.want) {
+				t.Errorf("status = %+v, want reconnect_needed %v and %q", st, tc.reconnect, tc.want)
+			}
+		})
+	}
+}
+
+// TestCalendarRefreshThatCannotBeSavedIsLogged: the refreshed access token
+// still lists the calendars, and the failed save is logged.
+func TestCalendarRefreshThatCannotBeSavedIsLogged(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("root writes to read-only folders")
+	}
+	srv, _ := fakeGoogle(t)
+	tb := newTestBridge(t, `, "sandbox": {"credentials_dir": "~/creds"}`)
+	_ = tb.do("PUT", "/api/google/client", map[string]string{"json": fmt.Sprintf(testClientJSON, srv.URL)})
+	tb.addFolderBrain(t, BrainManifest{ID: "a", Name: "A"})
+	expiredCalendarToken(t, tb, "A-REFRESH")
+	if err := os.Chmod(tb.google.credsDir(), 0o500); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(tb.google.credsDir(), 0o700) })
+	logs := captureLog(t)
+	var st struct {
+		Calendars []CalendarEntry `json:"calendars"`
+	}
+	_ = json.Unmarshal(tb.do("GET", "/api/brains/a/calendar", nil).Body.Bytes(), &st)
+	if len(st.Calendars) != 2 {
+		t.Errorf("calendars = %v, want them listed with the new access token", st.Calendars)
+	}
+	if all := strings.Join(logs(), "\n"); !strings.Contains(all, "saving the refreshed calendar token failed") {
+		t.Errorf("log = %s, want the failed save", all)
 	}
 }

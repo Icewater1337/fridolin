@@ -59,6 +59,18 @@ test('a revocation Google does not confirm offers to delete the token here only'
   assert.equal(net.calls[2].url, '/api/brains/work/calendar?local_only=1');
 });
 
+test('a sign-in Google no longer accepts says so', async (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  const document = installDom();
+  const net = stubFetch(t);
+  const card = calendarCard('work');
+  document.body.append(card);
+  net.answer(0, { ...connected, calendars: [], list_error: 'the sign-in no longer works at Google — connect this brain again', reconnect_needed: true });
+  await tick();
+  assert.ok(card.textContent.includes('Google no longer accepts this sign-in'), card.textContent);
+  assert.ok(button(card, 'Sign in again'));
+});
+
 test('a reload error reaches the button instead of an unhandled rejection', async (t) => {
   t.mock.timers.enable({ apis: ['setTimeout'] });
   const document = installDom();

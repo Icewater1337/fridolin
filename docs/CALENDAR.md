@@ -81,7 +81,9 @@ token file over 256 KiB too, far more than a real one holds; the brain's
 page then shows why its calendars cannot be listed, and connecting again
 fixes it. Nor does the bridge take the `token_uri` or the client in that
 file: it refreshes at Google's token endpoint with the client under
-Settings → Google sign-in.
+Settings → Google sign-in. A refresh keeps a new refresh token Google
+hands out, and every field an older version's calendar tool added to the
+file.
 
 The chosen calendars are stored in the brain's `brain.json`:
 
@@ -162,9 +164,10 @@ again keeps it, since the new token belongs to it.
   not a test user of an app in *Testing*. Add it, or publish the app.
 - **Works for a week, then fails** — the app is in *Testing*; publish it and
   connect again.
-- **The brain says to reconnect the calendar** — Google no longer accepts the
-  saved sign-in (access removed, the 7-day *Testing* limit, a changed
-  password). Connect again on the brain's Calendar page.
+- **The brain says to reconnect the calendar**, or its page says Google no
+  longer accepts the sign-in — Google refused the saved sign-in (access
+  removed, the 7-day *Testing* limit, a changed password). Connect again on
+  the brain's Calendar page.
 - **"did not return a refresh token"** — remove the app at
   myaccount.google.com/permissions and connect again.
 - **"signed in with another Google OAuth client"** on a brain's page — the

@@ -361,6 +361,7 @@ type tokenResponse struct {
 // oauthError is a refusal from Google's token endpoint.
 type oauthError struct {
 	status  int
+	code    string // the OAuth error (invalid_grant, invalid_client, …), "" when Google gave none
 	message string
 }
 
@@ -372,6 +373,11 @@ func (e *oauthError) Error() string { return "token request to Google failed: " 
 func (e *oauthError) temporary() bool {
 	return e.status == http.StatusTooManyRequests || e.status >= 500
 }
+
+// revoked reports whether Google refused the grant itself (invalid_grant):
+// the sign-in was revoked, expired (an app in Testing), or the password
+// changed. Only signing in again helps.
+func (e *oauthError) revoked() bool { return e.code == "invalid_grant" }
 
 func (g *GoogleAuth) postToken(ctx context.Context, c *GoogleClient, form url.Values) (*tokenResponse, error) {
 	form.Set("client_id", c.ClientID)
@@ -397,7 +403,7 @@ func (g *GoogleAuth) postToken(ctx context.Context, c *GoogleClient, form url.Va
 		if msg == "" {
 			msg = resp.Status
 		}
-		return nil, &oauthError{status: resp.StatusCode, message: msg}
+		return nil, &oauthError{status: resp.StatusCode, code: tr.Error, message: msg}
 	}
 	return &tr, nil
 }
@@ -483,15 +489,28 @@ func readCredentialFile(path string) ([]byte, error) {
 }
 
 func (g *GoogleAuth) loadToken(brainID string) (*googleToken, error) {
+	t, _, err := g.loadTokenFields(brainID)
+	return t, err
+}
+
+// loadTokenFields is loadToken with every field of the file as it is, for
+// writing the file back: the Google library that older versions' calendar
+// tool used added fields of its own (universe_domain), which googleToken
+// does not know.
+func (g *GoogleAuth) loadTokenFields(brainID string) (*googleToken, map[string]json.RawMessage, error) {
 	data, err := readCredentialFile(g.tokenPath(brainID))
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	var t googleToken
+	var fields map[string]json.RawMessage
 	if err := json.Unmarshal(data, &t); err != nil {
-		return nil, fmt.Errorf("unreadable token file: %w", err)
+		return nil, nil, fmt.Errorf("unreadable token file: %w", err)
 	}
-	return &t, nil
+	if err := json.Unmarshal(data, &fields); err != nil || fields == nil {
+		return nil, nil, fmt.Errorf("unreadable token file: not a JSON object")
+	}
+	return &t, fields, nil
 }
 
 // signInError is a brain's Google token the bridge itself will not use,
@@ -507,7 +526,7 @@ func (e *signInError) Unwrap() error { return e.err }
 // accessToken returns a valid access token, refreshing (and saving) it when
 // it has expired.
 func (g *GoogleAuth) accessToken(ctx context.Context, brainID string) (*googleToken, error) {
-	t, err := g.loadToken(brainID)
+	t, fields, err := g.loadTokenFields(brainID)
 	if errors.Is(err, fs.ErrNotExist) {
 		return nil, err // not connected
 	}
@@ -539,11 +558,36 @@ func (g *GoogleAuth) accessToken(ctx context.Context, brainID string) (*googleTo
 	t.Token = tr.AccessToken
 	t.Scopes = tr.grantedScopes(t.Scopes)
 	t.Expiry = time.Now().Add(time.Duration(tr.ExpiresIn) * time.Second).UTC().Format("2006-01-02T15:04:05.000000Z")
-	if data, err := json.MarshalIndent(t, "", "  "); err == nil {
-		// A rename: a symlink planted since the read is replaced, not followed.
-		_ = writeFileAtomic(g.tokenPath(brainID), data, 0o600, false)
+	// Google may hand out a new refresh token with a refresh, and the old
+	// one may stop working once it did.
+	if tr.RefreshToken != "" {
+		t.RefreshToken = tr.RefreshToken
+	}
+	// The access token is good for this call either way; a token not saved
+	// is only refreshed again next time.
+	if err := writeTokenFields(g.tokenPath(brainID), fields, t); err != nil {
+		log.Printf("brain %s: saving the refreshed calendar token failed: %v", brainID, err)
 	}
 	return t, nil
+}
+
+// writeTokenFields writes t's refreshed fields over fields, the token file
+// as it was read, so that what an older calendar tool's library added
+// stays.
+func writeTokenFields(path string, fields map[string]json.RawMessage, t *googleToken) error {
+	for k, v := range map[string]any{"token": t.Token, "refresh_token": t.RefreshToken, "expiry": t.Expiry, "scopes": t.Scopes} {
+		raw, err := json.Marshal(v)
+		if err != nil {
+			return err
+		}
+		fields[k] = raw
+	}
+	data, err := json.MarshalIndent(fields, "", "  ")
+	if err != nil {
+		return err
+	}
+	// A rename: a symlink planted since the read is replaced, not followed.
+	return writeFileAtomic(path, data, 0o600, false)
 }
 
 // CalendarEntry is one calendar of the signed-in account.
@@ -827,6 +871,8 @@ func (b *Bridge) apiCalendarStatus(w http.ResponseWriter, r *http.Request) {
 		}
 		if err != nil {
 			resp["list_error"] = err.Error()
+			var oe *oauthError
+			resp["reconnect_needed"] = errors.As(err, &oe) && oe.revoked()
 		}
 	}
 	writeJSON(w, http.StatusOK, resp)
