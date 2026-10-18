@@ -28,7 +28,7 @@ const groupsFetchTimeout = 20 * time.Second
 // runs wait for it instead of sending their own. The zero value is ready.
 type groupCache struct {
 	mu     sync.Mutex
-	groups []GroupInfo // nil when not known
+	groups []Group     // nil when not known
 	at     time.Time   // when groups came
 	gen    uint64      // counts invalidations
 	flight *groupFetch // the query running, if any
@@ -41,13 +41,13 @@ type groupCache struct {
 type groupFetch struct {
 	gen    uint64 // the generation it was started in
 	done   chan struct{}
-	groups []GroupInfo
+	groups []Group
 	err    error
 }
 
 // get returns the list, from fetch when it is not known or older than
 // groupsTTL. A failed fetch is not kept, so the next call asks again.
-func (c *groupCache) get(ctx context.Context, fetch func(context.Context) ([]GroupInfo, error)) ([]GroupInfo, error) {
+func (c *groupCache) get(ctx context.Context, fetch func(context.Context) ([]Group, error)) ([]Group, error) {
 	c.mu.Lock()
 	if c.groups != nil && time.Since(c.at) < groupsTTL {
 		groups := slices.Clone(c.groups)
@@ -69,12 +69,12 @@ func (c *groupCache) get(ctx context.Context, fetch func(context.Context) ([]Gro
 	}
 }
 
-func (c *groupCache) run(ctx context.Context, f *groupFetch, fetch func(context.Context) ([]GroupInfo, error)) {
+func (c *groupCache) run(ctx context.Context, f *groupFetch, fetch func(context.Context) ([]Group, error)) {
 	ctx, cancel := context.WithTimeout(ctx, groupsFetchTimeout)
 	defer cancel()
 	groups, err := fetch(ctx)
 	if err == nil && groups == nil {
-		groups = []GroupInfo{} // known to be none
+		groups = []Group{} // known to be none
 	}
 	c.mu.Lock()
 	defer c.mu.Unlock()

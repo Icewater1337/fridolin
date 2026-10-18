@@ -699,12 +699,12 @@ func checkReport(w io.Writer, path string, cfg *Config, o checkOptions) error {
 		return err
 	}
 	for _, jid := range o.routes {
-		isGroup := isGroupJID(jid)
+		isGroup := IsGroupJID(jid)
 		allowed := ""
 		if isGroup && !slices.Contains(cfg.AllowedGroups, jid) {
 			allowed = " (not in allowed_groups: ignored)"
 		}
-		if !isGroup && !numberAllowed(cfg, normalizeJID(jid)) {
+		if !isGroup && !numberAllowed(cfg, NormalizeJID(jid)) {
 			allowed = " (not in allowed_numbers: ignored)"
 		}
 		if br := mgr.BrainFor(jid, isGroup); br != nil {

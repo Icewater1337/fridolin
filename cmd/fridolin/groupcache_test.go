@@ -34,16 +34,16 @@ func newFakeGroups(names ...string) *fakeGroups {
 }
 
 func (f *fakeGroups) set(names ...string) {
-	var groups []GroupInfo
+	var groups []Group
 	for _, n := range names {
-		groups = append(groups, GroupInfo{JID: "120363000000000000@g.us", Name: n, Participants: 3})
+		groups = append(groups, Group{JID: "120363000000000000@g.us", Name: n, Participants: 3})
 	}
 	f.next.Store(groups)
 }
 
-func (f *fakeGroups) fetch(ctx context.Context) ([]GroupInfo, error) {
+func (f *fakeGroups) fetch(ctx context.Context) ([]Group, error) {
 	f.calls.Add(1)
-	groups := f.next.Load().([]GroupInfo)
+	groups := f.next.Load().([]Group)
 	if f.held.Load() {
 		wait := make(chan struct{})
 		f.mu.Lock()
@@ -68,7 +68,7 @@ func (f *fakeGroups) release(i int) {
 	close(f.waits[i])
 }
 
-func groupNames(groups []GroupInfo) []string {
+func groupNames(groups []Group) []string {
 	var out []string
 	for _, g := range groups {
 		out = append(out, g.Name)
@@ -320,7 +320,7 @@ func (f *fakeLister) GetJoinedGroups(context.Context) ([]*types.GroupInfo, error
 // from the client's cache, and the events whatsmeow hands the client's
 // event handler are what drop it.
 func TestJoinedGroupsAnswersFromTheCache(t *testing.T) {
-	want := []GroupInfo{{JID: "120363000000000000@g.us", Name: "Family", Participants: 3}}
+	want := []Group{{JID: "120363000000000000@g.us", Name: "Family", Participants: 3}}
 	cases := []struct {
 		name    string
 		evt     any // handed to the event handler between the calls; nil for none

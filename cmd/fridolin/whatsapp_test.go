@@ -455,7 +455,7 @@ func FuzzNumberAllowed(f *testing.F) {
 			}
 			// A sender, as WhatsApp reports one, in every form.
 			for _, jid := range []string{p, "+" + p, p + "@s.whatsapp.net", "+" + p + "@s.whatsapp.net"} {
-				if !numberAllowed(cfg, normalizeJID(jid)) {
+				if !numberAllowed(cfg, NormalizeJID(jid)) {
 					t.Errorf("allowed_numbers %q: %q is refused", allowed, jid)
 				}
 			}
@@ -1089,8 +1089,8 @@ func TestGroupNonMemberIsNotRead(t *testing.T) {
 			t.Run(e.name+", "+c.name, func(t *testing.T) {
 				logged := captureLog(t)
 				tw, dl := newGroupTestWhatsApp(t, e.members)
-				var changes []messageChange
-				tw.onChange = func(c messageChange) { changes = append(changes, c) }
+				var changes []Change
+				tw.onChange = func(c Change) { changes = append(changes, c) }
 				tw.handle(t, groupMessage(stranger, types.EmptyJID, c.msg))
 				if m, ok := tw.next(100 * time.Millisecond); ok {
 					t.Errorf("reached the brains: %+v", m)
@@ -1484,7 +1484,7 @@ func recordArrivals(tw *testWhatsApp, slow string) *arrivals {
 		a.seen = append(a.seen, m.ID)
 		a.msgs = append(a.msgs, m)
 	}
-	tw.onChange = func(c messageChange) {
+	tw.onChange = func(c Change) {
 		a.mu.Lock()
 		defer a.mu.Unlock()
 		a.seen = append(a.seen, c.Kind+" "+c.Target)

@@ -633,10 +633,10 @@ func TestRouteHonoursTheNamedBrain(t *testing.T) {
 		m    Inbound
 		want string // "" = no brain
 	}{
-		{"by chat", Inbound{JID: dm}, "personal"},
-		{"named brain wins over the chat's owner", Inbound{JID: dm, Brain: "team"}, "team"},
-		{"named brain in a group it does not own", Inbound{JID: "other@g.us", Brain: "personal"}, "personal"},
-		{"named brain is gone", Inbound{JID: dm, Brain: "removed"}, ""},
+		{"by chat", Inbound{InboundContent: InboundContent{JID: dm}}, "personal"},
+		{"named brain wins over the chat's owner", Inbound{InboundContent: InboundContent{JID: dm, Brain: "team"}}, "team"},
+		{"named brain in a group it does not own", Inbound{InboundContent: InboundContent{JID: "other@g.us", Brain: "personal"}}, "personal"},
+		{"named brain is gone", Inbound{InboundContent: InboundContent{JID: dm, Brain: "removed"}}, ""},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			got := ""
@@ -648,7 +648,7 @@ func TestRouteHonoursTheNamedBrain(t *testing.T) {
 			}
 		})
 	}
-	if _, _, _, err := mgr.Submit(Inbound{JID: dm, Brain: "removed", Text: "x"}); err == nil {
+	if _, _, _, err := mgr.Submit(Inbound{InboundContent: InboundContent{JID: dm, Brain: "removed", Text: "x"}}); err == nil {
 		t.Error("Submit to a removed brain must fail, not run in the DM brain")
 	}
 }
@@ -667,11 +667,11 @@ func TestChatJIDs(t *testing.T) {
 		m    Inbound
 		want string
 	}{
-		{"DM by number", Inbound{JID: pn, Sender: "15551234567"}, pn},
-		{"DM by LID", Inbound{JID: lid, Sender: "15551234567"}, lid + "," + pn},
-		{"DM without a sender", Inbound{JID: lid}, lid},
-		{"DM by number, its LID known", Inbound{JID: pn, ChatAlt: lid, Sender: "15551234567"}, pn + "," + lid},
-		{"group", Inbound{JID: group, Sender: "15551234567"}, group},
+		{"DM by number", Inbound{InboundContent: InboundContent{JID: pn, Sender: "15551234567"}}, pn},
+		{"DM by LID", Inbound{InboundContent: InboundContent{JID: lid, Sender: "15551234567"}}, lid + "," + pn},
+		{"DM without a sender", Inbound{InboundContent: InboundContent{JID: lid}}, lid},
+		{"DM by number, its LID known", Inbound{InboundContent: InboundContent{JID: pn, ChatAlt: lid, Sender: "15551234567"}}, pn + "," + lid},
+		{"group", Inbound{InboundContent: InboundContent{JID: group, Sender: "15551234567"}}, group},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			if got := strings.Join(chatJIDs(c.m), ","); got != c.want {
@@ -864,61 +864,6 @@ func FuzzParseIdentityMap(f *testing.F) {
 		}
 		if got := ids[identityKey(number)]; got != name {
 			t.Errorf("row | %s | %s | %s | read back as %q, want %q", number, name, notes, got, name)
-		}
-	})
-}
-
-func TestNormalizeJID(t *testing.T) {
-	cases := map[string]string{
-		"15551234567@s.whatsapp.net": "15551234567",
-		"+15551234567":               "15551234567",
-		"120363000000000000@g.us":    "120363000000000000",
-		"15551234567":                "15551234567",
-		"++15551234567":              "15551234567",
-		" + 15551234567 ":            "15551234567",
-	}
-	for in, want := range cases {
-		if got := normalizeJID(in); got != want {
-			t.Errorf("normalizeJID(%q) = %q, want %q", in, got, want)
-		}
-	}
-}
-
-// FuzzNormalizeJID: a normalised JID is what allowed_numbers and the
-// identity map hold, and what a sender is compared with. It has no server
-// and no space around it, it is part of the input, normalising it again
-// changes nothing, and every way of writing a number gives the number.
-func FuzzNormalizeJID(f *testing.F) {
-	for _, s := range []string{"15551234567@s.whatsapp.net", "+15551234567", "120363000000000000@g.us", "15551234567", "15551234567:12@s.whatsapp.net", "", "@", "+", "a@b@c", "+@s.whatsapp.net"} {
-		f.Add(s)
-	}
-	f.Fuzz(func(t *testing.T, jid string) {
-		n := normalizeJID(jid)
-		if strings.Contains(n, "@") {
-			t.Errorf("normalizeJID(%q) = %q, which still has a server", jid, n)
-		}
-		if n != strings.TrimSpace(n) {
-			t.Errorf("normalizeJID(%q) = %q, not trimmed", jid, n)
-		}
-		if !strings.Contains(jid, n) {
-			t.Errorf("normalizeJID(%q) = %q, which is not part of it", jid, n)
-		}
-		if again := normalizeJID(n); again != n {
-			t.Errorf("normalizeJID(%q) = %q, but normalising that gives %q", jid, n, again)
-		}
-		digits := strings.Map(func(r rune) rune {
-			if '0' <= r && r <= '9' {
-				return r
-			}
-			return -1
-		}, jid)
-		if digits == "" {
-			return
-		}
-		for _, form := range []string{digits, "+" + digits, digits + "@s.whatsapp.net", "+" + digits + "@s.whatsapp.net", digits + "@g.us"} {
-			if got := normalizeJID(form); got != digits {
-				t.Errorf("normalizeJID(%q) = %q, want %q", form, got, digits)
-			}
 		}
 	})
 }

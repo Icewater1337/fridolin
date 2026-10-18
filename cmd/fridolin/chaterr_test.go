@@ -52,7 +52,7 @@ func TestFailedRunPostsNoRawError(t *testing.T) {
 		t.Run(chat, func(t *testing.T) {
 			tb, br := newMainBridge(t, "")
 			t.Setenv("FRIDOLIN_FAKE_STDERR_BYTES", "10")
-			tb.handleInbound(context.Background(), Inbound{JID: chat, Sender: "15551234567", Text: "@claude fail", Source: sourceWhatsApp})
+			tb.handleInbound(context.Background(), Inbound{InboundContent: InboundContent{JID: chat, Sender: "15551234567", Text: "@claude fail", Source: SourceWhatsApp}})
 			waitFor(t, 10*time.Second, "the error notice", func() bool { return len(tb.sentTo(chat)) > 0 })
 			sent := tb.sentTo(chat)
 			if len(sent) != 1 || sent[0] != chatErrGeneric {

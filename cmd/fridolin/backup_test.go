@@ -2542,7 +2542,7 @@ func TestBackupWaitsForTheBrainToFinish(t *testing.T) {
 			logged := captureLog(t)
 
 			t.Setenv("FRIDOLIN_FAKE_SLEEP_MS", "1500")
-			if _, _, err := br.Submit(Inbound{JID: "15551234567@s.whatsapp.net", Sender: "15551234567", Text: "hello", Source: "whatsapp", At: time.Now()}); err != nil {
+			if _, _, err := br.Submit(Inbound{InboundContent: InboundContent{JID: "15551234567@s.whatsapp.net", Sender: "15551234567", Text: "hello", Source: "whatsapp", At: time.Now()}}); err != nil {
 				t.Fatal(err)
 			}
 			waitFor(t, 10*time.Second, "the run to start", running)

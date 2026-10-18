@@ -126,7 +126,7 @@ func TestParseStreamQuestions(t *testing.T) {
 				sent = append(sent, text)
 				return true
 			}}
-			res := readTestStream(br, Inbound{JID: "chat", Silent: c.silent}, strings.Join(c.stream, "\n")+"\n")
+			res := readTestStream(br, Inbound{InboundContent: InboundContent{JID: "chat", Silent: c.silent}}, strings.Join(c.stream, "\n")+"\n")
 			if (res.Err != nil) != c.err {
 				t.Errorf("error = %v, want one: %v", res.Err, c.err)
 			}
@@ -260,7 +260,7 @@ func TestMidRunMessagesReachTheChatMarked(t *testing.T) {
 	stream := `{"type":"assistant","message":{"content":[{"type":"tool_use","name":"AskUserQuestion","input":{"questions":[{"question":"⏳ Wait for the delivery?"}]}}]}}
 {"type":"result","result":"asked"}
 `
-	readTestStream(br, Inbound{JID: dm}, stream)
+	readTestStream(br, Inbound{InboundContent: InboundContent{JID: dm}}, stream)
 	br.hooks.Notice(dm, workingNotice)
 	// The question goes through the outbox, after the notice.
 	waitFor(t, 5*time.Second, "both messages", func() bool { return len(tb.sentTo(dm)) == 2 })

@@ -564,7 +564,7 @@ func TestResumeAppliesChangesBeforeStartingQueuedRuns(t *testing.T) {
 		started.Add(1)
 		return nil, func() {}
 	}})
-	m := Inbound{JID: harnessDM, Sender: "15551234567", Text: "must not run", Source: sourceWhatsApp, At: time.Now(), ID: "3EB0DELETED"}
+	m := Inbound{InboundContent: InboundContent{JID: harnessDM, Sender: "15551234567", Text: "must not run", Source: SourceWhatsApp, At: time.Now(), ID: "3EB0DELETED"}}
 	if err := keepInbound(t.Context(), tb.store, inboundQueued, "a", m); err != nil {
 		t.Fatal(err)
 	}
@@ -575,7 +575,7 @@ func TestResumeAppliesChangesBeforeStartingQueuedRuns(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	if err := keepChange(t.Context(), tb.store, messageChange{Kind: changeRevoke, Chat: m.JID, Sender: m.Sender, Target: m.ID}, time.Now()); err != nil {
+	if err := keepChange(t.Context(), tb.store, Change{Kind: ChangeRevoke, Chat: m.JID, Sender: m.Sender, Target: m.ID}, time.Now()); err != nil {
 		t.Fatal(err)
 	}
 	tb.resume(t.Context())
@@ -626,7 +626,7 @@ func TestShutdownKeepsWhatItHolds(t *testing.T) {
 // lost.
 func TestResumeOutlivesItsContext(t *testing.T) {
 	tb := newTestBridge(t, "")
-	m := Inbound{JID: harnessDM, Sender: "15551234567", Text: "summarise", Source: sourceWhatsApp, At: time.Now(), ID: "3EB0CUT"}
+	m := Inbound{InboundContent: InboundContent{JID: harnessDM, Sender: "15551234567", Text: "summarise", Source: SourceWhatsApp, At: time.Now(), ID: "3EB0CUT"}}
 	if err := keepInterrupted(t.Context(), tb.store, "main", m); err != nil {
 		t.Fatal(err)
 	}

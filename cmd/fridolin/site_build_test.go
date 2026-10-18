@@ -212,7 +212,7 @@ func TestLongBuildChatAnswerStaysWhole(t *testing.T) {
 // The Build page shows the log of the run in flight: from the heading that
 // names its pid to the next run's, never the lines of the runs before it.
 func TestCurrentRunLogIsTheRunsOwn(t *testing.T) {
-	chat := Inbound{JID: buildChatJID("web", 1), Sender: "dashboard"}
+	chat := Inbound{InboundContent: InboundContent{JID: buildChatJID("web", 1), Sender: "dashboard"}}
 	s := &brainSettings{model: "sonnet"}
 	heading := func(pid int) string { return "[10:00:00] " + runHeading(chat, s, pid) }
 	twoRuns := []string{

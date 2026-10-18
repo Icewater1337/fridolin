@@ -112,7 +112,7 @@ func (d *Debouncer) fire(key string, b *pendingBatch, gen uint64) {
 // Change applies an edit or a deletion to the open batch that holds the
 // message it changes, and reports whether one did. A batch left empty by
 // a deletion is dropped: nothing of it reaches a brain.
-func (d *Debouncer) Change(c messageChange) bool {
+func (d *Debouncer) Change(c Change) bool {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	for k, b := range d.batches {

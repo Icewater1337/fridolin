@@ -150,7 +150,7 @@ func TestBrainRunsGetTheirOwnPATHFolders(t *testing.T) {
 	if _, _, _, err := mgr.Submit(dm("hello")); err != nil {
 		t.Fatal(err)
 	}
-	group := Inbound{JID: "120363000000000000@g.us", Sender: "15551234567@s.whatsapp.net", Text: "@claude hi"}
+	group := Inbound{InboundContent: InboundContent{JID: "120363000000000000@g.us", Sender: "15551234567@s.whatsapp.net", Text: "@claude hi"}}
 	if _, _, _, err := mgr.Submit(group); err != nil {
 		t.Fatal(err)
 	}

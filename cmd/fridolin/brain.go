@@ -20,26 +20,12 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
-	"unicode"
 
 	"github.com/Icewater1337/fridolin/internal/fsx"
 	"github.com/Icewater1337/fridolin/internal/history"
 	"github.com/Icewater1337/fridolin/internal/platform"
 	"github.com/Icewater1337/fridolin/internal/textx"
 )
-
-// normalizeJID strips the WhatsApp server suffix and a leading + from a JID,
-// e.g. "15551234567@s.whatsapp.net" and "+15551234567" both become "15551234567".
-// Spaces around the number and further +s in front of it go too, so that
-// normalising the result again changes nothing: a number saved normalised
-// still equals the normalised JID of its sender.
-func normalizeJID(jid string) string {
-	if idx := strings.Index(jid, "@"); idx != -1 {
-		jid = jid[:idx]
-	}
-	jid = strings.TrimLeftFunc(jid, func(r rune) bool { return r == '+' || unicode.IsSpace(r) })
-	return strings.TrimRightFunc(jid, unicode.IsSpace)
-}
 
 // identityMapFile is the brain's contact map, in its folder.
 const identityMapFile = "memories/people/whatsapp-identity-map.md"
@@ -327,7 +313,7 @@ func (br *Brain) logInbound(m Inbound) Inbound {
 		if at.IsZero() {
 			at = m.At
 		}
-		parts[i].logged = br.appendEntry(history.Entry{TS: historyTime(at), Chat: m.JID, From: p.Sender, Text: historyTextWithMedia(p.textWithQuote(), p.Media), Type: history.In, ID: p.ID})
+		parts[i].logged = br.appendEntry(history.Entry{TS: historyTime(at), Chat: m.JID, From: p.Sender, Text: HistoryText(p.TextWithQuote(), p.Media), Type: history.In, ID: p.ID})
 	}
 	if len(m.parts) > 0 {
 		m.parts = parts
@@ -571,9 +557,9 @@ func (br *Brain) queueOrderLocked() []int {
 // whether it interrupts its sender's own run, which only a request does in
 // interrupt mode, and which waiting or running messages it replaces.
 func supersedes(m Inbound, s *brainSettings) (interrupting bool, replaces func(Inbound) bool) {
-	interrupting = s.queueMode == queueModeInterrupt && !m.Silent && m.Source != sourceIngest
+	interrupting = s.queueMode == queueModeInterrupt && !m.Silent && m.Source != SourceIngest
 	return interrupting, func(p Inbound) bool {
-		return p.JID == m.JID && (p.Silent || (interrupting && p.Sender == m.Sender && p.Source != sourceIngest))
+		return p.JID == m.JID && (p.Silent || (interrupting && p.Sender == m.Sender && p.Source != SourceIngest))
 	}
 }
 
@@ -1069,12 +1055,12 @@ func (br *Brain) Snapshot() BrainRuntime {
 	br.mu.Lock()
 	defer br.mu.Unlock()
 	if cur := br.current; cur != nil {
-		rt.Running = &RunView{Chat: cur.msg.JID, Sender: cur.msg.Sender, Preview: textx.Truncate(cur.msg.textWithQuote(), 160),
+		rt.Running = &RunView{Chat: cur.msg.JID, Sender: cur.msg.Sender, Preview: textx.Truncate(cur.msg.TextWithQuote(), 160),
 			Silent: cur.msg.Silent, Started: cur.started, PID: cur.pid}
 	}
 	for _, i := range br.queueOrderLocked() {
 		p := br.pending[i]
-		rt.Queue = append(rt.Queue, QueuedView{Chat: p.JID, Sender: p.Sender, Preview: textx.Truncate(p.textWithQuote(), 160), Silent: p.Silent, Queued: p.At})
+		rt.Queue = append(rt.Queue, QueuedView{Chat: p.JID, Sender: p.Sender, Preview: textx.Truncate(p.TextWithQuote(), 160), Silent: p.Silent, Queued: p.At})
 	}
 	if br.last != nil {
 		l := *br.last

@@ -166,7 +166,7 @@ func TestRunsGetATokenForTheirRunOnly(t *testing.T) {
 	t.Setenv("FRIDOLIN_FAKE_ENV_LOG", envLog)
 	t.Setenv("FRIDOLIN_FAKE_POLLS", "1")
 
-	tb.handleInbound(context.Background(), Inbound{JID: apiTestDM, Sender: "15551234567", Text: "polls?", Source: "whatsapp"})
+	tb.handleInbound(context.Background(), Inbound{InboundContent: InboundContent{JID: apiTestDM, Sender: "15551234567", Text: "polls?", Source: "whatsapp"}})
 	waitFor(t, 10*time.Second, "the reply", func() bool { return len(tb.sentTo(apiTestDM)) > 0 })
 	reply := tb.sentTo(apiTestDM)[0]
 	if !strings.Contains(reply, `polls=0 { "count": 1, "polls": [`) || !strings.Contains(reply, `"question": "Lunch?"`) {

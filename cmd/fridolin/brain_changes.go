@@ -22,7 +22,7 @@ import (
 // was deleted is stopped, so it sends nothing. It reports whether the
 // message was still waiting, which no run has read yet, and for an edit
 // of one, the message as edited.
-func (br *Brain) Change(c messageChange) (waiting bool, edited *Inbound) {
+func (br *Brain) Change(c Change) (waiting bool, edited *Inbound) {
 	br.mu.Lock()
 	var gone []Inbound
 	for i, p := range br.pending {
@@ -32,8 +32,8 @@ func (br *Brain) Change(c messageChange) (waiting bool, edited *Inbound) {
 		waiting = true
 		if next, _, keep := p.applyChange(c); keep {
 			br.pending[i] = next
-			if c.Kind == changeEdit {
-				if j := slices.IndexFunc(next.ownParts(), c.names); j >= 0 {
+			if c.Kind == ChangeEdit {
+				if j := slices.IndexFunc(next.ownParts(), func(p Inbound) bool { return c.Names(p.InboundContent) }); j >= 0 {
 					part := next.ownParts()[j]
 					edited = &part
 				}
@@ -48,7 +48,7 @@ func (br *Brain) Change(c messageChange) (waiting bool, edited *Inbound) {
 	if cur := br.current; !waiting && cur != nil && cur.msg.changes(c) {
 		// A run cannot take back what it read; one whose whole message
 		// was deleted is stopped. Part of an album deleted, it goes on.
-		if _, _, keep := cur.msg.applyChange(c); c.Kind == changeRevoke && !keep {
+		if _, _, keep := cur.msg.applyChange(c); c.Kind == ChangeRevoke && !keep {
 			stop = cur
 		}
 	}
@@ -70,7 +70,7 @@ func (br *Brain) Change(c messageChange) (waiting bool, edited *Inbound) {
 // so only when the history holds that line.
 // A message deleted after a run read it (not waiting) leaves an event too,
 // so the next run knows why it no longer sees what it answered.
-func (br *Brain) recordChange(c messageChange, waiting bool, edited *Inbound) {
+func (br *Brain) recordChange(c Change, waiting bool, edited *Inbound) {
 	is := func(e history.Entry) bool {
 		return e.ID == c.Target && e.Type == history.In && e.From == c.Sender &&
 			(e.Chat == c.Chat || (c.ChatAlt != "" && e.Chat == c.ChatAlt))
@@ -78,11 +78,11 @@ func (br *Brain) recordChange(c messageChange, waiting bool, edited *Inbound) {
 	var n int
 	var err error
 	switch {
-	case c.Kind == changeRevoke:
+	case c.Kind == ChangeRevoke:
 		n, err = br.rewriteHistory(c.Target, is, func(history.Entry) *history.Entry { return nil })
 	case edited != nil:
 		n, err = br.rewriteHistory(c.Target, is, func(e history.Entry) *history.Entry {
-			e.Text = historyTextWithMedia(edited.textWithQuote(), edited.Media)
+			e.Text = HistoryText(edited.TextWithQuote(), edited.Media)
 			return &e
 		})
 	default:
@@ -103,7 +103,7 @@ func (br *Brain) recordChange(c messageChange, waiting bool, edited *Inbound) {
 		log.Printf("brain %s: could not apply the %s of a message in %s to the history: %v", br.id, c.Kind, c.Chat, err)
 		return
 	}
-	if c.Kind == changeRevoke && n > 0 && !waiting {
+	if c.Kind == ChangeRevoke && n > 0 && !waiting {
 		br.appendHistory(c.Chat, c.Sender, "deleted a message they had sent", history.Event)
 	}
 }

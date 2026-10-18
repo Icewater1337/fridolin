@@ -238,9 +238,8 @@ func (b *Bridge) apiBuildSend(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	m := Inbound{
-		JID: buildChatJID(br.ID(), ch.Thread), Sender: "dashboard", Brain: br.ID(),
-		Text: text, Source: "site-build", At: time.Now(),
+	m := Inbound{InboundContent: InboundContent{JID: buildChatJID(br.ID(), ch.Thread), Sender: "dashboard", Brain: br.ID(),
+		Text: text, Source: "site-build", At: time.Now()},
 	}
 	if _, _, _, err := b.brainMgr.Submit(m); err != nil {
 		_ = b.site.chats.add(br.ID(), "assistant", buildChatError(err))

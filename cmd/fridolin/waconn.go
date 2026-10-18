@@ -117,7 +117,7 @@ func (wa *WhatsAppClient) onlineLocked() chan struct{} {
 }
 
 // State returns the current connection state.
-func (wa *WhatsAppClient) State() WAState {
+func (wa *WhatsAppClient) State() LinkState {
 	wa.mu.Lock()
 	defer wa.mu.Unlock()
 	return wa.state

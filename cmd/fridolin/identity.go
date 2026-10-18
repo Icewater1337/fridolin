@@ -36,7 +36,7 @@ func phoneNumber(s string) (string, error) {
 			return -1
 		}
 		return r
-	}, normalizeJID(s))
+	}, NormalizeJID(s))
 	if !phoneNumberRE.MatchString(n) {
 		return "", fmt.Errorf("%q is not a phone number: use digits with the country code, e.g. 15551234567", strings.TrimSpace(s))
 	}
@@ -54,7 +54,7 @@ func identityKey(s string) string {
 	if n, err := phoneNumber(s); err == nil {
 		return n
 	}
-	k := normalizeJID(s)
+	k := NormalizeJID(s)
 	if n, err := phoneNumber(k); err == nil {
 		return n
 	}
@@ -132,7 +132,7 @@ func chatJID(s string) (types.JID, error) {
 func ownerChat(cfg *Config) string {
 	for _, n := range cfg.AllowedNumbers {
 		if p, err := phoneNumber(n); err == nil {
-			return userJID(p)
+			return DMJID(p)
 		}
 	}
 	return ""

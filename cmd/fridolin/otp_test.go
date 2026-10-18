@@ -318,7 +318,7 @@ func TestHandOffOfACodeTheBrainAskedFor(t *testing.T) {
 	tb, br := newMainBridge(t, "")
 	asked := time.Now().Add(-2 * time.Minute).Truncate(time.Second)
 	br.appendEntry(history.Entry{TS: asked.Format(time.RFC3339), Chat: testDMChat, From: "main", Text: "🔐 Please send me the verification code", Type: history.Out})
-	tb.handleInbound(t.Context(), Inbound{JID: testDMChat, Sender: "15551234567", Text: "483920", Source: sourceWhatsApp})
+	tb.handleInbound(t.Context(), Inbound{InboundContent: InboundContent{JID: testDMChat, Sender: "15551234567", Text: "483920", Source: SourceWhatsApp}})
 	var h otpHandoff
 	data, err := os.ReadFile(filepath.Join(tb.cfgs.Get().DataDir, "otp", "main.json"))
 	if err == nil {

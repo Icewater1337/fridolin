@@ -70,7 +70,7 @@ func TestSmoke(t *testing.T) {
 		"data_dir":        data,
 		"http_listen":     addr,
 		"claude_path":     claude,
-		"allowed_numbers": []string{normalizeJID(harnessDM)},
+		"allowed_numbers": []string{NormalizeJID(harnessDM)},
 		"debounce":        map[string]int{"quiet_ms": 0},
 	})
 	if err != nil {
