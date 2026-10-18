@@ -38,6 +38,11 @@ behaviour unless its title says so. The steps so far:
   Runtime history locking, inbound bookkeeping and outbox merging remain in
   `cmd/fridolin`.
 
+- **R4 (chat)**: the shared message content, quotes, changes, connection
+  and group DTOs, and pure JID/merge helpers live in `internal/chat`. The
+  command keeps the runtime wrapper carrying logged history and merged
+  parts until the brain extraction.
+
 Everything else is still `package main` in `cmd/fridolin`, one file per
 subject (section 3 names the file each package will come from). A package
 that is not yet extracted is marked *(to come, Rn)* with the step that
@@ -167,13 +172,15 @@ responsibility and says what it must not do.
   object per entry in JSON; `Matches`, `Strip` and `First` match
   Unicode-correctly on byte offsets in the original text. `BoundaryAt` and
   `BoundaryBefore` are the word rule, which @-mentions follow too.
-- **`chat`** *(to come, R4; `inbound.go`, `envelope.go`, `identity.go`)*:
-  the vocabulary every transport and the pipeline share. It holds `Inbound`
-  (one message on its way to a brain, with an optional explicit `Brain`
-  target and a structured `Quote`), `Envelope` (what a transport saw,
-  before any policy), `Principal` (who asked for an action: a script, a
-  brain holding a run token, the bridge itself), `Source`, `LinkState`,
-  `Group`, and the JID helpers `NormalizeJID`, `IsGroupJID` and `DMJID`.
+- **`chat`**: shared message vocabulary with no internal dependencies.
+  `Inbound` holds message content, an optional explicit `Brain` target and
+  a structured `Quote`; `Merge`, `TextWithQuote` and `HistoryText` preserve
+  the existing text and attachment formatting. `Change` names edits and
+  deletions, with `Names` checking chat, sender and message ID. `LinkState`
+  and `Group` retain the dashboard JSON tags; `NormalizeJID`, `IsGroupJID`
+  and `DMJID` share the JID rules. Source and change-kind constants keep
+  their existing string values. Transport envelopes and script principals
+  remain in the command until the adapter and pipeline extractions.
 - **`platform`**: OS integration behind build tags. It provides the instance
   `Lock` (`AcquireLock`, `Release`; a value, not a global, which `NewBridge`
   takes today and `main` will own), process isolation (a session and

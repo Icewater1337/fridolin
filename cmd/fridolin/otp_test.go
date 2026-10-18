@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Icewater1337/fridolin/internal/chat"
 	"github.com/Icewater1337/fridolin/internal/fsx"
 	"github.com/Icewater1337/fridolin/internal/history"
 )
@@ -94,8 +95,8 @@ func TestCodeRequest(t *testing.T) {
 	now := time.Now()
 	ago := func(d time.Duration) string { return now.Add(-d).Format(time.RFC3339) }
 	const lid = "15559876543@lid"
-	ask := func(chat, from, via, text string, d time.Duration) history.Entry {
-		return history.Entry{TS: ago(d), Chat: chat, From: from, Via: via, Text: text, Type: history.Out}
+	ask := func(chatJID, from, via, text string, d time.Duration) history.Entry {
+		return history.Entry{TS: ago(d), Chat: chatJID, From: from, Via: via, Text: text, Type: history.Out}
 	}
 	// askFor is a script's request in the DM, which /send answered with id.
 	askFor := func(id, text string, d time.Duration) history.Entry {
@@ -318,7 +319,7 @@ func TestHandOffOfACodeTheBrainAskedFor(t *testing.T) {
 	tb, br := newMainBridge(t, "")
 	asked := time.Now().Add(-2 * time.Minute).Truncate(time.Second)
 	br.appendEntry(history.Entry{TS: asked.Format(time.RFC3339), Chat: testDMChat, From: "main", Text: "🔐 Please send me the verification code", Type: history.Out})
-	tb.handleInbound(t.Context(), Inbound{InboundContent: InboundContent{JID: testDMChat, Sender: "15551234567", Text: "483920", Source: SourceWhatsApp}})
+	tb.handleInbound(t.Context(), Inbound{Inbound: chat.Inbound{JID: testDMChat, Sender: "15551234567", Text: "483920", Source: chat.SourceWhatsApp}})
 	var h otpHandoff
 	data, err := os.ReadFile(filepath.Join(tb.cfgs.Get().DataDir, "otp", "main.json"))
 	if err == nil {

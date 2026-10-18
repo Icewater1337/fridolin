@@ -16,6 +16,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Icewater1337/fridolin/internal/chat"
 	"github.com/Icewater1337/fridolin/internal/fsx"
 	"github.com/Icewater1337/fridolin/internal/history"
 	"github.com/Icewater1337/fridolin/internal/logx"
@@ -78,7 +79,7 @@ func queueTestManager(t *testing.T, sleepMS int, extra string) (*BrainManager, *
 }
 
 func dm(text string) Inbound {
-	return Inbound{InboundContent: InboundContent{JID: "15551234567@s.whatsapp.net", Sender: "15551234567", Text: text}}
+	return Inbound{Inbound: chat.Inbound{JID: "15551234567@s.whatsapp.net", Sender: "15551234567", Text: text}}
 }
 
 func TestBrainRunsAndDeliversInOrder(t *testing.T) {
@@ -153,12 +154,12 @@ func TestStopKillsTheRunningProcess(t *testing.T) {
 // chat's own brain (that one !stop stops with StopChat).
 func TestStopHandOffsLeavesOtherWorkAlone(t *testing.T) {
 	const (
-		chat  = "15551234567@s.whatsapp.net"
-		other = "120363000000000001@g.us"
-		group = "120363000000000000@g.us"
+		chatJID = "15551234567@s.whatsapp.net"
+		other   = "120363000000000001@g.us"
+		group   = "120363000000000000@g.us"
 	)
 	handOff := func(jid, text string) Inbound {
-		return Inbound{InboundContent: InboundContent{JID: jid, Brain: "b", Sender: "upload", Text: text}}
+		return Inbound{Inbound: chat.Inbound{JID: jid, Brain: "b", Sender: "upload", Text: text}}
 	}
 	for _, c := range []struct {
 		name    string
@@ -168,11 +169,11 @@ func TestStopHandOffsLeavesOtherWorkAlone(t *testing.T) {
 		dropped int    // hand-offs that were waiting
 		left    string // b's work afterwards, running or waiting
 	}{
-		{"a hand-off answering in the chat is running", handOff(chat, "handed"),
-			[]Inbound{{InboundContent: InboundContent{JID: group, Text: "group"}}, handOff(chat, "handed again"), handOff(other, "elsewhere")},
+		{"a hand-off answering in the chat is running", handOff(chatJID, "handed"),
+			[]Inbound{{Inbound: chat.Inbound{JID: group, Text: "group"}}, handOff(chatJID, "handed again"), handOff(other, "elsewhere")},
 			true, 1, "group,elsewhere"},
-		{"the brain's own chat is running", Inbound{InboundContent: InboundContent{JID: group, Text: "group"}},
-			[]Inbound{handOff(chat, "handed"), handOff(other, "elsewhere")},
+		{"the brain's own chat is running", Inbound{Inbound: chat.Inbound{JID: group, Text: "group"}},
+			[]Inbound{handOff(chatJID, "handed"), handOff(other, "elsewhere")},
 			false, 1, "group,elsewhere"},
 	} {
 		t.Run(c.name, func(t *testing.T) {
@@ -190,7 +191,7 @@ func TestStopHandOffsLeavesOtherWorkAlone(t *testing.T) {
 				}
 			}
 
-			if stopped, dropped := mgr.StopHandOffs(chat); stopped != c.stopped || dropped != c.dropped {
+			if stopped, dropped := mgr.StopHandOffs(chatJID); stopped != c.stopped || dropped != c.dropped {
 				t.Errorf("StopHandOffs = %v, %d, want %v, %d", stopped, dropped, c.stopped, c.dropped)
 			}
 			rt := b.Snapshot()
@@ -231,12 +232,12 @@ func TestInterruptModeSupersedes(t *testing.T) {
 func TestInterruptModeOnlyReplacesTheSendersOwnRun(t *testing.T) {
 	const group = "120363000000000000@g.us" // brain b's group
 	g := func(sender, text string, silent bool) Inbound {
-		return Inbound{InboundContent: InboundContent{JID: group, Sender: sender, Text: text, Silent: silent}}
+		return Inbound{Inbound: chat.Inbound{JID: group, Sender: sender, Text: text, Silent: silent}}
 	}
-	otherDM := Inbound{InboundContent: InboundContent{JID: "15559876543@s.whatsapp.net", Sender: "15559876543", Text: "unrelated"}} // also brain a
+	otherDM := Inbound{Inbound: chat.Inbound{JID: "15559876543@s.whatsapp.net", Sender: "15559876543", Text: "unrelated"}} // also brain a
 	// ingest is a file handed to brain a through /ingest, answered in the DM.
 	ingest := func(sender, text string) Inbound {
-		return Inbound{InboundContent: InboundContent{JID: "15551234567@s.whatsapp.net", Sender: sender, Text: text, Source: SourceIngest}}
+		return Inbound{Inbound: chat.Inbound{JID: "15551234567@s.whatsapp.net", Sender: sender, Text: text, Source: chat.SourceIngest}}
 	}
 	cases := []struct {
 		name          string
@@ -315,10 +316,10 @@ func TestInterruptModeOnlyReplacesTheSendersOwnRun(t *testing.T) {
 // served by the same brain, keep their place.
 func TestInterruptModeKeepsOthersWaiting(t *testing.T) {
 	g := func(sender, text string, silent bool) Inbound {
-		return Inbound{InboundContent: InboundContent{JID: "120363000000000000@g.us", Sender: sender, Text: text, Silent: silent}}
+		return Inbound{Inbound: chat.Inbound{JID: "120363000000000000@g.us", Sender: sender, Text: text, Silent: silent}}
 	}
 	otherDM := func(text string) Inbound { // brain a, like dm
-		return Inbound{InboundContent: InboundContent{JID: "15559876543@s.whatsapp.net", Sender: "15559876543", Text: text}}
+		return Inbound{Inbound: chat.Inbound{JID: "15559876543@s.whatsapp.net", Sender: "15559876543", Text: text}}
 	}
 	cases := []struct {
 		name    string
@@ -372,11 +373,11 @@ func TestInterruptModeQueueIsBounded(t *testing.T) {
 	}
 	waitFor(t, 5*time.Second, "the first run", func() bool { r := br.Snapshot().Running; return r != nil && r.PID > 0 })
 	for _, jid := range []string{"120363000000000001@g.us", "120363000000000002@g.us"} {
-		if _, _, err := br.Submit(Inbound{InboundContent: InboundContent{JID: jid, Sender: "15559876543", Text: "question"}}); err != nil {
+		if _, _, err := br.Submit(Inbound{Inbound: chat.Inbound{JID: jid, Sender: "15559876543", Text: "question"}}); err != nil {
 			t.Fatalf("%s: %v", jid, err)
 		}
 	}
-	_, _, err := br.Submit(Inbound{InboundContent: InboundContent{JID: "120363000000000003@g.us", Sender: "15559876543", Text: "one more"}})
+	_, _, err := br.Submit(Inbound{Inbound: chat.Inbound{JID: "120363000000000003@g.us", Sender: "15559876543", Text: "one more"}})
 	if !errors.Is(err, errQueueFull) {
 		t.Errorf("err = %v, want the queue full", err)
 	}
@@ -385,7 +386,7 @@ func TestInterruptModeQueueIsBounded(t *testing.T) {
 func TestSilentMessagesAreSupersededAndQueueOverflows(t *testing.T) {
 	mgr, d, _ := queueTestManager(t, 500, `, "queue": {"max_pending": 2}`)
 	g := func(text string, silent bool) Inbound {
-		return Inbound{InboundContent: InboundContent{JID: "120363000000000000@g.us", Sender: "15551234567", Text: text, Silent: silent}}
+		return Inbound{Inbound: chat.Inbound{JID: "120363000000000000@g.us", Sender: "15551234567", Text: text, Silent: silent}}
 	}
 	_, _, _, _ = mgr.Submit(g("running", false))
 	waitFor(t, 5*time.Second, "run", func() bool { return mgr.Get("b").Snapshot().Running != nil })
@@ -410,7 +411,7 @@ func TestReloadKeepsRunningBrainAndRetiresRemoved(t *testing.T) {
 	t.Setenv("FRIDOLIN_FAKE_WAIT_FILE", release)
 	a, b := mgr.Get("a"), mgr.Get("b")
 	_, _, _, _ = mgr.Submit(dm("keep going"))
-	_, _, _, _ = mgr.Submit(Inbound{InboundContent: InboundContent{JID: "120363000000000000@g.us", Sender: "15551234567", Text: "doomed"}})
+	_, _, _, _ = mgr.Submit(Inbound{Inbound: chat.Inbound{JID: "120363000000000000@g.us", Sender: "15551234567", Text: "doomed"}})
 	waitFor(t, 5*time.Second, "both processes running", func() bool {
 		ar, br := a.Snapshot().Running, b.Snapshot().Running
 		return ar != nil && ar.PID > 0 && br != nil && br.PID > 0
@@ -1184,11 +1185,11 @@ func TestMCPConfigOfStaysInTheBrainFolder(t *testing.T) {
 
 func TestBuildPromptListsAllAttachments(t *testing.T) {
 	br := bareBrain(t)
-	p := br.buildPrompt(&brainSettings{}, Inbound{InboundContent: InboundContent{JID: "x@s.whatsapp.net", Sender: "1", Text: "file these", Media: []string{"/m/1.jpg", "/m/2.pdf"}}})
+	p := br.buildPrompt(&brainSettings{}, Inbound{Inbound: chat.Inbound{JID: "x@s.whatsapp.net", Sender: "1", Text: "file these", Media: []string{"/m/1.jpg", "/m/2.pdf"}}})
 	if !strings.Contains(p, `The 2 files in its "files" came with it`) || !strings.Contains(p, `"files":["/m/1.jpg","/m/2.pdf"]`) {
 		t.Errorf("prompt:\n%s", p)
 	}
-	if got := HistoryText("hi", []string{"/m/1.jpg"}); got != "hi\n[attachment: /m/1.jpg]" {
+	if got := chat.HistoryText("hi", []string{"/m/1.jpg"}); got != "hi\n[attachment: /m/1.jpg]" {
 		t.Errorf("history text = %q", got)
 	}
 }
@@ -1661,36 +1662,36 @@ func TestHistoryLineIsWrittenOnceTakenAtItsOwnTime(t *testing.T) {
 		err   error
 		want  []string // the history lines' text and time, "text@ts"
 	}{
-		{"a message, at its time", nil, Inbound{InboundContent: InboundContent{JID: testDMChat, Sender: "15551234567", Text: "hi", At: sent}},
+		{"a message, at its time", nil, Inbound{Inbound: chat.Inbound{JID: testDMChat, Sender: "15551234567", Text: "hi", At: sent}},
 			nil, []string{"hi@" + sent.Format(time.RFC3339)}},
-		{"each part at its own time", nil, Inbound{InboundContent: InboundContent{JID: testDMChat, Sender: "15551234567", Text: "photo", At: sent}}.merge(
-			Inbound{InboundContent: InboundContent{JID: testDMChat, Sender: "15551234567", Text: "what is it?", At: sent.Add(5 * time.Second)}}),
+		{"each part at its own time", nil, Inbound{Inbound: chat.Inbound{JID: testDMChat, Sender: "15551234567", Text: "photo", At: sent}}.merge(
+			Inbound{Inbound: chat.Inbound{JID: testDMChat, Sender: "15551234567", Text: "what is it?", At: sent.Add(5 * time.Second)}}),
 			nil, []string{"photo@" + sent.Format(time.RFC3339), "what is it?@" + sent.Add(5*time.Second).Format(time.RFC3339)}},
 		{"turned away by a full queue", func(t *testing.T, br *Brain) {
 			if _, _, err := br.Submit(dm("long task")); err != nil {
 				t.Fatal(err)
 			}
 			waitFor(t, 5*time.Second, "the first run", func() bool { r := br.Snapshot().Running; return r != nil && r.PID > 0 })
-			if _, _, err := br.Submit(Inbound{InboundContent: InboundContent{JID: testGroup, Sender: otherNumber, Text: "waiting"}}); err != nil {
+			if _, _, err := br.Submit(Inbound{Inbound: chat.Inbound{JID: testGroup, Sender: otherNumber, Text: "waiting"}}); err != nil {
 				t.Fatal(err)
 			}
-		}, Inbound{InboundContent: InboundContent{JID: testDMChat, Sender: "15551234567", Text: "one more", At: sent}}, errQueueFull, []string{"long task", "waiting"}},
+		}, Inbound{Inbound: chat.Inbound{JID: testDMChat, Sender: "15551234567", Text: "one more", At: sent}}, errQueueFull, []string{"long task", "waiting"}},
 		{"chatter that finds no place", func(t *testing.T, br *Brain) {
 			// b observes its group with runs, and its one place is taken.
-			if _, _, err := br.Submit(Inbound{InboundContent: InboundContent{JID: "120363000000000000@g.us", Sender: otherNumber, Text: "long task"}}); err != nil {
+			if _, _, err := br.Submit(Inbound{Inbound: chat.Inbound{JID: "120363000000000000@g.us", Sender: otherNumber, Text: "long task"}}); err != nil {
 				t.Fatal(err)
 			}
 			waitFor(t, 5*time.Second, "the first run", func() bool { r := br.Snapshot().Running; return r != nil && r.PID > 0 })
-			if _, _, err := br.Submit(Inbound{InboundContent: InboundContent{JID: "120363000000000000@g.us", Sender: otherNumber, Text: "waiting"}}); err != nil {
+			if _, _, err := br.Submit(Inbound{Inbound: chat.Inbound{JID: "120363000000000000@g.us", Sender: otherNumber, Text: "waiting"}}); err != nil {
 				t.Fatal(err)
 			}
-		}, Inbound{InboundContent: InboundContent{JID: "120363000000000000@g.us", Sender: "15551234567", Text: "chatter", At: sent, Silent: true}},
+		}, Inbound{Inbound: chat.Inbound{JID: "120363000000000000@g.us", Sender: "15551234567", Text: "chatter", At: sent, Silent: true}},
 			nil, []string{"long task", "waiting", "chatter@" + sent.Format(time.RFC3339)}},
 		{"turned away by a retired brain", func(t *testing.T, br *Brain) {
 			br.mu.Lock()
 			br.retired = true
 			br.mu.Unlock()
-		}, Inbound{InboundContent: InboundContent{JID: testDMChat, Sender: "15551234567", Text: "too late", At: sent}}, errBrainRetired, nil},
+		}, Inbound{Inbound: chat.Inbound{JID: testDMChat, Sender: "15551234567", Text: "too late", At: sent}}, errBrainRetired, nil},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -1726,9 +1727,9 @@ func TestHistoryLineIsWrittenOnceTakenAtItsOwnTime(t *testing.T) {
 // goes before untagged chatter whatever the turns.
 func TestQueueOrderGivesEachChatItsTurn(t *testing.T) {
 	const x, y, z = "x@s.whatsapp.net", "y@s.whatsapp.net", "z@g.us"
-	msg := func(chat, text string) Inbound { return Inbound{InboundContent: InboundContent{JID: chat, Text: text}} }
-	chatter := func(chat, text string) Inbound {
-		return Inbound{InboundContent: InboundContent{JID: chat, Text: text, Silent: true}}
+	msg := func(chatJID, text string) Inbound { return Inbound{Inbound: chat.Inbound{JID: chatJID, Text: text}} }
+	chatter := func(chatJID, text string) Inbound {
+		return Inbound{Inbound: chat.Inbound{JID: chatJID, Text: text, Silent: true}}
 	}
 	cases := []struct {
 		name    string
@@ -1757,9 +1758,9 @@ func TestQueueOrderGivesEachChatItsTurn(t *testing.T) {
 			for len(br.pending) > 0 {
 				i := nextIn(br.pending, br.turns)
 				got = append(got, br.pending[i].Text)
-				chat := br.pending[i].JID
+				chatJID := br.pending[i].JID
 				br.pending = slices.Delete(br.pending, i, i+1)
-				br.takeTurnLocked(chat)
+				br.takeTurnLocked(chatJID)
 			}
 			if strings.Join(got, " ") != c.want {
 				t.Errorf("ran %q, want %q", got, c.want)
@@ -1777,7 +1778,7 @@ func TestQueueOrderGivesEachChatItsTurn(t *testing.T) {
 func TestBusyChatDoesNotHoldUpAnother(t *testing.T) {
 	mgr, d, _ := queueTestManager(t, 400, "")
 	br := mgr.Get("a")
-	other := Inbound{InboundContent: InboundContent{JID: otherNumber + "@s.whatsapp.net", Sender: otherNumber, Text: "other 1"}}
+	other := Inbound{Inbound: chat.Inbound{JID: otherNumber + "@s.whatsapp.net", Sender: otherNumber, Text: "other 1"}}
 	if _, _, err := br.Submit(dm("dm 1")); err != nil {
 		t.Fatal(err)
 	}
@@ -1840,8 +1841,8 @@ const (
 	groupC = "120363000000000001@g.us"
 )
 
-func groupMsg(chat, text string, chatter bool) Inbound {
-	return Inbound{InboundContent: InboundContent{JID: chat, Sender: otherNumber, Text: text, Silent: chatter}}
+func groupMsg(chatJID, text string, chatter bool) Inbound {
+	return Inbound{Inbound: chat.Inbound{JID: chatJID, Sender: otherNumber, Text: text, Silent: chatter}}
 }
 
 // slotState is what the run slots hold: how many slots are held and how
@@ -1896,8 +1897,8 @@ func TestRunLimitBoundsRunsAcrossBrains(t *testing.T) {
 			mgr, d := limitTestManager(t, 700, c.limit)
 			for _, m := range []Inbound{
 				dm("for a"),
-				{InboundContent: InboundContent{JID: "120363000000000000@g.us", Sender: otherNumber, Text: "for b"}},
-				{InboundContent: InboundContent{JID: "120363000000000001@g.us", Sender: otherNumber, Text: "for c"}},
+				{Inbound: chat.Inbound{JID: "120363000000000000@g.us", Sender: otherNumber, Text: "for b"}},
+				{Inbound: chat.Inbound{JID: "120363000000000001@g.us", Sender: otherNumber, Text: "for c"}},
 			} {
 				if _, _, _, err := mgr.Submit(m); err != nil {
 					t.Fatal(err)
@@ -1929,7 +1930,7 @@ func TestRunSlotsGoToBrainsInTurn(t *testing.T) {
 		t.Fatal(err)
 	}
 	waitFor(t, 5*time.Second, "a's first run", func() bool { r := a.Snapshot().Running; return r != nil && r.PID > 0 })
-	for _, m := range []Inbound{dm("a 2"), {InboundContent: InboundContent{JID: "120363000000000001@g.us", Sender: otherNumber, Text: "c 1"}}} {
+	for _, m := range []Inbound{dm("a 2"), {Inbound: chat.Inbound{JID: "120363000000000001@g.us", Sender: otherNumber, Text: "c 1"}}} {
 		if _, _, _, err := mgr.Submit(m); err != nil {
 			t.Fatal(err)
 		}
@@ -1953,7 +1954,7 @@ func TestRunSlotsGoToBrainsInTurn(t *testing.T) {
 func TestRequestStopsChatterInAnotherBrainForASlot(t *testing.T) {
 	mgr, d := limitTestManager(t, 30000, 1)
 	b := mgr.Get("b")
-	if _, _, err := b.Submit(Inbound{InboundContent: InboundContent{JID: "120363000000000000@g.us", Sender: otherNumber, Text: "chatter here", Silent: true}}); err != nil {
+	if _, _, err := b.Submit(Inbound{Inbound: chat.Inbound{JID: "120363000000000000@g.us", Sender: otherNumber, Text: "chatter here", Silent: true}}); err != nil {
 		t.Fatal(err)
 	}
 	waitFor(t, 5*time.Second, "b's observe-only run", func() bool { r := b.Snapshot().Running; return r != nil && r.PID > 0 })

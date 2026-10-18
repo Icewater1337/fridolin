@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Icewater1337/fridolin/internal/chat"
 	"github.com/Icewater1337/fridolin/internal/fsx"
 	"github.com/Icewater1337/fridolin/internal/history"
 	"github.com/Icewater1337/fridolin/internal/logx"
@@ -524,7 +525,7 @@ func TestStreamLogIsNotFollowedOutOfTheFolder(t *testing.T) {
 				plant(t, logPath, tc.target(home))
 			}
 			logged := captureLog(t)
-			if res := readTestStream(br, Inbound{InboundContent: InboundContent{JID: "x"}}, stream); res.Text != "done" {
+			if res := readTestStream(br, Inbound{Inbound: chat.Inbound{JID: "x"}}, stream); res.Text != "done" {
 				t.Errorf("run = %+v, want it to finish", res)
 			}
 			if tc.target == nil {

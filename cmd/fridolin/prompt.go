@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Icewater1337/fridolin/internal/chat"
 	"github.com/Icewater1337/fridolin/internal/history"
 )
 
@@ -100,7 +101,7 @@ func renderPrompt(in promptInput) string {
 		where = "the WhatsApp group " + promptJSON(m.JID)
 	}
 	fmt.Fprintf(&sb, "It is now %s. This chat is %s.", in.Now.Format(promptNowLayout), where)
-	if m.Source == SourceIngest {
+	if m.Source == chat.SourceIngest {
 		sb.WriteString(" The new message did not come from it: its files were handed to you outside WhatsApp, and your reply is sent to this chat.")
 	}
 	sb.WriteString("\n\n")

@@ -5,6 +5,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/Icewater1337/fridolin/internal/chat"
 	"github.com/Icewater1337/fridolin/internal/history"
 	"github.com/Icewater1337/fridolin/internal/textx"
 )
@@ -57,7 +58,7 @@ func (a *Activity) addLocked(brainID string, e history.Entry) {
 // Change does to the feed what recordChange did to brainID's history: the
 // message c deletes leaves it, and the one an edit changed while it waited
 // gets text, its new history text; "" leaves it as it was.
-func (a *Activity) Change(brainID string, c Change, text string) {
+func (a *Activity) Change(brainID string, c chat.Change, text string) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	kept := a.entries[:0]
@@ -65,7 +66,7 @@ func (a *Activity) Change(brainID string, c Change, text string) {
 		is := e.Brain == brainID && e.id != "" && e.id == c.Target && e.Type == history.In && e.From == c.Sender &&
 			(e.Chat == c.Chat || (c.ChatAlt != "" && e.Chat == c.ChatAlt))
 		switch {
-		case is && c.Kind == ChangeRevoke:
+		case is && c.Kind == chat.ChangeRevoke:
 			continue
 		case is && text != "":
 			e.Text = textx.Truncate(text, 600)

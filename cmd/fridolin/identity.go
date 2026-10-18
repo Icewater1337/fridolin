@@ -10,6 +10,8 @@ import (
 
 	"go.mau.fi/whatsmeow/store"
 	"go.mau.fi/whatsmeow/types"
+
+	"github.com/Icewater1337/fridolin/internal/chat"
 )
 
 // Phone numbers and chats as people write them, and the one form the
@@ -36,7 +38,7 @@ func phoneNumber(s string) (string, error) {
 			return -1
 		}
 		return r
-	}, NormalizeJID(s))
+	}, chat.NormalizeJID(s))
 	if !phoneNumberRE.MatchString(n) {
 		return "", fmt.Errorf("%q is not a phone number: use digits with the country code, e.g. 15551234567", strings.TrimSpace(s))
 	}
@@ -54,7 +56,7 @@ func identityKey(s string) string {
 	if n, err := phoneNumber(s); err == nil {
 		return n
 	}
-	k := NormalizeJID(s)
+	k := chat.NormalizeJID(s)
 	if n, err := phoneNumber(k); err == nil {
 		return n
 	}
@@ -132,7 +134,7 @@ func chatJID(s string) (types.JID, error) {
 func ownerChat(cfg *Config) string {
 	for _, n := range cfg.AllowedNumbers {
 		if p, err := phoneNumber(n); err == nil {
-			return DMJID(p)
+			return chat.DMJID(p)
 		}
 	}
 	return ""

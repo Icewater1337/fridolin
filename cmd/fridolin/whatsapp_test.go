@@ -19,6 +19,7 @@ import (
 	"unicode"
 	"unicode/utf8"
 
+	"github.com/Icewater1337/fridolin/internal/chat"
 	"github.com/Icewater1337/fridolin/internal/trigger"
 	"go.mau.fi/whatsmeow"
 	"go.mau.fi/whatsmeow/proto/waE2E"
@@ -69,14 +70,14 @@ func TestIncomingChat(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			chat, ok := incomingChat(c.src)
+			chatJID, ok := incomingChat(c.src)
 			switch {
 			case c.want == "" && ok:
-				t.Errorf("incomingChat kept the message in %s, want it dropped", chat)
+				t.Errorf("incomingChat kept the message in %s, want it dropped", chatJID)
 			case c.want != "" && !ok:
 				t.Errorf("incomingChat dropped the message, want it in %s", c.want)
-			case c.want != "" && chat.String() != c.want:
-				t.Errorf("chat = %s, want %s", chat, c.want)
+			case c.want != "" && chatJID.String() != c.want:
+				t.Errorf("chat = %s, want %s", chatJID, c.want)
 			}
 		})
 	}
@@ -455,7 +456,7 @@ func FuzzNumberAllowed(f *testing.F) {
 			}
 			// A sender, as WhatsApp reports one, in every form.
 			for _, jid := range []string{p, "+" + p, p + "@s.whatsapp.net", "+" + p + "@s.whatsapp.net"} {
-				if !numberAllowed(cfg, NormalizeJID(jid)) {
+				if !numberAllowed(cfg, chat.NormalizeJID(jid)) {
 					t.Errorf("allowed_numbers %q: %q is refused", allowed, jid)
 				}
 			}
@@ -989,10 +990,10 @@ func TestExtractQuote(t *testing.T) {
 	cases := []struct {
 		name string
 		info *waE2E.ContextInfo
-		want *Quote
+		want *chat.Quote
 	}{
-		{"phone number", ctx("15559876543@s.whatsapp.net", "Lunch?"), &Quote{From: "15559876543", Text: "Lunch?"}},
-		{"lid", ctx("15559876543@lid", "Lunch?"), &Quote{From: "15559876543", Text: "Lunch?"}},
+		{"phone number", ctx("15559876543@s.whatsapp.net", "Lunch?"), &chat.Quote{From: "15559876543", Text: "Lunch?"}},
+		{"lid", ctx("15559876543@lid", "Lunch?"), &chat.Quote{From: "15559876543", Text: "Lunch?"}},
 		{"no sender", ctx("", "Lunch?"), nil},
 		{"no text", ctx("15559876543@s.whatsapp.net", ""), nil},
 		{"no context", nil, nil},
@@ -1089,8 +1090,8 @@ func TestGroupNonMemberIsNotRead(t *testing.T) {
 			t.Run(e.name+", "+c.name, func(t *testing.T) {
 				logged := captureLog(t)
 				tw, dl := newGroupTestWhatsApp(t, e.members)
-				var changes []Change
-				tw.onChange = func(c Change) { changes = append(changes, c) }
+				var changes []chat.Change
+				tw.onChange = func(c chat.Change) { changes = append(changes, c) }
 				tw.handle(t, groupMessage(stranger, types.EmptyJID, c.msg))
 				if m, ok := tw.next(100 * time.Millisecond); ok {
 					t.Errorf("reached the brains: %+v", m)
@@ -1484,7 +1485,7 @@ func recordArrivals(tw *testWhatsApp, slow string) *arrivals {
 		a.seen = append(a.seen, m.ID)
 		a.msgs = append(a.msgs, m)
 	}
-	tw.onChange = func(c Change) {
+	tw.onChange = func(c chat.Change) {
 		a.mu.Lock()
 		defer a.mu.Unlock()
 		a.seen = append(a.seen, c.Kind+" "+c.Target)
@@ -1724,13 +1725,13 @@ func TestDisconnectHandsOnWhatIsQueued(t *testing.T) {
 				a.seen = append(a.seen, "vote "+strings.Join(v.Selected, ","))
 			}
 			evts := c.evts(t)
-			chat, _ := tw.queueChat(evts[1].Info.MessageSource)
+			chatJID, _ := tw.queueChat(evts[1].Info.MessageSource)
 			tw.feed(evts...)
 			waitFor(t, time.Second, "the download to start", func() bool { return dl.callCount() == 1 })
 			waitFor(t, time.Second, "the next to be queued behind it", func() bool {
 				tw.intake.mu.Lock()
 				defer tw.intake.mu.Unlock()
-				c := tw.intake.chats[chat]
+				c := tw.intake.chats[chatJID]
 				return c != nil && len(c.jobs) == 1
 			})
 			tw.Disconnect()

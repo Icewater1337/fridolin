@@ -7,6 +7,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/Icewater1337/fridolin/internal/chat"
 	"github.com/Icewater1337/fridolin/internal/store"
 	"net"
 	"os"
@@ -1021,7 +1022,7 @@ func TestSandboxedRunReachesTheBrainAPI(t *testing.T) {
 	tb.addFolderBrain(t, BrainManifest{ID: "a", Name: "A", Routing: BrainRouting{HandlesDMs: true}})
 	savePoll(t, tb, "P1", apiTestDM, "Lunch?", []string{"Yes", "No"}, nil)
 	t.Setenv("FRIDOLIN_FAKE_POLLS", "1")
-	tb.handleInbound(context.Background(), Inbound{InboundContent: InboundContent{JID: apiTestDM, Sender: "15551234567", Text: "polls?", Source: "whatsapp"}})
+	tb.handleInbound(context.Background(), Inbound{Inbound: chat.Inbound{JID: apiTestDM, Sender: "15551234567", Text: "polls?", Source: "whatsapp"}})
 	waitFor(t, 20*time.Second, "the reply", func() bool { return len(tb.sentTo(apiTestDM)) > 0 })
 	if reply := tb.sentTo(apiTestDM)[0]; !strings.Contains(reply, `polls=0 {`) || !strings.Contains(reply, `"question": "Lunch?"`) {
 		t.Errorf("the sandboxed run's fridolin polls answered:\n%s", reply)

@@ -12,6 +12,7 @@ import (
 
 	"go.mau.fi/whatsmeow/types"
 
+	"github.com/Icewater1337/fridolin/internal/chat"
 	"github.com/Icewater1337/fridolin/internal/history"
 	"github.com/Icewater1337/fridolin/internal/store"
 )
@@ -151,7 +152,7 @@ type pollVote struct {
 func (b *Bridge) recordVote(v pollVote) {
 	br := b.brainMgr.Get(v.Poll.Brain)
 	if br == nil {
-		br = b.brainMgr.BrainFor(v.Poll.Chat, IsGroupJID(v.Poll.Chat))
+		br = b.brainMgr.BrainFor(v.Poll.Chat, chat.IsGroupJID(v.Poll.Chat))
 	}
 	if br == nil {
 		log.Printf("poll vote in %s: no brain to tell", v.Poll.Chat)

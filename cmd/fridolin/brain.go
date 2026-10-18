@@ -21,6 +21,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/Icewater1337/fridolin/internal/chat"
 	"github.com/Icewater1337/fridolin/internal/fsx"
 	"github.com/Icewater1337/fridolin/internal/history"
 	"github.com/Icewater1337/fridolin/internal/platform"
@@ -313,7 +314,7 @@ func (br *Brain) logInbound(m Inbound) Inbound {
 		if at.IsZero() {
 			at = m.At
 		}
-		parts[i].logged = br.appendEntry(history.Entry{TS: historyTime(at), Chat: m.JID, From: p.Sender, Text: HistoryText(p.TextWithQuote(), p.Media), Type: history.In, ID: p.ID})
+		parts[i].logged = br.appendEntry(history.Entry{TS: historyTime(at), Chat: m.JID, From: p.Sender, Text: chat.HistoryText(p.TextWithQuote(), p.Media), Type: history.In, ID: p.ID})
 	}
 	if len(m.parts) > 0 {
 		m.parts = parts
@@ -507,12 +508,12 @@ func nextIn(pending []Inbound, turns map[string]uint64) int {
 // nothing waiting whose turn came before every waiting chat's is
 // forgotten: it would go before all of them anyway, as one that never had
 // a turn does, so the record is no longer needed. br.mu is held.
-func (br *Brain) takeTurnLocked(chat string) {
+func (br *Brain) takeTurnLocked(chatJID string) {
 	if br.turns == nil {
 		br.turns = map[string]uint64{}
 	}
 	br.turn++
-	br.turns[chat] = br.turn
+	br.turns[chatJID] = br.turn
 	low := br.turn
 	waiting := map[string]bool{}
 	for _, p := range br.pending {
@@ -557,9 +558,9 @@ func (br *Brain) queueOrderLocked() []int {
 // whether it interrupts its sender's own run, which only a request does in
 // interrupt mode, and which waiting or running messages it replaces.
 func supersedes(m Inbound, s *brainSettings) (interrupting bool, replaces func(Inbound) bool) {
-	interrupting = s.queueMode == queueModeInterrupt && !m.Silent && m.Source != SourceIngest
+	interrupting = s.queueMode == queueModeInterrupt && !m.Silent && m.Source != chat.SourceIngest
 	return interrupting, func(p Inbound) bool {
-		return p.JID == m.JID && (p.Silent || (interrupting && p.Sender == m.Sender && p.Source != SourceIngest))
+		return p.JID == m.JID && (p.Silent || (interrupting && p.Sender == m.Sender && p.Source != chat.SourceIngest))
 	}
 }
 
@@ -2023,13 +2024,13 @@ func (br *Brain) appendEntry(entry history.Entry) history.Entry {
 // the outbox tries again later, so the answer is recorded once. Both
 // happen under historyMu, which undelivered reads the outbox under: a run
 // finds the answer in the outbox or in the history, never in neither.
-func (br *Brain) recordDelivered(chat, text string, remove func() error) error {
+func (br *Brain) recordDelivered(chatJID, text string, remove func() error) error {
 	br.historyMu.Lock()
 	if err := remove(); err != nil {
 		br.historyMu.Unlock()
 		return err
 	}
-	entry, err := history.Append(br.root, history.Entry{From: br.id, Chat: chat, Text: text, Type: history.Out})
+	entry, err := history.Append(br.root, history.Entry{From: br.id, Chat: chatJID, Text: text, Type: history.Out})
 	br.historyMu.Unlock()
 	br.entryWritten(entry, err)
 	return nil

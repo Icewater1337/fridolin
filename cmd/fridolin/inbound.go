@@ -1,13 +1,15 @@
 package main
 
 import (
-	"github.com/Icewater1337/fridolin/internal/history"
 	"slices"
+
+	"github.com/Icewater1337/fridolin/internal/chat"
+	"github.com/Icewater1337/fridolin/internal/history"
 )
 
 // Inbound carries message content plus the brain's history and queue bookkeeping.
 type Inbound struct {
-	InboundContent
+	chat.Inbound
 	// logged is the line Brain.Submit wrote to the history for the
 	// message; a merged message's parts each keep their own. Its prompt
 	// shows the chat's history before the first of them, and what the
@@ -23,7 +25,7 @@ type Inbound struct {
 // a file followed by "@claude what is this?" must get an answer.
 func (m Inbound) merge(next Inbound) Inbound {
 	parts := append(m.ownParts(), next.ownParts()...)
-	m.InboundContent = m.InboundContent.Merge(next.InboundContent)
+	m.Inbound = m.Inbound.Merge(next.Inbound)
 	m.parts = parts
 	return m
 }
@@ -63,8 +65,8 @@ func (m Inbound) withMediaMoved(moved map[string]string) Inbound {
 // in an edit or a deletion, and one group member must not rewrite or
 // cancel what another asked for; so a group admin's deletion of someone
 // else's message changes nothing here either.
-func (m Inbound) changes(c Change) bool {
-	return slices.ContainsFunc(m.ownParts(), func(p Inbound) bool { return c.Names(p.InboundContent) })
+func (m Inbound) changes(c chat.Change) bool {
+	return slices.ContainsFunc(m.ownParts(), func(p Inbound) bool { return c.Names(p.Inbound) })
 }
 
 // remerge merges parts again, as the debouncer did, into one message.
@@ -79,16 +81,16 @@ func remerge(parts []Inbound) Inbound {
 // applyChange applies c to m: the part c names is deleted, or gets its
 // new text. It reports whether m holds that part, and keep is false when
 // nothing is left of m.
-func (m Inbound) applyChange(c Change) (out Inbound, found, keep bool) {
+func (m Inbound) applyChange(c chat.Change) (out Inbound, found, keep bool) {
 	parts := m.ownParts()
-	i := slices.IndexFunc(parts, func(p Inbound) bool { return c.Names(p.InboundContent) })
+	i := slices.IndexFunc(parts, func(p Inbound) bool { return c.Names(p.Inbound) })
 	if i < 0 {
 		return m, false, true
 	}
 	switch c.Kind {
-	case ChangeRevoke:
+	case chat.ChangeRevoke:
 		parts = append(parts[:i], parts[i+1:]...)
-	case ChangeEdit:
+	case chat.ChangeEdit:
 		parts[i].Text = c.Text
 	}
 	if len(parts) == 0 {

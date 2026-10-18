@@ -14,6 +14,7 @@ import (
 	"unicode"
 	"unicode/utf8"
 
+	"github.com/Icewater1337/fridolin/internal/chat"
 	"github.com/Icewater1337/fridolin/internal/fsx"
 )
 
@@ -633,10 +634,10 @@ func TestRouteHonoursTheNamedBrain(t *testing.T) {
 		m    Inbound
 		want string // "" = no brain
 	}{
-		{"by chat", Inbound{InboundContent: InboundContent{JID: dm}}, "personal"},
-		{"named brain wins over the chat's owner", Inbound{InboundContent: InboundContent{JID: dm, Brain: "team"}}, "team"},
-		{"named brain in a group it does not own", Inbound{InboundContent: InboundContent{JID: "other@g.us", Brain: "personal"}}, "personal"},
-		{"named brain is gone", Inbound{InboundContent: InboundContent{JID: dm, Brain: "removed"}}, ""},
+		{"by chat", Inbound{Inbound: chat.Inbound{JID: dm}}, "personal"},
+		{"named brain wins over the chat's owner", Inbound{Inbound: chat.Inbound{JID: dm, Brain: "team"}}, "team"},
+		{"named brain in a group it does not own", Inbound{Inbound: chat.Inbound{JID: "other@g.us", Brain: "personal"}}, "personal"},
+		{"named brain is gone", Inbound{Inbound: chat.Inbound{JID: dm, Brain: "removed"}}, ""},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			got := ""
@@ -648,7 +649,7 @@ func TestRouteHonoursTheNamedBrain(t *testing.T) {
 			}
 		})
 	}
-	if _, _, _, err := mgr.Submit(Inbound{InboundContent: InboundContent{JID: dm, Brain: "removed", Text: "x"}}); err == nil {
+	if _, _, _, err := mgr.Submit(Inbound{Inbound: chat.Inbound{JID: dm, Brain: "removed", Text: "x"}}); err == nil {
 		t.Error("Submit to a removed brain must fail, not run in the DM brain")
 	}
 }
@@ -667,11 +668,11 @@ func TestChatJIDs(t *testing.T) {
 		m    Inbound
 		want string
 	}{
-		{"DM by number", Inbound{InboundContent: InboundContent{JID: pn, Sender: "15551234567"}}, pn},
-		{"DM by LID", Inbound{InboundContent: InboundContent{JID: lid, Sender: "15551234567"}}, lid + "," + pn},
-		{"DM without a sender", Inbound{InboundContent: InboundContent{JID: lid}}, lid},
-		{"DM by number, its LID known", Inbound{InboundContent: InboundContent{JID: pn, ChatAlt: lid, Sender: "15551234567"}}, pn + "," + lid},
-		{"group", Inbound{InboundContent: InboundContent{JID: group, Sender: "15551234567"}}, group},
+		{"DM by number", Inbound{Inbound: chat.Inbound{JID: pn, Sender: "15551234567"}}, pn},
+		{"DM by LID", Inbound{Inbound: chat.Inbound{JID: lid, Sender: "15551234567"}}, lid + "," + pn},
+		{"DM without a sender", Inbound{Inbound: chat.Inbound{JID: lid}}, lid},
+		{"DM by number, its LID known", Inbound{Inbound: chat.Inbound{JID: pn, ChatAlt: lid, Sender: "15551234567"}}, pn + "," + lid},
+		{"group", Inbound{Inbound: chat.Inbound{JID: group, Sender: "15551234567"}}, group},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			if got := strings.Join(chatJIDs(c.m), ","); got != c.want {

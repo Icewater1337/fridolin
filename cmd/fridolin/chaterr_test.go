@@ -7,6 +7,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/Icewater1337/fridolin/internal/chat"
 )
 
 func TestChatErrorText(t *testing.T) {
@@ -48,13 +50,13 @@ func TestChatErrorText(t *testing.T) {
 // A run that fails tells the chat in a short message; what the CLI wrote
 // to stderr goes to the log and the dashboard only.
 func TestFailedRunPostsNoRawError(t *testing.T) {
-	for _, chat := range []string{testDMChat, testGroup} {
-		t.Run(chat, func(t *testing.T) {
+	for _, chatJID := range []string{testDMChat, testGroup} {
+		t.Run(chatJID, func(t *testing.T) {
 			tb, br := newMainBridge(t, "")
 			t.Setenv("FRIDOLIN_FAKE_STDERR_BYTES", "10")
-			tb.handleInbound(context.Background(), Inbound{InboundContent: InboundContent{JID: chat, Sender: "15551234567", Text: "@claude fail", Source: SourceWhatsApp}})
-			waitFor(t, 10*time.Second, "the error notice", func() bool { return len(tb.sentTo(chat)) > 0 })
-			sent := tb.sentTo(chat)
+			tb.handleInbound(context.Background(), Inbound{Inbound: chat.Inbound{JID: chatJID, Sender: "15551234567", Text: "@claude fail", Source: chat.SourceWhatsApp}})
+			waitFor(t, 10*time.Second, "the error notice", func() bool { return len(tb.sentTo(chatJID)) > 0 })
+			sent := tb.sentTo(chatJID)
 			if len(sent) != 1 || sent[0] != chatErrGeneric {
 				t.Errorf("sent %q, want only %q", sent, chatErrGeneric)
 			}

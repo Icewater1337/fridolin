@@ -15,6 +15,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Icewater1337/fridolin/internal/chat"
 	"github.com/Icewater1337/fridolin/internal/fsx"
 	"github.com/Icewater1337/fridolin/internal/history"
 )
@@ -150,7 +151,7 @@ func TestBrainTakesItsFilesIntoItsInbox(t *testing.T) {
 	media := tb.cfgs.Get().MediaDir
 	p := writeTestFile(t, filepath.Join(media, incomingMediaDir, "voice.ogg"), "OggS")
 
-	tb.handleInbound(t.Context(), Inbound{InboundContent: InboundContent{JID: "15551234567@s.whatsapp.net", Sender: "15551234567", Text: "listen", Media: []string{p}, Source: "whatsapp", At: time.Now()}})
+	tb.handleInbound(t.Context(), Inbound{Inbound: chat.Inbound{JID: "15551234567@s.whatsapp.net", Sender: "15551234567", Text: "listen", Media: []string{p}, Source: "whatsapp", At: time.Now()}})
 	waitFor(t, 10*time.Second, "the reply", func() bool { return len(tb.dev.Outbox()) > 0 })
 
 	want := filepath.Join(media, "dm", "voice.ogg")
@@ -306,12 +307,12 @@ func TestRemovedBrainHandsItsFilesOn(t *testing.T) {
 func TestMergedMessageNamesItsFilesInTheInbox(t *testing.T) {
 	cases := []struct {
 		name   string
-		change *Change  // applied while the message waits
-		want   []string // the files the run gets, in the inbox
+		change *chat.Change // applied while the message waits
+		want   []string     // the files the run gets, in the inbox
 	}{
 		{"as merged", nil, []string{"one.jpg", "two.jpg"}},
-		{"one part edited", &Change{Kind: ChangeEdit, Target: "3EB0ONE", Text: "the first photo"}, []string{"one.jpg", "two.jpg"}},
-		{"one part deleted", &Change{Kind: ChangeRevoke, Target: "3EB0ONE"}, []string{"two.jpg"}},
+		{"one part edited", &chat.Change{Kind: chat.ChangeEdit, Target: "3EB0ONE", Text: "the first photo"}, []string{"one.jpg", "two.jpg"}},
+		{"one part deleted", &chat.Change{Kind: chat.ChangeRevoke, Target: "3EB0ONE"}, []string{"two.jpg"}},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {

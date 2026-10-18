@@ -17,6 +17,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/Icewater1337/fridolin/internal/chat"
 )
 
 // The brain API, /brain/, is what the tools a brain runs ask the bridge
@@ -206,15 +208,15 @@ func (b *Bridge) brainCall(fn func(w http.ResponseWriter, r *http.Request, br *B
 // ownsChat reports whether chat is one of br's: a chat that routes to it,
 // or the one it replies in. A brain sees only the polls of those, since a
 // poll's voters are the people of the chat it was sent to.
-func (b *Bridge) ownsChat(br *Brain, chat string) bool {
-	return b.brainMgr.BrainFor(chat, IsGroupJID(chat)) == br || b.replyChatFor(br, b.cfgs.Get()) == chat
+func (b *Bridge) ownsChat(br *Brain, chatJID string) bool {
+	return b.brainMgr.BrainFor(chatJID, chat.IsGroupJID(chatJID)) == br || b.replyChatFor(br, b.cfgs.Get()) == chatJID
 }
 
 // brainPolls answers GET /brain/polls: ?id=MSG_ID for one poll, else the
 // ?recent=N (default 10) newest, of ?chat=JID when given.
 func (b *Bridge) brainPolls(w http.ResponseWriter, r *http.Request, br *Brain) {
 	q := r.URL.Query()
-	owns := func(chat string) bool { return b.ownsChat(br, chat) }
+	owns := func(chatJID string) bool { return b.ownsChat(br, chatJID) }
 	if id := q.Get("id"); id != "" {
 		p, err := b.store.Poll(r.Context(), id)
 		if errors.Is(err, sql.ErrNoRows) || (err == nil && !owns(p.ChatJID)) {
@@ -237,12 +239,12 @@ func (b *Bridge) brainPolls(w http.ResponseWriter, r *http.Request, br *Brain) {
 		}
 		recent = n
 	}
-	chat := q.Get("chat")
-	if chat != "" && !owns(chat) {
-		writeErr(w, http.StatusForbidden, fmt.Sprintf("chat %q is not one of this brain's chats", chat))
+	chatJID := q.Get("chat")
+	if chatJID != "" && !owns(chatJID) {
+		writeErr(w, http.StatusForbidden, fmt.Sprintf("chat %q is not one of this brain's chats", chatJID))
 		return
 	}
-	polls, err := b.store.RecentPolls(r.Context(), chat, recent, owns)
+	polls, err := b.store.RecentPolls(r.Context(), chatJID, recent, owns)
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, "reading the polls: "+err.Error())
 		return

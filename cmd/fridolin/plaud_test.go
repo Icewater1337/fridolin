@@ -16,6 +16,8 @@ import (
 	"syscall"
 	"testing"
 	"time"
+
+	"github.com/Icewater1337/fridolin/internal/chat"
 )
 
 const (
@@ -638,7 +640,7 @@ func TestPlaudHandOffThroughTheBridge(t *testing.T) {
 	if err := tb.submitHandOff(br, dm, "plaud", "third", nil, done("third")); !errors.Is(err, errQueueFull) {
 		t.Errorf("a hand-off to a full queue = %v, want errQueueFull", err)
 	}
-	tb.handleInbound(context.Background(), Inbound{InboundContent: InboundContent{JID: dm, Sender: "15551234567", Text: "!stop", Source: "whatsapp"}})
+	tb.handleInbound(context.Background(), Inbound{Inbound: chat.Inbound{JID: dm, Sender: "15551234567", Text: "!stop", Source: "whatsapp"}})
 	waitFor(t, 10*time.Second, "both to end", func() bool { mu.Lock(); defer mu.Unlock(); return len(ended) == 2 })
 	if !errors.Is(ended["first"], errBrainInterrupted) || !errors.Is(ended["second"], errBrainDropped) {
 		t.Errorf("ended = %v, want the first stopped and the second dropped", ended)
@@ -2172,7 +2174,7 @@ func TestPlaudBacklogLeavesRoomInTheBrainsQueue(t *testing.T) {
 			t.Fatalf("check %d: %d with the brain and %d waiting, want %d and %d", i+1, *s.Handed, *s.Pending, limit, len(backlog)-limit)
 		}
 	}
-	if _, _, _, err := tb.brainMgr.Submit(Inbound{InboundContent: InboundContent{JID: "15551234567@s.whatsapp.net", Sender: "15551234567", Text: "hello", Source: "whatsapp"}}); err != nil {
+	if _, _, _, err := tb.brainMgr.Submit(Inbound{Inbound: chat.Inbound{JID: "15551234567@s.whatsapp.net", Sender: "15551234567", Text: "hello", Source: "whatsapp"}}); err != nil {
 		t.Errorf("your own message to the brain = %v, want it taken", err)
 	}
 }
@@ -2877,7 +2879,7 @@ func TestBrainRunsKeepPlaudTelemetryOff(t *testing.T) {
 	tb, _ := plaudBridge(t, "")
 	envLog := filepath.Join(t.TempDir(), "brain.env")
 	t.Setenv("FRIDOLIN_FAKE_ENV_LOG", envLog)
-	tb.handleInbound(context.Background(), Inbound{InboundContent: InboundContent{JID: "15551234567@s.whatsapp.net", Sender: "15551234567", Text: "hello", Source: "whatsapp"}})
+	tb.handleInbound(context.Background(), Inbound{Inbound: chat.Inbound{JID: "15551234567@s.whatsapp.net", Sender: "15551234567", Text: "hello", Source: "whatsapp"}})
 	waitFor(t, 10*time.Second, "the run", func() bool { return len(tb.dev.Outbox()) > 0 })
 	logged, err := os.ReadFile(envLog)
 	if err != nil {
@@ -2899,7 +2901,7 @@ func TestBrainsFindThePlaudCLIWhenTheyMayUseIt(t *testing.T) {
 			tb, _ := plaudBridge(t, fmt.Sprintf(`, "brain_access": %v`, access))
 			envLog := filepath.Join(t.TempDir(), "brain.env")
 			t.Setenv("FRIDOLIN_FAKE_ENV_LOG", envLog)
-			tb.handleInbound(context.Background(), Inbound{InboundContent: InboundContent{JID: "15551234567@s.whatsapp.net", Sender: "15551234567", Text: "hello", Source: "whatsapp"}})
+			tb.handleInbound(context.Background(), Inbound{Inbound: chat.Inbound{JID: "15551234567@s.whatsapp.net", Sender: "15551234567", Text: "hello", Source: "whatsapp"}})
 			waitFor(t, 10*time.Second, "the run", func() bool { return len(tb.dev.Outbox()) > 0 })
 			logged, _ := os.ReadFile(envLog)
 			var path string

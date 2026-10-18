@@ -16,14 +16,15 @@ import (
 	"go.mau.fi/whatsmeow/types/events"
 	"google.golang.org/protobuf/proto"
 
+	"github.com/Icewater1337/fridolin/internal/chat"
 	"github.com/Icewater1337/fridolin/internal/history"
 )
 
 // dmEvent is a DM from the allowed number, with the message ID id.
 func dmEvent(id string, msg *waE2E.Message) *events.Message {
-	chat := types.NewJID("15551234567", types.DefaultUserServer)
+	chatJID := types.NewJID("15551234567", types.DefaultUserServer)
 	return &events.Message{
-		Info:    types.MessageInfo{MessageSource: types.MessageSource{Chat: chat, Sender: chat}, ID: types.MessageID(id), Timestamp: time.Now()},
+		Info:    types.MessageInfo{MessageSource: types.MessageSource{Chat: chatJID, Sender: chatJID}, ID: types.MessageID(id), Timestamp: time.Now()},
 		Message: msg,
 	}
 }
@@ -61,7 +62,7 @@ func historyTexts(t *testing.T, br *Brain, typ string) []string {
 func TestDeletedMessageIsNotAnsweredAndLeavesTheHistory(t *testing.T) {
 	t.Run("waiting", func(t *testing.T) {
 		tb, br := newMainBridge(t, "")
-		startLongRun(t, tb, br, Inbound{InboundContent: InboundContent{JID: testDMChat, Sender: "15551234567", Text: "a long report", Source: SourceWhatsApp}})
+		startLongRun(t, tb, br, Inbound{Inbound: chat.Inbound{JID: testDMChat, Sender: "15551234567", Text: "a long report", Source: chat.SourceWhatsApp}})
 		wa := tb.whatsApp()
 		wa.handleMessage(dmEvent("3EB0WAIT", textMsg("my card number is 4111")))
 		waitFor(t, 5*time.Second, "the message to wait", func() bool { return len(br.Snapshot().Queue) == 1 })
@@ -117,9 +118,9 @@ func TestDeletedMessageIsNotAnsweredAndLeavesTheHistory(t *testing.T) {
 
 	t.Run("someone else's", func(t *testing.T) {
 		tb, br := newMainBridge(t, "")
-		startLongRun(t, tb, br, Inbound{InboundContent: InboundContent{JID: testGroup, Sender: "15551234567", Text: "a long report", Source: SourceWhatsApp}})
-		tb.handleInbound(t.Context(), Inbound{InboundContent: InboundContent{JID: testGroup, Sender: "15551234567", Text: "book Tuesday", Source: SourceWhatsApp, ID: "3EB0MINE"}})
-		tb.handleChange(Change{Kind: ChangeRevoke, Chat: testGroup, Sender: otherNumber, Target: "3EB0MINE"})
+		startLongRun(t, tb, br, Inbound{Inbound: chat.Inbound{JID: testGroup, Sender: "15551234567", Text: "a long report", Source: chat.SourceWhatsApp}})
+		tb.handleInbound(t.Context(), Inbound{Inbound: chat.Inbound{JID: testGroup, Sender: "15551234567", Text: "book Tuesday", Source: chat.SourceWhatsApp, ID: "3EB0MINE"}})
+		tb.handleChange(chat.Change{Kind: chat.ChangeRevoke, Chat: testGroup, Sender: otherNumber, Target: "3EB0MINE"})
 		if q := br.Snapshot().Queue; len(q) != 1 {
 			t.Errorf("queue = %+v: another member's deletion took the message", q)
 		}
@@ -135,7 +136,7 @@ func TestDeletedMessageIsNotAnsweredAndLeavesTheHistory(t *testing.T) {
 func TestEditedMessage(t *testing.T) {
 	t.Run("waiting", func(t *testing.T) {
 		tb, br := newMainBridge(t, "")
-		startLongRun(t, tb, br, Inbound{InboundContent: InboundContent{JID: testDMChat, Sender: "15551234567", Text: "a long report", Source: SourceWhatsApp}})
+		startLongRun(t, tb, br, Inbound{Inbound: chat.Inbound{JID: testDMChat, Sender: "15551234567", Text: "a long report", Source: chat.SourceWhatsApp}})
 		wa := tb.whatsApp()
 		wa.handleMessage(dmEvent("3EB0WAIT", textMsg("book Tuesday")))
 		waitFor(t, 5*time.Second, "the message to wait", func() bool { return len(br.Snapshot().Queue) == 1 })
@@ -170,7 +171,7 @@ func TestEditedMessage(t *testing.T) {
 		if ev := historyTexts(t, br, history.Event); !slices.Equal(ev, []string{`edited a message to: "book Wednesday"`}) {
 			t.Errorf("events = %q, want the edit noted", ev)
 		}
-		if preface := br.buildPrompt(br.settings.Load(), Inbound{InboundContent: InboundContent{JID: testDMChat, Sender: "15551234567", Text: "next"}}); !strings.Contains(preface, `"from":"15551234567","did":"edited a message to: \"book Wednesday\""`) {
+		if preface := br.buildPrompt(br.settings.Load(), Inbound{Inbound: chat.Inbound{JID: testDMChat, Sender: "15551234567", Text: "next"}}); !strings.Contains(preface, `"from":"15551234567","did":"edited a message to: \"book Wednesday\""`) {
 			t.Errorf("preface = %q, want the edit", preface)
 		}
 	})
@@ -207,14 +208,14 @@ func TestEditOfAMessageTheHistoryLacks(t *testing.T) {
 			}
 			br.appendHistory(askIn, "main", "🔐 Please send me the verification code", history.Out)
 			if c.code {
-				tb.handleInbound(t.Context(), Inbound{InboundContent: InboundContent{JID: testDMChat, ChatAlt: c.alt, Sender: "15551234567", Text: "483920", Source: SourceWhatsApp, ID: "3EB0OTP"}})
+				tb.handleInbound(t.Context(), Inbound{Inbound: chat.Inbound{JID: testDMChat, ChatAlt: c.alt, Sender: "15551234567", Text: "483920", Source: chat.SourceWhatsApp, ID: "3EB0OTP"}})
 			}
-			tb.handleChange(Change{Kind: ChangeEdit, Chat: testDMChat, ChatAlt: c.alt, Sender: "15551234567", Target: "3EB0OTP", Text: c.edit})
+			tb.handleChange(chat.Change{Kind: chat.ChangeEdit, Chat: testDMChat, ChatAlt: c.alt, Sender: "15551234567", Target: "3EB0OTP", Text: c.edit})
 
 			if h := readHistory(t, br); len(h) != 1 || h[0].Type != history.Out {
 				t.Errorf("history = %+v, want only the request", h)
 			}
-			if preface := br.buildPrompt(br.settings.Load(), Inbound{InboundContent: InboundContent{JID: testDMChat, Sender: "15551234567", Text: "next"}}); strings.Contains(preface, "4839") || strings.Contains(preface, c.edit) {
+			if preface := br.buildPrompt(br.settings.Load(), Inbound{Inbound: chat.Inbound{JID: testDMChat, Sender: "15551234567", Text: "next"}}); strings.Contains(preface, "4839") || strings.Contains(preface, c.edit) {
 				t.Errorf("preface = %q, want no trace of the edit", preface)
 			}
 			if a := tb.activity.Recent(10, "main"); len(a) != 1 {
@@ -242,11 +243,11 @@ func TestEditOfAMessageTheHistoryLacks(t *testing.T) {
 // its new text.
 func TestDebouncerAppliesChanges(t *testing.T) {
 	d, f := newTestDebouncer(80*time.Millisecond, time.Second)
-	base := Inbound{InboundContent: InboundContent{JID: testDMChat, Sender: "15551234567"}}
+	base := Inbound{Inbound: chat.Inbound{JID: testDMChat, Sender: "15551234567"}}
 	only := base
 	only.Text, only.ID = "a secret", "A"
 	d.Add(only)
-	if !d.Change(Change{Kind: ChangeRevoke, Chat: testDMChat, Sender: "15551234567", Target: "A"}) {
+	if !d.Change(chat.Change{Kind: chat.ChangeRevoke, Chat: testDMChat, Sender: "15551234567", Target: "A"}) {
 		t.Fatal("the deletion did not find the message")
 	}
 	if d.Pending() != 0 {
@@ -258,7 +259,7 @@ func TestDebouncerAppliesChanges(t *testing.T) {
 	second.Text, second.ID = "for four", "C"
 	d.Add(first)
 	d.Add(second)
-	d.Change(Change{Kind: ChangeEdit, Chat: testDMChat, Sender: "15551234567", Target: "B", Text: "book Wednesday"})
+	d.Change(chat.Change{Kind: chat.ChangeEdit, Chat: testDMChat, Sender: "15551234567", Target: "B", Text: "book Wednesday"})
 	waitFor(t, 2*time.Second, "the flush", func() bool { return f.n() == 1 })
 	if got := f.got[0]; got.Text != "book Wednesday\n\nfor four" {
 		t.Errorf("flushed %q, want the edited batch", got.Text)
@@ -305,7 +306,7 @@ func TestLocationInADMReachesTheBrain(t *testing.T) {
 // leaves it, and a waiting one that was edited shows its new text.
 func TestActivityFollowsChanges(t *testing.T) {
 	tb, br := newMainBridge(t, "")
-	startLongRun(t, tb, br, Inbound{InboundContent: InboundContent{JID: testDMChat, Sender: "15551234567", Text: "a long report", Source: SourceWhatsApp}})
+	startLongRun(t, tb, br, Inbound{Inbound: chat.Inbound{JID: testDMChat, Sender: "15551234567", Text: "a long report", Source: chat.SourceWhatsApp}})
 	wa := tb.whatsApp()
 	wa.handleMessage(dmEvent("3EB0A", textMsg("my card number is 4111")))
 	wa.handleMessage(dmEvent("3EB0B", textMsg("book Tuesday")))

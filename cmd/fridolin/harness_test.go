@@ -16,6 +16,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Icewater1337/fridolin/internal/chat"
 	"github.com/Icewater1337/fridolin/internal/fsx"
 	"go.mau.fi/whatsmeow/types/events"
 	waLog "go.mau.fi/whatsmeow/util/log"
@@ -76,7 +77,7 @@ func newHarness(t *testing.T, cfgJSON string) *harness {
 	cfg := map[string]any{
 		"data_dir":        filepath.Join(home, ".fridolin"),
 		"claude_path":     fakeClaudeEnv(t, 10),
-		"allowed_numbers": []string{NormalizeJID(harnessDM)},
+		"allowed_numbers": []string{chat.NormalizeJID(harnessDM)},
 		"allowed_groups":  []string{harnessGroup},
 		"debounce":        map[string]int{"quiet_ms": 0},
 	}
@@ -425,7 +426,7 @@ func TestHarnessAnswersADM(t *testing.T) {
 	h := newHarness(t, "")
 	dir := h.AddBrain(BrainManifest{ID: "main", Name: "Main", Routing: BrainRouting{HandlesDMs: true}})
 	h.Inject(inbound{JID: harnessDM, Text: "hello"})
-	if got := h.WaitSent(harnessDM, "hello"); got != "echo:"+dir+":"+NormalizeJID(harnessDM)+" says: hello" {
+	if got := h.WaitSent(harnessDM, "hello"); got != "echo:"+dir+":"+chat.NormalizeJID(harnessDM)+" says: hello" {
 		t.Errorf("reply = %q", got)
 	}
 	if h.Config().Path != filepath.Join(h.Root(), "config.json") {

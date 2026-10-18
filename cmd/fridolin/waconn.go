@@ -8,6 +8,7 @@ import (
 	"os"
 	"time"
 
+	"github.com/Icewater1337/fridolin/internal/chat"
 	"github.com/Icewater1337/fridolin/internal/platform"
 	"github.com/mdp/qrterminal/v3"
 	"go.mau.fi/whatsmeow"
@@ -117,7 +118,7 @@ func (wa *WhatsAppClient) onlineLocked() chan struct{} {
 }
 
 // State returns the current connection state.
-func (wa *WhatsAppClient) State() LinkState {
+func (wa *WhatsAppClient) State() chat.LinkState {
 	wa.mu.Lock()
 	defer wa.mu.Unlock()
 	return wa.state

@@ -7,6 +7,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"github.com/Icewater1337/fridolin/internal/chat"
 	"github.com/Icewater1337/fridolin/internal/logx"
 	"io"
 	"log"
@@ -699,12 +700,12 @@ func checkReport(w io.Writer, path string, cfg *Config, o checkOptions) error {
 		return err
 	}
 	for _, jid := range o.routes {
-		isGroup := IsGroupJID(jid)
+		isGroup := chat.IsGroupJID(jid)
 		allowed := ""
 		if isGroup && !slices.Contains(cfg.AllowedGroups, jid) {
 			allowed = " (not in allowed_groups: ignored)"
 		}
-		if !isGroup && !numberAllowed(cfg, NormalizeJID(jid)) {
+		if !isGroup && !numberAllowed(cfg, chat.NormalizeJID(jid)) {
 			allowed = " (not in allowed_numbers: ignored)"
 		}
 		if br := mgr.BrainFor(jid, isGroup); br != nil {
