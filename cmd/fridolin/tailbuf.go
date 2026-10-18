@@ -1,6 +1,9 @@
 package main
 
-import "sync"
+import (
+	"sync"
+	"unicode/utf8"
+)
 
 // stderrTailBytes is how much of a run's stderr the bridge keeps: plenty
 // for the last error the CLI printed, and a bound on what the CLI, or a
@@ -56,7 +59,7 @@ func (t *tailBuffer) String() string {
 		return string(b)
 	}
 	i := 0
-	for i < len(b) && i < 4 && !isRuneStart(b[i]) {
+	for i < len(b) && i < 4 && !utf8.RuneStart(b[i]) {
 		i++
 	}
 	return "…" + string(b[i:])
