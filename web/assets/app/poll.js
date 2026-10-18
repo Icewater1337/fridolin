@@ -21,7 +21,7 @@ export function retryPolls() { live.forEach((p) => p.retry()); }
 // this (or its own interval, when that is longer), so a bridge that is
 // down is not asked every few seconds by every poll. One answer from it
 // (retryPolls) brings them all back.
-export const MAX_BACKOFF_MS = 30000;
+const MAX_BACKOFF_MS = 30000;
 
 /** How long a poll waits after failures failed runs in a row, given its interval. */
 export function backoff(interval, failures) {

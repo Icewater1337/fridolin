@@ -1,0 +1,7 @@
+GET /api/whatsapp/qr
+404 Not Found
+Content-Type: application/json
+
+{
+  "error": "no pairing code right now"
+}

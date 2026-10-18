@@ -80,6 +80,9 @@ input[type="checkbox"], input[type="radio"] { accent-color: var(--accent); width
 .right { text-align: right; }
 .nowrap { white-space: nowrap; }
 .stack { display: flex; flex-direction: column; gap: 6px; }
+/* A part of a card that paint() repaints on its own. Its children are laid
+   out as the card's own, so the card's gaps hold. */
+.region { display: contents; }
 
 .boot { min-height: 100dvh; display: grid; place-items: center; color: var(--muted); }
 .noscript { padding: 24px; text-align: center; }

@@ -10,4 +10,7 @@ type connectJob struct {
 	AuthURL string `json:"auth_url,omitempty"`
 	Error   string `json:"error,omitempty"`
 	cancel  context.CancelFunc
+	// done, when set, is closed once the sign-in's goroutine has ended, so
+	// that whoever cancels it can wait for what it still writes.
+	done chan struct{}
 }

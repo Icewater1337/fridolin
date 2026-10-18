@@ -4,6 +4,8 @@ import { plural } from './format.js';
 
 export const BRAIN_ID_RE = /^[a-z0-9][a-z0-9_-]{0,39}$/;
 export const EFFORTS = [['', 'Inherit'], ['low', 'Low'], ['medium', 'Medium'], ['high', 'High'], ['xhigh', 'Extra high'], ['max', 'Max']];
+// What a brain does with untagged group messages (brain.json "observe").
+export const OBSERVE = [['history', 'Keep them in the history'], ['run', 'Also run the brain on each, observe-only']];
 export const DEFAULT_BACKUP_EXCLUDES = ['node_modules/', '*.log', '.DS_Store', '.venv/', '__pycache__/'];
 
 /** A brain id suggested from a name: lowercase, dashes, at most 40 characters. */
@@ -23,6 +25,23 @@ export function slugify(s) {
 /** A brain as a choice in a list: its name, with the id when that differs. */
 export function brainLabel(b) {
   return b.name && b.name !== b.id ? `${b.name} (${b.id})` : b.id;
+}
+
+// The id that stands for the bridge's own settings where backups list
+// brains by id: bridgeBackupID in backup.go, which says why it must not
+// change. No brain can have it, since brain ids start with a letter or
+// digit.
+export const BRIDGE_BACKUP_ID = '_bridge';
+
+/**
+ * Whose backup id is, as a backup job or a failed backup names it: the
+ * bridge's settings, or the brain of that id in brains (the id itself
+ * when it is not there).
+ */
+export function backupOwner(id, brains) {
+  if (id === BRIDGE_BACKUP_ID) return 'Bridge settings';
+  const b = (brains || []).find((x) => x.id === id);
+  return b ? (b.name || b.id) : id;
 }
 
 // What a brain's issue kinds (and status, which names the worst of them)

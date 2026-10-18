@@ -1,0 +1,15 @@
+POST /send
+{"jid": "15551234567@s.whatsapp.net", "text": "All work and no play. All work and no play. All work and no play. All work and no play. All work and no play. All work and no play. All work and no play. All work and no play. All work and no play. All work and no play. All work and no play. All work an… (313 bytes)
+200 OK
+Content-Type: application/json
+
+{
+  "status": "sent"
+}
+
+sent:
+  15551234567@s.whatsapp.net "[1/3] All work and no play. All work and no play. All work and no play. All work and no play."
+  15551234567@s.whatsapp.net "[2/3] All work and no play. All work and no play. All work and no play. All work and no play."
+  15551234567@s.whatsapp.net "[3/3] All work and no play. All work and no play. All work and no play. All work and no play."
+history:
+  main: {"ts":"<TIME>","from":"script","chat":"15551234567@s.whatsapp.net","text":"All work and no play. All work and no play. All work and no play. All work and no play. All work and no play. All work and no play. All work and no play. All work and no play. All work and no play. All work and no play. All work and no play. All work and no play. ","type":"out","via":"script"}

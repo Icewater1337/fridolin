@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"fmt"
 	"strings"
 )
 
@@ -35,14 +36,23 @@ type askInput struct {
 }
 
 type askQuestion struct {
-	Question string `json:"question"`
-	Header   string `json:"header"`
+	Question    string      `json:"question"`
+	Header      string      `json:"header"`
+	Options     []askOption `json:"options"`
+	MultiSelect bool        `json:"multiSelect"`
 }
 
-// extractAskQuestion pulls the question text out of an AskUserQuestion input.
-// A question that is blank is left out: once anything is forwarded, the
-// run's final reply is not sent, so a blank one would leave the chat with
-// an empty message and no answer.
+type askOption struct {
+	Label       string `json:"label"`
+	Description string `json:"description"`
+}
+
+// extractAskQuestion turns an AskUserQuestion input into the message the
+// chat gets: each question with its header and its options numbered, so
+// that a reply can name one. Nobody answers the tool call in a -p run; the
+// answer arrives as the chat's next message. A question that is blank is
+// left out, and so is a blank option: an empty message, or an empty
+// choice, asks nothing.
 func extractAskQuestion(raw json.RawMessage) string {
 	if len(raw) == 0 {
 		return ""
@@ -60,7 +70,22 @@ func extractAskQuestion(raw json.RawMessage) string {
 		if header != "" && header != text {
 			text = header + ": " + text
 		}
+		n := 0
+		for _, o := range q.Options {
+			label, desc := strings.TrimSpace(o.Label), strings.TrimSpace(o.Description)
+			if label == "" {
+				continue
+			}
+			n++
+			text += fmt.Sprintf("\n%d. %s", n, label)
+			if desc != "" {
+				text += " – " + desc
+			}
+		}
+		if n > 1 && q.MultiSelect {
+			text += "\n(You can pick more than one.)"
+		}
 		parts = append(parts, text)
 	}
-	return strings.Join(parts, "\n")
+	return strings.Join(parts, "\n\n")
 }

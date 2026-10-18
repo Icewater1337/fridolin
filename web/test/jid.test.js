@@ -73,6 +73,9 @@ test('WhatsApp mode labels', async (t) => {
   const cases = [
     ['connected', 'ok', 'WhatsApp connected'],
     ['logged-out', 'bad', 'Logged out of WhatsApp'],
+    ['outdated', 'bad', 'Fridolin needs an update'],
+    ['banned', 'bad', 'Temporarily banned by WhatsApp'],
+    ['failed', 'bad', 'WhatsApp refused the connection'],
     ['disabled', 'neutral', 'WhatsApp off'],
     ['something-new', 'neutral', 'WhatsApp: something-new'],
     ['', 'neutral', 'WhatsApp'],

@@ -151,8 +151,8 @@ func TestStatusWarnsAboutAnOldClaude(t *testing.T) {
 	} {
 		t.Run(c.version, func(t *testing.T) {
 			cli := versionCLI(t, "", c.version)
-			tb := newTestBridge(t, `, "claude_path": "`+cli+`"`)
-			w := tb.do("GET", "/api/status", nil)
+			h := newHarness(t, `{"claude_path": "`+cli+`"}`)
+			w := h.Do("GET", "/api/status", nil)
 			var resp struct {
 				Warnings []string `json:"warnings"`
 			}

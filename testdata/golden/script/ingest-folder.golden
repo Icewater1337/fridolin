@@ -1,0 +1,11 @@
+POST /ingest
+{"brain": "main", "paths": ["<HOME>/.fridolin/media/folder"]}
+400 Bad Request
+Content-Type: application/json
+
+{
+  "error": "not a regular file: folder"
+}
+
+sent:
+history:

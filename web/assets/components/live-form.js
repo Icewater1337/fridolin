@@ -34,10 +34,9 @@ import { callout } from './common.js';
  * newest data.
  */
 export function liveForm({ build, edits = (d) => d, onChange = () => {}, staleNote = {} }) {
-  const note = callout('warn', staleNote.title || 'These settings changed elsewhere',
+  const note = callout('warn', staleNote.title || 'These settings changed elsewhere', { hidden: true },
     staleNote.text || 'Saving now would overwrite that change.',
     h('div.actions', btn(staleNote.action || 'Load the new settings', { small: true, onClick: () => discard() })));
-  note.hidden = true;
   const box = h('div.live-form-body');
   const el = h('div.live-form', note, box);
 

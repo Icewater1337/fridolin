@@ -5,6 +5,7 @@
 import { post, put } from '../app/api.js';
 import { brainsResource, resource } from '../app/resources.js';
 import { h, mount, paint } from '../lib/dom.js';
+import { brainLabel } from '../lib/brain.js';
 import { icon } from '../components/icons.js';
 import { toast } from '../components/toast.js';
 import { btn } from '../components/buttons.js';
@@ -70,9 +71,13 @@ export default {
     };
 
     // A status known from an earlier visit paints at once, so everything
-    // render() uses is defined above.
+    // render() uses is defined above. It is asked for often only while
+    // Plaud's sign-in runs, so the card shows at once when it is done;
+    // otherwise only a check changes it, at most every 30 s
+    // (plaud.interval_seconds).
+    const signingIn = () => !!(status && status.connect && status.connect.state === 'running');
     ctx.follow(brainsResource, (list) => { brains = list || []; if (status) render(); }, 60000);
-    ctx.follow(plaud, (s) => { status = s; render(); }, 4000);
+    ctx.follow(plaud, (s) => { status = s; render(); }, () => (signingIn() ? 2000 : 20000));
 
     function render() {
       const s = status;
@@ -144,7 +149,7 @@ export default {
       // or listed but not running (not approved, or it has an issue).
       const missing = (label) => (s.brain_missing ? `${label} (missing)` : label);
       const auto = brains.find((b) => b.id === s.auto_brain);
-      const options = [['', `Automatic (${auto ? auto.name || auto.id : s.auto_brain || 'the DM brain'})`], ...brains.map((b) => [b.id, b.id === st.brain ? missing(b.name || b.id) : b.name || b.id])];
+      const options = [['', `Automatic (${auto ? auto.name || auto.id : s.auto_brain || 'the DM brain'})`], ...brains.map((b) => [b.id, b.id === st.brain ? missing(brainLabel(b)) : brainLabel(b)])];
       // The picked brain keeps its option while it is gone (or the list is
       // still loading), so Save does not quietly switch to Automatic.
       if (st.brain && !brains.some((b) => b.id === st.brain)) options.push([st.brain, missing(st.brain)]);

@@ -1,0 +1,9 @@
+It is now Sun 2026-10-18 09:31 CEST (UTC+02:00). This chat is a direct chat on WhatsApp.
+
+The new message is a JSON object: "at" is when it was sent, "from" who sent it and "text" what it said. The file in its "files" came with it, saved at that path.
+
+Nobody can answer AskUserQuestion while you work: a question you ask with it goes to the chat at once, with its options, and the answer comes as a new message. Your final reply is sent as well, so after asking, end your turn without repeating the question.
+
+<new_message>
+{"from":"15551234567","text":"hello","files":["/media/voice.ogg"]}
+</new_message>

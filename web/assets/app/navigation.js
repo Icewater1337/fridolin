@@ -17,11 +17,11 @@ import { matchRoute, activeNav, docTitle } from './router.js';
  * route of routes that win's address names into shell (createShell's).
  * confirm() asks whether to leave unsaved changes, resolving true to
  * leave. onAddress() sees each new address first and returns true when
- * it took care of it (a #token=… link), which renders nothing. Returns
- * {start(), pause(), resume(), paused(), dirty(), go(hash),
- * replace(hash)}: start renders the page the dashboard opened on, pause
- * leaves the page for the connect screen and renders nothing until
- * resume, and go and replace are the guard's.
+ * it took care of it (a #login=… or #token=… link), which renders
+ * nothing. Returns {start(), pause(), resume(), paused(), dirty(),
+ * go(hash), replace(hash)}: start renders the page the dashboard opened
+ * on, pause leaves the page for the connect screen and renders nothing
+ * until resume, and go and replace are the guard's.
  */
 export function createNavigation({ win, shell, routes, confirm, onAddress = () => false }) {
   let current = null; // the page context in use

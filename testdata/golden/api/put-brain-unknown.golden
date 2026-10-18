@@ -1,0 +1,8 @@
+PUT /api/brains/nope
+{"manifest":{"id":"nope","name":"Nope"}}
+422 Unprocessable Entity
+Content-Type: application/json
+
+{
+  "error": "no brain \"nope\""
+}

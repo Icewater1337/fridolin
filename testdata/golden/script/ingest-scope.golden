@@ -1,0 +1,11 @@
+POST /ingest
+{"scope": "main", "text": "x"}
+400 Bad Request
+Content-Type: application/json
+
+{
+  "error": "\"scope\" is no longer read: name the brain in \"brain\""
+}
+
+sent:
+history:

@@ -3,12 +3,9 @@ package main
 import (
 	"cmp"
 	"encoding/json"
-	"fmt"
 	"log"
 	"os"
 	"path/filepath"
-	"reflect"
-	"regexp"
 	"runtime"
 	"strings"
 	"syscall"
@@ -103,12 +100,13 @@ func TestIsJunkMessage(t *testing.T) {
 	}
 }
 
-// FuzzIsJunkMessage: untagged group messages the filter calls junk are
-// dropped unread, so it may only catch what carries nothing: a single
-// character, no letter or digit in any script, or one of the short
-// acknowledgements, which are ASCII once lowercased the way the filter
-// compares them. Whitespace around a message and its ASCII letter case
-// never change the verdict.
+// FuzzIsJunkMessage: untagged group messages the filter calls junk never
+// get a run, not even in a brain that observes with runs (observeRuns),
+// so it may only catch what carries nothing: a single character, no
+// letter or digit in any script, or one of the short acknowledgements,
+// which are ASCII once lowercased the way the filter compares them.
+// Whitespace around a message and its ASCII letter case never change the
+// verdict.
 func FuzzIsJunkMessage(f *testing.F) {
 	for _, s := range []string{"ok", "OK", "o\u212a", "than\u212a you", "thanks", "thank you", "👍", "...", "?", "a", "🎉🎉", "what time is it", "ok but why", "book it for 3pm", "PR 42?", "", " \n", "\xff\xfe"} {
 		f.Add(s)
@@ -158,236 +156,6 @@ func isASCII(s string) bool {
 		}
 	}
 	return true
-}
-
-// ── polls ─────────────────────────────────────────────────────────────────
-
-func TestExtractPolls(t *testing.T) {
-	text := `Sure, let's vote.
-
-[POLL]
-Question: When should we meet?
-- Monday 2pm
-- Tuesday 3pm
-[/POLL]
-
-Let me know.`
-
-	polls, remaining := extractPolls(text)
-	if len(polls) != 1 {
-		t.Fatalf("got %d polls, want 1", len(polls))
-	}
-	p := polls[0]
-	if p.Question != "When should we meet?" {
-		t.Errorf("question = %q", p.Question)
-	}
-	if len(p.Options) != 2 || p.Options[0] != "Monday 2pm" {
-		t.Errorf("options = %v", p.Options)
-	}
-	if p.MaxSelectable != 1 {
-		t.Errorf("MaxSelectable = %d, want 1", p.MaxSelectable)
-	}
-	if strings.Contains(remaining, "POLL") {
-		t.Errorf("poll block left in remaining text: %q", remaining)
-	}
-	if !strings.Contains(remaining, "Let me know.") {
-		t.Errorf("surrounding text lost: %q", remaining)
-	}
-}
-
-// The end of a block is found in any letter case, like its start: a
-// "[Poll]…[/poll]" block is a poll, not markup in the chat.
-func TestExtractPollsAnyCase(t *testing.T) {
-	polls, remaining := extractPolls("Vote:\n[Poll max=2]\nQuestion: Which?\n- A\n- B\n[/poll] thanks")
-	if len(polls) != 1 || polls[0].Question != "Which?" || polls[0].MaxSelectable != 2 {
-		t.Errorf("got %+v", polls)
-	}
-	if remaining != "Vote:\n thanks" {
-		t.Errorf("remaining = %q", remaining)
-	}
-}
-
-func TestExtractPollsMaxSelectable(t *testing.T) {
-	polls, _ := extractPolls("[POLL max=2]\nQuestion: Which?\n- A\n- B\n- C\n[/POLL]")
-	if len(polls) != 1 || polls[0].MaxSelectable != 2 {
-		t.Fatalf("got %+v", polls)
-	}
-}
-
-func TestExtractPollsClampsMaxToOptionCount(t *testing.T) {
-	// WhatsApp rejects a poll whose max exceeds the number of options.
-	polls, _ := extractPolls("[POLL max=9]\nQuestion: Which?\n- A\n- B\n[/POLL]")
-	if len(polls) != 1 {
-		t.Fatalf("got %d polls, want 1", len(polls))
-	}
-	if polls[0].MaxSelectable != 2 {
-		t.Errorf("MaxSelectable = %d, want 2", polls[0].MaxSelectable)
-	}
-}
-
-func TestExtractPollsTruncatesToWhatsAppLimit(t *testing.T) {
-	var sb strings.Builder
-	sb.WriteString("[POLL]\nQuestion: Pick\n")
-	for i := 0; i < 20; i++ {
-		sb.WriteString("- option\n")
-	}
-	sb.WriteString("[/POLL]")
-
-	polls, _ := extractPolls(sb.String())
-	if len(polls) != 1 {
-		t.Fatalf("got %d polls, want 1", len(polls))
-	}
-	if len(polls[0].Options) != maxPollOptions {
-		t.Errorf("options = %d, want %d", len(polls[0].Options), maxPollOptions)
-	}
-}
-
-func TestExtractPollsRejectsIncomplete(t *testing.T) {
-	// One option is not a poll; neither is a block with no question.
-	for _, text := range []string{
-		"[POLL]\nQuestion: Only one?\n- A\n[/POLL]",
-		"[POLL]\n- A\n- B\n[/POLL]",
-		"[POLL]\nQuestion: unterminated\n- A\n- B",
-	} {
-		if polls, _ := extractPolls(text); len(polls) != 0 {
-			t.Errorf("extractPolls(%q) returned %d polls, want 0", text, len(polls))
-		}
-	}
-}
-
-func TestExtractPollsNoPoll(t *testing.T) {
-	polls, remaining := extractPolls("just a normal reply")
-	if len(polls) != 0 {
-		t.Errorf("got %d polls, want 0", len(polls))
-	}
-	if remaining != "just a normal reply" {
-		t.Errorf("remaining = %q", remaining)
-	}
-}
-
-// anyPollCloseRe finds the end of a poll block in any letter case, the way
-// pollHeaderRe finds its start.
-var anyPollCloseRe = regexp.MustCompile(`(?i)\[/POLL\]`)
-
-// FuzzExtractPolls feeds extractPolls model output. Whatever the model
-// writes, each poll that comes out has a question, 2 to 12 trimmed
-// options and a max within them, and no complete poll block reaches the
-// chat (see checkPolls). A well-formed block built from the fuzzed
-// question and options, with nothing around it that looks like one, comes
-// back as exactly that poll, and the text around it as it was.
-func FuzzExtractPolls(f *testing.F) {
-	seeds := []struct {
-		before, question, options, after string
-		maxSel                           uint8
-	}{
-		{"Sure, let's vote.\n\n", "When should we meet?", "Monday 2pm\nTuesday 3pm", "\n\nLet me know.", 0},
-		{"", "Which?", "A\nB\nC", "", 2},
-		{"", "Which?", "A\nB", "", 9},
-		{"", "Pick", strings.Repeat("option\n", 20), "", 0},
-		{"", "Only one?", "A", "", 0},
-		{"", "", "A\nB", "", 0},
-		{"[POLL]\nQuestion: unterminated\n- A\n- B", "Q", "a\nb", "", 0},
-		{"[POLL max=3]\nQuestion: Q\n- a\n- b\n[/POLL] and ", "Q", "a\nb", " [POLL]", 1},
-		{"[PO[POLL]", "Q", "a\nb", "LL]", 0},
-		{"İİ ", "Fråga?", "é\n\U0001F600", " \xff", 3},
-	}
-	for _, s := range seeds {
-		f.Add(s.before, s.question, s.options, s.after, s.maxSel)
-	}
-	f.Fuzz(func(t *testing.T, before, question, options, after string, maxSel uint8) {
-		checkPolls(t, before)
-
-		q := strings.TrimSpace(strings.ReplaceAll(question, "\n", " "))
-		var opts []string
-		for _, o := range strings.Split(options, "\n") {
-			if o = strings.TrimSpace(o); o != "" {
-				opts = append(opts, o)
-			}
-		}
-		var block strings.Builder
-		if maxSel > 0 {
-			fmt.Fprintf(&block, "[POLL max=%d]\n", maxSel)
-		} else {
-			block.WriteString("[POLL]\n")
-		}
-		block.WriteString("Question: " + q + "\n")
-		for _, o := range opts {
-			block.WriteString("- " + o + "\n")
-		}
-		block.WriteString("[/POLL]")
-		text := before + block.String() + after
-		polls, remaining := checkPolls(t, text)
-
-		// Another start or end in the text, the fuzzed parts' own included,
-		// makes a different block.
-		if len(pollHeaderRe.FindAllString(text, -1)) != 1 || len(anyPollCloseRe.FindAllString(text, -1)) != 1 {
-			return
-		}
-		if want := strings.TrimSpace(before + after); remaining != want {
-			t.Errorf("remaining text = %q, want %q", remaining, want)
-		}
-		if q == "" || len(opts) < 2 {
-			if len(polls) != 0 {
-				t.Errorf("got %+v from a block without a question or two options", polls)
-			}
-			return
-		}
-		want := pollData{Question: q, Options: opts[:min(len(opts), maxPollOptions)], MaxSelectable: 1}
-		if maxSel > 0 {
-			want.MaxSelectable = int(maxSel)
-		}
-		want.MaxSelectable = min(want.MaxSelectable, len(want.Options))
-		if len(polls) != 1 || !reflect.DeepEqual(polls[0], want) {
-			t.Errorf("got %+v, want [%+v]", polls, want)
-		}
-	})
-}
-
-// checkPolls runs extractPolls on text and checks what holds for any text:
-// each poll has a question and 2 to 12 options, each a trimmed line of its
-// own; there are no more polls than closed blocks; and the remaining text,
-// which goes to the chat, is no longer than the input, still valid UTF-8
-// if the input was, and holds no complete block.
-func checkPolls(t *testing.T, text string) ([]pollData, string) {
-	t.Helper()
-	polls, remaining := extractPolls(text)
-	line := func(s string) bool {
-		return s != "" && s == strings.TrimSpace(s) && !strings.Contains(s, "\n")
-	}
-	for _, p := range polls {
-		if !line(p.Question) {
-			t.Errorf("question %q is not a trimmed line", p.Question)
-		}
-		if n := len(p.Options); n < 2 || n > maxPollOptions {
-			t.Errorf("poll %q has %d options, want 2 to %d", p.Question, n, maxPollOptions)
-		}
-		for _, o := range p.Options {
-			if !line(o) {
-				t.Errorf("option %q is not a trimmed line", o)
-			}
-		}
-		if p.MaxSelectable < 0 || p.MaxSelectable > len(p.Options) {
-			t.Errorf("poll %q: max %d for %d options", p.Question, p.MaxSelectable, len(p.Options))
-		}
-		if utf8.ValidString(text) && !utf8.ValidString(p.Question+strings.Join(p.Options, "")) {
-			t.Errorf("poll %+v is not valid UTF-8", p)
-		}
-	}
-	if closed := len(anyPollCloseRe.FindAllString(text, -1)); len(polls) > closed {
-		t.Errorf("%d polls from %d closed blocks", len(polls), closed)
-	} else if closed == 0 && remaining != strings.TrimSpace(text) {
-		t.Errorf("text without a closed block came back as %q", remaining)
-	}
-	if len(remaining) > len(text) {
-		t.Errorf("remaining text %q is longer than the input", remaining)
-	}
-	if utf8.ValidString(text) && !utf8.ValidString(remaining) {
-		t.Errorf("remaining text %q is not valid UTF-8", remaining)
-	}
-	if loc := pollHeaderRe.FindStringIndex(remaining); loc != nil && anyPollCloseRe.MatchString(remaining[loc[1]:]) {
-		t.Errorf("remaining text %q still holds a poll block", remaining)
-	}
-	return polls, remaining
 }
 
 // ── chunking ──────────────────────────────────────────────────────────────
@@ -950,8 +718,9 @@ func TestRouteHonoursTheNamedBrain(t *testing.T) {
 	}
 }
 
-// A DM goes by its chat JID and the sender's phone number, which WhatsApp
-// may use instead of each other; a group goes by its JID only.
+// A DM goes by its chat JID, its other JID and the sender's phone number,
+// which WhatsApp may use instead of each other; a group goes by its JID
+// only.
 func TestChatJIDs(t *testing.T) {
 	const (
 		pn    = "15551234567@s.whatsapp.net"
@@ -966,6 +735,7 @@ func TestChatJIDs(t *testing.T) {
 		{"DM by number", Inbound{JID: pn, Sender: "15551234567"}, pn},
 		{"DM by LID", Inbound{JID: lid, Sender: "15551234567"}, lid + "," + pn},
 		{"DM without a sender", Inbound{JID: lid}, lid},
+		{"DM by number, its LID known", Inbound{JID: pn, ChatAlt: lid, Sender: "15551234567"}, pn + "," + lid},
 		{"group", Inbound{JID: group, Sender: "15551234567"}, group},
 	} {
 		t.Run(c.name, func(t *testing.T) {
@@ -1151,6 +921,7 @@ func TestParseIdentityMap(t *testing.T) {
 | 15551234567     | Alex   | work  |
 | +15559876543    | Sam    | --- see the 2024 notes |
 | :-------------- | :----: | ----: |
+| (424) 242-4242  | Kim    |       |
 `))
 	if ids["15551234567"] != "Alex" {
 		t.Errorf("got %q for Alex", ids["15551234567"])
@@ -1163,9 +934,13 @@ func TestParseIdentityMap(t *testing.T) {
 	if _, ok := ids["WhatsApp Number"]; ok {
 		t.Error("header row was parsed as an entry")
 	}
+	// A number is read the way people write it, spaces and dashes and all.
+	if ids["4242424242"] != "Kim" {
+		t.Errorf("got %q for Kim", ids["4242424242"])
+	}
 	// The line under the header, in any alignment, is no entry.
-	if len(ids) != 2 {
-		t.Errorf("got %d entries, want 2: %v", len(ids), ids)
+	if len(ids) != 3 {
+		t.Errorf("got %d entries, want 3: %v", len(ids), ids)
 	}
 	if name, ok := parseIdentityMap([]byte("| + | Nobody |\n"))[""]; ok {
 		t.Errorf("a row without a number was read as %q", name)
@@ -1176,12 +951,13 @@ func TestParseIdentityMap(t *testing.T) {
 }
 
 // FuzzParseIdentityMap: the brain writes its contact map itself, so it can
-// hold anything. Every entry that comes out is a normalised number and a
+// hold anything. Every entry that comes out is an identityKey and a
 // name, each a trimmed cell; and a row with a number and a name in its first
 // two cells is read back, whatever its notes say.
 func FuzzParseIdentityMap(f *testing.F) {
 	table := "# People\n\n| WhatsApp Number | Person | Notes |\n| --------------- | ------ | ----- |\n| 15551234567     | Alex   | work  |\n"
 	f.Add([]byte(table), "+15559876543", "Sam", "")
+	f.Add([]byte(table), "+1 (555) 987-6543", "Sam", "written as people write it")
 	f.Add([]byte(table), "15551234567", "Alex Again", "replaces the first row")
 	f.Add([]byte(""), "15551234567@s.whatsapp.net", "Sam", "met in 2024")
 	f.Add([]byte("|a|b|\n|:--|--:|\r\n| x |"), "WhatsApp Number", "Person", "Notes")
@@ -1189,7 +965,7 @@ func FuzzParseIdentityMap(f *testing.F) {
 	f.Fuzz(func(t *testing.T, table []byte, number, name, notes string) {
 		check := func(ids map[string]string) {
 			for k, v := range ids {
-				if k == "" || strings.ContainsAny(k, "@|\n") || normalizeJID(k) != k || k != strings.TrimSpace(k) {
+				if k == "" || strings.ContainsAny(k, "@|\n") || identityKey(k) != k || k != strings.TrimSpace(k) {
 					t.Errorf("key %q is not a normalised number", k)
 				}
 				if v == "" || strings.ContainsAny(v, "|\n") || v != strings.TrimSpace(v) {
@@ -1207,10 +983,10 @@ func FuzzParseIdentityMap(f *testing.F) {
 		ids := parseIdentityMap([]byte(string(table) + "\n| " + number + " | " + name + " | " + notes + " |\n"))
 		check(ids)
 		// Nothing to read back, or the header and the line under it.
-		if number == "" || normalizeJID(number) == "" || name == "" || number == "WhatsApp Number" || strings.Trim(number+name+notes, "-: \t") == "" {
+		if number == "" || identityKey(number) == "" || name == "" || number == "WhatsApp Number" || strings.Trim(number+name+notes, "-: \t") == "" {
 			return
 		}
-		if got := ids[normalizeJID(number)]; got != name {
+		if got := ids[identityKey(number)]; got != name {
 			t.Errorf("row | %s | %s | %s | read back as %q, want %q", number, name, notes, got, name)
 		}
 	})
@@ -1328,8 +1104,8 @@ func TestIsLoopbackAddr(t *testing.T) {
 }
 
 // Some names are read outside Go: the dashboard labels the run outcomes
-// and the bridge's backup and offers the queue modes. Only this test keeps
-// the two sides in step.
+// and the bridge's backup and offers the queue and observe modes. Only
+// this test keeps the two sides in step.
 func TestNamesReadOutsideGo(t *testing.T) {
 	cases := []struct {
 		file string
@@ -1337,7 +1113,8 @@ func TestNamesReadOutsideGo(t *testing.T) {
 	}{
 		{"web/assets/components/brain.js", []string{outcomeOK + ": [", outcomeError + ": [", outcomeInterrupted + ": [", outcomeQuestion + ": ["}},
 		{"web/assets/pages/settings.js", []string{"def: '" + queueModeQueue + "'", "['" + queueModeQueue + "', ", "['" + queueModeInterrupt + "', "}},
-		{"web/assets/pages/backup.js", []string{"id === '" + bridgeBackupID + "'"}},
+		{"web/assets/lib/brain.js", []string{"export const BRIDGE_BACKUP_ID = '" + bridgeBackupID + "';", "[['" + observeHistory + "', ", "['" + observeRun + "', "}},
+		{"web/assets/pages/brain.js", []string{"m.observe || '" + observeHistory + "'"}},
 	}
 	for _, c := range cases {
 		t.Run(c.file, func(t *testing.T) {
@@ -1351,5 +1128,29 @@ func TestNamesReadOutsideGo(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// The bridge's backup id is spelt out in lib/brain.js alone, which
+// TestNamesReadOutsideGo holds to bridgeBackupID; the other modules
+// import it from there, so none can be left behind when it changes.
+func TestDashboardSpellsTheBridgesBackupIDOnce(t *testing.T) {
+	assets := filepath.Join(repoDir, "web", "assets")
+	err := filepath.WalkDir(assets, func(path string, d os.DirEntry, err error) error {
+		if err != nil || d.IsDir() || filepath.Ext(path) != ".js" || path == filepath.Join(assets, "lib", "brain.js") {
+			return err
+		}
+		js, err := os.ReadFile(path)
+		if err != nil {
+			return err
+		}
+		if strings.Contains(string(js), "'"+bridgeBackupID+"'") {
+			rel, _ := filepath.Rel(repoDir, path)
+			t.Errorf("%s spells out %q; import BRIDGE_BACKUP_ID from lib/brain.js", rel, bridgeBackupID)
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
 	}
 }

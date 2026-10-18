@@ -8,7 +8,7 @@ import { h, mount, paint, reconcile } from '../lib/dom.js';
 import { fmtDuration, plural, parseTs } from '../lib/format.js';
 import { phone } from '../lib/jid.js';
 import { waKind, waLabel } from '../lib/whatsapp.js';
-import { routingSummary, issueLabel } from '../lib/brain.js';
+import { routingSummary, issueLabel, backupOwner } from '../lib/brain.js';
 import { icon } from '../components/icons.js';
 import { toast } from '../components/toast.js';
 import { btn } from '../components/buttons.js';
@@ -147,28 +147,37 @@ export default {
     const renderSandbox = (s) => paint(sandboxCard, s.sandbox || {}, (sb) => {
       let p;
       let text;
-      if (!sb.supported) { p = pill('Not available', 'neutral'); text = 'The sandbox uses macOS sandbox-exec. On this system, run the bridge as a separate user instead.'; } else if (sb.enabled) { p = pill('On', 'ok'); text = 'Brains cannot read other brains’ folders, your keys, mail or documents.'; } else { p = pill('Off', 'warn'); text = 'Brains can read everything your user account can. Turn the sandbox on in Settings.'; }
+      if (!sb.supported) { p = pill('Not available', 'neutral'); text = 'The sandbox uses macOS sandbox-exec. Here brains can read everything the bridge’s user can, the dashboard token included. A separate user for the bridge keeps them out of your own files, not out of the bridge’s.'; } else if (sb.enabled) { p = pill('On', 'ok'); text = 'Brains cannot read other brains’ folders, your keys, mail or documents.'; } else { p = pill('Off', 'warn'); text = 'Brains can read everything your user account can. Turn the sandbox on in Settings.'; }
       return [
         h('div.card-head', h('div.card-title', icon('shield'), h('h2', 'Sandbox')), p),
         h('div.card-body', h('p.muted', text), sb.supported ? h('a.small', { href: '#/settings/sandbox' }, 'Sandbox settings') : null),
       ];
     });
 
-    const renderBackup = (s) => paint(backupCard, s.backup || {}, (b) => {
+    // Whose backup failed: the bridge's settings, or a brain by its name.
+    const failedOwner = (s) => {
+      const id = (s.backup || {}).last_error_brain;
+      return id ? backupOwner(id, s.brains) : '';
+    };
+    const renderBackup = (s) => paint(backupCard, { ...(s.backup || {}), owner: failedOwner(s) }, (b) => {
       let p;
-      if (!b.connected) p = pill('Not set up', 'neutral');
-      else if (b.running) p = pill('Backing up…', 'info', { pulse: true });
+      // Daily backups that lost their Drive link would otherwise just stop.
+      const stranded = !b.connected && b.enabled;
+      if (stranded) p = pill('Not connected', 'bad');
+      else if (!b.connected) p = pill('Not set up', 'neutral');
+      else if (b.running) p = pill(b.restoring ? 'Restoring…' : 'Backing up…', 'info', { pulse: true });
       else if (b.last_error && !b.last_ok) p = pill('Failing', 'bad');
       else if (b.enabled) p = pill('Daily', 'ok');
       else p = pill('Manual only', 'warn');
       return [
         h('div.card-head', h('div.card-title', icon('backup'), h('h2', 'Backup')), p),
         h('div.card-body',
-          !b.connected ? h('p.muted', 'Back up your brains to Google Drive every day.') : null,
+          stranded ? h('p.error-text.small', 'Daily backups are on, but Google Drive is not connected, so none run. Connect it again on the Backup page.') : null,
+          !b.connected && !stranded ? h('p.muted', 'Back up your brains to Google Drive every day.') : null,
           b.connected ? h('p', 'Last good backup: ', b.last_ok ? timeAgo(b.last_ok) : h('span.muted', 'none yet')) : null,
           b.connected && b.next_run ? h('p.muted', 'Next: ', timeAgo(b.next_run)) : null,
-          b.last_error ? h('p.error-text.small', b.last_error) : null,
-          h('a.small', { href: '#/backup' }, b.connected ? 'Backup settings' : 'Set up backups')),
+          b.last_error ? h('p.error-text.small', b.owner ? `${b.owner}: ${b.last_error}` : b.last_error) : null,
+          h('a.small', { href: '#/backup' }, b.connected || stranded ? 'Backup settings' : 'Set up backups')),
       ];
     });
 

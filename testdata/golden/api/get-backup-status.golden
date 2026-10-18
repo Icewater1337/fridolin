@@ -1,0 +1,60 @@
+GET /api/backup/status
+200 OK
+Content-Type: application/json
+
+{
+  "brains": [
+    {
+      "dir": "<HOME>/main",
+      "enabled": true,
+      "exclude": [
+        "node_modules/",
+        "*.log",
+        "- private.txt"
+      ],
+      "id": "main",
+      "last": {
+        "bytes": 0,
+        "files": 0,
+        "finished": "<TIME>",
+        "ok": true,
+        "seconds": "<SECONDS>",
+        "started": "<TIME>",
+        "trigger": "manual",
+        "version": "<STAMP>"
+      },
+      "name": "Main"
+    }
+  ],
+  "bridge": {
+    "bytes": 0,
+    "files": 0,
+    "finished": "<TIME>",
+    "ok": true,
+    "seconds": "<SECONDS>",
+    "started": "<TIME>",
+    "trigger": "manual",
+    "version": "<STAMP>"
+  },
+  "connect": null,
+  "connected": true,
+  "include_bridge_config": true,
+  "job": null,
+  "last_restore": null,
+  "next_run": "<TIME>",
+  "rclone": {
+    "found": true,
+    "install_hint": "<INSTALL_HINT>",
+    "path": "<FAKES>/rclone",
+    "version": "rclone v1.70.3"
+  },
+  "settings": {
+    "daily_at": "03:30",
+    "enabled": true,
+    "include_bridge_config": true,
+    "keep_versions_days": 30,
+    "rclone_path": "<FAKES>/rclone",
+    "remote": "brain-gdrive",
+    "root": "fridolin-backup"
+  }
+}

@@ -142,6 +142,10 @@ func (s siteChatMessenger) SendChunked(ctx context.Context, jid, text string) er
 	return s.Messenger.SendChunked(ctx, jid, text)
 }
 
+// TakesWhole reports that a build chat shows a reply in one piece, as
+// SendChunked sends it: the Build page has no limit to split for.
+func (s siteChatMessenger) TakesWhole(jid string) bool { return brainOfBuildJID(jid) != "" }
+
 func (s siteChatMessenger) SendPoll(ctx context.Context, jid, q string, opts []string, max int) (string, error) {
 	if id := brainOfBuildJID(jid); id != "" {
 		return "", s.toChat(id, q+"\n"+"• "+strings.Join(opts, "\n• "))

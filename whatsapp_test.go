@@ -401,9 +401,9 @@ func FuzzSanitizeMediaName(f *testing.F) {
 }
 
 // FuzzNumberAllowed: allowed_numbers lets a sender DM the bridge only when
-// it lists the number exactly: no prefix, no suffix, no other number.
+// it lists the number: no prefix, no suffix, no other number, however the
+// number was written on either side ("+1 555 123 4567" is 15551234567).
 // allow_any_dm decides what an empty list means and never widens a list.
-// A listed number gets in however the JID it came from was written.
 func FuzzNumberAllowed(f *testing.F) {
 	const n = "15551234567"
 	f.Add(n, n, false)
@@ -412,6 +412,8 @@ func FuzzNumberAllowed(f *testing.F) {
 	f.Add(n[:len(n)-1], n+",15559876543", true) // a listed number cut short
 	f.Add(n+"8", n, true)                       // and one made longer
 	f.Add("+"+n, n, false)
+	f.Add(n, "+1 555 123 4567", false) // a hand-written entry
+	f.Add(n, "1 555 123 456", false)   // that is another number
 	f.Add("", ",", false)
 	f.Fuzz(func(t *testing.T, number, list string, anyDM bool) {
 		var allowed []string
@@ -426,22 +428,35 @@ func FuzzNumberAllowed(f *testing.F) {
 			}
 			return
 		}
-		if listed := slices.Contains(allowed, number); got != listed {
+		// Digits only for what is a phone number, else as written.
+		canon := func(s string) string {
+			if p, err := phoneNumber(s); err == nil {
+				return p
+			}
+			return s
+		}
+		listed := slices.ContainsFunc(allowed, func(a string) bool { return canon(a) == canon(number) })
+		if got != listed {
 			t.Errorf("allowed_numbers %q: %q allowed: %v, listed: %v", allowed, number, got, listed)
 		}
 		other := !anyDM
 		if numberAllowed(&Config{AllowedNumbers: allowed, AllowAnyDM: &other}, number) != got {
 			t.Errorf("allowed_numbers %q: allow_any_dm changes whether %q is allowed", allowed, number)
 		}
-		for _, n := range allowed {
-			// The dashboard saves numbers normalised.
-			if n != normalizeJID(n) {
+		for _, a := range allowed {
+			p, err := phoneNumber(a)
+			if err != nil {
 				continue
 			}
-			for _, jid := range []string{n, "+" + n, n + "@s.whatsapp.net", "+" + n + "@s.whatsapp.net"} {
+			// A sender, as WhatsApp reports one, in every form.
+			for _, jid := range []string{p, "+" + p, p + "@s.whatsapp.net", "+" + p + "@s.whatsapp.net"} {
 				if !numberAllowed(cfg, normalizeJID(jid)) {
 					t.Errorf("allowed_numbers %q: %q is refused", allowed, jid)
 				}
+			}
+			// A number one digit longer is someone else.
+			if canon(p+"1") != canon(number) && numberAllowed(&Config{AllowedNumbers: []string{a}, AllowAnyDM: &anyDM}, p+"1") {
+				t.Errorf("allowed_numbers [%q]: %q, a longer number, is allowed", a, p+"1")
 			}
 		}
 	})

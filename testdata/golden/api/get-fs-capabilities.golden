@@ -1,0 +1,8 @@
+GET /api/fs/capabilities
+200 OK
+Content-Type: application/json
+
+{
+  "home": "<HOME>",
+  "picker": "<PICKER>"
+}

@@ -6,6 +6,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { installDom } from './fake-dom.js';
 import { fakeWindow } from './fake-window.js';
+import { runThemeScript } from './theme-script.js';
 import { settle } from './serve.js';
 import { h } from '../assets/lib/dom.js';
 import { createShell } from '../assets/app/shell.js';
@@ -27,8 +28,9 @@ const ROUTES = [
   { id: 'settings', path: 'settings/:section?', load: page('Settings', () => [h('section', { id: 'sec-access' }, h('h2', 'Access'))]) },
 ];
 
-function open(start = '#/overview', { onAddress } = {}) {
+function open(t, start = '#/overview', { onAddress } = {}) {
   installDom();
+  runThemeScript(t);
   const w = fakeWindow([start]);
   const shell = createShell({ onRestart: () => {} });
   document.body.append(...shell.nodes);
@@ -37,8 +39,8 @@ function open(start = '#/overview', { onAddress } = {}) {
   return { w, shell, view, heading };
 }
 
-test('opening the dashboard leaves the focus where the browser put it', async () => {
-  const { view, heading } = open('#/settings/access');
+test('opening the dashboard leaves the focus where the browser put it', async (t) => {
+  const { view, heading } = open(t, '#/settings/access');
   view.start();
   await settle();
   assert.equal(heading().textContent, 'Settings');
@@ -51,8 +53,8 @@ test('following a link moves the focus to the new page', async (t) => {
     ['#/settings/access', (s) => s.page.querySelector('#sec-access h2')],
     ['#/nope', (s) => s.page], // no page, so no heading: the page area
   ]) {
-    await t.test(href, async () => {
-      const { w, shell, view } = open();
+    await t.test(href, async (t) => {
+      const { w, shell, view } = open(t);
       view.start();
       await settle();
       w.click(href);
@@ -63,11 +65,11 @@ test('following a link moves the focus to the new page', async (t) => {
   }
 });
 
-test('a part named late takes the focus only while it is where it was put', async () => {
+test('a part named late takes the focus only while it is where it was put', async (t) => {
   let later = null;
   ROUTES.push({ id: 'slow', path: 'slow', load: page('Slow', (ctx) => { later = ctx; return [h('h2', 'Part')]; }) });
   try {
-    const { w, shell, view, heading } = open();
+    const { w, shell, view, heading } = open(t);
     view.start();
     await settle();
     w.click('#/slow');
@@ -85,8 +87,8 @@ test('a part named late takes the focus only while it is where it was put', asyn
   }
 });
 
-test('coming back from the connect screen moves the focus to the page', async () => {
-  const { w, view, heading } = open();
+test('coming back from the connect screen moves the focus to the page', async (t) => {
+  const { w, view, heading } = open(t);
   view.start();
   await settle();
   view.pause();
@@ -99,8 +101,8 @@ test('coming back from the connect screen moves the focus to the page', async ()
   assert.equal(document.activeElement, heading());
 });
 
-test('an address the app takes care of itself renders nothing', async () => {
-  const { w, view, heading } = open('#/overview', { onAddress: () => w.win.location.hash.startsWith('#token=') });
+test('an address the app takes care of itself renders nothing', async (t) => {
+  const { w, view, heading } = open(t, '#/overview', { onAddress: () => w.win.location.hash.startsWith('#token=') });
   view.start();
   await settle();
   w.click('#token=abc');

@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"syscall"
@@ -47,7 +48,8 @@ func (d *deliveries) all() []delivered {
 }
 
 // queueTestManager builds a manager with folder brains a (DMs) and b (a
-// group) running the fake CLI.
+// group) running the fake CLI. b observes its group with runs, so that
+// untagged chatter there queues like the rest.
 func queueTestManager(t *testing.T, sleepMS int, extra string) (*BrainManager, *deliveries, string) {
 	t.Helper()
 	home := canonicalDir(t.TempDir())
@@ -58,7 +60,7 @@ func queueTestManager(t *testing.T, sleepMS int, extra string) (*BrainManager, *
 		"data_dir": "`+home+`/data",
 		"claude_path": "`+claude+`"`+brainDirsJSON(t,
 		brainFolder(t, home+"/a", BrainManifest{ID: "a", Routing: BrainRouting{HandlesDMs: true}}),
-		brainFolder(t, home+"/b", BrainManifest{ID: "b", Routing: BrainRouting{Groups: []string{"120363000000000000@g.us"}}}),
+		brainFolder(t, home+"/b", BrainManifest{ID: "b", Routing: BrainRouting{Groups: []string{"120363000000000000@g.us"}}, Observe: observeRun}),
 	)+extra+`
 	}`))
 	if err != nil {
@@ -92,8 +94,10 @@ func TestBrainRunsAndDeliversInOrder(t *testing.T) {
 			t.Errorf("run %d = %q, want an echo of %q from brain a's folder", i, r.res.Text, want)
 		}
 	}
+	// The answers go into the history once they are delivered, which is
+	// the bridge's part (see TestReplyIsRecordedOnceDelivered).
 	hist, _ := os.ReadFile(filepath.Join(home, "a", "conversation-history.jsonl"))
-	if strings.Count(string(hist), `"type":"in"`) != 3 || strings.Count(string(hist), `"type":"out"`) != 3 {
+	if strings.Count(string(hist), `"type":"in"`) != 3 || strings.Count(string(hist), `"type":"out"`) != 0 {
 		t.Errorf("history:\n%s", hist)
 	}
 }
@@ -532,8 +536,8 @@ func TestReloadRefusesAClashingSet(t *testing.T) {
 // TestClaudeArgs: a brain loads only its own folder's Claude Code setup,
 // with the folder's .mcp.json passed explicitly and the instructions above
 // it excluded, unless inherit_claude_user_config asks for the old
-// behaviour. The other settings map to their flags, and the prompt comes
-// last.
+// behaviour. The other settings map to their flags, and -p comes last,
+// without the prompt, which goes on stdin.
 func TestClaudeArgs(t *testing.T) {
 	const mcp = "/brains/a/.mcp.json"
 	const settings = `{"claudeMdExcludes":["/brains/CLAUDE.md"]}`
@@ -557,7 +561,7 @@ func TestClaudeArgs(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			args := claudeArgs(&tc.s, tc.mcpConfig, tc.settings, "hi")
+			args := claudeArgs(&tc.s, tc.mcpConfig, tc.settings)
 			got := strings.Join(args, " ")
 			for _, w := range tc.want {
 				if !strings.Contains(got, w) {
@@ -569,13 +573,44 @@ func TestClaudeArgs(t *testing.T) {
 					t.Errorf("args %q have %q", got, w)
 				}
 			}
-			if !strings.HasSuffix(got, " -p hi") {
-				t.Errorf("args %q: the prompt must come last", got)
+			if !strings.HasSuffix(got, " -p") {
+				t.Errorf("args %q: -p must come last, the prompt goes on stdin", got)
 			}
 			// --mcp-config takes several files, so the CLI would take
 			// anything after the file that is not an option for another.
 			if i := slices.Index(args, "--mcp-config"); i >= 0 && !strings.HasPrefix(args[i+2], "-") {
 				t.Errorf("args %q: %q follows --mcp-config's file", got, args[i+2])
+			}
+		})
+	}
+}
+
+// The prompt reaches the CLI on stdin, not in its arguments, where every
+// process listing shows it and ARG_MAX bounds it: a message of a megabyte
+// and more, a few long pasted texts, still runs.
+func TestPromptGoesOnStdin(t *testing.T) {
+	cases := []struct {
+		name string
+		text string
+	}{
+		{"a short message", "MSG-ON-STDIN"},
+		{"over ARG_MAX", "MSG-ON-STDIN " + strings.Repeat("all of this was pasted in. ", 50000)},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			mgr, d, home := queueTestManager(t, 0, "")
+			argsLog := filepath.Join(home, "args.log")
+			t.Setenv("FRIDOLIN_FAKE_ARGS_LOG", argsLog)
+			if _, _, _, err := mgr.Submit(dm(c.text)); err != nil {
+				t.Fatal(err)
+			}
+			waitFor(t, 10*time.Second, "the run", func() bool { return d.count() == 1 })
+			if res := d.all()[0].res; res.Err != nil || !strings.HasSuffix(res.Text, "says: "+c.text) {
+				t.Errorf("run = %v, %.80q; want the message echoed from stdin", res.Err, res.Text)
+			}
+			args, _ := os.ReadFile(argsLog)
+			if strings.Contains(string(args), "MSG-ON-STDIN") || !strings.HasSuffix(strings.TrimSpace(string(args)), " -p") {
+				t.Errorf("args = %.200q, want them to end in -p, without the prompt", args)
 			}
 		})
 	}
@@ -1039,7 +1074,7 @@ func TestMCPConfigOfStaysInTheBrainFolder(t *testing.T) {
 func TestBuildPromptListsAllAttachments(t *testing.T) {
 	br := bareBrain(t)
 	p := br.buildPrompt(&brainSettings{}, Inbound{JID: "x@s.whatsapp.net", Sender: "1", Text: "file these", Media: []string{"/m/1.jpg", "/m/2.pdf"}})
-	if !strings.Contains(p, "2 files were shared together") || !strings.Contains(p, "- /m/2.pdf") {
+	if !strings.Contains(p, `The 2 files in its "files" came with it`) || !strings.Contains(p, `"files":["/m/1.jpg","/m/2.pdf"]`) {
 		t.Errorf("prompt:\n%s", p)
 	}
 	if got := historyTextWithMedia("hi", []string{"/m/1.jpg"}); got != "hi\n[attachment: /m/1.jpg]" {
@@ -1078,7 +1113,7 @@ func TestParseStreamReportsErrorText(t *testing.T) {
 	stream := `{"type":"assistant","message":{"content":[{"type":"text","text":"Failed to authenticate. API Error: 401"}]}}
 {"type":"result","is_error":true}
 `
-	res := br.parseStream("x", strings.NewReader(stream))
+	res := br.parseStream(Inbound{JID: "x"}, strings.NewReader(stream))
 	if res.Err == nil || !strings.Contains(res.Err.Error(), "Failed to authenticate") {
 		t.Errorf("err = %v, want the CLI's own message", res.Err)
 	}
@@ -1248,5 +1283,271 @@ func TestDataEnvIsAbsolute(t *testing.T) {
 	want := []string{"BRIDGE_DATA_DIR=" + cwd + "/rel", "BRIDGE_DB_PATH=" + cwd + "/rel/bridge.db"}
 	if got := dataEnv(s); !slices.Equal(got, want) {
 		t.Errorf("dataEnv = %q, want %q", got, want)
+	}
+}
+
+// TestPanicsInARunAreContained: a panic while a run is prepared, while
+// claude runs, while its output is read, or while its result is
+// delivered, is logged and recorded as that run's failure; the brain goes
+// on with the next message, the bridge keeps running, and no process of
+// the run is left behind.
+func TestPanicsInARunAreContained(t *testing.T) {
+	cases := []struct {
+		name     string
+		env      map[string]string
+		notice   time.Duration // workingNoticeAfter, when set
+		panicked bool          // the first run ends with errRunPanicked
+		hooks    func(d *deliveries, first *sync.Once) BrainHooks
+	}{
+		{"while the run is prepared", nil, 0, true, func(d *deliveries, first *sync.Once) BrainHooks {
+			return BrainHooks{Deliver: d.add, ExtraArgs: func(string) []string {
+				panicked := false
+				first.Do(func() { panicked = true })
+				if panicked {
+					panic("boom in ExtraArgs")
+				}
+				return nil
+			}}
+		}},
+		{"while claude runs", map[string]string{"FRIDOLIN_FAKE_SLEEP_MS": "1000"}, 100 * time.Millisecond, true, func(d *deliveries, first *sync.Once) BrainHooks {
+			// The working notice comes from invoke itself.
+			return BrainHooks{Deliver: d.add, Notice: func(string, string) {
+				first.Do(func() { panic("boom in the working notice") })
+			}}
+		}},
+		{"while its output is read", map[string]string{"FRIDOLIN_FAKE_ASK_ON": "says: one"}, 0, true, func(d *deliveries, first *sync.Once) BrainHooks {
+			// The question goes out from the goroutine that reads the output.
+			return BrainHooks{Deliver: d.add, Question: func(*Brain, string, string) bool {
+				first.Do(func() { panic("boom in sending the question") })
+				return true
+			}}
+		}},
+		{"while it is delivered", nil, 0, false, func(d *deliveries, first *sync.Once) BrainHooks {
+			return BrainHooks{Deliver: func(br *Brain, m Inbound, res RunResult) {
+				d.add(br, m, res)
+				first.Do(func() { panic("boom in Deliver") })
+			}}
+		}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			mgr, _, home := queueTestManager(t, 10, "")
+			for k, v := range tc.env {
+				t.Setenv(k, v)
+			}
+			pidLog := filepath.Join(home, "pids")
+			t.Setenv("FRIDOLIN_FAKE_PID_LOG", pidLog)
+			if tc.notice > 0 {
+				prev := workingNoticeAfter
+				workingNoticeAfter = tc.notice
+				t.Cleanup(func() { workingNoticeAfter = prev })
+			}
+			d := &deliveries{}
+			var first sync.Once
+			mgr.SetHooks(tc.hooks(d, &first))
+			logs := captureLog(t)
+			done := make(chan error, 2)
+			for _, text := range []string{"one", "two"} {
+				m := dm(text)
+				m.Done = func(err error) { done <- err }
+				if _, _, _, err := mgr.Submit(m); err != nil {
+					t.Fatal(err)
+				}
+			}
+			for range 2 {
+				select {
+				case <-done:
+				case <-time.After(10 * time.Second):
+					t.Fatal("a message was never finished")
+				}
+			}
+			runs := d.all()
+			if len(runs) != 2 || runs[1].res.Err != nil || !strings.HasSuffix(runs[1].res.Text, "says: two") {
+				t.Errorf("runs = %+v, want the second answered", runs)
+			}
+			if !strings.Contains(strings.Join(logs(), "\n"), "panicked: boom") {
+				t.Error("the panic was not logged")
+			}
+			if tc.panicked && (len(runs) == 0 || !errors.Is(runs[0].res.Err, errRunPanicked)) {
+				t.Errorf("runs = %+v, want the first to end with errRunPanicked", runs)
+			}
+			// Each run's process is gone, reaped too: a zombie still
+			// answers signal 0.
+			data, _ := os.ReadFile(pidLog)
+			for _, line := range strings.Fields(string(data)) {
+				pid, _ := strconv.Atoi(line)
+				if err := syscall.Kill(pid, 0); !errors.Is(err, syscall.ESRCH) {
+					t.Errorf("process %d of a run is still there (%v)", pid, err)
+				}
+			}
+		})
+	}
+}
+
+// TestRunTimeoutStopsAStuckRun: a run that takes longer than
+// run_timeout_minutes is stopped, process group and all, and ends with an
+// error that says so, so that its brain goes on with the next message. A
+// question it sent before it hung does not make it an answer: the chat
+// still hears that the run was stopped.
+func TestRunTimeoutStopsAStuckRun(t *testing.T) {
+	prev := runTimeoutUnit
+	runTimeoutUnit = 100 * time.Millisecond
+	t.Cleanup(func() { runTimeoutUnit = prev })
+	cases := []struct {
+		name     string
+		sleepMS  int
+		minutes  string // run_timeout_minutes, in runTimeoutUnit
+		env      map[string]string
+		question bool // the question goes out before the deadline
+	}{
+		// With a command holding the output open too.
+		{"before any output", 30000, "3", map[string]string{"FRIDOLIN_FAKE_CHILD": "1"}, false},
+		// Time enough for the question to go out first.
+		{"after asking a question", 0, "20", map[string]string{"FRIDOLIN_FAKE_ASK_ON": "says: stuck", "FRIDOLIN_FAKE_HANG_AFTER_ASK": "1"}, true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			mgr, d, _ := queueTestManager(t, tc.sleepMS, `, "run_timeout_minutes": `+tc.minutes)
+			for k, v := range tc.env {
+				t.Setenv(k, v)
+			}
+			var mu sync.Mutex
+			var sent []string
+			say := func(_, text string) {
+				mu.Lock()
+				defer mu.Unlock()
+				sent = append(sent, text)
+			}
+			mgr.SetHooks(BrainHooks{Deliver: d.add, Notice: say, Question: func(_ *Brain, jid, text string) bool {
+				say(jid, text)
+				return true
+			}})
+			start := time.Now()
+			if _, _, _, err := mgr.Submit(dm("stuck")); err != nil {
+				t.Fatal(err)
+			}
+			waitFor(t, 10*time.Second, "the run to be stopped", func() bool { return d.count() == 1 })
+			res := d.all()[0].res
+			if !errors.Is(res.Err, errRunTimedOut) || !strings.Contains(res.Err.Error(), "run_timeout_minutes") {
+				t.Errorf("result = %+v, want errRunTimedOut", res)
+			}
+			if el := time.Since(start); el > 5*time.Second {
+				t.Errorf("the run took %v to stop", el)
+			}
+			if last := mgr.Get("a").Snapshot().Last; last == nil || last.Outcome != outcomeError {
+				t.Errorf("last run = %+v, want outcome error", last)
+			}
+			mu.Lock()
+			defer mu.Unlock()
+			if asked := slices.ContainsFunc(sent, func(s string) bool { return strings.HasPrefix(s, questionPrefix) }); asked != tc.question {
+				t.Errorf("sent to the chat mid-run: %q, want a question: %v", sent, tc.question)
+			}
+		})
+	}
+}
+
+// TestRunEndsSoonAfterItsResult: a command Claude left running with the
+// output open does not keep the brain busy once the result is in: after
+// postResultGrace the rest of the run is stopped, and the answer goes out.
+func TestRunEndsSoonAfterItsResult(t *testing.T) {
+	prev := postResultGrace
+	postResultGrace = 300 * time.Millisecond
+	t.Cleanup(func() { postResultGrace = prev })
+	mgr, d, _ := queueTestManager(t, 10, "")
+	t.Setenv("FRIDOLIN_FAKE_CHILD", "1") // sleeps 30 s holding the output open
+	start := time.Now()
+	if _, _, _, err := mgr.Submit(dm("quick answer")); err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, 10*time.Second, "the answer", func() bool { return d.count() == 1 })
+	if res := d.all()[0].res; res.Err != nil || !strings.HasSuffix(res.Text, "says: quick answer") {
+		t.Errorf("result = %+v, want the answer", res)
+	}
+	if el := time.Since(start); el > 5*time.Second {
+		t.Errorf("the run took %v, held open by the command it left", el)
+	}
+}
+
+// TestRunTimeoutKeepsAnAnswerThatCame: a deadline that comes in the grace
+// after the result stops what is left of the run, but the answer that is
+// in still goes out.
+func TestRunTimeoutKeepsAnAnswerThatCame(t *testing.T) {
+	prevUnit, prevGrace := runTimeoutUnit, postResultGrace
+	runTimeoutUnit, postResultGrace = 100*time.Millisecond, 10*time.Second
+	t.Cleanup(func() { runTimeoutUnit, postResultGrace = prevUnit, prevGrace })
+	mgr, d, _ := queueTestManager(t, 0, `, "run_timeout_minutes": 20`)
+	t.Setenv("FRIDOLIN_FAKE_CHILD", "1") // sleeps 30 s holding the output open
+	if _, _, _, err := mgr.Submit(dm("answer in time")); err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, 10*time.Second, "the run", func() bool { return d.count() == 1 })
+	if res := d.all()[0].res; res.Err != nil || !strings.HasSuffix(res.Text, "says: answer in time") {
+		t.Errorf("result = %+v, want the answer that came before the deadline", res)
+	}
+}
+
+// TestRunTimeoutSetting: run_timeout_minutes defaults to 30, takes 0 for no
+// limit, and refuses what makes no sense.
+func TestRunTimeoutSetting(t *testing.T) {
+	cases := []struct {
+		json    string
+		want    time.Duration
+		wantErr bool
+	}{
+		{``, 30 * time.Minute, false},
+		{`, "run_timeout_minutes": 0`, 0, false},
+		{`, "run_timeout_minutes": 90`, 90 * time.Minute, false},
+		{`, "run_timeout_minutes": -1`, 0, true},
+		{`, "run_timeout_minutes": 100000`, 0, true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.json, func(t *testing.T) {
+			home := canonicalDir(t.TempDir())
+			t.Setenv("HOME", home)
+			cfg, err := LoadConfig(writeConfig(t, `{"brain_mode": true, "data_dir": "`+home+`/data"`+tc.json+`}`))
+			if tc.wantErr {
+				if err == nil || !strings.Contains(err.Error(), "run_timeout_minutes") {
+					t.Errorf("err = %v, want run_timeout_minutes refused", err)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got := cfg.RunTimeout(); got != tc.want {
+				t.Errorf("RunTimeout = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
+// TestStreamLogIsRotatedAndNamesEachRun: a full activity log is moved to
+// claude-stream.1.log when the next run starts, and each run's part of it
+// starts with the chat, the sender, the process and the model.
+func TestStreamLogIsRotatedAndNamesEachRun(t *testing.T) {
+	mgr, d, home := queueTestManager(t, 10, `, "brain_model": "sonnet"`)
+	logPath := filepath.Join(home, "a", streamLogName)
+	f, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY, 0o600)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := f.Truncate(streamLogMax); err != nil { // sparse: takes no room
+		t.Fatal(err)
+	}
+	f.Close()
+	if _, _, _, err := mgr.Submit(dm("hello")); err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, 10*time.Second, "the run", func() bool { return d.count() == 1 })
+	if fi, err := os.Stat(filepath.Join(home, "a", streamLogOld)); err != nil || fi.Size() != streamLogMax {
+		t.Errorf("rotated log: %v, %v; want the full one", fi, err)
+	}
+	data, err := os.ReadFile(logPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	first, _, _ := strings.Cut(string(data), "\n")
+	if len(data) > 4096 || !strings.Contains(first, "Run for 15551234567@s.whatsapp.net from 15551234567, pid ") || !strings.Contains(first, "model sonnet") {
+		t.Errorf("new log starts %q (%d bytes), want the run named", first, len(data))
 	}
 }

@@ -4,19 +4,28 @@ import { installDom } from './fake-dom.js';
 import { serve, settle, type, noConsoleErrors } from './serve.js';
 import { h } from '../assets/lib/dom.js';
 import { createPage } from '../assets/app/page.js';
-import { brainsResource } from '../assets/app/resources.js';
+import { brainsResource, resource } from '../assets/app/resources.js';
+import { brainSettingsFields } from '../assets/components/brain-fields.js';
 import page from '../assets/pages/brain.js';
 
 const manifest = (name) => ({ version: 1, id: 'work', name, routing: { handles_dms: true, default: false, groups: [] }, model: '', effort: '' });
 const view = (name, runtime = null) => ({ id: 'work', name, path: '/Users/you/work', status: 'ok', manifest: manifest(name), issues: [], runtime });
 
-async function openPage(t) {
+// opts.brains is what the bridge holds at first, opts.approve what it
+// answers POST /api/brains/work/approve with.
+async function openPage(t, opts = {}) {
   t.mock.timers.enable({ apis: ['setTimeout', 'Date'] });
   installDom();
   noConsoleErrors(t);
-  const bridge = { brains: [view('Work')] };
-  serve(t, (path) => {
+  const bridge = { brains: opts.brains || [view('Work')] };
+  const calls = serve(t, (path, init) => {
+    if (path === '/api/brains/work/approve' && init.method === 'POST') return opts.approve;
     if (path.startsWith('/api/brains/work/calendar')) return { client_configured: false, connected: false };
+    if (path === '/api/brains/work' && init.method === 'PUT') return { ok: true };
+    if (path === '/api/brains/work') {
+      const b = bridge.brains.find((x) => x.id === 'work');
+      return b ? { status: 200, body: b } : { status: 404, body: { error: 'no such brain' } };
+    }
     if (path.startsWith('/api/brains')) return bridge.brains;
     if (path.startsWith('/api/config')) return { etag: 'e1', path: '/Users/you/.fridolin/config.json', config: {}, effective: {} };
     if (path.startsWith('/api/whatsapp/groups')) return [];
@@ -32,8 +41,12 @@ async function openPage(t) {
   const nameIn = () => root.querySelector('.brain-form input');
   const note = () => root.querySelector('.live-form').firstChild; // the "changed elsewhere" note
   const bar = () => root.querySelector('.save-bar');
-  const poll = async (brains) => { bridge.brains = brains; await brainsResource.refresh(); await settle(); };
-  return { root, ctx, nameIn, note, bar, poll };
+  const poll = async (brains) => {
+    bridge.brains = brains;
+    await Promise.all([resource('/api/brains/work').refresh(), brainsResource.refresh()]);
+    await settle();
+  };
+  return { root, ctx, nameIn, note, bar, poll, calls };
 }
 
 test('typed settings survive a refresh, and a change elsewhere is flagged', async (t) => {
@@ -99,4 +112,111 @@ test('a brain that does not exist shows only that', async (t) => {
   assert.deepEqual(shown(), [], 'no empty sections of a brain that is not there');
   await poll([view('Work')]);
   assert.deepEqual(shown(), all, 'back once it is');
+});
+
+test('approving drift sends the brain.json shown', async (t) => {
+  // A rename only, so no confirmation dialog stands in the way.
+  const drifted = { ...view('Work'), status: 'drift', disk_manifest: manifest('Office'), issues: [{ kind: 'drift', detail: 'brain.json changed on disk' }] };
+  const cases = [
+    // name, the bridge's answer, the toast it gives
+    ['the bridge approves it', { status: 200, body: { status: 'approved' } }, ['ok', /Changes approved/]],
+    ['brain.json changed again meanwhile', { status: 409, body: { error: 'brain.json changed again since you reviewed it' } }, ['warn', /changed again since you reviewed it/]],
+  ];
+  for (const [name, approve, [kind, message]] of cases) {
+    await t.test(name, async (t) => {
+      const { root, calls } = await openPage(t, { brains: [drifted], approve });
+      const button = root.querySelectorAll('button').find((b) => b.textContent.includes('Approve changes'));
+      assert.ok(button, 'the drift card offers approval');
+      button.click();
+      await settle();
+      const posts = calls.filter((c) => c.method === 'POST');
+      assert.deepEqual(posts.map((c) => c.path), ['/api/brains/work/approve']);
+      assert.deepEqual(posts[0].body, { manifest: drifted.disk_manifest }, 'exactly the manifest the page showed');
+      const toasts = (k) => document.querySelectorAll(`.toast.${k}`).map((el) => el.textContent);
+      assert.deepEqual(toasts('error'), []);
+      assert.ok(toasts(kind).some((m) => message.test(m)), `${kind} toasts: ${toasts(kind)}`);
+      const after = calls.slice(calls.indexOf(posts[0]) + 1);
+      assert.ok(after.some((c) => c.method === 'GET' && c.path.startsWith('/api/brains')), 'and the page asks for the brains again');
+    });
+  }
+});
+
+const helps = (els) => [els].flat().flatMap((el) => el.querySelectorAll('.help').map((x) => x.textContent));
+const fieldset = (root, legend) => root.querySelectorAll('fieldset').find((f) => f.querySelector('legend').textContent === legend);
+
+test('the model, effort and backup settings are the wizard’s, and save with the rest', async (t) => {
+  const m = { ...manifest('Work'), model: 'sonnet', effort: 'high', backup: { enabled: true, exclude: ['node_modules/'] }, prompt_file: 'brain-prompt.md', reply_chat: '' };
+  const { root, calls } = await openPage(t, { brains: [{ ...view('Work'), manifest: m }] });
+  const shared = brainSettingsFields();
+  const model = fieldset(root, 'Model and tools');
+  assert.deepEqual(helps(model).slice(0, 2), helps(shared.model), 'the model fields are the shared ones');
+  assert.deepEqual(helps(fieldset(root, 'Backup')), helps(shared.backup), 'and so are the backup fields');
+  const modelIn = model.querySelector('input');
+  assert.equal(modelIn.value, 'sonnet');
+  const effort = model.querySelector('select');
+  assert.equal(effort.value, 'high');
+  const backup = fieldset(root, 'Backup').querySelector('input[type=checkbox]');
+  assert.equal(backup.checked, true);
+  const excludes = fieldset(root, 'Backup').querySelector('textarea');
+  assert.equal(excludes.value, 'node_modules/');
+
+  type(modelIn, 'opus');
+  effort.value = '';
+  effort.dispatchEvent(new Event('change', { bubbles: true }));
+  backup.checked = false;
+  backup.dispatchEvent(new Event('change', { bubbles: true }));
+  type(excludes, 'node_modules/\n*.log');
+  root.querySelector('.brain-form').dispatchEvent(new Event('submit', { cancelable: true }));
+  await settle();
+  const saved = calls.find((c) => c.path === '/api/brains/work' && c.method === 'PUT');
+  assert.ok(saved, 'the settings were saved');
+  assert.deepEqual(saved.body.manifest, { ...m, model: 'opus', effort: '', observe: 'history', backup: { enabled: false, exclude: ['node_modules/', '*.log'] } });
+  const toasts = (k) => document.querySelectorAll(`.toast.${k}`).map((el) => el.textContent);
+  assert.deepEqual(toasts('error'), []);
+  assert.ok(toasts('ok').includes('Settings saved'), `toasts: ${toasts('ok')}`);
+});
+
+test('the page polls its own brain, and the list of all only for the others’ routing', async (t) => {
+  const { calls } = await openPage(t);
+  const count = (path) => calls.filter((c) => c.method === 'GET' && c.path === path).length;
+  for (let i = 0; i < 4; i++) {
+    t.mock.timers.tick(3000);
+    await settle();
+  }
+  assert.equal(count('/api/brains/work'), 5, 'its brain every 3 s');
+  assert.equal(count('/api/brains'), 1, 'the list once');
+  t.mock.timers.tick(60000 - 12000);
+  await settle();
+  assert.equal(count('/api/brains'), 2, 'and then every minute');
+});
+
+test('a brain that is not there is asked after every 30 s, not every 3 s', async (t) => {
+  const { root, calls, poll } = await openPage(t, { brains: [] });
+  const count = () => calls.filter((c) => c.method === 'GET' && c.path === '/api/brains/work').length;
+  assert.match(root.textContent, /No such brain/);
+  for (let i = 0; i < 9; i++) {
+    t.mock.timers.tick(3000);
+    await settle();
+  }
+  assert.equal(count(), 1, 'each 404 is an error in the browser\'s console');
+  t.mock.timers.tick(3000);
+  await settle();
+  assert.equal(count(), 2);
+  await poll([view('Work')]);
+  const before = count();
+  t.mock.timers.tick(3000);
+  await settle();
+  assert.equal(count(), before + 1, 'every 3 s again once it is there');
+});
+
+test('the settings say what untagged group messages get, and save it', async (t) => {
+  const { root, calls } = await openPage(t);
+  const observe = root.querySelector('.brain-form select[name=observe]');
+  assert.equal(observe.value, 'history', 'a brain.json without the setting keeps them in the history');
+  observe.value = 'run';
+  observe.dispatchEvent(new Event('change', { bubbles: true }));
+  root.querySelector('.brain-form').dispatchEvent(new Event('submit', { cancelable: true }));
+  await settle();
+  const saved = calls.filter((c) => c.method === 'PUT').map((c) => [c.path, c.body.manifest.observe]);
+  assert.deepEqual(saved, [['/api/brains/work', 'run']]);
 });

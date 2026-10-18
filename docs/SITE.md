@@ -286,8 +286,12 @@ outside any sandbox (`open`, `osascript`, `launchctl`): declaring one gives the
 module a way out, so approve those only when you mean it.
 
 **Network.** Module code may connect anywhere but to the bridge's own HTTP
-port (the dashboard, and the `/send` and `/ingest` endpoints brains use
-without a token): it cannot send WhatsApp messages or hand brains work.
+port: the dashboard, `/send`, `/ingest` and the brains' `/brain/`. A module
+has no token for them, but `/send` still takes token-free sends to your
+allowed chats while
+[`script_api.tokenless_send`](CONFIGURATION.md#script_apitokenless_send) is
+on. With the port closed, it sends no WhatsApp messages and hands brains
+work only as [Handing files to a brain](#handing-files-to-a-brain) says.
 
 **Never**, whatever a module declares:
 

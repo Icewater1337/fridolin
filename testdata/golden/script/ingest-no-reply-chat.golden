@@ -1,0 +1,11 @@
+POST /ingest
+{"brain": "quiet", "text": "x"}
+400 Bad Request
+Content-Type: application/json
+
+{
+  "error": "brain quiet has no chat to reply in — set reply_chat in its settings"
+}
+
+sent:
+history:

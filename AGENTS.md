@@ -20,7 +20,8 @@ The person's data lives in brain folders they choose and in
 
 1. **Prerequisites.** Check, and install what is missing with the person's OK:
    - Go 1.26+ (`go version`); macOS: `brew install go`.
-   - A C compiler (SQLite needs cgo); macOS: `xcode-select --install`.
+   - A C compiler (SQLite needs cgo) and make; macOS: `xcode-select
+     --install` brings both.
    - Claude Code 2.1.302 or newer, logged in (`claude --version`; `claude
      update` updates it; if `claude -p hi` says it is not logged in, ask the
      person to run `claude` once and log in).
@@ -70,12 +71,16 @@ The person's data lives in brain folders they choose and in
    person to send the bridge a DM and confirm a reply arrives.
 
 Reopen the dashboard with `fridolin open`. To upgrade later: `git pull &&
-./setup.sh`; to go back to the version before: `fridolin service rollback`.
+./setup.sh`, then do what README's "Upgrading and rolling back" says for
+the version you came from (scripts and brains that call `/send` or
+`/ingest` without a token, rotating the dashboard token). To go back to
+the version before: `fridolin service rollback`.
 
 ## Rules
 
 - **Never delete or recreate `~/.fridolin/bridge.db`.** It holds
-  the WhatsApp pairing; losing it means re-pairing and losing poll history.
+  the WhatsApp pairing; losing it means re-pairing and losing poll history
+  and the replies still waiting to go out.
   If a repair seems to need it, stop and ask; move it aside rather than delete.
 - **Never run two bridges on one data directory or WhatsApp session.** The
   binary refuses (lock file + port), but do not try to work around it. To
@@ -85,10 +90,11 @@ Reopen the dashboard with `fridolin open`. To upgrade later: `git pull &&
 - **`./setup.sh` and `fridolin service install` restart the running
   bridge**, cutting off replies in progress. Ask before running them on a
   machine where the bridge is in use.
-- **Never print or paste** `~/.fridolin/dashboard.token`, the
-  rclone config in `~/.fridolin/rclone/`, or anything that looks
-  like a credential into chat or logs. `fridolin open` passes
-  the token to the browser directly.
+- **Never print or paste** `~/.fridolin/dashboard.token`,
+  `~/.fridolin/scripts.token`, the rclone config in
+  `~/.fridolin/rclone/`, or anything that looks like a credential into
+  chat or logs. `fridolin open` signs the browser in with a link that
+  works once, so the token never goes into a URL.
 - Do not commit the person's data. `config.json`, brain folders, databases,
   media and tokens are not part of this repository.
 - Do not weaken security defaults (sandbox, dashboard token, allowlists)
@@ -98,9 +104,10 @@ Reopen the dashboard with `fridolin open`. To upgrade later: `git pull &&
 
 - `make check` runs what CI's build, lint and test jobs run: gofmt, both
   `go vet` runs, `go mod tidy -diff`, the race tests, staticcheck,
-  shellcheck, ruff, actionlint, the action-pin check, the Python, web,
-  personal-data-check, action-pin-check and Makefile tests and a dev-mode
-  smoke test (`make help` lists the targets).
+  shellcheck, ruff, actionlint, the action-pin check, ESLint on the
+  dashboard, the Python, web, personal-data-check, action-pin-check and
+  Makefile tests and a dev-mode smoke test (`make help` lists the
+  targets).
   CI also runs the site's tests and the fuzz targets (both below),
   govulncheck, CodeQL and the personal-data scan of the pushed commits.
   `make check` builds only into temp dirs; `make build` writes
@@ -115,10 +122,28 @@ Reopen the dashboard with `fridolin open`. To upgrade later: `git pull &&
   bridge runs them, in folders with a `brain.json` listed in `brain_dirs`
   (`brainFolder`, `addFolderBrain`); a config with inline `"brains"` no
   longer loads.
+- The golden files in `testdata/golden` pin what the bridge says and writes
+  today: every GET of the API, config writes and their errors, the files the
+  dashboard serves, sandbox profiles, prompts and the Claude CLI's
+  arguments, `fridolin check` and `init`, a new brain's folder, backup files
+  and the replies of `/send` and `/ingest`. Times, temp paths, PIDs and the
+  version are masked, so a second run writes the same bytes. A change meant
+  to change one rewrites it with `go test -run 'TestName' -update .`, and
+  the pull request says why. A new setting also goes into
+  `testdata/config-v1.json`, which sets every one, and a new route into
+  `routeInventory` (`routes_test.go`) with the guards it needs. End-to-end
+  tests drive a dev-mode bridge through what it offers from outside with
+  `newHarness` (`harness_test.go`) instead of reaching into the `Bridge`, so
+  they keep working while code moves into packages; `knownbugs_test.go` pins
+  bugs that stay as they are for now, and the fix that changes one rewrites
+  its test. `testdata/coverage-baseline.txt` is each file's statement
+  coverage, which code that moves keeps. `TestSmoke` builds the bridge and
+  runs it in dev mode; `go test -short` skips it.
 - The parsers of untrusted input (chunking, poll blocks, triggers, JIDs and
   the DM allowlist, the identity map, brain.json, stream-json, attachment
-  names, the junk filter) have fuzz targets beside their tests. Fuzz one
-  with `go test -run='^$' -fuzz='^FuzzExtractPolls$' -fuzztime=30s .`;
+  names, the junk filter) and the prompt that carries it to a run have fuzz
+  targets beside their tests. Fuzz one with
+  `go test -run='^$' -fuzz='^FuzzExtractPolls$' -fuzztime=30s .`;
   a failing input is saved under the package's `testdata/fuzz/` (make
   `testdata` first in a package that has none), where plain `go test`
   runs it from then on, so commit it with the fix. `make fuzz-short` runs
@@ -136,8 +161,11 @@ Reopen the dashboard with `fridolin open`. To upgrade later: `git pull &&
   installs one.
 - The dashboard is plain HTML/CSS/JS in `web/` (no build step), embedded into
   the binary — rebuild after changing it. It runs under a strict CSP: no
-  inline scripts or styles. Its ES modules live in `web/assets`: `app/` (the
-  entry point and the plumbing every page shares), `pages/` (one module per
+  inline scripts or styles, and Trusted Types without a policy, so the
+  browser refuses `innerHTML` and every other way of turning a string
+  into HTML or script; build elements with `h()` from `lib/dom.js`. Its
+  ES modules live in `web/assets`: `app/` (the entry point and the
+  plumbing every page shares), `pages/` (one module per
   page), `components/` (shared pieces of UI) and `lib/` (the element builder
   and pure helpers, which know nothing about the app). Pages import from
   `app/`, `components/` and `lib/`, never from each other; `lib/` imports
@@ -145,7 +173,9 @@ Reopen the dashboard with `fridolin open`. To upgrade later: `git pull &&
   `app/routes.js`), so once the bridge runs another version an open tab
   asks for a reload instead of mixing two builds. A page follows the data
   it shows through `app/resources.js` (one poll per endpoint, shared with
-  the shell and other parts of the page) instead of polling it itself,
+  the shell and other parts of the page, which sends back the ETag of the
+  answer it has, so that an endpoint answering with `writeJSONIfChanged`
+  sends a bodyless 304 while nothing changed) instead of polling it itself,
   repaints with `paint()` and `reconcile()` from `lib/dom.js`, which keep
   the nodes of what did not change (and with them focus, typed text and
   open panels), and builds an editable form with `components/live-form.js`,
@@ -165,18 +195,25 @@ Reopen the dashboard with `fridolin open`. To upgrade later: `git pull &&
   `web/**/*.test.js` files (`web/test`). They cover the pure helpers, run
   pages against a stubbed bridge in a fake DOM (`web/test/serve.js`,
   `web/test/fake-dom.js`), check that every import resolves and keeps
-  those layers, and hold the stylesheet to its layout.
+  those layers and that every export is imported, and hold the
+  stylesheet to its layout. `make lint-web` runs ESLint with
+  `web/eslint.config.js` (names that are not defined, code that is never
+  used), which needs Node 22.13+: npx fetches the version the Makefile
+  pins the first time, and nothing is installed into the checkout.
 - The project was called whatsapp-claude-bridge before. Names from then
   that are on disk or that others rely on stay, each marked `compat:` in
   the code: the data dir `~/.whatsapp-claude-bridge`, which the bridge
-  still uses when `~/.fridolin` does not exist (`defaultDataDir`, and
-  `setup.sh` for the config it installs), the launchd label
+  still uses when `~/.fridolin` does not exist (`defaultDataDir`, which
+  `setup.sh` asks through `fridolin paths`), the launchd label
   `com.whatsapp-claude-bridge`, whose agent `fridolin service install`
-  retires, and the sandbox's denies of the old `~/.config` and
-  `~/Library/Logs` folders.
+  retires, the sandbox's denies of the old `~/.config` and
+  `~/Library/Logs` folders, and the personal-data check's old denylist
+  place, `~/.config/whatsapp-claude-bridge/personal-denylist`, which it
+  reads with a note to move it.
   *Bridge* is still the product's own word: `bridge.db`, `bridge.lock`,
   the `X-Bridge-Token` header and the `BRIDGE_*` variables brains read
-  keep it. Mark a new shim like these the same way.
+  keep it. Mark a new shim like these the same way, and list it in
+  `CHANGELOG.md`, which says what changes for people who run Fridolin.
 - Run `scripts/install-hooks.sh` before committing. The hooks refuse commits
   and pushes containing phone numbers, WhatsApp JIDs, emails, home paths or
   tokens. Use placeholders: `15551234567`, `120363000000000000@g.us`,

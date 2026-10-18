@@ -128,6 +128,17 @@ test('a brain picked for a group survives a refresh, and follows a change elsewh
   assert.equal(sel.value, 'work');
 });
 
+test('only the groups’ Refresh button has the bridge ask WhatsApp', async (t) => {
+  const { root, calls } = await openPage(t);
+  const asked = () => calls.filter((c) => c.path.startsWith('/api/whatsapp/groups')).map((c) => c.path);
+  await loadGroups(true); // what a change on the page does
+  const before = asked().length;
+  assert.ok(before > 0 && asked().every((p) => p === '/api/whatsapp/groups'), `the page takes the bridge's list: ${asked()}`);
+  root.querySelectorAll('button').find((b) => b.textContent.includes('Refresh')).click();
+  await settle();
+  assert.deepEqual(asked().slice(before), ['/api/whatsapp/groups?fresh=1']);
+});
+
 test('removing a number that is gone already says so, not that it was removed', async (t) => {
   const { root, bridge } = await openPage(t);
   bridge.numbers = []; // removed in another tab, before the page's next poll

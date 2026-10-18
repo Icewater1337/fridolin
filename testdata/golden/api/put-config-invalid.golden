@@ -1,0 +1,7 @@
+PUT /api/config
+422 Unprocessable Entity
+Content-Type: application/json
+
+{
+  "error": "http_listen \"0.0.0.0:80\" must be a loopback address such as 127.0.0.1:8765 — the API and dashboard are for this machine only"
+}

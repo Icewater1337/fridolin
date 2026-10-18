@@ -3,7 +3,8 @@
 // of its own; what it proposes waits under Site → Proposals.
 
 import { get, post } from '../app/api.js';
-import { h, mount } from '../lib/dom.js';
+import { h, mount, paint } from '../lib/dom.js';
+import { brainLabel } from '../lib/brain.js';
 import { icon } from '../components/icons.js';
 import { toast } from '../components/toast.js';
 import { btn } from '../components/buttons.js';
@@ -21,12 +22,18 @@ export default {
     let brains = [];
     let brainID = '';
     let chat = null;
-    let shownCount = -1;
-    let shownPreview = null; // the preview link shown, '' for none
     let draft = '';
 
+    // Each part repaints only when what it shows changed, so the Stop and
+    // Reload buttons are not replaced under the pointer, and a preview
+    // keeps its frame until it is another one (a restart gets a new
+    // address).
     const messagesEl = h('div.build-messages', { role: 'log', 'aria-live': 'polite' });
-    const statusEl = h('div.build-status');
+    // The working line changes with every tool the brain uses; the Stop
+    // button next to it only when a run starts or ends.
+    const workingEl = h('div.region');
+    const stopEl = h('div.region');
+    const statusEl = h('div.build-status', { hidden: true }, workingEl, stopEl);
     const input = h('textarea.build-input', { rows: 3, placeholder: 'e.g. “Add a page where members see this month’s events”' });
     input.addEventListener('input', () => { draft = input.value; });
     input.addEventListener('keydown', (e) => {
@@ -52,84 +59,88 @@ export default {
       }
     }
 
-    function renderMessages() {
-      if (chat.messages.length === shownCount) return;
-      shownCount = chat.messages.length;
+    function paintChat() {
+      // The newest message comes into view, unless you scrolled up to read.
       const atBottom = messagesEl.scrollHeight - messagesEl.scrollTop - messagesEl.clientHeight < 40;
-      mount(messagesEl, chat.messages.length ? chat.messages.map((m) => h(`div.build-msg.${m.role}`,
+      if (paint(messagesEl, chat.messages, renderMessages) && (atBottom || chat.messages.length <= 1)) messagesEl.scrollTop = messagesEl.scrollHeight;
+      const busy = !!(chat.running || chat.queued);
+      const last = busy ? [...chat.activity].reverse().find((l) => l.includes('🔧') || l.includes('💬')) || '' : '';
+      statusEl.hidden = !busy;
+      paint(workingEl, { busy, running: !!chat.running, last: last.replace(/^\[[\d:]+\]\s*/, '') }, renderWorking);
+      paint(stopEl, !!chat.running, renderStop);
+      paint(proposalEl, chat.proposal || null, renderProposal);
+      paint(previewEl, chat.preview || null, renderPreview);
+    }
+
+    function renderMessages(messages) {
+      return messages.length ? messages.map((m) => h(`div.build-msg.${m.role}`,
         h('div.build-text', m.text), h('div.build-time', timeAgo(m.at))))
-        : h('p.muted.build-empty', 'Nothing yet. Say what the site should have — the brain asks if it needs to know more.'));
-      if (atBottom || shownCount <= 1) messagesEl.scrollTop = messagesEl.scrollHeight;
+        : h('p.muted.build-empty', 'Nothing yet. Say what the site should have — the brain asks if it needs to know more.');
     }
 
-    function renderStatus() {
-      if (chat.running || chat.queued) {
-        const last = [...chat.activity].reverse().find((l) => l.includes('🔧') || l.includes('💬')) || '';
-        mount(statusEl,
-          h('div.build-working', h('span.spinner'), h('span', chat.running ? 'Working' : 'Waiting its turn'),
-            last ? h('span.muted.small.build-last', last.replace(/^\[[\d:]+\]\s*/, '')) : null),
-          chat.running ? btn('Stop', { small: true, icon: 'x', onClick: async () => { await post(`/api/site/build/${encodeURIComponent(brainID)}/stop`); poller.kick(); } }) : null);
-      } else {
-        mount(statusEl);
-      }
-      mount(proposalEl, chat.proposal ? callout('info', `Proposed: ${chat.proposal.title}`,
-        h('div', 'Waiting for you under ', h('a', { href: '#/site' }, 'Site → Proposals'), ' — ', timeAgo(chat.proposal.at))) : null);
+    function renderWorking({ busy, running, last }) {
+      return busy ? h('div.build-working', h('span.spinner'), h('span', running ? 'Working' : 'Waiting its turn'),
+        last ? h('span.muted.small.build-last', last) : null) : null;
     }
 
-    function renderPreview() {
-      const key = chat.preview ? chat.preview.local : '';
-      if (key === shownPreview) return;
-      shownPreview = key;
-      if (!chat.preview) {
-        mount(previewEl, h('div.build-preview-empty',
+    function renderStop(running) {
+      return running ? btn('Stop', { small: true, icon: 'x', onClick: async () => { await post(`/api/site/build/${encodeURIComponent(brainID)}/stop`); poller.kick(); } }) : null;
+    }
+
+    function renderProposal(p) {
+      return p ? callout('info', `Proposed: ${p.title}`,
+        h('div', 'Waiting for you under ', h('a', { href: '#/site' }, 'Site → Proposals'), ' — ', timeAgo(p.at))) : null;
+    }
+
+    function renderPreview(preview) {
+      if (!preview) {
+        return h('div.build-preview-empty',
           h('p.muted', 'No preview yet. The brain starts one when it has something to show — or start it now.'),
-          btn('Start a preview', { icon: 'play', onClick: startPreview })));
-        return;
+          btn('Start a preview', { icon: 'play', onClick: startPreview }));
       }
       // A new frame each time: one whose first load failed (the preview was
       // restarting) can stay blank however often its src is set again.
-      const makeFrame = () => h('iframe.build-frame', { src: chat.preview.local, title: 'Preview of the site' });
+      const makeFrame = () => h('iframe.build-frame', { src: preview.local, title: 'Preview of the site' });
       let frame = makeFrame();
-      mount(previewEl,
+      return [
         h('div.build-preview-bar',
           pill('Preview', 'warn'),
           h('div.actions',
             btn('Reload', { small: true, icon: 'refresh', onClick: () => { const next = makeFrame(); frame.replaceWith(next); frame = next; } }),
             btn('Restart', { small: true, icon: 'play', onClick: startPreview }),
-            h('a.btn.small', { href: chat.preview.local, target: '_blank', rel: 'noopener noreferrer' }, icon('external'), h('span.btn-label', 'Open')))),
-        frame);
+            h('a.btn.small', { href: preview.local, target: '_blank', rel: 'noopener noreferrer' }, icon('external'), h('span.btn-label', 'Open')))),
+        frame,
+      ];
     }
 
     async function startPreview() {
       try {
         await post(`/api/site/previews/${encodeURIComponent(brainID)}`);
-        shownPreview = null;
         poller.kick();
       } catch (e) { toast(e.message, 'bad'); }
     }
 
-    function layout() {
-      const picker = brains.length > 1 ? select(brains.map((b) => [b.id, b.name || b.id]), brainID) : null;
+    function renderLayout() {
+      const picker = brains.length > 1 ? select(brains.map((b) => [b.id, brainLabel(b)]), brainID) : null;
       if (picker) {
         picker.addEventListener('change', () => {
           brainID = picker.value;
           try { localStorage.setItem(STORE_KEY, brainID); } catch { /* ignore */ }
-          shownCount = -1; shownPreview = null;
           poller.kick();
         });
       }
-      mount(body, h('div.build-layout',
+      return h('div.build-layout',
         h('section.card.build-chat',
           h('div.card-head', h('div.card-title', icon('chats'), h('h2', brains.length > 1 ? 'Chat with' : `Chat with ${brains[0].name || brains[0].id}`)), picker,
             btn('New conversation', {
               small: true, onClick: async () => {
                 await post(`/api/site/build/${encodeURIComponent(brainID)}/new`);
-                shownCount = -1; poller.kick();
+                poller.kick();
               },
             })),
           messagesEl, statusEl, proposalEl,
           h('div.build-compose', input, h('div.actions', h('span.muted.small', '⌘↩ to send'), sendBtn))),
-        h('section.card.build-side', previewEl)));
+        h('section.card.build-side', previewEl));
     }
 
     const poller = ctx.poll(async (signal) => {
@@ -137,17 +148,17 @@ export default {
         const r = await get('/api/site/builders', { signal });
         brains = r.brains.filter((b) => b.builder);
         if (!brains.length) {
-          mount(body, callout('info', 'No brain builds the site yet',
+          paint(body, 'no builder', () => callout('info', 'No brain builds the site yet',
             h('div', 'Allow one under ', h('a', { href: '#/site' }, 'Site → Builders'), ' (connect the site’s repository first).')));
           return;
         }
         let saved = '';
         try { saved = localStorage.getItem(STORE_KEY) || ''; } catch { /* ignore */ }
         brainID = brains.some((b) => b.id === saved) ? saved : brains[0].id;
-        layout();
+        paint(body, 'chat', renderLayout);
       }
       chat = await get(`/api/site/build/${encodeURIComponent(brainID)}`, { signal });
-      renderMessages(); renderStatus(); renderPreview();
+      paintChat();
     }, () => (chat && (chat.running || chat.queued) ? 1500 : 5000));
   },
 };

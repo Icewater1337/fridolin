@@ -58,6 +58,27 @@ jobs:
       - name: build
         run: make build
 
+      # The backup tests that run the real rclone skip without it. Linux
+      # gets a pinned release, checked against its published checksum
+      # (Ubuntu's own package is years older), and FRIDOLIN_REQUIRE_RCLONE
+      # makes those tests fail rather than skip. The variables must not
+      # start with RCLONE_: rclone reads every RCLONE_* variable as one of
+      # its flags, and RCLONE_VERSION would become --version.
+      - name: install rclone
+        if: matrix.os == 'ubuntu-latest'
+        env:
+          PINNED_RCLONE_VERSION: v1.73.3
+          PINNED_RCLONE_SHA256: 70278c22b98c7d02aed01828b70053904dbce4c8a1a15d7781d836c6fdb036ea
+        run: |
+          cd "$RUNNER_TEMP"
+          name="rclone-$PINNED_RCLONE_VERSION-linux-amd64"
+          curl -fsSLo rclone.zip "https://downloads.rclone.org/$PINNED_RCLONE_VERSION/$name.zip"
+          echo "$PINNED_RCLONE_SHA256  rclone.zip" | sha256sum -c -
+          unzip -q rclone.zip
+          sudo install -m 0755 "$name/rclone" /usr/local/bin/rclone
+          rclone version
+          echo "FRIDOLIN_REQUIRE_RCLONE=1" >> "$GITHUB_ENV"
+
       - name: test
         run: make race
 
@@ -139,14 +160,23 @@ jobs:
           path: '**/testdata/fuzz/**'
 
   scripts:
-    runs-on: ubuntu-latest
+    # The git hooks run the personal-data check on macOS, with BSD awk,
+    # grep and sed; CI's own scan runs it on Linux with GNU's. Its tests
+    # run on both.
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
 
+      # Once is enough: shellcheck reports the same on both.
       - name: shellcheck
+        if: matrix.os == 'ubuntu-latest'
         run: make lint-sh
 
       - name: personal-data check, action-pin check and Makefile tests
@@ -204,6 +234,10 @@ jobs:
       # dashboard blank. node --test then runs web/test (web/**/*.test.js).
       - name: dashboard modules and unit tests
         run: make test-web
+
+      # ESLint at the version the Makefile pins, which npx fetches.
+      - name: ESLint
+        run: make lint-web
 
   site:
     # The site process (site/, docs/SITE.md): its own tests, then the Go

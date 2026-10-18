@@ -72,9 +72,8 @@ func TestSandboxFailsClosed(t *testing.T) {
 				t.Fatal(err)
 			}
 			waitFor(t, 10*time.Second, "the second run", func() bool { return d.count() == 2 })
-			if _, err := os.Stat(tmuxCalls); err != nil {
-				t.Errorf("the unsandboxed run did not start the viewer: %v", err)
-			}
+			// The viewer starts in the background.
+			waitFor(t, 10*time.Second, "the viewer to start", func() bool { return fileExists(tmuxCalls) })
 		})
 	}
 }
@@ -1089,6 +1088,68 @@ func TestNodePackage(t *testing.T) {
 	}
 }
 
+// browserProfileRules are the rules that deny the browser profiles in home.
+func browserProfileRules(home string, both func(filter, p string) []string) []string {
+	var out []string
+	for _, b := range []string{"Google", "Firefox", "BraveSoftware", "Arc", "Chromium"} {
+		out = append(out, both("subpath", home+"/Library/Application Support/"+b)...)
+	}
+	// The profile's strings escape a backslash, as the regex's \. needs.
+	prefixes := strings.ReplaceAll("^"+regexp.QuoteMeta(home+"/Library/Application Support")+browserProfilePattern(), `\`, `\\`)
+	out = append(out, both("regex", prefixes)...)
+	return append(out, both("subpath", home+"/Library/Safari")...)
+}
+
+// Every browser's profile folders are denied, the release channels kept
+// beside the stable one included. The prefix rule is a regex, matched here
+// with Go's; TestSandboxDeniesBrowserProfiles checks the real sandbox.
+func TestBrowserProfilesDenyEveryChannel(t *testing.T) {
+	const home = "/Users/you"
+	prefixes := regexp.MustCompile("^" + regexp.QuoteMeta(home+"/Library/Application Support") + browserProfilePattern())
+	denied := func(p string) bool {
+		for _, sub := range defaultDenySubpaths {
+			if d := home + "/" + sub; p == d || strings.HasPrefix(p, d+"/") {
+				return true
+			}
+		}
+		return prefixes.MatchString(p)
+	}
+	for _, c := range []struct {
+		folder string
+		want   bool
+	}{
+		{"Google/Chrome", true},
+		{"Google/Chrome Beta", true},
+		{"Google/Chrome Canary", true},
+		{"BraveSoftware/Brave-Browser", true},
+		{"BraveSoftware/Brave-Browser-Nightly", true},
+		{"Microsoft Edge", true},
+		{"Microsoft Edge Beta", true},
+		{"Microsoft Edge Dev", true},
+		{"Microsoft Edge Canary", true},
+		{"Vivaldi", true},
+		{"Vivaldi Snapshot", true},
+		{"com.operasoftware.Opera", true},
+		{"com.operasoftware.OperaGX", true},
+		{"com.operasoftware.OperaNext", true},
+		{"Arc", true},
+		{"Chromium", true},
+		{"Firefox", true},
+		// Other programs' folders stay open: the CLI and tools may need them.
+		{"Claude", false},
+		{"Code", false},
+		{"com.operasoftwareX", false},
+	} {
+		t.Run(c.folder, func(t *testing.T) {
+			for _, p := range []string{c.folder, c.folder + "/Default/Local Storage/leveldb/000003.log"} {
+				if got := denied(home + "/Library/Application Support/" + p); got != c.want {
+					t.Errorf("%s denied = %v, want %v", p, got, c.want)
+				}
+			}
+		})
+	}
+}
+
 // TestSandboxProfileDeniesBridgeSecrets: the deny set follows the bridge's
 // secrets wherever they are. db_path can put the WhatsApp session store
 // outside the data dir, where every brain could read it; an install that
@@ -1127,6 +1188,8 @@ func TestSandboxProfileDeniesBridgeSecrets(t *testing.T) {
 			append(both("subpath", home+"/.fridolin"), `(allow file-read* (subpath "`+home+`/.whatsapp-claude-bridge/media"))`), nil},
 		{"bridge logs", home + "/.fridolin", home + "/.fridolin/bridge.db",
 			append(both("subpath", home+"/Library/Logs/fridolin"), both("subpath", home+"/Library/Logs/whatsapp-claude-bridge")...), nil},
+		// Where a dashboard session, or an older dashboard's token, lives.
+		{"browser profiles", home + "/.fridolin", home + "/.fridolin/bridge.db", browserProfileRules(home, both), nil},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -1554,7 +1617,7 @@ func TestViewerClosesWithItsBrain(t *testing.T) {
 				waitFor(t, 5*time.Second, "the viewer to close", func() bool { return logContains(logs, "[viewer] closed claude-a") })
 			}
 			data, _ := os.ReadFile(calls)
-			if killed := strings.Contains(string(data), "kill-session -t claude-a"); killed != c.closed {
+			if killed := strings.Contains(string(data), "kill-session -t =claude-a"); killed != c.closed {
 				t.Errorf("tmux calls %q, want the session killed: %v", data, c.closed)
 			}
 		})

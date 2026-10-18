@@ -1,10 +1,13 @@
 // Brains: a card per brain with its routing, live state and issues.
 
+import { del, qs } from '../app/api.js';
 import { brainsResource } from '../app/resources.js';
 import { h, mount, paint, reconcile } from '../lib/dom.js';
 import { routingSummary, issueLabel } from '../lib/brain.js';
 import { icon } from '../components/icons.js';
 import { btn } from '../components/buttons.js';
+import { confirmDialog } from '../components/dialog.js';
+import { toast } from '../components/toast.js';
 import { mono, pageHeader, spinner } from '../components/common.js';
 import { brainStatusPill, runtimeSummary, firstBrainHero } from '../components/brain.js';
 
@@ -53,5 +56,21 @@ function brainCard(b) {
     (b.issues || []).length ? h('ul.issue-list', b.issues.map((is) => h('li', h('strong', `${issueLabel(is.kind)}: `), is.detail))) : null,
   ];
   if (href) return h('a.card.brain-card.link-card', { href }, body, icon('right', 'row-chevron'));
-  return h('div.card.brain-card', body, h('p.muted.small', 'This entry has no approved manifest, so it cannot be opened here. Remove it from brain_dirs in config.json and add the folder again.'));
+  return h('div.card.brain-card', body,
+    h('p.muted.small', 'This entry has no approved manifest, so it cannot be opened here. Remove it, then add the folder again.'),
+    h('div.actions', btn('Remove entry…', {
+      kind: 'danger', small: true, icon: 'trash',
+      onClick: async () => {
+        const ok = await confirmDialog({
+          title: 'Remove this entry?',
+          message: h('p', 'The bridge forgets ', mono(b.path), '. Nothing in the folder is deleted.'),
+          confirm: 'Remove entry',
+          danger: true,
+        });
+        if (!ok) return;
+        await del(`/api/brain-dirs${qs({ path: b.path })}`);
+        toast('Entry removed', 'ok');
+        await brainsResource.refresh();
+      },
+    })));
 }

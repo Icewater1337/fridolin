@@ -1,0 +1,80 @@
+# Statement coverage of each file of the main package before its code moves
+# into packages: covered/total statements and the share. A PR that moves
+# code out of a file keeps the moved code covered at least this well.
+# Measured on macOS (so the darwin-only files and tests count) with rclone
+# installed and without the site's node_modules, whose tests skip. Paths
+# that depend on timing move a count between runs, debounce.go's by up to
+# seven statements; each count is the best of several runs. Remake it with:
+#
+#   go test -count=1 -coverprofile=cover.out ./... && awk -F'[: ,]' 'NR > 1 { f = $1; n = $(NF-1); total[f] += n; all += n; if ($NF > 0) { cov[f] += n; covered += n } } END { for (f in total) printf "%-28s %5d/%-5d %5.1f%%\n", f, cov[f], total[f], 100 * cov[f] / total[f]; printf "%-28s %5d/%-5d %5.1f%%\n", "total", covered, all, 100 * covered / all }' cover.out | sort
+#
+fridolin/activity.go            40/42     95.2%
+fridolin/addressing.go          25/26     96.2%
+fridolin/apiclient.go           25/29     86.2%
+fridolin/assets.go              11/13     84.6%
+fridolin/backup.go             789/858    92.0%
+fridolin/brain.go              867/912    95.1%
+fridolin/brain_changes.go      116/137    84.7%
+fridolin/brainapi.go           181/215    84.2%
+fridolin/brainreg.go           131/140    93.6%
+fridolin/bridge.go             216/280    77.1%
+fridolin/calendar_cmd.go       217/227    95.6%
+fridolin/chaterr.go             22/23     95.7%
+fridolin/childenv.go            29/29    100.0%
+fridolin/chunks.go              97/98     99.0%
+fridolin/claudecli.go           54/57     94.7%
+fridolin/config.go             238/252    94.4%
+fridolin/configstore.go        192/210    91.4%
+fridolin/dashboard.go          155/175    88.6%
+fridolin/dashboard_api.go      625/754    82.9%
+fridolin/dashsession.go         60/73     82.2%
+fridolin/debounce.go            60/63     95.2%
+fridolin/envelope.go            32/32    100.0%
+fridolin/google.go             435/478    91.0%
+fridolin/google_calendar.go    165/183    90.2%
+fridolin/groupcache.go          36/37     97.3%
+fridolin/health.go              36/37     97.3%
+fridolin/helperbin.go           13/13    100.0%
+fridolin/history_cmd.go        110/116    94.8%
+fridolin/identity.go            58/59     98.3%
+fridolin/inbound.go             52/52    100.0%
+fridolin/layout.go              24/25     96.0%
+fridolin/lock.go                15/17     88.2%
+fridolin/logbuf.go              26/36     72.2%
+fridolin/logfile.go             23/29     79.3%
+fridolin/logfile_unix.go         1/1     100.0%
+fridolin/main.go               262/386    67.9%
+fridolin/manifest.go            74/85     87.1%
+fridolin/observe.go              1/1     100.0%
+fridolin/outbox.go             125/136    91.9%
+fridolin/outbox_store.go        51/61     83.6%
+fridolin/plaud.go              836/914    91.5%
+fridolin/polls.go               64/66     97.0%
+fridolin/polls_cmd.go           24/30     80.0%
+fridolin/procgroup_unix.go       8/10     80.0%
+fridolin/procstart_darwin.go     8/10     80.0%
+fridolin/prompt.go              70/72     97.2%
+fridolin/runrecord.go           39/48     81.2%
+fridolin/sandbox.go            483/515    93.8%
+fridolin/scripttoken.go         20/21     95.2%
+fridolin/server.go             149/149   100.0%
+fridolin/service.go            496/652    76.1%
+fridolin/site.go               279/538    51.9%
+fridolin/site_api.go           137/242    56.6%
+fridolin/site_build.go         112/140    80.0%
+fridolin/site_builder.go       140/425    32.9%
+fridolin/site_ingest.go        134/203    66.0%
+fridolin/site_mcp.go            52/67     77.6%
+fridolin/site_repo.go          255/371    68.7%
+fridolin/site_sandbox.go       170/222    76.6%
+fridolin/site_secrets.go        91/106    85.8%
+fridolin/store.go              134/160    83.8%
+fridolin/stream.go              25/25    100.0%
+fridolin/tailbuf.go             24/24    100.0%
+fridolin/tmux_session.go        33/37     89.2%
+fridolin/toolcmd.go             62/74     83.8%
+fridolin/trigger.go             85/86     98.8%
+fridolin/version.go              9/18     50.0%
+fridolin/waconn.go             131/175    74.9%
+fridolin/whatsapp.go           376/440    85.5%
+total                        10135/12237  82.8%

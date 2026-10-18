@@ -10,14 +10,16 @@ import (
 	"runtime"
 	"strings"
 	"syscall"
+	"time"
 )
 
 // Config holds all configuration for the bridge.
 type Config struct {
 	Comment string `json:"_comment,omitempty"`
 
-	// AllowedNumbers lists phone numbers (country code, no "+") allowed to DM
-	// the bridge.
+	// AllowedNumbers lists phone numbers allowed to DM the bridge: digits
+	// with the country code. The running config has each in that form,
+	// however it was written in the file (see allowedNumbersAsNumbers).
 	AllowedNumbers []string `json:"allowed_numbers"`
 
 	// AllowAnyDM decides what an empty allowed_numbers means. Unset or false:
@@ -75,6 +77,12 @@ type Config struct {
 	// Claude CLI so it can use tools without an interactive prompt. Required
 	// for unattended operation; see the security notes in the README.
 	DangerouslySkipPermissions bool `json:"dangerously_skip_permissions"`
+
+	// RunTimeoutMinutes stops a brain's run that takes longer, so that one
+	// stuck run (a hung tool, a network stall) cannot hold up its brain's
+	// queue until someone sends !stop. Default 30; 0 lets a run take as long
+	// as it takes.
+	RunTimeoutMinutes *int `json:"run_timeout_minutes,omitempty"`
 
 	// InheritClaudeUserConfig lets brains load your own Claude Code setup,
 	// as they did before this setting existed: your user settings (with
@@ -135,6 +143,7 @@ type Config struct {
 	Backup        BackupConfig        `json:"backup"`
 	Plaud         PlaudConfig         `json:"plaud"`
 	Dashboard     DashboardConfig     `json:"dashboard"`
+	ScriptAPI     ScriptAPIConfig     `json:"script_api"`
 }
 
 // retiredBrainMode is the brain_mode key. A missing key, null and true all
@@ -312,7 +321,7 @@ type IngestConfig struct {
 
 // StartupChecksConfig lists files that must exist for the assistant to work —
 // credentials, typically. Missing ones are logged loudly, shown on the
-// dashboard and optionally sent to you over WhatsApp.
+// dashboard and optionally sent to you over WhatsApp (see health.go).
 type StartupChecksConfig struct {
 	RequiredFiles  []string `json:"required_files,omitempty"`
 	NotifyWhatsApp bool     `json:"notify_whatsapp,omitempty"`
@@ -332,6 +341,16 @@ type DashboardConfig struct {
 	RequireToken *bool `json:"require_token,omitempty"`
 }
 
+// ScriptAPIConfig controls who may use /send and /ingest (docs/API.md).
+type ScriptAPIConfig struct {
+	// TokenlessSend (default true) lets /send work without a token, as it
+	// did before tokens, but only to the allowed chats. While it is on, any
+	// program on this computer, a brain among them, can message those
+	// chats. New configs turn it off; scripts then send the token in
+	// <data_dir>/scripts.token.
+	TokenlessSend *bool `json:"tokenless_send,omitempty"`
+}
+
 // Defaults for optional settings.
 const (
 	defaultHTTPListen    = "127.0.0.1:8765"
@@ -344,7 +363,19 @@ const (
 	defaultKeepVersions  = 30
 	defaultMaxMediaMB    = 100
 	maxMaxMediaMB        = 2048
+	// Agentic runs can take a while; a day is far more than any should.
+	defaultRunTimeoutMinutes = 30
+	maxRunTimeoutMinutes     = 24 * 60
 )
+
+// runTimeoutUnit is what one of run_timeout_minutes is, a variable so that
+// tests need not wait a minute.
+var runTimeoutUnit = time.Minute
+
+// RunTimeout is how long a brain's run may take, 0 for no limit.
+func (c *Config) RunTimeout() time.Duration {
+	return time.Duration(intOr(c.RunTimeoutMinutes, defaultRunTimeoutMinutes)) * runTimeoutUnit
+}
 
 func boolOr(p *bool, def bool) bool {
 	if p == nil {
@@ -370,6 +401,9 @@ func (c *Config) DebounceMaxWaitMS() int { return intOr(c.Debounce.MaxWaitMS, de
 // DashboardRequiresToken reports whether API calls need the dashboard token.
 func (c *Config) DashboardRequiresToken() bool { return boolOr(c.Dashboard.RequireToken, true) }
 
+// TokenlessSend reports whether /send works without a token.
+func (c *Config) TokenlessSend() bool { return boolOr(c.ScriptAPI.TokenlessSend, true) }
+
 // MaxMediaBytes is the largest attachment to download, in bytes.
 func (c *Config) MaxMediaBytes() int64 {
 	mb := c.MaxMediaMB
@@ -388,6 +422,32 @@ func (c *Config) AllowsAnyDM() bool { return boolOr(c.AllowAnyDM, false) }
 
 // AnyoneCanDM reports whether every sender passes the DM allowlist.
 func (c *Config) AnyoneCanDM() bool { return len(c.AllowedNumbers) == 0 && c.AllowsAnyDM() }
+
+// warnOddChats logs entries of allowed_numbers and allowed_groups that can
+// never match a chat: an entry that is no phone number, and a group the
+// bridge compares as it is written, with a typo or spaces. A number is
+// read however it was written (phoneNumber), so only one that is none is
+// named. They are logged rather than refused, so a config that ran
+// before still starts.
+func warnOddChats(path string, c *Config) {
+	var odd []string
+	for _, n := range c.AllowedNumbers {
+		if _, err := phoneNumber(n); err != nil {
+			odd = append(odd, fmt.Sprintf("allowed_numbers %q (digits with the country code)", n))
+		}
+	}
+	for _, g := range c.AllowedGroups {
+		switch want, err := allowListGroup(g); {
+		case err != nil:
+			odd = append(odd, fmt.Sprintf("allowed_groups %q (digits@g.us)", g))
+		case want != g:
+			odd = append(odd, fmt.Sprintf("allowed_groups %q (write it as %s)", g, want))
+		}
+	}
+	if len(odd) > 0 {
+		log.Printf("config %s: these entries match no chat: %s", path, strings.Join(odd, "; "))
+	}
+}
 
 // LoadConfig reads config.json and fills in the built-in defaults. The file
 // is the only source of settings: no environment variable or .env overrides
@@ -428,6 +488,39 @@ func defaultDataDir(home string) string {
 	return current
 }
 
+// Where the data dir came from, as the log and `fridolin paths` name it.
+const (
+	dataDirFromConfig  = "config"  // data_dir in the config file
+	dataDirFromDefault = "default" // ~/.fridolin
+	dataDirFromLegacy  = "legacy"  // the folder from before the rename
+)
+
+// resolveDataDir is the data dir a config file's data_dir value stands
+// for, and where it came from: the value itself, or for an empty one
+// defaultDataDir's choice.
+func resolveDataDir(value, home string) (dir, source string) {
+	dir = value
+	if dir == "" {
+		dir = defaultDataDir(home)
+	}
+	dir = expandHome(dir, home)
+	return dir, dataDirSource(value, dir, home)
+}
+
+// dataDirSource says where dir, the data dir resolveDataDir made of the
+// config file's data_dir value, came from. It looks at no folder: once
+// the bridge has made the data dir, asking defaultDataDir again could
+// answer otherwise.
+func dataDirSource(value, dir, home string) string {
+	switch {
+	case value != "":
+		return dataDirFromConfig
+	case dir == filepath.Join(home, legacyDataDirName):
+		return dataDirFromLegacy
+	}
+	return dataDirFromDefault
+}
+
 // effective derives the running configuration from the on-disk layer:
 // defaults, ~ expansion, validation.
 func effective(file *Config) (*Config, error) {
@@ -445,10 +538,7 @@ func effective(file *Config) (*Config, error) {
 		cfg.ClaudePath = "claude"
 	}
 	cfg.ClaudePath = expandHome(cfg.ClaudePath, home)
-	if cfg.DataDir == "" {
-		cfg.DataDir = defaultDataDir(home)
-	}
-	cfg.DataDir = expandHome(cfg.DataDir, home)
+	cfg.DataDir, _ = resolveDataDir(cfg.DataDir, home)
 	if cfg.DBPath == "" {
 		cfg.DBPath = filepath.Join(cfg.DataDir, "bridge.db")
 	}
@@ -499,8 +589,16 @@ func effective(file *Config) (*Config, error) {
 	if cfg.Dashboard.RequireToken == nil {
 		cfg.Dashboard.RequireToken = &t
 	}
+	if cfg.RunTimeoutMinutes == nil {
+		rt := defaultRunTimeoutMinutes
+		cfg.RunTimeoutMinutes = &rt
+	}
+	if cfg.ScriptAPI.TokenlessSend == nil {
+		cfg.ScriptAPI.TokenlessSend = &t
+	}
 	if cfg.Backup.IncludeBridgeConfig == nil {
-		cfg.Backup.IncludeBridgeConfig = &t
+		inc := defaultIncludeBridgeConfig
+		cfg.Backup.IncludeBridgeConfig = &inc
 	}
 	if cfg.Sandbox.GitConfig == "" {
 		cfg.Sandbox.GitConfig = "read"
@@ -521,6 +619,9 @@ func effective(file *Config) (*Config, error) {
 	}
 	cfg.Backup.RclonePath = expandHome(cfg.Backup.RclonePath, home)
 
+	// Compared with senders as digits, however they were typed into the
+	// file. The dashboard writes them so; a hand edit may not have.
+	cfg.AllowedNumbers = allowedNumbersAsNumbers(cfg.AllowedNumbers)
 	for i := range cfg.BrainDirs {
 		cfg.BrainDirs[i].Path = expandHome(cfg.BrainDirs[i].Path, home)
 	}
@@ -670,6 +771,9 @@ func (c *Config) validate() error {
 	}
 	if c.MaxChunkSize < minChunkSize {
 		return fmt.Errorf("max_chunk_size %d is too small: use at least %d, or 0 for the default of %d", c.MaxChunkSize, minChunkSize, defaultChunkSize)
+	}
+	if n := intOr(c.RunTimeoutMinutes, defaultRunTimeoutMinutes); n < 0 || n > maxRunTimeoutMinutes {
+		return fmt.Errorf("run_timeout_minutes must be between 0 (no limit) and %d, not %d", maxRunTimeoutMinutes, n)
 	}
 	if c.MaxMediaMB < 1 || c.MaxMediaMB > maxMaxMediaMB {
 		return fmt.Errorf("max_media_mb must be between 1 and %d, not %d", maxMaxMediaMB, c.MaxMediaMB)

@@ -14,6 +14,8 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"runtime/debug"
+	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -28,7 +30,14 @@ type historyEntry struct {
 	From string `json:"from"`
 	Chat string `json:"chat"` // JID of the chat (DM participant or group)
 	Text string `json:"text"`
-	Type string `json:"type"` // historyIn or historyOut
+	Type string `json:"type"` // historyIn, historyOut or historyEvent
+	// Via marks an "out" line that came in through /send: "brain" (From is
+	// the brain that sent it), "script" (the scripts token) or "api" (no
+	// token). A brain's own replies have none.
+	Via string `json:"via,omitempty"`
+	// ID is the WhatsApp message's ID for a message from WhatsApp, which an
+	// edit or a deletion of it names (see recordChange).
+	ID string `json:"id,omitempty"`
 }
 
 // The history entry types. They are written to every brain's history file,
@@ -37,6 +46,10 @@ type historyEntry struct {
 const (
 	historyIn  = "in"  // a message to the brain
 	historyOut = "out" // a message the brain sent, or one sent on its behalf
+	// historyEvent is something that happened in a chat without a message,
+	// such as a poll vote. Its From is who did it, and its text says what,
+	// after their name.
+	historyEvent = "event"
 )
 
 // normalizeJID strips the WhatsApp server suffix and a leading + from a JID,
@@ -55,8 +68,8 @@ func normalizeJID(jid string) string {
 // identityMapFile is the brain's contact map, in its folder.
 const identityMapFile = "memories/people/whatsapp-identity-map.md"
 
-// parseIdentityMap parses a brain's contact map and returns normalized
-// JID → name.
+// parseIdentityMap parses a brain's contact map and returns name by
+// identityKey.
 //
 // The map is a markdown table at identityMapFile in the brain's folder:
 //
@@ -84,8 +97,9 @@ func parseIdentityMap(data []byte) map[string]string {
 		if jid == "" || name == "" || jid == "WhatsApp Number" {
 			continue
 		}
-		// A cell like "+" or "@lid" holds no number to look up.
-		number := normalizeJID(jid)
+		// A cell like "+" or "@lid" holds no number to look up. A number
+		// is read however it was written: "+1 555 123 4567" is 15551234567.
+		number := identityKey(jid)
 		if number == "" {
 			continue
 		}
@@ -119,7 +133,8 @@ var defaultOTPMarkers = []string{"🔐", "OTP", "one-time code", "2FA", "verific
 
 // recentOutboundLooksLikeOTPRequest reports whether any of the brain's last 50
 // outbound messages in lines, the tail of its history, asked for a one-time
-// code. With no markers given it uses the built-in list.
+// code: its own replies, and what went out in its chats through /send, from
+// a script or a brain. With no markers given it uses the built-in list.
 func recentOutboundLooksLikeOTPRequest(lines []string, brainID string, markers ...string) bool {
 	if len(markers) == 0 {
 		markers = defaultOTPMarkers
@@ -133,7 +148,7 @@ func recentOutboundLooksLikeOTPRequest(lines []string, brainID string, markers .
 		if err := json.Unmarshal([]byte(lines[i]), &entry); err != nil {
 			continue
 		}
-		if entry.Type != historyOut || entry.From != brainID {
+		if entry.Type != historyOut || (entry.From != brainID && entry.Via == "") {
 			continue
 		}
 		for _, marker := range markers {
@@ -193,6 +208,11 @@ type Brain struct {
 	sandbox  *SandboxProfiler
 	hooks    *BrainHooks
 
+	// historyMu serialises the bridge's writes to the history file: an
+	// append must not land in a copy that a rewrite then drops (see
+	// rewriteHistory).
+	historyMu sync.Mutex
+
 	mu      sync.Mutex
 	current *brainRun
 	pending []Inbound
@@ -201,10 +221,14 @@ type Brain struct {
 	last    *RunInfo
 
 	// tmuxViewer is an optional Terminal window tailing this brain's
-	// activity log. A run starts it and a reload can close it, so viewerMu
-	// guards it.
-	viewerMu   sync.Mutex
-	tmuxViewer *TmuxViewer
+	// activity log. A run starts it in the background and a reload can close
+	// it, so viewerMu guards it, with viewerStarting, set while a start is
+	// under way, and viewerGen, which closeViewer moves on so that a start
+	// that ends after it knows to close what it opened.
+	viewerMu       sync.Mutex
+	tmuxViewer     *TmuxViewer
+	viewerStarting bool
+	viewerGen      int
 }
 
 // brainSettings is everything about a brain that can change while it runs.
@@ -222,8 +246,10 @@ type brainSettings struct {
 	otpGuard        bool
 	otpMarkers      []string
 	viewer          bool
+	runTimeout      time.Duration // 0 for none
 	queueMode       string
 	maxPending      int
+	observe         string // BrainManifest.Observe
 	credsDir        string // where per-brain credential files live
 	envPassthrough  []string
 	toolsDir        string // the bridge's Python helpers, or ""
@@ -234,11 +260,23 @@ type brainSettings struct {
 
 // BrainHooks connect brains to the rest of the bridge.
 type BrainHooks struct {
-	// Intermediate delivers a message before the final answer, ready to
-	// send: the working notice and questions the brain asks mid-run.
-	Intermediate func(jid, text string)
-	// Deliver receives every finished run.
+	// Notice tells the chat jid, ready to send, that a run is working on
+	// its message: of use only now.
+	Notice func(jid, text string)
+	// Question sends the chat jid a question br asks mid-run, marked as
+	// one, and reports whether it is on its way, ahead of the run's final
+	// reply. br's history records it once it arrived, like an answer: the
+	// reply to it comes as a new message, whose run must see what it
+	// answers. A silent run asks nothing (see readStream).
+	Question func(br *Brain, jid, text string) bool
+	// Deliver receives every finished run. It records the answer in the
+	// brain's history once it is sent.
 	Deliver func(br *Brain, m Inbound, res RunResult)
+	// Undelivered returns the brain's answers still on their way to
+	// WhatsApp, as its history will record them once they arrived. A
+	// chat gets them before anything a later run says there, so that run
+	// reads them as said (see undelivered).
+	Undelivered func(brainID string) []historyEntry
 	// OnHistory sees every line written to a brain's history.
 	OnHistory func(brainID string, e historyEntry)
 	// ExtraArgs adds CLI arguments to a brain's runs (the site builder's
@@ -253,17 +291,21 @@ type BrainHooks struct {
 // A run that takes longer than workingNoticeAfter tells the chat it is
 // working on it, and questions it asks mid-run go out marked as such.
 const (
-	workingNoticeAfter = 10 * time.Second
-	workingNotice      = "⏳ Working on it..."
-	questionPrefix     = "❓ "
+	workingNotice  = "⏳ Working on it..."
+	questionPrefix = "❓ "
 )
+
+// workingNoticeAfter is a variable so tests need not wait for it.
+var workingNoticeAfter = 10 * time.Second
 
 // RunResult is the outcome of one brain run.
 type RunResult struct {
-	Text        string
-	AlreadySent bool // a question was forwarded mid-run; don't send Text too
-	Err         error
-	Duration    time.Duration
+	Text string
+	// Asked is set when the run forwarded a question mid-run. Its answer
+	// comes as a new message; Text, the run's own final reply, is sent too.
+	Asked    bool
+	Err      error
+	Duration time.Duration
 }
 
 // RunInfo summarises the last finished run, for the dashboard.
@@ -298,6 +340,9 @@ var (
 	errBrainDropped     = errors.New("dropped before it ran")
 	errBrainRetired     = errors.New("brain was removed")
 	errQueueFull        = errors.New("brain queue is full")
+	errNoResult         = errors.New("no result from claude (empty output)")
+	// errRunTimedOut is a run that took longer than run_timeout_minutes.
+	errRunTimedOut = errors.New("the run took too long and was stopped")
 	// errSandboxUnavailable is what the chat sees. The cause goes to the log
 	// only, because it can name private paths.
 	errSandboxUnavailable = errors.New("the sandbox could not be set up, so this message was not run (details in the bridge log)")
@@ -334,33 +379,58 @@ func (br *Brain) historyTail(maxBytes int64) []string {
 	return tailLines(f, maxBytes)
 }
 
-// Submit queues a message for the brain. It returns the message's position in
-// the queue (1 = next) and whether it has to wait for other work; a run it
-// interrupts does not count.
+// logInbound writes m to the brain's history: a line for each part of a
+// merged message, with its ID, so that one deleted later is taken out
+// alone. It returns m with each part's line kept on it (Inbound.logged),
+// so that its own run shows the message once, as the new message, after
+// the chat's history before those lines.
+func (br *Brain) logInbound(m Inbound) Inbound {
+	parts := m.ownParts()
+	for i, p := range parts {
+		parts[i].logged = br.appendEntry(historyEntry{Chat: m.JID, From: p.Sender, Text: historyTextWithMedia(p.textWithQuote(), p.Media), Type: historyIn, ID: p.ID})
+	}
+	if len(m.parts) > 0 {
+		m.parts = parts
+	}
+	m.logged = parts[0].logged
+	return m
+}
+
+// Submit hands a message to the brain: it goes into the history and, unless
+// it is untagged chatter that gets no run (see observeRuns), into the
+// queue. It returns the message's position in the queue (1 = next, 0 for
+// none) and whether it has to wait for other work; a run it interrupts
+// does not count.
 func (br *Brain) Submit(m Inbound) (pos int, busy bool, err error) {
 	if m.At.IsZero() {
 		m.At = time.Now()
 	}
 	s := br.settings.Load()
 
-	// History first, so the run (and any later run) sees the message even when
-	// it is merged into a queue that is already moving.
-	br.appendHistory(m.JID, m.Sender, historyTextWithMedia(m.textWithQuote(), m.Media), historyIn)
+	// History first, so that later runs see the message even when it is
+	// merged into a queue that is already moving.
+	m = br.logInbound(m)
 
 	br.mu.Lock()
 	if br.retired {
 		br.mu.Unlock()
 		return 0, false, errBrainRetired
 	}
-	busy = br.current != nil || len(br.pending) > 0
+	// Untagged chatter needs nothing more, unless the brain observes it with
+	// runs: the next run in the chat reads it in the history.
+	if m.Silent && !observeRuns(s.observe, m) {
+		br.mu.Unlock()
+		return 0, false, nil
+	}
 
 	// A newer message from the same chat supersedes queued untagged chatter:
 	// it is already in the history the next run reads. In interrupt mode, a
 	// tagged message also replaces its sender's own earlier request in that
-	// chat, waiting or running. Nothing else is touched: other chats, and
-	// other people's requests in a group, keep their place, and untagged
-	// chatter never interrupts a run. Neither do ingested files, nor are they
-	// replaced: each is a job of its own, not a correction of the last one.
+	// chat, waiting or running. No other request is touched: other chats,
+	// and other people's requests in a group, keep their place, and untagged
+	// chatter never interrupts a run. Nor do ingested files interrupt a
+	// request, or get replaced: each is a job of its own, not a correction of
+	// the last one. Observe-only runs are another matter, see below.
 	interrupting := s.queueMode == queueModeInterrupt && !m.Silent && m.Source != sourceIngest
 	replaces := func(p Inbound) bool {
 		return p.JID == m.JID && (p.Silent || (interrupting && p.Sender == m.Sender && p.Source != sourceIngest))
@@ -387,16 +457,25 @@ func (br *Brain) Submit(m Inbound) (pos int, busy bool, err error) {
 		}
 		if !dropped {
 			br.mu.Unlock()
-			return 0, busy, errQueueFull
+			return 0, true, errQueueFull
 		}
 	}
+	// Work addressed to the brain does not wait for an observe-only run: it
+	// stops the one in flight and goes ahead of those waiting. Their chatter
+	// is in the history, where the next run in its chat reads it.
 	var interrupt *brainRun
-	if interrupting && br.current != nil && replaces(br.current.msg) {
-		interrupt = br.current
-		busy = len(br.pending) > 0
+	if cur := br.current; cur != nil && (interrupting && replaces(cur.msg) || !m.Silent && cur.msg.Silent) {
+		interrupt = cur
 	}
-	br.pending = append(br.pending, m)
-	pos = len(br.pending)
+	at := len(br.pending)
+	if !m.Silent {
+		if i := slices.IndexFunc(br.pending, func(p Inbound) bool { return p.Silent }); i >= 0 {
+			at = i
+		}
+	}
+	br.pending = slices.Insert(br.pending, at, m)
+	pos = at + 1
+	busy = at > 0 || (br.current != nil && interrupt == nil)
 	start := !br.working
 	br.working = true
 	br.mu.Unlock()
@@ -421,30 +500,80 @@ func (br *Brain) worker() {
 		}
 		m := br.pending[0]
 		br.pending = br.pending[1:]
-		ctx, cancel := context.WithCancel(context.Background())
+		s := br.settings.Load()
+		ctx, cancel := runContext(s.runTimeout)
 		run := &brainRun{cancel: cancel, done: make(chan struct{}), msg: m, started: time.Now()}
 		br.current = run
 		br.mu.Unlock()
 
-		s := br.settings.Load()
 		if m.Silent {
 			log.Printf("brain %s: running silently for untagged message from %s", br.id, m.Sender)
 		}
-		res := br.invoke(run, ctx, s, m)
+		res := br.invokeGuarded(run, ctx, s, m)
 		res.Duration = time.Since(run.started)
-		if res.Err == nil && !res.AlreadySent && res.Text != "" {
-			br.appendHistory(m.JID, br.id, res.Text, historyOut)
-		}
+		// The answer goes into the history once it was delivered (see
+		// Outbox), not here: the next run must not read as said what
+		// never reached the chat.
 		br.finishRun(run)
 		br.recordLast(m, res)
-
-		if br.hooks != nil && br.hooks.Deliver != nil {
-			br.hooks.Deliver(br, m, res)
-		}
-		if m.Done != nil {
-			m.Done(res.Err)
-		}
+		br.deliverGuarded(m, res)
 	}
+}
+
+// errRunPanicked is what a run that panicked inside the bridge ends with;
+// the panic and its stack go to the log only.
+var errRunPanicked = errors.New("the bridge failed while running this message (details in the bridge log)")
+
+// invokeGuarded is invoke with a panic in it turned into the run's error,
+// so that the run is finished and recorded like any failed one and the
+// worker goes on with the next message. Unrecovered, the panic would end
+// the whole bridge and leave every brain's running claude behind.
+func (br *Brain) invokeGuarded(run *brainRun, ctx context.Context, s *brainSettings, m Inbound) (res RunResult) {
+	defer func() {
+		if p := recover(); p != nil {
+			log.Printf("brain %s: the run for %s panicked: %v\n%s", br.id, m.JID, p, debug.Stack())
+			res = RunResult{Err: errRunPanicked}
+		}
+	}()
+	return br.invoke(run, ctx, s, m)
+}
+
+// deliverGuarded hands a finished run to the bridge and then to whoever
+// waits for the message, each with a panic logged rather than ending the
+// worker, and the one waiting told even when the delivery panicked.
+func (br *Brain) deliverGuarded(m Inbound, res RunResult) {
+	guard := func(what string, fn func()) {
+		defer func() {
+			if p := recover(); p != nil {
+				log.Printf("brain %s: %s the run for %s panicked: %v\n%s", br.id, what, m.JID, p, debug.Stack())
+			}
+		}()
+		fn()
+	}
+	if br.hooks != nil && br.hooks.Deliver != nil {
+		guard("delivering", func() { br.hooks.Deliver(br, m, res) })
+	}
+	if m.Done != nil {
+		guard("finishing", func() { m.Done(res.Err) })
+	}
+}
+
+// runContext is a run's context, which a stop cancels and which ends after
+// timeout too, unless that is 0.
+func runContext(timeout time.Duration) (context.Context, context.CancelFunc) {
+	if timeout > 0 {
+		return context.WithTimeout(context.Background(), timeout)
+	}
+	return context.WithCancel(context.Background())
+}
+
+// runTimedOut is the error of a run stopped at run_timeout_minutes.
+func runTimedOut(timeout time.Duration) error {
+	after := timeout.String()
+	if timeout%time.Minute == 0 {
+		after = fmt.Sprintf("%d minutes", int(timeout/time.Minute))
+	}
+	return fmt.Errorf("%w after %s (run_timeout_minutes)", errRunTimedOut, after)
 }
 
 // dropped tells the messages in ms that will not run, outside br.mu.
@@ -463,7 +592,7 @@ func (br *Brain) recordLast(m Inbound, res RunResult) {
 		info.Outcome = outcomeInterrupted
 	case res.Err != nil:
 		info.Outcome, info.Error = outcomeError, res.Err.Error()
-	case res.AlreadySent:
+	case res.Asked:
 		info.Outcome = outcomeQuestion
 	}
 	br.mu.Lock()
@@ -658,14 +787,41 @@ func (br *Brain) Snapshot() BrainRuntime {
 var startViewer = NewTmuxViewer
 
 // ensureViewer starts the tmux activity viewer if enabled and not running.
+// It does so in the background, one start at a time: tmux and osascript,
+// which can wait on an Automation consent prompt under launchd, must not
+// hold up the run.
 func (br *Brain) ensureViewer(s *brainSettings) {
 	if !s.viewer {
 		return
 	}
 	br.viewerMu.Lock()
-	defer br.viewerMu.Unlock()
-	if br.tmuxViewer != nil && br.tmuxViewer.IsAlive() {
+	if br.viewerStarting {
+		br.viewerMu.Unlock()
 		return
+	}
+	br.viewerStarting = true
+	tv, gen := br.tmuxViewer, br.viewerGen
+	br.viewerMu.Unlock()
+	go func() {
+		started := br.startViewerUnlessAlive(tv, s)
+		br.viewerMu.Lock()
+		br.viewerStarting = false
+		closed := gen != br.viewerGen // the setting went off, or the brain
+		if started != nil && !closed {
+			br.tmuxViewer = started
+		}
+		br.viewerMu.Unlock()
+		if started != nil && closed {
+			started.Close()
+		}
+	}()
+}
+
+// startViewerUnlessAlive starts a viewer unless tv still runs. It returns
+// the new viewer, or nil when tv runs or none could start.
+func (br *Brain) startViewerUnlessAlive(tv *TmuxViewer, s *brainSettings) *TmuxViewer {
+	if tv != nil && tv.IsAlive() {
+		return nil
 	}
 	// tail fails on a log that does not exist yet, so create it first,
 	// through the folder as a run opens it: touch would have followed a
@@ -673,23 +829,24 @@ func (br *Brain) ensureViewer(s *brainSettings) {
 	f, err := openInFolder(br.root, streamLogName, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600)
 	if err != nil {
 		log.Printf("brain %s: no tmux viewer: could not open stream log: %v", br.id, err)
-		return
+		return nil
 	}
 	f.Close()
-	tv, err := startViewer("claude-"+br.id, br.streamLogPath(), br.workDir, childEnv(anyChild, s.envPassthrough))
+	nv, err := startViewer("claude-"+br.id, br.streamLogPath(), br.workDir, childEnv(anyChild, s.envPassthrough))
 	if err != nil {
 		log.Printf("brain %s: could not start tmux viewer: %v", br.id, err)
-		return
+		return nil
 	}
-	br.tmuxViewer = tv
+	return nv
 }
 
 // closeViewer ends the activity viewer's tmux session, if it has one, which
-// closes its Terminal window.
+// closes its Terminal window. A start under way closes what it opens.
 func (br *Brain) closeViewer() {
 	br.viewerMu.Lock()
 	tv := br.tmuxViewer
 	br.tmuxViewer = nil
+	br.viewerGen++
 	br.viewerMu.Unlock()
 	if tv != nil {
 		tv.Close()
@@ -705,8 +862,9 @@ func (br *Brain) streamLogPath() string {
 
 // claudeArgs builds the CLI arguments for one run. mcpConfig is what
 // mcpConfigOf returned for the brain's folder, or "" for none; settings is
-// the brain's excludeInstructionsAbove.
-func claudeArgs(s *brainSettings, mcpConfig, settings, prompt string) []string {
+// the brain's excludeInstructionsAbove. They end in -p: the prompt goes on
+// stdin (see invoke).
+func claudeArgs(s *brainSettings, mcpConfig, settings string) []string {
 	args := []string{"--output-format", "stream-json", "--verbose"}
 	if !s.inheritUser {
 		// Only the brain folder's own Claude Code setup. Your user settings
@@ -736,18 +894,18 @@ func claudeArgs(s *brainSettings, mcpConfig, settings, prompt string) []string {
 	if len(s.disallowedTools) > 0 {
 		args = append(args, "--disallowed-tools", strings.Join(s.disallowedTools, ","))
 	}
-	return append(args, "-p", prompt)
+	return append(args, "-p")
 }
 
-// withArgsBeforePrompt puts extra before the trailing "-p <prompt>" that
-// claudeArgs ends with, where an option list such as --mcp-config's ends.
-func withArgsBeforePrompt(args, extra []string) []string {
-	if len(extra) == 0 || len(args) < 2 {
+// withArgsBeforePrint puts extra before the trailing -p that claudeArgs
+// ends with, which ends an option list such as --mcp-config's.
+func withArgsBeforePrint(args, extra []string) []string {
+	if len(extra) == 0 || len(args) < 1 {
 		return args
 	}
-	out := append([]string{}, args[:len(args)-2]...)
+	out := append([]string{}, args[:len(args)-1]...)
 	out = append(out, extra...)
-	return append(out, args[len(args)-2:]...)
+	return append(out, args[len(args)-1:]...)
 }
 
 // excludeInstructionsAbove returns the --settings for a brain in dir that
@@ -951,7 +1109,7 @@ func jsonObject(data []byte) (map[string]json.RawMessage, error) {
 // write: its .mcp.json, settings, prompt, identity map and calendar token.
 // That is far more than any real one holds, so that a brain cannot make
 // the bridge load gigabytes into memory on every run, and little enough to
-// pass a .mcp.json or the prompt on the command line.
+// pass a .mcp.json on the command line.
 const maxBrainFile = 256 << 10
 
 // readAtMost reads r to the end, and refuses it when that is more than
@@ -1044,9 +1202,9 @@ func (br *Brain) invoke(run *brainRun, ctx context.Context, s *brainSettings, m 
 		mcpConfig = mcpConfigOf(br.id, br.workDir)
 		settings = excludeInstructionsAbove(br.workDir)
 	}
-	args := claudeArgs(s, mcpConfig, settings, prompt)
+	args := claudeArgs(s, mcpConfig, settings)
 	if br.hooks != nil && br.hooks.ExtraArgs != nil {
-		args = withArgsBeforePrompt(args, br.hooks.ExtraArgs(br.id))
+		args = withArgsBeforePrint(args, br.hooks.ExtraArgs(br.id))
 	}
 
 	// Wrap the spawn in sandbox-exec so prompt injection in an incoming message
@@ -1099,47 +1257,106 @@ func (br *Brain) invoke(run *brainRun, ctx context.Context, s *brainSettings, m 
 	cmd.Env = env
 	isolateProcessGroup(cmd)
 
-	// stdin must be /dev/null or the CLI blocks waiting for input.
-	devNull, err := os.Open(os.DevNull)
+	// The prompt goes on stdin, which -p reads to its end, rather than in
+	// argv: argv is bounded by ARG_MAX, about 1 MiB on macOS with the
+	// environment, and on Linux one argument by 128 KiB, which a long
+	// prompt file and a few pasted texts reach; and every process listing
+	// shows it. The CLI takes 10 MB on stdin.
+	stdin, err := cmd.StdinPipe()
 	if err != nil {
-		return RunResult{Err: fmt.Errorf("opening /dev/null: %w", err)}
+		return RunResult{Err: fmt.Errorf("stdin pipe: %w", err)}
 	}
-	defer devNull.Close()
-	cmd.Stdin = devNull
 
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
 		return RunResult{Err: fmt.Errorf("stdout pipe: %w", err)}
 	}
 
-	var stderrBuf bytes.Buffer
-	cmd.Stderr = &stderrBuf
+	// Only the end of stderr is kept: the CLI, or something it started that
+	// holds on to its stderr, could otherwise make the bridge hold any
+	// amount of it, and only the last error is of use.
+	stderrBuf := newTailBuffer(stderrTailBytes)
+	cmd.Stderr = stderrBuf
+	// Wait waits for that copy to end, which a background process holding
+	// stderr could put off for good; after this long it stops waiting.
+	cmd.WaitDelay = runWaitDelay
 
 	if err := cmd.Start(); err != nil {
 		return RunResult{Err: fmt.Errorf("starting claude: %w", err)}
 	}
 	br.setRunPID(run, cmd.Process.Pid)
+	// Removed once Wait has returned and the run is over; a bridge that
+	// crashes before leaves it to the next start (reapOrphanedRuns).
+	if rec := recordRun(s.dataDir, br.id, cmd.Process.Pid); rec != "" {
+		defer os.Remove(rec)
+	}
+	// A panic from here on, in a hook say, skips the Wait below. The run's
+	// process group is then stopped and reaped here, before its record
+	// goes: cancelling the run alone would leave the CLI a zombie for as
+	// long as the bridge runs.
+	waited := false
+	defer func() {
+		if !waited {
+			_ = killProcessGroup(cmd.Process.Pid)
+			_ = cmd.Wait()
+		}
+	}()
+	go func() {
+		// Nothing waits for this: Wait closes the pipe once the CLI has
+		// exited, which ends a write it never read.
+		_, _ = io.WriteString(stdin, prompt)
+		stdin.Close()
+	}()
 
 	// Parse the stream in a goroutine so we can race it against the 10s timer.
 	parseDone := make(chan RunResult, 1)
+	resultSeen := make(chan struct{})
+	var resultOnce sync.Once
 	go func() {
-		parseDone <- br.parseStream(m.JID, stdout)
+		// A panic while the output is read, in the hook that sends a
+		// question to the chat say, ends the run as one in invoke does
+		// (invokeGuarded). In a goroutine of its own, unrecovered, it would
+		// end the whole bridge.
+		defer func() {
+			if p := recover(); p != nil {
+				log.Printf("brain %s: reading the output of the run for %s panicked: %v\n%s", br.id, m.JID, p, debug.Stack())
+				parseDone <- RunResult{Err: errRunPanicked}
+			}
+		}()
+		parseDone <- br.readStream(m, stdout, runHeading(m, s, cmd.Process.Pid), func() { resultOnce.Do(func() { close(resultSeen) }) })
 	}()
 
-	timer := time.NewTimer(workingNoticeAfter)
-	defer timer.Stop()
+	notice := time.NewTimer(workingNoticeAfter)
+	defer notice.Stop()
 
 	invocationStart := time.Now()
 	var res RunResult
-	select {
-	case res = <-parseDone:
-	case <-timer.C:
-		// Untagged (silent) messages never produce a visible reply, so they
-		// must not produce a visible "working" notice either.
-		if !m.Silent && br.hooks != nil && br.hooks.Intermediate != nil {
-			br.hooks.Intermediate(m.JID, workingNotice)
+	var grace <-chan time.Time
+	resultIn := resultSeen // nil once the grace runs
+	for parsing := true; parsing; {
+		select {
+		case res = <-parseDone:
+			parsing = false
+		case <-notice.C:
+			// Untagged (silent) messages never produce a visible reply, so they
+			// must not produce a visible "working" notice either.
+			if !m.Silent && br.hooks != nil && br.hooks.Notice != nil {
+				br.hooks.Notice(m.JID, workingNotice)
+			}
+		case <-resultIn:
+			// The answer is in, and the CLI exits right after it, unless
+			// something it started still holds its output open, a command
+			// left running in the background, say. That gets
+			// postResultGrace, or the brain would stay busy as long as it ran.
+			resultIn, grace = nil, time.After(postResultGrace)
+			notice.Stop()
+		case <-grace:
+			grace = nil
+			log.Printf("brain %s: claude's output was still open %v after its result; stopping what is left of the run", br.id, postResultGrace)
+			if err := killProcessGroup(cmd.Process.Pid); err != nil {
+				log.Printf("brain %s: failed to kill process group %d: %v", br.id, cmd.Process.Pid, err)
+			}
 		}
-		res = <-parseDone
 	}
 
 	if elapsed := time.Since(invocationStart); elapsed > 5*time.Minute && res.Text != "" {
@@ -1163,135 +1380,271 @@ func (br *Brain) invoke(run *brainRun, ctx context.Context, s *brainSettings, m 
 		_ = cmd.Process.Signal(os.Interrupt)
 	}
 
-	if waitErr := cmd.Wait(); waitErr != nil {
-		if ctx.Err() != nil {
+	waitErr := cmd.Wait()
+	waited = true
+	stderr := strings.TrimSpace(stderrBuf.String())
+	br.logStderr(m, cmd.Process.Pid, stderr)
+	// Whether the result event came: readStream has returned, so it would
+	// have closed resultSeen by now.
+	gotResult := false
+	select {
+	case <-resultSeen:
+		gotResult = true
+	default:
+	}
+	switch {
+	case errors.Is(ctx.Err(), context.DeadlineExceeded):
+		// The deadline may come in the grace after the result, which is
+		// the run's answer then all the same. A question sent before the
+		// run hung is not: the chat must hear that the run was stopped.
+		if res.Err != nil || !gotResult {
+			return RunResult{Err: runTimedOut(s.runTimeout)}
+		}
+	case ctx.Err() != nil:
+		if waitErr != nil || res.Text == "" {
 			return RunResult{Err: errBrainInterrupted}
 		}
-		stderr := strings.TrimSpace(stderrBuf.String())
-		if res.Err == nil && res.Text == "" && !res.AlreadySent {
-			return RunResult{Err: fmt.Errorf("claude exited: %w — stderr: %s", waitErr, truncate(stderr, 500))}
+	case waitErr != nil:
+		// Without a result, what the CLI wrote to stderr is the only
+		// account of what went wrong.
+		if errors.Is(res.Err, errNoResult) {
+			return RunResult{Err: fmt.Errorf("claude exited: %w — stderr: %s", waitErr, tail(stderr, 500))}
 		}
-	}
-	if ctx.Err() != nil && res.Text == "" {
-		return RunResult{Err: errBrainInterrupted}
 	}
 	return res
 }
 
-// composePreface reads the chat history for chatJID and formats recent messages:
-// the last 10 for a DM, the last 20 for a group.
-func (br *Brain) composePreface(chatJID string, isGroup bool) string {
-	histFile, err := openInFolder(br.root, historyFileName, os.O_RDONLY, 0)
+// postResultGrace is how long a run may keep its output open after its
+// result, a variable so tests need not wait for it.
+var postResultGrace = 5 * time.Second
+
+// runWaitDelay is how long Wait waits, once the CLI has exited, for the
+// copy of its stderr to end.
+const runWaitDelay = 5 * time.Second
+
+// logStderr adds what the CLI wrote to stderr to the brain's activity log,
+// the end of it when there is much, where a failed run can be looked into
+// even when the run succeeded or its error kept only a little of it. The
+// block names the run, the run for m with process pid, as its heading
+// does (runHeading): runs can end out of the order they started in.
+func (br *Brain) logStderr(m Inbound, pid int, stderr string) {
+	if stderr == "" {
+		return
+	}
+	f, err := openInFolder(br.root, streamLogName, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600)
 	if err != nil {
-		return ""
+		log.Printf("brain %s: could not open stream log: %v", br.id, err)
+		return
 	}
-	defer histFile.Close()
+	defer f.Close()
+	_, _ = fmt.Fprintf(f, "[%s] stderr of the run for %s from %s, pid %d:\n%s\n",
+		time.Now().Format("15:04:05"), m.JID, m.Sender, pid, tail(stderr, stderrLogBytes))
+}
 
-	scanner := bufio.NewScanner(histFile)
-	scanner.Buffer(make([]byte, 1024*1024), 1024*1024)
-	var entries []historyEntry
-	for scanner.Scan() {
-		var entry historyEntry
-		if err := json.Unmarshal(scanner.Bytes(), &entry); err != nil {
+// stderrLogBytes is how much of a run's stderr goes to its activity log.
+const stderrLogBytes = 4000
+
+// The most of a chat's recent messages a run's prompt shows.
+const (
+	dmHistoryWindow    = 10
+	groupHistoryWindow = 20
+)
+
+// promptHistoryTail is how much of the end of the history a run's prompt
+// is looked for in first: far more than a window of messages takes.
+const promptHistoryTail = 1 << 20
+
+// historyBefore returns what m's run is shown of its chat, the one that
+// goes by chatJIDs(m), oldest first and at most limit entries in all.
+// before is the chat's history before m's own lines (Inbound.logged).
+// since is what went out to the chat after them, while m waited in the
+// queue, and what waits in the outbox to go out ahead of anything m's
+// run says (see Brain.undelivered): the brain's replies and questions,
+// and what came through /send. Those answer earlier messages (the run
+// before m's, or the question it asked), which m's sender had not seen
+// when they wrote, and m's run must know what they said. The messages
+// others sent after m are left out: each has a run of its own, or is for
+// the next one to see. Without m's lines in the history, before is the
+// chat's last entries, with those in the outbox among them, and since is
+// empty; when the history cannot be read (see openInFolder), only the
+// outbox's are left.
+func (br *Brain) historyBefore(m Inbound, limit int) (before, since []historyEntry) {
+	chats := chatJIDs(m)
+	// The answers on their way first, then the history: one delivered in
+	// between is in both, and withUndelivered takes it once.
+	pending := br.undelivered(chats)
+	split := func(entries []historyEntry) {
+		at := m.loggedIn(entries)
+		if at < 0 {
+			before, since = withUndelivered(entries, pending), nil
+			return
+		}
+		before, since = entries[:at], nil
+		for _, e := range entries[at+1:] {
+			if e.Type == historyOut {
+				since = append(since, e)
+			}
+		}
+		since = withUndelivered(since, pending)
+	}
+	entries, whole := br.chatHistory(chats, promptHistoryTail)
+	split(entries)
+	if len(before) < limit && !whole {
+		// A chat that was quiet while others were busy: its window is
+		// further back than the end of the file.
+		entries, _ = br.chatHistory(chats, 0)
+		split(entries)
+	}
+	// The newest count most: what was sent since, then what came before.
+	since = since[max(0, len(since)-limit):]
+	before = before[max(0, len(before)-(limit-len(since))):]
+	return before, since
+}
+
+// chatHistory returns the entries of the chat that goes by chats in the
+// brain's history, oldest first: those in the last tail bytes of the file,
+// or all of them for a tail of 0, and whether that was all. A DM's lines
+// may be under its LID or its number, and both are the one chat. It
+// returns none when the history cannot be read (see openInFolder).
+func (br *Brain) chatHistory(chats []string, tail int64) (entries []historyEntry, whole bool) {
+	f, err := openInFolder(br.root, historyFileName, os.O_RDONLY, 0)
+	if err != nil {
+		return nil, true
+	}
+	defer f.Close()
+	keep := func(line []byte) {
+		var e historyEntry
+		if json.Unmarshal(line, &e) == nil && slices.Contains(chats, e.Chat) {
+			entries = append(entries, e)
+		}
+	}
+	if st, err := f.Stat(); err == nil && tail > 0 && st.Size() > tail {
+		for _, line := range tailLines(f, tail) {
+			keep([]byte(line))
+		}
+		return entries, false
+	}
+	// A line at a time, however long one is.
+	r := bufio.NewReader(f)
+	for {
+		line, err := r.ReadBytes('\n')
+		if line = bytes.TrimSpace(line); len(line) > 0 {
+			keep(line)
+		}
+		if err != nil {
+			return entries, true
+		}
+	}
+}
+
+// loggedIn returns where m's own lines begin in entries, the chat's
+// history: at the last line that is the line of the first of m's parts
+// still there (see Inbound.logged), or -1 for none. A part deleted since
+// took its line along; one edited while it waited has its line rewritten,
+// with the new text.
+func (m Inbound) loggedIn(entries []historyEntry) int {
+	for _, p := range m.ownParts() {
+		if p.logged == (historyEntry{}) {
 			continue
 		}
-		if entry.Chat != chatJID {
-			continue
+		for i := len(entries) - 1; i >= 0; i-- {
+			if p.logged.sameLine(entries[i]) {
+				return i
+			}
 		}
-		entries = append(entries, entry)
 	}
+	return -1
+}
 
-	limit := 10
-	if isGroup {
-		limit = 20
+// sameLine reports whether e is the history line l: equal, or for a
+// message from WhatsApp, whose line an edit rewrites, equal but for the
+// text.
+func (l historyEntry) sameLine(e historyEntry) bool {
+	if l.ID != "" {
+		e.Text = l.Text
 	}
-	if len(entries) > limit {
-		entries = entries[len(entries)-limit:]
-	}
-	if len(entries) == 0 {
-		return ""
-	}
+	return e == l
+}
 
-	// Through the folder: a map swapped for a symlink to another brain's
-	// would put that brain's contacts in this one's prompt.
+// identities reads the brain's identity map, through the folder: a map
+// swapped for a symlink to another brain's would put that brain's contacts
+// in this one's prompt.
+func (br *Brain) identities() map[string]string {
 	idMap, err := br.readFile(identityMapFile)
 	if err != nil && !errors.Is(err, fs.ErrNotExist) {
 		log.Printf("brain %s: could not read identity map %s: %v", br.id, identityMapFile, err)
 	}
-	identities := parseIdentityMap(idMap)
-
-	var sb strings.Builder
-	for _, entry := range entries {
-		ts, _ := time.Parse(time.RFC3339, entry.TS)
-		timeStr := ts.Format("15:04")
-
-		var senderDisplay string
-		if entry.Type == historyOut {
-			senderDisplay = fmt.Sprintf("You (%s)", br.id)
-		} else if name, found := identities[normalizeJID(entry.From)]; found {
-			senderDisplay = fmt.Sprintf("%s (%s)", name, entry.From)
-		} else {
-			senderDisplay = entry.From
-		}
-
-		sb.WriteString(fmt.Sprintf("[%s] %s: %s\n", timeStr, senderDisplay, entry.Text))
-	}
-	return sb.String()
+	return parseIdentityMap(idMap)
 }
 
-// buildPrompt constructs the -p prompt: the prompt file, chat-history
-// preface, attachments, then the new message.
+// buildPrompt gathers what m's run is told, through the brain's folder: its
+// prompt file, the chat's recent history and the identity map. renderPrompt
+// puts it into words.
 func (br *Brain) buildPrompt(s *brainSettings, m Inbound) string {
-	var sb strings.Builder
-	isGroup := m.IsGroup()
-
+	in := promptInput{Now: time.Now(), BrainID: br.id, Message: m, ObserveOnly: m.Silent}
 	if name := s.promptFile; name != "" {
-		if sysPrompt, err := br.readFile(name); err != nil {
+		if data, err := br.readFile(name); err != nil {
 			log.Printf("brain %s: could not read prompt file %s: %v", br.id, name, err)
 		} else {
-			sb.WriteString(strings.TrimSpace(string(sysPrompt)))
-			sb.WriteString("\n\n")
+			in.Instructions = strings.TrimSpace(string(data))
 		}
 	}
-
-	if preface := br.composePreface(m.JID, isGroup); preface != "" {
-		count := "10 messages"
-		if isGroup {
-			count = "20 messages"
-		}
-		sb.WriteString("<chat_history>\n")
-		sb.WriteString("The following is the last " + count + " in this WhatsApp chat (for context, not action). ")
-		sb.WriteString("You do NOT have prior turns in your working memory — the only context you have about previous conversation is what's in this block. ")
-		sb.WriteString("Names come from your identity map at `" + identityMapFile + "`; the JID in parens is the raw WhatsApp identifier. ")
-		sb.WriteString("For anything older or more detailed, search `" + historyFileName + "` with `\"$FRIDOLIN_BIN\" history QUERY`.\n\n")
-		sb.WriteString(preface)
-		sb.WriteString("</chat_history>\n\n")
+	limit := dmHistoryWindow
+	if m.IsGroup() {
+		limit = groupHistoryWindow
 	}
-
-	switch len(m.Media) {
-	case 0:
-	case 1:
-		sb.WriteString(fmt.Sprintf("A file was shared via WhatsApp and saved to: %s\n\n", m.Media[0]))
-	default:
-		sb.WriteString(fmt.Sprintf("%d files were shared together and saved to:\n", len(m.Media)))
-		for _, p := range m.Media {
-			sb.WriteString("- " + p + "\n")
-		}
-		sb.WriteString("Handle them together as one request.\n\n")
-	}
-
-	sb.WriteString("<new_message>\n")
-	sb.WriteString(fmt.Sprintf("%s says: %s\n", m.Sender, m.textWithQuote()))
-	sb.WriteString("</new_message>")
-	return sb.String()
+	in.History, in.Since = br.historyBefore(m, limit)
+	in.Names = br.identities()
+	return renderPrompt(in)
 }
 
-// parseStream reads the stream-json output from the Claude CLI and returns
-// the result, writing a human-readable activity log alongside it.
-func (br *Brain) parseStream(jid string, reader io.Reader) RunResult {
+// parseStream reads the stream-json output of m's run from the Claude CLI
+// and returns the result, writing a human-readable activity log alongside
+// it.
+func (br *Brain) parseStream(m Inbound, reader io.Reader) RunResult {
+	return br.readStream(m, reader, "── New invocation ──", nil)
+}
+
+// runHeading starts a run's part of the activity log: what it answers and
+// with what, so that it can be told from the others and matched to the
+// run the dashboard shows.
+func runHeading(m Inbound, s *brainSettings, pid int) string {
+	model := s.model
+	if model == "" {
+		model = "the CLI's default"
+	}
+	return fmt.Sprintf("── Run for %s from %s, pid %d, model %s ──", m.JID, m.Sender, pid, model)
+}
+
+// streamLogMax is the size at which the activity log is rotated when a run
+// starts: it becomes streamLogOld, replacing the one before, so the two
+// hold about twice this at most. Named *.log, the old one is left out of
+// backups too.
+const (
+	streamLogMax = 5 << 20
+	streamLogOld = "claude-stream.1.log"
+)
+
+// rotateStreamLog moves a full activity log aside, through the folder: a
+// rename replaces a symlink at streamLogOld itself, never what it points to.
+func (br *Brain) rotateStreamLog() {
+	fi, err := br.root.Lstat(streamLogName)
+	if err != nil || !fi.Mode().IsRegular() || fi.Size() < streamLogMax {
+		return
+	}
+	if err := br.root.Rename(streamLogName, streamLogOld); err != nil {
+		log.Printf("brain %s: could not rotate its stream log: %v", br.id, err)
+	}
+}
+
+// readStream is parseStream with heading as the first line of the run in
+// the activity log, calling onResult, when set, as soon as the result is
+// in, while the stream may still go on.
+func (br *Brain) readStream(m Inbound, reader io.Reader, heading string, onResult func()) RunResult {
 	scanner := bufio.NewScanner(reader)
 	scanner.Buffer(make([]byte, 4*1024*1024), 4*1024*1024)
 
+	br.rotateStreamLog()
 	// Through the folder, like the history: a brain can swap the log for a
 	// symlink to a file its sandbox denies it writing.
 	streamLog, logErr := openInFolder(br.root, streamLogName, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600)
@@ -1309,10 +1662,10 @@ func (br *Brain) parseStream(jid string, reader io.Reader) RunResult {
 		}
 	}()
 
-	writeLog("── New invocation ──")
+	writeLog(heading)
 
 	var finalResult, lastText string
-	questionSent := false
+	asked := false
 
 	for scanner.Scan() {
 		line := strings.TrimSpace(scanner.Text())
@@ -1340,10 +1693,12 @@ func (br *Brain) parseStream(jid string, reader io.Reader) RunResult {
 				case "tool_use":
 					writeLog("🔧 Tool: " + content.Name)
 					if content.Name == "AskUserQuestion" {
+						// Untagged (silent) messages never produce a visible
+						// reply, so they must not ask anything either. Only a
+						// question on its way counts as asked.
 						question := extractAskQuestion(content.Input)
-						if question != "" && br.hooks != nil && br.hooks.Intermediate != nil {
-							br.hooks.Intermediate(jid, questionPrefix+question)
-							questionSent = true
+						if question != "" && !m.Silent && br.hooks != nil && br.hooks.Question != nil && br.hooks.Question(br, m.JID, questionPrefix+question) {
+							asked = true
 						}
 					}
 				}
@@ -1364,10 +1719,13 @@ func (br *Brain) parseStream(jid string, reader io.Reader) RunResult {
 					errMsg = "(claude exited with an error but no message)"
 				}
 				writeLog("❌ Error: " + errMsg)
-				return RunResult{Err: fmt.Errorf("claude error: %s", errMsg)}
+				return RunResult{Err: &cliError{msg: errMsg}, Asked: asked}
 			}
 			finalResult = event.Result
 			writeLog("✅ Result: " + truncate(finalResult, 2000))
+			if onResult != nil {
+				onResult()
+			}
 		}
 	}
 
@@ -1378,17 +1736,15 @@ func (br *Brain) parseStream(jid string, reader io.Reader) RunResult {
 		return RunResult{Err: fmt.Errorf("reading claude output: %w", err)}
 	}
 
-	if questionSent {
-		// The question already went to WhatsApp; sending the final text too
-		// would duplicate it.
-		return RunResult{AlreadySent: true}
+	// A -p run is stateless and nobody answers its AskUserQuestion, so the
+	// model goes on after asking, often to an answer of its own ("I booked
+	// Monday"), which the chat must get too. A run that only asked has said
+	// what it had to say.
+	if finalResult == "" && !asked {
+		return RunResult{Err: errNoResult}
 	}
 
-	if finalResult == "" {
-		return RunResult{Err: fmt.Errorf("no result from claude (empty output)")}
-	}
-
-	return RunResult{Text: finalResult}
+	return RunResult{Text: finalResult, Asked: asked}
 }
 
 // truncate shortens s to at most n bytes without splitting a UTF-8 rune.
@@ -1461,29 +1817,127 @@ func (br *Brain) interruptRun(run *brainRun) {
 
 // appendHistory appends one JSONL entry to the brain's history file.
 func (br *Brain) appendHistory(chatJID, from, text, typ string) {
-	entry := historyEntry{
-		TS:   time.Now().Format(time.RFC3339),
-		From: from,
-		Chat: chatJID,
-		Text: text,
-		Type: typ,
+	br.appendHistoryVia(chatJID, from, text, typ, "")
+}
+
+// appendHistoryVia is appendHistory for a line marked with how it came in
+// (see historyEntry.Via).
+func (br *Brain) appendHistoryVia(chatJID, from, text, typ, via string) {
+	br.appendEntry(historyEntry{From: from, Chat: chatJID, Text: text, Type: typ, Via: via})
+}
+
+// appendEntry appends entry to the brain's history file, stamped with the
+// time now. It returns the line as it reads back, or none when the file
+// could not be opened.
+func (br *Brain) appendEntry(entry historyEntry) historyEntry {
+	br.historyMu.Lock()
+	entry, err := br.writeEntryLocked(entry)
+	br.historyMu.Unlock()
+	br.entryWritten(entry, err)
+	if err != nil {
+		return historyEntry{}
 	}
+	return entry
+}
+
+// recordDelivered writes the brain's answer text to chat into its
+// history once it reached WhatsApp, after remove took it out of the
+// outbox; when remove fails, it writes nothing and returns the error, and
+// the outbox tries again later, so the answer is recorded once. Both
+// happen under historyMu, which undelivered reads the outbox under: a run
+// finds the answer in the outbox or in the history, never in neither.
+func (br *Brain) recordDelivered(chat, text string, remove func() error) error {
+	br.historyMu.Lock()
+	if err := remove(); err != nil {
+		br.historyMu.Unlock()
+		return err
+	}
+	entry, err := br.writeEntryLocked(historyEntry{From: br.id, Chat: chat, Text: text, Type: historyOut})
+	br.historyMu.Unlock()
+	br.entryWritten(entry, err)
+	return nil
+}
+
+// writeEntryLocked appends entry to the history file, stamped with the
+// time now, and returns it as it reads back, which historyBefore looks
+// for: invalid UTF-8 in its text is written as U+FFFD. historyMu is held.
+func (br *Brain) writeEntryLocked(entry historyEntry) (historyEntry, error) {
+	entry.TS = time.Now().Format(time.RFC3339)
 	data, err := json.Marshal(entry)
 	if err != nil {
-		return
+		return entry, err
+	}
+	var written historyEntry
+	if json.Unmarshal(data, &written) == nil {
+		entry = written
 	}
 	// Through the folder: appending through a symlink would let a brain
 	// write to files its sandbox denies it, another brain's among them.
 	f, err := openInFolder(br.root, historyFileName, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600)
 	if err != nil {
-		log.Printf("brain %s: failed to open history file %s: %v", br.id, filepath.Join(br.workDir, historyFileName), err)
-		return
+		return entry, err
 	}
 	_, _ = f.Write(append(data, '\n'))
 	f.Close()
+	return entry, nil
+}
+
+// entryWritten logs an entry that could not be written, or hands one that
+// was to OnHistory, outside historyMu.
+func (br *Brain) entryWritten(entry historyEntry, err error) {
+	if err != nil {
+		log.Printf("brain %s: failed to open history file %s: %v", br.id, filepath.Join(br.workDir, historyFileName), err)
+		return
+	}
 	if br.hooks != nil && br.hooks.OnHistory != nil {
 		br.hooks.OnHistory(br.id, entry)
 	}
+}
+
+// undelivered returns the brain's answers in the chat that goes by chats
+// which are still on their way (BrainHooks.Undelivered). It reads them
+// under historyMu, which recordDelivered moves an answer from the outbox
+// into the history under: the history, read after, holds every answer
+// this did not return.
+func (br *Brain) undelivered(chats []string) []historyEntry {
+	if br.hooks == nil || br.hooks.Undelivered == nil {
+		return nil
+	}
+	br.historyMu.Lock()
+	all := br.hooks.Undelivered(br.id)
+	br.historyMu.Unlock()
+	var out []historyEntry
+	for _, e := range all {
+		if slices.Contains(chats, e.Chat) {
+			out = append(out, e)
+		}
+	}
+	return out
+}
+
+// withUndelivered puts the answers still on their way among the history's
+// entries, each after the last entry no later than it. One the history
+// holds already, delivered after pending was read, is left out: the same
+// answer, in the same chat, recorded no earlier than it was written.
+func withUndelivered(entries, pending []historyEntry) []historyEntry {
+	at := func(e historyEntry) time.Time {
+		t, _ := time.Parse(time.RFC3339, e.TS)
+		return t
+	}
+	for _, p := range pending {
+		pt := at(p)
+		if slices.ContainsFunc(entries, func(e historyEntry) bool {
+			return e.Type == historyOut && e.Chat == p.Chat && e.Text == p.Text && !at(e).Before(pt)
+		}) {
+			continue
+		}
+		i := len(entries)
+		for i > 0 && at(entries[i-1]).After(pt) {
+			i--
+		}
+		entries = slices.Insert(entries, i, p)
+	}
+	return entries
 }
 
 // ── BrainManager ─────────────────────────────────────────────────────────
@@ -1572,7 +2026,7 @@ func (bm *BrainManager) reload(specs []BrainSpec, issues []BrainIssue, cfg *Conf
 			root, err := os.OpenRoot(sp.Dir)
 			if err != nil {
 				log.Printf("brain %s: leaving it out: %v", m.ID, err)
-				issues = append(issues, BrainIssue{ID: m.ID, Path: sp.Dir, Kind: "missing", Detail: "the folder cannot be opened: " + err.Error(), atLoad: true})
+				issues = append(issues, BrainIssue{ID: m.ID, Path: sp.Dir, Kind: "missing", Detail: "the folder cannot be opened: " + err.Error(), atLoad: true, entry: sp.entry})
 				continue
 			}
 			br = &Brain{
@@ -1659,8 +2113,10 @@ func settingsFor(cfg *Config, sp BrainSpec) *brainSettings {
 		otpGuard:        cfg.OTPGuard,
 		otpMarkers:      append([]string(nil), cfg.OTPMarkers...),
 		viewer:          cfg.Viewer,
+		runTimeout:      cfg.RunTimeout(),
 		queueMode:       cfg.Queue.Mode,
 		maxPending:      cfg.Queue.MaxPending,
+		observe:         m.Observe,
 		credsDir:        credentialsDirOf(cfg),
 		envPassthrough:  append([]string(nil), cfg.ChildEnvPassthrough...),
 		toolsDir:        ownLayout().Tools,
@@ -1703,6 +2159,10 @@ func (bm *BrainManager) BrainFor(jid string, isGroup bool) *Brain {
 	}
 	return bm.fallback
 }
+
+// DMBrain returns the brain that gets direct messages: the one with
+// handles_dms, else the fallback brain, or nil.
+func (bm *BrainManager) DMBrain() *Brain { return bm.BrainFor("", false) }
 
 // Get returns a brain by id.
 func (bm *BrainManager) Get(id string) *Brain {

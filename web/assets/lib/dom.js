@@ -24,7 +24,7 @@ export function h(tag, attrs, ...children) {
   return el;
 }
 
-export function setAttrs(el, attrs) {
+function setAttrs(el, attrs) {
   for (const [k, v] of Object.entries(attrs)) {
     if (v === undefined || v === null || v === false) continue;
     if (k === 'class') {
