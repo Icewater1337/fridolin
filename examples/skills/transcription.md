@@ -52,10 +52,12 @@ If the tool errors, read the error and fix the cause. Don't route around it.
 ## How
 
 One command, whatever the format or length, with the file's path as the
-message gives it:
+message gives it. Run it with the python of the venv the engines are
+installed in (see the setup note), or the system's when there is none:
 
 ```bash
-python3 "$FRIDOLIN_TOOLS_DIR/transcribe.py" "PATH-FROM-THE-MESSAGE" --output-dir transcripts --move-original
+py="$HOME/.local/share/fridolin/venv/bin/python"; [ -x "$py" ] || py=python3
+"$py" "$FRIDOLIN_TOOLS_DIR/transcribe.py" "PATH-FROM-THE-MESSAGE" --output-dir transcripts --move-original
 ```
 
 Useful flags:
@@ -97,7 +99,8 @@ Someone sends a voice note. The message gives you the path it was saved to,
 something like `…/media/3EB0A1B2C3D4E5F6.ogg`:
 
 ```bash
-python3 "$FRIDOLIN_TOOLS_DIR/transcribe.py" \
+py="$HOME/.local/share/fridolin/venv/bin/python"; [ -x "$py" ] || py=python3
+"$py" "$FRIDOLIN_TOOLS_DIR/transcribe.py" \
   "PATH-FROM-THE-MESSAGE" \
   --output-dir transcripts --move-original \
   --language en
@@ -107,15 +110,24 @@ Read the JSON, share the text, flag anything actionable.
 
 ## Setup note
 
-Transcription needs extra dependencies — they are not installed by default:
+Transcription needs extra dependencies — they are not installed by default.
+They go into a venv of their own, `~/.local/share/fridolin/venv`, outside
+the bridge's data folder: Homebrew's and Debian's Python refuse a plain
+`pip install`.
 
 ```bash
+python3 -m venv ~/.local/share/fridolin/venv
+
 # Local model: private, no API key, large download
-pip install -r "$FRIDOLIN_TOOLS_DIR/requirements-transcription.txt"
+~/.local/share/fridolin/venv/bin/pip install -r "$FRIDOLIN_TOOLS_DIR/requirements-transcription.txt"
 
 # Or the API: light, needs a key
-pip install groq && export GROQ_API_KEY=...
+~/.local/share/fridolin/venv/bin/pip install groq && export GROQ_API_KEY=...
 ```
+
+With uv, `uv run --script "$FRIDOLIN_TOOLS_DIR/transcribe.py" …` installs
+both engines into uv's cache and runs the tool instead; use it in place of
+`"$py"` above.
 
 `GROQ_API_KEY` must be set in the bridge's process environment and named in
 the bridge's config, `"child_env_passthrough": ["GROQ_API_KEY"]`, or brains
