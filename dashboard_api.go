@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"encoding/base64"
 	"encoding/json"
@@ -111,6 +112,16 @@ func decodeJSON(r *http.Request, v any) error { return decodeBody(r, v, false) }
 // decodeOptionalJSON is decodeJSON for an endpoint whose body may be left
 // out, such as stopping a run: an empty body leaves v as it is.
 func decodeOptionalJSON(r *http.Request, v any) error { return decodeBody(r, v, true) }
+
+// decodeStrict decodes data, one JSON value, as strictly as decodeJSON.
+func decodeStrict(data []byte, v any) error {
+	dec := json.NewDecoder(bytes.NewReader(data))
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(v); err != nil {
+		return fmt.Errorf("invalid JSON: %w", err)
+	}
+	return nil
+}
 
 func decodeBody(r *http.Request, v any, optional bool) error {
 	dec := json.NewDecoder(r.Body)
@@ -800,11 +811,6 @@ func (b *Bridge) apiInspectFolder(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, resp)
 }
 
-// manifestHasBackup reports whether the request set any backup option.
-func manifestHasBackup(m BrainManifest) bool {
-	return m.Backup.Enabled || m.Backup.Exclude != nil
-}
-
 func prettyName(s string) string {
 	s = strings.NewReplacer("-", " ", "_", " ").Replace(s)
 	if s == "" {
@@ -828,9 +834,11 @@ func nonNil[T any](s []T) []T {
 // brain.json, register it, and start routing to it.
 func (b *Bridge) apiAddBrain(w http.ResponseWriter, r *http.Request) {
 	var req struct {
-		Path      string        `json:"path"`
-		Manifest  BrainManifest `json:"manifest"`
-		CreateDir bool          `json:"create_dir"`
+		Path string `json:"path"`
+		// Manifest is decoded below, where a backup setting left out must
+		// be told from one set to false.
+		Manifest  json.RawMessage `json:"manifest"`
+		CreateDir bool            `json:"create_dir"`
 		// UseExisting adopts a brain.json already in the folder (after the
 		// dashboard showed it to you) instead of writing Manifest.
 		UseExisting bool `json:"use_existing"`
@@ -838,6 +846,21 @@ func (b *Bridge) apiAddBrain(w http.ResponseWriter, r *http.Request) {
 	if err := decodeJSON(r, &req); err != nil {
 		writeErr(w, http.StatusBadRequest, err.Error())
 		return
+	}
+	var m BrainManifest
+	backupGiven := false
+	if !req.UseExisting {
+		if len(req.Manifest) == 0 {
+			writeErr(w, http.StatusBadRequest, "manifest required (or use_existing, to add the brain.json in the folder)")
+			return
+		}
+		if err := decodeStrict(req.Manifest, &m); err != nil {
+			writeErr(w, http.StatusBadRequest, "manifest: "+err.Error())
+			return
+		}
+		var keys map[string]json.RawMessage
+		_ = json.Unmarshal(req.Manifest, &keys)
+		backupGiven = keys["backup"] != nil && string(keys["backup"]) != "null"
 	}
 	// One add at a time, from the checks to the registration, so that an
 	// add's checks see every brain the adds before it registered. Two adds
@@ -865,7 +888,6 @@ func (b *Bridge) apiAddBrain(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	m := req.Manifest
 	if req.UseExisting {
 		disk, err := ReadManifest(abs)
 		if err != nil {
@@ -877,11 +899,13 @@ func (b *Bridge) apiAddBrain(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusConflict, "this folder already has a brain.json — review it and add it with “use existing”")
 		return
 	}
-	if !req.UseExisting && !manifestHasBackup(req.Manifest) {
+	switch {
+	case req.UseExisting:
+	case !backupGiven:
 		// No backup settings given: new brains are backed up, with the
 		// default exclusions.
 		m.Backup = BrainBackup{Enabled: true, Exclude: append([]string{}, DefaultBackupExcludes...)}
-	} else if !req.UseExisting && m.Backup.Exclude == nil {
+	case m.Backup.Exclude == nil:
 		m.Backup.Exclude = append([]string{}, DefaultBackupExcludes...)
 	}
 	m = m.normalized()

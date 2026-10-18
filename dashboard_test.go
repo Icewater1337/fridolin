@@ -1492,17 +1492,26 @@ func TestConfigPageFoldsTheRetiredModel(t *testing.T) {
 func TestAddBrainBackupDefaults(t *testing.T) {
 	tb := newTestBridge(t, "")
 	// No backup settings given: backed up, with the default exclusions.
-	_ = tb.do("POST", "/api/brains", map[string]any{"path": "~/a", "create_dir": true, "manifest": BrainManifest{ID: "a", Name: "A"}})
+	_ = tb.do("POST", "/api/brains", map[string]any{"path": "~/a", "create_dir": true, "manifest": map[string]any{"id": "a", "name": "A"}})
 	// Explicitly off stays off.
 	off := BrainManifest{ID: "b", Name: "B", Backup: BrainBackup{Enabled: false, Exclude: []string{"*.log"}}}
 	_ = tb.do("POST", "/api/brains", map[string]any{"path": "~/b", "create_dir": true, "manifest": off})
+	// Off without an exclude list stays off too, with the default
+	// exclusions should it be turned on.
+	if w := tb.do("POST", "/api/brains", map[string]any{"path": "~/c", "create_dir": true, "manifest": map[string]any{"id": "c", "name": "C", "backup": map[string]any{"enabled": false}}}); w.Code != 200 {
+		t.Fatalf("add c: %d %s", w.Code, w.Body.String())
+	}
 	a, _ := ReadManifest(filepath.Join(tb.home, "a"))
 	b, _ := ReadManifest(filepath.Join(tb.home, "b"))
+	c, _ := ReadManifest(filepath.Join(tb.home, "c"))
 	if !a.Backup.Enabled || len(a.Backup.Exclude) == 0 {
 		t.Errorf("a.backup = %+v, want on with defaults", a.Backup)
 	}
 	if b.Backup.Enabled || len(b.Backup.Exclude) != 1 {
 		t.Errorf("b.backup = %+v, want off as requested", b.Backup)
+	}
+	if c.Backup.Enabled || !slices.Equal(c.Backup.Exclude, DefaultBackupExcludes) {
+		t.Errorf("c.backup = %+v, want off with the default exclusions", c.Backup)
 	}
 }
 
