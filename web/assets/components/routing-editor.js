@@ -4,6 +4,7 @@
 import { store, loadGroups, chatName } from '../app/store.js';
 import { h, mount } from '../lib/dom.js';
 import { GROUP_JID_RE } from '../lib/jid.js';
+import { brainLabel } from '../lib/brain.js';
 import { btn } from './buttons.js';
 import { toggle, field, textInput, nextId } from './fields.js';
 import { mono, loading } from './common.js';
@@ -21,7 +22,7 @@ export function routingEditor({ routing = {}, selfId = '', brains = [], allowedG
   const dmOwner = others.find((b) => b.manifest.routing && b.manifest.routing.handles_dms);
   const defOwner = others.find((b) => b.manifest.routing && b.manifest.routing.default);
   const claimed = new Map();
-  for (const b of others) for (const g of (b.manifest.routing && b.manifest.routing.groups) || []) claimed.set(g, b.name || b.id);
+  for (const b of others) for (const g of (b.manifest.routing && b.manifest.routing.groups) || []) claimed.set(g, brainLabel(b));
 
   const changedFn = () => { if (onChange) onChange(); };
   const dmWarn = h('div.help.warn-text', { hidden: true });
@@ -36,8 +37,8 @@ export function routingEditor({ routing = {}, selfId = '', brains = [], allowedG
     label: 'Default for unassigned chats',
     onChange: (v) => { defWarn.hidden = !(v && defOwner); changedFn(); },
   });
-  if (dmOwner) dmWarn.textContent = `“${dmOwner.name || dmOwner.id}” handles direct messages now. Only one brain can — turn it off there first, or saving will fail.`;
-  if (defOwner) defWarn.textContent = `“${defOwner.name || defOwner.id}” is the default now. Only one brain can be — turn it off there first, or saving will fail.`;
+  if (dmOwner) dmWarn.textContent = `“${brainLabel(dmOwner)}” handles direct messages now. Only one brain can — turn it off there first, or saving will fail.`;
+  if (defOwner) defWarn.textContent = `“${brainLabel(defOwner)}” is the default now. Only one brain can be — turn it off there first, or saving will fail.`;
   dmWarn.hidden = !(routing.handles_dms && dmOwner);
   defWarn.hidden = !(routing.default && defOwner);
 

@@ -115,6 +115,13 @@ test('a card that was never connected offers only Connect', async (t) => {
   assert.deepEqual(root.querySelectorAll('button').map((b) => b.textContent), ['Connect Plaud']);
 });
 
+test('the brains to pick are named with their ids', async (t) => {
+  const now = status('2026-10-18T10:00:00Z');
+  const { root } = await openPage(t, { ...now, settings: { ...now.settings, brain: 'personal' }, brain_missing: true });
+  const options = root.querySelectorAll('select option').map((o) => [o.value, o.textContent]);
+  assert.deepEqual(options.slice(1), [['work', 'Work (work)'], ['personal', 'Personal (personal) (missing)']]);
+});
+
 test('Automatic names the brain it picks, not the one picked instead', async (t) => {
   const now = status('2026-10-18T10:00:00Z');
   const { root } = await openPage(t, { ...now, settings: { ...now.settings, brain: 'work' }, target_brain: 'work', auto_brain: 'personal' });
