@@ -1371,7 +1371,9 @@ func TestSandboxPinsItsOwnFolder(t *testing.T) {
 // as configured left the default ~/Documents deny in force for it, and the
 // brain could neither read its prompt and memories nor write its history.
 // Under the real sandbox-exec the brain reaches its own files by either
-// spelling, while the rest of ~/Documents and the other brain stay closed.
+// spelling, and looks at the folders above its own by either (mkdir -p
+// and realpath failed by the real one), while the rest of ~/Documents and
+// the other brain stay closed.
 func TestSandboxOpensItsOwnFolderThroughASymlink(t *testing.T) {
 	requireSandboxExec(t)
 	home := canonicalDir(t.TempDir())
@@ -1400,6 +1402,12 @@ func TestSandboxOpensItsOwnFolderThroughASymlink(t *testing.T) {
 		{"read the rest of Documents", `cat "$HOME/Documents/private.txt"`, false},
 		{"write the brains folder's CLAUDE.md", `printf obey > "$HOME/assistant/CLAUDE.md"`, false},
 		{"move its own folder by its real path", `mv "$R" "$R.old"`, false},
+		// Programs look at every folder on the way to a path: the
+		// folders above its own were open to that only as configured.
+		{"look at the folder above it by its real path", `stat "$HOME/Documents/assistant" >/dev/null`, true},
+		{"make folders in it by its real path", `mkdir -p "$R/new/dir"`, true},
+		{"find a file's real path", `realpath "$R/notes.md" >/dev/null`, true},
+		{"list the folder above it", `ls "$HOME/Documents/assistant"`, false},
 	}
 	t.Setenv("A", filepath.Join(home, "assistant", "a"))
 	t.Setenv("R", ownDir)

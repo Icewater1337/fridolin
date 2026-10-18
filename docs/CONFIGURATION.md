@@ -692,9 +692,11 @@ Reading is allowed by default. Brains cannot read:
   (see [writing](#writing)).
 
 The folders above a brain's own places may still be looked at, though not
-listed: programs check every folder on the way to a path (`mkdir -p`,
-`realpath`), and would fail in a brain's state below the data directory,
-or in a brain folder below `~/Documents`.
+listed, as configured and by their real paths: programs check every folder
+on the way to a path (`mkdir -p`, `realpath`), and would fail in a brain's
+state below the data directory, or in a brain folder below `~/Documents`
+(also one reached through a symlink, such as `~/assistant` →
+`~/Documents/assistant`).
 
 ### Starting code elsewhere
 

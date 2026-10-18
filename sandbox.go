@@ -737,9 +737,15 @@ func (sp *SandboxProfiler) Profile(brainID string) (string, error) {
 	// The folders above those places, and above the brain's folder, may be
 	// looked at, though not listed: programs stat every folder on the way
 	// to a path (mkdir -p, realpath), and failed in their own state below
-	// the denied data dir, or in a brain folder below ~/Documents.
+	// the denied data dir, or in a brain folder below ~/Documents. By their
+	// real paths too, which foldersAbove may not give (it names a folder
+	// once, ~/assistant for ~/Documents/assistant), and which is safe to
+	// resolve here: the brain can change none of these folders.
 	for _, dir := range foldersAbove(places...) {
 		b.allow("file-read-metadata", "literal", dir)
+		if real := resolvePath(dir); real != dir {
+			b.allow("file-read-metadata", "literal", real)
+		}
 	}
 	if sp.inheritUser {
 		// The CLI's state in your config dir, which brains share with you.
