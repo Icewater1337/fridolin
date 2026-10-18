@@ -2535,16 +2535,40 @@ var errBrainsStopped = errors.New("the brains are stopped")
 // that brain's history has them (see Brain.logInbound). One no brain takes
 // is dropped.
 func (bm *BrainManager) requeue(from *Brain, ms []Inbound) {
+	if bm.keepRetiredWaiting(from, ms) {
+		return
+	}
 	for _, m := range ms {
 		to, _, _, err := bm.Submit(m)
 		switch {
 		case err != nil:
+			// Stop may have closed the destination after the check above.
+			if bm.keepRetiredWaiting(from, []Inbound{m}) {
+				continue
+			}
 			log.Printf("brain %s: dropping a message for %s that waited for it: %v", from.id, m.JID, err)
 			dropped([]Inbound{m})
 		case to.id != from.id:
 			log.Printf("brain %s: handed a message for %s that waited for it to brain %s", from.id, m.JID, to.id)
 		}
 	}
+}
+
+// keepRetiredWaiting sends a retired queue to shutdown persistence once
+// Stop has begun, instead of starting new work in the replacement brain.
+func (bm *BrainManager) keepRetiredWaiting(from *Brain, ms []Inbound) bool {
+	bm.reloadMu.Lock()
+	stopped := bm.stopped
+	bm.reloadMu.Unlock()
+	if !stopped {
+		return false
+	}
+	if bm.hooks.Waiting != nil {
+		bm.hooks.Waiting(from, ms)
+	} else {
+		dropped(ms)
+	}
+	return true
 }
 
 // settingsFor combines global settings with a brain's own.
@@ -2775,15 +2799,30 @@ func (bm *BrainManager) KillRuns() {
 
 // Stop stops every brain for good as the bridge stops (see
 // Brain.shutdown), all at once, after the brains reloads took out have
-// handed on what they had waiting. Each run in flight gets shutdownGrace
+// kept what they had waiting. Each run in flight gets shutdownGrace
 // to finish and be delivered.
 func (bm *BrainManager) Stop() {
 	bm.reloadMu.Lock()
 	bm.stopped = true
+	brains := bm.Brains()
+	waiting := make([][]Inbound, len(brains))
+	for i, br := range brains {
+		waiting[i] = br.closeQueue()
+	}
 	bm.reloadMu.Unlock()
+	// Freeze and keep live queues before waiting for retired workers.
+	// Otherwise those workers could requeue a message into a live brain
+	// and start it while the rest of shutdown waited for retirement.
+	for i, br := range brains {
+		if bm.hooks.Waiting != nil {
+			bm.hooks.Waiting(br, waiting[i])
+		} else {
+			dropped(waiting[i])
+		}
+	}
 	bm.retiring.Wait()
 	var wg sync.WaitGroup
-	for _, br := range bm.Brains() {
+	for _, br := range brains {
 		wg.Go(func() { br.shutdown(shutdownGrace) })
 	}
 	wg.Wait()
