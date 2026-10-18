@@ -653,14 +653,15 @@ connection state (`pairing`, `connecting`, `connected`, `logged-out`,
 requests sent by web pages.
 
 Brains reach `/brain/` there, which `fridolin polls` asks for the brain's
-poll results. It takes no dashboard token but one the bridge makes for
-each run, in a file in the data directory's `run-tokens/<id>/` that the
-sandbox lets only that brain read; the run's `FRIDOLIN_BRAIN_TOKEN_FILE`
-names it. The token stops working, and its file goes, when the run ends,
-and the bridge answers with that brain's things only. The token is not in
-the run's environment, since macOS shows a process's environment to every
-program of the same user, other brains included. With `http_listen` off,
-those commands do not work.
+poll results and `fridolin calendar` for its calendar calls. It takes no
+dashboard token but one the bridge makes for each run, in a file in the
+data directory's `run-tokens/<id>/` that the sandbox lets only that
+brain read; the run's `FRIDOLIN_BRAIN_TOKEN_FILE` names it. The token
+stops working, and its file goes, when the run ends, and the bridge
+answers with that brain's things only. The token is not in the run's
+environment, since macOS shows a process's environment to every program
+of the same user, other brains included. With `http_listen` off, those
+commands do not work.
 
 ### `ingest.enabled`
 

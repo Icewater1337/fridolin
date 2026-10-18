@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"log"
 	"net/http"
 	"net/url"
@@ -338,6 +339,21 @@ type tokenResponse struct {
 	ErrorDesc    string `json:"error_description"`
 }
 
+// oauthError is a refusal from Google's token endpoint.
+type oauthError struct {
+	status  int
+	message string
+}
+
+func (e *oauthError) Error() string { return "token request to Google failed: " + e.message }
+
+// temporary reports whether Google may well take the same request in a
+// minute: it was overloaded or limited the rate, rather than refusing the
+// grant.
+func (e *oauthError) temporary() bool {
+	return e.status == http.StatusTooManyRequests || e.status >= 500
+}
+
 func (g *GoogleAuth) postToken(ctx context.Context, c *GoogleClient, form url.Values) (*tokenResponse, error) {
 	form.Set("client_id", c.ClientID)
 	form.Set("client_secret", c.ClientSecret)
@@ -348,7 +364,7 @@ func (g *GoogleAuth) postToken(ctx context.Context, c *GoogleClient, form url.Va
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	resp, err := googleHTTP.Do(req)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("could not reach Google (%w); this is usually temporary, try again in a minute", err)
 	}
 	defer resp.Body.Close()
 	var tr tokenResponse
@@ -362,7 +378,7 @@ func (g *GoogleAuth) postToken(ctx context.Context, c *GoogleClient, form url.Va
 		if msg == "" {
 			msg = resp.Status
 		}
-		return nil, fmt.Errorf("token request to Google failed: %s", msg)
+		return nil, &oauthError{status: resp.StatusCode, message: msg}
 	}
 	return &tr, nil
 }
@@ -468,19 +484,32 @@ func (g *GoogleAuth) loadToken(brainID string) (*googleToken, error) {
 	return &t, nil
 }
 
+// signInError is a brain's Google token the bridge itself will not use,
+// before Google is asked: a token file it cannot read or trust, one with
+// no refresh token or from another OAuth client, or no client to refresh
+// it with. Connecting the brain again writes a new token, so a brain is
+// told to ask for that (calendarCallProblem); other errors are not this.
+type signInError struct{ err error }
+
+func (e *signInError) Error() string { return e.err.Error() }
+func (e *signInError) Unwrap() error { return e.err }
+
 // accessToken returns a valid access token, refreshing (and saving) it when
 // it has expired.
 func (g *GoogleAuth) accessToken(ctx context.Context, brainID string) (*googleToken, error) {
 	t, err := g.loadToken(brainID)
+	if errors.Is(err, fs.ErrNotExist) {
+		return nil, err // not connected
+	}
 	if err != nil {
-		return nil, err
+		return nil, &signInError{err}
 	}
 	exp, _ := time.Parse(time.RFC3339Nano, t.Expiry)
 	if t.Token != "" && time.Until(exp) > time.Minute {
 		return t, nil
 	}
 	if t.RefreshToken == "" {
-		return nil, errors.New("the token has no refresh token — connect again")
+		return nil, &signInError{errors.New("the token has no refresh token — connect again")}
 	}
 	// The brain can write its token file, so the client in it is not
 	// trusted: the refresh uses yours, at Google's fixed endpoint. A
@@ -488,10 +517,10 @@ func (g *GoogleAuth) accessToken(ctx context.Context, brainID string) (*googleTo
 	// from another client cannot be refreshed here.
 	c := g.Client()
 	if c == nil {
-		return nil, errors.New("add your Google OAuth client first (Settings → Google sign-in)")
+		return nil, &signInError{errors.New("add your Google OAuth client first (Settings → Google sign-in)")}
 	}
 	if t.ClientID != c.ClientID {
-		return nil, errors.New("this brain signed in with another Google OAuth client than the one in Settings → Google sign-in — connect it again")
+		return nil, &signInError{errors.New("this brain signed in with another Google OAuth client than the one in Settings → Google sign-in — connect it again")}
 	}
 	tr, err := g.postToken(ctx, c, url.Values{"grant_type": {"refresh_token"}, "refresh_token": {t.RefreshToken}})
 	if err != nil {
@@ -516,49 +545,38 @@ type CalendarEntry struct {
 	Color      string `json:"color,omitempty"`
 }
 
+// calendarList returns the account's calendars, primary first. An account
+// can have more than fit in one page, and a calendar on the second would
+// look as if it did not exist.
 func (g *GoogleAuth) calendarList(ctx context.Context, tok *googleToken) ([]CalendarEntry, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, googleAPIBase+"/calendar/v3/users/me/calendarList?maxResults=250", nil)
-	if err != nil {
-		return nil, err
-	}
-	req.Header.Set("Authorization", "Bearer "+tok.Token)
-	resp, err := googleHTTP.Do(req)
-	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		var e struct {
-			Error struct {
-				Message string `json:"message"`
-			} `json:"error"`
+	q := url.Values{"maxResults": {"250"}} // the API's largest page
+	var out []CalendarEntry
+	for range maxGooglePages {
+		var page struct {
+			Items []struct {
+				ID              string `json:"id"`
+				Summary         string `json:"summary"`
+				SummaryOverride string `json:"summaryOverride"`
+				Primary         bool   `json:"primary"`
+				AccessRole      string `json:"accessRole"`
+				BackgroundColor string `json:"backgroundColor"`
+			} `json:"items"`
+			NextPageToken string `json:"nextPageToken"`
 		}
-		_ = json.NewDecoder(io.LimitReader(resp.Body, 1<<20)).Decode(&e)
-		if e.Error.Message == "" {
-			e.Error.Message = resp.Status
+		if err := g.calendarAPI(ctx, tok, http.MethodGet, "/users/me/calendarList", q, nil, &page); err != nil {
+			return nil, err
 		}
-		return nil, errors.New(e.Error.Message)
-	}
-	var body struct {
-		Items []struct {
-			ID              string `json:"id"`
-			Summary         string `json:"summary"`
-			SummaryOverride string `json:"summaryOverride"`
-			Primary         bool   `json:"primary"`
-			AccessRole      string `json:"accessRole"`
-			BackgroundColor string `json:"backgroundColor"`
-		} `json:"items"`
-	}
-	if err := json.NewDecoder(io.LimitReader(resp.Body, 4<<20)).Decode(&body); err != nil {
-		return nil, err
-	}
-	out := make([]CalendarEntry, 0, len(body.Items))
-	for _, it := range body.Items {
-		name := it.SummaryOverride
-		if name == "" {
-			name = it.Summary
+		for _, it := range page.Items {
+			name := it.SummaryOverride
+			if name == "" {
+				name = it.Summary
+			}
+			out = append(out, CalendarEntry{ID: it.ID, Summary: name, Primary: it.Primary, AccessRole: it.AccessRole, Color: it.BackgroundColor})
 		}
-		out = append(out, CalendarEntry{ID: it.ID, Summary: name, Primary: it.Primary, AccessRole: it.AccessRole, Color: it.BackgroundColor})
+		if page.NextPageToken == "" {
+			break
+		}
+		q.Set("pageToken", page.NextPageToken)
 	}
 	sort.SliceStable(out, func(i, j int) bool {
 		if out[i].Primary != out[j].Primary {

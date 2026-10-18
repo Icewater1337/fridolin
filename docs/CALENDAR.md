@@ -85,29 +85,35 @@ The chosen calendars are stored in the brain's `brain.json`:
 }
 ```
 
-When the bridge runs a brain, it tells `tools/calendar_tool.py` which brain is
-running and which calendars it chose, and `$FRIDOLIN_TOOLS_DIR` says where the
-tools are, so inside a brain:
+A brain uses its calendar with `fridolin calendar`, which asks the bridge:
+the bridge makes the call to Google with the brain's token, and only on the
+calendars ticked on the brain's page. Inside a brain:
 
 ```bash
-python3 "$FRIDOLIN_TOOLS_DIR/calendar_tool.py" calendars                 # what it may use
-python3 "$FRIDOLIN_TOOLS_DIR/calendar_tool.py" list --from 2026-01-05     # all chosen calendars
-python3 "$FRIDOLIN_TOOLS_DIR/calendar_tool.py" free --date 2026-01-06     # busy across all of them
-python3 "$FRIDOLIN_TOOLS_DIR/calendar_tool.py" create --title "Dentist" \
-    --start 2026-01-06T14:00:00 --end 2026-01-06T15:00:00                 # into the default
+fridolin calendar calendars                  # what it may use
+fridolin calendar list --from 2026-01-05     # all chosen calendars
+fridolin calendar free --date 2026-01-06     # busy across all of them
+fridolin calendar create --title "Dentist" \
+    --start 2026-01-06T14:00:00 --end 2026-01-06T15:00:00    # into the default
+fridolin calendar delete --event-id EVENT_ID
 ```
 
-`--calendar-id` selects one of the chosen calendars; others are refused.
-`list` returns at most `--max-results` events (default 100) across all of
-them, and says `"truncated": true` when there were more. The tool needs
-`pip3 install -r tools/requirements.txt`.
+`--calendar-id` selects one of the chosen calendars, and the bridge refuses
+any other, whatever the brain asks for. A brain with no calendars chosen in
+its `brain.json` gets its primary calendar only. `list` returns at most
+`--max-results` events (default 100) across all of them, and says
+`"truncated": true` when there were more. `free` reports the busy times
+and the free windows within `--hours` (default `08:00-18:00`), and fails
+rather than call a day free when Google cannot read one of the calendars.
+Times are in `--timezone`, else `CALENDAR_TZ`, else the system's timezone.
+Every command prints JSON, and an error as `{"error": …}`.
 
-The tool never opens a sign-in page by itself. When a brain's sign-in is
-revoked or expires, every command answers with an error asking you to connect
-again on the brain's Calendar page. (Run by hand outside a brain,
-`calendar_tool.py --profile <brain-id> auth` signs in through the browser
-instead; the comment at the top of `tools/calendar_tool.py` explains that
-setup.)
+Nothing in the brain signs in. When a brain's sign-in is revoked or
+expires, or its token cannot be used, every command answers with an error
+asking you to connect again on the brain's Calendar page; a Google outage
+says it is temporary instead. A calendar Google cannot read for `free`,
+one deleted or no longer shared with the account, is named with a hint to
+check it and the brain's calendars, since connecting again would not help.
 
 **Limits.** Google grants access to a whole account, not to single calendars.
 Keeping a brain to the calendars you ticked is done by the calendar tool, not

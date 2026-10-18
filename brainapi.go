@@ -1,8 +1,10 @@
 package main
 
 import (
+	"context"
 	"crypto/sha256"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io/fs"
@@ -10,16 +12,18 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 )
 
 // The brain API, /brain/, is what the tools a brain runs ask the bridge
-// for: poll results and calendar calls. The bridge answers them with what
-// a brain's sandbox keeps from it (bridge.db, the Google tokens) and
-// decides itself what the brain may see, so a brain cannot widen that by
-// changing its environment or writing its own client.
+// for: poll results and calendar calls (google_calendar.go). The bridge
+// answers them with what a brain's sandbox keeps from it (bridge.db, the
+// Google tokens) and decides itself what the brain may see, so a brain
+// cannot widen that by changing its environment or writing its own client.
 //
 // Each run gets a token of its own, bound to the brain, and the token
 // stops working when the run's CLI has exited. It opens nothing but
@@ -143,6 +147,11 @@ func pruneRunTokens(dataDir string) {
 func (b *Bridge) brainAPIHandler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /brain/polls", b.brainCall(b.brainPolls))
+	mux.HandleFunc("GET /brain/calendar/calendars", b.brainCall(b.calendarCall(b.brainCalendarList)))
+	mux.HandleFunc("GET /brain/calendar/events", b.brainCall(b.calendarCall(b.brainCalendarEvents)))
+	mux.HandleFunc("POST /brain/calendar/events", b.brainCall(b.calendarCall(b.brainCalendarCreate)))
+	mux.HandleFunc("DELETE /brain/calendar/events/{id}", b.brainCall(b.calendarCall(b.brainCalendarDelete)))
+	mux.HandleFunc("POST /brain/calendar/freebusy", b.brainCall(b.calendarCall(b.brainCalendarBusy)))
 	mux.HandleFunc("/brain/", func(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusNotFound, "no such brain API call: "+r.Method+" "+r.URL.Path)
 	})
@@ -212,4 +221,207 @@ func (b *Bridge) brainPolls(w http.ResponseWriter, r *http.Request, br *Brain) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"polls": polls, "count": len(polls)})
+}
+
+// callError is a brain API call the bridge refuses before doing anything,
+// with the status to answer.
+type callError struct {
+	status int
+	msg    string
+}
+
+func (e *callError) Error() string { return e.msg }
+
+func badCall(format string, args ...any) error {
+	return &callError{status: http.StatusBadRequest, msg: fmt.Sprintf(format, args...)}
+}
+
+// calendarHandler is one calendar call of a brain: cals are its calendars,
+// and token gets its access token, refreshing it when it has expired.
+type calendarHandler func(ctx context.Context, r *http.Request, cals brainCalendars, token func() (*googleToken, error)) (any, error)
+
+// calendarCall runs fn for a brain's call and answers with its result. The
+// brain's calendars come from its approved manifest, never from the call.
+func (b *Bridge) calendarCall(fn calendarHandler) func(w http.ResponseWriter, r *http.Request, br *Brain) {
+	return func(w http.ResponseWriter, r *http.Request, br *Brain) {
+		ctx, cancel := context.WithTimeout(r.Context(), 90*time.Second)
+		defer cancel()
+		cals := calendarsOf(br.settings.Load().manifest)
+		out, err := fn(ctx, r, cals, func() (*googleToken, error) { return b.google.accessToken(ctx, br.ID()) })
+		if err != nil {
+			var ce *callError
+			if errors.As(err, &ce) {
+				writeErr(w, ce.status, ce.msg)
+				return
+			}
+			status, msg := calendarCallProblem(err)
+			writeErr(w, status, msg)
+			return
+		}
+		writeJSON(w, http.StatusOK, out)
+	}
+}
+
+// CalendarChoice is one calendar a brain may use, as `calendars` lists it.
+type CalendarChoice struct {
+	ID      string `json:"id"`
+	Name    string `json:"name"`
+	Primary bool   `json:"primary"`
+	Default bool   `json:"default"`
+	Access  string `json:"access"`
+}
+
+// brainCalendarList answers GET /brain/calendar/calendars: the calendars
+// of the account the brain may use.
+func (b *Bridge) brainCalendarList(ctx context.Context, r *http.Request, cals brainCalendars, token func() (*googleToken, error)) (any, error) {
+	tok, err := token()
+	if err != nil {
+		return nil, err
+	}
+	list, err := b.google.calendarList(ctx, tok)
+	if err != nil {
+		return nil, err
+	}
+	out := []CalendarChoice{}
+	for _, e := range list {
+		if ok, def := cals.allows(e); ok {
+			out = append(out, CalendarChoice{ID: e.ID, Name: e.Summary, Primary: e.Primary, Default: def, Access: e.AccessRole})
+		}
+	}
+	// restricted: always, now that the bridge holds every brain to its
+	// calendars; kept for what read calendar_tool.py's answer.
+	return map[string]any{"calendars": out, "restricted": true}, nil
+}
+
+// timeRange reads a call's from and to (RFC 3339) and its time zone.
+func timeRange(from, to, tz string) (time.Time, time.Time, error) {
+	start, err := time.Parse(time.RFC3339, from)
+	if err != nil {
+		return time.Time{}, time.Time{}, badCall("from must be a time such as 2026-01-05T00:00:00+01:00, got %q", from)
+	}
+	end, err := time.Parse(time.RFC3339, to)
+	if err != nil {
+		return time.Time{}, time.Time{}, badCall("to must be a time such as 2026-01-06T00:00:00+01:00, got %q", to)
+	}
+	if !end.After(start) {
+		return time.Time{}, time.Time{}, badCall("to must come after from")
+	}
+	if tz != "" {
+		if _, err := time.LoadLocation(tz); err != nil {
+			return time.Time{}, time.Time{}, badCall("unknown timezone %q; use an IANA name such as Europe/Berlin", tz)
+		}
+	}
+	return start, end, nil
+}
+
+// brainCalendarEvents answers GET /brain/calendar/events?from=&to=: the
+// events of ?calendar=, else of every calendar of the brain, at most ?max=
+// (default 100) in all, in start order.
+func (b *Bridge) brainCalendarEvents(ctx context.Context, r *http.Request, cals brainCalendars, token func() (*googleToken, error)) (any, error) {
+	q := r.URL.Query()
+	from, to, err := timeRange(q.Get("from"), q.Get("to"), q.Get("time_zone"))
+	if err != nil {
+		return nil, err
+	}
+	limit := 100
+	if s := q.Get("max"); s != "" {
+		if limit, err = strconv.Atoi(s); err != nil || limit < 1 || limit > 2500 {
+			return nil, badCall("max must be a number from 1 to 2500")
+		}
+	}
+	calendars, err := cals.pick(q.Get("calendar"), true)
+	if err != nil {
+		return nil, err
+	}
+	tok, err := token()
+	if err != nil {
+		return nil, err
+	}
+	return b.google.eventsOf(ctx, tok, calendars, from, to, q.Get("time_zone"), limit)
+}
+
+// brainCalendarCreate answers POST /brain/calendar/events: a NewEvent,
+// into its calendar, else the brain's default one.
+func (b *Bridge) brainCalendarCreate(ctx context.Context, r *http.Request, cals brainCalendars, token func() (*googleToken, error)) (any, error) {
+	var ev NewEvent
+	dec := json.NewDecoder(r.Body)
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(&ev); err != nil {
+		return nil, badCall("the event is not valid JSON: %v", err)
+	}
+	body, err := ev.body()
+	if err != nil {
+		return nil, badCall("%v", err)
+	}
+	if ev.SendUpdates == "" {
+		ev.SendUpdates = "all"
+	}
+	if !slices.Contains(sendUpdatesValues, ev.SendUpdates) {
+		return nil, badCall("send_updates must be one of %s", strings.Join(sendUpdatesValues, ", "))
+	}
+	calendars, err := cals.pick(ev.Calendar, false)
+	if err != nil {
+		return nil, err
+	}
+	tok, err := token()
+	if err != nil {
+		return nil, err
+	}
+	created, err := b.google.insertEvent(ctx, tok, calendars[0], body, ev.SendUpdates)
+	if err != nil {
+		return nil, err
+	}
+	return map[string]any{"created": created}, nil
+}
+
+// brainCalendarDelete answers DELETE /brain/calendar/events/{id}: in
+// ?calendar=, else the brain's default calendar.
+func (b *Bridge) brainCalendarDelete(ctx context.Context, r *http.Request, cals brainCalendars, token func() (*googleToken, error)) (any, error) {
+	id := r.PathValue("id")
+	calendars, err := cals.pick(r.URL.Query().Get("calendar"), false)
+	if err != nil {
+		return nil, err
+	}
+	tok, err := token()
+	if err != nil {
+		return nil, err
+	}
+	if err := b.google.deleteEvent(ctx, tok, calendars[0], id); err != nil {
+		return nil, err
+	}
+	return map[string]string{"deleted": id}, nil
+}
+
+// brainCalendarBusy answers POST /brain/calendar/freebusy {from, to,
+// time_zone, calendar}: when the calendar, else any of the brain's
+// calendars, is busy.
+func (b *Bridge) brainCalendarBusy(ctx context.Context, r *http.Request, cals brainCalendars, token func() (*googleToken, error)) (any, error) {
+	var req struct {
+		From     string `json:"from"`
+		To       string `json:"to"`
+		TimeZone string `json:"time_zone"`
+		Calendar string `json:"calendar"`
+	}
+	dec := json.NewDecoder(r.Body)
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(&req); err != nil {
+		return nil, badCall("the request is not valid JSON: %v", err)
+	}
+	from, to, err := timeRange(req.From, req.To, req.TimeZone)
+	if err != nil {
+		return nil, err
+	}
+	calendars, err := cals.pick(req.Calendar, true)
+	if err != nil {
+		return nil, err
+	}
+	tok, err := token()
+	if err != nil {
+		return nil, err
+	}
+	busy, err := b.google.busyTimes(ctx, tok, calendars, from, to, req.TimeZone)
+	if err != nil {
+		return nil, err
+	}
+	return map[string]any{"busy": busy, "calendars": calendars}, nil
 }

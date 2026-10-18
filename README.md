@@ -560,8 +560,10 @@ boundaries so messages break somewhere readable, and numbers the parts.
 
 **`brainapi.go`** — `/brain/`, what the tools a brain runs ask the bridge
 for, with a token that works only while that run lasts.
-**`toolcmd.go`, `history_cmd.go`, `polls_cmd.go`** — `fridolin history` and
-`fridolin polls`, which brains run.
+**`toolcmd.go`, `history_cmd.go`, `polls_cmd.go`, `calendar_cmd.go`** —
+`fridolin history`, `fridolin polls` and `fridolin calendar`, which brains
+run. **`google.go`, `google_calendar.go`** — the calendar sign-in, and the
+calendar calls the bridge makes for brains.
 
 ---
 
