@@ -146,9 +146,13 @@ be listed, the run fails without syncing.
 
 Backup → Restore: choose a brain, `current` or a version, and a **new, empty**
 folder. The bridge never restores over an existing brain. The folder must
-pass the checks a new brain's folder does: inside your home folder, not in
-or around a brain, and not in the bridge's data folder or the credentials
-folder, also where a symlink on the way leads. The restore runs in the background (one at a time, and not while a
+pass the checks a new brain's folder does (see [adding a brain](BRAINS.md)):
+inside your home folder, not in or around a brain, and not in the bridge's
+data folder or the credentials folder. Nor may it lie inside what the
+sandbox keeps from brains, such as `~/.claude`, `~/.ssh` or a `deny_paths`
+entry, since the bridge writes the copy outside any sandbox. Each check
+looks where the folder really is, through any symlink on the way. The
+restore runs in the background (one at a time, and not while a
 backup runs), and the Backup page shows how the last one went, a failure
 included, with what rclone said. Inspect the result, then add it as a brain
 (the dashboard picks up its `brain.json`) or swap folders yourself, which

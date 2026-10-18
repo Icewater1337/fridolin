@@ -2158,9 +2158,11 @@ func connectAlias(t *testing.T, tb *testBridge) {
 
 // TestBackupRestoreChecksWhatItIsGiven: the brain and version name one
 // folder of the backup, and the target is a new or empty folder of yours
-// that is neither a brain's nor the bridge's.
+// that is neither a brain's nor the bridge's, nor inside what the sandbox
+// keeps from brains: the copy is written outside any sandbox, so
+// ~/.claude/skills/x would be loaded by your own Claude Code sessions.
 func TestBackupRestoreChecksWhatItIsGiven(t *testing.T) {
-	tb := newTestBridge(t, `, "sandbox": {"credentials_dir": "~/creds"}`)
+	tb := newTestBridge(t, `, "sandbox": {"credentials_dir": "~/creds", "deny_paths": ["~/clients"]}`)
 	connectAlias(t, tb)
 	addBackupBrain(t, tb, "notes")
 	var mu sync.Mutex
@@ -2206,6 +2208,10 @@ func TestBackupRestoreChecksWhatItIsGiven(t *testing.T) {
 		{"into a brain through a symlink", "notes", "current", "~/to-notes/restored", 422},
 		{"into the data dir through a symlink", "notes", "current", "~/to-data/a/restored", 422},
 		{"into the credentials folder through a symlink", "notes", "current", "~/to-creds/restored", 422},
+		{"into ~/.claude", "notes", "current", "~/.claude/skills/restored", 422},
+		{"into ~/.ssh", "notes", "current", "~/.ssh/restored", 422},
+		{"into LaunchAgents", "notes", "current", "~/Library/LaunchAgents/restored", 422},
+		{"into a deny_paths entry", "notes", "current", "~/clients/restored", 422},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

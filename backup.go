@@ -1715,6 +1715,26 @@ func resolveExisting(p string) string {
 	}
 }
 
+// checkRestoreTarget reports why target, a folder by its real path, lies
+// in what the sandbox keeps from brains ("is inside …", like
+// checkBrainDir), or nil. The bridge writes the copy outside any sandbox,
+// so where a brain folder may still live, inside ~/.ssh or a deny_paths
+// entry, no restore needs to write.
+func checkRestoreTarget(target string, cfg *Config, home string) error {
+	var denied []protectedPath
+	for _, p := range sandboxPolicyOf(cfg).protected(home, ownLayout()) {
+		p.inside = true
+		denied = append(denied, p)
+	}
+	for _, p := range cfg.Sandbox.DenyPaths {
+		denied = append(denied, protectedPath{expandHome(p, home), true, "the deny_paths entry " + p})
+	}
+	if what, ok := protectedIn(target, denied); ok {
+		return fmt.Errorf("%s, which the sandbox keeps from brains", what)
+	}
+	return nil
+}
+
 // restoreTarget checks the folder a restore copies into, as for a new brain
 // (CheckBrainPath): inside your home folder, neither the data dir nor in or
 // around a brain, and not the credentials folder either; and new or empty.
@@ -1724,6 +1744,11 @@ func (b *Bridge) restoreTarget(p string) (string, error) {
 	target, problems, _ := CheckBrainPath(resolveExisting(expandHome(strings.TrimSpace(p), homeDir())), cfg, brainDirs(cfg))
 	if creds := canonicalDir(cfg.Sandbox.CredentialsDir); len(problems) == 0 && creds != "" && (isWithin(target, creds) || isWithin(creds, target)) {
 		problems = append(problems, "the credentials folder cannot be (or contain) the restore folder")
+	}
+	if len(problems) == 0 {
+		if err := checkRestoreTarget(target, cfg, homeDir()); err != nil {
+			problems = append(problems, "the restore folder "+err.Error()+" — pick a new folder")
+		}
 	}
 	if len(problems) > 0 {
 		return "", errors.New(strings.Join(problems, "; "))
