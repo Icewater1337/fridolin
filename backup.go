@@ -73,6 +73,18 @@ var (
 	remoteNameRe = regexp.MustCompile(`^[A-Za-z0-9_-]{1,40}$`)
 )
 
+// defaultIncludeBridgeConfig is include_bridge_config's default.
+const defaultIncludeBridgeConfig = true
+
+// includeBridge and keepVersions read the two settings that are pointers so
+// that an unset one can be told from false or 0. effective fills both in,
+// with the same defaults, so the default of each lives in one place.
+func (bc BackupConfig) includeBridge() bool {
+	return boolOr(bc.IncludeBridgeConfig, defaultIncludeBridgeConfig)
+}
+
+func (bc BackupConfig) keepVersions() int { return intOr(bc.KeepVersionsDays, defaultKeepVersions) }
+
 func (bc BackupConfig) validate() error {
 	if bc.DailyAt != "" && !dailyAtRe.MatchString(bc.DailyAt) {
 		return fmt.Errorf("backup.daily_at %q must be HH:MM (24h)", bc.DailyAt)
@@ -397,7 +409,7 @@ func (b *Bridge) apiBackupStatus(w http.ResponseWriter, r *http.Request) {
 		"connected":             m.connected(),
 		"connect":               m.connect,
 		"settings":              cfg.Backup,
-		"include_bridge_config": boolOr(cfg.Backup.IncludeBridgeConfig, true),
+		"include_bridge_config": cfg.Backup.includeBridge(),
 		"brains":                rows,
 		"bridge":                m.state.Bridge,
 		"job":                   job,
@@ -687,7 +699,7 @@ func (b *Bridge) apiBackupRun(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, "force needs a brain: name the brains to mirror in \"brains\"")
 		return
 	}
-	include := boolOr(req.IncludeBridge, boolOr(b.cfgs.Get().Backup.IncludeBridgeConfig, true))
+	include := boolOr(req.IncludeBridge, b.cfgs.Get().Backup.includeBridge())
 	if err := b.backup.StartRun(req.Brains, include, "manual", req.Force); err != nil {
 		writeErr(w, http.StatusConflict, err.Error())
 		return
@@ -979,7 +991,7 @@ func (m *BackupManager) listFiles(ctx context.Context, path, filterFile string) 
 		args = append(args, "--filter-from", filterFile)
 	}
 	var stderr strings.Builder
-	out, err := m.runner(ctx, args, &lockedWriter{w: &stderr})
+	out, err := m.runner(ctx, args, &stderr)
 	if err != nil {
 		if strings.Contains(strings.ToLower(stderr.String()), "directory not found") {
 			return nil, errDirNotFound
@@ -1145,7 +1157,7 @@ func (j *jsonStats) lastError() string {
 // copy of a long-unchanged file in the very run that replaced or deleted it.
 func (m *BackupManager) prune(ctx context.Context, targets []*Brain) {
 	cfg := m.cfgs.Get()
-	days := intOr(cfg.Backup.KeepVersionsDays, defaultKeepVersions)
+	days := cfg.Backup.keepVersions()
 	if days <= 0 {
 		return
 	}
@@ -1219,7 +1231,7 @@ func sortVersions(names []string) {
 // deleted a file yet) is an empty list, not an error.
 func (m *BackupManager) listVersions(ctx context.Context, versions string) ([]string, error) {
 	var stderr strings.Builder
-	out, err := m.runner(ctx, []string{"lsjson", "--dirs-only", versions}, &lockedWriter{w: &stderr})
+	out, err := m.runner(ctx, []string{"lsjson", "--dirs-only", versions}, &stderr)
 	if err != nil {
 		if strings.Contains(strings.ToLower(stderr.String()), "not found") {
 			return []string{}, nil
@@ -1366,7 +1378,7 @@ func (m *BackupManager) tick(now time.Time) {
 	if now.Before(dueToday(cfg.Backup.DailyAt, now)) || last == today || busy {
 		return
 	}
-	if err := m.StartRun(nil, boolOr(cfg.Backup.IncludeBridgeConfig, true), "scheduled", false); err != nil {
+	if err := m.StartRun(nil, cfg.Backup.includeBridge(), "scheduled", false); err != nil {
 		log.Printf("scheduled backup: %v", err)
 		return
 	}
@@ -1390,18 +1402,6 @@ func (m *BackupManager) skipTodayIfPastDue(current string, next *string) {
 		m.saveStateLocked()
 		m.mu.Unlock()
 	}
-}
-
-// lockedWriter makes a writer safe for concurrent writes.
-type lockedWriter struct {
-	mu sync.Mutex
-	w  io.Writer
-}
-
-func (l *lockedWriter) Write(p []byte) (int, error) {
-	l.mu.Lock()
-	defer l.mu.Unlock()
-	return l.w.Write(p)
 }
 
 // Stop ends the scheduler and cancels a running backup.

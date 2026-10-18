@@ -500,7 +500,8 @@ func effective(file *Config) (*Config, error) {
 		cfg.Dashboard.RequireToken = &t
 	}
 	if cfg.Backup.IncludeBridgeConfig == nil {
-		cfg.Backup.IncludeBridgeConfig = &t
+		inc := defaultIncludeBridgeConfig
+		cfg.Backup.IncludeBridgeConfig = &inc
 	}
 	if cfg.Sandbox.GitConfig == "" {
 		cfg.Sandbox.GitConfig = "read"
