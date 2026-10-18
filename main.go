@@ -291,6 +291,7 @@ func runCmd(args []string) {
 		log.Fatalf("loading config: %v", err)
 	}
 	cfg := cfgs.Get()
+	logDataDir(cfgs)
 
 	// NewBridge takes the data dir's instance lock, so dev mode with the live
 	// data dir is refused next to the running bridge too.
@@ -332,16 +333,28 @@ func runCmd(args []string) {
 }
 
 // runLog sends the log to console and to a ring the dashboard shows, logs
-// the version, then picks the config file. In that order: a warning
-// configPath logs, such as the one about CONFIG_FILE, must reach the
-// dashboard's log too, the only one many people read, and the version line
-// comes first even when the bridge then refuses to start (no config, one
-// that does not load, another bridge on the data dir).
+// the version, then picks the config file and names it and where it came
+// from. In that order: a warning configPath logs, such as the one about
+// CONFIG_FILE, must reach the dashboard's log too, the only one many people
+// read, and the version line comes first even when the bridge then refuses
+// to start (no config, one that does not load, another bridge on the data
+// dir).
 func runLog(console io.Writer, configFlag string) (*LogRing, string) {
 	ring := NewLogRing(logRingLines)
 	log.SetOutput(io.MultiWriter(console, ring))
 	log.Printf("Starting %s", versionLine())
-	return ring, configPath(configFlag)
+	path, source := configPathFrom(configFlag)
+	log.Printf("Config file: %s (%s)", absPath(path), source)
+	return ring, path
+}
+
+// logDataDir names the data dir the bridge runs on, and with it the
+// WhatsApp session, and where it came from: without data_dir in the
+// config, which folders exist decides it.
+func logDataDir(cfgs *ConfigStore) {
+	home := homeDir()
+	dir := cfgs.Get().DataDir
+	log.Printf("Data dir: %s (%s)", absPath(dir), dataDirSource(cfgs.FileCopy().DataDir, dir, home))
 }
 
 func initCmd(args []string) {

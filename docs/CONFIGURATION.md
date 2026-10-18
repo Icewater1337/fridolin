@@ -20,6 +20,7 @@ fridolin check
 
 `fridolin paths` prints the config file and the data dir the other
 commands use, and where each came from (`--json` for a program to read).
+The bridge's log names both, and where each came from, at every start.
 
 Paths may start with `~`, which expands to your home directory.
 

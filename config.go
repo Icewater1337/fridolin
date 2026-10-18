@@ -499,14 +499,26 @@ const (
 // for, and where it came from: the value itself, or for an empty one
 // defaultDataDir's choice.
 func resolveDataDir(value, home string) (dir, source string) {
-	if value != "" {
-		return expandHome(value, home), dataDirFromConfig
+	dir = value
+	if dir == "" {
+		dir = defaultDataDir(home)
 	}
-	dir = defaultDataDir(home)
-	if dir == filepath.Join(home, legacyDataDirName) {
-		return dir, dataDirFromLegacy
+	dir = expandHome(dir, home)
+	return dir, dataDirSource(value, dir, home)
+}
+
+// dataDirSource says where dir, the data dir resolveDataDir made of the
+// config file's data_dir value, came from. It looks at no folder: once
+// the bridge has made the data dir, asking defaultDataDir again could
+// answer otherwise.
+func dataDirSource(value, dir, home string) string {
+	switch {
+	case value != "":
+		return dataDirFromConfig
+	case dir == filepath.Join(home, legacyDataDirName):
+		return dataDirFromLegacy
 	}
-	return dir, dataDirFromDefault
+	return dataDirFromDefault
 }
 
 // effective derives the running configuration from the on-disk layer:

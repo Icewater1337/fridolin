@@ -1,9 +1,10 @@
 #!/usr/bin/env bash
 #
 # Smoke test for a built binary: start it in dev mode (no WhatsApp) with a
-# scratch HOME, config and data dir on a free port, check that it answers,
-# then stop it with SIGTERM and check that it shuts down cleanly. It never
-# reads your config or data dir and never talks to a running bridge.
+# scratch HOME, config and data dir on a free port, check that it answers
+# and that its log names the config file and the data dir, then stop it
+# with SIGTERM and check that it shuts down cleanly. It never reads your
+# config or data dir and never talks to a running bridge.
 #
 #   scripts/smoke.sh [BINARY [VERSION]]   # default bin/fridolin
 #
@@ -91,6 +92,11 @@ for _ in $(seq 1 100); do
 done
 [ "$health" = ok ] || fail "GET /health says ok"
 pass "GET /health"
+
+# Both are logged before the bridge is made, so they are in the log by now.
+grep -qF "Config file: $cfg (--config)" "$log" || fail "the log names the config file, from --config"
+grep -qF "Data dir: $data (config)" "$log" || fail "the log names the data dir, from the config"
+pass "the log names the config file and the data dir"
 
 code="$(curl -s -o "$work/index.html" -w '%{http_code}' "$base/")"
 if [ "$code" != 200 ] || ! grep -q '<html' "$work/index.html"; then fail "GET / serves the dashboard (status $code)"; fi

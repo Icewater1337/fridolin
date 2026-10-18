@@ -187,6 +187,83 @@ func TestRunLogsConfigWarningsToTheDashboard(t *testing.T) {
 	}
 }
 
+func TestRunLogNamesTheConfigFile(t *testing.T) {
+	// A log excerpt must say which config the bridge ran on, and why that
+	// one: a service passes --config, a shell may export FRIDOLIN_CONFIG.
+	home, other := canonicalDir(t.TempDir()), canonicalDir(t.TempDir())
+	t.Setenv("HOME", home)
+	tests := []struct {
+		name, flag, env string // "" means none
+		path, source    string
+	}{
+		{"default", "", "", home + "/.fridolin/config.json", "default"},
+		{"FRIDOLIN_CONFIG", "", other + "/env.json", other + "/env.json", "FRIDOLIN_CONFIG"},
+		{"--config", other + "/flag.json", other + "/env.json", other + "/flag.json", "--config"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			clearEnv(t, "FRIDOLIN_CONFIG", "CONFIG_FILE")
+			if tc.env != "" {
+				t.Setenv("FRIDOLIN_CONFIG", tc.env)
+			}
+			prev := log.Writer()
+			t.Cleanup(func() { log.SetOutput(prev) })
+			var console strings.Builder
+			ring, path := runLog(&console, tc.flag)
+			if path != tc.path {
+				t.Errorf("runLog picked %s, want %s", path, tc.path)
+			}
+			want := "Config file: " + tc.path + " (" + tc.source + ")"
+			lines, _ := ring.Since(0, 50)
+			if len(lines) != 2 || !strings.Contains(lines[0].Text, "Starting fridolin ") || !strings.HasSuffix(lines[1].Text, want) {
+				t.Errorf("logged %+v, want the version and then %q", lines, want)
+			}
+			if !strings.Contains(console.String(), want) {
+				t.Errorf("the console does not say %q: %q", want, console.String())
+			}
+		})
+	}
+}
+
+func TestRunLogsTheDataDir(t *testing.T) {
+	// Without data_dir in the config the data dir, and with it the
+	// WhatsApp session, depends on which folders exist; the log says which
+	// one the bridge took, and why.
+	tests := []struct {
+		name    string
+		config  string   // the config file; HOME stands for the home folder
+		dirs    []string // folders in the home folder before it starts
+		dataDir string   // relative to the home folder
+		source  string
+	}{
+		{"set in the config", `{"data_dir": "~/data"}`, []string{".whatsapp-claude-bridge"}, "data", "config"},
+		{"the default", `{}`, nil, ".fridolin", "default"},
+		{"the folder from before the rename", `{}`, []string{".whatsapp-claude-bridge"}, ".whatsapp-claude-bridge", "legacy"},
+		{"that folder named in the config", `{"data_dir": "HOME/.whatsapp-claude-bridge"}`, []string{".whatsapp-claude-bridge"}, ".whatsapp-claude-bridge", "config"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			home := canonicalDir(t.TempDir())
+			t.Setenv("HOME", home)
+			for _, d := range tc.dirs {
+				if err := os.Mkdir(filepath.Join(home, d), 0o700); err != nil {
+					t.Fatal(err)
+				}
+			}
+			logs := captureLog(t)
+			cfgs, err := OpenConfigStore(writeConfig(t, strings.ReplaceAll(tc.config, "HOME", home)))
+			if err != nil {
+				t.Fatal(err)
+			}
+			logDataDir(cfgs)
+			want := "Data dir: " + filepath.Join(home, tc.dataDir) + " (" + tc.source + ")"
+			if !logContains(logs, want) {
+				t.Errorf("the log does not say %q: %q", want, logs())
+			}
+		})
+	}
+}
+
 func TestSetupStopsOnConfigFile(t *testing.T) {
 	// CONFIG_FILE was the old name of FRIDOLIN_CONFIG, but other software
 	// exports it too, so setup.sh stops before it writes anything and names
