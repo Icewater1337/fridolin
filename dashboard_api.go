@@ -624,7 +624,11 @@ func (b *Bridge) apiDismissChat(w http.ResponseWriter, r *http.Request) {
 func (b *Bridge) apiGetConfig(w http.ResponseWriter, r *http.Request) {
 	file := b.cfgs.FileCopy()
 	file.BrainDirs = nil
-	eff, _ := b.cfgs.Get().clone()
+	eff, err := b.cfgs.Get().clone()
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
 	eff.BrainDirs = nil
 	writeJSON(w, http.StatusOK, map[string]any{
 		"etag":      b.cfgs.ETag(),
@@ -1226,14 +1230,68 @@ func (b *Bridge) apiFSPick(w http.ResponseWriter, r *http.Request) {
 	defer pickMu.Unlock()
 	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Minute)
 	defer cancel()
-	out, err := exec.CommandContext(ctx, argv[0], argv[1:]...).Output()
-	if err != nil {
-		// Cancelling the dialog exits non-zero (osascript: error -128).
+	p, err := runPicker(ctx, argv)
+	switch {
+	case errors.Is(err, errPickerCancelled):
 		writeJSON(w, http.StatusOK, map[string]any{"cancelled": true})
-		return
+	case err != nil:
+		writeErr(w, http.StatusInternalServerError, fmt.Sprintf("the folder dialog failed (%v) — browse or type the path instead", err))
+	default:
+		writeJSON(w, http.StatusOK, map[string]any{"path": p})
+	}
+}
+
+// errPickerCancelled is a folder dialog closed without a choice.
+var errPickerCancelled = errors.New("no folder was chosen")
+
+// runPicker runs the folder dialog argv and returns the folder chosen. A
+// dialog that was cancelled, or outlived ctx, is errPickerCancelled; any
+// other failure is an error of its own, so one that cannot open (osascript
+// without automation access under launchd, say) does not pass for a
+// cancel.
+func runPicker(ctx context.Context, argv []string) (string, error) {
+	out, err := exec.CommandContext(ctx, argv[0], argv[1:]...).Output()
+	if ctx.Err() != nil {
+		return "", errPickerCancelled
+	}
+	var exit *exec.ExitError
+	switch {
+	case errors.As(err, &exit) && pickerCancelled(filepath.Base(argv[0]), exit.ExitCode(), exit.Stderr):
+		return "", errPickerCancelled
+	case errors.As(err, &exit):
+		if msg := strings.TrimSpace(string(exit.Stderr)); msg != "" {
+			return "", fmt.Errorf("%w: %s", err, textTail(msg, 300))
+		}
+		return "", err
+	case err != nil:
+		return "", err
 	}
 	p := strings.TrimRight(strings.TrimSpace(string(out)), "/")
-	writeJSON(w, http.StatusOK, map[string]any{"path": p})
+	if p == "" {
+		return "", errPickerCancelled
+	}
+	return p, nil
+}
+
+// pickerCancelled reports whether a folder dialog that exited with code
+// and stderr was cancelled: osascript says error -128, zenity and kdialog
+// exit with 1.
+func pickerCancelled(tool string, code int, stderr []byte) bool {
+	switch tool {
+	case "osascript":
+		return code == 1 && bytes.Contains(stderr, []byte("-128"))
+	case "zenity", "kdialog":
+		return code == 1
+	}
+	return false
+}
+
+// textTail is the last n bytes of s, or s.
+func textTail(s string, n int) string {
+	if len(s) <= n {
+		return s
+	}
+	return "…" + s[len(s)-n:]
 }
 
 // apiFSList lists folders inside your home folder, for the in-dashboard

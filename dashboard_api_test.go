@@ -1,7 +1,9 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -902,5 +904,45 @@ func TestConfigWarnsAboutOddChats(t *testing.T) {
 	}
 	if strings.Contains(got, `"15551234567"`) || strings.Contains(got, `"120363000000000000@g.us"`) {
 		t.Errorf("log names a valid entry:\n%s", got)
+	}
+}
+
+// A folder dialog that was cancelled is a cancel; one that failed is an
+// error, so a dialog that cannot open does not pass for a cancel.
+func TestRunPickerTellsCancelFromFailure(t *testing.T) {
+	cases := []struct {
+		name, tool, script string
+		want               string // a path, "cancel", or part of the error
+	}{
+		{"chosen", "osascript", `echo "/Users/you/brains/notes/"`, "/Users/you/brains/notes"},
+		{"osascript cancel", "osascript", `echo "execution error: User canceled. (-128)" >&2; exit 1`, "cancel"},
+		{"osascript refused", "osascript", `echo "Not authorized to send Apple events to System Events. (-1743)" >&2; exit 1`, "Not authorized"},
+		{"zenity cancel", "zenity", `exit 1`, "cancel"},
+		{"zenity failure", "zenity", `echo "cannot open display" >&2; exit 255`, "cannot open display"},
+		{"kdialog cancel", "kdialog", `exit 1`, "cancel"},
+		{"nothing printed", "kdialog", `exit 0`, "cancel"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			tool := filepath.Join(t.TempDir(), c.tool)
+			if err := os.WriteFile(tool, []byte("#!/bin/sh\n"+c.script+"\n"), 0o700); err != nil {
+				t.Fatal(err)
+			}
+			got, err := runPicker(context.Background(), []string{tool})
+			switch {
+			case c.want == "cancel":
+				if !errors.Is(err, errPickerCancelled) {
+					t.Fatalf("got %q, %v; want a cancel", got, err)
+				}
+			case strings.HasPrefix(c.want, "/"):
+				if err != nil || got != c.want {
+					t.Fatalf("got %q, %v; want %q", got, err, c.want)
+				}
+			default:
+				if err == nil || errors.Is(err, errPickerCancelled) || !strings.Contains(err.Error(), c.want) {
+					t.Fatalf("got %q, %v; want an error with %q", got, err, c.want)
+				}
+			}
+		})
 	}
 }
