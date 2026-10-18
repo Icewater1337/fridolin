@@ -31,6 +31,13 @@ func TestNewManifestWriteFailureLeavesNoFile(t *testing.T) {
 	if err := syscall.Getrlimit(syscall.RLIMIT_FSIZE, &limit); err != nil {
 		t.Fatal(err)
 	}
+	original := limit
+	t.Cleanup(func() {
+		// The instrumented child writes its coverage after the test returns.
+		if err := syscall.Setrlimit(syscall.RLIMIT_FSIZE, &original); err != nil {
+			t.Errorf("restoring file-size limit: %v", err)
+		}
+	})
 	limit.Cur = 1024
 	signal.Ignore(syscall.SIGXFSZ)
 	if err := syscall.Setrlimit(syscall.RLIMIT_FSIZE, &limit); err != nil {
