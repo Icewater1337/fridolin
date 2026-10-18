@@ -176,6 +176,7 @@ func NewBridge(cfgs *ConfigStore, opts BridgeOptions) (_ *Bridge, err error) {
 			log.Printf("applying configuration: %v", err)
 		}
 		logDMAccess(prev, next)
+		logSecurityChanges(prev, next)
 		for _, br := range b.brainMgr.Brains() {
 			b.activity.Seed(br)
 		}

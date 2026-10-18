@@ -617,6 +617,12 @@ func (b *Bridge) apiGetConfig(w http.ResponseWriter, r *http.Request) {
 
 // apiPutConfig replaces the settings. Brains are managed through their own
 // endpoints and are carried over untouched.
+//
+// It replaces the whole file layer, so it takes only the whole of it, as
+// GET /api/config returned it (see decodeConfigReplacement), and only with
+// the etag it came with: a script that sends one setting, or a tab that
+// saves over a newer change, would otherwise reset the rest to defaults —
+// the sandbox off, nobody allowed, another data dir.
 func (b *Bridge) apiPutConfig(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		ETag   string          `json:"etag"`
@@ -626,20 +632,18 @@ func (b *Bridge) apiPutConfig(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	var incoming Config
-	if err := json.Unmarshal(req.Config, &incoming); err != nil {
-		writeErr(w, http.StatusBadRequest, "invalid config: "+err.Error())
+	if req.ETag == "" {
+		writeErr(w, http.StatusPreconditionRequired, "etag required: send the etag GET /api/config returned along with the config")
 		return
 	}
-	// Folded as at startup, so a dashboard tab opened before an upgrade
-	// keeps a model it still sends, and cannot bring inline brains back.
-	if _, err := foldRetiredKeys(req.Config, &incoming); err != nil {
-		writeErr(w, http.StatusBadRequest, "invalid config: "+err.Error())
+	incoming, err := decodeConfigReplacement(req.Config)
+	if err != nil {
+		writeErr(w, http.StatusBadRequest, err.Error())
 		return
 	}
 	restart, err := b.cfgs.Update(req.ETag, func(c *Config) error {
 		incoming.BrainDirs = c.BrainDirs
-		*c = incoming
+		*c = *incoming
 		return nil
 	})
 	switch {

@@ -440,3 +440,81 @@ func TestTokenWarningsWithoutASandbox(t *testing.T) {
 		})
 	}
 }
+
+// PUT /api/config replaces the whole file layer, so it takes only a whole
+// config, and only with the etag it was read with. Every refused request
+// leaves config.json as it was.
+func TestPutConfigRefusesBlindAndPartialWrites(t *testing.T) {
+	tb := newTestBridge(t, `, "dangerously_skip_permissions": true`)
+	var cur struct {
+		ETag   string         `json:"etag"`
+		Config map[string]any `json:"config"`
+	}
+	if err := json.Unmarshal(tb.do("GET", "/api/config", nil).Body.Bytes(), &cur); err != nil {
+		t.Fatal(err)
+	}
+	whole := func(edit func(c map[string]any)) map[string]any {
+		data, _ := json.Marshal(cur.Config)
+		var c map[string]any
+		_ = json.Unmarshal(data, &c)
+		edit(c)
+		return c
+	}
+	cases := []struct {
+		name string
+		body any
+		want int
+		msg  string
+	}{
+		{"no etag", map[string]any{"config": cur.Config}, http.StatusPreconditionRequired, "etag required"},
+		{"stale etag", map[string]any{"etag": "0000", "config": cur.Config}, http.StatusConflict, "changed since"},
+		{"no config", map[string]any{"etag": cur.ETag}, http.StatusBadRequest, "config required"},
+		{"one setting", map[string]any{"etag": cur.ETag, "config": map[string]any{"log_level": "INFO"}}, http.StatusBadRequest, "allowed_numbers"},
+		{"a section left half out", map[string]any{"etag": cur.ETag, "config": whole(func(c map[string]any) { c["sandbox"] = map[string]any{} })}, http.StatusBadRequest, "sandbox.enabled"},
+		{"a typo", map[string]any{"etag": cur.ETag, "config": whole(func(c map[string]any) { c["log_levle"] = "debug" })}, http.StatusBadRequest, `unknown field \"log_levle\"`},
+		{"a typo in a section", map[string]any{"etag": cur.ETag, "config": whole(func(c map[string]any) { c["queue"] = map[string]any{"mode": "queue", "max_pendng": 3} })}, http.StatusBadRequest, "max_pendng"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			w := tb.do("PUT", "/api/config", c.body)
+			if w.Code != c.want || !strings.Contains(w.Body.String(), c.msg) {
+				t.Fatalf("%d %s, want %d with %q", w.Code, w.Body.String(), c.want, c.msg)
+			}
+			if tb.cfgs.ETag() != cur.ETag {
+				t.Fatal("the refused request changed config.json")
+			}
+		})
+	}
+	cfg := tb.cfgs.Get()
+	if !cfg.DangerouslySkipPermissions || !slices.Equal(cfg.AllowedNumbers, []string{"15551234567"}) {
+		t.Fatalf("settings changed: skip %v, allowed %v", cfg.DangerouslySkipPermissions, cfg.AllowedNumbers)
+	}
+
+	// The whole config, as read, saves.
+	if w := tb.do("PUT", "/api/config", map[string]any{"etag": cur.ETag, "config": whole(func(map[string]any) {})}); w.Code != 200 {
+		t.Fatalf("whole config: %d %s", w.Code, w.Body.String())
+	}
+}
+
+// Every change to a security setting is logged in one line.
+func TestConfigUpdateLogsSecurityChanges(t *testing.T) {
+	tb := newTestBridge(t, "")
+	logged := captureLog(t)
+	w := tb.editConfig(t, func(c map[string]any) {
+		c["allowed_numbers"] = []string{"15559876543"}
+		c["dangerously_skip_permissions"] = true
+		c["log_level"] = "debug"
+	})
+	if w.Code != 200 {
+		t.Fatalf("put: %d %s", w.Code, w.Body.String())
+	}
+	got := strings.Join(logged(), "\n")
+	for _, want := range []string{"security settings changed", "allowed_numbers +15559876543 -15551234567", `dangerously_skip_permissions "false" → "true"`} {
+		if !strings.Contains(got, want) {
+			t.Errorf("log lacks %q:\n%s", want, got)
+		}
+	}
+	if strings.Contains(got, "log_level") {
+		t.Errorf("log names a setting that is not a security one:\n%s", got)
+	}
+}
