@@ -17,6 +17,7 @@ import (
 	wastore "go.mau.fi/whatsmeow/store"
 	"go.mau.fi/whatsmeow/types"
 
+	"github.com/Icewater1337/fridolin/internal/activity"
 	"github.com/Icewater1337/fridolin/internal/chat"
 	"github.com/Icewater1337/fridolin/internal/history"
 	"github.com/Icewater1337/fridolin/internal/logx"
@@ -52,7 +53,7 @@ type Bridge struct {
 	brainMgr *BrainManager
 	deb      *Debouncer
 	logs     *logx.Ring
-	activity *Activity
+	activity *activity.Feed
 	token    *DashboardToken
 	// tokenAtStart is dashboard.require_token as the bridge started.
 	tokenAtStart bool
@@ -164,7 +165,7 @@ func NewBridge(cfgs *ConfigStore, opts BridgeOptions) (_ *Bridge, err error) {
 		lock:     lock,
 		store:    store,
 		logs:     opts.Logs,
-		activity: NewActivity(500),
+		activity: activity.New(500),
 		started:  time.Now(),
 		restart:  opts.Restart,
 	}
@@ -683,7 +684,7 @@ func (b *Bridge) handleChange(c chat.Change) {
 	if edited != nil {
 		text = chat.HistoryText(edited.TextWithQuote(), edited.Media)
 	}
-	b.activity.Change(br.ID(), ActivityChange{
+	b.activity.Change(br.ID(), activity.Change{
 		Target: c.Target, Sender: c.Sender, Chat: c.Chat, ChatAlt: c.ChatAlt,
 		Revoke: c.Kind == chat.ChangeRevoke,
 	}, text)
