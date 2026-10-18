@@ -249,6 +249,10 @@ for compatibility.
 - An HTTP server that fails after the bridge started stops the bridge
   (exit 1, which the service manager restarts). Before, the bridge ran on
   without the dashboard, `/send` and `/ingest`, and looked healthy.
+- A run whose output has a line longer than 4 MiB, a tool's large result
+  say, keeps its answer. The bridge failed it with "token too long" and
+  lost the result that came after; now it skips the line and notes it in
+  the brain's `claude-stream.log`.
 - "Connect again" on a Plaud login that Plaud refuses signs that login
   out first, giving the sign-out up to 30 seconds. Before, it took the
   CLI's "Already logged in" for a new sign-in and showed Connected until

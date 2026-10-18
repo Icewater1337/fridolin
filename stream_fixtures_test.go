@@ -1,6 +1,10 @@
 package main
 
 import (
+	"errors"
+	"fmt"
+	"io/fs"
+	"os"
 	"slices"
 	"strings"
 	"testing"
@@ -26,16 +30,35 @@ func (s *recordingSink) Question(text string) bool {
 
 func (s *recordingSink) Result(res RunResult) { s.results = append(s.results, res) }
 
+// skippedLog is the activity log's line for a line of size bytes that
+// parseStream skipped.
+func skippedLog(size int) string {
+	return fmt.Sprintf("⚠️ Skipped a line of %d bytes, longer than the 4 MiB the bridge reads", size)
+}
+
+// fillLine is what oversized-line.jsonl holds in place of the 5 MiB tool
+// result of the run it records, which is too large to commit.
+const fillLine = "@@FILL@@"
+
 // TestParseStreamFixtures runs the parser over whole streams as Claude Code
 // prints them with --output-format stream-json --verbose, in
 // testdata/stream: the events of a run at testedClaudeVersion, with every
 // field the CLI sends, the system init event and the tool results the
 // parser has no use for among them. Their paths, IDs and texts are made
 // up. An answer after a tool call, an API error, a failed login that only
-// the last text explains, and a question the model asks.
+// the last text explains, a question the model asks, and a tool result
+// longer than the parser reads of a line.
 func TestParseStreamFixtures(t *testing.T) {
+	const fill = 5 << 20
+	oversized := 0 // the length of the line with the tool result
+	for _, l := range strings.Split(string(fixture(t, "stream/oversized-line.jsonl")), "\n") {
+		if strings.Contains(l, fillLine) {
+			oversized = len(l) - len(fillLine) + fill
+		}
+	}
 	cases := []struct {
 		file      string
+		fill      int    // the bytes in place of fillLine
 		text      string // the result's Text
 		err       string // what its error says, "" for none
 		asked     bool
@@ -79,10 +102,24 @@ func TestParseStreamFixtures(t *testing.T) {
 				"✅ Result: I asked which day suits you. Until you answer, Thursday at 10:00 stays in your notes.",
 			},
 		},
+		{
+			file: "oversized-line.jsonl",
+			fill: fill,
+			text: "The export lists 48213 rows.",
+			logs: []string{
+				"🔧 Tool: Read",
+				skippedLog(oversized),
+				"💬 The export lists 48213 rows.",
+				"✅ Result: The export lists 48213 rows.",
+			},
+		},
 	}
 	for _, c := range cases {
 		t.Run(c.file, func(t *testing.T) {
 			stream := string(fixture(t, "stream/"+c.file))
+			if c.fill > 0 {
+				stream = strings.Replace(stream, fillLine, strings.Repeat("x", c.fill), 1)
+			}
 			var sink recordingSink
 			res := parseStream(strings.NewReader(stream), &sink)
 			if res.Text != c.text || res.Asked != c.asked {
@@ -99,6 +136,86 @@ func TestParseStreamFixtures(t *testing.T) {
 			}
 			if !slices.Equal(sink.logs, c.logs) {
 				t.Errorf("activity log:\n%s\nwant:\n%s", strings.Join(sink.logs, "\n"), strings.Join(c.logs, "\n"))
+			}
+		})
+	}
+}
+
+// assistantTextLine is an assistant event of exactly size bytes, its text x's.
+func assistantTextLine(size int) string {
+	const head, end = `{"type":"assistant","message":{"content":[{"type":"text","text":"`, `"}]}}`
+	return head + strings.Repeat("x", size-len(head)-len(end)) + end
+}
+
+// TestParseStreamLongLines: a line longer than maxStreamLine is skipped,
+// wherever it is, and the activity log says so; the rest of the stream
+// counts as ever, so the run keeps its answer. The bridge failed such a
+// run with "token too long" and lost its result. A line just as long as
+// that is read.
+func TestParseStreamLongLines(t *testing.T) {
+	const result = `{"type":"result","result":"done"}`
+	long := "💬 " + strings.Repeat("x", 2000) + "…" // a long text, as logged
+	cases := []struct {
+		name   string
+		stream string
+		logs   []string
+	}{
+		{"as long as one may be", assistantTextLine(maxStreamLine) + "\n" + result + "\n",
+			[]string{long, "✅ Result: done"}},
+		{"a byte longer", assistantTextLine(maxStreamLine+1) + "\n" + result + "\n",
+			[]string{skippedLog(maxStreamLine + 1), "✅ Result: done"}},
+		{"the last line, without a newline", result + "\n" + assistantTextLine(maxStreamLine+1),
+			[]string{"✅ Result: done", skippedLog(maxStreamLine + 1)}},
+		{"one after the other", assistantTextLine(5<<20) + "\n" + assistantTextLine(9<<20) + "\n" + result + "\n",
+			[]string{skippedLog(5 << 20), skippedLog(9 << 20), "✅ Result: done"}},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			var sink recordingSink
+			res := parseStream(strings.NewReader(c.stream), &sink)
+			if res.Err != nil || res.Text != "done" {
+				t.Errorf("result = %+v, want the text done", res)
+			}
+			if !slices.Equal(sink.logs, c.logs) {
+				t.Errorf("activity log %.80q, want %.80q", sink.logs, c.logs)
+			}
+		})
+	}
+}
+
+// failingReader yields what data holds, then err.
+type failingReader struct {
+	data *strings.Reader
+	err  error
+}
+
+func (r *failingReader) Read(p []byte) (int, error) {
+	if r.data.Len() > 0 {
+		return r.data.Read(p)
+	}
+	return 0, r.err
+}
+
+// TestParseStreamReadErrors: output that can no longer be read because the
+// pipe was closed, as stopping a run does, is an interrupted run; any other
+// failure to read it is the run's error.
+func TestParseStreamReadErrors(t *testing.T) {
+	closed := &fs.PathError{Op: "read", Path: "|0", Err: os.ErrClosed}
+	cases := []struct {
+		name string
+		err  error
+		want func(error) bool
+	}{
+		{"pipe closed", closed, func(err error) bool { return errors.Is(err, errBrainInterrupted) }},
+		{"another error", errors.New("boom"), func(err error) bool {
+			return err != nil && err.Error() == "reading claude output: boom"
+		}},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			r := &failingReader{data: strings.NewReader(`{"type":"assistant","message":{"content":[{"type":"text","text":"Working"}]}}` + "\n"), err: c.err}
+			if res := parseStream(r, &recordingSink{}); !c.want(res.Err) || res.Text != "" {
+				t.Errorf("result = %+v", res)
 			}
 		})
 	}
