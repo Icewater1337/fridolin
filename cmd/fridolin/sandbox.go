@@ -379,7 +379,8 @@ var instructionFiles = []string{"CLAUDE.md", "CLAUDE.local.md"}
 // writableDevices are the devices any program writes to: discarded output,
 // its own file descriptors. They lead nowhere a brain could keep anything.
 // The controlling terminal is not among them: runs start without one (see
-// platform.IsolateProcessGroup), and one that reached yours could type into it.
+// platform.IsolateProcessGroup), and one that reached yours could type into
+// it.
 var writableDevices = []struct{ filter, path string }{
 	{"literal", "/dev/null"},
 	{"literal", "/dev/zero"},

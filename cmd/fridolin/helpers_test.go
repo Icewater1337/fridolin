@@ -553,7 +553,8 @@ func fakeTTY() int {
 
 // fakeTTYParent plays the bridge in a terminal: it checks that it has one,
 // then runs the command spec describes (JSON: argv, dir, env, and isolate
-// for platform.IsolateProcessGroup, as a brain's run gets it) and prints its output.
+// for platform.IsolateProcessGroup, as a brain's run gets it) and prints
+// its output.
 func fakeTTYParent(spec string) int {
 	var s struct {
 		Argv, Env []string

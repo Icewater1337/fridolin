@@ -17,14 +17,14 @@ import (
 	"fridolin/internal/fsx"
 )
 
-// A brain run gets a process group of its own (platform.IsolateProcessGroup), so a
-// stop reaches everything Claude started. That also keeps the service
-// manager's cleanup from reaching it: when the bridge crashes or is killed,
-// the run and the commands it started go on unsupervised, with
-// --dangerously-skip-permissions, next to the runs of the bridge that starts
-// in its place. So each run is recorded in <data_dir>/runs/ while it lasts,
-// and a bridge that starts stops the runs the last one left behind before
-// any brain runs.
+// A brain run gets a process group of its own
+// (platform.IsolateProcessGroup), so a stop reaches everything Claude
+// started. That also keeps the service manager's cleanup from reaching it:
+// when the bridge crashes or is killed, the run and the commands it started
+// go on unsupervised, with --dangerously-skip-permissions, next to the runs
+// of the bridge that starts in its place. So each run is recorded in
+// <data_dir>/runs/ while it lasts, and a bridge that starts stops the runs
+// the last one left behind before any brain runs.
 
 // runRecord is one run's process group, as saved while the run lasts.
 type runRecord struct {

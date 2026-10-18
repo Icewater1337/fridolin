@@ -872,7 +872,8 @@ func TestSandboxProfileDeniesTheConfigFile(t *testing.T) {
 					}
 				}
 			}
-			// The temp file fsx.WriteFileAtomic saves through, .config.json.*.tmp.
+			// The temp file fsx.WriteFileAtomic saves through,
+			// .config.json.*.tmp.
 			for _, op := range []string{"file-read*", "file-write*"} {
 				rule := `(deny ` + op + ` (regex "^` + sbplRegex(dir) + `/\\.config\\.json\\.[^/]*\\.tmp$"))`
 				if got := slices.Contains(lines, rule); got != tc.want {

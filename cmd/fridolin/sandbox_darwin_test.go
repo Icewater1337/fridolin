@@ -1076,7 +1076,8 @@ func TestSandboxDeniesTheConfigFile(t *testing.T) {
 	requireSandboxExec(t)
 	home := fsx.Canonical(t.TempDir())
 	t.Setenv("HOME", home)
-	// A save in progress: fsx.WriteFileAtomic writes the whole config here first.
+	// A save in progress: fsx.WriteFileAtomic writes the whole config here
+	// first.
 	for _, f := range []string{"etc/config.json", "etc/.env", "etc/.config.json.123456.tmp", "a/notes.md"} {
 		p := filepath.Join(home, f)
 		if err := os.MkdirAll(filepath.Dir(p), 0o700); err != nil {

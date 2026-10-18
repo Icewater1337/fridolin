@@ -579,11 +579,11 @@ func (tr *tokenResponse) grantedScopes(asked []string) []string {
 }
 
 // saveToken writes the brain's token. It does not follow a symlink:
-// fsx.WriteFileAtomic renames a new file over the token, replacing whatever is
-// there. Older versions also copied the OAuth client, secret and all, next
-// to it as google_calendar_credentials_<brain>.json, for the calendar tool
-// in the brain; nothing reads that copy any more. The caller holds the
-// brain's token lock (lockToken).
+// fsx.WriteFileAtomic renames a new file over the token, replacing
+// whatever is there. Older versions also copied the OAuth client, secret
+// and all, next to it as google_calendar_credentials_<brain>.json, for the
+// calendar tool in the brain; nothing reads that copy any more. The caller
+// holds the brain's token lock (lockToken).
 func (g *GoogleAuth) saveToken(brainID string, tok *googleToken) error {
 	data, err := json.MarshalIndent(tok, "", "  ")
 	if err != nil {

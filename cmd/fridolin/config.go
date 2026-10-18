@@ -830,8 +830,9 @@ func (c *Config) EnsureDirs() error {
 // working bridge from starting.
 func protectDataDir(cfg *Config) {
 	// Compare absolute, resolved paths: a relative data_dir such as "."
-	// depends on the folder the bridge was started from, and fsx.Within cannot
-	// relate it to the home folder, so it would get past the home check.
+	// depends on the folder the bridge was started from, and fsx.Within
+	// cannot relate it to the home folder, so it would get past the home
+	// check.
 	dataDir := absPath(cfg.DataDir)
 	dbDir := absPath(filepath.Dir(cfg.DBPath))
 	home := homeDir()
