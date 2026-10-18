@@ -1,10 +1,14 @@
 package main
 
 import (
+	"bytes"
+	"context"
 	"errors"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 	"syscall"
@@ -205,5 +209,60 @@ func TestStopBeforeTheCLIStartsIsAnInterruption(t *testing.T) {
 	}
 	if last := br.Snapshot().Last; last == nil || last.Outcome != outcomeInterrupted || last.Error != "" {
 		t.Errorf("last run = %+v, want outcome interrupted", last)
+	}
+}
+
+// TestSiteSearchStartsClaudeAsBrainRunsDo: a site module's search runs
+// claude through the same helper as a brain's runs: the same output and
+// isolation arguments, its own read-only tools, and the prompt on stdin,
+// not in argv, where every process listing showed it and ARG_MAX bounded
+// it.
+func TestSiteSearchStartsClaudeAsBrainRunsDo(t *testing.T) {
+	tb := newTestBridge(t, "")
+	tb.addFolderBrain(t, BrainManifest{ID: "a", Name: "A", Routing: BrainRouting{HandlesDMs: true}})
+	argsLog := filepath.Join(tb.home, "args.log")
+	t.Setenv("FRIDOLIN_FAKE_ARGS_LOG", argsLog)
+	const prompt = "SEARCH-PROMPT where is the letter?"
+	var out bytes.Buffer
+	if err := tb.runBrainSearch(context.Background(), "a", prompt, &out); err != nil {
+		t.Fatalf("search: %v\n%s", err, out.String())
+	}
+	if !strings.Contains(out.String(), prompt) {
+		t.Errorf("search output %q, want the prompt echoed from stdin", out.String())
+	}
+	data, err := os.ReadFile(argsLog)
+	if err != nil {
+		t.Fatal(err)
+	}
+	args := strings.TrimSpace(string(data))
+	if strings.Contains(args, "SEARCH-PROMPT") {
+		t.Errorf("args %q hold the prompt", args)
+	}
+	if want := "--output-format stream-json --verbose --setting-sources project,local --strict-mcp-config --settings "; !strings.HasPrefix(args, want) {
+		t.Errorf("args %q, want them to start with %q", args, want)
+	}
+	if want := " --tools Read,Grep,Glob -p"; !strings.HasSuffix(args, want) {
+		t.Errorf("args %q, want them to end in %q, a bare -p last", args, want)
+	}
+}
+
+// TestSiteSearchKeepsOnlyTheEndOfStderr: what a search's claude writes to
+// stderr is kept up to its end only, however much it is, and that end
+// names the error. It was all kept in memory.
+func TestSiteSearchKeepsOnlyTheEndOfStderr(t *testing.T) {
+	tb := newTestBridge(t, "")
+	tb.addFolderBrain(t, BrainManifest{ID: "a", Name: "A", Routing: BrainRouting{HandlesDMs: true}})
+	const flood = 16 << 20
+	t.Setenv("FRIDOLIN_FAKE_STDERR_BYTES", strconv.Itoa(flood))
+	var before, after runtime.MemStats
+	runtime.GC()
+	runtime.ReadMemStats(&before)
+	err := tb.runBrainSearch(context.Background(), "a", "where is the letter?", io.Discard)
+	runtime.ReadMemStats(&after)
+	if err == nil || !strings.Contains(err.Error(), "fatal: the last thing the CLI said") || len(err.Error()) > 500 {
+		t.Errorf("err = %.600v, want the end of stderr", err)
+	}
+	if n := after.TotalAlloc - before.TotalAlloc; n > flood/4 {
+		t.Errorf("a search that wrote %d MiB to stderr allocated %d MiB", flood>>20, n>>20)
 	}
 }

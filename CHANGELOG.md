@@ -249,6 +249,10 @@ for compatibility.
 - An HTTP server that fails after the bridge started stops the bridge
   (exit 1, which the service manager restarts). Before, the bridge ran on
   without the dashboard, `/send` and `/ingest`, and looked healthy.
+- A site search starts Claude as brain runs do: its prompt goes on stdin
+  instead of the command line, where every process listing showed it,
+  only the end of what Claude writes to stderr is kept, and what the
+  agent left running is stopped when it ends.
 - A command a run started that left the run's process group (a daemon,
   or one started with `setsid`) and holds the CLI's output open no longer
   keeps the brain and its run slot busy for as long as it runs, past

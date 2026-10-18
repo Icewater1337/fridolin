@@ -22,7 +22,6 @@ package main
 // creates what it writes with O_EXCL.
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -30,7 +29,6 @@ import (
 	"io"
 	"log"
 	"os"
-	"os/exec"
 	"path"
 	"path/filepath"
 	"regexp"
@@ -404,13 +402,9 @@ func (b *Bridge) runBrainSearch(ctx context.Context, brainID, prompt string, out
 		return fmt.Errorf("no brain %q", brainID)
 	}
 	cfg := b.cfgs.Get()
-	args := []string{"--output-format", "stream-json", "--verbose", "--tools", "Read,Grep,Glob",
-		// Only the brain folder's own setup, as for a brain's runs.
-		"--setting-sources", "project,local", "--strict-mcp-config"}
-	if s := excludeInstructionsAbove(br.Dir()); s != "" {
-		args = append(args, "--settings", s)
-	}
-	args = append(args, "-p", prompt)
+	// Only the brain folder's own setup, as for a brain's runs, and tools
+	// that only read.
+	args := claudeArgList(true, excludeInstructionsAbove(br.Dir()), "--tools", "Read,Grep,Glob")
 	bin := cfg.ClaudePath
 	env := childEnv(claudeChild, cfg.ChildEnvPassthrough)
 	if sp := b.brainMgr.profiler; sp != nil && sp.Enabled() {
@@ -427,18 +421,17 @@ func (b *Bridge) runBrainSearch(ctx context.Context, brainID, prompt string, out
 		bin, args = sbBin, sbArgs
 		env = append(append(env, state...), "DISABLE_AUTOUPDATER=1")
 	}
-	cmd := exec.CommandContext(ctx, bin, args...)
-	cmd.Dir = br.Dir()
-	cmd.Env = env
-	cmd.Stdout = out
-	var stderr bytes.Buffer
-	cmd.Stderr = &stderr
-	isolateProcessGroup(cmd)
-	if err := cmd.Run(); err != nil {
-		if ctx.Err() != nil {
-			return ctx.Err()
-		}
-		return fmt.Errorf("claude: %v: %s", err, tail(stderr.String(), 400))
+	proc, err := startClaude(ctx, claudeRun{binary: bin, args: args, dir: br.Dir(), env: env, prompt: prompt, stdout: out})
+	if err == nil {
+		err = proc.wait()
 	}
-	return nil
+	switch {
+	case err == nil:
+		return nil
+	case ctx.Err() != nil:
+		return ctx.Err()
+	case proc == nil:
+		return fmt.Errorf("claude: %w", err)
+	}
+	return fmt.Errorf("claude: %w: %s", err, tail(proc.stderrTail(), 400))
 }
