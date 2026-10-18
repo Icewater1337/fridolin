@@ -571,6 +571,66 @@ func TestApproveBindsToTheReviewedManifest(t *testing.T) {
 	}
 }
 
+// GET /api/brains/{id} is that brain's entry of /api/brains, whatever
+// state it is in, so the Brain page that follows it shows what the list
+// showed; with two folders claiming the id, the first one's.
+func TestAPIBrainIsItsEntryOfTheList(t *testing.T) {
+	tb := newTestBridge(t, "")
+	m := BrainManifest{ID: "notes", Name: "Notes"}
+	dir := tb.addFolderBrain(t, m)
+	tb.addFolderBrain(t, BrainManifest{ID: "work", Name: "Work"})
+	edited := m
+	edited.Name = "Notes 2"
+	if err := WriteManifest(dir, &edited, true); err != nil {
+		t.Fatal(err)
+	}
+	copyDir := filepath.Join(tb.home, "copy")
+	if err := os.MkdirAll(copyDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := WriteManifest(copyDir, &m, false); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := tb.cfgs.Update("", func(c *Config) error {
+		c.BrainDirs = append(c.BrainDirs, BrainRef{Path: "~/copy", Approved: &m})
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	var list []json.RawMessage
+	if err := json.Unmarshal(tb.do("GET", "/api/brains", nil).Body.Bytes(), &list); err != nil || len(list) != 3 {
+		t.Fatalf("GET /api/brains: %d entries, %v", len(list), err)
+	}
+	cases := []struct {
+		id   string
+		want int // the entry of the list, or -1 for none
+	}{
+		{"notes", 0}, // drifted, and claimed by ~/copy too
+		{"work", 1},
+		{"nobody", -1},
+	}
+	for _, c := range cases {
+		t.Run(c.id, func(t *testing.T) {
+			w := tb.do("GET", "/api/brains/"+c.id, nil)
+			if c.want < 0 {
+				if w.Code != http.StatusNotFound || !strings.Contains(w.Body.String(), `"error"`) {
+					t.Fatalf("%d %s, want 404 with an error", w.Code, w.Body.String())
+				}
+				return
+			}
+			if got := strings.TrimSpace(w.Body.String()); w.Code != 200 || got != string(list[c.want]) {
+				t.Fatalf("%d %s\nwant the list's entry %s", w.Code, got, list[c.want])
+			}
+		})
+	}
+	var notes brainView
+	_ = json.Unmarshal(list[0], &notes)
+	if filepath.Base(notes.Path) != "notes" || notes.Disk == nil {
+		t.Fatalf("the notes entry is %+v; want the folder notes, with its edit on disk", notes)
+	}
+}
+
 // An entry of brain_dirs without an approved manifest still holds its
 // folder: a new brain or a restore cannot be put in it, around it or on it.
 // Its issues stay on that entry, and it can be removed through the API.

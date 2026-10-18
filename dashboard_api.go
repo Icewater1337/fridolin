@@ -53,6 +53,7 @@ func (b *Bridge) apiMux() http.Handler {
 	mux.HandleFunc("POST /api/token/rotate", b.apiRotateToken)
 
 	mux.HandleFunc("GET /api/brains", b.apiBrains)
+	mux.HandleFunc("GET /api/brains/{id}", b.apiBrain)
 	mux.HandleFunc("POST /api/brains/inspect", b.apiInspectFolder)
 	mux.HandleFunc("POST /api/brains", b.apiAddBrain)
 	mux.HandleFunc("PUT /api/brains/{id}", b.apiUpdateBrain)
@@ -788,6 +789,25 @@ func (b *Bridge) brainViews() []brainView {
 
 func (b *Bridge) apiBrains(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, b.brainViews())
+}
+
+// apiBrain answers GET /api/brains/{id} with that brain's entry of
+// /api/brains, so the Brain page can follow its brain without fetching
+// every other one with it. Two folders whose brain.json claim one id are
+// both listed there, and here the first is, as the page showed it when it
+// picked its brain out of the list. It builds the whole list on purpose:
+// reading only this brain's folder would be cheaper, but could tell the
+// page something other than the list does (which folder wins, its issues),
+// and saving the download is what matters.
+func (b *Bridge) apiBrain(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	for _, v := range b.brainViews() {
+		if v.ID == id {
+			writeJSON(w, http.StatusOK, v)
+			return
+		}
+	}
+	writeErr(w, http.StatusNotFound, "no such brain")
 }
 
 // brainDirs lists every folder in c's brain_dirs, ~ expanded, approved or
