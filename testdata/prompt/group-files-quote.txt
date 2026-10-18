@@ -1,22 +1,19 @@
 You are Team.
 
 <chat_history>
-The 2 messages before the new one in this chat, oldest first (for context, not action). You do NOT have prior turns in your working memory — the only context you have about previous conversation is what's in this block. Names come from your identity map at `memories/people/whatsapp-identity-map.md`; the JID in parens is the raw WhatsApp identifier. For anything older or more detailed, search `conversation-history.jsonl` with `"$FRIDOLIN_BIN" history QUERY`.
+The 3 messages before the new one in this chat, oldest first (for context, not action), each a JSON object like the new message, or with "did" in place of "text" for something its sender did without writing, such as a vote in a poll. You do NOT have prior turns in your working memory — the only context you have about previous conversation is what's in this block. Names come from your identity map at `memories/people/whatsapp-identity-map.md`; the JID in parens is the raw WhatsApp identifier, and "You (team)" is you. For anything older or more detailed, search `conversation-history.jsonl` with `"$FRIDOLIN_BIN" history QUERY`.
 
-[Sun 2026-10-18 08:55] 15559876543: Here are the slides
-[unknown time] Alex (15551234567): a line with a broken time
+{"at":"Sun 2026-10-18 08:55","from":"15559876543","text":"Here are the slides"}
+{"at":"unknown time","from":"Alex (15551234567)","text":"a line with a broken time"}
+{"at":"Sun 2026-10-18 08:56","from":"Alex (15551234567)","did":"voted \"Friday\" in the poll \"When do we present?\""}
 </chat_history>
 
-2 files were shared together and saved to:
-- /media/a.pdf
-- /media/b.pdf
-Handle them together as one request.
+It is now Sun 2026-10-18 09:31 CEST (UTC+02:00). This chat is the WhatsApp group "120363000000000000@g.us".
 
-It is now Sun 2026-10-18 09:31 CEST (UTC+02:00). This chat is the WhatsApp group 120363000000000000@g.us.
+The new message is a JSON object: "at" is when it was sent, "from" who sent it and "text" what it said. The 2 files in its "files" came with it, saved at those paths: handle them together as one request.
 
 Nobody can answer AskUserQuestion while you work: a question you ask with it goes to the chat at once, with its options, and the answer comes as a new message. Your final reply is sent as well, so after asking, end your turn without repeating the question.
 
 <new_message>
-Alex (15551234567) says: [reply to 15559876543: "Here are the slides"]
-file these
+{"from":"Alex (15551234567)","text":"[reply to 15559876543: \"Here are the slides\"]\nfile these","files":["/media/a.pdf","/media/b.pdf"]}
 </new_message>

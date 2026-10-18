@@ -190,12 +190,12 @@ func TestQueuedRunReadsTheAnswerBeforeIt(t *testing.T) {
 			waitFor(t, 20*time.Second, "the second run", func() bool { return len(fakePromptsIn(t, prompts)) == 2 })
 			second := fakePromptsIn(t, prompts)[1]
 			answered := slices.ContainsFunc(strings.Split(second, "\n"), func(line string) bool {
-				return strings.Contains(line, "You (main): echo:") && strings.Contains(line, "first question")
+				return strings.Contains(line, `"from":"You (main)","text":"echo:`) && strings.Contains(line, "first question")
 			})
 			if !answered {
 				t.Errorf("the second run's prompt lacks the first answer:\n%s", tail(second, 600))
 			}
-			if strings.Count(second, "You (main):") != 1 {
+			if strings.Count(second, `"from":"You (main)"`) != 1 {
 				t.Errorf("the second run's prompt holds the first answer more than once:\n%s", tail(second, 600))
 			}
 		})

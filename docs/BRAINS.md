@@ -174,12 +174,14 @@ the brain's prompt file (`brain-prompt.md`) followed by the messages of
 the chat before the new one (the last 10 of a direct chat, 20 of a
 group), what went out there while the new one waited for its run or
 still waits to go out to WhatsApp (the reply to the message before it,
-say), and the new message; Claude Code adds its own system prompt. From
-the brain's folder it also loads the Claude Code setup a session started
-there would: `CLAUDE.md` and `CLAUDE.local.md`, the settings, skills,
-agents, commands and rules in `.claude/`, and the MCP servers in
-`.mcp.json`, except those its `.claude` settings turn off with
-`disabledMcpjsonServers`.
+say), and the new message; Claude Code adds its own system prompt. Each
+message is one line of JSON with its time, sender and text, so that
+nothing someone writes can pass for the prompt's own structure or for
+another sender. From the brain's folder it also loads the Claude Code
+setup a session started there would: `CLAUDE.md` and `CLAUDE.local.md`,
+the settings, skills, agents, commands and rules in `.claude/`, and the
+MCP servers in `.mcp.json`, except those its `.claude` settings turn off
+with `disabledMcpjsonServers`.
 
 Every run gets the bridge's environment (see [what reaches
 brains](CONFIGURATION.md#what-reaches-brains)) plus variables of its own:

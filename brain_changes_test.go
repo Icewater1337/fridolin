@@ -169,7 +169,7 @@ func TestEditedMessage(t *testing.T) {
 		if ev := historyTexts(t, br, historyEvent); !slices.Equal(ev, []string{`edited a message to: "book Wednesday"`}) {
 			t.Errorf("events = %q, want the edit noted", ev)
 		}
-		if preface := br.buildPrompt(br.settings.Load(), Inbound{JID: testDMChat, Sender: "15551234567", Text: "next"}); !strings.Contains(preface, `15551234567 edited a message to: "book Wednesday"`) {
+		if preface := br.buildPrompt(br.settings.Load(), Inbound{JID: testDMChat, Sender: "15551234567", Text: "next"}); !strings.Contains(preface, `"from":"15551234567","did":"edited a message to: \"book Wednesday\""`) {
 			t.Errorf("preface = %q, want the edit", preface)
 		}
 	})

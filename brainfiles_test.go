@@ -578,13 +578,13 @@ func TestIdentityMapIsNotFollowedOutOfTheFolder(t *testing.T) {
 			preface := br.buildPrompt(br.settings.Load(), dm("hello"))
 			lines := logged()
 			if tc.target == nil {
-				if !strings.Contains(preface, "Alex (15551234567): hi") || len(lines) > 0 {
+				if !strings.Contains(preface, `"from":"Alex (15551234567)","text":"hi"`) || len(lines) > 0 {
 					t.Errorf("preface = %q, log = %q; want the name from the map and no log", preface, lines)
 				}
 				return
 			}
 			// The starter prompt names Alex too, in an example.
-			if history := promptBlock(preface, "chat_history"); strings.Contains(history, "Alex") || !strings.Contains(history, "15551234567: hi") {
+			if history := promptBlock(preface, "chat_history"); strings.Contains(history, "Alex") || !strings.Contains(history, `"from":"15551234567","text":"hi"`) {
 				t.Errorf("preface = %q, want the raw number", preface)
 			}
 			if len(lines) != 1 || !strings.Contains(lines[0], "brain a: could not read identity map "+identityMapFile+": "+errSymlink.Error()) {
@@ -702,7 +702,7 @@ func TestBrainFilesAreReadUpToALimit(t *testing.T) {
 			got := br.buildPrompt(br.settings.Load(), dm("hello"))
 			lines := logged()
 			if tc.ok {
-				if !strings.HasPrefix(got, "BIG PROMPT") || !strings.Contains(got, "Alex (15551234567): hi") || len(lines) > 0 {
+				if !strings.HasPrefix(got, "BIG PROMPT") || !strings.Contains(got, `"from":"Alex (15551234567)","text":"hi"`) || len(lines) > 0 {
 					t.Errorf("prompt starts %.40q, log = %q; want both files read", got, lines)
 				}
 				return

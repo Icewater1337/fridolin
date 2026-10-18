@@ -359,7 +359,7 @@ func TestPollVoteBecomesAHistoryEvent(t *testing.T) {
 					t.Fatalf("brain %s history = %+v, want [%+v]", br.ID(), h, want)
 				}
 				preface := br.buildPrompt(br.settings.Load(), Inbound{JID: testGroup, Sender: "15559876543", Text: "next"})
-				if !strings.Contains(preface, `15551234567 voted "Tuesday 3pm" in the poll "When should we meet?"`) {
+				if !strings.Contains(preface, `"from":"15551234567","did":"voted \"Tuesday 3pm\" in the poll \"When should we meet?\""`) {
 					t.Errorf("preface = %q, want the vote", preface)
 				}
 			}

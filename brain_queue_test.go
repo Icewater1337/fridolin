@@ -1043,7 +1043,7 @@ func TestMCPConfigOfStaysInTheBrainFolder(t *testing.T) {
 func TestBuildPromptListsAllAttachments(t *testing.T) {
 	br := bareBrain(t)
 	p := br.buildPrompt(&brainSettings{}, Inbound{JID: "x@s.whatsapp.net", Sender: "1", Text: "file these", Media: []string{"/m/1.jpg", "/m/2.pdf"}})
-	if !strings.Contains(p, "2 files were shared together") || !strings.Contains(p, "- /m/2.pdf") {
+	if !strings.Contains(p, `The 2 files in its "files" came with it`) || !strings.Contains(p, `"files":["/m/1.jpg","/m/2.pdf"]`) {
 		t.Errorf("prompt:\n%s", p)
 	}
 	if got := historyTextWithMedia("hi", []string{"/m/1.jpg"}); got != "hi\n[attachment: /m/1.jpg]" {

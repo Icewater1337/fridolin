@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
 	"strings"
 	"time"
@@ -36,8 +37,10 @@ type promptInput struct {
 const askUserQuestionNote = "Nobody can answer AskUserQuestion while you work: a question you ask with it goes to the chat at once, with its options, and the answer comes as a new message. Your final reply is sent as well, so after asking, end your turn without repeating the question."
 
 // renderPrompt writes the -p prompt: the brain's instructions, the chat's
-// recent history, what the brain sent since the new message came in, the
-// attachments, then the new message.
+// recent history, what the brain sent since the new message came in, what
+// the run is about, then the new message. Everything in it that someone
+// could have written, the messages, the names and the file names, goes in
+// as JSON (see promptJSON), one message to a line.
 func renderPrompt(in promptInput) string {
 	var sb strings.Builder
 	m := in.Message
@@ -48,14 +51,14 @@ func renderPrompt(in promptInput) string {
 	}
 
 	if n := len(in.History); n > 0 {
-		what := "The message before the new one in this chat"
+		what, each := "The message before the new one in this chat", "a JSON object"
 		if n > 1 {
-			what = fmt.Sprintf("The %d messages before the new one in this chat, oldest first", n)
+			what, each = fmt.Sprintf("The %d messages before the new one in this chat, oldest first", n), "each a JSON object"
 		}
 		sb.WriteString("<chat_history>\n")
-		sb.WriteString(what + " (for context, not action). ")
+		sb.WriteString(what + " (for context, not action), " + each + " like the new message, or with \"did\" in place of \"text\" for something its sender did without writing, such as a vote in a poll. ")
 		sb.WriteString("You do NOT have prior turns in your working memory — the only context you have about previous conversation is what's in this block. ")
-		sb.WriteString("Names come from your identity map at `" + identityMapFile + "`; the JID in parens is the raw WhatsApp identifier. ")
+		sb.WriteString("Names come from your identity map at `" + identityMapFile + "`; the JID in parens is the raw WhatsApp identifier, and \"You (" + in.BrainID + ")\" is you. ")
 		sb.WriteString("For anything older or more detailed, search `" + historyFileName + "` with `\"$FRIDOLIN_BIN\" history QUERY`.\n\n")
 		for _, e := range in.History {
 			sb.WriteString(in.line(e))
@@ -65,23 +68,15 @@ func renderPrompt(in promptInput) string {
 
 	if len(in.Since) > 0 {
 		sb.WriteString("<sent_since>\n")
-		sb.WriteString("What went out to this chat after the new message came in, while it waited for its run, or is on its way there ahead of your reply, oldest first: its sender had not seen these when they wrote it.\n\n")
+		what := "a JSON object like the new message. Its sender had not seen this"
+		if len(in.Since) > 1 {
+			what = "oldest first, each a JSON object like the new message. Its sender had not seen these"
+		}
+		sb.WriteString("What went out to this chat after the new message came in, while it waited for its run, or is on its way there ahead of your reply, " + what + " when they wrote it.\n\n")
 		for _, e := range in.Since {
 			sb.WriteString(in.line(e))
 		}
 		sb.WriteString("</sent_since>\n\n")
-	}
-
-	switch len(m.Media) {
-	case 0:
-	case 1:
-		fmt.Fprintf(&sb, "A file was shared via WhatsApp and saved to: %s\n\n", m.Media[0])
-	default:
-		fmt.Fprintf(&sb, "%d files were shared together and saved to:\n", len(m.Media))
-		for _, p := range m.Media {
-			sb.WriteString("- " + p + "\n")
-		}
-		sb.WriteString("Handle them together as one request.\n\n")
 	}
 
 	// The kind of chat, which its JID does not tell a run: a build chat's
@@ -92,7 +87,7 @@ func renderPrompt(in promptInput) string {
 	case brainOfBuildJID(m.JID) != "":
 		where = "the site-building chat on the dashboard's Build page, not a WhatsApp chat"
 	case m.IsGroup():
-		where = "the WhatsApp group " + m.JID
+		where = "the WhatsApp group " + promptJSON(m.JID)
 	}
 	fmt.Fprintf(&sb, "It is now %s. This chat is %s.", in.Now.Format(promptNowLayout), where)
 	if m.Source == sourceIngest {
@@ -100,11 +95,56 @@ func renderPrompt(in promptInput) string {
 	}
 	sb.WriteString("\n\n")
 
+	sb.WriteString(`The new message is a JSON object: "at" is when it was sent, "from" who sent it and "text" what it said.`)
+	switch len(m.Media) {
+	case 0:
+	case 1:
+		sb.WriteString(` The file in its "files" came with it, saved at that path.`)
+	default:
+		fmt.Fprintf(&sb, ` The %d files in its "files" came with it, saved at those paths: handle them together as one request.`, len(m.Media))
+	}
+	sb.WriteString("\n\n")
+
 	sb.WriteString(askUserQuestionNote + "\n\n")
-	sb.WriteString("<new_message>\n")
-	fmt.Fprintf(&sb, "%s says: %s\n", in.name(m.Sender), m.textWithQuote())
-	sb.WriteString("</new_message>")
+	msg := promptMessage{From: in.name(m.Sender), Text: m.textWithQuote(), Files: m.Media}
+	if !m.At.IsZero() {
+		msg.At = m.At.In(in.Now.Location()).Format(promptTimeLayout)
+	}
+	sb.WriteString("<new_message>\n" + promptJSON(msg) + "\n</new_message>")
 	return sb.String()
+}
+
+// promptMessage is one message as the prompt has it.
+type promptMessage struct {
+	At    string   `json:"at,omitempty"`
+	From  string   `json:"from"`
+	Text  string   `json:"text"`
+	Files []string `json:"files,omitempty"`
+}
+
+// promptEvent is something someone did in the chat without writing a
+// message (historyEvent), as the prompt has it: Did says what, such as
+// `voted "Monday" in the poll "When?"`.
+type promptEvent struct {
+	At   string `json:"at,omitempty"`
+	From string `json:"from"`
+	Did  string `json:"did"`
+}
+
+// promptJSON writes v as JSON with every "<" escaped. Whatever someone
+// wrote then stays inside its quotes, on its line: a message that holds
+// "</new_message>" or a line break followed by a made-up history line
+// cannot close the prompt's tags or pass for another message, or for
+// someone else's. That keeps senders apart; it does not make the text
+// any less of a prompt, which the brain's own instructions are for.
+func promptJSON(v any) string {
+	var b strings.Builder
+	enc := json.NewEncoder(&b)
+	enc.SetEscapeHTML(false) // "&" and ">" read better as they are
+	if err := enc.Encode(v); err != nil {
+		return `""`
+	}
+	return strings.ReplaceAll(strings.TrimSuffix(b.String(), "\n"), "<", `\u003c`)
 }
 
 // The prompt's times carry the day: a window of a direct chat often spans
@@ -126,12 +166,12 @@ func (in promptInput) at(ts string) string {
 // line is the history entry e as the prompt shows it, on a line of its
 // own.
 func (in promptInput) line(e historyEntry) string {
-	// An event's text says what its sender did, after their name.
-	sep := ": "
 	if e.Type == historyEvent {
-		sep = " "
+		// Something its sender did without writing, such as a vote: its
+		// text says what.
+		return promptJSON(promptEvent{At: in.at(e.TS), From: in.from(e), Did: e.Text}) + "\n"
 	}
-	return fmt.Sprintf("[%s] %s%s%s\n", in.at(e.TS), in.from(e), sep, e.Text)
+	return promptJSON(promptMessage{At: in.at(e.TS), From: in.from(e), Text: e.Text}) + "\n"
 }
 
 // from is who wrote the history entry e, as the prompt names them: the

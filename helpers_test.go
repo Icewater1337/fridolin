@@ -150,12 +150,17 @@ func bridgeVariables() []string {
 	return []string{"FRIDOLIN_CONFIG", "BRAIN_MODE"}
 }
 
-// fakeNewMessage is the new message in prompt, as the fake CLI echoes it.
+// fakeNewMessage is the new message in prompt, as the fake CLI echoes it:
+// "<from> says: <text>".
 func fakeNewMessage(prompt string) string {
 	msg := prompt
 	if i := strings.LastIndex(prompt, "<new_message>\n"); i >= 0 {
 		msg = strings.TrimSuffix(strings.TrimSpace(prompt[i+len("<new_message>\n"):]), "</new_message>")
 		msg = strings.TrimSpace(msg)
+	}
+	var m promptMessage
+	if err := json.Unmarshal([]byte(msg), &m); err == nil {
+		return m.From + " says: " + m.Text
 	}
 	return msg
 }
