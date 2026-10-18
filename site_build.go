@@ -41,12 +41,21 @@ type siteChats struct {
 	mu sync.Mutex
 }
 
-func (c *siteChats) path(brainID string) string { return c.m.dir("build", brainID+".json") }
+// path is the file of a brain's build chat. The id arrives in a request
+// URL, so only a valid brain id names a file (and so one in this folder).
+func (c *siteChats) path(brainID string) (string, error) {
+	if !brainIDRe.MatchString(brainID) {
+		return "", fmt.Errorf("%q is not a brain id", brainID)
+	}
+	return c.m.dir("build", brainID+".json"), nil
+}
 
 func (c *siteChats) loadLocked(brainID string) buildChat {
 	ch := buildChat{Thread: 1, Messages: []BuildMessage{}}
-	if data, err := os.ReadFile(c.path(brainID)); err == nil {
-		_ = json.Unmarshal(data, &ch)
+	if p, err := c.path(brainID); err == nil {
+		if data, err := os.ReadFile(p); err == nil {
+			_ = json.Unmarshal(data, &ch)
+		}
 	}
 	if ch.Thread < 1 {
 		ch.Thread = 1
@@ -58,11 +67,15 @@ func (c *siteChats) loadLocked(brainID string) buildChat {
 }
 
 func (c *siteChats) saveLocked(brainID string, ch buildChat) error {
+	p, err := c.path(brainID)
+	if err != nil {
+		return err
+	}
 	if len(ch.Messages) > 300 {
 		ch.Messages = ch.Messages[len(ch.Messages)-300:]
 	}
 	data, _ := json.MarshalIndent(ch, "", "  ")
-	return writeFileAtomic(c.path(brainID), data, 0o600, false)
+	return writeFileAtomic(p, data, 0o600, false)
 }
 
 func (c *siteChats) get(brainID string) buildChat {
