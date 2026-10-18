@@ -51,7 +51,7 @@ SHELLCHECK  ?= shellcheck
 FUZZTIME ?= 10s
 
 .DEFAULT_GOAL := build
-.PHONY: help build install test race vet fmt fmt-check tidy-check \
+.PHONY: help build install test race race-shard vet fmt fmt-check tidy-check \
 	lint lint-go lint-sh lint-py lint-actions lint-web \
 	test-py test-web test-sh smoke fuzz-short check clean
 
@@ -70,6 +70,9 @@ test: ## Go tests
 
 race: ## Go tests with the race detector, as CI runs them
 	$(GO) test -race -count=1 ./...
+
+race-shard: ## one slice of the race tests, SHARD=i/n (CI splits the macOS run)
+	GO="$(GO)" scripts/test-shard.sh $(subst /, ,$(SHARD)) -race -count=1
 
 # The second vet covers the Linux-only files from macOS (CI also runs Linux).
 vet: ## go vet, natively and for Linux without cgo
