@@ -746,6 +746,38 @@ func dropped(ms []Inbound) {
 	}
 }
 
+// waitIdle waits until the brain has nothing running or queued, for at
+// most max, and reports whether it got there. A backup asks before it
+// copies the brain's folder (see backupBrain). Between two queued runs no
+// run is current for a moment, so it waits for the worker to stop.
+func (br *Brain) waitIdle(ctx context.Context, max time.Duration) bool {
+	deadline := time.NewTimer(max)
+	defer deadline.Stop()
+	for {
+		br.mu.Lock()
+		run, working := br.current, br.working
+		br.mu.Unlock()
+		if !working {
+			return true
+		}
+		var done <-chan struct{}
+		var next <-chan time.Time
+		if run != nil {
+			done = run.done
+		} else {
+			next = time.After(50 * time.Millisecond)
+		}
+		select {
+		case <-done:
+		case <-next:
+		case <-deadline.C:
+			return false
+		case <-ctx.Done():
+			return false
+		}
+	}
+}
+
 func (br *Brain) recordLast(m Inbound, res RunResult) {
 	info := &RunInfo{Chat: m.JID, Finished: time.Now(), Seconds: res.Duration.Seconds(), Outcome: outcomeOK}
 	switch {

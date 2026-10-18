@@ -2447,3 +2447,82 @@ func TestBackupSecretExcludesAreDocumented(t *testing.T) {
 		}
 	}
 }
+
+// TestSyncDirRetriesFilesThatChange: rclone fails a file whose size changes
+// while it copies it ("source file is being updated"), and a brain's
+// history gets a line whenever a message comes in. The sync asks rclone to
+// try again after a pause, and the log says when it had to.
+func TestSyncDirRetriesFilesThatChange(t *testing.T) {
+	tb := newTestBridge(t, "")
+	var got []string
+	tb.backup.runner = func(_ context.Context, args []string, stderr io.Writer) ([]byte, error) {
+		got = args
+		fmt.Fprintln(stderr, `{"level":"error","msg":"conversation-history.jsonl: Failed to copy: can't copy - source file is being updated (size changed from 10 to 12)","object":"conversation-history.jsonl"}`)
+		fmt.Fprintln(stderr, `{"level":"error","msg":"Attempt 1/3 failed with 1 errors and: can't copy - source file is being updated"}`)
+		fmt.Fprintln(stderr, `{"level":"notice","msg":"Attempt 2/3 succeeded"}`)
+		return nil, nil
+	}
+	logged := captureLog(t)
+
+	res := tb.backup.syncDir(t.Context(), t.TempDir(), notesBase, "", "manual", -1)
+	if !res.OK {
+		t.Errorf("result = %+v, want OK", res)
+	}
+	if flagValue(got, "--retries") != "3" || flagValue(got, "--retries-sleep") != "10s" {
+		t.Errorf("sync args %q, want --retries 3 --retries-sleep 10s", got)
+	}
+	if all := strings.Join(logged(), "\n"); !strings.Contains(all, "rclone tried 1 more time(s)") {
+		t.Errorf("log = %q, want it to say rclone retried", all)
+	}
+}
+
+// TestBackupWaitsForTheBrainToFinish: a brain's folder was synced while a
+// run changed it, so the backup could hold a mix of before and after (a
+// .git index newer than its objects). The backup now waits for the run to
+// end before it copies the folder, but only so long: then it copies it
+// anyway, and the log says so.
+func TestBackupWaitsForTheBrainToFinish(t *testing.T) {
+	cases := []struct {
+		name        string
+		wait        time.Duration
+		wantRunning bool // the brain still runs when the sync starts
+	}{
+		{"until the run ends", 20 * time.Second, false},
+		{"not for ever", 50 * time.Millisecond, true},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			tb := newTestBridge(t, "")
+			addBackupBrain(t, tb, "notes")
+			br := tb.brainMgr.Get("notes")
+			tb.backup.idleWait = c.wait
+			running := func() bool {
+				br.mu.Lock()
+				defer br.mu.Unlock()
+				return br.current != nil
+			}
+			var syncedWhileRunning []bool
+			tb.backup.runner = func(_ context.Context, args []string, _ io.Writer) ([]byte, error) {
+				if args[0] == "sync" {
+					syncedWhileRunning = append(syncedWhileRunning, running())
+				}
+				return []byte("[]"), nil
+			}
+			logged := captureLog(t)
+
+			t.Setenv("FRIDOLIN_FAKE_SLEEP_MS", "1500")
+			if _, _, err := br.Submit(Inbound{JID: "15551234567@s.whatsapp.net", Sender: "15551234567", Text: "hello", Source: "whatsapp", At: time.Now()}); err != nil {
+				t.Fatal(err)
+			}
+			waitFor(t, 10*time.Second, "the run to start", running)
+			tb.backup.backupBrain(t.Context(), br, "manual", true)
+			if !slices.Equal(syncedWhileRunning, []bool{c.wantRunning}) {
+				t.Errorf("synced while the brain ran: %v, want [%v]", syncedWhileRunning, c.wantRunning)
+			}
+			if all := strings.Join(logged(), "\n"); strings.Contains(all, "the brain is still running") != c.wantRunning {
+				t.Errorf("log says it copied a running brain: %v, want %v (log %q)", !c.wantRunning, c.wantRunning, all)
+			}
+			waitFor(t, 10*time.Second, "the run to end", func() bool { return !running() })
+		})
+	}
+}

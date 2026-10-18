@@ -58,6 +58,14 @@ however old the files in it are. A version folder holds only what changed
 in that run, not a full snapshot. Folders in `versions/` whose name is not
 such a timestamp are never deleted.
 
+A backup is a copy of a live folder, not an atomic snapshot. While a brain
+runs, it changes its folder (its history, its memories, a git repository
+in it), so a brain's backup waits for the brain to finish what it is
+running, up to two minutes, and then copies the folder anyway; the log says
+when it did. A file that changes while rclone copies it fails that try, and
+rclone tries the sync again up to three times, ten seconds apart, which the
+log notes too.
+
 **Never uploaded:** the WhatsApp session (`bridge.db`), the dashboard token,
 the rclone config, downloaded media and every brain's own state in the data
 folder. Nor, from brain folders, whatever their excludes say: `.env`,

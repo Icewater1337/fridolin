@@ -219,7 +219,22 @@ type BackupManager struct {
 	// notify sends a WhatsApp message about a brain to its owner. The bridge
 	// sets it; nil sends nothing.
 	notify func(ctx context.Context, br *Brain, text string) error
+	// idleWait is how long a brain's backup waits for the brain to finish
+	// what it is running; see backupBrain.
+	idleWait time.Duration
 }
+
+// backupIdleWait is how long a brain's backup waits for the brain to go
+// idle by default.
+const backupIdleWait = 2 * time.Minute
+
+// syncRetries and syncRetrySleep are how often, and after how long, rclone
+// tries a sync again that ended with errors, such as a file that changed
+// while it was copied ("source file is being updated").
+const (
+	syncRetries    = 3
+	syncRetrySleep = 10 * time.Second
+)
 
 // refusalNoticeTimeout bounds the WhatsApp send of a refusal notice. It runs
 // inside the backup job, so a send that hangs would keep the job running and
@@ -231,7 +246,7 @@ var refusalNoticeTimeout = 30 * time.Second
 // last results and the day of the last scheduled run are gone then, and the
 // log says so rather than leaving it to the next scheduled run to show.
 func NewBackupManager(cfgs *ConfigStore, bm *BrainManager) *BackupManager {
-	m := &BackupManager{cfgs: cfgs, bm: bm, now: time.Now}
+	m := &BackupManager{cfgs: cfgs, bm: bm, now: time.Now, idleWait: backupIdleWait}
 	m.runner = m.runRclone
 	data, err := os.ReadFile(m.statePath())
 	switch {
@@ -1202,6 +1217,16 @@ func (m *BackupManager) backupBrain(ctx context.Context, br *Brain, trigger stri
 		now := time.Now()
 		return &BackupResult{Started: started, Finished: now, Seconds: now.Sub(started).Seconds(), Error: msg, Trigger: trigger}
 	}
+	// A run changes the brain's folder as it goes: the bridge appends to its
+	// history, Claude edits memories and maybe a git repository. A sync of
+	// a folder mid-run copies some files before the change and some after,
+	// a .git index newer than its objects, say. So wait for the brain to
+	// finish, but not for ever: a brain busy for hours must still be backed
+	// up, and an append that comes in during the sync is what rclone's
+	// retries are for (see syncDir).
+	if !br.waitIdle(ctx, m.idleWait) && ctx.Err() == nil {
+		log.Printf("backup %s: the brain is still running after %v, so its folder is copied while it changes", br.ID(), m.idleWait)
+	}
 	s := br.settings.Load()
 	// One config snapshot for the filter, the check and the sync, so a
 	// backup.root changed mid-run cannot count one folder and sync into
@@ -1472,6 +1497,7 @@ func (m *BackupManager) syncDir(ctx context.Context, src, base, filterFile, trig
 		"--backup-dir", base + "/versions/" + res.Version,
 		"--links", "--use-json-log", "--stats", "15s", "--stats-log-level", "NOTICE", "-v",
 		"--transfers", "4", "--checkers", "8", "--drive-chunk-size", "32M",
+		"--retries", strconv.Itoa(syncRetries), "--retries-sleep", syncRetrySleep.String(),
 	}
 	if filterFile != "" {
 		args = append(args, "--filter-from", filterFile)
@@ -1484,6 +1510,9 @@ func (m *BackupManager) syncDir(ctx context.Context, src, base, filterFile, trig
 	res.Finished = time.Now()
 	res.Seconds = res.Finished.Sub(res.Started).Seconds()
 	res.Bytes, res.Files = stderr.bytes, stderr.files
+	if n := stderr.failedAttempts(); n > 0 {
+		log.Printf("backup to %s: rclone tried %d more time(s), most likely because files changed while it copied them", base, n)
+	}
 	switch {
 	case ctx.Err() != nil:
 		res.Error = "cancelled"
@@ -1515,6 +1544,7 @@ type jsonStats struct {
 	files     int64
 	errs      []string
 	maxDelete bool
+	attempts  int // failed attempts rclone tried again or gave up after
 }
 
 func (j *jsonStats) Write(p []byte) (int, error) {
@@ -1539,6 +1569,11 @@ func (j *jsonStats) Write(p []byte) (int, error) {
 			j.bytes, j.files = e.Stats.Bytes, e.Stats.Transfers
 		}
 		if e.Level == "error" || e.Level == "critical" {
+			// "Attempt 1/3 failed with 1 errors and: …", once per try that
+			// ended with errors.
+			if strings.HasPrefix(e.Msg, "Attempt ") && strings.Contains(e.Msg, " failed with ") {
+				j.attempts++
+			}
 			j.errs = append(j.errs, e.Msg)
 			if len(j.errs) > 5 {
 				j.errs = j.errs[1:]
@@ -1549,6 +1584,13 @@ func (j *jsonStats) Write(p []byte) (int, error) {
 		}
 	}
 	return len(p), nil
+}
+
+// failedAttempts is how many of rclone's tries ended with errors.
+func (j *jsonStats) failedAttempts() int {
+	j.mu.Lock()
+	defer j.mu.Unlock()
+	return j.attempts
 }
 
 // hitMaxDelete reports whether rclone stopped at the --max-delete limit.
