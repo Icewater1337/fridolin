@@ -428,6 +428,11 @@ func (p *PlaudManager) appFile() string { return filepath.Join(p.appDir(), "plau
 // site's address and a new pairing code: Gradle, in plaud-android/ of the
 // checkout Fridolin was installed from.
 func (p *PlaudManager) BuildApp() error {
+	select {
+	case <-p.lifetime().Done():
+		return errPlaudStopping
+	default:
+	}
 	if !p.cfg().Plaud.PhoneUpload {
 		return errPhoneUploadOff
 	}
@@ -451,14 +456,18 @@ func (p *PlaudManager) BuildApp() error {
 		return err
 	}
 	p.mu.Lock()
+	if p.stopping {
+		p.mu.Unlock()
+		return errPlaudStopping
+	}
 	if p.appJob != nil && p.appJob.State == "running" {
 		p.mu.Unlock()
 		return errPlaudAppBuilding
 	}
 	job := &plaudAppJob{State: "running", Started: time.Now()}
 	p.appJob = job
-	p.mu.Unlock()
 	p.bg.Add(1)
+	p.mu.Unlock()
 	go func() {
 		defer p.bg.Done()
 		exp, out, err := p.buildApp(p.lifetime(), src, javaHome, sdk, site, dev)

@@ -972,13 +972,13 @@ func (p *PlaudManager) me(ctx context.Context) (map[string]string, error) {
 func (p *PlaudManager) refreshAccount(checked time.Time) {
 	p.mu.Lock()
 	due := time.Since(checked) >= plaudAccountEvery && time.Since(p.accountTried) >= plaudAccountEvery
-	if !due || p.accountBusy || p.connect != nil && p.connect.State == "running" {
+	if p.stopping || !due || p.accountBusy || p.connect != nil && p.connect.State == "running" {
 		p.mu.Unlock()
 		return
 	}
 	p.accountBusy, p.accountTried = true, time.Now()
-	p.mu.Unlock()
 	p.bg.Add(1)
+	p.mu.Unlock()
 	go func() {
 		defer p.bg.Done()
 		ctx, cancel := context.WithTimeout(p.lifetime(), 30*time.Second)
@@ -2113,11 +2113,15 @@ func (p *PlaudManager) Connect() error {
 		log.Printf("plaud: %s", w)
 	}
 	p.mu.Lock()
+	if p.stopping {
+		p.mu.Unlock()
+		return errPlaudStopping
+	}
 	if p.connect != nil && p.connect.State == "running" {
 		p.mu.Unlock()
 		return errPlaudSigningIn
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
+	ctx, cancel := context.WithTimeout(p.lifetime(), 10*time.Minute)
 	job := &connectJob{State: "running", cancel: cancel}
 	p.connect = job
 	// Only a login that is Fridolin's and in use: not one brain_access
@@ -2129,11 +2133,11 @@ func (p *PlaudManager) Connect() error {
 	if refused {
 		refusedLogin = p.loginStamp()
 	}
-	p.mu.Unlock()
-
 	// Stop cancels it and waits for its end: it records the sign-in in the
-	// data folder, and asks who signed in.
+	// data folder, and asks who signed in. Register while holding mu so
+	// Stop cannot finish waiting between the check and Add.
 	p.bg.Add(1)
+	p.mu.Unlock()
 	go func() {
 		defer p.bg.Done()
 		defer cancel()

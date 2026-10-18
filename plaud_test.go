@@ -2517,6 +2517,45 @@ func TestPlaudStopEndsASignIn(t *testing.T) {
 	}
 }
 
+// Status polling and a new sign-in must not add background work once
+// Stop has finished waiting. In particular, a status read after shutdown
+// must not start an account lookup that writes into the old data folder.
+func TestPlaudStopRefusesNewBackgroundWork(t *testing.T) {
+	t.Run("phone app build", func(t *testing.T) {
+		tb, _ := plaudBridge(t, "")
+		tb.plaud.Stop()
+		if err := tb.plaud.BuildApp(); !errors.Is(err, errPlaudStopping) {
+			t.Errorf("BuildApp after Stop = %v, want errPlaudStopping", err)
+		}
+	})
+	t.Run("account lookup", func(t *testing.T) {
+		tb, _ := plaudBridge(t, "")
+		tb.plaud.Stop()
+		release := make(chan struct{})
+		tb.plaud.run = func(context.Context, ...string) (string, error) {
+			<-release
+			return "", context.Canceled
+		}
+		tb.plaud.refreshAccount(time.Time{})
+		tb.plaud.mu.Lock()
+		busy := tb.plaud.accountBusy
+		tb.plaud.mu.Unlock()
+		close(release)
+		tb.plaud.bg.Wait()
+		if busy {
+			t.Error("account lookup started after Stop returned")
+		}
+	})
+	t.Run("sign-in", func(t *testing.T) {
+		tb, _ := plaudBridge(t, "")
+		tb.plaud.Stop()
+		if err := tb.plaud.Connect(); !errors.Is(err, errPlaudStopping) {
+			t.Errorf("Connect after Stop = %v, want errPlaudStopping", err)
+		}
+		tb.plaud.Stop()
+	})
+}
+
 // A run that ends while Fridolin stops has its end recorded before Stop
 // returns: the brain's worker records it after the reply went out, and
 // would otherwise write to the data folder after Fridolin stopped.
