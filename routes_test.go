@@ -257,7 +257,8 @@ func TestRouteInventoryIsComplete(t *testing.T) {
 // phone with WhatsApp, reach GitHub or a git remote, or restore a backup
 // over a brain's folder. TestRouteInventoryGuards only looks them up in
 // the API mux and never sends them a request, which a guard that stopped
-// working would let through.
+// working would let through. TestRestartInATestFailsTheRun probes the
+// restart for real, in a test binary of its own.
 var reachesOutside = map[string]bool{
 	"POST /api/restart":                true,
 	"POST /api/fs/pick":                true,
