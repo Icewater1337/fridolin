@@ -355,7 +355,7 @@ var errRestart = errors.New("restart requested")
 
 // execSelf replaces this process with the program at argv0, a variable so
 // that a test can see a restart without one.
-var execSelf = syscall.Exec
+var execSelf = platform.Exec
 
 // serve runs b until ctx ends or Start fails, then stops it. When ctx
 // ended for a restart, and no signal asked for a stop meanwhile

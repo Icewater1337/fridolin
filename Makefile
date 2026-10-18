@@ -150,6 +150,7 @@ test-sh: ## tests for the personal-data, action-pin, notices and release scripts
 	scripts/test-third-party-notices.sh
 	scripts/test-build-release.sh
 	scripts/test-makefile.sh
+	scripts/test-test-shard.sh
 
 # A temp dir, not the binary: a check must not replace a build in use.
 # -race makes a data race at start or shutdown fail the run. The build is

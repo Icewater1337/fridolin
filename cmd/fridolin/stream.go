@@ -9,6 +9,8 @@ import (
 	"io"
 	"os"
 	"strings"
+
+	"github.com/Icewater1337/fridolin/internal/textx"
 )
 
 // The Claude CLI, run with --output-format stream-json, prints one JSON
@@ -223,7 +225,7 @@ func (p *streamParser) event(line []byte) {
 			case "text":
 				if content.Text != "" {
 					p.lastText = content.Text
-					p.sink.Log("💬 " + truncate(content.Text, 2000))
+					p.sink.Log("💬 " + textx.Truncate(content.Text, 2000))
 				}
 			case "tool_use":
 				p.sink.Log("🔧 Tool: " + content.Name)
@@ -246,7 +248,7 @@ func (p *streamParser) event(line []byte) {
 			if errMsg == "" {
 				// The CLI reports some failures (authentication, quota) only
 				// as its last message.
-				errMsg = truncate(p.lastText, 300)
+				errMsg = textx.Truncate(p.lastText, 300)
 			}
 			if errMsg == "" {
 				errMsg = "(claude exited with an error but no message)"
@@ -257,7 +259,7 @@ func (p *streamParser) event(line []byte) {
 			return
 		}
 		p.result = event.Result
-		p.sink.Log("✅ Result: " + truncate(p.result, 2000))
+		p.sink.Log("✅ Result: " + textx.Truncate(p.result, 2000))
 		p.sink.Result(p.outcome())
 
 	case "user", "system":
@@ -273,7 +275,7 @@ func (p *streamParser) event(line []byte) {
 				p.unknown = map[string]bool{}
 			}
 			p.unknown[event.Type] = true
-			p.sink.Log(fmt.Sprintf("❔ Event of a type the bridge does not read: %q", truncate(event.Type, 100)))
+			p.sink.Log(fmt.Sprintf("❔ Event of a type the bridge does not read: %q", textx.Truncate(event.Type, 100)))
 		}
 	}
 }

@@ -12,6 +12,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/Icewater1337/fridolin/internal/platform"
 )
 
 // testedClaudeVersion is the oldest Claude Code release the bridge was
@@ -201,7 +203,7 @@ func startClaude(ctx context.Context, r claudeRun) (*claudeProcess, error) {
 	cmd := exec.CommandContext(ctx, r.binary, r.args...)
 	cmd.Dir = r.dir
 	cmd.Env = r.env
-	isolateProcessGroup(cmd)
+	platform.IsolateProcessGroup(cmd)
 	// The prompt goes on stdin, which -p reads to its end, rather than in
 	// argv: argv is bounded by ARG_MAX, about 1 MiB on macOS with the
 	// environment, and on Linux one argument by 128 KiB, which a long
@@ -236,7 +238,7 @@ func (p *claudeProcess) pid() int { return p.cmd.Process.Pid }
 // nothing else stops.
 func (p *claudeProcess) wait() error {
 	err := p.cmd.Wait()
-	_ = killProcessGroup(p.pid())
+	_ = platform.KillProcessGroup(p.pid())
 	p.acknowledgeStop()
 	return err
 }

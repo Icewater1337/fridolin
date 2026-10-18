@@ -521,7 +521,7 @@ func TestReloadHandsOnWhatWaited(t *testing.T) {
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			home := canonicalDir(t.TempDir())
+			home := fsx.Canonical(t.TempDir())
 			t.Setenv("HOME", home)
 			claude := fakeClaudeEnv(t, 30000)
 			config := func(refs ...BrainRef) *Config {

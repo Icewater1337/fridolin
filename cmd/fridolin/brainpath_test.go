@@ -212,7 +212,7 @@ func TestCheckRunsABrainWhoseFolderHoldsAPATHFolder(t *testing.T) {
 // brain-owned PATH folders before that first subprocess, just as startup
 // does before the dashboard can probe it.
 func TestCheckDoesNotExecuteBrainPATHPrograms(t *testing.T) {
-	home := canonicalDir(t.TempDir())
+	home := fsx.Canonical(t.TempDir())
 	t.Setenv("HOME", home)
 	brain := filepath.Join(home, "brain")
 	ownedBin, trustedBin := filepath.Join(brain, "bin"), filepath.Join(home, "trusted", "bin")
@@ -235,7 +235,7 @@ func TestCheckDoesNotExecuteBrainPATHPrograms(t *testing.T) {
 	if err := writeCheck(&out, checkOptions{config: path}); err != nil {
 		t.Fatalf("check: %v\n%s", err, out.String())
 	}
-	if fileExists(marker) {
+	if fsx.Exists(marker) {
 		t.Error("check ran the brain's planted Claude outside the sandbox")
 	}
 	if got := lineWith(out.String(), "claude:"); !strings.Contains(got, testedClaudeVersion+" trusted") || strings.Contains(got, "planted") {

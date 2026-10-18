@@ -12,6 +12,8 @@ import (
 	"syscall"
 	"testing"
 	"time"
+
+	"github.com/Icewater1337/fridolin/internal/fsx"
 )
 
 // A short write must not publish part of a new manifest: a transaction
@@ -155,7 +157,7 @@ func TestAddWritesBrainJSONWithTheRegistration(t *testing.T) {
 		added <- tb.do("POST", "/api/brains", map[string]any{"path": "~/b", "manifest": BrainManifest{ID: "b", Name: "B"}, "create_dir": true})
 	}()
 	dir := filepath.Join(tb.home, "b")
-	waitFor(t, 5*time.Second, "the add's scaffold", func() bool { return fileExists(filepath.Join(dir, "skills", "README.md")) })
+	waitFor(t, 5*time.Second, "the add's scaffold", func() bool { return fsx.Exists(filepath.Join(dir, "skills", "README.md")) })
 	time.Sleep(100 * time.Millisecond) // what the scaffold would write next
 	if _, err := os.Lstat(filepath.Join(dir, ManifestFile)); !os.IsNotExist(err) {
 		t.Errorf("brain.json is there before the update that registers the brain: %v", err)

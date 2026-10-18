@@ -24,6 +24,7 @@ import (
 	"unicode"
 
 	"github.com/Icewater1337/fridolin/internal/fsx"
+	"github.com/Icewater1337/fridolin/internal/platform"
 	"github.com/Icewater1337/fridolin/internal/textx"
 )
 

@@ -21,6 +21,8 @@ import (
 	"syscall"
 	"testing"
 	"time"
+
+	"github.com/Icewater1337/fridolin/internal/platform"
 )
 
 // The bridge's stop, as SIGTERM and a restart make it.
@@ -41,11 +43,11 @@ func TestStopRunsOnce(t *testing.T) {
 	if n := strings.Count(logs.String(), "Bridge stopped."); n != 1 {
 		t.Errorf("the bridge stopped %d times, want once:\n%s", n, logs.String())
 	}
-	lock, err := acquireInstanceLock(tb.cfgs.Get().DataDir)
+	lock, err := platform.AcquireLock(tb.cfgs.Get().DataDir)
 	if err != nil {
 		t.Fatalf("the data dir is still locked after Stop: %v", err)
 	}
-	lock.release()
+	lock.Release()
 }
 
 // brokenListener is a listener that has stopped taking connections, as
@@ -188,9 +190,9 @@ func TestServe(t *testing.T) {
 			execSelf = func(argv0 string, argv, env []string) error {
 				execs = append(execs, argv0)
 				// What the new process's NewBridge takes first.
-				lock, err := acquireInstanceLock(dataDir)
+				lock, err := platform.AcquireLock(dataDir)
 				if lockErr = err; err == nil {
-					lock.release()
+					lock.Release()
 				}
 				return errExecStub
 			}
@@ -302,8 +304,8 @@ func secondSignalStopsAtOnce(t *testing.T, provider string) {
 	}
 	waitFor(t, 20*time.Second, "the bridge to serve", func() bool { code, _ := call("GET", "/health", "", ""); return code == 200 })
 	// While it runs, the data dir is its own, for this process too.
-	if lock, err := acquireInstanceLock(filepath.Join(home, ".fridolin")); err == nil {
-		lock.release()
+	if lock, err := platform.AcquireLock(filepath.Join(home, ".fridolin")); err == nil {
+		lock.Release()
 		t.Error("a bridge in another process got the instance lock of the one running")
 	}
 	data, err := os.ReadFile(filepath.Join(home, ".fridolin", "dashboard.token"))

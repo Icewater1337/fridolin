@@ -1,17 +1,16 @@
 #!/usr/bin/env bash
 #
-# Runs one slice of the Go tests, so that CI can spread the slowest run, the
-# race tests on macOS, over several jobs at once.
+# Runs one slice of the Go tests, so CI can spread race tests over jobs.
 #
 #   scripts/test-shard.sh I N [go test flags...]     # e.g. 2 3 -race -count=1
 #
-# The tests and fuzz targets are listed by name, sorted, and dealt out in
-# turn, so each slice gets its share of every family of tests (the sandbox
-# tests, which are slow on macOS, say) and every name lands in exactly one
-# slice, a test added tomorrow included. 1 1 runs them all. Listing builds
-# the test binary with the same flags, so the run that follows reuses it.
+# Package names and their tests, fuzz targets and examples are sorted, then
+# dealt out in turn. Each (package, name) runs in exactly one slice, even
+# when several packages use the same name. 1 1 runs them all. Listing builds
+# each test binary with the same flags, so execution reuses it and packages
+# without tests are still checked for compilation errors.
 #
-# Exit status: that of go test; 2 for wrong arguments.
+# Exit status: 0 on success; 1 for a failed package or no tests; 2 for usage.
 set -euo pipefail
 
 usage() {
@@ -21,20 +20,33 @@ usage() {
 [ $# -ge 2 ] || usage
 i="$1" n="$2"
 shift 2
-if ! [[ $i =~ ^[0-9]+$ && $n =~ ^[0-9]+$ ]] || ((i < 1 || i > n)); then
+if ! [[ $i =~ ^[1-9][0-9]*$ && $n =~ ^[1-9][0-9]*$ ]] || ((i > n)); then
 	usage
 fi
 go="${GO:-go}"
-
-# The slices are of one package; a second one would go untested.
-packages="$("$go" list ./...)"
-if [ "$(printf '%s\n' "$packages" | wc -l)" -ne 1 ]; then
-	printf '%s: the tests are in more than one package now; slice each:\n%s\n' "$0" "$packages" >&2
-	exit 1
-fi
-
-names="$("$go" test "$@" -list '.*' . | grep -E '^(Test|Fuzz|Example)' | sort)"
-[ -n "$names" ] || { echo "$0: go test -list found no tests" >&2; exit 1; }
-slice="$(printf '%s\n' "$names" | awk -v i="$i" -v n="$n" '(NR - 1) % n == i - 1' | paste -sd '|' -)"
-echo "slice $i of $n: $(printf '%s\n' "$slice" | tr '|' '\n' | wc -l | tr -d ' ') of $(printf '%s\n' "$names" | wc -l | tr -d ' ') tests and fuzz targets"
-exec "$go" test "$@" -run "^($slice)\$" .
+packages="$("$go" list ./... | LC_ALL=C sort)"
+total=0 selected=0 failed=0
+while IFS= read -r pkg; do
+	[ -n "$pkg" ] || continue
+	# Capture the command separately: a build failure must not be mistaken
+	# for a package that has no tests, and must fail the whole slice.
+	if ! listed="$("$go" test "$@" -list '.*' "$pkg")"; then
+		exit 1
+	fi
+	names="$(printf '%s\n' "$listed" | awk '/^(Test|Fuzz|Example)/' | LC_ALL=C sort)"
+	[ -n "$names" ] || continue
+	count="$(printf '%s\n' "$names" | wc -l | tr -d ' ')"
+	slice="$(printf '%s\n' "$names" | awk -v i="$i" -v n="$n" -v offset="$total" '(NR - 1 + offset) % n == i - 1' | paste -sd '|' -)"
+	total=$((total + count))
+	# An empty selection must not turn into an unrestricted -run expression.
+	[ -n "$slice" ] || continue
+	chosen="$(printf '%s\n' "$slice" | tr '|' '\n' | wc -l | tr -d ' ')"
+	selected=$((selected + chosen))
+	echo "$pkg: slice $i of $n runs $chosen of $count tests, fuzz targets and examples"
+	if ! "$go" test "$@" -run "^($slice)\$" "$pkg"; then
+		failed=1
+	fi
+done <<< "$packages"
+[ "$total" -gt 0 ] || { echo "$0: go test -list found no tests" >&2; exit 1; }
+echo "slice $i of $n: $selected of $total tests, fuzz targets and examples"
+exit "$failed"
