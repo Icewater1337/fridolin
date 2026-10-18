@@ -7,6 +7,7 @@
 
 import { createHash, createHmac, pbkdf2Sync, randomBytes, timingSafeEqual } from 'node:crypto'
 import { readFileSync } from 'node:fs'
+import bcrypt from 'bcryptjs'
 import express from 'express'
 import type { GoogleClient, SiteUser, UserStore } from './config.ts'
 
@@ -58,8 +59,16 @@ export function verify<T>(key: Buffer, value: string | undefined): T | null {
 
 // ── passwords ─────────────────────────────────────────────────────────────────
 
-/** Checks a password against pbkdf2-sha256$<iterations>$<salt b64>$<hash b64> (written by Fridolin). */
-export function checkPassword(password: string, stored: string | undefined): boolean {
+/** A bcrypt hash an account was brought over with from another app (Fridolin checks the format). */
+const BCRYPT_RE = /^\$2[aby]\$\d\d\$[./A-Za-z0-9]{53}$/
+
+/**
+ * Checks a password against what Fridolin stored: its own
+ * pbkdf2-sha256$<iterations>$<salt b64>$<hash b64>, or a bcrypt hash an
+ * account was brought over with, so its owner keeps the password they had.
+ */
+export async function checkPassword(password: string, stored: string | undefined): Promise<boolean> {
+  if (stored && BCRYPT_RE.test(stored)) return bcrypt.compare(password, stored)
   const parts = (stored ?? '').split('$')
   if (parts.length !== 4 || parts[0] !== 'pbkdf2-sha256') return false
   const iterations = Number(parts[1])
@@ -190,7 +199,7 @@ export function createAuth(opts: AuthOptions): Auth {
     res.json(user)
   })
 
-  router.post('/auth/login', express.json({ limit: '4kb' }), (req, res) => {
+  router.post('/auth/login', express.json({ limit: '4kb' }), async (req, res) => {
     const { username, password } = (req.body ?? {}) as { username?: unknown; password?: unknown }
     if (typeof username !== 'string' || typeof password !== 'string' || !username || !password) {
       res.status(400).json({ error: 'Username and password, please' })
@@ -201,9 +210,11 @@ export function createAuth(opts: AuthOptions): Auth {
       res.status(429).json({ error: 'Too many failed attempts — try again in 15 minutes' })
       return
     }
+    // Counted before the check: it waits for the hash, and guesses sent at
+    // once must not all get past the limit while it does.
+    keys.forEach(fail)
     const u = opts.users.byUsername(username)
-    if (!u || !checkPassword(password, u.password_hash)) {
-      keys.forEach(fail)
+    if (!u || !(await checkPassword(password, u.password_hash))) {
       res.status(401).json({ error: 'Wrong username or password' })
       return
     }

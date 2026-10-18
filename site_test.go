@@ -11,6 +11,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -140,6 +141,46 @@ func TestSiteAccounts(t *testing.T) {
 	again := NewSiteManager(m.dataDir, nil)
 	if len(again.Users()) != 1 || again.Users()[0].Email != "owner@example.com" {
 		t.Errorf("reloaded users = %+v", again.Users())
+	}
+}
+
+// An account moved over from another app keeps its bcrypt hash, and with it
+// the password its owner had there (site/test/site.test.ts signs in with it).
+func TestSiteAccountWithBroughtHash(t *testing.T) {
+	m := newTestSite(t)
+	const salted = "F48X9LFXjtA2Te5nMw.Y/emwxyBEOJIqP85ZEYE.5adtF22W1jdn2"
+	add := func(username, hash, password string) (SiteUser, error) {
+		return m.AddUser(SiteUserInput{Kind: "password", Username: username, PasswordHash: hash, Password: password, Role: "member"})
+	}
+	for _, h := range []string{"$2b$10$" + salted, "$2y$12$" + salted, "$2a$14$" + salted} {
+		name := "u" + h[2:3] + h[4:6]
+		u, err := add(name, h, "")
+		if err != nil {
+			t.Fatalf("%s: %v", h[:7], err)
+		}
+		if u.PasswordHash != "" {
+			t.Error("AddUser returned the hash")
+		}
+		i := slices.IndexFunc(m.users, func(x SiteUser) bool { return x.ID == u.ID })
+		if m.users[i].PasswordHash != h {
+			t.Errorf("%s stored as %q, want it as it came", name, m.users[i].PasswordHash)
+		}
+	}
+	for _, c := range []struct{ hash, password, want string }{
+		{"$2b$10$" + salted, "long enough pw", "not both"},
+		{"$2b$09$" + salted, "", "cost 9"},
+		{"$2b$15$" + salted, "", "cost 15"},
+		{"$2x$10$" + salted, "", "bcrypt"},
+		{"$2b$10$" + salted[1:], "", "bcrypt"},
+		{"$2b$10$" + salted + "\n", "", "bcrypt"},
+		{"pbkdf2-sha256$1$c2FsdA==$aGFzaA==", "", "bcrypt"},
+	} {
+		if _, err := add("other", c.hash, c.password); err == nil || !strings.Contains(err.Error(), c.want) {
+			t.Errorf("%q: err = %v, want it to mention %q", c.hash, err, c.want)
+		}
+	}
+	if _, err := add("other", "", "short"); err == nil {
+		t.Error("a short password was accepted")
 	}
 }
 
