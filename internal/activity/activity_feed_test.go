@@ -1,4 +1,4 @@
-package main
+package activity
 
 import (
 	"encoding/json"
@@ -14,7 +14,7 @@ import (
 // The feed's memory limit, stable seed ordering, copies, and JSON shape stay
 // independent of the runtime that supplies each brain's history.
 func TestActivityFeedSeedAndSnapshot(t *testing.T) {
-	a := NewActivity(3)
+	a := New(3)
 	if data, err := json.Marshal(a.Recent(10, "")); err != nil || string(data) != "[]" {
 		t.Fatalf("empty feed = %s, %v", data, err)
 	}
@@ -50,7 +50,7 @@ func TestActivityFeedSeedAndSnapshot(t *testing.T) {
 }
 
 func TestActivityFeedChangeScopeAndTruncation(t *testing.T) {
-	a := NewActivity(10)
+	a := New(10)
 	message := history.Entry{TS: "2026-10-18T10:00:00Z", Chat: "chat", From: "sender", ID: "message", Text: "before", Type: history.In}
 	a.Add("a", message)
 	a.Add("b", message)
@@ -60,7 +60,7 @@ func TestActivityFeedChangeScopeAndTruncation(t *testing.T) {
 	other = message
 	other.Type = history.Out
 	a.Add("a", other)
-	change := ActivityChange{Target: "message", Sender: "sender", Chat: "canonical", ChatAlt: "chat"}
+	change := Change{Target: "message", Sender: "sender", Chat: "canonical", ChatAlt: "chat"}
 	a.Change("a", change, strings.Repeat("界", 250))
 	got := a.Recent(10, "")
 	if len(got) != 4 || got[0].Text != "before" || got[1].Text != "before" || got[2].Text != "before" {
@@ -83,7 +83,7 @@ func TestActivityFeedChangeScopeAndTruncation(t *testing.T) {
 // A slow history load and live writes still serialize through the feed's
 // original lock; concurrent callers load each brain only once.
 func TestActivityFeedConcurrentSeedAndWrites(t *testing.T) {
-	a := NewActivity(200)
+	a := New(200)
 	started, release := make(chan struct{}), make(chan struct{})
 	var workers sync.WaitGroup
 	workers.Go(func() {
