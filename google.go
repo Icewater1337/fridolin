@@ -32,14 +32,14 @@ import (
 // with a normal sign-in in the browser — no API keys, no files to copy.
 //
 // The sign-in returns to the bridge itself (http://127.0.0.1:<port>/), which
-// Google allows for Desktop app clients. The resulting token is written where
-// the calendar tool and the sandbox expect it:
+// Google allows for Desktop app clients. The resulting token is written to
 //
 //	<credentials dir>/google_calendar_token_<brain>.json
 //
 // (credentials dir = sandbox.credentials_dir, else the data dir), in the
-// standard "authorized user" format the Google libraries read. Only that
-// brain's sandbox profile can read it.
+// standard "authorized user" format the Google libraries read. The bridge
+// alone uses it: brains make their calendar calls through it
+// (google_calendar.go), and the sandbox denies them the folder.
 
 // calendarScopes are what a brain's sign-in asks Google for: the narrowest
 // grants the calendar commands work with. None of them lets a brain delete
@@ -77,7 +77,7 @@ func extraScopes(granted []string) []string {
 
 // Endpoints, variables so tests can point them at a fake server. Token
 // requests always go to googleTokenEndpoint, never to a token_uri from a
-// file: a brain can write its own token file.
+// file: a brain the sandbox does not hold can write its token file.
 var (
 	googleAuthEndpoint   = "https://accounts.google.com/o/oauth2/v2/auth"
 	googleTokenEndpoint  = "https://oauth2.googleapis.com/token"
@@ -160,20 +160,11 @@ func (g *GoogleAuth) tokenPath(brainID string) string {
 	return calendarTokenFile(g.credsDir(), brainID)
 }
 
-func (g *GoogleAuth) credentialsPath(brainID string) string {
-	return calendarCredentialsFile(g.credsDir(), brainID)
-}
-
-// calendarTokenFile and calendarCredentialsFile are a brain's calendar
-// files in dir, the credentials dir. The sandbox opens exactly these two
-// to the brain, and tools/calendar_tool.py, which reads them in the brain,
-// builds the same names from its profile, the brain's id.
+// calendarTokenFile is a brain's calendar token in dir, the credentials
+// dir. Only the bridge reads and writes it; the sandbox denies brains the
+// folder.
 func calendarTokenFile(dir, brainID string) string {
 	return filepath.Join(dir, "google_calendar_token_"+brainID+".json")
-}
-
-func calendarCredentialsFile(dir, brainID string) string {
-	return filepath.Join(dir, "google_calendar_credentials_"+brainID+".json")
 }
 
 // Client returns the configured OAuth client, or nil.
@@ -413,39 +404,30 @@ func (tr *tokenResponse) grantedScopes(asked []string) []string {
 	return slices.Clone(asked)
 }
 
-// saveToken writes the brain's token, plus a copy of the client as its
-// credentials file when there is none (tools fall back to it to sign in again).
-// Neither write follows a symlink: writeFileAtomic renames a new file over
-// the token, replacing whatever is there, and O_EXCL creates the
-// credentials file only where nothing is.
+// saveToken writes the brain's token. It does not follow a symlink:
+// writeFileAtomic renames a new file over the token, replacing whatever is
+// there. Older versions also copied the OAuth client, secret and all, next
+// to it as google_calendar_credentials_<brain>.json, for the calendar tool
+// in the brain; nothing reads that copy any more.
 func (g *GoogleAuth) saveToken(brainID string, tok *googleToken) error {
 	data, err := json.MarshalIndent(tok, "", "  ")
 	if err != nil {
 		return err
 	}
-	if err := writeFileAtomic(g.tokenPath(brainID), data, 0o600, false); err != nil {
-		return err
-	}
-	if c := g.Client(); c != nil {
-		f, err := os.OpenFile(g.credentialsPath(brainID), os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
-		if err == nil {
-			_, _ = f.Write(c.raw)
-			f.Close()
-		}
-	}
-	return nil
+	return writeFileAtomic(g.tokenPath(brainID), data, 0o600, false)
 }
 
 // readCredentialFile reads a brain's file in the credentials dir without
-// following a symlink. Each brain's sandbox lets it write its own token
-// file, so a brain can put a symlink there to another brain's token: the
-// bridge, outside the sandbox, would refresh that token and write it back
-// where this brain reads it, or revoke it on disconnect. The dir itself is
-// not brain-writable, so the last path component is the one to check. A
-// hard link would do the same; the sandbox refuses those, and a file with
-// more than one link is refused here as well. The open does not block, so
-// a FIFO cannot hang the dashboard, and a file larger than maxBrainFile is
-// refused rather than loaded.
+// following a symlink. A brain the sandbox does not hold (on Linux, or with
+// sandbox.enabled off) can write there, so it can put a symlink to another
+// brain's token in place of its own: the bridge would refresh that token
+// and write it back where this brain reads it, or revoke it on disconnect.
+// Older versions let each sandboxed brain write its own token file too. The
+// last path component is the one to check. A hard link would do the same;
+// the sandbox refuses those, and a file with more than one link is refused
+// here as well. The open does not block, so a FIFO cannot hang the
+// dashboard, and a file larger than maxBrainFile is refused rather than
+// loaded.
 func readCredentialFile(path string) ([]byte, error) {
 	f, err := os.OpenFile(path, os.O_RDONLY|syscall.O_NOFOLLOW|syscall.O_NONBLOCK, 0)
 	if errors.Is(err, syscall.ELOOP) {
@@ -511,10 +493,10 @@ func (g *GoogleAuth) accessToken(ctx context.Context, brainID string) (*googleTo
 	if t.RefreshToken == "" {
 		return nil, &signInError{errors.New("the token has no refresh token — connect again")}
 	}
-	// The brain can write its token file, so the client in it is not
-	// trusted: the refresh uses yours, at Google's fixed endpoint. A
-	// refresh token works only with the client that issued it, so a token
-	// from another client cannot be refreshed here.
+	// A brain the sandbox does not hold can write its token file, so the
+	// client in it is not trusted: the refresh uses yours, at Google's
+	// fixed endpoint. A refresh token works only with the client that
+	// issued it, so a token from another client cannot be refreshed here.
 	c := g.Client()
 	if c == nil {
 		return nil, &signInError{errors.New("add your Google OAuth client first (Settings → Google sign-in)")}

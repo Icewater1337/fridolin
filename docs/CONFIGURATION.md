@@ -393,10 +393,10 @@ Brains can neither read nor write:
 - `~/Documents`, `~/Downloads`, `~/Desktop`, `~/Movies`, `~/Music`, `~/Pictures`
 - `~/Library/Mail`, `Messages`, `Calendars`, `Safari`, Chrome and Firefox
   profiles, `Containers`, `Group Containers`, Contacts, Notes
-- the bridge's data directory — except `media/`, the brain's own calendar
-  credentials and, to read, its own `run-tokens/<id>/` — under both names it
-  has had, `~/.fridolin` and `~/.whatsapp-claude-bridge`, whichever is in
-  use (an old one left behind can still hold the WhatsApp keys and tokens)
+- the bridge's data directory — except `media/`, and a brain's own
+  `run-tokens/<id>/` to read — under both names it has had, `~/.fridolin`
+  and `~/.whatsapp-claude-bridge`, whichever is in use (an old one left
+  behind can still hold the WhatsApp keys and tokens)
 - the database (`db_path`, with its `-wal`, `-shm` and `-journal` files)
   wherever it is, and its folder when that lies outside the data directory,
   unless the folder is your home folder or a temp folder
@@ -531,9 +531,12 @@ git configuration entirely: those files and `~/.config/git`.
 ### `sandbox.credentials_dir`
 
 A directory of per-brain credential files kept outside the data directory
-(absolute or starting with `~/`). Brains are denied all of it except their
-own calendar pair (`google_calendar_credentials_<id>.json`,
-`google_calendar_token_<id>.json`).
+(absolute or starting with `~/`): the calendar tokens,
+`google_calendar_token_<id>.json`. Brains are denied all of it, their own
+token included; the bridge makes their calendar calls (see
+[CALENDAR.md](CALENDAR.md#what-the-brain-gets)). Older versions let each
+brain read its own token, and copied the OAuth client next to it as
+`google_calendar_credentials_<id>.json`, which nothing reads any more.
 
 This is containment, not a jail — it raises the cost of a prompt injection
 rather than eliminating it. Linux has no `sandbox-exec`: the bridge refuses a
@@ -611,9 +614,8 @@ Default `~/.fridolin`; an install from before the project was renamed keeps
 `~/.whatsapp-claude-bridge` while `~/.fridolin` does not exist, and says so
 in the log at every start: set `data_dir` to it to keep it for good.
 `db_path` and `media_dir` override individually. Brains cannot read it,
-except the `media/` inbox, their own calendar credentials and their own
-runs' brain API tokens in `run-tokens/<id>/`; a `db_path` elsewhere is
-denied to them too.
+except the `media/` inbox and their own runs' brain API tokens in
+`run-tokens/<id>/`; a `db_path` elsewhere is denied to them too.
 
 The lock that keeps a second bridge off the same WhatsApp session is
 `bridge.lock` in `data_dir`. It does not cover a `db_path` outside

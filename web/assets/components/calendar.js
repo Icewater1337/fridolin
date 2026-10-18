@@ -196,7 +196,7 @@ export function calendarCard(brainId, { signal } = {}) {
       cals.length ? h('div.table-wrap', h('table.table',
         h('thead', h('tr', h('th', ''), h('th', 'Calendar'), h('th', ''), h('th', 'New events'))),
         h('tbody', rows))) : null,
-      h('p.muted.small', 'Google grants access to the whole account; the bridge’s calendar tool keeps this brain to the calendars you tick. Token: ', mono(s.token_path)),
+      h('p.muted.small', 'Google grants access to the whole account; the bridge makes this brain’s calendar calls itself, only on the calendars you tick, and with the sandbox on the brain cannot read the token. Token: ', mono(s.token_path)),
       h('div.actions', cals.length ? saveBtn : null, connectButton('Switch account'), disconnectBtn));
   }
 

@@ -141,8 +141,10 @@ func TestCalendarSignInFlow(t *testing.T) {
 	if st, _ := os.Stat(tokPath); st.Mode().Perm() != 0o600 {
 		t.Errorf("token mode %v", st.Mode().Perm())
 	}
-	if _, err := os.Stat(filepath.Join(tb.cfgs.Get().DataDir, "google_calendar_credentials_fam.json")); err != nil {
-		t.Error("credentials copy for the tool not written")
+	// Older versions copied the OAuth client, secret and all, next to the
+	// token for the calendar tool in the brain.
+	if _, err := os.Stat(filepath.Join(tb.cfgs.Get().DataDir, "google_calendar_credentials_fam.json")); !os.IsNotExist(err) {
+		t.Errorf("a copy of the OAuth client was written next to the token (%v)", err)
 	}
 	// The state is single-use.
 	if w := cb("state=" + url.QueryEscape(q.Get("state")) + "&code=good-code"); w.Code != 400 {
@@ -241,13 +243,13 @@ func portOf(tb *testBridge) string {
 	return strings.TrimPrefix(tb.cfgs.Get().HTTPListen, "127.0.0.1:")
 }
 
-// TestCalendarTokenIsNotFollowed: each brain's sandbox lets it write its
-// own token file, so a brain can make it a link to another brain's token
-// in the same folder. The dashboard's status page would then refresh that
-// token and write it, refresh token and all, where the first brain reads
-// it, and Disconnect would revoke it at Google. The bridge refuses such a
-// token file, leaves the other brain's token alone, and removes only the
-// link on disconnect.
+// TestCalendarTokenIsNotFollowed: a brain the sandbox does not hold (on
+// Linux, or with the sandbox off) can write its own token file, so it can
+// make it a link to another brain's token in the same folder. The
+// dashboard's status page would then refresh that token and write it,
+// refresh token and all, where the first brain reads it, and Disconnect
+// would revoke it at Google. The bridge refuses such a token file, leaves
+// the other brain's token alone, and removes only the link on disconnect.
 func TestCalendarTokenIsNotFollowed(t *testing.T) {
 	cases := []struct {
 		name string
@@ -348,11 +350,11 @@ func mustSymlink(t *testing.T, target, link string) {
 	}
 }
 
-// TestCalendarTokenRequestsGoToGoogleWithYourClient: the brain can write
-// its token file, so the bridge takes neither the token_uri nor the client
-// in it. It refreshes at Google's token endpoint with the client you
-// configured, and a token from another client cannot be refreshed. The
-// token_uri of a pasted client file is not used either.
+// TestCalendarTokenRequestsGoToGoogleWithYourClient: a brain the sandbox
+// does not hold can write its token file, so the bridge takes neither the
+// token_uri nor the client in it. It refreshes at Google's token endpoint
+// with the client you configured, and a token from another client cannot
+// be refreshed. The token_uri of a pasted client file is not used either.
 func TestCalendarTokenRequestsGoToGoogleWithYourClient(t *testing.T) {
 	var elsewhere atomic.Int32
 	other := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -448,9 +450,10 @@ func TestCalendarTokenRequestsGoToGoogleWithYourClient(t *testing.T) {
 	})
 }
 
-// TestOversizedCalendarTokenIsRefused: a brain can make its token file as
-// large as it likes. The bridge refuses one larger than maxBrainFile
-// rather than load it, and so neither refreshes it nor revokes it.
+// TestOversizedCalendarTokenIsRefused: a brain the sandbox does not hold
+// can make its token file as large as it likes. The bridge refuses one
+// larger than maxBrainFile rather than load it, and so neither refreshes
+// it nor revokes it.
 func TestOversizedCalendarTokenIsRefused(t *testing.T) {
 	srv, got := fakeGoogle(t)
 	tb := newTestBridge(t, "")

@@ -64,17 +64,25 @@ and Disconnect revokes it.
 
 The sign-in is saved as the brain's token,
 `google_calendar_token_<brain>.json`, in `sandbox.credentials_dir` (or the
-bridge's data folder). The sandbox lets only that brain read it, and write
-it, since the calendar tool refreshes it. The bridge reads it too, to list
-the calendars on the brain's page and to revoke it on disconnect, and
-takes only a regular file there: a brain that put a symlink or a hard link
-to another brain's token in its place would otherwise have the bridge
-refresh that token into its own file, or revoke it. It refuses a token
-file over 256 KiB too, far more than a real one holds. The brain's page
-then shows why its calendars cannot be listed; connect it again. Nor does
-the bridge take the `token_uri` or the client in that file: it refreshes
-at Google's token endpoint with the client under Settings → Google
-sign-in.
+bridge's data folder), which the sandbox denies every brain, its own token
+included. The bridge uses it for the brain: it makes the brain's calendar
+calls (below), lists the calendars on the brain's page, refreshes the
+token and revokes it on disconnect. So a brain never sees a refresh token
+or the OAuth client's secret, and cannot call Google itself with them.
+Older versions let each brain read and rewrite its token, and copied the
+OAuth client next to it as `google_calendar_credentials_<brain>.json`;
+nothing reads that copy any more, and you can delete it.
+
+The bridge takes only a regular file as a token: a brain the sandbox does
+not hold (on Linux, or with the sandbox off) could otherwise put a symlink
+or a hard link to another brain's token in place of its own and have the
+bridge refresh that token into its own file, or revoke it. It refuses a
+token file over 256 KiB too, far more than a real one holds; the brain's
+page then shows why its calendars cannot be listed, and connecting again
+fixes it. Nor does the bridge take the `token_uri` or the client in that
+file: it refreshes at Google's token endpoint with the client under
+Settings → Google sign-in.
+
 The chosen calendars are stored in the brain's `brain.json`:
 
 ```json
@@ -116,11 +124,18 @@ says it is temporary instead. A calendar Google cannot read for `free`,
 one deleted or no longer shared with the account, is named with a hint to
 check it and the brain's calendars, since connecting again would not help.
 
-**Limits.** Google grants access to a whole account, not to single calendars.
-Keeping a brain to the calendars you ticked is done by the calendar tool, not
-by Google — a brain that wrote its own API calls with the token could reach
-the account's other calendars. If that matters, give the brain its own Google
-account and share just the calendars it needs with it.
+**Limits.** Google grants access to a whole account, not to single
+calendars: keeping a brain to the calendars you ticked is done by the
+bridge, which makes every calendar call itself. That holds while the brain
+cannot read its token, nor the brain API token of another brain's run,
+which takes the sandbox (macOS). Without it, a brain can read the
+credentials folder like any other file of yours and call Google with the
+whole account's access; then give each brain its own Google account,
+sharing just the calendars it needs with it.
+
+`tools/calendar_tool.py` still works for one release, as a wrapper that
+runs `fridolin calendar` with the same arguments (`--profile` is ignored,
+and `auth` points to the dashboard). It needs no Python packages any more.
 
 ## Disconnecting
 

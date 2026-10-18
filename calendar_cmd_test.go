@@ -11,6 +11,7 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"os"
+	"path/filepath"
 	"slices"
 	"strconv"
 	"strings"
@@ -708,5 +709,25 @@ func TestCalendarSignInProblems(t *testing.T) {
 				t.Errorf("the brain API answered %d %s; want %d", w.Code, w.Body.String(), tc.status)
 			}
 		})
+	}
+}
+
+// TestCalendarHintsNameTheDashboardsButtons: what a brain tells its owner
+// to click is a button the brain's Calendar card shows: "Connect Google
+// Calendar" until it is connected, "Sign in again" once Google refuses it.
+func TestCalendarHintsNameTheDashboardsButtons(t *testing.T) {
+	t.Parallel()
+	js, err := os.ReadFile(filepath.Join(repoDir, "web", "assets", "components", "calendar.js"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, notConnected := calendarCallProblem(fs.ErrNotExist)
+	for _, label := range []string{"Sign in again", "Connect Google Calendar"} {
+		if !strings.Contains(calendarReconnectHint+notConnected, label) {
+			t.Errorf("no hint names %q", label)
+		}
+		if !strings.Contains(string(js), "'"+label+"'") {
+			t.Errorf("the dashboard has no %q button", label)
+		}
 	}
 }

@@ -129,7 +129,6 @@ func TestSandboxIgnoresPlantedSymlinks(t *testing.T) {
 	}{
 		{"own folder", "assistant/a", ".ssh", "assistant/a/id_ed25519"},
 		{"media dir", ".fridolin/media", ".ssh", ".fridolin/media/id_ed25519"},
-		{"own calendar token", "creds/google_calendar_token_a.json", "creds/google_calendar_token_b.json", "creds/google_calendar_token_a.json"},
 		{"allow_paths folder", "Documents/share", ".ssh", "Documents/share/id_ed25519"},
 	}
 	for _, h := range homes {
@@ -215,7 +214,8 @@ func TestSandboxEnforcesProfile(t *testing.T) {
 		{"data dir write", true, ".fridolin/planted", false},
 		{"media read", false, ".fridolin/media/photo.jpg", true},
 		{"media write", true, ".fridolin/media/new.jpg", true},
-		{"own calendar token", false, "creds/google_calendar_token_a.json", true},
+		// The bridge makes a brain's calendar calls with it.
+		{"own calendar token", false, "creds/google_calendar_token_a.json", false},
 		{"other brain's calendar token", false, "creds/google_calendar_token_b.json", false},
 		{"credentials dir write", true, "creds/planted.json", false},
 		{"ssh key", false, ".ssh/id_ed25519", false},
@@ -895,7 +895,6 @@ func TestSandboxOwnFolderKeepsWhatIsInsideIt(t *testing.T) {
 		{"read its own notes", `cat "$B/notes.md"`, true},
 		{"write a file of its own", `printf x > "$B/new.md"`, true},
 		{"read media", `cat "$B/.fridolin/media/photo.jpg"`, true},
-		{"read its own calendar token", `cat "$B/creds/google_calendar_token_a.json"`, true},
 		{"read an allow_paths folder", `cat "$B/clients/share/ok.txt"`, true},
 		{"install a tool of its own on PATH", `printf x > "$B/bin/mytool2"`, true},
 		{"read another brain's files", `cat "$B/b/diary.md"`, false},
@@ -903,6 +902,7 @@ func TestSandboxOwnFolderKeepsWhatIsInsideIt(t *testing.T) {
 		{"move another brain aside", `mv "$B/b" "$B/b2"`, false},
 		{"read the dashboard token", `cat "$B/.fridolin/dashboard.token"`, false},
 		{"read the database", `cat "$B/wa/bridge.db"`, false},
+		{"read its own calendar token", `cat "$B/creds/google_calendar_token_a.json"`, false},
 		{"read another brain's calendar token", `cat "$B/creds/google_calendar_token_b.json"`, false},
 		{"read the config file", `cat "$B/etc/config.json"`, false},
 		{"read a deny_paths entry", `cat "$B/clients/contract.txt"`, false},
