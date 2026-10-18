@@ -222,7 +222,7 @@ func TestLoadDashboardToken(t *testing.T) {
 		{"two words", func(p string) error {
 			return os.WriteFile(p, []byte(strings.Repeat("a", 20)+" "+strings.Repeat("b", 20)), 0o600)
 		}, "is not a token"},
-		{"unreadable", func(p string) error { return os.Mkdir(p, 0o700) }, "reading dashboard token"},
+		{"unreadable", func(p string) error { return os.Mkdir(p, 0o700) }, "reading token"},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {

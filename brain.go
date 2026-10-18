@@ -30,6 +30,10 @@ type historyEntry struct {
 	Chat string `json:"chat"` // JID of the chat (DM participant or group)
 	Text string `json:"text"`
 	Type string `json:"type"` // historyIn or historyOut
+	// Via marks an "out" line that came in through /send: "brain" (From is
+	// the brain that sent it), "script" (the scripts token) or "api" (no
+	// token). A brain's own replies have none.
+	Via string `json:"via,omitempty"`
 }
 
 // The history entry types. They are written to every brain's history file,
@@ -120,7 +124,8 @@ var defaultOTPMarkers = []string{"🔐", "OTP", "one-time code", "2FA", "verific
 
 // recentOutboundLooksLikeOTPRequest reports whether any of the brain's last 50
 // outbound messages in lines, the tail of its history, asked for a one-time
-// code. With no markers given it uses the built-in list.
+// code: its own replies, and what went out in its chats through /send, from
+// a script or a brain. With no markers given it uses the built-in list.
 func recentOutboundLooksLikeOTPRequest(lines []string, brainID string, markers ...string) bool {
 	if len(markers) == 0 {
 		markers = defaultOTPMarkers
@@ -134,7 +139,7 @@ func recentOutboundLooksLikeOTPRequest(lines []string, brainID string, markers .
 		if err := json.Unmarshal([]byte(lines[i]), &entry); err != nil {
 			continue
 		}
-		if entry.Type != historyOut || entry.From != brainID {
+		if entry.Type != historyOut || (entry.From != brainID && entry.Via == "") {
 			continue
 		}
 		for _, marker := range markers {
@@ -1380,7 +1385,7 @@ func (br *Brain) composePreface(chatJID string, isGroup bool) string {
 
 		var senderDisplay string
 		if entry.Type == historyOut {
-			senderDisplay = fmt.Sprintf("You (%s)", br.id)
+			senderDisplay = outboundSender(br.id, entry)
 		} else if name, found := identities[normalizeJID(entry.From)]; found {
 			senderDisplay = fmt.Sprintf("%s (%s)", name, entry.From)
 		} else {
@@ -1390,6 +1395,24 @@ func (br *Brain) composePreface(chatJID string, isGroup bool) string {
 		sb.WriteString(fmt.Sprintf("[%s] %s: %s\n", timeStr, senderDisplay, entry.Text))
 	}
 	return sb.String()
+}
+
+// outboundSender is who the chat history shows as the sender of entry, an
+// "out" line in brain id's history. Only the brain's own replies, and what it
+// sent itself through /send, are "You": a line a script or another brain
+// sent through /send must not read as the brain's own words.
+func outboundSender(id string, entry historyEntry) string {
+	switch {
+	case entry.Via == "":
+		return fmt.Sprintf("You (%s)", id)
+	case entry.Via == "brain" && entry.From == id:
+		return fmt.Sprintf("You (%s, via /send)", id)
+	case entry.Via == "brain":
+		return fmt.Sprintf("Brain %s (via /send)", entry.From)
+	case entry.Via == "script":
+		return "Script (via /send)"
+	}
+	return "Script without a token (via /send)"
 }
 
 // buildPrompt constructs the -p prompt: the prompt file, chat-history
@@ -1657,12 +1680,19 @@ func (br *Brain) interruptRun(run *brainRun) {
 
 // appendHistory appends one JSONL entry to the brain's history file.
 func (br *Brain) appendHistory(chatJID, from, text, typ string) {
+	br.appendHistoryVia(chatJID, from, text, typ, "")
+}
+
+// appendHistoryVia is appendHistory for a line marked with how it came in
+// (see historyEntry.Via).
+func (br *Brain) appendHistoryVia(chatJID, from, text, typ, via string) {
 	entry := historyEntry{
 		TS:   time.Now().Format(time.RFC3339),
 		From: from,
 		Chat: chatJID,
 		Text: text,
 		Type: typ,
+		Via:  via,
 	}
 	data, err := json.Marshal(entry)
 	if err != nil {

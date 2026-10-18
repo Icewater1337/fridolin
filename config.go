@@ -142,6 +142,7 @@ type Config struct {
 	Backup        BackupConfig        `json:"backup"`
 	Plaud         PlaudConfig         `json:"plaud"`
 	Dashboard     DashboardConfig     `json:"dashboard"`
+	ScriptAPI     ScriptAPIConfig     `json:"script_api"`
 }
 
 // retiredBrainMode is the brain_mode key. A missing key, null and true all
@@ -339,6 +340,16 @@ type DashboardConfig struct {
 	RequireToken *bool `json:"require_token,omitempty"`
 }
 
+// ScriptAPIConfig controls who may use /send and /ingest (docs/API.md).
+type ScriptAPIConfig struct {
+	// TokenlessSend (default true) lets /send work without a token, as it
+	// did before tokens, but only to the allowed chats. While it is on, any
+	// program on this computer, a brain among them, can message those
+	// chats. New configs turn it off; scripts then send the token in
+	// <data_dir>/scripts.token.
+	TokenlessSend *bool `json:"tokenless_send,omitempty"`
+}
+
 // Defaults for optional settings.
 const (
 	defaultHTTPListen    = "127.0.0.1:8765"
@@ -388,6 +399,9 @@ func (c *Config) DebounceMaxWaitMS() int { return intOr(c.Debounce.MaxWaitMS, de
 
 // DashboardRequiresToken reports whether API calls need the dashboard token.
 func (c *Config) DashboardRequiresToken() bool { return boolOr(c.Dashboard.RequireToken, true) }
+
+// TokenlessSend reports whether /send works without a token.
+func (c *Config) TokenlessSend() bool { return boolOr(c.ScriptAPI.TokenlessSend, true) }
 
 // MaxMediaBytes is the largest attachment to download, in bytes.
 func (c *Config) MaxMediaBytes() int64 {
@@ -548,6 +562,9 @@ func effective(file *Config) (*Config, error) {
 	if cfg.RunTimeoutMinutes == nil {
 		rt := defaultRunTimeoutMinutes
 		cfg.RunTimeoutMinutes = &rt
+	}
+	if cfg.ScriptAPI.TokenlessSend == nil {
+		cfg.ScriptAPI.TokenlessSend = &t
 	}
 	if cfg.Backup.IncludeBridgeConfig == nil {
 		inc := defaultIncludeBridgeConfig

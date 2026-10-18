@@ -15,12 +15,16 @@ import (
 	"go.mau.fi/whatsmeow"
 )
 
-// script sends a request to the script API the way a local script does.
-func (tb *testBridge) script(method, path, body string) *httptest.ResponseRecorder {
+// script sends a request to the script API the way a local script does,
+// with token as its Authorization: Bearer token ("" sends none).
+func (tb *testBridge) script(method, path, body, token string) *httptest.ResponseRecorder {
 	r := httptest.NewRequest(method, "http://127.0.0.1:8765"+path, strings.NewReader(body))
 	r.Host = "127.0.0.1:8765"
 	if body != "" {
 		r.Header.Set("Content-Type", "application/json")
+	}
+	if token != "" {
+		r.Header.Set("Authorization", "Bearer "+token)
 	}
 	w := httptest.NewRecorder()
 	tb.h.ServeHTTP(w, r)
@@ -69,7 +73,11 @@ func TestScriptAPIContract(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			w := tb.script("POST", c.path, c.body)
+			token := ""
+			if c.path == "/ingest" {
+				token = tb.scriptAuth.scripts.Value()
+			}
+			w := tb.script("POST", c.path, c.body, token)
 			var got map[string]string
 			if w.Code != c.want || w.Header().Get("Content-Type") != "application/json" || json.Unmarshal(w.Body.Bytes(), &got) != nil {
 				t.Fatalf("%d %s %q, want %d with a JSON body", w.Code, w.Header().Get("Content-Type"), w.Body.String(), c.want)
@@ -82,11 +90,11 @@ func TestScriptAPIContract(t *testing.T) {
 		})
 	}
 
-	if w := tb.script("GET", "/health", ""); w.Code != 200 || w.Body.String() != "ok\n" {
+	if w := tb.script("GET", "/health", "", ""); w.Code != 200 || w.Body.String() != "ok\n" {
 		t.Errorf("health: %d %q", w.Code, w.Body.String())
 	}
 	var ready map[string]any
-	if w := tb.script("GET", "/ready", ""); w.Code != 200 || json.Unmarshal(w.Body.Bytes(), &ready) != nil ||
+	if w := tb.script("GET", "/ready", "", ""); w.Code != 200 || json.Unmarshal(w.Body.Bytes(), &ready) != nil ||
 		ready["ready"] != true || ready["whatsapp"] == nil || ready["version"] == nil || ready["started_at"] == nil {
 		t.Errorf("ready in dev mode: %d %s", w.Code, w.Body.String())
 	}
@@ -94,7 +102,7 @@ func TestScriptAPIContract(t *testing.T) {
 	// /send takes text as it is: a [POLL] block is not made a poll.
 	poll := "[POLL]\nQuestion: Lunch?\n- Yes\n- No\n[/POLL]"
 	body, _ := json.Marshal(sendRequest{JID: dm, Text: poll})
-	if w := tb.script("POST", "/send", string(body)); w.Code != 200 {
+	if w := tb.script("POST", "/send", string(body), ""); w.Code != 200 {
 		t.Fatalf("send a poll block: %d %s", w.Code, w.Body.String())
 	}
 	// The ingested files' runs send to the same chat, so look for it.
@@ -112,7 +120,7 @@ func TestScriptAPIContract(t *testing.T) {
 	}
 
 	off := newTestBridge(t, "")
-	if w := off.script("POST", "/ingest", `{"brain":"personal","text":"x"}`); w.Code != http.StatusNotFound || !strings.Contains(w.Body.String(), `"error"`) {
+	if w := off.script("POST", "/ingest", `{"brain":"personal","text":"x"}`, off.scriptAuth.scripts.Value()); w.Code != http.StatusNotFound || !strings.Contains(w.Body.String(), `"error"`) {
 		t.Errorf("ingest while disabled: %d %s", w.Code, w.Body.String())
 	}
 }
@@ -146,7 +154,7 @@ func TestSendFailureStatus(t *testing.T) {
 			tb := newTestBridge(t, "")
 			dir := tb.addFolderBrain(t, BrainManifest{ID: "p", Name: "P", Routing: BrainRouting{HandlesDMs: true}})
 			tb.wa = failingMessenger{devMessenger: tb.dev, err: c.err}
-			w := tb.script("POST", "/send", `{"jid":"`+dm+`","text":"first half second half"}`)
+			w := tb.script("POST", "/send", `{"jid":"`+dm+`","text":"first half second half"}`, "")
 			if w.Code != c.want || !strings.Contains(w.Body.String(), `"error"`) {
 				t.Fatalf("%d %s, want %d", w.Code, w.Body.String(), c.want)
 			}

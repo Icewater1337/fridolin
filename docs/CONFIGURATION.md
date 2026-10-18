@@ -637,7 +637,8 @@ writes deny-by-default.
 ### `data_dir` *(restart)*
 
 Database (including the WhatsApp session), downloaded media, the dashboard
-token, backup state, the bridge's rclone config and calendar credentials.
+token, the scripts token for `/send` and `/ingest` (`scripts.token`),
+backup state, the bridge's rclone config and calendar credentials.
 Default `~/.fridolin`; an install from before the project was renamed keeps
 `~/.whatsapp-claude-bridge` while `~/.fridolin` does not exist, and says so
 in the log at every start: set `data_dir` to it to keep it for good.
@@ -689,7 +690,9 @@ dashboard token but one the bridge makes for each run, in a file in the
 data directory's `run-tokens/<id>/` that the sandbox lets only that
 brain read; the run's `FRIDOLIN_BRAIN_TOKEN_FILE` names it. The token
 stops working, and its file goes, when the run ends, and the bridge
-answers with that brain's things only. The token is not in the run's
+answers with that brain's things only. The same token lets the run use
+`/send` for the brain's own chats and `/ingest` for itself
+([API.md](API.md#who-may-call)). The token is not in the run's
 environment, since macOS shows a process's environment to every program
 of the same user, other brains included. With `http_listen` off, those
 commands do not work.
@@ -701,7 +704,24 @@ still sends `scope`, the old name of `brain`, is refused with 400 and told
 to use `brain`. Paths must be files inside the media directory. The
 named brain receives them like WhatsApp attachments and answers in its
 `reply_chat`, even when that chat belongs to another brain (your DM, say).
-Off by default; see [API.md](API.md#post-ingest).
+Off by default; see [API.md](API.md#post-ingest). It always needs a token:
+yours in `<data_dir>/scripts.token`, or a brain's run's, which hands files
+only to that brain.
+
+### `script_api.tokenless_send`
+
+```json
+"script_api": { "tokenless_send": false }
+```
+
+Whether `POST /send` works without a token, as it did before tokens. Without
+one it reaches only the chats `allowed_numbers` and `allowed_groups` name.
+Unset means `true`, so scripts written before tokens keep working; new
+configs set it to `false`. While it is on, any program on this computer, a
+brain among them, can message those chats, and the dashboard says so. Have
+your scripts send the token in `<data_dir>/scripts.token` as
+`Authorization: Bearer …`, then turn it off (Settings → Advanced). Brains
+send their run's token; see [API.md](API.md#who-may-call).
 
 ### `queue`
 
@@ -913,7 +933,9 @@ On top, the bridge sets `FRIDOLIN_BRAIN_ID`, the brain's id; `FRIDOLIN_BIN`
 and `FRIDOLIN_TOOLS_DIR`, its own binary and the folder of its Python
 helpers ([BRAINS.md](BRAINS.md#what-a-brain-loads)); `FRIDOLIN_API` and
 `FRIDOLIN_BRAIN_TOKEN_FILE`, where the brain API is and the file with the
-run's token for it (see [`http_listen`](#http_listen-restart));
+run's token for it (see [`http_listen`](#http_listen-restart)), which
+also opens [`/send` and `/ingest`](API.md#who-may-call) to the brain's own
+chats and itself;
 `PLAUD_TELEMETRY_DISABLED=1` and `PLAUD_NO_UPDATE_NOTIFIER=1` for
 [Plaud](PLAUD.md)'s CLI, with `plaud.brain_access` a `PATH` that starts
 with that CLI's folder; and `DISABLE_AUTOUPDATER=1` in the sandbox. It

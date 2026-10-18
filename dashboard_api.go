@@ -212,6 +212,9 @@ func (b *Bridge) apiStatus(w http.ResponseWriter, r *http.Request) {
 	if w := claudeVersionWarning(resp.Claude); w != "" {
 		resp.Warnings = append(resp.Warnings, w)
 	}
+	if cfg.TokenlessSend() {
+		resp.Warnings = append(resp.Warnings, "/send works without a token (script_api.tokenless_send), so any program on this computer, brains included, can message your allowed chats. Have your scripts send the token in scripts.token in the data folder, then turn it off under Settings → Advanced.")
+	}
 	if cfg.InheritClaudeUserConfig {
 		// Set in config.json only, so the dashboard shows it nowhere else.
 		resp.Warnings = append(resp.Warnings, "Brains load your own Claude Code setup (inherit_claude_user_config in config.json): they run your hooks, read your instructions and can use your MCP servers for anyone who may message them.")

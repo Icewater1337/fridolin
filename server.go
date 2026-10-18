@@ -10,8 +10,11 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"time"
+
+	"go.mau.fi/whatsmeow/types"
 )
 
 // sendRequest is the JSON body expected by POST /send.
@@ -94,6 +97,11 @@ func (b *Bridge) httpReady(w http.ResponseWriter, r *http.Request) {
 // see what was said on its behalf — for example, so the OTP guard recognises a
 // code request that a script sent out.
 func (b *Bridge) httpSend(w http.ResponseWriter, r *http.Request) {
+	who, err := b.scriptAuth.authorize(r)
+	if err != nil {
+		writeErr(w, http.StatusUnauthorized, err.Error())
+		return
+	}
 	var req sendRequest
 	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20)).Decode(&req); err != nil {
 		writeErr(w, http.StatusBadRequest, "invalid JSON: "+err.Error())
@@ -112,20 +120,73 @@ func (b *Bridge) httpSend(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, err.Error())
 		return
 	}
+	if err := b.maySend(who, req.JID, b.cfgs.Get()); err != nil {
+		status := http.StatusForbidden
+		if errors.Is(err, errTokenRequired) {
+			status = http.StatusUnauthorized
+		}
+		writeErr(w, status, err.Error())
+		return
+	}
 
 	if err := b.wa.SendChunked(r.Context(), req.JID, req.Text); err != nil {
 		log.Printf("HTTP send error to %s: %v", req.JID, err)
 		// What did go out is in the chat, so it goes in the history too.
 		var partial *partialSendError
 		if errors.As(err, &partial) {
-			b.appendHTTPMessageToHistory(req.JID, strings.Join(partial.sent, "\n"))
+			b.appendHTTPMessageToHistory(who, req.JID, strings.Join(partial.sent, "\n"))
 		}
 		writeErr(w, sendErrStatus(err), "send failed: "+err.Error())
 		return
 	}
 
-	b.appendHTTPMessageToHistory(req.JID, req.Text)
+	b.appendHTTPMessageToHistory(who, req.JID, req.Text)
 	writeJSON(w, http.StatusOK, map[string]string{"status": "sent"})
+}
+
+// maySend refuses a /send that who may not make: a brain may send only to
+// its own chats (see brainChat), a caller without a token only to the
+// allowed chats and only while script_api.tokenless_send is on. The
+// scripts token may send anywhere checkSendJID lets through.
+func (b *Bridge) maySend(who principal, jid string, cfg *Config) error {
+	switch who.kind {
+	case callerScript:
+		return nil
+	case callerBrain:
+		br := b.brainMgr.Get(who.brain)
+		if br == nil || !b.brainChat(br, jid, cfg) {
+			return fmt.Errorf("brain %s may send only to its own chats, and %s is not one of them", who.brain, jid)
+		}
+		return nil
+	}
+	if !cfg.TokenlessSend() {
+		return fmt.Errorf("%w (script_api.tokenless_send is off)", errTokenRequired)
+	}
+	if !allowedChat(jid, cfg) {
+		return fmt.Errorf("without a token, /send reaches only the allowed chats (allowed_numbers, allowed_groups), and %s is not one", jid)
+	}
+	return nil
+}
+
+// brainChat reports whether jid is one of br's own chats: its reply chat
+// (reply_chat, or the one replyChatFor derives), or an allowed chat that
+// routes to it: a group it claims, for the fallback brain an allowed group
+// no brain claims, or, for the brain that gets DMs, an allowed number's DM.
+func (b *Bridge) brainChat(br *Brain, jid string, cfg *Config) bool {
+	if jid == b.replyChatFor(br, cfg) {
+		return true
+	}
+	return allowedChat(jid, cfg) && b.brainMgr.BrainFor(jid, isGroupJID(jid)) == br
+}
+
+// allowedChat reports whether jid is a chat config allows by name: a group
+// in allowed_groups, or the chat of a number in allowed_numbers. allow_any_dm
+// does not count: it lets anyone write in, not the bridge write to anyone.
+func allowedChat(jid string, cfg *Config) bool {
+	if isGroupJID(jid) {
+		return slices.Contains(cfg.AllowedGroups, jid)
+	}
+	return strings.HasSuffix(jid, "@"+types.DefaultUserServer) && slices.Contains(cfg.AllowedNumbers, normalizeJID(jid))
 }
 
 // checkSendJID refuses a /send to anything but a chat: a phone number or
@@ -159,14 +220,20 @@ func sendErrStatus(err error) int {
 	return http.StatusInternalServerError
 }
 
-// appendHTTPMessageToHistory records an HTTP-sent message in the history of
-// whichever brain owns the target chat.
-func (b *Bridge) appendHTTPMessageToHistory(jid, text string) {
+// appendHTTPMessageToHistory records a message who sent through /send in the
+// history of whichever brain owns the target chat, marked with how it came
+// in: the brain must not take a line a script or another brain sent for its
+// own words.
+func (b *Bridge) appendHTTPMessageToHistory(who principal, jid, text string) {
 	br := b.brainMgr.BrainFor(jid, isGroupJID(jid))
 	if br == nil {
 		return
 	}
-	br.appendHistory(jid, br.id, text, historyOut)
+	from := "script"
+	if who.kind == callerBrain {
+		from = who.brain
+	}
+	br.appendHistoryVia(jid, from, text, historyOut, who.via())
 }
 
 // httpIngest handles POST /ingest. It feeds files that arrived outside
@@ -175,10 +242,22 @@ func (b *Bridge) appendHTTPMessageToHistory(jid, text string) {
 // brain's reply goes to its reply chat, even when that chat routes to another
 // brain. Responds 202 at once; processing is asynchronous. docs/API.md is
 // its contract.
+//
+// It needs a token: the brain it names runs with its own folder, memories
+// and credentials, so handing work to a brain is not for any program on
+// this computer. A brain may hand files only to itself.
 func (b *Bridge) httpIngest(w http.ResponseWriter, r *http.Request) {
 	cfg := b.cfgs.Get()
 	if !cfg.Ingest.Enabled {
 		writeErr(w, http.StatusNotFound, "ingest is disabled (set ingest.enabled in the dashboard)")
+		return
+	}
+	who, err := b.scriptAuth.authorize(r)
+	if err == nil && who.kind == callerAnonymous {
+		err = errTokenRequired
+	}
+	if err != nil {
+		writeErr(w, http.StatusUnauthorized, err.Error())
 		return
 	}
 	var req ingestRequest
@@ -195,6 +274,15 @@ func (b *Bridge) httpIngest(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	id := strings.ToLower(strings.TrimSpace(req.Brain))
+	if who.kind == callerBrain {
+		if id == "" {
+			id = who.brain
+		}
+		if id != who.brain {
+			writeErr(w, http.StatusForbidden, fmt.Sprintf("brain %s may hand files only to itself, not to %q", who.brain, id))
+			return
+		}
+	}
 	br := b.brainMgr.Get(id)
 	if br == nil {
 		writeErr(w, http.StatusBadRequest, fmt.Sprintf("unknown brain %q", id))

@@ -160,6 +160,23 @@ with its tools, as `fridolin.prev`. To go back to it:
 fridolin service rollback     # run it again to undo
 ```
 
+**Coming from a version without API tokens** (one whose `/ingest` took
+none): `POST /ingest` now refuses a call without a token with `401`, so an
+upload handler or recorder sync written for the old version stops working
+until it sends yours:
+
+```bash
+curl -X POST http://127.0.0.1:8765/ingest \
+  -H "Authorization: Bearer $(cat ~/.fridolin/scripts.token)" …
+```
+
+`/send` without a token keeps reaching your allowed chats while
+[`script_api.tokenless_send`](docs/CONFIGURATION.md#script_apitokenless_send)
+is on, which it is in a config written before tokens. Before you turn it
+off, give your scripts that header too, and change brain instructions that
+`curl …/send` without one to send their run's token to
+`"$FRIDOLIN_API/send"`, as [Isolation](docs/BRAINS.md#isolation) shows.
+
 `fridolin version`, the dashboard's Overview and the `Starting fridolin …`
 line each start writes to the log say which version runs (on macOS:
 `grep 'Starting fridolin' ~/Library/Logs/fridolin/stderr.log | tail -1`).
@@ -326,9 +343,17 @@ by a wide margin.
 
 ```bash
 curl -X POST http://127.0.0.1:8765/send \
+  -H "Authorization: Bearer $(cat ~/.fridolin/scripts.token)" \
   -H 'Content-Type: application/json' \
   -d '{"jid":"120363000000000000@g.us","text":"Deploy finished ✅"}'
 ```
+
+The token in `~/.fridolin/scripts.token` is your scripts'. A brain
+sends its run's, from the file `$FRIDOLIN_BRAIN_TOKEN_FILE` names, and may
+send only to its own chats.
+Without a token, `/send` reaches only your allowed chats, and only while
+[`script_api.tokenless_send`](docs/CONFIGURATION.md#script_apitokenless_send)
+is on.
 
 `curl -fsS http://127.0.0.1:8765/ready` succeeds only while WhatsApp is
 connected, so a script can check first; its JSON names the connection state
@@ -340,6 +365,7 @@ sync), write them under `~/.fridolin/media/` and turn on
 
 ```bash
 curl -X POST http://127.0.0.1:8765/ingest \
+  -H "Authorization: Bearer $(cat ~/.fridolin/scripts.token)" \
   -H 'Content-Type: application/json' \
   -d '{"brain":"personal","paths":["/Users/you/.fridolin/media/upload/scan.pdf"],"text":"File this"}'
 ```
@@ -484,6 +510,12 @@ What the bridge does about it:
   bridge. On Linux, or with the sandbox off, a brain that runs with all
   permissions can read the token like any other file of yours; the
   dashboard warns about it.
+- **Tokens for `/send` and `/ingest`.** Each brain's run gets a token of
+  its own, which works while the run lasts: with it, a brain sends only to
+  its own chats and hands files only to itself, so it cannot make another
+  brain run with that brain's memories and credentials. Your scripts use
+  `~/.fridolin/scripts.token`;
+  see [docs/API.md](docs/API.md#who-may-call).
 - **You approve brain settings.** A brain that edits its own `brain.json` to
   claim your DMs or another group changes nothing until you approve it.
 - **OTP guard.** A message that is only a numeric code, arriving right after

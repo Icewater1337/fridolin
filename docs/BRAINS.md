@@ -249,3 +249,16 @@ or replace the folder itself and it re-opens nothing denied inside it; a
 brain whose folder is your home folder, or is itself something the sandbox
 protects, is refused. A run that cannot be sandboxed is refused, never run
 without it.
+
+A brain also reaches the bridge's [script API](API.md) only as itself,
+with its run's token, which `FRIDOLIN_BRAIN_TOKEN_FILE` names and which
+stops working when the run ends. With it a brain can send a message to its
+own chats (to tell you a job it runs finished, say) and hand files to
+itself, but not message other chats or make another brain run:
+
+```bash
+curl -X POST "$FRIDOLIN_API/send" \
+  -H "Authorization: Bearer $(cat "$FRIDOLIN_BRAIN_TOKEN_FILE")" \
+  -H 'Content-Type: application/json' \
+  -d '{"jid":"15551234567@s.whatsapp.net","text":"The report is ready"}'
+```

@@ -49,6 +49,7 @@ type Bridge struct {
 	token    *DashboardToken
 	// tokenAtStart is dashboard.require_token as the bridge started.
 	tokenAtStart bool
+	scriptAuth   *scriptAuth
 	backup       *BackupManager
 	google       *GoogleAuth
 	plaud        *PlaudManager
@@ -191,6 +192,9 @@ func NewBridge(cfgs *ConfigStore, opts BridgeOptions) (_ *Bridge, err error) {
 	}
 	b.token = tok
 	b.tokenAtStart = cfg.DashboardRequiresToken()
+	if b.scriptAuth, err = newScriptAuth(cfg.DataDir, b.runTokens.brainOf, func(id string) bool { return b.brainMgr.Get(id) != nil }); err != nil {
+		return nil, err
+	}
 	if !b.tokenAtStart {
 		log.Printf("warning: dashboard.require_token is off: any program on this computer, brains included, can change every setting through the dashboard API")
 	}

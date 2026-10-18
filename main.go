@@ -121,6 +121,8 @@ func starterConfig() *Config {
 		HTTPListen:                 defaultHTTPListen,
 		OTPGuard:                   true,
 		Sandbox:                    SandboxConfig{Enabled: runtime.GOOS == "darwin", DenyPaths: []string{}, AllowPaths: []string{}},
+		// A new install has no scripts written before tokens.
+		ScriptAPI: ScriptAPIConfig{TokenlessSend: &f},
 	}
 }
 

@@ -370,6 +370,7 @@ var securitySettings = []struct {
 	{"sandbox.credentials_dir", func(c *Config) any { return c.Sandbox.CredentialsDir }},
 	{"dashboard.require_token", func(c *Config) any { return fmt.Sprint(c.DashboardRequiresToken()) }},
 	{"ingest.enabled", func(c *Config) any { return fmt.Sprint(c.Ingest.Enabled) }},
+	{"script_api.tokenless_send", func(c *Config) any { return fmt.Sprint(c.TokenlessSend()) }},
 	{"http_listen", func(c *Config) any { return c.HTTPListen }},
 	{"data_dir", func(c *Config) any { return c.DataDir }},
 	{"db_path", func(c *Config) any { return c.DBPath }},

@@ -220,7 +220,9 @@ type siteBridgeLimits struct {
 	// SandboxProfiler.sitePaths.
 	deny, noWrite []string
 	// bridgePort is the port of the bridge's own HTTP server: the dashboard,
-	// and /send and /ingest, which take no token from programs on this Mac.
+	// /send, /ingest and /brain/. A module has no token for them, but /send
+	// still takes token-free sends to the allowed chats while
+	// script_api.tokenless_send is on.
 	bridgePort string
 }
 

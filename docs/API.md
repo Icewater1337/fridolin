@@ -9,8 +9,50 @@ and changes with the dashboard.
 All four answer on loopback only. They refuse a request whose `Host` is not
 the bridge's address (`421`, which stops DNS rebinding) and a write that a
 web page in your browser sent for another site (`403`, from the `Origin` or
-`Sec-Fetch-Site` header); those two answer in plain text. Programs such as curl, Python or Node send neither
-header and pass.
+`Sec-Fetch-Site` header); those two answer in plain text. Programs such as
+curl, Python or Node send neither header and pass.
+
+## Who may call
+
+Brains run on this computer too, and can reach the API with curl. So
+`/send` and `/ingest` ask who is calling, from an `Authorization: Bearer
+<token>` header (the scheme in any case, as HTTP allows):
+
+| Token | Who | `/send` | `/ingest` |
+| --- | --- | --- | --- |
+| `<data_dir>/scripts.token` | your own scripts | any chat | any brain |
+| the run's token, in the file `$FRIDOLIN_BRAIN_TOKEN_FILE` names | that brain, while the run lasts | its own chats | only itself |
+| none | anyone on this computer | the allowed chats, while `script_api.tokenless_send` is on | refused |
+
+- The bridge makes `scripts.token` on its first start. It is readable only
+  by your user, and the macOS sandbox denies it to brains, like the rest of
+  the data dir. On Linux, or with the sandbox off, a brain can read it.
+- Every brain run gets `FRIDOLIN_API`, the API's address, and
+  `FRIDOLIN_BRAIN_TOKEN_FILE`, a file with a token for that run: the
+  token of the [brain API](CONFIGURATION.md#http_listen-restart), which
+  stops working when the run ends. The macOS sandbox lets only that brain
+  read the file. The token is not in the run's environment, since macOS
+  shows a process's environment to every program of the same user, other
+  brains included. A brain's own chats are its reply chat and the allowed
+  chats that route to it: the groups it claims, for the fallback brain
+  ([`routing.default`](BRAINS.md#brainjson)) also the allowed groups no
+  brain claims, and, for the brain that gets DMs, the allowed numbers.
+- Without a token, `/send` reaches only the chats `allowed_numbers` and
+  `allowed_groups` name, and only while
+  [`script_api.tokenless_send`](CONFIGURATION.md#script_apitokenless_send)
+  is on, so scripts written before tokens keep working. A brain could use it
+  to message chats that are not its own, which is why new configs turn it
+  off.
+- A token the bridge did not give out, one of a run that is over, or one
+  of a brain that was removed, is refused with `401`; it never falls back
+  to calling without one.
+
+```bash
+curl -X POST http://127.0.0.1:8765/send \
+  -H "Authorization: Bearer $(cat ~/.fridolin/scripts.token)" \
+  -H 'Content-Type: application/json' \
+  -d '{"jid":"120363000000000000@g.us","text":"Deploy finished ✅"}'
+```
 
 ## `GET /health`
 
@@ -46,11 +88,16 @@ Sends a WhatsApp message.
 The message is appended to the history of the brain that owns the chat, so
 the brain knows what went out in its chat; a code request sent this way arms
 the OTP guard (see [`otp_guard`](CONFIGURATION.md#otp_guard-and-otp_markers)).
+The line is marked with how it came in (`"via"`: `"script"`, `"brain"` or
+`"api"` for no token), and the brain's chat history shows it as sent by a
+script or the brain that sent it, not as the brain's own words.
 
 | Status | Body | When |
 | --- | --- | --- |
 | `200` | `{"status": "sent"}` | Every part went out. |
 | `400` | `{"error": …}` | The body is not JSON, `jid` or `text` is missing or blank, `jid` is not a chat, or it is a Status, broadcast list or channel (`…@broadcast`, `…@newsletter`), which the bridge never posts to. |
+| `401` | `{"error": …}` | No token while `script_api.tokenless_send` is off, or a token the bridge did not give out. |
+| `403` | `{"error": …}` | The caller may not send to that chat (see [Who may call](#who-may-call)). |
 | `503` | `{"error": …}` | WhatsApp is not connected or not paired. Try again later. |
 | `500` | `{"error": …}` | Any other send failure. |
 
@@ -68,7 +115,8 @@ sync), as if they were sent in its chat. Off until
 ```
 
 - `brain`: the brain that handles it. `scope`, its old name, is refused
-  with `400`, so a script that still sends it learns the name to use.
+  with `400`, so a script that still sends it learns the name to use. A
+  brain calling with its run's token may leave it out.
 - `paths`: files already written inside the media directory
   (`<data_dir>/media` by default). Each must be an absolute path to a
   regular file there, also after symlinks are resolved.
@@ -84,6 +132,8 @@ brain. The request returns at once; the run happens afterwards.
 | --- | --- | --- |
 | `202` | `{"status": "accepted", "jid": …}` | Queued; `jid` is the chat the answer goes to. |
 | `400` | `{"error": …}` | The body is not JSON, it has `scope`, nothing to hand over, an unknown brain, a path outside the media directory or not a regular file, or a brain with no chat to answer in. |
+| `401` | `{"error": …}` | No token, or one the bridge did not give out. |
+| `403` | `{"error": …}` | A brain named another brain. |
 | `404` | `{"error": …}` | `ingest.enabled` is off. |
 
 ## Limits

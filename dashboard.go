@@ -31,39 +31,46 @@ import (
 //     macOS sandbox: on Linux, or with the sandbox off, a brain with all
 //     permissions can read the token, and the status page says so.
 //
-// /send, /ingest, /health and /ready keep their token-free contract for
-// local scripts, but get the same Host and Origin checks.
+// /health and /ready need no token. /send and /ingest get the same Host and
+// Origin checks, and capability tokens of their own (scripttoken.go).
 
-// DashboardToken is the shared secret between the bridge and your browser.
+// DashboardToken is a secret kept in a file of the data dir: the
+// dashboard's, or the one scripts send to /send and /ingest.
 type DashboardToken struct {
 	path string
 	v    atomic.Value // string
 }
 
-// minTokenLen is the shortest token file LoadDashboardToken accepts; Rotate
-// writes 48 hex digits.
+// minTokenLen is the shortest token loadTokenFile accepts; Rotate writes 48
+// hex digits.
 const minTokenLen = 32
 
 // LoadDashboardToken reads <dataDir>/dashboard.token, creating it on first
-// run. Only a missing file makes a new token: one that cannot be read or
-// holds something too short to be a token is an error, since quietly
-// replacing it would log out every dashboard and script that uses it, and
-// hide whatever broke the file.
+// run (see loadTokenFile).
 func LoadDashboardToken(dataDir string) (*DashboardToken, error) {
-	t := &DashboardToken{path: filepath.Join(dataDir, "dashboard.token")}
+	return loadTokenFile(filepath.Join(dataDir, "dashboard.token"))
+}
+
+// loadTokenFile reads the token in path, creating the file when there is
+// none. Only a missing file makes a new token: one that cannot be read or
+// holds something too short to be a token is an error, since quietly
+// replacing it would lock out every dashboard and script that uses it, and
+// hide whatever broke the file.
+func loadTokenFile(path string) (*DashboardToken, error) {
+	t := &DashboardToken{path: path}
 	data, err := os.ReadFile(t.path)
 	switch {
 	case errors.Is(err, fs.ErrNotExist):
 		if err := t.Rotate(); err != nil {
-			return nil, fmt.Errorf("creating dashboard token: %w", err)
+			return nil, fmt.Errorf("creating token %s: %w", path, err)
 		}
 		return t, nil
 	case err != nil:
-		return nil, fmt.Errorf("reading dashboard token: %w", err)
+		return nil, fmt.Errorf("reading token: %w", err)
 	}
 	tok := strings.TrimSpace(string(data))
 	if len(tok) < minTokenLen || strings.ContainsAny(tok, " \t\r\n") {
-		return nil, fmt.Errorf("dashboard token %s is not a token (delete the file and the bridge makes a new one)", t.path)
+		return nil, fmt.Errorf("%s is not a token (delete the file and the bridge makes a new one)", t.path)
 	}
 	t.v.Store(tok)
 	return t, nil

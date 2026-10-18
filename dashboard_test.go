@@ -79,11 +79,13 @@ func (tb *testBridge) do(method, path string, body any, mutate ...func(*http.Req
 	return w
 }
 
-// ingest posts to /ingest the way a local script does: no dashboard token.
+// ingest posts to /ingest the way a local script does: no dashboard token,
+// the scripts token.
 func (tb *testBridge) ingest(body string) *httptest.ResponseRecorder {
 	r := httptest.NewRequest("POST", "http://127.0.0.1:8765/ingest", strings.NewReader(body))
 	r.Host = "127.0.0.1:8765"
 	r.Header.Set("Content-Type", "application/json")
+	r.Header.Set("Authorization", "Bearer "+tb.scriptAuth.scripts.Value())
 	w := httptest.NewRecorder()
 	tb.h.ServeHTTP(w, r)
 	return w
