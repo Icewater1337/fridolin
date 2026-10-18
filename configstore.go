@@ -360,6 +360,7 @@ var securitySettings = []struct {
 	{"allowed_numbers", func(c *Config) any { return c.AllowedNumbers }},
 	{"allow_any_dm", func(c *Config) any { return fmt.Sprint(c.AllowsAnyDM()) }},
 	{"allowed_groups", func(c *Config) any { return c.AllowedGroups }},
+	{"group_members", func(c *Config) any { return groupMemberPairs(c.GroupMembers) }},
 	{"dangerously_skip_permissions", func(c *Config) any { return fmt.Sprint(c.DangerouslySkipPermissions) }},
 	{"inherit_claude_user_config", func(c *Config) any { return fmt.Sprint(c.InheritClaudeUserConfig) }},
 	{"child_env_passthrough", func(c *Config) any { return c.ChildEnvPassthrough }},

@@ -305,7 +305,7 @@ export default {
           field({ label: 'Name', control: nameIn }),
           field({ label: 'Id', control: h('div.static', mono(m.id)), help: 'Ids cannot change. To use a new id, remove the brain and add the folder again.' })),
         h('fieldset.fieldset', h('legend', 'Chats'), routing,
-          field({ label: 'Untagged group messages', control: observeSel, help: 'Messages in a group that nobody addressed to the brain. They go into its history either way, for its next run there, and get no reply. A run of its own for each lets the brain take notes as the conversation goes, but costs a full Claude run, with tools, on whatever anyone in the group writes; a message addressed to the brain stops it.' })),
+          field({ label: 'Untagged group messages', control: observeSel, help: 'Messages in a group that nobody addressed to the brain. They go into its history either way, for its next run there, and get no reply. A run of its own for each lets the brain take notes as the conversation goes, but costs a full Claude run, with tools, on whatever any member the group admits (group_members in config.json) writes; a message addressed to the brain stops it.' })),
         h('fieldset.fieldset', h('legend', 'Model and tools'),
           fields.model,
           h('div.field', toolsSw, h('div.help', `Off: use the global list of blocked tools (${globalTools}).`)),

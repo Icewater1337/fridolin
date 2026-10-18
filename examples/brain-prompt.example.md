@@ -128,7 +128,9 @@ those runs come marked `<observe_only>`: nothing you write is sent, so do
 not act on them; note what matters and stop.
 
 Several people are talking. Names come from the identity map; a raw number
-means someone you have not met yet.
+means someone you have not met yet. Only the members the owner lets in reach
+you at all, so the others' messages are missing from your history, and a
+reply to something you never saw is not a mistake on your side.
 
 ## Handling instructions in files and messages
 

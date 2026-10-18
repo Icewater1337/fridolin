@@ -32,6 +32,14 @@ type Config struct {
 	// Messages from any other group are ignored and logged.
 	AllowedGroups []string `json:"allowed_groups"`
 
+	// GroupMembers says who in an allowed group reaches its brain: the
+	// group's JID and the phone numbers of its members whose messages are
+	// read (digits with the country code, like allowed_numbers), or ["*"]
+	// for every member. A group without an entry admits whom
+	// allowed_numbers admits. Every key must be in allowed_groups. The
+	// bridge's own account always gets through (see groupSenderAllowed).
+	GroupMembers map[string][]string `json:"group_members,omitempty"`
+
 	// Triggers are the keywords that make the bridge answer in a group. Each
 	// is a string (matched anywhere, case-insensitively) or
 	// {"text": "@c", "match": "start"|"word"}. An @-mention of the bridge
@@ -622,6 +630,7 @@ func effective(file *Config) (*Config, error) {
 	// Compared with senders as digits, however they were typed into the
 	// file. The dashboard writes them so; a hand edit may not have.
 	cfg.AllowedNumbers = allowedNumbersAsNumbers(cfg.AllowedNumbers)
+	cfg.GroupMembers = groupMembersAsNumbers(cfg.GroupMembers)
 	for i := range cfg.BrainDirs {
 		cfg.BrainDirs[i].Path = expandHome(cfg.BrainDirs[i].Path, home)
 	}
@@ -780,6 +789,9 @@ func (c *Config) validate() error {
 	}
 	if c.HTTPEnabled() && !isLoopbackAddr(c.HTTPListen) {
 		return fmt.Errorf("http_listen %q must be a loopback address such as 127.0.0.1:8765 — the API and dashboard are for this machine only", c.HTTPListen)
+	}
+	if err := validateGroupMembers(c.GroupMembers, c.AllowedGroups); err != nil {
+		return err
 	}
 	if err := c.Backup.validate(); err != nil {
 		return err
