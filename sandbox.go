@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io/fs"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"regexp"
 	"runtime"
@@ -87,6 +88,11 @@ type sandboxPolicy struct {
 	// Code keeps its setup and state instead of ~/.claude, or "".
 	claudeDir string
 
+	// claudePath, rclonePath, plaudCLIPath and viewer name the programs the
+	// bridge itself runs outside the sandbox; see bridgeProgramsOf.
+	claudePath, rclonePath, plaudCLIPath string
+	viewer                               bool
+
 	// inbox and state name what the bridge keeps for brain id outside its
 	// folder, the only places there the brain may write: its media inbox
 	// (see mediaInbox) and its own state (see brainStateOf). Each is nil
@@ -105,15 +111,19 @@ func sandboxPolicyOf(cfg *Config) sandboxPolicy {
 	// These may be relative, and the bridge opens them relative to its
 	// working directory; the comparisons need them absolute.
 	p := sandboxPolicy{
-		dataDir:     absPath(cfg.DataDir),
-		dbPath:      absPath(cfg.DBPath),
-		mediaDir:    absPath(cfg.MediaDir),
-		credsDir:    cfg.Sandbox.CredentialsDir,
-		gitConfig:   cfg.Sandbox.GitConfig,
-		plaudShared: cfg.Plaud.BrainAccess,
-		inheritUser: cfg.InheritClaudeUserConfig,
-		extraDeny:   append([]string(nil), cfg.Sandbox.DenyPaths...),
-		extraAllow:  append([]string(nil), cfg.Sandbox.AllowPaths...),
+		dataDir:      absPath(cfg.DataDir),
+		dbPath:       absPath(cfg.DBPath),
+		mediaDir:     absPath(cfg.MediaDir),
+		credsDir:     cfg.Sandbox.CredentialsDir,
+		gitConfig:    cfg.Sandbox.GitConfig,
+		plaudShared:  cfg.Plaud.BrainAccess,
+		inheritUser:  cfg.InheritClaudeUserConfig,
+		claudePath:   cfg.ClaudePath,
+		rclonePath:   cfg.Backup.RclonePath,
+		plaudCLIPath: cfg.Plaud.CLIPath,
+		viewer:       cfg.Viewer,
+		extraDeny:    append([]string(nil), cfg.Sandbox.DenyPaths...),
+		extraAllow:   append([]string(nil), cfg.Sandbox.AllowPaths...),
 	}
 	if p.mediaDir == "" && p.dataDir != "" {
 		p.mediaDir = filepath.Join(p.dataDir, "media")
@@ -372,9 +382,10 @@ var launchers = []string{"/bin/launchctl", "/usr/bin/open", "/usr/bin/osascript"
 //  2. Soft denies: reading private home folders, your Claude Code setup,
 //     deny_paths entries. The allows below may open them.
 //  3. Allows: the brain's own folder (read and write), allow_paths (read).
-//  4. Hard denies: other brains' folders, the bridge's own files, the
-//     keychains and your instructions above the brain's folder. Nothing a
-//     brain or an allow_paths entry is given opens these again...
+//  4. Hard denies: other brains' folders, the bridge's own files and the
+//     programs it runs, the keychains and your instructions above the
+//     brain's folder. Nothing a brain or an allow_paths entry is given
+//     opens these again...
 //  5. ...but what the bridge gives this brain inside them: its media inbox,
 //     its state dir and its runs' brain API tokens (to read); and with
 //     plaud.brain_access the Plaud login, which the Plaud CLI refreshes.
@@ -628,17 +639,40 @@ func (sp *SandboxProfiler) Profile(brainID string) (string, error) {
 	for _, p := range sp.bridgeDirs() {
 		b.deny("file-write*", "subpath", p)
 	}
+	// The same goes for the programs the bridge runs outside the sandbox and
+	// the folders it looks them up in by name: a brain that replaced one,
+	// or planted one ahead of it, would run code outside its sandbox the
+	// next time the bridge starts it. A PATH folder that holds one of this
+	// brain's own places (HOME on PATH, say) keeps only what the default
+	// deny gives it, or the brain could not write its own folder.
+	progs := sp.bridgeProgramsOf(home)
+	for _, f := range progs.files {
+		b.deny("file-write*", "literal", f)
+	}
+	for _, d := range progs.dirs {
+		b.deny("file-write*", "subpath", d)
+	}
+	places := slices.Clone(own) // the brain's own places: its folder, inbox and state
+	if sp.inbox != nil {
+		places = append(places, sp.inbox(brainID))
+	}
+	if sp.state != nil {
+		places = append(places, sp.state(brainID).dir)
+	}
+	for _, d := range progs.path {
+		if !slices.ContainsFunc(places, func(p string) bool { return isWithin(p, d) || isWithin(resolvePath(p), resolvePath(d)) }) {
+			b.deny("file-write*", "subpath", d)
+		}
+	}
 	b.WriteString("\n")
 
 	// ── 5. what the bridge gives this brain ──────────────────────────────
 	b.WriteString(";; 5. This brain's media inbox, state and brain API tokens, and a shared Plaud login\n")
 	var pins []string
-	places := slices.Clone(own) // the brain's own places, for the folders above them
 	if sp.inbox != nil {
 		inbox := sp.inbox(brainID)
 		b.allow("file-read*", "subpath", inbox)
 		pins = append(pins, b.allow("file-write*", "subpath", inbox)...)
-		places = append(places, inbox)
 	}
 	var state brainState
 	if sp.state != nil {
@@ -648,7 +682,6 @@ func (sp *SandboxProfiler) Profile(brainID string) (string, error) {
 		for _, f := range state.folders() {
 			pins = append(pins, b.spellings(f, true)...)
 		}
-		places = append(places, state.dir)
 	}
 	// The brain API tokens of this brain's runs (see brainRunEnv), to read
 	// and no more; every other brain's stay denied with the data dir. No
@@ -927,6 +960,97 @@ func (p sandboxPolicy) protected(home string, l bridgeLayout) []protectedPath {
 	add(p.dbFolder(home), true, "the database's folder")
 	add(l.Source, true, "the bridge's source checkout")
 	add(l.Dir, true, "the folder the bridge is installed in")
+	progs := p.bridgeProgramsOf(home)
+	for _, f := range progs.files {
+		add(f, false, "the program "+f+" the bridge runs")
+	}
+	for _, d := range progs.dirs {
+		add(d, true, d+", which holds programs the bridge runs")
+	}
+	// A brain inside a PATH folder cannot put a program into it, only into
+	// its own folder below.
+	for _, d := range progs.path {
+		add(d, false, "the folder "+d+" the bridge runs programs from")
+	}
+	return out
+}
+
+// bridgePrograms is what the bridge runs outside any sandbox, and where it
+// finds it: a brain that changed any of it would run code outside its
+// sandbox the next time the bridge starts that program.
+type bridgePrograms struct {
+	// files are the programs as the bridge finds them now, and the files
+	// they resolve to: the Claude CLI (claude --version for the dashboard),
+	// rclone for backups, the Plaud CLI, tmux for the viewer and node for
+	// the site, and the node that runs a node script among them.
+	files []string
+	// dirs are folders every file of which counts: the npm package of a
+	// node script, all of which node loads, and nvm's node versions, where
+	// the bridge looks for node and the Plaud CLI off its PATH and takes
+	// the newest.
+	dirs []string
+	// path are the folders the bridge looks programs up in by name (git,
+	// gh, npm, open and the rest as well): its PATH, the Plaud CLI's, and
+	// the folders it falls back on, Homebrew's and ~/.local/bin.
+	path []string
+}
+
+// bridgeProgramsOf finds the bridge's programs as it would find them now.
+func (p sandboxPolicy) bridgeProgramsOf(home string) bridgePrograms {
+	var found []string
+	if c, err := exec.LookPath(cmp.Or(p.claudePath, "claude")); err == nil {
+		found = append(found, c)
+	}
+	if r, err := findRclone(p.rclonePath); err == nil {
+		found = append(found, r)
+	}
+	plaud, plaudErr := findPlaudCLI(p.plaudCLIPath)
+	if plaudErr == nil {
+		found = append(found, plaud)
+	}
+	if p.viewer {
+		if t := findTmux(); t != "" {
+			found = append(found, t)
+		}
+	}
+	var out bridgePrograms
+	var path []string
+	path = append(path, filepath.SplitList(os.Getenv("PATH"))...)
+	if plaudErr == nil {
+		path = append(path, filepath.SplitList(plaudPATH(plaud))...)
+	}
+	path = append(path, toolFallbackDirs()...)
+	if n, err := findNode(); err == nil {
+		// The site's processes run with node's folder first on PATH.
+		found = append(found, n)
+		path = append(path, filepath.Dir(n))
+	}
+	for _, f := range found {
+		abs := absPath(f)
+		out.files = append(out.files, abs, resolvePath(abs))
+		if pkg := nodePackage(resolvePath(abs)); pkg != "" {
+			out.dirs = append(out.dirs, pkg)
+			// #!/usr/bin/env node: the bridge runs the Plaud CLI with its
+			// own folder first on PATH, everything else with its own PATH.
+			for _, pp := range []string{plaudPATH(abs), os.Getenv("PATH")} {
+				if node := lookPathIn("node", pp); node != "" {
+					out.files = append(out.files, node, resolvePath(node))
+				}
+			}
+		}
+	}
+	out.files = append(out.files, rcloneFallbacks()...)
+	out.dirs = append(out.dirs, filepath.Join(home, nvmNodeVersions))
+	for _, d := range path {
+		// exec.LookPath skips relative entries.
+		if d = filepath.Clean(d); filepath.IsAbs(d) {
+			out.path = append(out.path, d)
+		}
+	}
+	for _, s := range []*[]string{&out.files, &out.dirs, &out.path} {
+		slices.Sort(*s)
+		*s = slices.Compact(*s)
+	}
 	return out
 }
 

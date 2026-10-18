@@ -3196,7 +3196,9 @@ func TestPlaudPATH(t *testing.T) {
 // and the CLI's #!/usr/bin/env node looks up node on it. Any other CLI
 // folder comes last, so that nothing in it runs in place of a program on
 // the bridge's PATH in another brain's run. The sandbox keeps brains from
-// writing in any of these folders, as anywhere outside their own places.
+// writing in any of these folders, as anywhere outside their own places,
+// and a brain folder may not hold one (see bridgeProgramsOf), so that no
+// brain can put a node in the CLI's folder that would move it first.
 func TestBrainPlaudPATH(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
@@ -3229,8 +3231,19 @@ func TestBrainPlaudPATH(t *testing.T) {
 			if tc.first && dirs[0] != tc.dir || !tc.first && dirs[len(dirs)-1] != tc.dir {
 				t.Errorf("brainPlaudPATH = %s, want %s first: %v", got, tc.dir, tc.first)
 			}
-			if !strings.Contains(got, os.Getenv("PATH")) {
+			i := strings.Index(got, os.Getenv("PATH"))
+			if i < 0 {
 				t.Fatalf("brainPlaudPATH = %s, which lacks the bridge's PATH", got)
+			}
+			progs := NewSandboxProfiler(nil, cfg).bridgeProgramsOf(home)
+			covered := func(dir string) bool { return slices.Contains(progs.path, dir) || withinAny(dir, progs.dirs) }
+			for _, d := range filepath.SplitList(strings.TrimSuffix(got[:i], ":")) {
+				if !covered(d) {
+					t.Errorf("brainPlaudPATH = %s, whose %s comes ahead of the bridge's PATH but is not kept from brains", got, d)
+				}
+			}
+			if !covered(tc.dir) {
+				t.Errorf("the sandbox does not keep brains from planting a node in %s", tc.dir)
 			}
 		})
 	}

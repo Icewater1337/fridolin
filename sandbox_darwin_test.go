@@ -654,6 +654,54 @@ func TestSandboxWritesOnlyItsOwnPlaces(t *testing.T) {
 	}
 }
 
+// TestSandboxKeepsTheBridgesProgramsFromBrains: the bridge runs the Claude
+// CLI, rclone and the rest outside any sandbox, found by name in the
+// folders of its PATH. A brain whose folder held such a folder could plant a
+// program there that the bridge then ran unsandboxed; under the real
+// sandbox-exec that brain does not run at all. A brain whose folder lies in
+// a PATH folder (~/assistant on PATH) still writes its own folder, and
+// nothing else there.
+func TestSandboxKeepsTheBridgesProgramsFromBrains(t *testing.T) {
+	requireSandboxExec(t)
+	home := canonicalDir(t.TempDir())
+	t.Setenv("HOME", home)
+	sp, own := sandboxFixture(t, home, "b", "clients")
+	claude := filepath.Join(home, ".local", "bin", "claude")
+	if err := os.MkdirAll(filepath.Dir(claude), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(claude, []byte("#!/bin/sh\necho ran\n"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", home+"/assistant:"+home+"/.local/bin:"+home+"/bin2:/usr/bin:/bin")
+	cases := []struct {
+		name, cmd string // cmd runs in sh with $HOME set
+		allow     bool
+	}{
+		{"write its own folder in a PATH folder", `printf x > "$PWD/new.md"`, true},
+		{"run the Claude CLI", `"$HOME/.local/bin/claude"`, true},
+		{"replace the Claude CLI", `printf x > "$HOME/.local/bin/claude"`, false},
+		{"plant a program next to its folder, on PATH", `printf x > "$HOME/assistant/git"`, false},
+		{"plant a program in a PATH folder not there yet", `mkdir -p "$HOME/bin2" && printf x > "$HOME/bin2/gh"`, false},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			if allowed, out := sandboxRun(t, sp, own, "/bin/sh", "-c", c.cmd); allowed != c.allow {
+				t.Errorf("%s: allowed=%v, want %v (output %q)", c.cmd, allowed, c.allow, out)
+			}
+		})
+	}
+	t.Run("a brain whose folder holds a PATH folder", func(t *testing.T) {
+		t.Setenv("PATH", own+"/bin:/usr/bin:/bin")
+		if bin, args, err := sp.Command("a", "/bin/sh", []string{"-c", `mkdir -p bin && printf x > bin/rclone`}); err == nil {
+			cmd := exec.Command(bin, args...)
+			cmd.Dir = own
+			out, err := cmd.CombinedOutput()
+			t.Errorf("brain a ran (%v, %q), want it refused", err, out)
+		}
+	})
+}
+
 // TestSandboxDeniesBridgeSecretsWhereverTheyLive: with db_path outside the
 // data dir, the WhatsApp session store (enough to take the account over
 // from another machine) used to be readable by every brain, and so was a

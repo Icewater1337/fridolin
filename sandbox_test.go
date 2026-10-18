@@ -1255,6 +1255,179 @@ func TestSandboxProfileWritesOnlyItsOwnPlaces(t *testing.T) {
 	}
 }
 
+// TestNodePackage finds the npm package folder of an installed file.
+func TestNodePackage(t *testing.T) {
+	cases := []struct{ in, want string }{
+		{"/n/lib/node_modules/@plaud-ai/cli/dist/index.js", "/n/lib/node_modules/@plaud-ai/cli"},
+		{"/n/lib/node_modules/@anthropic-ai/claude-code/cli.js", "/n/lib/node_modules/@anthropic-ai/claude-code"},
+		{"/n/lib/node_modules/rimraf/bin.js", "/n/lib/node_modules/rimraf"},
+		{"/n/lib/node_modules/a/node_modules/b/bin.js", "/n/lib/node_modules/a/node_modules/b"},
+		{"/n/lib/node_modules/@scope", ""},
+		{"/n/lib/node_modules/rimraf", ""},
+		{"/Users/you/.local/share/claude/versions/2.1.0", ""},
+	}
+	for _, tc := range cases {
+		if got := nodePackage(tc.in); got != tc.want {
+			t.Errorf("nodePackage(%s) = %q, want %q", tc.in, got, tc.want)
+		}
+	}
+}
+
+// bridgeProgramsFixture installs fake programs in a fake HOME: the Claude
+// CLI in ~/.local/bin (a symlink to its versions folder, as its installer
+// lays it out), rclone and tmux in ~/bin, and the Plaud CLI as a node script
+// in an nvm node version, off PATH. PATH finds only the Claude CLI, and also
+// names ~/bin2 and ~/tools/bin, which do not exist yet. It returns a config
+// whose bridge runs all of them, the viewer's tmux included.
+func bridgeProgramsFixture(t *testing.T, home string) *Config {
+	t.Helper()
+	t.Setenv("HOME", home)
+	t.Setenv("PATH", home+"/.local/bin:"+home+"/bin2:"+home+"/tools/bin:/usr/bin:/bin")
+	nvm := ".nvm/versions/node/v22.0.0/"
+	for _, f := range []string{
+		".local/share/claude/versions/1.0.0",
+		"bin/rclone",
+		"bin/tmux",
+		nvm + "bin/node",
+		nvm + "lib/node_modules/@plaud-ai/cli/dist/index.js",
+		"a/notes.md",
+	} {
+		p := filepath.Join(home, f)
+		if err := os.MkdirAll(filepath.Dir(p), 0o700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(p, []byte("#!/bin/sh\necho ran "+filepath.Base(f)+"\n"), 0o700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for link, target := range map[string]string{
+		".local/bin/claude": "../share/claude/versions/1.0.0",
+		nvm + "bin/plaud":   "../lib/node_modules/@plaud-ai/cli/dist/index.js",
+	} {
+		p := filepath.Join(home, link)
+		if err := os.MkdirAll(filepath.Dir(p), 0o700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Symlink(target, p); err != nil {
+			t.Fatal(err)
+		}
+	}
+	old := tmuxPath
+	tmuxOnce.Do(func() {}) // keep findTmux from looking up the real one
+	tmuxPath = home + "/bin/tmux"
+	t.Cleanup(func() { tmuxPath = old })
+	return &Config{ClaudePath: "claude", Viewer: true, Backup: BackupConfig{RclonePath: home + "/bin/rclone"}}
+}
+
+// TestSandboxProfileProtectsTheBridgesPrograms: the bridge runs the Claude
+// CLI, rclone, the Plaud CLI, tmux and node outside any sandbox, and finds
+// them, and git, gh, npm and the rest, by name in the folders of its PATH.
+// A brain that replaced one, or planted one ahead of it, would run code
+// outside its sandbox the next time the bridge starts it. Writing is denied
+// everywhere anyway; these hard denies keep them closed whatever is
+// allowed before them, as found and as resolved, with the npm package and
+// the node of a node script, nvm's node versions, rclone off PATH and the
+// folders of PATH, those not there yet too. A PATH folder that holds the
+// brain's own folder (HOME on PATH) is left to the default deny, or the
+// brain could not write its own folder.
+func TestSandboxProfileProtectsTheBridgesPrograms(t *testing.T) {
+	home := canonicalDir(t.TempDir())
+	cfg := bridgeProgramsFixture(t, home)
+	own := home + "/a"
+	sp := NewSandboxProfiler(map[string][]string{"a": {own}}, cfg)
+	rules := profileRules(mustProfile(t, sp, "a"))
+	ownAllow := slices.Index(rules, `(allow file-write* (subpath "`+own+`"))`)
+	if ownAllow < 0 {
+		t.Fatal("profile does not let brain a write its own folder")
+	}
+	nvm := home + "/.nvm/versions/node/v22.0.0"
+	cases := []struct{ name, filter, path string }{
+		{"the Claude CLI on PATH", "literal", home + "/.local/bin/claude"},
+		{"the Claude CLI it resolves to", "literal", home + "/.local/share/claude/versions/1.0.0"},
+		{"the configured rclone", "literal", home + "/bin/rclone"},
+		{"rclone off PATH", "literal", home + "/.local/bin/rclone"},
+		{"the Plaud CLI found in nvm", "literal", nvm + "/bin/plaud"},
+		{"the script it resolves to", "literal", nvm + "/lib/node_modules/@plaud-ai/cli/dist/index.js"},
+		{"the Plaud CLI's npm package", "subpath", nvm + "/lib/node_modules/@plaud-ai/cli"},
+		{"the node that runs it", "literal", nvm + "/bin/node"},
+		{"tmux for the viewer", "literal", home + "/bin/tmux"},
+		{"nvm's node versions", "subpath", home + "/.nvm/versions/node"},
+		{"a PATH folder", "subpath", home + "/.local/bin"},
+		{"a PATH folder not there yet", "subpath", home + "/bin2"},
+		{"the Plaud CLI's own folder, first on its PATH", "subpath", nvm + "/bin"},
+		{"a folder the bridge falls back on", "subpath", "/opt/homebrew/bin"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			rule := `(deny file-write* (` + tc.filter + ` "` + tc.path + `"))`
+			i := slices.Index(rules, rule)
+			if i < 0 {
+				t.Fatalf("profile lacks %s", rule)
+			}
+			if i < ownAllow {
+				t.Errorf("%s (rule %d) comes before the brain's own folder (rule %d), which would open it", rule, i, ownAllow)
+			}
+			if r := `(deny file-read* (` + tc.filter + ` "` + tc.path + `"))`; slices.Contains(rules, r) {
+				t.Errorf("profile denies running it: %s", r)
+			}
+		})
+	}
+	t.Run("a PATH folder that holds the brain's folder", func(t *testing.T) {
+		t.Setenv("PATH", home+":"+os.Getenv("PATH"))
+		rules := profileRules(mustProfile(t, sp, "a"))
+		if r := `(deny file-write* (subpath "` + home + `"))`; slices.Contains(rules, r) {
+			t.Errorf("profile has %s, which closes the brain's own folder", r)
+		}
+		if r := `(deny file-write* (subpath "` + home + `/.local/bin"))`; !slices.Contains(rules, r) {
+			t.Errorf("profile lacks %s", r)
+		}
+	})
+}
+
+// TestSandboxRefusesBrainFoldersHoldingItsPrograms: a brain may write its
+// own folder, so a folder that is or holds a PATH folder, or one of the
+// programs the bridge runs outside the sandbox, or lies inside the npm
+// package of one or nvm's node versions, would let it plant code there
+// that the bridge runs. Such a folder is refused, by every profile and when
+// the brains are loaded; a folder inside a PATH folder is not, since a
+// brain there writes only below it.
+func TestSandboxRefusesBrainFoldersHoldingItsPrograms(t *testing.T) {
+	home := canonicalDir(t.TempDir())
+	cfg := bridgeProgramsFixture(t, home)
+	nvm := home + "/.nvm/versions/node/v22.0.0"
+	cases := []struct{ name, dir, want string }{
+		{"a PATH folder not there yet", home + "/bin2", "is the folder " + home + "/bin2 the bridge runs programs from"},
+		{"a PATH folder with the Claude CLI", home + "/.local/bin", "holds the program " + home + "/.local/bin/claude the bridge runs"},
+		{"a folder holding a PATH folder not there yet", home + "/tools", "holds the folder " + home + "/tools/bin the bridge runs programs from"},
+		// By the file the CLI on PATH resolves to.
+		{"the Claude CLI's install", home + "/.local/share/claude", "holds the program " + home + "/.local/bin/claude the bridge runs"},
+		{"the folder of rclone and tmux", home + "/bin", "holds the program " + home + "/bin/rclone the bridge runs"},
+		{"inside nvm's node versions", home + "/.nvm/versions/node/v9", "is inside " + home + "/.nvm/versions/node, which holds programs the bridge runs"},
+		{"inside the Plaud CLI's npm package", nvm + "/lib/node_modules/@plaud-ai/cli/x", "which holds programs the bridge runs"},
+		{"inside a PATH folder", home + "/.local/bin/brain", ""},
+		{"a folder of its own", home + "/a", ""},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			sp := NewSandboxProfiler(map[string][]string{"a": {tc.dir}}, cfg)
+			_, err := sp.Profile("a")
+			dirErr := checkBrainDir(tc.dir, tc.dir, cfg, home)
+			if tc.want == "" {
+				if err != nil || dirErr != nil {
+					t.Errorf("Profile: %v; checkBrainDir: %v; want both to accept it", err, dirErr)
+				}
+				return
+			}
+			if err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Errorf("Profile error = %v, want one saying %q", err, tc.want)
+			}
+			if dirErr == nil || !strings.Contains(dirErr.Error(), tc.want) {
+				t.Errorf("checkBrainDir = %v, want one saying %q", dirErr, tc.want)
+			}
+		})
+	}
+}
+
 // TestSandboxProfileKeepsYourClaudeSetup: brains used to share ~/.claude
 // with you and each other: they could read your settings, plugins and
 // ~/.claude.json with its MCP servers, and write state every other run

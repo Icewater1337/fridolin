@@ -490,9 +490,10 @@ func (p *PlaudManager) cliPath() (string, error) {
 const nvmNodeVersions = ".nvm/versions/node"
 
 // findPlaudCLI finds the plaud binary, given plaud.cli_path. The sandbox
-// profile uses it too, to keep brains from replacing the CLI. Without
-// cli_path it looks only in the PATH folders helperPath keeps, since the
-// CLI runs outside the sandbox, then in nvm and the usual prefixes.
+// profile uses it too, to keep brains from replacing the CLI (see
+// bridgeProgramsOf). Without cli_path it looks only in the PATH folders
+// helperPath keeps, since the CLI runs outside the sandbox, then in nvm
+// and the usual prefixes.
 func findPlaudCLI(c string) (string, error) {
 	if c != "" {
 		if _, err := os.Stat(c); err != nil {
@@ -527,7 +528,8 @@ func findPlaudCLI(c string) (string, error) {
 // CLI's #!/usr/bin/env node needs, as in plaudPATH. Any other comes last:
 // brains find `plaud` there all the same, and nothing a brain put there
 // runs in place of a program on the bridge's PATH, such as the claude that
-// sandbox-exec starts for every brain's run.
+// sandbox-exec starts for every brain's run. The sandbox also keeps brains
+// from writing to every folder on that PATH (see bridgeProgramsOf).
 func brainPlaudPATH(cfg *Config) string {
 	if !cfg.Plaud.BrainAccess {
 		return ""

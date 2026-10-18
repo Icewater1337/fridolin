@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"runtime"
 	"strconv"
 	"strings"
@@ -166,7 +167,8 @@ func TestGoldenCheck(t *testing.T) {
 // database elsewhere, the calendar files in a credentials dir, deny_paths
 // and allow_paths, and git's config readable or denied. The folders between
 // / and the test's root differ between systems; they are <ABOVE>, once a
-// block.
+// block. So do the bridge's programs outside the test's folder, which it
+// leaves out (withoutSystemPrograms).
 func TestGoldenSandboxProfiles(t *testing.T) {
 	gitconfig := func(home string) {
 		if err := os.WriteFile(filepath.Join(home, ".gitconfig"), []byte("[user]\n\tname = You\n[include]\n\tpath = ~/.gitconfig-work\n"), 0o600); err != nil {
@@ -227,7 +229,86 @@ func TestGoldenSandboxProfiles(t *testing.T) {
 			}
 			// tmux names its folder after the user's id.
 			profile = strings.ReplaceAll(profile, "/tmux-"+strconv.Itoa(os.Getuid()), "/tmux-<UID>")
-			assertGolden(t, "sandbox/"+tc.name+".sb", []byte(newScrubber(root).lines(profile)))
+			assertGolden(t, "sandbox/"+tc.name+".sb", []byte(withoutSystemPrograms(newScrubber(root).lines(profile))))
+		})
+	}
+}
+
+// systemWriteDenyRE matches a write deny of a path the masks leave as it
+// is, one outside the test's folder.
+var systemWriteDenyRE = regexp.MustCompile(`^\(deny file-write\* \((literal|subpath) "/[^"]*"\)\)$`)
+
+// withoutSystemPrograms drops from a masked profile the write denies of
+// section 4 that name a path outside the test's folder: the programs the
+// bridge runs and the folders it finds them in. Which there are depends on
+// what the system has installed (node, rclone, Homebrew) and how its
+// folders link (/bin is /usr/bin on Linux), so they differ between
+// systems; TestSandboxProfileProtectsTheBridgesPrograms pins them. Those
+// in the test's folder stay.
+func withoutSystemPrograms(profile string) string {
+	var out []string
+	section4 := false
+	for _, l := range strings.Split(profile, "\n") {
+		switch {
+		case strings.HasPrefix(l, ";; "):
+			section4 = strings.HasPrefix(l, ";; 4. ")
+		case l == "":
+			section4 = false
+		case section4 && systemWriteDenyRE.MatchString(l):
+			continue
+		}
+		out = append(out, l)
+	}
+	return strings.Join(out, "\n")
+}
+
+func TestWithoutSystemPrograms(t *testing.T) {
+	lines := func(l ...string) string { return strings.Join(l, "\n") }
+	tests := []struct{ name, in, want string }{
+		{"a program and a PATH folder outside the test's folder", lines(
+			";; 4. Kept from every brain, whatever is allowed above",
+			`(deny file-write* (literal "<ROOT>/bin/fridolin"))`,
+			`(deny file-write* (literal "/opt/homebrew/bin/rclone"))`,
+			`(deny file-write* (subpath "/usr/bin"))`,
+			`(deny file-write* (subpath "<HOME>/.local/bin"))`,
+		), lines(
+			";; 4. Kept from every brain, whatever is allowed above",
+			`(deny file-write* (literal "<ROOT>/bin/fridolin"))`,
+			`(deny file-write* (subpath "<HOME>/.local/bin"))`,
+		)},
+		{"other rules of section 4 stay", lines(
+			";; 4. Kept from every brain, whatever is allowed above",
+			`(deny file-read* (literal "/CLAUDE.md"))`,
+			`(deny file-write* (literal "<ABOVE>"))  [×each folder above]`,
+		), lines(
+			";; 4. Kept from every brain, whatever is allowed above",
+			`(deny file-read* (literal "/CLAUDE.md"))`,
+			`(deny file-write* (literal "<ABOVE>"))  [×each folder above]`,
+		)},
+		{"other sections stay", lines(
+			";; 1. Writing is denied everywhere; this brain's own places are allowed below",
+			`(deny file-write* (subpath "/"))`,
+			"",
+			";; 4. Kept from every brain, whatever is allowed above",
+			`(deny file-write* (subpath "/bin"))`,
+			"",
+			";; 7. Starting code outside the sandbox",
+			`(deny file-write* (subpath "/usr/bin"))`,
+		), lines(
+			";; 1. Writing is denied everywhere; this brain's own places are allowed below",
+			`(deny file-write* (subpath "/"))`,
+			"",
+			";; 4. Kept from every brain, whatever is allowed above",
+			"",
+			";; 7. Starting code outside the sandbox",
+			`(deny file-write* (subpath "/usr/bin"))`,
+		)},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := withoutSystemPrograms(tc.in); got != tc.want {
+				t.Errorf("got\n%s\nwant\n%s", got, tc.want)
+			}
 		})
 	}
 }

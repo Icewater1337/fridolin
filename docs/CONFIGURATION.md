@@ -559,7 +559,14 @@ those load (`~/.nvm/nvm.sh`, `~/.oh-my-zsh`), `~/.gitconfig`, a program in
 a `PATH` folder (`~/.local/bin`, or `/opt/homebrew` and `/usr/local`,
 which your user may write), the bridge's own binary, install folder and
 checkout, or the programs the bridge runs unsandboxed (the Claude CLI,
-rclone, the Plaud CLI). Nor can it change another brain's state or inbox.
+rclone, the Plaud CLI with its npm package and node, tmux for the viewer,
+node for the site, and git, `gh`, npm and the rest it finds on its
+`PATH`). Nor can it change another brain's state or inbox. These stay
+unwritable even where a brain's own folder would cover one: a brain folder
+may not be or hold any of them, nor a folder on the bridge's `PATH`, the
+Plaud CLI's or `/opt/homebrew/bin`, `/usr/local/bin` and `~/.local/bin`,
+where it also looks, nor lie inside such a program's npm package or nvm's
+`~/.nvm/versions/node` (see [what wins](#what-wins)).
 
 That also means brains cannot update the Claude CLI (the bridge turns its
 auto-updater off for them, `DISABLE_AUTOUPDATER=1`; your own sessions
@@ -674,7 +681,10 @@ in this order, weakest first:
 4. Other brains' folders, the bridge's data directory, media folder,
    database, config file and credentials folder, the keychains, your
    instructions above the brain's folder and `~/.claude/CLAUDE.md` and
-   `rules` are denied again, whatever 3 opened.
+   `rules` are denied again, whatever 3 opened, and so is writing the
+   bridge's binary, install folder and checkout, the programs it runs and
+   the folders it finds them in (a `PATH` folder that holds the brain's
+   own folder excepted, which the brain could not write otherwise).
 5. What the bridge gives the brain inside those: its media inbox, its
    state and, to read, its runs' brain API tokens.
 6. What stays closed inside the brain's own places: a `deny_paths` entry
@@ -714,10 +724,12 @@ sandbox refuses a brain whose folder is your home folder or holds it (that
 fails every brain's runs, since each profile names every brain's folder),
 one whose folder is or holds something it protects (another brain's
 folder, a default-denied folder such as `~/.ssh`, `~/.claude`,
-`~/.gitconfig`), and one whose folder lies inside what the bridge keeps for
-itself (the data, media, database or credentials folder, `~/.claude`,
-`~/Library/LaunchAgents`, the keychains, the bridge's install folder or
-checkout). The dashboard refuses such a folder, and the bridge leaves a
+`~/.gitconfig`, a program the bridge runs or a folder it finds programs
+in, as listed under [writing](#writing)), and one whose folder lies inside
+what the bridge keeps for itself (the data, media, database or credentials
+folder, `~/.claude`, `~/Library/LaunchAgents`, the keychains, the bridge's
+install folder or checkout, the npm package of a program it runs, nvm's
+node versions). The dashboard refuses such a folder, and the bridge leaves a
 configured one out, with an issue on the Brains page, until you move it.
 Other tools a brain runs may still need paths the defaults deny, so keeping
 brains somewhere like `~/assistant/<name>` is simplest.

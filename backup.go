@@ -317,7 +317,8 @@ func (m *BackupManager) rclonePath() (string, error) {
 }
 
 // findRclone finds the rclone binary, given backup.rclone_path. The sandbox
-// profile uses it too, to keep brains from replacing the binary.
+// profile uses it too, to keep brains from replacing the binary (see
+// bridgeProgramsOf).
 //
 // A configured path must work as it is: falling back would quietly run
 // another rclone, maybe another version, than the one you named, and hide

@@ -113,8 +113,10 @@ func TestResolveBrainsRefusesFoldersTheSandboxProtects(t *testing.T) {
 		{"inside ~/.claude", "~/.claude/skills/x", "inside your Claude Code folder"},
 		{"your ssh keys", "~/.ssh", "is ~/.ssh"},
 		{"inside LaunchAgents", "~/Library/LaunchAgents/x", "inside ~/Library/LaunchAgents"},
+		{"a folder holding one on the bridge's PATH", "~/tools", "the bridge runs programs from"},
 		{"a folder of its own", "~/assistant/a", ""},
 	}
+	t.Setenv("PATH", home+"/tools/bin:/usr/bin:/bin")
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			ref := brainFolder(t, tc.path, BrainManifest{ID: "x", Routing: BrainRouting{HandlesDMs: true}})

@@ -105,6 +105,9 @@
 (deny file-write* (literal "<HOME>/.config/git/config"))
 (deny file-write* (subpath "<HOME>/.config/git"))
 (deny file-write* (literal "<ROOT>/bin/fridolin"))
+(deny file-write* (literal "<HOME>/.local/bin/rclone"))
+(deny file-write* (subpath "<HOME>/.nvm/versions/node"))
+(deny file-write* (subpath "<HOME>/.local/bin"))
 
 ;; 5. This brain's media inbox, state and brain API tokens, and a shared Plaud login
 (allow file-read* (subpath "<HOME>/.fridolin/media/main"))
