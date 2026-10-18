@@ -1661,6 +1661,11 @@ func (br *Brain) invoke(run *brainRun, ctx context.Context, s *brainSettings, m 
 	cmd.WaitDelay = runWaitDelay
 
 	if err := cmd.Start(); err != nil {
+		if ctx.Err() != nil {
+			// Stopped before the CLI started, which Start then refuses: a
+			// stop like any other, no failure.
+			return RunResult{Err: errBrainInterrupted}
+		}
 		return RunResult{Err: fmt.Errorf("starting %s: %w", agentName(s.provider), err)}
 	}
 	pid := cmd.Process.Pid

@@ -180,3 +180,30 @@ func TestStopAfterTheRunWasReapedSendsNoSignal(t *testing.T) {
 	case <-time.After(300 * time.Millisecond):
 	}
 }
+
+// TestStopBeforeTheCLIStartsIsAnInterruption: a run stopped while it is
+// prepared, before the CLI starts, is recorded as interrupted, as one
+// stopped a moment later is. Start's "context canceled" made it a failed
+// run, shown as an error on the dashboard.
+func TestStopBeforeTheCLIStartsIsAnInterruption(t *testing.T) {
+	mgr, d, _ := queueTestManager(t, 0, "")
+	br := mgr.Get("a")
+	mgr.SetHooks(BrainHooks{Deliver: d.add, ExtraArgs: func(string) []string {
+		// The last thing before the CLI starts that a stop can come in.
+		br.mu.Lock()
+		cur := br.current
+		br.mu.Unlock()
+		br.interruptRun(cur)
+		return nil
+	}})
+	if _, _, _, err := mgr.Submit(dm("stopped at once")); err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, 5*time.Second, "the run", func() bool { return d.count() == 1 })
+	if res := d.all()[0].res; !errors.Is(res.Err, errBrainInterrupted) {
+		t.Errorf("result = %+v, want interrupted", res)
+	}
+	if last := br.Snapshot().Last; last == nil || last.Outcome != outcomeInterrupted || last.Error != "" {
+		t.Errorf("last run = %+v, want outcome interrupted", last)
+	}
+}
