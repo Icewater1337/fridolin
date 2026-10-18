@@ -461,7 +461,8 @@ Record conversations with a Plaud? Dashboard → *Integrations → Plaud* signs 
 with Plaud's own login, and every new recording reaches a brain as a finished
 transcript with Plaud's summary. A NotePin can also skip Plaud's slow cloud
 sync: the Android app in [plaud-android/](plaud-android/README.md) pulls
-each recording off the pin as it stops. See [docs/PLAUD.md](docs/PLAUD.md).
+each recording off the pin as it stops and uploads its transcript through
+your site; the Plaud card builds and pairs it. See [docs/PLAUD.md](docs/PLAUD.md).
 
 ### Backups
 

@@ -17,6 +17,7 @@
 // files; it goes now.
 
 import { withDeadline } from '../lib/abort.js';
+import { h } from '../lib/dom.js';
 
 try { localStorage.removeItem('bridgeToken'); } catch { /* storage blocked */ }
 
@@ -180,6 +181,21 @@ export async function rotateToken() {
   const r = await api('POST', '/api/token/rotate');
   if (r && r.binding) keepBinding(r.binding);
   return r;
+}
+
+/**
+ * Saves the file a GET of path answers with as filename, signed in as the
+ * API's calls are (a plain link would not be). Rejects with an ApiError.
+ */
+export async function download(path, filename) {
+  const headers = {};
+  const binding = sessionBinding();
+  if (binding) headers['X-Bridge-Session'] = binding;
+  const res = await fetch(path, { headers, cache: 'no-store', credentials: 'same-origin' });
+  if (!res.ok) throw new ApiError(`Download failed (${res.status} ${res.statusText})`, res.status, null);
+  const url = URL.createObjectURL(await res.blob());
+  h('a', { href: url, download: filename }).click();
+  setTimeout(() => URL.revokeObjectURL(url), 60000);
 }
 
 export const get = (path, opts) => api('GET', path, undefined, opts);

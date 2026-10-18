@@ -90,6 +90,7 @@
     "interval_seconds": 120,
     "message": "[Plaud] {name} ({when}, {duration})",
     "phone_dir": "<HOME>/PlaudSync",
+    "phone_upload": true,
     "polished": true
   },
   "queue": {

@@ -70,6 +70,11 @@ type PlaudConfig struct {
 	// YYYY-MM-DD_HH-MM-SS.txt per recording, are handed over as the
 	// cloud's are; Plaud's CLI and its login are not used.
 	PhoneDir string `json:"phone_dir,omitempty"`
+	// PhoneUpload takes the Plaud Sync app's transcripts through the site
+	// instead: the app, built on the dashboard, pairs with Fridolin and
+	// signs each upload (plaud_app.go). They go into PhoneDir, or without
+	// one into <data_dir>/plaud/inbox, and are read from there.
+	PhoneUpload bool `json:"phone_upload,omitempty"`
 }
 
 // interval is how often Plaud is checked.
@@ -399,6 +404,14 @@ type PlaudManager struct {
 	// the sign-out of the private login (see Disconnect). It is runCLI;
 	// tests wrap it to act between two commands.
 	run func(ctx context.Context, args ...string) (string, error)
+
+	// The phone app uploading through the site (plaud_app.go). devMu makes
+	// every change to devices.json a read, change and write of its own;
+	// appJob is the last build of the app (under mu). siteURL is the site's
+	// address, "" while it has no domain; the caller sets it.
+	devMu   sync.Mutex
+	appJob  *plaudAppJob
+	siteURL func() string
 }
 
 // NewPlaudManager creates the manager. The caller sets submit and notify.
@@ -850,6 +863,9 @@ func plaudListedIDs(out string) []string {
 // full, or plaudListPages pages.
 func (p *PlaudManager) listUntil(ctx context.Context, known func(id string) bool) ([]string, error) {
 	if dir := p.phoneDir(); dir != "" {
+		if p.cfg().Plaud.PhoneDir == "" {
+			_ = os.MkdirAll(dir, 0o700) // the upload inbox is Fridolin's own
+		}
 		return phoneIDs(dir)
 	}
 	var all []string
@@ -1000,7 +1016,7 @@ func (p *PlaudManager) accountID(ctx context.Context) (string, error) {
 // transcript. It notes the recording's name in item once Plaud said it.
 func (p *PlaudManager) forward(ctx context.Context, cfg *Config, id string, item *plaudPending, br *Brain, jid string) (*PlaudForward, error) {
 	fetch := p.fetchCloud
-	if cfg.Plaud.PhoneDir != "" {
+	if plaudPhoneDir(cfg) != "" {
 		fetch = fetchPhone
 	}
 	rec, err := fetch(ctx, cfg, id, item)
@@ -1138,10 +1154,23 @@ const plaudPhoneLayout = "2006-01-02_15-04-05"
 // length, near enough.
 var plaudPhoneEndRe = regexp.MustCompile(`(?m)^\[[0-9:]+ - ([0-9:]+)\]`)
 
-// phoneDir is the folder recordings come from (plaud.phone_dir), "" for
-// Plaud's cloud.
+// phoneDir is the folder recordings come from, "" for Plaud's cloud (see
+// plaudPhoneDir).
 func (p *PlaudManager) phoneDir() string {
-	return p.cfg().Plaud.PhoneDir
+	return plaudPhoneDir(p.cfg())
+}
+
+// plaudPhoneDir is the folder recordings come from when the phone app
+// sends them: plaud.phone_dir, else the inbox its uploads go to
+// (plaud.phone_upload); "" for Plaud's cloud.
+func plaudPhoneDir(cfg *Config) string {
+	switch {
+	case cfg.Plaud.PhoneDir != "":
+		return cfg.Plaud.PhoneDir
+	case cfg.Plaud.PhoneUpload:
+		return filepath.Join(cfg.DataDir, "plaud", "inbox")
+	}
+	return ""
 }
 
 // phoneIDs lists the recordings in the phone folder dir, newest first, at
@@ -1175,7 +1204,7 @@ func fetchPhone(_ context.Context, cfg *Config, id string, item *plaudPending) (
 	if err != nil {
 		return nil, fmt.Errorf("%s is not a recording of the phone app", id)
 	}
-	data, err := os.ReadFile(filepath.Join(cfg.Plaud.PhoneDir, stem+".txt"))
+	data, err := os.ReadFile(filepath.Join(plaudPhoneDir(cfg), stem+".txt"))
 	if errors.Is(err, os.ErrNotExist) {
 		return nil, errPlaudNotFound
 	}
@@ -1705,6 +1734,11 @@ func (p *PlaudManager) seed(ctx context.Context, acct string) error {
 	if err != nil {
 		return err
 	}
+	// The inbox holds only what paired phones uploaded for this, so
+	// nothing in it is old: it is all sent.
+	if cfg := p.cfg(); cfg.Plaud.PhoneDir == "" && cfg.Plaud.PhoneUpload {
+		ids = nil
+	}
 	// Oldest first, like the recordings seen later, so that keeping the
 	// last plaudSeenKeep drops the oldest. A recording may show on two
 	// pages when one arrives while they are listed.
@@ -1957,6 +1991,9 @@ type PlaudStatus struct {
 	Account    string `json:"account,omitempty"`
 	Expired    bool   `json:"expired,omitempty"`
 	LoginMoved bool   `json:"login_moved,omitempty"`
+	// App is the phone app that uploads through the site, while
+	// plaud.phone_upload is on (plaud_app.go).
+	App *PlaudAppStatus `json:"app,omitempty"`
 }
 
 // Status reports the integration's state. It never runs the CLI: who is
@@ -1974,6 +2011,9 @@ func (p *PlaudManager) Status() PlaudStatus {
 
 		DefaultMessage:  defaultPlaudMessage,
 		IntervalSeconds: int(cfg.Plaud.interval() / time.Second),
+	}
+	if cfg.Plaud.PhoneUpload {
+		s.App = p.appStatus()
 	}
 	if path, err := p.cliPath(); err == nil {
 		s.CLI.Found, s.CLI.Path = true, path
@@ -2326,6 +2366,7 @@ func (b *Bridge) apiPlaudSettings(w http.ResponseWriter, r *http.Request) {
 		Polished    *bool   `json:"polished"`
 		Message     *string `json:"message"`
 		BrainAccess *bool   `json:"brain_access"`
+		PhoneUpload *bool   `json:"phone_upload"`
 	}
 	if err := decodeJSON(r, &req); err != nil {
 		writeErr(w, http.StatusBadRequest, err.Error())
@@ -2352,6 +2393,9 @@ func (b *Bridge) apiPlaudSettings(w http.ResponseWriter, r *http.Request) {
 		}
 		if req.BrainAccess != nil {
 			c.Plaud.BrainAccess = *req.BrainAccess
+		}
+		if req.PhoneUpload != nil {
+			c.Plaud.PhoneUpload = *req.PhoneUpload
 		}
 		return nil
 	})

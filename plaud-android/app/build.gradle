@@ -3,10 +3,12 @@ plugins {
     id 'org.jetbrains.kotlin.android'
 }
 
-// Credentials are read straight from ~/.plaud/plaud-secrets (client_id, client_secret, api_key)
-// so they never live in this repo. They do end up inside the APK: don't share the APK.
+// What the app is built with, never kept in this repo: the file Fridolin's dashboard writes
+// (-PfridolinConfig: Plaud's developer keys, the site to upload to and a one-time pairing code),
+// else ~/.plaud/plaud-secrets (the developer keys alone: no uploads). They end up inside the
+// APK, so don't share the APK.
 def secrets = new Properties()
-def secretsFile = new File(System.getProperty('user.home'), '.plaud/plaud-secrets')
+def secretsFile = findProperty('fridolinConfig') ? file(findProperty('fridolinConfig')) : new File(System.getProperty('user.home'), '.plaud/plaud-secrets')
 if (secretsFile.exists()) secretsFile.withInputStream { secrets.load(it) }
 
 // Plaud's Embedded SDK (Apache-2.0) is not kept in this repository: the first build fetches it
@@ -30,11 +32,13 @@ android {
         applicationId 'local.plaudsync'
         minSdk 31
         targetSdk 35
-        versionCode 1
-        versionName '0.1'
-        ['client_id', 'client_secret', 'api_key'].each { k ->
+        versionCode 2
+        versionName '0.2'
+        ['client_id', 'client_secret', 'api_key', 'site_url', 'pairing_code'].each { k ->
             buildConfigField 'String', k.toUpperCase(), "\"${secrets.getProperty(k, '').trim()}\""
         }
+        // Plain http only for a site on this computer (a test); a real one is https.
+        manifestPlaceholders = [cleartext: secrets.getProperty('site_url', '').startsWith('http://').toString()]
     }
 
     buildFeatures { buildConfig true }

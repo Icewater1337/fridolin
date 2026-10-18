@@ -605,6 +605,9 @@ type siteRuntime struct {
 	// handoff to brains (ctx.ingest, site_ingest.go). The live site only.
 	DataDir  string `json:"data_dir,omitempty"`
 	SpoolDir string `json:"spool_dir,omitempty"`
+	// DevicesFile lists the paired phones' public keys, so the live site
+	// turns away an upload no paired phone signed (plaud_app.go).
+	DevicesFile string `json:"devices_file,omitempty"`
 }
 
 // googleClientFile is the site's own Google client if one is saved, else
@@ -664,7 +667,7 @@ func (m *SiteManager) processCommand(ctx context.Context, name, listen, modulesD
 		}
 		mods = readModuleCaps(modulesDir, homeDir())
 		rt.SecretsFD = 3
-		rt.DataDir, rt.SpoolDir = m.dir("data"), m.spoolDir()
+		rt.DataDir, rt.SpoolDir, rt.DevicesFile = m.dir("data"), m.spoolDir(), m.dir("devices.json")
 		for _, d := range []string{rt.SpoolDir, rt.DataDir} {
 			if err := os.MkdirAll(d, 0o700); err != nil {
 				return nil, err

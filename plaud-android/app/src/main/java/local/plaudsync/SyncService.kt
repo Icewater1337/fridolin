@@ -79,7 +79,10 @@ class SyncService : Service() {
     private val queue = ArrayDeque<Long>()
     private var rescanJob: Job? = null
     private val transcribing = Mutex()
+    private val uploading = Mutex()
     private val pendingDir by lazy { File(filesDir, "pending").apply { mkdirs() } }
+    // Transcripts waiting to reach Fridolin (Fridolin.kt), when the app was built for it
+    private val outboxDir by lazy { File(filesDir, "outbox").apply { mkdirs() } }
     private val exportDir by lazy { File(cacheDir, "export").apply { mkdirs() } }
     private val wakeLock by lazy {
         getSystemService(PowerManager::class.java)
@@ -130,6 +133,12 @@ class SyncService : Service() {
         sdkReady = true
         scan()
         transcribePending()
+        scope.launch {
+            while (true) {
+                uploadPending()
+                delay(15 * 60_000L) // what failed (offline, say) is tried again
+            }
+        }
         while (true) {
             delay(12 * 3600_000L) // user tokens live 24 h
             token = renewToken()
@@ -336,6 +345,7 @@ class SyncService : Service() {
                     val text = withContext(Dispatchers.IO) { PlaudApi.transcribe(t, mp3) }
                     withContext(Dispatchers.IO) {
                         saveToDocuments("${mp3.nameWithoutExtension}.txt", "text/plain") { it.write(text.toByteArray()) }
+                        if (Fridolin.enabled) File(outboxDir, "${mp3.nameWithoutExtension}.txt").writeBytes(text.toByteArray())
                     }
                     mp3.delete()
                     AppLog.i("transcript saved: ${mp3.nameWithoutExtension}.txt")
@@ -346,6 +356,26 @@ class SyncService : Service() {
             }
         } finally {
             transcribing.unlock()
+        }
+        uploadPending()
+    }
+
+    /** Sends the transcripts in the outbox to Fridolin, oldest first; what fails waits for the next try. */
+    private suspend fun uploadPending() {
+        if (!Fridolin.enabled || !uploading.tryLock()) return
+        try {
+            for (txt in outboxDir.listFiles().orEmpty().sortedBy { it.name }) {
+                try {
+                    withContext(Dispatchers.IO) { Fridolin.upload(this@SyncService, txt.nameWithoutExtension, txt.readBytes()) }
+                    txt.delete()
+                    AppLog.i("sent ${txt.name} to Fridolin")
+                } catch (e: Exception) {
+                    AppLog.i("sending ${txt.name} to Fridolin failed, will retry: ${e.message}")
+                    break
+                }
+            }
+        } finally {
+            uploading.unlock()
         }
     }
 

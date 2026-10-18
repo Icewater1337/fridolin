@@ -249,6 +249,12 @@ func NewBridge(cfgs *ConfigStore, opts BridgeOptions) (_ *Bridge, err error) {
 	b.plaud.submit = b.submitHandOff
 	b.plaud.notify = b.wa.SendMessage
 	b.site = NewSiteManager(cfg.DataDir, b.google.clientPath)
+	b.plaud.siteURL = func() string {
+		if d := b.site.Settings().Domain; d != "" {
+			return "https://" + d
+		}
+		return ""
+	}
 	b.site.hooks = b.siteBuilderHooks()
 	// What builder brains say in the Build page's chats goes there, not to WhatsApp.
 	b.wa = siteChatMessenger{Messenger: b.wa, chats: b.site.chats}

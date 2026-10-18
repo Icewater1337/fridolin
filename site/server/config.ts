@@ -41,6 +41,8 @@ export type Runtime = {
   data_dir?: string
   /** The live site: the handoff folder Fridolin watches for ctx.ingest. */
   spool_dir?: string
+  /** The live site: the paired phones' public keys (devices.ts). */
+  devices_file?: string
 }
 
 export function readRuntime(path: string): Runtime {
@@ -64,6 +66,7 @@ export function readRuntime(path: string): Runtime {
     data_dir: raw.data_dir || undefined,
     // Only the live site hands files to brains.
     spool_dir: raw.preview_token ? undefined : raw.spool_dir || undefined,
+    devices_file: raw.preview_token ? undefined : raw.devices_file || undefined,
   }
 }
 

@@ -66,6 +66,9 @@ type builderHooks struct {
 	// search runs a read-only Claude agent in a brain's folder, its
 	// stream-json output to out (site_ingest.go).
 	search func(ctx context.Context, brainID, prompt string, out io.Writer) error
+	// device answers a phone's request the site passed on, which the
+	// bridge checks itself (plaud_app.go, site_ingest.go).
+	device func(op, assertion string, body []byte) (map[string]any, error)
 }
 
 func (m *SiteManager) builderBase(brainID string) string {
@@ -796,6 +799,7 @@ func (b *Bridge) siteBuilderHooks() builderHooks {
 		},
 		mediaDir: func() string { return b.cfgs.Get().MediaDir },
 		search:   b.runBrainSearch,
+		device:   b.plaud.deviceRequest,
 		// As /ingest: the brain's reply chat gets the answer, and the brain
 		// must take the files now (its queue is not full).
 		ingest: func(brainID, sender, text string, files []string) error {
