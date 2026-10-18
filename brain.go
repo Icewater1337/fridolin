@@ -259,10 +259,12 @@ type BrainHooks struct {
 // A run that takes longer than workingNoticeAfter tells the chat it is
 // working on it, and questions it asks mid-run go out marked as such.
 const (
-	workingNoticeAfter = 10 * time.Second
-	workingNotice      = "⏳ Working on it..."
-	questionPrefix     = "❓ "
+	workingNotice  = "⏳ Working on it..."
+	questionPrefix = "❓ "
 )
+
+// workingNoticeAfter is a variable so tests need not wait for it.
+var workingNoticeAfter = 10 * time.Second
 
 // RunResult is the outcome of one brain run.
 type RunResult struct {
@@ -1210,12 +1212,33 @@ func (br *Brain) invoke(run *brainRun, ctx context.Context, s *brainSettings, m 
 	if rec := recordRun(s.dataDir, br.id, cmd.Process.Pid); rec != "" {
 		defer os.Remove(rec)
 	}
+	// A panic from here on, in a hook say, skips the Wait below. The run's
+	// process group is then stopped and reaped here, before its record
+	// goes: cancelling the run alone would leave the CLI a zombie for as
+	// long as the bridge runs.
+	waited := false
+	defer func() {
+		if !waited {
+			_ = killProcessGroup(cmd.Process.Pid)
+			_ = cmd.Wait()
+		}
+	}()
 
 	// Parse the stream in a goroutine so we can race it against the 10s timer.
 	parseDone := make(chan RunResult, 1)
 	resultIn := make(chan struct{})
 	var resultOnce sync.Once
 	go func() {
+		// A panic while the output is read, in the hook that sends a
+		// question to the chat say, ends the run as one in invoke does
+		// (invokeGuarded). In a goroutine of its own, unrecovered, it would
+		// end the whole bridge.
+		defer func() {
+			if p := recover(); p != nil {
+				log.Printf("brain %s: reading the output of the run for %s panicked: %v\n%s", br.id, m.JID, p, debug.Stack())
+				parseDone <- RunResult{Err: errRunPanicked}
+			}
+		}()
 		parseDone <- br.readStream(m.JID, stdout, runHeading(m, s, cmd.Process.Pid), func() { resultOnce.Do(func() { close(resultIn) }) })
 	}()
 
@@ -1273,6 +1296,7 @@ func (br *Brain) invoke(run *brainRun, ctx context.Context, s *brainSettings, m 
 	}
 
 	waitErr := cmd.Wait()
+	waited = true
 	switch {
 	case errors.Is(ctx.Err(), context.DeadlineExceeded):
 		// The deadline may come in the grace after the result, which is

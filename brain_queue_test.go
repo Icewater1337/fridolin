@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"syscall"
@@ -1251,15 +1252,20 @@ func TestDataEnvIsAbsolute(t *testing.T) {
 	}
 }
 
-// TestPanicsInARunAreContained: a panic while a run is prepared, or while
-// its result is delivered, is logged and recorded as that run's failure;
-// the brain goes on with the next message and the bridge keeps running.
+// TestPanicsInARunAreContained: a panic while a run is prepared, while
+// claude runs, while its output is read, or while its result is
+// delivered, is logged and recorded as that run's failure; the brain goes
+// on with the next message, the bridge keeps running, and no process of
+// the run is left behind.
 func TestPanicsInARunAreContained(t *testing.T) {
 	cases := []struct {
-		name  string
-		hooks func(d *deliveries, first *sync.Once) BrainHooks
+		name     string
+		env      map[string]string
+		notice   time.Duration // workingNoticeAfter, when set
+		panicked bool          // the first run ends with errRunPanicked
+		hooks    func(d *deliveries, first *sync.Once) BrainHooks
 	}{
-		{"while the run is prepared", func(d *deliveries, first *sync.Once) BrainHooks {
+		{"while the run is prepared", nil, 0, true, func(d *deliveries, first *sync.Once) BrainHooks {
 			return BrainHooks{Deliver: d.add, ExtraArgs: func(string) []string {
 				panicked := false
 				first.Do(func() { panicked = true })
@@ -1269,7 +1275,19 @@ func TestPanicsInARunAreContained(t *testing.T) {
 				return nil
 			}}
 		}},
-		{"while it is delivered", func(d *deliveries, first *sync.Once) BrainHooks {
+		{"while claude runs", map[string]string{"FRIDOLIN_FAKE_SLEEP_MS": "1000"}, 100 * time.Millisecond, true, func(d *deliveries, first *sync.Once) BrainHooks {
+			// The working notice comes from invoke itself.
+			return BrainHooks{Deliver: d.add, Intermediate: func(string, string) {
+				first.Do(func() { panic("boom in the working notice") })
+			}}
+		}},
+		{"while its output is read", map[string]string{"FRIDOLIN_FAKE_ASK_ON": "says: one"}, 0, true, func(d *deliveries, first *sync.Once) BrainHooks {
+			// The question goes out from the goroutine that reads the output.
+			return BrainHooks{Deliver: d.add, Intermediate: func(string, string) {
+				first.Do(func() { panic("boom in sending the question") })
+			}}
+		}},
+		{"while it is delivered", nil, 0, false, func(d *deliveries, first *sync.Once) BrainHooks {
 			return BrainHooks{Deliver: func(br *Brain, m Inbound, res RunResult) {
 				d.add(br, m, res)
 				first.Do(func() { panic("boom in Deliver") })
@@ -1278,7 +1296,17 @@ func TestPanicsInARunAreContained(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			mgr, _, _ := queueTestManager(t, 10, "")
+			mgr, _, home := queueTestManager(t, 10, "")
+			for k, v := range tc.env {
+				t.Setenv(k, v)
+			}
+			pidLog := filepath.Join(home, "pids")
+			t.Setenv("FRIDOLIN_FAKE_PID_LOG", pidLog)
+			if tc.notice > 0 {
+				prev := workingNoticeAfter
+				workingNoticeAfter = tc.notice
+				t.Cleanup(func() { workingNoticeAfter = prev })
+			}
 			d := &deliveries{}
 			var first sync.Once
 			mgr.SetHooks(tc.hooks(d, &first))
@@ -1305,9 +1333,16 @@ func TestPanicsInARunAreContained(t *testing.T) {
 			if !strings.Contains(strings.Join(logs(), "\n"), "panicked: boom") {
 				t.Error("the panic was not logged")
 			}
-			if strings.Contains(tc.name, "prepared") {
-				if !errors.Is(runs[0].res.Err, errRunPanicked) {
-					t.Errorf("first run = %+v, want errRunPanicked", runs[0].res)
+			if tc.panicked && (len(runs) == 0 || !errors.Is(runs[0].res.Err, errRunPanicked)) {
+				t.Errorf("runs = %+v, want the first to end with errRunPanicked", runs)
+			}
+			// Each run's process is gone, reaped too: a zombie still
+			// answers signal 0.
+			data, _ := os.ReadFile(pidLog)
+			for _, line := range strings.Fields(string(data)) {
+				pid, _ := strconv.Atoi(line)
+				if err := syscall.Kill(pid, 0); !errors.Is(err, syscall.ESRCH) {
+					t.Errorf("process %d of a run is still there (%v)", pid, err)
 				}
 			}
 		})
