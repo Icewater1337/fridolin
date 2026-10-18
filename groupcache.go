@@ -14,8 +14,9 @@ import (
 // The dashboard asks for it every minute and after each change on the
 // Chats page, and each answer used to be a query to WhatsApp, which an
 // unofficial client had better keep rare. The events that change the
-// list drop it at once (see observe), so the TTL only bounds how long a
-// change that came without one stays unseen.
+// list drop it at once (see observe), and so does the Chats page's Refresh
+// button (ForgetGroups), so the TTL only bounds how long a change that
+// came without an event stays unseen when nobody presses it.
 const groupsTTL = 10 * time.Minute
 
 // groupsFetchTimeout bounds one query for the list. It runs apart from the
@@ -106,6 +107,11 @@ func (c *groupCache) observe(evt any) {
 		c.invalidate()
 	}
 }
+
+// ForgetGroups drops the list the client keeps, so the next JoinedGroups
+// asks WhatsApp: for the dashboard's Refresh button, which should also
+// show a change that came without an event.
+func (wa *WhatsAppClient) ForgetGroups() { wa.groups.invalidate() }
 
 // groupLister is what JoinedGroups needs from whatsmeow.Client; tests swap
 // in a fake to count what reaches WhatsApp.

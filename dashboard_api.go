@@ -393,9 +393,17 @@ func (b *Bridge) apiPair(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]string{"status": "pairing"})
 }
 
+// apiGroups answers GET /api/whatsapp/groups with the groups the account
+// is in, from the list the WhatsApp client keeps. With ?fresh=1, which the
+// Chats page's Refresh button sends, the client asks WhatsApp again first.
 func (b *Bridge) apiGroups(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), 20*time.Second)
 	defer cancel()
+	if r.URL.Query().Get("fresh") == "1" {
+		if f, ok := b.wa.(interface{ ForgetGroups() }); ok {
+			f.ForgetGroups()
+		}
+	}
 	groups, err := b.wa.JoinedGroups(ctx)
 	if err != nil {
 		writeErr(w, http.StatusServiceUnavailable, err.Error())

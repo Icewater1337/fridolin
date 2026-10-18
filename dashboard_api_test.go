@@ -933,6 +933,43 @@ func TestUnscaffoldStaysInTheFolder(t *testing.T) {
 	}
 }
 
+// The Chats page polls the groups and reloads them after each change on
+// it: those take the list the WhatsApp client keeps, and only its Refresh
+// button, with ?fresh=1, has the client ask WhatsApp again.
+func TestGroupsAskWhatsAppOnlyWhenFresh(t *testing.T) {
+	tb := newTestBridge(t, "")
+	tw := newTestWhatsApp(t)
+	fl := &fakeLister{}
+	tw.lister = fl
+	tb.wa = tw.WhatsAppClient
+	steps := []struct {
+		path    string
+		queries int32 // asked of WhatsApp so far
+	}{
+		{"/api/whatsapp/groups", 1},
+		{"/api/whatsapp/groups", 1},
+		{"/api/whatsapp/groups?fresh=0", 1},
+		{"/api/whatsapp/groups?fresh=1", 2},
+		{"/api/whatsapp/groups", 2},
+	}
+	for i, s := range steps {
+		w := tb.do("GET", s.path, nil)
+		if w.Code != http.StatusOK {
+			t.Fatalf("step %d: GET %s = %d %s", i+1, s.path, w.Code, w.Body)
+		}
+		var rows []struct {
+			JID     string `json:"jid"`
+			Allowed bool   `json:"allowed"`
+		}
+		if err := json.Unmarshal(w.Body.Bytes(), &rows); err != nil || len(rows) != 1 || rows[0].JID != "120363000000000000@g.us" || !rows[0].Allowed {
+			t.Fatalf("step %d: GET %s = %s (%v), want the allowed group", i+1, s.path, w.Body, err)
+		}
+		if n := fl.calls.Load(); n != s.queries {
+			t.Errorf("step %d: after GET %s WhatsApp was asked %d times, want %d", i+1, s.path, n, s.queries)
+		}
+	}
+}
+
 // What the dashboard polls every few seconds carries an ETag, and a poll
 // that sends it back while nothing changed gets a 304 without a body; once
 // something changed, the new answer with a new ETag.

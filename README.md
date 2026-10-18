@@ -607,10 +607,10 @@ folders of their own rather than your home directory, and
 Handles pairing, allowlists, trigger matching, attachment downloads, and poll
 vote decryption. It keeps the list of the account's groups that the
 dashboard shows (`groupcache.go`), and asks WhatsApp for it again only after
-a group event or a reconnect, or once it is ten minutes old. **`polls.go`** —
-the `[POLL]` blocks in replies, sending them, and matching votes to options
-(WhatsApp sends SHA-256 hashes of option names, which are matched against the
-stored options).
+a group event or a reconnect, once it is ten minutes old, or when you press
+Refresh on the Chats page. **`polls.go`** — the `[POLL]` blocks in replies,
+sending them, and matching votes to options (WhatsApp sends SHA-256 hashes of
+option names, which are matched against the stored options).
 
 **`debounce.go`** — merges a burst of messages from one person into one run.
 
