@@ -154,7 +154,8 @@
         "polished": {"type": "boolean"},
         "message": {"type": "string"},
         "brain_access": {"type": "boolean"},
-        "phone_dir": {"anyOf": [{"const": ""}, {"$ref": "#/$defs/absolute_path"}]}
+        "phone_dir": {"anyOf": [{"const": ""}, {"$ref": "#/$defs/absolute_path"}]},
+        "phone_upload": {"type": "boolean"}
       }
     },
     "dashboard": {
