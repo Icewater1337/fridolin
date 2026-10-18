@@ -8,6 +8,8 @@ package trigger
 import (
 	"encoding/json"
 	"fmt"
+	"maps"
+	"slices"
 	"strings"
 	"unicode"
 	"unicode/utf8"
@@ -29,7 +31,12 @@ const (
 
 // validTriggerMatches are the values a trigger's match takes; one left
 // out is MatchAnywhere.
-var validTriggerMatches = map[TriggerMatch]bool{MatchAnywhere: true, MatchStart: true, MatchWord: true}
+var validTriggerMatches = map[Match]bool{MatchAnywhere: true, MatchStart: true, MatchWord: true}
+
+// MatchValues lists the accepted match modes without exposing the validation map.
+func MatchValues() []Match {
+	return slices.Sorted(maps.Keys(validTriggerMatches))
+}
 
 // Trigger is one keyword that makes the bridge answer in a group.
 type Trigger struct {

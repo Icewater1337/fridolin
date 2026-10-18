@@ -3,6 +3,8 @@ package main
 import (
 	"fmt"
 	"strings"
+
+	"github.com/Icewater1337/fridolin/internal/textx"
 )
 
 // The messages the bridge itself sends into chats: its answers to the
@@ -99,10 +101,10 @@ func chatErrSandbox(err error) string { return "❌ " + capitalize(err.Error()) 
 
 // chatErrClaude is the CLI's own short account of a failed run, msg, as a
 // direct chat is told it.
-func chatErrClaude(msg string) string { return "❌ Claude: " + truncate(msg, 300) }
+func chatErrClaude(msg string) string { return "❌ Claude: " + textx.Truncate(msg, 300) }
 
 // chatErrCodex is Codex's own short account, shown only in a direct chat.
-func chatErrCodex(msg string) string { return "❌ Codex: " + truncate(msg, 300) }
+func chatErrCodex(msg string) string { return "❌ Codex: " + textx.Truncate(msg, 300) }
 
 // buildChatError is what a build chat on the Site's Build page shows for
 // a message the builder brain could not take.

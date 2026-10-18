@@ -14,6 +14,8 @@ import (
 	"strings"
 	"testing"
 	"unicode"
+
+	"github.com/Icewater1337/fridolin/internal/trigger"
 )
 
 // The schemas in docs/schemas are kept to the code in two ways. Each lists
@@ -514,7 +516,7 @@ func TestConfigSchemaTakesWhatTheBridgeTakes(t *testing.T) {
 func TestSchemaEnumsAreTheBridgesValues(t *testing.T) {
 	keys := func(m map[string]bool) []string { return slices.Collect(maps.Keys(m)) }
 	var matches, levels []string
-	for m := range validTriggerMatches {
+	for _, m := range trigger.MatchValues() {
 		matches = append(matches, string(m))
 	}
 	// The bridge takes a level in any case; the docs write it in lower.
@@ -787,7 +789,7 @@ func TestContractDocsLinkWhatExists(t *testing.T) {
 	if err != nil || len(schemas) == 0 {
 		t.Fatalf("no schemas: %v", err)
 	}
-	tests, err := os.ReadFile(filepath.Join(repoDir, "contracts_test.go"))
+	tests, err := os.ReadFile(filepath.Join(pkgDir, "contracts_test.go"))
 	if err != nil {
 		t.Fatal(err)
 	}

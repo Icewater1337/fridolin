@@ -28,6 +28,19 @@ func TestTriggerListJSONRoundTrip(t *testing.T) {
 	}
 }
 
+// Schema callers can inspect match values without altering what config accepts.
+func TestMatchValuesCannotChangeValidation(t *testing.T) {
+	values := MatchValues()
+	values[0] = "invented"
+	var list List
+	if err := json.Unmarshal([]byte(`[{"text":"@c","match":"anywhere"}]`), &list); err != nil {
+		t.Fatalf("changing the returned values changed validation: %v", err)
+	}
+	if err := json.Unmarshal([]byte(`[{"text":"@c","match":"invented"}]`), &list); err == nil {
+		t.Fatal("changing the returned values added a match mode")
+	}
+}
+
 // First names the trigger in help texts ("send @claude …"): the first one
 // that has a text, or none.
 func TestFirstIsTheFirstTriggerWithAText(t *testing.T) {

@@ -77,7 +77,7 @@ func TestGoldenMessages(t *testing.T) {
 	}
 	assertGolden(t, "messages.golden", []byte(out.String()))
 
-	f, err := parser.ParseFile(token.NewFileSet(), filepath.Join(repoDir, "messages.go"), nil, 0)
+	f, err := parser.ParseFile(token.NewFileSet(), filepath.Join(pkgDir, "messages.go"), nil, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -131,7 +131,7 @@ var notChatText = map[string]string{
 // string that starts with an emoji, the mark of a message the bridge
 // sends into chats, so that a new one goes into the catalogue.
 func TestChatMessagesLiveInTheCatalogue(t *testing.T) {
-	files, err := filepath.Glob(filepath.Join(repoDir, "*.go"))
+	files, err := filepath.Glob(filepath.Join(pkgDir, "*.go"))
 	if err != nil {
 		t.Fatal(err)
 	}

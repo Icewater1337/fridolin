@@ -8,6 +8,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/Icewater1337/fridolin/internal/fsx"
 )
 
 func TestCodexSandboxKeepsPersonalStateAndOtherBrainsOut(t *testing.T) {
@@ -44,7 +46,7 @@ echo safe > "$PWD/own-note"
 	if res := d.all()[0].res; res.Err != nil || res.Text != "Codex reply" {
 		t.Fatalf("got %+v", res)
 	}
-	if !fileExists(filepath.Join(home, "a", "own-note")) {
+	if !fsx.Exists(filepath.Join(home, "a", "own-note")) {
 		t.Fatal("brain could not write its own folder")
 	}
 }

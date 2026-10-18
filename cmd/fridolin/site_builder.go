@@ -160,7 +160,7 @@ func (m *SiteManager) CodexBuilder(brainID string) ([]string, []string, string, 
 	env := []string{"FRIDOLIN_BUILDER_URL=" + m.hooks.bridgeURL(), "FRIDOLIN_BUILDER_TOKEN=" + m.builderToken(brainID)}
 	var prompt strings.Builder
 	for _, skill := range []string{"fridolin-site-platform", "site-builder", "site-modules"} {
-		data, err := siteShellFS.ReadFile("site/builder/skills/" + skill + "/SKILL.md")
+		data, err := site.FS.ReadFile("builder/skills/" + skill + "/SKILL.md")
 		if err != nil {
 			return nil, nil, "", err
 		}

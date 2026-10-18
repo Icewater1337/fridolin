@@ -9,6 +9,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/Icewater1337/fridolin/internal/fsx"
 )
 
 func TestCodexDefaultsAndValidation(t *testing.T) {
@@ -111,7 +113,7 @@ func TestCodexWebToolRestrictions(t *testing.T) {
 
 func fakeCodex(t *testing.T) string {
 	t.Helper()
-	path := filepath.Join(canonicalDir(t.TempDir()), "codex")
+	path := filepath.Join(fsx.Canonical(t.TempDir()), "codex")
 	script := `#!/bin/sh
 if [ "$1" = --version ]; then echo 'codex-cli 0.163.0'; exit 0; fi
 printf '%s\n' "$@" > "$CODEX_HOME/args"
@@ -149,7 +151,7 @@ func TestCodexDashboardSwitch(t *testing.T) {
 	change("codex")
 	h.Inject(inbound{JID: harnessDM, Text: "hello Codex"})
 	st := brainStateOf(h.DataDir(), "main")
-	h.WaitFor("Codex started", func() bool { return fileExists(filepath.Join(st.codex, "prompt")) })
+	h.WaitFor("Codex started", func() bool { return fsx.Exists(filepath.Join(st.codex, "prompt")) })
 	change("claude") // a running Codex turn keeps its original output parser
 	h.WaitSent(harnessDM, "Codex reply")
 	args, err := os.ReadFile(filepath.Join(st.codex, "args"))
