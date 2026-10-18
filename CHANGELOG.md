@@ -276,7 +276,9 @@ for compatibility.
   edit or a deletion comes after the message it changes. A file that
   takes long to download holds up only the messages its own chat sent
   after it, no longer every chat's, and at most three files download at
-  once.
+  once. Shutdown hands over every accepted event before closing the
+  store; a drain longer than five seconds warns and keeps waiting rather
+  than dropping the remaining messages.
 - A group the bridge does not allow is looked up on WhatsApp, for its
   name in the log and on the Chats page, at most once an hour instead of
   for every message it sends, and an allowed group not at all. A lookup

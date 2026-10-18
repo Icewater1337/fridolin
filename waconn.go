@@ -268,14 +268,14 @@ func isTerminal(f *os.File) bool {
 	return err == nil && st.Mode()&os.ModeCharDevice != 0
 }
 
-// intakeDrainTimeout is how long Disconnect waits for the chats' workers
-// to hand on the messages they hold.
-const intakeDrainTimeout = 5 * time.Second
+// intakeDrainWarning is when Disconnect warns about a slow drain.
+const intakeDrainWarning = 5 * time.Second
 
 // Disconnect disconnects the client for good: it also ends the attachment
 // downloads still running, the group lookups and a pairing. The messages
-// that came before are still handed on, within intakeDrainTimeout: the
-// one whose download it cut off with its text, without the file.
+// that came before are still handed on: the one whose download it cut
+// off with its text, without the file. It joins every worker before the
+// bridge closes its store, warning after intakeDrainWarning if needed.
 func (wa *WhatsAppClient) Disconnect() {
 	wa.cancel()
 	wa.mu.Lock()
@@ -286,9 +286,7 @@ func (wa *WhatsAppClient) Disconnect() {
 	// First the connection, so that no more messages come; then the
 	// queues hand on what they hold.
 	wa.cl().Disconnect()
-	if left := wa.intake.close(intakeDrainTimeout); left > 0 {
-		log.Printf("WhatsApp: dropped %d messages not handled within %v of disconnecting", left, intakeDrainTimeout)
-	}
+	wa.intake.close(intakeDrainWarning)
 }
 
 // connectionEvent follows the connection's events into the state.

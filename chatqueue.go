@@ -128,10 +128,11 @@ func runJob(chat string, job func()) {
 	job()
 }
 
-// close stops taking jobs and waits up to wait for the workers to run
-// those they hold. It returns how many were left when the wait ended:
-// those are dropped, and the workers end after the job they are on.
-func (q *chatQueues) close(wait time.Duration) (left int) {
+// close stops taking jobs and joins every worker after it hands over the
+// accepted jobs. Network work is cancelled before this call. A slow local
+// handler warns after warnAfter, but cannot make us discard its queue or
+// return while a worker may still use the store that shutdown closes next.
+func (q *chatQueues) close(warnAfter time.Duration) {
 	q.mu.Lock()
 	q.closed = true
 	q.mu.Unlock()
@@ -140,20 +141,15 @@ func (q *chatQueues) close(wait time.Duration) (left int) {
 		q.wg.Wait()
 		close(done)
 	}()
-	timer := time.NewTimer(wait)
+	timer := time.NewTimer(warnAfter)
 	defer timer.Stop()
 	select {
 	case <-done:
-		return 0
+		return
 	case <-timer.C:
+		log.Printf("WhatsApp: still draining accepted messages after %v; waiting before closing the store", warnAfter)
 	}
-	q.mu.Lock()
-	defer q.mu.Unlock()
-	for _, c := range q.chats {
-		left += len(c.jobs)
-		c.jobs = nil
-	}
-	return left
+	<-done
 }
 
 // maskChatJID is chat, a queue's JID, for the log: a group's as the rest

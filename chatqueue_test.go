@@ -165,8 +165,8 @@ func TestChatQueuesFullQueueDrops(t *testing.T) {
 	})
 }
 
-// close refuses new jobs and waits for the workers to run those they hold,
-// for as long as it was given: what is left then is dropped.
+// close refuses new jobs and waits for all accepted jobs, warning when
+// the drain takes longer than expected.
 func TestChatQueuesClose(t *testing.T) {
 	t.Run("the jobs held run before it returns", func(t *testing.T) {
 		var q chatQueues
@@ -181,9 +181,7 @@ func TestChatQueuesClose(t *testing.T) {
 			}
 		}
 		time.AfterFunc(50*time.Millisecond, func() { close(gate) })
-		if left := q.close(5 * time.Second); left != 0 {
-			t.Errorf("close left %d jobs", left)
-		}
+		q.close(5 * time.Second)
 		if n := ran.Load(); n != 4 {
 			t.Errorf("%d jobs ran by the time close returned, want 4", n)
 		}
@@ -192,7 +190,7 @@ func TestChatQueuesClose(t *testing.T) {
 		}
 	})
 
-	t.Run("the wait is bounded", func(t *testing.T) {
+	t.Run("a slow worker does not lose the remaining jobs", func(t *testing.T) {
 		synctest.Test(t, func(t *testing.T) {
 			var q chatQueues
 			stuck := make(chan struct{})
@@ -205,17 +203,21 @@ func TestChatQueuesClose(t *testing.T) {
 					t.Fatal(err)
 				}
 			}
-			start := time.Now()
-			if left := q.close(5 * time.Second); left != 3 {
-				t.Errorf("close left %d jobs, want 3", left)
-			}
-			if waited := time.Since(start); waited != 5*time.Second {
-				t.Errorf("close waited %v, want 5s", waited)
+			done := make(chan struct{})
+			go func() { q.close(5 * time.Second); close(done) }()
+			synctest.Wait()
+			time.Sleep(5 * time.Second)
+			synctest.Wait()
+			select {
+			case <-done:
+				t.Error("close returned before the active worker finished")
+			default:
 			}
 			close(stuck)
 			synctest.Wait()
-			if n := ran.Load(); n != 0 {
-				t.Errorf("%d dropped jobs ran after close", n)
+			<-done
+			if n := ran.Load(); n != 3 {
+				t.Errorf("%d jobs ran after close, want all 3", n)
 			}
 		})
 	})

@@ -1655,7 +1655,7 @@ func TestDisconnectHandsOnWhatIsQueued(t *testing.T) {
 		})
 		start := time.Now()
 		tw.Disconnect()
-		if took := time.Since(start); took >= intakeDrainTimeout {
+		if took := time.Since(start); took >= intakeDrainWarning {
 			t.Errorf("Disconnect took %v", took)
 		}
 		if got, want := a.list(), []string{"3EB0OTHER", "3EB0PHOTO", "3EB0A", "3EB0B", "3EB0C"}; !slices.Equal(got, want) {
@@ -1745,36 +1745,48 @@ func TestDisconnectHandsOnWhatIsQueued(t *testing.T) {
 	}
 }
 
-// Disconnect waits for the queues only so long: a handler that does not
-// return keeps the rest of its chat from going on, and they are dropped
-// with a line in the log.
-func TestDisconnectWaitIsBounded(t *testing.T) {
+// Shutdown must keep the store open until every accepted event has been
+// handed over. A slow first handler warns after five seconds, but does
+// not discard the rest of its chat or let Disconnect return early.
+func TestDisconnectDrainsPastTheWarning(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		logged := captureLog(t)
 		tw := newTestWhatsApp(t)
 		stuck := make(chan struct{})
-		var handed atomic.Int32
-		tw.handler = func(context.Context, Inbound) {
-			if handed.Add(1) == 1 {
+		delivered := make(chan string, 3)
+		tw.handler = func(_ context.Context, m Inbound) {
+			if m.ID == "3EB0A" {
 				<-stuck
 			}
+			delivered <- m.ID
 		}
 		for _, id := range []string{"3EB0A", "3EB0B", "3EB0C"} {
 			tw.eventHandler(dmEvent(id, textMsg("hello")))
 		}
 		synctest.Wait()
-		start := time.Now()
-		tw.Disconnect()
-		if took := time.Since(start); took != intakeDrainTimeout {
-			t.Errorf("Disconnect took %v, want %v", took, intakeDrainTimeout)
+		done := make(chan struct{})
+		go func() { tw.Disconnect(); close(done) }()
+		synctest.Wait()
+		time.Sleep(intakeDrainWarning)
+		synctest.Wait()
+		select {
+		case <-done:
+			t.Error("Disconnect returned while an accepted worker still used the handler")
+		default:
+		}
+		if got := strings.Join(logged(), "\n"); !strings.Contains(got, "still draining accepted messages after 5s") {
+			t.Errorf("log %q, want the slow-drain warning", got)
 		}
 		close(stuck)
 		synctest.Wait()
-		if n := handed.Load(); n != 1 {
-			t.Errorf("%d messages were handed on, want only the one that was stuck", n)
+		<-done
+		close(delivered)
+		var got []string
+		for id := range delivered {
+			got = append(got, id)
 		}
-		if got := strings.Join(logged(), "\n"); !strings.Contains(got, "dropped 2 messages not handled within 5s of disconnecting") {
-			t.Errorf("log %q, want the drop", got)
+		if want := []string{"3EB0A", "3EB0B", "3EB0C"}; !slices.Equal(got, want) {
+			t.Errorf("handed over %v by Disconnect's return, want %v", got, want)
 		}
 	})
 }
