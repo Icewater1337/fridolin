@@ -1658,3 +1658,50 @@ func TestSandboxStopsStartingCodeOutsideIt(t *testing.T) {
 		})
 	}
 }
+
+// TestSandboxGitConfig: under the real sandbox-exec, in both git_config
+// modes a brain cannot write your git configuration, an included file
+// named with an inline comment and ~/.config/git included, where
+// core.fsmonitor or an alias would run in your own git; "deny" used to
+// leave them writable. "deny" hides them, "read" lets a brain read them to
+// commit in its own folder. git's credential files stay unreadable in both.
+func TestSandboxGitConfig(t *testing.T) {
+	requireSandboxExec(t)
+	cases := []struct {
+		name, cmd string // cmd runs in sh with $HOME set
+		read      bool   // allowed with git_config "read"; never with "deny"
+	}{
+		{"read ~/.gitconfig", `cat "$HOME/.gitconfig"`, true},
+		{"read an included file", `cat "$HOME/.gitconfig-extra"`, true},
+		{"read ~/.config/git/config", `cat "$HOME/.config/git/config"`, true},
+		{"read ~/.config/git/credentials", `cat "$HOME/.config/git/credentials"`, false},
+		{"read ~/.git-credentials", `cat "$HOME/.git-credentials"`, false},
+		{"write ~/.gitconfig", `printf '[core]\n\tfsmonitor = evil\n' >> "$HOME/.gitconfig"`, false},
+		{"write an included file", `printf '[alias]\n\tst = !evil\n' >> "$HOME/.gitconfig-extra"`, false},
+		{"write ~/.config/git/config", `printf '[core]\n\tfsmonitor = evil\n' >> "$HOME/.config/git/config"`, false},
+	}
+	for _, mode := range []string{"read", "deny"} {
+		t.Run(mode, func(t *testing.T) {
+			home := canonicalDir(t.TempDir())
+			t.Setenv("HOME", home)
+			sp, own := sandboxFixture(t, home, "b", "clients", map[string]any{"sandbox": map[string]any{"enabled": true, "git_config": mode}})
+			for name, content := range map[string]string{
+				".gitconfig":              "[include]\n\tpath = .gitconfig-extra ; local settings\n",
+				".gitconfig-extra":        "[user]\n\tname = You\n",
+				".config/git/config":      "[user]\n\temail = you@example.com\n",
+				".config/git/credentials": "https://you:secret@example.com\n",
+				".git-credentials":        "https://you:secret@example.com\n",
+			} {
+				writeTestFile(t, filepath.Join(home, name), content)
+			}
+			for _, c := range cases {
+				t.Run(c.name, func(t *testing.T) {
+					want := c.read && mode == "read"
+					if allowed, out := sandboxRun(t, sp, own, "/bin/sh", "-c", c.cmd); allowed != want {
+						t.Errorf("%s: allowed=%v, want %v (output %q)", c.cmd, allowed, want, out)
+					}
+				})
+			}
+		})
+	}
+}

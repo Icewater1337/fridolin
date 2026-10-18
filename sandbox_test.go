@@ -951,12 +951,85 @@ func TestBridgeTellsTheSandboxItsConfigFile(t *testing.T) {
 	}
 }
 
+// TestGitConfigChain: every file of your git configuration is protected, so
+// the profile must find all of them. It used to read ~/.gitconfig only,
+// follow includes one level deep, resolve a relative include against HOME
+// rather than the including file's folder, and keep an inline comment in
+// the path ("path = extra ; comment" named the file "extra ; comment"), so
+// the real file was neither protected nor hidden. ~/.config/git/config
+// counts as well.
+func TestGitConfigChain(t *testing.T) {
+	home := canonicalDir(t.TempDir())
+	files := map[string]string{
+		".gitconfig": "[user]\n\tname = You\n" +
+			"[include]\n\tpath = .gitconfig-extra ; a comment\n" +
+			"[includeIf \"gitdir:~/work/\"]\n\tPath = \"~/work/git config\" # quoted, with a space\n" +
+			"[include] path = conf.d/inline\n" +
+			"[alias]\n\tpath = not-an-include\n",
+		".gitconfig-extra":   "[include]\n\tpath = nested/one\n",
+		"nested/one":         "[include]\n\tpath = two ; relative to nested/\n",
+		"nested/two":         "[include]\n\tpath = ../.gitconfig\n", // a cycle back to the start
+		"work/git config":    "",
+		"conf.d/inline":      "",
+		".config/git/config": "[include]\n\tpath = ~/xdg-extra\n",
+		"xdg-extra":          "",
+		"not-an-include":     "",
+	}
+	for name, content := range files {
+		writeTestFile(t, filepath.Join(home, name), content)
+	}
+	got := gitConfigChain(home)
+	want := []string{".gitconfig", ".gitconfig-extra", "nested/one", "nested/two", "work/git config", "conf.d/inline", ".config/git/config", "xdg-extra"}
+	for i, w := range want {
+		want[i] = filepath.Join(home, w)
+	}
+	if !slices.Equal(got, want) {
+		t.Errorf("gitConfigChain:\n%s\nwant:\n%s", strings.Join(got, "\n"), strings.Join(want, "\n"))
+	}
+
+	t.Run("depth", func(t *testing.T) {
+		home := canonicalDir(t.TempDir())
+		writeTestFile(t, filepath.Join(home, ".gitconfig"), "[include]\npath = c1\n")
+		for i := 1; i <= maxGitIncludeDepth+3; i++ {
+			writeTestFile(t, filepath.Join(home, fmt.Sprintf("c%d", i)), fmt.Sprintf("[include]\npath = c%d\n", i+1))
+		}
+		if got := gitConfigChain(home); !slices.Contains(got, filepath.Join(home, fmt.Sprintf("c%d", maxGitIncludeDepth))) ||
+			slices.Contains(got, filepath.Join(home, fmt.Sprintf("c%d", maxGitIncludeDepth+2))) {
+			t.Errorf("gitConfigChain = %q, want includes followed %d levels deep", got, maxGitIncludeDepth)
+		}
+	})
+}
+
+// TestGitConfigValue reads values as git does.
+func TestGitConfigValue(t *testing.T) {
+	cases := []struct{ in, want string }{
+		{" extra", "extra"},
+		{" extra ; comment", "extra"},
+		{" extra# comment", "extra"},
+		{` "with ; inside" ; comment`, "with ; inside"},
+		{` "~/a b"`, "~/a b"},
+		{` "  padded  "`, "  padded  "},
+		{` a\"b`, `a"b`},
+		{` a\\b`, `a\b`},
+		{" ;only a comment", ""},
+	}
+	for _, c := range cases {
+		if got := gitConfigValue(c.in); got != c.want {
+			t.Errorf("gitConfigValue(%q) = %q, want %q", c.in, got, c.want)
+		}
+	}
+}
+
 // TestSandboxGitConfigModes: "deny" hides all git configuration, the XDG
-// file (~/.config/git/config) as well as ~/.gitconfig; "read" leaves both
-// readable. Neither mode lets a brain write them.
+// folder (~/.config/git) as well as ~/.gitconfig and what it includes;
+// "read" leaves them readable. In both modes none of them is writable, so
+// a brain cannot set core.fsmonitor or an alias that your own git runs:
+// "deny" used to write-protect nothing. git's credential file in
+// ~/.config/git is unreadable in both.
 func TestSandboxGitConfigModes(t *testing.T) {
 	home := canonicalDir(t.TempDir())
 	t.Setenv("HOME", home)
+	writeTestFile(t, filepath.Join(home, ".gitconfig"), "[include]\n\tpath = .gitconfig-extra ; local settings\n")
 	for _, mode := range []string{"read", "deny"} {
 		t.Run(mode, func(t *testing.T) {
 			cfg := &Config{Sandbox: SandboxConfig{GitConfig: mode}}
@@ -966,8 +1039,11 @@ func TestSandboxGitConfigModes(t *testing.T) {
 				want bool
 			}{
 				{`(deny file-read* (literal "` + home + `/.gitconfig"))`, mode == "deny"},
+				{`(deny file-read* (literal "` + home + `/.gitconfig-extra"))`, mode == "deny"},
 				{`(deny file-read* (subpath "` + home + `/.config/git"))`, mode == "deny"},
+				{`(deny file-read* (literal "` + home + `/.config/git/credentials"))`, true},
 				{`(deny file-write* (literal "` + home + `/.gitconfig"))`, true},
+				{`(deny file-write* (literal "` + home + `/.gitconfig-extra"))`, true},
 				{`(deny file-write* (subpath "` + home + `/.config/git"))`, true},
 			} {
 				if got := slices.Contains(lines, c.rule); got != c.want {

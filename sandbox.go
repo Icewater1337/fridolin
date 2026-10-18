@@ -321,6 +321,8 @@ var defaultWriteDenyLiterals = []string{
 var defaultDenyLiterals = []string{
 	".claude/history.jsonl",
 	".git-credentials",
+	// git's credential store also looks here.
+	".config/git/credentials",
 	".netrc",
 	".zsh_history",
 	".bash_history",
@@ -1384,40 +1386,123 @@ func sbplString(s string) (string, error) {
 
 var sbplEscaper = strings.NewReplacer(`\`, `\\`, `"`, `\"`)
 
-// gitConfigChain returns ~/.gitconfig plus every file it includes
-// ([include] / [includeIf] path = …), one level deep.
+// maxGitIncludeDepth is how deep gitConfigChain follows includes; git
+// itself refuses more than 10.
+const maxGitIncludeDepth = 10
+
+// gitConfigChain returns your git configuration files: ~/.gitconfig and
+// ~/.config/git/config, and every file they include ([include] and
+// [includeIf] path = …, whatever the condition), followed as git does: a
+// relative path is relative to the including file's folder, ~/ is HOME,
+// and an include in an included file counts too, up to
+// maxGitIncludeDepth levels and each file once. Each one can set
+// core.fsmonitor or an alias, which your own git then runs.
 func gitConfigChain(home string) []string {
-	main := filepath.Join(home, ".gitconfig")
-	out := []string{main}
-	f, err := os.Open(main)
+	var out []string
+	seen := map[string]bool{}
+	var walk func(file string, depth int)
+	walk = func(file string, depth int) {
+		file = filepath.Clean(file)
+		if seen[file] {
+			return
+		}
+		seen[file] = true
+		out = append(out, file)
+		if depth >= maxGitIncludeDepth {
+			return
+		}
+		for _, inc := range gitIncludes(file, home) {
+			walk(inc, depth+1)
+		}
+	}
+	walk(filepath.Join(home, ".gitconfig"), 0)
+	walk(filepath.Join(home, ".config", "git", "config"), 0)
+	return out
+}
+
+// gitIncludes returns the files the git config file includes, made
+// absolute, or nothing when it cannot be read.
+func gitIncludes(file, home string) []string {
+	f, err := os.Open(file)
 	if err != nil {
-		return out
+		return nil
 	}
 	defer f.Close()
+	var out []string
 	inInclude := false
 	sc := bufio.NewScanner(f)
 	for sc.Scan() {
 		line := strings.TrimSpace(sc.Text())
 		if strings.HasPrefix(line, "[") {
-			sec := strings.ToLower(line)
-			inInclude = strings.HasPrefix(sec, "[include]") || strings.HasPrefix(sec, "[includeif")
+			// [include], or [includeIf "gitdir:~/work/"]; a variable may
+			// follow on the same line.
+			end := strings.IndexByte(line, ']')
+			if end < 0 {
+				inInclude = false
+				continue
+			}
+			name, _, _ := strings.Cut(strings.TrimSpace(line[1:end]), " ")
+			name, _, _ = strings.Cut(name, "\t")
+			name, _, _ = strings.Cut(name, `"`)
+			inInclude = strings.EqualFold(name, "include") || strings.EqualFold(name, "includeIf")
+			line = strings.TrimSpace(line[end+1:])
+		}
+		if !inInclude || line == "" || line[0] == '#' || line[0] == ';' {
 			continue
 		}
-		if !inInclude {
+		key, value, ok := strings.Cut(line, "=")
+		if !ok || !strings.EqualFold(strings.TrimSpace(key), "path") {
 			continue
 		}
-		k, v, ok := strings.Cut(line, "=")
-		if !ok || strings.TrimSpace(strings.ToLower(k)) != "path" {
+		p := gitConfigValue(value)
+		if p == "" {
 			continue
 		}
-		p := strings.Trim(strings.TrimSpace(v), `"`)
 		p = expandHome(p, home)
 		if !filepath.IsAbs(p) {
-			p = filepath.Join(home, p)
+			p = filepath.Join(filepath.Dir(file), p)
 		}
 		out = append(out, p)
 	}
 	return out
+}
+
+// gitConfigValue is a git config value as git reads it: a ; or # outside
+// double quotes starts a comment, the quotes themselves go, \" \\ \n and
+// \t are escapes, and whitespace around the value outside quotes goes.
+// "path = extra ; comment" names the file "extra", not "extra ; comment".
+func gitConfigValue(v string) string {
+	v = strings.TrimSpace(v)
+	var b strings.Builder
+	quoted := false
+	keep := 0 // what to keep of b: not the whitespace before a comment
+	for i := 0; i < len(v); i++ {
+		c := v[i]
+		switch {
+		case c == '\\' && i+1 < len(v):
+			i++
+			switch v[i] {
+			case 'n':
+				b.WriteByte('\n')
+			case 't':
+				b.WriteByte('\t')
+			default:
+				b.WriteByte(v[i])
+			}
+			keep = b.Len()
+		case c == '"':
+			quoted = !quoted
+			keep = b.Len()
+		case (c == ';' || c == '#') && !quoted:
+			i = len(v)
+		default:
+			b.WriteByte(c)
+			if quoted || (c != ' ' && c != '\t') {
+				keep = b.Len()
+			}
+		}
+	}
+	return b.String()[:keep]
 }
 
 // Available reports why brain runs cannot be sandboxed on this machine, or

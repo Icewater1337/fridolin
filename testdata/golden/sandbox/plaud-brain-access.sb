@@ -43,6 +43,7 @@
 (deny file-read* (regex "^<HOME>/Library/Application Support/(Microsoft Edge|Vivaldi|com\\.operasoftware\\.Opera)"))
 (deny file-read* (literal "<HOME>/.claude/history.jsonl"))
 (deny file-read* (literal "<HOME>/.git-credentials"))
+(deny file-read* (literal "<HOME>/.config/git/credentials"))
 (deny file-read* (literal "<HOME>/.netrc"))
 (deny file-read* (literal "<HOME>/.zsh_history"))
 (deny file-read* (literal "<HOME>/.bash_history"))
@@ -93,6 +94,7 @@
 (deny file-read* (subpath "/.claude"))
 (deny file-write* (literal "<HOME>/.gitconfig"))
 (deny file-write* (literal "<HOME>/.gitconfig-work"))
+(deny file-write* (literal "<HOME>/.config/git/config"))
 (deny file-write* (subpath "<HOME>/.config/git"))
 (deny file-write* (literal "<ROOT>/bin/fridolin"))
 

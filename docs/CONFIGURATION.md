@@ -748,10 +748,14 @@ running sessions.
 
 ### `sandbox.git_config`
 
-`"read"` (default): brains may read `~/.gitconfig` and the files it includes,
-so they can commit in their own folder, but never write them. `"deny"` hides
-git configuration entirely: those files and `~/.config/git`.
-`~/.git-credentials` is denied either way.
+`"read"` (default): brains may read your git configuration, so they can
+commit in their own folder: `~/.gitconfig`, `~/.config/git` and every file
+they include (`[include]` and `[includeIf]`, whatever the condition,
+followed as git follows them, up to ten levels deep). `"deny"` hides all of
+it. In both modes brains can never write any of it, where `core.fsmonitor`
+or an alias would run in your own git, also when an included file lies in
+a brain's folder. `~/.git-credentials` and `~/.config/git/credentials` are
+denied either way.
 
 ### `sandbox.credentials_dir`
 
