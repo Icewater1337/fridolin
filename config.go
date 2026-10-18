@@ -97,8 +97,9 @@ type Config struct {
 	DisallowedTools []string `json:"disallowed_tools,omitempty"`
 
 	// DangerouslySkipPermissions passes --dangerously-skip-permissions to the
-	// Claude CLI so it can use tools without an interactive prompt. Required
-	// for unattended operation; see the security notes in the README.
+	// Claude CLI so it can use tools without an interactive prompt. Without
+	// it a run, in -p mode with nobody to approve, is refused every tool
+	// that needs approval; see the security notes in the README.
 	DangerouslySkipPermissions bool `json:"dangerously_skip_permissions"`
 
 	// RunTimeoutMinutes stops a brain's run that takes longer, so that one

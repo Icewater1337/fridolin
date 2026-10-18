@@ -134,7 +134,11 @@ test('a dangerous setting says why in a warning beside it', async (t) => {
   const field = inputFor('Let brains use tools without asking').closest('.field');
   const warn = field.querySelector('.callout.warn.inline-callout');
   assert.ok(warn, 'the help is a warning');
-  assert.match(warn.textContent, /the sandbox \(below\) is the safety net/);
+  // Without it, a run is refused the tools that need approval; it does
+  // not wait forever for one.
+  assert.match(warn.textContent, /Off: .*every tool that needs approval is refused/);
+  assert.doesNotMatch(warn.textContent, /waits forever/);
+  assert.match(warn.textContent, /The sandbox \(below\) limits what a run can reach either way/);
   assert.equal(field.querySelector('.help'), null, 'and is not repeated as plain help');
 });
 

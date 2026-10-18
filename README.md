@@ -585,9 +585,14 @@ releases by pushing a tag: `git tag v1.2.3 && git push origin v1.2.3`.
 
 ## Security
 
-The bridge runs Claude Code with `--dangerously-skip-permissions`, because
-nobody is at the keyboard to approve tool calls. The assistant can read and
-write files and run commands without asking.
+The bridge runs Claude Code with `--dangerously-skip-permissions`
+(`dangerously_skip_permissions`, on in new configs), because nobody is at
+the keyboard to approve tool calls. The assistant can read and write files
+and run commands without asking. Turned off, Claude Code refuses every tool
+that would need approval, so a brain can still read and search its files
+and answer, but cannot run a command, change a file or fetch a web page
+([details](docs/CONFIGURATION.md#dangerously_skip_permissions)). The macOS
+sandbox below limits what a run can reach either way.
 
 That means **anyone who can message the bridge can influence what it does on
 your machine**, and so can text inside any file they send it. Treat it that way.
