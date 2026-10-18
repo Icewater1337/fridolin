@@ -336,7 +336,7 @@ func secondSignalStopsAtOnce(t *testing.T, provider string) {
 		childPID, _ = strconv.Atoi(strings.TrimSpace(string(data)))
 		return childPID > 0
 	})
-	t.Cleanup(func() { _ = killProcessGroup(pid) })
+	t.Cleanup(func() { _ = platform.KillProcessGroup(pid) })
 	if err := cmd.Process.Signal(syscall.SIGTERM); err != nil {
 		t.Fatal(err)
 	}
