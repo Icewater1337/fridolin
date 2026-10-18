@@ -6,6 +6,8 @@ import (
 	"log"
 	"os/exec"
 	"runtime"
+	"slices"
+	"strings"
 	"sync"
 	"time"
 )
@@ -18,10 +20,11 @@ type TmuxViewer struct {
 	Name      string // tmux session name, e.g. "claude-personal"
 	StreamLog string // path to the brain's claude-stream.log, which must exist
 	CWD       string
-	// Env is what tmux and osascript run with (see childEnv). A tmux server
-	// this starts keeps it, and any brain can read it from there, so it
-	// must never be the bridge's whole environment. Every tmux call gets the
-	// same, so that each finds the same server.
+	// Env is what tmux and osascript run with (see childEnv), with PATH
+	// replaced by systemPATH (see run). A tmux server this starts keeps it,
+	// and any brain can read it from there, so it must never be the
+	// bridge's whole environment. Every tmux call gets the same, so that
+	// each finds the same server.
 	Env []string
 }
 
@@ -30,8 +33,9 @@ var (
 	tmuxPath string
 )
 
-// osascript opens the Terminal window, a variable so tests need not open one.
-var osascript = "osascript"
+// osascript opens the Terminal window: the system's, by its path, since it
+// runs outside the sandbox. A variable so tests need not open one.
+var osascript = "/usr/bin/osascript"
 
 // findTmux locates tmux once, in the folders of PATH that helperPath
 // keeps, and caches its path, which every tmux call then runs it by.
@@ -59,11 +63,18 @@ func NewTmuxViewer(name, streamLog, cwd string, env []string) (*TmuxViewer, erro
 var viewerTimeout = 5 * time.Second
 
 // run runs name args… with the viewer's environment and viewerTimeout.
+// tmux runs the session's sh, and sh its tail, by name, outside the
+// sandbox, and a tmux server passes the PATH it gets on to its windows: so
+// whatever PATH the environment has (a nil Env is the bridge's own, as for
+// exec.Cmd), they all get systemPATH, which has no folder a brain can
+// write to.
 func (tv *TmuxViewer) run(name string, args ...string) error {
 	ctx, cancel := context.WithTimeout(context.Background(), viewerTimeout)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, name, args...)
 	cmd.Env = tv.Env
+	env := slices.DeleteFunc(cmd.Environ(), func(kv string) bool { return strings.HasPrefix(kv, "PATH=") })
+	cmd.Env = append(env, "PATH="+systemPATH)
 	cmd.WaitDelay = time.Second
 	return cmd.Run()
 }

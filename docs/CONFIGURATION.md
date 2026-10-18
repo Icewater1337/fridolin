@@ -630,8 +630,8 @@ for the paths listed above. A manipulated brain can therefore still:
   [helper programs](#helper-programs)), and a `claude`, `osascript`,
   `zenity`, `kdialog` or `open` in any folder of the service's `PATH`,
   which the bridge still runs by name outside the sandbox
-  (`claude --version` for the dashboard, the viewer's Terminal window and
-  the dashboard's folder picker, `--open`)
+  (`claude --version` for the dashboard, the dashboard's folder picker,
+  `--open`)
 - leave files in its own folder that run or load when you work there
   yourself, outside the sandbox: git hooks and settings in `.git/`
   (`hooks/`, `core.fsmonitor`, `core.hooksPath`), a `.envrc` for direnv,
@@ -976,7 +976,12 @@ unsandboxed. The same goes for a tmux you run yourself; see
 A server the bridge starts keeps the environment it started with, which
 any brain can read, so it gets only a few of the bridge's variables,
 never the Claude CLI's login (see
-[what reaches brains](#what-reaches-brains)).
+[what reaches brains](#what-reaches-brains)). tmux, and the `sh` and `tail`
+it runs, get `PATH=/usr/bin:/bin:/usr/sbin:/sbin`, and Terminal is opened
+with `/usr/bin/osascript`, so that no program a brain put in a folder on
+the bridge's `PATH` runs in their place. A server the bridge starts keeps
+that `PATH` for the windows you open in it; your shell's startup files set
+your own.
 
 ### `log_level` *(restart)*
 
@@ -1077,8 +1082,8 @@ only:
 - the [Plaud](PLAUD.md) CLI, whose `HOME`, `PATH` and `DO_NOT_TRACK` the
   bridge sets itself
 - tmux and `osascript` for the [`viewer`](#viewer), which also get the
-  names in `child_env_passthrough`: brains can read the viewer's tmux
-  server anyway
+  names in `child_env_passthrough` (brains can read the viewer's tmux
+  server anyway), and the system's `PATH` instead of the bridge's
 
 rclone and the Plaud CLI never get those names, which are for brains.
 

@@ -32,6 +32,9 @@ yet, so everything is under Unreleased until the first one.
   One that is only in another folder of `PATH` is no longer found there:
   set `backup.rclone_path` or `plaud.cli_path` to it, or link tmux into
   `~/.local/bin`.
+- The activity viewer runs `/usr/bin/osascript`, and its tmux and
+  osascript with `PATH=/usr/bin:/bin:/usr/sbin:/sbin`; a tmux server the
+  bridge starts keeps that `PATH` for windows you open in it.
 
 ### Added
 
