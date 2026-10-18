@@ -164,11 +164,13 @@ func (s *Store) PruneOutbox(ctx context.Context, before time.Time) error {
 // OutboxSummary counts the replies waiting and those given up on within
 // outboxFailedKeep of now. It only reads, since the dashboard asks for it
 // every few seconds; the outbox prunes older ones (PruneOutbox).
+//
+// Its queries read in one transaction, so that they see the outbox as it
+// was at one moment: a reply given up on between two of them would
+// otherwise count both as waiting and as given up on.
 func (s *Store) OutboxSummary(ctx context.Context, now time.Time) (outboxSummary, error) {
 	var sum outboxSummary
 	since := now.Add(-outboxFailedKeep).UTC()
-	// One transaction, so that the counts are of one moment: the outbox
-	// moves rows from waiting to failed while they are read.
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return sum, err
