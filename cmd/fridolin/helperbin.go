@@ -28,11 +28,6 @@ import (
 // change it.
 var helperDirs = []string{"/usr/bin", "/bin", "/usr/sbin", "/sbin", "/usr/local/bin", "/opt/homebrew/bin", "/opt/local/bin"}
 
-// systemPATH is the PATH of the programs the bridge runs by name that the
-// system itself provides (the sh and tail of the viewer's tmux): only the
-// system's own folders.
-const systemPATH = "/usr/bin:/bin:/usr/sbin:/sbin"
-
 // helperPath is the bridge's PATH with only the folders it looks up its
 // helpers in, in PATH's order: those under HOME, where the sandbox keeps
 // brains from planting the programs the bridge runs by name (see

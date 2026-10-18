@@ -8,7 +8,6 @@ import (
 	"runtime"
 	"slices"
 	"strings"
-	"sync"
 	"time"
 )
 
@@ -21,60 +20,30 @@ type TmuxViewer struct {
 	StreamLog string // path to the brain's claude-stream.log, which must exist
 	CWD       string
 	// Env is what tmux and osascript run with (see childEnv), with PATH
-	// replaced by systemPATH (see run). A tmux server this starts keeps it,
+	// replaced by SystemPATH (see run). A tmux server this starts keeps it,
 	// and any brain can read it from there, so it must never be the
 	// bridge's whole environment. Every tmux call gets the same, so that
 	// each finds the same server.
 	Env []string
+	// These are resolved by the caller so a viewer owns its process settings.
+	TmuxPath  string
+	Osascript string
+	Timeout   time.Duration
 }
-
-var (
-	tmuxOnce sync.Once
-	tmuxPath string
-)
-
-// osascript opens the Terminal window: the system's, by its path, since it
-// runs outside the sandbox. A variable so tests need not open one.
-var osascript = "/usr/bin/osascript"
-
-// findTmux locates tmux once, in the folders of PATH that helperPath
-// keeps, and caches its path, which every tmux call then runs it by.
-func findTmux() string {
-	tmuxOnce.Do(func() { tmuxPath = lookPathIn("tmux", helperPath()) })
-	return tmuxPath
-}
-
-// NewTmuxViewer creates a detached tmux session tailing the brain's activity
-// log and opens a Terminal window attached to it, running both with env.
-func NewTmuxViewer(name, streamLog, cwd string, env []string) (*TmuxViewer, error) {
-	if findTmux() == "" {
-		return nil, fmt.Errorf("tmux not found (looked in %q)", helperPath())
-	}
-	tv := &TmuxViewer{Name: name, StreamLog: streamLog, CWD: cwd, Env: env}
-	if err := tv.start(); err != nil {
-		return nil, err
-	}
-	return tv, nil
-}
-
-// viewerTimeout bounds each tmux and osascript call. osascript can wait on
-// an Automation consent prompt, or for a GUI session there is none of under
-// launchd; a call that hangs must not keep the next viewer from starting.
-var viewerTimeout = 5 * time.Second
 
 // run runs name args… with the viewer's environment and viewerTimeout.
 // tmux runs the session's sh, and sh its tail, by name, outside the
 // sandbox, and a tmux server passes the PATH it gets on to its windows: so
 // whatever PATH the environment has (a nil Env is the bridge's own, as for
-// exec.Cmd), they all get systemPATH, which has no folder a brain can
+// exec.Cmd), they all get SystemPATH, which has no folder a brain can
 // write to.
 func (tv *TmuxViewer) run(name string, args ...string) error {
-	ctx, cancel := context.WithTimeout(context.Background(), viewerTimeout)
+	ctx, cancel := context.WithTimeout(context.Background(), tv.timeout())
 	defer cancel()
 	cmd := exec.CommandContext(ctx, name, args...)
 	cmd.Env = tv.Env
 	env := slices.DeleteFunc(cmd.Environ(), func(kv string) bool { return strings.HasPrefix(kv, "PATH=") })
-	cmd.Env = append(env, "PATH="+systemPATH)
+	cmd.Env = append(env, "PATH="+SystemPATH)
 	cmd.WaitDelay = time.Second
 	return cmd.Run()
 }
@@ -94,8 +63,9 @@ const viewerScript = `printf '\033[1m=== %s — Claude activity ===\033[0m\n\n' 
 	// bridge rotates it.
 	`exec tail -n 100 -F "$2" 2>/dev/null`
 
-func (tv *TmuxViewer) start() error {
-	tmux := findTmux()
+// Start creates the session and opens its optional terminal window.
+func (tv *TmuxViewer) Start() error {
+	tmux := tv.TmuxPath
 
 	// Replace a stale session of the same name, and only that one.
 	_ = tv.run(tmux, "kill-session", "-t", tv.target())
@@ -112,8 +82,8 @@ func (tv *TmuxViewer) start() error {
 	// goes to the script as an argument, and Terminal does not come to the
 	// front: a viewer started again by a run must not take the focus.
 	if runtime.GOOS == "darwin" {
-		attach := shellQuote(tmux) + " attach -t " + shellQuote(tv.target())
-		if err := tv.run(osascript, "-e", "on run argv", "-e", `tell application "Terminal" to do script (item 1 of argv)`, "-e", "end run", attach); err != nil {
+		attach := viewerShellQuote(tmux) + " attach -t " + viewerShellQuote(tv.target())
+		if err := tv.run(tv.osascript(), "-e", "on run argv", "-e", `tell application "Terminal" to do script (item 1 of argv)`, "-e", "end run", attach); err != nil {
 			log.Printf("[viewer] could not open Terminal for %s: %v (attach by hand with: tmux attach -t %s)", tv.Name, err, tv.target())
 		}
 	} else {
@@ -126,7 +96,7 @@ func (tv *TmuxViewer) start() error {
 
 // IsAlive reports whether the tmux session still exists.
 func (tv *TmuxViewer) IsAlive() bool {
-	tmux := findTmux()
+	tmux := tv.TmuxPath
 	if tmux == "" {
 		return false
 	}
@@ -135,8 +105,27 @@ func (tv *TmuxViewer) IsAlive() bool {
 
 // Close ends the tmux session, and with it the Terminal window attached.
 func (tv *TmuxViewer) Close() {
-	if tmux := findTmux(); tmux != "" {
+	if tmux := tv.TmuxPath; tmux != "" {
 		_ = tv.run(tmux, "kill-session", "-t", tv.target())
 		log.Printf("[viewer] closed %s", tv.Name)
 	}
 }
+
+// SystemPATH is the fixed PATH for the system programs a viewer runs.
+const SystemPATH = "/usr/bin:/bin:/usr/sbin:/sbin"
+
+func (tv *TmuxViewer) timeout() time.Duration {
+	if tv.Timeout == 0 {
+		return 5 * time.Second
+	}
+	return tv.Timeout
+}
+
+func (tv *TmuxViewer) osascript() string {
+	if tv.Osascript == "" {
+		return "/usr/bin/osascript"
+	}
+	return tv.Osascript
+}
+
+func viewerShellQuote(s string) string { return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'" }
