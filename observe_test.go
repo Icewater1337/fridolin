@@ -152,3 +152,40 @@ func TestAddressedWorkGoesAheadOfObserveRuns(t *testing.T) {
 		}
 	})
 }
+
+// A run for untagged chatter is told so: its prompt marks it observe-only
+// and says nothing about questions reaching the chat. A run for a message
+// addressed to the brain in the same group is not marked.
+func TestObserveRunsAreToldSo(t *testing.T) {
+	tb, br := newObservingBridge(t, "")
+	promptLog := filepath.Join(tb.home, "prompts.log")
+	t.Setenv("FRIDOLIN_FAKE_PROMPT_LOG", promptLog)
+	ctx := context.Background()
+	tb.handleInbound(ctx, Inbound{JID: testGroup, Sender: otherNumber, Text: "CHATTER", Silent: true, Source: sourceWhatsApp})
+	waitFor(t, 5*time.Second, "the observe-only run", func() bool { return br.Snapshot().Last != nil })
+	tb.handleInbound(ctx, Inbound{JID: testGroup, Sender: otherNumber, Text: "REQUEST", Source: sourceWhatsApp})
+	waitFor(t, 10*time.Second, "the answer", func() bool { return len(tb.sentTo(testGroup)) == 1 })
+
+	prompts := loggedPrompts(t, promptLog)
+	cases := []struct {
+		msg     string
+		observe bool
+	}{
+		{"CHATTER", true},
+		{"REQUEST", false},
+	}
+	for _, c := range cases {
+		t.Run(c.msg, func(t *testing.T) {
+			p := prompts[otherNumber+" says: "+c.msg]
+			if p == "" {
+				t.Fatalf("no prompt for %s in %q", c.msg, prompts)
+			}
+			if got := strings.Contains(p, observeOnlyNote); got != c.observe {
+				t.Errorf("marked observe-only: %v, want %v:\n%s", got, c.observe, p)
+			}
+			if got := strings.Contains(p, askUserQuestionNote); got == c.observe {
+				t.Errorf("told about AskUserQuestion: %v, want %v", got, !c.observe)
+			}
+		})
+	}
+}

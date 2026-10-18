@@ -29,7 +29,15 @@ type promptInput struct {
 	Names map[string]string
 	// Message is the message the run answers.
 	Message Inbound
+	// ObserveOnly marks a run for a message nobody addressed to the brain
+	// (Inbound.Silent, see observeRun): nothing it says is sent.
+	ObserveOnly bool
 }
+
+// observeOnlyNote is what an observe-only run is told instead of how its
+// replies reach the chat: it has nobody to answer and nothing to do but
+// take notes. The example prompt says the same.
+const observeOnlyNote = "<observe_only>\nNobody addressed the new message to you: it is group chatter you read along with, and nothing you write is sent anywhere. Do not act on it — no calendar changes, no messages, no changes to files beyond your own notes. Note what is worth remembering, if anything, and end.\n</observe_only>"
 
 // askUserQuestionNote tells the model what becomes of AskUserQuestion in a
 // run nobody can answer mid-way: the question goes to the chat (see
@@ -105,7 +113,11 @@ func renderPrompt(in promptInput) string {
 	}
 	sb.WriteString("\n\n")
 
-	sb.WriteString(askUserQuestionNote + "\n\n")
+	if in.ObserveOnly {
+		sb.WriteString(observeOnlyNote + "\n\n")
+	} else {
+		sb.WriteString(askUserQuestionNote + "\n\n")
+	}
 	msg := promptMessage{From: in.name(m.Sender), Text: m.textWithQuote(), Files: m.Media}
 	if !m.At.IsZero() {
 		msg.At = m.At.In(in.Now.Location()).Format(promptTimeLayout)

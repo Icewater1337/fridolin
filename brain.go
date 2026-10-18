@@ -1572,7 +1572,7 @@ func (br *Brain) identities() map[string]string {
 // prompt file, the chat's recent history and the identity map. renderPrompt
 // puts it into words.
 func (br *Brain) buildPrompt(s *brainSettings, m Inbound) string {
-	in := promptInput{Now: time.Now(), BrainID: br.id, Message: m}
+	in := promptInput{Now: time.Now(), BrainID: br.id, Message: m, ObserveOnly: m.Silent}
 	if name := s.promptFile; name != "" {
 		if data, err := br.readFile(name); err != nil {
 			log.Printf("brain %s: could not read prompt file %s: %v", br.id, name, err)
