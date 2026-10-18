@@ -75,9 +75,6 @@ type Bridge struct {
 
 	httpSrv *http.Server
 
-	mu       sync.Mutex
-	warnings []string // from startup checks
-
 	// addMu makes adding a brain one step at a time (apiAddBrain).
 	addMu sync.Mutex
 }
@@ -272,13 +269,16 @@ func (b *Bridge) Start(ctx context.Context) error {
 	}
 
 	go b.connectLoop(ctx)
-	go b.runStartupChecks(ctx)
+	// Waited for: it queues alerts in the outbox, which Stop closes.
+	var wg sync.WaitGroup
+	wg.Go(func() { b.watchRequiredFiles(ctx, requiredFilesEvery) })
 	b.backup.Start(ctx)
 	b.plaud.Start(ctx)
 	b.site.Start(ctx)
 
 	log.Println("Bridge started. Waiting for messages…")
 	<-ctx.Done()
+	wg.Wait()
 	return nil
 }
 
@@ -653,56 +653,6 @@ func (b *Bridge) undelivered(brainID string) []historyEntry {
 	return out
 }
 
-// ── startup checks ────────────────────────────────────────────────────────
-
-// runStartupChecks reports configured files that are missing — typically
-// credentials a brain's tools need. The alert goes to the log and the
-// dashboard, and to WhatsApp once connected when configured.
-func (b *Bridge) runStartupChecks(ctx context.Context) {
-	cfg := b.cfgs.Get()
-	var missing []string
-	for _, f := range cfg.StartupChecks.RequiredFiles {
-		if !fileExists(f) {
-			missing = append(missing, f)
-		}
-	}
-	if len(missing) == 0 {
-		return
-	}
-	msg := fmt.Sprintf("%d required file(s) are missing: %s", len(missing), strings.Join(missing, ", "))
-	if cfg.StartupChecks.Hint != "" {
-		msg += " — " + cfg.StartupChecks.Hint
-	}
-	log.Printf("STARTUP CHECK FAILED: %s", msg)
-	b.mu.Lock()
-	b.warnings = append(b.warnings, msg)
-	b.mu.Unlock()
-
-	if !cfg.StartupChecks.NotifyWhatsApp {
-		return
-	}
-	jid := cfg.StartupChecks.NotifyJID
-	if jid == "" {
-		jid = ownerChat(cfg)
-	}
-	if jid == "" {
-		return
-	}
-	deadline := time.Now().Add(2 * time.Minute)
-	for b.wa.State().Mode != "connected" {
-		if time.Now().After(deadline) {
-			return
-		}
-		select {
-		case <-ctx.Done():
-			return
-		case <-time.After(2 * time.Second):
-		}
-	}
-	time.Sleep(3 * time.Second)
-	_ = b.wa.SendMessage(ctx, jid, "⚠️ Bridge startup check: "+msg)
-}
-
 // logDMAccess says in the log who may DM the bridge: at startup (prev nil),
 // and again when an edit opens DMs to everyone. Allowed senders run Claude
 // with all its permissions, so an open allowlist must not go unnoticed, and
@@ -714,11 +664,4 @@ func logDMAccess(prev, next *Config) {
 	case prev == nil && len(next.AllowedNumbers) == 0:
 		log.Printf("allowed_numbers is empty, so nobody can send the bridge direct messages yet. Add your number under Chats → Allowed numbers.")
 	}
-}
-
-// Warnings returns the startup-check findings.
-func (b *Bridge) Warnings() []string {
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	return append([]string(nil), b.warnings...)
 }

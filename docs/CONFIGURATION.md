@@ -792,9 +792,12 @@ brains answer in the same chat. A batch never waits longer than
 }
 ```
 
-Files the assistant's tools need. Missing ones are logged loudly, shown on the
-dashboard and, with `notify_whatsapp`, sent to `notify_jid` (default: the
-first allowed number) once WhatsApp is connected.
+Files the assistant's tools need. They are checked while the bridge runs, not
+only at startup: the dashboard shows the ones missing when it asks, and the
+bridge looks every five minutes. It logs each change loudly and, with
+`notify_whatsapp`, sends the list to `notify_jid` (default: the first allowed
+number) whenever the files missing change, once WhatsApp is connected; a file
+restored and lost again is reported again. Edits to the list apply at once.
 
 ### `backup`
 
