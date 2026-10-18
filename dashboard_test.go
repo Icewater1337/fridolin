@@ -532,9 +532,11 @@ func TestIngestRunsInTheNamedBrain(t *testing.T) {
 	}
 }
 
-// The OTP guard checks the brain the hand-off names, not the brain that owns
-// its reply chat: up asked for the code, so up's guard must catch it.
-func TestIngestOTPGuardChecksTheNamedBrain(t *testing.T) {
+// What /ingest hands a brain comes from a program, not from the chat that
+// asked for a code: the OTP guard leaves it alone, and the brain reads it
+// like any other message. Otherwise a brain could plant a code for the
+// script that waits for one, through its own /ingest.
+func TestIngestedCodeIsNotCaught(t *testing.T) {
 	const dm = "15551234567@s.whatsapp.net"
 	tb := newTestBridge(t, `, "ingest": {"enabled": true}, "otp_guard": true, "otp_markers": ["Examplebank 2FA"]`)
 	tb.addFolderBrain(t, BrainManifest{ID: "dm", Name: "DM", Routing: BrainRouting{HandlesDMs: true}})
@@ -544,14 +546,12 @@ func TestIngestOTPGuardChecksTheNamedBrain(t *testing.T) {
 	if w := tb.ingest(`{"brain":"up","text":"483920"}`); w.Code != 202 {
 		t.Fatalf("ingest: %d %s", w.Code, w.Body.String())
 	}
-	otp := filepath.Join(tb.cfgs.Get().DataDir, "otp", "up.json")
-	waitFor(t, 3*time.Second, "otp file", func() bool { _, err := os.Stat(otp); return err == nil })
-	time.Sleep(200 * time.Millisecond)
-	if hist, _ := os.ReadFile(filepath.Join(upDir, "conversation-history.jsonl")); strings.Contains(string(hist), "483920") {
-		t.Error("the code reached up's history; the guard checked the wrong brain")
+	waitFor(t, 5*time.Second, "up's answer", func() bool { return tb.sentPrefix(dm, "echo:") })
+	if hist, _ := os.ReadFile(filepath.Join(upDir, "conversation-history.jsonl")); !strings.Contains(string(hist), `"text":"483920","type":"in"`) {
+		t.Errorf("up's history lacks the ingested text:\n%s", hist)
 	}
-	if out := tb.dev.Outbox(); len(out) != 0 {
-		t.Errorf("outbox = %+v, want nothing: a caught code must not start a run", out)
+	if _, err := os.Stat(filepath.Join(tb.cfgs.Get().DataDir, "otp", "up.json")); !os.IsNotExist(err) {
+		t.Errorf("the ingested text was handed over as a code (%v)", err)
 	}
 }
 
@@ -1709,7 +1709,13 @@ func TestOTPGuardHandsCodeToLocalScripts(t *testing.T) {
 		t.Error("the code must not be written to the conversation history")
 	}
 	time.Sleep(200 * time.Millisecond)
-	if out := h.Outbox(); len(out) != 1 || !strings.Contains(out[0].Text, "Examplebank 2FA") {
-		t.Errorf("outbox = %+v — only the script's own request may be there; the brain must not run on a caught code", out)
+	// The sender is told what became of the code; nothing else is sent.
+	var texts []string
+	for _, m := range h.Outbox() {
+		texts = append(texts, m.Text)
+	}
+	slices.Sort(texts)
+	if len(texts) != 2 || !strings.Contains(texts[0], "Examplebank 2FA") || texts[1] != otpCaughtNotice {
+		t.Errorf("sent %q — only the script's own request and the notice may be there; the brain must not run on a caught code", texts)
 	}
 }

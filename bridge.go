@@ -362,10 +362,13 @@ func (b *Bridge) handleChange(c messageChange) {
 	// (handleInbound), before anything else sees it: a sender who corrects
 	// a code hands the new one to the script that asked for it, and the
 	// message edited stays as it was.
-	if c.Kind == changeEdit && br != nil && br.DropsOTP(strings.TrimSpace(c.Text)) {
-		log.Printf("brain %s: kept an edited one-time code out of the conversation (OTP guard)", br.ID())
-		b.recordOTP(br, Inbound{JID: c.Chat, Sender: c.Sender, Text: c.Text})
-		return
+	if c.Kind == changeEdit && br != nil {
+		edited := Inbound{JID: c.Chat, ChatAlt: c.ChatAlt, Sender: c.Sender, Text: c.Text, Source: sourceWhatsApp}
+		if code, ok := br.catchesCode(edited, time.Now()); ok {
+			log.Printf("brain %s: kept an edited one-time code out of the conversation (OTP guard)", br.ID())
+			b.recordOTP(br, edited, code)
+			return
+		}
 	}
 	if b.deb.Change(c) {
 		return
@@ -435,22 +438,31 @@ func (b *Bridge) handleInbound(ctx context.Context, m Inbound) {
 		return
 	}
 	// The OTP guard runs before anything is written to history, so a
-	// stray two-factor code is neither logged nor sent to the model.
-	if len(m.Media) == 0 && br.DropsOTP(m.Text) {
+	// two-factor code the chat was asked for is neither logged nor sent to
+	// the model. Whoever sent it is told, unless it was untagged chatter,
+	// which the bridge never answers: a code that vanished without a word
+	// looks lost.
+	if code, ok := br.catchesCode(m, time.Now()); ok {
 		log.Printf("brain %s: kept a one-time code out of the conversation (OTP guard)", br.ID())
-		b.recordOTP(br, m)
+		b.recordOTP(br, m, code)
+		if !m.Silent {
+			_ = b.wa.SendMessage(ctx, m.JID, otpCaughtNotice)
+		}
 		return
 	}
 
 	b.deb.Add(m)
 }
 
+// otpCaughtNotice tells the sender of a caught code what became of it.
+const otpCaughtNotice = "🔐 That looks like the one-time code this chat was asked for, so I kept it out of the conversation: the assistant does not see it."
+
 // recordOTP hands a code the OTP guard caught to the local script that asked
 // for it (it sent the request through /send): it is written to
 // <data_dir>/otp/<brain>.json, readable only by this user. Brains cannot read
 // it (the sandbox denies the data folder), and it never reaches the history
 // or the model. Each code replaces the previous one.
-func (b *Bridge) recordOTP(br *Brain, m Inbound) {
+func (b *Bridge) recordOTP(br *Brain, m Inbound, c otpCatch) {
 	dir := filepath.Join(b.cfgs.Get().DataDir, "otp")
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		log.Printf("otp: %v", err)
@@ -461,7 +473,8 @@ func (b *Bridge) recordOTP(br *Brain, m Inbound) {
 		"brain":    br.ID(),
 		"chat":     m.JID,
 		"sender":   m.Sender,
-		"code":     strings.TrimSpace(m.Text),
+		"code":     c.Code,
+		"typed":    c.Typed,
 		"received": now.Format(time.RFC3339), // local time with offset, like the history
 		// What scripts compare with the time of their request: it needs no
 		// time zone (received ends in "Z" on a host in UTC, which Python

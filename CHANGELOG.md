@@ -75,6 +75,15 @@ yet, so everything is under Unreleased until the first one.
   keeps the earlier ones; `fridolin history` and the dashboard's feed
   leave the marker out. Scripts that read `conversation-history.jsonl`
   themselves meet a new line type, which has no text.
+- The OTP guard catches a code only in the chat that was asked for one,
+  and only for ten minutes after: a number in the brain's other chats, or
+  long after the request, reaches the brain like any other message. It
+  also catches codes written in groups (`483 920`, `483-920`) and
+  letter-and-digit codes (`G-483920`), matches `otp_markers` in any
+  letter case as whole words, tells the sender that the code was kept
+  out, and leaves text handed in through `/ingest` alone. The hand-off
+  file's `code` has the spaces and dashes taken out; `typed` holds the
+  message as it was sent.
 - A run's prompt looks for the chat's last messages in the last 16 MB of
   the brain's history, read back from its end, instead of reading the
   whole file for every run. A chat that was quiet behind more than 16 MB

@@ -138,9 +138,9 @@ type Config struct {
 	// Sandbox controls the macOS sandbox-exec wrapper around brain spawns.
 	Sandbox SandboxConfig `json:"sandbox"`
 
-	// OTPGuard drops bare numeric codes (e.g. "483920") when the bridge
-	// recently asked for one, so a two-factor code typed into the chat is not
-	// handed to the model.
+	// OTPGuard drops a message that is only a one-time code (e.g. "483920")
+	// in a chat that was asked for one in the last minutes (see otp.go), so
+	// a two-factor code typed into the chat is not handed to the model.
 	OTPGuard bool `json:"otp_guard"`
 
 	// OTPMarkers are the phrases that mark an outbound message as a request

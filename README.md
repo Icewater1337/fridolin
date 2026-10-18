@@ -572,10 +572,12 @@ What the bridge does about it:
   see [docs/API.md](docs/API.md#who-may-call).
 - **You approve brain settings.** A brain that edits its own `brain.json` to
   claim your DMs or another group changes nothing until you approve it.
-- **OTP guard.** A message that is only a numeric code, arriving right after
-  the assistant asked for one, is dropped before it reaches history or the model
-  — also when it is sent as a reply to the request or corrected by an edit —
-  and kept in `<data_dir>/otp/` for the local script that asked for it.
+- **OTP guard.** A message that is only a one-time code, arriving in a chat
+  within ten minutes after the assistant or a script asked that chat for
+  one, is dropped before it reaches history or the model — also when it is
+  sent as a reply to the request or corrected by an edit — and kept in
+  `<data_dir>/otp/` for the local script that asked for it. The sender is
+  told.
 
 What it does not do:
 

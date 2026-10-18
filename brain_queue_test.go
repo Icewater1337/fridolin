@@ -1098,16 +1098,6 @@ func TestBuildPromptNamesTheHistorySearch(t *testing.T) {
 	}
 }
 
-func TestOTPMarkersConfigurable(t *testing.T) {
-	lines := []string{`{"type":"out","from":"a","text":"Please send the Examplebank code"}`}
-	if recentOutboundLooksLikeOTPRequest(lines, "a") {
-		t.Error("default markers should not match a bank name")
-	}
-	if !recentOutboundLooksLikeOTPRequest(lines, "a", "Examplebank") {
-		t.Error("a configured marker should arm the guard")
-	}
-}
-
 func TestParseStreamReportsErrorText(t *testing.T) {
 	br := bareBrain(t)
 	stream := `{"type":"assistant","message":{"content":[{"type":"text","text":"Failed to authenticate. API Error: 401"}]}}

@@ -92,7 +92,8 @@ Sends a WhatsApp message.
 
 The message is appended to the history of the brain that owns the chat,
 under the chat's JID whatever form `jid` had, so the brain knows what went
-out in its chat; a code request sent this way arms the OTP guard (see
+out in its chat; a code request sent this way arms the OTP guard in that
+chat for ten minutes (see
 [`otp_guard`](CONFIGURATION.md#otp_guard-and-otp_markers)). The line is
 marked with how it came in (`"via"`: `"script"`, `"brain"` or `"api"` for no
 token), and the brain's chat history shows it as sent by a script or the

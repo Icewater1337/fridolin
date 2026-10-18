@@ -218,6 +218,53 @@ func TestOTPGuardDropsQuotedCode(t *testing.T) {
 	}
 }
 
+// The OTP guard catches a code only in the chat that was asked for one, and
+// only for a while after: a year in the brain's group, or a code that comes
+// long after the request, is a message like any other. A code written in
+// groups is caught too, and its sender is told, unless it was chatter.
+func TestOTPGuardIsScopedToTheChatAndTheWindow(t *testing.T) {
+	cases := []struct {
+		name     string
+		askIn    string        // the chat the brain asked for a code
+		askedAgo time.Duration // how long ago
+		m        Inbound
+		caught   string // the code handed over, "" for none
+		toldChat bool   // the sender hears that it was caught
+	}{
+		{"in the chat that asked", testDMChat, time.Minute, Inbound{JID: testDMChat, Sender: "15551234567", Text: "483920"}, "483920", true},
+		{"written in groups", testDMChat, time.Minute, Inbound{JID: testDMChat, Sender: "15551234567", Text: "483 920"}, "483920", true},
+		{"in another chat of the brain", testDMChat, time.Minute, Inbound{JID: testGroup, Sender: otherNumber, Text: "2024", Silent: true}, "", false},
+		{"long after the request", testDMChat, 11 * time.Minute, Inbound{JID: testDMChat, Sender: "15551234567", Text: "2024"}, "", false},
+		{"as chatter in the group that asked", testGroup, time.Minute, Inbound{JID: testGroup, Sender: otherNumber, Text: "483920", Silent: true}, "483920", false},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			tb, br := newObservingBridge(t, "")
+			br.appendEntry(historyEntry{TS: time.Now().Add(-c.askedAgo).Format(time.RFC3339), Chat: c.askIn, From: "main", Text: "🔐 Please send me the verification code", Type: historyOut})
+			c.m.Source = sourceWhatsApp
+			tb.handleInbound(context.Background(), c.m)
+
+			var handed struct{ Code, Typed, Chat string }
+			data, err := os.ReadFile(filepath.Join(tb.cfgs.Get().DataDir, "otp", "main.json"))
+			if err == nil {
+				err = json.Unmarshal(data, &handed)
+			} else if os.IsNotExist(err) {
+				err = nil
+			}
+			if err != nil || handed.Code != c.caught || (c.caught != "" && (handed.Typed != c.m.Text || handed.Chat != c.m.JID)) {
+				t.Errorf("handed over %+v (%v), want code %q from %s as typed", handed, err, c.caught, c.m.JID)
+			}
+			inHistory := slices.ContainsFunc(readHistory(t, br), func(e historyEntry) bool { return e.Text == c.m.Text })
+			if inHistory == (c.caught != "") {
+				t.Errorf("in the history: %v, want %v", inHistory, c.caught == "")
+			}
+			if told := slices.Contains(tb.sentTo(c.m.JID), otpCaughtNotice); told != c.toldChat {
+				t.Errorf("sender told: %v, want %v (sent %q)", told, c.toldChat, tb.sentTo(c.m.JID))
+			}
+		})
+	}
+}
+
 // The junk filter judges what was typed: an untagged "ok" gets no run of its
 // own whether or not it quotes something, in a brain that runs on chatter.
 // Every untagged message goes into the history with its quote: a "yes" may

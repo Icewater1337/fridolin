@@ -1002,13 +1002,25 @@ case.
 
 ### `otp_guard` and `otp_markers`
 
-Drops a message that is only a 4–8 digit number when one of the assistant's
-last 50 outbound messages contains one of `otp_markers` — by default `🔐`,
-`OTP`, `2FA`, `one-time code`, `verification code`. Add your own (a bank's
-name in its code prompt, say); setting the list replaces the defaults, so
-include them if you still want them. Only what was typed counts: a code sent
-as a reply to the request is caught too, and so is a corrected code, when
-its sender edits the message.
+Catches a one-time code in a chat that was just asked for one. A chat was
+asked when, in the last ten minutes, something went out there that holds
+one of `otp_markers`: the assistant's own reply, or a message sent in the
+chat through `/send` by a script or a brain. The markers are by default
+`🔐`, `OTP`, `2FA`, `one-time code` and `verification code`, matched in
+any letter case and as whole words (`OTP` is not found in "hotpot"). Add
+your own (a bank's name in its code prompt, say); setting the list
+replaces the defaults, so include them if you still want them. A message
+in that chat, from anyone in it, is caught when it is nothing but a code:
+4 to 8 digits, also in groups such as `483 920` or `483-920`, or 6 to 10
+upper-case letters and digits with at least two digits, such as
+`G-483920`. A number in another chat of the brain, or one that comes
+later than ten minutes after the request, is a message like any other.
+Only what was typed counts: a code sent as a reply to the request is
+caught too, and so is a corrected code, when its sender edits the message.
+Only messages from a chat are caught: text handed to a brain through
+`/ingest` or by Plaud comes from a program, and the brain reads it.
+Whoever sent the code is told that it was kept out of the conversation,
+unless it was untagged group chatter, which the bridge never answers.
 
 The code is never written to history or sent to the model — the assistant
 never sees it. It is kept for local scripts instead:
@@ -1017,8 +1029,12 @@ that brain, readable only by your user and denied to brains by the sandbox:
 
 ```json
 {"brain": "main", "chat": "15551234567@s.whatsapp.net", "sender": "15551234567",
- "code": "483920", "received": "2026-10-18T09:30:12+02:00", "received_unix_ms": 1792308612345}
+ "code": "483920", "typed": "483 920",
+ "received": "2026-10-18T09:30:12+02:00", "received_unix_ms": 1792308612345}
 ```
+
+`code` is the code without spaces and dashes, `typed` the message as it
+was sent.
 
 Each caught code replaces the one before, and the file stays until then, so
 a script deletes it once it has used the code if it wants it gone. The

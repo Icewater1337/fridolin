@@ -341,8 +341,10 @@ func TestReplacedFolderIsOpenedOnReload(t *testing.T) {
 // written to nor read through; nor is a missing file created at a
 // dangling symlink's target.
 func TestHistoryIsNotFollowedOutOfTheFolder(t *testing.T) {
-	const otherLines = `{"ts":"2026-01-01T10:00:00Z","from":"15551234567","chat":"15551234567@s.whatsapp.net","text":"OTHER-BRAIN-SECRET","type":"in"}
-{"ts":"2026-01-01T10:01:00Z","from":"a","chat":"15551234567@s.whatsapp.net","text":"🔐 send me the code","type":"out"}
+	// The code request is recent, so that it arms the guard.
+	asked := time.Now().Add(-time.Minute).Format(time.RFC3339)
+	otherLines := `{"ts":"2026-01-01T10:00:00Z","from":"15551234567","chat":"15551234567@s.whatsapp.net","text":"OTHER-BRAIN-SECRET","type":"in"}
+{"ts":"` + asked + `","from":"a","chat":"15551234567@s.whatsapp.net","text":"🔐 send me the code","type":"out"}
 `
 	cases := []struct {
 		name   string
@@ -381,7 +383,7 @@ func TestHistoryIsNotFollowedOutOfTheFolder(t *testing.T) {
 
 			br.appendHistory("15551234567@s.whatsapp.net", "15551234567", "NEW-MESSAGE", historyIn)
 			preface := br.buildPrompt(br.settings.Load(), dm("hello"))
-			drops := br.DropsOTP("123456")
+			_, drops := br.catchesCode(dm("123456"), time.Now())
 			feed := NewActivity(10)
 			feed.Seed(br)
 			var seeded []string
@@ -399,7 +401,7 @@ func TestHistoryIsNotFollowedOutOfTheFolder(t *testing.T) {
 					t.Errorf("preface = %q, want the history", preface)
 				}
 				if !drops || len(seeded) != 3 {
-					t.Errorf("DropsOTP = %v, activity = %q; want the code dropped and three entries", drops, seeded)
+					t.Errorf("code caught = %v, activity = %q; want the code caught and three entries", drops, seeded)
 				}
 				if lines := logged(); len(lines) > 0 {
 					t.Errorf("unexpected log %q", lines)
@@ -418,7 +420,7 @@ func TestHistoryIsNotFollowedOutOfTheFolder(t *testing.T) {
 				t.Errorf("the history symlink was replaced (%v)", err)
 			}
 			if strings.Contains(preface, "OTHER-BRAIN-SECRET") || drops || len(seeded) > 0 {
-				t.Errorf("read through the symlink: preface %q, DropsOTP %v, activity %q", preface, drops, seeded)
+				t.Errorf("read through the symlink: preface %q, code caught %v, activity %q", preface, drops, seeded)
 			}
 			lines := logged()
 			if len(lines) != 1 || !strings.Contains(lines[0], "brain a: failed to open history file "+hist+": "+errSymlink.Error()) {

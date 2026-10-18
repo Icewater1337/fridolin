@@ -14,7 +14,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"regexp"
 	"runtime/debug"
 	"slices"
 	"strings"
@@ -125,69 +124,6 @@ func isTableRule(cells []string) bool {
 		}
 	}
 	return true
-}
-
-// bareCodeRe matches a message that is nothing but a 4–8 digit number.
-var bareCodeRe = regexp.MustCompile(`^\s*\d{4,8}\s*$`)
-
-// defaultOTPMarkers are the substrings that mark an outbound message as a
-// request for a one-time code. When the last thing the brain said contains one
-// of these and the reply is a bare numeric code, the message is dropped
-// instead of being fed to the model — a 2FA code pasted into the chat should
-// not end up in a prompt. Add your own (a bank's name, say) with otp_markers.
-var defaultOTPMarkers = []string{"🔐", "OTP", "one-time code", "2FA", "verification code"}
-
-// recentOutboundLooksLikeOTPRequest reports whether any of the brain's last 50
-// outbound messages in lines, the tail of its history, asked for a one-time
-// code: its own replies, and what went out in its chats through /send, from
-// a script or a brain. With no markers given it uses the built-in list.
-func recentOutboundLooksLikeOTPRequest(lines []string, brainID string, markers ...string) bool {
-	if len(markers) == 0 {
-		markers = defaultOTPMarkers
-	}
-	start := len(lines) - 50
-	if start < 0 {
-		start = 0
-	}
-	for i := len(lines) - 1; i >= start; i-- {
-		var entry historyEntry
-		if err := json.Unmarshal([]byte(lines[i]), &entry); err != nil {
-			continue
-		}
-		if entry.Type != historyOut || (entry.From != brainID && entry.Via == "") {
-			continue
-		}
-		for _, marker := range markers {
-			if marker != "" && strings.Contains(entry.Text, marker) {
-				return true
-			}
-		}
-	}
-	return false
-}
-
-// tailLines returns the complete lines in the last maxBytes of f.
-func tailLines(f *os.File, maxBytes int64) []string {
-	st, err := f.Stat()
-	if err != nil {
-		return nil
-	}
-	off := st.Size() - maxBytes
-	if off < 0 {
-		off = 0
-	}
-	buf := make([]byte, st.Size()-off)
-	if _, err := f.ReadAt(buf, off); err != nil && err != io.EOF {
-		return nil
-	}
-	lines := strings.Split(strings.TrimRight(string(buf), "\n"), "\n")
-	if off > 0 && len(lines) > 0 {
-		lines = lines[1:] // the first line was cut in half
-	}
-	if len(lines) == 1 && lines[0] == "" {
-		return nil
-	}
-	return lines
 }
 
 // ── Brain ────────────────────────────────────────────────────────────────
@@ -378,27 +314,8 @@ func (br *Brain) Name() string { return br.settings.Load().name }
 // Dir is the brain's folder.
 func (br *Brain) Dir() string { return br.workDir }
 
-// DropsOTP reports whether text is a one-time code the brain asked for, which
-// must not be written to history or sent to the model.
-func (br *Brain) DropsOTP(text string) bool {
-	s := br.settings.Load()
-	return s.otpGuard && bareCodeRe.MatchString(text) &&
-		recentOutboundLooksLikeOTPRequest(br.historyTail(256*1024), br.id, s.otpMarkers...)
-}
-
 // historyFileName is the brain's conversation history, in its folder.
 const historyFileName = "conversation-history.jsonl"
-
-// historyTail returns the complete lines in the last maxBytes of the
-// brain's history, or none when it cannot be read (see openInFolder).
-func (br *Brain) historyTail(maxBytes int64) []string {
-	f, err := openInFolder(br.root, historyFileName, os.O_RDONLY, 0)
-	if err != nil {
-		return nil
-	}
-	defer f.Close()
-	return tailLines(f, maxBytes)
-}
 
 // logInbound writes m to the brain's history: a line for each part of a
 // merged message, with its ID, so that one deleted later is taken out

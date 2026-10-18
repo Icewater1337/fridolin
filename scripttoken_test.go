@@ -236,28 +236,3 @@ func TestOutboundSender(t *testing.T) {
 		}
 	}
 }
-
-// The OTP guard counts a code request a brain sent itself or that went out
-// in its chat through /send, but not another brain's own replies.
-func TestOTPGuardCountsSendLines(t *testing.T) {
-	line := func(from, via string) string {
-		data, _ := json.Marshal(historyEntry{From: from, Via: via, Type: "out", Text: "your OTP please"})
-		return string(data)
-	}
-	cases := []struct {
-		name  string
-		lines []string
-		want  bool
-	}{
-		{"its own reply", []string{line("a", "")}, true},
-		{"a script's request", []string{line("script", "script")}, true},
-		{"a request without a token", []string{line("script", "api")}, true},
-		{"its own /send", []string{line("a", "brain")}, true},
-		{"another brain's reply", []string{line("b", "")}, false},
-	}
-	for _, c := range cases {
-		if got := recentOutboundLooksLikeOTPRequest(c.lines, "a"); got != c.want {
-			t.Errorf("%s: %v, want %v", c.name, got, c.want)
-		}
-	}
-}
