@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"fmt"
 	"maps"
 	"os"
 	"path/filepath"
@@ -365,4 +366,69 @@ func brainRunEnv(t *testing.T, env map[string]string, config string) (map[string
 		got[k] = v
 	}
 	return got, home
+}
+
+// TestPrepareBrainState: before a sandboxed run the bridge creates the
+// brain's inbox and state folders, which the profile pins, and points the
+// run at them: its own Claude Code config dir (unless it shares yours),
+// TMPDIR, the CLI's temp dir and the tools' caches. A state folder that is
+// a symlink is refused, since the profile allows it by name, and so is an
+// id that cannot name a folder.
+func TestPrepareBrainState(t *testing.T) {
+	for _, inherit := range []bool{false, true} {
+		t.Run(fmt.Sprintf("inherit_claude_user_config=%v", inherit), func(t *testing.T) {
+			data := canonicalDir(t.TempDir())
+			env, err := prepareBrainState(data, data+"/media", "a", inherit)
+			if err != nil {
+				t.Fatal(err)
+			}
+			state := data + "/brains/a"
+			want := []string{
+				"TMPDIR=" + state + "/tmp", "CLAUDE_CODE_TMPDIR=" + state + "/tmp", "TMPPREFIX=" + state + "/tmp/zsh",
+				"XDG_CACHE_HOME=" + state + "/cache", "npm_config_cache=" + state + "/cache/npm",
+			}
+			if !inherit {
+				want = append(want, "CLAUDE_CONFIG_DIR="+state+"/claude")
+			}
+			if !slices.Equal(env, want) {
+				t.Errorf("env = %q, want %q", env, want)
+			}
+			for _, dir := range []string{state + "/claude", state + "/tmp", state + "/cache", data + "/media/a"} {
+				if fi, err := os.Lstat(dir); err != nil || !fi.IsDir() {
+					t.Errorf("%s: %v, %v", dir, fi, err)
+				}
+			}
+			// The folders the sandbox profile names are these.
+			if st := brainStateOf(data, "a"); !slices.Equal(st.folders(), []string{state + "/claude", state + "/tmp", state + "/cache"}) || st.dir != state {
+				t.Errorf("brainStateOf = %+v", st)
+			}
+		})
+	}
+	t.Run("a state folder that is a symlink", func(t *testing.T) {
+		data := canonicalDir(t.TempDir())
+		state := data + "/brains/a"
+		if err := os.MkdirAll(state, 0o700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Symlink(t.TempDir(), state+"/tmp"); err != nil {
+			t.Fatal(err)
+		}
+		if env, err := prepareBrainState(data, data+"/media", "a", false); err == nil {
+			t.Errorf("prepareBrainState = %q, want it refused", env)
+		}
+	})
+	for name, c := range map[string]struct{ data, id string }{
+		"no data dir":             {"", "a"},
+		"an id that is no folder": {"data", "../b"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			data := c.data
+			if data != "" {
+				data = filepath.Join(t.TempDir(), data)
+			}
+			if env, err := prepareBrainState(data, "", c.id, false); err == nil {
+				t.Errorf("prepareBrainState = %q, want it refused", env)
+			}
+		})
+	}
 }

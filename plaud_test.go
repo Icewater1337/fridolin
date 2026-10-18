@@ -2834,12 +2834,29 @@ func TestPlaudBrainAccessSharesTheLogin(t *testing.T) {
 	if !strings.Contains(fp.calls(), "HOME="+tb.home+" ") {
 		t.Errorf("with brain_access the CLI must use the real home:\n%s", fp.calls())
 	}
-	if strings.Contains(mustProfile(t, tb.brainMgr.profiler, "p"), filepath.Join(tb.home, ".plaud")) {
+	// Brains read the login, and save it when the CLI refreshes it, but
+	// cannot remove it or put anything else in its place.
+	denyRead := func(home string) string { return `(deny file-read* (subpath "` + filepath.Join(home, ".plaud") + `"))` }
+	profile := mustProfile(t, tb.brainMgr.profiler, "p")
+	if strings.Contains(profile, denyRead(tb.home)) {
 		t.Error("with brain_access brains must be able to read ~/.plaud")
 	}
+	tokens := filepath.Join(tb.home, ".plaud", "tokens.json")
+	for _, op := range []string{"file-write-data", "file-write-mode"} {
+		if !strings.Contains(profile, `(allow `+op+` (literal "`+tokens+`"))`) {
+			t.Errorf("with brain_access brains must be able to save a refreshed login (%s)", op)
+		}
+	}
+	if strings.Contains(profile, `(allow file-write* (literal "`+tokens+`"))`) {
+		t.Error("with brain_access brains may rewrite the Plaud login, not remove or replace it")
+	}
 	tb2, _ := plaudBridge(t, "")
-	if !strings.Contains(mustProfile(t, tb2.brainMgr.profiler, "p"), filepath.Join(tb2.home, ".plaud")) {
+	profile = mustProfile(t, tb2.brainMgr.profiler, "p")
+	if !strings.Contains(profile, denyRead(tb2.home)) {
 		t.Error("without brain_access the sandbox must deny ~/.plaud")
+	}
+	if strings.Contains(profile, "tokens.json") {
+		t.Error("without brain_access brains must not write the Plaud login")
 	}
 }
 
@@ -3174,14 +3191,12 @@ func TestPlaudPATH(t *testing.T) {
 
 // TestBrainPlaudPATH: brains that may use the Plaud CLI find it on their
 // PATH also where the bridge's PATH does not have it. Its folder comes
-// ahead of the bridge's PATH only when it holds the CLI's node (nvm), and
-// in HOME the sandbox then keeps brains from planting the programs the
-// bridge runs by name there: sandbox-exec starts claude by name on that
-// PATH for every brain's run, and the CLI's #!/usr/bin/env node looks up
-// node on it. Any other CLI folder comes last, so that nothing a brain put
-// there runs in place of a program on the bridge's PATH in another
-// brain's run. The sandbox covers a CLI folder in HOME either way, so that
-// no brain can put a node in it that would move it first.
+// ahead of the bridge's PATH only when it holds the CLI's node (nvm):
+// sandbox-exec starts claude by name on that PATH for every brain's run,
+// and the CLI's #!/usr/bin/env node looks up node on it. Any other CLI
+// folder comes last, so that nothing in it runs in place of a program on
+// the bridge's PATH in another brain's run. The sandbox keeps brains from
+// writing in any of these folders, as anywhere outside their own places.
 func TestBrainPlaudPATH(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
@@ -3195,7 +3210,6 @@ func TestBrainPlaudPATH(t *testing.T) {
 	outside := filepath.Join(t.TempDir(), "bin")
 	writeExecutables(t, filepath.Join(nvmBin, "plaud"), filepath.Join(nvmBin, "node"),
 		filepath.Join(inHome, "plaud"), filepath.Join(outside, "plaud"))
-	homes := []string{home, resolvePath(home)}
 	cases := []struct {
 		name, cliPath, dir string
 		first              bool // the CLI's folder comes first, else last
@@ -3215,22 +3229,8 @@ func TestBrainPlaudPATH(t *testing.T) {
 			if tc.first && dirs[0] != tc.dir || !tc.first && dirs[len(dirs)-1] != tc.dir {
 				t.Errorf("brainPlaudPATH = %s, want %s first: %v", got, tc.dir, tc.first)
 			}
-			i := strings.Index(got, os.Getenv("PATH"))
-			if i < 0 {
+			if !strings.Contains(got, os.Getenv("PATH")) {
 				t.Fatalf("brainPlaudPATH = %s, which lacks the bridge's PATH", got)
-			}
-			files, _ := NewSandboxProfiler(nil, cfg).plantablePrograms(home)
-			covered := func(dir string) bool {
-				return slices.Contains(files, filepath.Join(dir, "claude")) && slices.Contains(files, filepath.Join(dir, "node")) &&
-					slices.Contains(files, filepath.Join(dir, "sh"))
-			}
-			for _, d := range filepath.SplitList(strings.TrimSuffix(got[:i], ":")) {
-				if withinAny(d, homes) && !covered(d) {
-					t.Errorf("brainPlaudPATH = %s, whose %s comes ahead of the bridge's PATH but is not protected from planted programs", got, d)
-				}
-			}
-			if withinAny(tc.dir, homes) && !covered(tc.dir) {
-				t.Errorf("the sandbox does not keep brains from planting a node in %s", tc.dir)
 			}
 		})
 	}

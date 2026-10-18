@@ -116,24 +116,20 @@ below), while a check ran gets no notice: it did not expire.
 
 Plaud's tool stores its login in `<home>/.plaud/tokens.json`. By default
 Fridolin runs it with a private home in `~/.fridolin/plaud/home/`, which the
-sandbox denies to brains, and denies brains `~/.plaud/` as well. It runs the
-tool in that home folder, never in its own working folder (the tool would
-read a `.env` there), and stops it, with anything it started, when a check
-is cancelled. Fridolin runs the tool itself outside the sandbox, so when it
-is installed in your home folder (with nvm, for example) its whole npm
-package and the `node` that runs it are read-only to brains. Unless
-`cli_path` is set, Fridolin takes the tool from the newest nvm node version
-that has it, so brains cannot write anywhere in `~/.nvm/versions/node`, and
-they cannot add a `plaud` or `node` to a `PATH` folder in your home folder
-either, nor to the tool's own folder when that is in your home folder.
-The tool's `#!/usr/bin/env node` finds `node` on a `PATH` of Fridolin's:
-the tool's own folder first when that holds a `node` (as with nvm), then
-only the folders of the service's `PATH` that Fridolin takes its helpers
-from (see [CONFIGURATION.md](CONFIGURATION.md#helper-programs)), and
-last the tool's folder when it holds none, so that no `node` a brain put
-in another folder of that `PATH` runs instead. One in
-`/opt/homebrew` or `/usr/local` is not protected yet; see
-[what the sandbox does not cover yet](CONFIGURATION.md#what-the-sandbox-does-not-cover-yet).
+sandbox denies to brains, and denies brains `~/.plaud/` as well. It runs
+the tool in that home folder, never in its own working folder (the tool
+would read a `.env` there), and stops it, with anything it started, when a
+check is cancelled. The tool's `#!/usr/bin/env node` finds `node` on a
+`PATH` of Fridolin's: the tool's own folder first when that holds a
+`node` (as with nvm), then only the folders of the service's `PATH` that
+Fridolin takes its helpers from (see
+[CONFIGURATION.md](CONFIGURATION.md#helper-programs)), and last the tool's
+folder when it holds none. Fridolin runs the tool itself outside the
+sandbox, but brains can write nothing outside their own places (see
+[the sandbox](CONFIGURATION.md#writing)), so they can neither change the
+tool, its npm package or the `node` that runs it, wherever they are
+installed, nor add a newer node version to nvm or a `plaud` or `node` to a
+`PATH` folder, where Fridolin would find it next.
 
 **Let brains use the Plaud CLI** (`plaud.brain_access`) keeps the login in
 `~/.plaud/` instead, so brains can run `plaud search`, `plaud transcript` and
@@ -141,10 +137,20 @@ so on themselves. Their `PATH` then has the tool's folder as well as the
 service's whole `PATH`, so they find the tool also where the service's
 `PATH` does not have it: first when the folder holds the `node` the tool
 was installed with (as with nvm), so that they get that one, and
-otherwise last, so that nothing a brain put there runs in place of a
-program on the service's `PATH`, such as `claude` for another brain's
-run. A brain could then also read the token — turn it on only if you want
-brains to look things up in Plaud directly.
+otherwise last, so that nothing in it runs in place of a program on the
+service's `PATH`, such as `claude` for another brain's run. A brain could
+then also read the token — turn it on only if you want brains to look
+things up in Plaud directly. A brain's `plaud` also refreshes the login
+when it is about to expire and saves it, as yours does: the sandbox lets
+brains rewrite `~/.plaud/tokens.json` in place and set its mode, and
+nothing else in `~/.plaud/`. Without that, a brain's command failed as not
+logged in once the login had expired, and a refresh token Plaud replaced
+was lost, which signed Plaud out. Brains cannot remove, rename or replace
+the file: one that put a symlink in its place would have had Fridolin's
+own `plaud`, which runs outside the sandbox, write your next sign-in
+wherever the link points. A brain's `plaud logout` still revokes the
+login at Plaud, as anything holding the token can, though the file
+stays: Fridolin's next check then finds the login refused.
 
 Changing it does not move a login. Fridolin stops checking until you
 connect again (a check that is running ends there, and the recordings it

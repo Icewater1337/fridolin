@@ -348,17 +348,19 @@ the brain's own `claudeMdExcludes`, if it has any. It does not cover the
 skills, agents and commands in those `.claude` folders, nor keep a brain
 from reading any of these files with its tools. The
 [sandbox](#sandbox-macos) does both: it keeps brains from reading or
-writing any of them, up to `/`; in your home folder it denies only
-`.claude/CLAUDE.md` and `.claude/rules`, since the rest of `~/.claude` is
-the CLI's own state. Without the sandbox (Linux, or `sandbox.enabled` off),
+writing any of them, up to `/`, and all of `~/.claude`, since a sandboxed
+brain keeps its Claude Code state in a config folder of its own. Without
+the sandbox (Linux, or `sandbox.enabled` off),
 brains still get the skills, agents and commands above their folder and
 can read your instructions, so keep brain folders out from under folders
 that hold either.
 
 `true` brings back the old behaviour: brains load all of your setup, like a
-Claude Code session you start yourself in the brain's folder, and the
-sandbox lets them read those instruction files again (it still denies
-writing them, as listed under [sandbox](#sandbox-macos)).
+Claude Code session you start yourself in the brain's folder, and share
+your Claude Code config folder rather than keep one of their own. The
+sandbox then lets them read those instruction files and your setup again,
+and write the CLI's state in your config folder, never the configuration
+itself (see [with `inherit_claude_user_config`](#with-inherit_claude_user_config)).
 
 Before you upgrade to a version with this setting, check whether your
 brains rely on any of this:
@@ -522,8 +524,65 @@ When enabled, each Claude run is wrapped in `sandbox-exec` under a generated
 profile. Changes (including added or removed brains) apply to the next run of
 every brain. If the profile cannot be built or `/usr/bin/sandbox-exec` is
 missing, the run is refused: the chat gets an error, the bridge log names the
-cause, and Claude never starts unsandboxed. The profile is allow-by-default.
-Brains can neither read nor write:
+cause, and Claude never starts unsandboxed. `fridolin check --print-sandbox
+<brain id>` prints the profile a run would get.
+
+### Writing
+
+**Writing is denied everywhere**, except in a brain's own places:
+
+- its own folder;
+- its media inbox, `media/<brain id>/` in the data directory (see
+  [`data_dir`](#data_dir-restart)), where the files sent to its chats land;
+- its own state, `brains/<brain id>/` in the data directory, which the
+  bridge creates before each run: `claude/`, the brain's own Claude Code
+  config folder (`CLAUDE_CONFIG_DIR`: its settings, transcripts, todos and
+  `.claude.json`), `tmp/` (`TMPDIR`, the CLI's `CLAUDE_CODE_TMPDIR`, and
+  `TMPPREFIX` for zsh, which ignores `TMPDIR`) and `cache/`
+  (`XDG_CACHE_HOME`, and `npm_config_cache` for npm). It stays, with the
+  inbox, when the brain is removed, and a brain added later under the same
+  id takes both over (see [BRAINS.md](BRAINS.md#removing-a-brain));
+- with [`plaud.brain_access`](PLAUD.md#where-the-login-lives), the Plaud
+  login it shares, `~/.plaud/tokens.json`, in place: the Plaud CLI
+  rewrites it when it refreshes the login, after it sets the modes of the
+  file and of `~/.plaud`. A brain cannot remove, rename or replace the
+  file (with a symlink, through which the bridge's own Plaud CLI would
+  write your next sign-in), nor write anything else in `~/.plaud`;
+- `/dev/null`, `/dev/zero`, `/dev/tty`, `/dev/fd`.
+
+So a manipulated brain cannot leave anything that runs or loads outside its
+sandbox: not in `~/.claude` (settings and their hooks, `CLAUDE.md`, skills,
+plugins, auto-memory), which your own sessions load, nor in another
+project's `.claude/settings.json` or `.mcp.json`, a `CLAUDE.md` above any
+brain's folder, `~/Library/LaunchAgents`, a shell startup file, the files
+those load (`~/.nvm/nvm.sh`, `~/.oh-my-zsh`), `~/.gitconfig`, a program in
+a `PATH` folder (`~/.local/bin`, or `/opt/homebrew` and `/usr/local`,
+which your user may write), the bridge's own binary, install folder and
+checkout, or the programs the bridge runs unsandboxed (the Claude CLI,
+rclone, the Plaud CLI). Nor can it change another brain's state or inbox.
+
+That also means brains cannot update the Claude CLI (the bridge turns its
+auto-updater off for them, `DISABLE_AUTOUPDATER=1`; your own sessions
+still update it), install programs, node versions or global npm packages,
+or write a cache shared with you, such as `~/.cache` or
+`~/Library/Caches`. Tools that follow `XDG_CACHE_HOME` (uv, Hugging Face
+models, as `transcribe.py` downloads them) use the brain's own `cache/`, so
+each brain downloads such a model once for itself. Point a tool that does
+not at its own folder, for example in the brain folder's
+`.claude/settings.json`: `{ "env": { "HF_HOME": "/Users/you/assistant/a/.cache/hf" } }`.
+
+**Logging in.** With a Claude Code config folder of its own, a sandboxed
+brain does not see the login you made with `claude`, which lives in your
+keychain and your own config folder. Run `claude setup-token` and set the
+token it prints as `CLAUDE_CODE_OAUTH_TOKEN` in the bridge's environment,
+or set `ANTHROPIC_API_KEY`, or a Bedrock or Vertex setup (see [where to
+set them](#where-to-set-them)). The dashboard warns while none of them is
+set. A brain's own Claude Code state starts empty; the transcripts of its
+earlier runs stay in `~/.claude/projects`, which it can no longer read.
+
+### Reading
+
+Reading is allowed by default. Brains cannot read:
 
 - every **other brain's** working directory
 - `~/.ssh`, `~/.gnupg`, `~/.aws`, `~/.config/gh`, `~/.config/gcloud`,
@@ -535,11 +594,16 @@ Brains can neither read nor write:
 - the profiles of Safari, Chrome (all of `Application Support/Google`),
   Firefox, Brave, Edge, Arc, Chromium, Vivaldi and Opera, with the release
   channels kept beside them (Edge Beta, Vivaldi Snapshot, Opera GX, …)
+- your Claude Code setup and state: all of `~/.claude` (and of the
+  bridge's own `CLAUDE_CONFIG_DIR`, if it has one), with your settings,
+  plugins, skills and every session's transcript, and `~/.claude.json`,
+  with its MCP servers, and its backups; unless
+  `inherit_claude_user_config` is on (see below)
 - the bridge's data directory — except the brain's own media inbox
-  (`media/<brain id>/`), and its own `run-tokens/<id>/` to read — under
-  both names it has had, `~/.fridolin` and `~/.whatsapp-claude-bridge`,
-  whichever is in use (an old one left behind can still hold the WhatsApp
-  keys and tokens)
+  (`media/<brain id>/`), its own state (`brains/<brain id>/`) and its own
+  `run-tokens/<id>/` to read — under both names it has had, `~/.fridolin`
+  and `~/.whatsapp-claude-bridge`, whichever is in use (an old one left
+  behind can still hold the WhatsApp keys and tokens)
 - the media folder, wherever `media_dir` puts it, except the brain's own
   inbox in it: attachments are downloaded into `media/.incoming/`, and the
   brain that takes the message moves them into its inbox, so no brain sees
@@ -564,123 +628,97 @@ Brains can neither read nor write:
 - `~/.config/fridolin`, which holds the personal-data denylist the commit
   hooks read
 - your Claude Code instructions above a brain's folder: the `CLAUDE.md` and
-  `CLAUDE.local.md` in every folder above it, up to `/`, the `.claude`
-  folder in each of them (in your home folder only `.claude/CLAUDE.md` and
-  `.claude/rules`), and `~/.claude/CLAUDE.md` and `~/.claude/rules` for a
-  brain outside your home folder too; unless `inherit_claude_user_config`
-  is on, which makes them readable again
+  `CLAUDE.local.md` in every folder above it, up to `/`, and the `.claude`
+  folder in each of them below your home folder; unless
+  `inherit_claude_user_config` is on, which makes them readable again
 
-Other Claude Code sessions' records (`~/.claude/projects`,
-`~/.claude/sessions`, yours included) are unreadable, but the CLI writes its
-own run's files there, so writing stays allowed. Transcripts cannot be moved
-or deleted; the small per-process files in `sessions/` can (the CLI deletes
-its own on exit). Nor can a brain plant a symlink in either folder, such as
-a new project's folder linked into its own, through which a later session's
-transcript would reach it.
+`~/Library/Keychains` is deliberately **not** denied yet.
 
-Brains can read but never write the files that are loaded or run outside
-their sandbox, so a manipulated brain cannot plant code there:
+The folders above a brain's own places may still be looked at, though not
+listed: programs check every folder on the way to a path (`mkdir -p`,
+`realpath`), and would fail in a brain's state below the data directory,
+or in a brain folder below `~/Documents`.
 
-- Claude Code's own configuration: `~/.claude/settings.json`,
-  `settings.local.json`, `CLAUDE.md` and the `hooks`, `rules`, `agents`,
-  `commands`, `skills`, `plugins` and `output-styles` folders (`CLAUDE.md`
-  and `rules` are not even readable, see above). Your own Claude Code
-  sessions load them, and with `inherit_claude_user_config` so does every
-  brain's next run. Brains therefore cannot change Claude Code settings or
-  install plugins; do that yourself.
-- the `CLAUDE.md`, `CLAUDE.local.md` and `.mcp.json` in every folder above a
-  brain's folder, up to and including your home folder (or up to `/` for a
-  brain outside it), and the `.claude` folder in each of them below your
-  home folder. Your own sessions load them. So would the brains below
-  them, but the sandbox keeps the `CLAUDE.md` files and `.claude` folders
-  from brains (see above), and a brain loads no `.mcp.json` but its own,
-  unless `inherit_claude_user_config` is on. A brain's own folder is its
-  own.
-- Claude Code's auto-memory, `~/.claude/projects/<project>/memory`, which
-  every new session of that project loads, yours included
-- `~/Library/LaunchAgents`
-- shell startup files: `~/.zshenv`, `.zprofile`, `.zshrc`, `.zlogin`,
-  `.zlogout`, `.bash_profile`, `.bash_login`, `.bashrc`, `.profile`,
-  `~/.config/fish`
-- `~/.tmux.conf` and `~/.config/tmux`, read by the activity viewer's tmux
-- `~/.gitconfig` and the files it includes (see `git_config` below)
-- the bridge's own binary and, when it runs from one, its source checkout
-  (launchd runs it outside any sandbox)
-- the programs the bridge runs unsandboxed, when they live in your home
-  folder: the Claude CLI (as found on `PATH` and the file it links to),
-  rclone, the Plaud CLI with its whole npm package and the `node` that runs
-  it, and tmux when the viewer is on. Brain runs therefore cannot update the
-  Claude CLI or these tools, so the bridge turns the CLI's auto-updater off
-  for them (`DISABLE_AUTOUPDATER=1`); your own sessions still update it.
-- where the bridge would find such a program next, so that a brain cannot
-  plant one: in every folder of the bridge's `PATH` (and the Plaud CLI's)
-  that lies in your home folder, such as `~/.local/bin`, the names it runs
-  by name (`claude`, `rclone`, `plaud`, `node`, `tmux`, `sh`, `tail`,
-  `touch`, `osascript`, `open`), whether they exist there yet or not;
-  `~/.local/bin/rclone`, where it looks when rclone is not in the
-  [helper folders](#helper-programs) of `PATH`; and,
-  unless `plaud.cli_path` is set, all of `~/.nvm/versions/node`, because
-  the bridge takes the Plaud CLI of the newest node version that has one.
-  Brains therefore cannot install node versions or global npm packages with
-  nvm.
+### What wins
 
-Of its `PATH`, the bridge looks up tmux, rclone and the Plaud CLI only in
-those folders in your home folder and in a few system and package-manager
-folders, which the sandbox does not protect (see
-[helper programs](#helper-programs)).
+The sandbox applies the last rule that matches, so the profile is written
+in this order, weakest first:
 
-Renaming counts as writing. The sandbox matches paths, not files, so a brain
-that renamed `~/.ssh`, or the folder that holds another brain, used to read
-it under the new name. Nothing denied can be renamed or deleted, apart from
-the per-process files in `~/.claude/sessions`, and neither can any folder
-above it, up to your home folder (or up to `/` for a path outside it).
-Brains can still create and change files inside those folders. Nor can a
-brain create such a folder while it does not exist yet, for example a
-missing `~/.config` or `PATH` folder: it could create it as a symlink into
-its own folder, or move a folder of its own there, and so redirect what
-lies below it. The exception is `~/.claude` and the folders in it, which
-the Claude CLI creates on its first run: brains can create them too, though
-not as a symlink, and from the next run on they are pinned too.
+1. Writing is denied everywhere, but for the devices above.
+2. The home-folder defaults above and `deny_paths` entries outside the
+   brain's folder deny reading.
+3. The brain's own folder (reading and writing) and `allow_paths`
+   (reading) open what is above.
+4. Other brains' folders, the bridge's data directory, media folder,
+   database, config file and credentials folder, your instructions above
+   the brain's folder and `~/.claude/CLAUDE.md` and `rules` are denied
+   again, whatever 3 opened.
+5. What the bridge gives the brain inside those: its media inbox, its
+   state and, to read, its runs' brain API tokens.
+6. What stays closed inside the brain's own places: a `deny_paths` entry
+   inside its folder, the database, and the folders themselves.
 
-`~/Library/Keychains` is deliberately **not** denied: the Claude CLI reads its
-credentials from the keychain and fails with "Not logged in" without it.
-
-`deny_paths` adds your own (denied for reading and writing). `allow_paths`
-re-opens reading something the defaults closed; writing there stays denied.
-It cannot re-open another brain's folder, nor the bridge's own data
-directory, database, config file or credentials folder, nor your Claude
-Code instructions above a brain's folder.
-Entries must be absolute or start with `~/`; the bridge refuses a config with
-a relative one, which would protect nothing.
+So `deny_paths` adds your own read denies, and `allow_paths` re-opens
+reading something the defaults or `deny_paths` closed; writing there stays
+denied. Neither the brain's folder nor an `allow_paths` entry can open
+another brain's folder, the bridge's own files or your instructions above
+the folder. Entries must be absolute or start with `~/`; the bridge refuses
+a config with a relative one, which would protect nothing.
 
 The sandbox compares real paths, so every deny, brain folders included,
 covers both the path as configured and the path it reaches through
 symlinks (a home on another volume, a cloud-synced folder, `/var` →
 `/private/var`). Symlinks are resolved again on every run, and a folder
 that does not exist yet is still covered once it is created. Re-allowed
-paths (`allow_paths`, media, calendar files) are resolved only where your
-home, data or credentials folder itself is a symlink, never through any
-other symlink, because a brain could plant one to reach something else.
-If an `allow_paths` entry is a symlink or goes through one, list its real
-path. A brain's own folder is allowed as configured and at the real path
-the bridge found when it loaded the brains, the one the brain runs in.
+paths (`allow_paths`, the inbox, the state, the brain API tokens) are resolved
+only where your home, data, media or credentials folder itself is a
+symlink, never through any other symlink, because a brain could plant one
+to reach something else. If an `allow_paths` entry is a symlink or goes
+through one, list its real path. A brain's own folder is allowed as
+configured and at the real path the bridge found when it loaded the
+brains, the one the brain runs in.
 
-A brain's own folder is always readable and writable, even inside a denied
-directory. The brain cannot rename, delete or replace the folder itself,
-though (with a symlink to another brain's folder, say), only what is inside
-it, and the folder re-opens nothing denied inside it: another brain, the
-data directory, a `db_path` folder, the credentials folder, the bridge's
-checkout or a `deny_paths` entry inside a brain's folder stay as closed to
-that brain as to every other, and so does the `CLAUDE.md` above a brain
-further down. The sandbox refuses a brain whose folder is your home folder
-or holds it (that fails every brain's runs, since each profile names every
-brain's folder), and one whose folder is itself something the sandbox
-protects: another brain's folder, the data, database or credentials folder,
-the checkout, a default-denied folder such as `~/.ssh`. Its runs fail until
-you move it. A `deny_paths` entry may be a brain's folder, which keeps that
-folder from every other brain. Other tools a brain runs may still need
-paths the defaults deny, so keeping brains somewhere like
-`~/assistant/<name>` is simplest.
+A brain's own folder is always readable and writable, even inside a
+default-denied folder such as `~/Documents`. The brain cannot rename,
+delete or replace the folder itself, though (with a symlink to another
+brain's folder, say), only what is inside it; the same goes for its inbox
+and its state folders. A `deny_paths` entry inside a brain's folder wins
+over the folder: the brain can neither read nor write it, nor move it or a
+folder between it and the brain's folder, while an `allow_paths` entry
+inside it opens reading again. A `deny_paths` entry may also be a brain's
+folder, or hold one, which keeps that folder from every other brain. The
+sandbox refuses a brain whose folder is your home folder or holds it (that
+fails every brain's runs, since each profile names every brain's folder),
+one whose folder is or holds something it protects (another brain's
+folder, a default-denied folder such as `~/.ssh`, `~/.claude`,
+`~/.gitconfig`), and one whose folder lies inside what the bridge keeps for
+itself (the data, media, database or credentials folder, `~/.claude`,
+`~/Library/LaunchAgents`, the bridge's install folder or checkout). Its
+runs fail until you move it. Other tools a brain runs may still need paths
+the defaults deny, so keeping brains somewhere like `~/assistant/<name>` is
+simplest.
+
+### With `inherit_claude_user_config`
+
+Brains then share your Claude Code config folder (`~/.claude`, or the
+bridge's `CLAUDE_CONFIG_DIR`) instead of keeping their own, so they load
+your setup, and the sandbox lets them read it and write the state the CLI
+keeps there and in `~/.claude.json`. Never the configuration itself:
+`settings.json`, `settings.local.json`, `CLAUDE.md` and the `hooks`,
+`rules`, `agents`, `commands`, `skills`, `plugins` and `output-styles`
+folders stay unwritable, and so does every project's auto-memory,
+`projects/<project>/memory`, which every new session of that project
+loads, yours included. Other sessions' records (`projects` and `sessions`,
+yours included) stay unreadable; transcripts cannot be moved or deleted,
+the small per-process files in `sessions` can (the CLI deletes its own on
+exit), and no symlink can be planted in either folder, such as a new
+project's folder linked into the brain's own, through which a later
+session's transcript would reach it. The config folder and those two
+cannot be renamed or removed; while they do not exist yet the CLI may
+create them, though not as a symlink. A brain can still change the state
+all brains and your own sessions share, such as `~/.claude.json` with the
+MCP servers your own sessions start, and the shell snapshots sourced into
+running sessions.
 
 ### `sandbox.git_config`
 
@@ -711,55 +749,33 @@ the bridge as a dedicated user keeps brains out of your own files, but not
 out of the bridge's data dir: brains run as that user too, so they can read
 the dashboard token and change any setting.
 
-### What the sandbox does not cover yet
+### What the sandbox does not cover
 
-The profile allows everything it does not deny, and writing is denied only
-for the paths listed above. A manipulated brain can therefore still:
+Reading is denied only for the paths listed above, and the profile leaves
+everything but files alone. A manipulated brain can therefore still:
 
-- write anywhere else your user can: other projects in your home folder
-  (their `.claude/settings.json`, `.mcp.json`, `CLAUDE.md`, `.git/hooks`),
-  scripts your Claude Code settings run from outside `~/.claude/hooks`,
-  files a protected `CLAUDE.md` imports with `@path`, what your protected
-  shell startup files source or run (such as `~/.nvm/nvm.sh`,
-  `~/.oh-my-zsh`, `~/.p10k.zsh`, or a `ZDOTDIR` like `~/.config/zsh`), the
-  scripts and programs a `claude_path` wrapper script runs or sources
-  (only the wrapper itself is protected, and the bridge runs it outside
-  the sandbox, with a brain's environment, for `claude --version`), a new
-  program in a folder on your `PATH` that shadows another one (other than
-  the names the bridge runs, in folders under your home folder), and
-  programs outside your home folder such as `/opt/homebrew` (user-writable
-  on Apple Silicon) and `/usr/local`, including a `plaud`, `rclone`,
-  `tmux` or `node` in `/opt/homebrew/bin` or `/usr/local/bin` that the
-  bridge would run next (it looks up its helpers there, see
-  [helper programs](#helper-programs)), and a `claude`, `osascript`,
-  `zenity`, `kdialog` or `open` in any folder of the service's `PATH`,
-  which the bridge still runs by name outside the sandbox
-  (`claude --version` for the dashboard, the dashboard's folder picker,
-  `--open`)
+- read whatever else your user can read: other projects in your home
+  folder, configuration under `~/.config` and `~/Library` not listed above,
+  and the files the bridge runs (its tools, the Claude CLI)
 - leave files in its own folder that run or load when you work there
   yourself, outside the sandbox: git hooks and settings in `.git/`
   (`hooks/`, `core.fsmonitor`, `core.hooksPath`), a `.envrc` for direnv,
   and its own `.claude/settings.json` (hooks), `.mcp.json` and `CLAUDE.md`
   for a Claude Code session you start there. Check them before you open a
   shell, git or Claude Code in a brain's folder.
-- change the Claude Code state the CLI writes on every run, which all brains
-  and your own sessions share: `~/.claude.json` (including the MCP servers
-  your own sessions start), other sessions' transcripts in `~/.claude/projects`
-  (it can add to them, not read or move them), `~/.claude/shell-snapshots`
-  and `~/.claude/session-env` (sourced into running sessions' shell
-  commands), and the small per-process files in `~/.claude/sessions`,
-  which it can also move and then read
-- move a prepared folder into `~/.claude/projects` for a project that has
-  none yet (a symlink there is refused), which gives that project's
-  sessions an auto-memory the brain wrote; with a `memory` symlink into its
-  own folder inside, the brain also reads what those sessions save there
-- create `~/.claude`, or a folder in it such as `~/.claude/projects`, while
-  it is missing (on a home where the Claude CLI has not created it yet), by
-  moving a prepared folder there (a symlink there is refused). What it put
-  inside stays after the next run pins the folder: settings, hooks or a
-  `CLAUDE.md` that the CLI and your own sessions load, or symlinks into its
-  own folder, through which what they write there, transcripts included,
-  reaches the brain
+- with `inherit_claude_user_config`, change the Claude Code state it shares
+  with your own sessions: `~/.claude.json` (including the MCP servers your
+  own sessions start), other sessions' transcripts (it can add to them, not
+  read or move them), `~/.claude/shell-snapshots` and
+  `~/.claude/session-env` (sourced into running sessions' shell commands)
+  and the small per-process files in `~/.claude/sessions`, which it can
+  also move and then read; and move a prepared folder into
+  `~/.claude/projects` for a project that has none yet, or into a missing
+  `~/.claude` (a symlink there is refused), which then holds what the brain
+  put there
+- read the keychains: items whose access list trusts a program a brain can
+  run, such as `/usr/bin/security` (which `gh` stores its token through)
+  or git's credential helper, are readable without a prompt
 - ask launchd (`launchctl`), cron (`crontab`), `at`, LaunchServices
   (`open`), another app (`osascript`) or a tmux server that runs outside
   the sandbox (the activity viewer's, or your own) to start a program
@@ -770,10 +786,10 @@ for the paths listed above. A manipulated brain can therefore still:
   profile leaves readable), what `launchctl print` shows of the job, and
   the bridge's own process environment (`ps eww`); and use your ssh-agent,
   through the socket that `launchctl getenv SSH_AUTH_SOCK` names
-- reach the network
+- reach the network, the bridge's own `/send` and `/ingest` among it
 
-Later changes give each brain its own Claude Code state folder and make
-writes deny-by-default.
+For isolation beyond this, run each brain, or the whole bridge, as a macOS
+user of its own.
 
 ---
 
@@ -1118,7 +1134,7 @@ start for a brain whose `claude-stream.log` the bridge refuses, a symlink say
 starts these sessions on tmux's default server, outside the sandbox, and any
 brain can send that server commands (`tmux run-shell`), which then run
 unsandboxed. The same goes for a tmux you run yourself; see
-[what the sandbox does not cover yet](#what-the-sandbox-does-not-cover-yet).
+[what the sandbox does not cover](#what-the-sandbox-does-not-cover).
 A server the bridge starts keeps the environment it started with, which
 any brain can read, so it gets only a few of the bridge's variables,
 never the Claude CLI's login (see
@@ -1181,7 +1197,7 @@ variables of the bridge's environment:
 | `HOME`, `USER`, `LOGNAME`, `PATH`, `SHELL`, `TMPDIR`, `LANG`, `LC_*`, `TERM`, `TZ` | what any program expects |
 | `HTTPS_PROXY`, `HTTP_PROXY`, `NO_PROXY` (also in lower case), `NODE_EXTRA_CA_CERTS`, `SSL_CERT_FILE`, `SSL_CERT_DIR` | a proxy, or a firewall that inspects TLS |
 | `DO_NOT_TRACK`, `TMUX_TMPDIR` | the telemetry opt-out many tools honour; where tmux keeps its socket |
-| `CLAUDE_CODE_*`, `ANTHROPIC_*`, `CLAUDE_CONFIG_DIR` | the Claude CLI's login (`CLAUDE_CODE_OAUTH_TOKEN`, `ANTHROPIC_API_KEY`), provider and gateway (`ANTHROPIC_BASE_URL`) |
+| `CLAUDE_CODE_*`, `ANTHROPIC_*`, `CLAUDE_CONFIG_DIR` | the Claude CLI's login (`CLAUDE_CODE_OAUTH_TOKEN`, `ANTHROPIC_API_KEY`), provider and gateway (`ANTHROPIC_BASE_URL`); sandboxed brains get a `CLAUDE_CONFIG_DIR` of their own |
 | `DISABLE_AUTOUPDATER`, `DISABLE_TELEMETRY`, `DISABLE_ERROR_REPORTING` | the CLI's update check and reports |
 | `CALENDAR_TZ`, `TRANSCRIBE_MODEL`, `TRANSCRIBE_LANGUAGE` | the tools brains run: the timezone of `fridolin calendar`, and the model and language of [tools/transcribe.py](../tools/transcribe.py) |
 
@@ -1194,16 +1210,19 @@ also opens [`/send` and `/ingest`](API.md#who-may-call) to the brain's own
 chats and itself;
 `PLAUD_TELEMETRY_DISABLED=1` and `PLAUD_NO_UPDATE_NOTIFIER=1` for
 [Plaud](PLAUD.md)'s CLI, with `plaud.brain_access` a `PATH` that also
-has that CLI's folder; and `DISABLE_AUTOUPDATER=1` in the sandbox. It
-also sets `BRIDGE_DATA_DIR` and `BRIDGE_DB_PATH`, the data directory and
-database it runs with (absolute, wherever `data_dir` and `db_path` put
-them), for a brain's own scripts; and, for one release, `BRIDGE_BRAIN_ID`,
-`BRIDGE_CALENDARS` and `BRIDGE_CALENDAR_DEFAULT`, which the calendar tool
-used to read. Nothing in `tools/` reads any of these any more.
-`BRIDGE_CREDENTIALS_DIR`, which named the folder of the calendar tokens,
-is not set any more. What the bridge's own environment has under these
-names does not reach brains. The list lives in one place,
-`childEnvAllowlist` in `childenv.go`.
+has that CLI's folder; and in the sandbox `DISABLE_AUTOUPDATER=1`, and
+what points the run at the brain's own state (see [writing](#writing)):
+`CLAUDE_CONFIG_DIR` (unless `inherit_claude_user_config` is on), `TMPDIR`,
+`CLAUDE_CODE_TMPDIR`, `TMPPREFIX`, `XDG_CACHE_HOME` and
+`npm_config_cache`. It also sets `BRIDGE_DATA_DIR` and `BRIDGE_DB_PATH`,
+the data directory and database it runs with (absolute, wherever
+`data_dir` and `db_path` put them), for a brain's own scripts; and, for one
+release, `BRIDGE_BRAIN_ID`, `BRIDGE_CALENDARS` and
+`BRIDGE_CALENDAR_DEFAULT`, which the calendar tool used to read. Nothing
+in `tools/` reads any of these any more. `BRIDGE_CREDENTIALS_DIR`, which
+named the folder of the calendar tokens, is not set any more. What the
+bridge's own environment has under these names does not reach brains. The
+list lives in one place, `childEnvAllowlist` in `childenv.go`.
 
 Brains are not handed anything else, for example `GROQ_API_KEY`,
 `SSH_AUTH_SOCK` (your ssh-agent), the variables of a Bedrock or Vertex
@@ -1216,8 +1235,8 @@ This only keeps variables from being handed over unasked; it is not a
 secret store. A brain that goes looking can still read the bridge's
 environment: from the bridge's process (`ps eww`, or `/proc/<pid>/environ`
 on Linux, where brains run without a sandbox), from the service file and,
-on macOS, from launchd (see [what the sandbox does not cover
-yet](#what-the-sandbox-does-not-cover-yet)). Keep anything a brain must not
+on macOS, from launchd (see [what the sandbox does not
+cover](#what-the-sandbox-does-not-cover)). Keep anything a brain must not
 see out of the bridge's environment and its service file.
 
 These programs the bridge starts for itself get the first three rows
@@ -1253,10 +1272,10 @@ order. It leaves out every other folder of the service's `PATH`, which
 starts with the one you installed it from and may name a folder such as
 `/opt/homebrew/opt/go/bin` ahead of `/usr/bin`: a program a brain planted
 there would run outside the sandbox. On macOS the
-[sandbox](#sandbox-macos) keeps brains from planting these programs in the
-folders in your home folder; it does not protect the others it keeps (see
-[what the sandbox does not cover yet](#what-the-sandbox-does-not-cover-yet)).
-Brains themselves still get the whole `PATH`.
+[sandbox](#sandbox-macos) keeps brains from writing in any of these
+folders, as anywhere outside their own places (see [writing](#writing)),
+so the lookup only adds to it there. Brains themselves still get the
+whole `PATH`.
 
 The lookup is the same on Linux and with `sandbox.enabled` off, where it
 protects nothing. A helper installed in another folder, such as snap's
@@ -1279,11 +1298,14 @@ with the `node` it should use, as nvm does.
 Set what the Claude CLI and brains need in the bridge's process
 environment:
 
-- The Claude CLI's own login and network settings, if you set them rather
-  than log in once with `claude`: `ANTHROPIC_API_KEY`,
-  `CLAUDE_CODE_OAUTH_TOKEN`, `HTTPS_PROXY`, `NODE_EXTRA_CA_CERTS`. Left in a
-  `.env`, they do not reach `claude`, and every brain fails with "Not logged
-  in" (or cannot get through the proxy).
+- The Claude CLI's own login and network settings: `CLAUDE_CODE_OAUTH_TOKEN`
+  (which `claude setup-token` prints) or `ANTHROPIC_API_KEY`, and
+  `HTTPS_PROXY`, `NODE_EXTRA_CA_CERTS`. Sandboxed brains need the login
+  here: they have a Claude Code config folder of their own, so the one you
+  made with `claude` does not reach them. Without the sandbox, logging in
+  once with `claude` is enough. Left in a `.env`, these do not reach
+  `claude`, and every brain fails with "Not logged in" (or cannot get
+  through the proxy).
 - Keys a brain's tools need, such as `GROQ_API_KEY` for transcription,
   together with their names in `child_env_passthrough`.
 

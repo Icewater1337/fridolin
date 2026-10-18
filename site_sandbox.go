@@ -319,7 +319,7 @@ func siteSandboxProfile(in siteProfileInput) (string, error) {
 				// A file to write: with the -journal, -wal and -shm files
 				// SQLite keeps next to a database.
 				for _, s := range b.allowSpellings(f.Path) {
-					b.emit(ruleAllow, "allow "+ops, "regex", s, "^"+regexp.QuoteMeta(s)+`(-journal|-wal|-shm)?$`)
+					b.emit("allow "+ops, "regex", "^"+regexp.QuoteMeta(s)+`(-journal|-wal|-shm)?$`)
 					reach = append(reach, s)
 				}
 			default:
@@ -405,7 +405,7 @@ func siteSandboxProfile(in siteProfileInput) (string, error) {
 				b.pin(f.Path)
 			} else {
 				for _, s := range b.spellings(f.Path, true) {
-					b.emitNoSymlink(rulePin, "literal", s, s)
+					b.emitNoSymlink("literal", s)
 				}
 			}
 		}
@@ -429,7 +429,7 @@ func siteSandboxProfile(in siteProfileInput) (string, error) {
 	}
 	sort.Strings(above)
 	for _, d := range above {
-		b.emit(ruleAllow, "allow file-read-metadata", "literal", d, d)
+		b.emit("allow file-read-metadata", "literal", d)
 	}
 
 	if b.err != nil {
@@ -481,7 +481,7 @@ func (in siteProfileInput) neverWritable() []string {
 // them nor the folders they sit in, unless it declares them).
 func (b *profileBuilder) allowResolved(op, filter, path string) {
 	for _, s := range b.spellings(path, false) {
-		b.emit(ruleAllow, "allow "+op, filter, s, s)
+		b.emit("allow "+op, filter, s)
 	}
 }
 

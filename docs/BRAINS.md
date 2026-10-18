@@ -135,6 +135,16 @@ it, and starts it afresh in the new folder.
 *Remove* unregisters the brain: its runs stop and its chats fall back to the
 default brain. The folder is left exactly as it was.
 
+So are the brain's media inbox (`<brain id>/` in the media folder, which is
+`media/` in the data folder unless `media_dir` puts it elsewhere) and its
+state in the data folder (`brains/<brain id>/`: its Claude Code config
+folder with the CLI's transcripts, todos and `.claude.json`, its `TMPDIR`
+and its caches). A brain added later under the same id, from any folder,
+takes both over and can read what is in them, the old brain's transcripts
+and files included. To start such a brain afresh, move `brains/<brain id>/`
+out of the data folder and `<brain id>/` out of the media folder while the
+bridge is stopped, or give it another id.
+
 ## Configs with inline brains
 
 Configs from before brain folders listed brains inline in `config.json`
@@ -252,30 +262,28 @@ nothing says so: copy such a file into the brain's folder instead.
 
 ## Isolation
 
-With `sandbox.enabled` (macOS), every run is wrapped in `sandbox-exec`: the
-brain cannot read or write any other brain's folder, the bridge's data folder
-(except its own media inbox, `media/<brain id>/`, where the files sent to
-its chats land), or the usual secrets (SSH keys, cloud
-credentials, browser and mail data, shell history), and it cannot rename or
-delete the folders above them, which would move them out from under the
-sandbox's rules. Nor can it read your own Claude Code instructions, unless
-`inherit_claude_user_config` is on: the `CLAUDE.md` and `CLAUDE.local.md`
-files and the `.claude` folders above its folder, up to `/`, and
-`~/.claude/CLAUDE.md` and `~/.claude/rules` (the rest of `~/.claude` is
-Claude Code's own state, which a brain's run needs). It can read but not
-change the other files that run outside its sandbox: Claude Code's
-settings, hooks, skills and plugins (which your own sessions load), Claude
-Code's auto-memory, `~/Library/LaunchAgents`, your shell startup files, and
-the bridge's own binary, its helpers and source checkout, and the tools it
-runs. It can still write most other
-places your user can, including the Claude Code state all brains share;
-[the sandbox section](CONFIGURATION.md#what-the-sandbox-does-not-cover-yet)
+With `sandbox.enabled` (macOS), every run is wrapped in `sandbox-exec`. The
+brain may write only its own folder, its own media inbox
+(`media/<brain id>/`, where the files sent to its chats land) and its own
+state in the bridge's data folder (`brains/<brain id>/`: a Claude Code
+config folder, `TMPDIR` and caches), so nothing it writes runs or loads
+outside its sandbox, in another brain or in your own Claude Code sessions.
+It cannot read any other brain's folder or inbox, the rest of the bridge's
+data folder, or the usual secrets (SSH keys, cloud credentials, browser and
+mail data, shell history). Nor can it read your own Claude Code setup and
+instructions, unless `inherit_claude_user_config` is on: all of
+`~/.claude` and `~/.claude.json`, and the `CLAUDE.md` and `CLAUDE.local.md`
+files and the `.claude` folders above its folder, up to `/`. Because it
+keeps a config folder of its own, it logs in with a token in the bridge's
+environment (`claude setup-token`; see
+[the sandbox section](CONFIGURATION.md#writing)), not with yours.
+[What the sandbox does not cover](CONFIGURATION.md#what-the-sandbox-does-not-cover)
 lists what that leaves open. Its own folder is always readable and
 writable, even if it lives somewhere the defaults deny, but it cannot move
-or replace the folder itself and it re-opens nothing denied inside it; a
-brain whose folder is your home folder, or is itself something the sandbox
-protects, is refused. A run that cannot be sandboxed is refused, never run
-without it.
+or replace the folder itself, and the bridge's own files and other brains
+stay closed inside it; a brain whose folder is your home folder, or is,
+holds or lies inside something the sandbox protects, is refused. A run that
+cannot be sandboxed is refused, never run without it.
 
 A brain also reaches the bridge's [script API](API.md) only as itself,
 with its run's token, which `FRIDOLIN_BRAIN_TOKEN_FILE` names and which

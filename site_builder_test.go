@@ -28,7 +28,7 @@ func newTestBuilderSite(t *testing.T) (*SiteManager, string) {
 			}
 			return ""
 		},
-		sandbox:    func(_, bin string, args []string) (string, []string, error) { return bin, args, nil },
+		sandbox:    func(_, bin string, args []string) (string, []string, []string, error) { return bin, args, nil, nil },
 		bridgeURL:  func() string { return "http://127.0.0.1:1" },
 		executable: func() (string, error) { return "/usr/bin/true", nil },
 	}

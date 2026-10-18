@@ -379,12 +379,18 @@ func (b *Bridge) runBrainSearch(ctx context.Context, brainID, prompt string, out
 	bin := cfg.ClaudePath
 	env := childEnv(claudeChild, cfg.ChildEnvPassthrough)
 	if sp := b.brainMgr.profiler; sp != nil && sp.Enabled() {
+		// The brain's own Claude Code config dir, TMPDIR and caches, as for
+		// its runs (see invoke): it may write nowhere else.
+		state, err := prepareBrainState(absPath(cfg.DataDir), cfg.MediaDir, brainID, cfg.InheritClaudeUserConfig)
+		if err != nil {
+			return fmt.Errorf("the brain's sandbox: %w", err)
+		}
 		sbBin, sbArgs, err := sp.Command(brainID, bin, args)
 		if err != nil {
 			return fmt.Errorf("the brain's sandbox: %w", err)
 		}
 		bin, args = sbBin, sbArgs
-		env = append(env, "DISABLE_AUTOUPDATER=1")
+		env = append(append(env, state...), "DISABLE_AUTOUPDATER=1")
 	}
 	cmd := exec.CommandContext(ctx, bin, args...)
 	cmd.Dir = br.Dir()

@@ -1412,12 +1412,22 @@ func (br *Brain) invoke(run *brainRun, ctx context.Context, s *brainSettings, m 
 		extraEnv = append(extraEnv, env...)
 	}
 	if br.sandbox != nil && br.sandbox.Enabled() {
-		sbBinary, sbArgs, sbErr := br.sandbox.Command(br.id, s.claudePath, args)
-		if sbErr != nil {
-			log.Printf("brain %s: sandbox unavailable, refusing to run: %v", br.id, sbErr)
+		// The brain's own Claude Code config dir, TMPDIR and caches, the
+		// only places outside its folder and inbox the profile lets it
+		// write, made before the profile pins them. With a config dir of
+		// its own the CLI no longer finds your login in the keychain,
+		// which the profile closes anyway: brains log in with
+		// CLAUDE_CODE_OAUTH_TOKEN or ANTHROPIC_API_KEY from the bridge's
+		// environment.
+		stateEnv, err := prepareBrainState(s.dataDir, s.mediaDir, br.id, s.inheritUser)
+		if err == nil {
+			binary, finalArgs, err = br.sandbox.Command(br.id, s.claudePath, args)
+		}
+		if err != nil {
+			log.Printf("brain %s: sandbox unavailable, refusing to run: %v", br.id, err)
 			return RunResult{Err: errSandboxUnavailable}
 		}
-		binary, finalArgs = sbBinary, sbArgs
+		extraEnv = append(extraEnv, stateEnv...)
 		// The profile denies writes to the CLI's own install, so its
 		// auto-updater could download a new version on every run and never
 		// switch to it. This replaces the bridge's own value.

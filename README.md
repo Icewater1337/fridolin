@@ -99,7 +99,9 @@ See [docs/SITE.md](docs/SITE.md).
 
 - **macOS or Linux.** The sandbox layer is macOS-only; everything else is portable.
 - **[Claude Code](https://claude.com/claude-code)** 2.1.302 or newer, installed
-  and logged in.
+  and logged in. With the sandbox (macOS), brains log in with a token in the
+  bridge's environment instead: `claude setup-token` prints one (see
+  [where to set it](docs/CONFIGURATION.md#where-to-set-them)).
 - **Go 1.26+** and a C compiler to build (`xcode-select --install` on macOS).
 - **Python 3.9+** for the helper tools.
 - **A current browser** for the dashboard: Chrome or Edge 123+, Firefox 120+
@@ -526,18 +528,18 @@ What the bridge does about it:
 - **No Status or channels.** WhatsApp Status updates and channels are ignored,
   and the bridge refuses to send to Status, broadcast lists or channels, so
   nothing the assistant writes can end up in your public Status.
-- **Sandbox (macOS).** Each Claude run is wrapped in `sandbox-exec`. Brains
-  can neither read nor write SSH keys, cloud credentials, shell history,
-  browser and mail data, your Documents/Downloads/Desktop, the bridge's own
-  database — or any other brain's directory — and cannot rename the folders
-  above them to get around that. Other Claude sessions' transcripts are
-  unreadable, and so are your own Claude Code instructions (`~/CLAUDE.md`,
-  `~/.claude/CLAUDE.md` and every `CLAUDE.md` above a brain's folder)
-  unless `inherit_claude_user_config` is on. Files that run outside the
-  sandbox — Claude Code's settings and hooks (and the `CLAUDE.md` files
-  above brain folders), its auto-memory, `~/Library/LaunchAgents`, shell
-  startup files, the bridge's own binary, install folder and checkout, the
-  Claude CLI and the other tools the bridge runs — are never writable. Add
+- **Sandbox (macOS).** Each Claude run is wrapped in `sandbox-exec`.
+  Brains may write only their own folder, their own media inbox and the
+  state the bridge keeps for each of them (a Claude Code config folder,
+  `TMPDIR` and caches of its own), so nothing they write runs outside the
+  sandbox: not Claude Code's settings and hooks, a `CLAUDE.md`, a
+  LaunchAgent, a shell startup file, a program on your `PATH`, nor the
+  bridge's own binary, install folder and checkout. They cannot read SSH
+  keys, cloud credentials, shell history, browser and mail data, your
+  Documents/Downloads/Desktop, the bridge's own database, any other
+  brain's folder or inbox, nor your Claude Code setup and transcripts and
+  your instructions above their folder (`~/CLAUDE.md` and every
+  `CLAUDE.md` up to `/`) unless `inherit_claude_user_config` is on. Add
   your own paths under `sandbox.deny_paths`. When the sandbox is on but
   cannot be set up, the brain refuses the message with an error instead of
   running without it.
@@ -594,14 +596,13 @@ What it does not do:
   later. `group_members` is what limits who: keep it to people you would
   let DM the bridge.
 - The sandbox is containment, not a jail. It raises the cost of a prompt
-  injection; it does not stop code execution. It denies writing only where
-  listed, so a brain can still write elsewhere in your home folder,
-  including the Claude Code state all brains and your own sessions share
-  (`~/.claude.json` and its MCP servers) and the files your shell startup
-  files load (such as `~/.nvm/nvm.sh`), and it can ask launchd, `crontab`,
-  `at`, `open`, `osascript` or a running tmux server (the activity viewer's,
-  or your own) to start a program outside the sandbox. See
-  [what the sandbox does not cover yet](docs/CONFIGURATION.md#what-the-sandbox-does-not-cover-yet).
+  injection; it does not stop code execution. It denies reading only where
+  listed, so a brain can still read the rest of your home folder, and it
+  can ask launchd, `crontab`, `at`, `open`, `osascript` or a running tmux
+  server (the activity viewer's, or your own) to start a program outside
+  the sandbox. What it leaves in its own folder (git hooks, a `.envrc`)
+  runs when you work there yourself. See
+  [what the sandbox does not cover](docs/CONFIGURATION.md#what-the-sandbox-does-not-cover).
 - On Linux there is no sandbox layer at all (the bridge refuses to start with
   `sandbox.enabled` on). Run the bridge as a dedicated user: create one
   (`sudo useradd -m fridolin`), let its services run without a login
@@ -674,7 +675,9 @@ API; the page is plain HTML/CSS/JS compiled into the binary. In `web/assets`,
 `sandbox-exec -p` on each run (never written to a file).
 
 **`childenv.go`** — the one list of the bridge's environment variables that
-brains, rclone, the Plaud CLI and the activity viewer get.
+brains, rclone, the Plaud CLI and the activity viewer get, and the state
+the bridge creates for each sandboxed brain before its run: its Claude Code
+config folder, `TMPDIR` and caches.
 
 **`store.go`** — SQLite: the whatsmeow device store, polls, votes, and the
 chats that wrote without being allowed.
@@ -721,11 +724,14 @@ An empty list allows nobody unless `allow_any_dm` is `true`. Blocked senders
 appear under *Chats*, and the Overview warns about an entry that is no
 number.
 
-**"Not logged in" from the CLI** — run `claude` once in a terminal to
-authenticate. Under launchd, check that `HOME` is set correctly in the plist.
-If the CLI logs in through `ANTHROPIC_API_KEY` or `CLAUDE_CODE_OAUTH_TOKEN`,
-that variable must be in the bridge's process environment: the bridge reads
-no `.env` file, and says so in its log when one lies next to the config
+**"Not logged in" from the CLI** — with the sandbox on, brains have a
+Claude Code config folder of their own and do not see the login you made
+with `claude`: run `claude setup-token` and set `CLAUDE_CODE_OAUTH_TOKEN`
+(or `ANTHROPIC_API_KEY`) in the bridge's process environment (the
+dashboard warns while neither is there). Without the sandbox, run `claude`
+once in a terminal to authenticate; under launchd, check that `HOME` is
+set correctly in the plist. The bridge reads no `.env` file, and says so in
+its log when one lies next to the config
 ([details](docs/CONFIGURATION.md#environment-variables)).
 
 **Logged out of WhatsApp** — pair again with *Start pairing* on the
@@ -748,7 +754,9 @@ refusal, restart the bridge.
 directory; two bridges on one WhatsApp session knock each other offline.
 
 **Everything times out with the sandbox on** — set `sandbox.enabled` to `false`
-to confirm it's the cause, then add the path it needs to `sandbox.allow_paths`.
+to confirm it's the cause, then add the path it needs to read to
+`sandbox.allow_paths`. That opens reading only: a brain writes nowhere but
+its own folder, inbox and state.
 
 **"the sandbox could not be set up"** — the sandbox is on, but the bridge
 could not build the profile or find `/usr/bin/sandbox-exec`, so it did not run
