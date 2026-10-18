@@ -28,7 +28,7 @@ trap 'rm -rf "$stage"' EXIT
 mkdir -p "$stage/$name/tools" "$out"
 
 ( cd "$repo" && CGO_ENABLED=1 GOOS="$goos" GOARCH="$goarch" \
-    go build -trimpath -ldflags "-s -w -X fridolin/internal/version.version=$version" -o "$stage/$name/fridolin" "$pkg" )
+    go build -trimpath -ldflags "-s -w -X github.com/Icewater1337/fridolin/internal/version.version=$version" -o "$stage/$name/fridolin" "$pkg" )
 # What `fridolin service install` copies from tools/: the helpers and their
 # requirements, not their tests.
 cp "$repo"/tools/*.py "$repo"/tools/requirements*.txt "$stage/$name/tools/"

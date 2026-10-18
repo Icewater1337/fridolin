@@ -9,7 +9,7 @@ import (
 	"strings"
 	"testing"
 
-	"fridolin/internal/fsx"
+	"github.com/Icewater1337/fridolin/internal/fsx"
 )
 
 // fakeRclone writes a stand-in for rclone into dir and returns its path.

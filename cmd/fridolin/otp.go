@@ -17,7 +17,7 @@ import (
 	"unicode"
 	"unicode/utf8"
 
-	"fridolin/internal/fsx"
+	"github.com/Icewater1337/fridolin/internal/fsx"
 )
 
 // The OTP guard. A local script that logs in somewhere for you asks a chat

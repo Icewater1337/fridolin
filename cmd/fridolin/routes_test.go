@@ -13,7 +13,7 @@ import (
 	"strings"
 	"testing"
 
-	"fridolin/internal/fsx"
+	"github.com/Icewater1337/fridolin/internal/fsx"
 )
 
 // The route classes, by what guards a route.

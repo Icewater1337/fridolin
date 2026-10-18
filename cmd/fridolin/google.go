@@ -22,7 +22,7 @@ import (
 	"syscall"
 	"time"
 
-	"fridolin/internal/fsx"
+	"github.com/Icewater1337/fridolin/internal/fsx"
 )
 
 // Google sign-in for calendars.

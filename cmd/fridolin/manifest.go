@@ -14,7 +14,7 @@ import (
 	"strings"
 	"sync"
 
-	"fridolin/internal/fsx"
+	"github.com/Icewater1337/fridolin/internal/fsx"
 )
 
 // ManifestFile is the file that turns a folder into a brain.

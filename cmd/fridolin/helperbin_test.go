@@ -7,7 +7,7 @@ import (
 	"sync"
 	"testing"
 
-	"fridolin/internal/fsx"
+	"github.com/Icewater1337/fridolin/internal/fsx"
 )
 
 // shadowingPrograms are the programs the bridge runs outside the sandbox,

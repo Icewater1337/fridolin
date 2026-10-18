@@ -32,10 +32,10 @@ import (
 	"strings"
 	"time"
 
-	"fridolin/internal/fsx"
-	"fridolin/internal/platform"
-	"fridolin/internal/textx"
-	"fridolin/site"
+	"github.com/Icewater1337/fridolin/internal/fsx"
+	"github.com/Icewater1337/fridolin/internal/platform"
+	"github.com/Icewater1337/fridolin/internal/textx"
+	"github.com/Icewater1337/fridolin/site"
 )
 
 // SiteProposal is a change a builder brain pushed for review.

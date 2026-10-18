@@ -23,8 +23,8 @@ import (
 	"time"
 	"unicode"
 
-	"fridolin/internal/fsx"
-	"fridolin/internal/textx"
+	"github.com/Icewater1337/fridolin/internal/fsx"
+	"github.com/Icewater1337/fridolin/internal/textx"
 )
 
 // historyEntry is one line in a brain's conversation-history.jsonl file.

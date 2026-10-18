@@ -10,7 +10,7 @@ import (
 	"unicode"
 	"unicode/utf8"
 
-	"fridolin/internal/textx"
+	"github.com/Icewater1337/fridolin/internal/textx"
 )
 
 func TestChunkMessage(t *testing.T) {

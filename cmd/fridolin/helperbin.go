@@ -6,7 +6,7 @@ import (
 	"slices"
 	"strings"
 
-	"fridolin/internal/fsx"
+	"github.com/Icewater1337/fridolin/internal/fsx"
 )
 
 // The bridge runs a few helpers outside the sandbox: tmux for the activity

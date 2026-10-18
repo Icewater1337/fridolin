@@ -12,7 +12,7 @@ import (
 	"slices"
 	"strings"
 
-	"fridolin/internal/fsx"
+	"github.com/Icewater1337/fridolin/internal/fsx"
 )
 
 func (b *Bridge) siteAPI(mux *http.ServeMux) {

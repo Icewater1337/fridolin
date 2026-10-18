@@ -36,10 +36,10 @@ import (
 	"sync"
 	"time"
 
-	"fridolin/internal/fsx"
-	"fridolin/internal/platform"
-	"fridolin/internal/textx"
-	"fridolin/site"
+	"github.com/Icewater1337/fridolin/internal/fsx"
+	"github.com/Icewater1337/fridolin/internal/platform"
+	"github.com/Icewater1337/fridolin/internal/textx"
+	"github.com/Icewater1337/fridolin/site"
 )
 
 const (

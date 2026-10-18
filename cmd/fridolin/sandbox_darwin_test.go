@@ -16,7 +16,7 @@ import (
 	"testing"
 	"time"
 
-	"fridolin/internal/fsx"
+	"github.com/Icewater1337/fridolin/internal/fsx"
 )
 
 // These tests run generated profiles under the real sandbox-exec, so they

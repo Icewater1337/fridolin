@@ -14,7 +14,7 @@ import (
 	"testing"
 	"time"
 
-	"fridolin/internal/fsx"
+	"github.com/Icewater1337/fridolin/internal/fsx"
 )
 
 // ingestCalls records what the site handed to brains.

@@ -29,9 +29,9 @@ import (
 	"sync"
 	"time"
 
-	"fridolin/internal/fsx"
-	"fridolin/internal/textx"
-	"fridolin/site"
+	"github.com/Icewater1337/fridolin/internal/fsx"
+	"github.com/Icewater1337/fridolin/internal/textx"
+	"github.com/Icewater1337/fridolin/site"
 )
 
 // The identity of the commits Fridolin makes in the site repository.

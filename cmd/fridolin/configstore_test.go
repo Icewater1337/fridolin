@@ -9,7 +9,7 @@ import (
 	"strings"
 	"testing"
 
-	"fridolin/internal/fsx"
+	"github.com/Icewater1337/fridolin/internal/fsx"
 )
 
 func TestConfigStoreUpdateWritesAtomicallyAndKeepsTilde(t *testing.T) {

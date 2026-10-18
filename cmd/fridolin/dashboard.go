@@ -18,8 +18,8 @@ import (
 	"sync/atomic"
 	"time"
 
-	"fridolin/internal/fsx"
-	"fridolin/web"
+	"github.com/Icewater1337/fridolin/internal/fsx"
+	"github.com/Icewater1337/fridolin/web"
 )
 
 // The dashboard and its API are served by the bridge on http_listen, which is

@@ -32,6 +32,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/Icewater1337/fridolin/internal/fsx"
 	"log"
 	"math/big"
 	"net/http"
@@ -196,7 +197,7 @@ func (p *PlaudManager) updateDevices(fn func(st *plaudDevices) error) error {
 		return err
 	}
 	data, _ := json.MarshalIndent(st, "", "  ")
-	if err := writeFileAtomic(p.devicesPath(), data, 0o600, false); err != nil {
+	if err := fsx.WriteFileAtomic(p.devicesPath(), data, 0o600, false); err != nil {
 		return err
 	}
 	type siteDevice struct {
@@ -214,7 +215,7 @@ func (p *PlaudManager) updateDevices(fn func(st *plaudDevices) error) error {
 		return err
 	}
 	data, _ = json.Marshal(site)
-	return writeFileAtomic(sitePath, data, 0o600, false)
+	return fsx.WriteFileAtomic(sitePath, data, 0o600, false)
 }
 
 // newPairing makes a pairing code for the next build of the app.
@@ -340,7 +341,7 @@ func (p *PlaudManager) takeTranscript(assertion string, body []byte, now time.Ti
 	}
 	// The same upload again (a retry whose answer got lost) rewrites the
 	// same file, which the poller has seen already.
-	if err := writeFileAtomic(filepath.Join(dir, c.Name+".txt"), body, 0o600, false); err != nil {
+	if err := fsx.WriteFileAtomic(filepath.Join(dir, c.Name+".txt"), body, 0o600, false); err != nil {
 		return err
 	}
 	_ = p.updateDevices(func(st *plaudDevices) error {
@@ -404,7 +405,7 @@ func (p *PlaudManager) SaveDeveloper(d plaudDeveloper) error {
 		return err
 	}
 	data, _ := json.Marshal(old)
-	return writeFileAtomic(p.developerPath(), data, 0o600, false)
+	return fsx.WriteFileAtomic(p.developerPath(), data, 0o600, false)
 }
 
 // plaudAppJob is the dashboard's build of the phone app.
@@ -448,7 +449,7 @@ func (p *PlaudManager) BuildApp() error {
 		return errors.New("the site has no domain yet (Site → Domain): the app uploads through it")
 	}
 	src := filepath.Join(ownLayout().Source, "plaud-android")
-	if ownLayout().Source == "" || !fileExists(filepath.Join(src, "gradlew")) {
+	if ownLayout().Source == "" || !fsx.Exists(filepath.Join(src, "gradlew")) {
 		return errors.New("the app's source is not here: Fridolin builds it from plaud-android/ in the checkout it was installed from")
 	}
 	javaHome, sdk, err := androidToolchain()
@@ -499,7 +500,7 @@ func (p *PlaudManager) buildApp(ctx context.Context, src, javaHome, sdk, site st
 	// build itself stays in the data folder, which brains cannot read.
 	props := filepath.Join(dir, "build.properties")
 	content := fmt.Sprintf("client_id=%s\nclient_secret=%s\napi_key=%s\nsite_url=%s\npairing_code=%s\n", dev.ClientID, dev.ClientSecret, dev.APIKey, site, code)
-	if err := writeFileAtomic(props, []byte(content), 0o600, false); err != nil {
+	if err := fsx.WriteFileAtomic(props, []byte(content), 0o600, false); err != nil {
 		return time.Time{}, "", err
 	}
 	defer os.Remove(props)
@@ -520,7 +521,7 @@ func (p *PlaudManager) buildApp(ctx context.Context, src, javaHome, sdk, site st
 	if err != nil {
 		return time.Time{}, "", err
 	}
-	return exp, "", writeFileAtomic(p.appFile(), apk, 0o600, false)
+	return exp, "", fsx.WriteFileAtomic(p.appFile(), apk, 0o600, false)
 }
 
 // androidToolchain finds a JDK and the Android SDK to build the app with:
@@ -546,7 +547,7 @@ func androidToolchain() (javaHome, sdk string, err error) {
 		javas = append(javas, jvms...)
 	}
 	for _, j := range javas {
-		if j != "" && fileExists(filepath.Join(j, "bin", "java")) {
+		if j != "" && fsx.Exists(filepath.Join(j, "bin", "java")) {
 			javaHome = j
 			break
 		}
@@ -635,7 +636,7 @@ func (b *Bridge) apiPlaudAppBuild(w http.ResponseWriter, r *http.Request) {
 }
 
 func (b *Bridge) apiPlaudAppDownload(w http.ResponseWriter, r *http.Request) {
-	if !fileExists(b.plaud.appFile()) {
+	if !fsx.Exists(b.plaud.appFile()) {
 		writeErr(w, http.StatusNotFound, "no phone app built yet")
 		return
 	}

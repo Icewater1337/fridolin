@@ -20,7 +20,7 @@ import (
 	"time"
 	_ "time/tzdata" // TestNextDue's time zone, on machines without one
 
-	"fridolin/internal/fsx"
+	"github.com/Icewater1337/fridolin/internal/fsx"
 )
 
 func TestFilterLines(t *testing.T) {

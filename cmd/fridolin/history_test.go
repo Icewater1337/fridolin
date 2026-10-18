@@ -10,7 +10,7 @@ import (
 	"strings"
 	"testing"
 
-	"fridolin/internal/textx"
+	"github.com/Icewater1337/fridolin/internal/textx"
 )
 
 // countingReader counts what is read of the history.

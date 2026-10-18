@@ -8,7 +8,7 @@ import (
 	"os"
 	"time"
 
-	"fridolin/internal/platform"
+	"github.com/Icewater1337/fridolin/internal/platform"
 	"github.com/mdp/qrterminal/v3"
 	"go.mau.fi/whatsmeow"
 	"go.mau.fi/whatsmeow/types"

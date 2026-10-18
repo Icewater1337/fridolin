@@ -10,7 +10,7 @@ import (
 )
 
 // version is set at build time with
-// -ldflags "-X fridolin/internal/version.version=v1.2.3": make build and
+// -ldflags "-X github.com/Icewater1337/fridolin/internal/version.version=v1.2.3": make build and
 // setup.sh stamp `git describe --tags --always --dirty`, release builds
 // the tag (scripts/build-release.sh).
 var version = "dev"

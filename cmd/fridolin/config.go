@@ -14,8 +14,8 @@ import (
 	"syscall"
 	"time"
 
-	"fridolin/internal/fsx"
-	"fridolin/internal/trigger"
+	"github.com/Icewater1337/fridolin/internal/fsx"
+	"github.com/Icewater1337/fridolin/internal/trigger"
 )
 
 // Config holds all configuration for the bridge.

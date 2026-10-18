@@ -22,8 +22,8 @@ import (
 	"text/template"
 	"time"
 
-	"fridolin/internal/fsx"
-	"fridolin/internal/version"
+	"github.com/Icewater1337/fridolin/internal/fsx"
+	"github.com/Icewater1337/fridolin/internal/version"
 )
 
 // `fridolin service` installs the bridge outside its source checkout and

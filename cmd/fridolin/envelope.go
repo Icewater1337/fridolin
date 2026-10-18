@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"strings"
 
-	"fridolin/internal/textx"
+	"github.com/Icewater1337/fridolin/internal/textx"
 	"go.mau.fi/whatsmeow/proto/waE2E"
 	"go.mau.fi/whatsmeow/types/events"
 )

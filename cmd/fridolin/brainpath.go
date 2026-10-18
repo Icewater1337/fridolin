@@ -8,7 +8,7 @@ import (
 	"strings"
 	"sync"
 
-	"fridolin/internal/fsx"
+	"github.com/Icewater1337/fridolin/internal/fsx"
 )
 
 // A brain's own PATH folders. Your shell's PATH may name a folder inside a

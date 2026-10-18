@@ -15,7 +15,7 @@ import (
 	"testing"
 	"time"
 
-	"fridolin/internal/fsx"
+	"github.com/Icewater1337/fridolin/internal/fsx"
 )
 
 // groupOf starts script under sh in a process group of its own, as a run's

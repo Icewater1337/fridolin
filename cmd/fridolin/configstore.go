@@ -19,7 +19,7 @@ import (
 	"sync"
 	"sync/atomic"
 
-	"fridolin/internal/fsx"
+	"github.com/Icewater1337/fridolin/internal/fsx"
 )
 
 // ConfigStore holds the configuration in two layers: what is written in

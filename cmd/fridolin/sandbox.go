@@ -16,7 +16,7 @@ import (
 	"sync"
 	"unicode/utf8"
 
-	"fridolin/internal/fsx"
+	"github.com/Icewater1337/fridolin/internal/fsx"
 )
 
 // sandboxExecPath is the macOS sandbox wrapper used for brain spawns.

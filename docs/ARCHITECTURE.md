@@ -107,7 +107,7 @@ scripts/, .githooks/ personal-data guard, release build, smoke test and git hook
 setup.sh, Makefile   build, test and install the service
 ```
 
-The module path is `fridolin`; nothing outside the checkout imports it.
+The module path is `github.com/Icewater1337/fridolin`; nothing outside the checkout imports it.
 
 There are no Go files at the repository root. Build with `make build` or
 `go build -o bin/fridolin ./cmd/fridolin`, which is what `setup.sh` does
@@ -125,8 +125,8 @@ process, the starter template of a site repository and the builder plugin.
 Only `internal/app` will import them; today `cmd/fridolin` does, and tests
 may too.
 
-The build stamps its version into `fridolin/internal/version.version`
-(`-ldflags "-X fridolin/internal/version.version=v1.2.3"`), as `make build`
+The build stamps its version into `github.com/Icewater1337/fridolin/internal/version.version`
+(`-ldflags "-X github.com/Icewater1337/fridolin/internal/version.version=v1.2.3"`), as `make build`
 and `scripts/build-release.sh` do.
 
 ## 3. Package map

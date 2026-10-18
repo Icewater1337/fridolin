@@ -19,10 +19,10 @@ import (
 	"sync/atomic"
 	"syscall"
 
-	"fridolin/internal/fsx"
-	"fridolin/internal/platform"
-	"fridolin/internal/trigger"
-	"fridolin/internal/version"
+	"github.com/Icewater1337/fridolin/internal/fsx"
+	"github.com/Icewater1337/fridolin/internal/platform"
+	"github.com/Icewater1337/fridolin/internal/trigger"
+	"github.com/Icewater1337/fridolin/internal/version"
 )
 
 const usage = `fridolin — talk to Claude Code over WhatsApp

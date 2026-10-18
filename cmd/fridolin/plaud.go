@@ -25,9 +25,9 @@ import (
 	"syscall"
 	"time"
 
-	"fridolin/internal/fsx"
-	"fridolin/internal/platform"
-	"fridolin/internal/textx"
+	"github.com/Icewater1337/fridolin/internal/fsx"
+	"github.com/Icewater1337/fridolin/internal/platform"
+	"github.com/Icewater1337/fridolin/internal/textx"
 	"go.mau.fi/whatsmeow/types"
 )
 

@@ -14,8 +14,8 @@ import (
 	"strings"
 	"time"
 
-	"fridolin/internal/fsx"
-	"fridolin/internal/version"
+	"github.com/Icewater1337/fridolin/internal/fsx"
+	"github.com/Icewater1337/fridolin/internal/version"
 	"go.mau.fi/whatsmeow/types"
 )
 

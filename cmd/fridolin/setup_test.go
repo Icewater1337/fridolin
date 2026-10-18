@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"fridolin/internal/fsx"
+	"github.com/Icewater1337/fridolin/internal/fsx"
 )
 
 // fakeBridgeScript stands in for the build setup.sh makes: it answers
@@ -251,13 +251,13 @@ func TestSetupBuildsAndTestsWithTheMakefile(t *testing.T) {
 	}{
 		{"with the tests", []string{"--no-service"}, []string{
 			"make -s build VERSION=dev BINARY=",
-			`go build -trimpath -ldflags -X fridolin/internal/version.version=dev -o `,
+			`go build -trimpath -ldflags -X github.com/Icewater1337/fridolin/internal/version.version=dev -o `,
 			"make -s test",
 			"go test -count=1 ./...",
 		}, nil},
 		{"--skip-tests", []string{"--no-service", "--skip-tests"}, []string{
 			"make -s build VERSION=dev BINARY=",
-			`go build -trimpath -ldflags -X fridolin/internal/version.version=dev -o `,
+			`go build -trimpath -ldflags -X github.com/Icewater1337/fridolin/internal/version.version=dev -o `,
 		}, []string{"make -s test", "go test"}},
 	}
 	for _, c := range cases {

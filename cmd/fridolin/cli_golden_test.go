@@ -14,7 +14,7 @@ import (
 	"strings"
 	"testing"
 
-	"fridolin/internal/fsx"
+	"github.com/Icewater1337/fridolin/internal/fsx"
 )
 
 // linkBridgeBinary links (or copies) the test binary to <root>/bin/fridolin.

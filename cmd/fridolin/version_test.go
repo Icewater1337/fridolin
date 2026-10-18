@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"fridolin/internal/version"
+	"github.com/Icewater1337/fridolin/internal/version"
 )
 
 func TestRunLogsItsVersionFirst(t *testing.T) {

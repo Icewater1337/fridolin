@@ -14,7 +14,7 @@ import (
 	"syscall"
 	"time"
 
-	"fridolin/internal/fsx"
+	"github.com/Icewater1337/fridolin/internal/fsx"
 )
 
 // A brain run gets a process group of its own

@@ -12,7 +12,7 @@ import (
 	"testing"
 	"time"
 
-	"fridolin/internal/fsx"
+	"github.com/Icewater1337/fridolin/internal/fsx"
 )
 
 // TestSandboxFailsClosed: with the sandbox on, a run whose sandbox cannot be

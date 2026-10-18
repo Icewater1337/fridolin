@@ -22,9 +22,9 @@ import (
 	"testing"
 	"time"
 
-	"fridolin/internal/fsx"
-	"fridolin/internal/textx"
-	"fridolin/internal/version"
+	"github.com/Icewater1337/fridolin/internal/fsx"
+	"github.com/Icewater1337/fridolin/internal/textx"
+	"github.com/Icewater1337/fridolin/internal/version"
 )
 
 type testBridge struct {

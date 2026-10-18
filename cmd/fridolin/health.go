@@ -8,7 +8,7 @@ import (
 	"strings"
 	"time"
 
-	"fridolin/internal/fsx"
+	"github.com/Icewater1337/fridolin/internal/fsx"
 )
 
 // The startup checks: files the assistant's tools need, configured in

@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"fridolin/internal/fsx"
+	"github.com/Icewater1337/fridolin/internal/fsx"
 )
 
 // useLayout makes the bridge believe its own files are laid out as l.

@@ -15,8 +15,8 @@ import (
 	"time"
 	"unicode"
 
-	"fridolin/internal/textx"
-	"fridolin/internal/trigger"
+	"github.com/Icewater1337/fridolin/internal/textx"
+	"github.com/Icewater1337/fridolin/internal/trigger"
 	"go.mau.fi/whatsmeow"
 	"go.mau.fi/whatsmeow/proto/waE2E"
 	"go.mau.fi/whatsmeow/store"

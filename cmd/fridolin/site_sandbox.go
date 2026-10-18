@@ -34,7 +34,7 @@ import (
 	"sort"
 	"strings"
 
-	"fridolin/internal/fsx"
+	"github.com/Icewater1337/fridolin/internal/fsx"
 )
 
 // siteModuleCaps is what one module's module.json declares, as the sandbox

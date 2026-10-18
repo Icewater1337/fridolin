@@ -5,7 +5,7 @@ import (
 	"sync"
 	"time"
 
-	"fridolin/internal/textx"
+	"github.com/Icewater1337/fridolin/internal/textx"
 )
 
 // Activity is the dashboard's feed of recent messages across all brains. It is

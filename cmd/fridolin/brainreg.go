@@ -9,7 +9,7 @@ import (
 	"sort"
 	"strings"
 
-	"fridolin/internal/fsx"
+	"github.com/Icewater1337/fridolin/internal/fsx"
 )
 
 // BrainRef is one brain folder in config.json's brain_dirs. Approved is the

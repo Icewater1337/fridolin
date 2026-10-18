@@ -14,7 +14,7 @@ import (
 	"time"
 	"unicode"
 
-	"fridolin/internal/platform"
+	"github.com/Icewater1337/fridolin/internal/platform"
 	"go.mau.fi/whatsmeow/store"
 	"go.mau.fi/whatsmeow/types"
 )

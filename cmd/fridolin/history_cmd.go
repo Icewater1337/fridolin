@@ -19,7 +19,7 @@ import (
 	"time"
 	"unicode/utf8"
 
-	"fridolin/internal/fsx"
+	"github.com/Icewater1337/fridolin/internal/fsx"
 )
 
 // `fridolin history` searches a brain's conversation-history.jsonl. A run

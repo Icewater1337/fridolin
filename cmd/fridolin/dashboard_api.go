@@ -27,10 +27,10 @@ import (
 	"unicode"
 	"unicode/utf8"
 
-	"fridolin/internal/fsx"
-	"fridolin/internal/platform"
-	"fridolin/internal/textx"
-	"fridolin/internal/version"
+	"github.com/Icewater1337/fridolin/internal/fsx"
+	"github.com/Icewater1337/fridolin/internal/platform"
+	"github.com/Icewater1337/fridolin/internal/textx"
+	"github.com/Icewater1337/fridolin/internal/version"
 	"rsc.io/qr"
 )
 

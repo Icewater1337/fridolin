@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"fridolin/internal/trigger"
+	"github.com/Icewater1337/fridolin/internal/trigger"
 	"go.mau.fi/whatsmeow/proto/waE2E"
 	"go.mau.fi/whatsmeow/store"
 	"go.mau.fi/whatsmeow/types"

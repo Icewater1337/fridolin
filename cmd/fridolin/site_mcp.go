@@ -16,7 +16,7 @@ import (
 	"strings"
 	"time"
 
-	"fridolin/internal/version"
+	"github.com/Icewater1337/fridolin/internal/version"
 )
 
 type mcpTool struct {

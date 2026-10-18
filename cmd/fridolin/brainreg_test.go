@@ -12,8 +12,8 @@ import (
 	"strings"
 	"testing"
 
-	"fridolin/internal/fsx"
-	"fridolin/internal/textx"
+	"github.com/Icewater1337/fridolin/internal/fsx"
+	"github.com/Icewater1337/fridolin/internal/textx"
 )
 
 func testManifest(id string) BrainManifest {

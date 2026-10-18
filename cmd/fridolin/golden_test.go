@@ -17,8 +17,8 @@ import (
 	"testing"
 	"time"
 
-	"fridolin/internal/fsx"
-	"fridolin/internal/version"
+	"github.com/Icewater1337/fridolin/internal/fsx"
+	"github.com/Icewater1337/fridolin/internal/version"
 )
 
 // The golden files in testdata/golden pin what the bridge says and writes

@@ -13,8 +13,8 @@ import (
 	"strings"
 	"testing"
 
-	"fridolin/internal/fsx"
-	"fridolin/internal/platform"
+	"github.com/Icewater1337/fridolin/internal/fsx"
+	"github.com/Icewater1337/fridolin/internal/platform"
 )
 
 func TestNewBridgeTakesTheInstanceLock(t *testing.T) {

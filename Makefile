@@ -17,7 +17,7 @@ BINARY   ?= bin/fridolin
 VERSION  ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
 # Lazy (=), so only a target that builds runs git describe.
 # The variable is version in internal/version.
-VERSION_LDFLAGS = -X fridolin/internal/version.version=$(VERSION)
+VERSION_LDFLAGS = -X github.com/Icewater1337/fridolin/internal/version.version=$(VERSION)
 
 GO     ?= go
 PYTHON ?= python3
@@ -32,17 +32,11 @@ NODE   ?= node
 PREFIX ?= $(HOME)/.local
 BINDIR ?= $(PREFIX)/bin
 
-# The linters, pinned so a local run and CI report the same findings. The
-# Go ones run through `go run`, so nothing needs installing; ruff comes from
+# Go linters are pinned: staticcheck is a go.mod tool so Dependabot sees it;
+# actionlint remains an explicit version here. ruff comes from
 # tools/requirements-dev.txt and shellcheck from your package manager.
-# Dependabot does not see these two pins, so move them by hand until they
-# become tool directives in go.mod, which it does update. staticcheck
-# 2026.2.2 was pinned before it was a week old, the wait Dependabot keeps:
-# it is the first release that reads Go 1.27.2's export data, and 2026.2.1
-# stops with an internal error on the standard library.
-STATICCHECK_VERSION := 2026.2.2
 ACTIONLINT_VERSION  := v1.7.12
-STATICCHECK ?= $(GO) run honnef.co/go/tools/cmd/staticcheck@$(STATICCHECK_VERSION)
+STATICCHECK ?= $(GO) tool staticcheck
 ACTIONLINT  ?= $(GO) run github.com/rhysd/actionlint/cmd/actionlint@$(ACTIONLINT_VERSION)
 RUFF        ?= ruff
 SHELLCHECK  ?= shellcheck

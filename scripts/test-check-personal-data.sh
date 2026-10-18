@@ -201,6 +201,25 @@ new_repo "$notices_repo"
 commit "$notices_repo" THIRD_PARTY_NOTICES "Copyright (c) 2016 $author" >/dev/null
 expect "--all-history lets THIRD_PARTY_NOTICES name a licence's author" 0 "$notices_repo" --all-history
 
+# The public module identifier is a build contract, not an exception for
+# every occurrence of its account name or the rest of a line.
+account="Icewater""1337"
+module="github.com/$account/fridolin"
+printf '%s\n' "$account" "$secret" >"$PERSONAL_DENYLIST"
+for reference in "module $module" "\"$module/internal/fsx\"" "-X $module/internal/version.version=dev"; do
+  stage module.txt "$reference"
+  expect "canonical module reference passes" 0 "$staged" --staged
+done
+for reference in "$account" "$module-private" "other.$module" "$module $secret" "$module/$secret"; do
+  stage notes.txt "$reference"
+  expect "module exception keeps other denylist occurrences blocked" 1 "$staged" --staged
+done
+stage notes.txt "$module /Users/""jane"
+expect "module exception keeps generic patterns on the line" 1 "$staged" --staged
+printf '%s\n' "$secret" >"$PERSONAL_DENYLIST"
+stage notes.txt "Co-Authored-By: Codex <noreply@openai.com>"
+expect "Codex automation attribution passes" 0 "$staged" --staged
+
 # The denylist's place from before the rename is still read, and named.
 old_place="$HOME/.config/whatsapp-claude-bridge/personal-denylist"
 mkdir -p "$(dirname "$old_place")"

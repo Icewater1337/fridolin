@@ -37,7 +37,7 @@ for compatibility.
   `go build -o bin/fridolin ./cmd/fridolin`. `go build .` at the
   checkout's root now fails with "no Go files" and leaves an existing
   `./fridolin` as it was. A build stamps the version `fridolin version`
-  prints with `-ldflags "-X fridolin/internal/version.version=v1.2.3"`;
+  prints with `-ldflags "-X github.com/Icewater1337/fridolin/internal/version.version=v1.2.3"`;
   `-X main.version` no longer reaches it.
 - `setup.sh` reads `FRIDOLIN_DATA_DIR` and `FRIDOLIN_INSTALL_DIR`.
   `DATA_DIR` and `INSTALL_DIR`, the names it read before, are ignored with

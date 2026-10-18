@@ -17,7 +17,7 @@ import (
 	"testing"
 	"time"
 
-	"fridolin/internal/fsx"
+	"github.com/Icewater1337/fridolin/internal/fsx"
 )
 
 // requireSiteRuntime skips a test that runs the live site without what it

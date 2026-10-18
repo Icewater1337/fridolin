@@ -14,7 +14,7 @@ import (
 	"sync"
 	"time"
 
-	"fridolin/internal/fsx"
+	"github.com/Icewater1337/fridolin/internal/fsx"
 )
 
 // The media inbox. Attachments and transcripts arrive in the media folder

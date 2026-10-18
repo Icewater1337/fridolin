@@ -9,7 +9,7 @@ import (
 	"strings"
 	"testing"
 
-	"fridolin/web"
+	"github.com/Icewater1337/fridolin/web"
 )
 
 // TestGoldenAssetInventory pins what the dashboard serves under /: every

@@ -15,7 +15,7 @@ import (
 	"testing"
 	"time"
 
-	"fridolin/internal/fsx"
+	"github.com/Icewater1337/fridolin/internal/fsx"
 )
 
 // TestClaimMedia: a brain's files move from wherever they arrived in the

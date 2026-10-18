@@ -17,8 +17,8 @@ import (
 	"strings"
 	"testing"
 
-	"fridolin/internal/fsx"
-	"fridolin/internal/trigger"
+	"github.com/Icewater1337/fridolin/internal/fsx"
+	"github.com/Icewater1337/fridolin/internal/trigger"
 	"go.mau.fi/whatsmeow/proto/waAdv"
 	"go.mau.fi/whatsmeow/types"
 )

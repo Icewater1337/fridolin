@@ -13,8 +13,8 @@ import (
 	"testing"
 	"time"
 
-	"fridolin/internal/fsx"
-	"fridolin/internal/version"
+	"github.com/Icewater1337/fridolin/internal/fsx"
+	"github.com/Icewater1337/fridolin/internal/version"
 )
 
 // fakeService is a serviceHost whose launchctl, systemctl and HTTP calls

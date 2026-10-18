@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"io/fs"
 
-	"fridolin/examples"
+	"github.com/Icewater1337/fridolin/examples"
 )
 
 // The templates are read once, at startup. go:embed fails the build when a

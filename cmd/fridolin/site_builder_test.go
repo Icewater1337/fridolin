@@ -13,7 +13,7 @@ import (
 	"testing"
 	"time"
 
-	"fridolin/internal/fsx"
+	"github.com/Icewater1337/fridolin/internal/fsx"
 )
 
 // newTestBuilderSite is a test site whose one brain, "web", has a folder

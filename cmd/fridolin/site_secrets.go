@@ -19,7 +19,7 @@ import (
 	"strings"
 	"unicode/utf8"
 
-	"fridolin/internal/fsx"
+	"github.com/Icewater1337/fridolin/internal/fsx"
 )
 
 var (

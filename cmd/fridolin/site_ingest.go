@@ -36,7 +36,7 @@ import (
 	"strings"
 	"time"
 
-	"fridolin/internal/textx"
+	"github.com/Icewater1337/fridolin/internal/textx"
 )
 
 // spoolRequest is a module's request.json (ctx.ingest).

@@ -11,7 +11,7 @@ import (
 	"testing"
 	"time"
 
-	"fridolin/internal/fsx"
+	"github.com/Icewater1337/fridolin/internal/fsx"
 )
 
 // TestSetBridgePATH: your shell's PATH may name a folder inside a brain's
