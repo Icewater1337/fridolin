@@ -5,6 +5,7 @@ import (
 	"go/ast"
 	"go/parser"
 	"go/token"
+	"io/fs"
 	"maps"
 	"path/filepath"
 	"slices"
@@ -131,19 +132,33 @@ var notChatText = map[string]string{
 // string that starts with an emoji, the mark of a message the bridge
 // sends into chats, so that a new one goes into the catalogue.
 func TestChatMessagesLiveInTheCatalogue(t *testing.T) {
-	files, err := filepath.Glob(filepath.Join(pkgDir, "*.go"))
-	if err != nil {
-		t.Fatal(err)
+	var files []string
+	err := filepath.WalkDir(repoDir, func(path string, d fs.DirEntry, err error) error {
+		switch {
+		case err != nil:
+			return err
+		case d.IsDir() && path != repoDir && (strings.HasPrefix(d.Name(), ".") || d.Name() == "testdata" || d.Name() == "node_modules" || d.Name() == "vendor"):
+			return filepath.SkipDir
+		case !d.IsDir() && strings.HasSuffix(path, ".go") && !strings.HasSuffix(path, "_test.go"):
+			files = append(files, path)
+		}
+		return nil
+	})
+	if err != nil || len(files) == 0 {
+		t.Fatalf("no Go files in %s: %v", repoDir, err)
 	}
 	fset := token.NewFileSet()
 	seen := map[string]bool{}
 	for _, path := range files {
-		if strings.HasSuffix(path, "_test.go") || filepath.Base(path) == "messages.go" {
+		if path == filepath.Join(pkgDir, "messages.go") {
 			continue
 		}
-		f, err := parser.ParseFile(fset, path, nil, 0)
+		f, err := parser.ParseFile(fset, path, nil, parser.ParseComments)
 		if err != nil {
 			t.Fatal(err)
+		}
+		if ast.IsGenerated(f) {
+			continue
 		}
 		ast.Inspect(f, func(n ast.Node) bool {
 			lit, ok := n.(*ast.BasicLit)
