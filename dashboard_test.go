@@ -141,6 +141,39 @@ func TestDashboardGuards(t *testing.T) {
 	}
 }
 
+// Every answer carries the dashboard's CSP: scripts and styles from the
+// bridge only, no plugins, and Trusted Types without a policy, so no
+// string is ever parsed into the page as HTML or run as script.
+func TestDashboardCSP(t *testing.T) {
+	tb := newTestBridge(t, "")
+	want := map[string]string{
+		"default-src":               "'self'",
+		"script-src":                "'self'",
+		"style-src":                 "'self'",
+		"object-src":                "'none'",
+		"base-uri":                  "'none'",
+		"form-action":               "'none'",
+		"frame-ancestors":           "'none'",
+		"require-trusted-types-for": "'script'",
+		"trusted-types":             "'none'",
+	}
+	for _, path := range []string{"/", "/assets/app/main.js", "/api/status", "/api/nothing-here"} {
+		t.Run(path, func(t *testing.T) {
+			csp := tb.do("GET", path, nil).Header().Get("Content-Security-Policy")
+			got := map[string]string{}
+			for _, d := range strings.Split(csp, ";") {
+				name, value, _ := strings.Cut(strings.TrimSpace(d), " ")
+				got[name] = value
+			}
+			for name, value := range want {
+				if got[name] != value {
+					t.Errorf("%s is %q, want %q (CSP %q)", name, got[name], value, csp)
+				}
+			}
+		})
+	}
+}
+
 // The page's modules are served as JavaScript, which browsers require of
 // module scripts. The JavaScript tests and the package.json that marks the
 // modules for node sit in web/ too, but are not part of the page.

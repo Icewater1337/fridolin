@@ -7,20 +7,13 @@ import { folderBrowser } from '../components/folder-browser.js';
 import { liveForm } from '../components/live-form.js';
 import { h, mount, paint, reconcile, syncOptions } from '../lib/dom.js';
 import { fmtDuration, fmtBytes, plural, absTime, stamp } from '../lib/format.js';
-import { brainLabel } from '../lib/brain.js';
+import { brainLabel, backupOwner } from '../lib/brain.js';
 import { icon } from '../components/icons.js';
 import { toast } from '../components/toast.js';
 import { btn, copyButton, runBusy } from '../components/buttons.js';
 import { openDialog, confirmDialog } from '../components/dialog.js';
 import { field, textInput, toggle, select, linesArea, linesOf, nextId } from '../components/fields.js';
 import { pill, callout, timeAgo, mono, empty, pageHeader, spinner, loading } from '../components/common.js';
-
-// What a backup job is working on, as the progress card names it.
-const jobLabel = (id, brains) => {
-  if (id === '_bridge') return 'Bridge settings';
-  const b = (brains || []).find((x) => x.id === id);
-  return b ? (b.name || b.id) : id;
-};
 
 // A version folder is named after its run's time: in UTC with a Z, or in
 // the bridge's local time for folders made before.
@@ -210,7 +203,7 @@ export default {
       const restoring = j.kind === 'restore';
       return h('div.card.job-card',
         h('div.card-head',
-          h('div.card-title', spinner(), h('h2', restoring ? `Restoring ${jobLabel(j.brain, brains)}` : 'Backing up…')),
+          h('div.card-title', spinner(), h('h2', restoring ? `Restoring ${backupOwner(j.brain, brains)}` : 'Backing up…')),
           btn('Cancel', {
             small: true, icon: 'stop',
             onClick: async () => { await post('/api/backup/cancel'); toast('Cancelling…', 'info'); await refresh(); },
@@ -218,9 +211,9 @@ export default {
         restoring ? h('p.muted', 'Copying files from Google Drive into ', mono(j.target), '. Large folders can take a while.') : [
           bar,
           h('div.job-items',
-            done.map((id) => h('span.job-item.done', icon('check'), jobLabel(id, brains))),
-            j.current ? h('span.job-item.current', spinner(), jobLabel(j.current, brains)) : null,
-            queue.map((id) => h('span.job-item.queued', icon('clock'), jobLabel(id, brains)))),
+            done.map((id) => h('span.job-item.done', icon('check'), backupOwner(id, brains))),
+            j.current ? h('span.job-item.current', spinner(), backupOwner(j.current, brains)) : null,
+            queue.map((id) => h('span.job-item.queued', icon('clock'), backupOwner(id, brains)))),
         ],
         h('p.muted.small', timeAgo(j.started, 'Started ')));
     }

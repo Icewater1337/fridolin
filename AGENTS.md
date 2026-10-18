@@ -143,8 +143,11 @@ the version before: `fridolin service rollback`.
   installs one.
 - The dashboard is plain HTML/CSS/JS in `web/` (no build step), embedded into
   the binary — rebuild after changing it. It runs under a strict CSP: no
-  inline scripts or styles. Its ES modules live in `web/assets`: `app/` (the
-  entry point and the plumbing every page shares), `pages/` (one module per
+  inline scripts or styles, and Trusted Types without a policy, so the
+  browser refuses `innerHTML` and every other way of turning a string
+  into HTML or script; build elements with `h()` from `lib/dom.js`. Its
+  ES modules live in `web/assets`: `app/` (the entry point and the
+  plumbing every page shares), `pages/` (one module per
   page), `components/` (shared pieces of UI) and `lib/` (the element builder
   and pure helpers, which know nothing about the app). Pages import from
   `app/`, `components/` and `lib/`, never from each other; `lib/` imports
@@ -152,7 +155,9 @@ the version before: `fridolin service rollback`.
   `app/routes.js`), so once the bridge runs another version an open tab
   asks for a reload instead of mixing two builds. A page follows the data
   it shows through `app/resources.js` (one poll per endpoint, shared with
-  the shell and other parts of the page) instead of polling it itself,
+  the shell and other parts of the page, which sends back the ETag of the
+  answer it has, so that an endpoint answering with `writeJSONIfChanged`
+  sends a bodyless 304 while nothing changed) instead of polling it itself,
   repaints with `paint()` and `reconcile()` from `lib/dom.js`, which keep
   the nodes of what did not change (and with them focus, typed text and
   open panels), and builds an editable form with `components/live-form.js`,

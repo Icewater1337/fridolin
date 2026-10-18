@@ -3,7 +3,9 @@ package main
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
 	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -53,6 +55,7 @@ func (b *Bridge) apiMux() http.Handler {
 	mux.HandleFunc("POST /api/token/rotate", b.apiRotateToken)
 
 	mux.HandleFunc("GET /api/brains", b.apiBrains)
+	mux.HandleFunc("GET /api/brains/{id}", b.apiBrain)
 	mux.HandleFunc("POST /api/brains/inspect", b.apiInspectFolder)
 	mux.HandleFunc("POST /api/brains", b.apiAddBrain)
 	mux.HandleFunc("PUT /api/brains/{id}", b.apiUpdateBrain)
@@ -101,6 +104,41 @@ func (b *Bridge) apiMux() http.Handler {
 	// No catch-all: the mux answers an unknown path with 404 and a known
 	// one asked with the wrong method with 405 and an Allow header.
 	return mux
+}
+
+// writeJSONIfChanged writes v as writeJSON does, with an ETag of the body,
+// and answers a request whose If-None-Match names that ETag with 304 and
+// no body. The dashboard follows the activity feed and the brains every
+// few seconds and sends back the ETag of what it has, so a poll that finds
+// nothing new is not downloaded and compared again (app/resources.js).
+func writeJSONIfChanged(w http.ResponseWriter, r *http.Request, v any) {
+	body, err := json.Marshal(v)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	body = append(body, '\n') // as writeJSON's encoder ends it
+	sum := sha256.Sum256(body)
+	etag := `"` + hex.EncodeToString(sum[:12]) + `"`
+	w.Header().Set("ETag", etag)
+	if etagListed(r.Header.Get("If-None-Match"), etag) {
+		w.WriteHeader(http.StatusNotModified)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write(body)
+}
+
+// etagListed reports whether an If-None-Match header names etag. That
+// header compares weakly (RFC 9110, 13.1.2), so a W/ in front is ignored.
+func etagListed(header, etag string) bool {
+	for _, t := range strings.Split(header, ",") {
+		if t = strings.TrimSpace(t); t == "*" || strings.TrimPrefix(t, "W/") == etag {
+			return true
+		}
+	}
+	return false
 }
 
 // errNoBody answers a request that left out the body its endpoint needs.
@@ -355,9 +393,17 @@ func (b *Bridge) apiPair(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]string{"status": "pairing"})
 }
 
+// apiGroups answers GET /api/whatsapp/groups with the groups the account
+// is in, from the list the WhatsApp client keeps. With ?fresh=1, which the
+// Chats page's Refresh button sends, the client asks WhatsApp again first.
 func (b *Bridge) apiGroups(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), 20*time.Second)
 	defer cancel()
+	if r.URL.Query().Get("fresh") == "1" {
+		if f, ok := b.wa.(interface{ ForgetGroups() }); ok {
+			f.ForgetGroups()
+		}
+	}
 	groups, err := b.wa.JoinedGroups(ctx)
 	if err != nil {
 		writeErr(w, http.StatusServiceUnavailable, err.Error())
@@ -391,7 +437,7 @@ func (b *Bridge) apiActivity(w http.ResponseWriter, r *http.Request) {
 		limit = 100
 	}
 	limit = min(limit, 500)
-	writeJSON(w, http.StatusOK, b.activity.Recent(limit, r.URL.Query().Get("brain")))
+	writeJSONIfChanged(w, r, b.activity.Recent(limit, r.URL.Query().Get("brain")))
 }
 
 func (b *Bridge) apiStopRun(w http.ResponseWriter, r *http.Request) {
@@ -787,7 +833,26 @@ func (b *Bridge) brainViews() []brainView {
 }
 
 func (b *Bridge) apiBrains(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, http.StatusOK, b.brainViews())
+	writeJSONIfChanged(w, r, b.brainViews())
+}
+
+// apiBrain answers GET /api/brains/{id} with that brain's entry of
+// /api/brains, so the Brain page can follow its brain without fetching
+// every other one with it. Two folders whose brain.json claim one id are
+// both listed there, and here the first is, as the page showed it when it
+// picked its brain out of the list. It builds the whole list on purpose:
+// reading only this brain's folder would be cheaper, but could tell the
+// page something other than the list does (which folder wins, its issues),
+// and saving the download is what matters.
+func (b *Bridge) apiBrain(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	for _, v := range b.brainViews() {
+		if v.ID == id {
+			writeJSONIfChanged(w, r, v)
+			return
+		}
+	}
+	writeErr(w, http.StatusNotFound, "no such brain")
 }
 
 // brainDirs lists every folder in c's brain_dirs, ~ expanded, approved or

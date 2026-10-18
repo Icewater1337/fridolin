@@ -4,7 +4,7 @@ import { installDom } from './fake-dom.js';
 import { serve, settle, type, noConsoleErrors } from './serve.js';
 import { h } from '../assets/lib/dom.js';
 import { createPage } from '../assets/app/page.js';
-import { brainsResource } from '../assets/app/resources.js';
+import { brainsResource, resource } from '../assets/app/resources.js';
 import { brainSettingsFields } from '../assets/components/brain-fields.js';
 import page from '../assets/pages/brain.js';
 
@@ -22,6 +22,10 @@ async function openPage(t, opts = {}) {
     if (path === '/api/brains/work/approve' && init.method === 'POST') return opts.approve;
     if (path.startsWith('/api/brains/work/calendar')) return { client_configured: false, connected: false };
     if (path === '/api/brains/work' && init.method === 'PUT') return { ok: true };
+    if (path === '/api/brains/work') {
+      const b = bridge.brains.find((x) => x.id === 'work');
+      return b ? { status: 200, body: b } : { status: 404, body: { error: 'no such brain' } };
+    }
     if (path.startsWith('/api/brains')) return bridge.brains;
     if (path.startsWith('/api/config')) return { etag: 'e1', path: '/Users/you/.fridolin/config.json', config: {}, effective: {} };
     if (path.startsWith('/api/whatsapp/groups')) return [];
@@ -37,7 +41,11 @@ async function openPage(t, opts = {}) {
   const nameIn = () => root.querySelector('.brain-form input');
   const note = () => root.querySelector('.live-form').firstChild; // the "changed elsewhere" note
   const bar = () => root.querySelector('.save-bar');
-  const poll = async (brains) => { bridge.brains = brains; await brainsResource.refresh(); await settle(); };
+  const poll = async (brains) => {
+    bridge.brains = brains;
+    await Promise.all([resource('/api/brains/work').refresh(), brainsResource.refresh()]);
+    await settle();
+  };
   return { root, ctx, nameIn, note, bar, poll, calls };
 }
 
@@ -166,4 +174,37 @@ test('the model, effort and backup settings are the wizard’s, and save with th
   const toasts = (k) => document.querySelectorAll(`.toast.${k}`).map((el) => el.textContent);
   assert.deepEqual(toasts('error'), []);
   assert.ok(toasts('ok').includes('Settings saved'), `toasts: ${toasts('ok')}`);
+});
+
+test('the page polls its own brain, and the list of all only for the others’ routing', async (t) => {
+  const { calls } = await openPage(t);
+  const count = (path) => calls.filter((c) => c.method === 'GET' && c.path === path).length;
+  for (let i = 0; i < 4; i++) {
+    t.mock.timers.tick(3000);
+    await settle();
+  }
+  assert.equal(count('/api/brains/work'), 5, 'its brain every 3 s');
+  assert.equal(count('/api/brains'), 1, 'the list once');
+  t.mock.timers.tick(60000 - 12000);
+  await settle();
+  assert.equal(count('/api/brains'), 2, 'and then every minute');
+});
+
+test('a brain that is not there is asked after every 30 s, not every 3 s', async (t) => {
+  const { root, calls, poll } = await openPage(t, { brains: [] });
+  const count = () => calls.filter((c) => c.method === 'GET' && c.path === '/api/brains/work').length;
+  assert.match(root.textContent, /No such brain/);
+  for (let i = 0; i < 9; i++) {
+    t.mock.timers.tick(3000);
+    await settle();
+  }
+  assert.equal(count(), 1, 'each 404 is an error in the browser\'s console');
+  t.mock.timers.tick(3000);
+  await settle();
+  assert.equal(count(), 2);
+  await poll([view('Work')]);
+  const before = count();
+  t.mock.timers.tick(3000);
+  await settle();
+  assert.equal(count(), before + 1, 'every 3 s again once it is there');
 });

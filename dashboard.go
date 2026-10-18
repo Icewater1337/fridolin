@@ -330,10 +330,20 @@ func (b *Bridge) requiresToken() bool {
 	return b.tokenAtStart || b.cfgs.Get().DashboardRequiresToken()
 }
 
+// dashboardCSP is the page's Content-Security-Policy. Its scripts and
+// styles come from the bridge alone, never inline. Trusted Types with no
+// policy at all keep it that way for HTML: the page builds every element
+// with lib/dom.js and never parses a string into the DOM, so a string
+// that reaches innerHTML, document.write or the like is refused, not
+// run. No plugin content either.
+const dashboardCSP = "default-src 'self'; img-src 'self' data: blob:; style-src 'self'; script-src 'self'; connect-src 'self'; " +
+	"frame-src http://127.0.0.1:* http://localhost:*; frame-ancestors 'none'; base-uri 'none'; form-action 'none'; " +
+	"object-src 'none'; require-trusted-types-for 'script'; trusted-types 'none'"
+
 func securityHeaders(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		h := w.Header()
-		h.Set("Content-Security-Policy", "default-src 'self'; img-src 'self' data: blob:; style-src 'self'; script-src 'self'; connect-src 'self'; frame-src http://127.0.0.1:* http://localhost:*; frame-ancestors 'none'; base-uri 'none'; form-action 'none'")
+		h.Set("Content-Security-Policy", dashboardCSP)
 		h.Set("X-Content-Type-Options", "nosniff")
 		h.Set("Referrer-Policy", "no-referrer")
 		h.Set("X-Frame-Options", "DENY")

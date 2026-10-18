@@ -82,11 +82,32 @@ export const DEFAULT_TIMEOUT_MS = 30000;
  * answers), or with what the caller's signal aborted with (an AbortError
  * unless the caller gave a reason).
  */
-export async function api(method, path, body, { signal, timeout = DEFAULT_TIMEOUT_MS } = {}) {
+export async function api(method, path, body, { signal, timeout } = {}) {
+  return (await request(method, path, body, { signal, timeout })).data;
+}
+
+/** What getIfChanged resolves with when the answer the caller has still holds. */
+export const NOT_MODIFIED = Symbol('not modified');
+
+/**
+ * get for a poll: sends etag, the ETag of the answer the caller has, back
+ * in If-None-Match. Resolves with NOT_MODIFIED when the bridge answers 304
+ * (that answer still holds, and nothing is downloaded), else with {data,
+ * etag}: the new answer and its ETag, '' when it came without one. Rejects
+ * as api does.
+ */
+export async function getIfChanged(path, etag, { signal, timeout } = {}) {
+  const { res, data } = await request('GET', path, undefined, { signal, timeout, etag });
+  if (res.status === 304) return NOT_MODIFIED;
+  return { data, etag: res.headers.get('ETag') || '' };
+}
+
+async function request(method, path, body, { signal, timeout = DEFAULT_TIMEOUT_MS, etag = '' } = {}) {
   const deadline = withDeadline(signal, timeout);
   const headers = { Accept: 'application/json' };
   const binding = sessionBinding();
   if (binding) headers['X-Bridge-Session'] = binding;
+  if (etag) headers['If-None-Match'] = etag;
   const init = { method, headers, signal: deadline.signal, cache: 'no-store', credentials: 'same-origin' };
   if (method !== 'GET' && method !== 'HEAD') {
     headers['X-Bridge-Dashboard'] = '1';
@@ -117,7 +138,7 @@ export async function api(method, path, body, { signal, timeout = DEFAULT_TIMEOU
   if (text) {
     try { data = JSON.parse(text); } catch { data = text; }
   }
-  if (!res.ok) {
+  if (!res.ok && !(etag && res.status === 304)) {
     const msg = (data && typeof data === 'object' && data.error) ? data.error
       : (typeof data === 'string' && data.trim()) ? data.trim()
       : `Request failed (${res.status} ${res.statusText})`;
@@ -126,7 +147,7 @@ export async function api(method, path, body, { signal, timeout = DEFAULT_TIMEOU
     if (res.status === 401 && path !== LOGIN) listeners.unauthorized.forEach((fn) => fn(err));
     throw err;
   }
-  return data;
+  return { res, data };
 }
 
 const LOGIN = '/api/login';

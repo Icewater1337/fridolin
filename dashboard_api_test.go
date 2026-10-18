@@ -571,6 +571,66 @@ func TestApproveBindsToTheReviewedManifest(t *testing.T) {
 	}
 }
 
+// GET /api/brains/{id} is that brain's entry of /api/brains, whatever
+// state it is in, so the Brain page that follows it shows what the list
+// showed; with two folders claiming the id, the first one's.
+func TestAPIBrainIsItsEntryOfTheList(t *testing.T) {
+	tb := newTestBridge(t, "")
+	m := BrainManifest{ID: "notes", Name: "Notes"}
+	dir := tb.addFolderBrain(t, m)
+	tb.addFolderBrain(t, BrainManifest{ID: "work", Name: "Work"})
+	edited := m
+	edited.Name = "Notes 2"
+	if err := WriteManifest(dir, &edited, true); err != nil {
+		t.Fatal(err)
+	}
+	copyDir := filepath.Join(tb.home, "copy")
+	if err := os.MkdirAll(copyDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := WriteManifest(copyDir, &m, false); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := tb.cfgs.Update("", func(c *Config) error {
+		c.BrainDirs = append(c.BrainDirs, BrainRef{Path: "~/copy", Approved: &m})
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	var list []json.RawMessage
+	if err := json.Unmarshal(tb.do("GET", "/api/brains", nil).Body.Bytes(), &list); err != nil || len(list) != 3 {
+		t.Fatalf("GET /api/brains: %d entries, %v", len(list), err)
+	}
+	cases := []struct {
+		id   string
+		want int // the entry of the list, or -1 for none
+	}{
+		{"notes", 0}, // drifted, and claimed by ~/copy too
+		{"work", 1},
+		{"nobody", -1},
+	}
+	for _, c := range cases {
+		t.Run(c.id, func(t *testing.T) {
+			w := tb.do("GET", "/api/brains/"+c.id, nil)
+			if c.want < 0 {
+				if w.Code != http.StatusNotFound || !strings.Contains(w.Body.String(), `"error"`) {
+					t.Fatalf("%d %s, want 404 with an error", w.Code, w.Body.String())
+				}
+				return
+			}
+			if got := strings.TrimSpace(w.Body.String()); w.Code != 200 || got != string(list[c.want]) {
+				t.Fatalf("%d %s\nwant the list's entry %s", w.Code, got, list[c.want])
+			}
+		})
+	}
+	var notes brainView
+	_ = json.Unmarshal(list[0], &notes)
+	if filepath.Base(notes.Path) != "notes" || notes.Disk == nil {
+		t.Fatalf("the notes entry is %+v; want the folder notes, with its edit on disk", notes)
+	}
+}
+
 // An entry of brain_dirs without an approved manifest still holds its
 // folder: a new brain or a restore cannot be put in it, around it or on it.
 // Its issues stay on that entry, and it can be removed through the API.
@@ -870,6 +930,101 @@ func TestUnscaffoldStaysInTheFolder(t *testing.T) {
 	}
 	if dirExists(filepath.Join(dir, "memories")) {
 		t.Error("the scaffold inside the folder was left behind")
+	}
+}
+
+// The Chats page polls the groups and reloads them after each change on
+// it: those take the list the WhatsApp client keeps, and only its Refresh
+// button, with ?fresh=1, has the client ask WhatsApp again.
+func TestGroupsAskWhatsAppOnlyWhenFresh(t *testing.T) {
+	tb := newTestBridge(t, "")
+	tw := newTestWhatsApp(t)
+	fl := &fakeLister{}
+	tw.lister = fl
+	tb.wa = tw.WhatsAppClient
+	steps := []struct {
+		path    string
+		queries int32 // asked of WhatsApp so far
+	}{
+		{"/api/whatsapp/groups", 1},
+		{"/api/whatsapp/groups", 1},
+		{"/api/whatsapp/groups?fresh=0", 1},
+		{"/api/whatsapp/groups?fresh=1", 2},
+		{"/api/whatsapp/groups", 2},
+	}
+	for i, s := range steps {
+		w := tb.do("GET", s.path, nil)
+		if w.Code != http.StatusOK {
+			t.Fatalf("step %d: GET %s = %d %s", i+1, s.path, w.Code, w.Body)
+		}
+		var rows []struct {
+			JID     string `json:"jid"`
+			Allowed bool   `json:"allowed"`
+		}
+		if err := json.Unmarshal(w.Body.Bytes(), &rows); err != nil || len(rows) != 1 || rows[0].JID != "120363000000000000@g.us" || !rows[0].Allowed {
+			t.Fatalf("step %d: GET %s = %s (%v), want the allowed group", i+1, s.path, w.Body, err)
+		}
+		if n := fl.calls.Load(); n != s.queries {
+			t.Errorf("step %d: after GET %s WhatsApp was asked %d times, want %d", i+1, s.path, n, s.queries)
+		}
+	}
+}
+
+// What the dashboard polls every few seconds carries an ETag, and a poll
+// that sends it back while nothing changed gets a 304 without a body; once
+// something changed, the new answer with a new ETag.
+func TestPolledEndpointsAnswer304WhileUnchanged(t *testing.T) {
+	tb := newTestBridge(t, "")
+	dir := tb.addFolderBrain(t, BrainManifest{ID: "notes", Name: "Notes"})
+	say := func(text string) func() {
+		return func() {
+			tb.activity.Add("notes", historyEntry{TS: "2026-10-18T10:00:00Z", From: "15551234567", Chat: "15551234567@s.whatsapp.net", Text: text, Type: historyIn})
+		}
+	}
+	say("hello")()
+	cases := []struct {
+		path   string
+		change func()
+	}{
+		{"/api/activity?limit=30", say("again")},
+		{"/api/activity?brain=notes", say("once more")},
+		{"/api/brains", func() {
+			if err := WriteManifest(dir, &BrainManifest{ID: "notes", Name: "Notes 2"}, true); err != nil {
+				t.Fatal(err)
+			}
+		}},
+		{"/api/brains/notes", func() {
+			if err := WriteManifest(dir, &BrainManifest{ID: "notes", Name: "Notes 3"}, true); err != nil {
+				t.Fatal(err)
+			}
+		}},
+	}
+	ifNoneMatch := func(v string) func(*http.Request) {
+		return func(r *http.Request) { r.Header.Set("If-None-Match", v) }
+	}
+	for _, c := range cases {
+		t.Run(c.path, func(t *testing.T) {
+			first := tb.do("GET", c.path, nil)
+			etag := first.Header().Get("ETag")
+			if first.Code != 200 || !strings.HasPrefix(etag, `"`) || first.Header().Get("Content-Type") != "application/json" {
+				t.Fatalf("first poll: %d, ETag %q, Content-Type %q", first.Code, etag, first.Header().Get("Content-Type"))
+			}
+			for _, sent := range []string{etag, "W/" + etag, `"other", ` + etag, "*"} {
+				w := tb.do("GET", c.path, nil, ifNoneMatch(sent))
+				if w.Code != http.StatusNotModified || w.Body.Len() != 0 || w.Header().Get("ETag") != etag {
+					t.Errorf("If-None-Match %s: %d, ETag %q, body %q; want 304, the same ETag, no body", sent, w.Code, w.Header().Get("ETag"), w.Body.String())
+				}
+			}
+			if w := tb.do("GET", c.path, nil, ifNoneMatch(`"other"`)); w.Code != 200 || w.Body.String() != first.Body.String() {
+				t.Errorf("another ETag: %d %s; want the answer", w.Code, w.Body.String())
+			}
+
+			c.change()
+			w := tb.do("GET", c.path, nil, ifNoneMatch(etag))
+			if w.Code != 200 || w.Header().Get("ETag") == etag || w.Body.String() == first.Body.String() {
+				t.Fatalf("after a change: %d, ETag %q (was %q); want the new answer with a new ETag", w.Code, w.Header().Get("ETag"), etag)
+			}
+		})
 	}
 }
 

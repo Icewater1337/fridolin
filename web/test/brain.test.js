@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { BRAIN_ID_RE, slugify, routingSummary, brainLabel, issueLabel } from '../assets/lib/brain.js';
+import { BRAIN_ID_RE, BRIDGE_BACKUP_ID, slugify, routingSummary, brainLabel, backupOwner, issueLabel } from '../assets/lib/brain.js';
 import { installDom } from './fake-dom.js';
 import { brainStatusPill, runtimeSummary } from '../assets/components/brain.js';
 import { h } from '../assets/lib/dom.js';
@@ -53,6 +53,20 @@ test('brainLabel', async (t) => {
   for (const [name, b, want] of cases) {
     await t.test(name, () => assert.equal(brainLabel(b), want));
   }
+});
+
+test('backupOwner', async (t) => {
+  const brains = [{ id: 'work', name: 'Office' }, { id: 'notes' }];
+  const cases = [
+    ['the bridge', BRIDGE_BACKUP_ID, 'Bridge settings'],
+    ['a brain with a name', 'work', 'Office'],
+    ['a brain without one', 'notes', 'notes'],
+    ['a brain that is gone', 'old', 'old'],
+  ];
+  for (const [name, id, want] of cases) {
+    await t.test(name, () => assert.equal(backupOwner(id, brains), want));
+  }
+  assert.equal(BRAIN_ID_RE.test(BRIDGE_BACKUP_ID), false, 'no brain can have the bridge’s id');
 });
 
 test('one name per issue kind, short on a pill', async (t) => {

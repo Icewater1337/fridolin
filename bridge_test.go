@@ -1112,7 +1112,7 @@ func TestNamesReadOutsideGo(t *testing.T) {
 	}{
 		{"web/assets/components/brain.js", []string{outcomeOK + ": [", outcomeError + ": [", outcomeInterrupted + ": [", outcomeQuestion + ": ["}},
 		{"web/assets/pages/settings.js", []string{"def: '" + queueModeQueue + "'", "['" + queueModeQueue + "', ", "['" + queueModeInterrupt + "', "}},
-		{"web/assets/pages/backup.js", []string{"id === '" + bridgeBackupID + "'"}},
+		{"web/assets/lib/brain.js", []string{"export const BRIDGE_BACKUP_ID = '" + bridgeBackupID + "';"}},
 	}
 	for _, c := range cases {
 		t.Run(c.file, func(t *testing.T) {
@@ -1126,5 +1126,29 @@ func TestNamesReadOutsideGo(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// The bridge's backup id is spelt out in lib/brain.js alone, which
+// TestNamesReadOutsideGo holds to bridgeBackupID; the other modules
+// import it from there, so none can be left behind when it changes.
+func TestDashboardSpellsTheBridgesBackupIDOnce(t *testing.T) {
+	assets := filepath.Join(repoDir, "web", "assets")
+	err := filepath.WalkDir(assets, func(path string, d os.DirEntry, err error) error {
+		if err != nil || d.IsDir() || filepath.Ext(path) != ".js" || path == filepath.Join(assets, "lib", "brain.js") {
+			return err
+		}
+		js, err := os.ReadFile(path)
+		if err != nil {
+			return err
+		}
+		if strings.Contains(string(js), "'"+bridgeBackupID+"'") {
+			rel, _ := filepath.Rel(repoDir, path)
+			t.Errorf("%s spells out %q; import BRIDGE_BACKUP_ID from lib/brain.js", rel, bridgeBackupID)
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
 	}
 }

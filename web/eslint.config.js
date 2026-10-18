@@ -12,8 +12,9 @@ const common = [
   'URL', 'URLSearchParams', 'AbortController', 'AbortSignal', 'DOMException', 'Event', 'fetch',
 ];
 const browser = [...common, 'window', 'document', 'location', 'navigator', 'localStorage', 'Node'];
-// The tests also have the fake DOM's document (installDom), as the page has.
-const node = [...common, 'setImmediate', 'document'];
+// The tests also have the fake DOM's document (installDom), as the page has,
+// and build their stand-in fetch's responses with Headers.
+const node = [...common, 'setImmediate', 'document', 'Headers'];
 const globals = (names) => Object.fromEntries(names.map((n) => [n, 'readonly']));
 
 const rules = {

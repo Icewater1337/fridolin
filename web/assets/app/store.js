@@ -82,14 +82,23 @@ function learnNames(pairs) {
 let groupsLoading = null;
 let groupsAt = 0;
 
-/** Loads the WhatsApp groups list (cached for a minute). Never throws. */
-export async function loadGroups(force = false) {
-  if (groupsLoading) return groupsLoading;
+/**
+ * Loads the WhatsApp groups list (cached for a minute). Never throws.
+ * force skips the minute. The bridge answers from the list it keeps,
+ * which group events refresh; fresh has it ask WhatsApp instead, for a
+ * change that came without one, after a load already on its way.
+ */
+export async function loadGroups(force = false, { fresh = false } = {}) {
+  if (groupsLoading) {
+    if (!fresh) return groupsLoading;
+    await groupsLoading;
+    return loadGroups(force, { fresh });
+  }
   const { groups } = store.get();
-  if (!force && groups && Date.now() - groupsAt < 60000) return groups;
+  if (!force && !fresh && groups && Date.now() - groupsAt < 60000) return groups;
   groupsLoading = (async () => {
     try {
-      const list = await get('/api/whatsapp/groups');
+      const list = await get(fresh ? '/api/whatsapp/groups?fresh=1' : '/api/whatsapp/groups');
       store.set({ groups: Array.isArray(list) ? list : [], groupsError: '' });
       learnNames(store.get().groups.map((g) => [g.jid, g.name]));
     } catch (e) {
