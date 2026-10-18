@@ -26,14 +26,26 @@ import (
 // layer through Get, which is a cheap atomic load, so a change applies on
 // the next message without a restart.
 type ConfigStore struct {
-	path string
-
-	mu      sync.Mutex // serialises Update
-	file    *Config
+	path    string
 	startup *Config // the effective configuration the process started with
-	eff     atomic.Pointer[Config]
-	etag    atomic.Value // string
-	subs    []func(old, new *Config)
+
+	mu   sync.Mutex // serialises Update
+	snap atomic.Pointer[ConfigSnapshot]
+	subs []func(old, new *Config)
+}
+
+// ConfigSnapshot is one version of the configuration: the file layer, the
+// effective configuration made of it, and the etag of the config.json both
+// came from. The store swaps in a whole snapshot at a time, so whoever reads
+// one gets the three together, never one write's file with another's etag.
+// A snapshot is never changed: treat it and what it points to as read-only.
+type ConfigSnapshot struct {
+	File      *Config
+	Effective *Config
+	ETag      string
+	// Version counts the snapshots of this store: the one it opened with is
+	// 1, and each one swapped in after it is one more.
+	Version uint64
 }
 
 // ErrConfigConflict means config.json changed since the caller read it.
@@ -84,9 +96,8 @@ func OpenConfigStore(cfgPath string) (*ConfigStore, error) {
 		warnLegacyDataDir(eff.DataDir)
 	}
 	warnGroupsWithoutMembers(nil, eff)
-	cs := &ConfigStore{path: cfgPath, file: file, startup: eff}
-	cs.eff.Store(eff)
-	cs.etag.Store(etagOf(raw))
+	cs := &ConfigStore{path: cfgPath, startup: eff}
+	cs.snap.Store(&ConfigSnapshot{File: file, Effective: eff, ETag: etagOf(raw), Version: 1})
 	return cs, nil
 }
 
@@ -99,21 +110,26 @@ func (cs *ConfigStore) Startup() *Config { return cs.startup }
 
 // Get returns the effective configuration. Treat it as read-only: it is
 // shared by every goroutine until the next Update replaces it.
-func (cs *ConfigStore) Get() *Config { return cs.eff.Load() }
+func (cs *ConfigStore) Get() *Config { return cs.snap.Load().Effective }
 
 // ETag identifies the current file contents for optimistic concurrency.
-func (cs *ConfigStore) ETag() string { return cs.etag.Load().(string) }
+func (cs *ConfigStore) ETag() string { return cs.snap.Load().ETag }
+
+// Snapshot returns the current configuration, the file layer, the effective
+// one and the etag together. Read-only, like Get.
+func (cs *ConfigStore) Snapshot() ConfigSnapshot { return *cs.snap.Load() }
 
 // FileCopy returns a deep copy of the file layer for editing.
-func (cs *ConfigStore) FileCopy() *Config {
-	cs.mu.Lock()
-	defer cs.mu.Unlock()
-	c, err := cs.file.clone()
+func (cs *ConfigStore) FileCopy() *Config { return mustClone(cs.snap.Load().File) }
+
+// mustClone returns a deep copy of c, a configuration the store holds.
+func mustClone(c *Config) *Config {
+	out, err := c.clone()
 	if err != nil {
-		// Unreachable: the file layer always round-trips through JSON.
+		// Unreachable: what the store holds always round-trips through JSON.
 		panic(err)
 	}
-	return c
+	return out
 }
 
 // Subscribe registers fn to run after every successful Update, with the old
@@ -129,52 +145,53 @@ func (cs *ConfigStore) Subscribe(fn func(old, new *Config)) {
 // skips the conflict check. It returns RestartRequired as of the new
 // configuration.
 func (cs *ConfigStore) Update(etag string, mutate func(*Config) error) (restart []string, err error) {
-	old, eff, subs, err := cs.commit(etag, mutate)
+	prev, next, subs, err := cs.commit(etag, mutate)
 	if err != nil {
 		return nil, err
 	}
 
-	warnGroupsWithoutMembers(old, eff)
+	warnGroupsWithoutMembers(prev.Effective, next.Effective)
 
 	for _, fn := range subs {
-		fn(old, eff)
+		fn(prev.Effective, next.Effective)
 	}
-	return restartRequired(cs.startup, eff), nil
+	return restartRequired(cs.startup, next.Effective), nil
 }
 
 // commit is the part of Update that holds the lock: it writes the new
-// configuration and swaps it in, and returns it with the one it replaced
-// and the subscribers to tell. A panic on the way, in mutate or in deriving,
-// encoding or writing the configuration, comes back as an error, with the
-// lock given back and the configuration as it was: net/http recovers a
-// handler's panic and the bridge runs on, and a lock left held would stop
-// every later save, brain edit and calendar sign-in for good.
-func (cs *ConfigStore) commit(etag string, mutate func(*Config) error) (old, eff *Config, subs []func(old, new *Config), err error) {
+// configuration and swaps it in, and returns its snapshot with the one it
+// replaced and the subscribers to tell. A panic on the way, in mutate or in
+// deriving, encoding or writing the configuration, comes back as an error,
+// with the lock given back and the configuration as it was: net/http
+// recovers a handler's panic and the bridge runs on, and a lock left held
+// would stop every later save, brain edit and calendar sign-in for good.
+func (cs *ConfigStore) commit(etag string, mutate func(*Config) error) (prev, next *ConfigSnapshot, subs []func(old, new *Config), err error) {
 	cs.mu.Lock()
 	defer cs.mu.Unlock()
 	defer func() {
 		if r := recover(); r != nil {
 			log.Printf("config: an update panicked, nothing was changed: %v\n%s", r, debug.Stack())
-			old, eff, subs, err = nil, nil, nil, fmt.Errorf("the config update failed: %v", r)
+			prev, next, subs, err = nil, nil, nil, fmt.Errorf("the config update failed: %v", r)
 		}
 	}()
-	if etag != "" && etag != cs.ETag() {
+	prev = cs.snap.Load()
+	if etag != "" && etag != prev.ETag {
 		return nil, nil, nil, ErrConfigConflict
 	}
-	next, err := cs.file.clone()
+	file, err := prev.File.clone()
 	if err != nil {
 		return nil, nil, nil, err
 	}
-	if err := mutate(next); err != nil {
+	if err := mutate(file); err != nil {
 		return nil, nil, nil, err
 	}
 	// What is written is this version's file, whatever the edit made of it.
-	next.Version = currentConfigVersion
-	eff, err = effective(next)
+	file.Version = currentConfigVersion
+	eff, err := effective(file)
 	if err != nil {
 		return nil, nil, nil, err
 	}
-	data, err := json.MarshalIndent(next, "", "  ")
+	data, err := json.MarshalIndent(file, "", "  ")
 	if err != nil {
 		return nil, nil, nil, err
 	}
@@ -183,11 +200,9 @@ func (cs *ConfigStore) commit(etag string, mutate func(*Config) error) (old, eff
 		return nil, nil, nil, err
 	}
 
-	old = cs.eff.Load()
-	cs.file = next
-	cs.eff.Store(eff)
-	cs.etag.Store(etagOf(data))
-	return old, eff, append([]func(old, new *Config){}, cs.subs...), nil
+	next = &ConfigSnapshot{File: file, Effective: eff, ETag: etagOf(data), Version: prev.Version + 1}
+	cs.snap.Store(next)
+	return prev, next, append([]func(old, new *Config){}, cs.subs...), nil
 }
 
 // RestartRequired lists the settings that are read once at startup and now

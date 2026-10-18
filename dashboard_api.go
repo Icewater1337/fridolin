@@ -792,16 +792,16 @@ func (b *Bridge) apiDismissChat(w http.ResponseWriter, r *http.Request) {
 // ── config ───────────────────────────────────────────────────────────────
 
 func (b *Bridge) apiGetConfig(w http.ResponseWriter, r *http.Request) {
-	file := b.cfgs.FileCopy()
+	// One snapshot: the etag must be that of the config sent with it, or a
+	// save that comes back with it would pass the conflict check over a
+	// write the page never saw.
+	snap := b.cfgs.Snapshot()
+	file := mustClone(snap.File)
 	file.BrainDirs = nil
-	eff, err := b.cfgs.Get().clone()
-	if err != nil {
-		writeErr(w, http.StatusInternalServerError, err.Error())
-		return
-	}
+	eff := mustClone(snap.Effective)
 	eff.BrainDirs = nil
 	writeJSON(w, http.StatusOK, map[string]any{
-		"etag":      b.cfgs.ETag(),
+		"etag":      snap.ETag,
 		"path":      b.cfgs.Path(),
 		"config":    file,
 		"effective": eff,

@@ -1,8 +1,11 @@
 package main
 
 import (
+	"encoding/json"
+	"fmt"
 	"os"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 )
@@ -84,4 +87,70 @@ func TestConfigUpdatePanicIsAnError(t *testing.T) {
 			_ = cs.FileCopy() // and so does reading the file layer
 		})
 	}
+}
+
+// GET /api/config sends the etag of the config it sends, also while other
+// updates commit: with an etag of a later write, a save of the page's
+// stale config would pass the conflict check and undo that write.
+func TestGetConfigSendsTheETagOfItsConfig(t *testing.T) {
+	tb := newTestBridge(t, "")
+	// The etag is the hash of config.json, which is the file layer GET
+	// sends, indented; without brains, brain_dirs is null in both.
+	check := func() error {
+		w := tb.do("GET", "/api/config", nil)
+		var v struct {
+			ETag   string          `json:"etag"`
+			Config json.RawMessage `json:"config"`
+		}
+		if w.Code != 200 || json.Unmarshal(w.Body.Bytes(), &v) != nil {
+			return fmt.Errorf("GET /api/config: %d %s", w.Code, w.Body.String())
+		}
+		var c Config
+		if err := json.Unmarshal(v.Config, &c); err != nil {
+			return err
+		}
+		data, err := json.MarshalIndent(&c, "", "  ")
+		if err != nil {
+			return err
+		}
+		if got := etagOf(append(data, '\n')); got != v.ETag {
+			return fmt.Errorf("etag %s with a config whose hash is %s (_comment %q)", v.ETag, got, c.Comment)
+		}
+		return nil
+	}
+	if _, err := tb.cfgs.Update("", func(c *Config) error { c.Comment = "start"; return nil }); err != nil {
+		t.Fatal(err)
+	}
+	if err := check(); err != nil {
+		t.Fatalf("without other updates: %v", err)
+	}
+
+	stop := make(chan struct{})
+	var wg sync.WaitGroup
+	for w := 0; w < 4; w++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for i := 0; ; i++ {
+				select {
+				case <-stop:
+					return
+				default:
+				}
+				if _, err := tb.cfgs.Update("", func(c *Config) error { c.Comment = fmt.Sprintf("w%d-%d", w, i); return nil }); err != nil {
+					t.Error(err)
+					return
+				}
+			}
+		}()
+	}
+	deadline := time.Now().Add(time.Second)
+	for n := 0; n < 2000 && time.Now().Before(deadline); n++ {
+		if err := check(); err != nil {
+			t.Error(err)
+			break
+		}
+	}
+	close(stop)
+	wg.Wait()
 }
