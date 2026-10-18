@@ -183,11 +183,11 @@ for compatibility.
   seconds to finish, and its answer goes out. One that takes longer is
   stopped then. Before, every run in progress was stopped at once.
 - The WhatsApp messages still waiting when the bridge stops, in a brain's
-  queue or in a debounce batch, are kept in `bridge.db` and answered
-  after the next start, unless they were sent more than an hour before
-  it. A chat whose run the stop cut short is told so after the start, and
-  asked to send its message again. Before, all of them were dropped
-  without a word.
+  queue or in a debounce batch, and those that arrive while it stops, are
+  kept in `bridge.db` and answered after the next start, unless they were
+  sent more than an hour before it. A chat whose run the stop cut short is
+  told so after the start, and asked to send its message again. Before,
+  all of them were dropped without a word.
 
 ### Added
 

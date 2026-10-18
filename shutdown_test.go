@@ -531,3 +531,61 @@ func TestShutdownDropsWhatIsKeptTooLong(t *testing.T) {
 		t.Errorf("the log does not say the old message was dropped:\n%s", logs.String())
 	}
 }
+
+// What comes in once the stop has begun, while a run gets its grace, is
+// not acted on: no command runs and no brain sees it. It is kept, and the
+// next start handles it as if it came in then, after what the brains had
+// waiting: a deletion of a waiting message takes that one out.
+func TestShutdownKeepsWhatComesInDuringTheStop(t *testing.T) {
+	setShutdownGrace(t, 20*time.Second)
+	h := newHarness(t, "")
+	dir := h.AddBrain(BrainManifest{ID: "main", Name: "Main", Routing: BrainRouting{HandlesDMs: true}})
+	t.Setenv("FRIDOLIN_FAKE_SLEEP_MS", "3000")
+	h.WhatsApp(dmEvent("3EB0FIRST", textMsg("first")))
+	h.WaitFor("the first run", func() bool { return h.Running("main") })
+	h.WhatsApp(dmEvent("3EB0DOOMED", textMsg("doomed")))
+	h.WaitSent(harnessDM, "Queued")
+	t.Setenv("FRIDOLIN_FAKE_SLEEP_MS", "10")
+
+	b := h.b
+	stopped := make(chan struct{})
+	go func() {
+		h.Shutdown()
+		close(stopped)
+	}()
+	h.WaitFor("the stop to begin", func() bool {
+		b.intake.mu.Lock()
+		defer b.intake.mu.Unlock()
+		return b.intake.closed
+	})
+	h.WhatsApp(dmEvent("3EB0LATE", textMsg("late")))
+	h.WhatsApp(dmEvent("3EB0HELP", textMsg("!help")))
+	h.WhatsApp(dmEvent("3EB0DEL", revokeMsg("3EB0DOOMED")))
+	h.WaitFor("what came in to be kept", func() bool {
+		var n int
+		err := b.store.db.QueryRow(`SELECT COUNT(*) FROM inbound_queue WHERE kind IN ('late', 'change')`).Scan(&n)
+		return err == nil && n == 3
+	})
+	<-stopped
+	for _, text := range h.SentTo(harnessDM) {
+		if strings.Contains(text, "says: late") || strings.Contains(text, "!stop") {
+			t.Errorf("the bridge acted on what came in during the stop: sent %q", text)
+		}
+	}
+
+	h.Reopen()
+	h.WaitSent(harnessDM, "says: late")
+	h.WaitSent(harnessDM, "`!stop`") // the help
+	h.WaitSent(harnessDM, "says: first")
+	time.Sleep(200 * time.Millisecond)
+	for _, text := range h.SentTo(harnessDM) {
+		if strings.Contains(text, "doomed") {
+			t.Errorf("the message deleted during the stop was answered: %q", text)
+		}
+	}
+	for _, l := range historyLines(t, dir) {
+		if strings.Contains(l, "doomed") {
+			t.Errorf("the message deleted during the stop is in the history: %s", l)
+		}
+	}
+}

@@ -1191,7 +1191,9 @@ When the bridge stops or restarts, a brain's run in progress gets 15
 seconds to finish and send its answer. The WhatsApp messages still
 waiting, in a queue or in a [`debounce`](#debounce) batch, are kept in
 `bridge.db` and answered after the next start, unless they were sent more
-than an hour before it. A run the stop
+than an hour before it. So are those that arrive while the bridge stops:
+the next start handles them, and the edits and deletions that came with
+them, as if they had just come in, commands included. A run the stop
 cut short is not run again, since it may have done part of what it was
 asked: its chat gets "🔄 I restarted while I was working on your message.
 Send it again if you still need an answer." Files sent through `/ingest`

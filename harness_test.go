@@ -222,14 +222,16 @@ func (h *harness) Inject(m inbound) {
 
 // WhatsApp hands the bridge a message event as whatsmeow delivers one, to
 // the bridge's WhatsApp handling without a connection: what the dev inbound
-// cannot carry, such as a quoted reply, goes this way. Attachments cannot
+// cannot carry, such as a quoted reply, an edit or a deletion, goes this
+// way, as does a message that must come from WhatsApp, as those a stop
+// keeps for the next start do. Attachments cannot
 // be downloaded; what the bridge tells the chat about that is sent through
 // the dev outbox.
 func (h *harness) WhatsApp(ev *events.Message) {
 	h.t.Helper()
 	ctx, cancel := context.WithCancel(context.Background())
 	h.t.Cleanup(cancel)
-	wa := &WhatsAppClient{cfg: h.b.cfgs.Get, log: waLog.Noop, handler: h.b.handleInbound, ctx: ctx, cancel: cancel}
+	wa := &WhatsAppClient{cfg: h.b.cfgs.Get, log: waLog.Noop, handler: h.b.handleInbound, onChange: h.b.handleChange, ctx: ctx, cancel: cancel}
 	wa.media = wa.client // nil: every download fails with ErrClientIsNil
 	wa.notify = func(jid, text string) { _ = h.b.dev.SendMessage(ctx, jid, text) }
 	wa.handleMessage(ev)
