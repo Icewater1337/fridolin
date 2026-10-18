@@ -59,7 +59,8 @@ type BackupConfig struct {
 	Root string `json:"root,omitempty"`
 	// DailyAt is the local time of the scheduled backup, "HH:MM".
 	DailyAt string `json:"daily_at,omitempty"`
-	// RclonePath overrides the rclone binary (default: found on PATH).
+	// RclonePath overrides the rclone binary (default: found in the PATH
+	// folders helperPath keeps, else in rcloneFallbacks).
 	RclonePath string `json:"rclone_path,omitempty"`
 	// KeepVersionsDays is how long a version folder is kept after the run
 	// that made it (default 30; 0 keeps them forever).
@@ -281,17 +282,26 @@ func (m *BackupManager) rclonePath() (string, error) {
 //
 // A configured path must work as it is: falling back would quietly run
 // another rclone, maybe another version, than the one you named, and hide
-// the typo. Only without one does it look further than PATH, where
-// launchd's PATH lacks Homebrew's folder and rclone's installer's.
+// the typo. A name without a folder, and rclone itself when none is
+// configured, is looked up only in the PATH folders helperPath keeps:
+// rclone runs outside the sandbox. Only without a configured one does it
+// look further, where launchd's PATH lacks Homebrew's folder and rclone's
+// installer's.
 func findRclone(p string) (string, error) {
 	if p != "" {
+		if !strings.Contains(p, "/") {
+			if found := lookPathIn(p, helperPath()); found != "" {
+				return found, nil
+			}
+			return "", fmt.Errorf("backup.rclone_path %s: %w", p, exec.ErrNotFound)
+		}
 		found, err := exec.LookPath(p)
 		if err != nil {
 			return "", fmt.Errorf("backup.rclone_path %s: %w", p, err)
 		}
 		return found, nil
 	}
-	if found, err := exec.LookPath("rclone"); err == nil {
+	if found := lookPathIn("rclone", helperPath()); found != "" {
 		return found, nil
 	}
 	for _, c := range rcloneFallbacks() {
@@ -308,8 +318,9 @@ func findRclone(p string) (string, error) {
 // rclone is found.
 var errRcloneMissing = errors.New("rclone is not installed")
 
-// rcloneFallbacks are where findRclone looks when rclone is not on PATH, a
-// variable so tests can point it at their own files.
+// rcloneFallbacks are where findRclone looks when rclone is not in the
+// folders of PATH it looks in first, a variable so tests can point it at
+// their own files.
 var rcloneFallbacks = func() []string {
 	return []string{"/opt/homebrew/bin/rclone", "/usr/local/bin/rclone", filepath.Join(homeDir(), ".local/bin/rclone")}
 }

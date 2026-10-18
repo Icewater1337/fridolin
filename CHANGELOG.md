@@ -24,6 +24,14 @@ yet, so everything is under Unreleased until the first one.
   `~/.local/share/fridolin/venv`, which the transcription skill runs the
   tool with; a plain `pip install` fails on Homebrew's and Debian's Python.
   `uv run --script tools/transcribe.py` works too.
+- The bridge looks up tmux, rclone and the Plaud CLI, which it runs
+  outside the sandbox, only in the folders of its `PATH` that are in your
+  home folder or one of `/usr/bin`, `/bin`, `/usr/sbin`, `/sbin`,
+  `/usr/local/bin`, `/opt/homebrew/bin` and `/opt/local/bin`, so that a
+  brain cannot plant one in a folder such as `/opt/homebrew/opt/go/bin`.
+  One that is only in another folder of `PATH` is no longer found there:
+  set `backup.rclone_path` or `plaud.cli_path` to it, or link tmux into
+  `~/.local/bin`.
 
 ### Added
 

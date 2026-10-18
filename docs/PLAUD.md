@@ -164,4 +164,4 @@ for updates either; `plaud` in your own terminal follows your own settings.
 | `polished` | `false` | use Plaud's AI-cleaned transcript; when Plaud has none an hour after the recording showed up, the raw one is sent, with a note saying so |
 | `message` | follow `skills/plaud.md` | instruction sent with each recording, after the fixed first line |
 | `brain_access` | `false` | share the login with brains (see above) |
-| `cli_path` | found on `PATH`, else in the newest nvm node version, else in `/opt/homebrew/bin` or `/usr/local/bin` | path to `plaud` |
+| `cli_path` | found in the folders of `PATH` Fridolin takes its helpers from (see [CONFIGURATION.md](CONFIGURATION.md#helper-programs)), else in the newest nvm node version, else in `/opt/homebrew/bin` or `/usr/local/bin` | path to `plaud` |

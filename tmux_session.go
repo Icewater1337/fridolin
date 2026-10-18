@@ -33,13 +33,10 @@ var (
 // osascript opens the Terminal window, a variable so tests need not open one.
 var osascript = "osascript"
 
-// findTmux locates tmux on PATH once and caches the result.
+// findTmux locates tmux once, in the folders of PATH that helperPath
+// keeps, and caches its path, which every tmux call then runs it by.
 func findTmux() string {
-	tmuxOnce.Do(func() {
-		if p, err := exec.LookPath("tmux"); err == nil {
-			tmuxPath = p
-		}
-	})
+	tmuxOnce.Do(func() { tmuxPath = lookPathIn("tmux", helperPath()) })
 	return tmuxPath
 }
 
@@ -47,7 +44,7 @@ func findTmux() string {
 // log and opens a Terminal window attached to it, running both with env.
 func NewTmuxViewer(name, streamLog, cwd string, env []string) (*TmuxViewer, error) {
 	if findTmux() == "" {
-		return nil, fmt.Errorf("tmux not found on PATH")
+		return nil, fmt.Errorf("tmux not found (looked in %q)", helperPath())
 	}
 	tv := &TmuxViewer{Name: name, StreamLog: streamLog, CWD: cwd, Env: env}
 	if err := tv.start(); err != nil {

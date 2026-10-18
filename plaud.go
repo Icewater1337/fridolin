@@ -48,8 +48,9 @@ type PlaudConfig struct {
 	// Brain receives the recordings (default: the brain that handles DMs,
 	// else the default brain).
 	Brain string `json:"brain,omitempty"`
-	// CLIPath overrides the plaud binary (default: found on PATH, else in
-	// the newest nvm node version, else in /opt/homebrew or /usr/local).
+	// CLIPath overrides the plaud binary (default: found in the PATH
+	// folders helperPath keeps, else in the newest nvm node version, else
+	// in /opt/homebrew or /usr/local).
 	CLIPath string `json:"cli_path,omitempty"`
 	// IntervalSeconds between polls (default 60, minimum 30).
 	IntervalSeconds int `json:"interval_seconds,omitempty"`
@@ -488,7 +489,9 @@ func (p *PlaudManager) cliPath() (string, error) {
 const nvmNodeVersions = ".nvm/versions/node"
 
 // findPlaudCLI finds the plaud binary, given plaud.cli_path. The sandbox
-// profile uses it too, to keep brains from replacing the CLI.
+// profile uses it too, to keep brains from replacing the CLI. Without
+// cli_path it looks only in the PATH folders helperPath keeps, since the
+// CLI runs outside the sandbox, then in nvm and the usual prefixes.
 func findPlaudCLI(c string) (string, error) {
 	if c != "" {
 		if _, err := os.Stat(c); err != nil {
@@ -496,7 +499,7 @@ func findPlaudCLI(c string) (string, error) {
 		}
 		return c, nil
 	}
-	if found, err := exec.LookPath("plaud"); err == nil {
+	if found := lookPathIn("plaud", helperPath()); found != "" {
 		return found, nil
 	}
 	candidates, _ := filepath.Glob(filepath.Join(homeDir(), nvmNodeVersions, "*/bin/plaud"))

@@ -139,6 +139,8 @@ test('a backup.rclone_path that does not work is named, not offered for install'
   assert.ok(text.includes('The configured rclone does not work'), text);
   assert.ok(text.includes(error), 'the error is shown');
   assert.ok(!text.includes('brew install rclone'), 'no install hint for a path that is set');
+  // Without rclone_path, rclone is not taken from just anywhere on PATH.
+  assert.ok(text.includes('the rclone in the helper folders of this computer’s PATH'), text);
 });
 
 test('a restore shows while it runs and how it went once it ended', async (t) => {

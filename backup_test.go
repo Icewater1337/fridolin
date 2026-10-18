@@ -341,7 +341,9 @@ func TestRunRcloneUsesIsolatedConfig(t *testing.T) {
 // TestFindRclone: a configured rclone_path is used as it is, and one that
 // does not work is an error that names it, never a quiet fallback to another
 // rclone. Without one, PATH comes first, then the fallbacks, of which only an
-// executable file counts.
+// executable file counts. Of PATH, only the folders helperPath keeps count,
+// also for an rclone_path that is a bare name: an rclone in another PATH
+// folder may be one a brain planted there.
 func TestFindRclone(t *testing.T) {
 	dir := t.TempDir()
 	write := func(name string, mode os.FileMode) string {
@@ -351,14 +353,18 @@ func TestFindRclone(t *testing.T) {
 		}
 		return p
 	}
-	onPath := filepath.Join(dir, "path")
-	if err := os.Mkdir(onPath, 0o700); err != nil {
-		t.Fatal(err)
+	// A PATH folder under HOME, and one outside it.
+	home := t.TempDir()
+	onPath, outside := filepath.Join(home, "path"), filepath.Join(dir, "path")
+	for _, d := range []string{onPath, outside} {
+		if err := os.Mkdir(d, 0o700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(d, "rclone"), []byte("#!/bin/sh\n"), 0o700); err != nil {
+			t.Fatal(err)
+		}
 	}
 	pathRclone := filepath.Join(onPath, "rclone")
-	if err := os.WriteFile(pathRclone, []byte("#!/bin/sh\n"), 0o700); err != nil {
-		t.Fatal(err)
-	}
 	configured := write("my-rclone", 0o700)
 	plain := write("plain-file", 0o600)
 	fallback := write("fallback-rclone", 0o700)
@@ -375,12 +381,17 @@ func TestFindRclone(t *testing.T) {
 		{"configured", configured, onPath, []string{fallback}, configured, ""},
 		{"configured but missing", missing, onPath, []string{fallback}, "", "backup.rclone_path " + missing},
 		{"configured but not executable", plain, onPath, []string{fallback}, "", "backup.rclone_path " + plain},
+		{"configured by name", "rclone", outside + ":" + onPath, []string{fallback}, pathRclone, ""},
+		{"configured by name, only outside HOME", "rclone", outside, []string{fallback}, "", "backup.rclone_path rclone"},
 		{"on PATH", "", onPath, []string{fallback}, pathRclone, ""},
+		{"on PATH outside HOME first", "", outside + ":" + onPath, []string{fallback}, pathRclone, ""},
+		{"on PATH only outside HOME", "", outside, []string{fallback}, fallback, ""},
 		{"fallback", "", dir, []string{missing, plain, fallback}, fallback, ""},
 		{"none", "", dir, []string{missing, plain}, "", "rclone is not installed"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Setenv("HOME", home)
 			t.Setenv("PATH", tc.pathDirs)
 			prev := rcloneFallbacks
 			rcloneFallbacks = func() []string { return tc.fallbacks }
@@ -525,8 +536,9 @@ func TestRcloneGetsTheAllowlistedEnvironment(t *testing.T) {
 // (an rclone alias remote standing in for Google Drive), changes it, backs up
 // again, and restores into a new folder.
 func TestBackupRoundTripWithRealRclone(t *testing.T) {
-	needRclone(t)
+	rclone := needRclone(t)
 	tb := newTestBridge(t, `, "backup": {"keep_versions_days": 0}`)
+	useRclone(t, tb, rclone)
 	remoteDir := filepath.Join(t.TempDir(), "drive")
 	_ = os.MkdirAll(filepath.Dir(tb.backup.rcloneConf()), 0o700)
 	_ = os.WriteFile(tb.backup.rcloneConf(), []byte("[brain-gdrive]\ntype = alias\nremote = "+remoteDir+"\n"), 0o600)
@@ -689,14 +701,27 @@ func TestVersionNamesKeepTheirOrderWhenClocksGoBack(t *testing.T) {
 
 // needRclone skips a test that runs the real rclone when there is none,
 // unless FRIDOLIN_REQUIRE_RCLONE is set: CI installs rclone and sets it,
-// so that these tests cannot quietly go unrun there.
-func needRclone(t *testing.T) {
+// so that these tests cannot quietly go unrun there. It returns the rclone
+// on PATH.
+func needRclone(t *testing.T) string {
 	t.Helper()
-	if _, err := exec.LookPath("rclone"); err != nil {
+	p, err := exec.LookPath("rclone")
+	if err != nil {
 		if os.Getenv("FRIDOLIN_REQUIRE_RCLONE") != "" {
 			t.Fatalf("FRIDOLIN_REQUIRE_RCLONE is set, but there is no rclone: %v", err)
 		}
 		t.Skip("rclone not installed")
+	}
+	return p
+}
+
+// useRclone sets tb's backup.rclone_path to rclone. The tests run with a
+// HOME of their own, so an rclone installed in your home folder (in
+// ~/.local/bin, say) is not under it, and the bridge would not look there.
+func useRclone(t *testing.T, tb *testBridge, rclone string) {
+	t.Helper()
+	if _, err := tb.cfgs.Update("", func(c *Config) error { c.Backup.RclonePath = rclone; return nil }); err != nil {
+		t.Fatal(err)
 	}
 }
 
@@ -705,8 +730,9 @@ func needRclone(t *testing.T) {
 // rclone is not installed (see needRclone).
 func rcloneTestBridge(t *testing.T, extra string) (*testBridge, string) {
 	t.Helper()
-	needRclone(t)
+	rclone := needRclone(t)
 	tb := newTestBridge(t, extra)
+	useRclone(t, tb, rclone)
 	remoteDir := filepath.Join(t.TempDir(), "drive")
 	_ = os.MkdirAll(filepath.Dir(tb.backup.rcloneConf()), 0o700)
 	_ = os.WriteFile(tb.backup.rcloneConf(), []byte("[brain-gdrive]\ntype = alias\nremote = "+remoteDir+"\n"), 0o600)

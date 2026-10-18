@@ -115,7 +115,7 @@ export default {
           h('div.hero-body',
             h('h2', 'The configured rclone does not work'),
             callout('bad', null, rc.error),
-            h('p', 'Fix ', mono('backup.rclone_path'), ' in config.json, or remove it to use the rclone on this computer’s PATH.'),
+            h('p', 'Fix ', mono('backup.rclone_path'), ' in config.json, or remove it to use the rclone in the helper folders of this computer’s PATH (see Helper programs in docs/CONFIGURATION.md).'),
             h('div.actions', btn('Check again', { kind: 'primary', icon: 'refresh', onClick: () => refresh() }))));
       }
       const hint = rc.install_hint || 'See https://rclone.org/install/';
