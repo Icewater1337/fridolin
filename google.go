@@ -145,14 +145,38 @@ type oauthPending struct {
 type GoogleAuth struct {
 	cfgs *ConfigStore
 
-	mu        sync.Mutex
-	pending   map[string]oauthPending // state → sign-in in progress
-	lastError map[string]string       // brain id → last sign-in error
+	mu         sync.Mutex
+	pending    map[string]oauthPending  // state → sign-in in progress
+	lastError  map[string]string        // brain id → last sign-in error
+	tokenLocks map[string]chan struct{} // brain id → its token's lock; see lockToken
 }
 
 // NewGoogleAuth creates the manager.
 func NewGoogleAuth(cfgs *ConfigStore) *GoogleAuth {
-	return &GoogleAuth{cfgs: cfgs, pending: map[string]oauthPending{}, lastError: map[string]string{}}
+	return &GoogleAuth{cfgs: cfgs, pending: map[string]oauthPending{}, lastError: map[string]string{}, tokenLocks: map[string]chan struct{}{}}
+}
+
+// lockToken takes brainID's token lock, which a refresh, a disconnect and
+// a sign-in hold from reading the brain's token to writing or removing it.
+// Without it a refresh that read the token before a disconnect removed it
+// would write it back once Google answered: the brain would show as
+// connected again, and with no calendars chosen any more it may use its
+// primary one (calendarsOf). The lock is a channel of one, so that waiting
+// for it ends with ctx; unlock releases it.
+func (g *GoogleAuth) lockToken(ctx context.Context, brainID string) (unlock func(), err error) {
+	g.mu.Lock()
+	l := g.tokenLocks[brainID]
+	if l == nil {
+		l = make(chan struct{}, 1)
+		g.tokenLocks[brainID] = l
+	}
+	g.mu.Unlock()
+	select {
+	case l <- struct{}{}:
+		return func() { <-l }, nil
+	case <-ctx.Done():
+		return nil, fmt.Errorf("waiting for brain %s's calendar token, which another request is using: %w", brainID, ctx.Err())
+	}
 }
 
 func (g *GoogleAuth) clientPath() string {
@@ -340,6 +364,15 @@ func (g *GoogleAuth) HandleCallback(w http.ResponseWriter, r *http.Request) {
 		fail("the brain was removed while it signed in")
 		return
 	}
+	// Held to the end, so that a refresh in progress cannot write the
+	// token this replaces back over the new one, nor a disconnect come
+	// between reading the old token and saving the new (lockToken).
+	unlock, err := g.lockToken(ctx, p.brainID)
+	if err != nil {
+		fail(err.Error())
+		return
+	}
+	defer unlock()
 	// A switch to another account leaves the old one's grant behind, of use
 	// to nobody: revoke it, unless another brain signs in to that account
 	// too. Signing in to the same account again keeps its grant, which the
@@ -483,7 +516,8 @@ func (tr *tokenResponse) grantedScopes(asked []string) []string {
 // writeFileAtomic renames a new file over the token, replacing whatever is
 // there. Older versions also copied the OAuth client, secret and all, next
 // to it as google_calendar_credentials_<brain>.json, for the calendar tool
-// in the brain; nothing reads that copy any more.
+// in the brain; nothing reads that copy any more. The caller holds the
+// brain's token lock (lockToken).
 func (g *GoogleAuth) saveToken(brainID string, tok *googleToken) error {
 	data, err := json.MarshalIndent(tok, "", "  ")
 	if err != nil {
@@ -575,8 +609,17 @@ func (e *signInError) Error() string { return e.err.Error() }
 func (e *signInError) Unwrap() error { return e.err }
 
 // accessToken returns a valid access token, refreshing (and saving) it when
-// it has expired.
+// it has expired. It holds the brain's token lock from reading the token
+// to writing it back (lockToken), so that calls which find it expired at
+// the same time refresh it once: the others then read what the first one
+// saved. The refresh is a single request, bounded by ctx and googleHTTP's
+// timeout, so a disconnect waiting for the lock waits that long at most.
 func (g *GoogleAuth) accessToken(ctx context.Context, brainID string) (*googleToken, error) {
+	unlock, err := g.lockToken(ctx, brainID)
+	if err != nil {
+		return nil, err
+	}
+	defer unlock()
 	t, fields, err := g.loadTokenFields(brainID)
 	if errors.Is(err, fs.ErrNotExist) {
 		return nil, err // not connected
@@ -710,17 +753,32 @@ func (g *GoogleAuth) primaryAccount(ctx context.Context, tok *googleToken) (stri
 // again, or told to remove it here only.
 var errNotRevoked = errors.New("the revocation was not confirmed by Google")
 
-// Disconnect ends a brain's calendar access and deletes its token file. It
-// revokes the refresh token at Google first, but not while another token in
-// the credentials dir is from the same client for the same account, or may
-// be: Google revokes the app's whole grant for the account, so every brain
-// signed in to it would lose its access too. note then says why it did not
-// revoke. When Google does not confirm the revocation, the token stays and
-// the error wraps errNotRevoked, unless localOnly asks to delete it anyway.
+// Disconnect ends a brain's calendar access, deletes its token file and
+// clears its chosen calendars. It revokes the refresh token at Google
+// first, but not while another token in the credentials dir is from the
+// same client for the same account, or may be: Google revokes the app's
+// whole grant for the account, so every brain signed in to it would lose
+// its access too. note then says why it did not revoke. When Google does
+// not confirm the revocation, the token stays and the error wraps
+// errNotRevoked, unless localOnly asks to delete it anyway.
 //
 // A token file that is a symlink is not read, so nothing is revoked
 // through it, and the remove takes the symlink away, not what it points to.
+//
+// It holds the brain's token lock from the read to the remove, so that a
+// refresh in progress cannot write the token back after it (lockToken),
+// and returns ctx's error when ctx ends while it waits for the lock. The
+// brain's chosen calendars are cleared with the lock still held: cleared
+// after it, they could undo the choice of a sign-in that was waiting for
+// the lock and saved its token in between, which would leave the brain
+// signed in with no calendars chosen, so on its primary one
+// (calendarsOf).
 func (g *GoogleAuth) Disconnect(ctx context.Context, brainID string, localOnly bool) (revoked bool, note string, err error) {
+	unlock, err := g.lockToken(ctx, brainID)
+	if err != nil {
+		return false, "", err
+	}
+	defer unlock()
 	t, lerr := g.loadToken(brainID)
 	switch {
 	case lerr != nil || t.RefreshToken == "":
@@ -752,6 +810,9 @@ func (g *GoogleAuth) Disconnect(ctx context.Context, brainID string, localOnly b
 	g.mu.Lock()
 	delete(g.lastError, brainID)
 	g.mu.Unlock()
+	if err := g.cfgs.UpdateManifest(brainID, func(m *BrainManifest) error { m.Calendar = nil; return nil }); err != nil {
+		return revoked, note, fmt.Errorf("the token was deleted, but saving the brain's calendar settings failed: %w", err)
+	}
 	return revoked, note, nil
 }
 
@@ -991,10 +1052,6 @@ func (b *Bridge) apiCalendarDisconnect(w http.ResponseWriter, r *http.Request) {
 		return
 	case err != nil:
 		writeErr(w, http.StatusInternalServerError, err.Error())
-		return
-	}
-	if err := b.cfgs.UpdateManifest(br.ID(), func(m *BrainManifest) error { m.Calendar = nil; return nil }); err != nil {
-		writeErr(w, http.StatusInternalServerError, "the token was deleted, but saving the brain's calendar settings failed: "+err.Error())
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"status": "disconnected", "revoked": revoked, "note": note})

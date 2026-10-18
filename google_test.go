@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -11,6 +12,7 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"syscall"
 	"testing"
@@ -1130,5 +1132,342 @@ func TestCalendarRedirectIsTheAddressServed(t *testing.T) {
 	u, _ := url.Parse(start.AuthURL)
 	if got := u.Query().Get("redirect_uri"); got != served {
 		t.Errorf("redirect_uri = %q, want %q", got, served)
+	}
+}
+
+// gatedGoogle is a Google whose token endpoint holds every refresh until
+// release is called, answering each with a new access token, and grants a
+// sign-in's code at once.
+type gatedGoogle struct {
+	srv      *httptest.Server
+	refresh  atomic.Int32  // refresh requests
+	entered  chan struct{} // one value as each refresh arrives
+	release  func()
+	released chan struct{}
+	revoked  atomic.Value // the last token revoked, a string
+}
+
+func newGatedGoogle(t *testing.T) *gatedGoogle {
+	t.Helper()
+	g := &gatedGoogle{entered: make(chan struct{}, 10), released: make(chan struct{})}
+	var once sync.Once
+	g.release = func() { once.Do(func() { close(g.released) }) }
+	g.srv = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/token":
+			_ = r.ParseForm()
+			if r.PostForm.Get("grant_type") != "refresh_token" {
+				fmt.Fprint(w, `{"access_token":"ACCESS-SIGNIN","refresh_token":"RT-NEW","expires_in":3600}`)
+				return
+			}
+			n := g.refresh.Add(1)
+			g.entered <- struct{}{}
+			select {
+			case <-g.released:
+			case <-r.Context().Done():
+				return
+			}
+			fmt.Fprintf(w, `{"access_token":"ACCESS-%d","expires_in":3600}`, n)
+		case "/calendar/v3/users/me/calendarList":
+			fmt.Fprint(w, `{"items":[{"id":"you@example.com","summary":"you@example.com","primary":true,"accessRole":"owner"}]}`)
+		case "/revoke":
+			g.revoked.Store(r.FormValue("token"))
+		default:
+			w.WriteHeader(404)
+		}
+	}))
+	// Released first: Close waits for the requests it holds.
+	t.Cleanup(g.srv.Close)
+	t.Cleanup(g.release)
+	prev := [3]string{googleAPIBase, googleTokenEndpoint, googleRevokeEndpoint}
+	googleAPIBase, googleTokenEndpoint, googleRevokeEndpoint = g.srv.URL, g.srv.URL+"/token", g.srv.URL+"/revoke"
+	t.Cleanup(func() { googleAPIBase, googleTokenEndpoint, googleRevokeEndpoint = prev[0], prev[1], prev[2] })
+	return g
+}
+
+// waitEntered waits for a refresh to reach the token endpoint.
+func (g *gatedGoogle) waitEntered(t *testing.T) {
+	t.Helper()
+	select {
+	case <-g.entered:
+	case <-time.After(5 * time.Second):
+		t.Fatal("no refresh reached Google's token endpoint")
+	}
+}
+
+// gatedCalendarBrain sets up brain a, with its calendars chosen, and an
+// expired token signed in to account with refresh token RT-A, so that
+// using it means a refresh.
+func gatedCalendarBrain(t *testing.T, g *gatedGoogle, account string) *testBridge {
+	t.Helper()
+	tb := newTestBridge(t, "")
+	if w := tb.do("PUT", "/api/google/client", map[string]string{"json": fmt.Sprintf(testClientJSON, g.srv.URL)}); w.Code != 200 {
+		t.Fatal(w.Body.String())
+	}
+	tb.addFolderBrain(t, BrainManifest{ID: "a", Name: "A"})
+	if w := tb.do("PUT", "/api/brains/a/calendar", map[string]any{"account": account, "calendars": []string{account}, "default": account}); w.Code != 200 {
+		t.Fatal(w.Body.String())
+	}
+	data, _ := json.Marshal(googleToken{
+		Token: "ACCESS-OLD", RefreshToken: "RT-A", ClientID: "123-abc.apps.googleusercontent.com",
+		Scopes: calendarScopes, Account: account, Expiry: "2020-01-01T00:00:00.000000Z",
+	})
+	if err := os.WriteFile(tb.google.tokenPath("a"), data, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	return tb
+}
+
+// within waits up to d for done, which a goroutine closes when it returns,
+// and reports whether it did. A call that should wait for another is given
+// d to return early, as it would without the wait.
+func within(done <-chan struct{}, d time.Duration) bool {
+	select {
+	case <-done:
+		return true
+	case <-time.After(d):
+		return false
+	}
+}
+
+// TestRefreshDoesNotResurrectDisconnectedToken: a refresh that read the
+// brain's token before a disconnect removed it, and was waiting for Google
+// meanwhile, wrote the token back once Google answered. A disconnect here
+// only, or one that leaves a grant another brain shares, revokes nothing,
+// so the brain was connected again, and, with no calendars chosen any
+// more, used its primary one. The disconnect now waits for the refresh.
+func TestRefreshDoesNotResurrectDisconnectedToken(t *testing.T) {
+	g := newGatedGoogle(t)
+	tb := gatedCalendarBrain(t, g, "you@example.com")
+
+	refreshed := make(chan struct{})
+	var refreshErr error
+	go func() {
+		defer close(refreshed)
+		_, refreshErr = tb.google.accessToken(context.Background(), "a")
+	}()
+	g.waitEntered(t)
+
+	disconnected := make(chan struct{})
+	var w *httptest.ResponseRecorder
+	go func() {
+		defer close(disconnected)
+		w = tb.do("DELETE", "/api/brains/a/calendar?local_only=1", nil)
+	}()
+	if within(disconnected, 200*time.Millisecond) {
+		t.Log("the disconnect did not wait for the refresh")
+	}
+	g.release()
+	if !within(refreshed, 5*time.Second) || !within(disconnected, 5*time.Second) {
+		t.Fatal("the refresh or the disconnect hangs")
+	}
+	if refreshErr != nil {
+		t.Errorf("refresh: %v", refreshErr)
+	}
+	if w.Code != 200 {
+		t.Fatalf("disconnect = %d %s", w.Code, w.Body.String())
+	}
+
+	if data, err := os.ReadFile(tb.google.tokenPath("a")); !os.IsNotExist(err) {
+		t.Errorf("the token is back after the disconnect (%v):\n%s", err, data)
+	}
+	var st struct {
+		Connected bool `json:"connected"`
+	}
+	_ = json.Unmarshal(tb.do("GET", "/api/brains/a/calendar?list=0", nil).Body.Bytes(), &st)
+	if st.Connected {
+		t.Error("the brain shows as connected after the disconnect")
+	}
+	token, revoke := tb.runTokens.mint("a")
+	t.Cleanup(revoke)
+	call := tb.do("GET", "/brain/calendar/calendars", nil, func(r *http.Request) {
+		r.Header.Del("X-Bridge-Token")
+		r.Header.Set("Authorization", "Bearer "+token)
+	})
+	if call.Code != http.StatusPreconditionFailed || !strings.Contains(call.Body.String(), "not connected for this brain") {
+		t.Errorf("a calendar call after the disconnect = %d %s, want it refused as not connected", call.Code, call.Body.String())
+	}
+}
+
+// TestDisconnectClearsTheChosenCalendars: Disconnect itself clears the
+// brain's chosen calendars, while it still holds the token's lock. The
+// dashboard's handler cleared them after Disconnect had released it, so a
+// sign-in waiting for the lock could save its token and its calendars in
+// between, which the clearing then undid: the brain was signed in with no
+// calendars chosen, and used its primary one.
+func TestDisconnectClearsTheChosenCalendars(t *testing.T) {
+	for _, localOnly := range []bool{true, false} {
+		t.Run(fmt.Sprintf("local_only=%v", localOnly), func(t *testing.T) {
+			g := newGatedGoogle(t)
+			tb := gatedCalendarBrain(t, g, "you@example.com")
+			if m := tb.brainMgr.Get("a").settings.Load().manifest; m.Calendar == nil {
+				t.Fatal("no calendars chosen to begin with")
+			}
+			if _, _, err := tb.google.Disconnect(context.Background(), "a", localOnly); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := os.Stat(tb.google.tokenPath("a")); !os.IsNotExist(err) {
+				t.Errorf("the token after the disconnect: %v", err)
+			}
+			if m := tb.brainMgr.Get("a").settings.Load().manifest; m.Calendar != nil {
+				t.Errorf("calendar settings after the disconnect = %+v, want none", m.Calendar)
+			}
+		})
+	}
+}
+
+// TestConcurrentRefreshesPostOnce: calls that find the brain's token
+// expired at the same time refresh it once, and get the same access
+// token: the second waits for the first and reads the token it saved.
+// Each asked Google before, and the last answer to be saved won.
+func TestConcurrentRefreshesPostOnce(t *testing.T) {
+	g := newGatedGoogle(t)
+	tb := gatedCalendarBrain(t, g, "you@example.com")
+
+	const calls = 2
+	var wg sync.WaitGroup
+	tokens := make([]string, calls)
+	errs := make([]error, calls)
+	for i := range calls {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			tok, err := tb.google.accessToken(context.Background(), "a")
+			if tok != nil {
+				tokens[i] = tok.Token
+			}
+			errs[i] = err
+		}()
+	}
+	g.waitEntered(t)
+	// Time for the other call to reach Google too, as it would unserialized.
+	time.Sleep(200 * time.Millisecond)
+	g.release()
+	wg.Wait()
+
+	for i, err := range errs {
+		if err != nil {
+			t.Errorf("call %d: %v", i, err)
+		}
+	}
+	if n := g.refresh.Load(); n != 1 {
+		t.Errorf("%d refresh requests, want 1", n)
+	}
+	if tokens[0] != "ACCESS-1" || tokens[1] != tokens[0] {
+		t.Errorf("access tokens = %q, want ACCESS-1 for both", tokens)
+	}
+	var saved googleToken
+	data, _ := os.ReadFile(tb.google.tokenPath("a"))
+	if err := json.Unmarshal(data, &saved); err != nil || saved.Token != "ACCESS-1" {
+		t.Errorf("saved token = %s (%v), want ACCESS-1", data, err)
+	}
+}
+
+// TestWaitingForTheTokenLockEndsWithCtx: a disconnect or a calendar call
+// that waits for a refresh in progress gives up when its context ends,
+// and changes nothing, rather than hang with the refresh.
+func TestWaitingForTheTokenLockEndsWithCtx(t *testing.T) {
+	cases := []struct {
+		name string
+		call func(ctx context.Context, g *GoogleAuth) error
+	}{
+		{"disconnect", func(ctx context.Context, g *GoogleAuth) error {
+			_, _, err := g.Disconnect(ctx, "a", false)
+			return err
+		}},
+		{"calendar call", func(ctx context.Context, g *GoogleAuth) error {
+			_, err := g.accessToken(ctx, "a")
+			return err
+		}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			g := newGatedGoogle(t)
+			tb := gatedCalendarBrain(t, g, "you@example.com")
+			refreshed := make(chan struct{})
+			go func() {
+				defer close(refreshed)
+				_, _ = tb.google.accessToken(context.Background(), "a")
+			}()
+			defer func() { g.release(); <-refreshed }()
+			g.waitEntered(t)
+
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			done := make(chan struct{})
+			var err error
+			go func() {
+				defer close(done)
+				err = tc.call(ctx, tb.google)
+			}()
+			if within(done, 200*time.Millisecond) {
+				t.Fatalf("returned %v before the refresh it should wait for", err)
+			}
+			cancel()
+			if !within(done, 5*time.Second) {
+				t.Fatal("still waiting after its context ended")
+			}
+			if !errors.Is(err, context.Canceled) {
+				t.Errorf("err = %v, want the context's", err)
+			}
+			if _, err := os.Stat(tb.google.tokenPath("a")); err != nil {
+				t.Errorf("the token: %v", err)
+			}
+			if n := g.refresh.Load(); n != 1 {
+				t.Errorf("%d refresh requests, want only the first one's", n)
+			}
+			if r, _ := g.revoked.Load().(string); r != "" {
+				t.Errorf("revoked %q", r)
+			}
+		})
+	}
+}
+
+// TestSignInIsNotUndoneByARefresh: a sign-in to another account that
+// finishes while a refresh of the old token is waiting for Google is not
+// overwritten by it: the refresh wrote the old account's token back over
+// the new one, which the brain's settings named.
+func TestSignInIsNotUndoneByARefresh(t *testing.T) {
+	g := newGatedGoogle(t)
+	tb := gatedCalendarBrain(t, g, "team@example.com")
+
+	refreshed := make(chan struct{})
+	go func() {
+		defer close(refreshed)
+		_, _ = tb.google.accessToken(context.Background(), "a")
+	}()
+	g.waitEntered(t)
+
+	var start struct {
+		AuthURL string `json:"auth_url"`
+	}
+	_ = json.Unmarshal(tb.do("POST", "/api/brains/a/calendar/connect", nil).Body.Bytes(), &start)
+	u, err := url.Parse(start.AuthURL)
+	if err != nil || u.Query().Get("state") == "" {
+		t.Fatalf("auth url %q", start.AuthURL)
+	}
+	signedIn := make(chan struct{})
+	go func() {
+		defer close(signedIn)
+		r := httptest.NewRequest("GET", "http://127.0.0.1:8765/?state="+url.QueryEscape(u.Query().Get("state"))+"&code=good-code", nil)
+		r.Host = "127.0.0.1:8765"
+		tb.h.ServeHTTP(httptest.NewRecorder(), r)
+	}()
+	if within(signedIn, 200*time.Millisecond) {
+		t.Log("the sign-in did not wait for the refresh")
+	}
+	g.release()
+	if !within(refreshed, 5*time.Second) || !within(signedIn, 5*time.Second) {
+		t.Fatal("the refresh or the sign-in hangs")
+	}
+
+	var tok googleToken
+	data, _ := os.ReadFile(tb.google.tokenPath("a"))
+	if err := json.Unmarshal(data, &tok); err != nil || tok.RefreshToken != "RT-NEW" || tok.Account != "you@example.com" {
+		t.Errorf("token = %s (%v), want the new sign-in's", data, err)
+	}
+	m := tb.brainMgr.Get("a").settings.Load().manifest
+	if m.Calendar == nil || m.Calendar.Account != "you@example.com" {
+		t.Errorf("calendar settings = %+v, want the new account", m.Calendar)
 	}
 }
