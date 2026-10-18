@@ -1,4 +1,4 @@
-package main
+package textx
 
 import (
 	"strings"
@@ -8,7 +8,7 @@ import (
 
 func TestTruncateDoesNotSplitRunes(t *testing.T) {
 	// Cutting mid-rune would emit invalid UTF-8 into the activity log.
-	got := truncate("héllo wörld", 2)
+	got := Truncate("héllo wörld", 2)
 	if !strings.ContainsRune(got, '…') {
 		t.Errorf("expected an ellipsis, got %q", got)
 	}
@@ -17,12 +17,12 @@ func TestTruncateDoesNotSplitRunes(t *testing.T) {
 			t.Errorf("truncate produced invalid UTF-8: %q", got)
 		}
 	}
-	if truncate("short", 100) != "short" {
+	if Truncate("short", 100) != "short" {
 		t.Error("truncate altered a string under the limit")
 	}
 }
 
-// tail keeps the end of a command's output for an error message. Cutting
+// Tail keeps the end of a command's output for an error message. Cutting
 // mid-rune would put invalid UTF-8 into the log and the dashboard.
 func TestTailDoesNotSplitRunes(t *testing.T) {
 	cases := []struct {
@@ -38,7 +38,7 @@ func TestTailDoesNotSplitRunes(t *testing.T) {
 		{"x 🙂", 3, "…"},  // so do the last 3 bytes here, of the 4-byte 🙂
 	}
 	for _, c := range cases {
-		got := tail(c.in, c.n)
+		got := Tail(c.in, c.n)
 		if got != c.want || !utf8.ValidString(got) {
 			t.Errorf("tail(%q, %d) = %q, want %q", c.in, c.n, got, c.want)
 		}

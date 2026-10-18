@@ -1,14 +1,14 @@
-package main
+// Package textx shortens text for logs, previews and error messages
+// without cutting a UTF-8 rune in two. It knows nothing of the bridge.
+package textx
 
 import (
 	"strings"
 	"unicode/utf8"
 )
 
-// Text helpers that know nothing of the bridge.
-
-// truncate shortens s to at most n bytes without splitting a UTF-8 rune.
-func truncate(s string, n int) string {
+// Truncate shortens s to at most n bytes without splitting a UTF-8 rune.
+func Truncate(s string, n int) string {
 	if len(s) <= n {
 		return s
 	}
@@ -18,11 +18,11 @@ func truncate(s string, n int) string {
 	return s[:n] + "…"
 }
 
-// tail is truncate's counterpart for the end of s, for the last lines of
+// Tail is Truncate's counterpart for the end of s, for the last lines of
 // a command's output: s without surrounding space, cut after an ellipsis
 // to its last n bytes when longer, or a few fewer so that no rune is cut
 // in two.
-func tail(s string, n int) string {
+func Tail(s string, n int) string {
 	s = strings.TrimSpace(s)
 	if len(s) <= n {
 		return s
