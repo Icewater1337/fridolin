@@ -101,6 +101,37 @@ yet, so everything is under Unreleased until the first one.
   seconds later. The line is written once the brain took the message: one
   its full queue turned away ("Try again in a bit") is no longer recorded,
   so the sender's retry is no longer in the history twice.
+- On macOS a brain writes only its own places: its folder, its media
+  inbox (`media/<brain id>/`) and its own state in
+  `<data_dir>/brains/<brain id>/`, with a Claude Code config folder
+  (`CLAUDE_CONFIG_DIR`), a temp folder (`TMPDIR`) and a cache. Writing
+  anywhere else is denied, `/tmp` included, so a skill that writes there
+  or installs programs or global packages fails
+  ([Writing](docs/CONFIGURATION.md#writing)).
+- Brains no longer read your keychains, so the login you made with
+  `claude` does not reach them: run `claude setup-token` and set
+  `CLAUDE_CODE_OAUTH_TOKEN` in the service's environment before you
+  upgrade. Unless `inherit_claude_user_config` is on, each brain starts
+  with an empty Claude Code config folder of its own; its earlier CLI
+  settings and transcripts stay in `~/.claude`, which brains no longer
+  read. Its folder, memory and conversation history stay as they are.
+- Each brain has a media inbox of its own, and no brain reads another's.
+  On the first start what older versions left in the media folder, its
+  folders (`media/plaud/` among them) and the attachments at its top,
+  moves to `media/.old/`, which no brain can read.
+- `/ingest` takes files only at the top of the media folder or in the
+  named brain's own inbox.
+- Brains cannot start code outside the sandbox through `launchctl`,
+  `open`, `osascript`, Apple events or the sockets of Docker and tmux, and
+  runs start without a terminal.
+- `sandbox.git_config` `"deny"` hides `~/.config/git` too, and both modes
+  protect every file `~/.gitconfig` includes.
+- A brain folder that is, holds or lies inside a path the sandbox protects
+  is left out with an issue, also when `brain_dirs` was edited by hand;
+  restores refuse such a target too.
+- Backups never upload a brain folder's `.env` files, private keys or
+  calendar tokens unless `backup.include_secret_files` is on, and wait up
+  to two minutes for a busy brain before they copy its folder.
 
 ### Added
 

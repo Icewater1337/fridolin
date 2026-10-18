@@ -211,6 +211,29 @@ on; give them the new one from `~/.fridolin/dashboard.token`. The upgrade
 does not rotate it for you, so that those scripts do not stop without
 warning.
 
+**Coming from a version whose sandbox let brains write outside their
+folders** (one without media inboxes): sandboxed brains now write only
+their own folder, their inbox and their own state in
+`~/.fridolin/brains/<id>/`, and cannot read your keychain, so the login
+you made with `claude` no longer reaches them. Before you upgrade, run
+`claude setup-token` and set the token as `CLAUDE_CODE_OAUTH_TOKEN` in the
+service's environment
+([where to set them](docs/CONFIGURATION.md#where-to-set-them)); until
+then brains answer "Not logged in", and the dashboard warns. Unless
+`inherit_claude_user_config` is on, each brain starts with an empty Claude
+Code config folder of its own: its CLI settings, todos and the
+transcripts of its earlier runs stay in `~/.claude`, where it can no
+longer read them, while its folder, memory and conversation history are
+untouched. A skill that writes to `/tmp`, or installs programs or global
+packages, fails now: `$TMPDIR` is the brain's own temp folder
+([details](docs/CONFIGURATION.md#writing)). On the first start what
+older versions left in the media folder moves to `media/.old/`, which no
+brain can read: its folders, `media/plaud/` with every brain's Plaud
+transcripts and a script's own folder among them, and the files at its
+top, every chat's attachments. A script that hands files to `/ingest`
+writes them to the top of the media folder; one it left there before the
+upgrade is in `media/.old/` too.
+
 `fridolin version`, the dashboard's Overview and the `Starting fridolin …`
 line each start writes to the log say which version runs (on macOS:
 `grep 'Starting fridolin' ~/Library/Logs/fridolin/stderr.log | tail -1`).
