@@ -29,6 +29,15 @@ func newScaffold(dir string) (*scaffoldTx, error) {
 	if dir == "" {
 		return s, &os.PathError{Op: "mkdir", Path: dir, Err: fs.ErrInvalid}
 	}
+	// The selected folder may itself be a symlink. Pin that selection before
+	// using confined relative operations for its contents; existing parents
+	// and the selected folder are not ours to remove during rollback.
+	if root, err := os.OpenRoot(dir); err == nil {
+		s.root, s.roots = root, []*os.Root{root}
+		return s, nil
+	} else if !errors.Is(err, fs.ErrNotExist) {
+		return s, err
+	}
 	abs, err := filepath.Abs(dir)
 	if err != nil {
 		return s, err

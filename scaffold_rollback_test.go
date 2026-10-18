@@ -6,6 +6,26 @@ import (
 	"testing"
 )
 
+func TestScaffoldRollbackKeepsSelectedSymlink(t *testing.T) {
+	target := t.TempDir()
+	selected := filepath.Join(t.TempDir(), "selected")
+	if err := os.Symlink(target, selected); err != nil {
+		t.Fatal(err)
+	}
+	s, err := scaffoldFolderTx(selected, &BrainManifest{ID: "a", Name: "A"})
+	defer s.close()
+	if err != nil {
+		t.Fatal(err)
+	}
+	s.rollback()
+	if link, err := os.Readlink(selected); err != nil || link != target {
+		t.Fatalf("rollback changed the selected symlink: %q, %v", link, err)
+	}
+	if entries, err := os.ReadDir(target); err != nil || len(entries) != 0 {
+		t.Fatalf("rollback did not remove only its target's templates: %v, %v", entries, err)
+	}
+}
+
 func TestScaffoldRejectsEmptyDirectory(t *testing.T) {
 	m := testManifest("candidate")
 	before, err := os.ReadDir(".")
