@@ -190,11 +190,13 @@ export function calendarCard(brainId, { signal } = {}) {
       h('div.card-head', h('div.card-title', icon('clock'), h('h3', 'Google Calendar')), pill('Connected', 'ok')),
       errBox,
       h('p', 'Signed in as ', h('strong', s.account || 'unknown account'), '.'),
+      s.broad_access ? callout('warn', 'More access than the calendar needs',
+        'This brain signed in with full access to the account’s calendars, which older versions asked for and which includes deleting calendars and changing who they are shared with. Disconnect, then connect again, to grant only what the calendar uses: its events, free and busy times, and the list of calendars. Disconnecting revokes the old access at Google, every copy of it included.') : null,
       s.list_error ? callout('bad', 'Could not load the calendars', s.list_error, h('div.actions', connectButton('Sign in again'))) : null,
       cals.length ? h('div.table-wrap', h('table.table',
         h('thead', h('tr', h('th', ''), h('th', 'Calendar'), h('th', ''), h('th', 'New events'))),
         h('tbody', rows))) : null,
-      h('p.muted.small', 'Google grants access to the whole account; the bridge’s calendar tool keeps this brain to the calendars you tick. Token: ', mono(s.token_path)),
+      h('p.muted.small', 'Google grants access to the whole account; the bridge makes this brain’s calendar calls itself, only on the calendars you tick, and with the sandbox on the brain cannot read the token. Token: ', mono(s.token_path)),
       h('div.actions', cals.length ? saveBtn : null, connectButton('Switch account'), disconnectBtn));
   }
 

@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"log"
 	"net/http"
 	"net/url"
@@ -31,20 +32,52 @@ import (
 // with a normal sign-in in the browser — no API keys, no files to copy.
 //
 // The sign-in returns to the bridge itself (http://127.0.0.1:<port>/), which
-// Google allows for Desktop app clients. The resulting token is written where
-// the calendar tool and the sandbox expect it:
+// Google allows for Desktop app clients. The resulting token is written to
 //
 //	<credentials dir>/google_calendar_token_<brain>.json
 //
 // (credentials dir = sandbox.credentials_dir, else the data dir), in the
-// standard "authorized user" format the Google libraries read. Only that
-// brain's sandbox profile can read it.
+// standard "authorized user" format the Google libraries read. The bridge
+// alone uses it: brains make their calendar calls through it
+// (google_calendar.go), and the sandbox denies them the folder.
 
-const calendarScope = "https://www.googleapis.com/auth/calendar"
+// calendarScopes are what a brain's sign-in asks Google for: the narrowest
+// grants the calendar commands work with. None of them lets a brain delete
+// a calendar or change who it is shared with, which the full calendar
+// scope older versions asked for does.
+var calendarScopes = []string{
+	"https://www.googleapis.com/auth/calendar.events",                // list, create and delete events
+	"https://www.googleapis.com/auth/calendar.events.freebusy",       // free: the busy times of the brain's calendars
+	"https://www.googleapis.com/auth/calendar.calendarlist.readonly", // the account's calendars, for the brain's page and `calendars`
+}
+
+// missingScopes are the calendarScopes granted lacks. Google's consent
+// screen lets the person untick some of them.
+func missingScopes(granted []string) []string {
+	var out []string
+	for _, s := range calendarScopes {
+		if !slices.Contains(granted, s) {
+			out = append(out, s)
+		}
+	}
+	return out
+}
+
+// extraScopes are the scopes in granted beyond calendarScopes: the full
+// calendar scope of a brain that connected with an older version, say.
+func extraScopes(granted []string) []string {
+	var out []string
+	for _, s := range granted {
+		if !slices.Contains(calendarScopes, s) {
+			out = append(out, s)
+		}
+	}
+	return out
+}
 
 // Endpoints, variables so tests can point them at a fake server. Token
 // requests always go to googleTokenEndpoint, never to a token_uri from a
-// file: a brain can write its own token file.
+// file: a brain the sandbox does not hold can write its token file.
 var (
 	googleAuthEndpoint   = "https://accounts.google.com/o/oauth2/v2/auth"
 	googleTokenEndpoint  = "https://oauth2.googleapis.com/token"
@@ -127,20 +160,11 @@ func (g *GoogleAuth) tokenPath(brainID string) string {
 	return calendarTokenFile(g.credsDir(), brainID)
 }
 
-func (g *GoogleAuth) credentialsPath(brainID string) string {
-	return calendarCredentialsFile(g.credsDir(), brainID)
-}
-
-// calendarTokenFile and calendarCredentialsFile are a brain's calendar
-// files in dir, the credentials dir. The sandbox opens exactly these two
-// to the brain, and tools/calendar_tool.py, which reads them in the brain,
-// builds the same names from its profile, the brain's id.
+// calendarTokenFile is a brain's calendar token in dir, the credentials
+// dir. Only the bridge reads and writes it; the sandbox denies brains the
+// folder.
 func calendarTokenFile(dir, brainID string) string {
 	return filepath.Join(dir, "google_calendar_token_"+brainID+".json")
-}
-
-func calendarCredentialsFile(dir, brainID string) string {
-	return filepath.Join(dir, "google_calendar_credentials_"+brainID+".json")
 }
 
 // Client returns the configured OAuth client, or nil.
@@ -199,17 +223,18 @@ func (g *GoogleAuth) StartSignIn(brainID string) (string, error) {
 	delete(g.lastError, brainID)
 	g.mu.Unlock()
 
+	// No include_granted_scopes: it would fold whatever else this client
+	// was ever granted into the brain's token.
 	q := url.Values{
-		"client_id":              {c.ClientID},
-		"redirect_uri":           {g.redirectURI()},
-		"response_type":          {"code"},
-		"scope":                  {calendarScope},
-		"access_type":            {"offline"},
-		"prompt":                 {"consent select_account"},
-		"include_granted_scopes": {"true"},
-		"state":                  {state},
-		"code_challenge":         {base64.RawURLEncoding.EncodeToString(sum[:])},
-		"code_challenge_method":  {"S256"},
+		"client_id":             {c.ClientID},
+		"redirect_uri":          {g.redirectURI()},
+		"response_type":         {"code"},
+		"scope":                 {strings.Join(calendarScopes, " ")},
+		"access_type":           {"offline"},
+		"prompt":                {"consent select_account"},
+		"state":                 {state},
+		"code_challenge":        {base64.RawURLEncoding.EncodeToString(sum[:])},
+		"code_challenge_method": {"S256"},
 	}
 	return googleAuthEndpoint + "?" + q.Encode(), nil
 }
@@ -258,6 +283,13 @@ func (g *GoogleAuth) HandleCallback(w http.ResponseWriter, r *http.Request) {
 		fail("Google did not return a refresh token — remove the bridge's access at myaccount.google.com/permissions and connect again")
 		return
 	}
+	if missing := missingScopes(tok.Scopes); len(missing) > 0 {
+		fail("Google granted only part of the calendar access the brain needs (missing " + strings.Join(missing, ", ") + ") — connect again and leave every box ticked")
+		return
+	}
+	if extra := extraScopes(tok.Scopes); len(extra) > 0 {
+		log.Printf("brain %s: Google granted more than the bridge asked for (%s); to narrow it, disconnect the brain's calendar and connect it again", p.brainID, strings.Join(extra, ", "))
+	}
 	account, err := g.primaryAccount(ctx, tok)
 	if err != nil {
 		fail("signed in, but reading the calendar list failed: " + err.Error())
@@ -293,8 +325,24 @@ type tokenResponse struct {
 	AccessToken  string `json:"access_token"`
 	RefreshToken string `json:"refresh_token"`
 	ExpiresIn    int    `json:"expires_in"`
+	Scope        string `json:"scope"` // what Google granted, space-separated
 	Error        string `json:"error"`
 	ErrorDesc    string `json:"error_description"`
+}
+
+// oauthError is a refusal from Google's token endpoint.
+type oauthError struct {
+	status  int
+	message string
+}
+
+func (e *oauthError) Error() string { return "token request to Google failed: " + e.message }
+
+// temporary reports whether Google may well take the same request in a
+// minute: it was overloaded or limited the rate, rather than refusing the
+// grant.
+func (e *oauthError) temporary() bool {
+	return e.status == http.StatusTooManyRequests || e.status >= 500
 }
 
 func (g *GoogleAuth) postToken(ctx context.Context, c *GoogleClient, form url.Values) (*tokenResponse, error) {
@@ -307,7 +355,7 @@ func (g *GoogleAuth) postToken(ctx context.Context, c *GoogleClient, form url.Va
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	resp, err := googleHTTP.Do(req)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("could not reach Google (%w); this is usually temporary, try again in a minute", err)
 	}
 	defer resp.Body.Close()
 	var tr tokenResponse
@@ -321,7 +369,7 @@ func (g *GoogleAuth) postToken(ctx context.Context, c *GoogleClient, form url.Va
 		if msg == "" {
 			msg = resp.Status
 		}
-		return nil, fmt.Errorf("token request to Google failed: %s", msg)
+		return nil, &oauthError{status: resp.StatusCode, message: msg}
 	}
 	return &tr, nil
 }
@@ -342,44 +390,44 @@ func (g *GoogleAuth) exchange(ctx context.Context, code, verifier string) (*goog
 	}
 	return &googleToken{
 		Token: tr.AccessToken, RefreshToken: tr.RefreshToken, TokenURI: googleTokenEndpoint,
-		ClientID: c.ClientID, ClientSecret: c.ClientSecret, Scopes: []string{calendarScope},
+		ClientID: c.ClientID, ClientSecret: c.ClientSecret, Scopes: tr.grantedScopes(calendarScopes),
 		Expiry: time.Now().Add(time.Duration(tr.ExpiresIn) * time.Second).UTC().Format("2006-01-02T15:04:05.000000Z"),
 	}, nil
 }
 
-// saveToken writes the brain's token, plus a copy of the client as its
-// credentials file when there is none (tools fall back to it to sign in again).
-// Neither write follows a symlink: writeFileAtomic renames a new file over
-// the token, replacing whatever is there, and O_EXCL creates the
-// credentials file only where nothing is.
+// grantedScopes are the scopes Google says it granted, else asked: an
+// answer without a scope field grants what was requested.
+func (tr *tokenResponse) grantedScopes(asked []string) []string {
+	if granted := strings.Fields(tr.Scope); len(granted) > 0 {
+		return granted
+	}
+	return slices.Clone(asked)
+}
+
+// saveToken writes the brain's token. It does not follow a symlink:
+// writeFileAtomic renames a new file over the token, replacing whatever is
+// there. Older versions also copied the OAuth client, secret and all, next
+// to it as google_calendar_credentials_<brain>.json, for the calendar tool
+// in the brain; nothing reads that copy any more.
 func (g *GoogleAuth) saveToken(brainID string, tok *googleToken) error {
 	data, err := json.MarshalIndent(tok, "", "  ")
 	if err != nil {
 		return err
 	}
-	if err := writeFileAtomic(g.tokenPath(brainID), data, 0o600, false); err != nil {
-		return err
-	}
-	if c := g.Client(); c != nil {
-		f, err := os.OpenFile(g.credentialsPath(brainID), os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
-		if err == nil {
-			_, _ = f.Write(c.raw)
-			f.Close()
-		}
-	}
-	return nil
+	return writeFileAtomic(g.tokenPath(brainID), data, 0o600, false)
 }
 
 // readCredentialFile reads a brain's file in the credentials dir without
-// following a symlink. Each brain's sandbox lets it write its own token
-// file, so a brain can put a symlink there to another brain's token: the
-// bridge, outside the sandbox, would refresh that token and write it back
-// where this brain reads it, or revoke it on disconnect. The dir itself is
-// not brain-writable, so the last path component is the one to check. A
-// hard link would do the same; the sandbox refuses those, and a file with
-// more than one link is refused here as well. The open does not block, so
-// a FIFO cannot hang the dashboard, and a file larger than maxBrainFile is
-// refused rather than loaded.
+// following a symlink. A brain the sandbox does not hold (on Linux, or with
+// sandbox.enabled off) can write there, so it can put a symlink to another
+// brain's token in place of its own: the bridge would refresh that token
+// and write it back where this brain reads it, or revoke it on disconnect.
+// Older versions let each sandboxed brain write its own token file too. The
+// last path component is the one to check. A hard link would do the same;
+// the sandbox refuses those, and a file with more than one link is refused
+// here as well. The open does not block, so a FIFO cannot hang the
+// dashboard, and a file larger than maxBrainFile is refused rather than
+// loaded.
 func readCredentialFile(path string) ([]byte, error) {
 	f, err := os.OpenFile(path, os.O_RDONLY|syscall.O_NOFOLLOW|syscall.O_NONBLOCK, 0)
 	if errors.Is(err, syscall.ELOOP) {
@@ -418,36 +466,50 @@ func (g *GoogleAuth) loadToken(brainID string) (*googleToken, error) {
 	return &t, nil
 }
 
+// signInError is a brain's Google token the bridge itself will not use,
+// before Google is asked: a token file it cannot read or trust, one with
+// no refresh token or from another OAuth client, or no client to refresh
+// it with. Connecting the brain again writes a new token, so a brain is
+// told to ask for that (calendarCallProblem); other errors are not this.
+type signInError struct{ err error }
+
+func (e *signInError) Error() string { return e.err.Error() }
+func (e *signInError) Unwrap() error { return e.err }
+
 // accessToken returns a valid access token, refreshing (and saving) it when
 // it has expired.
 func (g *GoogleAuth) accessToken(ctx context.Context, brainID string) (*googleToken, error) {
 	t, err := g.loadToken(brainID)
+	if errors.Is(err, fs.ErrNotExist) {
+		return nil, err // not connected
+	}
 	if err != nil {
-		return nil, err
+		return nil, &signInError{err}
 	}
 	exp, _ := time.Parse(time.RFC3339Nano, t.Expiry)
 	if t.Token != "" && time.Until(exp) > time.Minute {
 		return t, nil
 	}
 	if t.RefreshToken == "" {
-		return nil, errors.New("the token has no refresh token — connect again")
+		return nil, &signInError{errors.New("the token has no refresh token — connect again")}
 	}
-	// The brain can write its token file, so the client in it is not
-	// trusted: the refresh uses yours, at Google's fixed endpoint. A
-	// refresh token works only with the client that issued it, so a token
-	// from another client cannot be refreshed here.
+	// A brain the sandbox does not hold can write its token file, so the
+	// client in it is not trusted: the refresh uses yours, at Google's
+	// fixed endpoint. A refresh token works only with the client that
+	// issued it, so a token from another client cannot be refreshed here.
 	c := g.Client()
 	if c == nil {
-		return nil, errors.New("add your Google OAuth client first (Settings → Google sign-in)")
+		return nil, &signInError{errors.New("add your Google OAuth client first (Settings → Google sign-in)")}
 	}
 	if t.ClientID != c.ClientID {
-		return nil, errors.New("this brain signed in with another Google OAuth client than the one in Settings → Google sign-in — connect it again")
+		return nil, &signInError{errors.New("this brain signed in with another Google OAuth client than the one in Settings → Google sign-in — connect it again")}
 	}
 	tr, err := g.postToken(ctx, c, url.Values{"grant_type": {"refresh_token"}, "refresh_token": {t.RefreshToken}})
 	if err != nil {
 		return nil, err
 	}
 	t.Token = tr.AccessToken
+	t.Scopes = tr.grantedScopes(t.Scopes)
 	t.Expiry = time.Now().Add(time.Duration(tr.ExpiresIn) * time.Second).UTC().Format("2006-01-02T15:04:05.000000Z")
 	if data, err := json.MarshalIndent(t, "", "  "); err == nil {
 		// A rename: a symlink planted since the read is replaced, not followed.
@@ -465,49 +527,38 @@ type CalendarEntry struct {
 	Color      string `json:"color,omitempty"`
 }
 
+// calendarList returns the account's calendars, primary first. An account
+// can have more than fit in one page, and a calendar on the second would
+// look as if it did not exist.
 func (g *GoogleAuth) calendarList(ctx context.Context, tok *googleToken) ([]CalendarEntry, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, googleAPIBase+"/calendar/v3/users/me/calendarList?maxResults=250", nil)
-	if err != nil {
-		return nil, err
-	}
-	req.Header.Set("Authorization", "Bearer "+tok.Token)
-	resp, err := googleHTTP.Do(req)
-	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		var e struct {
-			Error struct {
-				Message string `json:"message"`
-			} `json:"error"`
+	q := url.Values{"maxResults": {"250"}} // the API's largest page
+	var out []CalendarEntry
+	for range maxGooglePages {
+		var page struct {
+			Items []struct {
+				ID              string `json:"id"`
+				Summary         string `json:"summary"`
+				SummaryOverride string `json:"summaryOverride"`
+				Primary         bool   `json:"primary"`
+				AccessRole      string `json:"accessRole"`
+				BackgroundColor string `json:"backgroundColor"`
+			} `json:"items"`
+			NextPageToken string `json:"nextPageToken"`
 		}
-		_ = json.NewDecoder(io.LimitReader(resp.Body, 1<<20)).Decode(&e)
-		if e.Error.Message == "" {
-			e.Error.Message = resp.Status
+		if err := g.calendarAPI(ctx, tok, http.MethodGet, "/users/me/calendarList", q, nil, &page); err != nil {
+			return nil, err
 		}
-		return nil, errors.New(e.Error.Message)
-	}
-	var body struct {
-		Items []struct {
-			ID              string `json:"id"`
-			Summary         string `json:"summary"`
-			SummaryOverride string `json:"summaryOverride"`
-			Primary         bool   `json:"primary"`
-			AccessRole      string `json:"accessRole"`
-			BackgroundColor string `json:"backgroundColor"`
-		} `json:"items"`
-	}
-	if err := json.NewDecoder(io.LimitReader(resp.Body, 4<<20)).Decode(&body); err != nil {
-		return nil, err
-	}
-	out := make([]CalendarEntry, 0, len(body.Items))
-	for _, it := range body.Items {
-		name := it.SummaryOverride
-		if name == "" {
-			name = it.Summary
+		for _, it := range page.Items {
+			name := it.SummaryOverride
+			if name == "" {
+				name = it.Summary
+			}
+			out = append(out, CalendarEntry{ID: it.ID, Summary: name, Primary: it.Primary, AccessRole: it.AccessRole, Color: it.BackgroundColor})
 		}
-		out = append(out, CalendarEntry{ID: it.ID, Summary: name, Primary: it.Primary, AccessRole: it.AccessRole, Color: it.BackgroundColor})
+		if page.NextPageToken == "" {
+			break
+		}
+		q.Set("pageToken", page.NextPageToken)
 	}
 	sort.SliceStable(out, func(i, j int) bool {
 		if out[i].Primary != out[j].Primary {
@@ -642,6 +693,13 @@ func (b *Bridge) apiCalendarStatus(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	resp["connected"] = true
+	if t, err := g.loadToken(br.ID()); err == nil && len(extraScopes(t.Scopes)) > 0 {
+		// Connected with an older version, which asked for every calendar
+		// right there is. Signing in again alone keeps that grant alive at
+		// Google; Disconnect revokes it, and the next sign-in asks for
+		// calendarScopes only.
+		resp["broad_access"] = true
+	}
 	if r.URL.Query().Get("list") != "0" {
 		ctx, cancel := context.WithTimeout(r.Context(), 20*time.Second)
 		defer cancel()
@@ -717,8 +775,11 @@ func (b *Bridge) apiCalendarDisconnect(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]string{"status": "disconnected"})
 }
 
-// calendarEnv tells the calendar tool which brain is running and which
-// calendars it may use.
+// calendarEnv tells a run which brain it is and which calendars it may use.
+//
+// compat: calendar_tool.py read these to find the brain's token and keep to
+// its calendars; nothing in tools/ reads them now that the bridge makes the
+// calls, but a brain's own scripts may. Kept for one release, then removed.
 func calendarEnv(id string, m BrainManifest, credsDir string) []string {
 	env := []string{"BRIDGE_BRAIN_ID=" + id, "BRIDGE_CREDENTIALS_DIR=" + credsDir}
 	if m.Calendar != nil && len(m.Calendar.Calendars) > 0 {

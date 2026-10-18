@@ -16,18 +16,20 @@ a clip someone sent for fun, a voice memo being kept as a memento — use the
 
 ## Where things go
 
-Both the transcript and the original media land in the transcripts folder of
-your working directory:
+Both the transcript and the original media land in `transcripts/` in your own
+folder, the one you run in:
 
 ```
-<brain-folder>/transcripts/
+transcripts/
 ├── 2026-01-15 - Notes from the planning call.txt
 └── 2026-01-15 - Notes from the planning call.ogg
 ```
 
-The tool produces both, with a shared stem so they stay paired. Nothing to copy
-elsewhere afterwards. It never overwrites an earlier recording: a stem that is
-already taken gets ` (2)`, ` (3)`, … — use the paths the tool prints.
+The tool writes both, with a shared stem so they stay paired, and with
+`--move-original` it moves the original there out of the bridge's media inbox,
+where files arrive. Nothing is left behind and nothing is stored twice. It
+never overwrites an earlier recording: a stem that is already taken gets
+` (2)`, ` (3)`, … — use the paths the tool prints.
 
 ## Do not improvise
 
@@ -49,10 +51,11 @@ If the tool errors, read the error and fix the cause. Don't route around it.
 
 ## How
 
-One command, whatever the format or length:
+One command, whatever the format or length, with the file's path as the
+message gives it:
 
 ```bash
-python3 "$FRIDOLIN_TOOLS_DIR/transcribe.py" <file> --output-dir <brain-folder>/transcripts
+python3 "$FRIDOLIN_TOOLS_DIR/transcribe.py" "PATH-FROM-THE-MESSAGE" --output-dir transcripts --move-original
 ```
 
 Useful flags:
@@ -62,7 +65,7 @@ Useful flags:
 | `--language de` | You know the language. Skips detection and improves accuracy. |
 | `--prompt "..."` | Seed names, jargon, or the dialect being spoken — the single biggest accuracy win on domain-specific audio. Keep it to a few sentences: Whisper reads only the last ~220 tokens. |
 | `--engine groq` | The local model isn't installed, or you want speed over privacy. |
-| `--no-keep-original` | Don't copy the source media next to the transcript. |
+| `--move-original` | Move the source media next to the transcript. Use it for a file from the media inbox, or one you filed that now belongs with its transcript; leave it out to copy a file that should stay where it is. |
 
 A long recording can take several minutes. **Let it run.** Do not interrupt it
 and reimplement it in shell.
@@ -90,12 +93,13 @@ you'd be annoyed to have forgotten it in a month.
 
 ## Example
 
-Someone sends a voice note. You receive the file path in the message:
+Someone sends a voice note. The message gives you the path it was saved to,
+something like `…/media/3EB0A1B2C3D4E5F6.ogg`:
 
 ```bash
 python3 "$FRIDOLIN_TOOLS_DIR/transcribe.py" \
-  ~/.fridolin/media/3EB0A1B2C3.ogg \
-  --output-dir <brain-folder>/transcripts \
+  "PATH-FROM-THE-MESSAGE" \
+  --output-dir transcripts --move-original \
   --language en
 ```
 

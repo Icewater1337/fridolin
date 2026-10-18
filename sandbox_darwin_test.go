@@ -3,6 +3,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"os"
 	"os/exec"
@@ -128,7 +129,6 @@ func TestSandboxIgnoresPlantedSymlinks(t *testing.T) {
 	}{
 		{"own folder", "assistant/a", ".ssh", "assistant/a/id_ed25519"},
 		{"media dir", ".fridolin/media", ".ssh", ".fridolin/media/id_ed25519"},
-		{"own calendar token", "creds/google_calendar_token_a.json", "creds/google_calendar_token_b.json", "creds/google_calendar_token_a.json"},
 		{"allow_paths folder", "Documents/share", ".ssh", "Documents/share/id_ed25519"},
 	}
 	for _, h := range homes {
@@ -214,7 +214,8 @@ func TestSandboxEnforcesProfile(t *testing.T) {
 		{"data dir write", true, ".fridolin/planted", false},
 		{"media read", false, ".fridolin/media/photo.jpg", true},
 		{"media write", true, ".fridolin/media/new.jpg", true},
-		{"own calendar token", false, "creds/google_calendar_token_a.json", true},
+		// The bridge makes a brain's calendar calls with it.
+		{"own calendar token", false, "creds/google_calendar_token_a.json", false},
 		{"other brain's calendar token", false, "creds/google_calendar_token_b.json", false},
 		{"credentials dir write", true, "creds/planted.json", false},
 		{"ssh key", false, ".ssh/id_ed25519", false},
@@ -632,6 +633,79 @@ func TestSandboxDeniesBridgeSecretsWhereverTheyLive(t *testing.T) {
 	}
 }
 
+// TestSandboxKeepsRunTokensToTheirBrain: under the real sandbox-exec a
+// brain reads the brain API token of its own run, and not the token of
+// another brain's run in progress, with which it could call /brain/ as
+// that brain. That is why the token is in a file: in the run's
+// environment, macOS would show it to every process of the same user,
+// sandboxed or not.
+func TestSandboxKeepsRunTokensToTheirBrain(t *testing.T) {
+	requireSandboxExec(t)
+	tb, _ := serveTestBridge(t, `, "sandbox": {"enabled": true}`)
+	dirs := map[string]string{
+		"a": tb.addFolderBrain(t, BrainManifest{ID: "a", Name: "A", Routing: BrainRouting{HandlesDMs: true}}),
+		"g": tb.addFolderBrain(t, BrainManifest{ID: "g", Name: "G", Routing: BrainRouting{Groups: []string{"120363000000000000@g.us"}}}),
+	}
+	tokenFile := func(brain string) string {
+		env, done := tb.brainRunEnv(brain)
+		t.Cleanup(done)
+		for _, kv := range env {
+			if v, ok := strings.CutPrefix(kv, "FRIDOLIN_BRAIN_TOKEN_FILE="); ok {
+				return v
+			}
+		}
+		t.Fatalf("brain %s's run got no token file: %q", brain, env)
+		return ""
+	}
+	files := []string{"A=" + tokenFile("a"), "G=" + tokenFile("g")}
+	cases := []struct {
+		name, brain, cmd string
+		allow            bool
+	}{
+		{"read its own", "a", `cat "$A"`, true},
+		{"read another brain's", "a", `cat "$G"`, false},
+		{"the other way round", "g", `cat "$A"`, false},
+		{"list another brain's", "a", `ls "$(dirname "$G")"`, false},
+		{"overwrite its own", "a", `printf x > "$A"`, false},
+		{"plant one next to its own", "a", `printf x > "$(dirname "$A")/run-x.token"`, false},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			bin, argv, err := tb.brainMgr.profiler.Command(c.brain, "/bin/sh", []string{"-c", c.cmd})
+			if err != nil {
+				t.Fatal(err)
+			}
+			cmd := exec.Command(bin, argv...)
+			cmd.Dir = dirs[c.brain]
+			cmd.Env = append(os.Environ(), files...)
+			out, err := cmd.CombinedOutput()
+			denied := err != nil && strings.Contains(string(out), "Operation not permitted") && !strings.HasPrefix(string(out), "sandbox-exec:")
+			if err != nil && !denied {
+				t.Fatalf("%s: %v: %s", c.cmd, err, out)
+			}
+			if allowed := err == nil; allowed != c.allow {
+				t.Errorf("%s as brain %s: allowed=%v, want %v (%q)", c.cmd, c.brain, allowed, c.allow, out)
+			}
+		})
+	}
+}
+
+// TestSandboxedRunReachesTheBrainAPI: a sandboxed run reads its token from
+// the file the bridge wrote for it and asks the bridge, as `fridolin polls`
+// does in a real run.
+func TestSandboxedRunReachesTheBrainAPI(t *testing.T) {
+	requireSandboxExec(t)
+	tb, _ := serveTestBridge(t, `, "sandbox": {"enabled": true}`)
+	tb.addFolderBrain(t, BrainManifest{ID: "a", Name: "A", Routing: BrainRouting{HandlesDMs: true}})
+	savePoll(t, tb, "P1", apiTestDM, "Lunch?", []string{"Yes", "No"}, nil)
+	t.Setenv("FRIDOLIN_FAKE_POLLS", "1")
+	tb.handleInbound(context.Background(), Inbound{JID: apiTestDM, Sender: "15551234567", Text: "polls?", Source: "whatsapp"})
+	waitFor(t, 20*time.Second, "the reply", func() bool { return len(tb.sentTo(apiTestDM)) > 0 })
+	if reply := tb.sentTo(apiTestDM)[0]; !strings.Contains(reply, `polls=0 {`) || !strings.Contains(reply, `"question": "Lunch?"`) {
+		t.Errorf("the sandboxed run's fridolin polls answered:\n%s", reply)
+	}
+}
+
 // TestSandboxDeniesTheConfigFile: a config.json outside the data dir, and
 // the .env older versions read next to it, are neither readable nor
 // writable under the real sandbox-exec.
@@ -821,7 +895,6 @@ func TestSandboxOwnFolderKeepsWhatIsInsideIt(t *testing.T) {
 		{"read its own notes", `cat "$B/notes.md"`, true},
 		{"write a file of its own", `printf x > "$B/new.md"`, true},
 		{"read media", `cat "$B/.fridolin/media/photo.jpg"`, true},
-		{"read its own calendar token", `cat "$B/creds/google_calendar_token_a.json"`, true},
 		{"read an allow_paths folder", `cat "$B/clients/share/ok.txt"`, true},
 		{"install a tool of its own on PATH", `printf x > "$B/bin/mytool2"`, true},
 		{"read another brain's files", `cat "$B/b/diary.md"`, false},
@@ -829,6 +902,7 @@ func TestSandboxOwnFolderKeepsWhatIsInsideIt(t *testing.T) {
 		{"move another brain aside", `mv "$B/b" "$B/b2"`, false},
 		{"read the dashboard token", `cat "$B/.fridolin/dashboard.token"`, false},
 		{"read the database", `cat "$B/wa/bridge.db"`, false},
+		{"read its own calendar token", `cat "$B/creds/google_calendar_token_a.json"`, false},
 		{"read another brain's calendar token", `cat "$B/creds/google_calendar_token_b.json"`, false},
 		{"read the config file", `cat "$B/etc/config.json"`, false},
 		{"read a deny_paths entry", `cat "$B/clients/contract.txt"`, false},

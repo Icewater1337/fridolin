@@ -209,6 +209,121 @@ func (s *Store) SavePollVote(pollMsgID, voterJID string, selectedOptions []strin
 	return err
 }
 
+// PollResult is a poll the bridge sent, with its votes as they stand.
+type PollResult struct {
+	MsgID    string   `json:"msg_id"`
+	ChatJID  string   `json:"chat_jid"`
+	Question string   `json:"question"`
+	Options  []string `json:"options"`
+	// TotalVoters counts the people with a current vote; someone who took
+	// theirs back is not one.
+	TotalVoters int          `json:"total_voters"`
+	Results     []PollOption `json:"results"`
+	CreatedAt   time.Time    `json:"created_at"`
+}
+
+// PollOption is one option of a poll and who chose it.
+type PollOption struct {
+	Option string   `json:"option"`
+	Votes  int      `json:"votes"`
+	Voters []string `json:"voters"`
+}
+
+// Poll returns the poll sent as message msgID, or sql.ErrNoRows.
+func (s *Store) Poll(ctx context.Context, msgID string) (*PollResult, error) {
+	var p PollResult
+	var options string
+	err := s.db.QueryRowContext(ctx, `SELECT msg_id, chat_jid, question, options, created_at FROM polls WHERE msg_id = ?`, msgID).
+		Scan(&p.MsgID, &p.ChatJID, &p.Question, &options, &p.CreatedAt)
+	if err != nil {
+		return nil, err
+	}
+	p.Options = jsonStrings(options)
+	if err := s.tally(ctx, &p); err != nil {
+		return nil, err
+	}
+	return &p, nil
+}
+
+// RecentPolls returns up to limit polls, newest first, of the chats keep
+// accepts, only those in chat when it is not "".
+func (s *Store) RecentPolls(ctx context.Context, chat string, limit int, keep func(chat string) bool) ([]PollResult, error) {
+	query, args := `SELECT msg_id, chat_jid, question, options, created_at FROM polls`, []any{}
+	if chat != "" {
+		query, args = query+` WHERE chat_jid = ?`, append(args, chat)
+	}
+	rows, err := s.db.QueryContext(ctx, query+` ORDER BY created_at DESC`, args...)
+	if err != nil {
+		return nil, err
+	}
+	polls := []PollResult{}
+	for len(polls) < limit && rows.Next() {
+		var p PollResult
+		var options string
+		if err := rows.Scan(&p.MsgID, &p.ChatJID, &p.Question, &options, &p.CreatedAt); err != nil {
+			rows.Close()
+			return nil, err
+		}
+		if keep(p.ChatJID) {
+			p.Options = jsonStrings(options)
+			polls = append(polls, p)
+		}
+	}
+	// Closed before the votes are read: each poll's are another query.
+	if err := errors.Join(rows.Err(), rows.Close()); err != nil {
+		return nil, err
+	}
+	for i := range polls {
+		if err := s.tally(ctx, &polls[i]); err != nil {
+			return nil, err
+		}
+	}
+	return polls, nil
+}
+
+// tally counts p's votes into its results.
+func (s *Store) tally(ctx context.Context, p *PollResult) error {
+	p.Results = make([]PollOption, len(p.Options))
+	index := map[string]int{}
+	for i, opt := range p.Options {
+		p.Results[i] = PollOption{Option: opt, Voters: []string{}}
+		index[opt] = i
+	}
+	rows, err := s.db.QueryContext(ctx, `SELECT voter_jid, selected_options FROM poll_votes WHERE poll_msg_id = ? ORDER BY voted_at, voter_jid`, p.MsgID)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var voter, selected string
+		if err := rows.Scan(&voter, &selected); err != nil {
+			return err
+		}
+		// A vote taken back (every option deselected) is stored as null.
+		chosen := jsonStrings(selected)
+		if len(chosen) > 0 {
+			p.TotalVoters++
+		}
+		for _, opt := range chosen {
+			if i, ok := index[opt]; ok {
+				p.Results[i].Votes++
+				p.Results[i].Voters = append(p.Results[i].Voters, voter)
+			}
+		}
+	}
+	return rows.Err()
+}
+
+// jsonStrings decodes a JSON array of strings column, treating anything
+// else as empty.
+func jsonStrings(s string) []string {
+	var out []string
+	if json.Unmarshal([]byte(s), &out) != nil || out == nil {
+		return []string{}
+	}
+	return out
+}
+
 // Close closes both connections to the database: the plain one and the
 // whatsmeow container's, which nothing else closes.
 func (s *Store) Close() error {

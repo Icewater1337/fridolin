@@ -267,10 +267,12 @@ from files it writes itself:
         └── whatsapp-identity-map.md   phone numbers → names
 ```
 
-Anything older than the recent window is searchable:
+Anything older than the recent window is searchable. A brain runs
+`"$FRIDOLIN_BIN" history` in its own folder; from your shell, name the
+folder:
 
 ```bash
-python3 tools/history_search.py --brain-dir ~/assistant/personal --since 30d "invoice"
+fridolin history --brain-dir ~/assistant/personal --since 30d "invoice"
 ```
 
 ### Skills
@@ -294,8 +296,9 @@ They're starting points. Edit them, and add your own.
 ### Transcription
 
 `tools/transcribe.py` handles voice notes and recordings of any length: it
-pulls audio out of video, splits long files into chunks, runs a local Whisper
-model or the Groq API, and retries with backoff on rate limits.
+pulls audio out of video, splits long files into chunks, and runs a local
+Whisper model or the Groq API (sending 16 kHz mono FLAC, retried with backoff
+by Groq's SDK).
 
 ```bash
 python3 tools/transcribe.py voice-note.ogg --output-dir ~/assistant/personal/transcripts
@@ -557,6 +560,13 @@ chats that wrote without being allowed.
 boundaries so messages break somewhere readable, and numbers the parts.
 
 **`server.go`** — the localhost `/send` and `/ingest` endpoints.
+
+**`brainapi.go`** — `/brain/`, what the tools a brain runs ask the bridge
+for, with a token that works only while that run lasts.
+**`toolcmd.go`, `history_cmd.go`, `polls_cmd.go`, `calendar_cmd.go`** —
+`fridolin history`, `fridolin polls` and `fridolin calendar`, which brains
+run. **`google.go`, `google_calendar.go`** — the calendar sign-in, and the
+calendar calls the bridge makes for brains.
 
 ---
 

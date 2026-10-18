@@ -393,10 +393,10 @@ Brains can neither read nor write:
 - `~/Documents`, `~/Downloads`, `~/Desktop`, `~/Movies`, `~/Music`, `~/Pictures`
 - `~/Library/Mail`, `Messages`, `Calendars`, `Safari`, Chrome and Firefox
   profiles, `Containers`, `Group Containers`, Contacts, Notes
-- the bridge's data directory — except `media/` and the brain's own calendar
-  credentials — under both names it has had, `~/.fridolin` and
-  `~/.whatsapp-claude-bridge`, whichever is in use (an old one left behind
-  can still hold the WhatsApp keys and tokens)
+- the bridge's data directory — except `media/`, and a brain's own
+  `run-tokens/<id>/` to read — under both names it has had, `~/.fridolin`
+  and `~/.whatsapp-claude-bridge`, whichever is in use (an old one left
+  behind can still hold the WhatsApp keys and tokens)
 - the database (`db_path`, with its `-wal`, `-shm` and `-journal` files)
   wherever it is, and its folder when that lies outside the data directory,
   unless the folder is your home folder or a temp folder
@@ -531,9 +531,12 @@ git configuration entirely: those files and `~/.config/git`.
 ### `sandbox.credentials_dir`
 
 A directory of per-brain credential files kept outside the data directory
-(absolute or starting with `~/`). Brains are denied all of it except their
-own calendar pair (`google_calendar_credentials_<id>.json`,
-`google_calendar_token_<id>.json`).
+(absolute or starting with `~/`): the calendar tokens,
+`google_calendar_token_<id>.json`. Brains are denied all of it, their own
+token included; the bridge makes their calendar calls (see
+[CALENDAR.md](CALENDAR.md#what-the-brain-gets)). Older versions let each
+brain read its own token, and copied the OAuth client next to it as
+`google_calendar_credentials_<id>.json`, which nothing reads any more.
 
 This is containment, not a jail — it raises the cost of a prompt injection
 rather than eliminating it. Linux has no `sandbox-exec`: the bridge refuses a
@@ -610,8 +613,9 @@ token, backup state, the bridge's rclone config and calendar credentials.
 Default `~/.fridolin`; an install from before the project was renamed keeps
 `~/.whatsapp-claude-bridge` while `~/.fridolin` does not exist, and says so
 in the log at every start: set `data_dir` to it to keep it for good.
-`db_path` and `media_dir` override individually. Brains cannot read it, except the `media/` inbox and their own
-calendar credentials; a `db_path` elsewhere is denied to them too.
+`db_path` and `media_dir` override individually. Brains cannot read it,
+except the `media/` inbox and their own runs' brain API tokens in
+`run-tokens/<id>/`; a `db_path` elsewhere is denied to them too.
 
 The lock that keeps a second bridge off the same WhatsApp session is
 `bridge.lock` in `data_dir`. It does not cover a `db_path` outside
@@ -649,6 +653,17 @@ mode), `503` otherwise, both with
 connection state (`pairing`, `connecting`, `connected`, `logged-out`,
 `replaced`, …). None of these need the dashboard token, and all of them refuse
 requests sent by web pages.
+
+Brains reach `/brain/` there, which `fridolin polls` asks for the brain's
+poll results and `fridolin calendar` for its calendar calls. It takes no
+dashboard token but one the bridge makes for each run, in a file in the
+data directory's `run-tokens/<id>/` that the sandbox lets only that
+brain read; the run's `FRIDOLIN_BRAIN_TOKEN_FILE` names it. The token
+stops working, and its file goes, when the run ends, and the bridge
+answers with that brain's things only. The token is not in the run's
+environment, since macOS shows a process's environment to every program
+of the same user, other brains included. With `http_listen` off, those
+commands do not work.
 
 ### `ingest.enabled`
 
@@ -852,20 +867,23 @@ variables of the bridge's environment:
 | `DO_NOT_TRACK`, `TMUX_TMPDIR` | the telemetry opt-out many tools honour; where tmux keeps its socket |
 | `CLAUDE_CODE_*`, `ANTHROPIC_*`, `CLAUDE_CONFIG_DIR` | the Claude CLI's login (`CLAUDE_CODE_OAUTH_TOKEN`, `ANTHROPIC_API_KEY`), provider and gateway (`ANTHROPIC_BASE_URL`) |
 | `DISABLE_AUTOUPDATER`, `DISABLE_TELEMETRY`, `DISABLE_ERROR_REPORTING` | the CLI's update check and reports |
-| `CALENDAR_TZ`, `TRANSCRIBE_MODEL`, `TRANSCRIBE_LANGUAGE` | the tools in [tools/](../tools/): the calendar's timezone, the transcription model and language |
+| `CALENDAR_TZ`, `TRANSCRIBE_MODEL`, `TRANSCRIBE_LANGUAGE` | the tools brains run: the timezone of `fridolin calendar`, and the model and language of [tools/transcribe.py](../tools/transcribe.py) |
 
-On top, the bridge sets `BRIDGE_DATA_DIR` and `BRIDGE_DB_PATH`, the data
-directory and database it runs with (absolute, wherever `data_dir` and
-`db_path` put them), which the tools read; `FRIDOLIN_TOOLS_DIR`, the
-folder with the tools (see [BRAINS.md](BRAINS.md)); `BRIDGE_BRAIN_ID`,
-`BRIDGE_CREDENTIALS_DIR`, `BRIDGE_CALENDARS` and `BRIDGE_CALENDAR_DEFAULT`
-for the calendar tool; `PLAUD_TELEMETRY_DISABLED=1` and
-`PLAUD_NO_UPDATE_NOTIFIER=1` for [Plaud](PLAUD.md)'s CLI, with
-`plaud.brain_access` a `PATH` that starts with that CLI's folder; and
-`DISABLE_AUTOUPDATER=1` in the sandbox. What the bridge's own environment
-has under these names does not reach brains. Run by hand, outside a
-brain, the tools default to `~/.fridolin`; set `BRIDGE_DATA_DIR` for
-another data directory. The list lives in one place,
+On top, the bridge sets `FRIDOLIN_BRAIN_ID`, the brain's id; `FRIDOLIN_BIN`
+and `FRIDOLIN_TOOLS_DIR`, its own binary and the folder of its Python
+helpers ([BRAINS.md](BRAINS.md#what-a-brain-loads)); `FRIDOLIN_API` and
+`FRIDOLIN_BRAIN_TOKEN_FILE`, where the brain API is and the file with the
+run's token for it (see [`http_listen`](#http_listen-restart));
+`PLAUD_TELEMETRY_DISABLED=1` and `PLAUD_NO_UPDATE_NOTIFIER=1` for
+[Plaud](PLAUD.md)'s CLI, with `plaud.brain_access` a `PATH` that starts
+with that CLI's folder; and `DISABLE_AUTOUPDATER=1` in the sandbox. It
+also sets `BRIDGE_DATA_DIR` and `BRIDGE_DB_PATH`, the data directory and
+database it runs with (absolute, wherever `data_dir` and `db_path` put
+them), for a brain's own scripts; and, for one release, `BRIDGE_BRAIN_ID`,
+`BRIDGE_CREDENTIALS_DIR`, `BRIDGE_CALENDARS` and
+`BRIDGE_CALENDAR_DEFAULT`, which the calendar tool used to read. Nothing
+in `tools/` reads any of these any more. What the bridge's own environment
+has under these names does not reach brains. The list lives in one place,
 `childEnvAllowlist` in `childenv.go`.
 
 Brains are not handed anything else, for example `GROQ_API_KEY`,

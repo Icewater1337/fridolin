@@ -32,7 +32,8 @@ type historyEntry struct {
 }
 
 // The history entry types. They are written to every brain's history file,
-// which tools/history_search.py reads, so their values must not change.
+// which `fridolin history` and a brain's own scripts read, so their values
+// must not change.
 const (
 	historyIn  = "in"  // a message to the brain
 	historyOut = "out" // a message the brain sent, or one sent on its behalf
@@ -243,6 +244,10 @@ type BrainHooks struct {
 	// ExtraArgs adds CLI arguments to a brain's runs (the site builder's
 	// plugin and MCP server, for brains allowed to build the site).
 	ExtraArgs func(brainID string) []string
+	// RunEnv adds variables to one run's environment (the brain API's
+	// address and a token for the run), and returns what to call once the
+	// run is over.
+	RunEnv func(brainID string) (env []string, done func())
 }
 
 // A run that takes longer than workingNoticeAfter tells the chat it is
@@ -1052,7 +1057,8 @@ func (br *Brain) invoke(run *brainRun, ctx context.Context, s *brainSettings, m 
 	// without it: the fallback would quietly drop the only barrier left.
 	binary := s.claudePath
 	finalArgs := args
-	extraEnv := append(dataEnv(s), calendarEnv(br.id, s.manifest, s.credsDir)...)
+	extraEnv := append([]string{"FRIDOLIN_BRAIN_ID=" + br.id}, dataEnv(s)...)
+	extraEnv = append(extraEnv, calendarEnv(br.id, s.manifest, s.credsDir)...)
 	extraEnv = append(extraEnv, plaudOptOut...)
 	if s.toolsDir != "" {
 		// Prompts and skills run the helpers as $FRIDOLIN_TOOLS_DIR/<tool>,
@@ -1061,6 +1067,13 @@ func (br *Brain) invoke(run *brainRun, ctx context.Context, s *brainSettings, m 
 	}
 	if s.plaudPATH != "" {
 		extraEnv = append(extraEnv, "PATH="+s.plaudPATH) // replaces the bridge's
+	}
+	if br.hooks != nil && br.hooks.RunEnv != nil {
+		env, done := br.hooks.RunEnv(br.id)
+		// After Wait: the tools the run started have exited by then, or
+		// are left behind and lose the brain API with the run.
+		defer done()
+		extraEnv = append(extraEnv, env...)
 	}
 	if br.sandbox != nil && br.sandbox.Enabled() {
 		sbBinary, sbArgs, sbErr := br.sandbox.Command(br.id, s.claudePath, args)
@@ -1250,7 +1263,7 @@ func (br *Brain) buildPrompt(s *brainSettings, m Inbound) string {
 		sb.WriteString("The following is the last " + count + " in this WhatsApp chat (for context, not action). ")
 		sb.WriteString("You do NOT have prior turns in your working memory — the only context you have about previous conversation is what's in this block. ")
 		sb.WriteString("Names come from your identity map at `" + identityMapFile + "`; the JID in parens is the raw WhatsApp identifier. ")
-		sb.WriteString("For anything older or more detailed, search `" + historyFileName + "` with `$FRIDOLIN_TOOLS_DIR/history_search.py`.\n\n")
+		sb.WriteString("For anything older or more detailed, search `" + historyFileName + "` with `\"$FRIDOLIN_BIN\" history QUERY`.\n\n")
 		sb.WriteString(preface)
 		sb.WriteString("</chat_history>\n\n")
 	}
@@ -1659,10 +1672,10 @@ func settingsFor(cfg *Config, sp BrainSpec) *brainSettings {
 	}
 }
 
-// dataEnv tells the tools in tools/ where the bridge keeps its data, so they
-// need not guess: poll_results.py opens the DB at BRIDGE_DB_PATH, and
-// calendar_tool.py falls back to BRIDGE_DATA_DIR. compat: brains and their
-// scripts rely on these names, as on the other BRIDGE_ variables.
+// dataEnv tells brains where the bridge keeps its data. The tools in
+// tools/ read these until the bridge answered them (brainapi.go); compat:
+// brains and their scripts rely on these names, as on the other BRIDGE_
+// variables.
 func dataEnv(s *brainSettings) []string {
 	return []string{"BRIDGE_DATA_DIR=" + s.dataDir, "BRIDGE_DB_PATH=" + s.dbPath}
 }

@@ -383,3 +383,52 @@ func TestBrainsDocExampleIsAValidManifest(t *testing.T) {
 		t.Errorf("the example is not a valid manifest: %v", err)
 	}
 }
+
+// TestBrainTemplatesNameNoPaths: the starter prompt and the example skills
+// a new brain gets name the bridge's commands and helpers by the variables
+// every run sets, not by a path, and keep no placeholder of the template.
+// Older versions wrote the checkout's path into the prompt, and a literal
+// <bridge-repo> into the skills.
+func TestBrainTemplatesNameNoPaths(t *testing.T) {
+	m := testManifest("a")
+	m.Name = "Family"
+	exe, _ := os.Executable()
+	files := map[string]string{"brain-prompt.md": renderTemplate(examplePromptTemplate(), &m)}
+	for _, sk := range exampleSkills() {
+		files["skills/"+sk.name] = renderTemplate(sk.content, &m)
+	}
+	if len(files) < 4 {
+		t.Fatalf("only %d templates", len(files))
+	}
+	for name, content := range files {
+		// <work_dir> and ~/.fridolin/media were never filled in either: the
+		// brain runs in its folder, and the message gives each file's path.
+		for _, bad := range []string{"{{", "}}", "<bridge-repo>", "<work_dir>", "~/.fridolin", "tools/history_search.py", "tools/poll_results.py", "tools/calendar_tool.py", filepath.Dir(exe), repoDir} {
+			if strings.Contains(content, bad) {
+				t.Errorf("%s contains %q", name, bad)
+			}
+		}
+		// A helper is "$FRIDOLIN_TOOLS_DIR/<name>.py", wherever the bridge
+		// is installed, never a tools/ path.
+		if strings.Contains(content, "tools/") {
+			t.Errorf("%s names a helper by a tools/ path", name)
+		}
+	}
+	if p := files["brain-prompt.md"]; !strings.HasPrefix(p, "# Family assistant") || !strings.Contains(p, `"$FRIDOLIN_BIN" history`) || !strings.Contains(p, `"$FRIDOLIN_BIN" polls`) || !strings.Contains(p, `"$FRIDOLIN_BIN" calendar`) {
+		t.Errorf("brain-prompt.md does not name the brain or the commands:\n%s", p)
+	}
+	if s := files["skills/transcription.md"]; !strings.Contains(s, `"$FRIDOLIN_TOOLS_DIR/transcribe.py"`) || !strings.Contains(s, "--move-original") {
+		t.Errorf("skills/transcription.md does not run the helper by $FRIDOLIN_TOOLS_DIR, moving the original out of the inbox:\n%s", s)
+	}
+
+	// ScaffoldBrain writes them so.
+	dir := t.TempDir()
+	if _, err := ScaffoldBrain(dir, &m); err != nil {
+		t.Fatal(err)
+	}
+	for name, want := range files {
+		if got, err := os.ReadFile(filepath.Join(dir, name)); err != nil || string(got) != want {
+			t.Errorf("%s as written differs from the rendered template (%v)", name, err)
+		}
+	}
+}

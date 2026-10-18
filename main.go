@@ -33,6 +33,12 @@ Usage:
                                            fridolin service --help for more
   fridolin version
 
+Run by brains, inside a run (each prints JSON; -h shows its flags):
+  fridolin history QUERY     search the brain's conversation history
+  fridolin polls             the results of the polls the brain sent
+  fridolin calendar COMMAND  the brain's Google Calendar: calendars, list,
+                             create, free, delete
+
 Common flags:
   --config PATH     config file (default: $FRIDOLIN_CONFIG, else
                     ~/.fridolin/config.json)
@@ -64,6 +70,12 @@ func main() {
 		mcpSiteCmd()
 	case "service":
 		serviceCmd(args)
+	case "history":
+		os.Exit(historyCmd(args, processToolIO()))
+	case "polls":
+		os.Exit(pollsCmd(args, processToolIO()))
+	case "calendar":
+		os.Exit(calendarCmd(args, processToolIO()))
 	case "version":
 		fmt.Println(bridgeVersion())
 	case "help":

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"cmp"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -1034,19 +1035,28 @@ func TestSandboxProfileDeniesSecretsAndAllowsKeychain(t *testing.T) {
 	}
 }
 
-func TestSandboxProfileScopesCalendarCredentials(t *testing.T) {
-	home := t.TempDir()
-	t.Setenv("HOME", home)
-	dataDir := filepath.Join(home, "data")
-
-	sp := NewSandboxProfiler(map[string][]string{"a": {"/tmp/a"}, "b": {"/tmp/b"}}, &Config{DataDir: dataDir})
-	profile := mustProfile(t, sp, "a")
-
-	if !strings.Contains(profile, filepath.Join(dataDir, "google_calendar_credentials_a.json")) {
-		t.Error("brain a cannot read its own calendar credentials")
-	}
-	if strings.Contains(profile, "google_calendar_credentials_b.json") {
-		t.Error("brain a can read brain b's calendar credentials")
+// TestSandboxProfileKeepsCalendarTokensFromBrains: the bridge makes a
+// brain's calendar calls, so no brain may read a calendar token or the
+// OAuth client copy older versions wrote next to it, its own included,
+// whether they are in the data dir or in sandbox.credentials_dir.
+func TestSandboxProfileKeepsCalendarTokensFromBrains(t *testing.T) {
+	for _, creds := range []string{"", "creds"} {
+		t.Run("credentials_dir "+creds, func(t *testing.T) {
+			home := t.TempDir()
+			t.Setenv("HOME", home)
+			cfg := &Config{DataDir: filepath.Join(home, "data")}
+			if creds != "" {
+				cfg.Sandbox.CredentialsDir = filepath.Join(home, creds)
+			}
+			profile := mustProfile(t, NewSandboxProfiler(map[string][]string{"a": {"/tmp/a"}, "b": {"/tmp/b"}}, cfg), "a")
+			if strings.Contains(profile, "google_calendar_") {
+				t.Errorf("the profile opens a calendar file:\n%s", profile)
+			}
+			dir := cmp.Or(cfg.Sandbox.CredentialsDir, cfg.DataDir)
+			if !strings.Contains(profile, `(deny file-read* (subpath "`+dir+`"))`) {
+				t.Errorf("the profile does not deny %s", dir)
+			}
+		})
 	}
 }
 
@@ -1318,9 +1328,8 @@ func TestIsLoopbackAddr(t *testing.T) {
 }
 
 // Some names are read outside Go: the dashboard labels the run outcomes
-// and the bridge's backup and offers the queue modes,
-// tools/history_search.py reads the history, and tools/calendar_tool.py a
-// brain's calendar files. Only this test keeps the two sides in step.
+// and the bridge's backup and offers the queue modes. Only this test keeps
+// the two sides in step.
 func TestNamesReadOutsideGo(t *testing.T) {
 	cases := []struct {
 		file string
@@ -1328,12 +1337,7 @@ func TestNamesReadOutsideGo(t *testing.T) {
 	}{
 		{"web/assets/components/brain.js", []string{outcomeOK + ": [", outcomeError + ": [", outcomeInterrupted + ": [", outcomeQuestion + ": ["}},
 		{"web/assets/pages/settings.js", []string{"def: '" + queueModeQueue + "'", "['" + queueModeQueue + "', ", "['" + queueModeInterrupt + "', "}},
-		{"tools/history_search.py", []string{`HISTORY_FILENAME = "` + historyFileName + `"`, `row.get("type") != "` + historyIn + `"`}},
 		{"web/assets/pages/backup.js", []string{"id === '" + bridgeBackupID + "'"}},
-		// The tool's profile is the brain id, and its suffix is "_" + profile.
-		{"tools/calendar_tool.py", []string{`suffix = f"_{_profile}"`,
-			`f"` + strings.Replace(calendarCredentialsFile("", "ID"), "_ID", "{suffix}", 1) + `"`,
-			`f"` + strings.Replace(calendarTokenFile("", "ID"), "_ID", "{suffix}", 1) + `"`}},
 	}
 	for _, c := range cases {
 		t.Run(c.file, func(t *testing.T) {

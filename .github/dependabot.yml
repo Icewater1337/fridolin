@@ -29,8 +29,9 @@ updates:
         update-types: [minor, patch]
 
   # tools/requirements*.txt. Their ">=" floors are deliberate (the oldest
-  # release each feature was checked with), so a floor only moves when a new
-  # release falls outside it; exact pins (ruff) move with every release.
+  # release each feature was checked with), and their "<" ceilings the next
+  # major release, so a range only moves when a new release falls outside
+  # it; exact pins (ruff) move with every release.
   - package-ecosystem: pip
     directory: /tools
     schedule:

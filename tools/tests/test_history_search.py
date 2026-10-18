@@ -1,100 +1,57 @@
-"""Tests for history_search.py, against a scratch history file."""
+"""Tests for history_search.py, the wrapper around fridolin history."""
 
 from __future__ import annotations
 
 import json
-import tempfile
 import unittest
-from datetime import datetime, timedelta, timezone
-from pathlib import Path
 
 import support  # first: it puts tools/ on sys.path
 import history_search
 
-CHAT = "120363000000000000@g.us"
+HITS = '{"hits": [{"line": 3, "text": "invoice"}], "count": 1, "truncated": false, "file": "h.jsonl"}'
 
 
-def ts(dt: datetime) -> str:
-    return dt.isoformat(timespec="seconds")
-
-
-class HistorySearchTestCase(unittest.TestCase):
-    def setUp(self):
-        tmp = tempfile.TemporaryDirectory()
-        self.addCleanup(tmp.cleanup)
-        self.file = Path(tmp.name) / history_search.HISTORY_FILENAME
-
-    def write(self, rows: list[dict]):
-        with self.file.open("w", encoding="utf-8") as f:
-            for row in rows:
-                f.write(json.dumps(row) + "\n")
-
-    def search(self, *argv: str) -> tuple[int, list, str]:
-        code, out, err = support.run(history_search.main, ["--file", str(self.file), "--json", *argv])
-        return code, (json.loads(out) if code == 0 else None), err
-
-
-class SearchTest(HistorySearchTestCase):
-    def test_substring_newest_first(self):
-        now = datetime.now(timezone.utc)
-        self.write([
-            {"ts": ts(now - timedelta(hours=2)), "type": "in", "chat": CHAT, "text": "Invoice 1"},
-            {"ts": ts(now - timedelta(hours=1)), "type": "out", "chat": CHAT, "text": "no match"},
-            {"ts": ts(now), "type": "in", "chat": CHAT, "text": "the invoice again"},
-        ])
-        code, hits, err = self.search("invoice")
-        self.assertEqual(code, 0, err)
-        self.assertEqual([h["text"] for h in hits], ["the invoice again", "Invoice 1"])
-
-    def test_since_with_offset_timestamps(self):
-        now = datetime.now(timezone(timedelta(hours=2)))
-        self.write([
-            {"ts": ts(now - timedelta(days=10)), "type": "in", "text": "old invoice"},
-            {"ts": ts(now - timedelta(hours=1)), "type": "in", "text": "new invoice"},
-        ])
-        code, hits, err = self.search("--since", "7d", "invoice")
-        self.assertEqual(code, 0, err)
-        self.assertEqual([h["text"] for h in hits], ["new invoice"])
-
-    def test_since_with_utc_z_timestamps(self):
-        # The bridge's RFC 3339 timestamps end in Z on a host running in UTC.
-        now = datetime.now(timezone.utc).replace(microsecond=0)
-        self.write([
-            {"ts": (now - timedelta(days=10)).strftime("%Y-%m-%dT%H:%M:%SZ"), "type": "in", "text": "old invoice"},
-            {"ts": (now - timedelta(hours=1)).strftime("%Y-%m-%dT%H:%M:%SZ"), "type": "in", "text": "new invoice"},
-        ])
-        code, hits, err = self.search("--since", "7d", "invoice")
-        self.assertEqual(code, 0, err)
-        self.assertEqual([h["text"] for h in hits], ["new invoice"])
-
-    def test_parse_ts(self):
-        utc = timezone.utc
+class TranslateTest(unittest.TestCase):
+    def test_arguments(self):
         cases = [
-            ("Z suffix", "2026-01-15T10:00:00Z", datetime(2026, 1, 15, 10, tzinfo=utc)),
-            ("numeric offset", "2026-01-15T11:00:00+01:00", datetime(2026, 1, 15, 10, tzinfo=utc)),
-            ("garbage", "yesterday", None),
-            ("missing", "", None),
-            ("not a string", 1736935200, None),
+            ("text by default", ["--since", "7d", "invoice"], ["history", "--text", "--since", "7d", "invoice"], False),
+            ("--json", ["--json", "--regex", "x"], ["history", "--json", "--regex", "x"], True),
+            ("--json as the query", ["--", "--json"], ["history", "--text", "--", "--json"], False),
         ]
-        for name, given, want in cases:
+        for name, argv, want, as_json in cases:
             with self.subTest(name):
-                self.assertEqual(history_search.parse_ts(given), want)
+                self.assertEqual(history_search.translate(argv), (want, as_json))
 
-    def test_bad_since_is_a_usage_error(self):
-        self.write([])
-        for given in ("7days", "last week"):
-            with self.subTest(given):
-                code, _, err = self.search("--since", given, "x")
-                self.assertEqual(code, 2)
-                self.assertIn("argument --since: use 30m, 24h, 7d, 2w or an ISO timestamp", err)
-                self.assertNotIn("Traceback", err)
 
-    def test_since_accepts_iso_timestamps(self):
-        self.assertEqual(history_search.parse_since("2026-01-15T10:00:00Z"),
-                         datetime(2026, 1, 15, 10, tzinfo=timezone.utc))
+class WrapperTest(unittest.TestCase):
+    def test_text(self):
+        fridolin, argv = support.fake_fridolin(self, stdout="2026-01-15T10:00:00Z [in 15551234567] invoice")
+        code, out, err = support.run_tool("history_search.py", ["invoice"], {"FRIDOLIN_BIN": str(fridolin)})
+        self.assertEqual(code, 0, err)
+        self.assertEqual(json.loads(argv.read_text(encoding="utf-8")), ["history", "--text", "invoice"])
+        self.assertEqual(out, "2026-01-15T10:00:00Z [in 15551234567] invoice\n")
+        self.assertIn("history_search.py is deprecated", err)
 
-    def test_missing_file(self):
-        self.assertEqual(self.search("x")[0], 2)
+    def test_json_is_still_a_list(self):
+        fridolin, _ = support.fake_fridolin(self, stdout=HITS)
+        code, out, err = support.run_tool("history_search.py", ["--json", "invoice"], {"FRIDOLIN_BIN": str(fridolin)})
+        self.assertEqual(code, 0, err)
+        self.assertEqual(json.loads(out), [{"line": 3, "text": "invoice"}])
+
+    def test_help_with_json(self):
+        # fridolin history -h prints the usage on stderr and nothing on stdout.
+        fridolin, argv = support.fake_fridolin(self, stdout="")
+        code, out, err = support.run_tool("history_search.py", ["--json", "-h"], {"FRIDOLIN_BIN": str(fridolin)})
+        self.assertEqual((code, out.strip()), (0, ""), err)
+        self.assertNotIn("Traceback", err)
+        self.assertEqual(json.loads(argv.read_text(encoding="utf-8")), ["history", "--json", "-h"])
+
+    def test_errors_are_json(self):
+        fridolin, _ = support.fake_fridolin(self, stdout='{"error": "history file not found: h.jsonl"}', code=1)
+        for argv in (["x"], ["--json", "x"]):
+            with self.subTest(argv):
+                code, out, _ = support.run_tool("history_search.py", argv, {"FRIDOLIN_BIN": str(fridolin)})
+                self.assertEqual((code, json.loads(out)), (1, {"error": "history file not found: h.jsonl"}))
 
 
 if __name__ == "__main__":

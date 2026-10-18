@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import json
+import os
 import shlex
+import shutil
 import sys
 import tempfile
 import types
@@ -153,6 +155,30 @@ class KeepOriginalTest(TranscribeTestCase):
                 self.assertEqual(out["audio_file"] is not None, kept)
                 if kept:
                     self.assertEqual(Path(out["audio_file"]).read_bytes(), b"audio")
+
+    def test_move_original(self):
+        # Only on request: the tool never moves a file it was not told to,
+        # so one outside the media inbox is not taken from where it was.
+        cases = [
+            ("copy by default", [], True),
+            ("--move-original", ["--move-original"], False),
+        ]
+        for name, flags, source_stays in cases:
+            with self.subTest(name):
+                source = self.media("note.ogg", b"audio")
+                code, out, err = self.transcribe(str(source), *flags)
+                self.assertEqual(code, 0, err)
+                self.assertEqual(source.exists(), source_stays)
+                self.assertEqual(Path(out["audio_file"]).read_bytes(), b"audio")
+                self.assertEqual(Path(out["audio_file"]).parent, self.out)
+
+    def test_move_original_needs_the_original_kept(self):
+        source = self.media("note.ogg", b"audio")
+        code, out, _ = self.transcribe(str(source), "--move-original", "--no-keep-original")
+        self.assertEqual(code, 1)
+        self.assertIn("--move-original", out["error"])
+        self.assertTrue(source.exists())
+        self.assertEqual(self.engine.calls, [], "refused before any work")
 
     def test_one_documented_switch(self):
         # --keep-original used to be a separate store_true flag that defaulted
@@ -378,6 +404,153 @@ class EngineChoiceTest(TempDirTestCase):
         self.assertEqual(code, 1)
         self.assertIn("--engine local, but transformers/torch are not installed", out["error"])
         self.assertEqual(self.extract.calls, 0)
+
+
+class FakeGroq:
+    """Stands in for the groq package: records each client and each upload.
+
+    fail_with, when set, is what every upload raises.
+    """
+
+    def __init__(self):
+        self.clients: list[dict] = []
+        self.uploads: list[dict] = []
+        self.fail_with: Exception | None = None
+        fake = self
+
+        class Groq:
+            def __init__(self, **kwargs):
+                fake.clients.append(kwargs)
+                self.audio = types.SimpleNamespace(transcriptions=types.SimpleNamespace(create=self.create))
+
+            def create(self, **kwargs):
+                fake.uploads.append(kwargs)
+                if fake.fail_with is not None:
+                    raise fake.fail_with
+                return types.SimpleNamespace(text=f" text of {kwargs['file'][0]} ")
+
+        self.module = types.ModuleType("groq")
+        self.module.Groq = Groq
+
+
+class GroqEngineTest(TempDirTestCase):
+    """The Groq engine over a three-chunk recording, with the SDK faked."""
+
+    def setUp(self):
+        super().setUp()
+        self.groq = FakeGroq()
+        self.converted: list[Path] = []
+        self.chunks = [self.dir / "chunks" / f"chunk-{i:03d}.wav" for i in range(3)]
+        self.chunks[0].parent.mkdir()
+        for c in self.chunks:
+            c.write_bytes(b"pcm")
+        for target, value in [
+            ("local_available", lambda: False), ("_GROQ", None), ("to_flac", self.to_flac),
+            ("probe_duration", lambda path: 1800.0), ("split_audio", lambda path, seconds: list(self.chunks)),
+            ("date", FixedDate),
+        ]:
+            patcher = mock.patch.object(transcribe, target, value)
+            patcher.start()
+            self.addCleanup(patcher.stop)
+        for patcher in (mock.patch.dict(sys.modules, {"groq": self.groq.module}),
+                        mock.patch.dict(os.environ, {"GROQ_API_KEY": "test-groq-key"}),
+                        mock.patch.object(transcribe.shutil, "which", lambda name: f"/usr/bin/{name}")):
+            patcher.start()
+            self.addCleanup(patcher.stop)
+        self.source = self.dir / "meeting.ogg"
+        self.source.write_bytes(b"audio")
+
+    def to_flac(self, path: Path) -> Path:
+        out = self.dir / f"{path.stem}.flac"
+        out.write_bytes(b"flac")
+        self.converted.append(out)
+        return out
+
+    def run_tool(self, *flags: str) -> tuple[int, dict, str]:
+        code, out, err = support.run_main(transcribe, [str(self.source), "--output-dir", str(self.dir / "out"), *flags])
+        return code, json.loads(out), err
+
+    def test_one_client_whose_sdk_retries(self):
+        code, out, err = self.run_tool("--engine", "groq", "--language", "de")
+        self.assertEqual(code, 0, err)
+        self.assertEqual(out["transcript"], "text of chunk-000.flac text of chunk-001.flac text of chunk-002.flac")
+        self.assertEqual(self.groq.clients, [{"api_key": "test-groq-key", "max_retries": transcribe.GROQ_RETRIES}])
+        self.assertEqual([u["file"] for u in self.groq.uploads],
+                         [(f"chunk-00{i}.flac", b"flac") for i in range(3)])
+        self.assertTrue(all(u["language"] == "de" and u["model"] == "whisper-large-v3" for u in self.groq.uploads))
+        self.assertFalse(any(p.exists() for p in self.converted), "the FLAC copies are removed")
+
+    def test_errors_are_not_retried_again(self):
+        # The SDK has retried a rate limit already; a second loop here made
+        # one chunk about 15 requests, and took "sample rate" for a limit.
+        for msg in ("429 rate limit reached", "unsupported sample rate"):
+            with self.subTest(msg):
+                self.groq.uploads.clear()
+                self.groq.fail_with = RuntimeError(msg)
+                code, out, _err = self.run_tool("--engine", "groq")
+                self.assertEqual(code, 1)
+                self.assertEqual(out["error"], f"Groq transcription failed: {msg}")
+                self.assertEqual(len(self.groq.uploads), 1)
+
+    def test_an_upload_over_groqs_limit(self):
+        with mock.patch.object(transcribe, "GROQ_MAX_UPLOAD", 3):
+            code, out, _ = self.run_tool("--engine", "groq")
+        self.assertEqual(code, 1)
+        self.assertIn("pass a smaller --chunk-seconds", out["error"])
+        self.assertEqual(self.groq.uploads, [])
+
+
+class FFmpegTest(TempDirTestCase):
+    """What transcribe.py asks ffmpeg for, with ffmpeg itself faked."""
+
+    def setUp(self):
+        super().setUp()
+        self.calls: list[list[str]] = []
+        for patcher in (mock.patch.object(transcribe.subprocess, "run", self.ffmpeg),
+                        mock.patch.object(transcribe.shutil, "which", lambda name: f"/usr/bin/{name}")):
+            patcher.start()
+            self.addCleanup(patcher.stop)
+
+    def ffmpeg(self, cmd, **kwargs):
+        self.calls.append(cmd)
+        out = Path(cmd[-1])
+        if "%03d" in out.name:
+            for i in range(2):
+                (out.parent / (out.name % i)).write_bytes(b"pcm")
+        else:
+            out.write_bytes(b"out")
+        return types.SimpleNamespace(returncode=0, stdout="", stderr="")
+
+    def test_groq_gets_16khz_mono_flac(self):
+        out = transcribe.to_flac(self.dir / "voice.ogg")
+        self.addCleanup(out.unlink, missing_ok=True)
+        (cmd,) = self.calls
+        self.assertEqual(cmd[:4], ["ffmpeg", "-y", "-i", str(self.dir / "voice.ogg")])
+        self.assertIn("-ac 1 -ar 16000 -c:a flac", " ".join(cmd))
+        self.assertEqual(out.suffix, ".flac")
+
+    def test_chunks_are_decoded_not_copied(self):
+        chunks = transcribe.split_audio(self.dir / "meeting.m4a", 600)
+        self.addCleanup(shutil.rmtree, chunks[0].parent, True)
+        (cmd,) = self.calls
+        self.assertNotIn("copy", cmd)
+        self.assertIn("-acodec pcm_s16le -ac 1 -ar 16000", " ".join(cmd))
+        self.assertEqual([c.name for c in chunks], ["chunk-000.wav", "chunk-001.wav"])
+
+
+class ErrorBoundaryTest(TranscribeTestCase):
+    def test_anything_unexpected_is_a_json_error(self):
+        with mock.patch.object(transcribe, "build_filename", side_effect=KeyError("boom")):
+            code, out, err = self.transcribe(str(self.media("note.ogg", b"audio")))
+        self.assertEqual(code, 1)
+        self.assertEqual(out["error"], "Transcription failed: KeyError: 'boom'")
+        self.assertIn("Traceback", err)  # for whoever debugs it, on stderr
+
+    def test_a_usage_mistake_is_a_json_error(self):
+        code, out, err = support.run_main(transcribe, ["--engine", "whisper"])
+        self.assertEqual(code, 1)
+        self.assertIn("invalid choice", json.loads(out)["error"])
+        self.assertIn("usage:", err)
 
 
 if __name__ == "__main__":

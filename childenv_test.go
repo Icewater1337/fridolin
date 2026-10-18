@@ -34,6 +34,9 @@ func TestChildGets(t *testing.T) {
 		{"ANTHROPIC_BASE_URL", true, false, false},
 		{"TRANSCRIBE_MODEL", true, false, false},
 		{"CALENDAR_TZ", true, false, false},
+		// The bridge sets these from its own config (dataEnv).
+		{"BRIDGE_DATA_DIR", false, false, false},
+		{"BRIDGE_DB_PATH", false, false, false},
 		// Only for a sign-in that opens your browser.
 		{"DISPLAY", false, false, true},
 		{"WAYLAND_DISPLAY", false, false, true},
@@ -166,6 +169,7 @@ func TestBrainGetsOnlyTheAllowlistedEnvironment(t *testing.T) {
 	want := maps.Clone(listed)
 	maps.Copy(want, map[string]string{
 		"HOME":                   home,
+		"FRIDOLIN_BRAIN_ID":      "a",
 		"BRIDGE_BRAIN_ID":        "a",
 		"BRIDGE_CREDENTIALS_DIR": filepath.Join(home, "data"),
 		"BRIDGE_DATA_DIR":        filepath.Join(home, "data"),

@@ -317,7 +317,6 @@ func TestSandboxProfileCoversRealPaths(t *testing.T) {
 		`(deny file-read* (subpath "` + filepath.Join(root, "elsewhere", "data") + `"))`,
 		`(allow file-read* (subpath "` + filepath.Join(root, "elsewhere", "data", "media") + `"))`,
 		`(deny file-read* (subpath "` + filepath.Join(root, "elsewhere", "creds") + `"))`,
-		`(allow file-read* (literal "` + filepath.Join(root, "elsewhere", "creds", "google_calendar_token_a.json") + `"))`,
 		`(deny file-read* (subpath "` + filepath.Join(root, "elsewhere", "clients") + `"))`,
 		`(deny file-read* (subpath "` + filepath.Join(home, ".ssh") + `"))`,
 		`(deny file-read* (subpath "` + filepath.Join(root, "elsewhere", "ssh") + `"))`,
@@ -330,9 +329,9 @@ func TestSandboxProfileCoversRealPaths(t *testing.T) {
 }
 
 // TestSandboxAllowsDoNotFollowSymlinks: a brain can swap its own folder,
-// the media dir, its calendar token or a writable allow_paths folder for a
-// symlink. Allow rules resolve only HOME and the data and credentials dirs,
-// never such a symlink, or the brain would be allowed into its target.
+// the media dir or a writable allow_paths folder for a symlink. Allow
+// rules resolve only HOME and the data and credentials dirs, never such a
+// symlink, or the brain would be allowed into its target.
 func TestSandboxAllowsDoNotFollowSymlinks(t *testing.T) {
 	root := canonicalDir(t.TempDir())
 	home := filepath.Join(root, "home")
@@ -345,9 +344,8 @@ func TestSandboxAllowsDoNotFollowSymlinks(t *testing.T) {
 	for link, target := range map[string]string{
 		home:                                  filepath.Join(root, "home-real"),
 		filepath.Join(root, "home-real", "a"): secret,
-		filepath.Join(root, "home-real", ".fridolin", "media"):                        secret,
-		filepath.Join(root, "home-real", ".fridolin", "google_calendar_token_a.json"): filepath.Join(secret, "token"),
-		filepath.Join(root, "home-real", "Documents", "share"):                        secret,
+		filepath.Join(root, "home-real", ".fridolin", "media"): secret,
+		filepath.Join(root, "home-real", "Documents", "share"): secret,
 	} {
 		if err := os.Symlink(target, link); err != nil {
 			t.Fatal(err)
@@ -1389,7 +1387,6 @@ func TestSandboxOwnFolderOpensNothingInside(t *testing.T) {
 		{"the database", q("deny file-read*", "literal", box+"/wa/bridge.db")},
 		{"the database's folder", q("deny file-read*", "subpath", box+"/wa")},
 		{"the credentials dir", q("deny file-read*", "subpath", box+"/creds")},
-		{"its own calendar token, re-opened", q("allow file-read*", "literal", box+"/creds/google_calendar_token_a.json")},
 		{"the config file", q("deny file-read*", "literal", box+"/etc/config.json")},
 		{"the bridge binary", q("deny file-write*", "literal", box+"/fridolin/fridolin")},
 		{"the checkout", q("deny file-write*", "subpath", box+"/fridolin")},

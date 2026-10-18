@@ -8,7 +8,6 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
-	"time"
 )
 
 // BrainRef is one brain folder in config.json's brain_dirs. Approved is the
@@ -272,7 +271,7 @@ func ScaffoldBrain(dir string, m *BrainManifest) ([]string, error) {
 		return nil
 	}
 
-	prompt := starterPrompt(m)
+	prompt := renderTemplate(examplePromptTemplate(), m)
 	files := []struct{ rel, content string }{
 		{m.normalized().PromptFile, prompt},
 		{identityMapFile, identityMapTemplate},
@@ -280,7 +279,7 @@ func ScaffoldBrain(dir string, m *BrainManifest) ([]string, error) {
 		{"skills/README.md", "# Skills\n\nReusable how-tos and scripts this brain has written for itself.\n"},
 	}
 	for _, sk := range exampleSkills() {
-		files = append(files, struct{ rel, content string }{"skills/" + sk.name, sk.content})
+		files = append(files, struct{ rel, content string }{"skills/" + sk.name, renderTemplate(sk.content, m)})
 	}
 	for _, f := range files {
 		if err := write(f.rel, f.content); err != nil {
@@ -305,14 +304,11 @@ instead of raw numbers in the chat history it gives the brain.
 | --------------- | ------ | ----- |
 `
 
-// starterPrompt fills the example brain prompt for a new brain. It names
-// the tools by $FRIDOLIN_TOOLS_DIR, which every run sets, so the prompt
-// keeps working when the bridge is installed somewhere else.
-func starterPrompt(m *BrainManifest) string {
-	tpl := examplePromptTemplate()
-	r := strings.NewReplacer(
-		"{{BRAIN_NAME}}", m.Name,
-		"{{CREATED}}", time.Now().Format("2006-01-02"),
-	)
-	return r.Replace(tpl)
+// renderTemplate fills a brain template, the starter prompt or an example
+// skill, for the new brain m. The templates name the bridge's commands by
+// $FRIDOLIN_BIN and its helpers by $FRIDOLIN_TOOLS_DIR, which every run
+// sets (see brainRunEnv), and never by a path: a brain folder keeps
+// working when it or the bridge moves.
+func renderTemplate(tpl string, m *BrainManifest) string {
+	return strings.NewReplacer("{{BRAIN_NAME}}", m.Name).Replace(tpl)
 }

@@ -1047,6 +1047,22 @@ func TestBuildPromptListsAllAttachments(t *testing.T) {
 	}
 }
 
+// TestBuildPromptNamesTheHistorySearch: the chat history in the prompt
+// tells the brain how to look further back, with the command every run
+// can reach. It used to name tools/history_search.py, relative to the
+// brain's folder, where there is no tools/.
+func TestBuildPromptNamesTheHistorySearch(t *testing.T) {
+	br := bareBrain(t)
+	line, _ := json.Marshal(historyEntry{TS: "2026-01-15T10:00:00Z", From: "15551234567", Chat: "15551234567@s.whatsapp.net", Text: "earlier", Type: "in"})
+	if err := os.WriteFile(filepath.Join(br.workDir, historyFileName), append(line, '\n'), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	p := br.buildPrompt(&brainSettings{}, dm("hello"))
+	if !strings.Contains(p, "<chat_history>") || !strings.Contains(p, `with `+"`"+`"$FRIDOLIN_BIN" history QUERY`+"`") || strings.Contains(p, "tools/") {
+		t.Errorf("prompt:\n%s", p)
+	}
+}
+
 func TestOTPMarkersConfigurable(t *testing.T) {
 	lines := []string{`{"type":"out","from":"a","text":"Please send the Examplebank code"}`}
 	if recentOutboundLooksLikeOTPRequest(lines, "a") {

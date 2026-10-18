@@ -233,6 +233,8 @@ func (b *Bridge) newHTTPHandler(listen string) http.Handler {
 	mux.HandleFunc("POST /ingest", b.httpIngest)
 	// The site builder's MCP servers; each brain's own token (site_builder.go).
 	mux.Handle("/builder/", b.builderHandler())
+	// The tools brains run; each run's own token (brainapi.go).
+	mux.Handle("/brain/", b.brainAPIHandler())
 
 	if !b.cfgs.Get().Dashboard.Disabled {
 		static := staticHandler(webRoot())

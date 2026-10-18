@@ -67,7 +67,7 @@ func userJID(number string) string { return number + "@" + types.DefaultUserServ
 
 // textWithQuote is the text the model and the history see: a line naming the
 // quoted message, then the message itself. The line's format is what the
-// history has always held, and what tools/history_search.py finds.
+// history has always held, and what `fridolin history` finds.
 func (m Inbound) textWithQuote() string {
 	if m.Quoted == nil {
 		return m.Text

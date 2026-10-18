@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -8,6 +9,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync/atomic"
 	"syscall"
@@ -98,8 +100,11 @@ func TestCalendarSignInFlow(t *testing.T) {
 	}
 	q := u.Query()
 	if q.Get("redirect_uri") != "http://127.0.0.1:"+portOf(tb)+"/" || q.Get("code_challenge_method") != "S256" ||
-		q.Get("access_type") != "offline" || q.Get("scope") != calendarScope || q.Get("state") == "" {
+		q.Get("access_type") != "offline" || q.Get("scope") != strings.Join(calendarScopes, " ") || q.Get("state") == "" {
 		t.Errorf("auth params = %v", q)
+	}
+	if q.Has("include_granted_scopes") {
+		t.Error("the sign-in folds the client's other grants into the brain's token")
 	}
 
 	// A made-up state is refused and changes nothing.
@@ -130,14 +135,16 @@ func TestCalendarSignInFlow(t *testing.T) {
 	}
 	var tok googleToken
 	_ = json.Unmarshal(data, &tok)
-	if tok.RefreshToken != "RT-1" || tok.ClientID == "" || tok.Account != "you@example.com" || len(tok.Scopes) != 1 {
+	if tok.RefreshToken != "RT-1" || tok.ClientID == "" || tok.Account != "you@example.com" || !slices.Equal(tok.Scopes, calendarScopes) {
 		t.Errorf("token file = %+v", tok)
 	}
 	if st, _ := os.Stat(tokPath); st.Mode().Perm() != 0o600 {
 		t.Errorf("token mode %v", st.Mode().Perm())
 	}
-	if _, err := os.Stat(filepath.Join(tb.cfgs.Get().DataDir, "google_calendar_credentials_fam.json")); err != nil {
-		t.Error("credentials copy for the tool not written")
+	// Older versions copied the OAuth client, secret and all, next to the
+	// token for the calendar tool in the brain.
+	if _, err := os.Stat(filepath.Join(tb.cfgs.Get().DataDir, "google_calendar_credentials_fam.json")); !os.IsNotExist(err) {
+		t.Errorf("a copy of the OAuth client was written next to the token (%v)", err)
 	}
 	// The state is single-use.
 	if w := cb("state=" + url.QueryEscape(q.Get("state")) + "&code=good-code"); w.Code != 400 {
@@ -236,13 +243,13 @@ func portOf(tb *testBridge) string {
 	return strings.TrimPrefix(tb.cfgs.Get().HTTPListen, "127.0.0.1:")
 }
 
-// TestCalendarTokenIsNotFollowed: each brain's sandbox lets it write its
-// own token file, so a brain can make it a link to another brain's token
-// in the same folder. The dashboard's status page would then refresh that
-// token and write it, refresh token and all, where the first brain reads
-// it, and Disconnect would revoke it at Google. The bridge refuses such a
-// token file, leaves the other brain's token alone, and removes only the
-// link on disconnect.
+// TestCalendarTokenIsNotFollowed: a brain the sandbox does not hold (on
+// Linux, or with the sandbox off) can write its own token file, so it can
+// make it a link to another brain's token in the same folder. The
+// dashboard's status page would then refresh that token and write it,
+// refresh token and all, where the first brain reads it, and Disconnect
+// would revoke it at Google. The bridge refuses such a token file, leaves
+// the other brain's token alone, and removes only the link on disconnect.
 func TestCalendarTokenIsNotFollowed(t *testing.T) {
 	cases := []struct {
 		name string
@@ -343,11 +350,11 @@ func mustSymlink(t *testing.T, target, link string) {
 	}
 }
 
-// TestCalendarTokenRequestsGoToGoogleWithYourClient: the brain can write
-// its token file, so the bridge takes neither the token_uri nor the client
-// in it. It refreshes at Google's token endpoint with the client you
-// configured, and a token from another client cannot be refreshed. The
-// token_uri of a pasted client file is not used either.
+// TestCalendarTokenRequestsGoToGoogleWithYourClient: a brain the sandbox
+// does not hold can write its token file, so the bridge takes neither the
+// token_uri nor the client in it. It refreshes at Google's token endpoint
+// with the client you configured, and a token from another client cannot
+// be refreshed. The token_uri of a pasted client file is not used either.
 func TestCalendarTokenRequestsGoToGoogleWithYourClient(t *testing.T) {
 	var elsewhere atomic.Int32
 	other := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -443,9 +450,10 @@ func TestCalendarTokenRequestsGoToGoogleWithYourClient(t *testing.T) {
 	})
 }
 
-// TestOversizedCalendarTokenIsRefused: a brain can make its token file as
-// large as it likes. The bridge refuses one larger than maxBrainFile
-// rather than load it, and so neither refreshes it nor revokes it.
+// TestOversizedCalendarTokenIsRefused: a brain the sandbox does not hold
+// can make its token file as large as it likes. The bridge refuses one
+// larger than maxBrainFile rather than load it, and so neither refreshes
+// it nor revokes it.
 func TestOversizedCalendarTokenIsRefused(t *testing.T) {
 	srv, got := fakeGoogle(t)
 	tb := newTestBridge(t, "")
@@ -478,5 +486,153 @@ func TestOversizedCalendarTokenIsRefused(t *testing.T) {
 	}
 	if (*got)["refresh_token"] != "" || (*got)["revoked"] != "" {
 		t.Errorf("the token was used: %v", *got)
+	}
+}
+
+// TestCalendarSignInScopes: the bridge asks for the narrow scopes the
+// calendar commands need and records what Google granted. A grant that
+// lacks one of them fails the sign-in, since the commands that need it
+// would fail later with less to go on; a broader one, such as the full
+// calendar scope a brain got from an older version, is shown on the
+// brain's page so you can narrow it.
+func TestCalendarSignInScopes(t *testing.T) {
+	const full = "https://www.googleapis.com/auth/calendar"
+	narrow := strings.Join(calendarScopes, " ")
+	cases := []struct {
+		name      string
+		granted   string // the token response's scope field
+		connected bool
+		broad     bool
+		lastError string
+	}{
+		{"no scope field", "", true, false, ""},
+		{"what was asked", narrow, true, false, ""},
+		{"in another order", strings.Join([]string{calendarScopes[2], calendarScopes[0], calendarScopes[1]}, " "), true, false, ""},
+		{"one unticked", calendarScopes[0] + " " + calendarScopes[2], false, false, "missing " + calendarScopes[1]},
+		{"more than asked", narrow + " " + full, true, true, ""},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			google := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				switch r.URL.Path {
+				case "/token":
+					scope, _ := json.Marshal(tc.granted)
+					fmt.Fprintf(w, `{"access_token":"ACCESS-1","refresh_token":"RT-1","expires_in":3600,"scope":%s}`, scope)
+				case "/calendar/v3/users/me/calendarList":
+					fmt.Fprint(w, `{"items":[{"id":"you@example.com","summary":"you@example.com","primary":true,"accessRole":"owner"}]}`)
+				default:
+					w.WriteHeader(404)
+				}
+			}))
+			defer google.Close()
+			prevAPI, prevToken := googleAPIBase, googleTokenEndpoint
+			googleAPIBase, googleTokenEndpoint = google.URL, google.URL+"/token"
+			defer func() { googleAPIBase, googleTokenEndpoint = prevAPI, prevToken }()
+
+			tb := newTestBridge(t, "")
+			tb.addFolderBrain(t, BrainManifest{ID: "a", Name: "A"})
+			if w := tb.do("PUT", "/api/google/client", map[string]string{"json": fmt.Sprintf(testClientJSON, google.URL)}); w.Code != 200 {
+				t.Fatal(w.Body.String())
+			}
+			var start struct {
+				AuthURL string `json:"auth_url"`
+			}
+			_ = json.Unmarshal(tb.do("POST", "/api/brains/a/calendar/connect", nil).Body.Bytes(), &start)
+			u, _ := url.Parse(start.AuthURL)
+			r := httptest.NewRequest("GET", "http://127.0.0.1:8765/?state="+url.QueryEscape(u.Query().Get("state"))+"&code=good-code", nil)
+			r.Host = "127.0.0.1:8765"
+			tb.h.ServeHTTP(httptest.NewRecorder(), r)
+
+			var st struct {
+				Connected   bool   `json:"connected"`
+				BroadAccess bool   `json:"broad_access"`
+				LastError   string `json:"last_error"`
+			}
+			_ = json.Unmarshal(tb.do("GET", "/api/brains/a/calendar?list=0", nil).Body.Bytes(), &st)
+			if st.Connected != tc.connected || st.BroadAccess != tc.broad || !strings.Contains(st.LastError, tc.lastError) {
+				t.Errorf("status = %+v, want connected %v, broad_access %v, last_error with %q", st, tc.connected, tc.broad, tc.lastError)
+			}
+			if !tc.connected {
+				return
+			}
+			var tok googleToken
+			data, _ := os.ReadFile(tb.google.tokenPath("a"))
+			_ = json.Unmarshal(data, &tok)
+			want := strings.Fields(tc.granted)
+			if tc.granted == "" {
+				want = calendarScopes
+			}
+			if !slices.Equal(tok.Scopes, want) {
+				t.Errorf("token scopes = %q, want %q", tok.Scopes, want)
+			}
+		})
+	}
+}
+
+// TestCalendarRefreshRecordsGrantedScopes: a refresh stores the scopes
+// Google says the token has, as the sign-in does, since the brain's page
+// warns about broad access by them. An older version recorded the full
+// calendar scope whatever was granted. An answer without a scope field
+// leaves the stored ones as they were.
+func TestCalendarRefreshRecordsGrantedScopes(t *testing.T) {
+	const full = "https://www.googleapis.com/auth/calendar"
+	narrow := strings.Join(calendarScopes, " ")
+	cases := []struct {
+		name    string
+		stored  []string // in the token file before the refresh
+		granted string   // the refresh answer's scope field
+		want    []string
+		broad   bool
+	}{
+		{"Google grants less than stored", []string{full}, narrow, calendarScopes, false},
+		{"Google grants more than stored", calendarScopes, narrow + " " + full, append(slices.Clone(calendarScopes), full), true},
+		{"no scope field", []string{full}, "", []string{full}, true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			google := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.URL.Path != "/token" {
+					w.WriteHeader(404)
+					return
+				}
+				answer := map[string]any{"access_token": "ACCESS-2", "expires_in": 3600}
+				if tc.granted != "" {
+					answer["scope"] = tc.granted
+				}
+				_ = json.NewEncoder(w).Encode(answer)
+			}))
+			defer google.Close()
+			prev := googleTokenEndpoint
+			googleTokenEndpoint = google.URL + "/token"
+			defer func() { googleTokenEndpoint = prev }()
+
+			tb := newTestBridge(t, "")
+			tb.addFolderBrain(t, BrainManifest{ID: "a", Name: "A"})
+			if w := tb.do("PUT", "/api/google/client", map[string]string{"json": fmt.Sprintf(testClientJSON, google.URL)}); w.Code != 200 {
+				t.Fatal(w.Body.String())
+			}
+			data, _ := json.Marshal(googleToken{
+				Token: "ACCESS-1", RefreshToken: "RT-1", ClientID: "123-abc.apps.googleusercontent.com",
+				Scopes: tc.stored, Expiry: "2020-01-01T00:00:00.000000Z",
+			})
+			if err := os.WriteFile(tb.google.tokenPath("a"), data, 0o600); err != nil {
+				t.Fatal(err)
+			}
+			if tok, err := tb.google.accessToken(context.Background(), "a"); err != nil || tok.Token != "ACCESS-2" {
+				t.Fatalf("accessToken = %+v, %v; want it refreshed", tok, err)
+			}
+			var saved googleToken
+			data, _ = os.ReadFile(tb.google.tokenPath("a"))
+			if err := json.Unmarshal(data, &saved); err != nil || saved.Token != "ACCESS-2" || !slices.Equal(saved.Scopes, tc.want) {
+				t.Errorf("token file has %q with scopes %q (%v); want ACCESS-2 with %q", saved.Token, saved.Scopes, err, tc.want)
+			}
+			var st struct {
+				BroadAccess bool `json:"broad_access"`
+			}
+			_ = json.Unmarshal(tb.do("GET", "/api/brains/a/calendar?list=0", nil).Body.Bytes(), &st)
+			if st.BroadAccess != tc.broad {
+				t.Errorf("broad_access = %v, want %v", st.BroadAccess, tc.broad)
+			}
+		})
 	}
 }

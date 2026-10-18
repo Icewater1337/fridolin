@@ -266,10 +266,10 @@ type SandboxConfig struct {
 	// it includes, so they can commit in their own folder) or "deny".
 	GitConfig string `json:"git_config,omitempty"`
 
-	// CredentialsDir is a directory of per-brain credential files. Brains are
-	// denied the whole directory except their own calendar credentials
-	// (google_calendar_{credentials,token}_<brain>.json). Absolute or
-	// ~-relative.
+	// CredentialsDir is a directory of per-brain credential files: the
+	// calendar tokens (google_calendar_token_<brain>.json), which the
+	// bridge uses for the brains. Brains are denied the whole directory.
+	// Absolute or ~-relative.
 	CredentialsDir string `json:"credentials_dir,omitempty"`
 }
 

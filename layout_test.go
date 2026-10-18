@@ -112,28 +112,6 @@ func TestBrainRunsKnowWhereTheToolsAre(t *testing.T) {
 	}
 }
 
-func TestStarterFilesNameToolsByTheVariable(t *testing.T) {
-	// They used to embed the checkout's absolute path, or a "<bridge-repo>"
-	// placeholder when the binary did not run from the checkout.
-	files := map[string]string{"brain-prompt.md": starterPrompt(&BrainManifest{Name: "Family"})}
-	for _, sk := range exampleSkills() {
-		files["skills/"+sk.name] = sk.content
-	}
-	for name, content := range files {
-		if strings.Contains(content, "<bridge-repo>") || strings.Contains(content, "tools/") && !strings.Contains(content, "$FRIDOLIN_TOOLS_DIR") {
-			t.Errorf("%s names the tools by a path:\n%s", name, content)
-		}
-	}
-	for _, want := range []string{`"$FRIDOLIN_TOOLS_DIR/poll_results.py"`, "$FRIDOLIN_TOOLS_DIR/history_search.py"} {
-		if !strings.Contains(files["brain-prompt.md"], want) {
-			t.Errorf("the starter prompt lacks %s", want)
-		}
-	}
-	if !strings.Contains(files["skills/transcription.md"], `"$FRIDOLIN_TOOLS_DIR/transcribe.py"`) {
-		t.Errorf("the transcription skill does not run $FRIDOLIN_TOOLS_DIR/transcribe.py")
-	}
-}
-
 func TestCheckBrainPathWarnsAboutTheBridgesOwnFolders(t *testing.T) {
 	home := canonicalDir(t.TempDir())
 	t.Setenv("HOME", home)

@@ -527,7 +527,7 @@ func (sp *SandboxProfiler) Profile(brainID string) (string, error) {
 	// the dashboard token and backup credentials live in the data dir too.
 	// Media is the shared inbound staging dir, so it is re-allowed below.
 	// This comes after the allow_paths allows, which therefore cannot open
-	// any of it again; only media and this brain's calendar files can.
+	// any of it again; only media can.
 	b.WriteString(";; Bridge runtime data (media staging re-allowed below)\n")
 	// Both names the data dir has had, whichever is active: an install that
 	// moved to ~/.fridolin can leave the old folder behind, with an old copy
@@ -556,7 +556,6 @@ func (sp *SandboxProfiler) Profile(brainID string) (string, error) {
 	if sp.dataDir != "" {
 		b.allow("file-read*", "subpath", sp.mediaDir)
 		b.allow("file-write*", "subpath", sp.mediaDir)
-		b.calendarAllows(sp.dataDir, brainID)
 	}
 	// After the media allow, so no media_dir setting can open the DB again.
 	for _, f := range dbFiles {
@@ -585,11 +584,20 @@ func (sp *SandboxProfiler) Profile(brainID string) (string, error) {
 		}
 	}
 	b.WriteString("\n")
+	// No brain reads its calendar token: the bridge makes its calendar
+	// calls (google_calendar.go), so the files stay with the bridge.
 	if sp.credsDir != "" {
-		b.WriteString(";; Shared credentials dir: only this brain's own calendar files\n")
+		b.WriteString(";; Shared credentials dir: the bridge's alone\n")
 		b.deny("file-read*", "subpath", sp.credsDir)
 		b.deny("file-write*", "subpath", sp.credsDir)
-		b.calendarAllows(sp.credsDir, brainID)
+		b.WriteString("\n")
+	}
+	// The brain API tokens of this brain's runs (see brainRunEnv), to read
+	// and no more; every other brain's stay denied with the data dir. After
+	// the credentials dir, which may hold the data dir.
+	if sp.dataDir != "" {
+		b.WriteString(";; This brain's brain API tokens\n")
+		b.allow("file-read*", "subpath", runTokenDir(sp.dataDir, brainID))
 		b.WriteString("\n")
 	}
 
@@ -1043,9 +1051,9 @@ func (b *profileBuilder) pinParents(homes ...string) {
 // allow emits "(allow op (filter "path"))" for path, and again with its
 // longest trusted root (see trustRoot) replaced by that root's real path.
 // Unlike deny it follows no other symlink: a brain can replace its own
-// folder, the media dir or its calendar token with a symlink, and an allow
-// that followed it would open whatever the symlink points to. It returns
-// the spellings it allowed.
+// folder or the media dir with a symlink, and an allow that followed it
+// would open whatever the symlink points to. It returns the spellings it
+// allowed.
 func (b *profileBuilder) allow(op, filter, path string) []string {
 	out := b.allowSpellings(path)
 	for _, s := range out {
@@ -1205,16 +1213,6 @@ func resolvePath(p string) string {
 		resolved = string(filepath.Separator)
 	}
 	return resolved
-}
-
-// calendarAllows re-allows a brain's own calendar credential pair in dir:
-// read both, and write the token back on refresh.
-func (b *profileBuilder) calendarAllows(dir, brainID string) {
-	creds := calendarCredentialsFile(dir, brainID)
-	token := calendarTokenFile(dir, brainID)
-	b.allow("file-read*", "literal", creds)
-	b.allow("file-read*", "literal", token)
-	b.allow("file-write*", "literal", token)
 }
 
 // sbplString quotes s as an SBPL string literal. Go's %q is not one: it
