@@ -8,6 +8,7 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -474,6 +475,103 @@ func TestSiteProcessEndToEnd(t *testing.T) {
 	}
 	if siteHealthy(listen) {
 		t.Error("the site still answers after being turned off")
+	}
+}
+
+// Saving or removing the site's own Google client reaches the running site
+// without a manual restart; so does a change to Fridolin's shared client
+// while the site uses that one.
+func TestSiteGoogleClientReachesRunningSite(t *testing.T) {
+	requireSiteRuntime(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	m := newTestSite(t)
+	shared := filepath.Join(m.dataDir, "google", "oauth_client.json") // as GoogleAuth.clientPath
+	m.googleClient = func() string { return shared }
+	clientJSON := func(id string) string { return `{"web":{"client_id":"` + id + `","client_secret":"s"}}` }
+	setShared := func(id string) {
+		t.Helper()
+		os.MkdirAll(filepath.Dir(shared), 0o700)
+		if err := os.WriteFile(shared, []byte(clientJSON(id)), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	setShared("shared-1")
+
+	if err := m.ConnectRepo(ctx, SiteRepo{URL: newBareRepo(t)}); err != nil {
+		t.Fatal(err)
+	}
+	if err := m.AddStarter(ctx); err != nil {
+		t.Fatal(err)
+	}
+	up, _ := m.Fetch(ctx)
+	listen := freePort(t)
+	if _, err := m.UpdateSettings(SiteSettingsUpdate{Listen: &listen}); err != nil {
+		t.Fatal(err)
+	}
+	m.Start(ctx)
+	defer m.Stop()
+	if err := m.Deploy(ctx, up.Head); err != nil {
+		t.Fatal(err)
+	}
+	waitDeploy(t, m)
+	on := true
+	if _, err := m.UpdateSettings(SiteSettingsUpdate{Enabled: &on}); err != nil {
+		t.Fatal(err)
+	}
+
+	b := &Bridge{site: m}
+	mux := http.NewServeMux()
+	b.siteAPI(mux)
+	call := func(method, body string) {
+		t.Helper()
+		rec := httptest.NewRecorder()
+		mux.ServeHTTP(rec, httptest.NewRequest(method, "/api/site/google-client", strings.NewReader(body)))
+		if rec.Code != 200 {
+			t.Fatalf("%s /api/site/google-client: %d %s", method, rec.Code, rec.Body)
+		}
+	}
+	// signInClient is the client the site sends people to Google with.
+	noRedirect := &http.Client{Timeout: 2 * time.Second, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
+	signInClient := func() string {
+		resp, err := noRedirect.Get("http://" + listen + "/auth/google")
+		if err != nil {
+			return ""
+		}
+		resp.Body.Close()
+		u, err := url.Parse(resp.Header.Get("Location"))
+		if err != nil {
+			return ""
+		}
+		return u.Query().Get("client_id")
+	}
+	expect := func(what, id, file string) {
+		t.Helper()
+		waitFor(t, 60*time.Second, what, func() bool { return signInClient() == id })
+		var rt siteRuntime
+		data, _ := os.ReadFile(m.dir("site.runtime.json"))
+		if err := json.Unmarshal(data, &rt); err != nil || rt.GoogleClientFile != file {
+			t.Errorf("%s: runtime.json names %q (%v), want %q", what, rt.GoogleClientFile, err, file)
+		}
+	}
+	expect("the shared client", "shared-1", shared)
+
+	call("PUT", clientJSON("site-1"))
+	expect("the site's own client once saved", "site-1", m.dir("google_client.json"))
+
+	// The site's own client stays ahead of a changed shared one.
+	setShared("shared-2")
+	if got := signInClient(); got != "site-1" {
+		t.Errorf("after the shared client changed, the site signs in with %q", got)
+	}
+
+	call("DELETE", "")
+	expect("the shared client once the site's own is removed", "shared-2", shared)
+
+	// The site reads the shared client at each sign-in: no restart needed.
+	setShared("shared-3")
+	if got := signInClient(); got != "shared-3" {
+		t.Errorf("after the shared client changed, the site signs in with %q", got)
 	}
 }
 
