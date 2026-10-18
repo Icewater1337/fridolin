@@ -1004,6 +1004,7 @@ Google Drive backups; see [BACKUP.md](BACKUP.md).
 | `remote` | `"brain-gdrive"` | rclone remote name in the bridge's own rclone config |
 | `keep_versions_days` | `30` | days a version folder is kept after the run that made it; `0` keeps them forever |
 | `include_bridge_config` | `true` | also back up `config.json` and the brain list |
+| `include_secret_files` | `false` | also upload `.env` files, private keys and tokens from brain folders (see [BACKUP.md](BACKUP.md)); config.json only |
 | `rclone_path` | found in the [helper folders](#helper-programs) of PATH | the rclone to run; when set, only that one: one that is missing or not executable stops backups with an error naming it. Unset, rclone is looked for in the folders of PATH the bridge takes its helpers from (see [helper programs](#helper-programs)), then in `/opt/homebrew/bin`, `/usr/local/bin` and `~/.local/bin`; a name without a folder is looked for in those PATH folders only |
 
 ### `plaud`

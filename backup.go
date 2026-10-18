@@ -71,6 +71,27 @@ type BackupConfig struct {
 	// IncludeBridgeConfig also backs up config.json and the brain list
 	// (default true). Never included: the WhatsApp session, .env, tokens.
 	IncludeBridgeConfig *bool `json:"include_bridge_config,omitempty"`
+	// IncludeSecretFiles also uploads the files of backupSecretExcludes
+	// from brain folders, which are otherwise left out whatever a brain's
+	// excludes say. Off by default; config.json only.
+	IncludeSecretFiles bool `json:"include_secret_files,omitempty"`
+}
+
+// backupSecretExcludes are the files of a brain folder a backup leaves out
+// whatever the brain's exclude list says, unless include_secret_files is on:
+// a brain may keep API keys in a .env, private keys, and a calendar token
+// or CLI login copied into its folder, and a copy in Drive is one more
+// place they can leak from. Every '+' line of an exclude list is dropped
+// (see filterLines), so none can include them again. "*.key" is not among
+// them: it is also Keynote's extension. docs/BACKUP.md and the dashboard's
+// Backup page list them; TestBackupSecretExcludesAreDocumented keeps the
+// docs in step.
+var backupSecretExcludes = []string{
+	".env", ".env.*",
+	"*.pem", "*.p12",
+	"id_rsa*", "id_ecdsa*", "id_ed25519*",
+	"google_calendar_*.json",
+	".credentials.json",
 }
 
 var (
@@ -579,6 +600,7 @@ func (b *Bridge) apiBackupStatus(w http.ResponseWriter, r *http.Request) {
 		"connect":               copyOf(m.connect),
 		"settings":              cfg.Backup,
 		"include_bridge_config": cfg.Backup.includeBridge(),
+		"secret_excludes":       backupSecretExcludes,
 		"brains":                rows,
 		"bridge":                copyOf(m.state.Bridge),
 		"job":                   job,
@@ -1164,6 +1186,16 @@ func filterLines(excludes []string) string {
 	return sb.String()
 }
 
+// brainFilter is the rclone filter file for a brain folder: the secret
+// files first, unless includeSecrets, then the brain's own excludes. rclone
+// stops at the first rule that matches.
+func brainFilter(excludes []string, includeSecrets bool) string {
+	if includeSecrets {
+		return filterLines(excludes)
+	}
+	return filterLines(backupSecretExcludes) + filterLines(excludes)
+}
+
 func (m *BackupManager) backupBrain(ctx context.Context, br *Brain, trigger string, force bool) *BackupResult {
 	started := time.Now()
 	fail := func(msg string) *BackupResult {
@@ -1171,13 +1203,14 @@ func (m *BackupManager) backupBrain(ctx context.Context, br *Brain, trigger stri
 		return &BackupResult{Started: started, Finished: now, Seconds: now.Sub(started).Seconds(), Error: msg, Trigger: trigger}
 	}
 	s := br.settings.Load()
+	// One config snapshot for the filter, the check and the sync, so a
+	// backup.root changed mid-run cannot count one folder and sync into
+	// another.
+	cfg := m.cfgs.Get()
 	filter := filepath.Join(m.dir(), "filters-"+br.ID()+".txt")
-	if err := writeFileAtomic(filter, []byte(filterLines(s.manifest.Backup.Exclude)), 0o600, false); err != nil {
+	if err := writeFileAtomic(filter, []byte(brainFilter(s.manifest.Backup.Exclude, cfg.Backup.IncludeSecretFiles)), 0o600, false); err != nil {
 		return fail(err.Error())
 	}
-	// One config snapshot for the check and the sync, so a backup.root
-	// changed mid-run cannot count one folder and sync into another.
-	cfg := m.cfgs.Get()
 	base := backupPath(cfg.Backup, br.ID())
 	if force {
 		return m.syncDir(ctx, br.Dir(), base, filter, trigger, -1)

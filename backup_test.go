@@ -561,6 +561,9 @@ func TestBackupRoundTripWithRealRclone(t *testing.T) {
 	write("node_modules/x/index.js", "skip me")
 	write("run.log", "skip me")
 	write("private/secret.md", "skip me")
+	// Never uploaded, whatever the excludes say.
+	write(".env", "skip me")
+	write("keys/id_ed25519", "skip me")
 
 	run := func() {
 		t.Helper()
@@ -576,7 +579,7 @@ func TestBackupRoundTripWithRealRclone(t *testing.T) {
 	if data, _ := os.ReadFile(filepath.Join(cur, "memories/a.md")); string(data) != "version 1" {
 		t.Fatalf("file not backed up")
 	}
-	for _, skip := range []string{"node_modules", "run.log", "private"} {
+	for _, skip := range []string{"node_modules", "run.log", "private", ".env", "keys/id_ed25519"} {
 		if _, err := os.Stat(filepath.Join(cur, skip)); err == nil {
 			t.Errorf("%s should have been excluded", skip)
 		}
@@ -2374,5 +2377,73 @@ func TestBackupCancel(t *testing.T) {
 	}
 	if res := waitBackup(t, tb, "notes"); res.OK || res.Error != "cancelled" {
 		t.Errorf("result = %+v, want cancelled", res)
+	}
+}
+
+// TestBackupLeavesSecretsOut: a brain folder was synced with only the
+// brain's own excludes, and the defaults hold no secret patterns, so a
+// .env, a private key or a copied calendar token went to Drive although
+// the docs said .env files never do. The filter now starts with the secret
+// files, which no exclude list can include again ('+' lines are dropped),
+// even an empty one; include_secret_files leaves them to the brain's list.
+func TestBackupLeavesSecretsOut(t *testing.T) {
+	for _, tc := range []struct {
+		name           string
+		excludes       []string
+		includeSecrets bool
+	}{
+		{"no excludes", nil, false},
+		{"its own excludes", []string{"node_modules/", "*.log"}, false},
+		{"an exclude list that tries to include them", []string{"+ .env", "+ *.pem"}, false},
+		{"include_secret_files", []string{"*.log"}, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			filter := brainFilter(tc.excludes, tc.includeSecrets)
+			lines := strings.Split(strings.TrimSpace(filter), "\n")
+			for _, p := range backupSecretExcludes {
+				if got := slices.Contains(lines, "- "+p); got == tc.includeSecrets {
+					t.Errorf("filter has - %s: %v, want %v:\n%s", p, got, !tc.includeSecrets, filter)
+				}
+			}
+			for _, l := range lines {
+				if strings.HasPrefix(l, "+") {
+					t.Errorf("filter includes %q", l)
+				}
+			}
+			if !tc.includeSecrets && lines[0] != "- "+backupSecretExcludes[0] {
+				t.Errorf("filter starts with %q, want the secret files first", lines[0])
+			}
+		})
+	}
+
+	t.Run("a run writes it", func(t *testing.T) {
+		tb := newTestBridge(t, "")
+		addBackupBrain(t, tb, "notes")
+		var filters []string
+		tb.backup.runner = func(_ context.Context, args []string, _ io.Writer) ([]byte, error) {
+			if i := slices.Index(args, "--filter-from"); i >= 0 && args[0] == "sync" {
+				data, _ := os.ReadFile(args[i+1])
+				filters = append(filters, string(data))
+			}
+			return []byte("[]"), nil
+		}
+		tb.backup.backupBrain(t.Context(), tb.brainMgr.Get("notes"), "manual", true)
+		if len(filters) != 1 || !strings.HasPrefix(filters[0], "- .env\n") {
+			t.Errorf("sync filters = %q, want one starting with the secret files", filters)
+		}
+	})
+}
+
+// TestBackupSecretExcludesAreDocumented: docs/BACKUP.md promises what is
+// never uploaded, so it must name every pattern backupSecretExcludes holds.
+func TestBackupSecretExcludesAreDocumented(t *testing.T) {
+	doc, err := os.ReadFile(filepath.Join(repoDir, "docs", "BACKUP.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, p := range backupSecretExcludes {
+		if !strings.Contains(string(doc), "`"+p+"`") {
+			t.Errorf("docs/BACKUP.md does not name %s", p)
+		}
 	}
 }

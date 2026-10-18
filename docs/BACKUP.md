@@ -58,8 +58,15 @@ however old the files in it are. A version folder holds only what changed
 in that run, not a full snapshot. Folders in `versions/` whose name is not
 such a timestamp are never deleted.
 
-**Never uploaded:** the WhatsApp session (`bridge.db`), `.env` files, the
-dashboard token, the rclone config, downloaded media in the data folder.
+**Never uploaded:** the WhatsApp session (`bridge.db`), the dashboard token,
+the rclone config, downloaded media and every brain's own state in the data
+folder. Nor, from brain folders, whatever their excludes say: `.env`,
+`.env.*`, `*.pem`, `*.p12`, `id_rsa*`, `id_ecdsa*`, `id_ed25519*`,
+`google_calendar_*.json` and `.credentials.json` files, in any folder of
+the brain. Set `backup.include_secret_files` to `true` in `config.json` to
+upload them too (the dashboard has no field for it). Files a version from
+before this rule uploaded stay in Drive's `current/` and `versions/` until
+you delete them there.
 
 ## Excluding things
 
