@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"maps"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -640,6 +641,7 @@ func TestExpiredVersions(t *testing.T) {
 // names, with anything else after them.
 func TestBackupVersionsNewestFirst(t *testing.T) {
 	tb := newTestBridge(t, "")
+	connectAlias(t, tb)
 	tb.backup.runner = func(_ context.Context, args []string, _ io.Writer) ([]byte, error) {
 		return []byte(`[{"Name":"20261001-120000"},{"Name":"manual-copy"},{"Name":"20261015-080000"},{"Name":"20250101-000000"}]`), nil
 	}
@@ -1898,6 +1900,32 @@ func TestDailyBackupWithoutDriveIsLogged(t *testing.T) {
 	}
 }
 
+// TestBackupSummarySaysWhatRuns: the overview tells a restore that runs
+// from a backup.
+func TestBackupSummarySaysWhatRuns(t *testing.T) {
+	cases := []struct {
+		name               string
+		job                *backupJob
+		running, restoring bool
+	}{
+		{"nothing", nil, false, false},
+		{"a backup", &backupJob{kind: jobBackup}, true, false},
+		{"a restore", &backupJob{kind: jobRestore}, true, true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			m := newTestBridge(t, "").backup
+			m.mu.Lock()
+			m.job = tc.job
+			m.mu.Unlock()
+			t.Cleanup(func() { m.mu.Lock(); m.job = nil; m.mu.Unlock() })
+			if s := m.Summary(); s.Running != tc.running || s.Restoring != tc.restoring {
+				t.Errorf("running %v, restoring %v; want %v, %v", s.Running, s.Restoring, tc.running, tc.restoring)
+			}
+		})
+	}
+}
+
 // TestBackupSummaryShowsTheLatestFailure: with several brains failing, the
 // overview shows the latest failure and whose it is, the same on every
 // refresh, and a removed brain's failure neither shows nor stays saved.
@@ -2002,5 +2030,201 @@ func TestBackupBridgeRefusesAnIncompleteStage(t *testing.T) {
 				t.Errorf("rclone ran %v", calls)
 			}
 		})
+	}
+}
+
+// connectAlias gives the bridge's rclone config a remote, so that the
+// bridge counts Drive as connected.
+func connectAlias(t *testing.T, tb *testBridge) {
+	t.Helper()
+	if err := os.MkdirAll(filepath.Dir(tb.backup.rcloneConf()), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(tb.backup.rcloneConf(), []byte("[brain-gdrive]\ntype = alias\nremote = /nowhere\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// TestBackupRestoreChecksWhatItIsGiven: the brain and version name one
+// folder of the backup, and the target is a new or empty folder of yours
+// that is neither a brain's nor the bridge's.
+func TestBackupRestoreChecksWhatItIsGiven(t *testing.T) {
+	tb := newTestBridge(t, `, "sandbox": {"credentials_dir": "~/creds"}`)
+	connectAlias(t, tb)
+	addBackupBrain(t, tb, "notes")
+	var mu sync.Mutex
+	var calls [][]string
+	tb.backup.runner = func(_ context.Context, args []string, _ io.Writer) ([]byte, error) {
+		mu.Lock()
+		calls = append(calls, args)
+		mu.Unlock()
+		return []byte("[]"), nil
+	}
+	full := filepath.Join(tb.home, "full")
+	_ = os.MkdirAll(full, 0o700)
+	_ = os.WriteFile(filepath.Join(full, "x"), nil, 0o600)
+	// Folders of yours that lead elsewhere: a new folder under one is made
+	// where it points.
+	for link, to := range map[string]string{"to-notes": "notes", "to-data": "data/media", "to-creds": "creds"} {
+		if err := os.MkdirAll(filepath.Join(tb.home, to), 0o700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Symlink(filepath.Join(tb.home, to), filepath.Join(tb.home, link)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	cases := []struct {
+		name, brain, version, target string
+		code                         int
+	}{
+		{"brain ..", "..", "current", "~/r1", 400},
+		{"brain .", ".", "current", "~/r1", 400},
+		{"brain with a slash", "a/b", "current", "~/r1", 400},
+		{"brain with a colon", "other:x", "current", "~/r1", 400},
+		{"brain with a newline", "a\nb", "current", "~/r1", 400},
+		{"no brain", "", "current", "~/r1", 400},
+		{"version ..", "notes", "..", "~/r1", 400},
+		{"version not a stamp", "notes", "latest", "~/r1", 400},
+		{"version with a path", "notes", "20261018-093000/../../x", "~/r1", 400},
+		{"into a brain", "notes", "current", "~/notes/restored", 422},
+		{"around a brain", "notes", "current", "~", 422},
+		{"into the data dir", "notes", "current", "~/data/media/restored", 422},
+		{"into the credentials folder", "notes", "current", "~/creds/restored", 422},
+		{"outside home", "notes", "current", "/tmp/restored", 422},
+		{"not empty", "notes", "current", "~/full", 422},
+		{"into a brain through a symlink", "notes", "current", "~/to-notes/restored", 422},
+		{"into the data dir through a symlink", "notes", "current", "~/to-data/a/restored", 422},
+		{"into the credentials folder through a symlink", "notes", "current", "~/to-creds/restored", 422},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			w := tb.do("POST", "/api/backup/restore", map[string]string{"brain": tc.brain, "version": tc.version, "target": tc.target})
+			if w.Code != tc.code {
+				t.Errorf("restore = %d %s, want %d", w.Code, w.Body.String(), tc.code)
+			}
+		})
+	}
+	for _, made := range []string{"notes/restored", "data/media/a", "creds/restored"} {
+		if _, err := os.Lstat(filepath.Join(tb.home, made)); !os.IsNotExist(err) {
+			t.Errorf("a refused restore made ~/%s (%v)", made, err)
+		}
+	}
+	for _, id := range []string{"..", "a/b", ""} {
+		if w := tb.do("GET", "/api/backup/versions?brain="+url.QueryEscape(id), nil); w.Code != 400 {
+			t.Errorf("versions of %q = %d, want 400", id, w.Code)
+		}
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if len(calls) != 0 {
+		t.Errorf("rclone ran %v", calls)
+	}
+}
+
+// TestBackupRestoreNeedsDrive: a restore and the versions list say that
+// Drive is not connected, rather than fail out of sight.
+func TestBackupRestoreNeedsDrive(t *testing.T) {
+	tb := newTestBridge(t, "")
+	if w := tb.do("POST", "/api/backup/restore", map[string]string{"brain": "notes", "version": "current", "target": "~/restored"}); w.Code != 412 {
+		t.Errorf("restore = %d %s, want 412", w.Code, w.Body.String())
+	}
+	if w := tb.do("GET", "/api/backup/versions?brain=notes", nil); w.Code != 412 {
+		t.Errorf("versions = %d %s, want 412", w.Code, w.Body.String())
+	}
+}
+
+// TestBackupRestoreRecordsItsResult: a restore runs as a job of its own
+// kind, copies the folder it was asked for, and its outcome, a failure
+// included, stays on the Backup page after it ended.
+func TestBackupRestoreRecordsItsResult(t *testing.T) {
+	cases := []struct {
+		name    string
+		version string
+		fail    bool
+		wantSrc string
+	}{
+		{"latest copy", "current", false, notesBase + "/current"},
+		{"a version", "20261001-120000", false, notesBase + "/versions/20261001-120000"},
+		{"failed", "current", true, notesBase + "/current"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			tb := newTestBridge(t, "")
+			connectAlias(t, tb)
+			release := make(chan struct{})
+			var src string
+			tb.backup.runner = func(_ context.Context, args []string, stderr io.Writer) ([]byte, error) {
+				src = args[1]
+				<-release
+				if tc.fail {
+					fmt.Fprintln(stderr, `{"level":"error","msg":"directory not found"}`)
+					return nil, errors.New("exit status 3")
+				}
+				fmt.Fprintln(stderr, `{"level":"notice","msg":"stats","stats":{"bytes":2048,"transfers":3}}`)
+				return nil, nil
+			}
+			w := tb.do("POST", "/api/backup/restore", map[string]string{"brain": "notes", "version": tc.version, "target": "~/restored"})
+			if w.Code != 202 {
+				t.Fatalf("restore = %d %s", w.Code, w.Body.String())
+			}
+			if fi, err := os.Stat(filepath.Join(tb.home, "restored")); err != nil || !fi.IsDir() {
+				t.Errorf("the target was not made before the restore started (%v)", err)
+			}
+			var st struct {
+				Job struct {
+					Kind   string `json:"kind"`
+					Brain  string `json:"brain"`
+					Target string `json:"target"`
+				} `json:"job"`
+				LastRestore *RestoreResult `json:"last_restore"`
+			}
+			_ = json.Unmarshal(tb.do("GET", "/api/backup/status", nil).Body.Bytes(), &st)
+			if st.Job.Kind != "restore" || st.Job.Brain != "notes" || st.Job.Target != filepath.Join(tb.home, "restored") {
+				t.Errorf("job = %+v, want the restore of notes", st.Job)
+			}
+			close(release)
+			waitFor(t, 10*time.Second, "the restore", func() bool {
+				tb.backup.mu.Lock()
+				defer tb.backup.mu.Unlock()
+				return tb.backup.job == nil
+			})
+			if src != tc.wantSrc {
+				t.Errorf("copied %s, want %s", src, tc.wantSrc)
+			}
+			_ = json.Unmarshal(tb.do("GET", "/api/backup/status", nil).Body.Bytes(), &st)
+			r := st.LastRestore
+			switch {
+			case r == nil:
+				t.Fatal("no last restore")
+			case tc.fail && (r.OK || !strings.Contains(r.Error, "directory not found")):
+				t.Errorf("last restore = %+v, want the failure", r)
+			case !tc.fail && (!r.OK || r.Files != 3 || r.Bytes != 2048 || r.Version != tc.version):
+				t.Errorf("last restore = %+v, want 3 files of %s", r, tc.version)
+			}
+		})
+	}
+}
+
+// TestBackupRestoreFolderThatCannotBeMade: the restore folder is made
+// before the job starts, so a failure is the request's error.
+func TestBackupRestoreFolderThatCannotBeMade(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("root writes to read-only folders")
+	}
+	tb := newTestBridge(t, "")
+	connectAlias(t, tb)
+	ro := filepath.Join(tb.home, "ro")
+	if err := os.Mkdir(ro, 0o500); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(ro, 0o700) })
+	w := tb.do("POST", "/api/backup/restore", map[string]string{"brain": "notes", "version": "current", "target": "~/ro/restored"})
+	if w.Code != 500 || !strings.Contains(w.Body.String(), "creating the restore folder") {
+		t.Errorf("restore = %d %s, want 500", w.Code, w.Body.String())
+	}
+	tb.backup.mu.Lock()
+	defer tb.backup.mu.Unlock()
+	if tb.backup.job != nil {
+		t.Error("a restore started anyway")
 	}
 }

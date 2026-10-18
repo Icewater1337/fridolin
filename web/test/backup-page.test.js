@@ -120,3 +120,31 @@ test('a backup.rclone_path that does not work is named, not offered for install'
   assert.ok(text.includes(error), 'the error is shown');
   assert.ok(!text.includes('brew install rclone'), 'no install hint for a path that is set');
 });
+
+test('a restore shows while it runs and how it went once it ended', async (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout', 'Date'] });
+  installDom();
+  noConsoleErrors(t);
+  const running = { ...connected(), job: { kind: 'restore', brain: 'work', target: '/Users/you/restored/work', started: '2026-10-18T09:00:00Z', queue: [], done: [] } };
+  const bridge = { status: running };
+  serve(t, (path) => (path.startsWith('/api/backup/status') ? bridge.status : {}));
+  const root = h('div');
+  document.body.append(root);
+  const ctx = createPage();
+  t.after(() => ctx.destroy());
+  page.render(root, ctx);
+  await settle();
+  assert.ok(root.textContent.includes('Restoring Work'), root.textContent);
+  assert.ok(root.textContent.includes('/Users/you/restored/work'), 'the target is named');
+
+  bridge.status = {
+    ...connected(),
+    last_restore: { brain: 'work', version: 'current', target: '/Users/you/restored/work', ok: false, error: 'directory not found', finished: '2026-10-18T09:01:00Z', files: 0, bytes: 0 },
+  };
+  await resource('/api/backup/status').refresh();
+  await settle();
+  const text = root.textContent;
+  assert.ok(text.includes('Last restore failed'), text);
+  assert.ok(text.includes('directory not found'), 'the error is shown');
+  assert.ok(!text.includes('Restoring Work'), 'the progress card is gone');
+});

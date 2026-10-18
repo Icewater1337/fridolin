@@ -135,10 +135,17 @@ be listed, the run fails without syncing.
 ## Restoring
 
 Backup → Restore: choose a brain, `current` or a version, and a **new, empty**
-folder. The bridge never restores over an existing brain. Inspect the result,
-then add it as a brain (the dashboard picks up its `brain.json`) or swap
-folders yourself, which the bridge picks up when it restarts or you next
-save a setting (see [Moving a brain](BRAINS.md#moving-a-brain)).
+folder. The bridge never restores over an existing brain. The folder must
+pass the checks a new brain's folder does: inside your home folder, not in
+or around a brain, and not in the bridge's data folder or the credentials
+folder, also where a symlink on the way leads. The restore runs in the background (one at a time, and not while a
+backup runs), and the Backup page shows how the last one went, a failure
+included, with what rclone said. Inspect the result, then add it as a brain
+(the dashboard picks up its `brain.json`) or swap folders yourself, which
+the bridge picks up when it restarts or you next save a setting (see
+[Moving a brain](BRAINS.md#moving-a-brain)). Until then, every brain can
+read the copy: the sandbox keeps brains out of each other's folders, and a
+restored copy is not a brain's folder yet.
 
 On a new machine: install the bridge, connect Drive, restore each brain into a
 new folder, add them, and pair WhatsApp again. `_bridge/current/config.json`

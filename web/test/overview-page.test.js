@@ -37,6 +37,13 @@ test('backups that were never set up are offered', async (t) => {
   assert.ok(!text.includes('Daily backups are on'), text);
 });
 
+for (const [job, want] of [[{}, 'Backing up…'], [{ restoring: true }, 'Restoring…']]) {
+  test(`a running job reads "${want}"`, async (t) => {
+    const root = await openOverview(t, { backup: { connected: true, enabled: true, running: true, ...job } });
+    assert.ok(root.textContent.includes(want), root.textContent);
+  });
+}
+
 test('a failed backup says whose it was', async (t) => {
   const root = await openOverview(t, {
     brains: [{ id: 'notes', name: 'Notes', routing: {} }],

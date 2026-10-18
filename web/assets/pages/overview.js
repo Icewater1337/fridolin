@@ -167,7 +167,7 @@ export default {
       const stranded = !b.connected && b.enabled;
       if (stranded) p = pill('Not connected', 'bad');
       else if (!b.connected) p = pill('Not set up', 'neutral');
-      else if (b.running) p = pill('Backing up…', 'info', { pulse: true });
+      else if (b.running) p = pill(b.restoring ? 'Restoring…' : 'Backing up…', 'info', { pulse: true });
       else if (b.last_error && !b.last_ok) p = pill('Failing', 'bad');
       else if (b.enabled) p = pill('Daily', 'ok');
       else p = pill('Manual only', 'warn');

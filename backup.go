@@ -20,6 +20,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode"
 
 	"golang.org/x/text/unicode/norm"
 )
@@ -125,18 +126,45 @@ type backupState struct {
 	ArmedAt time.Time                `json:"armed_at,omitzero"`
 	Brains  map[string]*BackupResult `json:"brains"`
 	Bridge  *BackupResult            `json:"bridge"`
+	// LastRestore is how the last restore went, for the Backup page.
+	LastRestore *RestoreResult `json:"last_restore,omitempty"`
 	// RefusalNotices holds when the owner was told on WhatsApp that a
 	// brain's scheduled backup refused a mass deletion; an entry stays until
 	// a backup of that brain succeeds, so each refusal streak is told once.
 	RefusalNotices map[string]time.Time `json:"refusal_notices,omitempty"`
 }
 
+// RestoreResult is the outcome of a restore.
+type RestoreResult struct {
+	Brain    string    `json:"brain"`
+	Version  string    `json:"version"`
+	Target   string    `json:"target"`
+	Started  time.Time `json:"started"`
+	Finished time.Time `json:"finished"`
+	OK       bool      `json:"ok"`
+	Error    string    `json:"error,omitempty"`
+	Bytes    int64     `json:"bytes"`
+	Files    int64     `json:"files"`
+}
+
+// The kinds of backupJob.
+const (
+	jobBackup  = "backup"
+	jobRestore = "restore"
+)
+
+// backupJob is the backup or restore that runs; there is one at a time.
 type backupJob struct {
+	kind    string // jobBackup or jobRestore
 	started time.Time
+	// A backup's progress: the id being backed up, those still to come
+	// and those done.
 	current string
 	queue   []string
 	done    []string
-	cancel  context.CancelFunc
+	// A restore's brain and folder.
+	brain, target string
+	cancel        context.CancelFunc
 }
 
 // BackupManager runs and schedules backups.
@@ -389,6 +417,7 @@ type backupSummary struct {
 	Connected bool       `json:"connected"`
 	Enabled   bool       `json:"enabled"`
 	Running   bool       `json:"running"`
+	Restoring bool       `json:"restoring,omitempty"` // what runs is a restore, not a backup
 	LastOK    *time.Time `json:"last_ok,omitempty"`
 	LastError string     `json:"last_error,omitempty"`
 	// LastErrorBrain is whose backup LastError is: a brain's id, or
@@ -407,6 +436,7 @@ func (m *BackupManager) Summary() backupSummary {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	s := backupSummary{Connected: m.connected(), Enabled: cfg.Backup.Enabled, Running: m.job != nil}
+	s.Restoring = s.Running && m.job.kind == jobRestore
 	results := map[string]*BackupResult{bridgeBackupID: m.state.Bridge}
 	for _, br := range brains {
 		results[br.ID()] = m.state.Brains[br.ID()]
@@ -520,8 +550,11 @@ func (b *Bridge) apiBackupStatus(w http.ResponseWriter, r *http.Request) {
 			Exclude: nonNil(s.manifest.Backup.Exclude), Last: m.state.Brains[br.ID()]})
 	}
 	var job map[string]any
-	if m.job != nil {
-		job = map[string]any{"started": m.job.started, "current": m.job.current, "queue": m.job.queue, "done": m.job.done}
+	if j := m.job; j != nil {
+		job = map[string]any{"kind": j.kind, "started": j.started, "current": j.current, "queue": j.queue, "done": j.done}
+		if j.kind == jobRestore {
+			job["brain"], job["target"] = j.brain, j.target
+		}
 	}
 	connected := m.connected()
 	resp := map[string]any{
@@ -533,6 +566,7 @@ func (b *Bridge) apiBackupStatus(w http.ResponseWriter, r *http.Request) {
 		"brains":                rows,
 		"bridge":                m.state.Bridge,
 		"job":                   job,
+		"last_restore":          m.state.LastRestore,
 	}
 	if next := m.nextRunLocked(cfg, connected); next != nil {
 		resp["next_run"] = *next
@@ -946,7 +980,7 @@ func (m *BackupManager) StartRun(ids []string, includeBridge bool, trigger strin
 		return errDisconnecting
 	}
 	ctx, cancel := context.WithCancel(context.Background())
-	job := &backupJob{started: time.Now(), cancel: cancel}
+	job := &backupJob{kind: jobBackup, started: time.Now(), cancel: cancel}
 	for _, br := range targets {
 		job.queue = append(job.queue, br.ID())
 	}
@@ -1100,7 +1134,7 @@ func (m *BackupManager) backupBrain(ctx context.Context, br *Brain, trigger stri
 	// One config snapshot for the check and the sync, so a backup.root
 	// changed mid-run cannot count one folder and sync into another.
 	cfg := m.cfgs.Get()
-	base := cfg.Backup.Remote + ":" + cfg.Backup.Root + "/" + br.ID()
+	base := backupPath(cfg.Backup, br.ID())
 	if force {
 		return m.syncDir(ctx, br.Dir(), base, filter, trigger, -1)
 	}
@@ -1239,7 +1273,7 @@ func (m *BackupManager) backupBridge(ctx context.Context, trigger string) *Backu
 	// No deletion limit: the bridge writes this folder itself, and removing
 	// a brain drops its manifest, a deletion the backup must mirror.
 	cfg := m.cfgs.Get()
-	return m.syncDir(ctx, stage, cfg.Backup.Remote+":"+cfg.Backup.Root+"/"+bridgeBackupID, "", trigger, -1)
+	return m.syncDir(ctx, stage, backupPath(cfg.Backup, bridgeBackupID), "", trigger, -1)
 }
 
 // writeStaged writes one file into the staging folder, a variable so tests
@@ -1409,7 +1443,7 @@ func (m *BackupManager) prune(ctx context.Context, targets []*Brain) {
 	for _, id := range ids {
 		// One config snapshot for the listing and the purges, so a backup.root
 		// changed mid-run cannot make them point at different folders.
-		versions := cfg.Backup.Remote + ":" + cfg.Backup.Root + "/" + id + "/versions"
+		versions := backupPath(cfg.Backup, id, "versions")
 		names, err := m.listVersions(ctx, versions)
 		if ctx.Err() != nil {
 			return // cancelled: stop rather than log a failure for every id
@@ -1497,16 +1531,45 @@ func (m *BackupManager) listVersions(ctx context.Context, versions string) ([]st
 
 // ── versions and restore ─────────────────────────────────────────────────
 
+// backupPath is the rclone path of the backup named id under backup.root,
+// with parts below it: backupPath(bc, "notes", "versions") is
+// "brain-gdrive:fridolin-backup/notes/versions". Every path the backups
+// use is built here, from a name that backupNameOK accepts.
+func backupPath(bc BackupConfig, id string, parts ...string) string {
+	return bc.Remote + ":" + strings.Join(append([]string{bc.Root, id}, parts...), "/")
+}
+
+// backupNameOK reports whether id can name a backup in Drive: one path
+// segment, not "." or "..", with no separator, colon or control character
+// that would make the remote path name another folder. That covers the
+// bridge's own (bridgeBackupID) and every brain id, and the names of brains
+// backed up before ids were held to brainIDRe, which may still be restored.
+func backupNameOK(id string) bool {
+	if id == "" || id == "." || id == ".." || len(id) > 100 {
+		return false
+	}
+	return !strings.ContainsFunc(id, func(r rune) bool {
+		return r == '/' || r == '\\' || r == ':' || unicode.IsControl(r)
+	})
+}
+
+// restoreVersionRe matches what a restore may copy: the latest copy, or a
+// version folder named as the runs name them (versionLayout).
+var restoreVersionRe = regexp.MustCompile(`^(current|\d{8}-\d{6})$`)
+
 func (b *Bridge) apiBackupVersions(w http.ResponseWriter, r *http.Request) {
 	id := r.URL.Query().Get("brain")
-	if id == "" || strings.ContainsAny(id, "/:") {
+	if !backupNameOK(id) {
 		writeErr(w, http.StatusBadRequest, "brain required")
+		return
+	}
+	if !b.backup.connected() {
+		writeErr(w, http.StatusPreconditionFailed, "Google Drive is not connected")
 		return
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), 60*time.Second)
 	defer cancel()
-	cfg := b.cfgs.Get()
-	versions, err := b.backup.listVersions(ctx, cfg.Backup.Remote+":"+cfg.Backup.Root+"/"+id+"/versions")
+	versions, err := b.backup.listVersions(ctx, backupPath(b.cfgs.Get().Backup, id, "versions"))
 	if err != nil {
 		writeErr(w, http.StatusBadGateway, "listing versions failed: "+err.Error())
 		return
@@ -1515,9 +1578,55 @@ func (b *Bridge) apiBackupVersions(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"brain": id, "versions": versions})
 }
 
+// resolveExisting resolves the symlinks of absolute path p as far as it
+// exists, and puts back the part that does not. CheckBrainPath resolves
+// only a path that exists, so a new folder under a symlink would be checked
+// where the link is, and then made, and restored into, where it points: in
+// a brain, say.
+func resolveExisting(p string) string {
+	if !filepath.IsAbs(p) {
+		return p
+	}
+	p = filepath.Clean(p)
+	rest := ""
+	for d := p; ; d = filepath.Dir(d) {
+		if r, err := filepath.EvalSymlinks(d); err == nil {
+			return filepath.Join(r, rest)
+		}
+		if filepath.Dir(d) == d {
+			return p
+		}
+		rest = filepath.Join(filepath.Base(d), rest)
+	}
+}
+
+// restoreTarget checks the folder a restore copies into, as for a new brain
+// (CheckBrainPath): inside your home folder, neither the data dir nor in or
+// around a brain, and not the credentials folder either; and new or empty.
+// It returns the folder, resolved.
+func (b *Bridge) restoreTarget(p string) (string, error) {
+	cfg := b.cfgs.Get()
+	target, problems, _ := CheckBrainPath(resolveExisting(expandHome(strings.TrimSpace(p), homeDir())), cfg, b.otherBrainDirs(""))
+	if creds := canonicalDir(cfg.Sandbox.CredentialsDir); len(problems) == 0 && creds != "" && (isWithin(target, creds) || isWithin(creds, target)) {
+		problems = append(problems, "the credentials folder cannot be (or contain) the restore folder")
+	}
+	if len(problems) > 0 {
+		return "", errors.New(strings.Join(problems, "; "))
+	}
+	entries, err := os.ReadDir(target)
+	switch {
+	case err == nil && len(entries) > 0:
+		return "", errors.New("the restore folder must be new or empty")
+	case err != nil && !errors.Is(err, fs.ErrNotExist):
+		return "", err
+	}
+	return target, nil
+}
+
 // apiBackupRestore copies a backup into a new, empty folder. It never writes
 // into an existing brain: you inspect the copy and add it as a brain (or
-// swap folders) yourself.
+// swap folders) yourself. The restore runs as the job; how it went is saved
+// as the state's LastRestore, which the Backup page shows.
 func (b *Bridge) apiBackupRestore(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		Brain   string `json:"brain"`
@@ -1528,33 +1637,27 @@ func (b *Bridge) apiBackupRestore(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	if req.Brain == "" || strings.ContainsAny(req.Brain+req.Version, "/:\\") || strings.Contains(req.Version, "..") {
+	if req.Version == "" {
+		req.Version = "current"
+	}
+	if !backupNameOK(req.Brain) || !restoreVersionRe.MatchString(req.Version) {
 		writeErr(w, http.StatusBadRequest, "invalid brain or version")
 		return
 	}
-	cfg := b.cfgs.Get()
-	home := homeDir()
-	target := canonicalDir(expandHome(strings.TrimSpace(req.Target), home))
-	if !filepath.IsAbs(target) || !isWithin(target, canonicalDir(home)) || target == canonicalDir(home) {
-		writeErr(w, http.StatusUnprocessableEntity, "restore into a new folder inside your home folder")
-		return
-	}
-	for _, d := range b.otherBrainDirs("") {
-		d = canonicalDir(d)
-		if isWithin(target, d) || isWithin(d, target) {
-			writeErr(w, http.StatusUnprocessableEntity, "the restore folder overlaps the brain at "+d+" — pick a new folder")
-			return
-		}
-	}
-	if entries, err := os.ReadDir(target); err == nil && len(entries) > 0 {
-		writeErr(w, http.StatusUnprocessableEntity, "the restore folder must be new or empty")
-		return
-	}
-	src := cfg.Backup.Remote + ":" + cfg.Backup.Root + "/" + req.Brain + "/current"
-	if req.Version != "" && req.Version != "current" {
-		src = cfg.Backup.Remote + ":" + cfg.Backup.Root + "/" + req.Brain + "/versions/" + req.Version
-	}
 	m := b.backup
+	if !m.connected() {
+		writeErr(w, http.StatusPreconditionFailed, "Google Drive is not connected")
+		return
+	}
+	target, err := b.restoreTarget(req.Target)
+	if err != nil {
+		writeErr(w, http.StatusUnprocessableEntity, err.Error())
+		return
+	}
+	src := backupPath(b.cfgs.Get().Backup, req.Brain, "current")
+	if req.Version != "current" {
+		src = backupPath(b.cfgs.Get().Backup, req.Brain, "versions", req.Version)
+	}
 	m.mu.Lock()
 	if m.job != nil {
 		m.mu.Unlock()
@@ -1566,19 +1669,21 @@ func (b *Bridge) apiBackupRestore(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusConflict, errDisconnecting.Error())
 		return
 	}
+	// Made here, so that a folder that cannot be made is the request's
+	// error rather than a restore that fails out of sight.
+	if err := os.MkdirAll(target, 0o700); err != nil {
+		m.mu.Unlock()
+		writeErr(w, http.StatusInternalServerError, "creating the restore folder failed: "+err.Error())
+		return
+	}
 	ctx, cancel := context.WithCancel(context.Background())
-	job := &backupJob{started: time.Now(), cancel: cancel, current: "restore:" + req.Brain}
-	err := m.goLocked(func() {
+	job := &backupJob{kind: jobRestore, started: time.Now(), cancel: cancel, brain: req.Brain, target: target}
+	err = m.goLocked(func() {
 		defer cancel()
-		_ = os.MkdirAll(target, 0o700)
-		stderr := &jsonStats{}
-		_, err := m.runner(ctx, []string{"copy", src, target, "--links", "--use-json-log", "-v"}, stderr)
-		if err != nil {
-			log.Printf("restore %s into %s FAILED: %v %s", req.Brain, target, err, stderr.lastError())
-		} else {
-			log.Printf("restore %s (%s) into %s: done", req.Brain, req.Version, target)
-		}
+		res := m.restore(ctx, src, req.Brain, req.Version, target)
 		m.mu.Lock()
+		m.state.LastRestore = res
+		m.saveStateLocked()
 		m.job = nil
 		m.mu.Unlock()
 	})
@@ -1591,6 +1696,30 @@ func (b *Bridge) apiBackupRestore(w http.ResponseWriter, r *http.Request) {
 	m.job = job
 	m.mu.Unlock()
 	writeJSON(w, http.StatusAccepted, map[string]string{"status": "restoring", "target": target})
+}
+
+// restore copies src, a backup of brain, into target, and says how it went.
+func (m *BackupManager) restore(ctx context.Context, src, brain, version, target string) *RestoreResult {
+	res := &RestoreResult{Brain: brain, Version: version, Target: target, Started: time.Now()}
+	stderr := &jsonStats{}
+	_, err := m.runner(ctx, []string{"copy", src, target, "--links", "--use-json-log", "-v",
+		"--stats", "15s", "--stats-log-level", "NOTICE"}, stderr)
+	res.Finished = time.Now()
+	res.Bytes, res.Files = stderr.bytes, stderr.files
+	switch {
+	case ctx.Err() != nil:
+		res.Error = "cancelled"
+	case err != nil:
+		res.Error = strings.TrimSpace(err.Error() + " " + stderr.lastError())
+	default:
+		res.OK = true
+	}
+	if res.OK {
+		log.Printf("restore %s (%s) into %s: ok, %d files", brain, version, target, res.Files)
+	} else {
+		log.Printf("restore %s (%s) into %s FAILED: %s", brain, version, target, res.Error)
+	}
+	return res
 }
 
 // ── scheduler ────────────────────────────────────────────────────────────
