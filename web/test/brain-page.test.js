@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { installDom } from './fake-dom.js';
-import { serve, settle, type } from './serve.js';
+import { serve, settle, type, noConsoleErrors } from './serve.js';
 import { h } from '../assets/lib/dom.js';
 import { createPage } from '../assets/app/page.js';
 import { brainsResource } from '../assets/app/resources.js';
@@ -13,6 +13,7 @@ const view = (name, runtime = null) => ({ id: 'work', name, path: '/Users/you/wo
 async function openPage(t) {
   t.mock.timers.enable({ apis: ['setTimeout', 'Date'] });
   installDom();
+  noConsoleErrors(t);
   const bridge = { brains: [view('Work')] };
   serve(t, (path) => {
     if (path.startsWith('/api/brains/work/calendar')) return { client_configured: false, connected: false };

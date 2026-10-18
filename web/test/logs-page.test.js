@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { installDom } from './fake-dom.js';
-import { serve, settle, type } from './serve.js';
+import { serve, settle, type, noConsoleErrors } from './serve.js';
 import { h } from '../assets/lib/dom.js';
 import { createPage } from '../assets/app/page.js';
 import page from '../assets/pages/logs.js';
@@ -22,6 +22,7 @@ function ring(boot, texts) {
 async function openPage(t) {
   t.mock.timers.enable({ apis: ['setTimeout', 'Date'] });
   installDom();
+  noConsoleErrors(t);
   const bridge = { ring: ring(100, ['started', 'brain work: error for 15551234567@s.whatsapp.net: exit status 1', 'third']) };
   const calls = serve(t, (path) => {
     const after = Number(new URL(path, 'http://x').searchParams.get('after') || 0);

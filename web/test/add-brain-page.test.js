@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { installDom } from './fake-dom.js';
-import { serve, settle, type } from './serve.js';
+import { serve, settle, type, noConsoleErrors } from './serve.js';
 import { h } from '../assets/lib/dom.js';
 import { createPage } from '../assets/app/page.js';
 import page from '../assets/pages/add-brain.js';
@@ -9,6 +9,7 @@ import page from '../assets/pages/add-brain.js';
 test('the wizard asks before leaving only once something was edited', async (t) => {
   t.mock.timers.enable({ apis: ['setTimeout', 'Date'] });
   installDom();
+  noConsoleErrors(t);
   globalThis.window = { scrollTo() {} };
   t.after(() => { delete globalThis.window; });
   serve(t, (path) => {

@@ -29,3 +29,18 @@ export function type(input, text) {
   input.value = text;
   input.dispatchEvent(new Event('input', { bubbles: true }));
 }
+
+/**
+ * Fails the test when the page logs an error: a store or resource
+ * subscriber that throws is caught and only logged, so a page could break
+ * without anything else failing.
+ */
+export function noConsoleErrors(t) {
+  const real = console.error;
+  const seen = [];
+  console.error = (...args) => seen.push(args.map(String).join(' '));
+  t.after(() => {
+    console.error = real;
+    if (seen.length) throw new Error(`console.error: ${seen.join('; ')}`);
+  });
+}

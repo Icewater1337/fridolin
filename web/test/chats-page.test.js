@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { installDom } from './fake-dom.js';
-import { serve, settle, type } from './serve.js';
+import { serve, settle, type, noConsoleErrors } from './serve.js';
 import { h } from '../assets/lib/dom.js';
 import { createPage } from '../assets/app/page.js';
 import { ignoredResource, configResource, brainsResource } from '../assets/app/resources.js';
@@ -15,6 +15,7 @@ const brain = (id, routing = {}) => ({ id, name: id, status: 'ok', manifest: { i
 async function openPage(t, { brains = [brain('work', { default: true }), brain('family')] } = {}) {
   t.mock.timers.enable({ apis: ['setTimeout', 'Date'] });
   installDom();
+  noConsoleErrors(t);
   const bridge = {
     numbers: ['15551234567'],
     ignored: [{ kind: 'group', jid: WAITING, name: 'Book club', count: 1, last_seen: '2026-10-18T10:00:00Z' }],

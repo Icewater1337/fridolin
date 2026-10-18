@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { installDom } from './fake-dom.js';
-import { serve, settle, type } from './serve.js';
+import { serve, settle, type, noConsoleErrors } from './serve.js';
 import { h } from '../assets/lib/dom.js';
 import { createPage } from '../assets/app/page.js';
 import { configResource } from '../assets/app/resources.js';
@@ -10,6 +10,7 @@ import page from '../assets/pages/settings.js';
 async function openPage(t) {
   t.mock.timers.enable({ apis: ['setTimeout', 'Date'] });
   installDom();
+  noConsoleErrors(t);
   const scrolled = [];
   globalThis.window = { scrollTo: (to) => scrolled.push(to) };
   t.after(() => { delete globalThis.window; });

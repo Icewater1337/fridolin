@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { installDom } from './fake-dom.js';
-import { serve, settle, type } from './serve.js';
+import { serve, settle, type, noConsoleErrors } from './serve.js';
 import { h } from '../assets/lib/dom.js';
 import { createPage } from '../assets/app/page.js';
 import { resource } from '../assets/app/resources.js';
@@ -19,6 +19,7 @@ const disconnected = () => ({ rclone: { found: true }, connected: false, connect
 test('a schedule edit goes with the connection, and the schedule comes back with it', async (t) => {
   t.mock.timers.enable({ apis: ['setTimeout', 'Date'] });
   installDom();
+  noConsoleErrors(t);
   const bridge = { status: connected() };
   serve(t, (path) => (path.startsWith('/api/backup/status') ? bridge.status : {}));
   const root = h('div');
@@ -50,6 +51,7 @@ test('a schedule edit goes with the connection, and the schedule comes back with
 test('a refresh keeps the brain chosen for a restore', async (t) => {
   t.mock.timers.enable({ apis: ['setTimeout', 'Date'] });
   installDom();
+  noConsoleErrors(t);
   const bridge = { status: connected() };
   serve(t, (path) => {
     if (path.startsWith('/api/backup/status')) return bridge.status;
