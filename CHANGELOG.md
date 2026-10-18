@@ -192,6 +192,9 @@ for compatibility.
 
 ### Fixed
 
+- A build chat on the Site's Build page shows that Claude's usage limit is
+  reached, that its message is queued, or that the queue is full. It left
+  out every notice that starts with ⏳, to leave out "Working on it".
 - "Connect again" on a Plaud login that Plaud refuses signs that login
   out first, giving the sign-out up to 30 seconds. Before, it took the
   CLI's "Already logged in" for a new sign-in and showed Connected until

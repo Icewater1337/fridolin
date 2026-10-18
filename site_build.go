@@ -154,8 +154,10 @@ func (s siteChatMessenger) SendPoll(ctx context.Context, jid, q string, opts []s
 }
 
 func (s siteChatMessenger) toChat(brainID, text string) error {
-	// "Working on it" is what the page shows anyway while a run lasts.
-	if strings.HasPrefix(text, "⏳") {
+	// "Working on it" is what the page shows anyway while a run lasts. Only
+	// that notice: others start with the same ⏳, and a build chat must not
+	// miss that its message waits, or that Claude's usage limit is reached.
+	if text == workingNotice {
 		return nil
 	}
 	return s.chats.add(brainID, "assistant", text)
