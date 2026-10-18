@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"errors"
+	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
@@ -199,5 +200,71 @@ func TestQuestionAndFinalReplyBothReachTheChat(t *testing.T) {
 	}
 	if last := br.Snapshot().Last; last == nil || last.Outcome != outcomeQuestion {
 		t.Errorf("last run = %+v, want the outcome %q", last, outcomeQuestion)
+	}
+}
+
+// A message that comes in while the run before it in the chat is still at
+// work gets its run once that run's reply went out, and its prompt shows
+// the reply as sent since it came in: its sender had not seen it. So does
+// the answer to a question the run asked before it was over, which must
+// learn what that run settled on in the end ("I booked Monday").
+func TestQueuedRunSeesWhatWasSentWhileItWaited(t *testing.T) {
+	cases := []struct {
+		name          string
+		env           map[string]string
+		first, second string
+		// asked is the question the first run sends before the second
+		// message comes in, "" for none.
+		asked string
+	}{
+		{"a reply to the message before", map[string]string{"FRIDOLIN_FAKE_SLEEP_MS": "700"}, "FIRST", "SECOND", ""},
+		{"the reply after a question", map[string]string{"FRIDOLIN_FAKE_ASK_ON": "a table", "FRIDOLIN_FAKE_SLEEP_AFTER_ASK_MS": "700"}, "book a table", "Tuesday", "❓ Which day suits you?"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			tb, br := newMainBridge(t, `, "queue": {"notify": false}`)
+			promptLog := filepath.Join(tb.home, "prompts.log")
+			t.Setenv("FRIDOLIN_FAKE_PROMPT_LOG", promptLog)
+			for k, v := range c.env {
+				t.Setenv(k, v)
+			}
+			ctx := context.Background()
+			tb.handleInbound(ctx, Inbound{JID: testDMChat, Sender: "15551234567", Text: c.first, Source: sourceWhatsApp})
+			if c.asked == "" {
+				waitFor(t, 10*time.Second, "the first run", func() bool { return br.Snapshot().Running != nil })
+			} else {
+				// In the history, as the chat has it before anyone answers.
+				waitFor(t, 10*time.Second, "the question", func() bool { return slices.Contains(outbound(t, br)[testDMChat], c.asked) })
+			}
+			tb.handleInbound(ctx, Inbound{JID: testDMChat, Sender: "15551234567", Text: c.second, Source: sourceWhatsApp})
+			replies := func() []string {
+				var out []string
+				for _, s := range tb.sentTo(testDMChat) {
+					if s != c.asked {
+						out = append(out, s)
+					}
+				}
+				return out
+			}
+			waitFor(t, 10*time.Second, "both replies", func() bool { return len(replies()) == 2 })
+
+			first := replies()[0]
+			if !strings.HasSuffix(first, "says: "+c.first) {
+				t.Fatalf("the first reply is %q, want the answer to %q", first, c.first)
+			}
+			var prompt string
+			for msg, p := range loggedPrompts(t, promptLog) {
+				if strings.HasSuffix(msg, "says: "+c.second) {
+					prompt = p
+				}
+			}
+			history, since := promptBlock(prompt, "chat_history"), promptBlock(prompt, "sent_since")
+			if !strings.Contains(history, c.first) || !strings.Contains(history, c.asked) {
+				t.Errorf("the history in the second prompt lacks %q or %q:\n%s", c.first, c.asked, prompt)
+			}
+			if !strings.Contains(since, first) || strings.Contains(history, first) {
+				t.Errorf("the second prompt does not show the first reply as sent since it came in:\n%s", prompt)
+			}
+		})
 	}
 }

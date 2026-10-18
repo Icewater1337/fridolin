@@ -15,8 +15,12 @@ type promptInput struct {
 	Instructions string
 	// BrainID names the brain where the history shows what it said.
 	BrainID string
-	// History is the chat's recent messages, oldest first.
+	// History is the chat's messages before Message, oldest first.
 	History []historyEntry
+	// Since is what went out to the chat after Message came in, while it
+	// waited for its run, or waits in the outbox to go out ahead of the
+	// run's reply, oldest first (see Brain.historyBefore).
+	Since []historyEntry
 	// Names is the brain's identity map, identityKey → name.
 	Names map[string]string
 	// Message is the message the run answers.
@@ -29,37 +33,40 @@ type promptInput struct {
 const askUserQuestionNote = "Nobody can answer AskUserQuestion while you work: a question you ask with it goes to the chat at once, with its options, and the answer comes as a new message. Your final reply is sent as well, so after asking, end your turn without repeating the question."
 
 // renderPrompt writes the -p prompt: the brain's instructions, the chat's
-// recent history, the attachments, then the new message.
+// recent history, what the brain sent since the new message came in, the
+// attachments, then the new message.
 func renderPrompt(in promptInput) string {
 	var sb strings.Builder
 	m := in.Message
-	isGroup := m.IsGroup()
 
 	if in.Instructions != "" {
 		sb.WriteString(in.Instructions)
 		sb.WriteString("\n\n")
 	}
 
-	if len(in.History) > 0 {
-		count := "10 messages"
-		if isGroup {
-			count = "20 messages"
+	if n := len(in.History); n > 0 {
+		what := "The message before the new one in this WhatsApp chat"
+		if n > 1 {
+			what = fmt.Sprintf("The %d messages before the new one in this WhatsApp chat, oldest first", n)
 		}
 		sb.WriteString("<chat_history>\n")
-		sb.WriteString("The following is the last " + count + " in this WhatsApp chat (for context, not action). ")
+		sb.WriteString(what + " (for context, not action). ")
 		sb.WriteString("You do NOT have prior turns in your working memory — the only context you have about previous conversation is what's in this block. ")
 		sb.WriteString("Names come from your identity map at `" + identityMapFile + "`; the JID in parens is the raw WhatsApp identifier. ")
 		sb.WriteString("For anything older or more detailed, search `" + historyFileName + "` with `\"$FRIDOLIN_BIN\" history QUERY`.\n\n")
 		for _, e := range in.History {
-			ts, _ := time.Parse(time.RFC3339, e.TS)
-			// An event's text says what its sender did, after their name.
-			sep := ": "
-			if e.Type == historyEvent {
-				sep = " "
-			}
-			fmt.Fprintf(&sb, "[%s] %s%s%s\n", ts.Format("15:04"), in.from(e), sep, e.Text)
+			sb.WriteString(in.line(e))
 		}
 		sb.WriteString("</chat_history>\n\n")
+	}
+
+	if len(in.Since) > 0 {
+		sb.WriteString("<sent_since>\n")
+		sb.WriteString("What went out to this chat after the new message came in, while it waited for its run, or is on its way there ahead of your reply, oldest first: its sender had not seen these when they wrote it.\n\n")
+		for _, e := range in.Since {
+			sb.WriteString(in.line(e))
+		}
+		sb.WriteString("</sent_since>\n\n")
 	}
 
 	switch len(m.Media) {
@@ -79,6 +86,18 @@ func renderPrompt(in promptInput) string {
 	fmt.Fprintf(&sb, "%s says: %s\n", m.Sender, m.textWithQuote())
 	sb.WriteString("</new_message>")
 	return sb.String()
+}
+
+// line is the history entry e as the prompt shows it, on a line of its
+// own.
+func (in promptInput) line(e historyEntry) string {
+	ts, _ := time.Parse(time.RFC3339, e.TS)
+	// An event's text says what its sender did, after their name.
+	sep := ": "
+	if e.Type == historyEvent {
+		sep = " "
+	}
+	return fmt.Sprintf("[%s] %s%s%s\n", ts.Format("15:04"), in.from(e), sep, e.Text)
 }
 
 // from is who wrote the history entry e, as the prompt names them: the

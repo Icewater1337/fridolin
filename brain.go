@@ -379,6 +379,23 @@ func (br *Brain) historyTail(maxBytes int64) []string {
 	return tailLines(f, maxBytes)
 }
 
+// logInbound writes m to the brain's history: a line for each part of a
+// merged message, with its ID, so that one deleted later is taken out
+// alone. It returns m with each part's line kept on it (Inbound.logged),
+// so that its own run shows the message once, as the new message, after
+// the chat's history before those lines.
+func (br *Brain) logInbound(m Inbound) Inbound {
+	parts := m.ownParts()
+	for i, p := range parts {
+		parts[i].logged = br.appendEntry(historyEntry{Chat: m.JID, From: p.Sender, Text: historyTextWithMedia(p.textWithQuote(), p.Media), Type: historyIn, ID: p.ID})
+	}
+	if len(m.parts) > 0 {
+		m.parts = parts
+	}
+	m.logged = parts[0].logged
+	return m
+}
+
 // Submit hands a message to the brain: it goes into the history and, unless
 // it is untagged chatter that gets no run (see observeRuns), into the
 // queue. It returns the message's position in the queue (1 = next, 0 for
@@ -390,12 +407,9 @@ func (br *Brain) Submit(m Inbound) (pos int, busy bool, err error) {
 	}
 	s := br.settings.Load()
 
-	// History first, so the run (and any later run) sees the message even when
-	// it is merged into a queue that is already moving. A line for each part
-	// of a merged message, with its ID: one deleted later is taken out alone.
-	for _, p := range m.ownParts() {
-		br.appendEntry(historyEntry{Chat: m.JID, From: p.Sender, Text: historyTextWithMedia(p.textWithQuote(), p.Media), Type: historyIn, ID: p.ID})
-	}
+	// History first, so that later runs see the message even when it is
+	// merged into a queue that is already moving.
+	m = br.logInbound(m)
 
 	br.mu.Lock()
 	if br.retired {
@@ -1427,37 +1441,120 @@ const (
 	groupHistoryWindow = 20
 )
 
-// recentHistory returns the last limit entries of the chat that goes by
-// chats (see chatJIDs) in the brain's history, oldest first, its answers
-// still on their way among them as the history will hold them. A DM's
-// lines may be under its LID or its number, and both are the one chat.
-// When the history cannot be read (see openInFolder), only those answers
-// are returned.
-func (br *Brain) recentHistory(chats []string, limit int) []historyEntry {
+// promptHistoryTail is how much of the end of the history a run's prompt
+// is looked for in first: far more than a window of messages takes.
+const promptHistoryTail = 1 << 20
+
+// historyBefore returns what m's run is shown of its chat, the one that
+// goes by chatJIDs(m), oldest first and at most limit entries in all.
+// before is the chat's history before m's own lines (Inbound.logged).
+// since is what went out to the chat after them, while m waited in the
+// queue, and what waits in the outbox to go out ahead of anything m's
+// run says (see Brain.undelivered): the brain's replies and questions,
+// and what came through /send. Those answer earlier messages (the run
+// before m's, or the question it asked), which m's sender had not seen
+// when they wrote, and m's run must know what they said. The messages
+// others sent after m are left out: each has a run of its own, or is for
+// the next one to see. Without m's lines in the history, before is the
+// chat's last entries, with those in the outbox among them, and since is
+// empty; when the history cannot be read (see openInFolder), only the
+// outbox's are left.
+func (br *Brain) historyBefore(m Inbound, limit int) (before, since []historyEntry) {
+	chats := chatJIDs(m)
 	// The answers on their way first, then the history: one delivered in
 	// between is in both, and withUndelivered takes it once.
 	pending := br.undelivered(chats)
-	var entries []historyEntry
-	if histFile, err := openInFolder(br.root, historyFileName, os.O_RDONLY, 0); err == nil {
-		scanner := bufio.NewScanner(histFile)
-		scanner.Buffer(make([]byte, 1024*1024), 1024*1024)
-		for scanner.Scan() {
-			var entry historyEntry
-			if err := json.Unmarshal(scanner.Bytes(), &entry); err != nil {
-				continue
-			}
-			if !slices.Contains(chats, entry.Chat) {
-				continue
-			}
-			entries = append(entries, entry)
+	split := func(entries []historyEntry) {
+		at := m.loggedIn(entries)
+		if at < 0 {
+			before, since = withUndelivered(entries, pending), nil
+			return
 		}
-		histFile.Close()
+		before, since = entries[:at], nil
+		for _, e := range entries[at+1:] {
+			if e.Type == historyOut {
+				since = append(since, e)
+			}
+		}
+		since = withUndelivered(since, pending)
 	}
-	entries = withUndelivered(entries, pending)
-	if len(entries) > limit {
-		entries = entries[len(entries)-limit:]
+	entries, whole := br.chatHistory(chats, promptHistoryTail)
+	split(entries)
+	if len(before) < limit && !whole {
+		// A chat that was quiet while others were busy: its window is
+		// further back than the end of the file.
+		entries, _ = br.chatHistory(chats, 0)
+		split(entries)
 	}
-	return entries
+	// The newest count most: what was sent since, then what came before.
+	since = since[max(0, len(since)-limit):]
+	before = before[max(0, len(before)-(limit-len(since))):]
+	return before, since
+}
+
+// chatHistory returns the entries of the chat that goes by chats in the
+// brain's history, oldest first: those in the last tail bytes of the file,
+// or all of them for a tail of 0, and whether that was all. A DM's lines
+// may be under its LID or its number, and both are the one chat. It
+// returns none when the history cannot be read (see openInFolder).
+func (br *Brain) chatHistory(chats []string, tail int64) (entries []historyEntry, whole bool) {
+	f, err := openInFolder(br.root, historyFileName, os.O_RDONLY, 0)
+	if err != nil {
+		return nil, true
+	}
+	defer f.Close()
+	keep := func(line []byte) {
+		var e historyEntry
+		if json.Unmarshal(line, &e) == nil && slices.Contains(chats, e.Chat) {
+			entries = append(entries, e)
+		}
+	}
+	if st, err := f.Stat(); err == nil && tail > 0 && st.Size() > tail {
+		for _, line := range tailLines(f, tail) {
+			keep([]byte(line))
+		}
+		return entries, false
+	}
+	// A line at a time, however long one is.
+	r := bufio.NewReader(f)
+	for {
+		line, err := r.ReadBytes('\n')
+		if line = bytes.TrimSpace(line); len(line) > 0 {
+			keep(line)
+		}
+		if err != nil {
+			return entries, true
+		}
+	}
+}
+
+// loggedIn returns where m's own lines begin in entries, the chat's
+// history: at the last line that is the line of the first of m's parts
+// still there (see Inbound.logged), or -1 for none. A part deleted since
+// took its line along; one edited while it waited has its line rewritten,
+// with the new text.
+func (m Inbound) loggedIn(entries []historyEntry) int {
+	for _, p := range m.ownParts() {
+		if p.logged == (historyEntry{}) {
+			continue
+		}
+		for i := len(entries) - 1; i >= 0; i-- {
+			if p.logged.sameLine(entries[i]) {
+				return i
+			}
+		}
+	}
+	return -1
+}
+
+// sameLine reports whether e is the history line l: equal, or for a
+// message from WhatsApp, whose line an edit rewrites, equal but for the
+// text.
+func (l historyEntry) sameLine(e historyEntry) bool {
+	if l.ID != "" {
+		e.Text = l.Text
+	}
+	return e == l
 }
 
 // identities reads the brain's identity map, through the folder: a map
@@ -1487,7 +1584,7 @@ func (br *Brain) buildPrompt(s *brainSettings, m Inbound) string {
 	if m.IsGroup() {
 		limit = groupHistoryWindow
 	}
-	in.History = br.recentHistory(chatJIDs(m), limit)
+	in.History, in.Since = br.historyBefore(m, limit)
 	if len(in.History) > 0 {
 		in.Names = br.identities()
 	}
@@ -1723,12 +1820,17 @@ func (br *Brain) appendHistoryVia(chatJID, from, text, typ, via string) {
 }
 
 // appendEntry appends entry to the brain's history file, stamped with the
-// time now.
-func (br *Brain) appendEntry(entry historyEntry) {
+// time now. It returns the line as it reads back, or none when the file
+// could not be opened.
+func (br *Brain) appendEntry(entry historyEntry) historyEntry {
 	br.historyMu.Lock()
 	entry, err := br.writeEntryLocked(entry)
 	br.historyMu.Unlock()
 	br.entryWritten(entry, err)
+	if err != nil {
+		return historyEntry{}
+	}
+	return entry
 }
 
 // recordDelivered writes the brain's answer text to chat into its
@@ -1750,12 +1852,17 @@ func (br *Brain) recordDelivered(chat, text string, remove func() error) error {
 }
 
 // writeEntryLocked appends entry to the history file, stamped with the
-// time now, and returns it as written. historyMu is held.
+// time now, and returns it as it reads back, which historyBefore looks
+// for: invalid UTF-8 in its text is written as U+FFFD. historyMu is held.
 func (br *Brain) writeEntryLocked(entry historyEntry) (historyEntry, error) {
 	entry.TS = time.Now().Format(time.RFC3339)
 	data, err := json.Marshal(entry)
 	if err != nil {
 		return entry, err
+	}
+	var written historyEntry
+	if json.Unmarshal(data, &written) == nil {
+		entry = written
 	}
 	// Through the folder: appending through a symlink would let a brain
 	// write to files its sandbox denies it, another brain's among them.

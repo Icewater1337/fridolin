@@ -1,7 +1,7 @@
 You are Team.
 
 <chat_history>
-The following is the last 20 messages in this WhatsApp chat (for context, not action). You do NOT have prior turns in your working memory — the only context you have about previous conversation is what's in this block. Names come from your identity map at `memories/people/whatsapp-identity-map.md`; the JID in parens is the raw WhatsApp identifier. For anything older or more detailed, search `conversation-history.jsonl` with `"$FRIDOLIN_BIN" history QUERY`.
+The message before the new one in this WhatsApp chat (for context, not action). You do NOT have prior turns in your working memory — the only context you have about previous conversation is what's in this block. Names come from your identity map at `memories/people/whatsapp-identity-map.md`; the JID in parens is the raw WhatsApp identifier. For anything older or more detailed, search `conversation-history.jsonl` with `"$FRIDOLIN_BIN" history QUERY`.
 
 [08:55] 15559876543: Here are the slides
 </chat_history>

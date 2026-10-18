@@ -170,9 +170,11 @@ dashboard refuses to save any brain's settings.
 ## What a brain loads
 
 Each message is one `claude -p` run in the brain's folder. Its prompt is
-the brain's prompt file (`brain-prompt.md`) followed by the recent chat
-history, with the brain's answers that still wait to go out to WhatsApp,
-and the new message; Claude Code adds its own system prompt. From
+the brain's prompt file (`brain-prompt.md`) followed by the messages of
+the chat before the new one (the last 10 of a direct chat, 20 of a
+group), what went out there while the new one waited for its run or
+still waits to go out to WhatsApp (the reply to the message before it,
+say), and the new message; Claude Code adds its own system prompt. From
 the brain's folder it also loads the Claude Code setup a session started
 there would: `CLAUDE.md` and `CLAUDE.local.md`, the settings, skills,
 agents, commands and rules in `.claude/`, and the MCP servers in
