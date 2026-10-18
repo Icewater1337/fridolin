@@ -663,7 +663,11 @@ Reading is allowed by default. Brains cannot read:
   brain with its name, and with them every file at its top from before
   the bridge started: older versions downloaded every chat's attachments
   there, where `/ingest` would hand them to any brain that guessed a
-  name. A folder `media/.inboxes/` says it has done so.
+  name. A folder `media/.inboxes/` says it has done so. What it cannot
+  move (a folder without write permission, an immutable file) stays where
+  it is, the log says so, and `media/.inboxes/stuck` lists it: a brain
+  with its name gets no inbox, and no run, until you move it out of the
+  media folder; every other brain runs.
 - the database (`db_path`, with its `-wal`, `-shm` and `-journal` files)
   wherever it is, and its folder when that lies outside the data directory,
   unless the folder is your home folder or a temp folder
@@ -904,7 +908,10 @@ Default `~/.fridolin`; an install from before the project was renamed keeps
 in the log at every start: set `data_dir` to it to keep it for good. A new
 config, from `fridolin init`, `setup.sh` or the first start, gets the folder
 chosen then (written with `~`), so later starts do not choose again.
-`db_path` and `media_dir` override individually. Brains cannot read it,
+`db_path` and `media_dir` override individually. A `media_dir` must be
+the bridge's alone: on the first start of a version with media inboxes,
+every folder in it and every file at its top moves to `.old/` in it (see
+[reading](#reading)). Brains cannot read it,
 except their own inbox in `media/` (`media/<brain id>/`) and their own
 runs' brain API tokens in `run-tokens/<id>/`; a `db_path` elsewhere is
 denied to them too.

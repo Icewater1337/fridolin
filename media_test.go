@@ -1,7 +1,9 @@
 package main
 
 import (
+	"errors"
 	"io"
+	"io/fs"
 	"maps"
 	"os"
 	"path/filepath"
@@ -432,4 +434,86 @@ func TestCheckLeavesTheMediaFolderAlone(t *testing.T) {
 	if names := dirNames(t, media); !slices.Contains(names, mediaInboxesMarker) || slices.Contains(names, "old.jpg") || slices.Contains(names, "plaud") {
 		t.Errorf("after the bridge started the media folder holds %q, want what was there moved aside", names)
 	}
+}
+
+// TestLegacyMediaThatCannotMoveStays: one entry of the media folder that
+// could not be moved aside (a folder without write permission here) failed
+// the whole move, every time, and with it every brain's every run, as
+// "sandbox unavailable". The move now goes on with the rest and leaves
+// such an entry where it is; only a brain named like it gets no inbox, and
+// no run, until it is gone. A media folder that cannot be readied at all
+// leaves runs without an inbox rather than refusing them.
+func TestLegacyMediaThatCannotMoveStays(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("root moves any folder")
+	}
+	root := canonicalDir(t.TempDir())
+	data, media := filepath.Join(root, "data"), filepath.Join(root, "data", "media")
+	before := processStarted.Add(-time.Hour)
+	for _, f := range []string{"old.jpg", "plaud/standup.txt", "legacy/kept.txt"} {
+		p := writeTestFile(t, filepath.Join(media, f), "content of "+f)
+		if err := os.Chtimes(p, before, before); err != nil {
+			t.Fatal(err)
+		}
+	}
+	locked := filepath.Join(media, "legacy")
+	if err := os.Chmod(locked, 0o500); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(locked, 0o700) })
+	if _, err := prepareBrainState(data, media, "a", false); err != nil {
+		t.Fatalf("brain a's run was refused: %v", err)
+	}
+	if names := dirNames(t, media); !slices.Equal(names, []string{mediaInboxesMarker, legacyMediaDir, "a", "legacy"}) {
+		t.Errorf("the media folder holds %q, want all but legacy moved aside", names)
+	}
+	if names := dirNames(t, filepath.Join(media, legacyMediaDir)); !slices.Equal(names, []string{"old.jpg", "plaud"}) {
+		t.Errorf("%s holds %q", legacyMediaDir, names)
+	}
+	if _, err := openInbox(media, "legacy"); !errors.Is(err, errNotTheInbox) {
+		t.Errorf("openInbox(legacy) = %v, want %v", err, errNotTheInbox)
+	}
+	if _, err := prepareBrainState(data, media, "legacy", false); !errors.Is(err, errNotTheInbox) {
+		t.Errorf("brain legacy's run: %v, want it refused with %v", err, errNotTheInbox)
+	}
+	if data, err := os.ReadFile(filepath.Join(locked, "kept.txt")); err != nil || string(data) != "content of legacy/kept.txt" {
+		t.Errorf("what stayed: %q, %v", data, err)
+	}
+	// Moved out by hand, the name is free for an inbox again.
+	if err := os.Chmod(locked, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Rename(locked, filepath.Join(root, "moved-out")); err != nil {
+		t.Fatal(err)
+	}
+	inbox, err := openInbox(media, "legacy")
+	if err != nil {
+		t.Fatalf("openInbox(legacy) once it was moved out: %v", err)
+	}
+	inbox.Close()
+	if names := dirNames(t, filepath.Join(media, "legacy")); len(names) != 0 {
+		t.Errorf("brain legacy's new inbox holds %q", names)
+	}
+	if _, err := os.Stat(filepath.Join(media, mediaInboxesMarker, mediaStuckFile)); !errors.Is(err, fs.ErrNotExist) {
+		t.Errorf("the list of what stayed is still there: %v", err)
+	}
+
+	t.Run("a media folder that cannot be readied", func(t *testing.T) {
+		root := canonicalDir(t.TempDir())
+		data, media := filepath.Join(root, "data"), filepath.Join(root, "data", "media")
+		if err := os.MkdirAll(media, 0o700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Chmod(media, 0o500); err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { _ = os.Chmod(media, 0o700) })
+		if _, err := openInbox(media, "a"); err == nil || errors.Is(err, errNotTheInbox) {
+			t.Fatalf("openInbox = %v, want it to fail readying the folder", err)
+		}
+		env, err := prepareBrainState(data, media, "a", false)
+		if err != nil || !slices.Contains(env, "TMPDIR="+filepath.Join(data, "brains", "a", "tmp")) {
+			t.Errorf("brain a's run: %v (env %q), want it to go ahead without an inbox", err, env)
+		}
+	})
 }

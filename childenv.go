@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log"
 	"os"
 	"path/filepath"
 	"slices"
@@ -227,11 +228,18 @@ func prepareBrainState(dataDir, mediaDir, id string, inheritUser bool) ([]string
 		return nil, fmt.Errorf("brain id %q cannot name a folder", id)
 	}
 	if mediaDir != "" {
-		inbox, err := openInbox(mediaDir, id)
-		if err != nil {
+		// The profile opens the inbox by its path, so what is there and is
+		// no inbox refuses the run. Any other failure leaves the run without
+		// an inbox: the files sent to it stay where they are (see
+		// claimMedia), and the brain runs, as it used to fail every run.
+		switch inbox, err := openInbox(mediaDir, id); {
+		case errors.Is(err, errNotTheInbox):
 			return nil, err
+		case err != nil:
+			log.Printf("brain %s: no media inbox for this run: %v", id, err)
+		default:
+			inbox.Close()
 		}
-		inbox.Close()
 	}
 	st := brainStateOf(dataDir, id)
 	for _, dir := range st.folders() {

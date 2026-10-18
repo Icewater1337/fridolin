@@ -9,6 +9,7 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -58,6 +59,16 @@ var legacyMediaMu sync.Mutex
 // retireLegacyMedia).
 var processStarted = time.Now()
 
+// mediaStuckFile, in the mediaInboxesMarker folder, names what
+// retireLegacyMedia could not move aside, one name a line: none of them
+// becomes an inbox while it is there (see openInbox).
+const mediaStuckFile = "stuck"
+
+// errNotTheInbox is why a brain gets no inbox: what is at its inbox's path
+// is something else, which the brain's profile, naming the inbox by its
+// path, would open to it.
+var errNotTheInbox = errors.New("not the brain's inbox")
+
 // retireLegacyMedia readies the media folder for inboxes, once: unless it
 // has the mediaInboxesMarker, every folder (or symlink) in it whose name
 // could be a brain id's goes into legacyMediaDir, under a free name, and
@@ -71,6 +82,11 @@ var processStarted = time.Now()
 // versions left, never an inbox: once the marker is there, every folder
 // that appears is an inbox. Nothing else runs it: check, say, must leave
 // the media folder of a bridge that is still running alone.
+//
+// What it cannot move (a folder without write permission, an immutable
+// file) stays where it is, logged and listed in the marker's
+// mediaStuckFile, and it goes on with the rest. One entry like that used
+// to fail every call, and with it every brain's every run.
 func retireLegacyMedia(mediaDir string) error {
 	legacyMediaMu.Lock()
 	defer legacyMediaMu.Unlock()
@@ -95,48 +111,105 @@ func retireLegacyMedia(mediaDir string) error {
 		return err
 	}
 	files := 0
+	var stuck []string
 	for _, e := range entries {
 		name := e.Name()
 		if strings.HasPrefix(name, ".") {
 			continue
 		}
-		if e.Type().IsRegular() {
-			fi, err := e.Info()
-			if err != nil {
-				return err
-			}
-			if !fi.ModTime().Before(processStarted) {
-				continue
-			}
-		}
-		if err := media.Mkdir(legacyMediaDir, 0o700); err != nil && !errors.Is(err, fs.ErrExist) {
-			return err
-		}
-		for i := 1; ; i++ {
-			dst := filepath.Join(legacyMediaDir, mediaNameCandidate(name, i))
-			if _, err := media.Lstat(dst); err == nil && i < lastMediaCandidate {
-				continue
-			}
-			if err := media.Rename(name, dst); err != nil {
-				return fmt.Errorf("moving %s, which an older version left in the media folder, aside: %w", name, err)
-			}
-			if e.Type().IsRegular() {
-				files++
-			} else {
-				log.Printf("media: moved %s, which an older version left in the media folder, to %s, where no brain can read it", name, filepath.Join(mediaDir, dst))
-			}
-			break
+		dst, err := moveLegacyMedia(media, e)
+		switch {
+		case err != nil:
+			log.Printf("media: cannot move %s, which an older version left in the media folder, aside (%v); it stays in %s, and no brain named %s gets an inbox while it is there: move it out by hand", name, err, mediaDir, name)
+			stuck = append(stuck, name)
+		case dst == "":
+		case e.Type().IsRegular():
+			files++
+		default:
+			log.Printf("media: moved %s, which an older version left in the media folder, to %s, where no brain can read it", name, filepath.Join(mediaDir, dst))
 		}
 	}
 	if files > 0 {
 		log.Printf("media: moved %d files an older version left at the top of the media folder to %s, where no brain can read them", files, filepath.Join(mediaDir, legacyMediaDir))
 	}
-	if err := media.Mkdir(mediaInboxesMarker, 0o700); err != nil {
+	// The marker appears whole, with the list of what stayed in it, so
+	// that a bridge stopped in between neither redoes the move nor makes
+	// an inbox of what stayed.
+	tmp := mediaInboxesMarker + ".new"
+	if err := media.RemoveAll(tmp); err != nil {
 		return err
 	}
-	return media.WriteFile(filepath.Join(mediaInboxesMarker, "README.txt"),
+	if err := media.Mkdir(tmp, 0o700); err != nil {
+		return err
+	}
+	if err := media.WriteFile(filepath.Join(tmp, "README.txt"),
 		[]byte("Every folder next to this one is the media inbox of the brain it is named after.\n"+
-			"The folders and files an older version left there were moved into "+legacyMediaDir+"/.\n"), 0o600)
+			"The folders and files an older version left there were moved into "+legacyMediaDir+"/,\n"+
+			"except those named in "+mediaStuckFile+", which could not be moved.\n"), 0o600); err != nil {
+		return err
+	}
+	if len(stuck) > 0 {
+		if err := media.WriteFile(filepath.Join(tmp, mediaStuckFile), []byte(strings.Join(stuck, "\n")+"\n"), 0o600); err != nil {
+			return err
+		}
+	}
+	return media.Rename(tmp, mediaInboxesMarker)
+}
+
+// moveLegacyMedia moves the entry e at the top of the media folder into
+// legacyMediaDir under a free name and returns that name, or "" for a file
+// it leaves where it is, one newer than this process.
+func moveLegacyMedia(media *os.Root, e fs.DirEntry) (string, error) {
+	name := e.Name()
+	if e.Type().IsRegular() {
+		fi, err := e.Info()
+		if err != nil {
+			return "", err
+		}
+		if !fi.ModTime().Before(processStarted) {
+			return "", nil
+		}
+	}
+	if err := media.Mkdir(legacyMediaDir, 0o700); err != nil && !errors.Is(err, fs.ErrExist) {
+		return "", err
+	}
+	for i := 1; ; i++ {
+		dst := filepath.Join(legacyMediaDir, mediaNameCandidate(name, i))
+		if _, err := media.Lstat(dst); err == nil && i < lastMediaCandidate {
+			continue
+		}
+		if err := media.Rename(name, dst); err != nil {
+			return "", err
+		}
+		return dst, nil
+	}
+}
+
+// stuckMedia reports whether retireLegacyMedia left name in the media
+// folder because it could not move it, and that is still there. A name
+// whose entry is gone is taken off the list.
+func stuckMedia(media *os.Root, name string) (bool, error) {
+	list := filepath.Join(mediaInboxesMarker, mediaStuckFile)
+	data, err := media.ReadFile(list)
+	if errors.Is(err, fs.ErrNotExist) {
+		return false, nil
+	} else if err != nil {
+		return false, err
+	}
+	names := strings.Split(strings.TrimSpace(string(data)), "\n")
+	if !slices.Contains(names, name) {
+		return false, nil
+	}
+	if _, err := media.Lstat(name); err == nil {
+		return true, nil
+	} else if !errors.Is(err, fs.ErrNotExist) {
+		return false, err
+	}
+	names = slices.DeleteFunc(names, func(n string) bool { return n == name || n == "" })
+	if len(names) == 0 {
+		return false, media.Remove(list)
+	}
+	return false, media.WriteFile(list, []byte(strings.Join(names, "\n")+"\n"), 0o600)
 }
 
 // openInbox opens brain id's inbox in the media folder as an os.Root,
@@ -146,7 +219,8 @@ func retireLegacyMedia(mediaDir string) error {
 // above it is the bridge's alone. The bridge still checks that it is a real
 // folder before it puts anything there, and works inside it only through
 // the root, which refuses a path that a symlink the brain planted would
-// lead out of the inbox.
+// lead out of the inbox. What is at the inbox's path and is no inbox, a
+// file or what an older version left there, fails with errNotTheInbox.
 func openInbox(mediaDir, id string) (*os.Root, error) {
 	if !brainIDRe.MatchString(id) {
 		// The id names a folder; anything else could name another one.
@@ -161,13 +235,22 @@ func openInbox(mediaDir, id string) (*os.Root, error) {
 		return nil, err
 	}
 	defer media.Close()
+	legacyMediaMu.Lock()
+	stuck, err := stuckMedia(media, id)
+	legacyMediaMu.Unlock()
+	if err != nil {
+		return nil, err
+	}
+	if stuck {
+		return nil, fmt.Errorf("%w: %s in the media folder %s was left there by an older version and could not be moved aside; move it out of the folder by hand", errNotTheInbox, id, mediaDir)
+	}
 	if err := media.Mkdir(id, 0o700); err != nil && !errors.Is(err, fs.ErrExist) {
 		return nil, fmt.Errorf("creating the inbox of brain %s: %w", id, err)
 	}
 	if fi, err := media.Lstat(id); err != nil {
 		return nil, err
 	} else if !fi.IsDir() {
-		return nil, fmt.Errorf("the inbox of brain %s is not a folder (%v)", id, fi.Mode().Type())
+		return nil, fmt.Errorf("%w: the inbox of brain %s is not a folder (%v)", errNotTheInbox, id, fi.Mode().Type())
 	}
 	return media.OpenRoot(id)
 }
