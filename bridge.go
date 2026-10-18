@@ -76,6 +76,9 @@ type Bridge struct {
 
 	// addMu makes adding a brain one step at a time (apiAddBrain).
 	addMu sync.Mutex
+	// applyMu keeps reading the configuration and applying it to the
+	// brains together, see the config subscriber in NewBridge.
+	applyMu sync.Mutex
 }
 
 // BridgeOptions are the run-time switches from the command line.
@@ -209,8 +212,14 @@ func NewBridge(cfgs *ConfigStore, opts BridgeOptions) (_ *Bridge, err error) {
 	}
 
 	// Configuration edits (from the dashboard) apply to the brains at once.
+	// The brains get the configuration as it is now rather than next, under
+	// a lock, so that whichever notification comes last, the brains end on
+	// the latest configuration and never on one an update has replaced.
 	cfgs.Subscribe(func(prev, next *Config) {
-		if err := b.brainMgr.Apply(next); err != nil {
+		b.applyMu.Lock()
+		err := b.brainMgr.Apply(b.cfgs.Get())
+		b.applyMu.Unlock()
+		if err != nil {
 			log.Printf("applying configuration: %v", err)
 		}
 		logDMAccess(prev, next)

@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -153,4 +154,136 @@ func TestGetConfigSendsTheETagOfItsConfig(t *testing.T) {
 	}
 	close(stop)
 	wg.Wait()
+}
+
+// The subscribers hear of the updates in the order they were made, one at a
+// time: one that applies what it hears, as the brains do, must not end on
+// a configuration a later update replaced because the later notification
+// overtook the earlier one.
+func TestConfigSubscribersHearUpdatesInOrder(t *testing.T) {
+	cs := openTxStore(t, `{}`)
+	var mu sync.Mutex
+	var heard []string
+	inA := make(chan struct{})
+	heardB := make(chan struct{})
+	cs.Subscribe(func(_, next *Config) {
+		if next.Comment == "a" {
+			close(inA)
+			// B commits meanwhile; its notification must wait for this one.
+			waitFor(t, 5*time.Second, "update b to commit", func() bool { return cs.Get().Comment == "b" })
+			select {
+			case <-heardB:
+			case <-time.After(200 * time.Millisecond):
+			}
+		}
+		mu.Lock()
+		heard = append(heard, next.Comment)
+		mu.Unlock()
+		if next.Comment == "b" {
+			close(heardB)
+		}
+	})
+	done := make(chan error, 2)
+	go func() {
+		_, err := cs.Update("", func(c *Config) error { c.Comment = "a"; return nil })
+		done <- err
+	}()
+	<-inA
+	go func() {
+		_, err := cs.Update("", func(c *Config) error { c.Comment = "b"; return nil })
+		done <- err
+	}()
+	for range 2 {
+		if err := <-done; err != nil {
+			t.Fatal(err)
+		}
+	}
+	if strings.Join(heard, ",") != "a,b" {
+		t.Errorf("the subscriber heard of the updates as %v, want [a b]", heard)
+	}
+}
+
+// A subscriber that panics is logged; the update stays saved, the other
+// subscribers hear of it, and the next update is not blocked.
+func TestConfigSubscriberPanicIsLogged(t *testing.T) {
+	cs := openTxStore(t, `{}`)
+	logs := captureLog(t)
+	cs.Subscribe(func(_, next *Config) {
+		if next.Comment == "boom" {
+			panic("subscriber")
+		}
+	})
+	var heard []string
+	cs.Subscribe(func(_, next *Config) { heard = append(heard, next.Comment) })
+	if _, err := cs.Update("", func(c *Config) error { c.Comment = "boom"; return nil }); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := cs.Update("", func(c *Config) error { c.Comment = "next"; return nil }); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Join(heard, ",") != "boom,next" || cs.Get().Comment != "next" {
+		t.Errorf("heard %v, config %q", heard, cs.Get().Comment)
+	}
+	if !logContains(logs, "a subscriber panicked on the saved update: subscriber") {
+		t.Errorf("the panic was not logged: %q", logs())
+	}
+}
+
+// After updates that run at once, the brains run on the configuration the
+// store has, not on one an update replaced.
+func TestBrainsRunOnTheLatestConfig(t *testing.T) {
+	h := newHarness(t, "")
+	h.AddBrain(BrainManifest{ID: "main", Name: "Main", Routing: BrainRouting{HandlesDMs: true}})
+	for round := 0; round < 5; round++ {
+		var wg sync.WaitGroup
+		for i := 0; i < 10; i++ {
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				m := BrainManifest{ID: "main", Name: fmt.Sprintf("Main %d-%d", round, i), Routing: BrainRouting{HandlesDMs: true}}
+				if w := h.Do("PUT", "/api/brains/main", map[string]any{"manifest": m}); w.Code != 200 {
+					t.Errorf("PUT /api/brains/main: %d %s", w.Code, w.Body.String())
+				}
+			}()
+		}
+		wg.Wait()
+		var views []brainView
+		if w := h.Do("GET", "/api/brains", nil); w.Code != 200 || json.Unmarshal(w.Body.Bytes(), &views) != nil {
+			t.Fatalf("GET /api/brains: %d %s", w.Code, w.Body.String())
+		}
+		if len(views) != 1 || views[0].Runtime == nil {
+			t.Fatalf("GET /api/brains = %+v", views)
+		}
+		approved := h.Approved()["main"].Name
+		if views[0].Name != approved || views[0].Runtime.Name != approved {
+			t.Fatalf("round %d: config.json approves %q, the config %q, but the brain runs as %q", round, approved, views[0].Name, views[0].Runtime.Name)
+		}
+	}
+}
+
+// The bridge applies the configuration the store has when it hears of an
+// update, not the one the notification carries: a notification that comes
+// after a later update's leaves the brains on the later one.
+func TestBridgeAppliesTheLatestConfigOnALateNotification(t *testing.T) {
+	tb := newTestBridge(t, "")
+	tb.addFolderBrain(t, BrainManifest{ID: "main", Name: "Main", Routing: BrainRouting{HandlesDMs: true}})
+	rename := func(name string) ConfigSnapshot {
+		t.Helper()
+		if err := tb.cfgs.UpdateManifest("main", func(m *BrainManifest) error { m.Name = name; return nil }); err != nil {
+			t.Fatal(err)
+		}
+		return tb.cfgs.Snapshot()
+	}
+	before := tb.cfgs.Snapshot()
+	first := rename("First")
+	rename("Second")
+	tb.cfgs.subsMu.Lock()
+	subs := slices.Clone(tb.cfgs.subs)
+	tb.cfgs.subsMu.Unlock()
+	for _, fn := range subs {
+		fn(before.Effective, first.Effective) // the first update's, late
+	}
+	if got := tb.brainMgr.Get("main").Snapshot().Name; got != "Second" {
+		t.Errorf("after a late notification the brain runs as %q, want Second", got)
+	}
 }

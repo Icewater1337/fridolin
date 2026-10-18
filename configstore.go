@@ -31,7 +31,13 @@ type ConfigStore struct {
 
 	mu   sync.Mutex // serialises Update
 	snap atomic.Pointer[ConfigSnapshot]
-	subs []func(old, new *Config)
+
+	// notifyMu is held while the subscribers hear of an update. commit
+	// takes it before it gives back mu, so they hear of the snapshots in
+	// the order they were swapped in, one at a time.
+	notifyMu sync.Mutex
+	subsMu   sync.Mutex
+	subs     []func(old, new *Config)
 }
 
 // ConfigSnapshot is one version of the configuration: the file layer, the
@@ -133,10 +139,12 @@ func mustClone(c *Config) *Config {
 }
 
 // Subscribe registers fn to run after every successful Update, with the old
-// and new effective configurations.
+// and new effective configurations. The subscribers hear of the updates in
+// the order they were made, and of one at a time, so fn must not call
+// Update: that waits for fn to return.
 func (cs *ConfigStore) Subscribe(fn func(old, new *Config)) {
-	cs.mu.Lock()
-	defer cs.mu.Unlock()
+	cs.subsMu.Lock()
+	defer cs.subsMu.Unlock()
 	cs.subs = append(cs.subs, fn)
 }
 
@@ -145,64 +153,82 @@ func (cs *ConfigStore) Subscribe(fn func(old, new *Config)) {
 // skips the conflict check. It returns RestartRequired as of the new
 // configuration.
 func (cs *ConfigStore) Update(etag string, mutate func(*Config) error) (restart []string, err error) {
-	prev, next, subs, err := cs.commit(etag, mutate)
+	prev, next, err := cs.commit(etag, mutate)
 	if err != nil {
 		return nil, err
 	}
-
-	warnGroupsWithoutMembers(prev.Effective, next.Effective)
-
-	for _, fn := range subs {
-		fn(prev.Effective, next.Effective)
-	}
+	cs.notify(prev, next)
 	return restartRequired(cs.startup, next.Effective), nil
+}
+
+// notify tells the subscribers that next replaced prev, and gives back
+// notifyMu, which commit took. A subscriber that panics is logged: the
+// update is saved by then, and the other subscribers must still hear of it.
+func (cs *ConfigStore) notify(prev, next *ConfigSnapshot) {
+	defer cs.notifyMu.Unlock()
+	warnGroupsWithoutMembers(prev.Effective, next.Effective)
+	cs.subsMu.Lock()
+	subs := slices.Clone(cs.subs)
+	cs.subsMu.Unlock()
+	for _, fn := range subs {
+		func() {
+			defer func() {
+				if r := recover(); r != nil {
+					log.Printf("config: a subscriber panicked on the saved update: %v\n%s", r, debug.Stack())
+				}
+			}()
+			fn(prev.Effective, next.Effective)
+		}()
+	}
 }
 
 // commit is the part of Update that holds the lock: it writes the new
 // configuration and swaps it in, and returns its snapshot with the one it
-// replaced and the subscribers to tell. A panic on the way, in mutate or in
-// deriving, encoding or writing the configuration, comes back as an error,
-// with the lock given back and the configuration as it was: net/http
-// recovers a handler's panic and the bridge runs on, and a lock left held
-// would stop every later save, brain edit and calendar sign-in for good.
-func (cs *ConfigStore) commit(etag string, mutate func(*Config) error) (prev, next *ConfigSnapshot, subs []func(old, new *Config), err error) {
+// replaced. Once it has swapped one in, it returns with notifyMu held, for
+// notify to give back. A panic on the way, in mutate or in deriving,
+// encoding or writing the configuration, comes back as an error, with the
+// lock given back and the configuration as it was: net/http recovers a
+// handler's panic and the bridge runs on, and a lock left held would stop
+// every later save, brain edit and calendar sign-in for good.
+func (cs *ConfigStore) commit(etag string, mutate func(*Config) error) (prev, next *ConfigSnapshot, err error) {
 	cs.mu.Lock()
 	defer cs.mu.Unlock()
 	defer func() {
 		if r := recover(); r != nil {
 			log.Printf("config: an update panicked, nothing was changed: %v\n%s", r, debug.Stack())
-			prev, next, subs, err = nil, nil, nil, fmt.Errorf("the config update failed: %v", r)
+			prev, next, err = nil, nil, fmt.Errorf("the config update failed: %v", r)
 		}
 	}()
 	prev = cs.snap.Load()
 	if etag != "" && etag != prev.ETag {
-		return nil, nil, nil, ErrConfigConflict
+		return nil, nil, ErrConfigConflict
 	}
 	file, err := prev.File.clone()
 	if err != nil {
-		return nil, nil, nil, err
+		return nil, nil, err
 	}
 	if err := mutate(file); err != nil {
-		return nil, nil, nil, err
+		return nil, nil, err
 	}
 	// What is written is this version's file, whatever the edit made of it.
 	file.Version = currentConfigVersion
 	eff, err := effective(file)
 	if err != nil {
-		return nil, nil, nil, err
+		return nil, nil, err
 	}
 	data, err := json.MarshalIndent(file, "", "  ")
 	if err != nil {
-		return nil, nil, nil, err
+		return nil, nil, err
 	}
 	data = append(data, '\n')
 	if err := writeFileAtomic(cs.path, data, 0o600, true); err != nil {
-		return nil, nil, nil, err
+		return nil, nil, err
 	}
 
 	next = &ConfigSnapshot{File: file, Effective: eff, ETag: etagOf(data), Version: prev.Version + 1}
 	cs.snap.Store(next)
-	return prev, next, append([]func(old, new *Config){}, cs.subs...), nil
+	cs.notifyMu.Lock()
+	return prev, next, nil
 }
 
 // RestartRequired lists the settings that are read once at startup and now
