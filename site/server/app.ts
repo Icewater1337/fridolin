@@ -6,6 +6,7 @@ import { readGoogleClient, readSecrets, UserStore, type Runtime } from './config
 import { createAuth, loadSessionKey, page, type Auth } from './auth.ts'
 import { loadModules, mountModules, type ModuleSecrets } from './modules.ts'
 import { createPreviewAuth, previewForwarding, PreviewList } from './preview.ts'
+import { deviceRoutes } from './devices.ts'
 
 const WEB_DIR = fileURLToPath(new URL('../web/', import.meta.url))
 
@@ -64,6 +65,8 @@ export async function createSite(rt: Runtime, opts: SiteOptions = {}): Promise<e
   }
 
   app.get('/_fridolin/health', (_req, res) => { res.type('text').send('ok') })
+  // Phones sign each request themselves; the live site only (devices.ts).
+  if (rt.devices_file && rt.spool_dir) app.use(deviceRoutes(rt.devices_file, rt.spool_dir))
   app.get('/_fridolin/site.json', (req, res) => {
     const forwarded = forwarding?.active(req)
     res.json({ title: rt.title, preview: rt.preview_label ?? forwarded?.entry.label ?? null, exit: Boolean(forwarded) })

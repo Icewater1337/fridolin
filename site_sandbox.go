@@ -563,7 +563,7 @@ func (m *SiteManager) sandboxInput(node, deploy, root, rtFile string, mods []sit
 		spool:   m.spoolDir(),
 		node:    node,
 		reads: []string{
-			rtFile, m.dir("users.json"), m.dir("session.key"), m.dir("previews.json"),
+			rtFile, m.dir("users.json"), m.dir("session.key"), m.dir("previews.json"), m.dir("devices.json"),
 			// Both: the site's own client, and Fridolin's shared one.
 			m.dir("google_client.json"),
 		},

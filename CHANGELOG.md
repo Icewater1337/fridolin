@@ -163,6 +163,12 @@ yet, so everything is under Unreleased until the first one.
   recording off a NotePin as soon as it stops and has Plaud transcribe
   it; Fridolin reads the transcripts from the folder the app's files are
   synced to, with no Plaud CLI or login (docs/PLAUD.md).
+- `plaud.phone_upload`: the phone app uploads its transcripts through your
+  site instead. The Plaud card builds the app with the site's address and
+  a one-time pairing code (it needs a JDK and the Android SDK), and lists
+  the paired phones, each of which can be unpaired. A phone pairs a key
+  made in its keystore and signs every upload with it; the site and the
+  bridge both check the signature (docs/PLAUD.md, docs/SITE.md).
 
 ### Removed
 

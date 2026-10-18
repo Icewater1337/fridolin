@@ -69,16 +69,29 @@ export function makeIngest(moduleId: string, allowed: string[], spoolDir: string
     writeFileSync(join(dir, 'request.json.part'), JSON.stringify(request))
     renameSync(join(dir, 'request.json.part'), join(dir, 'request.json'))
 
-    const result = join(dir, 'result.json')
-    for (const deadline = Date.now() + ANSWER_MS; Date.now() < deadline;) {
-      await new Promise(r => setTimeout(r, 200))
-      if (!existsSync(result)) continue
-      const r = JSON.parse(readFileSync(result, 'utf8')) as { ok?: boolean; error?: string }
-      if (r.ok) return { status: 'accepted' }
-      throw new Error(r.error || 'Fridolin did not take the files')
-    }
-    throw new Error(`Fridolin did not take the files within ${ANSWER_MS / 1000} seconds; is the bridge running?`)
+    await awaitAnswer(dir, 'Fridolin did not take the files')
+    return { status: 'accepted' }
   }
+}
+
+/** Thrown when the bridge answered no: its message says why. */
+export class RefusedError extends Error {}
+
+/**
+ * Waits for the bridge's result.json in spool folder dir and returns it;
+ * throws a RefusedError with the bridge's reason when it says no, and an
+ * Error when it does not answer in time.
+ */
+export async function awaitAnswer(dir: string, refused: string): Promise<Record<string, unknown>> {
+  const result = join(dir, 'result.json')
+  for (const deadline = Date.now() + ANSWER_MS; Date.now() < deadline;) {
+    await new Promise(r => setTimeout(r, 200))
+    if (!existsSync(result)) continue
+    const r = JSON.parse(readFileSync(result, 'utf8')) as { ok?: boolean; error?: string }
+    if (r.ok) return r
+    throw new RefusedError(r.error || refused)
+  }
+  throw new Error(`Fridolin did not answer within ${ANSWER_MS / 1000} seconds; is the bridge running?`)
 }
 
 export type SearchRequest = {

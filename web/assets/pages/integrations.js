@@ -2,7 +2,7 @@
 // with Plaud's own sign-in, pick the brain that receives recordings, and see
 // what was handed over last.
 
-import { post, put } from '../app/api.js';
+import { del, download, post, put } from '../app/api.js';
 import { brainsResource, resource } from '../app/resources.js';
 import { h, mount, paint } from '../lib/dom.js';
 import { brainLabel } from '../lib/brain.js';
@@ -42,6 +42,13 @@ export default {
     const factsBox = h('div');
     const actionsBox = h('div.actions');
     const loginBox = h('p.muted.small');
+    // The phone app, while it uploads through the site: Plaud's developer
+    // keys, the build and the paired phones, each painted on its own so that
+    // keys being typed survive a refresh.
+    const keysBox = h('div');
+    const buildBox = h('div');
+    const phonesBox = h('div');
+    const appBox = h('div.stack', keysBox, buildBox, phonesBox);
     const settings = liveForm({ build: buildSettings, edits: (d) => d.st });
     ctx.dirty = () => settings.dirty();
 
@@ -63,6 +70,15 @@ export default {
           : h('div', 'Use the tab Plaud’s tool opened in your browser.')) : null,
       connect && connect.state === 'error' ? callout('bad', 'Sign-in did not finish', connect.error) : null,
     ];
+    // The phone app needs neither Plaud's CLI nor its login.
+    const phoneAppButton = () => btn('Use the Plaud Sync phone app instead', {
+      icon: 'phone',
+      onClick: async () => {
+        await put('/api/plaud/settings', { phone_upload: true });
+        toast('Set up the phone app on this card', 'ok');
+        await refresh();
+      },
+    });
     const startSignIn = async () => {
       await post('/api/plaud/connect');
       // The sign-in starts now; whether a browser tab opens, the card says.
@@ -76,21 +92,24 @@ export default {
     // otherwise only a check changes it, at most every 30 s
     // (plaud.interval_seconds).
     const signingIn = () => !!(status && status.connect && status.connect.state === 'running');
+    const building = () => !!(status && status.app && status.app.build && status.app.build.state === 'running');
     ctx.follow(brainsResource, (list) => { brains = list || []; if (status) render(); }, 60000);
-    ctx.follow(plaud, (s) => { status = s; render(); }, () => (signingIn() ? 2000 : 20000));
+    ctx.follow(plaud, (s) => { status = s; render(); }, () => (signingIn() || building() ? 2000 : 20000));
 
     function render() {
       const s = status;
-      // With plaud.phone_dir set, recordings come from a folder the Plaud
-      // Sync phone app's files are synced to: no CLI, no login.
-      const phone = (s.settings || {}).phone_dir || '';
+      // Recordings from the Plaud Sync phone app need no CLI and no login:
+      // they come from a folder its files are synced to (plaud.phone_dir),
+      // or it uploads them through the site (plaud.phone_upload).
+      const folder = (s.settings || {}).phone_dir || '';
+      const phone = !!(folder || (s.settings || {}).phone_upload);
       if (!s.cli.found && !phone) {
         paint(card, { install: s.cli.install_hint }, () => [
           head('Not installed', 'neutral'),
           h('p', 'New recordings from your Plaud reach a brain as finished transcripts — with Plaud’s AI summary — so it can file them, remember what matters and tell you the action items.'),
           callout('info', 'Install Plaud’s command-line tool first',
             h('div', 'In a terminal: ', mono(s.cli.install_hint, { copy: true }), ' (needs Node.js). Then check again.')),
-          h('div.actions', btn('Check again', { icon: 'refresh', onClick: () => refresh() })),
+          h('div.actions', btn('Check again', { icon: 'refresh', onClick: () => refresh() }), phoneAppButton()),
         ]);
         return;
       }
@@ -120,16 +139,17 @@ export default {
             kind: 'primary', icon: 'external', disabled: connecting, onClick: startSignIn,
           }),
           // Fridolin still has a login on record: you may rather stop here.
-          expired || moved ? disconnectButton({ connected: false, expired, moved, access }) : null),
+          expired || moved ? disconnectButton({ connected: false, expired, moved, access }) : phoneAppButton()),
         ]);
         return;
       }
 
-      paint(card, 'connected', () => [headBox, alertsBox, factsBox, settings.el, actionsBox, loginBox]);
+      paint(card, 'connected', () => [headBox, alertsBox, factsBox, settings.el, actionsBox, appBox, loginBox]);
       const st = s.settings || {};
-      paint(headBox, { expired: !!s.expired, account: s.account || '', phone }, ({ expired, account }) => [
-        head(phone ? 'Phone folder' : expired ? 'Login expired' : 'Connected', expired ? 'bad' : 'ok'),
-        phone ? h('p', 'Recordings come from the Plaud Sync phone app, through the folder ', mono(phone), ' its files are synced to (', mono('plaud.phone_dir'), ').') : null,
+      paint(headBox, { expired: !!s.expired, account: s.account || '', folder, phone }, ({ expired, account }) => [
+        head(folder ? 'Phone folder' : phone ? 'Phone app' : expired ? 'Login expired' : 'Connected', expired ? 'bad' : 'ok'),
+        folder ? h('p', 'Recordings come from the Plaud Sync phone app, through the folder ', mono(folder), ' its files are synced to (', mono('plaud.phone_dir'), ').')
+          : phone ? h('p', 'Recordings come from the Plaud Sync phone app: it takes each one off the NotePin as it stops, has Plaud transcribe it and uploads the transcript through your site, signed with a key only that phone has.') : null,
         account ? h('p', 'Signed in as ', h('strong', account), '.') : null,
       ]);
       // A destination problem only blocks anything while Plaud is on.
@@ -160,6 +180,13 @@ export default {
       settings.set({ st, options, defaultMessage: s.default_message || '', interval: s.interval_seconds || 60 });
       paint(actionsBox, { enabled: !!st.enabled, expired: !!s.expired, connecting: !!(s.connect && s.connect.state === 'running'), access: !!st.brain_access, phone }, renderActions);
       paint(loginBox, phone ? '' : s.login_dir || '', (dir) => (dir ? ['Login stored in ', mono(dir), '.'] : null));
+      const app = s.app || null;
+      appBox.hidden = !app;
+      if (app) {
+        paint(keysBox, { saved: !!app.credentials }, renderKeys);
+        paint(buildBox, { site: app.site_url || '', saved: !!app.credentials, build: app.build || null, built: app.built || '' }, renderBuild);
+        paint(phonesBox, app.devices || [], renderPhones);
+      }
     }
 
     function renderFacts(f) {
@@ -186,8 +213,67 @@ export default {
       return facts.length ? h('div.facts', facts) : null;
     }
 
+    function renderKeys({ saved }) {
+      const key = (label, help) => field({ label, help, control: h('input', { type: 'password', id: nextId('pk'), autocomplete: 'off', placeholder: saved ? 'saved — type to replace' : '' }) });
+      const fields = [key('Client ID'), key('Client secret'), key('API key', 'App Settings → API Keys: Plaud transcribes with it.')];
+      const value = (f) => f.querySelector('input').value;
+      return [
+        h('h3', 'Phone app'),
+        h('p.muted.small', 'The app is built with your Plaud developer app’s keys (portal.plaud.ai → App Settings). Fridolin keeps them in its data folder and never shows them again. They end up inside the app, so keep the app to yourself.'),
+        h('div.settings-fields', fields),
+        h('div.actions', btn(saved ? 'Replace keys' : 'Save keys', {
+          icon: 'key',
+          onClick: async () => {
+            const [clientId, clientSecret, apiKey] = fields.map(value);
+            await put('/api/plaud/app/credentials', { client_id: clientId, client_secret: clientSecret, api_key: apiKey });
+            fields.forEach((f) => { f.querySelector('input').value = ''; });
+            toast('Plaud developer keys saved', 'ok');
+            await refresh();
+          },
+        })),
+      ];
+    }
+
+    function renderBuild({ site, saved, build, built }) {
+      const running = !!(build && build.state === 'running');
+      const expires = build && build.pairing_expires ? ` Its pairing code works once, until ${new Date(build.pairing_expires).toLocaleString()}.` : '';
+      return [
+        site ? null : callout('warn', 'The site has no domain yet', 'The app uploads through your site: give it a domain on the Site page first.'),
+        build && build.state === 'error' ? callout('bad', 'Building the app failed', h('div', build.error), build.log ? h('pre.small', build.log) : null) : null,
+        built ? h('p', 'Built ', timeAgo(built), '.', expires) : null,
+        h('div.actions',
+          btn(running ? 'Building… (a few minutes)' : built ? 'Build again' : 'Build phone app', {
+            kind: built ? undefined : 'primary', icon: 'phone', disabled: running || !site || !saved,
+            onClick: async () => {
+              await post('/api/plaud/app/build');
+              toast('Building the phone app…', 'info');
+              await refresh();
+            },
+          }),
+          built && !running ? btn('Download app (APK)', { kind: 'primary', icon: 'download', onClick: () => download('/api/plaud/app.apk', 'plaud-sync.apk') }) : null),
+        h('p.muted.small', 'Copy it to the phone and install it, remove the NotePin from Plaud’s app, then tap Pair NotePin in Plaud Sync. On its first start the app makes a key that never leaves the phone and pairs it with Fridolin; build again for another phone.'),
+      ];
+    }
+
+    function renderPhones(devices) {
+      if (!devices.length) return h('p.muted', 'No phone is paired yet.');
+      const unpair = (id) => btn('Unpair', {
+        small: true, kind: 'danger', icon: 'x',
+        onClick: async () => {
+          const ok = await confirmDialog({ title: 'Unpair this phone?', message: 'Fridolin refuses its uploads from now on. To use it again, build the app again and install it over the old one.', confirm: 'Unpair', danger: true });
+          if (!ok) return;
+          await del(`/api/plaud/devices/${encodeURIComponent(id)}`);
+          toast('Phone unpaired', 'ok');
+          await refresh();
+        },
+      });
+      return h('div.facts', devices.map((d) => h('div', 'Phone ', mono(d.id), ' paired ', timeAgo(d.paired),
+        d.last_upload ? h('span', ' · last transcript ', timeAgo(d.last_upload)) : ' · nothing sent yet', ' ', unpair(d.id))));
+    }
+
     function buildSettings({ st, options, defaultMessage, interval }, changed) {
       const enabled = toggle({ checked: !!st.enabled, label: 'Send new recordings to a brain' });
+      const upload = toggle({ checked: !!st.phone_upload, label: 'Recordings come from the Plaud Sync phone app, through your site' });
       const brainSel = select(options, st.brain || '');
       const polished = toggle({ checked: !!st.polished, label: 'Use Plaud’s AI-cleaned transcript' });
       const accessWarn = h('div.help.warn-text', 'Brains can read the Plaud login while this is on.');
@@ -220,17 +306,21 @@ export default {
       msg.value = st.message || '';
       const value = () => ({
         enabled: enabled.input.checked, brain: brainSel.value, polished: polished.input.checked,
-        brain_access: access.input.checked, message: msg.value,
+        brain_access: access.input.checked, message: msg.value, phone_upload: upload.input.checked,
       });
       // The phone app's transcripts have no cleaned-up version, and no login is shared.
-      const phone = !!st.phone_dir;
+      const phone = !!(st.phone_dir || st.phone_upload);
       const el = h('div.settings-fields',
-        field({ control: enabled, help: phone
+        field({ control: enabled, help: st.phone_upload && !st.phone_dir
+          ? 'Each transcript the phone app uploads goes to the brain at once, at most five with the brain at once. Those that arrive while this is off wait, and are sent when you turn it back on.'
+          : phone
           ? `Every ${every(interval)} Fridolin looks in the phone folder for new transcripts. The first check — also the first after the folder changed — only remembers what is already there. Transcripts that arrive while this is off are sent when you turn it back on, oldest first, at most five with the brain at once.`
           : `Every ${every(interval)} Fridolin looks for new recordings and waits until Plaud has transcribed them. The first check — also the first after signing in with another Plaud account — only remembers what already exists, so old recordings are not sent. Recordings made while this is off are sent when you turn it back on, oldest first, at most five with the brain at once.` }),
         field({ label: 'Brain', control: brainSel, help: 'Recordings run in this brain. Its answer is private: it goes to the brain’s reply chat when that is a direct chat, otherwise to your DM — never to a group.' }),
         phone ? null : field({ control: polished, help: 'Plaud makes the cleaned-up transcript after the raw one, and not always. When it has none an hour after the recording showed up, the raw one is sent, with a note saying so.' }),
         phone ? null : accessField,
+        // A synced folder (plaud.phone_dir, in config.json) wins over uploads.
+        st.phone_dir ? null : field({ control: upload, help: 'On: the app is built further down this card, and Plaud’s cloud, its CLI and your Plaud login are not used. Save, then build the app.' }),
         field({ label: 'Instruction sent with each recording', control: msg, wide: true, help: h('span', 'It follows a first line that says what arrived. ', mono('{name}'), ', ', mono('{when}'), ' and ', mono('{duration}'), ' are filled in. How a brain files recordings belongs in its ', mono('skills/plaud.md'), '.') }));
       return { el, value };
     }

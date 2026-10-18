@@ -348,6 +348,17 @@ answer goes to its reply chat. `ctx.ingest` resolves once the brain has taken
 them, and throws for a brain the module does not list, when the brain's queue
 is full, when `ingest.enabled` is off, and in previews and checks.
 
+### Phones
+
+The site also takes requests from phones Fridolin paired, the Plaud Sync
+app ([PLAUD.md](PLAUD.md#through-your-site)): `POST /_fridolin/devices/pair`
+and `POST /_fridolin/devices/plaud/transcripts`. They need no sign-in, but
+each request carries a JWT signed with a key only that phone has. The site
+checks it against the public keys Fridolin writes to
+`<data_dir>/site/devices.json` and passes what passes on through the spool,
+where Fridolin checks it again before anything reaches a brain. A client
+whose requests keep failing waits 15 minutes.
+
 ### Searching a brain's folder
 
 A module cannot run Claude itself: the site's sandbox keeps the keychain and

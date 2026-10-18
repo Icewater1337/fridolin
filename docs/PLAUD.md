@@ -48,9 +48,56 @@ in [`plaud-android/`](../plaud-android/README.md) replaces it on an Android
 phone: it keeps the pin connected, pulls every recording off it as soon as
 it stops, has Plaud transcribe it, and saves `YYYY-MM-DD_HH-MM-SS.mp3` and
 `.txt` in the phone's `Documents/PlaudSync`. Recordings no longer go to
-your Plaud account then, and Plaud makes no AI summary of them.
+your Plaud account then, and Plaud makes no AI summary of them. The
+transcripts reach Fridolin through your site, or through a folder you sync.
 
-To hand them to a brain, sync that folder to a folder on this computer —
+### Through your site
+
+With [your site](SITE.md) running under a domain, the app uploads each
+transcript there as soon as Plaud has made it, and Fridolin builds the app
+for you:
+
+1. Dashboard → **Integrations → Plaud**: turn on **Recordings come from the
+   Plaud Sync phone app, through your site** (or, before Plaud is
+   connected, **Use the Plaud Sync phone app instead**), pick the brain and
+   save.
+2. Enter your Plaud developer app's **client ID**, **client secret** and
+   **API key** ([portal.plaud.ai](https://portal.plaud.ai) → App Settings;
+   the API key is under API Keys). Fridolin keeps them in
+   `<data_dir>/plaud/developer.json` and never shows them again.
+3. **Build phone app**. Fridolin builds `plaud-android/` of the checkout it
+   was installed from with Gradle, which needs a JDK 17 or newer and the
+   Android SDK on this computer (`brew install openjdk@17`, `brew install
+   --cask android-commandlinetools`, then `sdkmanager "platforms;android-35"
+   "build-tools;35.0.0"`). It finds them through `JAVA_HOME` and
+   `ANDROID_HOME` in the service's environment, else where Homebrew and
+   Android Studio put them. The first build downloads Gradle and Plaud's
+   SDK and takes a few minutes.
+4. **Download app (APK)**, copy it to the phone and install it. Remove the
+   NotePin from Plaud's app, then tap **Pair NotePin** in Plaud Sync.
+
+The app carries your site's address and a pairing code that works once,
+within 24 hours; build again for another phone, or after one was unpaired.
+On its first start the app makes a key pair in the phone's keystore, whose
+private key never leaves the phone, and pairs: it sends the public key and
+the code, signed with that key, to `https://<domain>/_fridolin/devices/pair`.
+Each upload then goes to `/_fridolin/devices/plaud/transcripts` with a JWT
+(ES256) the phone signed, which names the recording and the transcript's
+SHA-256, so it is good for that one transcript and for ten minutes at most.
+The site checks the signature to turn junk away, and Fridolin checks it
+again, since module code runs in the site's process; it keeps only the
+phones' public keys. A transcript that passes goes into
+`<data_dir>/plaud/inbox/` and from there to the brain at once, as described
+below. A phone offline meanwhile keeps its transcripts and sends them later.
+
+The card lists the paired phones; **Unpair** refuses a phone's uploads from
+then on. The developer keys are inside the app too, so keep the APK to
+yourself; the key a phone pairs with is not.
+
+### Through a synced folder
+
+To hand them to a brain without the site, sync that folder to a folder on
+this computer —
 [Syncthing](https://syncthing.net) does it directly, without a cloud
 (Syncthing-Fork on the phone, `brew install syncthing` here) — and set
 that folder in `config.json`:
@@ -229,4 +276,5 @@ for updates either; `plaud` in your own terminal follows your own settings.
 | `message` | follow `skills/plaud.md` | instruction sent with each recording, after the fixed first line |
 | `brain_access` | `false` | share the login with brains (see above) |
 | `phone_dir` | unset | a folder the phone app's files are synced to; recordings come from there instead of Plaud's cloud (see above) |
+| `phone_upload` | `false` | recordings come from the phone app, which uploads them through the site (see above); they go into `phone_dir` when that is set, else `<data_dir>/plaud/inbox` |
 | `cli_path` | found in the folders of `PATH` Fridolin takes its helpers from (see [CONFIGURATION.md](CONFIGURATION.md#helper-programs)), else in the newest nvm node version, else in `/opt/homebrew/bin` or `/usr/local/bin` | path to `plaud` |

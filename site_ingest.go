@@ -111,6 +111,9 @@ func (m *SiteManager) processSpool(ctx context.Context) {
 			spoolAnswer(root, name, m.takeSpoolEntry(root, name), nil)
 		case spoolHas(root, name, "search.json"):
 			m.startSpoolSearch(ctx, name)
+		case spoolHas(root, name, "device.json"):
+			extra, err := m.takeDeviceEntry(root, name)
+			spoolAnswer(root, name, err, extra)
 		default:
 			if st, err := root.Lstat(name); err == nil && time.Since(st.ModTime()) > time.Hour {
 				_ = root.RemoveAll(name)
@@ -274,6 +277,38 @@ func uniqueMediaPath(media, name string) string {
 		return p
 	}
 	return filepath.Join(media, fmt.Sprintf("%d_%s", time.Now().UnixNano(), name))
+}
+
+// ── phones ────────────────────────────────────────────────────────────────
+
+// spoolDevice is a phone's request the site checked and passed on
+// (device.json), with an upload's transcript in body.txt beside it.
+type spoolDevice struct {
+	Op        string `json:"op"`
+	Assertion string `json:"assertion"`
+}
+
+// takeDeviceEntry hands a phone's request to the bridge, which checks the
+// phone's signature itself (plaud_app.go).
+func (m *SiteManager) takeDeviceEntry(root *os.Root, entry string) (map[string]any, error) {
+	data, err := spoolRead(root, path.Join(entry, "device.json"), 16*1024)
+	if err != nil {
+		return nil, fmt.Errorf("reading the request: %w", err)
+	}
+	var req spoolDevice
+	if err := json.Unmarshal(data, &req); err != nil {
+		return nil, errors.New("the request is not valid JSON")
+	}
+	var body []byte
+	if spoolHas(root, entry, "body.txt") {
+		if body, err = spoolRead(root, path.Join(entry, "body.txt"), plaudTranscriptMax); err != nil {
+			return nil, err
+		}
+	}
+	if m.hooks.device == nil {
+		return nil, errors.New("this Fridolin takes no requests from phones")
+	}
+	return m.hooks.device(req.Op, req.Assertion, body)
 }
 
 // ── ctx.search ────────────────────────────────────────────────────────────
