@@ -39,17 +39,16 @@ export default {
     const actBox = h('div.activity-list.compact');
     const dangerBox = h('div');
 
-    mount(root,
-      head,
-      issuesBox,
-      driftBox,
+    // The brain's own sections, which a brain that does not exist lacks.
+    const sections = [
       h('section.section', h('h2.section-title', 'Now'), liveBox),
       h('section.section', h('h2.section-title', 'Settings'), formBox),
       h('section.section', h('h2.section-title', 'Calendar'), calendarCard(id, { signal: ctx.signal })),
       h('section.section',
         h('div.section-head', h('h2.section-title', 'Recent messages'), btn('All of this brain’s activity', { href: `#/activity/${encodeURIComponent(id)}`, small: true, kind: 'ghost', icon: 'right' })),
         actBox),
-      dangerBox);
+    ];
+    mount(root, head, issuesBox, driftBox, sections, dangerBox);
 
     const refresh = () => brainsResource.refresh();
     const settings = liveForm({
@@ -79,8 +78,10 @@ export default {
         paint(head, { missing: id }, () => h('header.page-header', h('div.page-heading', h('a.back-link', { href: '#/brains' }, icon('left'), 'Brains'), h('h1', id))));
         paint(issuesBox, 'missing', () => empty('No such brain', `There is no brain with the id “${id}”. It may have been removed.`, btn('All brains', { href: '#/brains', kind: 'primary' })));
         [driftBox, liveBox, formBox, dangerBox].forEach((box) => paint(box, 'missing', () => null));
+        sections.forEach((s) => { s.hidden = true; });
         return;
       }
+      sections.forEach((s) => { s.hidden = false; });
       ctx.setTitle(brain.name || brain.id);
       paint(head, { name: brain.name, id: brain.id, status: brain.status, path: brain.path }, renderHead);
       paint(issuesBox, (brain.issues || []).filter((is) => is.kind !== 'drift'), renderIssues);
