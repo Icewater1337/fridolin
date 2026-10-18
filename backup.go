@@ -118,9 +118,13 @@ type BackupResult struct {
 }
 
 type backupState struct {
-	LastScheduledDay string                   `json:"last_scheduled_day"`
-	Brains           map[string]*BackupResult `json:"brains"`
-	Bridge           *BackupResult            `json:"bridge"`
+	LastScheduledDay string `json:"last_scheduled_day"`
+	// ArmedAt is when the daily backup was last switched on or moved to
+	// another time. That day's run is due only if its time comes after
+	// this, so neither starts a backup at once (see nextDue).
+	ArmedAt time.Time                `json:"armed_at,omitzero"`
+	Brains  map[string]*BackupResult `json:"brains"`
+	Bridge  *BackupResult            `json:"bridge"`
 	// RefusalNotices holds when the owner was told on WhatsApp that a
 	// brain's scheduled backup refused a mass deletion; an entry stays until
 	// a backup of that brain succeeds, so each refusal streak is told once.
@@ -157,6 +161,8 @@ type BackupManager struct {
 	// and a Drive sign-in, for Stop to wait on.
 	wg     sync.WaitGroup
 	runner func(ctx context.Context, args []string, stderr io.Writer) ([]byte, error)
+	// now is the clock of the schedule, a variable so tests can set it.
+	now func() time.Time
 	// notify sends a WhatsApp message about a brain to its owner. The bridge
 	// sets it; nil sends nothing.
 	notify func(ctx context.Context, br *Brain, text string) error
@@ -172,7 +178,7 @@ var refusalNoticeTimeout = 30 * time.Second
 // last results and the day of the last scheduled run are gone then, and the
 // log says so rather than leaving it to the next scheduled run to show.
 func NewBackupManager(cfgs *ConfigStore, bm *BrainManager) *BackupManager {
-	m := &BackupManager{cfgs: cfgs, bm: bm}
+	m := &BackupManager{cfgs: cfgs, bm: bm, now: time.Now}
 	m.runner = m.runRclone
 	data, err := os.ReadFile(m.statePath())
 	switch {
@@ -191,6 +197,16 @@ func NewBackupManager(cfgs *ConfigStore, bm *BrainManager) *BackupManager {
 	if m.state.Brains == nil {
 		m.state.Brains = map[string]*BackupResult{}
 	}
+	// After the change is saved, never while it is being made: a change
+	// that validation or the write then refuses must not move the schedule.
+	cfgs.Subscribe(func(prev, next *Config) {
+		if next.Backup.Enabled && (!prev.Backup.Enabled || prev.Backup.DailyAt != next.Backup.DailyAt) {
+			m.mu.Lock()
+			m.state.ArmedAt = m.now()
+			m.saveStateLocked()
+			m.mu.Unlock()
+		}
+	})
 	return m
 }
 
@@ -393,10 +409,7 @@ func (m *BackupManager) Summary() backupSummary {
 			s.LastError = r.Error
 		}
 	}
-	if cfg.Backup.Enabled {
-		n := nextRun(cfg.Backup.DailyAt, time.Now())
-		s.NextRun = &n
-	}
+	s.NextRun = m.nextRunLocked(cfg, s.Connected)
 	return s
 }
 
@@ -413,25 +426,46 @@ func (m *BackupManager) allResultsLocked() []*BackupResult {
 	return out
 }
 
-// dueToday is when today's scheduled backup is due: daily_at on now's day,
-// in now's time zone. An empty or unparsable daily_at means the default.
-// The status, the scheduler and the switch-on check all ask here, so they
-// agree on when that is.
-func dueToday(dailyAt string, now time.Time) time.Time {
-	t, err := time.ParseInLocation("15:04", dailyAt, now.Location())
-	if err != nil {
-		t, _ = time.ParseInLocation("15:04", defaultBackupDailyAt, now.Location())
-	}
-	return time.Date(now.Year(), now.Month(), now.Day(), t.Hour(), t.Minute(), 0, 0, now.Location())
+// dayLayout names a day in backupState.LastScheduledDay.
+const dayLayout = "2006-01-02"
+
+// dueOn is daily_at on day's date, in day's time zone. On a day whose
+// clocks skip that time it is the moment the clocks jump to, as time.Date
+// has it. daily_at is valid HH:MM: effective refuses anything else.
+func dueOn(day time.Time, dailyAt string) time.Time {
+	t, _ := time.Parse("15:04", dailyAt)
+	y, m, d := day.Date()
+	return time.Date(y, m, d, t.Hour(), t.Minute(), 0, 0, day.Location())
 }
 
-// nextRun is the next time a scheduled backup is due after now.
-func nextRun(dailyAt string, now time.Time) time.Time {
-	next := dueToday(dailyAt, now)
-	if !next.After(now) {
-		next = next.AddDate(0, 0, 1)
+// nextDue is the daily schedule, for the scheduler and the status page
+// alike: the next scheduled run is today's at daily_at, unless it already
+// ran today (lastRunDay) or the schedule was switched on or moved after
+// today's time (armedAt). Then it is tomorrow's. runNow says that today's
+// is due: the time has come, perhaps while the machine slept.
+func nextDue(now time.Time, dailyAt, lastRunDay string, armedAt time.Time) (due time.Time, runNow bool) {
+	due = dueOn(now, dailyAt)
+	if lastRunDay == now.Format(dayLayout) || !due.After(armedAt) {
+		y, m, d := now.Date()
+		return dueOn(time.Date(y, m, d+1, 12, 0, 0, 0, now.Location()), dailyAt), false
 	}
-	return next
+	return due, !now.Before(due)
+}
+
+// nextRunLocked is when the next scheduled backup runs, for the status:
+// none while the schedule is off or Drive is not connected, since it would
+// never come, and now for a run that is due and only waits for the next
+// tick. Hold m.mu.
+func (m *BackupManager) nextRunLocked(cfg *Config, connected bool) *time.Time {
+	if !cfg.Backup.Enabled || !connected {
+		return nil
+	}
+	now := m.now()
+	due, runNow := nextDue(now, cfg.Backup.DailyAt, m.state.LastScheduledDay, m.state.ArmedAt)
+	if runNow {
+		due = now
+	}
+	return &due
 }
 
 func (b *Bridge) apiBackupStatus(w http.ResponseWriter, r *http.Request) {
@@ -463,9 +497,10 @@ func (b *Bridge) apiBackupStatus(w http.ResponseWriter, r *http.Request) {
 	if m.job != nil {
 		job = map[string]any{"started": m.job.started, "current": m.job.current, "queue": m.job.queue, "done": m.job.done}
 	}
+	connected := m.connected()
 	resp := map[string]any{
 		"rclone":                rc,
-		"connected":             m.connected(),
+		"connected":             connected,
 		"connect":               m.connect,
 		"settings":              cfg.Backup,
 		"include_bridge_config": cfg.Backup.includeBridge(),
@@ -473,8 +508,8 @@ func (b *Bridge) apiBackupStatus(w http.ResponseWriter, r *http.Request) {
 		"bridge":                m.state.Bridge,
 		"job":                   job,
 	}
-	if cfg.Backup.Enabled {
-		resp["next_run"] = nextRun(cfg.Backup.DailyAt, time.Now())
+	if next := m.nextRunLocked(cfg, connected); next != nil {
+		resp["next_run"] = *next
 	}
 	writeJSON(w, http.StatusOK, resp)
 }
@@ -773,9 +808,6 @@ func (b *Bridge) apiBackupSettings(w http.ResponseWriter, r *http.Request) {
 	}
 	_, err := b.cfgs.Update("", func(c *Config) error {
 		if req.Enabled != nil {
-			if *req.Enabled && !c.Backup.Enabled {
-				b.backup.skipTodayIfPastDue(c.Backup.DailyAt, req.DailyAt)
-			}
 			c.Backup.Enabled = *req.Enabled
 		}
 		if req.DailyAt != nil {
@@ -1535,12 +1567,11 @@ func (m *BackupManager) tick(now time.Time) {
 		m.warnNotConnected(now)
 		return
 	}
-	today := now.Format("2006-01-02")
 	m.mu.Lock()
-	last := m.state.LastScheduledDay
+	_, runNow := nextDue(now, cfg.Backup.DailyAt, m.state.LastScheduledDay, m.state.ArmedAt)
 	busy := m.job != nil || m.disconnecting
 	m.mu.Unlock()
-	if now.Before(dueToday(cfg.Backup.DailyAt, now)) || last == today || busy {
+	if !runNow || busy {
 		return
 	}
 	if err := m.StartRun(nil, cfg.Backup.includeBridge(), "scheduled", false); err != nil {
@@ -1548,7 +1579,7 @@ func (m *BackupManager) tick(now time.Time) {
 		return
 	}
 	m.mu.Lock()
-	m.state.LastScheduledDay = today
+	m.state.LastScheduledDay = now.Format(dayLayout)
 	m.saveStateLocked()
 	m.mu.Unlock()
 }
@@ -1557,29 +1588,13 @@ func (m *BackupManager) tick(now time.Time) {
 // Drive link to run on: after an abandoned reconnect, say. The overview says
 // so too; without either, the backups would just stop.
 func (m *BackupManager) warnNotConnected(now time.Time) {
-	day := now.Format("2006-01-02")
+	day := now.Format(dayLayout)
 	m.mu.Lock()
 	warned := m.warnedDay == day
 	m.warnedDay = day
 	m.mu.Unlock()
 	if !warned {
 		log.Printf("backup: daily backups are on, but Google Drive is not connected, so none run — connect it on the Backup page")
-	}
-}
-
-// skipTodayIfPastDue makes a schedule switched on after today's time start
-// tomorrow, instead of firing a backup the moment it is enabled.
-func (m *BackupManager) skipTodayIfPastDue(current string, next *string) {
-	at := current
-	if next != nil {
-		at = *next
-	}
-	now := time.Now()
-	if now.After(dueToday(at, now)) {
-		m.mu.Lock()
-		m.state.LastScheduledDay = now.Format("2006-01-02")
-		m.saveStateLocked()
-		m.mu.Unlock()
 	}
 }
 

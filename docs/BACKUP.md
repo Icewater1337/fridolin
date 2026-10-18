@@ -79,8 +79,13 @@ employer).
 ## Schedule
 
 Turn on the daily backup and pick a time (default 03:30). If the machine was
-asleep, the backup runs as soon as it wakes. *Back up now* runs one
-immediately; one brain or all.
+asleep, the backup runs as soon as it wakes. Switching the schedule on, or
+moving it to a time that has already passed today, does not start a backup
+at once: the first run is tomorrow's (a time still to come today runs
+today, unless today's scheduled backup already ran). The next run shown on
+the Backup page and the overview is the one that will happen; there is none
+while Google Drive is not connected.
+*Back up now* runs one immediately; one brain or all.
 
 ## Mass deletions
 

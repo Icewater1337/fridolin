@@ -243,7 +243,7 @@ export default {
         include_bridge_config: incSw.input.checked,
       });
       const form = h('form.card.form',
-        h('div.field', enabled, h('div.help', 'Runs at the time below while the computer is awake. A run missed while it slept happens as soon as it wakes.')),
+        h('div.field', enabled, h('div.help', 'Runs at the time below while the computer is awake. A run missed while it slept happens as soon as it wakes. Switched on, or moved to a time already past today, it first runs tomorrow.')),
         h('div.form-grid',
           field({ label: 'Time of day', control: time, help: '24-hour time on this computer.' }),
           field({ label: 'Keep old versions for (days)', control: keep, help: 'Counted from the backup that replaced or deleted the files. 0 keeps them forever.' }),

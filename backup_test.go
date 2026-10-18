@@ -13,7 +13,9 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"testing/synctest"
 	"time"
+	_ "time/tzdata" // TestNextDue's time zone, on machines without one
 )
 
 func TestFilterLines(t *testing.T) {
@@ -24,36 +26,209 @@ func TestFilterLines(t *testing.T) {
 	}
 }
 
-func TestNextRun(t *testing.T) {
-	loc := time.FixedZone("x", 0)
-	now := time.Date(2026, 3, 1, 10, 0, 0, 0, loc)
-	if got := nextRun("03:30", now); !got.Equal(time.Date(2026, 3, 2, 3, 30, 0, 0, loc)) {
-		t.Errorf("nextRun before = %v", got)
+// TestNextDue is the daily schedule: today's run is due at daily_at unless
+// it already ran today or the schedule was switched on or moved after that
+// time, and a run missed while the machine slept is due as soon as it is
+// awake.
+func TestNextDue(t *testing.T) {
+	zurich, err := time.LoadLocation("Europe/Zurich")
+	if err != nil {
+		t.Fatal(err)
 	}
-	if got := nextRun("23:15", now); !got.Equal(time.Date(2026, 3, 1, 23, 15, 0, 0, loc)) {
-		t.Errorf("nextRun later today = %v", got)
+	at := func(y int, mo time.Month, d, h, mi int) time.Time { return time.Date(y, mo, d, h, mi, 0, 0, zurich) }
+	day := at(2026, 3, 10, 0, 0)
+	cases := []struct {
+		name    string
+		now     time.Time
+		dailyAt string
+		lastRun string
+		armed   time.Time
+		wantDue time.Time
+		wantNow bool
+	}{
+		{"before the time", at(2026, 3, 10, 2, 0), "03:30", "", time.Time{}, at(2026, 3, 10, 3, 30), false},
+		{"at the time", at(2026, 3, 10, 3, 30), "03:30", "", time.Time{}, at(2026, 3, 10, 3, 30), true},
+		{"after the time: missed while asleep", at(2026, 3, 10, 9, 0), "03:30", "2026-03-09", day.AddDate(0, 0, -5), at(2026, 3, 10, 3, 30), true},
+		{"already ran today", at(2026, 3, 10, 9, 0), "03:30", "2026-03-10", time.Time{}, at(2026, 3, 11, 3, 30), false},
+		{"ran yesterday, later today", at(2026, 3, 10, 9, 0), "23:15", "2026-03-09", time.Time{}, at(2026, 3, 10, 23, 15), false},
+		{"switched on after the time", at(2026, 3, 10, 9, 0), "03:30", "", at(2026, 3, 10, 8, 59), at(2026, 3, 11, 3, 30), false},
+		{"switched on before the time", at(2026, 3, 10, 9, 0), "10:00", "", at(2026, 3, 10, 8, 59), at(2026, 3, 10, 10, 0), false},
+		{"moved to a time already past", at(2026, 3, 10, 15, 0), "14:00", "2026-03-09", at(2026, 3, 10, 14, 30), at(2026, 3, 11, 14, 0), false},
+		{"switched on in the due minute", at(2026, 3, 10, 3, 30), "03:30", "", at(2026, 3, 10, 3, 30).Add(20 * time.Second), at(2026, 3, 11, 3, 30), false},
+		{"end of the month", at(2026, 3, 31, 9, 0), "03:30", "2026-03-31", time.Time{}, at(2026, 4, 1, 3, 30), false},
+		// 2026-03-29: the clocks jump from 02:00 to 03:00.
+		{"a time the clocks skip", at(2026, 3, 29, 1, 0), "02:30", "", time.Time{}, at(2026, 3, 29, 3, 30), false},
+		{"a time the clocks skip, once it came", at(2026, 3, 29, 3, 31), "02:30", "", time.Time{}, at(2026, 3, 29, 3, 30), true},
+		{"the day before the clocks skip it", at(2026, 3, 28, 9, 0), "02:30", "2026-03-28", time.Time{}, at(2026, 3, 29, 3, 30), false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			due, now := nextDue(tc.now, tc.dailyAt, tc.lastRun, tc.armed)
+			if !due.Equal(tc.wantDue) || now != tc.wantNow {
+				t.Errorf("nextDue = %v, %v; want %v, %v", due, now, tc.wantDue, tc.wantNow)
+			}
+		})
+	}
+
+	// 2026-10-25: the clocks go back from 03:00 to 02:00, so 02:30 comes
+	// twice. The run is due once.
+	t.Run("a time that comes twice", func(t *testing.T) {
+		first := time.Date(2026, 10, 25, 0, 30, 0, 0, time.UTC).In(zurich)  // 02:30 summer time
+		second := time.Date(2026, 10, 25, 1, 30, 0, 0, time.UTC).In(zurich) // 02:30 winter time
+		ranAt := time.Time{}
+		for _, now := range []time.Time{first, second} {
+			if _, runNow := nextDue(now, "02:30", ranOn(ranAt), time.Time{}); runNow {
+				if !ranAt.IsZero() {
+					t.Fatalf("due again at %v after running at %v", now, ranAt)
+				}
+				ranAt = now
+			}
+		}
+		if ranAt.IsZero() {
+			t.Error("never due")
+		}
+	})
+}
+
+// ranOn is the LastScheduledDay of a run at t, "" for none.
+func ranOn(t time.Time) string {
+	if t.IsZero() {
+		return ""
+	}
+	return t.Format(dayLayout)
+}
+
+// TestBackupScheduleIsArmedOnlyBySavedChanges: switching the schedule on or
+// moving it marks when, so that neither starts a backup at once, and only
+// once the change is saved. One the config refuses changes nothing.
+func TestBackupScheduleIsArmedOnlyBySavedChanges(t *testing.T) {
+	tb := newTestBridge(t, `, "backup": {"daily_at": "03:30"}`)
+	m := tb.backup
+	clock := time.Date(2026, 10, 18, 9, 0, 0, 0, time.Local)
+	m.now = func() time.Time { return clock }
+	armed := func() time.Time {
+		m.mu.Lock()
+		defer m.mu.Unlock()
+		return m.state.ArmedAt
+	}
+
+	// Refused (the root is no plain folder name): not armed.
+	if w := tb.do("PUT", "/api/backup/settings", map[string]any{"enabled": true, "root": "../x"}); w.Code != 422 {
+		t.Fatalf("settings = %d %s, want 422", w.Code, w.Body.String())
+	}
+	if a := armed(); !a.IsZero() {
+		t.Errorf("a refused change armed the schedule at %v", a)
+	}
+	if w := tb.do("PUT", "/api/backup/settings", map[string]any{"enabled": true}); w.Code != 200 {
+		t.Fatalf("settings = %d %s", w.Code, w.Body.String())
+	}
+	if a := armed(); !a.Equal(clock) {
+		t.Errorf("armed at %v, want %v", a, clock)
+	}
+	if _, runNow := nextDue(clock.Add(time.Minute), "03:30", "", armed()); runNow {
+		t.Error("switching on after today's time starts a backup at once")
+	}
+	clock = clock.Add(time.Hour)
+	if w := tb.do("PUT", "/api/backup/settings", map[string]any{"keep_versions_days": 7}); w.Code != 200 {
+		t.Fatalf("settings = %d %s", w.Code, w.Body.String())
+	}
+	if a := armed(); a.Equal(clock) {
+		t.Error("another backup setting re-armed the schedule")
+	}
+	if w := tb.do("PUT", "/api/backup/settings", map[string]any{"daily_at": "08:00"}); w.Code != 200 {
+		t.Fatalf("settings = %d %s", w.Code, w.Body.String())
+	}
+	if a := armed(); !a.Equal(clock) {
+		t.Errorf("moving the time armed at %v, want %v", a, clock)
+	}
+	// Saved, it is there after a restart.
+	if a := NewBackupManager(tb.cfgs, tb.brainMgr).state.ArmedAt; !a.Equal(clock) {
+		t.Errorf("armed time after a restart = %v, want %v", a, clock)
 	}
 }
 
-// The status page, the scheduler and the check when backups are switched
-// on all take today's due time from dueToday, which reads an empty or bad
-// daily_at as the default, 03:30.
-func TestDueToday(t *testing.T) {
-	loc := time.FixedZone("x", 3600)
-	now := time.Date(2026, 3, 1, 10, 0, 0, 0, loc)
-	for at, want := range map[string]time.Time{
-		"07:05": time.Date(2026, 3, 1, 7, 5, 0, 0, loc),
-		"23:59": time.Date(2026, 3, 1, 23, 59, 0, 0, loc),
-		"":      time.Date(2026, 3, 1, 3, 30, 0, 0, loc),
-		"25:00": time.Date(2026, 3, 1, 3, 30, 0, 0, loc),
-		"noon":  time.Date(2026, 3, 1, 3, 30, 0, 0, loc),
-	} {
-		if got := dueToday(at, now); !got.Equal(want) {
-			t.Errorf("dueToday(%q) = %v, want %v", at, got, want)
-		}
+// TestBackupSchedulerTicks: Start looks at the schedule every minute, runs
+// the backup once its time has come, only once that day, and stops with
+// Stop.
+func TestBackupSchedulerTicks(t *testing.T) {
+	// A bubble's clock starts at 2000-01-01 00:00 UTC. Where 90 minutes on
+	// is the next day already (a zone a little behind UTC), today's time
+	// would be past at the first tick: the test then starts at midnight.
+	bubble := time.Date(2000, 1, 1, 0, 0, 0, 0, time.UTC)
+	start := bubble.In(time.Local)
+	if due := start.Add(90 * time.Minute); due.Day() != start.Day() {
+		start = time.Date(due.Year(), due.Month(), due.Day(), 0, 0, 0, 0, time.Local)
 	}
-	if got, want := nextRun("", now), time.Date(2026, 3, 2, 3, 30, 0, 0, loc); !got.Equal(want) {
-		t.Errorf("nextRun(\"\") = %v, want %v", got, want)
+	dailyAt := start.Add(90 * time.Minute).Format("15:04")
+	tb := newTestBridge(t, `, "backup": {"enabled": true, "include_bridge_config": false, "daily_at": "`+dailyAt+`"}`)
+	_ = os.MkdirAll(filepath.Dir(tb.backup.rcloneConf()), 0o700)
+	_ = os.WriteFile(tb.backup.rcloneConf(), []byte("[brain-gdrive]\ntype = alias\nremote = /nowhere\n"), 0o600)
+	addBackupBrain(t, tb, "notes")
+	synctest.Test(t, func(t *testing.T) {
+		time.Sleep(start.Sub(bubble))
+		m := NewBackupManager(tb.cfgs, tb.brainMgr)
+		d := &deletionRunner{src: []string{"a"}, cur: []string{"a"}}
+		m.runner = d.run
+		m.Start(context.Background())
+		syncs := func() int {
+			synctest.Wait()
+			d.mu.Lock()
+			defer d.mu.Unlock()
+			return len(d.syncs)
+		}
+		time.Sleep(89*time.Minute + time.Second)
+		if n := syncs(); n != 0 {
+			t.Fatalf("%d syncs before the time", n)
+		}
+		time.Sleep(time.Minute)
+		if n := syncs(); n != 1 {
+			t.Fatalf("%d syncs once the time came, want 1", n)
+		}
+		time.Sleep(3 * time.Hour)
+		if n := syncs(); n != 1 {
+			t.Errorf("%d syncs later that day, want still 1", n)
+		}
+		m.mu.Lock()
+		res, last := m.state.Brains["notes"], m.state.LastScheduledDay
+		m.mu.Unlock()
+		if res == nil || !res.OK || res.Trigger != "scheduled" || last != start.Format(dayLayout) {
+			t.Errorf("result %+v, last scheduled day %q; want a scheduled run on %s", res, last, start.Format(dayLayout))
+		}
+		m.Stop()
+	})
+}
+
+// TestBackupNextRun: the status shows the run that will happen: tomorrow's
+// once today's ran, now for one that is due, and none while Drive is not
+// connected.
+func TestBackupNextRun(t *testing.T) {
+	tb := newTestBridge(t, `, "backup": {"enabled": true, "daily_at": "03:30"}`)
+	m := tb.backup
+	clock := time.Date(2026, 10, 18, 9, 0, 0, 0, time.Local)
+	m.now = func() time.Time { return clock }
+	next := func() *time.Time {
+		var st struct {
+			NextRun *time.Time `json:"next_run"`
+		}
+		_ = json.Unmarshal(tb.do("GET", "/api/backup/status", nil).Body.Bytes(), &st)
+		if s := m.Summary().NextRun; (s == nil) != (st.NextRun == nil) || s != nil && !s.Equal(*st.NextRun) {
+			t.Errorf("the overview's next run %v differs from the Backup page's %v", s, st.NextRun)
+		}
+		return st.NextRun
+	}
+	if n := next(); n != nil {
+		t.Errorf("next run %v while Drive is not connected", n)
+	}
+	_ = os.MkdirAll(filepath.Dir(m.rcloneConf()), 0o700)
+	_ = os.WriteFile(m.rcloneConf(), []byte("[brain-gdrive]\ntype = alias\nremote = /nowhere\n"), 0o600)
+	if n := next(); n == nil || !n.Equal(clock) {
+		t.Errorf("next run = %v, want now (today's is due)", n)
+	}
+	m.mu.Lock()
+	m.state.LastScheduledDay = clock.Format(dayLayout)
+	m.mu.Unlock()
+	if n, want := next(), time.Date(2026, 10, 19, 3, 30, 0, 0, time.Local); n == nil || !n.Equal(want) {
+		t.Errorf("next run = %v, want %v", n, want)
 	}
 }
 
