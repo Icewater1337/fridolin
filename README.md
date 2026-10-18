@@ -639,11 +639,12 @@ worker, which takes each chat's messages in order and the chats in turn,
 and waits for one of the `max_concurrent_runs` run slots all brains share
 (`runslots.go`); each message spawns `claude -p` with
 `--output-format stream-json`, seeded on stdin with the brain's prompt
-file and recent chat history. Events
-are parsed live, so an `AskUserQuestion` reaches WhatsApp immediately, with
-its options numbered (the answer comes as the next message, and the run's
-final reply is sent too), and a run over 10 seconds gets a "working on it"
-notice (the event types are in `stream.go`). A run is stopped at
+file and recent chat history, which `history.go` reads back from the end
+of the file. Events are parsed live, so an `AskUserQuestion` reaches
+WhatsApp immediately, with its options numbered (the answer comes as the
+next message, and the run's final reply is sent too), and a run over 10
+seconds gets a "working on it" notice (the event types are in
+`stream.go`). A run is stopped at
 `run_timeout_minutes`, and five seconds after its result when something it
 started holds its output open. Runs are listed in `<data_dir>/runs/` while
 they last, so that a bridge that crashed stops what is left of them when it
@@ -683,6 +684,10 @@ numbered options); until then a run reads them from the outbox. One that
 cannot go out within an hour is given up on, and the Overview says so.
 
 **`server.go`** — the localhost `/send` and `/ingest` endpoints.
+
+**`otp.go`** — the OTP guard: a one-time code a chat was just asked for
+is kept out of the history and the model, and handed to the script that
+asked for it through `<data_dir>/otp/`, until it expires.
 
 **`brainapi.go`** — `/brain/`, what the tools a brain runs ask the bridge
 for, with a token that works only while that run lasts.
