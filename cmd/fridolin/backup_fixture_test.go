@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"os"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -222,3 +223,16 @@ func backupFlagValue(args []string, flag string) string {
 
 // backupMaxDelete returns a sync's --max-delete value, "" for none.
 func backupMaxDelete(args []string) string { return backupFlagValue(args, "--max-delete") }
+
+// connectBackupFixture supplies discovery without starting an executable.
+func connectBackupFixture(t *testing.T, run BackupRunFunc) *backupFixture {
+	t.Helper()
+	f := newBackupFixture(t, nil)
+	f.runner = run
+	missing := filepath.Join(t.TempDir(), "missing-rclone")
+	f.manager.opts.FindRclone = func(string) (string, error) { return missing, nil }
+	if err := os.MkdirAll(filepath.Dir(f.options.RcloneConf), 0700); err != nil {
+		t.Fatal(err)
+	}
+	return f
+}
