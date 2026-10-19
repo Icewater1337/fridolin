@@ -1,7 +1,5 @@
 package app_test
 
-import "github.com/Icewater1337/fridolin/internal/app"
-
 import (
 	"context"
 	"encoding/json"
@@ -9,6 +7,7 @@ import (
 	"runtime"
 	"testing"
 
+	"github.com/Icewater1337/fridolin/internal/app"
 	"github.com/Icewater1337/fridolin/internal/brain"
 	"github.com/Icewater1337/fridolin/internal/config"
 	"github.com/Icewater1337/fridolin/internal/manifest"

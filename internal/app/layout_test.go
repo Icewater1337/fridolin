@@ -1,0 +1,222 @@
+package app
+
+import (
+	"encoding/json"
+	"os"
+	"path/filepath"
+	"slices"
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/Icewater1337/fridolin/internal/platform"
+
+	"github.com/Icewater1337/fridolin/internal/config"
+
+	"github.com/Icewater1337/fridolin/internal/fsx"
+	"github.com/Icewater1337/fridolin/internal/testutil"
+)
+
+// useLayout makes the bridge believe its own files are laid out as l.
+func useLayout(t *testing.T, l platform.BridgeLayout) {
+	t.Helper()
+	prev := ownLayout
+	ownLayout = func() platform.BridgeLayout { return l }
+	t.Cleanup(func() { ownLayout = prev })
+}
+
+// makeFiles creates each path under root, a folder when it ends in "/".
+func makeFiles(t *testing.T, root string, paths ...string) {
+	t.Helper()
+	for _, p := range paths {
+		full := filepath.Join(root, p)
+		if strings.HasSuffix(p, "/") {
+			if err := os.MkdirAll(full, 0o700); err != nil {
+				t.Fatal(err)
+			}
+			continue
+		}
+		if err := os.MkdirAll(filepath.Dir(full), 0o700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(full, []byte("x\n"), 0o700); err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
+func TestLayoutOf(t *testing.T) {
+	root := fsx.Canonical(t.TempDir())
+	makeFiles(t, root,
+		"src/fridolin/go.mod", "src/fridolin/tools/poll_results.py", "src/fridolin/fridolin", "src/fridolin/bin/fridolin",
+		"lib/fridolin/fridolin", "lib/fridolin/tools/poll_results.py",
+		"installed/fridolin", "installed/tools/poll_results.py",
+		"bare/fridolin", "bare/fridolin.prev", "bare/tools.prev/poll_results.py",
+		"stale/fridolin", "stale/tools/poll_results.py",
+		"other/bin/fridolin", "other/go.mod",
+		"alone/fridolin",
+	)
+	src, lib := root+"/src/fridolin", root+"/lib/fridolin"
+	for dir, source := range map[string]string{"installed": src, "bare": src, "stale": root + "/other"} {
+		if err := writeTestInstallManifest(root+"/"+dir, source); err != nil {
+			t.Fatal(err)
+		}
+	}
+	cases := []struct {
+		name string
+		exe  string
+		want platform.BridgeLayout
+	}{
+		{"built in the checkout's root", src + "/fridolin", platform.BridgeLayout{Dir: src, Tools: src + "/tools", Source: src}},
+		{"dev build in the checkout's bin/", src + "/bin/fridolin", platform.BridgeLayout{Dir: src, Tools: src + "/tools", Source: src}},
+		{"tools next to the binary, no checkout", lib + "/fridolin", platform.BridgeLayout{Dir: lib, Tools: lib + "/tools"}},
+		{"installed from a checkout", root + "/installed/fridolin", platform.BridgeLayout{Dir: root + "/installed", Tools: root + "/installed/tools", Source: src}},
+		{"installed without tools", root + "/bare/fridolin", platform.BridgeLayout{Dir: root + "/bare", Source: src}},
+		{"installed from a folder that is no checkout now", root + "/stale/fridolin", platform.BridgeLayout{Dir: root + "/stale", Tools: root + "/stale/tools"}},
+		{"bin/ of a folder without tools", root + "/other/bin/fridolin", platform.BridgeLayout{}},
+		{"a binary on its own", root + "/alone/fridolin", platform.BridgeLayout{}},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			if got := platform.LayoutOf(c.exe); got != c.want {
+				t.Errorf("layoutOf(%s) = %+v, want %+v", c.exe, got, c.want)
+			}
+		})
+	}
+}
+
+func TestBrainRunsKnowWhereTheToolsAre(t *testing.T) {
+	// The starter prompt and the example skills run the helpers as
+	// $FRIDOLIN_TOOLS_DIR/<tool>, wherever the bridge is installed.
+	cases := []struct {
+		name, tools, want string
+	}{
+		{"tools found", "/opt/fridolin/tools", "FRIDOLIN_TOOLS_DIR=/opt/fridolin/tools"},
+		{"no tools", "", "FRIDOLIN_TOOLS_DIR unset"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			useLayout(t, platform.BridgeLayout{Tools: c.tools})
+			t.Setenv("FRIDOLIN_TOOLS_DIR", "")
+			os.Unsetenv("FRIDOLIN_TOOLS_DIR")
+			t.Setenv("FRIDOLIN_FAKE_ENV", "FRIDOLIN_TOOLS_DIR")
+			cfg, _ := brainASetup(t)
+			mgr := newTestManager(t, cfg)
+			d := &deliveries{}
+			mgr.SetHooks(BrainHooks{Deliver: d.add})
+			t.Cleanup(mgr.Stop)
+			if _, _, _, err := mgr.Submit(dm("hello")); err != nil {
+				t.Fatal(err)
+			}
+			testutil.WaitFor(t, 20*time.Second, "the run", func() bool { return d.count() == 1 })
+			res := d.all()[0].res
+			if res.Err != nil {
+				t.Fatalf("run failed: %v", res.Err)
+			}
+			if !strings.HasSuffix(res.Text, " "+c.want) {
+				t.Errorf("run = %q, want it to end with %q", res.Text, c.want)
+			}
+		})
+	}
+}
+
+// TestCheckBrainPathRefusesTheBridgesOwnFolders: a brain may write its own
+// folder, so one inside the checkout could plant a test file that the next
+// make check runs outside the sandbox, and one inside the install folder a
+// tool the bridge runs. Both used to be only a warning.
+func TestCheckBrainPathRefusesTheBridgesOwnFolders(t *testing.T) {
+	home := fsx.Canonical(t.TempDir())
+	t.Setenv("HOME", home)
+	src, lib := home+"/src/fridolin", home+"/.local/lib/fridolin"
+	cfg := &config.File{DataDir: home + "/.fridolin"}
+	const (
+		checkout = "inside the bridge's source checkout"
+		install  = "inside the folder the bridge is installed in"
+	)
+	cases := []struct {
+		name   string
+		layout platform.BridgeLayout
+		path   string
+		want   string // "" for neither problem
+	}{
+		{"in the checkout of a dev build", platform.BridgeLayout{Dir: src, Tools: src + "/tools", Source: src}, src + "/brains/a", checkout},
+		{"in the checkout an install came from", platform.BridgeLayout{Dir: lib, Tools: lib + "/tools", Source: src}, src + "/a", checkout},
+		{"in the install folder", platform.BridgeLayout{Dir: lib, Tools: lib + "/tools", Source: src}, lib + "/a", install},
+		{"a folder of its own", platform.BridgeLayout{Dir: lib, Tools: lib + "/tools", Source: src}, home + "/assistant/a", ""},
+		{"a binary on its own", platform.BridgeLayout{}, home + "/assistant/a", ""},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			useLayout(t, c.layout)
+			_, problems, _ := CheckBrainPath(c.path, cfg, nil)
+			all := strings.Join(problems, "\n")
+			for _, w := range []string{checkout, install} {
+				if got := strings.Contains(all, w); got != (w == c.want) {
+					t.Errorf("problems %q: %q present = %v, want %v", problems, w, got, w == c.want)
+				}
+			}
+		})
+	}
+}
+
+func TestSandboxProfileProtectsTheBridgesOwnFiles(t *testing.T) {
+	// launchd runs the bridge outside the sandbox, and setup.sh in the
+	// checkout builds what it runs next: a brain must not write either.
+	home := fsx.Canonical(t.TempDir())
+	t.Setenv("HOME", home)
+	makeFiles(t, home,
+		"src/fridolin/go.mod", "src/fridolin/tools/poll_results.py", "src/fridolin/fridolin", "src/fridolin/bin/fridolin",
+		"lib/fridolin/fridolin", "lib/fridolin/tools/poll_results.py",
+		"installed/fridolin", "installed/tools/poll_results.py",
+		"bare/fridolin", "bare/fridolin.prev", "bare/tools.prev/poll_results.py",
+		"alone/fridolin", "a/notes.md",
+	)
+	src, lib := home+"/src/fridolin", home+"/lib/fridolin"
+	for _, dir := range []string{"installed", "bare"} {
+		if err := writeTestInstallManifest(home+"/"+dir, src); err != nil {
+			t.Fatal(err)
+		}
+	}
+	cases := []struct {
+		name string
+		exe  string
+		want []string // subpaths denied for writing
+	}{
+		{"built in the checkout's root", src + "/fridolin", []string{src}},
+		{"dev build in the checkout's bin/", src + "/bin/fridolin", []string{src}},
+		{"tools next to the binary", lib + "/fridolin", []string{lib}},
+		{"installed from a checkout", home + "/installed/fridolin", []string{home + "/installed", src}},
+		// Else a brain could plant a fridolin.prev that `service
+		// rollback` starts outside any sandbox.
+		{"installed without tools", home + "/bare/fridolin", []string{home + "/bare", src}},
+		{"a binary on its own", home + "/alone/fridolin", nil},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			sp := NewSandboxProfiler(map[string][]string{"a": {home + "/a"}}, &config.File{ClaudePath: "claude", DataDir: home + "/.fridolin"})
+			sp.bridgeExe = c.exe
+			profile := mustProfile(t, sp, "a")
+			if !strings.Contains(profile, `(deny file-write* (literal "`+c.exe+`"))`) {
+				t.Errorf("the binary itself is writable")
+			}
+			for _, dir := range []string{src, lib, home + "/installed", home + "/bare", home + "/alone"} {
+				rule := `(deny file-write* (subpath "` + dir + `"))`
+				want := 0
+				if slices.Contains(c.want, dir) {
+					want = 1
+				}
+				if got := strings.Count(profile, rule); got != want {
+					t.Errorf("%s appears %d times, want %d", rule, got, want)
+				}
+			}
+		})
+	}
+}
+
+func writeTestInstallManifest(dir, source string) error {
+	data, err := json.Marshal(platform.InstallManifest{Source: source})
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(filepath.Join(dir, platform.InstallManifestFile), data, 0600)
+}

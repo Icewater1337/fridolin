@@ -26,7 +26,9 @@ import (
 // since an answer that late would only confuse, and the dashboard says
 // so. Replies to one chat go out in order.
 type Outbox struct {
-	store *store.Store
+	ctx       context.Context
+	startOnce sync.Once
+	store     *store.Store
 	// messenger is the bridge's, read at each reply and each send: the
 	// bridge wraps it after the outbox is made.
 	messenger func() Link
@@ -60,19 +62,30 @@ const (
 // NewOutbox makes an outbox and starts delivering, the replies a
 // previous run of the bridge left first. Stop ends it.
 func NewOutbox(store *store.Store, messenger func() Link, pace time.Duration, delivered func(context.Context, store.OutboxRow) error) *Outbox {
-	ctx, cancel := context.WithCancel(context.Background())
-	o := &Outbox{
-		store: store, messenger: messenger, pace: pace, delivered: delivered, now: time.Now,
-		wake: make(chan struct{}, 1), cancel: cancel, done: make(chan struct{}),
-	}
-	go o.run(ctx)
+	o := NewPausedOutbox(store, messenger, pace, delivered)
+	o.Start()
 	return o
 }
+
+// NewPausedOutbox wires delivery without starting a goroutine. Application
+// construction uses this so a failed listener bind never starts delivery.
+func NewPausedOutbox(store *store.Store, messenger func() Link, pace time.Duration, delivered func(context.Context, store.OutboxRow) error) *Outbox {
+	ctx, cancel := context.WithCancel(context.Background())
+	o := &Outbox{
+		ctx: ctx, store: store, messenger: messenger, pace: pace, delivered: delivered, now: time.Now,
+		wake: make(chan struct{}, 1), cancel: cancel, done: make(chan struct{}),
+	}
+	return o
+}
+
+// Start begins delivery once. Stop before Start leaves the outbox stopped.
+func (o *Outbox) Start() { o.startOnce.Do(func() { go o.run(o.ctx) }) }
 
 // Stop ends delivery and waits for a send in flight to end. What did not
 // go out stays in bridge.db for the next start.
 func (o *Outbox) Stop() {
 	o.once.Do(o.cancel)
+	o.startOnce.Do(func() { close(o.done) })
 	<-o.done
 }
 

@@ -3,11 +3,12 @@ package app
 import (
 	"context"
 	"encoding/json"
+	"slices"
+
 	"github.com/Icewater1337/fridolin/internal/access"
 	"github.com/Icewater1337/fridolin/internal/backup"
 	"github.com/Icewater1337/fridolin/internal/brain"
 	"github.com/Icewater1337/fridolin/internal/config"
-	"slices"
 )
 
 // AccessPolicy is the application's read-only projection from a config snapshot.

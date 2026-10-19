@@ -214,19 +214,30 @@ behaviour unless its title says so. The steps so far:
   unit tests run in the new package; HTTP and runtime integration tests remain
   in the command.
 
-Everything else is still `package main` in `cmd/fridolin`, one file per
-subject (section 3 names the file each package will come from). A package
-that is not yet extracted is marked *(to come, Rn)* with the step that
-creates it.
+- **R17, application root**: `internal/app.App` now owns composition, provider
+  adapters, configuration reconciliation, startup recovery, health checks and
+  ordered shutdown. `New(Options{Config, NoWhatsApp, Logs, Listen})` wires an idle
+  application. `Run(ctx)` binds first, starts delivery and background work, and
+  returns only after teardown; a restart returns `ErrRestart`. Constructor errors
+  close the brain roots, store and instance lock. `RequestRestart` cancels the
+  running application; only the CLI replaces the process.
+- **R17, CLI boundary**: `cmd/fridolin/main.go` delegates to `internal/cli`.
+  That package owns arguments, signals, logging, service installation and exit
+  behavior. `internal/toolcli` owns the in-run history, polls, calendar and MCP
+  command implementations with explicit process inputs. `internal/controlcli`
+  owns dashboard login and token-rotation client workflows. Application production
+  code cannot import these CLI packages; the external integration tests can.
+- **R17, tests**: application tests moved beside their implementation. The
+  original fixture tree remains at `cmd/fridolin/testdata`, shared through relative
+  testdata links, with the original golden bytes unchanged. `app/apptest` drives a
+  real dev-mode application through an ephemeral listener and guarded HTTP API.
+  White-box component tests remain in `package app`; lifecycle boundary tests are
+  in `package app_test`. The site CI job targets the moved application suite.
 
-How a step moves code: it first makes the code movable inside
-`cmd/fridolin` and writes the tests that guard the move; then it `git mv`s
-the files into their package, exports what the rest still uses and keeps
-the old names in a temporary `cmd/fridolin/aliases.go`; then it rewrites
-the call sites with a recorded script and deletes `aliases.go`, adding the
-package's row to archtest's import table. Each commit builds and passes the
-tests. Types, JSON tags, error strings, timings and goroutine structure stay
-the same, and known bugs move unchanged.
+R18's pointer-free settings conversion and the remaining logging and polish
+follow-ups are still outstanding. Earlier entries above describe each completed
+slice at the time it landed; the R17 ownership rules supersede their references
+to command-owned runtime code.
 
 ## 1. What Fridolin does
 
@@ -280,7 +291,7 @@ Every compatibility shim carries a `// compat:` comment next to its code, so
 ## 2. Repository layout
 
 ```
-cmd/fridolin/        CLI and, until the restructure is done, all code not yet in a package
+cmd/fridolin/        executable entry point (delegates to internal/cli)
 internal/            Go packages, one directory per package (section 3)
 web/                 the dashboard (HTML, CSS, ES modules, no build step) and embed.go
 examples/            brain templates (prompt, skills) and embed.go
@@ -569,24 +580,24 @@ responsibility and says what it must not do.
   files, OAuth and server lifecycle still live in `cmd/fridolin`
   (`dashboard*.go`, `server.go`, `scripttoken.go`, `brainapi.go`,
   `dashsession.go`, `site_api.go`) until R16.
-- **`app`** *(to come, R17)*: the composition root and lifecycle. It builds
+- **`app`**: the composition root and lifecycle. It builds
   every component, projects config into each package's own settings,
   reconciles on config change, supervises the `Run(ctx)` components and
   handles restart.
-- **`app/apptest`** *(to come, R17)*: the end-to-end harness in dev mode,
-  today `harness_test.go` in `cmd/fridolin`.
-- **`testutil`** *(to come, R8)*: shared test helpers. It makes the test
+- **`app/apptest`**: the external dev-mode HTTP/lifecycle harness. The existing
+  characterization helper remains in `internal/app/harness_test.go`.
+- **`testutil`**: shared test helpers. It makes the test
   binary act as the Claude or Plaud CLI, and provides `WaitFor` and golden
   files. It uses only the standard library. Today these are in
   `cmd/fridolin`'s `helpers_test.go`, `golden_test.go` and
   `plaud_fake_test.go`.
 - **`archtest`**: tests that enforce section 4.
-- **`cmd/fridolin`**: argument parsing and the subcommand table (`run`,
+- **`cli`**: argument parsing and the subcommand table (`run`,
   `check`, `open`, `rotate-token`, `init`, `paths`, `service`, `version`,
   the commands brains run, `history`, `polls` and `calendar`, and
   `mcp-site`, which a site builder's runs start). It owns the instance lock
   and the signal context and re-execs after a restart request. Today it
-  also holds all the code not yet in a package.
+  is called by the executable entry point in `cmd/fridolin`.
 
 ## 4. Dependency rules
 
@@ -595,7 +606,7 @@ This is the target; archtest's import table (`internal/archtest`) holds the
 edges that exist today.
 
 ```
-cmd/fridolin ─► app, config, registry, route, access, sandbox, httpapi, platform, version, logx
+cmd/fridolin ─► cli ─► app, config, httpapi, platform, version, logx, toolcli, controlcli
 
 app ─► every internal package except testutil and archtest; web; examples; site
 
@@ -1051,7 +1062,7 @@ The guards:
 ### Route table
 
 `routes.go` is the single list of method, pattern, class and handler.
-Today `routeInventory` in `cmd/fridolin/routes_test.go` lists them and
+Today `RouteInventory` in `internal/httpapi/routes.go` lists them and
 checks that no route is missing. A table test checks the class of every
 route: each `/api` route rejects a missing token, each write rejects a
 missing `X-Bridge-Dashboard` header or a form body, and no GET response
@@ -1193,7 +1204,7 @@ run fails with an error and no process starts.
 ### Claude runs
 
 `brain` builds a prompt and a `RunSpec` carrying the run settings snapshot. The
-production `commandRunner` in `cmd/fridolin` projects provider arguments, supplies
+production `commandRunner` in `internal/app` projects provider arguments, supplies
 the environment, wraps the command with the sandbox and calls `claudecli.Run`:
 
 - The process leads a session of its own, so it has no controlling
