@@ -15,7 +15,7 @@ func TestJSONErrorKeepsPublishedTypeNames(t *testing.T) {
 		{`{"max_chunk_size":"wrong"}`, "json: cannot unmarshal string into Go struct field Config.max_chunk_size of type int"},
 	} {
 		t.Run(tc.input, func(t *testing.T) {
-			var value Config
+			var value File
 			err := json.Unmarshal([]byte(tc.input), &value)
 			got := JSONError(err)
 			if got == nil || got.Error() != tc.want {
@@ -30,7 +30,7 @@ func TestJSONErrorKeepsPublishedTypeNames(t *testing.T) {
 	if JSONError(nil) != nil {
 		t.Fatal("a nil error became non-nil")
 	}
-	var value Config
+	var value File
 	err := json.Unmarshal([]byte(`{`), &value)
 	if JSONError(err) != err {
 		t.Fatal("an unrelated JSON error changed")

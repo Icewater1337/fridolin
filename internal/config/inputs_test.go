@@ -13,7 +13,7 @@ func TestResolveUsesInjectedPathsAndPlatform(t *testing.T) {
 	t.Parallel()
 	home := t.TempDir()
 	paths := Paths{Home: home, DefaultDataDir: filepath.Join(home, LegacyDataDirName)}
-	file := &Config{ClaudePath: "~/bin/claude", BrainDirs: []BrainRef{{Path: "~/brain"}}}
+	file := &File{ClaudePath: "~/bin/claude", BrainDirs: []BrainRef{{Path: "~/brain"}}}
 	before, _ := json.Marshal(file)
 	first, err := Resolve(file, paths, "linux")
 	if err != nil {
@@ -40,10 +40,10 @@ func TestResolveUsesInjectedPathsAndPlatform(t *testing.T) {
 	if got := (BrainRef{Path: "~/brain"}).Dir(home); got != filepath.Join(home, "brain") {
 		t.Fatalf("BrainRef.Dir = %q", got)
 	}
-	if _, err := Resolve(&Config{Sandbox: SandboxConfig{Enabled: true}}, paths, "linux"); err == nil {
+	if _, err := Resolve(&File{Sandbox: SandboxConfig{Enabled: true}}, paths, "linux"); err == nil {
 		t.Fatal("injected Linux platform allowed the macOS sandbox")
 	}
-	if _, err := Resolve(&Config{Sandbox: SandboxConfig{Enabled: true}}, paths, "darwin"); err != nil {
+	if _, err := Resolve(&File{Sandbox: SandboxConfig{Enabled: true}}, paths, "darwin"); err != nil {
 		t.Fatalf("injected macOS platform: %v", err)
 	}
 	if _, err := Resolve(file, Paths{}, "linux"); err == nil || err.Error() != "getting home dir: $HOME is not set" {
@@ -68,7 +68,7 @@ func TestStoreRetainsInputsAndReadsOnlyRetiredEnvironmentKey(t *testing.T) {
 	if err := os.Mkdir(filepath.Join(home, DataDirName), 0o700); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := cs.Update("", func(c *Config) error { c.Comment = "saved"; return nil }); err != nil {
+	if _, err := cs.Update("", func(c *File) error { c.Comment = "saved"; return nil }); err != nil {
 		t.Fatal(err)
 	}
 	if cs.Paths() != paths || cs.Get().DataDir != paths.DefaultDataDir || !reflect.DeepEqual(keys, []string{"BRAIN_MODE"}) {
@@ -106,7 +106,7 @@ func TestStarterUsesInjectedPathsAndPlatform(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	var file Config
+	var file File
 	if err := json.Unmarshal(data, &file); err != nil {
 		t.Fatal(err)
 	}

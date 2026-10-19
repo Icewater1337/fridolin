@@ -16,7 +16,7 @@ import (
 
 // ResolveBrains resolves the current configuration without freezing the
 // security policy or ambient home/layout inputs between candidate folders.
-func ResolveBrains(cfg *config.Config) ([]manifest.Spec, []registry.Issue) {
+func ResolveBrains(cfg *config.File) ([]manifest.Spec, []registry.Issue) {
 	return registry.Resolve(cfg.BrainDirs, func(dir, configured string) error {
 		return checkBrainDir(dir, configured, cfg, homeDir())
 	})
@@ -24,7 +24,7 @@ func ResolveBrains(cfg *config.Config) ([]manifest.Spec, []registry.Issue) {
 
 // CheckBrainPath keeps configuration and security-policy projection at the
 // command boundary; the registry receives explicit inputs and one checker.
-func CheckBrainPath(path string, cfg *config.Config, otherDirs []string) (string, []string, []string) {
+func CheckBrainPath(path string, cfg *config.File, otherDirs []string) (string, []string, []string) {
 	return registry.CheckPath(path, registry.PathContext{
 		Home: homeDir(), Others: otherDirs,
 		CheckDir: func(dir, configured, home string) error {
@@ -43,7 +43,7 @@ func CheckBrainPath(path string, cfg *config.Config, otherDirs []string) (string
 // data folder would read the WhatsApp session. The dashboard asks before it
 // adds a brain (CheckBrainPath), ResolveBrains for every configured brain,
 // a hand-edited brain_dirs included, and each sandbox profile again.
-func checkBrainDir(dir, configured string, cfg *config.Config, home string) error {
+func checkBrainDir(dir, configured string, cfg *config.File, home string) error {
 	// A folder of the bridge's PATH inside this one is no reason: the
 	// bridge takes it off its PATH once the folder is a brain's (see
 	// setBridgePATH), as it does for every configured one.
@@ -86,8 +86,8 @@ func registryFor(cs *config.Store) *registry.Registry {
 
 // brainDirCheck keeps requested validation first and additionally protects the
 // running process when a store is available, retaining its live policy rules.
-func brainDirCheck(cs *config.Store) func(string, string, *config.Config, string) error {
-	return func(dir, configured string, cfg *config.Config, home string) error {
+func brainDirCheck(cs *config.Store) func(string, string, *config.File, string) error {
+	return func(dir, configured string, cfg *config.File, home string) error {
 		if err := checkBrainDir(dir, configured, cfg, home); err != nil {
 			return err
 		}
@@ -98,4 +98,4 @@ func brainDirCheck(cs *config.Store) func(string, string, *config.Config, string
 	}
 }
 
-func checkSet(before, after *config.Config) error { return registryFor(nil).CheckSet(before, after) }
+func checkSet(before, after *config.File) error { return registryFor(nil).CheckSet(before, after) }

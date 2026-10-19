@@ -1053,7 +1053,7 @@ func TestCalendarRedirectIsTheAddressServed(t *testing.T) {
 	served := "http://" + tb.cfgs.Get().HTTPListen + "/"
 	_ = tb.do("PUT", "/api/google/client", map[string]string{"json": fmt.Sprintf(testClientJSON, srv.URL)})
 	tb.addFolderBrain(t, manifest.Manifest{ID: "a", Name: "A"})
-	if _, err := tb.cfgs.Update("", func(c *config.Config) error { c.HTTPListen = "127.0.0.1:1"; return nil }); err != nil {
+	if _, err := tb.cfgs.Update("", func(c *config.File) error { c.HTTPListen = "127.0.0.1:1"; return nil }); err != nil {
 		t.Fatal(err)
 	}
 	var start struct {

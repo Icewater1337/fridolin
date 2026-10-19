@@ -12,9 +12,9 @@ import (
 
 // Starter is written on the very first run, so the bridge can start and
 // everything else can be set up in the dashboard.
-func Starter(goos string) *Config {
+func Starter(goos string) *File {
 	f := false
-	return &Config{
+	return &File{
 		Comment:                    "Edit this in the dashboard (fridolin open). Every option: docs/CONFIGURATION.md",
 		Version:                    Version,
 		AllowedNumbers:             []string{},

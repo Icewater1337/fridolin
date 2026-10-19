@@ -545,7 +545,7 @@ func TestReloadHandsOnWhatWaited(t *testing.T) {
 			home := fsx.Canonical(t.TempDir())
 			t.Setenv("HOME", home)
 			claude := fakeClaudeEnv(t, 30000)
-			configValue := func(refs ...config.BrainRef) *config.Config {
+			configValue := func(refs ...config.BrainRef) *config.File {
 				cfg, err := loadConfig(writeConfig(t, `{
 					"data_dir": "`+home+`/data",
 					"claude_path": "`+claude+`"`+brainDirsJSON(t, refs...)+`
@@ -1359,7 +1359,7 @@ func TestBrainsAreToldTheDataDir(t *testing.T) {
 func TestDataEnvIsAbsolute(t *testing.T) {
 	cwd := fsx.Canonical(t.TempDir())
 	t.Chdir(cwd)
-	s := settingsFor(&config.Config{DataDir: "rel", DBPath: "rel/bridge.db"}, manifest.Spec{})
+	s := settingsFor(&config.File{DataDir: "rel", DBPath: "rel/bridge.db"}, manifest.Spec{})
 	want := []string{"BRIDGE_DATA_DIR=" + cwd + "/rel", "BRIDGE_DB_PATH=" + cwd + "/rel/bridge.db"}
 	if got := dataEnv(s); !slices.Equal(got, want) {
 		t.Errorf("dataEnv = %q, want %q", got, want)

@@ -126,7 +126,7 @@ func TestCheckBrainPathRefusesTheBridgesOwnFolders(t *testing.T) {
 	home := fsx.Canonical(t.TempDir())
 	t.Setenv("HOME", home)
 	src, lib := home+"/src/fridolin", home+"/.local/lib/fridolin"
-	cfg := &config.Config{DataDir: home + "/.fridolin"}
+	cfg := &config.File{DataDir: home + "/.fridolin"}
 	const (
 		checkout = "inside the bridge's source checkout"
 		install  = "inside the folder the bridge is installed in"
@@ -191,7 +191,7 @@ func TestSandboxProfileProtectsTheBridgesOwnFiles(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			sp := NewSandboxProfiler(map[string][]string{"a": {home + "/a"}}, &config.Config{ClaudePath: "claude", DataDir: home + "/.fridolin"})
+			sp := NewSandboxProfiler(map[string][]string{"a": {home + "/a"}}, &config.File{ClaudePath: "claude", DataDir: home + "/.fridolin"})
 			sp.bridgeExe = c.exe
 			profile := mustProfile(t, sp, "a")
 			if !strings.Contains(profile, `(deny file-write* (literal "`+c.exe+`"))`) {

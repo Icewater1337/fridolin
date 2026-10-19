@@ -1644,7 +1644,7 @@ func TestGetConfigLocksNoSettings(t *testing.T) {
 	if want := []string{"config", "effective", "etag", "path"}; !slices.Equal(keys, want) {
 		t.Errorf("GET /api/config has %v, want %v", keys, want)
 	}
-	var eff config.Config
+	var eff config.File
 	if err := json.Unmarshal(got["effective"], &eff); err != nil {
 		t.Fatal(err)
 	}
@@ -1668,7 +1668,7 @@ func TestPutConfigKeepsBrainsAndReportsRestart(t *testing.T) {
 	if len(h.Approved()) != 1 {
 		t.Error("saving settings must not drop brains")
 	}
-	var eff config.Config
+	var eff config.File
 	if err := json.Unmarshal(h.Config().Effective, &eff); err != nil {
 		t.Fatal(err)
 	}
@@ -1884,7 +1884,7 @@ func TestConfigPageFoldsTheRetiredModel(t *testing.T) {
 	if w := h.Do("PUT", "/api/config", map[string]any{"etag": got.ETag, "config": configValue}); w.Code != http.StatusOK {
 		t.Fatalf("put: %d %s", w.Code, w.Body.String())
 	}
-	var eff config.Config
+	var eff config.File
 	if err := json.Unmarshal(h.Config().Effective, &eff); err != nil {
 		t.Fatal(err)
 	}

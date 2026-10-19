@@ -25,7 +25,7 @@ type ChatsAPI struct {
 	ListIgnored    func() ([]IgnoredChatResponse, error)
 	DismissIgnored func(string, bool) error
 	AllowChat      func(bool, string, string) error
-	UpdateConfig   func(func(*config.Config) error) error
+	UpdateConfig   func(func(*config.File) error) error
 }
 
 func (a *ChatsAPI) Ignored(w http.ResponseWriter, r *http.Request) {
@@ -126,7 +126,7 @@ func (a *ChatsAPI) Revoke(w http.ResponseWriter, r *http.Request) {
 		canon, name = chat.PhoneNumber, "allowed_numbers"
 	}
 	var removed []string
-	err := a.UpdateConfig(func(c *config.Config) error {
+	err := a.UpdateConfig(func(c *config.File) error {
 		list := &c.AllowedGroups
 		if dm {
 			list = &c.AllowedNumbers
@@ -192,7 +192,7 @@ func (a *ChatsAPI) Members(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 	}
-	err = a.UpdateConfig(func(c *config.Config) error {
+	err = a.UpdateConfig(func(c *config.File) error {
 		if req.Members == nil {
 			delete(c.GroupMembers, group)
 			return nil

@@ -60,7 +60,7 @@ func TestGroupSenderAllowed(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			cfg := &config.Config{AllowedNumbers: c.numbers, AllowAnyDM: c.anyDM, AllowedGroups: []string{group, other}, GroupMembers: c.members}
+			cfg := &config.File{AllowedNumbers: c.numbers, AllowAnyDM: c.anyDM, AllowedGroups: []string{group, other}, GroupMembers: c.members}
 			if got := groupSenderAllowed(cfg, group, c.sender); got != c.want {
 				t.Errorf("groupSenderAllowed(%+v) = %v, want %v", c.sender, got, c.want)
 			}
@@ -87,7 +87,7 @@ func FuzzGroupSenderAllowed(f *testing.F) {
 		if list != "" {
 			members = strings.Split(list, ",")
 		}
-		cfg := &config.Config{AllowedGroups: []string{testGroup}, AllowAnyDM: &anyDM, GroupMembers: map[string][]string{testGroup: members}}
+		cfg := &config.File{AllowedGroups: []string{testGroup}, AllowAnyDM: &anyDM, GroupMembers: map[string][]string{testGroup: members}}
 		got := groupSenderAllowed(cfg, testGroup, groupSender{Number: number, Resolved: resolved})
 		if slices.Equal(members, []string{anyMember}) {
 			if !got {
@@ -208,7 +208,7 @@ func TestConfigUpdateRefusesStrayGroupMembers(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, err = cs.Update("", func(c *config.Config) error {
+	_, err = cs.Update("", func(c *config.File) error {
 		c.AllowedGroups = nil
 		return nil
 	})
@@ -254,7 +254,7 @@ func TestConfigWarnsAboutGroupsWithoutMembers(t *testing.T) {
 	}
 
 	// Another group allowed: only it is named.
-	if _, err := cs.Update("", func(c *config.Config) error {
+	if _, err := cs.Update("", func(c *config.File) error {
 		c.AllowedGroups = append(c.AllowedGroups, added)
 		return nil
 	}); err != nil {
@@ -264,7 +264,7 @@ func TestConfigWarnsAboutGroupsWithoutMembers(t *testing.T) {
 		t.Errorf("after allowing %s the log has:\n%s\nwant it named once and %s not again", added, strings.Join(logged(), "\n"), testGroup)
 	}
 	// Its entry removed: the listed group is named now.
-	if _, err := cs.Update("", func(c *config.Config) error {
+	if _, err := cs.Update("", func(c *config.File) error {
 		c.GroupMembers = nil
 		return nil
 	}); err != nil {
@@ -294,8 +294,8 @@ func TestNoGroupWarningWhileAnyoneMayDM(t *testing.T) {
 func TestLogSecurityChangesNamesGroupMembers(t *testing.T) {
 	const other = "120363000000000001@g.us"
 	logged := captureLog(t)
-	prev := &config.Config{GroupMembers: map[string][]string{testGroup: {"15551234567"}}}
-	next := &config.Config{GroupMembers: map[string][]string{testGroup: {"15559876543"}, other: {}}}
+	prev := &config.File{GroupMembers: map[string][]string{testGroup: {"15551234567"}}}
+	next := &config.File{GroupMembers: map[string][]string{testGroup: {"15559876543"}, other: {}}}
 	config.LogSecurityChanges(prev, next)
 	got := strings.Join(logged(), "\n")
 	for _, want := range []string{"group_members", "+" + testGroup + ":15559876543", "+" + other + ":", "-" + testGroup + ":15551234567"} {

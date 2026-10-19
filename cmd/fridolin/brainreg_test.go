@@ -30,7 +30,7 @@ func testManifest(id string) manifest.Manifest {
 func TestCheckBrainPath(t *testing.T) {
 	home := fsx.Canonical(t.TempDir())
 	t.Setenv("HOME", home)
-	cfg := &config.Config{DataDir: filepath.Join(home, ".fridolin")}
+	cfg := &config.File{DataDir: filepath.Join(home, ".fridolin")}
 	others := []string{filepath.Join(home, "brains", "medical")}
 
 	cases := []struct {
@@ -111,7 +111,7 @@ func TestResolveBrainsRefusesFoldersTheSandboxProtects(t *testing.T) {
 			other := brainFolder(t, "~/elsewhere/y", manifest.Manifest{ID: "y"})
 			// x second: the dashboard shows an issue on the entry it
 			// names, which was the first one for these.
-			cfg := &config.Config{DataDir: filepath.Join(home, "box", ".fridolin"), BrainDirs: []config.BrainRef{other, ref}}
+			cfg := &config.File{DataDir: filepath.Join(home, "box", ".fridolin"), BrainDirs: []config.BrainRef{other, ref}}
 			for i := range cfg.BrainDirs {
 				cfg.BrainDirs[i].Path = fsx.ExpandHome(cfg.BrainDirs[i].Path, home)
 			}

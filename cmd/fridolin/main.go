@@ -456,7 +456,7 @@ func openCmd(args []string) {
 // has no login codes, and its dashboard took the token in the link; there
 // is no falling back to that, since `fridolin open --print` is what an
 // agent runs and pastes into a chat.
-func dashboardLink(cfg *config.Config) (string, error) {
+func dashboardLink(cfg *config.File) (string, error) {
 	tokenPath := filepath.Join(cfg.DataDir, "dashboard.token")
 	token, err := httpapi.ReadToken(cfg.DataDir)
 	if err != nil {
@@ -489,7 +489,7 @@ func rotateTokenCmd(args []string) {
 }
 
 // rotateToken does rotateTokenCmd's work for cfg.
-func rotateToken(cfg *config.Config) error {
+func rotateToken(cfg *config.File) error {
 	token, err := httpapi.ReadToken(cfg.DataDir)
 	if err != nil {
 		return fmt.Errorf("no dashboard token yet — start the bridge first (%w)", err)
@@ -621,7 +621,7 @@ func writeCheck(w io.Writer, o checkOptions) error {
 }
 
 // checkReport writes what check says of cfg, the config loaded from path.
-func checkReport(w io.Writer, path string, cfg *config.Config, o checkOptions) error {
+func checkReport(w io.Writer, path string, cfg *config.File, o checkOptions) error {
 	// Before even the version probe: it runs outside the sandbox, so a
 	// Claude planted in a brain's PATH folder must not be selected.
 	setBridgePATH(cfg)
@@ -723,7 +723,7 @@ func claudeSummary(path string, passthrough []string) string {
 
 // dmAllowSummary says who may DM the bridge. A bare empty list would read
 // as "nobody" even when allow_any_dm lets everyone in.
-func dmAllowSummary(cfg *config.Config) string {
+func dmAllowSummary(cfg *config.File) string {
 	switch {
 	case cfg.AnyoneCanDM():
 		return "anyone (allow_any_dm is true and allowed_numbers is empty)"

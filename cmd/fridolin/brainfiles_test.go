@@ -44,7 +44,7 @@ func captureLog(t *testing.T) func() []string {
 
 // brainASetup sets up what folderBrain runs, and returns its
 // configuration and home.
-func brainASetup(t *testing.T) (*config.Config, string) {
+func brainASetup(t *testing.T) (*config.File, string) {
 	t.Helper()
 	home := fsx.Canonical(t.TempDir())
 	t.Setenv("HOME", home)
@@ -169,7 +169,7 @@ func TestLeftOutBrainShowsWhyOnItsPage(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = os.Chmod(dir, 0o700) })
 	approved := m.Normalized()
-	if _, err := tb.cfgs.Update("", func(c *config.Config) error {
+	if _, err := tb.cfgs.Update("", func(c *config.File) error {
 		c.BrainDirs = append(c.BrainDirs, config.BrainRef{Path: dir, Approved: &approved})
 		return nil
 	}); err != nil {

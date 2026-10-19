@@ -14,7 +14,7 @@ import (
 
 func TestBackupSettingsProjectionPreservesStatusJSON(t *testing.T) {
 	for _, raw := range []string{`{}`, `{"backup":{"enabled":true,"keep_versions_days":0,"include_bridge_config":false,"include_secret_files":true}}`} {
-		var file config.Config
+		var file config.File
 		if err := json.Unmarshal([]byte(raw), &file); err != nil {
 			t.Fatal(err)
 		}

@@ -30,7 +30,7 @@ func TestFieldsCoverEveryJSONLeafAndBootValue(t *testing.T) {
 			}
 		}
 	}
-	walk(reflect.TypeFor[Config](), "")
+	walk(reflect.TypeFor[File](), "")
 	seen := map[string]bool{}
 	boot := map[string]bool{}
 	for _, f := range Fields() {
@@ -73,15 +73,15 @@ func TestFieldsCoverEveryJSONLeafAndBootValue(t *testing.T) {
 
 func TestRestartRequiredOrderAndTokenTransitions(t *testing.T) {
 	t.Parallel()
-	old := &Config{HTTPListen: "old", DataDir: "old", DBPath: "old", MediaDir: "old", LogLevel: "info"}
-	next := &Config{HTTPListen: "new", DataDir: "new", DBPath: "new", MediaDir: "new", LogLevel: "debug", Dashboard: DashboardConfig{Disabled: true, RequireToken: new(false)}}
+	old := &File{HTTPListen: "old", DataDir: "old", DBPath: "old", MediaDir: "old", LogLevel: "info"}
+	next := &File{HTTPListen: "new", DataDir: "new", DBPath: "new", MediaDir: "new", LogLevel: "debug", Dashboard: DashboardConfig{Disabled: true, RequireToken: new(false)}}
 	if got := restartRequired(old, next); !slices.Equal(got, RestartFieldNames()) {
 		t.Fatalf("restart = %v", got)
 	}
 	for _, start := range []*bool{nil, new(false), new(true)} {
 		for _, now := range []*bool{nil, new(false), new(true)} {
-			a := &Config{Dashboard: DashboardConfig{RequireToken: start}}
-			b := &Config{Dashboard: DashboardConfig{RequireToken: now}}
+			a := &File{Dashboard: DashboardConfig{RequireToken: start}}
+			b := &File{Dashboard: DashboardConfig{RequireToken: now}}
 			got := restartRequired(a, b)
 			want := a.DashboardRequiresToken() && !b.DashboardRequiresToken()
 			if (len(got) != 0) != want || len(got) > 0 && got[0] != "dashboard.require_token" {

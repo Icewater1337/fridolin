@@ -77,7 +77,7 @@ func TestLoadConfigMaxMediaMB(t *testing.T) {
 			}
 		})
 	}
-	if got := (&config.Config{}).MaxMediaBytes(); got != 100<<20 {
+	if got := (&config.File{}).MaxMediaBytes(); got != 100<<20 {
 		t.Errorf("an unfilled config allows %d bytes, want the default", got)
 	}
 }
@@ -290,7 +290,7 @@ func TestProtectDataDirLeavesOtherUsersFolderAlone(t *testing.T) {
 	before := permOf(t, data)
 	logs := captureLog(t)
 
-	protectDataDir(&config.Config{DataDir: data, DBPath: filepath.Join(data, "bridge.db")})
+	protectDataDir(&config.File{DataDir: data, DBPath: filepath.Join(data, "bridge.db")})
 
 	if got := permOf(t, data); got != before {
 		t.Errorf("data dir of another user changed from %04o to %04o", before, got)
@@ -345,7 +345,7 @@ func TestConfigWritesLeaveFolderModesAlone(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, level := range []string{"debug", "info"} {
-		if _, err := cs.Update("", func(c *config.Config) error { c.LogLevel = level; return nil }); err != nil {
+		if _, err := cs.Update("", func(c *config.File) error { c.LogLevel = level; return nil }); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -436,13 +436,13 @@ func TestExampleConfigIsValid(t *testing.T) {
 
 func TestLogDMAccessWarnsWhenAnyoneCanDM(t *testing.T) {
 	yes, no := true, false
-	open := &config.Config{AllowAnyDM: &yes}
-	unset := &config.Config{}
-	listed := &config.Config{AllowedNumbers: []string{"15551234567"}, AllowAnyDM: &yes}
-	closed := &config.Config{AllowAnyDM: &no}
+	open := &config.File{AllowAnyDM: &yes}
+	unset := &config.File{}
+	listed := &config.File{AllowedNumbers: []string{"15551234567"}, AllowAnyDM: &yes}
+	closed := &config.File{AllowAnyDM: &no}
 	tests := []struct {
 		name       string
-		prev, next *config.Config
+		prev, next *config.File
 		want       string // "" means nothing is logged
 	}{
 		{"startup with explicit true and an empty list", nil, open, "WARNING: anyone"},
@@ -471,7 +471,7 @@ func TestLogDMAccessWarnsWhenAnyoneCanDM(t *testing.T) {
 
 // ── brain routing ─────────────────────────────────────────────────────────
 
-func newTestManager(t *testing.T, cfg *config.Config) *BrainManager {
+func newTestManager(t *testing.T, cfg *config.File) *BrainManager {
 	t.Helper()
 	requireTestDataDir(t, cfg)
 	mgr, err := NewBrainManager(cfg)
@@ -604,7 +604,7 @@ func TestSandboxProfileIsolatesBrains(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 
-	cfg := &config.Config{DataDir: filepath.Join(home, "data")}
+	cfg := &config.File{DataDir: filepath.Join(home, "data")}
 	sp := NewSandboxProfiler(map[string][]string{
 		"personal": {"/opt/brains/personal"},
 		"team":     {"/opt/brains/team"},
@@ -629,7 +629,7 @@ func TestSandboxProfileDeniesSecretsAndTheKeychains(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 
-	cfg := &config.Config{DataDir: filepath.Join(home, "data"), Sandbox: config.SandboxConfig{AllowPaths: []string{filepath.Join(home, "Library")}}}
+	cfg := &config.File{DataDir: filepath.Join(home, "data"), Sandbox: config.SandboxConfig{AllowPaths: []string{filepath.Join(home, "Library")}}}
 	profile := mustProfile(t, NewSandboxProfiler(map[string][]string{"a": {"/tmp/a"}}, cfg), "a")
 
 	for _, secret := range []string{".ssh", ".aws", ".gnupg", "Library/Mail", ".git-credentials", "Library/Keychains"} {
@@ -654,7 +654,7 @@ func TestSandboxProfileKeepsCalendarTokensFromBrains(t *testing.T) {
 		t.Run("credentials_dir "+creds, func(t *testing.T) {
 			home := t.TempDir()
 			t.Setenv("HOME", home)
-			cfg := &config.Config{DataDir: filepath.Join(home, "data")}
+			cfg := &config.File{DataDir: filepath.Join(home, "data")}
 			if creds != "" {
 				cfg.Sandbox.CredentialsDir = filepath.Join(home, creds)
 			}
@@ -674,7 +674,7 @@ func TestSandboxProfileIncludesConfiguredDenies(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 
-	cfg := &config.Config{
+	cfg := &config.File{
 		DataDir: filepath.Join(home, "data"),
 		Sandbox: config.SandboxConfig{DenyPaths: []string{"/private/clients"}},
 	}

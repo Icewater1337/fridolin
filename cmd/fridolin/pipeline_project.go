@@ -8,7 +8,7 @@ import (
 	"github.com/Icewater1337/fridolin/internal/config"
 )
 
-func messageSettingsOf(cfg *config.Config) pipeline.Settings {
+func messageSettingsOf(cfg *config.File) pipeline.Settings {
 	return pipeline.Settings{
 		FirstTrigger: cfg.Triggers.First(), QueueNotify: cfg.QueueNotify(),
 		OwnerChat: ownerChat(cfg), MaxChunkSize: cfg.MaxChunkSize,

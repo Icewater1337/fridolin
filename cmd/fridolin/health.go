@@ -26,7 +26,7 @@ import (
 const requiredFilesEvery = 5 * time.Minute
 
 // missingFiles returns the required files that do not exist now.
-func missingFiles(cfg *config.Config) []string {
+func missingFiles(cfg *config.File) []string {
 	var missing []string
 	for _, f := range cfg.StartupChecks.RequiredFiles {
 		if !fsx.Exists(f) {
@@ -38,7 +38,7 @@ func missingFiles(cfg *config.Config) []string {
 
 // missingFilesText says which required files are missing, with the
 // configured hint; "" when none is.
-func missingFilesText(cfg *config.Config, missing []string) string {
+func missingFilesText(cfg *config.File, missing []string) string {
 	if len(missing) == 0 {
 		return ""
 	}

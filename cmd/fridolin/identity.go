@@ -72,7 +72,7 @@ func chatJID(s string) (types.JID, error) {
 // what did not come from a chat (an /ingest, a Plaud recording, a startup
 // alert) go there when nothing else is set. "" when the list holds no
 // number.
-func ownerChat(cfg *config.Config) string {
+func ownerChat(cfg *config.File) string {
 	for _, n := range cfg.AllowedNumbers {
 		if p, err := chat.PhoneNumber(n); err == nil {
 			return chat.DMJID(p)

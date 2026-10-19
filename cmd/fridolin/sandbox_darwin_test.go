@@ -1097,7 +1097,7 @@ func TestSandboxDeniesTheConfigFile(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	sp := NewSandboxProfiler(map[string][]string{"a": {filepath.Join(home, "a")}}, &config.Config{DataDir: filepath.Join(home, ".fridolin")})
+	sp := NewSandboxProfiler(map[string][]string{"a": {filepath.Join(home, "a")}}, &config.File{DataDir: filepath.Join(home, ".fridolin")})
 	sp.SetConfigFile(filepath.Join(home, "etc", "config.json"))
 	for _, cmd := range []string{
 		`cat "$HOME/etc/config.json"`,
@@ -1137,7 +1137,7 @@ func TestSandboxAllowPathsKeepBridgeSecrets(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	cfg := &config.Config{
+	cfg := &config.File{
 		DataDir: filepath.Join(home, ".fridolin"),
 		DBPath:  filepath.Join(home, ".fridolin", "bridge.db"),
 		Sandbox: config.SandboxConfig{AllowPaths: []string{filepath.Join(home, ".fridolin"), filepath.Join(home, "team"), filepath.Join(home, "Documents", "share"), filepath.Join(home, "Library")}},
@@ -1290,7 +1290,7 @@ func TestSandboxOwnFolderKeepsWhatIsInsideIt(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	cfg := &config.Config{DataDir: home + "/.fridolin", Sandbox: config.SandboxConfig{
+	cfg := &config.File{DataDir: home + "/.fridolin", Sandbox: config.SandboxConfig{
 		DenyPaths:  []string{box + "/work/private"},
 		AllowPaths: []string{box + "/work/private/share"},
 	}}
@@ -1756,7 +1756,7 @@ func TestStatusWarnsWhenSandboxDoesNotApply(t *testing.T) {
 			tb := newTestBridge(t, `, "sandbox": {"enabled": true}`)
 			if tc.atHome {
 				ref := brainFolder(t, "~", a)
-				if _, err := tb.cfgs.Update("", func(c *config.Config) error {
+				if _, err := tb.cfgs.Update("", func(c *config.File) error {
 					c.BrainDirs = append(c.BrainDirs, ref)
 					return nil
 				}); err != nil {
