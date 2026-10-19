@@ -90,6 +90,8 @@ func TestIncomingChat(t *testing.T) {
 // media to a fakeDownloader.
 type testWhatsApp struct {
 	*WhatsAppClient
+	cfg     func() *Config
+	handler InboundHandler
 	inbound chan Inbound
 
 	mu      sync.Mutex
@@ -115,16 +117,19 @@ func (l testWaLogger) Sub(string) waLog.Logger                { return l }
 func newTestWhatsApp(t *testing.T) *testWhatsApp {
 	t.Helper()
 	cfg := &Config{AllowedNumbers: []string{"15551234567"}, MediaDir: t.TempDir(), MaxChunkSize: 4000}
-	tw := &testWhatsApp{inbound: make(chan Inbound, 4), notices: make(chan string, 4)}
+	tw := &testWhatsApp{cfg: func() *Config { return cfg }, inbound: make(chan Inbound, 4), notices: make(chan string, 4)}
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
+	tw.handler = func(_ context.Context, m Inbound) { tw.inbound <- m }
 	tw.WhatsAppClient = &WhatsAppClient{
-		cfg:     func() *Config { return cfg },
+		cfg:      whatsAppSettings(func() *Config { return tw.cfg() }),
+		chunks:   ChunkMessage,
+		outbound: whatsAppOutbound(), text: whatsAppText(), inbox: mediaInboxAt,
 		log:     testWaLogger{tw},
 		ctx:     ctx,
 		cancel:  cancel,
 		notify:  func(jid, text string) { tw.notices <- jid + ": " + text },
-		handler: func(_ context.Context, m Inbound) { tw.inbound <- m },
+		handler: func(ctx context.Context, m chat.Inbound) { tw.handler(ctx, Inbound{Inbound: m}) },
 		onIgnored: func(_, jid, _, _, _ string) {
 			tw.mu.Lock()
 			defer tw.mu.Unlock()
@@ -1585,12 +1590,13 @@ func TestDisconnectHandsOnWhatIsQueued(t *testing.T) {
 			tw, dl := newGroupTestWhatsApp(t, []string{"15551234567"})
 			dl.hold = make(chan struct{}) // never released
 			tw.client = whatsmeow.NewClient(&store.Device{LIDs: storedLIDs{}, MsgSecrets: pollSecrets{key: key}}, waLog.Noop)
-			tw.store = openTestStore(t, filepath.Join(t.TempDir(), "bridge.db"))
-			if err := tw.store.SavePoll("3EB0POLL", testDMChat, "main", "When should we meet?", []string{"Monday 2pm", "Tuesday 3pm"}); err != nil {
+			pollDB := openTestStore(t, filepath.Join(t.TempDir(), "bridge.db"))
+			tw.polls = whatsAppPollStore{pollDB}
+			if err := pollDB.SavePoll("3EB0POLL", testDMChat, "main", "When should we meet?", []string{"Monday 2pm", "Tuesday 3pm"}); err != nil {
 				t.Fatal(err)
 			}
 			a := recordArrivals(tw, "")
-			tw.onVote = func(v pollVote) {
+			tw.onVote = func(v waVote) {
 				a.mu.Lock()
 				defer a.mu.Unlock()
 				a.seen = append(a.seen, "vote "+strings.Join(v.Selected, ","))

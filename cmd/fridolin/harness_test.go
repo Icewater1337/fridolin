@@ -233,7 +233,7 @@ func (h *harness) WhatsApp(ev *events.Message) {
 	h.t.Helper()
 	ctx, cancel := context.WithCancel(context.Background())
 	h.t.Cleanup(cancel)
-	wa := &WhatsAppClient{cfg: h.b.cfgs.Get, log: waLog.Noop, handler: h.b.handleInbound, onChange: h.b.handleChange, ctx: ctx, cancel: cancel}
+	wa := &WhatsAppClient{cfg: whatsAppSettings(h.b.cfgs.Get), chunks: ChunkMessage, outbound: whatsAppOutbound(), text: whatsAppText(), inbox: mediaInboxAt, log: waLog.Noop, handler: whatsAppInboundHandler(h.b.handleInbound), onChange: h.b.handleChange, ctx: ctx, cancel: cancel}
 	wa.media = wa.client // nil: every download fails with ErrClientIsNil
 	wa.notify = func(jid, text string) { _ = h.b.dev.SendMessage(ctx, jid, text) }
 	wa.handleMessage(ev)

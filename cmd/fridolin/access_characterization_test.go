@@ -80,7 +80,7 @@ func TestGroupAccessCharacterization(t *testing.T) {
 				cfg.GroupMembers = map[string][]string{testGroup: {}}
 			}
 			if c.rules != nil {
-				tw.groupRules = func(string) groupRules { return *c.rules }
+				tw.groupRules = whatsAppGroupRules(func(string) groupRules { return *c.rules })
 			}
 			lister := &fakeLister{info: "Group"}
 			tw.lister = lister

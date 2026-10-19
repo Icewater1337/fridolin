@@ -207,9 +207,9 @@ func NewBridge(cfgs *ConfigStore, opts BridgeOptions) (_ *Bridge, err error) {
 		if err != nil {
 			return nil, fmt.Errorf("creating whatsapp client: %w", err)
 		}
-		wa.onVote = b.recordVote
+		wa.onVote = whatsAppVoteHandler(b.recordVote)
 		wa.onChange = b.handleChange
-		wa.groupRules = b.groupRules
+		wa.groupRules = whatsAppGroupRules(b.groupRules)
 		b.wa = wa
 		b.lids = wa.lidStore
 	}

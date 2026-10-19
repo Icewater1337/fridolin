@@ -6,8 +6,6 @@ import (
 	"fmt"
 	"github.com/Icewater1337/fridolin/internal/access"
 	"github.com/Icewater1337/fridolin/internal/chat"
-	"github.com/Icewater1337/fridolin/internal/logx"
-	"github.com/Icewater1337/fridolin/internal/store"
 	"log"
 	"path/filepath"
 	"strings"
@@ -42,24 +40,26 @@ type Messenger interface {
 	JoinedGroups(ctx context.Context) ([]chat.Group, error)
 }
 
-// InboundHandler receives every allowed message.
-type InboundHandler func(ctx context.Context, m Inbound)
-
 // IgnoredHandler is told about chats that wrote but are not allowed, so the
 // dashboard can offer to allow them. It never receives message text.
 type IgnoredHandler func(kind, jid, name, sender, pushName string)
 
 // WhatsAppClient wraps a whatsmeow client.
 type WhatsAppClient struct {
-	cfg       func() *Config
-	store     *store.Store
-	handler   InboundHandler
+	cfg       func() waSettings
+	container waDeviceContainer
+	polls     waPollStore
+	chunks    func(string, int) []string
+	outbound  waOutbound
+	text      waText
+	inbox     func(string) mediafiles.Inbox
+	handler   func(context.Context, chat.Inbound)
 	onIgnored IgnoredHandler
-	onVote    func(pollVote)    // a vote was recorded; may be nil
+	onVote    func(waVote)      // a vote was recorded; may be nil
 	onChange  func(chat.Change) // an edit or a deletion; may be nil
 	// groupRules is what addresses the bridge in a group, by its brain's
 	// routing; nil means defaultGroupRules.
-	groupRules func(groupJID string) groupRules
+	groupRules func(groupJID string) waGroupRules
 	log        waLog.Logger
 	media      mediaDownloader        // nil: the client; tests set a fake
 	lister     groupLister            // nil: the client; tests set a fake
@@ -103,28 +103,35 @@ type WhatsAppClient struct {
 	retryWait time.Duration
 }
 
-// NewWhatsAppClient creates a client. It does NOT connect — call Connect.
-func NewWhatsAppClient(cfg func() *Config, store *store.Store, handler InboundHandler, onIgnored IgnoredHandler) (*WhatsAppClient, error) {
-	logger := logx.NewWaLogger("WhatsApp", cfg().LogLevel)
-
-	deviceStore, err := store.Container.GetFirstDevice(context.Background())
+// newWhatsAppClient creates the transport without connecting it.
+func newWhatsAppClient(opts waOptions) (*WhatsAppClient, error) {
+	deviceStore, err := opts.Container.GetFirstDevice(context.Background())
 	if err != nil {
 		return nil, fmt.Errorf("getting device store: %w", err)
 	}
+	logger := opts.Log
 
 	client := whatsmeow.NewClient(deviceStore, logger)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	wa := &WhatsAppClient{
-		client:    client,
-		cfg:       cfg,
-		store:     store,
-		handler:   handler,
-		onIgnored: onIgnored,
-		log:       logger,
-		ctx:       ctx,
-		cancel:    cancel,
-		state:     chat.LinkState{Mode: "connecting", Since: time.Now()},
+		client:     client,
+		cfg:        opts.Settings,
+		container:  opts.Container,
+		polls:      opts.Polls,
+		chunks:     opts.Chunks,
+		outbound:   opts.Outbound,
+		text:       opts.Text,
+		inbox:      opts.Inbox,
+		handler:    opts.OnInbound,
+		onIgnored:  opts.OnIgnored,
+		onVote:     opts.OnVote,
+		onChange:   opts.OnChange,
+		groupRules: opts.GroupRules,
+		log:        logger,
+		ctx:        ctx,
+		cancel:     cancel,
+		state:      chat.LinkState{Mode: "connecting", Since: time.Now()},
 		// Nothing runs yet, so the device's own JIDs can be read here.
 		own:    deviceStore.GetJID().ToNonAD(),
 		ownLID: deviceStore.GetLID().ToNonAD(),
@@ -159,106 +166,16 @@ func (wa *WhatsAppClient) downloader() mediaDownloader {
 	return wa.cl()
 }
 
-// errOffline marks a send that failed because WhatsApp is not connected or
-// not paired: worth trying again later, and not the caller's mistake.
-var errOffline = errors.New("WhatsApp is not connected")
-
-// errBadRecipient marks a send to an address WhatsApp has no chat for.
-var errBadRecipient = errors.New("not a chat WhatsApp can send to")
-
-// classifySendErr marks err, from whatsmeow, with errOffline or
-// errBadRecipient where it is one, so callers can tell them apart without
-// knowing whatsmeow.
-func classifySendErr(err error) error {
-	switch {
-	case errors.Is(err, whatsmeow.ErrNotConnected), errors.Is(err, whatsmeow.ErrNotLoggedIn):
-		return fmt.Errorf("%w: %w", errOffline, err)
-	case errors.Is(err, whatsmeow.ErrUnknownServer):
-		return fmt.Errorf("%w: %w", errBadRecipient, err)
-	}
-	return err
-}
-
-// partialSendError is a chunked send that failed after some chunks went
-// out: sent holds those, as the chat shows them.
-type partialSendError struct {
-	sent  []string
-	total int
-	err   error
-}
-
-func (e *partialSendError) Error() string {
-	return fmt.Sprintf("sent %d of %d parts, then: %v", len(e.sent), e.total, e.err)
-}
-
-func (e *partialSendError) Unwrap() error { return e.err }
-
-// sendChunks sends chunks one by one with send, pausing between them
-// unless ctx ends. A failure after the first chunk is a *partialSendError
-// naming what went out.
-func sendChunks(ctx context.Context, chunks []string, pause time.Duration, send func(chunk string) error) error {
-	for i, chunk := range chunks {
-		err := ctx.Err()
-		if i > 0 && pause > 0 && err == nil {
-			select {
-			case <-ctx.Done():
-				err = ctx.Err()
-			case <-time.After(pause):
-			}
-		}
-		if err == nil {
-			err = send(chunk)
-		}
-		if err != nil {
-			if i > 0 {
-				return &partialSendError{sent: chunks[:i], total: len(chunks), err: err}
-			}
-			return err
-		}
-	}
-	return nil
-}
-
-// errRefusedRecipient marks a send the bridge refuses because of where it
-// would go.
-var errRefusedRecipient = errors.New("refusing to send to a Status, broadcast list or channel")
-
-// checkRecipient refuses Status, broadcast-list and channel addresses. A send
-// to status@broadcast posts this account's own Status to every contact, and
-// one to a newsletter posts in a public channel the account runs. whatsmeow
-// cannot send to other broadcast lists yet; once it can, a send would reach
-// every member. Nothing the bridge says belongs there, whoever asked for it:
-// a brain's reply, its reply_chat, or a script calling /send.
-func checkRecipient(jid types.JID) error {
-	if jid.Server == types.BroadcastServer || jid.Server == types.NewsletterServer {
-		return fmt.Errorf("%w: %s", errRefusedRecipient, jid)
-	}
-	return nil
-}
-
-// parseRecipient parses the JID of a chat to send to and refuses the ones
-// checkRecipient refuses.
-func parseRecipient(jid string) (types.JID, error) {
-	recipient, err := types.ParseJID(jid)
-	if err != nil {
-		return types.JID{}, fmt.Errorf("parsing JID %q: %w", jid, err)
-	}
-	if err := checkRecipient(recipient); err != nil {
-		return types.JID{}, err
-	}
-	return recipient, nil
-}
-
 // SendMessage sends a plain-text WhatsApp message to the given JID.
 func (wa *WhatsAppClient) SendMessage(ctx context.Context, jid string, text string) error {
-	recipient, err := parseRecipient(jid)
+	recipient, err := wa.outbound.Recipient(jid)
 	if err != nil {
 		return err
 	}
 	_, err = wa.cl().SendMessage(ctx, recipient, &waE2E.Message{
 		Conversation: proto.String(text),
 	})
-	return classifySendErr(err)
+	return wa.outbound.Classify(err)
 }
 
 // SendChunked splits text into chunks and sends each as a separate message,
@@ -266,7 +183,7 @@ func (wa *WhatsAppClient) SendMessage(ctx context.Context, jid string, text stri
 // whose caller hears of a failure; brains' replies go through the Outbox.
 // A failure part of the way is a *partialSendError.
 func (wa *WhatsAppClient) SendChunked(ctx context.Context, jid string, text string) error {
-	return sendChunks(ctx, ChunkMessage(text, wa.cfg().MaxChunkSize), outboxPace, func(chunk string) error {
+	return wa.outbound.Chunks(ctx, wa.chunks(text, wa.cfg().MaxChunkSize), func(chunk string) error {
 		return wa.SendMessage(ctx, jid, chunk)
 	})
 }
@@ -274,7 +191,7 @@ func (wa *WhatsAppClient) SendChunked(ctx context.Context, jid string, text stri
 // SendPoll sends a WhatsApp poll and returns the message ID.
 // maxSelectable is the max options a voter can pick (1 = single choice, 0 = unlimited).
 func (wa *WhatsAppClient) SendPoll(ctx context.Context, jid string, question string, options []string, maxSelectable int) (string, error) {
-	recipient, err := parseRecipient(jid)
+	recipient, err := wa.outbound.Recipient(jid)
 	if err != nil {
 		return "", err
 	}
@@ -372,7 +289,7 @@ func (wa *WhatsAppClient) handlePollVote(evt *events.Message) {
 	if err != nil {
 		// Masked, in whatsmeow's error too, which names the voter: the
 		// main log names no voter (see recordVote).
-		wa.log.Errorf("Failed to decrypt poll vote from %s: %v", maskJID(evt.Info.Sender.User, "", evt.Info.Sender.Server), (&redactor{}).text(err.Error()))
+		wa.log.Errorf("Failed to decrypt poll vote from %s: %v", wa.text.MaskJID(evt.Info.Sender.User, evt.Info.Sender.Server), wa.text.Redact(err.Error()))
 		return
 	}
 	pollMsgID := evt.Message.GetPollUpdateMessage().GetPollCreationMessageKey().GetID()
@@ -390,7 +307,7 @@ func (wa *WhatsAppClient) handlePollVote(evt *events.Message) {
 // as WhatsApp sends it, the hashes of the chosen options, and tells
 // onVote. A vote for a poll the bridge did not keep is dropped.
 func (wa *WhatsAppClient) recordVote(pollMsgID string, voter types.JID, hashes [][]byte) {
-	poll, err := wa.store.SentPoll(wa.storeCtx(), pollMsgID)
+	poll, err := wa.polls.SentPoll(wa.storeCtx(), pollMsgID)
 	if err != nil {
 		// Not necessarily an error: the poll may predate vote tracking.
 		log.Printf("Poll vote for unknown poll %s (not in DB) — skipping", pollMsgID)
@@ -400,12 +317,12 @@ func (wa *WhatsAppClient) recordVote(pollMsgID string, voter types.JID, hashes [
 	// Who chose what is for the debug log only: the main log is kept, and
 	// sent along with bug reports.
 	wa.log.Debugf("Poll vote recorded: poll=%s voter=%s options=%v", pollMsgID, voter, selected)
-	if err := wa.store.SavePollVote(pollMsgID, voter.String(), selected); err != nil {
-		wa.log.Errorf("Failed to save poll vote from %s: %v", maskJID(voter.User, "", voter.Server), err)
+	if err := wa.polls.SavePollVote(pollMsgID, voter.String(), selected); err != nil {
+		wa.log.Errorf("Failed to save poll vote from %s: %v", wa.text.MaskJID(voter.User, voter.Server), err)
 		return
 	}
 	if wa.onVote != nil {
-		wa.onVote(pollVote{Poll: poll, Voter: voter, Selected: selected})
+		wa.onVote(waVote{Poll: poll, Voter: voter, Selected: selected})
 	}
 }
 
@@ -474,7 +391,7 @@ func (wa *WhatsAppClient) handleMessage(msg *events.Message) {
 	// bridge's number, and the dashboard, which offers to allow them,
 	// shows it whole. A LID nothing resolves is no number allowed_numbers
 	// lists, so its line is followed by the one that ignores it.
-	who := groupSender{Number: sender.User, Resolved: resolved, Server: sender.Server}.masked()
+	who := wa.text.MaskSender(sender.User, resolved, sender.Server)
 	if !resolved {
 		log.Printf("DM: could not resolve %s to a phone number (using it as it is)", who)
 	}
@@ -483,7 +400,7 @@ func (wa *WhatsAppClient) handleMessage(msg *events.Message) {
 	// allowed phone number until WhatsApp resolves it. Keep the deliberate
 	// open-empty-list mode, using one config snapshot for both decisions.
 	cfg := wa.cfg()
-	policy := policyOf(cfg)
+	policy := cfg.Policy
 	envelope := chat.Envelope{Sender: sender.User, SenderResolved: resolved}
 	allowed := access.Authorize(policy, envelope).Allowed
 	if !allowed {
@@ -502,7 +419,7 @@ func (wa *WhatsAppClient) handleMessage(msg *events.Message) {
 		}
 		wa.change(kind, target, sender.String(), alt, sender.User, extractText(content))
 	case kindViewOnce:
-		go wa.notify(sender.String(), viewOnceNotice)
+		go wa.notify(sender.String(), wa.text.ViewOnce)
 	case kindOther:
 		wa.log.Debugf("DM %s from %s: nothing the bridge reads (a reaction, a sticker, …)", msg.Info.ID, sender.User)
 	default:
@@ -549,9 +466,8 @@ func (wa *WhatsAppClient) handleDMMessage(msg *events.Message, sender types.JID,
 		return
 	}
 
-	m := Inbound{Inbound: chat.Inbound{JID: chatJID, Sender: senderNumber, Text: text, Media: mediaList(mediaPath),
-		Quoted: quoted, Source: chat.SourceWhatsApp, At: msg.Info.Timestamp, ID: string(msg.Info.ID)},
-	}
+	m := chat.Inbound{JID: chatJID, Sender: senderNumber, Text: text, Media: mediaList(mediaPath),
+		Quoted: quoted, Source: chat.SourceWhatsApp, At: msg.Info.Timestamp, ID: string(msg.Info.ID)}
 	if !alt.IsEmpty() {
 		m.ChatAlt = alt.String()
 	}
@@ -583,15 +499,15 @@ func (wa *WhatsAppClient) handleGroupMessage(msg *events.Message) {
 	// identity map and group_members know them by.
 	sender, resolved := wa.senderOf(msg.Info.MessageSource)
 	senderNumber := sender.User
-	who := groupSender{Number: senderNumber, Resolved: resolved, Server: sender.Server, FromMe: msg.Info.IsFromMe}
+	who := wa.text.MaskSender(senderNumber, resolved, sender.Server)
 
 	// Unknown groups are logged and offered on the dashboard: that is how you
 	// find a group's JID to allow it. Both checks read the one snapshot cfg:
 	// with a fresh one here, an edit between them could let a message pass
 	// that neither config admits.
-	if !isAllowedGroup(cfg, groupJID) {
+	if !access.GroupAllowed(cfg.Policy, groupJID) {
 		groupName := wa.groupName(msg.Info.Chat)
-		log.Printf("Group message from %s by %s: ignored (not in allowed_groups)", groupLabel(groupJID, groupName), who.masked())
+		log.Printf("Group message from %s by %s: ignored (not in allowed_groups)", groupLabel(groupJID, groupName), who)
 		if wa.onIgnored != nil {
 			wa.onIgnored("group", groupJID, groupName, senderNumber, msg.Info.PushName)
 		}
@@ -600,15 +516,15 @@ func (wa *WhatsAppClient) handleGroupMessage(msg *events.Message) {
 	// A member group_members does not admit is not read at all: no run,
 	// no command, no download, no edit, not even a line in the history.
 	// The group is allowed, so it is not offered on the dashboard again.
-	if !groupSenderAllowed(cfg, groupJID, who) {
+	if !access.GroupSenderAllowed(cfg.Policy, groupJID, senderNumber, resolved, msg.Info.IsFromMe) {
 		// A reaction or a sticker would not have been read anyway, and a
 		// busy group sends many: they go to the debug log, as they would
 		// from a member.
 		if kind, _, _ := classify(msg); kind == kindOther {
-			wa.log.Debugf("Group message %s in %s by %s: ignored (not admitted by group_members, and nothing the bridge reads)", msg.Info.ID, groupJID, who.masked())
+			wa.log.Debugf("Group message %s in %s by %s: ignored (not admitted by group_members, and nothing the bridge reads)", msg.Info.ID, groupJID, who)
 			return
 		}
-		log.Printf("Group message in %s by %s: ignored (not admitted by group_members)", groupJID, who.masked())
+		log.Printf("Group message in %s by %s: ignored (not admitted by group_members)", groupJID, who)
 		return
 	}
 	// Only for the log line: an allowed group's name is never looked up.
@@ -629,14 +545,14 @@ func (wa *WhatsAppClient) handleGroupMessage(msg *events.Message) {
 
 	envelope := groupEnvelope(msg.Message, extractText(msg.Message), own)
 	envelope.Chat, envelope.Sender, envelope.SenderResolved, envelope.FromMe = groupJID, senderNumber, resolved, msg.Info.IsFromMe
-	policy := policyOf(cfg)
+	policy := cfg.Policy
 	rules := wa.rulesFor(groupJID)
-	policy.Files, policy.Forwards = rules.files, rules.forwards
+	policy.Files, policy.Forwards = rules.Files, rules.Forwards
 	decision := access.Decide(policy, envelope)
 	silent := decision.Silent
 	if kind == kindViewOnce {
 		if !silent {
-			go wa.notify(groupJID, viewOnceNotice)
+			go wa.notify(groupJID, wa.text.ViewOnce)
 		}
 		return
 	}
@@ -665,9 +581,8 @@ func (wa *WhatsAppClient) handleGroupMessage(msg *events.Message) {
 	}
 
 	log.Printf("Group message from %s by %s: processing (silent=%v)", groupLabel(groupJID, groupName), senderNumber, silent)
-	wa.handler(wa.ctx, Inbound{Inbound: chat.Inbound{JID: groupJID, Sender: senderNumber, Text: text, Media: mediaList(mediaPath),
-		Quoted: quoted, Silent: silent, Source: chat.SourceWhatsApp, At: msg.Info.Timestamp, ID: string(msg.Info.ID)},
-	})
+	wa.handler(wa.ctx, chat.Inbound{JID: groupJID, Sender: senderNumber, Text: text, Media: mediaList(mediaPath),
+		Quoted: quoted, Silent: silent, Source: chat.SourceWhatsApp, At: msg.Info.Timestamp, ID: string(msg.Info.ID)})
 }
 
 // fetchAttachment is downloadAttachment once one of the download slots
@@ -679,7 +594,7 @@ func (wa *WhatsAppClient) handleGroupMessage(msg *events.Message) {
 // message goes on without the file and without a notice, as one the
 // disconnect cut off.
 func (wa *WhatsAppClient) fetchAttachment(msg *events.Message, chatJID string) (path, caption, notice string) {
-	if att, ok := attachmentOf(msg.Message, msg.Info.ID); ok && att.size <= uint64(wa.cfg().MaxMediaBytes()) {
+	if att, ok := attachmentOf(msg.Message, msg.Info.ID); ok && att.size <= uint64(wa.cfg().MaxMediaBytes) {
 		if release, ok := wa.downloads.acquire(wa.ctx); ok {
 			defer release()
 		}
@@ -696,23 +611,23 @@ func (wa *WhatsAppClient) downloadAttachment(msg *events.Message, chatJID string
 		return "", "", ""
 	}
 	cfg := wa.cfg()
-	maxBytes := cfg.MaxMediaBytes()
+	maxBytes := cfg.MaxMediaBytes
 	ctx, cancel := context.WithTimeout(wa.ctx, mediaDownloadTimeout)
 	defer cancel()
 	// Into the media folder's incoming folder, which no brain can read:
 	// the brain that takes the message moves it into its own inbox.
-	path, err := saveAttachment(ctx, wa.downloader(), filepath.Join(cfg.MediaDir, mediafiles.IncomingDir), att, maxBytes)
+	path, err := saveAttachmentTo(ctx, wa.downloader(), wa.inbox(filepath.Join(cfg.MediaDir, mediafiles.IncomingDir)), att, maxBytes)
 	switch {
 	case errors.Is(err, mediafiles.ErrTooLarge):
 		wa.log.Warnf("Skipped attachment from %s: %v", chatJID, err)
-		return "", att.caption, mediaTooLargeNotice(maxBytes)
+		return "", att.caption, wa.text.MediaTooLarge(maxBytes)
 	case err != nil:
 		wa.log.Errorf("Failed to download attachment from %s: %v", chatJID, err)
 		if wa.ctx.Err() != nil {
 			return "", att.caption, "" // shutting down, not the sender's problem
 		}
 		// Without a word, a file sent without a caption would get no reply.
-		return "", att.caption, mediaFailedNotice
+		return "", att.caption, wa.text.MediaFailed
 	}
 	return path, att.caption, ""
 }
@@ -815,34 +730,20 @@ func mediaExt(mimeType, def string) string {
 	return def
 }
 
-// saveAttachment adapts whatsmeow to the media inbox's bounded file writer.
-func saveAttachment(ctx context.Context, dl mediaDownloader, dir string, att attachment, maxBytes int64) (string, error) {
-	return mediaInboxAt(dir).Save(ctx, att.kind, att.name, att.size, maxBytes, func(ctx context.Context, f mediafiles.File) error {
+// saveAttachmentTo adapts whatsmeow to the media inbox's bounded file writer.
+func saveAttachmentTo(ctx context.Context, dl mediaDownloader, inbox mediafiles.Inbox, att attachment, maxBytes int64) (string, error) {
+	return inbox.Save(ctx, att.kind, att.name, att.size, maxBytes, func(ctx context.Context, f mediafiles.File) error {
 		return dl.DownloadToFile(ctx, att.media, f)
 	})
 }
 
-// numberAllowed compares number and the list as phone numbers, digits
-// only, so that "+1 555 123 4567" in a config the bridge did not write
-// still lets 15551234567 in. Anything that is no phone number is compared
-// as it is.
-func numberAllowed(cfg *Config, number string) bool {
-	return access.NumberAllowed(policyOf(cfg), number)
-}
-
 // rulesFor returns what addresses the bridge in the group jid, as its
 // brain's routing says.
-func (wa *WhatsAppClient) rulesFor(jid string) groupRules {
+func (wa *WhatsAppClient) rulesFor(jid string) waGroupRules {
 	if wa.groupRules == nil {
-		return defaultGroupRules
+		return waGroupRules{Files: true, Forwards: true}
 	}
 	return wa.groupRules(jid)
-}
-
-// isAllowedGroup reports whether the group JID is in cfg's allowed_groups.
-// Unlike DMs, groups are deny-by-default: an empty list means no groups.
-func isAllowedGroup(cfg *Config, jid string) bool {
-	return access.GroupAllowed(policyOf(cfg), jid)
 }
 
 // ownMentionJIDs returns every JID form the bridge account may be mentioned as.
