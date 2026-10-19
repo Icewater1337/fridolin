@@ -786,7 +786,9 @@ when the feed is seeded.
 
 **`backup.go`** — Google Drive backups through rclone.
 
-**`plaud.go`** — the Plaud recorder integration.
+**`internal/plaud`** — recorder polling, transcript handoffs and phone uploads.
+The command supplies host policy and runtime callbacks; HTTP adapters stay in
+`cmd/fridolin/plaud_api.go` and `plaud_app_api.go` until the HTTP surface moves.
 
 **`sandbox.go`** — generates a per-brain `sandbox-exec` profile, passed to
 `sandbox-exec -p` on each run (never written to a file).

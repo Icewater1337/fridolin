@@ -17,6 +17,7 @@ import (
 	"github.com/Icewater1337/fridolin/internal/backup"
 	"github.com/Icewater1337/fridolin/internal/devchat"
 	"github.com/Icewater1337/fridolin/internal/google"
+	"github.com/Icewater1337/fridolin/internal/plaud"
 
 	"github.com/Icewater1337/fridolin/internal/activity"
 	"github.com/Icewater1337/fridolin/internal/chat"
@@ -74,7 +75,7 @@ type Bridge struct {
 	scriptAuth    *scriptAuth
 	backup        *backup.Manager
 	google        *google.Auth
-	plaud         *PlaudManager
+	plaud         *plaud.Manager
 	site          *SiteManager
 	outbox        *outboundmsg.Outbox
 	otp           otp.Handoff
@@ -270,16 +271,13 @@ func NewBridge(cfgs *config.Store, opts BridgeOptions) (_ *Bridge, err error) {
 	// expired-login notice: the owner may not open the dashboard for weeks.
 	b.backup = newProjectedBackup(cfgs, b.brainMgr, b.notifyBackup)
 	b.google = google.New(googleOptionsFor(cfgs))
-	b.plaud = NewPlaudManager(cfgs, b.brainMgr)
-	b.plaud.submit = b.submitHandOff
-	b.plaud.notify = b.wa.SendMessage
-	b.site = NewSiteManager(cfg.DataDir, b.google.ClientPath)
-	b.plaud.siteURL = func() string {
+	b.plaud = NewPlaudManager(cfgs, b.brainMgr, b.submitHandOff, b.wa.SendMessage, func() string {
 		if d := b.site.Settings().Domain; d != "" {
 			return "https://" + d
 		}
 		return ""
-	}
+	})
+	b.site = NewSiteManager(cfg.DataDir, b.google.ClientPath)
 	b.site.hooks = b.siteBuilderHooks()
 	// What builder brains say in the Build page's chats goes there, not to WhatsApp.
 	b.wa = siteChatMessenger{Messenger: b.wa, chats: b.site.chats}

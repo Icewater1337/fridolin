@@ -479,9 +479,15 @@ responsibility and says what it must not do.
   the calendar list and the calendar calls the brain API makes for runs,
   revocation, credential file naming and the calendar variables for runs.
   Endpoints and the HTTP client are injected.
-- **`plaud`** *(to come, R15; `plaud.go`)*: the Plaud recorder. It runs the
-  CLI with a private HOME, polls, waits for transcripts and hands them off
-  through narrow function dependencies.
+- **`plaud`**: recorder polling, transcript handoffs and phone uploads.
+  `Manager` receives owned settings, fixed Boot paths, target operations and
+  host inputs through `Options`. It runs the CLI with a private HOME, keeps
+  the versioned state and phone credentials, and waits for background work
+  during stop. HTTP handlers and configuration/runtime projections remain
+  in the command. It imports neither `net/http`, `brain` nor `pipeline`.
+  The `jsonx` adapter preserves legacy decoder diagnostics. Service tests
+  use injected callbacks and an isolated CLI fixture; command tests retain
+  real brain, sandbox, configuration and HTTP integration coverage.
 - The site manager (`site*.go`) is not in the plan's steps yet. It will get
   a package of its own below `internal/`; the name `site` is the embed
   package's.

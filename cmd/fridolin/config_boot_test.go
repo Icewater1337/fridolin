@@ -121,7 +121,7 @@ func TestRestartOnlyPathsStayAtBootAfterAPISave(t *testing.T) {
 }
 
 func TestRuntimePathConsumersKeepBootAndApplyLiveOptions(t *testing.T) {
-	tb := newTestBridge(t, `, "plaud":{"phone_upload":true}`)
+	tb := newTestBridge(t, `, "plaud":{"phone_upload":true,"enabled":true}`)
 	tb.addFolderBrain(t, manifest.Manifest{ID: "main", Name: "Main", Routing: manifest.Routing{HandlesDMs: true}})
 	boot := tb.cfgs.Boot()
 	next := filepath.Join(tb.home, "next-start")
@@ -137,9 +137,7 @@ func TestRuntimePathConsumersKeepBootAndApplyLiveOptions(t *testing.T) {
 	for label, pair := range map[string][2]string{
 		"Google credentials fallback": {tb.google.CredsDir(), boot.DataDir},
 		"Google redirect":             {tb.google.RedirectURI(), "http://" + boot.HTTPListen + "/"},
-		"Plaud state":                 {tb.plaud.dir(), boot.PlaudDir()},
-		"Plaud private HOME":          {tb.plaud.cliHome(), filepath.Join(boot.PlaudDir(), "home")},
-		"Plaud phone inbox":           {tb.plaud.phoneDir(), filepath.Join(boot.PlaudDir(), "inbox")},
+		"Plaud private login":         {tb.plaud.Status().LoginDir, filepath.Join(boot.PlaudDir(), "home", ".plaud")},
 		"site media":                  {tb.siteBuilderHooks().mediaDir(), boot.MediaDir},
 		"site bridge address":         {tb.siteBuilderHooks().bridgeURL(), "http://" + boot.HTTPListen},
 	} {
@@ -161,6 +159,7 @@ func TestRuntimePathConsumersKeepBootAndApplyLiveOptions(t *testing.T) {
 	if _, err := os.Stat(next); !os.IsNotExist(err) {
 		t.Errorf("backup created next-start path: %v", err)
 	}
+	checkPlaudPhonePaths(t, tb, filepath.Join(boot.PlaudDir(), "inbox"))
 	s := tb.brainMgr.Get("main").settings.Load()
 	if s.dataDir != boot.DataDir || s.dbPath != boot.DBPath || s.mediaDir != boot.MediaDir || s.credsDir != boot.DataDir {
 		t.Errorf("brain startup paths drifted: %#v", s)
@@ -184,9 +183,13 @@ func TestRuntimePathConsumersKeepBootAndApplyLiveOptions(t *testing.T) {
 	if w.Code != http.StatusOK {
 		t.Fatal(w.Body.String())
 	}
-	if tb.google.CredsDir() != explicitCreds || tb.plaud.phoneDir() != explicitPhone || tb.plaud.cliHome() != boot.Home || tb.brainMgr.Get("main").settings.Load().credsDir != explicitCreds {
+	if tb.google.CredsDir() != explicitCreds || tb.plaud.Status().LoginDir != filepath.Join(boot.Home, ".plaud") || tb.brainMgr.Get("main").settings.Load().credsDir != explicitCreds {
 		t.Error("explicit credential/phone paths or Plaud access stopped applying live")
 	}
+	if err := os.MkdirAll(explicitPhone, 0700); err != nil {
+		t.Fatal(err)
+	}
+	checkPlaudPhonePaths(t, tb, explicitPhone)
 
 	if runtime.GOOS == "darwin" {
 		if w := tb.editConfig(t, func(c map[string]any) { c["sandbox"].(map[string]any)["enabled"] = true }); w.Code != http.StatusOK {
@@ -207,6 +210,33 @@ func TestRuntimePathConsumersKeepBootAndApplyLiveOptions(t *testing.T) {
 	profile, err = tb.brainMgr.profiler.Profile("main")
 	if err != nil || !strings.Contains(profile, filepath.Join(boot.Home, ".ssh")) || strings.Contains(profile, filepath.Join(replacementHome, ".ssh")) {
 		t.Errorf("sandbox home changed after startup: %v", err)
+	}
+}
+
+// A first phone poll records which folder it read without handing old files
+// to a brain. This exercises the real read/write paths through the public API.
+func checkPlaudPhonePaths(t *testing.T, tb *testBridge, inbox string) {
+	t.Helper()
+	if err := tb.plaud.Poll(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	var state struct {
+		Account string `json:"account"`
+		Seeded  bool   `json:"seeded"`
+	}
+	path := filepath.Join(tb.cfgs.Boot().PlaudDir(), "state.json")
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal(data, &state); err != nil {
+		t.Fatal(err)
+	}
+	if !state.Seeded || state.Account != "phone "+inbox {
+		t.Errorf("Plaud read the wrong inbox or saved elsewhere: %+v", state)
+	}
+	if info, err := os.Stat(inbox); err != nil || !info.IsDir() {
+		t.Errorf("Plaud phone inbox was not created: %v", err)
 	}
 }
 

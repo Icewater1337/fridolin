@@ -842,7 +842,7 @@ func (b *Bridge) siteBuilderHooks() builderHooks {
 		},
 		mediaDir: func() string { return b.cfgs.Boot().MediaDir },
 		search:   b.runBrainSearch,
-		device:   b.plaud.deviceRequest,
+		device:   b.plaud.DeviceRequest,
 		// As /ingest: the brain's reply chat gets the answer, and the brain
 		// must take the files now (its queue is not full).
 		ingest: func(brainID, sender, text string, files []string) error {
