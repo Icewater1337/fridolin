@@ -22,8 +22,6 @@ import (
 	"github.com/Icewater1337/fridolin/internal/fsx"
 )
 
-// ── junk filter ───────────────────────────────────────────────────────────
-
 func TestIsJunkMessage(t *testing.T) {
 	junk := []string{"ok", "OK", "thanks", "👍", "...", "?", "a", "🎉🎉"}
 	for _, s := range junk {
@@ -97,33 +95,6 @@ func isASCII(s string) bool {
 	}
 	return true
 }
-
-// ── chunking ──────────────────────────────────────────────────────────────
-
-func TestChunkMessageShortTextUntouched(t *testing.T) {
-	chunks := ChunkMessage("hello", 100)
-	if len(chunks) != 1 || chunks[0] != "hello" {
-		t.Errorf("got %v", chunks)
-	}
-}
-
-func TestChunkMessageRespectsMaxSize(t *testing.T) {
-	text := strings.Repeat("paragraph one is here.\n\n", 200)
-	chunks := ChunkMessage(text, 500)
-	if len(chunks) < 2 {
-		t.Fatalf("expected multiple chunks, got %d", len(chunks))
-	}
-	for i, c := range chunks {
-		if n := utf8.RuneCountInString(c); n > 500 {
-			t.Errorf("chunk %d has %d characters, over the 500 limit", i, n)
-		}
-		if !strings.HasPrefix(c, "[") {
-			t.Errorf("chunk %d missing [n/total] prefix: %q", i, c[:20])
-		}
-	}
-}
-
-// ── config ────────────────────────────────────────────────────────────────
 
 func writeConfig(t *testing.T, body string) string {
 	t.Helper()
@@ -705,8 +676,6 @@ func TestBrainRoutingFallsBackToFirstBrain(t *testing.T) {
 	}
 }
 
-// ── sandbox ───────────────────────────────────────────────────────────────
-
 func TestSandboxProfileIsolatesBrains(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
@@ -792,8 +761,6 @@ func TestSandboxProfileIncludesConfiguredDenies(t *testing.T) {
 	}
 }
 
-// ── identity map ──────────────────────────────────────────────────────────
-
 func TestParseIdentityMap(t *testing.T) {
 	ids := parseIdentityMap([]byte(`# People
 
@@ -846,7 +813,7 @@ func FuzzParseIdentityMap(f *testing.F) {
 	f.Fuzz(func(t *testing.T, table []byte, number, name, notes string) {
 		check := func(ids map[string]string) {
 			for k, v := range ids {
-				if k == "" || strings.ContainsAny(k, "@|\n") || identityKey(k) != k || k != strings.TrimSpace(k) {
+				if k == "" || strings.ContainsAny(k, "@|\n") || chat.IdentityKey(k) != k || k != strings.TrimSpace(k) {
 					t.Errorf("key %q is not a normalised number", k)
 				}
 				if v == "" || strings.ContainsAny(v, "|\n") || v != strings.TrimSpace(v) {
@@ -864,10 +831,10 @@ func FuzzParseIdentityMap(f *testing.F) {
 		ids := parseIdentityMap([]byte(string(table) + "\n| " + number + " | " + name + " | " + notes + " |\n"))
 		check(ids)
 		// Nothing to read back, or the header and the line under it.
-		if number == "" || identityKey(number) == "" || name == "" || number == "WhatsApp Number" || strings.Trim(number+name+notes, "-: \t") == "" {
+		if number == "" || chat.IdentityKey(number) == "" || name == "" || number == "WhatsApp Number" || strings.Trim(number+name+notes, "-: \t") == "" {
 			return
 		}
-		if got := ids[identityKey(number)]; got != name {
+		if got := ids[chat.IdentityKey(number)]; got != name {
 			t.Errorf("row | %s | %s | %s | read back as %q, want %q", number, name, notes, got, name)
 		}
 	})

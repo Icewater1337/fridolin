@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	outboundmsg "github.com/Icewater1337/fridolin/internal/outbound"
 	"io"
 	"log"
 	"net"
@@ -638,7 +639,7 @@ func TestResumeOutlivesItsContext(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 	tb.resume(ctx)
-	waitFor(t, 5*time.Second, "the notice", func() bool { return slices.Contains(tb.sentTo(harnessDM), restartedNotice) })
+	waitFor(t, 5*time.Second, "the notice", func() bool { return slices.Contains(tb.sentTo(harnessDM), outboundmsg.RestartedNotice) })
 }
 
 // waitBatched waits until the debouncer holds one batch of n messages.
@@ -693,7 +694,7 @@ func TestShutdownDropsWhatIsKeptTooLong(t *testing.T) {
 	h.WhatsApp(dmEvent("3EB0RUN", textMsg("a long one")))
 	h.WaitFor("the run", func() bool { return h.Running("main") })
 	old := dmEvent("3EB0OLD", textMsg("from long ago"))
-	old.Info.Timestamp = time.Now().Add(-outboxTTL - time.Minute)
+	old.Info.Timestamp = time.Now().Add(-outboundmsg.OutboxTTL - time.Minute)
 	h.WhatsApp(old)
 	h.WaitSent(harnessDM, "Queued (#1)")
 	h.WhatsApp(dmEvent("3EB0NEW", textMsg("from just now")))
