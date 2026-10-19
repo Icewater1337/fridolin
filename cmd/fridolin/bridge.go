@@ -252,7 +252,7 @@ func NewBridge(cfgs *config.Store, opts BridgeOptions) (_ *Bridge, err error) {
 	})
 	b.site = NewSiteManager(SiteOptions{DataDir: cfg.DataDir, GoogleClient: b.google.ClientPath, Builder: b.siteBuilderHooks()})
 	// What builder brains say in the Build page's chats goes there, not to WhatsApp.
-	b.wa = siteChatMessenger{Messenger: b.wa, chats: b.site.chats}
+	b.wa = siteChatMessenger{Messenger: b.wa, appendMessage: b.site.AppendBuildMessage}
 	pace := outboundmsg.OutboxPace
 	if opts.NoWhatsApp {
 		pace = 0

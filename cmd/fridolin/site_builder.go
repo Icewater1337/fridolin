@@ -201,7 +201,7 @@ func (m *SiteManager) builderToken(brainID string) string {
 	return tok
 }
 
-func (m *SiteManager) brainForToken(tok string) string {
+func (m *SiteManager) BrainForToken(tok string) string {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	id := m.tokens[tok]
@@ -687,4 +687,12 @@ func (m *SiteManager) writePreviewsFile() error {
 	m.mu.Unlock()
 	data, _ := json.MarshalIndent(list, "", "  ")
 	return fsx.WriteFileAtomic(m.dir("previews.json"), data, 0o600, false)
+}
+
+// PreviewURLs returns the active preview links, or nil when no preview exists.
+func (m *SiteManager) PreviewURLs(id string) map[string]string {
+	if p := m.previewOf(id); p != nil {
+		return m.previewURLs(id, p)
+	}
+	return nil
 }

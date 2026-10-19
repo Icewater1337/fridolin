@@ -9,7 +9,7 @@ import (
 func (b *Bridge) builderHandler() http.Handler {
 	m := b.site
 	return (&httpapi.BuilderAPI{
-		BrainForToken: m.brainForToken,
+		BrainForToken: m.BrainForToken,
 		Context:       func(id string) any { return m.BuilderContext(id) },
 		Check:         func(ctx context.Context, id string) (any, error) { return m.BuilderCheck(ctx, id) },
 		Preview:       func(ctx context.Context, id string) (any, error) { return m.BuilderPreview(ctx, id) },

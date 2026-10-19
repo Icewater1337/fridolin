@@ -29,7 +29,7 @@ type BuildMessage struct {
 	At   string `json:"at"`
 }
 
-type buildChat struct {
+type BuildChat struct {
 	Thread   int            `json:"thread"`
 	Messages []BuildMessage `json:"messages"`
 }
@@ -49,8 +49,8 @@ func (c *siteChats) path(brainID string) (string, error) {
 	return c.m.dir("build", brainID+".json"), nil
 }
 
-func (c *siteChats) loadLocked(brainID string) buildChat {
-	ch := buildChat{Thread: 1, Messages: []BuildMessage{}}
+func (c *siteChats) loadLocked(brainID string) BuildChat {
+	ch := BuildChat{Thread: 1, Messages: []BuildMessage{}}
 	if p, err := c.path(brainID); err == nil {
 		if data, err := os.ReadFile(p); err == nil {
 			_ = json.Unmarshal(data, &ch)
@@ -65,7 +65,7 @@ func (c *siteChats) loadLocked(brainID string) buildChat {
 	return ch
 }
 
-func (c *siteChats) saveLocked(brainID string, ch buildChat) error {
+func (c *siteChats) saveLocked(brainID string, ch BuildChat) error {
 	p, err := c.path(brainID)
 	if err != nil {
 		return err
@@ -77,7 +77,7 @@ func (c *siteChats) saveLocked(brainID string, ch buildChat) error {
 	return fsx.WriteFileAtomic(p, data, 0o600, false)
 }
 
-func (c *siteChats) get(brainID string) buildChat {
+func (c *siteChats) get(brainID string) BuildChat {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	return c.loadLocked(brainID)
@@ -96,7 +96,7 @@ func (c *siteChats) newThread(brainID string) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	ch := c.loadLocked(brainID)
-	return c.saveLocked(brainID, buildChat{Thread: ch.Thread + 1, Messages: []BuildMessage{}})
+	return c.saveLocked(brainID, BuildChat{Thread: ch.Thread + 1, Messages: []BuildMessage{}})
 }
 
 func buildChatJID(brainID string, thread int) string {
@@ -119,3 +119,14 @@ func brainOfBuildJID(jid string) string {
 	}
 	return rest[:i]
 }
+
+// BuildChat returns the current thread and messages for a builder.
+func (m *SiteManager) BuildChat(id string) BuildChat { return m.chats.get(id) }
+
+// AppendBuildMessage records a message in the builder's current thread.
+func (m *SiteManager) AppendBuildMessage(id, role, text string) error {
+	return m.chats.add(id, role, text)
+}
+
+// NewBuildThread starts the builder's next conversation.
+func (m *SiteManager) NewBuildThread(id string) error { return m.chats.newThread(id) }
