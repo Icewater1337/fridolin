@@ -6,6 +6,8 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"github.com/Icewater1337/fridolin/internal/devchat"
+	outboundmsg "github.com/Icewater1337/fridolin/internal/outbound"
 	"image/png"
 	"io"
 	"log"
@@ -368,7 +370,7 @@ func TestSendRefusesMissingJIDOrText(t *testing.T) {
 // stateMessenger is the dev messenger with a WhatsApp state of the test's
 // choosing.
 type stateMessenger struct {
-	*devMessenger
+	*devchat.Messenger
 	state chat.LinkState
 }
 
@@ -394,7 +396,7 @@ func TestReadyReportsWhetherMessagesCanGoOut(t *testing.T) {
 		t.Run(c.name, func(t *testing.T) {
 			tb := newTestBridge(t, "")
 			if !c.dev {
-				tb.wa = stateMessenger{devMessenger: tb.dev, state: chat.LinkState{Mode: c.mode, OwnNumber: "15551234567"}}
+				tb.wa = stateMessenger{Messenger: tb.dev, state: chat.LinkState{Mode: c.mode, OwnNumber: "15551234567"}}
 				tb.dev = nil
 			}
 			r := httptest.NewRequest("GET", "http://127.0.0.1:8765/ready", nil)
@@ -1300,7 +1302,7 @@ func TestAllowListEntries(t *testing.T) {
 	}
 	for _, c := range numbers {
 		t.Run("number "+c.in, func(t *testing.T) {
-			got, err := phoneNumber(c.in)
+			got, err := chat.PhoneNumber(c.in)
 			if c.want == "" {
 				if err == nil {
 					t.Errorf("phoneNumber(%q) = %q, want an error", c.in, got)
@@ -1349,11 +1351,11 @@ func FuzzPhoneNumber(f *testing.F) {
 		f.Add(s)
 	}
 	f.Fuzz(func(t *testing.T, in string) {
-		n, err := phoneNumber(in)
+		n, err := chat.PhoneNumber(in)
 		if err != nil {
 			return
 		}
-		if !phoneNumberRE.MatchString(n) {
+		if !chat.IsPhoneNumber(n) {
 			t.Fatalf("phoneNumber(%q) = %q, not 6 to 15 digits", in, n)
 		}
 		digits := strings.Map(func(r rune) rune {
@@ -1365,7 +1367,7 @@ func FuzzPhoneNumber(f *testing.F) {
 		if !strings.Contains(digits, n) {
 			t.Errorf("phoneNumber(%q) = %q, digits that are not in the input", in, n)
 		}
-		if again, err := phoneNumber(n); err != nil || again != n {
+		if again, err := chat.PhoneNumber(n); err != nil || again != n {
 			t.Errorf("phoneNumber(%q) = %q, %v; want it unchanged", n, again, err)
 		}
 	})
@@ -1861,7 +1863,7 @@ func TestPrettyName(t *testing.T) {
 
 // qrMessenger is the dev messenger with a pairing code to show.
 type qrMessenger struct {
-	*devMessenger
+	*devchat.Messenger
 	code string
 }
 
@@ -2016,7 +2018,7 @@ func TestOTPGuardHandsCodeToLocalScripts(t *testing.T) {
 		texts = append(texts, m.Text)
 	}
 	slices.Sort(texts)
-	if len(texts) != 2 || !strings.Contains(texts[0], "Examplebank 2FA") || texts[1] != otpCaughtNotice {
+	if len(texts) != 2 || !strings.Contains(texts[0], "Examplebank 2FA") || texts[1] != outboundmsg.OtpCaughtNotice {
 		t.Errorf("sent %q — only the script's own request and the notice may be there; the brain must not run on a caught code", texts)
 	}
 }

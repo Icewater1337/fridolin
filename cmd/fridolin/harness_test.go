@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"github.com/Icewater1337/fridolin/internal/whatsapp"
 	"io"
 	"maps"
 	"net/http"
@@ -18,6 +19,8 @@ import (
 
 	"github.com/Icewater1337/fridolin/internal/chat"
 	"github.com/Icewater1337/fridolin/internal/fsx"
+	"go.mau.fi/whatsmeow"
+	"go.mau.fi/whatsmeow/store"
 	"go.mau.fi/whatsmeow/types/events"
 	waLog "go.mau.fi/whatsmeow/util/log"
 )
@@ -38,7 +41,7 @@ import (
 // use must change them too: newHarness and Reopen build the bridge with
 // NewBridge and newHTTPHandler, Reopen takes up what the last stop kept
 // with Bridge.resume, as Start does, and WhatsApp hands an event to a
-// WhatsAppClient built from its unexported fields, with the bridge's
+// WhatsApp client built through its normal constructor, with the bridge's
 // handleInbound and dev transport.
 type harness struct {
 	t *testing.T
@@ -231,12 +234,18 @@ func (h *harness) Inject(m inbound) {
 // the dev outbox.
 func (h *harness) WhatsApp(ev *events.Message) {
 	h.t.Helper()
-	ctx, cancel := context.WithCancel(context.Background())
-	h.t.Cleanup(cancel)
-	wa := &WhatsAppClient{cfg: h.b.cfgs.Get, log: waLog.Noop, handler: h.b.handleInbound, onChange: h.b.handleChange, ctx: ctx, cancel: cancel}
-	wa.media = wa.client // nil: every download fails with ErrClientIsNil
-	wa.notify = func(jid, text string) { _ = h.b.dev.SendMessage(ctx, jid, text) }
-	wa.handleMessage(ev)
+	opts := whatsAppOptions(h.b.cfgs.Get, h.b.store, h.b.handleInbound, nil)
+	opts.Container = fixedDeviceContainer{&store.Device{}}
+	opts.Log = waLog.Noop
+	opts.OnChange = h.b.handleChange
+	opts.Downloader = (*whatsmeow.Client)(nil)
+	opts.Notify = func(jid, text string) { _ = h.b.dev.SendMessage(context.Background(), jid, text) }
+	wa, err := whatsapp.New(opts)
+	if err != nil {
+		h.t.Fatal(err)
+	}
+	h.t.Cleanup(wa.Disconnect)
+	wa.ProcessMessage(ev)
 }
 
 // sent is a message the dev-mode bridge sent, as GET /api/dev/outbox lists

@@ -3,6 +3,7 @@ package main
 import (
 	"encoding/json"
 	"errors"
+	outboundmsg "github.com/Icewater1337/fridolin/internal/outbound"
 	"log"
 	"maps"
 	"os"
@@ -1530,7 +1531,7 @@ func TestRunTimeoutStopsAStuckRun(t *testing.T) {
 			}
 			mu.Lock()
 			defer mu.Unlock()
-			if asked := slices.ContainsFunc(sent, func(s string) bool { return strings.HasPrefix(s, questionPrefix) }); asked != tc.question {
+			if asked := slices.ContainsFunc(sent, func(s string) bool { return strings.HasPrefix(s, outboundmsg.QuestionPrefix) }); asked != tc.question {
 				t.Errorf("sent to the chat mid-run: %q, want a question: %v", sent, tc.question)
 			}
 		})

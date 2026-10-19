@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	outboundmsg "github.com/Icewater1337/fridolin/internal/outbound"
 	"os"
 	"path/filepath"
 	"runtime/debug"
@@ -60,8 +61,8 @@ func TestBuildChatLeavesOutOnlyTheWorkingNotice(t *testing.T) {
 		text  string
 		shown bool
 	}{
-		{workingNotice, false},
-		{chatErrLimit, true},
+		{outboundmsg.WorkingNotice, false},
+		{outboundmsg.ChatErrLimit, true},
 		{"⏳ Queued (#2) — I'll get to this right after the current task.", true},
 		{"Here is the new page.", true},
 	} {
@@ -165,13 +166,17 @@ func TestLongBuildChatAnswerStaysWhole(t *testing.T) {
 	long := strings.Repeat("This is one sentence of a long answer. ", 24)
 	cases := []struct {
 		name  string
-		send  func(o *Outbox, chatJID string) error
+		send  func(o *outboundmsg.Outbox, chatJID string) error
 		build bool // to a build chat
 		want  int  // messages
 	}{
-		{"a reply to a build chat", func(o *Outbox, chatJID string) error { return o.Reply(t.Context(), "web", chatJID, long, 200) }, true, 1},
-		{"a question in a build chat", func(o *Outbox, chatJID string) error { return o.Text(t.Context(), chatJID, long, 200) }, true, 1},
-		{"a reply to WhatsApp", func(o *Outbox, chatJID string) error { return o.Reply(t.Context(), "web", chatJID, long, 200) }, false, 5},
+		{"a reply to a build chat", func(o *outboundmsg.Outbox, chatJID string) error {
+			return o.Reply(t.Context(), "web", chatJID, long, 200)
+		}, true, 1},
+		{"a question in a build chat", func(o *outboundmsg.Outbox, chatJID string) error { return o.Text(t.Context(), chatJID, long, 200) }, true, 1},
+		{"a reply to WhatsApp", func(o *outboundmsg.Outbox, chatJID string) error {
+			return o.Reply(t.Context(), "web", chatJID, long, 200)
+		}, false, 5},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {

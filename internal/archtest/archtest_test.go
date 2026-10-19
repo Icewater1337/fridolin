@@ -24,11 +24,13 @@ import (
 // edge is a change to this table, made and reviewed in the same pull
 // request. Imports from outside the module are not checked here.
 var imports = map[string][]string{
-	"cmd/fridolin":      {"examples", "internal/activity", "internal/chat", "internal/fsx", "internal/history", "internal/httpapi", "internal/jsonx", "internal/logx", "internal/media", "internal/otp", "internal/platform", "internal/store", "internal/textx", "internal/trigger", "internal/version", "site", "web"},
+	"cmd/fridolin":      {"examples", "internal/access", "internal/activity", "internal/chat", "internal/devchat", "internal/fsx", "internal/history", "internal/httpapi", "internal/jsonx", "internal/logx", "internal/media", "internal/otp", "internal/outbound", "internal/platform", "internal/store", "internal/textx", "internal/trigger", "internal/version", "internal/whatsapp", "site", "web"},
 	"examples":          nil,
+	"internal/access":   {"internal/chat", "internal/trigger"},
 	"internal/activity": {"internal/history", "internal/textx"},
 	"internal/archtest": nil,
 	"internal/chat":     nil,
+	"internal/devchat":  {"internal/chat", "internal/textx"},
 	"internal/fsx":      nil,
 	"internal/jsonx":    nil,
 	"internal/history":  {"internal/fsx"},
@@ -37,10 +39,12 @@ var imports = map[string][]string{
 	"internal/otp":      {"internal/history", "internal/fsx"},
 	"internal/media":    {"internal/fsx", "internal/textx"},
 	"internal/platform": nil,
+	"internal/outbound": {"internal/store", "internal/textx"},
 	"internal/store":    {"internal/fsx", "internal/logx"},
 	"internal/textx":    nil,
 	"internal/trigger":  nil,
 	"internal/version":  nil,
+	"internal/whatsapp": {"internal/access", "internal/media", "internal/logx", "internal/platform", "internal/chat", "internal/textx", "internal/trigger"},
 	"site":              nil,
 	"web":               nil,
 }

@@ -2,6 +2,8 @@ package main
 
 import (
 	"fmt"
+	"github.com/Icewater1337/fridolin/internal/access"
+	"github.com/Icewater1337/fridolin/internal/chat"
 	"log"
 	"slices"
 	"sort"
@@ -42,26 +44,7 @@ type groupSender struct {
 // numbers, or anyone while it is empty and allow_any_dm is true. A sender
 // known only by a LID is admitted only where everyone is.
 func groupSenderAllowed(cfg *Config, group string, s groupSender) bool {
-	if s.FromMe {
-		return true
-	}
-	members, listed := cfg.GroupMembers[group]
-	switch {
-	case listed && slices.Equal(members, []string{anyMember}):
-		return true
-	case !listed && cfg.AnyoneCanDM():
-		return true
-	case !s.Resolved:
-		return false
-	case listed:
-		number := s.Number
-		if n, err := phoneNumber(number); err == nil {
-			number = n
-		}
-		return slices.Contains(allowedNumbersAsNumbers(members), number)
-	default:
-		return numberAllowed(cfg, s.Number)
-	}
+	return access.GroupSenderAllowed(policyOf(cfg), group, s.Number, s.Resolved, s.FromMe)
 }
 
 // masked is the sender for the log: a number down to its country code and
@@ -109,7 +92,7 @@ func validateGroupMembers(members map[string][]string, allowedGroups []string) e
 				}
 				continue
 			}
-			if _, err := phoneNumber(n); err != nil {
+			if _, err := chat.PhoneNumber(n); err != nil {
 				return fmt.Errorf("group_members: %s: entry %d is not a phone number: use digits with the country code, e.g. 15551234567", g, i+1)
 			}
 		}
@@ -129,7 +112,7 @@ func groupMembersAsNumbers(members map[string][]string) map[string][]string {
 			out[g] = list
 			continue
 		}
-		out[g] = allowedNumbersAsNumbers(list)
+		out[g] = chat.NumbersAsNumbers(list)
 	}
 	return out
 }
