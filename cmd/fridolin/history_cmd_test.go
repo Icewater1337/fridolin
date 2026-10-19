@@ -8,6 +8,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/Icewater1337/fridolin/internal/history"
 )
 
 const historyTestChat = "120363000000000000@g.us"
@@ -33,7 +35,7 @@ func writeHistory(t *testing.T, dir string, rows ...map[string]any) string {
 		b.Write(data)
 		b.WriteByte('\n')
 	}
-	path := filepath.Join(dir, historyFileName)
+	path := filepath.Join(dir, history.FileName)
 	if err := os.WriteFile(path, []byte(b.String()), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -113,7 +115,7 @@ func TestHistoryHitsKeepTheLine(t *testing.T) {
 		map[string]any{"ts": "2026-01-15T11:00:00Z", "type": "in", "from": "15551234567", "chat": historyTestChat, "text": "second", "media": 2},
 	)
 	// A line far longer than a bufio.Scanner's default buffer, and junk.
-	f, err := os.OpenFile(filepath.Join(dir, historyFileName), os.O_APPEND|os.O_WRONLY, 0)
+	f, err := os.OpenFile(filepath.Join(dir, history.FileName), os.O_APPEND|os.O_WRONLY, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -153,14 +155,14 @@ func TestHistoryFindsTheFile(t *testing.T) {
 	}{
 		{"the folder it runs in", brain, nil},
 		{"--brain-dir", home, []string{"--brain-dir", "~/brains/main"}},
-		{"--file", home, []string{"--file", "~/brains/main/" + historyFileName}},
+		{"--file", home, []string{"--file", "~/brains/main/" + history.FileName}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			code, out, _ := runTool(t, historyCmd, tc.dir, env, time.Now(), append(tc.args, "dentist")...)
 			var r historyResult
 			_ = json.Unmarshal([]byte(out), &r)
-			if code != 0 || r.File != filepath.Join(brain, historyFileName) || r.Count != 1 {
+			if code != 0 || r.File != filepath.Join(brain, history.FileName) || r.Count != 1 {
 				t.Errorf("exit %d, %+v", code, r)
 			}
 		})

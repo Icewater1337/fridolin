@@ -12,6 +12,8 @@ import (
 
 	"go.mau.fi/whatsmeow/types"
 	"go.mau.fi/whatsmeow/types/events"
+
+	"github.com/Icewater1337/fridolin/internal/history"
 )
 
 // run is one run of the fake Claude CLI, from FRIDOLIN_FAKE_RUN_LOG.
@@ -135,14 +137,14 @@ func TestGoldenRuns(t *testing.T) {
 		t.Fatalf("allow the second group: %d %s", w.Code, w.Body.String())
 	}
 
-	history := filepath.Join(dir, historyFileName)
+	historyPath := filepath.Join(dir, history.FileName)
 	for path, data := range map[string][]byte{
 		// A short prompt of the brains' own, so that these golden files pin
 		// how a run's prompt is put together. The starter prompt from
 		// examples/, which changes more often, is TestGoldenScaffold's.
 		filepath.Join(dir, defaultPromptFile):    []byte(goldenBrainPrompt),
 		filepath.Join(family, defaultPromptFile): []byte(goldenBrainPrompt),
-		history:                                  fixture(t, "history-v1.jsonl"),
+		historyPath:                              fixture(t, "history-v1.jsonl"),
 		filepath.Join(dir, identityMapFile):      []byte(goldenIdentityMap),
 		filepath.Join(dir, ".mcp.json"):          []byte(`{"mcpServers": {"notes": {"command": "notes-mcp"}}}`),
 	} {
@@ -202,8 +204,8 @@ func TestGoldenRuns(t *testing.T) {
 	recorded := func(answer string) bool {
 		for _, d := range []string{dir, family} {
 			for _, l := range historyLines(t, d) {
-				var e historyEntry
-				if json.Unmarshal([]byte(l), &e) == nil && e.Type == historyOut && e.Text == answer {
+				var e history.Entry
+				if json.Unmarshal([]byte(l), &e) == nil && e.Type == history.Out && e.Text == answer {
 					return true
 				}
 			}
@@ -249,7 +251,7 @@ func TestGoldenRuns(t *testing.T) {
 	if w := h.Script("POST", "/send", `{"jid": "`+harnessDM+`", "text": "Sent by a script."}`); w.Code != 200 {
 		t.Fatalf("send: %d %s", w.Code, w.Body.String())
 	}
-	data, err := os.ReadFile(history)
+	data, err := os.ReadFile(historyPath)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -5,6 +5,8 @@ import (
 	"reflect"
 	"testing"
 	"time"
+
+	"github.com/Icewater1337/fridolin/internal/history"
 )
 
 // What a stop keeps in the inbound queue reads back whole after the store
@@ -12,8 +14,8 @@ import (
 // empties the queue.
 func TestInboundQueueKeepsWhatTheStopLeft(t *testing.T) {
 	sent := time.Date(2026, 10, 18, 9, 30, 0, 0, time.UTC)
-	logged := func(id, text string) historyEntry {
-		return historyEntry{TS: sent.Format(time.RFC3339), From: "15551234567", Chat: harnessDM, Text: text, Type: historyIn, ID: id}
+	logged := func(id, text string) history.Entry {
+		return history.Entry{TS: sent.Format(time.RFC3339), From: "15551234567", Chat: harnessDM, Text: text, Type: history.In, ID: id}
 	}
 	first := Inbound{JID: harnessDM, ChatAlt: "15559876543@lid", Sender: "15551234567", Text: "what is this?",
 		Media: []string{"/Users/you/.fridolin/media/a.jpg"}, Source: sourceWhatsApp, At: sent, ID: "3EB0A", logged: logged("3EB0A", "what is this?")}

@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/Icewater1337/fridolin/internal/fsx"
+	"github.com/Icewater1337/fridolin/internal/history"
 )
 
 // TestClaimMedia: a brain's files move from wherever they arrived in the
@@ -156,7 +157,7 @@ func TestBrainTakesItsFilesIntoItsInbox(t *testing.T) {
 	if data, err := os.ReadFile(want); err != nil || string(data) != "OggS" {
 		t.Errorf("%s: %q, %v", want, data, err)
 	}
-	if hist, _ := os.ReadFile(filepath.Join(dmDir, historyFileName)); !strings.Contains(string(hist), "[attachment: "+want+"]") {
+	if hist, _ := os.ReadFile(filepath.Join(dmDir, history.FileName)); !strings.Contains(string(hist), "[attachment: "+want+"]") {
 		t.Errorf("history does not name the file in the inbox:\n%s", hist)
 	}
 	if names, _ := os.ReadDir(filepath.Join(media, "g")); len(names) != 0 {
@@ -258,7 +259,7 @@ func TestRemovedBrainHandsItsFilesOn(t *testing.T) {
 	var once sync.Once
 	// Between a's taking the files and its finding out that it is removed:
 	// its history line is written in between.
-	mgr.SetHooks(BrainHooks{Deliver: d.add, OnHistory: func(id string, _ historyEntry) {
+	mgr.SetHooks(BrainHooks{Deliver: d.add, OnHistory: func(id string, _ history.Entry) {
 		if id != "a" {
 			return
 		}
@@ -345,7 +346,7 @@ func TestMergedMessageNamesItsFilesInTheInbox(t *testing.T) {
 
 			// Every file the history names is in the inbox.
 			var named []string
-			for _, line := range historyTexts(t, br, historyIn) {
+			for _, line := range historyTexts(t, br, history.In) {
 				for _, m := range attachmentRe.FindAllStringSubmatch(line, -1) {
 					named = append(named, m[1])
 				}

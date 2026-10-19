@@ -14,9 +14,11 @@ import (
 	"strings"
 	"time"
 
-	"github.com/Icewater1337/fridolin/internal/fsx"
-	"github.com/Icewater1337/fridolin/internal/version"
 	"go.mau.fi/whatsmeow/types"
+
+	"github.com/Icewater1337/fridolin/internal/fsx"
+	"github.com/Icewater1337/fridolin/internal/history"
+	"github.com/Icewater1337/fridolin/internal/version"
 )
 
 // sendRequest is the JSON body expected by POST /send.
@@ -239,7 +241,7 @@ func (b *Bridge) appendHTTPMessageToHistory(who principal, jid, text, request st
 	if who.kind == callerBrain {
 		from = who.brain
 	}
-	br.appendEntry(historyEntry{From: from, Chat: jid, Text: text, Type: historyOut, Via: who.via(), OTPRequest: request})
+	br.appendEntry(history.Entry{From: from, Chat: jid, Text: text, Type: history.Out, Via: who.via(), OTPRequest: request})
 }
 
 // httpIngest handles POST /ingest. It feeds files that arrived outside

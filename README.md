@@ -751,7 +751,7 @@ worker, which takes each chat's messages in order and the chats in turn,
 and waits for one of the `max_concurrent_runs` run slots all brains share
 (`runslots.go`); each message spawns `claude -p` with
 `--output-format stream-json`, seeded on stdin with the brain's prompt
-file and recent chat history, which `history.go` reads back from the end
+file and recent chat history, which `internal/history` reads back from the end
 of the file. Events are parsed live, so an `AskUserQuestion` reaches
 WhatsApp immediately, with its options numbered (the answer comes as the
 next message, and the run's final reply is sent too), and a run over 10

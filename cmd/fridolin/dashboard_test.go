@@ -23,6 +23,7 @@ import (
 	"time"
 
 	"github.com/Icewater1337/fridolin/internal/fsx"
+	"github.com/Icewater1337/fridolin/internal/history"
 	"github.com/Icewater1337/fridolin/internal/textx"
 	"github.com/Icewater1337/fridolin/internal/version"
 )
@@ -687,7 +688,7 @@ func TestIngestedCodeIsNotCaught(t *testing.T) {
 	tb := newTestBridge(t, `, "ingest": {"enabled": true}, "otp_guard": true, "otp_markers": ["Examplebank 2FA"]`)
 	tb.addFolderBrain(t, BrainManifest{ID: "dm", Name: "DM", Routing: BrainRouting{HandlesDMs: true}})
 	upDir := tb.addFolderBrain(t, BrainManifest{ID: "up", Name: "Uploads", ReplyChat: dm})
-	tb.brainMgr.Get("up").appendHistory(dm, "up", "Examplebank 2FA: reply with the code", historyOut)
+	tb.brainMgr.Get("up").appendHistory(dm, "up", "Examplebank 2FA: reply with the code", history.Out)
 
 	if w := tb.ingest(`{"brain":"up","text":"483920"}`); w.Code != 202 {
 		t.Fatalf("ingest: %d %s", w.Code, w.Body.String())
@@ -781,7 +782,7 @@ func TestResetReachesAHandOffInItsReplyChat(t *testing.T) {
 	}
 	// up answers in the chat, so the chat starts afresh for it too: its
 	// next file's run reads none of the earlier ones.
-	if !slices.ContainsFunc(readHistory(t, up), func(e historyEntry) bool { return e.Type == historyReset && e.Chat == dm }) {
+	if !slices.ContainsFunc(readHistory(t, up), func(e history.Entry) bool { return e.Type == history.Reset && e.Chat == dm }) {
 		t.Errorf("up's history has no reset marker for the chat:\n%+v", readHistory(t, up))
 	}
 	if before, _ := up.historyBefore(Inbound{JID: dm, Brain: "up", Sender: "upload", Text: "next file", Source: sourceIngest}, dmHistoryWindow); len(before) != 0 {

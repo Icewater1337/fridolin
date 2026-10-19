@@ -11,6 +11,8 @@ import (
 	"strings"
 	"syscall"
 	"testing"
+
+	"github.com/Icewater1337/fridolin/internal/history"
 )
 
 // The script API, POST /send and POST /ingest, is what local scripts and
@@ -22,7 +24,7 @@ import (
 // historyLines returns the lines of a brain folder's history file.
 func historyLines(t *testing.T, dir string) []string {
 	t.Helper()
-	data, err := os.ReadFile(filepath.Join(dir, historyFileName))
+	data, err := os.ReadFile(filepath.Join(dir, history.FileName))
 	if os.IsNotExist(err) {
 		return nil
 	}

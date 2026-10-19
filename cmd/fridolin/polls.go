@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"crypto/sha256"
 	"fmt"
-	"github.com/Icewater1337/fridolin/internal/store"
 	"log"
 	"regexp"
 	"slices"
@@ -12,6 +11,9 @@ import (
 	"strings"
 
 	"go.mau.fi/whatsmeow/types"
+
+	"github.com/Icewater1337/fridolin/internal/history"
+	"github.com/Icewater1337/fridolin/internal/store"
 )
 
 // Polls a brain sends. A reply marks one as a block:
@@ -155,7 +157,7 @@ func (b *Bridge) recordVote(v pollVote) {
 		log.Printf("poll vote in %s: no brain to tell", v.Poll.Chat)
 		return
 	}
-	br.appendHistory(v.Poll.Chat, v.Voter.User, voteText(v.Poll.Question, v.Selected), historyEvent)
+	br.appendHistory(v.Poll.Chat, v.Voter.User, voteText(v.Poll.Question, v.Selected), history.Event)
 }
 
 // voteText is how a vote reads in a brain's history, after the voter's

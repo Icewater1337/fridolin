@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/Icewater1337/fridolin/internal/history"
 	"github.com/Icewater1337/fridolin/internal/store"
 )
 
@@ -67,7 +68,7 @@ type storedInbound struct {
 	Source  string          `json:"source"`
 	At      time.Time       `json:"at"`
 	ID      string          `json:"id,omitempty"`
-	Logged  *historyEntry   `json:"logged,omitempty"`
+	Logged  *history.Entry  `json:"logged,omitempty"`
 	Parts   []storedInbound `json:"parts,omitempty"`
 }
 
@@ -76,7 +77,7 @@ func storeInbound(m Inbound) storedInbound {
 		JID: m.JID, ChatAlt: m.ChatAlt, Sender: m.Sender, Text: m.Text, Media: m.Media, Brain: m.Brain,
 		Quoted: m.Quoted, Silent: m.Silent, Source: m.Source, At: m.At, ID: m.ID,
 	}
-	if m.logged != (historyEntry{}) {
+	if m.logged != (history.Entry{}) {
 		logged := m.logged
 		s.Logged = &logged
 	}

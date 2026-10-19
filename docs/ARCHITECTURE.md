@@ -33,6 +33,10 @@ behaviour unless its title says so. The steps so far:
   `store` owns the database, poll, outbox and inbound queue repositories.
   The shared file permission helper lives in `fsx`. Process logger setup and file rotation
   remain in `cmd/fridolin`.
+- **R4, history slice**: `history` owns the conversation entry format and
+  rooted file reads, appends and rewrites; `fsx` owns the regular-file opener.
+  Runtime history locking, inbound bookkeeping and outbox merging remain in
+  `cmd/fridolin`.
 
 Everything else is still `package main` in `cmd/fridolin`, one file per
 subject (section 3 names the file each package will come from). A package
@@ -148,7 +152,8 @@ responsibility and says what it must not do.
   falls back on for a path that does not exist yet), `Within` (containment
   that avoids the sibling-prefix trap), `Exists`, and `RestrictToOwner`
   (remove group/other access while preserving owner access and special bits).
-  *Planned:* helpers for working inside an `*os.Root`.
+  `OpenInFolder` opens a regular file through an `*os.Root`, refusing
+  symlinks, special files and a file replaced during the open.
 - **`textx`**: `Truncate` and `Tail`, which shorten text from its end or its
   start to a byte limit without splitting a rune.
 - **`version`**: `String()`, which returns the `-ldflags -X` value, or
@@ -191,10 +196,14 @@ responsibility and says what it must not do.
   `Normalized`, `Equal`, and `Read`/`Write` through the brain folder's
   `os.Root`. A `Spec` is an approved manifest located on disk and ready to
   run: manifest, canonical folder, prompt path.
-- **`history`** *(to come, R4; `history.go`)*: `conversation-history.jsonl`.
+- **`history`**: `conversation-history.jsonl`.
   It provides `Entry`, `Append`, `Tail` and `ForChat`, all through the
   brain's `os.Root`. A file is read back from its end, a block at a time,
-  and `ForChat` stops at the chat's newest reset marker.
+  and `ForChat` stops at the chat's newest reset marker. `Scan` supports
+  bounded reverse searches; `Rewrite` and `HoldsEntry` support message edits
+  and deletions. The package takes chat IDs as strings and knows nothing of
+  inbound queues, the outbox or delivery. Callers retain the history mutex
+  and invoke callbacks after releasing it.
 - **`store`**: `bridge.db`, opened with `Open(dbPath, logLevel)`.
   Fridolin's own tables are versioned in the `fridolin_version` table, kept
   apart from whatsmeow's `whatsmeow_version`, and migrations only add.

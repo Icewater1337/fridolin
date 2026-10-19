@@ -19,52 +19,13 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
-	"syscall"
 	"time"
 	"unicode"
 
 	"github.com/Icewater1337/fridolin/internal/fsx"
+	"github.com/Icewater1337/fridolin/internal/history"
 	"github.com/Icewater1337/fridolin/internal/platform"
 	"github.com/Icewater1337/fridolin/internal/textx"
-)
-
-// historyEntry is one line in a brain's conversation-history.jsonl file.
-// Brains' own scripts read the file too, so docs/BRAINS.md and
-// docs/schemas/history-line.schema.json describe the line: fields are
-// added, never renamed or removed.
-type historyEntry struct {
-	TS   string `json:"ts"`
-	From string `json:"from"`
-	Chat string `json:"chat"` // JID of the chat (DM participant or group)
-	Text string `json:"text"`
-	Type string `json:"type"` // historyIn, historyOut, historyEvent or historyReset
-	// Via marks an "out" line that came in through /send: "brain" (From is
-	// the brain that sent it), "script" (the scripts token) or "api" (no
-	// token). A brain's own replies have none.
-	Via string `json:"via,omitempty"`
-	// ID is the WhatsApp message's ID for a message from WhatsApp, which an
-	// edit or a deletion of it names (see recordChange).
-	ID string `json:"id,omitempty"`
-	// OTPRequest is the id /send answered a request for a one-time code
-	// with, on the "out" line of that request (see otpRequest).
-	OTPRequest string `json:"otp_request,omitempty"`
-}
-
-// The history entry types. They are written to every brain's history file,
-// which `fridolin history` and a brain's own scripts read, so their values
-// must not change.
-const (
-	historyIn  = "in"  // a message to the brain
-	historyOut = "out" // a message the brain sent, or one sent on its behalf
-	// historyEvent is something that happened in a chat without a message,
-	// such as a poll vote. Its From is who did it, and its text says what,
-	// after their name.
-	historyEvent = "event"
-	// historyReset marks where !reset started a chat afresh. Its From is
-	// who sent it, and it has no text. A run's prompt shows only the
-	// chat's lines after the newest one; it is no message, so neither the
-	// dashboard's feed nor `fridolin history` shows it.
-	historyReset = "reset"
 )
 
 // normalizeJID strips the WhatsApp server suffix and a leading + from a JID,
@@ -260,9 +221,9 @@ type BrainHooks struct {
 	// WhatsApp, as its history will record them once they arrived. A
 	// chat gets them before anything a later run says there, so that run
 	// reads them as said (see undelivered).
-	Undelivered func(brainID string) []historyEntry
+	Undelivered func(brainID string) []history.Entry
 	// OnHistory sees every line written to a brain's history.
-	OnHistory func(brainID string, e historyEntry)
+	OnHistory func(brainID string, e history.Entry)
 	// ExtraArgs adds CLI arguments to a brain's runs (the site builder's
 	// plugin and MCP server, for brains allowed to build the site).
 	ExtraArgs func(brainID string) []string
@@ -346,9 +307,6 @@ func (br *Brain) Name() string { return br.settings.Load().name }
 // Dir is the brain's folder.
 func (br *Brain) Dir() string { return br.workDir }
 
-// historyFileName is the brain's conversation history, in its folder.
-const historyFileName = "conversation-history.jsonl"
-
 // logInbound writes m to the brain's history: a line for each part of a
 // merged message, with its ID, so that one deleted later is taken out
 // alone, and with the time it was sent, not the time the debouncer let it
@@ -369,7 +327,7 @@ func (br *Brain) logInbound(m Inbound) Inbound {
 		if at.IsZero() {
 			at = m.At
 		}
-		parts[i].logged = br.appendEntry(historyEntry{TS: historyTime(at), Chat: m.JID, From: p.Sender, Text: historyTextWithMedia(p.textWithQuote(), p.Media), Type: historyIn, ID: p.ID})
+		parts[i].logged = br.appendEntry(history.Entry{TS: historyTime(at), Chat: m.JID, From: p.Sender, Text: historyTextWithMedia(p.textWithQuote(), p.Media), Type: history.In, ID: p.ID})
 	}
 	if len(m.parts) > 0 {
 		m.parts = parts
@@ -382,10 +340,10 @@ func (br *Brain) logInbound(m Inbound) Inbound {
 // wrote for m (Inbound.logged), the first of them at least: it has when
 // it wrote them, or when its folder is the one of the brain that did.
 func (br *Brain) holdsLines(m Inbound) bool {
-	if m.logged == (historyEntry{}) {
+	if m.logged == (history.Entry{}) {
 		return false
 	}
-	return m.loggedIn(br.chatHistory(chatJIDs(m), m.enoughBefore(1))) >= 0
+	return m.loggedIn(history.ForChat(br.root, br.id, chatJIDs(m), promptHistoryBudget, m.enoughBefore(1))) >= 0
 }
 
 // historyTime is t as a history line has it, "" for none: the time the
@@ -890,7 +848,7 @@ func (br *Brain) StopChat(jid string) (stopped bool, n int) {
 // sent !reset.
 func (br *Brain) ResetChat(chats []string, by string) {
 	for _, jid := range chats {
-		br.appendEntry(historyEntry{Chat: jid, From: by, Type: historyReset})
+		br.appendEntry(history.Entry{Chat: jid, From: by, Type: history.Reset})
 	}
 }
 
@@ -1057,7 +1015,7 @@ func (br *Brain) holdsFolder(dir string) bool {
 // readFile reads the file name in the brain's folder (see openInFolder),
 // at most maxBrainFile of it.
 func (br *Brain) readFile(name string) ([]byte, error) {
-	f, err := openInFolder(br.root, name, os.O_RDONLY, 0)
+	f, err := fsx.OpenInFolder(br.root, name, os.O_RDONLY, 0)
 	if err != nil {
 		return nil, err
 	}
@@ -1168,7 +1126,7 @@ func (br *Brain) startViewerUnlessAlive(tv *platform.Viewer, s *brainSettings) *
 	// tail fails on a log that does not exist yet, so create it first,
 	// through the folder as a run opens it: touch would have followed a
 	// dangling symlink there and created the file it points to.
-	f, err := openInFolder(br.root, streamLogName, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600)
+	f, err := fsx.OpenInFolder(br.root, streamLogName, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600)
 	if err != nil {
 		log.Printf("brain %s: no tmux viewer: could not open stream log: %v", br.id, err)
 		return nil
@@ -1455,58 +1413,6 @@ func readAtMost(r io.Reader) ([]byte, error) {
 	return data, nil
 }
 
-// errSymlink is why the bridge refuses a file that a brain could have
-// replaced with a symlink.
-var errSymlink = errors.New("it is a symlink, which the bridge does not follow")
-
-// openInFolder opens the file name, relative to the brain folder root, for
-// the bridge, which works on it outside the sandbox while the brain
-// controls what is there: a brain may replace any file in its folder with
-// a symlink to ~/.ssh, to another brain's history or to a file the sandbox
-// denies it, and have the bridge read that into its prompt or append to
-// it. os.Root refuses, at every step of the open, a path that leads out of
-// the folder, through a symlinked .claude folder say. It refuses a symlink
-// at the file itself too, even one that stays inside, and anything but a
-// regular file, and the file it opens must be the one it looked at, so
-// that nothing swapped in between gets through. The open does not block,
-// so a FIFO cannot hang the bridge either. With os.O_CREATE it creates
-// the file when there is none, never through a symlink.
-func openInFolder(root *os.Root, name string, flag int, perm os.FileMode) (*os.File, error) {
-	for tries := 0; ; tries++ {
-		fi, err := root.Lstat(name)
-		if errors.Is(err, fs.ErrNotExist) && flag&os.O_CREATE != 0 {
-			// With O_EXCL, os.Root follows no symlink, not even one
-			// planted since the Lstat; that makes the create fail.
-			f, err := root.OpenFile(name, flag|os.O_EXCL|syscall.O_NONBLOCK, perm)
-			if errors.Is(err, fs.ErrExist) && tries < 2 {
-				continue // something appeared there meanwhile: look again
-			}
-			return f, err
-		}
-		if err != nil {
-			return nil, err
-		}
-		if fi.Mode()&fs.ModeSymlink != 0 {
-			return nil, errSymlink
-		}
-		if !fi.Mode().IsRegular() {
-			return nil, errors.New("not a regular file")
-		}
-		f, err := root.OpenFile(name, flag&^os.O_CREATE|syscall.O_NONBLOCK, perm)
-		if err != nil {
-			return nil, err
-		}
-		if st, err := f.Stat(); err != nil || !os.SameFile(fi, st) {
-			f.Close()
-			if err == nil {
-				err = errors.New("it was replaced while the bridge opened it")
-			}
-			return nil, err
-		}
-		return f, nil
-	}
-}
-
 // readBrainFile reads the file name, relative to the brain folder dir, as
 // openInFolder opens it. It refuses a file larger than maxBrainFile.
 func readBrainFile(dir, name string) ([]byte, error) {
@@ -1520,7 +1426,7 @@ func readBrainFile(dir, name string) ([]byte, error) {
 
 // readBrainFileRoot keeps a transaction's reads on its already pinned folder.
 func readBrainFileRoot(root *os.Root, name string) ([]byte, error) {
-	f, err := openInFolder(root, name, os.O_RDONLY, 0)
+	f, err := fsx.OpenInFolder(root, name, os.O_RDONLY, 0)
 	if err != nil {
 		return nil, err
 	}
@@ -1805,7 +1711,7 @@ func (br *Brain) logStderr(m Inbound, pid int, stderr string) {
 	if stderr == "" {
 		return
 	}
-	f, err := openInFolder(br.root, streamLogName, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600)
+	f, err := fsx.OpenInFolder(br.root, streamLogName, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600)
 	if err != nil {
 		log.Printf("brain %s: could not open stream log: %v", br.id, err)
 		return
@@ -1844,19 +1750,19 @@ var promptHistoryBudget int64 = 16 << 20
 // chat's last entries, with those in the outbox among them, and since is
 // empty; when the history cannot be read (see openInFolder), only the
 // outbox's are left.
-func (br *Brain) historyBefore(m Inbound, limit int) (before, since []historyEntry) {
+func (br *Brain) historyBefore(m Inbound, limit int) (before, since []history.Entry) {
 	chats := chatJIDs(m)
 	// The answers on their way first, then the history: one delivered in
 	// between is in both, and withUndelivered takes it once.
 	pending := br.undelivered(chats)
-	entries := br.chatHistory(chats, m.enoughBefore(limit))
+	entries := history.ForChat(br.root, br.id, chats, promptHistoryBudget, m.enoughBefore(limit))
 	at := m.loggedIn(entries)
 	if at < 0 {
 		before = withUndelivered(entries, pending)
 	} else {
 		before = entries[:at]
 		for _, e := range entries[at+1:] {
-			if e.Type == historyOut {
+			if e.Type == history.Out {
 				since = append(since, e)
 			}
 		}
@@ -1873,18 +1779,18 @@ func (br *Brain) historyBefore(m Inbound, limit int) (before, since []historyEnt
 // Inbound.logged) and limit entries before the first of them, or for a
 // message without lines, limit entries. A line deleted since is not
 // found, and the reading goes on as far as it may.
-func (m Inbound) enoughBefore(limit int) func(e historyEntry) bool {
-	var lines []historyEntry
+func (m Inbound) enoughBefore(limit int) func(e history.Entry) bool {
+	var lines []history.Entry
 	for _, p := range m.ownParts() {
-		if p.logged != (historyEntry{}) {
+		if p.logged != (history.Entry{}) {
 			lines = append(lines, p.logged)
 		}
 	}
 	older := 0
-	return func(e historyEntry) bool {
+	return func(e history.Entry) bool {
 		if len(lines) > 0 {
 			// Newest first: the first of m's lines is the last found.
-			if i := slices.IndexFunc(lines, func(l historyEntry) bool { return l.sameLine(e) }); i >= 0 {
+			if i := slices.IndexFunc(lines, func(l history.Entry) bool { return l.SameLine(e) }); i >= 0 {
 				lines = slices.Delete(lines, i, i+1)
 			}
 			return false
@@ -1894,57 +1800,23 @@ func (m Inbound) enoughBefore(limit int) func(e historyEntry) bool {
 	}
 }
 
-// chatHistory returns the entries of the chat that goes by chats in the
-// brain's history, oldest first. It reads them back from the end of the
-// file, each newest first to enough, until enough reports that it has
-// what it needs, or it reaches the chat's newest reset marker (see
-// historyReset), or promptHistoryBudget is read, or the file's start is
-// reached. A DM's lines may be under its LID or its number, and both are
-// the one chat. It returns none when the history cannot be read (see
-// openInFolder).
-func (br *Brain) chatHistory(chats []string, enough func(historyEntry) bool) []historyEntry {
-	var entries []historyEntry
-	br.scanHistory(promptHistoryBudget, mentionsChat(chats), func(e historyEntry) bool {
-		if !slices.Contains(chats, e.Chat) {
-			return true
-		}
-		if e.Type == historyReset {
-			return false
-		}
-		entries = append(entries, e)
-		return !enough(e)
-	})
-	slices.Reverse(entries)
-	return entries
-}
-
 // loggedIn returns where m's own lines begin in entries, the chat's
 // history: at the last line that is the line of the first of m's parts
 // still there (see Inbound.logged), or -1 for none. A part deleted since
 // took its line along; one edited while it waited has its line rewritten,
 // with the new text.
-func (m Inbound) loggedIn(entries []historyEntry) int {
+func (m Inbound) loggedIn(entries []history.Entry) int {
 	for _, p := range m.ownParts() {
-		if p.logged == (historyEntry{}) {
+		if p.logged == (history.Entry{}) {
 			continue
 		}
 		for i := len(entries) - 1; i >= 0; i-- {
-			if p.logged.sameLine(entries[i]) {
+			if p.logged.SameLine(entries[i]) {
 				return i
 			}
 		}
 	}
 	return -1
-}
-
-// sameLine reports whether e is the history line l: equal, or for a
-// message from WhatsApp, whose line an edit rewrites, equal but for the
-// text.
-func (l historyEntry) sameLine(e historyEntry) bool {
-	if l.ID != "" {
-		e.Text = l.Text
-	}
-	return e == l
 }
 
 // identities reads the brain's identity map, through the folder: a map
@@ -2067,7 +1939,7 @@ func (br *Brain) readAgentStream(m Inbound, reader io.Reader, heading string, on
 	br.rotateStreamLog()
 	// Through the folder, like the history: a brain can swap the log for a
 	// symlink to a file its sandbox denies it writing.
-	streamLog, err := openInFolder(br.root, streamLogName, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600)
+	streamLog, err := fsx.OpenInFolder(br.root, streamLogName, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600)
 	if err != nil {
 		log.Printf("brain %s: could not open stream log: %v", br.id, err)
 	} else {
@@ -2142,19 +2014,19 @@ func (br *Brain) appendHistory(chatJID, from, text, typ string) {
 // appendHistoryVia is appendHistory for a line marked with how it came in
 // (see historyEntry.Via).
 func (br *Brain) appendHistoryVia(chatJID, from, text, typ, via string) {
-	br.appendEntry(historyEntry{From: from, Chat: chatJID, Text: text, Type: typ, Via: via})
+	br.appendEntry(history.Entry{From: from, Chat: chatJID, Text: text, Type: typ, Via: via})
 }
 
 // appendEntry appends entry to the brain's history file, stamped with the
 // time now unless it has a time. It returns the line as it reads back, or
 // none when the file could not be opened.
-func (br *Brain) appendEntry(entry historyEntry) historyEntry {
+func (br *Brain) appendEntry(entry history.Entry) history.Entry {
 	br.historyMu.Lock()
-	entry, err := br.writeEntryLocked(entry)
+	entry, err := history.Append(br.root, entry)
 	br.historyMu.Unlock()
 	br.entryWritten(entry, err)
 	if err != nil {
-		return historyEntry{}
+		return history.Entry{}
 	}
 	return entry
 }
@@ -2171,44 +2043,17 @@ func (br *Brain) recordDelivered(chat, text string, remove func() error) error {
 		br.historyMu.Unlock()
 		return err
 	}
-	entry, err := br.writeEntryLocked(historyEntry{From: br.id, Chat: chat, Text: text, Type: historyOut})
+	entry, err := history.Append(br.root, history.Entry{From: br.id, Chat: chat, Text: text, Type: history.Out})
 	br.historyMu.Unlock()
 	br.entryWritten(entry, err)
 	return nil
 }
 
-// writeEntryLocked appends entry to the history file, stamped with the
-// time now unless it has a time, and returns it as it reads back, which
-// historyBefore looks for: invalid UTF-8 in its text is written as U+FFFD.
-// historyMu is held.
-func (br *Brain) writeEntryLocked(entry historyEntry) (historyEntry, error) {
-	if entry.TS == "" {
-		entry.TS = time.Now().Format(time.RFC3339)
-	}
-	data, err := json.Marshal(entry)
-	if err != nil {
-		return entry, err
-	}
-	var written historyEntry
-	if json.Unmarshal(data, &written) == nil {
-		entry = written
-	}
-	// Through the folder: appending through a symlink would let a brain
-	// write to files its sandbox denies it, another brain's among them.
-	f, err := openInFolder(br.root, historyFileName, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600)
-	if err != nil {
-		return entry, err
-	}
-	_, _ = f.Write(append(data, '\n'))
-	f.Close()
-	return entry, nil
-}
-
 // entryWritten logs an entry that could not be written, or hands one that
 // was to OnHistory, outside historyMu.
-func (br *Brain) entryWritten(entry historyEntry, err error) {
+func (br *Brain) entryWritten(entry history.Entry, err error) {
 	if err != nil {
-		log.Printf("brain %s: failed to open history file %s: %v", br.id, filepath.Join(br.workDir, historyFileName), err)
+		log.Printf("brain %s: failed to open history file %s: %v", br.id, filepath.Join(br.workDir, history.FileName), err)
 		return
 	}
 	if br.hooks != nil && br.hooks.OnHistory != nil {
@@ -2221,14 +2066,14 @@ func (br *Brain) entryWritten(entry historyEntry, err error) {
 // under historyMu, which recordDelivered moves an answer from the outbox
 // into the history under: the history, read after, holds every answer
 // this did not return.
-func (br *Brain) undelivered(chats []string) []historyEntry {
+func (br *Brain) undelivered(chats []string) []history.Entry {
 	if br.hooks == nil || br.hooks.Undelivered == nil {
 		return nil
 	}
 	br.historyMu.Lock()
 	all := br.hooks.Undelivered(br.id)
 	br.historyMu.Unlock()
-	var out []historyEntry
+	var out []history.Entry
 	for _, e := range all {
 		if slices.Contains(chats, e.Chat) {
 			out = append(out, e)
@@ -2241,15 +2086,15 @@ func (br *Brain) undelivered(chats []string) []historyEntry {
 // entries, each after the last entry no later than it. One the history
 // holds already, delivered after pending was read, is left out: the same
 // answer, in the same chat, recorded no earlier than it was written.
-func withUndelivered(entries, pending []historyEntry) []historyEntry {
-	at := func(e historyEntry) time.Time {
+func withUndelivered(entries, pending []history.Entry) []history.Entry {
+	at := func(e history.Entry) time.Time {
 		t, _ := time.Parse(time.RFC3339, e.TS)
 		return t
 	}
 	for _, p := range pending {
 		pt := at(p)
-		if slices.ContainsFunc(entries, func(e historyEntry) bool {
-			return e.Type == historyOut && e.Chat == p.Chat && e.Text == p.Text && !at(e).Before(pt)
+		if slices.ContainsFunc(entries, func(e history.Entry) bool {
+			return e.Type == history.Out && e.Chat == p.Chat && e.Text == p.Text && !at(e).Before(pt)
 		}) {
 			continue
 		}

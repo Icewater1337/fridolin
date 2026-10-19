@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/Icewater1337/fridolin/internal/logx"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -18,6 +17,8 @@ import (
 	"time"
 
 	"github.com/Icewater1337/fridolin/internal/fsx"
+	"github.com/Icewater1337/fridolin/internal/history"
+	"github.com/Icewater1337/fridolin/internal/logx"
 )
 
 func TestDecodeJSONIsStrict(t *testing.T) {
@@ -1026,7 +1027,7 @@ func TestPolledEndpointsAnswer304WhileUnchanged(t *testing.T) {
 	dir := tb.addFolderBrain(t, BrainManifest{ID: "notes", Name: "Notes"})
 	say := func(text string) func() {
 		return func() {
-			tb.activity.Add("notes", historyEntry{TS: "2026-10-18T10:00:00Z", From: "15551234567", Chat: "15551234567@s.whatsapp.net", Text: text, Type: historyIn})
+			tb.activity.Add("notes", history.Entry{TS: "2026-10-18T10:00:00Z", From: "15551234567", Chat: "15551234567@s.whatsapp.net", Text: text, Type: history.In})
 		}
 	}
 	say("hello")()
@@ -1081,7 +1082,7 @@ func TestListLimitsClampToTheMaximum(t *testing.T) {
 	tb := newTestBridge(t, "")
 	for i := range 600 {
 		fmt.Fprintf(tb.logs, "line %d\n", i)
-		tb.activity.Add("a", historyEntry{TS: "2026-10-18T10:00:00Z", From: "a", Chat: "15551234567@s.whatsapp.net", Text: fmt.Sprint(i), Type: historyIn})
+		tb.activity.Add("a", history.Entry{TS: "2026-10-18T10:00:00Z", From: "a", Chat: "15551234567@s.whatsapp.net", Text: fmt.Sprint(i), Type: history.In})
 	}
 	count := map[string]func([]byte) int{
 		"/api/logs": func(b []byte) int {

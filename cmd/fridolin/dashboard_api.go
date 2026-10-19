@@ -27,11 +27,13 @@ import (
 	"unicode"
 	"unicode/utf8"
 
+	"rsc.io/qr"
+
 	"github.com/Icewater1337/fridolin/internal/fsx"
+	"github.com/Icewater1337/fridolin/internal/history"
 	"github.com/Icewater1337/fridolin/internal/platform"
 	"github.com/Icewater1337/fridolin/internal/textx"
 	"github.com/Icewater1337/fridolin/internal/version"
-	"rsc.io/qr"
 )
 
 func (b *Bridge) apiMux() http.Handler {
@@ -1005,7 +1007,7 @@ func (b *Bridge) apiInspectFolder(w http.ResponseWriter, r *http.Request) {
 		resp["entries"] = len(entries)
 		resp["is_git"] = fileExistsInRoot(root, filepath.Join(abs, ".git"))
 		resp["has_prompt"] = fileExistsInRoot(root, filepath.Join(abs, defaultPromptFile))
-		resp["has_history"] = fileExistsInRoot(root, filepath.Join(abs, historyFileName))
+		resp["has_history"] = fileExistsInRoot(root, filepath.Join(abs, history.FileName))
 		if m, err := ReadManifest(abs); err == nil {
 			resp["manifest"] = m
 		}

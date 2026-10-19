@@ -15,6 +15,7 @@ import (
 	"testing"
 	"unicode"
 
+	"github.com/Icewater1337/fridolin/internal/history"
 	"github.com/Icewater1337/fridolin/internal/logx"
 	"github.com/Icewater1337/fridolin/internal/trigger"
 )
@@ -45,7 +46,7 @@ type schemaType struct {
 var schemaTypes = []schemaType{
 	{schema: "config.schema.json", typ: reflect.TypeFor[Config](), closed: true, extra: retiredKeyNames()},
 	{schema: "brain.schema.json", typ: reflect.TypeFor[BrainManifest](), closed: true},
-	{schema: "history-line.schema.json", typ: reflect.TypeFor[historyEntry](), closed: true},
+	{schema: "history-line.schema.json", typ: reflect.TypeFor[history.Entry](), closed: true},
 	{schema: "send-request.schema.json", typ: reflect.TypeFor[sendRequest]()},
 	{schema: "ingest-request.schema.json", typ: reflect.TypeFor[ingestRequest](), refused: []string{"scope"}},
 }

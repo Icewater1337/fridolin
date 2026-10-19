@@ -10,6 +10,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/Icewater1337/fridolin/internal/history"
 )
 
 const (
@@ -189,9 +191,9 @@ func TestSendHistoryShowsWhoSentIt(t *testing.T) {
 		}
 	}
 	data, _ := os.ReadFile(filepath.Join(tb.home, "a", "conversation-history.jsonl"))
-	var got []historyEntry
+	var got []history.Entry
 	for _, line := range strings.Split(strings.TrimSpace(string(data)), "\n") {
-		var e historyEntry
+		var e history.Entry
 		_ = json.Unmarshal([]byte(line), &e)
 		got = append(got, e)
 	}
@@ -231,7 +233,7 @@ func TestOutboundSender(t *testing.T) {
 		{"script", "api", "Script without a token (via /send)"},
 	}
 	for _, c := range cases {
-		if got := outboundSender("a", historyEntry{From: c.from, Via: c.via, Type: "out"}); got != c.want {
+		if got := outboundSender("a", history.Entry{From: c.from, Via: c.via, Type: "out"}); got != c.want {
 			t.Errorf("from %q via %q: %q, want %q", c.from, c.via, got, c.want)
 		}
 	}

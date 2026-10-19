@@ -20,6 +20,8 @@ import (
 	"go.mau.fi/whatsmeow/types/events"
 	waLog "go.mau.fi/whatsmeow/util/log"
 	"google.golang.org/protobuf/proto"
+
+	"github.com/Icewater1337/fridolin/internal/history"
 )
 
 const (
@@ -108,9 +110,9 @@ func (tb *testBridge) sentPrefix(jid, prefix string) bool {
 // readHistory returns the brain's history. A reply is written there just
 // after it was sent, maybe while a test reads, so a last line that is not
 // complete yet is left for the next read.
-func readHistory(t *testing.T, br *Brain) []historyEntry {
+func readHistory(t *testing.T, br *Brain) []history.Entry {
 	t.Helper()
-	data, err := os.ReadFile(filepath.Join(br.Dir(), historyFileName))
+	data, err := os.ReadFile(filepath.Join(br.Dir(), history.FileName))
 	if os.IsNotExist(err) {
 		return nil
 	}
@@ -118,9 +120,9 @@ func readHistory(t *testing.T, br *Brain) []historyEntry {
 		t.Fatal(err)
 	}
 	lines := strings.Split(string(data), "\n")
-	var out []historyEntry
+	var out []history.Entry
 	for _, line := range lines[:len(lines)-1] {
-		var e historyEntry
+		var e history.Entry
 		if err := json.Unmarshal([]byte(line), &e); err != nil {
 			t.Fatalf("history line %q: %v", line, err)
 		}
@@ -185,7 +187,7 @@ func TestQuotedReplyReachesModelAndHistory(t *testing.T) {
 		t.Errorf("the model was sent %q, want it to end in %q", got, want)
 	}
 	h := readHistory(t, br)
-	if len(h) == 0 || h[0].Type != historyIn || h[0].Text != want {
+	if len(h) == 0 || h[0].Type != history.In || h[0].Text != want {
 		t.Errorf("history = %+v, want the reply line first", h)
 	}
 }
@@ -194,7 +196,7 @@ func TestQuotedReplyReachesModelAndHistory(t *testing.T) {
 // the code must still be kept out of the history and the model.
 func TestOTPGuardDropsQuotedCode(t *testing.T) {
 	tb, br := newMainBridge(t, "")
-	br.appendHistory(testDMChat, "main", "🔐 Please send me the verification code", historyOut)
+	br.appendHistory(testDMChat, "main", "🔐 Please send me the verification code", history.Out)
 
 	tb.whatsApp().handleMessage(replyEvent("483920", "🔐 Please send me the verification code"))
 
@@ -241,7 +243,7 @@ func TestOTPGuardIsScopedToTheChatAndTheWindow(t *testing.T) {
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			tb, br := newObservingBridge(t, "")
-			br.appendEntry(historyEntry{TS: time.Now().Add(-c.askedAgo).Format(time.RFC3339), Chat: c.askIn, From: "main", Text: "🔐 Please send me the verification code", Type: historyOut})
+			br.appendEntry(history.Entry{TS: time.Now().Add(-c.askedAgo).Format(time.RFC3339), Chat: c.askIn, From: "main", Text: "🔐 Please send me the verification code", Type: history.Out})
 			c.m.Source = sourceWhatsApp
 			tb.handleInbound(context.Background(), c.m)
 
@@ -255,7 +257,7 @@ func TestOTPGuardIsScopedToTheChatAndTheWindow(t *testing.T) {
 			if err != nil || handed.Code != c.caught || (c.caught != "" && (handed.Typed != c.m.Text || handed.Chat != c.m.JID)) {
 				t.Errorf("handed over %+v (%v), want code %q from %s as typed", handed, err, c.caught, c.m.JID)
 			}
-			inHistory := slices.ContainsFunc(readHistory(t, br), func(e historyEntry) bool { return e.Text == c.m.Text })
+			inHistory := slices.ContainsFunc(readHistory(t, br), func(e history.Entry) bool { return e.Text == c.m.Text })
 			if inHistory == (c.caught != "") {
 				t.Errorf("in the history: %v, want %v", inHistory, c.caught == "")
 			}
@@ -330,7 +332,7 @@ func TestTriggerOnlyReplyAsksAboutTheQuote(t *testing.T) {
 			if got := tb.sentTo(c.chat)[0]; !strings.HasSuffix(got, "says: "+want) {
 				t.Errorf("the model was sent %q, want it to end in %q", got, want)
 			}
-			if h := readHistory(t, br); len(h) == 0 || h[0].Type != historyIn || h[0].Text != want {
+			if h := readHistory(t, br); len(h) == 0 || h[0].Type != history.In || h[0].Text != want {
 				t.Errorf("history = %+v, want the reply line first", h)
 			}
 		})
@@ -650,8 +652,8 @@ func TestResetStartsOnlyThatChatAfresh(t *testing.T) {
 		t.Helper()
 		tb.handleInbound(ctx, Inbound{JID: chat, Sender: sender, Text: text, Source: sourceWhatsApp})
 		waitFor(t, 10*time.Second, "the answer to "+text, func() bool {
-			return slices.ContainsFunc(readHistory(t, br), func(e historyEntry) bool {
-				return e.Type == historyOut && strings.HasSuffix(e.Text, "says: "+text)
+			return slices.ContainsFunc(readHistory(t, br), func(e history.Entry) bool {
+				return e.Type == history.Out && strings.HasSuffix(e.Text, "says: "+text)
 			})
 		})
 	}
@@ -681,16 +683,16 @@ func TestResetStartsOnlyThatChatAfresh(t *testing.T) {
 		t.Errorf("the group's prompt lost its history to the DM's reset:\n%s", groupPrompt)
 	}
 
-	var markers []historyEntry
+	var markers []history.Entry
 	for _, e := range readHistory(t, br) {
-		if e.Type == historyReset {
+		if e.Type == history.Reset {
 			markers = append(markers, e)
 		}
 	}
 	if len(markers) != 1 || markers[0].Chat != testDMChat || markers[0].From != "15551234567" || markers[0].Text != "" {
 		t.Errorf("reset markers %+v, want one for the DM by its sender", markers)
 	}
-	if hist := readHistory(t, br); !slices.ContainsFunc(hist, func(e historyEntry) bool { return e.Text == "DM-BEFORE-RESET" }) {
+	if hist := readHistory(t, br); !slices.ContainsFunc(hist, func(e history.Entry) bool { return e.Text == "DM-BEFORE-RESET" }) {
 		t.Error("the history lost the DM's messages from before the reset")
 	}
 
@@ -698,14 +700,14 @@ func TestResetStartsOnlyThatChatAfresh(t *testing.T) {
 	seeded.Seed(br)
 	for name, feed := range map[string][]ActivityEntry{"live": tb.activity.Recent(100, ""), "seeded": seeded.Recent(100, "")} {
 		for _, e := range feed {
-			if e.Type == historyReset {
+			if e.Type == history.Reset {
 				t.Errorf("the %s feed shows the reset marker: %+v", name, e)
 			}
 		}
 	}
 	var out bytes.Buffer
 	code := historyCmd([]string{"--brain-dir", br.Dir(), "--limit", "0", ""}, toolIO{stdout: &out, stderr: io.Discard, getenv: os.Getenv, now: time.Now()})
-	if code != 0 || strings.Contains(out.String(), historyReset) || !strings.Contains(out.String(), "DM-BEFORE-RESET") {
+	if code != 0 || strings.Contains(out.String(), history.Reset) || !strings.Contains(out.String(), "DM-BEFORE-RESET") {
 		t.Errorf("fridolin history = %d %s, want every message and no marker", code, out.String())
 	}
 }
@@ -776,7 +778,7 @@ func TestInterruptModeQueuedNotice(t *testing.T) {
 // either: the next message by the number starts afresh all the same.
 func TestResetByLIDStartsTheDMAfresh(t *testing.T) {
 	tb, br := newMainBridge(t, "")
-	br.appendHistory(testDMChat, "15551234567", "before the reset", historyIn)
+	br.appendHistory(testDMChat, "15551234567", "before the reset", history.In)
 	tb.handleInbound(context.Background(), Inbound{JID: otherNumber + "@lid", Sender: "15551234567", Text: "!reset", Source: sourceWhatsApp})
 	if before, _ := br.historyBefore(dm("next"), dmHistoryWindow); len(before) != 0 {
 		t.Errorf("the DM's next run would read %+v", before)

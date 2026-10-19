@@ -1,18 +1,11 @@
 package main
 
 import (
-	"bufio"
-	"bytes"
-	"crypto/rand"
-	"encoding/hex"
-	"encoding/json"
-	"errors"
-	"fmt"
-	"io"
 	"log"
-	"os"
 	"slices"
 	"strconv"
+
+	"github.com/Icewater1337/fridolin/internal/history"
 )
 
 // Edits and deletions of WhatsApp messages a brain has received. A message
@@ -78,17 +71,17 @@ func (br *Brain) Change(c messageChange) (waiting bool, edited *Inbound) {
 // A message deleted after a run read it (not waiting) leaves an event too,
 // so the next run knows why it no longer sees what it answered.
 func (br *Brain) recordChange(c messageChange, waiting bool, edited *Inbound) {
-	is := func(e historyEntry) bool {
-		return e.ID == c.Target && e.Type == historyIn && e.From == c.Sender &&
+	is := func(e history.Entry) bool {
+		return e.ID == c.Target && e.Type == history.In && e.From == c.Sender &&
 			(e.Chat == c.Chat || (c.ChatAlt != "" && e.Chat == c.ChatAlt))
 	}
 	var n int
 	var err error
 	switch {
 	case c.Kind == changeRevoke:
-		n, err = br.rewriteHistory(c.Target, is, func(historyEntry) *historyEntry { return nil })
+		n, err = br.rewriteHistory(c.Target, is, func(history.Entry) *history.Entry { return nil })
 	case edited != nil:
-		n, err = br.rewriteHistory(c.Target, is, func(e historyEntry) *historyEntry {
+		n, err = br.rewriteHistory(c.Target, is, func(e history.Entry) *history.Entry {
 			e.Text = historyTextWithMedia(edited.textWithQuote(), edited.Media)
 			return &e
 		})
@@ -102,7 +95,7 @@ func (br *Brain) recordChange(c messageChange, waiting bool, edited *Inbound) {
 			log.Printf("brain %s: could not look for the edited message in %s in the history: %v", br.id, c.Chat, err)
 		}
 		if held {
-			br.appendHistory(c.Chat, c.Sender, "edited a message to: "+strconv.Quote(c.Text), historyEvent)
+			br.appendHistory(c.Chat, c.Sender, "edited a message to: "+strconv.Quote(c.Text), history.Event)
 		}
 		return
 	}
@@ -111,156 +104,19 @@ func (br *Brain) recordChange(c messageChange, waiting bool, edited *Inbound) {
 		return
 	}
 	if c.Kind == changeRevoke && n > 0 && !waiting {
-		br.appendHistory(c.Chat, c.Sender, "deleted a message they had sent", historyEvent)
+		br.appendHistory(c.Chat, c.Sender, "deleted a message they had sent", history.Event)
 	}
 }
 
-// rewriteHistory rewrites the brain's history file: each line match
-// accepts, which must be one of the message id's, is replaced by what
-// replace returns for it, or left out when that is nil. Every other line,
-// one that does not decode included, stays as it was. It returns how many
-// lines matched. The new file is written next to the old one in the
-// brain's folder and renamed over it, through the folder's root like
-// every other access, so that a crash leaves one or the other.
-func (br *Brain) rewriteHistory(id string, match func(historyEntry) bool, replace func(historyEntry) *historyEntry) (int, error) {
+// rewriteHistory serializes file rewrites with append and outbox delivery.
+func (br *Brain) rewriteHistory(id string, match func(history.Entry) bool, replace func(history.Entry) *history.Entry) (int, error) {
 	br.historyMu.Lock()
 	defer br.historyMu.Unlock()
-	in, err := openInFolder(br.root, historyFileName, os.O_RDONLY, 0)
-	if errors.Is(err, os.ErrNotExist) {
-		return 0, nil
-	}
-	if err != nil {
-		return 0, err
-	}
-	defer in.Close()
-	// A change often names a message this history never got: one in
-	// another brain's chat, one the debouncer dropped. Such a file is only
-	// read, not copied and synced, for every deletion in an allowed chat
-	// holds up incoming messages, which wait for historyMu.
-	if found, err := holdsID(in, id); err != nil || !found {
-		return 0, err
-	}
-	if _, err := in.Seek(0, io.SeekStart); err != nil {
-		return 0, err
-	}
-
-	var suffix [8]byte
-	_, _ = rand.Read(suffix[:])
-	tmpName := "." + historyFileName + ".tmp-" + hex.EncodeToString(suffix[:])
-	out, err := openInFolder(br.root, tmpName, os.O_WRONLY|os.O_CREATE, 0o600)
-	if err != nil {
-		return 0, err
-	}
-	defer func() {
-		out.Close()
-		_ = br.root.Remove(tmpName) // gone after the rename
-	}()
-
-	n := 0
-	r := bufio.NewReader(in)
-	w := bufio.NewWriter(out)
-	for {
-		line, rerr := r.ReadBytes('\n')
-		if len(line) > 0 {
-			var e historyEntry
-			if json.Unmarshal(bytes.TrimSpace(line), &e) == nil && match(e) {
-				n++
-				repl := replace(e)
-				if repl == nil {
-					line = nil
-				} else if data, err := json.Marshal(repl); err == nil {
-					line = append(data, '\n')
-				}
-			}
-			if _, err := w.Write(line); err != nil {
-				return 0, err
-			}
-		}
-		if errors.Is(rerr, io.EOF) {
-			break
-		}
-		if rerr != nil {
-			return 0, rerr
-		}
-	}
-	if n == 0 {
-		return 0, nil
-	}
-	if err := w.Flush(); err != nil {
-		return 0, err
-	}
-	if err := out.Sync(); err != nil {
-		return 0, err
-	}
-	if err := br.root.Rename(tmpName, historyFileName); err != nil {
-		return 0, fmt.Errorf("replacing the history: %w", err)
-	}
-	return n, nil
+	return history.Rewrite(br.root, id, match, replace)
 }
 
-// holdsEntry reports whether the brain's history has a line match
-// accepts, which must be one of the message id's. Like rewriteHistory, it
-// decodes the lines only of a file that holds id at all.
-func (br *Brain) holdsEntry(id string, match func(historyEntry) bool) (bool, error) {
+func (br *Brain) holdsEntry(id string, match func(history.Entry) bool) (bool, error) {
 	br.historyMu.Lock()
 	defer br.historyMu.Unlock()
-	f, err := openInFolder(br.root, historyFileName, os.O_RDONLY, 0)
-	if errors.Is(err, os.ErrNotExist) {
-		return false, nil
-	}
-	if err != nil {
-		return false, err
-	}
-	defer f.Close()
-	if found, err := holdsID(f, id); err != nil || !found {
-		return false, err
-	}
-	if _, err := f.Seek(0, io.SeekStart); err != nil {
-		return false, err
-	}
-	r := bufio.NewReader(f)
-	for {
-		line, rerr := r.ReadBytes('\n')
-		var e historyEntry
-		if len(line) > 0 && json.Unmarshal(bytes.TrimSpace(line), &e) == nil && match(e) {
-			return true, nil
-		}
-		if errors.Is(rerr, io.EOF) {
-			return false, nil
-		}
-		if rerr != nil {
-			return false, rerr
-		}
-	}
-}
-
-// holdsID reports whether r holds a history line with the message ID id,
-// or something that reads like one: the bytes `"id":` and id as JSON,
-// which a line's text cannot hold unescaped.
-func holdsID(r io.Reader, id string) (bool, error) {
-	key, err := json.Marshal(id)
-	if err != nil {
-		return false, err
-	}
-	needle := append([]byte(`"id":`), key...)
-	buf := make([]byte, 64<<10)
-	if len(needle) > len(buf)/2 {
-		return true, nil // too long to look for; the rewrite will tell
-	}
-	kept := 0 // the end of the last read, where the needle may begin
-	for {
-		n, err := r.Read(buf[kept:])
-		if bytes.Contains(buf[:kept+n], needle) {
-			return true, nil
-		}
-		if errors.Is(err, io.EOF) {
-			return false, nil
-		}
-		if err != nil {
-			return false, err
-		}
-		end := kept + n
-		kept = min(end, len(needle)-1)
-		copy(buf, buf[end-kept:end])
-	}
+	return history.HoldsEntry(br.root, id, match)
 }

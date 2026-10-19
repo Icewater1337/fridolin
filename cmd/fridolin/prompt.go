@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"strings"
 	"time"
+
+	"github.com/Icewater1337/fridolin/internal/history"
 )
 
 // promptInput is what one run's prompt is made of. The brain gathers it
@@ -20,11 +22,11 @@ type promptInput struct {
 	// BrainID names the brain where the history shows what it said.
 	BrainID string
 	// History is the chat's messages before Message, oldest first.
-	History []historyEntry
+	History []history.Entry
 	// Since is what went out to the chat after Message came in, while it
 	// waited for its run, or waits in the outbox to go out ahead of the
 	// run's reply, oldest first (see Brain.historyBefore).
-	Since []historyEntry
+	Since []history.Entry
 	// Names is the brain's identity map, identityKey → name.
 	Names map[string]string
 	// Message is the message the run answers.
@@ -67,7 +69,7 @@ func renderPrompt(in promptInput) string {
 		sb.WriteString(what + " (for context, not action), " + each + " like the new message, or with \"did\" in place of \"text\" for something its sender did without writing, such as a vote in a poll. ")
 		sb.WriteString("You do NOT have prior turns in your working memory — the only context you have about previous conversation is what's in this block. ")
 		sb.WriteString("Names come from your identity map at `" + identityMapFile + "`; the JID in parens is the raw WhatsApp identifier, and \"You (" + in.BrainID + ")\" is you. ")
-		sb.WriteString("For anything older or more detailed, search `" + historyFileName + "` with `\"$FRIDOLIN_BIN\" history QUERY`.\n\n")
+		sb.WriteString("For anything older or more detailed, search `" + history.FileName + "` with `\"$FRIDOLIN_BIN\" history QUERY`.\n\n")
 		for _, e := range in.History {
 			sb.WriteString(in.line(e))
 		}
@@ -177,8 +179,8 @@ func (in promptInput) at(ts string) string {
 
 // line is the history entry e as the prompt shows it, on a line of its
 // own.
-func (in promptInput) line(e historyEntry) string {
-	if e.Type == historyEvent {
+func (in promptInput) line(e history.Entry) string {
+	if e.Type == history.Event {
 		// Something its sender did without writing, such as a vote: its
 		// text says what.
 		return promptJSON(promptEvent{At: in.at(e.TS), From: in.from(e), Did: e.Text}) + "\n"
@@ -188,8 +190,8 @@ func (in promptInput) line(e historyEntry) string {
 
 // from is who wrote the history entry e, as the prompt names them: the
 // brain itself, or the sender as name gives them.
-func (in promptInput) from(e historyEntry) string {
-	if e.Type == historyOut {
+func (in promptInput) from(e history.Entry) string {
+	if e.Type == history.Out {
 		return outboundSender(in.BrainID, e)
 	}
 	return in.name(e.From)
@@ -208,7 +210,7 @@ func (in promptInput) name(sender string) string {
 // "out" line in brain id's history. Only the brain's own replies, and what it
 // sent itself through /send, are "You": a line a script or another brain
 // sent through /send must not read as the brain's own words.
-func outboundSender(id string, entry historyEntry) string {
+func outboundSender(id string, entry history.Entry) string {
 	switch {
 	case entry.Via == "":
 		return fmt.Sprintf("You (%s)", id)

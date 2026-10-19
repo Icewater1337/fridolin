@@ -17,6 +17,8 @@ import (
 	"syscall"
 	"testing"
 	"time"
+
+	"github.com/Icewater1337/fridolin/internal/fsx"
 )
 
 const testClientJSON = `{"installed":{"client_id":"123-abc.apps.googleusercontent.com","client_secret":"TEST-CLIENT-SECRET","auth_uri":"https://accounts.google.com/o/oauth2/auth","token_uri":"%s/token","redirect_uris":["http://localhost"]}}`
@@ -283,8 +285,8 @@ func TestCalendarTokenIsNotFollowed(t *testing.T) {
 		link func(t *testing.T, own, other string)
 		want string // in the status page's list_error
 	}{
-		{"symlink", func(t *testing.T, own, other string) { mustSymlink(t, other, own) }, errSymlink.Error()},
-		{"relative symlink", func(t *testing.T, own, other string) { mustSymlink(t, filepath.Base(other), own) }, errSymlink.Error()},
+		{"symlink", func(t *testing.T, own, other string) { mustSymlink(t, other, own) }, fsx.ErrSymlink.Error()},
+		{"relative symlink", func(t *testing.T, own, other string) { mustSymlink(t, filepath.Base(other), own) }, fsx.ErrSymlink.Error()},
 		{"hard link", func(t *testing.T, own, other string) {
 			if err := os.Link(other, own); err != nil {
 				t.Fatal(err)
