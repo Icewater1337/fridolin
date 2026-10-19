@@ -3,7 +3,6 @@ package main
 import (
 	"bytes"
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io/fs"
@@ -22,7 +21,6 @@ import (
 	"github.com/Icewater1337/fridolin/internal/access"
 	"github.com/Icewater1337/fridolin/internal/brain"
 
-	"github.com/Icewater1337/fridolin/internal/apperr"
 	"github.com/Icewater1337/fridolin/internal/backup"
 	"github.com/Icewater1337/fridolin/internal/chat"
 	"github.com/Icewater1337/fridolin/internal/claudecli"
@@ -60,15 +58,15 @@ func (b *Bridge) apiMux() http.Handler {
 	mux.HandleFunc("POST /api/login/code", b.apiLoginCode)
 	mux.HandleFunc("POST /api/token/rotate", b.apiRotateToken)
 
-	mux.HandleFunc("GET /api/brains", b.apiBrains)
-	mux.HandleFunc("GET /api/brains/{id}", b.apiBrain)
-	mux.HandleFunc("POST /api/brains/inspect", b.apiInspectFolder)
-	mux.HandleFunc("POST /api/brains", b.apiAddBrain)
-	mux.HandleFunc("PUT /api/brains/{id}", b.apiUpdateBrain)
-	mux.HandleFunc("POST /api/brains/{id}/approve", b.apiApproveBrain)
-	mux.HandleFunc("DELETE /api/brains/{id}", b.apiRemoveBrain)
+	mux.HandleFunc("GET /api/brains", b.newBrainsAPI().List)
+	mux.HandleFunc("GET /api/brains/{id}", b.newBrainsAPI().Get)
+	mux.HandleFunc("POST /api/brains/inspect", b.newBrainsAPI().Inspect)
+	mux.HandleFunc("POST /api/brains", b.newBrainsAPI().Add)
+	mux.HandleFunc("PUT /api/brains/{id}", b.newBrainsAPI().Update)
+	mux.HandleFunc("POST /api/brains/{id}/approve", b.newBrainsAPI().Approve)
+	mux.HandleFunc("DELETE /api/brains/{id}", b.newBrainsAPI().Remove)
 	mux.HandleFunc("POST /api/brains/{id}/stop", b.newConnectionAPI().StopRun)
-	mux.HandleFunc("DELETE /api/brain-dirs", b.apiRemoveBrainDir)
+	mux.HandleFunc("DELETE /api/brain-dirs", b.newBrainsAPI().RemoveDir)
 
 	mux.HandleFunc("GET /api/fs/capabilities", b.apiFSCaps)
 	mux.HandleFunc("POST /api/fs/pick", b.apiFSPick)
@@ -576,15 +574,6 @@ func (b *Bridge) apiRestart(w http.ResponseWriter, r *http.Request) {
 
 // ── brains ───────────────────────────────────────────────────────────────
 
-type brainView struct {
-	registry.View
-	Runtime *brain.Runtime `json:"runtime,omitempty"`
-	// Fallback marks the brain that takes the chats no other brain
-	// claims (BrainManager.Fallback). Without a default brain that is the
-	// first one, which no brain.json says, so the dashboard names it.
-	Fallback bool `json:"fallback"`
-}
-
 // brainIssues is what is wrong with the configured brains, the one list
 // /api/status and /api/brains both show: the configuration read now, so a
 // drift shows as soon as a brain.json changes, plus the folders the brain
@@ -600,12 +589,12 @@ func (b *Bridge) brainIssues(cfg *config.Config) []registry.Issue {
 	return issues
 }
 
-func (b *Bridge) brainViews() []brainView {
+func (b *Bridge) brainViews() []httpapi.BrainView {
 	cfg := b.cfgs.Get()
 	issues := b.brainIssues(cfg)
 	fallback := b.brainMgr.Fallback()
 	base := registry.Views(cfg, issues)
-	out := make([]brainView, len(base))
+	out := make([]httpapi.BrainView, len(base))
 	for i, v := range base {
 		out[i].View = v
 
@@ -616,178 +605,6 @@ func (b *Bridge) brainViews() []brainView {
 		}
 	}
 	return nonNil(out)
-}
-
-func (b *Bridge) apiBrains(w http.ResponseWriter, r *http.Request) {
-	httpapi.WriteJSONIfChanged(w, r, b.brainViews())
-}
-
-// apiBrain answers GET /api/brains/{id} with that brain's entry of
-// /api/brains, so the Brain page can follow its brain without fetching
-// every other one with it. Two folders whose brain.json claim one id are
-// both listed there, and here the first is, as the page showed it when it
-// picked its brain out of the list. It builds the whole list on purpose:
-// reading only this brain's folder would be cheaper, but could tell the
-// page something other than the list does (which folder wins, its issues),
-// and saving the download is what matters.
-func (b *Bridge) apiBrain(w http.ResponseWriter, r *http.Request) {
-	id := r.PathValue("id")
-	for _, v := range b.brainViews() {
-		if v.ID == id {
-			httpapi.WriteJSONIfChanged(w, r, v)
-			return
-		}
-	}
-	httpapi.WriteErr(w, http.StatusNotFound, "no such brain")
-}
-
-func (b *Bridge) apiInspectFolder(w http.ResponseWriter, r *http.Request) {
-	var req struct {
-		Path string `json:"path"`
-	}
-	if err := httpapi.DecodeJSON(r, &req); err != nil {
-		httpapi.WriteErr(w, http.StatusBadRequest, err.Error())
-		return
-	}
-	result, err := b.registry.Inspect(req.Path)
-	if err != nil {
-		httpapi.WriteErr(w, http.StatusBadRequest, err.Error())
-		return
-	}
-	httpapi.WriteJSON(w, http.StatusOK, result)
-}
-
-// nonNil returns s, or an empty slice for nil, so that the JSON says []
-// rather than null, which the dashboard would have to check for.
-func nonNil[T any](s []T) []T {
-	if s == nil {
-		return []T{}
-	}
-	return s
-}
-
-// apiAddBrain turns a folder into a brain: scaffold what is missing, write
-// brain.json, register it, and start routing to it.
-func (b *Bridge) apiAddBrain(w http.ResponseWriter, r *http.Request) {
-	var req struct {
-		Path string `json:"path"`
-		// Manifest is decoded below, where a backup setting left out must
-		// be told from one set to false.
-		Manifest  json.RawMessage `json:"manifest"`
-		CreateDir bool            `json:"create_dir"`
-		// UseExisting adopts a brain.json already in the folder (after the
-		// dashboard showed it to you) instead of writing Manifest.
-		UseExisting bool `json:"use_existing"`
-	}
-	if err := httpapi.DecodeJSON(r, &req); err != nil {
-		httpapi.WriteErr(w, http.StatusBadRequest, err.Error())
-		return
-	}
-	var m manifest.Manifest
-	backupGiven := false
-	if !req.UseExisting {
-		if len(req.Manifest) == 0 {
-			httpapi.WriteErr(w, http.StatusBadRequest, "manifest required (or use_existing, to add the brain.json in the folder)")
-			return
-		}
-		if err := manifest.JSONError(httpapi.DecodeStrict(req.Manifest, &m)); err != nil {
-			httpapi.WriteErr(w, http.StatusBadRequest, "manifest: "+err.Error())
-			return
-		}
-		var keys map[string]json.RawMessage
-		_ = json.Unmarshal(req.Manifest, &keys)
-		backupGiven = keys["backup"] != nil && string(keys["backup"]) != "null"
-	}
-	result, err := b.registry.Add(registry.AddInput{Path: req.Path, Manifest: m, BackupGiven: backupGiven, CreateDir: req.CreateDir, UseExisting: req.UseExisting})
-	if err != nil {
-		status := http.StatusUnprocessableEntity
-		switch apperr.KindOf(err) {
-		case apperr.Conflict:
-			status = http.StatusConflict
-		case apperr.Unknown:
-			status = http.StatusInternalServerError
-		}
-		httpapi.WriteErr(w, status, err.Error())
-		return
-	}
-	httpapi.WriteJSON(w, http.StatusOK, map[string]any{"id": result.ID, "path": result.Path, "created": result.Created})
-}
-
-// apiUpdateBrain saves edited settings for a brain.
-func (b *Bridge) apiUpdateBrain(w http.ResponseWriter, r *http.Request) {
-	id := r.PathValue("id")
-	var req struct {
-		Manifest manifest.Manifest `json:"manifest"`
-	}
-	if err := manifest.JSONError(httpapi.DecodeJSON(r, &req)); err != nil {
-		httpapi.WriteErr(w, http.StatusBadRequest, err.Error())
-		return
-	}
-	err := b.registry.Update(id, req.Manifest)
-	if err != nil {
-		httpapi.WriteErr(w, http.StatusUnprocessableEntity, err.Error())
-		return
-	}
-	httpapi.WriteJSON(w, http.StatusOK, map[string]string{"status": "saved"})
-}
-
-// apiApproveBrain accepts the brain.json on disk, provided it is still the
-// one the dashboard showed you: the request carries that manifest. A brain
-// can rewrite its own brain.json at any moment, and approving whatever is
-// on disk when the click arrives would grant it a change, routing say, that
-// you never saw, without the confirmation such a change asks for.
-func (b *Bridge) apiApproveBrain(w http.ResponseWriter, r *http.Request) {
-	id := r.PathValue("id")
-	var req struct {
-		Manifest *manifest.Manifest `json:"manifest"`
-	}
-	if err := manifest.JSONError(httpapi.DecodeJSON(r, &req)); err != nil {
-		httpapi.WriteErr(w, http.StatusBadRequest, err.Error())
-		return
-	}
-	if req.Manifest == nil {
-		httpapi.WriteErr(w, http.StatusBadRequest, "manifest required: send the brain.json you reviewed")
-		return
-	}
-	err := b.registry.Approve(id, *req.Manifest)
-	switch {
-	case errors.Is(err, registry.ErrReviewedManifestChanged):
-		httpapi.WriteErr(w, http.StatusConflict, err.Error())
-		return
-	case err != nil:
-		httpapi.WriteErr(w, http.StatusUnprocessableEntity, err.Error())
-		return
-	}
-	httpapi.WriteJSON(w, http.StatusOK, map[string]string{"status": "approved"})
-}
-
-// apiRemoveBrain stops routing to a brain. Its folder is left exactly as it is.
-func (b *Bridge) apiRemoveBrain(w http.ResponseWriter, r *http.Request) {
-	id := r.PathValue("id")
-	err := b.registry.Remove(id)
-	if err != nil {
-		httpapi.WriteErr(w, http.StatusUnprocessableEntity, err.Error())
-		return
-	}
-	httpapi.WriteJSON(w, http.StatusOK, map[string]string{"status": "removed"})
-}
-
-// apiRemoveBrainDir removes the brain_dirs entry for the folder ?path= that
-// has no approved manifest. Such an entry has no id, so it cannot be
-// removed as a brain; it comes from a hand-edited config.json. Its folder
-// is left exactly as it is.
-func (b *Bridge) apiRemoveBrainDir(w http.ResponseWriter, r *http.Request) {
-	path := strings.TrimSpace(r.URL.Query().Get("path"))
-	if path == "" {
-		httpapi.WriteErr(w, http.StatusBadRequest, "path required")
-		return
-	}
-	err := b.registry.RemoveDir(path)
-	if err != nil {
-		httpapi.WriteErr(w, http.StatusUnprocessableEntity, err.Error())
-		return
-	}
-	httpapi.WriteJSON(w, http.StatusOK, map[string]string{"status": "removed"})
 }
 
 // ── folder picking ───────────────────────────────────────────────────────
@@ -1051,3 +868,12 @@ func (b *Bridge) apiDevOutbox(w http.ResponseWriter, r *http.Request) {
 }
 
 // ── helpers ──────────────────────────────────────────────────────────────
+
+// nonNil returns s, or an empty slice for nil, so that the JSON says []
+// rather than null, which the dashboard would have to check for.
+func nonNil[T any](s []T) []T {
+	if s == nil {
+		return []T{}
+	}
+	return s
+}
