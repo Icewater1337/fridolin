@@ -263,7 +263,8 @@ func runCmd(args []string) int {
 		log.Printf("%v; logging to stderr without rotating it", logErr)
 	}
 	if err := config.EnsureFile(path, inputs.Paths, inputs.GOOS); err != nil {
-		log.Fatalf("creating config: %v", err)
+		log.Printf("creating config: %v", err)
+		return 1
 	}
 	cfgs, err := config.Open(path, inputs)
 	if err != nil {
