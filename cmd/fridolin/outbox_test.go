@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/Icewater1337/fridolin/internal/devchat"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -30,7 +31,7 @@ func TestOutboxDelay(t *testing.T) {
 // it is down, every send fails, as whatsmeow's do, and with dropAfter set
 // it goes down after that many more messages.
 type flakyMessenger struct {
-	*devMessenger
+	*devchat.Messenger
 
 	mu        sync.Mutex
 	online    chan struct{}
@@ -40,7 +41,7 @@ type flakyMessenger struct {
 }
 
 func newFlakyMessenger(cfg func() *Config, online bool) *flakyMessenger {
-	f := &flakyMessenger{devMessenger: newDevMessenger(func(text string) []string { return ChunkMessage(text, cfg().MaxChunkSize) }), online: make(chan struct{}), dropAfter: -1}
+	f := &flakyMessenger{Messenger: devchat.New(func(text string) []string { return ChunkMessage(text, cfg().MaxChunkSize) }), online: make(chan struct{}), dropAfter: -1}
 	if online {
 		close(f.online)
 	}
@@ -103,14 +104,14 @@ func (f *flakyMessenger) SendMessage(ctx context.Context, jid, text string) erro
 	if err := f.try(); err != nil {
 		return err
 	}
-	return f.devMessenger.SendMessage(ctx, jid, text)
+	return f.Messenger.SendMessage(ctx, jid, text)
 }
 
 func (f *flakyMessenger) SendPoll(ctx context.Context, jid, q string, opts []string, max int) (string, error) {
 	if err := f.try(); err != nil {
 		return "", err
 	}
-	return f.devMessenger.SendPoll(ctx, jid, q, opts, max)
+	return f.Messenger.SendPoll(ctx, jid, q, opts, max)
 }
 
 func (f *flakyMessenger) sent(jid string) []string {

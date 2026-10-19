@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/Icewater1337/fridolin/internal/devchat"
 	"log"
 	"net"
 	"net/http"
@@ -51,7 +52,7 @@ type Bridge struct {
 	lock     *platform.Lock
 	store    *store.Store
 	wa       Messenger
-	dev      *devMessenger // non-nil in --no-whatsapp mode
+	dev      *devchat.Messenger // non-nil in --no-whatsapp mode
 	brainMgr *BrainManager
 	deb      *Debouncer
 	logs     *logx.Ring
@@ -199,7 +200,7 @@ func NewBridge(cfgs *ConfigStore, opts BridgeOptions) (_ *Bridge, err error) {
 	)
 
 	if opts.NoWhatsApp {
-		b.dev = newDevMessenger(func(text string) []string { return ChunkMessage(text, cfgs.Get().MaxChunkSize) })
+		b.dev = devchat.New(func(text string) []string { return ChunkMessage(text, cfgs.Get().MaxChunkSize) })
 		b.wa = b.dev
 	} else {
 		wa, err := NewWhatsAppClient(cfgs.Get, store, b.handleInbound, b.recordIgnored)

@@ -6,6 +6,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"github.com/Icewater1337/fridolin/internal/devchat"
 	"image/png"
 	"io"
 	"log"
@@ -368,7 +369,7 @@ func TestSendRefusesMissingJIDOrText(t *testing.T) {
 // stateMessenger is the dev messenger with a WhatsApp state of the test's
 // choosing.
 type stateMessenger struct {
-	*devMessenger
+	*devchat.Messenger
 	state chat.LinkState
 }
 
@@ -394,7 +395,7 @@ func TestReadyReportsWhetherMessagesCanGoOut(t *testing.T) {
 		t.Run(c.name, func(t *testing.T) {
 			tb := newTestBridge(t, "")
 			if !c.dev {
-				tb.wa = stateMessenger{devMessenger: tb.dev, state: chat.LinkState{Mode: c.mode, OwnNumber: "15551234567"}}
+				tb.wa = stateMessenger{Messenger: tb.dev, state: chat.LinkState{Mode: c.mode, OwnNumber: "15551234567"}}
 				tb.dev = nil
 			}
 			r := httptest.NewRequest("GET", "http://127.0.0.1:8765/ready", nil)
@@ -1861,7 +1862,7 @@ func TestPrettyName(t *testing.T) {
 
 // qrMessenger is the dev messenger with a pairing code to show.
 type qrMessenger struct {
-	*devMessenger
+	*devchat.Messenger
 	code string
 }
 

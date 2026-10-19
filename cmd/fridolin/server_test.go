@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/Icewater1337/fridolin/internal/devchat"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -129,7 +130,7 @@ func TestScriptAPIContract(t *testing.T) {
 
 // failingMessenger is the dev messenger with SendChunked failing as err.
 type failingMessenger struct {
-	*devMessenger
+	*devchat.Messenger
 	err error
 }
 
@@ -155,7 +156,7 @@ func TestSendFailureStatus(t *testing.T) {
 		t.Run(c.name, func(t *testing.T) {
 			tb := newTestBridge(t, "")
 			dir := tb.addFolderBrain(t, BrainManifest{ID: "p", Name: "P", Routing: BrainRouting{HandlesDMs: true}})
-			tb.wa = failingMessenger{devMessenger: tb.dev, err: c.err}
+			tb.wa = failingMessenger{Messenger: tb.dev, err: c.err}
 			w := tb.script("POST", "/send", `{"jid":"`+dm+`","text":"first half second half"}`, "")
 			if w.Code != c.want || !strings.Contains(w.Body.String(), `"error"`) {
 				t.Fatalf("%d %s, want %d", w.Code, w.Body.String(), c.want)
