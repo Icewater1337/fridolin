@@ -1,11 +1,10 @@
-package main
+package brain
 
 import (
-	"bytes"
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
+
 	"io"
 	"io/fs"
 	"log"
@@ -21,13 +20,6 @@ import (
 	"sync/atomic"
 	"time"
 
-	outboundmsg "github.com/Icewater1337/fridolin/internal/outbound"
-
-	"github.com/Icewater1337/fridolin/internal/google"
-	"github.com/Icewater1337/fridolin/internal/registry"
-
-	"github.com/Icewater1337/fridolin/internal/config"
-
 	"github.com/Icewater1337/fridolin/internal/route"
 
 	"github.com/Icewater1337/fridolin/internal/manifest"
@@ -37,7 +29,6 @@ import (
 	"github.com/Icewater1337/fridolin/internal/fsx"
 	"github.com/Icewater1337/fridolin/internal/history"
 	"github.com/Icewater1337/fridolin/internal/platform"
-	"github.com/Icewater1337/fridolin/internal/sandbox"
 
 	prompttext "github.com/Icewater1337/fridolin/internal/prompt"
 	"github.com/Icewater1337/fridolin/internal/textx"
@@ -65,9 +56,11 @@ type Brain struct {
 	// rather than the path, which could lead elsewhere by then.
 	root *os.Root
 
-	settings atomic.Pointer[brainSettings]
-	sandbox  *SandboxProfiler
-	hooks    *BrainHooks
+	settings   atomic.Pointer[Settings]
+	runner     Runner
+	input      InputRules
+	claimMedia func(mediaDir, brainID string, paths []string) map[string]string
+	sink       *brainSinkRef
 	// slots are the run slots all brains share (max_concurrent_runs); nil
 	// for no limit.
 	slots *runSlots
@@ -103,6 +96,7 @@ type Brain struct {
 	// under way, and viewerGen, which closeViewer moves on so that a start
 	// that ends after it knows to close what it opened.
 	viewerMu       sync.Mutex
+	viewerStart    func(name, streamLog, cwd string, passthrough []string) (*platform.Viewer, error)
 	tmuxViewer     *platform.Viewer
 	viewerStarting bool
 	viewerGen      int
@@ -110,82 +104,37 @@ type Brain struct {
 
 // brainSettings is everything about a brain that can change while it runs.
 // Each run takes one snapshot, so an edit never changes a run half-way.
-type brainSettings struct {
-	name            string
-	manifest        manifest.Manifest
-	claudePath      string
-	provider        string
-	codexPath       string
-	model           string
-	effort          string
-	disallowedTools []string
-	promptFile      string // relative to the folder; see BrainSpec
-	dangerously     bool
-	inheritUser     bool // inherit_claude_user_config
-	otpGuard        bool
-	otpMarkers      []string
-	viewer          bool
-	runTimeout      time.Duration // 0 for none
-	queueMode       string
-	maxPending      int
-	observe         string // BrainManifest.Observe
-	credsDir        string // where per-brain credential files live
-	mediaDir        string // the media folder, which holds the brain's inbox
-	envPassthrough  []string
-	toolsDir        string // the bridge's Python helpers, or ""
-	dataDir         string // the data dir, absolute
-	dbPath          string // the bridge's DB, absolute
-	plaudPATH       string // the PATH to run with when brains may use Plaud's CLI
+type Settings struct {
+	Name            string
+	Manifest        manifest.Manifest
+	ClaudePath      string
+	Provider        string
+	CodexPath       string
+	Model           string
+	Effort          string
+	DisallowedTools []string
+	PromptFile      string // relative to the folder; see BrainSpec
+	Dangerously     bool
+	InheritUser     bool // inherit_claude_user_config
+	OTPGuard        bool
+	OTPMarkers      []string
+	Viewer          bool
+	RunTimeout      time.Duration // 0 for none
+	QueueMode       string
+	MaxPending      int
+	Observe         string // BrainManifest.Observe
+	CredsDir        string // where per-brain credential files live
+	MediaDir        string // the media folder, which holds the brain's inbox
+	EnvPassthrough  []string
+	ToolsDir        string // the bridge's Python helpers, or ""
+	DataDir         string // the data dir, absolute
+	DBPath          string // the bridge's DB, absolute
+	PlaudPATH       string // the PATH to run with when brains may use Plaud's CLI
 	// ownPATH are the folders of the bridge's PATH inside this brain's
 	// folder, which setBridgePATH took out of the bridge's: they go first
 	// on the PATH of this brain's runs, and of no one else's.
-	ownPATH []string
+	OwnPATH []string
 }
-
-// BrainHooks connect brains to the rest of the bridge.
-type BrainHooks struct {
-	// Notice tells the chat jid, ready to send, that a run is working on
-	// its message: of use only now.
-	Notice func(jid, text string)
-	// Question sends the chat jid a question br asks mid-run, marked as
-	// one, and reports whether it is on its way, ahead of the run's final
-	// reply. br's history records it once it arrived, like an answer: the
-	// reply to it comes as a new message, whose run must see what it
-	// answers. A silent run asks nothing (see runSink.Question).
-	Question func(br *Brain, jid, text string) bool
-	// Deliver receives every finished run. It records the answer in the
-	// brain's history once it is sent.
-	Deliver func(br *Brain, m Inbound, res claudecli.Result)
-	// Waiting gets, as the bridge stops, what br had waiting, which never
-	// ran, before its run in flight gets its grace (see shutdown). Nil
-	// drops it.
-	Waiting func(br *Brain, ms []Inbound)
-	// Interrupted gets, as the bridge stops, the message whose run br
-	// stopped once its grace was over.
-	Interrupted func(br *Brain, m Inbound)
-	// Undelivered returns the brain's answers still on their way to
-	// WhatsApp, as its history will record them once they arrived. A
-	// chat gets them before anything a later run says there, so that run
-	// reads them as said (see undelivered).
-	Undelivered func(brainID string) []history.Entry
-	// OnHistory sees every line written to a brain's history.
-	OnHistory func(brainID string, e history.Entry)
-	// ExtraArgs adds CLI arguments to a brain's runs (the site builder's
-	// plugin and MCP server, for brains allowed to build the site).
-	ExtraArgs func(brainID string) []string
-	// CodexSetup supplies the site builder's instructions and MCP settings
-	// using Codex's format; credentials travel in the environment, not argv.
-	CodexSetup func(brainID string) (args, env []string, prompt string, err error)
-	// RunEnv adds variables to one run's environment (the brain API's
-	// address and a token for the run), and returns what to call once the
-	// run is over.
-	RunEnv func(brainID string) (env []string, done func())
-}
-
-// workingNoticeAfter is how long a run goes before the chat is told that
-// it is working on it (workingNotice), a variable so tests need not wait
-// for it.
-var workingNoticeAfter = 10 * time.Second
 
 // RunInfo summarises the last finished run, for the dashboard.
 type RunInfo struct {
@@ -222,23 +171,27 @@ type brainRun struct {
 }
 
 var (
-	errBrainDropped = errors.New("dropped before it ran")
-	errBrainRetired = errors.New("brain was removed")
-	errQueueFull    = errors.New("brain queue is full")
+	ErrDropped   = errors.New("dropped before it ran")
+	ErrRetired   = errors.New("brain was removed")
+	ErrQueueFull = errors.New("brain queue is full")
 
 	// errSandboxUnavailable is what the chat sees. The cause goes to the log
 	// only, because it can name private paths.
-	errSandboxUnavailable = errors.New("the sandbox could not be set up, so this message was not run (details in the bridge log)")
+	ErrSandboxUnavailable = errors.New("the sandbox could not be set up, so this message was not run (details in the bridge log)")
 )
 
 // ID is the brain's stable identifier.
 func (br *Brain) ID() string { return br.id }
 
 // Name is the brain's display name.
-func (br *Brain) Name() string { return br.settings.Load().name }
+func (br *Brain) Name() string { return br.settings.Load().Name }
 
 // Dir is the brain's folder.
 func (br *Brain) Dir() string { return br.workDir }
+
+// Manifest returns the immutable manifest snapshot used by current runs.
+// Callers must not mutate its slices or optional nested settings.
+func (br *Brain) Manifest() manifest.Manifest { return br.settings.Load().Manifest }
 
 // logInbound writes m to the brain's history: a line for each part of a
 // merged message, with its ID, so that one deleted later is taken out
@@ -260,7 +213,7 @@ func (br *Brain) logInbound(m Inbound) Inbound {
 		if at.IsZero() {
 			at = m.At
 		}
-		parts[i].logged = br.appendEntry(history.Entry{TS: historyTime(at), Chat: m.JID, From: p.Sender, Text: chat.HistoryText(p.TextWithQuote(), p.Media), Type: history.In, ID: p.ID})
+		parts[i].logged = br.AppendEntry(history.Entry{TS: historyTime(at), Chat: m.JID, From: p.Sender, Text: chat.HistoryText(p.TextWithQuote(), p.Media), Type: history.In, ID: p.ID})
 	}
 	if len(m.parts) > 0 {
 		m.parts = parts
@@ -276,7 +229,7 @@ func (br *Brain) holdsLines(m Inbound) bool {
 	if m.logged == (history.Entry{}) {
 		return false
 	}
-	return m.loggedIn(history.ForChat(br.root, br.id, chatJIDs(m), promptHistoryBudget, m.enoughBefore(1))) >= 0
+	return m.loggedIn(history.ForChat(br.root, br.id, br.input.Chats(m.Inbound), promptHistoryBudget, m.enoughBefore(1))) >= 0
 }
 
 // historyTime is t as a history line has it, "" for none: the time the
@@ -312,7 +265,7 @@ func (br *Brain) submit(m *Inbound) (pos int, busy bool, err error) {
 	s := br.settings.Load()
 	// Untagged chatter needs nothing more than the history, unless the
 	// brain observes it with runs: the next run in the chat reads it there.
-	queues := !m.Silent || observeRuns(s.observe, *m)
+	queues := !m.Silent || br.input.Observe(s.Observe, m.Inbound)
 
 	// Turned away before anything is written: a message the brain does not
 	// take is not in its history, where the sender's retry after "queue is
@@ -321,12 +274,12 @@ func (br *Brain) submit(m *Inbound) (pos int, busy bool, err error) {
 	br.mu.Lock()
 	if br.retired {
 		br.mu.Unlock()
-		return 0, false, errBrainRetired
+		return 0, false, ErrRetired
 	}
 	if queues && !br.hasRoomLocked(*m, s) {
 		if !m.Silent {
 			br.mu.Unlock()
-			return 0, true, errQueueFull
+			return 0, true, ErrQueueFull
 		}
 		// Chatter that finds no place is kept in the history all the
 		// same, without a run of its own: it was said in the chat, and
@@ -337,7 +290,7 @@ func (br *Brain) submit(m *Inbound) (pos int, busy bool, err error) {
 
 	// The files go into this brain's inbox, the only part of the media
 	// folder its sandbox opens, before the history names where they are.
-	*m = m.withMediaMoved(mediaInboxAt(s.mediaDir).Claim(br.id, m.Media))
+	*m = m.withMediaMoved(br.claimMedia(s.MediaDir, br.id, m.Media))
 
 	// History first, so that later runs see the message even when it is
 	// merged into a queue that is already moving.
@@ -349,7 +302,7 @@ func (br *Brain) submit(m *Inbound) (pos int, busy bool, err error) {
 	br.mu.Lock()
 	if br.retired {
 		br.mu.Unlock()
-		return 0, false, errBrainRetired
+		return 0, false, ErrRetired
 	}
 
 	// A newer message from the same chat supersedes queued untagged chatter:
@@ -360,34 +313,14 @@ func (br *Brain) submit(m *Inbound) (pos int, busy bool, err error) {
 	// chatter never interrupts a run. Nor do ingested files interrupt a
 	// request, or get replaced: each is a job of its own, not a correction of
 	// the last one. Observe-only runs are another matter, see below.
-	interrupting, replaces := supersedes(*m, s)
-	var gone []Inbound
-	kept := br.pending[:0]
-	for _, p := range br.pending {
-		if replaces(p) {
-			gone = append(gone, p)
-		} else {
-			kept = append(kept, p)
-		}
+	next, gone, interrupting, err := admit(br.pending, *m, s.QueueMode, s.MaxPending)
+	br.pending = next
+	defer Dropped(gone)
+	if err != nil {
+		br.mu.Unlock()
+		return 0, true, err
 	}
-	br.pending = kept
-	defer dropped(gone)
-	if len(br.pending) >= s.maxPending {
-		// Only when another message took the last place since the check
-		// above.
-		dropped := false
-		for i, p := range br.pending {
-			if p.Silent {
-				br.pending = append(br.pending[:i], br.pending[i+1:]...)
-				dropped = true
-				break
-			}
-		}
-		if !dropped {
-			br.mu.Unlock()
-			return 0, true, errQueueFull
-		}
-	}
+	_, replaces := supersedes(*m, s.QueueMode)
 	// Work addressed to the brain does not wait for an observe-only run: it
 	// stops the one in flight and goes ahead of those waiting. Their chatter
 	// is in the history, where the next run in its chat reads it.
@@ -395,7 +328,6 @@ func (br *Brain) submit(m *Inbound) (pos int, busy bool, err error) {
 	if cur := br.current; cur != nil && (interrupting && replaces(cur.msg) || !m.Silent && cur.msg.Silent) {
 		interrupt = cur
 	}
-	br.pending = append(br.pending, *m)
 	pos = slices.Index(br.queueOrderLocked(), len(br.pending)-1) + 1
 	busy = pos > 1 || (br.current != nil && interrupt == nil) || br.slots.busy(!m.Silent)
 	start := !br.working
@@ -503,8 +435,8 @@ func (br *Brain) queueOrderLocked() []int {
 // supersedes says what m replaces when it joins the queue (see Submit):
 // whether it interrupts its sender's own run, which only a request does in
 // interrupt mode, and which waiting or running messages it replaces.
-func supersedes(m Inbound, s *brainSettings) (interrupting bool, replaces func(Inbound) bool) {
-	interrupting = s.queueMode == config.QueueModeInterrupt && !m.Silent && m.Source != chat.SourceIngest
+func supersedes(m Inbound, mode string) (interrupting bool, replaces func(Inbound) bool) {
+	interrupting = mode == QueueInterrupt && !m.Silent && m.Source != chat.SourceIngest
 	return interrupting, func(p Inbound) bool {
 		return p.JID == m.JID && (p.Silent || (interrupting && p.Sender == m.Sender && p.Source != chat.SourceIngest))
 	}
@@ -513,8 +445,8 @@ func supersedes(m Inbound, s *brainSettings) (interrupting bool, replaces func(I
 // hasRoomLocked reports whether the queue takes m: it has a free place,
 // or one m makes by what it replaces, or untagged chatter to drop. br.mu is
 // held.
-func (br *Brain) hasRoomLocked(m Inbound, s *brainSettings) bool {
-	_, replaces := supersedes(m, s)
+func (br *Brain) hasRoomLocked(m Inbound, s *Settings) bool {
+	_, replaces := supersedes(m, s.QueueMode)
 	n, silent := 0, false
 	for _, p := range br.pending {
 		if !replaces(p) {
@@ -522,7 +454,7 @@ func (br *Brain) hasRoomLocked(m Inbound, s *brainSettings) bool {
 			silent = silent || p.Silent
 		}
 	}
-	return n < s.maxPending || silent
+	return n < s.MaxPending || silent
 }
 
 // worker drains the queue one message at a time, each in a run slot (see
@@ -554,12 +486,12 @@ func (br *Brain) worker() {
 			// observe-only run it stops.
 			br.mu.Unlock()
 			slot.release()
-			dropped([]Inbound{m})
+			Dropped([]Inbound{m})
 			continue
 		}
 		br.takeTurnLocked(m.JID)
 		s := br.settings.Load()
-		ctx, cancel := runContext(s.runTimeout)
+		ctx, cancel := runContext(s.RunTimeout)
 		run := &brainRun{cancel: cancel, done: make(chan struct{}), msg: m, started: time.Now()}
 		br.current = run
 		br.mu.Unlock()
@@ -625,7 +557,7 @@ func (br *Brain) stopObservation() {
 // so that the run is finished and recorded like any failed one and the
 // worker goes on with the next message. Unrecovered, the panic would end
 // the whole bridge and leave every brain's running claude behind.
-func (br *Brain) invokeGuarded(run *brainRun, ctx context.Context, s *brainSettings, m Inbound) (res claudecli.Result) {
+func (br *Brain) invokeGuarded(run *brainRun, ctx context.Context, s *Settings, m Inbound) (res claudecli.Result) {
 	defer func() {
 		if p := recover(); p != nil {
 			log.Printf("brain %s: the run for %s panicked: %v\n%s", br.id, m.JID, p, debug.Stack())
@@ -647,9 +579,7 @@ func (br *Brain) deliverGuarded(m Inbound, res claudecli.Result) {
 		}()
 		fn()
 	}
-	if br.hooks != nil && br.hooks.Deliver != nil {
-		guard("delivering", func() { br.hooks.Deliver(br, m, res) })
-	}
+	guard("delivering", func() { br.sink.Finished(br, m, res) })
 	if m.Done != nil {
 		guard("finishing", func() { m.Done(res.Err) })
 	}
@@ -665,19 +595,19 @@ func runContext(timeout time.Duration) (context.Context, context.CancelFunc) {
 }
 
 // dropped tells the messages in ms that will not run, outside br.mu.
-func dropped(ms []Inbound) {
+func Dropped(ms []Inbound) {
 	for _, m := range ms {
 		if m.Done != nil {
-			m.Done(errBrainDropped)
+			m.Done(ErrDropped)
 		}
 	}
 }
 
-// waitIdle waits until the brain has nothing running or queued, for at
+// WaitIdle waits until the brain has nothing running or queued, for at
 // most max, and reports whether it got there. A backup asks before it
 // copies the brain's folder (see backupBrain). Between two queued runs no
 // run is current for a moment, so it waits for the worker to stop.
-func (br *Brain) waitIdle(ctx context.Context, max time.Duration) bool {
+func (br *Brain) WaitIdle(ctx context.Context, max time.Duration) bool {
 	deadline := time.NewTimer(max)
 	defer deadline.Stop()
 	for {
@@ -731,7 +661,7 @@ func (br *Brain) StopCurrent(clearQueue bool) bool {
 	}
 	cur := br.current
 	br.mu.Unlock()
-	dropped(gone)
+	Dropped(gone)
 	return br.stopRun(cur)
 }
 
@@ -756,7 +686,7 @@ func (br *Brain) StopChat(jid string) (stopped bool, n int) {
 		cur = nil
 	}
 	br.mu.Unlock()
-	dropped(gone)
+	Dropped(gone)
 	return br.stopRun(cur), len(gone)
 }
 
@@ -768,7 +698,7 @@ func (br *Brain) StopChat(jid string) (stopped bool, n int) {
 // sent !reset.
 func (br *Brain) ResetChat(chats []string, by string) {
 	for _, jid := range chats {
-		br.appendEntry(history.Entry{Chat: jid, From: by, Type: history.Reset})
+		br.AppendEntry(history.Entry{Chat: jid, From: by, Type: history.Reset})
 	}
 }
 
@@ -795,12 +725,12 @@ func (br *Brain) StopHandOffs(jid string) (stopped bool, n int) {
 		cur = nil
 	}
 	br.mu.Unlock()
-	dropped(gone)
+	Dropped(gone)
 	return br.stopRun(cur), len(gone)
 }
 
 // stopRunWait is how long a stop waits for a run it killed to end.
-const stopRunWait = 10 * time.Second
+const StopRunWait = 10 * time.Second
 
 // stopRun kills run, if there is one, and waits for it to end.
 func (br *Brain) stopRun(run *brainRun) bool {
@@ -810,17 +740,11 @@ func (br *Brain) stopRun(run *brainRun) bool {
 	br.interruptRun(run)
 	select {
 	case <-run.done:
-	case <-time.After(stopRunWait):
-		log.Printf("brain %s: run did not stop within %v", br.id, stopRunWait)
+	case <-time.After(StopRunWait):
+		log.Printf("brain %s: run did not stop within %v", br.id, StopRunWait)
 	}
 	return true
 }
-
-// shutdownGrace is how long the run in flight gets to finish and be
-// delivered when the bridge stops: most answers come within it, and a
-// service manager loses patience not long after (launchd kills the bridge
-// 20 seconds after SIGTERM). A variable so tests need not wait for it.
-var shutdownGrace = 15 * time.Second
 
 // shutdown stops the brain for good as the bridge stops. It takes no new
 // message and starts no new run, and hands what was waiting, which never
@@ -831,11 +755,7 @@ var shutdownGrace = 15 * time.Second
 // stays, for the next start to replace.
 func (br *Brain) shutdown(grace time.Duration) {
 	waiting := br.closeQueue()
-	if br.hooks != nil && br.hooks.Waiting != nil {
-		br.hooks.Waiting(br, waiting)
-	} else {
-		dropped(waiting)
-	}
+	br.sink.Waiting(br, waiting)
 	idle := make(chan struct{})
 	go func() {
 		br.workers.Wait()
@@ -856,8 +776,8 @@ func (br *Brain) shutdown(grace time.Duration) {
 		}
 		select {
 		case <-idle:
-		case <-time.After(stopRunWait):
-			log.Printf("brain %s: worker still finishing %v after the interrupt; waiting for its delivery", br.id, stopRunWait)
+		case <-time.After(StopRunWait):
+			log.Printf("brain %s: worker still finishing %v after the interrupt; waiting for its delivery", br.id, StopRunWait)
 			// Closing the store now would lose an answer the worker is
 			// still handing to the outbox. The grace bounds the run, not
 			// the hand-off of its result.
@@ -871,8 +791,8 @@ func (br *Brain) shutdown(grace time.Duration) {
 		}
 		br.mu.Unlock()
 	}
-	if cut != nil && br.hooks != nil && br.hooks.Interrupted != nil {
-		br.hooks.Interrupted(br, cut.msg)
+	if cut != nil {
+		br.sink.Interrupted(br, cut.msg)
 	}
 	// Done with the folder after every worker has released it.
 	br.root.Close()
@@ -906,7 +826,7 @@ func (br *Brain) freezeQueueLocked() {
 // the activity viewer: not when the brain moved, where the brain that runs
 // in the new folder replaces the tmux session of that name.
 func (br *Brain) retire(closeViewer bool) {
-	dropped(br.closeQueue())
+	Dropped(br.closeQueue())
 	br.StopCurrent(false)
 	// run.done precedes delivery. Retirement must finish that hand-off
 	// before closing the folder, requeuing work in its replacement, or
@@ -944,7 +864,7 @@ func (br *Brain) readFile(name string) ([]byte, error) {
 }
 
 // BrainRuntime is a brain's live state, for the dashboard.
-type BrainRuntime struct {
+type Runtime struct {
 	ID       string            `json:"id"`
 	Name     string            `json:"name"`
 	Dir      string            `json:"dir"`
@@ -979,12 +899,12 @@ type QueuedView struct {
 
 // Snapshot returns the brain's live state, the queue in the order it will
 // run.
-func (br *Brain) Snapshot() BrainRuntime {
+func (br *Brain) Snapshot() Runtime {
 	s := br.settings.Load()
-	rt := BrainRuntime{
-		ID: br.id, Name: s.name, Dir: br.workDir,
-		Routing: s.manifest.Routing, Model: s.model, Effort: s.effort,
-		Backup: s.manifest.Backup, Manifest: s.manifest, Queue: []QueuedView{},
+	rt := Runtime{
+		ID: br.id, Name: s.Name, Dir: br.workDir,
+		Routing: s.Manifest.Routing, Model: s.Model, Effort: s.Effort,
+		Backup: s.Manifest.Backup, Manifest: s.Manifest, Queue: []QueuedView{},
 	}
 	br.mu.Lock()
 	defer br.mu.Unlock()
@@ -1003,15 +923,12 @@ func (br *Brain) Snapshot() BrainRuntime {
 	return rt
 }
 
-// startViewer is NewTmuxViewer, a variable so tests need no tmux.
-var startViewer = NewTmuxViewer
-
 // ensureViewer starts the tmux activity viewer if enabled and not running.
 // It does so in the background, one start at a time: tmux and osascript,
 // which can wait on an Automation consent prompt under launchd, must not
 // hold up the run.
-func (br *Brain) ensureViewer(s *brainSettings) {
-	if !s.viewer {
+func (br *Brain) ensureViewer(s *Settings) {
+	if !s.Viewer {
 		return
 	}
 	br.viewerMu.Lock()
@@ -1039,20 +956,20 @@ func (br *Brain) ensureViewer(s *brainSettings) {
 
 // startViewerUnlessAlive starts a viewer unless tv still runs. It returns
 // the new viewer, or nil when tv runs or none could start.
-func (br *Brain) startViewerUnlessAlive(tv *platform.Viewer, s *brainSettings) *platform.Viewer {
+func (br *Brain) startViewerUnlessAlive(tv *platform.Viewer, s *Settings) *platform.Viewer {
 	if tv != nil && tv.IsAlive() {
 		return nil
 	}
 	// tail fails on a log that does not exist yet, so create it first,
 	// through the folder as a run opens it: touch would have followed a
 	// dangling symlink there and created the file it points to.
-	f, err := fsx.OpenInFolder(br.root, streamLogName, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600)
+	f, err := fsx.OpenInFolder(br.root, StreamLogName, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600)
 	if err != nil {
 		log.Printf("brain %s: no tmux viewer: could not open stream log: %v", br.id, err)
 		return nil
 	}
 	f.Close()
-	nv, err := startViewer("claude-"+br.id, br.streamLogPath(), br.workDir, childEnv(anyChild, s.envPassthrough))
+	nv, err := br.viewerStart("claude-"+br.id, br.StreamLogPath(), br.workDir, s.EnvPassthrough)
 	if err != nil {
 		log.Printf("brain %s: could not start tmux viewer: %v", br.id, err)
 		return nil
@@ -1074,334 +991,21 @@ func (br *Brain) closeViewer() {
 }
 
 // streamLogName is the brain's activity log, in its folder.
-const streamLogName = "claude-stream.log"
+const StreamLogName = "claude-stream.log"
 
-func (br *Brain) streamLogPath() string {
-	return filepath.Join(br.workDir, streamLogName)
-}
-
-// withArgsBeforePrint puts extra before the trailing -p that claudeArgs
-// ends with, which ends an option list such as --mcp-config's.
-func withArgsBeforePrint(args, extra []string) []string {
-	if len(extra) == 0 || len(args) < 1 {
-		return args
-	}
-	out := append([]string{}, args[:len(args)-1]...)
-	out = append(out, extra...)
-	return append(out, args[len(args)-1:]...)
-}
-
-// excludeInstructionsAbove returns the --settings for a brain in dir that
-// keep the CLI from loading your instructions above the folder, which
-// --setting-sources does not cover: the CLI reads the CLAUDE.md files and
-// .claude rules of every folder up to / as part of the project, and your
-// user memory in ~/.claude whatever the sources. Its claudeMdExcludes
-// setting skips them, and it merges with the brain's own. It does not
-// cover the skills, agents and commands in those .claude folders, nor
-// stop a brain from reading the files with its tools; that takes the
-// sandbox, which denies them all.
-func excludeInstructionsAbove(dir string) string {
-	data, err := json.Marshal(map[string][]string{"claudeMdExcludes": instructionsAbove(dir, homeDir())})
-	if err != nil {
-		return ""
-	}
-	return string(data)
-}
-
-// instructionsAbove lists the claudeMdExcludes patterns for a brain in dir:
-// the CLAUDE.md, CLAUDE.local.md, .claude/CLAUDE.md and .claude/rules of
-// every folder above dir, and those in home's .claude, the user memory,
-// for a brain outside home too. The patterns match paths as the CLI spells
-// them, which differ below a symlink (a brains folder linked from another
-// volume), so the folders above dir come along its path as configured and
-// along its real path, and home both ways too.
-func instructionsAbove(dir, home string) []string {
-	var folders []string
-	seen := map[string]bool{}
-	for _, start := range []string{absPath(dir), fsx.Resolve(absPath(dir))} {
-		for d := filepath.Dir(filepath.Clean(start)); ; d = filepath.Dir(d) {
-			if !seen[d] {
-				seen[d] = true
-				folders = append(folders, d)
-			}
-			if d == filepath.Dir(d) {
-				break
-			}
-		}
-	}
-	var out []string
-	patterns := func(d string, names ...string) {
-		for _, name := range names {
-			out = append(out, filepath.Join(globEscape(d), name))
-		}
-	}
-	inDotClaude := []string{filepath.Join(".claude", "CLAUDE.md"), filepath.Join(".claude", "rules", "**")}
-	for _, d := range folders {
-		patterns(d, sandbox.InstructionFiles()...)
-		patterns(d, inDotClaude...)
-	}
-	if filepath.IsAbs(home) {
-		for _, h := range []string{home, fsx.Resolve(home)} {
-			if !seen[h] {
-				seen[h] = true
-				patterns(h, inDotClaude...)
-			}
-		}
-	}
-	return out
-}
-
-// globEscape makes p a picomatch pattern, which the CLI matches
-// claudeMdExcludes with, that matches the path p alone. A backslash does
-// not do it, since the CLI turns every one into a / first, so each glob
-// character goes in brackets: a folder named "notes (old)" would otherwise
-// be a pattern for "notes old".
-func globEscape(p string) string {
-	var b strings.Builder
-	for _, r := range p {
-		if strings.ContainsRune("*?[]{}()!+@|", r) {
-			b.WriteByte('[')
-			b.WriteRune(r)
-			b.WriteByte(']')
-			continue
-		}
-		b.WriteRune(r)
-	}
-	return b.String()
-}
-
-// mcpConfigOf returns what to pass with --mcp-config for the .mcp.json in
-// the brain folder dir: the file, or its JSON without the servers the
-// folder's settings turn off (see disabledMCPServers), or "" when there is
-// nothing to pass. --strict-mcp-config makes the CLI ignore the file
-// otherwise. The CLI refuses to start with an --mcp-config file that is not
-// a JSON object holding an "mcpServers" object, which it never did for a
-// project .mcp.json: `{}` or a misspelt key stops it as surely as a typo.
-// Such a file is left out, as one mistake, or a file a manipulated brain
-// wrote, would otherwise stop every run of the brain. Broken entries inside
-// mcpServers it takes in its stride.
-func mcpConfigOf(brainID, dir string) string {
-	p := filepath.Join(dir, ".mcp.json")
-	data, err := fsx.ReadBrainFile(dir, ".mcp.json")
-	if errors.Is(err, fs.ErrNotExist) {
-		return ""
-	}
-	var servers map[string]json.RawMessage
-	if err == nil {
-		servers, err = mcpServersOf(data)
-	}
-	var disabled map[string]bool
-	if err == nil {
-		disabled, err = disabledMCPServers(dir)
-	}
-	if err != nil {
-		log.Printf("brain %s: leaving out %s: %v", brainID, p, err)
-		return ""
-	}
-	kept := make(map[string]json.RawMessage, len(servers))
-	for name, server := range servers {
-		if !disabled[name] {
-			kept[name] = server
-		}
-	}
-	switch {
-	case len(kept) == len(servers):
-		return p
-	case len(kept) == 0:
-		return ""
-	}
-	// --mcp-config takes the JSON itself as well as a file.
-	inline, err := json.Marshal(map[string]any{"mcpServers": kept})
-	if err != nil {
-		log.Printf("brain %s: leaving out %s: %v", brainID, p, err)
-		return ""
-	}
-	return string(inline)
-}
-
-// disabledMCPServers returns the .mcp.json servers that the
-// disabledMcpjsonServers of the brain folder dir's .claude/settings.json or
-// settings.local.json turn off, where Claude Code records a project's
-// server you declined. The CLI honours that list for a project's .mcp.json
-// but not for --mcp-config, which would start a server you turned off on
-// every run. Either file turns a server off, as it does for the CLI, and
-// enabledMcpjsonServers keeps no other server from starting there
-// (checked against CLI 2.1.302). When a file cannot be read, nothing can
-// tell which servers it turns off, so the brain gets none.
-func disabledMCPServers(dir string) (map[string]bool, error) {
-	disabled := map[string]bool{}
-	for _, name := range []string{"settings.json", "settings.local.json"} {
-		p := filepath.Join(dir, ".claude", name)
-		data, err := fsx.ReadBrainFile(dir, filepath.Join(".claude", name))
-		if errors.Is(err, fs.ErrNotExist) {
-			continue
-		}
-		var settings map[string]json.RawMessage
-		if err == nil {
-			settings, err = jsonObject(data)
-		}
-		var names []string
-		if raw, ok := settings["disabledMcpjsonServers"]; err == nil && ok {
-			err = json.Unmarshal(raw, &names)
-		}
-		if err != nil {
-			return nil, fmt.Errorf("cannot tell which servers %s turns off: %w", p, err)
-		}
-		for _, n := range names {
-			disabled[n] = true
-		}
-	}
-	return disabled, nil
-}
-
-// mcpServersOf returns the servers in the .mcp.json data by name, or why
-// the CLI would refuse the file: it must be a JSON object whose
-// "mcpServers", spelt exactly so, is an object.
-func mcpServersOf(data []byte) (map[string]json.RawMessage, error) {
-	top, err := jsonObject(data)
-	if err != nil {
-		return nil, err
-	}
-	var servers map[string]json.RawMessage
-	if raw, ok := top["mcpServers"]; ok {
-		if err := json.Unmarshal(raw, &servers); err != nil {
-			return nil, fmt.Errorf("mcpServers is not an object: %w", err)
-		}
-	}
-	if servers == nil {
-		return nil, errors.New(`it has no "mcpServers" object`)
-	}
-	return servers, nil
-}
-
-// jsonObject decodes data, a JSON object, by key. Unlike a struct, a map
-// matches keys exactly, as the CLI does, and it skips a leading byte order
-// mark, as the CLI does too.
-func jsonObject(data []byte) (map[string]json.RawMessage, error) {
-	var obj map[string]json.RawMessage
-	if err := json.Unmarshal(bytes.TrimPrefix(data, []byte("\uFEFF")), &obj); err != nil {
-		return nil, fmt.Errorf("not a JSON object: %w", err)
-	}
-	if obj == nil {
-		return nil, errors.New("not a JSON object: null")
-	}
-	return obj, nil
+func (br *Brain) StreamLogPath() string {
+	return filepath.Join(br.workDir, StreamLogName)
 }
 
 // invoke runs the selected CLI once for m.
-func (br *Brain) invoke(run *brainRun, ctx context.Context, s *brainSettings, m Inbound) claudecli.Result {
-	prompt := br.buildPrompt(s, m)
-
-	mcpConfig, settings := "", ""
-	if s.provider != "codex" && !s.inheritUser {
-		mcpConfig = mcpConfigOf(br.id, br.workDir)
-		settings = excludeInstructionsAbove(br.workDir)
-	}
-	args := claudeArgs(s, mcpConfig, settings)
-	if s.provider == "codex" {
-		if err := claudecli.ValidateCodexTools(s.disallowedTools); err != nil {
-			return claudecli.Result{Err: err}
-		}
-		args = codexArgs(s, br.workDir, br.sandbox != nil && br.sandbox.Enabled())
-		prompt = strings.ReplaceAll(prompt, prompttext.AskUserQuestionNote, "If you need clarification, ask in your final reply and end the turn. The answer arrives as a new message.")
-	}
-	var providerEnv []string
-	if s.provider == "codex" && br.hooks != nil && br.hooks.CodexSetup != nil {
-		extra, env, instructions, err := br.hooks.CodexSetup(br.id)
-		if err != nil {
-			return claudecli.Result{Err: err}
-		}
-		args = withArgsBeforePrint(args, extra)
-		providerEnv = env
-		prompt = instructions + prompt
-	}
-	if s.provider != "codex" && br.hooks != nil && br.hooks.ExtraArgs != nil {
-		extra := br.hooks.ExtraArgs(br.id)
-		args = withArgsBeforePrint(args, extra)
-	}
-
-	// Wrap the spawn in sandbox-exec so prompt injection in an incoming message
-	// cannot reach another brain's tree or cross-session Claude state. The brain
-	// still runs with --dangerously-skip-permissions for tool freedom; the
-	// sandbox enforces the read scope at the OS layer regardless. That is also
-	// why a sandbox that cannot be set up refuses the run instead of spawning
-	// without it: the fallback would quietly drop the only barrier left.
-	binary := s.claudePath
-	if s.provider == "codex" {
-		binary = s.codexPath
-	}
-	agentBinary := binary
-	finalArgs := args
-	extraEnv := append([]string{"FRIDOLIN_BRAIN_ID=" + br.id}, dataEnv(s)...)
-	extraEnv = append(extraEnv, providerEnv...)
-	extraEnv = append(extraEnv, google.CalendarEnv(br.id, s.manifest, s.credsDir)...)
-	extraEnv = append(extraEnv, plaudOptOut...)
-	if s.toolsDir != "" {
-		// Prompts and skills run the helpers as $FRIDOLIN_TOOLS_DIR/<tool>,
-		// wherever the bridge is installed.
-		extraEnv = append(extraEnv, "FRIDOLIN_TOOLS_DIR="+s.toolsDir)
-	}
-	if path := s.plaudPATH; path != "" || len(s.ownPATH) > 0 {
-		if path == "" {
-			path = os.Getenv("PATH")
-		}
-		dirs := append(slices.Clone(s.ownPATH), filepath.SplitList(path)...)
-		extraEnv = append(extraEnv, "PATH="+strings.Join(dirs, string(filepath.ListSeparator))) // replaces the bridge's
-	}
-	if br.hooks != nil && br.hooks.RunEnv != nil {
-		env, done := br.hooks.RunEnv(br.id)
-		// After Wait: the tools the run started have exited by then, or
-		// are left behind and lose the brain API with the run.
-		defer done()
-		extraEnv = append(extraEnv, env...)
-	}
-	if s.provider == "codex" || (br.sandbox != nil && br.sandbox.Enabled()) {
-		// The brain's own Claude Code config dir, TMPDIR and caches, the
-		// only places outside its folder and inbox the profile lets it
-		// write, made before the profile pins them. With a config dir of
-		// its own the CLI no longer finds your login in the keychain,
-		// which the profile closes anyway: brains log in with
-		// CLAUDE_CODE_OAUTH_TOKEN or ANTHROPIC_API_KEY from the bridge's
-		// environment.
-		stateEnv, err := prepareBrainState(s.dataDir, s.mediaDir, br.id, s.inheritUser)
-		if err == nil && br.sandbox != nil && br.sandbox.Enabled() {
-			binary, finalArgs, err = br.sandbox.Command(br.id, agentBinary, args)
-		}
-		if err != nil {
-			log.Printf("brain %s: sandbox unavailable, refusing to run: %v", br.id, err)
-			return claudecli.Result{Err: errSandboxUnavailable}
-		}
-		extraEnv = append(extraEnv, stateEnv...)
-		if s.provider == "codex" {
-			extraEnv = append(extraEnv, "CODEX_HOME="+brainStateOf(s.dataDir, br.id).codex)
-		}
-		// The profile denies writes to the CLI's own install, so its
-		// auto-updater could download a new version on every run and never
-		// switch to it. This replaces the bridge's own value.
-		extraEnv = append(extraEnv, "DISABLE_AUTOUPDATER=1")
-	}
-	// Only the variables on childEnvAllowlist: anyone who may message the
-	// brain can ask it to print its environment.
-	scope := claudeChild
-	if s.provider == "codex" {
-		scope = codexChild
-	}
-	env := childEnv(scope, s.envPassthrough, extraEnv...)
-
-	// Only once the sandbox is settled: a refused run starts no process.
-	br.ensureViewer(s)
-
-	return claudecli.Run(ctx, claudecli.Invocation{
-		Run:      claudecli.Spawn{WaitDelay: runWaitDelay, Binary: binary, Args: finalArgs, Dir: br.workDir, Env: env, Prompt: prompt},
-		Provider: s.provider, ExitGrace: postResultGrace, NoticeAfter: workingNoticeAfter,
-		DeadlineError: claudecli.TimedOut(s.runTimeout),
+func (br *Brain) invoke(run *brainRun, ctx context.Context, s *Settings, m Inbound) claudecli.Result {
+	return br.runner.Run(ctx, RunSpec{
+		ID: br.id, Dir: br.workDir, Settings: s, Prompt: br.buildPrompt(s, m),
+		BeforeStart: func() { br.ensureViewer(s) },
 	}, claudecli.Callbacks{
 		Start: run.startProcess,
 		Started: func(pid int) func() {
 			br.setRunPID(run, pid)
-			if rec := recordRun(s.dataDir, br.id, pid); rec != "" {
-				return func() { _ = os.Remove(rec) }
-			}
 			return nil
 		},
 		Reaped: func() { br.setRunPID(run, 0) },
@@ -1412,12 +1016,9 @@ func (br *Brain) invoke(run *brainRun, ctx context.Context, s *brainSettings, m 
 			log.Printf("brain %s: reading the output of the run for %s panicked: %v\n%s", br.id, m.JID, p, stack)
 		},
 		Notice: func() {
-			if !m.Silent && br.hooks != nil && br.hooks.Notice != nil {
-				br.hooks.Notice(m.JID, outboundmsg.WorkingNotice)
+			if !m.Silent {
+				br.sink.Working(m.JID)
 			}
-		},
-		GraceExpired: func() {
-			log.Printf("brain %s: %s's output was still open %v after its result; stopping what is left of the run", br.id, claudecli.AgentName(s.provider), postResultGrace)
 		},
 		SlowResponse: func(elapsed time.Duration) {
 			log.Printf("brain %s: response took %v for %s (slow response)", br.id, elapsed, m.JID)
@@ -1425,10 +1026,6 @@ func (br *Brain) invoke(run *brainRun, ctx context.Context, s *brainSettings, m 
 		Stderr: func(pid int, text string) { br.logStderr(m, pid, text) },
 	})
 }
-
-// postResultGrace is how long a run may go on after its result, a
-// variable so tests need not wait for it.
-var postResultGrace = 5 * time.Second
 
 // logStderr adds what the CLI wrote to stderr to the brain's activity log,
 // the end of it when there is much, where a failed run can be looked into
@@ -1439,7 +1036,7 @@ func (br *Brain) logStderr(m Inbound, pid int, stderr string) {
 	if stderr == "" {
 		return
 	}
-	f, err := fsx.OpenInFolder(br.root, streamLogName, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600)
+	f, err := fsx.OpenInFolder(br.root, StreamLogName, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600)
 	if err != nil {
 		log.Printf("brain %s: could not open stream log: %v", br.id, err)
 		return
@@ -1459,7 +1056,7 @@ const stderrLogBytes = 4000
 var promptHistoryBudget int64 = 16 << 20
 
 // historyBefore returns what m's run is shown of its chat, the one that
-// goes by chatJIDs(m), oldest first and at most limit entries in all.
+// goes by br.input.Chats(m.Inbound), oldest first and at most limit entries in all.
 // before is the chat's history before m's own lines (Inbound.logged).
 // since is what went out to the chat after them, while m waited in the
 // queue, and what waits in the outbox to go out ahead of anything m's
@@ -1473,7 +1070,7 @@ var promptHistoryBudget int64 = 16 << 20
 // empty; when the history cannot be read (see openInFolder), only the
 // outbox's are left.
 func (br *Brain) historyBefore(m Inbound, limit int) (before, since []history.Entry) {
-	chats := chatJIDs(m)
+	chats := br.input.Chats(m.Inbound)
 	// The answers on their way first, then the history: one delivered in
 	// between is in both, and withUndelivered takes it once.
 	pending := br.undelivered(chats)
@@ -1555,9 +1152,9 @@ func (br *Brain) identities() map[string]string {
 // buildPrompt gathers what m's run is told, through the brain's folder: its
 // prompt file, the chat's recent history and the identity map. renderPrompt
 // puts it into words.
-func (br *Brain) buildPrompt(s *brainSettings, m Inbound) string {
-	in := prompttext.Input{Now: time.Now(), BrainID: br.id, Message: m.Inbound, BuildChat: brainOfBuildJID(m.JID) != "", ObserveOnly: m.Silent}
-	if name := s.promptFile; name != "" {
+func (br *Brain) buildPrompt(s *Settings, m Inbound) string {
+	in := prompttext.Input{Now: time.Now(), BrainID: br.id, Message: m.Inbound, BuildChat: br.input.BuildChat != nil && br.input.BuildChat(m.JID), ObserveOnly: m.Silent}
+	if name := s.PromptFile; name != "" {
 		if data, err := br.readFile(name); err != nil {
 			log.Printf("brain %s: could not read prompt file %s: %v", br.id, name, err)
 		} else {
@@ -1573,8 +1170,8 @@ func (br *Brain) buildPrompt(s *brainSettings, m Inbound) string {
 // runHeading starts a run's part of the activity log: what it answers and
 // with what, so that it can be told from the others and matched to the
 // run the dashboard shows.
-func runHeading(m Inbound, s *brainSettings, pid int) string {
-	model := s.model
+func runHeading(m Inbound, s *Settings, pid int) string {
+	model := s.Model
 	if model == "" {
 		model = "the CLI's default"
 	}
@@ -1587,9 +1184,9 @@ func runHeading(m Inbound, s *brainSettings, pid int) string {
 // model does.
 var runHeadingRE = regexp.MustCompile(`^\[\d\d:\d\d:\d\d\] ── Run for .*, pid (\d+), model .* ──$`)
 
-// runHeadingPID returns the pid of the run whose heading line is, and
+// RunHeadingPID returns the pid of the run whose heading line is, and
 // false for any other line of the activity log.
-func runHeadingPID(line string) (int, bool) {
+func RunHeadingPID(line string) (int, bool) {
 	m := runHeadingRE.FindStringSubmatch(line)
 	if m == nil {
 		return 0, false
@@ -1610,11 +1207,11 @@ const (
 // rotateStreamLog moves a full activity log aside, through the folder: a
 // rename replaces a symlink at streamLogOld itself, never what it points to.
 func (br *Brain) rotateStreamLog() {
-	fi, err := br.root.Lstat(streamLogName)
+	fi, err := br.root.Lstat(StreamLogName)
 	if err != nil || !fi.Mode().IsRegular() || fi.Size() < streamLogMax {
 		return
 	}
-	if err := br.root.Rename(streamLogName, streamLogOld); err != nil {
+	if err := br.root.Rename(StreamLogName, streamLogOld); err != nil {
 		log.Printf("brain %s: could not rotate its stream log: %v", br.id, err)
 	}
 }
@@ -1637,8 +1234,7 @@ func (s *runSink) Log(line string) {
 // Question sends text to the run's chat. Untagged (silent) messages never
 // produce a visible reply, so they must not ask anything either.
 func (s *runSink) Question(text string) bool {
-	h := s.br.hooks
-	return !s.m.Silent && h != nil && h.Question != nil && h.Question(s.br, s.m.JID, outboundmsg.QuestionPrefix+text)
+	return !s.m.Silent && s.br.sink.Question(s.br, s.m.JID, text)
 }
 
 func (s *runSink) Result(res claudecli.Result) {
@@ -1664,7 +1260,7 @@ func (br *Brain) openRunStream(m Inbound, heading string, onResult func(claudecl
 	br.rotateStreamLog()
 	// Through the folder, like the history: a brain can swap the log for a
 	// symlink to a file its sandbox denies it writing.
-	streamLog, err := fsx.OpenInFolder(br.root, streamLogName, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600)
+	streamLog, err := fsx.OpenInFolder(br.root, StreamLogName, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600)
 	if err != nil {
 		log.Printf("brain %s: could not open stream log: %v", br.id, err)
 	}
@@ -1741,21 +1337,21 @@ func (br *Brain) interruptRun(run *brainRun) {
 	}
 }
 
-// appendHistory appends one JSONL entry to the brain's history file.
-func (br *Brain) appendHistory(chatJID, from, text, typ string) {
+// AppendHistory appends one JSONL entry to the brain's history file.
+func (br *Brain) AppendHistory(chatJID, from, text, typ string) {
 	br.appendHistoryVia(chatJID, from, text, typ, "")
 }
 
-// appendHistoryVia is appendHistory for a line marked with how it came in
+// appendHistoryVia is AppendHistory for a line marked with how it came in
 // (see historyEntry.Via).
 func (br *Brain) appendHistoryVia(chatJID, from, text, typ, via string) {
-	br.appendEntry(history.Entry{From: from, Chat: chatJID, Text: text, Type: typ, Via: via})
+	br.AppendEntry(history.Entry{From: from, Chat: chatJID, Text: text, Type: typ, Via: via})
 }
 
-// appendEntry appends entry to the brain's history file, stamped with the
+// AppendEntry appends entry to the brain's history file, stamped with the
 // time now unless it has a time. It returns the line as it reads back, or
 // none when the file could not be opened.
-func (br *Brain) appendEntry(entry history.Entry) history.Entry {
+func (br *Brain) AppendEntry(entry history.Entry) history.Entry {
 	br.historyMu.Lock()
 	entry, err := history.Append(br.root, entry)
 	br.historyMu.Unlock()
@@ -1766,13 +1362,13 @@ func (br *Brain) appendEntry(entry history.Entry) history.Entry {
 	return entry
 }
 
-// recordDelivered writes the brain's answer text to chat into its
+// RecordDelivered writes the brain's answer text to chat into its
 // history once it reached WhatsApp, after remove took it out of the
 // outbox; when remove fails, it writes nothing and returns the error, and
 // the outbox tries again later, so the answer is recorded once. Both
 // happen under historyMu, which undelivered reads the outbox under: a run
 // finds the answer in the outbox or in the history, never in neither.
-func (br *Brain) recordDelivered(chatJID, text string, remove func() error) error {
+func (br *Brain) RecordDelivered(chatJID, text string, remove func() error) error {
 	br.historyMu.Lock()
 	if err := remove(); err != nil {
 		br.historyMu.Unlock()
@@ -1791,22 +1387,20 @@ func (br *Brain) entryWritten(entry history.Entry, err error) {
 		log.Printf("brain %s: failed to open history file %s: %v", br.id, filepath.Join(br.workDir, history.FileName), err)
 		return
 	}
-	if br.hooks != nil && br.hooks.OnHistory != nil {
-		br.hooks.OnHistory(br.id, entry)
-	}
+	br.sink.History(br.id, entry)
 }
 
 // undelivered returns the brain's answers in the chat that goes by chats
-// which are still on their way (BrainHooks.Undelivered). It reads them
-// under historyMu, which recordDelivered moves an answer from the outbox
+// which are still on their way (brainSink.Undelivered). It reads them
+// under historyMu, which RecordDelivered moves an answer from the outbox
 // into the history under: the history, read after, holds every answer
 // this did not return.
 func (br *Brain) undelivered(chats []string) []history.Entry {
-	if br.hooks == nil || br.hooks.Undelivered == nil {
+	if br.sink == nil || br.sink.target == nil {
 		return nil
 	}
 	br.historyMu.Lock()
-	all := br.hooks.Undelivered(br.id)
+	all := br.sink.Undelivered(br.id)
 	br.historyMu.Unlock()
 	var out []history.Entry
 	for _, e := range all {
@@ -1842,12 +1436,12 @@ func withUndelivered(entries, pending []history.Entry) []history.Entry {
 	return entries
 }
 
-// ── BrainManager ─────────────────────────────────────────────────────────
+// ── brainManager ─────────────────────────────────────────────────────────
 
-// BrainManager owns the brains and routes messages to them. Its brain set can
+// brainManager owns the brains and routes messages to them. Its brain set can
 // be replaced at any time with Apply: unchanged brains keep running untouched,
 // removed brains finish being stopped in the background.
-type BrainManager struct {
+type Manager struct {
 	reloadMu sync.Mutex // serialises Apply
 	// stopped is set by Stop, under reloadMu: the brains are stopped for
 	// good, and a reload would start new ones.
@@ -1859,64 +1453,75 @@ type BrainManager struct {
 	// which may be held by filesystem work during a reload.
 	forced atomic.Bool
 
-	mu       sync.RWMutex // guards the fields below; never held while calling into a Brain
-	brains   map[string]*Brain
-	retired  map[*Brain]struct{} // removed from order, until retirement finishes
-	order    []*Brain
-	byGroup  map[string]*Brain
-	dmBrain  *Brain // brain with handles_dms; nil falls through to fallback
-	fallback *Brain // brain marked default, else the first brain
-	issues   []registry.Issue
-	// held routes what an approved brain left out (see
-	// registry.Issue.leavesOut) would take to that brain's id, so that no
-	// other brain gets it meanwhile: your DMs from a DM brain whose
-	// folder has a problem went to the default brain. See heldRoutes.
-	held heldRoutes
+	mu      sync.RWMutex // guards the fields below; never held while calling into a Brain
+	brains  map[string]*Brain
+	retired map[*Brain]struct{} // removed from order, until retirement finishes
+	order   []*Brain
+	routes  *route.Table
 
-	profiler *SandboxProfiler
-	hooks    *BrainHooks
+	options Options
+	sink    *brainSinkRef
 	// slots bound the runs of every brain together, across reloads.
 	slots *runSlots
 }
 
-// NewBrainManager builds the configured brains.
-func NewBrainManager(cfg *config.Config) (*BrainManager, error) {
-	bm := &BrainManager{
-		brains:   map[string]*Brain{},
-		byGroup:  map[string]*Brain{},
-		profiler: NewSandboxProfiler(nil, cfg),
-		hooks:    &BrainHooks{},
-		slots:    newRunSlots(cfg.RunLimit()),
-	}
-	if err := bm.Apply(cfg); err != nil {
-		return nil, err
-	}
-	return bm, nil
+// brainManagerOptions supplies runtime dependencies without configuration or
+// host policy. The same Runner and Sink serve live and retired brains.
+type Options struct {
+	Runner      Runner
+	Sink        Sink
+	Input       InputRules
+	ViewerStart func(name, streamLog, cwd string, passthrough []string) (*platform.Viewer, error)
+	ClaimMedia  func(mediaDir, brainID string, paths []string) map[string]string
+	// ShutdownGrace is read when Stop reaches each live brain, at the old
+	// command policy lookup point. Nil uses the service's 15-second default.
+	ShutdownGrace func() time.Duration
 }
 
-// SetHooks wires the brains to the bridge. Call before the first message.
-func (bm *BrainManager) SetHooks(h BrainHooks) { *bm.hooks = h }
-
-// Apply makes the running brains match cfg. The bridge's PATH goes first,
-// before any brain folder is checked against it: the folders of it inside
-// a brain's folder leave it for that brain's runs (see setBridgePATH).
-func (bm *BrainManager) Apply(cfg *config.Config) error {
-	ownPATH := setBridgePATH(cfg)
-	specs, issues := ResolveBrains(cfg)
-	return bm.reload(specs, issues, cfg, ownPATH)
+// brainApplyOptions is one reload's command projection. SetDirs runs under
+// reloadMu, outside mu, before publishing the new brain set. Its closure
+// captures the configuration used for this Apply, rather than reading a
+// newer live configuration while updating sandbox profiles.
+type ApplyOptions struct {
+	Held    []route.Held
+	OwnPATH map[string][]string
+	SetDirs func(map[string][]string)
 }
 
-// reload runs the brains specs, with issues the problems ResolveBrains
-// found and ownPATH each brain's own PATH folders (see setBridgePATH).
-func (bm *BrainManager) reload(specs []manifest.Spec, issues []registry.Issue, cfg *config.Config, ownPATH map[string][]string) error {
+// brainOpenFailure reports a root which became unavailable after resolution.
+// It is converted into a registry diagnostic by command composition only.
+type OpenFailure struct {
+	Spec manifest.Spec
+	Err  error
+}
+
+func NewManager(options Options) *Manager {
+	return &Manager{
+		brains: map[string]*Brain{}, options: options,
+		sink: &brainSinkRef{target: options.Sink}, slots: newRunSlots(0),
+	}
+}
+
+// PauseRuns holds new run-slot grants until the returned function is called.
+// Startup replay uses it to apply later persisted edits before a queued run
+// can start. Releasing the pause is idempotent.
+func (bm *Manager) PauseRuns() func() { return bm.slots.pause() }
+
+// SetSink wires runtime delivery before the first message. Every current and
+// future brain shares this reference, like the former hooks pointer.
+func (bm *Manager) SetSink(s Sink) { bm.sink.target = s }
+
+// apply keeps unchanged brains running and retires removed ones in the
+// background. Resolution and process policy are supplied by the caller.
+func (bm *Manager) Apply(specs []manifest.Spec, globals Globals, options ApplyOptions) ([]OpenFailure, error) {
 	bm.reloadMu.Lock()
 	defer bm.reloadMu.Unlock()
 
 	if bm.stopped || bm.forced.Load() {
-		return errBrainsStopped
+		return nil, ErrStopped
 	}
 	if err := route.Validate(specs); err != nil {
-		return err
+		return nil, err
 	}
 
 	bm.mu.RLock()
@@ -1925,8 +1530,9 @@ func (bm *BrainManager) reload(specs []manifest.Spec, issues []registry.Issue, c
 
 	next := make(map[string]*Brain, len(specs))
 	order := make([]*Brain, 0, len(specs))
-	byGroup := map[string]*Brain{}
-	var dm, def *Brain
+	active := make([]manifest.Spec, 0, len(specs))
+	held := append([]route.Held(nil), options.Held...)
+	var failures []OpenFailure
 	workDirs := map[string][]string{}
 
 	// The folders opened for new brains, closed again unless they run.
@@ -1948,46 +1554,44 @@ func (bm *BrainManager) reload(specs []manifest.Spec, issues []registry.Issue, c
 		if sp.Path != "" && sp.Path != sp.Dir {
 			workDirs[m.ID] = []string{sp.Path, sp.Dir}
 		}
-		s := settingsFor(cfg, sp)
-		s.ownPATH = ownPATH[m.ID]
+		s := MergeSettings(globals, sp)
+		s.OwnPATH = append([]string(nil), options.OwnPATH[m.ID]...)
 		br, ok := old[m.ID]
 		if !ok || br.workDir != sp.Dir || !br.holdsFolder(sp.Dir) {
 			root, err := os.OpenRoot(sp.Dir)
 			if err != nil {
 				log.Printf("brain %s: leaving it out: %v", m.ID, err)
-				issues = append(issues, registry.Issue{ID: m.ID, Path: sp.Dir, Kind: "missing", Detail: "the folder cannot be opened: " + err.Error(), AtLoad: true, Entry: sp.Entry, Routing: m.Routing})
+				failures = append(failures, OpenFailure{Spec: sp, Err: err})
+				held = append(held, route.Held{ID: m.ID, Routing: m.Routing})
 				continue
 			}
 			br = &Brain{
-				id:      m.ID,
-				workDir: sp.Dir,
-				root:    root,
-				sandbox: bm.profiler,
-				hooks:   bm.hooks,
-				slots:   bm.slots,
+				id:          m.ID,
+				workDir:     sp.Dir,
+				root:        root,
+				runner:      bm.options.Runner,
+				viewerStart: bm.options.ViewerStart,
+				input:       bm.options.Input,
+				claimMedia:  bm.options.ClaimMedia,
+				sink:        bm.sink,
+				slots:       bm.slots,
 			}
 			created = append(created, br)
 		}
 		br.settings.Store(s)
-		if !s.viewer {
+		if !s.Viewer {
 			br.closeViewer() // the viewer setting was turned off
 		}
 
 		next[m.ID] = br
 		order = append(order, br)
-		for _, g := range m.Routing.Groups {
-			byGroup[g] = br
-		}
-		if m.Routing.HandlesDMs {
-			dm = br
-		}
-		if m.Routing.Default {
-			def = br
-		}
+		active = append(active, sp)
 	}
-	held := heldRoutesOf(issues, dm, byGroup)
-	if def == nil && len(order) > 0 && held.fallback == "" {
-		def = order[0]
+	// The complete set was validated before opening roots. Removing a spec
+	// cannot introduce a clash; BuildWithHeld also validates direct callers.
+	routes, err := route.BuildWithHeld(active, held)
+	if err != nil {
+		return nil, err
 	}
 
 	var removed []*Brain
@@ -1997,15 +1601,17 @@ func (bm *BrainManager) reload(specs []manifest.Spec, issues []registry.Issue, c
 		}
 	}
 
-	bm.profiler.Update(workDirs, cfg)
-	bm.slots.setLimit(cfg.RunLimit())
+	if options.SetDirs != nil {
+		options.SetDirs(workDirs)
+	}
+	bm.slots.setLimit(globals.RunLimit)
 
 	bm.mu.Lock()
 	// KillRuns publishes its latch under this same lock, so its snapshot
 	// cannot miss a newly published brain or one about to retire.
 	if bm.forced.Load() {
 		bm.mu.Unlock()
-		return errBrainsStopped
+		return nil, ErrStopped
 	}
 	if bm.retired == nil {
 		bm.retired = make(map[*Brain]struct{})
@@ -2013,7 +1619,7 @@ func (bm *BrainManager) reload(specs []manifest.Spec, issues []registry.Issue, c
 	for _, br := range removed {
 		bm.retired[br] = struct{}{}
 	}
-	bm.brains, bm.order, bm.byGroup, bm.dmBrain, bm.fallback, bm.issues, bm.held = next, order, byGroup, dm, def, issues, held
+	bm.brains, bm.order, bm.routes = next, order, routes
 	bm.mu.Unlock()
 	applied = true
 
@@ -2038,18 +1644,18 @@ func (bm *BrainManager) reload(specs []manifest.Spec, issues []registry.Issue, c
 			bm.requeue(br, waiting)
 		})
 	}
-	return nil
+	return failures, nil
 }
 
 // errBrainsStopped is a reload after Stop.
-var errBrainsStopped = errors.New("the brains are stopped")
+var ErrStopped = errors.New("the brains are stopped")
 
 // requeue hands what from had waiting when a reload took it out, which
 // never ran, to the brains that take it now: the brain in its new folder,
 // or the one its chat goes to. A message keeps its history lines where
 // that brain's history has them (see Brain.logInbound). One no brain takes
 // is dropped.
-func (bm *BrainManager) requeue(from *Brain, ms []Inbound) {
+func (bm *Manager) requeue(from *Brain, ms []Inbound) {
 	if bm.keepRetiredWaiting(from, ms) {
 		return
 	}
@@ -2062,7 +1668,7 @@ func (bm *BrainManager) requeue(from *Brain, ms []Inbound) {
 				continue
 			}
 			log.Printf("brain %s: dropping a message for %s that waited for it: %v", from.id, m.JID, err)
-			dropped([]Inbound{m})
+			Dropped([]Inbound{m})
 		case to.id != from.id:
 			log.Printf("brain %s: handed a message for %s that waited for it to brain %s", from.id, m.JID, to.id)
 		}
@@ -2071,207 +1677,64 @@ func (bm *BrainManager) requeue(from *Brain, ms []Inbound) {
 
 // keepRetiredWaiting sends a retired queue to shutdown persistence once
 // Stop has begun, instead of starting new work in the replacement brain.
-func (bm *BrainManager) keepRetiredWaiting(from *Brain, ms []Inbound) bool {
+func (bm *Manager) keepRetiredWaiting(from *Brain, ms []Inbound) bool {
 	bm.reloadMu.Lock()
 	stopped := bm.stopped
 	bm.reloadMu.Unlock()
 	if !stopped {
 		return false
 	}
-	if bm.hooks.Waiting != nil {
-		bm.hooks.Waiting(from, ms)
-	} else {
-		dropped(ms)
-	}
+	bm.sink.Waiting(from, ms)
 	return true
 }
 
-// settingsFor combines global settings with a brain's own.
-func settingsFor(cfg *config.Config, sp manifest.Spec) *brainSettings {
-	m := sp.Manifest
-	model := m.Model
-	if model == "" {
-		model = cfg.BrainModel
-	}
-	effort := m.Effort
-	if effort == "" {
-		effort = cfg.BrainEffort
-	}
-	tools := cfg.DisallowedTools
-	if m.DisallowedTools != nil {
-		tools = *m.DisallowedTools
-	}
-	if cfg.AgentProvider == "codex" {
-		model, effort = cfg.CodexModel, cfg.CodexEffort
-	}
-	return &brainSettings{
-		name:            m.Name,
-		manifest:        m,
-		claudePath:      cfg.ClaudePath,
-		provider:        cfg.AgentProvider,
-		codexPath:       cfg.CodexPath,
-		model:           model,
-		effort:          effort,
-		disallowedTools: append([]string(nil), tools...),
-		promptFile:      sp.PromptFile,
-		dangerously:     cfg.DangerouslySkipPermissions,
-		inheritUser:     cfg.InheritClaudeUserConfig,
-		otpGuard:        cfg.OTPGuard,
-		otpMarkers:      append([]string(nil), cfg.OTPMarkers...),
-		viewer:          cfg.Viewer,
-		runTimeout:      runTimeout(cfg),
-		queueMode:       cfg.Queue.Mode,
-		maxPending:      cfg.Queue.MaxPending,
-		observe:         m.Observe,
-		credsDir:        credentialsDirOf(cfg),
-		mediaDir:        cfg.MediaDir,
-		envPassthrough:  append([]string(nil), cfg.ChildEnvPassthrough...),
-		toolsDir:        ownLayout().Tools,
-		// Absolute: brains run in their own folder, where a relative
-		// data_dir would name another one.
-		dataDir:   absPath(cfg.DataDir),
-		dbPath:    absPath(cfg.DBPath),
-		plaudPATH: brainPlaudPATH(cfg),
-	}
-}
-
-// dataEnv tells brains where the bridge keeps its data. The tools in
-// tools/ read these until the bridge answered them (brainapi.go); compat:
-// brains and their scripts rely on these names, as on the other BRIDGE_
-// variables.
-func dataEnv(s *brainSettings) []string {
-	return []string{"BRIDGE_DATA_DIR=" + s.dataDir, "BRIDGE_DB_PATH=" + s.dbPath}
-}
-
-// credentialsDirOf is where per-brain credential files live.
-func credentialsDirOf(cfg *config.Config) string {
-	if cfg.Sandbox.CredentialsDir != "" {
-		return cfg.Sandbox.CredentialsDir
-	}
-	return cfg.DataDir
-}
-
-// heldRoutes are the chats of approved brains that are left out, by the
-// id of the brain that would take them.
-type heldRoutes struct {
-	dms      string            // the DM brain's
-	groups   map[string]string // by group JID
-	fallback string            // the default brain's: what no other brain takes
-}
-
-// heldRoutesOf returns what the brains issues leaves out would take, of
-// what no brain that runs (dm, the DM brain, and byGroup) takes instead.
-func heldRoutesOf(issues []registry.Issue, dm *Brain, byGroup map[string]*Brain) heldRoutes {
-	h := heldRoutes{groups: map[string]string{}}
-	for _, is := range issues {
-		if !is.LeavesOut() {
-			continue
-		}
-		if is.Routing.HandlesDMs && dm == nil && h.dms == "" {
-			h.dms = is.ID
-		}
-		for _, g := range is.Routing.Groups {
-			if _, ok := byGroup[g]; !ok && h.groups[g] == "" {
-				h.groups[g] = is.ID
-			}
-		}
-		if is.Routing.Default && h.fallback == "" {
-			h.fallback = is.ID
-		}
-	}
-	return h
-}
-
-// BrainFor returns the brain that handles the given chat, or nil: also
-// when the brain that would is left out (see HeldFor), rather than the
-// default brain.
-func (bm *BrainManager) BrainFor(jid string, isGroup bool) *Brain {
+// BrainFor returns the brain that handles a chat, or nil when the route is
+// reserved for an unavailable brain (see HeldFor).
+func (bm *Manager) BrainFor(jid string, isGroup bool) *Brain {
 	bm.mu.RLock()
 	defer bm.mu.RUnlock()
-	if isGroup {
-		if br, ok := bm.byGroup[jid]; ok {
-			return br
-		}
-		if bm.held.groups[jid] != "" {
-			return nil
-		}
-		return bm.fallback
-	}
-	if bm.dmBrain != nil {
-		return bm.dmBrain
-	}
-	if bm.held.dms != "" {
-		return nil
-	}
-	return bm.fallback
+	return bm.brains[bm.routes.For(jid, isGroup)]
 }
 
-// HeldFor returns the id of the brain left out (see registry.Issue.leavesOut)
-// that would handle the given chat, which therefore goes to no brain, or
-// "" when BrainFor answers for it.
-func (bm *BrainManager) HeldFor(jid string, isGroup bool) string {
+// HeldFor returns the unavailable brain that reserves the chat, or empty.
+func (bm *Manager) HeldFor(jid string, isGroup bool) string {
 	bm.mu.RLock()
 	defer bm.mu.RUnlock()
-	if isGroup {
-		if _, ok := bm.byGroup[jid]; ok {
-			return ""
-		}
-		if id := bm.held.groups[jid]; id != "" {
-			return id
-		}
-	} else {
-		if bm.dmBrain != nil {
-			return ""
-		}
-		if bm.held.dms != "" {
-			return bm.held.dms
-		}
-	}
-	if bm.fallback == nil {
-		return bm.held.fallback
-	}
-	return ""
+	return bm.routes.HeldFor(jid, isGroup)
 }
 
 // DMBrain returns the brain that gets direct messages: the one with
 // handles_dms, else the fallback brain, or nil.
-func (bm *BrainManager) DMBrain() *Brain { return bm.BrainFor("", false) }
+func (bm *Manager) DMBrain() *Brain { return bm.BrainFor("", false) }
 
 // Fallback returns the brain BrainFor falls back to, for the allowed groups
 // no brain claims and, while no brain has handles_dms, for direct
 // messages: the one marked default, else the first brain; nil when there
 // is none.
-func (bm *BrainManager) Fallback() *Brain {
+func (bm *Manager) Fallback() *Brain {
 	bm.mu.RLock()
 	defer bm.mu.RUnlock()
-	return bm.fallback
+	return bm.brains[bm.routes.Default()]
 }
 
 // Get returns a brain by id.
-func (bm *BrainManager) Get(id string) *Brain {
+func (bm *Manager) Get(id string) *Brain {
 	bm.mu.RLock()
 	defer bm.mu.RUnlock()
 	return bm.brains[id]
 }
 
 // Brains returns the brains in configuration order.
-func (bm *BrainManager) Brains() []*Brain {
+func (bm *Manager) Brains() []*Brain {
 	bm.mu.RLock()
 	defer bm.mu.RUnlock()
 	return append([]*Brain(nil), bm.order...)
 }
 
-// Issues returns the problems found the last time the brains were loaded.
-func (bm *BrainManager) Issues() []registry.Issue {
-	bm.mu.RLock()
-	defer bm.mu.RUnlock()
-	return append([]registry.Issue(nil), bm.issues...)
-}
-
 // Route returns the brain that handles m: the brain it names, else the one
 // its chat routes to. A message that names a brain that no longer exists gets
 // nil rather than whichever brain owns its chat.
-func (bm *BrainManager) Route(m Inbound) *Brain {
+func (bm *Manager) Route(m Inbound) *Brain {
 	if m.Brain != "" {
 		return bm.Get(m.Brain)
 	}
@@ -2281,10 +1744,10 @@ func (bm *BrainManager) Route(m Inbound) *Brain {
 // Submit routes a message to its brain. A message that lands on a brain being
 // removed at that moment is routed again once, with its files where that
 // brain left them (see Brain.submit).
-func (bm *BrainManager) Submit(m Inbound) (br *Brain, pos int, busy bool, err error) {
+func (bm *Manager) Submit(m Inbound) (br *Brain, pos int, busy bool, err error) {
 	for attempt := 0; attempt < 2; attempt++ {
 		if bm.forced.Load() {
-			return nil, 0, false, errBrainsStopped
+			return nil, 0, false, ErrStopped
 		}
 		br = bm.Route(m)
 		if br == nil && m.Brain != "" {
@@ -2294,7 +1757,7 @@ func (bm *BrainManager) Submit(m Inbound) (br *Brain, pos int, busy bool, err er
 			return nil, 0, false, fmt.Errorf("no brain configured for %s", m.JID)
 		}
 		pos, busy, err = br.submit(&m)
-		if !errors.Is(err, errBrainRetired) {
+		if !errors.Is(err, ErrRetired) {
 			return br, pos, busy, err
 		}
 	}
@@ -2306,19 +1769,19 @@ func (bm *BrainManager) Submit(m Inbound) (br *Brain, pos int, busy bool, err er
 // reply chat, often a chat another brain owns, so !stop there must reach it.
 // It reports whether a run was stopped and how many waiting messages were
 // dropped.
-func (bm *BrainManager) StopHandOffs(jid string) (stopped bool, dropped int) {
+func (bm *Manager) StopHandOffs(jid string) (stopped bool, Dropped int) {
 	for _, br := range bm.Brains() {
 		s, d := br.StopHandOffs(jid)
-		stopped, dropped = stopped || s, dropped+d
+		stopped, Dropped = stopped || s, Dropped+d
 	}
-	return stopped, dropped
+	return stopped, Dropped
 }
 
 // KillRuns cancels every brain's run in flight at once, for a second signal.
 // Before os.Exit it waits for each process supervisor to acknowledge the
 // kill, never for the runs' output or delivery. Cancellation alone could
 // return before os/exec's watcher had a chance to signal the process group.
-func (bm *BrainManager) KillRuns() {
+func (bm *Manager) KillRuns() {
 	bm.mu.Lock()
 	bm.forced.Store(true)
 	brains := append([]*Brain(nil), bm.order...)
@@ -2349,7 +1812,7 @@ func (bm *BrainManager) KillRuns() {
 // Brain.shutdown), all at once, after the brains reloads took out have
 // kept what they had waiting. Each run in flight gets shutdownGrace
 // to finish and be delivered.
-func (bm *BrainManager) Stop() {
+func (bm *Manager) Stop() {
 	bm.reloadMu.Lock()
 	bm.stopped = true
 	brains := bm.Brains()
@@ -2362,16 +1825,18 @@ func (bm *BrainManager) Stop() {
 	// Otherwise those workers could requeue a message into a live brain
 	// and start it while the rest of shutdown waited for retirement.
 	for i, br := range brains {
-		if bm.hooks.Waiting != nil {
-			bm.hooks.Waiting(br, waiting[i])
-		} else {
-			dropped(waiting[i])
-		}
+		bm.sink.Waiting(br, waiting[i])
 	}
 	bm.retiring.Wait()
 	var wg sync.WaitGroup
 	for _, br := range brains {
-		wg.Go(func() { br.shutdown(shutdownGrace) })
+		wg.Go(func() {
+			grace := 15 * time.Second
+			if bm.options.ShutdownGrace != nil {
+				grace = bm.options.ShutdownGrace()
+			}
+			br.shutdown(grace)
+		})
 	}
 	wg.Wait()
 }

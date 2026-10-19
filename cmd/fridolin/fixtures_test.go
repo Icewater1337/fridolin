@@ -252,7 +252,7 @@ func TestBrainV1Fixture(t *testing.T) {
 }
 
 // TestHistoryV1Fixture: every line of history-v1.jsonl reads back and is
-// written again byte for byte, as appendHistory writes lines, and the
+// written again byte for byte, as AppendHistory writes lines, and the
 // lines between them have every type and set every field.
 func TestHistoryV1Fixture(t *testing.T) {
 	sc := bufio.NewScanner(bytes.NewReader(fixture(t, "history-v1.jsonl")))

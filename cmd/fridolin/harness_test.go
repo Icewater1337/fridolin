@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"github.com/Icewater1337/fridolin/internal/registry"
+	"github.com/Icewater1337/fridolin/internal/whatsapp"
 	"io"
 	"maps"
 	"net/http"
@@ -15,10 +17,6 @@ import (
 	"sync"
 	"testing"
 	"time"
-
-	"github.com/Icewater1337/fridolin/internal/whatsapp"
-
-	"github.com/Icewater1337/fridolin/internal/registry"
 
 	"github.com/Icewater1337/fridolin/internal/config"
 

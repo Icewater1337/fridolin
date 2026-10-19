@@ -11,9 +11,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Icewater1337/fridolin/internal/registry"
-
 	"github.com/Icewater1337/fridolin/internal/fsx"
+	"github.com/Icewater1337/fridolin/internal/registry"
 	"github.com/Icewater1337/fridolin/internal/testutil"
 )
 

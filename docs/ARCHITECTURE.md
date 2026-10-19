@@ -35,17 +35,17 @@ behaviour unless its title says so. The steps so far:
   remain in `cmd/fridolin`.
 - **R4, history slice**: `history` owns the conversation entry format and
   rooted file reads, appends and rewrites; `fsx` owns the regular-file opener.
-  Runtime history locking, inbound bookkeeping and outbox merging remain in
-  `cmd/fridolin`.
+  Runtime history locking, inbound bookkeeping and outbox merging now live in
+  `brain` (R10).
 
 - **R4 (chat)**: the shared message content, quotes, changes, connection
   and group DTOs, and pure JID/merge helpers live in `internal/chat`. The
-  command keeps the runtime wrapper carrying logged history and merged
-  parts until the brain extraction.
+  runtime wrapper carrying logged history and merged parts now lives in
+  `brain` (R10).
 
 - **R4, OTP slice**: `otp` owns code recognition, recent request lookup,
-  handoff records and expiry. The command keeps runtime settings, inbound
-  source checks and bridge callbacks.
+  handoff records and expiry. The runtime keeps settings and inbound source
+  checks; command composition supplies bridge callbacks.
 - **R4 (media)**: the `media` package owns bounded attachment creation,
   per-brain inboxes, path confinement and the legacy media migration. Its
   caller supplies the shared migration lifecycle and working directory.
@@ -122,6 +122,18 @@ behaviour unless its title says so. The steps so far:
   sources may import `testutil`, which uses only the standard library.
 
 
+
+- **R10, runtime slice**: `brain` owns pinned brain folders, settings snapshots,
+  per-chat queues, shared run slots, prompt inputs, history ordering and the
+  live/retired runtime set. `Manager.Apply` takes manifest specs, owned globals,
+  held routes and a folder-policy callback. The command keeps configuration,
+  registry diagnostics, process/environment/sandbox composition, viewer and media
+  adapters. `Runner` and `Sink` preserve start publication, process-stop
+  acknowledgements, question delivery and durable shutdown handoffs. Queue and
+  lifecycle tests live with their private state; integration tests observe public
+  snapshots, persisted inbound values or captured Runner inputs. The saved inbound
+  wire shape is unchanged, with original decoder diagnostics retained at the SQL
+  boundary. The config subscriber reads the current store under its reconcile lock.
 
 - **R11, access slice**: `access` owns pure admission, group addressing,
   silence and text decisions. Transports project facts into `chat.Envelope`;
@@ -206,7 +218,7 @@ them needs its own migration plan, not a refactor.
 | `bridge.db`: the whatsmeow device store plus `polls`, `poll_votes`, `ignored_chats`, `outbox` and `inbound_queue`, versioned in `fridolin_version`. The retired `sessions` and `process_state` tables stay in the schema and are never dropped. Opening an existing file must never force a re-pair. | `internal/store` | `internal/store/store.go`, `internal/store/outbox_store.go` |
 | `config.json` keys and meanings. The retired keys `model`, `work_dir`, `brain_mode` and `brains` still load. | `internal/config` | `config.go`, `configstore.go` |
 | `brain.json`, version 1. | `internal/manifest` | `manifest.go` |
-| `conversation-history.jsonl`: one JSON object per line, `{ts, from, chat, text, type}`. | `internal/history` | `brain.go` |
+| `conversation-history.jsonl`: one JSON object per line, `{ts, from, chat, text, type}`. | `internal/history` | `internal/brain` |
 | `POST /send`, `POST /ingest`, `GET /health`, `GET /ready` (docs/API.md): plain-text error bodies, today's status codes, the scripts token and run tokens. | `internal/httpapi` (`script.go`) | `server.go`, `scripttoken.go` |
 | The brain API `/brain/` and the commands brains run with it: `fridolin history`, `fridolin polls`, `fridolin calendar`. | `internal/httpapi`, `cmd/fridolin` | `brainapi.go`, `toolcmd.go`, `*_cmd.go` |
 | Dashboard headers `X-Bridge-Token` and `X-Bridge-Dashboard`; the token files `<data_dir>/dashboard.token` and `<data_dir>/scripts.token`; the login sessions of `fridolin open`. | `internal/httpapi` | `dashboard.go`, `dashsession.go` |
@@ -419,8 +431,8 @@ responsibility and says what it must not do.
   `HasMarker` and `DefaultMarkers` recognize requests. `Handoff.Write`
   writes a caught code as a `Record`, and the request it
   answers, to the file local scripts read.
-- **`brain`** *(to come, R10; `brain.go`, `runrecord.go`, `observe.go`,
-  `runslots.go`)*: the brain runtime. `Manager` owns the brain set, swaps
+- **`brain`** (`internal/brain`; command adapters retain `runrecord.go`
+  and `observe.go`): the brain runtime. `Manager` owns the brain set, swaps
   the routing table atomically on `Apply`, keeps unchanged brains (and
   their running process) across reloads, retires removed ones in the
   background, and holds the run slots all brains share
@@ -558,12 +570,14 @@ leaves (standard library only): fsx, textx, version, apperr, trigger, chat,
 
 Today `cmd/fridolin` imports `web`, `examples`, `site`, `fsx`, `textx`,
 `version`, `trigger`, `platform`, `chat`, `history`, `logx`, `store`,
-`otp`, `media`, `activity`, `httpapi`, `access`, `devchat` and `whatsapp`. WhatsApp imports `access`,
+`otp`, `media`, `activity`, `httpapi`, `access`, `devchat`, `whatsapp` and `brain`. WhatsApp imports `access`,
 `media`, `platform`, `chat` and `textx`; its fixtures also use `logx` and
 `trigger`. Devchat imports `chat` and `textx`. Access imports only
 `chat` and `trigger`; HTTP helpers import `fsx`. History imports `fsx`; store imports `fsx`
 and `logx`; OTP imports `history` and `fsx`; media imports `fsx` and `textx`;
-activity imports `history` and `textx`. The other extracted packages import
+activity imports `history` and `textx`. Brain imports `chat`, `claudecli`, `fsx`,
+`history`, `manifest`, `otp`, `platform`, `prompt`, `route` and `textx`; its tests
+also use `testutil`. The other extracted packages import
 nothing of the module.
 
 The rules:
@@ -1108,8 +1122,9 @@ run fails with an error and no process starts.
 
 ### Claude runs
 
-`brain` builds `claudecli.Args` and a `RunSpec`. The production `Runner` in
-`app` wraps the command with `sandbox.Profiler` and calls `claudecli.Run`:
+`brain` builds a prompt and a `RunSpec` carrying the run settings snapshot. The
+production `commandRunner` in `cmd/fridolin` projects provider arguments, supplies
+the environment, wraps the command with the sandbox and calls `claudecli.Run`:
 
 - The process leads a session of its own, so it has no controlling
   terminal and leads its own process group. `cmd.Cancel` kills the group
@@ -1328,7 +1343,7 @@ runs for untagged group chatter (`observe.go`, `prompt.go`), the durable
 outbox (`outbox.go`), capability tokens for `/send` and `/ingest` with the
 brain API (`scripttoken.go`, `brainapi.go`), the Go-owned `history`,
 `polls` and `calendar` subcommands (`toolcmd.go`, `*_cmd.go`), per-chat
-lanes in a brain's queue and shared run slots (`brain.go`, `runslots.go`),
+lanes in a brain's queue and shared run slots (`internal/brain`),
 a real `!reset`, which writes a reset marker the next prompt stops at
 (`history.go`), the group-member policy (`group_policy.go`), and the
 sandbox's write deny by default with each brain's own media inbox and

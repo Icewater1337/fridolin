@@ -54,15 +54,23 @@ func Validate(specs []manifest.Spec) error {
 	return nil
 }
 
-// Table is a snapshot of routing from approved, runnable brain specs.
-// Runtime routes held for unavailable brains remain with the manager until
-// its later extraction; this table does not replace that runtime state.
+// Held is the approved routing of a brain that cannot currently run. The
+// caller decides which resolution failures reserve their routes.
+type Held struct {
+	ID      string
+	Routing manifest.Routing
+}
+
+// Table is a snapshot of runnable brains and the routes reserved for brains
+// temporarily left out. It owns its routing values independently of callers.
 type Table struct {
-	entries  map[string]routeEntry
-	groups   map[string]string
-	dm       string
-	fallback string
-	dirs     []string
+	entries             map[string]routeEntry
+	groups              map[string]string
+	dm                  string
+	fallback            string
+	dirs                []string
+	heldDM, heldDefault string
+	heldGroups          map[string]string
 }
 
 type routeEntry struct {
@@ -74,6 +82,13 @@ type routeEntry struct {
 // Build validates the set and records its current routing values.
 // Individual manifest validation belongs to the caller resolving the specs.
 func Build(specs []manifest.Spec) (*Table, error) {
+	return BuildWithHeld(specs, nil)
+}
+
+// BuildWithHeld keeps unavailable brains' approved routes from falling
+// through to an unrelated brain. Active explicit routes take precedence;
+// the first held claim wins when several unavailable brains claim a route.
+func BuildWithHeld(specs []manifest.Spec, held []Held) (*Table, error) {
 	if err := Validate(specs); err != nil {
 		return nil, err
 	}
@@ -92,7 +107,21 @@ func Build(specs []manifest.Spec) (*Table, error) {
 			t.fallback = m.ID
 		}
 	}
-	if t.fallback == "" && len(specs) > 0 {
+	t.heldGroups = map[string]string{}
+	for _, h := range held {
+		if h.Routing.HandlesDMs && t.dm == "" && t.heldDM == "" {
+			t.heldDM = h.ID
+		}
+		for _, group := range h.Routing.Groups {
+			if t.groups[group] == "" && t.heldGroups[group] == "" {
+				t.heldGroups[group] = h.ID
+			}
+		}
+		if h.Routing.Default && t.heldDefault == "" {
+			t.heldDefault = h.ID
+		}
+	}
+	if t.fallback == "" && len(specs) > 0 && t.heldDefault == "" {
 		t.fallback = specs[0].Manifest.ID
 	}
 	return t, nil
@@ -100,21 +129,61 @@ func Build(specs []manifest.Spec) (*Table, error) {
 
 // For returns the brain id that handles the chat, or empty for an empty set.
 func (t *Table) For(jid string, isGroup bool) string {
+	if t == nil {
+		return ""
+	}
 	if isGroup {
 		if id, ok := t.groups[jid]; ok {
 			return id
 		}
+		if t.heldGroups[jid] != "" {
+			return ""
+		}
 	} else if t.dm != "" {
 		return t.dm
+	} else if t.heldDM != "" {
+		return ""
 	}
 	return t.fallback
+}
+
+// HeldFor returns the unavailable brain whose route prevents fallback, or
+// empty when a runnable brain (or no configured brain) takes the chat.
+func (t *Table) HeldFor(jid string, isGroup bool) string {
+	if t == nil {
+		return ""
+	}
+	if isGroup {
+		if t.groups[jid] != "" {
+			return ""
+		}
+		if id := t.heldGroups[jid]; id != "" {
+			return id
+		}
+	} else {
+		if t.dm != "" {
+			return ""
+		}
+		if t.heldDM != "" {
+			return t.heldDM
+		}
+	}
+	if t.fallback == "" {
+		return t.heldDefault
+	}
+	return ""
 }
 
 // Has reports whether id belongs to this table.
 func (t *Table) Has(id string) bool { _, ok := t.entries[id]; return ok }
 
 // Default returns the explicit default brain, or the first configured brain.
-func (t *Table) Default() string { return t.fallback }
+func (t *Table) Default() string {
+	if t == nil {
+		return ""
+	}
+	return t.fallback
+}
 
 // Dirs returns the canonical folders in configured order as a fresh slice.
 func (t *Table) Dirs() []string { return append([]string(nil), t.dirs...) }

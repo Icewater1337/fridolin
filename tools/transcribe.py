@@ -4,8 +4,8 @@
 # /// script
 # requires-python = ">=3.9"
 # dependencies = [
-#     "torch>=2.1.0,<3",
-#     "transformers>=4.57.0,<5",
+#     "torch>=2.2.0,<3",
+#     "transformers>=4.57.0,<6",
 #     "accelerate>=0.27.0,<2",
 #     "groq>=0.11.0,<2",
 # ]

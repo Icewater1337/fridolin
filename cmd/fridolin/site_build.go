@@ -21,6 +21,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/Icewater1337/fridolin/internal/brain"
 	outboundmsg "github.com/Icewater1337/fridolin/internal/outbound"
 
 	"github.com/Icewater1337/fridolin/internal/manifest"
@@ -182,7 +183,7 @@ func (b *Bridge) buildAPI(mux *http.ServeMux) {
 }
 
 // buildBrain returns the builder brain a build request names.
-func (b *Bridge) buildBrain(w http.ResponseWriter, r *http.Request) *Brain {
+func (b *Bridge) buildBrain(w http.ResponseWriter, r *http.Request) *brain.Brain {
 	id := r.PathValue("id")
 	br := b.brainMgr.Get(id)
 	if br == nil || !b.site.IsBuilder(id) {
@@ -209,7 +210,7 @@ func (b *Bridge) apiBuildChat(w http.ResponseWriter, r *http.Request) {
 	}
 	resp := map[string]any{"messages": ch.Messages, "thread": ch.Thread, "running": running, "queued": queued, "activity": []string{}}
 	if running {
-		resp["activity"] = currentRunLog(br.streamLogPath(), rt.Running.PID)
+		resp["activity"] = currentRunLog(br.StreamLogPath(), rt.Running.PID)
 	}
 	if p := b.site.previewOf(br.ID()); p != nil {
 		resp["preview"] = b.site.previewURLs(br.ID(), p)
@@ -244,7 +245,7 @@ func (b *Bridge) apiBuildSend(w http.ResponseWriter, r *http.Request) {
 		httpapi.WriteErr(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	m := Inbound{Inbound: chat.Inbound{JID: buildChatJID(br.ID(), ch.Thread), Sender: "dashboard", Brain: br.ID(),
+	m := brain.Inbound{Inbound: chat.Inbound{JID: buildChatJID(br.ID(), ch.Thread), Sender: "dashboard", Brain: br.ID(),
 		Text: text, Source: "site-build", At: time.Now()},
 	}
 	if _, _, _, err := b.brainMgr.Submit(m); err != nil {
@@ -316,7 +317,7 @@ func currentRunLog(path string, pid int) []string {
 	}
 	start, end, headings := -1, len(lines), 0
 	for i, l := range lines {
-		p, ok := runHeadingPID(l)
+		p, ok := brain.RunHeadingPID(l)
 		if !ok {
 			continue
 		}
@@ -360,7 +361,7 @@ func precedingRunPID(r io.Reader) int {
 	for {
 		line, err := reader.ReadSlice('\n')
 		if !fragment && err != bufio.ErrBufferFull {
-			if p, ok := runHeadingPID(strings.TrimSuffix(string(line), "\n")); ok {
+			if p, ok := brain.RunHeadingPID(strings.TrimSuffix(string(line), "\n")); ok {
 				pid = p
 			}
 		}

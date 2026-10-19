@@ -6,7 +6,6 @@ import (
 	"errors"
 	"io"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strconv"
@@ -16,8 +15,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Icewater1337/fridolin/internal/brain"
 	"github.com/Icewater1337/fridolin/internal/chat"
-	"github.com/Icewater1337/fridolin/internal/claudecli"
+
 	"github.com/Icewater1337/fridolin/internal/manifest"
 	"github.com/Icewater1337/fridolin/internal/testutil"
 )
@@ -83,7 +83,7 @@ func TestDetachedChildDoesNotHoldTheBrain(t *testing.T) {
 			if el := time.Since(start); el > tc.within+2*time.Second {
 				t.Errorf("the answer took %v, want it within %v", el, tc.within)
 			}
-			if last := mgr.Get("a").Snapshot().Last; last == nil || last.Outcome != outcomeOK {
+			if last := mgr.Get("a").Snapshot().Last; last == nil || last.Outcome != "ok" {
 				t.Errorf("last run = %+v, want outcome ok", last)
 			}
 
@@ -92,7 +92,7 @@ func TestDetachedChildDoesNotHoldTheBrain(t *testing.T) {
 			if err := os.Unsetenv("FRIDOLIN_FAKE_SETSID_CHILD"); err != nil {
 				t.Fatal(err)
 			}
-			next := Inbound{Inbound: chat.Inbound{JID: "120363000000000000@g.us", Sender: "15551234567", Text: "next"}}
+			next := brain.Inbound{Inbound: chat.Inbound{JID: "120363000000000000@g.us", Sender: "15551234567", Text: "next"}}
 			if _, _, _, err := mgr.Submit(next); err != nil {
 				t.Fatal(err)
 			}
@@ -101,127 +101,6 @@ func TestDetachedChildDoesNotHoldTheBrain(t *testing.T) {
 				t.Errorf("next result = %+v, want the answer", res)
 			}
 		})
-	}
-}
-
-// TestStopWhileOutputIsHeld: a stop ends a run whose output a process
-// outside its group holds, within runWaitDelay, as an interrupted run.
-// The bridge kept reading that output once the CLI was killed, and the
-// stop gave up after 10 seconds with the brain still busy.
-func TestStopWhileOutputIsHeld(t *testing.T) {
-	for _, provider := range []string{"claude", "codex"} {
-		t.Run(provider, func(t *testing.T) {
-			prevDelay := runWaitDelay
-			runWaitDelay = 300 * time.Millisecond
-			t.Cleanup(func() { runWaitDelay = prevDelay })
-			mgr, d, home := queueTestManager(t, 30000, "")
-			br := mgr.Get("a")
-			settings := *br.settings.Load()
-			settings.provider, settings.codexPath = provider, settings.claudePath
-			br.settings.Store(&settings)
-			setsidChildren(t, home, "stdout")
-			if _, _, _, err := mgr.Submit(dm("long task")); err != nil {
-				t.Fatal(err)
-			}
-			testutil.WaitFor(t, 5*time.Second, "the run's grandchild", func() bool {
-				data, _ := os.ReadFile(filepath.Join(home, "pids"))
-				return len(strings.Fields(string(data))) == 2
-			})
-			start := time.Now()
-			if !br.StopCurrent(false) {
-				t.Fatal("StopCurrent found no run")
-			}
-			if el := time.Since(start); el > 3*time.Second {
-				t.Errorf("the stop took %v", el)
-			}
-			testutil.WaitFor(t, 5*time.Second, "the stopped run", func() bool { return d.count() == 1 })
-			if res := d.all()[0].res; !errors.Is(res.Err, claudecli.ErrInterrupted) {
-				t.Errorf("result = %+v, want interrupted", res)
-			}
-		})
-	}
-}
-
-// TestStopAfterTheRunWasReapedSendsNoSignal: once Wait has reaped the CLI,
-// its PID is no longer the run's, and a stop that comes before the run is
-// finished, StopCurrent racing its end, signals nothing. The run kept the
-// PID until it was finished, and a stop killed that process group: by
-// then, with the PID taken by another process, someone else's.
-func TestStopAfterTheRunWasReapedSendsNoSignal(t *testing.T) {
-	mgr, _, _ := queueTestManager(t, 0, "")
-	br := mgr.Get("a")
-	m := dm("quick")
-	ctx, cancel := runContext(0)
-	run := &brainRun{cancel: cancel, done: make(chan struct{}), msg: m, started: time.Now()}
-	br.mu.Lock()
-	br.current = run
-	br.mu.Unlock()
-	if res := br.invoke(run, ctx, br.settings.Load(), m); res.Err != nil {
-		t.Fatal(res.Err)
-	}
-	// The run is over, but not yet finished: what the worker does next.
-	if rt := br.Snapshot(); rt.Running == nil || rt.Running.PID != 0 {
-		t.Errorf("running %+v once the CLI was reaped, want the run without a PID", rt.Running)
-	}
-
-	// As if the CLI's PID had gone to another process group's leader, and
-	// the run still named it.
-	other := exec.Command("sleep", "30")
-	other.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
-	if err := other.Start(); err != nil {
-		t.Fatal(err)
-	}
-	exited := make(chan struct{})
-	go func() {
-		_ = other.Wait()
-		close(exited)
-	}()
-	t.Cleanup(func() {
-		_ = other.Process.Kill()
-		<-exited
-	})
-	br.mu.Lock()
-	run.pid = other.Process.Pid
-	br.mu.Unlock()
-
-	stopped := make(chan bool, 1)
-	go func() { stopped <- br.StopCurrent(false) }()
-	<-ctx.Done() // the stop cancelled the run, and waits for it to finish
-	br.finishRun(run)
-	if !<-stopped {
-		t.Error("StopCurrent found no run")
-	}
-	select {
-	case <-exited:
-		t.Errorf("the stop killed process %d, which had the run's PID", other.Process.Pid)
-	case <-time.After(300 * time.Millisecond):
-	}
-}
-
-// TestStopBeforeTheCLIStartsIsAnInterruption: a run stopped while it is
-// prepared, before the CLI starts, is recorded as interrupted, as one
-// stopped a moment later is. Start's "context canceled" made it a failed
-// run, shown as an error on the dashboard.
-func TestStopBeforeTheCLIStartsIsAnInterruption(t *testing.T) {
-	mgr, d, _ := queueTestManager(t, 0, "")
-	br := mgr.Get("a")
-	mgr.SetHooks(BrainHooks{Deliver: d.add, ExtraArgs: func(string) []string {
-		// The last thing before the CLI starts that a stop can come in.
-		br.mu.Lock()
-		cur := br.current
-		br.mu.Unlock()
-		br.interruptRun(cur)
-		return nil
-	}})
-	if _, _, _, err := mgr.Submit(dm("stopped at once")); err != nil {
-		t.Fatal(err)
-	}
-	testutil.WaitFor(t, 5*time.Second, "the run", func() bool { return d.count() == 1 })
-	if res := d.all()[0].res; !errors.Is(res.Err, claudecli.ErrInterrupted) {
-		t.Errorf("result = %+v, want interrupted", res)
-	}
-	if last := br.Snapshot().Last; last == nil || last.Outcome != outcomeInterrupted || last.Error != "" {
-		t.Errorf("last run = %+v, want outcome interrupted", last)
 	}
 }
 
@@ -280,302 +159,33 @@ func TestSiteSearchKeepsOnlyTheEndOfStderr(t *testing.T) {
 	}
 }
 
-// A result is final even if a stop or deadline arrives while inherited
-// output is still open. Keep both answers and the CLI's own error then.
-func TestCancellationKeepsTheRecordedResult(t *testing.T) {
-	cases := []struct {
-		name      string
-		errorText string
-		timeout   bool
-		empty     bool
-	}{
-		{"stop after answer", "", false, false},
-		{"stop after empty result", "", false, true},
-		{"stop after error", "API quota exhausted", false, false},
-		{"timeout after error", "API quota exhausted", true, false},
-	}
-	for _, provider := range []string{"claude", "codex"} {
-		for _, tc := range cases {
-			t.Run(provider+"/"+tc.name, func(t *testing.T) {
-				prevGrace, prevDelay := postResultGrace, runWaitDelay
-				postResultGrace, runWaitDelay = 30*time.Second, 3*time.Second
-				t.Cleanup(func() { postResultGrace, runWaitDelay = prevGrace, prevDelay })
-				mgr, _, home := queueTestManager(t, 0, "")
-				setsidChildren(t, home, "stdout,stderr")
-				const answer = "The recorded answer"
-				br := mgr.Get("a")
-				settings := *br.settings.Load()
-				settings.provider = provider
-				settings.codexPath = settings.claudePath // the same fake prints either stream below
-				var output string
-				if provider == "codex" {
-					switch {
-					case tc.empty:
-						output = `{"type":"turn.completed"}`
-					case tc.errorText != "":
-						output = `{"type":"turn.failed","error":{"message":` + strconv.Quote(tc.errorText) + `}}`
-					default:
-						output = `{"type":"item.completed","item":{"type":"agent_message","text":` + strconv.Quote(answer) + `}}` + "\n" + `{"type":"turn.completed"}`
-					}
-				} else {
-					switch {
-					case tc.empty:
-						output = `{"type":"result","result":""}`
-					case tc.errorText != "":
-						output = `{"type":"result","is_error":true,"result":` + strconv.Quote(tc.errorText) + `}`
-					default:
-						output = `{"type":"result","result":` + strconv.Quote(answer) + `}`
-					}
-				}
-				t.Setenv("FRIDOLIN_FAKE_RESULT", output)
-				ctx, cancel := context.WithCancel(context.Background())
-				if tc.timeout {
-					cancel()
-					ctx, cancel = context.WithTimeout(context.Background(), 2*time.Second)
-				}
-				defer cancel()
-				m := dm("answer before stopping")
-				run := &brainRun{cancel: cancel, done: make(chan struct{}), msg: m}
-				result := make(chan claudecli.Result, 1)
-				go func() { result <- br.invokeGuarded(run, ctx, &settings, m) }()
-				testutil.WaitFor(t, 5*time.Second, "the recorded result", func() bool {
-					data, _ := os.ReadFile(filepath.Join(br.workDir, streamLogName))
-					return strings.Contains(string(data), "✅ Result:") || strings.Contains(string(data), "❌ Error:")
-				})
-				if !tc.timeout {
-					cancel()
-				}
-				select {
-				case res := <-result:
-					if tc.empty {
-						if !errors.Is(res.Err, claudecli.ErrNoResult) {
-							t.Errorf("result = %+v, want errNoResult", res)
-						}
-					} else if tc.errorText == "" {
-						if res.Err != nil || res.Text != answer {
-							t.Errorf("result = %+v, want the recorded answer", res)
-						}
-					} else {
-						var cliErr *claudecli.Error
-						if !errors.As(res.Err, &cliErr) || cliErr.Message != tc.errorText || cliErr.Provider != provider {
-							t.Errorf("result = %+v, want CLI error %q", res, tc.errorText)
-						}
-					}
-				case <-time.After(10 * time.Second):
-					t.Fatal("the cancelled run kept waiting for inherited output")
-				}
-			})
-		}
-	}
-}
-
-// A second signal may exit the bridge as soon as KillRuns returns. Even
-// with a delayed supervisor it must first signal every run, then wait for
-// the acknowledgement, without waiting for blocked reply hooks/run.done.
-func TestKillRunsWaitsForProcessCancellation(t *testing.T) {
-	var runs []*brainRun
-	var contexts []context.Context
-	mgr := &BrainManager{}
-	for range 2 {
-		ctx, cancel := context.WithCancel(context.Background())
-		t.Cleanup(cancel)
-		run := &brainRun{cancel: cancel, done: make(chan struct{}), process: &fakeProcessStop{stopped: make(chan struct{})}}
-		runs = append(runs, run)
-		contexts = append(contexts, ctx)
-		mgr.order = append(mgr.order, &Brain{current: run})
-		// Both cancellations must be requested before either supervisor
-		// acknowledges stopping; otherwise one delayed run blocks another.
-		t.Cleanup(func() {
-			if ctx.Err() == nil {
-				t.Error("run was not cancelled")
-			}
-		})
-	}
-	finished := make(chan struct{})
-	go func() { mgr.KillRuns(); close(finished) }()
-	defer func() {
-		for _, run := range runs {
-			run.process.(*fakeProcessStop).acknowledgeStop()
-		}
-		<-finished
-	}()
-	for _, ctx := range contexts {
-		select {
-		case <-ctx.Done():
-		case <-time.After(5 * time.Second):
-			t.Fatal("one delayed supervisor prevented cancelling the other run")
-		}
-	}
-	select {
-	case <-finished:
-		t.Fatal("force-exit returned before either supervisor acknowledged the kill")
-	case <-time.After(50 * time.Millisecond):
-	}
-	runs[0].process.(*fakeProcessStop).acknowledgeStop()
-	select {
-	case <-finished:
-		t.Fatal("force-exit returned before the second supervisor acknowledged the kill")
-	case <-time.After(50 * time.Millisecond):
-	}
-	runs[1].process.(*fakeProcessStop).acknowledgeStop()
-	select {
-	case <-finished:
-	case <-time.After(time.Second):
-		t.Fatal("force-exit waited for output or delivery after both kills were acknowledged")
-	}
-}
-
-// Force-exit also closes the gap before cmd.Start: once it returns,
-// preparation that was still running must never create a new child.
-func TestKillRunsPreventsALateProcess(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	run := &brainRun{cancel: cancel, done: make(chan struct{})}
-	mgr := &BrainManager{order: []*Brain{{current: run}}}
-	mgr.KillRuns()
-	// An independent context deliberately tests the startup barrier,
-	// rather than relying on os/exec noticing the cancelled run context.
-	marker := filepath.Join(t.TempDir(), "started")
-	proc, err := run.startProcess(context.Background(), claudecli.Spawn{WaitDelay: runWaitDelay, Binary: "/bin/sh", Args: []string{"-c", `echo started > "$1"`, "sh", marker}})
-	if proc != nil {
-		_ = proc.Wait()
-	}
-	if !errors.Is(err, context.Canceled) {
-		t.Errorf("late start = %v, want cancellation", err)
-	}
-	if _, err := os.Stat(marker); !os.IsNotExist(err) {
-		t.Error("force-exit allowed a later process to start")
-	}
-	if ctx.Err() == nil {
-		t.Error("run was not cancelled")
-	}
-}
-
-// A run may still be delivering after its CLI exited. Force-exit must use
-// the completed supervisor's acknowledgement, without another PID signal
-// or waiting for that delivery to finish.
-func TestKillRunsAfterCLIExit(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	run := &brainRun{cancel: cancel, done: make(chan struct{})}
-	proc, err := run.startProcess(ctx, claudecli.Spawn{WaitDelay: runWaitDelay, Binary: "/bin/sh", Args: []string{"-c", "exit 0"}})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := proc.Wait(); err != nil {
-		t.Fatal(err)
-	}
-	mgr := &BrainManager{order: []*Brain{{current: run}}}
-	stopped := make(chan struct{})
-	go func() { mgr.KillRuns(); close(stopped) }()
-	select {
-	case <-stopped:
-	case <-time.After(time.Second):
-		t.Fatal("force-exit waited for delivery after the CLI had exited")
-	}
-}
-
-func TestKillRunsIncludesRetiringBrains(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	proc := &fakeProcessStop{stopped: make(chan struct{})}
-	proc.acknowledgeStop()
-	old := &Brain{current: &brainRun{cancel: cancel, process: proc}}
-	mgr := &BrainManager{retired: map[*Brain]struct{}{old: {}}}
-	mgr.KillRuns()
-	if ctx.Err() == nil {
-		t.Fatal("force-exit missed the run removed from the current brain set")
-	}
-	if !old.retired {
-		t.Fatal("force-exit left the retired brain's queue open")
-	}
-}
-
-func TestKillRunsFreezesQueuedAndNewRuns(t *testing.T) {
-	for _, provider := range []string{"claude", "codex"} {
-		t.Run(provider, func(t *testing.T) {
-			mgr, d, home := queueTestManager(t, 30000, "")
-			br := mgr.Get("a")
-			settings := *br.settings.Load()
-			settings.provider, settings.codexPath = provider, settings.claudePath
-			br.settings.Store(&settings)
-			pidLog := filepath.Join(home, "run-pids")
-			t.Setenv("FRIDOLIN_FAKE_PID_LOG", pidLog)
-			delivering, release := make(chan struct{}), make(chan struct{})
-			var once sync.Once
-			releaseDelivery := sync.OnceFunc(func() { close(release) })
-			defer releaseDelivery()
-			mgr.SetHooks(BrainHooks{Deliver: func(br *Brain, m Inbound, res claudecli.Result) {
-				once.Do(func() { close(delivering) })
-				<-release
-				d.add(br, m, res)
-			}})
-			if _, _, _, err := mgr.Submit(dm("first")); err != nil {
-				t.Fatal(err)
-			}
-			testutil.WaitFor(t, 5*time.Second, "the CLI to start", func() bool {
-				data, _ := os.ReadFile(pidLog)
-				return len(strings.Fields(string(data))) == 1
-			})
-			if _, _, _, err := mgr.Submit(dm("queued")); err != nil {
-				t.Fatal(err)
-			}
-			stopped := make(chan struct{})
-			go func() { mgr.KillRuns(); close(stopped) }()
-			select {
-			case <-stopped:
-			case <-time.After(5 * time.Second):
-				t.Fatal("force-stop waited for delivery")
-			}
-			select {
-			case <-delivering:
-			case <-time.After(5 * time.Second):
-				t.Fatal("cancelled run did not reach delivery")
-			}
-			if _, _, _, err := mgr.Submit(dm("new")); !errors.Is(err, errBrainsStopped) {
-				t.Errorf("new message after force-stop: %v", err)
-			}
-			if _, _, err := br.Submit(dm("direct")); !errors.Is(err, errBrainRetired) {
-				t.Errorf("direct message after force-stop: %v", err)
-			}
-			releaseDelivery()
-			testutil.WaitFor(t, 5*time.Second, "the worker to finish without another turn", func() bool {
-				br.mu.Lock()
-				defer br.mu.Unlock()
-				return !br.working
-			})
-			data, _ := os.ReadFile(pidLog)
-			if len(strings.Fields(string(data))) != 1 {
-				t.Errorf("started more runs after force-stop: %s", data)
-			}
-			waiting := br.closeQueue()
-			if len(waiting) != 1 || waiting[0].Text != "queued" {
-				t.Errorf("pending message was lost: %+v", waiting)
-			}
-		})
-	}
-}
-
 func TestKillRunsRejectsReloadAlreadyInProgress(t *testing.T) {
 	mgr, _, home := queueTestManager(t, 0, "")
 	cfg, err := loadConfig(writeConfig(t, `{"data_dir": "`+home+`/data", "claude_path": "`+os.Args[0]+`"}`))
 	if err != nil {
 		t.Fatal(err)
 	}
-	// Block reload after its initial stopped check, before publication.
-	// Force-stop must not wait for reloadMu or allow that reload to publish.
+	// Block command reload while it computes sandbox policy. Diagnostics and
+	// force-stop must not wait for that work or let the reload publish later.
 	mgr.profiler.mu.Lock()
 	release := sync.OnceFunc(mgr.profiler.mu.Unlock)
 	defer release()
 	reloaded := make(chan error, 1)
 	go func() { reloaded <- mgr.reload(nil, nil, cfg, nil) }()
 	testutil.WaitFor(t, 5*time.Second, "reload to hold its serialization lock", func() bool {
-		if mgr.reloadMu.TryLock() {
-			mgr.reloadMu.Unlock()
+		if mgr.applyMu.TryLock() {
+			mgr.applyMu.Unlock()
 			return false
 		}
 		return true
 	})
+	readIssues := make(chan struct{})
+	go func() { mgr.Issues(); close(readIssues) }()
+	select {
+	case <-readIssues:
+	case <-time.After(5 * time.Second):
+		t.Fatal("reading diagnostics waited for a blocked reload")
+	}
 	stopped := make(chan struct{})
 	go func() { mgr.KillRuns(); close(stopped) }()
 	select {
@@ -584,62 +194,10 @@ func TestKillRunsRejectsReloadAlreadyInProgress(t *testing.T) {
 		t.Fatal("force-stop waited for a blocked reload")
 	}
 	release()
-	if err := <-reloaded; !errors.Is(err, errBrainsStopped) {
+	if err := <-reloaded; !errors.Is(err, brain.ErrStopped) {
 		t.Fatalf("in-flight reload after force-stop = %v", err)
 	}
 	if mgr.Get("a") == nil {
 		t.Fatal("reload published its replacement set after force-stop")
 	}
 }
-
-func TestReloadTracksRetirementUntilDeliveryFinishes(t *testing.T) {
-	mgr, _, home := queueTestManager(t, 0, "")
-	old := mgr.Get("a")
-	delivering, release := make(chan struct{}), make(chan struct{})
-	releaseDelivery := sync.OnceFunc(func() { close(release) })
-	defer releaseDelivery()
-	mgr.SetHooks(BrainHooks{Deliver: func(*Brain, Inbound, claudecli.Result) {
-		close(delivering)
-		<-release
-	}})
-	if _, _, _, err := mgr.Submit(dm("finish before reload")); err != nil {
-		t.Fatal(err)
-	}
-	select {
-	case <-delivering:
-	case <-time.After(5 * time.Second):
-		t.Fatal("run did not reach delivery")
-	}
-	cfg, err := loadConfig(writeConfig(t, `{"data_dir": "`+home+`/data", "claude_path": "`+os.Args[0]+`"}`))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := mgr.reload(nil, nil, cfg, nil); err != nil {
-		t.Fatal(err)
-	}
-	mgr.mu.RLock()
-	_, tracked := mgr.retired[old]
-	mgr.mu.RUnlock()
-	if !tracked {
-		t.Error("removed brain disappeared before its worker finished")
-	}
-	mgr.KillRuns() // Must return despite the blocked retirement/delivery.
-	releaseDelivery()
-	mgr.retiring.Wait()
-	mgr.mu.RLock()
-	_, tracked = mgr.retired[old]
-	mgr.mu.RUnlock()
-	if tracked {
-		t.Error("completed retirement remained in the force-stop set")
-	}
-}
-
-// fakeProcessStop lets manager tests delay the supervisor acknowledgement
-// without exposing or mutating the real process owner's internal state.
-type fakeProcessStop struct {
-	stopped chan struct{}
-	once    sync.Once
-}
-
-func (p *fakeProcessStop) Stopped() <-chan struct{} { return p.stopped }
-func (p *fakeProcessStop) acknowledgeStop()         { p.once.Do(func() { close(p.stopped) }) }

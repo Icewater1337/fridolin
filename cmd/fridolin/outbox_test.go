@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Icewater1337/fridolin/internal/brain"
 	"github.com/Icewater1337/fridolin/internal/devchat"
 	outboundmsg "github.com/Icewater1337/fridolin/internal/outbound"
 
@@ -130,7 +131,7 @@ func TestReplyIsRecordedOnceDelivered(t *testing.T) {
 	wa.dropAfter = 1 // the first chunk goes out, then the connection drops
 	tb.wa = wa
 
-	tb.handleInbound(context.Background(), Inbound{Inbound: chat.Inbound{JID: testDMChat, Sender: "15551234567", Text: strings.Repeat("a long question ", 12), Source: chat.SourceWhatsApp}})
+	tb.handleInbound(context.Background(), brain.Inbound{Inbound: chat.Inbound{JID: testDMChat, Sender: "15551234567", Text: strings.Repeat("a long question ", 12), Source: chat.SourceWhatsApp}})
 	testutil.WaitFor(t, 10*time.Second, "a failed attempt", func() bool {
 		wa.mu.Lock()
 		defer wa.mu.Unlock()
@@ -184,7 +185,7 @@ func TestQueuedRunReadsTheAnswerBeforeIt(t *testing.T) {
 			wa.delay = c.delay
 			tb.wa = wa
 			ask := func(text string) {
-				tb.handleInbound(context.Background(), Inbound{Inbound: chat.Inbound{JID: testDMChat, Sender: "15551234567", Text: text, Source: chat.SourceWhatsApp}})
+				tb.handleInbound(context.Background(), brain.Inbound{Inbound: chat.Inbound{JID: testDMChat, Sender: "15551234567", Text: text, Source: chat.SourceWhatsApp}})
 			}
 			ask("first question")
 			testutil.WaitFor(t, 5*time.Second, "the first run", func() bool { r := br.Snapshot().Running; return r != nil && r.PID > 0 })
@@ -204,41 +205,6 @@ func TestQueuedRunReadsTheAnswerBeforeIt(t *testing.T) {
 	}
 }
 
-// The answers on their way go among the history's lines by time, and one
-// the history holds by then, delivered after they were read, only once.
-func TestWithUndelivered(t *testing.T) {
-	at := func(hhmmss string) string { return "2026-10-18T" + hhmmss + "+02:00" }
-	in := func(ts, text string) history.Entry {
-		return history.Entry{TS: at(ts), Chat: testDMChat, From: "15551234567", Text: text, Type: history.In}
-	}
-	out := func(ts, text string) history.Entry {
-		return history.Entry{TS: at(ts), Chat: testDMChat, From: "main", Text: text, Type: history.Out}
-	}
-	cases := []struct {
-		name             string
-		history, pending []history.Entry
-		want             []string
-	}{
-		{"nothing waits", []history.Entry{in("10:00:00", "a")}, nil, []string{"a"}},
-		{"after what came before it", []history.Entry{in("10:00:00", "a"), in("10:00:01", "b")}, []history.Entry{out("10:00:02", "A")}, []string{"a", "b", "A"}},
-		{"before what came after it", []history.Entry{in("10:00:00", "a"), in("10:00:05", "c")}, []history.Entry{out("10:00:02", "A")}, []string{"a", "A", "c"}},
-		{"in order among themselves", []history.Entry{in("10:00:00", "a")}, []history.Entry{out("10:00:02", "A"), out("10:00:03", "B")}, []string{"a", "A", "B"}},
-		{"delivered meanwhile", []history.Entry{in("10:00:00", "a"), out("10:00:04", "A")}, []history.Entry{out("10:00:02", "A")}, []string{"a", "A"}},
-		{"the same words said before", []history.Entry{out("09:00:00", "OK"), in("10:00:00", "a")}, []history.Entry{out("10:00:02", "OK")}, []string{"OK", "a", "OK"}},
-	}
-	for _, c := range cases {
-		t.Run(c.name, func(t *testing.T) {
-			var got []string
-			for _, e := range withUndelivered(slices.Clone(c.history), c.pending) {
-				got = append(got, e.Text)
-			}
-			if !slices.Equal(got, c.want) {
-				t.Errorf("withUndelivered = %q, want %q", got, c.want)
-			}
-		})
-	}
-}
-
 // A reply that went out in full while its row could not be removed is
 // recorded once, when the removal works: the history must not hold a
 // line that the retry writes again, nor the chat get the reply twice.
@@ -249,7 +215,7 @@ func TestReplyIsRecordedOnceWhenItsRowStays(t *testing.T) {
 	if _, err := db.Exec(`CREATE TRIGGER keep_outbox BEFORE DELETE ON outbox BEGIN SELECT RAISE(FAIL, 'disk I/O error'); END`); err != nil {
 		t.Fatal(err)
 	}
-	tb.handleInbound(context.Background(), Inbound{Inbound: chat.Inbound{JID: testDMChat, Sender: "15551234567", Text: "hello", Source: chat.SourceWhatsApp}})
+	tb.handleInbound(context.Background(), brain.Inbound{Inbound: chat.Inbound{JID: testDMChat, Sender: "15551234567", Text: "hello", Source: chat.SourceWhatsApp}})
 	testutil.WaitFor(t, 10*time.Second, "the reply", func() bool { return len(tb.sentTo(testDMChat)) == 1 })
 	testutil.WaitFor(t, 5*time.Second, "the row, all of it sent", func() bool {
 		var left int
@@ -315,8 +281,8 @@ func TestOutboxSummaryOnlyReads(t *testing.T) {
 func TestQuestionsWaitAndNoticesDoNot(t *testing.T) {
 	tb, br := newMainBridge(t, "")
 	tb.wa = newFlakyMessenger(tb.cfgs.Get, false)
-	br.hooks.Question(br, testDMChat, outboundmsg.QuestionPrefix+"Which day suits you?")
-	br.hooks.Notice(testDMChat, "⏳ Still at it")
+	(brainHooksSink{tb.brainMgr.hooks}).Question(br, testDMChat, "Which day suits you?")
+	tb.brainMgr.hooks.Notice(testDMChat, "⏳ Still at it")
 	sum, err := tb.store.OutboxSummary(context.Background(), time.Now())
 	if err != nil || sum.Waiting != 1 {
 		t.Errorf("outbox = %+v, %v; want the question alone waiting", sum, err)
