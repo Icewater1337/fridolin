@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"slices"
 
-	chat "github.com/Icewater1337/fridolin/internal/chat"
+	"github.com/Icewater1337/fridolin/internal/access"
 	"github.com/Icewater1337/fridolin/internal/config"
 )
 
@@ -43,26 +43,7 @@ type groupSender struct {
 // numbers, or anyone while it is empty and allow_any_dm is true. A sender
 // known only by a LID is admitted only where everyone is.
 func groupSenderAllowed(cfg *config.Config, group string, s groupSender) bool {
-	if s.FromMe {
-		return true
-	}
-	members, listed := cfg.GroupMembers[group]
-	switch {
-	case listed && slices.Equal(members, []string{anyMember}):
-		return true
-	case !listed && cfg.AnyoneCanDM():
-		return true
-	case !s.Resolved:
-		return false
-	case listed:
-		number := s.Number
-		if n, err := chat.PhoneNumber(number); err == nil {
-			number = n
-		}
-		return slices.Contains(allowedNumbersAsNumbers(members), number)
-	default:
-		return numberAllowed(cfg, s.Number)
-	}
+	return access.GroupSenderAllowed(policyOf(cfg), group, s.Number, s.Resolved, s.FromMe)
 }
 
 // masked is the sender for the log: a number down to its country code and

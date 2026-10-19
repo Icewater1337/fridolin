@@ -9,6 +9,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Icewater1337/fridolin/internal/devchat"
+	outboundmsg "github.com/Icewater1337/fridolin/internal/outbound"
+
 	"github.com/Icewater1337/fridolin/internal/chat"
 	"github.com/Icewater1337/fridolin/internal/claudecli"
 	"github.com/Icewater1337/fridolin/internal/history"
@@ -16,7 +19,7 @@ import (
 
 // pollRefuser is the dev messenger in front of a WhatsApp that is
 // connected but refuses every poll, so that the outbox sends each as text.
-type pollRefuser struct{ *devMessenger }
+type pollRefuser struct{ *devchat.Messenger }
 
 func (pollRefuser) SendPoll(context.Context, string, string, []string, int) (string, error) {
 	return "", errors.New("polls are refused")
@@ -178,7 +181,7 @@ func TestMidRunMessagesOnlyForAddressedMessages(t *testing.T) {
 			if last := br.Snapshot().Last; (last.Outcome == outcomeQuestion) != c.asked {
 				t.Errorf("the run ended %q, want it to have asked: %v", last.Outcome, c.asked)
 			}
-			if notice := slices.Contains(chatJID(), workingNotice); notice != c.notice {
+			if notice := slices.Contains(chatJID(), outboundmsg.WorkingNotice); notice != c.notice {
 				t.Errorf("working notice sent %v, want %v", notice, c.notice)
 			}
 		})

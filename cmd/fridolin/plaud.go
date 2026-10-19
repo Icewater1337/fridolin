@@ -25,6 +25,8 @@ import (
 	"syscall"
 	"time"
 
+	outboundmsg "github.com/Icewater1337/fridolin/internal/outbound"
+
 	"github.com/Icewater1337/fridolin/internal/claudecli"
 	"github.com/Icewater1337/fridolin/internal/config"
 	"github.com/Icewater1337/fridolin/internal/fsx"
@@ -1673,7 +1675,7 @@ func (p *PlaudManager) poll(ctx context.Context) error {
 func (p *PlaudManager) noticeGivenUp(brain, jid, name, why string) {
 	ctx, cancel := context.WithTimeout(p.lifetime(), 30*time.Second)
 	defer cancel()
-	if err := p.notify(ctx, jid, plaudGivenUpAlert(name, brain, why)); err != nil {
+	if err := p.notify(ctx, jid, outboundmsg.PlaudGivenUpAlert(name, brain, why)); err != nil {
 		log.Printf("plaud: could not send the notice about a recording given up: %v", err)
 	}
 }
@@ -1742,7 +1744,7 @@ func (p *PlaudManager) notifyAuthExpired() {
 	// the next start.
 	ctx, cancel := context.WithTimeout(p.lifetime(), 30*time.Second)
 	defer cancel()
-	if err := p.notify(ctx, jid, plaudExpiredAlert); err != nil {
+	if err := p.notify(ctx, jid, outboundmsg.PlaudExpiredAlert); err != nil {
 		log.Printf("plaud: could not send the expiry notice: %v", err)
 		return
 	}
