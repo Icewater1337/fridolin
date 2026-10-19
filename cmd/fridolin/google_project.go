@@ -2,14 +2,15 @@ package main
 
 import (
 	"github.com/Icewater1337/fridolin/internal/config"
+	"github.com/Icewater1337/fridolin/internal/google"
 	"github.com/Icewater1337/fridolin/internal/manifest"
 )
 
 // googleOptionsFor fixes the client path and callback address at startup;
 // credentials and configured-brain checks keep their original live read sites.
-func googleOptionsFor(cfgs *config.Store) GoogleOptions {
+func googleOptionsFor(cfgs *config.Store) google.Options {
 	boot := cfgs.Boot()
-	return GoogleOptions{
+	return google.Options{
 		ClientPath:  boot.GoogleClientPath(),
 		RedirectURI: "http://" + boot.HTTPListen + "/",
 		CredsDir:    func() string { return credentialsDirOf(runtimeConfig(cfgs)) },

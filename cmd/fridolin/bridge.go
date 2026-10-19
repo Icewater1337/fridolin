@@ -15,6 +15,7 @@ import (
 	"unicode"
 
 	"github.com/Icewater1337/fridolin/internal/devchat"
+	"github.com/Icewater1337/fridolin/internal/google"
 	outboundmsg "github.com/Icewater1337/fridolin/internal/outbound"
 	"github.com/Icewater1337/fridolin/internal/whatsapp"
 
@@ -72,7 +73,7 @@ type Bridge struct {
 	sessionCookie string
 	scriptAuth    *scriptAuth
 	backup        *BackupManager
-	google        *GoogleAuth
+	google        *google.Auth
 	plaud         *PlaudManager
 	site          *SiteManager
 	outbox        *outboundmsg.Outbox
@@ -275,7 +276,7 @@ func NewBridge(cfgs *config.Store, opts BridgeOptions) (_ *Bridge, err error) {
 		}
 		return b.wa.SendMessage(ctx, jid, text)
 	}
-	b.google = NewGoogleAuth(googleOptionsFor(cfgs))
+	b.google = google.New(googleOptionsFor(cfgs))
 	b.plaud = NewPlaudManager(cfgs, b.brainMgr)
 	b.plaud.submit = b.submitHandOff
 	b.plaud.notify = b.wa.SendMessage

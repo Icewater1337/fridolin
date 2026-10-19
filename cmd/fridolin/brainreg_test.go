@@ -13,6 +13,7 @@ import (
 	"github.com/Icewater1337/fridolin/internal/chat"
 	"github.com/Icewater1337/fridolin/internal/config"
 	"github.com/Icewater1337/fridolin/internal/fsx"
+	"github.com/Icewater1337/fridolin/internal/google"
 	"github.com/Icewater1337/fridolin/internal/manifest"
 	"github.com/Icewater1337/fridolin/internal/registry"
 	"github.com/Icewater1337/fridolin/internal/textx"
@@ -250,7 +251,7 @@ func FuzzDecodeManifest(f *testing.F) {
 			}
 		}
 		if c := m.Calendar; c != nil && len(c.Calendars) > 0 {
-			for _, kv := range GoogleCalendarEnv(m.ID, *m, "/creds") {
+			for _, kv := range google.CalendarEnv(m.ID, *m, "/creds") {
 				if v, ok := strings.CutPrefix(kv, "BRIDGE_CALENDARS="); ok && !reflect.DeepEqual(strings.Split(v, ","), c.Calendars) {
 					t.Errorf("calendars %q reach the tool as %q", c.Calendars, v)
 				}

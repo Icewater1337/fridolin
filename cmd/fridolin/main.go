@@ -18,6 +18,7 @@ import (
 	"sync/atomic"
 	"syscall"
 
+	"github.com/Icewater1337/fridolin/internal/google"
 	"github.com/Icewater1337/fridolin/internal/registry"
 
 	"github.com/Icewater1337/fridolin/internal/chat"
@@ -855,7 +856,7 @@ func (r *redactor) text(s string) string {
 			}
 			return m
 		}
-		return GoogleMaskEmail(m)
+		return google.MaskEmail(m)
 	})
 	for _, c := range r.chats {
 		s = strings.ReplaceAll(s, c.value, c.masked)

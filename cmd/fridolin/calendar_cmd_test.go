@@ -15,6 +15,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Icewater1337/fridolin/internal/google"
 	"github.com/Icewater1337/fridolin/internal/manifest"
 )
 
@@ -27,7 +28,7 @@ type fakeCalendarAPI struct {
 
 	mu       sync.Mutex
 	events   map[string][]map[string]any // calendar → events
-	busy     map[string][]BusySlot
+	busy     map[string][]google.BusySlot
 	broken   map[string]bool // calendars free/busy reports an error for
 	touched  []string        // "METHOD calendar" of every events or free/busy request
 	inserted []map[string]any
@@ -38,7 +39,7 @@ type fakeCalendarAPI struct {
 
 func newFakeCalendarAPI(t *testing.T) *fakeCalendarAPI {
 	t.Helper()
-	f := &fakeCalendarAPI{events: map[string][]map[string]any{}, busy: map[string][]BusySlot{}, broken: map[string]bool{}}
+	f := &fakeCalendarAPI{events: map[string][]map[string]any{}, busy: map[string][]google.BusySlot{}, broken: map[string]bool{}}
 	calendars := []map[string]any{
 		{"id": "you@example.com", "summary": "you@example.com", "primary": true, "accessRole": "owner"},
 		{"id": "team@example.com", "summary": "Team", "summaryOverride": "Our team", "accessRole": "writer"},
@@ -136,7 +137,7 @@ func calendarBrain(t *testing.T, f *fakeCalendarAPI, cals []string, def string, 
 	if w := tb.do("PUT", "/api/google/client", map[string]string{"json": fmt.Sprintf(testClientJSON, f.srv.URL)}); w.Code != 200 {
 		t.Fatal(w.Body.String())
 	}
-	tok := GoogleToken{
+	tok := google.Token{
 		Token: "ACCESS-OK", RefreshToken: "RT-1", ClientID: "123-abc.apps.googleusercontent.com",
 		Scopes: calendarScopes, Expiry: time.Now().Add(time.Hour).UTC().Format(time.RFC3339Nano),
 	}
@@ -458,11 +459,11 @@ func TestCalendarDelete(t *testing.T) {
 
 func TestCalendarFree(t *testing.T) {
 	f := newFakeCalendarAPI(t)
-	f.busy["you@example.com"] = []BusySlot{
+	f.busy["you@example.com"] = []google.BusySlot{
 		{Start: "2026-01-05T08:30:00Z", End: "2026-01-05T09:30:00Z"}, // 09:30-10:30 in Zurich
 		{Start: "2026-01-05T18:00:00Z", End: "2026-01-05T19:00:00Z"}, // 19:00-20:00, outside the hours
 	}
-	f.busy["team@example.com"] = []BusySlot{{Start: "2026-01-05T06:00:00Z", End: "2026-01-05T07:15:00Z"}} // 07:00-08:15, half outside
+	f.busy["team@example.com"] = []google.BusySlot{{Start: "2026-01-05T06:00:00Z", End: "2026-01-05T07:15:00Z"}} // 07:00-08:15, half outside
 	_, url, token := calendarBrain(t, f, []string{"you@example.com", "team@example.com"}, "team@example.com", false)
 
 	code, doc := brainTool(t, calendarCmd, url, token, "free", "--date", "2026-01-05", "--min-slot", "20")
@@ -583,11 +584,11 @@ func TestCalendarZone(t *testing.T) {
 // command prints the message, and the call it makes answers the status.
 func TestCalendarSignInProblems(t *testing.T) {
 	// Expired, so a call has to refresh it first.
-	expired := GoogleToken{
+	expired := google.Token{
 		Token: "ACCESS-OLD", RefreshToken: "RT-1", ClientID: "123-abc.apps.googleusercontent.com",
 		Scopes: calendarScopes, Expiry: "2020-01-01T00:00:00.000000Z",
 	}
-	writeToken := func(t *testing.T, path string, tok GoogleToken) {
+	writeToken := func(t *testing.T, path string, tok google.Token) {
 		t.Helper()
 		data, _ := json.Marshal(tok)
 		if err := os.WriteFile(path, data, 0o600); err != nil {
@@ -654,14 +655,14 @@ func TestCalendarSignInProblems(t *testing.T) {
 				tc.setup(t, tb, path)
 			}
 			if tc.token != 0 {
-				google := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				googleServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 					w.WriteHeader(tc.token)
 					fmt.Fprint(w, tc.body)
 				}))
-				defer google.Close()
+				defer googleServer.Close()
 				options := googleTestOptions(googleOptionsFor(tb.cfgs), f.srv)
-				options.Endpoints.Token = google.URL + "/token"
-				tb.google = NewGoogleAuth(options)
+				options.Endpoints.Token = googleServer.URL + "/token"
+				tb.google = google.New(options)
 			}
 			code, doc := brainTool(t, calendarCmd, url, token, "list")
 			msg, _ := doc["error"].(string)

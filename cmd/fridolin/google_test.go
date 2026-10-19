@@ -19,6 +19,7 @@ import (
 	"time"
 
 	"github.com/Icewater1337/fridolin/internal/config"
+	"github.com/Icewater1337/fridolin/internal/google"
 	"github.com/Icewater1337/fridolin/internal/testutil"
 
 	"github.com/Icewater1337/fridolin/internal/manifest"
@@ -33,8 +34,8 @@ var fakeGoogle = testutil.FakeGoogle
 
 // googleTestOptions supplies a private HTTP client and endpoints for a fake
 // service, keeping the real authorization URL unless a test overrides it.
-func googleTestOptions(options GoogleOptions, srv *httptest.Server) GoogleOptions {
-	options.Endpoints = GoogleEndpoints{Token: srv.URL + "/token", Revoke: srv.URL + "/revoke", APIBase: srv.URL}
+func googleTestOptions(options google.Options, srv *httptest.Server) google.Options {
+	options.Endpoints = google.Endpoints{Token: srv.URL + "/token", Revoke: srv.URL + "/revoke", APIBase: srv.URL}
 	client := *srv.Client()
 	client.Timeout = 20 * time.Second
 	options.HTTP = &client
@@ -42,7 +43,7 @@ func googleTestOptions(options GoogleOptions, srv *httptest.Server) GoogleOption
 }
 
 func useGoogleServer(tb *testBridge, srv *httptest.Server) {
-	tb.google = NewGoogleAuth(googleTestOptions(googleOptionsFor(tb.cfgs), srv))
+	tb.google = google.New(googleTestOptions(googleOptionsFor(tb.cfgs), srv))
 }
 
 func TestCalendarDashboardSignInFlow(t *testing.T) {
@@ -110,7 +111,7 @@ func TestCalendarDashboardSignInFlow(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	var tok GoogleToken
+	var tok google.Token
 	_ = json.Unmarshal(data, &tok)
 	if tok.RefreshToken != "RT-1" || tok.ClientID == "" || tok.Account != "you@example.com" || !slices.Equal(tok.Scopes, calendarScopes) {
 		t.Errorf("token file = %+v", tok)
@@ -148,7 +149,7 @@ func TestCalendarDashboardSignInFlow(t *testing.T) {
 	if w.Code != 200 {
 		t.Fatal(w.Body.String())
 	}
-	env := strings.Join(GoogleCalendarEnv("fam", tb.brainMgr.Get("fam").settings.Load().manifest, tb.google.CredsDir()), " ")
+	env := strings.Join(google.CalendarEnv("fam", tb.brainMgr.Get("fam").settings.Load().manifest, tb.google.CredsDir()), " ")
 	if !strings.Contains(env, "BRIDGE_CALENDARS=you@example.com,team@example.com") || !strings.Contains(env, "BRIDGE_CALENDAR_DEFAULT=team@example.com") {
 		t.Errorf("env = %s", env)
 	}
@@ -248,7 +249,7 @@ func TestCalendarTokenIsNotFollowed(t *testing.T) {
 			}
 			// Brain b's token has expired, so using it means refreshing it.
 			other := tb.google.TokenPath("b")
-			bTok, _ := json.MarshalIndent(GoogleToken{
+			bTok, _ := json.MarshalIndent(google.Token{
 				Token: "B-ACCESS", RefreshToken: "B-REFRESH", TokenURI: srv.URL + "/token",
 				ClientID: "123-abc.apps.googleusercontent.com", ClientSecret: "TEST-CLIENT-SECRET",
 				Expiry: "2020-01-01T00:00:00.000000Z",
@@ -350,7 +351,7 @@ func TestCalendarTokenRequestsGoToGoogleWithYourClient(t *testing.T) {
 			if w := tb.do("POST", "/api/brains", map[string]any{"path": "~/a", "create_dir": true, "manifest": manifest.Manifest{ID: "a", Name: "A"}}); w.Code != 200 {
 				t.Fatal(w.Body.String())
 			}
-			tok, _ := json.Marshal(GoogleToken{
+			tok, _ := json.Marshal(google.Token{
 				Token: "OLD", RefreshToken: "A-REFRESH", TokenURI: other.URL + "/token",
 				ClientID: tc.clientID, ClientSecret: "SECRET-THE-BRAIN-WROTE",
 				Expiry: "2020-01-01T00:00:00.000000Z",
@@ -365,8 +366,8 @@ func TestCalendarTokenRequestsGoToGoogleWithYourClient(t *testing.T) {
 			}
 
 			var st struct {
-				Calendars []CalendarEntry `json:"calendars"`
-				ListError string          `json:"list_error"`
+				Calendars []google.CalendarEntry `json:"calendars"`
+				ListError string                 `json:"list_error"`
 			}
 			_ = json.Unmarshal(tb.do("GET", "/api/brains/a/calendar", nil).Body.Bytes(), &st)
 			if n := elsewhere.Load(); n != 0 {
@@ -408,7 +409,7 @@ func TestCalendarTokenRequestsGoToGoogleWithYourClient(t *testing.T) {
 		if n := elsewhere.Load(); n != 0 || (*got)["code"] != "good-code" {
 			t.Fatalf("code exchange went elsewhere (%d) or nowhere: %v", n, *got)
 		}
-		var tok GoogleToken
+		var tok google.Token
 		data, _ := os.ReadFile(tb.google.TokenPath("a"))
 		_ = json.Unmarshal(data, &tok)
 		if tok.TokenURI != srv.URL+"/token" {
@@ -432,7 +433,7 @@ func TestOversizedCalendarTokenIsRefused(t *testing.T) {
 		t.Fatal(w.Body.String())
 	}
 	// Valid JSON, expired, padded past the limit.
-	tok, _ := json.Marshal(GoogleToken{
+	tok, _ := json.Marshal(google.Token{
 		Token: "OLD", RefreshToken: "A-REFRESH",
 		ClientID: "123-abc.apps.googleusercontent.com", ClientSecret: "TEST-CLIENT-SECRET",
 		Expiry: "2020-01-01T00:00:00.000000Z",
@@ -481,7 +482,7 @@ func TestCalendarSignInScopes(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			google := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			googleServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				switch r.URL.Path {
 				case "/token":
 					scope, _ := json.Marshal(tc.granted)
@@ -492,11 +493,11 @@ func TestCalendarSignInScopes(t *testing.T) {
 					w.WriteHeader(404)
 				}
 			}))
-			defer google.Close()
+			defer googleServer.Close()
 			tb := newTestBridge(t, "")
-			useGoogleServer(tb, google)
+			useGoogleServer(tb, googleServer)
 			tb.addFolderBrain(t, manifest.Manifest{ID: "a", Name: "A"})
-			if w := tb.do("PUT", "/api/google/client", map[string]string{"json": fmt.Sprintf(testClientJSON, google.URL)}); w.Code != 200 {
+			if w := tb.do("PUT", "/api/google/client", map[string]string{"json": fmt.Sprintf(testClientJSON, googleServer.URL)}); w.Code != 200 {
 				t.Fatal(w.Body.String())
 			}
 			var start struct {
@@ -520,7 +521,7 @@ func TestCalendarSignInScopes(t *testing.T) {
 			if !tc.connected {
 				return
 			}
-			var tok GoogleToken
+			var tok google.Token
 			data, _ := os.ReadFile(tb.google.TokenPath("a"))
 			_ = json.Unmarshal(data, &tok)
 			want := strings.Fields(tc.granted)
@@ -555,7 +556,7 @@ func TestCalendarRefreshRecordsGrantedScopes(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			google := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			googleServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				if r.URL.Path != "/token" {
 					w.WriteHeader(404)
 					return
@@ -566,14 +567,14 @@ func TestCalendarRefreshRecordsGrantedScopes(t *testing.T) {
 				}
 				_ = json.NewEncoder(w).Encode(answer)
 			}))
-			defer google.Close()
+			defer googleServer.Close()
 			tb := newTestBridge(t, "")
-			useGoogleServer(tb, google)
+			useGoogleServer(tb, googleServer)
 			tb.addFolderBrain(t, manifest.Manifest{ID: "a", Name: "A"})
-			if w := tb.do("PUT", "/api/google/client", map[string]string{"json": fmt.Sprintf(testClientJSON, google.URL)}); w.Code != 200 {
+			if w := tb.do("PUT", "/api/google/client", map[string]string{"json": fmt.Sprintf(testClientJSON, googleServer.URL)}); w.Code != 200 {
 				t.Fatal(w.Body.String())
 			}
-			data, _ := json.Marshal(GoogleToken{
+			data, _ := json.Marshal(google.Token{
 				Token: "ACCESS-1", RefreshToken: "RT-1", ClientID: "123-abc.apps.googleusercontent.com",
 				Scopes: tc.stored, Expiry: "2020-01-01T00:00:00.000000Z",
 			})
@@ -583,7 +584,7 @@ func TestCalendarRefreshRecordsGrantedScopes(t *testing.T) {
 			if tok, err := tb.google.AccessToken(context.Background(), "a"); err != nil || tok.Token != "ACCESS-2" {
 				t.Fatalf("accessToken = %+v, %v; want it refreshed", tok, err)
 			}
-			var saved GoogleToken
+			var saved google.Token
 			data, _ = os.ReadFile(tb.google.TokenPath("a"))
 			if err := json.Unmarshal(data, &saved); err != nil || saved.Token != "ACCESS-2" || !slices.Equal(saved.Scopes, tc.want) {
 				t.Errorf("token file has %q with scopes %q (%v); want ACCESS-2 with %q", saved.Token, saved.Scopes, err, tc.want)
@@ -603,7 +604,7 @@ func TestCalendarRefreshRecordsGrantedScopes(t *testing.T) {
 // testClientJSON, signed in to account with refreshToken.
 func writeCalendarToken(t *testing.T, tb *testBridge, id, account, refreshToken string) {
 	t.Helper()
-	data, _ := json.Marshal(GoogleToken{
+	data, _ := json.Marshal(google.Token{
 		Token: "ACCESS-" + id, RefreshToken: refreshToken, ClientID: "123-abc.apps.googleusercontent.com",
 		ClientSecret: "TEST-CLIENT-SECRET", Account: account, Expiry: "2099-01-01T00:00:00.000000Z",
 	})
@@ -841,8 +842,8 @@ func TestCalendarRefreshKeepsTheToken(t *testing.T) {
 	expiredCalendarToken(t, tb, "A-REFRESH")
 
 	var st struct {
-		Calendars []CalendarEntry `json:"calendars"`
-		ListError string          `json:"list_error"`
+		Calendars []google.CalendarEntry `json:"calendars"`
+		ListError string                 `json:"list_error"`
 	}
 	_ = json.Unmarshal(tb.do("GET", "/api/brains/a/calendar", nil).Body.Bytes(), &st)
 	if st.ListError != "" || len(st.Calendars) != 2 || (*got)["refresh_token"] != "A-REFRESH" {
@@ -912,7 +913,7 @@ func TestCalendarRefreshThatCannotBeSavedIsLogged(t *testing.T) {
 	t.Cleanup(func() { _ = os.Chmod(tb.google.CredsDir(), 0o700) })
 	logs := captureLog(t)
 	var st struct {
-		Calendars []CalendarEntry `json:"calendars"`
+		Calendars []google.CalendarEntry `json:"calendars"`
 	}
 	_ = json.Unmarshal(tb.do("GET", "/api/brains/a/calendar", nil).Body.Bytes(), &st)
 	if len(st.Calendars) != 2 {
@@ -1135,7 +1136,7 @@ func gatedCalendarBrain(t *testing.T, g *gatedGoogle, account string) *testBridg
 	if w := tb.do("PUT", "/api/brains/a/calendar", map[string]any{"account": account, "calendars": []string{account}, "default": account}); w.Code != 200 {
 		t.Fatal(w.Body.String())
 	}
-	data, _ := json.Marshal(GoogleToken{
+	data, _ := json.Marshal(google.Token{
 		Token: "ACCESS-OLD", RefreshToken: "RT-A", ClientID: "123-abc.apps.googleusercontent.com",
 		Scopes: calendarScopes, Account: account, Expiry: "2020-01-01T00:00:00.000000Z",
 	})
@@ -1283,7 +1284,7 @@ func TestConcurrentRefreshesPostOnce(t *testing.T) {
 	if tokens[0] != "ACCESS-1" || tokens[1] != tokens[0] {
 		t.Errorf("access tokens = %q, want ACCESS-1 for both", tokens)
 	}
-	var saved GoogleToken
+	var saved google.Token
 	data, _ := os.ReadFile(tb.google.TokenPath("a"))
 	if err := json.Unmarshal(data, &saved); err != nil || saved.Token != "ACCESS-1" {
 		t.Errorf("saved token = %s (%v), want ACCESS-1", data, err)
@@ -1296,13 +1297,13 @@ func TestConcurrentRefreshesPostOnce(t *testing.T) {
 func TestWaitingForTheTokenLockEndsWithCtx(t *testing.T) {
 	cases := []struct {
 		name string
-		call func(ctx context.Context, g *GoogleAuth) error
+		call func(ctx context.Context, g *google.Auth) error
 	}{
-		{"disconnect", func(ctx context.Context, g *GoogleAuth) error {
+		{"disconnect", func(ctx context.Context, g *google.Auth) error {
 			_, _, err := g.Disconnect(ctx, "a", false)
 			return err
 		}},
-		{"calendar call", func(ctx context.Context, g *GoogleAuth) error {
+		{"calendar call", func(ctx context.Context, g *google.Auth) error {
 			_, err := g.AccessToken(ctx, "a")
 			return err
 		}},
@@ -1388,7 +1389,7 @@ func TestSignInIsNotUndoneByARefresh(t *testing.T) {
 		t.Fatal("the refresh or the sign-in hangs")
 	}
 
-	var tok GoogleToken
+	var tok google.Token
 	data, _ := os.ReadFile(tb.google.TokenPath("a"))
 	if err := json.Unmarshal(data, &tok); err != nil || tok.RefreshToken != "RT-NEW" || tok.Account != "you@example.com" {
 		t.Errorf("token = %s (%v), want the new sign-in's", data, err)
@@ -1470,7 +1471,7 @@ func TestLeftoverClientCopiesAreReported(t *testing.T) {
 			// At start: one warning, naming the files but not the folder.
 			logs := captureLog(t)
 			started := make(chan struct{})
-			go func() { defer close(started); NewGoogleAuth(googleOptionsFor(tb.cfgs)) }()
+			go func() { defer close(started); google.New(googleOptionsFor(tb.cfgs)) }()
 			if !within(started, 5*time.Second) {
 				t.Fatal("looking for copies hangs")
 			}

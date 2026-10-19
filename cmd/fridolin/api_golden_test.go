@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/Icewater1337/fridolin/internal/config"
+	"github.com/Icewater1337/fridolin/internal/google"
 
 	"github.com/Icewater1337/fridolin/internal/manifest"
 
@@ -86,7 +87,7 @@ func goldenBridge(t *testing.T) (h *harness, s *scrubber, fakes string) {
 	if w := h.Do("PUT", "/api/google/client", map[string]string{"json": goldenClientJSON}); w.Code != http.StatusOK {
 		t.Fatalf("google client: %d %s", w.Code, w.Body.String())
 	}
-	tok, err := json.Marshal(GoogleToken{Token: "golden-access-token", RefreshToken: "golden-refresh-token", ClientID: "123-abc.apps.googleusercontent.com", Scopes: calendarScopes, Account: "you@example.com"})
+	tok, err := json.Marshal(google.Token{Token: "golden-access-token", RefreshToken: "golden-refresh-token", ClientID: "123-abc.apps.googleusercontent.com", Scopes: calendarScopes, Account: "you@example.com"})
 	if err != nil {
 		t.Fatal(err)
 	}
