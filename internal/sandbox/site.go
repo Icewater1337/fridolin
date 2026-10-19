@@ -450,7 +450,7 @@ func sbplComment(s string) string {
 	}, s)
 }
 
-func sandboxPathExists(p string) bool { _, err := os.Stat(p); return err == nil }
+func sandboxPathExists(p string) bool { _, err := os.Lstat(p); return err == nil }
 func sandboxLookPathIn(name, path string) string {
 	for _, dir := range filepath.SplitList(path) {
 		if dir == "" {
