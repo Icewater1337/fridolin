@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/Icewater1337/fridolin/internal/chat"
+	outboundmsg "github.com/Icewater1337/fridolin/internal/outbound"
 	"io/fs"
 	"log"
 	"os"
@@ -557,7 +559,7 @@ func (c *Config) AnyoneCanDM() bool { return len(c.AllowedNumbers) == 0 && c.All
 func warnOddChats(path string, c *Config) {
 	var odd []string
 	for _, n := range c.AllowedNumbers {
-		if _, err := phoneNumber(n); err != nil {
+		if _, err := chat.PhoneNumber(n); err != nil {
 			odd = append(odd, fmt.Sprintf("allowed_numbers %q (digits with the country code)", n))
 		}
 	}
@@ -697,7 +699,7 @@ func effective(file *Config) (*Config, error) {
 	cfg.DBPath = fsx.ExpandHome(cfg.DBPath, home)
 	cfg.MediaDir = fsx.ExpandHome(cfg.MediaDir, home)
 	if cfg.MaxChunkSize == 0 {
-		cfg.MaxChunkSize = defaultChunkSize
+		cfg.MaxChunkSize = outboundmsg.DefaultChunkSize
 	}
 	if cfg.MaxMediaMB == 0 {
 		cfg.MaxMediaMB = defaultMaxMediaMB
@@ -775,7 +777,7 @@ func effective(file *Config) (*Config, error) {
 
 	// Compared with senders as digits, however they were typed into the
 	// file. The dashboard writes them so; a hand edit may not have.
-	cfg.AllowedNumbers = allowedNumbersAsNumbers(cfg.AllowedNumbers)
+	cfg.AllowedNumbers = chat.NumbersAsNumbers(cfg.AllowedNumbers)
 	cfg.GroupMembers = groupMembersAsNumbers(cfg.GroupMembers)
 	for i := range cfg.BrainDirs {
 		cfg.BrainDirs[i].Path = fsx.ExpandHome(cfg.BrainDirs[i].Path, home)
@@ -937,8 +939,8 @@ func (c *Config) validate() error {
 			return fmt.Errorf("child_env_passthrough: %q is not a variable name: use letters, digits and _, and do not start with a digit", name)
 		}
 	}
-	if c.MaxChunkSize < minChunkSize {
-		return fmt.Errorf("max_chunk_size %d is too small: use at least %d, or 0 for the default of %d", c.MaxChunkSize, minChunkSize, defaultChunkSize)
+	if c.MaxChunkSize < outboundmsg.MinChunkSize {
+		return fmt.Errorf("max_chunk_size %d is too small: use at least %d, or 0 for the default of %d", c.MaxChunkSize, outboundmsg.MinChunkSize, outboundmsg.DefaultChunkSize)
 	}
 	if n := intOr(c.RunTimeoutMinutes, defaultRunTimeoutMinutes); n < 0 || n > maxRunTimeoutMinutes {
 		return fmt.Errorf("run_timeout_minutes must be between 0 (no limit) and %d, not %d", maxRunTimeoutMinutes, n)
