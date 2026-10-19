@@ -8,6 +8,7 @@ import (
 	"bytes"
 	"fmt"
 	"io/fs"
+	"log"
 	"os"
 	"path/filepath"
 	"strings"
@@ -75,10 +76,13 @@ func writeFileAtomic(path string, data []byte, perm os.FileMode, backup, exclusi
 	if err != nil {
 		return err
 	}
-	// The file bytes were synced before publication; sync the directory entry
-	// too. A sync error can occur after publication, so callers must not assume
-	// an error means the previous file is still present.
-	return parent.Sync()
+	// Publication has committed. Report a durability warning, not a failed
+	// transaction: callers must not roll back companion manifests while the
+	// new config is already visible at path.
+	if err := parent.Sync(); err != nil {
+		log.Printf("warning: syncing directory after publishing %s: %v", path, err)
+	}
+	return nil
 }
 
 // ExpandHome rewrites a leading "~" to home, the user's home directory. It
