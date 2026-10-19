@@ -24,6 +24,7 @@ import (
 	"unicode"
 
 	"github.com/Icewater1337/fridolin/internal/fsx"
+	"github.com/Icewater1337/fridolin/internal/httpapi"
 	"github.com/Icewater1337/fridolin/internal/textx"
 	"golang.org/x/text/unicode/norm"
 )
@@ -628,7 +629,7 @@ func (b *Bridge) apiBackupStatus(w http.ResponseWriter, r *http.Request) {
 		resp["next_run"] = *next
 	}
 	m.mu.Unlock()
-	writeJSON(w, http.StatusOK, resp)
+	httpapi.WriteJSON(w, http.StatusOK, resp)
 }
 
 // rcloneVersionKey names one build of rclone: an upgrade in place (brew
@@ -710,30 +711,30 @@ func answerFor(q rcloneQuestion) string {
 func (b *Bridge) apiBackupConnect(w http.ResponseWriter, r *http.Request) {
 	m := b.backup
 	if _, err := m.rclonePath(); err != nil {
-		writeErr(w, http.StatusPreconditionFailed, rcloneMissingHint(err))
+		httpapi.WriteErr(w, http.StatusPreconditionFailed, rcloneMissingHint(err))
 		return
 	}
 	// Connecting starts by deleting the remote, so it would throw away a
 	// working link, for good if the new sign-in is then abandoned, and a
 	// backup running on it would fail half-way. Disconnect comes first.
 	if m.connected() {
-		writeErr(w, http.StatusConflict, "Google Drive is already connected — disconnect it first to connect another account")
+		httpapi.WriteErr(w, http.StatusConflict, "Google Drive is already connected — disconnect it first to connect another account")
 		return
 	}
 	m.mu.Lock()
 	if m.connect != nil && m.connect.State == "running" {
 		m.mu.Unlock()
-		writeErr(w, http.StatusConflict, "already connecting — finish in the browser tab rclone opened")
+		httpapi.WriteErr(w, http.StatusConflict, "already connecting — finish in the browser tab rclone opened")
 		return
 	}
 	if m.job != nil {
 		m.mu.Unlock()
-		writeErr(w, http.StatusConflict, "a backup or restore is running — wait for it or cancel it first")
+		httpapi.WriteErr(w, http.StatusConflict, "a backup or restore is running — wait for it or cancel it first")
 		return
 	}
 	if m.disconnecting {
 		m.mu.Unlock()
-		writeErr(w, http.StatusConflict, errDisconnecting.Error())
+		httpapi.WriteErr(w, http.StatusConflict, errDisconnecting.Error())
 		return
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), connectTimeout)
@@ -755,12 +756,12 @@ func (b *Bridge) apiBackupConnect(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		m.mu.Unlock()
 		cancel()
-		writeErr(w, http.StatusServiceUnavailable, err.Error())
+		httpapi.WriteErr(w, http.StatusServiceUnavailable, err.Error())
 		return
 	}
 	m.connect = job
 	m.mu.Unlock()
-	writeJSON(w, http.StatusAccepted, map[string]string{"status": "connecting"})
+	httpapi.WriteJSON(w, http.StatusAccepted, map[string]string{"status": "connecting"})
 }
 
 // connectTimeout is how long a Drive sign-in waits for you to approve it.
@@ -863,11 +864,11 @@ func (b *Bridge) apiBackupDisconnect(w http.ResponseWriter, r *http.Request) {
 	switch {
 	case m.job != nil:
 		m.mu.Unlock()
-		writeErr(w, http.StatusConflict, "a backup or restore is running — wait for it or cancel it first")
+		httpapi.WriteErr(w, http.StatusConflict, "a backup or restore is running — wait for it or cancel it first")
 		return
 	case m.disconnecting:
 		m.mu.Unlock()
-		writeErr(w, http.StatusConflict, errDisconnecting.Error())
+		httpapi.WriteErr(w, http.StatusConflict, errDisconnecting.Error())
 		return
 	}
 	m.disconnecting = true
@@ -888,7 +889,7 @@ func (b *Bridge) apiBackupDisconnect(w http.ResponseWriter, r *http.Request) {
 		select {
 		case <-job.done:
 		case <-time.After(backupStopWait):
-			writeErr(w, http.StatusInternalServerError, "the Google Drive sign-in did not stop — try again in a moment")
+			httpapi.WriteErr(w, http.StatusInternalServerError, "the Google Drive sign-in did not stop — try again in a moment")
 			return
 		}
 	}
@@ -898,10 +899,10 @@ func (b *Bridge) apiBackupDisconnect(w http.ResponseWriter, r *http.Request) {
 	}
 	m.mu.Unlock()
 	if _, err := m.runner(r.Context(), []string{"config", "delete", b.cfgs.Get().Backup.Remote}, nil); err != nil {
-		writeErr(w, http.StatusInternalServerError, "removing the Google Drive link failed: "+err.Error())
+		httpapi.WriteErr(w, http.StatusInternalServerError, "removing the Google Drive link failed: "+err.Error())
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]string{"status": "disconnected"})
+	httpapi.WriteJSON(w, http.StatusOK, map[string]string{"status": "disconnected"})
 }
 
 func (b *Bridge) apiBackupSettings(w http.ResponseWriter, r *http.Request) {
@@ -912,8 +913,8 @@ func (b *Bridge) apiBackupSettings(w http.ResponseWriter, r *http.Request) {
 		KeepVersionsDays    *int    `json:"keep_versions_days"`
 		IncludeBridgeConfig *bool   `json:"include_bridge_config"`
 	}
-	if err := decodeJSON(r, &req); err != nil {
-		writeErr(w, http.StatusBadRequest, err.Error())
+	if err := httpapi.DecodeJSON(r, &req); err != nil {
+		httpapi.WriteErr(w, http.StatusBadRequest, err.Error())
 		return
 	}
 	_, err := b.cfgs.Update("", func(c *Config) error {
@@ -935,10 +936,10 @@ func (b *Bridge) apiBackupSettings(w http.ResponseWriter, r *http.Request) {
 		return nil
 	})
 	if err != nil {
-		writeErr(w, http.StatusUnprocessableEntity, err.Error())
+		httpapi.WriteErr(w, http.StatusUnprocessableEntity, err.Error())
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]string{"status": "saved"})
+	httpapi.WriteJSON(w, http.StatusOK, map[string]string{"status": "saved"})
 }
 
 // apiBrainBackup changes one brain's backup settings, which live in its
@@ -948,17 +949,17 @@ func (b *Bridge) apiBrainBackup(w http.ResponseWriter, r *http.Request) {
 		Enabled *bool    `json:"enabled"`
 		Exclude []string `json:"exclude"`
 	}
-	if err := decodeJSON(r, &req); err != nil {
-		writeErr(w, http.StatusBadRequest, err.Error())
+	if err := httpapi.DecodeJSON(r, &req); err != nil {
+		httpapi.WriteErr(w, http.StatusBadRequest, err.Error())
 		return
 	}
 	if _, err := b.cfgs.UpdateTx("", func(c *Config, tx *Tx) error {
 		return updateBrainBackup(c, tx, r.PathValue("id"), req.Enabled, req.Exclude)
 	}); err != nil {
-		writeErr(w, http.StatusUnprocessableEntity, err.Error())
+		httpapi.WriteErr(w, http.StatusUnprocessableEntity, err.Error())
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]string{"status": "saved"})
+	httpapi.WriteJSON(w, http.StatusOK, map[string]string{"status": "saved"})
 }
 
 // updateBrainBackup changes one brain's backup settings in its manifest.
@@ -990,22 +991,22 @@ func (b *Bridge) apiBackupRun(w http.ResponseWriter, r *http.Request) {
 		// files are gone (see checkMassDeletion).
 		Force bool `json:"force"`
 	}
-	if err := decodeOptionalJSON(r, &req); err != nil {
-		writeErr(w, http.StatusBadRequest, err.Error())
+	if err := httpapi.DecodeOptionalJSON(r, &req); err != nil {
+		httpapi.WriteErr(w, http.StatusBadRequest, err.Error())
 		return
 	}
 	// Forcing is a decision about one brain's folder, made after looking at
 	// it; without a list it would mirror every brain's deletions at once.
 	if req.Force && len(req.Brains) == 0 {
-		writeErr(w, http.StatusBadRequest, "force needs a brain: name the brains to mirror in \"brains\"")
+		httpapi.WriteErr(w, http.StatusBadRequest, "force needs a brain: name the brains to mirror in \"brains\"")
 		return
 	}
 	include := boolOr(req.IncludeBridge, b.cfgs.Get().Backup.includeBridge())
 	if err := b.backup.StartRun(req.Brains, include, "manual", req.Force); err != nil {
-		writeErr(w, http.StatusConflict, err.Error())
+		httpapi.WriteErr(w, http.StatusConflict, err.Error())
 		return
 	}
-	writeJSON(w, http.StatusAccepted, map[string]string{"status": "started"})
+	httpapi.WriteJSON(w, http.StatusAccepted, map[string]string{"status": "started"})
 }
 
 func (b *Bridge) apiBackupCancel(w http.ResponseWriter, r *http.Request) {
@@ -1016,10 +1017,10 @@ func (b *Bridge) apiBackupCancel(w http.ResponseWriter, r *http.Request) {
 	}
 	b.backup.mu.Unlock()
 	if job == nil {
-		writeErr(w, http.StatusConflict, "no backup is running")
+		httpapi.WriteErr(w, http.StatusConflict, "no backup is running")
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]string{"status": "cancelling"})
+	httpapi.WriteJSON(w, http.StatusOK, map[string]string{"status": "cancelling"})
 }
 
 // copyOf returns a copy of *p, or nil: what the status shows of state a
@@ -1747,22 +1748,22 @@ var restoreVersionRe = regexp.MustCompile(`^(current|\d{8}-\d{6}Z?)$`)
 func (b *Bridge) apiBackupVersions(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 	if !backupNameOK(id) {
-		writeErr(w, http.StatusBadRequest, "invalid brain")
+		httpapi.WriteErr(w, http.StatusBadRequest, "invalid brain")
 		return
 	}
 	if !b.backup.connected() {
-		writeErr(w, http.StatusPreconditionFailed, "Google Drive is not connected")
+		httpapi.WriteErr(w, http.StatusPreconditionFailed, "Google Drive is not connected")
 		return
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), 60*time.Second)
 	defer cancel()
 	versions, err := b.backup.listVersions(ctx, backupPath(b.cfgs.Get().Backup, id, "versions"))
 	if err != nil {
-		writeErr(w, http.StatusBadGateway, "listing versions failed: "+err.Error())
+		httpapi.WriteErr(w, http.StatusBadGateway, "listing versions failed: "+err.Error())
 		return
 	}
 	sortVersions(versions)
-	writeJSON(w, http.StatusOK, map[string]any{"brain": id, "versions": versions})
+	httpapi.WriteJSON(w, http.StatusOK, map[string]any{"brain": id, "versions": versions})
 }
 
 // resolveExisting resolves the symlinks of absolute path p as far as it
@@ -1859,25 +1860,25 @@ func (b *Bridge) apiBackupRestore(w http.ResponseWriter, r *http.Request) {
 		Version string `json:"version"` // "current" or a versions/<ts> name
 		Target  string `json:"target"`
 	}
-	if err := decodeJSON(r, &req); err != nil {
-		writeErr(w, http.StatusBadRequest, err.Error())
+	if err := httpapi.DecodeJSON(r, &req); err != nil {
+		httpapi.WriteErr(w, http.StatusBadRequest, err.Error())
 		return
 	}
 	if req.Version == "" {
 		req.Version = "current"
 	}
 	if !backupNameOK(req.Brain) || !restoreVersionRe.MatchString(req.Version) {
-		writeErr(w, http.StatusBadRequest, "invalid brain or version")
+		httpapi.WriteErr(w, http.StatusBadRequest, "invalid brain or version")
 		return
 	}
 	m := b.backup
 	if !m.connected() {
-		writeErr(w, http.StatusPreconditionFailed, "Google Drive is not connected")
+		httpapi.WriteErr(w, http.StatusPreconditionFailed, "Google Drive is not connected")
 		return
 	}
 	target, err := b.restoreTarget(req.Target)
 	if err != nil {
-		writeErr(w, http.StatusUnprocessableEntity, err.Error())
+		httpapi.WriteErr(w, http.StatusUnprocessableEntity, err.Error())
 		return
 	}
 	src := backupPath(b.cfgs.Get().Backup, req.Brain, "current")
@@ -1887,19 +1888,19 @@ func (b *Bridge) apiBackupRestore(w http.ResponseWriter, r *http.Request) {
 	m.mu.Lock()
 	if m.job != nil {
 		m.mu.Unlock()
-		writeErr(w, http.StatusConflict, "a backup or restore is already running")
+		httpapi.WriteErr(w, http.StatusConflict, "a backup or restore is already running")
 		return
 	}
 	if m.disconnecting {
 		m.mu.Unlock()
-		writeErr(w, http.StatusConflict, errDisconnecting.Error())
+		httpapi.WriteErr(w, http.StatusConflict, errDisconnecting.Error())
 		return
 	}
 	// Made here, so that a folder that cannot be made is the request's
 	// error rather than a restore that fails out of sight.
 	if err := os.MkdirAll(target, 0o700); err != nil {
 		m.mu.Unlock()
-		writeErr(w, http.StatusInternalServerError, "creating the restore folder failed: "+err.Error())
+		httpapi.WriteErr(w, http.StatusInternalServerError, "creating the restore folder failed: "+err.Error())
 		return
 	}
 	ctx, cancel := context.WithCancel(context.Background())
@@ -1916,12 +1917,12 @@ func (b *Bridge) apiBackupRestore(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		m.mu.Unlock()
 		cancel()
-		writeErr(w, http.StatusServiceUnavailable, err.Error())
+		httpapi.WriteErr(w, http.StatusServiceUnavailable, err.Error())
 		return
 	}
 	m.job = job
 	m.mu.Unlock()
-	writeJSON(w, http.StatusAccepted, map[string]string{"status": "restoring", "target": target})
+	httpapi.WriteJSON(w, http.StatusAccepted, map[string]string{"status": "restoring", "target": target})
 }
 
 // restore copies src, a backup of brain, into target, and says how it went.

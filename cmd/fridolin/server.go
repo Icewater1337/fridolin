@@ -12,6 +12,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Icewater1337/fridolin/internal/httpapi"
+
 	"go.mau.fi/whatsmeow/types"
 
 	"github.com/Icewater1337/fridolin/internal/chat"
@@ -54,16 +56,6 @@ func isLoopbackAddr(addr string) bool {
 	return ip != nil && ip.IsLoopback()
 }
 
-func writeJSON(w http.ResponseWriter, status int, v any) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(status)
-	_ = json.NewEncoder(w).Encode(v)
-}
-
-func writeErr(w http.ResponseWriter, status int, msg string) {
-	writeJSON(w, status, map[string]string{"error": msg})
-}
-
 // readyResponse is the body of GET /ready: whether messages can go out and
 // which build answers. Nothing in it identifies the account.
 type readyResponse struct {
@@ -91,7 +83,7 @@ func (b *Bridge) httpReady(w http.ResponseWriter, r *http.Request) {
 		status = http.StatusServiceUnavailable
 	}
 	w.Header().Set("Cache-Control", "no-store")
-	writeJSON(w, status, resp)
+	httpapi.WriteJSON(w, status, resp)
 }
 
 // httpSend handles POST /send {"jid":"…","text":"…"} for local scripts.
@@ -103,18 +95,18 @@ func (b *Bridge) httpReady(w http.ResponseWriter, r *http.Request) {
 func (b *Bridge) httpSend(w http.ResponseWriter, r *http.Request) {
 	who, err := b.scriptAuth.authorize(r)
 	if err != nil {
-		writeErr(w, http.StatusUnauthorized, err.Error())
+		httpapi.WriteErr(w, http.StatusUnauthorized, err.Error())
 		return
 	}
 	var req sendRequest
 	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20)).Decode(&req); err != nil {
-		writeErr(w, http.StatusBadRequest, "invalid JSON: "+err.Error())
+		httpapi.WriteErr(w, http.StatusBadRequest, "invalid JSON: "+err.Error())
 		return
 	}
 	// Blank text would send nothing (ChunkMessage gives no chunks for it),
 	// so refuse it rather than answer "sent" and log a message to history.
 	if req.JID == "" || strings.TrimSpace(req.Text) == "" {
-		writeErr(w, http.StatusBadRequest, "jid and text are required")
+		httpapi.WriteErr(w, http.StatusBadRequest, "jid and text are required")
 		return
 	}
 	// Refused before sending: a script gets a 400 for its own mistake rather
@@ -125,7 +117,7 @@ func (b *Bridge) httpSend(w http.ResponseWriter, r *http.Request) {
 		err = checkRecipient(to)
 	}
 	if err != nil {
-		writeErr(w, http.StatusBadRequest, err.Error())
+		httpapi.WriteErr(w, http.StatusBadRequest, err.Error())
 		return
 	}
 	// A person is their number to the bridge (canonicalUser): sent to a
@@ -140,7 +132,7 @@ func (b *Bridge) httpSend(w http.ResponseWriter, r *http.Request) {
 		if errors.Is(err, errTokenRequired) {
 			status = http.StatusUnauthorized
 		}
-		writeErr(w, status, err.Error())
+		httpapi.WriteErr(w, status, err.Error())
 		return
 	}
 
@@ -153,7 +145,7 @@ func (b *Bridge) httpSend(w http.ResponseWriter, r *http.Request) {
 		if errors.As(err, &partial) {
 			b.appendHTTPMessageToHistory(who, jid, strings.Join(partial.sent, "\n"), "")
 		}
-		writeErr(w, sendErrStatus(err), "send failed: "+err.Error())
+		httpapi.WriteErr(w, sendErrStatus(err), "send failed: "+err.Error())
 		return
 	}
 
@@ -166,7 +158,7 @@ func (b *Bridge) httpSend(w http.ResponseWriter, r *http.Request) {
 		resp["otp_request"] = request
 	}
 	b.appendHTTPMessageToHistory(who, jid, req.Text, request)
-	writeJSON(w, http.StatusOK, resp)
+	httpapi.WriteJSON(w, http.StatusOK, resp)
 }
 
 // maySend refuses a /send that who may not make: a brain may send only to
@@ -256,7 +248,7 @@ func (b *Bridge) appendHTTPMessageToHistory(who principal, jid, text, request st
 func (b *Bridge) httpIngest(w http.ResponseWriter, r *http.Request) {
 	cfg := b.cfgs.Get()
 	if !cfg.Ingest.Enabled {
-		writeErr(w, http.StatusNotFound, "ingest is disabled (set ingest.enabled in the dashboard)")
+		httpapi.WriteErr(w, http.StatusNotFound, "ingest is disabled (set ingest.enabled in the dashboard)")
 		return
 	}
 	who, err := b.scriptAuth.authorize(r)
@@ -264,20 +256,20 @@ func (b *Bridge) httpIngest(w http.ResponseWriter, r *http.Request) {
 		err = errTokenRequired
 	}
 	if err != nil {
-		writeErr(w, http.StatusUnauthorized, err.Error())
+		httpapi.WriteErr(w, http.StatusUnauthorized, err.Error())
 		return
 	}
 	var req ingestRequest
 	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20)).Decode(&req); err != nil {
-		writeErr(w, http.StatusBadRequest, "invalid JSON: "+err.Error())
+		httpapi.WriteErr(w, http.StatusBadRequest, "invalid JSON: "+err.Error())
 		return
 	}
 	if req.Scope != "" {
-		writeErr(w, http.StatusBadRequest, `"scope" is no longer read: name the brain in "brain"`)
+		httpapi.WriteErr(w, http.StatusBadRequest, `"scope" is no longer read: name the brain in "brain"`)
 		return
 	}
 	if len(req.Paths) == 0 && strings.TrimSpace(req.Text) == "" {
-		writeErr(w, http.StatusBadRequest, "paths or text required")
+		httpapi.WriteErr(w, http.StatusBadRequest, "paths or text required")
 		return
 	}
 	id := strings.ToLower(strings.TrimSpace(req.Brain))
@@ -286,25 +278,25 @@ func (b *Bridge) httpIngest(w http.ResponseWriter, r *http.Request) {
 			id = who.brain
 		}
 		if id != who.brain {
-			writeErr(w, http.StatusForbidden, fmt.Sprintf("brain %s may hand files only to itself, not to %q", who.brain, id))
+			httpapi.WriteErr(w, http.StatusForbidden, fmt.Sprintf("brain %s may hand files only to itself, not to %q", who.brain, id))
 			return
 		}
 	}
 	br := b.brainMgr.Get(id)
 	if br == nil {
-		writeErr(w, http.StatusBadRequest, fmt.Sprintf("unknown brain %q", id))
+		httpapi.WriteErr(w, http.StatusBadRequest, fmt.Sprintf("unknown brain %q", id))
 		return
 	}
 
 	paths, err := mediaInboxAt(cfg.MediaDir).Resolve(br.ID(), req.Paths, who.kind == callerBrain)
 	if err != nil {
-		writeErr(w, http.StatusBadRequest, err.Error())
+		httpapi.WriteErr(w, http.StatusBadRequest, err.Error())
 		return
 	}
 
 	jid := b.replyChatFor(br, cfg)
 	if jid == "" {
-		writeErr(w, http.StatusBadRequest, "brain "+br.ID()+" has no chat to reply in — set reply_chat in its settings")
+		httpapi.WriteErr(w, http.StatusBadRequest, "brain "+br.ID()+" has no chat to reply in — set reply_chat in its settings")
 		return
 	}
 	sender := req.Sender
@@ -316,7 +308,7 @@ func (b *Bridge) httpIngest(w http.ResponseWriter, r *http.Request) {
 		text = "New files were uploaded."
 	}
 	go b.handOff(br, jid, sender, text, paths)
-	writeJSON(w, http.StatusAccepted, map[string]string{"status": "accepted", "jid": jid})
+	httpapi.WriteJSON(w, http.StatusAccepted, map[string]string{"status": "accepted", "jid": jid})
 }
 
 // handOff feeds files that arrived outside WhatsApp to the brain picked for

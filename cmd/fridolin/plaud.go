@@ -26,6 +26,7 @@ import (
 	"time"
 
 	"github.com/Icewater1337/fridolin/internal/fsx"
+	"github.com/Icewater1337/fridolin/internal/httpapi"
 	"github.com/Icewater1337/fridolin/internal/platform"
 	"github.com/Icewater1337/fridolin/internal/textx"
 	"go.mau.fi/whatsmeow/types"
@@ -2346,45 +2347,45 @@ func (b *Bridge) apiPlaudResend(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		ID string `json:"id"`
 	}
-	if err := decodeJSON(r, &req); err != nil {
-		writeErr(w, http.StatusBadRequest, err.Error())
+	if err := httpapi.DecodeJSON(r, &req); err != nil {
+		httpapi.WriteErr(w, http.StatusBadRequest, err.Error())
 		return
 	}
 	switch err := b.plaud.Resend(req.ID); {
 	case errors.Is(err, errPlaudUnknownRecording):
-		writeErr(w, http.StatusNotFound, err.Error())
+		httpapi.WriteErr(w, http.StatusNotFound, err.Error())
 	case errors.Is(err, errPlaudAlreadyWaiting):
-		writeErr(w, http.StatusConflict, err.Error())
+		httpapi.WriteErr(w, http.StatusConflict, err.Error())
 	case err != nil:
-		writeErr(w, http.StatusInternalServerError, err.Error())
+		httpapi.WriteErr(w, http.StatusInternalServerError, err.Error())
 	default:
-		writeJSON(w, http.StatusAccepted, map[string]string{"status": "waiting"})
+		httpapi.WriteJSON(w, http.StatusAccepted, map[string]string{"status": "waiting"})
 	}
 }
 
 func (b *Bridge) apiPlaudStatus(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, http.StatusOK, b.plaud.Status())
+	httpapi.WriteJSON(w, http.StatusOK, b.plaud.Status())
 }
 
 func (b *Bridge) apiPlaudConnect(w http.ResponseWriter, r *http.Request) {
 	switch err := b.plaud.Connect(); {
 	case errors.Is(err, errPlaudNotInstalled):
-		writeErr(w, http.StatusPreconditionFailed, "Install Plaud's CLI first: npm install -g @plaud-ai/cli")
+		httpapi.WriteErr(w, http.StatusPreconditionFailed, "Install Plaud's CLI first: npm install -g @plaud-ai/cli")
 	case errors.Is(err, errPlaudSigningIn):
-		writeErr(w, http.StatusConflict, err.Error())
+		httpapi.WriteErr(w, http.StatusConflict, err.Error())
 	case err != nil:
-		writeErr(w, http.StatusInternalServerError, err.Error())
+		httpapi.WriteErr(w, http.StatusInternalServerError, err.Error())
 	default:
-		writeJSON(w, http.StatusAccepted, map[string]string{"status": "connecting"})
+		httpapi.WriteJSON(w, http.StatusAccepted, map[string]string{"status": "connecting"})
 	}
 }
 
 func (b *Bridge) apiPlaudDisconnect(w http.ResponseWriter, r *http.Request) {
 	if err := b.plaud.Disconnect(); err != nil {
-		writeErr(w, http.StatusBadGateway, err.Error())
+		httpapi.WriteErr(w, http.StatusBadGateway, err.Error())
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]string{"status": "disconnected"})
+	httpapi.WriteJSON(w, http.StatusOK, map[string]string{"status": "disconnected"})
 }
 
 func (b *Bridge) apiPlaudSettings(w http.ResponseWriter, r *http.Request) {
@@ -2396,14 +2397,14 @@ func (b *Bridge) apiPlaudSettings(w http.ResponseWriter, r *http.Request) {
 		BrainAccess *bool   `json:"brain_access"`
 		PhoneUpload *bool   `json:"phone_upload"`
 	}
-	if err := decodeJSON(r, &req); err != nil {
-		writeErr(w, http.StatusBadRequest, err.Error())
+	if err := httpapi.DecodeJSON(r, &req); err != nil {
+		httpapi.WriteErr(w, http.StatusBadRequest, err.Error())
 		return
 	}
 	// Only a newly picked brain must exist: one that went away since must
 	// not keep the other settings from being saved.
 	if req.Brain != nil && *req.Brain != "" && *req.Brain != b.cfgs.Get().Plaud.Brain && b.brainMgr.Get(*req.Brain) == nil {
-		writeErr(w, http.StatusUnprocessableEntity, fmt.Sprintf("there is no approved brain %q", *req.Brain))
+		httpapi.WriteErr(w, http.StatusUnprocessableEntity, fmt.Sprintf("there is no approved brain %q", *req.Brain))
 		return
 	}
 	_, err := b.cfgs.Update("", func(c *Config) error {
@@ -2428,28 +2429,28 @@ func (b *Bridge) apiPlaudSettings(w http.ResponseWriter, r *http.Request) {
 		return nil
 	})
 	if err != nil {
-		writeErr(w, http.StatusUnprocessableEntity, err.Error())
+		httpapi.WriteErr(w, http.StatusUnprocessableEntity, err.Error())
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]string{"status": "saved"})
+	httpapi.WriteJSON(w, http.StatusOK, map[string]string{"status": "saved"})
 }
 
 func (b *Bridge) apiPlaudSync(w http.ResponseWriter, r *http.Request) {
 	started, err := b.plaud.CheckNow()
 	switch {
 	case errors.Is(err, errPlaudNotConnected):
-		writeErr(w, http.StatusPreconditionFailed, "Plaud is not connected")
+		httpapi.WriteErr(w, http.StatusPreconditionFailed, "Plaud is not connected")
 	case errors.Is(err, errPlaudSendingOff):
-		writeErr(w, http.StatusConflict, "Turn on “Send new recordings to a brain” first: a check hands new recordings to the brain")
+		httpapi.WriteErr(w, http.StatusConflict, "Turn on “Send new recordings to a brain” first: a check hands new recordings to the brain")
 	case errors.Is(err, errPlaudStopping):
-		writeErr(w, http.StatusServiceUnavailable, "Fridolin is stopping: the next start checks Plaud")
+		httpapi.WriteErr(w, http.StatusServiceUnavailable, "Fridolin is stopping: the next start checks Plaud")
 	case err != nil:
-		writeErr(w, http.StatusInternalServerError, err.Error())
+		httpapi.WriteErr(w, http.StatusInternalServerError, err.Error())
 	case !started:
 		// A check that is already running covers this one; say so rather
 		// than claim to start one.
-		writeJSON(w, http.StatusOK, map[string]string{"status": "already checking"})
+		httpapi.WriteJSON(w, http.StatusOK, map[string]string{"status": "already checking"})
 	default:
-		writeJSON(w, http.StatusAccepted, map[string]string{"status": "syncing"})
+		httpapi.WriteJSON(w, http.StatusAccepted, map[string]string{"status": "syncing"})
 	}
 }

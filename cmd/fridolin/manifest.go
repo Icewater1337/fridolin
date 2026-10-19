@@ -190,8 +190,18 @@ func (m BrainManifest) Equal(o BrainManifest) bool {
 // it goes as readBrainFile reads: nothing outside the folder, no symlink,
 // only a regular file, so that a FIFO cannot hang a reload.
 func ReadManifest(dir string) (*BrainManifest, error) {
-	path := filepath.Join(dir, ManifestFile)
-	data, err := readBrainFile(dir, ManifestFile)
+	root, err := os.OpenRoot(dir)
+	if err != nil {
+		return nil, fmt.Errorf("%s: %w", filepath.Join(dir, ManifestFile), err)
+	}
+	defer root.Close()
+	return readManifestRoot(root)
+}
+
+// readManifestRoot keeps inspection and transaction reads on their pinned folder.
+func readManifestRoot(root *os.Root) (*BrainManifest, error) {
+	path := filepath.Join(root.Name(), ManifestFile)
+	data, err := readBrainFileRoot(root, ManifestFile)
 	if err != nil {
 		return nil, fmt.Errorf("%s: %w", path, err)
 	}

@@ -23,6 +23,7 @@ import (
 
 	"github.com/Icewater1337/fridolin/internal/chat"
 	"github.com/Icewater1337/fridolin/internal/fsx"
+	"github.com/Icewater1337/fridolin/internal/httpapi"
 )
 
 const buildChatSuffix = "@fridolin.dashboard"
@@ -181,7 +182,7 @@ func (b *Bridge) buildBrain(w http.ResponseWriter, r *http.Request) *Brain {
 	id := r.PathValue("id")
 	br := b.brainMgr.Get(id)
 	if br == nil || !b.site.IsBuilder(id) {
-		writeErr(w, http.StatusNotFound, "no builder brain "+id+" (Site → Builders)")
+		httpapi.WriteErr(w, http.StatusNotFound, "no builder brain "+id+" (Site → Builders)")
 		return nil
 	}
 	return br
@@ -214,7 +215,7 @@ func (b *Bridge) apiBuildChat(w http.ResponseWriter, r *http.Request) {
 			resp["proposal"] = p
 		}
 	}
-	writeJSON(w, http.StatusOK, resp)
+	httpapi.WriteJSON(w, http.StatusOK, resp)
 }
 
 func (b *Bridge) apiBuildSend(w http.ResponseWriter, r *http.Request) {
@@ -225,18 +226,18 @@ func (b *Bridge) apiBuildSend(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		Text string `json:"text"`
 	}
-	if err := decodeJSON(r, &req); err != nil {
-		writeErr(w, http.StatusBadRequest, err.Error())
+	if err := httpapi.DecodeJSON(r, &req); err != nil {
+		httpapi.WriteErr(w, http.StatusBadRequest, err.Error())
 		return
 	}
 	text := strings.TrimSpace(req.Text)
 	if text == "" || len(text) > 20000 {
-		writeErr(w, http.StatusBadRequest, "write a message (up to 20,000 characters)")
+		httpapi.WriteErr(w, http.StatusBadRequest, "write a message (up to 20,000 characters)")
 		return
 	}
 	ch := b.site.chats.get(br.ID())
 	if err := b.site.chats.add(br.ID(), "user", text); err != nil {
-		writeErr(w, http.StatusInternalServerError, err.Error())
+		httpapi.WriteErr(w, http.StatusInternalServerError, err.Error())
 		return
 	}
 	m := Inbound{Inbound: chat.Inbound{JID: buildChatJID(br.ID(), ch.Thread), Sender: "dashboard", Brain: br.ID(),
@@ -244,10 +245,10 @@ func (b *Bridge) apiBuildSend(w http.ResponseWriter, r *http.Request) {
 	}
 	if _, _, _, err := b.brainMgr.Submit(m); err != nil {
 		_ = b.site.chats.add(br.ID(), "assistant", buildChatError(err))
-		writeErr(w, http.StatusBadRequest, err.Error())
+		httpapi.WriteErr(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	writeJSON(w, http.StatusAccepted, map[string]bool{"ok": true})
+	httpapi.WriteJSON(w, http.StatusAccepted, map[string]bool{"ok": true})
 }
 
 func (b *Bridge) apiBuildNew(w http.ResponseWriter, r *http.Request) {
@@ -256,10 +257,10 @@ func (b *Bridge) apiBuildNew(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := b.site.chats.newThread(br.ID()); err != nil {
-		writeErr(w, http.StatusInternalServerError, err.Error())
+		httpapi.WriteErr(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
+	httpapi.WriteJSON(w, http.StatusOK, map[string]bool{"ok": true})
 }
 
 func (b *Bridge) apiBuildStop(w http.ResponseWriter, r *http.Request) {
@@ -270,11 +271,11 @@ func (b *Bridge) apiBuildStop(w http.ResponseWriter, r *http.Request) {
 	ch := b.site.chats.get(br.ID())
 	rt := br.Snapshot()
 	if rt.Running == nil || rt.Running.Chat != buildChatJID(br.ID(), ch.Thread) {
-		writeErr(w, http.StatusConflict, "nothing is running in this chat")
+		httpapi.WriteErr(w, http.StatusConflict, "nothing is running in this chat")
 		return
 	}
 	br.StopCurrent(false)
-	writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
+	httpapi.WriteJSON(w, http.StatusOK, map[string]bool{"ok": true})
 }
 
 // runLogWindow is how much of the end of the activity log currentRunLog

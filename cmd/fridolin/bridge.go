@@ -14,6 +14,8 @@ import (
 	"time"
 	"unicode"
 
+	"github.com/Icewater1337/fridolin/internal/httpapi"
+
 	wastore "go.mau.fi/whatsmeow/store"
 	"go.mau.fi/whatsmeow/types"
 
@@ -54,7 +56,7 @@ type Bridge struct {
 	deb      *Debouncer
 	logs     *logx.Ring
 	activity *activity.Feed
-	token    *DashboardToken
+	token    *httpapi.Token
 	// tokenAtStart is dashboard.require_token as the bridge started.
 	tokenAtStart bool
 	sessions     *dashSessions
@@ -257,7 +259,7 @@ func NewBridge(cfgs *ConfigStore, opts BridgeOptions) (_ *Bridge, err error) {
 		}
 	})
 
-	tok, err := LoadDashboardToken(cfg.DataDir)
+	tok, err := httpapi.LoadDashboardToken(cfg.DataDir)
 	if err != nil {
 		return nil, err
 	}

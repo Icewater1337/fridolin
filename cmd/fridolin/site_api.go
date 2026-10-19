@@ -13,6 +13,7 @@ import (
 	"strings"
 
 	"github.com/Icewater1337/fridolin/internal/fsx"
+	"github.com/Icewater1337/fridolin/internal/httpapi"
 )
 
 func (b *Bridge) siteAPI(mux *http.ServeMux) {
@@ -108,46 +109,46 @@ func (b *Bridge) apiSiteStatus(w http.ResponseWriter, r *http.Request) {
 	}
 	resp["accounts"] = map[string]int{"total": len(users), "admins": admins}
 	resp["deploy"] = m.DeployStatus()
-	writeJSON(w, http.StatusOK, resp)
+	httpapi.WriteJSON(w, http.StatusOK, resp)
 }
 
 func (b *Bridge) apiSiteSettings(w http.ResponseWriter, r *http.Request) {
 	var u SiteSettingsUpdate
-	if err := decodeJSON(r, &u); err != nil {
-		writeErr(w, http.StatusBadRequest, err.Error())
+	if err := httpapi.DecodeJSON(r, &u); err != nil {
+		httpapi.WriteErr(w, http.StatusBadRequest, err.Error())
 		return
 	}
 	if u.Enabled != nil && *u.Enabled {
 		users := b.site.Users()
 		if !slices.ContainsFunc(users, func(x SiteUser) bool { return x.Role == "admin" }) {
-			writeErr(w, http.StatusBadRequest, "add an admin account (your Google address) before turning the site on")
+			httpapi.WriteErr(w, http.StatusBadRequest, "add an admin account (your Google address) before turning the site on")
 			return
 		}
 		if b.site.Settings().Approved == "" {
-			writeErr(w, http.StatusBadRequest, "deploy a commit of the site repository first")
+			httpapi.WriteErr(w, http.StatusBadRequest, "deploy a commit of the site repository first")
 			return
 		}
 	}
 	s, err := b.site.UpdateSettings(u)
 	if err != nil {
-		writeErr(w, http.StatusBadRequest, err.Error())
+		httpapi.WriteErr(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	writeJSON(w, http.StatusOK, s)
+	httpapi.WriteJSON(w, http.StatusOK, s)
 }
 
 func (b *Bridge) apiSiteRestart(w http.ResponseWriter, r *http.Request) {
 	go b.site.Restart()
-	writeJSON(w, http.StatusAccepted, map[string]bool{"ok": true})
+	httpapi.WriteJSON(w, http.StatusAccepted, map[string]bool{"ok": true})
 }
 
 func (b *Bridge) apiSiteDeployKey(w http.ResponseWriter, r *http.Request) {
 	pub, err := b.site.DeployKey(r.Context())
 	if err != nil {
-		writeErr(w, http.StatusInternalServerError, err.Error())
+		httpapi.WriteErr(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]string{"deploy_key": pub})
+	httpapi.WriteJSON(w, http.StatusOK, map[string]string{"deploy_key": pub})
 }
 
 // apiSiteDeployKeyGH adds the deploy key with gh. Before a repository is
@@ -157,156 +158,156 @@ func (b *Bridge) apiSiteDeployKeyGH(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		URL string `json:"url"`
 	}
-	if err := decodeOptionalJSON(r, &req); err != nil {
-		writeErr(w, http.StatusBadRequest, err.Error())
+	if err := httpapi.DecodeOptionalJSON(r, &req); err != nil {
+		httpapi.WriteErr(w, http.StatusBadRequest, err.Error())
 		return
 	}
 	repo, err := b.site.AddDeployKeyWithGH(r.Context(), req.URL)
 	if err != nil {
-		writeErr(w, http.StatusBadRequest, err.Error())
+		httpapi.WriteErr(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "repo": repo})
+	httpapi.WriteJSON(w, http.StatusOK, map[string]any{"ok": true, "repo": repo})
 }
 
 func (b *Bridge) apiSiteCreateGitHubRepo(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		Name string `json:"name"`
 	}
-	if err := decodeJSON(r, &req); err != nil {
-		writeErr(w, http.StatusBadRequest, err.Error())
+	if err := httpapi.DecodeJSON(r, &req); err != nil {
+		httpapi.WriteErr(w, http.StatusBadRequest, err.Error())
 		return
 	}
 	u, err := b.site.CreateGitHubRepo(r.Context(), strings.TrimSpace(req.Name))
 	if err != nil {
-		writeErr(w, http.StatusBadRequest, err.Error())
+		httpapi.WriteErr(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]string{"url": u})
+	httpapi.WriteJSON(w, http.StatusOK, map[string]string{"url": u})
 }
 
 func (b *Bridge) apiSiteConnect(w http.ResponseWriter, r *http.Request) {
 	var req SiteRepo
-	if err := decodeJSON(r, &req); err != nil {
-		writeErr(w, http.StatusBadRequest, err.Error())
+	if err := httpapi.DecodeJSON(r, &req); err != nil {
+		httpapi.WriteErr(w, http.StatusBadRequest, err.Error())
 		return
 	}
 	if err := b.site.ConnectRepo(r.Context(), req); err != nil {
-		writeErr(w, http.StatusBadRequest, err.Error())
+		httpapi.WriteErr(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	writeJSON(w, http.StatusOK, b.site.Settings())
+	httpapi.WriteJSON(w, http.StatusOK, b.site.Settings())
 }
 
 func (b *Bridge) apiSiteDisconnect(w http.ResponseWriter, r *http.Request) {
 	if err := b.site.DisconnectRepo(); err != nil {
-		writeErr(w, http.StatusBadRequest, err.Error())
+		httpapi.WriteErr(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
+	httpapi.WriteJSON(w, http.StatusOK, map[string]bool{"ok": true})
 }
 
 func (b *Bridge) apiSiteStarter(w http.ResponseWriter, r *http.Request) {
 	if err := b.site.AddStarter(r.Context()); err != nil {
-		writeErr(w, http.StatusBadRequest, err.Error())
+		httpapi.WriteErr(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
+	httpapi.WriteJSON(w, http.StatusOK, map[string]bool{"ok": true})
 }
 
 func (b *Bridge) apiSiteFetch(w http.ResponseWriter, r *http.Request) {
 	up, err := b.site.Fetch(r.Context())
 	if err != nil {
-		writeErr(w, http.StatusBadGateway, err.Error())
+		httpapi.WriteErr(w, http.StatusBadGateway, err.Error())
 		return
 	}
-	writeJSON(w, http.StatusOK, up)
+	httpapi.WriteJSON(w, http.StatusOK, up)
 }
 
 func (b *Bridge) apiSiteDeploy(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		Commit string `json:"commit"`
 	}
-	if err := decodeJSON(r, &req); err != nil {
-		writeErr(w, http.StatusBadRequest, err.Error())
+	if err := httpapi.DecodeJSON(r, &req); err != nil {
+		httpapi.WriteErr(w, http.StatusBadRequest, err.Error())
 		return
 	}
 	// The deploy outlives this request.
 	if err := b.site.Deploy(b.site.baseContext(), req.Commit); err != nil {
-		writeErr(w, http.StatusBadRequest, err.Error())
+		httpapi.WriteErr(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	writeJSON(w, http.StatusAccepted, b.site.DeployStatus())
+	httpapi.WriteJSON(w, http.StatusAccepted, b.site.DeployStatus())
 }
 
 func (b *Bridge) apiSiteUsers(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, http.StatusOK, map[string]any{"users": b.site.Users(), "roles": b.site.Settings().Roles})
+	httpapi.WriteJSON(w, http.StatusOK, map[string]any{"users": b.site.Users(), "roles": b.site.Settings().Roles})
 }
 
 func (b *Bridge) apiSiteAddUser(w http.ResponseWriter, r *http.Request) {
 	var in SiteUserInput
-	if err := decodeJSON(r, &in); err != nil {
-		writeErr(w, http.StatusBadRequest, err.Error())
+	if err := httpapi.DecodeJSON(r, &in); err != nil {
+		httpapi.WriteErr(w, http.StatusBadRequest, err.Error())
 		return
 	}
 	u, err := b.site.AddUser(in)
 	if err != nil {
-		writeErr(w, http.StatusBadRequest, err.Error())
+		httpapi.WriteErr(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	writeJSON(w, http.StatusOK, u)
+	httpapi.WriteJSON(w, http.StatusOK, u)
 }
 
 func (b *Bridge) apiSiteUpdateUser(w http.ResponseWriter, r *http.Request) {
 	var in SiteUserInput
-	if err := decodeJSON(r, &in); err != nil {
-		writeErr(w, http.StatusBadRequest, err.Error())
+	if err := httpapi.DecodeJSON(r, &in); err != nil {
+		httpapi.WriteErr(w, http.StatusBadRequest, err.Error())
 		return
 	}
 	u, err := b.site.UpdateUser(r.PathValue("id"), in)
 	if err != nil {
-		writeErr(w, http.StatusBadRequest, err.Error())
+		httpapi.WriteErr(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	writeJSON(w, http.StatusOK, u)
+	httpapi.WriteJSON(w, http.StatusOK, u)
 }
 
 func (b *Bridge) apiSiteRemoveUser(w http.ResponseWriter, r *http.Request) {
 	if err := b.site.RemoveUser(r.PathValue("id")); err != nil {
-		writeErr(w, http.StatusBadRequest, err.Error())
+		httpapi.WriteErr(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
+	httpapi.WriteJSON(w, http.StatusOK, map[string]bool{"ok": true})
 }
 
 func (b *Bridge) apiSiteRoles(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		Roles []string `json:"roles"`
 	}
-	if err := decodeJSON(r, &req); err != nil {
-		writeErr(w, http.StatusBadRequest, err.Error())
+	if err := httpapi.DecodeJSON(r, &req); err != nil {
+		httpapi.WriteErr(w, http.StatusBadRequest, err.Error())
 		return
 	}
 	if err := b.site.SetRoles(req.Roles); err != nil {
-		writeErr(w, http.StatusBadRequest, err.Error())
+		httpapi.WriteErr(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"roles": b.site.Settings().Roles})
+	httpapi.WriteJSON(w, http.StatusOK, map[string]any{"roles": b.site.Settings().Roles})
 }
 
 func (b *Bridge) apiSiteTunnel(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		Token string `json:"token"`
 	}
-	if err := decodeJSON(r, &req); err != nil {
-		writeErr(w, http.StatusBadRequest, err.Error())
+	if err := httpapi.DecodeJSON(r, &req); err != nil {
+		httpapi.WriteErr(w, http.StatusBadRequest, err.Error())
 		return
 	}
 	if err := b.site.SetTunnelToken(req.Token); err != nil {
-		writeErr(w, http.StatusBadRequest, err.Error())
+		httpapi.WriteErr(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
+	httpapi.WriteJSON(w, http.StatusOK, map[string]bool{"ok": true})
 }
 
 // apiSiteGoogleClient saves the site's own Google client and restarts the
@@ -315,7 +316,7 @@ func (b *Bridge) apiSiteTunnel(w http.ResponseWriter, r *http.Request) {
 func (b *Bridge) apiSiteGoogleClient(w http.ResponseWriter, r *http.Request) {
 	data, err := io.ReadAll(io.LimitReader(r.Body, 64*1024))
 	if err != nil {
-		writeErr(w, http.StatusBadRequest, err.Error())
+		httpapi.WriteErr(w, http.StatusBadRequest, err.Error())
 		return
 	}
 	// Accept the downloaded file as is, or wrapped as {"json": "..."}.
@@ -326,22 +327,22 @@ func (b *Bridge) apiSiteGoogleClient(w http.ResponseWriter, r *http.Request) {
 		data = []byte(wrapped.JSON)
 	}
 	if err := b.site.SetGoogleClient(data); err != nil {
-		writeErr(w, http.StatusBadRequest, err.Error())
+		httpapi.WriteErr(w, http.StatusBadRequest, err.Error())
 		return
 	}
 	go b.site.Restart()
-	writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
+	httpapi.WriteJSON(w, http.StatusOK, map[string]bool{"ok": true})
 }
 
 // apiSiteGoogleClientDelete removes the site's own Google client and restarts
 // the site, which then uses Fridolin's shared one.
 func (b *Bridge) apiSiteGoogleClientDelete(w http.ResponseWriter, r *http.Request) {
 	if err := b.site.SetGoogleClient(nil); err != nil {
-		writeErr(w, http.StatusInternalServerError, err.Error())
+		httpapi.WriteErr(w, http.StatusInternalServerError, err.Error())
 		return
 	}
 	go b.site.Restart()
-	writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
+	httpapi.WriteJSON(w, http.StatusOK, map[string]bool{"ok": true})
 }
 
 func (b *Bridge) apiSiteBuilders(w http.ResponseWriter, r *http.Request) {
@@ -353,57 +354,57 @@ func (b *Bridge) apiSiteBuilders(w http.ResponseWriter, r *http.Request) {
 		}
 		out = append(out, item)
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"brains": out})
+	httpapi.WriteJSON(w, http.StatusOK, map[string]any{"brains": out})
 }
 
 func (b *Bridge) apiSiteSetBuilder(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		On bool `json:"on"`
 	}
-	if err := decodeJSON(r, &req); err != nil {
-		writeErr(w, http.StatusBadRequest, err.Error())
+	if err := httpapi.DecodeJSON(r, &req); err != nil {
+		httpapi.WriteErr(w, http.StatusBadRequest, err.Error())
 		return
 	}
 	// Setting up the workspace can take a while (npm install); it outlives the request.
 	if err := b.site.SetBuilder(b.site.baseContext(), r.PathValue("id"), req.On); err != nil {
-		writeErr(w, http.StatusBadRequest, err.Error())
+		httpapi.WriteErr(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
+	httpapi.WriteJSON(w, http.StatusOK, map[string]bool{"ok": true})
 }
 
 func (b *Bridge) apiSiteProposals(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, http.StatusOK, map[string]any{"proposals": b.site.Proposals(r.Context())})
+	httpapi.WriteJSON(w, http.StatusOK, map[string]any{"proposals": b.site.Proposals(r.Context())})
 }
 
 func (b *Bridge) apiSiteMergeProposal(w http.ResponseWriter, r *http.Request) {
 	if err := b.site.MergeProposal(r.Context(), r.PathValue("id")); err != nil {
-		writeErr(w, http.StatusBadRequest, err.Error())
+		httpapi.WriteErr(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	writeJSON(w, http.StatusAccepted, b.site.DeployStatus())
+	httpapi.WriteJSON(w, http.StatusAccepted, b.site.DeployStatus())
 }
 
 func (b *Bridge) apiSiteDiscardProposal(w http.ResponseWriter, r *http.Request) {
 	if err := b.site.DiscardProposal(r.PathValue("id")); err != nil {
-		writeErr(w, http.StatusBadRequest, err.Error())
+		httpapi.WriteErr(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
+	httpapi.WriteJSON(w, http.StatusOK, map[string]bool{"ok": true})
 }
 
 func (b *Bridge) apiSiteStartPreview(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 	if !b.site.IsBuilder(id) {
-		writeErr(w, http.StatusBadRequest, "that brain does not build the site")
+		httpapi.WriteErr(w, http.StatusBadRequest, "that brain does not build the site")
 		return
 	}
 	urls, err := b.site.BuilderPreview(b.site.baseContext(), id)
 	if err != nil {
-		writeErr(w, http.StatusBadRequest, err.Error())
+		httpapi.WriteErr(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	writeJSON(w, http.StatusOK, urls)
+	httpapi.WriteJSON(w, http.StatusOK, urls)
 }
 
 // apiSiteSecrets lists the modules' secrets by name. Values never leave the
@@ -411,10 +412,10 @@ func (b *Bridge) apiSiteStartPreview(w http.ResponseWriter, r *http.Request) {
 func (b *Bridge) apiSiteSecrets(w http.ResponseWriter, r *http.Request) {
 	list, err := b.site.Secrets()
 	if err != nil {
-		writeErr(w, http.StatusInternalServerError, err.Error())
+		httpapi.WriteErr(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"modules": list})
+	httpapi.WriteJSON(w, http.StatusOK, map[string]any{"modules": list})
 }
 
 // apiSiteSetSecret saves a secret and restarts the site, which reads its
@@ -423,23 +424,23 @@ func (b *Bridge) apiSiteSetSecret(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		Value string `json:"value"`
 	}
-	if err := decodeJSON(r, &req); err != nil {
-		writeErr(w, http.StatusBadRequest, err.Error())
+	if err := httpapi.DecodeJSON(r, &req); err != nil {
+		httpapi.WriteErr(w, http.StatusBadRequest, err.Error())
 		return
 	}
 	if err := b.site.SetSecret(r.PathValue("module"), r.PathValue("name"), req.Value); err != nil {
-		writeErr(w, http.StatusBadRequest, err.Error())
+		httpapi.WriteErr(w, http.StatusBadRequest, err.Error())
 		return
 	}
 	go b.site.Restart()
-	writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
+	httpapi.WriteJSON(w, http.StatusOK, map[string]bool{"ok": true})
 }
 
 func (b *Bridge) apiSiteRemoveSecret(w http.ResponseWriter, r *http.Request) {
 	if err := b.site.RemoveSecret(r.PathValue("module"), r.PathValue("name")); err != nil {
-		writeErr(w, http.StatusBadRequest, err.Error())
+		httpapi.WriteErr(w, http.StatusBadRequest, err.Error())
 		return
 	}
 	go b.site.Restart()
-	writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
+	httpapi.WriteJSON(w, http.StatusOK, map[string]bool{"ok": true})
 }

@@ -33,6 +33,7 @@ import (
 	"time"
 
 	"github.com/Icewater1337/fridolin/internal/fsx"
+	"github.com/Icewater1337/fridolin/internal/httpapi"
 	"github.com/Icewater1337/fridolin/internal/platform"
 	"github.com/Icewater1337/fridolin/internal/textx"
 	"github.com/Icewater1337/fridolin/site"
@@ -753,15 +754,15 @@ func (b *Bridge) builderHandler() http.Handler {
 		return func(w http.ResponseWriter, r *http.Request) {
 			brainID := m.brainForToken(strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer "))
 			if brainID == "" {
-				writeErr(w, http.StatusUnauthorized, "this brain may not build the site (Fridolin dashboard → Site → Builders)")
+				httpapi.WriteErr(w, http.StatusUnauthorized, "this brain may not build the site (Fridolin dashboard → Site → Builders)")
 				return
 			}
 			out, err := fn(r, brainID)
 			if err != nil {
-				writeErr(w, http.StatusBadRequest, err.Error())
+				httpapi.WriteErr(w, http.StatusBadRequest, err.Error())
 				return
 			}
-			writeJSON(w, http.StatusOK, out)
+			httpapi.WriteJSON(w, http.StatusOK, out)
 		}
 	}
 	mux.HandleFunc("GET /builder/context", call(func(r *http.Request, id string) (any, error) {

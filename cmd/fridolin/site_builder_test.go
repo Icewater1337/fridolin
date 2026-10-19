@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/Icewater1337/fridolin/internal/fsx"
+	"github.com/Icewater1337/fridolin/internal/httpapi"
 )
 
 // newTestBuilderSite is a test site whose one brain, "web", has a folder
@@ -329,9 +330,9 @@ func TestSiteMCPServer(t *testing.T) {
 		gotBody = string(body[:n])
 		switch r.URL.Path {
 		case "/builder/context":
-			writeJSON(w, 200, map[string]any{"site": map[string]any{"title": "Test"}})
+			httpapi.WriteJSON(w, 200, map[string]any{"site": map[string]any{"title": "Test"}})
 		case "/builder/propose":
-			writeErr(w, 400, "commit your work first")
+			httpapi.WriteErr(w, 400, "commit your work first")
 		default:
 			http.NotFound(w, r)
 		}

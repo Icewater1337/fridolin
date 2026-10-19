@@ -22,52 +22,6 @@ import (
 	"github.com/Icewater1337/fridolin/internal/logx"
 )
 
-func TestDecodeJSONIsStrict(t *testing.T) {
-	type body struct {
-		DryRun bool   `json:"dry_run"`
-		Name   string `json:"name"`
-	}
-	cases := []struct {
-		name     string
-		body     string
-		chunked  bool
-		optional bool
-		want     string // "" = decodes
-	}{
-		{name: "one value", body: `{"dry_run": true, "name": "x"}`},
-		{name: "trailing space", body: `{"dry_run": true}` + "\n  "},
-		{name: "unknown key", body: `{"dry_run": true, "dryrun": false}`, want: `unknown field "dryrun"`},
-		{name: "second value", body: `{"dry_run": true} {"garbage": 1}`, want: "single JSON value"},
-		{name: "wrong type", body: `{"dry_run": "yes"}`, want: "dry_run"},
-		{name: "cut short", body: `{"dry_run": tr`, want: "invalid JSON"},
-		{name: "empty", body: ``, want: "a JSON body is required"},
-		{name: "empty chunked", body: ``, chunked: true, want: "a JSON body is required"},
-		{name: "empty optional", body: ``, optional: true},
-		{name: "empty optional chunked", body: ``, chunked: true, optional: true},
-	}
-	for _, c := range cases {
-		t.Run(c.name, func(t *testing.T) {
-			r := httptest.NewRequest("POST", "/", strings.NewReader(c.body))
-			if c.chunked {
-				r.ContentLength = -1
-			}
-			var v body
-			var err error
-			if c.optional {
-				err = decodeOptionalJSON(r, &v)
-			} else {
-				err = decodeJSON(r, &v)
-			}
-			switch {
-			case c.want == "" && err != nil:
-				t.Fatalf("got %v, want it decoded", err)
-			case c.want != "" && (err == nil || !strings.Contains(err.Error(), c.want)):
-				t.Fatalf("got %v, want an error with %q", err, c.want)
-			}
-		})
-	}
-}
-
 // Every request body the dashboard sends (web/assets) gets past the strict
 // decoder. A handler may still refuse it for what it says, in this empty
 // test bridge, but never because a key is unknown.
@@ -205,47 +159,6 @@ func TestBrainBackupRoute(t *testing.T) {
 	}
 	if w := tb.do("PUT", "/api/backup/settings", map[string]any{"brain": "notes", "brain_enabled": true}); w.Code != http.StatusBadRequest {
 		t.Fatalf("global settings with a brain: %d %s", w.Code, w.Body.String())
-	}
-}
-
-func TestLoadDashboardToken(t *testing.T) {
-	t.Run("made on first run, then kept", func(t *testing.T) {
-		dir := t.TempDir()
-		a, err := LoadDashboardToken(dir)
-		if err != nil {
-			t.Fatal(err)
-		}
-		b, err := LoadDashboardToken(dir)
-		if err != nil || b.Value() != a.Value() || len(a.Value()) < minTokenLen {
-			t.Fatalf("second load: %v, %q vs %q", err, b.Value(), a.Value())
-		}
-	})
-	cases := []struct {
-		name  string
-		setup func(path string) error
-		want  string
-	}{
-		{"too short", func(p string) error { return os.WriteFile(p, []byte("abc\n"), 0o600) }, "is not a token"},
-		{"two words", func(p string) error {
-			return os.WriteFile(p, []byte(strings.Repeat("a", 20)+" "+strings.Repeat("b", 20)), 0o600)
-		}, "is not a token"},
-		{"unreadable", func(p string) error { return os.Mkdir(p, 0o700) }, "reading token"},
-	}
-	for _, c := range cases {
-		t.Run(c.name, func(t *testing.T) {
-			dir := t.TempDir()
-			path := filepath.Join(dir, "dashboard.token")
-			if err := c.setup(path); err != nil {
-				t.Fatal(err)
-			}
-			before, _ := os.ReadFile(path)
-			if _, err := LoadDashboardToken(dir); err == nil || !strings.Contains(err.Error(), c.want) {
-				t.Fatalf("got %v, want %q", err, c.want)
-			}
-			if after, _ := os.ReadFile(path); string(after) != string(before) {
-				t.Fatal("the token file was replaced")
-			}
-		})
 	}
 }
 

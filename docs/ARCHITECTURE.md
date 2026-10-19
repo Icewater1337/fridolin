@@ -349,12 +349,17 @@ responsibility and says what it must not do.
 
 ### Surface and wiring
 
-- **`httpapi`** *(to come, R7, R16; `dashboard.go`, `dashboard_api.go`,
-  `server.go`, `scripttoken.go`, `brainapi.go`, `dashsession.go`,
-  `site_api.go`)*: the whole HTTP surface. It holds the guards,
-  the dashboard token and login sessions, the route table, one handler type
-  per resource, the script API with its tokens, the brain API, static
-  files, the OAuth callback mount and the server lifecycle.
+- **`httpapi`**: HTTP request guards, token files and JSON codecs. `Token`
+  loads or creates a named token file, rotates it and compares values;
+  `ReadToken` reads the dashboard token without creating it. `APIGuard`
+  receives callbacks for the current token requirement and session check.
+  Host, origin, write and security-header guards keep the existing response
+  contract. `DecodeJSON` and `DecodeOptionalJSON` retain strict unknown-key
+  and single-value decoding; `LoginURL` contains a one-use login code.
+  Resource handlers, login sessions, routes, script and brain APIs, static
+  files, OAuth and server lifecycle still live in `cmd/fridolin`
+  (`dashboard*.go`, `server.go`, `scripttoken.go`, `brainapi.go`,
+  `dashsession.go`, `site_api.go`) until R16.
 - **`app`** *(to come, R17)*: the composition root and lifecycle. It builds
   every component, projects config into each package's own settings,
   reconciles on config change, supervises the `Run(ctx)` components and

@@ -23,6 +23,7 @@ import (
 	"time"
 
 	"github.com/Icewater1337/fridolin/internal/fsx"
+	"github.com/Icewater1337/fridolin/internal/httpapi"
 )
 
 // Google sign-in for calendars.
@@ -956,41 +957,41 @@ func (b *Bridge) apiGoogleClient(w http.ResponseWriter, r *http.Request) {
 		}
 		resp["configured"], resp["type"], resp["client_id_hint"] = true, c.Type, hint
 	}
-	writeJSON(w, http.StatusOK, resp)
+	httpapi.WriteJSON(w, http.StatusOK, resp)
 }
 
 func (b *Bridge) apiSetGoogleClient(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		JSON string `json:"json"`
 	}
-	if err := decodeJSON(r, &req); err != nil {
-		writeErr(w, http.StatusBadRequest, err.Error())
+	if err := httpapi.DecodeJSON(r, &req); err != nil {
+		httpapi.WriteErr(w, http.StatusBadRequest, err.Error())
 		return
 	}
 	c, err := b.google.SetClient([]byte(strings.TrimSpace(req.JSON)))
 	if err != nil {
-		writeErr(w, http.StatusUnprocessableEntity, err.Error())
+		httpapi.WriteErr(w, http.StatusUnprocessableEntity, err.Error())
 		return
 	}
 	note := ""
 	if c.Type == "web" {
 		note = "This is a Web application client: add " + b.google.redirectURI() + " to its Authorized redirect URIs in Google Cloud Console, or create a Desktop app client instead."
 	}
-	writeJSON(w, http.StatusOK, map[string]string{"status": "saved", "type": c.Type, "note": note})
+	httpapi.WriteJSON(w, http.StatusOK, map[string]string{"status": "saved", "type": c.Type, "note": note})
 }
 
 func (b *Bridge) apiDeleteGoogleClient(w http.ResponseWriter, r *http.Request) {
 	if err := os.Remove(b.google.clientPath()); err != nil && !errors.Is(err, os.ErrNotExist) {
-		writeErr(w, http.StatusInternalServerError, err.Error())
+		httpapi.WriteErr(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]string{"status": "removed"})
+	httpapi.WriteJSON(w, http.StatusOK, map[string]string{"status": "removed"})
 }
 
 func (b *Bridge) calendarBrain(w http.ResponseWriter, r *http.Request) *Brain {
 	br := b.brainMgr.Get(r.PathValue("id"))
 	if br == nil {
-		writeErr(w, http.StatusNotFound, "no such brain")
+		httpapi.WriteErr(w, http.StatusNotFound, "no such brain")
 	}
 	return br
 }
@@ -1002,10 +1003,10 @@ func (b *Bridge) apiCalendarConnect(w http.ResponseWriter, r *http.Request) {
 	}
 	u, err := b.google.StartSignIn(br.ID())
 	if err != nil {
-		writeErr(w, http.StatusPreconditionFailed, err.Error())
+		httpapi.WriteErr(w, http.StatusPreconditionFailed, err.Error())
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]string{"auth_url": u})
+	httpapi.WriteJSON(w, http.StatusOK, map[string]string{"auth_url": u})
 }
 
 func (b *Bridge) apiCalendarStatus(w http.ResponseWriter, r *http.Request) {
@@ -1036,7 +1037,7 @@ func (b *Bridge) apiCalendarStatus(w http.ResponseWriter, r *http.Request) {
 	// Lstat: a symlink there shows as connected, with the reason it is not
 	// used in list_error.
 	if _, err := os.Lstat(g.tokenPath(br.ID())); err != nil {
-		writeJSON(w, http.StatusOK, resp)
+		httpapi.WriteJSON(w, http.StatusOK, resp)
 		return
 	}
 	resp["connected"] = true
@@ -1070,7 +1071,7 @@ func (b *Bridge) apiCalendarStatus(w http.ResponseWriter, r *http.Request) {
 			resp["reconnect_needed"] = errors.As(err, &oe) && oe.revoked()
 		}
 	}
-	writeJSON(w, http.StatusOK, resp)
+	httpapi.WriteJSON(w, http.StatusOK, resp)
 }
 
 func (b *Bridge) apiCalendarSelect(w http.ResponseWriter, r *http.Request) {
@@ -1083,12 +1084,12 @@ func (b *Bridge) apiCalendarSelect(w http.ResponseWriter, r *http.Request) {
 		Calendars []string `json:"calendars"`
 		Default   string   `json:"default"`
 	}
-	if err := decodeJSON(r, &req); err != nil {
-		writeErr(w, http.StatusBadRequest, err.Error())
+	if err := httpapi.DecodeJSON(r, &req); err != nil {
+		httpapi.WriteErr(w, http.StatusBadRequest, err.Error())
 		return
 	}
 	if len(req.Calendars) == 0 {
-		writeErr(w, http.StatusUnprocessableEntity, "choose at least one calendar (or disconnect)")
+		httpapi.WriteErr(w, http.StatusUnprocessableEntity, "choose at least one calendar (or disconnect)")
 		return
 	}
 	if req.Default == "" || !slices.Contains(req.Calendars, req.Default) {
@@ -1103,10 +1104,10 @@ func (b *Bridge) apiCalendarSelect(w http.ResponseWriter, r *http.Request) {
 		return nil
 	})
 	if err != nil {
-		writeErr(w, http.StatusUnprocessableEntity, err.Error())
+		httpapi.WriteErr(w, http.StatusUnprocessableEntity, err.Error())
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]string{"status": "saved"})
+	httpapi.WriteJSON(w, http.StatusOK, map[string]string{"status": "saved"})
 }
 
 // apiCalendarDisconnect ends a brain's calendar access. ?local_only=1
@@ -1122,13 +1123,13 @@ func (b *Bridge) apiCalendarDisconnect(w http.ResponseWriter, r *http.Request) {
 	revoked, note, err := b.google.Disconnect(ctx, br.ID(), r.URL.Query().Get("local_only") == "1")
 	switch {
 	case errors.Is(err, errNotRevoked):
-		writeErr(w, http.StatusBadGateway, err.Error()+"; the token was kept, so try again, or remove it here only")
+		httpapi.WriteErr(w, http.StatusBadGateway, err.Error()+"; the token was kept, so try again, or remove it here only")
 		return
 	case err != nil:
-		writeErr(w, http.StatusInternalServerError, err.Error())
+		httpapi.WriteErr(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"status": "disconnected", "revoked": revoked, "note": note})
+	httpapi.WriteJSON(w, http.StatusOK, map[string]any{"status": "disconnected", "revoked": revoked, "note": note})
 }
 
 // calendarEnv tells a run which brain it is and which calendars it may use.

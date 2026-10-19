@@ -7,8 +7,6 @@ import (
 	"errors"
 	"flag"
 	"fmt"
-	"github.com/Icewater1337/fridolin/internal/chat"
-	"github.com/Icewater1337/fridolin/internal/logx"
 	"io"
 	"log"
 	"os"
@@ -21,7 +19,11 @@ import (
 	"sync/atomic"
 	"syscall"
 
+	"github.com/Icewater1337/fridolin/internal/chat"
+	"github.com/Icewater1337/fridolin/internal/logx"
+
 	"github.com/Icewater1337/fridolin/internal/fsx"
+	"github.com/Icewater1337/fridolin/internal/httpapi"
 	"github.com/Icewater1337/fridolin/internal/platform"
 	"github.com/Icewater1337/fridolin/internal/trigger"
 	"github.com/Icewater1337/fridolin/internal/version"
@@ -340,11 +342,11 @@ func runCmd(args []string) {
 		// Only on an interactive terminal: even a code that works once
 		// must not end up in a log file.
 		code, _ := bridge.sessions.newCode()
-		fmt.Printf("\n  Dashboard: %s\n  (the link works once, within a minute; after that, run: fridolin open)\n\n", loginURL(cfg.HTTPListen, code))
+		fmt.Printf("\n  Dashboard: %s\n  (the link works once, within a minute; after that, run: fridolin open)\n\n", httpapi.LoginURL(cfg.HTTPListen, code))
 	}
 	if opts.open && cfg.HTTPEnabled() {
 		code, _ := bridge.sessions.newCode()
-		go func() { _ = platform.OpenBrowser(loginURL(cfg.HTTPListen, code)) }()
+		go func() { _ = platform.OpenBrowser(httpapi.LoginURL(cfg.HTTPListen, code)) }()
 	}
 
 	os.Exit(serve(ctx, bridge, signalled))
@@ -495,18 +497,18 @@ func openCmd(args []string) {
 // agent runs and pastes into a chat.
 func dashboardLink(cfg *Config) (string, error) {
 	tokenPath := filepath.Join(cfg.DataDir, "dashboard.token")
-	data, err := os.ReadFile(tokenPath)
+	token, err := httpapi.ReadToken(cfg.DataDir)
 	if err != nil {
 		return "", fmt.Errorf("no dashboard token yet — start the bridge first (%w)", err)
 	}
-	code, err := askLoginCode(cfg.HTTPListen, strings.TrimSpace(string(data)))
+	code, err := askLoginCode(cfg.HTTPListen, token)
 	if errors.Is(err, errOlderBridge) {
 		return "", fmt.Errorf("%w. Restart it on this build (./setup.sh installs it and restarts the bridge), or open its dashboard with the fridolin that runs it, or at http://%s/ with the token from %s", err, cfg.HTTPListen, tokenPath)
 	}
 	if err != nil {
 		return "", err
 	}
-	return loginURL(cfg.HTTPListen, code), nil
+	return httpapi.LoginURL(cfg.HTTPListen, code), nil
 }
 
 // rotateTokenCmd replaces the dashboard token and signs out every browser:
@@ -527,13 +529,13 @@ func rotateTokenCmd(args []string) {
 
 // rotateToken does rotateTokenCmd's work for cfg.
 func rotateToken(cfg *Config) error {
-	data, err := os.ReadFile(filepath.Join(cfg.DataDir, "dashboard.token"))
+	token, err := httpapi.ReadToken(cfg.DataDir)
 	if err != nil {
 		return fmt.Errorf("no dashboard token yet — start the bridge first (%w)", err)
 	}
 	if cfg.HTTPEnabled() {
 		var resp struct{ Status string }
-		err := callBridge(cfg.HTTPListen, strings.TrimSpace(string(data)), "/api/token/rotate", &resp)
+		err := callBridge(cfg.HTTPListen, token, "/api/token/rotate", &resp)
 		if errors.Is(err, errOlderBridge) && cfg.Dashboard.Disabled {
 			// It serves no dashboard API, so it answers 404 whatever its
 			// build. Nothing takes the token until the dashboard is on.
@@ -555,7 +557,7 @@ func rotateToken(cfg *Config) error {
 		return fmt.Errorf("the bridge runs but does not answer, so the token was not replaced: %w", err)
 	}
 	defer lock.Release()
-	tok, err := LoadDashboardToken(cfg.DataDir)
+	tok, err := httpapi.LoadDashboardToken(cfg.DataDir)
 	if err != nil {
 		return err
 	}
