@@ -842,7 +842,7 @@ func FuzzParseIdentityMap(f *testing.F) {
 	f.Fuzz(func(t *testing.T, table []byte, number, name, notes string) {
 		check := func(ids map[string]string) {
 			for k, v := range ids {
-				if k == "" || strings.ContainsAny(k, "@|\n") || identityKey(k) != k || k != strings.TrimSpace(k) {
+				if k == "" || strings.ContainsAny(k, "@|\n") || chat.IdentityKey(k) != k || k != strings.TrimSpace(k) {
 					t.Errorf("key %q is not a normalised number", k)
 				}
 				if v == "" || strings.ContainsAny(v, "|\n") || v != strings.TrimSpace(v) {
@@ -860,10 +860,10 @@ func FuzzParseIdentityMap(f *testing.F) {
 		ids := parseIdentityMap([]byte(string(table) + "\n| " + number + " | " + name + " | " + notes + " |\n"))
 		check(ids)
 		// Nothing to read back, or the header and the line under it.
-		if number == "" || identityKey(number) == "" || name == "" || number == "WhatsApp Number" || strings.Trim(number+name+notes, "-: \t") == "" {
+		if number == "" || chat.IdentityKey(number) == "" || name == "" || number == "WhatsApp Number" || strings.Trim(number+name+notes, "-: \t") == "" {
 			return
 		}
-		if got := ids[identityKey(number)]; got != name {
+		if got := ids[chat.IdentityKey(number)]; got != name {
 			t.Errorf("row | %s | %s | %s | read back as %q, want %q", number, name, notes, got, name)
 		}
 	})

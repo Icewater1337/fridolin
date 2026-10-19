@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/Icewater1337/fridolin/internal/access"
 	"github.com/Icewater1337/fridolin/internal/chat"
 	"github.com/Icewater1337/fridolin/internal/logx"
 	"github.com/Icewater1337/fridolin/internal/store"
@@ -484,7 +485,7 @@ func (wa *WhatsAppClient) handleMessage(msg *events.Message) {
 	cfg := wa.cfg()
 	policy := policyOf(cfg)
 	envelope := chat.Envelope{Sender: sender.User, SenderResolved: resolved}
-	allowed := accessAuthorize(policy, envelope).Allowed
+	allowed := access.Authorize(policy, envelope).Allowed
 	if !allowed {
 		log.Printf("DM from %s: ignored (not in allowed_numbers)", who)
 		if wa.onIgnored != nil {
@@ -525,7 +526,7 @@ func (wa *WhatsAppClient) change(kind msgKind, target, chatJID, alt, sender, tex
 
 // handleDMMessage handles an allowed direct message from sender, the
 // person as canonicalUser has them.
-func (wa *WhatsAppClient) handleDMMessage(msg *events.Message, sender types.JID, policy accessPolicy, envelope chat.Envelope) {
+func (wa *WhatsAppClient) handleDMMessage(msg *events.Message, sender types.JID, policy access.Policy, envelope chat.Envelope) {
 	chatJID := sender.String()
 	// The chat's other JID: history from before DMs were keyed by number
 	// may be under the LID WhatsApp addressed them by.
@@ -542,7 +543,7 @@ func (wa *WhatsAppClient) handleDMMessage(msg *events.Message, sender types.JID,
 		go wa.notify(chatJID, notice)
 	}
 	envelope.Text, envelope.Caption = text, caption
-	text = accessDecide(policy, envelope).Text
+	text = access.Decide(policy, envelope).Text
 
 	if text == "" && mediaPath == "" && quoted == nil {
 		return
@@ -631,7 +632,7 @@ func (wa *WhatsAppClient) handleGroupMessage(msg *events.Message) {
 	policy := policyOf(cfg)
 	rules := wa.rulesFor(groupJID)
 	policy.Files, policy.Forwards = rules.files, rules.forwards
-	decision := accessDecide(policy, envelope)
+	decision := access.Decide(policy, envelope)
 	silent := decision.Silent
 	if kind == kindViewOnce {
 		if !silent {
@@ -656,7 +657,7 @@ func (wa *WhatsAppClient) handleGroupMessage(msg *events.Message) {
 		go wa.notify(groupJID, notice)
 	}
 	envelope.Caption = caption
-	text := accessDecide(policy, envelope).Text
+	text := access.Decide(policy, envelope).Text
 
 	// A reply that is only the trigger asks about the quoted message.
 	if text == "" && mediaPath == "" && quoted == nil {
@@ -826,7 +827,7 @@ func saveAttachment(ctx context.Context, dl mediaDownloader, dir string, att att
 // still lets 15551234567 in. Anything that is no phone number is compared
 // as it is.
 func numberAllowed(cfg *Config, number string) bool {
-	return accessNumberAllowed(policyOf(cfg), number)
+	return access.NumberAllowed(policyOf(cfg), number)
 }
 
 // rulesFor returns what addresses the bridge in the group jid, as its
@@ -841,7 +842,7 @@ func (wa *WhatsAppClient) rulesFor(jid string) groupRules {
 // isAllowedGroup reports whether the group JID is in cfg's allowed_groups.
 // Unlike DMs, groups are deny-by-default: an empty list means no groups.
 func isAllowedGroup(cfg *Config, jid string) bool {
-	return accessGroupAllowed(policyOf(cfg), jid)
+	return access.GroupAllowed(policyOf(cfg), jid)
 }
 
 // ownMentionJIDs returns every JID form the bridge account may be mentioned as.
@@ -871,7 +872,7 @@ func stripMentions(text string, jids []types.JID) string {
 	for i, jid := range jids {
 		users[i] = jid.User
 	}
-	return accessStripMentions(text, users)
+	return access.StripMentions(text, users)
 }
 
 // senderOf is who sent src, as canonicalUser has them: by phone number

@@ -70,7 +70,7 @@ func TestIdentityKey(t *testing.T) {
 		"Alex":                           "Alex",
 	}
 	for in, want := range cases {
-		if got := identityKey(in); got != want {
+		if got := chat.IdentityKey(in); got != want {
 			t.Errorf("identityKey(%q) = %q, want %q", in, got, want)
 		}
 	}

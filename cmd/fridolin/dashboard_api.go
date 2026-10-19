@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/Icewater1337/fridolin/internal/access"
 	"io/fs"
 	"log"
 	"net/http"
@@ -521,7 +522,7 @@ func (req chatRequest) listEntry() (dm bool, entry string, err error) {
 		entry, err = allowListGroup(req.sent())
 		return false, entry, err
 	case "dm":
-		entry, err = phoneNumber(req.sent())
+		entry, err = chat.PhoneNumber(req.sent())
 		return true, entry, err
 	default:
 		return false, "", errors.New("kind must be group or dm")
@@ -596,7 +597,7 @@ func (b *Bridge) apiRevokeChat(w http.ResponseWriter, r *http.Request) {
 	}
 	canon, name := allowListGroup, "allowed_groups"
 	if dm {
-		canon, name = phoneNumber, "allowed_numbers"
+		canon, name = chat.PhoneNumber, "allowed_numbers"
 	}
 	var removed []string
 	_, err := b.cfgs.Update("", func(c *Config) error {
@@ -1547,7 +1548,7 @@ func (b *Bridge) apiDevInbound(w http.ResponseWriter, r *http.Request) {
 		policy := policyOf(cfg)
 		policy.Files = b.groupRules(m.JID).files
 		who := devGroupSender(m.Sender)
-		decision := accessDecide(policy, chat.Envelope{Chat: m.JID, Sender: who.Number, SenderResolved: who.Resolved, Group: true, Text: m.Text, HasFile: len(m.Media) > 0})
+		decision := access.Decide(policy, chat.Envelope{Chat: m.JID, Sender: who.Number, SenderResolved: who.Resolved, Group: true, Text: m.Text, HasFile: len(m.Media) > 0})
 		if decision.Silent {
 			m.Silent = true
 			// As on WhatsApp, a file that does not address the bridge is chatter.
@@ -1569,7 +1570,7 @@ func (b *Bridge) apiDevInbound(w http.ResponseWriter, r *http.Request) {
 // group's own digits when the request names no sender, is no number, like
 // a member WhatsApp names only by a LID nothing maps to a number.
 func devGroupSender(sender string) groupSender {
-	if n, err := phoneNumber(sender); err == nil {
+	if n, err := chat.PhoneNumber(sender); err == nil {
 		return groupSender{Number: n, Resolved: true}
 	}
 	user, server, _ := strings.Cut(strings.TrimSpace(sender), "@")

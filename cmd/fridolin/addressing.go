@@ -1,6 +1,7 @@
 package main
 
 import (
+	"github.com/Icewater1337/fridolin/internal/access"
 	"slices"
 
 	"github.com/Icewater1337/fridolin/internal/chat"
@@ -41,7 +42,7 @@ type groupAddressing struct {
 // video's metadata, and a video is a file.
 func addressGroup(msg *waE2E.Message, text string, triggers trigger.List, own []types.JID, rules groupRules) groupAddressing {
 	e := groupEnvelope(msg, text, own)
-	a := accessAddress(accessPolicy{Triggers: triggers, Files: rules.files, Forwards: rules.forwards}, e)
+	a := access.AddressGroup(access.Policy{Triggers: triggers, Files: rules.files, Forwards: rules.forwards}, e)
 	return groupAddressing{tagged: a.Tagged, mentioned: a.Mentioned, byCaption: a.ByCaption, file: a.File}
 }
 
