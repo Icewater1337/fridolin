@@ -17,6 +17,7 @@ import (
 	"runtime"
 	"slices"
 	"strings"
+	"sync/atomic"
 	"syscall"
 )
 
@@ -311,9 +312,13 @@ func runCmd(args []string) {
 	cfg := cfgs.Get()
 	logDataDir(cfgs)
 
+	// A signal and the dashboard's restart both end ctx, and serve stops
+	// the bridge then; the restart's cause says to run it again.
+	ctx, cancel := context.WithCancelCause(context.Background())
+	defer cancel(nil)
 	// NewBridge takes the data dir's instance lock, so dev mode with the live
 	// data dir is refused next to the running bridge too.
-	bridge, err := NewBridge(cfgs, BridgeOptions{NoWhatsApp: opts.noWhatsApp, Logs: ring})
+	bridge, err := NewBridge(cfgs, BridgeOptions{NoWhatsApp: opts.noWhatsApp, Logs: ring, Restart: func() { cancel(errRestart) }})
 	if err != nil {
 		log.Fatalf("creating bridge: %v", err)
 	}
@@ -323,16 +328,7 @@ func runCmd(args []string) {
 		go logClaudeCLI(cfg.ClaudePath, cfg.ChildEnvPassthrough)
 	}
 
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
-	sigCh := make(chan os.Signal, 1)
-	signal.Notify(sigCh, syscall.SIGTERM, syscall.SIGINT)
-	go func() {
-		sig := <-sigCh
-		log.Printf("Received signal %s, shutting down…", sig)
-		cancel()
-	}()
+	signalled := stopOnSignals(cancel, bridge.brainMgr)
 
 	if isTerminal(os.Stdout) && cfg.HTTPEnabled() && !cfg.Dashboard.Disabled {
 		// Only on an interactive terminal: even a code that works once
@@ -345,13 +341,71 @@ func runCmd(args []string) {
 		go func() { _ = openBrowser(loginURL(cfg.HTTPListen, code)) }()
 	}
 
-	if err := bridge.Start(ctx); err != nil {
-		log.Printf("bridge stopped: %v", err)
-		bridge.Stop()
-		os.Exit(1)
-	}
+	os.Exit(serve(ctx, bridge, signalled))
+}
 
-	bridge.Stop()
+// errRestart is the cause runCmd's context ends with when the dashboard
+// asks for a restart (apiRestart): serve stops the bridge, then runs it
+// again in place.
+var errRestart = errors.New("restart requested")
+
+// execSelf replaces this process with the program at argv0, a variable so
+// that a test can see a restart without one.
+var execSelf = syscall.Exec
+
+// serve runs b until ctx ends or Start fails, then stops it. When ctx
+// ended for a restart, and no signal asked for a stop meanwhile
+// (signalled), it then runs the bridge again in place: the same binary,
+// arguments and environment, in this process, which Stop has given the
+// instance lock back for. It returns main's exit code: 0 after a stop, 1
+// when Start or the restart failed.
+func serve(ctx context.Context, b *Bridge, signalled func() bool) int {
+	err := b.Start(ctx)
+	if err != nil {
+		log.Printf("bridge stopped: %v", err)
+	}
+	b.Stop()
+	switch {
+	case err != nil:
+		return 1
+	case !errors.Is(context.Cause(ctx), errRestart):
+		return 0
+	case signalled():
+		log.Printf("A signal came during the restart: staying stopped")
+		return 0
+	}
+	exe, err := os.Executable()
+	if err == nil {
+		err = execSelf(exe, os.Args, os.Environ())
+	}
+	// execSelf returns only when it failed. The service manager starts
+	// the bridge again after an exit 1.
+	log.Printf("restart failed: %v", err)
+	return 1
+}
+
+// stopOnSignals stops the bridge on SIGINT or SIGTERM. The first ends ctx
+// through cancel, and serve stops the bridge in order, which lets the
+// brains' runs finish for a while (shutdownGrace); a restart under way
+// stops instead of running the bridge again. A second while that stop is
+// under way stops the runs still going at once and exits 1, leaving the
+// rest of the stop undone. The function returned reports whether a signal
+// came.
+func stopOnSignals(cancel context.CancelCauseFunc, brains *BrainManager) func() bool {
+	var got atomic.Bool
+	sigCh := make(chan os.Signal, 2)
+	signal.Notify(sigCh, syscall.SIGTERM, syscall.SIGINT)
+	go func() {
+		sig := <-sigCh
+		got.Store(true)
+		log.Printf("Received signal %s, shutting down… (send it again to stop at once)", sig)
+		cancel(fmt.Errorf("received signal %s", sig))
+		sig = <-sigCh
+		log.Printf("Received signal %s again: stopping the runs still going and exiting", sig)
+		brains.KillRuns()
+		os.Exit(1)
+	}()
+	return got.Load
 }
 
 // runLog sends the log to console and to a ring the dashboard shows, logs

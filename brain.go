@@ -180,7 +180,10 @@ type Brain struct {
 	turns   map[string]uint64
 	turn    uint64
 	working bool // a worker goroutine is draining pending
-	retired bool // removed from the configuration
+	// workers counts the worker goroutines until they have returned,
+	// their last delivery done: a stop waits for them (shutdown).
+	workers sync.WaitGroup
+	retired bool // removed from the configuration, or the bridge stops
 	last    *RunInfo
 	// slotWait is set while the worker waits for a run slot.
 	slotWait *slotWait
@@ -244,6 +247,13 @@ type BrainHooks struct {
 	// Deliver receives every finished run. It records the answer in the
 	// brain's history once it is sent.
 	Deliver func(br *Brain, m Inbound, res RunResult)
+	// Waiting gets, as the bridge stops, what br had waiting, which never
+	// ran, before its run in flight gets its grace (see shutdown). Nil
+	// drops it.
+	Waiting func(br *Brain, ms []Inbound)
+	// Interrupted gets, as the bridge stops, the message whose run br
+	// stopped once its grace was over.
+	Interrupted func(br *Brain, m Inbound)
 	// Undelivered returns the brain's answers still on their way to
 	// WhatsApp, as its history will record them once they arrived. A
 	// chat gets them before anything a later run says there, so that run
@@ -337,6 +347,13 @@ const historyFileName = "conversation-history.jsonl"
 // (Inbound.logged), so that its own run shows the message once, as the
 // new message, after the chat's history before those lines.
 func (br *Brain) logInbound(m Inbound) Inbound {
+	// A message taken up again, by the brain in its brain's new folder
+	// say, has its lines in that history already, where they stay:
+	// written again, it would be there twice. A brain whose history does
+	// not have them, one the message was routed to anew, writes its own.
+	if br.holdsLines(m) {
+		return m
+	}
 	parts := m.ownParts()
 	for i, p := range parts {
 		at := p.At
@@ -350,6 +367,16 @@ func (br *Brain) logInbound(m Inbound) Inbound {
 	}
 	m.logged = parts[0].logged
 	return m
+}
+
+// holdsLines reports whether the brain's history has the lines a brain
+// wrote for m (Inbound.logged), the first of them at least: it has when
+// it wrote them, or when its folder is the one of the brain that did.
+func (br *Brain) holdsLines(m Inbound) bool {
+	if m.logged == (historyEntry{}) {
+		return false
+	}
+	return m.loggedIn(br.chatHistory(chatJIDs(m), m.enoughBefore(1))) >= 0
 }
 
 // historyTime is t as a history line has it, "" for none: the time the
@@ -473,6 +500,9 @@ func (br *Brain) submit(m *Inbound) (pos int, busy bool, err error) {
 	busy = pos > 1 || (br.current != nil && interrupt == nil) || br.slots.busy(!m.Silent)
 	start := !br.working
 	br.working = true
+	if start {
+		br.workers.Add(1)
+	}
 	// A worker that waits for a slot for chatter now waits for one for a
 	// request, which goes first.
 	var stopOther func()
@@ -598,6 +628,7 @@ func (br *Brain) hasRoomLocked(m Inbound, s *brainSettings) bool {
 // worker drains the queue one message at a time, each in a run slot (see
 // runSlots).
 func (br *Brain) worker() {
+	defer br.workers.Done()
 	for {
 		br.mu.Lock()
 		if br.retired || len(br.pending) == 0 {
@@ -881,6 +912,9 @@ func (br *Brain) StopHandOffs(jid string) (stopped bool, n int) {
 	return br.stopRun(cur), len(gone)
 }
 
+// stopRunWait is how long a stop waits for a run it killed to end.
+const stopRunWait = 10 * time.Second
+
 // stopRun kills run, if there is one, and waits for it to end.
 func (br *Brain) stopRun(run *brainRun) bool {
 	if run == nil {
@@ -889,32 +923,106 @@ func (br *Brain) stopRun(run *brainRun) bool {
 	br.interruptRun(run)
 	select {
 	case <-run.done:
-	case <-time.After(10 * time.Second):
-		log.Printf("brain %s: run did not stop within 10s", br.id)
+	case <-time.After(stopRunWait):
+		log.Printf("brain %s: run did not stop within %v", br.id, stopRunWait)
 	}
 	return true
 }
 
-// retire stops the brain for good after it was removed from the
-// configuration, or when the bridge stops. With closeViewer it also ends
-// the activity viewer: not when the bridge stops, so the window stays until
-// the next start replaces it, nor when the brain moved to another folder,
-// where the brain that runs there replaces the tmux session of that name.
-func (br *Brain) retire(closeViewer bool) {
+// shutdownGrace is how long the run in flight gets to finish and be
+// delivered when the bridge stops: most answers come within it, and a
+// service manager loses patience not long after (launchd kills the bridge
+// 20 seconds after SIGTERM). A variable so tests need not wait for it.
+var shutdownGrace = 15 * time.Second
+
+// shutdown stops the brain for good as the bridge stops. It takes no new
+// message and starts no new run, and hands what was waiting, which never
+// ran, to the Waiting hook at once. The run in flight gets grace to finish
+// and be delivered, and is interrupted after that, which the Interrupted
+// hook hears of. shutdown returns once the worker has ended, its last
+// delivery done. A second signal can abandon a stuck shutdown. The activity viewer
+// stays, for the next start to replace.
+func (br *Brain) shutdown(grace time.Duration) {
+	waiting := br.closeQueue()
+	if br.hooks != nil && br.hooks.Waiting != nil {
+		br.hooks.Waiting(br, waiting)
+	} else {
+		dropped(waiting)
+	}
+	idle := make(chan struct{})
+	go func() {
+		br.workers.Wait()
+		close(idle)
+	}()
+	graceOver := time.NewTimer(grace)
+	defer graceOver.Stop()
+	var cut *brainRun
+	select {
+	case <-idle:
+	case <-graceOver.C:
+		br.mu.Lock()
+		cur := br.current
+		br.mu.Unlock()
+		if cur != nil {
+			log.Printf("brain %s: the run for %s is not done %v into the stop; stopping it", br.id, cur.msg.JID, grace)
+			br.interruptRun(cur)
+		}
+		select {
+		case <-idle:
+		case <-time.After(stopRunWait):
+			log.Printf("brain %s: worker still finishing %v after the interrupt; waiting for its delivery", br.id, stopRunWait)
+			// Closing the store now would lose an answer the worker is
+			// still handing to the outbox. The grace bounds the run, not
+			// the hand-off of its result.
+			<-idle
+		}
+		// The run may have answered as it was stopped, and then it was
+		// delivered like any other.
+		br.mu.Lock()
+		if cur != nil && br.last != nil && br.last.Outcome == outcomeInterrupted {
+			cut = cur
+		}
+		br.mu.Unlock()
+	}
+	if cut != nil && br.hooks != nil && br.hooks.Interrupted != nil {
+		br.hooks.Interrupted(br, cut.msg)
+	}
+	// Done with the folder after every worker has released it.
+	br.root.Close()
+}
+
+// closeQueue stops the brain taking messages and starting runs, and
+// returns what it had waiting, which never ran. A worker that waits for a
+// run slot gives up its place.
+func (br *Brain) closeQueue() []Inbound {
 	br.mu.Lock()
+	defer br.mu.Unlock()
 	br.retired = true
 	gone := br.pending
 	br.pending = nil
 	if br.slotWait != nil {
 		br.slots.giveUp(br.slotWait)
 	}
-	br.mu.Unlock()
-	dropped(gone)
-	br.StopCurrent(true)
+	return gone
+}
+
+// retire stops the brain for good after a reload took it out, removed
+// from the configuration or moved to another folder: it takes nothing
+// more, drops what is still waiting (the reload took that out first, see
+// closeQueue) and stops the run in flight. With closeViewer it also ends
+// the activity viewer: not when the brain moved, where the brain that runs
+// in the new folder replaces the tmux session of that name.
+func (br *Brain) retire(closeViewer bool) {
+	dropped(br.closeQueue())
+	br.StopCurrent(false)
+	// run.done precedes delivery. Retirement must finish that hand-off
+	// before closing the folder, requeuing work in its replacement, or
+	// allowing Bridge.Stop to close the store below the old worker.
+	br.workers.Wait()
 	if closeViewer {
 		br.closeViewer()
 	}
-	// Done with the folder. A run that would not stop finds it closed.
+	// Every worker has finished with the folder.
 	br.root.Close()
 }
 
@@ -2247,6 +2355,12 @@ func withUndelivered(entries, pending []historyEntry) []historyEntry {
 // removed brains finish being stopped in the background.
 type BrainManager struct {
 	reloadMu sync.Mutex // serialises Apply
+	// stopped is set by Stop, under reloadMu: the brains are stopped for
+	// good, and a reload would start new ones.
+	stopped bool
+	// retiring are the brains reloads took out, while they stop and hand
+	// on what they had waiting (see requeue); Stop waits for them.
+	retiring sync.WaitGroup
 
 	mu       sync.RWMutex // guards the fields below; never held while calling into a Brain
 	brains   map[string]*Brain
@@ -2300,6 +2414,9 @@ func (bm *BrainManager) reload(specs []BrainSpec, issues []BrainIssue, cfg *Conf
 	bm.reloadMu.Lock()
 	defer bm.reloadMu.Unlock()
 
+	if bm.stopped {
+		return errBrainsStopped
+	}
 	if err := ValidateBrainSet(specs); err != nil {
 		return err
 	}
@@ -2397,9 +2514,61 @@ func (bm *BrainManager) reload(specs []BrainSpec, issues []BrainIssue, cfg *Conf
 			log.Printf("brain %s: removed from configuration; stopping it", br.id)
 		}
 		_, moved := next[br.id]
-		go br.retire(!moved)
+		// In the background, since the run in flight may take a while to
+		// stop. What waits goes on once it has: not to a brain in the same
+		// folder while the old run still works there.
+		waiting := br.closeQueue()
+		bm.retiring.Go(func() {
+			br.retire(!moved)
+			bm.requeue(br, waiting)
+		})
 	}
 	return nil
+}
+
+// errBrainsStopped is a reload after Stop.
+var errBrainsStopped = errors.New("the brains are stopped")
+
+// requeue hands what from had waiting when a reload took it out, which
+// never ran, to the brains that take it now: the brain in its new folder,
+// or the one its chat goes to. A message keeps its history lines where
+// that brain's history has them (see Brain.logInbound). One no brain takes
+// is dropped.
+func (bm *BrainManager) requeue(from *Brain, ms []Inbound) {
+	if bm.keepRetiredWaiting(from, ms) {
+		return
+	}
+	for _, m := range ms {
+		to, _, _, err := bm.Submit(m)
+		switch {
+		case err != nil:
+			// Stop may have closed the destination after the check above.
+			if bm.keepRetiredWaiting(from, []Inbound{m}) {
+				continue
+			}
+			log.Printf("brain %s: dropping a message for %s that waited for it: %v", from.id, m.JID, err)
+			dropped([]Inbound{m})
+		case to.id != from.id:
+			log.Printf("brain %s: handed a message for %s that waited for it to brain %s", from.id, m.JID, to.id)
+		}
+	}
+}
+
+// keepRetiredWaiting sends a retired queue to shutdown persistence once
+// Stop has begun, instead of starting new work in the replacement brain.
+func (bm *BrainManager) keepRetiredWaiting(from *Brain, ms []Inbound) bool {
+	bm.reloadMu.Lock()
+	stopped := bm.stopped
+	bm.reloadMu.Unlock()
+	if !stopped {
+		return false
+	}
+	if bm.hooks.Waiting != nil {
+		bm.hooks.Waiting(from, ms)
+	} else {
+		dropped(ms)
+	}
+	return true
 }
 
 // settingsFor combines global settings with a brain's own.
@@ -2617,15 +2786,44 @@ func (bm *BrainManager) StopHandOffs(jid string) (stopped bool, dropped int) {
 	return stopped, dropped
 }
 
-// Stop interrupts every run and drops every queue.
-func (bm *BrainManager) Stop() {
-	var wg sync.WaitGroup
+// KillRuns kills every brain's run in flight at once, for a second signal
+// while the bridge stops: nothing waits for the runs to end.
+func (bm *BrainManager) KillRuns() {
 	for _, br := range bm.Brains() {
-		wg.Add(1)
-		go func(br *Brain) {
-			defer wg.Done()
-			br.retire(false)
-		}(br)
+		br.mu.Lock()
+		cur := br.current
+		br.mu.Unlock()
+		br.interruptRun(cur)
+	}
+}
+
+// Stop stops every brain for good as the bridge stops (see
+// Brain.shutdown), all at once, after the brains reloads took out have
+// kept what they had waiting. Each run in flight gets shutdownGrace
+// to finish and be delivered.
+func (bm *BrainManager) Stop() {
+	bm.reloadMu.Lock()
+	bm.stopped = true
+	brains := bm.Brains()
+	waiting := make([][]Inbound, len(brains))
+	for i, br := range brains {
+		waiting[i] = br.closeQueue()
+	}
+	bm.reloadMu.Unlock()
+	// Freeze and keep live queues before waiting for retired workers.
+	// Otherwise those workers could requeue a message into a live brain
+	// and start it while the rest of shutdown waited for retirement.
+	for i, br := range brains {
+		if bm.hooks.Waiting != nil {
+			bm.hooks.Waiting(br, waiting[i])
+		} else {
+			dropped(waiting[i])
+		}
+	}
+	bm.retiring.Wait()
+	var wg sync.WaitGroup
+	for _, br := range brains {
+		wg.Go(func() { br.shutdown(shutdownGrace) })
 	}
 	wg.Wait()
 }

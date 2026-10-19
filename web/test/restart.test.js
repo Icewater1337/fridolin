@@ -54,7 +54,7 @@ test('the restart dialog stays until the bridge is back', async (t) => {
   const dialog = document.querySelector('dialog');
   assert.equal(dialog.open, true);
   assert.equal(dialog.getAttribute('aria-label'), 'Restarting');
-  assert.match(dialog.textContent, /Restarting the bridge… this usually takes a few seconds\./);
+  assert.match(dialog.textContent, /Restarting the bridge… this usually takes a few seconds, up to half a minute while a brain finishes an answer\./);
   assert.equal(dialog.querySelector('.dialog-close'), null, 'no close button');
   assert.equal(dialog.querySelectorAll('button').length, 0, 'and nothing to click');
   const cancel = new Event('cancel', { cancelable: true });

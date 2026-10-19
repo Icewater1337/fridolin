@@ -2,6 +2,8 @@ noBrainNotice
 	🧠 No brain is set up for this chat yet. Open the bridge dashboard and add one.
 heldBrainNotice
 	🧠 The brain for this chat cannot run right now. The Brains page of the bridge dashboard says why.
+restartedNotice
+	🔄 I restarted while I was working on your message. Send it again if you still need an answer.
 resetReply(false)
 	✅ Cleared anything this chat had running or waiting.
 resetReply(true)

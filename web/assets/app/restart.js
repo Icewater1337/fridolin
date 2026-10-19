@@ -18,7 +18,7 @@ export async function restartBridge({ reload = () => location.reload() } = {}) {
   const { status } = store.get();
   const before = status ? status.started_at : null;
   const version = status ? status.version : '';
-  const body = h('div.restart-body', spinner('large'), h('p', 'Restarting the bridge… this usually takes a few seconds.'));
+  const body = h('div.restart-body', spinner('large'), h('p', 'Restarting the bridge… this usually takes a few seconds, up to half a minute while a brain finishes an answer.'));
   // Only the restart's outcome closes it, and leaving the page (the browser's
   // Back button) does not: the restart goes on regardless.
   const dlg = openDialog({ title: 'Restarting', body, actions: [], dismissible: false, outlivesPage: true });

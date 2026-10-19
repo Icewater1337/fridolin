@@ -1,5 +1,0 @@
-sent:
-  15551234567@s.whatsapp.net "⏳ Queued (#1) — I'll get to this right after the current task."
-history:
-  {"ts":"<TIME>","from":"15551234567","chat":"15551234567@s.whatsapp.net","text":"first","type":"in"}
-  {"ts":"<TIME>","from":"15551234567","chat":"15551234567@s.whatsapp.net","text":"second","type":"in"}

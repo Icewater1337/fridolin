@@ -40,6 +40,10 @@ policy describes what that copy does with data.
   (`<media_dir>/<brain id>/plaud/`), which no other brain may read under the
   sandbox, until the brain files it in its own folder; from there it goes
   into that brain's backups too.
+- WhatsApp messages that no brain had started on when the bridge stopped
+  are kept in `bridge.db`, readable only by your user, until the next start
+  takes them up: it answers them, or drops those sent more than an hour
+  before.
 - A message deleted for everyone on WhatsApp is taken out of the brain's
   chat history (`conversation-history.jsonl`), and is not answered if it was
   still waiting; a file it carried stays in the media inbox, or where the

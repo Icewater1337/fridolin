@@ -175,6 +175,19 @@ for compatibility.
   running, and no edit or approval writes over the file. Unknown fields in
   `brain.json`, and unknown keys inside a section of `config.json`, are
   logged by their path.
+- A second Ctrl-C or SIGTERM while the bridge stops ends it at once: it
+  kills the brains' runs still going and exits with code 1. Restart in
+  the dashboard stops the bridge as SIGTERM does, and a SIGTERM while
+  it restarts leaves it stopped.
+- When the bridge stops or restarts, a brain's run in progress gets 15
+  seconds to finish, and its answer goes out. One that takes longer is
+  stopped then. Before, every run in progress was stopped at once.
+- The WhatsApp messages still waiting when the bridge stops, in a brain's
+  queue or in a debounce batch, and those that arrive while it stops, are
+  kept in `bridge.db` and answered after the next start, unless they were
+  sent more than an hour before it. A chat whose run the stop cut short is
+  told so after the start, and asked to send its message again. Before,
+  all of them were dropped without a word.
 
 ### Added
 
@@ -229,6 +242,13 @@ for compatibility.
 - A build chat on the Site's Build page shows that Claude's usage limit is
   reached, that its message is queued, or that the queue is full. It left
   out every notice that starts with ⏳, to leave out "Working on it".
+- Messages waiting for a brain that you remove, or move to another
+  folder, are answered by the brain that takes them now: the brain in
+  its new folder, or the one its chat falls back to. Before, they were
+  dropped without a word.
+- An HTTP server that fails after the bridge started stops the bridge
+  (exit 1, which the service manager restarts). Before, the bridge ran on
+  without the dashboard, `/send` and `/ingest`, and looked healthy.
 - "Connect again" on a Plaud login that Plaud refuses signs that login
   out first, giving the sign-out up to 30 seconds. Before, it took the
   CLI's "Already logged in" for a new sign-in and showed Connected until

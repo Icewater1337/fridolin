@@ -10,6 +10,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -31,11 +32,12 @@ import (
 // which keeps them the same from run to run; TestSmoke is the test that
 // starts one.
 //
-// Two places still reach inside, and the moves that change what they use
-// must change them too: newHarness builds the bridge with NewBridge and
-// newHTTPHandler, and WhatsApp hands an event to a WhatsAppClient built
-// from its unexported fields, with the bridge's handleInbound and dev
-// transport.
+// Three places still reach inside, and the moves that change what they
+// use must change them too: newHarness and Reopen build the bridge with
+// NewBridge and newHTTPHandler, Reopen takes up what the last stop kept
+// with Bridge.resume, as Start does, and WhatsApp hands an event to a
+// WhatsAppClient built from its unexported fields, with the bridge's
+// handleInbound and dev transport.
 type harness struct {
 	t *testing.T
 	// b is the bridge, for the harness's own setup and shutdown only.
@@ -46,6 +48,8 @@ type harness struct {
 	cfg  string
 	// stop stops the bridge once, whether a test or the cleanup asks.
 	stop func()
+	// sentBefore is what the bridges before a Reopen sent, oldest first.
+	sentBefore []sent
 }
 
 // harnessGroup is the group the harness's config allows, and harnessDM the
@@ -107,6 +111,34 @@ func newHarness(t *testing.T, cfgJSON string) *harness {
 // Shutdown stops the bridge as SIGTERM does. The API still answers what it
 // can from memory afterwards, such as the dev outbox.
 func (h *harness) Shutdown() { h.stop() }
+
+// Restart stops the bridge as SIGTERM does, then starts a new one on the
+// same config and data dir, as the service does after it (Reopen).
+func (h *harness) Restart() {
+	h.t.Helper()
+	h.Shutdown()
+	h.Reopen()
+}
+
+// Reopen starts a new bridge on the config and data dir of the one
+// Shutdown stopped, and takes up what that one kept for the next start,
+// as Bridge.Start does before WhatsApp connects. Outbox and SentTo go on
+// to list what the stopped bridges sent, then what the new one sends.
+func (h *harness) Reopen() {
+	h.t.Helper()
+	h.sentBefore = h.Outbox()
+	cfgs, err := OpenConfigStore(h.cfg)
+	if err != nil {
+		h.t.Fatal(err)
+	}
+	b, err := NewBridge(cfgs, BridgeOptions{NoWhatsApp: true})
+	if err != nil {
+		h.t.Fatal(err)
+	}
+	h.b, h.h, h.stop = b, b.newHTTPHandler(defaultHTTPListen), sync.OnceFunc(b.Stop)
+	h.t.Cleanup(h.stop)
+	b.resume(context.Background())
+}
 
 // Do sends a request the way the dashboard does: with the token, and on
 // writes the dashboard header and a JSON body. mutate adjusts it first.
@@ -190,14 +222,16 @@ func (h *harness) Inject(m inbound) {
 
 // WhatsApp hands the bridge a message event as whatsmeow delivers one, to
 // the bridge's WhatsApp handling without a connection: what the dev inbound
-// cannot carry, such as a quoted reply, goes this way. Attachments cannot
+// cannot carry, such as a quoted reply, an edit or a deletion, goes this
+// way, as does a message that must come from WhatsApp, as those a stop
+// keeps for the next start do. Attachments cannot
 // be downloaded; what the bridge tells the chat about that is sent through
 // the dev outbox.
 func (h *harness) WhatsApp(ev *events.Message) {
 	h.t.Helper()
 	ctx, cancel := context.WithCancel(context.Background())
 	h.t.Cleanup(cancel)
-	wa := &WhatsAppClient{cfg: h.b.cfgs.Get, log: waLog.Noop, handler: h.b.handleInbound, ctx: ctx, cancel: cancel}
+	wa := &WhatsAppClient{cfg: h.b.cfgs.Get, log: waLog.Noop, handler: h.b.handleInbound, onChange: h.b.handleChange, ctx: ctx, cancel: cancel}
 	wa.media = wa.client // nil: every download fails with ErrClientIsNil
 	wa.notify = func(jid, text string) { _ = h.b.dev.SendMessage(ctx, jid, text) }
 	wa.handleMessage(ev)
@@ -212,7 +246,8 @@ type sent struct {
 	Poll []string  `json:"poll"`
 }
 
-// Outbox returns what the bridge has sent, oldest first.
+// Outbox returns what the bridge has sent, oldest first, after what the
+// bridges before a Reopen sent.
 func (h *harness) Outbox() []sent {
 	h.t.Helper()
 	w := h.Do("GET", "/api/dev/outbox", nil)
@@ -221,10 +256,8 @@ func (h *harness) Outbox() []sent {
 		h.t.Fatalf("dev outbox: %d %s", w.Code, w.Body.String())
 	}
 	// The API lists the newest first.
-	for i, j := 0, len(out)-1; i < j; i, j = i+1, j-1 {
-		out[i], out[j] = out[j], out[i]
-	}
-	return out
+	slices.Reverse(out)
+	return append(slices.Clone(h.sentBefore), out...)
 }
 
 // SentTo returns the texts sent to jid, oldest first.

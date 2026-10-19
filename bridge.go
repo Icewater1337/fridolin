@@ -60,6 +60,8 @@ type Bridge struct {
 	outbox        *Outbox
 	otp           otpHandoffs
 	started       time.Time
+	// restart is BridgeOptions.Restart.
+	restart func()
 
 	// listen is the address the HTTP server binds, "" when it is off;
 	// runs reach the brain API there with a token from runTokens.
@@ -73,6 +75,13 @@ type Bridge struct {
 	lids func() store.LIDStore
 
 	httpSrv *http.Server
+	// loops are the goroutines Start leaves running past its return,
+	// the WhatsApp connect loop: Stop waits for them.
+	loops sync.WaitGroup
+	// stopOnce makes Stop run once, whoever calls it how often.
+	stopOnce sync.Once
+	// intake is what comes in from WhatsApp, which Stop closes first.
+	intake intake
 
 	// addMu makes adding a brain one step at a time (apiAddBrain).
 	addMu sync.Mutex
@@ -85,6 +94,10 @@ type Bridge struct {
 type BridgeOptions struct {
 	NoWhatsApp bool
 	Logs       *LogRing
+	// Restart asks whoever runs the bridge to stop it and run it again
+	// (POST /api/restart): runCmd ends its context with errRestart. Nil
+	// leaves the bridge unable to restart itself.
+	Restart func()
 }
 
 // NewBridge creates and wires up all components. It holds the data
@@ -146,6 +159,7 @@ func NewBridge(cfgs *ConfigStore, opts BridgeOptions) (_ *Bridge, err error) {
 		logs:     opts.Logs,
 		activity: NewActivity(500),
 		started:  time.Now(),
+		restart:  opts.Restart,
 	}
 	if cfg.HTTPEnabled() {
 		// A change to http_listen waits for a restart: until then the
@@ -206,6 +220,8 @@ func NewBridge(cfgs *ConfigStore, opts BridgeOptions) (_ *Bridge, err error) {
 		},
 		Deliver:     b.deliver,
 		Undelivered: b.undelivered,
+		Waiting:     b.keepWaiting,
+		Interrupted: b.keepInterrupted,
 		OnHistory:   b.activity.Add,
 		ExtraArgs:   func(id string) []string { return b.site.BuilderArgs(id) },
 		CodexSetup:  func(id string) ([]string, []string, string, error) { return b.site.CodexBuilder(id) },
@@ -280,21 +296,35 @@ func NewBridge(cfgs *ConfigStore, opts BridgeOptions) (_ *Bridge, err error) {
 	return b, nil
 }
 
+// listenHTTP binds the HTTP server's address, a variable so that a test
+// can hand Start a listener that fails.
+var listenHTTP = net.Listen
+
 // Start serves the dashboard, connects to WhatsApp and blocks until ctx is
-// cancelled. The HTTP port is bound first and failing to bind is fatal: an
-// already-running bridge holds it, and two bridges must never share one
-// WhatsApp session.
+// cancelled, or until the HTTP server fails: it returns that error then,
+// and the caller stops the bridge. The HTTP port is bound first and
+// failing to bind is fatal: an already-running bridge holds it, and two
+// bridges must never share one WhatsApp session.
 func (b *Bridge) Start(ctx context.Context) error {
 	cfg := b.cfgs.Get()
+	run, fail := context.WithCancelCause(ctx)
+	defer fail(nil)
 	if b.listen != "" {
-		ln, err := net.Listen("tcp", b.listen)
+		ln, err := listenHTTP("tcp", b.listen)
 		if err != nil {
 			return fmt.Errorf("listening on %s (is another bridge running?): %w", b.listen, err)
 		}
 		b.httpSrv = newHTTPServer(b.newHTTPHandler(b.listen))
+		// Requests end with the bridge: one that waits for you or for
+		// Google (a folder picker, a sign-in) gives up once the bridge
+		// stops, rather than hold up Stop.
+		b.httpSrv.BaseContext = func(net.Listener) context.Context { return run }
 		go func() {
-			if err := b.httpSrv.Serve(ln); err != nil && err != http.ErrServerClosed {
-				log.Printf("HTTP server error: %v", err)
+			// Serve ends with ErrServerClosed when Stop shuts it down. Any
+			// other end leaves /send and the dashboard dead while the
+			// bridge would run on and look healthy, so it stops instead.
+			if err := b.httpSrv.Serve(ln); !errors.Is(err, http.ErrServerClosed) {
+				fail(fmt.Errorf("HTTP server: %w", err))
 			}
 		}()
 		if !cfg.Dashboard.Disabled {
@@ -302,17 +332,23 @@ func (b *Bridge) Start(ctx context.Context) error {
 		}
 	}
 
-	go b.connectLoop(ctx)
+	// Before WhatsApp connects: what the last stop kept goes to the
+	// brains ahead of what comes in now.
+	b.resume(run)
+	b.loops.Go(func() { b.connectLoop(run) })
 	// Waited for: it queues alerts in the outbox, which Stop closes.
 	var wg sync.WaitGroup
-	wg.Go(func() { b.watchRequiredFiles(ctx, requiredFilesEvery) })
-	b.backup.Start(ctx)
-	b.plaud.Start(ctx)
-	b.site.Start(ctx)
+	wg.Go(func() { b.watchRequiredFiles(run, requiredFilesEvery) })
+	b.backup.Start(run)
+	b.plaud.Start(run)
+	b.site.Start(run)
 
 	log.Println("Bridge started. Waiting for messages…")
-	<-ctx.Done()
+	<-run.Done()
 	wg.Wait()
+	if ctx.Err() == nil {
+		return context.Cause(run)
+	}
 	return nil
 }
 
@@ -344,7 +380,7 @@ const (
 // Once connected, whatsmeow reconnects by itself. An error that another
 // try cannot fix ends it: the dashboard's state says what to do.
 func (b *Bridge) connectLoop(ctx context.Context) {
-	for delay := connectFirstRetry; ; delay = min(2*delay, connectMaxRetry) {
+	for delay := connectFirstRetry; ctx.Err() == nil; delay = min(2*delay, connectMaxRetry) {
 		err := b.wa.Connect()
 		if err == nil {
 			return
@@ -362,23 +398,40 @@ func (b *Bridge) connectLoop(ctx context.Context) {
 	}
 }
 
-// Stop shuts everything down in dependency order.
-func (b *Bridge) Stop() {
-	if b.httpSrv != nil {
-		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		_ = b.httpSrv.Shutdown(ctx)
-		cancel()
-	}
+// Stop shuts everything down in dependency order, once: a restart and a
+// signal that come together, or a test and its cleanup, stop the bridge
+// one time between them.
+func (b *Bridge) Stop() { b.stopOnce.Do(b.stop) }
+
+func (b *Bridge) stop() {
+	// Intake first: what comes in from now on waits for the next start,
+	// while the brains finish and WhatsApp stays connected for their
+	// replies, and nothing that came in before is still on its way to the
+	// debouncer or a brain.
+	b.intake.close()
+	b.stopHTTP()
 	b.backup.Stop()
 	b.plaud.Stop()
 	b.site.Stop()
-	b.deb.DropAll()
+	// What no brain has started on is kept in bridge.db for the next
+	// start (resume): WhatsApp took it as delivered and would not send it
+	// again. What the debouncer holds first, then what the brains have
+	// waiting, at once, before their runs in flight get their grace.
+	for _, m := range b.deb.Drain() {
+		b.keep(inboundHeld, "", m)
+	}
 	b.brainMgr.Stop()
 	// After the brains, whose last runs may still reply; what does not go
 	// out stays in bridge.db for the next start.
 	b.outbox.Stop()
 	b.otp.stop()
 	b.wa.Disconnect()
+	// The connect loop ends with Start's context, unless it is connecting
+	// still, which Disconnect cuts short.
+	if !waitWithin(&b.loops, connectStopWait) {
+		log.Printf("WhatsApp: still connecting %v after the disconnect; stopping without waiting for it", connectStopWait)
+	}
+	b.intake.end()
 	if err := b.store.Close(); err != nil {
 		log.Printf("closing store: %v", err)
 	}
@@ -386,10 +439,216 @@ func (b *Bridge) Stop() {
 	log.Println("Bridge stopped.")
 }
 
+// keepWaiting keeps what br had waiting as the bridge stops, which never
+// ran, for the next start (BrainHooks.Waiting).
+func (b *Bridge) keepWaiting(br *Brain, ms []Inbound) {
+	for _, m := range ms {
+		b.keep(inboundQueued, br.ID(), m)
+	}
+}
+
+// keep keeps m, of kind (see inbound_store.go), which brain had ("" for
+// none), for the next start: a message from WhatsApp, which nothing would
+// send again. Whoever handed in another hears that it was dropped
+// (Inbound.Done), and can hand it in again.
+func (b *Bridge) keep(kind, brain string, m Inbound) {
+	if m.Source != sourceWhatsApp {
+		log.Printf("dropping a message for %s from %s as the bridge stops", m.JID, m.Source)
+		dropped([]Inbound{m})
+		return
+	}
+	if err := b.store.KeepInbound(context.Background(), kind, brain, m); err != nil {
+		log.Printf("%v; it is lost", err)
+	}
+}
+
+// keepInterrupted keeps, for the next start, that the stop cut short br's
+// run for m, so that m's chat hears of it then (BrainHooks.Interrupted).
+// Not for an untagged message, whose run answers nobody, nor for a
+// hand-off, whose sender heard through Done.
+func (b *Bridge) keepInterrupted(br *Brain, m Inbound) {
+	if m.Source != sourceWhatsApp || m.Silent {
+		return
+	}
+	if err := b.store.KeepInterrupted(context.Background(), br.ID(), m); err != nil {
+		log.Printf("brain %s: %v", br.ID(), err)
+	}
+}
+
+// resume takes up what the bridge kept as it last stopped (see Stop),
+// before WhatsApp connects: each chat whose run the stop cut short is told
+// so, the messages no brain had started on go to the brains that take
+// them now, and the messages and changes that came in during the stop are
+// handled as if they came in now. A message or notice older than
+// outboxTTL is dropped, since an answer that late would only confuse; a
+// change is not, since a deletion must take its message out of the
+// history however late.
+func (b *Bridge) resume(ctx context.Context) {
+	resumeRuns := b.brainMgr.slots.pause()
+	defer resumeRuns()
+	// Taken out of bridge.db, what was kept is handed on whole: a stop
+	// that begins meanwhile keeps what is still waiting again, but a
+	// notice it cut off would be lost.
+	ctx = context.WithoutCancel(ctx)
+	rows, err := b.store.TakeInbound(ctx)
+	if err != nil {
+		log.Printf("taking up what the last stop kept: %v", err)
+	}
+	if len(rows) == 0 {
+		return
+	}
+	kinds := map[string]int{}
+	for _, r := range rows {
+		kinds[r.Kind]++
+	}
+	log.Printf("Taking up what the last stop kept: %d messages, %d edits or deletions, %d runs it cut short",
+		len(rows)-kinds[inboundChange]-kinds[inboundInterrupted], kinds[inboundChange], kinds[inboundInterrupted])
+	now := time.Now()
+	for _, r := range rows {
+		if age := now.Sub(r.SentAt); age > outboxTTL && r.Kind != inboundChange {
+			log.Printf("dropping a message for %s that the last stop kept: it came in %v ago, more than %v", r.Chat, age.Round(time.Minute), outboxTTL)
+			continue
+		}
+		switch r.Kind {
+		case inboundInterrupted:
+			if err := b.outbox.Text(ctx, r.Chat, restartedNotice, b.cfgs.Get().MaxChunkSize); err != nil {
+				log.Printf("brain %s: telling %s its run was cut short: %v", r.Brain, r.Chat, err)
+			}
+		case inboundQueued, inboundHeld:
+			if _, _, _, err := b.brainMgr.Submit(r.Msg); err != nil {
+				log.Printf("dropping a message for %s that the last stop kept: %v", r.Chat, err)
+			}
+		case inboundLate:
+			b.handleInbound(ctx, r.Msg)
+		case inboundChange:
+			b.handleChange(r.Change)
+		}
+	}
+}
+
+// httpStopWait is how long Stop waits for the requests in flight to end
+// before it cuts them off, a variable so tests need not wait for it.
+var httpStopWait = 5 * time.Second
+
+// connectStopWait is how long Stop waits for a WhatsApp connect under way.
+const connectStopWait = 5 * time.Second
+
+// stopHTTP stops the HTTP server, if Start began one: it takes no more
+// requests, and those in flight get httpStopWait to end.
+func (b *Bridge) stopHTTP() {
+	if b.httpSrv == nil {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), httpStopWait)
+	defer cancel()
+	if err := b.httpSrv.Shutdown(ctx); err != nil {
+		// Shutdown leaves the connections it did not see end open: Close
+		// ends them, and the handlers still running find out on their
+		// next write.
+		log.Printf("HTTP server: requests still running %v after the stop began (%v); cutting them off", httpStopWait, err)
+		_ = b.httpSrv.Close()
+	}
+}
+
+// waitWithin waits for wg for at most d, and reports whether it ended.
+func waitWithin(wg *sync.WaitGroup, d time.Duration) bool {
+	done := make(chan struct{})
+	go func() {
+		wg.Wait()
+		close(done)
+	}()
+	t := time.NewTimer(d)
+	defer t.Stop()
+	select {
+	case <-done:
+		return true
+	case <-t.C:
+		return false
+	}
+}
+
+// intake counts the calls of handleInbound and handleChange at work.
+// Stop closes it before anything else stops: from then on what comes in
+// is kept for the next start instead (keepLate), and close waits for the
+// calls at work, which may still hand a message to the debouncer or a
+// brain. What comes in once the store is about to close (end) is lost.
+type intake struct {
+	mu     sync.Mutex
+	closed bool
+	ended  bool
+	busy   sync.WaitGroup
+}
+
+// enter reports whether a call may act on what came in, and then counts
+// it until leave.
+func (in *intake) enter() bool {
+	in.mu.Lock()
+	defer in.mu.Unlock()
+	if in.closed {
+		return false
+	}
+	in.busy.Add(1)
+	return true
+}
+
+func (in *intake) leave() { in.busy.Done() }
+
+// close makes what comes in from now on wait for the next start, and
+// waits for the calls acting on what came in before.
+func (in *intake) close() {
+	in.mu.Lock()
+	in.closed = true
+	in.mu.Unlock()
+	in.busy.Wait()
+}
+
+// keep runs fn, which keeps what came in once intake closed, unless the
+// store is closing (end), and reports whether it did.
+func (in *intake) keep(fn func()) bool {
+	in.mu.Lock()
+	defer in.mu.Unlock()
+	if in.ended {
+		return false
+	}
+	fn()
+	return true
+}
+
+// end is when the store closes: what comes in after is lost.
+func (in *intake) end() {
+	in.mu.Lock()
+	in.ended = true
+	in.mu.Unlock()
+}
+
+// keepLate keeps m, which came in once the bridge had begun to stop, for
+// the next start, which handles it as if it came in then: nothing has
+// looked at it yet, so no command ran, and the OTP guard is still to see
+// it (see resume).
+func (b *Bridge) keepLate(m Inbound) {
+	if !b.intake.keep(func() { b.keep(inboundLate, "", m) }) {
+		log.Printf("dropping a message for %s: it came in as the bridge closed its store", m.JID)
+	}
+}
+
 // handleChange applies an edit or a deletion of a WhatsApp message: to
 // the debouncer's batch that holds it, which then reaches the brain as
-// changed, or else to the brain's queue, its run and its history.
+// changed, or else to the brain's queue, its run and its history. Once
+// the bridge stops, it is kept for the next start instead, as messages
+// are (see intake).
 func (b *Bridge) handleChange(c messageChange) {
+	if !b.intake.enter() {
+		kept := b.intake.keep(func() {
+			if err := b.store.KeepChange(context.Background(), c, time.Now()); err != nil {
+				log.Printf("%v; it is lost", err)
+			}
+		})
+		if !kept {
+			log.Printf("dropping the %s of message %s in %s: it came in as the bridge closed its store", c.Kind, c.Target, c.Chat)
+		}
+		return
+	}
+	defer b.intake.leave()
 	br := b.brainMgr.BrainFor(c.Chat, isGroupJID(c.Chat))
 	// An edit to a one-time code is caught like the code itself
 	// (handleInbound), before anything else sees it: a sender who corrects
@@ -441,8 +700,15 @@ func (b *Bridge) recordIgnored(kind, jid, name, sender, pushName string) {
 // allowed_groups and their senders against group_members (whom
 // allowed_numbers admits, for a group without an entry), DMs against
 // allowed_numbers. Group messages without the trigger arrive Silent, and go
-// on to their brain like the rest: it keeps them in its history.
+// on to their brain like the rest: it keeps them in its history. Once the
+// bridge stops, a message is kept for the next start instead: no command
+// runs and no notice goes out (see intake).
 func (b *Bridge) handleInbound(ctx context.Context, m Inbound) {
+	if !b.intake.enter() {
+		b.keepLate(m)
+		return
+	}
+	defer b.intake.leave()
 	m.Text = strings.TrimSpace(m.Text)
 	cfg := b.cfgs.Get()
 

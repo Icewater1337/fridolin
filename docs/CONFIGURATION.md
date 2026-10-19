@@ -1187,6 +1187,26 @@ waiting, in both modes.
 waiting messages; other chats keep theirs. It also stops files handed to
 another brain that answers in that chat (its `reply_chat`).
 
+When the bridge stops or restarts, a brain's run in progress gets 15
+seconds to finish and send its answer. The WhatsApp messages still
+waiting, in a queue or in a [`debounce`](#debounce) batch, are kept in
+`bridge.db` and answered after the next start, unless they were sent more
+than an hour before it. So are those that arrive while the bridge stops:
+the next start handles them, and the edits and deletions that came with
+them, as if they had just come in, commands included. A run the stop
+cut short is not run again, since it may have done part of what it was
+asked: its chat gets "🔄 I restarted while I was working on your message.
+Send it again if you still need an answer." Files sent through `/ingest`
+and messages from the dev page are not kept; a [Plaud](PLAUD.md)
+recording is handed over again after the restart.
+
+Shutdown waits for a finished run's answer to reach the outbox before
+closing the database, including when its brain was removed or moved.
+Edits and deletions saved during shutdown are applied before replayed
+messages can start new runs. This protects an orderly stop and restart;
+a forced exit, crash or power failure can still lose pending messages,
+including during startup replay.
+
 ### `debounce`
 
 ```json

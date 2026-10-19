@@ -20,6 +20,7 @@ func catalogue() []struct{ name, text string } {
 	return []struct{ name, text string }{
 		{"noBrainNotice", noBrainNotice},
 		{"heldBrainNotice", heldBrainNotice},
+		{"restartedNotice", restartedNotice},
 		{"resetReply(false)", resetReply(false)},
 		{"resetReply(true)", resetReply(true)},
 		{"stopReply(true, 0)", stopReply(true, 0)},
