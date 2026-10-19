@@ -174,7 +174,7 @@ func (p *PlaudManager) loadDevices() (plaudDevices, error) {
 	if err != nil {
 		return st, err
 	}
-	return st, json.Unmarshal(data, &st)
+	return st, plaudDecodeError(json.Unmarshal(data, &st))
 }
 
 // updateDevices changes devices.json with fn, drops the pairing codes that

@@ -1223,7 +1223,7 @@ func (p *PlaudManager) loadState() (*plaudState, error) {
 	}
 	st := &plaudState{}
 	if err := json.Unmarshal(data, st); err != nil {
-		return nil, err
+		return nil, plaudDecodeError(err)
 	}
 	if st.Pending == nil {
 		st.Pending = map[string]*plaudPending{}

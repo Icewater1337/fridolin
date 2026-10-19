@@ -11,7 +11,7 @@ import (
 func (b *Bridge) apiPlaudAppCredentials(w http.ResponseWriter, r *http.Request) {
 	var d plaudDeveloper
 	if err := httpapi.DecodeJSON(r, &d); err != nil {
-		httpapi.WriteErr(w, http.StatusBadRequest, err.Error())
+		httpapi.WriteErr(w, http.StatusBadRequest, plaudDecodeError(err).Error())
 		return
 	}
 	if err := b.plaud.SaveDeveloper(d); err != nil {
