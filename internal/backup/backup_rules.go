@@ -8,12 +8,12 @@ import (
 	"unicode"
 )
 
-// backupSecretExcludes are the files of a brain folder a backup leaves out
+// SecretExcludes are the files of a brain folder a backup leaves out
 // whatever the brain's exclude list says, unless include_secret_files is on:
 // a brain may keep API keys in a .env, private keys, and a calendar token
 // or CLI login copied into its folder, and a copy in Drive is one more
 // place they can leak from. Every '+' line of an exclude list is dropped
-// (see filterLines), so none can include them again. "*.key" is not among
+// (see FilterLines), so none can include them again. "*.key" is not among
 // them: it is also Keynote's extension. docs/BACKUP.md and the dashboard's
 // Backup page list them; TestBackupSecretExcludesAreDocumented keeps the
 // docs in step.
@@ -25,7 +25,7 @@ var SecretExcludes = []string{
 	".credentials.json",
 }
 
-// rcloneSection returns the key/values of one [name] section of an rclone
+// RcloneSection returns the key/values of one [name] section of an rclone
 // config file, or nil when it is absent.
 func RcloneSection(conf, name string) map[string]string {
 	var cur map[string]string
@@ -49,7 +49,7 @@ func RcloneSection(conf, name string) map[string]string {
 	return cur
 }
 
-// dayLayout names a day in backupState.LastScheduledDay.
+// DayLayout names a day in persisted scheduler state.
 const DayLayout = "2006-01-02"
 
 // dueOn is daily_at on day's date, in day's time zone. On a day whose
@@ -61,7 +61,7 @@ func dueOn(day time.Time, dailyAt string) time.Time {
 	return time.Date(y, m, d, t.Hour(), t.Minute(), 0, 0, day.Location())
 }
 
-// nextDue is the daily schedule, for the scheduler and the status page
+// Due is the daily schedule, for the scheduler and the status page
 // alike: the next scheduled run is today's at daily_at, unless it already
 // ran today (lastRunDay) or the schedule was switched on or moved after
 // today's time (armedAt). Then it is tomorrow's. runNow says that today's
@@ -75,7 +75,7 @@ func Due(now time.Time, dailyAt, lastRunDay string, armedAt time.Time) (due time
 	return due, !now.Before(due)
 }
 
-// filterLines turns exclude globs into an rclone filter file.
+// FilterLines turns exclude globs into an rclone filter file.
 func FilterLines(excludes []string) string {
 	var sb strings.Builder
 	for _, x := range excludes {
@@ -92,7 +92,7 @@ func FilterLines(excludes []string) string {
 	return sb.String()
 }
 
-// brainFilter is the rclone filter file for a brain folder: the secret
+// BrainFilter is the rclone filter file for a brain folder: the secret
 // files first, unless includeSecrets, then the brain's own excludes. rclone
 // stops at the first rule that matches.
 func BrainFilter(excludes []string, includeSecrets bool) string {
@@ -103,7 +103,7 @@ func BrainFilter(excludes []string, includeSecrets bool) string {
 }
 
 // versionLayout names a version folder after the time of its run, in UTC
-// (versionName). Local time comes twice in the hour the clocks go back, and
+// (VersionName). Local time comes twice in the hour the clocks go back, and
 // would sort a later run's folder before an earlier one's or give two runs
 // one name. legacyVersionLayout is the local time the folders made before
 // are named in. Prune and the restore list read the run time back out of
@@ -113,10 +113,10 @@ const (
 	legacyVersionLayout = "20060102-150405"
 )
 
-// versionName is the version folder name of a run that started at t.
+// VersionName is the version folder name of a run that started at t.
 func VersionName(t time.Time) string { return t.UTC().Format(versionLayout) }
 
-// parseVersion reads the run time out of a version folder name, of
+// ParseVersion reads the run time out of a version folder name, of
 // either layout.
 func ParseVersion(name string) (time.Time, bool) {
 	if t, err := time.Parse(versionLayout, name); err == nil {
@@ -126,7 +126,7 @@ func ParseVersion(name string) (time.Time, bool) {
 	return t, err == nil
 }
 
-// expiredVersions picks the version folders whose run is more than days
+// ExpiredVersions picks the version folders whose run is more than days
 // before now. A name that is not a version stamp is never picked, so prune
 // only ever deletes folders the bridge made.
 func ExpiredVersions(names []string, now time.Time, days int) []string {
@@ -140,7 +140,7 @@ func ExpiredVersions(names []string, now time.Time, days int) []string {
 	return out
 }
 
-// sortVersions orders version folder names newest run first; names that
+// SortVersions orders version folder names newest run first; names that
 // are not version stamps go last.
 func SortVersions(names []string) {
 	sort.SliceStable(names, func(i, j int) bool {
@@ -156,7 +156,7 @@ func SortVersions(names []string) {
 	})
 }
 
-// backupNameOK reports whether id can name a backup in Drive: one path
+// NameOK reports whether id can name a backup in Drive: one path
 // segment, not "." or "..", with no separator, colon or control character
 // that would make the remote path name another folder. That covers the
 // bridge's own (bridgeBackupID) and every brain id, and the names of brains
@@ -175,5 +175,5 @@ func NameOK(id string) bool {
 // versionLayout).
 var restoreVersionRe = regexp.MustCompile(`^(current|\d{8}-\d{6}Z?)$`)
 
-// BackupVersionOK reports whether a version names the current copy or one saved run.
+// VersionOK reports whether a version names the current copy or one saved run.
 func VersionOK(s string) bool { return restoreVersionRe.MatchString(s) }
