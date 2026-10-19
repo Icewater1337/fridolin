@@ -232,7 +232,7 @@ func prepareBrainState(dataDir, mediaDir, id string, inheritUser bool) ([]string
 	if dataDir == "" {
 		return nil, errors.New("the sandbox needs the data folder, which holds each brain's own state")
 	}
-	if !brainIDRe.MatchString(id) {
+	if !ValidID(id) {
 		return nil, fmt.Errorf("brain id %q cannot name a folder", id)
 	}
 	if mediaDir != "" {

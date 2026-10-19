@@ -775,7 +775,7 @@ func brainFolder(t testing.TB, path string, m BrainManifest) BrainRef {
 	if m.Name == "" {
 		m.Name = m.ID
 	}
-	m = m.normalized()
+	m = m.Normalized()
 	if _, err := ScaffoldBrain(fsx.ExpandHome(path, home), &m); err != nil {
 		t.Fatal(err)
 	}

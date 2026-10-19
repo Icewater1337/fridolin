@@ -844,7 +844,7 @@ func TestConcurrentAddsOfOneFolder(t *testing.T) {
 		if m.ID != won[0] {
 			t.Fatalf("round %d: brain.json is brain %q's, but %q was added", round, m.ID, won[0])
 		}
-		if _, err := os.Stat(filepath.Join(dir, m.normalized().PromptFile)); err != nil {
+		if _, err := os.Stat(filepath.Join(dir, m.Normalized().PromptFile)); err != nil {
 			t.Fatalf("round %d: the added brain's prompt file is gone: %v", round, err)
 		}
 	}

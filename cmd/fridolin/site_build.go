@@ -49,7 +49,7 @@ type siteChats struct {
 // path is the file of a brain's build chat. The id arrives in a request
 // URL, so only a valid brain id names a file (and so one in this folder).
 func (c *siteChats) path(brainID string) (string, error) {
-	if !brainIDRe.MatchString(brainID) {
+	if !ValidID(brainID) {
 		return "", fmt.Errorf("%q is not a brain id", brainID)
 	}
 	return c.m.dir("build", brainID+".json"), nil

@@ -1957,7 +1957,7 @@ func TestAddBrainBackupDefaults(t *testing.T) {
 	if b.Backup.Enabled || len(b.Backup.Exclude) != 1 {
 		t.Errorf("b.backup = %+v, want off as requested", b.Backup)
 	}
-	if c.Backup.Enabled || !slices.Equal(c.Backup.Exclude, DefaultBackupExcludes) {
+	if c.Backup.Enabled || !slices.Equal(c.Backup.Exclude, DefaultBackupExcludes()) {
 		t.Errorf("c.backup = %+v, want off with the default exclusions", c.Backup)
 	}
 }

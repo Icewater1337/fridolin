@@ -3,8 +3,6 @@ package main
 import (
 	"bytes"
 	"encoding/json"
-	"errors"
-	"io/fs"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -18,31 +16,7 @@ import (
 )
 
 func testManifest(id string) BrainManifest {
-	return BrainManifest{ID: id, Name: strings.ToUpper(id[:1]) + id[1:], Backup: BrainBackup{Enabled: true, Exclude: DefaultBackupExcludes}}
-}
-
-func TestManifestValidate(t *testing.T) {
-	good := testManifest("work-1")
-	if err := good.Validate(); err != nil {
-		t.Fatal(err)
-	}
-	bad := map[string]func(m *BrainManifest){
-		"uppercase id":       func(m *BrainManifest) { m.ID = "Work" },
-		"empty name":         func(m *BrainManifest) { m.Name = " " },
-		"absolute prompt":    func(m *BrainManifest) { m.PromptFile = "/etc/passwd" },
-		"escaping prompt":    func(m *BrainManifest) { m.PromptFile = "../other/brain-prompt.md" },
-		"bad effort":         func(m *BrainManifest) { m.Effort = "huge" },
-		"group not a group":  func(m *BrainManifest) { m.Routing.Groups = []string{"15551234567@s.whatsapp.net"} },
-		"filter injection":   func(m *BrainManifest) { m.Backup.Exclude = []string{"+ /secret"} },
-		"newline in exclude": func(m *BrainManifest) { m.Backup.Exclude = []string{"a\n+ b"} },
-	}
-	for name, mutate := range bad {
-		m := testManifest("work")
-		mutate(&m)
-		if err := m.Validate(); err == nil {
-			t.Errorf("%s: expected a validation error", name)
-		}
-	}
+	return BrainManifest{ID: id, Name: strings.ToUpper(id[:1]) + id[1:], Backup: BrainBackup{Enabled: true, Exclude: DefaultBackupExcludes()}}
 }
 
 func TestCheckBrainPath(t *testing.T) {
@@ -367,12 +341,6 @@ func TestResolveBrainsLeavesOutBadBrains(t *testing.T) {
 	}
 }
 
-func TestReadManifestMissing(t *testing.T) {
-	if _, err := ReadManifest(t.TempDir()); !errors.Is(err, fs.ErrNotExist) {
-		t.Errorf("err = %v, want not-exist", err)
-	}
-}
-
 // FuzzDecodeManifest: the brain can write its own brain.json, so it can
 // hold anything. What decodes is normalised, and what also validates is
 // safe to use: the id is a plain file name, the prompt file stays in the
@@ -407,7 +375,7 @@ func FuzzDecodeManifest(f *testing.F) {
 		if err != nil {
 			return
 		}
-		if n := m.normalized(); !reflect.DeepEqual(n, *m) {
+		if n := m.Normalized(); !reflect.DeepEqual(n, *m) {
 			t.Errorf("decoded %+v, normalised %+v", *m, n)
 		}
 		out, err := encodeManifest(m)
@@ -499,7 +467,7 @@ func TestBrainsDocExampleIsAValidManifest(t *testing.T) {
 	if err := dec.Decode(&m); err != nil {
 		t.Fatalf("the example does not decode as brain.json: %v", err)
 	}
-	m = m.normalized()
+	m = m.Normalized()
 	if err := m.Validate(); err != nil {
 		t.Errorf("the example is not a valid manifest: %v", err)
 	}

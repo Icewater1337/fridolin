@@ -1080,11 +1080,11 @@ func (b *Bridge) apiAddBrain(w http.ResponseWriter, r *http.Request) {
 	case !backupGiven:
 		// No backup settings given: new brains are backed up, with the
 		// default exclusions.
-		m.Backup = BrainBackup{Enabled: true, Exclude: append([]string{}, DefaultBackupExcludes...)}
+		m.Backup = BrainBackup{Enabled: true, Exclude: append([]string{}, DefaultBackupExcludes()...)}
 	case m.Backup.Exclude == nil:
-		m.Backup.Exclude = append([]string{}, DefaultBackupExcludes...)
+		m.Backup.Exclude = append([]string{}, DefaultBackupExcludes()...)
 	}
-	m = m.normalized()
+	m = m.Normalized()
 	if err := m.Validate(); err != nil {
 		httpapi.WriteErr(w, http.StatusUnprocessableEntity, err.Error())
 		return
@@ -1165,7 +1165,7 @@ func (b *Bridge) apiUpdateBrain(w http.ResponseWriter, r *http.Request) {
 		httpapi.WriteErr(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	m := req.Manifest.normalized()
+	m := req.Manifest.Normalized()
 	if m.ID != id {
 		httpapi.WriteErr(w, http.StatusUnprocessableEntity, "a brain's id cannot change — remove it and add the folder again under a new id")
 		return

@@ -7,10 +7,12 @@ import (
 	"fmt"
 	"io/fs"
 	"log"
+	"maps"
 	"os"
 	"path/filepath"
 	"reflect"
 	"regexp"
+	"slices"
 	"strings"
 	"sync"
 
@@ -86,11 +88,6 @@ type BrainRouting struct {
 	AnswerForwards *bool `json:"answer_forwards,omitempty"`
 }
 
-// groupRules is what addresses the bridge in the brain's groups.
-func (r BrainRouting) groupRules() groupRules {
-	return groupRules{files: boolOr(r.AnswerFiles, true), forwards: boolOr(r.AnswerForwards, true)}
-}
-
 // BrainBackup controls this brain's Google Drive backup.
 type BrainBackup struct {
 	Enabled bool `json:"enabled"`
@@ -99,9 +96,11 @@ type BrainBackup struct {
 	Exclude []string `json:"exclude"`
 }
 
-// DefaultBackupExcludes are applied to every new brain: rebuildable or
-// ephemeral files that only cost upload time.
-var DefaultBackupExcludes = []string{"node_modules/", "*.log", ".DS_Store", ".venv/", "__pycache__/"}
+// DefaultBackupExcludes returns a fresh list for each new brain: rebuildable
+// or ephemeral files that only cost upload time.
+func DefaultBackupExcludes() []string {
+	return []string{"node_modules/", "*.log", ".DS_Store", ".venv/", "__pycache__/"}
+}
 
 // manifestVersion is the version of brain.json this bridge reads and
 // writes. A newer one is refused, see checkManifestVersion.
@@ -125,16 +124,16 @@ var brainIDRe = regexp.MustCompile(`^[a-z0-9][a-z0-9_-]{0,39}$`)
 
 // Validate checks the manifest on its own (not against other brains).
 func (m *BrainManifest) Validate() error {
-	if !brainIDRe.MatchString(m.ID) {
+	if !ValidID(m.ID) {
 		return fmt.Errorf("brain id %q must be 1–40 lowercase letters, digits, - or _", m.ID)
 	}
 	if strings.TrimSpace(m.Name) == "" {
 		return fmt.Errorf("brain %q needs a name", m.ID)
 	}
-	if !validEfforts[m.Effort] {
+	if !ValidEffort(m.Effort) {
 		return fmt.Errorf("brain %q: effort %q must be one of low, medium, high, xhigh, max", m.ID, m.Effort)
 	}
-	if !validObserve[m.Observe] {
+	if !ValidObserve(m.Observe) {
 		return fmt.Errorf("brain %q: observe %q must be %q or %q", m.ID, m.Observe, observeHistory, observeRun)
 	}
 	if m.PromptFile != "" {
@@ -162,9 +161,9 @@ func (m *BrainManifest) Validate() error {
 	return nil
 }
 
-// normalized returns a copy with defaults filled in, so two manifests that
+// Normalized returns a copy with defaults filled in, so two manifests that
 // mean the same thing compare equal.
-func (m BrainManifest) normalized() BrainManifest {
+func (m BrainManifest) Normalized() BrainManifest {
 	if m.Version == 0 {
 		m.Version = manifestVersion
 	}
@@ -174,15 +173,19 @@ func (m BrainManifest) normalized() BrainManifest {
 	if m.Observe == "" {
 		m.Observe = observeHistory
 	}
-	m.Routing.Groups = nonNil(m.Routing.Groups)
-	m.Backup.Exclude = nonNil(m.Backup.Exclude)
+	if m.Routing.Groups == nil {
+		m.Routing.Groups = []string{}
+	}
+	if m.Backup.Exclude == nil {
+		m.Backup.Exclude = []string{}
+	}
 	return m
 }
 
 // Equal reports whether two manifests describe the same brain.
 func (m BrainManifest) Equal(o BrainManifest) bool {
-	a, _ := json.Marshal(m.normalized())
-	b, _ := json.Marshal(o.normalized())
+	a, _ := json.Marshal(m.Normalized())
+	b, _ := json.Marshal(o.Normalized())
 	return string(a) == string(b)
 }
 
@@ -215,7 +218,7 @@ func decodeManifest(data []byte) (*BrainManifest, error) {
 	if err := checkManifestVersion(m.Version); err != nil {
 		return nil, err
 	}
-	n := m.normalized()
+	n := m.Normalized()
 	return &n, nil
 }
 
@@ -242,7 +245,7 @@ func warnUnknownManifestKeys(path string, data []byte) {
 // encodeManifest returns the contents WriteManifest writes for m, or why m
 // is not a valid manifest.
 func encodeManifest(m *BrainManifest) ([]byte, error) {
-	n := m.normalized()
+	n := m.Normalized()
 	if err := n.Validate(); err != nil {
 		return nil, err
 	}
@@ -400,3 +403,61 @@ func slugify(s string) string {
 	}
 	return out
 }
+
+// BrainSpec is a brain ready to run.
+type BrainSpec struct {
+	Manifest BrainManifest
+	Dir      string // absolute, symlinks resolved
+	// Path is the folder as configured, ~ expanded. The sandbox profiles
+	// cover it as well as Dir, which the brain runs in: a symlink on the
+	// way to the folder, such as ~/assistant on another volume, is one a
+	// brain could swap for its own and so move another brain's folder.
+	Path string
+	// PromptFile is the prompt file relative to Dir. The bridge reads it
+	// through the brain's open folder, which stops a brain from pointing it
+	// at ~/.ssh with a symlink; checking the path here would not, as the
+	// brain can plant one at any time after.
+	PromptFile string
+	// Entry is the spec's index in brain_dirs, which its issues carry.
+	Entry int `json:"-"`
+}
+
+// validEfforts are the values brain_effort and a brain's effort take, ""
+// being the CLI's default. Like the other sets of values a setting takes
+// (validGitConfigs, validQueueModes, validTriggerMatches, validObserve,
+// waLevels), it is what the schemas in docs/schemas list for the setting,
+// which TestSchemaEnumsAreTheBridgesValues checks.
+var validEfforts = map[string]bool{"": true, "low": true, "medium": true, "high": true, "xhigh": true, "max": true}
+
+// What a brain does with untagged group messages, the ones nobody
+// addressed to it (Inbound.Silent): BrainManifest.Observe. Either way the
+// message goes into the brain's history first, and nothing is ever sent
+// back for it.
+const (
+	// observeHistory, the default, keeps them in the history only. The
+	// next run in that chat reads them there, which is all most brains
+	// need, and chatter costs no run and holds up nobody's request.
+	observeHistory = "history"
+	// observeRun also gives each one an observe-only run, for a brain that
+	// keeps notes on what it reads. Each costs a full Claude run, with
+	// tools, on text anyone in the group may have written.
+	observeRun = "run"
+)
+
+// validObserve are the values brain.json may give observe.
+var validObserve = map[string]bool{"": true, observeHistory: true, observeRun: true}
+
+// ValidID reports whether id is the stable slug accepted for a brain.
+func ValidID(id string) bool { return brainIDRe.MatchString(id) }
+
+// ValidEffort reports whether effort is an accepted CLI effort setting.
+func ValidEffort(effort string) bool { return validEfforts[effort] }
+
+// Efforts returns the accepted settings, including the unset value, in order.
+func Efforts() []string { return slices.Sorted(maps.Keys(validEfforts)) }
+
+// ValidObserve reports whether mode is a supported untagged-message policy.
+func ValidObserve(mode string) bool { return validObserve[mode] }
+
+// ObserveModes returns the accepted settings, including the unset value.
+func ObserveModes() []string { return slices.Sorted(maps.Keys(validObserve)) }

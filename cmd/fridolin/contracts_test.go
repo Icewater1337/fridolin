@@ -531,15 +531,15 @@ func TestSchemaEnumsAreTheBridgesValues(t *testing.T) {
 		values  []string
 		file    string // a file that sets it, %s for the value as JSON
 	}{
-		{"brain_effort", "config.schema.json#/properties/brain_effort", keys(validEfforts), `{"brain_effort": %s}`},
+		{"brain_effort", "config.schema.json#/properties/brain_effort", Efforts(), `{"brain_effort": %s}`},
 		{"agent_provider", "config.schema.json#/properties/agent_provider", []string{"", "claude", "codex"}, `{"agent_provider": %s}`},
-		{"codex_effort", "config.schema.json#/properties/codex_effort", keys(validEfforts), `{"codex_effort": %s}`},
+		{"codex_effort", "config.schema.json#/properties/codex_effort", Efforts(), `{"codex_effort": %s}`},
 		{"queue.mode", "config.schema.json#/properties/queue/properties/mode", keys(validQueueModes), `{"queue": {"mode": %s}}`},
 		{"sandbox.git_config", "config.schema.json#/properties/sandbox/properties/git_config", keys(validGitConfigs), `{"sandbox": {"git_config": %s}}`},
 		{"triggers match", "config.schema.json#/properties/triggers/items/oneOf/1/properties/match", matches, `{"triggers": [{"text": "@c", "match": %s}]}`},
 		{"log_level", "config.schema.json#/properties/log_level", levels, `{"log_level": %s}`},
-		{"brain.json effort", "brain.schema.json#/properties/effort", keys(validEfforts), `{"id": "a", "name": "A", "effort": %s}`},
-		{"brain.json observe", "brain.schema.json#/properties/observe", keys(validObserve), `{"id": "a", "name": "A", "observe": %s}`},
+		{"brain.json effort", "brain.schema.json#/properties/effort", Efforts(), `{"id": "a", "name": "A", "effort": %s}`},
+		{"brain.json observe", "brain.schema.json#/properties/observe", ObserveModes(), `{"id": "a", "name": "A", "observe": %s}`},
 	}
 	set := newSchemaSet(t)
 	t.Setenv("HOME", t.TempDir())

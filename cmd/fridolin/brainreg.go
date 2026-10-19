@@ -27,24 +27,6 @@ type BrainRef struct {
 // Path expanded already.
 func (r BrainRef) Dir() string { return fsx.ExpandHome(r.Path, homeDir()) }
 
-// BrainSpec is a brain ready to run.
-type BrainSpec struct {
-	Manifest BrainManifest
-	Dir      string // absolute, symlinks resolved
-	// Path is the folder as configured, ~ expanded. The sandbox profiles
-	// cover it as well as Dir, which the brain runs in: a symlink on the
-	// way to the folder, such as ~/assistant on another volume, is one a
-	// brain could swap for its own and so move another brain's folder.
-	Path string
-	// PromptFile is the prompt file relative to Dir. The bridge reads it
-	// through the brain's open folder, which stops a brain from pointing it
-	// at ~/.ssh with a symlink; checking the path here would not, as the
-	// brain can plant one at any time after.
-	PromptFile string
-	// entry is the spec's index in brain_dirs, which its issues carry.
-	entry int
-}
-
 // BrainIssue is a problem with one configured brain, shown on the dashboard.
 type BrainIssue struct {
 	ID     string `json:"id,omitempty"`
@@ -83,7 +65,7 @@ func ResolveBrains(cfg *Config) ([]BrainSpec, []BrainIssue) {
 			issues = append(issues, BrainIssue{Path: ref.Path, Kind: "unapproved", Detail: "no approved manifest — remove this entry and add the folder again", entry: i})
 			continue
 		}
-		m := ref.Approved.normalized()
+		m := ref.Approved.Normalized()
 		if err := m.Validate(); err != nil {
 			issues = append(issues, BrainIssue{ID: m.ID, Path: ref.Path, Kind: "invalid", Detail: err.Error(), entry: i, routing: m.Routing})
 			continue
@@ -106,14 +88,14 @@ func ResolveBrains(cfg *Config) ([]BrainSpec, []BrainIssue) {
 		}
 		// Validate kept prompt_file inside the folder; the folder's os.Root
 		// keeps it there when the bridge reads it.
-		specs = append(specs, BrainSpec{Manifest: m, Dir: dir, Path: filepath.Clean(ref.Path), PromptFile: m.PromptFile, entry: i})
+		specs = append(specs, BrainSpec{Manifest: m, Dir: dir, Path: filepath.Clean(ref.Path), PromptFile: m.PromptFile, Entry: i})
 	}
 
 	// Drop brains that clash with an earlier one rather than refusing to run.
 	var ok []BrainSpec
 	for _, s := range specs {
 		if err := ValidateBrainSet(append(append([]BrainSpec{}, ok...), s)); err != nil {
-			issues = append(issues, BrainIssue{ID: s.Manifest.ID, Path: s.Dir, Kind: "invalid", Detail: err.Error(), entry: s.entry, routing: s.Manifest.Routing})
+			issues = append(issues, BrainIssue{ID: s.Manifest.ID, Path: s.Dir, Kind: "invalid", Detail: err.Error(), entry: s.Entry, routing: s.Manifest.Routing})
 			continue
 		}
 		ok = append(ok, s)
@@ -284,7 +266,7 @@ func updateManifestIn(c *Config, tx *Tx, id string, mutate func(m *BrainManifest
 		if err := tx.WriteManifest(ref.Dir(), &m); err != nil {
 			return err
 		}
-		n := m.normalized()
+		n := m.Normalized()
 		ref.Approved = &n
 		return nil
 	}
@@ -325,7 +307,7 @@ func scaffoldFolderTx(dir string, m *BrainManifest) (*scaffoldTx, error) {
 
 	prompt := renderTemplate(examplePromptTemplate(), m)
 	files := []struct{ rel, content string }{
-		{m.normalized().PromptFile, prompt},
+		{m.Normalized().PromptFile, prompt},
 		{identityMapFile, identityMapTemplate},
 		{"memories/README.md", "# Memories\n\nOne markdown file per topic. The brain reads and updates these between conversations.\n"},
 		{"skills/README.md", "# Skills\n\nReusable how-tos and scripts this brain has written for itself.\n"},

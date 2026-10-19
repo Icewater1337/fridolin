@@ -73,7 +73,7 @@ func brainASetup(t *testing.T) (*Config, string) {
 	if err := os.WriteFile(filepath.Join(home, ".ssh", "id_test"), []byte("FAKE-PRIVATE-KEY\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	approved, err := json.Marshal(m.normalized())
+	approved, err := json.Marshal(m.Normalized())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -236,7 +236,7 @@ func TestLeftOutBrainShowsWhyOnItsPage(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = os.Chmod(dir, 0o700) })
-	approved := m.normalized()
+	approved := m.Normalized()
 	if _, err := tb.cfgs.Update("", func(c *Config) error {
 		c.BrainDirs = append(c.BrainDirs, BrainRef{Path: dir, Approved: &approved})
 		return nil

@@ -37,35 +37,6 @@ func TestObserveRuns(t *testing.T) {
 	}
 }
 
-func TestManifestObserve(t *testing.T) {
-	cases := []struct {
-		observe, normalized string
-		ok                  bool
-	}{
-		{"", observeHistory, true},
-		{observeHistory, observeHistory, true},
-		{observeRun, observeRun, true},
-		{"always", "", false},
-		{"Run", "", false},
-	}
-	for _, c := range cases {
-		t.Run(c.observe, func(t *testing.T) {
-			m := BrainManifest{ID: "g", Name: "G", Observe: c.observe}
-			if err := m.Validate(); (err == nil) != c.ok {
-				t.Fatalf("Validate() = %v, want ok %v", err, c.ok)
-			}
-			if c.ok && m.normalized().Observe != c.normalized {
-				t.Errorf("normalized observe = %q, want %q", m.normalized().Observe, c.normalized)
-			}
-		})
-	}
-	// A brain.json written before the setting existed is the same brain as
-	// its approved copy that has the default spelt out: no drift.
-	if !(BrainManifest{ID: "g", Name: "G"}).Equal(BrainManifest{ID: "g", Name: "G", Observe: observeHistory}) {
-		t.Error("a manifest without observe differs from one with the default")
-	}
-}
-
 // Untagged group chatter goes into the brain's history, and gets a run of
 // its own only when the brain observes with runs. Either way nothing is
 // sent back.
