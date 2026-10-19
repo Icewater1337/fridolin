@@ -174,7 +174,7 @@ func (m *SiteManager) liveCaps(module string) (sandbox.SiteModule, error) {
 	if s.Approved == "" {
 		return sandbox.SiteModule{}, errors.New("no commit of the site is live")
 	}
-	for _, mod := range readModuleCaps(m.modulesDirOf(s.Approved), homeDir()) {
+	for _, mod := range readModuleCaps(m.modulesDirOf(s.Approved), m.host.Home()) {
 		if mod.ID == module {
 			return mod, nil
 		}

@@ -37,7 +37,6 @@ import (
 	"time"
 
 	"github.com/Icewater1337/fridolin/internal/fsx"
-	"github.com/Icewater1337/fridolin/internal/google"
 	"github.com/Icewater1337/fridolin/internal/platform"
 	"github.com/Icewater1337/fridolin/internal/sandbox"
 	"github.com/Icewater1337/fridolin/internal/textx"
@@ -101,6 +100,7 @@ type SiteUser struct {
 // SiteManager runs the site.
 type SiteManager struct {
 	dataDir      string
+	host         SiteHost
 	googleClient func() string // path of Fridolin's shared Google OAuth client file
 
 	// Selected at construction: installing npm dependencies into a folder,
@@ -130,9 +130,10 @@ type SiteManager struct {
 }
 
 // NewSiteManager loads the site's settings and accounts from opts.DataDir/site.
-func NewSiteManager(opts SiteOptions) *SiteManager {
+func newSiteManager(opts SiteOptions) *SiteManager {
 	m := &SiteManager{
 		dataDir:      opts.DataDir,
+		host:         opts.Host,
 		googleClient: opts.GoogleClient,
 		hooks:        opts.Builder,
 		previews:     map[string]*sitePreview{},
@@ -662,7 +663,7 @@ func (m *SiteManager) processCommand(ctx context.Context, name, listen, modulesD
 	if err != nil {
 		return nil, err
 	}
-	node, err := findNode()
+	node, err := m.host.Node()
 	if err != nil {
 		return nil, err
 	}
@@ -682,7 +683,7 @@ func (m *SiteManager) processCommand(ctx context.Context, name, listen, modulesD
 		if s.Domain != "" {
 			rt.PublicOrigin = "https://" + s.Domain
 		}
-		mods = readModuleCaps(modulesDir, homeDir())
+		mods = readModuleCaps(modulesDir, m.host.Home())
 		rt.SecretsFD = 3
 		rt.DataDir, rt.SpoolDir, rt.DevicesFile = m.dir("data"), m.spoolDir(), m.dir("devices.json")
 		for _, d := range []string{rt.SpoolDir, rt.DataDir} {
@@ -726,7 +727,7 @@ func (m *SiteManager) processCommand(ctx context.Context, name, listen, modulesD
 		prepareDeclaredFolders(mods, in.Unwritable)
 		switch err := siteSandboxAvailable(m.sandboxExec); {
 		case err == nil:
-			profile, err := siteSandboxProfile(in)
+			profile, err := m.host.Profile(in)
 			if err != nil {
 				return nil, fmt.Errorf("the site's sandbox: %w", err)
 			}
@@ -740,7 +741,7 @@ func (m *SiteManager) processCommand(ctx context.Context, name, listen, modulesD
 	}
 	cmd := exec.CommandContext(ctx, bin, args...)
 	cmd.Dir = shell
-	cmd.Env = siteEnv(node, "FRIDOLIN_SITE_RUNTIME="+rtFile, "NODE_ENV=production", "TMPDIR="+tmp+string(filepath.Separator))
+	cmd.Env = m.host.Env(node, "FRIDOLIN_SITE_RUNTIME="+rtFile, "NODE_ENV=production", "TMPDIR="+tmp+string(filepath.Separator))
 	if live {
 		secrets, err := m.secretsFor(mods)
 		if err != nil {
@@ -768,12 +769,12 @@ func (m *SiteManager) tunnelCommand(ctx context.Context) (*exec.Cmd, error) {
 	if err != nil {
 		return nil, errors.New("no tunnel token saved")
 	}
-	bin, err := findTool("cloudflared")
+	bin, err := m.host.Tool("cloudflared")
 	if err != nil {
 		return nil, errors.New("cloudflared is not installed (macOS: brew install cloudflared)")
 	}
 	cmd := exec.CommandContext(ctx, bin, "tunnel", "--no-autoupdate", "run")
-	cmd.Env = siteEnv(bin, "TUNNEL_TOKEN="+strings.TrimSpace(string(token)))
+	cmd.Env = m.host.Env(bin, "TUNNEL_TOKEN="+strings.TrimSpace(string(token)))
 	return cmd, nil
 }
 
@@ -813,90 +814,14 @@ func (m *SiteManager) SetGoogleClient(data []byte) error {
 		}
 		return nil
 	}
-	c, err := google.ParseClient(data)
+	clientType, err := m.host.GoogleClientType(data)
 	if err != nil {
 		return err
 	}
-	if c.Type != "web" {
+	if clientType != "web" {
 		return errors.New(`the site needs a "Web application" client (this one is a Desktop app client)`)
 	}
 	return fsx.WriteFileAtomic(m.dir("google_client.json"), data, 0o600, false)
-}
-
-// siteEnv is the whole environment of a site process: nothing of the bridge's
-// own environment (tokens, API keys) reaches it.
-func siteEnv(bin string, extra ...string) []string {
-	env := []string{
-		"HOME=" + homeDir(),
-		"PATH=" + siteEnvPath(bin),
-		"LANG=en_US.UTF-8",
-	}
-	for _, k := range []string{"USER", "LOGNAME", "TMPDIR"} {
-		if v := os.Getenv(k); v != "" {
-			env = append(env, k+"="+v)
-		}
-	}
-	return append(env, extra...)
-}
-
-// siteEnvPath is the PATH of a site process: the folder of the program it
-// runs (node's, so npm and npx are found), then the usual ones.
-func siteEnvPath(bin string) string {
-	return filepath.Dir(bin) + ":/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin"
-}
-
-// findNode finds Node.js (the site needs 22 or newer): on PATH, in the usual
-// folders, or the newest nvm install. Symlinks are resolved, so npm is found
-// next to it.
-func findNode() (string, error) {
-	bin, err := findTool("node")
-	if err != nil {
-		found, _ := filepath.Glob(filepath.Join(homeDir(), ".nvm/versions/node/v*/bin/node"))
-		slices.SortFunc(found, func(a, b string) int { return compareVersionDirs(b, a) })
-		if len(found) == 0 {
-			return "", errors.New("node is not installed (macOS: brew install node); the site needs Node.js 22 or newer")
-		}
-		bin = found[0]
-	}
-	if real, err := filepath.EvalSymlinks(bin); err == nil {
-		bin = real
-	}
-	return bin, nil
-}
-
-// compareVersionDirs orders …/v22.14.0/bin/node before …/v24.1.0/bin/node.
-func compareVersionDirs(a, b string) int {
-	va := strings.Split(strings.TrimPrefix(filepath.Base(filepath.Dir(filepath.Dir(a))), "v"), ".")
-	vb := strings.Split(strings.TrimPrefix(filepath.Base(filepath.Dir(filepath.Dir(b))), "v"), ".")
-	for i := 0; i < len(va) && i < len(vb); i++ {
-		var x, y int
-		fmt.Sscan(va[i], &x)
-		fmt.Sscan(vb[i], &y)
-		if x != y {
-			return x - y
-		}
-	}
-	return len(va) - len(vb)
-}
-
-// findTool looks on PATH and in the usual install folders (launchd's PATH is short).
-func findTool(name string) (string, error) {
-	if p, err := exec.LookPath(name); err == nil {
-		return p, nil
-	}
-	for _, dir := range toolFallbackDirs() {
-		if p := filepath.Join(dir, name); fsx.Exists(p) {
-			return p, nil
-		}
-	}
-	return "", fmt.Errorf("%s not found", name)
-}
-
-// toolFallbackDirs are where findTool looks for a program that is not on
-// PATH, which under the service it often is not. The sandbox keeps them
-// from brains like the PATH folders.
-func toolFallbackDirs() []string {
-	return []string{"/opt/homebrew/bin", "/usr/local/bin", filepath.Join(homeDir(), ".local/bin")}
 }
 
 // ensureShell unpacks the embedded site process into <data_dir>/site/shell
@@ -953,13 +878,13 @@ func (m *SiteManager) ensureShell(ctx context.Context) (string, error) {
 
 // runNpmInstall installs a package's dependencies (npm ci when there is a lock file).
 func (m *SiteManager) runNpmInstall(ctx context.Context, dir string, prod bool) error {
-	node, err := findNode()
+	node, err := m.host.Node()
 	if err != nil {
 		return err
 	}
 	npm := filepath.Join(filepath.Dir(node), "npm")
 	if !fsx.Exists(npm) {
-		if npm, err = findTool("npm"); err != nil {
+		if npm, err = m.host.Tool("npm"); err != nil {
 			return errors.New("npm not found next to node")
 		}
 	}
@@ -975,7 +900,7 @@ func (m *SiteManager) runNpmInstall(ctx context.Context, dir string, prod bool) 
 	defer cancel()
 	cmd := exec.CommandContext(ctx, npm, args...)
 	cmd.Dir = dir
-	cmd.Env = siteEnv(node)
+	cmd.Env = m.host.Env(node)
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("npm %s: %v\n%s", args[0], err, textx.Tail(string(out), 1500))

@@ -85,3 +85,29 @@ func TestSiteOptionsKeepLivePaths(t *testing.T) {
 		t.Fatalf("own client=%q reads=%d/%d", got, clientReads, brainReads)
 	}
 }
+
+func TestSiteHostCapabilitiesStayLiveAndLocal(t *testing.T) {
+	home := t.TempDir()
+	nodeErr := errors.New("instance node unavailable")
+	clientErr := errors.New("instance client rejected")
+	m := NewSiteManager(SiteOptions{DataDir: t.TempDir(), Host: SiteHost{
+		Home:             func() string { return home },
+		Node:             func() (string, error) { return "", nodeErr },
+		GoogleClientType: func([]byte) (string, error) { return "", clientErr },
+	}})
+	for i := 0; i < 2; i++ {
+		home = t.TempDir()
+		if got := m.sandboxInput("node", "deploy", "root", "runtime", nil).Home; got != home {
+			t.Fatalf("profile home=%q, want current supplied home %q", got, home)
+		}
+	}
+	if err := m.runNpmInstall(t.Context(), t.TempDir(), false); !errors.Is(err, nodeErr) {
+		t.Fatalf("installer node lookup=%v", err)
+	}
+	if err := m.SetGoogleClient([]byte("synthetic")); !errors.Is(err, clientErr) {
+		t.Fatalf("client validation=%v", err)
+	}
+	if _, err := os.Stat(m.dir("google_client.json")); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("rejected client was written: %v", err)
+	}
+}

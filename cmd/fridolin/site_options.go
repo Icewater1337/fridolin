@@ -11,6 +11,7 @@ import (
 // GoogleClient and Builder callbacks remain live: the manager calls them at
 // the operation boundaries where the original bridge hooks were read.
 type SiteOptions struct {
+	Host         SiteHost
 	DataDir      string
 	GoogleClient func() string
 	Builder      SiteBuilderHooks
@@ -48,4 +49,16 @@ type SiteBuilderHooks struct {
 	// Device answers a phone's request the site passed on, which the
 	// bridge checks itself (plaud_app.go, site_ingest.go).
 	Device func(op, assertion string, body []byte) (map[string]any, error)
+}
+
+// SiteHost supplies host lookups at their existing operation boundaries.
+type SiteHost struct {
+	Home             func() string
+	Node             func() (string, error)
+	Tool             func(string) (string, error)
+	GitPath          func() string
+	Env              func(string, ...string) []string
+	Environ          func() []string
+	Profile          func(sandbox.SitePolicy) (string, error)
+	GoogleClientType func([]byte) (string, error)
 }

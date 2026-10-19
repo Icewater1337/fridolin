@@ -258,8 +258,8 @@ func (m *SiteManager) sandboxed(ctx context.Context, brainID, dir string, timeou
 	// whatever the command started too.
 	platform.IsolateProcessGroup(cmd)
 	cmd.Dir = dir
-	node, _ := findNode()
-	cmd.Env = append(siteEnv(node, "GIT_TERMINAL_PROMPT=0", "GIT_AUTHOR_NAME=Fridolin ("+brainID+")", "GIT_COMMITTER_NAME=Fridolin ("+brainID+")",
+	node, _ := m.host.Node()
+	cmd.Env = append(m.host.Env(node, "GIT_TERMINAL_PROMPT=0", "GIT_AUTHOR_NAME=Fridolin ("+brainID+")", "GIT_COMMITTER_NAME=Fridolin ("+brainID+")",
 		"GIT_AUTHOR_EMAIL="+siteGitEmail, "GIT_COMMITTER_EMAIL="+siteGitEmail), sbEnv...)
 	out, err := cmd.CombinedOutput()
 	if err != nil {
@@ -303,7 +303,7 @@ func (m *SiteManager) createWorkspace(ctx context.Context, brainID string) error
 		return err
 	}
 	ws := filepath.Join(base, "workspace")
-	git := gitPath()
+	git := m.host.GitPath()
 	if _, err := m.sandboxed(ctx, brainID, base, 2*time.Minute, git, "clone", "--quiet", "--no-checkout", bundle, ws); err != nil {
 		return err
 	}
@@ -320,7 +320,7 @@ func (m *SiteManager) createWorkspace(ctx context.Context, brainID string) error
 // npmInstallAsBrain installs a workspace's dependencies inside the brain's
 // sandbox: the package.json (and its install scripts) is the brain's to edit.
 func (m *SiteManager) npmInstallAsBrain(ctx context.Context, brainID, dir string) error {
-	node, err := findNode()
+	node, err := m.host.Node()
 	if err != nil {
 		return err
 	}
@@ -403,7 +403,7 @@ type BrokenModule struct {
 // the brain's sandbox — and lists what an approver will be asked to review.
 func (m *SiteManager) BuilderCheck(ctx context.Context, brainID string) (CheckResult, error) {
 	res := CheckResult{Mounted: []string{}, Broken: []BrokenModule{}, Review: []ModuleChange{}}
-	node, err := findNode()
+	node, err := m.host.Node()
 	if err != nil {
 		return res, err
 	}
@@ -484,12 +484,12 @@ func (m *SiteManager) BuilderSync(ctx context.Context, brainID string) (string, 
 	}
 	ws := m.workspace(brainID)
 	branch := m.Settings().Repo.Branch
-	if _, err := m.sandboxed(ctx, brainID, ws, time.Minute, gitPath(), "fetch", "--quiet", bundle, "+refs/heads/"+siteBaseRef+":refs/remotes/site/"+branch); err != nil {
+	if _, err := m.sandboxed(ctx, brainID, ws, time.Minute, m.host.GitPath(), "fetch", "--quiet", bundle, "+refs/heads/"+siteBaseRef+":refs/remotes/site/"+branch); err != nil {
 		return "", err
 	}
-	out, err := m.sandboxed(ctx, brainID, ws, time.Minute, gitPath(), "rebase", "refs/remotes/site/"+branch)
+	out, err := m.sandboxed(ctx, brainID, ws, time.Minute, m.host.GitPath(), "rebase", "refs/remotes/site/"+branch)
 	if err != nil {
-		_, _ = m.sandboxed(ctx, brainID, ws, time.Minute, gitPath(), "rebase", "--abort")
+		_, _ = m.sandboxed(ctx, brainID, ws, time.Minute, m.host.GitPath(), "rebase", "--abort")
 		return "", fmt.Errorf("your commits do not apply cleanly on the newest %s; the rebase was undone. Merge refs/remotes/site/%s yourself and resolve the conflicts: %w", branch, branch, err)
 	}
 	return strings.TrimSpace(out), nil
@@ -508,7 +508,7 @@ func (m *SiteManager) BuilderPropose(ctx context.Context, brainID, title, summar
 	base := m.builderBase(brainID)
 	bundle := filepath.Join(base, "proposal.bundle")
 	_ = os.Remove(bundle)
-	if _, err := m.sandboxed(ctx, brainID, m.workspace(brainID), time.Minute, gitPath(), "bundle", "create", bundle, "HEAD"); err != nil {
+	if _, err := m.sandboxed(ctx, brainID, m.workspace(brainID), time.Minute, m.host.GitPath(), "bundle", "create", bundle, "HEAD"); err != nil {
 		return SiteProposal{}, nil, err
 	}
 	ref := "refs/builder/" + brainID
@@ -655,7 +655,7 @@ func (m *SiteManager) BuilderPreview(ctx context.Context, brainID string) (map[s
 	}
 	shell := filepath.Join(base, "shell")
 	build := func(ctx context.Context) (*exec.Cmd, error) {
-		node, err := findNode()
+		node, err := m.host.Node()
 		if err != nil {
 			return nil, err
 		}
@@ -665,7 +665,7 @@ func (m *SiteManager) BuilderPreview(ctx context.Context, brainID string) (map[s
 		}
 		cmd := exec.CommandContext(ctx, bin, args...)
 		cmd.Dir = shell
-		cmd.Env = append(siteEnv(node, "FRIDOLIN_SITE_RUNTIME="+rtFile, "NODE_ENV=production"), sbEnv...)
+		cmd.Env = append(m.host.Env(node, "FRIDOLIN_SITE_RUNTIME="+rtFile, "NODE_ENV=production"), sbEnv...)
 		return cmd, nil
 	}
 	p.proc.ensure(m.baseContext(), build)
