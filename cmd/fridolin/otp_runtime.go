@@ -2,7 +2,6 @@ package main
 
 import (
 	"log"
-	"path/filepath"
 	"slices"
 	"strings"
 	"time"
@@ -71,7 +70,7 @@ func (b *Bridge) handOffCode(br *Brain, m Inbound, c otpCatch) {
 		Request: c.Request.ID, RequestedUnixMS: c.Request.At.UnixMilli(),
 		ExpiresUnixMS: now.Add(otp.HandoffTTL).UnixMilli(),
 	}
-	if err := b.otp.Write(filepath.Join(b.cfgs.Get().DataDir, "otp"), h); err != nil {
+	if err := b.otp.Write(b.cfgs.Boot().OTPDir(), h); err != nil {
 		log.Printf("brain %s: handing over a one-time code: %v", br.ID(), err)
 	}
 }

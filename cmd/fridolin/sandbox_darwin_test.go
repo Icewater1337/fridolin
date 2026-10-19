@@ -1599,13 +1599,14 @@ func sandboxFixture(t *testing.T, home, otherBrain, denyDir string, extra ...map
 	if err != nil {
 		t.Fatal(err)
 	}
-	cfg, err := loadConfig(writeConfig(t, string(cfgJSON)))
+	cfgs, err := openConfigStore(writeConfig(t, string(cfgJSON)))
 	if err != nil {
 		t.Fatal(err)
 	}
 	// The bridge opens its database before the brains, and the checks need
 	// the real file.
-	if err := cfg.EnsureDirs(); err != nil {
+	cfg := cfgs.Get()
+	if err := cfgs.Boot().EnsureDirs(); err != nil {
 		t.Fatal(err)
 	}
 	store, err := store.Open(cfg.DBPath, cfg.LogLevel)

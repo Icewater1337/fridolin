@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"github.com/Icewater1337/fridolin/internal/registry"
 	"net/http/httptest"
 	"os"
 	"os/exec"
@@ -297,7 +298,7 @@ func TestOneBrokenBrainDoesNotBlockTheOthers(t *testing.T) {
 	tb.addFolderBrain(t, manifest.Manifest{ID: "b", Name: "B"})
 	tb.addFolderBrain(t, manifest.Manifest{ID: "c", Name: "C", Routing: manifest.Routing{Default: true}})
 	breakApproved(t, tb, "b", func(m *manifest.Manifest) { m.Effort = "huge" })
-	if _, issues := ResolveBrains(tb.cfgs.Get()); !slices.ContainsFunc(issues, func(is BrainIssue) bool { return is.ID == "b" && is.Kind == "invalid" }) {
+	if _, issues := ResolveBrains(tb.cfgs.Get()); !slices.ContainsFunc(issues, func(is registry.Issue) bool { return is.ID == "b" && is.Kind == "invalid" }) {
 		t.Fatalf("b is not invalid: %+v", issues)
 	}
 

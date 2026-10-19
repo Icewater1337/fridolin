@@ -117,3 +117,18 @@ func loadExistingConfig(path string) (*config.Config, error) {
 	return config.LoadExisting(path, configOptions())
 }
 func ensureConfigFile(path string) error { return config.EnsureFile(path, configPaths(), runtime.GOOS) }
+
+// runtimeConfig is the temporary command projection for consumers that still
+// take Config before their owned runtime settings move out of the command.
+// Get/Snapshot retain saved next-start values for the API. Only this copied
+// value pins startup settings; slices/maps retain the snapshot's read-only rule.
+func runtimeConfig(cs *config.Store) *config.Config {
+	live := cs.Get()
+	boot := cs.Boot()
+	c := *live
+	c.HTTPListen, c.DataDir, c.DBPath, c.MediaDir, c.LogLevel = boot.HTTPListen, boot.DataDir, boot.DBPath, boot.MediaDir, boot.LogLevel
+	c.Dashboard.Disabled = boot.DashboardDisabled
+	// Turning protection on applies immediately; turning it off waits for restart.
+	c.Dashboard.RequireToken = new(boot.DashboardRequireToken || live.DashboardRequiresToken())
+	return &c
+}

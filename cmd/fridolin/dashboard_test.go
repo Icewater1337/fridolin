@@ -1822,23 +1822,6 @@ func TestAllowGroupMovesItBetweenBrains(t *testing.T) {
 	}
 }
 
-// The name suggested for a new brain's folder starts with a capital, also
-// when its first letter takes more than one byte.
-func TestPrettyName(t *testing.T) {
-	for in, want := range map[string]string{
-		"":             "Brain",
-		"personal":     "Personal",
-		"work_notes":   "Work notes",
-		"éclair-notes": "Éclair notes",
-		"ölkanne":      "Ölkanne",
-		"日記":           "日記",
-	} {
-		if got := prettyName(in); got != want {
-			t.Errorf("prettyName(%q) = %q, want %q", in, got, want)
-		}
-	}
-}
-
 // qrMessenger is the dev messenger with a pairing code to show.
 type qrMessenger struct {
 	*devchat.Messenger
