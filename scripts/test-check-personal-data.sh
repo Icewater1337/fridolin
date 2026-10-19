@@ -229,6 +229,23 @@ PERSONAL_DENYLIST="" expect "the denylist's old place is read" 1 "$staged" --sta
 expect_output "the denylist's old place is named, with the new one" "move it to ~/.config/fridolin/personal-denylist"
 rm -r "$HOME/.config/whatsapp-claude-bridge"
 
+# Only the exact public Dependabot trailer in a commit message is exempt.
+bot_repo="$work/bot-trailer"
+new_repo "$bot_repo"
+bot_base="$(commit "$bot_repo" README "clean")"
+bot_trailer="Signed-off-by: dependabot[bot] <support""@github.com>"
+git -C "$bot_repo" commit -q --allow-empty -m "Update dependencies" -m "$bot_trailer"
+expect "Dependabot public sign-off passes" 0 "$bot_repo" --range "$bot_base..HEAD"
+printf '%s\n' "$bot_trailer" >"$bot_repo/note.txt"
+git -C "$bot_repo" add note.txt
+expect "same address in file content is still checked" 1 "$bot_repo" --staged
+git -C "$bot_repo" reset -q
+changed_trailer="Signed-off-by: someone-else <support""@github.com>"
+git -C "$bot_repo" commit -q --allow-empty -m "Another update" -m "$changed_trailer"
+expect "another sign-off is still checked" 1 "$bot_repo" --range "HEAD~1..HEAD"
+printf '%s\n' 'support' >"$PERSONAL_DENYLIST"
+expect "Dependabot sign-off still passes through denylist" 1 "$bot_repo" --range "$bot_base..HEAD~1"
+
 if [ "$failed" -gt 0 ]; then
   printf '\n%d case(s) failed\n' "$failed" >&2
   exit 1
