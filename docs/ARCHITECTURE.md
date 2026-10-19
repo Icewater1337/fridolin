@@ -1065,14 +1065,20 @@ contains the token, the OAuth client secret or a refresh token.
 
 ### Handlers
 
-There is one unexported handler type per resource: `statusAPI`,
-`whatsappAPI`, `activityAPI`, `chatsAPI`, `configAPI`, `brainsAPI`, `fsAPI`,
-`backupAPI`, `googleAPI`, `plaudAPI`, `siteAPI`, `devAPI`, `scriptAPI` and
-`brainAPI`. Each holds only the dependencies it uses, as small interfaces
-declared next to it and listing exactly the methods it calls. A handler
-decodes the request, calls one service method and encodes the result.
-Workflows live in the services: brain changes in `registry`, the backup job
-lifecycle in `backup`, calendar status in `google`.
+Resource handlers live in `internal/httpapi`: `StatusAPI`, `ConnectionAPI`,
+`ChatsAPI`, `ConfigAPI`, `BrainsAPI`, `FilesystemAPI`, `BackupAPI`, `GoogleAPI`,
+`PlaudAPI`, `SiteAPI`, `DevAPI`, `ScriptAPI`, `BrainAPI`, `BuilderAPI` and
+`BuildChatAPI`, `ActivityAPI`, `LogsAPI` and `ReadyAPI`. Each receives only the interfaces or callbacks it uses.
+Command adapters construct them and retain host-specific operations and runtime
+composition. Callbacks for replaceable services resolve the current instance at
+the original operation boundary.
+
+Handlers preserve request validation, authorization, response shapes and status
+codes. Workflows remain in services: brain changes in `registry`, backup jobs in
+`backup`, calendar status in `google`, and inbound dispatch in `pipeline`.
+Site service extraction is still in progress: its public value types live in
+`internal/site`, while process supervision, repositories and builder state
+remain in command-owned `SiteManager` until their move is complete.
 
 ### Responses and errors
 
