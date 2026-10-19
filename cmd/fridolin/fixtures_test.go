@@ -518,3 +518,45 @@ func TestBridgeV1Fixture(t *testing.T) {
 		}
 	}
 }
+
+// Reopening through the shared pool must not alter the paired device or the
+// independent whatsmeow schema version. Legacy application rows remain usable.
+func TestSharedStoreReopensV1Fixture(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "bridge.db")
+	loadSQL(t, dbPath, fixture(t, "bridge-v1.sql"))
+	db := testStoreSQL(t, dbPath)
+	var version, compat int
+	if err := db.QueryRow(`SELECT version, compat FROM whatsmeow_version`).Scan(&version, &compat); err != nil {
+		t.Fatal(err)
+	}
+	for range 2 {
+		s := openTestStore(t, dbPath)
+		device, err := s.Container.GetFirstDevice(t.Context())
+		if err != nil {
+			t.Fatal(err)
+		}
+		if device.ID == nil || device.ID.String() != fixtureDeviceJID {
+			t.Fatal("paired device changed")
+		}
+		if err := s.Close(); err != nil {
+			t.Fatal(err)
+		}
+		var gotVersion, gotCompat int
+		if err := db.QueryRow(`SELECT version, compat FROM whatsmeow_version`).Scan(&gotVersion, &gotCompat); err != nil {
+			t.Fatal(err)
+		}
+		if gotVersion != version || gotCompat != compat {
+			t.Fatalf("device schema changed: %d/%d -> %d/%d", version, compat, gotVersion, gotCompat)
+		}
+		var userVersion int
+		if err := db.QueryRow(`PRAGMA user_version`).Scan(&userVersion); err != nil || userVersion != 0 {
+			t.Fatalf("user_version=%d: %v", userVersion, err)
+		}
+		for _, table := range []string{"sessions", "process_state"} {
+			var count int
+			if err := db.QueryRow(`SELECT COUNT(*) FROM ` + table).Scan(&count); err != nil || count != 1 {
+				t.Fatalf("legacy %s: rows=%d err=%v", table, count, err)
+			}
+		}
+	}
+}

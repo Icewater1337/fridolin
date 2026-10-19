@@ -10,6 +10,7 @@ import (
 	"github.com/Icewater1337/fridolin/internal/logx"
 	"log"
 	"os"
+	"sync"
 	"time"
 
 	_ "github.com/mattn/go-sqlite3"
@@ -20,6 +21,8 @@ import (
 type Store struct {
 	db        *sql.DB
 	Container *sqlstore.Container
+	closeOnce sync.Once
+	closeErr  error
 }
 
 // Open opens (or creates) the SQLite database and initialises both the
@@ -35,15 +38,14 @@ func Open(dbPath, logLevel string) (*Store, error) {
 
 	logger := logx.NewWaLogger("Store", logLevel)
 
-	container, err := sqlstore.New(context.Background(), "sqlite3", dbURL, logger)
-	if err != nil {
-		return nil, fmt.Errorf("creating sqlstore container: %w", err)
-	}
-
-	// Open a plain sql.DB on the same file for the bridge's own tables.
 	db, err := sql.Open("sqlite3", dbURL)
 	if err != nil {
-		return nil, errors.Join(fmt.Errorf("opening sqlite db: %w", err), container.Close())
+		return nil, fmt.Errorf("opening sqlite db: %w", err)
+	}
+	// The device container and application tables share one pool and owner.
+	container := sqlstore.NewWithDB(db, "sqlite3", logger)
+	if err := container.Upgrade(context.Background()); err != nil {
+		return nil, errors.Join(fmt.Errorf("creating sqlstore container: failed to upgrade database: %w", err), container.Close())
 	}
 
 	s := &Store{db: db, Container: container}
@@ -366,10 +368,10 @@ func jsonStrings(s string) []string {
 	return out
 }
 
-// Close closes both connections to the database: the plain one and the
-// whatsmeow container's, which nothing else closes.
+// Close closes the shared pool once, after all database consumers have stopped.
 func (s *Store) Close() error {
-	return errors.Join(s.db.Close(), s.Container.Close())
+	s.closeOnce.Do(func() { s.closeErr = s.Container.Close() })
+	return s.closeErr
 }
 
 // IgnoredChat is a chat that messaged the bridge without being allowed.
