@@ -65,7 +65,7 @@ type Brain struct {
 	root *os.Root
 
 	settings atomic.Pointer[brainSettings]
-	sandbox  *SandboxProfiler
+	runner   brainRunner
 	hooks    *BrainHooks
 	// slots are the run slots all brains share (max_concurrent_runs); nil
 	// for no limit.
@@ -1268,118 +1268,13 @@ func jsonObject(data []byte) (map[string]json.RawMessage, error) {
 
 // invoke runs the selected CLI once for m.
 func (br *Brain) invoke(run *brainRun, ctx context.Context, s *brainSettings, m Inbound) claudecli.Result {
-	prompt := br.buildPrompt(s, m)
-
-	mcpConfig, settings := "", ""
-	if s.provider != "codex" && !s.inheritUser {
-		mcpConfig = mcpConfigOf(br.id, br.workDir)
-		settings = excludeInstructionsAbove(br.workDir)
-	}
-	args := claudeArgs(s, mcpConfig, settings)
-	if s.provider == "codex" {
-		if err := claudecli.ValidateCodexTools(s.disallowedTools); err != nil {
-			return claudecli.Result{Err: err}
-		}
-		args = codexArgs(s, br.workDir, br.sandbox != nil && br.sandbox.Enabled())
-		prompt = strings.ReplaceAll(prompt, prompttext.AskUserQuestionNote, "If you need clarification, ask in your final reply and end the turn. The answer arrives as a new message.")
-	}
-	var providerEnv []string
-	if s.provider == "codex" && br.hooks != nil && br.hooks.CodexSetup != nil {
-		extra, env, instructions, err := br.hooks.CodexSetup(br.id)
-		if err != nil {
-			return claudecli.Result{Err: err}
-		}
-		args = withArgsBeforePrint(args, extra)
-		providerEnv = env
-		prompt = instructions + prompt
-	}
-	if s.provider != "codex" && br.hooks != nil && br.hooks.ExtraArgs != nil {
-		extra := br.hooks.ExtraArgs(br.id)
-		args = withArgsBeforePrint(args, extra)
-	}
-
-	// Wrap the spawn in sandbox-exec so prompt injection in an incoming message
-	// cannot reach another brain's tree or cross-session Claude state. The brain
-	// still runs with --dangerously-skip-permissions for tool freedom; the
-	// sandbox enforces the read scope at the OS layer regardless. That is also
-	// why a sandbox that cannot be set up refuses the run instead of spawning
-	// without it: the fallback would quietly drop the only barrier left.
-	binary := s.claudePath
-	if s.provider == "codex" {
-		binary = s.codexPath
-	}
-	agentBinary := binary
-	finalArgs := args
-	extraEnv := append([]string{"FRIDOLIN_BRAIN_ID=" + br.id}, dataEnv(s)...)
-	extraEnv = append(extraEnv, providerEnv...)
-	extraEnv = append(extraEnv, calendarEnv(br.id, s.manifest, s.credsDir)...)
-	extraEnv = append(extraEnv, plaudOptOut...)
-	if s.toolsDir != "" {
-		// Prompts and skills run the helpers as $FRIDOLIN_TOOLS_DIR/<tool>,
-		// wherever the bridge is installed.
-		extraEnv = append(extraEnv, "FRIDOLIN_TOOLS_DIR="+s.toolsDir)
-	}
-	if path := s.plaudPATH; path != "" || len(s.ownPATH) > 0 {
-		if path == "" {
-			path = os.Getenv("PATH")
-		}
-		dirs := append(slices.Clone(s.ownPATH), filepath.SplitList(path)...)
-		extraEnv = append(extraEnv, "PATH="+strings.Join(dirs, string(filepath.ListSeparator))) // replaces the bridge's
-	}
-	if br.hooks != nil && br.hooks.RunEnv != nil {
-		env, done := br.hooks.RunEnv(br.id)
-		// After Wait: the tools the run started have exited by then, or
-		// are left behind and lose the brain API with the run.
-		defer done()
-		extraEnv = append(extraEnv, env...)
-	}
-	if s.provider == "codex" || (br.sandbox != nil && br.sandbox.Enabled()) {
-		// The brain's own Claude Code config dir, TMPDIR and caches, the
-		// only places outside its folder and inbox the profile lets it
-		// write, made before the profile pins them. With a config dir of
-		// its own the CLI no longer finds your login in the keychain,
-		// which the profile closes anyway: brains log in with
-		// CLAUDE_CODE_OAUTH_TOKEN or ANTHROPIC_API_KEY from the bridge's
-		// environment.
-		stateEnv, err := prepareBrainState(s.dataDir, s.mediaDir, br.id, s.inheritUser)
-		if err == nil && br.sandbox != nil && br.sandbox.Enabled() {
-			binary, finalArgs, err = br.sandbox.Command(br.id, agentBinary, args)
-		}
-		if err != nil {
-			log.Printf("brain %s: sandbox unavailable, refusing to run: %v", br.id, err)
-			return claudecli.Result{Err: errSandboxUnavailable}
-		}
-		extraEnv = append(extraEnv, stateEnv...)
-		if s.provider == "codex" {
-			extraEnv = append(extraEnv, "CODEX_HOME="+brainStateOf(s.dataDir, br.id).codex)
-		}
-		// The profile denies writes to the CLI's own install, so its
-		// auto-updater could download a new version on every run and never
-		// switch to it. This replaces the bridge's own value.
-		extraEnv = append(extraEnv, "DISABLE_AUTOUPDATER=1")
-	}
-	// Only the variables on childEnvAllowlist: anyone who may message the
-	// brain can ask it to print its environment.
-	scope := claudeChild
-	if s.provider == "codex" {
-		scope = codexChild
-	}
-	env := childEnv(scope, s.envPassthrough, extraEnv...)
-
-	// Only once the sandbox is settled: a refused run starts no process.
-	br.ensureViewer(s)
-
-	return claudecli.Run(ctx, claudecli.Invocation{
-		Run:      claudecli.Spawn{WaitDelay: runWaitDelay, Binary: binary, Args: finalArgs, Dir: br.workDir, Env: env, Prompt: prompt},
-		Provider: s.provider, ExitGrace: postResultGrace, NoticeAfter: workingNoticeAfter,
-		DeadlineError: claudecli.TimedOut(s.runTimeout),
+	return br.runner.Run(ctx, brainRunSpec{
+		ID: br.id, Dir: br.workDir, Settings: s, Prompt: br.buildPrompt(s, m),
+		BeforeStart: func() { br.ensureViewer(s) },
 	}, claudecli.Callbacks{
 		Start: run.startProcess,
 		Started: func(pid int) func() {
 			br.setRunPID(run, pid)
-			if rec := recordRun(s.dataDir, br.id, pid); rec != "" {
-				return func() { _ = os.Remove(rec) }
-			}
 			return nil
 		},
 		Reaped: func() { br.setRunPID(run, 0) },
@@ -1940,7 +1835,7 @@ func (bm *BrainManager) reload(specs []manifest.Spec, issues []registry.Issue, c
 				id:      m.ID,
 				workDir: sp.Dir,
 				root:    root,
-				sandbox: bm.profiler,
+				runner:  &commandRunner{sandbox: bm.profiler, hooks: bm.hooks},
 				hooks:   bm.hooks,
 				slots:   bm.slots,
 			}
