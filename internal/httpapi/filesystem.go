@@ -1,11 +1,10 @@
-package main
+package httpapi
 
 import (
 	"context"
 	"errors"
 	"fmt"
 	"github.com/Icewater1337/fridolin/internal/fsx"
-	"github.com/Icewater1337/fridolin/internal/httpapi"
 	"github.com/Icewater1337/fridolin/internal/manifest"
 	"io/fs"
 	"net/http"
@@ -33,17 +32,17 @@ func (a *FilesystemAPI) Caps(w http.ResponseWriter, r *http.Request) {
 	if p := a.FolderPicker(home); p != nil {
 		picker = filepath.Base(p[0])
 	}
-	httpapi.WriteJSON(w, http.StatusOK, map[string]string{"picker": picker, "home": home})
+	WriteJSON(w, http.StatusOK, map[string]string{"picker": picker, "home": home})
 }
 
 func (a *FilesystemAPI) Pick(w http.ResponseWriter, r *http.Request) {
 	argv := a.FolderPicker(a.Home())
 	if argv == nil {
-		httpapi.WriteErr(w, http.StatusNotImplemented, "no native folder picker on this system — browse or type the path instead")
+		WriteErr(w, http.StatusNotImplemented, "no native folder picker on this system — browse or type the path instead")
 		return
 	}
 	if !a.PickMu.TryLock() {
-		httpapi.WriteErr(w, http.StatusConflict, "a folder picker is already open")
+		WriteErr(w, http.StatusConflict, "a folder picker is already open")
 		return
 	}
 	defer a.PickMu.Unlock()
@@ -52,11 +51,11 @@ func (a *FilesystemAPI) Pick(w http.ResponseWriter, r *http.Request) {
 	p, err := a.RunPicker(ctx, argv)
 	switch {
 	case errors.Is(err, a.PickerCancelled):
-		httpapi.WriteJSON(w, http.StatusOK, map[string]any{"cancelled": true})
+		WriteJSON(w, http.StatusOK, map[string]any{"cancelled": true})
 	case err != nil:
-		httpapi.WriteErr(w, http.StatusInternalServerError, fmt.Sprintf("the folder dialog failed (%v) — browse or type the path instead", err))
+		WriteErr(w, http.StatusInternalServerError, fmt.Sprintf("the folder dialog failed (%v) — browse or type the path instead", err))
 	default:
-		httpapi.WriteJSON(w, http.StatusOK, map[string]any{"path": p})
+		WriteJSON(w, http.StatusOK, map[string]any{"path": p})
 	}
 }
 
@@ -70,30 +69,30 @@ func (a *FilesystemAPI) List(w http.ResponseWriter, r *http.Request) {
 	}
 	p = fsx.Canonical(fsx.ExpandHome(p, home))
 	if !fsx.Within(p, home) {
-		httpapi.WriteErr(w, http.StatusForbidden, "only folders inside your home folder can be browsed")
+		WriteErr(w, http.StatusForbidden, "only folders inside your home folder can be browsed")
 		return
 	}
 	showHidden := r.URL.Query().Get("hidden") == "1"
 	root, err := os.OpenRoot(home)
 	if err != nil {
-		httpapi.WriteErr(w, http.StatusBadRequest, err.Error())
+		WriteErr(w, http.StatusBadRequest, err.Error())
 		return
 	}
 	defer root.Close()
 	rel, err := filepath.Rel(home, p)
 	if err != nil {
-		httpapi.WriteErr(w, http.StatusBadRequest, err.Error())
+		WriteErr(w, http.StatusBadRequest, err.Error())
 		return
 	}
 	dir, err := root.Open(rel)
 	if err != nil {
-		httpapi.WriteErr(w, http.StatusBadRequest, err.Error())
+		WriteErr(w, http.StatusBadRequest, err.Error())
 		return
 	}
 	entries, err := dir.ReadDir(-1)
 	dir.Close()
 	if err != nil {
-		httpapi.WriteErr(w, http.StatusBadRequest, err.Error())
+		WriteErr(w, http.StatusBadRequest, err.Error())
 		return
 	}
 	data := fsx.Canonical(a.DataDir())
@@ -133,7 +132,7 @@ func (a *FilesystemAPI) List(w http.ResponseWriter, r *http.Request) {
 	if p == home {
 		parent = ""
 	}
-	httpapi.WriteJSON(w, http.StatusOK, map[string]any{"path": p, "parent": parent, "home": home, "entries": out})
+	WriteJSON(w, http.StatusOK, map[string]any{"path": p, "parent": parent, "home": home, "entries": out})
 }
 
 // fileExistsInRoot probes metadata only inside root. Resolve first so an
