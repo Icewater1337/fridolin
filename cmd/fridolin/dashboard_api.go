@@ -9,7 +9,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/Icewater1337/fridolin/internal/access"
 	"io/fs"
 	"log"
 	"net/http"
@@ -26,6 +25,9 @@ import (
 	"time"
 	"unicode"
 	"unicode/utf8"
+
+	"github.com/Icewater1337/fridolin/internal/access"
+	"github.com/Icewater1337/fridolin/internal/registry"
 
 	"github.com/Icewater1337/fridolin/internal/route"
 
@@ -1180,14 +1182,15 @@ func (b *Bridge) apiAddBrain(w http.ResponseWriter, r *http.Request) {
 	// Everything but brain.json, which goes with the update that registers
 	// the brain: written only once the checks there pass, and taken away
 	// again if config.json then cannot be written.
-	scaffold, err := scaffoldFolderTx(abs, &m)
-	defer scaffold.close()
+	scaffold, err := registry.ScaffoldFolder(abs, &m, brainTemplates)
 	if err != nil {
-		scaffold.rollback()
+		defer scaffold.Close()
+		scaffold.Rollback()
 		httpapi.WriteErr(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	created := scaffold.created
+	defer scaffold.Close()
+	created := scaffold.Created()
 	writesManifest := false
 	if _, err := b.cfgs.UpdateTx("", func(c *Config, tx *Tx) error {
 		// Again, against the config this update changes. addMu keeps adds
@@ -1213,7 +1216,7 @@ func (b *Bridge) apiAddBrain(w http.ResponseWriter, r *http.Request) {
 		c.BrainDirs = append(c.BrainDirs, BrainRef{Path: fsx.Tilde(abs, homeDir()), Approved: &approved})
 		return nil
 	}); err != nil {
-		scaffold.rollback()
+		scaffold.Rollback()
 		httpapi.WriteErr(w, http.StatusUnprocessableEntity, err.Error())
 		return
 	}

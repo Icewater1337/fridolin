@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/Icewater1337/fridolin/internal/registry"
 	"io"
 	"io/fs"
 	"net"
@@ -778,7 +779,7 @@ func brainFolder(t testing.TB, path string, m manifest.Manifest) BrainRef {
 		m.Name = m.ID
 	}
 	m = m.Normalized()
-	if _, err := ScaffoldBrain(fsx.ExpandHome(path, home), &m); err != nil {
+	if _, err := registry.Scaffold(fsx.ExpandHome(path, home), &m, brainTemplates); err != nil {
 		t.Fatal(err)
 	}
 	return BrainRef{Path: path, Approved: &m}

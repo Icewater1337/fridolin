@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"github.com/Icewater1337/fridolin/internal/registry"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -170,7 +171,7 @@ func TestScaffoldBrainNeverOverwrites(t *testing.T) {
 	_ = os.MkdirAll(dir, 0o700)
 	_ = os.WriteFile(filepath.Join(dir, "brain-prompt.md"), []byte("mine"), 0o600)
 	m := testManifest("fam")
-	created, err := ScaffoldBrain(dir, &m)
+	created, err := registry.Scaffold(dir, &m, brainTemplates)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -184,7 +185,7 @@ func TestScaffoldBrainNeverOverwrites(t *testing.T) {
 		t.Error("brain-prompt.md reported as created although it existed")
 	}
 	// A second scaffold creates nothing and keeps the manifest.
-	again, err := ScaffoldBrain(dir, &m)
+	again, err := registry.Scaffold(dir, &m, brainTemplates)
 	if err != nil || len(again) != 0 {
 		t.Errorf("second scaffold created %v (err %v)", again, err)
 	}
@@ -197,7 +198,7 @@ func TestScaffoldBrainNeverOverwrites(t *testing.T) {
 func TestScaffoldedPromptSaysWhatItIs(t *testing.T) {
 	dir := filepath.Join(t.TempDir(), "brain")
 	m := testManifest("fam")
-	if _, err := ScaffoldBrain(dir, &m); err != nil {
+	if _, err := registry.Scaffold(dir, &m, brainTemplates); err != nil {
 		t.Fatal(err)
 	}
 	data, err := os.ReadFile(filepath.Join(dir, "brain-prompt.md"))
@@ -239,7 +240,7 @@ func TestResolveBrainsUsesApprovedManifestAndReportsDrift(t *testing.T) {
 	t.Setenv("HOME", home)
 	dir := filepath.Join(home, "fam")
 	m := testManifest("fam")
-	if _, err := ScaffoldBrain(dir, &m); err != nil {
+	if _, err := registry.Scaffold(dir, &m, brainTemplates); err != nil {
 		t.Fatal(err)
 	}
 	approved := m
@@ -272,7 +273,7 @@ func TestResolveBrainsSkipsMissingAndClashing(t *testing.T) {
 	a.Routing.HandlesDMs, b.Routing.HandlesDMs = true, true
 	for _, m := range []manifest.Manifest{a, b} {
 		m := m
-		if _, err := ScaffoldBrain(filepath.Join(home, m.ID), &m); err != nil {
+		if _, err := registry.Scaffold(filepath.Join(home, m.ID), &m, brainTemplates); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -428,14 +429,14 @@ func TestEmbeddedTemplatesAreTheExamples(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := examplePromptTemplate(); got != string(prompt) || !strings.Contains(got, "{{BRAIN_NAME}}") {
+	if got := brainTemplates.Prompt; got != string(prompt) || !strings.Contains(got, "{{BRAIN_NAME}}") {
 		t.Errorf("the prompt template is %q, want examples/brain-prompt.example.md with {{BRAIN_NAME}}", textx.Truncate(got, 80))
 	}
 	files, err := filepath.Glob(filepath.Join(repoDir, "examples", "skills", "*.md"))
 	if err != nil || len(files) == 0 {
 		t.Fatalf("no skills in examples/skills: %v", err)
 	}
-	skills := exampleSkills()
+	skills := brainTemplates.Skills
 	if len(skills) != len(files) {
 		t.Fatalf("%d embedded skills, want the %d in examples/skills", len(skills), len(files))
 	}
@@ -444,8 +445,8 @@ func TestEmbeddedTemplatesAreTheExamples(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if skills[i].name != filepath.Base(f) || skills[i].content != string(want) {
-			t.Errorf("skill %d is %s, want %s as in the checkout", i, skills[i].name, filepath.Base(f))
+		if skills[i].Name != filepath.Base(f) || skills[i].Content != string(want) {
+			t.Errorf("skill %d is %s, want %s as in the checkout", i, skills[i].Name, filepath.Base(f))
 		}
 	}
 }
@@ -484,9 +485,9 @@ func TestBrainTemplatesNameNoPaths(t *testing.T) {
 	m := testManifest("a")
 	m.Name = "Family"
 	exe, _ := os.Executable()
-	files := map[string]string{"brain-prompt.md": renderTemplate(examplePromptTemplate(), &m)}
-	for _, sk := range exampleSkills() {
-		files["skills/"+sk.name] = renderTemplate(sk.content, &m)
+	files := map[string]string{"brain-prompt.md": strings.ReplaceAll(brainTemplates.Prompt, "{{BRAIN_NAME}}", m.Name)}
+	for _, sk := range brainTemplates.Skills {
+		files["skills/"+sk.Name] = strings.ReplaceAll(sk.Content, "{{BRAIN_NAME}}", m.Name)
 	}
 	if len(files) < 4 {
 		t.Fatalf("only %d templates", len(files))
@@ -514,7 +515,7 @@ func TestBrainTemplatesNameNoPaths(t *testing.T) {
 
 	// ScaffoldBrain writes them so.
 	dir := t.TempDir()
-	if _, err := ScaffoldBrain(dir, &m); err != nil {
+	if _, err := registry.Scaffold(dir, &m, brainTemplates); err != nil {
 		t.Fatal(err)
 	}
 	for name, want := range files {

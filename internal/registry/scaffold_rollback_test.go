@@ -1,4 +1,4 @@
-package main
+package registry
 
 import (
 	"os"
@@ -9,17 +9,18 @@ import (
 )
 
 func TestScaffoldRollbackKeepsSelectedSymlink(t *testing.T) {
+	t.Parallel()
 	target := t.TempDir()
 	selected := filepath.Join(t.TempDir(), "selected")
 	if err := os.Symlink(target, selected); err != nil {
 		t.Fatal(err)
 	}
-	s, err := scaffoldFolderTx(selected, &manifest.Manifest{ID: "a", Name: "A"})
-	defer s.close()
+	s, err := ScaffoldFolder(selected, &manifest.Manifest{ID: "a", Name: "A"}, scaffoldTestTemplates())
+	t.Cleanup(s.Close)
 	if err != nil {
 		t.Fatal(err)
 	}
-	s.rollback()
+	s.Rollback()
 	if link, err := os.Readlink(selected); err != nil || link != target {
 		t.Fatalf("rollback changed the selected symlink: %q, %v", link, err)
 	}
@@ -29,12 +30,13 @@ func TestScaffoldRollbackKeepsSelectedSymlink(t *testing.T) {
 }
 
 func TestScaffoldRejectsEmptyDirectory(t *testing.T) {
-	m := testManifest("candidate")
+	t.Parallel()
+	m := manifest.Manifest{ID: "candidate", Name: "Candidate"}
 	before, err := os.ReadDir(".")
 	if err != nil {
 		t.Fatal(err)
 	}
-	created, err := ScaffoldBrain("", &m)
+	created, err := Scaffold("", &m, scaffoldTestTemplates())
 	if err == nil || len(created) != 0 {
 		t.Fatalf("empty folder scaffold = %v, %v", created, err)
 	}
@@ -46,16 +48,17 @@ func TestScaffoldRejectsEmptyDirectory(t *testing.T) {
 
 func scaffoldForRollback(t *testing.T, dir string) func() {
 	t.Helper()
-	m := testManifest("candidate")
-	scaffold, err := scaffoldFolderTx(dir, &m)
-	t.Cleanup(scaffold.close)
+	m := manifest.Manifest{ID: "candidate", Name: "Candidate"}
+	scaffold, err := ScaffoldFolder(dir, &m, scaffoldTestTemplates())
+	t.Cleanup(scaffold.Close)
 	if err != nil {
 		t.Fatal(err)
 	}
-	return scaffold.rollback
+	return scaffold.Rollback
 }
 
 func TestScaffoldRollbackKeepsEscapingParentTargets(t *testing.T) {
+	t.Parallel()
 	dir, outside := t.TempDir(), t.TempDir()
 	undo := scaffoldForRollback(t, dir)
 	if err := os.Rename(filepath.Join(dir, "skills"), filepath.Join(dir, "original-skills")); err != nil {
@@ -74,6 +77,7 @@ func TestScaffoldRollbackKeepsEscapingParentTargets(t *testing.T) {
 }
 
 func TestScaffoldRollbackKeepsReplacementFiles(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	undo := scaffoldForRollback(t, dir)
 	path := filepath.Join(dir, "brain-prompt.md")
@@ -90,6 +94,7 @@ func TestScaffoldRollbackKeepsReplacementFiles(t *testing.T) {
 }
 
 func TestScaffoldRollbackKeepsEditedFiles(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	undo := scaffoldForRollback(t, dir)
 	path := filepath.Join(dir, "brain-prompt.md")
@@ -103,6 +108,7 @@ func TestScaffoldRollbackKeepsEditedFiles(t *testing.T) {
 }
 
 func TestScaffoldRollbackKeepsExistingEmptyDirectories(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	path := filepath.Join(dir, "skills")
 	if err := os.Mkdir(path, 0o700); err != nil {
@@ -116,6 +122,7 @@ func TestScaffoldRollbackKeepsExistingEmptyDirectories(t *testing.T) {
 }
 
 func TestScaffoldRollbackKeepsReplacementBrainDirectory(t *testing.T) {
+	t.Parallel()
 	parent := t.TempDir()
 	dir := filepath.Join(parent, "candidate")
 	undo := scaffoldForRollback(t, dir)
@@ -137,10 +144,11 @@ func TestScaffoldRollbackKeepsReplacementBrainDirectory(t *testing.T) {
 // Invalid relative paths are rejected before a file can become owned by the
 // transaction; rollback never receives a caller-supplied list of path strings.
 func TestScaffoldOwnershipStaysInTheFolder(t *testing.T) {
+	t.Parallel()
 	parent := t.TempDir()
 	dir := filepath.Join(parent, "candidate")
 	scaffold, err := newScaffold(dir)
-	t.Cleanup(scaffold.close)
+	t.Cleanup(scaffold.Close)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -156,7 +164,7 @@ func TestScaffoldOwnershipStaysInTheFolder(t *testing.T) {
 	if err := scaffold.write("memories/README.md", "owned"); err != nil {
 		t.Fatal(err)
 	}
-	scaffold.rollback()
+	scaffold.Rollback()
 	if got, err := os.ReadFile(outside); err != nil || string(got) != "external" {
 		t.Fatalf("outside file changed: %q, %v", got, err)
 	}

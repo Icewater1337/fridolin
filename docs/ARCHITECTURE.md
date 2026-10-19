@@ -64,6 +64,11 @@ behaviour unless its title says so. The steps so far:
 - **R5, routing slice**: `route` owns set validation and pure chat/reply
   selection. The manager still owns live maps, held routes and brain identity.
 
+- **R9, scaffolding slice**: `registry` owns starter-template loading,
+  confined folder creation and retained-root rollback. The command supplies
+  embedded assets and the runtime's identity-map path; registration workflows
+  and config transactions remain in the command until their later extraction.
+
 - **R11, access slice**: `access` owns pure admission, group addressing,
   silence and text decisions. Transports project facts into `chat.Envelope`;
   the command projects one config snapshot. WhatsApp identity/group lookups,

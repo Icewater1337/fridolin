@@ -6,7 +6,6 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
-	"sort"
 	"strings"
 
 	"github.com/Icewater1337/fridolin/internal/route"
@@ -228,74 +227,4 @@ func updateManifestIn(c *Config, tx *Tx, id string, mutate func(m *manifest.Mani
 		return nil
 	}
 	return fmt.Errorf("no brain %q", id)
-}
-
-// ScaffoldBrain prepares a folder for a new brain: the folder itself, a
-// starter prompt file, the memory layout and brain.json. It never replaces
-// a file that already exists, so adopting a folder with content is safe. It
-// returns the files it created.
-func ScaffoldBrain(dir string, m *manifest.Manifest) ([]string, error) {
-	created, err := scaffoldFolder(dir, m)
-	if err != nil {
-		return created, err
-	}
-	if err := manifest.Write(dir, m, false); err == nil {
-		created = append(created, manifest.File)
-	} else if !errors.Is(err, manifest.ErrExists) {
-		return created, err
-	}
-	sort.Strings(created)
-	return created, nil
-}
-
-// scaffoldFolder is ScaffoldBrain without brain.json, which the dashboard
-// writes with the update that adds the brain (see apiAddBrain).
-func scaffoldFolder(dir string, m *manifest.Manifest) ([]string, error) {
-	s, err := scaffoldFolderTx(dir, m)
-	defer s.close()
-	return s.created, err
-}
-
-func scaffoldFolderTx(dir string, m *manifest.Manifest) (*scaffoldTx, error) {
-	s, err := newScaffold(dir)
-	if err != nil {
-		return s, err
-	}
-
-	prompt := renderTemplate(examplePromptTemplate(), m)
-	files := []struct{ rel, content string }{
-		{m.Normalized().PromptFile, prompt},
-		{identityMapFile, identityMapTemplate},
-		{"memories/README.md", "# Memories\n\nOne markdown file per topic. The brain reads and updates these between conversations.\n"},
-		{"skills/README.md", "# Skills\n\nReusable how-tos and scripts this brain has written for itself.\n"},
-	}
-	for _, sk := range exampleSkills() {
-		files = append(files, struct{ rel, content string }{"skills/" + sk.name, renderTemplate(sk.content, m)})
-	}
-	for _, f := range files {
-		if err := s.write(f.rel, f.content); err != nil {
-			return s, err
-		}
-	}
-	sort.Strings(s.created)
-	return s, nil
-}
-
-const identityMapTemplate = `# WhatsApp identity map
-
-Who is who in this brain's chats. The bridge reads this table to show names
-instead of raw numbers in the chat history it gives the brain. Write numbers
-with the country code, any way you like: +1 555 123-4567 works.
-
-| WhatsApp Number | Person | Notes |
-| --------------- | ------ | ----- |
-`
-
-// renderTemplate fills a brain template, the starter prompt or an example
-// skill, for the new brain m. The templates name the bridge's commands by
-// $FRIDOLIN_BIN and its helpers by $FRIDOLIN_TOOLS_DIR, which every run
-// sets (see brainRunEnv), and never by a path: a brain folder keeps
-// working when it or the bridge moves.
-func renderTemplate(tpl string, m *manifest.Manifest) string {
-	return strings.NewReplacer("{{BRAIN_NAME}}", m.Name).Replace(tpl)
 }
