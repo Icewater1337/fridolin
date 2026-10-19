@@ -106,13 +106,7 @@ func (a *BrainsAPI) Add(w http.ResponseWriter, r *http.Request) {
 	}
 	result, err := a.Registry().Add(registry.AddInput{Path: req.Path, Manifest: m, BackupGiven: backupGiven, CreateDir: req.CreateDir, UseExisting: req.UseExisting})
 	if err != nil {
-		status := http.StatusUnprocessableEntity
-		switch apperr.KindOf(err) {
-		case apperr.Conflict:
-			status = http.StatusConflict
-		case apperr.Unknown:
-			status = http.StatusInternalServerError
-		}
+		status := statusFor(apperr.KindOf(err))
 		WriteErr(w, status, err.Error())
 		return
 	}
