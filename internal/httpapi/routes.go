@@ -1,13 +1,12 @@
-package main
+package httpapi
 
 import (
 	"fmt"
-	"github.com/Icewater1337/fridolin/internal/httpapi"
 	"io/fs"
 	"net/http"
 )
 
-type HTTPDeps struct {
+type Deps struct {
 	Listen            string
 	Ready             http.HandlerFunc
 	Send              http.HandlerFunc
@@ -18,15 +17,15 @@ type HTTPDeps struct {
 	Static            fs.FS
 	GoogleCallback    http.HandlerFunc
 	Login             http.HandlerFunc
-	Token             *httpapi.Token
+	Token             *Token
 	RequiresToken     func() bool
 	SignedIn          func(*http.Request) bool
 	API               func() http.Handler
 }
 
 // newHTTPHandler builds the whole HTTP surface.
-func NewHTTPHandler(d HTTPDeps) http.Handler {
-	hosts := httpapi.AllowedHosts(d.Listen)
+func New(d Deps) http.Handler {
+	hosts := AllowedHosts(d.Listen)
 	mux := http.NewServeMux()
 
 	mux.HandleFunc("GET /health", func(w http.ResponseWriter, r *http.Request) {
@@ -41,7 +40,7 @@ func NewHTTPHandler(d HTTPDeps) http.Handler {
 	mux.Handle("/brain/", d.Brain())
 
 	if !d.DashboardDisabled() {
-		static := httpapi.StaticHandler(d.Static)
+		static := StaticHandler(d.Static)
 		mux.Handle("/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			if r.Method != http.MethodGet && r.Method != http.MethodHead {
 				http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
@@ -52,15 +51,15 @@ func NewHTTPHandler(d HTTPDeps) http.Handler {
 			// started, so it needs no token. Google sends the browser back
 			// with a GET; a HEAD, say from a link prefetcher, must not use
 			// up the state.
-			if r.Method == http.MethodGet && r.URL.Path == "/" && httpapi.IsOAuthCallback(r) {
+			if r.Method == http.MethodGet && r.URL.Path == "/" && IsOAuthCallback(r) {
 				d.GoogleCallback(w, r)
 				return
 			}
 			static.ServeHTTP(w, r)
 		}))
 		mux.HandleFunc("POST /api/login", d.Login)
-		mux.Handle("/api/", httpapi.APIGuard(d.Token, d.RequiresToken, d.SignedIn, d.API()))
+		mux.Handle("/api/", APIGuard(d.Token, d.RequiresToken, d.SignedIn, d.API()))
 	}
 
-	return httpapi.SecurityHeaders(httpapi.HostGuard(hosts, httpapi.OriginGuard(hosts, mux)))
+	return SecurityHeaders(HostGuard(hosts, OriginGuard(hosts, mux)))
 }

@@ -35,7 +35,7 @@ func (b *Bridge) requiresToken() bool {
 
 func (b *Bridge) newHTTPHandler(listen string) http.Handler {
 	b.sessionCookie = httpapi.SessionCookieName(listen)
-	return NewHTTPHandler(HTTPDeps{
+	return httpapi.New(httpapi.Deps{
 		Listen: listen, Ready: b.httpReady, Send: b.newScriptAPI().Send, Ingest: b.newScriptAPI().Ingest,
 		Builder: b.builderHandler, Brain: b.brainAPIHandler,
 		DashboardDisabled: func() bool { return b.cfgs.Get().Dashboard.Disabled }, Static: web.FS,
