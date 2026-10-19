@@ -165,8 +165,8 @@ func (b *Bridge) newHTTPHandler(listen string) http.Handler {
 		fmt.Fprintln(w, "ok")
 	})
 	mux.HandleFunc("GET /ready", b.httpReady)
-	mux.HandleFunc("POST /send", b.httpSend)
-	mux.HandleFunc("POST /ingest", b.httpIngest)
+	mux.HandleFunc("POST /send", b.newScriptAPI().Send)
+	mux.HandleFunc("POST /ingest", b.newScriptAPI().Ingest)
 	// The site builder's MCP servers; each brain's own token (site_builder.go).
 	mux.Handle("/builder/", b.builderHandler())
 	// The tools brains run; each run's own token (brainapi.go).
