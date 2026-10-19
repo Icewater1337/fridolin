@@ -1,8 +1,10 @@
 package main
 
 import (
+	"crypto/rand"
 	"crypto/sha256"
 	"crypto/subtle"
+	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -33,7 +35,7 @@ import (
 //     storage and sends in sessionHeader with every call. Only the two
 //     together sign a request in;
 //   - sessions are kept in <data_dir>, which brains cannot read, so they
-//     survive restarts, and end after sessionLifetime, on sign-out, or for
+//     survive restarts, and end after SessionLifetime, on sign-out, or for
 //     every browser at once when the token is rotated.
 //
 // The cookie alone is not enough because cookies are not kept apart by
@@ -55,15 +57,15 @@ import (
 // there from disk.
 
 const (
-	sessionLifetime   = 30 * 24 * time.Hour
-	loginCodeLifetime = time.Minute
+	SessionLifetime   = 30 * 24 * time.Hour
+	LoginCodeLifetime = time.Minute
 	// maxSessions caps the sign-ins kept; the oldest goes first.
 	maxSessions = 32
 )
 
-// dashSessions holds the sign-ins and the login codes not used yet. Both
+// DashboardSessions holds the sign-ins and the login codes not used yet. Both
 // are kept as hashes, so the sessions file holds nothing that signs in.
-type dashSessions struct {
+type DashboardSessions struct {
 	path string // <data_dir>/dashboard-sessions.json
 	now  func() time.Time
 
@@ -88,13 +90,13 @@ type sessionRecord struct {
 	Expires time.Time `json:"expires"`
 }
 
-// loadDashSessions reads the sessions in dataDir. A missing file is no
+// LoadDashboardSessions reads the sessions in dataDir. A missing file is no
 // sessions; one that cannot be parsed is logged and dropped, which only
 // means signing in again.
-func loadDashSessions(dataDir string) (*dashSessions, error) {
-	s := &dashSessions{
+func LoadDashboardSessions(dataDir string, now func() time.Time) (*DashboardSessions, error) {
+	s := &DashboardSessions{
 		path:     filepath.Join(dataDir, "dashboard-sessions.json"),
-		now:      time.Now,
+		now:      now,
 		sessions: map[string]session{},
 		codes:    map[string]time.Time{},
 	}
@@ -125,8 +127,8 @@ func hashSecret(secret string) string {
 }
 
 // newCode makes a login code that works once, until it expires.
-func (s *dashSessions) newCode() (string, time.Time) {
-	code := randomToken(24)
+func (s *DashboardSessions) NewCode() (string, time.Time) {
+	code := dashboardRandomToken(24)
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	now := s.now()
@@ -135,14 +137,14 @@ func (s *dashSessions) newCode() (string, time.Time) {
 			delete(s.codes, h)
 		}
 	}
-	exp := now.Add(loginCodeLifetime)
+	exp := now.Add(LoginCodeLifetime)
 	s.codes[hashSecret(code)] = exp
 	return code, exp
 }
 
 // useCode reports whether code is a login code that has not expired, and
 // uses it up.
-func (s *dashSessions) useCode(code string) bool {
+func (s *DashboardSessions) UseCode(code string) bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	h := hashSecret(code)
@@ -153,11 +155,11 @@ func (s *dashSessions) useCode(code string) bool {
 
 // create starts a session and saves it. It returns the session id, for the
 // cookie, and its binding, for the page.
-func (s *dashSessions) create() (id, binding string, expires time.Time, err error) {
-	id, binding = randomToken(32), randomToken(32)
+func (s *DashboardSessions) Create() (id, binding string, expires time.Time, err error) {
+	id, binding = dashboardRandomToken(32), dashboardRandomToken(32)
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	expires = s.now().Add(sessionLifetime)
+	expires = s.now().Add(SessionLifetime)
 	s.sessions[hashSecret(id)] = session{expires: expires, binding: hashSecret(binding)}
 	if err := s.saveLocked(); err != nil {
 		delete(s.sessions, hashSecret(id))
@@ -168,7 +170,7 @@ func (s *dashSessions) create() (id, binding string, expires time.Time, err erro
 
 // valid reports whether id is a session that has not ended and binding is
 // its binding.
-func (s *dashSessions) valid(id, binding string) bool {
+func (s *DashboardSessions) Valid(id, binding string) bool {
 	if id == "" || binding == "" {
 		return false
 	}
@@ -180,7 +182,7 @@ func (s *dashSessions) valid(id, binding string) bool {
 }
 
 // drop ends session id.
-func (s *dashSessions) drop(id string) error {
+func (s *DashboardSessions) Drop(id string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if _, ok := s.sessions[hashSecret(id)]; !ok {
@@ -191,7 +193,7 @@ func (s *dashSessions) drop(id string) error {
 }
 
 // dropAll ends every session and forgets every login code.
-func (s *dashSessions) dropAll() error {
+func (s *DashboardSessions) DropAll() error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.sessions = map[string]session{}
@@ -201,7 +203,7 @@ func (s *dashSessions) dropAll() error {
 
 // saveLocked writes the sessions that have not ended, at most maxSessions
 // of them, the newest.
-func (s *dashSessions) saveLocked() error {
+func (s *DashboardSessions) saveLocked() error {
 	now := s.now()
 	var f sessionFile
 	for h, ses := range s.sessions {
@@ -223,4 +225,10 @@ func (s *dashSessions) saveLocked() error {
 		return err
 	}
 	return fsx.WriteFileAtomic(s.path, append(data, '\n'), 0o600, false)
+}
+
+func dashboardRandomToken(n int) string {
+	b := make([]byte, n)
+	_, _ = rand.Read(b)
+	return base64.RawURLEncoding.EncodeToString(b)
 }

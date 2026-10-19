@@ -35,19 +35,19 @@ const sessionHeader = "X-Bridge-Session"
 // ended, in its cookie, together with that session's binding.
 func (b *Bridge) signedIn(r *http.Request) bool {
 	c, err := r.Cookie(b.sessionCookie)
-	return err == nil && b.sessions.valid(c.Value, r.Header.Get(sessionHeader))
+	return err == nil && b.sessions.Valid(c.Value, r.Header.Get(sessionHeader))
 }
 
 // startSession signs the browser in: a new session, in a cookie scripts on
 // the page cannot read and other sites do not get sent. It returns the
 // session's binding, for the page to keep and send in sessionHeader.
 func (b *Bridge) startSession(w http.ResponseWriter, r *http.Request) (string, error) {
-	id, binding, exp, err := b.sessions.create()
+	id, binding, exp, err := b.sessions.Create()
 	if err != nil {
 		return "", err
 	}
 	http.SetCookie(w, &http.Cookie{
-		Name: b.sessionCookie, Value: id, Path: "/", Expires: exp, MaxAge: int(sessionLifetime / time.Second),
+		Name: b.sessionCookie, Value: id, Path: "/", Expires: exp, MaxAge: int(SessionLifetime / time.Second),
 		HttpOnly: true, SameSite: http.SameSiteStrictMode, Secure: secureCookie(r),
 	})
 	return binding, nil
@@ -79,7 +79,7 @@ func (b *Bridge) apiLogin(w http.ResponseWriter, r *http.Request) {
 	// The token first: a request with both does not use up a code it
 	// did not need.
 	ok := req.Token != "" && b.token.Matches(req.Token)
-	ok = ok || req.Code != "" && b.sessions.useCode(req.Code)
+	ok = ok || req.Code != "" && b.sessions.UseCode(req.Code)
 	if !ok {
 		httpapi.WriteErr(w, http.StatusUnauthorized, "that link was already used or has expired, or the token is wrong — run fridolin open for a new link")
 		return
@@ -93,7 +93,7 @@ func (b *Bridge) apiLogin(w http.ResponseWriter, r *http.Request) {
 	// would otherwise stay until maxSessions pushed it out: every `fridolin
 	// open` signs in again.
 	if c, err := r.Cookie(b.sessionCookie); err == nil {
-		if err := b.sessions.drop(c.Value); err != nil {
+		if err := b.sessions.Drop(c.Value); err != nil {
 			log.Printf("dashboard sign-in: ending the session it replaces: %v", err)
 		}
 	}
@@ -103,7 +103,7 @@ func (b *Bridge) apiLogin(w http.ResponseWriter, r *http.Request) {
 // apiLogout ends this browser's session.
 func (b *Bridge) apiLogout(w http.ResponseWriter, r *http.Request) {
 	if c, err := r.Cookie(b.sessionCookie); err == nil {
-		if err := b.sessions.drop(c.Value); err != nil {
+		if err := b.sessions.Drop(c.Value); err != nil {
 			httpapi.WriteErr(w, http.StatusInternalServerError, err.Error())
 			return
 		}
@@ -115,7 +115,7 @@ func (b *Bridge) apiLogout(w http.ResponseWriter, r *http.Request) {
 // apiLoginCode makes a login code, for `fridolin open`, which calls it with
 // the token from the data dir.
 func (b *Bridge) apiLoginCode(w http.ResponseWriter, r *http.Request) {
-	code, exp := b.sessions.newCode()
+	code, exp := b.sessions.NewCode()
 	httpapi.WriteJSON(w, http.StatusOK, map[string]any{"code": code, "expires_at": exp})
 }
 
@@ -129,7 +129,7 @@ func (b *Bridge) apiRotateToken(w http.ResponseWriter, r *http.Request) {
 		httpapi.WriteErr(w, http.StatusInternalServerError, "writing a new token: "+err.Error())
 		return
 	}
-	if err := b.sessions.dropAll(); err != nil {
+	if err := b.sessions.DropAll(); err != nil {
 		httpapi.WriteErr(w, http.StatusInternalServerError, "ending the sessions: "+err.Error())
 		return
 	}

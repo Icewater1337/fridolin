@@ -17,6 +17,7 @@ import (
 	"strings"
 	"sync/atomic"
 	"syscall"
+	"time"
 
 	"github.com/Icewater1337/fridolin/internal/google"
 	"github.com/Icewater1337/fridolin/internal/registry"
@@ -295,11 +296,11 @@ func runCmd(args []string) {
 	if platform.IsTerminal(os.Stdout) && cfg.HTTPEnabled() && !cfg.Dashboard.Disabled {
 		// Only on an interactive terminal: even a code that works once
 		// must not end up in a log file.
-		code, _ := bridge.sessions.newCode()
+		code, _ := bridge.sessions.NewCode()
 		fmt.Printf("\n  Dashboard: %s\n  (the link works once, within a minute; after that, run: fridolin open)\n\n", httpapi.LoginURL(cfg.HTTPListen, code))
 	}
 	if opts.open && cfg.HTTPEnabled() {
-		code, _ := bridge.sessions.newCode()
+		code, _ := bridge.sessions.NewCode()
 		go func() { _ = platform.OpenBrowser(httpapi.LoginURL(cfg.HTTPListen, code)) }()
 	}
 
@@ -524,11 +525,11 @@ func rotateToken(cfg *config.Config) error {
 	if err := tok.Rotate(); err != nil {
 		return fmt.Errorf("writing a new token: %w", err)
 	}
-	sessions, err := loadDashSessions(cfg.DataDir)
+	sessions, err := LoadDashboardSessions(cfg.DataDir, time.Now)
 	if err != nil {
 		return err
 	}
-	return sessions.dropAll()
+	return sessions.DropAll()
 }
 
 // checkOptions are the check command's flags.
