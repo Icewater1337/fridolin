@@ -1,4 +1,4 @@
-package main
+package devchat
 
 import (
 	"context"
@@ -13,21 +13,21 @@ import (
 
 // ── dev mode ─────────────────────────────────────────────────────────────
 
-// devMessenger stands in for WhatsApp in --no-whatsapp mode. Outgoing
+// Messenger stands in for WhatsApp in --no-whatsapp mode. Outgoing
 // messages are kept in memory and shown on the dashboard; incoming ones are
 // injected through the dev API.
-type devMessenger struct {
+type Messenger struct {
 	chunk  func(string) []string
 	mu     sync.Mutex
-	outbox []DevMessage
+	outbox []Message
 }
 
-// newDevMessenger takes the current chunking policy. Each SendChunked call
+// New takes the current chunking policy. Each SendChunked call
 // evaluates it once, retaining live MaxChunkSize without a Config dependency.
-func newDevMessenger(chunk func(string) []string) *devMessenger { return &devMessenger{chunk: chunk} }
+func New(chunk func(string) []string) *Messenger { return &Messenger{chunk: chunk} }
 
-// DevMessage is one message the bridge "sent" in dev mode.
-type DevMessage struct {
+// Message is one message the bridge "sent" in dev mode.
+type Message struct {
 	TS   time.Time `json:"ts"`
 	JID  string    `json:"jid"`
 	Text string    `json:"text"`
@@ -37,18 +37,18 @@ type DevMessage struct {
 // devConnected is always closed: dev mode can always send.
 var devConnected = func() chan struct{} { c := make(chan struct{}); close(c); return c }()
 
-func (d *devMessenger) Connected() <-chan struct{} { return devConnected }
-func (d *devMessenger) Connect() error             { return nil }
-func (d *devMessenger) Disconnect()                {}
-func (d *devMessenger) State() chat.LinkState {
+func (d *Messenger) Connected() <-chan struct{} { return devConnected }
+func (d *Messenger) Connect() error             { return nil }
+func (d *Messenger) Disconnect()                {}
+func (d *Messenger) State() chat.LinkState {
 	return chat.LinkState{Mode: "disabled", Detail: "Dev mode (--no-whatsapp): messages are simulated"}
 }
-func (d *devMessenger) StartPairing() error {
+func (d *Messenger) StartPairing() error {
 	return fmt.Errorf("WhatsApp is disabled in dev mode")
 }
-func (d *devMessenger) JoinedGroups(context.Context) ([]chat.Group, error) { return nil, nil }
+func (d *Messenger) JoinedGroups(context.Context) ([]chat.Group, error) { return nil, nil }
 
-func (d *devMessenger) record(m DevMessage) {
+func (d *Messenger) record(m Message) {
 	m.TS = time.Now()
 	d.mu.Lock()
 	defer d.mu.Unlock()
@@ -59,28 +59,28 @@ func (d *devMessenger) record(m DevMessage) {
 	log.Printf("[dev] → %s: %s", m.JID, textx.Truncate(m.Text, 200))
 }
 
-func (d *devMessenger) SendMessage(_ context.Context, jid, text string) error {
-	d.record(DevMessage{JID: jid, Text: text})
+func (d *Messenger) SendMessage(_ context.Context, jid, text string) error {
+	d.record(Message{JID: jid, Text: text})
 	return nil
 }
 
-func (d *devMessenger) SendChunked(ctx context.Context, jid, text string) error {
+func (d *Messenger) SendChunked(ctx context.Context, jid, text string) error {
 	for _, c := range d.chunk(text) {
-		d.record(DevMessage{JID: jid, Text: c})
+		d.record(Message{JID: jid, Text: c})
 	}
 	return nil
 }
 
-func (d *devMessenger) SendPoll(_ context.Context, jid, q string, opts []string, _ int) (string, error) {
-	d.record(DevMessage{JID: jid, Text: q, Poll: opts})
+func (d *Messenger) SendPoll(_ context.Context, jid, q string, opts []string, _ int) (string, error) {
+	d.record(Message{JID: jid, Text: q, Poll: opts})
 	return fmt.Sprintf("dev-poll-%d", time.Now().UnixNano()), nil
 }
 
 // Outbox returns the recorded messages, newest first.
-func (d *devMessenger) Outbox() []DevMessage {
+func (d *Messenger) Outbox() []Message {
 	d.mu.Lock()
 	defer d.mu.Unlock()
-	out := make([]DevMessage, 0, len(d.outbox))
+	out := make([]Message, 0, len(d.outbox))
 	for i := len(d.outbox) - 1; i >= 0; i-- {
 		out = append(out, d.outbox[i])
 	}

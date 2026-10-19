@@ -59,6 +59,9 @@ behaviour unless its title says so. The steps so far:
   FIFO workers, downloads and delivery stay in the adapter. Shared phone
   normalization lives in the stdlib-only `chat` package.
 
+- **R11, devchat slice**: `devchat` owns the simulated messenger and its
+  bounded synchronized outbox. The command supplies live chunking policy.
+
 Everything else is still `package main` in `cmd/fridolin`, one file per
 subject (section 3 names the file each package will come from). A package
 that is not yet extracted is marked *(to come, Rn)* with the step that
@@ -330,7 +333,7 @@ responsibility and says what it must not do.
   pairs, tracks connection state, keeps the group list, sends text and
   polls, decrypts poll votes, turns protobuf messages into an `Envelope` (a
   pure function), and downloads media into the inbox.
-- **`devchat`** *(to come, R11)*: the in-memory transport for dev mode. It
+- **`devchat`** (`internal/devchat`): the in-memory transport for dev mode. It
   keeps sent messages for the dashboard and the tests.
 - **`activity`**: the dashboard's in-memory feed of recent history lines.
   `Feed` owns the bounded buffer, ordering, and edit/delete updates. The
@@ -435,7 +438,7 @@ leaves (standard library only): fsx, textx, version, apperr, trigger, chat,
 
 Today `cmd/fridolin` imports `web`, `examples`, `site`, `fsx`, `textx`,
 `version`, `trigger`, `platform`, `chat`, `history`, `logx`, `store`,
-`otp`, `media`, `activity`, `httpapi` and `access`. Access imports only
+`otp`, `media`, `activity`, `httpapi`, `access` and `devchat`. Devchat imports `chat` and `textx`. Access imports only
 `chat` and `trigger`; HTTP helpers import `fsx`. History imports `fsx`; store imports `fsx`
 and `logx`; OTP imports `history` and `fsx`; media imports `fsx` and `textx`;
 activity imports `history` and `textx`. The other extracted packages import

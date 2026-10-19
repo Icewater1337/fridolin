@@ -1,4 +1,4 @@
-package main
+package devchat
 
 import (
 	"context"
@@ -12,7 +12,7 @@ import (
 
 func TestDevMessenger(t *testing.T) {
 	calls := 0
-	d := newDevMessenger(func(text string) []string { calls++; return []string{text + " first", text + " second"} })
+	d := New(func(text string) []string { calls++; return []string{text + " first", text + " second"} })
 	ctx := context.Background()
 	if err := d.Connect(); err != nil {
 		t.Fatal(err)
@@ -68,7 +68,7 @@ func TestDevMessenger(t *testing.T) {
 }
 
 func TestDevMessengerBoundAndConcurrency(t *testing.T) {
-	d := newDevMessenger(nil)
+	d := New(nil)
 	ctx := context.Background()
 	for i := range 201 {
 		if err := d.SendMessage(ctx, "chat", fmt.Sprint(i)); err != nil {
@@ -99,7 +99,7 @@ func TestDevMessengerBoundAndConcurrency(t *testing.T) {
 }
 
 func TestDevMessageJSON(t *testing.T) {
-	m := DevMessage{TS: time.Unix(0, 0).UTC(), JID: "chat", Text: "hello"}
+	m := Message{TS: time.Unix(0, 0).UTC(), JID: "chat", Text: "hello"}
 	got, err := json.Marshal(m)
 	if err != nil {
 		t.Fatal(err)
