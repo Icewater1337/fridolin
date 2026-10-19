@@ -29,6 +29,74 @@ behaviour unless its title says so. The steps so far:
 - **R3**: the foundation packages `fsx`, `textx`, `version`, `trigger` and
   `platform` below `internal/`, and `internal/archtest`, which enforces the
   rules of section 4 that already apply.
+- **R4, first slice**: `logx` owns the log ring and whatsmeow logger adapter;
+  `store` owns the database, poll, outbox and inbound queue repositories.
+  The shared file permission helper lives in `fsx`. Process logger setup and file rotation
+  remain in `cmd/fridolin`.
+- **R4, history slice**: `history` owns the conversation entry format and
+  rooted file reads, appends and rewrites; `fsx` owns the regular-file opener.
+  Runtime history locking, inbound bookkeeping and outbox merging remain in
+  `cmd/fridolin`.
+
+- **R4 (chat)**: the shared message content, quotes, changes, connection
+  and group DTOs, and pure JID/merge helpers live in `internal/chat`. The
+  command keeps the runtime wrapper carrying logged history and merged
+  parts until the brain extraction.
+
+- **R4, OTP slice**: `otp` owns code recognition, recent request lookup,
+  handoff records and expiry. The command keeps runtime settings, inbound
+  source checks and bridge callbacks.
+- **R4 (media)**: the `media` package owns bounded attachment creation,
+  per-brain inboxes, path confinement and the legacy media migration. Its
+  caller supplies the shared migration lifecycle and working directory.
+- **R4, activity slice**: `activity` owns the dashboard's bounded feed and
+  edit/delete updates. The command supplies history entries and the lazy
+  seed reader, which still runs under the feed lock.
+
+- **R5, shared readers**: `jsonx` owns recursive unknown-field inspection;
+  `fsx` owns bounded regular-file reads through pinned brain folders.
+  Configuration and manifest policies remain at their callers.
+
+- **R5, manifest slice**: `manifest` owns portable brain descriptions,
+  validation, normalized defaults and rooted publication. Runtime addressing
+  and the config transaction retain their command-owned orchestration.
+
+- **R5, routing slice**: `route` owns set validation and pure chat/reply
+  selection. The manager still owns live maps, held routes and brain identity.
+
+- **R9, scaffolding slice**: `registry` owns starter-template loading,
+  confined folder creation and retained-root rollback. The command supplies
+  embedded assets and the runtime's identity-map path; registration workflows
+  and config transactions remain in the command until their later extraction.
+
+- **R5, configuration values**: `config` owns the file shape, section types,
+  defaults, validation, migrations and approved brain references. Loading,
+  transaction orchestration and startup permission changes remain in the command
+  for the next slice. `Resolve` still looks up the home folder; R6 injects paths.
+
+- **R11, access slice**: `access` owns pure admission, group addressing,
+  silence and text decisions. Transports project facts into `chat.Envelope`;
+  the command projects one config snapshot. WhatsApp identity/group lookups,
+  FIFO workers, downloads and delivery stay in the adapter. Shared phone
+  normalization lives in the stdlib-only `chat` package.
+
+- **R11, devchat slice**: `devchat` owns the simulated messenger and its
+  bounded synchronized outbox. The command supplies live chunking policy.
+
+- **R11, WhatsApp slice**: `whatsapp` owns connection/pairing, FIFO workers,
+  group caches, protobuf processing and downloads. The command supplies
+  owned settings, store/identity/privacy/outbound consumers and runtime
+  callbacks. Transport tests live with the package; command integration
+  still covers configuration, SQL polls, runtime bookkeeping and delivery.
+  `HandleEvent` retains queued production intake. `ProcessMessage` and
+  `ProcessVote` are synchronous worker boundaries whose callers own order.
+
+- **R12, outbound helpers**: `outbound` owns chunking, poll parsing, the
+  chat-message catalogue, shared send errors and the paced send loop. Its
+  minimal transport interfaces describe only sends and connection observation.
+  The durable outbox owns persistence, retries, poll fallback and its Stop
+  join. Command composition supplies the live transport and confirmed-delivery
+  history callback; pipeline extraction follows R10.
 
 Everything else is still `package main` in `cmd/fridolin`, one file per
 subject (section 3 names the file each package will come from). A package
@@ -77,7 +145,7 @@ them needs its own migration plan, not a refactor.
 
 | Contract | Owner | Today |
 | --- | --- | --- |
-| `bridge.db`: the whatsmeow device store plus `polls`, `poll_votes`, `ignored_chats` and `outbox`, versioned in `fridolin_version`. The retired `sessions` and `process_state` tables stay in the schema and are never dropped. Opening an existing file must never force a re-pair. | `internal/store` | `store.go`, `outbox_store.go` |
+| `bridge.db`: the whatsmeow device store plus `polls`, `poll_votes`, `ignored_chats`, `outbox` and `inbound_queue`, versioned in `fridolin_version`. The retired `sessions` and `process_state` tables stay in the schema and are never dropped. Opening an existing file must never force a re-pair. | `internal/store` | `internal/store/store.go`, `internal/store/outbox_store.go` |
 | `config.json` keys and meanings. The retired keys `model`, `work_dir`, `brain_mode` and `brains` still load. | `internal/config` | `config.go`, `configstore.go` |
 | `brain.json`, version 1. | `internal/manifest` | `manifest.go` |
 | `conversation-history.jsonl`: one JSON object per line, `{ts, from, chat, text, type}`. | `internal/history` | `brain.go` |
@@ -137,15 +205,25 @@ responsibility and says what it must not do.
 
 ### Foundation
 
-- **`fsx`**: file-system primitives. `WriteFileAtomic` (temp file, fsync,
+- **`fsx`**: file-system primitives. Bounded brain-file readers keep the
+  existing 256 KiB limit, reject non-regular entries and symlinks, and may
+  reuse an already pinned `os.Root`. `WriteFileAtomic` (temp file, fsync,
   rename, optional `.bak`), `ExpandHome` and `Tilde` (the home dir is always a
   parameter), `Canonical` (clean and resolve symlinks), `Resolve` (the real
   path of an absolute path, through the part that exists, which `Canonical`
   falls back on for a path that does not exist yet), `Within` (containment
-  that avoids the sibling-prefix trap) and `Exists`. *Planned:* helpers for
-  working inside an `*os.Root`.
+  that avoids the sibling-prefix trap), `Exists`, and `RestrictToOwner`
+  (remove group/other access while preserving owner access and special bits).
+  `OpenInFolder` opens a regular file through an `*os.Root`, refusing
+  symlinks, special files and a file replaced during the open.
+- **`jsonx`**: standard-library-only JSON field inspection. `UnknownKeys`
+  reports recursively sorted field paths while respecting custom decoders
+  and case-insensitive JSON field matching.
 - **`textx`**: `Truncate` and `Tail`, which shorten text from its end or its
-  start to a byte limit without splitting a rune.
+  start to a byte limit without splitting a rune. `SBPLString` quotes profile
+  strings without changing UTF-8; `EscapeSBPL` applies the same escaping to
+  diagnostic redaction. `ValidEnvName` checks child environment variable names.
+  Configuration and sandbox code share these pure validators.
 - **`version`**: `String()`, which returns the `-ldflags -X` value, or
   `dev-<rev>[+dirty]` from the build info, and `Line()`, the build, Go
   release and platform for the first log line.
@@ -157,13 +235,15 @@ responsibility and says what it must not do.
   object per entry in JSON; `Matches`, `Strip` and `First` match
   Unicode-correctly on byte offsets in the original text. `BoundaryAt` and
   `BoundaryBefore` are the word rule, which @-mentions follow too.
-- **`chat`** *(to come, R4; `inbound.go`, `envelope.go`, `identity.go`)*:
-  the vocabulary every transport and the pipeline share. It holds `Inbound`
-  (one message on its way to a brain, with an optional explicit `Brain`
-  target and a structured `Quote`), `Envelope` (what a transport saw,
-  before any policy), `Principal` (who asked for an action: a script, a
-  brain holding a run token, the bridge itself), `Source`, `LinkState`,
-  `Group`, and the JID helpers `NormalizeJID`, `IsGroupJID` and `DMJID`.
+- **`chat`**: shared message vocabulary with no internal dependencies.
+  `Inbound` holds message content, an optional explicit `Brain` target and
+  a structured `Quote`; `Merge`, `TextWithQuote` and `HistoryText` preserve
+  the existing text and attachment formatting. `Change` names edits and
+  deletions, with `Names` checking chat, sender and message ID. `LinkState`
+  and `Group` retain the dashboard JSON tags; `NormalizeJID`, `IsGroupJID`
+  and `DMJID` share the JID rules. Source and change-kind constants keep
+  their existing string values. Transport envelopes and script principals
+  remain in the command until the adapter and pipeline extractions.
 - **`platform`**: OS integration behind build tags. It provides the instance
   `Lock` (`AcquireLock`, `Release`; a value, not a global, which `NewBridge`
   takes today and `main` will own), process isolation (a session and
@@ -175,35 +255,54 @@ responsibility and says what it must not do.
   resolved helper path, allowlisted environment and timeout. Trusted helper
   lookup stays in the composition code. *Planned:* process start times
   from `procstart_*.go`.
-- **`logx`** *(to come, R4; `logbuf.go`, `logfile*.go`)*: the in-memory log
-  ring the dashboard reads, the whatsmeow logger adapter, and the process
-  logger setup.
+- **`logx`**: the in-memory `Ring` and `Line` the dashboard reads, and
+  `NewWaLogger`, the whatsmeow logger adapter. The process logger setup,
+  configured ring capacity and file rotation remain in `cmd/fridolin`.
 
 ### Formats and storage
 
-- **`manifest`** *(to come, R5; `manifest.go`)*: `brain.json`. It provides
-  `Manifest`, `Routing`, `Backup` and `Calendar`, plus `Validate`,
-  `Normalized`, `Equal`, and `Read`/`Write` through the brain folder's
-  `os.Root`. A `Spec` is an approved manifest located on disk and ready to
-  run: manifest, canonical folder, prompt path.
-- **`history`** *(to come, R4; `history.go`)*: `conversation-history.jsonl`.
+- **`manifest`**: portable `brain.json` descriptions, validation, normalized
+  defaults, copied backup exclusions and accepted effort/observe values.
+  `Read` and `Write` retain bounded regular-file reads and complete exclusive
+  publication. `OpenRoot`, `Encode` and `WriteDataRoot` let configuration
+  transactions keep pinned folders and published inode handles until commit
+  or rollback. `Spec` retains the manifest, canonical folder, configured path,
+  relative prompt file and configuration entry index. The package uses only
+  `chat`'s group suffix predicate, `fsx` and the pure `jsonx` inspector.
+
+- **`history`**: `conversation-history.jsonl`.
   It provides `Entry`, `Append`, `Tail` and `ForChat`, all through the
   brain's `os.Root`. A file is read back from its end, a block at a time,
-  and `ForChat` stops at the chat's newest reset marker.
-- **`store`** *(to come, R4; `store.go`, `outbox_store.go`)*: `bridge.db`.
+  and `ForChat` stops at the chat's newest reset marker. `Scan` supports
+  bounded reverse searches; `Rewrite` and `HoldsEntry` support message edits
+  and deletions. The package takes chat IDs as strings and knows nothing of
+  inbound queues, the outbox or delivery. Callers retain the history mutex
+  and invoke callbacks after releasing it.
+- **`store`**: `bridge.db`, opened with `Open(dbPath, logLevel)`.
   Fridolin's own tables are versioned in the `fridolin_version` table, kept
   apart from whatsmeow's `whatsmeow_version`, and migrations only add.
-  Repositories handle polls, poll votes, ignored chats and the outbox.
+  Repositories handle polls, poll votes, ignored chats, the outbox and inbound
+  queue rows. Inbound JSON encoding and decoding stay in `cmd/fridolin`,
+  alongside the message and history types; store handles opaque bodies and
+  preserves SQL ordering and transactional deletion after the codec visits
+  every row. A failed transaction exposes none of the decoded rows.
+  The raw SQL connection stays private; integration tests open separate
+  connections to their scratch databases for assertions and failure injection.
   *Planned (R19):* one `*sql.DB` shared by the whatsmeow device container
   and Fridolin's tables.
-- **`media`** *(to come, R4; `media.go`)*: the media folder and each
+- **`media`**: the media folder and each
   brain's inbox in it, `<media_dir>/<brain id>/`, the one part of it that
   brain can open. Attachments arrive in `.incoming/`, which no brain can
   read, and move into the inbox of the brain that takes their message
-  (`claimMedia`), through the media folder's `os.Root`, under a sanitised
+  (`Inbox.Claim`), through the media folder's `os.Root`, under a sanitised
   name that never replaces a file. `/ingest` takes files only from the top
   of the media folder or the named brain's own inbox: absolute paths only,
-  symlinks resolved, regular files only.
+  symlinks resolved, regular files only. `Inbox.Resolve` preserves both the
+  script and brain-token rules. `Inbox.Save` gives the transport a bounded
+  random-access `File`; WhatsApp types stay in its adapter. `Migration`
+  holds the process-start cutoff and mutex shared by every inbox; the
+  command constructs it once and passes it with the working directory.
+  Name shortening reuses `textx.Truncate`, so this leaf also imports `textx`.
 
 ### Configuration and brain set
 
@@ -212,11 +311,14 @@ responsibility and says what it must not do.
   (`File`), the retired-keys shim, the single defaults table, a pure
   `Resolve` into `Settings{Boot, Live}`, field validation, the field table,
   and the live `Store` (section 5).
-- **`route`** *(to come, R5)*: the routing table built from approved
-  manifests. It validates the brain set: unique ids, each group owned by one
-  brain, at most one DM brain and one default, no brain folder inside
-  another. It answers "which brain owns this chat" and "which chat does this
-  brain reply in". It is pure and keeps today's error texts.
+- **`route`**: pure validation and routing for approved, runnable specs.
+  `Build` validates the set and returns an immutable `Table` with `For`, `Has`,
+  `Default`, `Dirs` and `ReplyChat`. It keeps configured ordering and copies
+  mutable construction data. The free `ReplyChat` helper takes the runtime's
+  current DM decision so callers preserve held routes and exact brain pointer
+  identity. The manager's maps and unavailable-route holds remain in the
+  command until the runtime extraction; the new table does not replace them.
+
 - **`registry`** *(to come, R9; `brainreg.go`, `brain_changes.go`)*: the
   configured brain set. It resolves `brain_dirs` into specs and issues
   (drift, missing, invalid, unapproved, retired), checks folders, scaffolds
@@ -242,9 +344,11 @@ responsibility and says what it must not do.
   policy and wraps a command: the profile goes inline with `-p`, and if the
   sandbox is on but cannot be applied, the run fails instead of starting
   unsandboxed.
-- **`otp`** *(to come, R4; `otp.go`)*: decides whether a message is a
+- **`otp`**: decides whether a message is a
   one-time code its chat asked for, in the last ten minutes of the brain's
-  outbound history. `Handoff` writes a caught code, and the request it
+  outbound history through `Requested`. `Code` normalizes a bare code;
+  `HasMarker` and `DefaultMarkers` recognize requests. `Handoff.Write`
+  writes a caught code as a `Record`, and the request it
   answers, to the file local scripts read.
 - **`brain`** *(to come, R10; `brain.go`, `runrecord.go`, `observe.go`,
   `runslots.go`)*: the brain runtime. `Manager` owns the brain set, swaps
@@ -258,29 +362,34 @@ responsibility and says what it must not do.
   consumer interfaces cut it off from processes and transports. `Runner`
   does one run, and `Sink` receives the working notice, forwarded
   questions, finished runs and history lines.
-- **`access`** *(to come, R11; `addressing.go`, `group_policy.go`,
-  `whatsapp.go`)*: decides who may talk to the bridge, in a group who of
+- **`access`** (`internal/access`; transport projections remain in `addressing.go`, `group_policy.go`,
+  `whatsapp.go`): decides who may talk to the bridge, in a group who of
   its members (`group_members`), and whether a message addresses it.
-  `Decide(Policy, Envelope)` is one pure, table-tested function used by
-  WhatsApp, dev mode and `fridolin check --route`.
+  `Decide(Policy, chat.Envelope)` supplies WhatsApp and dev group decisions.
+  Admission is also exposed separately so edits and downloads are gated before
+  side effects. Dev DMs and `fridolin check --route` use `NumberAllowed`,
+  preserving their user-supplied number comparison; WhatsApp supplies explicit
+  resolved identity. Transport-specific ignored-chat notifications stay outside.
 - **`pipeline`** *(to come, R12; `bridge.go`, `debounce.go`)*: the single
   intake for every message source. It handles chat commands, the junk
   filter, choosing the brain, the OTP gate and debouncing. It dispatches to
   `brain.Manager`, turns finished runs into deliveries, and provides `Ingest`
   and `SendExternal` for `/ingest`, `/send`, Plaud and the site.
-- **`outbound`** *(to come, R12; `chunks.go`, `polls.go`, `outbox.go`,
-  `chaterr.go`)*: sending on top of a minimal `Transport`: the durable
-  outbox, chunking, pacing, polls with a text fallback, saving sent polls,
-  and the catalogue of every chat-facing message the pipeline sends.
-- **`whatsapp`** *(to come, R11; `whatsapp.go`, `waconn.go`,
-  `groupcache.go`)*: the WhatsApp transport and nothing else. It connects,
+- **`outbound`**: chunking, poll parsing, shared send errors, paced sends,
+  minimal transport contracts and the catalogue of every chat-facing message.
+  `Outbox` owns persisted replies, per-part progress, poll fallback, retries
+  and shutdown joining. The command supplies the confirmed-delivery history
+  callback and retains provider-aware error selection and pipeline wiring.
+- **`whatsapp`** (`internal/whatsapp`): the WhatsApp transport and nothing else. It connects,
   pairs, tracks connection state, keeps the group list, sends text and
   polls, decrypts poll votes, turns protobuf messages into an `Envelope` (a
   pure function), and downloads media into the inbox.
-- **`devchat`** *(to come, R11)*: the in-memory transport for dev mode. It
+- **`devchat`** (`internal/devchat`): the in-memory transport for dev mode. It
   keeps sent messages for the dashboard and the tests.
-- **`activity`** *(to come, R4; `activity.go`)*: the dashboard's in-memory
-  feed of recent history lines.
+- **`activity`**: the dashboard's in-memory feed of recent history lines.
+  `Feed` owns the bounded buffer, ordering, and edit/delete updates. The
+  caller supplies history entries and a lazy seed reader, called once per
+  brain under the feed lock; runtime brains and transports stay outside.
 
 ### Integrations
 
@@ -303,12 +412,17 @@ responsibility and says what it must not do.
 
 ### Surface and wiring
 
-- **`httpapi`** *(to come, R7, R16; `dashboard.go`, `dashboard_api.go`,
-  `server.go`, `scripttoken.go`, `brainapi.go`, `dashsession.go`,
-  `site_api.go`)*: the whole HTTP surface. It holds the guards,
-  the dashboard token and login sessions, the route table, one handler type
-  per resource, the script API with its tokens, the brain API, static
-  files, the OAuth callback mount and the server lifecycle.
+- **`httpapi`**: HTTP request guards, token files and JSON codecs. `Token`
+  loads or creates a named token file, rotates it and compares values;
+  `ReadToken` reads the dashboard token without creating it. `APIGuard`
+  receives callbacks for the current token requirement and session check.
+  Host, origin, write and security-header guards keep the existing response
+  contract. `DecodeJSON` and `DecodeOptionalJSON` retain strict unknown-key
+  and single-value decoding; `LoginURL` contains a one-use login code.
+  Resource handlers, login sessions, routes, script and brain APIs, static
+  files, OAuth and server lifecycle still live in `cmd/fridolin`
+  (`dashboard*.go`, `server.go`, `scripttoken.go`, `brainapi.go`,
+  `dashsession.go`, `site_api.go`) until R16.
 - **`app`** *(to come, R17)*: the composition root and lifecycle. It builds
   every component, projects config into each package's own settings,
   reconciles on config change, supervises the `Run(ctx)` components and
@@ -364,9 +478,9 @@ google ─► manifest, fsx, apperr
 plaud  ─► media, platform, chat, fsx, textx, apperr
 
 activity ─► history, textx
-store    ─► logx
+store    ─► fsx, logx
 history  ─► fsx
-media    ─► fsx
+media    ─► fsx, textx
 manifest ─► fsx, apperr
 
 leaves (standard library only): fsx, textx, version, apperr, trigger, chat,
@@ -374,7 +488,14 @@ leaves (standard library only): fsx, textx, version, apperr, trigger, chat,
 ```
 
 Today `cmd/fridolin` imports `web`, `examples`, `site`, `fsx`, `textx`,
-`version`, `trigger` and `platform`, and those import nothing of the module.
+`version`, `trigger`, `platform`, `chat`, `history`, `logx`, `store`,
+`otp`, `media`, `activity`, `httpapi`, `access`, `devchat` and `whatsapp`. WhatsApp imports `access`,
+`media`, `platform`, `chat` and `textx`; its fixtures also use `logx` and
+`trigger`. Devchat imports `chat` and `textx`. Access imports only
+`chat` and `trigger`; HTTP helpers import `fsx`. History imports `fsx`; store imports `fsx`
+and `logx`; OTP imports `history` and `fsx`; media imports `fsx` and `textx`;
+activity imports `history` and `textx`. The other extracted packages import
+nothing of the module.
 
 The rules:
 
@@ -1143,3 +1264,17 @@ a real `!reset`, which writes a reset marker the next prompt stops at
 (`history.go`), the group-member policy (`group_policy.go`), and the
 sandbox's write deny by default with each brain's own media inbox and
 state (`sandbox.go`, `media.go`, `childenv.go`).
+
+### Configuration value extraction boundary
+
+The extracted `config` package uses `manifest`, `trigger`, `fsx`, and the pure
+`chat` phone normalization and `textx` validation helpers. It imports no runtime
+manager, provider, transport or HTTP package. `HomeDir` is the explicit temporary
+ambient lookup exception until R6 supplies paths. The store and its retained-root
+manifest transaction remain command-owned in this slice.
+
+Configuration owns its saved provider/chunk defaults; direct provider and chunker
+calls retain their defensive fallback constants. Composition tests compare those
+contracts so a runtime package need not depend on the whole configuration schema.
+The runtime's shortened timeout unit remains command-owned: `Config.RunMinutes`
+provides the value and the command scales it exactly as before.

@@ -55,7 +55,7 @@ func codexArgs(s *brainSettings, dir string, externalSandbox bool) []string {
 		args = append(args, "--sandbox", "workspace-write", "-c", "sandbox_workspace_write.network_access=true",
 			"--add-dir", brainStateOf(s.dataDir, s.manifest.ID).dir)
 		if s.mediaDir != "" {
-			args = append(args, "--add-dir", mediaInbox(s.mediaDir, s.manifest.ID))
+			args = append(args, "--add-dir", mediaInboxAt(s.mediaDir).Path(s.manifest.ID))
 		}
 	} else {
 		args = append(args, "--sandbox", "read-only")

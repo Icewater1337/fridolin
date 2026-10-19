@@ -3,6 +3,7 @@ package main
 import (
 	"encoding/json"
 	"errors"
+	outboundmsg "github.com/Icewater1337/fridolin/internal/outbound"
 	"log"
 	"maps"
 	"os"
@@ -16,7 +17,14 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Icewater1337/fridolin/internal/config"
+
+	"github.com/Icewater1337/fridolin/internal/manifest"
+
+	"github.com/Icewater1337/fridolin/internal/chat"
 	"github.com/Icewater1337/fridolin/internal/fsx"
+	"github.com/Icewater1337/fridolin/internal/history"
+	"github.com/Icewater1337/fridolin/internal/logx"
 )
 
 // deliveries records what brains hand back to the bridge.
@@ -61,8 +69,8 @@ func queueTestManager(t *testing.T, sleepMS int, extra string) (*BrainManager, *
 		"brain_mode": true,
 		"data_dir": "`+home+`/data",
 		"claude_path": "`+claude+`"`+brainDirsJSON(t,
-		brainFolder(t, home+"/a", BrainManifest{ID: "a", Routing: BrainRouting{HandlesDMs: true}}),
-		brainFolder(t, home+"/b", BrainManifest{ID: "b", Routing: BrainRouting{Groups: []string{"120363000000000000@g.us"}}, Observe: observeRun}),
+		brainFolder(t, home+"/a", manifest.Manifest{ID: "a", Routing: manifest.Routing{HandlesDMs: true}}),
+		brainFolder(t, home+"/b", manifest.Manifest{ID: "b", Routing: manifest.Routing{Groups: []string{"120363000000000000@g.us"}}, Observe: manifest.ObserveRun}),
 	)+extra+`
 	}`))
 	if err != nil {
@@ -76,7 +84,7 @@ func queueTestManager(t *testing.T, sleepMS int, extra string) (*BrainManager, *
 }
 
 func dm(text string) Inbound {
-	return Inbound{JID: "15551234567@s.whatsapp.net", Sender: "15551234567", Text: text}
+	return Inbound{Inbound: chat.Inbound{JID: "15551234567@s.whatsapp.net", Sender: "15551234567", Text: text}}
 }
 
 func TestBrainRunsAndDeliversInOrder(t *testing.T) {
@@ -151,11 +159,13 @@ func TestStopKillsTheRunningProcess(t *testing.T) {
 // chat's own brain (that one !stop stops with StopChat).
 func TestStopHandOffsLeavesOtherWorkAlone(t *testing.T) {
 	const (
-		chat  = "15551234567@s.whatsapp.net"
-		other = "120363000000000001@g.us"
-		group = "120363000000000000@g.us"
+		chatJID = "15551234567@s.whatsapp.net"
+		other   = "120363000000000001@g.us"
+		group   = "120363000000000000@g.us"
 	)
-	handOff := func(jid, text string) Inbound { return Inbound{JID: jid, Brain: "b", Sender: "upload", Text: text} }
+	handOff := func(jid, text string) Inbound {
+		return Inbound{Inbound: chat.Inbound{JID: jid, Brain: "b", Sender: "upload", Text: text}}
+	}
 	for _, c := range []struct {
 		name    string
 		running Inbound   // b's run in flight
@@ -164,11 +174,11 @@ func TestStopHandOffsLeavesOtherWorkAlone(t *testing.T) {
 		dropped int    // hand-offs that were waiting
 		left    string // b's work afterwards, running or waiting
 	}{
-		{"a hand-off answering in the chat is running", handOff(chat, "handed"),
-			[]Inbound{{JID: group, Text: "group"}, handOff(chat, "handed again"), handOff(other, "elsewhere")},
+		{"a hand-off answering in the chat is running", handOff(chatJID, "handed"),
+			[]Inbound{{Inbound: chat.Inbound{JID: group, Text: "group"}}, handOff(chatJID, "handed again"), handOff(other, "elsewhere")},
 			true, 1, "group,elsewhere"},
-		{"the brain's own chat is running", Inbound{JID: group, Text: "group"},
-			[]Inbound{handOff(chat, "handed"), handOff(other, "elsewhere")},
+		{"the brain's own chat is running", Inbound{Inbound: chat.Inbound{JID: group, Text: "group"}},
+			[]Inbound{handOff(chatJID, "handed"), handOff(other, "elsewhere")},
 			false, 1, "group,elsewhere"},
 	} {
 		t.Run(c.name, func(t *testing.T) {
@@ -186,7 +196,7 @@ func TestStopHandOffsLeavesOtherWorkAlone(t *testing.T) {
 				}
 			}
 
-			if stopped, dropped := mgr.StopHandOffs(chat); stopped != c.stopped || dropped != c.dropped {
+			if stopped, dropped := mgr.StopHandOffs(chatJID); stopped != c.stopped || dropped != c.dropped {
 				t.Errorf("StopHandOffs = %v, %d, want %v, %d", stopped, dropped, c.stopped, c.dropped)
 			}
 			rt := b.Snapshot()
@@ -227,12 +237,12 @@ func TestInterruptModeSupersedes(t *testing.T) {
 func TestInterruptModeOnlyReplacesTheSendersOwnRun(t *testing.T) {
 	const group = "120363000000000000@g.us" // brain b's group
 	g := func(sender, text string, silent bool) Inbound {
-		return Inbound{JID: group, Sender: sender, Text: text, Silent: silent}
+		return Inbound{Inbound: chat.Inbound{JID: group, Sender: sender, Text: text, Silent: silent}}
 	}
-	otherDM := Inbound{JID: "15559876543@s.whatsapp.net", Sender: "15559876543", Text: "unrelated"} // also brain a
+	otherDM := Inbound{Inbound: chat.Inbound{JID: "15559876543@s.whatsapp.net", Sender: "15559876543", Text: "unrelated"}} // also brain a
 	// ingest is a file handed to brain a through /ingest, answered in the DM.
 	ingest := func(sender, text string) Inbound {
-		return Inbound{JID: "15551234567@s.whatsapp.net", Sender: sender, Text: text, Source: sourceIngest}
+		return Inbound{Inbound: chat.Inbound{JID: "15551234567@s.whatsapp.net", Sender: sender, Text: text, Source: chat.SourceIngest}}
 	}
 	cases := []struct {
 		name          string
@@ -311,10 +321,10 @@ func TestInterruptModeOnlyReplacesTheSendersOwnRun(t *testing.T) {
 // served by the same brain, keep their place.
 func TestInterruptModeKeepsOthersWaiting(t *testing.T) {
 	g := func(sender, text string, silent bool) Inbound {
-		return Inbound{JID: "120363000000000000@g.us", Sender: sender, Text: text, Silent: silent}
+		return Inbound{Inbound: chat.Inbound{JID: "120363000000000000@g.us", Sender: sender, Text: text, Silent: silent}}
 	}
 	otherDM := func(text string) Inbound { // brain a, like dm
-		return Inbound{JID: "15559876543@s.whatsapp.net", Sender: "15559876543", Text: text}
+		return Inbound{Inbound: chat.Inbound{JID: "15559876543@s.whatsapp.net", Sender: "15559876543", Text: text}}
 	}
 	cases := []struct {
 		name    string
@@ -368,11 +378,11 @@ func TestInterruptModeQueueIsBounded(t *testing.T) {
 	}
 	waitFor(t, 5*time.Second, "the first run", func() bool { r := br.Snapshot().Running; return r != nil && r.PID > 0 })
 	for _, jid := range []string{"120363000000000001@g.us", "120363000000000002@g.us"} {
-		if _, _, err := br.Submit(Inbound{JID: jid, Sender: "15559876543", Text: "question"}); err != nil {
+		if _, _, err := br.Submit(Inbound{Inbound: chat.Inbound{JID: jid, Sender: "15559876543", Text: "question"}}); err != nil {
 			t.Fatalf("%s: %v", jid, err)
 		}
 	}
-	_, _, err := br.Submit(Inbound{JID: "120363000000000003@g.us", Sender: "15559876543", Text: "one more"})
+	_, _, err := br.Submit(Inbound{Inbound: chat.Inbound{JID: "120363000000000003@g.us", Sender: "15559876543", Text: "one more"}})
 	if !errors.Is(err, errQueueFull) {
 		t.Errorf("err = %v, want the queue full", err)
 	}
@@ -381,7 +391,7 @@ func TestInterruptModeQueueIsBounded(t *testing.T) {
 func TestSilentMessagesAreSupersededAndQueueOverflows(t *testing.T) {
 	mgr, d, _ := queueTestManager(t, 500, `, "queue": {"max_pending": 2}`)
 	g := func(text string, silent bool) Inbound {
-		return Inbound{JID: "120363000000000000@g.us", Sender: "15551234567", Text: text, Silent: silent}
+		return Inbound{Inbound: chat.Inbound{JID: "120363000000000000@g.us", Sender: "15551234567", Text: text, Silent: silent}}
 	}
 	_, _, _, _ = mgr.Submit(g("running", false))
 	waitFor(t, 5*time.Second, "run", func() bool { return mgr.Get("b").Snapshot().Running != nil })
@@ -406,7 +416,7 @@ func TestReloadKeepsRunningBrainAndRetiresRemoved(t *testing.T) {
 	t.Setenv("FRIDOLIN_FAKE_WAIT_FILE", release)
 	a, b := mgr.Get("a"), mgr.Get("b")
 	_, _, _, _ = mgr.Submit(dm("keep going"))
-	_, _, _, _ = mgr.Submit(Inbound{JID: "120363000000000000@g.us", Sender: "15551234567", Text: "doomed"})
+	_, _, _, _ = mgr.Submit(Inbound{Inbound: chat.Inbound{JID: "120363000000000000@g.us", Sender: "15551234567", Text: "doomed"}})
 	waitFor(t, 5*time.Second, "both processes running", func() bool {
 		ar, br := a.Snapshot().Running, b.Snapshot().Running
 		return ar != nil && ar.PID > 0 && br != nil && br.PID > 0
@@ -437,8 +447,8 @@ func TestReloadKeepsRunningBrainAndRetiresRemoved(t *testing.T) {
 		"data_dir": "`+home+`/data",
 		"claude_path": "`+os.Args[0]+`",
 		"brain_model": "new-model"`+brainDirsJSON(t,
-		brainFolder(t, home+"/a", BrainManifest{ID: "a", Routing: BrainRouting{HandlesDMs: true}}),
-		brainFolder(t, home+"/c", BrainManifest{ID: "c", Routing: BrainRouting{Groups: []string{"120363000000000000@g.us"}}}),
+		brainFolder(t, home+"/a", manifest.Manifest{ID: "a", Routing: manifest.Routing{HandlesDMs: true}}),
+		brainFolder(t, home+"/c", manifest.Manifest{ID: "c", Routing: manifest.Routing{Groups: []string{"120363000000000000@g.us"}}}),
 	)+`
 	}`))
 	if err != nil {
@@ -496,26 +506,26 @@ func TestReloadHandsOnWhatWaited(t *testing.T) {
 		name string
 		// reload changes the brains, the DM brain a among them, and
 		// returns the folder whose brain should answer.
-		reload func(t *testing.T, home string) (brains []BrainRef, answers string)
+		reload func(t *testing.T, home string) (brains []config.BrainRef, answers string)
 	}{
-		{"moved", func(t *testing.T, home string) ([]BrainRef, string) {
+		{"moved", func(t *testing.T, home string) ([]config.BrainRef, string) {
 			if err := os.Rename(filepath.Join(home, "a"), filepath.Join(home, "a-moved")); err != nil {
 				t.Fatal(err)
 			}
-			return []BrainRef{
-				brainFolder(t, home+"/a-moved", BrainManifest{ID: "a", Routing: BrainRouting{HandlesDMs: true}}),
-				brainFolder(t, home+"/b", BrainManifest{ID: "b", Routing: BrainRouting{Default: true}}),
+			return []config.BrainRef{
+				brainFolder(t, home+"/a-moved", manifest.Manifest{ID: "a", Routing: manifest.Routing{HandlesDMs: true}}),
+				brainFolder(t, home+"/b", manifest.Manifest{ID: "b", Routing: manifest.Routing{Default: true}}),
 			}, filepath.Join(home, "a-moved")
 		}},
-		{"another folder", func(t *testing.T, home string) ([]BrainRef, string) {
-			return []BrainRef{
-				brainFolder(t, home+"/a-copy", BrainManifest{ID: "a", Routing: BrainRouting{HandlesDMs: true}}),
-				brainFolder(t, home+"/b", BrainManifest{ID: "b", Routing: BrainRouting{Default: true}}),
+		{"another folder", func(t *testing.T, home string) ([]config.BrainRef, string) {
+			return []config.BrainRef{
+				brainFolder(t, home+"/a-copy", manifest.Manifest{ID: "a", Routing: manifest.Routing{HandlesDMs: true}}),
+				brainFolder(t, home+"/b", manifest.Manifest{ID: "b", Routing: manifest.Routing{Default: true}}),
 			}, filepath.Join(home, "a-copy")
 		}},
-		{"removed", func(t *testing.T, home string) ([]BrainRef, string) {
-			return []BrainRef{
-				brainFolder(t, home+"/b", BrainManifest{ID: "b", Routing: BrainRouting{Default: true}}),
+		{"removed", func(t *testing.T, home string) ([]config.BrainRef, string) {
+			return []config.BrainRef{
+				brainFolder(t, home+"/b", manifest.Manifest{ID: "b", Routing: manifest.Routing{Default: true}}),
 			}, filepath.Join(home, "b")
 		}},
 	}
@@ -524,7 +534,7 @@ func TestReloadHandsOnWhatWaited(t *testing.T) {
 			home := fsx.Canonical(t.TempDir())
 			t.Setenv("HOME", home)
 			claude := fakeClaudeEnv(t, 30000)
-			config := func(refs ...BrainRef) *Config {
+			configValue := func(refs ...config.BrainRef) *config.Config {
 				cfg, err := LoadConfig(writeConfig(t, `{
 					"data_dir": "`+home+`/data",
 					"claude_path": "`+claude+`"`+brainDirsJSON(t, refs...)+`
@@ -534,9 +544,9 @@ func TestReloadHandsOnWhatWaited(t *testing.T) {
 				}
 				return cfg
 			}
-			mgr := newTestManager(t, config(
-				brainFolder(t, home+"/a", BrainManifest{ID: "a", Routing: BrainRouting{HandlesDMs: true}}),
-				brainFolder(t, home+"/b", BrainManifest{ID: "b", Routing: BrainRouting{Default: true}}),
+			mgr := newTestManager(t, configValue(
+				brainFolder(t, home+"/a", manifest.Manifest{ID: "a", Routing: manifest.Routing{HandlesDMs: true}}),
+				brainFolder(t, home+"/b", manifest.Manifest{ID: "b", Routing: manifest.Routing{Default: true}}),
 			))
 			d := &deliveries{}
 			mgr.SetHooks(BrainHooks{Deliver: d.add})
@@ -551,7 +561,7 @@ func TestReloadHandsOnWhatWaited(t *testing.T) {
 			}
 
 			refs, answers := tc.reload(t, home)
-			if err := mgr.Apply(config(refs...)); err != nil {
+			if err := mgr.Apply(configValue(refs...)); err != nil {
 				t.Fatal(err)
 			}
 			waitFor(t, 10*time.Second, "both runs to end", func() bool { return d.count() == 2 })
@@ -586,10 +596,10 @@ func TestReloadHandsOnWhatWaited(t *testing.T) {
 func TestReloadRunsTheApprovedManifest(t *testing.T) {
 	const dmChat = "15551234567@s.whatsapp.net"
 	tb := newTestBridge(t, "")
-	tb.addFolderBrain(t, BrainManifest{ID: "a", Name: "A", Routing: BrainRouting{HandlesDMs: true}})
-	dir := tb.addFolderBrain(t, BrainManifest{ID: "b", Name: "B"})
-	grab := BrainManifest{ID: "b", Name: "B", Routing: BrainRouting{HandlesDMs: true}}
-	if err := WriteManifest(dir, &grab, true); err != nil {
+	tb.addFolderBrain(t, manifest.Manifest{ID: "a", Name: "A", Routing: manifest.Routing{HandlesDMs: true}})
+	dir := tb.addFolderBrain(t, manifest.Manifest{ID: "b", Name: "B"})
+	grab := manifest.Manifest{ID: "b", Name: "B", Routing: manifest.Routing{HandlesDMs: true}}
+	if err := manifest.Write(dir, &grab, true); err != nil {
 		t.Fatal(err)
 	}
 	if err := tb.brainMgr.Apply(tb.cfgs.Get()); err != nil {
@@ -618,8 +628,8 @@ func TestReloadRefusesAClashingSet(t *testing.T) {
 	home := fsx.Canonical(t.TempDir())
 	t.Setenv("HOME", home)
 	cfg, err := LoadConfig(writeConfig(t, `{"data_dir": "`+home+`/data"`+brainDirsJSON(t,
-		brainFolder(t, "~/a", BrainManifest{ID: "a", Routing: BrainRouting{HandlesDMs: true}}),
-		brainFolder(t, "~/b", BrainManifest{ID: "b", Routing: BrainRouting{Groups: []string{group}}}),
+		brainFolder(t, "~/a", manifest.Manifest{ID: "a", Routing: manifest.Routing{HandlesDMs: true}}),
+		brainFolder(t, "~/b", manifest.Manifest{ID: "b", Routing: manifest.Routing{Groups: []string{group}}}),
 	)+`}`))
 	if err != nil {
 		t.Fatal(err)
@@ -967,11 +977,11 @@ func TestMCPConfigOf(t *testing.T) {
 				t.Fatal(err)
 			}
 		}, false, "not a regular file"},
-		{"huge", write(`{"mcpServers": {}, "pad": "` + strings.Repeat("x", maxBrainFile) + `"}`), false, "larger than"},
+		{"huge", write(`{"mcpServers": {}, "pad": "` + strings.Repeat("x", fsx.MaxBrainFile) + `"}`), false, "larger than"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			ring := NewLogRing(10)
+			ring := logx.NewRing(10)
 			prev := log.Writer()
 			log.SetOutput(ring)
 			t.Cleanup(func() { log.SetOutput(prev) })
@@ -1039,7 +1049,7 @@ func TestMCPConfigOfDropsServersTurnedOff(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			ring := NewLogRing(10)
+			ring := logx.NewRing(10)
 			prev := log.Writer()
 			log.SetOutput(ring)
 			t.Cleanup(func() { log.SetOutput(prev) })
@@ -1125,7 +1135,7 @@ func TestMCPConfigOfStaysInTheBrainFolder(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			ring := NewLogRing(10)
+			ring := logx.NewRing(10)
 			prev := log.Writer()
 			log.SetOutput(ring)
 			t.Cleanup(func() { log.SetOutput(prev) })
@@ -1180,11 +1190,11 @@ func TestMCPConfigOfStaysInTheBrainFolder(t *testing.T) {
 
 func TestBuildPromptListsAllAttachments(t *testing.T) {
 	br := bareBrain(t)
-	p := br.buildPrompt(&brainSettings{}, Inbound{JID: "x@s.whatsapp.net", Sender: "1", Text: "file these", Media: []string{"/m/1.jpg", "/m/2.pdf"}})
+	p := br.buildPrompt(&brainSettings{}, Inbound{Inbound: chat.Inbound{JID: "x@s.whatsapp.net", Sender: "1", Text: "file these", Media: []string{"/m/1.jpg", "/m/2.pdf"}}})
 	if !strings.Contains(p, `The 2 files in its "files" came with it`) || !strings.Contains(p, `"files":["/m/1.jpg","/m/2.pdf"]`) {
 		t.Errorf("prompt:\n%s", p)
 	}
-	if got := historyTextWithMedia("hi", []string{"/m/1.jpg"}); got != "hi\n[attachment: /m/1.jpg]" {
+	if got := chat.HistoryText("hi", []string{"/m/1.jpg"}); got != "hi\n[attachment: /m/1.jpg]" {
 		t.Errorf("history text = %q", got)
 	}
 }
@@ -1195,8 +1205,8 @@ func TestBuildPromptListsAllAttachments(t *testing.T) {
 // brain's folder, where there is no tools/.
 func TestBuildPromptNamesTheHistorySearch(t *testing.T) {
 	br := bareBrain(t)
-	line, _ := json.Marshal(historyEntry{TS: "2026-01-15T10:00:00Z", From: "15551234567", Chat: "15551234567@s.whatsapp.net", Text: "earlier", Type: "in"})
-	if err := os.WriteFile(filepath.Join(br.workDir, historyFileName), append(line, '\n'), 0o600); err != nil {
+	line, _ := json.Marshal(history.Entry{TS: "2026-01-15T10:00:00Z", From: "15551234567", Chat: "15551234567@s.whatsapp.net", Text: "earlier", Type: "in"})
+	if err := os.WriteFile(filepath.Join(br.workDir, history.FileName), append(line, '\n'), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	p := br.buildPrompt(&brainSettings{}, dm("hello"))
@@ -1239,7 +1249,7 @@ func TestBrainsDoNotSeeTheDotEnv(t *testing.T) {
 		"brain_mode": true,
 		"data_dir": "`+home+`/data",
 		"claude_path": "`+claude+`"`+brainDirsJSON(t,
-		brainFolder(t, home+"/a", BrainManifest{ID: "a", Routing: BrainRouting{HandlesDMs: true}}),
+		brainFolder(t, home+"/a", manifest.Manifest{ID: "a", Routing: manifest.Routing{HandlesDMs: true}}),
 	)+`
 	}`)
 	// One key older versions read as a setting, one they only exported.
@@ -1320,7 +1330,7 @@ func TestBrainsAreToldTheDataDir(t *testing.T) {
 			claude := fakeClaudeEnv(t, 0)
 			path := writeConfig(t, `{`+c.settings+`
 				"claude_path": "`+claude+`"`+brainDirsJSON(t,
-				brainFolder(t, home+"/a", BrainManifest{ID: "a", Routing: BrainRouting{HandlesDMs: true}}),
+				brainFolder(t, home+"/a", manifest.Manifest{ID: "a", Routing: manifest.Routing{HandlesDMs: true}}),
 			)+`
 			}`)
 			cfg, err := LoadConfig(path)
@@ -1365,7 +1375,7 @@ func TestBrainsAreToldTheDataDir(t *testing.T) {
 func TestDataEnvIsAbsolute(t *testing.T) {
 	cwd := fsx.Canonical(t.TempDir())
 	t.Chdir(cwd)
-	s := settingsFor(&Config{DataDir: "rel", DBPath: "rel/bridge.db"}, BrainSpec{})
+	s := settingsFor(&config.Config{DataDir: "rel", DBPath: "rel/bridge.db"}, manifest.Spec{})
 	want := []string{"BRIDGE_DATA_DIR=" + cwd + "/rel", "BRIDGE_DB_PATH=" + cwd + "/rel/bridge.db"}
 	if got := dataEnv(s); !slices.Equal(got, want) {
 		t.Errorf("dataEnv = %q, want %q", got, want)
@@ -1525,7 +1535,7 @@ func TestRunTimeoutStopsAStuckRun(t *testing.T) {
 			}
 			mu.Lock()
 			defer mu.Unlock()
-			if asked := slices.ContainsFunc(sent, func(s string) bool { return strings.HasPrefix(s, questionPrefix) }); asked != tc.question {
+			if asked := slices.ContainsFunc(sent, func(s string) bool { return strings.HasPrefix(s, outboundmsg.QuestionPrefix) }); asked != tc.question {
 				t.Errorf("sent to the chat mid-run: %q, want a question: %v", sent, tc.question)
 			}
 		})
@@ -1601,7 +1611,7 @@ func TestRunTimeoutSetting(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if got := cfg.RunTimeout(); got != tc.want {
+			if got := runTimeout(cfg); got != tc.want {
 				t.Errorf("RunTimeout = %v, want %v", got, tc.want)
 			}
 		})
@@ -1657,36 +1667,36 @@ func TestHistoryLineIsWrittenOnceTakenAtItsOwnTime(t *testing.T) {
 		err   error
 		want  []string // the history lines' text and time, "text@ts"
 	}{
-		{"a message, at its time", nil, Inbound{JID: testDMChat, Sender: "15551234567", Text: "hi", At: sent},
+		{"a message, at its time", nil, Inbound{Inbound: chat.Inbound{JID: testDMChat, Sender: "15551234567", Text: "hi", At: sent}},
 			nil, []string{"hi@" + sent.Format(time.RFC3339)}},
-		{"each part at its own time", nil, Inbound{JID: testDMChat, Sender: "15551234567", Text: "photo", At: sent}.merge(
-			Inbound{JID: testDMChat, Sender: "15551234567", Text: "what is it?", At: sent.Add(5 * time.Second)}),
+		{"each part at its own time", nil, Inbound{Inbound: chat.Inbound{JID: testDMChat, Sender: "15551234567", Text: "photo", At: sent}}.merge(
+			Inbound{Inbound: chat.Inbound{JID: testDMChat, Sender: "15551234567", Text: "what is it?", At: sent.Add(5 * time.Second)}}),
 			nil, []string{"photo@" + sent.Format(time.RFC3339), "what is it?@" + sent.Add(5*time.Second).Format(time.RFC3339)}},
 		{"turned away by a full queue", func(t *testing.T, br *Brain) {
 			if _, _, err := br.Submit(dm("long task")); err != nil {
 				t.Fatal(err)
 			}
 			waitFor(t, 5*time.Second, "the first run", func() bool { r := br.Snapshot().Running; return r != nil && r.PID > 0 })
-			if _, _, err := br.Submit(Inbound{JID: testGroup, Sender: otherNumber, Text: "waiting"}); err != nil {
+			if _, _, err := br.Submit(Inbound{Inbound: chat.Inbound{JID: testGroup, Sender: otherNumber, Text: "waiting"}}); err != nil {
 				t.Fatal(err)
 			}
-		}, Inbound{JID: testDMChat, Sender: "15551234567", Text: "one more", At: sent}, errQueueFull, []string{"long task", "waiting"}},
+		}, Inbound{Inbound: chat.Inbound{JID: testDMChat, Sender: "15551234567", Text: "one more", At: sent}}, errQueueFull, []string{"long task", "waiting"}},
 		{"chatter that finds no place", func(t *testing.T, br *Brain) {
 			// b observes its group with runs, and its one place is taken.
-			if _, _, err := br.Submit(Inbound{JID: "120363000000000000@g.us", Sender: otherNumber, Text: "long task"}); err != nil {
+			if _, _, err := br.Submit(Inbound{Inbound: chat.Inbound{JID: "120363000000000000@g.us", Sender: otherNumber, Text: "long task"}}); err != nil {
 				t.Fatal(err)
 			}
 			waitFor(t, 5*time.Second, "the first run", func() bool { r := br.Snapshot().Running; return r != nil && r.PID > 0 })
-			if _, _, err := br.Submit(Inbound{JID: "120363000000000000@g.us", Sender: otherNumber, Text: "waiting"}); err != nil {
+			if _, _, err := br.Submit(Inbound{Inbound: chat.Inbound{JID: "120363000000000000@g.us", Sender: otherNumber, Text: "waiting"}}); err != nil {
 				t.Fatal(err)
 			}
-		}, Inbound{JID: "120363000000000000@g.us", Sender: "15551234567", Text: "chatter", At: sent, Silent: true},
+		}, Inbound{Inbound: chat.Inbound{JID: "120363000000000000@g.us", Sender: "15551234567", Text: "chatter", At: sent, Silent: true}},
 			nil, []string{"long task", "waiting", "chatter@" + sent.Format(time.RFC3339)}},
 		{"turned away by a retired brain", func(t *testing.T, br *Brain) {
 			br.mu.Lock()
 			br.retired = true
 			br.mu.Unlock()
-		}, Inbound{JID: testDMChat, Sender: "15551234567", Text: "too late", At: sent}, errBrainRetired, nil},
+		}, Inbound{Inbound: chat.Inbound{JID: testDMChat, Sender: "15551234567", Text: "too late", At: sent}}, errBrainRetired, nil},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -1722,8 +1732,10 @@ func TestHistoryLineIsWrittenOnceTakenAtItsOwnTime(t *testing.T) {
 // goes before untagged chatter whatever the turns.
 func TestQueueOrderGivesEachChatItsTurn(t *testing.T) {
 	const x, y, z = "x@s.whatsapp.net", "y@s.whatsapp.net", "z@g.us"
-	msg := func(chat, text string) Inbound { return Inbound{JID: chat, Text: text} }
-	chatter := func(chat, text string) Inbound { return Inbound{JID: chat, Text: text, Silent: true} }
+	msg := func(chatJID, text string) Inbound { return Inbound{Inbound: chat.Inbound{JID: chatJID, Text: text}} }
+	chatter := func(chatJID, text string) Inbound {
+		return Inbound{Inbound: chat.Inbound{JID: chatJID, Text: text, Silent: true}}
+	}
 	cases := []struct {
 		name    string
 		turns   map[string]uint64
@@ -1751,9 +1763,9 @@ func TestQueueOrderGivesEachChatItsTurn(t *testing.T) {
 			for len(br.pending) > 0 {
 				i := nextIn(br.pending, br.turns)
 				got = append(got, br.pending[i].Text)
-				chat := br.pending[i].JID
+				chatJID := br.pending[i].JID
 				br.pending = slices.Delete(br.pending, i, i+1)
-				br.takeTurnLocked(chat)
+				br.takeTurnLocked(chatJID)
 			}
 			if strings.Join(got, " ") != c.want {
 				t.Errorf("ran %q, want %q", got, c.want)
@@ -1771,7 +1783,7 @@ func TestQueueOrderGivesEachChatItsTurn(t *testing.T) {
 func TestBusyChatDoesNotHoldUpAnother(t *testing.T) {
 	mgr, d, _ := queueTestManager(t, 400, "")
 	br := mgr.Get("a")
-	other := Inbound{JID: otherNumber + "@s.whatsapp.net", Sender: otherNumber, Text: "other 1"}
+	other := Inbound{Inbound: chat.Inbound{JID: otherNumber + "@s.whatsapp.net", Sender: otherNumber, Text: "other 1"}}
 	if _, _, err := br.Submit(dm("dm 1")); err != nil {
 		t.Fatal(err)
 	}
@@ -1813,9 +1825,9 @@ func limitTestManager(t *testing.T, sleepMS, limit int) (*BrainManager, *deliver
 		"data_dir": "`+home+`/data",
 		"claude_path": "`+claude+`",
 		"max_concurrent_runs": `+strconv.Itoa(limit)+brainDirsJSON(t,
-		brainFolder(t, home+"/a", BrainManifest{ID: "a", Routing: BrainRouting{HandlesDMs: true}}),
-		brainFolder(t, home+"/b", BrainManifest{ID: "b", Routing: BrainRouting{Groups: []string{"120363000000000000@g.us"}}, Observe: observeRun}),
-		brainFolder(t, home+"/c", BrainManifest{ID: "c", Routing: BrainRouting{Groups: []string{"120363000000000001@g.us"}}, Observe: observeRun}),
+		brainFolder(t, home+"/a", manifest.Manifest{ID: "a", Routing: manifest.Routing{HandlesDMs: true}}),
+		brainFolder(t, home+"/b", manifest.Manifest{ID: "b", Routing: manifest.Routing{Groups: []string{"120363000000000000@g.us"}}, Observe: manifest.ObserveRun}),
+		brainFolder(t, home+"/c", manifest.Manifest{ID: "c", Routing: manifest.Routing{Groups: []string{"120363000000000001@g.us"}}, Observe: manifest.ObserveRun}),
 	)+`
 	}`))
 	if err != nil {
@@ -1834,8 +1846,8 @@ const (
 	groupC = "120363000000000001@g.us"
 )
 
-func groupMsg(chat, text string, chatter bool) Inbound {
-	return Inbound{JID: chat, Sender: otherNumber, Text: text, Silent: chatter}
+func groupMsg(chatJID, text string, chatter bool) Inbound {
+	return Inbound{Inbound: chat.Inbound{JID: chatJID, Sender: otherNumber, Text: text, Silent: chatter}}
 }
 
 // slotState is what the run slots hold: how many slots are held and how
@@ -1890,8 +1902,8 @@ func TestRunLimitBoundsRunsAcrossBrains(t *testing.T) {
 			mgr, d := limitTestManager(t, 700, c.limit)
 			for _, m := range []Inbound{
 				dm("for a"),
-				{JID: "120363000000000000@g.us", Sender: otherNumber, Text: "for b"},
-				{JID: "120363000000000001@g.us", Sender: otherNumber, Text: "for c"},
+				{Inbound: chat.Inbound{JID: "120363000000000000@g.us", Sender: otherNumber, Text: "for b"}},
+				{Inbound: chat.Inbound{JID: "120363000000000001@g.us", Sender: otherNumber, Text: "for c"}},
 			} {
 				if _, _, _, err := mgr.Submit(m); err != nil {
 					t.Fatal(err)
@@ -1923,7 +1935,7 @@ func TestRunSlotsGoToBrainsInTurn(t *testing.T) {
 		t.Fatal(err)
 	}
 	waitFor(t, 5*time.Second, "a's first run", func() bool { r := a.Snapshot().Running; return r != nil && r.PID > 0 })
-	for _, m := range []Inbound{dm("a 2"), {JID: "120363000000000001@g.us", Sender: otherNumber, Text: "c 1"}} {
+	for _, m := range []Inbound{dm("a 2"), {Inbound: chat.Inbound{JID: "120363000000000001@g.us", Sender: otherNumber, Text: "c 1"}}} {
 		if _, _, _, err := mgr.Submit(m); err != nil {
 			t.Fatal(err)
 		}
@@ -1947,7 +1959,7 @@ func TestRunSlotsGoToBrainsInTurn(t *testing.T) {
 func TestRequestStopsChatterInAnotherBrainForASlot(t *testing.T) {
 	mgr, d := limitTestManager(t, 30000, 1)
 	b := mgr.Get("b")
-	if _, _, err := b.Submit(Inbound{JID: "120363000000000000@g.us", Sender: otherNumber, Text: "chatter here", Silent: true}); err != nil {
+	if _, _, err := b.Submit(Inbound{Inbound: chat.Inbound{JID: "120363000000000000@g.us", Sender: otherNumber, Text: "chatter here", Silent: true}}); err != nil {
 		t.Fatal(err)
 	}
 	waitFor(t, 5*time.Second, "b's observe-only run", func() bool { r := b.Snapshot().Running; return r != nil && r.PID > 0 })

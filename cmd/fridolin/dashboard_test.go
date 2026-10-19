@@ -6,6 +6,8 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"github.com/Icewater1337/fridolin/internal/devchat"
+	outboundmsg "github.com/Icewater1337/fridolin/internal/outbound"
 	"image/png"
 	"io"
 	"log"
@@ -22,7 +24,15 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Icewater1337/fridolin/internal/config"
+
+	"github.com/Icewater1337/fridolin/internal/manifest"
+
+	"github.com/Icewater1337/fridolin/internal/chat"
 	"github.com/Icewater1337/fridolin/internal/fsx"
+	"github.com/Icewater1337/fridolin/internal/history"
+	mediafiles "github.com/Icewater1337/fridolin/internal/media"
+	"github.com/Icewater1337/fridolin/internal/otp"
 	"github.com/Icewater1337/fridolin/internal/textx"
 	"github.com/Icewater1337/fridolin/internal/version"
 )
@@ -99,7 +109,7 @@ func (tb *testBridge) ingest(body string) *httptest.ResponseRecorder {
 
 // addFolderBrain adds a folder brain through the dashboard API, as the Add
 // brain page does, and returns its folder.
-func (tb *testBridge) addFolderBrain(t *testing.T, m BrainManifest) string {
+func (tb *testBridge) addFolderBrain(t *testing.T, m manifest.Manifest) string {
 	t.Helper()
 	if w := tb.do("POST", "/api/brains", map[string]any{"path": "~/" + m.ID, "manifest": m, "create_dir": true}); w.Code != 200 {
 		t.Fatalf("add brain %s: %d %s", m.ID, w.Code, w.Body.String())
@@ -336,7 +346,7 @@ func TestSendRefusesMissingJIDOrText(t *testing.T) {
 	// Blank text gives no chunks, so it used to send nothing while still
 	// answering "sent" and writing the blank text to the brain's history.
 	h := newHarness(t, "")
-	dir := h.AddBrain(BrainManifest{ID: "p", Name: "P", Routing: BrainRouting{HandlesDMs: true}})
+	dir := h.AddBrain(manifest.Manifest{ID: "p", Name: "P", Routing: manifest.Routing{HandlesDMs: true}})
 	cases := []struct {
 		name string
 		body string
@@ -364,11 +374,11 @@ func TestSendRefusesMissingJIDOrText(t *testing.T) {
 // stateMessenger is the dev messenger with a WhatsApp state of the test's
 // choosing.
 type stateMessenger struct {
-	*devMessenger
-	state WAState
+	*devchat.Messenger
+	state chat.LinkState
 }
 
-func (m stateMessenger) State() WAState { return m.state }
+func (m stateMessenger) State() chat.LinkState { return m.state }
 
 func TestReadyReportsWhetherMessagesCanGoOut(t *testing.T) {
 	// /health only says the process is up. /ready tells a script (or
@@ -390,7 +400,7 @@ func TestReadyReportsWhetherMessagesCanGoOut(t *testing.T) {
 		t.Run(c.name, func(t *testing.T) {
 			tb := newTestBridge(t, "")
 			if !c.dev {
-				tb.wa = stateMessenger{devMessenger: tb.dev, state: WAState{Mode: c.mode, OwnNumber: "15551234567"}}
+				tb.wa = stateMessenger{Messenger: tb.dev, state: chat.LinkState{Mode: c.mode, OwnNumber: "15551234567"}}
 				tb.dev = nil
 			}
 			r := httptest.NewRequest("GET", "http://127.0.0.1:8765/ready", nil)
@@ -429,7 +439,7 @@ func TestReadyReportsWhetherMessagesCanGoOut(t *testing.T) {
 
 func TestIngestConfinedToMediaDir(t *testing.T) {
 	h := newHarness(t, `{"ingest": {"enabled": true}}`)
-	dir := h.AddBrain(BrainManifest{ID: "personal", Name: "Personal", Routing: BrainRouting{HandlesDMs: true}})
+	dir := h.AddBrain(manifest.Manifest{ID: "personal", Name: "Personal", Routing: manifest.Routing{HandlesDMs: true}})
 	media := filepath.Join(h.DataDir(), "media")
 	inside := filepath.Join(media, "scan.pdf")
 	_ = os.MkdirAll(filepath.Dir(inside), 0o700)
@@ -476,10 +486,10 @@ func TestIngestConfinedToMediaDir(t *testing.T) {
 // files, or an attachment still on its way to the brain of its chat.
 func TestIngestKeepsOtherBrainsFiles(t *testing.T) {
 	tb := newTestBridge(t, `, "ingest": {"enabled": true}`)
-	tb.addFolderBrain(t, BrainManifest{ID: "personal", Name: "Personal", Routing: BrainRouting{HandlesDMs: true}})
-	tb.addFolderBrain(t, BrainManifest{ID: "team", Name: "Team", Routing: BrainRouting{Groups: []string{"120363000000000000@g.us"}}})
-	tb.addFolderBrain(t, BrainManifest{ID: "old", Name: "Old"})
-	left := tb.addFolderBrain(t, BrainManifest{ID: "left", Name: "Left"})
+	tb.addFolderBrain(t, manifest.Manifest{ID: "personal", Name: "Personal", Routing: manifest.Routing{HandlesDMs: true}})
+	tb.addFolderBrain(t, manifest.Manifest{ID: "team", Name: "Team", Routing: manifest.Routing{Groups: []string{"120363000000000000@g.us"}}})
+	tb.addFolderBrain(t, manifest.Manifest{ID: "old", Name: "Old"})
+	left := tb.addFolderBrain(t, manifest.Manifest{ID: "left", Name: "Left"})
 	media := tb.cfgs.Get().MediaDir
 	for _, p := range []string{"old/dm.pdf", "left/dm.pdf"} {
 		writeTestFile(t, filepath.Join(media, p), "x")
@@ -511,7 +521,7 @@ func TestIngestKeepsOtherBrainsFiles(t *testing.T) {
 		{"the inbox of a brain left out", "left/dm.pdf", 400, 400},
 		{"Plaud transcripts older versions kept", "plaud/2026-01-15 standup.txt", 400, 400},
 		{"a folder no brain owns", "upload/scan.pdf", 400, 400},
-		{"an attachment not yet routed", incomingMediaDir + "/voice.ogg", 400, 400},
+		{"an attachment not yet routed", mediafiles.IncomingDir + "/voice.ogg", 400, 400},
 		{"its own inbox", "team/notes.pdf", 202, 202},
 		{"a folder in its own inbox", "team/plaud/notes.txt", 202, 202},
 		{"the top of the media folder", "scan.pdf", 202, 400},
@@ -625,7 +635,7 @@ func TestUnknownBrainIsQuotedAsSent(t *testing.T) {
 // nothing is handed to any brain.
 func TestIngestRefusesScope(t *testing.T) {
 	h := newHarness(t, `{"ingest": {"enabled": true}}`)
-	dir := h.AddBrain(BrainManifest{ID: "personal", Name: "Personal", Routing: BrainRouting{HandlesDMs: true}})
+	dir := h.AddBrain(manifest.Manifest{ID: "personal", Name: "Personal", Routing: manifest.Routing{HandlesDMs: true}})
 	for name, body := range map[string]string{
 		"scope only":         `{"scope":"personal","text":"file this"}`,
 		"scope and brain":    `{"scope":"personal","brain":"personal","text":"file this"}`,
@@ -657,8 +667,8 @@ func TestIngestRefusesScope(t *testing.T) {
 func TestIngestRunsInTheNamedBrain(t *testing.T) {
 	const dm = "15551234567@s.whatsapp.net"
 	h := newHarness(t, `{"ingest": {"enabled": true}}`)
-	dmDir := h.AddBrain(BrainManifest{ID: "dm", Name: "DM", Routing: BrainRouting{HandlesDMs: true}})
-	upDir := h.AddBrain(BrainManifest{ID: "up", Name: "Uploads", ReplyChat: dm})
+	dmDir := h.AddBrain(manifest.Manifest{ID: "dm", Name: "DM", Routing: manifest.Routing{HandlesDMs: true}})
+	upDir := h.AddBrain(manifest.Manifest{ID: "up", Name: "Uploads", ReplyChat: dm})
 
 	w := h.Script("POST", "/ingest", `{"brain":"up","text":"file this"}`)
 	if w.Code != 202 || !strings.Contains(w.Body.String(), dm) {
@@ -685,9 +695,9 @@ func TestIngestRunsInTheNamedBrain(t *testing.T) {
 func TestIngestedCodeIsNotCaught(t *testing.T) {
 	const dm = "15551234567@s.whatsapp.net"
 	tb := newTestBridge(t, `, "ingest": {"enabled": true}, "otp_guard": true, "otp_markers": ["Examplebank 2FA"]`)
-	tb.addFolderBrain(t, BrainManifest{ID: "dm", Name: "DM", Routing: BrainRouting{HandlesDMs: true}})
-	upDir := tb.addFolderBrain(t, BrainManifest{ID: "up", Name: "Uploads", ReplyChat: dm})
-	tb.brainMgr.Get("up").appendHistory(dm, "up", "Examplebank 2FA: reply with the code", historyOut)
+	tb.addFolderBrain(t, manifest.Manifest{ID: "dm", Name: "DM", Routing: manifest.Routing{HandlesDMs: true}})
+	upDir := tb.addFolderBrain(t, manifest.Manifest{ID: "up", Name: "Uploads", ReplyChat: dm})
+	tb.brainMgr.Get("up").appendHistory(dm, "up", "Examplebank 2FA: reply with the code", history.Out)
 
 	if w := tb.ingest(`{"brain":"up","text":"483920"}`); w.Code != 202 {
 		t.Fatalf("ingest: %d %s", w.Code, w.Body.String())
@@ -716,8 +726,8 @@ func TestStopReachesAHandOffInItsReplyChat(t *testing.T) {
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			tb := newTestBridge(t, `, "ingest": {"enabled": true}`)
-			tb.addFolderBrain(t, BrainManifest{ID: "dm", Name: "DM", Routing: BrainRouting{HandlesDMs: true}})
-			tb.addFolderBrain(t, BrainManifest{ID: "up", Name: "Uploads", ReplyChat: dm})
+			tb.addFolderBrain(t, manifest.Manifest{ID: "dm", Name: "DM", Routing: manifest.Routing{HandlesDMs: true}})
+			tb.addFolderBrain(t, manifest.Manifest{ID: "up", Name: "Uploads", ReplyChat: dm})
 			t.Setenv("FRIDOLIN_FAKE_SLEEP_MS", "30000")
 			up := tb.brainMgr.Get("up")
 
@@ -758,8 +768,8 @@ func TestStopReachesAHandOffInItsReplyChat(t *testing.T) {
 func TestResetReachesAHandOffInItsReplyChat(t *testing.T) {
 	const dm = "15551234567@s.whatsapp.net"
 	tb := newTestBridge(t, `, "ingest": {"enabled": true}`)
-	tb.addFolderBrain(t, BrainManifest{ID: "dm", Name: "DM", Routing: BrainRouting{HandlesDMs: true}})
-	tb.addFolderBrain(t, BrainManifest{ID: "up", Name: "Uploads", ReplyChat: dm})
+	tb.addFolderBrain(t, manifest.Manifest{ID: "dm", Name: "DM", Routing: manifest.Routing{HandlesDMs: true}})
+	tb.addFolderBrain(t, manifest.Manifest{ID: "up", Name: "Uploads", ReplyChat: dm})
 	t.Setenv("FRIDOLIN_FAKE_SLEEP_MS", "30000")
 	up := tb.brainMgr.Get("up")
 
@@ -772,7 +782,7 @@ func TestResetReachesAHandOffInItsReplyChat(t *testing.T) {
 	}
 	waitFor(t, 5*time.Second, "the second file to wait", func() bool { return len(up.Snapshot().Queue) == 1 })
 
-	tb.handleInbound(context.Background(), Inbound{JID: dm, Sender: "15551234567", Text: "!reset", Source: sourceWhatsApp})
+	tb.handleInbound(context.Background(), Inbound{Inbound: chat.Inbound{JID: dm, Sender: "15551234567", Text: "!reset", Source: chat.SourceWhatsApp}})
 	if !tb.sentPrefix(dm, "✅ Reset. I stopped what this chat had running or waiting") {
 		t.Errorf("!reset answered %q, want that it cleared the chat", tb.sentTo(dm))
 	}
@@ -781,10 +791,10 @@ func TestResetReachesAHandOffInItsReplyChat(t *testing.T) {
 	}
 	// up answers in the chat, so the chat starts afresh for it too: its
 	// next file's run reads none of the earlier ones.
-	if !slices.ContainsFunc(readHistory(t, up), func(e historyEntry) bool { return e.Type == historyReset && e.Chat == dm }) {
+	if !slices.ContainsFunc(readHistory(t, up), func(e history.Entry) bool { return e.Type == history.Reset && e.Chat == dm }) {
 		t.Errorf("up's history has no reset marker for the chat:\n%+v", readHistory(t, up))
 	}
-	if before, _ := up.historyBefore(Inbound{JID: dm, Brain: "up", Sender: "upload", Text: "next file", Source: sourceIngest}, dmHistoryWindow); len(before) != 0 {
+	if before, _ := up.historyBefore(Inbound{Inbound: chat.Inbound{JID: dm, Brain: "up", Sender: "upload", Text: "next file", Source: chat.SourceIngest}}, dmHistoryWindow); len(before) != 0 {
 		t.Errorf("up's next run in the chat would read %+v", before)
 	}
 }
@@ -798,12 +808,12 @@ func TestStopCountsWaitingHandOffs(t *testing.T) {
 		group = "120363000000000000@g.us"
 	)
 	tb := newTestBridge(t, `, "ingest": {"enabled": true}`)
-	tb.addFolderBrain(t, BrainManifest{ID: "dm", Name: "DM", Routing: BrainRouting{HandlesDMs: true}})
-	tb.addFolderBrain(t, BrainManifest{ID: "up", Name: "Uploads", ReplyChat: dm, Routing: BrainRouting{Groups: []string{group}}})
+	tb.addFolderBrain(t, manifest.Manifest{ID: "dm", Name: "DM", Routing: manifest.Routing{HandlesDMs: true}})
+	tb.addFolderBrain(t, manifest.Manifest{ID: "up", Name: "Uploads", ReplyChat: dm, Routing: manifest.Routing{Groups: []string{group}}})
 	t.Setenv("FRIDOLIN_FAKE_SLEEP_MS", "30000")
 	up := tb.brainMgr.Get("up")
 
-	if _, _, _, err := tb.brainMgr.Submit(Inbound{JID: group, Sender: "15551234567", Text: "group work", Source: sourceWhatsApp}); err != nil {
+	if _, _, _, err := tb.brainMgr.Submit(Inbound{Inbound: chat.Inbound{JID: group, Sender: "15551234567", Text: "group work", Source: chat.SourceWhatsApp}}); err != nil {
 		t.Fatal(err)
 	}
 	waitFor(t, 5*time.Second, "up's group run", func() bool { r := up.Snapshot().Running; return r != nil && r.PID > 0 })
@@ -812,7 +822,7 @@ func TestStopCountsWaitingHandOffs(t *testing.T) {
 	}
 	waitFor(t, 5*time.Second, "the file to wait", func() bool { return len(up.Snapshot().Queue) == 1 })
 
-	tb.handleInbound(context.Background(), Inbound{JID: dm, Sender: "15551234567", Text: "!stop", Source: sourceWhatsApp})
+	tb.handleInbound(context.Background(), Inbound{Inbound: chat.Inbound{JID: dm, Sender: "15551234567", Text: "!stop", Source: chat.SourceWhatsApp}})
 	if !tb.sentPrefix(dm, "🛑 Nothing was running for this chat; cleared") {
 		t.Errorf("!stop answered %q, want that it cleared the waiting file", tb.sentTo(dm))
 	}
@@ -831,24 +841,24 @@ func TestReplyChatFor(t *testing.T) {
 		g1 = "120363000000000001@g.us"
 		g2 = "120363000000000002@g.us"
 	)
-	dmBrain := BrainManifest{ID: "p", Name: "P", Routing: BrainRouting{HandlesDMs: true}}
+	dmBrain := manifest.Manifest{ID: "p", Name: "P", Routing: manifest.Routing{HandlesDMs: true}}
 	for _, c := range []struct {
 		name   string
 		extra  string
-		brains []BrainManifest
+		brains []manifest.Manifest
 		brain  string
 		want   string
 	}{
 		{"DM brain with a group answers in the DM", "",
-			[]BrainManifest{{ID: "p", Name: "P", Routing: BrainRouting{HandlesDMs: true, Groups: []string{g1}}}}, "p", dm},
+			[]manifest.Manifest{{ID: "p", Name: "P", Routing: manifest.Routing{HandlesDMs: true, Groups: []string{g1}}}}, "p", dm},
 		{"fallback brain gets the DMs, so it answers there before its group", "",
-			[]BrainManifest{{ID: "f", Name: "F", Routing: BrainRouting{Default: true, Groups: []string{g1}}}}, "f", dm},
+			[]manifest.Manifest{{ID: "f", Name: "F", Routing: manifest.Routing{Default: true, Groups: []string{g1}}}}, "f", dm},
 		{"group brain answers in its group", "",
-			[]BrainManifest{dmBrain, {ID: "g", Name: "G", Routing: BrainRouting{Groups: []string{g2}}}}, "g", g2},
+			[]manifest.Manifest{dmBrain, {ID: "g", Name: "G", Routing: manifest.Routing{Groups: []string{g2}}}}, "g", g2},
 		{"brain without chats has none", "",
-			[]BrainManifest{dmBrain, {ID: "n", Name: "N"}}, "n", ""},
+			[]manifest.Manifest{dmBrain, {ID: "n", Name: "N"}}, "n", ""},
 		{"no allowed number: the fallback's group", `, "allowed_numbers": []`,
-			[]BrainManifest{{ID: "f", Name: "F", Routing: BrainRouting{Groups: []string{g1}}}}, "f", g1},
+			[]manifest.Manifest{{ID: "f", Name: "F", Routing: manifest.Routing{Groups: []string{g1}}}}, "f", g1},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			tb := newTestBridge(t, c.extra)
@@ -868,8 +878,8 @@ func TestReplyChatFor(t *testing.T) {
 func TestDevInboundCanNameABrain(t *testing.T) {
 	const dm = "15551234567@s.whatsapp.net"
 	h := newHarness(t, "")
-	h.AddBrain(BrainManifest{ID: "dm", Name: "DM", Routing: BrainRouting{HandlesDMs: true}})
-	upDir := h.AddBrain(BrainManifest{ID: "up", Name: "Uploads"})
+	h.AddBrain(manifest.Manifest{ID: "dm", Name: "DM", Routing: manifest.Routing{HandlesDMs: true}})
+	upDir := h.AddBrain(manifest.Manifest{ID: "up", Name: "Uploads"})
 
 	if w := h.Do("POST", "/api/dev/inbound", map[string]any{"jid": dm, "brain": "nobody", "text": "x"}); w.Code != 400 {
 		t.Errorf("unknown brain: %d, want 400", w.Code)
@@ -921,7 +931,7 @@ func TestDevInboundHearsWhomGroupMembersAdmits(t *testing.T) {
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			h := newHarness(t, c.cfg)
-			dir := h.AddBrain(BrainManifest{ID: "main", Name: "Main", Routing: BrainRouting{Groups: []string{harnessGroup}}})
+			dir := h.AddBrain(manifest.Manifest{ID: "main", Name: "Main", Routing: manifest.Routing{Groups: []string{harnessGroup}}})
 			w := h.Do("POST", "/api/dev/inbound", inbound{JID: harnessGroup, Sender: c.sender, Text: "untagged chatter"})
 			var resp struct{ Status, Reason string }
 			if err := json.Unmarshal(w.Body.Bytes(), &resp); w.Code != 202 || err != nil {
@@ -967,12 +977,12 @@ func TestAddBrainAllowChatAndRoute(t *testing.T) {
 		t.Fatalf("inspect: %d %s", w.Code, w.Body.String())
 	}
 
-	m := BrainManifest{ID: "family", Name: "Family", Routing: BrainRouting{HandlesDMs: true}}
+	m := manifest.Manifest{ID: "family", Name: "Family", Routing: manifest.Routing{HandlesDMs: true}}
 	w = h.Do("POST", "/api/brains", map[string]any{"path": "~/family", "manifest": m, "create_dir": true})
 	if w.Code != 200 {
 		t.Fatalf("add brain: %d %s", w.Code, w.Body.String())
 	}
-	if _, err := os.Stat(filepath.Join(dir, ManifestFile)); err != nil {
+	if _, err := os.Stat(filepath.Join(dir, manifest.File)); err != nil {
 		t.Error("brain.json not written")
 	}
 	if got := h.Answer(inbound{JID: harnessDM, Text: "hello brain"}); !strings.Contains(got, "echo:"+dir+":") || !strings.Contains(got, "hello brain") {
@@ -980,14 +990,14 @@ func TestAddBrainAllowChatAndRoute(t *testing.T) {
 	}
 	// config.json keeps the folder as typed.
 	var file struct {
-		BrainDirs []BrainRef `json:"brain_dirs"`
+		BrainDirs []config.BrainRef `json:"brain_dirs"`
 	}
 	if data, err := os.ReadFile(h.Config().Path); err != nil || json.Unmarshal(data, &file) != nil || len(file.BrainDirs) != 1 || file.BrainDirs[0].Path != "~/family" {
 		t.Errorf("brain_dirs = %+v (%v)", file.BrainDirs, err)
 	}
 
 	// A second DM brain is refused.
-	m2 := BrainManifest{ID: "work", Name: "Work", Routing: BrainRouting{HandlesDMs: true}}
+	m2 := manifest.Manifest{ID: "work", Name: "Work", Routing: manifest.Routing{HandlesDMs: true}}
 	if w := h.Do("POST", "/api/brains", map[string]any{"path": "~/work", "manifest": m2, "create_dir": true}); w.Code != 422 {
 		t.Errorf("second DM brain: %d, want 422", w.Code)
 	}
@@ -1010,7 +1020,7 @@ func TestAddBrainAllowChatAndRoute(t *testing.T) {
 	if got := h.Answer(inbound{JID: club, Sender: "15551234567", Text: "@claude hello club"}); !strings.Contains(got, "echo:"+dir+":") {
 		t.Errorf("group not routed to the chosen brain: %q", got)
 	}
-	if disk, _ := ReadManifest(dir); !slices.Contains(disk.Routing.Groups, club) {
+	if disk, _ := manifest.Read(dir); !slices.Contains(disk.Routing.Groups, club) {
 		t.Error("the group must be saved in the brain's own brain.json")
 	}
 	if ign := h.Do("GET", "/api/chats/ignored", nil).Body.String(); strings.TrimSpace(ign) != "[]" {
@@ -1036,11 +1046,11 @@ func TestAddBrainAllowChatAndRoute(t *testing.T) {
 
 func TestApproveDrift(t *testing.T) {
 	h := newHarness(t, "")
-	m := BrainManifest{ID: "notes", Name: "Notes"}
+	m := manifest.Manifest{ID: "notes", Name: "Notes"}
 	dir := h.AddBrain(m)
 	edited := m
 	edited.Name, edited.Routing.Default = "Notes 2", true
-	if err := WriteManifest(dir, &edited, true); err != nil {
+	if err := manifest.Write(dir, &edited, true); err != nil {
 		t.Fatal(err)
 	}
 
@@ -1093,7 +1103,7 @@ func TestStopRunFromTheDashboard(t *testing.T) {
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			h := newHarness(t, "")
-			h.AddBrain(BrainManifest{ID: "main", Name: "Main", Routing: BrainRouting{HandlesDMs: true}})
+			h.AddBrain(manifest.Manifest{ID: "main", Name: "Main", Routing: manifest.Routing{HandlesDMs: true}})
 			pids := filepath.Join(t.TempDir(), "pids")
 			t.Setenv("FRIDOLIN_FAKE_PID_LOG", pids)
 			t.Setenv("FRIDOLIN_FAKE_SLEEP_MS", "30000")
@@ -1149,14 +1159,14 @@ func TestStopRunFromTheDashboard(t *testing.T) {
 // they were.
 func TestUpdateBrain(t *testing.T) {
 	h := newHarness(t, "")
-	dir := h.AddBrain(BrainManifest{ID: "a", Name: "A", Routing: BrainRouting{HandlesDMs: true}})
-	dirB := h.AddBrain(BrainManifest{ID: "b", Name: "B"})
+	dir := h.AddBrain(manifest.Manifest{ID: "a", Name: "A", Routing: manifest.Routing{HandlesDMs: true}})
+	dirB := h.AddBrain(manifest.Manifest{ID: "b", Name: "B"})
 
-	edited := BrainManifest{ID: "a", Name: "Assistant", Model: "opus", Routing: BrainRouting{HandlesDMs: true, Groups: []string{harnessGroup}}}
+	edited := manifest.Manifest{ID: "a", Name: "Assistant", Model: "opus", Routing: manifest.Routing{HandlesDMs: true, Groups: []string{harnessGroup}}}
 	if w := h.Do("PUT", "/api/brains/a", map[string]any{"manifest": edited}); w.Code != 200 {
 		t.Fatalf("save: %d %s", w.Code, w.Body)
 	}
-	disk, err := ReadManifest(dir)
+	disk, err := manifest.Read(dir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1166,7 +1176,7 @@ func TestUpdateBrain(t *testing.T) {
 	if approved, ok := h.Approved()["a"]; !ok || !approved.Equal(*disk) {
 		t.Errorf("approved = %+v, want what brain.json has", approved)
 	}
-	if got := h.Answer(inbound{JID: harnessGroup, Sender: normalizeJID(harnessDM), Text: "@claude hello"}); !strings.Contains(got, "echo:"+dir+":") {
+	if got := h.Answer(inbound{JID: harnessGroup, Sender: chat.NormalizeJID(harnessDM), Text: "@claude hello"}); !strings.Contains(got, "echo:"+dir+":") {
 		t.Errorf("the group got %q, want the answer of the edited brain a", got)
 	}
 	var views []struct{ ID, Name string }
@@ -1179,13 +1189,13 @@ func TestUpdateBrain(t *testing.T) {
 
 	for _, c := range []struct {
 		name, id string
-		m        BrainManifest
+		m        manifest.Manifest
 		want     string
 	}{
-		{"id changed", "a", BrainManifest{ID: "x", Name: "X"}, "id cannot change"},
-		{"no such brain", "nobody", BrainManifest{ID: "nobody", Name: "N"}, `no brain \"nobody\"`},
-		{"not valid", "b", BrainManifest{ID: "b", Name: "B", Effort: "huge"}, "effort"},
-		{"second DM brain", "b", BrainManifest{ID: "b", Name: "B", Routing: BrainRouting{HandlesDMs: true}}, "both handle DMs"},
+		{"id changed", "a", manifest.Manifest{ID: "x", Name: "X"}, "id cannot change"},
+		{"no such brain", "nobody", manifest.Manifest{ID: "nobody", Name: "N"}, `no brain \"nobody\"`},
+		{"not valid", "b", manifest.Manifest{ID: "b", Name: "B", Effort: "huge"}, "effort"},
+		{"second DM brain", "b", manifest.Manifest{ID: "b", Name: "B", Routing: manifest.Routing{HandlesDMs: true}}, "both handle DMs"},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			etag := h.Config().ETag
@@ -1209,7 +1219,7 @@ func manifestFiles(t *testing.T, dirs ...string) []string {
 	t.Helper()
 	var out []string
 	for _, d := range dirs {
-		data, err := os.ReadFile(filepath.Join(d, ManifestFile))
+		data, err := os.ReadFile(filepath.Join(d, manifest.File))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -1237,8 +1247,8 @@ func TestAssignGroup(t *testing.T) {
 		t.Run(c.name, func(t *testing.T) {
 			h := newHarness(t, "")
 			dirs := map[string]string{
-				"a": h.AddBrain(BrainManifest{ID: "a", Name: "A", Routing: BrainRouting{Groups: []string{harnessGroup}}}),
-				"b": h.AddBrain(BrainManifest{ID: "b", Name: "B"}),
+				"a": h.AddBrain(manifest.Manifest{ID: "a", Name: "A", Routing: manifest.Routing{Groups: []string{harnessGroup}}}),
+				"b": h.AddBrain(manifest.Manifest{ID: "b", Name: "B"}),
 			}
 			before := manifestFiles(t, dirs["a"], dirs["b"])
 			w := h.Do("POST", "/api/chats/allow", map[string]string{"jid": harnessGroup, "kind": "group", "brain": c.to})
@@ -1252,7 +1262,7 @@ func TestAssignGroup(t *testing.T) {
 				return
 			}
 			for id, want := range c.want {
-				disk, err := ReadManifest(dirs[id])
+				disk, err := manifest.Read(dirs[id])
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -1265,7 +1275,7 @@ func TestAssignGroup(t *testing.T) {
 					t.Errorf("%s's approved groups are %q, want %q", id, approved.Routing.Groups, want)
 				}
 			}
-			if got := h.Answer(inbound{JID: harnessGroup, Sender: normalizeJID(harnessDM), Text: "@claude hello"}); !strings.Contains(got, "echo:"+dirs[c.to]+":") {
+			if got := h.Answer(inbound{JID: harnessGroup, Sender: chat.NormalizeJID(harnessDM), Text: "@claude hello"}); !strings.Contains(got, "echo:"+dirs[c.to]+":") {
 				t.Errorf("the group got %q, want the answer of %s", got, c.to)
 			}
 			if issues := h.Issues(); len(issues) != 0 {
@@ -1296,7 +1306,7 @@ func TestAllowListEntries(t *testing.T) {
 	}
 	for _, c := range numbers {
 		t.Run("number "+c.in, func(t *testing.T) {
-			got, err := phoneNumber(c.in)
+			got, err := chat.PhoneNumber(c.in)
 			if c.want == "" {
 				if err == nil {
 					t.Errorf("phoneNumber(%q) = %q, want an error", c.in, got)
@@ -1323,7 +1333,7 @@ func TestAllowListEntries(t *testing.T) {
 	}
 	for _, c := range groups {
 		t.Run("group "+c.in, func(t *testing.T) {
-			got, err := allowListGroup(c.in)
+			got, err := config.AllowListGroup(c.in)
 			if c.want == "" {
 				if err == nil {
 					t.Errorf("allowListGroup(%q) = %q, want an error", c.in, got)
@@ -1345,11 +1355,11 @@ func FuzzPhoneNumber(f *testing.F) {
 		f.Add(s)
 	}
 	f.Fuzz(func(t *testing.T, in string) {
-		n, err := phoneNumber(in)
+		n, err := chat.PhoneNumber(in)
 		if err != nil {
 			return
 		}
-		if !phoneNumberRE.MatchString(n) {
+		if !chat.IsPhoneNumber(n) {
 			t.Fatalf("phoneNumber(%q) = %q, not 6 to 15 digits", in, n)
 		}
 		digits := strings.Map(func(r rune) rune {
@@ -1361,7 +1371,7 @@ func FuzzPhoneNumber(f *testing.F) {
 		if !strings.Contains(digits, n) {
 			t.Errorf("phoneNumber(%q) = %q, digits that are not in the input", in, n)
 		}
-		if again, err := phoneNumber(n); err != nil || again != n {
+		if again, err := chat.PhoneNumber(n); err != nil || again != n {
 			t.Errorf("phoneNumber(%q) = %q, %v; want it unchanged", n, again, err)
 		}
 	})
@@ -1530,17 +1540,17 @@ func TestGroupMembersEditedOnTheChatsPage(t *testing.T) {
 
 func TestRevokedGroupKeepsItsBrain(t *testing.T) {
 	h := newHarness(t, "")
-	dir := h.AddBrain(BrainManifest{ID: "family", Name: "Family", Routing: BrainRouting{Groups: []string{harnessGroup}}})
+	dir := h.AddBrain(manifest.Manifest{ID: "family", Name: "Family", Routing: manifest.Routing{Groups: []string{harnessGroup}}})
 	if w := h.Do("POST", "/api/chats/revoke", map[string]string{"kind": "group", "jid": harnessGroup}); w.Code != 200 {
 		t.Fatalf("revoke: %d %s", w.Code, w.Body)
 	}
-	if disk, _ := ReadManifest(dir); !slices.Contains(disk.Routing.Groups, harnessGroup) {
+	if disk, _ := manifest.Read(dir); !slices.Contains(disk.Routing.Groups, harnessGroup) {
 		t.Error("revoking the group took it out of the brain's routing")
 	}
 	if w := h.Do("POST", "/api/chats/allow", map[string]string{"kind": "group", "jid": harnessGroup}); w.Code != 200 {
 		t.Fatalf("allow: %d %s", w.Code, w.Body)
 	}
-	if got := h.Answer(inbound{JID: harnessGroup, Sender: normalizeJID(harnessDM), Text: "@claude hello"}); !strings.Contains(got, "echo:"+dir+":") {
+	if got := h.Answer(inbound{JID: harnessGroup, Sender: chat.NormalizeJID(harnessDM), Text: "@claude hello"}); !strings.Contains(got, "echo:"+dir+":") {
 		t.Errorf("allowed again, the group got %q, want family's answer", got)
 	}
 }
@@ -1619,7 +1629,7 @@ func TestEmptyingTheAllowlistWarnsOnlyWithAllowAnyDM(t *testing.T) {
 			defer log.SetOutput(log.Writer())
 			log.SetOutput(&logs)
 			// Removing the last number on the Chats page.
-			if w := h.Do("POST", "/api/chats/revoke", map[string]string{"kind": "dm", "number": normalizeJID(harnessDM)}); w.Code != http.StatusOK {
+			if w := h.Do("POST", "/api/chats/revoke", map[string]string{"kind": "dm", "number": chat.NormalizeJID(harnessDM)}); w.Code != http.StatusOK {
 				t.Fatalf("revoke: %d %s", w.Code, w.Body.String())
 			}
 			if got := strings.Contains(logs.String(), "WARNING: anyone"); got != tc.open {
@@ -1663,7 +1673,7 @@ func TestGetConfigLocksNoSettings(t *testing.T) {
 	if want := []string{"config", "effective", "etag", "path"}; !slices.Equal(keys, want) {
 		t.Errorf("GET /api/config has %v, want %v", keys, want)
 	}
-	var eff Config
+	var eff config.Config
 	if err := json.Unmarshal(got["effective"], &eff); err != nil {
 		t.Fatal(err)
 	}
@@ -1674,7 +1684,7 @@ func TestGetConfigLocksNoSettings(t *testing.T) {
 
 func TestPutConfigKeepsBrainsAndReportsRestart(t *testing.T) {
 	h := newHarness(t, "")
-	h.AddBrain(BrainManifest{ID: "p", Name: "P"})
+	h.AddBrain(manifest.Manifest{ID: "p", Name: "P"})
 	got := h.Config()
 	var c map[string]any
 	_ = json.Unmarshal(got.Config, &c)
@@ -1687,7 +1697,7 @@ func TestPutConfigKeepsBrainsAndReportsRestart(t *testing.T) {
 	if len(h.Approved()) != 1 {
 		t.Error("saving settings must not drop brains")
 	}
-	var eff Config
+	var eff config.Config
 	if err := json.Unmarshal(h.Config().Effective, &eff); err != nil {
 		t.Fatal(err)
 	}
@@ -1756,15 +1766,15 @@ func TestStatusReportsSettingsWaitingForRestart(t *testing.T) {
 func TestPutConfigRefusesClassicMode(t *testing.T) {
 	h := newHarness(t, "")
 	got := h.Config()
-	var config map[string]any
-	if err := json.Unmarshal(got.Config, &config); err != nil {
+	var configValue map[string]any
+	if err := json.Unmarshal(got.Config, &configValue); err != nil {
 		t.Fatal(err)
 	}
-	if config["brain_mode"] != true {
-		t.Errorf("GET /api/config: brain_mode = %v, want true", config["brain_mode"])
+	if configValue["brain_mode"] != true {
+		t.Errorf("GET /api/config: brain_mode = %v, want true", configValue["brain_mode"])
 	}
-	config["brain_mode"] = false
-	w := h.Do("PUT", "/api/config", map[string]any{"etag": got.ETag, "config": config})
+	configValue["brain_mode"] = false
+	w := h.Do("PUT", "/api/config", map[string]any{"etag": got.ETag, "config": configValue})
 	if w.Code != http.StatusBadRequest || !strings.Contains(w.Body.String(), "classic mode, which was removed") {
 		t.Errorf("put brain_mode false: %d %s, want 400 saying classic mode was removed", w.Code, w.Body.String())
 	}
@@ -1790,19 +1800,19 @@ func TestPutConfigRefusesInlineBrains(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			h := newHarness(t, "")
 			got := h.Config()
-			var config map[string]any
-			if err := json.Unmarshal(got.Config, &config); err != nil {
+			var configValue map[string]any
+			if err := json.Unmarshal(got.Config, &configValue); err != nil {
 				t.Fatal(err)
 			}
-			if _, ok := config["brains"]; ok {
-				t.Errorf("GET /api/config has a brains key: %v", config["brains"])
+			if _, ok := configValue["brains"]; ok {
+				t.Errorf("GET /api/config has a brains key: %v", configValue["brains"])
 			}
-			delete(config, "version")
+			delete(configValue, "version")
 			if tc.version != nil {
-				config["version"] = tc.version
+				configValue["version"] = tc.version
 			}
-			config["brains"] = []map[string]any{{"name": "a", "work_dir": "~/a"}}
-			w := h.Do("PUT", "/api/config", map[string]any{"etag": got.ETag, "config": config})
+			configValue["brains"] = []map[string]any{{"name": "a", "work_dir": "~/a"}}
+			w := h.Do("PUT", "/api/config", map[string]any{"etag": got.ETag, "config": configValue})
 			if w.Code != http.StatusBadRequest || !strings.Contains(w.Body.String(), tc.want) {
 				t.Errorf("put inline brains: %d %s, want 400 saying %s", w.Code, w.Body.String(), tc.want)
 			}
@@ -1818,22 +1828,22 @@ func TestPutConfigRefusesInlineBrains(t *testing.T) {
 func TestAllowGroupMovesItBetweenBrains(t *testing.T) {
 	const moved, kept = "120363000000000001@g.us", "120363000000000002@g.us"
 	h := newHarness(t, `{"allowed_groups": ["`+moved+`", "`+kept+`"]}`)
-	fromDir := h.AddBrain(BrainManifest{ID: "from", Name: "From", Routing: BrainRouting{Groups: []string{kept, moved}}})
-	toDir := h.AddBrain(BrainManifest{ID: "to", Name: "To"})
+	fromDir := h.AddBrain(manifest.Manifest{ID: "from", Name: "From", Routing: manifest.Routing{Groups: []string{kept, moved}}})
+	toDir := h.AddBrain(manifest.Manifest{ID: "to", Name: "To"})
 
 	if w := h.Do("POST", "/api/chats/allow", map[string]string{"jid": moved, "kind": "group", "brain": "to"}); w.Code != 200 {
 		t.Fatalf("allow: %d %s", w.Code, w.Body.String())
 	}
-	if from, _ := ReadManifest(fromDir); !slices.Equal(from.Routing.Groups, []string{kept}) {
+	if from, _ := manifest.Read(fromDir); !slices.Equal(from.Routing.Groups, []string{kept}) {
 		t.Errorf("from has groups %q, want only %q", from.Routing.Groups, kept)
 	}
-	if to, _ := ReadManifest(toDir); !slices.Equal(to.Routing.Groups, []string{moved}) {
+	if to, _ := manifest.Read(toDir); !slices.Equal(to.Routing.Groups, []string{moved}) {
 		t.Errorf("to has groups %q, want %q", to.Routing.Groups, moved)
 	}
-	if got := h.Answer(inbound{JID: moved, Sender: normalizeJID(harnessDM), Text: "@claude hello"}); !strings.Contains(got, "echo:"+toDir+":") {
+	if got := h.Answer(inbound{JID: moved, Sender: chat.NormalizeJID(harnessDM), Text: "@claude hello"}); !strings.Contains(got, "echo:"+toDir+":") {
 		t.Errorf("the group got %q, want to's answer", got)
 	}
-	if got := h.Answer(inbound{JID: kept, Sender: normalizeJID(harnessDM), Text: "@claude hello"}); !strings.Contains(got, "echo:"+fromDir+":") {
+	if got := h.Answer(inbound{JID: kept, Sender: chat.NormalizeJID(harnessDM), Text: "@claude hello"}); !strings.Contains(got, "echo:"+fromDir+":") {
 		t.Errorf("the other group got %q, want from's answer", got)
 	}
 }
@@ -1857,11 +1867,11 @@ func TestPrettyName(t *testing.T) {
 
 // qrMessenger is the dev messenger with a pairing code to show.
 type qrMessenger struct {
-	*devMessenger
+	*devchat.Messenger
 	code string
 }
 
-func (q qrMessenger) State() WAState { return WAState{Mode: "pairing", QRCode: q.code} }
+func (q qrMessenger) State() chat.LinkState { return chat.LinkState{Mode: "pairing", QRCode: q.code} }
 
 // The pairing code is served as a PNG, square and big enough to scan once
 // the dashboard scales it, and only while there is a code.
@@ -1902,25 +1912,25 @@ func TestQRCodeIsServedAsAPNG(t *testing.T) {
 func TestConfigPageFoldsTheRetiredModel(t *testing.T) {
 	h := newHarness(t, `{"model": "sonnet"}`)
 	got := h.Config()
-	var config map[string]any
-	if err := json.Unmarshal(got.Config, &config); err != nil {
+	var configValue map[string]any
+	if err := json.Unmarshal(got.Config, &configValue); err != nil {
 		t.Fatal(err)
 	}
-	if _, ok := config["model"]; ok {
-		t.Errorf("GET /api/config has a model key: %v", config["model"])
+	if _, ok := configValue["model"]; ok {
+		t.Errorf("GET /api/config has a model key: %v", configValue["model"])
 	}
-	if config["brain_model"] != "sonnet" {
-		t.Errorf("GET /api/config: brain_model %v, want sonnet", config["brain_model"])
+	if configValue["brain_model"] != "sonnet" {
+		t.Errorf("GET /api/config: brain_model %v, want sonnet", configValue["brain_model"])
 	}
 
 	// An old tab: brain_model as an older bridge served it, and model,
 	// with no version, which older bridges did not have.
-	config["brain_model"], config["model"] = "", "haiku"
-	delete(config, "version")
-	if w := h.Do("PUT", "/api/config", map[string]any{"etag": got.ETag, "config": config}); w.Code != http.StatusOK {
+	configValue["brain_model"], configValue["model"] = "", "haiku"
+	delete(configValue, "version")
+	if w := h.Do("PUT", "/api/config", map[string]any{"etag": got.ETag, "config": configValue}); w.Code != http.StatusOK {
 		t.Fatalf("put: %d %s", w.Code, w.Body.String())
 	}
-	var eff Config
+	var eff config.Config
 	if err := json.Unmarshal(h.Config().Effective, &eff); err != nil {
 		t.Fatal(err)
 	}
@@ -1937,30 +1947,30 @@ func TestAddBrainBackupDefaults(t *testing.T) {
 	// No backup settings given: backed up, with the default exclusions.
 	_ = h.Do("POST", "/api/brains", map[string]any{"path": "~/a", "create_dir": true, "manifest": map[string]any{"id": "a", "name": "A"}})
 	// Explicitly off stays off.
-	off := BrainManifest{ID: "b", Name: "B", Backup: BrainBackup{Enabled: false, Exclude: []string{"*.log"}}}
+	off := manifest.Manifest{ID: "b", Name: "B", Backup: manifest.Backup{Enabled: false, Exclude: []string{"*.log"}}}
 	_ = h.Do("POST", "/api/brains", map[string]any{"path": "~/b", "create_dir": true, "manifest": off})
 	// Off without an exclude list stays off too, with the default
 	// exclusions should it be turned on.
 	if w := h.Do("POST", "/api/brains", map[string]any{"path": "~/c", "create_dir": true, "manifest": map[string]any{"id": "c", "name": "C", "backup": map[string]any{"enabled": false}}}); w.Code != 200 {
 		t.Fatalf("add c: %d %s", w.Code, w.Body.String())
 	}
-	a, _ := ReadManifest(filepath.Join(h.Home(), "a"))
-	b, _ := ReadManifest(filepath.Join(h.Home(), "b"))
-	c, _ := ReadManifest(filepath.Join(h.Home(), "c"))
+	a, _ := manifest.Read(filepath.Join(h.Home(), "a"))
+	b, _ := manifest.Read(filepath.Join(h.Home(), "b"))
+	c, _ := manifest.Read(filepath.Join(h.Home(), "c"))
 	if !a.Backup.Enabled || len(a.Backup.Exclude) == 0 {
 		t.Errorf("a.backup = %+v, want on with defaults", a.Backup)
 	}
 	if b.Backup.Enabled || len(b.Backup.Exclude) != 1 {
 		t.Errorf("b.backup = %+v, want off as requested", b.Backup)
 	}
-	if c.Backup.Enabled || !slices.Equal(c.Backup.Exclude, DefaultBackupExcludes) {
+	if c.Backup.Enabled || !slices.Equal(c.Backup.Exclude, manifest.DefaultBackupExcludes()) {
 		t.Errorf("c.backup = %+v, want off with the default exclusions", c.Backup)
 	}
 }
 
 func TestOTPGuardHandsCodeToLocalScripts(t *testing.T) {
 	h := newHarness(t, `{"otp_guard": true, "otp_markers": ["Examplebank 2FA"]}`)
-	dir := h.AddBrain(BrainManifest{ID: "p", Name: "P", Routing: BrainRouting{HandlesDMs: true}})
+	dir := h.AddBrain(manifest.Manifest{ID: "p", Name: "P", Routing: manifest.Routing{HandlesDMs: true}})
 	// A local script asks for a code through /send, which names the
 	// request...
 	asked := time.Now().UnixMilli()
@@ -1976,10 +1986,10 @@ func TestOTPGuardHandsCodeToLocalScripts(t *testing.T) {
 	if w := h.Do("POST", "/api/dev/inbound", map[string]any{"jid": "15551234567@s.whatsapp.net", "text": " 483920 "}); w.Code != 202 {
 		t.Fatal(w.Body.String())
 	}
-	otp := filepath.Join(h.DataDir(), "otp", "p.json")
-	waitFor(t, 3*time.Second, "otp file", func() bool { _, err := os.Stat(otp); return err == nil })
-	data, _ := os.ReadFile(otp)
-	var got otpHandoff
+	otpPath := filepath.Join(h.DataDir(), "otp", "p.json")
+	waitFor(t, 3*time.Second, "otp file", func() bool { _, err := os.Stat(otpPath); return err == nil })
+	data, _ := os.ReadFile(otpPath)
+	var got otp.Record
 	_ = json.Unmarshal(data, &got)
 	if got.Code != "483920" || got.Chat != "15551234567@s.whatsapp.net" || got.Brain != "p" || got.Sender == "" || got.Received == "" {
 		t.Errorf("otp file = %s", data)
@@ -1992,13 +2002,13 @@ func TestOTPGuardHandsCodeToLocalScripts(t *testing.T) {
 	if got.Request != answer.OTPRequest || got.RequestedUnixMS < asked-5000 || got.RequestedUnixMS > got.ReceivedUnixMS {
 		t.Errorf("request %q at %d, want %q around %d", got.Request, got.RequestedUnixMS, answer.OTPRequest, asked)
 	}
-	if want := got.ReceivedUnixMS + otpHandoffTTL.Milliseconds(); got.ExpiresUnixMS != want {
+	if want := got.ReceivedUnixMS + otp.HandoffTTL.Milliseconds(); got.ExpiresUnixMS != want {
 		t.Errorf("expires_unix_ms = %d, want %d", got.ExpiresUnixMS, want)
 	}
-	if st, _ := os.Stat(otp); st.Mode().Perm() != 0o600 {
+	if st, _ := os.Stat(otpPath); st.Mode().Perm() != 0o600 {
 		t.Errorf("otp file mode %v", st.Mode().Perm())
 	}
-	if st, _ := os.Stat(filepath.Dir(otp)); st.Mode().Perm() != 0o700 {
+	if st, _ := os.Stat(filepath.Dir(otpPath)); st.Mode().Perm() != 0o700 {
 		t.Errorf("otp folder mode %v", st.Mode().Perm())
 	}
 	hist, _ := os.ReadFile(filepath.Join(dir, "conversation-history.jsonl"))
@@ -2012,7 +2022,7 @@ func TestOTPGuardHandsCodeToLocalScripts(t *testing.T) {
 		texts = append(texts, m.Text)
 	}
 	slices.Sort(texts)
-	if len(texts) != 2 || !strings.Contains(texts[0], "Examplebank 2FA") || texts[1] != otpCaughtNotice {
+	if len(texts) != 2 || !strings.Contains(texts[0], "Examplebank 2FA") || texts[1] != outboundmsg.OtpCaughtNotice {
 		t.Errorf("sent %q — only the script's own request and the notice may be there; the brain must not run on a caught code", texts)
 	}
 }
@@ -2034,7 +2044,7 @@ func TestSendNamesACodeRequest(t *testing.T) {
 		t.Run(c.name, func(t *testing.T) {
 			tb := newTestBridge(t, c.extra)
 			if c.brain {
-				tb.addFolderBrain(t, BrainManifest{ID: "dm", Name: "DM", Routing: BrainRouting{HandlesDMs: true}})
+				tb.addFolderBrain(t, manifest.Manifest{ID: "dm", Name: "DM", Routing: manifest.Routing{HandlesDMs: true}})
 			}
 			body, _ := json.Marshal(map[string]string{"jid": testDMChat, "text": c.text})
 			r := httptest.NewRequest("POST", "http://127.0.0.1:8765/send", bytes.NewReader(body))

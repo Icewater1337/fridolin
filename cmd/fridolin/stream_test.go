@@ -3,11 +3,16 @@ package main
 import (
 	"encoding/json"
 	"fmt"
+	outboundmsg "github.com/Icewater1337/fridolin/internal/outbound"
 	"slices"
 	"strings"
 	"testing"
 	"time"
 	"unicode/utf8"
+
+	"github.com/Icewater1337/fridolin/internal/manifest"
+
+	"github.com/Icewater1337/fridolin/internal/chat"
 )
 
 func TestExtractAskQuestion(t *testing.T) {
@@ -126,7 +131,7 @@ func TestParseStreamQuestions(t *testing.T) {
 				sent = append(sent, text)
 				return true
 			}}
-			res := readTestStream(br, Inbound{JID: "chat", Silent: c.silent}, strings.Join(c.stream, "\n")+"\n")
+			res := readTestStream(br, Inbound{Inbound: chat.Inbound{JID: "chat", Silent: c.silent}}, strings.Join(c.stream, "\n")+"\n")
 			if (res.Err != nil) != c.err {
 				t.Errorf("error = %v, want one: %v", res.Err, c.err)
 			}
@@ -255,13 +260,13 @@ func FuzzParseStream(f *testing.F) {
 func TestMidRunMessagesReachTheChatMarked(t *testing.T) {
 	const dm = "15551234567@s.whatsapp.net"
 	tb := newTestBridge(t, "")
-	tb.addFolderBrain(t, BrainManifest{ID: "a", Name: "A", Routing: BrainRouting{HandlesDMs: true}})
+	tb.addFolderBrain(t, manifest.Manifest{ID: "a", Name: "A", Routing: manifest.Routing{HandlesDMs: true}})
 	br := tb.brainMgr.Get("a")
 	stream := `{"type":"assistant","message":{"content":[{"type":"tool_use","name":"AskUserQuestion","input":{"questions":[{"question":"⏳ Wait for the delivery?"}]}}]}}
 {"type":"result","result":"asked"}
 `
-	readTestStream(br, Inbound{JID: dm}, stream)
-	br.hooks.Notice(dm, workingNotice)
+	readTestStream(br, Inbound{Inbound: chat.Inbound{JID: dm}}, stream)
+	br.hooks.Notice(dm, outboundmsg.WorkingNotice)
 	// The question goes through the outbox, after the notice.
 	waitFor(t, 5*time.Second, "both messages", func() bool { return len(tb.sentTo(dm)) == 2 })
 	sent := tb.sentTo(dm)

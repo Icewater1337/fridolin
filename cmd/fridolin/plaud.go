@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	outboundmsg "github.com/Icewater1337/fridolin/internal/outbound"
 	"io"
 	"io/fs"
 	"log"
@@ -25,7 +26,10 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/Icewater1337/fridolin/internal/config"
+
 	"github.com/Icewater1337/fridolin/internal/fsx"
+	"github.com/Icewater1337/fridolin/internal/httpapi"
 	"github.com/Icewater1337/fridolin/internal/platform"
 	"github.com/Icewater1337/fridolin/internal/textx"
 	"go.mau.fi/whatsmeow/types"
@@ -45,61 +49,6 @@ import (
 // With plaud.brain_access the login stays in ~/.plaud/ instead, so brains can
 // run the CLI themselves (search, look up a transcript) — at the cost of
 // being able to read the token.
-
-// PlaudConfig controls the Plaud integration.
-type PlaudConfig struct {
-	// Enabled turns on polling for new recordings.
-	Enabled bool `json:"enabled"`
-	// Brain receives the recordings (default: the brain that handles DMs,
-	// else the default brain).
-	Brain string `json:"brain,omitempty"`
-	// CLIPath overrides the plaud binary (default: found in the PATH
-	// folders helperPath keeps, else in the newest nvm node version, else
-	// in /opt/homebrew or /usr/local).
-	CLIPath string `json:"cli_path,omitempty"`
-	// IntervalSeconds between polls (default 60, minimum 30).
-	IntervalSeconds int `json:"interval_seconds,omitempty"`
-	// Polished uses Plaud's AI-cleaned transcript instead of the raw one.
-	Polished bool `json:"polished,omitempty"`
-	// Message is the instruction sent to the brain with each recording,
-	// after a fixed line that says what arrived. {name}, {when} and
-	// {duration} are filled in. Empty uses defaultPlaudMessage.
-	Message string `json:"message,omitempty"`
-	// BrainAccess keeps the login in ~/.plaud/ so brains can use the CLI.
-	BrainAccess bool `json:"brain_access,omitempty"`
-	// PhoneDir, when set, is where recordings come from instead of Plaud's
-	// cloud: a folder that the Plaud Sync phone app's Documents/PlaudSync
-	// is synced to (plaud-android/). Its transcripts, one
-	// YYYY-MM-DD_HH-MM-SS.txt per recording, are handed over as the
-	// cloud's are; Plaud's CLI and its login are not used.
-	PhoneDir string `json:"phone_dir,omitempty"`
-	// PhoneUpload takes the Plaud Sync app's transcripts through the site
-	// instead: the app, built on the dashboard, pairs with Fridolin and
-	// signs each upload (plaud_app.go). They go into PhoneDir, or without
-	// one into <data_dir>/plaud/inbox, and are read from there.
-	PhoneUpload bool `json:"phone_upload,omitempty"`
-}
-
-// interval is how often Plaud is checked.
-func (pc PlaudConfig) interval() time.Duration {
-	if pc.IntervalSeconds > 0 {
-		return time.Duration(pc.IntervalSeconds) * time.Second
-	}
-	return time.Minute
-}
-
-func (pc PlaudConfig) validate() error {
-	if pc.Brain != "" && !brainIDRe.MatchString(pc.Brain) {
-		return fmt.Errorf("plaud.brain %q is not a brain id", pc.Brain)
-	}
-	if pc.IntervalSeconds != 0 && pc.IntervalSeconds < 30 {
-		return fmt.Errorf("plaud.interval_seconds must be at least 30")
-	}
-	if pc.PhoneDir != "" && !filepath.IsAbs(pc.PhoneDir) {
-		return fmt.Errorf("plaud.phone_dir %q must be an absolute path or start with ~/", pc.PhoneDir)
-	}
-	return nil
-}
 
 // plaudMessageHead starts every message a recording comes with: what
 // arrived. Skills and brain prompts can recognise it whatever instruction
@@ -252,7 +201,7 @@ func plaudRetryDelay(tries int) time.Duration {
 // plaudHandedLimit is how many recordings may be with brains at once under
 // cfg: plaudHandedMax, or half of queue.max_pending when that is less, so
 // that the queue keeps room for your own messages. One always may.
-func plaudHandedLimit(cfg *Config) int {
+func plaudHandedLimit(cfg *config.Config) int {
 	return max(1, min(plaudHandedMax, cfg.Queue.MaxPending/2))
 }
 
@@ -426,14 +375,14 @@ func NewPlaudManager(cfgs *ConfigStore, brains *BrainManager) *PlaudManager {
 	return p
 }
 
-func (p *PlaudManager) cfg() *Config { return p.cfgs.Get() }
+func (p *PlaudManager) cfg() *config.Config { return p.cfgs.Get() }
 
 func (p *PlaudManager) dir() string { return filepath.Join(p.cfg().DataDir, "plaud") }
 
 // cliHome is the HOME the CLI runs with, which decides where its login lives.
 func (p *PlaudManager) cliHome() string {
 	if p.cfg().Plaud.BrainAccess {
-		return homeDir()
+		return config.HomeDir()
 	}
 	return p.privateHome()
 }
@@ -539,7 +488,7 @@ func findPlaudCLI(c string) (string, error) {
 	if found := lookPathIn("plaud", helperPath()); found != "" {
 		return found, nil
 	}
-	candidates, _ := filepath.Glob(filepath.Join(homeDir(), nvmNodeVersions, "*/bin/plaud"))
+	candidates, _ := filepath.Glob(filepath.Join(config.HomeDir(), nvmNodeVersions, "*/bin/plaud"))
 	// The newest node first: by version, not by name, which would put
 	// v20.9.0 before v20.10.0, and v9 before v24.
 	slices.SortStableFunc(candidates, func(a, b string) int {
@@ -565,7 +514,7 @@ func findPlaudCLI(c string) (string, error) {
 // runs in place of a program on the bridge's PATH, such as the claude that
 // sandbox-exec starts for every brain's run. The sandbox also keeps brains
 // from writing to every folder on that PATH (see bridgeProgramsOf).
-func brainPlaudPATH(cfg *Config) string {
+func brainPlaudPATH(cfg *config.Config) string {
 	if !cfg.Plaud.BrainAccess {
 		return ""
 	}
@@ -1019,7 +968,7 @@ func (p *PlaudManager) accountID(ctx context.Context) (string, error) {
 // forward hands one waiting recording to br, whose answer goes to jid, and
 // says what it handed over: nil while Plaud has not finished the
 // transcript. It notes the recording's name in item once Plaud said it.
-func (p *PlaudManager) forward(ctx context.Context, cfg *Config, id string, item *plaudPending, br *Brain, jid string) (*PlaudForward, error) {
+func (p *PlaudManager) forward(ctx context.Context, cfg *config.Config, id string, item *plaudPending, br *Brain, jid string) (*PlaudForward, error) {
 	fetch := p.fetchCloud
 	if plaudPhoneDir(cfg) != "" {
 		fetch = fetchPhone
@@ -1031,14 +980,14 @@ func (p *PlaudManager) forward(ctx context.Context, cfg *Config, id string, item
 
 	// Into the plaud folder of the brain's own inbox: no other brain may
 	// read the recording.
-	file := plaudTranscriptPath(filepath.Join(mediaInbox(cfg.MediaDir, br.ID()), "plaud"), rec.day, rec.name, id)
+	file := plaudTranscriptPath(filepath.Join(mediaInboxAt(cfg.MediaDir).Path(br.ID()), "plaud"), rec.day, rec.name, id)
 	var body strings.Builder
 	fmt.Fprintf(&body, "Plaud recording: %s\nRecorded: %s\nDuration: %s\nPlaud ID: %s\n%s\n", rec.name, rec.when, rec.duration, id, rec.note)
 	if rec.summary != "" {
 		body.WriteString("=== Plaud AI summary ===\n" + rec.summary + "\n\n")
 	}
 	body.WriteString("=== Transcript ===\n" + strings.TrimSpace(rec.transcript) + "\n")
-	path, err := writeInboxFile(cfg.MediaDir, br.ID(), filepath.Join("plaud", filepath.Base(file)), []byte(body.String()))
+	path, err := mediaInboxAt(cfg.MediaDir).Write(br.ID(), filepath.Join("plaud", filepath.Base(file)), []byte(body.String()))
 	if err != nil {
 		return nil, err
 	}
@@ -1073,7 +1022,7 @@ type plaudRecording struct {
 // fetchCloud fetches recording id from Plaud's cloud through the CLI: nil
 // while Plaud has not finished the transcript. It notes the recording's
 // name in item once Plaud said it.
-func (p *PlaudManager) fetchCloud(ctx context.Context, cfg *Config, id string, item *plaudPending) (*plaudRecording, error) {
+func (p *PlaudManager) fetchCloud(ctx context.Context, cfg *config.Config, id string, item *plaudPending) (*plaudRecording, error) {
 	since := item.FirstSeen
 	detailsOut, err := p.run(ctx, "file", id)
 	if err != nil {
@@ -1168,7 +1117,7 @@ func (p *PlaudManager) phoneDir() string {
 // plaudPhoneDir is the folder recordings come from when the phone app
 // sends them: plaud.phone_dir, else the inbox its uploads go to
 // (plaud.phone_upload); "" for Plaud's cloud.
-func plaudPhoneDir(cfg *Config) string {
+func plaudPhoneDir(cfg *config.Config) string {
 	switch {
 	case cfg.Plaud.PhoneDir != "":
 		return cfg.Plaud.PhoneDir
@@ -1203,7 +1152,7 @@ func phoneIDs(dir string) ([]string, error) {
 
 // fetchPhone reads recording id from the phone folder. The app writes a
 // transcript once Plaud finished it, so one that is there is ready.
-func fetchPhone(_ context.Context, cfg *Config, id string, item *plaudPending) (*plaudRecording, error) {
+func fetchPhone(_ context.Context, cfg *config.Config, id string, item *plaudPending) (*plaudRecording, error) {
 	stem := strings.TrimPrefix(id, plaudPhonePrefix)
 	t, err := time.ParseInLocation(plaudPhoneLayout, stem, time.Local)
 	if err != nil {
@@ -1363,7 +1312,7 @@ func safePlaudName(s string) string {
 }
 
 // targetBrain is the configured brain, else the DM brain, else the default.
-func (p *PlaudManager) targetBrain(cfg *Config) *Brain {
+func (p *PlaudManager) targetBrain(cfg *config.Config) *Brain {
 	if id := cfg.Plaud.Brain; id != "" {
 		return p.brains.Get(id)
 	}
@@ -1375,7 +1324,7 @@ func (p *PlaudManager) targetBrain(cfg *Config) *Brain {
 // group, whatever chats the brain serves: its reply_chat when that is a
 // direct chat, else your own DM (the first allowed number). "" means there
 // is no private chat to use.
-func (p *PlaudManager) summaryChat(cfg *Config, br *Brain) string {
+func (p *PlaudManager) summaryChat(cfg *config.Config, br *Brain) string {
 	if rc := br.settings.Load().manifest.ReplyChat; isDirectChat(rc) {
 		return rc
 	}
@@ -1391,7 +1340,7 @@ func isDirectChat(jid string) bool {
 // destination returns the brain that receives recordings and the private
 // chat its answers go to, under cfg. A check reads the configuration once
 // and passes it on, so that it never mixes two versions of it.
-func (p *PlaudManager) destination(cfg *Config) (*Brain, string, error) {
+func (p *PlaudManager) destination(cfg *config.Config) (*Brain, string, error) {
 	br := p.targetBrain(cfg)
 	if br == nil {
 		if id := cfg.Plaud.Brain; id != "" {
@@ -1725,7 +1674,7 @@ func (p *PlaudManager) poll(ctx context.Context) error {
 func (p *PlaudManager) noticeGivenUp(brain, jid, name, why string) {
 	ctx, cancel := context.WithTimeout(p.lifetime(), 30*time.Second)
 	defer cancel()
-	if err := p.notify(ctx, jid, plaudGivenUpAlert(name, brain, why)); err != nil {
+	if err := p.notify(ctx, jid, outboundmsg.PlaudGivenUpAlert(name, brain, why)); err != nil {
 		log.Printf("plaud: could not send the notice about a recording given up: %v", err)
 	}
 }
@@ -1794,7 +1743,7 @@ func (p *PlaudManager) notifyAuthExpired() {
 	// the next start.
 	ctx, cancel := context.WithTimeout(p.lifetime(), 30*time.Second)
 	defer cancel()
-	if err := p.notify(ctx, jid, plaudExpiredAlert); err != nil {
+	if err := p.notify(ctx, jid, outboundmsg.PlaudExpiredAlert); err != nil {
 		log.Printf("plaud: could not send the expiry notice: %v", err)
 		return
 	}
@@ -1881,7 +1830,7 @@ func (p *PlaudManager) tick(ctx context.Context, due time.Time) time.Time {
 	default:
 		return due
 	}
-	return time.Now().Add(cfg.Plaud.interval())
+	return time.Now().Add(cfg.Plaud.Interval())
 }
 
 // lifetime is the context a check runs on, which Stop ends.
@@ -1965,10 +1914,10 @@ type PlaudCLI struct {
 
 // PlaudStatus is what the dashboard's Plaud card shows.
 type PlaudStatus struct {
-	CLI       PlaudCLI    `json:"cli"`
-	Connected bool        `json:"connected"`
-	Settings  PlaudConfig `json:"settings"`
-	LoginDir  string      `json:"login_dir"`
+	CLI       PlaudCLI           `json:"cli"`
+	Connected bool               `json:"connected"`
+	Settings  config.PlaudConfig `json:"settings"`
+	LoginDir  string             `json:"login_dir"`
 	// DefaultMessage is the instruction sent when plaud.message is empty,
 	// and IntervalSeconds how often Plaud is checked, defaults applied.
 	DefaultMessage  string `json:"default_message"`
@@ -2026,7 +1975,7 @@ func (p *PlaudManager) Status() PlaudStatus {
 		LoginDir:   filepath.Dir(p.tokenPath()),
 
 		DefaultMessage:  defaultPlaudMessage,
-		IntervalSeconds: int(cfg.Plaud.interval() / time.Second),
+		IntervalSeconds: int(cfg.Plaud.Interval() / time.Second),
 	}
 	if cfg.Plaud.PhoneUpload {
 		s.App = p.appStatus()
@@ -2346,45 +2295,45 @@ func (b *Bridge) apiPlaudResend(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		ID string `json:"id"`
 	}
-	if err := decodeJSON(r, &req); err != nil {
-		writeErr(w, http.StatusBadRequest, err.Error())
+	if err := httpapi.DecodeJSON(r, &req); err != nil {
+		httpapi.WriteErr(w, http.StatusBadRequest, err.Error())
 		return
 	}
 	switch err := b.plaud.Resend(req.ID); {
 	case errors.Is(err, errPlaudUnknownRecording):
-		writeErr(w, http.StatusNotFound, err.Error())
+		httpapi.WriteErr(w, http.StatusNotFound, err.Error())
 	case errors.Is(err, errPlaudAlreadyWaiting):
-		writeErr(w, http.StatusConflict, err.Error())
+		httpapi.WriteErr(w, http.StatusConflict, err.Error())
 	case err != nil:
-		writeErr(w, http.StatusInternalServerError, err.Error())
+		httpapi.WriteErr(w, http.StatusInternalServerError, err.Error())
 	default:
-		writeJSON(w, http.StatusAccepted, map[string]string{"status": "waiting"})
+		httpapi.WriteJSON(w, http.StatusAccepted, map[string]string{"status": "waiting"})
 	}
 }
 
 func (b *Bridge) apiPlaudStatus(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, http.StatusOK, b.plaud.Status())
+	httpapi.WriteJSON(w, http.StatusOK, b.plaud.Status())
 }
 
 func (b *Bridge) apiPlaudConnect(w http.ResponseWriter, r *http.Request) {
 	switch err := b.plaud.Connect(); {
 	case errors.Is(err, errPlaudNotInstalled):
-		writeErr(w, http.StatusPreconditionFailed, "Install Plaud's CLI first: npm install -g @plaud-ai/cli")
+		httpapi.WriteErr(w, http.StatusPreconditionFailed, "Install Plaud's CLI first: npm install -g @plaud-ai/cli")
 	case errors.Is(err, errPlaudSigningIn):
-		writeErr(w, http.StatusConflict, err.Error())
+		httpapi.WriteErr(w, http.StatusConflict, err.Error())
 	case err != nil:
-		writeErr(w, http.StatusInternalServerError, err.Error())
+		httpapi.WriteErr(w, http.StatusInternalServerError, err.Error())
 	default:
-		writeJSON(w, http.StatusAccepted, map[string]string{"status": "connecting"})
+		httpapi.WriteJSON(w, http.StatusAccepted, map[string]string{"status": "connecting"})
 	}
 }
 
 func (b *Bridge) apiPlaudDisconnect(w http.ResponseWriter, r *http.Request) {
 	if err := b.plaud.Disconnect(); err != nil {
-		writeErr(w, http.StatusBadGateway, err.Error())
+		httpapi.WriteErr(w, http.StatusBadGateway, err.Error())
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]string{"status": "disconnected"})
+	httpapi.WriteJSON(w, http.StatusOK, map[string]string{"status": "disconnected"})
 }
 
 func (b *Bridge) apiPlaudSettings(w http.ResponseWriter, r *http.Request) {
@@ -2396,17 +2345,17 @@ func (b *Bridge) apiPlaudSettings(w http.ResponseWriter, r *http.Request) {
 		BrainAccess *bool   `json:"brain_access"`
 		PhoneUpload *bool   `json:"phone_upload"`
 	}
-	if err := decodeJSON(r, &req); err != nil {
-		writeErr(w, http.StatusBadRequest, err.Error())
+	if err := httpapi.DecodeJSON(r, &req); err != nil {
+		httpapi.WriteErr(w, http.StatusBadRequest, err.Error())
 		return
 	}
 	// Only a newly picked brain must exist: one that went away since must
 	// not keep the other settings from being saved.
 	if req.Brain != nil && *req.Brain != "" && *req.Brain != b.cfgs.Get().Plaud.Brain && b.brainMgr.Get(*req.Brain) == nil {
-		writeErr(w, http.StatusUnprocessableEntity, fmt.Sprintf("there is no approved brain %q", *req.Brain))
+		httpapi.WriteErr(w, http.StatusUnprocessableEntity, fmt.Sprintf("there is no approved brain %q", *req.Brain))
 		return
 	}
-	_, err := b.cfgs.Update("", func(c *Config) error {
+	_, err := b.cfgs.Update("", func(c *config.Config) error {
 		if req.Enabled != nil {
 			c.Plaud.Enabled = *req.Enabled
 		}
@@ -2428,28 +2377,28 @@ func (b *Bridge) apiPlaudSettings(w http.ResponseWriter, r *http.Request) {
 		return nil
 	})
 	if err != nil {
-		writeErr(w, http.StatusUnprocessableEntity, err.Error())
+		httpapi.WriteErr(w, http.StatusUnprocessableEntity, err.Error())
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]string{"status": "saved"})
+	httpapi.WriteJSON(w, http.StatusOK, map[string]string{"status": "saved"})
 }
 
 func (b *Bridge) apiPlaudSync(w http.ResponseWriter, r *http.Request) {
 	started, err := b.plaud.CheckNow()
 	switch {
 	case errors.Is(err, errPlaudNotConnected):
-		writeErr(w, http.StatusPreconditionFailed, "Plaud is not connected")
+		httpapi.WriteErr(w, http.StatusPreconditionFailed, "Plaud is not connected")
 	case errors.Is(err, errPlaudSendingOff):
-		writeErr(w, http.StatusConflict, "Turn on “Send new recordings to a brain” first: a check hands new recordings to the brain")
+		httpapi.WriteErr(w, http.StatusConflict, "Turn on “Send new recordings to a brain” first: a check hands new recordings to the brain")
 	case errors.Is(err, errPlaudStopping):
-		writeErr(w, http.StatusServiceUnavailable, "Fridolin is stopping: the next start checks Plaud")
+		httpapi.WriteErr(w, http.StatusServiceUnavailable, "Fridolin is stopping: the next start checks Plaud")
 	case err != nil:
-		writeErr(w, http.StatusInternalServerError, err.Error())
+		httpapi.WriteErr(w, http.StatusInternalServerError, err.Error())
 	case !started:
 		// A check that is already running covers this one; say so rather
 		// than claim to start one.
-		writeJSON(w, http.StatusOK, map[string]string{"status": "already checking"})
+		httpapi.WriteJSON(w, http.StatusOK, map[string]string{"status": "already checking"})
 	default:
-		writeJSON(w, http.StatusAccepted, map[string]string{"status": "syncing"})
+		httpapi.WriteJSON(w, http.StatusAccepted, map[string]string{"status": "syncing"})
 	}
 }

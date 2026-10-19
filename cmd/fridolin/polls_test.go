@@ -3,315 +3,23 @@ package main
 import (
 	"context"
 	"crypto/sha256"
-	"fmt"
-	"reflect"
-	"regexp"
+
+	"github.com/Icewater1337/fridolin/internal/whatsapp"
+
 	"slices"
 	"strings"
 	"testing"
 	"time"
-	"unicode/utf8"
 
-	"go.mau.fi/whatsmeow"
-	"go.mau.fi/whatsmeow/proto/waE2E"
-	"go.mau.fi/whatsmeow/store"
+	"github.com/Icewater1337/fridolin/internal/manifest"
+
+	wastore "go.mau.fi/whatsmeow/store"
 	"go.mau.fi/whatsmeow/types"
-	"go.mau.fi/whatsmeow/types/events"
-	waLog "go.mau.fi/whatsmeow/util/log"
+
+	"github.com/Icewater1337/fridolin/internal/chat"
+	"github.com/Icewater1337/fridolin/internal/history"
+	"github.com/Icewater1337/fridolin/internal/store"
 )
-
-func TestExtractPolls(t *testing.T) {
-	text := `Sure, let's vote.
-
-[POLL]
-Question: When should we meet?
-- Monday 2pm
-- Tuesday 3pm
-[/POLL]
-
-Let me know.`
-
-	polls, remaining := extractPolls(text)
-	if len(polls) != 1 {
-		t.Fatalf("got %d polls, want 1", len(polls))
-	}
-	p := polls[0]
-	if p.Question != "When should we meet?" {
-		t.Errorf("question = %q", p.Question)
-	}
-	if len(p.Options) != 2 || p.Options[0] != "Monday 2pm" {
-		t.Errorf("options = %v", p.Options)
-	}
-	if p.MaxSelectable != 1 {
-		t.Errorf("MaxSelectable = %d, want 1", p.MaxSelectable)
-	}
-	if strings.Contains(remaining, "POLL") {
-		t.Errorf("poll block left in remaining text: %q", remaining)
-	}
-	if !strings.Contains(remaining, "Let me know.") {
-		t.Errorf("surrounding text lost: %q", remaining)
-	}
-}
-
-// The end of a block is found in any letter case, like its start: a
-// "[Poll]…[/poll]" block is a poll, not markup in the chat.
-func TestExtractPollsAnyCase(t *testing.T) {
-	polls, remaining := extractPolls("Vote:\n[Poll max=2]\nQuestion: Which?\n- A\n- B\n[/poll] thanks")
-	if len(polls) != 1 || polls[0].Question != "Which?" || polls[0].MaxSelectable != 2 {
-		t.Errorf("got %+v", polls)
-	}
-	if remaining != "Vote:\n thanks" {
-		t.Errorf("remaining = %q", remaining)
-	}
-}
-
-func TestExtractPollsMaxSelectable(t *testing.T) {
-	polls, _ := extractPolls("[POLL max=2]\nQuestion: Which?\n- A\n- B\n- C\n[/POLL]")
-	if len(polls) != 1 || polls[0].MaxSelectable != 2 {
-		t.Fatalf("got %+v", polls)
-	}
-}
-
-func TestExtractPollsClampsMaxToOptionCount(t *testing.T) {
-	// WhatsApp rejects a poll whose max exceeds the number of options.
-	polls, _ := extractPolls("[POLL max=9]\nQuestion: Which?\n- A\n- B\n[/POLL]")
-	if len(polls) != 1 {
-		t.Fatalf("got %d polls, want 1", len(polls))
-	}
-	if polls[0].MaxSelectable != 2 {
-		t.Errorf("MaxSelectable = %d, want 2", polls[0].MaxSelectable)
-	}
-}
-
-func TestExtractPollsTruncatesToWhatsAppLimit(t *testing.T) {
-	var sb strings.Builder
-	sb.WriteString("[POLL]\nQuestion: Pick\n")
-	for i := 0; i < 20; i++ {
-		fmt.Fprintf(&sb, "- option %d\n", i+1)
-	}
-	sb.WriteString("[/POLL]")
-
-	polls, _ := extractPolls(sb.String())
-	if len(polls) != 1 {
-		t.Fatalf("got %d polls, want 1", len(polls))
-	}
-	if len(polls[0].Options) != maxPollOptions {
-		t.Errorf("options = %d, want %d", len(polls[0].Options), maxPollOptions)
-	}
-}
-
-// One option is not a poll; neither is a block with no question, nor one
-// that never ends. Each stays in the text as the brain wrote it, so what
-// it said still reaches the chat.
-func TestExtractPollsRejectsIncomplete(t *testing.T) {
-	for _, text := range []string{
-		"Here is my idea:\n[POLL]\nQuestion: Only one?\n- A\n[/POLL]\nafter",
-		"[POLL]\n- A\n- B\n[/POLL] what do you think?",
-		"[POLL]\nQuestion: unterminated\n- A\n- B",
-		"[POLL]\nQuestion: Same twice?\n- A\n- A\n[/POLL]",
-	} {
-		polls, remaining := extractPolls(text)
-		if len(polls) != 0 {
-			t.Errorf("extractPolls(%q) returned %d polls, want 0", text, len(polls))
-		}
-		if remaining != text {
-			t.Errorf("extractPolls(%q) left %q, want the text as it was", text, remaining)
-		}
-	}
-}
-
-// A block left open ends nowhere: its header is text, and the next block
-// is a poll of its own, with the words between them kept.
-func TestExtractPollsUnclosedBlockDoesNotSwallowTheNext(t *testing.T) {
-	text := "[POLL]\nQuestion: first?\n- A\n- B\nbetween\n[POLL]\nQuestion: second?\n- C\n- D\n[/POLL]\nend"
-	polls, remaining := extractPolls(text)
-	want := []pollData{{Question: "second?", Options: []string{"C", "D"}, MaxSelectable: 1}}
-	if !reflect.DeepEqual(polls, want) {
-		t.Errorf("polls = %+v, want %+v", polls, want)
-	}
-	if wantText := "[POLL]\nQuestion: first?\n- A\n- B\nbetween\n\nend"; remaining != wantText {
-		t.Errorf("remaining = %q, want %q", remaining, wantText)
-	}
-}
-
-// An option given twice counts once, since votes are matched by the hash
-// of its text; options that differ in case are two.
-func TestExtractPollsDropsRepeatedOptions(t *testing.T) {
-	polls, _ := extractPolls("[POLL max=4]\nQuestion: Which?\n- A\n- A\n- a\n- B\n[/POLL]")
-	want := []pollData{{Question: "Which?", Options: []string{"A", "a", "B"}, MaxSelectable: 3}}
-	if !reflect.DeepEqual(polls, want) {
-		t.Errorf("polls = %+v, want %+v", polls, want)
-	}
-}
-
-func TestMatchVote(t *testing.T) {
-	hash := func(s string) []byte { h := sha256.Sum256([]byte(s)); return h[:] }
-	options := []string{"Monday 2pm", "Tuesday 3pm", "monday 2pm"}
-	cases := []struct {
-		name   string
-		hashes [][]byte
-		want   []string
-	}{
-		{"one", [][]byte{hash("Tuesday 3pm")}, []string{"Tuesday 3pm"}},
-		{"several, in the vote's order", [][]byte{hash("monday 2pm"), hash("Monday 2pm")}, []string{"monday 2pm", "Monday 2pm"}},
-		{"taken back", nil, nil},
-		{"an option the poll does not have", [][]byte{hash("Friday"), hash("Monday 2pm")}, []string{"Monday 2pm"}},
-	}
-	for _, c := range cases {
-		t.Run(c.name, func(t *testing.T) {
-			if got := matchVote(c.hashes, options); !reflect.DeepEqual(got, c.want) {
-				t.Errorf("matchVote = %q, want %q", got, c.want)
-			}
-		})
-	}
-}
-
-func TestExtractPollsNoPoll(t *testing.T) {
-	polls, remaining := extractPolls("just a normal reply")
-	if len(polls) != 0 {
-		t.Errorf("got %d polls, want 0", len(polls))
-	}
-	if remaining != "just a normal reply" {
-		t.Errorf("remaining = %q", remaining)
-	}
-}
-
-// anyPollCloseRe finds the end of a poll block in any letter case, the way
-// pollHeaderRe finds its start.
-var anyPollCloseRe = regexp.MustCompile(`(?i)\[/POLL\]`)
-
-// FuzzExtractPolls feeds extractPolls model output. Whatever the model
-// writes, each poll that comes out has a question, 2 to 12 distinct
-// trimmed options and a max within them, and text without a poll in it
-// reaches the chat as it was (see checkPolls). A well-formed block built
-// from the fuzzed question and options, with nothing around it that looks
-// like one, comes back as exactly that poll, and the text around it as it
-// was; a block that is no poll stays in the text.
-func FuzzExtractPolls(f *testing.F) {
-	seeds := []struct {
-		before, question, options, after string
-		maxSel                           uint8
-	}{
-		{"Sure, let's vote.\n\n", "When should we meet?", "Monday 2pm\nTuesday 3pm", "\n\nLet me know.", 0},
-		{"", "Which?", "A\nB\nC", "", 2},
-		{"", "Which?", "A\nB", "", 9},
-		{"", "Pick", strings.Repeat("option\n", 20), "", 0},
-		{"", "Only one?", "A", "", 0},
-		{"", "", "A\nB", "", 0},
-		{"[POLL]\nQuestion: unterminated\n- A\n- B", "Q", "a\nb", "", 0},
-		{"[POLL max=3]\nQuestion: Q\n- a\n- b\n[/POLL] and ", "Q", "a\nb", " [POLL]", 1},
-		{"[PO[POLL]", "Q", "a\nb", "LL]", 0},
-		{"İİ ", "Fråga?", "é\n\U0001F600", " \xff", 3},
-	}
-	for _, s := range seeds {
-		f.Add(s.before, s.question, s.options, s.after, s.maxSel)
-	}
-	f.Fuzz(func(t *testing.T, before, question, options, after string, maxSel uint8) {
-		checkPolls(t, before)
-
-		q := strings.TrimSpace(strings.ReplaceAll(question, "\n", " "))
-		var opts []string
-		for _, o := range strings.Split(options, "\n") {
-			if o = strings.TrimSpace(o); o != "" {
-				opts = append(opts, o)
-			}
-		}
-		var block strings.Builder
-		if maxSel > 0 {
-			fmt.Fprintf(&block, "[POLL max=%d]\n", maxSel)
-		} else {
-			block.WriteString("[POLL]\n")
-		}
-		block.WriteString("Question: " + q + "\n")
-		for _, o := range opts {
-			block.WriteString("- " + o + "\n")
-		}
-		block.WriteString("[/POLL]")
-		text := before + block.String() + after
-		polls, remaining := checkPolls(t, text)
-
-		// Another start or end in the text, the fuzzed parts' own included,
-		// makes a different block.
-		if len(pollHeaderRe.FindAllString(text, -1)) != 1 || len(anyPollCloseRe.FindAllString(text, -1)) != 1 {
-			return
-		}
-		var distinct []string
-		for _, o := range opts {
-			if !slices.Contains(distinct, o) {
-				distinct = append(distinct, o)
-			}
-		}
-		if q == "" || len(distinct) < 2 {
-			if len(polls) != 0 {
-				t.Errorf("got %+v from a block without a question or two options", polls)
-			}
-			if want := strings.TrimSpace(text); remaining != want {
-				t.Errorf("remaining text = %q, want the block left in: %q", remaining, want)
-			}
-			return
-		}
-		if want := strings.TrimSpace(before + after); remaining != want {
-			t.Errorf("remaining text = %q, want %q", remaining, want)
-		}
-		want := pollData{Question: q, Options: distinct[:min(len(distinct), maxPollOptions)], MaxSelectable: 1}
-		if maxSel > 0 {
-			want.MaxSelectable = int(maxSel)
-		}
-		want.MaxSelectable = min(want.MaxSelectable, len(want.Options))
-		if len(polls) != 1 || !reflect.DeepEqual(polls[0], want) {
-			t.Errorf("got %+v, want [%+v]", polls, want)
-		}
-	})
-}
-
-// checkPolls runs extractPolls on text and checks what holds for any text:
-// each poll has a question and 2 to 12 distinct options, each a trimmed
-// line of its own; there are no more polls than closed blocks; and the
-// remaining text, which goes to the chat, is the input when no poll came
-// out of it and shorter otherwise, and still valid UTF-8 if the input was.
-func checkPolls(t *testing.T, text string) ([]pollData, string) {
-	t.Helper()
-	polls, remaining := extractPolls(text)
-	line := func(s string) bool {
-		return s != "" && s == strings.TrimSpace(s) && !strings.Contains(s, "\n")
-	}
-	for _, p := range polls {
-		if !line(p.Question) {
-			t.Errorf("question %q is not a trimmed line", p.Question)
-		}
-		if n := len(p.Options); n < 2 || n > maxPollOptions {
-			t.Errorf("poll %q has %d options, want 2 to %d", p.Question, n, maxPollOptions)
-		}
-		for i, o := range p.Options {
-			if !line(o) {
-				t.Errorf("option %q is not a trimmed line", o)
-			}
-			if slices.Contains(p.Options[:i], o) {
-				t.Errorf("poll %q has the option %q twice", p.Question, o)
-			}
-		}
-		if p.MaxSelectable < 0 || p.MaxSelectable > len(p.Options) {
-			t.Errorf("poll %q: max %d for %d options", p.Question, p.MaxSelectable, len(p.Options))
-		}
-		if utf8.ValidString(text) && !utf8.ValidString(p.Question+strings.Join(p.Options, "")) {
-			t.Errorf("poll %+v is not valid UTF-8", p)
-		}
-	}
-	if closed := len(anyPollCloseRe.FindAllString(text, -1)); len(polls) > closed {
-		t.Errorf("%d polls from %d closed blocks", len(polls), closed)
-	}
-	// Nothing is dropped but the polls themselves.
-	if len(polls) == 0 && remaining != strings.TrimSpace(text) {
-		t.Errorf("text without a poll came back as %q", remaining)
-	}
-	if len(polls) > 0 && len(remaining) >= len(text) {
-		t.Errorf("remaining text %q is no shorter than the input, though %d polls left it", remaining, len(polls))
-	}
-	if utf8.ValidString(text) && !utf8.ValidString(remaining) {
-		t.Errorf("remaining text %q is not valid UTF-8", remaining)
-	}
-	return polls, remaining
-}
 
 func TestVoteText(t *testing.T) {
 	cases := []struct {
@@ -345,11 +53,11 @@ func TestPollVoteBecomesAHistoryEvent(t *testing.T) {
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			tb, mainBrain := newMainBridge(t, "")
-			tb.addFolderBrain(t, BrainManifest{ID: "files", Name: "Files"})
+			tb.addFolderBrain(t, manifest.Manifest{ID: "files", Name: "Files"})
 			if err := tb.store.SavePoll("3EB0POLL", testGroup, c.sentBy, "When should we meet?", []string{"Monday 2pm", "Tuesday 3pm"}); err != nil {
 				t.Fatal(err)
 			}
-			tb.whatsApp().recordVote("3EB0POLL", voter, [][]byte{hash("Tuesday 3pm")})
+			tb.whatsApp(t).ProcessVote("3EB0POLL", voter, [][]byte{hash("Tuesday 3pm")})
 
 			for _, br := range []*Brain{mainBrain, tb.brainMgr.Get("files")} {
 				h := readHistory(t, br)
@@ -359,11 +67,11 @@ func TestPollVoteBecomesAHistoryEvent(t *testing.T) {
 					}
 					continue
 				}
-				want := historyEntry{From: "15551234567", Chat: testGroup, Type: historyEvent, Text: `voted "Tuesday 3pm" in the poll "When should we meet?"`}
+				want := history.Entry{From: "15551234567", Chat: testGroup, Type: history.Event, Text: `voted "Tuesday 3pm" in the poll "When should we meet?"`}
 				if len(h) != 1 || h[0].From != want.From || h[0].Chat != want.Chat || h[0].Type != want.Type || h[0].Text != want.Text {
 					t.Fatalf("brain %s history = %+v, want [%+v]", br.ID(), h, want)
 				}
-				preface := br.buildPrompt(br.settings.Load(), Inbound{JID: testGroup, Sender: "15559876543", Text: "next"})
+				preface := br.buildPrompt(br.settings.Load(), Inbound{Inbound: chat.Inbound{JID: testGroup, Sender: "15559876543", Text: "next"}})
 				if !strings.Contains(preface, `"from":"15551234567","did":"voted \"Tuesday 3pm\" in the poll \"When should we meet?\""`) {
 					t.Errorf("preface = %q, want the vote", preface)
 				}
@@ -384,10 +92,9 @@ func TestPollVoteIsLoggedAtDebug(t *testing.T) {
 	if err := tb.store.SavePoll("3EB0POLL", testGroup, "main", "When should we meet?", []string{"Monday 2pm", "Tuesday 3pm"}); err != nil {
 		t.Fatal(err)
 	}
-	wa := tb.whatsApp()
 	rec := &testWhatsApp{}
-	wa.log = testWaLogger{rec}
-	wa.recordVote("3EB0POLL", types.NewJID(otherNumber, types.DefaultUserServer), [][]byte{hash("Tuesday 3pm")})
+	wa := tb.whatsAppOffline(t, &wastore.Device{}, func(opts *whatsapp.Options) { opts.Log = testWaLogger{rec} })
+	wa.ProcessVote("3EB0POLL", types.NewJID(otherNumber, types.DefaultUserServer), [][]byte{hash("Tuesday 3pm")})
 	if got := strings.Join(logged(), "\n"); strings.Contains(got, otherNumber) || strings.Contains(got, "Tuesday 3pm") {
 		t.Errorf("main log %q names the voter or the choice", got)
 	}
@@ -400,56 +107,25 @@ func TestPollVoteIsLoggedAtDebug(t *testing.T) {
 	}
 }
 
-// pollSecrets is whatsmeow's store of message secrets, as far as it keeps
-// key as every poll's. Like the SQL store, it fails under a context that
-// ended.
-type pollSecrets struct {
-	store.MsgSecretStore
-	key []byte
-}
-
-func (s pollSecrets) GetMessageSecret(ctx context.Context, _, sender types.JID, _ types.MessageID) ([]byte, types.JID, error) {
-	if err := ctx.Err(); err != nil {
-		return nil, types.EmptyJID, err
-	}
-	return s.key, sender, nil
-}
-
-// pollVoteEvent is voter's vote for options in the poll the bridge sent
-// voter as pollID, encrypted with key the way the voter's phone does.
-func pollVoteEvent(t *testing.T, key []byte, voter types.JID, pollID string, options ...string) *events.Message {
-	t.Helper()
-	phone := whatsmeow.NewClient(&store.Device{ID: &voter, MsgSecrets: pollSecrets{key: key}}, waLog.Noop)
-	// The poll as the phone has it: in the chat with the bridge, from it.
-	poll := types.MessageInfo{MessageSource: types.MessageSource{Chat: bridgeAccount, Sender: bridgeAccount}, ID: types.MessageID(pollID)}
-	vote, err := phone.EncryptPollVote(context.Background(), &poll, &waE2E.PollVoteMessage{SelectedOptions: whatsmeow.HashPollOptions(options)})
-	if err != nil {
-		t.Fatal(err)
-	}
-	src := types.MessageSource{Chat: voter, Sender: voter}
-	return &events.Message{Info: types.MessageInfo{MessageSource: src, ID: "3EB0VOTE", Timestamp: time.Now()}, Message: &waE2E.Message{PollUpdateMessage: vote}}
-}
-
 // A vote that cannot be decrypted or saved is logged as an error, the
 // voter masked there too, in what whatsmeow says as well.
 func TestPollVoteFailuresMaskTheVoter(t *testing.T) {
 	voter := types.NewJID(otherNumber, types.DefaultUserServer)
 	cases := []struct {
 		name string
-		vote func(t *testing.T, tb *testBridge, wa *WhatsAppClient)
+		vote func(t *testing.T, tb *testBridge, wa *whatsapp.Client)
 		want string
 	}{
-		{"not decrypted", func(t *testing.T, _ *testBridge, wa *WhatsAppClient) {
+		{"not decrypted", func(t *testing.T, _ *testBridge, wa *whatsapp.Client) {
 			// The bridge keeps another secret than the phone used.
-			wa.client = whatsmeow.NewClient(&store.Device{MsgSecrets: pollSecrets{key: make([]byte, 32)}}, waLog.Noop)
-			wa.handlePollVote(pollVoteEvent(t, []byte("0123456789abcdef0123456789abcdef"), voter, "3EB0POLL", "Tuesday 3pm"))
+			wa.ProcessMessage(pollVoteEvent(t, []byte("0123456789abcdef0123456789abcdef"), voter, "3EB0POLL", "Tuesday 3pm"))
 		}, "ERROR Failed to decrypt poll vote from " + maskPhone(otherNumber) + "@s.whatsapp.net: "},
-		{"not saved", func(t *testing.T, tb *testBridge, wa *WhatsAppClient) {
-			if _, err := tb.store.db.Exec(`CREATE TRIGGER refuse_votes BEFORE INSERT ON poll_votes BEGIN SELECT RAISE(ABORT, 'the disk is full'); END`); err != nil {
+		{"not saved", func(t *testing.T, tb *testBridge, wa *whatsapp.Client) {
+			if _, err := testStoreSQL(t, tb.cfgs.Get().DBPath).Exec(`CREATE TRIGGER refuse_votes BEFORE INSERT ON poll_votes BEGIN SELECT RAISE(ABORT, 'the disk is full'); END`); err != nil {
 				t.Fatal(err)
 			}
 			hash := sha256.Sum256([]byte("Tuesday 3pm"))
-			wa.recordVote("3EB0POLL", voter, [][]byte{hash[:]})
+			wa.ProcessVote("3EB0POLL", voter, [][]byte{hash[:]})
 		}, "ERROR Failed to save poll vote from " + maskPhone(otherNumber) + "@s.whatsapp.net: "},
 	}
 	for _, c := range cases {
@@ -459,9 +135,8 @@ func TestPollVoteFailuresMaskTheVoter(t *testing.T) {
 			if err := tb.store.SavePoll("3EB0POLL", voter.String(), "main", "When should we meet?", []string{"Monday 2pm", "Tuesday 3pm"}); err != nil {
 				t.Fatal(err)
 			}
-			wa := tb.whatsApp()
 			rec := &testWhatsApp{}
-			wa.log = testWaLogger{rec}
+			wa := tb.whatsAppOffline(t, &wastore.Device{MsgSecrets: pollSecrets{key: make([]byte, 32)}}, func(opts *whatsapp.Options) { opts.Log = testWaLogger{rec} })
 			c.vote(t, tb, wa)
 			// The debug log may name the voter; nothing else may.
 			got := logged()
@@ -485,7 +160,7 @@ func TestSentPollRemembersItsBrain(t *testing.T) {
 	if err := tb.outbox.Reply(context.Background(), "main", testDMChat, "[POLL]\nQuestion: Lunch?\n- yes\n- no\n[/POLL]", 0); err != nil {
 		t.Fatal(err)
 	}
-	var polls []PollResult
+	var polls []store.PollResult
 	waitFor(t, 5*time.Second, "the poll", func() bool {
 		polls, _ = tb.store.RecentPolls(context.Background(), "", 10, func(string) bool { return true })
 		return len(polls) == 1

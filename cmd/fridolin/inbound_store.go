@@ -2,11 +2,14 @@ package main
 
 import (
 	"context"
-	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"time"
+
+	"github.com/Icewater1337/fridolin/internal/chat"
+	"github.com/Icewater1337/fridolin/internal/history"
+	"github.com/Icewater1337/fridolin/internal/store"
 )
 
 // The inbound_queue table: what came in from WhatsApp that no brain had
@@ -38,21 +41,6 @@ const (
 	inboundChange = "change"
 )
 
-// migrateV4 adds the inbound queue.
-func migrateV4(tx *sql.Tx) error {
-	_, err := tx.Exec(`CREATE TABLE inbound_queue (
-		id         INTEGER PRIMARY KEY AUTOINCREMENT,
-		kind       TEXT NOT NULL,            -- one of the inbound* kinds
-		chat_jid   TEXT NOT NULL,
-		brain      TEXT NOT NULL DEFAULT '', -- the brain that had it, '' for none yet
-		msg_id     TEXT NOT NULL DEFAULT '', -- the WhatsApp message's ID
-		body       TEXT NOT NULL DEFAULT '', -- the message or the change, as JSON
-		sent_at    DATETIME NOT NULL,        -- when it was sent
-		created_at DATETIME NOT NULL
-	)`)
-	return err
-}
-
 // keptInbound is a row of the inbound queue.
 type keptInbound struct {
 	ID     int64
@@ -64,7 +52,7 @@ type keptInbound struct {
 	// Msg is the message of a queued, held or late row, Change the change
 	// of a change row.
 	Msg    Inbound
-	Change messageChange
+	Change chat.Change
 }
 
 // storedInbound is an Inbound as the inbound queue keeps it: all of it
@@ -76,12 +64,12 @@ type storedInbound struct {
 	Text    string          `json:"text,omitempty"`
 	Media   []string        `json:"media,omitempty"`
 	Brain   string          `json:"brain,omitempty"`
-	Quoted  *Quote          `json:"quoted,omitempty"`
+	Quoted  *chat.Quote     `json:"quoted,omitempty"`
 	Silent  bool            `json:"silent,omitempty"`
 	Source  string          `json:"source"`
 	At      time.Time       `json:"at"`
 	ID      string          `json:"id,omitempty"`
-	Logged  *historyEntry   `json:"logged,omitempty"`
+	Logged  *history.Entry  `json:"logged,omitempty"`
 	Parts   []storedInbound `json:"parts,omitempty"`
 }
 
@@ -90,7 +78,7 @@ func storeInbound(m Inbound) storedInbound {
 		JID: m.JID, ChatAlt: m.ChatAlt, Sender: m.Sender, Text: m.Text, Media: m.Media, Brain: m.Brain,
 		Quoted: m.Quoted, Silent: m.Silent, Source: m.Source, At: m.At, ID: m.ID,
 	}
-	if m.logged != (historyEntry{}) {
+	if m.logged != (history.Entry{}) {
 		logged := m.logged
 		s.Logged = &logged
 	}
@@ -101,9 +89,8 @@ func storeInbound(m Inbound) storedInbound {
 }
 
 func (s storedInbound) inbound() Inbound {
-	m := Inbound{
-		JID: s.JID, ChatAlt: s.ChatAlt, Sender: s.Sender, Text: s.Text, Media: s.Media, Brain: s.Brain,
-		Quoted: s.Quoted, Silent: s.Silent, Source: s.Source, At: s.At, ID: s.ID,
+	m := Inbound{Inbound: chat.Inbound{JID: s.JID, ChatAlt: s.ChatAlt, Sender: s.Sender, Text: s.Text, Media: s.Media, Brain: s.Brain,
+		Quoted: s.Quoted, Silent: s.Silent, Source: s.Source, At: s.At, ID: s.ID},
 	}
 	if s.Logged != nil {
 		m.logged = *s.Logged
@@ -124,98 +111,63 @@ type storedChange struct {
 	Text    string `json:"text,omitempty"`
 }
 
-// KeepInbound keeps m, a message of kind inboundQueued, inboundHeld or
+// keepInbound keeps m, a message of kind inboundQueued, inboundHeld or
 // inboundLate that brain had ("" for none), for the next start.
-func (s *Store) KeepInbound(ctx context.Context, kind, brain string, m Inbound) error {
+func keepInbound(ctx context.Context, s *store.Store, kind, brain string, m Inbound) error {
 	body, err := json.Marshal(storeInbound(m))
 	if err != nil {
 		return err
 	}
-	return s.keepInbound(ctx, kind, m.JID, brain, m.ID, string(body), m.At)
+	return s.KeepInbound(ctx, store.InboundRow{Kind: kind, Chat: m.JID, Brain: brain, MsgID: m.ID, Body: string(body), SentAt: m.At})
 }
 
-// KeepChange keeps c, an edit or a deletion that came in at at, for the
+// keepChange keeps c, an edit or a deletion that came in at at, for the
 // next start.
-func (s *Store) KeepChange(ctx context.Context, c messageChange, at time.Time) error {
+func keepChange(ctx context.Context, s *store.Store, c chat.Change, at time.Time) error {
 	body, err := json.Marshal(storedChange(c))
 	if err != nil {
 		return err
 	}
-	return s.keepInbound(ctx, inboundChange, c.Chat, "", c.Target, string(body), at)
+	return s.KeepInbound(ctx, store.InboundRow{Kind: inboundChange, Chat: c.Chat, MsgID: c.Target, Body: string(body), SentAt: at})
 }
 
-// KeepInterrupted keeps that the stop cut short brain's run for m.
-func (s *Store) KeepInterrupted(ctx context.Context, brain string, m Inbound) error {
-	return s.keepInbound(ctx, inboundInterrupted, m.JID, brain, m.ID, "", m.At)
+// keepInterrupted keeps that the stop cut short brain's run for m.
+func keepInterrupted(ctx context.Context, s *store.Store, brain string, m Inbound) error {
+	return s.KeepInbound(ctx, store.InboundRow{Kind: inboundInterrupted, Chat: m.JID, Brain: brain, MsgID: m.ID, SentAt: m.At})
 }
 
-func (s *Store) keepInbound(ctx context.Context, kind, chat, brain, msgID, body string, sent time.Time) error {
-	now := time.Now().UTC()
-	if sent.IsZero() {
-		sent = now
-	}
-	_, err := s.db.ExecContext(ctx,
-		`INSERT INTO inbound_queue (kind, chat_jid, brain, msg_id, body, sent_at, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)`,
-		kind, chat, brain, msgID, body, sent.UTC(), now)
-	if err != nil {
-		return fmt.Errorf("keeping a message for %s for the next start: %w", chat, err)
-	}
-	return nil
-}
-
-// TakeInbound returns what the inbound queue holds, in the order to take
-// it up in (see the kinds), and empties it, in one transaction: what it
-// returns is gone from bridge.db. A row it cannot read is left out, and
-// named in the error it returns alongside the others.
-func (s *Store) TakeInbound(ctx context.Context) ([]keptInbound, error) {
-	tx, err := s.db.BeginTx(ctx, nil)
-	if err != nil {
-		return nil, err
-	}
-	defer func() { _ = tx.Rollback() }()
-	rows, err := tx.QueryContext(ctx, `SELECT id, kind, chat_jid, brain, msg_id, body, sent_at FROM inbound_queue
-		ORDER BY CASE kind WHEN 'interrupted' THEN 0 WHEN 'queued' THEN 1 WHEN 'held' THEN 2 ELSE 3 END, id`)
-	if err != nil {
-		return nil, err
-	}
+// takeInbound decodes rows inside the store transaction, before deletion.
+// Malformed rows are reported and skipped; the remaining rows keep their order.
+func takeInbound(ctx context.Context, s *store.Store) ([]keptInbound, error) {
 	var out []keptInbound
 	var bad []error
-	for rows.Next() {
-		var k keptInbound
-		var body string
-		if err := rows.Scan(&k.ID, &k.Kind, &k.Chat, &k.Brain, &k.MsgID, &body, &k.SentAt); err != nil {
-			rows.Close()
-			return nil, err
-		}
+	err := s.TakeInbound(ctx, func(row store.InboundRow) {
+		k := keptInbound{ID: row.ID, Kind: row.Kind, Chat: row.Chat, Brain: row.Brain, MsgID: row.MsgID, SentAt: row.SentAt}
+		body := row.Body
+
 		switch k.Kind {
 		case inboundQueued, inboundHeld, inboundLate:
 			var m storedInbound
 			if err := json.Unmarshal([]byte(body), &m); err != nil {
 				bad = append(bad, fmt.Errorf("row %d: %w", k.ID, err))
-				continue
+				return
 			}
 			k.Msg = m.inbound()
 		case inboundChange:
 			var c storedChange
 			if err := json.Unmarshal([]byte(body), &c); err != nil {
 				bad = append(bad, fmt.Errorf("row %d: %w", k.ID, err))
-				continue
+				return
 			}
-			k.Change = messageChange(c)
+			k.Change = chat.Change(c)
 		case inboundInterrupted:
 		default:
 			bad = append(bad, fmt.Errorf("row %d: unknown kind %q", k.ID, k.Kind))
-			continue
+			return
 		}
 		out = append(out, k)
-	}
-	if err := errors.Join(rows.Err(), rows.Close()); err != nil {
-		return nil, err
-	}
-	if _, err := tx.ExecContext(ctx, `DELETE FROM inbound_queue`); err != nil {
-		return nil, err
-	}
-	if err := tx.Commit(); err != nil {
+	})
+	if err != nil {
 		return nil, err
 	}
 	return out, errors.Join(bad...)

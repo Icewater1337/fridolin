@@ -10,8 +10,12 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Icewater1337/fridolin/internal/manifest"
+
 	"go.mau.fi/whatsmeow/types"
 	"go.mau.fi/whatsmeow/types/events"
+
+	"github.com/Icewater1337/fridolin/internal/history"
 )
 
 // run is one run of the fake Claude CLI, from FRIDOLIN_FAKE_RUN_LOG.
@@ -129,22 +133,22 @@ func TestGoldenRuns(t *testing.T) {
 	runs := fakeRuns(t)
 	h := newHarness(t, `{"brain_model": "sonnet", "brain_effort": "high", "disallowed_tools": ["WebFetch"], "dangerously_skip_permissions": true, "ingest": {"enabled": true}, "group_members": {"`+harnessGroup+`": ["*"]}}`)
 	s := h.scrubber()
-	dir := h.AddBrain(BrainManifest{ID: "main", Name: "Main", Routing: BrainRouting{HandlesDMs: true, Groups: []string{harnessGroup}}})
-	family := h.AddBrain(BrainManifest{ID: "family", Name: "Family", Model: "opus", Effort: "low", DisallowedTools: &[]string{}, Routing: BrainRouting{Groups: []string{"120363000000000001@g.us"}}})
+	dir := h.AddBrain(manifest.Manifest{ID: "main", Name: "Main", Routing: manifest.Routing{HandlesDMs: true, Groups: []string{harnessGroup}}})
+	family := h.AddBrain(manifest.Manifest{ID: "family", Name: "Family", Model: "opus", Effort: "low", DisallowedTools: &[]string{}, Routing: manifest.Routing{Groups: []string{"120363000000000001@g.us"}}})
 	if w := h.Do("POST", "/api/chats/allow", map[string]string{"kind": "group", "jid": "120363000000000001@g.us"}); w.Code != 200 {
 		t.Fatalf("allow the second group: %d %s", w.Code, w.Body.String())
 	}
 
-	history := filepath.Join(dir, historyFileName)
+	historyPath := filepath.Join(dir, history.FileName)
 	for path, data := range map[string][]byte{
 		// A short prompt of the brains' own, so that these golden files pin
 		// how a run's prompt is put together. The starter prompt from
 		// examples/, which changes more often, is TestGoldenScaffold's.
-		filepath.Join(dir, defaultPromptFile):    []byte(goldenBrainPrompt),
-		filepath.Join(family, defaultPromptFile): []byte(goldenBrainPrompt),
-		history:                                  fixture(t, "history-v1.jsonl"),
-		filepath.Join(dir, identityMapFile):      []byte(goldenIdentityMap),
-		filepath.Join(dir, ".mcp.json"):          []byte(`{"mcpServers": {"notes": {"command": "notes-mcp"}}}`),
+		filepath.Join(dir, manifest.DefaultPromptFile):    []byte(goldenBrainPrompt),
+		filepath.Join(family, manifest.DefaultPromptFile): []byte(goldenBrainPrompt),
+		historyPath:                         fixture(t, "history-v1.jsonl"),
+		filepath.Join(dir, identityMapFile): []byte(goldenIdentityMap),
+		filepath.Join(dir, ".mcp.json"):     []byte(`{"mcpServers": {"notes": {"command": "notes-mcp"}}}`),
 	} {
 		if err := os.WriteFile(path, data, 0o600); err != nil {
 			t.Fatal(err)
@@ -202,8 +206,8 @@ func TestGoldenRuns(t *testing.T) {
 	recorded := func(answer string) bool {
 		for _, d := range []string{dir, family} {
 			for _, l := range historyLines(t, d) {
-				var e historyEntry
-				if json.Unmarshal([]byte(l), &e) == nil && e.Type == historyOut && e.Text == answer {
+				var e history.Entry
+				if json.Unmarshal([]byte(l), &e) == nil && e.Type == history.Out && e.Text == answer {
 					return true
 				}
 			}
@@ -249,7 +253,7 @@ func TestGoldenRuns(t *testing.T) {
 	if w := h.Script("POST", "/send", `{"jid": "`+harnessDM+`", "text": "Sent by a script."}`); w.Code != 200 {
 		t.Fatalf("send: %d %s", w.Code, w.Body.String())
 	}
-	data, err := os.ReadFile(history)
+	data, err := os.ReadFile(historyPath)
 	if err != nil {
 		t.Fatal(err)
 	}

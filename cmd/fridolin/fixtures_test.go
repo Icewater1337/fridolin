@@ -17,10 +17,16 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/Icewater1337/fridolin/internal/fsx"
-	"github.com/Icewater1337/fridolin/internal/trigger"
+	"github.com/Icewater1337/fridolin/internal/config"
+
+	"github.com/Icewater1337/fridolin/internal/manifest"
+
 	"go.mau.fi/whatsmeow/proto/waAdv"
 	"go.mau.fi/whatsmeow/types"
+
+	"github.com/Icewater1337/fridolin/internal/fsx"
+	"github.com/Icewater1337/fridolin/internal/history"
+	"github.com/Icewater1337/fridolin/internal/trigger"
 )
 
 // The fixtures in testdata are files as this version reads and writes
@@ -81,7 +87,7 @@ func TestGoldenConfigFixtures(t *testing.T) {
 			assertGolden(t, "config/"+name+"-effective.golden", s.json(t, eff))
 			assertGolden(t, "config/"+name+"-log.golden", []byte(s.text(strings.Join(logs(), "\n"))+"\n"))
 
-			if _, err := cs.Update(cs.ETag(), func(*Config) error { return nil }); err != nil {
+			if _, err := cs.Update(cs.ETag(), func(*config.Config) error { return nil }); err != nil {
 				t.Fatal(err)
 			}
 			saved, err := os.ReadFile(path)
@@ -99,7 +105,7 @@ func TestGoldenConfigFixtures(t *testing.T) {
 // key it lacks: it is a version 1 file, from before the key, and what a
 // save makes of it (config-v1-saved.golden) has it.
 func TestConfigV1HasEverySetting(t *testing.T) {
-	for _, key := range unsetKeys(t, reflect.TypeFor[Config](), fixture(t, "config-v1.json")) {
+	for _, key := range unsetKeys(t, reflect.TypeFor[config.Config](), fixture(t, "config-v1.json")) {
 		if key != "version" {
 			t.Errorf("config-v1.json has no %q", key)
 		}
@@ -224,14 +230,14 @@ func TestUnsetKeys(t *testing.T) {
 // written again byte for byte, as Add brain and every manifest edit write it.
 func TestBrainV1Fixture(t *testing.T) {
 	data := fixture(t, "brain-v1.json")
-	m, err := decodeManifest(data)
+	m, err := manifest.Decode(data)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if err := m.Validate(); err != nil {
 		t.Fatal(err)
 	}
-	out, err := encodeManifest(m)
+	out, err := manifest.Encode(m)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -239,7 +245,7 @@ func TestBrainV1Fixture(t *testing.T) {
 		t.Errorf("brain-v1.json written again (-fixture +written):\n%s", lineDiff(string(data), string(out)))
 	}
 	// Every field is set, so a new one shows up here.
-	for _, key := range unsetKeys(t, reflect.TypeFor[BrainManifest](), data) {
+	for _, key := range unsetKeys(t, reflect.TypeFor[manifest.Manifest](), data) {
 		t.Errorf("brain-v1.json has no %q", key)
 	}
 }
@@ -252,7 +258,7 @@ func TestHistoryV1Fixture(t *testing.T) {
 	kinds := map[string]bool{}
 	keys := map[string]json.RawMessage{}
 	for sc.Scan() {
-		var e historyEntry
+		var e history.Entry
 		if err := json.Unmarshal(sc.Bytes(), &e); err != nil {
 			t.Fatalf("%s: %v", sc.Bytes(), err)
 		}
@@ -268,14 +274,14 @@ func TestHistoryV1Fixture(t *testing.T) {
 			t.Errorf("line written again as\n%s\nwant\n%s", out, sc.Bytes())
 		}
 	}
-	if !kinds[historyIn] || !kinds[historyOut] || !kinds[historyEvent] || !kinds[historyReset] || len(kinds) != 4 {
-		t.Errorf("history-v1.jsonl has the types %v, want %q, %q, %q and %q", kinds, historyIn, historyOut, historyEvent, historyReset)
+	if !kinds[history.In] || !kinds[history.Out] || !kinds[history.Event] || !kinds[history.Reset] || len(kinds) != 4 {
+		t.Errorf("history-v1.jsonl has the types %v, want %q, %q, %q and %q", kinds, history.In, history.Out, history.Event, history.Reset)
 	}
 	all, err := json.Marshal(keys)
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, key := range unsetKeys(t, reflect.TypeFor[historyEntry](), all) {
+	for _, key := range unsetKeys(t, reflect.TypeFor[history.Entry](), all) {
 		t.Errorf("no line of history-v1.jsonl sets %q", key)
 	}
 }
@@ -299,6 +305,7 @@ func TestGenerateFixtures(t *testing.T) {
 	}
 	dbPath := filepath.Join(t.TempDir(), "bridge.db")
 	s := openTestStore(t, dbPath)
+	db := testStoreSQL(t, dbPath)
 	ctx := context.Background()
 
 	dev := s.Container.NewDevice()
@@ -342,12 +349,12 @@ func TestGenerateFixtures(t *testing.T) {
 		`INSERT INTO sessions (jid, session_id, updated_at) VALUES ('15551234567@s.whatsapp.net', '00000000-0000-4000-8000-000000000001', '2026-01-02 09:00:00+00:00')`,
 		`INSERT INTO process_state (jid, pid, updated_at) VALUES ('15551234567@s.whatsapp.net', 4242, '2026-01-02 09:00:00+00:00')`,
 	} {
-		if _, err := s.db.Exec(stmt); err != nil {
+		if _, err := db.Exec(stmt); err != nil {
 			t.Fatal(err)
 		}
 	}
 
-	dump, err := dumpSQL(s.db)
+	dump, err := dumpSQL(db)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -464,6 +471,7 @@ func TestBridgeV1Fixture(t *testing.T) {
 	dbPath := filepath.Join(t.TempDir(), "bridge.db")
 	loadSQL(t, dbPath, fixture(t, "bridge-v1.sql"))
 	s := openTestStore(t, dbPath)
+	db := testStoreSQL(t, dbPath)
 
 	dev, err := s.Container.GetFirstDevice(context.Background())
 	if err != nil {
@@ -480,11 +488,11 @@ func TestBridgeV1Fixture(t *testing.T) {
 		t.Errorf("poll = %+v, %v", p, err)
 	}
 	var votes int
-	if err := s.db.QueryRow(`SELECT COUNT(*) FROM poll_votes WHERE poll_msg_id = ?`, fixturePollID).Scan(&votes); err != nil || votes != 2 {
+	if err := db.QueryRow(`SELECT COUNT(*) FROM poll_votes WHERE poll_msg_id = ?`, fixturePollID).Scan(&votes); err != nil || votes != 2 {
 		t.Errorf("votes = %d, %v; want 2", votes, err)
 	}
 	var picks string
-	if err := s.db.QueryRow(`SELECT selected_options FROM poll_votes WHERE voter_jid = ?`, fixtureVoter).Scan(&picks); err != nil || picks != `["Sushi"]` {
+	if err := db.QueryRow(`SELECT selected_options FROM poll_votes WHERE voter_jid = ?`, fixtureVoter).Scan(&picks); err != nil || picks != `["Sushi"]` {
 		t.Errorf("%s voted %s, %v", fixtureVoter, picks, err)
 	}
 
@@ -504,7 +512,7 @@ func TestBridgeV1Fixture(t *testing.T) {
 	// Kept for a rollback to an older bridge, which reads them.
 	for _, table := range []string{"sessions", "process_state"} {
 		var n int
-		if err := s.db.QueryRow(`SELECT COUNT(*) FROM ` + table).Scan(&n); err != nil || n != 1 {
+		if err := db.QueryRow(`SELECT COUNT(*) FROM ` + table).Scan(&n); err != nil || n != 1 {
 			t.Errorf("%s has %d rows, %v; want 1", table, n, err)
 		}
 	}

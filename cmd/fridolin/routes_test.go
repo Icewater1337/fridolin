@@ -13,6 +13,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/Icewater1337/fridolin/internal/config"
+
 	"github.com/Icewater1337/fridolin/internal/fsx"
 )
 
@@ -44,16 +46,16 @@ const (
 	classNotFound = "not-found"
 )
 
-// route is one registered pattern. probe is a concrete request path for it,
+// httpRoute is one registered pattern. probe is a concrete request path for it,
 // when the pattern has wildcards or a GET needs a query to stay off the
 // network.
-type route struct {
+type httpRoute struct {
 	method, pattern, class, probe string
 }
 
 // routeInventory is every route the bridge serves, written out by hand so
 // that a route that appears, disappears or changes its guard is a decision.
-var routeInventory = []route{
+var routeInventory = []httpRoute{
 	{"GET", "/health", classPublic, ""},
 	{"GET", "/ready", classPublic, ""},
 	{"POST", "/send", classScript, ""},
@@ -185,7 +187,7 @@ var routeInventory = []route{
 var mountsWithCatchAll = []string{"/brain/"}
 
 // path is the request path to probe r with.
-func (r route) path() string {
+func (r httpRoute) path() string {
 	if r.probe != "" {
 		return r.probe
 	}
@@ -300,7 +302,7 @@ func TestRouteInventoryGuards(t *testing.T) {
 	secrets := []string{token, "TEST-CLIENT-SECRET", "golden-refresh-token", "golden-access-token"}
 
 	request := func(method, path, body string, mutate ...func(*http.Request)) *httptest.ResponseRecorder {
-		r := httptest.NewRequest(method, "http://"+defaultHTTPListen+path, strings.NewReader(body))
+		r := httptest.NewRequest(method, "http://"+config.DefaultHTTPListen+path, strings.NewReader(body))
 		if body != "" {
 			r.Header.Set("Content-Type", "application/json")
 		}
@@ -357,7 +359,7 @@ func TestRouteInventoryGuards(t *testing.T) {
 				// The API mux says which pattern takes the request, without
 				// running it: a route missing from the mux would fall to
 				// the catch-all.
-				r := httptest.NewRequest(method, "http://"+defaultHTTPListen+rt.path(), nil)
+				r := httptest.NewRequest(method, "http://"+config.DefaultHTTPListen+rt.path(), nil)
 				if _, pattern := api.Handler(r); pattern != strings.TrimSpace(rt.method+" "+rt.pattern) {
 					t.Errorf("%s %s is served by %q", method, rt.path(), pattern)
 				}
@@ -410,7 +412,7 @@ func TestRouteInventoryGuards(t *testing.T) {
 					t.Errorf("from another site: %d, want 403", w.Code)
 				}
 			case classAPIMount:
-				r := httptest.NewRequest(method, "http://"+defaultHTTPListen+rt.path(), nil)
+				r := httptest.NewRequest(method, "http://"+config.DefaultHTTPListen+rt.path(), nil)
 				if _, pattern := api.Handler(r); pattern != "" {
 					t.Errorf("%s %s is served by %q", method, rt.path(), pattern)
 				}
@@ -464,7 +466,7 @@ func TestRouteInventoryGuards(t *testing.T) {
 		})
 	}
 	for p := range reachesOutside {
-		if !slices.ContainsFunc(routeInventory, func(r route) bool { return r.method+" "+r.pattern == p }) {
+		if !slices.ContainsFunc(routeInventory, func(r httpRoute) bool { return r.method+" "+r.pattern == p }) {
 			t.Errorf("reachesOutside lists %q, which is not in routeInventory", p)
 		}
 	}

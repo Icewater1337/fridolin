@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"github.com/Icewater1337/fridolin/internal/whatsapp"
 	"io"
 	"maps"
 	"net/http"
@@ -16,7 +17,14 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Icewater1337/fridolin/internal/config"
+
+	"github.com/Icewater1337/fridolin/internal/manifest"
+
+	"github.com/Icewater1337/fridolin/internal/chat"
 	"github.com/Icewater1337/fridolin/internal/fsx"
+	"go.mau.fi/whatsmeow"
+	"go.mau.fi/whatsmeow/store"
 	"go.mau.fi/whatsmeow/types/events"
 	waLog "go.mau.fi/whatsmeow/util/log"
 )
@@ -37,7 +45,7 @@ import (
 // use must change them too: newHarness and Reopen build the bridge with
 // NewBridge and newHTTPHandler, Reopen takes up what the last stop kept
 // with Bridge.resume, as Start does, and WhatsApp hands an event to a
-// WhatsAppClient built from its unexported fields, with the bridge's
+// WhatsApp client built through its normal constructor, with the bridge's
 // handleInbound and dev transport.
 type harness struct {
 	t *testing.T
@@ -76,7 +84,7 @@ func newHarness(t *testing.T, cfgJSON string) *harness {
 	cfg := map[string]any{
 		"data_dir":        filepath.Join(home, ".fridolin"),
 		"claude_path":     fakeClaudeEnv(t, 10),
-		"allowed_numbers": []string{normalizeJID(harnessDM)},
+		"allowed_numbers": []string{chat.NormalizeJID(harnessDM)},
 		"allowed_groups":  []string{harnessGroup},
 		"debounce":        map[string]int{"quiet_ms": 0},
 	}
@@ -104,7 +112,7 @@ func newHarness(t *testing.T, cfgJSON string) *harness {
 	if err != nil {
 		t.Fatal(err)
 	}
-	h := &harness{t: t, b: b, h: b.newHTTPHandler(defaultHTTPListen), root: root, home: home, cfg: path, stop: sync.OnceFunc(b.Stop)}
+	h := &harness{t: t, b: b, h: b.newHTTPHandler(config.DefaultHTTPListen), root: root, home: home, cfg: path, stop: sync.OnceFunc(b.Stop)}
 	t.Cleanup(h.stop)
 	return h
 }
@@ -136,7 +144,7 @@ func (h *harness) Reopen() {
 	if err != nil {
 		h.t.Fatal(err)
 	}
-	h.b, h.h, h.stop = b, b.newHTTPHandler(defaultHTTPListen), sync.OnceFunc(b.Stop)
+	h.b, h.h, h.stop = b, b.newHTTPHandler(config.DefaultHTTPListen), sync.OnceFunc(b.Stop)
 	h.t.Cleanup(h.stop)
 	b.resume(context.Background())
 }
@@ -153,7 +161,7 @@ func (h *harness) Do(method, path string, body any, mutate ...func(*http.Request
 		}
 		rd = bytes.NewReader(data)
 	}
-	r := httptest.NewRequest(method, "http://"+defaultHTTPListen+path, rd)
+	r := httptest.NewRequest(method, "http://"+config.DefaultHTTPListen+path, rd)
 	r.Header.Set("X-Bridge-Token", h.token())
 	if method != http.MethodGet && method != http.MethodHead {
 		r.Header.Set("X-Bridge-Dashboard", "1")
@@ -174,7 +182,7 @@ func (h *harness) Do(method, path string, body any, mutate ...func(*http.Request
 // adjusts it first.
 func (h *harness) Script(method, path, body string, mutate ...func(*http.Request)) *httptest.ResponseRecorder {
 	h.t.Helper()
-	r := httptest.NewRequest(method, "http://"+defaultHTTPListen+path, strings.NewReader(body))
+	r := httptest.NewRequest(method, "http://"+config.DefaultHTTPListen+path, strings.NewReader(body))
 	r.Header.Set("Content-Type", "application/json")
 	r.Header.Set("Authorization", "Bearer "+h.readToken("scripts.token"))
 	for _, m := range mutate {
@@ -230,12 +238,18 @@ func (h *harness) Inject(m inbound) {
 // the dev outbox.
 func (h *harness) WhatsApp(ev *events.Message) {
 	h.t.Helper()
-	ctx, cancel := context.WithCancel(context.Background())
-	h.t.Cleanup(cancel)
-	wa := &WhatsAppClient{cfg: h.b.cfgs.Get, log: waLog.Noop, handler: h.b.handleInbound, onChange: h.b.handleChange, ctx: ctx, cancel: cancel}
-	wa.media = wa.client // nil: every download fails with ErrClientIsNil
-	wa.notify = func(jid, text string) { _ = h.b.dev.SendMessage(ctx, jid, text) }
-	wa.handleMessage(ev)
+	opts := whatsAppOptions(h.b.cfgs.Get, h.b.store, h.b.handleInbound, nil)
+	opts.Container = fixedDeviceContainer{&store.Device{}}
+	opts.Log = waLog.Noop
+	opts.OnChange = h.b.handleChange
+	opts.Downloader = (*whatsmeow.Client)(nil)
+	opts.Notify = func(jid, text string) { _ = h.b.dev.SendMessage(context.Background(), jid, text) }
+	wa, err := whatsapp.New(opts)
+	if err != nil {
+		h.t.Fatal(err)
+	}
+	h.t.Cleanup(wa.Disconnect)
+	wa.ProcessMessage(ev)
 }
 
 // sent is a message the dev-mode bridge sent, as GET /api/dev/outbox lists
@@ -275,7 +289,7 @@ func (h *harness) SentTo(jid string) []string {
 
 // AddBrain adds a brain in a new folder ~/<id> through the API, as the Add
 // brain page does, and returns the folder.
-func (h *harness) AddBrain(m BrainManifest) string {
+func (h *harness) AddBrain(m manifest.Manifest) string {
 	h.t.Helper()
 	// A manifest that sets no backup goes without the key, so the brain
 	// gets the defaults the page starts with: backed up, with the default
@@ -312,16 +326,16 @@ func (h *harness) Answer(m inbound) string {
 
 // Approved returns the approved copy of each brain's brain.json, by id, as
 // config.json holds them.
-func (h *harness) Approved() map[string]BrainManifest {
+func (h *harness) Approved() map[string]manifest.Manifest {
 	h.t.Helper()
 	var file struct {
-		BrainDirs []BrainRef `json:"brain_dirs"`
+		BrainDirs []config.BrainRef `json:"brain_dirs"`
 	}
 	data, err := os.ReadFile(h.cfg)
 	if err != nil || json.Unmarshal(data, &file) != nil {
 		h.t.Fatalf("config.json: %v\n%s", err, data)
 	}
-	out := map[string]BrainManifest{}
+	out := map[string]manifest.Manifest{}
 	for _, ref := range file.BrainDirs {
 		if ref.Approved != nil {
 			out[ref.Approved.ID] = *ref.Approved
@@ -423,9 +437,9 @@ func (h *harness) scrubber() *scrubber {
 
 func TestHarnessAnswersADM(t *testing.T) {
 	h := newHarness(t, "")
-	dir := h.AddBrain(BrainManifest{ID: "main", Name: "Main", Routing: BrainRouting{HandlesDMs: true}})
+	dir := h.AddBrain(manifest.Manifest{ID: "main", Name: "Main", Routing: manifest.Routing{HandlesDMs: true}})
 	h.Inject(inbound{JID: harnessDM, Text: "hello"})
-	if got := h.WaitSent(harnessDM, "hello"); got != "echo:"+dir+":"+normalizeJID(harnessDM)+" says: hello" {
+	if got := h.WaitSent(harnessDM, "hello"); got != "echo:"+dir+":"+chat.NormalizeJID(harnessDM)+" says: hello" {
 		t.Errorf("reply = %q", got)
 	}
 	if h.Config().Path != filepath.Join(h.Root(), "config.json") {

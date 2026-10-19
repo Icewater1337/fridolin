@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	outboundmsg "github.com/Icewater1337/fridolin/internal/outbound"
 	"io"
 	"log"
 	"net"
@@ -22,6 +23,11 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Icewater1337/fridolin/internal/config"
+
+	"github.com/Icewater1337/fridolin/internal/manifest"
+
+	"github.com/Icewater1337/fridolin/internal/chat"
 	"github.com/Icewater1337/fridolin/internal/platform"
 )
 
@@ -249,21 +255,21 @@ func TestASecondSignalStopsAtOnce(t *testing.T) {
 func secondSignalStopsAtOnce(t *testing.T, provider string) {
 	t.Helper()
 	addr := freePort(t)
-	root, cfg := cliFixture(t, `"http_listen": "`+addr+`", "debounce": {"quiet_ms": 0}`, func(home string) []BrainRef {
-		return []BrainRef{brainFolder(t, "~/main", BrainManifest{ID: "main", Name: "Main", Routing: BrainRouting{HandlesDMs: true}})}
+	root, cfg := cliFixture(t, `"http_listen": "`+addr+`", "debounce": {"quiet_ms": 0}`, func(home string) []config.BrainRef {
+		return []config.BrainRef{brainFolder(t, "~/main", manifest.Manifest{ID: "main", Name: "Main", Routing: manifest.Routing{HandlesDMs: true}})}
 	})
 	home := filepath.Join(root, "home")
 	configBytes, err := os.ReadFile(cfg)
 	if err != nil {
 		t.Fatal(err)
 	}
-	var config map[string]any
-	if err := json.Unmarshal(configBytes, &config); err != nil {
+	var configValue map[string]any
+	if err := json.Unmarshal(configBytes, &configValue); err != nil {
 		t.Fatal(err)
 	}
-	config["agent_provider"] = provider
-	config["codex_path"] = filepath.Join(root, "bin", "fridolin")
-	if err := os.WriteFile(cfg, mustJSON(t, config), 0600); err != nil {
+	configValue["agent_provider"] = provider
+	configValue["codex_path"] = filepath.Join(root, "bin", "fridolin")
+	if err := os.WriteFile(cfg, mustJSON(t, configValue), 0600); err != nil {
 		t.Fatal(err)
 	}
 	childLog := filepath.Join(root, "child-pid")
@@ -395,7 +401,7 @@ func TestStopGivesTheRunInFlightItsGrace(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			setShutdownGrace(t, tc.grace)
 			h := newHarness(t, "")
-			dir := h.AddBrain(BrainManifest{ID: "main", Name: "Main", Routing: BrainRouting{HandlesDMs: true}})
+			dir := h.AddBrain(manifest.Manifest{ID: "main", Name: "Main", Routing: manifest.Routing{HandlesDMs: true}})
 			t.Setenv("FRIDOLIN_FAKE_SLEEP_MS", tc.runMS)
 			h.Inject(inbound{JID: harnessDM, Text: "almost done"})
 			h.WaitFor("the run", func() bool { return h.Running("main") })
@@ -451,7 +457,7 @@ func TestStopWaitsForTheDelivery(t *testing.T) {
 
 func TestStopWaitsForARemovedBrainsDelivery(t *testing.T) {
 	tb := newTestBridge(t, "")
-	tb.addFolderBrain(t, BrainManifest{ID: "a", Name: "A", Routing: BrainRouting{HandlesDMs: true}})
+	tb.addFolderBrain(t, manifest.Manifest{ID: "a", Name: "A", Routing: manifest.Routing{HandlesDMs: true}})
 	entered, release := make(chan struct{}), make(chan struct{})
 	releaseDelivery := sync.OnceFunc(func() { close(release) })
 	defer releaseDelivery()
@@ -467,7 +473,7 @@ func TestStopWaitsForARemovedBrainsDelivery(t *testing.T) {
 	case <-time.After(5 * time.Second):
 		t.Fatal("run did not reach delivery")
 	}
-	if _, err := tb.cfgs.Update("", func(c *Config) error { c.BrainDirs = nil; return nil }); err != nil {
+	if _, err := tb.cfgs.Update("", func(c *config.Config) error { c.BrainDirs = nil; return nil }); err != nil {
 		t.Fatal(err)
 	}
 	stopped := make(chan struct{})
@@ -558,24 +564,24 @@ func TestStopWaitsForDeliveryAfterTheKillTimeout(t *testing.T) {
 // intervening messages takes long enough to schedule a worker.
 func TestResumeAppliesChangesBeforeStartingQueuedRuns(t *testing.T) {
 	tb := newTestBridge(t, "")
-	tb.addFolderBrain(t, BrainManifest{ID: "a", Name: "A", Routing: BrainRouting{HandlesDMs: true}})
+	tb.addFolderBrain(t, manifest.Manifest{ID: "a", Name: "A", Routing: manifest.Routing{HandlesDMs: true}})
 	var started atomic.Int32
 	tb.brainMgr.SetHooks(BrainHooks{RunEnv: func(string) ([]string, func()) {
 		started.Add(1)
 		return nil, func() {}
 	}})
-	m := Inbound{JID: harnessDM, Sender: "15551234567", Text: "must not run", Source: sourceWhatsApp, At: time.Now(), ID: "3EB0DELETED"}
-	if err := tb.store.KeepInbound(t.Context(), inboundQueued, "a", m); err != nil {
+	m := Inbound{Inbound: chat.Inbound{JID: harnessDM, Sender: "15551234567", Text: "must not run", Source: chat.SourceWhatsApp, At: time.Now(), ID: "3EB0DELETED"}}
+	if err := keepInbound(t.Context(), tb.store, inboundQueued, "a", m); err != nil {
 		t.Fatal(err)
 	}
 	for i := range 128 {
 		help := m
 		help.Text, help.ID = "!help", fmt.Sprintf("3EB0HELP%d", i)
-		if err := tb.store.KeepInbound(t.Context(), inboundLate, "", help); err != nil {
+		if err := keepInbound(t.Context(), tb.store, inboundLate, "", help); err != nil {
 			t.Fatal(err)
 		}
 	}
-	if err := tb.store.KeepChange(t.Context(), messageChange{Kind: changeRevoke, Chat: m.JID, Sender: m.Sender, Target: m.ID}, time.Now()); err != nil {
+	if err := keepChange(t.Context(), tb.store, chat.Change{Kind: chat.ChangeRevoke, Chat: m.JID, Sender: m.Sender, Target: m.ID}, time.Now()); err != nil {
 		t.Fatal(err)
 	}
 	tb.resume(t.Context())
@@ -594,7 +600,7 @@ func TestResumeAppliesChangesBeforeStartingQueuedRuns(t *testing.T) {
 func TestShutdownKeepsWhatItHolds(t *testing.T) {
 	setShutdownGrace(t, 200*time.Millisecond)
 	h := newHarness(t, "")
-	dir := h.AddBrain(BrainManifest{ID: "main", Name: "Main", Routing: BrainRouting{HandlesDMs: true}})
+	dir := h.AddBrain(manifest.Manifest{ID: "main", Name: "Main", Routing: manifest.Routing{HandlesDMs: true}})
 	t.Setenv("FRIDOLIN_FAKE_SLEEP_MS", "30000")
 	h.WhatsApp(dmEvent("3EB0FIRST", textMsg("first")))
 	h.WaitFor("the first run", func() bool { return h.Running("main") })
@@ -626,14 +632,14 @@ func TestShutdownKeepsWhatItHolds(t *testing.T) {
 // lost.
 func TestResumeOutlivesItsContext(t *testing.T) {
 	tb := newTestBridge(t, "")
-	m := Inbound{JID: harnessDM, Sender: "15551234567", Text: "summarise", Source: sourceWhatsApp, At: time.Now(), ID: "3EB0CUT"}
-	if err := tb.store.KeepInterrupted(t.Context(), "main", m); err != nil {
+	m := Inbound{Inbound: chat.Inbound{JID: harnessDM, Sender: "15551234567", Text: "summarise", Source: chat.SourceWhatsApp, At: time.Now(), ID: "3EB0CUT"}}
+	if err := keepInterrupted(t.Context(), tb.store, "main", m); err != nil {
 		t.Fatal(err)
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 	tb.resume(ctx)
-	waitFor(t, 5*time.Second, "the notice", func() bool { return slices.Contains(tb.sentTo(harnessDM), restartedNotice) })
+	waitFor(t, 5*time.Second, "the notice", func() bool { return slices.Contains(tb.sentTo(harnessDM), outboundmsg.RestartedNotice) })
 }
 
 // waitBatched waits until the debouncer holds one batch of n messages.
@@ -655,7 +661,7 @@ func waitBatched(h *harness, n int) {
 // once.
 func TestShutdownKeepsTheDebouncedBatch(t *testing.T) {
 	h := newHarness(t, `{"debounce": {"quiet_ms": 60000, "max_wait_ms": 120000}}`)
-	dir := h.AddBrain(BrainManifest{ID: "main", Name: "Main", Routing: BrainRouting{HandlesDMs: true}})
+	dir := h.AddBrain(manifest.Manifest{ID: "main", Name: "Main", Routing: manifest.Routing{HandlesDMs: true}})
 	h.WhatsApp(dmEvent("3EB0ONE", textMsg("part one")))
 	waitBatched(h, 1)
 	h.WhatsApp(dmEvent("3EB0TWO", textMsg("part two")))
@@ -683,12 +689,12 @@ func TestShutdownKeepsTheDebouncedBatch(t *testing.T) {
 func TestShutdownDropsWhatIsKeptTooLong(t *testing.T) {
 	setShutdownGrace(t, 200*time.Millisecond)
 	h := newHarness(t, "")
-	h.AddBrain(BrainManifest{ID: "main", Name: "Main", Routing: BrainRouting{HandlesDMs: true}})
+	h.AddBrain(manifest.Manifest{ID: "main", Name: "Main", Routing: manifest.Routing{HandlesDMs: true}})
 	t.Setenv("FRIDOLIN_FAKE_SLEEP_MS", "30000")
 	h.WhatsApp(dmEvent("3EB0RUN", textMsg("a long one")))
 	h.WaitFor("the run", func() bool { return h.Running("main") })
 	old := dmEvent("3EB0OLD", textMsg("from long ago"))
-	old.Info.Timestamp = time.Now().Add(-outboxTTL - time.Minute)
+	old.Info.Timestamp = time.Now().Add(-outboundmsg.OutboxTTL - time.Minute)
 	h.WhatsApp(old)
 	h.WaitSent(harnessDM, "Queued (#1)")
 	h.WhatsApp(dmEvent("3EB0NEW", textMsg("from just now")))
@@ -714,7 +720,7 @@ func TestShutdownDropsWhatIsKeptTooLong(t *testing.T) {
 func TestShutdownKeepsWhatComesInDuringTheStop(t *testing.T) {
 	setShutdownGrace(t, 20*time.Second)
 	h := newHarness(t, "")
-	dir := h.AddBrain(BrainManifest{ID: "main", Name: "Main", Routing: BrainRouting{HandlesDMs: true}})
+	dir := h.AddBrain(manifest.Manifest{ID: "main", Name: "Main", Routing: manifest.Routing{HandlesDMs: true}})
 	t.Setenv("FRIDOLIN_FAKE_SLEEP_MS", "3000")
 	h.WhatsApp(dmEvent("3EB0FIRST", textMsg("first")))
 	h.WaitFor("the first run", func() bool { return h.Running("main") })
@@ -723,6 +729,7 @@ func TestShutdownKeepsWhatComesInDuringTheStop(t *testing.T) {
 	t.Setenv("FRIDOLIN_FAKE_SLEEP_MS", "10")
 
 	b := h.b
+	db := testStoreSQL(t, b.cfgs.Get().DBPath)
 	stopped := make(chan struct{})
 	go func() {
 		h.Shutdown()
@@ -738,7 +745,7 @@ func TestShutdownKeepsWhatComesInDuringTheStop(t *testing.T) {
 	h.WhatsApp(dmEvent("3EB0DEL", revokeMsg("3EB0DOOMED")))
 	h.WaitFor("what came in to be kept", func() bool {
 		var n int
-		err := b.store.db.QueryRow(`SELECT COUNT(*) FROM inbound_queue WHERE kind IN ('late', 'change')`).Scan(&n)
+		err := db.QueryRow(`SELECT COUNT(*) FROM inbound_queue WHERE kind IN ('late', 'change')`).Scan(&n)
 		return err == nil && n == 3
 	})
 	<-stopped

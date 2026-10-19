@@ -13,6 +13,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Icewater1337/fridolin/internal/manifest"
+
 	"github.com/Icewater1337/fridolin/internal/fsx"
 	"github.com/Icewater1337/fridolin/internal/version"
 )
@@ -371,7 +373,7 @@ func TestServiceInstallKeepsBrainFoldersOffThePATH(t *testing.T) {
 		t.Run(goos, func(t *testing.T) {
 			f := newFakeService(t, goos)
 			makeFiles(t, f.home, "bin/", "assistant/personal/bin/")
-			ref := brainFolder(t, f.home+"/assistant/personal", BrainManifest{ID: "personal", Routing: BrainRouting{HandlesDMs: true}})
+			ref := brainFolder(t, f.home+"/assistant/personal", manifest.Manifest{ID: "personal", Routing: manifest.Routing{HandlesDMs: true}})
 			f.cfg = writeConfig(t, `{"brain_mode": true, "data_dir": "`+f.home+`/.fridolin", "http_listen": "127.0.0.1:18765"`+brainDirsJSON(t, ref)+`}`)
 			f.h.path = f.home + "/assistant/personal/bin:" + f.home + "/bin:/usr/bin"
 			unitPath, _ := f.h.unitFile()

@@ -18,6 +18,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/Icewater1337/fridolin/internal/manifest"
 )
 
 // fakeCalendarAPI is the Calendar API of one account, for the calendar
@@ -136,7 +138,7 @@ func (f *fakeCalendarAPI) touchedCalendars() []string {
 func calendarBrain(t *testing.T, f *fakeCalendarAPI, cals []string, def string, stale bool) (*testBridge, string, string) {
 	t.Helper()
 	tb, url := serveTestBridge(t, "")
-	tb.addFolderBrain(t, BrainManifest{ID: "a", Name: "A", Routing: BrainRouting{HandlesDMs: true}})
+	tb.addFolderBrain(t, manifest.Manifest{ID: "a", Name: "A", Routing: manifest.Routing{HandlesDMs: true}})
 	if w := tb.do("PUT", "/api/google/client", map[string]string{"json": fmt.Sprintf(testClientJSON, f.srv.URL)}); w.Code != 200 {
 		t.Fatal(w.Body.String())
 	}
@@ -290,12 +292,12 @@ func TestCalendarDefaultIsOneOfTheBrainsCalendars(t *testing.T) {
 			f := newFakeCalendarAPI(t)
 			tb, url, token := calendarBrain(t, f, []string{"you@example.com"}, "you@example.com", false)
 			dir := tb.brainMgr.Get("a").Dir()
-			m, err := ReadManifest(dir)
+			m, err := manifest.Read(dir)
 			if err != nil {
 				t.Fatal(err)
 			}
 			m.Calendar.Default = def
-			if err := WriteManifest(dir, m, true); err != nil {
+			if err := manifest.Write(dir, m, true); err != nil {
 				t.Fatal(err)
 			}
 			if w := tb.do("POST", "/api/brains/a/approve", map[string]any{"manifest": m}); w.Code != 200 {

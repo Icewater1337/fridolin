@@ -14,6 +14,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Icewater1337/fridolin/internal/manifest"
+
+	"github.com/Icewater1337/fridolin/internal/chat"
 	"github.com/Icewater1337/fridolin/internal/fsx"
 	"github.com/Icewater1337/fridolin/internal/platform"
 )
@@ -59,9 +62,9 @@ func brainTool(t *testing.T, cmd func([]string, toolIO) int, url, token string, 
 	return code, doc
 }
 
-func savePoll(t *testing.T, tb *testBridge, id, chat, question string, options []string, votes map[string][]string) {
+func savePoll(t *testing.T, tb *testBridge, id, chatJID, question string, options []string, votes map[string][]string) {
 	t.Helper()
-	if err := tb.store.SavePoll(id, chat, "", question, options); err != nil {
+	if err := tb.store.SavePoll(id, chatJID, "", question, options); err != nil {
 		t.Fatal(err)
 	}
 	for voter, chosen := range votes {
@@ -87,9 +90,9 @@ func pollQuestions(doc map[string]any) []string {
 // /ingest only and answers in the DM, so the polls it sends go there.
 func TestPollsAreTheBrainsOwn(t *testing.T) {
 	tb, url := serveTestBridge(t, "")
-	tb.addFolderBrain(t, BrainManifest{ID: "a", Name: "A", Routing: BrainRouting{HandlesDMs: true}})
-	tb.addFolderBrain(t, BrainManifest{ID: "g", Name: "G", Routing: BrainRouting{Groups: []string{apiTestGroup}}})
-	tb.addFolderBrain(t, BrainManifest{ID: "r", Name: "R", ReplyChat: apiTestDM})
+	tb.addFolderBrain(t, manifest.Manifest{ID: "a", Name: "A", Routing: manifest.Routing{HandlesDMs: true}})
+	tb.addFolderBrain(t, manifest.Manifest{ID: "g", Name: "G", Routing: manifest.Routing{Groups: []string{apiTestGroup}}})
+	tb.addFolderBrain(t, manifest.Manifest{ID: "r", Name: "R", ReplyChat: apiTestDM})
 	savePoll(t, tb, "P1", apiTestDM, "Lunch?", []string{"Yes", "No"}, map[string][]string{apiTestDM: {"Yes"}})
 	savePoll(t, tb, "P2", apiTestGroup, "When?", []string{"Mon", "Tue", "Wed"}, map[string][]string{
 		"15551234567@s.whatsapp.net": {"Mon", "Tue"},
@@ -160,13 +163,13 @@ func TestPollsAreTheBrainsOwn(t *testing.T) {
 // which works while the run lasts and not after it.
 func TestRunsGetATokenForTheirRunOnly(t *testing.T) {
 	tb, url := serveTestBridge(t, "")
-	tb.addFolderBrain(t, BrainManifest{ID: "a", Name: "A", Routing: BrainRouting{HandlesDMs: true}})
+	tb.addFolderBrain(t, manifest.Manifest{ID: "a", Name: "A", Routing: manifest.Routing{HandlesDMs: true}})
 	savePoll(t, tb, "P1", apiTestDM, "Lunch?", []string{"Yes", "No"}, nil)
 	envLog := filepath.Join(t.TempDir(), "brain.env")
 	t.Setenv("FRIDOLIN_FAKE_ENV_LOG", envLog)
 	t.Setenv("FRIDOLIN_FAKE_POLLS", "1")
 
-	tb.handleInbound(context.Background(), Inbound{JID: apiTestDM, Sender: "15551234567", Text: "polls?", Source: "whatsapp"})
+	tb.handleInbound(context.Background(), Inbound{Inbound: chat.Inbound{JID: apiTestDM, Sender: "15551234567", Text: "polls?", Source: "whatsapp"}})
 	waitFor(t, 10*time.Second, "the reply", func() bool { return len(tb.sentTo(apiTestDM)) > 0 })
 	reply := tb.sentTo(apiTestDM)[0]
 	if !strings.Contains(reply, `polls=0 { "count": 1, "polls": [`) || !strings.Contains(reply, `"question": "Lunch?"`) {
@@ -208,7 +211,7 @@ func TestRunsGetATokenForTheirRunOnly(t *testing.T) {
 // API as this brain (TestSandboxKeepsRunTokensToTheirBrain).
 func TestRunTokenStaysOutOfTheEnvironment(t *testing.T) {
 	tb, _ := serveTestBridge(t, "")
-	tb.addFolderBrain(t, BrainManifest{ID: "a", Name: "A", Routing: BrainRouting{HandlesDMs: true}})
+	tb.addFolderBrain(t, manifest.Manifest{ID: "a", Name: "A", Routing: manifest.Routing{HandlesDMs: true}})
 	env, done := tb.brainRunEnv("a")
 	var file string
 	for _, kv := range env {
@@ -346,7 +349,7 @@ func TestRunTokens(t *testing.T) {
 
 func TestBrainAPIRefusals(t *testing.T) {
 	tb, _ := serveTestBridge(t, "")
-	tb.addFolderBrain(t, BrainManifest{ID: "a", Name: "A"})
+	tb.addFolderBrain(t, manifest.Manifest{ID: "a", Name: "A"})
 	tok, revoke := tb.runTokens.mint("a")
 	defer revoke()
 	stale, revokeStale := tb.runTokens.mint("gone") // a brain removed since

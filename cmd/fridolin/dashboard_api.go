@@ -9,14 +9,12 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"io/fs"
 	"log"
 	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
-	"regexp"
 	"runtime"
 	"slices"
 	"sort"
@@ -27,11 +25,25 @@ import (
 	"unicode"
 	"unicode/utf8"
 
+	"github.com/Icewater1337/fridolin/internal/config"
+
+	"github.com/Icewater1337/fridolin/internal/access"
+	"github.com/Icewater1337/fridolin/internal/registry"
+
+	"github.com/Icewater1337/fridolin/internal/route"
+
+	"github.com/Icewater1337/fridolin/internal/manifest"
+
+	"github.com/Icewater1337/fridolin/internal/httpapi"
+
+	"rsc.io/qr"
+
+	"github.com/Icewater1337/fridolin/internal/chat"
 	"github.com/Icewater1337/fridolin/internal/fsx"
+	"github.com/Icewater1337/fridolin/internal/history"
 	"github.com/Icewater1337/fridolin/internal/platform"
 	"github.com/Icewater1337/fridolin/internal/textx"
 	"github.com/Icewater1337/fridolin/internal/version"
-	"rsc.io/qr"
 )
 
 func (b *Bridge) apiMux() http.Handler {
@@ -122,7 +134,7 @@ func (b *Bridge) apiMux() http.Handler {
 func writeJSONIfChanged(w http.ResponseWriter, r *http.Request, v any) {
 	body, err := json.Marshal(v)
 	if err != nil {
-		writeErr(w, http.StatusInternalServerError, err.Error())
+		httpapi.WriteErr(w, http.StatusInternalServerError, err.Error())
 		return
 	}
 	body = append(body, '\n') // as writeJSON's encoder ends it
@@ -147,49 +159,6 @@ func etagListed(header, etag string) bool {
 		}
 	}
 	return false
-}
-
-// errNoBody answers a request that left out the body its endpoint needs.
-var errNoBody = errors.New("a JSON body is required")
-
-// decodeJSON decodes the request's JSON body into v, strictly: a key the
-// endpoint does not know and anything after the first value are errors that
-// name what is wrong, rather than a typo silently dropped or a request that
-// runs with Go's zero values. An empty body is errNoBody, sent chunked or
-// not.
-func decodeJSON(r *http.Request, v any) error { return decodeBody(r, v, false) }
-
-// decodeOptionalJSON is decodeJSON for an endpoint whose body may be left
-// out, such as stopping a run: an empty body leaves v as it is.
-func decodeOptionalJSON(r *http.Request, v any) error { return decodeBody(r, v, true) }
-
-// decodeStrict decodes data, one JSON value, as strictly as decodeJSON.
-func decodeStrict(data []byte, v any) error {
-	dec := json.NewDecoder(bytes.NewReader(data))
-	dec.DisallowUnknownFields()
-	if err := dec.Decode(v); err != nil {
-		return fmt.Errorf("invalid JSON: %w", err)
-	}
-	return nil
-}
-
-func decodeBody(r *http.Request, v any, optional bool) error {
-	dec := json.NewDecoder(r.Body)
-	dec.DisallowUnknownFields()
-	if err := dec.Decode(v); err != nil {
-		if errors.Is(err, io.EOF) {
-			if optional {
-				return nil
-			}
-			return errNoBody
-		}
-		return fmt.Errorf("invalid JSON: %w", err)
-	}
-	var extra json.RawMessage
-	if err := dec.Decode(&extra); !errors.Is(err, io.EOF) {
-		return errors.New("invalid JSON: the body must be a single JSON value")
-	}
-	return nil
 }
 
 // ── status ───────────────────────────────────────────────────────────────
@@ -219,7 +188,7 @@ type statusResponse struct {
 }
 
 type waStatus struct {
-	WAState
+	chat.LinkState
 	QRAvailable bool `json:"qr_available"`
 }
 
@@ -245,7 +214,7 @@ func (b *Bridge) apiStatus(w http.ResponseWriter, r *http.Request) {
 		DataDir:       cfg.DataDir,
 		DevMode:       b.dev != nil,
 		Platform:      runtime.GOOS,
-		WhatsApp:      waStatus{WAState: wa, QRAvailable: wa.QRCode != ""},
+		WhatsApp:      waStatus{LinkState: wa, QRAvailable: wa.QRCode != ""},
 		Claude:        claudeInfo(cfg.ClaudePath, cfg.ChildEnvPassthrough),
 		AgentProvider: cfg.AgentProvider,
 		Sandbox:       sandboxStatus{Enabled: cfg.Sandbox.Enabled, Supported: runtime.GOOS == "darwin"},
@@ -305,7 +274,7 @@ func (b *Bridge) apiStatus(w http.ResponseWriter, r *http.Request) {
 		resp.Brains = append(resp.Brains, br.Snapshot())
 	}
 	resp.Brains = nonNil(resp.Brains)
-	writeJSON(w, http.StatusOK, resp)
+	httpapi.WriteJSON(w, http.StatusOK, resp)
 }
 
 // tokenWarnings says when the dashboard token does not keep brains out of
@@ -313,7 +282,7 @@ func (b *Bridge) apiStatus(w http.ResponseWriter, r *http.Request) {
 // permissions run without a sandbox, which on any OS lets them read the
 // token (and the rest of the data dir) themselves. A sandbox that is on
 // but cannot run gets its own warning: brains then refuse every message.
-func (b *Bridge) tokenWarnings(cfg *Config, goos string) []string {
+func (b *Bridge) tokenWarnings(cfg *config.Config, goos string) []string {
 	var out []string
 	switch {
 	case !b.requiresToken():
@@ -411,7 +380,7 @@ func sandboxProfileWarning(bm *BrainManager) string {
 func (b *Bridge) apiQR(w http.ResponseWriter, r *http.Request) {
 	st := b.wa.State()
 	if st.QRCode == "" {
-		writeErr(w, http.StatusNotFound, "no pairing code right now")
+		httpapi.WriteErr(w, http.StatusNotFound, "no pairing code right now")
 		return
 	}
 	// rsc.io/qr is what qrterminal draws the terminal's code with. Its PNG
@@ -419,10 +388,10 @@ func (b *Bridge) apiQR(w http.ResponseWriter, r *http.Request) {
 	// scales it.
 	code, err := qr.Encode(st.QRCode, qr.M)
 	if err != nil {
-		writeErr(w, http.StatusInternalServerError, err.Error())
+		httpapi.WriteErr(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{
+	httpapi.WriteJSON(w, http.StatusOK, map[string]any{
 		"data_url":   "data:image/png;base64," + base64.StdEncoding.EncodeToString(code.PNG()),
 		"created_at": st.QRAt,
 	})
@@ -430,10 +399,10 @@ func (b *Bridge) apiQR(w http.ResponseWriter, r *http.Request) {
 
 func (b *Bridge) apiPair(w http.ResponseWriter, r *http.Request) {
 	if err := b.wa.StartPairing(); err != nil {
-		writeErr(w, http.StatusConflict, err.Error())
+		httpapi.WriteErr(w, http.StatusConflict, err.Error())
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]string{"status": "pairing"})
+	httpapi.WriteJSON(w, http.StatusOK, map[string]string{"status": "pairing"})
 }
 
 // apiGroups answers GET /api/whatsapp/groups with the groups the account
@@ -449,12 +418,12 @@ func (b *Bridge) apiGroups(w http.ResponseWriter, r *http.Request) {
 	}
 	groups, err := b.wa.JoinedGroups(ctx)
 	if err != nil {
-		writeErr(w, http.StatusServiceUnavailable, err.Error())
+		httpapi.WriteErr(w, http.StatusServiceUnavailable, err.Error())
 		return
 	}
 	cfg := b.cfgs.Get()
 	type row struct {
-		GroupInfo
+		chat.Group
 		Allowed bool   `json:"allowed"`
 		Brain   string `json:"brain"`
 	}
@@ -464,14 +433,14 @@ func (b *Bridge) apiGroups(w http.ResponseWriter, r *http.Request) {
 		allowed[g] = true
 	}
 	for _, g := range groups {
-		rw := row{GroupInfo: g, Allowed: allowed[g.JID]}
+		rw := row{Group: g, Allowed: allowed[g.JID]}
 		if br := b.brainMgr.BrainFor(g.JID, true); br != nil && rw.Allowed {
 			rw.Brain = br.ID()
 		}
 		out = append(out, rw)
 	}
 	sort.Slice(out, func(i, j int) bool { return strings.ToLower(out[i].Name) < strings.ToLower(out[j].Name) })
-	writeJSON(w, http.StatusOK, out)
+	httpapi.WriteJSON(w, http.StatusOK, out)
 }
 
 func (b *Bridge) apiActivity(w http.ResponseWriter, r *http.Request) {
@@ -486,17 +455,17 @@ func (b *Bridge) apiActivity(w http.ResponseWriter, r *http.Request) {
 func (b *Bridge) apiStopRun(w http.ResponseWriter, r *http.Request) {
 	br := b.brainMgr.Get(r.PathValue("id"))
 	if br == nil {
-		writeErr(w, http.StatusNotFound, "no such brain")
+		httpapi.WriteErr(w, http.StatusNotFound, "no such brain")
 		return
 	}
 	var req struct {
 		ClearQueue bool `json:"clear_queue"`
 	}
-	if err := decodeOptionalJSON(r, &req); err != nil {
-		writeErr(w, http.StatusBadRequest, err.Error())
+	if err := httpapi.DecodeOptionalJSON(r, &req); err != nil {
+		httpapi.WriteErr(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]bool{"stopped": br.StopCurrent(req.ClearQueue)})
+	httpapi.WriteJSON(w, http.StatusOK, map[string]bool{"stopped": br.StopCurrent(req.ClearQueue)})
 }
 
 func (b *Bridge) apiLogs(w http.ResponseWriter, r *http.Request) {
@@ -507,7 +476,7 @@ func (b *Bridge) apiLogs(w http.ResponseWriter, r *http.Request) {
 	}
 	limit = min(limit, logRingLines)
 	lines, next := b.logs.Since(after, limit)
-	writeJSON(w, http.StatusOK, map[string]any{"lines": nonNil(lines), "next": next, "boot": b.started.Unix()})
+	httpapi.WriteJSON(w, http.StatusOK, map[string]any{"lines": nonNil(lines), "next": next, "boot": b.started.Unix()})
 }
 
 // ── chats ────────────────────────────────────────────────────────────────
@@ -515,24 +484,10 @@ func (b *Bridge) apiLogs(w http.ResponseWriter, r *http.Request) {
 func (b *Bridge) apiIgnored(w http.ResponseWriter, r *http.Request) {
 	chats, err := b.store.ListIgnored()
 	if err != nil {
-		writeErr(w, http.StatusInternalServerError, err.Error())
+		httpapi.WriteErr(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	writeJSON(w, http.StatusOK, chats)
-}
-
-// The form allowed_groups holds. Every edit of the allow lists goes
-// through phoneNumber and allowListGroup, so the dashboard's add boxes and
-// its Allow buttons agree on what they accept.
-var groupJIDRE = regexp.MustCompile(`^[0-9]+(-[0-9]+)?@g\.us$`)
-
-// allowListGroup is s as allowed_groups holds it: a group JID.
-func allowListGroup(s string) (string, error) {
-	g := strings.TrimSpace(s)
-	if !groupJIDRE.MatchString(g) {
-		return "", fmt.Errorf("%q is not a group JID: it looks like 120363000000000000@g.us", g)
-	}
-	return g, nil
+	httpapi.WriteJSON(w, http.StatusOK, chats)
 }
 
 // chatRequest is what /api/chats/allow and /api/chats/revoke take.
@@ -557,10 +512,10 @@ func (req chatRequest) sent() string {
 func (req chatRequest) listEntry() (dm bool, entry string, err error) {
 	switch req.Kind {
 	case "group":
-		entry, err = allowListGroup(req.sent())
+		entry, err = config.AllowListGroup(req.sent())
 		return false, entry, err
 	case "dm":
-		entry, err = phoneNumber(req.sent())
+		entry, err = chat.PhoneNumber(req.sent())
 		return true, entry, err
 	default:
 		return false, "", errors.New("kind must be group or dm")
@@ -571,16 +526,16 @@ func (req chatRequest) listEntry() (dm bool, entry string, err error) {
 // brain — the dashboard version of copying a JID out of the log.
 func (b *Bridge) apiAllowChat(w http.ResponseWriter, r *http.Request) {
 	var req chatRequest
-	if err := decodeJSON(r, &req); err != nil {
-		writeErr(w, http.StatusBadRequest, err.Error())
+	if err := httpapi.DecodeJSON(r, &req); err != nil {
+		httpapi.WriteErr(w, http.StatusBadRequest, err.Error())
 		return
 	}
 	dm, entry, err := req.listEntry()
 	if err != nil {
-		writeErr(w, http.StatusBadRequest, err.Error())
+		httpapi.WriteErr(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	_, err = b.cfgs.UpdateTx("", func(c *Config, tx *Tx) error {
+	_, err = b.cfgs.UpdateTx("", func(c *config.Config, tx *Tx) error {
 		if dm {
 			if !slices.Contains(c.AllowedNumbers, entry) {
 				c.AllowedNumbers = append(c.AllowedNumbers, entry)
@@ -596,7 +551,7 @@ func (b *Bridge) apiAllowChat(w http.ResponseWriter, r *http.Request) {
 		return assignGroup(c, tx, entry, req.Brain)
 	})
 	if err != nil {
-		writeErr(w, http.StatusUnprocessableEntity, err.Error())
+		httpapi.WriteErr(w, http.StatusUnprocessableEntity, err.Error())
 		return
 	}
 	// The chat no longer waits for access, also when it was typed in.
@@ -604,11 +559,11 @@ func (b *Bridge) apiAllowChat(w http.ResponseWriter, r *http.Request) {
 	if dm {
 		waiting = req.JID
 		if waiting == "" {
-			waiting = userJID(entry)
+			waiting = chat.DMJID(entry)
 		}
 	}
 	_ = b.store.DismissIgnored(waiting, true)
-	writeJSON(w, http.StatusOK, map[string]string{"status": "allowed", "entry": entry})
+	httpapi.WriteJSON(w, http.StatusOK, map[string]string{"status": "allowed", "entry": entry})
 }
 
 // errNotListed means the entry to revoke is not on its allow list.
@@ -622,23 +577,23 @@ var errNotListed = errors.New("not on the allow list")
 // happened elsewhere.
 func (b *Bridge) apiRevokeChat(w http.ResponseWriter, r *http.Request) {
 	var req chatRequest
-	if err := decodeJSON(r, &req); err != nil {
-		writeErr(w, http.StatusBadRequest, err.Error())
+	if err := httpapi.DecodeJSON(r, &req); err != nil {
+		httpapi.WriteErr(w, http.StatusBadRequest, err.Error())
 		return
 	}
 	// An entry the bridge would refuse may still be on the list as it is
 	// stored; only an unknown kind or no entry at all is refused at once.
 	dm, entry, invalid := req.listEntry()
 	if (req.Kind != "group" && req.Kind != "dm") || req.sent() == "" {
-		writeErr(w, http.StatusBadRequest, invalid.Error())
+		httpapi.WriteErr(w, http.StatusBadRequest, invalid.Error())
 		return
 	}
-	canon, name := allowListGroup, "allowed_groups"
+	canon, name := config.AllowListGroup, "allowed_groups"
 	if dm {
-		canon, name = phoneNumber, "allowed_numbers"
+		canon, name = chat.PhoneNumber, "allowed_numbers"
 	}
 	var removed []string
-	_, err := b.cfgs.Update("", func(c *Config) error {
+	_, err := b.cfgs.Update("", func(c *config.Config) error {
 		list := &c.AllowedGroups
 		if dm {
 			list = &c.AllowedNumbers
@@ -660,11 +615,11 @@ func (b *Bridge) apiRevokeChat(w http.ResponseWriter, r *http.Request) {
 	})
 	switch {
 	case errors.Is(err, errNotListed):
-		writeErr(w, http.StatusNotFound, fmt.Sprintf("%s is not in %s", req.sent(), name))
+		httpapi.WriteErr(w, http.StatusNotFound, fmt.Sprintf("%s is not in %s", req.sent(), name))
 	case err != nil:
-		writeErr(w, http.StatusUnprocessableEntity, err.Error())
+		httpapi.WriteErr(w, http.StatusUnprocessableEntity, err.Error())
 	default:
-		writeJSON(w, http.StatusOK, map[string]any{"status": "revoked", "removed": removed})
+		httpapi.WriteJSON(w, http.StatusOK, map[string]any{"status": "revoked", "removed": removed})
 	}
 }
 
@@ -680,31 +635,31 @@ func (b *Bridge) apiGroupMembers(w http.ResponseWriter, r *http.Request) {
 		JID     string    `json:"jid"`
 		Members *[]string `json:"members"`
 	}
-	if err := decodeJSON(r, &req); err != nil {
-		writeErr(w, http.StatusBadRequest, err.Error())
+	if err := httpapi.DecodeJSON(r, &req); err != nil {
+		httpapi.WriteErr(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	group, err := allowListGroup(req.JID)
+	group, err := config.AllowListGroup(req.JID)
 	if err != nil {
-		writeErr(w, http.StatusBadRequest, err.Error())
+		httpapi.WriteErr(w, http.StatusBadRequest, err.Error())
 		return
 	}
 	var members []string
 	if req.Members != nil {
 		entry := map[string][]string{group: *req.Members}
-		if err := validateGroupMembers(entry, []string{group}); err != nil {
-			writeErr(w, http.StatusBadRequest, err.Error())
+		if err := config.ValidateGroupMembers(entry, []string{group}); err != nil {
+			httpapi.WriteErr(w, http.StatusBadRequest, err.Error())
 			return
 		}
 		// A number typed twice, in two ways perhaps, is kept once.
 		members = []string{}
-		for _, n := range groupMembersAsNumbers(entry)[group] {
+		for _, n := range config.GroupMembersAsNumbers(entry)[group] {
 			if !slices.Contains(members, n) {
 				members = append(members, n)
 			}
 		}
 	}
-	_, err = b.cfgs.Update("", func(c *Config) error {
+	_, err = b.cfgs.Update("", func(c *config.Config) error {
 		if req.Members == nil {
 			delete(c.GroupMembers, group)
 			return nil
@@ -716,10 +671,10 @@ func (b *Bridge) apiGroupMembers(w http.ResponseWriter, r *http.Request) {
 		return nil
 	})
 	if err != nil {
-		writeErr(w, http.StatusUnprocessableEntity, err.Error())
+		httpapi.WriteErr(w, http.StatusUnprocessableEntity, err.Error())
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"status": "saved", "members": members})
+	httpapi.WriteJSON(w, http.StatusOK, map[string]any{"status": "saved", "members": members})
 }
 
 // revokeEntry splits list into what stays and what revoking sent removes.
@@ -751,8 +706,8 @@ func revokeEntry(list []string, sent, entry string, valid bool, canon func(strin
 // in their manifests (brain.json, staged in tx, and the approved copy). The
 // chosen brain goes first, so that one that is not there is refused before
 // the others are looked at.
-func assignGroup(c *Config, tx *Tx, jid, brainID string) error {
-	if err := updateManifestIn(c, tx, brainID, func(m *BrainManifest) error {
+func assignGroup(c *config.Config, tx *Tx, jid, brainID string) error {
+	if err := updateManifestIn(c, tx, brainID, func(m *manifest.Manifest) error {
 		if !slices.Contains(m.Routing.Groups, jid) {
 			m.Routing.Groups = append(m.Routing.Groups, jid)
 		}
@@ -762,7 +717,7 @@ func assignGroup(c *Config, tx *Tx, jid, brainID string) error {
 	}
 	for _, ref := range c.BrainDirs {
 		if a := ref.Approved; a != nil && a.ID != brainID && slices.Contains(a.Routing.Groups, jid) {
-			if err := updateManifestIn(c, tx, a.ID, func(m *BrainManifest) error {
+			if err := updateManifestIn(c, tx, a.ID, func(m *manifest.Manifest) error {
 				m.Routing.Groups = slices.DeleteFunc(slices.Clone(m.Routing.Groups), func(g string) bool { return g == jid })
 				return nil
 			}); err != nil {
@@ -777,19 +732,19 @@ func (b *Bridge) apiDismissChat(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		JID string `json:"jid"`
 	}
-	if err := decodeJSON(r, &req); err != nil {
-		writeErr(w, http.StatusBadRequest, err.Error())
+	if err := httpapi.DecodeJSON(r, &req); err != nil {
+		httpapi.WriteErr(w, http.StatusBadRequest, err.Error())
 		return
 	}
 	if req.JID == "" {
-		writeErr(w, http.StatusBadRequest, "jid required")
+		httpapi.WriteErr(w, http.StatusBadRequest, "jid required")
 		return
 	}
 	if err := b.store.DismissIgnored(req.JID, false); err != nil {
-		writeErr(w, http.StatusInternalServerError, err.Error())
+		httpapi.WriteErr(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]string{"status": "dismissed"})
+	httpapi.WriteJSON(w, http.StatusOK, map[string]string{"status": "dismissed"})
 }
 
 // ── config ───────────────────────────────────────────────────────────────
@@ -803,7 +758,7 @@ func (b *Bridge) apiGetConfig(w http.ResponseWriter, r *http.Request) {
 	file.BrainDirs = nil
 	eff := mustClone(snap.Effective)
 	eff.BrainDirs = nil
-	writeJSON(w, http.StatusOK, map[string]any{
+	httpapi.WriteJSON(w, http.StatusOK, map[string]any{
 		"etag":      snap.ETag,
 		"path":      b.cfgs.Path(),
 		"config":    file,
@@ -824,35 +779,35 @@ func (b *Bridge) apiPutConfig(w http.ResponseWriter, r *http.Request) {
 		ETag   string          `json:"etag"`
 		Config json.RawMessage `json:"config"`
 	}
-	if err := decodeJSON(r, &req); err != nil {
-		writeErr(w, http.StatusBadRequest, err.Error())
+	if err := httpapi.DecodeJSON(r, &req); err != nil {
+		httpapi.WriteErr(w, http.StatusBadRequest, err.Error())
 		return
 	}
 	if req.ETag == "" {
-		writeErr(w, http.StatusPreconditionRequired, "etag required: send the etag GET /api/config returned along with the config")
+		httpapi.WriteErr(w, http.StatusPreconditionRequired, "etag required: send the etag GET /api/config returned along with the config")
 		return
 	}
 	incoming, err := decodeConfigReplacement(req.Config)
 	if err != nil {
-		writeErr(w, http.StatusBadRequest, err.Error())
+		httpapi.WriteErr(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	res, err := b.cfgs.UpdateTx(req.ETag, func(c *Config, _ *Tx) error {
+	res, err := b.cfgs.UpdateTx(req.ETag, func(c *config.Config, _ *Tx) error {
 		incoming.BrainDirs = c.BrainDirs
 		*c = *incoming
 		return nil
 	})
 	switch {
 	case errors.Is(err, ErrConfigConflict):
-		writeErr(w, http.StatusConflict, err.Error())
+		httpapi.WriteErr(w, http.StatusConflict, err.Error())
 		return
 	case err != nil:
-		writeErr(w, http.StatusUnprocessableEntity, err.Error())
+		httpapi.WriteErr(w, http.StatusUnprocessableEntity, err.Error())
 		return
 	}
 	// The etag of what this save wrote, not ETag(), which may be a later
 	// save's: the page would take that write for the one it saved.
-	writeJSON(w, http.StatusOK, map[string]any{"etag": res.ETag, "restart_required": nonNil(res.Restart)})
+	httpapi.WriteJSON(w, http.StatusOK, map[string]any{"etag": res.ETag, "restart_required": nonNil(res.Restart)})
 }
 
 // apiRestart restarts the bridge in place (same binary, same arguments): it
@@ -861,25 +816,25 @@ func (b *Bridge) apiPutConfig(w http.ResponseWriter, r *http.Request) {
 // main runs the bridge again once it is over.
 func (b *Bridge) apiRestart(w http.ResponseWriter, r *http.Request) {
 	if b.restart == nil {
-		writeErr(w, http.StatusServiceUnavailable, "this bridge cannot restart itself")
+		httpapi.WriteErr(w, http.StatusServiceUnavailable, "this bridge cannot restart itself")
 		return
 	}
 	log.Printf("Restarting on request from the dashboard…")
-	writeJSON(w, http.StatusAccepted, map[string]string{"status": "restarting"})
+	httpapi.WriteJSON(w, http.StatusAccepted, map[string]string{"status": "restarting"})
 	b.restart()
 }
 
 // ── brains ───────────────────────────────────────────────────────────────
 
 type brainView struct {
-	ID       string         `json:"id"`
-	Name     string         `json:"name"`
-	Path     string         `json:"path"`
-	Status   string         `json:"status"` // ok, drift, missing, invalid, unapproved
-	Manifest *BrainManifest `json:"manifest"`
-	Disk     *BrainManifest `json:"disk_manifest,omitempty"`
-	Issues   []BrainIssue   `json:"issues"`
-	Runtime  *BrainRuntime  `json:"runtime,omitempty"`
+	ID       string             `json:"id"`
+	Name     string             `json:"name"`
+	Path     string             `json:"path"`
+	Status   string             `json:"status"` // ok, drift, missing, invalid, unapproved
+	Manifest *manifest.Manifest `json:"manifest"`
+	Disk     *manifest.Manifest `json:"disk_manifest,omitempty"`
+	Issues   []BrainIssue       `json:"issues"`
+	Runtime  *BrainRuntime      `json:"runtime,omitempty"`
 	// Fallback marks the brain that takes the chats no other brain
 	// claims (BrainManager.Fallback). Without a default brain that is the
 	// first one, which no brain.json says, so the dashboard names it.
@@ -891,7 +846,7 @@ type brainView struct {
 // drift shows as soon as a brain.json changes, plus the folders the brain
 // manager could not open when it last loaded the brains, which only it
 // knows of.
-func (b *Bridge) brainIssues(cfg *Config) []BrainIssue {
+func (b *Bridge) brainIssues(cfg *config.Config) []BrainIssue {
 	_, issues := ResolveBrains(cfg)
 	for _, is := range b.brainMgr.Issues() {
 		if is.atLoad {
@@ -919,7 +874,7 @@ func (b *Bridge) brainViews() []brainView {
 		if ref.Approved != nil {
 			v.ID, v.Name = ref.Approved.ID, ref.Approved.Name
 		}
-		if disk, err := ReadManifest(fsx.Canonical(ref.Path)); err == nil && (ref.Approved == nil || !disk.Equal(*ref.Approved)) {
+		if disk, err := manifest.Read(fsx.Canonical(ref.Path)); err == nil && (ref.Approved == nil || !disk.Equal(*ref.Approved)) {
 			v.Disk = disk
 		}
 		out = append(out, v)
@@ -960,13 +915,13 @@ func (b *Bridge) apiBrain(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	writeErr(w, http.StatusNotFound, "no such brain")
+	httpapi.WriteErr(w, http.StatusNotFound, "no such brain")
 }
 
 // brainDirs lists every folder in c's brain_dirs, ~ expanded, approved or
 // not: a new brain, or a restore, must not land in, around or on any of
 // them, an entry still waiting for approval included.
-func brainDirs(c *Config) []string {
+func brainDirs(c *config.Config) []string {
 	var dirs []string
 	for _, ref := range c.BrainDirs {
 		dirs = append(dirs, ref.Dir())
@@ -978,8 +933,8 @@ func (b *Bridge) apiInspectFolder(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		Path string `json:"path"`
 	}
-	if err := decodeJSON(r, &req); err != nil {
-		writeErr(w, http.StatusBadRequest, err.Error())
+	if err := httpapi.DecodeJSON(r, &req); err != nil {
+		httpapi.WriteErr(w, http.StatusBadRequest, err.Error())
 		return
 	}
 	cfg := b.cfgs.Get()
@@ -988,29 +943,17 @@ func (b *Bridge) apiInspectFolder(w http.ResponseWriter, r *http.Request) {
 	if len(problems) > 0 {
 		// A folder that cannot be a brain is not looked into: outside the
 		// home folder that would be a way to probe any path on disk.
-		writeJSON(w, http.StatusOK, resp)
+		httpapi.WriteJSON(w, http.StatusOK, resp)
 		return
 	}
-	st, err := os.Stat(abs)
-	resp["exists"] = err == nil
-	resp["is_dir"] = err == nil && st.IsDir()
-	if err == nil && st.IsDir() {
-		root, err := os.OpenRoot(fsx.Canonical(homeDir()))
-		if err != nil {
-			writeErr(w, http.StatusBadRequest, err.Error())
-			return
-		}
-		defer root.Close()
-		entries, _ := os.ReadDir(abs)
-		resp["entries"] = len(entries)
-		resp["is_git"] = fileExistsInRoot(root, filepath.Join(abs, ".git"))
-		resp["has_prompt"] = fileExistsInRoot(root, filepath.Join(abs, defaultPromptFile))
-		resp["has_history"] = fileExistsInRoot(root, filepath.Join(abs, historyFileName))
-		if m, err := ReadManifest(abs); err == nil {
-			resp["manifest"] = m
-		}
+	root, err := os.OpenRoot(fsx.Canonical(config.HomeDir()))
+	if err != nil {
+		httpapi.WriteErr(w, http.StatusBadRequest, err.Error())
+		return
 	}
-	id := slugify(filepath.Base(abs))
+	defer root.Close()
+	inspectFolderMetadata(root, abs, resp)
+	id := manifest.Slugify(filepath.Base(abs))
 	taken := map[string]bool{}
 	for _, ref := range cfg.BrainDirs {
 		if ref.Approved != nil {
@@ -1018,10 +961,98 @@ func (b *Bridge) apiInspectFolder(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	for i := 2; taken[id]; i++ {
-		id = fmt.Sprintf("%s-%d", slugify(filepath.Base(abs)), i)
+		id = fmt.Sprintf("%s-%d", manifest.Slugify(filepath.Base(abs)), i)
 	}
 	resp["suggested"] = map[string]string{"id": id, "name": prettyName(filepath.Base(abs))}
-	writeJSON(w, http.StatusOK, resp)
+	httpapi.WriteJSON(w, http.StatusOK, resp)
+}
+
+// inspectFolderMetadata only receives a canonical path accepted by CheckBrainPath.
+// Keep the listing and manifest on the same opened directory.
+func inspectFolderMetadata(home *os.Root, abs string, resp map[string]any) {
+	dir, st, err := openInspectFolder(home, abs)
+	resp["exists"] = err == nil
+	resp["is_dir"] = err == nil && st.IsDir()
+	if err != nil || dir == nil {
+		return
+	}
+	defer dir.Close()
+	entries := 0
+	if f, err := dir.Open("."); err == nil {
+		list, _ := f.ReadDir(-1)
+		entries = len(list)
+		f.Close()
+	}
+	resp["entries"] = entries
+	resp["is_git"] = fileExistsInRoot(home, filepath.Join(abs, ".git"))
+	resp["has_prompt"] = fileExistsInRoot(home, filepath.Join(abs, manifest.DefaultPromptFile))
+	resp["has_history"] = fileExistsInRoot(home, filepath.Join(abs, history.FileName))
+	if m, err := manifest.ReadRoot(dir); err == nil {
+		resp["manifest"] = m
+	}
+}
+
+// openInspectFolder pins each component of an already canonical, accepted path.
+// Reject new symlinks even within home: a replacement could point into a
+// protected sibling. Initially legitimate aliases were resolved by CheckBrainPath.
+func openInspectFolder(home *os.Root, abs string) (*os.Root, os.FileInfo, error) {
+	rel, err := filepath.Rel(home.Name(), abs)
+	if err != nil || rel == "." || !filepath.IsLocal(rel) {
+		return nil, nil, errors.New("inspection path is not inside home")
+	}
+	current, err := home.OpenRoot(".")
+	if err != nil {
+		return nil, nil, err
+	}
+	defer func() {
+		if current != nil {
+			current.Close()
+		}
+	}()
+	parts := strings.Split(rel, string(filepath.Separator))
+	var st os.FileInfo
+	for i, part := range parts {
+		st, err = current.Lstat(part)
+		if err != nil {
+			return nil, nil, err
+		}
+		if st.Mode()&os.ModeSymlink != 0 {
+			return nil, nil, fsx.ErrSymlink
+		}
+		if !st.IsDir() {
+			if i == len(parts)-1 {
+				return nil, st, nil
+			}
+			return nil, nil, errors.New("inspection parent is not a directory")
+		}
+		next, err := openInspectChild(current, part, st)
+		if err != nil {
+			return nil, nil, err
+		}
+		current.Close()
+		current = next
+	}
+	dir := current
+	current = nil // the caller owns the pinned directory
+	return dir, st, nil
+}
+
+// The identity check closes the Lstat/OpenRoot interval without reading any
+// entries from a replacement directory, including a relative symlink in home.
+func openInspectChild(parent *os.Root, name string, observed os.FileInfo) (*os.Root, error) {
+	dir, err := parent.OpenRoot(name)
+	if err != nil {
+		return nil, err
+	}
+	st, err := dir.Stat(".")
+	if err != nil || !os.SameFile(observed, st) {
+		dir.Close()
+		if err == nil {
+			err = errors.New("inspection folder changed while opening it")
+		}
+		return nil, err
+	}
+	return dir, nil
 }
 
 func prettyName(s string) string {
@@ -1056,19 +1087,19 @@ func (b *Bridge) apiAddBrain(w http.ResponseWriter, r *http.Request) {
 		// dashboard showed it to you) instead of writing Manifest.
 		UseExisting bool `json:"use_existing"`
 	}
-	if err := decodeJSON(r, &req); err != nil {
-		writeErr(w, http.StatusBadRequest, err.Error())
+	if err := httpapi.DecodeJSON(r, &req); err != nil {
+		httpapi.WriteErr(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	var m BrainManifest
+	var m manifest.Manifest
 	backupGiven := false
 	if !req.UseExisting {
 		if len(req.Manifest) == 0 {
-			writeErr(w, http.StatusBadRequest, "manifest required (or use_existing, to add the brain.json in the folder)")
+			httpapi.WriteErr(w, http.StatusBadRequest, "manifest required (or use_existing, to add the brain.json in the folder)")
 			return
 		}
-		if err := decodeStrict(req.Manifest, &m); err != nil {
-			writeErr(w, http.StatusBadRequest, "manifest: "+err.Error())
+		if err := httpapi.DecodeStrict(req.Manifest, &m); err != nil {
+			httpapi.WriteErr(w, http.StatusBadRequest, "manifest: "+err.Error())
 			return
 		}
 		var keys map[string]json.RawMessage
@@ -1085,33 +1116,33 @@ func (b *Bridge) apiAddBrain(w http.ResponseWriter, r *http.Request) {
 	cfg := b.cfgs.Get()
 	abs, problems, _ := CheckBrainPath(req.Path, cfg, brainDirs(cfg))
 	if len(problems) > 0 {
-		writeErr(w, http.StatusUnprocessableEntity, strings.Join(problems, "; "))
+		httpapi.WriteErr(w, http.StatusUnprocessableEntity, strings.Join(problems, "; "))
 		return
 	}
 	abs, ok := inHome(abs)
 	if !ok {
-		writeErr(w, http.StatusUnprocessableEntity, "brain folders must be inside your home folder")
+		httpapi.WriteErr(w, http.StatusUnprocessableEntity, "brain folders must be inside your home folder")
 		return
 	}
 	if st, err := os.Stat(abs); err != nil {
 		if !req.CreateDir {
-			writeErr(w, http.StatusUnprocessableEntity, "folder does not exist")
+			httpapi.WriteErr(w, http.StatusUnprocessableEntity, "folder does not exist")
 			return
 		}
 	} else if !st.IsDir() {
-		writeErr(w, http.StatusUnprocessableEntity, "not a folder")
+		httpapi.WriteErr(w, http.StatusUnprocessableEntity, "not a folder")
 		return
 	}
 
 	if req.UseExisting {
-		disk, err := ReadManifest(abs)
+		disk, err := manifest.Read(abs)
 		if err != nil {
-			writeErr(w, http.StatusUnprocessableEntity, "no readable brain.json in that folder: "+err.Error())
+			httpapi.WriteErr(w, http.StatusUnprocessableEntity, "no readable brain.json in that folder: "+err.Error())
 			return
 		}
 		m = *disk
-	} else if _, err := ReadManifest(abs); err == nil {
-		writeErr(w, http.StatusConflict, "this folder already has a brain.json — review it and add it with “use existing”")
+	} else if _, err := manifest.Read(abs); err == nil {
+		httpapi.WriteErr(w, http.StatusConflict, "this folder already has a brain.json — review it and add it with “use existing”")
 		return
 	}
 	switch {
@@ -1119,40 +1150,41 @@ func (b *Bridge) apiAddBrain(w http.ResponseWriter, r *http.Request) {
 	case !backupGiven:
 		// No backup settings given: new brains are backed up, with the
 		// default exclusions.
-		m.Backup = BrainBackup{Enabled: true, Exclude: append([]string{}, DefaultBackupExcludes...)}
+		m.Backup = manifest.Backup{Enabled: true, Exclude: append([]string{}, manifest.DefaultBackupExcludes()...)}
 	case m.Backup.Exclude == nil:
-		m.Backup.Exclude = append([]string{}, DefaultBackupExcludes...)
+		m.Backup.Exclude = append([]string{}, manifest.DefaultBackupExcludes()...)
 	}
-	m = m.normalized()
+	m = m.Normalized()
 	if err := m.Validate(); err != nil {
-		writeErr(w, http.StatusUnprocessableEntity, err.Error())
+		httpapi.WriteErr(w, http.StatusUnprocessableEntity, err.Error())
 		return
 	}
 
 	// Check the new brain against the others before touching the disk.
 	if err := checkNewBrain(cfg, m, abs); err != nil {
-		writeErr(w, http.StatusUnprocessableEntity, err.Error())
+		httpapi.WriteErr(w, http.StatusUnprocessableEntity, err.Error())
 		return
 	}
 
 	// Everything but brain.json, which goes with the update that registers
 	// the brain: written only once the checks there pass, and taken away
 	// again if config.json then cannot be written.
-	scaffold, err := scaffoldFolderTx(abs, &m)
-	defer scaffold.close()
+	scaffold, err := registry.ScaffoldFolder(abs, &m, brainTemplates)
 	if err != nil {
-		scaffold.rollback()
-		writeErr(w, http.StatusInternalServerError, err.Error())
+		defer scaffold.Close()
+		scaffold.Rollback()
+		httpapi.WriteErr(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	created := scaffold.created
+	defer scaffold.Close()
+	created := scaffold.Created()
 	writesManifest := false
-	if _, err := b.cfgs.UpdateTx("", func(c *Config, tx *Tx) error {
+	if _, err := b.cfgs.UpdateTx("", func(c *config.Config, tx *Tx) error {
 		// Again, against the config this update changes. addMu keeps adds
 		// apart, but not the other config writers: a brain saved or
 		// approved since the check above may claim the same group or the
 		// DMs, and the two must not both be registered.
-		eff, err := effective(c)
+		eff, err := config.Resolve(c)
 		if err != nil {
 			return err
 		}
@@ -1161,71 +1193,71 @@ func (b *Bridge) apiAddBrain(w http.ResponseWriter, r *http.Request) {
 		}
 		// A brain.json the folder has, one that does not load say, stays
 		// as ScaffoldBrain would leave it.
-		if _, err := readBrainFile(abs, ManifestFile); !req.UseExisting && errors.Is(err, fs.ErrNotExist) {
+		if _, err := fsx.ReadBrainFile(abs, manifest.File); !req.UseExisting && errors.Is(err, fs.ErrNotExist) {
 			if err := tx.CreateManifest(abs, &m); err != nil {
 				return err
 			}
 			writesManifest = true
 		}
 		approved := m
-		c.BrainDirs = append(c.BrainDirs, BrainRef{Path: fsx.Tilde(abs, homeDir()), Approved: &approved})
+		c.BrainDirs = append(c.BrainDirs, config.BrainRef{Path: fsx.Tilde(abs, config.HomeDir()), Approved: &approved})
 		return nil
 	}); err != nil {
-		scaffold.rollback()
-		writeErr(w, http.StatusUnprocessableEntity, err.Error())
+		scaffold.Rollback()
+		httpapi.WriteErr(w, http.StatusUnprocessableEntity, err.Error())
 		return
 	}
 	if writesManifest {
-		created = append(created, ManifestFile)
+		created = append(created, manifest.File)
 		sort.Strings(created)
 	}
 	log.Printf("brain %s: added (%s), created %v", m.ID, abs, created)
-	writeJSON(w, http.StatusOK, map[string]any{"id": m.ID, "path": abs, "created": nonNil(created)})
+	httpapi.WriteJSON(w, http.StatusOK, map[string]any{"id": m.ID, "path": abs, "created": nonNil(created)})
 }
 
 // checkNewBrain checks brain m, to go in folder abs, against the brains cfg
 // (an effective configuration) has: the folder must be none of theirs, in
 // or around one, and m must not clash with them.
-func checkNewBrain(cfg *Config, m BrainManifest, abs string) error {
+func checkNewBrain(cfg *config.Config, m manifest.Manifest, abs string) error {
 	if _, problems, _ := CheckBrainPath(abs, cfg, brainDirs(cfg)); len(problems) > 0 {
 		return errors.New(strings.Join(problems, "; "))
 	}
 	specs, _ := ResolveBrains(cfg)
-	return ValidateBrainSet(append(specs, BrainSpec{Manifest: m, Dir: abs}))
+	return route.Validate(append(specs, manifest.Spec{Manifest: m, Dir: abs}))
 }
 
 // apiUpdateBrain saves edited settings for a brain.
 func (b *Bridge) apiUpdateBrain(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 	var req struct {
-		Manifest BrainManifest `json:"manifest"`
+		Manifest manifest.Manifest `json:"manifest"`
 	}
-	if err := decodeJSON(r, &req); err != nil {
-		writeErr(w, http.StatusBadRequest, err.Error())
+	if err := httpapi.DecodeJSON(r, &req); err != nil {
+		httpapi.WriteErr(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	m := req.Manifest.normalized()
+	m := req.Manifest.Normalized()
 	if m.ID != id {
-		writeErr(w, http.StatusUnprocessableEntity, "a brain's id cannot change — remove it and add the folder again under a new id")
+		httpapi.WriteErr(w, http.StatusUnprocessableEntity, "a brain's id cannot change — remove it and add the folder again under a new id")
 		return
 	}
 	if err := m.Validate(); err != nil {
-		writeErr(w, http.StatusUnprocessableEntity, err.Error())
+		httpapi.WriteErr(w, http.StatusUnprocessableEntity, err.Error())
 		return
 	}
 	// The brain.json the update stages has it check the brain set with
 	// the edit before anything is written (see checkSet).
-	_, err := b.cfgs.UpdateTx("", func(c *Config, tx *Tx) error {
-		return updateManifestIn(c, tx, id, func(cur *BrainManifest) error {
+	_, err := b.cfgs.UpdateTx("", func(c *config.Config, tx *Tx) error {
+		return updateManifestIn(c, tx, id, func(cur *manifest.Manifest) error {
 			*cur = m
 			return nil
 		})
 	})
 	if err != nil {
-		writeErr(w, http.StatusUnprocessableEntity, err.Error())
+		httpapi.WriteErr(w, http.StatusUnprocessableEntity, err.Error())
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]string{"status": "saved"})
+	httpapi.WriteJSON(w, http.StatusOK, map[string]string{"status": "saved"})
 }
 
 // checkSet refuses an edit that makes brains clash, or leaves one that
@@ -1235,7 +1267,7 @@ func (b *Bridge) apiUpdateBrain(w http.ResponseWriter, r *http.Request) {
 // hand edit broke say, is not the edit's doing, and does not keep the
 // other brains from being edited or approved. Issues are told apart by
 // brain, kind and detail.
-func checkSet(before, after *Config) error {
+func checkSet(before, after *config.Config) error {
 	_, was := ResolveBrains(before)
 	seen := map[string]bool{}
 	for _, is := range was {
@@ -1267,23 +1299,23 @@ var errReviewedManifestChanged = errors.New("brain.json changed again since you 
 func (b *Bridge) apiApproveBrain(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 	var req struct {
-		Manifest *BrainManifest `json:"manifest"`
+		Manifest *manifest.Manifest `json:"manifest"`
 	}
-	if err := decodeJSON(r, &req); err != nil {
-		writeErr(w, http.StatusBadRequest, err.Error())
+	if err := httpapi.DecodeJSON(r, &req); err != nil {
+		httpapi.WriteErr(w, http.StatusBadRequest, err.Error())
 		return
 	}
 	if req.Manifest == nil {
-		writeErr(w, http.StatusBadRequest, "manifest required: send the brain.json you reviewed")
+		httpapi.WriteErr(w, http.StatusBadRequest, "manifest required: send the brain.json you reviewed")
 		return
 	}
-	_, err := b.cfgs.UpdateTx("", func(c *Config, tx *Tx) error {
+	_, err := b.cfgs.UpdateTx("", func(c *config.Config, tx *Tx) error {
 		for i := range c.BrainDirs {
 			ref := &c.BrainDirs[i]
 			if ref.Approved == nil || ref.Approved.ID != id {
 				continue
 			}
-			disk, err := ReadManifest(ref.Dir())
+			disk, err := manifest.Read(ref.Dir())
 			if err != nil {
 				return err
 			}
@@ -1304,19 +1336,19 @@ func (b *Bridge) apiApproveBrain(w http.ResponseWriter, r *http.Request) {
 	})
 	switch {
 	case errors.Is(err, errReviewedManifestChanged):
-		writeErr(w, http.StatusConflict, err.Error())
+		httpapi.WriteErr(w, http.StatusConflict, err.Error())
 		return
 	case err != nil:
-		writeErr(w, http.StatusUnprocessableEntity, err.Error())
+		httpapi.WriteErr(w, http.StatusUnprocessableEntity, err.Error())
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]string{"status": "approved"})
+	httpapi.WriteJSON(w, http.StatusOK, map[string]string{"status": "approved"})
 }
 
 // apiRemoveBrain stops routing to a brain. Its folder is left exactly as it is.
 func (b *Bridge) apiRemoveBrain(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
-	_, err := b.cfgs.Update("", func(c *Config) error {
+	_, err := b.cfgs.Update("", func(c *config.Config) error {
 		for i, ref := range c.BrainDirs {
 			if ref.Approved != nil && ref.Approved.ID == id {
 				c.BrainDirs = slices.Delete(c.BrainDirs, i, i+1)
@@ -1326,10 +1358,10 @@ func (b *Bridge) apiRemoveBrain(w http.ResponseWriter, r *http.Request) {
 		return fmt.Errorf("no brain %q", id)
 	})
 	if err != nil {
-		writeErr(w, http.StatusUnprocessableEntity, err.Error())
+		httpapi.WriteErr(w, http.StatusUnprocessableEntity, err.Error())
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]string{"status": "removed"})
+	httpapi.WriteJSON(w, http.StatusOK, map[string]string{"status": "removed"})
 }
 
 // apiRemoveBrainDir removes the brain_dirs entry for the folder ?path= that
@@ -1339,11 +1371,11 @@ func (b *Bridge) apiRemoveBrain(w http.ResponseWriter, r *http.Request) {
 func (b *Bridge) apiRemoveBrainDir(w http.ResponseWriter, r *http.Request) {
 	path := strings.TrimSpace(r.URL.Query().Get("path"))
 	if path == "" {
-		writeErr(w, http.StatusBadRequest, "path required")
+		httpapi.WriteErr(w, http.StatusBadRequest, "path required")
 		return
 	}
-	want := fsx.Canonical(fsx.ExpandHome(path, homeDir()))
-	_, err := b.cfgs.Update("", func(c *Config) error {
+	want := fsx.Canonical(fsx.ExpandHome(path, config.HomeDir()))
+	_, err := b.cfgs.Update("", func(c *config.Config) error {
 		for i, ref := range c.BrainDirs {
 			if ref.Approved == nil && fsx.Canonical(ref.Dir()) == want {
 				c.BrainDirs = slices.Delete(c.BrainDirs, i, i+1)
@@ -1353,10 +1385,10 @@ func (b *Bridge) apiRemoveBrainDir(w http.ResponseWriter, r *http.Request) {
 		return fmt.Errorf("no unapproved brain folder %s (remove an approved brain by its id)", path)
 	})
 	if err != nil {
-		writeErr(w, http.StatusUnprocessableEntity, err.Error())
+		httpapi.WriteErr(w, http.StatusUnprocessableEntity, err.Error())
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]string{"status": "removed"})
+	httpapi.WriteJSON(w, http.StatusOK, map[string]string{"status": "removed"})
 }
 
 // ── folder picking ───────────────────────────────────────────────────────
@@ -1364,22 +1396,22 @@ func (b *Bridge) apiRemoveBrainDir(w http.ResponseWriter, r *http.Request) {
 var pickMu sync.Mutex
 
 func (b *Bridge) apiFSCaps(w http.ResponseWriter, r *http.Request) {
-	home := homeDir()
+	home := config.HomeDir()
 	picker := ""
 	if p := platform.FolderPicker(home); p != nil {
 		picker = filepath.Base(p[0])
 	}
-	writeJSON(w, http.StatusOK, map[string]string{"picker": picker, "home": home})
+	httpapi.WriteJSON(w, http.StatusOK, map[string]string{"picker": picker, "home": home})
 }
 
 func (b *Bridge) apiFSPick(w http.ResponseWriter, r *http.Request) {
-	argv := platform.FolderPicker(homeDir())
+	argv := platform.FolderPicker(config.HomeDir())
 	if argv == nil {
-		writeErr(w, http.StatusNotImplemented, "no native folder picker on this system — browse or type the path instead")
+		httpapi.WriteErr(w, http.StatusNotImplemented, "no native folder picker on this system — browse or type the path instead")
 		return
 	}
 	if !pickMu.TryLock() {
-		writeErr(w, http.StatusConflict, "a folder picker is already open")
+		httpapi.WriteErr(w, http.StatusConflict, "a folder picker is already open")
 		return
 	}
 	defer pickMu.Unlock()
@@ -1388,11 +1420,11 @@ func (b *Bridge) apiFSPick(w http.ResponseWriter, r *http.Request) {
 	p, err := runPicker(ctx, argv)
 	switch {
 	case errors.Is(err, errPickerCancelled):
-		writeJSON(w, http.StatusOK, map[string]any{"cancelled": true})
+		httpapi.WriteJSON(w, http.StatusOK, map[string]any{"cancelled": true})
 	case err != nil:
-		writeErr(w, http.StatusInternalServerError, fmt.Sprintf("the folder dialog failed (%v) — browse or type the path instead", err))
+		httpapi.WriteErr(w, http.StatusInternalServerError, fmt.Sprintf("the folder dialog failed (%v) — browse or type the path instead", err))
 	default:
-		writeJSON(w, http.StatusOK, map[string]any{"path": p})
+		httpapi.WriteJSON(w, http.StatusOK, map[string]any{"path": p})
 	}
 }
 
@@ -1452,37 +1484,37 @@ func textTail(s string, n int) string {
 // apiFSList lists folders inside your home folder, for the in-dashboard
 // folder browser. The bridge's data folder is hidden.
 func (b *Bridge) apiFSList(w http.ResponseWriter, r *http.Request) {
-	home := fsx.Canonical(homeDir())
+	home := fsx.Canonical(config.HomeDir())
 	p := r.URL.Query().Get("path")
 	if p == "" {
 		p = home
 	}
 	p = fsx.Canonical(fsx.ExpandHome(p, home))
 	if !fsx.Within(p, home) {
-		writeErr(w, http.StatusForbidden, "only folders inside your home folder can be browsed")
+		httpapi.WriteErr(w, http.StatusForbidden, "only folders inside your home folder can be browsed")
 		return
 	}
 	showHidden := r.URL.Query().Get("hidden") == "1"
 	root, err := os.OpenRoot(home)
 	if err != nil {
-		writeErr(w, http.StatusBadRequest, err.Error())
+		httpapi.WriteErr(w, http.StatusBadRequest, err.Error())
 		return
 	}
 	defer root.Close()
 	rel, err := filepath.Rel(home, p)
 	if err != nil {
-		writeErr(w, http.StatusBadRequest, err.Error())
+		httpapi.WriteErr(w, http.StatusBadRequest, err.Error())
 		return
 	}
 	dir, err := root.Open(rel)
 	if err != nil {
-		writeErr(w, http.StatusBadRequest, err.Error())
+		httpapi.WriteErr(w, http.StatusBadRequest, err.Error())
 		return
 	}
 	entries, err := dir.ReadDir(-1)
 	dir.Close()
 	if err != nil {
-		writeErr(w, http.StatusBadRequest, err.Error())
+		httpapi.WriteErr(w, http.StatusBadRequest, err.Error())
 		return
 	}
 	data := fsx.Canonical(b.cfgs.Get().DataDir)
@@ -1515,14 +1547,14 @@ func (b *Bridge) apiFSList(w http.ResponseWriter, r *http.Request) {
 		if st, err := root.Stat(child); err != nil || !st.IsDir() {
 			continue
 		}
-		out = append(out, entry{Name: e.Name(), Path: full, IsBrain: fileExistsInRoot(root, filepath.Join(resolved, ManifestFile)), IsGit: fileExistsInRoot(root, filepath.Join(resolved, ".git"))})
+		out = append(out, entry{Name: e.Name(), Path: full, IsBrain: fileExistsInRoot(root, filepath.Join(resolved, manifest.File)), IsGit: fileExistsInRoot(root, filepath.Join(resolved, ".git"))})
 	}
 	sort.Slice(out, func(i, j int) bool { return strings.ToLower(out[i].Name) < strings.ToLower(out[j].Name) })
 	parent := filepath.Dir(p)
 	if p == home {
 		parent = ""
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"path": p, "parent": parent, "home": home, "entries": out})
+	httpapi.WriteJSON(w, http.StatusOK, map[string]any{"path": p, "parent": parent, "home": home, "entries": out})
 }
 
 // fileExistsInRoot probes metadata only inside root. Resolve first so an
@@ -1550,54 +1582,56 @@ func (b *Bridge) apiDevInbound(w http.ResponseWriter, r *http.Request) {
 		// the way /ingest and Plaud hand files to a brain.
 		Brain string `json:"brain"`
 	}
-	if err := decodeJSON(r, &req); err != nil {
-		writeErr(w, http.StatusBadRequest, err.Error())
+	if err := httpapi.DecodeJSON(r, &req); err != nil {
+		httpapi.WriteErr(w, http.StatusBadRequest, err.Error())
 		return
 	}
 	if req.JID == "" {
-		writeErr(w, http.StatusBadRequest, "jid required")
+		httpapi.WriteErr(w, http.StatusBadRequest, "jid required")
 		return
 	}
 	req.Brain = strings.ToLower(strings.TrimSpace(req.Brain))
 	if req.Brain != "" && b.brainMgr.Get(req.Brain) == nil {
-		writeErr(w, http.StatusBadRequest, fmt.Sprintf("unknown brain %q", req.Brain))
+		httpapi.WriteErr(w, http.StatusBadRequest, fmt.Sprintf("unknown brain %q", req.Brain))
 		return
 	}
 	if req.Sender == "" {
-		req.Sender = normalizeJID(req.JID)
+		req.Sender = chat.NormalizeJID(req.JID)
 	}
 	// Apply the same allow lists, group_members and trigger handling as
 	// WhatsApp messages, on one config snapshot as handleGroupMessage does.
 	cfg := b.cfgs.Get()
-	m := Inbound{JID: req.JID, Brain: req.Brain, Sender: req.Sender, Text: req.Text, Media: req.Media, Silent: req.Silent, Source: sourceDev, At: time.Now()}
+	m := Inbound{Inbound: chat.Inbound{JID: req.JID, Brain: req.Brain, Sender: req.Sender, Text: req.Text, Media: req.Media, Silent: req.Silent, Source: chat.SourceDev, At: time.Now()}}
 	if m.IsGroup() {
 		if !isAllowedGroup(cfg, m.JID) {
 			b.recordIgnored("group", m.JID, "", m.Sender, "")
-			writeJSON(w, http.StatusAccepted, map[string]string{"status": "ignored", "reason": "group not allowed"})
+			httpapi.WriteJSON(w, http.StatusAccepted, map[string]string{"status": "ignored", "reason": "group not allowed"})
 			return
 		}
 		// A member group_members does not admit is not read at all, and
 		// the group, which is allowed, is not offered on the dashboard.
 		if who := devGroupSender(m.Sender); !groupSenderAllowed(cfg, m.JID, who) {
 			log.Printf("Dev group message in %s by %s: ignored (not admitted by group_members)", m.JID, who.masked())
-			writeJSON(w, http.StatusAccepted, map[string]string{"status": "ignored", "reason": "sender not admitted by group_members"})
+			httpapi.WriteJSON(w, http.StatusAccepted, map[string]string{"status": "ignored", "reason": "sender not admitted by group_members"})
 			return
 		}
-		files := len(m.Media) > 0 && b.groupRules(m.JID).files
-		if !cfg.Triggers.Matches(m.Text) && !files {
+		policy := policyOf(cfg)
+		policy.Files = b.groupRules(m.JID).files
+		who := devGroupSender(m.Sender)
+		decision := access.Decide(policy, chat.Envelope{Chat: m.JID, Sender: who.Number, SenderResolved: who.Resolved, Group: true, Text: m.Text, HasFile: len(m.Media) > 0})
+		if decision.Silent {
 			m.Silent = true
-			// As on WhatsApp, a file that does not address the bridge is
-			// chatter, and not fetched.
+			// As on WhatsApp, a file that does not address the bridge is chatter.
 			m.Media = nil
 		}
-		m.Text = cfg.Triggers.Strip(m.Text)
+		m.Text = decision.Text
 	} else if !numberAllowed(cfg, m.Sender) {
 		b.recordIgnored("dm", m.JID, "", m.Sender, "")
-		writeJSON(w, http.StatusAccepted, map[string]string{"status": "ignored", "reason": "number not allowed"})
+		httpapi.WriteJSON(w, http.StatusAccepted, map[string]string{"status": "ignored", "reason": "number not allowed"})
 		return
 	}
 	go b.handleInbound(context.Background(), m)
-	writeJSON(w, http.StatusAccepted, map[string]string{"status": "accepted"})
+	httpapi.WriteJSON(w, http.StatusAccepted, map[string]string{"status": "accepted"})
 }
 
 // devGroupSender is the member a dev message to a group comes from, as
@@ -1606,15 +1640,15 @@ func (b *Bridge) apiDevInbound(w http.ResponseWriter, r *http.Request) {
 // group's own digits when the request names no sender, is no number, like
 // a member WhatsApp names only by a LID nothing maps to a number.
 func devGroupSender(sender string) groupSender {
-	if n, err := phoneNumber(sender); err == nil {
+	if n, err := chat.PhoneNumber(sender); err == nil {
 		return groupSender{Number: n, Resolved: true}
 	}
 	user, server, _ := strings.Cut(strings.TrimSpace(sender), "@")
-	return groupSender{Number: normalizeJID(user), Server: server}
+	return groupSender{Number: chat.NormalizeJID(user), Server: server}
 }
 
 func (b *Bridge) apiDevOutbox(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, http.StatusOK, b.dev.Outbox())
+	httpapi.WriteJSON(w, http.StatusOK, b.dev.Outbox())
 }
 
 // ── helpers ──────────────────────────────────────────────────────────────

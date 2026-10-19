@@ -4,6 +4,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/Icewater1337/fridolin/internal/devchat"
+	outboundmsg "github.com/Icewater1337/fridolin/internal/outbound"
+	"github.com/Icewater1337/fridolin/internal/whatsapp"
 	"log"
 	"net"
 	"net/http"
@@ -14,9 +17,22 @@ import (
 	"time"
 	"unicode"
 
-	"github.com/Icewater1337/fridolin/internal/platform"
-	"go.mau.fi/whatsmeow/store"
+	"github.com/Icewater1337/fridolin/internal/config"
+
+	"github.com/Icewater1337/fridolin/internal/manifest"
+
+	"github.com/Icewater1337/fridolin/internal/httpapi"
+
+	wastore "go.mau.fi/whatsmeow/store"
 	"go.mau.fi/whatsmeow/types"
+
+	"github.com/Icewater1337/fridolin/internal/activity"
+	"github.com/Icewater1337/fridolin/internal/chat"
+	"github.com/Icewater1337/fridolin/internal/history"
+	"github.com/Icewater1337/fridolin/internal/logx"
+	"github.com/Icewater1337/fridolin/internal/otp"
+	"github.com/Icewater1337/fridolin/internal/platform"
+	"github.com/Icewater1337/fridolin/internal/store"
 )
 
 // isJunkMessage reports whether a message is too trivial to be worth a Claude
@@ -40,14 +56,14 @@ func isJunkMessage(text string) bool {
 type Bridge struct {
 	cfgs     *ConfigStore
 	lock     *platform.Lock
-	store    *Store
+	store    *store.Store
 	wa       Messenger
-	dev      *devMessenger // non-nil in --no-whatsapp mode
+	dev      *devchat.Messenger // non-nil in --no-whatsapp mode
 	brainMgr *BrainManager
 	deb      *Debouncer
-	logs     *LogRing
-	activity *Activity
-	token    *DashboardToken
+	logs     *logx.Ring
+	activity *activity.Feed
+	token    *httpapi.Token
 	// tokenAtStart is dashboard.require_token as the bridge started.
 	tokenAtStart bool
 	sessions     *dashSessions
@@ -58,8 +74,8 @@ type Bridge struct {
 	google        *GoogleAuth
 	plaud         *PlaudManager
 	site          *SiteManager
-	outbox        *Outbox
-	otp           otpHandoffs
+	outbox        *outboundmsg.Outbox
+	otp           otp.Handoff
 	started       time.Time
 	// restart is BridgeOptions.Restart.
 	restart func()
@@ -73,7 +89,7 @@ type Bridge struct {
 	// lids is whatsmeow's map between LIDs and phone numbers, nil in dev
 	// mode, for what knows a person by LID outside an event: a /send to
 	// one.
-	lids func() store.LIDStore
+	lids func() wastore.LIDStore
 
 	httpSrv *http.Server
 	// loops are the goroutines Start leaves running past its return,
@@ -94,7 +110,7 @@ type Bridge struct {
 // BridgeOptions are the run-time switches from the command line.
 type BridgeOptions struct {
 	NoWhatsApp bool
-	Logs       *LogRing
+	Logs       *logx.Ring
 	// Restart asks whoever runs the bridge to stop it and run it again
 	// (POST /api/restart): runCmd ends its context with errRestart. Nil
 	// leaves the bridge unable to restart itself.
@@ -123,7 +139,7 @@ func NewBridge(cfgs *ConfigStore, opts BridgeOptions) (_ *Bridge, err error) {
 	}()
 	protectDataDir(cfg)
 	pruneRunTokens(cfg.DataDir)
-	sweepOTPHandoffs(filepath.Join(cfg.DataDir, "otp"), time.Now())
+	otp.Sweep(filepath.Join(cfg.DataDir, "otp"), time.Now())
 	// With the lock held no other bridge runs here, so any run the last one
 	// recorded that is still going was left behind by a crash.
 	reapOrphanedRuns(cfg.DataDir)
@@ -135,11 +151,11 @@ func NewBridge(cfgs *ConfigStore, opts BridgeOptions) (_ *Bridge, err error) {
 	// bridge's media folder under it. A failure here leaves it to the
 	// first inbox.
 	if cfg.MediaDir != "" {
-		if err := retireLegacyMedia(cfg.MediaDir); err != nil {
+		if err := mediaInboxAt(cfg.MediaDir).RetireLegacy(); err != nil {
 			log.Printf("media: readying %s for inboxes: %v", cfg.MediaDir, err)
 		}
 	}
-	store, err := NewStore(cfg)
+	store, err := store.Open(cfg.DBPath, cfg.LogLevel)
 	if err != nil {
 		return nil, fmt.Errorf("creating store: %w", err)
 	}
@@ -158,7 +174,7 @@ func NewBridge(cfgs *ConfigStore, opts BridgeOptions) (_ *Bridge, err error) {
 		lock:     lock,
 		store:    store,
 		logs:     opts.Logs,
-		activity: NewActivity(500),
+		activity: activity.New(500),
 		started:  time.Now(),
 		restart:  opts.Restart,
 	}
@@ -169,7 +185,7 @@ func NewBridge(cfgs *ConfigStore, opts BridgeOptions) (_ *Bridge, err error) {
 	}
 	b.exe = bridgeBinary()
 	if b.logs == nil {
-		b.logs = NewLogRing(logRingLines)
+		b.logs = logx.NewRing(logRingLines)
 	}
 
 	mgr, err := NewBrainManager(cfg)
@@ -190,18 +206,19 @@ func NewBridge(cfgs *ConfigStore, opts BridgeOptions) (_ *Bridge, err error) {
 	)
 
 	if opts.NoWhatsApp {
-		b.dev = &devMessenger{cfg: cfgs.Get}
+		b.dev = devchat.New(func(text string) []string { return outboundmsg.Chunk(text, cfgs.Get().MaxChunkSize) })
 		b.wa = b.dev
 	} else {
-		wa, err := NewWhatsAppClient(cfgs.Get, store, b.handleInbound, b.recordIgnored)
+		waOpts := whatsAppOptions(cfgs.Get, store, b.handleInbound, b.recordIgnored)
+		waOpts.OnVote = whatsAppVoteHandler(b.recordVote)
+		waOpts.OnChange = b.handleChange
+		waOpts.GroupRules = whatsAppGroupRules(b.groupRules)
+		wa, err := whatsapp.New(waOpts)
 		if err != nil {
 			return nil, fmt.Errorf("creating whatsapp client: %w", err)
 		}
-		wa.onVote = b.recordVote
-		wa.onChange = b.handleChange
-		wa.groupRules = b.groupRules
 		b.wa = wa
-		b.lids = wa.lidStore
+		b.lids = wa.LIDStore
 	}
 
 	b.brainMgr.SetHooks(BrainHooks{
@@ -229,14 +246,14 @@ func NewBridge(cfgs *ConfigStore, opts BridgeOptions) (_ *Bridge, err error) {
 		RunEnv:      b.brainRunEnv,
 	})
 	for _, br := range b.brainMgr.Brains() {
-		b.activity.Seed(br)
+		seedActivity(b.activity, br)
 	}
 
 	// Configuration edits (from the dashboard) apply to the brains at once.
 	// The brains get the configuration as it is now rather than next, under
 	// a lock, so that whichever notification comes last, the brains end on
 	// the latest configuration and never on one an update has replaced.
-	cfgs.Subscribe(func(prev, next *Config) {
+	cfgs.Subscribe(func(prev, next *config.Config) {
 		b.applyMu.Lock()
 		err := b.brainMgr.Apply(b.cfgs.Get())
 		b.applyMu.Unlock()
@@ -246,11 +263,11 @@ func NewBridge(cfgs *ConfigStore, opts BridgeOptions) (_ *Bridge, err error) {
 		logDMAccess(prev, next)
 		logSecurityChanges(prev, next)
 		for _, br := range b.brainMgr.Brains() {
-			b.activity.Seed(br)
+			seedActivity(b.activity, br)
 		}
 	})
 
-	tok, err := LoadDashboardToken(cfg.DataDir)
+	tok, err := httpapi.LoadDashboardToken(cfg.DataDir)
 	if err != nil {
 		return nil, err
 	}
@@ -289,11 +306,11 @@ func NewBridge(cfgs *ConfigStore, opts BridgeOptions) (_ *Bridge, err error) {
 	b.site.hooks = b.siteBuilderHooks()
 	// What builder brains say in the Build page's chats goes there, not to WhatsApp.
 	b.wa = siteChatMessenger{Messenger: b.wa, chats: b.site.chats}
-	pace := outboxPace
+	pace := outboundmsg.OutboxPace
 	if opts.NoWhatsApp {
 		pace = 0
 	}
-	b.outbox = newOutbox(store, func() Messenger { return b.wa }, pace, b.delivered)
+	b.outbox = outboundmsg.NewOutbox(store, func() outboundmsg.Link { return b.wa }, pace, b.delivered)
 	return b, nil
 }
 
@@ -370,34 +387,8 @@ func newHTTPServer(h http.Handler) *http.Server {
 	}
 }
 
-// Connection retries: the first after connectFirstRetry, doubling up to
-// connectMaxRetry.
-const (
-	connectFirstRetry = 5 * time.Second
-	connectMaxRetry   = 2 * time.Minute
-)
-
-// connectLoop connects to WhatsApp, retrying while the network is down.
-// Once connected, whatsmeow reconnects by itself. An error that another
-// try cannot fix ends it: the dashboard's state says what to do.
-func (b *Bridge) connectLoop(ctx context.Context) {
-	for delay := connectFirstRetry; ctx.Err() == nil; delay = min(2*delay, connectMaxRetry) {
-		err := b.wa.Connect()
-		if err == nil {
-			return
-		}
-		if errors.Is(err, store.ErrDeviceDeleted) || errors.Is(err, errPairingLive) {
-			log.Printf("WhatsApp connect failed: %v", err)
-			return
-		}
-		log.Printf("WhatsApp connect failed: %v — retrying in %v", err, delay)
-		select {
-		case <-ctx.Done():
-			return
-		case <-time.After(delay):
-		}
-	}
-}
+// connectLoop retains the bridge's ownership of the connection goroutine.
+func (b *Bridge) connectLoop(ctx context.Context) { whatsapp.RunConnectLoop(ctx, b.wa.Connect) }
 
 // Stop shuts everything down in dependency order, once: a restart and a
 // signal that come together, or a test and its cleanup, stop the bridge
@@ -425,7 +416,7 @@ func (b *Bridge) stop() {
 	// After the brains, whose last runs may still reply; what does not go
 	// out stays in bridge.db for the next start.
 	b.outbox.Stop()
-	b.otp.stop()
+	b.otp.Stop()
 	b.wa.Disconnect()
 	// The connect loop ends with Start's context, unless it is connecting
 	// still, which Disconnect cuts short.
@@ -453,12 +444,12 @@ func (b *Bridge) keepWaiting(br *Brain, ms []Inbound) {
 // send again. Whoever handed in another hears that it was dropped
 // (Inbound.Done), and can hand it in again.
 func (b *Bridge) keep(kind, brain string, m Inbound) {
-	if m.Source != sourceWhatsApp {
+	if m.Source != chat.SourceWhatsApp {
 		log.Printf("dropping a message for %s from %s as the bridge stops", m.JID, m.Source)
 		dropped([]Inbound{m})
 		return
 	}
-	if err := b.store.KeepInbound(context.Background(), kind, brain, m); err != nil {
+	if err := keepInbound(context.Background(), b.store, kind, brain, m); err != nil {
 		log.Printf("%v; it is lost", err)
 	}
 }
@@ -468,10 +459,10 @@ func (b *Bridge) keep(kind, brain string, m Inbound) {
 // Not for an untagged message, whose run answers nobody, nor for a
 // hand-off, whose sender heard through Done.
 func (b *Bridge) keepInterrupted(br *Brain, m Inbound) {
-	if m.Source != sourceWhatsApp || m.Silent {
+	if m.Source != chat.SourceWhatsApp || m.Silent {
 		return
 	}
-	if err := b.store.KeepInterrupted(context.Background(), br.ID(), m); err != nil {
+	if err := keepInterrupted(context.Background(), b.store, br.ID(), m); err != nil {
 		log.Printf("brain %s: %v", br.ID(), err)
 	}
 }
@@ -491,7 +482,7 @@ func (b *Bridge) resume(ctx context.Context) {
 	// that begins meanwhile keeps what is still waiting again, but a
 	// notice it cut off would be lost.
 	ctx = context.WithoutCancel(ctx)
-	rows, err := b.store.TakeInbound(ctx)
+	rows, err := takeInbound(ctx, b.store)
 	if err != nil {
 		log.Printf("taking up what the last stop kept: %v", err)
 	}
@@ -506,13 +497,13 @@ func (b *Bridge) resume(ctx context.Context) {
 		len(rows)-kinds[inboundChange]-kinds[inboundInterrupted], kinds[inboundChange], kinds[inboundInterrupted])
 	now := time.Now()
 	for _, r := range rows {
-		if age := now.Sub(r.SentAt); age > outboxTTL && r.Kind != inboundChange {
-			log.Printf("dropping a message for %s that the last stop kept: it came in %v ago, more than %v", r.Chat, age.Round(time.Minute), outboxTTL)
+		if age := now.Sub(r.SentAt); age > outboundmsg.OutboxTTL && r.Kind != inboundChange {
+			log.Printf("dropping a message for %s that the last stop kept: it came in %v ago, more than %v", r.Chat, age.Round(time.Minute), outboundmsg.OutboxTTL)
 			continue
 		}
 		switch r.Kind {
 		case inboundInterrupted:
-			if err := b.outbox.Text(ctx, r.Chat, restartedNotice, b.cfgs.Get().MaxChunkSize); err != nil {
+			if err := b.outbox.Text(ctx, r.Chat, outboundmsg.RestartedNotice, b.cfgs.Get().MaxChunkSize); err != nil {
 				log.Printf("brain %s: telling %s its run was cut short: %v", r.Brain, r.Chat, err)
 			}
 		case inboundQueued, inboundHeld:
@@ -637,10 +628,10 @@ func (b *Bridge) keepLate(m Inbound) {
 // changed, or else to the brain's queue, its run and its history. Once
 // the bridge stops, it is kept for the next start instead, as messages
 // are (see intake).
-func (b *Bridge) handleChange(c messageChange) {
+func (b *Bridge) handleChange(c chat.Change) {
 	if !b.intake.enter() {
 		kept := b.intake.keep(func() {
-			if err := b.store.KeepChange(context.Background(), c, time.Now()); err != nil {
+			if err := keepChange(context.Background(), b.store, c, time.Now()); err != nil {
 				log.Printf("%v; it is lost", err)
 			}
 		})
@@ -650,13 +641,13 @@ func (b *Bridge) handleChange(c messageChange) {
 		return
 	}
 	defer b.intake.leave()
-	br := b.brainMgr.BrainFor(c.Chat, isGroupJID(c.Chat))
+	br := b.brainMgr.BrainFor(c.Chat, chat.IsGroupJID(c.Chat))
 	// An edit to a one-time code is caught like the code itself
 	// (handleInbound), before anything else sees it: a sender who corrects
 	// a code hands the new one to the script that asked for it, and the
 	// message edited stays as it was.
-	if c.Kind == changeEdit && br != nil {
-		edited := Inbound{JID: c.Chat, ChatAlt: c.ChatAlt, Sender: c.Sender, Text: c.Text, Source: sourceWhatsApp}
+	if c.Kind == chat.ChangeEdit && br != nil {
+		edited := Inbound{Inbound: chat.Inbound{JID: c.Chat, ChatAlt: c.ChatAlt, Sender: c.Sender, Text: c.Text, Source: chat.SourceWhatsApp}}
 		if code, ok := br.catchesCode(edited, time.Now()); ok {
 			log.Printf("brain %s: kept an edited one-time code out of the conversation (OTP guard)", br.ID())
 			b.handOffCode(br, edited, code)
@@ -675,16 +666,19 @@ func (b *Bridge) handleChange(c messageChange) {
 	// must not linger there either.
 	text := ""
 	if edited != nil {
-		text = historyTextWithMedia(edited.textWithQuote(), edited.Media)
+		text = chat.HistoryText(edited.TextWithQuote(), edited.Media)
 	}
-	b.activity.Change(br.ID(), c, text)
+	b.activity.Change(br.ID(), activity.Change{
+		Target: c.Target, Sender: c.Sender, Chat: c.Chat, ChatAlt: c.ChatAlt,
+		Revoke: c.Kind == chat.ChangeRevoke,
+	}, text)
 }
 
 // groupRules is what addresses the bridge in the group jid: what the
 // routing of the brain that answers there says.
 func (b *Bridge) groupRules(jid string) groupRules {
 	if br := b.brainMgr.BrainFor(jid, true); br != nil {
-		return br.settings.Load().manifest.Routing.groupRules()
+		return groupRulesFor(br.settings.Load().manifest.Routing)
 	}
 	return defaultGroupRules
 }
@@ -718,7 +712,7 @@ func (b *Bridge) handleInbound(ctx context.Context, m Inbound) {
 	// A command must also be addressed to the bridge. In a group, an untagged
 	// "!stop" is someone talking to the others: it must not stop anything,
 	// and the bridge must not answer it.
-	if m.Source != sourceIngest && m.Brain == "" && !m.Silent && b.handleCommand(ctx, m, cfg) {
+	if m.Source != chat.SourceIngest && m.Brain == "" && !m.Silent && b.handleCommand(ctx, m, cfg) {
 		return
 	}
 	if m.Text == "" && len(m.Media) == 0 && m.Quoted == nil {
@@ -733,16 +727,16 @@ func (b *Bridge) handleInbound(ctx context.Context, m Inbound) {
 		return
 	}
 	if br == nil {
-		reply := noBrainNotice
+		reply := outboundmsg.NoBrainNotice
 		if id := b.brainMgr.HeldFor(m.JID, m.IsGroup()); id != "" {
 			// Not the default brain instead: what was meant for this
 			// brain, your DMs say, must not land in another one.
 			log.Printf("brain %s, which handles %s, cannot run (see its issue on the Brains page); the message goes to no other brain", id, m.JID)
-			reply = heldBrainNotice
+			reply = outboundmsg.HeldBrainNotice
 		} else {
 			log.Printf("No brain configured for %s — add one in the dashboard", m.JID)
 		}
-		if !m.Silent && m.Source != sourceIngest {
+		if !m.Silent && m.Source != chat.SourceIngest {
 			_ = b.wa.SendMessage(ctx, m.JID, reply)
 		}
 		return
@@ -756,7 +750,7 @@ func (b *Bridge) handleInbound(ctx context.Context, m Inbound) {
 		log.Printf("brain %s: kept a one-time code out of the conversation (OTP guard)", br.ID())
 		b.handOffCode(br, m, code)
 		if !m.Silent {
-			_ = b.wa.SendMessage(ctx, m.JID, otpCaughtNotice)
+			_ = b.wa.SendMessage(ctx, m.JID, outboundmsg.OtpCaughtNotice)
 		}
 		return
 	}
@@ -765,7 +759,7 @@ func (b *Bridge) handleInbound(ctx context.Context, m Inbound) {
 }
 
 // handleCommand runs !help, !reset and !stop. It reports whether text was one.
-func (b *Bridge) handleCommand(ctx context.Context, m Inbound, cfg *Config) bool {
+func (b *Bridge) handleCommand(ctx context.Context, m Inbound, cfg *config.Config) bool {
 	switch strings.ToLower(m.Text) {
 	case "!reset":
 		// A reset stops what !stop stops for the chat, hand-offs from other
@@ -775,11 +769,11 @@ func (b *Bridge) handleCommand(ctx context.Context, m Inbound, cfg *Config) bool
 		// happened: the brain's memory files stay, and a chat no brain
 		// answers has no history to start afresh.
 		b.stopChat(m)
-		_ = b.wa.SendMessage(ctx, m.JID, resetReply(b.resetChat(m)))
+		_ = b.wa.SendMessage(ctx, m.JID, outboundmsg.ResetReply(b.resetChat(m)))
 		return true
 
 	case "!stop":
-		_ = b.wa.SendMessage(ctx, m.JID, stopReply(b.stopChat(m)))
+		_ = b.wa.SendMessage(ctx, m.JID, outboundmsg.StopReply(b.stopChat(m)))
 		return true
 
 	case "!help":
@@ -787,7 +781,7 @@ func (b *Bridge) handleCommand(ctx context.Context, m Inbound, cfg *Config) bool
 		if m.IsGroup() {
 			trigger = cfg.Triggers.First()
 		}
-		_ = b.wa.SendMessage(ctx, m.JID, helpReply(trigger))
+		_ = b.wa.SendMessage(ctx, m.JID, outboundmsg.HelpReply(trigger))
 		return true
 	}
 	return false
@@ -848,7 +842,7 @@ func chatJIDs(m Inbound) []string {
 	if m.IsGroup() {
 		return jids
 	}
-	for _, jid := range []string{m.ChatAlt, userJID(m.Sender)} {
+	for _, jid := range []string{m.ChatAlt, chat.DMJID(m.Sender)} {
 		if jid != "@"+types.DefaultUserServer && jid != "" && !slices.Contains(jids, jid) {
 			jids = append(jids, jid)
 		}
@@ -871,13 +865,13 @@ func (b *Bridge) dispatch(m Inbound) {
 			if t := cfg.Triggers.First(); m.IsGroup() && t != "" {
 				stop = t + " !stop"
 			}
-			_ = b.wa.SendMessage(ctx, m.JID, queueFullNotice(stop))
+			_ = b.wa.SendMessage(ctx, m.JID, outboundmsg.QueueFullNotice(stop))
 		}
 	case err != nil:
 		log.Printf("routing message for %s: %v", m.JID, err)
 	case busy && !m.Silent && cfg.QueueNotify():
 		// Interrupt mode queues too: behind other chats and other people.
-		_ = b.wa.SendMessage(ctx, m.JID, queuedNotice(pos))
+		_ = b.wa.SendMessage(ctx, m.JID, outboundmsg.QueuedNotice(pos))
 	}
 }
 
@@ -913,7 +907,7 @@ func (b *Bridge) deliver(br *Brain, m Inbound, res RunResult) {
 // records it in the history of the brain that wrote it: only now is it
 // something the brain said. The history gets it only once its row is gone,
 // so the retry after a failed removal does not record it twice.
-func (b *Bridge) delivered(ctx context.Context, r outboxRow) error {
+func (b *Bridge) delivered(ctx context.Context, r store.OutboxRow) error {
 	remove := func() error { return b.store.OutboxDelivered(ctx, r.ID) }
 	if r.Brain == "" || r.History == "" {
 		return remove()
@@ -928,15 +922,15 @@ func (b *Bridge) delivered(ctx context.Context, r outboxRow) error {
 
 // undelivered is what brainID answered that waits in the outbox, as its
 // history will record it (BrainHooks.Undelivered).
-func (b *Bridge) undelivered(brainID string) []historyEntry {
+func (b *Bridge) undelivered(brainID string) []history.Entry {
 	rows, err := b.store.UndeliveredReplies(context.Background(), brainID)
 	if err != nil {
 		log.Printf("brain %s: reading its replies in the outbox: %v", brainID, err)
 		return nil
 	}
-	out := make([]historyEntry, 0, len(rows))
+	out := make([]history.Entry, 0, len(rows))
 	for _, r := range rows {
-		out = append(out, historyEntry{TS: r.CreatedAt.Local().Format(time.RFC3339), From: brainID, Chat: r.Chat, Text: r.History, Type: historyOut})
+		out = append(out, history.Entry{TS: r.CreatedAt.Local().Format(time.RFC3339), From: brainID, Chat: r.Chat, Text: r.History, Type: history.Out})
 	}
 	return out
 }
@@ -945,11 +939,16 @@ func (b *Bridge) undelivered(brainID string) []historyEntry {
 // and again when an edit opens DMs to everyone. Allowed senders run Claude
 // with all its permissions, so an open allowlist must not go unnoticed, and
 // a closed one explains why DMs get no answer.
-func logDMAccess(prev, next *Config) {
+func logDMAccess(prev, next *config.Config) {
 	switch {
 	case next.AnyoneCanDM() && (prev == nil || !prev.AnyoneCanDM()):
 		log.Printf("WARNING: anyone who can message this WhatsApp account can use the assistant: allowed_numbers is empty and allow_any_dm is true. Add your number under Chats → Allowed numbers, or turn allow_any_dm off.")
 	case prev == nil && len(next.AllowedNumbers) == 0:
 		log.Printf("allowed_numbers is empty, so nobody can send the bridge direct messages yet. Add your number under Chats → Allowed numbers.")
 	}
+}
+
+// groupRulesFor is what addresses the bridge in the brain's groups.
+func groupRulesFor(r manifest.Routing) groupRules {
+	return groupRules{files: config.BoolOr(r.AnswerFiles, true), forwards: config.BoolOr(r.AnswerForwards, true)}
 }

@@ -11,6 +11,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/Icewater1337/fridolin/internal/config"
 )
 
 // TestSiteSandboxEnforcesDeclarations runs system programs under the live
@@ -22,8 +24,8 @@ import (
 // needed: this is the profile, under the real sandbox-exec.
 func TestSiteSandboxEnforcesDeclarations(t *testing.T) {
 	requireSandboxExec(t)
-	home := homeDir()
-	data := filepath.Join(home, dataDirName)
+	home := config.HomeDir()
+	data := filepath.Join(home, config.DataDirName)
 	site := filepath.Join(data, "site")
 	files := t.TempDir()
 	mod := filepath.Join(site, "deploys", "abc", "modules", "m")

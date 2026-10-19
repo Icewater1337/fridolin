@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/Icewater1337/fridolin/internal/devchat"
 	"net/http"
 	"os"
 	"os/exec"
@@ -16,6 +17,12 @@ import (
 	"syscall"
 	"testing"
 	"time"
+
+	"github.com/Icewater1337/fridolin/internal/config"
+
+	"github.com/Icewater1337/fridolin/internal/manifest"
+
+	"github.com/Icewater1337/fridolin/internal/chat"
 )
 
 const (
@@ -82,11 +89,11 @@ func (f *fakePlaudFixture) calls() string {
 }
 
 // plaudDMBrain is brain p, which gets the DMs: the one brain of plaudBridge.
-var plaudDMBrain = BrainManifest{ID: "p", Name: "P", Routing: BrainRouting{HandlesDMs: true}}
+var plaudDMBrain = manifest.Manifest{ID: "p", Name: "P", Routing: manifest.Routing{HandlesDMs: true}}
 
 // plaudGroupBrain is a brain id that serves the group and no DMs.
-func plaudGroupBrain(id string) BrainManifest {
-	return BrainManifest{ID: id, Name: strings.ToUpper(id), Routing: BrainRouting{Groups: []string{"120363000000000000@g.us"}}}
+func plaudGroupBrain(id string) manifest.Manifest {
+	return manifest.Manifest{ID: id, Name: strings.ToUpper(id), Routing: manifest.Routing{Groups: []string{"120363000000000000@g.us"}}}
 }
 
 func plaudBridge(t *testing.T, extra string) (*testBridge, *fakePlaudFixture) {
@@ -95,7 +102,7 @@ func plaudBridge(t *testing.T, extra string) (*testBridge, *fakePlaudFixture) {
 
 // plaudBridgeWith takes top-level settings (allowed numbers), extra plaud
 // settings and the folder brains to add once the bridge runs.
-func plaudBridgeWith(t *testing.T, top, plaud string, brains ...BrainManifest) (*testBridge, *fakePlaudFixture) {
+func plaudBridgeWith(t *testing.T, top, plaud string, brains ...manifest.Manifest) (*testBridge, *fakePlaudFixture) {
 	fp := newFakePlaud(t)
 	tb := newTestBridge(t, top+`, "plaud": {"enabled": true, "cli_path": "`+os.Args[0]+`"`+plaud+`}`)
 	for _, m := range brains {
@@ -136,7 +143,7 @@ func plaudDeliverRecording(t *testing.T, tb *testBridge, fp *fakePlaudFixture, r
 func TestPlaudRunsInThePickedBrain(t *testing.T) {
 	const dm = "15551234567@s.whatsapp.net"
 	tb, fp := plaudBridge(t, "")
-	gDir := tb.addFolderBrain(t, BrainManifest{ID: "g", Name: "Recordings", ReplyChat: dm})
+	gDir := tb.addFolderBrain(t, manifest.Manifest{ID: "g", Name: "Recordings", ReplyChat: dm})
 	if w := tb.do("PUT", "/api/plaud/settings", map[string]any{"brain": "g"}); w.Code != 200 {
 		t.Fatalf("settings: %d %s", w.Code, w.Body.String())
 	}
@@ -176,21 +183,21 @@ func TestPlaudSummariesStayOutOfGroups(t *testing.T) {
 	for _, c := range []struct {
 		name   string
 		plaud  string
-		brains []BrainManifest
+		brains []manifest.Manifest
 		brain  string // brain that must run the recording
 		want   string // chat that must get the answer
 	}{
 		{name: "group brain without a reply chat answers in your DM",
-			brains: []BrainManifest{plaudDMBrain, plaudGroupBrain("g")},
+			brains: []manifest.Manifest{plaudDMBrain, plaudGroupBrain("g")},
 			plaud:  `, "brain": "g"`, brain: "g", want: dm},
 		{name: "a group as reply chat is passed over for your DM",
-			brains: []BrainManifest{plaudDMBrain, {ID: "g", Name: "G", ReplyChat: group}},
+			brains: []manifest.Manifest{plaudDMBrain, {ID: "g", Name: "G", ReplyChat: group}},
 			plaud:  `, "brain": "g"`, brain: "g", want: dm},
 		{name: "a direct reply chat is used",
-			brains: []BrainManifest{plaudDMBrain, {ID: "g", Name: "G", ReplyChat: other}},
+			brains: []manifest.Manifest{plaudDMBrain, {ID: "g", Name: "G", ReplyChat: other}},
 			plaud:  `, "brain": "g"`, brain: "g", want: other},
 		{name: "automatic: the fallback brain that serves a group answers in your DM",
-			brains: []BrainManifest{plaudGroupBrain("f")},
+			brains: []manifest.Manifest{plaudGroupBrain("f")},
 			brain:  "f", want: dm},
 	} {
 		t.Run(c.name, func(t *testing.T) {
@@ -239,7 +246,7 @@ func TestPlaudWithoutAPrivateChatWaits(t *testing.T) {
 		t.Fatalf("outbox = %+v, want nothing", out)
 	}
 
-	if _, err := tb.cfgs.Update("", func(c *Config) error { c.AllowedNumbers = []string{"15551234567"}; return nil }); err != nil {
+	if _, err := tb.cfgs.Update("", func(c *config.Config) error { c.AllowedNumbers = []string{"15551234567"}; return nil }); err != nil {
 		t.Fatal(err)
 	}
 	if err := tb.plaud.Poll(context.Background()); err != nil {
@@ -262,7 +269,7 @@ func TestPlaudStatusNamesTheAutomaticBrain(t *testing.T) {
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			tb, _ := plaudBridge(t, "")
-			tb.addFolderBrain(t, BrainManifest{ID: "g", Name: "Recordings"})
+			tb.addFolderBrain(t, manifest.Manifest{ID: "g", Name: "Recordings"})
 			if w := tb.do("PUT", "/api/plaud/settings", map[string]any{"brain": c.picked}); w.Code != 200 {
 				t.Fatalf("settings: %d %s", w.Code, w.Body.String())
 			}
@@ -638,7 +645,7 @@ func TestPlaudHandOffThroughTheBridge(t *testing.T) {
 	if err := tb.submitHandOff(br, dm, "plaud", "third", nil, done("third")); !errors.Is(err, errQueueFull) {
 		t.Errorf("a hand-off to a full queue = %v, want errQueueFull", err)
 	}
-	tb.handleInbound(context.Background(), Inbound{JID: dm, Sender: "15551234567", Text: "!stop", Source: "whatsapp"})
+	tb.handleInbound(context.Background(), Inbound{Inbound: chat.Inbound{JID: dm, Sender: "15551234567", Text: "!stop", Source: "whatsapp"}})
 	waitFor(t, 10*time.Second, "both to end", func() bool { mu.Lock(); defer mu.Unlock(); return len(ended) == 2 })
 	if !errors.Is(ended["first"], errBrainInterrupted) || !errors.Is(ended["second"], errBrainDropped) {
 		t.Errorf("ended = %v, want the first stopped and the second dropped", ended)
@@ -1366,7 +1373,7 @@ func TestPlaudConnectSignsOutTheRefusedLoginWhereItIs(t *testing.T) {
 	tb.plaud.cliMu.Lock()
 	err := tb.plaud.Connect()
 	if err == nil {
-		_, err = tb.cfgs.Update("", func(c *Config) error { c.Plaud.BrainAccess = true; return nil })
+		_, err = tb.cfgs.Update("", func(c *config.Config) error { c.Plaud.BrainAccess = true; return nil })
 	}
 	tb.plaud.cliMu.Unlock()
 	if err != nil {
@@ -1435,7 +1442,7 @@ func TestPlaudConnectGivesTheSignOutItsOwnTime(t *testing.T) {
 func TestPlaudSigningOutDuringACheckIsNoExpiry(t *testing.T) {
 	disconnect := func(tb *testBridge) error { return tb.plaud.Disconnect() }
 	moveLogin := func(tb *testBridge) error {
-		_, err := tb.cfgs.Update("", func(c *Config) error { c.Plaud.BrainAccess = true; return nil })
+		_, err := tb.cfgs.Update("", func(c *config.Config) error { c.Plaud.BrainAccess = true; return nil })
 		return err
 	}
 	for _, c := range []struct {
@@ -1525,7 +1532,7 @@ func TestPlaudCheckEndsWhenItsLoginGoes(t *testing.T) {
 				return err
 			}
 		}
-		_, err := tb.cfgs.Update("", func(c *Config) error { c.Plaud.BrainAccess = true; return nil })
+		_, err := tb.cfgs.Update("", func(c *config.Config) error { c.Plaud.BrainAccess = true; return nil })
 		return err
 	}
 	// The same, and you connect that login, as a sign-in that finishes does.
@@ -2108,7 +2115,7 @@ func TestPlaudPagesBackToTheLastKnownRecording(t *testing.T) {
 // leaves half of a small queue for your own messages.
 func TestPlaudBacklogTricklesInAsRunsEnd(t *testing.T) {
 	for _, c := range []struct{ maxPending, want int }{{10, plaudHandedMax}, {100, plaudHandedMax}, {6, 3}, {3, 1}, {1, 1}} {
-		if got := plaudHandedLimit(&Config{Queue: QueueConfig{MaxPending: c.maxPending}}); got != c.want {
+		if got := plaudHandedLimit(&config.Config{Queue: config.QueueConfig{MaxPending: c.maxPending}}); got != c.want {
 			t.Errorf("limit with queue.max_pending %d = %d, want %d", c.maxPending, got, c.want)
 		}
 	}
@@ -2172,7 +2179,7 @@ func TestPlaudBacklogLeavesRoomInTheBrainsQueue(t *testing.T) {
 			t.Fatalf("check %d: %d with the brain and %d waiting, want %d and %d", i+1, *s.Handed, *s.Pending, limit, len(backlog)-limit)
 		}
 	}
-	if _, _, _, err := tb.brainMgr.Submit(Inbound{JID: "15551234567@s.whatsapp.net", Sender: "15551234567", Text: "hello", Source: "whatsapp"}); err != nil {
+	if _, _, _, err := tb.brainMgr.Submit(Inbound{Inbound: chat.Inbound{JID: "15551234567@s.whatsapp.net", Sender: "15551234567", Text: "hello", Source: "whatsapp"}}); err != nil {
 		t.Errorf("your own message to the brain = %v, want it taken", err)
 	}
 }
@@ -2773,7 +2780,7 @@ func TestPlaudAccountLookUpLeavesAMovedLoginAlone(t *testing.T) {
 	tb.plaud.run = func(ctx context.Context, args ...string) (string, error) {
 		out, err := run(ctx, args...)
 		if args[0] == "me" {
-			if _, err := tb.cfgs.Update("", func(c *Config) error { c.Plaud.BrainAccess = true; return nil }); err != nil {
+			if _, err := tb.cfgs.Update("", func(c *config.Config) error { c.Plaud.BrainAccess = true; return nil }); err != nil {
 				t.Error(err)
 			}
 		}
@@ -2877,7 +2884,7 @@ func TestBrainRunsKeepPlaudTelemetryOff(t *testing.T) {
 	tb, _ := plaudBridge(t, "")
 	envLog := filepath.Join(t.TempDir(), "brain.env")
 	t.Setenv("FRIDOLIN_FAKE_ENV_LOG", envLog)
-	tb.handleInbound(context.Background(), Inbound{JID: "15551234567@s.whatsapp.net", Sender: "15551234567", Text: "hello", Source: "whatsapp"})
+	tb.handleInbound(context.Background(), Inbound{Inbound: chat.Inbound{JID: "15551234567@s.whatsapp.net", Sender: "15551234567", Text: "hello", Source: "whatsapp"}})
 	waitFor(t, 10*time.Second, "the run", func() bool { return len(tb.dev.Outbox()) > 0 })
 	logged, err := os.ReadFile(envLog)
 	if err != nil {
@@ -2899,7 +2906,7 @@ func TestBrainsFindThePlaudCLIWhenTheyMayUseIt(t *testing.T) {
 			tb, _ := plaudBridge(t, fmt.Sprintf(`, "brain_access": %v`, access))
 			envLog := filepath.Join(t.TempDir(), "brain.env")
 			t.Setenv("FRIDOLIN_FAKE_ENV_LOG", envLog)
-			tb.handleInbound(context.Background(), Inbound{JID: "15551234567@s.whatsapp.net", Sender: "15551234567", Text: "hello", Source: "whatsapp"})
+			tb.handleInbound(context.Background(), Inbound{Inbound: chat.Inbound{JID: "15551234567@s.whatsapp.net", Sender: "15551234567", Text: "hello", Source: "whatsapp"}})
 			waitFor(t, 10*time.Second, "the run", func() bool { return len(tb.dev.Outbox()) > 0 })
 			logged, _ := os.ReadFile(envLog)
 			var path string
@@ -3398,7 +3405,7 @@ func TestBrainPlaudPATH(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			cfg := &Config{Plaud: PlaudConfig{BrainAccess: true, CLIPath: tc.cliPath}}
+			cfg := &config.Config{Plaud: config.PlaudConfig{BrainAccess: true, CLIPath: tc.cliPath}}
 			got := brainPlaudPATH(cfg)
 			dirs := filepath.SplitList(got)
 			if want := filepath.Join(tc.dir, "plaud"); lookPathIn("plaud", got) != want {
@@ -3575,7 +3582,7 @@ func TestPlaudPhoneFolder(t *testing.T) {
 		}
 	}
 	waitFor(t, 5*time.Second, "brain replies", func() bool { return len(tb.dev.Outbox()) == 2 })
-	if out := tb.dev.Outbox(); !slices.ContainsFunc(out, func(m DevMessage) bool {
+	if out := tb.dev.Outbox(); !slices.ContainsFunc(out, func(m devchat.Message) bool {
 		return strings.Contains(m.Text, `[Plaud] New recording "Phone recording" (2026-10-18 10:00, 01:05)`)
 	}) {
 		t.Errorf("replies = %+v", out)

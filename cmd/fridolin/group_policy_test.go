@@ -1,9 +1,12 @@
 package main
 
 import (
+	"github.com/Icewater1337/fridolin/internal/chat"
 	"slices"
 	"strings"
 	"testing"
+
+	"github.com/Icewater1337/fridolin/internal/config"
 )
 
 // groupSenderAllowed decides who in an allowed group reaches its brain:
@@ -56,7 +59,7 @@ func TestGroupSenderAllowed(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			cfg := &Config{AllowedNumbers: c.numbers, AllowAnyDM: c.anyDM, AllowedGroups: []string{group, other}, GroupMembers: c.members}
+			cfg := &config.Config{AllowedNumbers: c.numbers, AllowAnyDM: c.anyDM, AllowedGroups: []string{group, other}, GroupMembers: c.members}
 			if got := groupSenderAllowed(cfg, group, c.sender); got != c.want {
 				t.Errorf("groupSenderAllowed(%+v) = %v, want %v", c.sender, got, c.want)
 			}
@@ -83,7 +86,7 @@ func FuzzGroupSenderAllowed(f *testing.F) {
 		if list != "" {
 			members = strings.Split(list, ",")
 		}
-		cfg := &Config{AllowedGroups: []string{testGroup}, AllowAnyDM: &anyDM, GroupMembers: map[string][]string{testGroup: members}}
+		cfg := &config.Config{AllowedGroups: []string{testGroup}, AllowAnyDM: &anyDM, GroupMembers: map[string][]string{testGroup: members}}
 		got := groupSenderAllowed(cfg, testGroup, groupSender{Number: number, Resolved: resolved})
 		if slices.Equal(members, []string{anyMember}) {
 			if !got {
@@ -92,13 +95,13 @@ func FuzzGroupSenderAllowed(f *testing.F) {
 			return
 		}
 		canon := func(s string) string {
-			if p, err := phoneNumber(s); err == nil {
+			if p, err := chat.PhoneNumber(s); err == nil {
 				return p
 			}
 			return s
 		}
 		listed := resolved && slices.ContainsFunc(members, func(m string) bool { return canon(m) == canon(number) })
-		if resolved && phoneNumberRE.MatchString(number) && slices.Contains(members, number) && !got {
+		if resolved && chat.IsPhoneNumber(number) && slices.Contains(members, number) && !got {
 			t.Errorf("group_members %q refused %q, which it lists as it is", members, number)
 		}
 		if !resolved && got {
@@ -184,7 +187,7 @@ func TestGroupMembersErrorNamesNoEntry(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			err := validateGroupMembers(c.members, []string{testGroup})
+			err := config.ValidateGroupMembers(c.members, []string{testGroup})
 			if err == nil {
 				t.Fatalf("group_members %q was accepted", c.members)
 			}
@@ -204,7 +207,7 @@ func TestConfigUpdateRefusesStrayGroupMembers(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, err = cs.Update("", func(c *Config) error {
+	_, err = cs.Update("", func(c *config.Config) error {
 		c.AllowedGroups = nil
 		return nil
 	})
@@ -250,7 +253,7 @@ func TestConfigWarnsAboutGroupsWithoutMembers(t *testing.T) {
 	}
 
 	// Another group allowed: only it is named.
-	if _, err := cs.Update("", func(c *Config) error {
+	if _, err := cs.Update("", func(c *config.Config) error {
 		c.AllowedGroups = append(c.AllowedGroups, added)
 		return nil
 	}); err != nil {
@@ -260,7 +263,7 @@ func TestConfigWarnsAboutGroupsWithoutMembers(t *testing.T) {
 		t.Errorf("after allowing %s the log has:\n%s\nwant it named once and %s not again", added, strings.Join(logged(), "\n"), testGroup)
 	}
 	// Its entry removed: the listed group is named now.
-	if _, err := cs.Update("", func(c *Config) error {
+	if _, err := cs.Update("", func(c *config.Config) error {
 		c.GroupMembers = nil
 		return nil
 	}); err != nil {
@@ -290,8 +293,8 @@ func TestNoGroupWarningWhileAnyoneMayDM(t *testing.T) {
 func TestLogSecurityChangesNamesGroupMembers(t *testing.T) {
 	const other = "120363000000000001@g.us"
 	logged := captureLog(t)
-	prev := &Config{GroupMembers: map[string][]string{testGroup: {"15551234567"}}}
-	next := &Config{GroupMembers: map[string][]string{testGroup: {"15559876543"}, other: {}}}
+	prev := &config.Config{GroupMembers: map[string][]string{testGroup: {"15551234567"}}}
+	next := &config.Config{GroupMembers: map[string][]string{testGroup: {"15559876543"}, other: {}}}
 	logSecurityChanges(prev, next)
 	got := strings.Join(logged(), "\n")
 	for _, want := range []string{"group_members", "+" + testGroup + ":15559876543", "+" + other + ":", "-" + testGroup + ":15551234567"} {

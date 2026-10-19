@@ -3,7 +3,6 @@ package main
 import (
 	"encoding/json"
 	"errors"
-	"github.com/Icewater1337/fridolin/internal/platform"
 	"log"
 	"os"
 	"path/filepath"
@@ -12,7 +11,17 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Icewater1337/fridolin/internal/config"
+	"github.com/Icewater1337/fridolin/internal/registry"
+
+	"github.com/Icewater1337/fridolin/internal/manifest"
+
+	"github.com/Icewater1337/fridolin/internal/activity"
+	"github.com/Icewater1337/fridolin/internal/chat"
 	"github.com/Icewater1337/fridolin/internal/fsx"
+	"github.com/Icewater1337/fridolin/internal/history"
+	"github.com/Icewater1337/fridolin/internal/logx"
+	"github.com/Icewater1337/fridolin/internal/platform"
 )
 
 // The bridge reads and writes files in a brain's folder outside the
@@ -23,7 +32,7 @@ import (
 // captureLog collects what the bridge logs until the test ends.
 func captureLog(t *testing.T) func() []string {
 	t.Helper()
-	ring := NewLogRing(50)
+	ring := logx.NewRing(50)
 	prev := log.Writer()
 	log.SetOutput(ring)
 	t.Cleanup(func() { log.SetOutput(prev) })
@@ -54,13 +63,13 @@ func folderBrain(t *testing.T) (*Brain, string) {
 
 // brainASetup sets up what folderBrain runs, and returns its
 // configuration and home.
-func brainASetup(t *testing.T) (*Config, string) {
+func brainASetup(t *testing.T) (*config.Config, string) {
 	t.Helper()
 	home := fsx.Canonical(t.TempDir())
 	t.Setenv("HOME", home)
 	m := testManifest("a")
 	m.Routing.HandlesDMs = true
-	if _, err := ScaffoldBrain(filepath.Join(home, "a"), &m); err != nil {
+	if _, err := registry.Scaffold(filepath.Join(home, "a"), &m, brainTemplates); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.MkdirAll(filepath.Join(home, ".ssh"), 0o700); err != nil {
@@ -69,7 +78,7 @@ func brainASetup(t *testing.T) (*Config, string) {
 	if err := os.WriteFile(filepath.Join(home, ".ssh", "id_test"), []byte("FAKE-PRIVATE-KEY\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	approved, err := json.Marshal(m.normalized())
+	approved, err := json.Marshal(m.Normalized())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -155,7 +164,7 @@ func TestPromptFileIsNotFollowedOutOfTheFolder(t *testing.T) {
 				}
 				return
 			}
-			if len(lines) != 1 || !strings.Contains(lines[0], "brain a: could not read prompt file brain-prompt.md: "+errSymlink.Error()) {
+			if len(lines) != 1 || !strings.Contains(lines[0], "brain a: could not read prompt file brain-prompt.md: "+fsx.ErrSymlink.Error()) {
 				t.Errorf("log = %q, want one line refusing the symlink", lines)
 			}
 		})
@@ -174,8 +183,8 @@ func TestBrainWhoseFolderCannotBeOpenedIsLeftOut(t *testing.T) {
 	home := fsx.Canonical(t.TempDir())
 	t.Setenv("HOME", home)
 	dirs := brainDirsJSON(t,
-		brainFolder(t, "~/a", BrainManifest{ID: "a", Routing: BrainRouting{HandlesDMs: true, Default: true}}),
-		brainFolder(t, "~/b", BrainManifest{ID: "b", Routing: BrainRouting{Groups: []string{"120363000000000000@g.us"}}}),
+		brainFolder(t, "~/a", manifest.Manifest{ID: "a", Routing: manifest.Routing{HandlesDMs: true, Default: true}}),
+		brainFolder(t, "~/b", manifest.Manifest{ID: "b", Routing: manifest.Routing{Groups: []string{"120363000000000000@g.us"}}}),
 	)
 	locked := filepath.Join(home, "b")
 	if err := os.Chmod(locked, 0); err != nil {
@@ -225,16 +234,16 @@ func TestLeftOutBrainShowsWhyOnItsPage(t *testing.T) {
 	tb := newTestBridge(t, "")
 	dir := filepath.Join(tb.home, "b")
 	m := testManifest("b")
-	if _, err := ScaffoldBrain(dir, &m); err != nil {
+	if _, err := registry.Scaffold(dir, &m, brainTemplates); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.Chmod(dir, 0); err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = os.Chmod(dir, 0o700) })
-	approved := m.normalized()
-	if _, err := tb.cfgs.Update("", func(c *Config) error {
-		c.BrainDirs = append(c.BrainDirs, BrainRef{Path: dir, Approved: &approved})
+	approved := m.Normalized()
+	if _, err := tb.cfgs.Update("", func(c *config.Config) error {
+		c.BrainDirs = append(c.BrainDirs, config.BrainRef{Path: dir, Approved: &approved})
 		return nil
 	}); err != nil {
 		t.Fatal(err)
@@ -293,14 +302,14 @@ func TestReplacedFolderIsOpenedOnReload(t *testing.T) {
 				if err := os.Rename(dir, dir+".old"); err != nil {
 					t.Fatal(err)
 				}
-				manifest, err := os.ReadFile(filepath.Join(dir+".old", ManifestFile))
+				manifestData, err := os.ReadFile(filepath.Join(dir+".old", manifest.File))
 				if err != nil {
 					t.Fatal(err)
 				}
 				if err := os.Mkdir(dir, 0o700); err != nil {
 					t.Fatal(err)
 				}
-				for name, data := range map[string]string{ManifestFile: string(manifest), "brain-prompt.md": want + "\n"} {
+				for name, data := range map[string]string{manifest.File: string(manifestData), "brain-prompt.md": want + "\n"} {
 					if err := os.WriteFile(filepath.Join(dir, name), []byte(data), 0o600); err != nil {
 						t.Fatal(err)
 					}
@@ -318,8 +327,8 @@ func TestReplacedFolderIsOpenedOnReload(t *testing.T) {
 			if got := br.buildPrompt(br.settings.Load(), dm("hello")); !strings.HasPrefix(got, want) {
 				t.Errorf("prompt = %q, want it to start with %q", got, want)
 			}
-			br.appendHistory("15551234567@s.whatsapp.net", "15551234567", "AFTER-RELOAD", historyIn)
-			if data, _ := os.ReadFile(filepath.Join(dir, historyFileName)); !strings.Contains(string(data), "AFTER-RELOAD") {
+			br.appendHistory("15551234567@s.whatsapp.net", "15551234567", "AFTER-RELOAD", history.In)
+			if data, _ := os.ReadFile(filepath.Join(dir, history.FileName)); !strings.Contains(string(data), "AFTER-RELOAD") {
 				t.Errorf("history at %s = %q, want the message", dir, data)
 			}
 			lines := logged()
@@ -329,7 +338,7 @@ func TestReplacedFolderIsOpenedOnReload(t *testing.T) {
 				}
 				return
 			}
-			if data, _ := os.ReadFile(filepath.Join(dir+".old", historyFileName)); strings.Contains(string(data), "AFTER-RELOAD") {
+			if data, _ := os.ReadFile(filepath.Join(dir+".old", history.FileName)); strings.Contains(string(data), "AFTER-RELOAD") {
 				t.Errorf("the message went to the folder moved aside: %q", data)
 			}
 			if len(lines) != 1 || !strings.Contains(lines[0], "brain a: now in the folder at "+dir+"; stopping it in the old one") {
@@ -356,8 +365,8 @@ func TestHistoryIsNotFollowedOutOfTheFolder(t *testing.T) {
 		target func(home string) string // what the history points to; "" for a regular file
 	}{
 		{"regular file", nil},
-		{"another brain's history", func(home string) string { return filepath.Join(home, "b", historyFileName) }},
-		{"relative symlink up and out", func(string) string { return filepath.Join("..", "b", historyFileName) }},
+		{"another brain's history", func(home string) string { return filepath.Join(home, "b", history.FileName) }},
+		{"relative symlink up and out", func(string) string { return filepath.Join("..", "b", history.FileName) }},
 		{"symlink inside the folder", func(string) string { return "notes.jsonl" }},
 		{"dangling symlink out", func(home string) string { return filepath.Join(home, ".ssh", "authorized_keys") }},
 	}
@@ -368,8 +377,8 @@ func TestHistoryIsNotFollowedOutOfTheFolder(t *testing.T) {
 			s.otpGuard = true
 			br.settings.Store(&s)
 			dir := filepath.Join(home, "a")
-			hist := filepath.Join(dir, historyFileName)
-			for _, p := range []string{filepath.Join(home, "b", historyFileName), filepath.Join(dir, "notes.jsonl")} {
+			hist := filepath.Join(dir, history.FileName)
+			for _, p := range []string{filepath.Join(home, "b", history.FileName), filepath.Join(dir, "notes.jsonl")} {
 				if err := os.MkdirAll(filepath.Dir(p), 0o700); err != nil {
 					t.Fatal(err)
 				}
@@ -386,11 +395,11 @@ func TestHistoryIsNotFollowedOutOfTheFolder(t *testing.T) {
 			}
 			logged := captureLog(t)
 
-			br.appendHistory("15551234567@s.whatsapp.net", "15551234567", "NEW-MESSAGE", historyIn)
+			br.appendHistory("15551234567@s.whatsapp.net", "15551234567", "NEW-MESSAGE", history.In)
 			preface := br.buildPrompt(br.settings.Load(), dm("hello"))
 			_, drops := br.catchesCode(dm("123456"), time.Now())
-			feed := NewActivity(10)
-			feed.Seed(br)
+			feed := activity.New(10)
+			seedActivity(feed, br)
 			var seeded []string
 			for _, e := range feed.Recent(10, "") {
 				seeded = append(seeded, e.Text)
@@ -413,7 +422,7 @@ func TestHistoryIsNotFollowedOutOfTheFolder(t *testing.T) {
 				}
 				return
 			}
-			for _, p := range []string{filepath.Join(home, "b", historyFileName), filepath.Join(dir, "notes.jsonl")} {
+			for _, p := range []string{filepath.Join(home, "b", history.FileName), filepath.Join(dir, "notes.jsonl")} {
 				if data, _ := os.ReadFile(p); string(data) != otherLines {
 					t.Errorf("%s was written through the symlink:\n%s", p, data)
 				}
@@ -428,7 +437,7 @@ func TestHistoryIsNotFollowedOutOfTheFolder(t *testing.T) {
 				t.Errorf("read through the symlink: preface %q, code caught %v, activity %q", preface, drops, seeded)
 			}
 			lines := logged()
-			if len(lines) != 1 || !strings.Contains(lines[0], "brain a: failed to open history file "+hist+": "+errSymlink.Error()) {
+			if len(lines) != 1 || !strings.Contains(lines[0], "brain a: failed to open history file "+hist+": "+fsx.ErrSymlink.Error()) {
 				t.Errorf("log = %q, want one line refusing the symlink", lines)
 			}
 		})
@@ -487,7 +496,7 @@ func TestViewerCreatesTheStreamLogInTheFolder(t *testing.T) {
 			if _, err := os.Lstat(filepath.Join(outside, "authorized_keys")); !os.IsNotExist(err) {
 				t.Errorf("the dangling symlink's target was created (%v)", err)
 			}
-			if lines := logged(); len(lines) != 1 || !strings.Contains(lines[0], "brain a: no tmux viewer: could not open stream log: "+errSymlink.Error()) {
+			if lines := logged(); len(lines) != 1 || !strings.Contains(lines[0], "brain a: no tmux viewer: could not open stream log: "+fsx.ErrSymlink.Error()) {
 				t.Errorf("log = %q, want one line refusing the symlink", lines)
 			}
 		})
@@ -522,7 +531,7 @@ func TestStreamLogIsNotFollowedOutOfTheFolder(t *testing.T) {
 				plant(t, logPath, tc.target(home))
 			}
 			logged := captureLog(t)
-			if res := readTestStream(br, Inbound{JID: "x"}, stream); res.Text != "done" {
+			if res := readTestStream(br, Inbound{Inbound: chat.Inbound{JID: "x"}}, stream); res.Text != "done" {
 				t.Errorf("run = %+v, want it to finish", res)
 			}
 			if tc.target == nil {
@@ -544,7 +553,7 @@ func TestStreamLogIsNotFollowedOutOfTheFolder(t *testing.T) {
 				t.Errorf("the dangling symlink's target was created (%v)", err)
 			}
 			lines := logged()
-			if len(lines) != 1 || !strings.Contains(lines[0], "brain a: could not open stream log: "+errSymlink.Error()) {
+			if len(lines) != 1 || !strings.Contains(lines[0], "brain a: could not open stream log: "+fsx.ErrSymlink.Error()) {
 				t.Errorf("log = %q, want one line refusing the symlink", lines)
 			}
 		})
@@ -580,7 +589,7 @@ func TestIdentityMapIsNotFollowedOutOfTheFolder(t *testing.T) {
 			if tc.target != nil {
 				plant(t, mapPath, tc.target(home))
 			}
-			br.appendHistory("15551234567@s.whatsapp.net", "15551234567", "hi", historyIn)
+			br.appendHistory("15551234567@s.whatsapp.net", "15551234567", "hi", history.In)
 			logged := captureLog(t)
 			preface := br.buildPrompt(br.settings.Load(), dm("hello"))
 			lines := logged()
@@ -594,7 +603,7 @@ func TestIdentityMapIsNotFollowedOutOfTheFolder(t *testing.T) {
 			if history := promptBlock(preface, "chat_history"); strings.Contains(history, "Alex") || !strings.Contains(history, `"from":"15551234567","text":"hi"`) {
 				t.Errorf("preface = %q, want the raw number", preface)
 			}
-			if len(lines) != 1 || !strings.Contains(lines[0], "brain a: could not read identity map "+identityMapFile+": "+errSymlink.Error()) {
+			if len(lines) != 1 || !strings.Contains(lines[0], "brain a: could not read identity map "+identityMapFile+": "+fsx.ErrSymlink.Error()) {
 				t.Errorf("log = %q, want one line refusing the symlink", lines)
 			}
 		})
@@ -613,13 +622,13 @@ func TestManifestIsNotFollowedOutOfTheFolder(t *testing.T) {
 		want  string // in the error
 	}{
 		{"symlink to a manifest outside", func(t *testing.T, home string) {
-			plant(t, filepath.Join(home, "a", ManifestFile), filepath.Join(home, "b", ManifestFile))
-		}, errSymlink.Error()},
+			plant(t, filepath.Join(home, "a", manifest.File), filepath.Join(home, "b", manifest.File))
+		}, fsx.ErrSymlink.Error()},
 		{"symlink inside the folder", func(t *testing.T, home string) {
-			plant(t, filepath.Join(home, "a", ManifestFile), "copy.json")
-		}, errSymlink.Error()},
+			plant(t, filepath.Join(home, "a", manifest.File), "copy.json")
+		}, fsx.ErrSymlink.Error()},
 		{"FIFO", func(t *testing.T, home string) {
-			p := filepath.Join(home, "a", ManifestFile)
+			p := filepath.Join(home, "a", manifest.File)
 			if err := os.Remove(p); err != nil {
 				t.Fatal(err)
 			}
@@ -640,23 +649,23 @@ func TestManifestIsNotFollowedOutOfTheFolder(t *testing.T) {
 				if err := os.MkdirAll(dir, 0o700); err != nil {
 					t.Fatal(err)
 				}
-				if err := WriteManifest(dir, &other, false); err != nil {
+				if err := manifest.Write(dir, &other, false); err != nil {
 					t.Fatal(err)
 				}
 			}
-			if err := os.Rename(filepath.Join(home, "a", "copy", ManifestFile), filepath.Join(home, "a", "copy.json")); err != nil {
+			if err := os.Rename(filepath.Join(home, "a", "copy", manifest.File), filepath.Join(home, "a", "copy.json")); err != nil {
 				t.Fatal(err)
 			}
 			tc.plant(t, home)
 
 			type resolved struct {
-				specs  []BrainSpec
+				specs  []manifest.Spec
 				issues []BrainIssue
 				err    error
 			}
 			done := make(chan resolved, 1)
 			go func() {
-				_, err := ReadManifest(filepath.Join(home, "a"))
+				_, err := manifest.Read(filepath.Join(home, "a"))
 				specs, issues := ResolveBrains(cfg)
 				done <- resolved{specs, issues, err}
 			}()
@@ -666,7 +675,7 @@ func TestManifestIsNotFollowedOutOfTheFolder(t *testing.T) {
 			case <-time.After(5 * time.Second):
 				t.Fatal("reading brain.json hangs")
 			}
-			if got.err == nil || !strings.Contains(got.err.Error(), filepath.Join(home, "a", ManifestFile)+": "+tc.want) {
+			if got.err == nil || !strings.Contains(got.err.Error(), filepath.Join(home, "a", manifest.File)+": "+tc.want) {
 				t.Errorf("ReadManifest: %v, want %q for it", got.err, tc.want)
 			}
 			if len(got.specs) != 1 || len(got.specs[0].Manifest.Routing.Groups) != 0 || !got.specs[0].Manifest.Routing.HandlesDMs {
@@ -689,8 +698,8 @@ func TestBrainFilesAreReadUpToALimit(t *testing.T) {
 		size int
 		ok   bool
 	}{
-		{"at the limit", maxBrainFile, true},
-		{"over the limit", maxBrainFile + 1, false},
+		{"at the limit", fsx.MaxBrainFile, true},
+		{"over the limit", fsx.MaxBrainFile + 1, false},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -704,7 +713,7 @@ func TestBrainFilesAreReadUpToALimit(t *testing.T) {
 					t.Fatal(err)
 				}
 			}
-			br.appendHistory("15551234567@s.whatsapp.net", "15551234567", "hi", historyIn)
+			br.appendHistory("15551234567@s.whatsapp.net", "15551234567", "hi", history.In)
 			logged := captureLog(t)
 			got := br.buildPrompt(br.settings.Load(), dm("hello"))
 			lines := logged()

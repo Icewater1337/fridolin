@@ -15,6 +15,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Icewater1337/fridolin/internal/manifest"
+
+	"github.com/Icewater1337/fridolin/internal/chat"
 	"github.com/Icewater1337/fridolin/internal/fsx"
 )
 
@@ -70,7 +73,7 @@ func TestSmoke(t *testing.T) {
 		"data_dir":        data,
 		"http_listen":     addr,
 		"claude_path":     claude,
-		"allowed_numbers": []string{normalizeJID(harnessDM)},
+		"allowed_numbers": []string{chat.NormalizeJID(harnessDM)},
 		"debounce":        map[string]int{"quiet_ms": 0},
 	})
 	if err != nil {
@@ -180,7 +183,7 @@ func TestSmoke(t *testing.T) {
 
 	if code, body := post("/api/brains", token, map[string]any{
 		"path": "~/main", "create_dir": true,
-		"manifest": BrainManifest{ID: "main", Name: "Main", Routing: BrainRouting{HandlesDMs: true}},
+		"manifest": manifest.Manifest{ID: "main", Name: "Main", Routing: manifest.Routing{HandlesDMs: true}},
 	}); code != 200 {
 		fail("add a brain: %d %s", code, body)
 	}

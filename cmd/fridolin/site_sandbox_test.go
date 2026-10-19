@@ -17,6 +17,10 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Icewater1337/fridolin/internal/config"
+
+	"github.com/Icewater1337/fridolin/internal/textx"
+
 	"github.com/Icewater1337/fridolin/internal/fsx"
 )
 
@@ -286,7 +290,7 @@ func TestSiteSecrets(t *testing.T) {
 	}
 
 	// The site gets keeper's declared value, trimmed, and nothing of the rest.
-	payload, err := m.secretsFor(readModuleCaps(m.modulesDirOf(commit), homeDir()))
+	payload, err := m.secretsFor(readModuleCaps(m.modulesDirOf(commit), config.HomeDir()))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -350,7 +354,7 @@ func TestSiteAPISecrets(t *testing.T) {
 // own files after that.
 func TestSiteSandboxProfileOrder(t *testing.T) {
 	home := t.TempDir()
-	data := filepath.Join(home, dataDirName)
+	data := filepath.Join(home, config.DataDirName)
 	in := siteProfileInput{
 		home: home, dataDir: data,
 		shell: filepath.Join(data, "site", "shell"), deploy: filepath.Join(data, "site", "deploys", "abc"),
@@ -373,7 +377,7 @@ func TestSiteSandboxProfileOrder(t *testing.T) {
 		}
 		return i
 	}
-	q := func(p string) string { s, _ := sbplString(p); return s }
+	q := func(p string) string { s, _ := textx.SBPLString(p); return s }
 	sshAllow := at(`(allow file-read* (subpath ` + q(filepath.Join(home, ".ssh")) + `))`)
 	sshDeny := at(`(deny file-read* (subpath ` + q(filepath.Join(home, ".ssh")) + `))`)
 	secretsAllow := at(`(allow file-read* (subpath ` + q(filepath.Join(data, "site", "secrets")) + `))`)
@@ -397,9 +401,9 @@ func TestSiteSandboxProfileOrder(t *testing.T) {
 // in Application Support stay open to a declaration.
 func TestSiteProfileClosesBrowserProfiles(t *testing.T) {
 	home := t.TempDir()
-	data := filepath.Join(home, dataDirName)
+	data := filepath.Join(home, config.DataDirName)
 	appSupport := filepath.Join(home, "Library", "Application Support")
-	q := func(p string) string { s, _ := sbplString(p); return s }
+	q := func(p string) string { s, _ := textx.SBPLString(p); return s }
 	// The prefix rule, as the profile writes it; its strings escape a
 	// backslash, as the regex's \. needs.
 	prefixRule := strings.ReplaceAll("^"+regexp.QuoteMeta(appSupport)+browserProfilePattern(), `\`, `\\`)
@@ -460,7 +464,7 @@ func TestSiteProfileClosesBrowserProfiles(t *testing.T) {
 func TestSandboxProfilerSitePaths(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
-	cfg := &Config{DataDir: filepath.Join(home, "data"), DBPath: filepath.Join(home, "db", "bridge.db")}
+	cfg := &config.Config{DataDir: filepath.Join(home, "data"), DBPath: filepath.Join(home, "db", "bridge.db")}
 	cfg.Sandbox.CredentialsDir = filepath.Join(home, "creds")
 	cfg.Sandbox.DenyPaths = []string{filepath.Join(home, "private")}
 	sp := NewSandboxProfiler(nil, cfg)

@@ -32,7 +32,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/Icewater1337/fridolin/internal/fsx"
 	"log"
 	"math/big"
 	"net/http"
@@ -43,6 +42,11 @@ import (
 	"slices"
 	"strings"
 	"time"
+
+	"github.com/Icewater1337/fridolin/internal/config"
+
+	"github.com/Icewater1337/fridolin/internal/fsx"
+	"github.com/Icewater1337/fridolin/internal/httpapi"
 )
 
 const (
@@ -528,7 +532,7 @@ func (p *PlaudManager) buildApp(ctx context.Context, src, javaHome, sdk, site st
 // JAVA_HOME and ANDROID_HOME (or ANDROID_SDK_ROOT) of the bridge's
 // environment, else where macOS, Homebrew and Android Studio put them.
 func androidToolchain() (javaHome, sdk string, err error) {
-	home := homeDir()
+	home := config.HomeDir()
 	javas := []string{os.Getenv("JAVA_HOME")}
 	sdks := []string{os.Getenv("ANDROID_HOME"), os.Getenv("ANDROID_SDK_ROOT"), filepath.Join(home, "Library", "Android", "sdk"), filepath.Join(home, "Android", "Sdk")}
 	if runtime.GOOS == "darwin" {
@@ -613,31 +617,31 @@ func (p *PlaudManager) appStatus() *PlaudAppStatus {
 
 func (b *Bridge) apiPlaudAppCredentials(w http.ResponseWriter, r *http.Request) {
 	var d plaudDeveloper
-	if err := decodeJSON(r, &d); err != nil {
-		writeErr(w, http.StatusBadRequest, err.Error())
+	if err := httpapi.DecodeJSON(r, &d); err != nil {
+		httpapi.WriteErr(w, http.StatusBadRequest, err.Error())
 		return
 	}
 	if err := b.plaud.SaveDeveloper(d); err != nil {
-		writeErr(w, http.StatusUnprocessableEntity, err.Error())
+		httpapi.WriteErr(w, http.StatusUnprocessableEntity, err.Error())
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]string{"status": "saved"})
+	httpapi.WriteJSON(w, http.StatusOK, map[string]string{"status": "saved"})
 }
 
 func (b *Bridge) apiPlaudAppBuild(w http.ResponseWriter, r *http.Request) {
 	switch err := b.plaud.BuildApp(); {
 	case errors.Is(err, errPlaudAppBuilding):
-		writeErr(w, http.StatusConflict, err.Error())
+		httpapi.WriteErr(w, http.StatusConflict, err.Error())
 	case err != nil:
-		writeErr(w, http.StatusPreconditionFailed, err.Error())
+		httpapi.WriteErr(w, http.StatusPreconditionFailed, err.Error())
 	default:
-		writeJSON(w, http.StatusAccepted, map[string]string{"status": "building"})
+		httpapi.WriteJSON(w, http.StatusAccepted, map[string]string{"status": "building"})
 	}
 }
 
 func (b *Bridge) apiPlaudAppDownload(w http.ResponseWriter, r *http.Request) {
 	if !fsx.Exists(b.plaud.appFile()) {
-		writeErr(w, http.StatusNotFound, "no phone app built yet")
+		httpapi.WriteErr(w, http.StatusNotFound, "no phone app built yet")
 		return
 	}
 	w.Header().Set("Content-Type", "application/vnd.android.package-archive")
@@ -648,10 +652,10 @@ func (b *Bridge) apiPlaudAppDownload(w http.ResponseWriter, r *http.Request) {
 func (b *Bridge) apiPlaudRevokeDevice(w http.ResponseWriter, r *http.Request) {
 	switch err := b.plaud.RevokeDevice(r.PathValue("id")); {
 	case errors.Is(err, errPlaudUnknownDevice):
-		writeErr(w, http.StatusNotFound, err.Error())
+		httpapi.WriteErr(w, http.StatusNotFound, err.Error())
 	case err != nil:
-		writeErr(w, http.StatusInternalServerError, err.Error())
+		httpapi.WriteErr(w, http.StatusInternalServerError, err.Error())
 	default:
-		writeJSON(w, http.StatusOK, map[string]string{"status": "unpaired"})
+		httpapi.WriteJSON(w, http.StatusOK, map[string]string{"status": "unpaired"})
 	}
 }

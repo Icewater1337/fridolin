@@ -14,10 +14,13 @@ import (
 	"unicode"
 	"unicode/utf8"
 
+	"github.com/Icewater1337/fridolin/internal/config"
+
+	"github.com/Icewater1337/fridolin/internal/manifest"
+
+	"github.com/Icewater1337/fridolin/internal/chat"
 	"github.com/Icewater1337/fridolin/internal/fsx"
 )
-
-// ── junk filter ───────────────────────────────────────────────────────────
 
 func TestIsJunkMessage(t *testing.T) {
 	junk := []string{"ok", "OK", "thanks", "👍", "...", "?", "a", "🎉🎉"}
@@ -93,33 +96,6 @@ func isASCII(s string) bool {
 	return true
 }
 
-// ── chunking ──────────────────────────────────────────────────────────────
-
-func TestChunkMessageShortTextUntouched(t *testing.T) {
-	chunks := ChunkMessage("hello", 100)
-	if len(chunks) != 1 || chunks[0] != "hello" {
-		t.Errorf("got %v", chunks)
-	}
-}
-
-func TestChunkMessageRespectsMaxSize(t *testing.T) {
-	text := strings.Repeat("paragraph one is here.\n\n", 200)
-	chunks := ChunkMessage(text, 500)
-	if len(chunks) < 2 {
-		t.Fatalf("expected multiple chunks, got %d", len(chunks))
-	}
-	for i, c := range chunks {
-		if n := utf8.RuneCountInString(c); n > 500 {
-			t.Errorf("chunk %d has %d characters, over the 500 limit", i, n)
-		}
-		if !strings.HasPrefix(c, "[") {
-			t.Errorf("chunk %d missing [n/total] prefix: %q", i, c[:20])
-		}
-	}
-}
-
-// ── config ────────────────────────────────────────────────────────────────
-
 func writeConfig(t *testing.T, body string) string {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), "config.json")
@@ -177,7 +153,7 @@ func TestLoadConfigMaxMediaMB(t *testing.T) {
 			}
 		})
 	}
-	if got := (&Config{}).MaxMediaBytes(); got != 100<<20 {
+	if got := (&config.Config{}).MaxMediaBytes(); got != 100<<20 {
 		t.Errorf("an unfilled config allows %d bytes, want the default", got)
 	}
 }
@@ -390,7 +366,7 @@ func TestProtectDataDirLeavesOtherUsersFolderAlone(t *testing.T) {
 	before := permOf(t, data)
 	logs := captureLog(t)
 
-	protectDataDir(&Config{DataDir: data, DBPath: filepath.Join(data, "bridge.db")})
+	protectDataDir(&config.Config{DataDir: data, DBPath: filepath.Join(data, "bridge.db")})
 
 	if got := permOf(t, data); got != before {
 		t.Errorf("data dir of another user changed from %04o to %04o", before, got)
@@ -445,7 +421,7 @@ func TestConfigWritesLeaveFolderModesAlone(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, level := range []string{"debug", "info"} {
-		if _, err := cs.Update("", func(c *Config) error { c.LogLevel = level; return nil }); err != nil {
+		if _, err := cs.Update("", func(c *config.Config) error { c.LogLevel = level; return nil }); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -536,13 +512,13 @@ func TestExampleConfigIsValid(t *testing.T) {
 
 func TestLogDMAccessWarnsWhenAnyoneCanDM(t *testing.T) {
 	yes, no := true, false
-	open := &Config{AllowAnyDM: &yes}
-	unset := &Config{}
-	listed := &Config{AllowedNumbers: []string{"15551234567"}, AllowAnyDM: &yes}
-	closed := &Config{AllowAnyDM: &no}
+	open := &config.Config{AllowAnyDM: &yes}
+	unset := &config.Config{}
+	listed := &config.Config{AllowedNumbers: []string{"15551234567"}, AllowAnyDM: &yes}
+	closed := &config.Config{AllowAnyDM: &no}
 	tests := []struct {
 		name       string
-		prev, next *Config
+		prev, next *config.Config
 		want       string // "" means nothing is logged
 	}{
 		{"startup with explicit true and an empty list", nil, open, "WARNING: anyone"},
@@ -571,7 +547,7 @@ func TestLogDMAccessWarnsWhenAnyoneCanDM(t *testing.T) {
 
 // ── brain routing ─────────────────────────────────────────────────────────
 
-func newTestManager(t *testing.T, cfg *Config) *BrainManager {
+func newTestManager(t *testing.T, cfg *config.Config) *BrainManager {
 	t.Helper()
 	requireTestDataDir(t, cfg)
 	mgr, err := NewBrainManager(cfg)
@@ -588,9 +564,9 @@ func TestBrainRouting(t *testing.T) {
 	cfg, err := LoadConfig(writeConfig(t, `{
 		"brain_mode": true,
 		"data_dir": "`+home+`/data"`+brainDirsJSON(t,
-		brainFolder(t, home+"/p", BrainManifest{ID: "personal", Routing: BrainRouting{HandlesDMs: true}}),
-		brainFolder(t, home+"/t", BrainManifest{ID: "team", Routing: BrainRouting{Groups: []string{"team@g.us"}}}),
-		brainFolder(t, home+"/o", BrainManifest{ID: "other", Routing: BrainRouting{Default: true}}),
+		brainFolder(t, home+"/p", manifest.Manifest{ID: "personal", Routing: manifest.Routing{HandlesDMs: true}}),
+		brainFolder(t, home+"/t", manifest.Manifest{ID: "team", Routing: manifest.Routing{Groups: []string{"team@g.us"}}}),
+		brainFolder(t, home+"/o", manifest.Manifest{ID: "other", Routing: manifest.Routing{Default: true}}),
 	)+`
 	}`))
 	if err != nil {
@@ -619,8 +595,8 @@ func TestRouteHonoursTheNamedBrain(t *testing.T) {
 	cfg, err := LoadConfig(writeConfig(t, `{
 		"brain_mode": true,
 		"data_dir": "`+home+`/data"`+brainDirsJSON(t,
-		brainFolder(t, home+"/p", BrainManifest{ID: "personal", Routing: BrainRouting{HandlesDMs: true}}),
-		brainFolder(t, home+"/t", BrainManifest{ID: "team", Routing: BrainRouting{Groups: []string{"team@g.us"}}}),
+		brainFolder(t, home+"/p", manifest.Manifest{ID: "personal", Routing: manifest.Routing{HandlesDMs: true}}),
+		brainFolder(t, home+"/t", manifest.Manifest{ID: "team", Routing: manifest.Routing{Groups: []string{"team@g.us"}}}),
 	)+`
 	}`))
 	if err != nil {
@@ -633,10 +609,10 @@ func TestRouteHonoursTheNamedBrain(t *testing.T) {
 		m    Inbound
 		want string // "" = no brain
 	}{
-		{"by chat", Inbound{JID: dm}, "personal"},
-		{"named brain wins over the chat's owner", Inbound{JID: dm, Brain: "team"}, "team"},
-		{"named brain in a group it does not own", Inbound{JID: "other@g.us", Brain: "personal"}, "personal"},
-		{"named brain is gone", Inbound{JID: dm, Brain: "removed"}, ""},
+		{"by chat", Inbound{Inbound: chat.Inbound{JID: dm}}, "personal"},
+		{"named brain wins over the chat's owner", Inbound{Inbound: chat.Inbound{JID: dm, Brain: "team"}}, "team"},
+		{"named brain in a group it does not own", Inbound{Inbound: chat.Inbound{JID: "other@g.us", Brain: "personal"}}, "personal"},
+		{"named brain is gone", Inbound{Inbound: chat.Inbound{JID: dm, Brain: "removed"}}, ""},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			got := ""
@@ -648,7 +624,7 @@ func TestRouteHonoursTheNamedBrain(t *testing.T) {
 			}
 		})
 	}
-	if _, _, _, err := mgr.Submit(Inbound{JID: dm, Brain: "removed", Text: "x"}); err == nil {
+	if _, _, _, err := mgr.Submit(Inbound{Inbound: chat.Inbound{JID: dm, Brain: "removed", Text: "x"}}); err == nil {
 		t.Error("Submit to a removed brain must fail, not run in the DM brain")
 	}
 }
@@ -667,11 +643,11 @@ func TestChatJIDs(t *testing.T) {
 		m    Inbound
 		want string
 	}{
-		{"DM by number", Inbound{JID: pn, Sender: "15551234567"}, pn},
-		{"DM by LID", Inbound{JID: lid, Sender: "15551234567"}, lid + "," + pn},
-		{"DM without a sender", Inbound{JID: lid}, lid},
-		{"DM by number, its LID known", Inbound{JID: pn, ChatAlt: lid, Sender: "15551234567"}, pn + "," + lid},
-		{"group", Inbound{JID: group, Sender: "15551234567"}, group},
+		{"DM by number", Inbound{Inbound: chat.Inbound{JID: pn, Sender: "15551234567"}}, pn},
+		{"DM by LID", Inbound{Inbound: chat.Inbound{JID: lid, Sender: "15551234567"}}, lid + "," + pn},
+		{"DM without a sender", Inbound{Inbound: chat.Inbound{JID: lid}}, lid},
+		{"DM by number, its LID known", Inbound{Inbound: chat.Inbound{JID: pn, ChatAlt: lid, Sender: "15551234567"}}, pn + "," + lid},
+		{"group", Inbound{Inbound: chat.Inbound{JID: group, Sender: "15551234567"}}, group},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			if got := strings.Join(chatJIDs(c.m), ","); got != c.want {
@@ -687,7 +663,7 @@ func TestBrainRoutingFallsBackToFirstBrain(t *testing.T) {
 
 	cfg, err := LoadConfig(writeConfig(t, `{
 		"brain_mode": true,
-		"data_dir": "`+home+`/data"`+brainDirsJSON(t, brainFolder(t, home+"/o", BrainManifest{ID: "only"}))+`
+		"data_dir": "`+home+`/data"`+brainDirsJSON(t, brainFolder(t, home+"/o", manifest.Manifest{ID: "only"}))+`
 	}`))
 	if err != nil {
 		t.Fatal(err)
@@ -700,13 +676,11 @@ func TestBrainRoutingFallsBackToFirstBrain(t *testing.T) {
 	}
 }
 
-// ── sandbox ───────────────────────────────────────────────────────────────
-
 func TestSandboxProfileIsolatesBrains(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 
-	cfg := &Config{DataDir: filepath.Join(home, "data")}
+	cfg := &config.Config{DataDir: filepath.Join(home, "data")}
 	sp := NewSandboxProfiler(map[string][]string{
 		"personal": {"/opt/brains/personal"},
 		"team":     {"/opt/brains/team"},
@@ -731,7 +705,7 @@ func TestSandboxProfileDeniesSecretsAndTheKeychains(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 
-	cfg := &Config{DataDir: filepath.Join(home, "data"), Sandbox: SandboxConfig{AllowPaths: []string{filepath.Join(home, "Library")}}}
+	cfg := &config.Config{DataDir: filepath.Join(home, "data"), Sandbox: config.SandboxConfig{AllowPaths: []string{filepath.Join(home, "Library")}}}
 	profile := mustProfile(t, NewSandboxProfiler(map[string][]string{"a": {"/tmp/a"}}, cfg), "a")
 
 	for _, secret := range []string{".ssh", ".aws", ".gnupg", "Library/Mail", ".git-credentials", "Library/Keychains"} {
@@ -756,7 +730,7 @@ func TestSandboxProfileKeepsCalendarTokensFromBrains(t *testing.T) {
 		t.Run("credentials_dir "+creds, func(t *testing.T) {
 			home := t.TempDir()
 			t.Setenv("HOME", home)
-			cfg := &Config{DataDir: filepath.Join(home, "data")}
+			cfg := &config.Config{DataDir: filepath.Join(home, "data")}
 			if creds != "" {
 				cfg.Sandbox.CredentialsDir = filepath.Join(home, creds)
 			}
@@ -776,9 +750,9 @@ func TestSandboxProfileIncludesConfiguredDenies(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 
-	cfg := &Config{
+	cfg := &config.Config{
 		DataDir: filepath.Join(home, "data"),
-		Sandbox: SandboxConfig{DenyPaths: []string{"/private/clients"}},
+		Sandbox: config.SandboxConfig{DenyPaths: []string{"/private/clients"}},
 	}
 	profile := mustProfile(t, NewSandboxProfiler(map[string][]string{"a": {"/tmp/a"}}, cfg), "a")
 
@@ -786,8 +760,6 @@ func TestSandboxProfileIncludesConfiguredDenies(t *testing.T) {
 		t.Error("configured deny path missing from the profile")
 	}
 }
-
-// ── identity map ──────────────────────────────────────────────────────────
 
 func TestParseIdentityMap(t *testing.T) {
 	ids := parseIdentityMap([]byte(`# People
@@ -841,7 +813,7 @@ func FuzzParseIdentityMap(f *testing.F) {
 	f.Fuzz(func(t *testing.T, table []byte, number, name, notes string) {
 		check := func(ids map[string]string) {
 			for k, v := range ids {
-				if k == "" || strings.ContainsAny(k, "@|\n") || identityKey(k) != k || k != strings.TrimSpace(k) {
+				if k == "" || strings.ContainsAny(k, "@|\n") || chat.IdentityKey(k) != k || k != strings.TrimSpace(k) {
 					t.Errorf("key %q is not a normalised number", k)
 				}
 				if v == "" || strings.ContainsAny(v, "|\n") || v != strings.TrimSpace(v) {
@@ -859,86 +831,16 @@ func FuzzParseIdentityMap(f *testing.F) {
 		ids := parseIdentityMap([]byte(string(table) + "\n| " + number + " | " + name + " | " + notes + " |\n"))
 		check(ids)
 		// Nothing to read back, or the header and the line under it.
-		if number == "" || identityKey(number) == "" || name == "" || number == "WhatsApp Number" || strings.Trim(number+name+notes, "-: \t") == "" {
+		if number == "" || chat.IdentityKey(number) == "" || name == "" || number == "WhatsApp Number" || strings.Trim(number+name+notes, "-: \t") == "" {
 			return
 		}
-		if got := ids[identityKey(number)]; got != name {
+		if got := ids[chat.IdentityKey(number)]; got != name {
 			t.Errorf("row | %s | %s | %s | read back as %q, want %q", number, name, notes, got, name)
 		}
 	})
 }
 
-func TestNormalizeJID(t *testing.T) {
-	cases := map[string]string{
-		"15551234567@s.whatsapp.net": "15551234567",
-		"+15551234567":               "15551234567",
-		"120363000000000000@g.us":    "120363000000000000",
-		"15551234567":                "15551234567",
-		"++15551234567":              "15551234567",
-		" + 15551234567 ":            "15551234567",
-	}
-	for in, want := range cases {
-		if got := normalizeJID(in); got != want {
-			t.Errorf("normalizeJID(%q) = %q, want %q", in, got, want)
-		}
-	}
-}
-
-// FuzzNormalizeJID: a normalised JID is what allowed_numbers and the
-// identity map hold, and what a sender is compared with. It has no server
-// and no space around it, it is part of the input, normalising it again
-// changes nothing, and every way of writing a number gives the number.
-func FuzzNormalizeJID(f *testing.F) {
-	for _, s := range []string{"15551234567@s.whatsapp.net", "+15551234567", "120363000000000000@g.us", "15551234567", "15551234567:12@s.whatsapp.net", "", "@", "+", "a@b@c", "+@s.whatsapp.net"} {
-		f.Add(s)
-	}
-	f.Fuzz(func(t *testing.T, jid string) {
-		n := normalizeJID(jid)
-		if strings.Contains(n, "@") {
-			t.Errorf("normalizeJID(%q) = %q, which still has a server", jid, n)
-		}
-		if n != strings.TrimSpace(n) {
-			t.Errorf("normalizeJID(%q) = %q, not trimmed", jid, n)
-		}
-		if !strings.Contains(jid, n) {
-			t.Errorf("normalizeJID(%q) = %q, which is not part of it", jid, n)
-		}
-		if again := normalizeJID(n); again != n {
-			t.Errorf("normalizeJID(%q) = %q, but normalising that gives %q", jid, n, again)
-		}
-		digits := strings.Map(func(r rune) rune {
-			if '0' <= r && r <= '9' {
-				return r
-			}
-			return -1
-		}, jid)
-		if digits == "" {
-			return
-		}
-		for _, form := range []string{digits, "+" + digits, digits + "@s.whatsapp.net", "+" + digits + "@s.whatsapp.net", digits + "@g.us"} {
-			if got := normalizeJID(form); got != digits {
-				t.Errorf("normalizeJID(%q) = %q, want %q", form, got, digits)
-			}
-		}
-	})
-}
-
 // ── misc ──────────────────────────────────────────────────────────────────
-
-func TestIsLoopbackAddr(t *testing.T) {
-	loopback := []string{"127.0.0.1:8765", "localhost:8765", "[::1]:8765"}
-	for _, a := range loopback {
-		if !isLoopbackAddr(a) {
-			t.Errorf("isLoopbackAddr(%q) = false, want true", a)
-		}
-	}
-	exposed := []string{"0.0.0.0:8765", ":8765", "192.168.1.5:8765", "example.com:80", "8765"}
-	for _, a := range exposed {
-		if isLoopbackAddr(a) {
-			t.Errorf("isLoopbackAddr(%q) = true, want false", a)
-		}
-	}
-}
 
 // Some names are read outside Go: the dashboard labels the run outcomes
 // and the bridge's backup and offers the queue and observe modes. Only
@@ -949,9 +851,9 @@ func TestNamesReadOutsideGo(t *testing.T) {
 		want []string
 	}{
 		{"web/assets/components/brain.js", []string{outcomeOK + ": [", outcomeError + ": [", outcomeInterrupted + ": [", outcomeQuestion + ": ["}},
-		{"web/assets/pages/settings.js", []string{"def: '" + queueModeQueue + "'", "['" + queueModeQueue + "', ", "['" + queueModeInterrupt + "', "}},
-		{"web/assets/lib/brain.js", []string{"export const BRIDGE_BACKUP_ID = '" + bridgeBackupID + "';", "[['" + observeHistory + "', ", "['" + observeRun + "', "}},
-		{"web/assets/pages/brain.js", []string{"m.observe || '" + observeHistory + "'"}},
+		{"web/assets/pages/settings.js", []string{"def: '" + config.QueueModeQueue + "'", "['" + config.QueueModeQueue + "', ", "['" + config.QueueModeInterrupt + "', "}},
+		{"web/assets/lib/brain.js", []string{"export const BRIDGE_BACKUP_ID = '" + bridgeBackupID + "';", "[['" + manifest.ObserveHistory + "', ", "['" + manifest.ObserveRun + "', "}},
+		{"web/assets/pages/brain.js", []string{"m.observe || '" + manifest.ObserveHistory + "'"}},
 	}
 	for _, c := range cases {
 		t.Run(c.file, func(t *testing.T) {

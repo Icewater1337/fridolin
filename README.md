@@ -751,7 +751,7 @@ worker, which takes each chat's messages in order and the chats in turn,
 and waits for one of the `max_concurrent_runs` run slots all brains share
 (`runslots.go`); each message spawns `claude -p` with
 `--output-format stream-json`, seeded on stdin with the brain's prompt
-file and recent chat history, which `history.go` reads back from the end
+file and recent chat history, which `internal/history` reads back from the end
 of the file. Events are parsed live, so an `AskUserQuestion` reaches
 WhatsApp immediately, with its options numbered (the answer comes as the
 next message, and the run's final reply is sent too), and a run over 10
@@ -779,6 +779,10 @@ checks and scaffolding. **`configstore.go`** — the live configuration.
 API; the page is plain HTML/CSS/JS compiled into the binary. In `web/assets`,
 `app/` starts it, `pages/` holds one module per page, and `components/` and
 `lib/` the pieces they share; `css/` holds its styles.
+
+**`internal/activity`** — the dashboard's bounded feed of history lines,
+including edits and deletions. The bridge supplies each brain's history tail
+when the feed is seeded.
 
 **`backup.go`** — Google Drive backups through rclone.
 
@@ -813,7 +817,7 @@ cannot go out within an hour is given up on, and the Overview says so.
 
 **`server.go`** — the localhost `/send` and `/ingest` endpoints.
 
-**`otp.go`** — the OTP guard: a one-time code a chat was just asked for
+**`internal/otp`** — the OTP guard: a one-time code a chat was just asked for
 is kept out of the history and the model, and handed to the script that
 asked for it through `<data_dir>/otp/`, until it expires.
 

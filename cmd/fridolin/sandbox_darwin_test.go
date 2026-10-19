@@ -16,7 +16,14 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Icewater1337/fridolin/internal/config"
+
+	"github.com/Icewater1337/fridolin/internal/chat"
+	"github.com/Icewater1337/fridolin/internal/manifest"
+	"github.com/Icewater1337/fridolin/internal/store"
+
 	"github.com/Icewater1337/fridolin/internal/fsx"
+	mediafiles "github.com/Icewater1337/fridolin/internal/media"
 )
 
 // These tests run generated profiles under the real sandbox-exec, so they
@@ -119,7 +126,7 @@ func TestSandboxedRunTurnsOffTheAutoUpdater(t *testing.T) {
 func TestSandboxedSiteSearchGetsTheBrainsOwnState(t *testing.T) {
 	requireSandboxExec(t)
 	tb := newTestBridge(t, `, "sandbox": {"enabled": true}`)
-	tb.addFolderBrain(t, BrainManifest{ID: "a", Name: "A", Routing: BrainRouting{HandlesDMs: true}})
+	tb.addFolderBrain(t, manifest.Manifest{ID: "a", Name: "A", Routing: manifest.Routing{HandlesDMs: true}})
 	state := filepath.Join(tb.home, "data", "brains", "a")
 	for name, want := range map[string]string{"CLAUDE_CONFIG_DIR": state + "/claude", "TMPDIR": state + "/tmp"} {
 		t.Run(name, func(t *testing.T) {
@@ -964,8 +971,8 @@ func TestSandboxKeepsRunTokensToTheirBrain(t *testing.T) {
 	requireSandboxExec(t)
 	tb, _ := serveTestBridge(t, `, "sandbox": {"enabled": true}`)
 	dirs := map[string]string{
-		"a": tb.addFolderBrain(t, BrainManifest{ID: "a", Name: "A", Routing: BrainRouting{HandlesDMs: true}}),
-		"g": tb.addFolderBrain(t, BrainManifest{ID: "g", Name: "G", Routing: BrainRouting{Groups: []string{"120363000000000000@g.us"}}}),
+		"a": tb.addFolderBrain(t, manifest.Manifest{ID: "a", Name: "A", Routing: manifest.Routing{HandlesDMs: true}}),
+		"g": tb.addFolderBrain(t, manifest.Manifest{ID: "g", Name: "G", Routing: manifest.Routing{Groups: []string{"120363000000000000@g.us"}}}),
 	}
 	tokenFile := func(brain string) string {
 		env, done := tb.brainRunEnv(brain)
@@ -1017,10 +1024,10 @@ func TestSandboxKeepsRunTokensToTheirBrain(t *testing.T) {
 func TestSandboxedRunReachesTheBrainAPI(t *testing.T) {
 	requireSandboxExec(t)
 	tb, _ := serveTestBridge(t, `, "sandbox": {"enabled": true}`)
-	tb.addFolderBrain(t, BrainManifest{ID: "a", Name: "A", Routing: BrainRouting{HandlesDMs: true}})
+	tb.addFolderBrain(t, manifest.Manifest{ID: "a", Name: "A", Routing: manifest.Routing{HandlesDMs: true}})
 	savePoll(t, tb, "P1", apiTestDM, "Lunch?", []string{"Yes", "No"}, nil)
 	t.Setenv("FRIDOLIN_FAKE_POLLS", "1")
-	tb.handleInbound(context.Background(), Inbound{JID: apiTestDM, Sender: "15551234567", Text: "polls?", Source: "whatsapp"})
+	tb.handleInbound(context.Background(), Inbound{Inbound: chat.Inbound{JID: apiTestDM, Sender: "15551234567", Text: "polls?", Source: "whatsapp"}})
 	waitFor(t, 20*time.Second, "the reply", func() bool { return len(tb.sentTo(apiTestDM)) > 0 })
 	if reply := tb.sentTo(apiTestDM)[0]; !strings.Contains(reply, `polls=0 {`) || !strings.Contains(reply, `"question": "Lunch?"`) {
 		t.Errorf("the sandboxed run's fridolin polls answered:\n%s", reply)
@@ -1087,7 +1094,7 @@ func TestSandboxDeniesTheConfigFile(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	sp := NewSandboxProfiler(map[string][]string{"a": {filepath.Join(home, "a")}}, &Config{DataDir: filepath.Join(home, ".fridolin")})
+	sp := NewSandboxProfiler(map[string][]string{"a": {filepath.Join(home, "a")}}, &config.Config{DataDir: filepath.Join(home, ".fridolin")})
 	sp.SetConfigFile(filepath.Join(home, "etc", "config.json"))
 	for _, cmd := range []string{
 		`cat "$HOME/etc/config.json"`,
@@ -1115,7 +1122,7 @@ func TestSandboxAllowPathsKeepBridgeSecrets(t *testing.T) {
 	t.Setenv("HOME", home)
 	// Ready for inboxes, as the bridge has it before any run, so that a's
 	// photo stays in a's inbox.
-	if err := retireLegacyMedia(filepath.Join(home, ".fridolin", "media")); err != nil {
+	if err := mediaInboxAt(filepath.Join(home, ".fridolin", "media")).RetireLegacy(); err != nil {
 		t.Fatal(err)
 	}
 	for _, f := range []string{".fridolin/dashboard.token", ".fridolin/bridge.db", ".fridolin/media/a/photo.jpg", "Documents/share/ok.txt", "a/notes.md", "team/b/diary.md", "Library/Keychains/login.keychain-db", "Library/Preferences/x.plist"} {
@@ -1127,10 +1134,10 @@ func TestSandboxAllowPathsKeepBridgeSecrets(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	cfg := &Config{
+	cfg := &config.Config{
 		DataDir: filepath.Join(home, ".fridolin"),
 		DBPath:  filepath.Join(home, ".fridolin", "bridge.db"),
-		Sandbox: SandboxConfig{AllowPaths: []string{filepath.Join(home, ".fridolin"), filepath.Join(home, "team"), filepath.Join(home, "Documents", "share"), filepath.Join(home, "Library")}},
+		Sandbox: config.SandboxConfig{AllowPaths: []string{filepath.Join(home, ".fridolin"), filepath.Join(home, "team"), filepath.Join(home, "Documents", "share"), filepath.Join(home, "Library")}},
 	}
 	sp := NewSandboxProfiler(map[string][]string{"a": {filepath.Join(home, "a")}, "b": {filepath.Join(home, "team", "b")}}, cfg)
 	for _, c := range []struct {
@@ -1280,7 +1287,7 @@ func TestSandboxOwnFolderKeepsWhatIsInsideIt(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	cfg := &Config{DataDir: home + "/.fridolin", Sandbox: SandboxConfig{
+	cfg := &config.Config{DataDir: home + "/.fridolin", Sandbox: config.SandboxConfig{
 		DenyPaths:  []string{box + "/work/private"},
 		AllowPaths: []string{box + "/work/private/share"},
 	}}
@@ -1435,7 +1442,7 @@ func TestSandboxKeepsAMediaFolderOutsideTheDataDir(t *testing.T) {
 	home := fsx.Canonical(t.TempDir())
 	t.Setenv("HOME", home)
 	sp, own := sandboxFixture(t, home, "b", "clients", map[string]any{"media_dir": "~/media"})
-	for _, f := range []string{"media/a/photo.jpg", "media/b/dm.pdf", "media/" + incomingMediaDir + "/voice.ogg", "media/top.pdf"} {
+	for _, f := range []string{"media/a/photo.jpg", "media/b/dm.pdf", "media/" + mediafiles.IncomingDir + "/voice.ogg", "media/top.pdf"} {
 		writeTestFile(t, filepath.Join(home, f), "content of "+f)
 	}
 	t.Setenv("M", filepath.Join(home, "media"))
@@ -1447,7 +1454,7 @@ func TestSandboxKeepsAMediaFolderOutsideTheDataDir(t *testing.T) {
 		{"write its own inbox", `printf x > "$M/a/new.jpg"`, true},
 		{"read another brain's inbox", `cat "$M/b/dm.pdf"`, false},
 		{"write another brain's inbox", `printf x > "$M/b/planted.pdf"`, false},
-		{"read an attachment not yet routed", `cat "$M/` + incomingMediaDir + `/voice.ogg"`, false},
+		{"read an attachment not yet routed", `cat "$M/` + mediafiles.IncomingDir + `/voice.ogg"`, false},
 		{"read a file at the top", `cat "$M/top.pdf"`, false},
 		{"write at the top", `printf x > "$M/planted.pdf"`, false},
 		{"list the media folder", `ls "$M"`, false},
@@ -1577,9 +1584,9 @@ func sandboxFixture(t *testing.T, home, otherBrain, denyDir string, extra ...map
 			"deny_paths":      []string{"~/" + denyDir},
 			"allow_paths":     []string{"~/Documents/share"},
 		},
-		"brain_dirs": []BrainRef{
-			brainFolder(t, "~/assistant/a", BrainManifest{ID: "a", Routing: BrainRouting{HandlesDMs: true}}),
-			brainFolder(t, "~/assistant/"+otherBrain, BrainManifest{ID: "b", Routing: BrainRouting{Groups: []string{"120363000000000000@g.us"}}}),
+		"brain_dirs": []config.BrainRef{
+			brainFolder(t, "~/assistant/a", manifest.Manifest{ID: "a", Routing: manifest.Routing{HandlesDMs: true}}),
+			brainFolder(t, "~/assistant/"+otherBrain, manifest.Manifest{ID: "b", Routing: manifest.Routing{Groups: []string{"120363000000000000@g.us"}}}),
 		},
 	}
 	for _, e := range extra {
@@ -1600,7 +1607,7 @@ func sandboxFixture(t *testing.T, home, otherBrain, denyDir string, extra ...map
 	if err := cfg.EnsureDirs(); err != nil {
 		t.Fatal(err)
 	}
-	store, err := NewStore(cfg)
+	store, err := store.Open(cfg.DBPath, cfg.LogLevel)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1609,7 +1616,7 @@ func sandboxFixture(t *testing.T, home, otherBrain, denyDir string, extra ...map
 	t.Cleanup(mgr.Stop)
 	// As the bridge does when it starts: the inboxes below are the
 	// brains' own, not what an older version left there.
-	if err := retireLegacyMedia(cfg.MediaDir); err != nil {
+	if err := mediaInboxAt(cfg.MediaDir).RetireLegacy(); err != nil {
 		t.Fatal(err)
 	}
 
@@ -1713,8 +1720,8 @@ func resolvedForTest(t *testing.T, p string) string {
 // "On" from the config alone, so the status warns when runs are refused for
 // a missing sandbox-exec or a profile that cannot be built.
 func TestStatusWarnsWhenSandboxDoesNotApply(t *testing.T) {
-	a := BrainManifest{ID: "a", Name: "A", Routing: BrainRouting{HandlesDMs: true}}
-	b := BrainManifest{ID: "b", Name: "B", Routing: BrainRouting{Groups: []string{"120363000000000000@g.us"}}}
+	a := manifest.Manifest{ID: "a", Name: "A", Routing: manifest.Routing{HandlesDMs: true}}
+	b := manifest.Manifest{ID: "b", Name: "B", Routing: manifest.Routing{Groups: []string{"120363000000000000@g.us"}}}
 	cases := []struct {
 		name      string
 		atHome    bool // brain a's folder is the home folder, and there is no b
@@ -1745,7 +1752,7 @@ func TestStatusWarnsWhenSandboxDoesNotApply(t *testing.T) {
 			tb := newTestBridge(t, `, "sandbox": {"enabled": true}`)
 			if tc.atHome {
 				ref := brainFolder(t, "~", a)
-				if _, err := tb.cfgs.Update("", func(c *Config) error {
+				if _, err := tb.cfgs.Update("", func(c *config.Config) error {
 					c.BrainDirs = append(c.BrainDirs, ref)
 					return nil
 				}); err != nil {

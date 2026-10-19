@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/Icewater1337/fridolin/internal/devchat"
 	"io"
 	"maps"
 	"net/url"
@@ -20,6 +21,11 @@ import (
 	"time"
 	_ "time/tzdata" // TestNextDue's time zone, on machines without one
 
+	"github.com/Icewater1337/fridolin/internal/config"
+
+	"github.com/Icewater1337/fridolin/internal/manifest"
+
+	"github.com/Icewater1337/fridolin/internal/chat"
 	"github.com/Icewater1337/fridolin/internal/fsx"
 )
 
@@ -237,14 +243,6 @@ func TestBackupNextRun(t *testing.T) {
 	}
 }
 
-func TestBackupConfigValidate(t *testing.T) {
-	for _, bad := range []BackupConfig{{DailyAt: "25:00"}, {Remote: "my remote"}, {Root: "../x"}, {Root: "/abs"}, {Root: "a:b"}} {
-		if bad.validate() == nil {
-			t.Errorf("%+v should be rejected", bad)
-		}
-	}
-}
-
 func TestRcloneSection(t *testing.T) {
 	conf := "[other]\ntype = s3\n\n[brain-gdrive]\ntype = drive\nscope = drive.file\ntoken = {\"x\":1}\n"
 	s := rcloneSection(conf, "brain-gdrive")
@@ -306,7 +304,7 @@ func TestConnectDriveWalksQuestionsAndHidesToken(t *testing.T) {
 		t.Error("not connected after the flow")
 	}
 	last := f.calls[len(f.calls)-1]
-	if last[0] != "mkdir" || last[1] != "brain-gdrive:"+defaultBackupRoot {
+	if last[0] != "mkdir" || last[1] != "brain-gdrive:"+config.DefaultBackupRoot {
 		t.Errorf("last call = %v, want mkdir of the backup root", last)
 	}
 	// rclone opens the browser from one of these runs, so they all get the
@@ -549,7 +547,7 @@ func TestBackupRoundTripWithRealRclone(t *testing.T) {
 		t.Fatal("alias remote not recognised")
 	}
 
-	m := BrainManifest{ID: "notes", Name: "Notes", Backup: BrainBackup{Enabled: true, Exclude: []string{"node_modules/", "*.log", "/private/"}}}
+	m := manifest.Manifest{ID: "notes", Name: "Notes", Backup: manifest.Backup{Enabled: true, Exclude: []string{"node_modules/", "*.log", "/private/"}}}
 	if w := tb.do("POST", "/api/brains", map[string]any{"path": "~/notes", "manifest": m, "create_dir": true}); w.Code != 200 {
 		t.Fatal(w.Body.String())
 	}
@@ -577,7 +575,7 @@ func TestBackupRoundTripWithRealRclone(t *testing.T) {
 		}
 	}
 	run()
-	cur := filepath.Join(remoteDir, defaultBackupRoot, "notes", "current")
+	cur := filepath.Join(remoteDir, config.DefaultBackupRoot, "notes", "current")
 	if data, _ := os.ReadFile(filepath.Join(cur, "memories/a.md")); string(data) != "version 1" {
 		t.Fatalf("file not backed up")
 	}
@@ -586,21 +584,21 @@ func TestBackupRoundTripWithRealRclone(t *testing.T) {
 			t.Errorf("%s should have been excluded", skip)
 		}
 	}
-	if _, err := os.Stat(filepath.Join(remoteDir, defaultBackupRoot, "_bridge", "current", "config.json")); err != nil {
+	if _, err := os.Stat(filepath.Join(remoteDir, config.DefaultBackupRoot, "_bridge", "current", "config.json")); err != nil {
 		t.Error("bridge config not backed up")
 	}
-	if _, err := os.Stat(filepath.Join(remoteDir, defaultBackupRoot, "_bridge", "current", "dashboard.token")); err == nil {
+	if _, err := os.Stat(filepath.Join(remoteDir, config.DefaultBackupRoot, "_bridge", "current", "dashboard.token")); err == nil {
 		t.Error("the dashboard token must never be backed up")
 	}
 
 	write("memories/a.md", "version 2")
 	time.Sleep(1100 * time.Millisecond) // a new version folder name
 	run()
-	versions, _ := os.ReadDir(filepath.Join(remoteDir, defaultBackupRoot, "notes", "versions"))
+	versions, _ := os.ReadDir(filepath.Join(remoteDir, config.DefaultBackupRoot, "notes", "versions"))
 	if len(versions) != 1 {
 		t.Fatalf("versions = %d, want 1", len(versions))
 	}
-	old, _ := os.ReadFile(filepath.Join(remoteDir, defaultBackupRoot, "notes", "versions", versions[0].Name(), "memories/a.md"))
+	old, _ := os.ReadFile(filepath.Join(remoteDir, config.DefaultBackupRoot, "notes", "versions", versions[0].Name(), "memories/a.md"))
 	if string(old) != "version 1" {
 		t.Errorf("the overwritten file must be kept in versions/, got %q", old)
 	}
@@ -718,7 +716,7 @@ func needRclone(t *testing.T) string {
 // ~/.local/bin, say) is not under it, and the bridge would not look there.
 func useRclone(t *testing.T, tb *testBridge, rclone string) {
 	t.Helper()
-	if _, err := tb.cfgs.Update("", func(c *Config) error { c.Backup.RclonePath = rclone; return nil }); err != nil {
+	if _, err := tb.cfgs.Update("", func(c *config.Config) error { c.Backup.RclonePath = rclone; return nil }); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -743,7 +741,7 @@ func rcloneTestBridge(t *testing.T, extra string) (*testBridge, string) {
 // addBackupBrain adds a brain with backups on and returns its folder.
 func addBackupBrain(t *testing.T, tb *testBridge, id string) string {
 	t.Helper()
-	m := BrainManifest{ID: id, Name: id, Backup: BrainBackup{Enabled: true}}
+	m := manifest.Manifest{ID: id, Name: id, Backup: manifest.Backup{Enabled: true}}
 	if w := tb.do("POST", "/api/brains", map[string]any{"path": "~/" + id, "manifest": m, "create_dir": true}); w.Code != 200 {
 		t.Fatal(w.Body.String())
 	}
@@ -816,7 +814,7 @@ func TestBackupPruneKeepsVersionsByRunDate(t *testing.T) {
 		t.Fatalf("first backup = %+v", res)
 	}
 
-	versions := filepath.Join(remoteDir, defaultBackupRoot, "notes", "versions")
+	versions := filepath.Join(remoteDir, config.DefaultBackupRoot, "notes", "versions")
 	seed := func(name string) {
 		p := filepath.Join(versions, name, "memories", "older.md")
 		_ = os.MkdirAll(filepath.Dir(p), 0o700)
@@ -886,7 +884,7 @@ func TestPrunePurgesExpiredVersionFolders(t *testing.T) {
 			t.Errorf("unexpected rclone call %v", c)
 		}
 	}
-	want := []string{"brain-gdrive:" + defaultBackupRoot + "/notes/versions/" + expired}
+	want := []string{"brain-gdrive:" + config.DefaultBackupRoot + "/notes/versions/" + expired}
 	if fmt.Sprint(purged) != fmt.Sprint(want) {
 		t.Errorf("purged %v, want %v", purged, want)
 	}
@@ -906,7 +904,7 @@ func TestPruneKeepsItsConfigAndStopsWhenCancelled(t *testing.T) {
 		tb.backup.runner = func(_ context.Context, args []string, _ io.Writer) ([]byte, error) {
 			calls = append(calls, args)
 			if len(calls) == 1 {
-				if _, err := tb.cfgs.Update("", func(c *Config) error { c.Backup.Root = "moved"; return nil }); err != nil {
+				if _, err := tb.cfgs.Update("", func(c *config.Config) error { c.Backup.Root = "moved"; return nil }); err != nil {
 					t.Error(err)
 				}
 			}
@@ -920,7 +918,7 @@ func TestPruneKeepsItsConfigAndStopsWhenCancelled(t *testing.T) {
 			t.Errorf("%d rclone calls, want a listing and two purges for each of 3 ids: %v", len(calls), calls)
 		}
 		for _, c := range calls {
-			if p := c[len(c)-1]; !strings.HasPrefix(p, "brain-gdrive:"+defaultBackupRoot+"/") {
+			if p := c[len(c)-1]; !strings.HasPrefix(p, "brain-gdrive:"+config.DefaultBackupRoot+"/") {
 				t.Errorf("%s %s is not under the backup.root prune started with", c[0], p)
 			}
 		}
@@ -1001,7 +999,7 @@ func (d *deletionRunner) run(_ context.Context, args []string, stderr io.Writer)
 }
 
 // notesBase is where the default config backs up the brain "notes".
-const notesBase = defaultBackupRemote + ":" + defaultBackupRoot + "/notes"
+const notesBase = config.DefaultBackupRemote + ":" + config.DefaultBackupRoot + "/notes"
 
 // flagValue returns the value after an rclone flag, "" when it is not set.
 func flagValue(args []string, flag string) string {
@@ -1143,7 +1141,7 @@ func TestBackupBrainKeepsItsConfig(t *testing.T) {
 	tb.backup.runner = func(ctx context.Context, args []string, stderr io.Writer) ([]byte, error) {
 		if args[0] == "lsjson" && !moved {
 			moved = true
-			if _, err := tb.cfgs.Update("", func(c *Config) error { c.Backup.Root = "moved"; return nil }); err != nil {
+			if _, err := tb.cfgs.Update("", func(c *config.Config) error { c.Backup.Root = "moved"; return nil }); err != nil {
 				t.Error(err)
 			}
 		}
@@ -1316,7 +1314,7 @@ func TestScheduledRefusalIsToldOnWhatsApp(t *testing.T) {
 	if jid == "" {
 		t.Fatal("the test brain has no chat")
 	}
-	sent := func() []DevMessage { return tb.dev.Outbox() }
+	sent := func() []devchat.Message { return tb.dev.Outbox() }
 	told := func() bool {
 		tb.backup.mu.Lock()
 		defer tb.backup.mu.Unlock()
@@ -1469,7 +1467,7 @@ func TestBackupMassDeletionWithRealRclone(t *testing.T) {
 	if res := runBackup(t, tb, "notes"); !res.OK {
 		t.Fatalf("first backup = %+v", res)
 	}
-	cur := filepath.Join(remoteDir, defaultBackupRoot, "notes", "current")
+	cur := filepath.Join(remoteDir, config.DefaultBackupRoot, "notes", "current")
 	count := func(root string) int {
 		n := 0
 		_ = filepath.WalkDir(root, func(_ string, d os.DirEntry, err error) error {
@@ -1519,7 +1517,7 @@ func TestBackupMassDeletionWithRealRclone(t *testing.T) {
 	if n := count(cur); n != 0 {
 		t.Errorf("current/ has %d files after mirroring the empty folder, want 0", n)
 	}
-	if n := count(filepath.Join(remoteDir, defaultBackupRoot, "notes", "versions", res.Version)); n != backedUp {
+	if n := count(filepath.Join(remoteDir, config.DefaultBackupRoot, "notes", "versions", res.Version)); n != backedUp {
 		t.Errorf("versions/%s holds %d files, want all %d deleted ones", res.Version, n, backedUp)
 	}
 }
@@ -1555,7 +1553,7 @@ func TestBackupExcludedThenDeletedWithRealRclone(t *testing.T) {
 			t.Fatalf("run %d after excluding and deleting exports/ = %+v, want OK", run, res)
 		}
 	}
-	cur := filepath.Join(remoteDir, defaultBackupRoot, "notes", "current")
+	cur := filepath.Join(remoteDir, config.DefaultBackupRoot, "notes", "current")
 	if entries, _ := os.ReadDir(filepath.Join(cur, "exports")); len(entries) != 20 {
 		t.Errorf("current/exports has %d files, want all 20: the sync leaves excluded files in Drive", len(entries))
 	}
@@ -1589,7 +1587,7 @@ func TestSyncDirMaxDeleteWithRealRclone(t *testing.T) {
 	if res.OK || !res.Refused {
 		t.Errorf("result = %+v, want a refusal at the --max-delete limit", res)
 	}
-	entries, _ := os.ReadDir(filepath.Join(remoteDir, defaultBackupRoot, "notes", "current"))
+	entries, _ := os.ReadDir(filepath.Join(remoteDir, config.DefaultBackupRoot, "notes", "current"))
 	if len(entries) < 2 {
 		t.Errorf("current/ has %d files, rclone deleted more than the limit", len(entries))
 	}
@@ -1627,7 +1625,7 @@ func TestBackupPartlyReadableFolderWithRealRclone(t *testing.T) {
 	if res.OK || res.Refused || !strings.Contains(res.Error, "parts of the brain folder could not be read") || !strings.Contains(res.Error, "locked") {
 		t.Errorf("result = %+v, want a failure that names the unreadable folder", res)
 	}
-	cur := filepath.Join(remoteDir, defaultBackupRoot, "notes", "current")
+	cur := filepath.Join(remoteDir, config.DefaultBackupRoot, "notes", "current")
 	for rel, why := range map[string]string{
 		"memories/new.md":  "the readable new file must be backed up",
 		"memories/old.md":  "an unchanged file must stay",
@@ -2542,7 +2540,7 @@ func TestBackupWaitsForTheBrainToFinish(t *testing.T) {
 			logged := captureLog(t)
 
 			t.Setenv("FRIDOLIN_FAKE_SLEEP_MS", "1500")
-			if _, _, err := br.Submit(Inbound{JID: "15551234567@s.whatsapp.net", Sender: "15551234567", Text: "hello", Source: "whatsapp", At: time.Now()}); err != nil {
+			if _, _, err := br.Submit(Inbound{Inbound: chat.Inbound{JID: "15551234567@s.whatsapp.net", Sender: "15551234567", Text: "hello", Source: "whatsapp", At: time.Now()}}); err != nil {
 				t.Fatal(err)
 			}
 			waitFor(t, 10*time.Second, "the run to start", running)

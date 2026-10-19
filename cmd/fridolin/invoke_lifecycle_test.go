@@ -15,6 +15,10 @@ import (
 	"syscall"
 	"testing"
 	"time"
+
+	"github.com/Icewater1337/fridolin/internal/manifest"
+
+	"github.com/Icewater1337/fridolin/internal/chat"
 )
 
 // setsidChildren has the fake CLI start a grandchild that leaves the run's
@@ -87,7 +91,7 @@ func TestDetachedChildDoesNotHoldTheBrain(t *testing.T) {
 			if err := os.Unsetenv("FRIDOLIN_FAKE_SETSID_CHILD"); err != nil {
 				t.Fatal(err)
 			}
-			next := Inbound{JID: "120363000000000000@g.us", Sender: "15551234567", Text: "next"}
+			next := Inbound{Inbound: chat.Inbound{JID: "120363000000000000@g.us", Sender: "15551234567", Text: "next"}}
 			if _, _, _, err := mgr.Submit(next); err != nil {
 				t.Fatal(err)
 			}
@@ -227,7 +231,7 @@ func TestStopBeforeTheCLIStartsIsAnInterruption(t *testing.T) {
 // it.
 func TestSiteSearchStartsClaudeAsBrainRunsDo(t *testing.T) {
 	tb := newTestBridge(t, "")
-	tb.addFolderBrain(t, BrainManifest{ID: "a", Name: "A", Routing: BrainRouting{HandlesDMs: true}})
+	tb.addFolderBrain(t, manifest.Manifest{ID: "a", Name: "A", Routing: manifest.Routing{HandlesDMs: true}})
 	argsLog := filepath.Join(tb.home, "args.log")
 	t.Setenv("FRIDOLIN_FAKE_ARGS_LOG", argsLog)
 	const prompt = "SEARCH-PROMPT where is the letter?"
@@ -259,7 +263,7 @@ func TestSiteSearchStartsClaudeAsBrainRunsDo(t *testing.T) {
 // names the error. It was all kept in memory.
 func TestSiteSearchKeepsOnlyTheEndOfStderr(t *testing.T) {
 	tb := newTestBridge(t, "")
-	tb.addFolderBrain(t, BrainManifest{ID: "a", Name: "A", Routing: BrainRouting{HandlesDMs: true}})
+	tb.addFolderBrain(t, manifest.Manifest{ID: "a", Name: "A", Routing: manifest.Routing{HandlesDMs: true}})
 	const flood = 16 << 20
 	t.Setenv("FRIDOLIN_FAKE_STDERR_BYTES", strconv.Itoa(flood))
 	var before, after runtime.MemStats

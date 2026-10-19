@@ -8,6 +8,8 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/Icewater1337/fridolin/internal/config"
+
 	"github.com/Icewater1337/fridolin/internal/fsx"
 )
 
@@ -38,7 +40,7 @@ type pathOwner struct {
 }
 
 // pathOwners lists cfg's brain folders.
-func pathOwners(cfg *Config) []pathOwner {
+func pathOwners(cfg *config.Config) []pathOwner {
 	var out []pathOwner
 	for _, ref := range cfg.BrainDirs {
 		dir := ref.Dir()
@@ -119,7 +121,7 @@ var bridgePATH struct {
 // it before it loads the brains, at its start and on every change of the
 // config, and check calls it too, so that it sees the brains and profiles
 // the bridge would.
-func setBridgePATH(cfg *Config) map[string][]string {
+func setBridgePATH(cfg *config.Config) map[string][]string {
 	st := &bridgePATH
 	st.mu.Lock()
 	defer st.mu.Unlock()

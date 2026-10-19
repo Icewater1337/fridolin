@@ -12,6 +12,10 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/Icewater1337/fridolin/internal/config"
+
+	"github.com/Icewater1337/fridolin/internal/httpapi"
 )
 
 // login posts to /api/login the way the dashboard page does.
@@ -295,7 +299,7 @@ func TestRotateForgetsLoginCodes(t *testing.T) {
 }
 
 func TestSessionCookieNamePerPort(t *testing.T) {
-	if a, b := sessionCookieName("127.0.0.1:8765"), sessionCookieName("127.0.0.1:9999"); a == b || a != "fridolin_session_8765" {
+	if a, b := httpapi.SessionCookieName("127.0.0.1:8765"), httpapi.SessionCookieName("127.0.0.1:9999"); a == b || a != "fridolin_session_8765" {
 		t.Fatalf("%q, %q", a, b)
 	}
 }
@@ -374,7 +378,7 @@ func TestOpenAsksForALoginCode(t *testing.T) {
 	if err != nil || code == "" || code == tb.token.Value() {
 		t.Fatalf("code %q, %v", code, err)
 	}
-	if url := loginURL(listen, code); strings.Contains(url, tb.token.Value()) || !strings.HasSuffix(url, "/#login="+code) {
+	if url := httpapi.LoginURL(listen, code); strings.Contains(url, tb.token.Value()) || !strings.HasSuffix(url, "/#login="+code) {
 		t.Errorf("url %q", url)
 	}
 	if !tb.sessions.useCode(code) {
@@ -419,7 +423,7 @@ func TestDashboardLink(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			cfg := &Config{DataDir: t.TempDir(), HTTPListen: stubBridge(t, c.status, c.body)}
+			cfg := &config.Config{DataDir: t.TempDir(), HTTPListen: stubBridge(t, c.status, c.body)}
 			if err := os.WriteFile(filepath.Join(cfg.DataDir, "dashboard.token"), []byte(token+"\n"), 0o600); err != nil {
 				t.Fatal(err)
 			}
@@ -501,18 +505,18 @@ func TestRotateTokenCommand(t *testing.T) {
 	}{{"no bridge", false}, {"no bridge, the dashboard off", true}} {
 		t.Run(c.name, func(t *testing.T) {
 			dataDir := t.TempDir()
-			tok, err := LoadDashboardToken(dataDir)
+			tok, err := httpapi.LoadDashboardToken(dataDir)
 			if err != nil {
 				t.Fatal(err)
 			}
 			sessions, _ := loadDashSessions(dataDir)
 			id, binding, _, _ := sessions.create()
-			cfg := &Config{DataDir: dataDir, HTTPListen: closedPort(t)}
+			cfg := &config.Config{DataDir: dataDir, HTTPListen: closedPort(t)}
 			cfg.Dashboard.Disabled = c.off
 			if err := rotateToken(cfg); err != nil {
 				t.Fatal(err)
 			}
-			after, err := LoadDashboardToken(dataDir)
+			after, err := httpapi.LoadDashboardToken(dataDir)
 			if err != nil || after.Value() == tok.Value() {
 				t.Errorf("token %q → %q (%v)", tok.Value(), after.Value(), err)
 			}

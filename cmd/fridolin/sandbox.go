@@ -14,7 +14,10 @@ import (
 	"sort"
 	"strings"
 	"sync"
-	"unicode/utf8"
+
+	"github.com/Icewater1337/fridolin/internal/config"
+
+	"github.com/Icewater1337/fridolin/internal/textx"
 
 	"github.com/Icewater1337/fridolin/internal/fsx"
 )
@@ -114,7 +117,7 @@ type sandboxPolicy struct {
 }
 
 // sandboxPolicyOf takes the profiles' settings from cfg.
-func sandboxPolicyOf(cfg *Config) sandboxPolicy {
+func sandboxPolicyOf(cfg *config.Config) sandboxPolicy {
 	// These may be relative, and the bridge opens them relative to its
 	// working directory; the comparisons need them absolute.
 	p := sandboxPolicy{
@@ -137,7 +140,7 @@ func sandboxPolicyOf(cfg *Config) sandboxPolicy {
 		p.mediaDir = filepath.Join(p.dataDir, "media")
 	}
 	if media := p.mediaDir; media != "" {
-		p.inbox = func(id string) string { return mediaInbox(media, id) }
+		p.inbox = func(id string) string { return mediaInboxAt(media).Path(id) }
 	}
 	if data := p.dataDir; data != "" {
 		p.state = func(id string) brainState { return brainStateOf(data, id) }
@@ -152,7 +155,7 @@ func sandboxPolicyOf(cfg *Config) sandboxPolicy {
 }
 
 // NewSandboxProfiler builds a profiler for the configured brains.
-func NewSandboxProfiler(workDirs map[string][]string, cfg *Config) *SandboxProfiler {
+func NewSandboxProfiler(workDirs map[string][]string, cfg *config.Config) *SandboxProfiler {
 	sp := &SandboxProfiler{execPath: sandboxExecPath}
 	if exe, err := os.Executable(); err == nil {
 		sp.bridgeExe = exe
@@ -163,7 +166,7 @@ func NewSandboxProfiler(workDirs map[string][]string, cfg *Config) *SandboxProfi
 
 // Update replaces the brain set and settings. Profiles are built per run,
 // so the next run of every brain picks the change up.
-func (sp *SandboxProfiler) Update(workDirs map[string][]string, cfg *Config) {
+func (sp *SandboxProfiler) Update(workDirs map[string][]string, cfg *config.Config) {
 	wd := make(map[string][]string, len(workDirs))
 	for k, v := range workDirs {
 		// Made absolute, "" would be the bridge's working directory.
@@ -214,7 +217,7 @@ func (sp *SandboxProfiler) sitePaths() (deny, noWrite []string) {
 		}
 	}
 	if sp.configFile != "" {
-		deny = append(deny, sp.configFile, sp.configFile+".bak", dotEnvPath(sp.configFile))
+		deny = append(deny, sp.configFile, sp.configFile+".bak", config.DotEnvPath(sp.configFile))
 	}
 	if sp.credsDir != "" {
 		deny = append(deny, absPath(sp.credsDir))
@@ -424,7 +427,7 @@ var launchers = []string{"/bin/launchctl", "/usr/bin/open", "/usr/bin/osascript"
 func (sp *SandboxProfiler) Profile(brainID string) (string, error) {
 	sp.mu.RLock()
 	defer sp.mu.RUnlock()
-	home := homeDir()
+	home := config.HomeDir()
 	if !filepath.IsAbs(home) {
 		// Every home-relative deny would silently become a relative path.
 		return "", fmt.Errorf("HOME %q is not an absolute path", home)
@@ -609,7 +612,7 @@ func (sp *SandboxProfiler) Profile(brainID string) (string, error) {
 	// working directory when there was none there. The bridge reads
 	// neither any more, but either may still hold settings and secrets.
 	if sp.configFile != "" {
-		for _, f := range []string{sp.configFile, sp.configFile + ".bak", dotEnvPath(sp.configFile), ".env"} {
+		for _, f := range []string{sp.configFile, sp.configFile + ".bak", config.DotEnvPath(sp.configFile), ".env"} {
 			if abs, err := filepath.Abs(f); err == nil && !withinAny(abs, dataDirs) {
 				b.deny("file-read*", "literal", abs)
 				b.deny("file-write*", "literal", abs)
@@ -915,7 +918,7 @@ func (sp *SandboxProfiler) userClaudeDirs(home string) []string {
 
 // dataDirs is the data dir and both names it has had in HOME.
 func (p sandboxPolicy) dataDirs(home string) []string {
-	dirs := []string{filepath.Join(home, dataDirName), filepath.Join(home, legacyDataDirName)}
+	dirs := []string{filepath.Join(home, config.DataDirName), filepath.Join(home, config.LegacyDataDirName)}
 	if p.dataDir != "" && !slices.Contains(dirs, filepath.Clean(p.dataDir)) {
 		dirs = append(dirs, p.dataDir)
 	}
@@ -1514,7 +1517,7 @@ func (b *profileBuilder) emitSocket(action, dir string) {
 
 // quote returns value as an SBPL string, or fails the profile.
 func (b *profileBuilder) quote(value string) (string, bool) {
-	q, err := sbplString(value)
+	q, err := textx.SBPLString(value)
 	if err != nil {
 		b.fail(err)
 		return "", false
@@ -1546,25 +1549,6 @@ func (b *profileBuilder) fail(err error) {
 		b.err = err
 	}
 }
-
-// sbplString quotes s as an SBPL string literal. Go's %q is not one: it
-// writes a no-break space as \u00a0 and the joiner inside emoji as \u200d,
-// which the profile reader does not decode, so the rule named a path that
-// does not exist and never matched. Only backslash and double quote need
-// escaping; everything else goes in as UTF-8. A NUL cannot be passed in an
-// argument at all, and line breaks or invalid UTF-8 are refused rather than
-// guessed at.
-func sbplString(s string) (string, error) {
-	if !utf8.ValidString(s) {
-		return "", fmt.Errorf("sandbox path %q is not valid UTF-8", s)
-	}
-	if strings.ContainsAny(s, "\x00\n\r") {
-		return "", fmt.Errorf("sandbox path %q contains a NUL or a line break", s)
-	}
-	return `"` + sbplEscaper.Replace(s) + `"`, nil
-}
-
-var sbplEscaper = strings.NewReplacer(`\`, `\\`, `"`, `\"`)
 
 // maxGitIncludeDepth is how deep gitConfigChain follows includes; git
 // itself refuses more than 10.

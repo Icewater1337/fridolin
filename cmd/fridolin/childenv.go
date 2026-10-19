@@ -9,6 +9,10 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+
+	"github.com/Icewater1337/fridolin/internal/manifest"
+
+	mediafiles "github.com/Icewater1337/fridolin/internal/media"
 )
 
 // childScope says which of the programs the bridge starts get a variable.
@@ -162,22 +166,6 @@ func childGets(scope childScope, name string) bool {
 	return false
 }
 
-// validEnvName reports whether name can be an environment variable's name
-// in child_env_passthrough: letters, digits and underscores, not starting
-// with a digit. "=" or a NUL byte would make the entry another variable or
-// none at all.
-func validEnvName(name string) bool {
-	if name == "" || (name[0] >= '0' && name[0] <= '9') {
-		return false
-	}
-	for _, c := range name {
-		if c != '_' && !('a' <= c && c <= 'z') && !('A' <= c && c <= 'Z') && !('0' <= c && c <= '9') {
-			return false
-		}
-	}
-	return true
-}
-
 // brainStatesDirName is the folder of the data dir that holds every brain's
 // own state, one folder per brain id (see brainStateOf).
 const brainStatesDirName = "brains"
@@ -230,7 +218,7 @@ func prepareBrainState(dataDir, mediaDir, id string, inheritUser bool) ([]string
 	if dataDir == "" {
 		return nil, errors.New("the sandbox needs the data folder, which holds each brain's own state")
 	}
-	if !brainIDRe.MatchString(id) {
+	if !manifest.ValidID(id) {
 		return nil, fmt.Errorf("brain id %q cannot name a folder", id)
 	}
 	if mediaDir != "" {
@@ -238,8 +226,8 @@ func prepareBrainState(dataDir, mediaDir, id string, inheritUser bool) ([]string
 		// no inbox refuses the run. Any other failure leaves the run without
 		// an inbox: the files sent to it stay where they are (see
 		// claimMedia), and the brain runs, as it used to fail every run.
-		switch inbox, err := openInbox(mediaDir, id); {
-		case errors.Is(err, errNotTheInbox):
+		switch inbox, err := mediaInboxAt(mediaDir).Open(id); {
+		case errors.Is(err, mediafiles.ErrNotTheInbox):
 			return nil, err
 		case err != nil:
 			log.Printf("brain %s: no media inbox for this run: %v", id, err)

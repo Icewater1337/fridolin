@@ -6,44 +6,16 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
-	"sort"
 	"strings"
+
+	"github.com/Icewater1337/fridolin/internal/config"
+
+	"github.com/Icewater1337/fridolin/internal/route"
+
+	"github.com/Icewater1337/fridolin/internal/manifest"
 
 	"github.com/Icewater1337/fridolin/internal/fsx"
 )
-
-// BrainRef is one brain folder in config.json's brain_dirs. Approved is the
-// manifest you accepted in the dashboard. The bridge runs the approved
-// version: a brain can edit its own brain.json, and must not be able to grant
-// itself your DMs or another brain's groups that way. Differences show up in
-// the dashboard as "changed on disk" until you approve them.
-type BrainRef struct {
-	Path     string         `json:"path"`
-	Approved *BrainManifest `json:"approved"`
-}
-
-// Dir is the brain's folder with ~ expanded, for code that works on the
-// file layer, where Path is kept as typed. The effective configuration has
-// Path expanded already.
-func (r BrainRef) Dir() string { return fsx.ExpandHome(r.Path, homeDir()) }
-
-// BrainSpec is a brain ready to run.
-type BrainSpec struct {
-	Manifest BrainManifest
-	Dir      string // absolute, symlinks resolved
-	// Path is the folder as configured, ~ expanded. The sandbox profiles
-	// cover it as well as Dir, which the brain runs in: a symlink on the
-	// way to the folder, such as ~/assistant on another volume, is one a
-	// brain could swap for its own and so move another brain's folder.
-	Path string
-	// PromptFile is the prompt file relative to Dir. The bridge reads it
-	// through the brain's open folder, which stops a brain from pointing it
-	// at ~/.ssh with a symlink; checking the path here would not, as the
-	// brain can plant one at any time after.
-	PromptFile string
-	// entry is the spec's index in brain_dirs, which its issues carry.
-	entry int
-}
 
 // BrainIssue is a problem with one configured brain, shown on the dashboard.
 type BrainIssue struct {
@@ -60,7 +32,7 @@ type BrainIssue struct {
 	entry int
 	// routing is what the approved manifest routes to the brain, whose
 	// chats no other brain takes while it is left out (see leavesOut).
-	routing BrainRouting
+	routing manifest.Routing
 }
 
 // leavesOut reports whether the issue keeps an approved brain from running:
@@ -73,8 +45,8 @@ func (is BrainIssue) leavesOut() bool {
 // ResolveBrains turns the brain folders in the configuration into runnable
 // brains. Brains with problems are left out and reported, so one broken
 // folder never takes the others down.
-func ResolveBrains(cfg *Config) ([]BrainSpec, []BrainIssue) {
-	var specs []BrainSpec
+func ResolveBrains(cfg *config.Config) ([]manifest.Spec, []BrainIssue) {
+	var specs []manifest.Spec
 	var issues []BrainIssue
 
 	for i, ref := range cfg.BrainDirs {
@@ -83,7 +55,7 @@ func ResolveBrains(cfg *Config) ([]BrainSpec, []BrainIssue) {
 			issues = append(issues, BrainIssue{Path: ref.Path, Kind: "unapproved", Detail: "no approved manifest — remove this entry and add the folder again", entry: i})
 			continue
 		}
-		m := ref.Approved.normalized()
+		m := ref.Approved.Normalized()
 		if err := m.Validate(); err != nil {
 			issues = append(issues, BrainIssue{ID: m.ID, Path: ref.Path, Kind: "invalid", Detail: err.Error(), entry: i, routing: m.Routing})
 			continue
@@ -95,25 +67,25 @@ func ResolveBrains(cfg *Config) ([]BrainSpec, []BrainIssue) {
 		// The dashboard refuses such a folder, but brain_dirs can be edited
 		// by hand, and a folder can be moved, or a symlink on its way
 		// changed, after it was added.
-		if err := checkBrainDir(dir, ref.Path, cfg, homeDir()); err != nil {
+		if err := checkBrainDir(dir, ref.Path, cfg, config.HomeDir()); err != nil {
 			issues = append(issues, BrainIssue{ID: m.ID, Path: ref.Path, Kind: "invalid", Detail: "the folder " + err.Error() + ", so it cannot hold a brain; move the brain to a folder of its own", entry: i, routing: m.Routing})
 			continue
 		}
-		if disk, err := ReadManifest(dir); err == nil && !disk.Equal(m) {
+		if disk, err := manifest.Read(dir); err == nil && !disk.Equal(m) {
 			issues = append(issues, BrainIssue{ID: m.ID, Path: ref.Path, Kind: "drift", Detail: "brain.json changed on disk — review and approve it in the dashboard", entry: i})
 		} else if err != nil && !errors.Is(err, fs.ErrNotExist) {
 			issues = append(issues, BrainIssue{ID: m.ID, Path: ref.Path, Kind: "drift", Detail: err.Error(), entry: i})
 		}
 		// Validate kept prompt_file inside the folder; the folder's os.Root
 		// keeps it there when the bridge reads it.
-		specs = append(specs, BrainSpec{Manifest: m, Dir: dir, Path: filepath.Clean(ref.Path), PromptFile: m.PromptFile, entry: i})
+		specs = append(specs, manifest.Spec{Manifest: m, Dir: dir, Path: filepath.Clean(ref.Path), PromptFile: m.PromptFile, Entry: i})
 	}
 
 	// Drop brains that clash with an earlier one rather than refusing to run.
-	var ok []BrainSpec
+	var ok []manifest.Spec
 	for _, s := range specs {
-		if err := ValidateBrainSet(append(append([]BrainSpec{}, ok...), s)); err != nil {
-			issues = append(issues, BrainIssue{ID: s.Manifest.ID, Path: s.Dir, Kind: "invalid", Detail: err.Error(), entry: s.entry, routing: s.Manifest.Routing})
+		if err := route.Validate(append(append([]manifest.Spec{}, ok...), s)); err != nil {
+			issues = append(issues, BrainIssue{ID: s.Manifest.ID, Path: s.Dir, Kind: "invalid", Detail: err.Error(), entry: s.Entry, routing: s.Manifest.Routing})
 			continue
 		}
 		ok = append(ok, s)
@@ -121,57 +93,10 @@ func ResolveBrains(cfg *Config) ([]BrainSpec, []BrainIssue) {
 	return ok, issues
 }
 
-// ValidateBrainSet checks brains against each other: unique ids, every group
-// owned by one brain, at most one DM brain and one default, no two brains in
-// one folder and no brain folder inside another (sandbox profiles deny other
-// brains' folders, so a nested brain could not read itself).
-func ValidateBrainSet(specs []BrainSpec) error {
-	ids := map[string]string{}
-	groups := map[string]string{}
-	dm, def := "", ""
-	for _, s := range specs {
-		m := s.Manifest
-		if other, ok := ids[m.ID]; ok {
-			return fmt.Errorf("two brains use the id %q (%s and %s)", m.ID, other, s.Dir)
-		}
-		ids[m.ID] = s.Dir
-		for _, g := range m.Routing.Groups {
-			if owner, ok := groups[g]; ok {
-				return fmt.Errorf("group %s is claimed by both %q and %q", g, owner, m.ID)
-			}
-			groups[g] = m.ID
-		}
-		if m.Routing.HandlesDMs {
-			if dm != "" {
-				return fmt.Errorf("brains %q and %q both handle DMs", dm, m.ID)
-			}
-			dm = m.ID
-		}
-		if m.Routing.Default {
-			if def != "" {
-				return fmt.Errorf("brains %q and %q are both marked default", def, m.ID)
-			}
-			def = m.ID
-		}
-	}
-	for i, a := range specs {
-		for j, b := range specs {
-			switch {
-			case i == j:
-			case a.Dir == b.Dir:
-				return fmt.Errorf("brains %q and %q use the same folder %s", a.Manifest.ID, b.Manifest.ID, a.Dir)
-			case fsx.Within(b.Dir, a.Dir):
-				return fmt.Errorf("brain folder %s is inside brain folder %s", b.Dir, a.Dir)
-			}
-		}
-	}
-	return nil
-}
-
 // CheckBrainPath vets a folder before it becomes a brain. Problems block it;
 // warnings are shown but allowed.
-func CheckBrainPath(path string, cfg *Config, otherDirs []string) (abs string, problems, warnings []string) {
-	home := homeDir()
+func CheckBrainPath(path string, cfg *config.Config, otherDirs []string) (abs string, problems, warnings []string) {
+	home := config.HomeDir()
 	abs = fsx.Canonical(fsx.ExpandHome(strings.TrimSpace(path), home))
 	if !filepath.IsAbs(abs) {
 		return abs, []string{"enter an absolute path (or one starting with ~/)"}, nil
@@ -217,7 +142,7 @@ func CheckBrainPath(path string, cfg *Config, otherDirs []string) (abs string, p
 // data folder would read the WhatsApp session. The dashboard asks before it
 // adds a brain (CheckBrainPath), ResolveBrains for every configured brain,
 // a hand-edited brain_dirs included, and each sandbox profile again.
-func checkBrainDir(dir, configured string, cfg *Config, home string) error {
+func checkBrainDir(dir, configured string, cfg *config.Config, home string) error {
 	// A folder of the bridge's PATH inside this one is no reason: the
 	// bridge takes it off its PATH once the folder is a brain's (see
 	// setBridgePATH), as it does for every configured one.
@@ -249,7 +174,7 @@ func checkBrainDir(dir, configured string, cfg *Config, home string) error {
 // built this way, inside the home folder by construction. ok is false for
 // the home folder itself and for anything outside it.
 func inHome(p string) (string, bool) {
-	home := fsx.Canonical(homeDir())
+	home := fsx.Canonical(config.HomeDir())
 	rel, err := filepath.Rel(home, p)
 	if home == "" || err != nil || rel == "." || !filepath.IsLocal(rel) {
 		return "", false
@@ -258,8 +183,8 @@ func inHome(p string) (string, bool) {
 }
 
 // UpdateManifest changes one brain's manifest, see updateManifestIn.
-func (cs *ConfigStore) UpdateManifest(id string, mutate func(m *BrainManifest) error) error {
-	_, err := cs.UpdateTx("", func(c *Config, tx *Tx) error { return updateManifestIn(c, tx, id, mutate) })
+func (cs *ConfigStore) UpdateManifest(id string, mutate func(m *manifest.Manifest) error) error {
+	_, err := cs.UpdateTx("", func(c *config.Config, tx *Tx) error { return updateManifestIn(c, tx, id, mutate) })
 	return err
 }
 
@@ -268,7 +193,7 @@ func (cs *ConfigStore) UpdateManifest(id string, mutate func(m *BrainManifest) e
 // brain.json in the brain's folder, so that the two change together and
 // the change is not reported as drift. It is the one way the bridge
 // changes a manifest; an error from mutate leaves both as they were.
-func updateManifestIn(c *Config, tx *Tx, id string, mutate func(m *BrainManifest) error) error {
+func updateManifestIn(c *config.Config, tx *Tx, id string, mutate func(m *manifest.Manifest) error) error {
 	for i := range c.BrainDirs {
 		ref := &c.BrainDirs[i]
 		if ref.Approved == nil || ref.Approved.ID != id {
@@ -284,79 +209,9 @@ func updateManifestIn(c *Config, tx *Tx, id string, mutate func(m *BrainManifest
 		if err := tx.WriteManifest(ref.Dir(), &m); err != nil {
 			return err
 		}
-		n := m.normalized()
+		n := m.Normalized()
 		ref.Approved = &n
 		return nil
 	}
 	return fmt.Errorf("no brain %q", id)
-}
-
-// ScaffoldBrain prepares a folder for a new brain: the folder itself, a
-// starter prompt file, the memory layout and brain.json. It never replaces
-// a file that already exists, so adopting a folder with content is safe. It
-// returns the files it created.
-func ScaffoldBrain(dir string, m *BrainManifest) ([]string, error) {
-	created, err := scaffoldFolder(dir, m)
-	if err != nil {
-		return created, err
-	}
-	if err := WriteManifest(dir, m, false); err == nil {
-		created = append(created, ManifestFile)
-	} else if !errors.Is(err, errManifestExists) {
-		return created, err
-	}
-	sort.Strings(created)
-	return created, nil
-}
-
-// scaffoldFolder is ScaffoldBrain without brain.json, which the dashboard
-// writes with the update that adds the brain (see apiAddBrain).
-func scaffoldFolder(dir string, m *BrainManifest) ([]string, error) {
-	s, err := scaffoldFolderTx(dir, m)
-	defer s.close()
-	return s.created, err
-}
-
-func scaffoldFolderTx(dir string, m *BrainManifest) (*scaffoldTx, error) {
-	s, err := newScaffold(dir)
-	if err != nil {
-		return s, err
-	}
-
-	prompt := renderTemplate(examplePromptTemplate(), m)
-	files := []struct{ rel, content string }{
-		{m.normalized().PromptFile, prompt},
-		{identityMapFile, identityMapTemplate},
-		{"memories/README.md", "# Memories\n\nOne markdown file per topic. The brain reads and updates these between conversations.\n"},
-		{"skills/README.md", "# Skills\n\nReusable how-tos and scripts this brain has written for itself.\n"},
-	}
-	for _, sk := range exampleSkills() {
-		files = append(files, struct{ rel, content string }{"skills/" + sk.name, renderTemplate(sk.content, m)})
-	}
-	for _, f := range files {
-		if err := s.write(f.rel, f.content); err != nil {
-			return s, err
-		}
-	}
-	sort.Strings(s.created)
-	return s, nil
-}
-
-const identityMapTemplate = `# WhatsApp identity map
-
-Who is who in this brain's chats. The bridge reads this table to show names
-instead of raw numbers in the chat history it gives the brain. Write numbers
-with the country code, any way you like: +1 555 123-4567 works.
-
-| WhatsApp Number | Person | Notes |
-| --------------- | ------ | ----- |
-`
-
-// renderTemplate fills a brain template, the starter prompt or an example
-// skill, for the new brain m. The templates name the bridge's commands by
-// $FRIDOLIN_BIN and its helpers by $FRIDOLIN_TOOLS_DIR, which every run
-// sets (see brainRunEnv), and never by a path: a brain folder keeps
-// working when it or the bridge moves.
-func renderTemplate(tpl string, m *BrainManifest) string {
-	return strings.NewReplacer("{{BRAIN_NAME}}", m.Name).Replace(tpl)
 }

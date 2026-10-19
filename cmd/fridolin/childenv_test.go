@@ -3,6 +3,7 @@ package main
 import (
 	"encoding/json"
 	"fmt"
+	"github.com/Icewater1337/fridolin/internal/registry"
 	"maps"
 	"os"
 	"path/filepath"
@@ -331,10 +332,10 @@ func brainRunEnv(t *testing.T, env map[string]string, config string) (map[string
 
 	m := testManifest("a")
 	m.Routing.HandlesDMs = true
-	if _, err := ScaffoldBrain(filepath.Join(home, "a"), &m); err != nil {
+	if _, err := registry.Scaffold(filepath.Join(home, "a"), &m, brainTemplates); err != nil {
 		t.Fatal(err)
 	}
-	approved, err := json.Marshal(m.normalized())
+	approved, err := json.Marshal(m.Normalized())
 	if err != nil {
 		t.Fatal(err)
 	}

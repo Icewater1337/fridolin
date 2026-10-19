@@ -13,6 +13,7 @@ dashboard.token
 *.db-shm
 *.db-wal
 media/
+!internal/media/
 *.log
 conversation-history.jsonl
 # transcribe.py's default output folder, wherever it ran in this checkout

@@ -36,6 +36,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/Icewater1337/fridolin/internal/config"
+
 	"github.com/Icewater1337/fridolin/internal/fsx"
 	"github.com/Icewater1337/fridolin/internal/platform"
 	"github.com/Icewater1337/fridolin/internal/textx"
@@ -670,7 +672,7 @@ func (m *SiteManager) processCommand(ctx context.Context, name, listen, modulesD
 		if s.Domain != "" {
 			rt.PublicOrigin = "https://" + s.Domain
 		}
-		mods = readModuleCaps(modulesDir, homeDir())
+		mods = readModuleCaps(modulesDir, config.HomeDir())
 		rt.SecretsFD = 3
 		rt.DataDir, rt.SpoolDir, rt.DevicesFile = m.dir("data"), m.spoolDir(), m.dir("devices.json")
 		for _, d := range []string{rt.SpoolDir, rt.DataDir} {
@@ -815,7 +817,7 @@ func (m *SiteManager) SetGoogleClient(data []byte) error {
 // own environment (tokens, API keys) reaches it.
 func siteEnv(bin string, extra ...string) []string {
 	env := []string{
-		"HOME=" + homeDir(),
+		"HOME=" + config.HomeDir(),
 		"PATH=" + siteEnvPath(bin),
 		"LANG=en_US.UTF-8",
 	}
@@ -839,7 +841,7 @@ func siteEnvPath(bin string) string {
 func findNode() (string, error) {
 	bin, err := findTool("node")
 	if err != nil {
-		found, _ := filepath.Glob(filepath.Join(homeDir(), ".nvm/versions/node/v*/bin/node"))
+		found, _ := filepath.Glob(filepath.Join(config.HomeDir(), ".nvm/versions/node/v*/bin/node"))
 		slices.SortFunc(found, func(a, b string) int { return compareVersionDirs(b, a) })
 		if len(found) == 0 {
 			return "", errors.New("node is not installed (macOS: brew install node); the site needs Node.js 22 or newer")
@@ -884,7 +886,7 @@ func findTool(name string) (string, error) {
 // PATH, which under the service it often is not. The sandbox keeps them
 // from brains like the PATH folders.
 func toolFallbackDirs() []string {
-	return []string{"/opt/homebrew/bin", "/usr/local/bin", filepath.Join(homeDir(), ".local/bin")}
+	return []string{"/opt/homebrew/bin", "/usr/local/bin", filepath.Join(config.HomeDir(), ".local/bin")}
 }
 
 // ensureShell unpacks the embedded site process into <data_dir>/site/shell

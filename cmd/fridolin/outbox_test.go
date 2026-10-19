@@ -11,23 +11,21 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Icewater1337/fridolin/internal/config"
+	"github.com/Icewater1337/fridolin/internal/devchat"
+	outboundmsg "github.com/Icewater1337/fridolin/internal/outbound"
+
+	"github.com/Icewater1337/fridolin/internal/chat"
+	"github.com/Icewater1337/fridolin/internal/history"
+	"github.com/Icewater1337/fridolin/internal/store"
 	"github.com/Icewater1337/fridolin/internal/textx"
 )
-
-func TestOutboxDelay(t *testing.T) {
-	cases := map[int]time.Duration{1: 5 * time.Second, 2: 10 * time.Second, 3: 20 * time.Second, 5: 80 * time.Second, 6: outboxMaxRetry, 40: outboxMaxRetry}
-	for attempts, want := range cases {
-		if got := outboxDelay(attempts); got != want {
-			t.Errorf("outboxDelay(%d) = %v, want %v", attempts, got, want)
-		}
-	}
-}
 
 // flakyMessenger is the dev messenger with a connection that drops: while
 // it is down, every send fails, as whatsmeow's do, and with dropAfter set
 // it goes down after that many more messages.
 type flakyMessenger struct {
-	*devMessenger
+	*devchat.Messenger
 
 	mu        sync.Mutex
 	online    chan struct{}
@@ -36,8 +34,8 @@ type flakyMessenger struct {
 	delay     time.Duration // how long each send takes
 }
 
-func newFlakyMessenger(cfg func() *Config, online bool) *flakyMessenger {
-	f := &flakyMessenger{devMessenger: &devMessenger{cfg: cfg}, online: make(chan struct{}), dropAfter: -1}
+func newFlakyMessenger(cfg func() *config.Config, online bool) *flakyMessenger {
+	f := &flakyMessenger{Messenger: devchat.New(func(text string) []string { return outboundmsg.Chunk(text, cfg().MaxChunkSize) }), online: make(chan struct{}), dropAfter: -1}
 	if online {
 		close(f.online)
 	}
@@ -78,12 +76,12 @@ func (f *flakyMessenger) try() error {
 	select {
 	case <-f.online:
 	default:
-		return errOffline
+		return outboundmsg.ErrOffline
 	}
 	if f.dropAfter == 0 {
 		f.dropAfter = -1
 		f.setOnlineLocked(false)
-		return errOffline
+		return outboundmsg.ErrOffline
 	}
 	if f.dropAfter > 0 {
 		f.dropAfter--
@@ -94,20 +92,20 @@ func (f *flakyMessenger) try() error {
 func (f *flakyMessenger) SendMessage(ctx context.Context, jid, text string) error {
 	time.Sleep(f.delay)
 	// Refused like WhatsApp refuses it, which the dev messenger does not.
-	if _, err := parseRecipient(jid); errors.Is(err, errRefusedRecipient) {
+	if _, err := parseRecipient(jid); errors.Is(err, outboundmsg.ErrRefusedRecipient) {
 		return err
 	}
 	if err := f.try(); err != nil {
 		return err
 	}
-	return f.devMessenger.SendMessage(ctx, jid, text)
+	return f.Messenger.SendMessage(ctx, jid, text)
 }
 
 func (f *flakyMessenger) SendPoll(ctx context.Context, jid, q string, opts []string, max int) (string, error) {
 	if err := f.try(); err != nil {
 		return "", err
 	}
-	return f.devMessenger.SendPoll(ctx, jid, q, opts, max)
+	return f.Messenger.SendPoll(ctx, jid, q, opts, max)
 }
 
 func (f *flakyMessenger) sent(jid string) []string {
@@ -130,13 +128,13 @@ func TestReplyIsRecordedOnceDelivered(t *testing.T) {
 	wa.dropAfter = 1 // the first chunk goes out, then the connection drops
 	tb.wa = wa
 
-	tb.handleInbound(context.Background(), Inbound{JID: testDMChat, Sender: "15551234567", Text: strings.Repeat("a long question ", 12), Source: sourceWhatsApp})
+	tb.handleInbound(context.Background(), Inbound{Inbound: chat.Inbound{JID: testDMChat, Sender: "15551234567", Text: strings.Repeat("a long question ", 12), Source: chat.SourceWhatsApp}})
 	waitFor(t, 10*time.Second, "a failed attempt", func() bool {
 		wa.mu.Lock()
 		defer wa.mu.Unlock()
 		return wa.tries >= 2
 	})
-	if out := historyTexts(t, br, historyOut); len(out) != 0 {
+	if out := historyTexts(t, br, history.Out); len(out) != 0 {
 		t.Errorf("history holds %q before the reply went out", out)
 	}
 	if got := wa.sent(testDMChat); len(got) != 1 || !strings.HasPrefix(got[0], "[1/") {
@@ -144,7 +142,7 @@ func TestReplyIsRecordedOnceDelivered(t *testing.T) {
 	}
 
 	wa.setOnline(true)
-	waitFor(t, 10*time.Second, "the history line", func() bool { return len(historyTexts(t, br, historyOut)) == 1 })
+	waitFor(t, 10*time.Second, "the history line", func() bool { return len(historyTexts(t, br, history.Out)) == 1 })
 	got := wa.sent(testDMChat)
 	n := len(got)
 	for i, c := range got {
@@ -184,7 +182,7 @@ func TestQueuedRunReadsTheAnswerBeforeIt(t *testing.T) {
 			wa.delay = c.delay
 			tb.wa = wa
 			ask := func(text string) {
-				tb.handleInbound(context.Background(), Inbound{JID: testDMChat, Sender: "15551234567", Text: text, Source: sourceWhatsApp})
+				tb.handleInbound(context.Background(), Inbound{Inbound: chat.Inbound{JID: testDMChat, Sender: "15551234567", Text: text, Source: chat.SourceWhatsApp}})
 			}
 			ask("first question")
 			waitFor(t, 5*time.Second, "the first run", func() bool { r := br.Snapshot().Running; return r != nil && r.PID > 0 })
@@ -208,23 +206,23 @@ func TestQueuedRunReadsTheAnswerBeforeIt(t *testing.T) {
 // the history holds by then, delivered after they were read, only once.
 func TestWithUndelivered(t *testing.T) {
 	at := func(hhmmss string) string { return "2026-10-18T" + hhmmss + "+02:00" }
-	in := func(ts, text string) historyEntry {
-		return historyEntry{TS: at(ts), Chat: testDMChat, From: "15551234567", Text: text, Type: historyIn}
+	in := func(ts, text string) history.Entry {
+		return history.Entry{TS: at(ts), Chat: testDMChat, From: "15551234567", Text: text, Type: history.In}
 	}
-	out := func(ts, text string) historyEntry {
-		return historyEntry{TS: at(ts), Chat: testDMChat, From: "main", Text: text, Type: historyOut}
+	out := func(ts, text string) history.Entry {
+		return history.Entry{TS: at(ts), Chat: testDMChat, From: "main", Text: text, Type: history.Out}
 	}
 	cases := []struct {
 		name             string
-		history, pending []historyEntry
+		history, pending []history.Entry
 		want             []string
 	}{
-		{"nothing waits", []historyEntry{in("10:00:00", "a")}, nil, []string{"a"}},
-		{"after what came before it", []historyEntry{in("10:00:00", "a"), in("10:00:01", "b")}, []historyEntry{out("10:00:02", "A")}, []string{"a", "b", "A"}},
-		{"before what came after it", []historyEntry{in("10:00:00", "a"), in("10:00:05", "c")}, []historyEntry{out("10:00:02", "A")}, []string{"a", "A", "c"}},
-		{"in order among themselves", []historyEntry{in("10:00:00", "a")}, []historyEntry{out("10:00:02", "A"), out("10:00:03", "B")}, []string{"a", "A", "B"}},
-		{"delivered meanwhile", []historyEntry{in("10:00:00", "a"), out("10:00:04", "A")}, []historyEntry{out("10:00:02", "A")}, []string{"a", "A"}},
-		{"the same words said before", []historyEntry{out("09:00:00", "OK"), in("10:00:00", "a")}, []historyEntry{out("10:00:02", "OK")}, []string{"OK", "a", "OK"}},
+		{"nothing waits", []history.Entry{in("10:00:00", "a")}, nil, []string{"a"}},
+		{"after what came before it", []history.Entry{in("10:00:00", "a"), in("10:00:01", "b")}, []history.Entry{out("10:00:02", "A")}, []string{"a", "b", "A"}},
+		{"before what came after it", []history.Entry{in("10:00:00", "a"), in("10:00:05", "c")}, []history.Entry{out("10:00:02", "A")}, []string{"a", "A", "c"}},
+		{"in order among themselves", []history.Entry{in("10:00:00", "a")}, []history.Entry{out("10:00:02", "A"), out("10:00:03", "B")}, []string{"a", "A", "B"}},
+		{"delivered meanwhile", []history.Entry{in("10:00:00", "a"), out("10:00:04", "A")}, []history.Entry{out("10:00:02", "A")}, []string{"a", "A"}},
+		{"the same words said before", []history.Entry{out("09:00:00", "OK"), in("10:00:00", "a")}, []history.Entry{out("10:00:02", "OK")}, []string{"OK", "a", "OK"}},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -244,28 +242,29 @@ func TestWithUndelivered(t *testing.T) {
 // line that the retry writes again, nor the chat get the reply twice.
 func TestReplyIsRecordedOnceWhenItsRowStays(t *testing.T) {
 	tb, br := newMainBridge(t, "")
+	db := testStoreSQL(t, tb.cfgs.Startup().DBPath)
 	// bridge.db refuses to delete from the outbox until the trigger goes.
-	if _, err := tb.store.db.Exec(`CREATE TRIGGER keep_outbox BEFORE DELETE ON outbox BEGIN SELECT RAISE(FAIL, 'disk I/O error'); END`); err != nil {
+	if _, err := db.Exec(`CREATE TRIGGER keep_outbox BEFORE DELETE ON outbox BEGIN SELECT RAISE(FAIL, 'disk I/O error'); END`); err != nil {
 		t.Fatal(err)
 	}
-	tb.handleInbound(context.Background(), Inbound{JID: testDMChat, Sender: "15551234567", Text: "hello", Source: sourceWhatsApp})
+	tb.handleInbound(context.Background(), Inbound{Inbound: chat.Inbound{JID: testDMChat, Sender: "15551234567", Text: "hello", Source: chat.SourceWhatsApp}})
 	waitFor(t, 10*time.Second, "the reply", func() bool { return len(tb.sentTo(testDMChat)) == 1 })
 	waitFor(t, 5*time.Second, "the row, all of it sent", func() bool {
 		var left int
-		err := tb.store.db.QueryRow(`SELECT COUNT(*) FROM outbox WHERE state = 'pending' AND next_part = 1`).Scan(&left)
+		err := db.QueryRow(`SELECT COUNT(*) FROM outbox WHERE state = 'pending' AND next_part = 1`).Scan(&left)
 		return err == nil && left == 1
 	})
-	if out := historyTexts(t, br, historyOut); len(out) != 0 {
+	if out := historyTexts(t, br, history.Out); len(out) != 0 {
 		t.Errorf("history holds %q while the reply is still in the outbox", out)
 	}
-	if _, err := tb.store.db.Exec(`DROP TRIGGER keep_outbox`); err != nil {
+	if _, err := db.Exec(`DROP TRIGGER keep_outbox`); err != nil {
 		t.Fatal(err)
 	}
 	tb.outbox.Wake()
-	waitFor(t, 15*time.Second, "the history line", func() bool { return len(historyTexts(t, br, historyOut)) == 1 })
+	waitFor(t, 15*time.Second, "the history line", func() bool { return len(historyTexts(t, br, history.Out)) == 1 })
 	tb.outbox.Wake()
 	time.Sleep(200 * time.Millisecond)
-	if out := historyTexts(t, br, historyOut); len(out) != 1 {
+	if out := historyTexts(t, br, history.Out); len(out) != 1 {
 		t.Errorf("history holds the reply %d times, want once", len(out))
 	}
 	if sent := tb.sentTo(testDMChat); len(sent) != 1 {
@@ -276,10 +275,12 @@ func TestReplyIsRecordedOnceWhenItsRowStays(t *testing.T) {
 // Asking for the summary, which the dashboard does every few seconds,
 // changes nothing; the outbox itself forgets replies given up on long ago.
 func TestOutboxSummaryOnlyReads(t *testing.T) {
-	s := openOutboxStore(t, t.TempDir())
+	dir := t.TempDir()
+	s := openOutboxStore(t, dir)
+	db := testStoreSQL(t, filepath.Join(dir, "bridge.db"))
 	ctx := context.Background()
-	old := time.Now().Add(-outboxFailedKeep - time.Hour)
-	id, err := s.AddOutbox(ctx, outboxRow{Chat: testDMChat, Parts: []outboxPart{{Text: "x"}}, CreatedAt: old})
+	old := time.Now().Add(-store.OutboxFailedKeep - time.Hour)
+	id, err := s.AddOutbox(ctx, store.OutboxRow{Chat: testDMChat, Parts: []store.OutboxPart{{Text: "x"}}, CreatedAt: old})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -288,7 +289,7 @@ func TestOutboxSummaryOnlyReads(t *testing.T) {
 	}
 	rows := func() int {
 		var n int
-		if err := s.db.QueryRow(`SELECT COUNT(*) FROM outbox`).Scan(&n); err != nil {
+		if err := db.QueryRow(`SELECT COUNT(*) FROM outbox`).Scan(&n); err != nil {
 			t.Fatal(err)
 		}
 		return n
@@ -300,7 +301,9 @@ func TestOutboxSummaryOnlyReads(t *testing.T) {
 	if n := rows(); n != 1 {
 		t.Fatalf("the summary removed rows: %d left, want 1", n)
 	}
-	o := newOutbox(s, func() Messenger { return newFlakyMessenger(func() *Config { return &Config{} }, true) }, 0, nil)
+	o := outboundmsg.NewOutbox(s, func() outboundmsg.Link {
+		return newFlakyMessenger(func() *config.Config { return &config.Config{} }, true)
+	}, 0, nil)
 	defer o.Stop()
 	waitFor(t, 5*time.Second, "the outbox to forget it", func() bool { return rows() == 0 })
 }
@@ -310,7 +313,7 @@ func TestOutboxSummaryOnlyReads(t *testing.T) {
 func TestQuestionsWaitAndNoticesDoNot(t *testing.T) {
 	tb, br := newMainBridge(t, "")
 	tb.wa = newFlakyMessenger(tb.cfgs.Get, false)
-	br.hooks.Question(br, testDMChat, questionPrefix+"Which day suits you?")
+	br.hooks.Question(br, testDMChat, outboundmsg.QuestionPrefix+"Which day suits you?")
 	br.hooks.Notice(testDMChat, "⏳ Still at it")
 	sum, err := tb.store.OutboxSummary(context.Background(), time.Now())
 	if err != nil || sum.Waiting != 1 {
@@ -319,9 +322,9 @@ func TestQuestionsWaitAndNoticesDoNot(t *testing.T) {
 }
 
 // openOutboxStore opens a bridge.db in dir.
-func openOutboxStore(t *testing.T, dir string) *Store {
+func openOutboxStore(t *testing.T, dir string) *store.Store {
 	t.Helper()
-	s, err := NewStore(&Config{DBPath: filepath.Join(dir, "bridge.db"), LogLevel: "error"})
+	s, err := store.Open(filepath.Join(dir, "bridge.db"), "error")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -333,10 +336,10 @@ func openOutboxStore(t *testing.T, dir string) *Store {
 // again, recorded in the history of the brain that wrote it.
 func TestOutboxSurvivesARestart(t *testing.T) {
 	dir := t.TempDir()
-	cfg := func() *Config { return &Config{MaxChunkSize: 4000} }
+	cfg := func() *config.Config { return &config.Config{MaxChunkSize: 4000} }
 	s := openOutboxStore(t, dir)
 	down := newFlakyMessenger(cfg, false)
-	first := newOutbox(s, func() Messenger { return down }, 0, func(context.Context, outboxRow) error {
+	first := outboundmsg.NewOutbox(s, func() outboundmsg.Link { return down }, 0, func(context.Context, store.OutboxRow) error {
 		t.Error("delivered while offline")
 		return nil
 	})
@@ -353,8 +356,8 @@ func TestOutboxSurvivesARestart(t *testing.T) {
 
 	s = openOutboxStore(t, dir)
 	up := newFlakyMessenger(cfg, true)
-	got := make(chan outboxRow, 1)
-	second := newOutbox(s, func() Messenger { return up }, 0, func(ctx context.Context, r outboxRow) error {
+	got := make(chan store.OutboxRow, 1)
+	second := outboundmsg.NewOutbox(s, func() outboundmsg.Link { return up }, 0, func(ctx context.Context, r store.OutboxRow) error {
 		got <- r
 		return s.OutboxDelivered(ctx, r.ID)
 	})
@@ -380,17 +383,19 @@ func TestOutboxSurvivesARestart(t *testing.T) {
 // text, and a recipient the bridge refuses is given up on at once. Either
 // way the dashboard hears of it.
 func TestOutboxGivesUp(t *testing.T) {
-	s := openOutboxStore(t, t.TempDir())
-	m := newFlakyMessenger(func() *Config { return &Config{} }, true)
-	o := newOutbox(s, func() Messenger { return m }, 0, nil)
+	dir := t.TempDir()
+	s := openOutboxStore(t, dir)
+	db := testStoreSQL(t, filepath.Join(dir, "bridge.db"))
+	m := newFlakyMessenger(func() *config.Config { return &config.Config{} }, true)
+	o := outboundmsg.NewOutbox(s, func() outboundmsg.Link { return m }, 0, nil)
 	defer o.Stop()
-	if _, err := s.AddOutbox(context.Background(), outboxRow{Chat: testDMChat, Brain: "main", History: "stale", Parts: []outboxPart{{Text: "stale"}}, CreatedAt: time.Now().Add(-2 * outboxTTL)}); err != nil {
+	if _, err := s.AddOutbox(context.Background(), store.OutboxRow{Chat: testDMChat, Brain: "main", History: "stale", Parts: []store.OutboxPart{{Text: "stale"}}, CreatedAt: time.Now().Add(-2 * outboundmsg.OutboxTTL)}); err != nil {
 		t.Fatal(err)
 	}
 	if err := o.Text(context.Background(), "status@broadcast", "to everyone", 0); err != nil {
 		t.Fatal(err)
 	}
-	var sum outboxSummary
+	var sum store.OutboxSummary
 	waitFor(t, 5*time.Second, "both given up", func() bool {
 		sum, _ = s.OutboxSummary(context.Background(), time.Now())
 		return sum.Failed == 2
@@ -402,7 +407,7 @@ func TestOutboxGivesUp(t *testing.T) {
 		t.Errorf("sent %+v", sent)
 	}
 	var texts int
-	if err := s.db.QueryRow(`SELECT COUNT(*) FROM outbox WHERE parts != '[]' OR history != ''`).Scan(&texts); err != nil || texts != 0 {
+	if err := db.QueryRow(`SELECT COUNT(*) FROM outbox WHERE parts != '[]' OR history != ''`).Scan(&texts); err != nil || texts != 0 {
 		t.Errorf("%d rows still hold their text (%v)", texts, err)
 	}
 }
@@ -411,8 +416,8 @@ func TestOutboxGivesUp(t *testing.T) {
 // that failed. Another chat's go on.
 func TestOutboxKeepsAChatsOrder(t *testing.T) {
 	s := openOutboxStore(t, t.TempDir())
-	m := newFlakyMessenger(func() *Config { return &Config{} }, false)
-	o := newOutbox(s, func() Messenger { return m }, 0, nil)
+	m := newFlakyMessenger(func() *config.Config { return &config.Config{} }, false)
+	o := outboundmsg.NewOutbox(s, func() outboundmsg.Link { return m }, 0, nil)
 	defer o.Stop()
 	for _, text := range []string{"first", "second"} {
 		if err := o.Text(context.Background(), testDMChat, text, 0); err != nil {
@@ -443,10 +448,10 @@ func TestStatusWarnsAboutTheOutbox(t *testing.T) {
 	tb := newTestBridge(t, "")
 	tb.wa = newFlakyMessenger(tb.cfgs.Get, false)
 	ctx := context.Background()
-	if _, err := tb.store.AddOutbox(ctx, outboxRow{Chat: testDMChat, Parts: []outboxPart{{Text: "late"}}, CreatedAt: time.Now().Add(-10 * time.Minute)}); err != nil {
+	if _, err := tb.store.AddOutbox(ctx, store.OutboxRow{Chat: testDMChat, Parts: []store.OutboxPart{{Text: "late"}}, CreatedAt: time.Now().Add(-10 * time.Minute)}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := tb.store.AddOutbox(ctx, outboxRow{Chat: testGroup, Parts: []outboxPart{{Text: "too late"}}, CreatedAt: time.Now().Add(-2 * outboxTTL)}); err != nil {
+	if _, err := tb.store.AddOutbox(ctx, store.OutboxRow{Chat: testGroup, Parts: []store.OutboxPart{{Text: "too late"}}, CreatedAt: time.Now().Add(-2 * outboundmsg.OutboxTTL)}); err != nil {
 		t.Fatal(err)
 	}
 	tb.outbox.Wake()
@@ -460,9 +465,11 @@ func TestStatusWarnsAboutTheOutbox(t *testing.T) {
 // reads counts as waiting or as given up on, never as both or neither.
 // TestOutboxGivesUp saw one counted twice on CI.
 func TestOutboxSummaryIsOneMoment(t *testing.T) {
-	s := openOutboxStore(t, t.TempDir())
+	dir := t.TempDir()
+	s := openOutboxStore(t, dir)
+	db := testStoreSQL(t, filepath.Join(dir, "bridge.db"))
 	ctx := context.Background()
-	if _, err := s.AddOutbox(ctx, outboxRow{Chat: testDMChat, Parts: []outboxPart{{Text: "hi"}}, CreatedAt: time.Now()}); err != nil {
+	if _, err := s.AddOutbox(ctx, store.OutboxRow{Chat: testDMChat, Parts: []store.OutboxPart{{Text: "hi"}}, CreatedAt: time.Now()}); err != nil {
 		t.Fatal(err)
 	}
 	// The reply goes back and forth between waiting and given up on.
@@ -476,7 +483,7 @@ func TestOutboxSummaryIsOneMoment(t *testing.T) {
 				return
 			default:
 			}
-			if _, err := s.db.ExecContext(ctx, `UPDATE outbox SET state = CASE state WHEN 'pending' THEN 'failed' ELSE 'pending' END, next_try_at = ?`, time.Now().UTC()); err != nil {
+			if _, err := db.ExecContext(ctx, `UPDATE outbox SET state = CASE state WHEN 'pending' THEN 'failed' ELSE 'pending' END, next_try_at = ?`, time.Now().UTC()); err != nil {
 				flipped <- err
 				return
 			}

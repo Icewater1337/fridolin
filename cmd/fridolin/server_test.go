@@ -4,13 +4,19 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"fmt"
+
+	outboundmsg "github.com/Icewater1337/fridolin/internal/outbound"
+
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/Icewater1337/fridolin/internal/devchat"
+
+	"github.com/Icewater1337/fridolin/internal/manifest"
 
 	"go.mau.fi/whatsmeow"
 )
@@ -35,7 +41,7 @@ func (tb *testBridge) script(method, path, body, token string) *httptest.Respons
 // code and the shape of every body. Errors are JSON {"error": ...}.
 func TestScriptAPIContract(t *testing.T) {
 	tb := newTestBridge(t, `, "ingest": {"enabled": true}`)
-	tb.addFolderBrain(t, BrainManifest{ID: "personal", Name: "Personal", Routing: BrainRouting{HandlesDMs: true}})
+	tb.addFolderBrain(t, manifest.Manifest{ID: "personal", Name: "Personal", Routing: manifest.Routing{HandlesDMs: true}})
 	media := tb.cfgs.Get().MediaDir
 	inside := filepath.Join(media, "scan.pdf")
 	if err := os.WriteFile(inside, []byte("%PDF"), 0o600); err != nil {
@@ -129,7 +135,7 @@ func TestScriptAPIContract(t *testing.T) {
 
 // failingMessenger is the dev messenger with SendChunked failing as err.
 type failingMessenger struct {
-	*devMessenger
+	*devchat.Messenger
 	err error
 }
 
@@ -149,13 +155,13 @@ func TestSendFailureStatus(t *testing.T) {
 		{"not paired", classifySendErr(whatsmeow.ErrNotLoggedIn), http.StatusServiceUnavailable, ""},
 		{"unknown server", classifySendErr(whatsmeow.ErrUnknownServer), http.StatusBadRequest, ""},
 		{"anything else", errors.New("boom"), http.StatusInternalServerError, ""},
-		{"part way", &partialSendError{sent: []string{"[1/2] first half"}, total: 2, err: classifySendErr(whatsmeow.ErrNotConnected)}, http.StatusServiceUnavailable, "[1/2] first half"},
+		{"part way", &outboundmsg.PartialSendError{Sent: []string{"[1/2] first half"}, Total: 2, Err: classifySendErr(whatsmeow.ErrNotConnected)}, http.StatusServiceUnavailable, "[1/2] first half"},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			tb := newTestBridge(t, "")
-			dir := tb.addFolderBrain(t, BrainManifest{ID: "p", Name: "P", Routing: BrainRouting{HandlesDMs: true}})
-			tb.wa = failingMessenger{devMessenger: tb.dev, err: c.err}
+			dir := tb.addFolderBrain(t, manifest.Manifest{ID: "p", Name: "P", Routing: manifest.Routing{HandlesDMs: true}})
+			tb.wa = failingMessenger{Messenger: tb.dev, err: c.err}
 			w := tb.script("POST", "/send", `{"jid":"`+dm+`","text":"first half second half"}`, "")
 			if w.Code != c.want || !strings.Contains(w.Body.String(), `"error"`) {
 				t.Fatalf("%d %s, want %d", w.Code, w.Body.String(), c.want)
@@ -165,34 +171,5 @@ func TestSendFailureStatus(t *testing.T) {
 				t.Errorf("history = %q, want %q", hist, c.hist)
 			}
 		})
-	}
-}
-
-func TestSendChunksReportsWhatWentOut(t *testing.T) {
-	chunks := []string{"a", "b", "c"}
-	fail := errors.New("offline")
-	for i := range chunks {
-		t.Run(fmt.Sprint("fails at ", i), func(t *testing.T) {
-			var sent []string
-			err := sendChunks(context.Background(), chunks, 0, func(c string) error {
-				if len(sent) == i {
-					return fail
-				}
-				sent = append(sent, c)
-				return nil
-			})
-			var partial *partialSendError
-			switch {
-			case !errors.Is(err, fail):
-				t.Fatalf("err = %v", err)
-			case i == 0 && errors.As(err, &partial):
-				t.Fatalf("nothing went out, yet %v", err)
-			case i > 0 && (!errors.As(err, &partial) || strings.Join(partial.sent, "") != strings.Join(chunks[:i], "")):
-				t.Fatalf("err = %v, want the first %d chunks reported", err, i)
-			}
-		})
-	}
-	if err := sendChunks(context.Background(), chunks, 0, func(string) error { return nil }); err != nil {
-		t.Fatal(err)
 	}
 }

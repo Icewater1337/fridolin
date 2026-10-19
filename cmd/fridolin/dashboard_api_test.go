@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/Icewater1337/fridolin/internal/whatsapp"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -16,61 +17,22 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Icewater1337/fridolin/internal/fsx"
-)
+	"github.com/Icewater1337/fridolin/internal/config"
 
-func TestDecodeJSONIsStrict(t *testing.T) {
-	type body struct {
-		DryRun bool   `json:"dry_run"`
-		Name   string `json:"name"`
-	}
-	cases := []struct {
-		name     string
-		body     string
-		chunked  bool
-		optional bool
-		want     string // "" = decodes
-	}{
-		{name: "one value", body: `{"dry_run": true, "name": "x"}`},
-		{name: "trailing space", body: `{"dry_run": true}` + "\n  "},
-		{name: "unknown key", body: `{"dry_run": true, "dryrun": false}`, want: `unknown field "dryrun"`},
-		{name: "second value", body: `{"dry_run": true} {"garbage": 1}`, want: "single JSON value"},
-		{name: "wrong type", body: `{"dry_run": "yes"}`, want: "dry_run"},
-		{name: "cut short", body: `{"dry_run": tr`, want: "invalid JSON"},
-		{name: "empty", body: ``, want: "a JSON body is required"},
-		{name: "empty chunked", body: ``, chunked: true, want: "a JSON body is required"},
-		{name: "empty optional", body: ``, optional: true},
-		{name: "empty optional chunked", body: ``, chunked: true, optional: true},
-	}
-	for _, c := range cases {
-		t.Run(c.name, func(t *testing.T) {
-			r := httptest.NewRequest("POST", "/", strings.NewReader(c.body))
-			if c.chunked {
-				r.ContentLength = -1
-			}
-			var v body
-			var err error
-			if c.optional {
-				err = decodeOptionalJSON(r, &v)
-			} else {
-				err = decodeJSON(r, &v)
-			}
-			switch {
-			case c.want == "" && err != nil:
-				t.Fatalf("got %v, want it decoded", err)
-			case c.want != "" && (err == nil || !strings.Contains(err.Error(), c.want)):
-				t.Fatalf("got %v, want an error with %q", err, c.want)
-			}
-		})
-	}
-}
+	"github.com/Icewater1337/fridolin/internal/manifest"
+
+	"github.com/Icewater1337/fridolin/internal/activity"
+	"github.com/Icewater1337/fridolin/internal/fsx"
+	"github.com/Icewater1337/fridolin/internal/history"
+	"github.com/Icewater1337/fridolin/internal/logx"
+)
 
 // Every request body the dashboard sends (web/assets) gets past the strict
 // decoder. A handler may still refuse it for what it says, in this empty
 // test bridge, but never because a key is unknown.
 func TestDashboardRequestBodiesDecode(t *testing.T) {
 	tb := newTestBridge(t, "")
-	tb.addFolderBrain(t, BrainManifest{ID: "notes", Name: "Notes", Routing: BrainRouting{HandlesDMs: true, Default: true}})
+	tb.addFolderBrain(t, manifest.Manifest{ID: "notes", Name: "Notes", Routing: manifest.Routing{HandlesDMs: true, Default: true}})
 	manifest := map[string]any{
 		"version": 1, "id": "notes", "name": "Notes",
 		"routing": map[string]any{"handles_dms": true, "default": true, "groups": []string{}},
@@ -189,7 +151,7 @@ func TestAPIRoutesAnswer404And405(t *testing.T) {
 // settings no longer take a brain.
 func TestBrainBackupRoute(t *testing.T) {
 	tb := newTestBridge(t, "")
-	tb.addFolderBrain(t, BrainManifest{ID: "notes", Name: "Notes"})
+	tb.addFolderBrain(t, manifest.Manifest{ID: "notes", Name: "Notes"})
 	if w := tb.do("PUT", "/api/brains/notes/backup", map[string]any{"enabled": false, "exclude": []string{" *.tmp ", ""}}); w.Code != 200 {
 		t.Fatalf("%d %s", w.Code, w.Body.String())
 	}
@@ -202,47 +164,6 @@ func TestBrainBackupRoute(t *testing.T) {
 	}
 	if w := tb.do("PUT", "/api/backup/settings", map[string]any{"brain": "notes", "brain_enabled": true}); w.Code != http.StatusBadRequest {
 		t.Fatalf("global settings with a brain: %d %s", w.Code, w.Body.String())
-	}
-}
-
-func TestLoadDashboardToken(t *testing.T) {
-	t.Run("made on first run, then kept", func(t *testing.T) {
-		dir := t.TempDir()
-		a, err := LoadDashboardToken(dir)
-		if err != nil {
-			t.Fatal(err)
-		}
-		b, err := LoadDashboardToken(dir)
-		if err != nil || b.Value() != a.Value() || len(a.Value()) < minTokenLen {
-			t.Fatalf("second load: %v, %q vs %q", err, b.Value(), a.Value())
-		}
-	})
-	cases := []struct {
-		name  string
-		setup func(path string) error
-		want  string
-	}{
-		{"too short", func(p string) error { return os.WriteFile(p, []byte("abc\n"), 0o600) }, "is not a token"},
-		{"two words", func(p string) error {
-			return os.WriteFile(p, []byte(strings.Repeat("a", 20)+" "+strings.Repeat("b", 20)), 0o600)
-		}, "is not a token"},
-		{"unreadable", func(p string) error { return os.Mkdir(p, 0o700) }, "reading token"},
-	}
-	for _, c := range cases {
-		t.Run(c.name, func(t *testing.T) {
-			dir := t.TempDir()
-			path := filepath.Join(dir, "dashboard.token")
-			if err := c.setup(path); err != nil {
-				t.Fatal(err)
-			}
-			before, _ := os.ReadFile(path)
-			if _, err := LoadDashboardToken(dir); err == nil || !strings.Contains(err.Error(), c.want) {
-				t.Fatalf("got %v, want %q", err, c.want)
-			}
-			if after, _ := os.ReadFile(path); string(after) != string(before) {
-				t.Fatal("the token file was replaced")
-			}
-		})
 	}
 }
 
@@ -533,11 +454,11 @@ func TestConfigUpdateLogsSecurityChanges(t *testing.T) {
 // brain rewrote it since, the approval is refused and nothing changes.
 func TestApproveBindsToTheReviewedManifest(t *testing.T) {
 	tb := newTestBridge(t, "")
-	m := BrainManifest{ID: "notes", Name: "Notes"}
+	m := manifest.Manifest{ID: "notes", Name: "Notes"}
 	dir := tb.addFolderBrain(t, m)
 	harmless := m
 	harmless.Name = "Notes 2"
-	if err := WriteManifest(dir, &harmless, true); err != nil {
+	if err := manifest.Write(dir, &harmless, true); err != nil {
 		t.Fatal(err)
 	}
 	var views []brainView
@@ -550,7 +471,7 @@ func TestApproveBindsToTheReviewedManifest(t *testing.T) {
 	// Between the page load and the click, the brain claims your DMs.
 	grab := harmless
 	grab.Routing.HandlesDMs = true
-	if err := WriteManifest(dir, &grab, true); err != nil {
+	if err := manifest.Write(dir, &grab, true); err != nil {
 		t.Fatal(err)
 	}
 	before := tb.cfgs.ETag()
@@ -581,16 +502,16 @@ func TestApproveBindsToTheReviewedManifest(t *testing.T) {
 func TestBrainsMarkTheFallback(t *testing.T) {
 	cases := []struct {
 		name   string
-		brains []BrainManifest
+		brains []manifest.Manifest
 		want   string // the fallback's folder
 	}{
-		{"the first brain, without a default", []BrainManifest{
-			{ID: "family", Routing: BrainRouting{Groups: []string{testGroup}}},
+		{"the first brain, without a default", []manifest.Manifest{
+			{ID: "family", Routing: manifest.Routing{Groups: []string{testGroup}}},
 			{ID: "work"},
 		}, "family"},
-		{"the default brain", []BrainManifest{
-			{ID: "family", Routing: BrainRouting{HandlesDMs: true}},
-			{ID: "work", Routing: BrainRouting{Default: true}},
+		{"the default brain", []manifest.Manifest{
+			{ID: "family", Routing: manifest.Routing{HandlesDMs: true}},
+			{ID: "work", Routing: manifest.Routing{Default: true}},
 		}, "work"},
 	}
 	for _, c := range cases {
@@ -601,16 +522,16 @@ func TestBrainsMarkTheFallback(t *testing.T) {
 				tb.addFolderBrain(t, m)
 			}
 			// A second folder with the fallback's brain.json, left out.
-			m := BrainManifest{ID: c.want, Name: c.want}
+			m := manifest.Manifest{ID: c.want, Name: c.want}
 			copyDir := filepath.Join(tb.home, "copy")
 			if err := os.MkdirAll(copyDir, 0o700); err != nil {
 				t.Fatal(err)
 			}
-			if err := WriteManifest(copyDir, &m, false); err != nil {
+			if err := manifest.Write(copyDir, &m, false); err != nil {
 				t.Fatal(err)
 			}
-			if _, err := tb.cfgs.Update("", func(c *Config) error {
-				c.BrainDirs = append(c.BrainDirs, BrainRef{Path: "~/copy", Approved: &m})
+			if _, err := tb.cfgs.Update("", func(c *config.Config) error {
+				c.BrainDirs = append(c.BrainDirs, config.BrainRef{Path: "~/copy", Approved: &m})
 				return nil
 			}); err != nil {
 				t.Fatal(err)
@@ -644,23 +565,23 @@ func TestBrainsMarkTheFallback(t *testing.T) {
 // showed; with two folders claiming the id, the first one's.
 func TestAPIBrainIsItsEntryOfTheList(t *testing.T) {
 	tb := newTestBridge(t, "")
-	m := BrainManifest{ID: "notes", Name: "Notes"}
+	m := manifest.Manifest{ID: "notes", Name: "Notes"}
 	dir := tb.addFolderBrain(t, m)
-	tb.addFolderBrain(t, BrainManifest{ID: "work", Name: "Work"})
+	tb.addFolderBrain(t, manifest.Manifest{ID: "work", Name: "Work"})
 	edited := m
 	edited.Name = "Notes 2"
-	if err := WriteManifest(dir, &edited, true); err != nil {
+	if err := manifest.Write(dir, &edited, true); err != nil {
 		t.Fatal(err)
 	}
 	copyDir := filepath.Join(tb.home, "copy")
 	if err := os.MkdirAll(copyDir, 0o700); err != nil {
 		t.Fatal(err)
 	}
-	if err := WriteManifest(copyDir, &m, false); err != nil {
+	if err := manifest.Write(copyDir, &m, false); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := tb.cfgs.Update("", func(c *Config) error {
-		c.BrainDirs = append(c.BrainDirs, BrainRef{Path: "~/copy", Approved: &m})
+	if _, err := tb.cfgs.Update("", func(c *config.Config) error {
+		c.BrainDirs = append(c.BrainDirs, config.BrainRef{Path: "~/copy", Approved: &m})
 		return nil
 	}); err != nil {
 		t.Fatal(err)
@@ -713,7 +634,7 @@ func TestUnapprovedBrainEntries(t *testing.T) {
 		if len(got.Problems) == 0 {
 			t.Errorf("inspect %s: no problems", p)
 		}
-		w := tb.do("POST", "/api/brains", map[string]any{"path": p, "manifest": BrainManifest{ID: "x", Name: "X"}})
+		w := tb.do("POST", "/api/brains", map[string]any{"path": p, "manifest": manifest.Manifest{ID: "x", Name: "X"}})
 		if w.Code != http.StatusUnprocessableEntity {
 			t.Errorf("add %s: %d %s", p, w.Code, w.Body.String())
 		}
@@ -725,9 +646,9 @@ func TestUnapprovedBrainEntries(t *testing.T) {
 
 	// A hand-edited duplicate of a brain's folder: the issue is the
 	// duplicate's, and the brain itself is fine.
-	tb.addFolderBrain(t, BrainManifest{ID: "notes", Name: "Notes"})
-	if _, err := tb.cfgs.Update("", func(c *Config) error {
-		c.BrainDirs = append(c.BrainDirs, BrainRef{Path: "~/notes"})
+	tb.addFolderBrain(t, manifest.Manifest{ID: "notes", Name: "Notes"})
+	if _, err := tb.cfgs.Update("", func(c *config.Config) error {
+		c.BrainDirs = append(c.BrainDirs, config.BrainRef{Path: "~/notes"})
 		return nil
 	}); err != nil {
 		t.Fatal(err)
@@ -769,8 +690,8 @@ func dirExists(p string) bool {
 // changed on disk shows in both at once, not only after the next reload.
 func TestStatusAndBrainsShareTheIssues(t *testing.T) {
 	tb := newTestBridge(t, "")
-	dir := tb.addFolderBrain(t, BrainManifest{ID: "notes", Name: "Notes"})
-	if err := WriteManifest(dir, &BrainManifest{ID: "notes", Name: "Changed"}, true); err != nil {
+	dir := tb.addFolderBrain(t, manifest.Manifest{ID: "notes", Name: "Notes"})
+	if err := manifest.Write(dir, &manifest.Manifest{ID: "notes", Name: "Changed"}, true); err != nil {
 		t.Fatal(err)
 	}
 	var st struct{ Issues []BrainIssue }
@@ -813,7 +734,7 @@ func TestConcurrentAddsCannotBothClaimAGroup(t *testing.T) {
 			go func() {
 				defer wg.Done()
 				id := fmt.Sprintf("r%d-%d", round, i)
-				m := BrainManifest{ID: id, Name: id, Routing: BrainRouting{Groups: []string{group}}}
+				m := manifest.Manifest{ID: id, Name: id, Routing: manifest.Routing{Groups: []string{group}}}
 				codes[i] = tb.do("POST", "/api/brains", map[string]any{"path": "~/" + id, "manifest": m, "create_dir": true}).Code
 			}()
 		}
@@ -842,12 +763,12 @@ func TestConcurrentAddsCannotBothClaimAGroup(t *testing.T) {
 func TestAddBrainRechecksAgainstOtherWriters(t *testing.T) {
 	const group = "120363000000000000@g.us"
 	tb := newTestBridge(t, "")
-	tb.addFolderBrain(t, BrainManifest{ID: "a", Name: "A"})
+	tb.addFolderBrain(t, manifest.Manifest{ID: "a", Name: "A"})
 	// The other writer, as PUT /api/brains/a is, holds the config update
 	// until the add has passed its first check, then gives a the group.
 	inside, release, saved := make(chan struct{}), make(chan struct{}), make(chan error, 1)
 	go func() {
-		_, err := tb.cfgs.Update("", func(c *Config) error {
+		_, err := tb.cfgs.Update("", func(c *config.Config) error {
 			close(inside)
 			<-release
 			for _, ref := range c.BrainDirs {
@@ -862,12 +783,12 @@ func TestAddBrainRechecksAgainstOtherWriters(t *testing.T) {
 	<-inside
 	added := make(chan *httptest.ResponseRecorder, 1)
 	go func() {
-		m := BrainManifest{ID: "b", Name: "B", Routing: BrainRouting{Groups: []string{group}}}
+		m := manifest.Manifest{ID: "b", Name: "B", Routing: manifest.Routing{Groups: []string{group}}}
 		added <- tb.do("POST", "/api/brains", map[string]any{"path": "~/b", "manifest": m, "create_dir": true})
 	}()
 	// It scaffolds only after its first check passed; brain.json waits for
 	// the update that registers the brain.
-	waitFor(t, 5*time.Second, "the add's scaffold", func() bool { return fsx.Exists(filepath.Join(tb.home, "b", defaultPromptFile)) })
+	waitFor(t, 5*time.Second, "the add's scaffold", func() bool { return fsx.Exists(filepath.Join(tb.home, "b", manifest.DefaultPromptFile)) })
 	close(release)
 	if err := <-saved; err != nil {
 		t.Fatal(err)
@@ -903,7 +824,7 @@ func TestConcurrentAddsOfOneFolder(t *testing.T) {
 			wg.Add(1)
 			go func() {
 				defer wg.Done()
-				m := BrainManifest{ID: fmt.Sprintf("race-%d-%d", round, i), Name: "Race"}
+				m := manifest.Manifest{ID: fmt.Sprintf("race-%d-%d", round, i), Name: "Race"}
 				w := tb.do("POST", "/api/brains", map[string]any{"path": path, "manifest": m, "create_dir": true})
 				var resp struct{ ID string }
 				_ = json.Unmarshal(w.Body.Bytes(), &resp)
@@ -921,14 +842,14 @@ func TestConcurrentAddsOfOneFolder(t *testing.T) {
 			t.Fatalf("round %d: %d adds succeeded (%v), want 1: %v", round, len(won), won, results)
 		}
 		dir := filepath.Join(tb.home, fmt.Sprintf("race-%d", round))
-		m, err := ReadManifest(dir)
+		m, err := manifest.Read(dir)
 		if err != nil {
 			t.Fatalf("round %d: the added brain's folder has no brain.json: %v", round, err)
 		}
 		if m.ID != won[0] {
 			t.Fatalf("round %d: brain.json is brain %q's, but %q was added", round, m.ID, won[0])
 		}
-		if _, err := os.Stat(filepath.Join(dir, m.normalized().PromptFile)); err != nil {
+		if _, err := os.Stat(filepath.Join(dir, m.Normalized().PromptFile)); err != nil {
 			t.Fatalf("round %d: the added brain's prompt file is gone: %v", round, err)
 		}
 	}
@@ -955,7 +876,7 @@ func TestFailedAddRemovesTheScaffold(t *testing.T) {
 	t.Cleanup(func() { _ = os.Chmod(cfgDir, 0o700) })
 	// create_dir makes the folders above the brain's too.
 	for _, p := range []string{"~/fresh", "~/existing", "~/new/deeper/fresh", "~/existing/sub/fresh"} {
-		w := tb.do("POST", "/api/brains", map[string]any{"path": p, "manifest": BrainManifest{ID: "x", Name: "X"}, "create_dir": true})
+		w := tb.do("POST", "/api/brains", map[string]any{"path": p, "manifest": manifest.Manifest{ID: "x", Name: "X"}, "create_dir": true})
 		if w.Code != http.StatusUnprocessableEntity {
 			t.Fatalf("add %s with config.json read-only: %d %s", p, w.Code, w.Body.String())
 		}
@@ -975,7 +896,7 @@ func TestFailedAddRemovesTheScaffold(t *testing.T) {
 	if err := os.Chmod(cfgDir, 0o700); err != nil {
 		t.Fatal(err)
 	}
-	if w := tb.do("POST", "/api/brains", map[string]any{"path": "~/existing", "manifest": BrainManifest{ID: "x", Name: "X"}}); w.Code != 200 {
+	if w := tb.do("POST", "/api/brains", map[string]any{"path": "~/existing", "manifest": manifest.Manifest{ID: "x", Name: "X"}}); w.Code != 200 {
 		t.Fatalf("add again: %d %s", w.Code, w.Body.String())
 	}
 }
@@ -985,10 +906,9 @@ func TestFailedAddRemovesTheScaffold(t *testing.T) {
 // button, with ?fresh=1, has the client ask WhatsApp again.
 func TestGroupsAskWhatsAppOnlyWhenFresh(t *testing.T) {
 	tb := newTestBridge(t, "")
-	tw := newTestWhatsApp(t)
 	fl := &fakeLister{}
-	tw.lister = fl
-	tb.wa = tw.WhatsAppClient
+	tw := newTestWhatsApp(t, func(opts *whatsapp.Options) { opts.Groups = fl })
+	tb.wa = tw.Client
 	steps := []struct {
 		path    string
 		queries int32 // asked of WhatsApp so far
@@ -1022,10 +942,10 @@ func TestGroupsAskWhatsAppOnlyWhenFresh(t *testing.T) {
 // something changed, the new answer with a new ETag.
 func TestPolledEndpointsAnswer304WhileUnchanged(t *testing.T) {
 	tb := newTestBridge(t, "")
-	dir := tb.addFolderBrain(t, BrainManifest{ID: "notes", Name: "Notes"})
+	dir := tb.addFolderBrain(t, manifest.Manifest{ID: "notes", Name: "Notes"})
 	say := func(text string) func() {
 		return func() {
-			tb.activity.Add("notes", historyEntry{TS: "2026-10-18T10:00:00Z", From: "15551234567", Chat: "15551234567@s.whatsapp.net", Text: text, Type: historyIn})
+			tb.activity.Add("notes", history.Entry{TS: "2026-10-18T10:00:00Z", From: "15551234567", Chat: "15551234567@s.whatsapp.net", Text: text, Type: history.In})
 		}
 	}
 	say("hello")()
@@ -1036,12 +956,12 @@ func TestPolledEndpointsAnswer304WhileUnchanged(t *testing.T) {
 		{"/api/activity?limit=30", say("again")},
 		{"/api/activity?brain=notes", say("once more")},
 		{"/api/brains", func() {
-			if err := WriteManifest(dir, &BrainManifest{ID: "notes", Name: "Notes 2"}, true); err != nil {
+			if err := manifest.Write(dir, &manifest.Manifest{ID: "notes", Name: "Notes 2"}, true); err != nil {
 				t.Fatal(err)
 			}
 		}},
 		{"/api/brains/notes", func() {
-			if err := WriteManifest(dir, &BrainManifest{ID: "notes", Name: "Notes 3"}, true); err != nil {
+			if err := manifest.Write(dir, &manifest.Manifest{ID: "notes", Name: "Notes 3"}, true); err != nil {
 				t.Fatal(err)
 			}
 		}},
@@ -1080,16 +1000,16 @@ func TestListLimitsClampToTheMaximum(t *testing.T) {
 	tb := newTestBridge(t, "")
 	for i := range 600 {
 		fmt.Fprintf(tb.logs, "line %d\n", i)
-		tb.activity.Add("a", historyEntry{TS: "2026-10-18T10:00:00Z", From: "a", Chat: "15551234567@s.whatsapp.net", Text: fmt.Sprint(i), Type: historyIn})
+		tb.activity.Add("a", history.Entry{TS: "2026-10-18T10:00:00Z", From: "a", Chat: "15551234567@s.whatsapp.net", Text: fmt.Sprint(i), Type: history.In})
 	}
 	count := map[string]func([]byte) int{
 		"/api/logs": func(b []byte) int {
-			var logs struct{ Lines []LogLine }
+			var logs struct{ Lines []logx.Line }
 			_ = json.Unmarshal(b, &logs)
 			return len(logs.Lines)
 		},
 		"/api/activity": func(b []byte) int {
-			var entries []ActivityEntry
+			var entries []activity.Entry
 			_ = json.Unmarshal(b, &entries)
 			return len(entries)
 		},
@@ -1180,7 +1100,7 @@ func TestRunPickerTellsCancelFromFailure(t *testing.T) {
 func TestSignInKeepsItsClientAndRedirect(t *testing.T) {
 	srv, got := fakeGoogle(t)
 	tb := newTestBridge(t, "")
-	tb.addFolderBrain(t, BrainManifest{ID: "fam", Name: "Fam"})
+	tb.addFolderBrain(t, manifest.Manifest{ID: "fam", Name: "Fam"})
 	if w := tb.do("PUT", "/api/google/client", map[string]string{"json": fmt.Sprintf(testClientJSON, srv.URL)}); w.Code != 200 {
 		t.Fatal(w.Body.String())
 	}

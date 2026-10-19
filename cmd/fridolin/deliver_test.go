@@ -3,16 +3,21 @@ package main
 import (
 	"context"
 	"errors"
+	"github.com/Icewater1337/fridolin/internal/devchat"
+	outboundmsg "github.com/Icewater1337/fridolin/internal/outbound"
 	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/Icewater1337/fridolin/internal/chat"
+	"github.com/Icewater1337/fridolin/internal/history"
 )
 
 // pollRefuser is the dev messenger in front of a WhatsApp that is
 // connected but refuses every poll, so that the outbox sends each as text.
-type pollRefuser struct{ *devMessenger }
+type pollRefuser struct{ *devchat.Messenger }
 
 func (pollRefuser) SendPoll(context.Context, string, string, []string, int) (string, error) {
 	return "", errors.New("polls are refused")
@@ -23,7 +28,7 @@ func outbound(t *testing.T, br *Brain) map[string][]string {
 	t.Helper()
 	out := map[string][]string{}
 	for _, e := range readHistory(t, br) {
-		if e.Type == historyOut {
+		if e.Type == history.Out {
 			if e.From != br.ID() {
 				t.Errorf("outbound line %+v is not from brain %s", e, br.ID())
 			}
@@ -65,7 +70,7 @@ func TestRepliesAreRecordedAsSent(t *testing.T) {
 			if c.wa != nil {
 				tb.wa = c.wa(tb)
 			}
-			tb.deliver(br, Inbound{JID: testDMChat, Sender: "15551234567", Text: "hi", Silent: c.silent}, c.res)
+			tb.deliver(br, Inbound{Inbound: chat.Inbound{JID: testDMChat, Sender: "15551234567", Text: "hi", Silent: c.silent}}, c.res)
 			if len(c.want) > 0 {
 				waitFor(t, 5*time.Second, "the reply in the history", func() bool { return len(outbound(t, br)[testDMChat]) > 0 })
 			} else if f, ok := tb.wa.(*flakyMessenger); ok {
@@ -88,7 +93,7 @@ func TestRepliesAreRecordedAsSent(t *testing.T) {
 func TestSilentRunLeavesNoReplyInTheHistory(t *testing.T) {
 	tb, br := newObservingBridge(t, `, "queue": {"notify": false}`)
 	ctx := context.Background()
-	tb.handleInbound(ctx, Inbound{JID: testGroup, Sender: "15551234567", Text: "we meet at noon", Silent: true, Source: sourceWhatsApp})
+	tb.handleInbound(ctx, Inbound{Inbound: chat.Inbound{JID: testGroup, Sender: "15551234567", Text: "we meet at noon", Silent: true, Source: chat.SourceWhatsApp}})
 	// The silent run ends with an answer before the DM comes in, so that
 	// it is not stopped for the DM, and is delivered before the DM's run
 	// starts: one worker runs the brain's messages in turn.
@@ -96,7 +101,7 @@ func TestSilentRunLeavesNoReplyInTheHistory(t *testing.T) {
 	if last := br.Snapshot().Last; last.Chat != testGroup || last.Outcome != outcomeOK {
 		t.Fatalf("the silent run ended %+v, want it answered", last)
 	}
-	tb.handleInbound(ctx, Inbound{JID: testDMChat, Sender: "15551234567", Text: "hello", Source: sourceWhatsApp})
+	tb.handleInbound(ctx, Inbound{Inbound: chat.Inbound{JID: testDMChat, Sender: "15551234567", Text: "hello", Source: chat.SourceWhatsApp}})
 	waitFor(t, 10*time.Second, "the DM's answer", func() bool { return len(tb.sentTo(testDMChat)) == 1 })
 	// It goes into the history just after it was sent.
 	waitFor(t, 5*time.Second, "the DM's answer in the history", func() bool { return len(outbound(t, br)[testDMChat]) > 0 })
@@ -124,7 +129,7 @@ func TestMidRunMessagesOnlyForAddressedMessages(t *testing.T) {
 	prev := workingNoticeAfter
 	workingNoticeAfter = 50 * time.Millisecond
 	t.Cleanup(func() { workingNoticeAfter = prev })
-	dm := Inbound{JID: testDMChat, Sender: "15551234567", Text: "book a table", Source: sourceWhatsApp}
+	dm := Inbound{Inbound: chat.Inbound{JID: testDMChat, Sender: "15551234567", Text: "book a table", Source: chat.SourceWhatsApp}}
 	cases := []struct {
 		name    string
 		m       Inbound
@@ -137,7 +142,7 @@ func TestMidRunMessagesOnlyForAddressedMessages(t *testing.T) {
 		{name: "a DM", m: dm, sent: true, asked: true, notice: true},
 		{name: "a DM, the outbox refusing it", m: dm, refused: true, notice: true},
 		{name: "a DM while WhatsApp is down", m: dm, offline: true, asked: true},
-		{name: "untagged group chatter", m: Inbound{JID: testGroup, Sender: "15551234567", Text: "we meet at noon", Silent: true, Source: sourceWhatsApp}},
+		{name: "untagged group chatter", m: Inbound{Inbound: chat.Inbound{JID: testGroup, Sender: "15551234567", Text: "we meet at noon", Silent: true, Source: chat.SourceWhatsApp}}},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -145,15 +150,15 @@ func TestMidRunMessagesOnlyForAddressedMessages(t *testing.T) {
 			t.Setenv("FRIDOLIN_FAKE_ASK", `{"questions":[{"question":"Which day?"}]}`)
 			t.Setenv("FRIDOLIN_FAKE_SLEEP_MS", "300") // time for the working notice
 			if c.refused {
-				if _, err := tb.store.db.Exec(`CREATE TRIGGER refuse_outbox BEFORE INSERT ON outbox BEGIN SELECT RAISE(FAIL, 'disk full'); END`); err != nil {
+				if _, err := testStoreSQL(t, tb.cfgs.Startup().DBPath).Exec(`CREATE TRIGGER refuse_outbox BEFORE INSERT ON outbox BEGIN SELECT RAISE(FAIL, 'disk full'); END`); err != nil {
 					t.Fatal(err)
 				}
 			}
-			chat := func() []string { return tb.sentTo(c.m.JID) }
+			chatJID := func() []string { return tb.sentTo(c.m.JID) }
 			if c.offline {
 				wa := newFlakyMessenger(tb.cfgs.Get, false)
 				tb.wa = wa
-				chat = func() []string { return wa.sent(c.m.JID) }
+				chatJID = func() []string { return wa.sent(c.m.JID) }
 			}
 			tb.handleInbound(context.Background(), c.m)
 			waitFor(t, 10*time.Second, "the run", func() bool { return br.Snapshot().Last != nil })
@@ -166,7 +171,7 @@ func TestMidRunMessagesOnlyForAddressedMessages(t *testing.T) {
 				}
 			}
 
-			sent := slices.Contains(chat(), "❓ Which day?")
+			sent := slices.Contains(chatJID(), "❓ Which day?")
 			recorded := slices.Contains(outbound(t, br)[c.m.JID], "❓ Which day?")
 			if sent != c.sent || recorded != c.sent {
 				t.Errorf("question sent %v, in the history %v; want %v", sent, recorded, c.sent)
@@ -174,7 +179,7 @@ func TestMidRunMessagesOnlyForAddressedMessages(t *testing.T) {
 			if last := br.Snapshot().Last; (last.Outcome == outcomeQuestion) != c.asked {
 				t.Errorf("the run ended %q, want it to have asked: %v", last.Outcome, c.asked)
 			}
-			if notice := slices.Contains(chat(), workingNotice); notice != c.notice {
+			if notice := slices.Contains(chatJID(), outboundmsg.WorkingNotice); notice != c.notice {
 				t.Errorf("working notice sent %v, want %v", notice, c.notice)
 			}
 		})
@@ -187,7 +192,7 @@ func TestMidRunMessagesOnlyForAddressedMessages(t *testing.T) {
 func TestQuestionAndFinalReplyBothReachTheChat(t *testing.T) {
 	tb, br := newMainBridge(t, "")
 	t.Setenv("FRIDOLIN_FAKE_ASK", `{"questions":[{"header":"Day","question":"Which day?","options":[{"label":"Monday"},{"label":"Tuesday"}]}]}`)
-	tb.handleInbound(context.Background(), Inbound{JID: testDMChat, Sender: "15551234567", Text: "book a table", Source: sourceWhatsApp})
+	tb.handleInbound(context.Background(), Inbound{Inbound: chat.Inbound{JID: testDMChat, Sender: "15551234567", Text: "book a table", Source: chat.SourceWhatsApp}})
 	waitFor(t, 10*time.Second, "the reply", func() bool { return len(tb.sentTo(testDMChat)) == 2 })
 	waitFor(t, 5*time.Second, "the reply in the history", func() bool { return len(outbound(t, br)[testDMChat]) == 2 })
 
@@ -229,14 +234,14 @@ func TestQueuedRunSeesWhatWasSentWhileItWaited(t *testing.T) {
 				t.Setenv(k, v)
 			}
 			ctx := context.Background()
-			tb.handleInbound(ctx, Inbound{JID: testDMChat, Sender: "15551234567", Text: c.first, Source: sourceWhatsApp})
+			tb.handleInbound(ctx, Inbound{Inbound: chat.Inbound{JID: testDMChat, Sender: "15551234567", Text: c.first, Source: chat.SourceWhatsApp}})
 			if c.asked == "" {
 				waitFor(t, 10*time.Second, "the first run", func() bool { return br.Snapshot().Running != nil })
 			} else {
 				// In the history, as the chat has it before anyone answers.
 				waitFor(t, 10*time.Second, "the question", func() bool { return slices.Contains(outbound(t, br)[testDMChat], c.asked) })
 			}
-			tb.handleInbound(ctx, Inbound{JID: testDMChat, Sender: "15551234567", Text: c.second, Source: sourceWhatsApp})
+			tb.handleInbound(ctx, Inbound{Inbound: chat.Inbound{JID: testDMChat, Sender: "15551234567", Text: c.second, Source: chat.SourceWhatsApp}})
 			replies := func() []string {
 				var out []string
 				for _, s := range tb.sentTo(testDMChat) {

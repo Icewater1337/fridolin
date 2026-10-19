@@ -11,6 +11,11 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Icewater1337/fridolin/internal/config"
+
+	"github.com/Icewater1337/fridolin/internal/manifest"
+
+	"github.com/Icewater1337/fridolin/internal/chat"
 	"github.com/Icewater1337/fridolin/internal/fsx"
 )
 
@@ -34,24 +39,24 @@ func TestSetBridgePATH(t *testing.T) {
 	if err := os.Symlink(home+"/real/q", home+"/q"); err != nil {
 		t.Fatal(err)
 	}
-	personal := brainFolder(t, home+"/assistant/personal", BrainManifest{ID: "personal", Routing: BrainRouting{HandlesDMs: true}})
-	q := brainFolder(t, home+"/q", BrainManifest{ID: "q"})
-	unapproved := BrainRef{Path: home + "/new"}
+	personal := brainFolder(t, home+"/assistant/personal", manifest.Manifest{ID: "personal", Routing: manifest.Routing{HandlesDMs: true}})
+	q := brainFolder(t, home+"/q", manifest.Manifest{ID: "q"})
+	unapproved := config.BrainRef{Path: home + "/new"}
 	path := strings.Join([]string{home + "/assistant/personal/bin", "/usr/bin", home + "/real/q/bin", "relative", home + "/new/bin", home + "/assistant/personal/tools/", "/bin"}, ":")
 	cases := []struct {
 		name     string
-		refs     []BrainRef
+		refs     []config.BrainRef
 		brainVar string
 		want     string
 		wantOwn  map[string][]string
 		logged   []string
 	}{
 		{"no brain folder on PATH", nil, "", path, map[string][]string{}, nil},
-		{"brain folders on PATH", []BrainRef{personal, q, unapproved}, "",
+		{"brain folders on PATH", []config.BrainRef{personal, q, unapproved}, "",
 			"/usr/bin:relative:/bin",
 			map[string][]string{"personal": {home + "/assistant/personal/bin", home + "/assistant/personal/tools"}, "q": {home + "/real/q/bin"}},
 			[]string{home + "/assistant/personal/bin is in brain personal's folder", home + "/real/q/bin is in brain q's folder", home + "/new/bin is in the brain folder " + home + "/new"}},
-		{"what the service file keeps for brains", []BrainRef{personal}, home + "/assistant/personal/scripts:" + home + "/gone/bin", "/usr/bin:" + home + "/real/q/bin:relative:" + home + "/new/bin:/bin",
+		{"what the service file keeps for brains", []config.BrainRef{personal}, home + "/assistant/personal/scripts:" + home + "/gone/bin", "/usr/bin:" + home + "/real/q/bin:relative:" + home + "/new/bin:/bin",
 			map[string][]string{"personal": {home + "/assistant/personal/bin", home + "/assistant/personal/tools", home + "/assistant/personal/scripts"}},
 			[]string{home + "/assistant/personal/scripts, from " + brainPATHVar + ", goes to brain personal's runs only", home + "/gone/bin, from " + brainPATHVar + ", is in no approved brain's folder"}},
 	}
@@ -62,7 +67,7 @@ func TestSetBridgePATH(t *testing.T) {
 			var logs bytes.Buffer
 			log.SetOutput(&logs)
 			t.Cleanup(func() { log.SetOutput(os.Stderr) })
-			own := setBridgePATH(&Config{BrainDirs: c.refs})
+			own := setBridgePATH(&config.Config{BrainDirs: c.refs})
 			if got := os.Getenv("PATH"); got != c.want {
 				t.Errorf("PATH = %q, want %q", got, c.want)
 			}
@@ -88,7 +93,7 @@ func TestSetBridgePATH(t *testing.T) {
 		log.SetOutput(&logs)
 		t.Cleanup(func() { log.SetOutput(os.Stderr) })
 		for range 2 {
-			setBridgePATH(&Config{BrainDirs: []BrainRef{personal}})
+			setBridgePATH(&config.Config{BrainDirs: []config.BrainRef{personal}})
 		}
 		if n := strings.Count(logs.String(), "goes to brain personal's runs"); n != 1 {
 			t.Errorf("logged %d times, want once:\n%s", n, logs.String())
@@ -97,11 +102,11 @@ func TestSetBridgePATH(t *testing.T) {
 	t.Run("a removed brain's folder stays off the bridge's PATH", func(t *testing.T) {
 		t.Setenv("PATH", path)
 		t.Setenv(brainPATHVar, "")
-		setBridgePATH(&Config{BrainDirs: []BrainRef{personal}})
+		setBridgePATH(&config.Config{BrainDirs: []config.BrainRef{personal}})
 		var logs bytes.Buffer
 		log.SetOutput(&logs)
 		t.Cleanup(func() { log.SetOutput(os.Stderr) })
-		own := setBridgePATH(&Config{})
+		own := setBridgePATH(&config.Config{})
 		if got := os.Getenv("PATH"); strings.Contains(got, "/assistant/personal/") {
 			t.Errorf("PATH = %q after brain personal was removed, want its folders still out", got)
 		}
@@ -131,8 +136,8 @@ func TestBrainRunsGetTheirOwnPATHFolders(t *testing.T) {
 		"brain_mode": true,
 		"claude_path": "`+claude+`",
 		"data_dir": "`+home+`/data"`+brainDirsJSON(t,
-		brainFolder(t, home+"/assistant/personal", BrainManifest{ID: "personal", Routing: BrainRouting{HandlesDMs: true}}),
-		brainFolder(t, home+"/team", BrainManifest{ID: "team", Routing: BrainRouting{Groups: []string{"120363000000000000@g.us"}}}),
+		brainFolder(t, home+"/assistant/personal", manifest.Manifest{ID: "personal", Routing: manifest.Routing{HandlesDMs: true}}),
+		brainFolder(t, home+"/team", manifest.Manifest{ID: "team", Routing: manifest.Routing{Groups: []string{"120363000000000000@g.us"}}}),
 	)+`}`))
 	if err != nil {
 		t.Fatal(err)
@@ -150,7 +155,7 @@ func TestBrainRunsGetTheirOwnPATHFolders(t *testing.T) {
 	if _, _, _, err := mgr.Submit(dm("hello")); err != nil {
 		t.Fatal(err)
 	}
-	group := Inbound{JID: "120363000000000000@g.us", Sender: "15551234567@s.whatsapp.net", Text: "@claude hi"}
+	group := Inbound{Inbound: chat.Inbound{JID: "120363000000000000@g.us", Sender: "15551234567@s.whatsapp.net", Text: "@claude hi"}}
 	if _, _, _, err := mgr.Submit(group); err != nil {
 		t.Fatal(err)
 	}
@@ -184,8 +189,8 @@ func TestCheckRunsABrainWhoseFolderHoldsAPATHFolder(t *testing.T) {
 		"brain_mode": true,
 		"claude_path": "`+fakeClaudeEnv(t, 0)+`",
 		"data_dir": "`+home+`/data"`+brainDirsJSON(t,
-		brainFolder(t, home+"/assistant/personal", BrainManifest{ID: "personal", Routing: BrainRouting{HandlesDMs: true}}),
-		brainFolder(t, home+"/work", BrainManifest{ID: "work", Routing: BrainRouting{Default: true}}),
+		brainFolder(t, home+"/assistant/personal", manifest.Manifest{ID: "personal", Routing: manifest.Routing{HandlesDMs: true}}),
+		brainFolder(t, home+"/work", manifest.Manifest{ID: "work", Routing: manifest.Routing{Default: true}}),
 	)+`}`)
 	o := checkOptions{config: path, routes: []string{"15551234567@s.whatsapp.net"}}
 	if runtime.GOOS == "darwin" {
@@ -229,7 +234,7 @@ func TestCheckDoesNotExecuteBrainPATHPrograms(t *testing.T) {
 	versionCLI(t, filepath.Join(trustedBin, "claude"), testedClaudeVersion+" trusted")
 	t.Setenv("PATH", strings.Join([]string{ownedBin, trustedBin, "/usr/bin", "/bin"}, string(filepath.ListSeparator)))
 	path := writeConfig(t, `{"claude_path":"claude","data_dir":"`+home+`/data"`+brainDirsJSON(t,
-		brainFolder(t, brain, BrainManifest{ID: "a", Routing: BrainRouting{HandlesDMs: true}}),
+		brainFolder(t, brain, manifest.Manifest{ID: "a", Routing: manifest.Routing{HandlesDMs: true}}),
 	)+`}`)
 	var out bytes.Buffer
 	if err := writeCheck(&out, checkOptions{config: path}); err != nil {

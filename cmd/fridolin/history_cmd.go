@@ -20,6 +20,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/Icewater1337/fridolin/internal/fsx"
+	"github.com/Icewater1337/fridolin/internal/history"
 )
 
 // `fridolin history` searches a brain's conversation-history.jsonl. A run
@@ -89,12 +90,12 @@ func historyCmd(args []string, t toolIO) int {
 		}
 	}
 
-	path := filepath.Join(t.dir, historyFileName)
+	path := filepath.Join(t.dir, history.FileName)
 	switch home := t.getenv("HOME"); {
 	case *file != "":
 		path = fsx.ExpandHome(*file, home)
 	case *brainDir != "":
-		path = filepath.Join(fsx.ExpandHome(*brainDir, home), historyFileName)
+		path = filepath.Join(fsx.ExpandHome(*brainDir, home), history.FileName)
 	}
 	f, err := os.Open(path)
 	if errors.Is(err, fs.ErrNotExist) {
@@ -179,10 +180,10 @@ func matchHistoryLine(line []byte, q historyQuery) historyHit {
 	}
 	text, _ := h["text"].(string)
 	// A reset marker is no message, whatever it holds.
-	if text == "" || h["type"] == historyReset {
+	if text == "" || h["type"] == history.Reset {
 		return nil
 	}
-	if q.fromOnly && h["type"] != historyIn {
+	if q.fromOnly && h["type"] != history.In {
 		return nil
 	}
 	if q.chat != "" && h["chat"] != q.chat {

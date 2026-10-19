@@ -22,6 +22,11 @@ import (
 	"time"
 	"unsafe"
 
+	"github.com/Icewater1337/fridolin/internal/config"
+	"github.com/Icewater1337/fridolin/internal/registry"
+
+	"github.com/Icewater1337/fridolin/internal/manifest"
+
 	"github.com/Icewater1337/fridolin/internal/fsx"
 	"github.com/Icewater1337/fridolin/internal/platform"
 )
@@ -619,7 +624,7 @@ func fakeClaudeEnv(t *testing.T, sleepMS int) string {
 // a store call it first, so a config that still points at a real install
 // (a data_dir copied from one, say) stops the test before the store, the
 // token or rclone's config is touched.
-func requireTestDataDir(t testing.TB, cfg *Config) {
+func requireTestDataDir(t testing.TB, cfg *config.Config) {
 	t.Helper()
 	// t.TempDir hands out numbered folders inside one directory per test.
 	if err := checkTestDataDir(filepath.Dir(t.TempDir()), cfg); err != nil {
@@ -630,7 +635,7 @@ func requireTestDataDir(t testing.TB, cfg *Config) {
 // checkTestDataDir reports the first data path of cfg outside root. Paths
 // may use root as given or with its symlinks resolved (/var and /private/var
 // on macOS).
-func checkTestDataDir(root string, cfg *Config) error {
+func checkTestDataDir(root string, cfg *config.Config) error {
 	roots := []string{filepath.Clean(root), fsx.Canonical(root)}
 	for _, p := range []struct{ field, path string }{
 		{"data_dir", cfg.DataDir},
@@ -701,7 +706,7 @@ func TestCheckTestDataDir(t *testing.T) {
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			err := checkTestDataDir(root, &Config{DataDir: tc.data, DBPath: tc.db, MediaDir: tc.media})
+			err := checkTestDataDir(root, &config.Config{DataDir: tc.data, DBPath: tc.db, MediaDir: tc.media})
 			switch {
 			case tc.wantErr == "" && err != nil:
 				t.Errorf("unexpected error: %v", err)
@@ -730,7 +735,7 @@ func TestRequireTestDataDir(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			dir := tc.dataDir(t)
 			r := &fatalRecorder{TB: t}
-			requireTestDataDir(r, &Config{DataDir: dir, DBPath: filepath.Join(dir, "bridge.db"), MediaDir: filepath.Join(dir, "media")})
+			requireTestDataDir(r, &config.Config{DataDir: dir, DBPath: filepath.Join(dir, "bridge.db"), MediaDir: filepath.Join(dir, "media")})
 			switch {
 			case !tc.refused && r.fatal != "":
 				t.Errorf("refused a data dir inside the test's temp dir: %s", r.fatal)
@@ -766,7 +771,7 @@ func logContains(logs func() []string, substr string) bool {
 // and returns the brain_dirs entry that runs it with m approved. path goes
 // into the config as given, and a ~ in it is the test's HOME, so set that
 // first. A manifest without a name is named after its id.
-func brainFolder(t testing.TB, path string, m BrainManifest) BrainRef {
+func brainFolder(t testing.TB, path string, m manifest.Manifest) config.BrainRef {
 	t.Helper()
 	home, err := os.UserHomeDir()
 	if err != nil {
@@ -775,16 +780,16 @@ func brainFolder(t testing.TB, path string, m BrainManifest) BrainRef {
 	if m.Name == "" {
 		m.Name = m.ID
 	}
-	m = m.normalized()
-	if _, err := ScaffoldBrain(fsx.ExpandHome(path, home), &m); err != nil {
+	m = m.Normalized()
+	if _, err := registry.Scaffold(fsx.ExpandHome(path, home), &m, brainTemplates); err != nil {
 		t.Fatal(err)
 	}
-	return BrainRef{Path: path, Approved: &m}
+	return config.BrainRef{Path: path, Approved: &m}
 }
 
 // brainDirsJSON is the brain_dirs setting of a test config that runs refs,
 // as text to append to its other settings: `, "brain_dirs": [...]`.
-func brainDirsJSON(t testing.TB, refs ...BrainRef) string {
+func brainDirsJSON(t testing.TB, refs ...config.BrainRef) string {
 	t.Helper()
 	data, err := json.Marshal(refs)
 	if err != nil {

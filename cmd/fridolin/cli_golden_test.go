@@ -14,6 +14,10 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/Icewater1337/fridolin/internal/config"
+
+	"github.com/Icewater1337/fridolin/internal/manifest"
+
 	"github.com/Icewater1337/fridolin/internal/fsx"
 )
 
@@ -98,10 +102,10 @@ func runBridgeCLI(t *testing.T, root string, args ...string) (string, int) {
 // brains, and <root>/config.json, whose claude_path is the bridge binary
 // playing the Claude CLI. config holds the settings besides those, as
 // "key": value pairs; brains are made with brainFolder.
-func cliFixture(t *testing.T, config string, brains func(home string) []BrainRef) (root, cfgPath string) {
+func cliFixture(t *testing.T, configValue string, brains func(home string) []config.BrainRef) (root, cfgPath string) {
 	t.Helper()
 	root, home := fixtureHome(t)
-	var refs []BrainRef
+	var refs []config.BrainRef
 	if brains != nil {
 		refs = brains(home)
 	}
@@ -111,8 +115,8 @@ func cliFixture(t *testing.T, config string, brains func(home string) []BrainRef
 		"data_dir": "~/.fridolin",
 		"allowed_numbers": ["15551234567"],
 		"allowed_groups": ["120363000000000000@g.us"]` + brainDirsJSON(t, refs...)
-	if config != "" {
-		body += ", " + config
+	if configValue != "" {
+		body += ", " + configValue
 	}
 	if err := os.WriteFile(cfgPath, []byte(body+"}"), 0o600); err != nil {
 		t.Fatal(err)
@@ -124,21 +128,21 @@ func cliFixture(t *testing.T, config string, brains func(home string) []BrainRef
 // TestGoldenCheck pins what `fridolin check` prints: the summary, with
 // --route the brain each chat goes to, and a config that does not load.
 func TestGoldenCheck(t *testing.T) {
-	brains := func(home string) []BrainRef {
-		return []BrainRef{
-			brainFolder(t, "~/main", BrainManifest{ID: "main", Name: "Main", Routing: BrainRouting{HandlesDMs: true}}),
-			brainFolder(t, "~/family", BrainManifest{ID: "family", Name: "Family", Routing: BrainRouting{Groups: []string{harnessGroup}}}),
+	brains := func(home string) []config.BrainRef {
+		return []config.BrainRef{
+			brainFolder(t, "~/main", manifest.Manifest{ID: "main", Name: "Main", Routing: manifest.Routing{HandlesDMs: true}}),
+			brainFolder(t, "~/family", manifest.Manifest{ID: "family", Name: "Family", Routing: manifest.Routing{Groups: []string{harnessGroup}}}),
 			// A folder whose brain.json was changed after it was approved.
-			func() BrainRef {
-				ref := brainFolder(t, "~/drifted", BrainManifest{ID: "drifted", Name: "Drifted"})
+			func() config.BrainRef {
+				ref := brainFolder(t, "~/drifted", manifest.Manifest{ID: "drifted", Name: "Drifted"})
 				m := *ref.Approved
 				m.Routing.Default = true
-				if err := WriteManifest(filepath.Join(home, "drifted"), &m, true); err != nil {
+				if err := manifest.Write(filepath.Join(home, "drifted"), &m, true); err != nil {
 					t.Fatal(err)
 				}
 				return ref
 			}(),
-			{Path: "~/missing", Approved: &BrainManifest{Version: 1, ID: "missing", Name: "Missing", PromptFile: defaultPromptFile}},
+			{Path: "~/missing", Approved: &manifest.Manifest{Version: 1, ID: "missing", Name: "Missing", PromptFile: manifest.DefaultPromptFile}},
 		}
 	}
 	tests := []struct {
@@ -177,22 +181,22 @@ func TestGoldenSandboxProfiles(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	one := func(home string) []BrainRef {
+	one := func(home string) []config.BrainRef {
 		gitconfig(home)
-		return []BrainRef{brainFolder(t, "~/main", BrainManifest{ID: "main", Routing: BrainRouting{HandlesDMs: true}})}
+		return []config.BrainRef{brainFolder(t, "~/main", manifest.Manifest{ID: "main", Routing: manifest.Routing{HandlesDMs: true}})}
 	}
-	several := func(home string) []BrainRef {
+	several := func(home string) []config.BrainRef {
 		gitconfig(home)
-		return []BrainRef{
-			brainFolder(t, "~/brains/main", BrainManifest{ID: "main", Routing: BrainRouting{HandlesDMs: true}}),
-			brainFolder(t, "~/brains/family", BrainManifest{ID: "family", Routing: BrainRouting{Groups: []string{harnessGroup}}}),
+		return []config.BrainRef{
+			brainFolder(t, "~/brains/main", manifest.Manifest{ID: "main", Routing: manifest.Routing{HandlesDMs: true}}),
+			brainFolder(t, "~/brains/family", manifest.Manifest{ID: "family", Routing: manifest.Routing{Groups: []string{harnessGroup}}}),
 			// Outside HOME.
-			brainFolder(t, filepath.Join(filepath.Dir(home), "elsewhere", "work"), BrainManifest{ID: "work"}),
+			brainFolder(t, filepath.Join(filepath.Dir(home), "elsewhere", "work"), manifest.Manifest{ID: "work"}),
 		}
 	}
 	tests := []struct {
 		name, config string
-		brains       func(home string) []BrainRef
+		brains       func(home string) []config.BrainRef
 	}{
 		{"own-brain", "", one},
 		{"other-brains", "", several},
