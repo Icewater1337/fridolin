@@ -12,7 +12,7 @@ const GROUP = '120363000000000000@g.us';
 const WAITING = '120363000000000001@g.us';
 const brain = (id, routing = {}) => ({ id, name: id, status: 'ok', manifest: { id, name: id, routing: { groups: [], ...routing } } });
 
-async function openPage(t, { brains = [brain('work', { default: true }), brain('family')] } = {}) {
+async function openPage(t, { brains = [brain('work', { default: true }), brain('family')], members = {} } = {}) {
   t.mock.timers.enable({ apis: ['setTimeout', 'Date'] });
   installDom();
   noConsoleErrors(t);
@@ -21,6 +21,8 @@ async function openPage(t, { brains = [brain('work', { default: true }), brain('
     ignored: [{ kind: 'group', jid: WAITING, name: 'Book club', count: 1, last_seen: '2026-10-18T10:00:00Z' }],
     brains,
     groups: [{ jid: GROUP, name: 'Family', participants: 4, allowed: true, brain: 'work' }],
+    members,
+    refuse: null, // what /api/chats/members answers with 422 instead of saving
   };
   const calls = serve(t, (path, init) => {
     if (path === '/api/chats/allow' && init.method === 'POST') {
@@ -34,9 +36,16 @@ async function openPage(t, { brains = [brain('work', { default: true }), brain('
       bridge.numbers = bridge.numbers.filter((n) => n !== body.number);
       return { status: 200, body: { status: 'revoked' } };
     }
+    if (path === '/api/chats/members' && init.method === 'POST') {
+      const body = JSON.parse(init.body);
+      if (bridge.refuse) return { status: 422, body: { error: bridge.refuse } };
+      if (body.members === null) delete bridge.members[body.jid];
+      else bridge.members[body.jid] = body.members.map((n) => (n === '*' ? n : n.replace(/\D/g, '')));
+      return { status: 200, body: { status: 'saved' } };
+    }
     if (path.startsWith('/api/chats/ignored')) return bridge.ignored;
     if (path.startsWith('/api/brains')) return bridge.brains;
-    if (path.startsWith('/api/config')) return { etag: 'e', config: { allowed_numbers: bridge.numbers, allowed_groups: [GROUP] }, effective: {} };
+    if (path.startsWith('/api/config')) return { etag: 'e', config: { allowed_numbers: bridge.numbers, allowed_groups: [GROUP], group_members: { ...bridge.members } }, effective: {} };
     if (path.startsWith('/api/whatsapp/groups')) return bridge.groups;
     return {};
   });
@@ -149,4 +158,82 @@ test('removing a number that is gone already says so, not that it was removed', 
   assert.deepEqual(toasts('ok'), []);
   assert.deepEqual(toasts('info'), ['15551234567 is not in allowed_numbers']);
   assert.match(root.textContent, /nobody can send direct messages yet/, 'the list shows it is gone');
+});
+
+// The allowed groups' list, the editor of who is heard in the first, and
+// what the page asked the bridge to save.
+const heard = (root) => root.querySelectorAll('.plain-list')[1].querySelector('.heard').textContent;
+const dialogButton = (label) => document.querySelectorAll('dialog button').find((b) => b.textContent === label);
+async function openMembers(root) {
+  root.querySelectorAll('button').find((b) => b.textContent === 'Members').click();
+  await settle();
+  return document.querySelector('dialog');
+}
+const saved = (calls) => calls.filter((c) => c.path === '/api/chats/members').map((c) => c.body);
+
+test('an allowed group says who is heard there, and the editor saves a list of numbers', async (t) => {
+  const { root, calls } = await openPage(t);
+  assert.equal(heard(root), 'Heard: the allowed numbers', 'a group without an entry hears the allowed numbers');
+
+  const dlg = await openMembers(root);
+  const mode = dlg.querySelector('select');
+  assert.equal(mode.value, '', 'the editor starts from the group’s entry: none');
+  mode.value = 'list';
+  mode.dispatchEvent(new Event('change'));
+  dialogButton('Add number').click();
+  type(dlg.querySelector('.list-row input'), '+1 555 987 6543');
+  dialogButton('Save').click();
+  await settle();
+  assert.deepEqual(saved(calls), [{ jid: GROUP, members: ['+1 555 987 6543'] }]);
+  assert.equal(document.querySelector('dialog'), null, 'saved, the editor closes');
+  assert.equal(heard(root), 'Heard: +15559876543');
+
+  // Opened again, it shows the list the bridge keeps.
+  const again = await openMembers(root);
+  assert.equal(again.querySelector('select').value, 'list');
+  assert.deepEqual(again.querySelectorAll('.list-row input').map((i) => i.value), ['15559876543']);
+});
+
+test('every member, and back to the allowed numbers', async (t) => {
+  const { root, calls } = await openPage(t, { members: { [GROUP]: ['15551234567'] } });
+  assert.equal(heard(root), 'Heard: +15551234567');
+  for (const [value, members, summary] of [['*', ['*'], 'Heard: every member'], ['', null, 'Heard: the allowed numbers']]) {
+    const dlg = await openMembers(root);
+    const mode = dlg.querySelector('select');
+    mode.value = value;
+    mode.dispatchEvent(new Event('change'));
+    assert.equal(dlg.querySelector('.list-editor').closest('.field').hidden, true, 'the numbers are only for a list');
+    dialogButton('Save').click();
+    await settle();
+    assert.deepEqual(saved(calls).at(-1), { jid: GROUP, members });
+    assert.equal(heard(root), summary);
+  }
+});
+
+test('a number that is none stays in the editor, and so does the bridge’s refusal', async (t) => {
+  const { root, bridge, calls } = await openPage(t);
+  const dlg = await openMembers(root);
+  const mode = dlg.querySelector('select');
+  mode.value = 'list';
+  mode.dispatchEvent(new Event('change'));
+  dialogButton('Add number').click();
+  for (const bad of ['call me', '15551234567@lid', '*']) {
+    type(dlg.querySelector('.list-row input'), bad);
+    dialogButton('Save').click();
+    await settle();
+    assert.deepEqual(saved(calls), [], `${bad} is not sent`);
+    const err = dlg.querySelector('.form-error');
+    assert.equal(err.hidden, false);
+    assert.match(err.textContent, /no phone numbers/);
+    assert.ok(document.querySelector('dialog'), 'the editor stays open to fix it');
+  }
+
+  bridge.refuse = `group_members: ${GROUP} is not in allowed_groups: allow the group too, or remove its entry`;
+  type(dlg.querySelector('.list-row input'), '15559876543');
+  dialogButton('Save').click();
+  await settle();
+  assert.equal(saved(calls).length, 1);
+  assert.match(dlg.querySelector('.form-error').textContent, /is not in allowed_groups/);
+  assert.ok(document.querySelector('dialog'), 'refused, the editor stays open');
+  assert.deepEqual(toasts('ok'), []);
 });

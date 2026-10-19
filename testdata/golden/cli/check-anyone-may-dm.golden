@@ -4,6 +4,7 @@ Config OK: <ROOT>/config.json
   dashboard: http://127.0.0.1:8765/
   DM allow:  anyone (allow_any_dm is true and allowed_numbers is empty)
   groups:    [120363000000000000@g.us]
+  heard in 120363000000000000@g.us: every member (no group_members entry, allow_any_dm is true and allowed_numbers is empty)
   triggers:  ["@claude"]
   brain main           → <HOME>/main (dms=true default=false groups=[])
   brain family         → <HOME>/family (dms=false default=false groups=[120363000000000000@g.us])

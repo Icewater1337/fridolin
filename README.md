@@ -245,6 +245,25 @@ top, every chat's attachments. A script that hands files to `/ingest`
 writes them to the top of the media folder; one it left there before the
 upgrade is in `media/.old/` too.
 
+**Coming from a version without `group_members`** (one in which every
+member of an allowed group reached its brain): in an allowed group, only
+the numbers in `allowed_numbers` are heard now, and what the others write
+is not read at all, not even into the brain's history. Where other people
+should still be heard, pick **Members** next to the group under **Chats →
+Allowed groups** once the new version runs: *Every member of the group*
+is the old behaviour, or list their numbers. You can also write the
+entry into `config.json` right before `./setup.sh`:
+
+```json
+"group_members": {"120363000000000000@g.us": ["*"]}
+```
+
+An older bridge ignores the key, but its dashboard drops it when it
+saves. At startup the log names each allowed group without an entry, and
+`fridolin check` prints who is heard in each. Nothing changes while
+`allowed_numbers` is empty and `allow_any_dm` is `true`
+([details](docs/CONFIGURATION.md#group_members)).
+
 `fridolin version`, the dashboard's Overview and the `Starting fridolin …`
 line each start writes to the log say which version runs (on macOS:
 `grep 'Starting fridolin' ~/Library/Logs/fridolin/stderr.log | tail -1`).
@@ -257,6 +276,9 @@ and whether the bridge answers.
 2. The group appears in the dashboard under **Chats → waiting for access**.
 3. Click **Allow**, pick the brain that should handle it, and say
    `@claude hello` in the group.
+4. Only your allowed numbers are heard there at first. To let others in,
+   pick **Members** next to the group under **Chats → Allowed groups**:
+   every member, or the numbers you list.
 
 ### Brain folders
 
@@ -285,7 +307,7 @@ The dashboard writes `~/.fridolin/config.json`; you can edit it
 too. Every option is documented in [docs/CONFIGURATION.md](docs/CONFIGURATION.md).
 
 ```bash
-fridolin check                           # validate and show DM access and routing
+fridolin check                           # validate; show who is heard, and the routing
 fridolin check --route 15551234567@s.whatsapp.net
 ```
 
@@ -300,7 +322,10 @@ bridge alone. Give the scratch config its own `http_listen` port and
 `data_dir`.
 
 Dev mode runs the dashboard and brains with a simulated chat: inject messages
-on the **Dev** page and read the replies there.
+on the **Dev** page and read the replies there. They pass the same allow
+lists, `group_members` and triggers as WhatsApp messages, so a message to a
+group needs a sender the group admits; the page says when the bridge
+ignored one, and why.
 
 ---
 
@@ -309,7 +334,10 @@ on the **Dev** page and read the replies there.
 **Direct message** — just write. Attach files, ask questions, give it work.
 
 **In a group** — start with your trigger keyword (`@claude` by default),
-@-mention the bridge's account, or send a file.
+@-mention the bridge's account, or send a file. Only the members the group
+admits are heard (**Members** next to it on the **Chats** page): your
+allowed numbers unless you pick others, or every member. What anyone else
+writes there is not read.
 
 **Commands**
 
@@ -324,7 +352,7 @@ In a group, address the bridge as for any request (`@claude !stop`, or
 @-mention its account): an untagged `!stop` is ordinary chatter. Commands act
 only on the chat they were sent in: one brain often serves several chats, and
 a `!stop` in a group leaves your DM alone. The dashboard's *Stop* buttons act
-on the whole brain. Any member of an allowed group can send an addressed
+on the whole brain. Any member the group admits can send an addressed
 command there; it affects only that group's work.
 
 ### Shaping the assistant

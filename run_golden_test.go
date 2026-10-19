@@ -127,7 +127,7 @@ Answer in one sentence.
 // for each kind of message.
 func TestGoldenRuns(t *testing.T) {
 	runs := fakeRuns(t)
-	h := newHarness(t, `{"brain_model": "sonnet", "brain_effort": "high", "disallowed_tools": ["WebFetch"], "dangerously_skip_permissions": true, "ingest": {"enabled": true}}`)
+	h := newHarness(t, `{"brain_model": "sonnet", "brain_effort": "high", "disallowed_tools": ["WebFetch"], "dangerously_skip_permissions": true, "ingest": {"enabled": true}, "group_members": {"`+harnessGroup+`": ["*"]}}`)
 	s := h.scrubber()
 	dir := h.AddBrain(BrainManifest{ID: "main", Name: "Main", Routing: BrainRouting{HandlesDMs: true, Groups: []string{harnessGroup}}})
 	family := h.AddBrain(BrainManifest{ID: "family", Name: "Family", Model: "opus", Effort: "low", DisallowedTools: &[]string{}, Routing: BrainRouting{Groups: []string{"120363000000000001@g.us"}}})

@@ -424,7 +424,9 @@ func (b *Bridge) recordIgnored(kind, jid, name, sender, pushName string) {
 }
 
 // handleInbound is the entry point for every allowed message. Access control
-// already happened: groups against allowed_groups, DMs against
+// already happened, for WhatsApp and dev messages alike: groups against
+// allowed_groups and their senders against group_members (whom
+// allowed_numbers admits, for a group without an entry), DMs against
 // allowed_numbers. Group messages without the trigger arrive Silent, and go
 // on to their brain like the rest: it keeps them in its history.
 func (b *Bridge) handleInbound(ctx context.Context, m Inbound) {

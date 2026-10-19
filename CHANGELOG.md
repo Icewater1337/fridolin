@@ -25,12 +25,13 @@ for compatibility.
   permissions. What the others write is no longer read at all: no run, no
   `!stop`, no download, and nothing in the history but their votes in the
   bridge's polls. If other people in your groups should still be heard,
-  add an entry to `config.json` as you upgrade, right before `./setup.sh`
-  (an older bridge ignores the key, but its dashboard drops it when it
-  saves): `"group_members": {"<group JID>": ["*"]}` keeps the old
-  behaviour, or list their numbers. The log names every allowed group
-  without an entry at startup. Nothing changes while `allowed_numbers` is
-  empty and `allow_any_dm` is `true`.
+  pick **Members** next to each group under Chats → Allowed groups once
+  the new version runs, or add an entry to `config.json` as you upgrade,
+  right before `./setup.sh` (an older bridge ignores the key, but its
+  dashboard drops it when it saves): `"group_members": {"<group JID>":
+  ["*"]}` keeps the old behaviour, or list their numbers. The log names
+  every allowed group without an entry at startup. Nothing changes while
+  `allowed_numbers` is empty and `allow_any_dm` is `true`.
 - `setup.sh` reads `FRIDOLIN_DATA_DIR` and `FRIDOLIN_INSTALL_DIR`.
   `DATA_DIR` and `INSTALL_DIR`, the names it read before, are ignored with
   a warning, since other software exports them too. When one of them names
@@ -159,11 +160,17 @@ for compatibility.
   but not remove or replace it, and the bridge no longer runs the Plaud
   CLI with a `~/.plaud/tokens.json` that is a symlink or a hard link, or a
   `~/.plaud` that is a symlink: remove the link and connect again.
+- In dev mode, a group message from the **Dev** page or
+  `/api/dev/inbound` passes `group_members` as one from WhatsApp does: from
+  a member the group's entry does not admit, or with no sender, it is
+  ignored, and the Dev page says why instead of "Message injected".
 
 ### Added
 
 - `group_members`: who in each allowed group reaches its brain, by phone
-  number, or `["*"]` for everyone (docs/CONFIGURATION.md).
+  number, or `["*"]` for everyone (docs/CONFIGURATION.md), set with
+  **Members** next to the group under Chats → Allowed groups. `fridolin
+  check` says for each allowed group whose messages are read there.
 - `config.json` has a `version`, 2 today, which every save writes. A
   config without one is version 1 and is read as version 2, its retired
   keys folded in as before; starting does not rewrite it. A bridge

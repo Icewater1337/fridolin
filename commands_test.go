@@ -486,7 +486,7 @@ func TestGroupCommandsMustBeAddressed(t *testing.T) {
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			tb, br := newMainBridge(t, "")
-			if w := tb.do("POST", "/api/dev/inbound", map[string]any{"jid": c.jid, "text": c.text}); w.Code != 202 {
+			if w := tb.do("POST", "/api/dev/inbound", map[string]any{"jid": c.jid, "sender": "15551234567", "text": c.text}); w.Code != 202 {
 				t.Fatalf("dev inbound: %d %s", w.Code, w.Body.String())
 			}
 			if c.command {

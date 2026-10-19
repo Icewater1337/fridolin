@@ -84,8 +84,9 @@ The person's data lives in brain folders they choose and in
 Reopen the dashboard with `fridolin open`. To upgrade later: `git pull &&
 ./setup.sh`, then do what README's "Upgrading and rolling back" says for
 the version you came from (scripts and brains that call `/send` or
-`/ingest` without a token, rotating the dashboard token). To go back to
-the version before: `fridolin service rollback`.
+`/ingest` without a token, rotating the dashboard token, who is heard in
+the allowed groups). To go back to the version before: `fridolin service
+rollback`.
 
 ## Rules
 

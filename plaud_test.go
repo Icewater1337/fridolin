@@ -1323,6 +1323,16 @@ func TestPlaudConnectAgainAfterARefusedLogin(t *testing.T) {
 // check gets the refusal, and the chat its one expiry notice.
 func plaudRefuseLogin(t *testing.T, tb *testBridge, fp *fakePlaudFixture) {
 	t.Helper()
+	plaudRevokeLogin(t, tb, fp)
+	if err := tb.plaud.Poll(context.Background()); !errors.Is(err, errPlaudAuth) {
+		t.Fatalf("poll = %v, want the login refused", err)
+	}
+}
+
+// plaudRevokeLogin is plaudRefuseLogin up to the check that gets the
+// refusal.
+func plaudRevokeLogin(t *testing.T, tb *testBridge, fp *fakePlaudFixture) {
+	t.Helper()
 	plaudSignIn(t, tb)
 	st := plaudRecordLogin(tb, plaudSeededState("u_1", plaudOld1))
 	// Who signed in was asked just now, so that the status does not ask
@@ -1333,9 +1343,6 @@ func plaudRefuseLogin(t *testing.T, tb *testBridge, fp *fakePlaudFixture) {
 	}
 	fp.files(plaudOld1)
 	fp.write("revoked", "")
-	if err := tb.plaud.Poll(context.Background()); !errors.Is(err, errPlaudAuth) {
-		t.Fatalf("poll = %v, want the login refused", err)
-	}
 }
 
 // Connect signs the refused login out in the CLI home it was refused in,
@@ -2510,6 +2517,45 @@ func TestPlaudStopEndsASignIn(t *testing.T) {
 	}
 }
 
+// Status polling and a new sign-in must not add background work once
+// Stop has finished waiting. In particular, a status read after shutdown
+// must not start an account lookup that writes into the old data folder.
+func TestPlaudStopRefusesNewBackgroundWork(t *testing.T) {
+	t.Run("phone app build", func(t *testing.T) {
+		tb, _ := plaudBridge(t, "")
+		tb.plaud.Stop()
+		if err := tb.plaud.BuildApp(); !errors.Is(err, errPlaudStopping) {
+			t.Errorf("BuildApp after Stop = %v, want errPlaudStopping", err)
+		}
+	})
+	t.Run("account lookup", func(t *testing.T) {
+		tb, _ := plaudBridge(t, "")
+		tb.plaud.Stop()
+		release := make(chan struct{})
+		tb.plaud.run = func(context.Context, ...string) (string, error) {
+			<-release
+			return "", context.Canceled
+		}
+		tb.plaud.refreshAccount(time.Time{})
+		tb.plaud.mu.Lock()
+		busy := tb.plaud.accountBusy
+		tb.plaud.mu.Unlock()
+		close(release)
+		tb.plaud.bg.Wait()
+		if busy {
+			t.Error("account lookup started after Stop returned")
+		}
+	})
+	t.Run("sign-in", func(t *testing.T) {
+		tb, _ := plaudBridge(t, "")
+		tb.plaud.Stop()
+		if err := tb.plaud.Connect(); !errors.Is(err, errPlaudStopping) {
+			t.Errorf("Connect after Stop = %v, want errPlaudStopping", err)
+		}
+		tb.plaud.Stop()
+	})
+}
+
 // A run that ends while Fridolin stops has its end recorded before Stop
 // returns: the brain's worker records it after the reply went out, and
 // would otherwise write to the data folder after Fridolin stopped.
@@ -2553,29 +2599,72 @@ func TestPlaudStopWaitsForARunsEnd(t *testing.T) {
 }
 
 // A check that Check now started ends when Fridolin stops, like the
-// poller's own checks, instead of running on for up to ten minutes.
+// poller's own checks, instead of running on for up to ten minutes, and
+// Stop waits for its end: what a check writes to the data folder must not
+// come after it. That holds in a command of the CLI and while it sends the
+// expiry notice of a login Plaud refused. Once Fridolin is stopping, Check
+// now starts none.
 func TestPlaudStopEndsCheckNow(t *testing.T) {
-	tb, fp := plaudBridge(t, "")
-	plaudSignIn(t, tb)
-	fp.files(plaudOld1)
-	tb.plaud.Start(context.Background())
-	tb.plaud.Stop()
-	if w := tb.do("POST", "/api/plaud/sync", nil); w.Code != 202 {
-		t.Fatalf("check now = %d %s, want 202", w.Code, w.Body.String())
+	cases := []struct {
+		name string
+		// hold has the check wait in held until it is cancelled.
+		hold    func(t *testing.T, tb *testBridge, fp *fakePlaudFixture, held func(context.Context) error)
+		lastErr error // what the check then ends with
+	}{
+		{"in a command", func(t *testing.T, tb *testBridge, fp *fakePlaudFixture, held func(context.Context) error) {
+			plaudSignIn(t, tb)
+			fp.files(plaudOld1)
+			tb.plaud.run = func(ctx context.Context, args ...string) (string, error) { return "", held(ctx) }
+		}, context.Canceled},
+		{"sending the expiry notice", func(t *testing.T, tb *testBridge, fp *fakePlaudFixture, held func(context.Context) error) {
+			plaudRevokeLogin(t, tb, fp)
+			tb.plaud.notify = func(ctx context.Context, _, _ string) error { return held(ctx) }
+		}, errPlaudAuth},
 	}
-	waitFor(t, 10*time.Second, "the check to end", func() bool {
-		tb.plaud.mu.Lock()
-		defer tb.plaud.mu.Unlock()
-		return !tb.plaud.busy
-	})
-	if calls := fp.calls(); calls != "" {
-		t.Errorf("Plaud was checked after Fridolin stopped:\n%s", calls)
-	}
-	tb.plaud.mu.Lock()
-	lastErr := tb.plaud.lastErr
-	tb.plaud.mu.Unlock()
-	if !strings.Contains(lastErr, context.Canceled.Error()) {
-		t.Errorf("last error = %q, want the check cancelled", lastErr)
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			tb, fp := plaudBridge(t, "")
+			asked, done := make(chan struct{}), make(chan struct{})
+			// Released at the end, so that a Stop that does not end the
+			// check fails the test instead of hanging it.
+			t.Cleanup(func() { close(done) })
+			var once sync.Once
+			c.hold(t, tb, fp, func(ctx context.Context) error {
+				once.Do(func() { close(asked) })
+				select {
+				case <-ctx.Done():
+					return ctx.Err()
+				case <-done:
+					return errors.New("held past the test")
+				}
+			})
+			tb.plaud.Start(context.Background())
+			if w := tb.do("POST", "/api/plaud/sync", nil); w.Code != 202 {
+				t.Fatalf("check now = %d %s, want 202", w.Code, w.Body.String())
+			}
+			select {
+			case <-asked:
+			case <-time.After(10 * time.Second):
+				t.Fatal("the check did not get there")
+			}
+			stopped := make(chan struct{})
+			go func() { tb.plaud.Stop(); close(stopped) }()
+			select {
+			case <-stopped:
+			case <-time.After(10 * time.Second):
+				t.Fatal("Stop did not end the check")
+			}
+			tb.plaud.mu.Lock()
+			busy, lastErr := tb.plaud.busy, tb.plaud.lastErr
+			tb.plaud.mu.Unlock()
+			if busy || !strings.Contains(lastErr, c.lastErr.Error()) {
+				t.Errorf("after Stop: checking %v, last error %q; want the check over, with %q", busy, lastErr, c.lastErr)
+			}
+
+			if w := tb.do("POST", "/api/plaud/sync", nil); w.Code != 503 {
+				t.Errorf("check now while stopping = %d %s, want 503", w.Code, w.Body.String())
+			}
+		})
 	}
 }
 

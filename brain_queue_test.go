@@ -1513,7 +1513,8 @@ func TestRunTimeoutSetting(t *testing.T) {
 
 // TestStreamLogIsRotatedAndNamesEachRun: a full activity log is moved to
 // claude-stream.1.log when the next run starts, and each run's part of it
-// starts with the chat, the sender, the process and the model.
+// starts with the chat, the sender, the process and the model, in a line
+// runHeadingPID reads back.
 func TestStreamLogIsRotatedAndNamesEachRun(t *testing.T) {
 	mgr, d, home := queueTestManager(t, 10, `, "brain_model": "sonnet"`)
 	logPath := filepath.Join(home, "a", streamLogName)
@@ -1539,6 +1540,10 @@ func TestStreamLogIsRotatedAndNamesEachRun(t *testing.T) {
 	first, _, _ := strings.Cut(string(data), "\n")
 	if len(data) > 4096 || !strings.Contains(first, "Run for 15551234567@s.whatsapp.net from 15551234567, pid ") || !strings.Contains(first, "model sonnet") {
 		t.Errorf("new log starts %q (%d bytes), want the run named", first, len(data))
+	}
+	// The Build page finds the run's part of the log by this heading.
+	if pid, ok := runHeadingPID(first); !ok || pid <= 0 {
+		t.Errorf("runHeadingPID(%q) = %d, %v; want the run's pid", first, pid, ok)
 	}
 }
 

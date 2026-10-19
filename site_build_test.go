@@ -3,8 +3,11 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
+	"runtime/debug"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -202,4 +205,108 @@ func TestLongBuildChatAnswerStaysWhole(t *testing.T) {
 			}
 		})
 	}
+}
+
+// The Build page shows the log of the run in flight: from the heading that
+// names its pid to the next run's, never the lines of the runs before it.
+func TestCurrentRunLogIsTheRunsOwn(t *testing.T) {
+	chat := Inbound{JID: buildChatJID("web", 1), Sender: "dashboard"}
+	s := &brainSettings{model: "sonnet"}
+	heading := func(pid int) string { return "[10:00:00] " + runHeading(chat, s, pid) }
+	twoRuns := []string{
+		heading(101),
+		"[10:00:01] 🔧 Tool: Read",
+		"[10:00:02] 💬 The first answer",
+		heading(202),
+		"[10:05:01] 🔧 Tool: Edit",
+		"[10:05:02] 💬 Working on it",
+	}
+	// Tools a long run used, n of them.
+	tools := func(n int) []string {
+		var out []string
+		for i := range n {
+			out = append(out, fmt.Sprintf("[10:06:00] 🔧 Tool: Bash %04d %s", i, strings.Repeat("x", 40)))
+		}
+		return out
+	}
+	busy := append([]string{heading(101), "[10:00:01] 💬 Before", heading(303)}, tools(100)...)
+	// More than currentRunLog reads of the log's end, heading and all.
+	long := append([]string{heading(101), "[10:00:01] 💬 Before", heading(303)}, tools(2000)...)
+	// Lines so long that fewer than 40 fit in what is read. The first line
+	// read is the end of one, which is left out.
+	var wide []string
+	for i := range 30 {
+		wide = append(wide, fmt.Sprintf("[10:06:00] 🔧 Tool: Bash %04d %s", i, strings.Repeat("y", 3000)))
+	}
+	wide = append([]string{heading(101), heading(303)}, wide...)
+	whole := func(lines []string) []string { // those wholly in what is read
+		size := 0
+		for i := len(lines) - 1; i >= 0; i-- {
+			if size += len(lines[i]) + 1; size >= runLogWindow {
+				return lines[i+1:]
+			}
+		}
+		return lines
+	}
+	crossing := []string{heading(101), heading(303), strings.Repeat("y", runLogWindow-20), "tail"}
+	oversized := []string{heading(303), strings.Repeat("y", 2*runLogWindow), "tail"}
+	cases := []struct {
+		name  string
+		lines []string
+		pid   int
+		want  []string
+	}{
+		{"the run in flight", twoRuns, 202, []string{"[10:05:01] 🔧 Tool: Edit", "[10:05:02] 💬 Working on it"}},
+		{"a run before it", twoRuns, 101, []string{"[10:00:01] 🔧 Tool: Read", "[10:00:02] 💬 The first answer"}},
+		{"a run that has not written its heading yet", twoRuns, 404, []string{}},
+		{"a run without its process yet", twoRuns, 0, []string{}},
+		{"its last 40 lines", busy, 303, busy[len(busy)-40:]},
+		{"a run longer than what is read", long, 303, long[len(long)-40:]},
+		{"a new run after a long previous run", long, 404, []string{}},
+		{"a long log without a run heading", tools(2000), 303, []string{}},
+		{"its whole lines only", wide, 303, whole(wide)},
+		{"heading split by the window", crossing, 303, crossing[2:]},
+		{"oversized tool line", oversized, 303, []string{"tail"}},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), streamLogName)
+			if err := os.WriteFile(path, []byte(strings.Join(c.lines, "\n")+"\n"), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			if got := currentRunLog(path, c.pid); !slices.Equal(got, c.want) {
+				t.Errorf("currentRunLog(pid %d) = %q, want %q", c.pid, got, c.want)
+			}
+		})
+	}
+	if got := currentRunLog(filepath.Join(t.TempDir(), "none.log"), 202); got == nil || len(got) != 0 {
+		t.Errorf("without a log: %q, want an empty list", got)
+	}
+
+	// The Build page asks every second or so, also while the run starts
+	// and has no pid yet: no file may stay open after an answer.
+	t.Run("no file left open", func(t *testing.T) {
+		openFiles := func() int {
+			fds, err := os.ReadDir("/dev/fd")
+			if err != nil {
+				t.Skipf("cannot count open files: %v", err)
+			}
+			return len(fds)
+		}
+		path := filepath.Join(t.TempDir(), streamLogName)
+		if err := os.WriteFile(path, []byte(strings.Join(twoRuns, "\n")+"\n"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		// A collection would close what was left open, and hide it.
+		defer debug.SetGCPercent(debug.SetGCPercent(-1))
+		before := openFiles()
+		for _, pid := range []int{0, 202, 404} {
+			for range 50 {
+				currentRunLog(path, pid)
+			}
+		}
+		if left := openFiles() - before; left > 25 {
+			t.Errorf("%d files left open after 150 answers", left)
+		}
+	})
 }

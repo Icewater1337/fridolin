@@ -453,3 +453,48 @@ func TestStatusWarnsAboutTheOutbox(t *testing.T) {
 		return len(w) == 2 && strings.Contains(w[0], "1 reply is waiting") && strings.Contains(w[1], "1 reply could not be delivered")
 	})
 }
+
+// The summary sees the outbox at one moment: a reply given up on while it
+// reads counts as waiting or as given up on, never as both or neither.
+// TestOutboxGivesUp saw one counted twice on CI.
+func TestOutboxSummaryIsOneMoment(t *testing.T) {
+	s := openOutboxStore(t, t.TempDir())
+	ctx := context.Background()
+	if _, err := s.AddOutbox(ctx, outboxRow{Chat: testDMChat, Parts: []outboxPart{{Text: "hi"}}, CreatedAt: time.Now()}); err != nil {
+		t.Fatal(err)
+	}
+	// The reply goes back and forth between waiting and given up on.
+	done := make(chan struct{})
+	flipped := make(chan error, 1)
+	go func() {
+		for {
+			select {
+			case <-done:
+				flipped <- nil
+				return
+			default:
+			}
+			if _, err := s.db.ExecContext(ctx, `UPDATE outbox SET state = CASE state WHEN 'pending' THEN 'failed' ELSE 'pending' END, next_try_at = ?`, time.Now().UTC()); err != nil {
+				flipped <- err
+				return
+			}
+			// Not at once again: the summary must get its turn.
+			time.Sleep(100 * time.Microsecond)
+		}
+	}()
+	defer func() {
+		close(done)
+		if err := <-flipped; err != nil {
+			t.Errorf("flipping the reply: %v", err)
+		}
+	}()
+	for i := range 100 {
+		sum, err := s.OutboxSummary(ctx, time.Now())
+		if err != nil {
+			t.Fatal(err)
+		}
+		if sum.Waiting+sum.Failed != 1 {
+			t.Fatalf("summary %d = %+v, want the one reply once", i, sum)
+		}
+	}
+}

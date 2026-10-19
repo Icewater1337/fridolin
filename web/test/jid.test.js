@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { isGroupJid, GROUP_JID_RE, shortJid, phone, phoneish, senderLabel } from '../assets/lib/jid.js';
+import { isGroupJid, GROUP_JID_RE, shortJid, phone, phoneDigits, phoneish, senderLabel } from '../assets/lib/jid.js';
 import { waKind, waLabel } from '../assets/lib/whatsapp.js';
 
 const DM = '15551234567@s.whatsapp.net';
@@ -10,6 +10,30 @@ test('isGroupJid', async (t) => {
   const cases = [[GROUP, true], [DM, false], ['', false], [null, false], [42, false]];
   for (const [jid, want] of cases) {
     await t.test(String(jid), () => assert.equal(isGroupJid(jid), want));
+  }
+});
+
+test('phoneDigits takes the numbers the bridge takes', async (t) => {
+  // The same cases as the numbers of TestAllowListEntries in dashboard_test.go.
+  const cases = [
+    ['15551234567', '15551234567'],
+    ['+1 555 123 4567', '15551234567'],
+    ['+1 (555) 123-4567', '15551234567'],
+    ['1.555.123.4567', '15551234567'],
+    [' 15551234567\u00a0', '15551234567'],
+    ['15551234567@s.whatsapp.net', '15551234567'],
+    ['12345', null],
+    ['1555123456789012', null],
+    ['1555abc4567', null],
+    ['15551234567:12@s.whatsapp.net', null],
+    ['15551234567@lid', null], // WhatsApp's id for the sender, not a number
+    [GROUP, null],
+    ['', null],
+    ['+', null],
+    ['*', null],
+  ];
+  for (const [s, want] of cases) {
+    await t.test(s || 'empty', () => assert.equal(phoneDigits(s), want));
   }
 });
 

@@ -44,6 +44,7 @@ func (b *Bridge) apiMux() http.Handler {
 	mux.HandleFunc("GET /api/chats/ignored", b.apiIgnored)
 	mux.HandleFunc("POST /api/chats/allow", b.apiAllowChat)
 	mux.HandleFunc("POST /api/chats/revoke", b.apiRevokeChat)
+	mux.HandleFunc("POST /api/chats/members", b.apiGroupMembers)
 	mux.HandleFunc("POST /api/chats/dismiss", b.apiDismissChat)
 
 	mux.HandleFunc("GET /api/config", b.apiGetConfig)
@@ -662,6 +663,60 @@ func (b *Bridge) apiRevokeChat(w http.ResponseWriter, r *http.Request) {
 	default:
 		writeJSON(w, http.StatusOK, map[string]any{"status": "revoked", "removed": removed})
 	}
+}
+
+// apiGroupMembers sets who in an allowed group reaches its brain, its
+// group_members entry: ["*"] for every member, or the numbers given,
+// stored as digits like allowed_numbers. members null, or left out,
+// removes the entry, so that allowed_numbers decide again; an empty list
+// lets nobody in. The list is checked as the config checks it
+// (validateGroupMembers), and a group allowed_groups does not list is
+// refused.
+func (b *Bridge) apiGroupMembers(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		JID     string    `json:"jid"`
+		Members *[]string `json:"members"`
+	}
+	if err := decodeJSON(r, &req); err != nil {
+		writeErr(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	group, err := allowListGroup(req.JID)
+	if err != nil {
+		writeErr(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	var members []string
+	if req.Members != nil {
+		entry := map[string][]string{group: *req.Members}
+		if err := validateGroupMembers(entry, []string{group}); err != nil {
+			writeErr(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		// A number typed twice, in two ways perhaps, is kept once.
+		members = []string{}
+		for _, n := range groupMembersAsNumbers(entry)[group] {
+			if !slices.Contains(members, n) {
+				members = append(members, n)
+			}
+		}
+	}
+	_, err = b.cfgs.Update("", func(c *Config) error {
+		if req.Members == nil {
+			delete(c.GroupMembers, group)
+			return nil
+		}
+		if c.GroupMembers == nil {
+			c.GroupMembers = map[string][]string{}
+		}
+		c.GroupMembers[group] = members
+		return nil
+	})
+	if err != nil {
+		writeErr(w, http.StatusUnprocessableEntity, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"status": "saved", "members": members})
 }
 
 // revokeEntry splits list into what stays and what revoking sent removes.
@@ -1519,15 +1574,21 @@ func (b *Bridge) apiDevInbound(w http.ResponseWriter, r *http.Request) {
 	if req.Sender == "" {
 		req.Sender = normalizeJID(req.JID)
 	}
-	// Apply the same allow lists and trigger handling as WhatsApp messages,
-	// except group_members: a dev message's sender is whoever the request
-	// names, the group's own digits unless it names one.
+	// Apply the same allow lists, group_members and trigger handling as
+	// WhatsApp messages, on one config snapshot as handleGroupMessage does.
 	cfg := b.cfgs.Get()
 	m := Inbound{JID: req.JID, Brain: req.Brain, Sender: req.Sender, Text: req.Text, Media: req.Media, Silent: req.Silent, Source: sourceDev, At: time.Now()}
 	if m.IsGroup() {
-		if !slices.Contains(cfg.AllowedGroups, m.JID) {
+		if !isAllowedGroup(cfg, m.JID) {
 			b.recordIgnored("group", m.JID, "", m.Sender, "")
 			writeJSON(w, http.StatusAccepted, map[string]string{"status": "ignored", "reason": "group not allowed"})
+			return
+		}
+		// A member group_members does not admit is not read at all, and
+		// the group, which is allowed, is not offered on the dashboard.
+		if who := devGroupSender(m.Sender); !groupSenderAllowed(cfg, m.JID, who) {
+			log.Printf("Dev group message in %s by %s: ignored (not admitted by group_members)", m.JID, who.masked())
+			writeJSON(w, http.StatusAccepted, map[string]string{"status": "ignored", "reason": "sender not admitted by group_members"})
 			return
 		}
 		files := len(m.Media) > 0 && b.groupRules(m.JID).files
@@ -1545,6 +1606,19 @@ func (b *Bridge) apiDevInbound(w http.ResponseWriter, r *http.Request) {
 	}
 	go b.handleInbound(context.Background(), m)
 	writeJSON(w, http.StatusAccepted, map[string]string{"status": "accepted"})
+}
+
+// devGroupSender is the member a dev message to a group comes from, as
+// groupSenderAllowed sees a WhatsApp sender: their number when sender is
+// one, written in any way phoneNumber takes. Anything else, a LID or the
+// group's own digits when the request names no sender, is no number, like
+// a member WhatsApp names only by a LID nothing maps to a number.
+func devGroupSender(sender string) groupSender {
+	if n, err := phoneNumber(sender); err == nil {
+		return groupSender{Number: n, Resolved: true}
+	}
+	user, server, _ := strings.Cut(strings.TrimSpace(sender), "@")
+	return groupSender{Number: normalizeJID(user), Server: server}
 }
 
 func (b *Bridge) apiDevOutbox(w http.ResponseWriter, r *http.Request) {

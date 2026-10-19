@@ -14,8 +14,10 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"runtime/debug"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -1882,6 +1884,23 @@ func runHeading(m Inbound, s *brainSettings, pid int) string {
 		model = "the CLI's default"
 	}
 	return fmt.Sprintf("── Run for %s from %s, pid %d, model %s ──", m.JID, m.Sender, pid, model)
+}
+
+// runHeadingRE matches a heading runHeading wrote, after the time
+// readStream puts in front of every line, and takes its pid. The pid is
+// the last one in it: a chat or a sender cannot end the line the way the
+// model does.
+var runHeadingRE = regexp.MustCompile(`^\[\d\d:\d\d:\d\d\] ── Run for .*, pid (\d+), model .* ──$`)
+
+// runHeadingPID returns the pid of the run whose heading line is, and
+// false for any other line of the activity log.
+func runHeadingPID(line string) (int, bool) {
+	m := runHeadingRE.FindStringSubmatch(line)
+	if m == nil {
+		return 0, false
+	}
+	pid, err := strconv.Atoi(m[1])
+	return pid, err == nil
 }
 
 // streamLogMax is the size at which the activity log is rotated when a run

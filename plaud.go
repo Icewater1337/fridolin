@@ -390,11 +390,12 @@ type PlaudManager struct {
 	accountBusy  bool
 	accountTried time.Time
 	// bg is the background work Stop waits for.
-	bg   sync.WaitGroup
-	stop context.CancelFunc
-	// life is the poller's context from Start, which Stop cancels; checks
-	// started from the dashboard run on it too.
+	bg sync.WaitGroup
+	// life is the context the poller and every check run on, the ones
+	// started from the dashboard too, also before Start. stop ends it:
+	// Stop does, and so does the end of the context Start is given.
 	life context.Context
+	stop context.CancelFunc
 	// checkedLogin is the login (see loginStamp) whose account the state was
 	// last checked against. Only polls use it, one at a time.
 	checkedLogin string
@@ -417,6 +418,7 @@ type PlaudManager struct {
 // NewPlaudManager creates the manager. The caller sets submit and notify.
 func NewPlaudManager(cfgs *ConfigStore, brains *BrainManager) *PlaudManager {
 	p := &PlaudManager{cfgs: cfgs, brains: brains, inFlight: map[string]bool{}}
+	p.life, p.stop = context.WithCancel(context.Background())
 	p.run = p.runCLI
 	return p
 }
@@ -970,13 +972,13 @@ func (p *PlaudManager) me(ctx context.Context) (map[string]string, error) {
 func (p *PlaudManager) refreshAccount(checked time.Time) {
 	p.mu.Lock()
 	due := time.Since(checked) >= plaudAccountEvery && time.Since(p.accountTried) >= plaudAccountEvery
-	if !due || p.accountBusy || p.connect != nil && p.connect.State == "running" {
+	if p.stopping || !due || p.accountBusy || p.connect != nil && p.connect.State == "running" {
 		p.mu.Unlock()
 		return
 	}
 	p.accountBusy, p.accountTried = true, time.Now()
-	p.mu.Unlock()
 	p.bg.Add(1)
+	p.mu.Unlock()
 	go func() {
 		defer p.bg.Done()
 		ctx, cancel := context.WithTimeout(p.lifetime(), 30*time.Second)
@@ -1784,7 +1786,12 @@ func (p *PlaudManager) notifyAuthExpired() {
 	if err != nil {
 		return
 	}
-	if err := p.notify(context.Background(), jid, plaudExpiredAlert); err != nil {
+	// A check or the poller sends it, and Stop waits for both: a send that
+	// hangs must not hold Stop up. A notice Stop cuts short goes out after
+	// the next start.
+	ctx, cancel := context.WithTimeout(p.lifetime(), 30*time.Second)
+	defer cancel()
+	if err := p.notify(ctx, jid, plaudExpiredAlert); err != nil {
 		log.Printf("plaud: could not send the expiry notice: %v", err)
 		return
 	}
@@ -1811,27 +1818,43 @@ func (p *PlaudManager) removeFetchFolders() {
 	}
 }
 
-// Start runs the poller, after removing what fetches that never ended left
-// behind. The dashboard may already be serving then, but a check it
-// started meanwhile has not reached a fetch yet: it looks up the account
-// and lists the recordings first, each a run of the CLI.
+// Start runs the poller until ctx ends or Stop, after removing what
+// fetches that never ended left behind. The dashboard may already be
+// serving then, but a check it started meanwhile has not reached a fetch
+// yet: it looks up the account and lists the recordings first, each a run
+// of the CLI.
 func (p *PlaudManager) Start(ctx context.Context) {
 	p.removeFetchFolders()
-	ctx, cancel := context.WithCancel(ctx)
-	p.mu.Lock()
-	p.stop, p.life = cancel, ctx
-	p.mu.Unlock()
+	context.AfterFunc(ctx, p.stop)
+	if !p.goBackground() {
+		return
+	}
 	go func() {
+		defer p.bg.Done()
 		next := time.Now().Add(15 * time.Second) // let WhatsApp connect first
 		for {
 			select {
-			case <-ctx.Done():
+			case <-p.life.Done():
 				return
 			case <-time.After(5 * time.Second):
 			}
-			next = p.tick(ctx, next)
+			next = p.tick(p.life, next)
 		}
 	}()
+}
+
+// goBackground counts work about to start in a goroutine of its own as
+// background work Stop waits for, which must call bg.Done when it ends.
+// false means Fridolin is stopping: the work must not start, since Stop
+// may be waiting already.
+func (p *PlaudManager) goBackground() bool {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if p.stopping {
+		return false
+	}
+	p.bg.Add(1)
+	return true
 }
 
 // tick checks Plaud if a check is due at due, and returns when the next
@@ -1858,27 +1881,17 @@ func (p *PlaudManager) tick(ctx context.Context, due time.Time) time.Time {
 	return time.Now().Add(cfg.Plaud.interval())
 }
 
-// lifetime is the context a check runs on: Start's, so that Stop ends it,
-// or Background before Start.
-func (p *PlaudManager) lifetime() context.Context {
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	if p.life != nil {
-		return p.life
-	}
-	return context.Background()
-}
+// lifetime is the context a check runs on, which Stop ends.
+func (p *PlaudManager) lifetime() context.Context { return p.life }
 
 // Stop ends the poller, a running check and a running sign-in, and waits
-// for the sign-in, a look-up of the account and the recording of a run
-// that ended. Recordings whose runs it stops are handed over again at the
-// next start.
+// for them, a look-up of the account and the recording of a run that
+// ended: nothing writes to the data folder once it returns. Recordings
+// whose runs it stops are handed over again at the next start.
 func (p *PlaudManager) Stop() {
 	p.mu.Lock()
 	p.stopping = true
-	if p.stop != nil {
-		p.stop()
-	}
+	p.stop()
 	if p.connect != nil && p.connect.cancel != nil {
 		p.connect.cancel()
 	}
@@ -1934,6 +1947,7 @@ var (
 	errPlaudSigningIn        = errors.New("already signing in — finish in the browser tab Plaud opened")
 	errPlaudNotConnected     = errors.New("the Plaud CLI is not signed in")
 	errPlaudSendingOff       = errors.New("sending new recordings to a brain is off")
+	errPlaudStopping         = errors.New("stopping: the next start checks Plaud")
 )
 
 // PlaudCLI says whether the Plaud CLI is installed, where, and which
@@ -2099,11 +2113,15 @@ func (p *PlaudManager) Connect() error {
 		log.Printf("plaud: %s", w)
 	}
 	p.mu.Lock()
+	if p.stopping {
+		p.mu.Unlock()
+		return errPlaudStopping
+	}
 	if p.connect != nil && p.connect.State == "running" {
 		p.mu.Unlock()
 		return errPlaudSigningIn
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
+	ctx, cancel := context.WithTimeout(p.lifetime(), 10*time.Minute)
 	job := &connectJob{State: "running", cancel: cancel}
 	p.connect = job
 	// Only a login that is Fridolin's and in use: not one brain_access
@@ -2115,11 +2133,11 @@ func (p *PlaudManager) Connect() error {
 	if refused {
 		refusedLogin = p.loginStamp()
 	}
-	p.mu.Unlock()
-
 	// Stop cancels it and waits for its end: it records the sign-in in the
-	// data folder, and asks who signed in.
+	// data folder, and asks who signed in. Register while holding mu so
+	// Stop cannot finish waiting between the check and Add.
 	p.bg.Add(1)
+	p.mu.Unlock()
 	go func() {
 		defer p.bg.Done()
 		defer cancel()
@@ -2262,8 +2280,9 @@ func (p *PlaudManager) Disconnect() error {
 }
 
 // CheckNow starts a check in the background, on the poller's lifetime so
-// that stopping Fridolin ends it. false means one is already running, which
-// covers this one.
+// that stopping Fridolin ends it, and Stop waits for its end. false means
+// one is already running, which covers this one. Once Fridolin is stopping
+// none starts.
 func (p *PlaudManager) CheckNow() (bool, error) {
 	if !p.connected() {
 		return false, errPlaudNotConnected
@@ -2274,7 +2293,14 @@ func (p *PlaudManager) CheckNow() (bool, error) {
 	if !p.beginPoll() {
 		return false, nil
 	}
+	if !p.goBackground() {
+		p.mu.Lock()
+		p.busy = false
+		p.mu.Unlock()
+		return false, errPlaudStopping
+	}
 	go func() {
+		defer p.bg.Done()
 		ctx, cancel := context.WithTimeout(p.lifetime(), 10*time.Minute)
 		defer cancel()
 		if err := p.runPoll(ctx); err != nil {
@@ -2412,6 +2438,8 @@ func (b *Bridge) apiPlaudSync(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusPreconditionFailed, "Plaud is not connected")
 	case errors.Is(err, errPlaudSendingOff):
 		writeErr(w, http.StatusConflict, "Turn on “Send new recordings to a brain” first: a check hands new recordings to the brain")
+	case errors.Is(err, errPlaudStopping):
+		writeErr(w, http.StatusServiceUnavailable, "Fridolin is stopping: the next start checks Plaud")
 	case err != nil:
 		writeErr(w, http.StatusInternalServerError, err.Error())
 	case !started:

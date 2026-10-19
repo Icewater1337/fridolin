@@ -87,6 +87,51 @@ func TestCheckShowsWhoMayDM(t *testing.T) {
 	}
 }
 
+// check says for each allowed group whose messages there reach its brain,
+// as groupSenderAllowed decides: the numbers its group_members entry
+// lists, every member for ["*"], and without an entry whom allowed_numbers
+// admits.
+func TestCheckShowsWhoIsHeardInGroups(t *testing.T) {
+	const group = "120363000000000000@g.us"
+	cases := []struct {
+		name   string
+		access string // config fields that decide who is heard
+		heard  string // the group's line
+	}{
+		{"listed", `"group_members": {"` + group + `": ["+1 555 987 6543", "15551234567"]}`, "heard in " + group + ": [15559876543 15551234567] (group_members)"},
+		{"everyone", `"group_members": {"` + group + `": ["*"]}`, "heard in " + group + `: every member (group_members is ["*"])`},
+		{"an entry of no one", `"group_members": {"` + group + `": []}`, "heard in " + group + ": nobody (its group_members entry lists no one)"},
+		{"no entry", "", "heard in " + group + ": [15551234567] (no group_members entry: allowed_numbers)"},
+		{"no entry, nobody may DM", `"allowed_numbers": []`, "heard in " + group + ": nobody (no group_members entry, and allowed_numbers is empty)"},
+		{"no entry, anyone may DM", `"allowed_numbers": [], "allow_any_dm": true`, "heard in " + group + ": every member (no group_members entry, allow_any_dm is true and allowed_numbers is empty)"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			home := t.TempDir()
+			t.Setenv("HOME", home)
+			access := `"allowed_numbers": ["15551234567"]`
+			if strings.Contains(c.access, "allowed_numbers") {
+				access = c.access
+			} else if c.access != "" {
+				access += ", " + c.access
+			}
+			path := writeConfig(t, `{
+				"claude_path": "`+fakeClaudeEnv(t, 0)+`",
+				"data_dir": "`+home+`/data",
+				"allowed_groups": ["`+group+`"],
+				`+access+`
+			}`)
+			var out bytes.Buffer
+			if err := writeCheck(&out, checkOptions{config: path}); err != nil {
+				t.Fatal(err)
+			}
+			if got := lineWith(out.String(), "heard in"); strings.TrimSpace(got) != c.heard {
+				t.Errorf("got %q, want %q in:\n%s", got, c.heard, out.String())
+			}
+		})
+	}
+}
+
 // lineWith returns the first line of out that contains s.
 func lineWith(out, s string) string {
 	for _, l := range strings.Split(out, "\n") {
@@ -713,6 +758,9 @@ func TestCheckRedact(t *testing.T) {
 		brainGroup    = "120363000000000002@g.us"
 		ownerJID      = owner + "@s.whatsapp.net"
 		strangerGroup = "120363000000000003@g.us"
+		// memberOnly is in group_members only, which check prints as
+		// digits, with no + or JID that would give it away as a number.
+		memberOnly = "15550001234" // personal-data:ignore (a fictional 555 number)
 	)
 	lid := strings.Repeat("7", 15) + "@lid"
 	path := filepath.Join(home, ".fridolin", "config.json")
@@ -724,6 +772,7 @@ func TestCheckRedact(t *testing.T) {
 		"data_dir": "~/.fridolin",
 		"allowed_numbers": ["` + owner + `", "` + otherWritten + `"],
 		"allowed_groups": ["` + allowedGroup + `", "` + oddGroup + `"],
+		"group_members": {"` + allowedGroup + `": ["` + memberOnly + `"]},
 		"not_a_setting": true` + brainDirsJSON(t,
 		brainFolder(t, home+"/brains/main", BrainManifest{ID: "main", Routing: BrainRouting{HandlesDMs: true, Groups: []string{brainGroup}}}),
 	) + `}`
@@ -745,7 +794,7 @@ func TestCheckRedact(t *testing.T) {
 		}
 		return out.String(), logs()
 	}
-	secrets := []string{home, resolvePath(home), regexp.QuoteMeta(home), owner, other, otherWritten, oddGroup,
+	secrets := []string{home, resolvePath(home), regexp.QuoteMeta(home), owner, other, otherWritten, oddGroup, memberOnly,
 		"120363000000000001", "120363000000000002", "120363000000000003", strings.Repeat("7", 15)}
 
 	t.Run("redacted", func(t *testing.T) {
@@ -761,6 +810,8 @@ func TestCheckRedact(t *testing.T) {
 			"  data dir:  ~/.fridolin\n",
 			"  DM allow:  [1…67 +1…43]\n",
 			"  groups:    […01@g.us …04]\n",
+			"  heard in …01@g.us: [1…34] (group_members)\n",
+			"  heard in …04: [1…67 +1…43] (no group_members entry: allowed_numbers)\n",
 			"→ ~/brains/main (dms=true default=false groups=[…02@g.us])\n",
 			"  route 1…67@s.whatsapp.net → main\n",
 			"  route …01@g.us → ",
@@ -784,7 +835,7 @@ func TestCheckRedact(t *testing.T) {
 
 	t.Run("as it is", func(t *testing.T) {
 		out, logs := report(t, false)
-		for _, s := range append([]string{home}, owner, otherWritten, oddGroup, allowedGroup, brainGroup, strangerGroup, lid, "Config OK: "+path+"\n", "  DM allow:  ["+owner+" "+otherWritten+"]\n") {
+		for _, s := range append([]string{home}, owner, otherWritten, oddGroup, allowedGroup, brainGroup, strangerGroup, lid, memberOnly, "Config OK: "+path+"\n", "  DM allow:  ["+owner+" "+otherWritten+"]\n") {
 			if !strings.Contains(out, s) {
 				t.Errorf("no %q in:\n%s", s, out)
 			}
@@ -799,6 +850,20 @@ func TestCheckRedact(t *testing.T) {
 		red, _ := report(t, true)
 		if got, want := strings.Count(red, "\n"), strings.Count(out, "\n"); got != want {
 			t.Errorf("the redacted report has %d lines, the plain one %d", got, want)
+		}
+	})
+
+	// The chats of the config file, read before it loads (addConfig), are
+	// masked as written: loading logs what it finds odd that way. No such
+	// log names a group_members number today, so only this case needs
+	// addConfig to add them; the report masks the loaded ones.
+	t.Run("as written", func(t *testing.T) {
+		r := newRedactor(home)
+		r.addConfig(path)
+		for _, s := range []string{owner, otherWritten, oddGroup, allowedGroup, memberOnly} {
+			if got := r.text(s); strings.Contains(got, s) {
+				t.Errorf("%q, from the config file, is redacted to %q", s, got)
+			}
 		}
 	})
 
