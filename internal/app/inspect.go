@@ -88,7 +88,7 @@ func WriteCheck(w io.Writer, o CheckOptions) error {
 }
 
 // CheckReport writes what check says of cfg, the config loaded from path.
-func CheckReport(w io.Writer, path string, cfg *config.File, o CheckOptions) error {
+func CheckReport(w io.Writer, path string, cfg *config.Settings, o CheckOptions) error {
 	// Before even the version probe: it runs outside the sandbox, so a
 	// Claude planted in a brain's PATH folder must not be selected.
 	SetBridgePATH(cfg)
@@ -190,7 +190,7 @@ func claudeSummary(path string, passthrough []string) string {
 
 // dmAllowSummary says who may DM the bridge. A bare empty list would read
 // as "nobody" even when allow_any_dm lets everyone in.
-func dmAllowSummary(cfg *config.File) string {
+func dmAllowSummary(cfg *config.Settings) string {
 	switch {
 	case cfg.AnyoneCanDM():
 		return "anyone (allow_any_dm is true and allowed_numbers is empty)"

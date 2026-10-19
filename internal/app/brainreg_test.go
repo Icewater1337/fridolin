@@ -6,7 +6,6 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
-	"runtime"
 	"slices"
 	"strings"
 	"testing"
@@ -69,13 +68,13 @@ func TestCheckBrainPath(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, c := range cases {
-		_, problems, _ := CheckBrainPath(c.path, cfg, others)
+		_, problems, _ := CheckBrainPath(c.path, resolvedSettings(t, cfg), others)
 		if (len(problems) == 0) != c.ok {
 			t.Errorf("CheckBrainPath(%q): problems=%v, want ok=%v", c.path, problems, c.ok)
 		}
 	}
 	// macOS guards ~/Documents from the bridge itself, not the sandbox.
-	if _, _, warnings := CheckBrainPath("~/Documents/assistant", cfg, others); len(warnings) != 1 || !strings.Contains(warnings[0], "Privacy & Security") {
+	if _, _, warnings := CheckBrainPath("~/Documents/assistant", resolvedSettings(t, cfg), others); len(warnings) != 1 || !strings.Contains(warnings[0], "Privacy & Security") {
 		t.Errorf("warnings for ~/Documents = %q, want one naming the privacy settings", warnings)
 	}
 }
@@ -116,7 +115,7 @@ func TestResolveBrainsRefusesFoldersTheSandboxProtects(t *testing.T) {
 			for i := range cfg.BrainDirs {
 				cfg.BrainDirs[i].Path = fsx.ExpandHome(cfg.BrainDirs[i].Path, home)
 			}
-			specs, issues := ResolveBrains(cfg)
+			specs, issues := ResolveBrains(resolvedSettings(t, cfg))
 			var ids []string
 			for _, s := range specs {
 				ids = append(ids, s.Manifest.ID)
@@ -467,14 +466,8 @@ func TestLeftOutBrainsKeepTheirChats(t *testing.T) {
 		t.Cleanup(mgr.Stop)
 		p := plaud.New(plaud.Options{
 			PlaudDir: filepath.Join(home, "data", "plaud"), Home: home,
-			Settings: func() *plaud.Snapshot {
-				settings, err := config.Resolve(cfg, config.Paths{Home: home}, runtime.GOOS)
-				if err != nil {
-					t.Fatal(err)
-				}
-				return plaudSnapshotOf(*settings)
-			},
-			FindCLI: findPlaudCLI, CLIVersion: plaudCLIVersion,
+			Settings: func() *plaud.Snapshot { return plaudSnapshotOf(*cfg) },
+			FindCLI:  findPlaudCLI, CLIVersion: plaudCLIVersion,
 			Target:     func(id string) *plaud.Target { return plaudTargetOf(mgr, id, nil) },
 			HeldTarget: func() string { return mgr.HeldFor("", false) },
 		})

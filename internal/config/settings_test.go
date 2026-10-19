@@ -20,7 +20,7 @@ func TestSettingsPreserveEffectiveWire(t *testing.T) {
 	for name, file := range map[string]*File{"empty": {}, "fixture": &fixture, "explicit zero": {AllowAnyDM: new(true), RunTimeoutMinutes: new(0), MaxConcurrentRuns: new(0), Queue: QueueConfig{Notify: new(false)}, Dashboard: DashboardConfig{RequireToken: new(false)}, ScriptAPI: ScriptAPIConfig{TokenlessSend: new(false)}, Backup: BackupConfig{KeepVersionsDays: new(0), IncludeBridgeConfig: new(false)}, Debounce: DebounceConfig{QuietMS: new(0), MaxWaitMS: new(0)}}} {
 		t.Run(name, func(t *testing.T) {
 			paths := Paths{Home: t.TempDir()}
-			old, err := ResolveFile(file, paths, "darwin")
+			old, err := resolveFile(file, paths, "darwin")
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -80,7 +80,7 @@ func TestRuntimeSettingsPublishAtomically(t *testing.T) {
 	}
 	first := cs.Get()
 	calls := 0
-	cs.SubscribeRuntime(func(old, next *Settings) {
+	cs.Subscribe(func(old, next *Settings) {
 		calls++
 		if old.Live.AllowAnyDM || !next.Live.AllowAnyDM || next.Live.Queue.Notify {
 			t.Fatal("subscriber policy does not match saved values")

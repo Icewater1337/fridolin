@@ -13,8 +13,8 @@ import (
 
 // AccessPolicy is the application's read-only projection from a config snapshot.
 // The policy never retains or rereads the config store.
-func AccessPolicy(cfg *config.File) access.Policy {
-	return access.Policy{AllowedNumbers: cfg.AllowedNumbers, AllowAnyDM: cfg.AllowsAnyDM(), AllowedGroups: cfg.AllowedGroups, GroupMembers: cfg.GroupMembers, Triggers: cfg.Triggers}
+func AccessPolicy(cfg *config.Settings) access.Policy {
+	return access.Policy{AllowedNumbers: cfg.AllowedNumbers, AllowAnyDM: cfg.AllowAnyDM, AllowedGroups: cfg.AllowedGroups, GroupMembers: cfg.GroupMembers, Triggers: cfg.Triggers}
 }
 
 func accessPolicyOf(cfg config.Live) access.Policy {
@@ -71,7 +71,7 @@ func BackupFiles(cfgs *config.Store) (backup.BridgeFiles, error) {
 }
 
 // CredentialsDir is where per-brain credential files live.
-func CredentialsDir(cfg *config.File) string {
+func CredentialsDir(cfg *config.Settings) string {
 	if cfg.Sandbox.CredentialsDir != "" {
 		return cfg.Sandbox.CredentialsDir
 	}
@@ -81,10 +81,9 @@ func CredentialsDir(cfg *config.File) string {
 // RuntimeConfig combines live configuration with the process startup values.
 // Get/Snapshot retain saved next-start values for the API. Only this copied
 // value pins startup settings; slices/maps retain the snapshot's read-only rule.
-func RuntimeConfig(cs *config.Store) *config.File {
+func RuntimeConfig(cs *config.Store) *config.Settings {
 	settings := RuntimeSettings(cs)
-	c := config.EffectiveFile(&settings)
-	return &c
+	return &settings
 }
 
 // RuntimeSettings pins startup resources and permits immediate tightening of

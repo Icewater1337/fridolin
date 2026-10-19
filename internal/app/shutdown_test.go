@@ -53,7 +53,7 @@ func TestStopRunsOnce(t *testing.T) {
 	if n := strings.Count(logs.String(), "Bridge stopped."); n != 1 {
 		t.Errorf("the bridge stopped %d times, want once:\n%s", n, logs.String())
 	}
-	lock, err := platform.AcquireLock(tb.cfgs.Effective().DataDir)
+	lock, err := platform.AcquireLock(tb.cfgs.Get().DataDir)
 	if err != nil {
 		t.Fatalf("the data dir is still locked after Stop: %v", err)
 	}
@@ -183,7 +183,7 @@ func TestServe(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			tb := newTestBridge(t, `, "http_listen": "127.0.0.1:0"`)
-			dataDir := tb.cfgs.Effective().DataDir
+			dataDir := tb.cfgs.Get().DataDir
 			var logs lockedBuffer
 			defer log.SetOutput(log.Writer())
 			log.SetOutput(&logs)
@@ -685,7 +685,7 @@ func TestShutdownKeepsWhatComesInDuringTheStop(t *testing.T) {
 	t.Setenv("FRIDOLIN_FAKE_SLEEP_MS", "10")
 
 	b := h.b
-	db := testStoreSQL(t, b.cfgs.Effective().DBPath)
+	db := testStoreSQL(t, b.cfgs.Get().DBPath)
 	stopped := make(chan struct{})
 	go func() {
 		h.Shutdown()

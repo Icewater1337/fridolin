@@ -164,7 +164,7 @@ func TestAuthorizeReadsTheBearerScheme(t *testing.T) {
 // The scripts token is a file in the data dir, made once and kept.
 func TestScriptsTokenFile(t *testing.T) {
 	tb := newTestBridge(t, "")
-	path := filepath.Join(tb.cfgs.Effective().DataDir, "scripts.token")
+	path := filepath.Join(tb.cfgs.Get().DataDir, "scripts.token")
 	data, err := os.ReadFile(path)
 	if err != nil || strings.TrimSpace(string(data)) != tb.scriptAuth.scripts.Value() {
 		t.Fatalf("scripts.token = %q, %v", data, err)

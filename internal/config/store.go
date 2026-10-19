@@ -36,8 +36,8 @@ type Store struct {
 	boot        Boot
 	paths       Paths
 	goos        string
-	startup     *File                       // the effective configuration the process started with
-	checkBrains func(old, next *File) error // command-owned brain-set validation
+	startup     *Settings                       // the effective configuration the process started with
+	checkBrains func(old, next *Settings) error // command-owned brain-set validation
 
 	mu   sync.Mutex // serialises Update
 	snap atomic.Pointer[Snapshot]
@@ -47,7 +47,7 @@ type Store struct {
 	// the order they were swapped in, one at a time.
 	notifyMu sync.Mutex
 	subsMu   sync.Mutex
-	subs     []func(old, new *File)
+	subs     []func(old, new *Settings)
 }
 
 // Snapshot is one version of the configuration: the file layer, the
@@ -93,15 +93,16 @@ func Open(cfgPath string, options Options) (*Store, error) {
 		return nil, fmt.Errorf("reading config file %q: %w", cfgPath, err)
 	}
 
-	eff, err := ResolveFile(file, options.Paths, options.GOOS)
+	eff, err := resolveFile(file, options.Paths, options.GOOS)
 	if err != nil {
 		return nil, err
 	}
 	if file.DataDir == "" {
 		warnLegacyDataDir(eff.DataDir, options.Paths.Home)
 	}
-	WarnGroupsWithoutMembers(nil, eff)
-	cs := &Store{path: cfgPath, startup: eff, boot: bootOf(eff, options.Paths), paths: options.Paths, goos: options.GOOS, checkBrains: options.CheckBrains}
+	settings := settingsOf(eff, options.Paths)
+	WarnGroupsWithoutMembers(nil, settings)
+	cs := &Store{path: cfgPath, startup: settings, boot: bootOf(eff, options.Paths), paths: options.Paths, goos: options.GOOS, checkBrains: options.CheckBrains}
 	cs.snap.Store(&Snapshot{File: file, Effective: eff, Settings: settingsOf(eff, cs.paths), ETag: etagOf(raw), Version: 1})
 	return cs, nil
 }
@@ -136,11 +137,7 @@ func (cs *Store) Path() string { return cs.path }
 
 // Startup returns the effective configuration the process started with:
 // what the settings that need a restart still are.
-func (cs *Store) Startup() *File { return cs.startup }
-
-// Effective returns the compatibility file projection. Treat it as read-only: it is
-// shared by every goroutine until the next Update replaces it.
-func (cs *Store) Effective() *File { return cs.snap.Load().Effective }
+func (cs *Store) Startup() *Settings { return cs.startup }
 
 // Get returns resolved runtime settings from the atomic configuration snapshot.
 // Treat it and its slices and maps as read-only.
@@ -170,16 +167,10 @@ func MustClone(c *File) *File {
 // and new effective configurations. The subscribers hear of the updates in
 // the order they were made, and of one at a time, so fn must not call
 // Update: that waits for fn to return.
-func (cs *Store) Subscribe(fn func(old, new *File)) {
+func (cs *Store) Subscribe(fn func(old, new *Settings)) {
 	cs.subsMu.Lock()
 	defer cs.subsMu.Unlock()
 	cs.subs = append(cs.subs, fn)
-}
-
-// SubscribeRuntime delivers the same ordered publications as Subscribe using
-// resolved value settings. The callback must not call Update.
-func (cs *Store) SubscribeRuntime(fn func(old, next *Settings)) {
-	cs.Subscribe(func(old, next *File) { fn(settingsOf(old, cs.paths), settingsOf(next, cs.paths)) })
 }
 
 // Update applies mutate to a copy of the file layer, validates the result,
@@ -219,7 +210,7 @@ func (cs *Store) UpdateTx(etag string, mutate func(c *File, tx *Tx) error) (Upda
 	if err != nil {
 		return UpdateResult{}, err
 	}
-	return UpdateResult{Restart: restartRequired(cs.startup, next.Effective), ETag: next.ETag}, nil
+	return UpdateResult{Restart: restartRequired(cs.startup, next.Settings), ETag: next.ETag}, nil
 }
 
 // notify tells the subscribers that next replaced prev, and gives back
@@ -227,7 +218,7 @@ func (cs *Store) UpdateTx(etag string, mutate func(c *File, tx *Tx) error) (Upda
 // update is saved by then, and the other subscribers must still hear of it.
 func (cs *Store) notify(prev, next *Snapshot) {
 	defer cs.notifyMu.Unlock()
-	WarnGroupsWithoutMembers(prev.Effective, next.Effective)
+	WarnGroupsWithoutMembers(prev.Settings, next.Settings)
 	cs.subsMu.Lock()
 	subs := slices.Clone(cs.subs)
 	cs.subsMu.Unlock()
@@ -238,7 +229,7 @@ func (cs *Store) notify(prev, next *Snapshot) {
 					log.Printf("config: a subscriber panicked on the saved update: %v\n%s", r, debug.Stack())
 				}
 			}()
-			fn(prev.Effective, next.Effective)
+			fn(prev.Settings, next.Settings)
 		}()
 	}
 }
@@ -292,7 +283,7 @@ func (cs *Store) commit(etag string, mutate func(*File, *Tx) error) (prev, next 
 	}
 	// What is written is this version's file, whatever the edit made of it.
 	file.Version = Version
-	eff, err := cs.ResolveFile(file)
+	eff, err := cs.resolveFile(file)
 	if err != nil {
 		return prev, next, err
 	}
@@ -300,7 +291,7 @@ func (cs *Store) commit(etag string, mutate func(*File, *Tx) error) (prev, next 
 		if cs.checkBrains == nil {
 			return prev, next, errors.New("config: brain-set validation is not configured")
 		}
-		if err := cs.checkBrains(base.Effective, eff); err != nil {
+		if err := cs.checkBrains(base.Settings, settingsOf(eff, cs.paths)); err != nil {
 			return prev, next, err
 		}
 	}
@@ -353,7 +344,7 @@ func (cs *Store) reread(cur *Snapshot) (*Snapshot, error) {
 	file, err := decodeConfigFile(cs.path, data)
 	if err == nil {
 		var eff *File
-		if eff, err = cs.ResolveFile(file); err == nil {
+		if eff, err = cs.resolveFile(file); err == nil {
 			log.Printf("config: %s changed on disk since the bridge read it, and applies from now on", cs.path)
 			return &Snapshot{File: file, Effective: eff, Settings: settingsOf(eff, cs.paths), ETag: etag, Version: cur.Version + 1}, nil
 		}
@@ -521,7 +512,7 @@ func (tx *Tx) close() {
 // differ from the value the bridge started with, so they wait for a
 // restart. A setting changed and then changed back is not listed.
 func (cs *Store) RestartRequired() []string {
-	return restartRequired(cs.startup, cs.Effective())
+	return restartRequired(cs.startup, cs.Get())
 }
 
 func etagOf(data []byte) string {
@@ -621,32 +612,32 @@ func missingKeys(data []byte, t reflect.Type, prefix string) []string {
 // what brains may reach. LogSecurityChanges logs every change to them.
 var securitySettings = []struct {
 	name string
-	get  func(*File) any // a string, or a []string for a list
+	get  func(*Settings) any // a string, or a []string for a list
 }{
-	{"allowed_numbers", func(c *File) any { return c.AllowedNumbers }},
-	{"allow_any_dm", func(c *File) any { return fmt.Sprint(c.AllowsAnyDM()) }},
-	{"allowed_groups", func(c *File) any { return c.AllowedGroups }},
-	{"group_members", func(c *File) any { return GroupMemberPairs(c.GroupMembers) }},
-	{"dangerously_skip_permissions", func(c *File) any { return fmt.Sprint(c.DangerouslySkipPermissions) }},
-	{"inherit_claude_user_config", func(c *File) any { return fmt.Sprint(c.InheritClaudeUserConfig) }},
-	{"child_env_passthrough", func(c *File) any { return c.ChildEnvPassthrough }},
-	{"sandbox.enabled", func(c *File) any { return fmt.Sprint(c.Sandbox.Enabled) }},
-	{"sandbox.deny_paths", func(c *File) any { return c.Sandbox.DenyPaths }},
-	{"sandbox.allow_paths", func(c *File) any { return c.Sandbox.AllowPaths }},
-	{"sandbox.git_config", func(c *File) any { return c.Sandbox.GitConfig }},
-	{"sandbox.credentials_dir", func(c *File) any { return c.Sandbox.CredentialsDir }},
-	{"dashboard.require_token", func(c *File) any { return fmt.Sprint(c.DashboardRequiresToken()) }},
-	{"ingest.enabled", func(c *File) any { return fmt.Sprint(c.Ingest.Enabled) }},
-	{"script_api.tokenless_send", func(c *File) any { return fmt.Sprint(c.TokenlessSend()) }},
-	{"http_listen", func(c *File) any { return c.HTTPListen }},
-	{"data_dir", func(c *File) any { return c.DataDir }},
-	{"db_path", func(c *File) any { return c.DBPath }},
+	{"allowed_numbers", func(c *Settings) any { return c.AllowedNumbers }},
+	{"allow_any_dm", func(c *Settings) any { return fmt.Sprint(c.AllowAnyDM) }},
+	{"allowed_groups", func(c *Settings) any { return c.AllowedGroups }},
+	{"group_members", func(c *Settings) any { return GroupMemberPairs(c.GroupMembers) }},
+	{"dangerously_skip_permissions", func(c *Settings) any { return fmt.Sprint(c.DangerouslySkipPermissions) }},
+	{"inherit_claude_user_config", func(c *Settings) any { return fmt.Sprint(c.InheritClaudeUserConfig) }},
+	{"child_env_passthrough", func(c *Settings) any { return c.ChildEnvPassthrough }},
+	{"sandbox.enabled", func(c *Settings) any { return fmt.Sprint(c.Sandbox.Enabled) }},
+	{"sandbox.deny_paths", func(c *Settings) any { return c.Sandbox.DenyPaths }},
+	{"sandbox.allow_paths", func(c *Settings) any { return c.Sandbox.AllowPaths }},
+	{"sandbox.git_config", func(c *Settings) any { return c.Sandbox.GitConfig }},
+	{"sandbox.credentials_dir", func(c *Settings) any { return c.Sandbox.CredentialsDir }},
+	{"dashboard.require_token", func(c *Settings) any { return fmt.Sprint(c.Dashboard.RequireToken) }},
+	{"ingest.enabled", func(c *Settings) any { return fmt.Sprint(c.Ingest.Enabled) }},
+	{"script_api.tokenless_send", func(c *Settings) any { return fmt.Sprint(c.ScriptAPI.TokenlessSend) }},
+	{"http_listen", func(c *Settings) any { return c.HTTPListen }},
+	{"data_dir", func(c *Settings) any { return c.DataDir }},
+	{"db_path", func(c *Settings) any { return c.DBPath }},
 }
 
 // LogSecurityChanges logs, in one line, how an update changed the security
 // settings, so the log shows afterwards when the sandbox went off or who
 // was let in. A list shows what was added (+) and removed (-).
-func LogSecurityChanges(prev, next *File) {
+func LogSecurityChanges(prev, next *Settings) {
 	var changes []string
 	for _, s := range securitySettings {
 		switch a, b := s.get(prev), s.get(next); a := a.(type) {
@@ -698,7 +689,10 @@ func warnUnknownKeys(path string, data []byte) {
 func (cs *Store) Paths() Paths { return cs.paths }
 
 // Resolve derives values using this store's captured process inputs.
-func (cs *Store) ResolveFile(file *File) (*File, error) { return ResolveFile(file, cs.paths, cs.goos) }
+func (cs *Store) resolveFile(file *File) (*File, error) { return resolveFile(file, cs.paths, cs.goos) }
 
 // Boot returns the immutable process-start values.
 func (cs *Store) Boot() Boot { return cs.boot }
+
+// Resolve validates a proposed file and derives typed runtime values.
+func (cs *Store) Resolve(file *File) (*Settings, error) { return Resolve(file, cs.paths, cs.goos) }

@@ -28,13 +28,13 @@ func backupOptions(cfgs *config.Store, bm *BrainManager, notify func(context.Con
 func newProjectedBackup(cfgs *config.Store, bm *BrainManager, notify func(context.Context, *brain.Brain, string) error) *backup.Manager {
 	m := backup.New(backupOptions(cfgs, bm, notify))
 	// Publication succeeds before the schedule moves; failed saves never reach this callback.
-	cfgs.SubscribeRuntime(func(prev, next *config.Settings) { m.SettingsChanged(BackupSettings(prev), BackupSettings(next)) })
+	cfgs.Subscribe(func(prev, next *config.Settings) { m.SettingsChanged(BackupSettings(prev), BackupSettings(next)) })
 	return m
 }
 
 // notifyBackup resolves the selected runtime's current reply destination.
 func (b *App) notifyBackup(ctx context.Context, br *brain.Brain, text string) error {
-	jid := b.replyChatFor(br, b.cfgs.Effective())
+	jid := b.replyChatFor(br, b.cfgs.Get())
 	if jid == "" {
 		return fmt.Errorf("brain %s has no chat to send it to — set its reply chat", br.ID())
 	}

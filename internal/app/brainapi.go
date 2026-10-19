@@ -152,5 +152,5 @@ func bridgeBinary() string {
 // or the one it replies in. A brain sees only the polls of those, since a
 // poll's voters are the people of the chat it was sent to.
 func (b *App) ownsChat(br *brainruntime.Brain, chatJID string) bool {
-	return b.brainMgr.BrainFor(chatJID, chat.IsGroupJID(chatJID)) == br || b.replyChatFor(br, b.cfgs.Effective()) == chatJID
+	return b.brainMgr.BrainFor(chatJID, chat.IsGroupJID(chatJID)) == br || b.replyChatFor(br, b.cfgs.Get()) == chatJID
 }

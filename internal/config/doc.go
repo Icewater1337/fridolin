@@ -1,5 +1,6 @@
-// Package config owns persisted configuration values, validation, defaults and
-// migrations. Resolve preserves the current file shape and path derivation;
-// loading and transaction orchestration remain in the command until the next
-// extraction slice. Configuration resolution writes no directories.
+// Package config owns the persisted File schema, validation, defaults,
+// migrations and atomic configuration transactions. Resolve derives immutable
+// Settings with startup resources in Boot and resolved policy values in Live.
+// EffectiveFile preserves the dashboard's JSON representation. Paths, platform
+// and environment access are explicit inputs; resolution creates no directories.
 package config

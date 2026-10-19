@@ -35,7 +35,7 @@ func TestBridgeStartRemovesExpiredOTPHandoffs(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	requireTestDataDir(t, cfgs.Effective())
+	requireTestDataDir(t, cfgs.Get())
 	b, err := New(Options{Config: cfgs, NoWhatsApp: true})
 	if err != nil {
 		t.Fatal(err)
@@ -58,7 +58,7 @@ func TestHandOffOfACodeTheBrainAskedFor(t *testing.T) {
 	br.AppendEntry(history.Entry{TS: asked.Format(time.RFC3339), Chat: testDMChat, From: "main", Text: "🔐 Please send me the verification code", Type: history.Out})
 	tb.handleInbound(t.Context(), brain.Inbound{Inbound: chat.Inbound{JID: testDMChat, Sender: "15551234567", Text: "483920", Source: chat.SourceWhatsApp}})
 	var h otp.Record
-	data, err := os.ReadFile(filepath.Join(tb.cfgs.Effective().DataDir, "otp", "main.json"))
+	data, err := os.ReadFile(filepath.Join(tb.cfgs.Get().DataDir, "otp", "main.json"))
 	if err == nil {
 		err = json.Unmarshal(data, &h)
 	}

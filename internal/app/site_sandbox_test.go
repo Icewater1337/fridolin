@@ -77,7 +77,7 @@ func TestSandboxProfilerSitePaths(t *testing.T) {
 	cfg := &config.File{DataDir: filepath.Join(home, "data"), DBPath: filepath.Join(home, "db", "bridge.db")}
 	cfg.Sandbox.CredentialsDir = filepath.Join(home, "creds")
 	cfg.Sandbox.DenyPaths = []string{filepath.Join(home, "private")}
-	sp := NewSandboxProfiler(nil, cfg)
+	sp := NewSandboxProfiler(nil, resolvedSettings(t, cfg))
 	sp.SetConfigFile(filepath.Join(home, "etc", "config.json"))
 	sp.bridgeExe = filepath.Join(home, "bin", "fridolin")
 	deny, noWrite := sp.sitePaths()

@@ -8,8 +8,8 @@ import (
 
 // Settings separates startup resources from live policy. Treat published values as immutable.
 type Settings struct {
-	Boot Boot
-	Live Live
+	Boot
+	Live
 }
 
 // Live holds resolved global policy. BrainDirs are approval documents, whose
@@ -305,3 +305,6 @@ func plaudConfigOf(c PlaudSettings) PlaudConfig {
 		PhoneUpload:     c.PhoneUpload,
 	}
 }
+
+// AnyoneCanDM reports an explicitly open allowlist.
+func (s *Settings) AnyoneCanDM() bool { return len(s.AllowedNumbers) == 0 && s.AllowAnyDM }

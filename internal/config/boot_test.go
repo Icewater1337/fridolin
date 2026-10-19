@@ -42,10 +42,10 @@ func TestStoreBootSurvivesSavesAndIsAValueCopy(t *testing.T) {
 	if cs.Boot() != before {
 		t.Fatalf("save changed Boot: %#v -> %#v", before, cs.Boot())
 	}
-	if cs.Effective().DataDir != filepath.Join(home, "next") || cs.Effective().CodexModel != "live-model" || cs.FileCopy().DataDir != "~/next" {
+	if cs.Get().DataDir != filepath.Join(home, "next") || cs.Get().CodexModel != "live-model" || cs.FileCopy().DataDir != "~/next" {
 		t.Fatal("save lost the next-start or live values")
 	}
-	for _, dir := range []string{before.DataDir, cs.Effective().DataDir} {
+	for _, dir := range []string{before.DataDir, cs.Get().DataDir} {
 		if _, err := os.Stat(dir); !os.IsNotExist(err) {
 			t.Fatalf("save created runtime dir %q: %v", dir, err)
 		}
@@ -62,7 +62,7 @@ func TestStoreBootSurvivesSavesAndIsAValueCopy(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if restarted.Boot().DataDir != cs.Effective().DataDir || restarted.Boot().DashboardRequireToken {
+	if restarted.Boot().DataDir != cs.Get().DataDir || restarted.Boot().DashboardRequireToken {
 		t.Fatalf("next open did not apply saved Boot values: %#v", restarted.Boot())
 	}
 }

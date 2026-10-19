@@ -205,7 +205,7 @@ func TestOTPGuardDropsQuotedCode(t *testing.T) {
 
 	tb.whatsApp(t).ProcessMessage(replyEvent("483920", "🔐 Please send me the verification code"))
 
-	otpFile := filepath.Join(tb.cfgs.Effective().DataDir, "otp", "main.json")
+	otpFile := filepath.Join(tb.cfgs.Get().DataDir, "otp", "main.json")
 	testutil.WaitFor(t, 5*time.Second, "the code to be handed over", func() bool {
 		_, err := os.Stat(otpFile)
 		return err == nil
@@ -253,7 +253,7 @@ func TestOTPGuardIsScopedToTheChatAndTheWindow(t *testing.T) {
 			tb.handleInbound(context.Background(), c.m)
 
 			var handed struct{ Code, Typed, Chat string }
-			data, err := os.ReadFile(filepath.Join(tb.cfgs.Effective().DataDir, "otp", "main.json"))
+			data, err := os.ReadFile(filepath.Join(tb.cfgs.Get().DataDir, "otp", "main.json"))
 			if err == nil {
 				err = json.Unmarshal(data, &handed)
 			} else if os.IsNotExist(err) {

@@ -243,7 +243,7 @@ func runCmd(args []string) int {
 		log.Printf("loading config: %v", err)
 		return 1
 	}
-	cfg := cfgs.Effective()
+	cfg := cfgs.Get()
 	logDataDir(cfgs)
 
 	// A signal and the dashboard's restart both end ctx, and serve stops
@@ -266,13 +266,13 @@ func runCmd(args []string) int {
 	signalled, stopSignals := stopOnSignals(cancel, bridge.KillRuns)
 	defer stopSignals()
 
-	if platform.IsTerminal(os.Stdout) && cfg.HTTPEnabled() && !cfg.Dashboard.Disabled {
+	if platform.IsTerminal(os.Stdout) && cfg.HTTPEnabled && !cfg.Dashboard.Disabled {
 		// Only on an interactive terminal: even a code that works once
 		// must not end up in a log file.
 		code, _ := bridge.NewLoginCode()
 		fmt.Printf("\n  Dashboard: %s\n  (the link works once, within a minute; after that, run: fridolin open)\n\n", httpapi.LoginURL(cfg.HTTPListen, code))
 	}
-	if opts.open && cfg.HTTPEnabled() {
+	if opts.open && cfg.HTTPEnabled {
 		code, _ := bridge.NewLoginCode()
 		go func() { _ = platform.OpenBrowser(httpapi.LoginURL(cfg.HTTPListen, code)) }()
 	}
@@ -339,7 +339,7 @@ func runLogWithPaths(console io.Writer, configFlag string, paths config.Paths) (
 // config, which folders exist decides it.
 func logDataDir(cfgs *config.Store) {
 	home := cfgs.Paths().Home
-	dir := cfgs.Effective().DataDir
+	dir := cfgs.Get().DataDir
 	log.Printf("Data dir: %s (%s)", app.AbsPath(dir), config.DataDirSource(cfgs.FileCopy().DataDir, dir, home))
 }
 
@@ -375,7 +375,7 @@ func openCmd(args []string) {
 	if err != nil {
 		log.Fatalf("loading config: %v", err)
 	}
-	if !cfg.HTTPEnabled() || cfg.Dashboard.Disabled {
+	if !cfg.HTTPEnabled || cfg.Dashboard.Disabled {
 		log.Fatalf("the dashboard is turned off in %s", path)
 	}
 	url, err := controlcli.DashboardLink(cfg)

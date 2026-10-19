@@ -193,7 +193,7 @@ func TestEditOfAMessageTheHistoryLacks(t *testing.T) {
 				t.Errorf("activity = %+v, want only the request", a)
 			}
 			var got struct{ Code string }
-			data, err := os.ReadFile(filepath.Join(tb.cfgs.Effective().DataDir, "otp", "main.json"))
+			data, err := os.ReadFile(filepath.Join(tb.cfgs.Get().DataDir, "otp", "main.json"))
 			if err == nil {
 				err = json.Unmarshal(data, &got)
 			} else if errors.Is(err, os.ErrNotExist) {

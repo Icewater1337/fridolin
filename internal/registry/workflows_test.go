@@ -20,7 +20,7 @@ func testBrainRegistry(t *testing.T) (*Registry, string) {
 	home := fsx.Canonical(t.TempDir())
 	g := New(nil, Options{
 		Home:        func() string { return home },
-		CheckDir:    func(string, string, *config.File, string) error { return nil },
+		CheckDir:    func(string, string, *config.Settings, string) error { return nil },
 		HistoryFile: "history.md",
 		Templates:   Templates{Prompt: "Test prompt", IdentityMapPath: "identity-map.md"},
 	})
@@ -95,13 +95,13 @@ func TestRegistryWorkflowsKeepApprovalAndAllowlistingAtomic(t *testing.T) {
 	if err := g.Approve(second.ID, changed); err != nil {
 		t.Fatal(err)
 	}
-	if got := g.store.Effective().BrainDirs[1].Approved.Name; got != changed.Name {
+	if got := g.store.Get().BrainDirs[1].Approved.Name; got != changed.Name {
 		t.Fatalf("approved name: %q", got)
 	}
 	if err := g.UpdateBackup(second.ID, nil, []string{" *.tmp ", "", " cache/ "}); err != nil {
 		t.Fatal(err)
 	}
-	if got := g.store.Effective().BrainDirs[1].Approved.Backup.Exclude; strings.Join(got, ",") != "*.tmp,cache/" {
+	if got := g.store.Get().BrainDirs[1].Approved.Backup.Exclude; strings.Join(got, ",") != "*.tmp,cache/" {
 		t.Fatalf("backup exclusions: %v", got)
 	}
 	if err := g.Remove(first.ID); err != nil {
@@ -116,7 +116,7 @@ func TestRegistryInspectStopsAtRefusedPath(t *testing.T) {
 	t.Parallel()
 	g, home := testBrainRegistry(t)
 	called := 0
-	g.options.CheckDir = func(string, string, *config.File, string) error {
+	g.options.CheckDir = func(string, string, *config.Settings, string) error {
 		called++
 		return errors.New("protected test folder")
 	}

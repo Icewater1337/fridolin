@@ -301,7 +301,7 @@ func TestOneBrokenBrainDoesNotBlockTheOthers(t *testing.T) {
 	tb.addFolderBrain(t, manifest.Manifest{ID: "b", Name: "B"})
 	tb.addFolderBrain(t, manifest.Manifest{ID: "c", Name: "C", Routing: manifest.Routing{Default: true}})
 	breakApproved(t, tb, "b", func(m *manifest.Manifest) { m.Effort = "huge" })
-	if _, issues := ResolveBrains(tb.cfgs.Effective()); !slices.ContainsFunc(issues, func(is registry.Issue) bool { return is.ID == "b" && is.Kind == "invalid" }) {
+	if _, issues := ResolveBrains(tb.cfgs.Get()); !slices.ContainsFunc(issues, func(is registry.Issue) bool { return is.ID == "b" && is.Kind == "invalid" }) {
 		t.Fatalf("b is not invalid: %+v", issues)
 	}
 
@@ -340,7 +340,7 @@ func TestOneBrokenBrainDoesNotBlockTheOthers(t *testing.T) {
 			}
 		}
 	}
-	for _, ref := range tb.cfgs.Effective().BrainDirs {
+	for _, ref := range tb.cfgs.Get().BrainDirs {
 		if m := ref.Approved; m.ID == "a" && (m.Name != "A3" || !slices.Contains(m.Routing.Groups, "120363000000000000@g.us") || m.Routing.Default) {
 			t.Errorf("a's approved manifest: %+v", *m)
 		}

@@ -17,7 +17,7 @@ import (
 // retain their independent defensive defaults for direct callers. These tests
 // keep those contracts in step without imports from config into runtime code.
 func TestConfigDefaultsMatchRuntimeContracts(t *testing.T) {
-	cfg, err := config.ResolveFile(&config.File{}, ConfigPaths(), runtime.GOOS)
+	cfg, err := config.Resolve(&config.File{}, ConfigPaths(), runtime.GOOS)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -34,10 +34,10 @@ func TestConfigDefaultsMatchRuntimeContracts(t *testing.T) {
 	if a, b := outboundmsg.Chunk(text, 0), outboundmsg.Chunk(text, cfg.MaxChunkSize); !reflect.DeepEqual(a, b) {
 		t.Fatal("configured chunk default differs from direct-call fallback")
 	}
-	if _, err := config.ResolveFile(&config.File{MaxChunkSize: outboundmsg.MinChunkSize}, ConfigPaths(), runtime.GOOS); err != nil {
+	if _, err := config.Resolve(&config.File{MaxChunkSize: outboundmsg.MinChunkSize}, ConfigPaths(), runtime.GOOS); err != nil {
 		t.Fatalf("chunker's minimum is refused by config: %v", err)
 	}
-	if _, err := config.ResolveFile(&config.File{MaxChunkSize: outboundmsg.MinChunkSize - 1}, ConfigPaths(), runtime.GOOS); err == nil {
+	if _, err := config.Resolve(&config.File{MaxChunkSize: outboundmsg.MinChunkSize - 1}, ConfigPaths(), runtime.GOOS); err == nil {
 		t.Fatal("config accepted less than the chunker's minimum")
 	}
 }

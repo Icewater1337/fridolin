@@ -26,7 +26,7 @@ func TestStoreChecksBrainsBeforeWriting(t *testing.T) {
 	refused := errors.New("brain set refused")
 	var cs *Store
 	called := 0
-	check := func(old, next *File) error {
+	check := func(old, next *Settings) error {
 		called++
 		if cs.mu.TryLock() {
 			cs.mu.Unlock()
@@ -58,7 +58,7 @@ func TestStoreChecksBrainsBeforeWriting(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(dir, manifest.File)); !errors.Is(err, os.ErrNotExist) {
 		t.Errorf("refused transaction wrote manifest: %v", err)
 	}
-	if cs.Effective().LogLevel != "info" {
+	if cs.Get().LogLevel != "info" {
 		t.Error("refused transaction published a snapshot")
 	}
 	if _, err := cs.Update("", func(c *File) error { c.Comment = "after refusal"; return nil }); err != nil {

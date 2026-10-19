@@ -28,7 +28,7 @@ type PathOwner struct {
 }
 
 // pathOwners lists cfg's brain folders.
-func PathOwners(cfg *config.File) []PathOwner {
+func PathOwners(cfg *config.Settings) []PathOwner {
 	var out []PathOwner
 	for _, ref := range cfg.BrainDirs {
 		dir := ref.Dir(HomeDir())
@@ -109,7 +109,7 @@ var bridgePATH struct {
 // it before it loads the brains, at its start and on every change of the
 // config, and check calls it too, so that it sees the brains and profiles
 // the bridge would.
-func SetBridgePATH(cfg *config.File) map[string][]string {
+func SetBridgePATH(cfg *config.Settings) map[string][]string {
 	st := &bridgePATH
 	st.mu.Lock()
 	defer st.mu.Unlock()

@@ -112,7 +112,7 @@ func newHarness(t *testing.T, cfgJSON string) *harness {
 	if err != nil {
 		t.Fatal(err)
 	}
-	requireTestDataDir(t, cfgs.Effective())
+	requireTestDataDir(t, cfgs.Get())
 	b, err := New(Options{Config: cfgs, NoWhatsApp: true})
 	if err != nil {
 		t.Fatal(err)

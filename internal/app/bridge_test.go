@@ -72,13 +72,13 @@ func TestLoadConfigMaxMediaMB(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if cfg.MaxMediaMB != c.want || cfg.MaxMediaBytes() != int64(c.want)<<20 {
-				t.Errorf("max_media_mb %d (%d bytes), want %d", cfg.MaxMediaMB, cfg.MaxMediaBytes(), c.want)
+			if cfg.MaxMediaMB != c.want || (int64(cfg.MaxMediaMB)<<20) != int64(c.want)<<20 {
+				t.Errorf("max_media_mb %d (%d bytes), want %d", cfg.MaxMediaMB, (int64(cfg.MaxMediaMB) << 20), c.want)
 			}
 		})
 	}
-	if got := (&config.File{}).MaxMediaBytes(); got != 100<<20 {
-		t.Errorf("an unfilled config allows %d bytes, want the default", got)
+	if got := (int64(resolvedSettings(t, &config.File{}).MaxMediaMB) << 20); got != 100<<20 {
+		t.Errorf("a default config allows %d bytes, want the default", got)
 	}
 }
 
@@ -290,7 +290,7 @@ func TestProtectDataDirLeavesOtherUsersFolderAlone(t *testing.T) {
 	before := permOf(t, data)
 	logs := captureLog(t)
 
-	protectDataDir(&config.File{DataDir: data, DBPath: filepath.Join(data, "bridge.db")})
+	protectDataDir(resolvedSettings(t, &config.File{DataDir: data, DBPath: filepath.Join(data, "bridge.db")}))
 
 	if got := permOf(t, data); got != before {
 		t.Errorf("data dir of another user changed from %04o to %04o", before, got)
@@ -457,7 +457,7 @@ func TestLogDMAccessWarnsWhenAnyoneCanDM(t *testing.T) {
 			var buf strings.Builder
 			defer log.SetOutput(log.Writer())
 			log.SetOutput(&buf)
-			logDMAccess(tc.prev, tc.next)
+			logDMAccess(resolvedSettings(t, tc.prev), resolvedSettings(t, tc.next))
 			got := buf.String()
 			if tc.want == "" && got != "" {
 				t.Errorf("logged %q, want nothing", got)
@@ -471,7 +471,7 @@ func TestLogDMAccessWarnsWhenAnyoneCanDM(t *testing.T) {
 
 // ── brain routing ─────────────────────────────────────────────────────────
 
-func newTestManager(t *testing.T, cfg *config.File) *BrainManager {
+func newTestManager(t *testing.T, cfg *config.Settings) *BrainManager {
 	t.Helper()
 	requireTestDataDir(t, cfg)
 	mgr, err := NewBrainManager(cfg)
@@ -608,7 +608,7 @@ func TestSandboxProfileIsolatesBrains(t *testing.T) {
 	sp := NewSandboxProfiler(map[string][]string{
 		"personal": {"/opt/brains/personal"},
 		"team":     {"/opt/brains/team"},
-	}, cfg)
+	}, resolvedSettings(t, cfg))
 
 	profile := mustProfile(t, sp, "personal")
 
@@ -630,7 +630,7 @@ func TestSandboxProfileDeniesSecretsAndTheKeychains(t *testing.T) {
 	t.Setenv("HOME", home)
 
 	cfg := &config.File{DataDir: filepath.Join(home, "data"), Sandbox: config.SandboxConfig{AllowPaths: []string{filepath.Join(home, "Library")}}}
-	profile := mustProfile(t, NewSandboxProfiler(map[string][]string{"a": {"/tmp/a"}}, cfg), "a")
+	profile := mustProfile(t, NewSandboxProfiler(map[string][]string{"a": {"/tmp/a"}}, resolvedSettings(t, cfg)), "a")
 
 	for _, secret := range []string{".ssh", ".aws", ".gnupg", "Library/Mail", ".git-credentials", "Library/Keychains"} {
 		if !strings.Contains(profile, filepath.Join(home, secret)) {
@@ -658,7 +658,7 @@ func TestSandboxProfileKeepsCalendarTokensFromBrains(t *testing.T) {
 			if creds != "" {
 				cfg.Sandbox.CredentialsDir = filepath.Join(home, creds)
 			}
-			profile := mustProfile(t, NewSandboxProfiler(map[string][]string{"a": {"/tmp/a"}, "b": {"/tmp/b"}}, cfg), "a")
+			profile := mustProfile(t, NewSandboxProfiler(map[string][]string{"a": {"/tmp/a"}, "b": {"/tmp/b"}}, resolvedSettings(t, cfg)), "a")
 			if strings.Contains(profile, "google_calendar_") {
 				t.Errorf("the profile opens a calendar file:\n%s", profile)
 			}
@@ -678,7 +678,7 @@ func TestSandboxProfileIncludesConfiguredDenies(t *testing.T) {
 		DataDir: filepath.Join(home, "data"),
 		Sandbox: config.SandboxConfig{DenyPaths: []string{"/private/clients"}},
 	}
-	profile := mustProfile(t, NewSandboxProfiler(map[string][]string{"a": {"/tmp/a"}}, cfg), "a")
+	profile := mustProfile(t, NewSandboxProfiler(map[string][]string{"a": {"/tmp/a"}}, resolvedSettings(t, cfg)), "a")
 
 	if !strings.Contains(profile, `(deny file-read* (subpath "/private/clients"))`) {
 		t.Error("configured deny path missing from the profile")

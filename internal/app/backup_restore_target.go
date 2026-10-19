@@ -16,7 +16,7 @@ import (
 // around a brain, and not the credentials folder either; and new or empty.
 // It returns the folder, resolved.
 func (b *App) restoreTarget(p string) (string, error) {
-	cfg := b.cfgs.Effective()
+	cfg := b.cfgs.Get()
 	home := b.cfgs.Boot().Home
 	checkDir := brainDirCheck(b.cfgs)
 	target, problems, _ := registry.CheckPath(resolveExisting(fsx.ExpandHome(strings.TrimSpace(p), home)), registry.PathContext{

@@ -7,8 +7,8 @@ import (
 
 const requiredFilesEvery = 5 * time.Minute
 
-func (b *App) Warnings() []string { return RequiredFileWarnings(b.cfgs.Effective()) }
+func (b *App) Warnings() []string { return RequiredFileWarnings(b.cfgs.Get()) }
 
 func (b *App) watchRequiredFiles(ctx context.Context, every time.Duration) {
-	WatchRequiredFiles(ctx, every, RequiredFilesOptions{Config: b.cfgs.Effective, OwnerChat: ownerChat, Notify: b.outbox.Text})
+	WatchRequiredFiles(ctx, every, RequiredFilesOptions{Config: b.cfgs.Get, OwnerChat: ownerChat, Notify: b.outbox.Text})
 }

@@ -96,7 +96,7 @@ func TestPlaudPhoneUploadsThroughTheSite(t *testing.T) {
 		t.Error("a pairing code worked twice")
 	}
 	// The site's copy has the public key and nothing else.
-	site, err := os.ReadFile(filepath.Join(tb.cfgs.Effective().DataDir, "site", "devices.json"))
+	site, err := os.ReadFile(filepath.Join(tb.cfgs.Get().DataDir, "site", "devices.json"))
 	if err != nil || !strings.Contains(string(site), device) || !strings.Contains(string(site), phone.jwk.X) || strings.Contains(string(site), "hash") {
 		t.Errorf("site devices.json = %s, %v", site, err)
 	}
@@ -136,7 +136,7 @@ func TestPlaudPhoneUploadsThroughTheSite(t *testing.T) {
 	if _, err := tb.plaud.DeviceRequest("transcript", phone.upload(t, device, "2026-10-18_11-00-00", text), []byte(text)); err == nil || !strings.Contains(err.Error(), "not paired") {
 		t.Errorf("an unpaired phone's upload: %v", err)
 	}
-	if data, _ := os.ReadFile(filepath.Join(tb.cfgs.Effective().DataDir, "site", "devices.json")); strings.Contains(string(data), device) {
+	if data, _ := os.ReadFile(filepath.Join(tb.cfgs.Get().DataDir, "site", "devices.json")); strings.Contains(string(data), device) {
 		t.Error("the site still lists the unpaired phone")
 	}
 }

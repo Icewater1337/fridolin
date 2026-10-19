@@ -63,7 +63,7 @@ func plaudSnapshotOf(c config.Settings) *plaud.Snapshot {
 // runs in place of a program on the bridge's PATH, such as the claude that
 // sandbox-exec starts for every brain's run. The sandbox also keeps brains
 // from writing to every folder on that PATH (see bridgeProgramsOf).
-func brainPlaudPATH(cfg *config.File) string {
+func brainPlaudPATH(cfg *config.Settings) string {
 	if !cfg.Plaud.BrainAccess {
 		return ""
 	}

@@ -103,7 +103,7 @@ func TestPlaudRunsInThePickedBrain(t *testing.T) {
 		t.Errorf("g's history lacks the recording:\n%s", hist)
 	}
 	// The transcript is in g's inbox, which the DM brain cannot read.
-	media := tb.cfgs.Effective().MediaDir
+	media := tb.cfgs.Get().MediaDir
 	if files, _ := filepath.Glob(filepath.Join(media, "*", "plaud", "*.txt")); len(files) != 1 || filepath.Dir(files[0]) != filepath.Join(media, "g", "plaud") {
 		t.Errorf("transcripts = %v, want one in g's inbox", files)
 	}
@@ -175,7 +175,7 @@ func TestPlaudWithoutAPrivateChatWaits(t *testing.T) {
 	if st, _ := tb.readPlaudState(); st.Pending[plaudNew] == nil || slices.Contains(st.Seen, plaudNew) {
 		t.Errorf("state = %+v, want the recording still pending", st)
 	}
-	if files, _ := filepath.Glob(filepath.Join(tb.cfgs.Effective().MediaDir, "*", "plaud", "*")); len(files) != 0 {
+	if files, _ := filepath.Glob(filepath.Join(tb.cfgs.Get().MediaDir, "*", "plaud", "*")); len(files) != 0 {
 		t.Errorf("files written without a destination: %v", files)
 	}
 	var status map[string]any
@@ -270,7 +270,7 @@ func TestPlaudMissingBrainIsReported(t *testing.T) {
 			t.Errorf("PUT %v = %d %s, want %d %s", c.body, w.Code, w.Body.String(), c.code, c.want)
 		}
 	}
-	if pc := tb.cfgs.Effective().Plaud; pc.Brain != "" || !pc.Polished {
+	if pc := tb.cfgs.Get().Plaud; pc.Brain != "" || !pc.Polished {
 		t.Errorf("settings = %+v, want polished saved and the brain back to automatic", pc)
 	}
 }
@@ -672,7 +672,7 @@ func TestPlaudFirstSyncThenForwardsNewRecordings(t *testing.T) {
 	}
 	// Seen once the brain's run answered it.
 	tb.waitPlaudSeen(t, plaudNew)
-	files, _ := filepath.Glob(filepath.Join(tb.cfgs.Effective().MediaDir, plaudDMBrain.ID, "plaud", "* - Team sync - "+plaudNew+".txt"))
+	files, _ := filepath.Glob(filepath.Join(tb.cfgs.Get().MediaDir, plaudDMBrain.ID, "plaud", "* - Team sync - "+plaudNew+".txt"))
 	if len(files) != 1 {
 		t.Fatalf("transcript files = %v", files)
 	}
@@ -701,7 +701,7 @@ func TestPlaudFirstSyncThenForwardsNewRecordings(t *testing.T) {
 	}
 
 	// The login is private to Fridolin, and the API never shows it.
-	if !strings.Contains(fp.Calls(), "HOME="+filepath.Join(tb.cfgs.Effective().DataDir, "plaud", "home")) {
+	if !strings.Contains(fp.Calls(), "HOME="+filepath.Join(tb.cfgs.Get().DataDir, "plaud", "home")) {
 		t.Errorf("CLI not run with the private home:\n%s", fp.Calls())
 	}
 	token, err := os.ReadFile(tb.plaudTokenPath())
@@ -856,7 +856,7 @@ func TestPlaudFailedFirstSyncForwardsNothingOld(t *testing.T) {
 			if err := tb.plaud.Poll(context.Background()); err != nil {
 				t.Fatal(err)
 			}
-			if files, _ := filepath.Glob(filepath.Join(tb.cfgs.Effective().MediaDir, "*", "plaud", "*")); len(files) != 0 {
+			if files, _ := filepath.Glob(filepath.Join(tb.cfgs.Get().MediaDir, "*", "plaud", "*")); len(files) != 0 {
 				t.Errorf("old recordings were written out: %v", files)
 			}
 			if strings.Contains(fp.Calls(), " file ") {
@@ -874,7 +874,7 @@ func TestPlaudFailedFirstSyncForwardsNothingOld(t *testing.T) {
 
 // plaudForwarded reports whether a recording was written out for a brain.
 func (tb *testBridge) plaudForwarded() bool {
-	files, _ := filepath.Glob(filepath.Join(tb.cfgs.Effective().MediaDir, "*", "plaud", "*.txt"))
+	files, _ := filepath.Glob(filepath.Join(tb.cfgs.Get().MediaDir, "*", "plaud", "*.txt"))
 	return len(files) > 0
 }
 
@@ -928,7 +928,7 @@ func TestPlaudStateBelongsToTheAccount(t *testing.T) {
 // plaudDelivered returns the transcript file written for recording id.
 func (tb *testBridge) plaudDelivered(t *testing.T, id string) string {
 	t.Helper()
-	files, _ := filepath.Glob(filepath.Join(tb.cfgs.Effective().MediaDir, "*", "plaud", "* - "+id+".txt"))
+	files, _ := filepath.Glob(filepath.Join(tb.cfgs.Get().MediaDir, "*", "plaud", "* - "+id+".txt"))
 	if len(files) != 1 {
 		t.Fatalf("transcript files for %s = %v, want one", id, files)
 	}
@@ -1007,7 +1007,7 @@ func TestPlaudRetryRewritesTheSameTranscript(t *testing.T) {
 	}
 	testutil.WaitFor(t, 10*time.Second, "second brain reply", func() bool { return len(tb.dev.Outbox()) == 2 })
 
-	files, _ := filepath.Glob(filepath.Join(tb.cfgs.Effective().MediaDir, "*", "plaud", "*"))
+	files, _ := filepath.Glob(filepath.Join(tb.cfgs.Get().MediaDir, "*", "plaud", "*"))
 	if len(files) != 1 || !strings.HasSuffix(files[0], " - "+plaudNew+".txt") {
 		t.Fatalf("transcript files = %v, want one named after the recording id", files)
 	}
@@ -1025,7 +1025,7 @@ func TestPlaudTranscriptReplacesASymlink(t *testing.T) {
 	if err := os.WriteFile(target, []byte("keep me"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	dir := filepath.Join(tb.cfgs.Effective().MediaDir, plaudDMBrain.ID, "plaud")
+	dir := filepath.Join(tb.cfgs.Get().MediaDir, plaudDMBrain.ID, "plaud")
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		t.Fatal(err)
 	}
@@ -1060,7 +1060,7 @@ func TestPlaudTranscriptReplacesASymlink(t *testing.T) {
 // points.
 func TestPlaudTranscriptStaysInTheInbox(t *testing.T) {
 	tb, fp := plaudBridge(t, "")
-	media := tb.cfgs.Effective().MediaDir
+	media := tb.cfgs.Get().MediaDir
 	elsewhere := t.TempDir()
 	for name, target := range map[string]string{"out of the media folder": elsewhere, "into another brain's inbox": filepath.Join(media, "other")} {
 		t.Run(name, func(t *testing.T) {
@@ -1677,7 +1677,7 @@ func TestBrainPlaudPATH(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			cfg := &config.File{Plaud: config.PlaudConfig{BrainAccess: true, CLIPath: tc.cliPath}}
-			got := brainPlaudPATH(cfg)
+			got := brainPlaudPATH(resolvedSettings(t, cfg))
 			dirs := filepath.SplitList(got)
 			if want := filepath.Join(tc.dir, "plaud"); lookPathIn("plaud", got) != want {
 				t.Errorf("brainPlaudPATH = %s, on which brains do not find %s", got, want)
@@ -1689,7 +1689,7 @@ func TestBrainPlaudPATH(t *testing.T) {
 			if i < 0 {
 				t.Fatalf("brainPlaudPATH = %s, which lacks the bridge's PATH", got)
 			}
-			progs := NewSandboxProfiler(nil, cfg).bridgeProgramsOf(home)
+			progs := NewSandboxProfiler(nil, resolvedSettings(t, cfg)).bridgeProgramsOf(home)
 			covered := func(dir string) bool { return slices.Contains(progs.Path, dir) || withinAny(dir, progs.Dirs) }
 			for _, d := range filepath.SplitList(strings.TrimSuffix(got[:i], ":")) {
 				if !covered(d) {
@@ -1742,7 +1742,7 @@ func TestPlaudCLIGetsTheAllowlistedEnvironment(t *testing.T) {
 	} {
 		t.Setenv(k, v)
 	}
-	bin, err := findPlaudCLI(tb.cfgs.Effective().Plaud.CLIPath)
+	bin, err := findPlaudCLI(tb.cfgs.Get().Plaud.CLIPath)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1843,7 +1843,7 @@ func TestPlaudPhoneFolder(t *testing.T) {
 	if st, _ := tb.readPlaudState(); len(st.Seen) != 3 || len(st.Pending) != 0 {
 		t.Fatalf("state = %+v", st)
 	}
-	data, err := os.ReadFile(filepath.Join(tb.cfgs.Effective().MediaDir, plaudDMBrain.ID, "plaud", "2026-10-18 - Phone recording - phone_2026-10-18_10-00-00.txt"))
+	data, err := os.ReadFile(filepath.Join(tb.cfgs.Get().MediaDir, plaudDMBrain.ID, "plaud", "2026-10-18 - Phone recording - phone_2026-10-18_10-00-00.txt"))
 	if err != nil {
 		t.Fatal(err)
 	}

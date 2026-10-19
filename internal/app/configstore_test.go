@@ -8,6 +8,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/Icewater1337/fridolin/internal/config"
 
@@ -25,8 +26,8 @@ func TestConfigStoreUpdateWritesAtomicallyAndKeepsTilde(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if want := filepath.Join(home, "data"); cs.Effective().DataDir != want {
-		t.Fatalf("effective DataDir = %q", cs.Effective().DataDir)
+	if want := filepath.Join(home, "data"); cs.Get().DataDir != want {
+		t.Fatalf("effective DataDir = %q", cs.Get().DataDir)
 	}
 
 	etag := cs.ETag()
@@ -51,7 +52,7 @@ func TestConfigStoreUpdateWritesAtomicallyAndKeepsTilde(t *testing.T) {
 	if _, err := os.Stat(path + ".bak"); err != nil {
 		t.Error("the previous version should be kept as .bak")
 	}
-	if got := cs.Effective().AllowedNumbers; len(got) != 2 {
+	if got := cs.Get().AllowedNumbers; len(got) != 2 {
 		t.Errorf("effective config not updated: %v", got)
 	}
 
@@ -63,7 +64,7 @@ func TestConfigStoreUpdateWritesAtomicallyAndKeepsTilde(t *testing.T) {
 	if _, err := cs.Update("", func(c *config.File) error { c.BrainEffort = "extreme"; return nil }); err == nil {
 		t.Error("invalid effort must be rejected")
 	}
-	if cs.Effective().BrainEffort != "" {
+	if cs.Get().BrainEffort != "" {
 		t.Error("a rejected edit must not apply")
 	}
 }
@@ -140,7 +141,7 @@ func effectiveJSON(t *testing.T, path string) string {
 	if err != nil {
 		t.Fatal(err)
 	}
-	data, err := json.Marshal(cfg)
+	data, err := json.Marshal(config.EffectiveFile(cfg))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -153,20 +154,20 @@ func TestConfigDefaultsAndLoopbackOnly(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if cfg.HTTPListen != config.DefaultHTTPListen || !cfg.HTTPEnabled() {
+	if cfg.HTTPListen != config.DefaultHTTPListen || !cfg.HTTPEnabled {
 		t.Errorf("http_listen default = %q", cfg.HTTPListen)
 	}
-	if cfg.Queue.Mode != "queue" || *cfg.Debounce.QuietMS != config.DefaultQuietMS || !*cfg.Queue.Notify || !cfg.DashboardRequiresToken() {
+	if cfg.Queue.Mode != "queue" || cfg.Debounce.Quiet != time.Duration(config.DefaultQuietMS)*time.Millisecond || !cfg.Queue.Notify || !cfg.Dashboard.RequireToken {
 		t.Error("unexpected defaults")
 	}
-	if cfg.AllowsAnyDM() || cfg.AllowAnyDM == nil || *cfg.AllowAnyDM {
+	if cfg.AllowAnyDM {
 		t.Error("an unset allow_any_dm must mean false, and the effective config must say so")
 	}
-	if (&config.File{}).AllowsAnyDM() {
-		t.Error("a Config built without the defaults must not let anyone DM either")
+	if resolvedSettings(t, &config.File{}).AllowAnyDM {
+		t.Error("an empty file must resolve to closed DM access")
 	}
 	cfg, err = LoadConfig(writeConfig(t, `{"http_listen":"off"}`))
-	if err != nil || cfg.HTTPEnabled() {
+	if err != nil || cfg.HTTPEnabled {
 		t.Error(`"off" must disable the HTTP server`)
 	}
 	if _, err := LoadConfig(writeConfig(t, `{"http_listen":"0.0.0.0:8765"}`)); err == nil {
@@ -184,7 +185,7 @@ func TestStarterConfigLoads(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if cfg.AllowsAnyDM() {
+	if cfg.AllowAnyDM {
 		t.Error("a fresh install must not answer strangers")
 	}
 	// An older bridge rolled back to runs classic mode without the key.
@@ -342,7 +343,7 @@ func TestRetiredConfigKeys(t *testing.T) {
 			if err != nil {
 				t.Fatalf("load: %v, want it to load", err)
 			}
-			if got := cs.Effective().BrainModel; got != c.brainModel {
+			if got := cs.Get().BrainModel; got != c.brainModel {
 				t.Errorf("brain_model = %q, want %q", got, c.brainModel)
 			}
 			var logged []string
@@ -379,7 +380,7 @@ func TestRetiredConfigKeys(t *testing.T) {
 			if saved != c.brainModel {
 				t.Errorf("saved brain_model %q, want %q", saved, c.brainModel)
 			}
-			if got := cs.Effective().BrainModel; got != c.brainModel {
+			if got := cs.Get().BrainModel; got != c.brainModel {
 				t.Errorf("brain_model after a save = %q, want %q", got, c.brainModel)
 			}
 		})
@@ -431,7 +432,7 @@ func TestLegacyDataDir(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if got, want := cs.Effective().DataDir, filepath.Join(home, c.want); got != want {
+			if got, want := cs.Get().DataDir, filepath.Join(home, c.want); got != want {
 				t.Errorf("data dir %s, want %s", got, want)
 			}
 			if got := logContains(logs, "has the name from before the rename"); got != c.wantWarning {
@@ -452,7 +453,7 @@ func TestConfigStoreRejectsTooSmallChunkSize(t *testing.T) {
 	if _, err := cs.Update("", func(c *config.File) error { c.MaxChunkSize = 50; return nil }); err == nil {
 		t.Fatal("max_chunk_size 50 must be rejected")
 	}
-	if got := cs.Effective().MaxChunkSize; got != 3900 {
+	if got := cs.Get().MaxChunkSize; got != 3900 {
 		t.Errorf("a rejected edit must not apply: MaxChunkSize = %d", got)
 	}
 }
@@ -500,7 +501,7 @@ func TestRemovingTheLastNumberDoesNotOpenDMs(t *testing.T) {
 	if _, err := cs.Update("", func(c *config.File) error { c.AllowedNumbers = []string{}; return nil }); err != nil {
 		t.Fatal(err)
 	}
-	if NumberAllowed(cs.Effective(), "15559876543") {
+	if NumberAllowed(cs.Get(), "15559876543") {
 		t.Error("an empty list with allow_any_dm unset must refuse everyone")
 	}
 }
@@ -558,14 +559,14 @@ func TestDotEnvIsNotRead(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if got := cs.Effective().BrainModel; got != "from-file" {
+			if got := cs.Get().BrainModel; got != "from-file" {
 				t.Errorf("BrainModel = %q, want the config's from-file", got)
 			}
 			// An edit re-derives the effective config from the file alone.
 			if _, err := cs.Update("", func(c *config.File) error { c.LogLevel = "debug"; return nil }); err != nil {
 				t.Fatal(err)
 			}
-			if got := cs.Effective().BrainModel; got != "from-file" {
+			if got := cs.Get().BrainModel; got != "from-file" {
 				t.Errorf("BrainModel after an edit = %q, want the config's from-file", got)
 			}
 			if v, ok := os.LookupEnv("FRIDOLIN_TEST_DOTENV_ONLY"); ok {
@@ -647,7 +648,7 @@ func TestConfigVersionOnDisk(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if got := cs.Effective().BrainModel; got != "" {
+		if got := cs.Get().BrainModel; got != "" {
 			t.Errorf("brain_model = %q, want none: model is no key of version 2", got)
 		}
 		if !slices.ContainsFunc(logs(), func(l string) bool { return strings.Contains(l, "ignoring unknown settings [model]") }) {

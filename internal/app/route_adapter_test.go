@@ -56,7 +56,7 @@ func TestReplyChatKeepsHeldDMAndRetiredBrainIdentity(t *testing.T) {
 			}
 			mgr := &BrainManager{Manager: core}
 			b := &App{brainMgr: mgr}
-			if got := b.replyChatFor(selected, cfg); got != tc.want {
+			if got := b.replyChatFor(selected, resolvedSettings(t, cfg)); got != tc.want {
 				t.Fatalf("reply chat = %q, want %q", got, tc.want)
 			}
 		})

@@ -75,8 +75,8 @@ func TestConfigUpdatePanicIsAnError(t *testing.T) {
 			case <-time.After(5 * time.Second):
 				t.Fatal("Update with a panic did not return")
 			}
-			if cs.ETag() != etag || cs.Effective().LogLevel != "info" {
-				t.Errorf("after the panic: etag %q (was %q), log_level %q: the update was applied", cs.ETag(), etag, cs.Effective().LogLevel)
+			if cs.ETag() != etag || cs.Get().LogLevel != "info" {
+				t.Errorf("after the panic: etag %q (was %q), log_level %q: the update was applied", cs.ETag(), etag, cs.Get().LogLevel)
 			}
 			if after, _ := os.ReadFile(cs.Path()); string(after) != string(before) {
 				t.Errorf("config.json changed:\n%s", after)
@@ -95,7 +95,7 @@ func TestConfigUpdatePanicIsAnError(t *testing.T) {
 			case <-time.After(5 * time.Second):
 				t.Fatal("the update after the panic blocks: the lock was left held")
 			}
-			if got := cs.Effective().LogLevel; got != "warn" {
+			if got := cs.Get().LogLevel; got != "warn" {
 				t.Errorf("log_level = %q after the next update, want warn", got)
 			}
 			_ = cs.FileCopy() // and so does reading the file layer
@@ -179,11 +179,11 @@ func TestConfigSubscribersHearUpdatesInOrder(t *testing.T) {
 	var heard []string
 	inA := make(chan struct{})
 	heardB := make(chan struct{})
-	cs.Subscribe(func(_, next *config.File) {
+	cs.Subscribe(func(_, next *config.Settings) {
 		if next.Comment == "a" {
 			close(inA)
 			// B commits meanwhile; its notification must wait for this one.
-			testutil.WaitFor(t, 5*time.Second, "update b to commit", func() bool { return cs.Effective().Comment == "b" })
+			testutil.WaitFor(t, 5*time.Second, "update b to commit", func() bool { return cs.Get().Comment == "b" })
 			select {
 			case <-heardB:
 			case <-time.After(200 * time.Millisecond):
@@ -221,21 +221,21 @@ func TestConfigSubscribersHearUpdatesInOrder(t *testing.T) {
 func TestConfigSubscriberPanicIsLogged(t *testing.T) {
 	cs := openTxStore(t, `{}`)
 	logs := captureLog(t)
-	cs.Subscribe(func(_, next *config.File) {
+	cs.Subscribe(func(_, next *config.Settings) {
 		if next.Comment == "boom" {
 			panic("subscriber")
 		}
 	})
 	var heard []string
-	cs.Subscribe(func(_, next *config.File) { heard = append(heard, next.Comment) })
+	cs.Subscribe(func(_, next *config.Settings) { heard = append(heard, next.Comment) })
 	if _, err := cs.Update("", func(c *config.File) error { c.Comment = "boom"; return nil }); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := cs.Update("", func(c *config.File) error { c.Comment = "next"; return nil }); err != nil {
 		t.Fatal(err)
 	}
-	if strings.Join(heard, ",") != "boom,next" || cs.Effective().Comment != "next" {
-		t.Errorf("heard %v, config %q", heard, cs.Effective().Comment)
+	if strings.Join(heard, ",") != "boom,next" || cs.Get().Comment != "next" {
+		t.Errorf("heard %v, config %q", heard, cs.Get().Comment)
 	}
 	if !logContains(logs, "a subscriber panicked on the saved update: subscriber") {
 		t.Errorf("the panic was not logged: %q", logs())
@@ -290,7 +290,7 @@ func TestBridgeAppliesTheLatestConfigOnALateNotification(t *testing.T) {
 	before := tb.cfgs.Snapshot()
 	first := rename("First")
 	rename("Second")
-	tb.configChanged(before.Effective, first.Effective) // the first update's, late
+	tb.configChanged(before.Settings, first.Settings) // the first update's, late
 	if got := tb.brainMgr.Get("main").Snapshot().Name; got != "Second" {
 		t.Errorf("after a late notification the brain runs as %q, want Second", got)
 	}
@@ -304,7 +304,7 @@ func TestPutConfigSendsItsOwnETag(t *testing.T) {
 	var once sync.Once
 	var putETag string
 	later := make(chan error, 1)
-	tb.cfgs.Subscribe(func(_, next *config.File) {
+	tb.cfgs.Subscribe(func(_, next *config.Settings) {
 		if next.LogLevel != "debug" {
 			return
 		}
@@ -316,7 +316,7 @@ func TestPutConfigSendsItsOwnETag(t *testing.T) {
 				_, err := tb.cfgs.Update("", func(c *config.File) error { c.Comment = "later"; return nil })
 				later <- err
 			}()
-			testutil.WaitFor(t, 5*time.Second, "the later update", func() bool { return tb.cfgs.Effective().Comment == "later" })
+			testutil.WaitFor(t, 5*time.Second, "the later update", func() bool { return tb.cfgs.Get().Comment == "later" })
 		})
 	})
 	w := tb.editConfig(t, func(c map[string]any) { c["log_level"] = "debug" })
@@ -385,7 +385,7 @@ func TestHandEditThenSaveWithTheOldETagConflicts(t *testing.T) {
 		t.Errorf("the hand edit was not logged: %q", logs())
 	}
 	// The bridge runs on the hand edit now, and the page gets it on reload.
-	if got := tb.cfgs.Effective().MaxChunkSize; got != 1234 {
+	if got := tb.cfgs.Get().MaxChunkSize; got != 1234 {
 		t.Errorf("max_chunk_size = %d after the hand edit was found, want 1234", got)
 	}
 	w = tb.editConfig(t, func(c map[string]any) {
@@ -417,7 +417,7 @@ func TestHandEditThenDeltaUpdateKeepsBoth(t *testing.T) {
 	if file.MaxChunkSize != 1234 || !slices.Contains(file.AllowedNumbers, "15559876543") {
 		t.Errorf("config.json has max_chunk_size %d and allowed_numbers %v, want the hand edit and the allowed number", file.MaxChunkSize, file.AllowedNumbers)
 	}
-	if cfg := tb.cfgs.Effective(); cfg.MaxChunkSize != 1234 || !slices.Contains(cfg.AllowedNumbers, "15559876543") {
+	if cfg := tb.cfgs.Get(); cfg.MaxChunkSize != 1234 || !slices.Contains(cfg.AllowedNumbers, "15559876543") {
 		t.Errorf("the bridge runs with max_chunk_size %d and allowed_numbers %v", cfg.MaxChunkSize, cfg.AllowedNumbers)
 	}
 }
@@ -444,7 +444,7 @@ func TestHandEditThatDoesNotLoadIsNotWrittenOver(t *testing.T) {
 			if got := readFile(t, cs.Path()); got != tc.body {
 				t.Errorf("config.json was written over:\n%s", got)
 			}
-			if got := cs.Effective().AllowedNumbers; !slices.Equal(got, []string{"15551234567"}) {
+			if got := cs.Get().AllowedNumbers; !slices.Equal(got, []string{"15551234567"}) {
 				t.Errorf("the bridge runs with allowed_numbers %v", got)
 			}
 		})

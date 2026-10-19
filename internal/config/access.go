@@ -71,7 +71,7 @@ func GroupMembersAsNumbers(members map[string][]string) map[string][]string {
 // onlyAllowedNumbers lists the groups of c in which only allowed_numbers
 // reach the brain: allowed and without a group_members entry, unless an
 // empty allowed_numbers with allow_any_dm lets everyone in anyway.
-func onlyAllowedNumbers(c *File) []string {
+func onlyAllowedNumbers(c *Settings) []string {
 	if c == nil || c.AnyoneCanDM() {
 		return nil
 	}
@@ -88,7 +88,7 @@ func onlyAllowedNumbers(c *File) []string {
 // that admit only allowed_numbers and did not in prev (nil at startup), so
 // that an owner whose groups trusted every member before group_members
 // existed sees why the others go unheard, and how to change it.
-func WarnGroupsWithoutMembers(prev, next *File) {
+func WarnGroupsWithoutMembers(prev, next *Settings) {
 	before := onlyAllowedNumbers(prev)
 	for _, g := range onlyAllowedNumbers(next) {
 		if slices.Contains(before, g) {

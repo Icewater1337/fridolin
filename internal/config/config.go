@@ -474,48 +474,6 @@ type ScriptAPIConfig struct {
 	TokenlessSend *bool `json:"tokenless_send,omitempty"`
 }
 
-// RunLimit is how many Claude runs may go at once, 0 for no limit.
-func (c *File) RunLimit() int { return IntOr(c.MaxConcurrentRuns, defaultConcurrentRuns) }
-
-func BoolOr(p *bool, def bool) bool {
-	if p == nil {
-		return def
-	}
-	return *p
-}
-
-func IntOr(p *int, def int) int {
-	if p == nil {
-		return def
-	}
-	return *p
-}
-
-// DashboardRequiresToken reports whether API calls need the dashboard token.
-func (c *File) DashboardRequiresToken() bool { return BoolOr(c.Dashboard.RequireToken, true) }
-
-// TokenlessSend reports whether /send works without a token.
-func (c *File) TokenlessSend() bool { return BoolOr(c.ScriptAPI.TokenlessSend, true) }
-
-// MaxMediaBytes is the largest attachment to download, in bytes.
-func (c *File) MaxMediaBytes() int64 {
-	mb := c.MaxMediaMB
-	if mb <= 0 {
-		mb = defaultMaxMediaMB
-	}
-	return int64(mb) << 20
-}
-
-// HTTPEnabled reports whether the local HTTP server should run.
-func (c *File) HTTPEnabled() bool { return c.HTTPListen != "" && c.HTTPListen != "off" }
-
-// AllowsAnyDM reports whether an empty allowed_numbers list means everyone.
-// It takes an explicit allow_any_dm: true.
-func (c *File) AllowsAnyDM() bool { return BoolOr(c.AllowAnyDM, false) }
-
-// AnyoneCanDM reports whether every sender passes the DM allowlist.
-func (c *File) AnyoneCanDM() bool { return len(c.AllowedNumbers) == 0 && c.AllowsAnyDM() }
-
 // WarnOddChats logs entries of allowed_numbers and allowed_groups that can
 // never match a chat: an entry that is no phone number, and a group the
 // bridge compares as it is written, with a typo or spaces. A number is
@@ -662,16 +620,18 @@ func (c *File) Validate(goos string) error {
 	if c.MaxChunkSize < configMinChunkSize {
 		return fmt.Errorf("max_chunk_size %d is too small: use at least %d, or 0 for the default of %d", c.MaxChunkSize, configMinChunkSize, configDefaultChunkSize)
 	}
-	if n := IntOr(c.RunTimeoutMinutes, defaultRunTimeoutMinutes); n < 0 || n > maxRunTimeoutMinutes {
+	if p := c.RunTimeoutMinutes; p != nil && (*p < 0 || *p > maxRunTimeoutMinutes) {
+		n := *p
 		return fmt.Errorf("run_timeout_minutes must be between 0 (no limit) and %d, not %d", maxRunTimeoutMinutes, n)
 	}
-	if n := c.RunLimit(); n < 0 || n > maxConcurrentRuns {
+	if p := c.MaxConcurrentRuns; p != nil && (*p < 0 || *p > maxConcurrentRuns) {
+		n := *p
 		return fmt.Errorf("max_concurrent_runs must be between 0 (no limit) and %d, not %d", maxConcurrentRuns, n)
 	}
 	if c.MaxMediaMB < 1 || c.MaxMediaMB > maxMaxMediaMB {
 		return fmt.Errorf("max_media_mb must be between 1 and %d, not %d", maxMaxMediaMB, c.MaxMediaMB)
 	}
-	if c.HTTPEnabled() && !IsLoopbackAddr(c.HTTPListen) {
+	if c.HTTPListen != "" && c.HTTPListen != "off" && !IsLoopbackAddr(c.HTTPListen) {
 		return fmt.Errorf("http_listen %q must be a loopback address such as 127.0.0.1:8765 — the API and dashboard are for this machine only", c.HTTPListen)
 	}
 	if err := ValidateGroupMembers(c.GroupMembers, c.AllowedGroups); err != nil {
@@ -728,7 +688,6 @@ func IsTruthy(v string) bool {
 }
 
 // RunMinutes is the configured run limit in minutes, or its default.
-func (c *File) RunMinutes() int { return IntOr(c.RunTimeoutMinutes, defaultRunTimeoutMinutes) }
 
 // QueueModes returns accepted queue modes in sorted order.
 func QueueModes() []string { return slices.Sorted(maps.Keys(validQueueModes)) }

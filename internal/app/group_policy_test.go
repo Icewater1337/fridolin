@@ -61,7 +61,7 @@ func TestGroupSenderAllowed(t *testing.T) {
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			cfg := &config.File{AllowedNumbers: c.numbers, AllowAnyDM: c.anyDM, AllowedGroups: []string{group, other}, GroupMembers: c.members}
-			if got := groupSenderAllowed(cfg, group, c.sender); got != c.want {
+			if got := groupSenderAllowed(resolvedSettings(t, cfg), group, c.sender); got != c.want {
 				t.Errorf("groupSenderAllowed(%+v) = %v, want %v", c.sender, got, c.want)
 			}
 		})
@@ -88,7 +88,7 @@ func FuzzGroupSenderAllowed(f *testing.F) {
 			members = strings.Split(list, ",")
 		}
 		cfg := &config.File{AllowedGroups: []string{testGroup}, AllowAnyDM: &anyDM, GroupMembers: map[string][]string{testGroup: members}}
-		got := groupSenderAllowed(cfg, testGroup, groupSender{Number: number, Resolved: resolved})
+		got := groupSenderAllowed(resolvedSettings(t, cfg), testGroup, groupSender{Number: number, Resolved: resolved})
 		if slices.Equal(members, []string{AnyMember}) {
 			if !got {
 				t.Errorf("[%q] refused %q", AnyMember, number)
@@ -112,10 +112,10 @@ func FuzzGroupSenderAllowed(f *testing.F) {
 			t.Errorf("group_members %q: %q (resolved %v) admitted: %v, listed: %v", members, number, resolved, got, listed)
 		}
 		cfg.AllowedNumbers = []string{number}
-		if groupSenderAllowed(cfg, testGroup, groupSender{Number: number, Resolved: resolved}) != got {
+		if groupSenderAllowed(resolvedSettings(t, cfg), testGroup, groupSender{Number: number, Resolved: resolved}) != got {
 			t.Errorf("group_members %q: allowed_numbers changes whether %q is admitted", members, number)
 		}
-		if !groupSenderAllowed(cfg, testGroup, groupSender{Number: number, Resolved: resolved, FromMe: true}) {
+		if !groupSenderAllowed(resolvedSettings(t, cfg), testGroup, groupSender{Number: number, Resolved: resolved, FromMe: true}) {
 			t.Errorf("group_members %q: the bridge's own account is refused", members)
 		}
 	})
@@ -215,7 +215,7 @@ func TestConfigUpdateRefusesStrayGroupMembers(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "not in allowed_groups") {
 		t.Fatalf("Update: %v, want the stray entry refused", err)
 	}
-	if got := cs.Effective().AllowedGroups; !slices.Equal(got, []string{testGroup}) {
+	if got := cs.Get().AllowedGroups; !slices.Equal(got, []string{testGroup}) {
 		t.Errorf("allowed_groups = %q after a refused edit", got)
 	}
 }
@@ -296,7 +296,7 @@ func TestLogSecurityChangesNamesGroupMembers(t *testing.T) {
 	logged := captureLog(t)
 	prev := &config.File{GroupMembers: map[string][]string{testGroup: {"15551234567"}}}
 	next := &config.File{GroupMembers: map[string][]string{testGroup: {"15559876543"}, other: {}}}
-	config.LogSecurityChanges(prev, next)
+	config.LogSecurityChanges(resolvedSettings(t, prev), resolvedSettings(t, next))
 	got := strings.Join(logged(), "\n")
 	for _, want := range []string{"group_members", "+" + testGroup + ":15559876543", "+" + other + ":", "-" + testGroup + ":15551234567"} {
 		if !strings.Contains(got, want) {
