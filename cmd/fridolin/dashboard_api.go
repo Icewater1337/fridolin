@@ -29,86 +29,6 @@ import (
 	"github.com/Icewater1337/fridolin/internal/version"
 )
 
-func (b *Bridge) apiMux() http.Handler {
-	mux := http.NewServeMux()
-
-	mux.HandleFunc("GET /api/status", httpapi.StatusAPI{Snapshot: b.statusSnapshot}.ServeHTTP)
-	mux.HandleFunc("GET /api/whatsapp/qr", b.newConnectionAPI().QR)
-	mux.HandleFunc("POST /api/whatsapp/pair", b.newConnectionAPI().Pair)
-	mux.HandleFunc("GET /api/whatsapp/groups", b.newConnectionAPI().Groups)
-	mux.HandleFunc("GET /api/activity", b.apiActivity)
-	mux.HandleFunc("GET /api/logs", b.apiLogs)
-
-	mux.HandleFunc("GET /api/chats/ignored", b.newChatsAPI().Ignored)
-	mux.HandleFunc("POST /api/chats/allow", b.newChatsAPI().Allow)
-	mux.HandleFunc("POST /api/chats/revoke", b.newChatsAPI().Revoke)
-	mux.HandleFunc("POST /api/chats/members", b.newChatsAPI().Members)
-	mux.HandleFunc("POST /api/chats/dismiss", b.newChatsAPI().Dismiss)
-
-	mux.HandleFunc("GET /api/config", b.newConfigAPI().Get)
-	mux.HandleFunc("PUT /api/config", b.newConfigAPI().Put)
-	mux.HandleFunc("POST /api/restart", b.apiRestart)
-
-	mux.HandleFunc("POST /api/logout", b.newDashboardAuth().Logout)
-	mux.HandleFunc("POST /api/login/code", b.newDashboardAuth().LoginCode)
-	mux.HandleFunc("POST /api/token/rotate", b.newDashboardAuth().RotateToken)
-
-	mux.HandleFunc("GET /api/brains", b.newBrainsAPI().List)
-	mux.HandleFunc("GET /api/brains/{id}", b.newBrainsAPI().Get)
-	mux.HandleFunc("POST /api/brains/inspect", b.newBrainsAPI().Inspect)
-	mux.HandleFunc("POST /api/brains", b.newBrainsAPI().Add)
-	mux.HandleFunc("PUT /api/brains/{id}", b.newBrainsAPI().Update)
-	mux.HandleFunc("POST /api/brains/{id}/approve", b.newBrainsAPI().Approve)
-	mux.HandleFunc("DELETE /api/brains/{id}", b.newBrainsAPI().Remove)
-	mux.HandleFunc("POST /api/brains/{id}/stop", b.newConnectionAPI().StopRun)
-	mux.HandleFunc("DELETE /api/brain-dirs", b.newBrainsAPI().RemoveDir)
-
-	mux.HandleFunc("GET /api/fs/capabilities", b.newFilesystemAPI().Caps)
-	mux.HandleFunc("POST /api/fs/pick", b.newFilesystemAPI().Pick)
-	mux.HandleFunc("GET /api/fs/list", b.newFilesystemAPI().List)
-
-	mux.HandleFunc("GET /api/backup/status", b.newBackupAPI().Status)
-	mux.HandleFunc("POST /api/backup/connect", b.newBackupAPI().Connect)
-	mux.HandleFunc("POST /api/backup/disconnect", b.newBackupAPI().Disconnect)
-	mux.HandleFunc("PUT /api/backup/settings", b.newBackupAPI().Settings)
-	mux.HandleFunc("POST /api/backup/run", b.newBackupAPI().Run)
-	mux.HandleFunc("POST /api/backup/cancel", b.newBackupAPI().Cancel)
-	mux.HandleFunc("POST /api/backup/restore", b.newBackupAPI().Restore)
-	mux.HandleFunc("PUT /api/brains/{id}/backup", b.newBackupAPI().BrainSettings)
-	mux.HandleFunc("GET /api/brains/{id}/backup/versions", b.newBackupAPI().Versions)
-
-	mux.HandleFunc("GET /api/google/client", b.newGoogleAPI().Client)
-	mux.HandleFunc("PUT /api/google/client", b.newGoogleAPI().SetClient)
-	mux.HandleFunc("DELETE /api/google/client", b.newGoogleAPI().DeleteClient)
-	mux.HandleFunc("GET /api/brains/{id}/calendar", b.newGoogleAPI().Status)
-	mux.HandleFunc("POST /api/brains/{id}/calendar/connect", b.newGoogleAPI().Connect)
-	mux.HandleFunc("PUT /api/brains/{id}/calendar", b.newGoogleAPI().Select)
-	mux.HandleFunc("DELETE /api/brains/{id}/calendar", b.newGoogleAPI().Disconnect)
-
-	mux.HandleFunc("GET /api/plaud/status", b.newPlaudAPI().Status)
-	mux.HandleFunc("POST /api/plaud/connect", b.newPlaudAPI().Connect)
-	mux.HandleFunc("POST /api/plaud/disconnect", b.newPlaudAPI().Disconnect)
-	mux.HandleFunc("PUT /api/plaud/settings", b.newPlaudAPI().Settings)
-	mux.HandleFunc("POST /api/plaud/sync", b.newPlaudAPI().Sync)
-	mux.HandleFunc("POST /api/plaud/resend", b.newPlaudAPI().Resend)
-	mux.HandleFunc("PUT /api/plaud/app/credentials", b.newPlaudAppAPI().Credentials)
-	mux.HandleFunc("POST /api/plaud/app/build", b.newPlaudAppAPI().Build)
-	mux.HandleFunc("GET /api/plaud/app.apk", b.newPlaudAppAPI().Download)
-	mux.HandleFunc("DELETE /api/plaud/devices/{id}", b.newPlaudAppAPI().RevokeDevice)
-
-	b.siteAPI(mux)
-
-	// Only in dev mode: outside it they are not there at all (404).
-	if b.dev != nil {
-		mux.HandleFunc("POST /api/dev/inbound", b.newDevAPI().Inbound)
-		mux.HandleFunc("GET /api/dev/outbox", b.newDevAPI().Outbox)
-	}
-
-	// No catch-all: the mux answers an unknown path with 404 and a known
-	// one asked with the wrong method with 405 and an Allow header.
-	return mux
-}
-
 // ── status ───────────────────────────────────────────────────────────────
 
 func (b *Bridge) statusSnapshot(ctx context.Context) httpapi.StatusResponse {
@@ -457,4 +377,23 @@ func nonNil[T any](s []T) []T {
 		return []T{}
 	}
 	return s
+}
+
+func (b *Bridge) apiMux() http.Handler {
+	return NewAPIMux(APIDeps{
+		Status:   httpapi.StatusAPI{Snapshot: b.statusSnapshot}.ServeHTTP,
+		Activity: b.apiActivity, Logs: b.apiLogs, Restart: b.apiRestart,
+		Site: b.siteAPI, DevMode: b.dev != nil,
+		Connection: b.newConnectionAPI,
+		Chats:      b.newChatsAPI,
+		Config:     b.newConfigAPI,
+		Brains:     b.newBrainsAPI,
+		Filesystem: b.newFilesystemAPI,
+		Backup:     b.newBackupAPI,
+		Google:     b.newGoogleAPI,
+		Plaud:      b.newPlaudAPI,
+		PlaudApp:   b.newPlaudAppAPI,
+		Auth:       b.newDashboardAuth,
+		Dev:        b.newDevAPI,
+	})
 }
