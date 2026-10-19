@@ -25,7 +25,8 @@ import (
 
 // TestMain lets the test binary stand in for the Claude CLI: with
 // FRIDOLIN_FAKE_CLAUDE=1 it prints a stream-json result echoing its working
-// directory and the new message, after FRIDOLIN_FAKE_SLEEP_MS. With
+// directory and the new message, after FRIDOLIN_FAKE_SLEEP_MS and after
+// FRIDOLIN_FAKE_WAIT_FILE exists when set. With
 // FRIDOLIN_FAKE_READ it also reports whether it could read that file, with
 // FRIDOLIN_FAKE_ENV the value of that environment variable, and with
 // FRIDOLIN_FAKE_POLLS=1 what `fridolin polls` answers in the run. With
@@ -348,6 +349,17 @@ func fakeClaude() {
 					f.Close()
 				}
 			}
+		}
+	}
+	if path := os.Getenv("FRIDOLIN_FAKE_WAIT_FILE"); path != "" {
+		for {
+			if _, err := os.Stat(path); err == nil {
+				break
+			} else if !os.IsNotExist(err) {
+				fmt.Fprintln(os.Stderr, "waiting for test release:", err)
+				os.Exit(1)
+			}
+			time.Sleep(5 * time.Millisecond)
 		}
 	}
 	if ms, _ := strconv.Atoi(os.Getenv("FRIDOLIN_FAKE_SLEEP_MS")); ms > 0 {

@@ -397,12 +397,17 @@ func TestSilentMessagesAreSupersededAndQueueOverflows(t *testing.T) {
 }
 
 func TestReloadKeepsRunningBrainAndRetiresRemoved(t *testing.T) {
-	mgr, d, home := queueTestManager(t, 800, "")
-	a := mgr.Get("a")
+	mgr, d, home := queueTestManager(t, 0, "")
+	// Keep both real child processes running until reload has retired b.
+	// A fixed sleep lets them finish before a loaded runner applies config.
+	release := filepath.Join(home, "release-runs")
+	t.Setenv("FRIDOLIN_FAKE_WAIT_FILE", release)
+	a, b := mgr.Get("a"), mgr.Get("b")
 	_, _, _, _ = mgr.Submit(dm("keep going"))
 	_, _, _, _ = mgr.Submit(Inbound{JID: "120363000000000000@g.us", Sender: "15551234567", Text: "doomed"})
-	waitFor(t, 5*time.Second, "both running", func() bool {
-		return a.Snapshot().Running != nil && mgr.Get("b").Snapshot().Running != nil
+	waitFor(t, 5*time.Second, "both processes running", func() bool {
+		ar, br := a.Snapshot().Running, b.Snapshot().Running
+		return ar != nil && ar.PID > 0 && br != nil && br.PID > 0
 	})
 
 	// Concurrent routing while reloading must be race-free (run with -race).
@@ -454,6 +459,13 @@ func TestReloadKeepsRunningBrainAndRetiresRemoved(t *testing.T) {
 	}
 	if mgr.Get("b") != nil {
 		t.Error("b should be gone")
+	}
+	waitFor(t, 10*time.Second, "the removed brain's delivery", func() bool { return d.count() == 1 })
+	if run := a.Snapshot().Running; run == nil || run.PID == 0 {
+		t.Fatal("a's process must stay running through the reload")
+	}
+	if err := os.WriteFile(release, nil, 0o600); err != nil {
+		t.Fatal(err)
 	}
 	waitFor(t, 10*time.Second, "both deliveries", func() bool { return d.count() == 2 })
 	for _, r := range d.all() {
