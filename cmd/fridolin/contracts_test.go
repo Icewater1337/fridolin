@@ -15,7 +15,8 @@ import (
 	"testing"
 	"unicode"
 
-	chat "github.com/Icewater1337/fridolin/internal/chat"
+	"github.com/Icewater1337/fridolin/internal/chat"
+
 	"github.com/Icewater1337/fridolin/internal/config"
 	"github.com/Icewater1337/fridolin/internal/history"
 	"github.com/Icewater1337/fridolin/internal/logx"

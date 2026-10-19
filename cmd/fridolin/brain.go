@@ -21,6 +21,8 @@ import (
 	"sync/atomic"
 	"time"
 
+	outboundmsg "github.com/Icewater1337/fridolin/internal/outbound"
+
 	"github.com/Icewater1337/fridolin/internal/registry"
 
 	"github.com/Icewater1337/fridolin/internal/config"
@@ -1410,7 +1412,7 @@ func (br *Brain) invoke(run *brainRun, ctx context.Context, s *brainSettings, m 
 		},
 		Notice: func() {
 			if !m.Silent && br.hooks != nil && br.hooks.Notice != nil {
-				br.hooks.Notice(m.JID, workingNotice)
+				br.hooks.Notice(m.JID, outboundmsg.WorkingNotice)
 			}
 		},
 		GraceExpired: func() {
@@ -1635,7 +1637,7 @@ func (s *runSink) Log(line string) {
 // produce a visible reply, so they must not ask anything either.
 func (s *runSink) Question(text string) bool {
 	h := s.br.hooks
-	return !s.m.Silent && h != nil && h.Question != nil && h.Question(s.br, s.m.JID, questionPrefix+text)
+	return !s.m.Silent && h != nil && h.Question != nil && h.Question(s.br, s.m.JID, outboundmsg.QuestionPrefix+text)
 }
 
 func (s *runSink) Result(res claudecli.Result) {

@@ -5,7 +5,8 @@ import (
 	"strings"
 	"testing"
 
-	chat "github.com/Icewater1337/fridolin/internal/chat"
+	"github.com/Icewater1337/fridolin/internal/chat"
+
 	"github.com/Icewater1337/fridolin/internal/config"
 )
 

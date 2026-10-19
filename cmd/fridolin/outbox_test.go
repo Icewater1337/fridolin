@@ -11,6 +11,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Icewater1337/fridolin/internal/devchat"
+	outboundmsg "github.com/Icewater1337/fridolin/internal/outbound"
+
 	"github.com/Icewater1337/fridolin/internal/config"
 
 	"github.com/Icewater1337/fridolin/internal/chat"
@@ -20,20 +23,11 @@ import (
 	"github.com/Icewater1337/fridolin/internal/textx"
 )
 
-func TestOutboxDelay(t *testing.T) {
-	cases := map[int]time.Duration{1: 5 * time.Second, 2: 10 * time.Second, 3: 20 * time.Second, 5: 80 * time.Second, 6: outboxMaxRetry, 40: outboxMaxRetry}
-	for attempts, want := range cases {
-		if got := outboxDelay(attempts); got != want {
-			t.Errorf("outboxDelay(%d) = %v, want %v", attempts, got, want)
-		}
-	}
-}
-
 // flakyMessenger is the dev messenger with a connection that drops: while
 // it is down, every send fails, as whatsmeow's do, and with dropAfter set
 // it goes down after that many more messages.
 type flakyMessenger struct {
-	*devMessenger
+	*devchat.Messenger
 
 	mu        sync.Mutex
 	online    chan struct{}
@@ -43,7 +37,7 @@ type flakyMessenger struct {
 }
 
 func newFlakyMessenger(cfg func() *config.Config, online bool) *flakyMessenger {
-	f := &flakyMessenger{devMessenger: &devMessenger{cfg: cfg}, online: make(chan struct{}), dropAfter: -1}
+	f := &flakyMessenger{Messenger: devchat.New(func(text string) []string { return outboundmsg.Chunk(text, cfg().MaxChunkSize) }), online: make(chan struct{}), dropAfter: -1}
 	if online {
 		close(f.online)
 	}
@@ -84,12 +78,12 @@ func (f *flakyMessenger) try() error {
 	select {
 	case <-f.online:
 	default:
-		return errOffline
+		return outboundmsg.ErrOffline
 	}
 	if f.dropAfter == 0 {
 		f.dropAfter = -1
 		f.setOnlineLocked(false)
-		return errOffline
+		return outboundmsg.ErrOffline
 	}
 	if f.dropAfter > 0 {
 		f.dropAfter--
@@ -100,20 +94,20 @@ func (f *flakyMessenger) try() error {
 func (f *flakyMessenger) SendMessage(ctx context.Context, jid, text string) error {
 	time.Sleep(f.delay)
 	// Refused like WhatsApp refuses it, which the dev messenger does not.
-	if _, err := parseRecipient(jid); errors.Is(err, errRefusedRecipient) {
+	if _, err := parseRecipient(jid); errors.Is(err, outboundmsg.ErrRefusedRecipient) {
 		return err
 	}
 	if err := f.try(); err != nil {
 		return err
 	}
-	return f.devMessenger.SendMessage(ctx, jid, text)
+	return f.Messenger.SendMessage(ctx, jid, text)
 }
 
 func (f *flakyMessenger) SendPoll(ctx context.Context, jid, q string, opts []string, max int) (string, error) {
 	if err := f.try(); err != nil {
 		return "", err
 	}
-	return f.devMessenger.SendPoll(ctx, jid, q, opts, max)
+	return f.Messenger.SendPoll(ctx, jid, q, opts, max)
 }
 
 func (f *flakyMessenger) sent(jid string) []string {
@@ -309,7 +303,9 @@ func TestOutboxSummaryOnlyReads(t *testing.T) {
 	if n := rows(); n != 1 {
 		t.Fatalf("the summary removed rows: %d left, want 1", n)
 	}
-	o := newOutbox(s, func() Messenger { return newFlakyMessenger(func() *config.Config { return &config.Config{} }, true) }, 0, nil)
+	o := outboundmsg.NewOutbox(s, func() outboundmsg.Link {
+		return newFlakyMessenger(func() *config.Config { return &config.Config{} }, true)
+	}, 0, nil)
 	defer o.Stop()
 	testutil.WaitFor(t, 5*time.Second, "the outbox to forget it", func() bool { return rows() == 0 })
 }
@@ -319,7 +315,7 @@ func TestOutboxSummaryOnlyReads(t *testing.T) {
 func TestQuestionsWaitAndNoticesDoNot(t *testing.T) {
 	tb, br := newMainBridge(t, "")
 	tb.wa = newFlakyMessenger(tb.cfgs.Get, false)
-	br.hooks.Question(br, testDMChat, questionPrefix+"Which day suits you?")
+	br.hooks.Question(br, testDMChat, outboundmsg.QuestionPrefix+"Which day suits you?")
 	br.hooks.Notice(testDMChat, "⏳ Still at it")
 	sum, err := tb.store.OutboxSummary(context.Background(), time.Now())
 	if err != nil || sum.Waiting != 1 {
@@ -345,7 +341,7 @@ func TestOutboxSurvivesARestart(t *testing.T) {
 	cfg := func() *config.Config { return &config.Config{MaxChunkSize: 4000} }
 	s := openOutboxStore(t, dir)
 	down := newFlakyMessenger(cfg, false)
-	first := newOutbox(s, func() Messenger { return down }, 0, func(context.Context, store.OutboxRow) error {
+	first := outboundmsg.NewOutbox(s, func() outboundmsg.Link { return down }, 0, func(context.Context, store.OutboxRow) error {
 		t.Error("delivered while offline")
 		return nil
 	})
@@ -363,7 +359,7 @@ func TestOutboxSurvivesARestart(t *testing.T) {
 	s = openOutboxStore(t, dir)
 	up := newFlakyMessenger(cfg, true)
 	got := make(chan store.OutboxRow, 1)
-	second := newOutbox(s, func() Messenger { return up }, 0, func(ctx context.Context, r store.OutboxRow) error {
+	second := outboundmsg.NewOutbox(s, func() outboundmsg.Link { return up }, 0, func(ctx context.Context, r store.OutboxRow) error {
 		got <- r
 		return s.OutboxDelivered(ctx, r.ID)
 	})
@@ -393,9 +389,9 @@ func TestOutboxGivesUp(t *testing.T) {
 	s := openOutboxStore(t, dir)
 	db := testStoreSQL(t, filepath.Join(dir, "bridge.db"))
 	m := newFlakyMessenger(func() *config.Config { return &config.Config{} }, true)
-	o := newOutbox(s, func() Messenger { return m }, 0, nil)
+	o := outboundmsg.NewOutbox(s, func() outboundmsg.Link { return m }, 0, nil)
 	defer o.Stop()
-	if _, err := s.AddOutbox(context.Background(), store.OutboxRow{Chat: testDMChat, Brain: "main", History: "stale", Parts: []store.OutboxPart{{Text: "stale"}}, CreatedAt: time.Now().Add(-2 * outboxTTL)}); err != nil {
+	if _, err := s.AddOutbox(context.Background(), store.OutboxRow{Chat: testDMChat, Brain: "main", History: "stale", Parts: []store.OutboxPart{{Text: "stale"}}, CreatedAt: time.Now().Add(-2 * outboundmsg.OutboxTTL)}); err != nil {
 		t.Fatal(err)
 	}
 	if err := o.Text(context.Background(), "status@broadcast", "to everyone", 0); err != nil {
@@ -423,7 +419,7 @@ func TestOutboxGivesUp(t *testing.T) {
 func TestOutboxKeepsAChatsOrder(t *testing.T) {
 	s := openOutboxStore(t, t.TempDir())
 	m := newFlakyMessenger(func() *config.Config { return &config.Config{} }, false)
-	o := newOutbox(s, func() Messenger { return m }, 0, nil)
+	o := outboundmsg.NewOutbox(s, func() outboundmsg.Link { return m }, 0, nil)
 	defer o.Stop()
 	for _, text := range []string{"first", "second"} {
 		if err := o.Text(context.Background(), testDMChat, text, 0); err != nil {
@@ -457,7 +453,7 @@ func TestStatusWarnsAboutTheOutbox(t *testing.T) {
 	if _, err := tb.store.AddOutbox(ctx, store.OutboxRow{Chat: testDMChat, Parts: []store.OutboxPart{{Text: "late"}}, CreatedAt: time.Now().Add(-10 * time.Minute)}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := tb.store.AddOutbox(ctx, store.OutboxRow{Chat: testGroup, Parts: []store.OutboxPart{{Text: "too late"}}, CreatedAt: time.Now().Add(-2 * outboxTTL)}); err != nil {
+	if _, err := tb.store.AddOutbox(ctx, store.OutboxRow{Chat: testGroup, Parts: []store.OutboxPart{{Text: "too late"}}, CreatedAt: time.Now().Add(-2 * outboundmsg.OutboxTTL)}); err != nil {
 		t.Fatal(err)
 	}
 	tb.outbox.Wake()

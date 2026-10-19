@@ -13,45 +13,47 @@ import (
 	"strings"
 	"testing"
 	"unicode/utf8"
+
+	outboundmsg "github.com/Icewater1337/fridolin/internal/outbound"
 )
 
 // catalogue is every message of messages.go, by the name it has there,
 // as a chat gets it: each function once for each way it reads.
 func catalogue() []struct{ name, text string } {
 	return []struct{ name, text string }{
-		{"noBrainNotice", noBrainNotice},
-		{"heldBrainNotice", heldBrainNotice},
-		{"restartedNotice", restartedNotice},
-		{"resetReply(false)", resetReply(false)},
-		{"resetReply(true)", resetReply(true)},
-		{"stopReply(true, 0)", stopReply(true, 0)},
-		{"stopReply(false, 2)", stopReply(false, 2)},
-		{"stopReply(false, 0)", stopReply(false, 0)},
-		{`helpReply("")`, helpReply("")},
-		{`helpReply("@claude")`, helpReply("@claude")},
-		{"queuedNotice(2)", queuedNotice(2)},
-		{"queueFullNotice(\"@claude !stop\")", queueFullNotice("@claude !stop")},
-		{"otpCaughtNotice", otpCaughtNotice},
-		{"workingNotice", workingNotice},
-		{"questionPrefix", questionPrefix + "Which day?"},
-		{"chatErrNotSignedIn", chatErrNotSignedIn},
-		{"chatErrCodexNotSignedIn", chatErrCodexNotSignedIn},
-		{"chatErrCodexLimit", chatErrCodexLimit},
-		{"chatErrLimit", chatErrLimit},
-		{"chatErrTimeout", chatErrTimeout},
-		{"chatErrGeneric", chatErrGeneric},
-		{"chatErrSandbox", chatErrSandbox(errors.New("the sandbox could not be set up"))},
-		{"chatErrClaude", chatErrClaude("Credit balance is too low")},
-		{"chatErrCodex", chatErrCodex("Something failed")},
-		{"buildChatError", buildChatError(errors.New("brain queue is full"))},
-		{"viewOnceNotice", viewOnceNotice},
-		{"mediaTooLargeNotice", mediaTooLargeNotice(100 << 20)},
-		{"mediaFailedNotice", mediaFailedNotice},
-		{"pollAsText", pollAsText(pollData{Question: "Lunch on Friday?", Options: []string{"Pizza", "Sushi"}})},
-		{"startupCheckAlert", startupCheckAlert("missing ~/.fridolin/credentials/google_calendar_token_main.json")},
-		{"backupRefusedAlert", backupRefusedAlert("Notes", "it would delete 12 of 40 files")},
-		{"plaudGivenUpAlert", plaudGivenUpAlert("Team sync", "notes", "brain notes is not configured")},
-		{"plaudExpiredAlert", plaudExpiredAlert},
+		{"noBrainNotice", outboundmsg.NoBrainNotice},
+		{"heldBrainNotice", outboundmsg.HeldBrainNotice},
+		{"restartedNotice", outboundmsg.RestartedNotice},
+		{"resetReply(false)", outboundmsg.ResetReply(false)},
+		{"resetReply(true)", outboundmsg.ResetReply(true)},
+		{"stopReply(true, 0)", outboundmsg.StopReply(true, 0)},
+		{"stopReply(false, 2)", outboundmsg.StopReply(false, 2)},
+		{"stopReply(false, 0)", outboundmsg.StopReply(false, 0)},
+		{`helpReply("")`, outboundmsg.HelpReply("")},
+		{`helpReply("@claude")`, outboundmsg.HelpReply("@claude")},
+		{"queuedNotice(2)", outboundmsg.QueuedNotice(2)},
+		{"queueFullNotice(\"@claude !stop\")", outboundmsg.QueueFullNotice("@claude !stop")},
+		{"otpCaughtNotice", outboundmsg.OtpCaughtNotice},
+		{"workingNotice", outboundmsg.WorkingNotice},
+		{"questionPrefix", outboundmsg.QuestionPrefix + "Which day?"},
+		{"chatErrNotSignedIn", outboundmsg.ChatErrNotSignedIn},
+		{"chatErrCodexNotSignedIn", outboundmsg.ChatErrCodexNotSignedIn},
+		{"chatErrCodexLimit", outboundmsg.ChatErrCodexLimit},
+		{"chatErrLimit", outboundmsg.ChatErrLimit},
+		{"chatErrTimeout", outboundmsg.ChatErrTimeout},
+		{"chatErrGeneric", outboundmsg.ChatErrGeneric},
+		{"chatErrSandbox", outboundmsg.ChatErrSandbox(errors.New("the sandbox could not be set up"))},
+		{"chatErrClaude", outboundmsg.ChatErrClaude("Credit balance is too low")},
+		{"chatErrCodex", outboundmsg.ChatErrCodex("Something failed")},
+		{"buildChatError", outboundmsg.BuildChatError(errors.New("brain queue is full"))},
+		{"viewOnceNotice", outboundmsg.ViewOnceNotice},
+		{"mediaTooLargeNotice", outboundmsg.MediaTooLargeNotice(100 << 20)},
+		{"mediaFailedNotice", outboundmsg.MediaFailedNotice},
+		{"pollAsText", outboundmsg.PollAsText(outboundmsg.Poll{Question: "Lunch on Friday?", Options: []string{"Pizza", "Sushi"}})},
+		{"startupCheckAlert", outboundmsg.StartupCheckAlert("missing ~/.fridolin/credentials/google_calendar_token_main.json")},
+		{"backupRefusedAlert", outboundmsg.BackupRefusedAlert("Notes", "it would delete 12 of 40 files")},
+		{"plaudGivenUpAlert", outboundmsg.PlaudGivenUpAlert("Team sync", "notes", "brain notes is not configured")},
+		{"plaudExpiredAlert", outboundmsg.PlaudExpiredAlert},
 	}
 }
 
@@ -78,11 +80,12 @@ func TestGoldenMessages(t *testing.T) {
 	}
 	assertGolden(t, "messages.golden", []byte(out.String()))
 
-	f, err := parser.ParseFile(token.NewFileSet(), filepath.Join(pkgDir, "messages.go"), nil, 0)
+	f, err := parser.ParseFile(token.NewFileSet(), filepath.Join(repoDir, "internal", "outbound", "messages.go"), nil, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
 	for _, name := range topLevelNames(f) {
+		name = strings.ToLower(name[:1]) + name[1:]
 		if !named[name] {
 			t.Errorf("messages.go declares %s, which catalogue() does not list", name)
 		}
@@ -154,7 +157,7 @@ func TestChatMessagesLiveInTheCatalogue(t *testing.T) {
 	fset := token.NewFileSet()
 	seen := map[string]bool{}
 	for _, path := range files {
-		if path == filepath.Join(pkgDir, "messages.go") {
+		if path == filepath.Join(repoDir, "internal", "outbound", "messages.go") {
 			continue
 		}
 		f, err := parser.ParseFile(fset, path, nil, parser.ParseComments)

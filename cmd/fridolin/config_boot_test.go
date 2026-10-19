@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -11,12 +12,15 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
+
+	"github.com/Icewater1337/fridolin/internal/chat"
+	"github.com/Icewater1337/fridolin/internal/whatsapp"
 
 	"github.com/Icewater1337/fridolin/internal/config"
 	"github.com/Icewater1337/fridolin/internal/manifest"
 	"github.com/Icewater1337/fridolin/internal/otp"
 	"go.mau.fi/whatsmeow/proto/waE2E"
-	"go.mau.fi/whatsmeow/types/events"
 	"google.golang.org/protobuf/proto"
 )
 
@@ -194,12 +198,12 @@ func TestRuntimePathConsumersKeepBootAndApplyLiveOptions(t *testing.T) {
 	}
 }
 
-// Exercise the client actually wired by NewBridge, with only the network
-// downloader replaced. A callback accidentally wired to Get would fail this.
+// Exercise the options used by NewBridge with only I/O consumers replaced.
+// A settings callback accidentally wired to Get would fail this.
 func TestWhatsAppAttachmentKeepsBootMediaAfterAPISave(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
-	cs, err := openConfigStore(writeConfig(t, fmt.Sprintf(`{"data_dir":%q}`, filepath.Join(home, "running"))))
+	cs, err := openConfigStore(writeConfig(t, fmt.Sprintf(`{"data_dir":%q,"allowed_numbers":["15551234567"]}`, filepath.Join(home, "running"))))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -213,20 +217,50 @@ func TestWhatsAppAttachmentKeepsBootMediaAfterAPISave(t *testing.T) {
 	if w := tb.editConfig(t, func(c map[string]any) { c["media_dir"] = next; c["max_media_mb"] = 1 }); w.Code != http.StatusOK {
 		t.Fatal(w.Body.String())
 	}
-	wa := b.wa.(siteChatMessenger).Messenger.(*WhatsAppClient)
-	wa.media = &fakeDownloader{body: "%PDF-1.7"}
-	msg := &events.Message{Message: &waE2E.Message{DocumentMessage: &waE2E.DocumentMessage{FileName: proto.String("scan.pdf"), FileLength: proto.Uint64(8)}}}
-	path, _, notice := wa.downloadAttachment(msg, harnessDM)
-	if want := filepath.Join(cs.Boot().MediaDir, ".incoming", "scan.pdf"); path != want || notice != "" {
-		t.Fatalf("download = %q, %q; want %q", path, notice, want)
+	opts := b.whatsAppOptions()
+	opts.Downloader = &fakeDownloader{body: "%PDF-1.7"}
+	inbound := make(chan chat.Inbound, 1)
+	notices := make(chan string, 1)
+	opts.OnInbound = func(_ context.Context, m chat.Inbound) { inbound <- m }
+	opts.Notify = func(_, text string) { notices <- text }
+	wa, err := whatsapp.New(opts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(wa.Disconnect)
+	msg := dmEvent("boot-download", &waE2E.Message{DocumentMessage: &waE2E.DocumentMessage{FileName: proto.String("scan.pdf"), FileLength: proto.Uint64(8)}})
+	wa.ProcessMessage(msg)
+	select {
+	case m := <-inbound:
+		want := filepath.Join(cs.Boot().MediaDir, ".incoming", "scan.pdf")
+		if len(m.Media) != 1 || m.Media[0] != want {
+			t.Fatalf("download = %q; want %q", m.Media, want)
+		}
+		if body, err := os.ReadFile(want); err != nil || string(body) != "%PDF-1.7" {
+			t.Fatalf("downloaded body = %q, %v", body, err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("attachment was not delivered")
 	}
 	if _, err := os.Stat(next); !os.IsNotExist(err) {
 		t.Errorf("download created next-start media directory: %v", err)
 	}
 	msg.Message.DocumentMessage.FileLength = proto.Uint64(2 << 20)
-	if path, _, notice := wa.downloadAttachment(msg, harnessDM); path != "" || notice == "" {
-		t.Errorf("live media size limit not applied: %q %q", path, notice)
+	wa.ProcessMessage(msg)
+	select {
+	case notice := <-notices:
+		if notice == "" {
+			t.Error("empty media size notice")
+		}
+	case <-time.After(time.Second):
+		t.Fatal("live media size limit not applied")
 	}
+	select {
+	case m := <-inbound:
+		t.Errorf("oversized media delivered: %q", m.Media)
+	default:
+	}
+
 }
 
 // A direct request must not turn the still-active private data folder into a

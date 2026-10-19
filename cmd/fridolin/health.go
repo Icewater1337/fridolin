@@ -8,6 +8,8 @@ import (
 	"strings"
 	"time"
 
+	outboundmsg "github.com/Icewater1337/fridolin/internal/outbound"
+
 	"github.com/Icewater1337/fridolin/internal/config"
 
 	"github.com/Icewater1337/fridolin/internal/fsx"
@@ -83,7 +85,7 @@ func (b *Bridge) watchRequiredFiles(ctx context.Context, every time.Duration) {
 				jid = ownerChat(cfg)
 			}
 			if jid != "" {
-				if err := b.outbox.Text(ctx, jid, startupCheckAlert(msg), cfg.MaxChunkSize); err != nil {
+				if err := b.outbox.Text(ctx, jid, outboundmsg.StartupCheckAlert(msg), cfg.MaxChunkSize); err != nil {
 					log.Printf("startup check: %v", err)
 				} else {
 					told = missing

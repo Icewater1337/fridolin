@@ -22,8 +22,6 @@ import (
 	"github.com/Icewater1337/fridolin/internal/fsx"
 )
 
-// ── junk filter ───────────────────────────────────────────────────────────
-
 func TestIsJunkMessage(t *testing.T) {
 	junk := []string{"ok", "OK", "thanks", "👍", "...", "?", "a", "🎉🎉"}
 	for _, s := range junk {
@@ -97,33 +95,6 @@ func isASCII(s string) bool {
 	}
 	return true
 }
-
-// ── chunking ──────────────────────────────────────────────────────────────
-
-func TestChunkMessageShortTextUntouched(t *testing.T) {
-	chunks := ChunkMessage("hello", 100)
-	if len(chunks) != 1 || chunks[0] != "hello" {
-		t.Errorf("got %v", chunks)
-	}
-}
-
-func TestChunkMessageRespectsMaxSize(t *testing.T) {
-	text := strings.Repeat("paragraph one is here.\n\n", 200)
-	chunks := ChunkMessage(text, 500)
-	if len(chunks) < 2 {
-		t.Fatalf("expected multiple chunks, got %d", len(chunks))
-	}
-	for i, c := range chunks {
-		if n := utf8.RuneCountInString(c); n > 500 {
-			t.Errorf("chunk %d has %d characters, over the 500 limit", i, n)
-		}
-		if !strings.HasPrefix(c, "[") {
-			t.Errorf("chunk %d missing [n/total] prefix: %q", i, c[:20])
-		}
-	}
-}
-
-// ── config ────────────────────────────────────────────────────────────────
 
 func writeConfig(t *testing.T, body string) string {
 	t.Helper()
@@ -704,8 +675,6 @@ func TestBrainRoutingFallsBackToFirstBrain(t *testing.T) {
 		t.Errorf("DM routed to %q, want only", got.ID())
 	}
 }
-
-// ── sandbox ───────────────────────────────────────────────────────────────
 
 func TestSandboxProfileIsolatesBrains(t *testing.T) {
 	home := t.TempDir()
