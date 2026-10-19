@@ -54,7 +54,7 @@ var imports = map[string][]string{
 // (TestNoAmbientEnv).
 var ambientAllowed = map[string]bool{
 	"internal/platform": true,
-	// Temporary R5 exception: HomeDir retains the existing resolution contract; R6 injects paths.
+	// Temporary R5 exception: HomeDir and the retired BRAIN_MODE check keep their existing contracts; R6 injects paths/environment.
 	"internal/config": true,
 }
 

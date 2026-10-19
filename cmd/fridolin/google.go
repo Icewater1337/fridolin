@@ -22,10 +22,10 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/Icewater1337/fridolin/internal/manifest"
-
+	"github.com/Icewater1337/fridolin/internal/config"
 	"github.com/Icewater1337/fridolin/internal/fsx"
 	"github.com/Icewater1337/fridolin/internal/httpapi"
+	"github.com/Icewater1337/fridolin/internal/manifest"
 )
 
 // Google sign-in for calendars.
@@ -148,7 +148,7 @@ type oauthPending struct {
 
 // GoogleAuth manages the client, sign-ins and per-brain tokens.
 type GoogleAuth struct {
-	cfgs *Store
+	cfgs *config.Store
 
 	mu         sync.Mutex
 	pending    map[string]oauthPending  // state → sign-in in progress
@@ -158,7 +158,7 @@ type GoogleAuth struct {
 
 // NewGoogleAuth creates the manager, and logs the files in the credentials
 // dir that look like the copies of the OAuth client older versions left.
-func NewGoogleAuth(cfgs *Store) *GoogleAuth {
+func NewGoogleAuth(cfgs *config.Store) *GoogleAuth {
 	g := &GoogleAuth{cfgs: cfgs, pending: map[string]oauthPending{}, lastError: map[string]string{}, tokenLocks: map[string]chan struct{}{}}
 	if copies := g.leftoverClientCopies(); len(copies) > 0 {
 		log.Printf("WARNING: the credentials folder holds files named like the copies of the Google OAuth client that older versions wrote for the calendar tool, "+

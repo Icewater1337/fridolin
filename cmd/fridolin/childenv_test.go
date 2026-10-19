@@ -11,9 +11,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Icewater1337/fridolin/internal/registry"
-
+	"github.com/Icewater1337/fridolin/internal/config"
 	"github.com/Icewater1337/fridolin/internal/fsx"
+	"github.com/Icewater1337/fridolin/internal/registry"
 )
 
 func TestChildGets(t *testing.T) {
@@ -254,7 +254,7 @@ func TestChildEnvPassthroughNames(t *testing.T) {
 			home := t.TempDir()
 			t.Setenv("HOME", home)
 			names, _ := json.Marshal([]string{tc.name})
-			_, err := Load(writeConfig(t, `{"data_dir": "`+home+`/data", "child_env_passthrough": `+string(names)+`}`))
+			_, err := config.Load(writeConfig(t, `{"data_dir": "`+home+`/data", "child_env_passthrough": `+string(names)+`}`))
 			if tc.ok && err != nil {
 				t.Fatalf("Load: %v", err)
 			}
@@ -323,7 +323,7 @@ func TestOnlyEnvRefusesParallelTests(t *testing.T) {
 // brainRunEnv runs one message through folder brain a, with config added to
 // config.json, while the bridge's environment is env, a temp HOME and what
 // the fake CLI needs. It returns the environment the CLI got, and HOME.
-func brainRunEnv(t *testing.T, env map[string]string, config string) (map[string]string, string) {
+func brainRunEnv(t *testing.T, env map[string]string, configValue string) (map[string]string, string) {
 	t.Helper()
 	home := fsx.Canonical(t.TempDir())
 	envLog := filepath.Join(t.TempDir(), "brain.env")
@@ -340,11 +340,11 @@ func brainRunEnv(t *testing.T, env map[string]string, config string) (map[string
 	if err != nil {
 		t.Fatal(err)
 	}
-	cfg, err := Load(writeConfig(t, `{
+	cfg, err := config.Load(writeConfig(t, `{
 		"brain_mode": true,
 		"data_dir": "`+home+`/data",
 		"claude_path": "`+os.Args[0]+`",
-		"brain_dirs": [{"path": "`+home+`/a", "approved": `+string(approved)+`}]`+config+`
+		"brain_dirs": [{"path": "`+home+`/a", "approved": `+string(approved)+`}]`+configValue+`
 	}`))
 	if err != nil {
 		t.Fatal(err)

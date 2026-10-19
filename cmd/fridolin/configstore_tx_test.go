@@ -28,7 +28,7 @@ import (
 
 // openTxStore opens a config store on a config.json with body, in a temp
 // HOME of its own.
-func openTxStore(t *testing.T, body string) *Store {
+func openTxStore(t *testing.T, body string) *config.Store {
 	t.Helper()
 	home := t.TempDir()
 	t.Setenv("HOME", home)
@@ -282,7 +282,7 @@ func TestBrainsRunOnTheLatestConfig(t *testing.T) {
 func TestBridgeAppliesTheLatestConfigOnALateNotification(t *testing.T) {
 	tb := newTestBridge(t, "")
 	tb.addFolderBrain(t, manifest.Manifest{ID: "main", Name: "Main", Routing: manifest.Routing{HandlesDMs: true}})
-	rename := func(name string) Snapshot {
+	rename := func(name string) config.Snapshot {
 		t.Helper()
 		if err := updateManifest(tb.cfgs, "main", func(m *manifest.Manifest) error { m.Name = name; return nil }); err != nil {
 			t.Fatal(err)
@@ -490,7 +490,7 @@ func TestTheConfigMakesNoFolders(t *testing.T) {
 		}
 	}
 
-	if _, err := Load(filepath.Join(root, "typo.json")); err != nil {
+	if _, err := config.Load(filepath.Join(root, "typo.json")); err != nil {
 		t.Fatal(err)
 	}
 	noFolders("loading a config file that is not there")
@@ -640,7 +640,7 @@ func TestConfigExternalEditMigrationKeepsItsETag(t *testing.T) {
 		t.Fatal(err)
 	}
 	called := false
-	if _, err := cs.Update(old, func(c *config.Config) error { called = true; return nil }); !errors.Is(err, ErrConflict) || called {
+	if _, err := cs.Update(old, func(c *config.Config) error { called = true; return nil }); !errors.Is(err, config.ErrConflict) || called {
 		t.Fatalf("update = %v, mutation called %v; want conflict before mutation", err, called)
 	}
 	snap := cs.Snapshot()

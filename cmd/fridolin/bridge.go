@@ -51,7 +51,7 @@ func isJunkMessage(text string) bool {
 
 // Bridge connects WhatsApp to the brains, and serves the dashboard.
 type Bridge struct {
-	cfgs     *Store
+	cfgs     *config.Store
 	lock     *platform.Lock
 	store    *store.Store
 	wa       Messenger
@@ -116,7 +116,7 @@ type BridgeOptions struct {
 
 // NewBridge creates and wires up all components. It holds the data
 // directory's instance lock until Stop.
-func NewBridge(cfgs *Store, opts BridgeOptions) (_ *Bridge, err error) {
+func NewBridge(cfgs *config.Store, opts BridgeOptions) (_ *Bridge, err error) {
 	cfg := cfgs.Get()
 	// Before the lock, which is a file in the data dir.
 	if err := cfg.EnsureDirs(); err != nil {
@@ -971,7 +971,7 @@ func (b *Bridge) configChanged(prev, next *config.Config) {
 		log.Printf("applying configuration: %v", err)
 	}
 	logDMAccess(prev, next)
-	LogSecurityChanges(prev, next)
+	config.LogSecurityChanges(prev, next)
 	for _, br := range b.brainMgr.Brains() {
 		seedActivity(b.activity, br)
 	}

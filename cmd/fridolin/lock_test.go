@@ -13,10 +13,10 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/Icewater1337/fridolin/internal/store"
-
+	"github.com/Icewater1337/fridolin/internal/config"
 	"github.com/Icewater1337/fridolin/internal/fsx"
 	"github.com/Icewater1337/fridolin/internal/platform"
+	"github.com/Icewater1337/fridolin/internal/store"
 )
 
 func TestNewBridgeTakesTheInstanceLock(t *testing.T) {
@@ -87,9 +87,9 @@ func TestBridgeClosesTheStoreWhenItGivesUpTheLock(t *testing.T) {
 	// store.Open.
 	tests := []struct {
 		name string
-		run  func(t *testing.T, cfgs *Store, dataDir string)
+		run  func(t *testing.T, cfgs *config.Store, dataDir string)
 	}{
-		{"stopped", func(t *testing.T, cfgs *Store, dataDir string) {
+		{"stopped", func(t *testing.T, cfgs *config.Store, dataDir string) {
 			b, err := NewBridge(cfgs, BridgeOptions{NoWhatsApp: true})
 			if err != nil {
 				t.Fatal(err)
@@ -100,7 +100,7 @@ func TestBridgeClosesTheStoreWhenItGivesUpTheLock(t *testing.T) {
 			}
 			b.Stop()
 		}},
-		{"failed after opening the store", func(t *testing.T, cfgs *Store, dataDir string) {
+		{"failed after opening the store", func(t *testing.T, cfgs *config.Store, dataDir string) {
 			// A folder in place of dashboard.token makes NewBridge fail late.
 			if err := os.MkdirAll(filepath.Join(dataDir, "dashboard.token", "x"), 0o700); err != nil {
 				t.Fatal(err)
@@ -113,7 +113,7 @@ func TestBridgeClosesTheStoreWhenItGivesUpTheLock(t *testing.T) {
 				t.Fatalf("NewBridge failed before it opened the store: %v", err)
 			}
 		}},
-		{"failed while opening the store", func(t *testing.T, cfgs *Store, dataDir string) {
+		{"failed while opening the store", func(t *testing.T, cfgs *config.Store, dataDir string) {
 			// whatsmeow's container opens on a read-only bridge.db whose
 			// schema is current, then the bridge's own migration fails on a
 			// table it has to create: one of a database from before the

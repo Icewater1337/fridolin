@@ -534,7 +534,7 @@ func (b *Bridge) apiAllowChat(w http.ResponseWriter, r *http.Request) {
 		httpapi.WriteErr(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	_, err = b.cfgs.UpdateTx("", func(c *config.Config, tx *Tx) error {
+	_, err = b.cfgs.UpdateTx("", func(c *config.Config, tx *config.Tx) error {
 		if dm {
 			if !slices.Contains(c.AllowedNumbers, entry) {
 				c.AllowedNumbers = append(c.AllowedNumbers, entry)
@@ -705,7 +705,7 @@ func revokeEntry(list []string, sent, entry string, valid bool, canon func(strin
 // in their manifests (brain.json, staged in tx, and the approved copy). The
 // chosen brain goes first, so that one that is not there is refused before
 // the others are looked at.
-func assignGroup(c *config.Config, tx *Tx, jid, brainID string) error {
+func assignGroup(c *config.Config, tx *config.Tx, jid, brainID string) error {
 	if err := updateManifestIn(c, tx, brainID, func(m *manifest.Manifest) error {
 		if !slices.Contains(m.Routing.Groups, jid) {
 			m.Routing.Groups = append(m.Routing.Groups, jid)
@@ -753,9 +753,9 @@ func (b *Bridge) apiGetConfig(w http.ResponseWriter, r *http.Request) {
 	// save that comes back with it would pass the conflict check over a
 	// write the page never saw.
 	snap := b.cfgs.Snapshot()
-	file := MustClone(snap.File)
+	file := config.MustClone(snap.File)
 	file.BrainDirs = nil
-	eff := MustClone(snap.Effective)
+	eff := config.MustClone(snap.Effective)
 	eff.BrainDirs = nil
 	httpapi.WriteJSON(w, http.StatusOK, map[string]any{
 		"etag":      snap.ETag,
@@ -786,18 +786,18 @@ func (b *Bridge) apiPutConfig(w http.ResponseWriter, r *http.Request) {
 		httpapi.WriteErr(w, http.StatusPreconditionRequired, "etag required: send the etag GET /api/config returned along with the config")
 		return
 	}
-	incoming, err := DecodeReplacement(req.Config)
+	incoming, err := config.DecodeReplacement(req.Config)
 	if err != nil {
 		httpapi.WriteErr(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	res, err := b.cfgs.UpdateTx(req.ETag, func(c *config.Config, _ *Tx) error {
+	res, err := b.cfgs.UpdateTx(req.ETag, func(c *config.Config, _ *config.Tx) error {
 		incoming.BrainDirs = c.BrainDirs
 		*c = *incoming
 		return nil
 	})
 	switch {
-	case errors.Is(err, ErrConflict):
+	case errors.Is(err, config.ErrConflict):
 		httpapi.WriteErr(w, http.StatusConflict, err.Error())
 		return
 	case err != nil:
@@ -1102,7 +1102,7 @@ func (b *Bridge) apiAddBrain(w http.ResponseWriter, r *http.Request) {
 	defer scaffold.Close()
 	created := scaffold.Created()
 	writesManifest := false
-	if _, err := b.cfgs.UpdateTx("", func(c *config.Config, tx *Tx) error {
+	if _, err := b.cfgs.UpdateTx("", func(c *config.Config, tx *config.Tx) error {
 		// Again, against the config this update changes. addMu keeps adds
 		// apart, but not the other config writers: a brain saved or
 		// approved since the check above may claim the same group or the
@@ -1170,7 +1170,7 @@ func (b *Bridge) apiUpdateBrain(w http.ResponseWriter, r *http.Request) {
 	}
 	// The brain.json the update stages has it check the brain set with
 	// the edit before anything is written (see checkSet).
-	_, err := b.cfgs.UpdateTx("", func(c *config.Config, tx *Tx) error {
+	_, err := b.cfgs.UpdateTx("", func(c *config.Config, tx *config.Tx) error {
 		return updateManifestIn(c, tx, id, func(cur *manifest.Manifest) error {
 			*cur = m
 			return nil
@@ -1232,7 +1232,7 @@ func (b *Bridge) apiApproveBrain(w http.ResponseWriter, r *http.Request) {
 		httpapi.WriteErr(w, http.StatusBadRequest, "manifest required: send the brain.json you reviewed")
 		return
 	}
-	_, err := b.cfgs.UpdateTx("", func(c *config.Config, tx *Tx) error {
+	_, err := b.cfgs.UpdateTx("", func(c *config.Config, tx *config.Tx) error {
 		for i := range c.BrainDirs {
 			ref := &c.BrainDirs[i]
 			if ref.Approved == nil || ref.Approved.ID != id {

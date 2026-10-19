@@ -99,4 +99,4 @@ func openToOthers(dir string) (os.FileMode, bool) {
 }
 
 // openConfigStore wires registry validation into each writing store.
-func openConfigStore(path string) (*Store, error) { return Open(path, checkSet) }
+func openConfigStore(path string) (*config.Store, error) { return config.Open(path, checkSet) }

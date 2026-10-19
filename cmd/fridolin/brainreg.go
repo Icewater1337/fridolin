@@ -183,8 +183,8 @@ func inHome(p string) (string, bool) {
 }
 
 // updateManifest changes one brain's manifest, see updateManifestIn.
-func updateManifest(cs *Store, id string, mutate func(m *manifest.Manifest) error) error {
-	_, err := cs.UpdateTx("", func(c *config.Config, tx *Tx) error { return updateManifestIn(c, tx, id, mutate) })
+func updateManifest(cs *config.Store, id string, mutate func(m *manifest.Manifest) error) error {
+	_, err := cs.UpdateTx("", func(c *config.Config, tx *config.Tx) error { return updateManifestIn(c, tx, id, mutate) })
 	return err
 }
 
@@ -193,7 +193,7 @@ func updateManifest(cs *Store, id string, mutate func(m *manifest.Manifest) erro
 // brain.json in the brain's folder, so that the two change together and
 // the change is not reported as drift. It is the one way the bridge
 // changes a manifest; an error from mutate leaves both as they were.
-func updateManifestIn(c *config.Config, tx *Tx, id string, mutate func(m *manifest.Manifest) error) error {
+func updateManifestIn(c *config.Config, tx *config.Tx, id string, mutate func(m *manifest.Manifest) error) error {
 	for i := range c.BrainDirs {
 		ref := &c.BrainDirs[i]
 		if ref.Approved == nil || ref.Approved.ID != id {

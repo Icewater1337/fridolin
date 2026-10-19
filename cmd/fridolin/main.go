@@ -139,7 +139,7 @@ func configPathFrom(flagValue string) (path, source string) {
 	if p := os.Getenv("FRIDOLIN_CONFIG"); p != "" {
 		return p, configFromEnv
 	}
-	return DefaultPath(), configFromDefault
+	return config.DefaultPath(), configFromDefault
 }
 
 // resolvedPaths are the config file and the data dir a command uses, both
@@ -257,7 +257,7 @@ func runCmd(args []string) {
 		// Once the log reaches the dashboard too.
 		log.Printf("%v; logging to stderr without rotating it", logErr)
 	}
-	if err := EnsureFile(path); err != nil {
+	if err := config.EnsureFile(path); err != nil {
 		log.Fatalf("creating config: %v", err)
 	}
 	cfgs, err := openConfigStore(path)
@@ -382,7 +382,7 @@ func runLog(console io.Writer, configFlag string) (*logx.Ring, string) {
 // logDataDir names the data dir the bridge runs on, and with it the
 // WhatsApp session, and where it came from: without data_dir in the
 // config, which folders exist decides it.
-func logDataDir(cfgs *Store) {
+func logDataDir(cfgs *config.Store) {
 	home := config.HomeDir()
 	dir := cfgs.Get().DataDir
 	log.Printf("Data dir: %s (%s)", absPath(dir), config.DataDirSource(cfgs.FileCopy().DataDir, dir, home))
@@ -399,10 +399,10 @@ func initCmd(args []string) {
 		fmt.Printf("%s already exists — leaving it alone.\n", path)
 		return
 	}
-	if err := WriteStarter(path, *claudePath, *dataDir); err != nil {
+	if err := config.WriteStarter(path, *claudePath, *dataDir); err != nil {
 		log.Fatalf("writing %s: %v", path, err)
 	}
-	if _, err := Load(path); err != nil {
+	if _, err := config.Load(path); err != nil {
 		log.Fatalf("the starter config does not load: %v", err)
 	}
 }
@@ -414,7 +414,7 @@ func openCmd(args []string) {
 	_ = fs.Parse(args)
 	path := configPath(*cfgPath)
 
-	cfg, err := LoadExisting(path)
+	cfg, err := config.LoadExisting(path)
 	if err != nil {
 		log.Fatalf("loading config: %v", err)
 	}
@@ -464,7 +464,7 @@ func rotateTokenCmd(args []string) {
 	fs := flag.NewFlagSet("rotate-token", flag.ExitOnError)
 	cfgPath := fs.String("config", "", configFlagHelp)
 	_ = fs.Parse(args)
-	cfg, err := LoadExisting(configPath(*cfgPath))
+	cfg, err := config.LoadExisting(configPath(*cfgPath))
 	if err != nil {
 		log.Fatalf("loading config: %v", err)
 	}
@@ -587,7 +587,7 @@ func writeCheck(w io.Writer, o checkOptions) error {
 	if red != nil {
 		red.addConfig(path)
 	}
-	cfg, err := LoadExisting(path)
+	cfg, err := config.LoadExisting(path)
 	if err != nil {
 		return red.err(fmt.Errorf("loading config: %w", err))
 	}

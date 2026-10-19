@@ -143,7 +143,7 @@ type backupJob struct {
 
 // BackupManager runs and schedules backups.
 type BackupManager struct {
-	cfgs *Store
+	cfgs *config.Store
 	bm   *BrainManager
 
 	mu      sync.Mutex
@@ -194,7 +194,7 @@ var refusalNoticeTimeout = 30 * time.Second
 // be read is kept as state.json.corrupt and the bridge starts with none: the
 // last results and the day of the last scheduled run are gone then, and the
 // log says so rather than leaving it to the next scheduled run to show.
-func NewBackupManager(cfgs *Store, bm *BrainManager) *BackupManager {
+func NewBackupManager(cfgs *config.Store, bm *BrainManager) *BackupManager {
 	m := &BackupManager{cfgs: cfgs, bm: bm, now: time.Now, idleWait: backupIdleWait}
 	m.runner = m.runRclone
 	data, err := os.ReadFile(m.statePath())
@@ -899,7 +899,7 @@ func (b *Bridge) apiBrainBackup(w http.ResponseWriter, r *http.Request) {
 		httpapi.WriteErr(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	if _, err := b.cfgs.UpdateTx("", func(c *config.Config, tx *Tx) error {
+	if _, err := b.cfgs.UpdateTx("", func(c *config.Config, tx *config.Tx) error {
 		return updateBrainBackup(c, tx, r.PathValue("id"), req.Enabled, req.Exclude)
 	}); err != nil {
 		httpapi.WriteErr(w, http.StatusUnprocessableEntity, err.Error())
@@ -909,7 +909,7 @@ func (b *Bridge) apiBrainBackup(w http.ResponseWriter, r *http.Request) {
 }
 
 // updateBrainBackup changes one brain's backup settings in its manifest.
-func updateBrainBackup(c *config.Config, tx *Tx, id string, enabled *bool, exclude []string) error {
+func updateBrainBackup(c *config.Config, tx *config.Tx, id string, enabled *bool, exclude []string) error {
 	return updateManifestIn(c, tx, id, func(m *manifest.Manifest) error {
 		if enabled != nil {
 			m.Backup.Enabled = *enabled

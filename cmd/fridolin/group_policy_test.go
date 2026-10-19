@@ -145,7 +145,7 @@ func TestLoadConfigGroupMembers(t *testing.T) {
 		t.Run(c.name, func(t *testing.T) {
 			home := t.TempDir()
 			t.Setenv("HOME", home)
-			cfg, err := Load(writeConfig(t, `{"data_dir": "`+home+`/data", `+groups+`, "group_members": `+c.members+`}`))
+			cfg, err := config.Load(writeConfig(t, `{"data_dir": "`+home+`/data", `+groups+`, "group_members": `+c.members+`}`))
 			if c.err != "" {
 				if err == nil || !strings.Contains(err.Error(), c.err) {
 					t.Fatalf("Load: %v, want an error saying %q", err, c.err)
@@ -294,7 +294,7 @@ func TestLogSecurityChangesNamesGroupMembers(t *testing.T) {
 	logged := captureLog(t)
 	prev := &config.Config{GroupMembers: map[string][]string{testGroup: {"15551234567"}}}
 	next := &config.Config{GroupMembers: map[string][]string{testGroup: {"15559876543"}, other: {}}}
-	LogSecurityChanges(prev, next)
+	config.LogSecurityChanges(prev, next)
 	got := strings.Join(logged(), "\n")
 	for _, want := range []string{"group_members", "+" + testGroup + ":15559876543", "+" + other + ":", "-" + testGroup + ":15551234567"} {
 		if !strings.Contains(got, want) {
