@@ -1,4 +1,4 @@
-package main
+package jsonx
 
 import (
 	"encoding/json"
@@ -9,13 +9,13 @@ import (
 	"strings"
 )
 
-// unknownKeys lists the keys in data, a JSON value for a t, that no field
+// UnknownKeys lists the keys in data, a JSON value for a t, that no field
 // of t takes when data is decoded into one, each by its path from path:
 // sandbox.enable, brain_dirs[0].approved.nmae. It looks into the objects
 // of structs, and into arrays and objects that hold structs, but not into
 // a type that decodes itself. Keys are matched as encoding/json matches
 // them, an exact match first and then one that differs only in case.
-func unknownKeys(data []byte, t reflect.Type, path string) []string {
+func UnknownKeys(data []byte, t reflect.Type, path string) []string {
 	for t.Kind() == reflect.Pointer {
 		t = t.Elem()
 	}
@@ -44,7 +44,7 @@ func unknownKeys(data []byte, t reflect.Type, path string) []string {
 				out = append(out, unknownKeyPath(path, k))
 				continue
 			}
-			out = append(out, unknownKeys(obj[k], ft, unknownKeyPath(path, k))...)
+			out = append(out, UnknownKeys(obj[k], ft, unknownKeyPath(path, k))...)
 		}
 	case reflect.Slice, reflect.Array:
 		var arr []json.RawMessage
@@ -52,7 +52,7 @@ func unknownKeys(data []byte, t reflect.Type, path string) []string {
 			return nil
 		}
 		for i, el := range arr {
-			out = append(out, unknownKeys(el, t.Elem(), fmt.Sprintf("%s[%d]", path, i))...)
+			out = append(out, UnknownKeys(el, t.Elem(), fmt.Sprintf("%s[%d]", path, i))...)
 		}
 	case reflect.Map:
 		var obj map[string]json.RawMessage
@@ -60,7 +60,7 @@ func unknownKeys(data []byte, t reflect.Type, path string) []string {
 			return nil
 		}
 		for _, k := range slices.Sorted(maps.Keys(obj)) {
-			out = append(out, unknownKeys(obj[k], t.Elem(), unknownKeyPath(path, k))...)
+			out = append(out, UnknownKeys(obj[k], t.Elem(), unknownKeyPath(path, k))...)
 		}
 	}
 	return out

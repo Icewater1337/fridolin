@@ -1,4 +1,4 @@
-package main
+package jsonx
 
 import (
 	"encoding/json"
@@ -37,17 +37,17 @@ func TestUnknownKeysKeepsRecursivePathsAndJSONMatching(t *testing.T) {
 		"open": {"anything": true}, "Plain": "ok", "Hidden": "bad", "secret": "bad"
 	}`)
 	want := []string{"Hidden", "array[0].oops", "leaf.nmae", "list[1].extra", "map.a.nope", "map.z.oops", "secret", "z"}
-	if got := unknownKeys(data, reflect.TypeFor[*value](), ""); !slices.Equal(got, want) {
+	if got := UnknownKeys(data, reflect.TypeFor[*value](), ""); !slices.Equal(got, want) {
 		t.Fatalf("unknown keys = %v, want %v", got, want)
 	}
-	if got := unknownKeys([]byte(`{"extra": 1}`), reflect.TypeFor[inspectedLeaf](), "approved"); !slices.Equal(got, []string{"approved.extra"}) {
+	if got := UnknownKeys([]byte(`{"extra": 1}`), reflect.TypeFor[inspectedLeaf](), "approved"); !slices.Equal(got, []string{"approved.extra"}) {
 		t.Fatalf("prefixed keys = %v", got)
 	}
 }
 
 func TestUnknownKeysLeavesInvalidValuesToTheDecoder(t *testing.T) {
 	for _, data := range []string{"{", "null", "42", "[]"} {
-		if got := unknownKeys([]byte(data), reflect.TypeFor[inspectedLeaf](), ""); len(got) != 0 {
+		if got := UnknownKeys([]byte(data), reflect.TypeFor[inspectedLeaf](), ""); len(got) != 0 {
 			t.Errorf("%q: unknown keys = %v", data, got)
 		}
 	}
