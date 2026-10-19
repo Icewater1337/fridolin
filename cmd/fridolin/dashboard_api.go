@@ -205,27 +205,9 @@ func sandboxProfileWarning(bm *BrainManager) string {
 	return fmt.Sprintf("The sandbox profile cannot be built (%v), so brains %s refuse every message until that is fixed.", cause, strings.Join(failing, ", "))
 }
 
-func (b *Bridge) apiActivity(w http.ResponseWriter, r *http.Request) {
-	httpapi.ActivityAPI{Reader: b.activity}.ServeHTTP(w, r)
-}
-
-func (b *Bridge) apiLogs(w http.ResponseWriter, r *http.Request) {
-	httpapi.LogsAPI{Reader: b.logs, StartedAt: b.started, MaxLines: logRingLines}.ServeHTTP(w, r)
-}
-
 // ── chats ────────────────────────────────────────────────────────────────
 
 // ── config ───────────────────────────────────────────────────────────────
-
-func (b *Bridge) apiRestart(w http.ResponseWriter, r *http.Request) {
-	if b.restart == nil {
-		httpapi.WriteErr(w, http.StatusServiceUnavailable, "this bridge cannot restart itself")
-		return
-	}
-	log.Printf("Restarting on request from the dashboard…")
-	httpapi.WriteJSON(w, http.StatusAccepted, map[string]string{"status": "restarting"})
-	b.restart()
-}
 
 // ── brains ───────────────────────────────────────────────────────────────
 
@@ -382,7 +364,9 @@ func nonNil[T any](s []T) []T {
 func (b *Bridge) apiMux() http.Handler {
 	return httpapi.NewAPIMux(httpapi.APIDeps{
 		Status:   httpapi.StatusAPI{Snapshot: b.statusSnapshot}.ServeHTTP,
-		Activity: b.apiActivity, Logs: b.apiLogs, Restart: b.apiRestart,
+		Activity: func(w http.ResponseWriter, r *http.Request) { httpapi.ActivityAPI{Reader: b.activity}.ServeHTTP(w, r) }, Logs: func(w http.ResponseWriter, r *http.Request) {
+			httpapi.LogsAPI{Reader: b.logs, StartedAt: b.started, MaxLines: logRingLines}.ServeHTTP(w, r)
+		}, Restart: b.newRestartAPI().ServeHTTP,
 		Site: b.siteAPI, DevMode: b.dev != nil,
 		Connection: b.newConnectionAPI,
 		Chats:      b.newChatsAPI,

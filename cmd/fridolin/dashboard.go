@@ -1,6 +1,7 @@
 package main
 
 import (
+	"github.com/Icewater1337/fridolin/internal/version"
 	"net/http"
 
 	"github.com/Icewater1337/fridolin/internal/httpapi"
@@ -36,7 +37,9 @@ func (b *Bridge) requiresToken() bool {
 func (b *Bridge) newHTTPHandler(listen string) http.Handler {
 	b.sessionCookie = httpapi.SessionCookieName(listen)
 	return httpapi.New(httpapi.Deps{
-		Listen: listen, Ready: b.httpReady, Send: b.newScriptAPI().Send, Ingest: b.newScriptAPI().Ingest,
+		Listen: listen, Ready: func(w http.ResponseWriter, r *http.Request) {
+			httpapi.ReadyAPI{Connection: b.wa, DevMode: b.dev != nil, Version: version.String, StartedAt: b.started}.ServeHTTP(w, r)
+		}, Send: b.newScriptAPI().Send, Ingest: b.newScriptAPI().Ingest,
 		Builder: b.builderHandler, Brain: b.brainAPIHandler,
 		DashboardDisabled: func() bool { return b.cfgs.Get().Dashboard.Disabled }, Static: web.FS,
 		GoogleCallback: func(w http.ResponseWriter, r *http.Request) { b.newGoogleAPI().Callback(w, r) },
