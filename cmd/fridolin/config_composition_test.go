@@ -6,6 +6,8 @@ import (
 	"strings"
 	"testing"
 
+	outboundmsg "github.com/Icewater1337/fridolin/internal/outbound"
+
 	"github.com/Icewater1337/fridolin/internal/config"
 )
 
@@ -23,17 +25,17 @@ func TestConfigDefaultsMatchRuntimeContracts(t *testing.T) {
 	if cfg.CodexModel != defaultCodexModel {
 		t.Fatalf("config model %q differs from provider fallback %q", cfg.CodexModel, defaultCodexModel)
 	}
-	if cfg.MaxChunkSize != defaultChunkSize {
-		t.Fatalf("config chunk default %d differs from chunker %d", cfg.MaxChunkSize, defaultChunkSize)
+	if cfg.MaxChunkSize != outboundmsg.DefaultChunkSize {
+		t.Fatalf("config chunk default %d differs from chunker %d", cfg.MaxChunkSize, outboundmsg.DefaultChunkSize)
 	}
-	text := strings.Repeat("x", defaultChunkSize*2)
-	if a, b := ChunkMessage(text, 0), ChunkMessage(text, cfg.MaxChunkSize); !reflect.DeepEqual(a, b) {
+	text := strings.Repeat("x", outboundmsg.DefaultChunkSize*2)
+	if a, b := outboundmsg.Chunk(text, 0), outboundmsg.Chunk(text, cfg.MaxChunkSize); !reflect.DeepEqual(a, b) {
 		t.Fatal("configured chunk default differs from direct-call fallback")
 	}
-	if _, err := config.Resolve(&config.Config{MaxChunkSize: minChunkSize}, configPaths(), runtime.GOOS); err != nil {
+	if _, err := config.Resolve(&config.Config{MaxChunkSize: outboundmsg.MinChunkSize}, configPaths(), runtime.GOOS); err != nil {
 		t.Fatalf("chunker's minimum is refused by config: %v", err)
 	}
-	if _, err := config.Resolve(&config.Config{MaxChunkSize: minChunkSize - 1}, configPaths(), runtime.GOOS); err == nil {
+	if _, err := config.Resolve(&config.Config{MaxChunkSize: outboundmsg.MinChunkSize - 1}, configPaths(), runtime.GOOS); err == nil {
 		t.Fatal("config accepted less than the chunker's minimum")
 	}
 }

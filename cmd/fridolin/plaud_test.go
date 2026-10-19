@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/Icewater1337/fridolin/internal/devchat"
 	"net/http"
 	"os"
 	"os/exec"
@@ -2316,6 +2317,12 @@ func TestPlaudRetryRewritesTheSameTranscript(t *testing.T) {
 		t.Fatal(err)
 	}
 	waitFor(t, 10*time.Second, "brain reply", func() bool { return len(tb.dev.Outbox()) == 1 })
+	// Delivery precedes the completion callback. Let it finish saving state
+	// before replacing that state to simulate a retry after a crash.
+	waitFor(t, 10*time.Second, "the first run to be noted", func() bool {
+		last := tb.plaud.Status().LastForwarded
+		return last != nil && last.ID == plaudNew && last.Status == plaudRunDone
+	})
 
 	renamed := fp.teamSync(plaudNew, true)
 	renamed.Name = "Weekly sync"
@@ -3581,7 +3588,7 @@ func TestPlaudPhoneFolder(t *testing.T) {
 		}
 	}
 	waitFor(t, 5*time.Second, "brain replies", func() bool { return len(tb.dev.Outbox()) == 2 })
-	if out := tb.dev.Outbox(); !slices.ContainsFunc(out, func(m DevMessage) bool {
+	if out := tb.dev.Outbox(); !slices.ContainsFunc(out, func(m devchat.Message) bool {
 		return strings.Contains(m.Text, `[Plaud] New recording "Phone recording" (2026-10-18 10:00, 01:05)`)
 	}) {
 		t.Errorf("replies = %+v", out)
