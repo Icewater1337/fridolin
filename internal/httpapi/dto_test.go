@@ -109,11 +109,16 @@ func TestResponseDTOsKeepMapWireEncoding(t *testing.T) {
 
 func TestOptionalResponseFieldsKeepPresence(t *testing.T) {
 	empty, value := "", "value"
+	emptyPreview := map[string]string{}
 	cases := []struct {
 		name  string
 		value any
 		want  string
 	}{
+		{"builder", BuilderRow{}, `{"builder":false,"id":"","name":""}`},
+		{"builder empty preview", BuilderRow{Preview: &emptyPreview}, `{"builder":false,"id":"","name":"","preview":{}}`},
+		{"build chat", BuildChatResponse{}, `{"activity":null,"messages":null,"queued":0,"running":false,"thread":0}`},
+		{"build chat empty preview", BuildChatResponse{Preview: &emptyPreview}, `{"activity":null,"messages":null,"preview":{},"queued":0,"running":false,"thread":0}`},
 		{"send", SendResponse{Status: "sent"}, `{"status":"sent"}`},
 		{"send OTP", SendResponse{OTPRequest: value, Status: "sent"}, `{"otp_request":"value","status":"sent"}`},
 		{"rotate", RotateTokenResponse{Status: "rotated"}, `{"status":"rotated"}`},

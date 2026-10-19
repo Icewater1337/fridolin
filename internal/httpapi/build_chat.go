@@ -9,7 +9,7 @@ import (
 
 type BuildChatAPI struct {
 	Brain       func(string) *brain.Brain
-	View        func(*brain.Brain) map[string]any
+	View        func(*brain.Brain) BuildChatResponse
 	AppendUser  func(string, string) (int, error)
 	Submit      func(*brain.Brain, int, string) error
 	NewThread   func(string) error

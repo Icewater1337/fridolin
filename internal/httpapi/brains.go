@@ -21,7 +21,7 @@ type BrainView struct {
 }
 
 type BrainRegistry interface {
-	Inspect(string) (map[string]any, error)
+	Inspect(string) (registry.Inspection, error)
 	Add(registry.AddInput) (registry.AddResult, error)
 	Update(string, manifest.Manifest) error
 	Approve(string, manifest.Manifest) error

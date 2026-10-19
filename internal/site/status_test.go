@@ -41,3 +41,21 @@ func TestSiteStatusSnapshotPreservesMapEncoding(t *testing.T) {
 		}
 	}
 }
+
+func TestProposalSnapshotKeepsEmptyOptionalFields(t *testing.T) {
+	empty := ""
+	preview := map[string]string{}
+	value := ProposalSnapshot{Error: &empty, Preview: &preview}
+	old := map[string]any{"changes": []ModuleChange(nil), "error": "", "preview": preview, "proposal": value.Proposal}
+	got, err := json.Marshal(value)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want, err := json.Marshal(old)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != string(want) {
+		t.Fatalf("got %s; want %s", got, want)
+	}
+}

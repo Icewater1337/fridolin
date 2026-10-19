@@ -518,17 +518,26 @@ func (m *SiteManager) BuilderPropose(ctx context.Context, brainID, title, summar
 }
 
 // Proposals lists the open proposals with what each changes.
-func (m *SiteManager) Proposals(ctx context.Context) []map[string]any {
+type ProposalSnapshot struct {
+	Changes  []ModuleChange     `json:"changes"`
+	Error    *string            `json:"error,omitempty"`
+	Preview  *map[string]string `json:"preview,omitempty"`
+	Proposal SiteProposal       `json:"proposal"`
+}
+
+func (m *SiteManager) Proposals(ctx context.Context) []ProposalSnapshot {
 	s := m.Settings()
-	out := []map[string]any{}
+	out := []ProposalSnapshot{}
 	for _, p := range s.Proposals {
 		changes, err := m.ModuleChanges(ctx, s.Approved, p.Commit)
-		item := map[string]any{"proposal": p, "changes": changes}
+		item := ProposalSnapshot{Proposal: p, Changes: changes}
 		if err != nil {
-			item["error"] = err.Error()
+			message := err.Error()
+			item.Error = &message
 		}
 		if pv := m.previewOf(p.Brain); pv != nil {
-			item["preview"] = m.previewURLs(p.Brain, pv)
+			preview := m.previewURLs(p.Brain, pv)
+			item.Preview = &preview
 		}
 		out = append(out, item)
 	}

@@ -57,9 +57,9 @@ func TestInspectRejectsReplacedCanonicalComponents(t *testing.T) {
 					t.Fatal(err)
 				}
 				defer home.Close()
-				got := map[string]any{}
+				got := &Inspection{}
 				g.inspectFolderMetadata(home, abs, got)
-				if got["exists"] != false || got["is_dir"] != false || got["entries"] != nil || got["manifest"] != nil {
+				if got.Exists == nil || *got.Exists || got.IsDir == nil || *got.IsDir || got.Entries != nil || got.Manifest != nil {
 					t.Fatalf("inspected replaced candidate: %+v", got)
 				}
 			})
@@ -167,12 +167,12 @@ func TestInspectPreservesAcceptedAliasesAndFileMetadata(t *testing.T) {
 		{filepath.Join(home, "missing"), false, false},
 	} {
 		got, err := g.Inspect(tc.path)
-		if err != nil || got["exists"] != tc.exists || got["is_dir"] != tc.isDir {
+		if err != nil || got.Exists == nil || *got.Exists != tc.exists || got.IsDir == nil || *got.IsDir != tc.isDir {
 			t.Fatalf("inspect %s = %+v, %v", tc.path, got, err)
 		}
 		if tc.isDir {
-			m, ok := got["manifest"].(*manifest.Manifest)
-			if got["entries"] != 1 || !ok || m.ID != "candidate" {
+			m := got.Manifest
+			if got.Entries == nil || *got.Entries != 1 || m == nil || m.ID != "candidate" {
 				t.Fatalf("lost directory metadata: %+v", got)
 			}
 		}

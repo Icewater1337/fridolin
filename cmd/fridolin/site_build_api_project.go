@@ -43,7 +43,7 @@ func (b *Bridge) buildAPI(mux *http.ServeMux) {
 		},
 	}).Register(mux)
 }
-func (b *Bridge) buildChatView(br *brain.Brain) map[string]any {
+func (b *Bridge) buildChatView(br *brain.Brain) httpapi.BuildChatResponse {
 	ch := b.site.BuildChat(br.ID())
 	jid := buildChatJID(br.ID(), ch.Thread)
 	rt := br.Snapshot()
@@ -54,16 +54,17 @@ func (b *Bridge) buildChatView(br *brain.Brain) map[string]any {
 			queued++
 		}
 	}
-	resp := map[string]any{"messages": ch.Messages, "thread": ch.Thread, "running": running, "queued": queued, "activity": []string{}}
+	resp := httpapi.BuildChatResponse{Messages: ch.Messages, Thread: ch.Thread, Running: running, Queued: queued, Activity: []string{}}
 	if running {
-		resp["activity"] = currentRunLog(br.StreamLogPath(), rt.Running.PID)
+		resp.Activity = currentRunLog(br.StreamLogPath(), rt.Running.PID)
 	}
 	if urls := b.site.PreviewURLs(br.ID()); urls != nil {
-		resp["preview"] = urls
+		resp.Preview = &urls
 	}
 	for _, p := range b.site.Settings().Proposals {
 		if p.Brain == br.ID() {
-			resp["proposal"] = p
+			proposal := p
+			resp.Proposal = &proposal
 		}
 	}
 	return resp

@@ -411,10 +411,28 @@ func prettyName(s string) string {
 	return string(unicode.ToUpper(r)) + s[size:]
 }
 
-func (g *Registry) Inspect(path string) (map[string]any, error) {
+type Inspection struct {
+	AbsPath    string             `json:"abs_path"`
+	Entries    *int               `json:"entries,omitempty"`
+	Exists     *bool              `json:"exists,omitempty"`
+	HasHistory *bool              `json:"has_history,omitempty"`
+	HasPrompt  *bool              `json:"has_prompt,omitempty"`
+	IsDir      *bool              `json:"is_dir,omitempty"`
+	IsGit      *bool              `json:"is_git,omitempty"`
+	Manifest   *manifest.Manifest `json:"manifest,omitempty"`
+	Problems   []string           `json:"problems"`
+	Suggested  *SuggestedBrain    `json:"suggested,omitempty"`
+	Warnings   []string           `json:"warnings"`
+}
+type SuggestedBrain struct {
+	ID   string `json:"id"`
+	Name string `json:"name"`
+}
+
+func (g *Registry) Inspect(path string) (Inspection, error) {
 	cfg := g.store.Get()
 	abs, problems, warnings := g.checkPath(path, cfg, g.OtherDirs(cfg))
-	resp := map[string]any{"abs_path": abs, "problems": nonNil(problems), "warnings": nonNil(warnings)}
+	resp := Inspection{AbsPath: abs, Problems: nonNil(problems), Warnings: nonNil(warnings)}
 	if len(problems) > 0 {
 		// A folder that cannot be a brain is not looked into: outside the
 		// home folder that would be a way to probe any path on disk.
@@ -422,10 +440,10 @@ func (g *Registry) Inspect(path string) (map[string]any, error) {
 	}
 	root, err := os.OpenRoot(fsx.Canonical(g.options.Home()))
 	if err != nil {
-		return nil, err
+		return Inspection{}, err
 	}
 	defer root.Close()
-	g.inspectFolderMetadata(root, abs, resp)
+	g.inspectFolderMetadata(root, abs, &resp)
 	id := manifest.Slugify(filepath.Base(abs))
 	taken := map[string]bool{}
 	for _, ref := range cfg.BrainDirs {
@@ -436,16 +454,16 @@ func (g *Registry) Inspect(path string) (map[string]any, error) {
 	for i := 2; taken[id]; i++ {
 		id = fmt.Sprintf("%s-%d", manifest.Slugify(filepath.Base(abs)), i)
 	}
-	resp["suggested"] = map[string]string{"id": id, "name": prettyName(filepath.Base(abs))}
+	resp.Suggested = &SuggestedBrain{ID: id, Name: prettyName(filepath.Base(abs))}
 	return resp, nil
 }
 
 // inspectFolderMetadata only receives a canonical path accepted by Registry.checkPath.
 // Keep the listing and manifest on the same opened directory.
-func (g *Registry) inspectFolderMetadata(home *os.Root, abs string, resp map[string]any) {
+func (g *Registry) inspectFolderMetadata(home *os.Root, abs string, resp *Inspection) {
 	dir, st, err := openInspectFolder(home, abs)
-	resp["exists"] = err == nil
-	resp["is_dir"] = err == nil && st.IsDir()
+	exists, isDir := err == nil, err == nil && st.IsDir()
+	resp.Exists, resp.IsDir = &exists, &isDir
 	if err != nil || dir == nil {
 		return
 	}
@@ -456,12 +474,15 @@ func (g *Registry) inspectFolderMetadata(home *os.Root, abs string, resp map[str
 		entries = len(list)
 		f.Close()
 	}
-	resp["entries"] = entries
-	resp["is_git"] = fileExistsInRoot(home, filepath.Join(abs, ".git"))
-	resp["has_prompt"] = fileExistsInRoot(home, filepath.Join(abs, manifest.DefaultPromptFile))
-	resp["has_history"] = fileExistsInRoot(home, filepath.Join(abs, g.options.HistoryFile))
+	resp.Entries = &entries
+	is_git := fileExistsInRoot(home, filepath.Join(abs, ".git"))
+	resp.IsGit = &is_git
+	has_prompt := fileExistsInRoot(home, filepath.Join(abs, manifest.DefaultPromptFile))
+	resp.HasPrompt = &has_prompt
+	has_history := fileExistsInRoot(home, filepath.Join(abs, g.options.HistoryFile))
+	resp.HasHistory = &has_history
 	if m, err := manifest.ReadRoot(dir); err == nil {
-		resp["manifest"] = m
+		resp.Manifest = m
 	}
 }
 
