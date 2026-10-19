@@ -1,10 +1,11 @@
-package main
+//go:build unix
+
+package platform
 
 import (
 	"encoding/json"
 	"os"
 	"path/filepath"
-	"sync"
 	"time"
 )
 
@@ -83,11 +84,5 @@ func IsDir(p string) bool {
 	return err == nil && st.IsDir()
 }
 
-// ownLayout is the running bridge's layout; tests replace it.
-var ownLayout = sync.OnceValue(func() BridgeLayout {
-	exe, err := os.Executable()
-	if err != nil {
-		return BridgeLayout{}
-	}
-	return LayoutOf(exe)
-})
+// pathExists includes dangling symlinks, matching installation layout discovery.
+func pathExists(p string) bool { _, err := os.Lstat(p); return err == nil }
