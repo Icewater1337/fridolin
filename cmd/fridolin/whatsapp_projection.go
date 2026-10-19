@@ -67,7 +67,7 @@ func whatsAppOptions(cfg func() *Config, s *store.Store, handler InboundHandler,
 
 func whatsAppOutbound() whatsapp.Outbound {
 	return whatsapp.Outbound{Recipient: parseRecipient, Classify: classifySendErr, Chunks: func(ctx context.Context, chunks []string, send func(string) error) error {
-		return outboundmsg.SendChunks(ctx, chunks, outboxPace, send)
+		return outboundmsg.SendChunks(ctx, chunks, outboundmsg.OutboxPace, send)
 	}}
 }
 

@@ -690,7 +690,7 @@ func TestShutdownDropsWhatIsKeptTooLong(t *testing.T) {
 	h.WhatsApp(dmEvent("3EB0RUN", textMsg("a long one")))
 	h.WaitFor("the run", func() bool { return h.Running("main") })
 	old := dmEvent("3EB0OLD", textMsg("from long ago"))
-	old.Info.Timestamp = time.Now().Add(-outboxTTL - time.Minute)
+	old.Info.Timestamp = time.Now().Add(-outboundmsg.OutboxTTL - time.Minute)
 	h.WhatsApp(old)
 	h.WaitSent(harnessDM, "Queued (#1)")
 	h.WhatsApp(dmEvent("3EB0NEW", textMsg("from just now")))
