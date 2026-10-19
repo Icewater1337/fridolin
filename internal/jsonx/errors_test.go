@@ -58,3 +58,33 @@ func TestRenameTypeErrorIncludesContainerTypes(t *testing.T) {
 		t.Fatal("an unchanged type caused a wrapper")
 	}
 }
+
+func TestRenameTypeErrorIncludesAnonymousAggregate(t *testing.T) {
+	t.Parallel()
+	var value struct {
+		Items []renamedFixture `json:"items"`
+	}
+	original := json.Unmarshal([]byte(`false`), &value)
+	wrapped := fmt.Errorf("reading jsonx.renamedFixture: %w", original)
+	name := func(typ reflect.Type) string {
+		if typ == reflect.TypeOf(value) {
+			return "struct { Items []main.OldFixture \"json:\\\"items\\\"\" }"
+		}
+		return ""
+	}
+	got := RenameTypeError(wrapped, name, nil)
+	want := "reading jsonx.renamedFixture: json: cannot unmarshal bool into Go value of type struct { Items []main.OldFixture \"json:\\\"items\\\"\" }"
+	if got.Error() != want {
+		t.Fatalf("diagnostic = %q, want %q", got.Error(), want)
+	}
+	var before, after *json.UnmarshalTypeError
+	if !errors.As(original, &before) || !errors.As(got, &after) || before != after || !errors.Is(got, wrapped) {
+		t.Fatal("original error identity or metadata lost")
+	}
+	if before.Type != reflect.TypeOf(value) {
+		t.Fatal("the original decoder error was modified")
+	}
+	if RenameTypeError(wrapped, func(reflect.Type) string { return "" }, nil) != wrapped {
+		t.Fatal("an unchanged anonymous type caused a wrapper")
+	}
+}

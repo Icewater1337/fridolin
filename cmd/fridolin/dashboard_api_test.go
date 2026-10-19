@@ -1113,6 +1113,7 @@ func TestRunPickerTellsCancelFromFailure(t *testing.T) {
 func TestSignInKeepsItsClientAndRedirect(t *testing.T) {
 	srv, got := fakeGoogle(t)
 	tb := newTestBridge(t, "")
+	useGoogleServer(tb, srv)
 	tb.addFolderBrain(t, manifest.Manifest{ID: "fam", Name: "Fam"})
 	if w := tb.do("PUT", "/api/google/client", map[string]string{"json": fmt.Sprintf(testClientJSON, srv.URL)}); w.Code != 200 {
 		t.Fatal(w.Body.String())
@@ -1156,16 +1157,5 @@ func TestSignInKeepsItsClientAndRedirect(t *testing.T) {
 	}
 	if (*got)["redirect_uri"] != served || (*got)["client_id"] != "123-abc.apps.googleusercontent.com" {
 		t.Fatalf("exchange sent redirect_uri %q and client %q", (*got)["redirect_uri"], (*got)["client_id"])
-	}
-}
-
-func TestTokenLifetime(t *testing.T) {
-	for _, c := range []struct {
-		in   int
-		want time.Duration
-	}{{3599, 3599 * time.Second}, {0, time.Hour}, {-5, time.Hour}} {
-		if got := tokenLifetime(c.in); got != c.want {
-			t.Errorf("tokenLifetime(%d) = %v, want %v", c.in, got, c.want)
-		}
 	}
 }

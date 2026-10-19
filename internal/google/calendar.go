@@ -1,4 +1,4 @@
-package main
+package google
 
 import (
 	"bytes"
@@ -28,20 +28,20 @@ import (
 // and the token, refresh token and OAuth client secret included, was
 // there for any program the brain ran.
 
-// brainCalendars are the calendars of its Google account a brain may use.
-type brainCalendars struct {
+// Calendars are the calendars of its Google account a brain may use.
+type Calendars struct {
 	allowed []string
 	def     string // where new events go
 }
 
-// calendarsOf reads them from the brain's approved manifest. A brain with
+// CalendarsOf reads them from the brain's approved manifest. A brain with
 // no calendars chosen there (one connected by hand, or a brain.json edited
 // since) may use its primary calendar only.
-func calendarsOf(m manifest.Manifest) brainCalendars {
+func CalendarsOf(m manifest.Manifest) Calendars {
 	if m.Calendar == nil || len(m.Calendar.Calendars) == 0 {
-		return brainCalendars{allowed: []string{"primary"}, def: "primary"}
+		return Calendars{allowed: []string{"primary"}, def: "primary"}
 	}
-	c := brainCalendars{allowed: slices.Clone(m.Calendar.Calendars), def: m.Calendar.Default}
+	c := Calendars{allowed: slices.Clone(m.Calendar.Calendars), def: m.Calendar.Default}
 	if !slices.Contains(c.allowed, c.def) {
 		c.def = c.allowed[0]
 	}
@@ -51,11 +51,11 @@ func calendarsOf(m manifest.Manifest) brainCalendars {
 // errCalendarNotAllowed is a call on a calendar the brain may not use.
 var errCalendarNotAllowed = errors.New("calendar not enabled for this brain")
 
-// pick resolves the calendar a call names: none means every allowed
+// Pick resolves the calendar a call names: none means every allowed
 // calendar for a read (many) and the default one for a write, and
 // "primary", the only name before calendars could be chosen, means the
 // default one too.
-func (c brainCalendars) pick(requested string, many bool) ([]string, error) {
+func (c Calendars) Pick(requested string, many bool) ([]string, error) {
 	switch {
 	case requested == "" && many:
 		return slices.Clone(c.allowed), nil
@@ -68,9 +68,9 @@ func (c brainCalendars) pick(requested string, many bool) ([]string, error) {
 		errCalendarNotAllowed, requested, strings.Join(c.allowed, ", "))
 }
 
-// allows reports whether an entry of the account's calendar list is one
+// Allows reports whether an entry of the account's calendar list is one
 // of the brain's, and whether it is the default.
-func (c brainCalendars) allows(e CalendarEntry) (allowed, isDefault bool) {
+func (c Calendars) Allows(e CalendarEntry) (allowed, isDefault bool) {
 	is := func(id string) bool { return id == e.ID || (id == "primary" && e.Primary) }
 	return slices.ContainsFunc(c.allowed, is), is(c.def)
 }
@@ -105,8 +105,8 @@ const calendarReconnectHint = "Ask the owner to connect the calendar again in th
 // calendarAPI calls the Calendar API with the brain's access token: method
 // on path with query, body as JSON when it is not nil, and the answer
 // decoded into out when it is not nil.
-func (g *GoogleAuth) calendarAPI(ctx context.Context, tok *googleToken, method, path string, query url.Values, body, out any) error {
-	u := googleAPIBase + "/calendar/v3" + path
+func (g *Auth) calendarAPI(ctx context.Context, tok *Token, method, path string, query url.Values, body, out any) error {
+	u := g.options.Endpoints.APIBase + "/calendar/v3" + path
 	if len(query) > 0 {
 		u += "?" + query.Encode()
 	}
@@ -126,7 +126,7 @@ func (g *GoogleAuth) calendarAPI(ctx context.Context, tok *googleToken, method, 
 	if body != nil {
 		req.Header.Set("Content-Type", "application/json")
 	}
-	resp, err := googleHTTP.Do(req)
+	resp, err := g.options.HTTP.Do(req)
 	if err != nil {
 		return fmt.Errorf("could not reach Google Calendar (%w); this is usually temporary, try again in a minute", err)
 	}
@@ -147,7 +147,7 @@ func (g *GoogleAuth) calendarAPI(ctx context.Context, tok *googleToken, method, 
 		return nil
 	}
 	if err := json.NewDecoder(io.LimitReader(resp.Body, 16<<20)).Decode(out); err != nil {
-		return fmt.Errorf("reading Google Calendar's answer: %w", err)
+		return fmt.Errorf("reading Google Calendar's answer: %w", DecodeError(err))
 	}
 	return nil
 }
@@ -216,7 +216,7 @@ func (e googleEvent) brief() CalendarEvent {
 // in start order, and whether it had more. Google may return fewer events
 // per page than asked for even when more match, so it follows the pages:
 // stopping early would make a busy day look free.
-func (g *GoogleAuth) listEvents(ctx context.Context, tok *googleToken, calendar string, from, to time.Time, tz string, limit int) ([]googleEvent, bool, error) {
+func (g *Auth) listEvents(ctx context.Context, tok *Token, calendar string, from, to time.Time, tz string, limit int) ([]googleEvent, bool, error) {
 	q := url.Values{
 		"timeMin":      {from.Format(time.RFC3339)},
 		"timeMax":      {to.Format(time.RFC3339)},
@@ -256,8 +256,8 @@ type CalendarListing struct {
 	Truncated bool            `json:"truncated"`
 }
 
-// eventsOf lists the events of calendars, at most limit in all.
-func (g *GoogleAuth) eventsOf(ctx context.Context, tok *googleToken, calendars []string, from, to time.Time, tz string, limit int) (*CalendarListing, error) {
+// EventsOf lists the events of calendars, at most limit in all.
+func (g *Auth) EventsOf(ctx context.Context, tok *Token, calendars []string, from, to time.Time, tz string, limit int) (*CalendarListing, error) {
 	out := &CalendarListing{Events: []CalendarEvent{}}
 	for _, cal := range calendars {
 		items, more, err := g.listEvents(ctx, tok, cal, from, to, tz, limit)
@@ -311,8 +311,8 @@ type Reminder struct {
 	Minutes int    `json:"minutes"`
 }
 
-// body checks e and builds the Calendar API's event from it.
-func (e NewEvent) body() (map[string]any, error) {
+// Body checks e and builds the Calendar API's event from it.
+func (e NewEvent) Body() (map[string]any, error) {
 	if strings.TrimSpace(e.Title) == "" {
 		return nil, errors.New("the event needs a title")
 	}
@@ -376,18 +376,15 @@ func (e NewEvent) body() (map[string]any, error) {
 	return body, nil
 }
 
-// sendUpdatesValues are what the Calendar API takes as sendUpdates.
-var sendUpdatesValues = []string{"all", "externalOnly", "none"}
-
-// insertEvent creates an event in calendar.
-func (g *GoogleAuth) insertEvent(ctx context.Context, tok *googleToken, calendar string, body map[string]any, sendUpdates string) (CalendarEvent, error) {
+// InsertEvent creates an event in calendar.
+func (g *Auth) InsertEvent(ctx context.Context, tok *Token, calendar string, body map[string]any, sendUpdates string) (CalendarEvent, error) {
 	var created googleEvent
 	err := g.calendarAPI(ctx, tok, http.MethodPost, "/calendars/"+url.PathEscape(calendar)+"/events", url.Values{"sendUpdates": {sendUpdates}}, body, &created)
 	return created.brief(), err
 }
 
-// deleteEvent deletes event id of calendar.
-func (g *GoogleAuth) deleteEvent(ctx context.Context, tok *googleToken, calendar, id string) error {
+// DeleteEvent deletes event id of calendar.
+func (g *Auth) DeleteEvent(ctx context.Context, tok *Token, calendar, id string) error {
 	return g.calendarAPI(ctx, tok, http.MethodDelete, "/calendars/"+url.PathEscape(calendar)+"/events/"+url.PathEscape(id), nil, nil, nil)
 }
 
@@ -397,9 +394,9 @@ type BusySlot struct {
 	End   string `json:"end"`
 }
 
-// busyTimes returns when any of calendars is busy between from and to. A
+// BusyTimes returns when any of calendars is busy between from and to. A
 // calendar Google cannot read the times of is an error, not free time.
-func (g *GoogleAuth) busyTimes(ctx context.Context, tok *googleToken, calendars []string, from, to time.Time, tz string) ([]BusySlot, error) {
+func (g *Auth) BusyTimes(ctx context.Context, tok *Token, calendars []string, from, to time.Time, tz string) ([]BusySlot, error) {
 	req := map[string]any{"timeMin": from.Format(time.RFC3339), "timeMax": to.Format(time.RFC3339)}
 	if tz != "" {
 		req["timeZone"] = tz
@@ -452,12 +449,12 @@ func (e *busyError) Error() string {
 // cannot read for it, where connecting again would not help.
 const calendarCheckHint = "If it stays so, ask the owner to check that the calendar still exists and is shared with the brain's Google account, and which calendars the brain has: Brains → this brain → Calendar."
 
-// calendarCallProblem is the status and message a brain's calendar call
+// CallProblem is the status and message a brain's calendar call
 // gets for err, which came from getting the brain's token or from Google.
 // Only a sign-in that Google refuses, or that the bridge cannot use, tells
 // the brain to have its owner connect again: for anything else that would
 // send the owner to fix what is not broken.
-func calendarCallProblem(err error) (int, string) {
+func CallProblem(err error) (int, string) {
 	var se *signInError
 	var oe *oauthError
 	var ge *googleAPIError

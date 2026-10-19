@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"github.com/Icewater1337/fridolin/internal/google"
 	"log"
 	"os"
 	"path/filepath"
@@ -65,7 +66,7 @@ func (r *commandRunner) Run(ctx context.Context, spec brain.RunSpec, callbacks c
 	finalArgs := args
 	extraEnv := append([]string{"FRIDOLIN_BRAIN_ID=" + spec.ID}, dataEnv(s)...)
 	extraEnv = append(extraEnv, providerEnv...)
-	extraEnv = append(extraEnv, calendarEnv(spec.ID, s.Manifest, s.CredsDir)...)
+	extraEnv = append(extraEnv, google.CalendarEnv(spec.ID, s.Manifest, s.CredsDir)...)
 	extraEnv = append(extraEnv, plaudOptOut...)
 	if s.ToolsDir != "" {
 		// Prompts and skills run the helpers as $FRIDOLIN_TOOLS_DIR/<tool>,
