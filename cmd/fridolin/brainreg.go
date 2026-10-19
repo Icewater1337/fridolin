@@ -9,6 +9,8 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/Icewater1337/fridolin/internal/route"
+
 	"github.com/Icewater1337/fridolin/internal/manifest"
 
 	"github.com/Icewater1337/fridolin/internal/fsx"
@@ -96,7 +98,7 @@ func ResolveBrains(cfg *Config) ([]manifest.Spec, []BrainIssue) {
 	// Drop brains that clash with an earlier one rather than refusing to run.
 	var ok []manifest.Spec
 	for _, s := range specs {
-		if err := ValidateBrainSet(append(append([]manifest.Spec{}, ok...), s)); err != nil {
+		if err := route.Validate(append(append([]manifest.Spec{}, ok...), s)); err != nil {
 			issues = append(issues, BrainIssue{ID: s.Manifest.ID, Path: s.Dir, Kind: "invalid", Detail: err.Error(), entry: s.Entry, routing: s.Manifest.Routing})
 			continue
 		}

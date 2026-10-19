@@ -12,6 +12,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Icewater1337/fridolin/internal/route"
+
 	"github.com/Icewater1337/fridolin/internal/httpapi"
 
 	"go.mau.fi/whatsmeow/types"
@@ -344,5 +346,5 @@ func (b *Bridge) replyChatFor(br *Brain, cfg *Config) string {
 		return m.ReplyChat
 	}
 	getsDMs := m.Routing.HandlesDMs || b.brainMgr.DMBrain() == br
-	return replyChat(m, getsDMs, ownerChat(cfg))
+	return route.ReplyChat(m, getsDMs, ownerChat(cfg))
 }

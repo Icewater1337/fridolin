@@ -21,6 +21,8 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/Icewater1337/fridolin/internal/route"
+
 	"github.com/Icewater1337/fridolin/internal/manifest"
 
 	"github.com/Icewater1337/fridolin/internal/chat"
@@ -2128,7 +2130,7 @@ func (bm *BrainManager) reload(specs []manifest.Spec, issues []BrainIssue, cfg *
 	if bm.stopped || bm.forced.Load() {
 		return errBrainsStopped
 	}
-	if err := ValidateBrainSet(specs); err != nil {
+	if err := route.Validate(specs); err != nil {
 		return err
 	}
 

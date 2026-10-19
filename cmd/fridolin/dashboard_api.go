@@ -26,6 +26,8 @@ import (
 	"unicode"
 	"unicode/utf8"
 
+	"github.com/Icewater1337/fridolin/internal/route"
+
 	"github.com/Icewater1337/fridolin/internal/manifest"
 
 	"github.com/Icewater1337/fridolin/internal/httpapi"
@@ -1154,7 +1156,7 @@ func checkNewBrain(cfg *Config, m manifest.Manifest, abs string) error {
 		return errors.New(strings.Join(problems, "; "))
 	}
 	specs, _ := ResolveBrains(cfg)
-	return ValidateBrainSet(append(specs, manifest.Spec{Manifest: m, Dir: abs}))
+	return route.Validate(append(specs, manifest.Spec{Manifest: m, Dir: abs}))
 }
 
 // apiUpdateBrain saves edited settings for a brain.
