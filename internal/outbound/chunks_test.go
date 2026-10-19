@@ -1,4 +1,4 @@
-package main
+package outbound
 
 import (
 	"fmt"
@@ -84,9 +84,9 @@ func TestChunkMessage(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			got := ChunkMessage(tc.text, tc.limit)
+			got := Chunk(tc.text, tc.limit)
 			if !slices.Equal(got, tc.want) {
-				t.Errorf("ChunkMessage(%q, %d)\n got %q\nwant %q", tc.text, tc.limit, got, tc.want)
+				t.Errorf("Chunk(%q, %d)\n got %q\nwant %q", tc.text, tc.limit, got, tc.want)
 			}
 			checkChunks(t, tc.text, tc.limit, got)
 		})
@@ -133,9 +133,9 @@ func TestChunkMessageKeepsCharactersWhole(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			got := ChunkMessage(tc.text, tc.limit)
+			got := Chunk(tc.text, tc.limit)
 			if !slices.Equal(got, tc.want) {
-				t.Errorf("ChunkMessage(%q, %d)\n got %q\nwant %q", tc.text, tc.limit, got, tc.want)
+				t.Errorf("Chunk(%q, %d)\n got %q\nwant %q", tc.text, tc.limit, got, tc.want)
 			}
 			checkChunks(t, tc.text, tc.limit, got)
 		})
@@ -143,7 +143,7 @@ func TestChunkMessageKeepsCharactersWhole(t *testing.T) {
 
 	t.Run("a run of marks too long to keep whole is cut anyway", func(t *testing.T) {
 		text := "a" + strings.Repeat("\u0301", 300)
-		got := ChunkMessage(text, 100)
+		got := Chunk(text, 100)
 		if len(got) != 4 {
 			t.Errorf("got %d chunks, want 4", len(got))
 		}
@@ -155,7 +155,7 @@ func TestChunkMessageWidensNumberingForTenOrMoreChunks(t *testing.T) {
 	// Twelve chunks need "[10/12] ", two characters more than the first
 	// round reserved; the bodies must shrink to make room, not get cut.
 	text := strings.Repeat("word ", 200)
-	got := ChunkMessage(text, 100)
+	got := Chunk(text, 100)
 	if len(got) != 12 || !strings.HasPrefix(got[11], "[12/12] ") {
 		t.Fatalf("got %d chunks, last %q", len(got), got[len(got)-1])
 	}
@@ -168,7 +168,7 @@ func TestChunkMessageRaisesTinyLimits(t *testing.T) {
 	text := strings.Repeat("abc ", 100)
 	for _, limit := range []int{1, 5, 6, 99} {
 		t.Run(fmt.Sprint(limit), func(t *testing.T) {
-			got := ChunkMessage(text, limit)
+			got := Chunk(text, limit)
 			if len(got) < 2 {
 				t.Fatalf("expected the text to be split, got %q", got)
 			}
@@ -197,7 +197,7 @@ func TestChunkMessageProperties(t *testing.T) {
 			limit = 100 + rng.IntN(500)
 		}
 		text := b.String()
-		checkChunks(t, text, limit, ChunkMessage(text, limit))
+		checkChunks(t, text, limit, Chunk(text, limit))
 		if t.Failed() {
 			t.Fatalf("failed for limit %d and text %q", limit, text)
 		}
@@ -241,11 +241,11 @@ func FuzzChunkMessage(f *testing.F) {
 		// including zero, negative and too-small limits.
 		text = strings.Repeat(text, 1+int(repeat))
 		maxSize := int(limit) % 400
-		checkChunks(t, text, maxSize, ChunkMessage(text, maxSize))
+		checkChunks(t, text, maxSize, Chunk(text, maxSize))
 	})
 }
 
-// checkChunks asserts what every result of ChunkMessage must satisfy: each
+// checkChunks asserts what every result of Chunk must satisfy: each
 // chunk is valid UTF-8, within the limit and not blank; several chunks are
 // numbered "[i/N] " in order; the chunks, without their numbering, are the
 // input with only whitespace dropped between them; and a paragraph short
@@ -254,9 +254,9 @@ func checkChunks(t *testing.T, text string, maxSize int, chunks []string) {
 	t.Helper()
 	limit := maxSize
 	if limit <= 0 {
-		limit = defaultChunkSize
+		limit = DefaultChunkSize
 	}
-	limit = max(limit, minChunkSize)
+	limit = max(limit, MinChunkSize)
 	input := strings.ToValidUTF8(text, "\uFFFD")
 	trimmed := strings.TrimSpace(input)
 	if trimmed == "" {

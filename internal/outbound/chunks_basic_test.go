@@ -1,4 +1,4 @@
-package main
+package outbound
 
 import (
 	"strings"
@@ -9,7 +9,7 @@ import (
 )
 
 func TestChunkMessageShortTextUntouched(t *testing.T) {
-	chunks := ChunkMessage("hello", 100)
+	chunks := Chunk("hello", 100)
 	if len(chunks) != 1 || chunks[0] != "hello" {
 		t.Errorf("got %v", chunks)
 	}
@@ -17,7 +17,7 @@ func TestChunkMessageShortTextUntouched(t *testing.T) {
 
 func TestChunkMessageRespectsMaxSize(t *testing.T) {
 	text := strings.Repeat("paragraph one is here.\n\n", 200)
-	chunks := ChunkMessage(text, 500)
+	chunks := Chunk(text, 500)
 	if len(chunks) < 2 {
 		t.Fatalf("expected multiple chunks, got %d", len(chunks))
 	}

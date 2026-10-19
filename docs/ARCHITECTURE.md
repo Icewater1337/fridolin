@@ -70,6 +70,12 @@ behaviour unless its title says so. The steps so far:
   `HandleEvent` retains queued production intake. `ProcessMessage` and
   `ProcessVote` are synchronous worker boundaries whose callers own order.
 
+- **R12, outbound helpers**: `outbound` owns chunking, poll parsing, the
+  chat-message catalogue, shared send errors and the paced send loop. Its
+  minimal transport interfaces describe only sends and connection observation.
+  Durable outbox persistence, retries, poll fallback, history handoff and Stop
+  still live in command composition; pipeline extraction follows R10.
+
 Everything else is still `package main` in `cmd/fridolin`, one file per
 subject (section 3 names the file each package will come from). A package
 that is not yet extracted is marked *(to come, Rn)* with the step that
@@ -332,10 +338,10 @@ responsibility and says what it must not do.
   filter, choosing the brain, the OTP gate and debouncing. It dispatches to
   `brain.Manager`, turns finished runs into deliveries, and provides `Ingest`
   and `SendExternal` for `/ingest`, `/send`, Plaud and the site.
-- **`outbound`** *(to come, R12; `chunks.go`, `polls.go`, `outbox.go`,
-  `chaterr.go`)*: sending on top of a minimal `Transport`: the durable
-  outbox, chunking, pacing, polls with a text fallback, saving sent polls,
-  and the catalogue of every chat-facing message the pipeline sends.
+- **`outbound`**: chunking, poll parsing, shared send errors, paced sends,
+  minimal transport contracts and the catalogue of every chat-facing message.
+  The durable outbox, poll fallback/persistence and provider-aware error
+  selection remain in `cmd/fridolin` for the next R12 integration slice.
 - **`whatsapp`** (`internal/whatsapp`): the WhatsApp transport and nothing else. It connects,
   pairs, tracks connection state, keeps the group list, sends text and
   polls, decrypts poll votes, turns protobuf messages into an `Envelope` (a

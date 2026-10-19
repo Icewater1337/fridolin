@@ -78,11 +78,12 @@ func TestGoldenMessages(t *testing.T) {
 	}
 	assertGolden(t, "messages.golden", []byte(out.String()))
 
-	f, err := parser.ParseFile(token.NewFileSet(), filepath.Join(pkgDir, "messages.go"), nil, 0)
+	f, err := parser.ParseFile(token.NewFileSet(), filepath.Join(repoDir, "internal", "outbound", "messages.go"), nil, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
 	for _, name := range topLevelNames(f) {
+		name = strings.ToLower(name[:1]) + name[1:]
 		if !named[name] {
 			t.Errorf("messages.go declares %s, which catalogue() does not list", name)
 		}
@@ -150,7 +151,7 @@ func TestChatMessagesLiveInTheCatalogue(t *testing.T) {
 	fset := token.NewFileSet()
 	seen := map[string]bool{}
 	for _, path := range files {
-		if path == filepath.Join(pkgDir, "messages.go") {
+		if path == filepath.Join(repoDir, "internal", "outbound", "messages.go") {
 			continue
 		}
 		f, err := parser.ParseFile(fset, path, nil, parser.ParseComments)

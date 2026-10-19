@@ -1,4 +1,4 @@
-package main
+package outbound
 
 import (
 	"context"
@@ -42,7 +42,7 @@ func TestSendChunksPacingAndCancellation(t *testing.T) {
 				var sent []string
 				fail := errors.New("send failed")
 				started := time.Now()
-				err := sendChunks(ctx, []string{"a", "b", "c"}, tc.pace, func(s string) error {
+				err := SendChunks(ctx, []string{"a", "b", "c"}, tc.pace, func(s string) error {
 					if len(sent) == tc.failAt {
 						return fail
 					}
@@ -55,7 +55,7 @@ func TestSendChunksPacingAndCancellation(t *testing.T) {
 				if elapsed := time.Since(started); elapsed != tc.wantElapsed {
 					t.Fatalf("elapsed=%s, want %s", elapsed, tc.wantElapsed)
 				}
-				var partial *partialSendError
+				var partial *PartialSendError
 				if got := errors.As(err, &partial); got != tc.wantPartial {
 					t.Fatalf("partial=%v, want %v: %v", got, tc.wantPartial, err)
 				}

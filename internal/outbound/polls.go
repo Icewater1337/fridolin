@@ -1,4 +1,4 @@
-package main
+package outbound
 
 import (
 	"log"
@@ -8,15 +8,15 @@ import (
 	"strings"
 )
 
-// pollData represents a parsed [POLL]…[/POLL] block.
-type pollData struct {
+// Poll represents a parsed [POLL]…[/POLL] block.
+type Poll struct {
 	Question      string
 	Options       []string
 	MaxSelectable int // 1 = single choice, 0 = unlimited
 }
 
-// maxPollOptions is WhatsApp's own limit on options per poll.
-const maxPollOptions = 12
+// MaxPollOptions is WhatsApp's own limit on options per poll.
+const MaxPollOptions = 12
 
 // pollHeaderRe matches [POLL] or [POLL max=N], and pollCloseRe the [/POLL]
 // that ends the block, both in any letter case.
@@ -25,15 +25,15 @@ var (
 	pollCloseRe  = regexp.MustCompile(`(?i)\[/POLL\]`)
 )
 
-// extractPolls finds the [POLL]…[/POLL] blocks in text and returns the
+// ExtractPolls finds the [POLL]…[/POLL] blocks in text and returns the
 // polls they hold and the text without them. It reads the text from the
 // start: a block ends at the first [/POLL] after its header, and a header
 // that another header follows before that is plain text, so a block the
 // model left open does not swallow the next one and the words between
 // them. A block that is no poll (no question, or fewer than two options)
 // stays in the text as written: nothing the brain said goes missing.
-func extractPolls(text string) ([]pollData, string) {
-	var polls []pollData
+func ExtractPolls(text string) ([]Poll, string) {
+	var polls []Poll
 	var out strings.Builder
 	rest := text
 	for {
@@ -73,7 +73,7 @@ func extractPolls(text string) ([]pollData, string) {
 // option given twice counts once: WhatsApp reports a vote as the hash of
 // the option's text, so two equal options could not be told apart, and
 // options differing only in case are kept, since they hash differently.
-func parsePollBlock(block string, maxSelectable int) (pollData, bool) {
+func parsePollBlock(block string, maxSelectable int) (Poll, bool) {
 	var question string
 	var options []string
 	for _, line := range strings.Split(block, "\n") {
@@ -89,13 +89,13 @@ func parsePollBlock(block string, maxSelectable int) (pollData, bool) {
 		}
 	}
 	if question == "" || len(options) < 2 {
-		return pollData{}, false
+		return Poll{}, false
 	}
-	if len(options) > maxPollOptions {
-		log.Printf("poll %q had %d options; truncating to WhatsApp's limit of %d", question, len(options), maxPollOptions)
-		options = options[:maxPollOptions]
+	if len(options) > MaxPollOptions {
+		log.Printf("poll %q had %d options; truncating to WhatsApp's limit of %d", question, len(options), MaxPollOptions)
+		options = options[:MaxPollOptions]
 	}
 	// WhatsApp rejects a poll whose max exceeds the number of options.
 	maxSelectable = min(maxSelectable, len(options))
-	return pollData{Question: question, Options: options, MaxSelectable: maxSelectable}, true
+	return Poll{Question: question, Options: options, MaxSelectable: maxSelectable}, true
 }

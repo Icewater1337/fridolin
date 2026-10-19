@@ -1,4 +1,4 @@
-package main
+package outbound
 
 // capitalize upper-cases the first letter of an ASCII sentence.
 func capitalize(s string) string {

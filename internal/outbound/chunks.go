@@ -1,4 +1,4 @@
-package main
+package outbound
 
 import (
 	"fmt"
@@ -8,12 +8,12 @@ import (
 	"unicode/utf8"
 )
 
-// defaultChunkSize is the longest outgoing message when max_chunk_size is
-// unset. minChunkSize is the smallest limit ChunkMessage works with: below
+// DefaultChunkSize is the longest outgoing message when max_chunk_size is
+// unset. MinChunkSize is the smallest limit Chunk works with: below
 // it the "[i/N] " numbering would leave too little room for the text.
 const (
-	defaultChunkSize = 3900
-	minChunkSize     = 100
+	DefaultChunkSize = 3900
+	MinChunkSize     = 100
 )
 
 // chunkSeparators are the places a long reply may be cut, coarsest first:
@@ -27,21 +27,21 @@ var chunkSeparators = [][]string{
 	{" "},
 }
 
-// ChunkMessage splits text into messages of at most maxSize characters
+// Chunk splits text into messages of at most maxSize characters
 // (runes, not bytes), the "[i/N] " numbering included. Text that fits is
 // returned as is. Longer text is cut at the coarsest separator that makes
 // each piece fit, and only whitespace is dropped: a split reply is trimmed
 // at both ends, and no chunk starts or ends with whitespace, indentation
 // included. The chunks hold every other character of text, in order.
-// maxSize 0 or less means the default; a limit below minChunkSize is
+// maxSize 0 or less means the default; a limit below MinChunkSize is
 // raised to it.
 // Blank text gives no chunks, and invalid UTF-8 is replaced so every chunk
 // is valid.
-func ChunkMessage(text string, maxSize int) []string {
+func Chunk(text string, maxSize int) []string {
 	if maxSize <= 0 {
-		maxSize = defaultChunkSize
+		maxSize = DefaultChunkSize
 	}
-	maxSize = max(maxSize, minChunkSize)
+	maxSize = max(maxSize, MinChunkSize)
 	text = strings.ToValidUTF8(text, "\uFFFD")
 	if strings.TrimSpace(text) == "" {
 		return nil
