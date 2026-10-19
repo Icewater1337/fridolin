@@ -19,11 +19,13 @@ type Settings struct {
 	FirstTrigger string
 	QueueNotify  bool
 	OwnerChat    string
+	MaxChunkSize int
 }
 
 // Workflow owns message decisions independently of bridge lifecycle.
 // The command intake wrapper still owns admission and persistence on shutdown.
 type Workflow struct {
+	Reply        func(context.Context, string, string, string, int) error
 	Brains       *brainruntime.Manager
 	Debouncer    *Debouncer
 	Settings     func() Settings

@@ -21,7 +21,6 @@ import (
 
 	"github.com/Icewater1337/fridolin/internal/activity"
 	"github.com/Icewater1337/fridolin/internal/chat"
-	"github.com/Icewater1337/fridolin/internal/claudecli"
 	"github.com/Icewater1337/fridolin/internal/config"
 	"github.com/Icewater1337/fridolin/internal/history"
 	"github.com/Icewater1337/fridolin/internal/httpapi"
@@ -223,7 +222,7 @@ func NewBridge(cfgs *config.Store, opts BridgeOptions) (_ *Bridge, err error) {
 			}
 			return true
 		},
-		Deliver:     b.deliver,
+		Deliver:     b.pipeline.Finished,
 		Undelivered: b.undelivered,
 		Waiting:     b.keepWaiting,
 		Interrupted: b.keepInterrupted,
@@ -684,34 +683,6 @@ func chatJIDs(m brainruntime.Inbound) []string {
 		}
 	}
 	return jids
-}
-
-// deliver sends a finished brain run's answer.
-func (b *Bridge) deliver(br *brainruntime.Brain, m brainruntime.Inbound, res claudecli.Result) {
-	ctx := context.Background()
-	if res.Err != nil {
-		if errors.Is(res.Err, claudecli.ErrInterrupted) || errors.Is(res.Err, context.Canceled) {
-			log.Printf("brain %s: run for %s was stopped", br.ID(), m.JID)
-			return
-		}
-		// The error in full goes to the log and the dashboard only: it can
-		// hold the CLI's stderr, and a group's members read the chat.
-		log.Printf("brain %s: error for %s: %v", br.ID(), m.JID, res.Err)
-		if text := chatErrorText(res.Err, !m.IsGroup()); text != "" && !m.Silent {
-			_ = b.wa.SendMessage(ctx, m.JID, text)
-		}
-		return
-	}
-
-	// An empty response follows a question forwarded mid-run, which said
-	// it all. Silent runs never reply at all.
-	if res.Text == "" || m.Silent {
-		return
-	}
-	log.Printf("brain %s: sending response (%d chars) to %s after %s", br.ID(), len(res.Text), m.JID, res.Duration.Round(time.Second))
-	if err := b.outbox.Reply(ctx, br.ID(), m.JID, res.Text, b.cfgs.Get().MaxChunkSize); err != nil {
-		log.Printf("brain %s: %v", br.ID(), err)
-	}
 }
 
 // delivered takes a reply that went out in full out of the outbox and

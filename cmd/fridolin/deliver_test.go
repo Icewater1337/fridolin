@@ -74,7 +74,7 @@ func TestRepliesAreRecordedAsSent(t *testing.T) {
 			if c.wa != nil {
 				tb.wa = c.wa(tb)
 			}
-			tb.deliver(br, brain.Inbound{Inbound: chat.Inbound{JID: testDMChat, Sender: "15551234567", Text: "hi", Silent: c.silent}}, c.res)
+			tb.pipeline.Finished(br, brain.Inbound{Inbound: chat.Inbound{JID: testDMChat, Sender: "15551234567", Text: "hi", Silent: c.silent}}, c.res)
 			if len(c.want) > 0 {
 				testutil.WaitFor(t, 5*time.Second, "the reply in the history", func() bool { return len(outbound(t, br)[testDMChat]) > 0 })
 			} else if f, ok := tb.wa.(*flakyMessenger); ok {
