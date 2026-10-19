@@ -93,9 +93,9 @@ func (a *ScriptAPI) Send(w http.ResponseWriter, r *http.Request) {
 		WriteErr(w, sendErrStatus(err), "send failed: "+err.Error())
 		return
 	}
-	resp := map[string]string{"status": "sent"}
+	resp := SendResponse{Status: "sent"}
 	if request != "" {
-		resp["otp_request"] = request
+		resp.OTPRequest = request
 	}
 	WriteJSON(w, http.StatusOK, resp)
 }
@@ -171,5 +171,5 @@ func (a *ScriptAPI) Ingest(w http.ResponseWriter, r *http.Request) {
 		WriteErr(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	WriteJSON(w, http.StatusAccepted, map[string]string{"status": "accepted", "jid": jid})
+	WriteJSON(w, http.StatusAccepted, IngestAcceptedResponse{Status: "accepted", JID: jid})
 }

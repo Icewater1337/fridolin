@@ -31,21 +31,6 @@ type BrainAPI struct {
 	Google        func() BrainCalendarService
 }
 
-// brainAPIHandler serves /brain/.
-func (a *BrainAPI) Handler() http.Handler {
-	mux := http.NewServeMux()
-	mux.HandleFunc("GET /brain/polls", a.brainCall(a.brainPolls))
-	mux.HandleFunc("GET /brain/calendar/calendars", a.brainCall(a.calendarCall(a.brainCalendarList)))
-	mux.HandleFunc("GET /brain/calendar/events", a.brainCall(a.calendarCall(a.brainCalendarEvents)))
-	mux.HandleFunc("POST /brain/calendar/events", a.brainCall(a.calendarCall(a.brainCalendarCreate)))
-	mux.HandleFunc("DELETE /brain/calendar/events/{id}", a.brainCall(a.calendarCall(a.brainCalendarDelete)))
-	mux.HandleFunc("POST /brain/calendar/freebusy", a.brainCall(a.calendarCall(a.brainCalendarBusy)))
-	mux.HandleFunc("/brain/", func(w http.ResponseWriter, r *http.Request) {
-		WriteErr(w, http.StatusNotFound, "no such brain API call: "+r.Method+" "+r.URL.Path)
-	})
-	return mux
-}
-
 // brainCall authenticates a brain API call by the run's token and hands
 // the brain it belongs to on to fn.
 func (a *BrainAPI) brainCall(fn func(w http.ResponseWriter, r *http.Request, br *brainruntime.Brain)) http.HandlerFunc {
@@ -101,7 +86,7 @@ func (a *BrainAPI) brainPolls(w http.ResponseWriter, r *http.Request, br *brainr
 		WriteErr(w, http.StatusInternalServerError, "reading the polls: "+err.Error())
 		return
 	}
-	WriteJSON(w, http.StatusOK, map[string]any{"polls": polls, "count": count})
+	WriteJSON(w, http.StatusOK, PollsResponse{Polls: polls, Count: count})
 }
 
 // callError is a brain API call the bridge refuses before doing anything,
@@ -171,7 +156,7 @@ func (a *BrainAPI) brainCalendarList(ctx context.Context, r *http.Request, cals 
 	}
 	// restricted: always, now that the bridge holds every brain to its
 	// calendars; kept for what read calendar_tool.py's answer.
-	return map[string]any{"calendars": out, "restricted": true}, nil
+	return CalendarListResponse{Calendars: out, Restricted: true}, nil
 }
 
 // timeRange reads a call's from and to (RFC 3339) and its time zone.
@@ -255,7 +240,7 @@ func (a *BrainAPI) brainCalendarCreate(ctx context.Context, r *http.Request, cal
 	if err != nil {
 		return nil, err
 	}
-	return map[string]any{"created": created}, nil
+	return CalendarCreatedResponse{Created: created}, nil
 }
 
 // brainCalendarDelete answers DELETE /brain/calendar/events/{id}: in
@@ -273,7 +258,7 @@ func (a *BrainAPI) brainCalendarDelete(ctx context.Context, r *http.Request, cal
 	if err := a.Google().DeleteEvent(ctx, tok, calendars[0], id); err != nil {
 		return nil, err
 	}
-	return map[string]string{"deleted": id}, nil
+	return CalendarDeletedResponse{Deleted: id}, nil
 }
 
 // brainCalendarBusy answers POST /brain/calendar/freebusy {from, to,
@@ -307,5 +292,5 @@ func (a *BrainAPI) brainCalendarBusy(ctx context.Context, r *http.Request, cals 
 	if err != nil {
 		return nil, err
 	}
-	return map[string]any{"busy": busy, "calendars": calendars}, nil
+	return CalendarBusyResponse{Busy: busy, Calendars: calendars}, nil
 }

@@ -49,10 +49,10 @@ func (a *DevAPI) Inbound(w http.ResponseWriter, r *http.Request) {
 		req.Sender = chat.NormalizeJID(req.JID)
 	}
 	if reason := a.Submit(req); reason != "" {
-		WriteJSON(w, http.StatusAccepted, map[string]string{"status": "ignored", "reason": reason})
+		WriteJSON(w, http.StatusAccepted, DevIgnoredResponse{Status: "ignored", Reason: reason})
 		return
 	}
-	WriteJSON(w, http.StatusAccepted, map[string]string{"status": "accepted"})
+	WriteJSON(w, http.StatusAccepted, OperationResponse{Status: "accepted"})
 }
 
 func (a *DevAPI) Outbox(w http.ResponseWriter, r *http.Request) {

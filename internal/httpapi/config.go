@@ -23,12 +23,7 @@ func (a *ConfigAPI) Get(w http.ResponseWriter, r *http.Request) {
 	file.BrainDirs = nil
 	eff := config.MustClone(snap.Effective)
 	eff.BrainDirs = nil
-	WriteJSON(w, http.StatusOK, map[string]any{
-		"etag":      snap.ETag,
-		"path":      a.Store().Path(),
-		"config":    file,
-		"effective": eff,
-	})
+	WriteJSON(w, http.StatusOK, ConfigResponse{ETag: snap.ETag, Path: a.Store().Path(), Config: file, Effective: eff})
 }
 
 // apiPutConfig replaces the settings. Brains are managed through their own
@@ -72,7 +67,7 @@ func (a *ConfigAPI) Put(w http.ResponseWriter, r *http.Request) {
 	}
 	// The etag of what this save wrote, not ETag(), which may be a later
 	// save's: the page would take that write for the one it saved.
-	WriteJSON(w, http.StatusOK, map[string]any{"etag": res.ETag, "restart_required": nonNil(res.Restart)})
+	WriteJSON(w, http.StatusOK, ConfigSavedResponse{ETag: res.ETag, RestartRequired: nonNil(res.Restart)})
 }
 
 // apiRestart restarts the bridge in place (same binary, same arguments): it

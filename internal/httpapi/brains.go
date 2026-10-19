@@ -116,7 +116,7 @@ func (a *BrainsAPI) Add(w http.ResponseWriter, r *http.Request) {
 		WriteErr(w, status, err.Error())
 		return
 	}
-	WriteJSON(w, http.StatusOK, map[string]any{"id": result.ID, "path": result.Path, "created": result.Created})
+	WriteJSON(w, http.StatusOK, BrainCreatedResponse{ID: result.ID, Path: result.Path, Created: result.Created})
 }
 
 // apiUpdateBrain saves edited settings for a brain.
@@ -134,7 +134,7 @@ func (a *BrainsAPI) Update(w http.ResponseWriter, r *http.Request) {
 		WriteErr(w, http.StatusUnprocessableEntity, err.Error())
 		return
 	}
-	WriteJSON(w, http.StatusOK, map[string]string{"status": "saved"})
+	WriteJSON(w, http.StatusOK, OperationResponse{Status: "saved"})
 }
 
 // apiApproveBrain accepts the brain.json on disk, provided it is still the
@@ -164,7 +164,7 @@ func (a *BrainsAPI) Approve(w http.ResponseWriter, r *http.Request) {
 		WriteErr(w, http.StatusUnprocessableEntity, err.Error())
 		return
 	}
-	WriteJSON(w, http.StatusOK, map[string]string{"status": "approved"})
+	WriteJSON(w, http.StatusOK, OperationResponse{Status: "approved"})
 }
 
 // apiRemoveBrain stops routing to a brain. Its folder is left exactly as it is.
@@ -175,7 +175,7 @@ func (a *BrainsAPI) Remove(w http.ResponseWriter, r *http.Request) {
 		WriteErr(w, http.StatusUnprocessableEntity, err.Error())
 		return
 	}
-	WriteJSON(w, http.StatusOK, map[string]string{"status": "removed"})
+	WriteJSON(w, http.StatusOK, OperationResponse{Status: "removed"})
 }
 
 // apiRemoveBrainDir removes the brain_dirs entry for the folder ?path= that
@@ -193,5 +193,5 @@ func (a *BrainsAPI) RemoveDir(w http.ResponseWriter, r *http.Request) {
 		WriteErr(w, http.StatusUnprocessableEntity, err.Error())
 		return
 	}
-	WriteJSON(w, http.StatusOK, map[string]string{"status": "removed"})
+	WriteJSON(w, http.StatusOK, OperationResponse{Status: "removed"})
 }
