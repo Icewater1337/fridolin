@@ -1,4 +1,4 @@
-package main
+package site
 
 import (
 	"github.com/Icewater1337/fridolin/internal/fsx"

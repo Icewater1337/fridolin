@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	sitesvc "github.com/Icewater1337/fridolin/internal/site"
 	"log"
 	"net"
 	"net/http"
@@ -59,7 +60,7 @@ type Bridge struct {
 	backup        *backup.Manager
 	google        *google.Auth
 	plaud         *plaud.Manager
-	site          *SiteManager
+	site          *sitesvc.SiteManager
 	outbox        *outboundmsg.Outbox
 	otp           otp.Handoff
 	started       time.Time
@@ -250,7 +251,7 @@ func NewBridge(cfgs *config.Store, opts BridgeOptions) (_ *Bridge, err error) {
 		}
 		return ""
 	})
-	b.site = NewSiteManager(SiteOptions{DataDir: cfg.DataDir, GoogleClient: b.google.ClientPath, Builder: b.siteBuilderHooks()})
+	b.site = NewSiteManager(sitesvc.SiteOptions{DataDir: cfg.DataDir, GoogleClient: b.google.ClientPath, Builder: b.siteBuilderHooks()})
 	// What builder brains say in the Build page's chats goes there, not to WhatsApp.
 	b.wa = siteChatMessenger{Messenger: b.wa, appendMessage: b.site.AppendBuildMessage}
 	pace := outboundmsg.OutboxPace

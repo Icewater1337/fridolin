@@ -1,4 +1,4 @@
-package main
+package site
 
 // The Build page (docs/SITE.md): a chat with a builder brain in the
 // dashboard, next to its preview.
@@ -12,15 +12,13 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
-	"strings"
+
 	"sync"
 	"time"
 
 	"github.com/Icewater1337/fridolin/internal/fsx"
 	"github.com/Icewater1337/fridolin/internal/manifest"
 )
-
-const buildChatSuffix = "@fridolin.dashboard"
 
 // BuildMessage is one line of a build chat.
 type BuildMessage struct {
@@ -97,27 +95,6 @@ func (c *siteChats) newThread(brainID string) error {
 	defer c.mu.Unlock()
 	ch := c.loadLocked(brainID)
 	return c.saveLocked(brainID, BuildChat{Thread: ch.Thread + 1, Messages: []BuildMessage{}})
-}
-
-func buildChatJID(brainID string, thread int) string {
-	return fmt.Sprintf("site-build-%s-%d%s", brainID, thread, buildChatSuffix)
-}
-
-// brainOfBuildJID is the brain a build chat JID belongs to, or "".
-func brainOfBuildJID(jid string) string {
-	rest, ok := strings.CutSuffix(jid, buildChatSuffix)
-	if !ok {
-		return ""
-	}
-	rest, ok = strings.CutPrefix(rest, "site-build-")
-	if !ok {
-		return ""
-	}
-	i := strings.LastIndex(rest, "-")
-	if i <= 0 {
-		return ""
-	}
-	return rest[:i]
 }
 
 // BuildChat returns the current thread and messages for a builder.
