@@ -6,6 +6,7 @@ package fsx
 
 import (
 	"bytes"
+	"fmt"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -16,6 +17,17 @@ import (
 // and renames it over path, so a crash never leaves a half-written file. With
 // backup, the previous version is kept as path.bak.
 func WriteFileAtomic(path string, data []byte, perm os.FileMode, backup bool) error {
+	return writeFileAtomic(path, data, perm, backup, false)
+}
+
+// CreateFileAtomic publishes a complete file only if path is still absent.
+// Existing files and symlinks are never replaced; callers can use errors.Is
+// with fs.ErrExist to recognize another creator winning the race.
+func CreateFileAtomic(path string, data []byte, perm os.FileMode) error {
+	return writeFileAtomic(path, data, perm, false, true)
+}
+
+func writeFileAtomic(path string, data []byte, perm os.FileMode, backup, exclusive bool) error {
 	dir := filepath.Dir(path)
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return err
@@ -43,10 +55,30 @@ func WriteFileAtomic(path string, data []byte, perm os.FileMode, backup bool) er
 	}
 	if backup {
 		if prev, err := os.ReadFile(path); err == nil && !bytes.Equal(prev, data) {
-			_ = os.WriteFile(path+".bak", prev, perm)
+			// Rename a complete backup instead of following a .bak symlink
+			// or exposing a truncated previous version to another reader.
+			if err := writeFileAtomic(path+".bak", prev, perm, false, false); err != nil {
+				return fmt.Errorf("backing up %s: %w", path, err)
+			}
 		}
 	}
-	return os.Rename(tmpName, path)
+	parent, err := os.Open(dir)
+	if err != nil {
+		return err
+	}
+	defer parent.Close()
+	if exclusive {
+		err = os.Link(tmpName, path)
+	} else {
+		err = os.Rename(tmpName, path)
+	}
+	if err != nil {
+		return err
+	}
+	// The file bytes were synced before publication; sync the directory entry
+	// too. A sync error can occur after publication, so callers must not assume
+	// an error means the previous file is still present.
+	return parent.Sync()
 }
 
 // ExpandHome rewrites a leading "~" to home, the user's home directory. It

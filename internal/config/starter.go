@@ -2,6 +2,7 @@ package config
 
 import (
 	"encoding/json"
+	"errors"
 	"log"
 	"os"
 	"path/filepath"
@@ -52,7 +53,11 @@ func WriteStarter(path, claudePath, dataDir string, paths Paths, goos string) er
 		return err
 	}
 	log.Printf("No config found — writing a starter config to %s", path)
-	return fsx.WriteFileAtomic(path, append(data, '\n'), 0o600, false)
+	err = fsx.CreateFileAtomic(path, append(data, '\n'), 0o600)
+	if errors.Is(err, os.ErrExist) {
+		return nil
+	}
+	return err
 }
 
 // StarterDataDir is the data dir a new config gets when none is given: the

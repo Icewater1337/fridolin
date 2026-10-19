@@ -19,6 +19,11 @@ for compatibility.
 
 ### Changed
 
+- Configuration rejects unknown log levels and chunks larger than 65536
+  characters. `check` identifies disabled dashboards and unavailable brains.
+  Config backups are published atomically without following backup symlinks;
+  concurrent starter creation preserves the first complete file.
+
 - Plaud retry-exhaustion notices keep raw provider errors on the dashboard
   instead of sending stderr into the destination chat.
 
