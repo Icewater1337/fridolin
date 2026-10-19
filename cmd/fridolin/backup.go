@@ -227,10 +227,10 @@ func NewBackupManager(cfgs *config.Store, bm *BrainManager) *BackupManager {
 	return m
 }
 
-func (m *BackupManager) dir() string       { return filepath.Join(m.cfgs.Get().DataDir, "backup") }
+func (m *BackupManager) dir() string       { return m.cfgs.Boot().BackupDir() }
 func (m *BackupManager) statePath() string { return filepath.Join(m.dir(), "state.json") }
 func (m *BackupManager) rcloneConf() string {
-	return filepath.Join(m.cfgs.Get().DataDir, "rclone", "rclone.conf")
+	return m.cfgs.Boot().RcloneConf()
 }
 
 func (m *BackupManager) saveStateLocked() {

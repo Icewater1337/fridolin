@@ -1,6 +1,10 @@
 package config
 
-import "path/filepath"
+import (
+	"fmt"
+	"os"
+	"path/filepath"
+)
 
 // Boot holds values captured once when the configuration store opens. It is a
 // value copy: live saves keep their requested values in Config for the API and
@@ -33,3 +37,22 @@ func (b Boot) GoogleClientPath() string {
 }
 func (b Boot) PlaudDir() string { return filepath.Join(b.DataDir, "plaud") }
 func (b Boot) OTPDir() string   { return filepath.Join(b.DataDir, "otp") }
+
+// EnsureDirs creates the data dir and the folders of the database and the
+// media. Resolve does not: it runs for check and open too, which must
+// not make a ~/.fridolin for a config file that is not there, and for
+// every dashboard save, which would make a folder typed into Settings
+// before the restart that uses it. The bridge calls EnsureDirs once, as it
+// starts.
+func (b Boot) EnsureDirs() error {
+	if err := os.MkdirAll(b.DataDir, 0o700); err != nil {
+		return fmt.Errorf("creating data directory: %w", err)
+	}
+	if err := os.MkdirAll(filepath.Dir(b.DBPath), 0o700); err != nil {
+		return fmt.Errorf("creating db directory: %w", err)
+	}
+	if err := os.MkdirAll(b.MediaDir, 0o700); err != nil {
+		return fmt.Errorf("creating media directory: %w", err)
+	}
+	return nil
+}

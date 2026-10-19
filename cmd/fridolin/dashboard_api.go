@@ -203,7 +203,7 @@ type sandboxStatus struct {
 }
 
 func (b *Bridge) apiStatus(w http.ResponseWriter, r *http.Request) {
-	cfg := b.cfgs.Get()
+	cfg := runtimeConfig(b.cfgs)
 	wa := b.wa.State()
 	resp := statusResponse{
 		Version:       version.String(),
@@ -1407,7 +1407,7 @@ func textTail(s string, n int) string {
 // apiFSList lists folders inside your home folder, for the in-dashboard
 // folder browser. The bridge's data folder is hidden.
 func (b *Bridge) apiFSList(w http.ResponseWriter, r *http.Request) {
-	home := fsx.Canonical(homeDir())
+	home := fsx.Canonical(b.cfgs.Boot().Home)
 	p := r.URL.Query().Get("path")
 	if p == "" {
 		p = home
@@ -1440,7 +1440,7 @@ func (b *Bridge) apiFSList(w http.ResponseWriter, r *http.Request) {
 		httpapi.WriteErr(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	data := fsx.Canonical(b.cfgs.Get().DataDir)
+	data := fsx.Canonical(b.cfgs.Boot().DataDir)
 	type entry struct {
 		Name    string `json:"name"`
 		Path    string `json:"path"`

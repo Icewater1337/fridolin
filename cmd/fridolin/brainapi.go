@@ -97,7 +97,7 @@ func (b *Bridge) brainRunEnv(brain string) ([]string, func()) {
 		return env, func() {}
 	}
 	tok, revoke := b.runTokens.mint(brain)
-	path, err := writeRunToken(runTokenDir(b.cfgs.Get().DataDir, brain), tok)
+	path, err := writeRunToken(runTokenDir(b.cfgs.Boot().DataDir, brain), tok)
 	if err != nil {
 		revoke()
 		log.Printf("brain %s: no brain API for this run: %v", brain, err)

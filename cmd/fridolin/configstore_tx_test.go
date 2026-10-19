@@ -510,10 +510,10 @@ func TestTheConfigMakesNoFolders(t *testing.T) {
 	}
 	noFolders("saving a new media_dir")
 
-	if err := cs.Get().EnsureDirs(); err != nil {
+	if err := cs.Boot().EnsureDirs(); err != nil {
 		t.Fatal(err)
 	}
-	for _, d := range []string{folders[1], folders[2], folders[4]} {
+	for _, d := range []string{folders[1], folders[2], folders[3]} {
 		if st, err := os.Stat(d); err != nil || !st.IsDir() || st.Mode().Perm() != 0o700 {
 			t.Errorf("EnsureDirs: %s is %v, %v; want a 0700 folder", d, st, err)
 		}
@@ -565,7 +565,7 @@ func treeOf(t *testing.T, root string) []string {
 }
 
 // A download makes the media folder when it is not there, as after a
-// media_dir saved in Settings and before the restart.
+// a removed incoming folder that is recreated for the next attachment.
 func TestDownloadMakesTheMediaFolder(t *testing.T) {
 	dir := filepath.Join(t.TempDir(), "media")
 	doc := attachment{kind: "document", media: &waE2E.DocumentMessage{}, name: "scan.pdf"}

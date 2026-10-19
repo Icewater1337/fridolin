@@ -403,7 +403,7 @@ func (b *Bridge) runBrainSearch(ctx context.Context, brainID, prompt string, out
 	if br == nil {
 		return fmt.Errorf("no brain %q", brainID)
 	}
-	cfg := b.cfgs.Get()
+	cfg := runtimeConfig(b.cfgs)
 	// Only the brain folder's own setup, as for a brain's runs, and tools
 	// that only read.
 	args := claudeArgList(true, excludeInstructionsAbove(br.Dir()), "--tools", "Read,Grep,Glob")

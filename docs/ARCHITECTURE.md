@@ -1280,3 +1280,13 @@ calls retain their defensive fallback constants. Composition tests compare those
 contracts so a runtime package need not depend on the whole configuration schema.
 The runtime's shortened timeout unit remains command-owned: `Config.RunMinutes`
 provides the value and the command scales it exactly as before.
+
+`Store.Boot()` returns copied startup paths and flags, including the captured
+home. `Boot.EnsureDirs()` is a startup operation. The complete JSON-leaf table
+in `config/fields.go` drives restart reporting and is checked against Config,
+Boot and the configuration guide. Token protection may turn on immediately;
+turning it off waits for restart. Get/Snapshot still expose the saved values
+for API compatibility and the next start. The temporary command-only
+`runtimeConfig` projection overlays Boot on a live snapshot for consumers
+that still accept Config; it preserves snapshot ownership and will give way
+to owned runtime settings at their package boundaries.
