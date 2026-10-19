@@ -1,4 +1,4 @@
-package main
+package whatsapp
 
 import (
 	"context"
@@ -11,73 +11,73 @@ import (
 	waLog "go.mau.fi/whatsmeow/util/log"
 )
 
-// waSettings contains only the settings consumed by the transport. Each
+// Settings contains only the settings consumed by the transport. Each
 // read corresponds to the same config read the adapter made before: one
 // snapshot for authorization, later reads for media limits and chunk size.
-type waSettings struct {
+type Settings struct {
 	access.Policy
 	MediaDir      string
 	MaxMediaBytes int64
 	MaxChunkSize  int
 }
 
-type waDeviceContainer interface {
+type DeviceContainer interface {
 	GetFirstDevice(context.Context) (*wastore.Device, error)
 	NewDevice() *wastore.Device
 }
 
-type waSentPoll struct {
+type SentPoll struct {
 	Chat     string
 	Brain    string
 	Question string
 	Options  []string
 }
 
-type waPollStore interface {
-	SentPoll(context.Context, string) (waSentPoll, error)
+type PollStore interface {
+	SentPoll(context.Context, string) (SentPoll, error)
 	SavePollVote(string, string, []string) error
 }
 
-type waVote struct {
-	Poll     waSentPoll
+type Vote struct {
+	Poll     SentPoll
 	Voter    types.JID
 	Selected []string
 }
 
-type waGroupRules struct{ Files, Forwards bool }
+type GroupRules struct{ Files, Forwards bool }
 
-type waOptions struct {
-	Settings   func() waSettings
-	Container  waDeviceContainer
-	Polls      waPollStore
+type Options struct {
+	Settings   func() Settings
+	Container  DeviceContainer
+	Polls      PollStore
 	OnInbound  func(context.Context, chat.Inbound)
 	OnIgnored  IgnoredHandler
-	OnVote     func(waVote)
+	OnVote     func(Vote)
 	OnChange   func(chat.Change)
-	GroupRules func(string) waGroupRules
+	GroupRules func(string) GroupRules
 	Log        waLog.Logger
 	Chunks     func(string, int) []string
-	Identity   waIdentity
-	Outbound   waOutbound
-	Text       waText
+	Identity   Identity
+	Outbound   Outbound
+	Text       Text
 	Inbox      func(string) mediafiles.Inbox
 	// Optional I/O consumers use the current WhatsApp client when nil.
-	Downloader mediaDownloader
-	Groups     groupLister
+	Downloader Downloader
+	Groups     GroupLister
 	Notify     func(jid, text string)
 }
 
-// waOutbound preserves the shared recipient errors and partial-send contract
+// Outbound preserves the shared recipient errors and partial-send contract
 // while their implementation remains with the command's outbound path.
-type waOutbound struct {
+type Outbound struct {
 	Recipient func(string) (types.JID, error)
 	Classify  func(error) error
 	Chunks    func(context.Context, []string, func(string) error) error
 }
 
-// waText supplies the message catalogue and privacy formatting. The transport
+// Text supplies the message catalogue and privacy formatting. The transport
 // decides when a notice or log is emitted; formatting stays at composition.
-type waText struct {
+type Text struct {
 	ViewOnce, MediaFailed string
 	MediaTooLarge         func(int64) string
 	MaskSender            func(string, bool, string) string
@@ -86,9 +86,9 @@ type waText struct {
 	Redact                func(string) string
 }
 
-// waIdentity keeps resolution shared with the command's /send path. It reads
+// Identity keeps resolution shared with the command's /send path. It reads
 // the same supplied device store and context as the transport did directly.
-type waIdentity struct {
+type Identity struct {
 	Canonical func(context.Context, wastore.LIDStore, types.JID, types.JID) types.JID
 	LID       func(context.Context, wastore.LIDStore, types.JID) types.JID
 }

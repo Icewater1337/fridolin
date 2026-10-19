@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"github.com/Icewater1337/fridolin/internal/whatsapp"
 	"path/filepath"
 	"reflect"
 	"testing"
@@ -15,7 +16,8 @@ func TestWhatsAppProjectionReadBoundaries(t *testing.T) {
 	reads := 0
 	get := func() *Config { reads++; return cfg }
 	s := openTestStore(t, filepath.Join(t.TempDir(), "bridge.db"))
-	wa, err := NewWhatsAppClient(get, s, nil, nil)
+	opts := whatsAppOptions(get, s, nil, nil)
+	wa, err := whatsapp.New(opts)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -23,12 +25,12 @@ func TestWhatsAppProjectionReadBoundaries(t *testing.T) {
 	if reads != 1 {
 		t.Fatalf("constructor config reads = %d, want initial log-level read only", reads)
 	}
-	first := wa.cfg()
+	first := opts.Settings()
 	if reads != 2 || first.MediaDir != cfg.MediaDir || first.MaxChunkSize != 4000 || first.MaxMediaBytes != cfg.MaxMediaBytes() || !reflect.DeepEqual(first.AllowedNumbers, cfg.AllowedNumbers) {
 		t.Fatalf("first settings = %+v, reads=%d", first, reads)
 	}
 	cfg = &Config{AllowedNumbers: []string{"15559876543"}, MediaDir: "later", MaxChunkSize: 2000, MaxMediaMB: 24}
-	second := wa.cfg()
+	second := opts.Settings()
 	if reads != 3 || second.MediaDir != "later" || second.MaxChunkSize != 2000 || second.MaxMediaBytes != cfg.MaxMediaBytes() || second.AllowedNumbers[0] != "15559876543" {
 		t.Fatalf("later settings = %+v, reads=%d", second, reads)
 	}
@@ -52,9 +54,9 @@ func TestWhatsAppCallbackProjections(t *testing.T) {
 	if calls != 1 {
 		t.Fatalf("inbound calls = %d", calls)
 	}
-	vote := waVote{Poll: waSentPoll{Chat: testDMChat, Brain: "main", Question: "when", Options: []string{"today", "tomorrow"}}, Voter: types.NewJID("15551234567", types.DefaultUserServer), Selected: []string{"today"}}
+	vote := whatsapp.Vote{Poll: whatsapp.SentPoll{Chat: testDMChat, Brain: "main", Question: "when", Options: []string{"today", "tomorrow"}}, Voter: types.NewJID("15551234567", types.DefaultUserServer), Selected: []string{"today"}}
 	whatsAppVoteHandler(func(got pollVote) {
-		if !reflect.DeepEqual(waSentPoll(got.Poll), vote.Poll) || got.Voter != vote.Voter || !reflect.DeepEqual(got.Selected, vote.Selected) {
+		if !reflect.DeepEqual(whatsapp.SentPoll(got.Poll), vote.Poll) || got.Voter != vote.Voter || !reflect.DeepEqual(got.Selected, vote.Selected) {
 			t.Fatalf("vote projection = %+v", got)
 		}
 	})(vote)

@@ -10,40 +10,9 @@ import (
 	"testing"
 	"time"
 
-	"go.mau.fi/whatsmeow/proto/waCommon"
-	"go.mau.fi/whatsmeow/proto/waE2E"
-	"go.mau.fi/whatsmeow/types"
-	"go.mau.fi/whatsmeow/types/events"
-	"google.golang.org/protobuf/proto"
-
 	"github.com/Icewater1337/fridolin/internal/chat"
 	"github.com/Icewater1337/fridolin/internal/history"
 )
-
-// dmEvent is a DM from the allowed number, with the message ID id.
-func dmEvent(id string, msg *waE2E.Message) *events.Message {
-	chatJID := types.NewJID("15551234567", types.DefaultUserServer)
-	return &events.Message{
-		Info:    types.MessageInfo{MessageSource: types.MessageSource{Chat: chatJID, Sender: chatJID}, ID: types.MessageID(id), Timestamp: time.Now()},
-		Message: msg,
-	}
-}
-
-func textMsg(s string) *waE2E.Message { return &waE2E.Message{Conversation: proto.String(s)} }
-
-// revokeMsg deletes the message id for everyone.
-func revokeMsg(id string) *waE2E.Message {
-	return &waE2E.Message{ProtocolMessage: &waE2E.ProtocolMessage{
-		Type: waE2E.ProtocolMessage_REVOKE.Enum(), Key: &waCommon.MessageKey{ID: proto.String(id)},
-	}}
-}
-
-// editMsg gives the message id the text s.
-func editMsg(id, s string) *waE2E.Message {
-	return &waE2E.Message{ProtocolMessage: &waE2E.ProtocolMessage{
-		Type: waE2E.ProtocolMessage_MESSAGE_EDIT.Enum(), Key: &waCommon.MessageKey{ID: proto.String(id)}, EditedMessage: textMsg(s),
-	}}
-}
 
 // historyTexts returns the text of the brain's history lines of type typ.
 func historyTexts(t *testing.T, br *Brain, typ string) []string {
@@ -263,42 +232,6 @@ func TestDebouncerAppliesChanges(t *testing.T) {
 	waitFor(t, 2*time.Second, "the flush", func() bool { return f.n() == 1 })
 	if got := f.got[0]; got.Text != "book Wednesday\n\nfor four" {
 		t.Errorf("flushed %q, want the edited batch", got.Text)
-	}
-}
-
-// A view-once photo is not downloaded or kept, and the sender is told.
-func TestViewOnceIsNotOpened(t *testing.T) {
-	tw := newTestWhatsApp(t)
-	dl := &fakeDownloader{body: "jpeg"}
-	tw.media = dl
-	evt := dmEvent("3EB0ONCE", &waE2E.Message{ImageMessage: &waE2E.ImageMessage{Caption: proto.String("just for you")}})
-	evt.IsViewOnce = true
-	tw.handle(t, evt)
-	select {
-	case n := <-tw.notices:
-		if !strings.Contains(n, "view-once") {
-			t.Errorf("notice %q, want one about view-once", n)
-		}
-	case <-time.After(2 * time.Second):
-		t.Error("the sender was not told")
-	}
-	if m, ok := tw.next(100 * time.Millisecond); ok {
-		t.Errorf("handed to a brain: %+v", m)
-	}
-	if dl.callCount() != 0 {
-		t.Error("the photo was downloaded")
-	}
-}
-
-// A location shared in a DM reaches the brain as a line it can read.
-func TestLocationInADMReachesTheBrain(t *testing.T) {
-	tw := newTestWhatsApp(t)
-	tw.handle(t, dmEvent("3EB0LOC", &waE2E.Message{LocationMessage: &waE2E.LocationMessage{
-		DegreesLatitude: proto.Float64(47.3769), DegreesLongitude: proto.Float64(8.5417),
-	}}))
-	m, ok := tw.next(2 * time.Second)
-	if !ok || m.Text != "[location: 47.376900, 8.541700]" || m.ID != "3EB0LOC" {
-		t.Errorf("got %+v (delivered %v), want the location as text", m, ok)
 	}
 }
 

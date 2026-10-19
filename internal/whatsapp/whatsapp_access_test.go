@@ -1,4 +1,4 @@
-package main
+package whatsapp
 
 import (
 	"testing"
@@ -50,9 +50,9 @@ func TestDMAccessPreservesSenderIdentity(t *testing.T) {
 		t.Run(c.name, func(t *testing.T) {
 			tw := newTestWhatsApp(t)
 			cfg := tw.cfg()
-			cfg.AllowedNumbers, cfg.AllowAnyDM = c.numbers, &c.anyDM
+			cfg.AllowedNumbers, cfg.AllowAnyDM = c.numbers, c.anyDM
 			reads := 0
-			tw.cfg = func() *Config { reads++; return cfg }
+			tw.cfg = func() *Settings { reads++; return cfg }
 			if c.lids != nil {
 				tw.client = whatsmeow.NewClient(&store.Device{LIDs: c.lids}, waLog.Noop)
 			}

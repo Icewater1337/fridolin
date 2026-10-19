@@ -1,4 +1,4 @@
-package main
+package whatsapp
 
 import (
 	"context"
@@ -66,13 +66,13 @@ func failureRetryAfter(prev time.Duration) time.Duration {
 	return min(2*prev, connectFailureMaxRetry)
 }
 
-func (wa *WhatsAppClient) setState(mode, detail string) {
+func (wa *Client) setState(mode, detail string) {
 	wa.mu.Lock()
 	defer wa.mu.Unlock()
 	wa.setStateLocked(mode, detail)
 }
 
-func (wa *WhatsAppClient) setStateLocked(mode, detail string) {
+func (wa *Client) setStateLocked(mode, detail string) {
 	if wa.state.Mode != mode {
 		wa.state.Since = time.Now()
 	}
@@ -96,7 +96,7 @@ func (wa *WhatsAppClient) setStateLocked(mode, detail string) {
 
 // setOwn records the bridge account's JIDs, as whatsmeow reported them on
 // connecting or pairing; empty ones once it was logged out.
-func (wa *WhatsAppClient) setOwn(own, lid types.JID) {
+func (wa *Client) setOwn(own, lid types.JID) {
 	wa.mu.Lock()
 	defer wa.mu.Unlock()
 	wa.own, wa.ownLID = own.ToNonAD(), lid.ToNonAD()
@@ -104,13 +104,13 @@ func (wa *WhatsAppClient) setOwn(own, lid types.JID) {
 }
 
 // Connected returns a channel closed while WhatsApp is connected.
-func (wa *WhatsAppClient) Connected() <-chan struct{} {
+func (wa *Client) Connected() <-chan struct{} {
 	wa.mu.Lock()
 	defer wa.mu.Unlock()
 	return wa.onlineLocked()
 }
 
-func (wa *WhatsAppClient) onlineLocked() chan struct{} {
+func (wa *Client) onlineLocked() chan struct{} {
 	if wa.online == nil {
 		wa.online = make(chan struct{})
 	}
@@ -118,7 +118,7 @@ func (wa *WhatsAppClient) onlineLocked() chan struct{} {
 }
 
 // State returns the current connection state.
-func (wa *WhatsAppClient) State() chat.LinkState {
+func (wa *Client) State() chat.LinkState {
 	wa.mu.Lock()
 	defer wa.mu.Unlock()
 	return wa.state
@@ -127,7 +127,7 @@ func (wa *WhatsAppClient) State() chat.LinkState {
 // Connect connects with the stored session, or starts QR pairing in the
 // background when there is none. It does not block on pairing: the code is
 // shown on the dashboard (and in the terminal, when there is one).
-func (wa *WhatsAppClient) Connect() error {
+func (wa *Client) Connect() error {
 	cli := wa.cl()
 	if cli.Store.ID != nil {
 		wa.setState(modeConnecting, "")
@@ -146,7 +146,7 @@ var errPairingLive = errors.New("pairing is already in progress — scan the cod
 // StartPairing begins QR pairing for an unpaired bridge. After WhatsApp
 // logged the device out, it first starts a new session (see newSession):
 // whatsmeow deleted the device, and its client cannot connect again.
-func (wa *WhatsAppClient) StartPairing() error {
+func (wa *Client) StartPairing() error {
 	wa.pairMu.Lock()
 	defer wa.pairMu.Unlock()
 	if wa.pairing {
@@ -183,7 +183,7 @@ func (wa *WhatsAppClient) StartPairing() error {
 
 // followPairing shows the pairing's codes and ends with it: when its
 // channel closes, or its ctx ends.
-func (wa *WhatsAppClient) followPairing(ctx context.Context, cancel context.CancelFunc, qrChan <-chan whatsmeow.QRChannelItem) {
+func (wa *Client) followPairing(ctx context.Context, cancel context.CancelFunc, qrChan <-chan whatsmeow.QRChannelItem) {
 	defer func() {
 		cancel()
 		wa.pairMu.Lock()
@@ -250,7 +250,7 @@ func pairingState(item whatsmeow.QRChannelItem) (mode, detail string, ok bool) {
 // whatsmeow deleted the device and refuses to connect with it again, so
 // pairing again needs a client on a new one. The rest of bridge.db (polls,
 // ignored chats, the outbox) stays.
-func (wa *WhatsAppClient) newSession() *whatsmeow.Client {
+func (wa *Client) newSession() *whatsmeow.Client {
 	cli := whatsmeow.NewClient(wa.container.NewDevice(), wa.log)
 	cli.AddEventHandler(wa.HandleEvent)
 	wa.mu.Lock()
@@ -273,7 +273,7 @@ const intakeDrainWarning = 5 * time.Second
 // that came before are still handed on: the one whose download it cut
 // off with its text, without the file. It joins every worker before the
 // bridge closes its store, warning after intakeDrainWarning if needed.
-func (wa *WhatsAppClient) Disconnect() {
+func (wa *Client) Disconnect() {
 	wa.cancel()
 	wa.mu.Lock()
 	if wa.retry != nil {
@@ -287,7 +287,7 @@ func (wa *WhatsAppClient) Disconnect() {
 }
 
 // connectionEvent follows the connection's events into the state.
-func (wa *WhatsAppClient) connectionEvent(rawEvt any) {
+func (wa *Client) connectionEvent(rawEvt any) {
 	var retry time.Duration // when the bridge connects again itself
 	switch evt := rawEvt.(type) {
 	case *events.Connected:
@@ -382,7 +382,7 @@ func connectionState(rawEvt any, now time.Time, retry time.Duration) (mode, deta
 // disconnected for good by then: whatsmeow does not, after a ban ends or
 // after a failure on WhatsApp's side. One such attempt waits at a time,
 // the one the latest event asked for.
-func (wa *WhatsAppClient) connectAfter(d time.Duration) {
+func (wa *Client) connectAfter(d time.Duration) {
 	wa.mu.Lock()
 	defer wa.mu.Unlock()
 	if wa.retry != nil {

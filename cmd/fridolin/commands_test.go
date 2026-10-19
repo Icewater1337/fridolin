@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"github.com/Icewater1337/fridolin/internal/whatsapp"
 	"io"
 	"maps"
 	"os"
@@ -24,14 +25,6 @@ import (
 	"github.com/Icewater1337/fridolin/internal/activity"
 	"github.com/Icewater1337/fridolin/internal/chat"
 	"github.com/Icewater1337/fridolin/internal/history"
-)
-
-const (
-	testDMChat = "15551234567@s.whatsapp.net"
-	testGroup  = "120363000000000000@g.us"
-	// otherNumber is a second person: another member of the group, or the
-	// bridge's own account as a quote names it.
-	otherNumber = "15559876543"
 )
 
 // newMainBridge is a test bridge with one folder brain, "main", that takes
@@ -66,8 +59,8 @@ func newMainBridgeWith(t *testing.T, extra string, m BrainManifest) (*testBridge
 // messages and poll votes to the test bridge, like the real one. It
 // cannot download an attachment, and sends what it tells a chat about one
 // through the test bridge.
-func (tb *testBridge) whatsApp(t *testing.T) *WhatsAppClient {
-	return tb.whatsAppOffline(t, &store.Device{}, func(opts *waOptions) { opts.Downloader = (*whatsmeow.Client)(nil) })
+func (tb *testBridge) whatsApp(t *testing.T) *whatsapp.Client {
+	return tb.whatsAppOffline(t, &store.Device{}, func(opts *whatsapp.Options) { opts.Downloader = (*whatsmeow.Client)(nil) })
 }
 
 // fixedDeviceContainer makes an offline transport use the supplied device.
@@ -77,9 +70,10 @@ type fixedDeviceContainer struct{ device *store.Device }
 func (c fixedDeviceContainer) GetFirstDevice(context.Context) (*store.Device, error) {
 	return c.device, nil
 }
+
 func (c fixedDeviceContainer) NewDevice() *store.Device { return &store.Device{} }
 
-func (tb *testBridge) whatsAppOffline(t *testing.T, dev *store.Device, configure ...func(*waOptions)) *WhatsAppClient {
+func (tb *testBridge) whatsAppOffline(t *testing.T, dev *store.Device, configure ...func(*whatsapp.Options)) *whatsapp.Client {
 	t.Helper()
 	opts := whatsAppOptions(tb.cfgs.Get, tb.store, tb.handleInbound, nil)
 	opts.Container = fixedDeviceContainer{dev}
@@ -91,7 +85,7 @@ func (tb *testBridge) whatsAppOffline(t *testing.T, dev *store.Device, configure
 	for _, apply := range configure {
 		apply(&opts)
 	}
-	wa, err := newWhatsAppClient(opts)
+	wa, err := whatsapp.New(opts)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -165,16 +159,6 @@ func replyMessage(text, quoted string) *waE2E.Message {
 			QuotedMessage: &waE2E.Message{Conversation: proto.String(quoted)},
 		},
 	}}
-}
-
-// groupEvent is msg, sent by the allowed number in the allowed group.
-func groupEvent(msg *waE2E.Message) *events.Message {
-	src := types.MessageSource{
-		Chat:    types.NewJID("120363000000000000", types.GroupServer),
-		Sender:  types.NewJID("15551234567", types.DefaultUserServer),
-		IsGroup: true,
-	}
-	return &events.Message{Info: types.MessageInfo{MessageSource: src, ID: "3EB0GROUP", Timestamp: time.Now()}, Message: msg}
 }
 
 // startLongRun puts a long run for chat on the brain and waits until its
@@ -433,21 +417,6 @@ func TestQuotedCommandIsRecognised(t *testing.T) {
 			t.Errorf("running = %+v after the stop confirmation, want nothing", rt.Running)
 		}
 	})
-}
-
-// bridgeLID is the LID of the bridge's own account (otherNumber) in tests:
-// short, so it cannot be anyone's real one.
-const bridgeLID = "424242"
-
-// bridgeLIDs is the part of whatsmeow's store that maps the bridge's own
-// number to its LID.
-type bridgeLIDs struct{ store.LIDStore }
-
-func (bridgeLIDs) GetLIDForPN(_ context.Context, pn types.JID) (types.JID, error) {
-	if pn.User == otherNumber {
-		return types.NewJID(bridgeLID, types.HiddenUserServer), nil
-	}
-	return types.EmptyJID, nil
 }
 
 // An @-mention addresses the bridge like the trigger keyword, commands

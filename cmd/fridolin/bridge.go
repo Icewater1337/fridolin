@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"github.com/Icewater1337/fridolin/internal/devchat"
+	"github.com/Icewater1337/fridolin/internal/whatsapp"
 	"log"
 	"net"
 	"net/http"
@@ -207,7 +208,7 @@ func NewBridge(cfgs *ConfigStore, opts BridgeOptions) (_ *Bridge, err error) {
 		waOpts.OnVote = whatsAppVoteHandler(b.recordVote)
 		waOpts.OnChange = b.handleChange
 		waOpts.GroupRules = whatsAppGroupRules(b.groupRules)
-		wa, err := newWhatsAppClient(waOpts)
+		wa, err := whatsapp.New(waOpts)
 		if err != nil {
 			return nil, fmt.Errorf("creating whatsapp client: %w", err)
 		}
@@ -382,7 +383,7 @@ func newHTTPServer(h http.Handler) *http.Server {
 }
 
 // connectLoop retains the bridge's ownership of the connection goroutine.
-func (b *Bridge) connectLoop(ctx context.Context) { runConnectLoop(ctx, b.wa.Connect) }
+func (b *Bridge) connectLoop(ctx context.Context) { whatsapp.RunConnectLoop(ctx, b.wa.Connect) }
 
 // Stop shuts everything down in dependency order, once: a restart and a
 // signal that come together, or a test and its cleanup, stop the bridge

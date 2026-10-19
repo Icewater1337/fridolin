@@ -1,9 +1,8 @@
-package main
+package whatsapp
 
 import (
 	"context"
 	"errors"
-	"github.com/Icewater1337/fridolin/internal/devchat"
 	"strings"
 	"sync"
 	"testing"
@@ -223,9 +222,7 @@ func TestStartPairingRefusesASecondPairing(t *testing.T) {
 // connect again: pairing again gets a client on a new device instead of
 // failing until a restart.
 func TestNewSessionAfterLogout(t *testing.T) {
-	s := openOutboxStore(t, t.TempDir())
-	cfg := &Config{LogLevel: "error"}
-	wa, err := NewWhatsAppClient(func() *Config { return cfg }, s, func(context.Context, Inbound) {}, nil)
+	wa, err := New(Options{Container: fixedDeviceContainer{&store.Device{}}, Log: waLog.Noop})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -245,7 +242,6 @@ func TestNewSessionAfterLogout(t *testing.T) {
 
 // connectMessenger is the dev messenger whose Connect fails with err.
 type connectMessenger struct {
-	*devchat.Messenger
 	err   error
 	mu    sync.Mutex
 	tries int
@@ -262,12 +258,11 @@ func (c *connectMessenger) Connect() error {
 func TestConnectLoopStopsOnPermanentErrors(t *testing.T) {
 	for _, err := range []error{store.ErrDeviceDeleted, errPairingLive} {
 		t.Run(err.Error(), func(t *testing.T) {
-			m := &connectMessenger{Messenger: &devchat.Messenger{}, err: err}
-			b := &Bridge{wa: m}
+			m := &connectMessenger{err: err}
 			done := make(chan struct{})
 			go func() {
 				defer close(done)
-				b.connectLoop(context.Background())
+				RunConnectLoop(context.Background(), m.Connect)
 			}()
 			select {
 			case <-done:

@@ -1,4 +1,4 @@
-package main
+package whatsapp
 
 import (
 	"context"
@@ -127,11 +127,11 @@ func (c *groupCache) observe(evt any) {
 // ForgetGroups drops the list the client keeps, so the next JoinedGroups
 // asks WhatsApp: for the dashboard's Refresh button, which should also
 // show a change that came without an event.
-func (wa *WhatsAppClient) ForgetGroups() { wa.groups.invalidate() }
+func (wa *Client) ForgetGroups() { wa.groups.invalidate() }
 
-// groupLister is what JoinedGroups and groupName need from
+// GroupLister is what JoinedGroups and groupName need from
 // whatsmeow.Client; tests swap in a fake to count what reaches WhatsApp.
-type groupLister interface {
+type GroupLister interface {
 	IsLoggedIn() bool
 	GetJoinedGroups(ctx context.Context) ([]*types.GroupInfo, error)
 	GetGroupInfo(ctx context.Context, jid types.JID) (*types.GroupInfo, error)
@@ -139,7 +139,7 @@ type groupLister interface {
 
 // groupsFrom is what JoinedGroups and groupName ask: the client, read anew
 // each time since a logout replaces it, unless a test set lister.
-func (wa *WhatsAppClient) groupsFrom() groupLister {
+func (wa *Client) groupsFrom() GroupLister {
 	if wa.lister != nil {
 		return wa.lister
 	}

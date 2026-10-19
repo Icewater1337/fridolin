@@ -1,4 +1,4 @@
-package main
+package whatsapp
 
 import (
 	"context"
@@ -15,7 +15,7 @@ func TestRunConnectLoopRetrySchedule(t *testing.T) {
 		defer cancel()
 		start := time.Now()
 		var attempts []time.Duration
-		runConnectLoop(ctx, func() error {
+		RunConnectLoop(ctx, func() error {
 			attempts = append(attempts, time.Since(start))
 			if len(attempts) == 8 {
 				return nil
@@ -33,7 +33,7 @@ func TestRunConnectLoopCancellation(t *testing.T) {
 	t.Run("before first attempt", func(t *testing.T) {
 		ctx, cancel := context.WithCancel(context.Background())
 		cancel()
-		runConnectLoop(ctx, func() error { t.Fatal("connected after cancellation"); return nil })
+		RunConnectLoop(ctx, func() error { t.Fatal("connected after cancellation"); return nil })
 	})
 	t.Run("during retry wait", func(t *testing.T) {
 		synctest.Test(t, func(t *testing.T) {
@@ -43,7 +43,7 @@ func TestRunConnectLoopCancellation(t *testing.T) {
 			done := make(chan struct{})
 			go func() {
 				defer close(done)
-				runConnectLoop(ctx, func() error { attempts++; return errors.New("network unavailable") })
+				RunConnectLoop(ctx, func() error { attempts++; return errors.New("network unavailable") })
 			}()
 			synctest.Wait()
 			cancel()
