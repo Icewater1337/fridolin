@@ -39,7 +39,7 @@ type Issue struct {
 	Kind   IssueKind `json:"kind"` // drift, missing, invalid, unapproved
 	Detail string    `json:"detail"`
 	// AtLoad marks one the brain manager found as it loaded the brains, a
-	// folder it could not open, which ResolveBrains does not see.
+	// folder it could not open, which Resolve does not see.
 	AtLoad bool `json:"-"`
 	// Entry is the index in brain_dirs of the entry the issue is about.
 	// The dashboard shows an issue on that entry, not on every entry with
@@ -59,7 +59,9 @@ func (is Issue) LeavesOut() bool {
 
 // Resolve turns the brain folders in the configuration into runnable
 // brains. Brains with problems are left out and reported, so one broken
-// folder never takes the others down.
+// folder never takes the others down. checkDir is required; it is called
+// for each existing, individually valid approved folder before disk drift
+// inspection and set validation.
 func Resolve(refs []config.BrainRef, checkDir func(dir, configured string) error) ([]manifest.Spec, []Issue) {
 	var specs []manifest.Spec
 	var issues []Issue

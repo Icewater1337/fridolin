@@ -3,6 +3,7 @@ package main
 import (
 	"errors"
 	"fmt"
+	"github.com/Icewater1337/fridolin/internal/registry"
 	"path/filepath"
 
 	"github.com/Icewater1337/fridolin/internal/config"
@@ -14,8 +15,8 @@ import (
 
 // ResolveBrains resolves the current configuration without freezing the
 // security policy or ambient home/layout inputs between candidate folders.
-func ResolveBrains(cfg *config.Config) ([]manifest.Spec, []BrainIssue) {
-	return resolveBrainRefs(cfg.BrainDirs, func(dir, configured string) error {
+func ResolveBrains(cfg *config.Config) ([]manifest.Spec, []registry.Issue) {
+	return registry.Resolve(cfg.BrainDirs, func(dir, configured string) error {
 		return checkBrainDir(dir, configured, cfg, config.HomeDir())
 	})
 }
@@ -23,7 +24,7 @@ func ResolveBrains(cfg *config.Config) ([]manifest.Spec, []BrainIssue) {
 // CheckBrainPath keeps configuration and security-policy projection at the
 // command boundary; the registry receives explicit inputs and one checker.
 func CheckBrainPath(path string, cfg *config.Config, otherDirs []string) (string, []string, []string) {
-	return checkBrainPath(path, BrainPathContext{
+	return registry.CheckPath(path, registry.PathContext{
 		Home: config.HomeDir(), Others: otherDirs,
 		CheckDir: func(dir, configured, home string) error {
 			return checkBrainDir(dir, configured, cfg, home)

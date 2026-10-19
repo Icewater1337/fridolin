@@ -227,16 +227,6 @@ func TestScaffoldedPromptSaysWhatItIs(t *testing.T) {
 	}
 }
 
-func folderBrainConfig(t *testing.T, home string, refs ...config.BrainRef) *config.Config {
-	t.Helper()
-	cfg := &config.Config{DataDir: filepath.Join(home, "data"), BrainDirs: refs}
-	eff, err := config.Resolve(cfg)
-	if err != nil {
-		t.Fatal(err)
-	}
-	return eff
-}
-
 // FuzzDecodeManifest: the brain can write its own brain.json, so it can
 // hold anything. What decodes is normalised, and what also validates is
 // safe to use: the id is a plain file name, the prompt file stays in the
