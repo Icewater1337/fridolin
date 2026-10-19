@@ -2064,55 +2064,6 @@ func (bm *BrainManager) keepRetiredWaiting(from *Brain, ms []Inbound) bool {
 	return true
 }
 
-// settingsFor combines global settings with a brain's own.
-func settingsFor(cfg *config.Config, sp manifest.Spec) *brainSettings {
-	m := sp.Manifest
-	model := m.Model
-	if model == "" {
-		model = cfg.BrainModel
-	}
-	effort := m.Effort
-	if effort == "" {
-		effort = cfg.BrainEffort
-	}
-	tools := cfg.DisallowedTools
-	if m.DisallowedTools != nil {
-		tools = *m.DisallowedTools
-	}
-	if cfg.AgentProvider == "codex" {
-		model, effort = cfg.CodexModel, cfg.CodexEffort
-	}
-	return &brainSettings{
-		name:            m.Name,
-		manifest:        m,
-		claudePath:      cfg.ClaudePath,
-		provider:        cfg.AgentProvider,
-		codexPath:       cfg.CodexPath,
-		model:           model,
-		effort:          effort,
-		disallowedTools: append([]string(nil), tools...),
-		promptFile:      sp.PromptFile,
-		dangerously:     cfg.DangerouslySkipPermissions,
-		inheritUser:     cfg.InheritClaudeUserConfig,
-		otpGuard:        cfg.OTPGuard,
-		otpMarkers:      append([]string(nil), cfg.OTPMarkers...),
-		viewer:          cfg.Viewer,
-		runTimeout:      runTimeout(cfg),
-		queueMode:       cfg.Queue.Mode,
-		maxPending:      cfg.Queue.MaxPending,
-		observe:         m.Observe,
-		credsDir:        credentialsDirOf(cfg),
-		mediaDir:        cfg.MediaDir,
-		envPassthrough:  append([]string(nil), cfg.ChildEnvPassthrough...),
-		toolsDir:        ownLayout().Tools,
-		// Absolute: brains run in their own folder, where a relative
-		// data_dir would name another one.
-		dataDir:   absPath(cfg.DataDir),
-		dbPath:    absPath(cfg.DBPath),
-		plaudPATH: brainPlaudPATH(cfg),
-	}
-}
-
 // dataEnv tells brains where the bridge keeps its data. The tools in
 // tools/ read these until the bridge answered them (brainapi.go); compat:
 // brains and their scripts rely on these names, as on the other BRIDGE_
