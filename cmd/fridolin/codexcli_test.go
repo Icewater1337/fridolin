@@ -10,21 +10,23 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Icewater1337/fridolin/internal/config"
+
 	"github.com/Icewater1337/fridolin/internal/manifest"
 
 	"github.com/Icewater1337/fridolin/internal/fsx"
 )
 
 func TestCodexDefaultsAndValidation(t *testing.T) {
-	cfg, err := effective(&Config{})
+	cfg, err := config.Resolve(&config.Config{})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if cfg.AgentProvider != "claude" || cfg.CodexPath != "codex" || cfg.CodexModel != "gpt-6.1-sol" || cfg.CodexEffort != "high" {
 		t.Fatalf("wrong agent defaults: %s %s %s %s", cfg.AgentProvider, cfg.CodexPath, cfg.CodexModel, cfg.CodexEffort)
 	}
-	for _, c := range []*Config{{AgentProvider: "other"}, {CodexEffort: "minimal"}} {
-		if _, err := effective(c); err == nil {
+	for _, c := range []*config.Config{{AgentProvider: "other"}, {CodexEffort: "minimal"}} {
+		if _, err := config.Resolve(c); err == nil {
 			t.Fatal("accepted invalid configuration")
 		}
 	}
@@ -182,7 +184,7 @@ func TestCodexDashboardSwitch(t *testing.T) {
 	}
 	h.Inject(inbound{JID: harnessDM, Text: "hello Claude"})
 	h.WaitSent(harnessDM, "says: hello Claude")
-	var saved Config
+	var saved config.Config
 	if err := json.Unmarshal(h.Config().Config, &saved); err != nil {
 		t.Fatal(err)
 	}

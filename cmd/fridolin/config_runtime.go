@@ -10,6 +10,8 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/Icewater1337/fridolin/internal/config"
+
 	"github.com/Icewater1337/fridolin/internal/fsx"
 )
 
@@ -18,14 +20,14 @@ import (
 var runTimeoutUnit = time.Minute
 
 // runTimeout is how long a brain's run may take, 0 for no limit.
-func runTimeout(c *Config) time.Duration {
+func runTimeout(c *config.Config) time.Duration {
 	return time.Duration(c.RunMinutes()) * runTimeoutUnit
 }
 
 // LoadConfig reads config.json and fills in the built-in defaults. The file
 // is the only source of settings: no environment variable or .env overrides
 // any of them.
-func LoadConfig(cfgPath string) (*Config, error) {
+func LoadConfig(cfgPath string) (*config.Config, error) {
 	cs, err := OpenConfigStore(cfgPath)
 	if err != nil {
 		return nil, err
@@ -37,7 +39,7 @@ func LoadConfig(cfgPath string) (*Config, error) {
 // set up: a config file that is not there is an error, not the defaults,
 // so that a mistyped --config is reported rather than checked, or used,
 // as an empty config.
-func LoadExistingConfig(cfgPath string) (*Config, error) {
+func LoadExistingConfig(cfgPath string) (*config.Config, error) {
 	if _, err := os.Stat(cfgPath); errors.Is(err, fs.ErrNotExist) {
 		return nil, fmt.Errorf("no config file at %s (run fridolin init)", cfgPath)
 	}
@@ -59,14 +61,14 @@ func LoadExistingConfig(cfgPath string) (*Config, error) {
 // dir, which may be shared on purpose. bridge.db itself is 0600 either way.
 // A chmod that fails is logged, not fatal, so an upgrade cannot keep a
 // working bridge from starting.
-func protectDataDir(cfg *Config) {
+func protectDataDir(cfg *config.Config) {
 	// Compare absolute, resolved paths: a relative data_dir such as "."
 	// depends on the folder the bridge was started from, and fsx.Within
 	// cannot relate it to the home folder, so it would get past the home
 	// check.
 	dataDir := absPath(cfg.DataDir)
 	dbDir := absPath(filepath.Dir(cfg.DBPath))
-	home := homeDir()
+	home := config.HomeDir()
 	homeOrAbove := func(dir string) bool {
 		return home != "" && fsx.Within(fsx.Canonical(home), fsx.Canonical(dir))
 	}

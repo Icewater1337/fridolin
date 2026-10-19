@@ -12,6 +12,8 @@ import (
 	"syscall"
 	"testing"
 
+	"github.com/Icewater1337/fridolin/internal/config"
+
 	"github.com/Icewater1337/fridolin/internal/manifest"
 
 	"github.com/Icewater1337/fridolin/internal/history"
@@ -58,7 +60,7 @@ func scriptCall(t *testing.T, h *harness, s *scrubber, brains map[string]string,
 	if strings.Contains(body, `"brain"`) || strings.Contains(body, `"paths"`) || strings.Contains(body, `"scope"`) {
 		path = "/ingest"
 	}
-	r := httptest.NewRequest("POST", "http://"+defaultHTTPListen+path, strings.NewReader(body))
+	r := httptest.NewRequest("POST", "http://"+config.DefaultHTTPListen+path, strings.NewReader(body))
 	r.Header.Set("Content-Type", "application/json")
 	r.Header.Set("Authorization", "Bearer "+h.readToken("scripts.token"))
 	for _, m := range mutate {

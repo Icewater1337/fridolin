@@ -15,6 +15,8 @@ import (
 	"testing"
 	"unicode"
 
+	"github.com/Icewater1337/fridolin/internal/config"
+
 	"github.com/Icewater1337/fridolin/internal/manifest"
 
 	"github.com/Icewater1337/fridolin/internal/history"
@@ -46,7 +48,7 @@ type schemaType struct {
 
 // schemaTypes are the schemas of docs/schemas and their Go types.
 var schemaTypes = []schemaType{
-	{schema: "config.schema.json", typ: reflect.TypeFor[Config](), closed: true, extra: RetiredKeyNames()},
+	{schema: "config.schema.json", typ: reflect.TypeFor[config.Config](), closed: true, extra: config.RetiredKeyNames()},
 	{schema: "brain.schema.json", typ: reflect.TypeFor[manifest.Manifest](), closed: true},
 	{schema: "history-line.schema.json", typ: reflect.TypeFor[history.Entry](), closed: true},
 	{schema: "send-request.schema.json", typ: reflect.TypeFor[sendRequest]()},
@@ -350,8 +352,8 @@ func assertValid(t testing.TB, set *schemaSet, ref, what string, data []byte) {
 // writes.
 func TestConfigSchemaVersion(t *testing.T) {
 	version := newSchemaSet(t).resolve("config.schema.json", "#/properties/version").schema.(map[string]any)
-	if got := fmt.Sprint(version["maximum"]); got != fmt.Sprint(currentConfigVersion) {
-		t.Errorf("config.schema.json reads up to version %s, the bridge %d", got, currentConfigVersion)
+	if got := fmt.Sprint(version["maximum"]); got != fmt.Sprint(config.Version) {
+		t.Errorf("config.schema.json reads up to version %s, the bridge %d", got, config.Version)
 	}
 }
 
@@ -372,7 +374,7 @@ func TestConfigFilesFollowTheSchema(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if _, err := cs.Update(cs.ETag(), func(*Config) error { return nil }); err != nil {
+			if _, err := cs.Update(cs.ETag(), func(*config.Config) error { return nil }); err != nil {
 				t.Fatal(err)
 			}
 			saved, err := os.ReadFile(path)
@@ -527,8 +529,8 @@ func TestSchemaEnumsAreTheBridgesValues(t *testing.T) {
 		{"brain_effort", "config.schema.json#/properties/brain_effort", manifest.Efforts(), `{"brain_effort": %s}`},
 		{"agent_provider", "config.schema.json#/properties/agent_provider", []string{"", "claude", "codex"}, `{"agent_provider": %s}`},
 		{"codex_effort", "config.schema.json#/properties/codex_effort", manifest.Efforts(), `{"codex_effort": %s}`},
-		{"queue.mode", "config.schema.json#/properties/queue/properties/mode", QueueModes(), `{"queue": {"mode": %s}}`},
-		{"sandbox.git_config", "config.schema.json#/properties/sandbox/properties/git_config", GitConfigs(), `{"sandbox": {"git_config": %s}}`},
+		{"queue.mode", "config.schema.json#/properties/queue/properties/mode", config.QueueModes(), `{"queue": {"mode": %s}}`},
+		{"sandbox.git_config", "config.schema.json#/properties/sandbox/properties/git_config", config.GitConfigs(), `{"sandbox": {"git_config": %s}}`},
 		{"triggers match", "config.schema.json#/properties/triggers/items/oneOf/1/properties/match", matches, `{"triggers": [{"text": "@c", "match": %s}]}`},
 		{"log_level", "config.schema.json#/properties/log_level", levels, `{"log_level": %s}`},
 		{"brain.json effort", "brain.schema.json#/properties/effort", manifest.Efforts(), `{"id": "a", "name": "A", "effort": %s}`},

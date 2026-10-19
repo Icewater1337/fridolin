@@ -3,6 +3,8 @@ package main
 import (
 	"testing"
 
+	"github.com/Icewater1337/fridolin/internal/config"
+
 	"github.com/Icewater1337/fridolin/internal/manifest"
 )
 
@@ -14,7 +16,7 @@ func TestReplyChatKeepsHeldDMAndRetiredBrainIdentity(t *testing.T) {
 		br.settings.Store(&brainSettings{manifest: manifest.Manifest{ID: id, Routing: manifest.Routing{HandlesDMs: handlesDMs, Groups: []string{group}}}})
 		return br
 	}
-	cfg := &Config{AllowedNumbers: []string{"15551234567"}}
+	cfg := &config.Config{AllowedNumbers: []string{"15551234567"}}
 	for _, tc := range []struct {
 		name       string
 		heldDM     string

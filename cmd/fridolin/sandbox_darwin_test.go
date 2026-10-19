@@ -16,6 +16,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Icewater1337/fridolin/internal/config"
+
 	"github.com/Icewater1337/fridolin/internal/chat"
 	"github.com/Icewater1337/fridolin/internal/manifest"
 	"github.com/Icewater1337/fridolin/internal/store"
@@ -1092,7 +1094,7 @@ func TestSandboxDeniesTheConfigFile(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	sp := NewSandboxProfiler(map[string][]string{"a": {filepath.Join(home, "a")}}, &Config{DataDir: filepath.Join(home, ".fridolin")})
+	sp := NewSandboxProfiler(map[string][]string{"a": {filepath.Join(home, "a")}}, &config.Config{DataDir: filepath.Join(home, ".fridolin")})
 	sp.SetConfigFile(filepath.Join(home, "etc", "config.json"))
 	for _, cmd := range []string{
 		`cat "$HOME/etc/config.json"`,
@@ -1132,10 +1134,10 @@ func TestSandboxAllowPathsKeepBridgeSecrets(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	cfg := &Config{
+	cfg := &config.Config{
 		DataDir: filepath.Join(home, ".fridolin"),
 		DBPath:  filepath.Join(home, ".fridolin", "bridge.db"),
-		Sandbox: SandboxConfig{AllowPaths: []string{filepath.Join(home, ".fridolin"), filepath.Join(home, "team"), filepath.Join(home, "Documents", "share"), filepath.Join(home, "Library")}},
+		Sandbox: config.SandboxConfig{AllowPaths: []string{filepath.Join(home, ".fridolin"), filepath.Join(home, "team"), filepath.Join(home, "Documents", "share"), filepath.Join(home, "Library")}},
 	}
 	sp := NewSandboxProfiler(map[string][]string{"a": {filepath.Join(home, "a")}, "b": {filepath.Join(home, "team", "b")}}, cfg)
 	for _, c := range []struct {
@@ -1285,7 +1287,7 @@ func TestSandboxOwnFolderKeepsWhatIsInsideIt(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	cfg := &Config{DataDir: home + "/.fridolin", Sandbox: SandboxConfig{
+	cfg := &config.Config{DataDir: home + "/.fridolin", Sandbox: config.SandboxConfig{
 		DenyPaths:  []string{box + "/work/private"},
 		AllowPaths: []string{box + "/work/private/share"},
 	}}
@@ -1582,7 +1584,7 @@ func sandboxFixture(t *testing.T, home, otherBrain, denyDir string, extra ...map
 			"deny_paths":      []string{"~/" + denyDir},
 			"allow_paths":     []string{"~/Documents/share"},
 		},
-		"brain_dirs": []BrainRef{
+		"brain_dirs": []config.BrainRef{
 			brainFolder(t, "~/assistant/a", manifest.Manifest{ID: "a", Routing: manifest.Routing{HandlesDMs: true}}),
 			brainFolder(t, "~/assistant/"+otherBrain, manifest.Manifest{ID: "b", Routing: manifest.Routing{Groups: []string{"120363000000000000@g.us"}}}),
 		},
@@ -1750,7 +1752,7 @@ func TestStatusWarnsWhenSandboxDoesNotApply(t *testing.T) {
 			tb := newTestBridge(t, `, "sandbox": {"enabled": true}`)
 			if tc.atHome {
 				ref := brainFolder(t, "~", a)
-				if _, err := tb.cfgs.Update("", func(c *Config) error {
+				if _, err := tb.cfgs.Update("", func(c *config.Config) error {
 					c.BrainDirs = append(c.BrainDirs, ref)
 					return nil
 				}); err != nil {

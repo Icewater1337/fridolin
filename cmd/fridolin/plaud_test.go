@@ -17,6 +17,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Icewater1337/fridolin/internal/config"
+
 	"github.com/Icewater1337/fridolin/internal/manifest"
 
 	"github.com/Icewater1337/fridolin/internal/chat"
@@ -243,7 +245,7 @@ func TestPlaudWithoutAPrivateChatWaits(t *testing.T) {
 		t.Fatalf("outbox = %+v, want nothing", out)
 	}
 
-	if _, err := tb.cfgs.Update("", func(c *Config) error { c.AllowedNumbers = []string{"15551234567"}; return nil }); err != nil {
+	if _, err := tb.cfgs.Update("", func(c *config.Config) error { c.AllowedNumbers = []string{"15551234567"}; return nil }); err != nil {
 		t.Fatal(err)
 	}
 	if err := tb.plaud.Poll(context.Background()); err != nil {
@@ -1370,7 +1372,7 @@ func TestPlaudConnectSignsOutTheRefusedLoginWhereItIs(t *testing.T) {
 	tb.plaud.cliMu.Lock()
 	err := tb.plaud.Connect()
 	if err == nil {
-		_, err = tb.cfgs.Update("", func(c *Config) error { c.Plaud.BrainAccess = true; return nil })
+		_, err = tb.cfgs.Update("", func(c *config.Config) error { c.Plaud.BrainAccess = true; return nil })
 	}
 	tb.plaud.cliMu.Unlock()
 	if err != nil {
@@ -1439,7 +1441,7 @@ func TestPlaudConnectGivesTheSignOutItsOwnTime(t *testing.T) {
 func TestPlaudSigningOutDuringACheckIsNoExpiry(t *testing.T) {
 	disconnect := func(tb *testBridge) error { return tb.plaud.Disconnect() }
 	moveLogin := func(tb *testBridge) error {
-		_, err := tb.cfgs.Update("", func(c *Config) error { c.Plaud.BrainAccess = true; return nil })
+		_, err := tb.cfgs.Update("", func(c *config.Config) error { c.Plaud.BrainAccess = true; return nil })
 		return err
 	}
 	for _, c := range []struct {
@@ -1529,7 +1531,7 @@ func TestPlaudCheckEndsWhenItsLoginGoes(t *testing.T) {
 				return err
 			}
 		}
-		_, err := tb.cfgs.Update("", func(c *Config) error { c.Plaud.BrainAccess = true; return nil })
+		_, err := tb.cfgs.Update("", func(c *config.Config) error { c.Plaud.BrainAccess = true; return nil })
 		return err
 	}
 	// The same, and you connect that login, as a sign-in that finishes does.
@@ -2112,7 +2114,7 @@ func TestPlaudPagesBackToTheLastKnownRecording(t *testing.T) {
 // leaves half of a small queue for your own messages.
 func TestPlaudBacklogTricklesInAsRunsEnd(t *testing.T) {
 	for _, c := range []struct{ maxPending, want int }{{10, plaudHandedMax}, {100, plaudHandedMax}, {6, 3}, {3, 1}, {1, 1}} {
-		if got := plaudHandedLimit(&Config{Queue: QueueConfig{MaxPending: c.maxPending}}); got != c.want {
+		if got := plaudHandedLimit(&config.Config{Queue: config.QueueConfig{MaxPending: c.maxPending}}); got != c.want {
 			t.Errorf("limit with queue.max_pending %d = %d, want %d", c.maxPending, got, c.want)
 		}
 	}
@@ -2777,7 +2779,7 @@ func TestPlaudAccountLookUpLeavesAMovedLoginAlone(t *testing.T) {
 	tb.plaud.run = func(ctx context.Context, args ...string) (string, error) {
 		out, err := run(ctx, args...)
 		if args[0] == "me" {
-			if _, err := tb.cfgs.Update("", func(c *Config) error { c.Plaud.BrainAccess = true; return nil }); err != nil {
+			if _, err := tb.cfgs.Update("", func(c *config.Config) error { c.Plaud.BrainAccess = true; return nil }); err != nil {
 				t.Error(err)
 			}
 		}
@@ -3402,7 +3404,7 @@ func TestBrainPlaudPATH(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			cfg := &Config{Plaud: PlaudConfig{BrainAccess: true, CLIPath: tc.cliPath}}
+			cfg := &config.Config{Plaud: config.PlaudConfig{BrainAccess: true, CLIPath: tc.cliPath}}
 			got := brainPlaudPATH(cfg)
 			dirs := filepath.SplitList(got)
 			if want := filepath.Join(tc.dir, "plaud"); lookPathIn("plaud", got) != want {

@@ -8,6 +8,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Icewater1337/fridolin/internal/config"
+
 	"go.mau.fi/whatsmeow"
 	"go.mau.fi/whatsmeow/store"
 	"go.mau.fi/whatsmeow/types"
@@ -223,8 +225,8 @@ func TestStartPairingRefusesASecondPairing(t *testing.T) {
 // failing until a restart.
 func TestNewSessionAfterLogout(t *testing.T) {
 	s := openOutboxStore(t, t.TempDir())
-	cfg := &Config{LogLevel: "error"}
-	wa, err := NewWhatsAppClient(func() *Config { return cfg }, s, func(context.Context, Inbound) {}, nil)
+	cfg := &config.Config{LogLevel: "error"}
+	wa, err := NewWhatsAppClient(func() *config.Config { return cfg }, s, func(context.Context, Inbound) {}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -18,6 +18,8 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"github.com/Icewater1337/fridolin/internal/config"
+
 	"github.com/Icewater1337/fridolin/internal/chat"
 	mediafiles "github.com/Icewater1337/fridolin/internal/media"
 	"github.com/Icewater1337/fridolin/internal/trigger"
@@ -114,12 +116,12 @@ func (l testWaLogger) Sub(string) waLog.Logger                { return l }
 
 func newTestWhatsApp(t *testing.T) *testWhatsApp {
 	t.Helper()
-	cfg := &Config{AllowedNumbers: []string{"15551234567"}, MediaDir: t.TempDir(), MaxChunkSize: 4000}
+	cfg := &config.Config{AllowedNumbers: []string{"15551234567"}, MediaDir: t.TempDir(), MaxChunkSize: 4000}
 	tw := &testWhatsApp{inbound: make(chan Inbound, 4), notices: make(chan string, 4)}
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
 	tw.WhatsAppClient = &WhatsAppClient{
-		cfg:     func() *Config { return cfg },
+		cfg:     func() *config.Config { return cfg },
 		log:     testWaLogger{tw},
 		ctx:     ctx,
 		cancel:  cancel,
@@ -350,7 +352,7 @@ func FuzzNumberAllowed(f *testing.F) {
 		if list != "" {
 			allowed = strings.Split(list, ",")
 		}
-		cfg := &Config{AllowedNumbers: allowed, AllowAnyDM: &anyDM}
+		cfg := &config.Config{AllowedNumbers: allowed, AllowAnyDM: &anyDM}
 		got := numberAllowed(cfg, number)
 		if len(allowed) == 0 {
 			if got != anyDM {
@@ -370,7 +372,7 @@ func FuzzNumberAllowed(f *testing.F) {
 			t.Errorf("allowed_numbers %q: %q allowed: %v, listed: %v", allowed, number, got, listed)
 		}
 		other := !anyDM
-		if numberAllowed(&Config{AllowedNumbers: allowed, AllowAnyDM: &other}, number) != got {
+		if numberAllowed(&config.Config{AllowedNumbers: allowed, AllowAnyDM: &other}, number) != got {
 			t.Errorf("allowed_numbers %q: allow_any_dm changes whether %q is allowed", allowed, number)
 		}
 		for _, a := range allowed {
@@ -385,7 +387,7 @@ func FuzzNumberAllowed(f *testing.F) {
 				}
 			}
 			// A number one digit longer is someone else.
-			if canon(p+"1") != canon(number) && numberAllowed(&Config{AllowedNumbers: []string{a}, AllowAnyDM: &anyDM}, p+"1") {
+			if canon(p+"1") != canon(number) && numberAllowed(&config.Config{AllowedNumbers: []string{a}, AllowAnyDM: &anyDM}, p+"1") {
 				t.Errorf("allowed_numbers [%q]: %q, a longer number, is allowed", a, p+"1")
 			}
 		}
@@ -1153,10 +1155,10 @@ func TestGroupNonMemberReactionIsQuiet(t *testing.T) {
 // only the owner.
 func TestGroupMessageReadsOneConfig(t *testing.T) {
 	tw, _ := newGroupTestWhatsApp(t, nil)
-	before := &Config{AllowedNumbers: []string{}, AllowAnyDM: proto.Bool(true), MediaDir: t.TempDir(), MaxChunkSize: 4000}
+	before := &config.Config{AllowedNumbers: []string{}, AllowAnyDM: proto.Bool(true), MediaDir: t.TempDir(), MaxChunkSize: 4000}
 	after := tw.cfg()
 	var reads atomic.Int32
-	tw.cfg = func() *Config {
+	tw.cfg = func() *config.Config {
 		if reads.Add(1) == 1 {
 			return before
 		}

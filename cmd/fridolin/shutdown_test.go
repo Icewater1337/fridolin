@@ -22,6 +22,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Icewater1337/fridolin/internal/config"
+
 	"github.com/Icewater1337/fridolin/internal/manifest"
 
 	"github.com/Icewater1337/fridolin/internal/chat"
@@ -252,21 +254,21 @@ func TestASecondSignalStopsAtOnce(t *testing.T) {
 func secondSignalStopsAtOnce(t *testing.T, provider string) {
 	t.Helper()
 	addr := freePort(t)
-	root, cfg := cliFixture(t, `"http_listen": "`+addr+`", "debounce": {"quiet_ms": 0}`, func(home string) []BrainRef {
-		return []BrainRef{brainFolder(t, "~/main", manifest.Manifest{ID: "main", Name: "Main", Routing: manifest.Routing{HandlesDMs: true}})}
+	root, cfg := cliFixture(t, `"http_listen": "`+addr+`", "debounce": {"quiet_ms": 0}`, func(home string) []config.BrainRef {
+		return []config.BrainRef{brainFolder(t, "~/main", manifest.Manifest{ID: "main", Name: "Main", Routing: manifest.Routing{HandlesDMs: true}})}
 	})
 	home := filepath.Join(root, "home")
 	configBytes, err := os.ReadFile(cfg)
 	if err != nil {
 		t.Fatal(err)
 	}
-	var config map[string]any
-	if err := json.Unmarshal(configBytes, &config); err != nil {
+	var configValue map[string]any
+	if err := json.Unmarshal(configBytes, &configValue); err != nil {
 		t.Fatal(err)
 	}
-	config["agent_provider"] = provider
-	config["codex_path"] = filepath.Join(root, "bin", "fridolin")
-	if err := os.WriteFile(cfg, mustJSON(t, config), 0600); err != nil {
+	configValue["agent_provider"] = provider
+	configValue["codex_path"] = filepath.Join(root, "bin", "fridolin")
+	if err := os.WriteFile(cfg, mustJSON(t, configValue), 0600); err != nil {
 		t.Fatal(err)
 	}
 	childLog := filepath.Join(root, "child-pid")
@@ -470,7 +472,7 @@ func TestStopWaitsForARemovedBrainsDelivery(t *testing.T) {
 	case <-time.After(5 * time.Second):
 		t.Fatal("run did not reach delivery")
 	}
-	if _, err := tb.cfgs.Update("", func(c *Config) error { c.BrainDirs = nil; return nil }); err != nil {
+	if _, err := tb.cfgs.Update("", func(c *config.Config) error { c.BrainDirs = nil; return nil }); err != nil {
 		t.Fatal(err)
 	}
 	stopped := make(chan struct{})

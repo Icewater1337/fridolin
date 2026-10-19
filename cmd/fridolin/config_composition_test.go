@@ -4,13 +4,15 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+
+	"github.com/Icewater1337/fridolin/internal/config"
 )
 
 // Configuration owns defaults for saved settings; providers and the chunker
 // retain their independent defensive defaults for direct callers. These tests
 // keep those contracts in step without imports from config into runtime code.
 func TestConfigDefaultsMatchRuntimeContracts(t *testing.T) {
-	cfg, err := effective(&Config{})
+	cfg, err := config.Resolve(&config.Config{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -27,10 +29,10 @@ func TestConfigDefaultsMatchRuntimeContracts(t *testing.T) {
 	if a, b := ChunkMessage(text, 0), ChunkMessage(text, cfg.MaxChunkSize); !reflect.DeepEqual(a, b) {
 		t.Fatal("configured chunk default differs from direct-call fallback")
 	}
-	if _, err := effective(&Config{MaxChunkSize: minChunkSize}); err != nil {
+	if _, err := config.Resolve(&config.Config{MaxChunkSize: minChunkSize}); err != nil {
 		t.Fatalf("chunker's minimum is refused by config: %v", err)
 	}
-	if _, err := effective(&Config{MaxChunkSize: minChunkSize - 1}); err == nil {
+	if _, err := config.Resolve(&config.Config{MaxChunkSize: minChunkSize - 1}); err == nil {
 		t.Fatal("config accepted less than the chunker's minimum")
 	}
 }

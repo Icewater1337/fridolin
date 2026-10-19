@@ -13,6 +13,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/Icewater1337/fridolin/internal/config"
+
 	"github.com/Icewater1337/fridolin/internal/fsx"
 )
 
@@ -300,7 +302,7 @@ func TestRouteInventoryGuards(t *testing.T) {
 	secrets := []string{token, "TEST-CLIENT-SECRET", "golden-refresh-token", "golden-access-token"}
 
 	request := func(method, path, body string, mutate ...func(*http.Request)) *httptest.ResponseRecorder {
-		r := httptest.NewRequest(method, "http://"+defaultHTTPListen+path, strings.NewReader(body))
+		r := httptest.NewRequest(method, "http://"+config.DefaultHTTPListen+path, strings.NewReader(body))
 		if body != "" {
 			r.Header.Set("Content-Type", "application/json")
 		}
@@ -357,7 +359,7 @@ func TestRouteInventoryGuards(t *testing.T) {
 				// The API mux says which pattern takes the request, without
 				// running it: a route missing from the mux would fall to
 				// the catch-all.
-				r := httptest.NewRequest(method, "http://"+defaultHTTPListen+rt.path(), nil)
+				r := httptest.NewRequest(method, "http://"+config.DefaultHTTPListen+rt.path(), nil)
 				if _, pattern := api.Handler(r); pattern != strings.TrimSpace(rt.method+" "+rt.pattern) {
 					t.Errorf("%s %s is served by %q", method, rt.path(), pattern)
 				}
@@ -410,7 +412,7 @@ func TestRouteInventoryGuards(t *testing.T) {
 					t.Errorf("from another site: %d, want 403", w.Code)
 				}
 			case classAPIMount:
-				r := httptest.NewRequest(method, "http://"+defaultHTTPListen+rt.path(), nil)
+				r := httptest.NewRequest(method, "http://"+config.DefaultHTTPListen+rt.path(), nil)
 				if _, pattern := api.Handler(r); pattern != "" {
 					t.Errorf("%s %s is served by %q", method, rt.path(), pattern)
 				}

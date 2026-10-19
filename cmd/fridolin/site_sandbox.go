@@ -34,6 +34,8 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/Icewater1337/fridolin/internal/config"
+
 	"github.com/Icewater1337/fridolin/internal/textx"
 
 	"github.com/Icewater1337/fridolin/internal/fsx"
@@ -446,7 +448,7 @@ func siteSandboxProfile(in siteProfileInput) (string, error) {
 // Fridolin's data folder under both its names and the configured one, the
 // bridge's own files, and the usual secrets.
 func (in siteProfileInput) neverPaths() []string {
-	out := []string{filepath.Join(in.home, dataDirName), filepath.Join(in.home, legacyDataDirName)}
+	out := []string{filepath.Join(in.home, config.DataDirName), filepath.Join(in.home, config.LegacyDataDirName)}
 	if in.dataDir != "" && !slices.Contains(out, filepath.Clean(in.dataDir)) {
 		out = append(out, in.dataDir)
 	}
@@ -557,7 +559,7 @@ func (m *SiteManager) SandboxStatus() SiteSandboxStatus {
 // sandboxInput gathers what the live site's profile is built from.
 func (m *SiteManager) sandboxInput(node, deploy, root, rtFile string, mods []siteModuleCaps) siteProfileInput {
 	in := siteProfileInput{
-		home:    homeDir(),
+		home:    config.HomeDir(),
 		dataDir: m.dataDir,
 		shell:   m.dir("shell"),
 		deploy:  deploy,

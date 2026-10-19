@@ -4,15 +4,17 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"github.com/Icewater1337/fridolin/internal/chat"
-	"github.com/Icewater1337/fridolin/internal/logx"
-	"github.com/Icewater1337/fridolin/internal/store"
 	"log"
 	"path/filepath"
 	"slices"
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/Icewater1337/fridolin/internal/chat"
+	"github.com/Icewater1337/fridolin/internal/config"
+	"github.com/Icewater1337/fridolin/internal/logx"
+	"github.com/Icewater1337/fridolin/internal/store"
 
 	mediafiles "github.com/Icewater1337/fridolin/internal/media"
 	"github.com/Icewater1337/fridolin/internal/textx"
@@ -52,7 +54,7 @@ type IgnoredHandler func(kind, jid, name, sender, pushName string)
 
 // WhatsAppClient wraps a whatsmeow client.
 type WhatsAppClient struct {
-	cfg       func() *Config
+	cfg       func() *config.Config
 	store     *store.Store
 	handler   InboundHandler
 	onIgnored IgnoredHandler
@@ -105,7 +107,7 @@ type WhatsAppClient struct {
 }
 
 // NewWhatsAppClient creates a client. It does NOT connect — call Connect.
-func NewWhatsAppClient(cfg func() *Config, store *store.Store, handler InboundHandler, onIgnored IgnoredHandler) (*WhatsAppClient, error) {
+func NewWhatsAppClient(cfg func() *config.Config, store *store.Store, handler InboundHandler, onIgnored IgnoredHandler) (*WhatsAppClient, error) {
 	logger := logx.NewWaLogger("WhatsApp", cfg().LogLevel)
 
 	deviceStore, err := store.Container.GetFirstDevice(context.Background())
@@ -849,7 +851,7 @@ func (wa *WhatsAppClient) isAllowed(number string) bool {
 // only, so that "+1 555 123 4567" in a config the bridge did not write
 // still lets 15551234567 in. Anything that is no phone number is compared
 // as it is.
-func numberAllowed(cfg *Config, number string) bool {
+func numberAllowed(cfg *config.Config, number string) bool {
 	if len(cfg.AllowedNumbers) == 0 {
 		return cfg.AllowsAnyDM()
 	}
@@ -870,7 +872,7 @@ func (wa *WhatsAppClient) rulesFor(jid string) groupRules {
 
 // isAllowedGroup reports whether the group JID is in cfg's allowed_groups.
 // Unlike DMs, groups are deny-by-default: an empty list means no groups.
-func isAllowedGroup(cfg *Config, jid string) bool {
+func isAllowedGroup(cfg *config.Config, jid string) bool {
 	return slices.Contains(cfg.AllowedGroups, jid)
 }
 
@@ -1054,7 +1056,7 @@ func extractText(msg *waE2E.Message) string {
 // messages are kept in memory and shown on the dashboard; incoming ones are
 // injected through the dev API.
 type devMessenger struct {
-	cfg    func() *Config
+	cfg    func() *config.Config
 	mu     sync.Mutex
 	outbox []DevMessage
 }

@@ -24,11 +24,12 @@ import (
 // edge is a change to this table, made and reviewed in the same pull
 // request. Imports from outside the module are not checked here.
 var imports = map[string][]string{
-	"cmd/fridolin":      {"examples", "internal/activity", "internal/chat", "internal/fsx", "internal/history", "internal/httpapi", "internal/jsonx", "internal/logx", "internal/manifest", "internal/media", "internal/otp", "internal/platform", "internal/registry", "internal/route", "internal/store", "internal/textx", "internal/trigger", "internal/version", "site", "web"},
+	"cmd/fridolin":      {"examples", "internal/activity", "internal/chat", "internal/config", "internal/fsx", "internal/history", "internal/httpapi", "internal/jsonx", "internal/logx", "internal/manifest", "internal/media", "internal/otp", "internal/platform", "internal/registry", "internal/route", "internal/store", "internal/textx", "internal/trigger", "internal/version", "site", "web"},
 	"examples":          nil,
 	"internal/activity": {"internal/history", "internal/textx"},
 	"internal/archtest": nil,
 	"internal/chat":     nil,
+	"internal/config":   {"internal/chat", "internal/fsx", "internal/manifest", "internal/textx", "internal/trigger"},
 	"internal/fsx":      nil,
 	"internal/jsonx":    nil,
 	"internal/history":  {"internal/fsx"},
@@ -53,6 +54,8 @@ var imports = map[string][]string{
 // (TestNoAmbientEnv).
 var ambientAllowed = map[string]bool{
 	"internal/platform": true,
+	// Temporary R5 exception: HomeDir retains the existing resolution contract; R6 injects paths.
+	"internal/config": true,
 }
 
 // ambient are the calls that read process-wide state. Code below internal/

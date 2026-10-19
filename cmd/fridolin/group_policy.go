@@ -3,6 +3,8 @@ package main
 import (
 	"fmt"
 	"slices"
+
+	"github.com/Icewater1337/fridolin/internal/config"
 )
 
 // Who in an allowed group may reach its brain. allowed_groups lets a group
@@ -39,7 +41,7 @@ type groupSender struct {
 // one without admits whom allowed_numbers admits (numberAllowed): its
 // numbers, or anyone while it is empty and allow_any_dm is true. A sender
 // known only by a LID is admitted only where everyone is.
-func groupSenderAllowed(cfg *Config, group string, s groupSender) bool {
+func groupSenderAllowed(cfg *config.Config, group string, s groupSender) bool {
 	if s.FromMe {
 		return true
 	}
@@ -78,7 +80,7 @@ func (s groupSender) masked() string {
 // groupHeardSummary says for fridolin check whose messages in the allowed
 // group g reach its brain, as groupSenderAllowed decides, besides the
 // bridge's own account, which always does.
-func groupHeardSummary(cfg *Config, g string) string {
+func groupHeardSummary(cfg *config.Config, g string) string {
 	members, listed := cfg.GroupMembers[g]
 	switch {
 	case listed && slices.Equal(members, []string{anyMember}):

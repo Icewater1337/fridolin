@@ -16,6 +16,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/Icewater1337/fridolin/internal/config"
+
 	"github.com/Icewater1337/fridolin/internal/manifest"
 
 	"github.com/Icewater1337/fridolin/internal/fsx"
@@ -968,7 +970,7 @@ func TestCheckExitsWhenABrainCannotRun(t *testing.T) {
 	renamed.Name = "Notes, approved before"
 	drifted.Approved = &renamed
 	inData := brainFolder(t, home+"/data/inside", manifest.Manifest{ID: "inside"})
-	gone := brainDirsJSON(t, main, BrainRef{Path: home + "/gone", Approved: &manifest.Manifest{ID: "gone", Name: "gone"}})
+	gone := brainDirsJSON(t, main, config.BrainRef{Path: home + "/gone", Approved: &manifest.Manifest{ID: "gone", Name: "gone"}})
 	cases := []struct {
 		name   string
 		config string

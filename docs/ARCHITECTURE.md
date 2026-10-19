@@ -69,6 +69,11 @@ behaviour unless its title says so. The steps so far:
   embedded assets and the runtime's identity-map path; registration workflows
   and config transactions remain in the command until their later extraction.
 
+- **R5, configuration values**: `config` owns the file shape, section types,
+  defaults, validation, migrations and approved brain references. Loading,
+  transaction orchestration and startup permission changes remain in the command
+  for the next slice. `Resolve` still looks up the home folder; R6 injects paths.
+
 Everything else is still `package main` in `cmd/fridolin`, one file per
 subject (section 3 names the file each package will come from). A package
 that is not yet extracted is marked *(to come, Rn)* with the step that
@@ -1229,3 +1234,17 @@ a real `!reset`, which writes a reset marker the next prompt stops at
 (`history.go`), the group-member policy (`group_policy.go`), and the
 sandbox's write deny by default with each brain's own media inbox and
 state (`sandbox.go`, `media.go`, `childenv.go`).
+
+### Configuration value extraction boundary
+
+The extracted `config` package uses `manifest`, `trigger`, `fsx`, and the pure
+`chat` phone normalization and `textx` validation helpers. It imports no runtime
+manager, provider, transport or HTTP package. `HomeDir` is the explicit temporary
+ambient lookup exception until R6 supplies paths. The store and its retained-root
+manifest transaction remain command-owned in this slice.
+
+Configuration owns its saved provider/chunk defaults; direct provider and chunker
+calls retain their defensive fallback constants. Composition tests compare those
+contracts so a runtime package need not depend on the whole configuration schema.
+The runtime's shortened timeout unit remains command-owned: `Config.RunMinutes`
+provides the value and the command scales it exactly as before.

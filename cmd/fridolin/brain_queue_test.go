@@ -16,6 +16,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Icewater1337/fridolin/internal/config"
+
 	"github.com/Icewater1337/fridolin/internal/manifest"
 
 	"github.com/Icewater1337/fridolin/internal/chat"
@@ -503,25 +505,25 @@ func TestReloadHandsOnWhatWaited(t *testing.T) {
 		name string
 		// reload changes the brains, the DM brain a among them, and
 		// returns the folder whose brain should answer.
-		reload func(t *testing.T, home string) (brains []BrainRef, answers string)
+		reload func(t *testing.T, home string) (brains []config.BrainRef, answers string)
 	}{
-		{"moved", func(t *testing.T, home string) ([]BrainRef, string) {
+		{"moved", func(t *testing.T, home string) ([]config.BrainRef, string) {
 			if err := os.Rename(filepath.Join(home, "a"), filepath.Join(home, "a-moved")); err != nil {
 				t.Fatal(err)
 			}
-			return []BrainRef{
+			return []config.BrainRef{
 				brainFolder(t, home+"/a-moved", manifest.Manifest{ID: "a", Routing: manifest.Routing{HandlesDMs: true}}),
 				brainFolder(t, home+"/b", manifest.Manifest{ID: "b", Routing: manifest.Routing{Default: true}}),
 			}, filepath.Join(home, "a-moved")
 		}},
-		{"another folder", func(t *testing.T, home string) ([]BrainRef, string) {
-			return []BrainRef{
+		{"another folder", func(t *testing.T, home string) ([]config.BrainRef, string) {
+			return []config.BrainRef{
 				brainFolder(t, home+"/a-copy", manifest.Manifest{ID: "a", Routing: manifest.Routing{HandlesDMs: true}}),
 				brainFolder(t, home+"/b", manifest.Manifest{ID: "b", Routing: manifest.Routing{Default: true}}),
 			}, filepath.Join(home, "a-copy")
 		}},
-		{"removed", func(t *testing.T, home string) ([]BrainRef, string) {
-			return []BrainRef{
+		{"removed", func(t *testing.T, home string) ([]config.BrainRef, string) {
+			return []config.BrainRef{
 				brainFolder(t, home+"/b", manifest.Manifest{ID: "b", Routing: manifest.Routing{Default: true}}),
 			}, filepath.Join(home, "b")
 		}},
@@ -531,7 +533,7 @@ func TestReloadHandsOnWhatWaited(t *testing.T) {
 			home := fsx.Canonical(t.TempDir())
 			t.Setenv("HOME", home)
 			claude := fakeClaudeEnv(t, 30000)
-			config := func(refs ...BrainRef) *Config {
+			configValue := func(refs ...config.BrainRef) *config.Config {
 				cfg, err := LoadConfig(writeConfig(t, `{
 					"data_dir": "`+home+`/data",
 					"claude_path": "`+claude+`"`+brainDirsJSON(t, refs...)+`
@@ -541,7 +543,7 @@ func TestReloadHandsOnWhatWaited(t *testing.T) {
 				}
 				return cfg
 			}
-			mgr := newTestManager(t, config(
+			mgr := newTestManager(t, configValue(
 				brainFolder(t, home+"/a", manifest.Manifest{ID: "a", Routing: manifest.Routing{HandlesDMs: true}}),
 				brainFolder(t, home+"/b", manifest.Manifest{ID: "b", Routing: manifest.Routing{Default: true}}),
 			))
@@ -558,7 +560,7 @@ func TestReloadHandsOnWhatWaited(t *testing.T) {
 			}
 
 			refs, answers := tc.reload(t, home)
-			if err := mgr.Apply(config(refs...)); err != nil {
+			if err := mgr.Apply(configValue(refs...)); err != nil {
 				t.Fatal(err)
 			}
 			waitFor(t, 10*time.Second, "both runs to end", func() bool { return d.count() == 2 })
@@ -1372,7 +1374,7 @@ func TestBrainsAreToldTheDataDir(t *testing.T) {
 func TestDataEnvIsAbsolute(t *testing.T) {
 	cwd := fsx.Canonical(t.TempDir())
 	t.Chdir(cwd)
-	s := settingsFor(&Config{DataDir: "rel", DBPath: "rel/bridge.db"}, manifest.Spec{})
+	s := settingsFor(&config.Config{DataDir: "rel", DBPath: "rel/bridge.db"}, manifest.Spec{})
 	want := []string{"BRIDGE_DATA_DIR=" + cwd + "/rel", "BRIDGE_DB_PATH=" + cwd + "/rel/bridge.db"}
 	if got := dataEnv(s); !slices.Equal(got, want) {
 		t.Errorf("dataEnv = %q, want %q", got, want)

@@ -6,6 +6,8 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/Icewater1337/fridolin/internal/config"
+
 	"github.com/Icewater1337/fridolin/internal/fsx"
 )
 
@@ -36,7 +38,7 @@ var helperDirs = []string{"/usr/bin", "/bin", "/usr/sbin", "/sbin", "/usr/local/
 func helperPath() string {
 	var homes []string
 	// A HOME of "" or / would put every folder under it.
-	if home := homeDir(); home != "" && filepath.Dir(home) != home {
+	if home := config.HomeDir(); home != "" && filepath.Dir(home) != home {
 		homes = []string{home, fsx.Resolve(home)}
 	}
 	var out []string

@@ -6,6 +6,8 @@ import (
 	"os/exec"
 	"path/filepath"
 	"testing"
+
+	"github.com/Icewater1337/fridolin/internal/config"
 )
 
 // makeImmutable sets the user immutable flag on path, so that not even its
@@ -33,7 +35,7 @@ func TestProtectDataDirWarnsWhenChmodFails(t *testing.T) {
 	makeImmutable(t, data)
 	logs := captureLog(t)
 
-	protectDataDir(&Config{DataDir: data, DBPath: filepath.Join(data, "bridge.db")})
+	protectDataDir(&config.Config{DataDir: data, DBPath: filepath.Join(data, "bridge.db")})
 
 	if got := permOf(t, data); got != 0o755 {
 		t.Errorf("immutable data dir has mode %04o, want 0755 unchanged", got)

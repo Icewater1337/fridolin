@@ -23,6 +23,8 @@ import (
 	"time"
 	"unicode"
 
+	"github.com/Icewater1337/fridolin/internal/config"
+
 	"github.com/Icewater1337/fridolin/internal/manifest"
 
 	"github.com/Icewater1337/fridolin/internal/fsx"
@@ -214,7 +216,7 @@ func NewBackupManager(cfgs *ConfigStore, bm *BrainManager) *BackupManager {
 	}
 	// After the change is saved, never while it is being made: a change
 	// that validation or the write then refuses must not move the schedule.
-	cfgs.Subscribe(func(prev, next *Config) {
+	cfgs.Subscribe(func(prev, next *config.Config) {
 		if next.Backup.Enabled && (!prev.Backup.Enabled || prev.Backup.DailyAt != next.Backup.DailyAt) {
 			m.mu.Lock()
 			m.state.ArmedAt = m.now()
@@ -309,7 +311,7 @@ var errRcloneMissing = errors.New("rclone is not installed")
 // folders of PATH it looks in first, a variable so tests can point it at
 // their own files.
 var rcloneFallbacks = func() []string {
-	return []string{"/opt/homebrew/bin/rclone", "/usr/local/bin/rclone", filepath.Join(homeDir(), ".local/bin/rclone")}
+	return []string{"/opt/homebrew/bin/rclone", "/usr/local/bin/rclone", filepath.Join(config.HomeDir(), ".local/bin/rclone")}
 }
 
 // rcloneMissingHint says what to do about findRclone's error: install
@@ -466,7 +468,7 @@ func (m *BackupManager) Summary() backupSummary {
 // brain that reuses an id does not start with another's last result. A
 // brain whose folder is missing for now is still configured, and keeps
 // its result. Hold m.mu.
-func (m *BackupManager) forgetRemovedLocked(cfg *Config) {
+func (m *BackupManager) forgetRemovedLocked(cfg *config.Config) {
 	configured := map[string]bool{}
 	for _, ref := range cfg.BrainDirs {
 		if ref.Approved != nil {
@@ -510,7 +512,7 @@ func nextDue(now time.Time, dailyAt, lastRunDay string, armedAt time.Time) (due 
 // none while the schedule is off or Drive is not connected, since it would
 // never come, and now for a run that is due and only waits for the next
 // tick. Hold m.mu.
-func (m *BackupManager) nextRunLocked(cfg *Config, connected bool) *time.Time {
+func (m *BackupManager) nextRunLocked(cfg *config.Config, connected bool) *time.Time {
 	if !cfg.Backup.Enabled || !connected {
 		return nil
 	}
@@ -861,7 +863,7 @@ func (b *Bridge) apiBackupSettings(w http.ResponseWriter, r *http.Request) {
 		httpapi.WriteErr(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	_, err := b.cfgs.Update("", func(c *Config) error {
+	_, err := b.cfgs.Update("", func(c *config.Config) error {
 		if req.Enabled != nil {
 			c.Backup.Enabled = *req.Enabled
 		}
@@ -897,7 +899,7 @@ func (b *Bridge) apiBrainBackup(w http.ResponseWriter, r *http.Request) {
 		httpapi.WriteErr(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	if _, err := b.cfgs.UpdateTx("", func(c *Config, tx *Tx) error {
+	if _, err := b.cfgs.UpdateTx("", func(c *config.Config, tx *Tx) error {
 		return updateBrainBackup(c, tx, r.PathValue("id"), req.Enabled, req.Exclude)
 	}); err != nil {
 		httpapi.WriteErr(w, http.StatusUnprocessableEntity, err.Error())
@@ -907,7 +909,7 @@ func (b *Bridge) apiBrainBackup(w http.ResponseWriter, r *http.Request) {
 }
 
 // updateBrainBackup changes one brain's backup settings in its manifest.
-func updateBrainBackup(c *Config, tx *Tx, id string, enabled *bool, exclude []string) error {
+func updateBrainBackup(c *config.Config, tx *Tx, id string, enabled *bool, exclude []string) error {
 	return updateManifestIn(c, tx, id, func(m *manifest.Manifest) error {
 		if enabled != nil {
 			m.Backup.Enabled = *enabled
@@ -945,7 +947,7 @@ func (b *Bridge) apiBackupRun(w http.ResponseWriter, r *http.Request) {
 		httpapi.WriteErr(w, http.StatusBadRequest, "force needs a brain: name the brains to mirror in \"brains\"")
 		return
 	}
-	include := boolOr(req.IncludeBridge, b.cfgs.Get().Backup.IncludeBridge())
+	include := config.BoolOr(req.IncludeBridge, b.cfgs.Get().Backup.IncludeBridge())
 	if err := b.backup.StartRun(req.Brains, include, "manual", req.Force); err != nil {
 		httpapi.WriteErr(w, http.StatusConflict, err.Error())
 		return
@@ -1666,7 +1668,7 @@ func (m *BackupManager) listVersions(ctx context.Context, versions string) ([]st
 // with parts below it: backupPath(bc, "notes", "versions") is
 // "brain-gdrive:fridolin-backup/notes/versions". Every path the backups
 // use is built here, from a name that backupNameOK accepts.
-func backupPath(bc BackupConfig, id string, parts ...string) string {
+func backupPath(bc config.BackupConfig, id string, parts ...string) string {
 	return bc.Remote + ":" + strings.Join(append([]string{bc.Root, id}, parts...), "/")
 }
 
@@ -1739,7 +1741,7 @@ func resolveExisting(p string) string {
 // entry, no restore needs to write. The folders of your own files are the
 // exception, ~/Documents and the rest of userFileFolders: brains live
 // there, and so may a restored one, as CheckBrainPath lets a new one.
-func checkRestoreTarget(target string, cfg *Config, home string) error {
+func checkRestoreTarget(target string, cfg *config.Config, home string) error {
 	var denied []protectedPath
 	for _, p := range sandboxPolicyOf(cfg).protected(home, ownLayout()) {
 		if !slices.ContainsFunc(userFileFolders, func(sub string) bool { return p.path == filepath.Join(home, sub) }) {
@@ -1762,12 +1764,12 @@ func checkRestoreTarget(target string, cfg *Config, home string) error {
 // It returns the folder, resolved.
 func (b *Bridge) restoreTarget(p string) (string, error) {
 	cfg := b.cfgs.Get()
-	target, problems, _ := CheckBrainPath(resolveExisting(fsx.ExpandHome(strings.TrimSpace(p), homeDir())), cfg, brainDirs(cfg))
+	target, problems, _ := CheckBrainPath(resolveExisting(fsx.ExpandHome(strings.TrimSpace(p), config.HomeDir())), cfg, brainDirs(cfg))
 	if creds := fsx.Canonical(cfg.Sandbox.CredentialsDir); len(problems) == 0 && creds != "" && (fsx.Within(target, creds) || fsx.Within(creds, target)) {
 		problems = append(problems, "the credentials folder cannot be (or contain) the restore folder")
 	}
 	if len(problems) == 0 {
-		if err := checkRestoreTarget(target, cfg, homeDir()); err != nil {
+		if err := checkRestoreTarget(target, cfg, config.HomeDir()); err != nil {
 			problems = append(problems, "the restore folder "+err.Error()+" — pick a new folder")
 		}
 	}
@@ -1778,7 +1780,7 @@ func (b *Bridge) restoreTarget(p string) (string, error) {
 	// on it. Build what is listed, made and copied into from your home
 	// folder and a part of it that stays inside, so that it is there by
 	// construction and not only by that report.
-	home := fsx.Canonical(homeDir())
+	home := fsx.Canonical(config.HomeDir())
 	rel, err := filepath.Rel(home, target)
 	if err != nil || rel == "." || !filepath.IsLocal(rel) {
 		return "", errors.New("restore into a new folder inside your home folder")

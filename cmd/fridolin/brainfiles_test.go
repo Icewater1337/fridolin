@@ -3,7 +3,6 @@ package main
 import (
 	"encoding/json"
 	"errors"
-	"github.com/Icewater1337/fridolin/internal/registry"
 	"log"
 	"os"
 	"path/filepath"
@@ -11,6 +10,9 @@ import (
 	"syscall"
 	"testing"
 	"time"
+
+	"github.com/Icewater1337/fridolin/internal/config"
+	"github.com/Icewater1337/fridolin/internal/registry"
 
 	"github.com/Icewater1337/fridolin/internal/manifest"
 
@@ -61,7 +63,7 @@ func folderBrain(t *testing.T) (*Brain, string) {
 
 // brainASetup sets up what folderBrain runs, and returns its
 // configuration and home.
-func brainASetup(t *testing.T) (*Config, string) {
+func brainASetup(t *testing.T) (*config.Config, string) {
 	t.Helper()
 	home := fsx.Canonical(t.TempDir())
 	t.Setenv("HOME", home)
@@ -240,8 +242,8 @@ func TestLeftOutBrainShowsWhyOnItsPage(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = os.Chmod(dir, 0o700) })
 	approved := m.Normalized()
-	if _, err := tb.cfgs.Update("", func(c *Config) error {
-		c.BrainDirs = append(c.BrainDirs, BrainRef{Path: dir, Approved: &approved})
+	if _, err := tb.cfgs.Update("", func(c *config.Config) error {
+		c.BrainDirs = append(c.BrainDirs, config.BrainRef{Path: dir, Approved: &approved})
 		return nil
 	}); err != nil {
 		t.Fatal(err)
