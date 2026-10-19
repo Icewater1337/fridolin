@@ -1,5 +1,7 @@
 package main
 
+import "github.com/Icewater1337/fridolin/internal/app"
+
 import (
 	"encoding/json"
 	"errors"
@@ -34,7 +36,7 @@ func TestSavedInboundDecoderDiagnostics(t *testing.T) {
 				want = tc.old
 			}
 			var out brain.SavedInbound
-			err := decodeSavedInbound([]byte(tc.input), &out)
+			err := app.DecodeSavedInbound([]byte(tc.input), &out)
 			if err == nil || err.Error() != want {
 				t.Fatalf("diagnostic=%v; want %q", err, want)
 			}
@@ -51,7 +53,7 @@ func TestSavedInboundDecoderDiagnostics(t *testing.T) {
 	}
 	var out brain.SavedInbound
 	raw := json.Unmarshal([]byte(`{"jid":`), &out)
-	got := decodeSavedInbound([]byte(`{"jid":`), &out)
+	got := app.DecodeSavedInbound([]byte(`{"jid":`), &out)
 	var syntax *json.SyntaxError
 	if !errors.As(got, &syntax) || got.Error() != raw.Error() {
 		t.Fatalf("syntax diagnostic changed: %v / %v", got, raw)

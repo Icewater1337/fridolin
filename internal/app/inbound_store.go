@@ -1,4 +1,4 @@
-package main
+package app
 
 import (
 	"context"
@@ -30,22 +30,22 @@ import (
 const (
 	// inboundInterrupted is a message whose run the stop cut short. Only
 	// its chat, brain and ID are kept, for the notice its chat gets.
-	inboundInterrupted = "interrupted"
+	InboundInterrupted = "interrupted"
 	// inboundQueued is a message waiting in a brain's queue. Its lines
 	// are in that brain's history (Inbound.logged), and it keeps them.
-	inboundQueued = "queued"
+	InboundQueued = "queued"
 	// inboundHeld is a message the debouncer held, in no history yet.
-	inboundHeld = "held"
+	InboundHeld = "held"
 	// inboundLate is a message that came in once the stop had begun.
 	// Nothing has looked at it: it is handled as one that comes in then,
 	// commands and the OTP guard included.
-	inboundLate = "late"
+	InboundLate = "late"
 	// inboundChange is an edit or a deletion that came in then.
-	inboundChange = "change"
+	InboundChange = "change"
 )
 
 // keptInbound is a row of the inbound queue.
-type keptInbound struct {
+type KeptInbound struct {
 	ID     int64
 	Kind   string
 	Chat   string
@@ -70,7 +70,7 @@ type storedChange struct {
 
 // keepInbound keeps m, a message of kind inboundQueued, inboundHeld or
 // inboundLate that brain had ("" for none), for the next start.
-func keepInbound(ctx context.Context, s *store.Store, kind, brain string, m brainruntime.Inbound) error {
+func KeepInbound(ctx context.Context, s *store.Store, kind, brain string, m brainruntime.Inbound) error {
 	body, err := json.Marshal(m.Save())
 	if err != nil {
 		return err
@@ -80,44 +80,44 @@ func keepInbound(ctx context.Context, s *store.Store, kind, brain string, m brai
 
 // keepChange keeps c, an edit or a deletion that came in at at, for the
 // next start.
-func keepChange(ctx context.Context, s *store.Store, c chat.Change, at time.Time) error {
+func KeepChange(ctx context.Context, s *store.Store, c chat.Change, at time.Time) error {
 	body, err := json.Marshal(storedChange(c))
 	if err != nil {
 		return err
 	}
-	return s.KeepInbound(ctx, store.InboundRow{Kind: inboundChange, Chat: c.Chat, MsgID: c.Target, Body: string(body), SentAt: at})
+	return s.KeepInbound(ctx, store.InboundRow{Kind: InboundChange, Chat: c.Chat, MsgID: c.Target, Body: string(body), SentAt: at})
 }
 
 // keepInterrupted keeps that the stop cut short brain's run for m.
-func keepInterrupted(ctx context.Context, s *store.Store, brain string, m brainruntime.Inbound) error {
-	return s.KeepInbound(ctx, store.InboundRow{Kind: inboundInterrupted, Chat: m.JID, Brain: brain, MsgID: m.ID, SentAt: m.At})
+func KeepInterrupted(ctx context.Context, s *store.Store, brain string, m brainruntime.Inbound) error {
+	return s.KeepInbound(ctx, store.InboundRow{Kind: InboundInterrupted, Chat: m.JID, Brain: brain, MsgID: m.ID, SentAt: m.At})
 }
 
 // takeInbound decodes rows inside the store transaction, before deletion.
 // Malformed rows are reported and skipped; the remaining rows keep their order.
-func takeInbound(ctx context.Context, s *store.Store) ([]keptInbound, error) {
-	var out []keptInbound
+func TakeInbound(ctx context.Context, s *store.Store) ([]KeptInbound, error) {
+	var out []KeptInbound
 	var bad []error
 	err := s.TakeInbound(ctx, func(row store.InboundRow) {
-		k := keptInbound{ID: row.ID, Kind: row.Kind, Chat: row.Chat, Brain: row.Brain, MsgID: row.MsgID, SentAt: row.SentAt}
+		k := KeptInbound{ID: row.ID, Kind: row.Kind, Chat: row.Chat, Brain: row.Brain, MsgID: row.MsgID, SentAt: row.SentAt}
 		body := row.Body
 
 		switch k.Kind {
-		case inboundQueued, inboundHeld, inboundLate:
+		case InboundQueued, InboundHeld, InboundLate:
 			var m brainruntime.SavedInbound
-			if err := decodeSavedInbound([]byte(body), &m); err != nil {
+			if err := DecodeSavedInbound([]byte(body), &m); err != nil {
 				bad = append(bad, fmt.Errorf("row %d: %w", k.ID, err))
 				return
 			}
 			k.Msg = m.Restore()
-		case inboundChange:
+		case InboundChange:
 			var c storedChange
-			if err := json.Unmarshal([]byte(body), &c); err != nil {
+			if err := decodeStoredChange([]byte(body), &c); err != nil {
 				bad = append(bad, fmt.Errorf("row %d: %w", k.ID, err))
 				return
 			}
 			k.Change = chat.Change(c)
-		case inboundInterrupted:
+		case InboundInterrupted:
 		default:
 			bad = append(bad, fmt.Errorf("row %d: unknown kind %q", k.ID, k.Kind))
 			return
@@ -133,7 +133,7 @@ func takeInbound(ctx context.Context, s *store.Store) ([]keptInbound, error) {
 // decodeSavedInbound preserves the persisted queue's decoder diagnostics when
 // its representation moves to the runtime package. The underlying typed error
 // remains available to callers through errors.As.
-func decodeSavedInbound(body []byte, out *brainruntime.SavedInbound) error {
+func DecodeSavedInbound(body []byte, out *brainruntime.SavedInbound) error {
 	return jsonx.RenameTypeError(json.Unmarshal(body, out), func(t reflect.Type) string {
 		if t == reflect.TypeFor[brainruntime.SavedInbound]() {
 			return "main.storedInbound"
@@ -145,4 +145,14 @@ func decodeSavedInbound(body []byte, out *brainruntime.SavedInbound) error {
 		}
 		return ""
 	})
+}
+
+// decodeStoredChange keeps persisted-row diagnostics stable across the package move.
+func decodeStoredChange(body []byte, out *storedChange) error {
+	return jsonx.RenameTypeError(json.Unmarshal(body, out), func(t reflect.Type) string {
+		if t == reflect.TypeFor[storedChange]() {
+			return "main.storedChange"
+		}
+		return ""
+	}, nil)
 }

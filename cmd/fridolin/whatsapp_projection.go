@@ -1,5 +1,7 @@
 package main
 
+import "github.com/Icewater1337/fridolin/internal/app"
+
 import (
 	"context"
 	"github.com/Icewater1337/fridolin/internal/google"
@@ -21,7 +23,7 @@ type InboundHandler func(context.Context, brain.Inbound)
 func whatsAppSettings(get func() *config.File) func() whatsapp.Settings {
 	return func() whatsapp.Settings {
 		cfg := get()
-		return whatsapp.Settings{Policy: policyOf(cfg), MediaDir: cfg.MediaDir, MaxMediaBytes: cfg.MaxMediaBytes(), MaxChunkSize: cfg.MaxChunkSize}
+		return whatsapp.Settings{Policy: app.AccessPolicy(cfg), MediaDir: cfg.MediaDir, MaxMediaBytes: cfg.MaxMediaBytes(), MaxChunkSize: cfg.MaxChunkSize}
 	}
 }
 
@@ -94,7 +96,7 @@ func whatsAppIdentity() whatsapp.Identity {
 // whatsAppOptions is the production composition shared by construction and
 // integration tests. Startup paths come from Boot; policy and limits stay live.
 func (b *Bridge) whatsAppOptions() whatsapp.Options {
-	opts := whatsAppOptions(func() *config.File { return runtimeConfig(b.cfgs) }, b.store, b.handleInbound, b.recordIgnored)
+	opts := whatsAppOptions(func() *config.File { return app.RuntimeConfig(b.cfgs) }, b.store, b.handleInbound, b.recordIgnored)
 	opts.OnVote = whatsAppVoteHandler(b.recordVote)
 	opts.OnChange = b.handleChange
 	opts.GroupRules = whatsAppGroupRules(b.groupRules)

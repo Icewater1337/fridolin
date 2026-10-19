@@ -6,8 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"github.com/Icewater1337/fridolin/internal/httpapi"
-	"github.com/Icewater1337/fridolin/internal/registry"
-	"github.com/Icewater1337/fridolin/internal/whatsapp"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -19,14 +17,16 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Icewater1337/fridolin/internal/whatsapp"
+
+	"github.com/Icewater1337/fridolin/internal/registry"
+
 	"github.com/Icewater1337/fridolin/internal/activity"
 	"github.com/Icewater1337/fridolin/internal/config"
-
-	"github.com/Icewater1337/fridolin/internal/manifest"
-
 	"github.com/Icewater1337/fridolin/internal/fsx"
 	"github.com/Icewater1337/fridolin/internal/history"
 	"github.com/Icewater1337/fridolin/internal/logx"
+	"github.com/Icewater1337/fridolin/internal/manifest"
 	"github.com/Icewater1337/fridolin/internal/testutil"
 )
 

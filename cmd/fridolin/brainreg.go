@@ -1,5 +1,7 @@
 package main
 
+import "github.com/Icewater1337/fridolin/internal/app"
+
 import (
 	"errors"
 	"fmt"
@@ -92,7 +94,7 @@ func brainDirCheck(cs *config.Store) func(string, string, *config.File, string) 
 			return err
 		}
 		if cs != nil {
-			return checkBrainDir(dir, configured, runtimeConfig(cs), cs.Boot().Home)
+			return checkBrainDir(dir, configured, app.RuntimeConfig(cs), cs.Boot().Home)
 		}
 		return nil
 	}

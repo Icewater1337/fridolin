@@ -1,8 +1,9 @@
 package main
 
+import "github.com/Icewater1337/fridolin/internal/app"
+
 import (
 	"context"
-	"errors"
 	"fmt"
 	sitesvc "github.com/Icewater1337/fridolin/internal/site"
 	"log"
@@ -78,14 +79,11 @@ type Bridge struct {
 	// one.
 	lids func() wastore.LIDStore
 
-	httpSrv *http.Server
-	// loops are the goroutines Start leaves running past its return,
-	// the WhatsApp connect loop: Stop waits for them.
-	loops sync.WaitGroup
+	supervisor app.Supervisor
 	// stopOnce makes Stop run once, whoever calls it how often.
 	stopOnce sync.Once
 	// intake is what comes in from WhatsApp, which Stop closes first.
-	intake intake
+	intake app.IntakeGate
 
 	// registry owns the brain workflows, including add serialization.
 	registry *registry.Registry
@@ -99,7 +97,7 @@ type BridgeOptions struct {
 	NoWhatsApp bool
 	Logs       *logx.Ring
 	// Restart asks whoever runs the bridge to stop it and run it again
-	// (POST /api/restart): runCmd ends its context with errRestart. Nil
+	// (POST /api/restart): runCmd ends its context with app.ErrRestart. Nil
 	// leaves the bridge unable to restart itself.
 	Restart func()
 }
@@ -107,7 +105,7 @@ type BridgeOptions struct {
 // NewBridge creates and wires up all components. It holds the data
 // directory's instance lock until Stop.
 func NewBridge(cfgs *config.Store, opts BridgeOptions) (_ *Bridge, err error) {
-	cfg := runtimeConfig(cfgs)
+	cfg := app.RuntimeConfig(cfgs)
 	// Before the lock, which is a file in the data dir.
 	if err := cfgs.Boot().EnsureDirs(); err != nil {
 		return nil, err
@@ -272,50 +270,15 @@ var listenHTTP = net.Listen
 // failing to bind is fatal: an already-running bridge holds it, and two
 // bridges must never share one WhatsApp session.
 func (b *Bridge) Start(ctx context.Context) error {
-	cfg := runtimeConfig(b.cfgs)
-	run, fail := context.WithCancelCause(ctx)
-	defer fail(nil)
-	if b.listen != "" {
-		ln, err := listenHTTP("tcp", b.listen)
-		if err != nil {
-			return fmt.Errorf("listening on %s (is another bridge running?): %w", b.listen, err)
-		}
-		b.httpSrv = httpapi.NewServer(b.newHTTPHandler(b.listen))
-		// Requests end with the bridge: one that waits for you or for
-		// Google (a folder picker, a sign-in) gives up once the bridge
-		// stops, rather than hold up Stop.
-		b.httpSrv.BaseContext = func(net.Listener) context.Context { return run }
-		go func() {
-			// Serve ends with ErrServerClosed when Stop shuts it down. Any
-			// other end leaves /send and the dashboard dead while the
-			// bridge would run on and look healthy, so it stops instead.
-			if err := b.httpSrv.Serve(ln); !errors.Is(err, http.ErrServerClosed) {
-				fail(fmt.Errorf("HTTP server: %w", err))
-			}
-		}()
-		if !cfg.Dashboard.Disabled {
-			log.Printf("Dashboard: http://%s/  (open it with: fridolin open)", b.listen)
-		}
-	}
-
-	// Before WhatsApp connects: what the last stop kept goes to the
-	// brains ahead of what comes in now.
-	b.resume(run)
-	b.loops.Go(func() { b.connectLoop(run) })
-	// Waited for: it queues alerts in the outbox, which Stop closes.
-	var wg sync.WaitGroup
-	wg.Go(func() { b.watchRequiredFiles(run, requiredFilesEvery) })
-	b.backup.Start(run)
-	b.plaud.Start(run)
-	b.site.Start(run)
-
-	log.Println("Bridge started. Waiting for messages…")
-	<-run.Done()
-	wg.Wait()
-	if ctx.Err() == nil {
-		return context.Cause(run)
-	}
-	return nil
+	cfg := app.RuntimeConfig(b.cfgs)
+	return b.supervisor.Run(ctx, app.RunOptions{
+		Address: b.listen, Listen: listenHTTP,
+		Handler:          func() http.Handler { return b.newHTTPHandler(b.listen) },
+		DashboardEnabled: !cfg.Dashboard.Disabled,
+		Resume:           b.resume, Connect: b.connectLoop,
+		Watch:      func(ctx context.Context) { b.watchRequiredFiles(ctx, requiredFilesEvery) },
+		Background: []func(context.Context){b.backup.Start, b.plaud.Start, b.site.Start},
+	})
 }
 
 // connectLoop retains the bridge's ownership of the connection goroutine.
@@ -331,7 +294,7 @@ func (b *Bridge) stop() {
 	// while the brains finish and WhatsApp stays connected for their
 	// replies, and nothing that came in before is still on its way to the
 	// debouncer or a brain.
-	b.intake.close()
+	b.intake.Close()
 	b.stopHTTP()
 	b.backup.Stop()
 	b.plaud.Stop()
@@ -341,7 +304,7 @@ func (b *Bridge) stop() {
 	// again. What the debouncer holds first, then what the brains have
 	// waiting, at once, before their runs in flight get their grace.
 	for _, m := range b.deb.Drain() {
-		b.keep(inboundHeld, "", m)
+		b.keep(app.InboundHeld, "", m)
 	}
 	b.brainMgr.Stop()
 	// After the brains, whose last runs may still reply; what does not go
@@ -351,10 +314,10 @@ func (b *Bridge) stop() {
 	b.wa.Disconnect()
 	// The connect loop ends with Start's context, unless it is connecting
 	// still, which Disconnect cuts short.
-	if !waitWithin(&b.loops, connectStopWait) {
+	if !b.supervisor.WaitConnections(connectStopWait) {
 		log.Printf("WhatsApp: still connecting %v after the disconnect; stopping without waiting for it", connectStopWait)
 	}
-	b.intake.end()
+	b.intake.End()
 	if err := b.store.Close(); err != nil {
 		log.Printf("closing store: %v", err)
 	}
@@ -366,7 +329,7 @@ func (b *Bridge) stop() {
 // ran, for the next start (BrainHooks.Waiting).
 func (b *Bridge) keepWaiting(br *brainruntime.Brain, ms []brainruntime.Inbound) {
 	for _, m := range ms {
-		b.keep(inboundQueued, br.ID(), m)
+		b.keep(app.InboundQueued, br.ID(), m)
 	}
 }
 
@@ -380,7 +343,7 @@ func (b *Bridge) keep(kind, brain string, m brainruntime.Inbound) {
 		brainruntime.Dropped([]brainruntime.Inbound{m})
 		return
 	}
-	if err := keepInbound(context.Background(), b.store, kind, brain, m); err != nil {
+	if err := app.KeepInbound(context.Background(), b.store, kind, brain, m); err != nil {
 		log.Printf("%v; it is lost", err)
 	}
 }
@@ -393,7 +356,7 @@ func (b *Bridge) keepInterrupted(br *brainruntime.Brain, m brainruntime.Inbound)
 	if m.Source != chat.SourceWhatsApp || m.Silent {
 		return
 	}
-	if err := keepInterrupted(context.Background(), b.store, br.ID(), m); err != nil {
+	if err := app.KeepInterrupted(context.Background(), b.store, br.ID(), m); err != nil {
 		log.Printf("brain %s: %v", br.ID(), err)
 	}
 }
@@ -413,7 +376,7 @@ func (b *Bridge) resume(ctx context.Context) {
 	// that begins meanwhile keeps what is still waiting again, but a
 	// notice it cut off would be lost.
 	ctx = context.WithoutCancel(ctx)
-	rows, err := takeInbound(ctx, b.store)
+	rows, err := app.TakeInbound(ctx, b.store)
 	if err != nil {
 		log.Printf("taking up what the last stop kept: %v", err)
 	}
@@ -425,25 +388,25 @@ func (b *Bridge) resume(ctx context.Context) {
 		kinds[r.Kind]++
 	}
 	log.Printf("Taking up what the last stop kept: %d messages, %d edits or deletions, %d runs it cut short",
-		len(rows)-kinds[inboundChange]-kinds[inboundInterrupted], kinds[inboundChange], kinds[inboundInterrupted])
+		len(rows)-kinds[app.InboundChange]-kinds[app.InboundInterrupted], kinds[app.InboundChange], kinds[app.InboundInterrupted])
 	now := time.Now()
 	for _, r := range rows {
-		if age := now.Sub(r.SentAt); age > outboundmsg.OutboxTTL && r.Kind != inboundChange {
+		if age := now.Sub(r.SentAt); age > outboundmsg.OutboxTTL && r.Kind != app.InboundChange {
 			log.Printf("dropping a message for %s that the last stop kept: it came in %v ago, more than %v", r.Chat, age.Round(time.Minute), outboundmsg.OutboxTTL)
 			continue
 		}
 		switch r.Kind {
-		case inboundInterrupted:
+		case app.InboundInterrupted:
 			if err := b.outbox.Text(ctx, r.Chat, outboundmsg.RestartedNotice, b.cfgs.Get().MaxChunkSize); err != nil {
 				log.Printf("brain %s: telling %s its run was cut short: %v", r.Brain, r.Chat, err)
 			}
-		case inboundQueued, inboundHeld:
+		case app.InboundQueued, app.InboundHeld:
 			if _, _, _, err := b.brainMgr.Submit(r.Msg); err != nil {
 				log.Printf("dropping a message for %s that the last stop kept: %v", r.Chat, err)
 			}
-		case inboundLate:
+		case app.InboundLate:
 			b.handleInbound(ctx, r.Msg)
-		case inboundChange:
+		case app.InboundChange:
 			b.handleChange(r.Change)
 		}
 	}
@@ -458,98 +421,14 @@ const connectStopWait = 5 * time.Second
 
 // stopHTTP stops the HTTP server, if Start began one: it takes no more
 // requests, and those in flight get httpStopWait to end.
-func (b *Bridge) stopHTTP() {
-	if b.httpSrv == nil {
-		return
-	}
-	ctx, cancel := context.WithTimeout(context.Background(), httpStopWait)
-	defer cancel()
-	if err := b.httpSrv.Shutdown(ctx); err != nil {
-		// Shutdown leaves the connections it did not see end open: Close
-		// ends them, and the handlers still running find out on their
-		// next write.
-		log.Printf("HTTP server: requests still running %v after the stop began (%v); cutting them off", httpStopWait, err)
-		_ = b.httpSrv.Close()
-	}
-}
-
-// waitWithin waits for wg for at most d, and reports whether it ended.
-func waitWithin(wg *sync.WaitGroup, d time.Duration) bool {
-	done := make(chan struct{})
-	go func() {
-		wg.Wait()
-		close(done)
-	}()
-	t := time.NewTimer(d)
-	defer t.Stop()
-	select {
-	case <-done:
-		return true
-	case <-t.C:
-		return false
-	}
-}
-
-// intake counts the calls of handleInbound and handleChange at work.
-// Stop closes it before anything else stops: from then on what comes in
-// is kept for the next start instead (keepLate), and close waits for the
-// calls at work, which may still hand a message to the debouncer or a
-// brain. What comes in once the store is about to close (end) is lost.
-type intake struct {
-	mu     sync.Mutex
-	closed bool
-	ended  bool
-	busy   sync.WaitGroup
-}
-
-// enter reports whether a call may act on what came in, and then counts
-// it until leave.
-func (in *intake) enter() bool {
-	in.mu.Lock()
-	defer in.mu.Unlock()
-	if in.closed {
-		return false
-	}
-	in.busy.Add(1)
-	return true
-}
-
-func (in *intake) leave() { in.busy.Done() }
-
-// close makes what comes in from now on wait for the next start, and
-// waits for the calls acting on what came in before.
-func (in *intake) close() {
-	in.mu.Lock()
-	in.closed = true
-	in.mu.Unlock()
-	in.busy.Wait()
-}
-
-// keep runs fn, which keeps what came in once intake closed, unless the
-// store is closing (end), and reports whether it did.
-func (in *intake) keep(fn func()) bool {
-	in.mu.Lock()
-	defer in.mu.Unlock()
-	if in.ended {
-		return false
-	}
-	fn()
-	return true
-}
-
-// end is when the store closes: what comes in after is lost.
-func (in *intake) end() {
-	in.mu.Lock()
-	in.ended = true
-	in.mu.Unlock()
-}
+func (b *Bridge) stopHTTP() { b.supervisor.StopHTTP(httpStopWait) }
 
 // keepLate keeps m, which came in once the bridge had begun to stop, for
 // the next start, which handles it as if it came in then: nothing has
 // looked at it yet, so no command ran, and the OTP guard is still to see
 // it (see resume).
 func (b *Bridge) keepLate(m brainruntime.Inbound) {
-	if !b.intake.keep(func() { b.keep(inboundLate, "", m) }) {
+	if !b.intake.Keep(func() { b.keep(app.InboundLate, "", m) }) {
 		log.Printf("dropping a message for %s: it came in as the bridge closed its store", m.JID)
 	}
 }
@@ -560,9 +439,9 @@ func (b *Bridge) keepLate(m brainruntime.Inbound) {
 // the bridge stops, it is kept for the next start instead, as messages
 // are (see intake).
 func (b *Bridge) handleChange(c chat.Change) {
-	if !b.intake.enter() {
-		kept := b.intake.keep(func() {
-			if err := keepChange(context.Background(), b.store, c, time.Now()); err != nil {
+	if !b.intake.Enter() {
+		kept := b.intake.Keep(func() {
+			if err := app.KeepChange(context.Background(), b.store, c, time.Now()); err != nil {
 				log.Printf("%v; it is lost", err)
 			}
 		})
@@ -571,7 +450,7 @@ func (b *Bridge) handleChange(c chat.Change) {
 		}
 		return
 	}
-	defer b.intake.leave()
+	defer b.intake.Leave()
 	br := b.brainMgr.BrainFor(c.Chat, chat.IsGroupJID(c.Chat))
 	// An edit to a one-time code is caught like the code itself
 	// (handleInbound), before anything else sees it: a sender who corrects
@@ -630,11 +509,11 @@ func (b *Bridge) recordIgnored(kind, jid, name, sender, pushName string) {
 // bridge stops, a message is kept for the next start instead: no command
 // runs and no notice goes out (see intake).
 func (b *Bridge) handleInbound(ctx context.Context, m brainruntime.Inbound) {
-	if !b.intake.enter() {
+	if !b.intake.Enter() {
 		b.keepLate(m)
 		return
 	}
-	defer b.intake.leave()
+	defer b.intake.Leave()
 	b.pipeline.Handle(ctx, m)
 }
 
@@ -712,7 +591,7 @@ func groupRulesFor(r manifest.Routing) groupRules {
 // the latest configuration and never on one an update has replaced.
 func (b *Bridge) configChanged(prev, next *config.File) {
 	b.applyMu.Lock()
-	err := b.brainMgr.Apply(runtimeConfig(b.cfgs))
+	err := b.brainMgr.Apply(app.RuntimeConfig(b.cfgs))
 	b.applyMu.Unlock()
 	if err != nil {
 		log.Printf("applying configuration: %v", err)

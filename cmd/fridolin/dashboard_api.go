@@ -1,5 +1,7 @@
 package main
 
+import "github.com/Icewater1337/fridolin/internal/app"
+
 import (
 	"bytes"
 	"context"
@@ -32,7 +34,7 @@ import (
 // ── status ───────────────────────────────────────────────────────────────
 
 func (b *Bridge) statusSnapshot(ctx context.Context) httpapi.StatusResponse {
-	cfg := runtimeConfig(b.cfgs)
+	cfg := app.RuntimeConfig(b.cfgs)
 	wa := b.wa.State()
 	resp := httpapi.StatusResponse{
 		Version:       version.String(),
@@ -319,7 +321,7 @@ func (b *Bridge) submitDevInbound(req httpapi.DevInboundRequest) string {
 			log.Printf("Dev group message in %s by %s: ignored (not admitted by group_members)", m.JID, who.masked())
 			return "sender not admitted by group_members"
 		}
-		policy := policyOf(cfg)
+		policy := app.AccessPolicy(cfg)
 		policy.Files = b.groupRules(m.JID).files
 		who := devGroupSender(m.Sender)
 		decision := access.Decide(policy, chat.Envelope{Chat: m.JID, Sender: who.Number, SenderResolved: who.Resolved, Group: true, Text: m.Text, HasFile: len(m.Media) > 0})

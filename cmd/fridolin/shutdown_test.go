@@ -1,5 +1,7 @@
 package main
 
+import "github.com/Icewater1337/fridolin/internal/app"
+
 import (
 	"bufio"
 	"context"
@@ -138,7 +140,7 @@ func TestStopEndsTheRequestsInFlight(t *testing.T) {
 	if err := <-done; err != nil {
 		t.Fatalf("Start: %v", err)
 	}
-	if tb.httpSrv.BaseContext == nil || tb.httpSrv.BaseContext(nil).Err() == nil {
+	if tb.supervisor.HTTPContext() == nil || tb.supervisor.HTTPContext().Err() == nil {
 		t.Error("the requests' context goes on after the bridge began to stop")
 	}
 	stopped := time.Now()
@@ -208,7 +210,7 @@ func TestServe(t *testing.T) {
 			}
 			ctx, cancel := context.WithCancelCause(context.Background())
 			defer cancel(nil)
-			tb.restart = func() { cancel(errRestart) }
+			tb.restart = func() { cancel(app.ErrRestart) }
 			code := make(chan int, 1)
 			go func() { code <- serve(ctx, tb.Bridge, func() bool { return tc.signalled }) }()
 			tc.end(t, tb, cancel)
@@ -543,17 +545,17 @@ func TestResumeAppliesChangesBeforeStartingQueuedRuns(t *testing.T) {
 		return nil, func() {}
 	}})
 	m := brain.Inbound{Inbound: chat.Inbound{JID: harnessDM, Sender: "15551234567", Text: "must not run", Source: chat.SourceWhatsApp, At: time.Now(), ID: "3EB0DELETED"}}
-	if err := keepInbound(t.Context(), tb.store, inboundQueued, "a", m); err != nil {
+	if err := app.KeepInbound(t.Context(), tb.store, app.InboundQueued, "a", m); err != nil {
 		t.Fatal(err)
 	}
 	for i := range 128 {
 		help := m
 		help.Text, help.ID = "!help", fmt.Sprintf("3EB0HELP%d", i)
-		if err := keepInbound(t.Context(), tb.store, inboundLate, "", help); err != nil {
+		if err := app.KeepInbound(t.Context(), tb.store, app.InboundLate, "", help); err != nil {
 			t.Fatal(err)
 		}
 	}
-	if err := keepChange(t.Context(), tb.store, chat.Change{Kind: chat.ChangeRevoke, Chat: m.JID, Sender: m.Sender, Target: m.ID}, time.Now()); err != nil {
+	if err := app.KeepChange(t.Context(), tb.store, chat.Change{Kind: chat.ChangeRevoke, Chat: m.JID, Sender: m.Sender, Target: m.ID}, time.Now()); err != nil {
 		t.Fatal(err)
 	}
 	tb.resume(t.Context())
@@ -605,7 +607,7 @@ func TestShutdownKeepsWhatItHolds(t *testing.T) {
 func TestResumeOutlivesItsContext(t *testing.T) {
 	tb := newTestBridge(t, "")
 	m := brain.Inbound{Inbound: chat.Inbound{JID: harnessDM, Sender: "15551234567", Text: "summarise", Source: chat.SourceWhatsApp, At: time.Now(), ID: "3EB0CUT"}}
-	if err := keepInterrupted(t.Context(), tb.store, "main", m); err != nil {
+	if err := app.KeepInterrupted(t.Context(), tb.store, "main", m); err != nil {
 		t.Fatal(err)
 	}
 	ctx, cancel := context.WithCancel(context.Background())
@@ -692,9 +694,7 @@ func TestShutdownKeepsWhatComesInDuringTheStop(t *testing.T) {
 		close(stopped)
 	}()
 	h.WaitFor("the stop to begin", func() bool {
-		b.intake.mu.Lock()
-		defer b.intake.mu.Unlock()
-		return b.intake.closed
+		return b.intake.Closed()
 	})
 	h.WhatsApp(dmEvent("3EB0LATE", textMsg("late")))
 	h.WhatsApp(dmEvent("3EB0HELP", textMsg("!help")))

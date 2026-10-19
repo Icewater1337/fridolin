@@ -1,0 +1,87 @@
+package app
+
+import (
+	"context"
+	"encoding/json"
+	"github.com/Icewater1337/fridolin/internal/access"
+	"github.com/Icewater1337/fridolin/internal/backup"
+	"github.com/Icewater1337/fridolin/internal/brain"
+	"github.com/Icewater1337/fridolin/internal/config"
+	"slices"
+)
+
+// AccessPolicy is the application's read-only projection from a config snapshot.
+// The policy never retains or rereads the config store.
+func AccessPolicy(cfg *config.File) access.Policy {
+	return access.Policy{AllowedNumbers: cfg.AllowedNumbers, AllowAnyDM: cfg.AllowsAnyDM(), AllowedGroups: cfg.AllowedGroups, GroupMembers: cfg.GroupMembers, Triggers: cfg.Triggers}
+}
+
+func BackupSettings(cfg *config.File) backup.Settings {
+	bc := cfg.Backup
+	s := backup.Settings{Enabled: bc.Enabled, Remote: bc.Remote, Root: bc.Root, DailyAt: bc.DailyAt, RclonePath: bc.RclonePath,
+		KeepVersionsDays: bc.KeepVersions(), IncludeBridgeConfig: bc.IncludeBridge(), IncludeSecretFiles: bc.IncludeSecretFiles}
+	for _, ref := range cfg.BrainDirs {
+		if ref.Approved != nil {
+			s.ConfiguredIDs = append(s.ConfiguredIDs, ref.Approved.ID)
+		}
+	}
+	return s
+}
+
+func BackupTarget(br *brain.Brain, notify func(context.Context, *brain.Brain, string) error) backup.Target {
+	t := backup.Target{ID: br.ID(), Dir: br.Dir(), WaitIdle: br.WaitIdle, Settings: func() backup.TargetSettings {
+		m := br.Manifest()
+		return backup.TargetSettings{Name: m.Name, Enabled: m.Backup.Enabled, Exclude: slices.Clone(m.Backup.Exclude)}
+	}}
+	if notify != nil {
+		t.Notify = func(ctx context.Context, text string) error { return notify(ctx, br, text) }
+	}
+	return t
+}
+
+func BackupTargets(brains []*brain.Brain, notify func(context.Context, *brain.Brain, string) error) []backup.Target {
+	targets := make([]backup.Target, 0, len(brains))
+	for _, br := range brains {
+		targets = append(targets, BackupTarget(br, notify))
+	}
+	return targets
+}
+
+func BackupFiles(cfgs *config.Store) (backup.BridgeFiles, error) {
+	file := cfgs.FileCopy()
+	data, err := json.MarshalIndent(file, "", "  ")
+	if err != nil {
+		return backup.BridgeFiles{}, err
+	}
+	files := backup.BridgeFiles{Config: data}
+	for _, ref := range file.BrainDirs {
+		if ref.Approved == nil {
+			continue
+		}
+		md, err := json.MarshalIndent(ref.Approved, "", "  ")
+		files.Manifests = append(files.Manifests, backup.ManifestFile{ID: ref.Approved.ID, Data: md, Err: err})
+	}
+	return files, nil
+}
+
+// CredentialsDir is where per-brain credential files live.
+func CredentialsDir(cfg *config.File) string {
+	if cfg.Sandbox.CredentialsDir != "" {
+		return cfg.Sandbox.CredentialsDir
+	}
+	return cfg.DataDir
+}
+
+// RuntimeConfig combines live configuration with the process startup values.
+// Get/Snapshot retain saved next-start values for the API. Only this copied
+// value pins startup settings; slices/maps retain the snapshot's read-only rule.
+func RuntimeConfig(cs *config.Store) *config.File {
+	live := cs.Get()
+	boot := cs.Boot()
+	c := *live
+	c.HTTPListen, c.DataDir, c.DBPath, c.MediaDir, c.LogLevel = boot.HTTPListen, boot.DataDir, boot.DBPath, boot.MediaDir, boot.LogLevel
+	c.Dashboard.Disabled = boot.DashboardDisabled
+	// Turning protection on applies immediately; turning it off waits for restart.
+	c.Dashboard.RequireToken = new(boot.DashboardRequireToken || live.DashboardRequiresToken())
+	return &c
+}

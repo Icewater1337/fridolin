@@ -1,5 +1,7 @@
 package main
 
+import "github.com/Icewater1337/fridolin/internal/app"
+
 import (
 	"context"
 	"encoding/json"
@@ -14,14 +16,13 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Icewater1337/fridolin/internal/chat"
-	"github.com/Icewater1337/fridolin/internal/whatsapp"
-
 	"github.com/Icewater1337/fridolin/internal/brain"
+	"github.com/Icewater1337/fridolin/internal/chat"
 	"github.com/Icewater1337/fridolin/internal/claudecli"
 	"github.com/Icewater1337/fridolin/internal/config"
 	"github.com/Icewater1337/fridolin/internal/manifest"
 	"github.com/Icewater1337/fridolin/internal/otp"
+	"github.com/Icewater1337/fridolin/internal/whatsapp"
 	"go.mau.fi/whatsmeow/proto/waE2E"
 	"google.golang.org/protobuf/proto"
 )
@@ -262,7 +263,7 @@ func captureBootRunSettings(t *testing.T, tb *testBridge) func() brain.Settings 
 		Input: commandBrainInputRules(), ClaimMedia: claimBrainMedia,
 		ShutdownGrace: func() time.Duration { return 0 },
 	})
-	if err := mgr.Apply(runtimeConfig(tb.cfgs)); err != nil {
+	if err := mgr.Apply(app.RuntimeConfig(tb.cfgs)); err != nil {
 		t.Fatal(err)
 	}
 	return func() brain.Settings {

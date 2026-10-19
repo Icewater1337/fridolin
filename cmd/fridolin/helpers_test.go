@@ -1,5 +1,7 @@
 package main
 
+import "github.com/Icewater1337/fridolin/internal/app"
+
 import (
 	"context"
 	"encoding/json"
@@ -50,7 +52,7 @@ func TestRestartInATestFailsTheRun(t *testing.T) {
 	if os.Getenv(child) == "1" {
 		tb := newTestBridge(t, `, "http_listen": "127.0.0.1:0"`)
 		ctx, cancel := context.WithCancelCause(context.Background())
-		tb.restart = func() { cancel(errRestart) }
+		tb.restart = func() { cancel(app.ErrRestart) }
 		go serve(ctx, tb.Bridge, func() bool { return false })
 		for _, c := range []struct {
 			name   string

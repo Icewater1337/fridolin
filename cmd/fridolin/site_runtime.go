@@ -1,5 +1,7 @@
 package main
 
+import "github.com/Icewater1337/fridolin/internal/app"
+
 import (
 	"context"
 	"errors"
@@ -31,7 +33,7 @@ func (b *Bridge) siteBuilderHooks() sitesvc.SiteBuilderHooks {
 			if sp == nil || !sp.Enabled() {
 				return bin, args, nil, nil
 			}
-			cfg := runtimeConfig(b.cfgs)
+			cfg := app.RuntimeConfig(b.cfgs)
 			env, err := prepareBrainState(absPath(cfg.DataDir), cfg.MediaDir, brainID, cfg.InheritClaudeUserConfig)
 			if err != nil {
 				return "", nil, nil, err
@@ -52,7 +54,7 @@ func (b *Bridge) siteBuilderHooks() sitesvc.SiteBuilderHooks {
 			if sp := b.brainMgr.profiler; sp != nil {
 				l.Deny, l.NoWrite = sp.sitePaths()
 			}
-			if cfg := runtimeConfig(b.cfgs); cfg.HTTPEnabled() {
+			if cfg := app.RuntimeConfig(b.cfgs); cfg.HTTPEnabled() {
 				if _, port, err := net.SplitHostPort(cfg.HTTPListen); err == nil {
 					l.BridgePort = port
 				}
@@ -65,7 +67,7 @@ func (b *Bridge) siteBuilderHooks() sitesvc.SiteBuilderHooks {
 		// As /ingest: the brain's reply chat gets the answer, and the brain
 		// must take the files now (its queue is not full).
 		Ingest: func(brainID, sender, text string, files []string) error {
-			cfg := runtimeConfig(b.cfgs)
+			cfg := app.RuntimeConfig(b.cfgs)
 			if !cfg.Ingest.Enabled {
 				return errors.New("ingest is turned off (ingest.enabled)")
 			}
@@ -89,7 +91,7 @@ func (b *Bridge) runBrainSearch(ctx context.Context, brainID, prompt string, out
 	if br == nil {
 		return fmt.Errorf("no brain %q", brainID)
 	}
-	cfg := runtimeConfig(b.cfgs)
+	cfg := app.RuntimeConfig(b.cfgs)
 	// Only the brain folder's own setup, as for a brain's runs, and tools
 	// that only read.
 	args := claudecli.ArgList(true, excludeInstructionsAbove(br.Dir()), "--tools", "Read,Grep,Glob")

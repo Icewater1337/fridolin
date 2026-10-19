@@ -1,5 +1,7 @@
 package main
 
+import "github.com/Icewater1337/fridolin/internal/app"
+
 import (
 	"bytes"
 	"context"
@@ -280,7 +282,7 @@ func runCmd(args []string) int {
 	defer cancel(nil)
 	// NewBridge takes the data dir's instance lock, so dev mode with the live
 	// data dir is refused next to the running bridge too.
-	bridge, err := NewBridge(cfgs, BridgeOptions{NoWhatsApp: opts.noWhatsApp, Logs: ring, Restart: func() { cancel(errRestart) }})
+	bridge, err := NewBridge(cfgs, BridgeOptions{NoWhatsApp: opts.noWhatsApp, Logs: ring, Restart: func() { cancel(app.ErrRestart) }})
 	if err != nil {
 		log.Printf("creating bridge: %v", err)
 		return 1
@@ -308,11 +310,6 @@ func runCmd(args []string) int {
 	return serve(ctx, bridge, signalled)
 }
 
-// errRestart is the cause runCmd's context ends with when the dashboard
-// asks for a restart (apiRestart): serve stops the bridge, then runs it
-// again in place.
-var errRestart = errors.New("restart requested")
-
 // execSelf replaces this process with the program at argv0, a variable so
 // that a test can see a restart without one.
 var execSelf = platform.Exec
@@ -332,7 +329,7 @@ func serve(ctx context.Context, b *Bridge, signalled func() bool) int {
 	switch {
 	case err != nil:
 		return 1
-	case !errors.Is(context.Cause(ctx), errRestart):
+	case !errors.Is(context.Cause(ctx), app.ErrRestart):
 		return 0
 	case signalled():
 		log.Printf("A signal came during the restart: staying stopped")

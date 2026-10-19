@@ -4,12 +4,13 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"github.com/Icewater1337/fridolin/internal/store"
 	"log"
 	"math"
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/Icewater1337/fridolin/internal/store"
 )
 
 // Outbox delivers brains' replies. WhatsApp does not queue a message

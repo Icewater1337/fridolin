@@ -3,10 +3,9 @@ package whatsapp
 import (
 	"context"
 	"errors"
+	wastore "go.mau.fi/whatsmeow/store"
 	"log"
 	"time"
-
-	wastore "go.mau.fi/whatsmeow/store"
 )
 
 // Run connects the client, retrying until connected, permanently refused,

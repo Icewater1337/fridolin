@@ -1,5 +1,7 @@
 package main
 
+import "github.com/Icewater1337/fridolin/internal/app"
+
 import (
 	"context"
 	"errors"
@@ -26,7 +28,7 @@ func plaudOptions(cfgs *config.Store, brains *BrainManager,
 	boot := cfgs.Boot()
 	return plaud.Options{
 		PlaudDir: boot.PlaudDir(), Home: boot.Home,
-		Settings:   func() *plaud.Snapshot { return plaudSnapshotOf(runtimeConfig(cfgs)) },
+		Settings:   func() *plaud.Snapshot { return plaudSnapshotOf(app.RuntimeConfig(cfgs)) },
 		Target:     func(id string) *plaud.Target { return plaudTargetOf(brains, id, submit) },
 		HeldTarget: func() string { return brains.HeldFor("", false) },
 		Notify:     notify,

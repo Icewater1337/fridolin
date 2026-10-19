@@ -1,5 +1,7 @@
 package main
 
+import "github.com/Icewater1337/fridolin/internal/app"
+
 import (
 	"errors"
 	"github.com/Icewater1337/fridolin/internal/fsx"
@@ -31,7 +33,7 @@ func (b *Bridge) restoreTarget(p string) (string, error) {
 		}
 	}
 	if len(problems) == 0 {
-		if err := checkRestoreTarget(target, runtimeConfig(b.cfgs), home); err != nil {
+		if err := checkRestoreTarget(target, app.RuntimeConfig(b.cfgs), home); err != nil {
 			problems = append(problems, "the restore folder "+err.Error()+" — pick a new folder")
 		}
 	}

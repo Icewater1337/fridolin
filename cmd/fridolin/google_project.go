@@ -1,5 +1,7 @@
 package main
 
+import "github.com/Icewater1337/fridolin/internal/app"
+
 import (
 	"github.com/Icewater1337/fridolin/internal/config"
 	"github.com/Icewater1337/fridolin/internal/google"
@@ -13,7 +15,7 @@ func googleOptionsFor(cfgs *config.Store) google.Options {
 	return google.Options{
 		ClientPath:  boot.GoogleClientPath(),
 		RedirectURI: "http://" + boot.HTTPListen + "/",
-		CredsDir:    func() string { return credentialsDirOf(runtimeConfig(cfgs)) },
+		CredsDir:    func() string { return app.CredentialsDir(app.RuntimeConfig(cfgs)) },
 		Configured: func(brainID string) bool {
 			for _, ref := range cfgs.Get().BrainDirs {
 				if ref.Approved != nil && ref.Approved.ID == brainID {

@@ -1452,3 +1452,7 @@ for API compatibility and the next start. The temporary command-only
 `runtimeConfig` projection overlays Boot on a live snapshot for consumers
 that still accept Config; it preserves snapshot ownership and will give way
 to owned runtime settings at their package boundaries.
+
+### Application composition
+
+`internal/app` owns the projections from configuration snapshots into access and backup service inputs, including startup-path pinning and credential-directory selection. Its backup projection tests exercise the public application boundary. Command adapters call these projections while the remaining application lifecycle moves out of the CLI.

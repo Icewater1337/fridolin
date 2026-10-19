@@ -1,5 +1,7 @@
 package main
 
+import "github.com/Icewater1337/fridolin/internal/app"
+
 import (
 	"github.com/Icewater1337/fridolin/internal/brain"
 	"github.com/Icewater1337/fridolin/internal/chat"
@@ -25,7 +27,7 @@ func brainGlobalsOf(cfg *config.File) brain.Globals {
 			Dangerously:     cfg.DangerouslySkipPermissions, InheritUser: cfg.InheritClaudeUserConfig,
 			OTPGuard: cfg.OTPGuard, OTPMarkers: append([]string(nil), cfg.OTPMarkers...),
 			Viewer: cfg.Viewer, RunTimeout: runTimeout(cfg), QueueMode: cfg.Queue.Mode, MaxPending: cfg.Queue.MaxPending,
-			CredsDir: credentialsDirOf(cfg), MediaDir: cfg.MediaDir,
+			CredsDir: app.CredentialsDir(cfg), MediaDir: cfg.MediaDir,
 			EnvPassthrough: append([]string(nil), cfg.ChildEnvPassthrough...), ToolsDir: ownLayout().Tools,
 			// Absolute: brains run in their own folder, where a relative data_dir
 			// would name another one. R6 supplies these startup paths through Boot.
@@ -40,14 +42,6 @@ func brainGlobalsOf(cfg *config.File) brain.Globals {
 // variables.
 func dataEnv(s *brain.Settings) []string {
 	return []string{"BRIDGE_DATA_DIR=" + s.DataDir, "BRIDGE_DB_PATH=" + s.DBPath}
-}
-
-// credentialsDirOf is where per-brain credential files live.
-func credentialsDirOf(cfg *config.File) string {
-	if cfg.Sandbox.CredentialsDir != "" {
-		return cfg.Sandbox.CredentialsDir
-	}
-	return cfg.DataDir
 }
 
 // startViewer is NewTmuxViewer, a variable so tests need no tmux.
