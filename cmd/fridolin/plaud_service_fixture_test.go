@@ -57,7 +57,10 @@ func (n *plaudServiceNotices) Outbox() []plaudServiceNotice {
 func plaudService(t *testing.T, extra string) (*plaudServiceFixture, *testutil.PlaudFixture) {
 	t.Helper()
 	fp := testutil.NewPlaudFixture(t)
-	root := t.TempDir()
+	root, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
 	f := &plaudServiceFixture{home: filepath.Join(root, "home"), dev: &plaudServiceNotices{}}
 	settings := PlaudSettings{Enabled: true, CLIPath: os.Args[0]}
 	if err := json.Unmarshal([]byte(`{"enabled":true`+extra+`}`), &settings); err != nil {
@@ -266,4 +269,16 @@ func (f *plaudServiceFixture) updateSettings(change func(*PlaudSnapshot) error) 
 	}
 	f.settings.Store(&next)
 	return nil
+}
+
+func plaudServiceRevokeLogin(t *testing.T, tb *plaudServiceFixture, fp *testutil.PlaudFixture) {
+	t.Helper()
+	plaudServiceSignIn(t, tb)
+	st := plaudServiceRecordLogin(tb, plaudServiceSeededState("u_1", servicePlaudOld1))
+	st.Login.Checked = time.Now()
+	if err := tb.plaud.saveState(st); err != nil {
+		t.Fatal(err)
+	}
+	fp.Files(servicePlaudOld1)
+	fp.Write("revoked", "")
 }

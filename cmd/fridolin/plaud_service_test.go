@@ -5,13 +5,14 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/Icewater1337/fridolin/internal/testutil"
 	"os"
 	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/Icewater1337/fridolin/internal/testutil"
 )
 
 // A recording that keeps failing is given up after three days, like one

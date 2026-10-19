@@ -459,13 +459,19 @@ func TestLeftOutBrainsKeepTheirChats(t *testing.T) {
 		}
 		mgr := newTestManager(t, cfg)
 		t.Cleanup(mgr.Stop)
-		br, _, err := (&PlaudManager{options: PlaudOptions{
+		p := newPlaudManager(PlaudOptions{
+			PlaudDir: filepath.Join(home, "data", "plaud"), Home: home,
+			Settings: func() *PlaudSnapshot { return plaudSnapshotOf(cfg) },
+			FindCLI:  findPlaudCLI, CLIVersion: plaudCLIVersion,
 			Target:     func(id string) *PlaudTarget { return plaudTargetOf(mgr, id, nil) },
 			HeldTarget: func() string { return mgr.HeldFor("", false) },
-		}}).destination(plaudSnapshotOf(cfg))
-		if br != nil || err == nil || !strings.Contains(err.Error(), "brain personal, which gets Plaud recordings, cannot run") {
-			t.Errorf("recordings go to %v (%v), want them to wait for brain personal", br, err)
+		})
+		t.Cleanup(p.Stop)
+		status := p.Status()
+		if status.TargetBrain != "" || !strings.Contains(status.SummaryError, "brain personal, which gets Plaud recordings, cannot run") {
+			t.Errorf("recordings go to %s (%s), want them to wait for brain personal", status.TargetBrain, status.SummaryError)
 		}
+
 	})
 	t.Run("the chat is told", func(t *testing.T) {
 		brains := fsx.Canonical(t.TempDir())

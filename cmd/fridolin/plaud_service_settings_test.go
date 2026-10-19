@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"github.com/Icewater1337/fridolin/internal/testutil"
 	"os"
 	"path/filepath"
 	"slices"
@@ -12,6 +11,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/Icewater1337/fridolin/internal/testutil"
 )
 
 // Connect signs the refused login out in the CLI home it was refused in,

@@ -34,7 +34,7 @@ import (
 // token and talks to a server on 127.0.0.1.
 var updatePlaudGolden = flag.Bool("update-plaud-golden", false, "rewrite "+plaudGoldenFile+" from the CLI in FRIDOLIN_PLAUD_CLI")
 
-var plaudGoldenFile = filepath.Join("testdata", "plaud", "cli-"+plaudCLITested+".json")
+var plaudGoldenFile = filepath.Join("testdata", "plaud", "cli-"+"0.3.15"+".json")
 
 // plaudGoldenRun is one recorded call: the login it ran with, its
 // arguments (@OUT@ stands for a file to write to), and what it did.
@@ -332,8 +332,8 @@ func realPlaudEnv(bin, home string) []string {
 // and what Fridolin reads, still match it.
 func TestPlaudCLIContract(t *testing.T) {
 	bin := realPlaudCLI(t)
-	if v := plaudCLIVersion(bin); v != plaudCLITested && !*updatePlaudGolden {
-		t.Errorf("%s is version %q; the recorded output is from %s", bin, v, plaudCLITested)
+	if v := plaudCLIVersion(bin); v != "0.3.15" && !*updatePlaudGolden {
+		t.Errorf("%s is version %q; the recorded output is from %s", bin, v, "0.3.15")
 	}
 	list, recs := plaudGoldenRecordings()
 	srv := httptest.NewServer(plaudStubAPI(list, recs))
@@ -385,8 +385,8 @@ func TestPlaudForwardWithTheRealCLI(t *testing.T) {
 	defer srv.Close()
 	tb := newTestBridge(t, `, "plaud": {"enabled": true, "cli_path": "`+bin+`"}`)
 	tb.addFolderBrain(t, plaudDMBrain)
-	writeRealPlaudLogin(t, tb.plaud.cliHome(), "ok", srv.URL)
-	if err := tb.plaud.saveState(plaudSeededState("u_1", plaudGoldOld)); err != nil {
+	writeRealPlaudLogin(t, tb.plaudFixtureHome(), "ok", srv.URL)
+	if err := tb.writePlaudState(plaudSeededState("u_1", plaudGoldOld)); err != nil {
 		t.Fatal(err)
 	}
 	if err := tb.plaud.Poll(context.Background()); err != nil {
@@ -406,34 +406,6 @@ func TestPlaudForwardWithTheRealCLI(t *testing.T) {
 			if !strings.Contains(got, w) {
 				t.Errorf("%s lacks %q:\n%s", id, w, got)
 			}
-		}
-	}
-}
-
-// parseKV leaves out a value the CLI has not got: "-" for a missing
-// start_at or serial_number, as in the recorded details, and "undefined"
-// or "null" for a field Plaud did not send. The transcript's header then
-// falls back ("?" for the duration) rather than print them.
-func TestPlaudParseKV(t *testing.T) {
-	d := parseKV(loadPlaudGolden(t)["file"].Stdout)
-	for k, want := range map[string]string{"id": plaudGoldTeam, "name": "Team sync", "duration": "5m00s", "transcript": "available", "start_at": "", "serial_number": ""} {
-		if d[k] != want {
-			t.Errorf("recorded details: %s = %q, want %q", k, d[k], want)
-		}
-	}
-	for _, c := range []struct {
-		line, want string
-	}{
-		{"  duration: 5m00s", "5m00s"},
-		{"  duration: -", ""},
-		{"  duration: undefined", ""},
-		{"  duration: null", ""},
-		{"  duration:", ""},
-		{"  duration:    ", ""},
-	} {
-		got, ok := parseKV(c.line)["duration"]
-		if got != c.want || ok != (c.want != "") {
-			t.Errorf("parseKV(%q) duration = %q (%v), want %q", c.line, got, ok, c.want)
 		}
 	}
 }

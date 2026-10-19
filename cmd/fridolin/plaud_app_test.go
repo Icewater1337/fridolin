@@ -7,6 +7,7 @@ import (
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"os"
 	"path/filepath"
@@ -21,7 +22,7 @@ import (
 // testPhone is a phone's key pair, as the app makes it in its keystore.
 type testPhone struct {
 	key *ecdsa.PrivateKey
-	jwk plaudJWK
+	jwk plaudPhoneFixtureKey
 }
 
 func newTestPhone(t *testing.T) testPhone {
@@ -35,11 +36,11 @@ func newTestPhone(t *testing.T) testPhone {
 		t.Fatal(err)
 	}
 	enc := base64.RawURLEncoding.EncodeToString
-	return testPhone{k, plaudJWK{Kty: "EC", Crv: "P-256", X: enc(b[1:33]), Y: enc(b[33:])}}
+	return testPhone{k, plaudPhoneFixtureKey{Kty: "EC", Crv: "P-256", X: enc(b[1:33]), Y: enc(b[33:])}}
 }
 
 // sign makes the compact ES256 JWT the app sends.
-func (p testPhone) sign(t *testing.T, c plaudClaims) string {
+func (p testPhone) sign(t *testing.T, c plaudPhoneFixtureClaims) string {
 	t.Helper()
 	payload, _ := json.Marshal(c)
 	input := base64.RawURLEncoding.EncodeToString([]byte(`{"alg":"ES256","typ":"JWT"}`)) + "." + base64.RawURLEncoding.EncodeToString(payload)
@@ -56,48 +57,13 @@ func (p testPhone) sign(t *testing.T, c plaudClaims) string {
 
 func (p testPhone) pairing(t *testing.T, code string) string {
 	now := time.Now().Unix()
-	return p.sign(t, plaudClaims{Aud: plaudPairAud, Iat: now, Exp: now + 300, Code: code, Key: &p.jwk})
+	return p.sign(t, plaudPhoneFixtureClaims{Aud: "fridolin:pair", Iat: now, Exp: now + 300, Code: code, Key: &p.jwk})
 }
 
 func (p testPhone) upload(t *testing.T, device, name, text string) string {
 	now := time.Now().Unix()
 	sum := sha256.Sum256([]byte(text))
-	return p.sign(t, plaudClaims{Iss: device, Aud: plaudTranscriptAud, Iat: now, Exp: now + 300, Name: name, SHA256: base64.RawURLEncoding.EncodeToString(sum[:])})
-}
-
-func TestPlaudJWTIsChecked(t *testing.T) {
-	phone, other := newTestPhone(t), newTestPhone(t)
-	now := time.Now()
-	at := func(d time.Duration) int64 { return now.Add(d).Unix() }
-	good := plaudClaims{Aud: plaudPairAud, Iat: at(0), Exp: at(5 * time.Minute)}
-	if _, err := verifyPlaudJWT(phone.sign(t, good), phone.jwk, plaudPairAud, now); err != nil {
-		t.Fatalf("a good JWT: %v", err)
-	}
-	tok := phone.sign(t, good)
-	parts := strings.Split(tok, ".")
-	claims, _ := json.Marshal(plaudClaims{Aud: plaudPairAud, Iat: at(0), Exp: at(5 * time.Minute), Code: "changed"})
-	tampered := parts[0] + "." + base64.RawURLEncoding.EncodeToString(claims) + "." + parts[2]
-	none := base64.RawURLEncoding.EncodeToString([]byte(`{"alg":"none"}`)) + "." + parts[1] + "."
-	offCurve := phone.jwk
-	offCurve.Y = phone.jwk.X
-	for what, c := range map[string]struct {
-		tok string
-		key plaudJWK
-	}{
-		"changed claims":      {tampered, phone.jwk},
-		"another key":         {tok, other.jwk},
-		"alg none":            {none, phone.jwk},
-		"a key off the curve": {tok, offCurve},
-		"another audience":    {phone.sign(t, plaudClaims{Aud: plaudTranscriptAud, Iat: at(0), Exp: at(time.Minute)}), phone.jwk},
-		"expired":             {phone.sign(t, plaudClaims{Aud: plaudPairAud, Iat: at(-20 * time.Minute), Exp: at(-10 * time.Minute)}), phone.jwk},
-		"from the future":     {phone.sign(t, plaudClaims{Aud: plaudPairAud, Iat: at(10 * time.Minute), Exp: at(12 * time.Minute)}), phone.jwk},
-		"living too long":     {phone.sign(t, plaudClaims{Aud: plaudPairAud, Iat: at(0), Exp: at(time.Hour)}), phone.jwk},
-		"not a JWT":           {"abc", phone.jwk},
-	} {
-		if _, err := verifyPlaudJWT(c.tok, c.key, plaudPairAud, now); err == nil {
-			t.Errorf("%s: accepted", what)
-		}
-	}
+	return p.sign(t, plaudPhoneFixtureClaims{Iss: device, Aud: "fridolin:plaud-transcript", Iat: now, Exp: now + 300, Name: name, SHA256: base64.RawURLEncoding.EncodeToString(sum[:])})
 }
 
 // A phone pairs with the code its build carries, once; then each
@@ -114,7 +80,7 @@ func TestPlaudPhoneUploadsThroughTheSite(t *testing.T) {
 	if _, err := tb.plaud.DeviceRequest("pair", phone.pairing(t, "never-made"), nil); err == nil {
 		t.Fatal("a made-up pairing code paired")
 	}
-	code, _, err := tb.plaud.newPairing()
+	code, err := plaudFixturePairing(t, tb)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -152,7 +118,7 @@ func TestPlaudPhoneUploadsThroughTheSite(t *testing.T) {
 	if err := tb.plaud.Poll(ctx); err != nil {
 		t.Fatal(err)
 	}
-	tb.waitPlaudSeen(t, plaudPhonePrefix+name)
+	tb.waitPlaudSeen(t, "phone_"+name)
 	testutil.WaitFor(t, 5*time.Second, "brain reply", func() bool { return len(tb.dev.Outbox()) == 1 })
 	if out := tb.dev.Outbox()[0]; !strings.Contains(out.Text, `[Plaud] New recording "Phone recording" (2026-10-18 10:00, 02:10)`) {
 		t.Errorf("reply = %+v", out)
@@ -160,7 +126,7 @@ func TestPlaudPhoneUploadsThroughTheSite(t *testing.T) {
 	if calls := fp.Calls(); calls != "" {
 		t.Errorf("the CLI ran:\n%s", calls)
 	}
-	if st := tb.plaud.appStatus(); len(st.Devices) != 1 || st.Devices[0].LastUpload.IsZero() {
+	if st := *tb.plaud.Status().App; len(st.Devices) != 1 || st.Devices[0].LastUpload.IsZero() {
 		t.Errorf("app status = %+v", st)
 	}
 
@@ -178,7 +144,7 @@ func TestPlaudPhoneUploadsThroughTheSite(t *testing.T) {
 func TestPlaudPhoneUploadOffRefusesPhones(t *testing.T) {
 	tb, _ := plaudBridge(t, "")
 	phone := newTestPhone(t)
-	code, _, _ := tb.plaud.newPairing()
+	code, _ := plaudFixturePairing(t, tb)
 	if _, err := tb.plaud.DeviceRequest("pair", phone.pairing(t, code), nil); err == nil || !strings.Contains(err.Error(), "phone_upload") {
 		t.Errorf("pairing with uploads off: %v", err)
 	}
@@ -206,4 +172,39 @@ func TestSiteSpoolPassesPhoneRequestsOn(t *testing.T) {
 	if a := readSpoolAnswer(t, dir); a["ok"] != true || a["device"] != "dev_1" {
 		t.Errorf("answer = %v", a)
 	}
+}
+
+// These are the phone app's wire inputs, independent of the service decoder.
+type plaudPhoneFixtureKey struct {
+	Kty string `json:"kty"`
+	Crv string `json:"crv"`
+	X   string `json:"x"`
+	Y   string `json:"y"`
+}
+type plaudPhoneFixtureClaims struct {
+	Iss    string                `json:"iss,omitempty"`
+	Aud    string                `json:"aud"`
+	Iat    int64                 `json:"iat"`
+	Exp    int64                 `json:"exp"`
+	Code   string                `json:"code,omitempty"`
+	Key    *plaudPhoneFixtureKey `json:"key,omitempty"`
+	Name   string                `json:"name,omitempty"`
+	SHA256 string                `json:"sha256,omitempty"`
+}
+
+// A fresh app build persists the hash of its one-use pairing code. Arrangement
+// happens before any device request; the test then exercises actual pairing.
+func plaudFixturePairing(t *testing.T, tb *testBridge) (string, error) {
+	t.Helper()
+	code := "fixture-pairing-code"
+	sum := sha256.Sum256([]byte(code))
+	data, err := json.Marshal(map[string]any{"devices": []any{}, "pairings": []map[string]any{{"hash": hex.EncodeToString(sum[:]), "expires": time.Now().Add(time.Hour)}}})
+	if err != nil {
+		return "", err
+	}
+	dir := tb.cfgs.Boot().PlaudDir()
+	if err := os.MkdirAll(dir, 0700); err != nil {
+		return "", err
+	}
+	return code, os.WriteFile(filepath.Join(dir, "devices.json"), data, 0600)
 }
