@@ -38,6 +38,19 @@ func TestSandboxFailsClosed(t *testing.T) {
 			argsLog := filepath.Join(home, "args.log")
 			t.Setenv("FRIDOLIN_FAKE_ARGS_LOG", argsLog)
 			tmuxCalls := fakeTmux(t)
+			br := mgr.Get("a")
+			t.Cleanup(func() {
+				// Stop admits no further viewer starts. A logged tmux call is
+				// not completion: the background start still reads the fake's
+				// globals and environment. Join its completion under viewerMu
+				// before fakeTmux and Setenv restore them, including on failure.
+				mgr.Stop()
+				waitFor(t, 10*time.Second, "the viewer start to finish", func() bool {
+					br.viewerMu.Lock()
+					defer br.viewerMu.Unlock()
+					return !br.viewerStarting
+				})
+			})
 			sp := mgr.profiler
 			sp.mu.Lock()
 			sp.enabled = true
