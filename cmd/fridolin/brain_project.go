@@ -3,6 +3,7 @@ package main
 import (
 	"github.com/Icewater1337/fridolin/internal/config"
 	"github.com/Icewater1337/fridolin/internal/manifest"
+	"github.com/Icewater1337/fridolin/internal/platform"
 )
 
 // settingsFor is the current composition boundary. The manager's later Apply
@@ -30,3 +31,28 @@ func brainGlobalsOf(cfg *config.Config) brainGlobals {
 		},
 	}
 }
+
+// dataEnv tells brains where the bridge keeps its data. The tools in
+// tools/ read these until the bridge answered them (brainapi.go); compat:
+// brains and their scripts rely on these names, as on the other BRIDGE_
+// variables.
+func dataEnv(s *brainSettings) []string {
+	return []string{"BRIDGE_DATA_DIR=" + s.dataDir, "BRIDGE_DB_PATH=" + s.dbPath}
+}
+
+// credentialsDirOf is where per-brain credential files live.
+func credentialsDirOf(cfg *config.Config) string {
+	if cfg.Sandbox.CredentialsDir != "" {
+		return cfg.Sandbox.CredentialsDir
+	}
+	return cfg.DataDir
+}
+
+// startViewer is NewTmuxViewer, a variable so tests need no tmux.
+var startViewer = NewTmuxViewer
+
+func startBrainViewer(name, streamLog, cwd string, passthrough []string) (*platform.Viewer, error) {
+	return startViewer(name, streamLog, cwd, childEnv(anyChild, passthrough))
+}
+
+func isBuildChat(jid string) bool { return brainOfBuildJID(jid) != "" }
