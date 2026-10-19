@@ -174,9 +174,9 @@ func TestLeftOutBrainShowsWhyOnItsPage(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	view := func() brainView {
+	view := func() BrainView {
 		t.Helper()
-		var views []brainView
+		var views []BrainView
 		_ = json.Unmarshal(tb.do("GET", "/api/brains", nil).Body.Bytes(), &views)
 		if len(views) != 1 {
 			t.Fatalf("views = %+v, want brain b", views)

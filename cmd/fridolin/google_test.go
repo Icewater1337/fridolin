@@ -153,7 +153,7 @@ func TestCalendarDashboardSignInFlow(t *testing.T) {
 	if !strings.Contains(env, "BRIDGE_CALENDARS=you@example.com,team@example.com") || !strings.Contains(env, "BRIDGE_CALENDAR_DEFAULT=team@example.com") {
 		t.Errorf("env = %s", env)
 	}
-	var views []brainView
+	var views []BrainView
 	_ = json.Unmarshal(tb.do("GET", "/api/brains", nil).Body.Bytes(), &views)
 	if views[0].Status != "ok" {
 		t.Errorf("a dashboard change must not show as drift: %+v", views[0])

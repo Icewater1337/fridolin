@@ -1055,7 +1055,7 @@ func TestApproveDrift(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	var views []brainView
+	var views []BrainView
 	_ = json.Unmarshal(h.Do("GET", "/api/brains", nil).Body.Bytes(), &views)
 	if len(views) != 1 || views[0].Status != "drift" || views[0].Disk == nil {
 		t.Fatalf("views = %+v", views)

@@ -63,9 +63,9 @@ func TestNewManifestWriteFailureLeavesNoFile(t *testing.T) {
 }
 
 // brainViews returns GET /api/brains.
-func (h *harness) brainViews() []brainView {
+func (h *harness) brainViews() []BrainView {
 	h.t.Helper()
-	var views []brainView
+	var views []BrainView
 	if w := h.Do("GET", "/api/brains", nil); w.Code != 200 || json.Unmarshal(w.Body.Bytes(), &views) != nil {
 		h.t.Fatalf("GET /api/brains: %d %s", w.Code, w.Body.String())
 	}

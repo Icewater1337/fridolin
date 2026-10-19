@@ -258,7 +258,7 @@ func TestBrainsRunOnTheLatestConfig(t *testing.T) {
 			}()
 		}
 		wg.Wait()
-		var views []brainView
+		var views []BrainView
 		if w := h.Do("GET", "/api/brains", nil); w.Code != 200 || json.Unmarshal(w.Body.Bytes(), &views) != nil {
 			t.Fatalf("GET /api/brains: %d %s", w.Code, w.Body.String())
 		}
