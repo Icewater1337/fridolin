@@ -1,4 +1,4 @@
-package main
+package config
 
 import (
 	"fmt"
@@ -46,13 +46,13 @@ var (
 const defaultIncludeBridgeConfig = true
 
 // includeBridge and keepVersions read the two settings that are pointers so
-// that an unset one can be told from false or 0. effective fills both in,
+// that an unset one can be told from false or 0. Resolve fills both in,
 // with the same defaults, so the default of each lives in one place.
 func (bc BackupConfig) IncludeBridge() bool {
-	return boolOr(bc.IncludeBridgeConfig, defaultIncludeBridgeConfig)
+	return BoolOr(bc.IncludeBridgeConfig, defaultIncludeBridgeConfig)
 }
 
-func (bc BackupConfig) KeepVersions() int { return intOr(bc.KeepVersionsDays, defaultKeepVersions) }
+func (bc BackupConfig) KeepVersions() int { return IntOr(bc.KeepVersionsDays, defaultKeepVersions) }
 
 func (bc BackupConfig) Validate() error {
 	if bc.DailyAt != "" && !dailyAtRe.MatchString(bc.DailyAt) {
@@ -136,12 +136,12 @@ type BrainRef struct {
 }
 
 // Dir is the brain's folder with ~ expanded, for code that works on the
-// file layer, where Path is kept as typed. The effective configuration has
+// file layer, where Path is kept as typed. The Resolve configuration has
 // Path expanded already.
-func (r BrainRef) Dir() string { return fsx.ExpandHome(r.Path, homeDir()) }
+func (r BrainRef) Dir() string { return fsx.ExpandHome(r.Path, HomeDir()) }
 
-// isLoopbackAddr reports whether addr binds to a loopback interface.
-func isLoopbackAddr(addr string) bool {
+// IsLoopbackAddr reports whether addr binds to a loopback interface.
+func IsLoopbackAddr(addr string) bool {
 	host, _, err := net.SplitHostPort(addr)
 	if err != nil {
 		return false

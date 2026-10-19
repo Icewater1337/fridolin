@@ -1,4 +1,4 @@
-package main
+package config
 
 import (
 	"fmt"
@@ -7,20 +7,22 @@ import (
 	"slices"
 	"sort"
 	"strings"
+
+	"github.com/Icewater1337/fridolin/internal/chat"
 )
 
-// validateGroupMembers rejects a group_members that cannot mean what it
+// ValidateGroupMembers rejects a group_members that cannot mean what it
 // says: an entry for a chat that is no group, or for a group allowed_groups
 // does not let in (its members would reach nothing), a number that is none,
 // and "*" next to numbers, which would let everyone in while it looks like
-// a list. It runs on the effective config, where every entry that is a
+// a list. It runs on the Resolve config, where every entry that is a
 // number is already digits.
 //
 // The error names a group by its JID, which check --redact masks, but
 // neither a key that is no group JID nor a number that is none: either may
 // be a phone number written so that nothing recognises it as one, and the
 // error goes into the bug report as it is.
-func validateGroupMembers(members map[string][]string, allowedGroups []string) error {
+func ValidateGroupMembers(members map[string][]string, allowedGroups []string) error {
 	groups := make([]string, 0, len(members))
 	for g := range members {
 		groups = append(groups, g)
@@ -41,7 +43,7 @@ func validateGroupMembers(members map[string][]string, allowedGroups []string) e
 				}
 				continue
 			}
-			if _, err := phoneNumber(n); err != nil {
+			if _, err := chat.PhoneNumber(n); err != nil {
 				return fmt.Errorf("group_members: %s: entry %d is not a phone number: use digits with the country code, e.g. 15551234567", g, i+1)
 			}
 		}
@@ -49,9 +51,9 @@ func validateGroupMembers(members map[string][]string, allowedGroups []string) e
 	return nil
 }
 
-// groupMembersAsNumbers is group_members with each number in the form the
-// bridge compares, digits only, like allowed_numbers (allowedNumbersAsNumbers).
-func groupMembersAsNumbers(members map[string][]string) map[string][]string {
+// GroupMembersAsNumbers is group_members with each number in the form the
+// bridge compares, digits only, like allowed_numbers (chat.NumbersAsNumbers).
+func GroupMembersAsNumbers(members map[string][]string) map[string][]string {
 	if members == nil {
 		return nil
 	}
@@ -61,7 +63,7 @@ func groupMembersAsNumbers(members map[string][]string) map[string][]string {
 			out[g] = list
 			continue
 		}
-		out[g] = allowedNumbersAsNumbers(list)
+		out[g] = chat.NumbersAsNumbers(list)
 	}
 	return out
 }
@@ -82,11 +84,11 @@ func onlyAllowedNumbers(c *Config) []string {
 	return out
 }
 
-// warnGroupsWithoutMembers logs, once for each, the allowed groups of next
+// WarnGroupsWithoutMembers logs, once for each, the allowed groups of next
 // that admit only allowed_numbers and did not in prev (nil at startup), so
 // that an owner whose groups trusted every member before group_members
 // existed sees why the others go unheard, and how to change it.
-func warnGroupsWithoutMembers(prev, next *Config) {
+func WarnGroupsWithoutMembers(prev, next *Config) {
 	before := onlyAllowedNumbers(prev)
 	for _, g := range onlyAllowedNumbers(next) {
 		if slices.Contains(before, g) {
@@ -96,10 +98,10 @@ func warnGroupsWithoutMembers(prev, next *Config) {
 	}
 }
 
-// groupMemberPairs is group_members as a sorted list of "group:number"
+// GroupMemberPairs is group_members as a sorted list of "group:number"
 // entries, and "group:" for one that lists nobody, so that
 // logSecurityChanges can say who was let in or out of which group.
-func groupMemberPairs(members map[string][]string) []string {
+func GroupMemberPairs(members map[string][]string) []string {
 	var out []string
 	for g, list := range members {
 		if len(list) == 0 {
@@ -114,12 +116,12 @@ func groupMemberPairs(members map[string][]string) []string {
 }
 
 // The form allowed_groups holds. Every edit of the allow lists goes
-// through phoneNumber and allowListGroup, so the dashboard's add boxes and
+// through chat.PhoneNumber and AllowListGroup, so the dashboard's add boxes and
 // its Allow buttons agree on what they accept.
 var groupJIDRE = regexp.MustCompile(`^[0-9]+(-[0-9]+)?@g\.us$`)
 
-// allowListGroup is s as allowed_groups holds it: a group JID.
-func allowListGroup(s string) (string, error) {
+// AllowListGroup is s as allowed_groups holds it: a group JID.
+func AllowListGroup(s string) (string, error) {
 	g := strings.TrimSpace(s)
 	if !groupJIDRE.MatchString(g) {
 		return "", fmt.Errorf("%q is not a group JID: it looks like 120363000000000000@g.us", g)
