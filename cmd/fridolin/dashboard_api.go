@@ -957,25 +957,13 @@ func (b *Bridge) apiInspectFolder(w http.ResponseWriter, r *http.Request) {
 		httpapi.WriteJSON(w, http.StatusOK, resp)
 		return
 	}
-	st, err := os.Stat(abs)
-	resp["exists"] = err == nil
-	resp["is_dir"] = err == nil && st.IsDir()
-	if err == nil && st.IsDir() {
-		root, err := os.OpenRoot(fsx.Canonical(homeDir()))
-		if err != nil {
-			httpapi.WriteErr(w, http.StatusBadRequest, err.Error())
-			return
-		}
-		defer root.Close()
-		entries, _ := os.ReadDir(abs)
-		resp["entries"] = len(entries)
-		resp["is_git"] = fileExistsInRoot(root, filepath.Join(abs, ".git"))
-		resp["has_prompt"] = fileExistsInRoot(root, filepath.Join(abs, manifest.DefaultPromptFile))
-		resp["has_history"] = fileExistsInRoot(root, filepath.Join(abs, history.FileName))
-		if m, err := manifest.Read(abs); err == nil {
-			resp["manifest"] = m
-		}
+	root, err := os.OpenRoot(fsx.Canonical(homeDir()))
+	if err != nil {
+		httpapi.WriteErr(w, http.StatusBadRequest, err.Error())
+		return
 	}
+	defer root.Close()
+	inspectFolderMetadata(root, abs, resp)
 	id := manifest.Slugify(filepath.Base(abs))
 	taken := map[string]bool{}
 	for _, ref := range cfg.BrainDirs {
@@ -988,6 +976,94 @@ func (b *Bridge) apiInspectFolder(w http.ResponseWriter, r *http.Request) {
 	}
 	resp["suggested"] = map[string]string{"id": id, "name": prettyName(filepath.Base(abs))}
 	httpapi.WriteJSON(w, http.StatusOK, resp)
+}
+
+// inspectFolderMetadata only receives a canonical path accepted by CheckBrainPath.
+// Keep the listing and manifest on the same opened directory.
+func inspectFolderMetadata(home *os.Root, abs string, resp map[string]any) {
+	dir, st, err := openInspectFolder(home, abs)
+	resp["exists"] = err == nil
+	resp["is_dir"] = err == nil && st.IsDir()
+	if err != nil || dir == nil {
+		return
+	}
+	defer dir.Close()
+	entries := 0
+	if f, err := dir.Open("."); err == nil {
+		list, _ := f.ReadDir(-1)
+		entries = len(list)
+		f.Close()
+	}
+	resp["entries"] = entries
+	resp["is_git"] = fileExistsInRoot(home, filepath.Join(abs, ".git"))
+	resp["has_prompt"] = fileExistsInRoot(home, filepath.Join(abs, manifest.DefaultPromptFile))
+	resp["has_history"] = fileExistsInRoot(home, filepath.Join(abs, history.FileName))
+	if m, err := manifest.ReadRoot(dir); err == nil {
+		resp["manifest"] = m
+	}
+}
+
+// openInspectFolder pins each component of an already canonical, accepted path.
+// Reject new symlinks even within home: a replacement could point into a
+// protected sibling. Initially legitimate aliases were resolved by CheckBrainPath.
+func openInspectFolder(home *os.Root, abs string) (*os.Root, os.FileInfo, error) {
+	rel, err := filepath.Rel(home.Name(), abs)
+	if err != nil || rel == "." || !filepath.IsLocal(rel) {
+		return nil, nil, errors.New("inspection path is not inside home")
+	}
+	current, err := home.OpenRoot(".")
+	if err != nil {
+		return nil, nil, err
+	}
+	defer func() {
+		if current != nil {
+			current.Close()
+		}
+	}()
+	parts := strings.Split(rel, string(filepath.Separator))
+	var st os.FileInfo
+	for i, part := range parts {
+		st, err = current.Lstat(part)
+		if err != nil {
+			return nil, nil, err
+		}
+		if st.Mode()&os.ModeSymlink != 0 {
+			return nil, nil, fsx.ErrSymlink
+		}
+		if !st.IsDir() {
+			if i == len(parts)-1 {
+				return nil, st, nil
+			}
+			return nil, nil, errors.New("inspection parent is not a directory")
+		}
+		next, err := openInspectChild(current, part, st)
+		if err != nil {
+			return nil, nil, err
+		}
+		current.Close()
+		current = next
+	}
+	dir := current
+	current = nil // the caller owns the pinned directory
+	return dir, st, nil
+}
+
+// The identity check closes the Lstat/OpenRoot interval without reading any
+// entries from a replacement directory, including a relative symlink in home.
+func openInspectChild(parent *os.Root, name string, observed os.FileInfo) (*os.Root, error) {
+	dir, err := parent.OpenRoot(name)
+	if err != nil {
+		return nil, err
+	}
+	st, err := dir.Stat(".")
+	if err != nil || !os.SameFile(observed, st) {
+		dir.Close()
+		if err == nil {
+			err = errors.New("inspection folder changed while opening it")
+		}
+		return nil, err
+	}
+	return dir, nil
 }
 
 func prettyName(s string) string {
