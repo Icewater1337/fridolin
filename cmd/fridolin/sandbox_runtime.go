@@ -166,7 +166,7 @@ func (sp *SandboxProfiler) sitePaths() (deny, noWrite []string) {
 	}
 	if sp.bridgeExe != "" {
 		noWrite = append(noWrite, sp.bridgeExe)
-		l := layoutOf(sp.bridgeExe)
+		l := LayoutOf(sp.bridgeExe)
 		for _, dir := range []string{l.Dir, l.Source} {
 			if dir != "" {
 				noWrite = append(noWrite, dir)
@@ -323,7 +323,7 @@ func sandboxContextNow(home string) sandbox.Context {
 	cwd, err := os.Getwd()
 	return sandbox.Context{Home: home, WorkingDir: cwd, WorkingDirErr: err, TempDir: os.TempDir(), TmuxSocket: filepath.Join(cmp.Or(os.Getenv("TMUX_TMPDIR"), "/tmp"), fmt.Sprintf("tmux-%d", os.Getuid()))}
 }
-func sandboxInstallLayoutOf(l bridgeLayout) sandbox.InstallLayout {
+func sandboxInstallLayoutOf(l BridgeLayout) sandbox.InstallLayout {
 	return sandbox.InstallLayout{Dir: l.Dir, Source: l.Source}
 }
 func (sp *SandboxProfiler) Profile(id string) (string, error) {
@@ -332,11 +332,11 @@ func (sp *SandboxProfiler) Profile(id string) (string, error) {
 	ctx := sandboxContextNow(sp.home)
 	var layout sandbox.InstallLayout
 	if sp.bridgeExe != "" {
-		layout = sandboxInstallLayoutOf(layoutOf(sp.bridgeExe))
+		layout = sandboxInstallLayoutOf(LayoutOf(sp.bridgeExe))
 	}
 	return sandbox.Profile(sandbox.Policy{Settings: sp.Settings, Context: ctx, WorkDirs: sp.workDirs, ConfigFile: sp.configFile, ConfigEnvFile: config.DotEnvPath(sp.configFile), BridgeExe: sp.bridgeExe, Layout: layout, Programs: sp.bridgeProgramsOf(ctx.Home)}, id)
 }
-func (p sandboxConfig) protected(home string, l bridgeLayout) []sandbox.ProtectedPath {
+func (p sandboxConfig) protected(home string, l BridgeLayout) []sandbox.ProtectedPath {
 	return p.Settings.Protected(sandboxContextNow(home), sandboxInstallLayoutOf(l), p.bridgeProgramsOf(home))
 }
 func protectedIn(dir string, paths []sandbox.ProtectedPath) (string, bool) {

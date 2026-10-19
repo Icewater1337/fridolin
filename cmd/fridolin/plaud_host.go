@@ -162,7 +162,7 @@ func androidToolchain() (javaHome, sdk string, err error) {
 		}
 	}
 	for _, s := range sdks {
-		if s != "" && isDir(filepath.Join(s, "platforms")) {
+		if s != "" && IsDir(filepath.Join(s, "platforms")) {
 			sdk = s
 			break
 		}
