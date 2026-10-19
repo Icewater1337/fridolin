@@ -54,7 +54,7 @@
     "max_chunk_size": {
       "type": "integer",
       "description": "The most characters in one outgoing message; 0 is the default, 3900.",
-      "anyOf": [{"const": 0}, {"minimum": 100}]
+      "anyOf": [{"const": 0}, {"minimum": 100, "maximum": 65536}]
     },
     "max_media_mb": {"type": "integer", "minimum": 0, "maximum": 2048, "description": "The largest attachment downloaded, in MB; 0 is the default, 100."},
     "brain_model": {"type": "string", "description": "The model brains use unless they name their own; empty uses the CLI's default."},

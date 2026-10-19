@@ -142,9 +142,9 @@ rollback`.
   arguments, `fridolin check` and `init`, a new brain's folder, backup files,
   the service's launchd agent and systemd unit, the replies of `/send` and
   `/ingest`, and every message the bridge itself sends into chats, which
-  live in `messages.go`. Times, temp paths, PIDs and the version are
+  live in `internal/app/messages.go`. Times, temp paths, PIDs and the version are
   masked, so a second run writes the same bytes. A change meant to change
-  one rewrites it with `go test -run 'TestName' -update ./cmd/fridolin`, and
+  one rewrites it with `go test -run 'TestName' -update ./internal/app`, and
   the pull request says why. A new setting also goes into
   `cmd/fridolin/testdata/config-v1.json`, which sets every one, and into
   `docs/schemas/config.schema.json` (a field of brain.json into
@@ -158,7 +158,7 @@ rollback`.
   (`config.go`), so that a file written before keeps its meaning.
   End-to-end tests drive a dev-mode bridge
   through what it offers from outside with `newHarness`
-  (`internal/app/harness_test.go`) instead of reaching into the `Bridge`, so
+  (`internal/app/harness_test.go`) instead of reaching into the `App`, so
   they keep working while code moves into packages; `knownbugs_test.go` pins
   bugs that stay as they are for now, and the fix that changes one rewrites
   its test. `cmd/fridolin/testdata/coverage-baseline.txt` is each file's statement
@@ -168,7 +168,7 @@ rollback`.
   the DM allowlist, the identity map, brain.json, stream-json, attachment
   names, the junk filter) and the prompt that carries it to a run have fuzz
   targets beside their tests. Fuzz one with
-  `go test -run='^$' -fuzz='^FuzzExtractPolls$' -fuzztime=30s ./cmd/fridolin`;
+  `go test -run='^$' -fuzz='^FuzzExtractPolls$' -fuzztime=30s ./internal/outbound`;
   a failing input is saved under the package's `testdata/fuzz/` (make
   `testdata` first in a package that has none), where plain `go test`
   runs it from then on, so commit it with the fix. `make fuzz-short` runs

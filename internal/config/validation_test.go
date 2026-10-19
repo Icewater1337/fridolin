@@ -97,3 +97,12 @@ func TestLogLevelValidation(t *testing.T) {
 		t.Fatal("unknown log level accepted")
 	}
 }
+
+func TestChunkSizeUpperBound(t *testing.T) {
+	for _, size := range []int{65536, 65537} {
+		_, err := Resolve(&File{MaxChunkSize: size}, Paths{Home: t.TempDir()}, "darwin")
+		if (err != nil) != (size > 65536) {
+			t.Fatalf("size %d: %v", size, err)
+		}
+	}
+}

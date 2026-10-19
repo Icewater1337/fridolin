@@ -124,6 +124,7 @@ func SecurityHeaders(next http.Handler) http.Handler {
 		h.Set("X-Content-Type-Options", "nosniff")
 		h.Set("Referrer-Policy", "no-referrer")
 		h.Set("X-Frame-Options", "DENY")
+		h.Set("Permissions-Policy", "camera=(), microphone=(), geolocation=()")
 		// A site that opened the dashboard in a window gets no handle on
 		// it, and no other site may load its files.
 		h.Set("Cross-Origin-Opener-Policy", "same-origin")

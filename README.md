@@ -717,122 +717,22 @@ folders of their own rather than your home directory, and
 
 ## How it works
 
-The Go code is the `main` package in `cmd/fridolin`, where the files
-below are, and the packages below `internal/` it is being split into
-([docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) has the layout and its
-rules): `main.go` loads config; `bridge.go` wires everything together.
+The executable in `cmd/fridolin` delegates to `internal/cli`; `internal/app`
+constructs and owns the running bridge. Transport events pass through access
+checks and ordered intake into brain queues. Each brain runs the selected
+provider through a supervised process runner. Replies pass through a persistent
+outbox, and history records what was delivered. Shutdown preserves pending
+WhatsApp messages for the next start.
 
-**`whatsapp.go`** — [whatsmeow](https://github.com/tulir/whatsmeow) client.
-Handles pairing, allowlists, trigger matching, attachment downloads, and poll
-vote decryption. Each chat's messages, edits, deletions and votes wait on a
-queue of their own (`chatqueue.go`), whose worker hands them on in the order
-they came, so a slow download holds up only its own chat; at most three files
-download at once, all chats together. A contact's LID and phone-number messages
-share that queue whenever WhatsApp's local identity store knows the mapping.
-Disconnect cancels network work and waits until accepted messages have been
-handed over before the store closes. If that takes more than five seconds,
-it warns and continues waiting; an unresponsive handler can delay shutdown. It keeps the list of the account's groups
-that the dashboard shows (`groupcache.go`), and asks WhatsApp for it again only
-after a group event or a reconnect, once it is ten minutes old, or when you
-press Refresh on the Chats page. Group names come from that list and from
-rename events; only a group that is not allowed is looked up, at most once an
-hour. **`polls.go`** — the `[POLL]` blocks in replies, sending them, and
-matching votes to options (WhatsApp sends SHA-256 hashes of option names, which
-are matched against the stored options).
+Configuration documents, resolved runtime settings, brain manifests and routing
+live in `internal/config`, `manifest`, `registry` and `route`. Integration services
+own backup, Google, Plaud and site behavior. `internal/httpapi` serves the API and
+dashboard with application-supplied capabilities. The dashboard is embedded from
+`web/`; no frontend build step is needed.
 
-**`media.go`** — the media inbox: each brain's own folder in the media
-directory, and moving a message's files into the inbox of the brain that
-takes it.
-
-**`debounce.go`** — merges a burst of messages from one person into one run.
-
-**`internal/brain`** — the multi-brain runtime. Each brain has a queue and one
-worker, which takes each chat's messages in order and the chats in turn,
-and waits for one of the `max_concurrent_runs` run slots all brains share
-(`internal/brain/slots.go`); the command Runner starts the selected provider,
-Claude or Codex. Claude uses `claude -p` with
-`--output-format stream-json`, seeded on stdin with the brain's prompt
-file and recent chat history, which `internal/history` reads back from the end
-of the file. Events are parsed live, so an `AskUserQuestion` reaches
-WhatsApp immediately, with its options numbered (the answer comes as the
-next message, and the run's final reply is sent too), and a run over 10
-seconds gets a "working on it" notice. The parser, in `internal/claudecli`, skips
-a line over 4 MiB (a tool's large result, say) with a note in the activity
-log rather than failing the run. A run is stopped at
-`run_timeout_minutes`, and five seconds after its result when something it
-started holds its output open; output that a process outside the run's
-process group holds is let go of five seconds after the CLI exited. Runs
-are listed in `<data_dir>/runs/` while they last, so that a bridge that
-crashed stops what is left of them when it starts again. A second shutdown
-signal waits for the process supervisor to acknowledge the group kill before
-exiting, without waiting for output readers or reply delivery; a run still
-preparing cannot start a CLI after that force-stop. It freezes admission,
-queue turns and reload publication, and also stops runs in removed brains
-whose retirement has not finished.
-`brain.Manager.Apply` swaps the brain set at runtime without touching
-brains that did not change, and hands what a brain it takes out
-had waiting to the brain that takes it now.
-
-**`manifest.go`, `brainreg.go`** — `brain.json`, the brain registry, path
-checks and scaffolding. **`configstore.go`** — the live configuration.
-
-**`dashboard.go`, `dashboard_api.go`, `web/`** — the dashboard, its guards and
-API; the page is plain HTML/CSS/JS compiled into the binary. In `web/assets`,
-`app/` starts it, `pages/` holds one module per page, and `components/` and
-`lib/` the pieces they share; `css/` holds its styles.
-
-**`internal/activity`** — the dashboard's bounded feed of history lines,
-including edits and deletions. The bridge supplies each brain's history tail
-when the feed is seeded.
-
-**`internal/backup`** — Google Drive backups through rclone, with command adapters
-in `backup_projection.go` and `backup_api.go`.
-
-**`internal/plaud`** — recorder polling, transcript handoffs and phone uploads.
-The command supplies host policy and runtime callbacks; HTTP adapters stay in
-`cmd/fridolin/plaud_api.go` and `plaud_app_api.go` until the HTTP surface moves.
-
-**`sandbox.go`** — generates a per-brain `sandbox-exec` profile, passed to
-`sandbox-exec -p` on each run (never written to a file).
-
-**`childenv.go`** — the one list of the bridge's environment variables that
-brains, rclone, the Plaud CLI and the activity viewer get, and the state
-the bridge creates for each sandboxed brain before its run: its Claude Code
-config folder, `TMPDIR` and caches.
-
-**`store.go`** — SQLite: the whatsmeow device store, polls, votes, and the
-chats that wrote without being allowed. **`inbound_store.go`** — the WhatsApp
-messages no brain had started on when the bridge stopped, which the next
-start answers, and the runs the stop cut short, whose chats it tells.
-
-**`chunks.go`** — splits long replies at paragraph, line, sentence, then word
-boundaries so messages break somewhere readable, and numbers the parts.
-
-**`messages.go`** — every message the bridge itself sends into chats, as
-opposed to a brain's answers, pinned in `testdata/golden/messages.golden`.
-
-**`outbox.go`** — brains' replies, and the questions they ask mid-run,
-wait in `bridge.db` until WhatsApp took every message of them, are tried
-again with backoff (from the message that failed, and at once when
-WhatsApp reconnects, after a restart too), and go into the brain's history
-only once delivered, as what the chat got (a poll as its question and
-numbered options); until then a run reads them from the outbox. One that
-cannot go out within an hour is given up on, and the Overview says so.
-
-**`server.go`** — the localhost `/send` and `/ingest` endpoints.
-
-**`internal/otp`** — the OTP guard: a one-time code a chat was just asked for
-is kept out of the history and the model, and handed to the script that
-asked for it through `<data_dir>/otp/`, until it expires.
-
-**`brainapi.go`** — `/brain/`, what the tools a brain runs ask the bridge
-for, with a token that works only while that run lasts.
-**`toolcmd.go`, `history_cmd.go`, `polls_cmd.go`, `calendar_cmd.go`** —
-`fridolin history`, `fridolin polls` and `fridolin calendar`, which brains
-run. **`internal/google`**, with HTTP adapters in `google_api.go` — the calendar sign-in, and the
-calendar calls the bridge makes for brains.
-
----
+For package responsibilities, dependency rules, lifecycle, storage and testing,
+see [Architecture](docs/ARCHITECTURE.md). User-facing configuration and API
+contracts are in [Configuration](docs/CONFIGURATION.md) and [API](docs/API.md).
 
 ## Troubleshooting
 

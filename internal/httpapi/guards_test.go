@@ -127,7 +127,7 @@ func TestHTTPSecurityHeaders(t *testing.T) {
 	SecurityHeaders(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(204) })).ServeHTTP(w, httptest.NewRequest("GET", "/", nil))
 	for k, v := range map[string]string{
 		"Content-Security-Policy": dashboardCSP, "X-Content-Type-Options": "nosniff", "Referrer-Policy": "no-referrer",
-		"X-Frame-Options": "DENY", "Cross-Origin-Opener-Policy": "same-origin", "Cross-Origin-Resource-Policy": "same-origin",
+		"X-Frame-Options": "DENY", "Permissions-Policy": "camera=(), microphone=(), geolocation=()", "Cross-Origin-Opener-Policy": "same-origin", "Cross-Origin-Resource-Policy": "same-origin",
 	} {
 		if got := w.Header().Get(k); got != v {
 			t.Errorf("%s=%q want %q", k, got, v)

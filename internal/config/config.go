@@ -626,6 +626,9 @@ func (c *File) Validate(goos string) error {
 	if c.MaxChunkSize < configMinChunkSize {
 		return fmt.Errorf("max_chunk_size %d is too small: use at least %d, or 0 for the default of %d", c.MaxChunkSize, configMinChunkSize, configDefaultChunkSize)
 	}
+	if c.MaxChunkSize > 65536 {
+		return fmt.Errorf("max_chunk_size must not exceed 65536 characters")
+	}
 	if p := c.RunTimeoutMinutes; p != nil && (*p < 0 || *p > maxRunTimeoutMinutes) {
 		n := *p
 		return fmt.Errorf("run_timeout_minutes must be between 0 (no limit) and %d, not %d", maxRunTimeoutMinutes, n)
