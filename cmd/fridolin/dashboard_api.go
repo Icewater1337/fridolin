@@ -589,12 +589,12 @@ func (b *Bridge) brainIssues(cfg *config.Config) []registry.Issue {
 	return issues
 }
 
-func (b *Bridge) brainViews() []BrainView {
+func (b *Bridge) brainViews() []httpapi.BrainView {
 	cfg := b.cfgs.Get()
 	issues := b.brainIssues(cfg)
 	fallback := b.brainMgr.Fallback()
 	base := registry.Views(cfg, issues)
-	out := make([]BrainView, len(base))
+	out := make([]httpapi.BrainView, len(base))
 	for i, v := range base {
 		out[i].View = v
 

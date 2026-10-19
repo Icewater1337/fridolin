@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/Icewater1337/fridolin/internal/httpapi"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -474,7 +475,7 @@ func TestApproveBindsToTheReviewedManifest(t *testing.T) {
 	if err := manifest.Write(dir, &harmless, true); err != nil {
 		t.Fatal(err)
 	}
-	var views []BrainView
+	var views []httpapi.BrainView
 	_ = json.Unmarshal(tb.do("GET", "/api/brains", nil).Body.Bytes(), &views)
 	if len(views) != 1 || views[0].Disk == nil {
 		t.Fatalf("views = %+v", views)
@@ -626,7 +627,7 @@ func TestAPIBrainIsItsEntryOfTheList(t *testing.T) {
 			}
 		})
 	}
-	var notes BrainView
+	var notes httpapi.BrainView
 	_ = json.Unmarshal(list[0], &notes)
 	if filepath.Base(notes.Path) != "notes" || notes.Disk == nil {
 		t.Fatalf("the notes entry is %+v; want the folder notes, with its edit on disk", notes)
@@ -666,7 +667,7 @@ func TestUnapprovedBrainEntries(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	var views []BrainView
+	var views []httpapi.BrainView
 	_ = json.Unmarshal(tb.do("GET", "/api/brains", nil).Body.Bytes(), &views)
 	if len(views) != 3 || views[1].ID != "notes" || views[1].Status != "ok" || views[2].Status != "unapproved" {
 		t.Fatalf("views = %+v", views)

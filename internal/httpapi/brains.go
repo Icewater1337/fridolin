@@ -1,11 +1,10 @@
-package main
+package httpapi
 
 import (
 	"encoding/json"
 	"errors"
 	"github.com/Icewater1337/fridolin/internal/apperr"
 	"github.com/Icewater1337/fridolin/internal/brain"
-	"github.com/Icewater1337/fridolin/internal/httpapi"
 	"github.com/Icewater1337/fridolin/internal/manifest"
 	"github.com/Icewater1337/fridolin/internal/registry"
 	"net/http"
@@ -35,7 +34,7 @@ type BrainsAPI struct {
 }
 
 func (a *BrainsAPI) List(w http.ResponseWriter, r *http.Request) {
-	httpapi.WriteJSONIfChanged(w, r, a.Views())
+	WriteJSONIfChanged(w, r, a.Views())
 }
 
 // apiBrain answers GET /api/brains/{id} with that brain's entry of
@@ -50,27 +49,27 @@ func (a *BrainsAPI) Get(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 	for _, v := range a.Views() {
 		if v.ID == id {
-			httpapi.WriteJSONIfChanged(w, r, v)
+			WriteJSONIfChanged(w, r, v)
 			return
 		}
 	}
-	httpapi.WriteErr(w, http.StatusNotFound, "no such brain")
+	WriteErr(w, http.StatusNotFound, "no such brain")
 }
 
 func (a *BrainsAPI) Inspect(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		Path string `json:"path"`
 	}
-	if err := httpapi.DecodeJSON(r, &req); err != nil {
-		httpapi.WriteErr(w, http.StatusBadRequest, err.Error())
+	if err := DecodeJSON(r, &req); err != nil {
+		WriteErr(w, http.StatusBadRequest, err.Error())
 		return
 	}
 	result, err := a.Registry().Inspect(req.Path)
 	if err != nil {
-		httpapi.WriteErr(w, http.StatusBadRequest, err.Error())
+		WriteErr(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	httpapi.WriteJSON(w, http.StatusOK, result)
+	WriteJSON(w, http.StatusOK, result)
 }
 
 // apiAddBrain turns a folder into a brain: scaffold what is missing, write
@@ -86,19 +85,19 @@ func (a *BrainsAPI) Add(w http.ResponseWriter, r *http.Request) {
 		// dashboard showed it to you) instead of writing Manifest.
 		UseExisting bool `json:"use_existing"`
 	}
-	if err := httpapi.DecodeJSON(r, &req); err != nil {
-		httpapi.WriteErr(w, http.StatusBadRequest, err.Error())
+	if err := DecodeJSON(r, &req); err != nil {
+		WriteErr(w, http.StatusBadRequest, err.Error())
 		return
 	}
 	var m manifest.Manifest
 	backupGiven := false
 	if !req.UseExisting {
 		if len(req.Manifest) == 0 {
-			httpapi.WriteErr(w, http.StatusBadRequest, "manifest required (or use_existing, to add the brain.json in the folder)")
+			WriteErr(w, http.StatusBadRequest, "manifest required (or use_existing, to add the brain.json in the folder)")
 			return
 		}
-		if err := manifest.JSONError(httpapi.DecodeStrict(req.Manifest, &m)); err != nil {
-			httpapi.WriteErr(w, http.StatusBadRequest, "manifest: "+err.Error())
+		if err := manifest.JSONError(DecodeStrict(req.Manifest, &m)); err != nil {
+			WriteErr(w, http.StatusBadRequest, "manifest: "+err.Error())
 			return
 		}
 		var keys map[string]json.RawMessage
@@ -114,10 +113,10 @@ func (a *BrainsAPI) Add(w http.ResponseWriter, r *http.Request) {
 		case apperr.Unknown:
 			status = http.StatusInternalServerError
 		}
-		httpapi.WriteErr(w, status, err.Error())
+		WriteErr(w, status, err.Error())
 		return
 	}
-	httpapi.WriteJSON(w, http.StatusOK, map[string]any{"id": result.ID, "path": result.Path, "created": result.Created})
+	WriteJSON(w, http.StatusOK, map[string]any{"id": result.ID, "path": result.Path, "created": result.Created})
 }
 
 // apiUpdateBrain saves edited settings for a brain.
@@ -126,16 +125,16 @@ func (a *BrainsAPI) Update(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		Manifest manifest.Manifest `json:"manifest"`
 	}
-	if err := manifest.JSONError(httpapi.DecodeJSON(r, &req)); err != nil {
-		httpapi.WriteErr(w, http.StatusBadRequest, err.Error())
+	if err := manifest.JSONError(DecodeJSON(r, &req)); err != nil {
+		WriteErr(w, http.StatusBadRequest, err.Error())
 		return
 	}
 	err := a.Registry().Update(id, req.Manifest)
 	if err != nil {
-		httpapi.WriteErr(w, http.StatusUnprocessableEntity, err.Error())
+		WriteErr(w, http.StatusUnprocessableEntity, err.Error())
 		return
 	}
-	httpapi.WriteJSON(w, http.StatusOK, map[string]string{"status": "saved"})
+	WriteJSON(w, http.StatusOK, map[string]string{"status": "saved"})
 }
 
 // apiApproveBrain accepts the brain.json on disk, provided it is still the
@@ -148,24 +147,24 @@ func (a *BrainsAPI) Approve(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		Manifest *manifest.Manifest `json:"manifest"`
 	}
-	if err := manifest.JSONError(httpapi.DecodeJSON(r, &req)); err != nil {
-		httpapi.WriteErr(w, http.StatusBadRequest, err.Error())
+	if err := manifest.JSONError(DecodeJSON(r, &req)); err != nil {
+		WriteErr(w, http.StatusBadRequest, err.Error())
 		return
 	}
 	if req.Manifest == nil {
-		httpapi.WriteErr(w, http.StatusBadRequest, "manifest required: send the brain.json you reviewed")
+		WriteErr(w, http.StatusBadRequest, "manifest required: send the brain.json you reviewed")
 		return
 	}
 	err := a.Registry().Approve(id, *req.Manifest)
 	switch {
 	case errors.Is(err, registry.ErrReviewedManifestChanged):
-		httpapi.WriteErr(w, http.StatusConflict, err.Error())
+		WriteErr(w, http.StatusConflict, err.Error())
 		return
 	case err != nil:
-		httpapi.WriteErr(w, http.StatusUnprocessableEntity, err.Error())
+		WriteErr(w, http.StatusUnprocessableEntity, err.Error())
 		return
 	}
-	httpapi.WriteJSON(w, http.StatusOK, map[string]string{"status": "approved"})
+	WriteJSON(w, http.StatusOK, map[string]string{"status": "approved"})
 }
 
 // apiRemoveBrain stops routing to a brain. Its folder is left exactly as it is.
@@ -173,10 +172,10 @@ func (a *BrainsAPI) Remove(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 	err := a.Registry().Remove(id)
 	if err != nil {
-		httpapi.WriteErr(w, http.StatusUnprocessableEntity, err.Error())
+		WriteErr(w, http.StatusUnprocessableEntity, err.Error())
 		return
 	}
-	httpapi.WriteJSON(w, http.StatusOK, map[string]string{"status": "removed"})
+	WriteJSON(w, http.StatusOK, map[string]string{"status": "removed"})
 }
 
 // apiRemoveBrainDir removes the brain_dirs entry for the folder ?path= that
@@ -186,13 +185,13 @@ func (a *BrainsAPI) Remove(w http.ResponseWriter, r *http.Request) {
 func (a *BrainsAPI) RemoveDir(w http.ResponseWriter, r *http.Request) {
 	path := strings.TrimSpace(r.URL.Query().Get("path"))
 	if path == "" {
-		httpapi.WriteErr(w, http.StatusBadRequest, "path required")
+		WriteErr(w, http.StatusBadRequest, "path required")
 		return
 	}
 	err := a.Registry().RemoveDir(path)
 	if err != nil {
-		httpapi.WriteErr(w, http.StatusUnprocessableEntity, err.Error())
+		WriteErr(w, http.StatusUnprocessableEntity, err.Error())
 		return
 	}
-	httpapi.WriteJSON(w, http.StatusOK, map[string]string{"status": "removed"})
+	WriteJSON(w, http.StatusOK, map[string]string{"status": "removed"})
 }

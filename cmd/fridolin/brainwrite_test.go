@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"github.com/Icewater1337/fridolin/internal/httpapi"
 	"net/http/httptest"
 	"os"
 	"os/exec"
@@ -63,9 +64,9 @@ func TestNewManifestWriteFailureLeavesNoFile(t *testing.T) {
 }
 
 // brainViews returns GET /api/brains.
-func (h *harness) brainViews() []BrainView {
+func (h *harness) brainViews() []httpapi.BrainView {
 	h.t.Helper()
-	var views []BrainView
+	var views []httpapi.BrainView
 	if w := h.Do("GET", "/api/brains", nil); w.Code != 200 || json.Unmarshal(w.Body.Bytes(), &views) != nil {
 		h.t.Fatalf("GET /api/brains: %d %s", w.Code, w.Body.String())
 	}
