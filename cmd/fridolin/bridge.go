@@ -275,7 +275,7 @@ func NewBridge(cfgs *config.Store, opts BridgeOptions) (_ *Bridge, err error) {
 		}
 		return b.wa.SendMessage(ctx, jid, text)
 	}
-	b.google = NewGoogleAuth(cfgs)
+	b.google = NewGoogleAuth(googleOptionsFor(cfgs))
 	b.plaud = NewPlaudManager(cfgs, b.brainMgr)
 	b.plaud.submit = b.submitHandOff
 	b.plaud.notify = b.wa.SendMessage

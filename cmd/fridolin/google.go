@@ -22,7 +22,6 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/Icewater1337/fridolin/internal/config"
 	"github.com/Icewater1337/fridolin/internal/fsx"
 	"github.com/Icewater1337/fridolin/internal/manifest"
 )
@@ -145,9 +144,19 @@ type oauthPending struct {
 	redirectURI string
 }
 
+// GoogleOptions supplies startup paths and the live configuration operations
+// consumed by Google sign-in. The command owns configuration and manifests.
+type GoogleOptions struct {
+	ClientPath     string
+	RedirectURI    string
+	CredsDir       func() string
+	Configured     func(brainID string) bool
+	UpdateManifest func(brainID string, update func(*manifest.Manifest) error) error
+}
+
 // GoogleAuth manages the client, sign-ins and per-brain tokens.
 type GoogleAuth struct {
-	cfgs *config.Store
+	options GoogleOptions
 
 	mu         sync.Mutex
 	pending    map[string]oauthPending  // state → sign-in in progress
@@ -157,8 +166,8 @@ type GoogleAuth struct {
 
 // NewGoogleAuth creates the manager, and logs the files in the credentials
 // dir that look like the copies of the OAuth client older versions left.
-func NewGoogleAuth(cfgs *config.Store) *GoogleAuth {
-	g := &GoogleAuth{cfgs: cfgs, pending: map[string]oauthPending{}, lastError: map[string]string{}, tokenLocks: map[string]chan struct{}{}}
+func NewGoogleAuth(options GoogleOptions) *GoogleAuth {
+	g := &GoogleAuth{options: options, pending: map[string]oauthPending{}, lastError: map[string]string{}, tokenLocks: map[string]chan struct{}{}}
 	if copies := g.leftoverClientCopies(); len(copies) > 0 {
 		log.Printf("WARNING: the credentials folder holds files named like the copies of the Google OAuth client that older versions wrote for the calendar tool, "+
 			"each holding a client secret: %s. The bridge no longer reads them, and a brain the sandbox does not hold (on Linux, or with the sandbox off) can: "+
@@ -191,11 +200,11 @@ func (g *GoogleAuth) lockToken(ctx context.Context, brainID string) (unlock func
 }
 
 func (g *GoogleAuth) clientPath() string {
-	return g.cfgs.Boot().GoogleClientPath()
+	return g.options.ClientPath
 }
 
 // credsDir is where per-brain calendar files live.
-func (g *GoogleAuth) credsDir() string { return credentialsDirOf(runtimeConfig(g.cfgs)) }
+func (g *GoogleAuth) credsDir() string { return g.options.CredsDir() }
 
 func (g *GoogleAuth) tokenPath(brainID string) string {
 	return calendarTokenFile(g.credsDir(), brainID)
@@ -311,7 +320,7 @@ func (g *GoogleAuth) SetClient(data []byte) (*GoogleClient, error) {
 // itself, at the address it was started on. http_listen changes only with a
 // restart, and a sign-in started before it must come back here.
 func (g *GoogleAuth) redirectURI() string {
-	return "http://" + g.cfgs.Boot().HTTPListen + "/"
+	return g.options.RedirectURI
 }
 
 // tokenLifetime is how long an access token Google issued lasts. An
@@ -457,7 +466,7 @@ func (g *GoogleAuth) HandleCallback(w http.ResponseWriter, r *http.Request) {
 		fail("saving the token failed: " + err.Error())
 		return
 	}
-	if err := updateManifest(g.cfgs, p.brainID, func(m *manifest.Manifest) error {
+	if err := g.options.UpdateManifest(p.brainID, func(m *manifest.Manifest) error {
 		if m.Calendar == nil || m.Calendar.Account != account {
 			m.Calendar = &manifest.Calendar{Account: account, Calendars: []string{account}, Default: account}
 		}
@@ -596,12 +605,7 @@ func (g *GoogleAuth) saveToken(brainID string, tok *googleToken) error {
 
 // configured reports whether brainID is one of the configured brains.
 func (g *GoogleAuth) configured(brainID string) bool {
-	for _, ref := range g.cfgs.Get().BrainDirs {
-		if ref.Approved != nil && ref.Approved.ID == brainID {
-			return true
-		}
-	}
-	return false
+	return g.options.Configured(brainID)
 }
 
 // readCredentialFile reads a brain's file in the credentials dir without
@@ -883,7 +887,7 @@ func (g *GoogleAuth) Disconnect(ctx context.Context, brainID string, localOnly b
 	g.mu.Lock()
 	delete(g.lastError, brainID)
 	g.mu.Unlock()
-	if err := updateManifest(g.cfgs, brainID, func(m *manifest.Manifest) error { m.Calendar = nil; return nil }); err != nil {
+	if err := g.options.UpdateManifest(brainID, func(m *manifest.Manifest) error { m.Calendar = nil; return nil }); err != nil {
 		return revoked, note, fmt.Errorf("the token was deleted, but saving the brain's calendar settings failed: %w", err)
 	}
 	return revoked, note, nil
@@ -1022,7 +1026,7 @@ func (g *GoogleAuth) Select(brainID string, cal manifest.Calendar) error {
 	if cal.Default == "" || !slices.Contains(cal.Calendars, cal.Default) {
 		cal.Default = cal.Calendars[0]
 	}
-	return updateManifest(g.cfgs, brainID, func(m *manifest.Manifest) error {
+	return g.options.UpdateManifest(brainID, func(m *manifest.Manifest) error {
 		account := cal.Account
 		if account == "" && m.Calendar != nil {
 			account = m.Calendar.Account

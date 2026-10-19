@@ -1548,7 +1548,7 @@ func TestLeftoverClientCopiesAreReported(t *testing.T) {
 			// At start: one warning, naming the files but not the folder.
 			logs := captureLog(t)
 			started := make(chan struct{})
-			go func() { defer close(started); NewGoogleAuth(tb.cfgs) }()
+			go func() { defer close(started); NewGoogleAuth(googleOptionsFor(tb.cfgs)) }()
 			if !within(started, 5*time.Second) {
 				t.Fatal("looking for copies hangs")
 			}
