@@ -6,10 +6,12 @@ import (
 	"github.com/Icewater1337/fridolin/internal/fsx"
 	"github.com/Icewater1337/fridolin/internal/trigger"
 	"path/filepath"
+	"time"
 )
 
 // Defaults for optional settings.
 const (
+	DefaultPlaudInterval = time.Minute
 	DefaultHTTPListen    = "127.0.0.1:8765"
 	defaultQueueMax      = 10
 	DefaultQuietMS       = 2000
@@ -27,10 +29,10 @@ const (
 	maxConcurrentRuns        = 64
 )
 
-// Resolve derives the running configuration from the on-disk layer:
+// resolveFile derives the compatible effective JSON representation:
 // defaults, ~ expansion and platform validation from explicit inputs. It reads
 // no environment or filesystem state and writes nothing, see EnsureDirs.
-func Resolve(file *File, paths Paths, goos string) (*File, error) {
+func resolveFile(file *File, paths Paths, goos string) (*File, error) {
 	cfg, err := file.Clone()
 	if err != nil {
 		return nil, err
@@ -177,3 +179,13 @@ const (
 
 // defaultIncludeBridgeConfig is include_bridge_config's default.
 const defaultIncludeBridgeConfig = true
+
+// Resolve derives runtime values without optional policy pointers.
+// The file projection remains available for persistence and dashboard responses.
+func Resolve(file *File, paths Paths, goos string) (*Settings, error) {
+	c, err := resolveFile(file, paths, goos)
+	if err != nil {
+		return nil, err
+	}
+	return settingsOf(c, paths), nil
+}

@@ -18,8 +18,8 @@ import (
 var runTimeoutUnit = time.Minute
 
 // runTimeout is how long a brain's run may take, 0 for no limit.
-func runTimeout(c *config.File) time.Duration {
-	return time.Duration(c.RunMinutes()) * runTimeoutUnit
+func runTimeout(c *config.Settings) time.Duration {
+	return c.RunTimeout / time.Minute * runTimeoutUnit
 }
 
 // protectDataDir takes group and other access away from the data dir and
@@ -37,7 +37,7 @@ func runTimeout(c *config.File) time.Duration {
 // dir, which may be shared on purpose. bridge.db itself is 0600 either way.
 // A chmod that fails is logged, not fatal, so an upgrade cannot keep a
 // working bridge from starting.
-func protectDataDir(cfg *config.File) {
+func protectDataDir(cfg *config.Settings) {
 	// Compare absolute, resolved paths: a relative data_dir such as "."
 	// depends on the folder the bridge was started from, and fsx.Within
 	// cannot relate it to the home folder, so it would get past the home
@@ -115,9 +115,9 @@ func ConfigOptions() config.Options {
 	return config.Options{Paths: ConfigPaths(), GOOS: runtime.GOOS, Getenv: os.Getenv, CheckBrains: CheckSet}
 }
 
-func LoadConfig(path string) (*config.File, error) { return config.Load(path, ConfigOptions()) }
+func LoadConfig(path string) (*config.Settings, error) { return config.Load(path, ConfigOptions()) }
 
-func LoadExistingConfig(path string) (*config.File, error) {
+func LoadExistingConfig(path string) (*config.Settings, error) {
 	return config.LoadExisting(path, ConfigOptions())
 }
 

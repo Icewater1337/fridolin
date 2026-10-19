@@ -10,7 +10,7 @@ import (
 // groupHeardSummary says for fridolin check whose messages in the allowed
 // group g reach its brain, as groupSenderAllowed decides, besides the
 // bridge's own account, which always does.
-func groupHeardSummary(cfg *config.File, g string) string {
+func groupHeardSummary(cfg *config.Settings, g string) string {
 	members, listed := cfg.GroupMembers[g]
 	switch {
 	case listed && slices.Equal(members, []string{AnyMember}):

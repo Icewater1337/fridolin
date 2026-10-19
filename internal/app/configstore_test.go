@@ -8,6 +8,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/Icewater1337/fridolin/internal/config"
 
@@ -140,7 +141,7 @@ func effectiveJSON(t *testing.T, path string) string {
 	if err != nil {
 		t.Fatal(err)
 	}
-	data, err := json.Marshal(cfg)
+	data, err := json.Marshal(config.EffectiveFile(cfg))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -153,20 +154,20 @@ func TestConfigDefaultsAndLoopbackOnly(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if cfg.HTTPListen != config.DefaultHTTPListen || !cfg.HTTPEnabled() {
+	if cfg.HTTPListen != config.DefaultHTTPListen || !cfg.HTTPEnabled {
 		t.Errorf("http_listen default = %q", cfg.HTTPListen)
 	}
-	if cfg.Queue.Mode != "queue" || cfg.DebounceQuietMS() != config.DefaultQuietMS || !cfg.QueueNotify() || !cfg.DashboardRequiresToken() {
+	if cfg.Queue.Mode != "queue" || cfg.Debounce.Quiet != time.Duration(config.DefaultQuietMS)*time.Millisecond || !cfg.Queue.Notify || !cfg.Dashboard.RequireToken {
 		t.Error("unexpected defaults")
 	}
-	if cfg.AllowsAnyDM() || cfg.AllowAnyDM == nil || *cfg.AllowAnyDM {
+	if cfg.AllowAnyDM {
 		t.Error("an unset allow_any_dm must mean false, and the effective config must say so")
 	}
-	if (&config.File{}).AllowsAnyDM() {
-		t.Error("a Config built without the defaults must not let anyone DM either")
+	if resolvedSettings(t, &config.File{}).AllowAnyDM {
+		t.Error("an empty file must resolve to closed DM access")
 	}
 	cfg, err = LoadConfig(writeConfig(t, `{"http_listen":"off"}`))
-	if err != nil || cfg.HTTPEnabled() {
+	if err != nil || cfg.HTTPEnabled {
 		t.Error(`"off" must disable the HTTP server`)
 	}
 	if _, err := LoadConfig(writeConfig(t, `{"http_listen":"0.0.0.0:8765"}`)); err == nil {
@@ -184,7 +185,7 @@ func TestStarterConfigLoads(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if cfg.AllowsAnyDM() {
+	if cfg.AllowAnyDM {
 		t.Error("a fresh install must not answer strangers")
 	}
 	// An older bridge rolled back to runs classic mode without the key.

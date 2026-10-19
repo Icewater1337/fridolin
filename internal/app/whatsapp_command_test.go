@@ -93,7 +93,7 @@ func FuzzNumberAllowed(f *testing.F) {
 			allowed = strings.Split(list, ",")
 		}
 		cfg := &config.File{AllowedNumbers: allowed, AllowAnyDM: &anyDM}
-		got := NumberAllowed(cfg, number)
+		got := NumberAllowed(resolvedSettings(t, cfg), number)
 		if len(allowed) == 0 {
 			if got != anyDM {
 				t.Errorf("with no allowed_numbers and allow_any_dm %v, %q allowed: %v", anyDM, number, got)
@@ -112,7 +112,7 @@ func FuzzNumberAllowed(f *testing.F) {
 			t.Errorf("allowed_numbers %q: %q allowed: %v, listed: %v", allowed, number, got, listed)
 		}
 		other := !anyDM
-		if NumberAllowed(&config.File{AllowedNumbers: allowed, AllowAnyDM: &other}, number) != got {
+		if NumberAllowed(resolvedSettings(t, &config.File{AllowedNumbers: allowed, AllowAnyDM: &other}), number) != got {
 			t.Errorf("allowed_numbers %q: allow_any_dm changes whether %q is allowed", allowed, number)
 		}
 		for _, a := range allowed {
@@ -122,12 +122,12 @@ func FuzzNumberAllowed(f *testing.F) {
 			}
 			// A sender, as WhatsApp reports one, in every form.
 			for _, jid := range []string{p, "+" + p, p + "@s.whatsapp.net", "+" + p + "@s.whatsapp.net"} {
-				if !NumberAllowed(cfg, chat.NormalizeJID(jid)) {
+				if !NumberAllowed(resolvedSettings(t, cfg), chat.NormalizeJID(jid)) {
 					t.Errorf("allowed_numbers %q: %q is refused", allowed, jid)
 				}
 			}
 			// A number one digit longer is someone else.
-			if canon(p+"1") != canon(number) && NumberAllowed(&config.File{AllowedNumbers: []string{a}, AllowAnyDM: &anyDM}, p+"1") {
+			if canon(p+"1") != canon(number) && NumberAllowed(resolvedSettings(t, &config.File{AllowedNumbers: []string{a}, AllowAnyDM: &anyDM}), p+"1") {
 				t.Errorf("allowed_numbers [%q]: %q, a longer number, is allowed", a, p+"1")
 			}
 		}

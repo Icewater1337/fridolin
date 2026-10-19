@@ -65,7 +65,7 @@ var rcloneFallbacks = func() []string {
 // entry, no restore needs to write. The folders of your own files are the
 // exception, ~/Documents and the rest of sandboxUserFileFolders(): brains live
 // there, and so may a restored one, as CheckBrainPath lets a new one.
-func checkRestoreTarget(target string, cfg *config.File, home string) error {
+func checkRestoreTarget(target string, cfg *config.Settings, home string) error {
 	var denied []sandbox.ProtectedPath
 	for _, p := range sandboxPolicyOf(cfg).protected(home, ownLayout()) {
 		if !slices.ContainsFunc(sandbox.UserFileFolders(), func(sub string) bool { return p.Path == filepath.Join(home, sub) }) {

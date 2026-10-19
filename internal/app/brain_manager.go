@@ -26,7 +26,7 @@ type BrainManager struct {
 	issues   []registry.Issue
 }
 
-func newCommandBrainManager(cfg *config.File) *BrainManager {
+func newCommandBrainManager(cfg *config.Settings) *BrainManager {
 	hooks := &BrainHooks{}
 	profiler := NewSandboxProfiler(nil, cfg)
 	return &BrainManager{
@@ -41,7 +41,7 @@ func newCommandBrainManager(cfg *config.File) *BrainManager {
 }
 
 // NewBrainManager builds the configured brains.
-func NewBrainManager(cfg *config.File) (*BrainManager, error) {
+func NewBrainManager(cfg *config.Settings) (*BrainManager, error) {
 	bm := newCommandBrainManager(cfg)
 	if err := bm.Apply(cfg); err != nil {
 		return nil, err
@@ -57,7 +57,7 @@ func (bm *BrainManager) SetHooks(h BrainHooks) {
 
 // Apply establishes the bridge PATH before resolving brain folders against
 // it, then passes a value projection and host callbacks to the runtime.
-func (bm *BrainManager) Apply(cfg *config.File) error {
+func (bm *BrainManager) Apply(cfg *config.Settings) error {
 	bm.applyMu.Lock()
 	defer bm.applyMu.Unlock()
 	ownPATH := SetBridgePATH(cfg)
@@ -65,13 +65,13 @@ func (bm *BrainManager) Apply(cfg *config.File) error {
 	return bm.reloadLocked(specs, issues, cfg, ownPATH)
 }
 
-func (bm *BrainManager) reload(specs []manifest.Spec, issues []registry.Issue, cfg *config.File, ownPATH map[string][]string) error {
+func (bm *BrainManager) reload(specs []manifest.Spec, issues []registry.Issue, cfg *config.Settings, ownPATH map[string][]string) error {
 	bm.applyMu.Lock()
 	defer bm.applyMu.Unlock()
 	return bm.reloadLocked(specs, issues, cfg, ownPATH)
 }
 
-func (bm *BrainManager) reloadLocked(specs []manifest.Spec, issues []registry.Issue, cfg *config.File, ownPATH map[string][]string) error {
+func (bm *BrainManager) reloadLocked(specs []manifest.Spec, issues []registry.Issue, cfg *config.Settings, ownPATH map[string][]string) error {
 	failures, err := bm.Manager.Apply(specs, brainGlobalsOf(cfg), brain.ApplyOptions{
 		Held: HeldBrainRoutes(issues), OwnPATH: ownPATH,
 		SetDirs: func(dirs map[string][]string) { bm.profiler.Update(dirs, cfg) },

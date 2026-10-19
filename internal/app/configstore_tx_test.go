@@ -179,7 +179,7 @@ func TestConfigSubscribersHearUpdatesInOrder(t *testing.T) {
 	var heard []string
 	inA := make(chan struct{})
 	heardB := make(chan struct{})
-	cs.Subscribe(func(_, next *config.File) {
+	cs.Subscribe(func(_, next *config.Settings) {
 		if next.Comment == "a" {
 			close(inA)
 			// B commits meanwhile; its notification must wait for this one.
@@ -221,13 +221,13 @@ func TestConfigSubscribersHearUpdatesInOrder(t *testing.T) {
 func TestConfigSubscriberPanicIsLogged(t *testing.T) {
 	cs := openTxStore(t, `{}`)
 	logs := captureLog(t)
-	cs.Subscribe(func(_, next *config.File) {
+	cs.Subscribe(func(_, next *config.Settings) {
 		if next.Comment == "boom" {
 			panic("subscriber")
 		}
 	})
 	var heard []string
-	cs.Subscribe(func(_, next *config.File) { heard = append(heard, next.Comment) })
+	cs.Subscribe(func(_, next *config.Settings) { heard = append(heard, next.Comment) })
 	if _, err := cs.Update("", func(c *config.File) error { c.Comment = "boom"; return nil }); err != nil {
 		t.Fatal(err)
 	}
@@ -290,7 +290,7 @@ func TestBridgeAppliesTheLatestConfigOnALateNotification(t *testing.T) {
 	before := tb.cfgs.Snapshot()
 	first := rename("First")
 	rename("Second")
-	tb.configChanged(before.Effective, first.Effective) // the first update's, late
+	tb.configChanged(before.Settings, first.Settings) // the first update's, late
 	if got := tb.brainMgr.Get("main").Snapshot().Name; got != "Second" {
 		t.Errorf("after a late notification the brain runs as %q, want Second", got)
 	}
@@ -304,7 +304,7 @@ func TestPutConfigSendsItsOwnETag(t *testing.T) {
 	var once sync.Once
 	var putETag string
 	later := make(chan error, 1)
-	tb.cfgs.Subscribe(func(_, next *config.File) {
+	tb.cfgs.Subscribe(func(_, next *config.Settings) {
 		if next.LogLevel != "debug" {
 			return
 		}

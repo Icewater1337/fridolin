@@ -9,7 +9,7 @@ func (b *App) newBackupAPI() *httpapi.BackupAPI {
 	return &httpapi.BackupAPI{
 		Backup:        func() httpapi.BackupService { return b.backup },
 		UpdateConfig:  func(update func(*config.File) error) error { _, err := b.cfgs.Update("", update); return err },
-		IncludeBridge: func() bool { return b.cfgs.Get().Backup.IncludeBridge() },
+		IncludeBridge: func() bool { return b.cfgs.Get().Live.Backup.IncludeBridgeConfig },
 		UpdateBrain: func(id string, enabled *bool, exclude []string) error {
 			return b.registry.UpdateBackup(id, enabled, exclude)
 		},

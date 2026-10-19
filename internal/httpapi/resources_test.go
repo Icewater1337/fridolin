@@ -23,7 +23,7 @@ type configReadFake struct {
 func (f *configReadFake) Snapshot() config.Snapshot { f.reads++; return f.snapshot }
 func (f *configReadFake) Path() string              { return "config.json" }
 func TestConfigGetUsesOneSnapshotWithoutMutatingIt(t *testing.T) {
-	f := &configReadFake{snapshot: config.Snapshot{File: &config.File{BrainDirs: []config.BrainRef{{Path: "brain"}}}, Effective: &config.File{BrainDirs: []config.BrainRef{{Path: "brain"}}}, ETag: "revision"}}
+	f := &configReadFake{snapshot: config.Snapshot{File: &config.File{BrainDirs: []config.BrainRef{{Path: "brain"}}}, Effective: &config.File{BrainDirs: []config.BrainRef{{Path: "brain"}}}, Settings: &config.Settings{Live: config.Live{BrainDirs: []config.BrainRef{{Path: "brain"}}}}, ETag: "revision"}}
 	a := ConfigAPI{Store: func() ConfigStore { return f }}
 	w := httptest.NewRecorder()
 	a.Get(w, httptest.NewRequest("GET", "/config", nil))
@@ -31,7 +31,7 @@ func TestConfigGetUsesOneSnapshotWithoutMutatingIt(t *testing.T) {
 	if err := json.Unmarshal(w.Body.Bytes(), &response); err != nil {
 		t.Fatal(err)
 	}
-	if f.reads != 1 || response.ETag != "revision" || len(response.Config.BrainDirs) != 0 || len(response.Effective.BrainDirs) != 0 || len(f.snapshot.File.BrainDirs) != 1 || len(f.snapshot.Effective.BrainDirs) != 1 {
+	if f.reads != 1 || response.ETag != "revision" || len(response.Config.BrainDirs) != 0 || len(response.Effective.BrainDirs) != 0 || len(f.snapshot.File.BrainDirs) != 1 || len(f.snapshot.Settings.Live.BrainDirs) != 1 {
 		t.Fatalf("reads=%d response=%+v", f.reads, response)
 	}
 }

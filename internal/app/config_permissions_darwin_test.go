@@ -35,7 +35,7 @@ func TestProtectDataDirWarnsWhenChmodFails(t *testing.T) {
 	makeImmutable(t, data)
 	logs := captureLog(t)
 
-	protectDataDir(&config.File{DataDir: data, DBPath: filepath.Join(data, "bridge.db")})
+	protectDataDir(resolvedSettings(t, &config.File{DataDir: data, DBPath: filepath.Join(data, "bridge.db")}))
 
 	if got := permOf(t, data); got != 0o755 {
 		t.Errorf("immutable data dir has mode %04o, want 0755 unchanged", got)

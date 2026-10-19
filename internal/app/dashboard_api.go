@@ -42,7 +42,7 @@ func (b *App) statusSnapshot(ctx context.Context) httpapi.StatusResponse {
 		Platform:      runtime.GOOS,
 		WhatsApp:      httpapi.WhatsAppStatus{LinkState: wa, QRAvailable: wa.QRCode != ""},
 		Claude:        ClaudeInfo(cfg.ClaudePath, cfg.ChildEnvPassthrough),
-		AgentProvider: cfg.AgentProvider,
+		AgentProvider: string(cfg.AgentProvider),
 		Sandbox:       httpapi.SandboxStatus{Enabled: cfg.Sandbox.Enabled, Supported: runtime.GOOS == "darwin"},
 		Issues:        nonNil(b.brainIssues(cfg)),
 		Warnings:      nonNil(b.Warnings()),
@@ -77,7 +77,7 @@ func (b *App) statusSnapshot(ctx context.Context) httpapi.StatusResponse {
 	if w := claudecli.VersionWarning(resp.Claude); cfg.AgentProvider != "codex" && w != "" {
 		resp.Warnings = append(resp.Warnings, w)
 	}
-	if cfg.TokenlessSend() {
+	if cfg.ScriptAPI.TokenlessSend {
 		resp.Warnings = append(resp.Warnings, "/send works without a token (script_api.tokenless_send), so any program on this computer, brains included, can message your allowed chats. Have your scripts send the token in scripts.token in the data folder, then turn it off under Settings → Advanced.")
 	}
 	if cfg.AgentProvider != "codex" && cfg.InheritClaudeUserConfig {
@@ -108,12 +108,12 @@ func (b *App) statusSnapshot(ctx context.Context) httpapi.StatusResponse {
 // permissions run without a sandbox, which on any OS lets them read the
 // token (and the rest of the data dir) themselves. A sandbox that is on
 // but cannot run gets its own warning: brains then refuse every message.
-func (b *App) tokenWarnings(cfg *config.File, goos string) []string {
+func (b *App) tokenWarnings(cfg *config.Settings, goos string) []string {
 	var out []string
 	switch {
 	case !b.requiresToken():
 		out = append(out, "The dashboard token is off (dashboard.require_token): any program on this computer, brains included, can change every setting, allow chats and turn the sandbox off. Turn it on under Settings → Advanced.")
-	case !cfg.DashboardRequiresToken():
+	case !cfg.Dashboard.RequireToken:
 		out = append(out, "The dashboard token was turned off (dashboard.require_token). That takes effect at the next restart: from then on any program on this computer, brains included, can change every setting. Turn it back on under Settings → Advanced to keep it.")
 	}
 	if cfg.DangerouslySkipPermissions && !cfg.Sandbox.Enabled {
@@ -208,7 +208,7 @@ func sandboxProfileWarning(bm *BrainManager) string {
 // drift shows as soon as a brain.json changes, plus the folders the brain
 // manager could not open when it last loaded the brains, which only it
 // knows of.
-func (b *App) brainIssues(cfg *config.File) []registry.Issue {
+func (b *App) brainIssues(cfg *config.Settings) []registry.Issue {
 	_, issues := ResolveBrains(cfg)
 	for _, is := range b.brainMgr.Issues() {
 		if is.AtLoad {

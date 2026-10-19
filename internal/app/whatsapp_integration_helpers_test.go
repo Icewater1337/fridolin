@@ -42,10 +42,13 @@ func (l testWaLogger) Errorf(msg string, args ...interface{}) { l.add("ERROR", m
 func (l testWaLogger) Sub(string) waLog.Logger                { return l }
 func newTestWhatsApp(t *testing.T, configure ...func(*whatsapp.Options)) *testWhatsApp {
 	t.Helper()
-	cfg := &config.File{AllowedNumbers: []string{"15551234567"}, MediaDir: t.TempDir(), MaxChunkSize: 4000}
+	cfg, err := config.Resolve(&config.File{AllowedNumbers: []string{"15551234567"}, MediaDir: t.TempDir(), MaxChunkSize: 4000}, config.Paths{Home: t.TempDir()}, "linux")
+	if err != nil {
+		t.Fatal(err)
+	}
 	tw := &testWhatsApp{inbound: make(chan brain.Inbound, 4), notices: make(chan string, 4)}
 	tw.handler = func(_ context.Context, m brain.Inbound) { tw.inbound <- m }
-	opts := whatsapp.Options{Settings: whatsAppSettings(func() *config.File { return cfg }), Container: fixedDeviceContainer{&store.Device{}}, Chunks: outboundmsg.Chunk, Identity: whatsAppIdentity(), Outbound: whatsAppOutbound(), Text: whatsAppText(), Inbox: mediaInboxAt, Log: testWaLogger{tw},
+	opts := whatsapp.Options{Settings: whatsAppSettings(func() config.Settings { return *cfg }), Container: fixedDeviceContainer{&store.Device{}}, Chunks: outboundmsg.Chunk, Identity: whatsAppIdentity(), Outbound: whatsAppOutbound(), Text: whatsAppText(), Inbox: mediaInboxAt, Log: testWaLogger{tw},
 		OnInbound: func(ctx context.Context, m chat.Inbound) { tw.handler(ctx, brain.Inbound{Inbound: m}) }, Notify: func(jid, text string) { tw.notices <- jid + ": " + text }}
 	for _, apply := range configure {
 		apply(&opts)

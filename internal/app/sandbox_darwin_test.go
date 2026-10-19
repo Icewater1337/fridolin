@@ -1098,7 +1098,7 @@ func TestSandboxDeniesTheConfigFile(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	sp := NewSandboxProfiler(map[string][]string{"a": {filepath.Join(home, "a")}}, &config.File{DataDir: filepath.Join(home, ".fridolin")})
+	sp := NewSandboxProfiler(map[string][]string{"a": {filepath.Join(home, "a")}}, resolvedSettings(t, &config.File{DataDir: filepath.Join(home, ".fridolin")}))
 	sp.SetConfigFile(filepath.Join(home, "etc", "config.json"))
 	for _, cmd := range []string{
 		`cat "$HOME/etc/config.json"`,
@@ -1143,7 +1143,7 @@ func TestSandboxAllowPathsKeepBridgeSecrets(t *testing.T) {
 		DBPath:  filepath.Join(home, ".fridolin", "bridge.db"),
 		Sandbox: config.SandboxConfig{AllowPaths: []string{filepath.Join(home, ".fridolin"), filepath.Join(home, "team"), filepath.Join(home, "Documents", "share"), filepath.Join(home, "Library")}},
 	}
-	sp := NewSandboxProfiler(map[string][]string{"a": {filepath.Join(home, "a")}, "b": {filepath.Join(home, "team", "b")}}, cfg)
+	sp := NewSandboxProfiler(map[string][]string{"a": {filepath.Join(home, "a")}, "b": {filepath.Join(home, "team", "b")}}, resolvedSettings(t, cfg))
 	for _, c := range []struct {
 		path         string
 		write, allow bool
@@ -1295,7 +1295,7 @@ func TestSandboxOwnFolderKeepsWhatIsInsideIt(t *testing.T) {
 		DenyPaths:  []string{box + "/work/private"},
 		AllowPaths: []string{box + "/work/private/share"},
 	}}
-	sp := NewSandboxProfiler(map[string][]string{"a": {box}}, cfg)
+	sp := NewSandboxProfiler(map[string][]string{"a": {box}}, resolvedSettings(t, cfg))
 	cases := []struct {
 		name, cmd string // cmd runs in sh with $B set to the brain's folder
 		allow     bool
@@ -1320,7 +1320,7 @@ func TestSandboxOwnFolderKeepsWhatIsInsideIt(t *testing.T) {
 
 	for name, dir := range map[string]string{"your home folder": home, "a folder holding the data dir": filepath.Dir(cfg.DataDir) + "/x/.."} {
 		t.Run("a brain at "+name+" is refused", func(t *testing.T) {
-			sp := NewSandboxProfiler(map[string][]string{"a": {filepath.Clean(dir)}}, cfg)
+			sp := NewSandboxProfiler(map[string][]string{"a": {filepath.Clean(dir)}}, resolvedSettings(t, cfg))
 			if bin, args, err := sp.Command("a", "/bin/cat", []string{cfg.DataDir + "/dashboard.token"}); err == nil {
 				t.Errorf("Command = %s %q, want it refused", bin, args)
 			}

@@ -51,7 +51,9 @@ func outbound(t *testing.T, br *brain.Brain) map[string][]string {
 func TestRepliesAreRecordedAsSent(t *testing.T) {
 	const poll = "[POLL]\nQuestion: Lunch?\n- Yes\n- No\n[/POLL]"
 	const pollText = "📊 *Lunch?*\n1. Yes\n2. No"
-	offline := func(tb *testBridge) Messenger { return newFlakyMessenger(tb.cfgs.Get, false) }
+	offline := func(tb *testBridge) Messenger {
+		return newFlakyMessenger(func() int { return tb.cfgs.Get().MaxChunkSize }, false)
+	}
 	refusePolls := func(tb *testBridge) Messenger { return pollRefuser{tb.dev} }
 	cases := []struct {
 		name   string
@@ -160,7 +162,7 @@ func TestMidRunMessagesOnlyForAddressedMessages(t *testing.T) {
 			}
 			chatJID := func() []string { return tb.sentTo(c.m.JID) }
 			if c.offline {
-				wa := newFlakyMessenger(tb.cfgs.Get, false)
+				wa := newFlakyMessenger(func() int { return tb.cfgs.Get().MaxChunkSize }, false)
 				tb.wa = wa
 				chatJID = func() []string { return wa.sent(c.m.JID) }
 			}

@@ -16,9 +16,9 @@ import (
 )
 
 func TestWhatsAppProjectionReadBoundaries(t *testing.T) {
-	cfg := &config.File{AllowedNumbers: []string{"15551234567"}, MediaDir: "incoming", MaxChunkSize: 4000, MaxMediaMB: 12}
+	cfg := config.Settings{Boot: config.Boot{MediaDir: "incoming"}, Live: config.Live{AllowedNumbers: []string{"15551234567"}, MaxChunkSize: 4000, MaxMediaMB: 12}}
 	reads := 0
-	get := func() *config.File { reads++; return cfg }
+	get := func() config.Settings { reads++; return cfg }
 	s := openTestStore(t, filepath.Join(t.TempDir(), "bridge.db"))
 	opts := whatsAppOptions(get, s, nil, nil)
 	wa, err := whatsapp.New(opts)
@@ -30,12 +30,12 @@ func TestWhatsAppProjectionReadBoundaries(t *testing.T) {
 		t.Fatalf("constructor config reads = %d, want initial log-level read only", reads)
 	}
 	first := opts.Settings()
-	if reads != 2 || first.MediaDir != cfg.MediaDir || first.MaxChunkSize != 4000 || first.MaxMediaBytes != cfg.MaxMediaBytes() || !reflect.DeepEqual(first.AllowedNumbers, cfg.AllowedNumbers) {
+	if reads != 2 || first.MediaDir != cfg.Boot.MediaDir || first.MaxChunkSize != 4000 || first.MaxMediaBytes != int64(cfg.Live.MaxMediaMB)*1024*1024 || !reflect.DeepEqual(first.AllowedNumbers, cfg.Live.AllowedNumbers) {
 		t.Fatalf("first settings = %+v, reads=%d", first, reads)
 	}
-	cfg = &config.File{AllowedNumbers: []string{"15559876543"}, MediaDir: "later", MaxChunkSize: 2000, MaxMediaMB: 24}
+	cfg = config.Settings{Boot: config.Boot{MediaDir: "later"}, Live: config.Live{AllowedNumbers: []string{"15559876543"}, MaxChunkSize: 2000, MaxMediaMB: 24}}
 	second := opts.Settings()
-	if reads != 3 || second.MediaDir != "later" || second.MaxChunkSize != 2000 || second.MaxMediaBytes != cfg.MaxMediaBytes() || second.AllowedNumbers[0] != "15559876543" {
+	if reads != 3 || second.MediaDir != "later" || second.MaxChunkSize != 2000 || second.MaxMediaBytes != int64(cfg.Live.MaxMediaMB)*1024*1024 || second.AllowedNumbers[0] != "15559876543" {
 		t.Fatalf("later settings = %+v, reads=%d", second, reads)
 	}
 	if first.MediaDir != "incoming" || first.MaxChunkSize != 4000 || first.AllowedNumbers[0] != "15551234567" {

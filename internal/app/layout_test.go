@@ -148,7 +148,7 @@ func TestCheckBrainPathRefusesTheBridgesOwnFolders(t *testing.T) {
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			useLayout(t, c.layout)
-			_, problems, _ := CheckBrainPath(c.path, cfg, nil)
+			_, problems, _ := CheckBrainPath(c.path, resolvedSettings(t, cfg), nil)
 			all := strings.Join(problems, "\n")
 			for _, w := range []string{checkout, install} {
 				if got := strings.Contains(all, w); got != (w == c.want) {
@@ -193,7 +193,7 @@ func TestSandboxProfileProtectsTheBridgesOwnFiles(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			sp := NewSandboxProfiler(map[string][]string{"a": {home + "/a"}}, &config.File{ClaudePath: "claude", DataDir: home + "/.fridolin"})
+			sp := NewSandboxProfiler(map[string][]string{"a": {home + "/a"}}, resolvedSettings(t, &config.File{ClaudePath: "claude", DataDir: home + "/.fridolin"}))
 			sp.bridgeExe = c.exe
 			profile := mustProfile(t, sp, "a")
 			if !strings.Contains(profile, `(deny file-write* (literal "`+c.exe+`"))`) {

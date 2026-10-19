@@ -124,7 +124,10 @@ func (a *BackupAPI) Run(w http.ResponseWriter, r *http.Request) {
 		WriteErr(w, http.StatusBadRequest, "force needs a brain: name the brains to mirror in \"brains\"")
 		return
 	}
-	include := config.BoolOr(req.IncludeBridge, a.IncludeBridge())
+	include := a.IncludeBridge()
+	if req.IncludeBridge != nil {
+		include = *req.IncludeBridge
+	}
 	if err := a.Backup().StartRun(req.Brains, include, "manual", req.Force); err != nil {
 		WriteErr(w, http.StatusConflict, err.Error())
 		return

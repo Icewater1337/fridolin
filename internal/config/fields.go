@@ -10,20 +10,20 @@ type Field struct {
 }
 type fieldSpec struct {
 	Field
-	get   func(*File) string
-	waits func(start, now *File) bool
+	get   func(*Settings) string
+	waits func(start, now *Settings) bool
 }
 
 // fields is the single inventory of config leaves, with restart rows first in
 // their established reporting order. Collections and custom JSON values are leaves.
 var fields = []fieldSpec{
-	{Field: Field{Name: "http_listen", Boot: true}, get: func(c *File) string { return c.HTTPListen }},
-	{Field: Field{Name: "data_dir", Boot: true}, get: func(c *File) string { return c.DataDir }},
-	{Field: Field{Name: "db_path", Boot: true}, get: func(c *File) string { return c.DBPath }},
-	{Field: Field{Name: "media_dir", Boot: true}, get: func(c *File) string { return c.MediaDir }},
-	{Field: Field{Name: "log_level", Boot: true}, get: func(c *File) string { return c.LogLevel }},
-	{Field: Field{Name: "dashboard.disabled", Boot: true}, get: func(c *File) string { return fmt.Sprint(c.Dashboard.Disabled) }},
-	{Field: Field{Name: "dashboard.require_token", Boot: true}, waits: func(start, now *File) bool { return start.DashboardRequiresToken() && !now.DashboardRequiresToken() }},
+	{Field: Field{Name: "http_listen", Boot: true}, get: func(c *Settings) string { return c.HTTPListen }},
+	{Field: Field{Name: "data_dir", Boot: true}, get: func(c *Settings) string { return c.DataDir }},
+	{Field: Field{Name: "db_path", Boot: true}, get: func(c *Settings) string { return c.DBPath }},
+	{Field: Field{Name: "media_dir", Boot: true}, get: func(c *Settings) string { return c.MediaDir }},
+	{Field: Field{Name: "log_level", Boot: true}, get: func(c *Settings) string { return c.LogLevel }},
+	{Field: Field{Name: "dashboard.disabled", Boot: true}, get: func(c *Settings) string { return fmt.Sprint(c.Dashboard.Disabled) }},
+	{Field: Field{Name: "dashboard.require_token", Boot: true}, waits: func(start, now *Settings) bool { return start.Dashboard.RequireToken && !now.Dashboard.RequireToken }},
 	{Field: Field{Name: "_comment"}},
 	{Field: Field{Name: "version"}},
 	{Field: Field{Name: "allowed_numbers"}},
@@ -106,7 +106,7 @@ func RestartFieldNames() []string {
 	return out
 }
 
-func restartRequired(old, next *File) []string {
+func restartRequired(old, next *Settings) []string {
 	var out []string
 	for _, f := range fields {
 		if !f.Boot {

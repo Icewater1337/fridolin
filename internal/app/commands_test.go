@@ -16,6 +16,7 @@ import (
 	"github.com/Icewater1337/fridolin/internal/activity"
 	"github.com/Icewater1337/fridolin/internal/brain"
 	"github.com/Icewater1337/fridolin/internal/chat"
+	"github.com/Icewater1337/fridolin/internal/config"
 	"github.com/Icewater1337/fridolin/internal/history"
 	"github.com/Icewater1337/fridolin/internal/manifest"
 	"github.com/Icewater1337/fridolin/internal/toolcli"
@@ -81,7 +82,7 @@ func (c fixedDeviceContainer) NewDevice() *store.Device { return &store.Device{}
 
 func (tb *testBridge) whatsAppOffline(t *testing.T, dev *store.Device, configure ...func(*whatsapp.Options)) *whatsapp.Client {
 	t.Helper()
-	opts := whatsAppOptions(tb.cfgs.Get, tb.store, tb.handleInbound, nil)
+	opts := whatsAppOptions(func() config.Settings { return *tb.cfgs.Get() }, tb.store, tb.handleInbound, nil)
 	opts.Container = fixedDeviceContainer{dev}
 	opts.Log = waLog.Noop
 	opts.OnVote = whatsAppVoteHandler(tb.recordVote)

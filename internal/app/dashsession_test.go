@@ -443,7 +443,7 @@ func TestDashboardLink(t *testing.T) {
 			if err := os.WriteFile(filepath.Join(cfg.DataDir, "dashboard.token"), []byte(token+"\n"), 0o600); err != nil {
 				t.Fatal(err)
 			}
-			link, err := controlcli.DashboardLink(cfg)
+			link, err := controlcli.DashboardLink(resolvedSettings(t, cfg))
 			if c.link != "" {
 				if err != nil || link != "http://"+cfg.HTTPListen+c.link {
 					t.Fatalf("link %q, %v", link, err)
@@ -529,7 +529,7 @@ func TestRotateTokenCommand(t *testing.T) {
 			id, binding, _, _ := sessions.Create()
 			cfg := &config.File{DataDir: dataDir, HTTPListen: closedPort(t)}
 			cfg.Dashboard.Disabled = c.off
-			if err := controlcli.RotateToken(cfg); err != nil {
+			if err := controlcli.RotateToken(resolvedSettings(t, cfg)); err != nil {
 				t.Fatal(err)
 			}
 			after, err := httpapi.LoadDashboardToken(dataDir)

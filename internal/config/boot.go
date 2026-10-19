@@ -10,6 +10,7 @@ import (
 // value copy: live saves keep their requested values in Config for the API and
 // next restart, while running components use these paths and startup flags.
 type Boot struct {
+	HTTPEnabled           bool   `config:"-"`
 	Home                  string `config:"-"`
 	HTTPListen            string `config:"http_listen"`
 	DataDir               string `config:"data_dir"`
@@ -22,9 +23,9 @@ type Boot struct {
 
 func bootOf(c *File, paths Paths) Boot {
 	return Boot{
-		Home: paths.Home, HTTPListen: c.HTTPListen, DataDir: c.DataDir,
+		HTTPEnabled: c.HTTPListen != "" && c.HTTPListen != "off", Home: paths.Home, HTTPListen: c.HTTPListen, DataDir: c.DataDir,
 		DBPath: c.DBPath, MediaDir: c.MediaDir, LogLevel: c.LogLevel,
-		DashboardDisabled: c.Dashboard.Disabled, DashboardRequireToken: c.DashboardRequiresToken(),
+		DashboardDisabled: c.Dashboard.Disabled, DashboardRequireToken: *c.Dashboard.RequireToken,
 	}
 }
 

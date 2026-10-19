@@ -61,7 +61,7 @@ func TestGroupSenderAllowed(t *testing.T) {
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			cfg := &config.File{AllowedNumbers: c.numbers, AllowAnyDM: c.anyDM, AllowedGroups: []string{group, other}, GroupMembers: c.members}
-			if got := groupSenderAllowed(cfg, group, c.sender); got != c.want {
+			if got := groupSenderAllowed(resolvedSettings(t, cfg), group, c.sender); got != c.want {
 				t.Errorf("groupSenderAllowed(%+v) = %v, want %v", c.sender, got, c.want)
 			}
 		})
@@ -87,7 +87,7 @@ func FuzzGroupSenderAllowed(f *testing.F) {
 		if list != "" {
 			members = strings.Split(list, ",")
 		}
-		cfg := &config.File{AllowedGroups: []string{testGroup}, AllowAnyDM: &anyDM, GroupMembers: map[string][]string{testGroup: members}}
+		cfg := &config.Settings{Live: config.Live{AllowedGroups: []string{testGroup}, AllowAnyDM: anyDM, GroupMembers: map[string][]string{testGroup: members}}}
 		got := groupSenderAllowed(cfg, testGroup, groupSender{Number: number, Resolved: resolved})
 		if slices.Equal(members, []string{AnyMember}) {
 			if !got {
@@ -294,8 +294,8 @@ func TestNoGroupWarningWhileAnyoneMayDM(t *testing.T) {
 func TestLogSecurityChangesNamesGroupMembers(t *testing.T) {
 	const other = "120363000000000001@g.us"
 	logged := captureLog(t)
-	prev := &config.File{GroupMembers: map[string][]string{testGroup: {"15551234567"}}}
-	next := &config.File{GroupMembers: map[string][]string{testGroup: {"15559876543"}, other: {}}}
+	prev := &config.Settings{Live: config.Live{GroupMembers: map[string][]string{testGroup: {"15551234567"}}}}
+	next := &config.Settings{Live: config.Live{GroupMembers: map[string][]string{testGroup: {"15559876543"}, other: {}}}}
 	config.LogSecurityChanges(prev, next)
 	got := strings.Join(logged(), "\n")
 	for _, want := range []string{"group_members", "+" + testGroup + ":15559876543", "+" + other + ":", "-" + testGroup + ":15551234567"} {

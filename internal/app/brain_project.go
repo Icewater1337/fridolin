@@ -11,20 +11,20 @@ import (
 // settingsFor is the current composition boundary. The manager's later Apply
 // seam receives brainGlobals directly; configuration and host discovery stay
 // here rather than becoming imports of the brain runtime.
-func settingsFor(cfg *config.File, sp manifest.Spec) *brain.Settings {
+func settingsFor(cfg *config.Settings, sp manifest.Spec) *brain.Settings {
 	return brain.MergeSettings(brainGlobalsOf(cfg), sp)
 }
 
-func brainGlobalsOf(cfg *config.File) brain.Globals {
+func brainGlobalsOf(cfg *config.Settings) brain.Globals {
 	return brain.Globals{
-		CodexModel: cfg.CodexModel, CodexEffort: cfg.CodexEffort, RunLimit: cfg.RunLimit(),
+		CodexModel: cfg.CodexModel, CodexEffort: cfg.CodexEffort, RunLimit: cfg.MaxConcurrentRuns,
 		Defaults: brain.Settings{
-			ClaudePath: cfg.ClaudePath, Provider: cfg.AgentProvider, CodexPath: cfg.CodexPath,
+			ClaudePath: cfg.ClaudePath, Provider: string(cfg.AgentProvider), CodexPath: cfg.CodexPath,
 			Model: cfg.BrainModel, Effort: cfg.BrainEffort,
 			DisallowedTools: append([]string(nil), cfg.DisallowedTools...),
 			Dangerously:     cfg.DangerouslySkipPermissions, InheritUser: cfg.InheritClaudeUserConfig,
 			OTPGuard: cfg.OTPGuard, OTPMarkers: append([]string(nil), cfg.OTPMarkers...),
-			Viewer: cfg.Viewer, RunTimeout: runTimeout(cfg), QueueMode: cfg.Queue.Mode, MaxPending: cfg.Queue.MaxPending,
+			Viewer: cfg.Viewer, RunTimeout: runTimeout(cfg), QueueMode: string(cfg.Queue.Mode), MaxPending: cfg.Queue.MaxPending,
 			CredsDir: CredentialsDir(cfg), MediaDir: cfg.MediaDir,
 			EnvPassthrough: append([]string(nil), cfg.ChildEnvPassthrough...), ToolsDir: ownLayout().Tools,
 			// Absolute: brains run in their own folder, where a relative data_dir

@@ -73,19 +73,25 @@ func TestFieldsCoverEveryJSONLeafAndBootValue(t *testing.T) {
 
 func TestRestartRequiredOrderAndTokenTransitions(t *testing.T) {
 	t.Parallel()
-	old := &File{HTTPListen: "old", DataDir: "old", DBPath: "old", MediaDir: "old", LogLevel: "info"}
-	next := &File{HTTPListen: "new", DataDir: "new", DBPath: "new", MediaDir: "new", LogLevel: "debug", Dashboard: DashboardConfig{Disabled: true, RequireToken: new(false)}}
+	old := &Settings{Boot: Boot{HTTPListen: "old", DataDir: "old", DBPath: "old", MediaDir: "old", LogLevel: "info"}, Live: Live{Dashboard: DashboardSettings{RequireToken: true}}}
+	next := &Settings{Boot: Boot{HTTPListen: "new", DataDir: "new", DBPath: "new", MediaDir: "new", LogLevel: "debug"}, Live: Live{Dashboard: DashboardSettings{Disabled: true, RequireToken: false}}}
 	if got := restartRequired(old, next); !slices.Equal(got, RestartFieldNames()) {
 		t.Fatalf("restart = %v", got)
 	}
 	for _, start := range []*bool{nil, new(false), new(true)} {
 		for _, now := range []*bool{nil, new(false), new(true)} {
-			a := &File{Dashboard: DashboardConfig{RequireToken: start}}
-			b := &File{Dashboard: DashboardConfig{RequireToken: now}}
+			a, err := Resolve(&File{Dashboard: DashboardConfig{RequireToken: start}}, Paths{Home: t.TempDir()}, "linux")
+			if err != nil {
+				t.Fatal(err)
+			}
+			b, err := Resolve(&File{Dashboard: DashboardConfig{RequireToken: now}}, Paths{Home: t.TempDir()}, "linux")
+			if err != nil {
+				t.Fatal(err)
+			}
 			got := restartRequired(a, b)
-			want := a.DashboardRequiresToken() && !b.DashboardRequiresToken()
+			want := a.Dashboard.RequireToken && !b.Dashboard.RequireToken
 			if (len(got) != 0) != want || len(got) > 0 && got[0] != "dashboard.require_token" {
-				t.Fatalf("token transition %v -> %v: %v", a.DashboardRequiresToken(), b.DashboardRequiresToken(), got)
+				t.Fatalf("token transition %v -> %v: %v", a.Dashboard.RequireToken, b.Dashboard.RequireToken, got)
 			}
 		}
 	}

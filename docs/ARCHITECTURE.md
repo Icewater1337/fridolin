@@ -1430,40 +1430,42 @@ a real `!reset`, which writes a reset marker the next prompt stops at
 sandbox's write deny by default with each brain's own media inbox and
 state (`sandbox.go`, `media.go`, `childenv.go`).
 
-### Configuration value extraction boundary
+### Configuration values and publication
 
-The extracted `config` package uses `manifest`, `trigger`, `fsx`, and the pure
-`chat` phone normalization, `textx` validation and `jsonx` inspection helpers.
-It imports no runtime manager, provider, transport or HTTP package and performs
-no ambient environment/home lookup. `Paths{Home, DefaultDataDir}` and the platform
-are passed to pure `Resolve`. The command probes the legacy default directory
-when constructing inputs. `Open` accepts `Options`, reads only `BRAIN_MODE`
-through the supplied environment callback, and retains paths/platform for saves.
-Starter writers receive those inputs explicitly; `init` still writes its
-requested starter file. `BrainRef.Dir(home)` expands file-layer paths explicitly.
-`Store` retains a single immutable atomic snapshot, locked external-file reread and validation, ordered callbacks,
-and manifest-first/config-last publication. A brain-set checker is supplied at
-open and runs inside that lock before writes; without it, brain edits fail
-closed. Registry workflows and bridge reconciliation stay in the command.
-Private rollback state and its tests move together, preserving retained root
-handles, writer identity checks, reverse rollback and deferred handle closure.
+`config.File` is the persisted JSON schema. Optional pointers belong to this
+file layer so omitted fields remain distinguishable from explicit zero or false.
+`config.Resolve` derives `Settings`, with startup resources in `Boot` and
+resolved policy values in `Live`. Global policy uses values, durations and
+provider/queue enums. Brain approval documents retain the manifest schema's
+optional fields because they express per-brain inheritance.
 
-Configuration owns its saved provider/chunk defaults; direct provider and chunker
-calls retain their defensive fallback constants. Composition tests compare those
-contracts so a runtime package need not depend on the whole configuration schema.
-The runtime's shortened timeout unit remains command-owned: `Config.RunMinutes`
-provides the value and the command scales it exactly as before.
+`Store.Get()` and ordered subscribers receive immutable settings snapshots.
+`EffectiveFile` produces the existing dashboard representation, including its
+legacy omission of an unspecified Plaud interval; the runtime interval is
+always resolved. `Snapshot` keeps the file, settings, effective representation
+and etag together. Transactions reread external edits under the store lock,
+validate the proposed brain set, publish manifests before configuration, and
+notify subscribers only after publication. Failed writes roll back staged
+manifests before releasing their retained roots.
 
-`Store.Boot()` returns copied startup paths and flags, including the captured
-home. `Boot.EnsureDirs()` is a startup operation. The complete JSON-leaf table
-in `config/fields.go` drives restart reporting and is checked against Config,
-Boot and the configuration guide. Token protection may turn on immediately;
-turning it off waits for restart. Get/Snapshot still expose the saved values
-for API compatibility and the next start. The temporary command-only
-`runtimeConfig` projection overlays Boot on a live snapshot for consumers
-that still accept Config; it preserves snapshot ownership and will give way
-to owned runtime settings at their package boundaries.
+Paths, platform and environment access are explicit inputs. Resolution creates
+no directories; `Boot.EnsureDirs()` runs at application construction.
+`Store.Boot()` retains startup paths and flags. The application overlays these
+on live settings, allowing token protection to tighten immediately while
+relaxing it waits for restart. The field inventory drives restart reporting.
 
 ### Application composition
 
-`internal/app` owns the projections from configuration snapshots into access and backup service inputs, including startup-path pinning and credential-directory selection. Its backup projection tests exercise the public application boundary. Command adapters call these projections while the remaining application lifecycle moves out of the CLI.
+`internal/app.New` constructs the application, acquires its instance lock and
+opens storage. `Run` starts intake and services after listener binding, owns
+cancellation and ordered teardown, and returns `ErrRestart` after releasing
+resources. `Stop` cancels and joins an owned run; an application cannot run
+again after stopping. Construction leaves the outbox paused.
+
+`cmd/fridolin` delegates to `internal/cli`, which owns flags, signals and process
+replacement. Tool commands live in `internal/toolcli`; dashboard control
+commands live in `internal/controlcli`. Application projections supply each
+subsystem's own settings without making subsystems import the file schema.
+The external `app/apptest` harness exercises real Run/HTTP lifecycle boundaries;
+existing white-box tests live with the application. Original fixtures remain
+under `cmd/fridolin/testdata`.

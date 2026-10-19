@@ -15,7 +15,7 @@ func TestResolveUsesInjectedPathsAndPlatform(t *testing.T) {
 	paths := Paths{Home: home, DefaultDataDir: filepath.Join(home, LegacyDataDirName)}
 	file := &File{ClaudePath: "~/bin/claude", BrainDirs: []BrainRef{{Path: "~/brain"}}}
 	before, _ := json.Marshal(file)
-	first, err := Resolve(file, paths, "linux")
+	first, err := resolveFile(file, paths, "linux")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -29,7 +29,7 @@ func TestResolveUsesInjectedPathsAndPlatform(t *testing.T) {
 	if err := os.Mkdir(filepath.Join(home, DataDirName), 0o700); err != nil {
 		t.Fatal(err)
 	}
-	second, err := Resolve(file, paths, "linux")
+	second, err := resolveFile(file, paths, "linux")
 	if err != nil || !reflect.DeepEqual(first, second) {
 		t.Fatalf("filesystem changes affected Resolve: %v", err)
 	}
@@ -40,13 +40,13 @@ func TestResolveUsesInjectedPathsAndPlatform(t *testing.T) {
 	if got := (BrainRef{Path: "~/brain"}).Dir(home); got != filepath.Join(home, "brain") {
 		t.Fatalf("BrainRef.Dir = %q", got)
 	}
-	if _, err := Resolve(&File{Sandbox: SandboxConfig{Enabled: true}}, paths, "linux"); err == nil {
+	if _, err := resolveFile(&File{Sandbox: SandboxConfig{Enabled: true}}, paths, "linux"); err == nil {
 		t.Fatal("injected Linux platform allowed the macOS sandbox")
 	}
-	if _, err := Resolve(&File{Sandbox: SandboxConfig{Enabled: true}}, paths, "darwin"); err != nil {
+	if _, err := resolveFile(&File{Sandbox: SandboxConfig{Enabled: true}}, paths, "darwin"); err != nil {
 		t.Fatalf("injected macOS platform: %v", err)
 	}
-	if _, err := Resolve(file, Paths{}, "linux"); err == nil || err.Error() != "getting home dir: $HOME is not set" {
+	if _, err := resolveFile(file, Paths{}, "linux"); err == nil || err.Error() != "getting home dir: $HOME is not set" {
 		t.Fatalf("missing injected home: %v", err)
 	}
 }

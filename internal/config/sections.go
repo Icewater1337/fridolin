@@ -42,15 +42,6 @@ var (
 	remoteNameRe = regexp.MustCompile(`^[A-Za-z0-9_-]{1,40}$`)
 )
 
-// includeBridge and keepVersions read the two settings that are pointers so
-// that an unset one can be told from false or 0. Resolve fills both in,
-// with the same defaults, so the default of each lives in one place.
-func (bc BackupConfig) IncludeBridge() bool {
-	return BoolOr(bc.IncludeBridgeConfig, defaultIncludeBridgeConfig)
-}
-
-func (bc BackupConfig) KeepVersions() int { return IntOr(bc.KeepVersionsDays, defaultKeepVersions) }
-
 func (bc BackupConfig) Validate() error {
 	if bc.DailyAt != "" && !dailyAtRe.MatchString(bc.DailyAt) {
 		return fmt.Errorf("backup.daily_at %q must be HH:MM (24h)", bc.DailyAt)
@@ -106,7 +97,7 @@ func (pc PlaudConfig) Interval() time.Duration {
 	if pc.IntervalSeconds > 0 {
 		return time.Duration(pc.IntervalSeconds) * time.Second
 	}
-	return time.Minute
+	return DefaultPlaudInterval
 }
 
 func (pc PlaudConfig) Validate() error {
@@ -115,6 +106,9 @@ func (pc PlaudConfig) Validate() error {
 	}
 	if pc.IntervalSeconds != 0 && pc.IntervalSeconds < 30 {
 		return fmt.Errorf("plaud.interval_seconds must be at least 30")
+	}
+	if int64(pc.IntervalSeconds) > int64((1<<63-1)/time.Second) {
+		return fmt.Errorf("plaud.interval_seconds is too large to represent as a duration")
 	}
 	if pc.PhoneDir != "" && !filepath.IsAbs(pc.PhoneDir) {
 		return fmt.Errorf("plaud.phone_dir %q must be an absolute path or start with ~/", pc.PhoneDir)

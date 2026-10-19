@@ -16,13 +16,13 @@ import (
 // RequiredFilesOptions wires the current configuration and delivery owner.
 // Constructing it starts no watcher; WatchRequiredFiles runs until cancellation.
 type RequiredFilesOptions struct {
-	Config    func() *config.File
-	OwnerChat func(*config.File) string
+	Config    func() *config.Settings
+	OwnerChat func(*config.Settings) string
 	Notify    func(context.Context, string, string, int) error
 }
 
 // RequiredFileWarnings reports missing required files at the time of the call.
-func RequiredFileWarnings(cfg *config.File) []string {
+func RequiredFileWarnings(cfg *config.Settings) []string {
 	if msg := missingFilesText(cfg, missingFiles(cfg)); msg != "" {
 		return []string{msg}
 	}
@@ -30,7 +30,7 @@ func RequiredFileWarnings(cfg *config.File) []string {
 }
 
 // missingFiles returns the required files that do not exist now.
-func missingFiles(cfg *config.File) []string {
+func missingFiles(cfg *config.Settings) []string {
 	var missing []string
 	for _, f := range cfg.StartupChecks.RequiredFiles {
 		if !fsx.Exists(f) {
@@ -42,7 +42,7 @@ func missingFiles(cfg *config.File) []string {
 
 // missingFilesText says which required files are missing, with the
 // configured hint; "" when none is.
-func missingFilesText(cfg *config.File, missing []string) string {
+func missingFilesText(cfg *config.Settings, missing []string) string {
 	if len(missing) == 0 {
 		return ""
 	}

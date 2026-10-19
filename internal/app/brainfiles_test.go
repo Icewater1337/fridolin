@@ -45,7 +45,7 @@ func captureLog(t *testing.T) func() []string {
 
 // brainASetup sets up what folderBrain runs, and returns its
 // configuration and home.
-func brainASetup(t *testing.T) (*config.File, string) {
+func brainASetup(t *testing.T) (*config.Settings, string) {
 	t.Helper()
 	home := fsx.Canonical(t.TempDir())
 	t.Setenv("HOME", home)

@@ -23,7 +23,7 @@ func TestBackupSettingsProjectionPreservesStatusJSON(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		before, err := json.Marshal(cfg.Backup)
+		before, err := json.Marshal(config.EffectiveFile(cfg).Backup)
 		if err != nil {
 			t.Fatal(err)
 		}

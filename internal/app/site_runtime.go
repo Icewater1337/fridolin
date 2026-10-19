@@ -53,7 +53,7 @@ func (b *App) siteBuilderHooks() sitesvc.SiteBuilderHooks {
 			if sp := b.brainMgr.profiler; sp != nil {
 				l.Deny, l.NoWrite = sp.sitePaths()
 			}
-			if cfg := RuntimeConfig(b.cfgs); cfg.HTTPEnabled() {
+			if cfg := RuntimeConfig(b.cfgs); cfg.HTTPEnabled {
 				if _, port, err := net.SplitHostPort(cfg.HTTPListen); err == nil {
 					l.BridgePort = port
 				}

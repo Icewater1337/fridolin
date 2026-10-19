@@ -38,7 +38,7 @@ import (
 	"go.mau.fi/whatsmeow/types"
 )
 
-// Bridge connects WhatsApp to the brains, and serves the dashboard.
+// App connects WhatsApp to the brains and serves the dashboard.
 type App struct {
 	bind      func(string, string) (net.Listener, error)
 	runMu     sync.Mutex
@@ -69,7 +69,7 @@ type App struct {
 	outbox        *outboundmsg.Outbox
 	otp           otp.Handoff
 	started       time.Time
-	// restart is BridgeOptions.Restart.
+	// restart is the optional embedding owner callback.
 	restart func()
 
 	// listen is the address the HTTP server binds, "" when it is off;
@@ -90,24 +90,23 @@ type App struct {
 	// registry owns the brain workflows, including add serialization.
 	registry *registry.Registry
 	// applyMu keeps reading the configuration and applying it to the
-	// brains together, see the config subscriber in NewBridge.
+	// brains together, see the config subscriber in New.
 	applyMu sync.Mutex
 }
 
-// BridgeOptions are the run-time switches from the command line.
+// Options supplies configuration and host capabilities for construction.
 type Options struct {
 	// Listen overrides listener creation for an embedding host or isolated tests.
 	Listen     func(string, string) (net.Listener, error)
 	Config     *config.Store
 	NoWhatsApp bool
 	Logs       *logx.Ring
-	// Restart asks whoever runs the bridge to stop it and run it again
-	// (POST /api/restart): runCmd ends its context with app.ErrRestart. Nil
-	// leaves the bridge unable to restart itself.
+	// Restart overrides restart handling for an embedding owner. When nil,
+	// Run handles a dashboard restart and returns ErrRestart after teardown.
 	Restart func()
 }
 
-// NewBridge creates and wires up all components. It holds the data
+// New creates and wires up all components. It holds the data
 // directory's instance lock until Stop.
 func New(opts Options) (_ *App, err error) {
 	cfgs := opts.Config
@@ -174,7 +173,7 @@ func New(opts Options) (_ *App, err error) {
 		started:  time.Now(),
 		restart:  opts.Restart,
 	}
-	if cfg.HTTPEnabled() {
+	if cfg.HTTPEnabled {
 		// A change to http_listen waits for a restart: until then the
 		// server listens, and runs are told, where it started.
 		b.listen = cfg.HTTPListen
@@ -203,8 +202,8 @@ func New(opts Options) (_ *App, err error) {
 
 	b.pipeline = b.newMessagePipeline()
 	b.deb = pipeline.NewDebouncer(
-		func() time.Duration { return time.Duration(b.cfgs.Get().DebounceQuietMS()) * time.Millisecond },
-		func() time.Duration { return time.Duration(b.cfgs.Get().DebounceMaxWaitMS()) * time.Millisecond },
+		func() time.Duration { return b.cfgs.Get().Live.Debounce.Quiet },
+		func() time.Duration { return b.cfgs.Get().Live.Debounce.MaxWait },
 		b.pipeline.Dispatch,
 	)
 	b.pipeline.Debouncer = b.deb
@@ -242,7 +241,7 @@ func New(opts Options) (_ *App, err error) {
 		return nil, err
 	}
 	b.token = tok
-	b.tokenAtStart = cfg.DashboardRequiresToken()
+	b.tokenAtStart = cfg.Dashboard.RequireToken
 	if b.sessions, err = httpapi.LoadDashboardSessions(cfg.DataDir, time.Now); err != nil {
 		return nil, err
 	}
@@ -579,7 +578,7 @@ func (b *App) undelivered(brainID string) []history.Entry {
 // and again when an edit opens DMs to everyone. Allowed senders run Claude
 // with all its permissions, so an open allowlist must not go unnoticed, and
 // a closed one explains why DMs get no answer.
-func logDMAccess(prev, next *config.File) {
+func logDMAccess(prev, next *config.Settings) {
 	switch {
 	case next.AnyoneCanDM() && (prev == nil || !prev.AnyoneCanDM()):
 		log.Printf("WARNING: anyone who can message this WhatsApp account can use the assistant: allowed_numbers is empty and allow_any_dm is true. Add your number under Chats → Allowed numbers, or turn allow_any_dm off.")
@@ -590,14 +589,14 @@ func logDMAccess(prev, next *config.File) {
 
 // groupRulesFor is what addresses the bridge in the brain's groups.
 func groupRulesFor(r manifest.Routing) groupRules {
-	return groupRules{files: config.BoolOr(r.AnswerFiles, true), forwards: config.BoolOr(r.AnswerForwards, true)}
+	return groupRules{files: r.AnswerFiles == nil || *r.AnswerFiles, forwards: r.AnswerForwards == nil || *r.AnswerForwards}
 }
 
 // Configuration edits (from the dashboard) apply to the brains at once.
 // The brains get the configuration as it is now rather than next, under
 // a lock, so that whichever notification comes last, the brains end on
 // the latest configuration and never on one an update has replaced.
-func (b *App) configChanged(prev, next *config.File) {
+func (b *App) configChanged(prev, next *config.Settings) {
 	b.applyMu.Lock()
 	err := b.brainMgr.Apply(RuntimeConfig(b.cfgs))
 	b.applyMu.Unlock()

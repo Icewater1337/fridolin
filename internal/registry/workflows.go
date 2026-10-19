@@ -32,7 +32,7 @@ type Registry struct {
 
 type Options struct {
 	Home        func() string
-	CheckDir    func(dir, configured string, cfg *config.File, home string) error
+	CheckDir    func(dir, configured string, cfg *config.Settings, home string) error
 	Templates   Templates
 	HistoryFile string
 }
@@ -41,13 +41,13 @@ func New(store *config.Store, options Options) *Registry {
 	return &Registry{store: store, options: options}
 }
 
-func (g *Registry) resolve(cfg *config.File) ([]manifest.Spec, []Issue) {
+func (g *Registry) resolve(cfg *config.Settings) ([]manifest.Spec, []Issue) {
 	return Resolve(cfg.BrainDirs, func(dir, configured string) error {
 		return g.options.CheckDir(dir, configured, cfg, g.options.Home())
 	})
 }
 
-func (g *Registry) checkPath(path string, cfg *config.File, others []string) (string, []string, []string) {
+func (g *Registry) checkPath(path string, cfg *config.Settings, others []string) (string, []string, []string) {
 	return CheckPath(path, PathContext{Home: g.options.Home(), Others: others,
 		CheckDir: func(dir, configured, home string) error {
 			return g.options.CheckDir(dir, configured, cfg, home)
@@ -241,7 +241,7 @@ func (g *Registry) RemoveDir(path string) error {
 // hand edit broke say, is not the edit's doing, and does not keep the
 // other brains from being edited or approved. Issues are told apart by
 // brain, kind and detail.
-func (g *Registry) CheckSet(before, after *config.File) error {
+func (g *Registry) CheckSet(before, after *config.Settings) error {
 	_, was := g.resolve(before)
 	seen := map[string]bool{}
 	for _, is := range was {
@@ -382,7 +382,7 @@ func (g *Registry) Add(req AddInput) (AddResult, error) {
 // checkNewBrain checks brain m, to go in folder abs, against the brains cfg
 // (an effective configuration) has: the folder must be none of theirs, in
 // or around one, and m must not clash with them.
-func (g *Registry) checkNewBrain(cfg *config.File, m manifest.Manifest, abs string) error {
+func (g *Registry) checkNewBrain(cfg *config.Settings, m manifest.Manifest, abs string) error {
 	if _, problems, _ := g.checkPath(abs, cfg, g.OtherDirs(cfg)); len(problems) > 0 {
 		return errors.New(strings.Join(problems, "; "))
 	}
@@ -393,7 +393,7 @@ func (g *Registry) checkNewBrain(cfg *config.File, m manifest.Manifest, abs stri
 // otherDirs lists every folder in c's brain_dirs, ~ expanded, approved or
 // not: a new brain, or a restore, must not land in, around or on any of
 // them, an entry still waiting for approval included.
-func (g *Registry) OtherDirs(c *config.File) []string {
+func (g *Registry) OtherDirs(c *config.Settings) []string {
 	var dirs []string
 	for _, ref := range c.BrainDirs {
 		dirs = append(dirs, ref.Dir(g.options.Home()))
@@ -583,7 +583,7 @@ type View struct {
 	Issues   []Issue            `json:"issues"`
 }
 
-func Views(cfg *config.File, issues []Issue) []View {
+func Views(cfg *config.Settings, issues []Issue) []View {
 	byEntry := map[int][]Issue{}
 	for _, is := range issues {
 		// One found at load is about the entry it had then; skip it if the

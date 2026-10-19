@@ -26,7 +26,7 @@ func TestStoreChecksBrainsBeforeWriting(t *testing.T) {
 	refused := errors.New("brain set refused")
 	var cs *Store
 	called := 0
-	check := func(old, next *File) error {
+	check := func(old, next *Settings) error {
 		called++
 		if cs.mu.TryLock() {
 			cs.mu.Unlock()

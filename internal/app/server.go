@@ -24,7 +24,7 @@ import (
 // its own chats (see brainChat), a caller without a token only to the
 // allowed chats and only while script_api.tokenless_send is on. The
 // scripts token may send anywhere checkSendJID lets through.
-func (b *App) maySend(who chat.Principal, jid string, cfg *config.File) error {
+func (b *App) maySend(who chat.Principal, jid string, cfg *config.Settings) error {
 	switch who.Kind {
 	case chat.CallerScript:
 		return nil
@@ -35,7 +35,7 @@ func (b *App) maySend(who chat.Principal, jid string, cfg *config.File) error {
 		}
 		return nil
 	}
-	if !cfg.TokenlessSend() {
+	if !cfg.ScriptAPI.TokenlessSend {
 		return fmt.Errorf("%w (script_api.tokenless_send is off)", errTokenRequired)
 	}
 	if !allowedChat(jid, cfg) {
@@ -48,7 +48,7 @@ func (b *App) maySend(who chat.Principal, jid string, cfg *config.File) error {
 // (reply_chat, or the one replyChatFor derives), or an allowed chat that
 // routes to it: a group it claims, for the fallback brain an allowed group
 // no brain claims, or, for the brain that gets DMs, an allowed number's DM.
-func (b *App) brainChat(br *brain.Brain, jid string, cfg *config.File) bool {
+func (b *App) brainChat(br *brain.Brain, jid string, cfg *config.Settings) bool {
 	if jid == b.replyChatFor(br, cfg) {
 		return true
 	}
@@ -58,7 +58,7 @@ func (b *App) brainChat(br *brain.Brain, jid string, cfg *config.File) bool {
 // allowedChat reports whether jid is a chat config allows by name: a group
 // in allowed_groups, or the chat of a number in allowed_numbers. allow_any_dm
 // does not count: it lets anyone write in, not the bridge write to anyone.
-func allowedChat(jid string, cfg *config.File) bool {
+func allowedChat(jid string, cfg *config.Settings) bool {
 	if chat.IsGroupJID(jid) {
 		return slices.Contains(cfg.AllowedGroups, jid)
 	}
@@ -108,7 +108,7 @@ func (b *App) submitHandOff(br *brain.Brain, jid, sender, text string, media []s
 // none), else the brain's first group. The DM comes before any group: files
 // handed in privately must not land in a group because the brain also
 // serves one.
-func (b *App) replyChatFor(br *brain.Brain, cfg *config.File) string {
+func (b *App) replyChatFor(br *brain.Brain, cfg *config.Settings) string {
 	return replyChatForBrain(b.brainMgr.Manager, br, ownerChat(cfg))
 }
 

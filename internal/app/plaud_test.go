@@ -1677,7 +1677,7 @@ func TestBrainPlaudPATH(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			cfg := &config.File{Plaud: config.PlaudConfig{BrainAccess: true, CLIPath: tc.cliPath}}
-			got := brainPlaudPATH(cfg)
+			got := brainPlaudPATH(resolvedSettings(t, cfg))
 			dirs := filepath.SplitList(got)
 			if want := filepath.Join(tc.dir, "plaud"); lookPathIn("plaud", got) != want {
 				t.Errorf("brainPlaudPATH = %s, on which brains do not find %s", got, want)
@@ -1689,7 +1689,7 @@ func TestBrainPlaudPATH(t *testing.T) {
 			if i < 0 {
 				t.Fatalf("brainPlaudPATH = %s, which lacks the bridge's PATH", got)
 			}
-			progs := NewSandboxProfiler(nil, cfg).bridgeProgramsOf(home)
+			progs := NewSandboxProfiler(nil, resolvedSettings(t, cfg)).bridgeProgramsOf(home)
 			covered := func(dir string) bool { return slices.Contains(progs.Path, dir) || withinAny(dir, progs.Dirs) }
 			for _, d := range filepath.SplitList(strings.TrimSuffix(got[:i], ":")) {
 				if !covered(d) {

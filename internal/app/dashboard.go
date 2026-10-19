@@ -15,7 +15,7 @@ import (
 // other programs on this computer out of the API at once. Turning it on
 // applies at once.
 func (b *App) requiresToken() bool {
-	return b.tokenAtStart || b.cfgs.Get().DashboardRequiresToken()
+	return b.tokenAtStart || b.cfgs.Get().Dashboard.RequireToken
 }
 
 func (b *App) newHTTPHandler(listen string) http.Handler {

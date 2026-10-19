@@ -81,7 +81,7 @@ func TestGoldenConfigFixtures(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			eff, err := json.Marshal(cs.Get())
+			eff, err := json.Marshal(config.EffectiveFile(cs.Get()))
 			if err != nil {
 				t.Fatal(err)
 			}

@@ -545,7 +545,7 @@ func TestReloadHandsOnWhatWaited(t *testing.T) {
 			home := fsx.Canonical(t.TempDir())
 			t.Setenv("HOME", home)
 			claude := fakeClaudeEnv(t, 30000)
-			configValue := func(refs ...config.BrainRef) *config.File {
+			configValue := func(refs ...config.BrainRef) *config.Settings {
 				cfg, err := LoadConfig(writeConfig(t, `{
 					"data_dir": "`+home+`/data",
 					"claude_path": "`+claude+`"`+brainDirsJSON(t, refs...)+`
@@ -1359,7 +1359,7 @@ func TestBrainsAreToldTheDataDir(t *testing.T) {
 func TestDataEnvIsAbsolute(t *testing.T) {
 	cwd := fsx.Canonical(t.TempDir())
 	t.Chdir(cwd)
-	s := settingsFor(&config.File{DataDir: "rel", DBPath: "rel/bridge.db"}, manifest.Spec{})
+	s := settingsFor(resolvedSettings(t, &config.File{DataDir: "rel", DBPath: "rel/bridge.db"}), manifest.Spec{})
 	want := []string{"BRIDGE_DATA_DIR=" + cwd + "/rel", "BRIDGE_DB_PATH=" + cwd + "/rel/bridge.db"}
 	if got := dataEnv(s); !slices.Equal(got, want) {
 		t.Errorf("dataEnv = %q, want %q", got, want)
@@ -1664,7 +1664,7 @@ func TestRunLimitSetting(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if got := cfg.RunLimit(); got != c.want {
+			if got := cfg.MaxConcurrentRuns; got != c.want {
 				t.Errorf("RunLimit = %d, want %d", got, c.want)
 			}
 			mgr := newTestManager(t, cfg)
@@ -1673,7 +1673,7 @@ func TestRunLimitSetting(t *testing.T) {
 			}
 			n := 7
 			next := *cfg
-			next.MaxConcurrentRuns = &n
+			next.MaxConcurrentRuns = n
 			if err := mgr.Apply(&next); err != nil {
 				t.Fatal(err)
 			}

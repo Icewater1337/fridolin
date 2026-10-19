@@ -17,7 +17,7 @@ import (
 // has no login codes, and its dashboard took the token in the link; there
 // is no falling back to that, since `fridolin open --print` is what an
 // agent runs and pastes into a chat.
-func DashboardLink(cfg *config.File) (string, error) {
+func DashboardLink(cfg *config.Settings) (string, error) {
 	tokenPath := filepath.Join(cfg.DataDir, "dashboard.token")
 	token, err := httpapi.ReadToken(cfg.DataDir)
 	if err != nil {
@@ -34,12 +34,12 @@ func DashboardLink(cfg *config.File) (string, error) {
 }
 
 // RotateToken does rotateTokenCmd's work for cfg.
-func RotateToken(cfg *config.File) error {
+func RotateToken(cfg *config.Settings) error {
 	token, err := httpapi.ReadToken(cfg.DataDir)
 	if err != nil {
 		return fmt.Errorf("no dashboard token yet — start the bridge first (%w)", err)
 	}
-	if cfg.HTTPEnabled() {
+	if cfg.HTTPEnabled {
 		var resp struct{ Status string }
 		err := callBridge(cfg.HTTPListen, token, "/api/token/rotate", &resp)
 		if errors.Is(err, ErrOlderBridge) && cfg.Dashboard.Disabled {
