@@ -88,3 +88,45 @@ func TestRenameTypeErrorIncludesAnonymousAggregate(t *testing.T) {
 		t.Fatal("an unchanged anonymous type caused a wrapper")
 	}
 }
+
+func TestRenameTypeErrorComposesAcrossPackageBoundaries(t *testing.T) {
+	t.Parallel()
+	var value struct{ Item renamedFixture }
+	original := json.Unmarshal([]byte(`{"Item":false}`), &value)
+	var typed *json.UnmarshalTypeError
+	if !errors.As(original, &typed) {
+		t.Fatal(original)
+	}
+	typed.Struct = "File"
+	for _, reverse := range []bool{false, true} {
+		renameStruct := func(err error) error {
+			return RenameTypeError(err, nil, func(s string) string {
+				if s == "File" {
+					return "Config"
+				}
+				return ""
+			})
+		}
+		renameType := func(err error) error {
+			return RenameTypeError(err, func(typ reflect.Type) string {
+				if typ == reflect.TypeFor[renamedFixture]() {
+					return "main.OldFixture"
+				}
+				return ""
+			}, nil)
+		}
+		first, second := renameStruct, renameType
+		if reverse {
+			first, second = second, first
+		}
+		got := second(fmt.Errorf("invalid config: %w", first(original)))
+		want := "invalid config: json: cannot unmarshal bool into Go struct field Config.Item of type main.OldFixture"
+		if got.Error() != want {
+			t.Fatalf("reverse=%v: %v, want %s", reverse, got, want)
+		}
+		var preserved *json.UnmarshalTypeError
+		if !errors.As(got, &preserved) || preserved != typed || typed.Struct != "File" {
+			t.Fatal("lost or modified original error")
+		}
+	}
+}
