@@ -166,22 +166,6 @@ func childGets(scope childScope, name string) bool {
 	return false
 }
 
-// validEnvName reports whether name can be an environment variable's name
-// in child_env_passthrough: letters, digits and underscores, not starting
-// with a digit. "=" or a NUL byte would make the entry another variable or
-// none at all.
-func validEnvName(name string) bool {
-	if name == "" || (name[0] >= '0' && name[0] <= '9') {
-		return false
-	}
-	for _, c := range name {
-		if c != '_' && !('a' <= c && c <= 'z') && !('A' <= c && c <= 'Z') && !('0' <= c && c <= '9') {
-			return false
-		}
-	}
-	return true
-}
-
 // brainStatesDirName is the folder of the data dir that holds every brain's
 // own state, one folder per brain id (see brainStateOf).
 const brainStatesDirName = "brains"

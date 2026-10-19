@@ -807,7 +807,7 @@ func newRedactor(home string) *redactor {
 	}
 	var spellings []string
 	for _, h := range []string{home, fsx.Resolve(home)} {
-		spellings = append(spellings, h, sbplEscaper.Replace(h), regexp.QuoteMeta(h), sbplEscaper.Replace(regexp.QuoteMeta(h)))
+		spellings = append(spellings, h, escapeSBPL(h), regexp.QuoteMeta(h), escapeSBPL(regexp.QuoteMeta(h)))
 	}
 	// The longest first, since one may begin with another; equal ones next
 	// to each other, for Compact.
