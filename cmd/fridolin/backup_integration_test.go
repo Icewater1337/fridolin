@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"testing"
 	"time"
+
+	"github.com/Icewater1337/fridolin/internal/testutil"
 )
 
 // installBackupRunner retains the production projections while replacing only
@@ -54,4 +56,26 @@ func startScheduledBackup(t *testing.T, tb *testBridge) *BackupResult {
 		t.Fatal(err)
 	}
 	return waitBackup(t, tb, "notes")
+}
+
+func waitBackupConnect(t *testing.T, tb *testBridge) {
+	t.Helper()
+	testutil.WaitFor(t, 10*time.Second, "Drive connection", func() bool {
+		var st struct {
+			Connect *struct {
+				State string `json:"state"`
+				Error string `json:"error"`
+			} `json:"connect"`
+		}
+		if err := json.Unmarshal(tb.do("GET", "/api/backup/status", nil).Body.Bytes(), &st); err != nil {
+			t.Fatal(err)
+		}
+		if st.Connect != nil && st.Connect.State != "running" {
+			if st.Connect.State != "done" {
+				t.Fatalf("connect: %+v", st.Connect)
+			}
+			return true
+		}
+		return false
+	})
 }

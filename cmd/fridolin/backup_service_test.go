@@ -667,3 +667,37 @@ func TestSyncDirRetriesFilesThatChange(t *testing.T) {
 		t.Errorf("log = %q, want it to say rclone retried", all)
 	}
 }
+
+// A published schedule captures its arming time, leaves it alone for unrelated
+// settings, and reads the same time after restart. The command test separately
+// exercises successful and refused HTTP saves through the real config store.
+func TestBackupPublishedScheduleSurvivesRestart(t *testing.T) {
+	fx := newBackupFixture(t, nil)
+	m := fx.manager
+	clock := time.Date(2026, 10, 18, 9, 0, 0, 0, time.Local)
+	m.now = func() time.Time { return clock }
+	prev := fx.options.Settings()
+	next := prev
+	next.Enabled = true
+	m.SettingsChanged(prev, next)
+	if !m.state.ArmedAt.Equal(clock) {
+		t.Fatalf("armed at %v, want %v", m.state.ArmedAt, clock)
+	}
+	if _, runNow := backup.Due(clock.Add(time.Minute), next.DailyAt, "", m.state.ArmedAt); runNow {
+		t.Error("enabling after today's time starts a backup at once")
+	}
+	first := clock
+	clock = clock.Add(time.Hour)
+	prev = next
+	next.KeepVersionsDays = 7
+	m.SettingsChanged(prev, next)
+	if !m.state.ArmedAt.Equal(first) {
+		t.Error("unrelated setting rearmed schedule")
+	}
+	prev = next
+	next.DailyAt = "08:00"
+	m.SettingsChanged(prev, next)
+	if a := newBackupManager(fx.options).state.ArmedAt; !a.Equal(clock) {
+		t.Errorf("armed time after restart = %v, want %v", a, clock)
+	}
+}

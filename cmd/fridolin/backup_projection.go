@@ -83,16 +83,6 @@ func NewBackupManager(cfgs *config.Store, bm *BrainManager) *BackupManager {
 	return newProjectedBackup(cfgs, bm, nil)
 }
 
-// rcloneEnv retains the command test seam while core callers pass a context to
-// the injected environment function.
-func (m *BackupManager) rcloneEnv(scope childScope) []string {
-	ctx := context.Background()
-	if scope == desktopChild {
-		ctx = withDesktop(ctx)
-	}
-	return m.opts.Environ(ctx)
-}
-
 // notifyBackup resolves the selected runtime's current reply destination.
 func (b *Bridge) notifyBackup(ctx context.Context, br *Brain, text string) error {
 	jid := b.replyChatFor(br, b.cfgs.Get())

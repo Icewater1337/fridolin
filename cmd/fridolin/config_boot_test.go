@@ -135,8 +135,6 @@ func TestRuntimePathConsumersKeepBootAndApplyLiveOptions(t *testing.T) {
 		t.Fatalf("save: %d %s", w.Code, w.Body.String())
 	}
 	for label, pair := range map[string][2]string{
-		"rclone":                      {tb.backup.rcloneConf(), boot.RcloneConf()},
-		"backup":                      {tb.backup.dir(), boot.BackupDir()},
 		"Google credentials fallback": {tb.google.credsDir(), boot.DataDir},
 		"Google redirect":             {tb.google.redirectURI(), "http://" + boot.HTTPListen + "/"},
 		"Plaud state":                 {tb.plaud.dir(), boot.PlaudDir()},
@@ -148,6 +146,20 @@ func TestRuntimePathConsumersKeepBootAndApplyLiveOptions(t *testing.T) {
 		if pair[0] != pair[1] {
 			t.Errorf("%s = %q, want %q", label, pair[0], pair[1])
 		}
+	}
+	// Exercise the backup's actual read/write paths after requested paths change.
+	connectAlias(t, tb)
+	if !tb.backup.Summary().Connected {
+		t.Error("backup connection follows next-start path")
+	}
+	if w := tb.do("PUT", "/api/backup/settings", map[string]any{"enabled": true}); w.Code != http.StatusOK {
+		t.Fatalf("backup settings: %d %s", w.Code, w.Body.String())
+	}
+	if _, err := os.Stat(filepath.Join(boot.BackupDir(), "state.json")); err != nil {
+		t.Errorf("backup state not saved under boot path: %v", err)
+	}
+	if _, err := os.Stat(next); !os.IsNotExist(err) {
+		t.Errorf("backup created next-start path: %v", err)
 	}
 	s := tb.brainMgr.Get("main").settings.Load()
 	if s.dataDir != boot.DataDir || s.dbPath != boot.DBPath || s.mediaDir != boot.MediaDir || s.credsDir != boot.DataDir {
