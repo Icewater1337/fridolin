@@ -1,17 +1,20 @@
 package main
 
-import "github.com/Icewater1337/fridolin/internal/config"
+import (
+	"github.com/Icewater1337/fridolin/internal/config"
+	"github.com/Icewater1337/fridolin/internal/httpapi"
+)
 
-func (b *Bridge) newChatsAPI() *ChatsAPI {
-	return &ChatsAPI{
-		ListIgnored: func() ([]IgnoredChatResponse, error) {
+func (b *Bridge) newChatsAPI() *httpapi.ChatsAPI {
+	return &httpapi.ChatsAPI{
+		ListIgnored: func() ([]httpapi.IgnoredChatResponse, error) {
 			rows, err := b.store.ListIgnored()
 			if rows == nil {
 				return nil, err
 			}
-			out := make([]IgnoredChatResponse, len(rows))
+			out := make([]httpapi.IgnoredChatResponse, len(rows))
 			for i, row := range rows {
-				out[i] = IgnoredChatResponse(row)
+				out[i] = httpapi.IgnoredChatResponse(row)
 			}
 			return out, err
 		},

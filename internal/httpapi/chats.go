@@ -1,11 +1,10 @@
-package main
+package httpapi
 
 import (
 	"errors"
 	"fmt"
 	"github.com/Icewater1337/fridolin/internal/chat"
 	"github.com/Icewater1337/fridolin/internal/config"
-	"github.com/Icewater1337/fridolin/internal/httpapi"
 	"net/http"
 	"slices"
 	"strings"
@@ -32,10 +31,10 @@ type ChatsAPI struct {
 func (a *ChatsAPI) Ignored(w http.ResponseWriter, r *http.Request) {
 	chats, err := a.ListIgnored()
 	if err != nil {
-		httpapi.WriteErr(w, http.StatusInternalServerError, err.Error())
+		WriteErr(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	httpapi.WriteJSON(w, http.StatusOK, chats)
+	WriteJSON(w, http.StatusOK, chats)
 }
 
 // ChatRequest is what /api/chats/allow and /api/chats/revoke take.
@@ -74,18 +73,18 @@ func (req ChatRequest) listEntry() (dm bool, entry string, err error) {
 // brain — the dashboard version of copying a JID out of the log.
 func (a *ChatsAPI) Allow(w http.ResponseWriter, r *http.Request) {
 	var req ChatRequest
-	if err := httpapi.DecodeJSON(r, &req); err != nil {
-		httpapi.WriteErr(w, http.StatusBadRequest, err.Error())
+	if err := DecodeJSON(r, &req); err != nil {
+		WriteErr(w, http.StatusBadRequest, err.Error())
 		return
 	}
 	dm, entry, err := req.listEntry()
 	if err != nil {
-		httpapi.WriteErr(w, http.StatusBadRequest, err.Error())
+		WriteErr(w, http.StatusBadRequest, err.Error())
 		return
 	}
 	err = a.AllowChat(dm, entry, req.Brain)
 	if err != nil {
-		httpapi.WriteErr(w, http.StatusUnprocessableEntity, err.Error())
+		WriteErr(w, http.StatusUnprocessableEntity, err.Error())
 		return
 	}
 	// The chat no longer waits for access, also when it was typed in.
@@ -97,7 +96,7 @@ func (a *ChatsAPI) Allow(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	_ = a.DismissIgnored(waiting, true)
-	httpapi.WriteJSON(w, http.StatusOK, map[string]string{"status": "allowed", "entry": entry})
+	WriteJSON(w, http.StatusOK, map[string]string{"status": "allowed", "entry": entry})
 }
 
 // errNotListed means the entry to revoke is not on its allow list.
@@ -111,15 +110,15 @@ var errNotListed = errors.New("not on the allow list")
 // happened elsewhere.
 func (a *ChatsAPI) Revoke(w http.ResponseWriter, r *http.Request) {
 	var req ChatRequest
-	if err := httpapi.DecodeJSON(r, &req); err != nil {
-		httpapi.WriteErr(w, http.StatusBadRequest, err.Error())
+	if err := DecodeJSON(r, &req); err != nil {
+		WriteErr(w, http.StatusBadRequest, err.Error())
 		return
 	}
 	// An entry the bridge would refuse may still be on the list as it is
 	// stored; only an unknown kind or no entry at all is refused at once.
 	dm, entry, invalid := req.listEntry()
 	if (req.Kind != "group" && req.Kind != "dm") || req.sent() == "" {
-		httpapi.WriteErr(w, http.StatusBadRequest, invalid.Error())
+		WriteErr(w, http.StatusBadRequest, invalid.Error())
 		return
 	}
 	canon, name := config.AllowListGroup, "allowed_groups"
@@ -149,11 +148,11 @@ func (a *ChatsAPI) Revoke(w http.ResponseWriter, r *http.Request) {
 	})
 	switch {
 	case errors.Is(err, errNotListed):
-		httpapi.WriteErr(w, http.StatusNotFound, fmt.Sprintf("%s is not in %s", req.sent(), name))
+		WriteErr(w, http.StatusNotFound, fmt.Sprintf("%s is not in %s", req.sent(), name))
 	case err != nil:
-		httpapi.WriteErr(w, http.StatusUnprocessableEntity, err.Error())
+		WriteErr(w, http.StatusUnprocessableEntity, err.Error())
 	default:
-		httpapi.WriteJSON(w, http.StatusOK, map[string]any{"status": "revoked", "removed": removed})
+		WriteJSON(w, http.StatusOK, map[string]any{"status": "revoked", "removed": removed})
 	}
 }
 
@@ -169,20 +168,20 @@ func (a *ChatsAPI) Members(w http.ResponseWriter, r *http.Request) {
 		JID     string    `json:"jid"`
 		Members *[]string `json:"members"`
 	}
-	if err := httpapi.DecodeJSON(r, &req); err != nil {
-		httpapi.WriteErr(w, http.StatusBadRequest, err.Error())
+	if err := DecodeJSON(r, &req); err != nil {
+		WriteErr(w, http.StatusBadRequest, err.Error())
 		return
 	}
 	group, err := config.AllowListGroup(req.JID)
 	if err != nil {
-		httpapi.WriteErr(w, http.StatusBadRequest, err.Error())
+		WriteErr(w, http.StatusBadRequest, err.Error())
 		return
 	}
 	var members []string
 	if req.Members != nil {
 		entry := map[string][]string{group: *req.Members}
 		if err := config.ValidateGroupMembers(entry, []string{group}); err != nil {
-			httpapi.WriteErr(w, http.StatusBadRequest, err.Error())
+			WriteErr(w, http.StatusBadRequest, err.Error())
 			return
 		}
 		// A number typed twice, in two ways perhaps, is kept once.
@@ -205,10 +204,10 @@ func (a *ChatsAPI) Members(w http.ResponseWriter, r *http.Request) {
 		return nil
 	})
 	if err != nil {
-		httpapi.WriteErr(w, http.StatusUnprocessableEntity, err.Error())
+		WriteErr(w, http.StatusUnprocessableEntity, err.Error())
 		return
 	}
-	httpapi.WriteJSON(w, http.StatusOK, map[string]any{"status": "saved", "members": members})
+	WriteJSON(w, http.StatusOK, map[string]any{"status": "saved", "members": members})
 }
 
 // revokeEntry splits list into what stays and what revoking sent removes.
@@ -240,17 +239,17 @@ func (a *ChatsAPI) Dismiss(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		JID string `json:"jid"`
 	}
-	if err := httpapi.DecodeJSON(r, &req); err != nil {
-		httpapi.WriteErr(w, http.StatusBadRequest, err.Error())
+	if err := DecodeJSON(r, &req); err != nil {
+		WriteErr(w, http.StatusBadRequest, err.Error())
 		return
 	}
 	if req.JID == "" {
-		httpapi.WriteErr(w, http.StatusBadRequest, "jid required")
+		WriteErr(w, http.StatusBadRequest, "jid required")
 		return
 	}
 	if err := a.DismissIgnored(req.JID, false); err != nil {
-		httpapi.WriteErr(w, http.StatusInternalServerError, err.Error())
+		WriteErr(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	httpapi.WriteJSON(w, http.StatusOK, map[string]string{"status": "dismissed"})
+	WriteJSON(w, http.StatusOK, map[string]string{"status": "dismissed"})
 }
