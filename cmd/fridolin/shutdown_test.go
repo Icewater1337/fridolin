@@ -1,5 +1,7 @@
 package main
 
+import "github.com/Icewater1337/fridolin/internal/app"
+
 import (
 	"bufio"
 	"context"
@@ -543,17 +545,17 @@ func TestResumeAppliesChangesBeforeStartingQueuedRuns(t *testing.T) {
 		return nil, func() {}
 	}})
 	m := brain.Inbound{Inbound: chat.Inbound{JID: harnessDM, Sender: "15551234567", Text: "must not run", Source: chat.SourceWhatsApp, At: time.Now(), ID: "3EB0DELETED"}}
-	if err := keepInbound(t.Context(), tb.store, inboundQueued, "a", m); err != nil {
+	if err := app.KeepInbound(t.Context(), tb.store, app.InboundQueued, "a", m); err != nil {
 		t.Fatal(err)
 	}
 	for i := range 128 {
 		help := m
 		help.Text, help.ID = "!help", fmt.Sprintf("3EB0HELP%d", i)
-		if err := keepInbound(t.Context(), tb.store, inboundLate, "", help); err != nil {
+		if err := app.KeepInbound(t.Context(), tb.store, app.InboundLate, "", help); err != nil {
 			t.Fatal(err)
 		}
 	}
-	if err := keepChange(t.Context(), tb.store, chat.Change{Kind: chat.ChangeRevoke, Chat: m.JID, Sender: m.Sender, Target: m.ID}, time.Now()); err != nil {
+	if err := app.KeepChange(t.Context(), tb.store, chat.Change{Kind: chat.ChangeRevoke, Chat: m.JID, Sender: m.Sender, Target: m.ID}, time.Now()); err != nil {
 		t.Fatal(err)
 	}
 	tb.resume(t.Context())
@@ -605,7 +607,7 @@ func TestShutdownKeepsWhatItHolds(t *testing.T) {
 func TestResumeOutlivesItsContext(t *testing.T) {
 	tb := newTestBridge(t, "")
 	m := brain.Inbound{Inbound: chat.Inbound{JID: harnessDM, Sender: "15551234567", Text: "summarise", Source: chat.SourceWhatsApp, At: time.Now(), ID: "3EB0CUT"}}
-	if err := keepInterrupted(t.Context(), tb.store, "main", m); err != nil {
+	if err := app.KeepInterrupted(t.Context(), tb.store, "main", m); err != nil {
 		t.Fatal(err)
 	}
 	ctx, cancel := context.WithCancel(context.Background())

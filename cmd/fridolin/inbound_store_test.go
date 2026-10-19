@@ -1,5 +1,7 @@
 package main
 
+import "github.com/Icewater1337/fridolin/internal/app"
+
 import (
 	"path/filepath"
 	"reflect"
@@ -46,11 +48,11 @@ func TestInboundQueueKeepsWhatTheStopLeft(t *testing.T) {
 	// In the order a stop keeps them, which is not the order to take
 	// them up in.
 	for _, keep := range []func() error{
-		func() error { return keepInbound(ctx, s, inboundLate, "", late) },
-		func() error { return keepInbound(ctx, s, inboundHeld, "", chatter) },
-		func() error { return keepInbound(ctx, s, inboundQueued, "main", merged) },
-		func() error { return keepChange(ctx, s, edit, sent.Add(2*time.Minute)) },
-		func() error { return keepInterrupted(ctx, s, "family", running) },
+		func() error { return app.KeepInbound(ctx, s, app.InboundLate, "", late) },
+		func() error { return app.KeepInbound(ctx, s, app.InboundHeld, "", chatter) },
+		func() error { return app.KeepInbound(ctx, s, app.InboundQueued, "main", merged) },
+		func() error { return app.KeepChange(ctx, s, edit, sent.Add(2*time.Minute)) },
+		func() error { return app.KeepInterrupted(ctx, s, "family", running) },
 	} {
 		if err := keep(); err != nil {
 			t.Fatal(err)
@@ -61,16 +63,16 @@ func TestInboundQueueKeepsWhatTheStopLeft(t *testing.T) {
 	}
 
 	s = openTestStore(t, dbPath)
-	got, err := takeInbound(ctx, s)
+	got, err := app.TakeInbound(ctx, s)
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := []keptInbound{
-		{Kind: inboundInterrupted, Chat: harnessGroup, Brain: "family", MsgID: "3EB0E", SentAt: sent},
-		{Kind: inboundQueued, Chat: harnessDM, Brain: "main", MsgID: "3EB0A", SentAt: sent, Msg: merged},
-		{Kind: inboundHeld, Chat: harnessGroup, MsgID: "3EB0C", SentAt: sent, Msg: chatter},
-		{Kind: inboundLate, Chat: harnessDM, MsgID: "3EB0D", SentAt: sent.Add(time.Minute), Msg: late},
-		{Kind: inboundChange, Chat: harnessDM, MsgID: "3EB0A", SentAt: sent.Add(2 * time.Minute), Change: edit},
+	want := []app.KeptInbound{
+		{Kind: app.InboundInterrupted, Chat: harnessGroup, Brain: "family", MsgID: "3EB0E", SentAt: sent},
+		{Kind: app.InboundQueued, Chat: harnessDM, Brain: "main", MsgID: "3EB0A", SentAt: sent, Msg: merged},
+		{Kind: app.InboundHeld, Chat: harnessGroup, MsgID: "3EB0C", SentAt: sent, Msg: chatter},
+		{Kind: app.InboundLate, Chat: harnessDM, MsgID: "3EB0D", SentAt: sent.Add(time.Minute), Msg: late},
+		{Kind: app.InboundChange, Chat: harnessDM, MsgID: "3EB0A", SentAt: sent.Add(2 * time.Minute), Change: edit},
 	}
 	if len(got) != len(want) {
 		t.Fatalf("took %d rows, want %d: %+v", len(got), len(want), got)
@@ -88,7 +90,7 @@ func TestInboundQueueKeepsWhatTheStopLeft(t *testing.T) {
 			t.Errorf("row %d:\n got %+v\nwant %+v", i, got[i], want[i])
 		}
 	}
-	if again, err := takeInbound(ctx, s); err != nil || len(again) != 0 {
+	if again, err := app.TakeInbound(ctx, s); err != nil || len(again) != 0 {
 		t.Errorf("the queue still holds %+v (%v) once taken", again, err)
 	}
 }
@@ -101,7 +103,7 @@ func TestInboundQueueSkipsARowItCannotRead(t *testing.T) {
 	db := testStoreSQL(t, path)
 	ctx := t.Context()
 	m := brain.Inbound{Inbound: chat.Inbound{JID: harnessDM, Sender: "15551234567", Text: "hello", Source: chat.SourceWhatsApp, At: time.Now()}}
-	if err := keepInbound(ctx, s, inboundHeld, "", m); err != nil {
+	if err := app.KeepInbound(ctx, s, app.InboundHeld, "", m); err != nil {
 		t.Fatal(err)
 	}
 	for _, stmt := range []string{
@@ -112,14 +114,14 @@ func TestInboundQueueSkipsARowItCannotRead(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	got, err := takeInbound(ctx, s)
+	got, err := app.TakeInbound(ctx, s)
 	if err == nil {
 		t.Error("no error for the rows it could not read")
 	}
 	if len(got) != 1 || got[0].Msg.Text != "hello" {
 		t.Errorf("took %+v, want the one message it can read", got)
 	}
-	if again, _ := takeInbound(ctx, s); len(again) != 0 {
+	if again, _ := app.TakeInbound(ctx, s); len(again) != 0 {
 		t.Errorf("the queue still holds %+v", again)
 	}
 }

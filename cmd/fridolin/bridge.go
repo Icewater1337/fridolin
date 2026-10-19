@@ -343,7 +343,7 @@ func (b *Bridge) stop() {
 	// again. What the debouncer holds first, then what the brains have
 	// waiting, at once, before their runs in flight get their grace.
 	for _, m := range b.deb.Drain() {
-		b.keep(inboundHeld, "", m)
+		b.keep(app.InboundHeld, "", m)
 	}
 	b.brainMgr.Stop()
 	// After the brains, whose last runs may still reply; what does not go
@@ -368,7 +368,7 @@ func (b *Bridge) stop() {
 // ran, for the next start (BrainHooks.Waiting).
 func (b *Bridge) keepWaiting(br *brainruntime.Brain, ms []brainruntime.Inbound) {
 	for _, m := range ms {
-		b.keep(inboundQueued, br.ID(), m)
+		b.keep(app.InboundQueued, br.ID(), m)
 	}
 }
 
@@ -382,7 +382,7 @@ func (b *Bridge) keep(kind, brain string, m brainruntime.Inbound) {
 		brainruntime.Dropped([]brainruntime.Inbound{m})
 		return
 	}
-	if err := keepInbound(context.Background(), b.store, kind, brain, m); err != nil {
+	if err := app.KeepInbound(context.Background(), b.store, kind, brain, m); err != nil {
 		log.Printf("%v; it is lost", err)
 	}
 }
@@ -395,7 +395,7 @@ func (b *Bridge) keepInterrupted(br *brainruntime.Brain, m brainruntime.Inbound)
 	if m.Source != chat.SourceWhatsApp || m.Silent {
 		return
 	}
-	if err := keepInterrupted(context.Background(), b.store, br.ID(), m); err != nil {
+	if err := app.KeepInterrupted(context.Background(), b.store, br.ID(), m); err != nil {
 		log.Printf("brain %s: %v", br.ID(), err)
 	}
 }
@@ -415,7 +415,7 @@ func (b *Bridge) resume(ctx context.Context) {
 	// that begins meanwhile keeps what is still waiting again, but a
 	// notice it cut off would be lost.
 	ctx = context.WithoutCancel(ctx)
-	rows, err := takeInbound(ctx, b.store)
+	rows, err := app.TakeInbound(ctx, b.store)
 	if err != nil {
 		log.Printf("taking up what the last stop kept: %v", err)
 	}
@@ -427,25 +427,25 @@ func (b *Bridge) resume(ctx context.Context) {
 		kinds[r.Kind]++
 	}
 	log.Printf("Taking up what the last stop kept: %d messages, %d edits or deletions, %d runs it cut short",
-		len(rows)-kinds[inboundChange]-kinds[inboundInterrupted], kinds[inboundChange], kinds[inboundInterrupted])
+		len(rows)-kinds[app.InboundChange]-kinds[app.InboundInterrupted], kinds[app.InboundChange], kinds[app.InboundInterrupted])
 	now := time.Now()
 	for _, r := range rows {
-		if age := now.Sub(r.SentAt); age > outboundmsg.OutboxTTL && r.Kind != inboundChange {
+		if age := now.Sub(r.SentAt); age > outboundmsg.OutboxTTL && r.Kind != app.InboundChange {
 			log.Printf("dropping a message for %s that the last stop kept: it came in %v ago, more than %v", r.Chat, age.Round(time.Minute), outboundmsg.OutboxTTL)
 			continue
 		}
 		switch r.Kind {
-		case inboundInterrupted:
+		case app.InboundInterrupted:
 			if err := b.outbox.Text(ctx, r.Chat, outboundmsg.RestartedNotice, b.cfgs.Get().MaxChunkSize); err != nil {
 				log.Printf("brain %s: telling %s its run was cut short: %v", r.Brain, r.Chat, err)
 			}
-		case inboundQueued, inboundHeld:
+		case app.InboundQueued, app.InboundHeld:
 			if _, _, _, err := b.brainMgr.Submit(r.Msg); err != nil {
 				log.Printf("dropping a message for %s that the last stop kept: %v", r.Chat, err)
 			}
-		case inboundLate:
+		case app.InboundLate:
 			b.handleInbound(ctx, r.Msg)
-		case inboundChange:
+		case app.InboundChange:
 			b.handleChange(r.Change)
 		}
 	}
@@ -551,7 +551,7 @@ func (in *intake) end() {
 // looked at it yet, so no command ran, and the OTP guard is still to see
 // it (see resume).
 func (b *Bridge) keepLate(m brainruntime.Inbound) {
-	if !b.intake.keep(func() { b.keep(inboundLate, "", m) }) {
+	if !b.intake.keep(func() { b.keep(app.InboundLate, "", m) }) {
 		log.Printf("dropping a message for %s: it came in as the bridge closed its store", m.JID)
 	}
 }
@@ -564,7 +564,7 @@ func (b *Bridge) keepLate(m brainruntime.Inbound) {
 func (b *Bridge) handleChange(c chat.Change) {
 	if !b.intake.enter() {
 		kept := b.intake.keep(func() {
-			if err := keepChange(context.Background(), b.store, c, time.Now()); err != nil {
+			if err := app.KeepChange(context.Background(), b.store, c, time.Now()); err != nil {
 				log.Printf("%v; it is lost", err)
 			}
 		})
