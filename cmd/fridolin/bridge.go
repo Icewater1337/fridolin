@@ -14,24 +14,24 @@ import (
 	"time"
 	"unicode"
 
+	"github.com/Icewater1337/fridolin/internal/backup"
 	"github.com/Icewater1337/fridolin/internal/devchat"
-	outboundmsg "github.com/Icewater1337/fridolin/internal/outbound"
-	"github.com/Icewater1337/fridolin/internal/whatsapp"
-
-	"github.com/Icewater1337/fridolin/internal/registry"
-
-	"github.com/Icewater1337/fridolin/internal/claudecli"
-	"github.com/Icewater1337/fridolin/internal/config"
-	"github.com/Icewater1337/fridolin/internal/httpapi"
-	"github.com/Icewater1337/fridolin/internal/manifest"
 
 	"github.com/Icewater1337/fridolin/internal/activity"
 	"github.com/Icewater1337/fridolin/internal/chat"
+	"github.com/Icewater1337/fridolin/internal/claudecli"
+	"github.com/Icewater1337/fridolin/internal/config"
 	"github.com/Icewater1337/fridolin/internal/history"
+	"github.com/Icewater1337/fridolin/internal/httpapi"
 	"github.com/Icewater1337/fridolin/internal/logx"
+	"github.com/Icewater1337/fridolin/internal/manifest"
 	"github.com/Icewater1337/fridolin/internal/otp"
+	outboundmsg "github.com/Icewater1337/fridolin/internal/outbound"
 	"github.com/Icewater1337/fridolin/internal/platform"
+	"github.com/Icewater1337/fridolin/internal/registry"
 	"github.com/Icewater1337/fridolin/internal/store"
+	"github.com/Icewater1337/fridolin/internal/whatsapp"
+
 	wastore "go.mau.fi/whatsmeow/store"
 	"go.mau.fi/whatsmeow/types"
 )
@@ -71,7 +71,7 @@ type Bridge struct {
 	// sessionCookie names the session cookie for the address served on.
 	sessionCookie string
 	scriptAuth    *scriptAuth
-	backup        *BackupManager
+	backup        *backup.Manager
 	google        *GoogleAuth
 	plaud         *PlaudManager
 	site          *SiteManager

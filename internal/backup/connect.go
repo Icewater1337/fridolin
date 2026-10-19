@@ -2,7 +2,7 @@ package backup
 
 import "context"
 
-// backupConnectJob is a sign-in that runs in the background while the dashboard
+// connectJob is a sign-in that runs in the background while the dashboard
 // polls for it: Google Drive's for backups. It waits for an approval in
 // the browser, which can take minutes.
 type connectJob struct {

@@ -190,14 +190,14 @@ func (m *Manager) Versions(ctx context.Context, id string) ([]string, error) {
 	return versions, nil
 }
 
-// BackupRestoreRequest identifies the snapshot and destination of a restore.
+// RestoreRequest identifies the snapshot and destination of a restore.
 type RestoreRequest struct {
 	Brain   string
 	Version string
 	Target  string
 }
 
-// ErrBackupRestoreRequest distinguishes malformed remote path components from a
+// ErrRestoreRequest distinguishes malformed remote path components from a
 // rejected local destination. HTTP presents the former as 400 and the latter as 422.
 var ErrRestoreRequest = errors.New("invalid brain or version")
 

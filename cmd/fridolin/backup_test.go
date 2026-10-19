@@ -506,7 +506,7 @@ func addBackupBrain(t *testing.T, tb *testBridge, id string) string {
 }
 
 // runBackup starts a backup of one brain, waits for it, and returns its result.
-func runBackup(t *testing.T, tb *testBridge, id string) *BackupResult {
+func runBackup(t *testing.T, tb *testBridge, id string) *backup.Result {
 	t.Helper()
 	if err := tb.backup.StartRun([]string{id}, false, "manual", false); err != nil {
 		t.Fatal(err)
@@ -516,9 +516,9 @@ func runBackup(t *testing.T, tb *testBridge, id string) *BackupResult {
 
 // waitBackup waits until no backup runs, as the Backup page sees it, and
 // returns the last result of brain id.
-func waitBackup(t *testing.T, tb *testBridge, id string) *BackupResult {
+func waitBackup(t *testing.T, tb *testBridge, id string) *backup.Result {
 	t.Helper()
-	var res *BackupResult
+	var res *backup.Result
 	testutil.WaitFor(t, 60*time.Second, "backup", func() bool {
 		running, last := backupStatus(t, tb)
 		res = last[id]
@@ -532,19 +532,19 @@ func waitBackup(t *testing.T, tb *testBridge, id string) *BackupResult {
 
 // backupStatus reports from GET /api/backup/status whether a backup runs,
 // and each brain's last result.
-func backupStatus(t *testing.T, tb *testBridge) (running bool, last map[string]*BackupResult) {
+func backupStatus(t *testing.T, tb *testBridge) (running bool, last map[string]*backup.Result) {
 	t.Helper()
 	var st struct {
 		Job    any `json:"job"`
 		Brains []struct {
-			ID   string        `json:"id"`
-			Last *BackupResult `json:"last"`
+			ID   string         `json:"id"`
+			Last *backup.Result `json:"last"`
 		} `json:"brains"`
 	}
 	if w := tb.do("GET", "/api/backup/status", nil); w.Code != 200 || json.Unmarshal(w.Body.Bytes(), &st) != nil {
 		t.Fatalf("backup status: %d %s", w.Code, w.Body.String())
 	}
-	last = map[string]*BackupResult{}
+	last = map[string]*backup.Result{}
 	for _, b := range st.Brains {
 		last[b.ID] = b.Last
 	}
@@ -664,19 +664,6 @@ func (d *deletionRunner) run(_ context.Context, args []string, stderr io.Writer)
 // notesBase is where the default config backs up the brain "notes".
 const notesBase = config.DefaultBackupRemote + ":" + config.DefaultBackupRoot + "/notes"
 
-// flagValue returns the value after an rclone flag, "" when it is not set.
-func flagValue(args []string, flag string) string {
-	for i, a := range args {
-		if a == flag && i+1 < len(args) {
-			return args[i+1]
-		}
-	}
-	return ""
-}
-
-// syncMaxDelete returns a sync's --max-delete value, "" for none.
-func syncMaxDelete(args []string) string { return flagValue(args, "--max-delete") }
-
 // TestBackupRunForceOverridesRefusal: the API's force field reaches the run,
 // and only for the brains it names.
 func TestBackupRunForceOverridesRefusal(t *testing.T) {
@@ -738,9 +725,9 @@ func scheduledBackupBridge(t *testing.T) (*testBridge, *deletionRunner) {
 func TestScheduledRefusalIsToldOnWhatsApp(t *testing.T) {
 	tb, runner := scheduledBackupBridge(t)
 	var failNotice bool
-	installBackupRunner(t, tb, runner.run, func(opts *BackupOptions) {
+	installBackupRunner(t, tb, runner.run, func(opts *backup.Options) {
 		send := opts.Notify
-		opts.Notify = func(ctx context.Context, target BackupTarget, text string) error {
+		opts.Notify = func(ctx context.Context, target backup.Target, text string) error {
 			if failNotice {
 				return fmt.Errorf("WhatsApp is not connected")
 			}
@@ -1150,7 +1137,7 @@ func TestBackupRestoreRecordsItsResult(t *testing.T) {
 					Brain  string `json:"brain"`
 					Target string `json:"target"`
 				} `json:"job"`
-				LastRestore *RestoreResult `json:"last_restore"`
+				LastRestore *backup.RestoreResult `json:"last_restore"`
 			}
 			_ = json.Unmarshal(tb.do("GET", "/api/backup/status", nil).Body.Bytes(), &st)
 			if st.Job.Kind != "restore" || st.Job.Brain != "notes" || st.Job.Target != filepath.Join(tb.home, "restored") {
@@ -1333,9 +1320,9 @@ func TestBackupWaitsForTheBrainToFinish(t *testing.T) {
 					syncedWhileRunning = append(syncedWhileRunning, running())
 				}
 				return []byte("[]"), nil
-			}, func(opts *BackupOptions) {
+			}, func(opts *backup.Options) {
 				targets := opts.Targets
-				opts.Targets = func() []BackupTarget {
+				opts.Targets = func() []backup.Target {
 					all := targets()
 					for i := range all {
 						wait := all[i].WaitIdle

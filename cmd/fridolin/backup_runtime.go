@@ -7,6 +7,7 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/Icewater1337/fridolin/internal/backup"
 	"github.com/Icewater1337/fridolin/internal/config"
 	"github.com/Icewater1337/fridolin/internal/fsx"
 	"github.com/Icewater1337/fridolin/internal/sandbox"
@@ -47,7 +48,7 @@ func findRclone(p string) (string, error) {
 			return found, nil
 		}
 	}
-	return "", ErrBackupRcloneMissing
+	return "", backup.ErrRcloneMissing
 }
 
 // rcloneFallbacks are where findRclone looks when rclone is not in the

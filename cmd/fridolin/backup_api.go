@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/Icewater1337/fridolin/internal/apperr"
+	"github.com/Icewater1337/fridolin/internal/backup"
 	"github.com/Icewater1337/fridolin/internal/config"
 	"github.com/Icewater1337/fridolin/internal/fsx"
 	"github.com/Icewater1337/fridolin/internal/httpapi"
@@ -216,7 +217,7 @@ func (b *Bridge) apiBackupRestore(w http.ResponseWriter, r *http.Request) {
 		httpapi.WriteErr(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	target, err := b.backup.Restore(BackupRestoreRequest{Brain: req.Brain, Version: req.Version, Target: req.Target}, b.restoreTarget)
+	target, err := b.backup.Restore(backup.RestoreRequest{Brain: req.Brain, Version: req.Version, Target: req.Target}, b.restoreTarget)
 	if err != nil {
 		status := http.StatusInternalServerError
 		switch apperr.KindOf(err) {
@@ -229,7 +230,7 @@ func (b *Bridge) apiBackupRestore(w http.ResponseWriter, r *http.Request) {
 		case apperr.Unavailable:
 			status = http.StatusServiceUnavailable
 		}
-		if errors.Is(err, ErrBackupRestoreRequest) {
+		if errors.Is(err, backup.ErrRestoreRequest) {
 			status = http.StatusBadRequest
 		}
 		httpapi.WriteErr(w, status, err.Error())

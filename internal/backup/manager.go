@@ -44,7 +44,7 @@ import (
 // scheduled run that refuses tells the owner on WhatsApp (see
 // noticeRefusal).
 
-// BackupBridgeID stands for the bridge's own settings wherever backups
+// BridgeID stands for the bridge's own settings wherever backups
 // list brains by id: in a job, in the backup state, and in Drive, where it
 // is the folder name above, so it must not change. The dashboard holds it
 // as BRIDGE_BACKUP_ID (web/assets/lib/brain.js) and shows it as "Bridge
@@ -52,7 +52,7 @@ import (
 // or digit.
 const BridgeID = "_bridge"
 
-// BackupResult is the outcome of backing up one brain (or the bridge config).
+// Result is the outcome of backing up one brain (or the bridge config).
 type Result struct {
 	Started  time.Time `json:"started"`
 	Finished time.Time `json:"finished"`
@@ -117,7 +117,7 @@ type backupJob struct {
 	cancel        context.CancelFunc
 }
 
-// BackupManager runs and schedules backups.
+// Manager runs and schedules backups.
 type Manager struct {
 	opts Options
 
@@ -165,7 +165,7 @@ const (
 // Back up now disabled.
 var refusalNoticeTimeout = 30 * time.Second
 
-// NewBackupService loads the saved backup state. A state file that cannot
+// New loads the saved backup state. A state file that cannot
 // be read is kept as state.json.corrupt and the bridge starts with none: the
 // last results and the day of the last scheduled run are gone then, and the
 // log says so rather than leaving it to the next scheduled run to show.
@@ -1159,7 +1159,7 @@ func (m *Manager) listVersions(ctx context.Context, versions string) ([]string, 
 // backupPath is the rclone path of the backup named id under backup.root,
 // with parts below it: backupPath(bc, "notes", "versions") is
 // "brain-gdrive:fridolin-backup/notes/versions". Every path the backups
-// use is built here, from a name that backupNameOK accepts.
+// use is built here, from a name that NameOK accepts.
 func backupPath(bc Settings, id string, parts ...string) string {
 	return bc.Remote + ":" + strings.Join(append([]string{bc.Root, id}, parts...), "/")
 }

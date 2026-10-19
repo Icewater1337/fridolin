@@ -7,12 +7,13 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Icewater1337/fridolin/internal/backup"
 	"github.com/Icewater1337/fridolin/internal/testutil"
 )
 
 // installBackupRunner retains the production projections while replacing only
 // external process execution. The old manager has no work in these fixtures.
-func installBackupRunner(t *testing.T, tb *testBridge, runner BackupRunFunc, configure ...func(*BackupOptions)) {
+func installBackupRunner(t *testing.T, tb *testBridge, runner backup.RunFunc, configure ...func(*backup.Options)) {
 	t.Helper()
 	tb.backup.Stop()
 	opts := backupOptions(tb.cfgs, tb.brainMgr, tb.notifyBackup)
@@ -20,7 +21,7 @@ func installBackupRunner(t *testing.T, tb *testBridge, runner BackupRunFunc, con
 	for _, apply := range configure {
 		apply(&opts)
 	}
-	tb.backup = NewBackupService(opts)
+	tb.backup = backup.New(opts)
 }
 
 // persistedBackupState reads the on-disk contract instead of service internals.
@@ -50,7 +51,7 @@ func connectedBackup(tb *testBridge) bool { return tb.backup.Status()["connected
 
 // startScheduledBackup exercises scheduled-result delivery without invoking a
 // private scheduler tick; the schedule itself is covered by service fixtures.
-func startScheduledBackup(t *testing.T, tb *testBridge) *BackupResult {
+func startScheduledBackup(t *testing.T, tb *testBridge) *backup.Result {
 	t.Helper()
 	if err := tb.backup.StartRun([]string{"notes"}, false, "scheduled", false); err != nil {
 		t.Fatal(err)

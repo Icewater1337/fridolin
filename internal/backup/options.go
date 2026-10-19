@@ -7,7 +7,7 @@ import (
 	"time"
 )
 
-// BackupSettings is an owned projection of one live config snapshot. The two
+// Settings is an owned projection of one live config snapshot. The two
 // resolved scalar fields intentionally have no omitempty: the status response
 // previously included their non-nil pointers even for false and zero.
 type Settings struct {
@@ -22,7 +22,7 @@ type Settings struct {
 	ConfiguredIDs       []string `json:"-"`
 }
 
-// BackupTarget keeps the selected runtime identity for the life of a job. Its
+// Target keeps the selected runtime identity for the life of a job. Its
 // settings are read at the original operation boundaries, including after WaitIdle.
 type Target struct {
 	ID, Dir  string
@@ -36,7 +36,7 @@ type TargetSettings struct {
 	Exclude []string
 }
 
-// BackupBridgeFiles preserves configured manifest order, including a per-file
+// BridgeFiles preserves configured manifest order, including a per-file
 // serialization error, so staging still attempts every remaining write.
 type BridgeFiles struct {
 	Config    []byte
@@ -74,6 +74,6 @@ func (m *Manager) SettingsChanged(prev, next Settings) {
 	}
 }
 
-// ErrBackupRcloneMissing is findRclone's error when no rclone_path is set and no
+// ErrRcloneMissing is findRclone's error when no rclone_path is set and no
 // rclone is found.
 var ErrRcloneMissing = errors.New("rclone is not installed")

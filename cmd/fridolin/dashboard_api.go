@@ -24,25 +24,19 @@ import (
 	"time"
 
 	"github.com/Icewater1337/fridolin/internal/access"
-
 	"github.com/Icewater1337/fridolin/internal/apperr"
-
-	"github.com/Icewater1337/fridolin/internal/config"
-
-	"github.com/Icewater1337/fridolin/internal/registry"
-
-	"github.com/Icewater1337/fridolin/internal/manifest"
-
-	"github.com/Icewater1337/fridolin/internal/httpapi"
-
-	"rsc.io/qr"
-
+	"github.com/Icewater1337/fridolin/internal/backup"
 	"github.com/Icewater1337/fridolin/internal/chat"
 	"github.com/Icewater1337/fridolin/internal/claudecli"
+	"github.com/Icewater1337/fridolin/internal/config"
 	"github.com/Icewater1337/fridolin/internal/fsx"
+	"github.com/Icewater1337/fridolin/internal/httpapi"
+	"github.com/Icewater1337/fridolin/internal/manifest"
 	"github.com/Icewater1337/fridolin/internal/platform"
+	"github.com/Icewater1337/fridolin/internal/registry"
 	"github.com/Icewater1337/fridolin/internal/textx"
 	"github.com/Icewater1337/fridolin/internal/version"
+	"rsc.io/qr"
 )
 
 func (b *Bridge) apiMux() http.Handler {
@@ -178,7 +172,7 @@ type statusResponse struct {
 	Brains        []BrainRuntime    `json:"brains"`
 	Issues        []registry.Issue  `json:"issues"`
 	Warnings      []string          `json:"warnings"`
-	Backup        BackupSummary     `json:"backup"`
+	Backup        backup.Summary    `json:"backup"`
 	Ingest        bool              `json:"ingest"`
 	Pending       int               `json:"debouncing"`
 	// Settings saved since the start that only apply after a restart. The
