@@ -141,8 +141,8 @@ func TestRuntimePathConsumersKeepBootAndApplyLiveOptions(t *testing.T) {
 		"Google credentials fallback": {tb.google.CredsDir(), boot.DataDir},
 		"Google redirect":             {tb.google.RedirectURI(), "http://" + boot.HTTPListen + "/"},
 		"Plaud private login":         {tb.plaud.Status().LoginDir, filepath.Join(boot.PlaudDir(), "home", ".plaud")},
-		"site media":                  {tb.siteBuilderHooks().mediaDir(), boot.MediaDir},
-		"site bridge address":         {tb.siteBuilderHooks().bridgeURL(), "http://" + boot.HTTPListen},
+		"site media":                  {tb.siteBuilderHooks().MediaDir(), boot.MediaDir},
+		"site bridge address":         {tb.siteBuilderHooks().BridgeURL(), "http://" + boot.HTTPListen},
 	} {
 		if pair[0] != pair[1] {
 			t.Errorf("%s = %q, want %q", label, pair[0], pair[1])
@@ -198,7 +198,7 @@ func TestRuntimePathConsumersKeepBootAndApplyLiveOptions(t *testing.T) {
 		if w := tb.editConfig(t, func(c map[string]any) { c["sandbox"].(map[string]any)["enabled"] = true }); w.Code != http.StatusOK {
 			t.Fatal(w.Body.String())
 		}
-		_, _, env, err := tb.siteBuilderHooks().sandbox("main", os.Args[0], nil)
+		_, _, env, err := tb.siteBuilderHooks().Sandbox("main", os.Args[0], nil)
 		if err != nil {
 			t.Fatal(err)
 		}

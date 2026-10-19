@@ -20,6 +20,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	sitesvc "github.com/Icewater1337/fridolin/internal/site"
 	"io"
 	"io/fs"
 	"log"
@@ -37,7 +38,6 @@ import (
 	"time"
 
 	"github.com/Icewater1337/fridolin/internal/fsx"
-	"github.com/Icewater1337/fridolin/internal/google"
 	"github.com/Icewater1337/fridolin/internal/platform"
 	"github.com/Icewater1337/fridolin/internal/sandbox"
 	"github.com/Icewater1337/fridolin/internal/textx"
@@ -50,61 +50,14 @@ const (
 	siteKeepDeploys   = 3
 )
 
-// SiteSettings is <data_dir>/site/settings.json, edited from the dashboard.
-type SiteSettings struct {
-	Enabled bool   `json:"enabled"`
-	Title   string `json:"title"`
-	// Listen is where the site process listens; a tunnel forwards the domain to it.
-	Listen string `json:"listen"`
-	// Domain is the public host name, e.g. "example.com" (https assumed).
-	Domain string   `json:"domain"`
-	Repo   SiteRepo `json:"repo"`
-	// Roles users can have. "admin" is always one of them.
-	Roles []string `json:"roles"`
-	// Approved is the commit the live site serves.
-	Approved string       `json:"approved"`
-	History  []SiteDeploy `json:"history"`
-	// Tunnel runs cloudflared with the saved tunnel token.
-	Tunnel bool `json:"tunnel"`
-	// Builders are the brains allowed to build the site (site_builder.go).
-	Builders  []string       `json:"builders"`
-	Proposals []SiteProposal `json:"proposals"`
-}
-
-// SiteRepo is the private repository that holds the site's modules.
-type SiteRepo struct {
-	URL    string `json:"url"`
-	Branch string `json:"branch"`
-	// Subdir is the folder inside the repository that holds modules/ ("" = the root).
-	Subdir string `json:"subdir"`
-}
-
-// SiteDeploy is one approved commit.
-type SiteDeploy struct {
-	Commit  string `json:"commit"`
-	Subject string `json:"subject"`
-	At      string `json:"at"`
-}
-
-// SiteUser is one account in users.json. The site process reads the same file.
-type SiteUser struct {
-	ID           string `json:"id"`
-	Kind         string `json:"kind"` // google | password
-	Email        string `json:"email,omitempty"`
-	Username     string `json:"username,omitempty"`
-	Name         string `json:"name,omitempty"`
-	Role         string `json:"role"`
-	PasswordHash string `json:"password_hash,omitempty"`
-	Created      string `json:"created"`
-}
-
 // SiteManager runs the site.
 type SiteManager struct {
 	dataDir      string
+	host         SiteHost
 	googleClient func() string // path of Fridolin's shared Google OAuth client file
 
-	// Swappable for tests: installing npm dependencies into a folder, and
-	// into a builder brain's workspace (as that brain).
+	// Selected at construction: installing npm dependencies into a folder,
+	// and into a builder brain's workspace (as that brain).
 	npmInstall       func(ctx context.Context, dir string, prod bool) error
 	workspaceInstall func(ctx context.Context, brainID, dir string) error
 	// sandboxExec runs the live site under its profile (site_sandbox.go).
@@ -113,14 +66,14 @@ type SiteManager struct {
 	secretsMu sync.Mutex // site_secrets.go
 
 	mu       sync.Mutex
-	settings SiteSettings
-	users    []SiteUser
+	settings sitesvc.SiteSettings
+	users    []sitesvc.SiteUser
 	site     *siteProc
 	tunnel   *siteProc
-	deploy   *siteJob
+	deploy   *SiteJob
 	previews map[string]*sitePreview
 	tokens   map[string]string // builder token → brain id
-	hooks    builderHooks
+	hooks    SiteBuilderHooks
 	chats    *siteChats
 	// searchSlots limits the searches the bridge runs for the site at once.
 	searchSlots chan struct{}
@@ -129,18 +82,29 @@ type SiteManager struct {
 	warnNoSandbox sync.Once
 }
 
-// NewSiteManager loads the site's settings and accounts from dataDir/site.
-func NewSiteManager(dataDir string, googleClient func() string) *SiteManager {
+// NewSiteManager loads the site's settings and accounts from opts.DataDir/site.
+func newSiteManager(opts SiteOptions) *SiteManager {
 	m := &SiteManager{
-		dataDir:      dataDir,
-		googleClient: googleClient,
+		dataDir:      opts.DataDir,
+		host:         opts.Host,
+		googleClient: opts.GoogleClient,
+		hooks:        opts.Builder,
 		previews:     map[string]*sitePreview{},
 		site:         newSiteProc("site"),
 		tunnel:       newSiteProc("tunnel"),
-		sandboxExec:  sandbox.ExecPath,
+		sandboxExec:  opts.SandboxExec,
 	}
-	m.npmInstall = m.runNpmInstall
-	m.workspaceInstall = m.npmInstallAsBrain
+	if m.sandboxExec == "" {
+		m.sandboxExec = sandbox.ExecPath
+	}
+	m.npmInstall = opts.NPMInstall
+	if m.npmInstall == nil {
+		m.npmInstall = m.runNpmInstall
+	}
+	m.workspaceInstall = opts.WorkspaceInstall
+	if m.workspaceInstall == nil {
+		m.workspaceInstall = m.npmInstallAsBrain
+	}
 	m.chats = &siteChats{m: m}
 	m.searchSlots = make(chan struct{}, spoolSearchLimit)
 	m.settings = m.loadSettings()
@@ -152,8 +116,8 @@ func (m *SiteManager) dir(parts ...string) string {
 	return filepath.Join(append([]string{m.dataDir, "site"}, parts...)...)
 }
 
-func (m *SiteManager) loadSettings() SiteSettings {
-	var s SiteSettings
+func (m *SiteManager) loadSettings() sitesvc.SiteSettings {
+	var s sitesvc.SiteSettings
 	if data, err := os.ReadFile(m.dir("settings.json")); err == nil {
 		if err := json.Unmarshal(data, &s); err != nil {
 			log.Printf("[site] %s is not valid JSON, using defaults: %v", m.dir("settings.json"), err)
@@ -183,15 +147,15 @@ func (m *SiteManager) saveSettingsLocked() error {
 }
 
 // Settings returns a copy of the current settings.
-func (m *SiteManager) Settings() SiteSettings {
+func (m *SiteManager) Settings() sitesvc.SiteSettings {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	s := m.settings
 	s.Roles = slices.Clone(s.Roles)
 	// [] rather than null in JSON.
-	s.History = append([]SiteDeploy{}, s.History...)
+	s.History = append([]sitesvc.SiteDeploy{}, s.History...)
 	s.Builders = append([]string{}, s.Builders...)
-	s.Proposals = append([]SiteProposal{}, s.Proposals...)
+	s.Proposals = append([]sitesvc.SiteProposal{}, s.Proposals...)
 	return s
 }
 
@@ -202,25 +166,16 @@ var (
 	siteEmailRE  = regexp.MustCompile(`^[^@\s]+@[^@\s]+\.[^@\s]+$`)
 )
 
-// SiteSettingsUpdate is what the dashboard may change directly.
-type SiteSettingsUpdate struct {
-	Enabled *bool   `json:"enabled"`
-	Title   *string `json:"title"`
-	Listen  *string `json:"listen"`
-	Domain  *string `json:"domain"`
-	Tunnel  *bool   `json:"tunnel"`
-}
-
 // UpdateSettings validates and saves a change, then starts, restarts or
 // stops what the change affects.
-func (m *SiteManager) UpdateSettings(u SiteSettingsUpdate) (SiteSettings, error) {
+func (m *SiteManager) UpdateSettings(u sitesvc.SiteSettingsUpdate) (sitesvc.SiteSettings, error) {
 	m.mu.Lock()
 	next := m.settings
 	if u.Title != nil {
 		t := strings.TrimSpace(*u.Title)
 		if t == "" || len(t) > 80 {
 			m.mu.Unlock()
-			return SiteSettings{}, errors.New("the title must be 1 to 80 characters")
+			return sitesvc.SiteSettings{}, errors.New("the title must be 1 to 80 characters")
 		}
 		next.Title = t
 	}
@@ -228,7 +183,7 @@ func (m *SiteManager) UpdateSettings(u SiteSettingsUpdate) (SiteSettings, error)
 		host, port, err := net.SplitHostPort(strings.TrimSpace(*u.Listen))
 		if err != nil || port == "" || port == "0" {
 			m.mu.Unlock()
-			return SiteSettings{}, errors.New(`listen must be host:port, e.g. "127.0.0.1:8780"`)
+			return sitesvc.SiteSettings{}, errors.New(`listen must be host:port, e.g. "127.0.0.1:8780"`)
 		}
 		next.Listen = net.JoinHostPort(host, port)
 	}
@@ -237,7 +192,7 @@ func (m *SiteManager) UpdateSettings(u SiteSettingsUpdate) (SiteSettings, error)
 		d = strings.TrimSuffix(strings.TrimPrefix(strings.TrimPrefix(d, "https://"), "http://"), "/")
 		if d != "" && !siteDomainRE.MatchString(d) {
 			m.mu.Unlock()
-			return SiteSettings{}, fmt.Errorf("%q is not a host name like example.com", d)
+			return sitesvc.SiteSettings{}, fmt.Errorf("%q is not a host name like example.com", d)
 		}
 		next.Domain = d
 	}
@@ -248,7 +203,7 @@ func (m *SiteManager) UpdateSettings(u SiteSettingsUpdate) (SiteSettings, error)
 		next.Tunnel = *u.Tunnel
 		if next.Tunnel && !fsx.Exists(m.dir("tunnel.token")) {
 			m.mu.Unlock()
-			return SiteSettings{}, errors.New("save a Cloudflare tunnel token first")
+			return sitesvc.SiteSettings{}, errors.New("save a Cloudflare tunnel token first")
 		}
 	}
 	restart := next.Listen != m.settings.Listen || next.Domain != m.settings.Domain || next.Title != m.settings.Title
@@ -256,7 +211,7 @@ func (m *SiteManager) UpdateSettings(u SiteSettingsUpdate) (SiteSettings, error)
 	err := m.saveSettingsLocked()
 	m.mu.Unlock()
 	if err != nil {
-		return SiteSettings{}, err
+		return sitesvc.SiteSettings{}, err
 	}
 	m.reconcile(restart)
 	return m.Settings(), nil
@@ -281,7 +236,7 @@ func (m *SiteManager) SetRoles(roles []string) error {
 	}
 	for _, u := range m.users {
 		if !seen[u.Role] {
-			return fmt.Errorf("%s still has the role %q; change it first", u.display(), u.Role)
+			return fmt.Errorf("%s still has the role %q; change it first", u.Display(), u.Role)
 		}
 	}
 	m.settings.Roles = out
@@ -290,16 +245,9 @@ func (m *SiteManager) SetRoles(roles []string) error {
 
 // ── accounts ────────────────────────────────────────────────────────────────
 
-func (u SiteUser) display() string {
-	if u.Kind == "google" {
-		return u.Email
-	}
-	return u.Username
-}
-
-func (m *SiteManager) loadUsers() []SiteUser {
+func (m *SiteManager) loadUsers() []sitesvc.SiteUser {
 	var f struct {
-		Users []SiteUser `json:"users"`
+		Users []sitesvc.SiteUser `json:"users"`
 	}
 	data, err := os.ReadFile(m.dir("users.json"))
 	if err != nil {
@@ -317,29 +265,15 @@ func (m *SiteManager) saveUsersLocked() error {
 }
 
 // Users returns the accounts without their password hashes.
-func (m *SiteManager) Users() []SiteUser {
+func (m *SiteManager) Users() []sitesvc.SiteUser {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	out := make([]SiteUser, len(m.users))
+	out := make([]sitesvc.SiteUser, len(m.users))
 	for i, u := range m.users {
 		u.PasswordHash = ""
 		out[i] = u
 	}
 	return out
-}
-
-// SiteUserInput adds or changes an account.
-type SiteUserInput struct {
-	Kind     string `json:"kind"`
-	Email    string `json:"email"`
-	Username string `json:"username"`
-	Name     string `json:"name"`
-	Role     string `json:"role"`
-	Password string `json:"password"`
-	// PasswordHash moves a password account over from another app with the
-	// password its owner had there: a bcrypt hash, which the site checks as
-	// it is. Only when adding an account, instead of Password.
-	PasswordHash string `json:"password_hash"`
 }
 
 func (m *SiteManager) checkRoleLocked(kind, role string) error {
@@ -354,58 +288,58 @@ func (m *SiteManager) checkRoleLocked(kind, role string) error {
 }
 
 // AddUser creates an account.
-func (m *SiteManager) AddUser(in SiteUserInput) (SiteUser, error) {
+func (m *SiteManager) AddUser(in sitesvc.SiteUserInput) (sitesvc.SiteUser, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	u := SiteUser{ID: "u_" + randomToken(9), Kind: in.Kind, Name: strings.TrimSpace(in.Name), Role: in.Role, Created: time.Now().UTC().Format(time.RFC3339)}
+	u := sitesvc.SiteUser{ID: "u_" + randomToken(9), Kind: in.Kind, Name: strings.TrimSpace(in.Name), Role: in.Role, Created: time.Now().UTC().Format(time.RFC3339)}
 	switch in.Kind {
 	case "google":
 		u.Email = strings.ToLower(strings.TrimSpace(in.Email))
 		if !siteEmailRE.MatchString(u.Email) {
-			return SiteUser{}, errors.New("enter the Google account's email address")
+			return sitesvc.SiteUser{}, errors.New("enter the Google account's email address")
 		}
 		for _, x := range m.users {
 			if x.Kind == "google" && x.Email == u.Email {
-				return SiteUser{}, fmt.Errorf("%s already has an account", u.Email)
+				return sitesvc.SiteUser{}, fmt.Errorf("%s already has an account", u.Email)
 			}
 		}
 	case "password":
 		u.Username = strings.TrimSpace(in.Username)
 		if !siteUserRE.MatchString(u.Username) {
-			return SiteUser{}, errors.New("a username is 2–40 letters, digits, . _ or -")
+			return sitesvc.SiteUser{}, errors.New("a username is 2–40 letters, digits, . _ or -")
 		}
 		for _, x := range m.users {
 			if x.Kind == "password" && strings.EqualFold(x.Username, u.Username) {
-				return SiteUser{}, fmt.Errorf("the username %s is taken", u.Username)
+				return sitesvc.SiteUser{}, fmt.Errorf("the username %s is taken", u.Username)
 			}
 		}
 		h, err := newSitePasswordHash(in)
 		if err != nil {
-			return SiteUser{}, err
+			return sitesvc.SiteUser{}, err
 		}
 		u.PasswordHash = h
 	default:
-		return SiteUser{}, errors.New(`kind must be "google" or "password"`)
+		return sitesvc.SiteUser{}, errors.New(`kind must be "google" or "password"`)
 	}
 	if err := m.checkRoleLocked(u.Kind, u.Role); err != nil {
-		return SiteUser{}, err
+		return sitesvc.SiteUser{}, err
 	}
 	m.users = append(m.users, u)
 	if err := m.saveUsersLocked(); err != nil {
 		m.users = m.users[:len(m.users)-1]
-		return SiteUser{}, err
+		return sitesvc.SiteUser{}, err
 	}
 	u.PasswordHash = ""
 	return u, nil
 }
 
 // UpdateUser changes an account's name, role or password.
-func (m *SiteManager) UpdateUser(id string, in SiteUserInput) (SiteUser, error) {
+func (m *SiteManager) UpdateUser(id string, in sitesvc.SiteUserInput) (sitesvc.SiteUser, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	i := slices.IndexFunc(m.users, func(u SiteUser) bool { return u.ID == id })
+	i := slices.IndexFunc(m.users, func(u sitesvc.SiteUser) bool { return u.ID == id })
 	if i < 0 {
-		return SiteUser{}, errors.New("no such account")
+		return sitesvc.SiteUser{}, errors.New("no such account")
 	}
 	u := m.users[i]
 	if in.Name != "" {
@@ -413,20 +347,20 @@ func (m *SiteManager) UpdateUser(id string, in SiteUserInput) (SiteUser, error) 
 	}
 	if in.Role != "" && in.Role != u.Role {
 		if err := m.checkRoleLocked(u.Kind, in.Role); err != nil {
-			return SiteUser{}, err
+			return sitesvc.SiteUser{}, err
 		}
 		if u.Role == "admin" && m.adminCountLocked() == 1 {
-			return SiteUser{}, errors.New("this is the only admin; make someone else admin first")
+			return sitesvc.SiteUser{}, errors.New("this is the only admin; make someone else admin first")
 		}
 		u.Role = in.Role
 	}
 	if in.Password != "" {
 		if u.Kind != "password" {
-			return SiteUser{}, errors.New("accounts that sign in with Google have no password here")
+			return sitesvc.SiteUser{}, errors.New("accounts that sign in with Google have no password here")
 		}
 		h, err := hashSitePassword(in.Password)
 		if err != nil {
-			return SiteUser{}, err
+			return sitesvc.SiteUser{}, err
 		}
 		u.PasswordHash = h
 	}
@@ -434,7 +368,7 @@ func (m *SiteManager) UpdateUser(id string, in SiteUserInput) (SiteUser, error) 
 	m.users[i] = u
 	if err := m.saveUsersLocked(); err != nil {
 		m.users[i] = prev
-		return SiteUser{}, err
+		return sitesvc.SiteUser{}, err
 	}
 	u.PasswordHash = ""
 	return u, nil
@@ -445,7 +379,7 @@ func (m *SiteManager) UpdateUser(id string, in SiteUserInput) (SiteUser, error) 
 func (m *SiteManager) RemoveUser(id string) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	i := slices.IndexFunc(m.users, func(u SiteUser) bool { return u.ID == id })
+	i := slices.IndexFunc(m.users, func(u sitesvc.SiteUser) bool { return u.ID == id })
 	if i < 0 {
 		return errors.New("no such account")
 	}
@@ -490,7 +424,7 @@ func hashSitePassword(pw string) (string, error) {
 
 // newSitePasswordHash is what a new password account keeps: Fridolin's hash
 // of its password, or a bcrypt hash brought over from another app.
-func newSitePasswordHash(in SiteUserInput) (string, error) {
+func newSitePasswordHash(in sitesvc.SiteUserInput) (string, error) {
 	switch {
 	case in.PasswordHash == "":
 		return hashSitePassword(in.Password)
@@ -577,9 +511,9 @@ func (m *SiteManager) reconcile(restart bool) {
 	}
 }
 
-// baseContext is the bridge's context once started; background work such as
+// BaseContext is the bridge's context once started; background work such as
 // a deploy outlives the request that began it.
-func (m *SiteManager) baseContext() context.Context {
+func (m *SiteManager) BaseContext() context.Context {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if m.ctx != nil {
@@ -652,7 +586,7 @@ func (m *SiteManager) processCommand(ctx context.Context, name, listen, modulesD
 	if err != nil {
 		return nil, err
 	}
-	node, err := findNode()
+	node, err := m.host.Node()
 	if err != nil {
 		return nil, err
 	}
@@ -672,7 +606,7 @@ func (m *SiteManager) processCommand(ctx context.Context, name, listen, modulesD
 		if s.Domain != "" {
 			rt.PublicOrigin = "https://" + s.Domain
 		}
-		mods = readModuleCaps(modulesDir, homeDir())
+		mods = readModuleCaps(modulesDir, m.host.Home())
 		rt.SecretsFD = 3
 		rt.DataDir, rt.SpoolDir, rt.DevicesFile = m.dir("data"), m.spoolDir(), m.dir("devices.json")
 		for _, d := range []string{rt.SpoolDir, rt.DataDir} {
@@ -716,7 +650,7 @@ func (m *SiteManager) processCommand(ctx context.Context, name, listen, modulesD
 		prepareDeclaredFolders(mods, in.Unwritable)
 		switch err := siteSandboxAvailable(m.sandboxExec); {
 		case err == nil:
-			profile, err := siteSandboxProfile(in)
+			profile, err := m.host.Profile(in)
 			if err != nil {
 				return nil, fmt.Errorf("the site's sandbox: %w", err)
 			}
@@ -730,7 +664,7 @@ func (m *SiteManager) processCommand(ctx context.Context, name, listen, modulesD
 	}
 	cmd := exec.CommandContext(ctx, bin, args...)
 	cmd.Dir = shell
-	cmd.Env = siteEnv(node, "FRIDOLIN_SITE_RUNTIME="+rtFile, "NODE_ENV=production", "TMPDIR="+tmp+string(filepath.Separator))
+	cmd.Env = m.host.Env(node, "FRIDOLIN_SITE_RUNTIME="+rtFile, "NODE_ENV=production", "TMPDIR="+tmp+string(filepath.Separator))
 	if live {
 		secrets, err := m.secretsFor(mods)
 		if err != nil {
@@ -758,12 +692,12 @@ func (m *SiteManager) tunnelCommand(ctx context.Context) (*exec.Cmd, error) {
 	if err != nil {
 		return nil, errors.New("no tunnel token saved")
 	}
-	bin, err := findTool("cloudflared")
+	bin, err := m.host.Tool("cloudflared")
 	if err != nil {
 		return nil, errors.New("cloudflared is not installed (macOS: brew install cloudflared)")
 	}
 	cmd := exec.CommandContext(ctx, bin, "tunnel", "--no-autoupdate", "run")
-	cmd.Env = siteEnv(bin, "TUNNEL_TOKEN="+strings.TrimSpace(string(token)))
+	cmd.Env = m.host.Env(bin, "TUNNEL_TOKEN="+strings.TrimSpace(string(token)))
 	return cmd, nil
 }
 
@@ -803,90 +737,14 @@ func (m *SiteManager) SetGoogleClient(data []byte) error {
 		}
 		return nil
 	}
-	c, err := google.ParseClient(data)
+	clientType, err := m.host.GoogleClientType(data)
 	if err != nil {
 		return err
 	}
-	if c.Type != "web" {
+	if clientType != "web" {
 		return errors.New(`the site needs a "Web application" client (this one is a Desktop app client)`)
 	}
 	return fsx.WriteFileAtomic(m.dir("google_client.json"), data, 0o600, false)
-}
-
-// siteEnv is the whole environment of a site process: nothing of the bridge's
-// own environment (tokens, API keys) reaches it.
-func siteEnv(bin string, extra ...string) []string {
-	env := []string{
-		"HOME=" + homeDir(),
-		"PATH=" + siteEnvPath(bin),
-		"LANG=en_US.UTF-8",
-	}
-	for _, k := range []string{"USER", "LOGNAME", "TMPDIR"} {
-		if v := os.Getenv(k); v != "" {
-			env = append(env, k+"="+v)
-		}
-	}
-	return append(env, extra...)
-}
-
-// siteEnvPath is the PATH of a site process: the folder of the program it
-// runs (node's, so npm and npx are found), then the usual ones.
-func siteEnvPath(bin string) string {
-	return filepath.Dir(bin) + ":/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin"
-}
-
-// findNode finds Node.js (the site needs 22 or newer): on PATH, in the usual
-// folders, or the newest nvm install. Symlinks are resolved, so npm is found
-// next to it.
-func findNode() (string, error) {
-	bin, err := findTool("node")
-	if err != nil {
-		found, _ := filepath.Glob(filepath.Join(homeDir(), ".nvm/versions/node/v*/bin/node"))
-		slices.SortFunc(found, func(a, b string) int { return compareVersionDirs(b, a) })
-		if len(found) == 0 {
-			return "", errors.New("node is not installed (macOS: brew install node); the site needs Node.js 22 or newer")
-		}
-		bin = found[0]
-	}
-	if real, err := filepath.EvalSymlinks(bin); err == nil {
-		bin = real
-	}
-	return bin, nil
-}
-
-// compareVersionDirs orders …/v22.14.0/bin/node before …/v24.1.0/bin/node.
-func compareVersionDirs(a, b string) int {
-	va := strings.Split(strings.TrimPrefix(filepath.Base(filepath.Dir(filepath.Dir(a))), "v"), ".")
-	vb := strings.Split(strings.TrimPrefix(filepath.Base(filepath.Dir(filepath.Dir(b))), "v"), ".")
-	for i := 0; i < len(va) && i < len(vb); i++ {
-		var x, y int
-		fmt.Sscan(va[i], &x)
-		fmt.Sscan(vb[i], &y)
-		if x != y {
-			return x - y
-		}
-	}
-	return len(va) - len(vb)
-}
-
-// findTool looks on PATH and in the usual install folders (launchd's PATH is short).
-func findTool(name string) (string, error) {
-	if p, err := exec.LookPath(name); err == nil {
-		return p, nil
-	}
-	for _, dir := range toolFallbackDirs() {
-		if p := filepath.Join(dir, name); fsx.Exists(p) {
-			return p, nil
-		}
-	}
-	return "", fmt.Errorf("%s not found", name)
-}
-
-// toolFallbackDirs are where findTool looks for a program that is not on
-// PATH, which under the service it often is not. The sandbox keeps them
-// from brains like the PATH folders.
-func toolFallbackDirs() []string {
-	return []string{"/opt/homebrew/bin", "/usr/local/bin", filepath.Join(homeDir(), ".local/bin")}
 }
 
 // ensureShell unpacks the embedded site process into <data_dir>/site/shell
@@ -943,13 +801,13 @@ func (m *SiteManager) ensureShell(ctx context.Context) (string, error) {
 
 // runNpmInstall installs a package's dependencies (npm ci when there is a lock file).
 func (m *SiteManager) runNpmInstall(ctx context.Context, dir string, prod bool) error {
-	node, err := findNode()
+	node, err := m.host.Node()
 	if err != nil {
 		return err
 	}
 	npm := filepath.Join(filepath.Dir(node), "npm")
 	if !fsx.Exists(npm) {
-		if npm, err = findTool("npm"); err != nil {
+		if npm, err = m.host.Tool("npm"); err != nil {
 			return errors.New("npm not found next to node")
 		}
 	}
@@ -965,21 +823,12 @@ func (m *SiteManager) runNpmInstall(ctx context.Context, dir string, prod bool) 
 	defer cancel()
 	cmd := exec.CommandContext(ctx, npm, args...)
 	cmd.Dir = dir
-	cmd.Env = siteEnv(node)
+	cmd.Env = m.host.Env(node)
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("npm %s: %v\n%s", args[0], err, textx.Tail(string(out), 1500))
 	}
 	return nil
-}
-
-// SiteProcStatus is what the dashboard shows about one process.
-type SiteProcStatus struct {
-	State    string   `json:"state"` // stopped, starting, running, crashed
-	Since    string   `json:"since,omitempty"`
-	Error    string   `json:"error,omitempty"`
-	Restarts int      `json:"restarts"`
-	Log      []string `json:"log"`
 }
 
 // siteProc keeps one process running: it restarts it after a crash, waiting
@@ -1014,10 +863,10 @@ func (p *siteProc) set(state, errText string) {
 	p.state, p.lastErr, p.since = state, errText, time.Now()
 }
 
-func (p *siteProc) status() SiteProcStatus {
+func (p *siteProc) status() sitesvc.SiteProcStatus {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	st := SiteProcStatus{State: p.state, Error: p.lastErr, Restarts: p.restarts, Log: slices.Clone(p.lines)}
+	st := sitesvc.SiteProcStatus{State: p.state, Error: p.lastErr, Restarts: p.restarts, Log: slices.Clone(p.lines)}
 	if !p.since.IsZero() {
 		st.Since = p.since.UTC().Format(time.RFC3339)
 	}

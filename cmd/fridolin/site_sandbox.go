@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	sitesvc "github.com/Icewater1337/fridolin/internal/site"
 	"log"
 	"os"
 	"path/filepath"
@@ -103,24 +104,18 @@ func siteSandboxAvailable(execPath string) error {
 	return nil
 }
 
-// SiteSandboxStatus is what the dashboard shows about the sandbox.
-type SiteSandboxStatus struct {
-	On   bool   `json:"on"`
-	Note string `json:"note"`
-}
-
 // SandboxStatus says whether the live site runs sandboxed.
-func (m *SiteManager) SandboxStatus() SiteSandboxStatus {
+func (m *SiteManager) SandboxStatus() sitesvc.SiteSandboxStatus {
 	if err := siteSandboxAvailable(m.sandboxExec); err != nil {
-		return SiteSandboxStatus{Note: err.Error()}
+		return sitesvc.SiteSandboxStatus{Note: err.Error()}
 	}
-	return SiteSandboxStatus{On: true, Note: "module code reaches only the files, programs and secrets its module.json declares"}
+	return sitesvc.SiteSandboxStatus{On: true, Note: "module code reaches only the files, programs and secrets its module.json declares"}
 }
 
 // sandboxInput gathers what the live site's profile is built from.
 func (m *SiteManager) sandboxInput(node, deploy, root, rtFile string, mods []sandbox.SiteModule) sandbox.SitePolicy {
 	in := sandbox.SitePolicy{
-		Home:    homeDir(),
+		Home:    m.host.Home(),
 		DataDir: m.dataDir,
 		Shell:   m.dir("shell"),
 		Deploy:  deploy,
@@ -140,8 +135,8 @@ func (m *SiteManager) sandboxInput(node, deploy, root, rtFile string, mods []san
 	if m.googleClient != nil {
 		in.Reads = append(in.Reads, m.googleClient())
 	}
-	if m.hooks.siteLimits != nil {
-		in.SiteLimits = m.hooks.siteLimits()
+	if m.hooks.SiteLimits != nil {
+		in.SiteLimits = m.hooks.SiteLimits()
 	}
 	return in
 }

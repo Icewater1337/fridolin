@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	sitesvc "github.com/Icewater1337/fridolin/internal/site"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -26,16 +27,16 @@ func newTestBuilderSite(t *testing.T) (*SiteManager, string) {
 	if err := os.MkdirAll(brainDir, 0o700); err != nil {
 		t.Fatal(err)
 	}
-	m.hooks = builderHooks{
-		brainDir: func(id string) string {
+	m.hooks = SiteBuilderHooks{
+		BrainDir: func(id string) string {
 			if id == "web" {
 				return brainDir
 			}
 			return ""
 		},
-		sandbox:    func(_, bin string, args []string) (string, []string, []string, error) { return bin, args, nil, nil },
-		bridgeURL:  func() string { return "http://127.0.0.1:1" },
-		executable: func() (string, error) { return "/usr/bin/true", nil },
+		Sandbox:    func(_, bin string, args []string) (string, []string, []string, error) { return bin, args, nil, nil },
+		BridgeURL:  func() string { return "http://127.0.0.1:1" },
+		Executable: func() (string, error) { return "/usr/bin/true", nil },
 	}
 	m.workspaceInstall = func(ctx context.Context, brainID, dir string) error { return m.npmInstall(ctx, dir, false) }
 	return m, brainDir
@@ -69,7 +70,7 @@ func TestSiteBuilderFlow(t *testing.T) {
 	if err := m.SetBuilder(ctx, "web", true); err == nil {
 		t.Fatal("a builder was allowed before a repository was connected")
 	}
-	if err := m.ConnectRepo(ctx, SiteRepo{URL: remote}); err != nil {
+	if err := m.ConnectRepo(ctx, sitesvc.SiteRepo{URL: remote}); err != nil {
 		t.Fatal(err)
 	}
 	if err := m.AddStarter(ctx); err != nil {
@@ -279,7 +280,7 @@ export default (ctx) => express.Router().get('/note', (_req, res) => res.json({ 
 // timeout left what the command started running.
 func TestSiteBuilderCommandsLeadASessionOfTheirOwn(t *testing.T) {
 	m, dir := newTestBuilderSite(t)
-	m.hooks.sandbox = func(_, bin string, args []string) (string, []string, []string, error) {
+	m.hooks.Sandbox = func(_, bin string, args []string) (string, []string, []string, error) {
 		return bin, args, []string{"FRIDOLIN_FAKE_SESSION=1"}, nil
 	}
 	out, err := m.sandboxed(context.Background(), "web", dir, 30*time.Second, os.Args[0])

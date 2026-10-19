@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	sitesvc "github.com/Icewater1337/fridolin/internal/site"
 	"io"
 	"net/http"
 	"os"
@@ -75,7 +76,7 @@ func TestSiteSpoolHandoff(t *testing.T) {
 	m := newTestSite(t)
 	media := t.TempDir()
 	var got ingestCalls
-	m.hooks.ingest, m.hooks.mediaDir = got.hook, func() string { return media }
+	m.hooks.Ingest, m.hooks.MediaDir = got.hook, func() string { return media }
 
 	// A live commit whose "inbox" module may hand files to brain web.
 	commit := strings.Repeat("a", 40)
@@ -166,14 +167,14 @@ func TestSiteModuleDataAndIngest(t *testing.T) {
 	media := filepath.Join(m.dataDir, "media")
 	os.MkdirAll(media, 0o700)
 	var got ingestCalls
-	m.hooks.ingest, m.hooks.mediaDir = got.hook, func() string { return media }
-	m.hooks.search = func(ctx context.Context, brainID, prompt string, out io.Writer) error {
+	m.hooks.Ingest, m.hooks.MediaDir = got.hook, func() string { return media }
+	m.hooks.Search = func(ctx context.Context, brainID, prompt string, out io.Writer) error {
 		_, err := io.WriteString(out, `{"type":"assistant","message":{"content":[{"type":"text","text":"`+brainID+` answers: `+prompt+`"}]}}`+"\n")
 		return err
 	}
 
 	remote := newBareRepo(t)
-	if err := m.ConnectRepo(ctx, SiteRepo{URL: remote}); err != nil {
+	if err := m.ConnectRepo(ctx, sitesvc.SiteRepo{URL: remote}); err != nil {
 		t.Fatal(err)
 	}
 	if err := m.AddStarter(ctx); err != nil {
@@ -200,7 +201,7 @@ export default (ctx) => express.Router().get('/probe', async (_req, res) => {
 	gitT(t, work, "commit", "-q", "-m", "Add inbox")
 	gitT(t, work, "push", "-q", "origin", "main")
 
-	if _, err := m.AddUser(SiteUserInput{Kind: "password", Username: "sam", Password: "long enough pw", Role: "member"}); err != nil {
+	if _, err := m.AddUser(sitesvc.SiteUserInput{Kind: "password", Username: "sam", Password: "long enough pw", Role: "member"}); err != nil {
 		t.Fatal(err)
 	}
 	up, err := m.Fetch(ctx)
@@ -208,7 +209,7 @@ export default (ctx) => express.Router().get('/probe', async (_req, res) => {
 		t.Fatal(err)
 	}
 	listen := freePort(t)
-	if _, err := m.UpdateSettings(SiteSettingsUpdate{Listen: &listen}); err != nil {
+	if _, err := m.UpdateSettings(sitesvc.SiteSettingsUpdate{Listen: &listen}); err != nil {
 		t.Fatal(err)
 	}
 	m.Start(ctx)
@@ -218,7 +219,7 @@ export default (ctx) => express.Router().get('/probe', async (_req, res) => {
 	}
 	waitDeploy(t, m)
 	on := true
-	if _, err := m.UpdateSettings(SiteSettingsUpdate{Enabled: &on}); err != nil {
+	if _, err := m.UpdateSettings(sitesvc.SiteSettingsUpdate{Enabled: &on}); err != nil {
 		t.Fatal(err)
 	}
 	testutil.WaitFor(t, 60*time.Second, "the site to answer", func() bool { return siteHealthy(listen) })
@@ -269,7 +270,7 @@ func TestSiteSpoolSearch(t *testing.T) {
 
 	var mu sync.Mutex
 	var prompts []string
-	m.hooks.search = func(ctx context.Context, brainID, prompt string, out io.Writer) error {
+	m.hooks.Search = func(ctx context.Context, brainID, prompt string, out io.Writer) error {
 		mu.Lock()
 		prompts = append(prompts, brainID+": "+prompt)
 		mu.Unlock()
