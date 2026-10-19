@@ -16,6 +16,7 @@ type Feed struct {
 	mu      sync.Mutex
 	entries []Entry
 	max     int
+	start   int
 	seeded  map[string]bool
 }
 
@@ -31,7 +32,12 @@ type Entry struct {
 }
 
 // New keeps up to max entries.
-func New(max int) *Feed { return &Feed{max: max, seeded: map[string]bool{}} }
+func New(max int) *Feed {
+	if max < 0 {
+		max = 0
+	}
+	return &Feed{max: max, seeded: map[string]bool{}}
+}
 
 // Add records a history line. A reset marker is no message and stays out.
 func (a *Feed) Add(brainID string, e history.Entry) {
@@ -44,13 +50,19 @@ func (a *Feed) Add(brainID string, e history.Entry) {
 }
 
 func (a *Feed) addLocked(brainID string, e history.Entry) {
+	if a.max == 0 {
+		return
+	}
 	ts, err := time.Parse(time.RFC3339, e.TS)
 	if err != nil {
 		ts = time.Now()
 	}
-	a.entries = append(a.entries, Entry{TS: ts, Brain: brainID, Chat: e.Chat, From: e.From, Type: e.Type, Text: textx.Truncate(e.Text, 600), id: e.ID})
-	if over := len(a.entries) - a.max; over > 0 {
-		a.entries = append([]Entry(nil), a.entries[over:]...)
+	entry := Entry{TS: ts, Brain: brainID, Chat: e.Chat, From: e.From, Type: e.Type, Text: textx.Truncate(e.Text, 600), id: e.ID}
+	if len(a.entries) < a.max {
+		a.entries = append(a.entries, entry)
+	} else {
+		a.entries[a.start] = entry
+		a.start = (a.start + 1) % a.max
 	}
 }
 
@@ -67,6 +79,7 @@ type Change struct {
 func (a *Feed) Change(brainID string, c Change, text string) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
+	a.linearizeLocked()
 	kept := a.entries[:0]
 	for _, e := range a.entries {
 		is := e.Brain == brainID && e.id != "" && e.id == c.Target && e.Type == history.In && e.From == c.Sender &&
@@ -79,6 +92,7 @@ func (a *Feed) Change(brainID string, c Change, text string) {
 		}
 		kept = append(kept, e)
 	}
+	clear(a.entries[len(kept):])
 	a.entries = kept
 }
 
@@ -94,6 +108,7 @@ func (a *Feed) Seed(brainID string, load func() []history.Entry) {
 	for _, e := range load() {
 		a.addLocked(brainID, e)
 	}
+	a.linearizeLocked()
 	sort.SliceStable(a.entries, func(i, j int) bool { return a.entries[i].TS.Before(a.entries[j].TS) })
 }
 
@@ -103,9 +118,22 @@ func (a *Feed) Recent(limit int, brainID string) []Entry {
 	defer a.mu.Unlock()
 	out := []Entry{}
 	for i := len(a.entries) - 1; i >= 0 && len(out) < limit; i-- {
-		if brainID == "" || a.entries[i].Brain == brainID {
-			out = append(out, a.entries[i])
+		entry := a.entries[(a.start+i)%len(a.entries)]
+		if brainID == "" || entry.Brain == brainID {
+			out = append(out, entry)
 		}
 	}
 	return out
+}
+
+// Edits and startup seeding need a chronological slice; ordinary writes do not.
+func (a *Feed) linearizeLocked() {
+	if a.start == 0 {
+		return
+	}
+	ordered := make([]Entry, 0, len(a.entries))
+	ordered = append(ordered, a.entries[a.start:]...)
+	ordered = append(ordered, a.entries[:a.start]...)
+	a.entries = ordered
+	a.start = 0
 }

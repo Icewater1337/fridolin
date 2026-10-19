@@ -430,6 +430,7 @@ func TestConfigSchemaRefusesWhatTheBridgeRefuses(t *testing.T) {
 		`{"brain_effort": "extreme"}`,
 		`{"agent_provider": "other"}`,
 		`{"codex_effort": "extreme"}`,
+		`{"log_level": "verbose"}`,
 		`{"max_chunk_size": 50}`,
 		`{"max_media_mb": 5000}`,
 		`{"max_media_mb": -1}`,
@@ -491,7 +492,6 @@ func TestConfigSchemaTakesWhatTheBridgeTakes(t *testing.T) {
 		{`{"not_a_setting": true}`, true},
 		{`{"version": 2, "model": "sonnet"}`, true},
 		{`{"log_level": "DEBUG"}`, true},
-		{`{"log_level": "verbose"}`, true},
 		{`{"http_listen": "[::ffff:127.0.0.1]:8765"}`, true},
 		{`{"http_listen": "127.0.0.1:"}`, true},
 	} {

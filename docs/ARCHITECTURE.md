@@ -1469,3 +1469,13 @@ subsystem's own settings without making subsystems import the file schema.
 The external `app/apptest` harness exercises real Run/HTTP lifecycle boundaries;
 existing white-box tests live with the application. Original fixtures remain
 under `cmd/fridolin/testdata`.
+
+### Logging ownership
+
+The CLI installs one `logx.TextHandler` with `slog.SetDefault`, writing to the
+console and dashboard ring. Existing standard-library log calls use that same
+bridge. The handler preserves the timestamp/message format and appends encoded
+attributes when present. `app.Options.Logger` supplies lifecycle logging to an
+embedding host; when no ring is supplied, the application also records those
+lifecycle messages in its own dashboard ring. The log ring and activity feed use
+bounded circular storage, without copying the retained entries on every write.

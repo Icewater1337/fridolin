@@ -583,6 +583,12 @@ var validGitConfigs = map[string]bool{"read": true, "deny": true}
 // another out instead of stopping them all. Zero brains is fine: a fresh
 // install adds its first brain from the dashboard.
 func (c *File) Validate(goos string) error {
+	switch strings.ToLower(c.LogLevel) {
+	case "debug", "info", "warn", "error":
+	default:
+		return fmt.Errorf("log_level must be debug, info, warn or error, not %q", c.LogLevel)
+	}
+
 	if c.AgentProvider != "claude" && c.AgentProvider != "codex" {
 		return fmt.Errorf("agent_provider must be claude or codex, not %q", c.AgentProvider)
 	}

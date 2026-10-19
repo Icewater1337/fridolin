@@ -105,3 +105,28 @@ func TestWaLoggerLevelsAndSubmodules(t *testing.T) {
 		})
 	}
 }
+
+func TestLogRingWrapsWithoutChangingCursorOrPartialLines(t *testing.T) {
+	t.Parallel()
+	ring := NewRing(2)
+	for _, part := range []string{"one\ntwo\nthree", "\nfour\nfi", "ve\n"} {
+		if _, err := ring.Write([]byte(part)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	got, next := ring.Since(0, 0)
+	if len(got) != 2 || got[0].Seq != 4 || got[0].Text != "four" || got[1].Seq != 5 || got[1].Text != "five" || next != 5 {
+		t.Fatalf("wrapped ring: %+v %d", got, next)
+	}
+	got, next = ring.Since(4, 1)
+	if len(got) != 1 || got[0].Text != "five" || next != 5 {
+		t.Fatalf("cursor: %+v %d", got, next)
+	}
+	for _, size := range []int{0, -1} {
+		empty := NewRing(size)
+		_, _ = empty.Write([]byte("line\n"))
+		if got, next := empty.Since(3, 10); len(got) != 0 || next != 3 {
+			t.Fatalf("disabled ring: %+v %d", got, next)
+		}
+	}
+}

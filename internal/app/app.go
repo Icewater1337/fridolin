@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"log/slog"
 	"net"
 	"net/http"
 	"path/filepath"
@@ -40,6 +41,7 @@ import (
 
 // App connects WhatsApp to the brains and serves the dashboard.
 type App struct {
+	logger    *slog.Logger
 	bind      func(string, string) (net.Listener, error)
 	runMu     sync.Mutex
 	runCancel context.CancelCauseFunc
@@ -96,6 +98,8 @@ type App struct {
 
 // Options supplies configuration and host capabilities for construction.
 type Options struct {
+	// Logger receives lifecycle records; nil uses the standard process bridge.
+	Logger *slog.Logger
 	// Listen overrides listener creation for an embedding host or isolated tests.
 	Listen     func(string, string) (net.Listener, error)
 	Config     *config.Store
@@ -163,6 +167,7 @@ func New(opts Options) (_ *App, err error) {
 	}()
 
 	b := &App{
+		logger:   opts.Logger,
 		bind:     opts.Listen,
 		cfgs:     cfgs,
 		registry: registryFor(cfgs),
@@ -181,6 +186,11 @@ func New(opts Options) (_ *App, err error) {
 	b.exe = bridgeBinary()
 	if b.logs == nil {
 		b.logs = logx.NewRing(LogRingLines)
+		var sink slog.Handler = logx.StandardHandler()
+		if b.logger != nil {
+			sink = b.logger.Handler()
+		}
+		b.logger = slog.New(logx.Fanout(sink, logx.NewTextHandler(b.logs, nil)))
 	}
 
 	mgr, err := NewBrainManager(cfg)
@@ -288,7 +298,7 @@ func (b *App) Start(ctx context.Context) error {
 	if bind == nil {
 		bind = listenHTTP
 	}
-	return b.supervisor.Run(ctx, RunOptions{
+	return b.supervisor.Run(ctx, RunOptions{Logger: b.logger,
 		Address: b.listen, Listen: bind,
 		Handler:          func() http.Handler { return b.newHTTPHandler(b.listen) },
 		DashboardEnabled: !cfg.Dashboard.Disabled,
@@ -322,7 +332,7 @@ func (b *App) Stop() {
 }
 
 func (b *App) stopResources() {
-	b.supervisor.Stop(StopOptions{
+	b.supervisor.Stop(StopOptions{Logger: b.logger,
 		CloseIntake: b.intake.Close, HTTPGrace: httpStopWait,
 		Background: []func(){b.backup.Stop, b.plaud.Stop, b.site.Stop},
 		KeepPending: func() {

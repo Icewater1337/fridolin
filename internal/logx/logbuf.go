@@ -13,11 +13,12 @@ import (
 )
 
 // Ring keeps the most recent log lines in memory for the dashboard. It is
-// an io.Writer installed next to stderr with log.SetOutput.
+// an io.Writer installed next to stderr in the process log handler.
 type Ring struct {
 	mu      sync.Mutex
 	lines   []Line
 	max     int
+	start   int
 	nextSeq int64
 	partial string
 }
@@ -30,7 +31,12 @@ type Line struct {
 }
 
 // NewRing keeps up to max lines.
-func NewRing(max int) *Ring { return &Ring{max: max, nextSeq: 1} }
+func NewRing(max int) *Ring {
+	if max < 0 {
+		max = 0
+	}
+	return &Ring{max: max, nextSeq: 1}
+}
 
 func (r *Ring) Write(p []byte) (int, error) {
 	r.mu.Lock()
@@ -39,11 +45,17 @@ func (r *Ring) Write(p []byte) (int, error) {
 	parts := strings.Split(text, "\n")
 	r.partial = parts[len(parts)-1]
 	for _, line := range parts[:len(parts)-1] {
-		r.lines = append(r.lines, Line{Seq: r.nextSeq, TS: time.Now(), Text: line})
+		entry := Line{Seq: r.nextSeq, TS: time.Now(), Text: line}
 		r.nextSeq++
-	}
-	if over := len(r.lines) - r.max; over > 0 {
-		r.lines = append([]Line(nil), r.lines[over:]...)
+		if r.max == 0 {
+			continue
+		}
+		if len(r.lines) < r.max {
+			r.lines = append(r.lines, entry)
+		} else {
+			r.lines[r.start] = entry
+			r.start = (r.start + 1) % r.max
+		}
 	}
 	return len(p), nil
 }
@@ -54,7 +66,8 @@ func (r *Ring) Since(after int64, limit int) ([]Line, int64) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	var out []Line
-	for _, l := range r.lines {
+	for i := range r.lines {
+		l := r.lines[(r.start+i)%len(r.lines)]
 		if l.Seq > after {
 			out = append(out, l)
 		}
