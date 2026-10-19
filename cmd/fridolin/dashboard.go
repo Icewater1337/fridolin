@@ -185,7 +185,7 @@ func (b *Bridge) newHTTPHandler(listen string) http.Handler {
 			// with a GET; a HEAD, say from a link prefetcher, must not use
 			// up the state.
 			if r.Method == http.MethodGet && r.URL.Path == "/" && isOAuthCallback(r) {
-				b.googleCallback(w, r)
+				b.newGoogleAPI().Callback(w, r)
 				return
 			}
 			static.ServeHTTP(w, r)

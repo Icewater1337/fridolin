@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 
@@ -13,14 +14,32 @@ import (
 	"github.com/Icewater1337/fridolin/internal/manifest"
 )
 
+// GoogleService is the calendar and client surface used by HTTP handlers.
+type GoogleService interface {
+	Callback(context.Context, url.Values) (string, error)
+	RedirectURI() string
+	Client() *google.Client
+	SetClient([]byte) (*google.Client, error)
+	DeleteClient() error
+	StartSignIn(string) (string, error)
+	CalendarStatus(context.Context, string, *manifest.Calendar, bool) map[string]any
+	Select(string, manifest.Calendar) error
+	Disconnect(context.Context, string, bool) (bool, string, error)
+}
+
+type GoogleAPI struct {
+	Google func() GoogleService
+	Brain  func(string) *brain.Brain
+}
+
 // isOAuthCallback reports whether a request to / is Google returning.
 func isOAuthCallback(r *http.Request) bool {
 	q := r.URL.Query()
 	return q.Get("state") != "" && (q.Get("code") != "" || q.Get("error") != "")
 }
 
-func (b *Bridge) googleCallback(w http.ResponseWriter, r *http.Request) {
-	redirect, err := b.google.Callback(r.Context(), r.URL.Query())
+func (a *GoogleAPI) Callback(w http.ResponseWriter, r *http.Request) {
+	redirect, err := a.Google().Callback(r.Context(), r.URL.Query())
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
@@ -30,8 +49,8 @@ func (b *Bridge) googleCallback(w http.ResponseWriter, r *http.Request) {
 
 // ── API ──────────────────────────────────────────────────────────────────
 
-func (b *Bridge) apiGoogleClient(w http.ResponseWriter, r *http.Request) {
-	g := b.google
+func (a *GoogleAPI) Client(w http.ResponseWriter, r *http.Request) {
+	g := a.Google()
 	resp := map[string]any{"configured": false, "redirect_uri": g.RedirectURI()}
 	if c := g.Client(); c != nil {
 		hint := c.ClientID
@@ -43,7 +62,7 @@ func (b *Bridge) apiGoogleClient(w http.ResponseWriter, r *http.Request) {
 	httpapi.WriteJSON(w, http.StatusOK, resp)
 }
 
-func (b *Bridge) apiSetGoogleClient(w http.ResponseWriter, r *http.Request) {
+func (a *GoogleAPI) SetClient(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		JSON string `json:"json"`
 	}
@@ -51,40 +70,40 @@ func (b *Bridge) apiSetGoogleClient(w http.ResponseWriter, r *http.Request) {
 		httpapi.WriteErr(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	c, err := b.google.SetClient([]byte(strings.TrimSpace(req.JSON)))
+	c, err := a.Google().SetClient([]byte(strings.TrimSpace(req.JSON)))
 	if err != nil {
 		httpapi.WriteErr(w, http.StatusUnprocessableEntity, err.Error())
 		return
 	}
 	note := ""
 	if c.Type == "web" {
-		note = "This is a Web application client: add " + b.google.RedirectURI() + " to its Authorized redirect URIs in Google Cloud Console, or create a Desktop app client instead."
+		note = "This is a Web application client: add " + a.Google().RedirectURI() + " to its Authorized redirect URIs in Google Cloud Console, or create a Desktop app client instead."
 	}
 	httpapi.WriteJSON(w, http.StatusOK, map[string]string{"status": "saved", "type": c.Type, "note": note})
 }
 
-func (b *Bridge) apiDeleteGoogleClient(w http.ResponseWriter, r *http.Request) {
-	if err := b.google.DeleteClient(); err != nil {
+func (a *GoogleAPI) DeleteClient(w http.ResponseWriter, r *http.Request) {
+	if err := a.Google().DeleteClient(); err != nil {
 		httpapi.WriteErr(w, http.StatusInternalServerError, err.Error())
 		return
 	}
 	httpapi.WriteJSON(w, http.StatusOK, map[string]string{"status": "removed"})
 }
 
-func (b *Bridge) calendarBrain(w http.ResponseWriter, r *http.Request) *brain.Brain {
-	br := b.brainMgr.Get(r.PathValue("id"))
+func (a *GoogleAPI) calendarBrain(w http.ResponseWriter, r *http.Request) *brain.Brain {
+	br := a.Brain(r.PathValue("id"))
 	if br == nil {
 		httpapi.WriteErr(w, http.StatusNotFound, "no such brain")
 	}
 	return br
 }
 
-func (b *Bridge) apiCalendarConnect(w http.ResponseWriter, r *http.Request) {
-	br := b.calendarBrain(w, r)
+func (a *GoogleAPI) Connect(w http.ResponseWriter, r *http.Request) {
+	br := a.calendarBrain(w, r)
 	if br == nil {
 		return
 	}
-	u, err := b.google.StartSignIn(br.ID())
+	u, err := a.Google().StartSignIn(br.ID())
 	if err != nil {
 		httpapi.WriteErr(w, http.StatusPreconditionFailed, err.Error())
 		return
@@ -92,18 +111,18 @@ func (b *Bridge) apiCalendarConnect(w http.ResponseWriter, r *http.Request) {
 	httpapi.WriteJSON(w, http.StatusOK, map[string]string{"auth_url": u})
 }
 
-func (b *Bridge) apiCalendarStatus(w http.ResponseWriter, r *http.Request) {
-	br := b.calendarBrain(w, r)
+func (a *GoogleAPI) Status(w http.ResponseWriter, r *http.Request) {
+	br := a.calendarBrain(w, r)
 	if br == nil {
 		return
 	}
 	m := br.Manifest()
-	resp := b.google.CalendarStatus(r.Context(), br.ID(), m.Calendar, r.URL.Query().Get("list") != "0")
+	resp := a.Google().CalendarStatus(r.Context(), br.ID(), m.Calendar, r.URL.Query().Get("list") != "0")
 	httpapi.WriteJSON(w, http.StatusOK, resp)
 }
 
-func (b *Bridge) apiCalendarSelect(w http.ResponseWriter, r *http.Request) {
-	br := b.calendarBrain(w, r)
+func (a *GoogleAPI) Select(w http.ResponseWriter, r *http.Request) {
+	br := a.calendarBrain(w, r)
 	if br == nil {
 		return
 	}
@@ -116,7 +135,7 @@ func (b *Bridge) apiCalendarSelect(w http.ResponseWriter, r *http.Request) {
 		httpapi.WriteErr(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	err := b.google.Select(br.ID(), manifest.Calendar{Account: req.Account, Calendars: req.Calendars, Default: req.Default})
+	err := a.Google().Select(br.ID(), manifest.Calendar{Account: req.Account, Calendars: req.Calendars, Default: req.Default})
 	if err != nil {
 		httpapi.WriteErr(w, http.StatusUnprocessableEntity, err.Error())
 		return
@@ -127,14 +146,14 @@ func (b *Bridge) apiCalendarSelect(w http.ResponseWriter, r *http.Request) {
 // apiCalendarDisconnect ends a brain's calendar access. ?local_only=1
 // deletes the token without revoking it, for when Google would not confirm
 // the revocation.
-func (b *Bridge) apiCalendarDisconnect(w http.ResponseWriter, r *http.Request) {
-	br := b.calendarBrain(w, r)
+func (a *GoogleAPI) Disconnect(w http.ResponseWriter, r *http.Request) {
+	br := a.calendarBrain(w, r)
 	if br == nil {
 		return
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), 20*time.Second)
 	defer cancel()
-	revoked, note, err := b.google.Disconnect(ctx, br.ID(), r.URL.Query().Get("local_only") == "1")
+	revoked, note, err := a.Google().Disconnect(ctx, br.ID(), r.URL.Query().Get("local_only") == "1")
 	switch {
 	case errors.Is(err, google.ErrNotRevoked):
 		httpapi.WriteErr(w, http.StatusBadGateway, err.Error()+"; the token was kept, so try again, or remove it here only")
