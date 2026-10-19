@@ -12,19 +12,18 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Icewater1337/fridolin/internal/chat"
 	"github.com/Icewater1337/fridolin/internal/config"
-
+	"github.com/Icewater1337/fridolin/internal/history"
 	"github.com/Icewater1337/fridolin/internal/manifest"
-
+	prompttext "github.com/Icewater1337/fridolin/internal/prompt"
 	"go.mau.fi/whatsmeow"
 	"go.mau.fi/whatsmeow/proto/waE2E"
 	"go.mau.fi/whatsmeow/store"
 	"go.mau.fi/whatsmeow/types"
+
 	waLog "go.mau.fi/whatsmeow/util/log"
 	"google.golang.org/protobuf/proto"
-
-	"github.com/Icewater1337/fridolin/internal/chat"
-	"github.com/Icewater1337/fridolin/internal/history"
 )
 
 func TestChatJID(t *testing.T) {
@@ -305,7 +304,7 @@ func TestGroupSenderAndQuoteByNumber(t *testing.T) {
 		t.Fatal(err)
 	}
 	idMap := "| WhatsApp Number | Person | Notes |\n| --- | --- | --- |\n| +1 555 123 4567 | Alex | |\n"
-	if err := os.WriteFile(filepath.Join(br.Dir(), identityMapFile), []byte(idMap), 0o600); err != nil {
+	if err := os.WriteFile(filepath.Join(br.Dir(), prompttext.IdentityMapPath), []byte(idMap), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	own := types.JID{User: otherNumber, Device: 12, Server: types.DefaultUserServer}

@@ -73,6 +73,9 @@ behaviour unless its title says so. The steps so far:
   defaults, validation, migrations and approved brain references. Loading,
   transaction orchestration and startup permission changes remain in the command
   for the next slice. `Resolve` still looks up the home folder; R6 injects paths.
+- **R8, prompt slice**: `prompt` owns prompt rendering, identity-map parsing,
+  and history-window limits; `chat` owns shared phone/identity normalization.
+  The command supplies message content and dashboard-chat context.
 
 Everything else is still `package main` in `cmd/fridolin`, one file per
 subject (section 3 names the file each package will come from). A package

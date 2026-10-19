@@ -9,6 +9,7 @@ import (
 
 	"github.com/Icewater1337/fridolin/internal/chat"
 	"github.com/Icewater1337/fridolin/internal/history"
+	prompttext "github.com/Icewater1337/fridolin/internal/prompt"
 )
 
 // promptBlock is what prompt holds between <tag> and </tag>, or "".
@@ -206,7 +207,7 @@ func TestHistoryBeforeAfterChanges(t *testing.T) {
 			br := bareBrain(t)
 			br.appendHistory(testDMChat, "15551234567", "one", history.In)
 			m := c.setup(br)
-			before, since := br.historyBefore(m, dmHistoryWindow)
+			before, since := br.historyBefore(m, prompttext.DMHistoryWindow)
 			if texts(before) != c.before || texts(since) != c.since {
 				t.Errorf("historyBefore = %q, %q; want %q, %q", texts(before), texts(since), c.before, c.since)
 			}
@@ -230,7 +231,7 @@ func TestPromptSaysWhatChatItIs(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			p := renderPrompt(promptInput{Now: time.Now(), BrainID: "main", Message: c.m.Inbound, BuildChat: brainOfBuildJID(c.m.JID) != ""})
+			p := prompttext.Build(prompttext.Input{Now: time.Now(), BrainID: "main", Message: c.m.Inbound, BuildChat: brainOfBuildJID(c.m.JID) != ""})
 			if !strings.Contains(p, c.want) {
 				t.Errorf("the prompt does not say %q:\n%s", c.want, p)
 			}
@@ -247,7 +248,7 @@ func TestPromptSaysWhatChatItIs(t *testing.T) {
 func TestNewMessageNamesTheSender(t *testing.T) {
 	br, home := folderBrain(t)
 	table := "| WhatsApp Number | Person | Notes |\n| --- | --- | --- |\n| +15551234567 | Alex | |\n"
-	if err := os.WriteFile(filepath.Join(home, "a", identityMapFile), []byte(table), 0o600); err != nil {
+	if err := os.WriteFile(filepath.Join(home, "a", prompttext.IdentityMapPath), []byte(table), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	cases := []struct{ sender, want string }{

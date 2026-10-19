@@ -22,6 +22,7 @@ import (
 	"github.com/Icewater1337/fridolin/internal/history"
 	"github.com/Icewater1337/fridolin/internal/logx"
 	"github.com/Icewater1337/fridolin/internal/platform"
+	prompttext "github.com/Icewater1337/fridolin/internal/prompt"
 )
 
 // The bridge reads and writes files in a brain's folder outside the
@@ -571,14 +572,14 @@ func TestIdentityMapIsNotFollowedOutOfTheFolder(t *testing.T) {
 		target func(home string) string // what the map points to; nil for a regular file
 	}{
 		{"regular file", nil},
-		{"another brain's map", func(home string) string { return filepath.Join(home, "b", identityMapFile) }},
+		{"another brain's map", func(home string) string { return filepath.Join(home, "b", prompttext.IdentityMapPath) }},
 		{"symlink inside the folder", func(string) string { return "other.md" }},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			br, home := folderBrain(t)
-			mapPath := filepath.Join(home, "a", identityMapFile)
-			for _, p := range []string{filepath.Join(home, "b", identityMapFile), filepath.Join(filepath.Dir(mapPath), "other.md"), mapPath} {
+			mapPath := filepath.Join(home, "a", prompttext.IdentityMapPath)
+			for _, p := range []string{filepath.Join(home, "b", prompttext.IdentityMapPath), filepath.Join(filepath.Dir(mapPath), "other.md"), mapPath} {
 				if err := os.MkdirAll(filepath.Dir(p), 0o700); err != nil {
 					t.Fatal(err)
 				}
@@ -603,7 +604,7 @@ func TestIdentityMapIsNotFollowedOutOfTheFolder(t *testing.T) {
 			if history := promptBlock(preface, "chat_history"); strings.Contains(history, "Alex") || !strings.Contains(history, `"from":"15551234567","text":"hi"`) {
 				t.Errorf("preface = %q, want the raw number", preface)
 			}
-			if len(lines) != 1 || !strings.Contains(lines[0], "brain a: could not read identity map "+identityMapFile+": "+fsx.ErrSymlink.Error()) {
+			if len(lines) != 1 || !strings.Contains(lines[0], "brain a: could not read identity map "+prompttext.IdentityMapPath+": "+fsx.ErrSymlink.Error()) {
 				t.Errorf("log = %q, want one line refusing the symlink", lines)
 			}
 		})
@@ -707,7 +708,7 @@ func TestBrainFilesAreReadUpToALimit(t *testing.T) {
 			dir := filepath.Join(home, "a")
 			// Each file is tc.size bytes, what to look for first.
 			const prompt, table = "BIG PROMPT\n", "| 15551234567 | Alex | |\n"
-			for name, head := range map[string]string{"brain-prompt.md": prompt, identityMapFile: table} {
+			for name, head := range map[string]string{"brain-prompt.md": prompt, prompttext.IdentityMapPath: table} {
 				data := head + strings.Repeat(" ", tc.size-len(head))
 				if err := os.WriteFile(filepath.Join(dir, name), []byte(data), 0o600); err != nil {
 					t.Fatal(err)
@@ -729,7 +730,7 @@ func TestBrainFilesAreReadUpToALimit(t *testing.T) {
 			// The prompt is read first, then the map for the preface.
 			want := []string{
 				"brain a: could not read prompt file brain-prompt.md: larger than 256 KiB",
-				"brain a: could not read identity map " + identityMapFile + ": larger than 256 KiB",
+				"brain a: could not read identity map " + prompttext.IdentityMapPath + ": larger than 256 KiB",
 			}
 			if len(lines) != 2 || !strings.HasSuffix(lines[0], want[0]) || !strings.HasSuffix(lines[1], want[1]) {
 				t.Errorf("log = %q, want %q", lines, want)

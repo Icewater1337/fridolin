@@ -1,7 +1,6 @@
 package main
 
 import (
-	"github.com/Icewater1337/fridolin/internal/platform"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -12,6 +11,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/Icewater1337/fridolin/internal/platform"
 )
 
 // TestViewerGetsTheAllowlistedEnvironment: a tmux server the viewer starts

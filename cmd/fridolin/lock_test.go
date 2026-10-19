@@ -4,7 +4,6 @@ package main
 
 import (
 	"errors"
-	"github.com/Icewater1337/fridolin/internal/store"
 	"io/fs"
 	"os"
 	"os/exec"
@@ -13,6 +12,8 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+
+	"github.com/Icewater1337/fridolin/internal/store"
 
 	"github.com/Icewater1337/fridolin/internal/fsx"
 	"github.com/Icewater1337/fridolin/internal/platform"

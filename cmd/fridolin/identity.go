@@ -31,7 +31,7 @@ func allowedNumbersAsNumbers(list []string) []string { return chat.NumbersAsNumb
 func badAllowedNumbers(list []string) []string {
 	var bad []string
 	for _, s := range list {
-		if _, err := phoneNumber(s); err != nil {
+		if _, err := chat.PhoneNumber(s); err != nil {
 			bad = append(bad, s)
 		}
 	}
@@ -49,7 +49,7 @@ var errNotAChat = errors.New("not a chat JID: use one such as 15551234567@s.what
 func chatJID(s string) (types.JID, error) {
 	s = strings.TrimSpace(s)
 	if !strings.Contains(s, "@") {
-		n, err := phoneNumber(s)
+		n, err := chat.PhoneNumber(s)
 		if err != nil {
 			return types.JID{}, fmt.Errorf("%q is %w", s, errNotAChat)
 		}
@@ -61,7 +61,7 @@ func chatJID(s string) (types.JID, error) {
 	}
 	switch jid.Server {
 	case types.DefaultUserServer:
-		if !canonicalPhoneNumber(jid.User) {
+		if !chat.IsPhoneNumber(jid.User) {
 			return types.JID{}, fmt.Errorf("%q is %w", s, errNotAChat)
 		}
 	case types.GroupServer, types.HiddenUserServer, types.BroadcastServer, types.NewsletterServer:
@@ -80,7 +80,7 @@ func chatJID(s string) (types.JID, error) {
 // number.
 func ownerChat(cfg *config.Config) string {
 	for _, n := range cfg.AllowedNumbers {
-		if p, err := phoneNumber(n); err == nil {
+		if p, err := chat.PhoneNumber(n); err == nil {
 			return chat.DMJID(p)
 		}
 	}

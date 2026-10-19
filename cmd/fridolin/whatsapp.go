@@ -855,7 +855,7 @@ func numberAllowed(cfg *config.Config, number string) bool {
 	if len(cfg.AllowedNumbers) == 0 {
 		return cfg.AllowsAnyDM()
 	}
-	if n, err := phoneNumber(number); err == nil {
+	if n, err := chat.PhoneNumber(number); err == nil {
 		number = n
 	}
 	return slices.Contains(allowedNumbersAsNumbers(cfg.AllowedNumbers), number)

@@ -31,6 +31,7 @@ import (
 	"github.com/Icewater1337/fridolin/internal/fsx"
 	"github.com/Icewater1337/fridolin/internal/history"
 	"github.com/Icewater1337/fridolin/internal/platform"
+	prompttext "github.com/Icewater1337/fridolin/internal/prompt"
 	"github.com/Icewater1337/fridolin/internal/textx"
 )
 
@@ -1345,7 +1346,7 @@ func (br *Brain) invoke(run *brainRun, ctx context.Context, s *brainSettings, m 
 			return RunResult{Err: err}
 		}
 		args = codexArgs(s, br.workDir, br.sandbox != nil && br.sandbox.Enabled())
-		prompt = strings.ReplaceAll(prompt, askUserQuestionNote, "If you need clarification, ask in your final reply and end the turn. The answer arrives as a new message.")
+		prompt = strings.ReplaceAll(prompt, prompttext.AskUserQuestionNote, "If you need clarification, ask in your final reply and end the turn. The answer arrives as a new message.")
 	}
 	var providerEnv []string
 	if s.provider == "codex" && br.hooks != nil && br.hooks.CodexSetup != nil {
@@ -1713,18 +1714,18 @@ func (m Inbound) loggedIn(entries []history.Entry) int {
 // swapped for a symlink to another brain's would put that brain's contacts
 // in this one's prompt.
 func (br *Brain) identities() map[string]string {
-	idMap, err := br.readFile(identityMapFile)
+	idMap, err := br.readFile(prompttext.IdentityMapPath)
 	if err != nil && !errors.Is(err, fs.ErrNotExist) {
-		log.Printf("brain %s: could not read identity map %s: %v", br.id, identityMapFile, err)
+		log.Printf("brain %s: could not read identity map %s: %v", br.id, prompttext.IdentityMapPath, err)
 	}
-	return parseIdentityMap(idMap)
+	return prompttext.ParseIdentityMap(idMap)
 }
 
 // buildPrompt gathers what m's run is told, through the brain's folder: its
 // prompt file, the chat's recent history and the identity map. renderPrompt
 // puts it into words.
 func (br *Brain) buildPrompt(s *brainSettings, m Inbound) string {
-	in := promptInput{Now: time.Now(), BrainID: br.id, Message: m.Inbound, BuildChat: brainOfBuildJID(m.JID) != "", ObserveOnly: m.Silent}
+	in := prompttext.Input{Now: time.Now(), BrainID: br.id, Message: m.Inbound, BuildChat: brainOfBuildJID(m.JID) != "", ObserveOnly: m.Silent}
 	if name := s.promptFile; name != "" {
 		if data, err := br.readFile(name); err != nil {
 			log.Printf("brain %s: could not read prompt file %s: %v", br.id, name, err)
@@ -1732,10 +1733,10 @@ func (br *Brain) buildPrompt(s *brainSettings, m Inbound) string {
 			in.Instructions = strings.TrimSpace(string(data))
 		}
 	}
-	limit := promptHistoryLimit(m.IsGroup())
+	limit := prompttext.HistoryLimit(m.IsGroup())
 	in.History, in.Since = br.historyBefore(m, limit)
 	in.Names = br.identities()
-	return renderPrompt(in)
+	return prompttext.Build(in)
 }
 
 // runHeading starts a run's part of the activity log: what it answers and

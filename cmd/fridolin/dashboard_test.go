@@ -29,6 +29,8 @@ import (
 	"github.com/Icewater1337/fridolin/internal/chat"
 	"github.com/Icewater1337/fridolin/internal/fsx"
 	"github.com/Icewater1337/fridolin/internal/history"
+	prompttext "github.com/Icewater1337/fridolin/internal/prompt"
+
 	mediafiles "github.com/Icewater1337/fridolin/internal/media"
 	"github.com/Icewater1337/fridolin/internal/otp"
 	"github.com/Icewater1337/fridolin/internal/textx"
@@ -792,7 +794,7 @@ func TestResetReachesAHandOffInItsReplyChat(t *testing.T) {
 	if !slices.ContainsFunc(readHistory(t, up), func(e history.Entry) bool { return e.Type == history.Reset && e.Chat == dm }) {
 		t.Errorf("up's history has no reset marker for the chat:\n%+v", readHistory(t, up))
 	}
-	if before, _ := up.historyBefore(Inbound{Inbound: chat.Inbound{JID: dm, Brain: "up", Sender: "upload", Text: "next file", Source: chat.SourceIngest}}, dmHistoryWindow); len(before) != 0 {
+	if before, _ := up.historyBefore(Inbound{Inbound: chat.Inbound{JID: dm, Brain: "up", Sender: "upload", Text: "next file", Source: chat.SourceIngest}}, prompttext.DMHistoryWindow); len(before) != 0 {
 		t.Errorf("up's next run in the chat would read %+v", before)
 	}
 }
@@ -1304,7 +1306,7 @@ func TestAllowListEntries(t *testing.T) {
 	}
 	for _, c := range numbers {
 		t.Run("number "+c.in, func(t *testing.T) {
-			got, err := phoneNumber(c.in)
+			got, err := chat.PhoneNumber(c.in)
 			if c.want == "" {
 				if err == nil {
 					t.Errorf("phoneNumber(%q) = %q, want an error", c.in, got)

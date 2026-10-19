@@ -11,6 +11,7 @@ import (
 	"github.com/Icewater1337/fridolin/internal/manifest"
 
 	"github.com/Icewater1337/fridolin/internal/chat"
+	prompttext "github.com/Icewater1337/fridolin/internal/prompt"
 )
 
 func TestObserveRuns(t *testing.T) {
@@ -155,10 +156,10 @@ func TestObserveRunsAreToldSo(t *testing.T) {
 			if p == "" {
 				t.Fatalf("no prompt for %s in %q", c.msg, prompts)
 			}
-			if got := strings.Contains(p, observeOnlyNote); got != c.observe {
+			if got := strings.Contains(p, prompttext.ObserveOnlyNote); got != c.observe {
 				t.Errorf("marked observe-only: %v, want %v:\n%s", got, c.observe, p)
 			}
-			if got := strings.Contains(p, askUserQuestionNote); got == c.observe {
+			if got := strings.Contains(p, prompttext.AskUserQuestionNote); got == c.observe {
 				t.Errorf("told about AskUserQuestion: %v, want %v", got, !c.observe)
 			}
 		})

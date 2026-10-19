@@ -3,7 +3,6 @@ package main
 import (
 	"encoding/json"
 	"fmt"
-	"github.com/Icewater1337/fridolin/internal/registry"
 	"maps"
 	"os"
 	"path/filepath"
@@ -11,6 +10,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/Icewater1337/fridolin/internal/registry"
 
 	"github.com/Icewater1337/fridolin/internal/fsx"
 )

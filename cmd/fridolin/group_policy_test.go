@@ -5,6 +5,7 @@ import (
 	"strings"
 	"testing"
 
+	chat "github.com/Icewater1337/fridolin/internal/chat"
 	"github.com/Icewater1337/fridolin/internal/config"
 )
 
@@ -94,13 +95,13 @@ func FuzzGroupSenderAllowed(f *testing.F) {
 			return
 		}
 		canon := func(s string) string {
-			if p, err := phoneNumber(s); err == nil {
+			if p, err := chat.PhoneNumber(s); err == nil {
 				return p
 			}
 			return s
 		}
 		listed := resolved && slices.ContainsFunc(members, func(m string) bool { return canon(m) == canon(number) })
-		if resolved && canonicalPhoneNumber(number) && slices.Contains(members, number) && !got {
+		if resolved && chat.IsPhoneNumber(number) && slices.Contains(members, number) && !got {
 			t.Errorf("group_members %q refused %q, which it lists as it is", members, number)
 		}
 		if !resolved && got {
