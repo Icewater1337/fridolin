@@ -982,25 +982,38 @@ func (g *Auth) DeleteClient() error {
 	return nil
 }
 
+// CalendarSnapshot preserves optional connection fields independently of their values.
+type CalendarSnapshot struct {
+	Account              *string         `json:"account,omitempty"`
+	BroadAccess          bool            `json:"broad_access,omitempty"`
+	Calendars            []CalendarEntry `json:"calendars"`
+	ClientConfigured     bool            `json:"client_configured"`
+	Connected            bool            `json:"connected"`
+	Default              *string         `json:"default,omitempty"`
+	LastError            string          `json:"last_error,omitempty"`
+	LeftoverClientCopies []string        `json:"leftover_client_copies"`
+	ListError            *string         `json:"list_error,omitempty"`
+	ReconnectNeeded      *bool           `json:"reconnect_needed,omitempty"`
+	Selected             []string        `json:"selected"`
+	TokenPath            string          `json:"token_path"`
+}
+
 // CalendarStatus returns the current connection and optional calendar list.
 // The caller supplies the brain's selected calendars from its runtime snapshot.
-func (g *Auth) CalendarStatus(ctx context.Context, brainID string, cal *manifest.Calendar, list bool) map[string]any {
-	resp := map[string]any{
-		"client_configured": g.Client() != nil,
-		"connected":         false,
-		"token_path":        g.TokenPath(brainID),
-		"calendars":         []CalendarEntry{},
-		"selected":          []string{},
-		// Of every brain, not only this one: any brain the sandbox does not
-		// hold can read them.
-		"leftover_client_copies": googleNonNil(g.leftoverClientCopies()),
+func (g *Auth) CalendarStatus(ctx context.Context, brainID string, cal *manifest.Calendar, list bool) CalendarSnapshot {
+	resp := CalendarSnapshot{
+		ClientConfigured: g.Client() != nil, Connected: false,
+		TokenPath: g.TokenPath(brainID), Calendars: []CalendarEntry{}, Selected: []string{},
+		// Of every brain: any brain outside the sandbox can read these copies.
+		LeftoverClientCopies: googleNonNil(g.leftoverClientCopies()),
 	}
 	if cal != nil {
-		resp["account"], resp["selected"], resp["default"] = cal.Account, googleNonNil(cal.Calendars), cal.Default
+		account, selected, defaultCalendar := cal.Account, googleNonNil(cal.Calendars), cal.Default
+		resp.Account, resp.Selected, resp.Default = &account, selected, &defaultCalendar
 	}
 	g.mu.Lock()
 	if e := g.lastError[brainID]; e != "" {
-		resp["last_error"] = e
+		resp.LastError = e
 	}
 	g.mu.Unlock()
 	// Lstat: a symlink there shows as connected, with the reason it is not
@@ -1008,13 +1021,13 @@ func (g *Auth) CalendarStatus(ctx context.Context, brainID string, cal *manifest
 	if _, err := os.Lstat(g.TokenPath(brainID)); err != nil {
 		return resp
 	}
-	resp["connected"] = true
+	resp.Connected = true
 	if t, err := g.loadToken(brainID); err == nil && len(extraScopes(t.Scopes)) > 0 {
 		// Connected with an older version, which asked for every calendar
 		// right there is. Signing in again alone keeps that grant alive at
 		// Google; Disconnect revokes it, and the next sign-in asks for
 		// calendarScopes only.
-		resp["broad_access"] = true
+		resp.BroadAccess = true
 	}
 	if list {
 		ctx, cancel := context.WithTimeout(ctx, 20*time.Second)
@@ -1023,20 +1036,23 @@ func (g *Auth) CalendarStatus(ctx context.Context, brainID string, cal *manifest
 		if err == nil {
 			var cals []CalendarEntry
 			if cals, err = g.CalendarList(ctx, tok); err == nil {
-				resp["calendars"] = cals
+				resp.Calendars = cals
 				if cal == nil {
 					for _, c := range cals {
 						if c.Primary {
-							resp["account"] = c.ID
+							account := c.ID
+							resp.Account = &account
 						}
 					}
 				}
 			}
 		}
 		if err != nil {
-			resp["list_error"] = err.Error()
+			message := err.Error()
+			resp.ListError = &message
 			var oe *oauthError
-			resp["reconnect_needed"] = errors.As(err, &oe) && oe.revoked()
+			reconnect := errors.As(err, &oe) && oe.revoked()
+			resp.ReconnectNeeded = &reconnect
 		}
 	}
 	return resp
