@@ -24,6 +24,8 @@ import (
 	"time"
 
 	"github.com/Icewater1337/fridolin/internal/access"
+	"github.com/Icewater1337/fridolin/internal/brain"
+
 	"github.com/Icewater1337/fridolin/internal/apperr"
 	"github.com/Icewater1337/fridolin/internal/backup"
 	"github.com/Icewater1337/fridolin/internal/chat"
@@ -169,7 +171,7 @@ type statusResponse struct {
 	AgentProvider string            `json:"agent_provider"`
 	Codex         *claudecli.Status `json:"codex,omitempty"`
 	Sandbox       sandboxStatus     `json:"sandbox"`
-	Brains        []BrainRuntime    `json:"brains"`
+	Brains        []brain.Runtime   `json:"brains"`
 	Issues        []registry.Issue  `json:"issues"`
 	Warnings      []string          `json:"warnings"`
 	Backup        backup.Summary    `json:"backup"`
@@ -221,8 +223,8 @@ func (b *Bridge) apiStatus(w http.ResponseWriter, r *http.Request) {
 		}
 		if os.Getenv("CODEX_API_KEY") == "" {
 			for _, br := range b.brainMgr.Brains() {
-				if !fsx.Exists(filepath.Join(brainStateOf(cfg.DataDir, br.id).codex, "auth.json")) {
-					resp.Warnings = append(resp.Warnings, "Sign Codex in for brain "+br.id+" from Terminal: "+codexLoginHint(cfg.DataDir, br.id))
+				if !fsx.Exists(filepath.Join(brainStateOf(cfg.DataDir, br.ID()).codex, "auth.json")) {
+					resp.Warnings = append(resp.Warnings, "Sign Codex in for brain "+br.ID()+" from Terminal: "+codexLoginHint(cfg.DataDir, br.ID()))
 				}
 			}
 		}
@@ -775,7 +777,7 @@ func (b *Bridge) apiRestart(w http.ResponseWriter, r *http.Request) {
 
 type brainView struct {
 	registry.View
-	Runtime *BrainRuntime `json:"runtime,omitempty"`
+	Runtime *brain.Runtime `json:"runtime,omitempty"`
 	// Fallback marks the brain that takes the chats no other brain
 	// claims (BrainManager.Fallback). Without a default brain that is the
 	// first one, which no brain.json says, so the dashboard names it.
@@ -1197,7 +1199,7 @@ func (b *Bridge) apiDevInbound(w http.ResponseWriter, r *http.Request) {
 	// Apply the same allow lists, group_members and trigger handling as
 	// WhatsApp messages, on one config snapshot as handleGroupMessage does.
 	cfg := b.cfgs.Get()
-	m := Inbound{Inbound: chat.Inbound{JID: req.JID, Brain: req.Brain, Sender: req.Sender, Text: req.Text, Media: req.Media, Silent: req.Silent, Source: chat.SourceDev, At: time.Now()}}
+	m := brain.Inbound{Inbound: chat.Inbound{JID: req.JID, Brain: req.Brain, Sender: req.Sender, Text: req.Text, Media: req.Media, Silent: req.Silent, Source: chat.SourceDev, At: time.Now()}}
 	if m.IsGroup() {
 		if !isAllowedGroup(cfg, m.JID) {
 			b.recordIgnored("group", m.JID, "", m.Sender, "")

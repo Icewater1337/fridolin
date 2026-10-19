@@ -13,21 +13,19 @@ import (
 	"testing"
 	"time"
 
-	outboundmsg "github.com/Icewater1337/fridolin/internal/outbound"
-	"github.com/Icewater1337/fridolin/internal/whatsapp"
-
 	"github.com/Icewater1337/fridolin/internal/activity"
+	"github.com/Icewater1337/fridolin/internal/brain"
 	"github.com/Icewater1337/fridolin/internal/chat"
 	"github.com/Icewater1337/fridolin/internal/history"
 	"github.com/Icewater1337/fridolin/internal/manifest"
-	prompttext "github.com/Icewater1337/fridolin/internal/prompt"
+	outboundmsg "github.com/Icewater1337/fridolin/internal/outbound"
 	"github.com/Icewater1337/fridolin/internal/testutil"
+	"github.com/Icewater1337/fridolin/internal/whatsapp"
 	"go.mau.fi/whatsmeow"
 	"go.mau.fi/whatsmeow/proto/waE2E"
 	"go.mau.fi/whatsmeow/store"
 	"go.mau.fi/whatsmeow/types"
 	"go.mau.fi/whatsmeow/types/events"
-
 	waLog "go.mau.fi/whatsmeow/util/log"
 	"google.golang.org/protobuf/proto"
 )
@@ -35,20 +33,20 @@ import (
 // newMainBridge is a test bridge with one folder brain, "main", that takes
 // the DMs and, as the only brain, the allowed group too: one brain serving
 // several chats, as in most setups.
-func newMainBridge(t *testing.T, extra string) (*testBridge, *Brain) {
+func newMainBridge(t *testing.T, extra string) (*testBridge, *brain.Brain) {
 	t.Helper()
 	return newMainBridgeWith(t, extra, manifest.Manifest{})
 }
 
 // newObservingBridge is newMainBridge with a brain that gives untagged
 // group messages observe-only runs of their own (observeRun).
-func newObservingBridge(t *testing.T, extra string) (*testBridge, *Brain) {
+func newObservingBridge(t *testing.T, extra string) (*testBridge, *brain.Brain) {
 	t.Helper()
 	return newMainBridgeWith(t, extra, manifest.Manifest{Observe: manifest.ObserveRun})
 }
 
 // newMainBridgeWith is newMainBridge with m's settings for the brain.
-func newMainBridgeWith(t *testing.T, extra string, m manifest.Manifest) (*testBridge, *Brain) {
+func newMainBridgeWith(t *testing.T, extra string, m manifest.Manifest) (*testBridge, *brain.Brain) {
 	t.Helper()
 	tb := newTestBridge(t, `, "otp_guard": true`+extra)
 	m.ID, m.Name, m.Routing = "main", "Main", manifest.Routing{HandlesDMs: true}
@@ -123,7 +121,7 @@ func (tb *testBridge) sentPrefix(jid, prefix string) bool {
 // readHistory returns the brain's history. A reply is written there just
 // after it was sent, maybe while a test reads, so a last line that is not
 // complete yet is left for the next read.
-func readHistory(t *testing.T, br *Brain) []history.Entry {
+func readHistory(t *testing.T, br *brain.Brain) []history.Entry {
 	t.Helper()
 	data, err := os.ReadFile(filepath.Join(br.Dir(), history.FileName))
 	if os.IsNotExist(err) {
@@ -168,7 +166,7 @@ func replyMessage(text, quoted string) *waE2E.Message {
 
 // startLongRun puts a long run for chat on the brain and waits until its
 // process is up.
-func startLongRun(t *testing.T, tb *testBridge, br *Brain, m Inbound) {
+func startLongRun(t *testing.T, tb *testBridge, br *brain.Brain, m brain.Inbound) {
 	t.Helper()
 	t.Setenv("FRIDOLIN_FAKE_SLEEP_MS", "30000")
 	tb.handleInbound(context.Background(), m)
@@ -199,7 +197,7 @@ func TestQuotedReplyReachesModelAndHistory(t *testing.T) {
 // the code must still be kept out of the history and the model.
 func TestOTPGuardDropsQuotedCode(t *testing.T) {
 	tb, br := newMainBridge(t, "")
-	br.appendHistory(testDMChat, "main", "🔐 Please send me the verification code", history.Out)
+	br.AppendHistory(testDMChat, "main", "🔐 Please send me the verification code", history.Out)
 
 	tb.whatsApp(t).ProcessMessage(replyEvent("483920", "🔐 Please send me the verification code"))
 
@@ -233,20 +231,20 @@ func TestOTPGuardIsScopedToTheChatAndTheWindow(t *testing.T) {
 		name     string
 		askIn    string        // the chat the brain asked for a code
 		askedAgo time.Duration // how long ago
-		m        Inbound
+		m        brain.Inbound
 		caught   string // the code handed over, "" for none
 		toldChat bool   // the sender hears that it was caught
 	}{
-		{"in the chat that asked", testDMChat, time.Minute, Inbound{Inbound: chat.Inbound{JID: testDMChat, Sender: "15551234567", Text: "483920"}}, "483920", true},
-		{"written in groups", testDMChat, time.Minute, Inbound{Inbound: chat.Inbound{JID: testDMChat, Sender: "15551234567", Text: "483 920"}}, "483920", true},
-		{"in another chat of the brain", testDMChat, time.Minute, Inbound{Inbound: chat.Inbound{JID: testGroup, Sender: otherNumber, Text: "2024", Silent: true}}, "", false},
-		{"long after the request", testDMChat, 11 * time.Minute, Inbound{Inbound: chat.Inbound{JID: testDMChat, Sender: "15551234567", Text: "2024"}}, "", false},
-		{"as chatter in the group that asked", testGroup, time.Minute, Inbound{Inbound: chat.Inbound{JID: testGroup, Sender: otherNumber, Text: "483920", Silent: true}}, "483920", false},
+		{"in the chat that asked", testDMChat, time.Minute, brain.Inbound{Inbound: chat.Inbound{JID: testDMChat, Sender: "15551234567", Text: "483920"}}, "483920", true},
+		{"written in groups", testDMChat, time.Minute, brain.Inbound{Inbound: chat.Inbound{JID: testDMChat, Sender: "15551234567", Text: "483 920"}}, "483920", true},
+		{"in another chat of the brain", testDMChat, time.Minute, brain.Inbound{Inbound: chat.Inbound{JID: testGroup, Sender: otherNumber, Text: "2024", Silent: true}}, "", false},
+		{"long after the request", testDMChat, 11 * time.Minute, brain.Inbound{Inbound: chat.Inbound{JID: testDMChat, Sender: "15551234567", Text: "2024"}}, "", false},
+		{"as chatter in the group that asked", testGroup, time.Minute, brain.Inbound{Inbound: chat.Inbound{JID: testGroup, Sender: otherNumber, Text: "483920", Silent: true}}, "483920", false},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			tb, br := newObservingBridge(t, "")
-			br.appendEntry(history.Entry{TS: time.Now().Add(-c.askedAgo).Format(time.RFC3339), Chat: c.askIn, From: "main", Text: "🔐 Please send me the verification code", Type: history.Out})
+			br.AppendEntry(history.Entry{TS: time.Now().Add(-c.askedAgo).Format(time.RFC3339), Chat: c.askIn, From: "main", Text: "🔐 Please send me the verification code", Type: history.Out})
 			c.m.Source = chat.SourceWhatsApp
 			tb.handleInbound(context.Background(), c.m)
 
@@ -289,7 +287,7 @@ func TestJunkFilterIgnoresTheQuote(t *testing.T) {
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			tb, br := newObservingBridge(t, "")
-			tb.handleInbound(context.Background(), Inbound{Inbound: chat.Inbound{JID: testGroup, Sender: otherNumber, Text: c.text, Quoted: q, Silent: true, Source: chat.SourceWhatsApp}})
+			tb.handleInbound(context.Background(), brain.Inbound{Inbound: chat.Inbound{JID: testGroup, Sender: otherNumber, Text: c.text, Quoted: q, Silent: true, Source: chat.SourceWhatsApp}})
 			testutil.WaitFor(t, 5*time.Second, "the history line", func() bool { return len(readHistory(t, br)) > 0 })
 			if want := `[reply to ` + otherNumber + `: "Lunch at 12?"]` + "\n" + c.text; readHistory(t, br)[0].Text != want {
 				t.Errorf("history = %q, want %q", readHistory(t, br)[0].Text, want)
@@ -323,7 +321,7 @@ func TestTriggerOnlyReplyAsksAboutTheQuote(t *testing.T) {
 			tb.whatsApp(t).ProcessMessage(replyEvent("", "Lunch?"))
 		}},
 		{"in a group, handed to the bridge", testGroup, func(tb *testBridge) {
-			tb.handleInbound(context.Background(), Inbound{Inbound: chat.Inbound{JID: testGroup, Sender: "15551234567",
+			tb.handleInbound(context.Background(), brain.Inbound{Inbound: chat.Inbound{JID: testGroup, Sender: "15551234567",
 				Quoted: &chat.Quote{From: otherNumber, Text: "Lunch?"}, Source: chat.SourceWhatsApp}})
 		}},
 	}
@@ -387,8 +385,8 @@ func TestPreviewShowsTheQuote(t *testing.T) {
 	tb, br := newMainBridge(t, "")
 	q := &chat.Quote{From: otherNumber, Text: "Lunch?"}
 	line := `[reply to ` + otherNumber + `: "Lunch?"]`
-	startLongRun(t, tb, br, Inbound{Inbound: chat.Inbound{JID: testDMChat, Sender: "15551234567", Text: "yes", Quoted: q, Source: chat.SourceWhatsApp}})
-	tb.handleInbound(context.Background(), Inbound{Inbound: chat.Inbound{JID: testGroup, Sender: "15551234567", Quoted: q, Source: chat.SourceWhatsApp}})
+	startLongRun(t, tb, br, brain.Inbound{Inbound: chat.Inbound{JID: testDMChat, Sender: "15551234567", Text: "yes", Quoted: q, Source: chat.SourceWhatsApp}})
+	tb.handleInbound(context.Background(), brain.Inbound{Inbound: chat.Inbound{JID: testGroup, Sender: "15551234567", Quoted: q, Source: chat.SourceWhatsApp}})
 
 	rt := br.Snapshot()
 	if rt.Running == nil || rt.Running.Preview != line+"\nyes" {
@@ -413,7 +411,7 @@ func TestQuotedCommandIsRecognised(t *testing.T) {
 
 	t.Run("!stop", func(t *testing.T) {
 		tb, br := newMainBridge(t, "")
-		startLongRun(t, tb, br, Inbound{Inbound: chat.Inbound{JID: testDMChat, Sender: "15551234567", Text: "write a long report", Source: chat.SourceWhatsApp}})
+		startLongRun(t, tb, br, brain.Inbound{Inbound: chat.Inbound{JID: testDMChat, Sender: "15551234567", Text: "write a long report", Source: chat.SourceWhatsApp}})
 		tb.whatsApp(t).ProcessMessage(replyEvent("!stop", outboundmsg.WorkingNotice))
 		// The confirmation goes out once the run has stopped, so wait for it
 		// rather than for the run: the snapshot clears a moment earlier.
@@ -500,9 +498,9 @@ func TestGroupCommandsMustBeAddressed(t *testing.T) {
 // An untagged "!stop" in a group must not stop the run a member asked for.
 func TestUntaggedStopInGroupIsChatter(t *testing.T) {
 	tb, br := newMainBridge(t, "")
-	startLongRun(t, tb, br, Inbound{Inbound: chat.Inbound{JID: testGroup, Sender: "15551234567", Text: "summarise the thread", Source: chat.SourceWhatsApp}})
+	startLongRun(t, tb, br, brain.Inbound{Inbound: chat.Inbound{JID: testGroup, Sender: "15551234567", Text: "summarise the thread", Source: chat.SourceWhatsApp}})
 
-	tb.handleInbound(context.Background(), Inbound{Inbound: chat.Inbound{JID: testGroup, Sender: otherNumber, Text: "!stop", Silent: true, Source: chat.SourceWhatsApp}})
+	tb.handleInbound(context.Background(), brain.Inbound{Inbound: chat.Inbound{JID: testGroup, Sender: otherNumber, Text: "!stop", Silent: true, Source: chat.SourceWhatsApp}})
 	time.Sleep(300 * time.Millisecond)
 	rt := br.Snapshot()
 	if rt.Running == nil || rt.Running.Preview != "summarise the thread" {
@@ -521,17 +519,17 @@ func TestUntaggedStopInGroupIsChatter(t *testing.T) {
 func TestQueueFullReplyNamesTheChatsStop(t *testing.T) {
 	cases := []struct {
 		name string
-		next Inbound
+		next brain.Inbound
 		want string
 	}{
-		{"in a DM", Inbound{Inbound: chat.Inbound{JID: testDMChat, Sender: "15551234567", Text: "dm 3"}}, "send `!stop` to drop what this chat has waiting"},
-		{"in a group", Inbound{Inbound: chat.Inbound{JID: testGroup, Sender: otherNumber, Text: "group 1"}}, "send `@claude !stop` to drop what this chat has waiting"},
+		{"in a DM", brain.Inbound{Inbound: chat.Inbound{JID: testDMChat, Sender: "15551234567", Text: "dm 3"}}, "send `!stop` to drop what this chat has waiting"},
+		{"in a group", brain.Inbound{Inbound: chat.Inbound{JID: testGroup, Sender: otherNumber, Text: "group 1"}}, "send `@claude !stop` to drop what this chat has waiting"},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			tb, br := newMainBridge(t, `, "queue": {"max_pending": 1}`)
-			startLongRun(t, tb, br, Inbound{Inbound: chat.Inbound{JID: testDMChat, Sender: "15551234567", Text: "dm 1", Source: chat.SourceWhatsApp}})
-			tb.handleInbound(context.Background(), Inbound{Inbound: chat.Inbound{JID: testDMChat, Sender: "15551234567", Text: "dm 2", Source: chat.SourceWhatsApp}})
+			startLongRun(t, tb, br, brain.Inbound{Inbound: chat.Inbound{JID: testDMChat, Sender: "15551234567", Text: "dm 1", Source: chat.SourceWhatsApp}})
+			tb.handleInbound(context.Background(), brain.Inbound{Inbound: chat.Inbound{JID: testDMChat, Sender: "15551234567", Text: "dm 2", Source: chat.SourceWhatsApp}})
 			c.next.Source = "whatsapp"
 			tb.handleInbound(context.Background(), c.next)
 
@@ -549,7 +547,7 @@ func TestQueueFullReplyNamesTheChatsStop(t *testing.T) {
 }
 
 // queuePreviews lists what waits in the brain's queue.
-func queuePreviews(br *Brain) []string {
+func queuePreviews(br *brain.Brain) []string {
 	var out []string
 	for _, q := range br.Snapshot().Queue {
 		out = append(out, q.Preview)
@@ -578,15 +576,15 @@ func TestStopAndResetAreScopedToTheChat(t *testing.T) {
 		t.Run(c.name, func(t *testing.T) {
 			tb, br := newMainBridge(t, "")
 			ctx := context.Background()
-			startLongRun(t, tb, br, Inbound{Inbound: chat.Inbound{JID: testDMChat, Sender: "15551234567", Text: "dm 1", Source: chat.SourceWhatsApp}})
+			startLongRun(t, tb, br, brain.Inbound{Inbound: chat.Inbound{JID: testDMChat, Sender: "15551234567", Text: "dm 1", Source: chat.SourceWhatsApp}})
 			pid := br.Snapshot().Running.PID
-			tb.handleInbound(ctx, Inbound{Inbound: chat.Inbound{JID: testDMChat, Sender: "15551234567", Text: "dm 2", Source: chat.SourceWhatsApp}})
-			tb.handleInbound(ctx, Inbound{Inbound: chat.Inbound{JID: testGroup, Sender: otherNumber, Text: "group 1", Source: chat.SourceWhatsApp}})
+			tb.handleInbound(ctx, brain.Inbound{Inbound: chat.Inbound{JID: testDMChat, Sender: "15551234567", Text: "dm 2", Source: chat.SourceWhatsApp}})
+			tb.handleInbound(ctx, brain.Inbound{Inbound: chat.Inbound{JID: testGroup, Sender: otherNumber, Text: "group 1", Source: chat.SourceWhatsApp}})
 			if q := queuePreviews(br); len(q) != 2 {
 				t.Fatalf("queue = %q, want dm 2 and group 1 waiting", q)
 			}
 
-			tb.handleInbound(ctx, Inbound{Inbound: chat.Inbound{JID: c.chat, Sender: chat.NormalizeJID(c.chat), Text: c.cmd, Source: chat.SourceWhatsApp}})
+			tb.handleInbound(ctx, brain.Inbound{Inbound: chat.Inbound{JID: c.chat, Sender: chat.NormalizeJID(c.chat), Text: c.cmd, Source: chat.SourceWhatsApp}})
 
 			testutil.WaitFor(t, 10*time.Second, "the run of "+c.wantRunning, func() bool {
 				r := br.Snapshot().Running
@@ -612,7 +610,7 @@ func TestResetReplySaysWhatItDoes(t *testing.T) {
 	tb, _ := newMainBridge(t, "")
 	ctx := context.Background()
 	for _, cmd := range []string{"!reset", "!help"} {
-		tb.handleInbound(ctx, Inbound{Inbound: chat.Inbound{JID: testDMChat, Sender: "15551234567", Text: cmd, Source: chat.SourceWhatsApp}})
+		tb.handleInbound(ctx, brain.Inbound{Inbound: chat.Inbound{JID: testDMChat, Sender: "15551234567", Text: cmd, Source: chat.SourceWhatsApp}})
 	}
 	sent := tb.sentTo(testDMChat)
 	if len(sent) != 2 {
@@ -638,7 +636,7 @@ func TestResetStartsOnlyThatChatAfresh(t *testing.T) {
 	// send sends text and waits until the answer is in the history.
 	send := func(chatJID, sender, text string) {
 		t.Helper()
-		tb.handleInbound(ctx, Inbound{Inbound: chat.Inbound{JID: chatJID, Sender: sender, Text: text, Source: chat.SourceWhatsApp}})
+		tb.handleInbound(ctx, brain.Inbound{Inbound: chat.Inbound{JID: chatJID, Sender: sender, Text: text, Source: chat.SourceWhatsApp}})
 		testutil.WaitFor(t, 10*time.Second, "the answer to "+text, func() bool {
 			return slices.ContainsFunc(readHistory(t, br), func(e history.Entry) bool {
 				return e.Type == history.Out && strings.HasSuffix(e.Text, "says: "+text)
@@ -646,8 +644,8 @@ func TestResetStartsOnlyThatChatAfresh(t *testing.T) {
 		})
 	}
 	send(testDMChat, "15551234567", "DM-BEFORE-RESET")
-	tb.handleInbound(ctx, Inbound{Inbound: chat.Inbound{JID: testGroup, Sender: otherNumber, Text: "GROUP-BEFORE-RESET", Silent: true, Source: chat.SourceWhatsApp}})
-	tb.handleInbound(ctx, Inbound{Inbound: chat.Inbound{JID: testDMChat, Sender: "15551234567", Text: "!reset", Source: chat.SourceWhatsApp}})
+	tb.handleInbound(ctx, brain.Inbound{Inbound: chat.Inbound{JID: testGroup, Sender: otherNumber, Text: "GROUP-BEFORE-RESET", Silent: true, Source: chat.SourceWhatsApp}})
+	tb.handleInbound(ctx, brain.Inbound{Inbound: chat.Inbound{JID: testDMChat, Sender: "15551234567", Text: "!reset", Source: chat.SourceWhatsApp}})
 	send(testDMChat, "15551234567", "DM-AFTER-RESET")
 	send(testGroup, otherNumber, "GROUP-AFTER")
 
@@ -705,7 +703,7 @@ func TestResetStartsOnlyThatChatAfresh(t *testing.T) {
 // message sees the history.
 func TestResetWithoutABrain(t *testing.T) {
 	tb := newTestBridge(t, "")
-	tb.handleInbound(context.Background(), Inbound{Inbound: chat.Inbound{JID: testDMChat, Sender: "15551234567", Text: "!reset", Source: chat.SourceWhatsApp}})
+	tb.handleInbound(context.Background(), brain.Inbound{Inbound: chat.Inbound{JID: testDMChat, Sender: "15551234567", Text: "!reset", Source: chat.SourceWhatsApp}})
 	sent := tb.sentTo(testDMChat)
 	if len(sent) != 1 || sent[0] != "✅ Cleared anything this chat had running or waiting." {
 		t.Errorf("sent %q, want only that it cleared the chat", sent)
@@ -729,9 +727,9 @@ func TestBrainRunsWriteNoSessionOrProcessRows(t *testing.T) {
 			}
 		}
 	}
-	startLongRun(t, tb, br, Inbound{Inbound: chat.Inbound{JID: testDMChat, Sender: "15551234567", Text: "dm 1", Source: chat.SourceWhatsApp}})
+	startLongRun(t, tb, br, brain.Inbound{Inbound: chat.Inbound{JID: testDMChat, Sender: "15551234567", Text: "dm 1", Source: chat.SourceWhatsApp}})
 	rows("while a brain runs")
-	tb.handleInbound(context.Background(), Inbound{Inbound: chat.Inbound{JID: testDMChat, Sender: "15551234567", Text: "!reset", Source: chat.SourceWhatsApp}})
+	tb.handleInbound(context.Background(), brain.Inbound{Inbound: chat.Inbound{JID: testDMChat, Sender: "15551234567", Text: "!reset", Source: chat.SourceWhatsApp}})
 	testutil.WaitFor(t, 10*time.Second, "the run to stop", func() bool { return br.Snapshot().Running == nil })
 	rows("after !reset")
 }
@@ -741,17 +739,17 @@ func TestBrainRunsWriteNoSessionOrProcessRows(t *testing.T) {
 func TestInterruptModeQueuedNotice(t *testing.T) {
 	cases := []struct {
 		name   string
-		next   Inbound
+		next   brain.Inbound
 		notice bool
 	}{
-		{"a request from another chat waits", Inbound{Inbound: chat.Inbound{JID: testGroup, Sender: otherNumber, Text: "group question"}}, true},
-		{"a newer request replaces the sender's run", Inbound{Inbound: chat.Inbound{JID: testDMChat, Sender: "15551234567", Text: "dm 2"}}, false},
-		{"untagged chatter is never told", Inbound{Inbound: chat.Inbound{JID: testGroup, Sender: otherNumber, Text: "chatter here", Silent: true}}, false},
+		{"a request from another chat waits", brain.Inbound{Inbound: chat.Inbound{JID: testGroup, Sender: otherNumber, Text: "group question"}}, true},
+		{"a newer request replaces the sender's run", brain.Inbound{Inbound: chat.Inbound{JID: testDMChat, Sender: "15551234567", Text: "dm 2"}}, false},
+		{"untagged chatter is never told", brain.Inbound{Inbound: chat.Inbound{JID: testGroup, Sender: otherNumber, Text: "chatter here", Silent: true}}, false},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			tb, br := newMainBridge(t, `, "queue": {"mode": "interrupt"}`)
-			startLongRun(t, tb, br, Inbound{Inbound: chat.Inbound{JID: testDMChat, Sender: "15551234567", Text: "dm 1", Source: chat.SourceWhatsApp}})
+			startLongRun(t, tb, br, brain.Inbound{Inbound: chat.Inbound{JID: testDMChat, Sender: "15551234567", Text: "dm 1", Source: chat.SourceWhatsApp}})
 			t.Setenv("FRIDOLIN_FAKE_SLEEP_MS", "10")
 			c.next.Source = "whatsapp"
 			tb.handleInbound(context.Background(), c.next)
@@ -766,9 +764,9 @@ func TestInterruptModeQueuedNotice(t *testing.T) {
 // either: the next message by the number starts afresh all the same.
 func TestResetByLIDStartsTheDMAfresh(t *testing.T) {
 	tb, br := newMainBridge(t, "")
-	br.appendHistory(testDMChat, "15551234567", "before the reset", history.In)
-	tb.handleInbound(context.Background(), Inbound{Inbound: chat.Inbound{JID: otherNumber + "@lid", Sender: "15551234567", Text: "!reset", Source: chat.SourceWhatsApp}})
-	if before, _ := br.historyBefore(dm("next"), prompttext.DMHistoryWindow); len(before) != 0 {
+	br.AppendHistory(testDMChat, "15551234567", "before the reset", history.In)
+	tb.handleInbound(context.Background(), brain.Inbound{Inbound: chat.Inbound{JID: otherNumber + "@lid", Sender: "15551234567", Text: "!reset", Source: chat.SourceWhatsApp}})
+	if before := promptBlock(capturedPrompt(t, br, dm("next")), "chat_history"); before != "" {
 		t.Errorf("the DM's next run would read %+v", before)
 	}
 }
@@ -781,10 +779,10 @@ func TestStopByLIDReachesTheDMsRun(t *testing.T) {
 	const lid = otherNumber + "@lid"
 	tb, br := newMainBridge(t, "")
 	ctx := context.Background()
-	startLongRun(t, tb, br, Inbound{Inbound: chat.Inbound{JID: testDMChat, Sender: "15551234567", Text: "dm 1", Source: chat.SourceWhatsApp}})
-	tb.handleInbound(ctx, Inbound{Inbound: chat.Inbound{JID: testDMChat, Sender: "15551234567", Text: "dm 2", Source: chat.SourceWhatsApp}})
+	startLongRun(t, tb, br, brain.Inbound{Inbound: chat.Inbound{JID: testDMChat, Sender: "15551234567", Text: "dm 1", Source: chat.SourceWhatsApp}})
+	tb.handleInbound(ctx, brain.Inbound{Inbound: chat.Inbound{JID: testDMChat, Sender: "15551234567", Text: "dm 2", Source: chat.SourceWhatsApp}})
 
-	tb.handleInbound(ctx, Inbound{Inbound: chat.Inbound{JID: lid, Sender: "15551234567", Text: "!stop", Source: chat.SourceWhatsApp}})
+	tb.handleInbound(ctx, brain.Inbound{Inbound: chat.Inbound{JID: lid, Sender: "15551234567", Text: "!stop", Source: chat.SourceWhatsApp}})
 	if !tb.sentPrefix(lid, "🛑 Stopped") {
 		t.Errorf("!stop answered %q, want that it stopped the DM's run", tb.sentTo(lid))
 	}

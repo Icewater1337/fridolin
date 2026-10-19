@@ -7,6 +7,7 @@ import (
 	"runtime"
 	"testing"
 
+	"github.com/Icewater1337/fridolin/internal/brain"
 	"github.com/Icewater1337/fridolin/internal/config"
 	"github.com/Icewater1337/fridolin/internal/manifest"
 )
@@ -36,18 +37,34 @@ func TestBackupSettingsProjectionPreservesStatusJSON(t *testing.T) {
 }
 
 func TestBackupTargetProjectionKeepsIdentityAndOwnsExcludes(t *testing.T) {
-	br := &Brain{id: "notes", workDir: t.TempDir()}
-	br.settings.Store(&brainSettings{name: "Before", manifest: manifest.Manifest{Backup: manifest.Backup{Enabled: true, Exclude: []string{"one"}}}})
+	mgr := brain.NewManager(brain.Options{})
+	t.Cleanup(mgr.Stop)
+	sp := manifest.Spec{Dir: t.TempDir(), Manifest: manifest.Manifest{ID: "notes", Name: "Before", Backup: manifest.Backup{Enabled: true, Exclude: []string{"one"}}}}
+	apply := func() {
+		t.Helper()
+		if failures, err := mgr.Apply([]manifest.Spec{sp}, brain.Globals{}, brain.ApplyOptions{}); err != nil || len(failures) != 0 {
+			t.Fatalf("apply: %v %v", failures, err)
+		}
+	}
+	apply()
+	br := mgr.Get("notes")
 	original := br
-	var notified *Brain
-	target := backupTarget(br, func(_ context.Context, got *Brain, _ string) error { notified = got; return nil })
+	var notified *brain.Brain
+	target := backupTarget(br, func(_ context.Context, got *brain.Brain, _ string) error { notified = got; return nil })
 	first := target.Settings()
 	first.Exclude[0] = "changed by consumer"
 	if !reflect.DeepEqual(target.Settings().Exclude, []string{"one"}) {
 		t.Fatal("projection borrowed mutable excludes")
 	}
-	original.settings.Store(&brainSettings{name: "After", manifest: manifest.Manifest{Backup: manifest.Backup{Exclude: []string{"two"}}}})
-	br = &Brain{id: "notes", workDir: t.TempDir()}
+	sp.Manifest.Name = "After"
+	sp.Manifest.Backup = manifest.Backup{Exclude: []string{"two"}}
+	apply()
+	if mgr.Get("notes") != original {
+		t.Fatal("settings reload replaced the runtime")
+	}
+	sp.Dir = t.TempDir()
+	apply()
+	br = mgr.Get("notes")
 	if s := target.Settings(); s.Name != "After" || s.Enabled || !reflect.DeepEqual(s.Exclude, []string{"two"}) {
 		t.Fatalf("target froze settings: %+v", s)
 	}

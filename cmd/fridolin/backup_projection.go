@@ -7,6 +7,7 @@ import (
 	"slices"
 
 	"github.com/Icewater1337/fridolin/internal/backup"
+	"github.com/Icewater1337/fridolin/internal/brain"
 	"github.com/Icewater1337/fridolin/internal/config"
 
 	outboundmsg "github.com/Icewater1337/fridolin/internal/outbound"
@@ -24,10 +25,10 @@ func backupSettings(cfg *config.Config) backup.Settings {
 	return s
 }
 
-func backupTarget(br *Brain, notify func(context.Context, *Brain, string) error) backup.Target {
-	t := backup.Target{ID: br.ID(), Dir: br.Dir(), WaitIdle: br.waitIdle, Settings: func() backup.TargetSettings {
-		s := br.settings.Load()
-		return backup.TargetSettings{Name: s.name, Enabled: s.manifest.Backup.Enabled, Exclude: slices.Clone(s.manifest.Backup.Exclude)}
+func backupTarget(br *brain.Brain, notify func(context.Context, *brain.Brain, string) error) backup.Target {
+	t := backup.Target{ID: br.ID(), Dir: br.Dir(), WaitIdle: br.WaitIdle, Settings: func() backup.TargetSettings {
+		m := br.Manifest()
+		return backup.TargetSettings{Name: m.Name, Enabled: m.Backup.Enabled, Exclude: slices.Clone(m.Backup.Exclude)}
 	}}
 	if notify != nil {
 		t.Notify = func(ctx context.Context, text string) error { return notify(ctx, br, text) }
@@ -35,7 +36,7 @@ func backupTarget(br *Brain, notify func(context.Context, *Brain, string) error)
 	return t
 }
 
-func backupTargets(brains []*Brain, notify func(context.Context, *Brain, string) error) []backup.Target {
+func backupTargets(brains []*brain.Brain, notify func(context.Context, *brain.Brain, string) error) []backup.Target {
 	targets := make([]backup.Target, 0, len(brains))
 	for _, br := range brains {
 		targets = append(targets, backupTarget(br, notify))
@@ -60,7 +61,7 @@ func backupFiles(cfgs *config.Store) (backup.BridgeFiles, error) {
 	return files, nil
 }
 
-func backupOptions(cfgs *config.Store, bm *BrainManager, notify func(context.Context, *Brain, string) error) backup.Options {
+func backupOptions(cfgs *config.Store, bm *BrainManager, notify func(context.Context, *brain.Brain, string) error) backup.Options {
 	boot := cfgs.Boot()
 	opts := backup.Options{BackupDir: boot.BackupDir(), RcloneConf: boot.RcloneConf(), Settings: func() backup.Settings { return backupSettings(cfgs.Get()) },
 		Targets: func() []backup.Target { return backupTargets(bm.Brains(), notify) }, BridgeFiles: func() (backup.BridgeFiles, error) { return backupFiles(cfgs) },
@@ -74,7 +75,7 @@ func backupOptions(cfgs *config.Store, bm *BrainManager, notify func(context.Con
 	return opts
 }
 
-func newProjectedBackup(cfgs *config.Store, bm *BrainManager, notify func(context.Context, *Brain, string) error) *backup.Manager {
+func newProjectedBackup(cfgs *config.Store, bm *BrainManager, notify func(context.Context, *brain.Brain, string) error) *backup.Manager {
 	m := backup.New(backupOptions(cfgs, bm, notify))
 	// Publication succeeds before the schedule moves; failed saves never reach this callback.
 	cfgs.Subscribe(func(prev, next *config.Config) { m.SettingsChanged(backupSettings(prev), backupSettings(next)) })
@@ -82,7 +83,7 @@ func newProjectedBackup(cfgs *config.Store, bm *BrainManager, notify func(contex
 }
 
 // notifyBackup resolves the selected runtime's current reply destination.
-func (b *Bridge) notifyBackup(ctx context.Context, br *Brain, text string) error {
+func (b *Bridge) notifyBackup(ctx context.Context, br *brain.Brain, text string) error {
 	jid := b.replyChatFor(br, b.cfgs.Get())
 	if jid == "" {
 		return fmt.Errorf("brain %s has no chat to send it to — set its reply chat", br.ID())

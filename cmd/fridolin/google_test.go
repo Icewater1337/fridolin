@@ -134,7 +134,7 @@ func TestCalendarDashboardSignInFlow(t *testing.T) {
 	if m.Calendar == nil || m.Calendar.Account != "you@example.com" || m.Calendar.Default != "you@example.com" {
 		t.Fatalf("manifest calendar = %+v", m.Calendar)
 	}
-	if tb.brainMgr.Get("fam").settings.Load().manifest.Calendar == nil {
+	if tb.brainMgr.Get("fam").Manifest().Calendar == nil {
 		t.Error("the running brain did not pick up its calendar")
 	}
 
@@ -149,7 +149,7 @@ func TestCalendarDashboardSignInFlow(t *testing.T) {
 	if w.Code != 200 {
 		t.Fatal(w.Body.String())
 	}
-	env := strings.Join(google.CalendarEnv("fam", tb.brainMgr.Get("fam").settings.Load().manifest, tb.google.CredsDir()), " ")
+	env := strings.Join(google.CalendarEnv("fam", tb.brainMgr.Get("fam").Manifest(), tb.google.CredsDir()), " ")
 	if !strings.Contains(env, "BRIDGE_CALENDARS=you@example.com,team@example.com") || !strings.Contains(env, "BRIDGE_CALENDAR_DEFAULT=team@example.com") {
 		t.Errorf("env = %s", env)
 	}
@@ -1228,7 +1228,7 @@ func TestDisconnectClearsTheChosenCalendars(t *testing.T) {
 		t.Run(fmt.Sprintf("local_only=%v", localOnly), func(t *testing.T) {
 			g := newGatedGoogle(t)
 			tb := gatedCalendarBrain(t, g, "you@example.com")
-			if m := tb.brainMgr.Get("a").settings.Load().manifest; m.Calendar == nil {
+			if m := tb.brainMgr.Get("a").Manifest(); m.Calendar == nil {
 				t.Fatal("no calendars chosen to begin with")
 			}
 			if _, _, err := tb.google.Disconnect(context.Background(), "a", localOnly); err != nil {
@@ -1237,7 +1237,7 @@ func TestDisconnectClearsTheChosenCalendars(t *testing.T) {
 			if _, err := os.Stat(tb.google.TokenPath("a")); !os.IsNotExist(err) {
 				t.Errorf("the token after the disconnect: %v", err)
 			}
-			if m := tb.brainMgr.Get("a").settings.Load().manifest; m.Calendar != nil {
+			if m := tb.brainMgr.Get("a").Manifest(); m.Calendar != nil {
 				t.Errorf("calendar settings after the disconnect = %+v, want none", m.Calendar)
 			}
 		})
@@ -1394,7 +1394,7 @@ func TestSignInIsNotUndoneByARefresh(t *testing.T) {
 	if err := json.Unmarshal(data, &tok); err != nil || tok.RefreshToken != "RT-NEW" || tok.Account != "you@example.com" {
 		t.Errorf("token = %s (%v), want the new sign-in's", data, err)
 	}
-	m := tb.brainMgr.Get("a").settings.Load().manifest
+	m := tb.brainMgr.Get("a").Manifest()
 	if m.Calendar == nil || m.Calendar.Account != "you@example.com" {
 		t.Errorf("calendar settings = %+v, want the new account", m.Calendar)
 	}

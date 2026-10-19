@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/Icewater1337/fridolin/internal/brain"
 	outboundmsg "github.com/Icewater1337/fridolin/internal/outbound"
 
 	"github.com/Icewater1337/fridolin/internal/claudecli"
@@ -38,5 +39,11 @@ func TestConfigDefaultsMatchRuntimeContracts(t *testing.T) {
 	}
 	if _, err := config.Resolve(&config.Config{MaxChunkSize: outboundmsg.MinChunkSize - 1}, configPaths(), runtime.GOOS); err == nil {
 		t.Fatal("config accepted less than the chunker's minimum")
+	}
+}
+
+func TestBrainQueueModeMatchesConfiguration(t *testing.T) {
+	if brain.QueueInterrupt != config.QueueModeInterrupt {
+		t.Fatal("runtime and configuration interrupt modes differ")
 	}
 }

@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Icewater1337/fridolin/internal/brain"
 	"github.com/Icewater1337/fridolin/internal/google"
 	"github.com/Icewater1337/fridolin/internal/httpapi"
 	"github.com/Icewater1337/fridolin/internal/manifest"
@@ -70,7 +71,7 @@ func (b *Bridge) apiDeleteGoogleClient(w http.ResponseWriter, r *http.Request) {
 	httpapi.WriteJSON(w, http.StatusOK, map[string]string{"status": "removed"})
 }
 
-func (b *Bridge) calendarBrain(w http.ResponseWriter, r *http.Request) *Brain {
+func (b *Bridge) calendarBrain(w http.ResponseWriter, r *http.Request) *brain.Brain {
 	br := b.brainMgr.Get(r.PathValue("id"))
 	if br == nil {
 		httpapi.WriteErr(w, http.StatusNotFound, "no such brain")
@@ -96,7 +97,7 @@ func (b *Bridge) apiCalendarStatus(w http.ResponseWriter, r *http.Request) {
 	if br == nil {
 		return
 	}
-	m := br.settings.Load().manifest
+	m := br.Manifest()
 	resp := b.google.CalendarStatus(r.Context(), br.ID(), m.Calendar, r.URL.Query().Get("list") != "0")
 	httpapi.WriteJSON(w, http.StatusOK, resp)
 }

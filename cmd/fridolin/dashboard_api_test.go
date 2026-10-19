@@ -157,7 +157,7 @@ func TestBrainBackupRoute(t *testing.T) {
 	if w := tb.do("PUT", "/api/brains/notes/backup", map[string]any{"enabled": false, "exclude": []string{" *.tmp ", ""}}); w.Code != 200 {
 		t.Fatalf("%d %s", w.Code, w.Body.String())
 	}
-	m := tb.brainMgr.Get("notes").settings.Load().manifest
+	m := tb.brainMgr.Get("notes").Manifest()
 	if m.Backup.Enabled || !slices.Equal(m.Backup.Exclude, []string{"*.tmp"}) {
 		t.Fatalf("backup = %+v", m.Backup)
 	}
@@ -491,7 +491,7 @@ func TestApproveBindsToTheReviewedManifest(t *testing.T) {
 	if w := tb.do("POST", "/api/brains/notes/approve", map[string]any{"manifest": reviewed}); w.Code != http.StatusConflict || !strings.Contains(w.Body.String(), "changed again") {
 		t.Fatalf("approve the stale review: %d %s", w.Code, w.Body.String())
 	}
-	if tb.cfgs.ETag() != before || tb.brainMgr.Get("notes").settings.Load().manifest.Routing.HandlesDMs {
+	if tb.cfgs.ETag() != before || tb.brainMgr.Get("notes").Manifest().Routing.HandlesDMs {
 		t.Fatal("the refused approval changed the approved manifest")
 	}
 	if w := tb.do("POST", "/api/brains/notes/approve", nil); w.Code != http.StatusBadRequest {
@@ -502,7 +502,7 @@ func TestApproveBindsToTheReviewedManifest(t *testing.T) {
 	if w := tb.do("POST", "/api/brains/notes/approve", map[string]any{"manifest": grab}); w.Code != 200 {
 		t.Fatalf("approve the current file: %d %s", w.Code, w.Body.String())
 	}
-	if !tb.brainMgr.Get("notes").settings.Load().manifest.Routing.HandlesDMs {
+	if !tb.brainMgr.Get("notes").Manifest().Routing.HandlesDMs {
 		t.Fatal("approval did not apply")
 	}
 }

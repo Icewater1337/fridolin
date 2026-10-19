@@ -22,6 +22,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Icewater1337/fridolin/internal/brain"
 	outboundmsg "github.com/Icewater1337/fridolin/internal/outbound"
 
 	"github.com/Icewater1337/fridolin/internal/config"
@@ -330,7 +331,7 @@ func secondSignalStopsAtOnce(t *testing.T, provider string) {
 		_, body := call("GET", "/api/status", token, "")
 		var st struct {
 			Brains []struct {
-				Running *RunView `json:"running"`
+				Running *brain.RunView `json:"running"`
 			} `json:"brains"`
 		}
 		if json.Unmarshal([]byte(body), &st) == nil && len(st.Brains) == 1 && st.Brains[0].Running != nil {
@@ -410,7 +411,7 @@ func TestStopGivesTheRunInFlightItsGrace(t *testing.T) {
 			h.WaitFor("the run", func() bool { return h.Running("main") })
 			began := time.Now()
 			h.Shutdown()
-			if took := time.Since(began); took > tc.grace+stopRunWait {
+			if took := time.Since(began); took > tc.grace+brain.StopRunWait {
 				t.Errorf("the stop took %v, more than the grace and the wait for the stopped run", took)
 			}
 			h.Reopen()
@@ -444,7 +445,7 @@ func TestStopWaitsForTheDelivery(t *testing.T) {
 	setShutdownGrace(t, 10*time.Second)
 	mgr, _, _ := queueTestManager(t, 300, "")
 	var delivered atomic.Bool
-	mgr.SetHooks(BrainHooks{Deliver: func(br *Brain, m Inbound, res claudecli.Result) {
+	mgr.SetHooks(BrainHooks{Deliver: func(br *brain.Brain, m brain.Inbound, res claudecli.Result) {
 		time.Sleep(500 * time.Millisecond) // the outbox's write, slowed down
 		delivered.Store(true)
 	}})
@@ -464,7 +465,7 @@ func TestStopWaitsForARemovedBrainsDelivery(t *testing.T) {
 	entered, release := make(chan struct{}), make(chan struct{})
 	releaseDelivery := sync.OnceFunc(func() { close(release) })
 	defer releaseDelivery()
-	tb.brainMgr.SetHooks(BrainHooks{Deliver: func(*Brain, Inbound, claudecli.Result) {
+	tb.brainMgr.SetHooks(BrainHooks{Deliver: func(*brain.Brain, brain.Inbound, claudecli.Result) {
 		close(entered)
 		<-release
 	}})
@@ -494,38 +495,6 @@ func TestStopWaitsForARemovedBrainsDelivery(t *testing.T) {
 	}
 }
 
-func TestRetirementKeepsItsQueueWhenStopHasBegun(t *testing.T) {
-	mgr, _, _ := queueTestManager(t, 10, "")
-	var started, kept atomic.Int32
-	mgr.SetHooks(BrainHooks{
-		RunEnv:  func(string) ([]string, func()) { started.Add(1); return nil, func() {} },
-		Waiting: func(_ *Brain, ms []Inbound) { kept.Add(int32(len(ms))) },
-	})
-	// A retirement whose old worker is still delivering holds Stop at
-	// its retirement barrier. Its queue arrives at requeue afterward.
-	mgr.retiring.Add(1)
-	retired := sync.OnceFunc(mgr.retiring.Done)
-	defer retired()
-	stopped := make(chan struct{})
-	go func() { mgr.Stop(); close(stopped) }()
-	testutil.WaitFor(t, 5*time.Second, "the stop to begin", func() bool {
-		mgr.reloadMu.Lock()
-		defer mgr.reloadMu.Unlock()
-		return mgr.stopped
-	})
-	mgr.requeue(mgr.Get("a"), []Inbound{dm("still waiting")})
-	testutil.WaitFor(t, 5*time.Second, "the retired queue to be handled", func() bool { return started.Load()+kept.Load() > 0 })
-	if started.Load() != 0 || kept.Load() != 1 {
-		t.Errorf("retirement during stop: started=%d, kept=%d; want zero runs and one kept message", started.Load(), kept.Load())
-	}
-	retired()
-	select {
-	case <-stopped:
-	case <-time.After(5 * time.Second):
-		t.Fatal("Stop did not finish after retirement")
-	}
-}
-
 // Finishing the grace and the kill wait must not close the store beneath
 // an answer already being delivered. A second signal remains the way to
 // abandon a stuck shutdown.
@@ -535,7 +504,7 @@ func TestStopWaitsForDeliveryAfterTheKillTimeout(t *testing.T) {
 	entered, release := make(chan struct{}), make(chan struct{})
 	releaseDelivery := sync.OnceFunc(func() { close(release) })
 	defer releaseDelivery()
-	mgr.SetHooks(BrainHooks{Deliver: func(*Brain, Inbound, claudecli.Result) {
+	mgr.SetHooks(BrainHooks{Deliver: func(*brain.Brain, brain.Inbound, claudecli.Result) {
 		close(entered)
 		<-release
 	}})
@@ -552,7 +521,7 @@ func TestStopWaitsForDeliveryAfterTheKillTimeout(t *testing.T) {
 	select {
 	case <-stopped:
 		t.Fatal("Stop returned while delivery still needed the store")
-	case <-time.After(stopRunWait + 200*time.Millisecond):
+	case <-time.After(brain.StopRunWait + 200*time.Millisecond):
 	}
 	releaseDelivery()
 	select {
@@ -573,7 +542,7 @@ func TestResumeAppliesChangesBeforeStartingQueuedRuns(t *testing.T) {
 		started.Add(1)
 		return nil, func() {}
 	}})
-	m := Inbound{Inbound: chat.Inbound{JID: harnessDM, Sender: "15551234567", Text: "must not run", Source: chat.SourceWhatsApp, At: time.Now(), ID: "3EB0DELETED"}}
+	m := brain.Inbound{Inbound: chat.Inbound{JID: harnessDM, Sender: "15551234567", Text: "must not run", Source: chat.SourceWhatsApp, At: time.Now(), ID: "3EB0DELETED"}}
 	if err := keepInbound(t.Context(), tb.store, inboundQueued, "a", m); err != nil {
 		t.Fatal(err)
 	}
@@ -635,7 +604,7 @@ func TestShutdownKeepsWhatItHolds(t *testing.T) {
 // lost.
 func TestResumeOutlivesItsContext(t *testing.T) {
 	tb := newTestBridge(t, "")
-	m := Inbound{Inbound: chat.Inbound{JID: harnessDM, Sender: "15551234567", Text: "summarise", Source: chat.SourceWhatsApp, At: time.Now(), ID: "3EB0CUT"}}
+	m := brain.Inbound{Inbound: chat.Inbound{JID: harnessDM, Sender: "15551234567", Text: "summarise", Source: chat.SourceWhatsApp, At: time.Now(), ID: "3EB0CUT"}}
 	if err := keepInterrupted(t.Context(), tb.store, "main", m); err != nil {
 		t.Fatal(err)
 	}
@@ -653,7 +622,7 @@ func waitBatched(h *harness, n int) {
 		d.mu.Lock()
 		defer d.mu.Unlock()
 		for _, b := range d.batches {
-			return len(d.batches) == 1 && len(b.msg.ownParts()) == n
+			return len(d.batches) == 1 && max(1, len(b.msg.Save().Parts)) == n
 		}
 		return false
 	})
