@@ -1,12 +1,10 @@
-package main
+package httpapi
 
 import (
 	"context"
 	"encoding/json"
 	"net/http"
 	"strings"
-
-	"github.com/Icewater1337/fridolin/internal/httpapi"
 )
 
 type BuilderAPI struct {
@@ -26,15 +24,15 @@ func (a *BuilderAPI) Handler() http.Handler {
 		return func(w http.ResponseWriter, r *http.Request) {
 			brainID := a.BrainForToken(strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer "))
 			if brainID == "" {
-				httpapi.WriteErr(w, http.StatusUnauthorized, "this brain may not build the site (Fridolin dashboard → Site → Builders)")
+				WriteErr(w, http.StatusUnauthorized, "this brain may not build the site (Fridolin dashboard → Site → Builders)")
 				return
 			}
 			out, err := fn(r, brainID)
 			if err != nil {
-				httpapi.WriteErr(w, http.StatusBadRequest, err.Error())
+				WriteErr(w, http.StatusBadRequest, err.Error())
 				return
 			}
-			httpapi.WriteJSON(w, http.StatusOK, out)
+			WriteJSON(w, http.StatusOK, out)
 		}
 	}
 	mux.HandleFunc("GET /builder/context", call(func(r *http.Request, id string) (any, error) {
