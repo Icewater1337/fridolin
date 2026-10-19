@@ -21,6 +21,7 @@ import (
 	waLog "go.mau.fi/whatsmeow/util/log"
 	"google.golang.org/protobuf/proto"
 
+	"github.com/Icewater1337/fridolin/internal/activity"
 	"github.com/Icewater1337/fridolin/internal/chat"
 	"github.com/Icewater1337/fridolin/internal/history"
 )
@@ -697,9 +698,9 @@ func TestResetStartsOnlyThatChatAfresh(t *testing.T) {
 		t.Error("the history lost the DM's messages from before the reset")
 	}
 
-	seeded := NewActivity(100)
-	seeded.Seed(br)
-	for name, feed := range map[string][]ActivityEntry{"live": tb.activity.Recent(100, ""), "seeded": seeded.Recent(100, "")} {
+	seeded := activity.New(100)
+	seedActivity(seeded, br)
+	for name, feed := range map[string][]activity.Entry{"live": tb.activity.Recent(100, ""), "seeded": seeded.Recent(100, "")} {
 		for _, e := range feed {
 			if e.Type == history.Reset {
 				t.Errorf("the %s feed shows the reset marker: %+v", name, e)

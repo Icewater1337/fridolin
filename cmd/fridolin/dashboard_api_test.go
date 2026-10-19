@@ -16,6 +16,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Icewater1337/fridolin/internal/activity"
 	"github.com/Icewater1337/fridolin/internal/fsx"
 	"github.com/Icewater1337/fridolin/internal/history"
 	"github.com/Icewater1337/fridolin/internal/logx"
@@ -1091,7 +1092,7 @@ func TestListLimitsClampToTheMaximum(t *testing.T) {
 			return len(logs.Lines)
 		},
 		"/api/activity": func(b []byte) int {
-			var entries []ActivityEntry
+			var entries []activity.Entry
 			_ = json.Unmarshal(b, &entries)
 			return len(entries)
 		},

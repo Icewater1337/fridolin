@@ -780,6 +780,10 @@ API; the page is plain HTML/CSS/JS compiled into the binary. In `web/assets`,
 `app/` starts it, `pages/` holds one module per page, and `components/` and
 `lib/` the pieces they share; `css/` holds its styles.
 
+**`internal/activity`** — the dashboard's bounded feed of history lines,
+including edits and deletions. The bridge supplies each brain's history tail
+when the feed is seeded.
+
 **`backup.go`** — Google Drive backups through rclone.
 
 **`plaud.go`** — the Plaud recorder integration.

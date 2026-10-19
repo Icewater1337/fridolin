@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Icewater1337/fridolin/internal/activity"
 	"github.com/Icewater1337/fridolin/internal/chat"
 	"github.com/Icewater1337/fridolin/internal/fsx"
 	"github.com/Icewater1337/fridolin/internal/history"
@@ -392,8 +393,8 @@ func TestHistoryIsNotFollowedOutOfTheFolder(t *testing.T) {
 			br.appendHistory("15551234567@s.whatsapp.net", "15551234567", "NEW-MESSAGE", history.In)
 			preface := br.buildPrompt(br.settings.Load(), dm("hello"))
 			_, drops := br.catchesCode(dm("123456"), time.Now())
-			feed := NewActivity(10)
-			feed.Seed(br)
+			feed := activity.New(10)
+			seedActivity(feed, br)
 			var seeded []string
 			for _, e := range feed.Recent(10, "") {
 				seeded = append(seeded, e.Text)

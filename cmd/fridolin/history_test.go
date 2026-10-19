@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/Icewater1337/fridolin/internal/activity"
 	"github.com/Icewater1337/fridolin/internal/history"
 )
 
@@ -79,8 +80,8 @@ func TestActivitySeedReadsTheLastLines(t *testing.T) {
 	for i := range 60 {
 		br.appendHistory(testDMChat, "15551234567", fmt.Sprintf("message %d", i), history.In)
 	}
-	feed := NewActivity(100)
-	feed.Seed(br)
+	feed := activity.New(100)
+	seedActivity(feed, br)
 	got := feed.Recent(100, "")
 	if len(got) != 50 || got[0].Text != "message 59" || got[49].Text != "message 10" {
 		var texts []string

@@ -49,6 +49,9 @@ behaviour unless its title says so. The steps so far:
 - **R4 (media)**: the `media` package owns bounded attachment creation,
   per-brain inboxes, path confinement and the legacy media migration. Its
   caller supplies the shared migration lifecycle and working directory.
+- **R4, activity slice**: `activity` owns the dashboard's bounded feed and
+  edit/delete updates. The command supplies history entries and the lazy
+  seed reader, which still runs under the feed lock.
 
 Everything else is still `package main` in `cmd/fridolin`, one file per
 subject (section 3 names the file each package will come from). A package
@@ -320,8 +323,10 @@ responsibility and says what it must not do.
   pure function), and downloads media into the inbox.
 - **`devchat`** *(to come, R11)*: the in-memory transport for dev mode. It
   keeps sent messages for the dashboard and the tests.
-- **`activity`** *(to come, R4; `activity.go`)*: the dashboard's in-memory
-  feed of recent history lines.
+- **`activity`**: the dashboard's in-memory feed of recent history lines.
+  `Feed` owns the bounded buffer, ordering, and edit/delete updates. The
+  caller supplies history entries and a lazy seed reader, called once per
+  brain under the feed lock; runtime brains and transports stay outside.
 
 ### Integrations
 
@@ -415,8 +420,11 @@ leaves (standard library only): fsx, textx, version, apperr, trigger, chat,
 ```
 
 Today `cmd/fridolin` imports `web`, `examples`, `site`, `fsx`, `textx`,
-`version`, `trigger`, `platform` and `media`. The foundation packages import
-nothing of the module; `media` imports only `fsx` and `textx`.
+`version`, `trigger`, `platform`, `chat`, `history`, `logx`, `store`,
+`otp`, `media` and `activity`. History imports `fsx`; store imports `fsx`
+and `logx`; OTP imports `history` and `fsx`; media imports `fsx` and `textx`;
+activity imports `history` and `textx`. The other extracted packages import
+nothing of the module.
 
 The rules:
 
