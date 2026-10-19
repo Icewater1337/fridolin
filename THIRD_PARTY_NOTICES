@@ -33,8 +33,8 @@ github.com/elliotchance/orderedmap/v3 v3.1.1 (MIT)
 github.com/google/uuid v1.6.0 (BSD-3-Clause)
 github.com/mattn/go-colorable v0.1.15 (MIT)
 github.com/mattn/go-isatty v0.0.24 (MIT)
-github.com/mattn/go-sqlite3 v1.14.48 (MIT)
-github.com/mdp/qrterminal/v3 v3.2.0 (MIT)
+github.com/mattn/go-sqlite3 v1.14.52 (MIT)
+github.com/mdp/qrterminal/v3 v3.2.1 (MIT)
 github.com/petermattis/goid v0.0.0-20260713124913-97594f28f5ca (Apache-2.0)
 github.com/rs/zerolog v1.35.1 (MIT)
 github.com/vektah/gqlparser/v2 v2.5.36 (MIT)
@@ -48,7 +48,7 @@ golang.org/x/sync v0.24.0 (BSD-3-Clause)
 golang.org/x/sys v0.49.0 (BSD-3-Clause)
 golang.org/x/term v0.47.0 (BSD-3-Clause)
 golang.org/x/text v0.43.0 (BSD-3-Clause)
-google.golang.org/protobuf v1.36.11 (BSD-3-Clause)
+google.golang.org/protobuf v1.36.12 (BSD-3-Clause)
 rsc.io/qr v0.2.0 (BSD-3-Clause)
 
 
@@ -255,7 +255,7 @@ THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLI
 
 
 ==============================================================================
-github.com/mattn/go-sqlite3 v1.14.48: LICENSE
+github.com/mattn/go-sqlite3 v1.14.52: LICENSE
 ==============================================================================
 
 The MIT License (MIT)
@@ -282,7 +282,7 @@ SOFTWARE.
 
 
 ==============================================================================
-github.com/mdp/qrterminal/v3 v3.2.0: LICENSE
+github.com/mdp/qrterminal/v3 v3.2.1: LICENSE
 ==============================================================================
 
 Copyright 2019 Mark Percival <m@mdp.im>
@@ -2237,7 +2237,7 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 
 ==============================================================================
-google.golang.org/protobuf v1.36.11: LICENSE
+google.golang.org/protobuf v1.36.12: LICENSE
 ==============================================================================
 
 Copyright (c) 2018 The Go Authors. All rights reserved.
