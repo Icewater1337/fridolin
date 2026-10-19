@@ -61,6 +61,12 @@ func (s *Store) TakeInbound(ctx context.Context, visit func(InboundRow)) error {
 		return err
 	}
 	defer func() { _ = tx.Rollback() }()
+	// Acquire the write reservation before reading. Upgrading a read snapshot
+	// after another connection commits can fail immediately with SQLITE_BUSY,
+	// even with a busy timeout, leaving startup recovery unperformed.
+	if _, err := tx.ExecContext(ctx, `DELETE FROM inbound_queue WHERE 0`); err != nil {
+		return err
+	}
 	rows, err := tx.QueryContext(ctx, `SELECT id, kind, chat_jid, brain, msg_id, body, sent_at FROM inbound_queue
 		ORDER BY CASE kind WHEN 'interrupted' THEN 0 WHEN 'queued' THEN 1 WHEN 'held' THEN 2 ELSE 3 END, id`)
 	if err != nil {
