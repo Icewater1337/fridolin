@@ -34,62 +34,6 @@ import (
 	"github.com/Icewater1337/fridolin/internal/textx"
 )
 
-// identityMapFile is the brain's contact map, in its folder.
-const identityMapFile = "memories/people/whatsapp-identity-map.md"
-
-// parseIdentityMap parses a brain's contact map and returns name by
-// identityKey.
-//
-// The map is a markdown table at identityMapFile in the brain's folder:
-//
-//	| WhatsApp Number | Person | Notes |
-//	| --------------- | ------ | ----- |
-//	| 15551234567     | Alex   | …     |
-//
-// It is entirely optional — without it, chat history shows raw JIDs.
-func parseIdentityMap(data []byte) map[string]string {
-	identities := make(map[string]string)
-
-	for _, line := range strings.Split(string(data), "\n") {
-		line = strings.TrimSpace(line)
-		if !strings.HasPrefix(line, "|") {
-			continue
-		}
-
-		parts := strings.Split(line, "|")
-		if len(parts) < 3 || isTableRule(parts) {
-			continue
-		}
-
-		jid := strings.TrimSpace(parts[1])
-		name := strings.TrimSpace(parts[2])
-		if jid == "" || name == "" || jid == "WhatsApp Number" {
-			continue
-		}
-		// A cell like "+" or "@lid" holds no number to look up. A number
-		// is read however it was written: "+1 555 123 4567" is 15551234567.
-		number := identityKey(jid)
-		if number == "" {
-			continue
-		}
-		identities[number] = name
-	}
-
-	return identities
-}
-
-// isTableRule reports whether the cells of a markdown table row hold only
-// dashes and colons, as the line under the header does. A row that merely
-// contains "---", say in its notes, is a contact like any other.
-func isTableRule(cells []string) bool {
-	for _, c := range cells {
-		if strings.Trim(c, "-: \t") != "" {
-			return false
-		}
-	}
-	return true
-}
-
 // ── Brain ────────────────────────────────────────────────────────────────
 
 // Brain is one isolated Claude Code context: its own folder, conversation
@@ -1676,12 +1620,6 @@ func (br *Brain) logStderr(m Inbound, pid int, stderr string) {
 // stderrLogBytes is how much of a run's stderr goes to its activity log.
 const stderrLogBytes = 4000
 
-// The most of a chat's recent messages a run's prompt shows.
-const (
-	dmHistoryWindow    = 10
-	groupHistoryWindow = 20
-)
-
 // promptHistoryBudget is how far back from the end of the history a run's
 // prompt looks for its chat's messages: far more than a window of them
 // takes in a busy brain, so that a chat quiet while others talked still
@@ -1786,7 +1724,7 @@ func (br *Brain) identities() map[string]string {
 // prompt file, the chat's recent history and the identity map. renderPrompt
 // puts it into words.
 func (br *Brain) buildPrompt(s *brainSettings, m Inbound) string {
-	in := promptInput{Now: time.Now(), BrainID: br.id, Message: m, ObserveOnly: m.Silent}
+	in := promptInput{Now: time.Now(), BrainID: br.id, Message: m.Inbound, BuildChat: brainOfBuildJID(m.JID) != "", ObserveOnly: m.Silent}
 	if name := s.promptFile; name != "" {
 		if data, err := br.readFile(name); err != nil {
 			log.Printf("brain %s: could not read prompt file %s: %v", br.id, name, err)
@@ -1794,10 +1732,7 @@ func (br *Brain) buildPrompt(s *brainSettings, m Inbound) string {
 			in.Instructions = strings.TrimSpace(string(data))
 		}
 	}
-	limit := dmHistoryWindow
-	if m.IsGroup() {
-		limit = groupHistoryWindow
-	}
+	limit := promptHistoryLimit(m.IsGroup())
 	in.History, in.Since = br.historyBefore(m, limit)
 	in.Names = br.identities()
 	return renderPrompt(in)

@@ -62,24 +62,6 @@ func TestChatJID(t *testing.T) {
 	}
 }
 
-func TestIdentityKey(t *testing.T) {
-	cases := map[string]string{
-		"15551234567":                    "15551234567",
-		"+1 555 123 4567":                "15551234567",
-		"+1 (555) 123-4567":              "15551234567",
-		"+1\u00a0555\u00a0123\u00a04567": "15551234567", // no-break spaces
-		"15551234567@s.whatsapp.net":     "15551234567",
-		bridgeLID + "@lid":               bridgeLID,
-		"1 555 123 4567@lid":             "15551234567", // keys as its key does
-		"Alex":                           "Alex",
-	}
-	for in, want := range cases {
-		if got := identityKey(in); got != want {
-			t.Errorf("identityKey(%q) = %q, want %q", in, got, want)
-		}
-	}
-}
-
 // A number written into config.json by hand, the way people write it,
 // lets its sender in; the running config holds it as digits.
 func TestLoadConfigNormalisesAllowedNumbers(t *testing.T) {

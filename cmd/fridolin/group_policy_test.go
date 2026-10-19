@@ -100,7 +100,7 @@ func FuzzGroupSenderAllowed(f *testing.F) {
 			return s
 		}
 		listed := resolved && slices.ContainsFunc(members, func(m string) bool { return canon(m) == canon(number) })
-		if resolved && phoneNumberRE.MatchString(number) && slices.Contains(members, number) && !got {
+		if resolved && canonicalPhoneNumber(number) && slices.Contains(members, number) && !got {
 			t.Errorf("group_members %q refused %q, which it lists as it is", members, number)
 		}
 		if !resolved && got {

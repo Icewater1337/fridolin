@@ -31,7 +31,9 @@ type promptInput struct {
 	// Names is the brain's identity map, identityKey → name.
 	Names map[string]string
 	// Message is the message the run answers.
-	Message Inbound
+	Message chat.Inbound
+	// BuildChat marks the dashboard site-building chat, projected by the caller.
+	BuildChat bool
 	// ObserveOnly marks a run for a message nobody addressed to the brain
 	// (Inbound.Silent, see observeRun): nothing it says is sent.
 	ObserveOnly bool
@@ -95,7 +97,7 @@ func renderPrompt(in promptInput) string {
 	// from Plaud did not come from the chat they are answered in.
 	where := "a direct chat on WhatsApp"
 	switch {
-	case brainOfBuildJID(m.JID) != "":
+	case in.BuildChat:
 		where = "the site-building chat on the dashboard's Build page, not a WhatsApp chat"
 	case m.IsGroup():
 		where = "the WhatsApp group " + promptJSON(m.JID)
@@ -223,4 +225,74 @@ func outboundSender(id string, entry history.Entry) string {
 		return "Script (via /send)"
 	}
 	return "Script without a token (via /send)"
+}
+
+// identityMapFile is the brain's contact map, in its folder.
+const identityMapFile = "memories/people/whatsapp-identity-map.md"
+
+// parseIdentityMap parses a brain's contact map and returns name by
+// identityKey.
+//
+// The map is a markdown table at identityMapFile in the brain's folder:
+//
+//	| WhatsApp Number | Person | Notes |
+//	| --------------- | ------ | ----- |
+//	| 15551234567     | Alex   | …     |
+//
+// It is entirely optional — without it, chat history shows raw JIDs.
+func parseIdentityMap(data []byte) map[string]string {
+	identities := make(map[string]string)
+
+	for _, line := range strings.Split(string(data), "\n") {
+		line = strings.TrimSpace(line)
+		if !strings.HasPrefix(line, "|") {
+			continue
+		}
+
+		parts := strings.Split(line, "|")
+		if len(parts) < 3 || isTableRule(parts) {
+			continue
+		}
+
+		jid := strings.TrimSpace(parts[1])
+		name := strings.TrimSpace(parts[2])
+		if jid == "" || name == "" || jid == "WhatsApp Number" {
+			continue
+		}
+		// A cell like "+" or "@lid" holds no number to look up. A number
+		// is read however it was written: "+1 555 123 4567" is 15551234567.
+		number := identityKey(jid)
+		if number == "" {
+			continue
+		}
+		identities[number] = name
+	}
+
+	return identities
+}
+
+// isTableRule reports whether the cells of a markdown table row hold only
+// dashes and colons, as the line under the header does. A row that merely
+// contains "---", say in its notes, is a contact like any other.
+func isTableRule(cells []string) bool {
+	for _, c := range cells {
+		if strings.Trim(c, "-: \t") != "" {
+			return false
+		}
+	}
+	return true
+}
+
+// The most of a chat's recent messages a run's prompt shows.
+const (
+	dmHistoryWindow    = 10
+	groupHistoryWindow = 20
+)
+
+// promptHistoryLimit is how many recent entries a run sees for this chat.
+func promptHistoryLimit(group bool) int {
+	if group {
+		return groupHistoryWindow
+	}
+	return dmHistoryWindow
 }
