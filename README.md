@@ -134,6 +134,11 @@ phone.
 
 ## Setup
 
+Guides: [Setup](docs/SETUP.md), [Usage](docs/USAGE.md), [Security model](docs/SECURITY-MODEL.md), [Troubleshooting](docs/TROUBLESHOOTING.md), [Tools](docs/TOOLS.md).
+
+Copy the HTTPS clone URL from this repository’s **Code** menu (or your fork).
+Replace the example URL below with that URL before running it.
+
 ```bash
 git clone https://github.com/YOUR_USERNAME/fridolin.git
 cd fridolin
@@ -795,6 +800,8 @@ Overview shows it too, with the brains it affects.
 
 ## Contributing
 
+See [CONTRIBUTING.md](CONTRIBUTING.md) for development boundaries and review conventions.
+
 Issues and pull requests welcome; a security problem goes privately
 through [SECURITY.md](SECURITY.md) instead. Please don't include real
 phone numbers, group JIDs, or chat content in bug reports — redact them.
@@ -814,8 +821,7 @@ a check that `THIRD_PARTY_NOTICES` is current, ESLint on the dashboard,
 the Python, dashboard, personal-data-check, action-pin-check, notices,
 release-archive and Makefile tests, and a smoke test that starts a
 race-enabled build in dev mode on a scratch config (`make help` lists every
-target). staticcheck and actionlint run through `go run` at pinned
-versions, and ESLint through `npx` at a pinned version, which it fetches
+target). staticcheck runs through `go tool` and actionlint through `go run`, both pinned, and ESLint through `npx` at a pinned version, which it fetches
 the first time; ruff comes from `pip install -r tools/requirements-dev.txt`,
 shellcheck from your package manager. `make check` builds into a temp dir.
 `make build` writes `bin/fridolin` (it builds `./cmd/fridolin`; the

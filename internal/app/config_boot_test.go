@@ -20,6 +20,7 @@ import (
 	"github.com/Icewater1337/fridolin/internal/config"
 	"github.com/Icewater1337/fridolin/internal/manifest"
 	"github.com/Icewater1337/fridolin/internal/otp"
+	outboundmsg "github.com/Icewater1337/fridolin/internal/outbound"
 	"github.com/Icewater1337/fridolin/internal/whatsapp"
 	"go.mau.fi/whatsmeow/proto/waE2E"
 	"google.golang.org/protobuf/proto"
@@ -84,15 +85,20 @@ func TestRestartOnlyPathsStayAtBootAfterAPISave(t *testing.T) {
 	if err != nil || json.Unmarshal(data, &handoff) != nil || handoff.Code != "483920" {
 		t.Fatalf("OTP handoff: %s, %v", data, err)
 	}
+	// Handoff persistence precedes delivery of its notice. Drain that notice
+	// before Answer snapshots the outbox for an unrelated provider reply.
+	h.WaitSent(harnessDM, outboundmsg.OtpCaughtNotice)
 	// The next run still receives the running data/database paths and a token
 	// under that data directory. These are output by the fake CLI, not read
 	// from internal brain settings.
 	for key, want := range map[string]string{"BRIDGE_DATA_DIR": boot, "BRIDGE_DB_PATH": filepath.Join(boot, "bridge.db"), "FRIDOLIN_BRAIN_TOKEN_FILE": filepath.Join(boot, "run-tokens", "main")} {
+		h.WaitFor("the preceding environment probe to finish", func() bool { return !h.Running("main") })
 		t.Setenv("FRIDOLIN_FAKE_ENV", key)
 		if got := h.Answer(inbound{JID: harnessDM, Text: "show " + key}); !strings.Contains(got, want) || strings.Contains(got, next) {
 			t.Errorf("run environment %s = %q, want %q", key, got, want)
 		}
 	}
+	h.WaitFor("the final environment probe to finish", func() bool { return !h.Running("main") })
 	// Script paths continue to resolve inside the running media inbox.
 	p := writeTestFile(t, filepath.Join(boot, "media", "main", "note.txt"), "note")
 	beforeReply := len(h.Outbox())

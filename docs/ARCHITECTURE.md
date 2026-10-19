@@ -108,7 +108,7 @@ a crash. Sandboxed runs receive projected paths and filtered child environments.
 Outbound formatting, chunking, polls and delivery are separate from transport
 intake. Delivery history is recorded after successful delivery. Observe-only runs
 and OTP handoff preserve their explicit policy boundaries. Chat notice strings
-are centralized in `internal/app/messages.go` and pinned by golden tests.
+are centralized in `internal/outbound/messages.go` and pinned by golden tests.
 
 ## HTTP boundary
 

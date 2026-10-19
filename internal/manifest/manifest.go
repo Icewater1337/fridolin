@@ -242,7 +242,7 @@ var loggedManifestKeys sync.Map // path → the keys, joined
 // left out where the bridge uses the manifest, and dropped from the file
 // the next time the dashboard writes it.
 func warnUnknownManifestKeys(path string, data []byte) {
-	keys := jsonx.UnknownKeys(data, reflect.TypeOf(Manifest{}), "")
+	keys := jsonx.UnknownKeys(data, reflect.TypeFor[Manifest](), "")
 	joined := strings.Join(keys, " ")
 	if prev, ok := loggedManifestKeys.Swap(path, joined); ok && prev == joined || !ok && joined == "" {
 		return

@@ -33,8 +33,7 @@ func Wrap(kind Kind, err error) error {
 	return &Error{Kind: kind, Message: err.Error(), cause: err}
 }
 func KindOf(err error) Kind {
-	var e *Error
-	if errors.As(err, &e) {
+	if e, ok := errors.AsType[*Error](err); ok {
 		return e.Kind
 	}
 	return Unknown

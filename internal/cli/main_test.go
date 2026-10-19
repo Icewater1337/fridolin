@@ -766,8 +766,7 @@ func TestCheckExitsWhenABrainCannotRun(t *testing.T) {
 			cmd.Stderr = &stderr
 			err := cmd.Run()
 			exit := 0
-			var ee *exec.ExitError
-			if errors.As(err, &ee) {
+			if ee, ok := errors.AsType[*exec.ExitError](err); ok {
 				exit = ee.ExitCode()
 			} else if err != nil {
 				t.Fatal(err)

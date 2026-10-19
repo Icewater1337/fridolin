@@ -20,8 +20,7 @@ func RenameTypeError(err error, typeName func(reflect.Type) string, structName f
 	copy := *typed
 	oldType := typed.Type.String()
 	oldDiagnostic := typed.Error()
-	var previous renamedTypeError
-	if errors.As(err, &previous) {
+	if previous, ok := errors.AsType[renamedTypeError](err); ok {
 		copy, oldType = previous.diagnostic, previous.typeName
 		oldDiagnostic = renderTypeError(copy, oldType)
 	}

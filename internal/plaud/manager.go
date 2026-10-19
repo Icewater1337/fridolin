@@ -601,9 +601,8 @@ func plaudLoginRefused(p string, fi fs.FileInfo, what string) error {
 // the cause: 2 a login Plaud refuses (for a sign-in: one Plaud did not
 // grant), 3 Plaud unreachable, 4 a timeout, 1 anything else.
 func plaudRunError(cmd string, err error, stderr string) error {
-	var ee *exec.ExitError
 	code := -1
-	if errors.As(err, &ee) {
+	if ee, ok := errors.AsType[*exec.ExitError](err); ok {
 		code = ee.ExitCode()
 	}
 	// Without a terminal the CLI's spinner leaves "- Fetching file..." and

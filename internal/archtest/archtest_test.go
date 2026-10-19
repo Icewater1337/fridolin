@@ -181,8 +181,7 @@ func TestImportRules(t *testing.T) {
 			ctx := build.Default
 			ctx.GOOS, ctx.CgoEnabled = goos, true
 			pkg, err := ctx.ImportDir(filepath.Join(root, filepath.FromSlash(dir)), 0)
-			var noGo *build.NoGoError
-			if errors.As(err, &noGo) {
+			if _, ok := errors.AsType[*build.NoGoError](err); ok {
 				continue
 			}
 			if err != nil {

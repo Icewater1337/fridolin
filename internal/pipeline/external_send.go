@@ -16,8 +16,7 @@ import (
 func (p *Workflow) SendExternal(ctx context.Context, who chat.Principal, jid, text string) (string, error) {
 	if err := p.SendChunked(ctx, jid, text); err != nil {
 		log.Printf("HTTP send error to %s: %v", jid, err)
-		var partial *outboundmsg.PartialSendError
-		if errors.As(err, &partial) {
+		if partial, ok := errors.AsType[*outboundmsg.PartialSendError](err); ok {
 			p.AppendSent(who, jid, strings.Join(partial.Sent, "\n"), "")
 		}
 		return "", err
