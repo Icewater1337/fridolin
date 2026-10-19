@@ -1021,7 +1021,7 @@ func (b *Bridge) apiAddBrain(w http.ResponseWriter, r *http.Request) {
 			httpapi.WriteErr(w, http.StatusBadRequest, "manifest required (or use_existing, to add the brain.json in the folder)")
 			return
 		}
-		if err := httpapi.DecodeStrict(req.Manifest, &m); err != nil {
+		if err := manifest.JSONError(httpapi.DecodeStrict(req.Manifest, &m)); err != nil {
 			httpapi.WriteErr(w, http.StatusBadRequest, "manifest: "+err.Error())
 			return
 		}

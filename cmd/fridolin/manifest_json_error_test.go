@@ -52,3 +52,36 @@ func TestManifestJSONDiagnosticContracts(t *testing.T) {
 		})
 	}
 }
+
+// Add decodes a raw manifest after the outer request, so the diagnostic has
+// the direct manifest type context captured before package extraction.
+func TestAddBrainManifestJSONDiagnosticContracts(t *testing.T) {
+	for _, tc := range []struct{ input, want string }{
+		{"[]", "manifest: invalid JSON: json: cannot unmarshal array into Go value of type main.BrainManifest"},
+		{"17", "manifest: invalid JSON: json: cannot unmarshal number into Go value of type main.BrainManifest"},
+		{"\"x\"", "manifest: invalid JSON: json: cannot unmarshal string into Go value of type main.BrainManifest"},
+		{"{\"id\":17}", "manifest: invalid JSON: json: cannot unmarshal number into Go struct field BrainManifest.id of type string"},
+		{"{\"routing\":false}", "manifest: invalid JSON: json: cannot unmarshal bool into Go struct field BrainManifest.routing of type main.BrainRouting"},
+		{"{\"routing\":{\"handles_dms\":\"yes\"}}", "manifest: invalid JSON: json: cannot unmarshal string into Go struct field BrainManifest.routing.handles_dms of type bool"},
+		{"{\"backup\":17}", "manifest: invalid JSON: json: cannot unmarshal number into Go struct field BrainManifest.backup of type main.BrainBackup"},
+		{"{\"backup\":{\"enabled\":[]}}", "manifest: invalid JSON: json: cannot unmarshal array into Go struct field BrainManifest.backup.enabled of type bool"},
+		{"{\"calendar\":\"x\"}", "manifest: invalid JSON: json: cannot unmarshal string into Go struct field BrainManifest.calendar of type main.BrainCalendar"},
+		{"{\"calendar\":{\"calendars\":42}}", "manifest: invalid JSON: json: cannot unmarshal number into Go struct field BrainManifest.calendar.calendars of type []string"},
+		{"{\"model\":[]}", "manifest: invalid JSON: json: cannot unmarshal array into Go struct field BrainManifest.model of type string"},
+	} {
+		t.Run(tc.input, func(t *testing.T) {
+			rec := httptest.NewRecorder()
+			req := httptest.NewRequest(http.MethodPost, "/", strings.NewReader(`{"manifest":`+tc.input+`}`))
+			(&Bridge{}).apiAddBrain(rec, req)
+			var response struct {
+				Error string `json:"error"`
+			}
+			if err := json.Unmarshal(rec.Body.Bytes(), &response); err != nil {
+				t.Fatal(err)
+			}
+			if rec.Code != http.StatusBadRequest || response.Error != tc.want {
+				t.Fatalf("add: %d %q; want %q", rec.Code, response.Error, tc.want)
+			}
+		})
+	}
+}
