@@ -24,18 +24,18 @@ func TestChatErrorText(t *testing.T) {
 		{"cancelled", fmt.Errorf("run: %w", context.Canceled), false, ""},
 		{"stderr stays out of a DM", stderr, true, chatErrGeneric},
 		{"stderr stays out of a group", stderr, false, chatErrGeneric},
-		{"not logged in", &cliError{msg: "Invalid API key · Please run /login"}, false, chatErrNotSignedIn},
+		{"not logged in", &cliError{Message: "Invalid API key · Please run /login"}, false, chatErrNotSignedIn},
 		{"auth in stderr", errors.New("claude exited: exit status 1 — stderr: Failed to authenticate. API Error: 401"), true, chatErrNotSignedIn},
-		{"usage limit", &cliError{msg: "Claude AI usage limit reached|1760000000"}, false, chatErrLimit},
+		{"usage limit", &cliError{Message: "Claude AI usage limit reached|1760000000"}, false, chatErrLimit},
 		{"rate limited", errors.New("API Error: 429 rate_limit_error"), true, chatErrLimit},
 		{"deadline", fmt.Errorf("run: %w", context.DeadlineExceeded), false, chatErrTimeout},
-		{"timed out", &cliError{msg: "Request timed out"}, true, chatErrTimeout},
+		{"timed out", &cliError{Message: "Request timed out"}, true, chatErrTimeout},
 		{"run_timeout_minutes", runTimedOut(30 * time.Minute), false, chatErrTimeout},
 		// By the error, not by a word its text happens to hold.
 		{"run timeout in other words", fmt.Errorf("%w after 90s", errRunTimedOut), true, chatErrTimeout},
 		{"sandbox", errSandboxUnavailable, false, "❌ The sandbox could not be set up, so this message was not run (details in the bridge log)."},
-		{"the CLI's own words in a DM", &cliError{msg: "Credit balance is too low"}, true, "❌ Claude: Credit balance is too low"},
-		{"but not in a group", &cliError{msg: "Credit balance is too low"}, false, chatErrGeneric},
+		{"the CLI's own words in a DM", &cliError{Message: "Credit balance is too low"}, true, "❌ Claude: Credit balance is too low"},
+		{"but not in a group", &cliError{Message: "Credit balance is too low"}, false, chatErrGeneric},
 		{"no result", errNoResult, true, chatErrGeneric},
 	}
 	for _, c := range cases {

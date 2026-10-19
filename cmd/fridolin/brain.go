@@ -1384,7 +1384,7 @@ func (br *Brain) invoke(run *brainRun, ctx context.Context, s *brainSettings, m 
 	br.ensureViewer(s)
 
 	return superviseCLI(ctx, cliInvocation{
-		Run:      claudeRun{waitDelay: runWaitDelay, binary: binary, args: finalArgs, dir: br.workDir, env: env, prompt: prompt},
+		Run:      claudeRun{WaitDelay: runWaitDelay, Binary: binary, Args: finalArgs, Dir: br.workDir, Env: env, Prompt: prompt},
 		Provider: s.provider, ExitGrace: postResultGrace, NoticeAfter: workingNoticeAfter,
 		DeadlineError: runTimedOut(s.runTimeout),
 	}, cliCallbacks{

@@ -47,3 +47,5 @@ venv/
 .personal-denylist
 
 !internal/prompt/
+
+!internal/claudecli/

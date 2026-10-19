@@ -1,7 +1,8 @@
-package main
+package claudecli
 
 import (
 	"encoding/json"
+	"fmt"
 	"strings"
 	"testing"
 	"unicode/utf8"
@@ -30,8 +31,8 @@ func TestExtractAskQuestion(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			if got := extractAskQuestion(json.RawMessage(c.input)); got != c.want {
-				t.Errorf("extractAskQuestion(%s) = %q, want %q", c.input, got, c.want)
+			if got := AskQuestion(json.RawMessage(c.input)); got != c.want {
+				t.Errorf("AskQuestion(%s) = %q, want %q", c.input, got, c.want)
 			}
 		})
 	}
@@ -53,17 +54,17 @@ func FuzzExtractAskQuestion(f *testing.F) {
 		f.Add([]byte(s))
 	}
 	f.Fuzz(func(t *testing.T, raw []byte) {
-		got := extractAskQuestion(raw)
+		got := AskQuestion(raw)
 		if !utf8.ValidString(got) {
-			t.Errorf("extractAskQuestion(%s) = %q, not valid UTF-8", raw, got)
+			t.Errorf("AskQuestion(%s) = %q, not valid UTF-8", raw, got)
 		}
 		if got != "" && strings.TrimSpace(got) == "" {
-			t.Errorf("extractAskQuestion(%s) = %q, a blank message sent in place of the reply", raw, got)
+			t.Errorf("AskQuestion(%s) = %q, a blank message sent in place of the reply", raw, got)
 		}
 		var ask askInput
 		if err := json.Unmarshal(raw, &ask); err != nil {
 			if got != "" {
-				t.Errorf("extractAskQuestion(%s) = %q from input that does not decode", raw, got)
+				t.Errorf("AskQuestion(%s) = %q from input that does not decode", raw, got)
 			}
 			return
 		}
@@ -73,13 +74,74 @@ func FuzzExtractAskQuestion(f *testing.F) {
 				continue
 			}
 			if !strings.Contains(got, s) {
-				t.Errorf("extractAskQuestion(%s) = %q, without the question %q", raw, got, s)
+				t.Errorf("AskQuestion(%s) = %q, without the question %q", raw, got, s)
 			}
 			for _, o := range q.Options {
 				if l := strings.TrimSpace(o.Label); l != "" && !strings.Contains(got, l) {
-					t.Errorf("extractAskQuestion(%s) = %q, without the option %q", raw, got, l)
+					t.Errorf("AskQuestion(%s) = %q, without the option %q", raw, got, l)
 				}
 			}
+		}
+	})
+}
+
+// FuzzParseStream: the stream is the CLI's, but most of what is in it the
+// model wrote. Whatever it holds, a run ends either in an error or with
+// something said: a reply, a question sent mid-run, or both, and never
+// with an error and a reply. It reports a question exactly when one was
+// sent, and what is sent mid-run is never blank. Lines that are not JSON
+// objects, like the CLI's own warnings, change nothing.
+func FuzzParseStream(f *testing.F) {
+	for _, s := range []struct{ stream, junk string }{
+		{`{"type":"assistant","message":{"content":[{"type":"tool_use","name":"AskUserQuestion","input":{"questions":[{"header":"Meeting","question":"Which day suits you?"}]}}]}}
+{"type":"result","result":"I asked which day suits you."}
+`, "Warning: something"},
+		{`{"type":"assistant","message":{"content":[{"type":"text","text":"Working on it"}]}}
+{"type":"result","subtype":"success","result":"Done."}`, ""},
+		{`{"type":"assistant","message":{"content":[{"type":"text","text":"Invalid API key"}]}}
+{"type":"result","is_error":true}`, "  "},
+		{`{"type":"result","error":"quota"}`, "{"},
+		{`{"type":"assistant","message":{"content":[{"type":"tool_use","name":"AskUserQuestion","input":{"questions":[{"question":"Which day?","options":[{"label":"Monday"}]}]}}]}}
+{"type":"result","is_error":true,"result":"quota"}`, ""},
+		{`{"type":"result","result":""}`, "\r"},
+		{`{"type":"assistant","message":null}
+{"type":"assistant","message":{"content":[{"type":"tool_use","name":"AskUserQuestion","input":"x"}]}}
+{"type":"result","result":"a"}
+{"type":"result","result":"b"}`, "[]"},
+		{"", "plain text"},
+		{"{not json\n{\"type\":\"result\",\"result\":\"\xff\"}", "\x00"},
+	} {
+		f.Add(s.stream, s.junk)
+	}
+	run := func(stream string) (Result, []string) {
+		var sink recordingSink
+		res := Parse(strings.NewReader(stream), &sink)
+		return res, sink.questions
+	}
+	f.Fuzz(func(t *testing.T, stream, junk string) {
+		res, sent := run(stream)
+		if res.Err == nil && res.Text == "" && !res.Asked {
+			t.Errorf("result %+v has neither an error nor anything said", res)
+		}
+		if res.Err != nil && res.Text != "" {
+			t.Errorf("result %+v has both an error and a reply", res)
+		}
+		if res.Asked != (len(sent) > 0) {
+			t.Errorf("result %+v, with the questions %q sent", res, sent)
+		}
+		for _, q := range sent {
+			if strings.TrimSpace(q) == "" {
+				t.Errorf("sent the blank question %q", q)
+			}
+		}
+
+		junk = strings.ReplaceAll(junk, "\n", " ")
+		if strings.HasPrefix(strings.TrimSpace(junk), "{") {
+			junk = "x" + junk
+		}
+		res2, sent2 := run(junk + "\n" + stream + "\n" + junk)
+		if fmt.Sprint(res2) != fmt.Sprint(res) || fmt.Sprint(sent2) != fmt.Sprint(sent) {
+			t.Errorf("the line %q around the stream changed the result from %+v, %q to %+v, %q", junk, res, sent, res2, sent2)
 		}
 	})
 }

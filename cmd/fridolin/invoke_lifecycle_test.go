@@ -356,7 +356,7 @@ func TestCancellationKeepsTheRecordedResult(t *testing.T) {
 						}
 					} else {
 						var cliErr *cliError
-						if !errors.As(res.Err, &cliErr) || cliErr.msg != tc.cliError || cliErr.provider != provider {
+						if !errors.As(res.Err, &cliErr) || cliErr.Message != tc.cliError || cliErr.Provider != provider {
 							t.Errorf("result = %+v, want CLI error %q", res, tc.cliError)
 						}
 					}
@@ -435,9 +435,9 @@ func TestKillRunsPreventsALateProcess(t *testing.T) {
 	// An independent context deliberately tests the startup barrier,
 	// rather than relying on os/exec noticing the cancelled run context.
 	marker := filepath.Join(t.TempDir(), "started")
-	proc, err := run.startProcess(context.Background(), claudeRun{waitDelay: runWaitDelay, binary: "/bin/sh", args: []string{"-c", `echo started > "$1"`, "sh", marker}})
+	proc, err := run.startProcess(context.Background(), claudeRun{WaitDelay: runWaitDelay, Binary: "/bin/sh", Args: []string{"-c", `echo started > "$1"`, "sh", marker}})
 	if proc != nil {
-		_ = proc.wait()
+		_ = proc.Wait()
 	}
 	if !errors.Is(err, context.Canceled) {
 		t.Errorf("late start = %v, want cancellation", err)
@@ -457,11 +457,11 @@ func TestKillRunsAfterCLIExit(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	run := &brainRun{cancel: cancel, done: make(chan struct{})}
-	proc, err := run.startProcess(ctx, claudeRun{waitDelay: runWaitDelay, binary: "/bin/sh", args: []string{"-c", "exit 0"}})
+	proc, err := run.startProcess(ctx, claudeRun{WaitDelay: runWaitDelay, Binary: "/bin/sh", Args: []string{"-c", "exit 0"}})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := proc.wait(); err != nil {
+	if err := proc.Wait(); err != nil {
 		t.Fatal(err)
 	}
 	mgr := &BrainManager{order: []*Brain{{current: run}}}

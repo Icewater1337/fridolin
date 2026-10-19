@@ -24,7 +24,7 @@ func chatErrorText(err error, inDM bool) string {
 	text := strings.ToLower(err.Error())
 	var ce *cliError
 	fromCLI := errors.As(err, &ce)
-	codex := (fromCLI && ce.provider == "codex") || strings.HasPrefix(text, "codex ")
+	codex := (fromCLI && ce.Provider == "codex") || strings.HasPrefix(text, "codex ")
 	if codex && containsAny(text, "not logged in", "not signed in", "401", "invalid api key", "authentication", "access token", "refresh token") {
 		return chatErrCodexNotSignedIn
 	}
@@ -42,9 +42,9 @@ func chatErrorText(err error, inDM bool) string {
 	}
 	if inDM && fromCLI {
 		if codex {
-			return chatErrCodex(ce.msg)
+			return chatErrCodex(ce.Message)
 		}
-		return chatErrClaude(ce.msg)
+		return chatErrClaude(ce.Message)
 	}
 	return chatErrGeneric
 }

@@ -1,4 +1,4 @@
-package main
+package claudecli
 
 import (
 	"cmp"
@@ -8,9 +8,9 @@ import (
 	"strconv"
 )
 
-const defaultCodexModel = "gpt-6.1-sol"
+const DefaultCodexModel = "gpt-6.1-sol"
 
-func agentName(provider string) string {
+func AgentName(provider string) string {
 	if provider == "codex" {
 		return "codex"
 	}
@@ -19,7 +19,7 @@ func agentName(provider string) string {
 
 // Codex's combined web tool covers both Claude web tools. Turning it off
 // honors either restriction. Other Claude tool names have no safe mapping.
-func validateCodexTools(blocked []string) error {
+func ValidateCodexTools(blocked []string) error {
 	for _, tool := range blocked {
 		if tool != "WebFetch" && tool != "WebSearch" {
 			return fmt.Errorf("the Codex CLI cannot enforce Claude's blocked tools entry %q; use Claude mode while it is configured", tool)
@@ -32,9 +32,9 @@ func validateCodexTools(blocked []string) error {
 // configuration and ancestor instructions must not bring personal tools,
 // hooks or conversations into a brain. The brain prompt is supplied by
 // Fridolin, and its files remain available in the working directory.
-func buildCodexArgs(s cliOptions, dir string, externalSandbox bool) []string {
+func CodexArgs(s Options, dir string, externalSandbox bool) []string {
 	args := []string{"exec", "--json", "--ephemeral", "--skip-git-repo-check", "--ignore-user-config", "--ignore-rules",
-		"--color", "never", "--model", cmp.Or(s.Model, defaultCodexModel),
+		"--color", "never", "--model", cmp.Or(s.Model, DefaultCodexModel),
 		"-c", "model_reasoning_effort=" + strconv.Quote(cmp.Or(s.Effort, "high")),
 		"-c", "approval_policy=\"never\"",
 		"-c", "project_doc_max_bytes=0",

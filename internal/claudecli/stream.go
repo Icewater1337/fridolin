@@ -1,4 +1,4 @@
-package main
+package claudecli
 
 import (
 	"bufio"
@@ -54,13 +54,13 @@ type askOption struct {
 	Description string `json:"description"`
 }
 
-// extractAskQuestion turns an AskUserQuestion input into the message the
+// AskQuestion turns an AskUserQuestion input into the message the
 // chat gets: each question with its header and its options numbered, so
 // that a reply can name one. Nobody answers the tool call in a -p run; the
 // answer arrives as the chat's next message. A question that is blank is
 // left out, and so is a blank option: an empty message, or an empty
 // choice, asks nothing.
-func extractAskQuestion(raw json.RawMessage) string {
+func AskQuestion(raw json.RawMessage) string {
 	if len(raw) == 0 {
 		return ""
 	}
@@ -97,7 +97,7 @@ func extractAskQuestion(raw json.RawMessage) string {
 	return strings.Join(parts, "\n\n")
 }
 
-// StreamSink is what parseStream tells about a run's output while it reads
+// StreamSink is what Parse tells about a run's output while it reads
 // it: the lines of the brain's activity log, the questions the model asks,
 // and the result as soon as it is in.
 type StreamSink interface {
@@ -110,27 +110,27 @@ type StreamSink interface {
 	// Result takes the run's result once its event is in, an error result
 	// too. The output may go on after it: a command the run left in the
 	// background can hold it open.
-	Result(res RunResult)
+	Result(res Result)
 }
 
-// maxStreamLine is the longest line of the CLI's output the parser reads.
+// MaxStreamLine is the longest line of the CLI's output the parser reads.
 // An event is far shorter, unless it carries a tool's large result, a file
 // read whole say: such a line is skipped, and the run goes on to its
 // result.
-const maxStreamLine = 4 << 20
+const MaxStreamLine = 4 << 20
 
-// parseStream reads the stream-json output of one run of the Claude CLI and
+// Parse reads the stream-json output of one run of the Claude CLI and
 // returns the run's outcome, telling sink what it finds on the way. It does
 // nothing else: writing the activity log and sending a question to the chat
 // are for the sink to do (see Brain.readStream), so that the parser can be
 // run on a recorded stream alone.
-func parseStream(r io.Reader, sink StreamSink) RunResult {
-	return parseAgentStream(r, sink, "claude")
+func Parse(r io.Reader, sink StreamSink) Result {
+	return ParseProvider(r, sink, "claude")
 }
 
-// parseAgentStream shares line limits and terminal-result handling across both
+// ParseProvider shares line limits and terminal-result handling across both
 // providers; codexStream translates Codex JSONL into the common events.
-func parseAgentStream(r io.Reader, sink StreamSink, provider string) RunResult {
+func ParseProvider(r io.Reader, sink StreamSink, provider string) Result {
 	in := bufio.NewReaderSize(r, 64<<10)
 	p := streamParser{sink: sink, provider: provider}
 	var buf []byte
@@ -138,8 +138,8 @@ func parseAgentStream(r io.Reader, sink StreamSink, provider string) RunResult {
 		line, size, err := readStreamLine(in, buf)
 		buf = line
 		switch {
-		case size > maxStreamLine:
-			sink.Log(fmt.Sprintf("⚠️ Skipped a line of %d bytes, longer than the %d MiB the bridge reads", size, maxStreamLine>>20))
+		case size > MaxStreamLine:
+			sink.Log(fmt.Sprintf("⚠️ Skipped a line of %d bytes, longer than the %d MiB the bridge reads", size, MaxStreamLine>>20))
 		case p.done:
 			// A result is the run's last word. What comes after it
 			// is read all the same, to the end: a CLI left with output
@@ -151,16 +151,16 @@ func parseAgentStream(r io.Reader, sink StreamSink, provider string) RunResult {
 		case p.done && err != nil, err == io.EOF:
 			return p.outcome()
 		case errors.Is(err, os.ErrClosed):
-			return RunResult{Err: errBrainInterrupted}
+			return Result{Err: ErrInterrupted}
 		case err != nil:
-			return RunResult{Err: fmt.Errorf("reading %s output: %w", agentName(provider), err)}
+			return Result{Err: fmt.Errorf("reading %s output: %w", AgentName(provider), err)}
 		}
 	}
 }
 
 // readStreamLine reads the next line of r into buf, without its newline,
-// and returns it and its length. A line longer than maxStreamLine is read
-// to its end, but not kept: size is more than maxStreamLine then, and line
+// and returns it and its length. A line longer than MaxStreamLine is read
+// to its end, but not kept: size is more than MaxStreamLine then, and line
 // is only the buffer to reuse. err is io.EOF after the last line, which may
 // lack a newline, or what r failed with.
 func readStreamLine(r *bufio.Reader, buf []byte) (line []byte, size int, err error) {
@@ -169,7 +169,7 @@ func readStreamLine(r *bufio.Reader, buf []byte) (line []byte, size int, err err
 		var chunk []byte
 		chunk, err = r.ReadSlice('\n')
 		size += len(chunk)
-		if size <= maxStreamLine+1 { // +1 for the newline
+		if size <= MaxStreamLine+1 { // +1 for the newline
 			line = append(line, chunk...)
 		}
 		if err != bufio.ErrBufferFull {
@@ -178,14 +178,14 @@ func readStreamLine(r *bufio.Reader, buf []byte) (line []byte, size int, err err
 	}
 	if err == nil { // it ends in a newline
 		size--
-		if size <= maxStreamLine {
+		if size <= MaxStreamLine {
 			line = line[:size]
 		}
 	}
 	return line, size, err
 }
 
-// streamParser is what parseStream knows of a run so far.
+// streamParser is what Parse knows of a run so far.
 type streamParser struct {
 	provider string
 	codex    codexStream
@@ -231,7 +231,7 @@ func (p *streamParser) event(line []byte) {
 				p.sink.Log("🔧 Tool: " + content.Name)
 				if content.Name == "AskUserQuestion" {
 					// Only a question on its way counts as asked.
-					if question := extractAskQuestion(content.Input); question != "" && p.sink.Question(question) {
+					if question := AskQuestion(content.Input); question != "" && p.sink.Question(question) {
 						p.asked = true
 					}
 				}
@@ -254,7 +254,7 @@ func (p *streamParser) event(line []byte) {
 				errMsg = "(claude exited with an error but no message)"
 			}
 			p.sink.Log("❌ Error: " + errMsg)
-			p.err = &cliError{msg: errMsg, provider: p.provider}
+			p.err = &Error{Message: errMsg, Provider: p.provider}
 			p.sink.Result(p.outcome())
 			return
 		}
@@ -281,9 +281,9 @@ func (p *streamParser) event(line []byte) {
 }
 
 // outcome is the run's outcome once its output ended.
-func (p *streamParser) outcome() RunResult {
+func (p *streamParser) outcome() Result {
 	if p.err != nil {
-		return RunResult{Err: p.err, Asked: p.asked}
+		return Result{Err: p.err, Asked: p.asked}
 	}
 	// A -p run is stateless and nobody answers its AskUserQuestion, so the
 	// model goes on after asking, often to an answer of its own ("I booked
@@ -291,9 +291,9 @@ func (p *streamParser) outcome() RunResult {
 	// what it had to say.
 	if p.result == "" && !p.asked {
 		if p.provider == "codex" && p.codex.err != "" {
-			return RunResult{Err: &cliError{msg: p.codex.err, provider: p.provider}}
+			return Result{Err: &Error{Message: p.codex.err, Provider: p.provider}}
 		}
-		return RunResult{Err: errNoResult}
+		return Result{Err: ErrNoResult}
 	}
-	return RunResult{Text: p.result, Asked: p.asked}
+	return Result{Text: p.result, Asked: p.asked}
 }

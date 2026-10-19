@@ -1,9 +1,9 @@
-package main
+package claudecli
 
 import "strings"
 
-// cliOptions is the provider argument policy projected from runtime settings.
-type cliOptions struct {
+// Options is the provider argument policy projected from runtime settings.
+type Options struct {
 	InheritUser, Dangerously bool
 	Model, Effort            string
 	DisallowedTools          []string
@@ -13,8 +13,8 @@ type cliOptions struct {
 // claudeArgs builds the CLI arguments for one run. mcpConfig is what
 // mcpConfigOf returned for the brain's folder, or "" for none; settings is
 // the brain's excludeInstructionsAbove. They end in -p: the prompt goes on
-// stdin (see startClaude).
-func buildClaudeArgs(s cliOptions, mcpConfig, settings string) []string {
+// stdin (see Start).
+func Args(s Options, mcpConfig, settings string) []string {
 	var args []string
 	if !s.InheritUser && mcpConfig != "" {
 		// --mcp-config takes several files: an option must follow.
@@ -32,5 +32,5 @@ func buildClaudeArgs(s cliOptions, mcpConfig, settings string) []string {
 	if len(s.DisallowedTools) > 0 {
 		args = append(args, "--disallowed-tools", strings.Join(s.DisallowedTools, ","))
 	}
-	return claudeArgList(!s.InheritUser, settings, args...)
+	return ArgList(!s.InheritUser, settings, args...)
 }

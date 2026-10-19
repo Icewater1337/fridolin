@@ -425,9 +425,9 @@ func (b *Bridge) runBrainSearch(ctx context.Context, brainID, prompt string, out
 		bin, args = sbBin, sbArgs
 		env = append(append(env, state...), "DISABLE_AUTOUPDATER=1")
 	}
-	proc, err := startClaude(ctx, claudeRun{waitDelay: runWaitDelay, binary: bin, args: args, dir: br.Dir(), env: env, prompt: prompt, stdout: out})
+	proc, err := startClaude(ctx, claudeRun{WaitDelay: runWaitDelay, Binary: bin, Args: args, Dir: br.Dir(), Env: env, Prompt: prompt, Stdout: out})
 	if err == nil {
-		err = proc.wait()
+		err = proc.Wait()
 	}
 	switch {
 	case err == nil:
@@ -437,5 +437,5 @@ func (b *Bridge) runBrainSearch(ctx context.Context, brainID, prompt string, out
 	case proc == nil:
 		return fmt.Errorf("claude: %w", err)
 	}
-	return fmt.Errorf("claude: %w: %s", err, textx.Tail(proc.stderrTail(), 400))
+	return fmt.Errorf("claude: %w: %s", err, textx.Tail(proc.StderrTail(), 400))
 }

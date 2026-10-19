@@ -1,4 +1,4 @@
-package main
+package claudecli
 
 import (
 	"context"
@@ -12,29 +12,29 @@ import (
 	"time"
 )
 
-// testedClaudeVersion is the oldest Claude Code release the bridge was
+// TestedClaudeVersion is the oldest Claude Code release the bridge was
 // tested with. Brains rely on its flags (--effort, --setting-sources,
 // --strict-mcp-config, --disallowed-tools), on the claudeMdExcludes
 // setting passed with --settings, and on the shape of its stream-json
 // events; brain.go notes what was checked against it. The CLI updates
 // itself, so an older one usually means auto-updates are off.
-const testedClaudeVersion = "2.1.302"
+const TestedClaudeVersion = "2.1.302"
 
 type claudeCacheEntry struct {
 	file string // the binary, symlinks resolved
 	mod  time.Time
 	size int64
-	st   claudeStatus
+	st   Status
 }
 
-type cliProber struct {
+type Prober struct {
 	mu    sync.Mutex
 	cache map[string]claudeCacheEntry
 }
 
-// parseClaudeVersion reads the release from `claude --version` output such
+// ParseClaudeVersion reads the release from `claude --version` output such
 // as "2.1.302 (Claude Code)".
-func parseClaudeVersion(s string) ([3]int, bool) {
+func ParseClaudeVersion(s string) ([3]int, bool) {
 	var v [3]int
 	fields := strings.Fields(s)
 	if len(fields) == 0 {
@@ -58,27 +58,27 @@ func parseClaudeVersion(s string) ([3]int, bool) {
 	return v, true
 }
 
-// claudeVersionWarning says when the CLI is older than testedClaudeVersion,
+// VersionWarning says when the CLI is older than TestedClaudeVersion,
 // or "" when it is not, or when its version cannot be told.
-func claudeVersionWarning(st claudeStatus) string {
-	have, ok := parseClaudeVersion(st.Version)
+func VersionWarning(st Status) string {
+	have, ok := ParseClaudeVersion(st.Version)
 	if !st.Found || !ok {
 		return ""
 	}
-	tested, _ := parseClaudeVersion(testedClaudeVersion)
+	tested, _ := ParseClaudeVersion(TestedClaudeVersion)
 	for i := range have {
 		if have[i] != tested[i] {
 			if have[i] > tested[i] {
 				return ""
 			}
 			return fmt.Sprintf("The Claude Code CLI at %s is version %d.%d.%d, older than %s, the oldest release Fridolin was tested with: brains may fail, or run without some of their settings. Update it (claude update).",
-				st.Path, have[0], have[1], have[2], testedClaudeVersion)
+				st.Path, have[0], have[1], have[2], TestedClaudeVersion)
 		}
 	}
 	return ""
 }
 
-func (probe *cliProber) Info(path, resolved string, env []string) claudeStatus {
+func (probe *Prober) Info(path, resolved string, env []string) Status {
 	file, err := filepath.EvalSymlinks(resolved)
 	if err != nil {
 		file = resolved
@@ -97,7 +97,7 @@ func (probe *cliProber) Info(path, resolved string, env []string) claudeStatus {
 	if c, ok := probe.cache[path]; ok && c.file == file && c.mod.Equal(mod) && c.size == size {
 		return c.st
 	}
-	st := claudeStatus{Path: resolved, Found: true}
+	st := Status{Path: resolved, Found: true}
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	cmd := exec.CommandContext(ctx, resolved, "--version")
 	cmd.Env = env

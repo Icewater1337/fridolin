@@ -1,4 +1,4 @@
-package main
+package claudecli
 
 import (
 	"strings"
@@ -10,7 +10,7 @@ func TestClaudeVersionWarning(t *testing.T) {
 		version string
 		warn    bool
 	}{
-		{testedClaudeVersion + " (Claude Code)", false},
+		{TestedClaudeVersion + " (Claude Code)", false},
 		{"2.1.303 (Claude Code)", false},
 		{"2.2.0 (Claude Code)", false},
 		{"3.0.0", false},
@@ -26,16 +26,16 @@ func TestClaudeVersionWarning(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.version, func(t *testing.T) {
-			w := claudeVersionWarning(claudeStatus{Path: "/usr/local/bin/claude", Found: true, Version: c.version})
+			w := VersionWarning(Status{Path: "/usr/local/bin/claude", Found: true, Version: c.version})
 			if (w != "") != c.warn {
 				t.Errorf("warning %q, want one: %v", w, c.warn)
 			}
-			if c.warn && !strings.Contains(w, "older than "+testedClaudeVersion) {
+			if c.warn && !strings.Contains(w, "older than "+TestedClaudeVersion) {
 				t.Errorf("warning %q does not name the tested release", w)
 			}
 		})
 	}
-	if w := claudeVersionWarning(claudeStatus{Path: "claude", Version: "1.0.0"}); w != "" {
+	if w := VersionWarning(Status{Path: "claude", Version: "1.0.0"}); w != "" {
 		t.Errorf("a CLI that was not found: %q", w)
 	}
 }
