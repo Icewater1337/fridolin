@@ -156,10 +156,10 @@ func TestRunRcloneUsesIsolatedConfig(t *testing.T) {
 	}
 	args, _ := os.ReadFile(filepath.Join(bin, "args"))
 	env, _ := os.ReadFile(filepath.Join(bin, "env"))
-	if !strings.HasPrefix(string(args), "--config "+tb.backup.rcloneConf()) {
+	if !strings.HasPrefix(string(args), "--config "+tb.cfgs.Boot().RcloneConf()) {
 		t.Errorf("args = %s", args)
 	}
-	if strings.Contains(string(env), "RCLONE_CONFIG_EVIL") || !strings.Contains(string(env), "RCLONE_CONFIG="+tb.backup.rcloneConf()) {
+	if strings.Contains(string(env), "RCLONE_CONFIG_EVIL") || !strings.Contains(string(env), "RCLONE_CONFIG="+tb.cfgs.Boot().RcloneConf()) {
 		t.Error("the user's RCLONE_* environment must not reach the bridge's rclone")
 	}
 }
@@ -337,7 +337,7 @@ func TestRcloneGetsTheAllowlistedEnvironment(t *testing.T) {
 				t.Fatal(err)
 			}
 			env := strings.Split(string(data), "\n")
-			for _, want := range []string{"HOME=" + os.Getenv("HOME"), "HTTPS_PROXY=http://proxy.example.com:3128", "RCLONE_CONFIG=" + tb.backup.rcloneConf()} {
+			for _, want := range []string{"HOME=" + os.Getenv("HOME"), "HTTPS_PROXY=http://proxy.example.com:3128", "RCLONE_CONFIG=" + tb.cfgs.Boot().RcloneConf()} {
 				if !slices.Contains(env, want) {
 					t.Errorf("rclone lacks %s", want)
 				}
@@ -366,9 +366,9 @@ func TestBackupRoundTripWithRealRclone(t *testing.T) {
 	tb := newTestBridge(t, `, "backup": {"keep_versions_days": 0}`)
 	useRclone(t, tb, rclone)
 	remoteDir := filepath.Join(t.TempDir(), "drive")
-	_ = os.MkdirAll(filepath.Dir(tb.backup.rcloneConf()), 0o700)
-	_ = os.WriteFile(tb.backup.rcloneConf(), []byte("[brain-gdrive]\ntype = alias\nremote = "+remoteDir+"\n"), 0o600)
-	if !tb.backup.connected() {
+	_ = os.MkdirAll(filepath.Dir(tb.cfgs.Boot().RcloneConf()), 0o700)
+	_ = os.WriteFile(tb.cfgs.Boot().RcloneConf(), []byte("[brain-gdrive]\ntype = alias\nremote = "+remoteDir+"\n"), 0o600)
+	if !connectedBackup(tb) {
 		t.Fatal("alias remote not recognised")
 	}
 
@@ -449,9 +449,9 @@ func TestBackupRoundTripWithRealRclone(t *testing.T) {
 func TestBackupVersionsNewestFirst(t *testing.T) {
 	tb := newTestBridge(t, "")
 	connectAlias(t, tb)
-	tb.backup.runner = func(_ context.Context, args []string, _ io.Writer) ([]byte, error) {
+	installBackupRunner(t, tb, func(_ context.Context, args []string, _ io.Writer) ([]byte, error) {
 		return []byte(`[{"Name":"20261001-120000"},{"Name":"manual-copy"},{"Name":"20261016-080000Z"},{"Name":"20261015-080000"},{"Name":"20250101-000000"}]`), nil
-	}
+	})
 	w := tb.do("GET", "/api/brains/notes/backup/versions", nil)
 	if w.Code != 200 {
 		t.Fatal(w.Body.String())
@@ -501,9 +501,9 @@ func rcloneTestBridge(t *testing.T, extra string) (*testBridge, string) {
 	tb := newTestBridge(t, extra)
 	useRclone(t, tb, rclone)
 	remoteDir := filepath.Join(t.TempDir(), "drive")
-	_ = os.MkdirAll(filepath.Dir(tb.backup.rcloneConf()), 0o700)
-	_ = os.WriteFile(tb.backup.rcloneConf(), []byte("[brain-gdrive]\ntype = alias\nremote = "+remoteDir+"\n"), 0o600)
-	if !tb.backup.connected() {
+	_ = os.MkdirAll(filepath.Dir(tb.cfgs.Boot().RcloneConf()), 0o700)
+	_ = os.WriteFile(tb.cfgs.Boot().RcloneConf(), []byte("[brain-gdrive]\ntype = alias\nremote = "+remoteDir+"\n"), 0o600)
+	if !connectedBackup(tb) {
 		t.Fatal("alias remote not recognised")
 	}
 	return tb, remoteDir
@@ -695,11 +695,11 @@ func syncMaxDelete(args []string) string { return flagValue(args, "--max-delete"
 // and only for the brains it names.
 func TestBackupRunForceOverridesRefusal(t *testing.T) {
 	tb := newTestBridge(t, "")
-	_ = os.MkdirAll(filepath.Dir(tb.backup.rcloneConf()), 0o700)
-	_ = os.WriteFile(tb.backup.rcloneConf(), []byte("[brain-gdrive]\ntype = alias\nremote = /nowhere\n"), 0o600)
+	_ = os.MkdirAll(filepath.Dir(tb.cfgs.Boot().RcloneConf()), 0o700)
+	_ = os.WriteFile(tb.cfgs.Boot().RcloneConf(), []byte("[brain-gdrive]\ntype = alias\nremote = /nowhere\n"), 0o600)
 	addBackupBrain(t, tb, "notes")
 	d := &deletionRunner{src: []string{}, cur: []string{"a", "b"}}
-	tb.backup.runner = d.run
+	installBackupRunner(t, tb, d.run)
 
 	// Forcing every brain at once is refused: force names its brains.
 	for _, body := range []map[string]any{{"force": true}, {"brains": []string{}, "force": true}} {
@@ -737,41 +737,12 @@ func TestBackupRunForceOverridesRefusal(t *testing.T) {
 func scheduledBackupBridge(t *testing.T) (*testBridge, *deletionRunner) {
 	t.Helper()
 	tb := newTestBridge(t, `, "backup": {"enabled": true, "daily_at": "03:30", "include_bridge_config": false}`)
-	_ = os.MkdirAll(filepath.Dir(tb.backup.rcloneConf()), 0o700)
-	_ = os.WriteFile(tb.backup.rcloneConf(), []byte("[brain-gdrive]\ntype = alias\nremote = /nowhere\n"), 0o600)
+	_ = os.MkdirAll(filepath.Dir(tb.cfgs.Boot().RcloneConf()), 0o700)
+	_ = os.WriteFile(tb.cfgs.Boot().RcloneConf(), []byte("[brain-gdrive]\ntype = alias\nremote = /nowhere\n"), 0o600)
 	addBackupBrain(t, tb, "notes")
 	d := &deletionRunner{src: []string{}, cur: []string{"a", "b"}}
-	tb.backup.runner = d.run
+	installBackupRunner(t, tb, d.run)
 	return tb, d
-}
-
-// scheduledRun lets the scheduler fire on the given day and waits for the
-// backup of "notes".
-func scheduledRun(t *testing.T, tb *testBridge, day int) *BackupResult {
-	t.Helper()
-	y, mo, d := time.Now().Date()
-	tb.backup.tick(time.Date(y, mo, d+day, 12, 0, 0, 0, time.Local))
-	return waitBackup(t, tb, "notes")
-}
-
-// TestScheduledBackupNeverForces: the nightly run keeps refusing a mass
-// deletion, so a wiped brain is never mirrored without the owner.
-func TestScheduledBackupNeverForces(t *testing.T) {
-	tb, d := scheduledBackupBridge(t)
-	now := time.Now()
-	res := scheduledRun(t, tb, 0)
-	d.mu.Lock()
-	syncs := len(d.syncs)
-	d.mu.Unlock()
-	if res.OK || !res.Refused || res.Trigger != "scheduled" || syncs != 0 {
-		t.Errorf("scheduled run = %+v with %d syncs, want a scheduled refusal and no sync", res, syncs)
-	}
-	tb.backup.mu.Lock()
-	last := tb.backup.state.LastScheduledDay
-	tb.backup.mu.Unlock()
-	if last != now.Format("2006-01-02") {
-		t.Errorf("last scheduled day = %q, want today", last)
-	}
 }
 
 // TestScheduledRefusalIsToldOnWhatsApp: a scheduled run that refuses tells
@@ -779,7 +750,17 @@ func TestScheduledBackupNeverForces(t *testing.T) {
 // brain succeeds, manual refusals are never sent (the owner is looking at
 // the dashboard), and a notice that failed to send is tried next time.
 func TestScheduledRefusalIsToldOnWhatsApp(t *testing.T) {
-	tb, _ := scheduledBackupBridge(t)
+	tb, runner := scheduledBackupBridge(t)
+	var failNotice bool
+	installBackupRunner(t, tb, runner.run, func(opts *BackupOptions) {
+		send := opts.Notify
+		opts.Notify = func(ctx context.Context, target BackupTarget, text string) error {
+			if failNotice {
+				return fmt.Errorf("WhatsApp is not connected")
+			}
+			return send(ctx, target, text)
+		}
+	})
 	br := tb.brainMgr.Get("notes")
 	jid := tb.replyChatFor(br, tb.cfgs.Get())
 	if jid == "" {
@@ -787,13 +768,11 @@ func TestScheduledRefusalIsToldOnWhatsApp(t *testing.T) {
 	}
 	sent := func() []devchat.Message { return tb.dev.Outbox() }
 	told := func() bool {
-		tb.backup.mu.Lock()
-		defer tb.backup.mu.Unlock()
-		_, ok := tb.backup.state.RefusalNotices["notes"]
+		_, ok := persistedBackupState(t, tb).RefusalNotices["notes"]
 		return ok
 	}
 
-	if res := scheduledRun(t, tb, 0); !res.Refused {
+	if res := startScheduledBackup(t, tb); !res.Refused {
 		t.Fatalf("first scheduled run = %+v, want a refusal", res)
 	}
 	out := sent()
@@ -801,11 +780,11 @@ func TestScheduledRefusalIsToldOnWhatsApp(t *testing.T) {
 		!strings.Contains(out[0].Text, "2 of 2 backed-up files are gone") {
 		t.Fatalf("want one notice to %s, got %+v", jid, out)
 	}
-	if _, ok := NewBackupManager(tb.cfgs, tb.brainMgr).state.RefusalNotices["notes"]; !ok {
+	if _, ok := persistedBackupState(t, tb).RefusalNotices["notes"]; !ok {
 		t.Error("the notice is not saved, so a restart would send it again")
 	}
 
-	scheduledRun(t, tb, 1)
+	startScheduledBackup(t, tb)
 	if n := len(sent()); n != 1 {
 		t.Errorf("%d messages after a second scheduled refusal, want still 1", n)
 	}
@@ -821,69 +800,15 @@ func TestScheduledRefusalIsToldOnWhatsApp(t *testing.T) {
 	if res := runBackup(t, tb, "notes"); !res.Refused || told() || len(sent()) != 1 {
 		t.Errorf("a manual refusal must not be sent: %+v, %d messages", res, len(sent()))
 	}
-	send := tb.backup.notify
-	tb.backup.notify = func(context.Context, BackupTarget, string) error { return fmt.Errorf("WhatsApp is not connected") }
-	scheduledRun(t, tb, 2)
+	failNotice = true
+	startScheduledBackup(t, tb)
 	if told() || len(sent()) != 1 {
 		t.Errorf("a notice that failed to send must not count as told")
 	}
-	tb.backup.notify = send
-	scheduledRun(t, tb, 3)
+	failNotice = false
+	startScheduledBackup(t, tb)
 	if out := sent(); len(out) != 2 || !told() {
 		t.Errorf("want the second streak told once it could be sent, got %+v", out)
-	}
-}
-
-// TestRefusalNoticeGivesUp: the notice is sent from inside the backup job,
-// so a send that hangs must not keep the job (and Back up now) busy. It
-// gives up after refusalNoticeTimeout and counts as not told.
-func TestRefusalNoticeGivesUp(t *testing.T) {
-	tb, _ := scheduledBackupBridge(t)
-	defer func(d time.Duration) { refusalNoticeTimeout = d }(refusalNoticeTimeout)
-	refusalNoticeTimeout = 50 * time.Millisecond
-	tb.backup.notify = func(ctx context.Context, _ BackupTarget, _ string) error {
-		<-ctx.Done()
-		return ctx.Err()
-	}
-	done := make(chan struct{})
-	go func() {
-		defer close(done)
-		res := &BackupResult{Refused: true, Trigger: "scheduled", Error: massDeletionError}
-		tb.backup.noticeRefusal(context.Background(), backupTarget(tb.brainMgr.Get("notes"), nil), res)
-	}()
-	select {
-	case <-done:
-	case <-time.After(10 * time.Second):
-		t.Fatal("a send that hangs keeps the backup job busy")
-	}
-	tb.backup.mu.Lock()
-	_, told := tb.backup.state.RefusalNotices["notes"]
-	tb.backup.mu.Unlock()
-	if told {
-		t.Error("a notice that timed out must not count as told")
-	}
-}
-
-// TestRefusalNoticesForgetRemovedBrains: the saved notices drop brains that
-// are gone, so the list does not grow forever and a new brain that reuses an
-// id is still told about its first refusal.
-func TestRefusalNoticesForgetRemovedBrains(t *testing.T) {
-	tb, _ := scheduledBackupBridge(t)
-	tb.backup.mu.Lock()
-	tb.backup.state.RefusalNotices = map[string]time.Time{"removed": time.Now(), "notes": time.Now()}
-	tb.backup.mu.Unlock()
-	if res := scheduledRun(t, tb, 0); !res.Refused {
-		t.Fatalf("scheduled run = %+v, want a refusal", res)
-	}
-	saved := NewBackupManager(tb.cfgs, tb.brainMgr).state.RefusalNotices
-	if _, ok := saved["removed"]; ok {
-		t.Errorf("the notice of a removed brain is still saved: %v", saved)
-	}
-	if _, ok := saved["notes"]; !ok {
-		t.Errorf("the notice of a brain that is still refused was dropped: %v", saved)
-	}
-	if out := tb.dev.Outbox(); len(out) != 0 {
-		t.Errorf("a refusal already told was sent again: %+v", out)
 	}
 }
 
@@ -1114,8 +1039,8 @@ func connectTestBridge(t *testing.T, run func(ctx context.Context, args []string
 		t.Fatal(err)
 	}
 	tb := newTestBridge(t, `, "backup": {"rclone_path": "`+script+`"}`)
-	tb.backup.runner = run
-	if err := os.MkdirAll(filepath.Dir(tb.backup.rcloneConf()), 0o700); err != nil {
+	installBackupRunner(t, tb, run)
+	if err := os.MkdirAll(filepath.Dir(tb.cfgs.Boot().RcloneConf()), 0o700); err != nil {
 		t.Fatal(err)
 	}
 	return tb
@@ -1125,10 +1050,10 @@ func connectTestBridge(t *testing.T, run func(ctx context.Context, args []string
 // bridge counts Drive as connected.
 func connectAlias(t *testing.T, tb *testBridge) {
 	t.Helper()
-	if err := os.MkdirAll(filepath.Dir(tb.backup.rcloneConf()), 0o700); err != nil {
+	if err := os.MkdirAll(filepath.Dir(tb.cfgs.Boot().RcloneConf()), 0o700); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(tb.backup.rcloneConf(), []byte("[brain-gdrive]\ntype = alias\nremote = /nowhere\n"), 0o600); err != nil {
+	if err := os.WriteFile(tb.cfgs.Boot().RcloneConf(), []byte("[brain-gdrive]\ntype = alias\nremote = /nowhere\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -1144,12 +1069,12 @@ func TestBackupRestoreChecksWhatItIsGiven(t *testing.T) {
 	addBackupBrain(t, tb, "notes")
 	var mu sync.Mutex
 	var calls [][]string
-	tb.backup.runner = func(_ context.Context, args []string, _ io.Writer) ([]byte, error) {
+	installBackupRunner(t, tb, func(_ context.Context, args []string, _ io.Writer) ([]byte, error) {
 		mu.Lock()
 		calls = append(calls, args)
 		mu.Unlock()
 		return []byte("[]"), nil
-	}
+	})
 	full := filepath.Join(tb.home, "full")
 	_ = os.MkdirAll(full, 0o700)
 	_ = os.WriteFile(filepath.Join(full, "x"), nil, 0o600)
@@ -1277,7 +1202,7 @@ func TestBackupRestoreRecordsItsResult(t *testing.T) {
 			connectAlias(t, tb)
 			release := make(chan struct{})
 			var src string
-			tb.backup.runner = func(_ context.Context, args []string, stderr io.Writer) ([]byte, error) {
+			installBackupRunner(t, tb, func(_ context.Context, args []string, stderr io.Writer) ([]byte, error) {
 				src = args[1]
 				<-release
 				if tc.fail {
@@ -1286,7 +1211,7 @@ func TestBackupRestoreRecordsItsResult(t *testing.T) {
 				}
 				fmt.Fprintln(stderr, `{"level":"notice","msg":"stats","stats":{"bytes":2048,"transfers":3}}`)
 				return nil, nil
-			}
+			})
 			w := tb.do("POST", "/api/backup/restore", map[string]string{"brain": "notes", "version": tc.version, "target": "~/restored"})
 			if w.Code != 202 {
 				t.Fatalf("restore = %d %s", w.Code, w.Body.String())
@@ -1363,14 +1288,14 @@ func TestBackupCancel(t *testing.T) {
 		t.Errorf("cancel with nothing running = %d, want 409", w.Code)
 	}
 	syncing := make(chan struct{})
-	tb.backup.runner = func(ctx context.Context, args []string, _ io.Writer) ([]byte, error) {
+	installBackupRunner(t, tb, func(ctx context.Context, args []string, _ io.Writer) ([]byte, error) {
 		if args[0] != "sync" {
 			return []byte("[]"), nil
 		}
 		close(syncing)
 		<-ctx.Done()
 		return nil, ctx.Err()
-	}
+	})
 	if w := tb.do("POST", "/api/backup/run", map[string]any{"brains": []string{"notes"}, "include_bridge": false, "force": true}); w.Code != 202 {
 		t.Fatalf("run = %d %s", w.Code, w.Body.String())
 	}
@@ -1423,13 +1348,13 @@ func TestBackupLeavesSecretsOut(t *testing.T) {
 		tb := newTestBridge(t, "")
 		addBackupBrain(t, tb, "notes")
 		var filters []string
-		tb.backup.runner = func(_ context.Context, args []string, _ io.Writer) ([]byte, error) {
+		installBackupRunner(t, tb, func(_ context.Context, args []string, _ io.Writer) ([]byte, error) {
 			if i := slices.Index(args, "--filter-from"); i >= 0 && args[0] == "sync" {
 				data, _ := os.ReadFile(args[i+1])
 				filters = append(filters, string(data))
 			}
 			return []byte("[]"), nil
-		}
+		})
 		tb.backup.backupBrain(t.Context(), backupTarget(tb.brainMgr.Get("notes"), nil), "manual", true)
 		if len(filters) != 1 || !strings.HasPrefix(filters[0], "- .env\n") {
 			t.Errorf("sync filters = %q, want one starting with the secret files", filters)
@@ -1477,12 +1402,12 @@ func TestBackupWaitsForTheBrainToFinish(t *testing.T) {
 				return br.current != nil
 			}
 			var syncedWhileRunning []bool
-			tb.backup.runner = func(_ context.Context, args []string, _ io.Writer) ([]byte, error) {
+			installBackupRunner(t, tb, func(_ context.Context, args []string, _ io.Writer) ([]byte, error) {
 				if args[0] == "sync" {
 					syncedWhileRunning = append(syncedWhileRunning, running())
 				}
 				return []byte("[]"), nil
-			}
+			})
 			logged := captureLog(t)
 
 			t.Setenv("FRIDOLIN_FAKE_SLEEP_MS", "1500")

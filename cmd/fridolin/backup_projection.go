@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"slices"
 
 	"github.com/Icewater1337/fridolin/internal/config"
@@ -57,7 +58,7 @@ func backupFiles(cfgs *config.Store) (BackupBridgeFiles, error) {
 	return files, nil
 }
 
-func newProjectedBackup(cfgs *config.Store, bm *BrainManager, notify func(context.Context, *Brain, string) error) *BackupManager {
+func backupOptions(cfgs *config.Store, bm *BrainManager, notify func(context.Context, *Brain, string) error) BackupOptions {
 	boot := cfgs.Boot()
 	opts := BackupOptions{BackupDir: boot.BackupDir(), RcloneConf: boot.RcloneConf(), Settings: func() BackupSettings { return backupSettings(cfgs.Get()) },
 		Targets: func() []BackupTarget { return backupTargets(bm.Brains(), notify) }, BridgeFiles: func() (BackupBridgeFiles, error) { return backupFiles(cfgs) },
@@ -68,7 +69,11 @@ func newProjectedBackup(cfgs *config.Store, bm *BrainManager, notify func(contex
 	if notify != nil {
 		opts.Notify = func(ctx context.Context, target BackupTarget, text string) error { return target.Notify(ctx, text) }
 	}
-	m := newBackupManager(opts)
+	return opts
+}
+
+func newProjectedBackup(cfgs *config.Store, bm *BrainManager, notify func(context.Context, *Brain, string) error) *BackupManager {
+	m := newBackupManager(backupOptions(cfgs, bm, notify))
 	// Publication succeeds before the schedule moves; failed saves never reach this callback.
 	cfgs.Subscribe(func(prev, next *config.Config) { m.SettingsChanged(backupSettings(prev), backupSettings(next)) })
 	return m
@@ -86,4 +91,13 @@ func (m *BackupManager) rcloneEnv(scope childScope) []string {
 		ctx = withDesktop(ctx)
 	}
 	return m.opts.Environ(ctx)
+}
+
+// notifyBackup resolves the selected runtime's current reply destination.
+func (b *Bridge) notifyBackup(ctx context.Context, br *Brain, text string) error {
+	jid := b.replyChatFor(br, b.cfgs.Get())
+	if jid == "" {
+		return fmt.Errorf("brain %s has no chat to send it to — set its reply chat", br.ID())
+	}
+	return b.wa.SendMessage(ctx, jid, text)
 }

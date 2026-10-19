@@ -107,6 +107,11 @@ func (f *backupFixture) run(t *testing.T, id string) *BackupResult {
 	if err := f.manager.StartRun([]string{id}, false, "manual", false); err != nil {
 		t.Fatal(err)
 	}
+	return f.wait(t, id)
+}
+
+func (f *backupFixture) wait(t *testing.T, id string) *BackupResult {
+	t.Helper()
 	deadline := time.Now().Add(10 * time.Second)
 	for time.Now().Before(deadline) {
 		f.manager.mu.Lock()
@@ -235,4 +240,26 @@ func connectBackupFixture(t *testing.T, run BackupRunFunc) *backupFixture {
 		t.Fatal(err)
 	}
 	return f
+}
+
+func scheduledBackupFixture(t *testing.T) (*backupFixture, *backupDeletionRunner) {
+	t.Helper()
+	f := newBackupFixture(t, func(s *BackupSettings) { s.Enabled = true; s.IncludeBridgeConfig = false })
+	if err := os.MkdirAll(filepath.Dir(f.options.RcloneConf), 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(f.options.RcloneConf, []byte("[brain-gdrive]\ntype = alias\nremote = /nowhere\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	f.addTarget(t, "notes")
+	runner := &backupDeletionRunner{src: []string{}, cur: []string{"a", "b"}}
+	f.runner = runner.run
+	return f, runner
+}
+
+func scheduledFixtureRun(t *testing.T, f *backupFixture, day int) *BackupResult {
+	t.Helper()
+	y, mo, d := time.Now().Date()
+	f.manager.tick(time.Date(y, mo, d+day, 12, 0, 0, 0, time.Local))
+	return f.wait(t, "notes")
 }
