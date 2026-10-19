@@ -954,8 +954,8 @@ func (b *Bridge) apiBrainBackup(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	if _, err := b.cfgs.Update("", func(c *Config) error {
-		return updateBrainBackup(c, r.PathValue("id"), req.Enabled, req.Exclude)
+	if _, err := b.cfgs.UpdateTx("", func(c *Config, tx *Tx) error {
+		return updateBrainBackup(c, tx, r.PathValue("id"), req.Enabled, req.Exclude)
 	}); err != nil {
 		writeErr(w, http.StatusUnprocessableEntity, err.Error())
 		return
@@ -964,8 +964,8 @@ func (b *Bridge) apiBrainBackup(w http.ResponseWriter, r *http.Request) {
 }
 
 // updateBrainBackup changes one brain's backup settings in its manifest.
-func updateBrainBackup(c *Config, id string, enabled *bool, exclude []string) error {
-	return updateManifestIn(c, id, func(m *BrainManifest) error {
+func updateBrainBackup(c *Config, tx *Tx, id string, enabled *bool, exclude []string) error {
+	return updateManifestIn(c, tx, id, func(m *BrainManifest) error {
 		if enabled != nil {
 			m.Backup.Enabled = *enabled
 		}

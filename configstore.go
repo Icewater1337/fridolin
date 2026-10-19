@@ -7,12 +7,14 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io/fs"
 	"log"
+	"maps"
 	"os"
 	"path/filepath"
 	"reflect"
+	"runtime/debug"
 	"slices"
-	"sort"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -25,14 +27,32 @@ import (
 // layer through Get, which is a cheap atomic load, so a change applies on
 // the next message without a restart.
 type ConfigStore struct {
-	path string
-
-	mu      sync.Mutex // serialises Update
-	file    *Config
+	path    string
 	startup *Config // the effective configuration the process started with
-	eff     atomic.Pointer[Config]
-	etag    atomic.Value // string
-	subs    []func(old, new *Config)
+
+	mu   sync.Mutex // serialises Update
+	snap atomic.Pointer[ConfigSnapshot]
+
+	// notifyMu is held while the subscribers hear of an update. commit
+	// takes it before it gives back mu, so they hear of the snapshots in
+	// the order they were swapped in, one at a time.
+	notifyMu sync.Mutex
+	subsMu   sync.Mutex
+	subs     []func(old, new *Config)
+}
+
+// ConfigSnapshot is one version of the configuration: the file layer, the
+// effective configuration made of it, and the etag of the config.json both
+// came from. The store swaps in a whole snapshot at a time, so whoever reads
+// one gets the three together, never one write's file with another's etag.
+// A snapshot is never changed: treat it and what it points to as read-only.
+type ConfigSnapshot struct {
+	File      *Config
+	Effective *Config
+	ETag      string
+	// Version counts the snapshots of this store: the one it opened with is
+	// 1, and each one swapped in after it is one more.
+	Version uint64
 }
 
 // ErrConfigConflict means config.json changed since the caller read it.
@@ -54,23 +74,9 @@ func OpenConfigStore(cfgPath string) (*ConfigStore, error) {
 	var raw []byte
 	if data, err := os.ReadFile(cfgPath); err == nil {
 		raw = data
-		// An older version is migrated in memory only, and the next save
-		// writes it as this one. A migration logs what it changed.
-		migrated, notes, err := migrateConfigJSON(data)
-		if errors.Is(err, errConfigTooNew) {
-			return nil, fmt.Errorf("config file %q: %w. Run that newer version again, or put back a config.json from before it (see docs/CONFIGURATION.md#version)", cfgPath, err)
+		if file, err = decodeConfigFile(cfgPath, data); err != nil {
+			return nil, err
 		}
-		if err != nil {
-			return nil, fmt.Errorf("parsing config file %q: %w", cfgPath, err)
-		}
-		if err := json.Unmarshal(migrated, file); err != nil {
-			return nil, fmt.Errorf("parsing config file %q: %w", cfgPath, err)
-		}
-		for _, note := range notes {
-			log.Printf("config %s: %s", cfgPath, note)
-		}
-		warnUnknownKeys(cfgPath, migrated)
-		warnOddChats(cfgPath, file)
 	} else if !os.IsNotExist(err) {
 		return nil, fmt.Errorf("reading config file %q: %w", cfgPath, err)
 	}
@@ -83,10 +89,34 @@ func OpenConfigStore(cfgPath string) (*ConfigStore, error) {
 		warnLegacyDataDir(eff.DataDir)
 	}
 	warnGroupsWithoutMembers(nil, eff)
-	cs := &ConfigStore{path: cfgPath, file: file, startup: eff}
-	cs.eff.Store(eff)
-	cs.etag.Store(etagOf(raw))
+	cs := &ConfigStore{path: cfgPath, startup: eff}
+	cs.snap.Store(&ConfigSnapshot{File: file, Effective: eff, ETag: etagOf(raw), Version: 1})
 	return cs, nil
+}
+
+// decodeConfigFile decodes data, what the config file path holds, into the
+// file layer, and logs what is odd about it: retired keys, unknown ones,
+// chats no entry can match.
+func decodeConfigFile(path string, data []byte) (*Config, error) {
+	// Migrate in memory on startup and external edits; the next save writes
+	// this version while the snapshot ETag still identifies the original bytes.
+	migrated, notes, err := migrateConfigJSON(data)
+	if errors.Is(err, errConfigTooNew) {
+		return nil, fmt.Errorf("config file %q: %w. Run that newer version again, or put back a config.json from before it (see docs/CONFIGURATION.md#version)", path, err)
+	}
+	if err != nil {
+		return nil, fmt.Errorf("parsing config file %q: %w", path, err)
+	}
+	file := &Config{Version: currentConfigVersion}
+	if err := json.Unmarshal(migrated, file); err != nil {
+		return nil, fmt.Errorf("parsing config file %q: %w", path, err)
+	}
+	for _, note := range notes {
+		log.Printf("config %s: %s", path, note)
+	}
+	warnUnknownKeys(path, migrated)
+	warnOddChats(path, file)
+	return file, nil
 }
 
 // Path is the config file this store reads and writes.
@@ -98,81 +128,322 @@ func (cs *ConfigStore) Startup() *Config { return cs.startup }
 
 // Get returns the effective configuration. Treat it as read-only: it is
 // shared by every goroutine until the next Update replaces it.
-func (cs *ConfigStore) Get() *Config { return cs.eff.Load() }
+func (cs *ConfigStore) Get() *Config { return cs.snap.Load().Effective }
 
 // ETag identifies the current file contents for optimistic concurrency.
-func (cs *ConfigStore) ETag() string { return cs.etag.Load().(string) }
+func (cs *ConfigStore) ETag() string { return cs.snap.Load().ETag }
+
+// Snapshot returns the current configuration, the file layer, the effective
+// one and the etag together. Read-only, like Get.
+func (cs *ConfigStore) Snapshot() ConfigSnapshot { return *cs.snap.Load() }
 
 // FileCopy returns a deep copy of the file layer for editing.
-func (cs *ConfigStore) FileCopy() *Config {
-	cs.mu.Lock()
-	defer cs.mu.Unlock()
-	c, err := cs.file.clone()
+func (cs *ConfigStore) FileCopy() *Config { return mustClone(cs.snap.Load().File) }
+
+// mustClone returns a deep copy of c, a configuration the store holds.
+func mustClone(c *Config) *Config {
+	out, err := c.clone()
 	if err != nil {
-		// Unreachable: the file layer always round-trips through JSON.
+		// Unreachable: what the store holds always round-trips through JSON.
 		panic(err)
 	}
-	return c
+	return out
 }
 
 // Subscribe registers fn to run after every successful Update, with the old
-// and new effective configurations.
+// and new effective configurations. The subscribers hear of the updates in
+// the order they were made, and of one at a time, so fn must not call
+// Update: that waits for fn to return.
 func (cs *ConfigStore) Subscribe(fn func(old, new *Config)) {
-	cs.mu.Lock()
-	defer cs.mu.Unlock()
+	cs.subsMu.Lock()
+	defer cs.subsMu.Unlock()
 	cs.subs = append(cs.subs, fn)
 }
 
 // Update applies mutate to a copy of the file layer, validates the result,
 // writes it atomically and swaps in the new effective configuration. etag ""
 // skips the conflict check. It returns RestartRequired as of the new
-// configuration.
+// configuration. UpdateTx says what happens when config.json was changed
+// by hand.
 func (cs *ConfigStore) Update(etag string, mutate func(*Config) error) (restart []string, err error) {
-	cs.mu.Lock()
-	if etag != "" && etag != cs.ETag() {
-		cs.mu.Unlock()
-		return nil, ErrConfigConflict
+	res, err := cs.UpdateTx(etag, func(c *Config, _ *Tx) error { return mutate(c) })
+	return res.Restart, err
+}
+
+// UpdateResult is what an update saved.
+type UpdateResult struct {
+	// Restart is RestartRequired as of the new configuration.
+	Restart []string
+	// ETag is the etag of the config.json the update wrote. ETag() may
+	// already be a later update's.
+	ETag string
+}
+
+// UpdateTx is Update for an edit that writes brain.json files too: mutate
+// edits the file layer and stages those in tx, which UpdateTx writes only
+// once the new configuration has passed its checks (see Tx).
+//
+// It reads config.json first. When the file changed since the store last
+// read or wrote it, by hand or by a restore, that is the configuration
+// from then on, decoded as at startup, and the update starts from it: with
+// etag "" mutate edits the file as it is now, so the change by hand
+// stays; with an etag the update is refused with ErrConfigConflict, since
+// the caller sends a whole configuration made from the one before.
+func (cs *ConfigStore) UpdateTx(etag string, mutate func(c *Config, tx *Tx) error) (UpdateResult, error) {
+	prev, next, err := cs.commit(etag, mutate)
+	if next != nil {
+		cs.notify(prev, next)
 	}
-	next, err := cs.file.clone()
 	if err != nil {
-		cs.mu.Unlock()
-		return nil, err
+		return UpdateResult{}, err
 	}
-	if err := mutate(next); err != nil {
-		cs.mu.Unlock()
-		return nil, err
+	return UpdateResult{Restart: restartRequired(cs.startup, next.Effective), ETag: next.ETag}, nil
+}
+
+// notify tells the subscribers that next replaced prev, and gives back
+// notifyMu, which commit took. A subscriber that panics is logged: the
+// update is saved by then, and the other subscribers must still hear of it.
+func (cs *ConfigStore) notify(prev, next *ConfigSnapshot) {
+	defer cs.notifyMu.Unlock()
+	warnGroupsWithoutMembers(prev.Effective, next.Effective)
+	cs.subsMu.Lock()
+	subs := slices.Clone(cs.subs)
+	cs.subsMu.Unlock()
+	for _, fn := range subs {
+		func() {
+			defer func() {
+				if r := recover(); r != nil {
+					log.Printf("config: a subscriber panicked on the saved update: %v\n%s", r, debug.Stack())
+				}
+			}()
+			fn(prev.Effective, next.Effective)
+		}()
+	}
+}
+
+// commit is the part of Update that holds the lock: it writes the new
+// configuration and swaps it in. It returns the snapshot it found, and the
+// one it swapped in last, nil if none: a config.json changed by hand is
+// swapped in even when the update is then refused. With one swapped in it
+// returns with notifyMu held, for notify to give back. A panic on the way,
+// in mutate or in deriving, encoding or writing the configuration, comes
+// back as an error, with the lock given back and nothing of the update
+// saved: net/http recovers a handler's panic and the bridge runs on, and a
+// lock left held would stop every later save, brain edit and calendar
+// sign-in for good.
+func (cs *ConfigStore) commit(etag string, mutate func(*Config, *Tx) error) (prev, next *ConfigSnapshot, err error) {
+	cs.mu.Lock()
+	defer cs.mu.Unlock()
+	// Before the unlock: the subscribers hear of this snapshot before the
+	// next update can swap in another.
+	defer func() {
+		if next != nil {
+			cs.notifyMu.Lock()
+		}
+	}()
+	defer func() {
+		if r := recover(); r != nil {
+			log.Printf("config: an update panicked and was not saved: %v\n%s", r, debug.Stack())
+			err = fmt.Errorf("the config update failed: %v", r)
+		}
+	}()
+	prev = cs.snap.Load()
+	base, err := cs.reread(prev)
+	if err != nil {
+		return prev, nil, err
+	}
+	if base != prev {
+		cs.snap.Store(base)
+		next = base
+	}
+	if etag != "" && etag != base.ETag {
+		return prev, next, ErrConfigConflict
+	}
+	file, err := base.File.clone()
+	if err != nil {
+		return prev, next, err
+	}
+	tx := &Tx{}
+	if err := mutate(file, tx); err != nil {
+		return prev, next, err
 	}
 	// What is written is this version's file, whatever the edit made of it.
-	next.Version = currentConfigVersion
-	eff, err := effective(next)
+	file.Version = currentConfigVersion
+	eff, err := effective(file)
 	if err != nil {
-		cs.mu.Unlock()
-		return nil, err
+		return prev, next, err
 	}
-	data, err := json.MarshalIndent(next, "", "  ")
+	if tx.checkBrains {
+		if err := checkSet(base.Effective, eff); err != nil {
+			return prev, next, err
+		}
+	}
+	data, err := json.MarshalIndent(file, "", "  ")
 	if err != nil {
-		cs.mu.Unlock()
-		return nil, err
+		return prev, next, err
 	}
 	data = append(data, '\n')
+
+	// The brain.json files go first and config.json last, which is what
+	// makes the edit count. Until it is written, a failure, or a panic,
+	// puts back what they held.
+	committed := false
+	defer func() {
+		if !committed {
+			tx.rollback()
+		}
+	}()
+	if err := tx.write(); err != nil {
+		return prev, next, err
+	}
 	if err := writeFileAtomic(cs.path, data, 0o600, true); err != nil {
-		cs.mu.Unlock()
-		return nil, err
+		return prev, next, err
 	}
+	committed = true
 
-	old := cs.eff.Load()
-	cs.file = next
-	cs.eff.Store(eff)
-	cs.etag.Store(etagOf(data))
-	subs := append([]func(old, new *Config){}, cs.subs...)
-	cs.mu.Unlock()
+	saved := &ConfigSnapshot{File: file, Effective: eff, ETag: etagOf(data), Version: base.Version + 1}
+	cs.snap.Store(saved)
+	next = saved
+	return prev, next, nil
+}
 
-	warnGroupsWithoutMembers(old, eff)
-
-	for _, fn := range subs {
-		fn(old, eff)
+// reread returns the snapshot of config.json as it is now. That is cur
+// unless the file changed since the store last read or wrote it; a
+// changed file is decoded and derived as at startup, and one that does
+// not load is an error, so that no update writes over it. A file that is
+// gone is written again by the update, from the configuration that runs.
+func (cs *ConfigStore) reread(cur *ConfigSnapshot) (*ConfigSnapshot, error) {
+	data, err := os.ReadFile(cs.path)
+	switch {
+	case errors.Is(err, fs.ErrNotExist):
+		return cur, nil
+	case err != nil:
+		return nil, fmt.Errorf("reading config file %q: %w", cs.path, err)
 	}
-	return restartRequired(cs.startup, eff), nil
+	etag := etagOf(data)
+	if etag == cur.ETag {
+		return cur, nil
+	}
+	file, err := decodeConfigFile(cs.path, data)
+	if err == nil {
+		var eff *Config
+		if eff, err = effective(file); err == nil {
+			log.Printf("config: %s changed on disk since the bridge read it, and applies from now on", cs.path)
+			return &ConfigSnapshot{File: file, Effective: eff, ETag: etag, Version: cur.Version + 1}, nil
+		}
+	}
+	return nil, fmt.Errorf("%s changed on disk and does not load, so nothing was saved; fix the file (fridolin check says what is wrong): %w", cs.path, err)
+}
+
+// Tx holds the brain.json files an update writes besides config.json.
+// mutate only stages them. The update writes them once the new
+// configuration has passed its checks, each one atomically, and then
+// config.json. When a write fails after the first, config.json's
+// included, it puts back what each file it wrote held before, or removes
+// one that was not there: a refused or failed save never leaves a
+// brain.json changed that config.json does not approve, which the
+// dashboard would show as changed on disk.
+type Tx struct {
+	writes []*stagedManifest
+	// checkBrains has the update check the brain set, see CheckBrains.
+	checkBrains bool
+}
+
+// CheckBrains has the update refused when it makes brains clash, as
+// checkSet decides, once mutate is done and before anything is written.
+// Staging a brain.json asks for it too: it changes a brain.
+func (tx *Tx) CheckBrains() { tx.checkBrains = true }
+
+// stagedManifest is a brain.json a transaction writes.
+type stagedManifest struct {
+	dir  string
+	data []byte
+	// create is for a new brain's folder, which must have no brain.json.
+	create bool
+
+	// written says the file is written; existed and prev say whether it
+	// was there before and what it held.
+	written bool
+	existed bool
+	prev    []byte
+}
+
+// WriteManifest stages m as the brain.json of the folder dir. m is checked
+// and encoded at once, so an invalid one fails the update before anything
+// is written. A later write for the same folder replaces this one.
+func (tx *Tx) WriteManifest(dir string, m *BrainManifest) error {
+	return tx.stage(dir, m, false)
+}
+
+// CreateManifest stages m as the brain.json of dir, a new brain's folder.
+// The update fails if the folder has one by the time it is written.
+func (tx *Tx) CreateManifest(dir string, m *BrainManifest) error {
+	return tx.stage(dir, m, true)
+}
+
+func (tx *Tx) stage(dir string, m *BrainManifest, create bool) error {
+	data, err := encodeManifest(m)
+	if err != nil {
+		return err
+	}
+	tx.checkBrains = true
+	dir = filepath.Clean(dir)
+	for _, w := range tx.writes {
+		if w.dir == dir {
+			w.data, w.create = data, create
+			return nil
+		}
+	}
+	tx.writes = append(tx.writes, &stagedManifest{dir: dir, data: data, create: create})
+	return nil
+}
+
+// write writes the staged files in the order they were staged, and stops
+// at the first that fails. Each one's contents are read first, the way
+// the bridge reads a brain's files (readBrainFile), so they can be put
+// back: one that is no regular file, such as a symlink the brain put
+// there, could not be, and is not replaced.
+func (tx *Tx) write() error {
+	for _, w := range tx.writes {
+		path := filepath.Join(w.dir, ManifestFile)
+		prev, err := readBrainFile(w.dir, ManifestFile)
+		switch {
+		case errors.Is(err, fs.ErrNotExist):
+			w.existed, w.prev = false, nil
+		case err != nil:
+			return fmt.Errorf("%s: %w", path, err)
+		default:
+			w.existed, w.prev = true, prev
+		}
+		if err := writeManifestData(w.dir, w.data, !w.create); err != nil {
+			return err
+		}
+		w.written = true
+	}
+	return nil
+}
+
+// rollback puts back what the files write wrote held before, the last
+// one first. It logs what it cannot put back: the dashboard then shows
+// that brain's brain.json as changed on disk.
+func (tx *Tx) rollback() {
+	for i := len(tx.writes) - 1; i >= 0; i-- {
+		w := tx.writes[i]
+		if !w.written {
+			continue
+		}
+		path := filepath.Join(w.dir, ManifestFile)
+		var err error
+		if w.existed {
+			err = writeFileAtomic(path, w.prev, 0o600, false)
+		} else {
+			err = os.Remove(path)
+		}
+		if err != nil {
+			log.Printf("config: putting back %s after the update failed: %v", path, err)
+		}
+		w.written = false
+	}
 }
 
 // RestartRequired lists the settings that are read once at startup and now
@@ -411,30 +682,94 @@ func listDiff(a, b []string) string {
 	return strings.Join(diff, " ")
 }
 
-// warnUnknownKeys logs top-level keys config.json has but the bridge does not
-// know — usually a typo, or a setting from another version. They are dropped
-// the next time the dashboard saves the file. data is the file migrated to
-// the current version: the retired keys of a version 1 file are gone from
-// it, and got a line of their own (see foldRetiredKeys).
+// warnUnknownKeys logs keys the bridge does not know at any depth, by
+// their path. data is migrated to the current version: retired keys from
+// version 1 are already removed and logged by the migration; the same keys
+// in a version 2 file are unknown settings.
 func warnUnknownKeys(path string, data []byte) {
-	var m map[string]json.RawMessage
-	if json.Unmarshal(data, &m) != nil {
-		return
-	}
-	known := map[string]bool{}
-	t := reflect.TypeOf(Config{})
-	for i := 0; i < t.NumField(); i++ {
-		name, _, _ := strings.Cut(t.Field(i).Tag.Get("json"), ",")
-		known[name] = true
-	}
-	var unknown []string
-	for k := range m {
-		if !known[k] {
-			unknown = append(unknown, k)
-		}
-	}
-	if len(unknown) > 0 {
-		sort.Strings(unknown)
+	if unknown := unknownKeys(data, reflect.TypeOf(Config{}), ""); len(unknown) > 0 {
 		log.Printf("config %s: ignoring unknown settings %v (they will be dropped when the dashboard saves)", path, unknown)
 	}
+}
+
+// unknownKeys lists the keys in data, a JSON value for a t, that no field
+// of t takes when data is decoded into one, each by its path from path:
+// sandbox.enable, brain_dirs[0].approved.nmae. It looks into the objects
+// of structs, and into arrays and objects that hold structs, but not into
+// a type that decodes itself. Keys are matched as encoding/json matches
+// them, an exact match first and then one that differs only in case.
+func unknownKeys(data []byte, t reflect.Type, path string) []string {
+	for t.Kind() == reflect.Pointer {
+		t = t.Elem()
+	}
+	if reflect.PointerTo(t).Implements(jsonUnmarshaler) {
+		return nil
+	}
+	var out []string
+	switch t.Kind() {
+	case reflect.Struct:
+		var obj map[string]json.RawMessage
+		if json.Unmarshal(data, &obj) != nil {
+			return nil
+		}
+		fields := jsonFieldsOf(t)
+		for _, k := range slices.Sorted(maps.Keys(obj)) {
+			ft, ok := fields[k]
+			if !ok {
+				for name, f := range fields {
+					if strings.EqualFold(name, k) {
+						ft, ok = f, true
+						break
+					}
+				}
+			}
+			if !ok {
+				out = append(out, unknownKeyPath(path, k))
+				continue
+			}
+			out = append(out, unknownKeys(obj[k], ft, unknownKeyPath(path, k))...)
+		}
+	case reflect.Slice, reflect.Array:
+		var arr []json.RawMessage
+		if json.Unmarshal(data, &arr) != nil {
+			return nil
+		}
+		for i, el := range arr {
+			out = append(out, unknownKeys(el, t.Elem(), fmt.Sprintf("%s[%d]", path, i))...)
+		}
+	case reflect.Map:
+		var obj map[string]json.RawMessage
+		if json.Unmarshal(data, &obj) != nil {
+			return nil
+		}
+		for _, k := range slices.Sorted(maps.Keys(obj)) {
+			out = append(out, unknownKeys(obj[k], t.Elem(), unknownKeyPath(path, k))...)
+		}
+	}
+	return out
+}
+
+// jsonFieldsOf maps the JSON keys of the struct type t to their types.
+func jsonFieldsOf(t reflect.Type) map[string]reflect.Type {
+	fields := map[string]reflect.Type{}
+	for i := 0; i < t.NumField(); i++ {
+		f := t.Field(i)
+		name, _, _ := strings.Cut(f.Tag.Get("json"), ",")
+		if !f.IsExported() || name == "-" {
+			continue
+		}
+		if name == "" {
+			name = f.Name
+		}
+		fields[name] = f.Type
+	}
+	return fields
+}
+
+// unknownKeyPath is the path of key k in the object at path.
+func unknownKeyPath(path, k string) string {
+	if path == "" {
+		return k
+	}
+	return path + "." + k
 }

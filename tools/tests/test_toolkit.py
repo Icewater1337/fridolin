@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 import tempfile
 import unittest
 from pathlib import Path
@@ -63,6 +64,21 @@ class FindFridolinTest(unittest.TestCase):
         code, out, _ = self.find({"PATH": ""})
         self.assertEqual(code, 1)
         self.assertIn("FRIDOLIN_BIN", json.loads(out)["error"])
+
+    def test_wrapper_tests_do_not_execute_an_adjacent_build(self):
+        built = self.program("checkout")
+        tools = self.dir / "checkout" / "tools"
+        tools.mkdir(parents=True)
+        for source in support.TOOLS_DIR.glob("*.py"):
+            shutil.copyfile(source, tools / source.name)
+        marker = self.dir / "executed"
+        built.write_text(f"#!/bin/sh\n: > '{marker}'\n", encoding="utf-8")
+        with mock.patch.object(support, "TOOLS_DIR", tools), \
+             mock.patch.dict(os.environ, {"FRIDOLIN_BIN": str(built), "PATH": str(built.parent)}):
+            code, out, _ = support.run_tool("poll_results.py", [], {})
+        self.assertEqual(code, 1)
+        self.assertIn("FRIDOLIN_BIN", json.loads(out)["error"])
+        self.assertFalse(marker.exists())
 
 
 if __name__ == "__main__":

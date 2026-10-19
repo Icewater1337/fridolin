@@ -12,6 +12,19 @@ the dashboard offers: once one differs from the value the bridge started
 with, every dashboard tab shows a "Restart the bridge to apply" banner until
 the bridge restarts or the setting is changed back.
 
+You can also edit `config.json` by hand, or put back one from a backup,
+while the bridge runs. The bridge does not notice at once: it reads the file
+again before every change it saves (from the dashboard, a calendar sign-in,
+a Plaud sync and so on), and when the file changed since it last read or
+wrote it, it logs so and runs on the file as it is now, as if the edit had
+been made in the dashboard. The change being saved then goes on top of your
+edit, so both stay; only a save of the whole Settings page, made from the
+config as it was before, is refused, and the page asks you to reload, which
+shows your edit. A file that does not load, with a typo say, makes every
+save fail, and nothing is written over it, until you fix it (`fridolin
+check` says what is wrong). To apply a hand edit straight away, restart the
+bridge (`fridolin service restart`).
+
 Validate at any time:
 
 ```bash
@@ -23,6 +36,12 @@ status 3 when a brain you approved will not run (its folder is missing or
 cannot hold a brain, or it clashes with another), 1 when the config does
 not load. `setup.sh` shows those issues and stops before it installs in
 either case.
+
+`check`, like `fridolin open` and `fridolin rotate-token`, is about a
+bridge that is set up: with no config file where it looks, a mistyped
+`--config` say, it says so and exits with status 1, and makes nothing,
+instead of checking the defaults (`fridolin init` writes a starter
+config).
 
 For a bug report, `fridolin check --redact` prints the same with phone
 numbers, group JIDs, LIDs and email addresses masked and `~` for your home
@@ -602,7 +621,9 @@ dashboard save, which writes version 2, leaves them out:
 | `brains` | Inline brains, when the list is empty or `null`. One that lists brains is refused, see [Inline brains](#inline-brains). |
 
 In a version 2 config they are unknown keys. Any key the bridge does not
-know is logged as an unknown setting and dropped the same way.
+know, at the top or inside a section, is logged as an unknown setting by
+its path (`sandbox.enable`, a typo of `sandbox.enabled`, say) and dropped
+the same way.
 
 ### `brain_mode`
 
@@ -1026,12 +1047,14 @@ Default `~/.fridolin`; an install from before the project was renamed keeps
 in the log at every start: set `data_dir` to it to keep it for good. A new
 config, from `fridolin init`, `setup.sh` or the first start, gets the folder
 chosen then (written with `~`), so later starts do not choose again.
-`db_path` and `media_dir` override individually, each also *(restart)*.
-A `media_dir` must be the bridge's alone: on the first start of a version
-with media inboxes, every folder in it and every file at its top moves to
-`.old/` in it (see [reading](#reading)). Brains cannot read it, except
-their own inbox in `media/` (`media/<brain id>/`), their own state in
-`brains/<id>/`, which they also write (see [writing](#writing)), and
+`db_path` and `media_dir` override individually, each also *(restart)*. The bridge makes the
+data dir and the folders of both as it starts, and no sooner: a folder typed
+into Settings is made by the restart that uses it. A `media_dir` must be
+the bridge's alone: on the first start of a version with media inboxes,
+every folder in it and every file at its top moves to `.old/` in it (see
+[reading](#reading)). Brains cannot read it,
+except their own inbox in `media/` (`media/<brain id>/`), their own state
+in `brains/<id>/`, which they also write (see [writing](#writing)), and
 their own runs' brain API tokens in `run-tokens/<id>/`; a `db_path` or
 `media_dir` elsewhere is denied to them too, but for the inbox.
 

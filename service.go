@@ -746,6 +746,11 @@ func (h *serviceHost) install(o installOptions) error {
 		}
 	}
 
+	// The service starts in the data folder, which launchd and systemd
+	// refuse when it is not there; the bridge makes the rest as it starts.
+	if err := os.MkdirAll(p.data.WorkDir, 0o700); err != nil {
+		return err
+	}
 	if h.goos == "darwin" {
 		if err := os.MkdirAll(p.data.LogDir, 0o700); err != nil {
 			return err

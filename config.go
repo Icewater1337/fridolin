@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io/fs"
 	"log"
 	"os"
 	"path/filepath"
@@ -577,6 +578,17 @@ func LoadConfig(cfgPath string) (*Config, error) {
 	return cs.Get(), nil
 }
 
+// LoadExistingConfig is LoadConfig for a command about a bridge that is
+// set up: a config file that is not there is an error, not the defaults,
+// so that a mistyped --config is reported rather than checked, or used,
+// as an empty config.
+func LoadExistingConfig(cfgPath string) (*Config, error) {
+	if _, err := os.Stat(cfgPath); errors.Is(err, fs.ErrNotExist) {
+		return nil, fmt.Errorf("no config file at %s (run fridolin init)", cfgPath)
+	}
+	return LoadConfig(cfgPath)
+}
+
 // dataDirName and legacyDataDirName are the home-relative names of the data
 // dir, now and before the project was renamed. compat: installs from before
 // the rename keep the old one, see defaultDataDir.
@@ -639,7 +651,7 @@ func dataDirSource(value, dir, home string) string {
 }
 
 // effective derives the running configuration from the on-disk layer:
-// defaults, ~ expansion, validation.
+// defaults, ~ expansion, validation. It writes nothing, see EnsureDirs.
 func effective(file *Config) (*Config, error) {
 	cfg, err := file.clone()
 	if err != nil {
@@ -774,18 +786,26 @@ func effective(file *Config) (*Config, error) {
 	if err := cfg.validate(); err != nil {
 		return nil, err
 	}
-
-	if err := os.MkdirAll(cfg.DataDir, 0o700); err != nil {
-		return nil, fmt.Errorf("creating data directory: %w", err)
-	}
-	if err := os.MkdirAll(filepath.Dir(cfg.DBPath), 0o700); err != nil {
-		return nil, fmt.Errorf("creating db directory: %w", err)
-	}
-	if err := os.MkdirAll(cfg.MediaDir, 0o700); err != nil {
-		return nil, fmt.Errorf("creating media directory: %w", err)
-	}
-
 	return cfg, nil
+}
+
+// EnsureDirs creates the data dir and the folders of the database and the
+// media. effective does not: it runs for check and open too, which must
+// not make a ~/.fridolin for a config file that is not there, and for
+// every dashboard save, which would make a folder typed into Settings
+// before the restart that uses it. The bridge calls EnsureDirs once, as it
+// starts.
+func (c *Config) EnsureDirs() error {
+	if err := os.MkdirAll(c.DataDir, 0o700); err != nil {
+		return fmt.Errorf("creating data directory: %w", err)
+	}
+	if err := os.MkdirAll(filepath.Dir(c.DBPath), 0o700); err != nil {
+		return fmt.Errorf("creating db directory: %w", err)
+	}
+	if err := os.MkdirAll(c.MediaDir, 0o700); err != nil {
+		return fmt.Errorf("creating media directory: %w", err)
+	}
+	return nil
 }
 
 // protectDataDir takes group and other access away from the data dir and

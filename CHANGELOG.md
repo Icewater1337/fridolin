@@ -164,6 +164,17 @@ for compatibility.
   `/api/dev/inbound` passes `group_members` as one from WhatsApp does: from
   a member the group's entry does not admit, or with no sender, it is
   ignored, and the Dev page says why instead of "Message injected".
+- `fridolin check`, `fridolin open` and `fridolin rotate-token` fail when
+  there is no config file where they look, a mistyped `--config` say,
+  instead of going on with the defaults, and make no `~/.fridolin`. The
+  bridge makes its data folder and the folders of `db_path` and
+  `media_dir` as it starts, not when one is saved in Settings.
+- A `brain.json` with a `version` newer than 1 is refused instead of being
+  read as version 1 and written back without the fields this version does
+  not know: the brain shows as changed on disk, its approved settings keep
+  running, and no edit or approval writes over the file. Unknown fields in
+  `brain.json`, and unknown keys inside a section of `config.json`, are
+  logged by their path.
 
 ### Added
 
@@ -212,6 +223,9 @@ for compatibility.
   that leave its folder. The dashboard's folder browser and inspector keep
   file metadata checks inside your home folder, including child symlinks
   and symlinked marker files such as `.git`.
+- When adding a brain fails, cleanup stays in the folders it opened and
+  removes only unchanged files and directories it created. Replaced or
+  edited files and pre-existing empty directories are preserved.
 - A build chat on the Site's Build page shows that Claude's usage limit is
   reached, that its message is queued, or that the queue is full. It left
   out every notice that starts with ⏳, to leave out "Working on it".
@@ -219,6 +233,24 @@ for compatibility.
   out first, giving the sign-out up to 30 seconds. Before, it took the
   CLI's "Already logged in" for a new sign-in and showed Connected until
   the next check was refused again.
+- A brain's settings saved while `config.json` could not be written, or
+  refused by a later check, no longer leave its `brain.json` edited and
+  the brain shown as changed on disk: `brain.json` is written only once
+  the edit passed its checks, and put back when the save fails.
+  Allowing a group for a brain puts back every `brain.json` it changed
+  when one of them cannot be written.
+- A `config.json` edited by hand, or put back from a backup, while the
+  bridge runs is no longer written over by the next save from the
+  dashboard, a calendar sign-in or a Plaud sync: the bridge reads the
+  file before each save, runs on it from then on, and makes the change
+  on top of it. Saving the whole Settings page over it asks you to
+  reload first, and a file that does not load makes the save fail
+  instead of being written over (docs/CONFIGURATION.md).
+- A brain that cannot run, after a hand edit of `config.json` say, no
+  longer keeps every other brain from being saved or approved with its
+  own error: an edit is refused only for a clash it brings in. Allowing a
+  group for a brain is checked the same way, so it can no longer move
+  your DMs to another brain without a word.
 
 ### Kept for compatibility
 

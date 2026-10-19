@@ -797,8 +797,9 @@ func TestAddBrainRechecksAgainstOtherWriters(t *testing.T) {
 		m := BrainManifest{ID: "b", Name: "B", Routing: BrainRouting{Groups: []string{group}}}
 		added <- tb.do("POST", "/api/brains", map[string]any{"path": "~/b", "manifest": m, "create_dir": true})
 	}()
-	// It scaffolds only after its first check passed.
-	waitFor(t, 5*time.Second, "the add's scaffold", func() bool { return fileExists(filepath.Join(tb.home, "b", "brain.json")) })
+	// It scaffolds only after its first check passed; brain.json waits for
+	// the update that registers the brain.
+	waitFor(t, 5*time.Second, "the add's scaffold", func() bool { return fileExists(filepath.Join(tb.home, "b", defaultPromptFile)) })
 	close(release)
 	if err := <-saved; err != nil {
 		t.Fatal(err)
@@ -908,28 +909,6 @@ func TestFailedAddRemovesTheScaffold(t *testing.T) {
 	}
 	if w := tb.do("POST", "/api/brains", map[string]any{"path": "~/existing", "manifest": BrainManifest{ID: "x", Name: "X"}}); w.Code != 200 {
 		t.Fatalf("add again: %d %s", w.Code, w.Body.String())
-	}
-}
-
-// Undoing a scaffold removes files inside the brain's folder only, whatever
-// the list of created files says.
-func TestUnscaffoldStaysInTheFolder(t *testing.T) {
-	root := t.TempDir()
-	dir := filepath.Join(root, "brain")
-	if err := os.MkdirAll(filepath.Join(dir, "memories"), 0o700); err != nil {
-		t.Fatal(err)
-	}
-	for _, f := range []string{filepath.Join(root, "outside.md"), filepath.Join(dir, "memories", "README.md")} {
-		if err := os.WriteFile(f, []byte("x"), 0o600); err != nil {
-			t.Fatal(err)
-		}
-	}
-	unscaffold(dir, []string{"../outside.md", filepath.Join(root, "outside.md"), "memories/README.md"}, "")
-	if !fileExists(filepath.Join(root, "outside.md")) {
-		t.Error("a file outside the brain's folder was removed")
-	}
-	if dirExists(filepath.Join(dir, "memories")) {
-		t.Error("the scaffold inside the folder was left behind")
 	}
 }
 

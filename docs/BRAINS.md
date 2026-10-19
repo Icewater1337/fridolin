@@ -69,6 +69,7 @@ restart.
 
 | Field | Meaning |
 | --- | --- |
+| `version` | The version of `brain.json` the file is written in, `1` today; a file without it is version 1. A bridge refuses a `brain.json` of a newer version than it reads, from a newer Fridolin before you went back to an older one say: the Brains page shows it as changed on disk, with both versions, the approved copy keeps running, and no edit or approval writes over the file, which would drop the settings the older bridge does not know. |
 | `id` | Stable identifier (lowercase, digits, `-`, `_`). Used for history attribution, the sandbox profile and per-brain credential file names. It cannot be changed; remove the brain and add the folder again under a new id instead. |
 | `name` | Display name. |
 | `routing.handles_dms` | This brain answers direct messages. At most one brain. |
@@ -87,6 +88,11 @@ restart.
 [`schemas/brain.schema.json`](schemas/brain.schema.json) is a JSON Schema
 of the file, version 1.
 
+A field the bridge does not know, a typo such as `routing.handles_dm` or
+one a newer version added, is logged by its path when the bridge reads the
+file; the brain loads without it, and the next edit in the dashboard drops
+it from the file.
+
 ## Approval
 
 The bridge does not simply trust `brain.json`. Your accepted version is stored
@@ -97,7 +103,15 @@ edit its own `brain.json` — for instance after reading a document with
 instructions hidden in it — to claim your direct messages or another brain's
 group. Such a change has no effect: the dashboard marks the brain as
 *changed on disk* and shows the difference, and you approve it or not.
-Edits you make in the dashboard update both copies.
+Edits you make in the dashboard update both copies, together: `brain.json`
+is written once the edit has passed its checks, just before the bridge's
+config, and when the config then cannot be written, the save fails and
+`brain.json` is put back as it was. An edit of a brain whose `brain.json`
+is not a file the bridge reads (see below) fails rather than replace it.
+An edit or approval is refused when it would make brains clash (two
+brains for your DMs, one group for two brains and so on) or leave one that
+cannot run; a brain that cannot run already, after a hand edit of
+`config.json` say, keeps none of the others from being edited.
 
 ## Files the bridge reads and writes
 
@@ -224,8 +238,8 @@ version, go through what it printed:
 Then run `fridolin check` with this version. It must load the config,
 and a brain whose folder was in `brain_dirs` already may now be listed
 twice, which it reports as two brains with the same id: remove one of the
-two entries from `brain_dirs` in `config.json`. Until you do, the
-dashboard refuses to save any brain's settings.
+two entries from `brain_dirs` in `config.json`. Until you do, the bridge
+runs only the first of the two.
 
 ## What a brain loads
 

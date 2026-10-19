@@ -191,6 +191,19 @@ func TestConfigPath(t *testing.T) {
 				}
 			}
 			t.Chdir(wd)
+			// Every config the case names is there: check refuses one that
+			// is not, and must still say which it took.
+			for _, p := range []string{"home/.fridolin/config.json", tc.flag, tc.fridolinCfg, tc.cfgFile} {
+				if p == "" {
+					continue
+				}
+				if err := os.MkdirAll(filepath.Dir(abs(p)), 0o700); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.WriteFile(abs(p), []byte(`{}`), 0o600); err != nil {
+					t.Fatal(err)
+				}
+			}
 			var args []string
 			if tc.flag != "" {
 				args = []string{"--config", abs(tc.flag)}
