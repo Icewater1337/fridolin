@@ -17,10 +17,11 @@ func AccessPolicy(cfg *config.File) access.Policy {
 	return access.Policy{AllowedNumbers: cfg.AllowedNumbers, AllowAnyDM: cfg.AllowsAnyDM(), AllowedGroups: cfg.AllowedGroups, GroupMembers: cfg.GroupMembers, Triggers: cfg.Triggers}
 }
 
-func BackupSettings(cfg *config.File) backup.Settings {
+func BackupSettings(settings *config.Settings) backup.Settings {
+	cfg := settings.Live
 	bc := cfg.Backup
 	s := backup.Settings{Enabled: bc.Enabled, Remote: bc.Remote, Root: bc.Root, DailyAt: bc.DailyAt, RclonePath: bc.RclonePath,
-		KeepVersionsDays: bc.KeepVersions(), IncludeBridgeConfig: bc.IncludeBridge(), IncludeSecretFiles: bc.IncludeSecretFiles}
+		KeepVersionsDays: bc.KeepVersionsDays, IncludeBridgeConfig: bc.IncludeBridgeConfig, IncludeSecretFiles: bc.IncludeSecretFiles}
 	for _, ref := range cfg.BrainDirs {
 		if ref.Approved != nil {
 			s.ConfiguredIDs = append(s.ConfiguredIDs, ref.Approved.ID)
@@ -77,12 +78,17 @@ func CredentialsDir(cfg *config.File) string {
 // Get/Snapshot retain saved next-start values for the API. Only this copied
 // value pins startup settings; slices/maps retain the snapshot's read-only rule.
 func RuntimeConfig(cs *config.Store) *config.File {
-	live := cs.Get()
-	boot := cs.Boot()
-	c := *live
-	c.HTTPListen, c.DataDir, c.DBPath, c.MediaDir, c.LogLevel = boot.HTTPListen, boot.DataDir, boot.DBPath, boot.MediaDir, boot.LogLevel
-	c.Dashboard.Disabled = boot.DashboardDisabled
-	// Turning protection on applies immediately; turning it off waits for restart.
-	c.Dashboard.RequireToken = new(boot.DashboardRequireToken || live.DashboardRequiresToken())
+	settings := RuntimeSettings(cs)
+	c := config.EffectiveFile(&settings)
 	return &c
+}
+
+// RuntimeSettings pins startup resources and permits immediate tightening of
+// dashboard authentication. Disabling protection waits for the next start.
+func RuntimeSettings(cs *config.Store) config.Settings {
+	s := *cs.Runtime()
+	s.Boot = cs.Boot()
+	s.Live.Dashboard.Disabled = s.Boot.DashboardDisabled
+	s.Live.Dashboard.RequireToken = s.Boot.DashboardRequireToken || s.Live.Dashboard.RequireToken
+	return s
 }

@@ -13,7 +13,7 @@ import (
 
 func backupOptions(cfgs *config.Store, bm *BrainManager, notify func(context.Context, *brain.Brain, string) error) backup.Options {
 	boot := cfgs.Boot()
-	opts := backup.Options{BackupDir: boot.BackupDir(), RcloneConf: boot.RcloneConf(), Settings: func() backup.Settings { return BackupSettings(cfgs.Get()) },
+	opts := backup.Options{BackupDir: boot.BackupDir(), RcloneConf: boot.RcloneConf(), Settings: func() backup.Settings { return BackupSettings(cfgs.Runtime()) },
 		Targets: func() []backup.Target { return BackupTargets(bm.Brains(), notify) }, BridgeFiles: func() (backup.BridgeFiles, error) { return BackupFiles(cfgs) },
 		FindRclone: findRclone, Environ: func(ctx context.Context) []string {
 			return childEnv(helperScope(ctx), nil, "RCLONE_CONFIG="+boot.RcloneConf())
@@ -28,7 +28,7 @@ func backupOptions(cfgs *config.Store, bm *BrainManager, notify func(context.Con
 func newProjectedBackup(cfgs *config.Store, bm *BrainManager, notify func(context.Context, *brain.Brain, string) error) *backup.Manager {
 	m := backup.New(backupOptions(cfgs, bm, notify))
 	// Publication succeeds before the schedule moves; failed saves never reach this callback.
-	cfgs.Subscribe(func(prev, next *config.File) { m.SettingsChanged(BackupSettings(prev), BackupSettings(next)) })
+	cfgs.SubscribeRuntime(func(prev, next *config.Settings) { m.SettingsChanged(BackupSettings(prev), BackupSettings(next)) })
 	return m
 }
 

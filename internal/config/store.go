@@ -58,6 +58,7 @@ type Store struct {
 type Snapshot struct {
 	File      *File
 	Effective *File
+	Settings  *Settings
 	ETag      string
 	// Version counts the snapshots of this store: the one it opened with is
 	// 1, and each one swapped in after it is one more.
@@ -101,7 +102,7 @@ func Open(cfgPath string, options Options) (*Store, error) {
 	}
 	WarnGroupsWithoutMembers(nil, eff)
 	cs := &Store{path: cfgPath, startup: eff, boot: bootOf(eff, options.Paths), paths: options.Paths, goos: options.GOOS, checkBrains: options.CheckBrains}
-	cs.snap.Store(&Snapshot{File: file, Effective: eff, ETag: etagOf(raw), Version: 1})
+	cs.snap.Store(&Snapshot{File: file, Effective: eff, Settings: settingsOf(eff, cs.paths), ETag: etagOf(raw), Version: 1})
 	return cs, nil
 }
 
@@ -141,6 +142,10 @@ func (cs *Store) Startup() *File { return cs.startup }
 // shared by every goroutine until the next Update replaces it.
 func (cs *Store) Get() *File { return cs.snap.Load().Effective }
 
+// Runtime returns the value settings from the same atomic snapshot as Get.
+// Treat it and its slices and maps as read-only.
+func (cs *Store) Runtime() *Settings { return cs.snap.Load().Settings }
+
 // ETag identifies the current file contents for optimistic concurrency.
 func (cs *Store) ETag() string { return cs.snap.Load().ETag }
 
@@ -169,6 +174,12 @@ func (cs *Store) Subscribe(fn func(old, new *File)) {
 	cs.subsMu.Lock()
 	defer cs.subsMu.Unlock()
 	cs.subs = append(cs.subs, fn)
+}
+
+// SubscribeRuntime delivers the same ordered publications as Subscribe using
+// resolved value settings. The callback must not call Update.
+func (cs *Store) SubscribeRuntime(fn func(old, next *Settings)) {
+	cs.Subscribe(func(old, next *File) { fn(settingsOf(old, cs.paths), settingsOf(next, cs.paths)) })
 }
 
 // Update applies mutate to a copy of the file layer, validates the result,
@@ -316,7 +327,7 @@ func (cs *Store) commit(etag string, mutate func(*File, *Tx) error) (prev, next 
 	}
 	committed = true
 
-	saved := &Snapshot{File: file, Effective: eff, ETag: etagOf(data), Version: base.Version + 1}
+	saved := &Snapshot{File: file, Effective: eff, Settings: settingsOf(eff, cs.paths), ETag: etagOf(data), Version: base.Version + 1}
 	cs.snap.Store(saved)
 	next = saved
 	return prev, next, nil
@@ -344,7 +355,7 @@ func (cs *Store) reread(cur *Snapshot) (*Snapshot, error) {
 		var eff *File
 		if eff, err = cs.Resolve(file); err == nil {
 			log.Printf("config: %s changed on disk since the bridge read it, and applies from now on", cs.path)
-			return &Snapshot{File: file, Effective: eff, ETag: etag, Version: cur.Version + 1}, nil
+			return &Snapshot{File: file, Effective: eff, Settings: settingsOf(eff, cs.paths), ETag: etag, Version: cur.Version + 1}, nil
 		}
 	}
 	return nil, fmt.Errorf("%s changed on disk and does not load, so nothing was saved; fix the file (fridolin check says what is wrong): %w", cs.path, err)

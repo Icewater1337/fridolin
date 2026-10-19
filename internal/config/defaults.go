@@ -177,3 +177,13 @@ const (
 
 // defaultIncludeBridgeConfig is include_bridge_config's default.
 const defaultIncludeBridgeConfig = true
+
+// ResolveSettings derives runtime values without optional policy pointers.
+// The file projection remains available for persistence and dashboard responses.
+func ResolveSettings(file *File, paths Paths, goos string) (*Settings, error) {
+	c, err := Resolve(file, paths, goos)
+	if err != nil {
+		return nil, err
+	}
+	return settingsOf(c, paths), nil
+}
