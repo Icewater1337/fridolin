@@ -1,4 +1,4 @@
-package main
+package config
 
 import (
 	"encoding/json"
@@ -7,28 +7,27 @@ import (
 	"path/filepath"
 	"runtime"
 
-	"github.com/Icewater1337/fridolin/internal/config"
 	"github.com/Icewater1337/fridolin/internal/fsx"
 	"github.com/Icewater1337/fridolin/internal/trigger"
 )
 
 // Starter is written on the very first run, so the bridge can start and
 // everything else can be set up in the dashboard.
-func Starter() *config.Config {
+func Starter() *Config {
 	f := false
-	return &config.Config{
+	return &Config{
 		Comment:                    "Edit this in the dashboard (fridolin open). Every option: docs/CONFIGURATION.md",
-		Version:                    config.Version,
+		Version:                    Version,
 		AllowedNumbers:             []string{},
 		AllowAnyDM:                 &f,
 		AllowedGroups:              []string{},
 		Triggers:                   trigger.FromStrings([]string{"@claude"}),
 		DangerouslySkipPermissions: true,
-		HTTPListen:                 config.DefaultHTTPListen,
+		HTTPListen:                 DefaultHTTPListen,
 		OTPGuard:                   true,
-		Sandbox:                    config.SandboxConfig{Enabled: runtime.GOOS == "darwin", DenyPaths: []string{}, AllowPaths: []string{}},
+		Sandbox:                    SandboxConfig{Enabled: runtime.GOOS == "darwin", DenyPaths: []string{}, AllowPaths: []string{}},
 		// A new install has no scripts written before tokens.
-		ScriptAPI: config.ScriptAPIConfig{TokenlessSend: &f},
+		ScriptAPI: ScriptAPIConfig{TokenlessSend: &f},
 	}
 }
 
@@ -47,7 +46,7 @@ func WriteStarter(path, claudePath, dataDir string) error {
 	cfg.ClaudePath = claudePath
 	cfg.DataDir = dataDir
 	if dataDir == "" {
-		cfg.DataDir = StarterDataDir(config.HomeDir())
+		cfg.DataDir = StarterDataDir(HomeDir())
 	}
 	data, err := json.MarshalIndent(cfg, "", "  ")
 	if err != nil {
@@ -61,13 +60,13 @@ func WriteStarter(path, claudePath, dataDir string) error {
 // folder the bridge would pick now, written with ~ so that the config
 // still holds when a backup of it is restored under another home folder.
 func StarterDataDir(home string) string {
-	if _, source := config.ResolveDataDir("", home); source == config.DataDirFromLegacy {
-		return "~/" + config.LegacyDataDirName
+	if _, source := ResolveDataDir("", home); source == DataDirFromLegacy {
+		return "~/" + LegacyDataDirName
 	}
-	return "~/" + config.DataDirName
+	return "~/" + DataDirName
 }
 
 // DefaultPath is the default config file path for the current home.
 func DefaultPath() string {
-	return filepath.Join(config.DefaultDataDir(config.HomeDir()), "config.json")
+	return filepath.Join(DefaultDataDir(HomeDir()), "config.json")
 }

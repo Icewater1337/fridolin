@@ -1,4 +1,4 @@
-package main
+package config
 
 import (
 	"bytes"
@@ -18,8 +18,6 @@ import (
 	"sync"
 	"sync/atomic"
 
-	"github.com/Icewater1337/fridolin/internal/config"
-
 	"github.com/Icewater1337/fridolin/internal/manifest"
 
 	"github.com/Icewater1337/fridolin/internal/jsonx"
@@ -35,8 +33,8 @@ import (
 // the next message without a restart.
 type Store struct {
 	path        string
-	startup     *config.Config                       // the effective configuration the process started with
-	checkBrains func(old, next *config.Config) error // command-owned brain-set validation
+	startup     *Config                       // the effective configuration the process started with
+	checkBrains func(old, next *Config) error // command-owned brain-set validation
 
 	mu   sync.Mutex // serialises Update
 	snap atomic.Pointer[Snapshot]
@@ -46,7 +44,7 @@ type Store struct {
 	// the order they were swapped in, one at a time.
 	notifyMu sync.Mutex
 	subsMu   sync.Mutex
-	subs     []func(old, new *config.Config)
+	subs     []func(old, new *Config)
 }
 
 // Snapshot is one version of the configuration: the file layer, the
@@ -55,8 +53,8 @@ type Store struct {
 // one gets the three together, never one write's file with another's etag.
 // A snapshot is never changed: treat it and what it points to as read-only.
 type Snapshot struct {
-	File      *config.Config
-	Effective *config.Config
+	File      *Config
+	Effective *Config
 	ETag      string
 	// Version counts the snapshots of this store: the one it opened with is
 	// 1, and each one swapped in after it is one more.
@@ -70,17 +68,17 @@ var ErrConflict = errors.New("config changed since it was loaded — reload and 
 // configuration with defaults, which is what a fresh install starts from.
 // checkBrains validates registry edits under the commit lock before any write.
 // A nil callback permits reads and settings updates, but refuses brain edits.
-func Open(cfgPath string, checkBrains func(old, next *config.Config) error) (*Store, error) {
+func Open(cfgPath string, checkBrains func(old, next *Config) error) (*Store, error) {
 	// BRAIN_MODE switched classic mode on as "brain_mode": false did, and
 	// is refused like it (see retiredBrainMode). It is no setting: the
 	// environment only gets this check, so a bridge that ran classic mode
 	// from it does not quietly start without a brain for its chats.
-	if v := os.Getenv("BRAIN_MODE"); v != "" && !config.IsTruthy(v) {
-		return nil, config.ClassicModeRemoved("BRAIN_MODE="+v, "Unset BRAIN_MODE in the bridge's environment")
+	if v := os.Getenv("BRAIN_MODE"); v != "" && !IsTruthy(v) {
+		return nil, ClassicModeRemoved("BRAIN_MODE="+v, "Unset BRAIN_MODE in the bridge's environment")
 	}
 	warnDotEnvNotRead(cfgPath)
 
-	file := &config.Config{Version: config.Version}
+	file := &Config{Version: Version}
 	var raw []byte
 	if data, err := os.ReadFile(cfgPath); err == nil {
 		raw = data
@@ -91,14 +89,14 @@ func Open(cfgPath string, checkBrains func(old, next *config.Config) error) (*St
 		return nil, fmt.Errorf("reading config file %q: %w", cfgPath, err)
 	}
 
-	eff, err := config.Resolve(file)
+	eff, err := Resolve(file)
 	if err != nil {
 		return nil, err
 	}
 	if file.DataDir == "" {
 		warnLegacyDataDir(eff.DataDir)
 	}
-	config.WarnGroupsWithoutMembers(nil, eff)
+	WarnGroupsWithoutMembers(nil, eff)
 	cs := &Store{path: cfgPath, startup: eff, checkBrains: checkBrains}
 	cs.snap.Store(&Snapshot{File: file, Effective: eff, ETag: etagOf(raw), Version: 1})
 	return cs, nil
@@ -107,25 +105,25 @@ func Open(cfgPath string, checkBrains func(old, next *config.Config) error) (*St
 // decodeConfigFile decodes data, what the config file path holds, into the
 // file layer, and logs what is odd about it: retired keys, unknown ones,
 // chats no entry can match.
-func decodeConfigFile(path string, data []byte) (*config.Config, error) {
+func decodeConfigFile(path string, data []byte) (*Config, error) {
 	// Migrate in memory on startup and external edits; the next save writes
 	// this version while the snapshot ETag still identifies the original bytes.
-	migrated, notes, err := config.MigrateJSON(data)
-	if errors.Is(err, config.ErrTooNew) {
+	migrated, notes, err := MigrateJSON(data)
+	if errors.Is(err, ErrTooNew) {
 		return nil, fmt.Errorf("config file %q: %w. Run that newer version again, or put back a config.json from before it (see docs/CONFIGURATION.md#version)", path, err)
 	}
 	if err != nil {
 		return nil, fmt.Errorf("parsing config file %q: %w", path, err)
 	}
-	file := &config.Config{Version: config.Version}
+	file := &Config{Version: Version}
 	if err := json.Unmarshal(migrated, file); err != nil {
-		return nil, fmt.Errorf("parsing config file %q: %w", path, config.JSONError(err))
+		return nil, fmt.Errorf("parsing config file %q: %w", path, JSONError(err))
 	}
 	for _, note := range notes {
 		log.Printf("config %s: %s", path, note)
 	}
 	warnUnknownKeys(path, migrated)
-	config.WarnOddChats(path, file)
+	WarnOddChats(path, file)
 	return file, nil
 }
 
@@ -134,11 +132,11 @@ func (cs *Store) Path() string { return cs.path }
 
 // Startup returns the effective configuration the process started with:
 // what the settings that need a restart still are.
-func (cs *Store) Startup() *config.Config { return cs.startup }
+func (cs *Store) Startup() *Config { return cs.startup }
 
 // Get returns the effective configuration. Treat it as read-only: it is
 // shared by every goroutine until the next Update replaces it.
-func (cs *Store) Get() *config.Config { return cs.snap.Load().Effective }
+func (cs *Store) Get() *Config { return cs.snap.Load().Effective }
 
 // ETag identifies the current file contents for optimistic concurrency.
 func (cs *Store) ETag() string { return cs.snap.Load().ETag }
@@ -148,10 +146,10 @@ func (cs *Store) ETag() string { return cs.snap.Load().ETag }
 func (cs *Store) Snapshot() Snapshot { return *cs.snap.Load() }
 
 // FileCopy returns a deep copy of the file layer for editing.
-func (cs *Store) FileCopy() *config.Config { return MustClone(cs.snap.Load().File) }
+func (cs *Store) FileCopy() *Config { return MustClone(cs.snap.Load().File) }
 
 // MustClone returns a deep copy of c, a configuration the store holds.
-func MustClone(c *config.Config) *config.Config {
+func MustClone(c *Config) *Config {
 	out, err := c.Clone()
 	if err != nil {
 		// Unreachable: what the store holds always round-trips through JSON.
@@ -164,7 +162,7 @@ func MustClone(c *config.Config) *config.Config {
 // and new effective configurations. The subscribers hear of the updates in
 // the order they were made, and of one at a time, so fn must not call
 // Update: that waits for fn to return.
-func (cs *Store) Subscribe(fn func(old, new *config.Config)) {
+func (cs *Store) Subscribe(fn func(old, new *Config)) {
 	cs.subsMu.Lock()
 	defer cs.subsMu.Unlock()
 	cs.subs = append(cs.subs, fn)
@@ -175,8 +173,8 @@ func (cs *Store) Subscribe(fn func(old, new *config.Config)) {
 // skips the conflict check. It returns RestartRequired as of the new
 // configuration. UpdateTx says what happens when config.json was changed
 // by hand.
-func (cs *Store) Update(etag string, mutate func(*config.Config) error) (restart []string, err error) {
-	res, err := cs.UpdateTx(etag, func(c *config.Config, _ *Tx) error { return mutate(c) })
+func (cs *Store) Update(etag string, mutate func(*Config) error) (restart []string, err error) {
+	res, err := cs.UpdateTx(etag, func(c *Config, _ *Tx) error { return mutate(c) })
 	return res.Restart, err
 }
 
@@ -199,7 +197,7 @@ type UpdateResult struct {
 // etag "" mutate edits the file as it is now, so the change by hand
 // stays; with an etag the update is refused with ErrConflict, since
 // the caller sends a whole configuration made from the one before.
-func (cs *Store) UpdateTx(etag string, mutate func(c *config.Config, tx *Tx) error) (UpdateResult, error) {
+func (cs *Store) UpdateTx(etag string, mutate func(c *Config, tx *Tx) error) (UpdateResult, error) {
 	prev, next, err := cs.commit(etag, mutate)
 	if next != nil {
 		cs.notify(prev, next)
@@ -215,7 +213,7 @@ func (cs *Store) UpdateTx(etag string, mutate func(c *config.Config, tx *Tx) err
 // update is saved by then, and the other subscribers must still hear of it.
 func (cs *Store) notify(prev, next *Snapshot) {
 	defer cs.notifyMu.Unlock()
-	config.WarnGroupsWithoutMembers(prev.Effective, next.Effective)
+	WarnGroupsWithoutMembers(prev.Effective, next.Effective)
 	cs.subsMu.Lock()
 	subs := slices.Clone(cs.subs)
 	cs.subsMu.Unlock()
@@ -241,7 +239,7 @@ func (cs *Store) notify(prev, next *Snapshot) {
 // saved: net/http recovers a handler's panic and the bridge runs on, and a
 // lock left held would stop every later save, brain edit and calendar
 // sign-in for good.
-func (cs *Store) commit(etag string, mutate func(*config.Config, *Tx) error) (prev, next *Snapshot, err error) {
+func (cs *Store) commit(etag string, mutate func(*Config, *Tx) error) (prev, next *Snapshot, err error) {
 	cs.mu.Lock()
 	defer cs.mu.Unlock()
 	// Before the unlock: the subscribers hear of this snapshot before the
@@ -279,8 +277,8 @@ func (cs *Store) commit(etag string, mutate func(*config.Config, *Tx) error) (pr
 		return prev, next, err
 	}
 	// What is written is this version's file, whatever the edit made of it.
-	file.Version = config.Version
-	eff, err := config.Resolve(file)
+	file.Version = Version
+	eff, err := Resolve(file)
 	if err != nil {
 		return prev, next, err
 	}
@@ -340,8 +338,8 @@ func (cs *Store) reread(cur *Snapshot) (*Snapshot, error) {
 	}
 	file, err := decodeConfigFile(cs.path, data)
 	if err == nil {
-		var eff *config.Config
-		if eff, err = config.Resolve(file); err == nil {
+		var eff *Config
+		if eff, err = Resolve(file); err == nil {
 			log.Printf("config: %s changed on disk since the bridge read it, and applies from now on", cs.path)
 			return &Snapshot{File: file, Effective: eff, ETag: etag, Version: cur.Version + 1}, nil
 		}
@@ -515,25 +513,25 @@ func (cs *Store) RestartRequired() []string {
 // restartFields are settings read once at startup.
 var restartFields = []struct {
 	name string
-	get  func(*config.Config) string
+	get  func(*Config) string
 	// waits, when set, decides instead of get whether a change from the
 	// value at the start waits for a restart.
-	waits func(start, now *config.Config) bool
+	waits func(start, now *Config) bool
 }{
-	{name: "http_listen", get: func(c *config.Config) string { return c.HTTPListen }},
-	{name: "data_dir", get: func(c *config.Config) string { return c.DataDir }},
-	{name: "db_path", get: func(c *config.Config) string { return c.DBPath }},
-	{name: "media_dir", get: func(c *config.Config) string { return c.MediaDir }},
-	{name: "log_level", get: func(c *config.Config) string { return c.LogLevel }},
-	{name: "dashboard.disabled", get: func(c *config.Config) string { return fmt.Sprint(c.Dashboard.Disabled) }},
+	{name: "http_listen", get: func(c *Config) string { return c.HTTPListen }},
+	{name: "data_dir", get: func(c *Config) string { return c.DataDir }},
+	{name: "db_path", get: func(c *Config) string { return c.DBPath }},
+	{name: "media_dir", get: func(c *Config) string { return c.MediaDir }},
+	{name: "log_level", get: func(c *Config) string { return c.LogLevel }},
+	{name: "dashboard.disabled", get: func(c *Config) string { return fmt.Sprint(c.Dashboard.Disabled) }},
 	// Turning the token off waits for a restart (see apiGuard); turning it
 	// on applies at once.
-	{name: "dashboard.require_token", waits: func(start, now *config.Config) bool {
+	{name: "dashboard.require_token", waits: func(start, now *Config) bool {
 		return start.DashboardRequiresToken() && !now.DashboardRequiresToken()
 	}},
 }
 
-func restartRequired(old, new *config.Config) []string {
+func restartRequired(old, new *Config) []string {
 	var out []string
 	for _, f := range restartFields {
 		if f.waits != nil && f.waits(old, new) || f.waits == nil && f.get(old) != f.get(new) {
@@ -555,7 +553,7 @@ func etagOf(data []byte) string {
 // brains failing with "Not logged in". The file is not opened, so nothing
 // in it, a secret say, can end up in the log.
 func warnDotEnvNotRead(cfgPath string) {
-	path := config.DotEnvPath(cfgPath)
+	path := DotEnvPath(cfgPath)
 	if abs, err := filepath.Abs(path); err == nil {
 		path = abs // so the line names the folder, for a relative --config too
 	}
@@ -568,11 +566,11 @@ func warnDotEnvNotRead(cfgPath string) {
 // the rename, taken because ~/.fridolin does not exist, so that it can be
 // named in data_dir before the bridge stops looking for it.
 func warnLegacyDataDir(dataDir string) {
-	home := config.HomeDir()
-	if home == "" || dataDir != filepath.Join(home, config.LegacyDataDirName) {
+	home := HomeDir()
+	if home == "" || dataDir != filepath.Join(home, LegacyDataDirName) {
 		return
 	}
-	log.Printf("warning: data dir %s has the name from before the rename and is used because %s does not exist; set the data folder to it (Settings → Advanced) to keep it once the bridge no longer looks for that name", dataDir, filepath.Join(home, config.DataDirName))
+	log.Printf("warning: data dir %s has the name from before the rename and is used because %s does not exist; set the data folder to it (Settings → Advanced) to keep it once the bridge no longer looks for that name", dataDir, filepath.Join(home, DataDirName))
 }
 
 // DecodeReplacement decodes data, a whole configuration that is to
@@ -585,19 +583,19 @@ func warnLegacyDataDir(dataDir string) {
 // a version, from a dashboard tab opened before an upgrade, keeps a model
 // it still sends and cannot bring inline brains back, and one from a newer
 // version is refused.
-func DecodeReplacement(data []byte) (*config.Config, error) {
+func DecodeReplacement(data []byte) (*Config, error) {
 	if len(bytes.TrimSpace(data)) == 0 || string(bytes.TrimSpace(data)) == "null" {
 		return nil, errors.New("config required: send the whole config GET /api/config returns, with your changes")
 	}
-	migrated, _, err := config.MigrateJSON(data)
+	migrated, _, err := MigrateJSON(data)
 	if err != nil {
 		return nil, fmt.Errorf("invalid config: %w", err)
 	}
 	dec := json.NewDecoder(bytes.NewReader(migrated))
 	dec.DisallowUnknownFields()
-	var c config.Config
+	var c Config
 	if err := dec.Decode(&c); err != nil {
-		return nil, fmt.Errorf("invalid config: %w", config.JSONError(err))
+		return nil, fmt.Errorf("invalid config: %w", JSONError(err))
 	}
 	if missing := missingKeys(migrated, reflect.TypeOf(c), ""); len(missing) > 0 {
 		return nil, fmt.Errorf("the config leaves out %s: send the whole config GET /api/config returns, with your changes", strings.Join(missing, ", "))
@@ -641,32 +639,32 @@ func missingKeys(data []byte, t reflect.Type, prefix string) []string {
 // what brains may reach. LogSecurityChanges logs every change to them.
 var securitySettings = []struct {
 	name string
-	get  func(*config.Config) any // a string, or a []string for a list
+	get  func(*Config) any // a string, or a []string for a list
 }{
-	{"allowed_numbers", func(c *config.Config) any { return c.AllowedNumbers }},
-	{"allow_any_dm", func(c *config.Config) any { return fmt.Sprint(c.AllowsAnyDM()) }},
-	{"allowed_groups", func(c *config.Config) any { return c.AllowedGroups }},
-	{"group_members", func(c *config.Config) any { return config.GroupMemberPairs(c.GroupMembers) }},
-	{"dangerously_skip_permissions", func(c *config.Config) any { return fmt.Sprint(c.DangerouslySkipPermissions) }},
-	{"inherit_claude_user_config", func(c *config.Config) any { return fmt.Sprint(c.InheritClaudeUserConfig) }},
-	{"child_env_passthrough", func(c *config.Config) any { return c.ChildEnvPassthrough }},
-	{"sandbox.enabled", func(c *config.Config) any { return fmt.Sprint(c.Sandbox.Enabled) }},
-	{"sandbox.deny_paths", func(c *config.Config) any { return c.Sandbox.DenyPaths }},
-	{"sandbox.allow_paths", func(c *config.Config) any { return c.Sandbox.AllowPaths }},
-	{"sandbox.git_config", func(c *config.Config) any { return c.Sandbox.GitConfig }},
-	{"sandbox.credentials_dir", func(c *config.Config) any { return c.Sandbox.CredentialsDir }},
-	{"dashboard.require_token", func(c *config.Config) any { return fmt.Sprint(c.DashboardRequiresToken()) }},
-	{"ingest.enabled", func(c *config.Config) any { return fmt.Sprint(c.Ingest.Enabled) }},
-	{"script_api.tokenless_send", func(c *config.Config) any { return fmt.Sprint(c.TokenlessSend()) }},
-	{"http_listen", func(c *config.Config) any { return c.HTTPListen }},
-	{"data_dir", func(c *config.Config) any { return c.DataDir }},
-	{"db_path", func(c *config.Config) any { return c.DBPath }},
+	{"allowed_numbers", func(c *Config) any { return c.AllowedNumbers }},
+	{"allow_any_dm", func(c *Config) any { return fmt.Sprint(c.AllowsAnyDM()) }},
+	{"allowed_groups", func(c *Config) any { return c.AllowedGroups }},
+	{"group_members", func(c *Config) any { return GroupMemberPairs(c.GroupMembers) }},
+	{"dangerously_skip_permissions", func(c *Config) any { return fmt.Sprint(c.DangerouslySkipPermissions) }},
+	{"inherit_claude_user_config", func(c *Config) any { return fmt.Sprint(c.InheritClaudeUserConfig) }},
+	{"child_env_passthrough", func(c *Config) any { return c.ChildEnvPassthrough }},
+	{"sandbox.enabled", func(c *Config) any { return fmt.Sprint(c.Sandbox.Enabled) }},
+	{"sandbox.deny_paths", func(c *Config) any { return c.Sandbox.DenyPaths }},
+	{"sandbox.allow_paths", func(c *Config) any { return c.Sandbox.AllowPaths }},
+	{"sandbox.git_config", func(c *Config) any { return c.Sandbox.GitConfig }},
+	{"sandbox.credentials_dir", func(c *Config) any { return c.Sandbox.CredentialsDir }},
+	{"dashboard.require_token", func(c *Config) any { return fmt.Sprint(c.DashboardRequiresToken()) }},
+	{"ingest.enabled", func(c *Config) any { return fmt.Sprint(c.Ingest.Enabled) }},
+	{"script_api.tokenless_send", func(c *Config) any { return fmt.Sprint(c.TokenlessSend()) }},
+	{"http_listen", func(c *Config) any { return c.HTTPListen }},
+	{"data_dir", func(c *Config) any { return c.DataDir }},
+	{"db_path", func(c *Config) any { return c.DBPath }},
 }
 
 // LogSecurityChanges logs, in one line, how an update changed the security
 // settings, so the log shows afterwards when the sandbox went off or who
 // was let in. A list shows what was added (+) and removed (-).
-func LogSecurityChanges(prev, next *config.Config) {
+func LogSecurityChanges(prev, next *Config) {
 	var changes []string
 	for _, s := range securitySettings {
 		switch a, b := s.get(prev), s.get(next); a := a.(type) {
@@ -709,7 +707,7 @@ func listDiff(a, b []string) string {
 // version 1 are already removed and logged by the migration; the same keys
 // in a version 2 file are unknown settings.
 func warnUnknownKeys(path string, data []byte) {
-	if unknown := jsonx.UnknownKeys(data, reflect.TypeOf(config.Config{}), ""); len(unknown) > 0 {
+	if unknown := jsonx.UnknownKeys(data, reflect.TypeOf(Config{}), ""); len(unknown) > 0 {
 		log.Printf("config %s: ignoring unknown settings %v (they will be dropped when the dashboard saves)", path, unknown)
 	}
 }
