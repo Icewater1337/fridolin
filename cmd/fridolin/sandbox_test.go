@@ -132,7 +132,7 @@ func TestSandboxConfigNeedsMacOS(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(fmt.Sprintf("%s enabled=%v", tc.goos, tc.enabled), func(t *testing.T) {
-			err := SandboxConfig{Enabled: tc.enabled}.validate(tc.goos)
+			err := SandboxConfig{Enabled: tc.enabled}.Validate(tc.goos)
 			if (err != nil) != tc.wantErr {
 				t.Fatalf("validate = %v, want error %v", err, tc.wantErr)
 			}

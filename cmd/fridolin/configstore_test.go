@@ -366,9 +366,9 @@ func TestRetiredConfigKeys(t *testing.T) {
 				t.Fatal(err)
 			}
 			raw := readRawConfig(t, path)
-			for _, rk := range retiredKeys {
-				if v, ok := raw[rk.name]; ok {
-					t.Errorf("a save wrote %q: %s", rk.name, v)
+			for _, name := range RetiredKeyNames() {
+				if v, ok := raw[name]; ok {
+					t.Errorf("a save wrote %q: %s", name, v)
 				}
 			}
 			var saved string
@@ -587,59 +587,6 @@ func TestDotEnvIsNotRead(t *testing.T) {
 				t.Errorf("log %q mentions a .env, but there is none next to the config", got)
 			}
 		})
-	}
-}
-
-// config.json carries the version it was written in. A file without one is
-// version 1, which is migrated to the current version as it is read; a
-// newer version, or a version that is no number, is refused.
-func TestMigrateConfig(t *testing.T) {
-	cases := []struct {
-		name, config string
-		from         int
-		want         map[string]string // keys of the migrated file, as JSON; "" for a key it lacks
-		err          string            // part of the error, "" when it migrates
-	}{
-		{"no version", `{"log_level": "debug"}`, 1, map[string]string{"version": "2", "log_level": `"debug"`}, ""},
-		{"null", `{"version": null}`, 1, map[string]string{"version": "2"}, ""},
-		{"version 1 with retired keys", `{"version": 1, "model": "sonnet", "work_dir": "~/a", "brains": []}`, 1,
-			map[string]string{"version": "2", "brain_model": `"sonnet"`, "model": "", "work_dir": "", "brains": ""}, ""},
-		{"version 1 keeps its brain_model", `{"model": "sonnet", "brain_model": "opus"}`, 1, map[string]string{"brain_model": `"opus"`, "model": ""}, ""},
-		// The retired keys are version 1's: in a version 2 file they are
-		// unknown keys, which no migration touches.
-		{"version 2", `{"version": 2, "model": "sonnet"}`, 2, map[string]string{"version": "2", "model": `"sonnet"`, "brain_model": ""}, ""},
-		{"version 1 with inline brains", `{"brains": [{"name": "a"}]}`, 1, nil, `lists brains inline under "brains"`},
-		{"newer", `{"version": 3}`, 3, nil, "version 3 is newer than the version 2 this build of Fridolin reads"},
-		{"zero", `{"version": 0}`, 0, nil, "version 0: must be a whole number from 1 to 2"},
-		{"negative", `{"version": -1}`, 0, nil, "version -1: must be a whole number from 1 to 2"},
-		{"a string", `{"version": "2"}`, 0, nil, `version "2": must be a whole number`},
-		{"a fraction", `{"version": 1.5}`, 0, nil, "version 1.5: must be a whole number"},
-	}
-	for _, c := range cases {
-		t.Run(c.name, func(t *testing.T) {
-			var obj map[string]json.RawMessage
-			if err := json.Unmarshal([]byte(c.config), &obj); err != nil {
-				t.Fatal(err)
-			}
-			from, _, err := migrateConfig(obj)
-			switch {
-			case c.err != "" && (err == nil || !strings.Contains(err.Error(), c.err)):
-				t.Fatalf("err = %v, want one containing %q", err, c.err)
-			case c.err == "" && err != nil:
-				t.Fatalf("err = %v", err)
-			}
-			if from != c.from {
-				t.Errorf("from = %d, want %d", from, c.from)
-			}
-			for key, want := range c.want {
-				if got := string(obj[key]); got != want {
-					t.Errorf("%s = %s, want %s", key, got, want)
-				}
-			}
-		})
-	}
-	if len(configMigrations) != currentConfigVersion-1 {
-		t.Errorf("%d migrations for version %d: each version after 1 needs one", len(configMigrations), currentConfigVersion)
 	}
 }
 

@@ -873,21 +873,6 @@ func FuzzParseIdentityMap(f *testing.F) {
 
 // ── misc ──────────────────────────────────────────────────────────────────
 
-func TestIsLoopbackAddr(t *testing.T) {
-	loopback := []string{"127.0.0.1:8765", "localhost:8765", "[::1]:8765"}
-	for _, a := range loopback {
-		if !isLoopbackAddr(a) {
-			t.Errorf("isLoopbackAddr(%q) = false, want true", a)
-		}
-	}
-	exposed := []string{"0.0.0.0:8765", ":8765", "192.168.1.5:8765", "example.com:80", "8765"}
-	for _, a := range exposed {
-		if isLoopbackAddr(a) {
-			t.Errorf("isLoopbackAddr(%q) = true, want false", a)
-		}
-	}
-}
-
 // Some names are read outside Go: the dashboard labels the run outcomes
 // and the bridge's backup and offers the queue and observe modes. Only
 // this test keeps the two sides in step.

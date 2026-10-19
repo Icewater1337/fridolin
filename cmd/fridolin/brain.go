@@ -2334,7 +2334,7 @@ func settingsFor(cfg *Config, sp manifest.Spec) *brainSettings {
 		otpGuard:        cfg.OTPGuard,
 		otpMarkers:      append([]string(nil), cfg.OTPMarkers...),
 		viewer:          cfg.Viewer,
-		runTimeout:      cfg.RunTimeout(),
+		runTimeout:      runTimeout(cfg),
 		queueMode:       cfg.Queue.Mode,
 		maxPending:      cfg.Queue.MaxPending,
 		observe:         m.Observe,

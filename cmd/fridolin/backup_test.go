@@ -240,14 +240,6 @@ func TestBackupNextRun(t *testing.T) {
 	}
 }
 
-func TestBackupConfigValidate(t *testing.T) {
-	for _, bad := range []BackupConfig{{DailyAt: "25:00"}, {Remote: "my remote"}, {Root: "../x"}, {Root: "/abs"}, {Root: "a:b"}} {
-		if bad.validate() == nil {
-			t.Errorf("%+v should be rejected", bad)
-		}
-	}
-}
-
 func TestRcloneSection(t *testing.T) {
 	conf := "[other]\ntype = s3\n\n[brain-gdrive]\ntype = drive\nscope = drive.file\ntoken = {\"x\":1}\n"
 	s := rcloneSection(conf, "brain-gdrive")

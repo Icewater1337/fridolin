@@ -9,14 +9,12 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/Icewater1337/fridolin/internal/registry"
 	"io/fs"
 	"log"
 	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
-	"regexp"
 	"runtime"
 	"slices"
 	"sort"
@@ -26,6 +24,8 @@ import (
 	"time"
 	"unicode"
 	"unicode/utf8"
+
+	"github.com/Icewater1337/fridolin/internal/registry"
 
 	"github.com/Icewater1337/fridolin/internal/route"
 
@@ -485,20 +485,6 @@ func (b *Bridge) apiIgnored(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	httpapi.WriteJSON(w, http.StatusOK, chats)
-}
-
-// The form allowed_groups holds. Every edit of the allow lists goes
-// through phoneNumber and allowListGroup, so the dashboard's add boxes and
-// its Allow buttons agree on what they accept.
-var groupJIDRE = regexp.MustCompile(`^[0-9]+(-[0-9]+)?@g\.us$`)
-
-// allowListGroup is s as allowed_groups holds it: a group JID.
-func allowListGroup(s string) (string, error) {
-	g := strings.TrimSpace(s)
-	if !groupJIDRE.MatchString(g) {
-		return "", fmt.Errorf("%q is not a group JID: it looks like 120363000000000000@g.us", g)
-	}
-	return g, nil
 }
 
 // chatRequest is what /api/chats/allow and /api/chats/revoke take.

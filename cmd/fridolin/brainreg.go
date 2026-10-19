@@ -15,21 +15,6 @@ import (
 	"github.com/Icewater1337/fridolin/internal/fsx"
 )
 
-// BrainRef is one brain folder in config.json's brain_dirs. Approved is the
-// manifest you accepted in the dashboard. The bridge runs the approved
-// version: a brain can edit its own brain.json, and must not be able to grant
-// itself your DMs or another brain's groups that way. Differences show up in
-// the dashboard as "changed on disk" until you approve them.
-type BrainRef struct {
-	Path     string             `json:"path"`
-	Approved *manifest.Manifest `json:"approved"`
-}
-
-// Dir is the brain's folder with ~ expanded, for code that works on the
-// file layer, where Path is kept as typed. The effective configuration has
-// Path expanded already.
-func (r BrainRef) Dir() string { return fsx.ExpandHome(r.Path, homeDir()) }
-
 // BrainIssue is a problem with one configured brain, shown on the dashboard.
 type BrainIssue struct {
 	ID     string `json:"id,omitempty"`

@@ -57,31 +57,6 @@ import (
 // or digit.
 const bridgeBackupID = "_bridge"
 
-// BackupConfig controls Google Drive backups.
-type BackupConfig struct {
-	// Enabled turns on the daily scheduled backup.
-	Enabled bool `json:"enabled"`
-	// Remote is the rclone remote name inside the bridge's own rclone config.
-	Remote string `json:"remote,omitempty"`
-	// Root is the folder in Google Drive that holds every backup.
-	Root string `json:"root,omitempty"`
-	// DailyAt is the local time of the scheduled backup, "HH:MM".
-	DailyAt string `json:"daily_at,omitempty"`
-	// RclonePath overrides the rclone binary (default: found in the PATH
-	// folders helperPath keeps, else in rcloneFallbacks).
-	RclonePath string `json:"rclone_path,omitempty"`
-	// KeepVersionsDays is how long a version folder is kept after the run
-	// that made it (default 30; 0 keeps them forever).
-	KeepVersionsDays *int `json:"keep_versions_days,omitempty"`
-	// IncludeBridgeConfig also backs up config.json and the brain list
-	// (default true). Never included: the WhatsApp session, .env, tokens.
-	IncludeBridgeConfig *bool `json:"include_bridge_config,omitempty"`
-	// IncludeSecretFiles also uploads the files of backupSecretExcludes
-	// from brain folders, which are otherwise left out whatever a brain's
-	// excludes say. Off by default; config.json only.
-	IncludeSecretFiles bool `json:"include_secret_files,omitempty"`
-}
-
 // backupSecretExcludes are the files of a brain folder a backup leaves out
 // whatever the brain's exclude list says, unless include_secret_files is on:
 // a brain may keep API keys in a .env, private keys, and a calendar token
@@ -97,39 +72,6 @@ var backupSecretExcludes = []string{
 	"id_rsa*", "id_ecdsa*", "id_ed25519*",
 	"google_calendar_*.json",
 	".credentials.json",
-}
-
-var (
-	dailyAtRe    = regexp.MustCompile(`^([01]\d|2[0-3]):[0-5]\d$`)
-	remoteNameRe = regexp.MustCompile(`^[A-Za-z0-9_-]{1,40}$`)
-)
-
-// defaultIncludeBridgeConfig is include_bridge_config's default.
-const defaultIncludeBridgeConfig = true
-
-// includeBridge and keepVersions read the two settings that are pointers so
-// that an unset one can be told from false or 0. effective fills both in,
-// with the same defaults, so the default of each lives in one place.
-func (bc BackupConfig) includeBridge() bool {
-	return boolOr(bc.IncludeBridgeConfig, defaultIncludeBridgeConfig)
-}
-
-func (bc BackupConfig) keepVersions() int { return intOr(bc.KeepVersionsDays, defaultKeepVersions) }
-
-func (bc BackupConfig) validate() error {
-	if bc.DailyAt != "" && !dailyAtRe.MatchString(bc.DailyAt) {
-		return fmt.Errorf("backup.daily_at %q must be HH:MM (24h)", bc.DailyAt)
-	}
-	if bc.Remote != "" && !remoteNameRe.MatchString(bc.Remote) {
-		return fmt.Errorf("backup.remote %q may only contain letters, digits, - and _", bc.Remote)
-	}
-	if strings.ContainsAny(bc.Root, ":\r\n\\") || strings.HasPrefix(bc.Root, "/") || strings.Contains(bc.Root, "..") {
-		return fmt.Errorf("backup.root %q must be a plain folder name such as my-assistant-backup", bc.Root)
-	}
-	if bc.KeepVersionsDays != nil && *bc.KeepVersionsDays < 0 {
-		return fmt.Errorf("backup.keep_versions_days cannot be negative")
-	}
-	return nil
 }
 
 // BackupResult is the outcome of backing up one brain (or the bridge config).
@@ -620,7 +562,7 @@ func (b *Bridge) apiBackupStatus(w http.ResponseWriter, r *http.Request) {
 		"connected":             connected,
 		"connect":               copyOf(m.connect),
 		"settings":              cfg.Backup,
-		"include_bridge_config": cfg.Backup.includeBridge(),
+		"include_bridge_config": cfg.Backup.IncludeBridge(),
 		"secret_excludes":       backupSecretExcludes,
 		"brains":                rows,
 		"bridge":                copyOf(m.state.Bridge),
@@ -1003,7 +945,7 @@ func (b *Bridge) apiBackupRun(w http.ResponseWriter, r *http.Request) {
 		httpapi.WriteErr(w, http.StatusBadRequest, "force needs a brain: name the brains to mirror in \"brains\"")
 		return
 	}
-	include := boolOr(req.IncludeBridge, b.cfgs.Get().Backup.includeBridge())
+	include := boolOr(req.IncludeBridge, b.cfgs.Get().Backup.IncludeBridge())
 	if err := b.backup.StartRun(req.Brains, include, "manual", req.Force); err != nil {
 		httpapi.WriteErr(w, http.StatusConflict, err.Error())
 		return
@@ -1616,7 +1558,7 @@ func (j *jsonStats) lastError() string {
 // copy of a long-unchanged file in the very run that replaced or deleted it.
 func (m *BackupManager) prune(ctx context.Context, targets []*Brain) {
 	cfg := m.cfgs.Get()
-	days := cfg.Backup.keepVersions()
+	days := cfg.Backup.KeepVersions()
 	if days <= 0 {
 		return
 	}
@@ -1990,7 +1932,7 @@ func (m *BackupManager) tick(now time.Time) {
 	if !runNow || busy {
 		return
 	}
-	if err := m.StartRun(nil, cfg.Backup.includeBridge(), "scheduled", false); err != nil {
+	if err := m.StartRun(nil, cfg.Backup.IncludeBridge(), "scheduled", false); err != nil {
 		log.Printf("scheduled backup: %v", err)
 		return
 	}

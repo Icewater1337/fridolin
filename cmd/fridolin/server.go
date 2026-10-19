@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"log"
-	"net"
 	"net/http"
 	"slices"
 	"strings"
@@ -43,19 +42,6 @@ type ingestRequest struct {
 	// that still sends it is refused with the field to use instead, rather
 	// than failing on a brain it does not name.
 	Scope string `json:"scope"`
-}
-
-// isLoopbackAddr reports whether addr binds to a loopback interface.
-func isLoopbackAddr(addr string) bool {
-	host, _, err := net.SplitHostPort(addr)
-	if err != nil {
-		return false
-	}
-	if host == "localhost" {
-		return true
-	}
-	ip := net.ParseIP(host)
-	return ip != nil && ip.IsLoopback()
 }
 
 // readyResponse is the body of GET /ready: whether messages can go out and

@@ -147,7 +147,7 @@ func (cs *ConfigStore) FileCopy() *Config { return mustClone(cs.snap.Load().File
 
 // mustClone returns a deep copy of c, a configuration the store holds.
 func mustClone(c *Config) *Config {
-	out, err := c.clone()
+	out, err := c.Clone()
 	if err != nil {
 		// Unreachable: what the store holds always round-trips through JSON.
 		panic(err)
@@ -264,7 +264,7 @@ func (cs *ConfigStore) commit(etag string, mutate func(*Config, *Tx) error) (pre
 	if etag != "" && etag != base.ETag {
 		return prev, next, ErrConfigConflict
 	}
-	file, err := base.File.clone()
+	file, err := base.File.Clone()
 	if err != nil {
 		return prev, next, err
 	}

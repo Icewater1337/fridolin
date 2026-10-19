@@ -46,19 +46,11 @@ type schemaType struct {
 
 // schemaTypes are the schemas of docs/schemas and their Go types.
 var schemaTypes = []schemaType{
-	{schema: "config.schema.json", typ: reflect.TypeFor[Config](), closed: true, extra: retiredKeyNames()},
+	{schema: "config.schema.json", typ: reflect.TypeFor[Config](), closed: true, extra: RetiredKeyNames()},
 	{schema: "brain.schema.json", typ: reflect.TypeFor[manifest.Manifest](), closed: true},
 	{schema: "history-line.schema.json", typ: reflect.TypeFor[history.Entry](), closed: true},
 	{schema: "send-request.schema.json", typ: reflect.TypeFor[sendRequest]()},
 	{schema: "ingest-request.schema.json", typ: reflect.TypeFor[ingestRequest](), refused: []string{"scope"}},
-}
-
-func retiredKeyNames() []string {
-	var names []string
-	for _, rk := range retiredKeys {
-		names = append(names, rk.name)
-	}
-	return names
 }
 
 // TestSchemasFollowTheGoTypes: every key of each Go type is in its schema,
@@ -518,7 +510,6 @@ func TestConfigSchemaTakesWhatTheBridgeTakes(t *testing.T) {
 // to take, such as a new effort of the Claude CLI, that the schema still
 // refuses.
 func TestSchemaEnumsAreTheBridgesValues(t *testing.T) {
-	keys := func(m map[string]bool) []string { return slices.Collect(maps.Keys(m)) }
 	var matches, levels []string
 	for _, m := range trigger.MatchValues() {
 		matches = append(matches, string(m))
@@ -536,8 +527,8 @@ func TestSchemaEnumsAreTheBridgesValues(t *testing.T) {
 		{"brain_effort", "config.schema.json#/properties/brain_effort", manifest.Efforts(), `{"brain_effort": %s}`},
 		{"agent_provider", "config.schema.json#/properties/agent_provider", []string{"", "claude", "codex"}, `{"agent_provider": %s}`},
 		{"codex_effort", "config.schema.json#/properties/codex_effort", manifest.Efforts(), `{"codex_effort": %s}`},
-		{"queue.mode", "config.schema.json#/properties/queue/properties/mode", keys(validQueueModes), `{"queue": {"mode": %s}}`},
-		{"sandbox.git_config", "config.schema.json#/properties/sandbox/properties/git_config", keys(validGitConfigs), `{"sandbox": {"git_config": %s}}`},
+		{"queue.mode", "config.schema.json#/properties/queue/properties/mode", QueueModes(), `{"queue": {"mode": %s}}`},
+		{"sandbox.git_config", "config.schema.json#/properties/sandbox/properties/git_config", GitConfigs(), `{"sandbox": {"git_config": %s}}`},
 		{"triggers match", "config.schema.json#/properties/triggers/items/oneOf/1/properties/match", matches, `{"triggers": [{"text": "@c", "match": %s}]}`},
 		{"log_level", "config.schema.json#/properties/log_level", levels, `{"log_level": %s}`},
 		{"brain.json effort", "brain.schema.json#/properties/effort", manifest.Efforts(), `{"id": "a", "name": "A", "effort": %s}`},

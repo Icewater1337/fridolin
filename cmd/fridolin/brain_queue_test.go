@@ -1608,7 +1608,7 @@ func TestRunTimeoutSetting(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if got := cfg.RunTimeout(); got != tc.want {
+			if got := runTimeout(cfg); got != tc.want {
 				t.Errorf("RunTimeout = %v, want %v", got, tc.want)
 			}
 		})
