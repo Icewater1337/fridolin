@@ -1,27 +1,41 @@
 package main
 
 import (
+	"context"
 	"errors"
-	"io/fs"
 	"net/http"
-	"os"
-	"path/filepath"
-	"strings"
 
 	"github.com/Icewater1337/fridolin/internal/apperr"
 	"github.com/Icewater1337/fridolin/internal/backup"
 	"github.com/Icewater1337/fridolin/internal/config"
-	"github.com/Icewater1337/fridolin/internal/fsx"
 	"github.com/Icewater1337/fridolin/internal/httpapi"
-	"github.com/Icewater1337/fridolin/internal/registry"
 )
 
-func (b *Bridge) apiBackupStatus(w http.ResponseWriter, r *http.Request) {
-	httpapi.WriteJSON(w, http.StatusOK, b.backup.Status())
+// BackupService is the backup job surface used by the HTTP adapter.
+type BackupService interface {
+	Status() map[string]any
+	Connect() error
+	Disconnect(context.Context) error
+	StartRun([]string, bool, string, bool) error
+	Cancel() error
+	Versions(context.Context, string) ([]string, error)
+	Restore(backup.RestoreRequest, func(string) (string, error)) (string, error)
 }
 
-func (b *Bridge) apiBackupConnect(w http.ResponseWriter, r *http.Request) {
-	if err := b.backup.Connect(); err != nil {
+type BackupAPI struct {
+	Backup        func() BackupService
+	UpdateConfig  func(func(*config.Config) error) error
+	IncludeBridge func() bool
+	UpdateBrain   func(string, *bool, []string) error
+	RestoreTarget func(string) (string, error)
+}
+
+func (a *BackupAPI) Status(w http.ResponseWriter, r *http.Request) {
+	httpapi.WriteJSON(w, http.StatusOK, a.Backup().Status())
+}
+
+func (a *BackupAPI) Connect(w http.ResponseWriter, r *http.Request) {
+	if err := a.Backup().Connect(); err != nil {
 		status := http.StatusInternalServerError
 		switch apperr.KindOf(err) {
 		case apperr.Precondition:
@@ -37,8 +51,8 @@ func (b *Bridge) apiBackupConnect(w http.ResponseWriter, r *http.Request) {
 	httpapi.WriteJSON(w, http.StatusAccepted, map[string]string{"status": "connecting"})
 }
 
-func (b *Bridge) apiBackupDisconnect(w http.ResponseWriter, r *http.Request) {
-	if err := b.backup.Disconnect(r.Context()); err != nil {
+func (a *BackupAPI) Disconnect(w http.ResponseWriter, r *http.Request) {
+	if err := a.Backup().Disconnect(r.Context()); err != nil {
 		status := http.StatusInternalServerError
 		if apperr.KindOf(err) == apperr.Conflict {
 			status = http.StatusConflict
@@ -49,7 +63,7 @@ func (b *Bridge) apiBackupDisconnect(w http.ResponseWriter, r *http.Request) {
 	httpapi.WriteJSON(w, http.StatusOK, map[string]string{"status": "disconnected"})
 }
 
-func (b *Bridge) apiBackupSettings(w http.ResponseWriter, r *http.Request) {
+func (a *BackupAPI) Settings(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		Enabled             *bool   `json:"enabled"`
 		DailyAt             *string `json:"daily_at"`
@@ -61,7 +75,7 @@ func (b *Bridge) apiBackupSettings(w http.ResponseWriter, r *http.Request) {
 		httpapi.WriteErr(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	_, err := b.cfgs.Update("", func(c *config.Config) error {
+	err := a.UpdateConfig(func(c *config.Config) error {
 		if req.Enabled != nil {
 			c.Backup.Enabled = *req.Enabled
 		}
@@ -88,7 +102,7 @@ func (b *Bridge) apiBackupSettings(w http.ResponseWriter, r *http.Request) {
 
 // apiBrainBackup changes one brain's backup settings, which live in its
 // manifest: whether it is backed up and what is left out.
-func (b *Bridge) apiBrainBackup(w http.ResponseWriter, r *http.Request) {
+func (a *BackupAPI) BrainSettings(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		Enabled *bool    `json:"enabled"`
 		Exclude []string `json:"exclude"`
@@ -97,14 +111,14 @@ func (b *Bridge) apiBrainBackup(w http.ResponseWriter, r *http.Request) {
 		httpapi.WriteErr(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	if err := b.registry.UpdateBackup(r.PathValue("id"), req.Enabled, req.Exclude); err != nil {
+	if err := a.UpdateBrain(r.PathValue("id"), req.Enabled, req.Exclude); err != nil {
 		httpapi.WriteErr(w, http.StatusUnprocessableEntity, err.Error())
 		return
 	}
 	httpapi.WriteJSON(w, http.StatusOK, map[string]string{"status": "saved"})
 }
 
-func (b *Bridge) apiBackupRun(w http.ResponseWriter, r *http.Request) {
+func (a *BackupAPI) Run(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		Brains        []string `json:"brains"`
 		IncludeBridge *bool    `json:"include_bridge"`
@@ -122,25 +136,25 @@ func (b *Bridge) apiBackupRun(w http.ResponseWriter, r *http.Request) {
 		httpapi.WriteErr(w, http.StatusBadRequest, "force needs a brain: name the brains to mirror in \"brains\"")
 		return
 	}
-	include := config.BoolOr(req.IncludeBridge, b.cfgs.Get().Backup.IncludeBridge())
-	if err := b.backup.StartRun(req.Brains, include, "manual", req.Force); err != nil {
+	include := config.BoolOr(req.IncludeBridge, a.IncludeBridge())
+	if err := a.Backup().StartRun(req.Brains, include, "manual", req.Force); err != nil {
 		httpapi.WriteErr(w, http.StatusConflict, err.Error())
 		return
 	}
 	httpapi.WriteJSON(w, http.StatusAccepted, map[string]string{"status": "started"})
 }
 
-func (b *Bridge) apiBackupCancel(w http.ResponseWriter, r *http.Request) {
-	if err := b.backup.Cancel(); err != nil {
+func (a *BackupAPI) Cancel(w http.ResponseWriter, r *http.Request) {
+	if err := a.Backup().Cancel(); err != nil {
 		httpapi.WriteErr(w, http.StatusConflict, err.Error())
 		return
 	}
 	httpapi.WriteJSON(w, http.StatusOK, map[string]string{"status": "cancelling"})
 }
 
-func (b *Bridge) apiBackupVersions(w http.ResponseWriter, r *http.Request) {
+func (a *BackupAPI) Versions(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
-	versions, err := b.backup.Versions(r.Context(), id)
+	versions, err := a.Backup().Versions(r.Context(), id)
 	if err != nil {
 		status := http.StatusBadGateway
 		switch apperr.KindOf(err) {
@@ -155,59 +169,11 @@ func (b *Bridge) apiBackupVersions(w http.ResponseWriter, r *http.Request) {
 	httpapi.WriteJSON(w, http.StatusOK, map[string]any{"brain": id, "versions": versions})
 }
 
-// restoreTarget checks the folder a restore copies into, as for a new brain
-// (CheckBrainPath): inside your home folder, neither the data dir nor in or
-// around a brain, and not the credentials folder either; and new or empty.
-// It returns the folder, resolved.
-func (b *Bridge) restoreTarget(p string) (string, error) {
-	cfg := b.cfgs.Get()
-	home := b.cfgs.Boot().Home
-	checkDir := brainDirCheck(b.cfgs)
-	target, problems, _ := registry.CheckPath(resolveExisting(fsx.ExpandHome(strings.TrimSpace(p), home)), registry.PathContext{
-		Home: home, Others: registryFor(b.cfgs).OtherDirs(cfg),
-		CheckDir: func(dir, configured, home string) error { return checkDir(dir, configured, cfg, home) },
-	})
-	if creds := fsx.Canonical(cfg.Sandbox.CredentialsDir); len(problems) == 0 && creds != "" && (fsx.Within(target, creds) || fsx.Within(creds, target)) {
-		problems = append(problems, "the credentials folder cannot be (or contain) the restore folder")
-	}
-	if len(problems) == 0 {
-		if err := checkRestoreTarget(target, cfg, home); err != nil {
-			problems = append(problems, "the restore folder "+err.Error()+" — pick a new folder")
-		}
-	}
-	if len(problems) == 0 {
-		if err := checkRestoreTarget(target, runtimeConfig(b.cfgs), home); err != nil {
-			problems = append(problems, "the restore folder "+err.Error()+" — pick a new folder")
-		}
-	}
-	if len(problems) > 0 {
-		return "", errors.New(strings.Join(problems, "; "))
-	}
-	// The folder comes from the request, and CheckBrainPath only reports
-	// on it. Build what is listed, made and copied into from your home
-	// folder and a part of it that stays inside, so that it is there by
-	// construction and not only by that report.
-	home = fsx.Canonical(home)
-	rel, err := filepath.Rel(home, target)
-	if err != nil || rel == "." || !filepath.IsLocal(rel) {
-		return "", errors.New("restore into a new folder inside your home folder")
-	}
-	target = filepath.Join(home, rel)
-	entries, err := os.ReadDir(target)
-	switch {
-	case err == nil && len(entries) > 0:
-		return "", errors.New("the restore folder must be new or empty")
-	case err != nil && !errors.Is(err, fs.ErrNotExist):
-		return "", err
-	}
-	return target, nil
-}
-
 // apiBackupRestore copies a backup into a new, empty folder. It never writes
 // into an existing brain: you inspect the copy and add it as a brain (or
 // swap folders) yourself. The restore runs as the job; how it went is saved
 // as the state's LastRestore, which the Backup page shows.
-func (b *Bridge) apiBackupRestore(w http.ResponseWriter, r *http.Request) {
+func (a *BackupAPI) Restore(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		Brain   string `json:"brain"`
 		Version string `json:"version"` // "current" or a versions/<ts> name
@@ -217,7 +183,7 @@ func (b *Bridge) apiBackupRestore(w http.ResponseWriter, r *http.Request) {
 		httpapi.WriteErr(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	target, err := b.backup.Restore(backup.RestoreRequest{Brain: req.Brain, Version: req.Version, Target: req.Target}, b.restoreTarget)
+	target, err := a.Backup().Restore(backup.RestoreRequest{Brain: req.Brain, Version: req.Version, Target: req.Target}, a.RestoreTarget)
 	if err != nil {
 		status := http.StatusInternalServerError
 		switch apperr.KindOf(err) {
