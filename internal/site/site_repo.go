@@ -446,7 +446,13 @@ func (m *SiteManager) manifestAt(ctx context.Context, commit, file string) map[s
 	if commit == "" {
 		return nil
 	}
-	data, err := m.git(ctx, m.repoDir(), "show", commit+":"+file)
+	object := commit + ":" + file
+	// A revision is data, never a Git option. The explicit check also covers
+	// settings loaded from disk and keeps this helper safe for future callers.
+	if strings.HasPrefix(object, "--") || strings.HasPrefix(object, "-") {
+		return nil
+	}
+	data, err := m.git(ctx, m.repoDir(), "show", "--end-of-options", object, "--")
 	if err != nil {
 		return nil
 	}
