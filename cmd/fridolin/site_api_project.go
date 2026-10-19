@@ -3,13 +3,14 @@ package main
 import (
 	"github.com/Icewater1337/fridolin/internal/fsx"
 	"github.com/Icewater1337/fridolin/internal/google"
+	"github.com/Icewater1337/fridolin/internal/httpapi"
 	"net/http"
 	"os"
 	"strings"
 )
 
 func (b *Bridge) siteAPI(mux *http.ServeMux) {
-	(&SiteAPI{Site: func() SiteService { return b.site }, StatusView: b.siteStatusView, BuildersView: b.siteBuildersView, BuildRoutes: b.buildAPI}).Register(mux)
+	(&httpapi.SiteAPI{Site: func() httpapi.SiteService { return b.site }, StatusView: b.siteStatusView, BuildersView: b.siteBuildersView, BuildRoutes: b.buildAPI}).Register(mux)
 }
 func (b *Bridge) siteStatusView() map[string]any {
 	m := b.site
