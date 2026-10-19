@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Icewater1337/fridolin/internal/brain"
 	outboundmsg "github.com/Icewater1337/fridolin/internal/outbound"
 
 	"github.com/Icewater1337/fridolin/internal/manifest"
@@ -222,9 +223,10 @@ func TestLongBuildChatAnswerStaysWhole(t *testing.T) {
 // The Build page shows the log of the run in flight: from the heading that
 // names its pid to the next run's, never the lines of the runs before it.
 func TestCurrentRunLogIsTheRunsOwn(t *testing.T) {
-	chatJID := Inbound{Inbound: chat.Inbound{JID: buildChatJID("web", 1), Sender: "dashboard"}}
-	s := &brainSettings{model: "sonnet"}
-	heading := func(pid int) string { return "[10:00:00] " + runHeading(chatJID, s, pid) }
+	chatJID := brain.Inbound{Inbound: chat.Inbound{JID: buildChatJID("web", 1), Sender: "dashboard"}}
+	heading := func(pid int) string {
+		return fmt.Sprintf("[10:00:00] ── Run for %s from %s, pid %d, model sonnet ──", chatJID.JID, chatJID.Sender, pid)
+	}
 	twoRuns := []string{
 		heading(101),
 		"[10:00:01] 🔧 Tool: Read",
@@ -282,7 +284,7 @@ func TestCurrentRunLogIsTheRunsOwn(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			path := filepath.Join(t.TempDir(), streamLogName)
+			path := filepath.Join(t.TempDir(), brain.StreamLogName)
 			if err := os.WriteFile(path, []byte(strings.Join(c.lines, "\n")+"\n"), 0o600); err != nil {
 				t.Fatal(err)
 			}
@@ -305,7 +307,7 @@ func TestCurrentRunLogIsTheRunsOwn(t *testing.T) {
 			}
 			return len(fds)
 		}
-		path := filepath.Join(t.TempDir(), streamLogName)
+		path := filepath.Join(t.TempDir(), brain.StreamLogName)
 		if err := os.WriteFile(path, []byte(strings.Join(twoRuns, "\n")+"\n"), 0o600); err != nil {
 			t.Fatal(err)
 		}

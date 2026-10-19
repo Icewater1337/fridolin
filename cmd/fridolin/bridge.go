@@ -15,22 +15,26 @@ import (
 	"unicode"
 
 	"github.com/Icewater1337/fridolin/internal/backup"
+	brainruntime "github.com/Icewater1337/fridolin/internal/brain"
 	"github.com/Icewater1337/fridolin/internal/devchat"
+	outboundmsg "github.com/Icewater1337/fridolin/internal/outbound"
+	"github.com/Icewater1337/fridolin/internal/whatsapp"
+
+	"github.com/Icewater1337/fridolin/internal/registry"
+
+	"github.com/Icewater1337/fridolin/internal/claudecli"
+
+	"github.com/Icewater1337/fridolin/internal/config"
+	"github.com/Icewater1337/fridolin/internal/httpapi"
+	"github.com/Icewater1337/fridolin/internal/manifest"
 
 	"github.com/Icewater1337/fridolin/internal/activity"
 	"github.com/Icewater1337/fridolin/internal/chat"
-	"github.com/Icewater1337/fridolin/internal/claudecli"
-	"github.com/Icewater1337/fridolin/internal/config"
 	"github.com/Icewater1337/fridolin/internal/history"
-	"github.com/Icewater1337/fridolin/internal/httpapi"
 	"github.com/Icewater1337/fridolin/internal/logx"
-	"github.com/Icewater1337/fridolin/internal/manifest"
 	"github.com/Icewater1337/fridolin/internal/otp"
-	outboundmsg "github.com/Icewater1337/fridolin/internal/outbound"
 	"github.com/Icewater1337/fridolin/internal/platform"
-	"github.com/Icewater1337/fridolin/internal/registry"
 	"github.com/Icewater1337/fridolin/internal/store"
-	"github.com/Icewater1337/fridolin/internal/whatsapp"
 
 	wastore "go.mau.fi/whatsmeow/store"
 	"go.mau.fi/whatsmeow/types"
@@ -228,7 +232,7 @@ func NewBridge(cfgs *config.Store, opts BridgeOptions) (_ *Bridge, err error) {
 				log.Printf("failed to send the working notice to %s: %v", jid, err)
 			}
 		},
-		Question: func(br *Brain, jid, text string) bool {
+		Question: func(br *brainruntime.Brain, jid, text string) bool {
 			if err := b.outbox.Question(context.Background(), br.ID(), jid, text, b.cfgs.Get().MaxChunkSize); err != nil {
 				log.Printf("brain %s: question to %s: %v", br.ID(), jid, err)
 				return false
@@ -409,7 +413,7 @@ func (b *Bridge) stop() {
 
 // keepWaiting keeps what br had waiting as the bridge stops, which never
 // ran, for the next start (BrainHooks.Waiting).
-func (b *Bridge) keepWaiting(br *Brain, ms []Inbound) {
+func (b *Bridge) keepWaiting(br *brainruntime.Brain, ms []brainruntime.Inbound) {
 	for _, m := range ms {
 		b.keep(inboundQueued, br.ID(), m)
 	}
@@ -419,10 +423,10 @@ func (b *Bridge) keepWaiting(br *Brain, ms []Inbound) {
 // none), for the next start: a message from WhatsApp, which nothing would
 // send again. Whoever handed in another hears that it was dropped
 // (Inbound.Done), and can hand it in again.
-func (b *Bridge) keep(kind, brain string, m Inbound) {
+func (b *Bridge) keep(kind, brain string, m brainruntime.Inbound) {
 	if m.Source != chat.SourceWhatsApp {
 		log.Printf("dropping a message for %s from %s as the bridge stops", m.JID, m.Source)
-		dropped([]Inbound{m})
+		brainruntime.Dropped([]brainruntime.Inbound{m})
 		return
 	}
 	if err := keepInbound(context.Background(), b.store, kind, brain, m); err != nil {
@@ -434,7 +438,7 @@ func (b *Bridge) keep(kind, brain string, m Inbound) {
 // run for m, so that m's chat hears of it then (BrainHooks.Interrupted).
 // Not for an untagged message, whose run answers nobody, nor for a
 // hand-off, whose sender heard through Done.
-func (b *Bridge) keepInterrupted(br *Brain, m Inbound) {
+func (b *Bridge) keepInterrupted(br *brainruntime.Brain, m brainruntime.Inbound) {
 	if m.Source != chat.SourceWhatsApp || m.Silent {
 		return
 	}
@@ -452,7 +456,7 @@ func (b *Bridge) keepInterrupted(br *Brain, m Inbound) {
 // change is not, since a deletion must take its message out of the
 // history however late.
 func (b *Bridge) resume(ctx context.Context) {
-	resumeRuns := b.brainMgr.slots.pause()
+	resumeRuns := b.brainMgr.PauseRuns()
 	defer resumeRuns()
 	// Taken out of bridge.db, what was kept is handed on whole: a stop
 	// that begins meanwhile keeps what is still waiting again, but a
@@ -593,7 +597,7 @@ func (in *intake) end() {
 // the next start, which handles it as if it came in then: nothing has
 // looked at it yet, so no command ran, and the OTP guard is still to see
 // it (see resume).
-func (b *Bridge) keepLate(m Inbound) {
+func (b *Bridge) keepLate(m brainruntime.Inbound) {
 	if !b.intake.keep(func() { b.keep(inboundLate, "", m) }) {
 		log.Printf("dropping a message for %s: it came in as the bridge closed its store", m.JID)
 	}
@@ -623,8 +627,8 @@ func (b *Bridge) handleChange(c chat.Change) {
 	// a code hands the new one to the script that asked for it, and the
 	// message edited stays as it was.
 	if c.Kind == chat.ChangeEdit && br != nil {
-		edited := Inbound{Inbound: chat.Inbound{JID: c.Chat, ChatAlt: c.ChatAlt, Sender: c.Sender, Text: c.Text, Source: chat.SourceWhatsApp}}
-		if code, ok := br.catchesCode(edited, time.Now()); ok {
+		edited := brainruntime.Inbound{Inbound: chat.Inbound{JID: c.Chat, ChatAlt: c.ChatAlt, Sender: c.Sender, Text: c.Text, Source: chat.SourceWhatsApp}}
+		if code, ok := br.CatchesCode(edited, time.Now()); ok {
 			log.Printf("brain %s: kept an edited one-time code out of the conversation (OTP guard)", br.ID())
 			b.handOffCode(br, edited, code)
 			return
@@ -637,7 +641,7 @@ func (b *Bridge) handleChange(c chat.Change) {
 		return
 	}
 	waiting, edited := br.Change(c)
-	br.recordChange(c, waiting, edited)
+	br.RecordChange(c, waiting, edited)
 	// The dashboard's feed shows the history's lines: a deleted message
 	// must not linger there either.
 	text := ""
@@ -654,7 +658,7 @@ func (b *Bridge) handleChange(c chat.Change) {
 // routing of the brain that answers there says.
 func (b *Bridge) groupRules(jid string) groupRules {
 	if br := b.brainMgr.BrainFor(jid, true); br != nil {
-		return groupRulesFor(br.settings.Load().manifest.Routing)
+		return groupRulesFor(br.Manifest().Routing)
 	}
 	return defaultGroupRules
 }
@@ -674,7 +678,7 @@ func (b *Bridge) recordIgnored(kind, jid, name, sender, pushName string) {
 // on to their brain like the rest: it keeps them in its history. Once the
 // bridge stops, a message is kept for the next start instead: no command
 // runs and no notice goes out (see intake).
-func (b *Bridge) handleInbound(ctx context.Context, m Inbound) {
+func (b *Bridge) handleInbound(ctx context.Context, m brainruntime.Inbound) {
 	if !b.intake.enter() {
 		b.keepLate(m)
 		return
@@ -722,7 +726,7 @@ func (b *Bridge) handleInbound(ctx context.Context, m Inbound) {
 	// the model. Whoever sent it is told, unless it was untagged chatter,
 	// which the bridge never answers: a code that vanished without a word
 	// looks lost.
-	if code, ok := br.catchesCode(m, time.Now()); ok {
+	if code, ok := br.CatchesCode(m, time.Now()); ok {
 		log.Printf("brain %s: kept a one-time code out of the conversation (OTP guard)", br.ID())
 		b.handOffCode(br, m, code)
 		if !m.Silent {
@@ -735,7 +739,7 @@ func (b *Bridge) handleInbound(ctx context.Context, m Inbound) {
 }
 
 // handleCommand runs !help, !reset and !stop. It reports whether text was one.
-func (b *Bridge) handleCommand(ctx context.Context, m Inbound, cfg *config.Config) bool {
+func (b *Bridge) handleCommand(ctx context.Context, m brainruntime.Inbound, cfg *config.Config) bool {
 	switch strings.ToLower(m.Text) {
 	case "!reset":
 		// A reset stops what !stop stops for the chat, hand-offs from other
@@ -766,7 +770,7 @@ func (b *Bridge) handleCommand(ctx context.Context, m Inbound, cfg *config.Confi
 // stopChat stops what is going on for m's chat, for !stop and !reset. It
 // reports whether a run was stopped and how many waiting messages were
 // dropped.
-func (b *Bridge) stopChat(m Inbound) (stopped bool, dropped int) {
+func (b *Bridge) stopChat(m brainruntime.Inbound) (stopped bool, dropped int) {
 	// Only this chat's work: a brain serves several chats, and one chat must
 	// not cancel what another asked for. A DM goes by two JIDs (see
 	// chatJIDs), and its run may have come in under either.
@@ -794,7 +798,7 @@ func (b *Bridge) stopChat(m Inbound) (stopped bool, dropped int) {
 // answers there and in every brain whose reply chat it is, which answers
 // files handed to it there: !reset is about the chat, whichever brain
 // speaks in it. It reports whether any brain does.
-func (b *Bridge) resetChat(m Inbound) bool {
+func (b *Bridge) resetChat(m brainruntime.Inbound) bool {
 	cfg := b.cfgs.Get()
 	chats := chatJIDs(m)
 	owner := b.brainMgr.BrainFor(m.JID, m.IsGroup())
@@ -813,7 +817,7 @@ func (b *Bridge) resetChat(m Inbound) bool {
 // number, but WhatsApp may address it by LID, history from before may be
 // under the LID, and a hand-off that answers there (a reply_chat, the
 // owner's DM) may name either.
-func chatJIDs(m Inbound) []string {
+func chatJIDs(m brainruntime.Inbound) []string {
 	jids := []string{m.JID}
 	if m.IsGroup() {
 		return jids
@@ -827,12 +831,12 @@ func chatJIDs(m Inbound) []string {
 }
 
 // dispatch hands a (debounced) message to its brain.
-func (b *Bridge) dispatch(m Inbound) {
+func (b *Bridge) dispatch(m brainruntime.Inbound) {
 	ctx := context.Background()
 	cfg := b.cfgs.Get()
 	br, pos, busy, err := b.brainMgr.Submit(m)
 	switch {
-	case errors.Is(err, errQueueFull):
+	case errors.Is(err, brainruntime.ErrQueueFull):
 		log.Printf("brain %s: queue full, rejecting message from %s", br.ID(), m.Sender)
 		if !m.Silent {
 			// !stop drops only this chat's work, and in a group it needs the
@@ -852,7 +856,7 @@ func (b *Bridge) dispatch(m Inbound) {
 }
 
 // deliver sends a finished brain run's answer.
-func (b *Bridge) deliver(br *Brain, m Inbound, res claudecli.Result) {
+func (b *Bridge) deliver(br *brainruntime.Brain, m brainruntime.Inbound, res claudecli.Result) {
 	ctx := context.Background()
 	if res.Err != nil {
 		if errors.Is(res.Err, claudecli.ErrInterrupted) || errors.Is(res.Err, context.Canceled) {
@@ -893,7 +897,7 @@ func (b *Bridge) delivered(ctx context.Context, r store.OutboxRow) error {
 		log.Printf("brain %s: delivered a reply to %s, but the brain is gone", r.Brain, r.Chat)
 		return remove()
 	}
-	return br.recordDelivered(r.Chat, r.History, remove)
+	return br.RecordDelivered(r.Chat, r.History, remove)
 }
 
 // undelivered is what brainID answered that waits in the outbox, as its

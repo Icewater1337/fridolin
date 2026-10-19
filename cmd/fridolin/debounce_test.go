@@ -1,21 +1,23 @@
 package main
 
 import (
+	"github.com/Icewater1337/fridolin/internal/testutil"
 	"sync"
 	"testing"
+	"testing/synctest"
 	"time"
 
+	"github.com/Icewater1337/fridolin/internal/brain"
 	"github.com/Icewater1337/fridolin/internal/chat"
-	"github.com/Icewater1337/fridolin/internal/testutil"
 )
 
 type flushes struct {
 	mu  sync.Mutex
-	got []Inbound
+	got []brain.Inbound
 	at  []time.Time
 }
 
-func (f *flushes) add(m Inbound) {
+func (f *flushes) add(m brain.Inbound) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.got = append(f.got, m)
@@ -35,7 +37,7 @@ func newTestDebouncer(quiet, maxWait time.Duration) (*Debouncer, *flushes) {
 
 func TestDebounceMergesBurstAndKeepsTrigger(t *testing.T) {
 	d, f := newTestDebouncer(80*time.Millisecond, time.Second)
-	base := Inbound{Inbound: chat.Inbound{JID: "g@g.us", Sender: "1"}}
+	base := brain.Inbound{Inbound: chat.Inbound{JID: "g@g.us", Sender: "1"}}
 	m1 := base
 	m1.Media, m1.Silent = []string{"/m/1.jpg"}, false
 	m2 := base
@@ -60,33 +62,35 @@ func TestDebounceMergesBurstAndKeepsTrigger(t *testing.T) {
 }
 
 func TestDebounceMaxWaitCapsContinuousInput(t *testing.T) {
-	d, f := newTestDebouncer(50*time.Millisecond, 120*time.Millisecond)
-	start := time.Now()
-	stop := time.After(400 * time.Millisecond)
-loop:
-	for {
-		select {
-		case <-stop:
-			break loop
-		default:
-			d.Add(Inbound{Inbound: chat.Inbound{JID: "c", Sender: "1", Text: "x"}})
-			time.Sleep(10 * time.Millisecond)
+	synctest.Test(t, func(t *testing.T) {
+		d, f := newTestDebouncer(50*time.Millisecond, 120*time.Millisecond)
+		start := time.Now()
+		stop := time.After(400 * time.Millisecond)
+	loop:
+		for {
+			select {
+			case <-stop:
+				break loop
+			default:
+				d.Add(brain.Inbound{Inbound: chat.Inbound{JID: "c", Sender: "1", Text: "x"}})
+				time.Sleep(10 * time.Millisecond)
+			}
 		}
-	}
-	testutil.WaitFor(t, time.Second, "flushes", func() bool { return f.n() >= 3 })
-	f.mu.Lock()
-	first := f.at[0].Sub(start)
-	f.mu.Unlock()
-	if first > 200*time.Millisecond {
-		t.Errorf("first flush after %v; max wait is 120ms", first)
-	}
+		testutil.WaitFor(t, time.Second, "flushes", func() bool { return f.n() >= 3 })
+		f.mu.Lock()
+		first := f.at[0].Sub(start)
+		f.mu.Unlock()
+		if first > 200*time.Millisecond {
+			t.Errorf("first flush after %v; max wait is 120ms", first)
+		}
+	})
 }
 
 func TestDebounceSeparatesSendersAndChats(t *testing.T) {
 	d, f := newTestDebouncer(40*time.Millisecond, time.Second)
-	d.Add(Inbound{Inbound: chat.Inbound{JID: "g", Sender: "1", Text: "a"}})
-	d.Add(Inbound{Inbound: chat.Inbound{JID: "g", Sender: "2", Text: "b"}})
-	d.Add(Inbound{Inbound: chat.Inbound{JID: "h", Sender: "1", Text: "c"}})
+	d.Add(brain.Inbound{Inbound: chat.Inbound{JID: "g", Sender: "1", Text: "a"}})
+	d.Add(brain.Inbound{Inbound: chat.Inbound{JID: "g", Sender: "2", Text: "b"}})
+	d.Add(brain.Inbound{Inbound: chat.Inbound{JID: "h", Sender: "1", Text: "c"}})
 	testutil.WaitFor(t, time.Second, "three flushes", func() bool { return f.n() == 3 })
 }
 
@@ -94,8 +98,8 @@ func TestDebounceSeparatesSendersAndChats(t *testing.T) {
 // same default sender, must stay two runs, each in its own brain.
 func TestDebounceKeepsTargetBrainsApart(t *testing.T) {
 	d, f := newTestDebouncer(40*time.Millisecond, time.Second)
-	d.Add(Inbound{Inbound: chat.Inbound{JID: "dm", Brain: "up", Sender: "upload", Text: "a"}})
-	d.Add(Inbound{Inbound: chat.Inbound{JID: "dm", Brain: "notes", Sender: "upload", Text: "b"}})
+	d.Add(brain.Inbound{Inbound: chat.Inbound{JID: "dm", Brain: "up", Sender: "upload", Text: "a"}})
+	d.Add(brain.Inbound{Inbound: chat.Inbound{JID: "dm", Brain: "notes", Sender: "upload", Text: "b"}})
 	testutil.WaitFor(t, time.Second, "two flushes", func() bool { return f.n() == 2 })
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -110,12 +114,12 @@ func TestDebounceKeepsTargetBrainsApart(t *testing.T) {
 
 func TestDebounceOffAndDrop(t *testing.T) {
 	d, f := newTestDebouncer(0, 0)
-	d.Add(Inbound{Inbound: chat.Inbound{JID: "g", Sender: "1", Text: "now"}})
+	d.Add(brain.Inbound{Inbound: chat.Inbound{JID: "g", Sender: "1", Text: "now"}})
 	if f.n() != 1 {
 		t.Error("quiet 0 must flush immediately")
 	}
 	d2, f2 := newTestDebouncer(50*time.Millisecond, time.Second)
-	d2.Add(Inbound{Inbound: chat.Inbound{JID: "g", Sender: "1", Text: "a"}})
+	d2.Add(brain.Inbound{Inbound: chat.Inbound{JID: "g", Sender: "1", Text: "a"}})
 	d2.Drop("g")
 	time.Sleep(120 * time.Millisecond)
 	if f2.n() != 0 {
@@ -129,13 +133,13 @@ func TestDebounceOffAndDrop(t *testing.T) {
 // message's quiet period.
 func TestDebounceTimerThatFiredDuringAddDoesNotFlushEarly(t *testing.T) {
 	d, f := newTestDebouncer(10*time.Millisecond, 0)
-	d.Add(Inbound{Inbound: chat.Inbound{JID: "c", Sender: "1", Text: "first"}})
+	d.Add(brain.Inbound{Inbound: chat.Inbound{JID: "c", Sender: "1", Text: "first"}})
 
 	// What Add does for the second message, with the first message's timer
 	// gone off meanwhile and waiting for the lock.
 	d.mu.Lock()
 	time.Sleep(100 * time.Millisecond)
-	if _, due := d.addLocked(Inbound{Inbound: chat.Inbound{JID: "c", Sender: "1", Text: "second"}}, 10*time.Second, time.Now()); due {
+	if _, due := d.addLocked(brain.Inbound{Inbound: chat.Inbound{JID: "c", Sender: "1", Text: "second"}}, 10*time.Second, time.Now()); due {
 		d.mu.Unlock()
 		t.Fatal("the batch was due at once")
 	}
@@ -157,19 +161,19 @@ func TestDebounceTimerThatFiredDuringAddDoesNotFlushEarly(t *testing.T) {
 func TestDebounceDrain(t *testing.T) {
 	release := make(chan struct{})
 	f := &flushes{}
-	d := NewDebouncer(func() time.Duration { return 50 * time.Millisecond }, func() time.Duration { return 0 }, func(m Inbound) {
+	d := NewDebouncer(func() time.Duration { return 50 * time.Millisecond }, func() time.Duration { return 0 }, func(m brain.Inbound) {
 		if m.Text == "slow" {
 			<-release
 		}
 		f.add(m)
 	})
-	d.Add(Inbound{Inbound: chat.Inbound{JID: "c", Sender: "1", Text: "slow"}})
+	d.Add(brain.Inbound{Inbound: chat.Inbound{JID: "c", Sender: "1", Text: "slow"}})
 	testutil.WaitFor(t, time.Second, "the flush to begin", func() bool { return d.Pending() == 0 })
-	d.Add(Inbound{Inbound: chat.Inbound{JID: "c", Sender: "2", Text: "older"}})
+	d.Add(brain.Inbound{Inbound: chat.Inbound{JID: "c", Sender: "2", Text: "older"}})
 	time.Sleep(5 * time.Millisecond)
-	d.Add(Inbound{Inbound: chat.Inbound{JID: "c", Sender: "3", Text: "newer"}})
+	d.Add(brain.Inbound{Inbound: chat.Inbound{JID: "c", Sender: "3", Text: "newer"}})
 
-	drained := make(chan []Inbound, 1)
+	drained := make(chan []brain.Inbound, 1)
 	go func() { drained <- d.Drain() }()
 	select {
 	case <-drained:
@@ -185,7 +189,7 @@ func TestDebounceDrain(t *testing.T) {
 	if f.n() != 1 {
 		t.Errorf("%d flushes, want only the one under way", f.n())
 	}
-	d.Add(Inbound{Inbound: chat.Inbound{JID: "c", Sender: "4", Text: "after"}})
+	d.Add(brain.Inbound{Inbound: chat.Inbound{JID: "c", Sender: "4", Text: "after"}})
 	if f.n() != 2 {
 		t.Error("a message added after Drain did not flush at once")
 	}

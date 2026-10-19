@@ -12,6 +12,7 @@ import (
 
 	"github.com/Icewater1337/fridolin/internal/backup"
 
+	"github.com/Icewater1337/fridolin/internal/brain"
 	"github.com/Icewater1337/fridolin/internal/chat"
 	"github.com/Icewater1337/fridolin/internal/config"
 	"github.com/Icewater1337/fridolin/internal/fsx"
@@ -472,7 +473,7 @@ func TestLeftOutBrainsKeepTheirChats(t *testing.T) {
 			config.BrainRef{Path: brains + "/personal", Approved: &manifest.Manifest{ID: "personal", Name: "personal", Routing: manifest.Routing{HandlesDMs: true}}},
 			brainFolder(t, brains+"/work", manifest.Manifest{ID: "work", Routing: manifest.Routing{Default: true}}),
 		))
-		tb.handleInbound(t.Context(), Inbound{Inbound: chat.Inbound{JID: testDMChat, Sender: "15551234567", Text: "hi", Source: chat.SourceWhatsApp}})
+		tb.handleInbound(t.Context(), brain.Inbound{Inbound: chat.Inbound{JID: testDMChat, Sender: "15551234567", Text: "hi", Source: chat.SourceWhatsApp}})
 		sent := tb.sentTo(testDMChat)
 		if len(sent) != 1 || !strings.Contains(sent[0], "cannot run right now") {
 			t.Errorf("the chat got %q, want to hear its brain cannot run", sent)

@@ -34,7 +34,7 @@ func (b *Bridge) recordVote(v pollVote) {
 		log.Printf("poll vote in %s: no brain to tell", v.Poll.Chat)
 		return
 	}
-	br.appendHistory(v.Poll.Chat, v.Voter.User, voteText(v.Poll.Question, v.Selected), history.Event)
+	br.AppendHistory(v.Poll.Chat, v.Voter.User, voteText(v.Poll.Question, v.Selected), history.Event)
 }
 
 // voteText is how a vote reads in a brain's history, after the voter's

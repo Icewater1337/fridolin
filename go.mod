@@ -3,12 +3,12 @@ module github.com/Icewater1337/fridolin
 go 1.26.0
 
 require (
-	github.com/mattn/go-sqlite3 v1.14.48
-	github.com/mdp/qrterminal/v3 v3.2.0
+	github.com/mattn/go-sqlite3 v1.14.52
+	github.com/mdp/qrterminal/v3 v3.2.1
 	go.mau.fi/whatsmeow v0.0.0-20260730092514-662ad1dc6900
 	golang.org/x/sys v0.49.0
 	golang.org/x/text v0.43.0
-	google.golang.org/protobuf v1.36.11
+	google.golang.org/protobuf v1.36.12
 	rsc.io/qr v0.2.0
 )
 

@@ -746,16 +746,17 @@ takes it.
 
 **`debounce.go`** — merges a burst of messages from one person into one run.
 
-**`brain.go`** — the multi-brain runner. Each brain has a queue and one
+**`internal/brain`** — the multi-brain runtime. Each brain has a queue and one
 worker, which takes each chat's messages in order and the chats in turn,
 and waits for one of the `max_concurrent_runs` run slots all brains share
-(`runslots.go`); each message spawns `claude -p` with
+(`internal/brain/slots.go`); the command Runner starts the selected provider,
+Claude or Codex. Claude uses `claude -p` with
 `--output-format stream-json`, seeded on stdin with the brain's prompt
 file and recent chat history, which `internal/history` reads back from the end
 of the file. Events are parsed live, so an `AskUserQuestion` reaches
 WhatsApp immediately, with its options numbered (the answer comes as the
 next message, and the run's final reply is sent too), and a run over 10
-seconds gets a "working on it" notice. The parser, in `stream.go`, skips
+seconds gets a "working on it" notice. The parser, in `internal/claudecli`, skips
 a line over 4 MiB (a tool's large result, say) with a note in the activity
 log rather than failing the run. A run is stopped at
 `run_timeout_minutes`, and five seconds after its result when something it
@@ -768,7 +769,7 @@ exiting, without waiting for output readers or reply delivery; a run still
 preparing cannot start a CLI after that force-stop. It freezes admission,
 queue turns and reload publication, and also stops runs in removed brains
 whose retirement has not finished.
-`BrainManager.Apply` swaps the brain set at runtime without touching
+`brain.Manager.Apply` swaps the brain set at runtime without touching
 brains that did not change, and hands what a brain it takes out
 had waiting to the brain that takes it now.
 

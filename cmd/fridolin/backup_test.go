@@ -19,6 +19,7 @@ import (
 
 	"github.com/Icewater1337/fridolin/internal/backup"
 
+	brainruntime "github.com/Icewater1337/fridolin/internal/brain"
 	"github.com/Icewater1337/fridolin/internal/devchat"
 
 	"github.com/Icewater1337/fridolin/internal/config"
@@ -1310,9 +1311,7 @@ func TestBackupWaitsForTheBrainToFinish(t *testing.T) {
 			addBackupBrain(t, tb, "notes")
 			br := tb.brainMgr.Get("notes")
 			running := func() bool {
-				br.mu.Lock()
-				defer br.mu.Unlock()
-				return br.current != nil
+				return br.Snapshot().Running != nil
 			}
 			var syncedWhileRunning []bool
 			installBackupRunner(t, tb, func(_ context.Context, args []string, _ io.Writer) ([]byte, error) {
@@ -1334,7 +1333,7 @@ func TestBackupWaitsForTheBrainToFinish(t *testing.T) {
 			logged := captureLog(t)
 
 			t.Setenv("FRIDOLIN_FAKE_SLEEP_MS", "1500")
-			if _, _, err := br.Submit(Inbound{Inbound: chat.Inbound{JID: "15551234567@s.whatsapp.net", Sender: "15551234567", Text: "hello", Source: "whatsapp", At: time.Now()}}); err != nil {
+			if _, _, err := br.Submit(brainruntime.Inbound{Inbound: chat.Inbound{JID: "15551234567@s.whatsapp.net", Sender: "15551234567", Text: "hello", Source: "whatsapp", At: time.Now()}}); err != nil {
 				t.Fatal(err)
 			}
 			testutil.WaitFor(t, 10*time.Second, "the run to start", running)
