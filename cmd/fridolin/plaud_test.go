@@ -3419,7 +3419,7 @@ func TestBrainPlaudPATH(t *testing.T) {
 				t.Fatalf("brainPlaudPATH = %s, which lacks the bridge's PATH", got)
 			}
 			progs := NewSandboxProfiler(nil, cfg).bridgeProgramsOf(home)
-			covered := func(dir string) bool { return slices.Contains(progs.path, dir) || withinAny(dir, progs.dirs) }
+			covered := func(dir string) bool { return slices.Contains(progs.Path, dir) || withinAny(dir, progs.Dirs) }
 			for _, d := range filepath.SplitList(strings.TrimSuffix(got[:i], ":")) {
 				if !covered(d) {
 					t.Errorf("brainPlaudPATH = %s, whose %s comes ahead of the bridge's PATH but is not kept from brains", got, d)

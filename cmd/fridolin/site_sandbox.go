@@ -120,28 +120,28 @@ func (m *SiteManager) SandboxStatus() SiteSandboxStatus {
 // sandboxInput gathers what the live site's profile is built from.
 func (m *SiteManager) sandboxInput(node, deploy, root, rtFile string, mods []siteModuleCaps) siteProfileInput {
 	in := siteProfileInput{
-		home:    config.HomeDir(),
-		dataDir: m.dataDir,
-		shell:   m.dir("shell"),
-		deploy:  deploy,
-		deps:    []string{m.dir("shell", "node_modules"), filepath.Join(root, "node_modules")},
-		tmp:     m.dir("tmp"),
-		data:    m.dir("data"),
-		spool:   m.spoolDir(),
-		node:    node,
-		reads: []string{
+		Home:    config.HomeDir(),
+		DataDir: m.dataDir,
+		Shell:   m.dir("shell"),
+		Deploy:  deploy,
+		Deps:    []string{m.dir("shell", "node_modules"), filepath.Join(root, "node_modules")},
+		Tmp:     m.dir("tmp"),
+		Data:    m.dir("data"),
+		Spool:   m.spoolDir(),
+		Node:    node,
+		Reads: []string{
 			rtFile, m.dir("users.json"), m.dir("session.key"), m.dir("previews.json"), m.dir("devices.json"),
 			// Both: the site's own client, and Fridolin's shared one.
 			m.dir("google_client.json"),
 		},
-		modules: mods,
-		path:    siteEnvPath(node),
+		Modules: mods,
+		Path:    siteEnvPath(node),
 	}
 	if m.googleClient != nil {
-		in.reads = append(in.reads, m.googleClient())
+		in.Reads = append(in.Reads, m.googleClient())
 	}
 	if m.hooks.siteLimits != nil {
-		in.siteBridgeLimits = m.hooks.siteLimits()
+		in.SiteLimits = m.hooks.siteLimits()
 	}
 	return in
 }
@@ -174,7 +174,7 @@ func prepareDeclaredFolders(mods []siteModuleCaps, closed func(string) bool) {
 }
 
 func siteSandboxProfile(in siteProfileInput) (string, error) {
-	in.cwd, in.cwdErr = os.Getwd()
-	in.logf = log.Printf
+	in.WorkingDir, in.WorkingDirErr = os.Getwd()
+	in.Logf = log.Printf
 	return buildSiteSandboxProfile(in)
 }

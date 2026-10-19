@@ -713,7 +713,7 @@ func (m *SiteManager) processCommand(ctx context.Context, name, listen, modulesD
 		deploy := m.deployDir(s.Approved)
 		root := filepath.Join(deploy, filepath.FromSlash(s.Repo.Subdir))
 		in := m.sandboxInput(node, deploy, root, rtFile, mods)
-		prepareDeclaredFolders(mods, in.unwritable)
+		prepareDeclaredFolders(mods, in.Unwritable)
 		switch err := siteSandboxAvailable(m.sandboxExec); {
 		case err == nil:
 			profile, err := siteSandboxProfile(in)

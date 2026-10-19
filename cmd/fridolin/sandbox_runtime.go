@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"slices"
+	"strings"
 	"sync"
 
 	"github.com/Icewater1337/fridolin/internal/config"
@@ -58,31 +59,31 @@ func sandboxPolicyOf(cfg *config.Config) sandboxConfig {
 	// These may be relative, and the bridge opens them relative to its
 	// working directory; the comparisons need them absolute.
 	p := sandboxConfig{sandboxPolicy: sandboxPolicy{
-		dataDir:     absPath(cfg.DataDir),
-		dbPath:      absPath(cfg.DBPath),
-		mediaDir:    absPath(cfg.MediaDir),
-		credsDir:    cfg.Sandbox.CredentialsDir,
-		gitConfig:   cfg.Sandbox.GitConfig,
-		plaudShared: cfg.Plaud.BrainAccess,
-		inheritUser: cfg.InheritClaudeUserConfig,
-		extraDeny:   append([]string(nil), cfg.Sandbox.DenyPaths...),
-		extraAllow:  append([]string(nil), cfg.Sandbox.AllowPaths...),
+		DataDir:     absPath(cfg.DataDir),
+		DBPath:      absPath(cfg.DBPath),
+		MediaDir:    absPath(cfg.MediaDir),
+		CredsDir:    cfg.Sandbox.CredentialsDir,
+		GitConfig:   cfg.Sandbox.GitConfig,
+		PlaudShared: cfg.Plaud.BrainAccess,
+		InheritUser: cfg.InheritClaudeUserConfig,
+		ExtraDeny:   append([]string(nil), cfg.Sandbox.DenyPaths...),
+		ExtraAllow:  append([]string(nil), cfg.Sandbox.AllowPaths...),
 	}, claudePath: cfg.ClaudePath, codexPath: cfg.CodexPath, rclonePath: cfg.Backup.RclonePath, plaudCLIPath: cfg.Plaud.CLIPath, viewer: cfg.Viewer}
-	if p.mediaDir == "" && p.dataDir != "" {
-		p.mediaDir = filepath.Join(p.dataDir, "media")
+	if p.MediaDir == "" && p.DataDir != "" {
+		p.MediaDir = filepath.Join(p.DataDir, "media")
 	}
-	if media := p.mediaDir; media != "" {
-		p.inbox = func(id string) string { return mediaInboxAt(media).Path(id) }
+	if media := p.MediaDir; media != "" {
+		p.Inbox = func(id string) string { return mediaInboxAt(media).Path(id) }
 	}
-	if data := p.dataDir; data != "" {
-		p.state = func(id string) sandboxStatePaths {
+	if data := p.DataDir; data != "" {
+		p.State = func(id string) sandboxStatePaths {
 			s := brainStateOf(data, id)
 			return sandboxStatePaths{s.dir, s.folders()}
 		}
-		p.tokens = func(id string) string { return runTokenDir(data, id) }
+		p.Tokens = func(id string) string { return runTokenDir(data, id) }
 	}
 	if dir := os.Getenv("CLAUDE_CONFIG_DIR"); filepath.IsAbs(dir) {
-		p.claudeDir = filepath.Clean(dir)
+		p.ClaudeDir = filepath.Clean(dir)
 	}
 	for _, o := range pathOwners(cfg) {
 		p.brainDirs = append(p.brainDirs, o.dirs...)
@@ -144,21 +145,21 @@ func (sp *SandboxProfiler) Enabled() bool {
 func (sp *SandboxProfiler) sitePaths() (deny, noWrite []string) {
 	sp.mu.RLock()
 	defer sp.mu.RUnlock()
-	if sp.dataDir != "" {
-		deny = append(deny, sp.dataDir)
+	if sp.DataDir != "" {
+		deny = append(deny, sp.DataDir)
 	}
-	if sp.dbPath != "" {
+	if sp.DBPath != "" {
 		for _, suffix := range []string{"", "-wal", "-shm", "-journal"} {
-			deny = append(deny, sp.dbPath+suffix)
+			deny = append(deny, sp.DBPath+suffix)
 		}
 	}
 	if sp.configFile != "" {
 		deny = append(deny, sp.configFile, sp.configFile+".bak", config.DotEnvPath(sp.configFile))
 	}
-	if sp.credsDir != "" {
-		deny = append(deny, absPath(sp.credsDir))
+	if sp.CredsDir != "" {
+		deny = append(deny, absPath(sp.CredsDir))
 	}
-	for _, p := range sp.extraDeny {
+	for _, p := range sp.ExtraDeny {
 		deny = append(deny, absPath(p))
 	}
 	if sp.bridgeExe != "" {
@@ -221,27 +222,27 @@ func (p sandboxConfig) bridgeProgramsOf(home string) bridgePrograms {
 	}
 	for _, f := range found {
 		abs := absPath(f)
-		out.files = append(out.files, abs, fsx.Resolve(abs))
+		out.Files = append(out.Files, abs, fsx.Resolve(abs))
 		if pkg := nodePackage(fsx.Resolve(abs)); pkg != "" {
-			out.dirs = append(out.dirs, pkg)
+			out.Dirs = append(out.Dirs, pkg)
 			// #!/usr/bin/env node: the bridge runs the Plaud CLI with its
 			// own folder first on PATH, everything else with its own PATH.
 			for _, pp := range []string{plaudPATH(abs), os.Getenv("PATH")} {
 				if node := lookPathIn("node", pp); node != "" {
-					out.files = append(out.files, node, fsx.Resolve(node))
+					out.Files = append(out.Files, node, fsx.Resolve(node))
 				}
 			}
 		}
 	}
-	out.files = append(out.files, rcloneFallbacks()...)
-	out.dirs = append(out.dirs, filepath.Join(home, nvmNodeVersions))
+	out.Files = append(out.Files, rcloneFallbacks()...)
+	out.Dirs = append(out.Dirs, filepath.Join(home, nvmNodeVersions))
 	for _, d := range path {
 		// exec.LookPath skips relative entries.
 		if d = filepath.Clean(d); filepath.IsAbs(d) {
-			out.path = append(out.path, d)
+			out.Path = append(out.Path, d)
 		}
 	}
-	for _, s := range []*[]string{&out.files, &out.dirs, &out.path} {
+	for _, s := range []*[]string{&out.Files, &out.Dirs, &out.Path} {
 		slices.Sort(*s)
 		*s = slices.Compact(*s)
 	}
@@ -318,7 +319,7 @@ type sandboxConfig struct {
 
 func sandboxContextNow(home string) sandboxContext {
 	cwd, err := os.Getwd()
-	return sandboxContext{home: home, cwd: cwd, cwdErr: err, tempDir: os.TempDir(), tmuxSocket: filepath.Join(cmp.Or(os.Getenv("TMUX_TMPDIR"), "/tmp"), fmt.Sprintf("tmux-%d", os.Getuid()))}
+	return sandboxContext{Home: home, WorkingDir: cwd, WorkingDirErr: err, TempDir: os.TempDir(), TmuxSocket: filepath.Join(cmp.Or(os.Getenv("TMUX_TMPDIR"), "/tmp"), fmt.Sprintf("tmux-%d", os.Getuid()))}
 }
 func sandboxInstallLayoutOf(l bridgeLayout) sandboxInstallLayout {
 	return sandboxInstallLayout{Dir: l.Dir, Source: l.Source}
@@ -331,11 +332,34 @@ func (sp *SandboxProfiler) Profile(id string) (string, error) {
 	if sp.bridgeExe != "" {
 		layout = sandboxInstallLayoutOf(layoutOf(sp.bridgeExe))
 	}
-	return (sandboxProfile{sandboxPolicy: sp.sandboxPolicy, context: ctx, workDirs: sp.workDirs, configFile: sp.configFile, configEnvFile: config.DotEnvPath(sp.configFile), bridgeExe: sp.bridgeExe, layout: layout, programs: sp.bridgeProgramsOf(ctx.home)}).profile(id)
+	return buildBrainSandboxProfile(sandboxProfile{Settings: sp.sandboxPolicy, Context: ctx, WorkDirs: sp.workDirs, ConfigFile: sp.configFile, ConfigEnvFile: config.DotEnvPath(sp.configFile), BridgeExe: sp.bridgeExe, Layout: layout, Programs: sp.bridgeProgramsOf(ctx.Home)}, id)
 }
 func (p sandboxConfig) protected(home string, l bridgeLayout) []protectedPath {
-	return p.sandboxPolicy.protected(sandboxContextNow(home), sandboxInstallLayoutOf(l), p.bridgeProgramsOf(home))
+	return p.sandboxPolicy.Protected(sandboxContextNow(home), sandboxInstallLayoutOf(l), p.bridgeProgramsOf(home))
 }
 func protectedIn(dir string, paths []protectedPath) (string, bool) {
 	return protectedPathIn(sandboxContextNow(""), dir, paths)
+}
+
+// nodePackage returns the npm package folder that holds the file p
+// (…/node_modules/<name> or …/node_modules/@scope/<name>), or "".
+func nodePackage(p string) string {
+	const nm = "/node_modules/"
+	i := strings.LastIndex(p, nm)
+	if i < 0 {
+		return ""
+	}
+	rest := strings.Split(p[i+len(nm):], "/")
+	n := 1
+	if strings.HasPrefix(rest[0], "@") {
+		n = 2
+	}
+	if len(rest) <= n {
+		return ""
+	}
+	return p[:i+len(nm)] + strings.Join(rest[:n], "/")
+}
+
+func withinAny(p string, dirs []string) bool {
+	return slices.ContainsFunc(dirs, func(d string) bool { return fsx.Within(p, d) })
 }

@@ -32,6 +32,7 @@ import (
 	"github.com/Icewater1337/fridolin/internal/fsx"
 	"github.com/Icewater1337/fridolin/internal/history"
 	"github.com/Icewater1337/fridolin/internal/platform"
+	"github.com/Icewater1337/fridolin/internal/sandbox"
 
 	prompttext "github.com/Icewater1337/fridolin/internal/prompt"
 	"github.com/Icewater1337/fridolin/internal/textx"
@@ -1131,7 +1132,7 @@ func instructionsAbove(dir, home string) []string {
 	}
 	inDotClaude := []string{filepath.Join(".claude", "CLAUDE.md"), filepath.Join(".claude", "rules", "**")}
 	for _, d := range folders {
-		patterns(d, instructionFiles...)
+		patterns(d, sandbox.InstructionFiles()...)
 		patterns(d, inDotClaude...)
 	}
 	if filepath.IsAbs(home) {

@@ -61,11 +61,11 @@ func TestSiteSandboxEnforcesDeclarations(t *testing.T) {
 	_, bridgePort, _ := net.SplitHostPort(bridge.Listener.Addr().String())
 
 	in := siteProfileInput{
-		home: home, dataDir: data,
-		shell: filepath.Join(site, "shell"), deploy: filepath.Join(site, "deploys", "abc"),
-		tmp: filepath.Join(site, "tmp"), reads: []string{users},
-		siteBridgeLimits: siteBridgeLimits{deny: []string{config}, bridgePort: bridgePort},
-		modules: []siteModuleCaps{{ID: "m", Dir: mod, Files: []siteFileCap{
+		Home: home, DataDir: data,
+		Shell: filepath.Join(site, "shell"), Deploy: filepath.Join(site, "deploys", "abc"),
+		Tmp: filepath.Join(site, "tmp"), Reads: []string{users},
+		SiteLimits: siteBridgeLimits{Deny: []string{config}, BridgePort: bridgePort},
+		Modules: []siteModuleCaps{{ID: "m", Dir: mod, Files: []siteFileCap{
 			{Name: "note", Path: readable, Access: "read"},
 			{Name: "docs", Path: readDir, Access: "read", Folder: true},
 			{Name: "db", Path: db, Access: "write"},
@@ -78,7 +78,7 @@ func TestSiteSandboxEnforcesDeclarations(t *testing.T) {
 			{Name: "users", Path: users, Access: "write"},
 			{Name: "config", Path: config, Access: "read"},
 		}, Commands: []string{"/bin/cat", "/bin/mv", "/bin/ln", "/bin/rm", "/usr/bin/curl"}}},
-		path: "/usr/bin:/bin",
+		Path: "/usr/bin:/bin",
 	}
 	profile, err := siteSandboxProfile(in)
 	if err != nil {

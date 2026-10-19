@@ -1699,7 +1699,7 @@ func sandboxStateEnv(t *testing.T, sp *SandboxProfiler, id string) []string {
 // sandboxState is prepareBrainState for brain id with sp's settings.
 func sandboxState(sp *SandboxProfiler, id string) ([]string, error) {
 	sp.mu.RLock()
-	data, media, inherit := sp.dataDir, sp.mediaDir, sp.inheritUser
+	data, media, inherit := sp.DataDir, sp.MediaDir, sp.InheritUser
 	sp.mu.RUnlock()
 	return prepareBrainState(data, media, id, inherit)
 }

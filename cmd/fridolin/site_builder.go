@@ -830,11 +830,11 @@ func (b *Bridge) siteBuilderHooks() builderHooks {
 		siteLimits: func() siteBridgeLimits {
 			var l siteBridgeLimits
 			if sp := b.brainMgr.profiler; sp != nil {
-				l.deny, l.noWrite = sp.sitePaths()
+				l.Deny, l.NoWrite = sp.sitePaths()
 			}
 			if cfg := b.cfgs.Get(); cfg.HTTPEnabled() {
 				if _, port, err := net.SplitHostPort(cfg.HTTPListen); err == nil {
-					l.bridgePort = port
+					l.BridgePort = port
 				}
 			}
 			return l

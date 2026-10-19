@@ -46,7 +46,7 @@ import (
 //
 // The binding is in the browser's files on disk as well, though, so the
 // pair is out of a brain's reach only while the browser's profile is one
-// the sandbox denies (defaultDenySubpaths and browserProfilePrefixes:
+// the sandbox denies (sandboxHomeReadDenies() and browserProfilePrefixes:
 // Safari, Chrome, Chromium, Brave, Arc, Edge, Vivaldi, Opera, Firefox), or,
 // in another Chromium browser, while nobody opens a server a brain runs on
 // 127.0.0.1 in it: Chromium encrypts cookies at rest with a Keychain key a
