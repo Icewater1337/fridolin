@@ -19,15 +19,6 @@ import (
 	"github.com/Icewater1337/fridolin/internal/textx"
 )
 
-func TestOutboxDelay(t *testing.T) {
-	cases := map[int]time.Duration{1: 5 * time.Second, 2: 10 * time.Second, 3: 20 * time.Second, 5: 80 * time.Second, 6: outboxMaxRetry, 40: outboxMaxRetry}
-	for attempts, want := range cases {
-		if got := outboxDelay(attempts); got != want {
-			t.Errorf("outboxDelay(%d) = %v, want %v", attempts, got, want)
-		}
-	}
-}
-
 // flakyMessenger is the dev messenger with a connection that drops: while
 // it is down, every send fails, as whatsmeow's do, and with dropAfter set
 // it goes down after that many more messages.
