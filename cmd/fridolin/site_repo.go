@@ -64,7 +64,7 @@ func (m *SiteManager) git(ctx context.Context, dir string, args ...string) (stri
 	if key := m.dir("deploy_key"); fsx.Exists(key) {
 		cmd.Env = append(cmd.Env, "GIT_SSH_COMMAND="+fmt.Sprintf(
 			"ssh -i %s -o IdentitiesOnly=yes -o BatchMode=yes -o StrictHostKeyChecking=accept-new -o UserKnownHostsFile=%s",
-			shellQuote(key), shellQuote(m.dir("known_hosts"))))
+			siteShellQuote(key), siteShellQuote(m.dir("known_hosts"))))
 	}
 	var out, errb bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &out, &errb
@@ -92,8 +92,6 @@ func gitEnv(env []string) []string {
 	}
 	return out
 }
-
-func shellQuote(s string) string { return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'" }
 
 // ── deploy key ──────────────────────────────────────────────────────────────
 
@@ -289,7 +287,7 @@ func (m *SiteManager) AddStarter(ctx context.Context) error {
 	head, _ := m.git(ctx, m.repoDir(), "rev-parse", "--verify", "--quiet", "refs/remotes/origin/"+s.Repo.Branch)
 	var work string
 	if head != "" {
-		work = m.dir("work", "starter-"+randomToken(6))
+		work = m.dir("work", "starter-"+siteRandomToken(6))
 		if _, err := m.git(ctx, m.repoDir(), "worktree", "add", "--detach", work, head); err != nil {
 			return err
 		}

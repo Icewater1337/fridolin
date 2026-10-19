@@ -196,7 +196,7 @@ func (m *SiteManager) builderToken(brainID string) string {
 			return tok
 		}
 	}
-	tok := randomToken(24)
+	tok := siteRandomToken(24)
 	m.tokens[tok] = brainID
 	return tok
 }
@@ -395,8 +395,8 @@ func (m *SiteManager) BuilderCheck(ctx context.Context, brainID string) (sitesvc
 	if err := json.Unmarshal([]byte(lines[len(lines)-1]), &res); err != nil {
 		return res, fmt.Errorf("the check printed no report: %s", textx.Tail(out, 600))
 	}
-	res.Mounted = nonNil(res.Mounted)
-	res.Broken = nonNil(res.Broken)
+	res.Mounted = siteNonNil(res.Mounted)
+	res.Broken = siteNonNil(res.Broken)
 	res.Review = m.reviewWorkspace(ctx, brainID)
 	return res, nil
 }
@@ -547,7 +547,7 @@ func (m *SiteManager) MergeProposal(ctx context.Context, brainID string) error {
 	if _, err := m.git(ctx, m.repoDir(), "fetch", "--prune", "origin"); err != nil {
 		return err
 	}
-	work := m.dir("work", "merge-"+randomToken(6))
+	work := m.dir("work", "merge-"+siteRandomToken(6))
 	if _, err := m.git(ctx, m.repoDir(), "worktree", "add", "--detach", work, "refs/remotes/origin/"+s.Repo.Branch); err != nil {
 		return err
 	}
@@ -618,7 +618,7 @@ func (m *SiteManager) BuilderPreview(ctx context.Context, brainID string) (map[s
 	}
 	listen := ln.Addr().String()
 	ln.Close()
-	p := &sitePreview{Branch: builderBranch(brainID), Listen: listen, Token: randomToken(24), proc: newSiteProc("preview " + brainID)}
+	p := &sitePreview{Branch: builderBranch(brainID), Listen: listen, Token: siteRandomToken(24), proc: newSiteProc("preview " + brainID)}
 	base := m.builderBase(brainID)
 	rt := map[string]any{
 		"listen": listen, "title": m.Settings().Title + " (preview)",

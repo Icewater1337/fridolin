@@ -291,7 +291,7 @@ func (m *SiteManager) checkRoleLocked(kind, role string) error {
 func (m *SiteManager) AddUser(in sitesvc.SiteUserInput) (sitesvc.SiteUser, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	u := sitesvc.SiteUser{ID: "u_" + randomToken(9), Kind: in.Kind, Name: strings.TrimSpace(in.Name), Role: in.Role, Created: time.Now().UTC().Format(time.RFC3339)}
+	u := sitesvc.SiteUser{ID: "u_" + siteRandomToken(9), Kind: in.Kind, Name: strings.TrimSpace(in.Name), Role: in.Role, Created: time.Now().UTC().Format(time.RFC3339)}
 	switch in.Kind {
 	case "google":
 		u.Email = strings.ToLower(strings.TrimSpace(in.Email))
@@ -455,12 +455,6 @@ func checkBroughtHash(h string) (string, error) {
 		return "", fmt.Errorf("password_hash has cost %d; the site takes bcrypt costs %d to %d", cost, siteBcryptMinCost, siteBcryptMaxCost)
 	}
 	return h, nil
-}
-
-func randomToken(n int) string {
-	b := make([]byte, n)
-	_, _ = rand.Read(b)
-	return base64.RawURLEncoding.EncodeToString(b)
 }
 
 // ── the site process ────────────────────────────────────────────────────────

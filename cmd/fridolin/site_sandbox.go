@@ -130,7 +130,7 @@ func (m *SiteManager) sandboxInput(node, deploy, root, rtFile string, mods []san
 			m.dir("google_client.json"),
 		},
 		Modules: mods,
-		Path:    siteEnvPath(node),
+		Path:    siteProcessPath(node),
 	}
 	if m.googleClient != nil {
 		in.Reads = append(in.Reads, m.googleClient())
@@ -159,7 +159,7 @@ func prepareDeclaredFolders(mods []sandbox.SiteModule, closed func(string) bool)
 			if closed(dir) || closed(fsx.Resolve(dir)) {
 				continue
 			}
-			if !pathExists(dir) {
+			if !sitePathExists(dir) {
 				if err := os.MkdirAll(dir, 0o700); err != nil {
 					log.Printf("[site] module %s: could not create %s for capabilities.files.%s: %v", mod.ID, dir, f.Name, err)
 				}
