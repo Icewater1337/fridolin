@@ -70,7 +70,7 @@ type Bridge struct {
 	google        *GoogleAuth
 	plaud         *PlaudManager
 	site          *SiteManager
-	outbox        *Outbox
+	outbox        *outboundmsg.Outbox
 	otp           otp.Handoff
 	started       time.Time
 	// restart is BridgeOptions.Restart.
@@ -302,11 +302,11 @@ func NewBridge(cfgs *ConfigStore, opts BridgeOptions) (_ *Bridge, err error) {
 	b.site.hooks = b.siteBuilderHooks()
 	// What builder brains say in the Build page's chats goes there, not to WhatsApp.
 	b.wa = siteChatMessenger{Messenger: b.wa, chats: b.site.chats}
-	pace := outboxPace
+	pace := outboundmsg.OutboxPace
 	if opts.NoWhatsApp {
 		pace = 0
 	}
-	b.outbox = newOutbox(store, func() Messenger { return b.wa }, pace, b.delivered)
+	b.outbox = outboundmsg.NewOutbox(store, func() outboundmsg.Link { return b.wa }, pace, b.delivered)
 	return b, nil
 }
 
@@ -493,8 +493,8 @@ func (b *Bridge) resume(ctx context.Context) {
 		len(rows)-kinds[inboundChange]-kinds[inboundInterrupted], kinds[inboundChange], kinds[inboundInterrupted])
 	now := time.Now()
 	for _, r := range rows {
-		if age := now.Sub(r.SentAt); age > outboxTTL && r.Kind != inboundChange {
-			log.Printf("dropping a message for %s that the last stop kept: it came in %v ago, more than %v", r.Chat, age.Round(time.Minute), outboxTTL)
+		if age := now.Sub(r.SentAt); age > outboundmsg.OutboxTTL && r.Kind != inboundChange {
+			log.Printf("dropping a message for %s that the last stop kept: it came in %v ago, more than %v", r.Chat, age.Round(time.Minute), outboundmsg.OutboxTTL)
 			continue
 		}
 		switch r.Kind {

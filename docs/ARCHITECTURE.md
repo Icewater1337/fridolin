@@ -73,8 +73,9 @@ behaviour unless its title says so. The steps so far:
 - **R12, outbound helpers**: `outbound` owns chunking, poll parsing, the
   chat-message catalogue, shared send errors and the paced send loop. Its
   minimal transport interfaces describe only sends and connection observation.
-  Durable outbox persistence, retries, poll fallback, history handoff and Stop
-  still live in command composition; pipeline extraction follows R10.
+  The durable outbox owns persistence, retries, poll fallback and its Stop
+  join. Command composition supplies the live transport and confirmed-delivery
+  history callback; pipeline extraction follows R10.
 
 Everything else is still `package main` in `cmd/fridolin`, one file per
 subject (section 3 names the file each package will come from). A package
@@ -340,8 +341,9 @@ responsibility and says what it must not do.
   and `SendExternal` for `/ingest`, `/send`, Plaud and the site.
 - **`outbound`**: chunking, poll parsing, shared send errors, paced sends,
   minimal transport contracts and the catalogue of every chat-facing message.
-  The durable outbox, poll fallback/persistence and provider-aware error
-  selection remain in `cmd/fridolin` for the next R12 integration slice.
+  `Outbox` owns persisted replies, per-part progress, poll fallback, retries
+  and shutdown joining. The command supplies the confirmed-delivery history
+  callback and retains provider-aware error selection and pipeline wiring.
 - **`whatsapp`** (`internal/whatsapp`): the WhatsApp transport and nothing else. It connects,
   pairs, tracks connection state, keeps the group list, sends text and
   polls, decrypts poll votes, turns protobuf messages into an `Envelope` (a

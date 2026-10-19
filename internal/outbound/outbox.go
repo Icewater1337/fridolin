@@ -1,10 +1,9 @@
-package main
+package outbound
 
 import (
 	"context"
 	"errors"
 	"fmt"
-	outboundmsg "github.com/Icewater1337/fridolin/internal/outbound"
 	"github.com/Icewater1337/fridolin/internal/store"
 	"log"
 	"math"
@@ -22,14 +21,14 @@ import (
 // is tried again with backoff, from the message that failed (the chat
 // does not get "[1/3]" twice), and again at once when WhatsApp connects;
 // replies still waiting when the bridge stops go out after the next
-// start. A reply that could not go out within outboxTTL is given up on,
+// start. A reply that could not go out within OutboxTTL is given up on,
 // since an answer that late would only confuse, and the dashboard says
 // so. Replies to one chat go out in order.
 type Outbox struct {
 	store *store.Store
 	// messenger is the bridge's, read at each reply and each send: the
 	// bridge wraps it after the outbox is made.
-	messenger func() Messenger
+	messenger func() Link
 	// pace is the pause between the messages of a reply, so that they
 	// arrive in order; 0 in dev mode.
 	pace time.Duration
@@ -46,20 +45,20 @@ type Outbox struct {
 }
 
 // Delivery timings. A send is retried after outboxFirstRetry, doubling up
-// to outboxMaxRetry, for as long as outboxTTL after the reply was written.
+// to outboxMaxRetry, for as long as OutboxTTL after the reply was written.
 const (
 	outboxFirstRetry = 5 * time.Second
 	outboxMaxRetry   = 2 * time.Minute
-	outboxTTL        = time.Hour
+	OutboxTTL        = time.Hour
 	outboxSendLimit  = 30 * time.Second // one message
 	outboxIdle       = time.Minute      // the longest the outbox sleeps
-	outboxPace       = 300 * time.Millisecond
+	OutboxPace       = 300 * time.Millisecond
 	outboxPruneEvery = time.Hour // how often replies given up on are forgotten
 )
 
-// newOutbox makes an outbox and starts delivering, the replies a
+// NewOutbox makes an outbox and starts delivering, the replies a
 // previous run of the bridge left first. Stop ends it.
-func newOutbox(store *store.Store, messenger func() Messenger, pace time.Duration, delivered func(context.Context, store.OutboxRow) error) *Outbox {
+func NewOutbox(store *store.Store, messenger func() Link, pace time.Duration, delivered func(context.Context, store.OutboxRow) error) *Outbox {
 	ctx, cancel := context.WithCancel(context.Background())
 	o := &Outbox{
 		store: store, messenger: messenger, pace: pace, delivered: delivered, now: time.Now,
@@ -83,14 +82,14 @@ func (o *Outbox) Stop() {
 // numbered options, as it reads when WhatsApp refuses the poll, then the
 // text. The [POLL] markup never reached anyone.
 func (o *Outbox) Reply(ctx context.Context, brain, chat, text string, maxChunk int) error {
-	polls, remaining := outboundmsg.ExtractPolls(text)
+	polls, remaining := ExtractPolls(text)
 	var parts []store.OutboxPart
 	var said []string
 	// The polls go before the text that introduces them, as the example
 	// prompt promises (see sendPolls).
 	for _, p := range polls {
 		parts = append(parts, store.OutboxPart{Question: p.Question, Options: p.Options, Max: p.MaxSelectable})
-		said = append(said, outboundmsg.PollAsText(p))
+		said = append(said, PollAsText(p))
 	}
 	parts = append(parts, o.textParts(chat, remaining, maxChunk)...)
 	if remaining != "" {
@@ -135,7 +134,7 @@ func (o *Outbox) chunks(chat, text string, maxChunk int) []string {
 	if w, ok := o.messenger().(wholeText); ok && w.TakesWhole(chat) {
 		maxChunk = math.MaxInt
 	}
-	return outboundmsg.Chunk(text, maxChunk)
+	return Chunk(text, maxChunk)
 }
 
 func (o *Outbox) add(ctx context.Context, r store.OutboxRow) error {
@@ -219,8 +218,8 @@ func (o *Outbox) flush(ctx context.Context, force bool) (wait time.Duration, wai
 			waiting = true
 			continue
 		}
-		if now.Sub(r.CreatedAt) > outboxTTL {
-			o.giveUp(ctx, r, fmt.Sprintf("not delivered within %v: %s", outboxTTL, r.LastError))
+		if now.Sub(r.CreatedAt) > OutboxTTL {
+			o.giveUp(ctx, r, fmt.Sprintf("not delivered within %v: %s", OutboxTTL, r.LastError))
 			continue
 		}
 		if !force && r.NextTryAt.After(now) {
@@ -234,7 +233,7 @@ func (o *Outbox) flush(ctx context.Context, force bool) (wait time.Duration, wai
 			continue
 		case ctx.Err() != nil:
 			return wait, true, offline
-		case errors.Is(err, outboundmsg.ErrRefusedRecipient) || errors.Is(err, errNotAChat):
+		case errors.Is(err, ErrRefusedRecipient) || errors.Is(err, ErrNotAChat):
 			o.giveUp(ctx, r, err.Error())
 			continue
 		case errors.Is(err, errNotRecorded):
@@ -310,21 +309,21 @@ func (o *Outbox) finish(ctx context.Context, r store.OutboxRow) error {
 
 // send sends one part. A poll WhatsApp refuses while connected goes out
 // as a numbered list instead; while it is not, the poll waits like text.
-func (o *Outbox) send(ctx context.Context, m outboundmsg.Link, r *store.OutboxRow, p store.OutboxPart) error {
+func (o *Outbox) send(ctx context.Context, m Link, r *store.OutboxRow, p store.OutboxPart) error {
 	ctx, cancel := context.WithTimeout(ctx, outboxSendLimit)
 	defer cancel()
 	if !p.IsPoll() {
 		return m.SendMessage(ctx, r.Chat, p.Text)
 	}
-	poll := outboundmsg.Poll{Question: p.Question, Options: p.Options, MaxSelectable: p.Max}
+	poll := Poll{Question: p.Question, Options: p.Options, MaxSelectable: p.Max}
 	log.Printf("Sending poll to %s: %q (%d options)", r.Chat, p.Question, len(p.Options))
 	msgID, err := m.SendPoll(ctx, r.Chat, p.Question, p.Options, p.Max)
 	if err != nil {
-		if !isConnected(m) || ctx.Err() != nil || errors.Is(err, outboundmsg.ErrRefusedRecipient) {
+		if !isConnected(m) || ctx.Err() != nil || errors.Is(err, ErrRefusedRecipient) {
 			return err
 		}
 		log.Printf("failed to send poll to %s: %v — falling back to text", r.Chat, err)
-		return m.SendMessage(ctx, r.Chat, outboundmsg.PollAsText(poll))
+		return m.SendMessage(ctx, r.Chat, PollAsText(poll))
 	}
 	// Kept so the votes can be matched back to its options and reach the
 	// brain that sent it.
@@ -343,7 +342,7 @@ func (o *Outbox) giveUp(ctx context.Context, r store.OutboxRow, why string) {
 }
 
 // isConnected reports whether m can send now.
-func isConnected(m outboundmsg.Link) bool {
+func isConnected(m Link) bool {
 	select {
 	case <-m.Connected():
 		return true

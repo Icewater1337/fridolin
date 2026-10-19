@@ -2,8 +2,8 @@ package main
 
 import (
 	"context"
-	"errors"
 	"fmt"
+	outboundmsg "github.com/Icewater1337/fridolin/internal/outbound"
 	"log"
 	"strings"
 
@@ -26,9 +26,6 @@ func badAllowedNumbers(list []string) []string {
 	return bad
 }
 
-// errNotAChat is why a chat a script named cannot be sent to.
-var errNotAChat = errors.New("not a chat JID: use one such as 15551234567@s.whatsapp.net, a …@lid or 120363000000000000@g.us, or a phone number with the country code")
-
 // chatJID parses the chat a script names, for /send: a WhatsApp JID, or a
 // phone number written any way phoneNumber takes, for the direct chat with
 // it. A bare number parses as a JID without a user, which whatsmeow fails
@@ -39,24 +36,24 @@ func chatJID(s string) (types.JID, error) {
 	if !strings.Contains(s, "@") {
 		n, err := chat.PhoneNumber(s)
 		if err != nil {
-			return types.JID{}, fmt.Errorf("%q is %w", s, errNotAChat)
+			return types.JID{}, fmt.Errorf("%q is %w", s, outboundmsg.ErrNotAChat)
 		}
 		return types.NewJID(n, types.DefaultUserServer), nil
 	}
 	jid, err := types.ParseJID(s)
 	if err != nil || jid.User == "" {
-		return types.JID{}, fmt.Errorf("%q is %w", s, errNotAChat)
+		return types.JID{}, fmt.Errorf("%q is %w", s, outboundmsg.ErrNotAChat)
 	}
 	switch jid.Server {
 	case types.DefaultUserServer:
 		if !chat.IsPhoneNumber(jid.User) {
-			return types.JID{}, fmt.Errorf("%q is %w", s, errNotAChat)
+			return types.JID{}, fmt.Errorf("%q is %w", s, outboundmsg.ErrNotAChat)
 		}
 	case types.GroupServer, types.HiddenUserServer, types.BroadcastServer, types.NewsletterServer:
 		// Broadcast lists and channels are chats, which checkRecipient
 		// refuses to send to.
 	default:
-		return types.JID{}, fmt.Errorf("%q is %w", s, errNotAChat)
+		return types.JID{}, fmt.Errorf("%q is %w", s, outboundmsg.ErrNotAChat)
 	}
 	return jid.ToNonAD(), nil
 }

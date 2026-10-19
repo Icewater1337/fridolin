@@ -38,7 +38,7 @@ var imports = map[string][]string{
 	"internal/otp":      {"internal/history", "internal/fsx"},
 	"internal/media":    {"internal/fsx", "internal/textx"},
 	"internal/platform": nil,
-	"internal/outbound": {"internal/textx"},
+	"internal/outbound": {"internal/store", "internal/textx"},
 	"internal/store":    {"internal/fsx", "internal/logx"},
 	"internal/textx":    nil,
 	"internal/trigger":  nil,
