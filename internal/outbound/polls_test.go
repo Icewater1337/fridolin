@@ -1,4 +1,4 @@
-package main
+package outbound
 
 import (
 	"fmt"
@@ -23,7 +23,7 @@ Question: When should we meet?
 
 Let me know.`
 
-	polls, remaining := extractPolls(text)
+	polls, remaining := ExtractPolls(text)
 	if len(polls) != 1 {
 		t.Fatalf("got %d polls, want 1", len(polls))
 	}
@@ -48,7 +48,7 @@ Let me know.`
 // The end of a block is found in any letter case, like its start: a
 // "[Poll]…[/poll]" block is a poll, not markup in the chat.
 func TestExtractPollsAnyCase(t *testing.T) {
-	polls, remaining := extractPolls("Vote:\n[Poll max=2]\nQuestion: Which?\n- A\n- B\n[/poll] thanks")
+	polls, remaining := ExtractPolls("Vote:\n[Poll max=2]\nQuestion: Which?\n- A\n- B\n[/poll] thanks")
 	if len(polls) != 1 || polls[0].Question != "Which?" || polls[0].MaxSelectable != 2 {
 		t.Errorf("got %+v", polls)
 	}
@@ -58,7 +58,7 @@ func TestExtractPollsAnyCase(t *testing.T) {
 }
 
 func TestExtractPollsMaxSelectable(t *testing.T) {
-	polls, _ := extractPolls("[POLL max=2]\nQuestion: Which?\n- A\n- B\n- C\n[/POLL]")
+	polls, _ := ExtractPolls("[POLL max=2]\nQuestion: Which?\n- A\n- B\n- C\n[/POLL]")
 	if len(polls) != 1 || polls[0].MaxSelectable != 2 {
 		t.Fatalf("got %+v", polls)
 	}
@@ -66,7 +66,7 @@ func TestExtractPollsMaxSelectable(t *testing.T) {
 
 func TestExtractPollsClampsMaxToOptionCount(t *testing.T) {
 	// WhatsApp rejects a poll whose max exceeds the number of options.
-	polls, _ := extractPolls("[POLL max=9]\nQuestion: Which?\n- A\n- B\n[/POLL]")
+	polls, _ := ExtractPolls("[POLL max=9]\nQuestion: Which?\n- A\n- B\n[/POLL]")
 	if len(polls) != 1 {
 		t.Fatalf("got %d polls, want 1", len(polls))
 	}
@@ -83,12 +83,12 @@ func TestExtractPollsTruncatesToWhatsAppLimit(t *testing.T) {
 	}
 	sb.WriteString("[/POLL]")
 
-	polls, _ := extractPolls(sb.String())
+	polls, _ := ExtractPolls(sb.String())
 	if len(polls) != 1 {
 		t.Fatalf("got %d polls, want 1", len(polls))
 	}
-	if len(polls[0].Options) != maxPollOptions {
-		t.Errorf("options = %d, want %d", len(polls[0].Options), maxPollOptions)
+	if len(polls[0].Options) != MaxPollOptions {
+		t.Errorf("options = %d, want %d", len(polls[0].Options), MaxPollOptions)
 	}
 }
 
@@ -102,12 +102,12 @@ func TestExtractPollsRejectsIncomplete(t *testing.T) {
 		"[POLL]\nQuestion: unterminated\n- A\n- B",
 		"[POLL]\nQuestion: Same twice?\n- A\n- A\n[/POLL]",
 	} {
-		polls, remaining := extractPolls(text)
+		polls, remaining := ExtractPolls(text)
 		if len(polls) != 0 {
-			t.Errorf("extractPolls(%q) returned %d polls, want 0", text, len(polls))
+			t.Errorf("ExtractPolls(%q) returned %d polls, want 0", text, len(polls))
 		}
 		if remaining != text {
-			t.Errorf("extractPolls(%q) left %q, want the text as it was", text, remaining)
+			t.Errorf("ExtractPolls(%q) left %q, want the text as it was", text, remaining)
 		}
 	}
 }
@@ -116,8 +116,8 @@ func TestExtractPollsRejectsIncomplete(t *testing.T) {
 // is a poll of its own, with the words between them kept.
 func TestExtractPollsUnclosedBlockDoesNotSwallowTheNext(t *testing.T) {
 	text := "[POLL]\nQuestion: first?\n- A\n- B\nbetween\n[POLL]\nQuestion: second?\n- C\n- D\n[/POLL]\nend"
-	polls, remaining := extractPolls(text)
-	want := []pollData{{Question: "second?", Options: []string{"C", "D"}, MaxSelectable: 1}}
+	polls, remaining := ExtractPolls(text)
+	want := []Poll{{Question: "second?", Options: []string{"C", "D"}, MaxSelectable: 1}}
 	if !reflect.DeepEqual(polls, want) {
 		t.Errorf("polls = %+v, want %+v", polls, want)
 	}
@@ -129,15 +129,15 @@ func TestExtractPollsUnclosedBlockDoesNotSwallowTheNext(t *testing.T) {
 // An option given twice counts once, since votes are matched by the hash
 // of its text; options that differ in case are two.
 func TestExtractPollsDropsRepeatedOptions(t *testing.T) {
-	polls, _ := extractPolls("[POLL max=4]\nQuestion: Which?\n- A\n- A\n- a\n- B\n[/POLL]")
-	want := []pollData{{Question: "Which?", Options: []string{"A", "a", "B"}, MaxSelectable: 3}}
+	polls, _ := ExtractPolls("[POLL max=4]\nQuestion: Which?\n- A\n- A\n- a\n- B\n[/POLL]")
+	want := []Poll{{Question: "Which?", Options: []string{"A", "a", "B"}, MaxSelectable: 3}}
 	if !reflect.DeepEqual(polls, want) {
 		t.Errorf("polls = %+v, want %+v", polls, want)
 	}
 }
 
 func TestExtractPollsNoPoll(t *testing.T) {
-	polls, remaining := extractPolls("just a normal reply")
+	polls, remaining := ExtractPolls("just a normal reply")
 	if len(polls) != 0 {
 		t.Errorf("got %d polls, want 0", len(polls))
 	}
@@ -150,7 +150,7 @@ func TestExtractPollsNoPoll(t *testing.T) {
 // pollHeaderRe finds its start.
 var anyPollCloseRe = regexp.MustCompile(`(?i)\[/POLL\]`)
 
-// FuzzExtractPolls feeds extractPolls model output. Whatever the model
+// FuzzExtractPolls feeds ExtractPolls model output. Whatever the model
 // writes, each poll that comes out has a question, 2 to 12 distinct
 // trimmed options and a max within them, and text without a poll in it
 // reaches the chat as it was (see checkPolls). A well-formed block built
@@ -223,7 +223,7 @@ func FuzzExtractPolls(f *testing.F) {
 		if want := strings.TrimSpace(before + after); remaining != want {
 			t.Errorf("remaining text = %q, want %q", remaining, want)
 		}
-		want := pollData{Question: q, Options: distinct[:min(len(distinct), maxPollOptions)], MaxSelectable: 1}
+		want := Poll{Question: q, Options: distinct[:min(len(distinct), MaxPollOptions)], MaxSelectable: 1}
 		if maxSel > 0 {
 			want.MaxSelectable = int(maxSel)
 		}
@@ -234,14 +234,14 @@ func FuzzExtractPolls(f *testing.F) {
 	})
 }
 
-// checkPolls runs extractPolls on text and checks what holds for any text:
+// checkPolls runs ExtractPolls on text and checks what holds for any text:
 // each poll has a question and 2 to 12 distinct options, each a trimmed
 // line of its own; there are no more polls than closed blocks; and the
 // remaining text, which goes to the chat, is the input when no poll came
 // out of it and shorter otherwise, and still valid UTF-8 if the input was.
-func checkPolls(t *testing.T, text string) ([]pollData, string) {
+func checkPolls(t *testing.T, text string) ([]Poll, string) {
 	t.Helper()
-	polls, remaining := extractPolls(text)
+	polls, remaining := ExtractPolls(text)
 	line := func(s string) bool {
 		return s != "" && s == strings.TrimSpace(s) && !strings.Contains(s, "\n")
 	}
@@ -249,8 +249,8 @@ func checkPolls(t *testing.T, text string) ([]pollData, string) {
 		if !line(p.Question) {
 			t.Errorf("question %q is not a trimmed line", p.Question)
 		}
-		if n := len(p.Options); n < 2 || n > maxPollOptions {
-			t.Errorf("poll %q has %d options, want 2 to %d", p.Question, n, maxPollOptions)
+		if n := len(p.Options); n < 2 || n > MaxPollOptions {
+			t.Errorf("poll %q has %d options, want 2 to %d", p.Question, n, MaxPollOptions)
 		}
 		for i, o := range p.Options {
 			if !line(o) {

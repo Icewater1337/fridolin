@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	outboundmsg "github.com/Icewater1337/fridolin/internal/outbound"
 	"github.com/Icewater1337/fridolin/internal/whatsapp"
 
 	"github.com/Icewater1337/fridolin/internal/chat"
@@ -61,17 +62,17 @@ func NewWhatsAppClient(cfg func() *Config, s *store.Store, handler InboundHandle
 func whatsAppOptions(cfg func() *Config, s *store.Store, handler InboundHandler, onIgnored whatsapp.IgnoredHandler) whatsapp.Options {
 	// Keep the initial log-level read before loading the device.
 	logger := logx.NewWaLogger("WhatsApp", cfg().LogLevel)
-	return whatsapp.Options{Settings: whatsAppSettings(cfg), Container: s.Container, Polls: whatsAppPollStore{s}, OnInbound: whatsAppInboundHandler(handler), OnIgnored: onIgnored, Log: logger, Chunks: ChunkMessage, Identity: whatsAppIdentity(), Outbound: whatsAppOutbound(), Text: whatsAppText(), Inbox: mediaInboxAt}
+	return whatsapp.Options{Settings: whatsAppSettings(cfg), Container: s.Container, Polls: whatsAppPollStore{s}, OnInbound: whatsAppInboundHandler(handler), OnIgnored: onIgnored, Log: logger, Chunks: outboundmsg.Chunk, Identity: whatsAppIdentity(), Outbound: whatsAppOutbound(), Text: whatsAppText(), Inbox: mediaInboxAt}
 }
 
 func whatsAppOutbound() whatsapp.Outbound {
 	return whatsapp.Outbound{Recipient: parseRecipient, Classify: classifySendErr, Chunks: func(ctx context.Context, chunks []string, send func(string) error) error {
-		return sendChunks(ctx, chunks, outboxPace, send)
+		return outboundmsg.SendChunks(ctx, chunks, outboxPace, send)
 	}}
 }
 
 func whatsAppText() whatsapp.Text {
-	return whatsapp.Text{ViewOnce: viewOnceNotice, MediaFailed: mediaFailedNotice, MediaTooLarge: mediaTooLargeNotice,
+	return whatsapp.Text{ViewOnce: outboundmsg.ViewOnceNotice, MediaFailed: outboundmsg.MediaFailedNotice, MediaTooLarge: outboundmsg.MediaTooLargeNotice,
 		MaskSender: func(number string, resolved bool, server string) string {
 			return (groupSender{Number: number, Resolved: resolved, Server: server}).masked()
 		},

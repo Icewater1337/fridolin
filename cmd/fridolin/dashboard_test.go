@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"github.com/Icewater1337/fridolin/internal/devchat"
+	outboundmsg "github.com/Icewater1337/fridolin/internal/outbound"
 	"image/png"
 	"io"
 	"log"
@@ -2017,7 +2018,7 @@ func TestOTPGuardHandsCodeToLocalScripts(t *testing.T) {
 		texts = append(texts, m.Text)
 	}
 	slices.Sort(texts)
-	if len(texts) != 2 || !strings.Contains(texts[0], "Examplebank 2FA") || texts[1] != otpCaughtNotice {
+	if len(texts) != 2 || !strings.Contains(texts[0], "Examplebank 2FA") || texts[1] != outboundmsg.OtpCaughtNotice {
 		t.Errorf("sent %q — only the script's own request and the notice may be there; the brain must not run on a caught code", texts)
 	}
 }

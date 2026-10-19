@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	outboundmsg "github.com/Icewater1337/fridolin/internal/outbound"
 	"github.com/Icewater1337/fridolin/internal/whatsapp"
 	"io"
 	"maps"
@@ -259,7 +260,7 @@ func TestOTPGuardIsScopedToTheChatAndTheWindow(t *testing.T) {
 			if inHistory == (c.caught != "") {
 				t.Errorf("in the history: %v, want %v", inHistory, c.caught == "")
 			}
-			if told := slices.Contains(tb.sentTo(c.m.JID), otpCaughtNotice); told != c.toldChat {
+			if told := slices.Contains(tb.sentTo(c.m.JID), outboundmsg.OtpCaughtNotice); told != c.toldChat {
 				t.Errorf("sender told: %v, want %v (sent %q)", told, c.toldChat, tb.sentTo(c.m.JID))
 			}
 		})
@@ -409,7 +410,7 @@ func TestQuotedCommandIsRecognised(t *testing.T) {
 	t.Run("!stop", func(t *testing.T) {
 		tb, br := newMainBridge(t, "")
 		startLongRun(t, tb, br, Inbound{Inbound: chat.Inbound{JID: testDMChat, Sender: "15551234567", Text: "write a long report", Source: chat.SourceWhatsApp}})
-		tb.whatsApp(t).ProcessMessage(replyEvent("!stop", workingNotice))
+		tb.whatsApp(t).ProcessMessage(replyEvent("!stop", outboundmsg.WorkingNotice))
 		// The confirmation goes out once the run has stopped, so wait for it
 		// rather than for the run: the snapshot clears a moment earlier.
 		waitFor(t, 10*time.Second, "the stop confirmation", func() bool { return tb.sentPrefix(testDMChat, "🛑") })

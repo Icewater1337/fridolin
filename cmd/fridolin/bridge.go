@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"github.com/Icewater1337/fridolin/internal/devchat"
+	outboundmsg "github.com/Icewater1337/fridolin/internal/outbound"
 	"github.com/Icewater1337/fridolin/internal/whatsapp"
 	"log"
 	"net"
@@ -201,7 +202,7 @@ func NewBridge(cfgs *ConfigStore, opts BridgeOptions) (_ *Bridge, err error) {
 	)
 
 	if opts.NoWhatsApp {
-		b.dev = devchat.New(func(text string) []string { return ChunkMessage(text, cfgs.Get().MaxChunkSize) })
+		b.dev = devchat.New(func(text string) []string { return outboundmsg.Chunk(text, cfgs.Get().MaxChunkSize) })
 		b.wa = b.dev
 	} else {
 		waOpts := whatsAppOptions(cfgs.Get, store, b.handleInbound, b.recordIgnored)
@@ -498,7 +499,7 @@ func (b *Bridge) resume(ctx context.Context) {
 		}
 		switch r.Kind {
 		case inboundInterrupted:
-			if err := b.outbox.Text(ctx, r.Chat, restartedNotice, b.cfgs.Get().MaxChunkSize); err != nil {
+			if err := b.outbox.Text(ctx, r.Chat, outboundmsg.RestartedNotice, b.cfgs.Get().MaxChunkSize); err != nil {
 				log.Printf("brain %s: telling %s its run was cut short: %v", r.Brain, r.Chat, err)
 			}
 		case inboundQueued, inboundHeld:
@@ -722,12 +723,12 @@ func (b *Bridge) handleInbound(ctx context.Context, m Inbound) {
 		return
 	}
 	if br == nil {
-		reply := noBrainNotice
+		reply := outboundmsg.NoBrainNotice
 		if id := b.brainMgr.HeldFor(m.JID, m.IsGroup()); id != "" {
 			// Not the default brain instead: what was meant for this
 			// brain, your DMs say, must not land in another one.
 			log.Printf("brain %s, which handles %s, cannot run (see its issue on the Brains page); the message goes to no other brain", id, m.JID)
-			reply = heldBrainNotice
+			reply = outboundmsg.HeldBrainNotice
 		} else {
 			log.Printf("No brain configured for %s — add one in the dashboard", m.JID)
 		}
@@ -745,7 +746,7 @@ func (b *Bridge) handleInbound(ctx context.Context, m Inbound) {
 		log.Printf("brain %s: kept a one-time code out of the conversation (OTP guard)", br.ID())
 		b.handOffCode(br, m, code)
 		if !m.Silent {
-			_ = b.wa.SendMessage(ctx, m.JID, otpCaughtNotice)
+			_ = b.wa.SendMessage(ctx, m.JID, outboundmsg.OtpCaughtNotice)
 		}
 		return
 	}
@@ -764,11 +765,11 @@ func (b *Bridge) handleCommand(ctx context.Context, m Inbound, cfg *Config) bool
 		// happened: the brain's memory files stay, and a chat no brain
 		// answers has no history to start afresh.
 		b.stopChat(m)
-		_ = b.wa.SendMessage(ctx, m.JID, resetReply(b.resetChat(m)))
+		_ = b.wa.SendMessage(ctx, m.JID, outboundmsg.ResetReply(b.resetChat(m)))
 		return true
 
 	case "!stop":
-		_ = b.wa.SendMessage(ctx, m.JID, stopReply(b.stopChat(m)))
+		_ = b.wa.SendMessage(ctx, m.JID, outboundmsg.StopReply(b.stopChat(m)))
 		return true
 
 	case "!help":
@@ -776,7 +777,7 @@ func (b *Bridge) handleCommand(ctx context.Context, m Inbound, cfg *Config) bool
 		if m.IsGroup() {
 			trigger = cfg.Triggers.First()
 		}
-		_ = b.wa.SendMessage(ctx, m.JID, helpReply(trigger))
+		_ = b.wa.SendMessage(ctx, m.JID, outboundmsg.HelpReply(trigger))
 		return true
 	}
 	return false
@@ -860,13 +861,13 @@ func (b *Bridge) dispatch(m Inbound) {
 			if t := cfg.Triggers.First(); m.IsGroup() && t != "" {
 				stop = t + " !stop"
 			}
-			_ = b.wa.SendMessage(ctx, m.JID, queueFullNotice(stop))
+			_ = b.wa.SendMessage(ctx, m.JID, outboundmsg.QueueFullNotice(stop))
 		}
 	case err != nil:
 		log.Printf("routing message for %s: %v", m.JID, err)
 	case busy && !m.Silent && cfg.QueueNotify():
 		// Interrupt mode queues too: behind other chats and other people.
-		_ = b.wa.SendMessage(ctx, m.JID, queuedNotice(pos))
+		_ = b.wa.SendMessage(ctx, m.JID, outboundmsg.QueuedNotice(pos))
 	}
 }
 

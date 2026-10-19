@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"github.com/Icewater1337/fridolin/internal/devchat"
+	outboundmsg "github.com/Icewater1337/fridolin/internal/outbound"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -178,7 +179,7 @@ func TestMidRunMessagesOnlyForAddressedMessages(t *testing.T) {
 			if last := br.Snapshot().Last; (last.Outcome == outcomeQuestion) != c.asked {
 				t.Errorf("the run ended %q, want it to have asked: %v", last.Outcome, c.asked)
 			}
-			if notice := slices.Contains(chatJID(), workingNotice); notice != c.notice {
+			if notice := slices.Contains(chatJID(), outboundmsg.WorkingNotice); notice != c.notice {
 				t.Errorf("working notice sent %v, want %v", notice, c.notice)
 			}
 		})

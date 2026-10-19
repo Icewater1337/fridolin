@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	outboundmsg "github.com/Icewater1337/fridolin/internal/outbound"
 
 	"github.com/Icewater1337/fridolin/internal/devchat"
 	"net/http"
@@ -150,7 +151,7 @@ func TestSendFailureStatus(t *testing.T) {
 		{"not paired", classifySendErr(whatsmeow.ErrNotLoggedIn), http.StatusServiceUnavailable, ""},
 		{"unknown server", classifySendErr(whatsmeow.ErrUnknownServer), http.StatusBadRequest, ""},
 		{"anything else", errors.New("boom"), http.StatusInternalServerError, ""},
-		{"part way", &partialSendError{Sent: []string{"[1/2] first half"}, Total: 2, Err: classifySendErr(whatsmeow.ErrNotConnected)}, http.StatusServiceUnavailable, "[1/2] first half"},
+		{"part way", &outboundmsg.PartialSendError{Sent: []string{"[1/2] first half"}, Total: 2, Err: classifySendErr(whatsmeow.ErrNotConnected)}, http.StatusServiceUnavailable, "[1/2] first half"},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {

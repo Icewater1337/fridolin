@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	outboundmsg "github.com/Icewater1337/fridolin/internal/outbound"
 
 	"slices"
 	"strings"
@@ -38,7 +39,7 @@ func TestSendRefusesStatusBroadcastAndChannels(t *testing.T) {
 					}()
 					return send(jid)
 				}()
-				if !errors.Is(err, errRefusedRecipient) {
+				if !errors.Is(err, outboundmsg.ErrRefusedRecipient) {
 					t.Errorf("err = %v, want a refusal", err)
 				}
 			})
@@ -61,7 +62,7 @@ func TestCheckRecipient(t *testing.T) {
 	for _, c := range cases {
 		t.Run(c.jid, func(t *testing.T) {
 			err := checkRecipient(mustJID(t, c.jid))
-			if got := errors.Is(err, errRefusedRecipient); got != c.refuse {
+			if got := errors.Is(err, outboundmsg.ErrRefusedRecipient); got != c.refuse {
 				t.Errorf("refused = %v (%v), want %v", got, err, c.refuse)
 			}
 		})

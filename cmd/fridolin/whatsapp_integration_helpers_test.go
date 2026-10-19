@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
+	outboundmsg "github.com/Icewater1337/fridolin/internal/outbound"
 	"github.com/Icewater1337/fridolin/internal/whatsapp"
 	"sync"
 	"testing"
@@ -40,7 +41,7 @@ func newTestWhatsApp(t *testing.T, configure ...func(*whatsapp.Options)) *testWh
 	cfg := &Config{AllowedNumbers: []string{"15551234567"}, MediaDir: t.TempDir(), MaxChunkSize: 4000}
 	tw := &testWhatsApp{inbound: make(chan Inbound, 4), notices: make(chan string, 4)}
 	tw.handler = func(_ context.Context, m Inbound) { tw.inbound <- m }
-	opts := whatsapp.Options{Settings: whatsAppSettings(func() *Config { return cfg }), Container: fixedDeviceContainer{&store.Device{}}, Chunks: ChunkMessage, Identity: whatsAppIdentity(), Outbound: whatsAppOutbound(), Text: whatsAppText(), Inbox: mediaInboxAt, Log: testWaLogger{tw},
+	opts := whatsapp.Options{Settings: whatsAppSettings(func() *Config { return cfg }), Container: fixedDeviceContainer{&store.Device{}}, Chunks: outboundmsg.Chunk, Identity: whatsAppIdentity(), Outbound: whatsAppOutbound(), Text: whatsAppText(), Inbox: mediaInboxAt, Log: testWaLogger{tw},
 		OnInbound: func(ctx context.Context, m chat.Inbound) { tw.handler(ctx, Inbound{Inbound: m}) }, Notify: func(jid, text string) { tw.notices <- jid + ": " + text }}
 	for _, apply := range configure {
 		apply(&opts)

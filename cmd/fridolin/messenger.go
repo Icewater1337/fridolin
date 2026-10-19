@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	outboundmsg "github.com/Icewater1337/fridolin/internal/outbound"
 
 	"github.com/Icewater1337/fridolin/internal/chat"
 )
@@ -10,7 +11,7 @@ import (
 // WhatsApp; dev mode (--no-whatsapp) swaps in a fake that records outgoing
 // messages, so the dashboard and brains can be tried without pairing a phone.
 type Messenger interface {
-	outboundLink
+	outboundmsg.Link
 	Connect() error
 	Disconnect()
 	SendChunked(ctx context.Context, jid, text string) error

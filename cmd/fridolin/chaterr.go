@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"errors"
+	outboundmsg "github.com/Icewater1337/fridolin/internal/outbound"
 	"strings"
 )
 
@@ -23,37 +24,37 @@ func chatErrorText(err error, inDM bool) string {
 		return ""
 	}
 	if errors.Is(err, errSandboxUnavailable) {
-		return chatErrSandbox(errSandboxUnavailable)
+		return outboundmsg.ChatErrSandbox(errSandboxUnavailable)
 	}
 	if errors.Is(err, context.DeadlineExceeded) || errors.Is(err, errRunTimedOut) {
-		return chatErrTimeout
+		return outboundmsg.ChatErrTimeout
 	}
 	text := strings.ToLower(err.Error())
 	var ce *cliError
 	fromCLI := errors.As(err, &ce)
 	codex := (fromCLI && ce.provider == "codex") || strings.HasPrefix(text, "codex ")
 	if codex && containsAny(text, "not logged in", "not signed in", "401", "invalid api key", "authentication", "access token", "refresh token") {
-		return chatErrCodexNotSignedIn
+		return outboundmsg.ChatErrCodexNotSignedIn
 	}
 	switch {
 	case containsAny(text, "not logged in", "please run /login", "invalid api key", "failed to authenticate",
 		"authentication_error", "oauth token has expired", "api error: 401"):
-		return chatErrNotSignedIn
+		return outboundmsg.ChatErrNotSignedIn
 	case containsAny(text, "usage limit", "rate limit", "rate_limit", "quota", "api error: 429", "overloaded"):
 		if codex {
-			return chatErrCodexLimit
+			return outboundmsg.ChatErrCodexLimit
 		}
-		return chatErrLimit
+		return outboundmsg.ChatErrLimit
 	case containsAny(text, "timed out", "timeout"):
-		return chatErrTimeout
+		return outboundmsg.ChatErrTimeout
 	}
 	if inDM && fromCLI {
 		if codex {
-			return chatErrCodex(ce.msg)
+			return outboundmsg.ChatErrCodex(ce.msg)
 		}
-		return chatErrClaude(ce.msg)
+		return outboundmsg.ChatErrClaude(ce.msg)
 	}
-	return chatErrGeneric
+	return outboundmsg.ChatErrGeneric
 }
 
 func containsAny(s string, subs ...string) bool {
