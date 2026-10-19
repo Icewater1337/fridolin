@@ -61,8 +61,8 @@ func TestBuildChatPathNeedsABrainID(t *testing.T) {
 // that start with the same ⏳ too, such as the one about Claude's usage
 // limit.
 func TestBuildChatLeavesOutOnlyTheWorkingNotice(t *testing.T) {
-	c := &siteChats{m: newTestSite(t)}
-	s := siteChatMessenger{appendMessage: c.add}
+	m := newTestSite(t)
+	s := siteChatMessenger{appendMessage: m.AppendBuildMessage}
 	for _, tc := range []struct {
 		text  string
 		shown bool
@@ -72,11 +72,11 @@ func TestBuildChatLeavesOutOnlyTheWorkingNotice(t *testing.T) {
 		{"⏳ Queued (#2) — I'll get to this right after the current task.", true},
 		{"Here is the new page.", true},
 	} {
-		before := len(c.get("web").Messages)
+		before := len(m.BuildChat("web").Messages)
 		if err := s.SendMessage(context.Background(), buildChatJID("web", 1), tc.text); err != nil {
 			t.Fatal(err)
 		}
-		if shown := len(c.get("web").Messages) > before; shown != tc.shown {
+		if shown := len(m.BuildChat("web").Messages) > before; shown != tc.shown {
 			t.Errorf("%q in the build chat: %v, want %v", tc.text, shown, tc.shown)
 		}
 	}

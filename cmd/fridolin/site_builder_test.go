@@ -22,12 +22,12 @@ import (
 // and runs without a sandbox (tests cannot nest sandbox-exec).
 func newTestBuilderSite(t *testing.T) (*SiteManager, string) {
 	t.Helper()
-	m := newTestSite(t)
+	opts := testSiteOptions(t)
 	brainDir := filepath.Join(t.TempDir(), "web-brain")
 	if err := os.MkdirAll(brainDir, 0o700); err != nil {
 		t.Fatal(err)
 	}
-	m.hooks = SiteBuilderHooks{
+	opts.Builder = SiteBuilderHooks{
 		BrainDir: func(id string) string {
 			if id == "web" {
 				return brainDir
@@ -38,8 +38,8 @@ func newTestBuilderSite(t *testing.T) (*SiteManager, string) {
 		BridgeURL:  func() string { return "http://127.0.0.1:1" },
 		Executable: func() (string, error) { return "/usr/bin/true", nil },
 	}
-	m.workspaceInstall = func(ctx context.Context, brainID, dir string) error { return m.npmInstall(ctx, dir, false) }
-	return m, brainDir
+	opts.WorkspaceInstall = func(ctx context.Context, brainID, dir string) error { return opts.NPMInstall(ctx, dir, false) }
+	return NewSiteManager(opts), brainDir
 }
 
 func TestWithArgsBeforePrint(t *testing.T) {
@@ -311,14 +311,14 @@ func TestBuilderHandlerNeedsTheBrainsToken(t *testing.T) {
 			t.Errorf("%q: %d", auth, rec.Code)
 		}
 	}
-	// A token whose brain is no longer a builder is refused too.
+}
+
+// A known run token is still refused when its brain is not a builder.
+func TestBuilderTokenRequiresActiveBuilder(t *testing.T) {
+	m, _ := newTestBuilderSite(t)
 	tok := m.builderToken("web")
-	req := httptest.NewRequest("GET", "/builder/context", nil)
-	req.Header.Set("Authorization", "Bearer "+tok)
-	rec := httptest.NewRecorder()
-	h.ServeHTTP(rec, req)
-	if rec.Code != http.StatusUnauthorized {
-		t.Errorf("a non-builder's token: %d", rec.Code)
+	if got := m.BrainForToken(tok); got != "" {
+		t.Errorf("a non-builder's token resolved to %q", got)
 	}
 }
 

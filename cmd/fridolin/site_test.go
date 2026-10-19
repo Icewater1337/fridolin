@@ -31,6 +31,11 @@ import (
 // checkout a link would lead to.
 func newTestSite(t *testing.T) *SiteManager {
 	t.Helper()
+	return NewSiteManager(testSiteOptions(t))
+}
+
+func testSiteOptions(t *testing.T) SiteOptions {
+	t.Helper()
 	opts := SiteOptions{DataDir: t.TempDir(), GoogleClient: func() string { return "" }}
 	opts.NPMInstall = func(ctx context.Context, dir string, prod bool) error {
 		src := filepath.Join(repoDir, "site", "node_modules")
@@ -42,7 +47,7 @@ func newTestSite(t *testing.T) *SiteManager {
 		}
 		return nil
 	}
-	return NewSiteManager(opts)
+	return opts
 }
 
 func gitT(t *testing.T, dir string, args ...string) string {
@@ -563,9 +568,10 @@ func TestSiteGoogleClientReachesRunningSite(t *testing.T) {
 	requireSiteRuntime(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	m := newTestSite(t)
-	shared := filepath.Join(m.dataDir, "google", "oauth_client.json") // as GoogleAuth.clientPath
-	m.googleClient = func() string { return shared }
+	opts := testSiteOptions(t)
+	shared := filepath.Join(opts.DataDir, "google", "oauth_client.json") // as GoogleAuth.clientPath
+	opts.GoogleClient = func() string { return shared }
+	m := NewSiteManager(opts)
 	clientJSON := func(id string) string { return `{"web":{"client_id":"` + id + `","client_secret":"s"}}` }
 	setShared := func(id string) {
 		t.Helper()
@@ -626,8 +632,10 @@ func TestSiteGoogleClientReachesRunningSite(t *testing.T) {
 	expect := func(what, id, file string) {
 		t.Helper()
 		testutil.WaitFor(t, 60*time.Second, what, func() bool { return signInClient() == id })
-		var rt siteRuntime
-		data, _ := os.ReadFile(m.dir("site.runtime.json"))
+		var rt struct {
+			GoogleClientFile string `json:"google_client_file"`
+		}
+		data, _ := os.ReadFile(filepath.Join(opts.DataDir, "site", "site.runtime.json"))
 		if err := json.Unmarshal(data, &rt); err != nil || rt.GoogleClientFile != file {
 			t.Errorf("%s: runtime.json names %q (%v), want %q", what, rt.GoogleClientFile, err, file)
 		}
@@ -635,7 +643,7 @@ func TestSiteGoogleClientReachesRunningSite(t *testing.T) {
 	expect("the shared client", "shared-1", shared)
 
 	call("PUT", clientJSON("site-1"))
-	expect("the site's own client once saved", "site-1", m.dir("google_client.json"))
+	expect("the site's own client once saved", "site-1", filepath.Join(opts.DataDir, "site", "google_client.json"))
 
 	// The site's own client stays ahead of a changed shared one.
 	setShared("shared-2")
@@ -717,7 +725,8 @@ func TestSiteDeployKeyWithGH(t *testing.T) {
 	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
 	t.Setenv("FRIDOLIN_FAKE_GH_FAIL", "")
 
-	m := newTestSite(t)
+	opts := testSiteOptions(t)
+	m := NewSiteManager(opts)
 	b := &Bridge{site: m}
 	mux := http.NewServeMux()
 	b.siteAPI(mux)
@@ -761,7 +770,7 @@ func TestSiteDeployKeyWithGH(t *testing.T) {
 	if code != 200 || out["repo"] != "you/my-site" {
 		t.Fatalf("add before connecting: %d %v", code, out)
 	}
-	pub := m.dir("deploy_key.pub")
+	pub := filepath.Join(opts.DataDir, "site", "deploy_key.pub")
 	if !fsx.Exists(pub) {
 		t.Fatal("no deploy key was made")
 	}
@@ -785,10 +794,22 @@ func TestSiteDeployKeyWithGH(t *testing.T) {
 	t.Setenv("FRIDOLIN_FAKE_GH_FAIL", "")
 
 	// Connected: the connected repository, as before; another address is refused.
-	m.mu.Lock()
-	m.settings.Repo = sitesvc.SiteRepo{URL: "git@github.com:you/my-site.git", Branch: "main"}
-	m.mu.Unlock()
-	if err := os.MkdirAll(m.repoDir(), 0o700); err != nil {
+	setRepo := func(repo sitesvc.SiteRepo) {
+		t.Helper()
+		settings := m.Settings()
+		settings.Repo = repo
+		data, err := json.Marshal(settings)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(opts.DataDir, "site", "settings.json"), data, 0o600); err != nil {
+			t.Fatal(err)
+		}
+		m = NewSiteManager(opts)
+		b.site = m
+	}
+	setRepo(sitesvc.SiteRepo{URL: "git@github.com:you/my-site.git", Branch: "main"})
+	if err := os.MkdirAll(filepath.Join(opts.DataDir, "site", "repo"), 0o700); err != nil {
 		t.Fatal(err)
 	}
 	os.Remove(argsLog)
@@ -804,9 +825,7 @@ func TestSiteDeployKeyWithGH(t *testing.T) {
 		t.Errorf("gh ran with %v, want %s twice", got, want)
 	}
 
-	m.mu.Lock()
-	m.settings.Repo = sitesvc.SiteRepo{URL: newBareRepo(t), Branch: "main"}
-	m.mu.Unlock()
+	setRepo(sitesvc.SiteRepo{URL: newBareRepo(t), Branch: "main"})
 	if code, out := call(""); code != 400 || !strings.Contains(fmt.Sprint(out["error"]), "not on GitHub") {
 		t.Errorf("connected to a repository elsewhere: %d %v", code, out)
 	}
