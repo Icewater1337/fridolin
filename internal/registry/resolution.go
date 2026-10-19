@@ -1,4 +1,4 @@
-package main
+package registry
 
 import (
 	"errors"
@@ -23,17 +23,17 @@ const (
 	IssueUnapproved IssueKind = "unapproved"
 )
 
-// BrainPathContext supplies the home and sibling folders for a path check.
+// PathContext supplies the home and sibling folders for a path check.
 // CheckDir is required and evaluates the caller's security policy at the
 // existing check point, after basic home confinement has succeeded.
-type BrainPathContext struct {
+type PathContext struct {
 	Home     string
 	Others   []string
 	CheckDir func(dir, configured, home string) error
 }
 
-// BrainIssue is a problem with one configured brain, shown on the dashboard.
-type BrainIssue struct {
+// Issue is a problem with one configured brain, shown on the dashboard.
+type Issue struct {
 	ID     string    `json:"id,omitempty"`
 	Path   string    `json:"path"`
 	Kind   IssueKind `json:"kind"` // drift, missing, invalid, unapproved
@@ -53,43 +53,43 @@ type BrainIssue struct {
 // LeavesOut reports whether the issue keeps an approved brain from running:
 // its folder is missing or cannot hold a brain, or it clashes with another
 // brain. Drift does not; the approved manifest still runs.
-func (is BrainIssue) LeavesOut() bool {
+func (is Issue) LeavesOut() bool {
 	return is.ID != "" && (is.Kind == IssueInvalid || is.Kind == IssueMissing)
 }
 
-// resolveBrainRefs turns the brain folders in the configuration into runnable
+// Resolve turns the brain folders in the configuration into runnable
 // brains. Brains with problems are left out and reported, so one broken
 // folder never takes the others down.
-func resolveBrainRefs(refs []config.BrainRef, checkDir func(dir, configured string) error) ([]manifest.Spec, []BrainIssue) {
+func Resolve(refs []config.BrainRef, checkDir func(dir, configured string) error) ([]manifest.Spec, []Issue) {
 	var specs []manifest.Spec
-	var issues []BrainIssue
+	var issues []Issue
 
 	for i, ref := range refs {
 		dir := fsx.Canonical(ref.Path)
 		if ref.Approved == nil {
-			issues = append(issues, BrainIssue{Path: ref.Path, Kind: IssueUnapproved, Detail: "no approved manifest — remove this entry and add the folder again", Entry: i})
+			issues = append(issues, Issue{Path: ref.Path, Kind: IssueUnapproved, Detail: "no approved manifest — remove this entry and add the folder again", Entry: i})
 			continue
 		}
 		m := ref.Approved.Normalized()
 		if err := m.Validate(); err != nil {
-			issues = append(issues, BrainIssue{ID: m.ID, Path: ref.Path, Kind: IssueInvalid, Detail: err.Error(), Entry: i, Routing: m.Routing})
+			issues = append(issues, Issue{ID: m.ID, Path: ref.Path, Kind: IssueInvalid, Detail: err.Error(), Entry: i, Routing: m.Routing})
 			continue
 		}
 		if st, err := os.Stat(dir); err != nil || !st.IsDir() {
-			issues = append(issues, BrainIssue{ID: m.ID, Path: ref.Path, Kind: IssueMissing, Detail: "folder not found", Entry: i, Routing: m.Routing})
+			issues = append(issues, Issue{ID: m.ID, Path: ref.Path, Kind: IssueMissing, Detail: "folder not found", Entry: i, Routing: m.Routing})
 			continue
 		}
 		// The dashboard refuses such a folder, but brain_dirs can be edited
 		// by hand, and a folder can be moved, or a symlink on its way
 		// changed, after it was added.
 		if err := checkDir(dir, ref.Path); err != nil {
-			issues = append(issues, BrainIssue{ID: m.ID, Path: ref.Path, Kind: IssueInvalid, Detail: "the folder " + err.Error() + ", so it cannot hold a brain; move the brain to a folder of its own", Entry: i, Routing: m.Routing})
+			issues = append(issues, Issue{ID: m.ID, Path: ref.Path, Kind: IssueInvalid, Detail: "the folder " + err.Error() + ", so it cannot hold a brain; move the brain to a folder of its own", Entry: i, Routing: m.Routing})
 			continue
 		}
 		if disk, err := manifest.Read(dir); err == nil && !disk.Equal(m) {
-			issues = append(issues, BrainIssue{ID: m.ID, Path: ref.Path, Kind: IssueDrift, Detail: "brain.json changed on disk — review and approve it in the dashboard", Entry: i})
+			issues = append(issues, Issue{ID: m.ID, Path: ref.Path, Kind: IssueDrift, Detail: "brain.json changed on disk — review and approve it in the dashboard", Entry: i})
 		} else if err != nil && !errors.Is(err, fs.ErrNotExist) {
-			issues = append(issues, BrainIssue{ID: m.ID, Path: ref.Path, Kind: IssueDrift, Detail: err.Error(), Entry: i})
+			issues = append(issues, Issue{ID: m.ID, Path: ref.Path, Kind: IssueDrift, Detail: err.Error(), Entry: i})
 		}
 		// Validate kept prompt_file inside the folder; the folder's os.Root
 		// keeps it there when the bridge reads it.
@@ -100,7 +100,7 @@ func resolveBrainRefs(refs []config.BrainRef, checkDir func(dir, configured stri
 	var ok []manifest.Spec
 	for _, s := range specs {
 		if err := route.Validate(append(append([]manifest.Spec{}, ok...), s)); err != nil {
-			issues = append(issues, BrainIssue{ID: s.Manifest.ID, Path: s.Dir, Kind: IssueInvalid, Detail: err.Error(), Entry: s.Entry, Routing: s.Manifest.Routing})
+			issues = append(issues, Issue{ID: s.Manifest.ID, Path: s.Dir, Kind: IssueInvalid, Detail: err.Error(), Entry: s.Entry, Routing: s.Manifest.Routing})
 			continue
 		}
 		ok = append(ok, s)
@@ -108,9 +108,9 @@ func resolveBrainRefs(refs []config.BrainRef, checkDir func(dir, configured stri
 	return ok, issues
 }
 
-// checkBrainPath vets a folder before it becomes a brain. Problems block it;
+// CheckPath vets a folder before it becomes a brain. Problems block it;
 // warnings are shown but allowed.
-func checkBrainPath(path string, ctx BrainPathContext) (abs string, problems, warnings []string) {
+func CheckPath(path string, ctx PathContext) (abs string, problems, warnings []string) {
 	home := ctx.Home
 	abs = fsx.Canonical(fsx.ExpandHome(strings.TrimSpace(path), home))
 	if !filepath.IsAbs(abs) {

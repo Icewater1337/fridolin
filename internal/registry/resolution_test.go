@@ -1,4 +1,4 @@
-package main
+package registry
 
 import (
 	"os"
@@ -39,7 +39,7 @@ func TestResolveBrainsUsesApprovedManifestAndReportsDrift(t *testing.T) {
 	approved := m
 	cfg := resolutionConfig(config.BrainRef{Path: dir, Approved: &approved})
 
-	specs, issues := resolveBrainRefs(cfg.BrainDirs, allowResolutionDir)
+	specs, issues := Resolve(cfg.BrainDirs, allowResolutionDir)
 	if len(specs) != 1 || len(issues) != 0 {
 		t.Fatalf("specs=%v issues=%v", specs, issues)
 	}
@@ -50,7 +50,7 @@ func TestResolveBrainsUsesApprovedManifestAndReportsDrift(t *testing.T) {
 	if err := manifest.Write(dir, &evil, true); err != nil {
 		t.Fatal(err)
 	}
-	specs, issues = resolveBrainRefs(cfg.BrainDirs, allowResolutionDir)
+	specs, issues = Resolve(cfg.BrainDirs, allowResolutionDir)
 	if len(specs) != 1 || specs[0].Manifest.Routing.HandlesDMs {
 		t.Error("an unapproved brain.json change must not take effect")
 	}
@@ -76,7 +76,7 @@ func TestResolveBrainsSkipsMissingAndClashing(t *testing.T) {
 		config.BrainRef{Path: filepath.Join(home, "b"), Approved: &b},
 		config.BrainRef{Path: filepath.Join(home, "gone"), Approved: &gone},
 	)
-	specs, issues := resolveBrainRefs(cfg.BrainDirs, allowResolutionDir)
+	specs, issues := Resolve(cfg.BrainDirs, allowResolutionDir)
 	if len(specs) != 1 || specs[0].Manifest.ID != "a" {
 		t.Errorf("specs = %v, want only a", specs)
 	}
@@ -126,7 +126,7 @@ func TestResolveBrainsLeavesOutBadBrains(t *testing.T) {
 				config.BrainRef{Path: filepath.Join(home, "a"), Approved: &first},
 				config.BrainRef{Path: filepath.Join(home, tc.dir), Approved: tc.second},
 			)
-			specs, issues := resolveBrainRefs(cfg.BrainDirs, allowResolutionDir)
+			specs, issues := Resolve(cfg.BrainDirs, allowResolutionDir)
 			if len(specs) != 1 || specs[0].Manifest.ID != "a" {
 				t.Errorf("specs = %+v, want only a", specs)
 			}

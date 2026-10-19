@@ -1,4 +1,4 @@
-package main
+package registry
 
 import (
 	"encoding/json"
@@ -30,7 +30,7 @@ func TestResolutionSecurityCheckOrderAndIssueContext(t *testing.T) {
 		}
 	}
 	var calls []string
-	specs, issues := resolveBrainRefs(refs, func(dir, configured string) error {
+	specs, issues := Resolve(refs, func(dir, configured string) error {
 		if dir != configured {
 			t.Errorf("checker paths = %q, %q", dir, configured)
 		}
@@ -66,7 +66,7 @@ func TestResolutionSecurityCheckOrderAndIssueContext(t *testing.T) {
 		t.Fatalf("wire issue = %s", data)
 	}
 	for _, k := range []IssueKind{IssueDrift, IssueUnapproved} {
-		if (BrainIssue{ID: "x", Kind: k}).LeavesOut() {
+		if (Issue{ID: "x", Kind: k}).LeavesOut() {
 			t.Fatalf("%s incorrectly holds routes", k)
 		}
 	}
@@ -76,7 +76,7 @@ func TestBrainPathContextConfinementBeforeSecurityCheck(t *testing.T) {
 	t.Parallel()
 	home := fsx.Canonical(t.TempDir())
 	for _, path := range []string{"relative", home, "/", filepath.Join(filepath.Dir(home), "outside")} {
-		_, problems, _ := checkBrainPath(path, BrainPathContext{Home: home, CheckDir: func(string, string, string) error {
+		_, problems, _ := CheckPath(path, PathContext{Home: home, CheckDir: func(string, string, string) error {
 			t.Fatal("security checker called before home confinement")
 			return nil
 		}})
@@ -86,7 +86,7 @@ func TestBrainPathContextConfinementBeforeSecurityCheck(t *testing.T) {
 	}
 	var got []string
 	target := filepath.Join(home, "Documents", "assistant")
-	abs, problems, warnings := checkBrainPath(" ~/Documents/assistant ", BrainPathContext{
+	abs, problems, warnings := CheckPath(" ~/Documents/assistant ", PathContext{
 		Home: home, Others: []string{target},
 		CheckDir: func(dir, configured, homeArg string) error {
 			got = []string{dir, configured, homeArg}
