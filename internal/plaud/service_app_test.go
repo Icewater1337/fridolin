@@ -1,4 +1,4 @@
-package main
+package plaud
 
 import (
 	"crypto/ecdsa"

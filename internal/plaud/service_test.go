@@ -1,4 +1,4 @@
-package main
+package plaud
 
 import (
 	"context"
@@ -354,7 +354,7 @@ func TestPlaudMessageSaysWhatArrived(t *testing.T) {
 		t.Run(c.name, func(t *testing.T) {
 			tb, fp := plaudService(t, c.settings)
 			var text, file string
-			tb.plaud.submit = func(br *PlaudTarget, jid, sender, txt string, media []string, done func(error)) error {
+			tb.plaud.submit = func(br *Target, jid, sender, txt string, media []string, done func(error)) error {
 				text, file = txt, filepath.Base(media[0])
 				return nil
 			}
@@ -385,7 +385,7 @@ func TestPlaudMessageSaysWhatArrived(t *testing.T) {
 func TestPlaudPagesBackToTheLastKnownRecording(t *testing.T) {
 	tb, fp := plaudService(t, "")
 	var handed []string
-	tb.plaud.submit = func(br *PlaudTarget, jid, sender, text string, media []string, done func(error)) error {
+	tb.plaud.submit = func(br *Target, jid, sender, text string, media []string, done func(error)) error {
 		handed = append(handed, strings.TrimSuffix(media[0][strings.LastIndex(media[0], " - ")+3:], ".txt"))
 		done(nil)
 		return nil
@@ -542,7 +542,7 @@ func TestPlaudPendingGoesOldestFirst(t *testing.T) {
 	const older, newer = "of_00000000000000000000bb", "of_00000000000000000000ba"
 	tb, fp := plaudService(t, "")
 	var order []string
-	tb.plaud.submit = func(br *PlaudTarget, jid, sender, text string, media []string, done func(error)) error {
+	tb.plaud.submit = func(br *Target, jid, sender, text string, media []string, done func(error)) error {
 		order = append(order, media[0][len(media[0])-len(older)-4:len(media[0])-4])
 		done(nil)
 		return nil
@@ -588,7 +588,7 @@ func TestPlaudStopRefusesNewBackgroundWork(t *testing.T) {
 	t.Run("phone app build", func(t *testing.T) {
 		tb, _ := plaudService(t, "")
 		tb.plaud.Stop()
-		if err := tb.plaud.BuildApp(); !errors.Is(err, errPlaudStopping) {
+		if err := tb.plaud.BuildApp(); !errors.Is(err, ErrStopping) {
 			t.Errorf("BuildApp after Stop = %v, want errPlaudStopping", err)
 		}
 	})
@@ -613,7 +613,7 @@ func TestPlaudStopRefusesNewBackgroundWork(t *testing.T) {
 	t.Run("sign-in", func(t *testing.T) {
 		tb, _ := plaudService(t, "")
 		tb.plaud.Stop()
-		if err := tb.plaud.Connect(); !errors.Is(err, errPlaudStopping) {
+		if err := tb.plaud.Connect(); !errors.Is(err, ErrStopping) {
 			t.Errorf("Connect after Stop = %v, want errPlaudStopping", err)
 		}
 		tb.plaud.Stop()
@@ -702,7 +702,7 @@ func TestPlaudSignInSaysWhyItFailed(t *testing.T) {
 			if err := tb.plaud.Connect(); err != nil {
 				t.Fatal(err)
 			}
-			var job PlaudConnect
+			var job ConnectJob
 			testutil.WaitFor(t, 10*time.Second, "the sign-in to end", func() bool {
 				job = *tb.plaud.Status().Connect
 				return job.State != "running"
@@ -723,9 +723,9 @@ func TestPlaudManagerUsesOnlyWhatItIsGiven(t *testing.T) {
 		media                    []string
 	}
 	var got []handed
-	p := newPlaudManager(tb.options)
+	p := New(tb.options)
 	t.Cleanup(p.Stop)
-	p.submit = func(br *PlaudTarget, jid, sender, text string, media []string, done func(error)) error {
+	p.submit = func(br *Target, jid, sender, text string, media []string, done func(error)) error {
 		got = append(got, handed{br.ID(), jid, sender, text, media})
 		return nil
 	}
@@ -845,7 +845,7 @@ func TestPlaudConnectAgainAfterARefusedLogin(t *testing.T) {
 			if err := tb.plaud.Connect(); err != nil {
 				t.Fatal(err)
 			}
-			var job PlaudConnect
+			var job ConnectJob
 			var refused bool
 			// Not through Status: once the sign-in ended, that may ask who
 			// is signed in, a command of its own.
@@ -919,7 +919,7 @@ func TestPlaudConnectGivesTheSignOutItsOwnTime(t *testing.T) {
 		t.Fatal(err)
 	}
 	// Well below the 30 s the fake's logout hangs for.
-	var job PlaudConnect
+	var job ConnectJob
 	testutil.WaitFor(t, 10*time.Second, "the sign-in to end", func() bool {
 		tb.plaud.mu.Lock()
 		defer tb.plaud.mu.Unlock()

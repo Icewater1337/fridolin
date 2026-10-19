@@ -1,4 +1,4 @@
-package main
+package plaud
 
 import (
 	"context"
@@ -10,7 +10,7 @@ import (
 
 // PlaudSettings is the integration's live configuration, including its dashboard shape.
 // The command projection's explicit conversion checks that every field is represented.
-type PlaudSettings struct {
+type Settings struct {
 	Enabled         bool   `json:"enabled"`
 	Brain           string `json:"brain,omitempty"`
 	CLIPath         string `json:"cli_path,omitempty"`
@@ -23,8 +23,8 @@ type PlaudSettings struct {
 }
 
 // PlaudSnapshot keeps one poll's policy and paths together.
-type PlaudSnapshot struct {
-	Plaud             PlaudSettings
+type Snapshot struct {
+	Plaud             Settings
 	DataDir, MediaDir string
 	QueueMaxPending   int
 	OwnerChat         string
@@ -32,10 +32,10 @@ type PlaudSnapshot struct {
 }
 
 // PlaudOptions supplies startup paths and current settings without a config store.
-type PlaudOptions struct {
+type Options struct {
 	PlaudDir, Home   string
-	Settings         func() *PlaudSnapshot
-	Target           func(id string) *PlaudTarget
+	Settings         func() *Snapshot
+	Target           func(id string) *Target
 	HeldTarget       func() string
 	Notify           func(context.Context, string, string) error
 	FindCLI          func(string) (string, error)
@@ -48,22 +48,22 @@ type PlaudOptions struct {
 	AppSource        func() (string, error)
 	AndroidToolchain func() (string, string, error)
 	AppEnviron       func(context.Context, string, string) []string
-	Runner           PlaudRunFunc
+	Runner           RunFunc
 }
 
 // PlaudTarget retains the selected runtime for a handoff. Its callbacks read
 // that runtime's current reply settings and submit to that same runtime even
 // when a reload replaces it with another brain bearing the same ID.
-type PlaudTarget struct {
+type Target struct {
 	BrainID    string
 	ReplyChat  func() string
 	OtherOwner func(jid string) string
 	Submit     func(jid, sender, text string, media []string, done func(error)) error
 }
 
-func (t *PlaudTarget) ID() string { return t.BrainID }
+func (t *Target) ID() string { return t.BrainID }
 
 // PlaudRunFunc executes one CLI call after login checks and serialization.
 // out receives live output during browser sign-in; returned text is parsed by
 // the poller. Nil uses the built-in process runner with Options.Environ.
-type PlaudRunFunc func(ctx context.Context, bin, home string, out io.Writer, args ...string) (string, error)
+type RunFunc func(ctx context.Context, bin, home string, out io.Writer, args ...string) (string, error)

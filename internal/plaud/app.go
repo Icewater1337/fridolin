@@ -1,4 +1,4 @@
-package main
+package plaud
 
 // The Plaud Sync phone app (plaud-android/) uploading transcripts through
 // the site (plaud.phone_upload; docs/PLAUD.md, "Through your site").
@@ -52,9 +52,9 @@ const (
 	plaudPairAud       = "fridolin:pair"
 	plaudTranscriptAud = "fridolin:plaud-transcript"
 	// A JWT may live this long, and clocks may be this far apart.
-	plaudJWTMaxAge     = 10 * time.Minute
-	plaudClockSkew     = time.Minute
-	plaudTranscriptMax = 512 << 10
+	plaudJWTMaxAge = 10 * time.Minute
+	plaudClockSkew = time.Minute
+	TranscriptMax  = 512 << 10
 )
 
 var errPhoneUploadOff = errors.New("uploads from the phone app are off (plaud.phone_upload)")
@@ -164,9 +164,9 @@ type plaudDevices struct {
 	Pairings []plaudPairing `json:"pairings,omitempty"`
 }
 
-func (p *PlaudManager) devicesPath() string { return filepath.Join(p.dir(), "devices.json") }
+func (p *Manager) devicesPath() string { return filepath.Join(p.dir(), "devices.json") }
 
-func (p *PlaudManager) loadDevices() (plaudDevices, error) {
+func (p *Manager) loadDevices() (plaudDevices, error) {
 	var st plaudDevices
 	data, err := os.ReadFile(p.devicesPath())
 	if errors.Is(err, os.ErrNotExist) {
@@ -175,13 +175,13 @@ func (p *PlaudManager) loadDevices() (plaudDevices, error) {
 	if err != nil {
 		return st, err
 	}
-	return st, plaudDecodeError(json.Unmarshal(data, &st))
+	return st, DecodeError(json.Unmarshal(data, &st))
 }
 
 // updateDevices changes devices.json with fn, drops the pairing codes that
 // expired and rewrites the site's copy, which has the ids and public keys
 // only. An error from fn saves nothing.
-func (p *PlaudManager) updateDevices(fn func(st *plaudDevices) error) error {
+func (p *Manager) updateDevices(fn func(st *plaudDevices) error) error {
 	p.devMu.Lock()
 	defer p.devMu.Unlock()
 	st, err := p.loadDevices()
@@ -219,7 +219,7 @@ func (p *PlaudManager) updateDevices(fn func(st *plaudDevices) error) error {
 }
 
 // newPairing makes a pairing code for the next build of the app.
-func (p *PlaudManager) newPairing() (string, time.Time, error) {
+func (p *Manager) newPairing() (string, time.Time, error) {
 	code := plaudRandomToken(18)
 	exp := time.Now().Add(plaudPairingLifetime)
 	sum := sha256.Sum256([]byte(code))
@@ -230,12 +230,12 @@ func (p *PlaudManager) newPairing() (string, time.Time, error) {
 }
 
 // RevokeDevice unpairs phone id: its uploads are refused from now on.
-func (p *PlaudManager) RevokeDevice(id string) error {
+func (p *Manager) RevokeDevice(id string) error {
 	err := p.updateDevices(func(st *plaudDevices) error {
 		n := len(st.Devices)
 		st.Devices = slices.DeleteFunc(st.Devices, func(d plaudDevice) bool { return d.ID == id })
 		if len(st.Devices) == n {
-			return errPlaudUnknownDevice
+			return ErrUnknownDevice
 		}
 		return nil
 	})
@@ -245,13 +245,13 @@ func (p *PlaudManager) RevokeDevice(id string) error {
 	return err
 }
 
-var errPlaudUnknownDevice = errors.New("there is no such paired phone")
+var ErrUnknownDevice = errors.New("there is no such paired phone")
 
 // DeviceRequest answers a phone's request that the site passed on:
 // "pair", or "transcript" with the transcript in body (site_ingest.go).
 // Its errors go back to the phone, so they name what is wrong and nothing
 // the request carried.
-func (p *PlaudManager) DeviceRequest(op, assertion string, body []byte) (map[string]any, error) {
+func (p *Manager) DeviceRequest(op, assertion string, body []byte) (map[string]any, error) {
 	switch op {
 	case "pair":
 		id, err := p.pairDevice(assertion, time.Now())
@@ -267,7 +267,7 @@ func (p *PlaudManager) DeviceRequest(op, assertion string, body []byte) (map[str
 
 // pairDevice keeps the key that signed assertion, a pairing request with a
 // code that works: it proves the phone holds the key's private half.
-func (p *PlaudManager) pairDevice(assertion string, now time.Time) (string, error) {
+func (p *Manager) pairDevice(assertion string, now time.Time) (string, error) {
 	if !p.cfg().Plaud.PhoneUpload {
 		return "", errPhoneUploadOff
 	}
@@ -304,7 +304,7 @@ func (p *PlaudManager) pairDevice(assertion string, now time.Time) (string, erro
 
 // takeTranscript puts an uploaded transcript where the poller reads phone
 // recordings, once its JWT shows a paired phone signed this very text.
-func (p *PlaudManager) takeTranscript(assertion string, body []byte, now time.Time) error {
+func (p *Manager) takeTranscript(assertion string, body []byte, now time.Time) error {
 	cfg := p.cfg()
 	if !cfg.Plaud.PhoneUpload {
 		return errPhoneUploadOff
@@ -332,7 +332,7 @@ func (p *PlaudManager) takeTranscript(assertion string, body []byte, now time.Ti
 	if _, err := time.ParseInLocation(plaudPhoneLayout, c.Name, time.Local); err != nil {
 		return errors.New("the transcript's name is not a recording's start time")
 	}
-	if len(body) > plaudTranscriptMax {
+	if len(body) > TranscriptMax {
 		return errors.New("the transcript is too long")
 	}
 	dir := plaudPhoneDir(cfg)
@@ -367,20 +367,20 @@ func (p *PlaudManager) takeTranscript(assertion string, body []byte, now time.Ti
 // plaudDeveloper is the Plaud developer app the phone app is built with
 // (portal.plaud.ai): <data_dir>/plaud/developer.json. The dashboard only
 // learns whether it is there.
-type plaudDeveloper struct {
+type Developer struct {
 	ClientID     string `json:"client_id"`
 	ClientSecret string `json:"client_secret"`
 	APIKey       string `json:"api_key"`
 }
 
-func (d plaudDeveloper) complete() bool {
+func (d Developer) complete() bool {
 	return d.ClientID != "" && d.ClientSecret != "" && d.APIKey != ""
 }
 
-func (p *PlaudManager) developerPath() string { return filepath.Join(p.dir(), "developer.json") }
+func (p *Manager) developerPath() string { return filepath.Join(p.dir(), "developer.json") }
 
-func (p *PlaudManager) loadDeveloper() plaudDeveloper {
-	var d plaudDeveloper
+func (p *Manager) loadDeveloper() Developer {
+	var d Developer
 	if data, err := os.ReadFile(p.developerPath()); err == nil {
 		_ = json.Unmarshal(data, &d)
 	}
@@ -388,7 +388,7 @@ func (p *PlaudManager) loadDeveloper() plaudDeveloper {
 }
 
 // SaveDeveloper keeps the keys of d that are set; the others stay.
-func (p *PlaudManager) SaveDeveloper(d plaudDeveloper) error {
+func (p *Manager) SaveDeveloper(d Developer) error {
 	old := p.loadDeveloper()
 	for _, f := range []struct{ in, out *string }{{&d.ClientID, &old.ClientID}, {&d.ClientSecret, &old.ClientSecret}, {&d.APIKey, &old.APIKey}} {
 		v := strings.TrimSpace(*f.in)
@@ -420,18 +420,18 @@ type plaudAppJob struct {
 	PairingExpires time.Time `json:"pairing_expires,omitzero"`
 }
 
-var errPlaudAppBuilding = errors.New("the phone app is being built already")
+var ErrAppBuilding = errors.New("the phone app is being built already")
 
-func (p *PlaudManager) appDir() string  { return filepath.Join(p.dir(), "app") }
-func (p *PlaudManager) AppFile() string { return filepath.Join(p.appDir(), "plaud-sync.apk") }
+func (p *Manager) appDir() string  { return filepath.Join(p.dir(), "app") }
+func (p *Manager) AppFile() string { return filepath.Join(p.appDir(), "plaud-sync.apk") }
 
 // BuildApp starts building the phone app in the background, with the
 // site's address and a new pairing code: Gradle, in plaud-android/ of the
 // checkout Fridolin was installed from.
-func (p *PlaudManager) BuildApp() error {
+func (p *Manager) BuildApp() error {
 	select {
 	case <-p.lifetime().Done():
-		return errPlaudStopping
+		return ErrStopping
 	default:
 	}
 	if !p.cfg().Plaud.PhoneUpload {
@@ -459,11 +459,11 @@ func (p *PlaudManager) BuildApp() error {
 	p.mu.Lock()
 	if p.stopping {
 		p.mu.Unlock()
-		return errPlaudStopping
+		return ErrStopping
 	}
 	if p.appJob != nil && p.appJob.State == "running" {
 		p.mu.Unlock()
-		return errPlaudAppBuilding
+		return ErrAppBuilding
 	}
 	job := &plaudAppJob{State: "running", Started: time.Now()}
 	p.appJob = job
@@ -487,7 +487,7 @@ func (p *PlaudManager) BuildApp() error {
 
 // buildApp runs the build and copies the app to AppFile. On failure it
 // returns the end of Gradle's output.
-func (p *PlaudManager) buildApp(ctx context.Context, src, javaHome, sdk, site string, dev plaudDeveloper) (time.Time, string, error) {
+func (p *Manager) buildApp(ctx context.Context, src, javaHome, sdk, site string, dev Developer) (time.Time, string, error) {
 	dir := p.appDir()
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return time.Time{}, "", err
@@ -528,25 +528,25 @@ func (p *PlaudManager) buildApp(ctx context.Context, src, javaHome, sdk, site st
 
 // PlaudAppStatus is the phone app part of the Plaud card, there while
 // plaud.phone_upload is on.
-type PlaudAppStatus struct {
+type AppStatus struct {
 	// Credentials says whether Plaud's developer keys are saved.
 	Credentials bool `json:"credentials"`
 	// SiteURL is where the app uploads, "" while the site has no domain.
-	SiteURL string          `json:"site_url,omitempty"`
-	Built   *time.Time      `json:"built,omitempty"`
-	Build   *plaudAppJob    `json:"build,omitempty"`
-	Devices []PlaudPhoneRow `json:"devices"`
+	SiteURL string       `json:"site_url,omitempty"`
+	Built   *time.Time   `json:"built,omitempty"`
+	Build   *plaudAppJob `json:"build,omitempty"`
+	Devices []PhoneRow   `json:"devices"`
 }
 
 // PlaudPhoneRow is a paired phone on the card.
-type PlaudPhoneRow struct {
+type PhoneRow struct {
 	ID         string    `json:"id"`
 	Paired     time.Time `json:"paired"`
 	LastUpload time.Time `json:"last_upload,omitzero"`
 }
 
-func (p *PlaudManager) appStatus() *PlaudAppStatus {
-	s := &PlaudAppStatus{Credentials: p.loadDeveloper().complete(), Devices: []PlaudPhoneRow{}}
+func (p *Manager) appStatus() *AppStatus {
+	s := &AppStatus{Credentials: p.loadDeveloper().complete(), Devices: []PhoneRow{}}
 	if p.options.SiteURL != nil {
 		s.SiteURL = p.options.SiteURL()
 	}
@@ -562,7 +562,7 @@ func (p *PlaudManager) appStatus() *PlaudAppStatus {
 	p.mu.Unlock()
 	if st, err := p.loadDevices(); err == nil {
 		for _, d := range st.Devices {
-			s.Devices = append(s.Devices, PlaudPhoneRow{d.ID, d.Paired, d.LastUpload})
+			s.Devices = append(s.Devices, PhoneRow{d.ID, d.Paired, d.LastUpload})
 		}
 	}
 	return s

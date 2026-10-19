@@ -1,4 +1,4 @@
-package main
+package plaud
 
 import (
 	"context"
@@ -218,7 +218,7 @@ func TestPlaudDisabledAfterCheckBegins(t *testing.T) {
 	if !tb.plaud.beginPoll() {
 		t.Fatal("a check is still running")
 	}
-	if err := tb.updateSettings(func(s *PlaudSnapshot) error { s.Plaud.Enabled = false; return nil }); err != nil {
+	if err := tb.updateSettings(func(s *Snapshot) error { s.Plaud.Enabled = false; return nil }); err != nil {
 		t.Fatal(err)
 	}
 	if err := tb.plaud.runPoll(context.Background()); err != nil {
@@ -292,7 +292,7 @@ func TestPlaudStopFinishesCheckProcessor(t *testing.T) {
 				t.Errorf("after Stop: checking %v, last error %q; want the check over, with %q", busy, lastErr, c.lastErr)
 			}
 
-			if _, err := tb.plaud.CheckNow(); !errors.Is(err, errPlaudStopping) {
+			if _, err := tb.plaud.CheckNow(); !errors.Is(err, ErrStopping) {
 				t.Errorf("check now while stopping = %v", err)
 			}
 		})

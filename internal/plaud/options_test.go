@@ -1,4 +1,4 @@
-package main
+package plaud
 
 import (
 	"context"
@@ -16,11 +16,11 @@ import (
 func TestPlaudRunnerResolvesHomeAfterWaiting(t *testing.T) {
 	t.Parallel()
 	root := t.TempDir()
-	var current atomic.Pointer[PlaudSnapshot]
-	current.Store(&PlaudSnapshot{})
+	var current atomic.Pointer[Snapshot]
+	current.Store(&Snapshot{})
 	found := make(chan struct{})
 	called := make(chan string, 1)
-	p := newPlaudManager(PlaudOptions{
+	p := New(Options{
 		PlaudDir: filepath.Join(root, "plaud"), Home: filepath.Join(root, "shared"),
 		Settings: current.Load,
 		FindCLI:  func(string) (string, error) { close(found); return "fake-plaud", nil },
@@ -48,7 +48,7 @@ func TestPlaudRunnerResolvesHomeAfterWaiting(t *testing.T) {
 		t.Fatal("runner bypassed CLI serialization")
 	default:
 	}
-	current.Store(&PlaudSnapshot{Plaud: PlaudSettings{BrainAccess: true}})
+	current.Store(&Snapshot{Plaud: Settings{BrainAccess: true}})
 	p.cliMu.Unlock()
 	select {
 	case err := <-done:
@@ -72,8 +72,8 @@ func TestPlaudInjectedRunnerKeepsLoginConfinement(t *testing.T) {
 	if err := os.WriteFile(outside, []byte("unchanged"), 0600); err != nil {
 		t.Fatal(err)
 	}
-	p := newPlaudManager(PlaudOptions{
-		PlaudDir: filepath.Join(root, "plaud"), Settings: func() *PlaudSnapshot { return &PlaudSnapshot{} },
+	p := New(Options{
+		PlaudDir: filepath.Join(root, "plaud"), Settings: func() *Snapshot { return &Snapshot{} },
 		FindCLI: func(string) (string, error) { return "fake-plaud", nil },
 	})
 	defer p.Stop()

@@ -1,4 +1,4 @@
-package main
+package plaud
 
 import (
 	"encoding/json"
@@ -27,8 +27,8 @@ func TestPlaudJSONDiagnostics(t *testing.T) {
 		{"devices list", `{"devices":false}`, &plaudDevices{}},
 		{"devices key", `{"devices":[{"key":false}]}`, &plaudDevices{}},
 		{"pairings list", `{"pairings":false}`, &plaudDevices{}},
-		{"developer root", `false`, &plaudDeveloper{}},
-		{"developer field", `{"client_id":false}`, &plaudDeveloper{}},
+		{"developer root", `false`, &Developer{}},
+		{"developer field", `{"client_id":false}`, &Developer{}},
 	}
 	want := map[string]string{
 		"state pending map":   "json: cannot unmarshal bool into Go struct field current.pending of type map[string]*main.plaudPending",
@@ -56,7 +56,7 @@ func TestPlaudJSONDiagnostics(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			err := plaudDecodeError(json.Unmarshal([]byte(tc.input), tc.value))
+			err := DecodeError(json.Unmarshal([]byte(tc.input), tc.value))
 			if err == nil {
 				t.Fatal("invalid input accepted")
 			}

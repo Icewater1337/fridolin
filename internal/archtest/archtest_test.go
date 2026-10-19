@@ -24,7 +24,7 @@ import (
 // edge is a change to this table, made and reviewed in the same pull
 // request. Imports from outside the module are not checked here.
 var imports = map[string][]string{
-	"cmd/fridolin":       {"examples", "internal/access", "internal/activity", "internal/apperr", "internal/chat", "internal/claudecli", "internal/config", "internal/devchat", "internal/fsx", "internal/history", "internal/httpapi", "internal/jsonx", "internal/logx", "internal/manifest", "internal/media", "internal/otp", "internal/outbound", "internal/platform", "internal/prompt", "internal/registry", "internal/route", "internal/sandbox", "internal/store", "internal/testutil", "internal/textx", "internal/trigger", "internal/version", "internal/whatsapp", "site", "web"},
+	"cmd/fridolin":       {"examples", "internal/access", "internal/activity", "internal/apperr", "internal/chat", "internal/claudecli", "internal/config", "internal/devchat", "internal/fsx", "internal/history", "internal/httpapi", "internal/jsonx", "internal/logx", "internal/manifest", "internal/media", "internal/otp", "internal/outbound", "internal/platform", "internal/plaud", "internal/prompt", "internal/registry", "internal/route", "internal/sandbox", "internal/store", "internal/testutil", "internal/textx", "internal/trigger", "internal/version", "internal/whatsapp", "site", "web"},
 	"examples":           nil,
 	"internal/access":    {"internal/chat", "internal/trigger"},
 	"internal/activity":  {"internal/history", "internal/textx"},
@@ -44,6 +44,7 @@ var imports = map[string][]string{
 	"internal/otp":       {"internal/fsx", "internal/history"},
 	"internal/outbound":  {"internal/store", "internal/textx"},
 	"internal/platform":  nil,
+	"internal/plaud":     {"internal/fsx", "internal/jsonx", "internal/logx", "internal/media", "internal/outbound", "internal/platform", "internal/testutil", "internal/textx"},
 	"internal/prompt":    {"internal/chat", "internal/history", "internal/testutil"},
 	"internal/registry":  {"internal/apperr", "internal/config", "internal/fsx", "internal/manifest", "internal/route"},
 	"internal/route":     {"internal/fsx", "internal/manifest"},
@@ -175,6 +176,9 @@ func TestImportRules(t *testing.T) {
 			}
 			if err != nil {
 				t.Fatalf("%s (%s): %v", dir, goos, err)
+			}
+			if dir == "internal/plaud" && slices.Contains(pkg.Imports, "net/http") {
+				report("plaud owns service operations; HTTP handling belongs to httpapi")
 			}
 			for _, imp := range slices.Concat(pkg.Imports, pkg.TestImports, pkg.XTestImports) {
 				rel, ok := strings.CutPrefix(imp, mod+"/")

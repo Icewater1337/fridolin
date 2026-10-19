@@ -1,4 +1,4 @@
-package main
+package plaud
 
 import (
 	"context"
@@ -27,11 +27,11 @@ const (
 )
 
 type plaudServiceFixture struct {
-	plaud    *PlaudManager
-	settings atomic.Pointer[PlaudSnapshot]
+	plaud    *Manager
+	settings atomic.Pointer[Snapshot]
 	home     string
 	dev      *plaudServiceNotices
-	options  PlaudOptions
+	options  Options
 }
 
 type plaudServiceNotice struct{ JID, Text string }
@@ -62,7 +62,7 @@ func plaudService(t *testing.T, extra string) (*plaudServiceFixture, *testutil.P
 		t.Fatal(err)
 	}
 	f := &plaudServiceFixture{home: filepath.Join(root, "home"), dev: &plaudServiceNotices{}}
-	settings := PlaudSettings{Enabled: true, CLIPath: os.Args[0]}
+	settings := Settings{Enabled: true, CLIPath: os.Args[0]}
 	if err := json.Unmarshal([]byte(`{"enabled":true`+extra+`}`), &settings); err != nil {
 		t.Fatal(err)
 	}
@@ -70,12 +70,12 @@ func plaudService(t *testing.T, extra string) (*plaudServiceFixture, *testutil.P
 	if interval <= 0 {
 		interval = 60
 	}
-	f.settings.Store(&PlaudSnapshot{Plaud: settings, DataDir: filepath.Join(root, "data"), MediaDir: filepath.Join(root, "media"), QueueMaxPending: 10, OwnerChat: "15551234567@s.whatsapp.net", Interval: time.Duration(interval) * time.Second})
+	f.settings.Store(&Snapshot{Plaud: settings, DataDir: filepath.Join(root, "data"), MediaDir: filepath.Join(root, "media"), QueueMaxPending: 10, OwnerChat: "15551234567@s.whatsapp.net", Interval: time.Duration(interval) * time.Second})
 	migration := &mediafiles.Migration{Started: time.Now()}
-	target := &PlaudTarget{BrainID: "p", ReplyChat: func() string { return "" }, OtherOwner: func(string) string { return "" }, Submit: func(_, _, _ string, _ []string, done func(error)) error { done(nil); return nil }}
-	f.options = PlaudOptions{
+	target := &Target{BrainID: "p", ReplyChat: func() string { return "" }, OtherOwner: func(string) string { return "" }, Submit: func(_, _, _ string, _ []string, done func(error)) error { done(nil); return nil }}
+	f.options = Options{
 		PlaudDir: filepath.Join(root, "data", "plaud"), Home: f.home, Settings: f.settings.Load,
-		Target: func(id string) *PlaudTarget {
+		Target: func(id string) *Target {
 			if id == "" || id == "p" {
 				return target
 			}
@@ -94,7 +94,7 @@ func plaudService(t *testing.T, extra string) (*plaudServiceFixture, *testutil.P
 		Inbox:          func(dir string) mediafiles.Inbox { return mediafiles.Inbox{Dir: dir, Migration: migration} },
 		RunInterrupted: func(err error) bool { return errors.Is(err, context.Canceled) },
 	}
-	f.plaud = newPlaudManager(f.options)
+	f.plaud = New(f.options)
 	t.Cleanup(f.plaud.Stop)
 	return f, fp
 }
@@ -118,9 +118,9 @@ func plaudServiceDeliver(t *testing.T, f *plaudServiceFixture, fp *testutil.Plau
 	fp.Recording(servicePlaudNew, true)
 	return f.plaud.Poll(context.Background())
 }
-func plaudServiceAfterRestart(t *testing.T, f *plaudServiceFixture) *PlaudManager {
+func plaudServiceAfterRestart(t *testing.T, f *plaudServiceFixture) *Manager {
 	t.Helper()
-	p := newPlaudManager(f.options)
+	p := New(f.options)
 	t.Cleanup(p.Stop)
 	return p
 }
@@ -177,7 +177,7 @@ type plaudServiceRecorder struct {
 	refuse error
 }
 
-func (r *plaudServiceRecorder) submit(_ *PlaudTarget, _, _, _ string, media []string, done func(error)) error {
+func (r *plaudServiceRecorder) submit(_ *Target, _, _, _ string, media []string, done func(error)) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if r.refuse != nil {
@@ -262,7 +262,7 @@ func plaudServiceWriteFile(t *testing.T, p, content string) string {
 
 // updateSettings publishes a fresh snapshot at the point a scenario changes
 // the supplied live settings; configuration persistence belongs to integration tests.
-func (f *plaudServiceFixture) updateSettings(change func(*PlaudSnapshot) error) error {
+func (f *plaudServiceFixture) updateSettings(change func(*Snapshot) error) error {
 	next := *f.settings.Load()
 	if err := change(&next); err != nil {
 		return err

@@ -1,4 +1,4 @@
-package main
+package plaud
 
 import (
 	"context"
@@ -36,7 +36,7 @@ func TestPlaudConnectSignsOutTheRefusedLoginWhereItIs(t *testing.T) {
 	tb.plaud.cliMu.Lock()
 	err := tb.plaud.Connect()
 	if err == nil {
-		err = tb.updateSettings(func(c *PlaudSnapshot) error { c.Plaud.BrainAccess = true; return nil })
+		err = tb.updateSettings(func(c *Snapshot) error { c.Plaud.BrainAccess = true; return nil })
 	}
 	tb.plaud.cliMu.Unlock()
 	if err != nil {
@@ -70,7 +70,7 @@ func TestPlaudConnectSignsOutTheRefusedLoginWhereItIs(t *testing.T) {
 func TestPlaudSigningOutDuringACheckIsNoExpiry(t *testing.T) {
 	disconnect := func(tb *plaudServiceFixture) error { return tb.plaud.Disconnect() }
 	moveLogin := func(tb *plaudServiceFixture) error {
-		err := tb.updateSettings(func(c *PlaudSnapshot) error { c.Plaud.BrainAccess = true; return nil })
+		err := tb.updateSettings(func(c *Snapshot) error { c.Plaud.BrainAccess = true; return nil })
 		return err
 	}
 	for _, c := range []struct {
@@ -160,7 +160,7 @@ func TestPlaudCheckEndsWhenItsLoginGoes(t *testing.T) {
 				return err
 			}
 		}
-		err := tb.updateSettings(func(c *PlaudSnapshot) error { c.Plaud.BrainAccess = true; return nil })
+		err := tb.updateSettings(func(c *Snapshot) error { c.Plaud.BrainAccess = true; return nil })
 		return err
 	}
 	// The same, and you connect that login, as a sign-in that finishes does.
@@ -278,7 +278,7 @@ func TestPlaudAccountLookUpLeavesAMovedLoginAlone(t *testing.T) {
 	tb.plaud.run = func(ctx context.Context, args ...string) (string, error) {
 		out, err := run(ctx, args...)
 		if args[0] == "me" {
-			if err := tb.updateSettings(func(c *PlaudSnapshot) error { c.Plaud.BrainAccess = true; return nil }); err != nil {
+			if err := tb.updateSettings(func(c *Snapshot) error { c.Plaud.BrainAccess = true; return nil }); err != nil {
 				t.Error(err)
 			}
 		}
@@ -314,7 +314,7 @@ func TestPlaudMovedLoginTickWaitsForReconnect(t *testing.T) {
 	fp.Write("account", "u_2")
 	fp.Files(servicePlaudNew, servicePlaudOld1)
 	fp.Recording(servicePlaudNew, true)
-	if err := tb.updateSettings(func(s *PlaudSnapshot) error { s.Plaud.BrainAccess = true; return nil }); err != nil {
+	if err := tb.updateSettings(func(s *Snapshot) error { s.Plaud.BrainAccess = true; return nil }); err != nil {
 		t.Fatal(err)
 	}
 	tb.plaud.tick(context.Background(), time.Now().Add(-time.Second))
