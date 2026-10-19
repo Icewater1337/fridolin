@@ -33,6 +33,7 @@ import (
 // the next message without a restart.
 type Store struct {
 	path        string
+	boot        Boot
 	paths       Paths
 	goos        string
 	startup     *Config                       // the effective configuration the process started with
@@ -99,7 +100,7 @@ func Open(cfgPath string, options Options) (*Store, error) {
 		warnLegacyDataDir(eff.DataDir, options.Paths.Home)
 	}
 	WarnGroupsWithoutMembers(nil, eff)
-	cs := &Store{path: cfgPath, startup: eff, paths: options.Paths, goos: options.GOOS, checkBrains: options.CheckBrains}
+	cs := &Store{path: cfgPath, startup: eff, boot: bootOf(eff, options.Paths), paths: options.Paths, goos: options.GOOS, checkBrains: options.CheckBrains}
 	cs.snap.Store(&Snapshot{File: file, Effective: eff, ETag: etagOf(raw), Version: 1})
 	return cs, nil
 }
@@ -512,37 +513,6 @@ func (cs *Store) RestartRequired() []string {
 	return restartRequired(cs.startup, cs.Get())
 }
 
-// restartFields are settings read once at startup.
-var restartFields = []struct {
-	name string
-	get  func(*Config) string
-	// waits, when set, decides instead of get whether a change from the
-	// value at the start waits for a restart.
-	waits func(start, now *Config) bool
-}{
-	{name: "http_listen", get: func(c *Config) string { return c.HTTPListen }},
-	{name: "data_dir", get: func(c *Config) string { return c.DataDir }},
-	{name: "db_path", get: func(c *Config) string { return c.DBPath }},
-	{name: "media_dir", get: func(c *Config) string { return c.MediaDir }},
-	{name: "log_level", get: func(c *Config) string { return c.LogLevel }},
-	{name: "dashboard.disabled", get: func(c *Config) string { return fmt.Sprint(c.Dashboard.Disabled) }},
-	// Turning the token off waits for a restart (see apiGuard); turning it
-	// on applies at once.
-	{name: "dashboard.require_token", waits: func(start, now *Config) bool {
-		return start.DashboardRequiresToken() && !now.DashboardRequiresToken()
-	}},
-}
-
-func restartRequired(old, new *Config) []string {
-	var out []string
-	for _, f := range restartFields {
-		if f.waits != nil && f.waits(old, new) || f.waits == nil && f.get(old) != f.get(new) {
-			out = append(out, f.name)
-		}
-	}
-	return out
-}
-
 func etagOf(data []byte) string {
 	sum := sha256.Sum256(data)
 	return hex.EncodeToString(sum[:8])
@@ -713,17 +683,11 @@ func warnUnknownKeys(path string, data []byte) {
 	}
 }
 
-// RestartFieldNames lists the restart-sensitive settings in reporting order.
-func RestartFieldNames() []string {
-	names := make([]string, len(restartFields))
-	for i, f := range restartFields {
-		names[i] = f.name
-	}
-	return names
-}
-
 // Paths returns the process inputs captured when the store opened.
 func (cs *Store) Paths() Paths { return cs.paths }
 
 // Resolve derives values using this store's captured process inputs.
 func (cs *Store) Resolve(file *Config) (*Config, error) { return Resolve(file, cs.paths, cs.goos) }
+
+// Boot returns the immutable process-start values.
+func (cs *Store) Boot() Boot { return cs.boot }

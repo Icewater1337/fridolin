@@ -192,11 +192,11 @@ func (g *GoogleAuth) lockToken(ctx context.Context, brainID string) (unlock func
 }
 
 func (g *GoogleAuth) clientPath() string {
-	return filepath.Join(g.cfgs.Get().DataDir, "google", "oauth_client.json")
+	return g.cfgs.Boot().GoogleClientPath()
 }
 
 // credsDir is where per-brain calendar files live.
-func (g *GoogleAuth) credsDir() string { return credentialsDirOf(g.cfgs.Get()) }
+func (g *GoogleAuth) credsDir() string { return credentialsDirOf(runtimeConfig(g.cfgs)) }
 
 func (g *GoogleAuth) tokenPath(brainID string) string {
 	return calendarTokenFile(g.credsDir(), brainID)
@@ -312,7 +312,7 @@ func (g *GoogleAuth) SetClient(data []byte) (*GoogleClient, error) {
 // itself, at the address it was started on. http_listen changes only with a
 // restart, and a sign-in started before it must come back here.
 func (g *GoogleAuth) redirectURI() string {
-	return "http://" + g.cfgs.Startup().HTTPListen + "/"
+	return "http://" + g.cfgs.Boot().HTTPListen + "/"
 }
 
 // tokenLifetime is how long an access token Google issued lasts. An

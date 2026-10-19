@@ -811,7 +811,7 @@ func (b *Bridge) siteBuilderHooks() builderHooks {
 			if sp == nil || !sp.Enabled() {
 				return bin, args, nil, nil
 			}
-			cfg := b.cfgs.Get()
+			cfg := runtimeConfig(b.cfgs)
 			env, err := prepareBrainState(absPath(cfg.DataDir), cfg.MediaDir, brainID, cfg.InheritClaudeUserConfig)
 			if err != nil {
 				return "", nil, nil, err
@@ -819,7 +819,7 @@ func (b *Bridge) siteBuilderHooks() builderHooks {
 			sbBin, sbArgs, err := sp.Command(brainID, bin, args)
 			return sbBin, sbArgs, env, err
 		},
-		bridgeURL: func() string { return "http://" + b.cfgs.Get().HTTPListen },
+		bridgeURL: func() string { return "http://" + b.cfgs.Boot().HTTPListen },
 		executable: func() (string, error) {
 			exe, err := os.Executable()
 			if err != nil {
@@ -832,20 +832,20 @@ func (b *Bridge) siteBuilderHooks() builderHooks {
 			if sp := b.brainMgr.profiler; sp != nil {
 				l.deny, l.noWrite = sp.sitePaths()
 			}
-			if cfg := b.cfgs.Get(); cfg.HTTPEnabled() {
+			if cfg := runtimeConfig(b.cfgs); cfg.HTTPEnabled() {
 				if _, port, err := net.SplitHostPort(cfg.HTTPListen); err == nil {
 					l.bridgePort = port
 				}
 			}
 			return l
 		},
-		mediaDir: func() string { return b.cfgs.Get().MediaDir },
+		mediaDir: func() string { return b.cfgs.Boot().MediaDir },
 		search:   b.runBrainSearch,
 		device:   b.plaud.deviceRequest,
 		// As /ingest: the brain's reply chat gets the answer, and the brain
 		// must take the files now (its queue is not full).
 		ingest: func(brainID, sender, text string, files []string) error {
-			cfg := b.cfgs.Get()
+			cfg := runtimeConfig(b.cfgs)
 			if !cfg.Ingest.Enabled {
 				return errors.New("ingest is turned off (ingest.enabled)")
 			}

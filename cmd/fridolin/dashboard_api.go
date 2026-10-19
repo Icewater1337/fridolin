@@ -200,7 +200,7 @@ type sandboxStatus struct {
 }
 
 func (b *Bridge) apiStatus(w http.ResponseWriter, r *http.Request) {
-	cfg := b.cfgs.Get()
+	cfg := runtimeConfig(b.cfgs)
 	wa := b.wa.State()
 	resp := statusResponse{
 		Version:       version.String(),
@@ -243,7 +243,7 @@ func (b *Bridge) apiStatus(w http.ResponseWriter, r *http.Request) {
 	if cfg.AnyoneCanDM() {
 		resp.Warnings = append(resp.Warnings, "allowed_numbers is empty, so anyone who can message this WhatsApp account can use the assistant. Add your number under Chats → Allowed numbers.")
 	}
-	resp.Warnings = append(resp.Warnings, b.tokenWarnings(cfg, runtime.GOOS)...)
+	resp.Warnings = append(resp.Warnings, b.tokenWarnings(b.cfgs.Get(), runtime.GOOS)...)
 	if w := claudeVersionWarning(resp.Claude); cfg.AgentProvider != "codex" && w != "" {
 		resp.Warnings = append(resp.Warnings, w)
 	}
@@ -1089,7 +1089,7 @@ func textTail(s string, n int) string {
 // apiFSList lists folders inside your home folder, for the in-dashboard
 // folder browser. The bridge's data folder is hidden.
 func (b *Bridge) apiFSList(w http.ResponseWriter, r *http.Request) {
-	home := fsx.Canonical(homeDir())
+	home := fsx.Canonical(b.cfgs.Boot().Home)
 	p := r.URL.Query().Get("path")
 	if p == "" {
 		p = home
@@ -1122,7 +1122,7 @@ func (b *Bridge) apiFSList(w http.ResponseWriter, r *http.Request) {
 		httpapi.WriteErr(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	data := fsx.Canonical(b.cfgs.Get().DataDir)
+	data := fsx.Canonical(b.cfgs.Boot().DataDir)
 	type entry struct {
 		Name    string `json:"name"`
 		Path    string `json:"path"`

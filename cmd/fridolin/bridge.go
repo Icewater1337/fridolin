@@ -4,10 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"github.com/Icewater1337/fridolin/internal/devchat"
-	outboundmsg "github.com/Icewater1337/fridolin/internal/outbound"
-	"github.com/Icewater1337/fridolin/internal/registry"
-	"github.com/Icewater1337/fridolin/internal/whatsapp"
 	"log"
 	"net"
 	"net/http"
@@ -17,6 +13,11 @@ import (
 	"sync"
 	"time"
 	"unicode"
+
+	"github.com/Icewater1337/fridolin/internal/devchat"
+	outboundmsg "github.com/Icewater1337/fridolin/internal/outbound"
+	"github.com/Icewater1337/fridolin/internal/registry"
+	"github.com/Icewater1337/fridolin/internal/whatsapp"
 
 	"github.com/Icewater1337/fridolin/internal/config"
 
@@ -121,9 +122,9 @@ type BridgeOptions struct {
 // NewBridge creates and wires up all components. It holds the data
 // directory's instance lock until Stop.
 func NewBridge(cfgs *config.Store, opts BridgeOptions) (_ *Bridge, err error) {
-	cfg := cfgs.Get()
+	cfg := runtimeConfig(cfgs)
 	// Before the lock, which is a file in the data dir.
-	if err := cfg.EnsureDirs(); err != nil {
+	if err := cfgs.Boot().EnsureDirs(); err != nil {
 		return nil, err
 	}
 	// Taken before the store opens: a second bridge on the same data dir, dev
@@ -195,6 +196,7 @@ func NewBridge(cfgs *config.Store, opts BridgeOptions) (_ *Bridge, err error) {
 		return nil, fmt.Errorf("creating brain manager: %w", err)
 	}
 	b.brainMgr = mgr
+	mgr.profiler.home = cfgs.Boot().Home
 	mgr.profiler.SetConfigFile(cfgs.Path())
 	for _, is := range mgr.Issues() {
 		log.Printf("brain %s (%s): %s — %s", is.ID, is.Path, is.Kind, is.Detail)
@@ -211,11 +213,7 @@ func NewBridge(cfgs *config.Store, opts BridgeOptions) (_ *Bridge, err error) {
 		b.dev = devchat.New(func(text string) []string { return outboundmsg.Chunk(text, cfgs.Get().MaxChunkSize) })
 		b.wa = b.dev
 	} else {
-		waOpts := whatsAppOptions(cfgs.Get, store, b.handleInbound, b.recordIgnored)
-		waOpts.OnVote = whatsAppVoteHandler(b.recordVote)
-		waOpts.OnChange = b.handleChange
-		waOpts.GroupRules = whatsAppGroupRules(b.groupRules)
-		wa, err := whatsapp.New(waOpts)
+		wa, err := whatsapp.New(b.whatsAppOptions())
 		if err != nil {
 			return nil, fmt.Errorf("creating whatsapp client: %w", err)
 		}
@@ -310,7 +308,7 @@ var listenHTTP = net.Listen
 // failing to bind is fatal: an already-running bridge holds it, and two
 // bridges must never share one WhatsApp session.
 func (b *Bridge) Start(ctx context.Context) error {
-	cfg := b.cfgs.Get()
+	cfg := runtimeConfig(b.cfgs)
 	run, fail := context.WithCancelCause(ctx)
 	defer fail(nil)
 	if b.listen != "" {
@@ -945,7 +943,7 @@ func groupRulesFor(r manifest.Routing) groupRules {
 // the latest configuration and never on one an update has replaced.
 func (b *Bridge) configChanged(prev, next *config.Config) {
 	b.applyMu.Lock()
-	err := b.brainMgr.Apply(b.cfgs.Get())
+	err := b.brainMgr.Apply(runtimeConfig(b.cfgs))
 	b.applyMu.Unlock()
 	if err != nil {
 		log.Printf("applying configuration: %v", err)

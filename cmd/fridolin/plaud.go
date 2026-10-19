@@ -375,14 +375,14 @@ func NewPlaudManager(cfgs *config.Store, brains *BrainManager) *PlaudManager {
 	return p
 }
 
-func (p *PlaudManager) cfg() *config.Config { return p.cfgs.Get() }
+func (p *PlaudManager) cfg() *config.Config { return runtimeConfig(p.cfgs) }
 
-func (p *PlaudManager) dir() string { return filepath.Join(p.cfg().DataDir, "plaud") }
+func (p *PlaudManager) dir() string { return p.cfgs.Boot().PlaudDir() }
 
 // cliHome is the HOME the CLI runs with, which decides where its login lives.
 func (p *PlaudManager) cliHome() string {
 	if p.cfg().Plaud.BrainAccess {
-		return homeDir()
+		return p.cfgs.Boot().Home
 	}
 	return p.privateHome()
 }

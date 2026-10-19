@@ -3,6 +3,7 @@ package main
 import (
 	"errors"
 	"fmt"
+
 	"github.com/Icewater1337/fridolin/internal/history"
 	"github.com/Icewater1337/fridolin/internal/registry"
 
@@ -72,11 +73,29 @@ func updateManifest(cs *config.Store, id string, mutate func(m *manifest.Manifes
 	return registryFor(cs).UpdateManifest(id, mutate)
 }
 
-// registryFor supplies command-owned dependencies at their existing read points.
+// registryFor validates requested settings first, preserving their errors, then
+// also protects the active process's paths until a restart applies the saved
+// paths. The nil-store checker is used only for candidate config validation.
 func registryFor(cs *config.Store) *registry.Registry {
-	return registry.New(cs, registry.Options{Home: homeDir, CheckDir: checkBrainDir, Templates: brainTemplates, HistoryFile: history.FileName})
+	options := registry.Options{Home: homeDir, CheckDir: brainDirCheck(cs), Templates: brainTemplates, HistoryFile: history.FileName}
+	if cs != nil {
+		options.Home = func() string { return cs.Boot().Home }
+	}
+	return registry.New(cs, options)
+}
+
+// brainDirCheck keeps requested validation first and additionally protects the
+// running process when a store is available, retaining its live policy rules.
+func brainDirCheck(cs *config.Store) func(string, string, *config.Config, string) error {
+	return func(dir, configured string, cfg *config.Config, home string) error {
+		if err := checkBrainDir(dir, configured, cfg, home); err != nil {
+			return err
+		}
+		if cs != nil {
+			return checkBrainDir(dir, configured, runtimeConfig(cs), cs.Boot().Home)
+		}
+		return nil
+	}
 }
 
 func checkSet(before, after *config.Config) error { return registryFor(nil).CheckSet(before, after) }
-
-func brainDirs(c *config.Config) []string { return registryFor(nil).OtherDirs(c) }

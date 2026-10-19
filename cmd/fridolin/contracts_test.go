@@ -921,3 +921,22 @@ func TestRestartSettingsAreMarked(t *testing.T) {
 		}
 	}
 }
+
+// The field inventory and the user guide must grow together. Nested settings
+// may be described by their short key within their section or JSON example.
+func TestConfigFieldsAreDocumented(t *testing.T) {
+	data, err := os.ReadFile(filepath.Join(repoDir, "docs", "CONFIGURATION.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, field := range config.Fields() {
+		key := field.Name
+		if at := strings.LastIndexByte(key, '.'); at >= 0 {
+			key = key[at+1:]
+		}
+		re := regexp.MustCompile(`\b` + regexp.QuoteMeta(key) + `\b`)
+		if !re.Match(data) {
+			t.Errorf("CONFIGURATION.md does not describe %s", field.Name)
+		}
+	}
+}

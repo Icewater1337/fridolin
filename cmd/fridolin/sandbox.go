@@ -56,6 +56,7 @@ type SandboxProfiler struct {
 
 	// configFile is the config.json the bridge runs with; see SetConfigFile.
 	configFile string
+	home       string // captured at startup, never follows later process environment changes
 
 	// execPath is sandboxExecPath; tests point it at a missing file.
 	execPath string
@@ -156,7 +157,7 @@ func sandboxPolicyOf(cfg *config.Config) sandboxPolicy {
 
 // NewSandboxProfiler builds a profiler for the configured brains.
 func NewSandboxProfiler(workDirs map[string][]string, cfg *config.Config) *SandboxProfiler {
-	sp := &SandboxProfiler{execPath: sandboxExecPath}
+	sp := &SandboxProfiler{execPath: sandboxExecPath, home: homeDir()}
 	if exe, err := os.Executable(); err == nil {
 		sp.bridgeExe = exe
 	}
@@ -427,7 +428,7 @@ var launchers = []string{"/bin/launchctl", "/usr/bin/open", "/usr/bin/osascript"
 func (sp *SandboxProfiler) Profile(brainID string) (string, error) {
 	sp.mu.RLock()
 	defer sp.mu.RUnlock()
-	home := homeDir()
+	home := sp.home
 	if !filepath.IsAbs(home) {
 		// Every home-relative deny would silently become a relative path.
 		return "", fmt.Errorf("HOME %q is not an absolute path", home)

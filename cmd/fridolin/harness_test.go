@@ -239,7 +239,7 @@ func (h *harness) Inject(m inbound) {
 // the dev outbox.
 func (h *harness) WhatsApp(ev *events.Message) {
 	h.t.Helper()
-	opts := whatsAppOptions(h.b.cfgs.Get, h.b.store, h.b.handleInbound, nil)
+	opts := whatsAppOptions(func() *config.Config { return runtimeConfig(h.b.cfgs) }, h.b.store, h.b.handleInbound, nil)
 	opts.Container = fixedDeviceContainer{&store.Device{}}
 	opts.Log = waLog.Noop
 	opts.OnChange = h.b.handleChange
