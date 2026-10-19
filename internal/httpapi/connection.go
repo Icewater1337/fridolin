@@ -1,11 +1,10 @@
-package main
+package httpapi
 
 import (
 	"context"
 	"encoding/base64"
 	"github.com/Icewater1337/fridolin/internal/brain"
 	"github.com/Icewater1337/fridolin/internal/chat"
-	"github.com/Icewater1337/fridolin/internal/httpapi"
 	"net/http"
 	"rsc.io/qr"
 	"sort"
@@ -28,7 +27,7 @@ type ConnectionAPI struct {
 func (a *ConnectionAPI) QR(w http.ResponseWriter, r *http.Request) {
 	st := a.Connection().State()
 	if st.QRCode == "" {
-		httpapi.WriteErr(w, http.StatusNotFound, "no pairing code right now")
+		WriteErr(w, http.StatusNotFound, "no pairing code right now")
 		return
 	}
 	// rsc.io/qr is what qrterminal draws the terminal's code with. Its PNG
@@ -36,10 +35,10 @@ func (a *ConnectionAPI) QR(w http.ResponseWriter, r *http.Request) {
 	// scales it.
 	code, err := qr.Encode(st.QRCode, qr.M)
 	if err != nil {
-		httpapi.WriteErr(w, http.StatusInternalServerError, err.Error())
+		WriteErr(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	httpapi.WriteJSON(w, http.StatusOK, map[string]any{
+	WriteJSON(w, http.StatusOK, map[string]any{
 		"data_url":   "data:image/png;base64," + base64.StdEncoding.EncodeToString(code.PNG()),
 		"created_at": st.QRAt,
 	})
@@ -47,10 +46,10 @@ func (a *ConnectionAPI) QR(w http.ResponseWriter, r *http.Request) {
 
 func (a *ConnectionAPI) Pair(w http.ResponseWriter, r *http.Request) {
 	if err := a.Connection().StartPairing(); err != nil {
-		httpapi.WriteErr(w, http.StatusConflict, err.Error())
+		WriteErr(w, http.StatusConflict, err.Error())
 		return
 	}
-	httpapi.WriteJSON(w, http.StatusOK, map[string]string{"status": "pairing"})
+	WriteJSON(w, http.StatusOK, map[string]string{"status": "pairing"})
 }
 
 // apiGroups answers GET /api/whatsapp/groups with the groups the account
@@ -66,7 +65,7 @@ func (a *ConnectionAPI) Groups(w http.ResponseWriter, r *http.Request) {
 	}
 	groups, err := a.Connection().JoinedGroups(ctx)
 	if err != nil {
-		httpapi.WriteErr(w, http.StatusServiceUnavailable, err.Error())
+		WriteErr(w, http.StatusServiceUnavailable, err.Error())
 		return
 	}
 	allowedGroups := a.AllowedGroups()
@@ -88,21 +87,21 @@ func (a *ConnectionAPI) Groups(w http.ResponseWriter, r *http.Request) {
 		out = append(out, rw)
 	}
 	sort.Slice(out, func(i, j int) bool { return strings.ToLower(out[i].Name) < strings.ToLower(out[j].Name) })
-	httpapi.WriteJSON(w, http.StatusOK, out)
+	WriteJSON(w, http.StatusOK, out)
 }
 
 func (a *ConnectionAPI) StopRun(w http.ResponseWriter, r *http.Request) {
 	br := a.Brain(r.PathValue("id"))
 	if br == nil {
-		httpapi.WriteErr(w, http.StatusNotFound, "no such brain")
+		WriteErr(w, http.StatusNotFound, "no such brain")
 		return
 	}
 	var req struct {
 		ClearQueue bool `json:"clear_queue"`
 	}
-	if err := httpapi.DecodeOptionalJSON(r, &req); err != nil {
-		httpapi.WriteErr(w, http.StatusBadRequest, err.Error())
+	if err := DecodeOptionalJSON(r, &req); err != nil {
+		WriteErr(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	httpapi.WriteJSON(w, http.StatusOK, map[string]bool{"stopped": br.StopCurrent(req.ClearQueue)})
+	WriteJSON(w, http.StatusOK, map[string]bool{"stopped": br.StopCurrent(req.ClearQueue)})
 }
