@@ -243,7 +243,7 @@ func TestDashboardStaticFilesHaveValidatorsAndNoListings(t *testing.T) {
 		})
 	}
 	etags := map[string]string{}
-	for _, path := range []string{"/", "/assets/css", "/assets/app/main.js"} {
+	for _, path := range []string{"/", "/assets/app.css", "/assets/app/main.js"} {
 		t.Run("validator "+path, func(t *testing.T) {
 			w := get(path)
 			etag := w.Header().Get("ETag")
@@ -259,11 +259,11 @@ func TestDashboardStaticFilesHaveValidatorsAndNoListings(t *testing.T) {
 			}
 		})
 	}
-	if etags["/"] == etags["/assets/css"] {
+	if etags["/"] == etags["/assets/app.css"] {
 		t.Errorf("files with different content share the ETag %s", etags["/"])
 	}
 	// A redirect to the file is not the file, so it carries no validator.
-	for _, c := range []struct{ path, to string }{{"/index.html", "./"}, {"/assets/css/", "../css"}} {
+	for _, c := range []struct{ path, to string }{{"/index.html", "./"}, {"/assets/app.css/", "../app.css"}} {
 		t.Run("redirect "+c.path, func(t *testing.T) {
 			w := get(c.path)
 			if w.Code != http.StatusMovedPermanently || w.Header().Get("Location") != c.to {

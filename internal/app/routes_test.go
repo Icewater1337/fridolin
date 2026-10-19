@@ -139,7 +139,7 @@ var routeInventory = []httpRoute{
 	{"POST", "/api/plaud/resend", classAPI, ""},
 	{"PUT", "/api/plaud/app/credentials", classAPI, ""},
 	{"POST", "/api/plaud/app/build", classAPI, ""},
-	{"GET", "/api/plaud/apk", classAPI, ""},
+	{"GET", "/api/plaud/app.apk", classAPI, ""},
 	{"DELETE", "/api/plaud/devices/{id}", classAPI, ""},
 	{"GET", "/api/site", classAPI, ""},
 	{"PUT", "/api/site/settings", classAPI, ""},
