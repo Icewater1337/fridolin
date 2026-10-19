@@ -2,6 +2,7 @@ package main
 
 import (
 	"sync"
+	"time"
 
 	"github.com/Icewater1337/fridolin/internal/config"
 	"github.com/Icewater1337/fridolin/internal/manifest"
@@ -33,6 +34,7 @@ func newCommandBrainManager(cfg *config.Config) *BrainManager {
 			Runner: &commandRunner{sandbox: profiler, hooks: hooks},
 			Sink:   brainHooksSink{hooks}, Input: commandBrainInputRules(),
 			ViewerStart: startBrainViewer, ClaimMedia: claimBrainMedia,
+			ShutdownGrace: func() time.Duration { return shutdownGrace },
 		}),
 	}
 }

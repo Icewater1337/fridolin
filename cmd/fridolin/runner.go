@@ -134,6 +134,9 @@ func (r *commandRunner) Run(ctx context.Context, spec brainRunSpec, callbacks cl
 			}
 		}
 	}
+	callbacks.GraceExpired = func() {
+		log.Printf("brain %s: %s's output was still open %v after its result; stopping what is left of the run", spec.ID, claudecli.AgentName(s.provider), postResultGrace)
+	}
 	return claudecli.Run(ctx, claudecli.Invocation{
 		Run:      claudecli.Spawn{WaitDelay: runWaitDelay, Binary: binary, Args: finalArgs, Dir: spec.Dir, Env: env, Prompt: prompt},
 		Provider: s.provider, ExitGrace: postResultGrace, NoticeAfter: workingNoticeAfter,

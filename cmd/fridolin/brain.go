@@ -135,11 +135,6 @@ type brainSettings struct {
 	ownPATH []string
 }
 
-// workingNoticeAfter is how long a run goes before the chat is told that
-// it is working on it (workingNotice), a variable so tests need not wait
-// for it.
-var workingNoticeAfter = 10 * time.Second
-
 // RunInfo summarises the last finished run, for the dashboard.
 type RunInfo struct {
 	Chat     string    `json:"chat"`
@@ -750,12 +745,6 @@ func (br *Brain) stopRun(run *brainRun) bool {
 	return true
 }
 
-// shutdownGrace is how long the run in flight gets to finish and be
-// delivered when the bridge stops: most answers come within it, and a
-// service manager loses patience not long after (launchd kills the bridge
-// 20 seconds after SIGTERM). A variable so tests need not wait for it.
-var shutdownGrace = 15 * time.Second
-
 // shutdown stops the brain for good as the bridge stops. It takes no new
 // message and starts no new run, and hands what was waiting, which never
 // ran, to the Waiting hook at once. The run in flight gets grace to finish
@@ -1030,19 +1019,12 @@ func (br *Brain) invoke(run *brainRun, ctx context.Context, s *brainSettings, m 
 				br.sink.Working(m.JID)
 			}
 		},
-		GraceExpired: func() {
-			log.Printf("brain %s: %s's output was still open %v after its result; stopping what is left of the run", br.id, claudecli.AgentName(s.provider), postResultGrace)
-		},
 		SlowResponse: func(elapsed time.Duration) {
 			log.Printf("brain %s: response took %v for %s (slow response)", br.id, elapsed, m.JID)
 		},
 		Stderr: func(pid int, text string) { br.logStderr(m, pid, text) },
 	})
 }
-
-// postResultGrace is how long a run may go on after its result, a
-// variable so tests need not wait for it.
-var postResultGrace = 5 * time.Second
 
 // logStderr adds what the CLI wrote to stderr to the brain's activity log,
 // the end of it when there is much, where a failed run can be looked into
@@ -1490,6 +1472,9 @@ type brainManagerOptions struct {
 	Input       brainInputRules
 	ViewerStart func(name, streamLog, cwd string, passthrough []string) (*platform.Viewer, error)
 	ClaimMedia  func(mediaDir, brainID string, paths []string) map[string]string
+	// ShutdownGrace is read when Stop reaches each live brain, at the old
+	// command policy lookup point. Nil uses the service's 15-second default.
+	ShutdownGrace func() time.Duration
 }
 
 // brainApplyOptions is one reload's command projection. SetDirs runs under
@@ -1844,7 +1829,13 @@ func (bm *brainManager) Stop() {
 	bm.retiring.Wait()
 	var wg sync.WaitGroup
 	for _, br := range brains {
-		wg.Go(func() { br.shutdown(shutdownGrace) })
+		wg.Go(func() {
+			grace := 15 * time.Second
+			if bm.options.ShutdownGrace != nil {
+				grace = bm.options.ShutdownGrace()
+			}
+			br.shutdown(grace)
+		})
 	}
 	wg.Wait()
 }
