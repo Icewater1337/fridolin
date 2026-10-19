@@ -592,7 +592,7 @@ func TestPlaudExpiryNoticeStaysPrivate(t *testing.T) {
 			_ = os.MkdirAll(filepath.Dir(tb.plaudTokenPath()), 0o700)
 			_ = os.WriteFile(tb.plaudTokenPath(), []byte("{}"), 0o600)
 			fp.Write("expired", "")
-			if err := tb.plaud.Poll(context.Background()); err != errPlaudAuth {
+			if err := tb.plaud.Poll(context.Background()); err == nil || err.Error() != "the Plaud login expired" {
 				t.Fatalf("poll: err = %v", err)
 			}
 			var got []string
@@ -835,7 +835,7 @@ func TestPlaudFailedFirstSyncForwardsNothingOld(t *testing.T) {
 			fp.Recording(plaudOld2, true)
 			fp.Write(c.fixture, "")
 			err := tb.plaud.Poll(context.Background())
-			if err == nil || errors.Is(err, errPlaudAuth) != c.auth {
+			if err == nil || (err.Error() == "the Plaud login expired") != c.auth {
 				t.Fatalf("first poll: err = %v, want a failure (auth=%v)", err, c.auth)
 			}
 			if tb.plaudSeeded() {
@@ -1193,7 +1193,7 @@ func TestPlaudStopEndsCheckNow(t *testing.T) {
 		{"sending the expiry notice", func(t *testing.T, tb *testBridge, fp *testutil.PlaudFixture, held func(context.Context) error) {
 			plaudRevokeLogin(t, tb, fp)
 			tb.replacePlaud(t, func(o *PlaudOptions) { o.Notify = func(ctx context.Context, _, _ string) error { return held(ctx) } })
-		}, errPlaudAuth},
+		}, errors.New("the Plaud login expired")},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -1891,7 +1891,7 @@ func TestPlaudDashboardDisconnectClearsExpiredLogin(t *testing.T) {
 		t.Fatal(err)
 	}
 	fp.Write("expired", "")
-	if err := tb.plaud.Poll(context.Background()); !errors.Is(err, errPlaudAuth) {
+	if err := tb.plaud.Poll(context.Background()); err == nil || err.Error() != "the Plaud login expired" {
 		t.Fatalf("expiry = %v", err)
 	}
 	if s := tb.plaud.Status(); !s.Expired {

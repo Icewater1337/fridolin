@@ -282,3 +282,12 @@ func plaudServiceRevokeLogin(t *testing.T, tb *plaudServiceFixture, fp *testutil
 	fp.Files(servicePlaudOld1)
 	fp.Write("revoked", "")
 }
+
+func plaudServiceLogContains(logs func() []string, substr string) bool {
+	for _, line := range logs() {
+		if strings.Contains(line, substr) {
+			return true
+		}
+	}
+	return false
+}

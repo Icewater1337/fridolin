@@ -141,7 +141,7 @@ func (tb *testBridge) replacePlaud(t *testing.T, change func(*PlaudOptions)) {
 	options := plaudOptions(tb.cfgs, tb.brainMgr, tb.submitHandOff, tb.wa.SendMessage, nil)
 	change(&options)
 	tb.plaud = newPlaudManager(options)
-	t.Cleanup(tb.plaud.Stop)
+	// Bridge.Stop owns the current manager; keep its original cleanup order.
 }
 
 // usePlaudRecorder replaces only the runtime submit callback, preserving the

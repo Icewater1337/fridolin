@@ -1042,7 +1042,7 @@ func TestPlaudPolishedFallsBackToTheRawTranscript(t *testing.T) {
 			if !strings.Contains(got, "=== Transcript ===\n"+c.want+"\n") {
 				t.Errorf("the file lacks the transcript %q:\n%s", c.want, got)
 			}
-			if strings.Contains(got, "this is the raw one") != c.note || logContains(logs, "sending the raw one") != c.note {
+			if strings.Contains(got, "this is the raw one") != c.note || plaudServiceLogContains(logs, "sending the raw one") != c.note {
 				t.Errorf("note about the raw transcript in the file or the log, want %v:\n%s\n%q", c.note, got, logs())
 			}
 		})

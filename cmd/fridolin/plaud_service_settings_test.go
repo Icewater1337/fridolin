@@ -294,3 +294,34 @@ func TestPlaudAccountLookUpLeavesAMovedLoginAlone(t *testing.T) {
 		t.Errorf("login = %+v, want Fridolin's sign-in in %s, untouched", st.Login, private)
 	}
 }
+
+// The scheduled path does not run even one CLI command against a terminal's
+// login after the setting moves HOME. The command integration separately pins
+// CheckNow's refusal and the dashboard setting/reconnect round trip.
+func TestPlaudMovedLoginTickWaitsForReconnect(t *testing.T) {
+	tb, fp := plaudService(t, "")
+	plaudServiceSignIn(t, tb)
+	if err := tb.plaud.saveState(plaudServiceRecordLogin(tb, plaudServiceSeededState("u_1", servicePlaudOld1))); err != nil {
+		t.Fatal(err)
+	}
+	shared := filepath.Join(tb.home, ".plaud", "tokens.json")
+	if err := os.MkdirAll(filepath.Dir(shared), 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(shared, []byte("{}"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	fp.Write("account", "u_2")
+	fp.Files(servicePlaudNew, servicePlaudOld1)
+	fp.Recording(servicePlaudNew, true)
+	if err := tb.updateSettings(func(s *PlaudSnapshot) error { s.Plaud.BrainAccess = true; return nil }); err != nil {
+		t.Fatal(err)
+	}
+	tb.plaud.tick(context.Background(), time.Now().Add(-time.Second))
+	if calls := fp.Calls(); calls != "" {
+		t.Fatalf("the CLI ran with a login Fridolin did not make:\n%s", calls)
+	}
+	if got := tb.plaud.loginStatus(); got != plaudMoved {
+		t.Errorf("login = %s, want moved", got)
+	}
+}
