@@ -127,7 +127,7 @@ func (b *Bridge) httpSend(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	request, err := b.sendExternal(r.Context(), who, jid, req.Text)
+	request, err := b.pipeline.SendExternal(r.Context(), who, jid, req.Text)
 	if err != nil {
 		httpapi.WriteErr(w, sendErrStatus(err), "send failed: "+err.Error())
 		return

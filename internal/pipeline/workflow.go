@@ -31,6 +31,8 @@ type Workflow struct {
 	HandOffCode func(*brainruntime.Brain, brainruntime.Inbound, brainruntime.OTPCatch)
 	Chats       func(brainruntime.Inbound) []string
 	ReplyChat   func(*brainruntime.Brain, string) string
+	SendChunked func(context.Context, string, string) error
+	AppendSent  func(chat.Principal, string, string, string)
 }
 
 // handleInbound is the entry point for every allowed message. Access control
