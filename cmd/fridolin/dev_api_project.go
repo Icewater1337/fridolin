@@ -1,17 +1,19 @@
 package main
 
-func (b *Bridge) newDevAPI() *DevAPI {
-	return &DevAPI{
+import "github.com/Icewater1337/fridolin/internal/httpapi"
+
+func (b *Bridge) newDevAPI() *httpapi.DevAPI {
+	return &httpapi.DevAPI{
 		HasBrain: func(id string) bool { return b.brainMgr.Get(id) != nil },
 		Submit:   b.submitDevInbound,
-		Messages: func() []DevMessage {
+		Messages: func() []httpapi.DevMessage {
 			rows := b.dev.Outbox()
 			if rows == nil {
 				return nil
 			}
-			out := make([]DevMessage, len(rows))
+			out := make([]httpapi.DevMessage, len(rows))
 			for i, row := range rows {
-				out[i] = DevMessage(row)
+				out[i] = httpapi.DevMessage(row)
 			}
 			return out
 		},

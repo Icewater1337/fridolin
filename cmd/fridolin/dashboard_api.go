@@ -401,7 +401,7 @@ func textTail(s string, n int) string {
 
 // ── dev mode ─────────────────────────────────────────────────────────────
 
-func (b *Bridge) submitDevInbound(req DevInboundRequest) string {
+func (b *Bridge) submitDevInbound(req httpapi.DevInboundRequest) string {
 	// Apply the same allow lists, group_members and trigger handling as
 	// WhatsApp messages, on one config snapshot as handleGroupMessage does.
 	cfg := b.cfgs.Get()

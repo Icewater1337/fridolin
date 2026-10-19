@@ -1,9 +1,8 @@
-package main
+package httpapi
 
 import (
 	"fmt"
 	"github.com/Icewater1337/fridolin/internal/chat"
-	"github.com/Icewater1337/fridolin/internal/httpapi"
 	"net/http"
 	"strings"
 	"time"
@@ -33,29 +32,29 @@ type DevInboundRequest struct {
 
 func (a *DevAPI) Inbound(w http.ResponseWriter, r *http.Request) {
 	var req DevInboundRequest
-	if err := httpapi.DecodeJSON(r, &req); err != nil {
-		httpapi.WriteErr(w, http.StatusBadRequest, err.Error())
+	if err := DecodeJSON(r, &req); err != nil {
+		WriteErr(w, http.StatusBadRequest, err.Error())
 		return
 	}
 	if req.JID == "" {
-		httpapi.WriteErr(w, http.StatusBadRequest, "jid required")
+		WriteErr(w, http.StatusBadRequest, "jid required")
 		return
 	}
 	req.Brain = strings.ToLower(strings.TrimSpace(req.Brain))
 	if req.Brain != "" && !a.HasBrain(req.Brain) {
-		httpapi.WriteErr(w, http.StatusBadRequest, fmt.Sprintf("unknown brain %q", req.Brain))
+		WriteErr(w, http.StatusBadRequest, fmt.Sprintf("unknown brain %q", req.Brain))
 		return
 	}
 	if req.Sender == "" {
 		req.Sender = chat.NormalizeJID(req.JID)
 	}
 	if reason := a.Submit(req); reason != "" {
-		httpapi.WriteJSON(w, http.StatusAccepted, map[string]string{"status": "ignored", "reason": reason})
+		WriteJSON(w, http.StatusAccepted, map[string]string{"status": "ignored", "reason": reason})
 		return
 	}
-	httpapi.WriteJSON(w, http.StatusAccepted, map[string]string{"status": "accepted"})
+	WriteJSON(w, http.StatusAccepted, map[string]string{"status": "accepted"})
 }
 
 func (a *DevAPI) Outbox(w http.ResponseWriter, r *http.Request) {
-	httpapi.WriteJSON(w, http.StatusOK, a.Messages())
+	WriteJSON(w, http.StatusOK, a.Messages())
 }
