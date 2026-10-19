@@ -69,6 +69,12 @@ behaviour unless its title says so. The steps so far:
   embedded assets and the runtime's identity-map path; registration workflows
   remain in the command until their later extraction.
 
+- **R9, resolution slice**: `registry.Resolve` and `CheckPath` own reference
+  resolution, drift/conflict reporting and path confinement. Security-policy
+  evaluation remains an injected command callback at the existing check
+  point. Three resolution tests now run with explicit temporary folders in
+  parallel; command integration tests still exercise sandbox protection.
+
 - **R5, configuration values**: `config` owns the file shape, section types,
   defaults, validation, migrations and approved brain references. `Resolve` still
   looks up the home folder; R6 injects paths.
@@ -303,12 +309,15 @@ responsibility and says what it must not do.
   identity. The manager's maps and unavailable-route holds remain in the
   command until the runtime extraction; the new table does not replace them.
 
-- **`registry`** *(to come, R9; `brainreg.go`, `brain_changes.go`)*: the
-  configured brain set. It resolves `brain_dirs` into specs and issues
-  (drift, missing, invalid, unapproved, retired), checks folders, scaffolds
-  new brains, and runs every workflow that changes `brain_dirs` or a
-  `brain.json`: add, update, approve, remove, assign group, per-brain backup
-  and calendar settings. It is the only code that writes `brain.json`.
+- **`registry`**: resolves configured brain references into specs and typed
+  issues (drift, missing, invalid, unapproved), checks candidate paths and
+  scaffolds new folders. `Resolve` takes a required directory-security
+  callback; `CheckPath` takes explicit home/other-folder inputs and a checker.
+  The command evaluates its sandbox policy at the same per-candidate points
+  as before, so registry has no sandbox or ambient-environment dependency.
+  Internal issue metadata stays out of JSON. *Planned:* the add, update,
+  approve, remove, group assignment, backup and calendar workflows still in
+  the command will move here once configuration transactions are extracted.
 
 ### Runtime
 
