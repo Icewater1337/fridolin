@@ -20,6 +20,8 @@ import (
 	"time"
 	_ "time/tzdata" // TestNextDue's time zone, on machines without one
 
+	"github.com/Icewater1337/fridolin/internal/backup"
+
 	"github.com/Icewater1337/fridolin/internal/devchat"
 
 	"github.com/Icewater1337/fridolin/internal/config"
@@ -58,7 +60,7 @@ func TestBackupScheduleIsArmedOnlyBySavedChanges(t *testing.T) {
 	if a := armed(); !a.Equal(clock) {
 		t.Errorf("armed at %v, want %v", a, clock)
 	}
-	if _, runNow := BackupDue(clock.Add(time.Minute), "03:30", "", armed()); runNow {
+	if _, runNow := backup.Due(clock.Add(time.Minute), "03:30", "", armed()); runNow {
 		t.Error("switching on after today's time starts a backup at once")
 	}
 	clock = clock.Add(time.Hour)
@@ -124,8 +126,8 @@ func TestBackupSchedulerTicks(t *testing.T) {
 		m.mu.Lock()
 		res, last := m.state.Brains["notes"], m.state.LastScheduledDay
 		m.mu.Unlock()
-		if res == nil || !res.OK || res.Trigger != "scheduled" || last != start.Format(BackupDayLayout) {
-			t.Errorf("result %+v, last scheduled day %q; want a scheduled run on %s", res, last, start.Format(BackupDayLayout))
+		if res == nil || !res.OK || res.Trigger != "scheduled" || last != start.Format(backup.DayLayout) {
+			t.Errorf("result %+v, last scheduled day %q; want a scheduled run on %s", res, last, start.Format(backup.DayLayout))
 		}
 		m.Stop()
 	})
@@ -158,7 +160,7 @@ func TestBackupNextRun(t *testing.T) {
 		t.Errorf("next run = %v, want now (today's is due)", n)
 	}
 	m.mu.Lock()
-	m.state.LastScheduledDay = clock.Format(BackupDayLayout)
+	m.state.LastScheduledDay = clock.Format(backup.DayLayout)
 	m.mu.Unlock()
 	if n, want := next(), time.Date(2026, 10, 19, 3, 30, 0, 0, time.Local); n == nil || !n.Equal(want) {
 		t.Errorf("next run = %v, want %v", n, want)
@@ -677,8 +679,8 @@ func TestBackupPruneKeepsVersionsByRunDate(t *testing.T) {
 		_ = os.MkdirAll(filepath.Dir(p), 0o700)
 		_ = os.WriteFile(p, []byte("older"), 0o600)
 	}
-	expired := BackupVersionName(time.Now().AddDate(0, 0, -40))
-	recent := BackupVersionName(time.Now().AddDate(0, 0, -10))
+	expired := backup.VersionName(time.Now().AddDate(0, 0, -40))
+	recent := backup.VersionName(time.Now().AddDate(0, 0, -10))
 	seed(expired)
 	seed(recent)
 	seed("not-a-version")
@@ -712,8 +714,8 @@ func TestBackupPruneKeepsVersionsByRunDate(t *testing.T) {
 // never filters files by their age.
 func TestPrunePurgesExpiredVersionFolders(t *testing.T) {
 	tb := newTestBridge(t, `, "backup": {"keep_versions_days": 30}`)
-	expired := BackupVersionName(time.Now().AddDate(0, 0, -31))
-	recent := BackupVersionName(time.Now().AddDate(0, 0, -29))
+	expired := backup.VersionName(time.Now().AddDate(0, 0, -31))
+	recent := backup.VersionName(time.Now().AddDate(0, 0, -29))
 	var mu sync.Mutex
 	var calls [][]string
 	tb.backup.runner = func(_ context.Context, args []string, stderr io.Writer) ([]byte, error) {
@@ -751,8 +753,8 @@ func TestPrunePurgesExpiredVersionFolders(t *testing.T) {
 // one prune all use the config it started with, and a cancelled job stops
 // it at once instead of trying (and logging) every remaining id.
 func TestPruneKeepsItsConfigAndStopsWhenCancelled(t *testing.T) {
-	listing := []byte(`[{"Name":"` + BackupVersionName(time.Now().AddDate(0, 0, -31)) + `"},` +
-		`{"Name":"` + BackupVersionName(time.Now().AddDate(0, 0, -60)) + `"}]`)
+	listing := []byte(`[{"Name":"` + backup.VersionName(time.Now().AddDate(0, 0, -31)) + `"},` +
+		`{"Name":"` + backup.VersionName(time.Now().AddDate(0, 0, -60)) + `"}]`)
 	brains := []*Brain{{id: "notes"}, {id: "work"}}
 
 	t.Run("backup.root changed mid-run", func(t *testing.T) {
@@ -2284,9 +2286,9 @@ func TestBackupLeavesSecretsOut(t *testing.T) {
 		{"include_secret_files", []string{"*.log"}, true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			filter := BackupBrainFilter(tc.excludes, tc.includeSecrets)
+			filter := backup.BrainFilter(tc.excludes, tc.includeSecrets)
 			lines := strings.Split(strings.TrimSpace(filter), "\n")
-			for _, p := range BackupSecretExcludes {
+			for _, p := range backup.SecretExcludes {
 				if got := slices.Contains(lines, "- "+p); got == tc.includeSecrets {
 					t.Errorf("filter has - %s: %v, want %v:\n%s", p, got, !tc.includeSecrets, filter)
 				}
@@ -2296,7 +2298,7 @@ func TestBackupLeavesSecretsOut(t *testing.T) {
 					t.Errorf("filter includes %q", l)
 				}
 			}
-			if !tc.includeSecrets && lines[0] != "- "+BackupSecretExcludes[0] {
+			if !tc.includeSecrets && lines[0] != "- "+backup.SecretExcludes[0] {
 				t.Errorf("filter starts with %q, want the secret files first", lines[0])
 			}
 		})
@@ -2327,7 +2329,7 @@ func TestBackupSecretExcludesAreDocumented(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, p := range BackupSecretExcludes {
+	for _, p := range backup.SecretExcludes {
 		if !strings.Contains(string(doc), "`"+p+"`") {
 			t.Errorf("docs/BACKUP.md does not name %s", p)
 		}

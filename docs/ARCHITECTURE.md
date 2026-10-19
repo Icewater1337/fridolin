@@ -453,7 +453,14 @@ responsibility and says what it must not do.
 
 ### Integrations
 
-- **`backup`** *(to come, R13; `backup.go`, `connectjob.go`)*: Google Drive
+- **`backup`** *(pure rules extracted, R13; manager still to come)*: The
+  standard-library-only leaf owns daily scheduling (including DST), exclusion
+  filters, rclone section parsing, and backup/version name rules. Its existing
+  pure tests moved with it; command callers qualify the package directly.
+  Manager preparation now uses owned settings, retained target callbacks,
+  ordered bridge-file snapshots and explicit process adapters; stateful test
+  fixtures will move through those inputs before the manager leaves the command.
+  The planned manager owns Google Drive
   backups through an isolated rclone (its own `--config`, `RCLONE_*`
   stripped from the environment, stdout never logged). It covers connect,
   run, the daily schedule, prune, versions and restore, and has no HTTP

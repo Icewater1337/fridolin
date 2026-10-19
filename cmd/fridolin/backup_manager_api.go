@@ -8,6 +8,8 @@ import (
 	"slices"
 	"time"
 
+	"github.com/Icewater1337/fridolin/internal/backup"
+
 	"github.com/Icewater1337/fridolin/internal/apperr"
 )
 
@@ -52,7 +54,7 @@ func (m *BackupManager) Status() map[string]any {
 		"connect":               copyOf(m.connect),
 		"settings":              cfg,
 		"include_bridge_config": cfg.IncludeBridgeConfig,
-		"secret_excludes":       BackupSecretExcludes,
+		"secret_excludes":       backup.SecretExcludes,
 		"brains":                rows,
 		"bridge":                copyOf(m.state.Bridge),
 		"job":                   job,
@@ -174,7 +176,7 @@ func (m *BackupManager) Cancel() error {
 
 // Versions lists a brain's saved versions in the dashboard's existing order.
 func (m *BackupManager) Versions(ctx context.Context, id string) ([]string, error) {
-	if !BackupNameOK(id) {
+	if !backup.NameOK(id) {
 		return nil, apperr.New(apperr.Invalid, "invalid brain")
 	}
 	if !m.connected() {
@@ -186,7 +188,7 @@ func (m *BackupManager) Versions(ctx context.Context, id string) ([]string, erro
 	if err != nil {
 		return nil, apperr.New(apperr.Unknown, "listing versions failed: "+err.Error())
 	}
-	BackupSortVersions(versions)
+	backup.SortVersions(versions)
 	return versions, nil
 }
 
@@ -207,7 +209,7 @@ func (m *BackupManager) Restore(req BackupRestoreRequest, overlapCheck func(stri
 	if req.Version == "" {
 		req.Version = "current"
 	}
-	if !BackupNameOK(req.Brain) || !BackupVersionOK(req.Version) {
+	if !backup.NameOK(req.Brain) || !backup.VersionOK(req.Version) {
 		return "", errBackupRestoreRequest
 	}
 	if !m.connected() {

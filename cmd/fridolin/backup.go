@@ -20,6 +20,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/Icewater1337/fridolin/internal/backup"
+
 	"golang.org/x/text/unicode/norm"
 
 	"github.com/Icewater1337/fridolin/internal/fsx"
@@ -288,7 +290,7 @@ func (m *BackupManager) connected() bool {
 	if err != nil {
 		return false
 	}
-	section := BackupRcloneSection(string(data), m.opts.Settings().Remote)
+	section := backup.RcloneSection(string(data), m.opts.Settings().Remote)
 	if section == nil {
 		return false
 	}
@@ -377,7 +379,7 @@ func (m *BackupManager) nextRunLocked(cfg BackupSettings, connected bool) *time.
 		return nil
 	}
 	now := m.now()
-	due, runNow := BackupDue(now, cfg.DailyAt, m.state.LastScheduledDay, m.state.ArmedAt)
+	due, runNow := backup.Due(now, cfg.DailyAt, m.state.LastScheduledDay, m.state.ArmedAt)
 	if runNow {
 		due = now
 	}
@@ -726,7 +728,7 @@ func (m *BackupManager) backupBrain(ctx context.Context, br BackupTarget, trigge
 	// another.
 	cfg := m.opts.Settings()
 	filter := filepath.Join(m.dir(), "filters-"+br.ID+".txt")
-	if err := fsx.WriteFileAtomic(filter, []byte(BackupBrainFilter(s.Exclude, cfg.IncludeSecretFiles)), 0o600, false); err != nil {
+	if err := fsx.WriteFileAtomic(filter, []byte(backup.BrainFilter(s.Exclude, cfg.IncludeSecretFiles)), 0o600, false); err != nil {
 		return fail(err.Error())
 	}
 	base := backupPath(cfg, br.ID)
@@ -968,7 +970,7 @@ func (m *BackupManager) stageBridge(stage string) error {
 // deletions and the run is refused as a mass deletion.
 func (m *BackupManager) syncDir(ctx context.Context, src, base, filterFile, trigger string, maxDelete int) *BackupResult {
 	res := &BackupResult{Started: time.Now(), Trigger: trigger}
-	res.Version = BackupVersionName(res.Started)
+	res.Version = backup.VersionName(res.Started)
 	args := []string{"sync", src + "/", base + "/current",
 		"--backup-dir", base + "/versions/" + res.Version,
 		"--links", "--use-json-log", "--stats", "15s", "--stats-log-level", "NOTICE", "-v",
@@ -1113,7 +1115,7 @@ func (m *BackupManager) prune(ctx context.Context, targets []BackupTarget) {
 			log.Printf("backup %s: listing versions to prune failed: %v", id, err)
 			continue
 		}
-		for _, v := range BackupExpiredVersions(names, now, days) {
+		for _, v := range backup.ExpiredVersions(names, now, days) {
 			_, err := m.runner(ctx, []string{"purge", versions + "/" + v}, nil)
 			if ctx.Err() != nil {
 				return
@@ -1243,7 +1245,7 @@ func (m *BackupManager) tick(now time.Time) {
 		return
 	}
 	m.mu.Lock()
-	_, runNow := BackupDue(now, cfg.DailyAt, m.state.LastScheduledDay, m.state.ArmedAt)
+	_, runNow := backup.Due(now, cfg.DailyAt, m.state.LastScheduledDay, m.state.ArmedAt)
 	busy := m.job != nil || m.disconnecting
 	m.mu.Unlock()
 	if !runNow || busy {
@@ -1254,7 +1256,7 @@ func (m *BackupManager) tick(now time.Time) {
 		return
 	}
 	m.mu.Lock()
-	m.state.LastScheduledDay = now.Format(BackupDayLayout)
+	m.state.LastScheduledDay = now.Format(backup.DayLayout)
 	m.saveStateLocked()
 	m.mu.Unlock()
 }
@@ -1263,7 +1265,7 @@ func (m *BackupManager) tick(now time.Time) {
 // Drive link to run on: after an abandoned reconnect, say. The overview says
 // so too; without either, the backups would just stop.
 func (m *BackupManager) warnNotConnected(now time.Time) {
-	day := now.Format(BackupDayLayout)
+	day := now.Format(backup.DayLayout)
 	m.mu.Lock()
 	warned := m.warnedDay == day
 	m.warnedDay = day
