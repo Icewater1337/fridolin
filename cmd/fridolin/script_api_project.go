@@ -4,12 +4,13 @@ import (
 	"context"
 	"github.com/Icewater1337/fridolin/internal/brain"
 	"github.com/Icewater1337/fridolin/internal/chat"
+	"github.com/Icewater1337/fridolin/internal/httpapi"
 	"go.mau.fi/whatsmeow/types"
 	"net/http"
 )
 
-func (b *Bridge) newScriptAPI() *ScriptAPI {
-	return &ScriptAPI{
+func (b *Bridge) newScriptAPI() *httpapi.ScriptAPI {
+	return &httpapi.ScriptAPI{
 		Authorize:     func(r *http.Request) (chat.Principal, error) { return b.scriptAuth.authorize(r) },
 		Recipient:     b.scriptRecipient,
 		MaySend:       func(who chat.Principal, jid string) error { return b.maySend(who, jid, b.cfgs.Get()) },
@@ -17,9 +18,9 @@ func (b *Bridge) newScriptAPI() *ScriptAPI {
 		SendExternal: func(ctx context.Context, who chat.Principal, jid, text string) (string, error) {
 			return b.pipeline.SendExternal(ctx, who, jid, text)
 		},
-		IngestPolicy: func() IngestPolicy {
+		IngestPolicy: func() httpapi.IngestPolicy {
 			cfg := b.cfgs.Get()
-			return IngestPolicy{Enabled: cfg.Ingest.Enabled, OwnerChat: ownerChat(cfg)}
+			return httpapi.IngestPolicy{Enabled: cfg.Ingest.Enabled, OwnerChat: ownerChat(cfg)}
 		},
 		Brain: func(id string) *brain.Brain { return b.brainMgr.Get(id) },
 		IngestTarget: func(who chat.Principal, br *brain.Brain, paths []string, sender, text, owner string) (string, error) {

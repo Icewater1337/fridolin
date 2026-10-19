@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"github.com/Icewater1337/fridolin/internal/httpapi"
 
 	outboundmsg "github.com/Icewater1337/fridolin/internal/outbound"
 
@@ -109,7 +110,7 @@ func TestScriptAPIContract(t *testing.T) {
 
 	// /send takes text as it is: a [POLL] block is not made a poll.
 	poll := "[POLL]\nQuestion: Lunch?\n- Yes\n- No\n[/POLL]"
-	body, _ := json.Marshal(SendRequest{JID: dm, Text: poll})
+	body, _ := json.Marshal(httpapi.SendRequest{JID: dm, Text: poll})
 	if w := tb.script("POST", "/send", string(body), ""); w.Code != 200 {
 		t.Fatalf("send a poll block: %d %s", w.Code, w.Body.String())
 	}

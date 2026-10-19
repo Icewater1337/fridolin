@@ -1,4 +1,4 @@
-package main
+package httpapi
 
 import (
 	"context"
@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"github.com/Icewater1337/fridolin/internal/brain"
 	"github.com/Icewater1337/fridolin/internal/chat"
-	"github.com/Icewater1337/fridolin/internal/httpapi"
 	outboundmsg "github.com/Icewater1337/fridolin/internal/outbound"
 	"net/http"
 	"strings"
@@ -58,18 +57,18 @@ type IngestRequest struct {
 func (a *ScriptAPI) Send(w http.ResponseWriter, r *http.Request) {
 	who, err := a.Authorize(r)
 	if err != nil {
-		httpapi.WriteErr(w, http.StatusUnauthorized, err.Error())
+		WriteErr(w, http.StatusUnauthorized, err.Error())
 		return
 	}
 	var req SendRequest
 	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20)).Decode(&req); err != nil {
-		httpapi.WriteErr(w, http.StatusBadRequest, "invalid JSON: "+err.Error())
+		WriteErr(w, http.StatusBadRequest, "invalid JSON: "+err.Error())
 		return
 	}
 	// Blank text would send nothing (ChunkMessage gives no chunks for it),
 	// so refuse it rather than answer "sent" and log a message to history.
 	if req.JID == "" || strings.TrimSpace(req.Text) == "" {
-		httpapi.WriteErr(w, http.StatusBadRequest, "jid and text are required")
+		WriteErr(w, http.StatusBadRequest, "jid and text are required")
 		return
 	}
 	// Refused before sending: a script gets a 400 for its own mistake rather
@@ -77,7 +76,7 @@ func (a *ScriptAPI) Send(w http.ResponseWriter, r *http.Request) {
 	// refuses it too. A bare number is the DM with it.
 	jid, err := a.Recipient(r.Context(), req.JID)
 	if err != nil {
-		httpapi.WriteErr(w, http.StatusBadRequest, err.Error())
+		WriteErr(w, http.StatusBadRequest, err.Error())
 		return
 	}
 	if err := a.MaySend(who, jid); err != nil {
@@ -85,20 +84,20 @@ func (a *ScriptAPI) Send(w http.ResponseWriter, r *http.Request) {
 		if errors.Is(err, a.TokenRequired) {
 			status = http.StatusUnauthorized
 		}
-		httpapi.WriteErr(w, status, err.Error())
+		WriteErr(w, status, err.Error())
 		return
 	}
 
 	request, err := a.SendExternal(r.Context(), who, jid, req.Text)
 	if err != nil {
-		httpapi.WriteErr(w, sendErrStatus(err), "send failed: "+err.Error())
+		WriteErr(w, sendErrStatus(err), "send failed: "+err.Error())
 		return
 	}
 	resp := map[string]string{"status": "sent"}
 	if request != "" {
 		resp["otp_request"] = request
 	}
-	httpapi.WriteJSON(w, http.StatusOK, resp)
+	WriteJSON(w, http.StatusOK, resp)
 }
 
 // sendErrStatus is the status for a send that failed with err: 503 while
@@ -127,7 +126,7 @@ func sendErrStatus(err error) int {
 func (a *ScriptAPI) Ingest(w http.ResponseWriter, r *http.Request) {
 	policy := a.IngestPolicy()
 	if !policy.Enabled {
-		httpapi.WriteErr(w, http.StatusNotFound, "ingest is disabled (set ingest.enabled in the dashboard)")
+		WriteErr(w, http.StatusNotFound, "ingest is disabled (set ingest.enabled in the dashboard)")
 		return
 	}
 	who, err := a.Authorize(r)
@@ -135,20 +134,20 @@ func (a *ScriptAPI) Ingest(w http.ResponseWriter, r *http.Request) {
 		err = a.TokenRequired
 	}
 	if err != nil {
-		httpapi.WriteErr(w, http.StatusUnauthorized, err.Error())
+		WriteErr(w, http.StatusUnauthorized, err.Error())
 		return
 	}
 	var req IngestRequest
 	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20)).Decode(&req); err != nil {
-		httpapi.WriteErr(w, http.StatusBadRequest, "invalid JSON: "+err.Error())
+		WriteErr(w, http.StatusBadRequest, "invalid JSON: "+err.Error())
 		return
 	}
 	if req.Scope != "" {
-		httpapi.WriteErr(w, http.StatusBadRequest, `"scope" is no longer read: name the brain in "brain"`)
+		WriteErr(w, http.StatusBadRequest, `"scope" is no longer read: name the brain in "brain"`)
 		return
 	}
 	if len(req.Paths) == 0 && strings.TrimSpace(req.Text) == "" {
-		httpapi.WriteErr(w, http.StatusBadRequest, "paths or text required")
+		WriteErr(w, http.StatusBadRequest, "paths or text required")
 		return
 	}
 	id := strings.ToLower(strings.TrimSpace(req.Brain))
@@ -157,20 +156,20 @@ func (a *ScriptAPI) Ingest(w http.ResponseWriter, r *http.Request) {
 			id = who.Brain
 		}
 		if id != who.Brain {
-			httpapi.WriteErr(w, http.StatusForbidden, fmt.Sprintf("brain %s may hand files only to itself, not to %q", who.Brain, id))
+			WriteErr(w, http.StatusForbidden, fmt.Sprintf("brain %s may hand files only to itself, not to %q", who.Brain, id))
 			return
 		}
 	}
 	br := a.Brain(id)
 	if br == nil {
-		httpapi.WriteErr(w, http.StatusBadRequest, fmt.Sprintf("unknown brain %q", id))
+		WriteErr(w, http.StatusBadRequest, fmt.Sprintf("unknown brain %q", id))
 		return
 	}
 
 	jid, err := a.IngestTarget(who, br, req.Paths, req.Sender, req.Text, policy.OwnerChat)
 	if err != nil {
-		httpapi.WriteErr(w, http.StatusBadRequest, err.Error())
+		WriteErr(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	httpapi.WriteJSON(w, http.StatusAccepted, map[string]string{"status": "accepted", "jid": jid})
+	WriteJSON(w, http.StatusAccepted, map[string]string{"status": "accepted", "jid": jid})
 }

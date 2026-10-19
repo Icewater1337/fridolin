@@ -329,7 +329,7 @@ func TestHTTPSendRefusesStatusBroadcastAndChannels(t *testing.T) {
 	h := newHarness(t, "")
 	for _, jid := range []string{"status@broadcast", "1700000000@broadcast", "120363000000000000@newsletter"} {
 		t.Run(jid, func(t *testing.T) {
-			body, _ := json.Marshal(SendRequest{JID: jid, Text: "hello"})
+			body, _ := json.Marshal(httpapi.SendRequest{JID: jid, Text: "hello"})
 			w := h.Script("POST", "/send", string(body))
 			var resp map[string]string
 			if w.Code != http.StatusBadRequest || w.Header().Get("Content-Type") != "application/json" ||

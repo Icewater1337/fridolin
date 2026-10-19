@@ -3,6 +3,7 @@ package main
 import (
 	"encoding/json"
 	"fmt"
+	"github.com/Icewater1337/fridolin/internal/httpapi"
 	"maps"
 	"net/http"
 	"net/http/httptest"
@@ -51,8 +52,8 @@ var schemaTypes = []schemaType{
 	{schema: "config.schema.json", typ: reflect.TypeFor[config.Config](), closed: true, extra: config.RetiredKeyNames()},
 	{schema: "brain.schema.json", typ: reflect.TypeFor[manifest.Manifest](), closed: true},
 	{schema: "history-line.schema.json", typ: reflect.TypeFor[history.Entry](), closed: true},
-	{schema: "send-request.schema.json", typ: reflect.TypeFor[SendRequest]()},
-	{schema: "ingest-request.schema.json", typ: reflect.TypeFor[IngestRequest](), refused: []string{"scope"}},
+	{schema: "send-request.schema.json", typ: reflect.TypeFor[httpapi.SendRequest]()},
+	{schema: "ingest-request.schema.json", typ: reflect.TypeFor[httpapi.IngestRequest](), refused: []string{"scope"}},
 }
 
 // TestSchemasFollowTheGoTypes: every key of each Go type is in its schema,
