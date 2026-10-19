@@ -270,7 +270,7 @@ func (h *harness) WhatsAppAndWait(ev *events.Message) {
 
 func (h *harness) whatsApp(ev *events.Message, handle InboundHandler) {
 	h.t.Helper()
-	opts := whatsAppOptions(func() *config.Config { return runtimeConfig(h.b.cfgs) }, h.b.store, handle, nil)
+	opts := whatsAppOptions(func() *config.File { return runtimeConfig(h.b.cfgs) }, h.b.store, handle, nil)
 	opts.Container = fixedDeviceContainer{&store.Device{}}
 	opts.Log = waLog.Noop
 	opts.OnChange = h.b.handleChange

@@ -110,7 +110,7 @@ func (b *Bridge) statusSnapshot(ctx context.Context) httpapi.StatusResponse {
 // permissions run without a sandbox, which on any OS lets them read the
 // token (and the rest of the data dir) themselves. A sandbox that is on
 // but cannot run gets its own warning: brains then refuse every message.
-func (b *Bridge) tokenWarnings(cfg *config.Config, goos string) []string {
+func (b *Bridge) tokenWarnings(cfg *config.File, goos string) []string {
 	var out []string
 	switch {
 	case !b.requiresToken():
@@ -216,7 +216,7 @@ func sandboxProfileWarning(bm *BrainManager) string {
 // drift shows as soon as a brain.json changes, plus the folders the brain
 // manager could not open when it last loaded the brains, which only it
 // knows of.
-func (b *Bridge) brainIssues(cfg *config.Config) []registry.Issue {
+func (b *Bridge) brainIssues(cfg *config.File) []registry.Issue {
 	_, issues := ResolveBrains(cfg)
 	for _, is := range b.brainMgr.Issues() {
 		if is.AtLoad {

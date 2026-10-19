@@ -83,10 +83,10 @@ type ChatRevokedResponse struct {
 }
 
 type ConfigResponse struct {
-	Config    *config.Config `json:"config"`
-	Effective *config.Config `json:"effective"`
-	ETag      string         `json:"etag"`
-	Path      string         `json:"path"`
+	Config    *config.File `json:"config"`
+	Effective *config.File `json:"effective"`
+	ETag      string       `json:"etag"`
+	Path      string       `json:"path"`
 }
 
 type ConfigSavedResponse struct {

@@ -188,7 +188,7 @@ func TestPlaudWithoutAPrivateChatWaits(t *testing.T) {
 		t.Fatalf("outbox = %+v, want nothing", out)
 	}
 
-	if _, err := tb.cfgs.Update("", func(c *config.Config) error { c.AllowedNumbers = []string{"15551234567"}; return nil }); err != nil {
+	if _, err := tb.cfgs.Update("", func(c *config.File) error { c.AllowedNumbers = []string{"15551234567"}; return nil }); err != nil {
 		t.Fatal(err)
 	}
 	if err := tb.plaud.Poll(context.Background()); err != nil {
@@ -1676,7 +1676,7 @@ func TestBrainPlaudPATH(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			cfg := &config.Config{Plaud: config.PlaudConfig{BrainAccess: true, CLIPath: tc.cliPath}}
+			cfg := &config.File{Plaud: config.PlaudConfig{BrainAccess: true, CLIPath: tc.cliPath}}
 			got := brainPlaudPATH(cfg)
 			dirs := filepath.SplitList(got)
 			if want := filepath.Join(tc.dir, "plaud"); lookPathIn("plaud", got) != want {

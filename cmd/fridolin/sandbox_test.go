@@ -128,7 +128,7 @@ func TestSandboxCommandPassesProfileInline(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 	sp := NewSandboxProfiler(map[string][]string{"a": {filepath.Join(home, "a")}, "b": {filepath.Join(home, "b")}},
-		&config.Config{DataDir: filepath.Join(home, "data")})
+		&config.File{DataDir: filepath.Join(home, "data")})
 	sp.execPath = os.Args[0] // any file that exists
 
 	bin, args, err := sp.Command("a", "/opt/claude", []string{"--verbose", "-p", "hi"})
@@ -162,21 +162,21 @@ func mustProfile(t *testing.T, sp *SandboxProfiler, brainID string) string {
 func TestSandboxProfileRefusesUnquotablePaths(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
-	cases := map[string]func(cfg *config.Config, dirs map[string][]string){
-		"other brain's folder": func(cfg *config.Config, dirs map[string][]string) { dirs["b"] = []string{home + "/b\nc"} },
-		"other brain's folder, second spelling": func(cfg *config.Config, dirs map[string][]string) {
+	cases := map[string]func(cfg *config.File, dirs map[string][]string){
+		"other brain's folder": func(cfg *config.File, dirs map[string][]string) { dirs["b"] = []string{home + "/b\nc"} },
+		"other brain's folder, second spelling": func(cfg *config.File, dirs map[string][]string) {
 			dirs["b"] = []string{home + "/b", home + "/b\nc"}
 		},
-		"own folder, second spelling": func(cfg *config.Config, dirs map[string][]string) {
+		"own folder, second spelling": func(cfg *config.File, dirs map[string][]string) {
 			dirs["a"] = []string{home + "/a", home + "/a\nc"}
 		},
-		"deny path":  func(cfg *config.Config, dirs map[string][]string) { cfg.Sandbox.DenyPaths = []string{home + "/x\x00"} },
-		"allow path": func(cfg *config.Config, dirs map[string][]string) { cfg.Sandbox.AllowPaths = []string{home + "/x\r"} },
-		"data dir":   func(cfg *config.Config, dirs map[string][]string) { cfg.DataDir = home + "/data\n" },
+		"deny path":  func(cfg *config.File, dirs map[string][]string) { cfg.Sandbox.DenyPaths = []string{home + "/x\x00"} },
+		"allow path": func(cfg *config.File, dirs map[string][]string) { cfg.Sandbox.AllowPaths = []string{home + "/x\r"} },
+		"data dir":   func(cfg *config.File, dirs map[string][]string) { cfg.DataDir = home + "/data\n" },
 	}
 	for name, breakIt := range cases {
 		t.Run(name, func(t *testing.T) {
-			cfg := &config.Config{DataDir: filepath.Join(home, "data")}
+			cfg := &config.File{DataDir: filepath.Join(home, "data")}
 			dirs := map[string][]string{"a": {filepath.Join(home, "a")}, "b": {filepath.Join(home, "b")}}
 			breakIt(cfg, dirs)
 			if profile, err := NewSandboxProfiler(dirs, cfg).Profile("a"); err == nil {
@@ -210,7 +210,7 @@ func TestSandboxProfileCoversRealPaths(t *testing.T) {
 		}
 	}
 	t.Setenv("HOME", home)
-	cfg := &config.Config{
+	cfg := &config.File{
 		DataDir: filepath.Join(home, ".fridolin"),
 		Sandbox: config.SandboxConfig{
 			CredentialsDir: filepath.Join(home, "creds"),
@@ -259,7 +259,7 @@ func TestSandboxAllowsDoNotFollowSymlinks(t *testing.T) {
 		}
 	}
 	t.Setenv("HOME", home)
-	cfg := &config.Config{
+	cfg := &config.File{
 		DataDir: filepath.Join(home, ".fridolin"),
 		Sandbox: config.SandboxConfig{AllowPaths: []string{filepath.Join(home, "Documents", "share")}},
 	}
@@ -295,7 +295,7 @@ func TestSandboxProfileNeedsAbsolutePaths(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Setenv("HOME", tc.home)
-			cfg := &config.Config{DataDir: "/Users/you/.fridolin", Sandbox: config.SandboxConfig{AllowPaths: tc.allow}}
+			cfg := &config.File{DataDir: "/Users/you/.fridolin", Sandbox: config.SandboxConfig{AllowPaths: tc.allow}}
 			if profile, err := NewSandboxProfiler(map[string][]string{"a": {"/Users/you/a"}}, cfg).Profile("a"); err == nil {
 				t.Errorf("Profile succeeded:\n%s", profile)
 			}
@@ -361,7 +361,7 @@ func TestSandboxDeniesEverySpelling(t *testing.T) {
 		}
 	}
 	t.Setenv("HOME", home)
-	profile := mustProfile(t, NewSandboxProfiler(map[string][]string{"a": {filepath.Join(home, "a")}}, &config.Config{}), "a")
+	profile := mustProfile(t, NewSandboxProfiler(map[string][]string{"a": {filepath.Join(home, "a")}}, &config.File{}), "a")
 	for _, c := range []struct {
 		op, path string
 		want     bool
@@ -551,8 +551,8 @@ func TestSandboxProfileDeniesInstructionsAboveBrains(t *testing.T) {
 		"d": {outside + "/brains/d"}, // outside HOME
 		"l": {home + "/linked/l"},    // really vol/brains/l
 	}
-	isolated := NewSandboxProfiler(dirs, &config.Config{})
-	inherit := NewSandboxProfiler(dirs, &config.Config{InheritClaudeUserConfig: true})
+	isolated := NewSandboxProfiler(dirs, &config.File{})
+	inherit := NewSandboxProfiler(dirs, &config.File{InheritClaudeUserConfig: true})
 	rule := func(op, filter, p string) string { return `(deny ` + op + ` (` + filter + ` "` + p + `"))` }
 	cases := []struct {
 		brain, name string
@@ -638,7 +638,7 @@ func TestSandboxProfileWritesEachDenyOnce(t *testing.T) {
 	t.Run("a deny again after an allow", func(t *testing.T) {
 		t.Setenv("HOME", home)
 		team, b := filepath.Join(home, "team"), filepath.Join(home, "team", "b")
-		cfg := &config.Config{Sandbox: config.SandboxConfig{DenyPaths: []string{b}, AllowPaths: []string{team}}}
+		cfg := &config.File{Sandbox: config.SandboxConfig{DenyPaths: []string{b}, AllowPaths: []string{team}}}
 		lines := strings.Split(mustProfile(t, NewSandboxProfiler(map[string][]string{"a": {filepath.Join(home, "a")}, "b": {b}}, cfg), "a"), "\n")
 		allow := slices.Index(lines, `(allow file-read* (subpath "`+team+`"))`)
 		// Writing b is denied with everything else before the allow.
@@ -761,7 +761,7 @@ func TestSandboxProfileDeniesBridgeSecrets(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			cfg := &config.Config{DataDir: tc.dataDir, DBPath: tc.db}
+			cfg := &config.File{DataDir: tc.dataDir, DBPath: tc.db}
 			lines := strings.Split(mustProfile(t, NewSandboxProfiler(map[string][]string{"a": {home + "/a"}}, cfg), "a"), "\n")
 			for _, rule := range tc.want {
 				if !slices.Contains(lines, rule) {
@@ -788,7 +788,7 @@ func TestSandboxProfileDeniesBridgeSecrets(t *testing.T) {
 		t.Run("relative db_path "+db, func(t *testing.T) {
 			wd := fsx.Canonical(t.TempDir())
 			t.Chdir(wd)
-			cfg := &config.Config{DataDir: home + "/.fridolin", DBPath: db}
+			cfg := &config.File{DataDir: home + "/.fridolin", DBPath: db}
 			lines := strings.Split(mustProfile(t, NewSandboxProfiler(map[string][]string{"a": {home + "/a"}}, cfg), "a"), "\n")
 			abs := filepath.Join(wd, db)
 			for _, rule := range append(dbRules(abs), both("subpath", filepath.Dir(abs))...) {
@@ -821,7 +821,7 @@ func TestSandboxProfileDeniesTheConfigFile(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			sp := NewSandboxProfiler(map[string][]string{"a": {home + "/a"}}, &config.Config{DataDir: home + "/.fridolin"})
+			sp := NewSandboxProfiler(map[string][]string{"a": {home + "/a"}}, &config.File{DataDir: home + "/.fridolin"})
 			sp.SetConfigFile(tc.cfgFile)
 			lines := strings.Split(mustProfile(t, sp, "a"), "\n")
 			dir := filepath.Dir(tc.cfgFile)
@@ -871,7 +871,7 @@ func TestSandboxGitConfigModes(t *testing.T) {
 	writeTestFile(t, filepath.Join(home, ".gitconfig"), "[include]\n\tpath = .gitconfig-extra ; local settings\n")
 	for _, mode := range []string{"read", "deny"} {
 		t.Run(mode, func(t *testing.T) {
-			cfg := &config.Config{Sandbox: config.SandboxConfig{GitConfig: mode}}
+			cfg := &config.File{Sandbox: config.SandboxConfig{GitConfig: mode}}
 			lines := strings.Split(mustProfile(t, NewSandboxProfiler(map[string][]string{"a": {home + "/a"}}, cfg), "a"), "\n")
 			for _, c := range []struct {
 				rule string
@@ -901,7 +901,7 @@ func TestSandboxGitConfigModes(t *testing.T) {
 func TestSandboxAllowPathsCannotOpenBridgeSecrets(t *testing.T) {
 	home := fsx.Canonical(t.TempDir())
 	t.Setenv("HOME", home)
-	cfg := &config.Config{
+	cfg := &config.File{
 		DataDir: home + "/.fridolin",
 		DBPath:  home + "/wa-store/bridge.db",
 		Sandbox: config.SandboxConfig{
@@ -954,7 +954,7 @@ func precedenceFixture(t *testing.T, inherit bool) (sp *SandboxProfiler, home, o
 	home = fsx.Canonical(t.TempDir())
 	t.Setenv("HOME", home)
 	own = home + "/assistant/a"
-	cfg := &config.Config{
+	cfg := &config.File{
 		DataDir:                 home + "/.fridolin",
 		DBPath:                  home + "/wa/bridge.db",
 		InheritClaudeUserConfig: inherit,
@@ -1118,7 +1118,7 @@ func TestNodePackage(t *testing.T) {
 // in an nvm node version, off PATH. PATH finds only the Claude CLI, and also
 // names ~/bin2 and ~/tools/bin, which do not exist yet. It returns a config
 // whose bridge runs all of them, the viewer's tmux included.
-func bridgeProgramsFixture(t *testing.T, home string) *config.Config {
+func bridgeProgramsFixture(t *testing.T, home string) *config.File {
 	t.Helper()
 	t.Setenv("HOME", home)
 	t.Setenv("PATH", home+"/.local/bin:"+home+"/bin2:"+home+"/tools/bin:/usr/bin:/bin")
@@ -1155,7 +1155,7 @@ func bridgeProgramsFixture(t *testing.T, home string) *config.Config {
 	tmuxOnce.Do(func() {}) // keep findTmux from looking up the real one
 	tmuxPath = home + "/bin/tmux"
 	t.Cleanup(func() { tmuxPath = old })
-	return &config.Config{ClaudePath: "claude", Viewer: true, Backup: config.BackupConfig{RclonePath: home + "/bin/rclone"}}
+	return &config.File{ClaudePath: "claude", Viewer: true, Backup: config.BackupConfig{RclonePath: home + "/bin/rclone"}}
 }
 
 // TestSandboxProfileProtectsTheBridgesPrograms: the bridge runs the Claude
@@ -1397,7 +1397,7 @@ func TestSandboxRefusesBrainFoldersItCannotProtect(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			cfg := &config.Config{
+			cfg := &config.File{
 				DataDir: home + "/.fridolin",
 				DBPath:  home + "/wa/bridge.db",
 				Sandbox: config.SandboxConfig{CredentialsDir: home + "/creds", DenyPaths: []string{home + "/clients"}},

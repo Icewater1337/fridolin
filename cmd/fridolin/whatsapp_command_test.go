@@ -92,7 +92,7 @@ func FuzzNumberAllowed(f *testing.F) {
 		if list != "" {
 			allowed = strings.Split(list, ",")
 		}
-		cfg := &config.Config{AllowedNumbers: allowed, AllowAnyDM: &anyDM}
+		cfg := &config.File{AllowedNumbers: allowed, AllowAnyDM: &anyDM}
 		got := numberAllowed(cfg, number)
 		if len(allowed) == 0 {
 			if got != anyDM {
@@ -112,7 +112,7 @@ func FuzzNumberAllowed(f *testing.F) {
 			t.Errorf("allowed_numbers %q: %q allowed: %v, listed: %v", allowed, number, got, listed)
 		}
 		other := !anyDM
-		if numberAllowed(&config.Config{AllowedNumbers: allowed, AllowAnyDM: &other}, number) != got {
+		if numberAllowed(&config.File{AllowedNumbers: allowed, AllowAnyDM: &other}, number) != got {
 			t.Errorf("allowed_numbers %q: allow_any_dm changes whether %q is allowed", allowed, number)
 		}
 		for _, a := range allowed {
@@ -127,7 +127,7 @@ func FuzzNumberAllowed(f *testing.F) {
 				}
 			}
 			// A number one digit longer is someone else.
-			if canon(p+"1") != canon(number) && numberAllowed(&config.Config{AllowedNumbers: []string{a}, AllowAnyDM: &anyDM}, p+"1") {
+			if canon(p+"1") != canon(number) && numberAllowed(&config.File{AllowedNumbers: []string{a}, AllowAnyDM: &anyDM}, p+"1") {
 				t.Errorf("allowed_numbers [%q]: %q, a longer number, is allowed", a, p+"1")
 			}
 		}

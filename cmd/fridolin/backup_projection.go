@@ -13,7 +13,7 @@ import (
 	outboundmsg "github.com/Icewater1337/fridolin/internal/outbound"
 )
 
-func backupSettings(cfg *config.Config) backup.Settings {
+func backupSettings(cfg *config.File) backup.Settings {
 	bc := cfg.Backup
 	s := backup.Settings{Enabled: bc.Enabled, Remote: bc.Remote, Root: bc.Root, DailyAt: bc.DailyAt, RclonePath: bc.RclonePath,
 		KeepVersionsDays: bc.KeepVersions(), IncludeBridgeConfig: bc.IncludeBridge(), IncludeSecretFiles: bc.IncludeSecretFiles}
@@ -78,7 +78,7 @@ func backupOptions(cfgs *config.Store, bm *BrainManager, notify func(context.Con
 func newProjectedBackup(cfgs *config.Store, bm *BrainManager, notify func(context.Context, *brain.Brain, string) error) *backup.Manager {
 	m := backup.New(backupOptions(cfgs, bm, notify))
 	// Publication succeeds before the schedule moves; failed saves never reach this callback.
-	cfgs.Subscribe(func(prev, next *config.Config) { m.SettingsChanged(backupSettings(prev), backupSettings(next)) })
+	cfgs.Subscribe(func(prev, next *config.File) { m.SettingsChanged(backupSettings(prev), backupSettings(next)) })
 	return m
 }
 

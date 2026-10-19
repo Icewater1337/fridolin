@@ -20,6 +20,6 @@ func (b *Bridge) newChatsAPI() *httpapi.ChatsAPI {
 		},
 		DismissIgnored: func(jid string, remove bool) error { return b.store.DismissIgnored(jid, remove) },
 		AllowChat:      func(dm bool, entry, id string) error { return b.registry.AllowChat(dm, entry, id) },
-		UpdateConfig:   func(update func(*config.Config) error) error { _, err := b.cfgs.Update("", update); return err },
+		UpdateConfig:   func(update func(*config.File) error) error { _, err := b.cfgs.Update("", update); return err },
 	}
 }

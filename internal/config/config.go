@@ -22,8 +22,8 @@ import (
 	"github.com/Icewater1337/fridolin/internal/trigger"
 )
 
-// Config holds all configuration for the bridge.
-type Config struct {
+// File is the JSON configuration stored on disk, including optional values.
+type File struct {
 	Comment string `json:"_comment,omitempty"`
 
 	// Version is the version of config.json the file was written in, see
@@ -473,27 +473,8 @@ type ScriptAPIConfig struct {
 	TokenlessSend *bool `json:"tokenless_send,omitempty"`
 }
 
-// Defaults for optional settings.
-const (
-	DefaultHTTPListen    = "127.0.0.1:8765"
-	defaultQueueMax      = 10
-	DefaultQuietMS       = 2000
-	defaultMaxWaitMS     = 10000
-	DefaultBackupRemote  = "brain-gdrive"
-	DefaultBackupRoot    = "fridolin-backup"
-	defaultBackupDailyAt = "03:30"
-	defaultKeepVersions  = 30
-	defaultMaxMediaMB    = 100
-	maxMaxMediaMB        = 2048
-	// Agentic runs can take a while; a day is far more than any should.
-	defaultRunTimeoutMinutes = 30
-	maxRunTimeoutMinutes     = 24 * 60
-	defaultConcurrentRuns    = 2
-	maxConcurrentRuns        = 64
-)
-
 // RunLimit is how many Claude runs may go at once, 0 for no limit.
-func (c *Config) RunLimit() int { return IntOr(c.MaxConcurrentRuns, defaultConcurrentRuns) }
+func (c *File) RunLimit() int { return IntOr(c.MaxConcurrentRuns, defaultConcurrentRuns) }
 
 func BoolOr(p *bool, def bool) bool {
 	if p == nil {
@@ -510,20 +491,20 @@ func IntOr(p *int, def int) int {
 }
 
 // QueueNotify reports whether to tell the sender their message is queued.
-func (c *Config) QueueNotify() bool { return BoolOr(c.Queue.Notify, true) }
+func (c *File) QueueNotify() bool { return BoolOr(c.Queue.Notify, true) }
 
 // DebounceQuietMS and DebounceMaxWaitMS return the debounce timings.
-func (c *Config) DebounceQuietMS() int   { return IntOr(c.Debounce.QuietMS, DefaultQuietMS) }
-func (c *Config) DebounceMaxWaitMS() int { return IntOr(c.Debounce.MaxWaitMS, defaultMaxWaitMS) }
+func (c *File) DebounceQuietMS() int   { return IntOr(c.Debounce.QuietMS, DefaultQuietMS) }
+func (c *File) DebounceMaxWaitMS() int { return IntOr(c.Debounce.MaxWaitMS, defaultMaxWaitMS) }
 
 // DashboardRequiresToken reports whether API calls need the dashboard token.
-func (c *Config) DashboardRequiresToken() bool { return BoolOr(c.Dashboard.RequireToken, true) }
+func (c *File) DashboardRequiresToken() bool { return BoolOr(c.Dashboard.RequireToken, true) }
 
 // TokenlessSend reports whether /send works without a token.
-func (c *Config) TokenlessSend() bool { return BoolOr(c.ScriptAPI.TokenlessSend, true) }
+func (c *File) TokenlessSend() bool { return BoolOr(c.ScriptAPI.TokenlessSend, true) }
 
 // MaxMediaBytes is the largest attachment to download, in bytes.
-func (c *Config) MaxMediaBytes() int64 {
+func (c *File) MaxMediaBytes() int64 {
 	mb := c.MaxMediaMB
 	if mb <= 0 {
 		mb = defaultMaxMediaMB
@@ -532,14 +513,14 @@ func (c *Config) MaxMediaBytes() int64 {
 }
 
 // HTTPEnabled reports whether the local HTTP server should run.
-func (c *Config) HTTPEnabled() bool { return c.HTTPListen != "" && c.HTTPListen != "off" }
+func (c *File) HTTPEnabled() bool { return c.HTTPListen != "" && c.HTTPListen != "off" }
 
 // AllowsAnyDM reports whether an empty allowed_numbers list means everyone.
 // It takes an explicit allow_any_dm: true.
-func (c *Config) AllowsAnyDM() bool { return BoolOr(c.AllowAnyDM, false) }
+func (c *File) AllowsAnyDM() bool { return BoolOr(c.AllowAnyDM, false) }
 
 // AnyoneCanDM reports whether every sender passes the DM allowlist.
-func (c *Config) AnyoneCanDM() bool { return len(c.AllowedNumbers) == 0 && c.AllowsAnyDM() }
+func (c *File) AnyoneCanDM() bool { return len(c.AllowedNumbers) == 0 && c.AllowsAnyDM() }
 
 // WarnOddChats logs entries of allowed_numbers and allowed_groups that can
 // never match a chat: an entry that is no phone number, and a group the
@@ -547,7 +528,7 @@ func (c *Config) AnyoneCanDM() bool { return len(c.AllowedNumbers) == 0 && c.All
 // read however it was written (chat.PhoneNumber), so only one that is none is
 // named. They are logged rather than refused, so a config that ran
 // before still starts.
-func WarnOddChats(path string, c *Config) {
+func WarnOddChats(path string, c *File) {
 	var odd []string
 	for _, n := range c.AllowedNumbers {
 		if _, err := chat.PhoneNumber(n); err != nil {
@@ -628,153 +609,13 @@ func DataDirSource(value, dir, home string) string {
 	return DataDirFromDefault
 }
 
-// Resolve derives the running configuration from the on-disk layer:
-// defaults, ~ expansion and platform validation from explicit inputs. It reads
-// no environment or filesystem state and writes nothing, see EnsureDirs.
-func Resolve(file *Config, paths Paths, goos string) (*Config, error) {
-	cfg, err := file.Clone()
-	if err != nil {
-		return nil, err
-	}
-
-	home := paths.Home
-	if home == "" {
-		return nil, errors.New("getting home dir: $HOME is not set")
-	}
-
-	if cfg.ClaudePath == "" {
-		cfg.ClaudePath = "claude"
-	}
-	cfg.ClaudePath = fsx.ExpandHome(cfg.ClaudePath, home)
-	if cfg.AgentProvider == "" {
-		cfg.AgentProvider = "claude"
-	}
-	if cfg.CodexPath == "" {
-		cfg.CodexPath = "codex"
-	}
-	cfg.CodexPath = fsx.ExpandHome(cfg.CodexPath, home)
-	if cfg.CodexModel == "" {
-		cfg.CodexModel = configDefaultCodexModel
-	}
-	if cfg.CodexEffort == "" {
-		cfg.CodexEffort = "high"
-	}
-	cfg.DataDir, _ = ResolveDataDir(cfg.DataDir, paths)
-	if cfg.DBPath == "" {
-		cfg.DBPath = filepath.Join(cfg.DataDir, "bridge.db")
-	}
-	if cfg.MediaDir == "" {
-		cfg.MediaDir = filepath.Join(cfg.DataDir, "media")
-	}
-	cfg.DBPath = fsx.ExpandHome(cfg.DBPath, home)
-	cfg.MediaDir = fsx.ExpandHome(cfg.MediaDir, home)
-	if cfg.MaxChunkSize == 0 {
-		cfg.MaxChunkSize = configDefaultChunkSize
-	}
-	if cfg.MaxMediaMB == 0 {
-		cfg.MaxMediaMB = defaultMaxMediaMB
-	}
-	if len(cfg.Triggers) == 0 {
-		cfg.Triggers = trigger.FromStrings([]string{"@claude"})
-	}
-	if cfg.LogLevel == "" {
-		cfg.LogLevel = "info"
-	}
-	if cfg.HTTPListen == "" {
-		cfg.HTTPListen = DefaultHTTPListen
-	}
-	if cfg.Queue.Mode == "" {
-		cfg.Queue.Mode = QueueModeQueue
-	}
-	if cfg.Queue.MaxPending <= 0 {
-		cfg.Queue.MaxPending = defaultQueueMax
-	}
-	// Fill optional settings so the Resolve config shows real values.
-	t := true
-	if cfg.Queue.Notify == nil {
-		cfg.Queue.Notify = &t
-	}
-	if cfg.Debounce.QuietMS == nil {
-		q := DefaultQuietMS
-		cfg.Debounce.QuietMS = &q
-	}
-	if cfg.Debounce.MaxWaitMS == nil {
-		mw := defaultMaxWaitMS
-		cfg.Debounce.MaxWaitMS = &mw
-	}
-	if cfg.AllowAnyDM == nil {
-		// Unset fails closed: an empty list allows nobody.
-		f := false
-		cfg.AllowAnyDM = &f
-	}
-	if cfg.Dashboard.RequireToken == nil {
-		cfg.Dashboard.RequireToken = &t
-	}
-	if cfg.RunTimeoutMinutes == nil {
-		rt := defaultRunTimeoutMinutes
-		cfg.RunTimeoutMinutes = &rt
-	}
-	if cfg.MaxConcurrentRuns == nil {
-		n := defaultConcurrentRuns
-		cfg.MaxConcurrentRuns = &n
-	}
-	if cfg.ScriptAPI.TokenlessSend == nil {
-		cfg.ScriptAPI.TokenlessSend = &t
-	}
-	if cfg.Backup.IncludeBridgeConfig == nil {
-		inc := defaultIncludeBridgeConfig
-		cfg.Backup.IncludeBridgeConfig = &inc
-	}
-	if cfg.Sandbox.GitConfig == "" {
-		cfg.Sandbox.GitConfig = "read"
-	}
-	cfg.Sandbox.CredentialsDir = fsx.ExpandHome(cfg.Sandbox.CredentialsDir, home)
-	if cfg.Backup.Remote == "" {
-		cfg.Backup.Remote = DefaultBackupRemote
-	}
-	if cfg.Backup.Root == "" {
-		cfg.Backup.Root = DefaultBackupRoot
-	}
-	if cfg.Backup.DailyAt == "" {
-		cfg.Backup.DailyAt = defaultBackupDailyAt
-	}
-	if cfg.Backup.KeepVersionsDays == nil {
-		n := defaultKeepVersions
-		cfg.Backup.KeepVersionsDays = &n
-	}
-	cfg.Backup.RclonePath = fsx.ExpandHome(cfg.Backup.RclonePath, home)
-	cfg.Plaud.PhoneDir = fsx.ExpandHome(cfg.Plaud.PhoneDir, home)
-
-	// Compared with senders as digits, however they were typed into the
-	// file. The dashboard writes them so; a hand edit may not have.
-	cfg.AllowedNumbers = chat.NumbersAsNumbers(cfg.AllowedNumbers)
-	cfg.GroupMembers = GroupMembersAsNumbers(cfg.GroupMembers)
-	for i := range cfg.BrainDirs {
-		cfg.BrainDirs[i].Path = fsx.ExpandHome(cfg.BrainDirs[i].Path, home)
-	}
-	for i := range cfg.Sandbox.DenyPaths {
-		cfg.Sandbox.DenyPaths[i] = fsx.ExpandHome(cfg.Sandbox.DenyPaths[i], home)
-	}
-	for i := range cfg.Sandbox.AllowPaths {
-		cfg.Sandbox.AllowPaths[i] = fsx.ExpandHome(cfg.Sandbox.AllowPaths[i], home)
-	}
-	for i := range cfg.StartupChecks.RequiredFiles {
-		cfg.StartupChecks.RequiredFiles[i] = fsx.ExpandHome(cfg.StartupChecks.RequiredFiles[i], home)
-	}
-
-	if err := cfg.Validate(goos); err != nil {
-		return nil, err
-	}
-	return cfg, nil
-}
-
-// Clone deep-copies a Config through JSON.
-func (c *Config) Clone() (*Config, error) {
+// Clone deep-copies a File through JSON.
+func (c *File) Clone() (*File, error) {
 	data, err := json.Marshal(c)
 	if err != nil {
 		return nil, err
 	}
-	out := &Config{}
+	out := &File{}
 	if err := json.Unmarshal(data, out); err != nil {
 		return nil, err
 	}
@@ -789,7 +630,7 @@ var validGitConfigs = map[string]bool{"read": true, "deny": true}
 // when they are resolved (ResolveBrains), which leaves one that clashes with
 // another out instead of stopping them all. Zero brains is fine: a fresh
 // install adds its first brain from the dashboard.
-func (c *Config) Validate(goos string) error {
+func (c *File) Validate(goos string) error {
 	if c.AgentProvider != "claude" && c.AgentProvider != "codex" {
 		return fmt.Errorf("agent_provider must be claude or codex, not %q", c.AgentProvider)
 	}
@@ -882,15 +723,7 @@ func IsTruthy(v string) bool {
 }
 
 // RunMinutes is the configured run limit in minutes, or its default.
-func (c *Config) RunMinutes() int { return IntOr(c.RunTimeoutMinutes, defaultRunTimeoutMinutes) }
-
-// These configuration defaults also belong to the direct provider/chunker
-// contracts. Composition tests keep the independent boundaries consistent.
-const (
-	configDefaultCodexModel = "gpt-6.1-sol"
-	configDefaultChunkSize  = 3900
-	configMinChunkSize      = 100
-)
+func (c *File) RunMinutes() int { return IntOr(c.RunTimeoutMinutes, defaultRunTimeoutMinutes) }
 
 // QueueModes returns accepted queue modes in sorted order.
 func QueueModes() []string { return slices.Sorted(maps.Keys(validQueueModes)) }

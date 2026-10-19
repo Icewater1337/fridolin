@@ -23,7 +23,7 @@ type configReadFake struct {
 func (f *configReadFake) Snapshot() config.Snapshot { f.reads++; return f.snapshot }
 func (f *configReadFake) Path() string              { return "config.json" }
 func TestConfigGetUsesOneSnapshotWithoutMutatingIt(t *testing.T) {
-	f := &configReadFake{snapshot: config.Snapshot{File: &config.Config{BrainDirs: []config.BrainRef{{Path: "brain"}}}, Effective: &config.Config{BrainDirs: []config.BrainRef{{Path: "brain"}}}, ETag: "revision"}}
+	f := &configReadFake{snapshot: config.Snapshot{File: &config.File{BrainDirs: []config.BrainRef{{Path: "brain"}}}, Effective: &config.File{BrainDirs: []config.BrainRef{{Path: "brain"}}}, ETag: "revision"}}
 	a := ConfigAPI{Store: func() ConfigStore { return f }}
 	w := httptest.NewRecorder()
 	a.Get(w, httptest.NewRequest("GET", "/config", nil))

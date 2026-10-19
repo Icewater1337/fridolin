@@ -20,7 +20,7 @@ type Boot struct {
 	DashboardRequireToken bool   `config:"dashboard.require_token"`
 }
 
-func bootOf(c *Config, paths Paths) Boot {
+func bootOf(c *File, paths Paths) Boot {
 	return Boot{
 		Home: paths.Home, HTTPListen: c.HTTPListen, DataDir: c.DataDir,
 		DBPath: c.DBPath, MediaDir: c.MediaDir, LogLevel: c.LogLevel,

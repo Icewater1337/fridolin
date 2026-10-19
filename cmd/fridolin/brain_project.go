@@ -11,11 +11,11 @@ import (
 // settingsFor is the current composition boundary. The manager's later Apply
 // seam receives brainGlobals directly; configuration and host discovery stay
 // here rather than becoming imports of the brain runtime.
-func settingsFor(cfg *config.Config, sp manifest.Spec) *brain.Settings {
+func settingsFor(cfg *config.File, sp manifest.Spec) *brain.Settings {
 	return brain.MergeSettings(brainGlobalsOf(cfg), sp)
 }
 
-func brainGlobalsOf(cfg *config.Config) brain.Globals {
+func brainGlobalsOf(cfg *config.File) brain.Globals {
 	return brain.Globals{
 		CodexModel: cfg.CodexModel, CodexEffort: cfg.CodexEffort, RunLimit: cfg.RunLimit(),
 		Defaults: brain.Settings{
@@ -43,7 +43,7 @@ func dataEnv(s *brain.Settings) []string {
 }
 
 // credentialsDirOf is where per-brain credential files live.
-func credentialsDirOf(cfg *config.Config) string {
+func credentialsDirOf(cfg *config.File) string {
 	if cfg.Sandbox.CredentialsDir != "" {
 		return cfg.Sandbox.CredentialsDir
 	}

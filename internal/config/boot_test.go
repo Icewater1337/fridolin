@@ -21,7 +21,7 @@ func TestStoreBootSurvivesSavesAndIsAValueCopy(t *testing.T) {
 	if cs.Boot() != before {
 		t.Fatal("modifying a returned Boot changed the store")
 	}
-	restart, err := cs.Update("", func(c *Config) error {
+	restart, err := cs.Update("", func(c *File) error {
 		c.HTTPListen = "127.0.0.1:9876"
 		c.DataDir = "~/next"
 		c.DBPath = "~/next/custom.db"

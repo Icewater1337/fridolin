@@ -240,7 +240,7 @@ func fakeClaudeEnv(t *testing.T, sleepMS int) string {
 // a store call it first, so a config that still points at a real install
 // (a data_dir copied from one, say) stops the test before the store, the
 // token or rclone's config is touched.
-func requireTestDataDir(t testing.TB, cfg *config.Config) {
+func requireTestDataDir(t testing.TB, cfg *config.File) {
 	t.Helper()
 	// t.TempDir hands out numbered folders inside one directory per test.
 	if err := checkTestDataDir(filepath.Dir(t.TempDir()), cfg); err != nil {
@@ -251,7 +251,7 @@ func requireTestDataDir(t testing.TB, cfg *config.Config) {
 // checkTestDataDir reports the first data path of cfg outside root. Paths
 // may use root as given or with its symlinks resolved (/var and /private/var
 // on macOS).
-func checkTestDataDir(root string, cfg *config.Config) error {
+func checkTestDataDir(root string, cfg *config.File) error {
 	roots := []string{filepath.Clean(root), fsx.Canonical(root)}
 	for _, p := range []struct{ field, path string }{
 		{"data_dir", cfg.DataDir},
@@ -289,7 +289,7 @@ func TestCheckTestDataDir(t *testing.T) {
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			err := checkTestDataDir(root, &config.Config{DataDir: tc.data, DBPath: tc.db, MediaDir: tc.media})
+			err := checkTestDataDir(root, &config.File{DataDir: tc.data, DBPath: tc.db, MediaDir: tc.media})
 			switch {
 			case tc.wantErr == "" && err != nil:
 				t.Errorf("unexpected error: %v", err)
@@ -318,7 +318,7 @@ func TestRequireTestDataDir(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			dir := tc.dataDir(t)
 			r := &fatalRecorder{TB: t}
-			requireTestDataDir(r, &config.Config{DataDir: dir, DBPath: filepath.Join(dir, "bridge.db"), MediaDir: filepath.Join(dir, "media")})
+			requireTestDataDir(r, &config.File{DataDir: dir, DBPath: filepath.Join(dir, "bridge.db"), MediaDir: filepath.Join(dir, "media")})
 			switch {
 			case !tc.refused && r.fatal != "":
 				t.Errorf("refused a data dir inside the test's temp dir: %s", r.fatal)

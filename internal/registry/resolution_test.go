@@ -22,8 +22,8 @@ func scaffoldResolutionFixture(dir string, m *manifest.Manifest) ([]string, erro
 	return nil, manifest.Write(dir, m, false)
 }
 
-func resolutionConfig(refs ...config.BrainRef) *config.Config {
-	return &config.Config{BrainDirs: refs}
+func resolutionConfig(refs ...config.BrainRef) *config.File {
+	return &config.File{BrainDirs: refs}
 }
 
 func allowResolutionDir(string, string) error { return nil }
