@@ -155,7 +155,7 @@ func TestPlaudPhoneUploadOffRefusesPhones(t *testing.T) {
 func TestSiteSpoolPassesPhoneRequestsOn(t *testing.T) {
 	m := newTestSite(t)
 	var got []string
-	m.hooks.device = func(op, assertion string, body []byte) (map[string]any, error) {
+	m.hooks.Device = func(op, assertion string, body []byte) (map[string]any, error) {
 		got = append(got, op+"|"+assertion+"|"+string(body))
 		return map[string]any{"device": "dev_1"}, nil
 	}
