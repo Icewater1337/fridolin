@@ -61,6 +61,9 @@ behaviour unless its title says so. The steps so far:
   validation, normalized defaults and rooted publication. Runtime addressing
   and the config transaction retain their command-owned orchestration.
 
+- **R5, routing slice**: `route` owns set validation and pure chat/reply
+  selection. The manager still owns live maps, held routes and brain identity.
+
 - **R11, access slice**: `access` owns pure admission, group addressing,
   silence and text decisions. Transports project facts into `chat.Envelope`;
   the command projects one config snapshot. WhatsApp identity/group lookups,
@@ -295,11 +298,14 @@ responsibility and says what it must not do.
   (`File`), the retired-keys shim, the single defaults table, a pure
   `Resolve` into `Settings{Boot, Live}`, field validation, the field table,
   and the live `Store` (section 5).
-- **`route`** *(to come, R5)*: the routing table built from approved
-  manifests. It validates the brain set: unique ids, each group owned by one
-  brain, at most one DM brain and one default, no brain folder inside
-  another. It answers "which brain owns this chat" and "which chat does this
-  brain reply in". It is pure and keeps today's error texts.
+- **`route`**: pure validation and routing for approved, runnable specs.
+  `Build` validates the set and returns an immutable `Table` with `For`, `Has`,
+  `Default`, `Dirs` and `ReplyChat`. It keeps configured ordering and copies
+  mutable construction data. The free `ReplyChat` helper takes the runtime's
+  current DM decision so callers preserve held routes and exact brain pointer
+  identity. The manager's maps and unavailable-route holds remain in the
+  command until the runtime extraction; the new table does not replace them.
+
 - **`registry`** *(to come, R9; `brainreg.go`, `brain_changes.go`)*: the
   configured brain set. It resolves `brain_dirs` into specs and issues
   (drift, missing, invalid, unapproved, retired), checks folders, scaffolds

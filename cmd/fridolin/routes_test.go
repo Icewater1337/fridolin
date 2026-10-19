@@ -44,16 +44,16 @@ const (
 	classNotFound = "not-found"
 )
 
-// route is one registered pattern. probe is a concrete request path for it,
+// httpRoute is one registered pattern. probe is a concrete request path for it,
 // when the pattern has wildcards or a GET needs a query to stay off the
 // network.
-type route struct {
+type httpRoute struct {
 	method, pattern, class, probe string
 }
 
 // routeInventory is every route the bridge serves, written out by hand so
 // that a route that appears, disappears or changes its guard is a decision.
-var routeInventory = []route{
+var routeInventory = []httpRoute{
 	{"GET", "/health", classPublic, ""},
 	{"GET", "/ready", classPublic, ""},
 	{"POST", "/send", classScript, ""},
@@ -185,7 +185,7 @@ var routeInventory = []route{
 var mountsWithCatchAll = []string{"/brain/"}
 
 // path is the request path to probe r with.
-func (r route) path() string {
+func (r httpRoute) path() string {
 	if r.probe != "" {
 		return r.probe
 	}
@@ -464,7 +464,7 @@ func TestRouteInventoryGuards(t *testing.T) {
 		})
 	}
 	for p := range reachesOutside {
-		if !slices.ContainsFunc(routeInventory, func(r route) bool { return r.method+" "+r.pattern == p }) {
+		if !slices.ContainsFunc(routeInventory, func(r httpRoute) bool { return r.method+" "+r.pattern == p }) {
 			t.Errorf("reachesOutside lists %q, which is not in routeInventory", p)
 		}
 	}
