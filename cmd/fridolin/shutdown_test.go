@@ -31,6 +31,7 @@ import (
 	"github.com/Icewater1337/fridolin/internal/chat"
 	"github.com/Icewater1337/fridolin/internal/claudecli"
 	"github.com/Icewater1337/fridolin/internal/platform"
+	"github.com/Icewater1337/fridolin/internal/testutil"
 )
 
 // The bridge's stop, as SIGTERM and a restart make it.
@@ -310,7 +311,7 @@ func secondSignalStopsAtOnce(t *testing.T, provider string) {
 		data, _ := io.ReadAll(resp.Body)
 		return resp.StatusCode, string(data)
 	}
-	waitFor(t, 20*time.Second, "the bridge to serve", func() bool { code, _ := call("GET", "/health", "", ""); return code == 200 })
+	testutil.WaitFor(t, 20*time.Second, "the bridge to serve", func() bool { code, _ := call("GET", "/health", "", ""); return code == 200 })
 	// While it runs, the data dir is its own, for this process too.
 	if lock, err := platform.AcquireLock(filepath.Join(home, ".fridolin")); err == nil {
 		lock.Release()
@@ -325,7 +326,7 @@ func secondSignalStopsAtOnce(t *testing.T, provider string) {
 		t.Fatalf("dev inbound: %d %s", code, body)
 	}
 	var pid int
-	waitFor(t, 20*time.Second, "the run to start", func() bool {
+	testutil.WaitFor(t, 20*time.Second, "the run to start", func() bool {
 		_, body := call("GET", "/api/status", token, "")
 		var st struct {
 			Brains []struct {
@@ -339,7 +340,7 @@ func secondSignalStopsAtOnce(t *testing.T, provider string) {
 	})
 
 	var childPID int
-	waitFor(t, 5*time.Second, "the run's child", func() bool {
+	testutil.WaitFor(t, 5*time.Second, "the run's child", func() bool {
 		data, _ := os.ReadFile(childLog)
 		childPID, _ = strconv.Atoi(strings.TrimSpace(string(data)))
 		return childPID > 0
@@ -348,7 +349,7 @@ func secondSignalStopsAtOnce(t *testing.T, provider string) {
 	if err := cmd.Process.Signal(syscall.SIGTERM); err != nil {
 		t.Fatal(err)
 	}
-	waitFor(t, 10*time.Second, "the stop to begin", func() bool { return strings.Contains(out.String(), "shutting down") })
+	testutil.WaitFor(t, 10*time.Second, "the stop to begin", func() bool { return strings.Contains(out.String(), "shutting down") })
 	time.Sleep(200 * time.Millisecond)
 	select {
 	case err := <-exited:
@@ -372,8 +373,8 @@ func secondSignalStopsAtOnce(t *testing.T, provider string) {
 	}
 	t.Logf("exited %v after the second signal", time.Since(sent).Round(time.Millisecond))
 	// The run's process group is gone, though its 60 seconds are not.
-	waitFor(t, 5*time.Second, "the run to be killed", func() bool { return syscall.Kill(pid, 0) == syscall.ESRCH })
-	waitFor(t, 5*time.Second, "the run's child to be killed", func() bool { return syscall.Kill(childPID, 0) == syscall.ESRCH })
+	testutil.WaitFor(t, 5*time.Second, "the run to be killed", func() bool { return syscall.Kill(pid, 0) == syscall.ESRCH })
+	testutil.WaitFor(t, 5*time.Second, "the run's child to be killed", func() bool { return syscall.Kill(childPID, 0) == syscall.ESRCH })
 }
 
 // setShutdownGrace gives the runs in flight d to finish when the test's
@@ -507,13 +508,13 @@ func TestRetirementKeepsItsQueueWhenStopHasBegun(t *testing.T) {
 	defer retired()
 	stopped := make(chan struct{})
 	go func() { mgr.Stop(); close(stopped) }()
-	waitFor(t, 5*time.Second, "the stop to begin", func() bool {
+	testutil.WaitFor(t, 5*time.Second, "the stop to begin", func() bool {
 		mgr.reloadMu.Lock()
 		defer mgr.reloadMu.Unlock()
 		return mgr.stopped
 	})
 	mgr.requeue(mgr.Get("a"), []Inbound{dm("still waiting")})
-	waitFor(t, 5*time.Second, "the retired queue to be handled", func() bool { return started.Load()+kept.Load() > 0 })
+	testutil.WaitFor(t, 5*time.Second, "the retired queue to be handled", func() bool { return started.Load()+kept.Load() > 0 })
 	if started.Load() != 0 || kept.Load() != 1 {
 		t.Errorf("retirement during stop: started=%d, kept=%d; want zero runs and one kept message", started.Load(), kept.Load())
 	}
@@ -641,7 +642,7 @@ func TestResumeOutlivesItsContext(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 	tb.resume(ctx)
-	waitFor(t, 5*time.Second, "the notice", func() bool { return slices.Contains(tb.sentTo(harnessDM), outboundmsg.RestartedNotice) })
+	testutil.WaitFor(t, 5*time.Second, "the notice", func() bool { return slices.Contains(tb.sentTo(harnessDM), outboundmsg.RestartedNotice) })
 }
 
 // waitBatched waits until the debouncer holds one batch of n messages.

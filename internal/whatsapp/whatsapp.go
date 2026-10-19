@@ -4,13 +4,14 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"github.com/Icewater1337/fridolin/internal/access"
-	"github.com/Icewater1337/fridolin/internal/chat"
 	"log"
 	"path/filepath"
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/Icewater1337/fridolin/internal/access"
+	"github.com/Icewater1337/fridolin/internal/chat"
 
 	mediafiles "github.com/Icewater1337/fridolin/internal/media"
 	"github.com/Icewater1337/fridolin/internal/textx"

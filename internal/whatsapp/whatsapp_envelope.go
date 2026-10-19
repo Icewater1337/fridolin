@@ -1,10 +1,11 @@
 package whatsapp
 
 import (
+	"slices"
+
 	"github.com/Icewater1337/fridolin/internal/chat"
 	"go.mau.fi/whatsmeow/proto/waE2E"
 	"go.mau.fi/whatsmeow/types"
-	"slices"
 )
 
 // groupEnvelope projects only message facts; authorization and addressing

@@ -18,6 +18,7 @@ import (
 	"github.com/Icewater1337/fridolin/internal/chat"
 	"github.com/Icewater1337/fridolin/internal/claudecli"
 	"github.com/Icewater1337/fridolin/internal/fsx"
+	"github.com/Icewater1337/fridolin/internal/testutil"
 )
 
 // TestSetBridgePATH: your shell's PATH may name a folder inside a brain's
@@ -160,7 +161,7 @@ func TestBrainRunsGetTheirOwnPATHFolders(t *testing.T) {
 	if _, _, _, err := mgr.Submit(group); err != nil {
 		t.Fatal(err)
 	}
-	waitFor(t, 20*time.Second, "both runs", func() bool { return d.count() == 2 })
+	testutil.WaitFor(t, 20*time.Second, "both runs", func() bool { return d.count() == 2 })
 	for _, r := range d.all() {
 		if r.res.Err != nil {
 			t.Fatalf("run failed: %v", r.res.Err)

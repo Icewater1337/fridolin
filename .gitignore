@@ -51,3 +51,5 @@ venv/
 !internal/claudecli/
 
 !internal/sandbox/
+
+!internal/testutil/

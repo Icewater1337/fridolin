@@ -25,6 +25,7 @@ import (
 
 	"github.com/Icewater1337/fridolin/internal/chat"
 	"github.com/Icewater1337/fridolin/internal/claudecli"
+	"github.com/Icewater1337/fridolin/internal/testutil"
 )
 
 const (
@@ -69,18 +70,18 @@ func (f *fakePlaudFixture) recording(id string, transcriptReady bool) {
 
 // teamSync is the recording that recording puts in Plaud, to change before
 // putting it there.
-func (f *fakePlaudFixture) teamSync(id string, transcriptReady bool) fakePlaudRecording {
+func (f *fakePlaudFixture) teamSync(id string, transcriptReady bool) testutil.PlaudRecording {
 	start := "2026-10-16T18:00:00"
-	r := fakePlaudRecording{ID: id, Name: "Team sync", CreatedAt: start, StartAt: &start, Duration: 300000,
-		Notes: []fakePlaudBlock{{DataType: "auto_sum_note", Content: "Decided to ship on Friday.", TabName: "Summary"}}}
+	r := testutil.PlaudRecording{ID: id, Name: "Team sync", CreatedAt: start, StartAt: &start, Duration: 300000,
+		Notes: []testutil.PlaudBlock{{DataType: "auto_sum_note", Content: "Decided to ship on Friday.", TabName: "Summary"}}}
 	if transcriptReady {
-		r.Sources = []fakePlaudBlock{{DataType: "transaction", Content: fakePlaudTranscript(fakePlaudSegment{0, 4000, "Speaker 1", "Let's ship on Friday."})}}
+		r.Sources = []testutil.PlaudBlock{{DataType: "transaction", Content: testutil.PlaudTranscript(testutil.PlaudSegment{Start: 0, End: 4000, Speaker: "Speaker 1", Content: "Let's ship on Friday."})}}
 	}
 	return r
 }
 
 // put puts r in Plaud, or replaces it there.
-func (f *fakePlaudFixture) put(r fakePlaudRecording) {
+func (f *fakePlaudFixture) put(r testutil.PlaudRecording) {
 	data, _ := json.Marshal(r)
 	f.write("rec_"+r.ID+".json", string(data))
 }
@@ -129,7 +130,7 @@ func plaudDeliver(t *testing.T, tb *testBridge, fp *fakePlaudFixture) error {
 }
 
 // plaudDeliverRecording is plaudDeliver for the recording r.
-func plaudDeliverRecording(t *testing.T, tb *testBridge, fp *fakePlaudFixture, r fakePlaudRecording) error {
+func plaudDeliverRecording(t *testing.T, tb *testBridge, fp *fakePlaudFixture, r testutil.PlaudRecording) error {
 	t.Helper()
 	plaudSignIn(t, tb)
 	if err := tb.plaud.saveState(plaudSeededState("", plaudOld1)); err != nil {
@@ -152,7 +153,7 @@ func TestPlaudRunsInThePickedBrain(t *testing.T) {
 	if err := plaudDeliver(t, tb, fp); err != nil {
 		t.Fatal(err)
 	}
-	waitFor(t, 10*time.Second, "brain reply", func() bool { return len(tb.dev.Outbox()) > 0 })
+	testutil.WaitFor(t, 10*time.Second, "brain reply", func() bool { return len(tb.dev.Outbox()) > 0 })
 	if out := tb.dev.Outbox()[0]; out.JID != dm || !strings.Contains(out.Text, "echo:"+gDir+":plaud says: [Plaud] New recording") {
 		t.Errorf("reply = %+v, want it from %s in the DM", out, gDir)
 	}
@@ -167,7 +168,7 @@ func TestPlaudRunsInThePickedBrain(t *testing.T) {
 	if files, _ := filepath.Glob(filepath.Join(media, "*", "plaud", "*.txt")); len(files) != 1 || filepath.Dir(files[0]) != filepath.Join(media, "g", "plaud") {
 		t.Errorf("transcripts = %v, want one in g's inbox", files)
 	}
-	waitFor(t, 10*time.Second, "the run to be noted", func() bool {
+	testutil.WaitFor(t, 10*time.Second, "the run to be noted", func() bool {
 		last := tb.plaud.Status().LastForwarded
 		return last != nil && last.Brain == "g" && last.Status == plaudRunDone
 	})
@@ -208,7 +209,7 @@ func TestPlaudSummariesStayOutOfGroups(t *testing.T) {
 			if err := plaudDeliver(t, tb, fp); err != nil {
 				t.Fatal(err)
 			}
-			waitFor(t, 10*time.Second, "brain reply", func() bool { return len(tb.dev.Outbox()) > 0 })
+			testutil.WaitFor(t, 10*time.Second, "brain reply", func() bool { return len(tb.dev.Outbox()) > 0 })
 			time.Sleep(100 * time.Millisecond)
 			out := tb.dev.Outbox()
 			for _, m := range out {
@@ -254,7 +255,7 @@ func TestPlaudWithoutAPrivateChatWaits(t *testing.T) {
 	if err := tb.plaud.Poll(context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	waitFor(t, 10*time.Second, "brain reply", func() bool { return len(tb.dev.Outbox()) > 0 })
+	testutil.WaitFor(t, 10*time.Second, "brain reply", func() bool { return len(tb.dev.Outbox()) > 0 })
 	if out := tb.dev.Outbox()[0]; out.JID != "15551234567@s.whatsapp.net" {
 		t.Errorf("reply = %+v, want it in the DM", out)
 	}
@@ -360,7 +361,7 @@ func TestPlaudDeliveryErrorIsShown(t *testing.T) {
 			if err := tb.plaud.Poll(context.Background()); err != nil {
 				t.Fatal(err)
 			}
-			waitFor(t, 10*time.Second, "brain reply", func() bool { return len(tb.dev.Outbox()) > 0 })
+			testutil.WaitFor(t, 10*time.Second, "brain reply", func() bool { return len(tb.dev.Outbox()) > 0 })
 			var after map[string]any
 			_ = json.Unmarshal(tb.do("GET", "/api/plaud/status", nil).Body.Bytes(), &after)
 			if e, ok := after["last_error"]; ok {
@@ -525,7 +526,7 @@ func TestPlaudRecordingIsSeenOnlyOnceItsRunEnds(t *testing.T) {
 				t.Errorf("given up = %+v, want %v", s.GivenUp, c.givenUp)
 			}
 			if c.givenUp {
-				waitFor(t, 5*time.Second, "the notice", func() bool { return len(tb.dev.Outbox()) == 1 })
+				testutil.WaitFor(t, 5*time.Second, "the notice", func() bool { return len(tb.dev.Outbox()) == 1 })
 				if m := tb.dev.Outbox()[0]; !strings.Contains(m.Text, "the brain's run failed 3 times (e3)") {
 					t.Errorf("notice = %q", m.Text)
 				}
@@ -534,7 +535,7 @@ func TestPlaudRecordingIsSeenOnlyOnceItsRunEnds(t *testing.T) {
 				if w := tb.do("POST", "/api/plaud/resend", map[string]string{"id": plaudNew}); w.Code != 202 {
 					t.Fatalf("send again: %d %s", w.Code, w.Body.String())
 				}
-				waitFor(t, 5*time.Second, "the recording to be handed over again", func() bool { return rec.count() == c.handed+1 })
+				testutil.WaitFor(t, 5*time.Second, "the recording to be handed over again", func() bool { return rec.count() == c.handed+1 })
 			}
 		})
 	}
@@ -640,7 +641,7 @@ func TestPlaudHandOffThroughTheBridge(t *testing.T) {
 	if err := tb.submitHandOff(br, dm, "plaud", "first", nil, done("first")); err != nil {
 		t.Fatal(err)
 	}
-	waitFor(t, 5*time.Second, "the first run", func() bool { r := br.Snapshot().Running; return r != nil && r.PID > 0 })
+	testutil.WaitFor(t, 5*time.Second, "the first run", func() bool { r := br.Snapshot().Running; return r != nil && r.PID > 0 })
 	if err := tb.submitHandOff(br, dm, "plaud", "second", nil, done("second")); err != nil {
 		t.Fatal(err)
 	}
@@ -648,7 +649,7 @@ func TestPlaudHandOffThroughTheBridge(t *testing.T) {
 		t.Errorf("a hand-off to a full queue = %v, want errQueueFull", err)
 	}
 	tb.handleInbound(context.Background(), Inbound{Inbound: chat.Inbound{JID: dm, Sender: "15551234567", Text: "!stop", Source: "whatsapp"}})
-	waitFor(t, 10*time.Second, "both to end", func() bool { mu.Lock(); defer mu.Unlock(); return len(ended) == 2 })
+	testutil.WaitFor(t, 10*time.Second, "both to end", func() bool { mu.Lock(); defer mu.Unlock(); return len(ended) == 2 })
 	if !errors.Is(ended["first"], claudecli.ErrInterrupted) || !errors.Is(ended["second"], errBrainDropped) {
 		t.Errorf("ended = %v, want the first stopped and the second dropped", ended)
 	}
@@ -837,7 +838,7 @@ func TestPlaudFirstSyncThenForwardsNewRecordings(t *testing.T) {
 	if w := tb.do("POST", "/api/plaud/connect", nil); w.Code != 202 {
 		t.Fatal(w.Body.String())
 	}
-	waitFor(t, 5*time.Second, "login", func() bool { return tb.plaud.connected() })
+	testutil.WaitFor(t, 5*time.Second, "login", func() bool { return tb.plaud.connected() })
 
 	// The first sync only remembers what exists.
 	fp.files(plaudOld1, plaudOld2)
@@ -876,7 +877,7 @@ func TestPlaudFirstSyncThenForwardsNewRecordings(t *testing.T) {
 		}
 	}
 	// The brain got it like an attachment and answered in its chat.
-	waitFor(t, 5*time.Second, "brain reply", func() bool { return len(tb.dev.Outbox()) > 0 })
+	testutil.WaitFor(t, 5*time.Second, "brain reply", func() bool { return len(tb.dev.Outbox()) > 0 })
 	if out := tb.dev.Outbox()[0]; !strings.Contains(out.Text, "plaud says: [Plaud] New recording") || out.JID != "15551234567@s.whatsapp.net" {
 		t.Errorf("reply = %+v", out)
 	}
@@ -969,7 +970,7 @@ func plaudSignIn(t *testing.T, tb *testBridge) {
 // once the brain's run answered it.
 func (tb *testBridge) waitPlaudSeen(t *testing.T, id string) {
 	t.Helper()
-	waitFor(t, 10*time.Second, id+" to be seen", func() bool {
+	testutil.WaitFor(t, 10*time.Second, id+" to be seen", func() bool {
 		st, _ := tb.plaud.loadState()
 		return st != nil && st.Pending[id] == nil && slices.Contains(st.Seen, id)
 	})
@@ -1049,7 +1050,7 @@ func TestPlaudStatusDoesNotRunTheCLI(t *testing.T) {
 		if err := tb.plaud.Connect(); err != nil {
 			t.Fatal(err)
 		}
-		waitFor(t, 10*time.Second, "the sign-in", func() bool { c := tb.plaud.Status().Connect; return c != nil && c.State == "done" })
+		testutil.WaitFor(t, 10*time.Second, "the sign-in", func() bool { c := tb.plaud.Status().Connect; return c != nil && c.State == "done" })
 		for range 5 {
 			if got := account(tb); got != "you@example.com" {
 				t.Fatalf("account = %q", got)
@@ -1062,7 +1063,7 @@ func TestPlaudStatusDoesNotRunTheCLI(t *testing.T) {
 	t.Run("an older login", func(t *testing.T) {
 		tb, fp := plaudBridge(t, "")
 		plaudSignIn(t, tb)
-		waitFor(t, 10*time.Second, "the account", func() bool { return account(tb) == "you@example.com" })
+		testutil.WaitFor(t, 10*time.Second, "the account", func() bool { return account(tb) == "you@example.com" })
 		for range 5 {
 			account(tb)
 		}
@@ -1152,7 +1153,7 @@ func TestPlaudConnectingAfterADisconnectCountsAgain(t *testing.T) {
 			if err := tb.plaud.Connect(); err != nil {
 				t.Fatal(err)
 			}
-			waitFor(t, 10*time.Second, "the sign-in", func() bool { c := tb.plaud.Status().Connect; return c != nil && c.State != "running" })
+			testutil.WaitFor(t, 10*time.Second, "the sign-in", func() bool { c := tb.plaud.Status().Connect; return c != nil && c.State != "running" })
 			if c := tb.plaud.Status().Connect; c.State != "done" {
 				t.Fatalf("sign-in %s: %s", c.State, c.Error)
 			}
@@ -1274,7 +1275,7 @@ func TestPlaudConnectAgainAfterARefusedLogin(t *testing.T) {
 			var refused bool
 			// Not through Status: once the sign-in ended, that may ask who
 			// is signed in, a command of its own.
-			waitFor(t, 10*time.Second, "the sign-in to end", func() bool {
+			testutil.WaitFor(t, 10*time.Second, "the sign-in to end", func() bool {
 				tb.plaud.mu.Lock()
 				defer tb.plaud.mu.Unlock()
 				job, refused = *tb.plaud.connect, tb.plaud.refused
@@ -1381,7 +1382,7 @@ func TestPlaudConnectSignsOutTheRefusedLoginWhereItIs(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	waitFor(t, 10*time.Second, "the sign-in to end", func() bool {
+	testutil.WaitFor(t, 10*time.Second, "the sign-in to end", func() bool {
 		tb.plaud.mu.Lock()
 		defer tb.plaud.mu.Unlock()
 		return tb.plaud.connect.State != "running"
@@ -1420,7 +1421,7 @@ func TestPlaudConnectGivesTheSignOutItsOwnTime(t *testing.T) {
 	}
 	// Well below the 30 s the fake's logout hangs for.
 	var job connectJob
-	waitFor(t, 10*time.Second, "the sign-in to end", func() bool {
+	testutil.WaitFor(t, 10*time.Second, "the sign-in to end", func() bool {
 		tb.plaud.mu.Lock()
 		defer tb.plaud.mu.Unlock()
 		job = *tb.plaud.connect
@@ -1766,7 +1767,7 @@ func TestPlaudStateBelongsToTheAccount(t *testing.T) {
 				t.Errorf("forwarded = %v, want %v", got, c.forward)
 			}
 			if c.forward {
-				waitFor(t, 10*time.Second, "brain reply", func() bool { return len(tb.dev.Outbox()) > 0 })
+				testutil.WaitFor(t, 10*time.Second, "brain reply", func() bool { return len(tb.dev.Outbox()) > 0 })
 				tb.waitPlaudSeen(t, plaudNew)
 			}
 			if st, _ := tb.plaud.loadState(); st.Account != c.account || !slices.Contains(st.Seen, plaudNew) {
@@ -1955,26 +1956,26 @@ func TestPlaudForwardReadsWhatTheCLIPrints(t *testing.T) {
 	created := time.Date(2026, 10, 15, 7, 30, 0, 0, time.UTC).Local()
 	for _, c := range []struct {
 		name    string
-		change  func(r *fakePlaudRecording)
+		change  func(r *testutil.PlaudRecording)
 		want    []string // in the file, which starts with its name
 		notWant []string
 	}{
-		{"a summary line that starts like the spinner",
-			func(r *fakePlaudRecording) { r.Notes[0].Content = plaudGoldenSummary },
-			[]string{"=== Plaud AI summary ===\n" + plaudGoldenSummary + "\n\n=== Transcript ===\n"},
-			[]string{"Team sync\n## Team sync"}},
-		{"the transcript without its header",
-			func(*fakePlaudRecording) {},
-			[]string{"=== Transcript ===\n[00:00 - 00:04] Speaker 1: Let's ship on Friday.\n"},
-			[]string{"Transcript: Team sync"}},
-		{"no start time: the day it reached Plaud",
-			func(r *fakePlaudRecording) { r.StartAt, r.CreatedAt = nil, "2026-10-15T07:30:00" },
-			[]string{created.Format("2006-01-02") + " - Team sync - ", "Recorded: " + created.Format("2006-01-02 15:04") + "\n"},
-			[]string{"Recorded: -"}},
-		{"an empty summary note",
-			func(r *fakePlaudRecording) { r.Notes[0].Content = "" },
-			nil,
-			[]string{"=== Plaud AI summary ===", "no content yet"}},
+		{name: "a summary line that starts like the spinner",
+			change:  func(r *testutil.PlaudRecording) { r.Notes[0].Content = plaudGoldenSummary },
+			want:    []string{"=== Plaud AI summary ===\n" + plaudGoldenSummary + "\n\n=== Transcript ===\n"},
+			notWant: []string{"Team sync\n## Team sync"}},
+		{name: "the transcript without its header",
+			change:  func(*testutil.PlaudRecording) {},
+			want:    []string{"=== Transcript ===\n[00:00 - 00:04] Speaker 1: Let's ship on Friday.\n"},
+			notWant: []string{"Transcript: Team sync"}},
+		{name: "no start time: the day it reached Plaud",
+			change:  func(r *testutil.PlaudRecording) { r.StartAt, r.CreatedAt = nil, "2026-10-15T07:30:00" },
+			want:    []string{created.Format("2006-01-02") + " - Team sync - ", "Recorded: " + created.Format("2006-01-02 15:04") + "\n"},
+			notWant: []string{"Recorded: -"}},
+		{name: "an empty summary note",
+			change:  func(r *testutil.PlaudRecording) { r.Notes[0].Content = "" },
+			want:    nil,
+			notWant: []string{"=== Plaud AI summary ===", "no content yet"}},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			tb, fp := plaudBridge(t, "")
@@ -2026,9 +2027,9 @@ func TestPlaudPolishedFallsBackToTheRawTranscript(t *testing.T) {
 			}
 			r := fp.teamSync(plaudNew, true)
 			if c.polished != nil {
-				b := fakePlaudBlock{DataType: "transaction_polish"}
+				b := testutil.PlaudBlock{DataType: "transaction_polish"}
 				if *c.polished != "" {
-					b.Content = fakePlaudTranscript(fakePlaudSegment{0, 4000, "Speaker 1", *c.polished})
+					b.Content = testutil.PlaudTranscript(testutil.PlaudSegment{Start: 0, End: 4000, Speaker: "Speaker 1", Content: *c.polished})
 				}
 				r.Sources = append(r.Sources, b)
 			}
@@ -2212,8 +2213,8 @@ func TestPlaudListedIDsComeFromTheIDColumn(t *testing.T) {
 		t.Errorf("ids from the recorded listing = %v", got)
 	}
 	dir := t.TempDir()
-	r := fakePlaudRecording{ID: plaudNew, Name: "of_00000000000000000000ff copy", CreatedAt: "2026-10-16T18:00:00", Duration: 60000}
-	writeFakePlaudRecordings(t, dir, []string{plaudNew}, []fakePlaudRecording{r})
+	r := testutil.PlaudRecording{ID: plaudNew, Name: "of_00000000000000000000ff copy", CreatedAt: "2026-10-16T18:00:00", Duration: 60000}
+	writeFakePlaudRecordings(t, dir, []string{plaudNew}, []testutil.PlaudRecording{r})
 	home := t.TempDir()
 	_ = os.MkdirAll(filepath.Join(home, ".plaud"), 0o700)
 	_ = os.WriteFile(filepath.Join(home, ".plaud", "tokens.json"), []byte("{}"), 0o600)
@@ -2318,10 +2319,10 @@ func TestPlaudRetryRewritesTheSameTranscript(t *testing.T) {
 	if err := plaudDeliver(t, tb, fp); err != nil {
 		t.Fatal(err)
 	}
-	waitFor(t, 10*time.Second, "brain reply", func() bool { return len(tb.dev.Outbox()) == 1 })
+	testutil.WaitFor(t, 10*time.Second, "brain reply", func() bool { return len(tb.dev.Outbox()) == 1 })
 	// Delivery precedes the completion callback. Let it finish saving state
 	// before replacing that state to simulate a retry after a crash.
-	waitFor(t, 10*time.Second, "the first run to be noted", func() bool {
+	testutil.WaitFor(t, 10*time.Second, "the first run to be noted", func() bool {
 		last := tb.plaud.Status().LastForwarded
 		return last != nil && last.ID == plaudNew && last.Status == plaudRunDone
 	})
@@ -2335,7 +2336,7 @@ func TestPlaudRetryRewritesTheSameTranscript(t *testing.T) {
 	if err := tb.plaud.Poll(context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	waitFor(t, 10*time.Second, "second brain reply", func() bool { return len(tb.dev.Outbox()) == 2 })
+	testutil.WaitFor(t, 10*time.Second, "second brain reply", func() bool { return len(tb.dev.Outbox()) == 2 })
 
 	files, _ := filepath.Glob(filepath.Join(tb.cfgs.Get().MediaDir, "*", "plaud", "*"))
 	if len(files) != 1 || !strings.HasSuffix(files[0], " - "+plaudNew+".txt") {
@@ -2366,7 +2367,7 @@ func TestPlaudTranscriptReplacesASymlink(t *testing.T) {
 	if err := plaudDeliver(t, tb, fp); err != nil {
 		t.Fatal(err)
 	}
-	waitFor(t, 10*time.Second, "brain reply", func() bool { return len(tb.dev.Outbox()) == 1 })
+	testutil.WaitFor(t, 10*time.Second, "brain reply", func() bool { return len(tb.dev.Outbox()) == 1 })
 
 	if data, _ := os.ReadFile(target); string(data) != "keep me" {
 		t.Errorf("the transcript was written through the link:\n%s", data)
@@ -2483,7 +2484,7 @@ func TestPlaudCheckNowNeedsSendingOn(t *testing.T) {
 	if w := tb.do("POST", "/api/plaud/sync", nil); w.Code != 202 {
 		t.Fatalf("check now = %d %s, want 202", w.Code, w.Body.String())
 	}
-	waitFor(t, 10*time.Second, "brain reply", func() bool { return len(tb.dev.Outbox()) > 0 })
+	testutil.WaitFor(t, 10*time.Second, "brain reply", func() bool { return len(tb.dev.Outbox()) > 0 })
 }
 
 // While a check is running, "Check now" says so instead of claiming to
@@ -2510,7 +2511,7 @@ func TestPlaudCheckNowWhileChecking(t *testing.T) {
 			t.Errorf("check now (busy=%v) = %d %q, want %d %q", c.busy, w.Code, got.Status, c.code, c.want)
 		}
 	}
-	waitFor(t, 10*time.Second, "the check to finish", func() bool {
+	testutil.WaitFor(t, 10*time.Second, "the check to finish", func() bool {
 		tb.plaud.mu.Lock()
 		defer tb.plaud.mu.Unlock()
 		return !tb.plaud.busy && tb.plaudSeeded()
@@ -2525,7 +2526,7 @@ func TestPlaudStopEndsASignIn(t *testing.T) {
 	if err := tb.plaud.Connect(); err != nil {
 		t.Fatal(err)
 	}
-	waitFor(t, 5*time.Second, "the sign-in to start", func() bool { return strings.Contains(fp.calls(), " login") })
+	testutil.WaitFor(t, 5*time.Second, "the sign-in to start", func() bool { return strings.Contains(fp.calls(), " login") })
 	tb.plaud.Stop()
 	if c := tb.plaud.Status().Connect; c == nil || c.State != "error" {
 		t.Errorf("sign-in after Stop = %+v, want it ended", c)
@@ -2590,7 +2591,7 @@ func TestPlaudStopWaitsForARunsEnd(t *testing.T) {
 	// The run's end waits to write the state while Stop is called.
 	tb.plaud.stMu.Lock()
 	go rec.end(plaudNew, nil)
-	waitFor(t, 5*time.Second, "the run's end to begin", func() bool {
+	testutil.WaitFor(t, 5*time.Second, "the run's end to begin", func() bool {
 		tb.plaud.mu.Lock()
 		defer tb.plaud.mu.Unlock()
 		return !tb.plaud.inFlight[plaudNew]
@@ -2747,7 +2748,7 @@ func TestPlaudBrainAccessNeedsConnectingAgain(t *testing.T) {
 	if err := tb.plaud.Connect(); err != nil {
 		t.Fatal(err)
 	}
-	waitFor(t, 10*time.Second, "the sign-in", func() bool { return tb.plaud.connected() })
+	testutil.WaitFor(t, 10*time.Second, "the sign-in", func() bool { return tb.plaud.connected() })
 	if err := tb.plaud.Poll(ctx); err != nil {
 		t.Fatal(err)
 	}
@@ -2835,7 +2836,7 @@ func TestPlaudDisconnectReportsALoginThatStays(t *testing.T) {
 	if err := tb.plaud.Connect(); err != nil {
 		t.Fatal(err)
 	}
-	waitFor(t, 10*time.Second, "the sign-in", func() bool { return tb.plaud.connected() })
+	testutil.WaitFor(t, 10*time.Second, "the sign-in", func() bool { return tb.plaud.connected() })
 }
 
 // Disconnecting while the card asks to connect again, after brain_access
@@ -2893,7 +2894,7 @@ func TestBrainRunsKeepPlaudTelemetryOff(t *testing.T) {
 	envLog := filepath.Join(t.TempDir(), "brain.env")
 	t.Setenv("FRIDOLIN_FAKE_ENV_LOG", envLog)
 	tb.handleInbound(context.Background(), Inbound{Inbound: chat.Inbound{JID: "15551234567@s.whatsapp.net", Sender: "15551234567", Text: "hello", Source: "whatsapp"}})
-	waitFor(t, 10*time.Second, "the run", func() bool { return len(tb.dev.Outbox()) > 0 })
+	testutil.WaitFor(t, 10*time.Second, "the run", func() bool { return len(tb.dev.Outbox()) > 0 })
 	logged, err := os.ReadFile(envLog)
 	if err != nil {
 		t.Fatal(err)
@@ -2915,7 +2916,7 @@ func TestBrainsFindThePlaudCLIWhenTheyMayUseIt(t *testing.T) {
 			envLog := filepath.Join(t.TempDir(), "brain.env")
 			t.Setenv("FRIDOLIN_FAKE_ENV_LOG", envLog)
 			tb.handleInbound(context.Background(), Inbound{Inbound: chat.Inbound{JID: "15551234567@s.whatsapp.net", Sender: "15551234567", Text: "hello", Source: "whatsapp"}})
-			waitFor(t, 10*time.Second, "the run", func() bool { return len(tb.dev.Outbox()) > 0 })
+			testutil.WaitFor(t, 10*time.Second, "the run", func() bool { return len(tb.dev.Outbox()) > 0 })
 			logged, _ := os.ReadFile(envLog)
 			var path string
 			for _, kv := range strings.Split(string(logged), "\n") {
@@ -3064,7 +3065,7 @@ func TestPlaudConnectShowsTheSignInLinkWhileWaiting(t *testing.T) {
 			AuthURL string `json:"auth_url"`
 		} `json:"connect"`
 	}
-	waitFor := func(what string, ok func(status) bool) {
+	waitStatus := func(what string, ok func(status) bool) {
 		t.Helper()
 		for i := 0; i < 200; i++ {
 			var s status
@@ -3076,11 +3077,11 @@ func TestPlaudConnectShowsTheSignInLinkWhileWaiting(t *testing.T) {
 		}
 		t.Fatalf("timed out waiting for %s", what)
 	}
-	waitFor("the sign-in link", func(s status) bool {
+	waitStatus("the sign-in link", func(s status) bool {
 		return s.Connect.State == "running" && s.Connect.AuthURL == "https://web.plaud.ai/platform/oauth?client_id=x&state=y"
 	})
 	fp.write("login_go", "")
-	waitFor("the sign-in to finish", func(s status) bool { return s.Connect.State == "done" && s.Connected })
+	waitStatus("the sign-in to finish", func(s status) bool { return s.Connect.State == "done" && s.Connected })
 }
 
 // The CLI runs in its own home, not in the bridge's working folder (the
@@ -3108,7 +3109,7 @@ func TestPlaudCLIRunsContained(t *testing.T) {
 		// Cancel only once the child exists: slow runner startup must not
 		// turn this process-group test into cancellation before execution.
 		pid := 0
-		waitFor(t, 10*time.Second, "the fake child to start", func() bool {
+		testutil.WaitFor(t, 10*time.Second, "the fake child to start", func() bool {
 			data, _ := os.ReadFile(filepath.Join(fp.dir, "child.pid"))
 			pid, _ = strconv.Atoi(strings.TrimSpace(string(data)))
 			return pid > 0
@@ -3122,7 +3123,7 @@ func TestPlaudCLIRunsContained(t *testing.T) {
 		case <-time.After(8 * time.Second):
 			t.Fatal("the cancelled run did not end")
 		}
-		waitFor(t, 5*time.Second, "the child to end", func() bool { return syscall.Kill(pid, 0) != nil })
+		testutil.WaitFor(t, 5*time.Second, "the child to end", func() bool { return syscall.Kill(pid, 0) != nil })
 	})
 	t.Run("its output is capped", func(t *testing.T) {
 		tb, fp := plaudBridge(t, "")
@@ -3167,14 +3168,14 @@ func TestPlaudRunsOneCommandAtATime(t *testing.T) {
 	if err := tb.plaud.Connect(); err != nil {
 		t.Fatal(err)
 	}
-	waitFor(t, 5*time.Second, "the sign-in to start", func() bool { return strings.Contains(fp.calls(), " login") })
+	testutil.WaitFor(t, 5*time.Second, "the sign-in to start", func() bool { return strings.Contains(fp.calls(), " login") })
 	start := time.Now()
 	_, _ = tb.plaud.run(context.Background(), "me")
 	if d := time.Since(start); d > 3*time.Second {
 		t.Errorf("a command waited %v for the sign-in", d)
 	}
 	fp.write("login_go", "")
-	waitFor(t, 10*time.Second, "the sign-in to end", func() bool { return tb.plaud.connected() })
+	testutil.WaitFor(t, 10*time.Second, "the sign-in to end", func() bool { return tb.plaud.connected() })
 
 	gone, cancel := context.WithCancel(context.Background())
 	cancel()
@@ -3201,7 +3202,7 @@ func TestPlaudSignInSaysWhyItFailed(t *testing.T) {
 				t.Fatal(err)
 			}
 			var job connectJob
-			waitFor(t, 10*time.Second, "the sign-in to end", func() bool {
+			testutil.WaitFor(t, 10*time.Second, "the sign-in to end", func() bool {
 				job = *tb.plaud.Status().Connect
 				return job.State != "running"
 			})
@@ -3242,7 +3243,7 @@ func TestPlaudConnectJudgesTheSignInByTheLogin(t *testing.T) {
 				t.Fatalf("connect: %d %s", rec.Code, rec.Body)
 			}
 			var job connectJob
-			waitFor(t, 10*time.Second, "the sign-in to end", func() bool {
+			testutil.WaitFor(t, 10*time.Second, "the sign-in to end", func() bool {
 				job = *tb.plaud.Status().Connect
 				return job.State != "running"
 			})
@@ -3508,7 +3509,7 @@ func TestPlaudCLIGetsTheAllowlistedEnvironment(t *testing.T) {
 			if w := tb.do("POST", "/api/plaud/connect", nil); w.Code != 202 {
 				t.Fatal(w.Body.String())
 			}
-			waitFor(t, 5*time.Second, "login", func() bool { return tb.plaud.connected() })
+			testutil.WaitFor(t, 5*time.Second, "login", func() bool { return tb.plaud.connected() })
 		}, true},
 	}
 	for _, tc := range cases {
@@ -3597,7 +3598,7 @@ func TestPlaudPhoneFolder(t *testing.T) {
 			t.Errorf("transcript file lacks %q:\n%s", want, data)
 		}
 	}
-	waitFor(t, 5*time.Second, "brain replies", func() bool { return len(tb.dev.Outbox()) == 2 })
+	testutil.WaitFor(t, 5*time.Second, "brain replies", func() bool { return len(tb.dev.Outbox()) == 2 })
 	if out := tb.dev.Outbox(); !slices.ContainsFunc(out, func(m devchat.Message) bool {
 		return strings.Contains(m.Text, `[Plaud] New recording "Phone recording" (2026-10-18 10:00, 01:05)`)
 	}) {

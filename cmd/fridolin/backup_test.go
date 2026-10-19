@@ -28,6 +28,7 @@ import (
 
 	"github.com/Icewater1337/fridolin/internal/chat"
 	"github.com/Icewater1337/fridolin/internal/fsx"
+	"github.com/Icewater1337/fridolin/internal/testutil"
 )
 
 func TestFilterLines(t *testing.T) {
@@ -614,7 +615,7 @@ func TestBackupRoundTripWithRealRclone(t *testing.T) {
 	}
 	var resp map[string]string
 	_ = json.Unmarshal(w.Body.Bytes(), &resp)
-	waitFor(t, 30*time.Second, "restore", func() bool {
+	testutil.WaitFor(t, 30*time.Second, "restore", func() bool {
 		data, _ := os.ReadFile(filepath.Join(tb.home, "restored", "memories/a.md"))
 		return string(data) == "version 2"
 	})
@@ -763,7 +764,7 @@ func runBackup(t *testing.T, tb *testBridge, id string) *BackupResult {
 func waitBackup(t *testing.T, tb *testBridge, id string) *BackupResult {
 	t.Helper()
 	var res *BackupResult
-	waitFor(t, 60*time.Second, "backup", func() bool {
+	testutil.WaitFor(t, 60*time.Second, "backup", func() bool {
 		running, last := backupStatus(t, tb)
 		res = last[id]
 		return !running
@@ -1657,7 +1658,7 @@ func TestRcloneIsInterruptedWhenCancelled(t *testing.T) {
 		_, err := tb.backup.runRclone(ctx, []string{"copy", "x:", "y"}, nil)
 		done <- err
 	}()
-	waitFor(t, 10*time.Second, "rclone to start", func() bool { return fsx.Exists(filepath.Join(bin, "started")) })
+	testutil.WaitFor(t, 10*time.Second, "rclone to start", func() bool { return fsx.Exists(filepath.Join(bin, "started")) })
 	cancel()
 	select {
 	case <-done:
@@ -2334,7 +2335,7 @@ func TestBackupRestoreRecordsItsResult(t *testing.T) {
 				t.Errorf("job = %+v, want the restore of notes", st.Job)
 			}
 			close(release)
-			waitFor(t, 10*time.Second, "the restore", func() bool {
+			testutil.WaitFor(t, 10*time.Second, "the restore", func() bool {
 				tb.backup.mu.Lock()
 				defer tb.backup.mu.Unlock()
 				return tb.backup.job == nil
@@ -2544,7 +2545,7 @@ func TestBackupWaitsForTheBrainToFinish(t *testing.T) {
 			if _, _, err := br.Submit(Inbound{Inbound: chat.Inbound{JID: "15551234567@s.whatsapp.net", Sender: "15551234567", Text: "hello", Source: "whatsapp", At: time.Now()}}); err != nil {
 				t.Fatal(err)
 			}
-			waitFor(t, 10*time.Second, "the run to start", running)
+			testutil.WaitFor(t, 10*time.Second, "the run to start", running)
 			tb.backup.backupBrain(t.Context(), br, "manual", true)
 			if !slices.Equal(syncedWhileRunning, []bool{c.wantRunning}) {
 				t.Errorf("synced while the brain ran: %v, want [%v]", syncedWhileRunning, c.wantRunning)
@@ -2552,7 +2553,7 @@ func TestBackupWaitsForTheBrainToFinish(t *testing.T) {
 			if all := strings.Join(logged(), "\n"); strings.Contains(all, "the brain is still running") != c.wantRunning {
 				t.Errorf("log says it copied a running brain: %v, want %v (log %q)", !c.wantRunning, c.wantRunning, all)
 			}
-			waitFor(t, 10*time.Second, "the run to end", func() bool { return !running() })
+			testutil.WaitFor(t, 10*time.Second, "the run to end", func() bool { return !running() })
 		})
 	}
 }

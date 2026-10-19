@@ -10,6 +10,7 @@ import (
 	"github.com/Icewater1337/fridolin/internal/chat"
 	"github.com/Icewater1337/fridolin/internal/history"
 	prompttext "github.com/Icewater1337/fridolin/internal/prompt"
+	"github.com/Icewater1337/fridolin/internal/testutil"
 )
 
 // promptBlock is what prompt holds between <tag> and </tag>, or "".
@@ -33,7 +34,7 @@ func TestPromptShowsTheMessageOnce(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	waitFor(t, 10*time.Second, "three runs", func() bool { return d.count() == 3 })
+	testutil.WaitFor(t, 10*time.Second, "three runs", func() bool { return d.count() == 3 })
 
 	prompts := loggedPrompts(t, promptLog)
 	cases := []struct {

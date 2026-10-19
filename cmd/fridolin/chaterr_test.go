@@ -12,6 +12,7 @@ import (
 
 	"github.com/Icewater1337/fridolin/internal/chat"
 	"github.com/Icewater1337/fridolin/internal/claudecli"
+	"github.com/Icewater1337/fridolin/internal/testutil"
 )
 
 func TestChatErrorText(t *testing.T) {
@@ -58,12 +59,12 @@ func TestFailedRunPostsNoRawError(t *testing.T) {
 			tb, br := newMainBridge(t, "")
 			t.Setenv("FRIDOLIN_FAKE_STDERR_BYTES", "10")
 			tb.handleInbound(context.Background(), Inbound{Inbound: chat.Inbound{JID: chatJID, Sender: "15551234567", Text: "@claude fail", Source: chat.SourceWhatsApp}})
-			waitFor(t, 10*time.Second, "the error notice", func() bool { return len(tb.sentTo(chatJID)) > 0 })
+			testutil.WaitFor(t, 10*time.Second, "the error notice", func() bool { return len(tb.sentTo(chatJID)) > 0 })
 			sent := tb.sentTo(chatJID)
 			if len(sent) != 1 || sent[0] != outboundmsg.ChatErrGeneric {
 				t.Errorf("sent %q, want only %q", sent, outboundmsg.ChatErrGeneric)
 			}
-			waitFor(t, 5*time.Second, "the run's outcome", func() bool { return br.Snapshot().Last != nil })
+			testutil.WaitFor(t, 5*time.Second, "the run's outcome", func() bool { return br.Snapshot().Last != nil })
 			if last := br.Snapshot().Last; !strings.Contains(last.Error, "fatal: the last thing the CLI said") {
 				t.Errorf("dashboard error = %q, want the CLI's stderr", last.Error)
 			}

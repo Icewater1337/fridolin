@@ -14,6 +14,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/Icewater1337/fridolin/internal/testutil"
 )
 
 // testPhone is a phone's key pair, as the app makes it in its keystore.
@@ -151,7 +153,7 @@ func TestPlaudPhoneUploadsThroughTheSite(t *testing.T) {
 		t.Fatal(err)
 	}
 	tb.waitPlaudSeen(t, plaudPhonePrefix+name)
-	waitFor(t, 5*time.Second, "brain reply", func() bool { return len(tb.dev.Outbox()) == 1 })
+	testutil.WaitFor(t, 5*time.Second, "brain reply", func() bool { return len(tb.dev.Outbox()) == 1 })
 	if out := tb.dev.Outbox()[0]; !strings.Contains(out.Text, `[Plaud] New recording "Phone recording" (2026-10-18 10:00, 02:10)`) {
 		t.Errorf("reply = %+v", out)
 	}

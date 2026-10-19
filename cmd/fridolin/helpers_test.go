@@ -1,8 +1,6 @@
 package main
 
 import (
-	"bufio"
-	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -14,7 +12,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"slices"
 	"strconv"
 	"strings"
 	"syscall"
@@ -28,99 +25,8 @@ import (
 	"github.com/Icewater1337/fridolin/internal/manifest"
 	"github.com/Icewater1337/fridolin/internal/platform"
 	"github.com/Icewater1337/fridolin/internal/registry"
+	"github.com/Icewater1337/fridolin/internal/testutil"
 )
-
-// TestMain lets the test binary stand in for the Claude CLI: with
-// FRIDOLIN_FAKE_CLAUDE=1 it prints a stream-json result echoing its working
-// directory and the new message, after FRIDOLIN_FAKE_SLEEP_MS and after
-// FRIDOLIN_FAKE_WAIT_FILE exists when set. With
-// FRIDOLIN_FAKE_READ it also reports whether it could read that file, with
-// FRIDOLIN_FAKE_ENV the value of that environment variable, and with
-// FRIDOLIN_FAKE_POLLS=1 what `fridolin polls` answers in the run. With
-// FRIDOLIN_FAKE_ASK_ON a message ending in that asks a question first (and
-// with FRIDOLIN_FAKE_HANG_AFTER_ASK=1 never answers, with
-// FRIDOLIN_FAKE_SLEEP_AFTER_ASK_MS answers that much later), with
-// FRIDOLIN_FAKE_ASK every run first calls AskUserQuestion with that input,
-// FRIDOLIN_FAKE_PID_LOG gets each run's process ID and
-// FRIDOLIN_FAKE_PROMPT_LOG its prompt, with FRIDOLIN_FAKE_SETSID_CHILD
-// it leaves a grandchild in a session of its own holding its output, and
-// with FRIDOLIN_FAKE_STDERR_BYTES it floods stderr and fails instead. Asked for
-// --version, it answers testedClaudeVersion. Tests point claude_path at
-// os.Args[0], so no script or real CLI is needed. With
-// FRIDOLIN_FAKE_CONNECT it connects to that unix socket instead (see
-// fakeConnect), with FRIDOLIN_FAKE_SESSION it reports its session (see
-// fakeSession), with FRIDOLIN_FAKE_TTY or FRIDOLIN_FAKE_TTY_PARENT it
-// plays a run that tries the terminal, or the bridge that starts it (see
-// fakeTTY), and with FRIDOLIN_TEST_RUN_MAIN=1 it is the bridge itself,
-// see runBridgeCLI.
-//
-// Before the tests run it unsets the variables the bridge reads: a shell
-// that exports FRIDOLIN_CONFIG for a real bridge would otherwise point the
-// tests at that bridge's config. It also gives them an empty HOME, see
-// useEmptyHome, moves them out of the checkout, see runInEmptyDir, passes
-// testChildEnv on to the programs the bridge starts, and has the bridges
-// they start stop without a grace for their runs (shutdownGrace).
-//
-// A test binary that finds its own process ID in testPIDVariable has been
-// executed again in place, and fails at once, see reexecutedInPlace.
-func TestMain(m *testing.M) {
-	if reexecutedInPlace() {
-		fmt.Fprintln(os.Stderr, "TestMain: a restart re-executed the bridge, and with it this test binary in place (serve in a test, with the real execSelf?): the tests that were running never finished")
-		os.Exit(2)
-	}
-	if os.Getenv("FRIDOLIN_TEST_RUN_MAIN") == "1" {
-		// Not FRIDOLIN_FAKE_*, so the programs this bridge starts do not
-		// get it, and the fake CLIs among them stay fakes.
-		childEnvAllowlist = append(childEnvAllowlist, testChildEnv...)
-		main()
-		os.Exit(0)
-	}
-	if os.Getenv("FRIDOLIN_FAKE_PLAUD") == "1" && len(os.Args) > 1 && isPlaudCommand(os.Args[1]) {
-		os.Exit(fakePlaud(os.Args[1:]))
-	}
-	if os.Getenv("FRIDOLIN_FAKE_CLAUDE") == "1" {
-		fakeClaude()
-		return
-	}
-	if p := os.Getenv("FRIDOLIN_FAKE_CONNECT"); p != "" {
-		os.Exit(fakeConnect(p))
-	}
-	if os.Getenv("FRIDOLIN_FAKE_SESSION") == "1" {
-		os.Exit(fakeSession())
-	}
-	if os.Getenv("FRIDOLIN_FAKE_TTY") == "1" {
-		os.Exit(fakeTTY())
-	}
-	if spec := os.Getenv("FRIDOLIN_FAKE_TTY_PARENT"); spec != "" {
-		os.Exit(fakeTTYParent(spec))
-	}
-	childEnvAllowlist = append(childEnvAllowlist, testChildEnv...)
-	for _, k := range bridgeVariables() {
-		if err := os.Unsetenv(k); err != nil {
-			fmt.Fprintf(os.Stderr, "unsetting %s: %v\n", k, err)
-			os.Exit(1)
-		}
-	}
-	if err := os.Setenv(testPIDVariable, strconv.Itoa(os.Getpid())); err != nil {
-		fmt.Fprintf(os.Stderr, "setting %s: %v\n", testPIDVariable, err)
-		os.Exit(1)
-	}
-	goToolHome = os.Getenv("HOME")
-	// The tests of the stop set a grace of their own.
-	shutdownGrace = 0
-	removeHome, err := useEmptyHome()
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "giving the tests an empty HOME: %v\n", err)
-		os.Exit(1)
-	}
-	code, err := runInEmptyDir(m)
-	removeHome()
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "moving the tests out of the checkout: %v\n", err)
-		os.Exit(1)
-	}
-	os.Exit(code)
-}
 
 // testChildEnv is what the programs the bridge starts get in tests on top
 // of childEnvAllowlist: the FRIDOLIN_FAKE_* variables that steer the fakes, this
@@ -129,22 +35,6 @@ func TestMain(m *testing.M) {
 var testChildEnv = []childEnvVar{
 	{"FRIDOLIN_FAKE_*", anyChild},
 	{"GORACE", anyChild},
-}
-
-// testPIDVariable holds the process ID of the test binary that runs the
-// tests. The programs it starts have their own, so only a process that is
-// that binary executed again in place finds its own ID there.
-const testPIDVariable = "FRIDOLIN_TEST_PID"
-
-// reexecutedInPlace reports whether this process is the test binary
-// executed again in place. exec keeps the process ID: a restart (serve)
-// re-executes os.Args[0], which in a test is this binary, with the test
-// flags and the environment of the test that was running. Playing the
-// fake CLI, as that environment says, or running the tests again, it would
-// exit 0, and go test would report the package as passing although the
-// tests after that one never ran.
-func reexecutedInPlace() bool {
-	return os.Getenv(testPIDVariable) == strconv.Itoa(os.Getpid())
 }
 
 // TestRestartInATestFailsTheRun: a restart runs the bridge again in place
@@ -208,24 +98,6 @@ var testHome string
 // by default. Nothing else may use it.
 var goToolHome string
 
-// useEmptyHome points HOME at a new, empty temp directory and returns a
-// function that removes it. Tests set their own HOME with t.Setenv; one that
-// forgets and loads a config would otherwise resolve ~ and the default data
-// dir, ~/.fridolin, in the real home, and loading the config creates the
-// data dir and media/ there before any guard runs.
-func useEmptyHome() (func(), error) {
-	dir, err := os.MkdirTemp("", "fridolin-test-home-")
-	if err != nil {
-		return nil, err
-	}
-	if err := os.Setenv("HOME", dir); err != nil {
-		os.RemoveAll(dir)
-		return nil, err
-	}
-	testHome = dir
-	return func() { os.RemoveAll(dir) }, nil
-}
-
 // pkgDir is the package directory the tests were started in, whose
 // testdata is the tests' own (see linkTestdata).
 var pkgDir string
@@ -235,260 +107,6 @@ var pkgDir string
 // it to this.
 var repoDir string
 
-// runInEmptyDir runs the tests in a new, empty working directory. A relative
-// path in a test must not reach the checkout, where a developer may keep a
-// config.json. Only the package's testdata is linked in, see linkTestdata.
-func runInEmptyDir(m *testing.M) (int, error) {
-	var err error
-	if pkgDir, err = os.Getwd(); err != nil {
-		return 0, err
-	}
-	// A test that runs this binary again starts it in the empty directory
-	// it runs in itself, whose testdata link leads back to the package.
-	if target, err := os.Readlink(filepath.Join(pkgDir, "testdata")); err == nil && filepath.IsAbs(target) {
-		pkgDir = filepath.Dir(target)
-	}
-	if repoDir, err = moduleRoot(pkgDir); err != nil {
-		return 0, err
-	}
-	// Tests run this binary again through os.Args[0], which must keep
-	// working from the new directory when it was started by a relative path.
-	if strings.ContainsRune(os.Args[0], filepath.Separator) {
-		if os.Args[0], err = filepath.Abs(os.Args[0]); err != nil {
-			return 0, err
-		}
-	}
-	wd, err := os.MkdirTemp("", "fridolin-test-wd-")
-	if err != nil {
-		return 0, err
-	}
-	defer os.RemoveAll(wd)
-	if err := os.Chdir(wd); err != nil {
-		return 0, err
-	}
-	if err := os.Setenv("PWD", wd); err != nil {
-		return 0, err
-	}
-	if err := linkTestdata(pkgDir, wd); err != nil {
-		return 0, err
-	}
-	return m.Run(), nil
-}
-
-// moduleRoot is the folder of the go.mod at or above dir.
-func moduleRoot(dir string) (string, error) {
-	for root := dir; ; root = filepath.Dir(root) {
-		if st, err := os.Stat(filepath.Join(root, "go.mod")); err == nil && st.Mode().IsRegular() {
-			return root, nil
-		}
-		if filepath.Dir(root) == root {
-			return "", fmt.Errorf("no go.mod at or above %s", dir)
-		}
-	}
-}
-
-// linkTestdata makes testdata in the working directory wd the package's own.
-// The fuzz engine reads a target's corpus from testdata/fuzz/<target> and
-// saves a failing input there, both relative to the working directory: in
-// the empty one, `go test` would skip the committed inputs, and `go test
-// -fuzz` would save a crash into a directory that is removed when the tests
-// end. The link is made even when the package has no testdata yet, so that
-// saving a crash then fails loudly instead of going nowhere.
-func linkTestdata(pkgDir, wd string) error {
-	return os.Symlink(filepath.Join(pkgDir, "testdata"), filepath.Join(wd, "testdata"))
-}
-
-// bridgeVariables are the environment variables the bridge reads:
-// FRIDOLIN_CONFIG picks the config, and a false BRAIN_MODE refuses it.
-func bridgeVariables() []string {
-	return []string{"FRIDOLIN_CONFIG", "BRAIN_MODE"}
-}
-
-// fakeNewMessage is the new message in prompt, as the fake CLI echoes it:
-// "<from> says: <text>".
-func fakeNewMessage(prompt string) string {
-	msg := prompt
-	if i := strings.LastIndex(prompt, "<new_message>\n"); i >= 0 {
-		msg = strings.TrimSuffix(strings.TrimSpace(prompt[i+len("<new_message>\n"):]), "</new_message>")
-		msg = strings.TrimSpace(msg)
-	}
-	var m struct {
-		From string `json:"from"`
-		Text string `json:"text"`
-	}
-	if err := json.Unmarshal([]byte(msg), &m); err == nil {
-		return m.From + " says: " + m.Text
-	}
-	return msg
-}
-
-func fakeClaude() {
-	args := os.Args[1:]
-	if len(args) == 1 && args[0] == "--version" {
-		// What the dashboard and `fridolin check` ask for.
-		fmt.Println(claudecli.TestedClaudeVersion + " (Claude Code)")
-		return
-	}
-	// Like the CLI, it reads the prompt from stdin when -p comes last.
-	prompt := ""
-	for i, a := range args {
-		if a == "-p" && i+1 < len(args) {
-			prompt = args[i+1]
-		}
-	}
-	if len(args) > 0 && args[len(args)-1] == "-p" {
-		data, _ := io.ReadAll(os.Stdin)
-		prompt = string(data)
-	}
-	if log := os.Getenv("FRIDOLIN_FAKE_PID_LOG"); log != "" {
-		// One line a run, so that a test can look for the process later.
-		f, err := os.OpenFile(log, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600)
-		if err == nil {
-			fmt.Fprintln(f, os.Getpid())
-			f.Close()
-		}
-	}
-	if log := os.Getenv("FRIDOLIN_FAKE_PROMPT_LOG"); log != "" {
-		// Each run's prompt after a line of its own (fakePromptsIn).
-		f, err := os.OpenFile(log, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600)
-		if err == nil {
-			fmt.Fprintf(f, "%s\n%s\n", fakePromptMark, prompt)
-			f.Close()
-		}
-	}
-	if os.Getenv("FRIDOLIN_FAKE_CHILD") == "1" {
-		// A grandchild that inherits stdout, like a shell command Claude ran.
-		child := exec.Command("sleep", "30")
-		child.Stdout = os.Stdout
-		if child.Start() == nil {
-			if path := os.Getenv("FRIDOLIN_FAKE_CHILD_PID_LOG"); path != "" {
-				_ = os.WriteFile(path, []byte(strconv.Itoa(child.Process.Pid)), 0600)
-			}
-		}
-	}
-	if holds := os.Getenv("FRIDOLIN_FAKE_SETSID_CHILD"); holds != "" {
-		// A grandchild that leaves the run's process group, as a daemon or
-		// setsid does, holding stdout, or stdout and stderr with
-		// "stdout,stderr": no kill of the group reaches it. Its PID goes
-		// to FRIDOLIN_FAKE_PID_LOG after the CLI's own.
-		child := exec.Command("sleep", "30")
-		child.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
-		child.Stdout = os.Stdout
-		if strings.Contains(holds, "stderr") {
-			child.Stderr = os.Stderr
-		}
-		if child.Start() == nil {
-			if log := os.Getenv("FRIDOLIN_FAKE_PID_LOG"); log != "" {
-				if f, err := os.OpenFile(log, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600); err == nil {
-					fmt.Fprintln(f, child.Process.Pid)
-					f.Close()
-				}
-			}
-		}
-	}
-	if path := os.Getenv("FRIDOLIN_FAKE_WAIT_FILE"); path != "" {
-		for {
-			if _, err := os.Stat(path); err == nil {
-				break
-			} else if !os.IsNotExist(err) {
-				fmt.Fprintln(os.Stderr, "waiting for test release:", err)
-				os.Exit(1)
-			}
-			time.Sleep(5 * time.Millisecond)
-		}
-	}
-	if ms, _ := strconv.Atoi(os.Getenv("FRIDOLIN_FAKE_SLEEP_MS")); ms > 0 {
-		time.Sleep(time.Duration(ms) * time.Millisecond)
-	}
-	if n, _ := strconv.Atoi(os.Getenv("FRIDOLIN_FAKE_STDERR_BYTES")); n > 0 {
-		// A CLI that floods stderr and fails without a result: n bytes of
-		// filler, then the line that says what went wrong.
-		w := bufio.NewWriter(os.Stderr)
-		for i := 0; i < n; i++ {
-			_ = w.WriteByte('x')
-		}
-		fmt.Fprintln(w, "\nfatal: the last thing the CLI said")
-		_ = w.Flush()
-		os.Exit(1)
-	}
-	if log := os.Getenv("FRIDOLIN_FAKE_ARGS_LOG"); log != "" {
-		f, err := os.OpenFile(log, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600)
-		if err == nil {
-			fmt.Fprintln(f, strings.Join(args, " "))
-			f.Close()
-		}
-	}
-	if log := os.Getenv("FRIDOLIN_FAKE_RUN_LOG"); log != "" {
-		// Each run as one JSON line: the arguments, with a prompt that
-		// follows -p set apart, the prompt, from there or from stdin, and
-		// the working directory.
-		wd, _ := os.Getwd()
-		argv := slices.Clone(args)
-		if i := slices.Index(argv, "-p"); i >= 0 && i+1 < len(argv) {
-			argv[i+1] = "<prompt>"
-		}
-		line, _ := json.Marshal(map[string]any{"args": argv, "prompt": prompt, "dir": wd})
-		if f, err := os.OpenFile(log, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600); err == nil {
-			fmt.Fprintf(f, "%s\n", line)
-			f.Close()
-		}
-	}
-	if log := os.Getenv("FRIDOLIN_FAKE_ENV_LOG"); log != "" {
-		// What a brain inherits, one VAR=value per line.
-		_ = os.WriteFile(log, []byte(strings.Join(os.Environ(), "\n")+"\n"), 0o600)
-	}
-	msg := fakeNewMessage(prompt)
-	wd, _ := os.Getwd()
-	out := fmt.Sprintf("echo:%s:%s", wd, msg)
-	if p := os.Getenv("FRIDOLIN_FAKE_READ"); p != "" {
-		switch _, err := os.ReadFile(p); {
-		case err == nil:
-			out += " read=ok"
-		case errors.Is(err, fs.ErrPermission):
-			out += " read=denied"
-		default:
-			out += " read=error: " + err.Error()
-		}
-	}
-	if os.Getenv("FRIDOLIN_FAKE_POLLS") == "1" {
-		// A tool the run starts, asking the bridge with the run's token.
-		var res bytes.Buffer
-		code := pollsCmd(nil, toolIO{stdout: &res, stderr: io.Discard, getenv: os.Getenv, now: time.Now()})
-		out += fmt.Sprintf(" polls=%d %s", code, strings.Join(strings.Fields(res.String()), " "))
-	}
-	if name := os.Getenv("FRIDOLIN_FAKE_ENV"); name != "" {
-		if v, ok := os.LookupEnv(name); ok {
-			out += " " + name + "=" + v
-		} else {
-			out += " " + name + " unset"
-		}
-	}
-	if ask := os.Getenv("FRIDOLIN_FAKE_ASK_ON"); ask != "" && strings.HasSuffix(msg, ask) {
-		// A message ending in it asks the chat a question first.
-		fmt.Println(`{"type":"assistant","message":{"content":[{"type":"tool_use","name":"AskUserQuestion","input":{"questions":[{"question":"Which day suits you?"}]}}]}}`)
-		if os.Getenv("FRIDOLIN_FAKE_HANG_AFTER_ASK") == "1" {
-			// A run that hangs once it has asked, until it is stopped.
-			time.Sleep(30 * time.Second)
-			return
-		}
-		if ms, _ := strconv.Atoi(os.Getenv("FRIDOLIN_FAKE_SLEEP_AFTER_ASK_MS")); ms > 0 {
-			// A run that is still at work when the answer comes.
-			time.Sleep(time.Duration(ms) * time.Millisecond)
-		}
-	}
-	if ask := os.Getenv("FRIDOLIN_FAKE_ASK"); ask != "" {
-		// An AskUserQuestion call, its input as given, which nobody answers.
-		fmt.Printf(`{"type":"assistant","message":{"content":[{"type":"tool_use","name":"AskUserQuestion","input":%s}]}}`+"\n", ask)
-	}
-	if result := os.Getenv("FRIDOLIN_FAKE_RESULT"); result != "" {
-		fmt.Println(result)
-		return
-	}
-	q := strconv.Quote(out)
-	fmt.Printf(`{"type":"assistant","message":{"content":[{"type":"text","text":%s}]}}`+"\n", q)
-	fmt.Printf(`{"type":"result","result":%s}`+"\n", q)
-}
-
 // loggedPrompts returns the prompts the fake CLI logged to path, by the
 // text of their new message.
 func loggedPrompts(t *testing.T, path string) map[string]string {
@@ -496,7 +114,7 @@ func loggedPrompts(t *testing.T, path string) map[string]string {
 	out := map[string]string{}
 	for _, p := range fakePromptsIn(t, path) {
 		p = strings.TrimSuffix(p, "\n")
-		out[fakeNewMessage(p)] = p
+		out[testutil.NewMessage(p)] = p
 	}
 	return out
 }
@@ -596,10 +214,6 @@ func fakeTTYParent(spec string) int {
 	return 0
 }
 
-// fakeClaudeEnv makes brains in this test spawn the fake CLI.
-// fakePromptMark starts each prompt in FRIDOLIN_FAKE_PROMPT_LOG.
-const fakePromptMark = "=====PROMPT====="
-
 // fakePromptsIn returns the prompts the fake CLI logged to path, oldest
 // first.
 func fakePromptsIn(t *testing.T, path string) []string {
@@ -611,7 +225,7 @@ func fakePromptsIn(t *testing.T, path string) []string {
 	if err != nil {
 		t.Fatal(err)
 	}
-	return strings.Split(string(data), fakePromptMark+"\n")[1:]
+	return strings.Split(string(data), testutil.PromptMark+"\n")[1:]
 }
 
 func fakeClaudeEnv(t *testing.T, sleepMS int) string {
@@ -653,39 +267,6 @@ func checkTestDataDir(root string, cfg *config.Config) error {
 		}
 	}
 	return nil
-}
-
-// clearEnv unsets keys for the rest of the test and restores them afterwards,
-// so a value the code under test exports cannot leak into the next test.
-func clearEnv(t *testing.T, keys ...string) {
-	t.Helper()
-	for _, k := range keys {
-		t.Setenv(k, "") // registers the restore
-		if err := os.Unsetenv(k); err != nil {
-			t.Fatal(err)
-		}
-	}
-}
-
-// waitFor polls cond until it holds or the timeout passes.
-func waitFor(t *testing.T, timeout time.Duration, what string, cond func() bool) {
-	t.Helper()
-	deadline := time.Now().Add(timeout)
-	for time.Now().Before(deadline) {
-		if cond() {
-			return
-		}
-		time.Sleep(10 * time.Millisecond)
-	}
-	t.Fatalf("timed out waiting for %s", what)
-}
-
-func isPlaudCommand(c string) bool {
-	switch c {
-	case "files", "file", "transcript", "summary", "me", "login", "logout":
-		return true
-	}
-	return false
 }
 
 func TestCheckTestDataDir(t *testing.T) {
@@ -808,4 +389,34 @@ func permOf(t *testing.T, path string) os.FileMode {
 		t.Fatal(err)
 	}
 	return st.Mode().Perm()
+}
+
+func TestMain(m *testing.M) {
+	testutil.Main(m, testutil.MainOptions{
+		Version:        claudecli.TestedClaudeVersion,
+		RunMain:        main,
+		BeforeChildren: func() { childEnvAllowlist = append(childEnvAllowlist, testChildEnv...) },
+		BeforeTests:    func() { shutdownGrace = 0 },
+		Ready: func(p testutil.Paths) {
+			testHome, goToolHome, pkgDir, repoDir = p.Home, p.OriginalHome, p.PackageDir, p.RepoDir
+		},
+		Polls: func(w io.Writer) int {
+			return pollsCmd(nil, toolIO{stdout: w, stderr: io.Discard, getenv: os.Getenv, now: time.Now()})
+		},
+		Extra: func() (bool, int) {
+			if p := os.Getenv("FRIDOLIN_FAKE_CONNECT"); p != "" {
+				return true, fakeConnect(p)
+			}
+			if os.Getenv("FRIDOLIN_FAKE_SESSION") == "1" {
+				return true, fakeSession()
+			}
+			if os.Getenv("FRIDOLIN_FAKE_TTY") == "1" {
+				return true, fakeTTY()
+			}
+			if p := os.Getenv("FRIDOLIN_FAKE_TTY_PARENT"); p != "" {
+				return true, fakeTTYParent(p)
+			}
+			return false, 0
+		},
+	})
 }

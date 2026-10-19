@@ -15,6 +15,7 @@ import (
 	"google.golang.org/protobuf/proto"
 
 	"github.com/Icewater1337/fridolin/internal/history"
+	"github.com/Icewater1337/fridolin/internal/testutil"
 )
 
 // Quote-replying to one of the bridge's messages in a group addresses it:
@@ -24,7 +25,7 @@ func TestGroupReplyToTheBridgeIsAnswered(t *testing.T) {
 	own := types.JID{User: otherNumber, Device: 12, Server: types.DefaultUserServer}
 	wa := tb.whatsAppOffline(t, &store.Device{ID: &own, LIDs: bridgeLIDs{}})
 	wa.ProcessMessage(groupEvent(replyMessage("and on Sunday?", "The pool opens at 9 on Saturday.")))
-	waitFor(t, 10*time.Second, "the answer", func() bool { return len(tb.sentTo(testGroup)) > 0 })
+	testutil.WaitFor(t, 10*time.Second, "the answer", func() bool { return len(tb.sentTo(testGroup)) > 0 })
 }
 
 // A brain can make files and forwards in its groups chatter: a photo is
@@ -57,7 +58,7 @@ func TestGroupFilesAndForwardsCanBeChatter(t *testing.T) {
 		slices.Sort(texts)
 		return texts
 	}
-	waitFor(t, 10*time.Second, "the chatter in the history", func() bool { return len(inbound()) == 2 })
+	testutil.WaitFor(t, 10*time.Second, "the chatter in the history", func() bool { return len(inbound()) == 2 })
 	time.Sleep(300 * time.Millisecond)
 	if got, want := inbound(), []string{"a chain letter", "the view from the hut"}; !slices.Equal(got, want) {
 		t.Errorf("history holds %q, want %q: the caption and the forward, no attachment", got, want)
@@ -71,7 +72,7 @@ func TestGroupFilesAndForwardsCanBeChatter(t *testing.T) {
 
 	// The trigger still addresses the bridge, a file along with it.
 	wa.ProcessMessage(groupEvent(&waE2E.Message{ImageMessage: &waE2E.ImageMessage{Caption: proto.String("@claude what is this?")}}))
-	waitFor(t, 10*time.Second, "the answer", func() bool { return len(tb.sentTo(testGroup)) > 0 })
+	testutil.WaitFor(t, 10*time.Second, "the answer", func() bool { return len(tb.sentTo(testGroup)) > 0 })
 	if n := dl.callCount(); n != 1 {
 		t.Errorf("%d downloads, want the addressed photo's", n)
 	}

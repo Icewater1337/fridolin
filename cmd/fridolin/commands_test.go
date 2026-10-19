@@ -21,6 +21,7 @@ import (
 	"github.com/Icewater1337/fridolin/internal/history"
 	"github.com/Icewater1337/fridolin/internal/manifest"
 	prompttext "github.com/Icewater1337/fridolin/internal/prompt"
+	"github.com/Icewater1337/fridolin/internal/testutil"
 	"go.mau.fi/whatsmeow"
 	"go.mau.fi/whatsmeow/proto/waE2E"
 	"go.mau.fi/whatsmeow/store"
@@ -171,7 +172,7 @@ func startLongRun(t *testing.T, tb *testBridge, br *Brain, m Inbound) {
 	t.Helper()
 	t.Setenv("FRIDOLIN_FAKE_SLEEP_MS", "30000")
 	tb.handleInbound(context.Background(), m)
-	waitFor(t, 5*time.Second, "the run for "+m.JID, func() bool {
+	testutil.WaitFor(t, 5*time.Second, "the run for "+m.JID, func() bool {
 		r := br.Snapshot().Running
 		return r != nil && r.PID > 0 && r.Chat == m.JID
 	})
@@ -184,7 +185,7 @@ func TestQuotedReplyReachesModelAndHistory(t *testing.T) {
 	tb.whatsApp(t).ProcessMessage(replyEvent("yes, book it", "Lunch at 12?"))
 
 	want := `[reply to ` + otherNumber + `: "Lunch at 12?"]` + "\nyes, book it"
-	waitFor(t, 10*time.Second, "the answer", func() bool { return len(tb.sentTo(testDMChat)) > 0 })
+	testutil.WaitFor(t, 10*time.Second, "the answer", func() bool { return len(tb.sentTo(testDMChat)) > 0 })
 	if got := tb.sentTo(testDMChat)[0]; !strings.HasSuffix(got, "says: "+want) {
 		t.Errorf("the model was sent %q, want it to end in %q", got, want)
 	}
@@ -203,7 +204,7 @@ func TestOTPGuardDropsQuotedCode(t *testing.T) {
 	tb.whatsApp(t).ProcessMessage(replyEvent("483920", "🔐 Please send me the verification code"))
 
 	otpFile := filepath.Join(tb.cfgs.Get().DataDir, "otp", "main.json")
-	waitFor(t, 5*time.Second, "the code to be handed over", func() bool {
+	testutil.WaitFor(t, 5*time.Second, "the code to be handed over", func() bool {
 		_, err := os.Stat(otpFile)
 		return err == nil
 	})
@@ -289,12 +290,12 @@ func TestJunkFilterIgnoresTheQuote(t *testing.T) {
 		t.Run(c.name, func(t *testing.T) {
 			tb, br := newObservingBridge(t, "")
 			tb.handleInbound(context.Background(), Inbound{Inbound: chat.Inbound{JID: testGroup, Sender: otherNumber, Text: c.text, Quoted: q, Silent: true, Source: chat.SourceWhatsApp}})
-			waitFor(t, 5*time.Second, "the history line", func() bool { return len(readHistory(t, br)) > 0 })
+			testutil.WaitFor(t, 5*time.Second, "the history line", func() bool { return len(readHistory(t, br)) > 0 })
 			if want := `[reply to ` + otherNumber + `: "Lunch at 12?"]` + "\n" + c.text; readHistory(t, br)[0].Text != want {
 				t.Errorf("history = %q, want %q", readHistory(t, br)[0].Text, want)
 			}
 			if c.runs {
-				waitFor(t, 5*time.Second, "the observe-only run", func() bool { return br.Snapshot().Last != nil })
+				testutil.WaitFor(t, 5*time.Second, "the observe-only run", func() bool { return br.Snapshot().Last != nil })
 				return
 			}
 			time.Sleep(200 * time.Millisecond)
@@ -330,7 +331,7 @@ func TestTriggerOnlyReplyAsksAboutTheQuote(t *testing.T) {
 		t.Run(c.name, func(t *testing.T) {
 			tb, br := newMainBridge(t, "")
 			c.send(tb)
-			waitFor(t, 10*time.Second, "the answer", func() bool { return len(tb.sentTo(c.chat)) > 0 })
+			testutil.WaitFor(t, 10*time.Second, "the answer", func() bool { return len(tb.sentTo(c.chat)) > 0 })
 			if got := tb.sentTo(c.chat)[0]; !strings.HasSuffix(got, "says: "+want) {
 				t.Errorf("the model was sent %q, want it to end in %q", got, want)
 			}
@@ -365,7 +366,7 @@ func TestFailedDownloadIsAnswered(t *testing.T) {
 		t.Run(c.name, func(t *testing.T) {
 			tb, _ := newMainBridge(t, "")
 			c.send(tb)
-			waitFor(t, 10*time.Second, "the notice and the answer", func() bool { return len(tb.sentTo(c.chat)) >= 2 })
+			testutil.WaitFor(t, 10*time.Second, "the notice and the answer", func() bool { return len(tb.sentTo(c.chat)) >= 2 })
 			if !tb.sentPrefix(c.chat, "⚠️ I couldn't download that file. Please send it again.") {
 				t.Errorf("sent %q, want the notice among it", tb.sentTo(c.chat))
 			}
@@ -403,7 +404,7 @@ func TestQuotedCommandIsRecognised(t *testing.T) {
 	t.Run("!help", func(t *testing.T) {
 		tb, br := newMainBridge(t, "")
 		tb.whatsApp(t).ProcessMessage(replyEvent("!help", "Here is your summary."))
-		waitFor(t, 5*time.Second, "the help text", func() bool { return tb.sentPrefix(testDMChat, "🤖 *Fridolin*") })
+		testutil.WaitFor(t, 5*time.Second, "the help text", func() bool { return tb.sentPrefix(testDMChat, "🤖 *Fridolin*") })
 		time.Sleep(200 * time.Millisecond)
 		if h := readHistory(t, br); len(h) > 0 {
 			t.Errorf("the command reached the brain: %+v", h)
@@ -416,7 +417,7 @@ func TestQuotedCommandIsRecognised(t *testing.T) {
 		tb.whatsApp(t).ProcessMessage(replyEvent("!stop", outboundmsg.WorkingNotice))
 		// The confirmation goes out once the run has stopped, so wait for it
 		// rather than for the run: the snapshot clears a moment earlier.
-		waitFor(t, 10*time.Second, "the stop confirmation", func() bool { return tb.sentPrefix(testDMChat, "🛑") })
+		testutil.WaitFor(t, 10*time.Second, "the stop confirmation", func() bool { return tb.sentPrefix(testDMChat, "🛑") })
 		if rt := br.Snapshot(); rt.Running != nil {
 			t.Errorf("running = %+v after the stop confirmation, want nothing", rt.Running)
 		}
@@ -446,7 +447,7 @@ func TestMentionAddressesTheBridge(t *testing.T) {
 				Text:        proto.String(c.text),
 				ContextInfo: &waE2E.ContextInfo{MentionedJID: []string{c.mentioned}},
 			}}))
-			waitFor(t, 10*time.Second, "the answer", func() bool { return len(tb.sentTo(testGroup)) > 0 })
+			testutil.WaitFor(t, 10*time.Second, "the answer", func() bool { return len(tb.sentTo(testGroup)) > 0 })
 			got := tb.sentTo(testGroup)[0]
 			if !strings.Contains(got, c.want) {
 				t.Errorf("answered %q, want it to contain %q", got, c.want)
@@ -480,11 +481,11 @@ func TestGroupCommandsMustBeAddressed(t *testing.T) {
 				t.Fatalf("dev inbound: %d %s", w.Code, w.Body.String())
 			}
 			if c.command {
-				waitFor(t, 5*time.Second, "the help text", func() bool { return tb.sentPrefix(c.jid, "🤖 *Fridolin*") })
+				testutil.WaitFor(t, 5*time.Second, "the help text", func() bool { return tb.sentPrefix(c.jid, "🤖 *Fridolin*") })
 				return
 			}
 			// Ordinary chatter: the brain keeps it, nobody gets an answer.
-			waitFor(t, 5*time.Second, "the message in the history", func() bool {
+			testutil.WaitFor(t, 5*time.Second, "the message in the history", func() bool {
 				h := readHistory(t, br)
 				return len(h) > 0 && h[0].Text == c.text
 			})
@@ -587,7 +588,7 @@ func TestStopAndResetAreScopedToTheChat(t *testing.T) {
 
 			tb.handleInbound(ctx, Inbound{Inbound: chat.Inbound{JID: c.chat, Sender: chat.NormalizeJID(c.chat), Text: c.cmd, Source: chat.SourceWhatsApp}})
 
-			waitFor(t, 10*time.Second, "the run of "+c.wantRunning, func() bool {
+			testutil.WaitFor(t, 10*time.Second, "the run of "+c.wantRunning, func() bool {
 				r := br.Snapshot().Running
 				return r != nil && r.Preview == c.wantRunning && r.PID > 0
 			})
@@ -638,7 +639,7 @@ func TestResetStartsOnlyThatChatAfresh(t *testing.T) {
 	send := func(chatJID, sender, text string) {
 		t.Helper()
 		tb.handleInbound(ctx, Inbound{Inbound: chat.Inbound{JID: chatJID, Sender: sender, Text: text, Source: chat.SourceWhatsApp}})
-		waitFor(t, 10*time.Second, "the answer to "+text, func() bool {
+		testutil.WaitFor(t, 10*time.Second, "the answer to "+text, func() bool {
 			return slices.ContainsFunc(readHistory(t, br), func(e history.Entry) bool {
 				return e.Type == history.Out && strings.HasSuffix(e.Text, "says: "+text)
 			})
@@ -731,7 +732,7 @@ func TestBrainRunsWriteNoSessionOrProcessRows(t *testing.T) {
 	startLongRun(t, tb, br, Inbound{Inbound: chat.Inbound{JID: testDMChat, Sender: "15551234567", Text: "dm 1", Source: chat.SourceWhatsApp}})
 	rows("while a brain runs")
 	tb.handleInbound(context.Background(), Inbound{Inbound: chat.Inbound{JID: testDMChat, Sender: "15551234567", Text: "!reset", Source: chat.SourceWhatsApp}})
-	waitFor(t, 10*time.Second, "the run to stop", func() bool { return br.Snapshot().Running == nil })
+	testutil.WaitFor(t, 10*time.Second, "the run to stop", func() bool { return br.Snapshot().Running == nil })
 	rows("after !reset")
 }
 

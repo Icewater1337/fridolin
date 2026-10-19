@@ -22,6 +22,7 @@ import (
 	"github.com/Icewater1337/fridolin/internal/manifest"
 	"github.com/Icewater1337/fridolin/internal/sandbox"
 	"github.com/Icewater1337/fridolin/internal/store"
+	"github.com/Icewater1337/fridolin/internal/testutil"
 
 	mediafiles "github.com/Icewater1337/fridolin/internal/media"
 )
@@ -66,7 +67,7 @@ func TestSandboxedRunAppliesProfileInline(t *testing.T) {
 	if _, _, _, err := mgr.Submit(dm("hello")); err != nil {
 		t.Fatal(err)
 	}
-	waitFor(t, 20*time.Second, "the run", func() bool { return d.count() == 1 })
+	testutil.WaitFor(t, 20*time.Second, "the run", func() bool { return d.count() == 1 })
 	res := d.all()[0].res
 	if res.Err != nil {
 		t.Fatalf("sandboxed run failed: %v", res.Err)
@@ -106,7 +107,7 @@ func TestSandboxedRunTurnsOffTheAutoUpdater(t *testing.T) {
 			if _, _, _, err := mgr.Submit(dm("hello")); err != nil {
 				t.Fatal(err)
 			}
-			waitFor(t, 20*time.Second, "the run", func() bool { return d.count() == 1 })
+			testutil.WaitFor(t, 20*time.Second, "the run", func() bool { return d.count() == 1 })
 			res := d.all()[0].res
 			if res.Err != nil {
 				t.Fatalf("run failed: %v", res.Err)
@@ -1028,7 +1029,7 @@ func TestSandboxedRunReachesTheBrainAPI(t *testing.T) {
 	savePoll(t, tb, "P1", apiTestDM, "Lunch?", []string{"Yes", "No"}, nil)
 	t.Setenv("FRIDOLIN_FAKE_POLLS", "1")
 	tb.handleInbound(context.Background(), Inbound{Inbound: chat.Inbound{JID: apiTestDM, Sender: "15551234567", Text: "polls?", Source: "whatsapp"}})
-	waitFor(t, 20*time.Second, "the reply", func() bool { return len(tb.sentTo(apiTestDM)) > 0 })
+	testutil.WaitFor(t, 20*time.Second, "the reply", func() bool { return len(tb.sentTo(apiTestDM)) > 0 })
 	if reply := tb.sentTo(apiTestDM)[0]; !strings.Contains(reply, `polls=0 {`) || !strings.Contains(reply, `"question": "Lunch?"`) {
 		t.Errorf("the sandboxed run's fridolin polls answered:\n%s", reply)
 	}

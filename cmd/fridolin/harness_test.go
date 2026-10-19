@@ -24,6 +24,7 @@ import (
 
 	"github.com/Icewater1337/fridolin/internal/chat"
 	"github.com/Icewater1337/fridolin/internal/fsx"
+	"github.com/Icewater1337/fridolin/internal/testutil"
 	"go.mau.fi/whatsmeow"
 	"go.mau.fi/whatsmeow/store"
 	"go.mau.fi/whatsmeow/types/events"
@@ -382,7 +383,7 @@ func (h *harness) Running(id string) bool {
 // WaitFor polls cond until it holds, for up to ten seconds.
 func (h *harness) WaitFor(what string, cond func() bool) {
 	h.t.Helper()
-	waitFor(h.t, 10*time.Second, what, cond)
+	testutil.WaitFor(h.t, 10*time.Second, what, cond)
 }
 
 // WaitSent waits until jid got a message containing substr and returns it.

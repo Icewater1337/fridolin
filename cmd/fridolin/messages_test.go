@@ -131,7 +131,7 @@ var notChatText = map[string]string{
 	"🔐":          "one of the OTP guard's markers, which it looks for in what a brain sends",
 }
 
-// TestChatMessagesLiveInTheCatalogue: no Go file but messages.go has a
+// TestChatMessagesLiveInTheCatalogue: no production Go file but messages.go has a
 // string that starts with an emoji, the mark of a message the bridge
 // sends into chats, so that a new one goes into the catalogue.
 func TestChatMessagesLiveInTheCatalogue(t *testing.T) {
@@ -140,6 +140,10 @@ func TestChatMessagesLiveInTheCatalogue(t *testing.T) {
 		switch {
 		case err != nil:
 			return err
+		case d.IsDir() && path == filepath.Join(repoDir, "internal", "testutil"):
+			// Fake CLI diagnostics moved out of _test.go so leaf-package tests
+			// can reuse them. Archtest forbids this package in production.
+			return filepath.SkipDir
 		case d.IsDir() && path != repoDir && (strings.HasPrefix(d.Name(), ".") || d.Name() == "testdata" || d.Name() == "node_modules" || d.Name() == "vendor"):
 			return filepath.SkipDir
 		case !d.IsDir() && strings.HasSuffix(path, ".go") && !strings.HasSuffix(path, "_test.go"):

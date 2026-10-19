@@ -19,6 +19,7 @@ import (
 	"github.com/Icewater1337/fridolin/internal/chat"
 	"github.com/Icewater1337/fridolin/internal/claudecli"
 	"github.com/Icewater1337/fridolin/internal/manifest"
+	"github.com/Icewater1337/fridolin/internal/testutil"
 )
 
 // setsidChildren has the fake CLI start a grandchild that leaves the run's
@@ -74,7 +75,7 @@ func TestDetachedChildDoesNotHoldTheBrain(t *testing.T) {
 			if _, _, _, err := mgr.Submit(dm("answer and leave")); err != nil {
 				t.Fatal(err)
 			}
-			waitFor(t, 15*time.Second, "the answer", func() bool { return d.count() == 1 })
+			testutil.WaitFor(t, 15*time.Second, "the answer", func() bool { return d.count() == 1 })
 			if res := d.all()[0].res; res.Err != nil || !strings.HasSuffix(res.Text, "says: answer and leave") {
 				t.Errorf("result = %+v, want the answer", res)
 			}
@@ -95,7 +96,7 @@ func TestDetachedChildDoesNotHoldTheBrain(t *testing.T) {
 			if _, _, _, err := mgr.Submit(next); err != nil {
 				t.Fatal(err)
 			}
-			waitFor(t, 5*time.Second, "the next answer", func() bool { return d.count() == 2 })
+			testutil.WaitFor(t, 5*time.Second, "the next answer", func() bool { return d.count() == 2 })
 			if res := d.all()[1].res; res.Err != nil || !strings.HasSuffix(res.Text, "says: next") {
 				t.Errorf("next result = %+v, want the answer", res)
 			}
@@ -122,7 +123,7 @@ func TestStopWhileOutputIsHeld(t *testing.T) {
 			if _, _, _, err := mgr.Submit(dm("long task")); err != nil {
 				t.Fatal(err)
 			}
-			waitFor(t, 5*time.Second, "the run's grandchild", func() bool {
+			testutil.WaitFor(t, 5*time.Second, "the run's grandchild", func() bool {
 				data, _ := os.ReadFile(filepath.Join(home, "pids"))
 				return len(strings.Fields(string(data))) == 2
 			})
@@ -133,7 +134,7 @@ func TestStopWhileOutputIsHeld(t *testing.T) {
 			if el := time.Since(start); el > 3*time.Second {
 				t.Errorf("the stop took %v", el)
 			}
-			waitFor(t, 5*time.Second, "the stopped run", func() bool { return d.count() == 1 })
+			testutil.WaitFor(t, 5*time.Second, "the stopped run", func() bool { return d.count() == 1 })
 			if res := d.all()[0].res; !errors.Is(res.Err, claudecli.ErrInterrupted) {
 				t.Errorf("result = %+v, want interrupted", res)
 			}
@@ -215,7 +216,7 @@ func TestStopBeforeTheCLIStartsIsAnInterruption(t *testing.T) {
 	if _, _, _, err := mgr.Submit(dm("stopped at once")); err != nil {
 		t.Fatal(err)
 	}
-	waitFor(t, 5*time.Second, "the run", func() bool { return d.count() == 1 })
+	testutil.WaitFor(t, 5*time.Second, "the run", func() bool { return d.count() == 1 })
 	if res := d.all()[0].res; !errors.Is(res.Err, claudecli.ErrInterrupted) {
 		t.Errorf("result = %+v, want interrupted", res)
 	}
@@ -337,7 +338,7 @@ func TestCancellationKeepsTheRecordedResult(t *testing.T) {
 				run := &brainRun{cancel: cancel, done: make(chan struct{}), msg: m}
 				result := make(chan claudecli.Result, 1)
 				go func() { result <- br.invokeGuarded(run, ctx, &settings, m) }()
-				waitFor(t, 5*time.Second, "the recorded result", func() bool {
+				testutil.WaitFor(t, 5*time.Second, "the recorded result", func() bool {
 					data, _ := os.ReadFile(filepath.Join(br.workDir, streamLogName))
 					return strings.Contains(string(data), "✅ Result:") || strings.Contains(string(data), "❌ Error:")
 				})
@@ -512,7 +513,7 @@ func TestKillRunsFreezesQueuedAndNewRuns(t *testing.T) {
 			if _, _, _, err := mgr.Submit(dm("first")); err != nil {
 				t.Fatal(err)
 			}
-			waitFor(t, 5*time.Second, "the CLI to start", func() bool {
+			testutil.WaitFor(t, 5*time.Second, "the CLI to start", func() bool {
 				data, _ := os.ReadFile(pidLog)
 				return len(strings.Fields(string(data))) == 1
 			})
@@ -538,7 +539,7 @@ func TestKillRunsFreezesQueuedAndNewRuns(t *testing.T) {
 				t.Errorf("direct message after force-stop: %v", err)
 			}
 			releaseDelivery()
-			waitFor(t, 5*time.Second, "the worker to finish without another turn", func() bool {
+			testutil.WaitFor(t, 5*time.Second, "the worker to finish without another turn", func() bool {
 				br.mu.Lock()
 				defer br.mu.Unlock()
 				return !br.working
@@ -568,7 +569,7 @@ func TestKillRunsRejectsReloadAlreadyInProgress(t *testing.T) {
 	defer release()
 	reloaded := make(chan error, 1)
 	go func() { reloaded <- mgr.reload(nil, nil, cfg, nil) }()
-	waitFor(t, 5*time.Second, "reload to hold its serialization lock", func() bool {
+	testutil.WaitFor(t, 5*time.Second, "reload to hold its serialization lock", func() bool {
 		if mgr.reloadMu.TryLock() {
 			mgr.reloadMu.Unlock()
 			return false

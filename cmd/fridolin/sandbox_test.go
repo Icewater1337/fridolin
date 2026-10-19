@@ -17,6 +17,7 @@ import (
 	"github.com/Icewater1337/fridolin/internal/manifest"
 	"github.com/Icewater1337/fridolin/internal/platform"
 	"github.com/Icewater1337/fridolin/internal/sandbox"
+	"github.com/Icewater1337/fridolin/internal/testutil"
 
 	"github.com/Icewater1337/fridolin/internal/fsx"
 )
@@ -50,7 +51,7 @@ func TestSandboxFailsClosed(t *testing.T) {
 				// globals and environment. Join its completion under viewerMu
 				// before fakeTmux and Setenv restore them, including on failure.
 				mgr.Stop()
-				waitFor(t, 10*time.Second, "the viewer start to finish", func() bool {
+				testutil.WaitFor(t, 10*time.Second, "the viewer start to finish", func() bool {
 					br.viewerMu.Lock()
 					defer br.viewerMu.Unlock()
 					return !br.viewerStarting
@@ -65,7 +66,7 @@ func TestSandboxFailsClosed(t *testing.T) {
 			if _, _, _, err := mgr.Submit(dm("hello")); err != nil {
 				t.Fatal(err)
 			}
-			waitFor(t, 10*time.Second, "the run", func() bool { return d.count() == 1 })
+			testutil.WaitFor(t, 10*time.Second, "the run", func() bool { return d.count() == 1 })
 
 			res := d.all()[0].res
 			if !errors.Is(res.Err, errSandboxUnavailable) {
@@ -92,9 +93,9 @@ func TestSandboxFailsClosed(t *testing.T) {
 			if _, _, _, err := mgr.Submit(dm("again")); err != nil {
 				t.Fatal(err)
 			}
-			waitFor(t, 10*time.Second, "the second run", func() bool { return d.count() == 2 })
+			testutil.WaitFor(t, 10*time.Second, "the second run", func() bool { return d.count() == 2 })
 			// The viewer starts in the background.
-			waitFor(t, 10*time.Second, "the viewer to start", func() bool { return fsx.Exists(tmuxCalls) })
+			testutil.WaitFor(t, 10*time.Second, "the viewer to start", func() bool { return fsx.Exists(tmuxCalls) })
 		})
 	}
 }
@@ -1498,7 +1499,7 @@ func TestViewerClosesWithItsBrain(t *testing.T) {
 			if c.closed {
 				// The line comes last, from the goroutine that retires the
 				// brain, which is then done with the fake tmux.
-				waitFor(t, 5*time.Second, "the viewer to close", func() bool { return logContains(logs, "[viewer] closed claude-a") })
+				testutil.WaitFor(t, 5*time.Second, "the viewer to close", func() bool { return logContains(logs, "[viewer] closed claude-a") })
 			}
 			data, _ := os.ReadFile(calls)
 			if killed := strings.Contains(string(data), "kill-session -t =claude-a"); killed != c.closed {

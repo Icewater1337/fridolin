@@ -112,6 +112,15 @@ behaviour unless its title says so. The steps so far:
   the builder itself performs filesystem inspection but reads no ambient
   environment. The site supplies its diagnostic logger explicitly. Shared
   SBPL quoting lives in `textx`, also used by configuration validation.
+- **R8, shared tests**: `testutil.Main` preserves fake provider/Plaud
+  dispatch and the restart guard, then isolates HOME, cwd and config selectors.
+  `FakeClaude`/`FakeCodex` return a test executable plus per-child scenario
+  environment, without mutating the parent's environment. The process package
+  directly tests cancellation of a provider and its grandchild, and terminal
+  result preservation. CI repeats its race tests five times. Command-specific
+  polling and terminal probes remain callbacks in command tests. Only test
+  sources may import `testutil`, which uses only the standard library.
+
 
 
 - **R11, access slice**: `access` owns pure admission, group addressing,

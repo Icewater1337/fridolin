@@ -21,6 +21,7 @@ import (
 	"time"
 
 	"github.com/Icewater1337/fridolin/internal/fsx"
+	"github.com/Icewater1337/fridolin/internal/testutil"
 )
 
 // newTestSite is a SiteManager in a temp data dir whose npm installs only
@@ -66,7 +67,7 @@ func newBareRepo(t *testing.T) string {
 func waitDeploy(t *testing.T, m *SiteManager) *siteJob {
 	t.Helper()
 	var j *siteJob
-	waitFor(t, 2*time.Minute, "the deploy to finish", func() bool {
+	testutil.WaitFor(t, 2*time.Minute, "the deploy to finish", func() bool {
 		j = m.DeployStatus()
 		return j != nil && j.State != "running"
 	})
@@ -505,7 +506,7 @@ func TestSiteProcessEndToEnd(t *testing.T) {
 	if _, err := m.UpdateSettings(SiteSettingsUpdate{Enabled: &on}); err != nil {
 		t.Fatal(err)
 	}
-	waitFor(t, 60*time.Second, "the site to answer", func() bool { return siteHealthy(listen) })
+	testutil.WaitFor(t, 60*time.Second, "the site to answer", func() bool { return siteHealthy(listen) })
 
 	body, _ := json.Marshal(map[string]string{"username": "sam", "password": "long enough pw"})
 	resp, err := http.Post("http://"+listen+"/auth/login", "application/json", bytes.NewReader(body))
@@ -623,7 +624,7 @@ func TestSiteGoogleClientReachesRunningSite(t *testing.T) {
 	}
 	expect := func(what, id, file string) {
 		t.Helper()
-		waitFor(t, 60*time.Second, what, func() bool { return signInClient() == id })
+		testutil.WaitFor(t, 60*time.Second, what, func() bool { return signInClient() == id })
 		var rt siteRuntime
 		data, _ := os.ReadFile(m.dir("site.runtime.json"))
 		if err := json.Unmarshal(data, &rt); err != nil || rt.GoogleClientFile != file {

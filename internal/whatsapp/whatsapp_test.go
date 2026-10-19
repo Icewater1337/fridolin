@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+
 	"github.com/Icewater1337/fridolin/internal/access"
 
 	"io/fs"
@@ -20,6 +21,7 @@ import (
 
 	"github.com/Icewater1337/fridolin/internal/chat"
 	mediafiles "github.com/Icewater1337/fridolin/internal/media"
+	"github.com/Icewater1337/fridolin/internal/testutil"
 	"github.com/Icewater1337/fridolin/internal/trigger"
 	"go.mau.fi/whatsmeow"
 	"go.mau.fi/whatsmeow/proto/waE2E"
@@ -420,7 +422,7 @@ func TestHandleMessageSavesAttachment(t *testing.T) {
 			defer close(done)
 			tw.handle(t, docEvent())
 		}()
-		waitFor(t, 2*time.Second, "the download to start", func() bool { return dl.callCount() == 1 })
+		testutil.WaitFor(t, 2*time.Second, "the download to start", func() bool { return dl.callCount() == 1 })
 		tw.Disconnect()
 		select {
 		case <-done:
@@ -985,7 +987,7 @@ func TestIgnoredGroupNameIsLookedUpOnce(t *testing.T) {
 		evts = append(evts, groupMessage(stranger, types.EmptyJID, groupChatter()))
 	}
 	tw.feed(evts...)
-	waitFor(t, 2*time.Second, "the five messages", func() bool { return len(offered()) == 5 })
+	testutil.WaitFor(t, 2*time.Second, "the five messages", func() bool { return len(offered()) == 5 })
 	if n := fl.infoCalls.Load(); n != 1 {
 		t.Errorf("WhatsApp was asked for the name %d times, want once", n)
 	}
@@ -1107,7 +1109,7 @@ func TestChatEventsKeepTheirOrder(t *testing.T) {
 			tw.feed(c.evts...)
 			// A download stalls until the rest of the chat came in.
 			time.AfterFunc(100*time.Millisecond, func() { close(dl.hold) })
-			waitFor(t, 2*time.Second, "both to arrive", func() bool { return len(a.list()) == len(c.want) })
+			testutil.WaitFor(t, 2*time.Second, "both to arrive", func() bool { return len(a.list()) == len(c.want) })
 			if got := a.list(); !slices.Equal(got, c.want) {
 				t.Errorf("arrived as %v, want %v", got, c.want)
 			}
@@ -1124,12 +1126,12 @@ func TestSlowDownloadHoldsUpOnlyItsChat(t *testing.T) {
 	tw.media = dl
 	a := recordArrivals(tw, "")
 	tw.feed(dmEvent("3EB0PHOTO", photoMsg("look")), dmEventFrom(otherNumber, "3EB0OTHER", textMsg("hello")))
-	waitFor(t, time.Second, "the other chat's message", func() bool { return slices.Contains(a.list(), "3EB0OTHER") })
+	testutil.WaitFor(t, time.Second, "the other chat's message", func() bool { return slices.Contains(a.list(), "3EB0OTHER") })
 	if got := a.list(); slices.Contains(got, "3EB0PHOTO") {
 		t.Errorf("arrived %v while the download stalled", got)
 	}
 	close(dl.hold)
-	waitFor(t, 2*time.Second, "the photo", func() bool { return slices.Contains(a.list(), "3EB0PHOTO") })
+	testutil.WaitFor(t, 2*time.Second, "the photo", func() bool { return slices.Contains(a.list(), "3EB0PHOTO") })
 }
 
 // A group lookup that hangs holds up only the group that asked for it: a
@@ -1140,9 +1142,11 @@ func TestHangingGroupLookupDoesNotDelayADM(t *testing.T) {
 	tw.lister = fl
 	a := recordArrivals(tw, "")
 	stranger := types.NewJID(otherNumber, types.DefaultUserServer)
+	tw.feed(groupMessage(stranger, types.EmptyJID, groupChatter()))
+	testutil.WaitFor(t, time.Second, "the group lookup to start", func() bool { return fl.infoCalls.Load() == 1 })
 	start := time.Now()
-	tw.feed(groupMessage(stranger, types.EmptyJID, groupChatter()), dmEvent("3EB0DM", textMsg("hello")))
-	waitFor(t, time.Second, "the DM", func() bool { return slices.Contains(a.list(), "3EB0DM") })
+	tw.feed(dmEvent("3EB0DM", textMsg("hello")))
+	testutil.WaitFor(t, time.Second, "the DM", func() bool { return slices.Contains(a.list(), "3EB0DM") })
 	if waited := time.Since(start); waited >= groupNameTimeout {
 		t.Errorf("the DM took %v, as long as the lookup", waited)
 	}
@@ -1203,9 +1207,9 @@ func TestDisconnectHandsOnWhatIsQueued(t *testing.T) {
 			dmEventFrom(otherNumber, "3EB0OTHER", textMsg("hello")),
 			dmEvent("3EB0C", textMsg("three")),
 		)
-		waitFor(t, time.Second, "the download to start", func() bool { return dl.callCount() == 1 })
-		waitFor(t, time.Second, "the other chat's message", func() bool { return slices.Contains(a.list(), "3EB0OTHER") })
-		waitFor(t, time.Second, "the chat's messages to be queued", func() bool {
+		testutil.WaitFor(t, time.Second, "the download to start", func() bool { return dl.callCount() == 1 })
+		testutil.WaitFor(t, time.Second, "the other chat's message", func() bool { return slices.Contains(a.list(), "3EB0OTHER") })
+		testutil.WaitFor(t, time.Second, "the chat's messages to be queued", func() bool {
 			tw.intake.mu.Lock()
 			defer tw.intake.mu.Unlock()
 			c := tw.intake.chats[testDMChat]
@@ -1280,8 +1284,8 @@ func TestDisconnectHandsOnWhatIsQueued(t *testing.T) {
 			evts := c.evts(t)
 			chatJID, _ := tw.queueChat(evts[1].Info.MessageSource)
 			tw.feed(evts...)
-			waitFor(t, time.Second, "the download to start", func() bool { return dl.callCount() == 1 })
-			waitFor(t, time.Second, "the next to be queued behind it", func() bool {
+			testutil.WaitFor(t, time.Second, "the download to start", func() bool { return dl.callCount() == 1 })
+			testutil.WaitFor(t, time.Second, "the next to be queued behind it", func() bool {
 				tw.intake.mu.Lock()
 				defer tw.intake.mu.Unlock()
 				c := tw.intake.chats[chatJID]
@@ -1396,13 +1400,13 @@ func TestDownloadsAreBoundedAcrossChats(t *testing.T) {
 		evts = append(evts, evt)
 	}
 	tw.feed(evts...)
-	waitFor(t, time.Second, "the downloads to start", func() bool { return dl.callCount() >= maxDownloads })
+	testutil.WaitFor(t, time.Second, "the downloads to start", func() bool { return dl.callCount() >= maxDownloads })
 	time.Sleep(50 * time.Millisecond)
 	if n := dl.callCount(); n != maxDownloads {
 		t.Errorf("%d downloads at once, want %d", n, maxDownloads)
 	}
 	close(dl.hold)
-	waitFor(t, 2*time.Second, "every photo", func() bool { return len(a.list()) == len(evts) })
+	testutil.WaitFor(t, 2*time.Second, "every photo", func() bool { return len(a.list()) == len(evts) })
 	for _, m := range a.messages() {
 		if len(m.Media) != 1 {
 			t.Errorf("%s arrived without its photo: %+v", m.JID, m)
@@ -1426,7 +1430,7 @@ func TestOversizedFileDoesNotWaitForASlot(t *testing.T) {
 		evts = append(evts, evt)
 	}
 	tw.feed(evts...)
-	waitFor(t, time.Second, "every slot to be taken", func() bool { return dl.callCount() == maxDownloads })
+	testutil.WaitFor(t, time.Second, "every slot to be taken", func() bool { return dl.callCount() == maxDownloads })
 	tw.feed(dmEvent("3EB0BIG", &waE2E.Message{DocumentMessage: &waE2E.DocumentMessage{
 		FileName: proto.String("backup.zip"), FileLength: proto.Uint64(101 << 20),
 	}}))

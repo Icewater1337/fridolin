@@ -101,6 +101,10 @@ jobs:
       - name: test
         run: make race-shard SHARD=${{ matrix.shard }}/${{ env.SHARDS }}
 
+      - name: repeat provider process tests
+        if: matrix.shard == fromJSON(env.SHARDS)
+        run: make race-process
+
       # Builds the binary with -race in a temp dir, starts it in dev mode on
       # a scratch config and stops it.
       - name: smoke test
