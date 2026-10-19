@@ -476,7 +476,7 @@ func FuzzRenderPrompt(f *testing.F) {
 		in := promptInput{
 			Now:         time.Date(2026, 10, 18, 9, 31, 0, 0, time.UTC),
 			BrainID:     "team",
-			Names:       map[string]string{identityKey(sender): name},
+			Names:       map[string]string{chat.IdentityKey(sender): name},
 			Message:     Inbound{Inbound: chat.Inbound{JID: testGroup, Sender: sender, Text: text, Silent: silent}},
 			ObserveOnly: silent,
 		}
