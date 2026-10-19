@@ -160,14 +160,14 @@ func TestCalendarDashboardSignInFlow(t *testing.T) {
 		tb.h.ServeHTTP(w, r)
 		return w
 	}
-	if w := cb("state=forged&code=x"); w.Code != 400 {
-		t.Errorf("forged state: %d", w.Code)
+	if w := cb("state=forged&code=x"); w.Code != 400 || w.Body.String() != "This sign-in link expired or was already used. Start again from the dashboard.\n" || w.Header().Get("Content-Type") != "text/plain; charset=utf-8" {
+		t.Errorf("forged state: %d %q (%s)", w.Code, w.Body.String(), w.Header().Get("Content-Type"))
 	}
 
 	// Google returns: token exchanged with the PKCE verifier, files written.
 	w = cb("state=" + url.QueryEscape(q.Get("state")) + "&code=good-code")
-	if w.Code != 302 || w.Header().Get("Location") != "/#/brains/fam" {
-		t.Fatalf("callback: %d %s", w.Code, w.Header().Get("Location"))
+	if w.Code != 302 || w.Header().Get("Location") != "/#/brains/fam" || w.Body.String() != "<a href=\"/#/brains/fam\">Found</a>.\n\n" {
+		t.Fatalf("callback: %d %s %q", w.Code, w.Header().Get("Location"), w.Body.String())
 	}
 	if (*got)["code_verifier"] == "" || (*got)["code"] != "good-code" || (*got)["client_secret"] != "TEST-CLIENT-SECRET" {
 		t.Errorf("token request = %v", *got)
@@ -254,7 +254,11 @@ func TestCalendarSignInErrorsAreShown(t *testing.T) {
 	cb := func(query string) {
 		r := httptest.NewRequest("GET", "http://127.0.0.1:8765/?"+query, nil)
 		r.Host = "127.0.0.1:8765"
-		tb.h.ServeHTTP(httptest.NewRecorder(), r)
+		w := httptest.NewRecorder()
+		tb.h.ServeHTTP(w, r)
+		if w.Code != 302 || w.Header().Get("Location") != "/#/brains/p" {
+			t.Fatalf("sign-in failure: %d %s %q", w.Code, w.Header().Get("Location"), w.Body.String())
+		}
 	}
 	cb("state=" + start() + "&error=access_denied")
 	if s := tb.do("GET", "/api/brains/p/calendar", nil).Body.String(); !strings.Contains(s, "cancelled") {

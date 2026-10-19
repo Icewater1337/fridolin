@@ -11,6 +11,21 @@ import (
 	"github.com/Icewater1337/fridolin/internal/manifest"
 )
 
+// isOAuthCallback reports whether a request to / is Google returning.
+func isOAuthCallback(r *http.Request) bool {
+	q := r.URL.Query()
+	return q.Get("state") != "" && (q.Get("code") != "" || q.Get("error") != "")
+}
+
+func (b *Bridge) googleCallback(w http.ResponseWriter, r *http.Request) {
+	redirect, err := b.google.Callback(r.Context(), r.URL.Query())
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	http.Redirect(w, r, redirect, http.StatusFound)
+}
+
 // ── API ──────────────────────────────────────────────────────────────────
 
 func (b *Bridge) apiGoogleClient(w http.ResponseWriter, r *http.Request) {

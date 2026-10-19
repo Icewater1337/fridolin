@@ -402,78 +402,64 @@ func (g *GoogleAuth) StartSignIn(brainID string) (string, error) {
 	return g.options.Endpoints.Auth + "?" + q.Encode(), nil
 }
 
-// isOAuthCallback reports whether a request to / is Google returning.
-func isOAuthCallback(r *http.Request) bool {
-	q := r.URL.Query()
-	return q.Get("state") != "" && (q.Get("code") != "" || q.Get("error") != "")
-}
-
-// HandleCallback finishes a sign-in and redirects to the brain's page.
-func (g *GoogleAuth) HandleCallback(w http.ResponseWriter, r *http.Request) {
-	q := r.URL.Query()
+// Callback finishes a sign-in and returns the brain's page. An invalid or
+// expired state returns an error; sign-in failures are recorded for the page.
+func (g *GoogleAuth) Callback(ctx context.Context, q url.Values) (string, error) {
 	g.mu.Lock()
 	p, ok := g.pending[q.Get("state")]
 	delete(g.pending, q.Get("state"))
 	g.mu.Unlock()
 	if !ok || time.Since(p.created) > 15*time.Minute {
-		http.Error(w, "This sign-in link expired or was already used. Start again from the dashboard.", http.StatusBadRequest)
-		return
+		//lint:ignore ST1005 Preserve the existing dashboard HTTP response text.
+		return "", errors.New("This sign-in link expired or was already used. Start again from the dashboard.")
 	}
 	back := "/#/brains/" + url.PathEscape(p.brainID)
-	fail := func(msg string) {
+	fail := func(msg string) (string, error) {
 		g.mu.Lock()
 		g.lastError[p.brainID] = msg
 		g.mu.Unlock()
 		log.Printf("brain %s: Google sign-in failed: %s", p.brainID, msg)
-		http.Redirect(w, r, back, http.StatusFound)
+		return back, nil
 	}
 	if e := q.Get("error"); e != "" {
 		if e == "access_denied" {
-			fail("Google sign-in was cancelled")
-		} else {
-			fail("Google returned an error: " + e)
+			return fail("Google sign-in was cancelled")
 		}
-		return
+		return fail("Google returned an error: " + e)
 	}
 	// Not the request's context: the code is spent once Google has it, and a
 	// browser that goes away meanwhile must not throw the sign-in away.
-	ctx, cancel := context.WithTimeout(context.WithoutCancel(r.Context()), 30*time.Second)
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
 	defer cancel()
 	tok, err := g.exchange(ctx, p, q.Get("code"))
 	if err != nil {
-		fail(err.Error())
-		return
+		return fail(err.Error())
 	}
 	if tok.RefreshToken == "" {
-		fail("Google did not return a refresh token — remove the bridge's access at myaccount.google.com/permissions and connect again")
-		return
+		return fail("Google did not return a refresh token — remove the bridge's access at myaccount.google.com/permissions and connect again")
 	}
 	if missing := missingScopes(tok.Scopes); len(missing) > 0 {
-		fail("Google granted only part of the calendar access the brain needs (missing " + strings.Join(missing, ", ") + ") — connect again and leave every box ticked")
-		return
+		return fail("Google granted only part of the calendar access the brain needs (missing " + strings.Join(missing, ", ") + ") — connect again and leave every box ticked")
 	}
 	if extra := extraScopes(tok.Scopes); len(extra) > 0 {
 		log.Printf("brain %s: Google granted more than the bridge asked for (%s); to narrow it, disconnect the brain's calendar, and every other brain signed in to the same account, and connect it again", p.brainID, strings.Join(extra, ", "))
 	}
 	account, err := g.primaryAccount(ctx, tok)
 	if err != nil {
-		fail("signed in, but reading the calendar list failed: " + err.Error())
-		return
+		return fail("signed in, but reading the calendar list failed: " + err.Error())
 	}
 	tok.Account = account
 	// A brain removed while it signed in gets no token: one left behind
 	// would count as connected for a later brain of the same id.
 	if !g.configured(p.brainID) {
-		fail("the brain was removed while it signed in")
-		return
+		return fail("the brain was removed while it signed in")
 	}
 	// Held to the end, so that a refresh in progress cannot write the
 	// token this replaces back over the new one, nor a disconnect come
 	// between reading the old token and saving the new (lockToken).
 	unlock, err := g.lockToken(ctx, p.brainID)
 	if err != nil {
-		fail(err.Error())
-		return
+		return fail(err.Error())
 	}
 	defer unlock()
 	// A switch to another account leaves the old one's grant behind, of use
@@ -489,8 +475,7 @@ func (g *GoogleAuth) HandleCallback(w http.ResponseWriter, r *http.Request) {
 		revokeOld = old.RefreshToken
 	}
 	if err := g.saveToken(p.brainID, tok); err != nil {
-		fail("saving the token failed: " + err.Error())
-		return
+		return fail("saving the token failed: " + err.Error())
 	}
 	if err := g.options.UpdateManifest(p.brainID, func(m *manifest.Manifest) error {
 		if m.Calendar == nil || m.Calendar.Account != account {
@@ -505,8 +490,7 @@ func (g *GoogleAuth) HandleCallback(w http.ResponseWriter, r *http.Request) {
 		} else {
 			_ = os.Remove(g.tokenPath(p.brainID))
 		}
-		fail("saving the brain's calendar settings failed: " + err.Error())
-		return
+		return fail("saving the brain's calendar settings failed: " + err.Error())
 	}
 	log.Printf("brain %s: Google Calendar connected (%s)", p.brainID, maskEmail(account))
 	// Only now: a sign-in that failed above leaves the brain with the old
@@ -516,7 +500,7 @@ func (g *GoogleAuth) HandleCallback(w http.ResponseWriter, r *http.Request) {
 			log.Printf("brain %s: could not revoke the access of the Google account it switched from: %v", p.brainID, err)
 		}
 	}
-	http.Redirect(w, r, back, http.StatusFound)
+	return back, nil
 }
 
 func maskEmail(e string) string {

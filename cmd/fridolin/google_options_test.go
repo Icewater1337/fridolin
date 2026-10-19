@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
-	"net/http/httptest"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -80,17 +79,14 @@ func TestCalendarSignInFlow(t *testing.T) {
 			}
 			// Credential destination is read at completion, not frozen with the client.
 			creds = filepath.Join(root, "at-completion")
-			callback := func(state string) *httptest.ResponseRecorder {
-				w := httptest.NewRecorder()
-				r := httptest.NewRequest(http.MethodGet, "http://127.0.0.1:8765/?state="+url.QueryEscape(state)+"&code=good-code", nil)
-				g.HandleCallback(w, r)
-				return w
+			callback := func(state string) (string, error) {
+				return g.Callback(t.Context(), url.Values{"state": {state}, "code": {"good-code"}})
 			}
-			if w := callback("forged"); w.Code != http.StatusBadRequest {
-				t.Fatalf("forged state status=%d", w.Code)
+			if redirect, err := callback("forged"); redirect != "" || err == nil {
+				t.Fatalf("forged state: redirect=%q error=%v", redirect, err)
 			}
-			if w := callback(q.Get("state")); w.Code != http.StatusFound || w.Header().Get("Location") != "/#/brains/a" {
-				t.Fatalf("callback=%d %s", w.Code, w.Body.String())
+			if redirect, err := callback(q.Get("state")); redirect != "/#/brains/a" || err != nil {
+				t.Fatalf("callback: redirect=%q error=%v", redirect, err)
 			}
 			if configuredCalls != 1 || current.Calendar == nil || current.Calendar.Account != "you@example.com" {
 				t.Fatalf("configured calls=%d calendar=%+v", configuredCalls, current.Calendar)
@@ -105,8 +101,8 @@ func TestCalendarSignInFlow(t *testing.T) {
 			if _, err := os.Stat(calendarTokenFile(filepath.Join(root, "before-sign-in"), "a")); !os.IsNotExist(err) {
 				t.Fatalf("token was written to the startup credentials path: %v", err)
 			}
-			if w := callback(q.Get("state")); w.Code != http.StatusBadRequest {
-				t.Fatalf("replayed state status=%d", w.Code)
+			if redirect, err := callback(q.Get("state")); redirect != "" || err == nil {
+				t.Fatalf("replayed state: redirect=%q error=%v", redirect, err)
 			}
 			status, _ := json.Marshal(g.CalendarStatus(t.Context(), "a", current.Calendar, true))
 			for _, secret := range []string{"TEST-CLIENT-SECRET", "ACCESS-1", "RT-1"} {
