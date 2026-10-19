@@ -30,7 +30,7 @@ type SiteService interface {
 	Fetch(ctx context.Context) (sitesvc.SiteUpdates, error)
 	IsBuilder(brainID string) bool
 	MergeProposal(ctx context.Context, brainID string) error
-	Proposals(ctx context.Context) []map[string]any
+	Proposals(ctx context.Context) []sitesvc.ProposalSnapshot
 	RemoveSecret(module, name string) error
 	RemoveUser(id string) error
 	Restart()
@@ -48,8 +48,8 @@ type SiteService interface {
 
 type SiteAPI struct {
 	Site         func() SiteService
-	StatusView   func() map[string]any
-	BuildersView func() []map[string]any
+	StatusView   func() sitesvc.StatusSnapshot
+	BuildersView func() []BuilderRow
 	BuildRoutes  func(*http.ServeMux)
 }
 

@@ -298,7 +298,7 @@ func TestRcloneGetsTheAllowlistedEnvironment(t *testing.T) {
 	}{
 		{"backup", "env.lsjson", func(t *testing.T) error { _, err := tb.backup.Versions(context.Background(), "notes"); return err }, false},
 		{"version", "env.version", func(t *testing.T) error {
-			if v := tb.backup.Status()["rclone"].(map[string]any)["version"]; v != "rclone v9.9" {
+			if v := *tb.backup.Status().Rclone.Version; v != "rclone v9.9" {
 				return fmt.Errorf("version = %q", v)
 			}
 			return nil

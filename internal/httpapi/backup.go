@@ -12,7 +12,7 @@ import (
 
 // BackupService is the backup job surface used by the HTTP adapter.
 type BackupService interface {
-	Status() map[string]any
+	Status() backup.StatusSnapshot
 	Connect() error
 	Disconnect(context.Context) error
 	StartRun([]string, bool, string, bool) error

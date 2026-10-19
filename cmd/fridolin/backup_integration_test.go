@@ -47,7 +47,7 @@ func persistedBackupState(t *testing.T, tb *testBridge) struct {
 	return state
 }
 
-func connectedBackup(tb *testBridge) bool { return tb.backup.Status()["connected"].(bool) }
+func connectedBackup(tb *testBridge) bool { return tb.backup.Status().Connected }
 
 // startScheduledBackup exercises scheduled-result delivery without invoking a
 // private scheduler tick; the schedule itself is covered by service fixtures.

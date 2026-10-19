@@ -200,7 +200,7 @@ func TestOriginGuardAndNoStore(t *testing.T) {
 }
 
 func TestHTTPServerTimeouts(t *testing.T) {
-	s := newHTTPServer(http.NotFoundHandler())
+	s := httpapi.NewServer(http.NotFoundHandler())
 	if s.ReadHeaderTimeout <= 0 || s.ReadTimeout <= 0 || s.IdleTimeout <= 0 || s.MaxHeaderBytes <= 0 || s.MaxHeaderBytes > 1<<20 {
 		t.Fatalf("read header %v, read %v, idle %v, max header %d", s.ReadHeaderTimeout, s.ReadTimeout, s.IdleTimeout, s.MaxHeaderBytes)
 	}

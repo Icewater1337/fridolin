@@ -40,7 +40,7 @@ type BuilderSyncResponse struct {
 }
 
 type BuildersResponse struct {
-	Brains []map[string]any `json:"brains"`
+	Brains []BuilderRow `json:"brains"`
 }
 
 type CalendarBusyResponse struct {
@@ -185,7 +185,7 @@ type SignInResponse struct {
 }
 
 type SiteProposalsResponse struct {
-	Proposals []map[string]any `json:"proposals"`
+	Proposals []site.ProposalSnapshot `json:"proposals"`
 }
 
 type SiteRolesResponse struct {
@@ -215,4 +215,21 @@ type GoogleClientResponse struct {
 	Configured   bool    `json:"configured"`
 	RedirectURI  string  `json:"redirect_uri"`
 	Type         *string `json:"type,omitempty"`
+}
+
+// Builder responses retain optional keys even when their values are empty.
+type BuilderRow struct {
+	Builder bool               `json:"builder"`
+	ID      string             `json:"id"`
+	Name    string             `json:"name"`
+	Preview *map[string]string `json:"preview,omitempty"`
+}
+type BuildChatResponse struct {
+	Activity []string            `json:"activity"`
+	Messages []site.BuildMessage `json:"messages"`
+	Preview  *map[string]string  `json:"preview,omitempty"`
+	Proposal *site.SiteProposal  `json:"proposal,omitempty"`
+	Queued   int                 `json:"queued"`
+	Running  bool                `json:"running"`
+	Thread   int                 `json:"thread"`
 }

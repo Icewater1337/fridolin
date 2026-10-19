@@ -3,7 +3,6 @@ package httpapi
 import (
 	"context"
 	"database/sql"
-	"encoding/json"
 	"errors"
 	"fmt"
 	brainruntime "github.com/Icewater1337/fridolin/internal/brain"
@@ -213,9 +212,7 @@ var brainSendUpdatesValues = []string{"all", "externalOnly", "none"}
 // into its calendar, else the brain's default one.
 func (a *BrainAPI) brainCalendarCreate(ctx context.Context, r *http.Request, cals google.Calendars, token func() (*google.Token, error)) (any, error) {
 	var ev google.NewEvent
-	dec := json.NewDecoder(r.Body)
-	dec.DisallowUnknownFields()
-	if err := dec.Decode(&ev); err != nil {
+	if err := decodeSingleJSON(r.Body, &ev); err != nil {
 		return nil, badCall("the event is not valid JSON: %v", google.DecodeError(err))
 	}
 	body, err := ev.Body()
@@ -271,9 +268,7 @@ func (a *BrainAPI) brainCalendarBusy(ctx context.Context, r *http.Request, cals 
 		TimeZone string `json:"time_zone"`
 		Calendar string `json:"calendar"`
 	}
-	dec := json.NewDecoder(r.Body)
-	dec.DisallowUnknownFields()
-	if err := dec.Decode(&req); err != nil {
+	if err := decodeSingleJSON(r.Body, &req); err != nil {
 		return nil, badCall("the request is not valid JSON: %v", err)
 	}
 	from, to, err := timeRange(req.From, req.To, req.TimeZone)
