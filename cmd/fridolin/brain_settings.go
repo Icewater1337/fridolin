@@ -21,32 +21,32 @@ type brainInputRules struct {
 // defaults contain no per-brain manifest or prompt selection. The two Codex
 // values remain distinct because that provider ignores Claude overrides.
 type brainGlobals struct {
-	defaults                brainSettings
-	codexModel, codexEffort string
-	runLimit                int
+	Defaults                brainSettings
+	CodexModel, CodexEffort string
+	RunLimit                int
 }
 
 // mergeBrainSettings applies only the manifest's run overrides. It reads no
 // process state and owns every mutable settings slice, as settingsFor did.
 func mergeBrainSettings(g brainGlobals, sp manifest.Spec) *brainSettings {
 	m := sp.Manifest
-	s := g.defaults
-	s.name, s.manifest, s.promptFile, s.observe = m.Name, m, sp.PromptFile, m.Observe
+	s := g.Defaults
+	s.Name, s.Manifest, s.PromptFile, s.Observe = m.Name, m, sp.PromptFile, m.Observe
 	if m.Model != "" {
-		s.model = m.Model
+		s.Model = m.Model
 	}
 	if m.Effort != "" {
-		s.effort = m.Effort
+		s.Effort = m.Effort
 	}
-	tools := g.defaults.disallowedTools
+	tools := g.Defaults.DisallowedTools
 	if m.DisallowedTools != nil {
 		tools = *m.DisallowedTools
 	}
-	s.disallowedTools = append([]string(nil), tools...)
-	s.otpMarkers = append([]string(nil), g.defaults.otpMarkers...)
-	s.envPassthrough = append([]string(nil), g.defaults.envPassthrough...)
-	if s.provider == "codex" {
-		s.model, s.effort = g.codexModel, g.codexEffort
+	s.DisallowedTools = append([]string(nil), tools...)
+	s.OTPMarkers = append([]string(nil), g.Defaults.OTPMarkers...)
+	s.EnvPassthrough = append([]string(nil), g.Defaults.EnvPassthrough...)
+	if s.Provider == "codex" {
+		s.Model, s.Effort = g.CodexModel, g.CodexEffort
 	}
 	return &s
 }

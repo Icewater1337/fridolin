@@ -133,7 +133,7 @@ func TestMergedMessageNamesItsFilesInTheInbox(t *testing.T) {
 			}
 			testutil.WaitFor(t, 5*time.Second, "the first run", func() bool { r := br.Snapshot().Running; return r != nil && r.PID > 0 })
 
-			media := br.settings.Load().mediaDir
+			media := br.settings.Load().MediaDir
 			inbox := mediaInboxAt(media).Path("a")
 			part := func(id, file string) Inbound {
 				m := dm("")

@@ -34,12 +34,12 @@ func TestCodexDefaultsAndValidation(t *testing.T) {
 	sp := manifest.Spec{Manifest: manifest.Manifest{ID: "a", Model: "opus", Effort: "max"}}
 	cfg.AgentProvider = "codex"
 	s := settingsFor(cfg, sp)
-	if s.model != claudecli.DefaultCodexModel || s.effort != "high" {
+	if s.Model != claudecli.DefaultCodexModel || s.Effort != "high" {
 		t.Fatalf("Claude overrides reached Codex: %+v", s)
 	}
 	cfg.AgentProvider = "claude"
 	s = settingsFor(cfg, sp)
-	if s.model != "opus" || s.effort != "max" {
+	if s.Model != "opus" || s.Effort != "max" {
 		t.Fatalf("Claude overrides lost: %+v", s)
 	}
 }
@@ -47,7 +47,7 @@ func TestCodexDefaultsAndValidation(t *testing.T) {
 func TestCodexArgsPermissions(t *testing.T) {
 	for _, external := range []bool{false, true} {
 		for _, tools := range []bool{false, true} {
-			s := &brainSettings{dangerously: tools, dataDir: "/data", mediaDir: "/media", manifest: manifest.Manifest{ID: "a"}}
+			s := &brainSettings{Dangerously: tools, DataDir: "/data", MediaDir: "/media", Manifest: manifest.Manifest{ID: "a"}}
 			args := codexArgs(s, "/brain", external)
 			if args[len(args)-1] != "-" || !slices.Contains(args, claudecli.DefaultCodexModel) || !slices.Contains(args, `model_reasoning_effort="high"`) {
 				t.Fatalf("missing stdin/defaults: %q", args)
@@ -103,7 +103,7 @@ func TestCodexWebToolRestrictions(t *testing.T) {
 		if err := claudecli.ValidateCodexTools(blocked); err != nil {
 			t.Fatal(err)
 		}
-		args := codexArgs(&brainSettings{disallowedTools: blocked}, "/brain", false)
+		args := codexArgs(&brainSettings{DisallowedTools: blocked}, "/brain", false)
 		if slices.Contains(args, `web_search="disabled"`) != (len(blocked) > 0) {
 			t.Fatalf("web restriction %v not applied: %v", blocked, args)
 		}

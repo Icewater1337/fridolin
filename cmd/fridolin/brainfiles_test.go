@@ -375,7 +375,7 @@ func TestHistoryIsNotFollowedOutOfTheFolder(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			br, home := folderBrain(t)
 			s := *br.settings.Load()
-			s.otpGuard = true
+			s.OTPGuard = true
 			br.settings.Store(&s)
 			dir := filepath.Join(home, "a")
 			hist := filepath.Join(dir, history.FileName)
@@ -479,7 +479,7 @@ func TestViewerCreatesTheStreamLogInTheFolder(t *testing.T) {
 			t.Cleanup(func() { startViewer = prev })
 			logged := captureLog(t)
 
-			br.ensureViewer(&brainSettings{viewer: true})
+			br.ensureViewer(&brainSettings{Viewer: true})
 			viewerIdle(t, br)
 
 			if tc.target == "" {

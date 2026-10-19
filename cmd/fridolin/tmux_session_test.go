@@ -50,7 +50,7 @@ func TestViewerGetsTheAllowlistedEnvironment(t *testing.T) {
 	}
 
 	br := bareBrain(t)
-	br.ensureViewer(&brainSettings{viewer: true, envPassthrough: []string{"GROQ_API_KEY"}})
+	br.ensureViewer(&brainSettings{Viewer: true, EnvPassthrough: []string{"GROQ_API_KEY"}})
 	viewerIdle(t, br)
 	if br.tmuxViewer == nil {
 		t.Fatal("no viewer started")
@@ -196,7 +196,7 @@ func TestViewerClosedWhileItStarts(t *testing.T) {
 			logs := captureLog(t)
 
 			br := bareBrain(t)
-			br.ensureViewer(&brainSettings{viewer: true})
+			br.ensureViewer(&brainSettings{Viewer: true})
 			<-starting
 			if tc.closed {
 				br.closeViewer()
@@ -243,7 +243,7 @@ func TestViewerStartDoesNotHoldUpTheRun(t *testing.T) {
 
 	br := bareBrain(t)
 	start := time.Now()
-	br.ensureViewer(&brainSettings{viewer: true})
+	br.ensureViewer(&brainSettings{Viewer: true})
 	// Well under one call's timeout: a start in the run's path, bounded
 	// as it is, would wait for at least that one.
 	if el := time.Since(start); el > viewerTimeout/2 {

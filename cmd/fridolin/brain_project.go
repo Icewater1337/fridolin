@@ -16,19 +16,19 @@ func settingsFor(cfg *config.Config, sp manifest.Spec) *brainSettings {
 
 func brainGlobalsOf(cfg *config.Config) brainGlobals {
 	return brainGlobals{
-		codexModel: cfg.CodexModel, codexEffort: cfg.CodexEffort, runLimit: cfg.RunLimit(),
-		defaults: brainSettings{
-			claudePath: cfg.ClaudePath, provider: cfg.AgentProvider, codexPath: cfg.CodexPath,
-			model: cfg.BrainModel, effort: cfg.BrainEffort,
-			disallowedTools: append([]string(nil), cfg.DisallowedTools...),
-			dangerously:     cfg.DangerouslySkipPermissions, inheritUser: cfg.InheritClaudeUserConfig,
-			otpGuard: cfg.OTPGuard, otpMarkers: append([]string(nil), cfg.OTPMarkers...),
-			viewer: cfg.Viewer, runTimeout: runTimeout(cfg), queueMode: cfg.Queue.Mode, maxPending: cfg.Queue.MaxPending,
-			credsDir: credentialsDirOf(cfg), mediaDir: cfg.MediaDir,
-			envPassthrough: append([]string(nil), cfg.ChildEnvPassthrough...), toolsDir: ownLayout().Tools,
+		CodexModel: cfg.CodexModel, CodexEffort: cfg.CodexEffort, RunLimit: cfg.RunLimit(),
+		Defaults: brainSettings{
+			ClaudePath: cfg.ClaudePath, Provider: cfg.AgentProvider, CodexPath: cfg.CodexPath,
+			Model: cfg.BrainModel, Effort: cfg.BrainEffort,
+			DisallowedTools: append([]string(nil), cfg.DisallowedTools...),
+			Dangerously:     cfg.DangerouslySkipPermissions, InheritUser: cfg.InheritClaudeUserConfig,
+			OTPGuard: cfg.OTPGuard, OTPMarkers: append([]string(nil), cfg.OTPMarkers...),
+			Viewer: cfg.Viewer, RunTimeout: runTimeout(cfg), QueueMode: cfg.Queue.Mode, MaxPending: cfg.Queue.MaxPending,
+			CredsDir: credentialsDirOf(cfg), MediaDir: cfg.MediaDir,
+			EnvPassthrough: append([]string(nil), cfg.ChildEnvPassthrough...), ToolsDir: ownLayout().Tools,
 			// Absolute: brains run in their own folder, where a relative data_dir
 			// would name another one. R6 supplies these startup paths through Boot.
-			dataDir: absPath(cfg.DataDir), dbPath: absPath(cfg.DBPath), plaudPATH: brainPlaudPATH(cfg),
+			DataDir: absPath(cfg.DataDir), DBPath: absPath(cfg.DBPath), PlaudPATH: brainPlaudPATH(cfg),
 		},
 	}
 }
@@ -38,7 +38,7 @@ func brainGlobalsOf(cfg *config.Config) brainGlobals {
 // brains and their scripts rely on these names, as on the other BRIDGE_
 // variables.
 func dataEnv(s *brainSettings) []string {
-	return []string{"BRIDGE_DATA_DIR=" + s.dataDir, "BRIDGE_DB_PATH=" + s.dbPath}
+	return []string{"BRIDGE_DATA_DIR=" + s.DataDir, "BRIDGE_DB_PATH=" + s.DBPath}
 }
 
 // credentialsDirOf is where per-brain credential files live.

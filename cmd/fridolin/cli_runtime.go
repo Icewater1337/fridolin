@@ -9,18 +9,18 @@ import (
 // cliOptionsOf projects only argument policy; paths are resolved before
 // they reach the provider package.
 func cliOptionsOf(s *brainSettings) claudecli.Options {
-	return claudecli.Options{InheritUser: s.inheritUser, Dangerously: s.dangerously,
-		Model: s.model, Effort: s.effort, DisallowedTools: s.disallowedTools}
+	return claudecli.Options{InheritUser: s.InheritUser, Dangerously: s.Dangerously,
+		Model: s.Model, Effort: s.Effort, DisallowedTools: s.DisallowedTools}
 }
 func claudeArgs(s *brainSettings, mcpConfig, settings string) []string {
 	return claudecli.Args(cliOptionsOf(s), mcpConfig, settings)
 }
 func codexArgs(s *brainSettings, dir string, external bool) []string {
 	o := cliOptionsOf(s)
-	if s.dangerously && !external {
-		o.StateDir = brainStateOf(s.dataDir, s.manifest.ID).dir
-		if s.mediaDir != "" {
-			o.MediaInbox = mediaInboxAt(s.mediaDir).Path(s.manifest.ID)
+	if s.Dangerously && !external {
+		o.StateDir = brainStateOf(s.DataDir, s.Manifest.ID).dir
+		if s.MediaDir != "" {
+			o.MediaInbox = mediaInboxAt(s.MediaDir).Path(s.Manifest.ID)
 		}
 	}
 	return claudecli.CodexArgs(o, dir, external)

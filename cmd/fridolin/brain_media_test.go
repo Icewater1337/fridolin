@@ -24,7 +24,7 @@ func TestBrainClaimsMediaBeforeHistoryWithoutQueueLock(t *testing.T) {
 		if _, err := os.Stat(filepath.Join(br.workDir, history.FileName)); !errors.Is(err, os.ErrNotExist) {
 			t.Errorf("history existed before media was claimed: %v", err)
 		}
-		if dir != br.settings.Load().mediaDir || id != br.ID() || len(paths) != 1 || paths[0] != "/incoming/file.txt" {
+		if dir != br.settings.Load().MediaDir || id != br.ID() || len(paths) != 1 || paths[0] != "/incoming/file.txt" {
 			t.Errorf("claim input = %q %q %v", dir, id, paths)
 		}
 		return map[string]string{"/incoming/file.txt": "/claimed/file.txt"}

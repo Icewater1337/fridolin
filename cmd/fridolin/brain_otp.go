@@ -24,14 +24,14 @@ type OTPCatch struct {
 // waits for it.
 func (br *Brain) CatchesCode(m Inbound, now time.Time) (OTPCatch, bool) {
 	s := br.settings.Load()
-	if !s.otpGuard || len(m.Media) > 0 || !fromChat(m) {
+	if !s.OTPGuard || len(m.Media) > 0 || !fromChat(m) {
 		return OTPCatch{}, false
 	}
 	code, ok := otp.Code(m.Text)
 	if !ok {
 		return OTPCatch{}, false
 	}
-	req, ok := otp.Requested(br.root, br.id, br.input.Chats(m.Inbound), s.otpMarkers, now)
+	req, ok := otp.Requested(br.root, br.id, br.input.Chats(m.Inbound), s.OTPMarkers, now)
 	if !ok {
 		return OTPCatch{}, false
 	}
@@ -48,9 +48,9 @@ func fromChat(m Inbound) bool { return m.Source != chat.SourceIngest && m.Brain 
 // text holds one of its markers.
 func (br *Brain) AsksForCode(text string) bool {
 	s := br.settings.Load()
-	markers := s.otpMarkers
+	markers := s.OTPMarkers
 	if len(markers) == 0 {
 		markers = otp.DefaultMarkers
 	}
-	return s.otpGuard && slices.ContainsFunc(markers, func(m string) bool { return otp.HasMarker(text, m) })
+	return s.OTPGuard && slices.ContainsFunc(markers, func(m string) bool { return otp.HasMarker(text, m) })
 }

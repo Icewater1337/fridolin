@@ -150,11 +150,11 @@ func TestRuntimePathConsumersKeepBootAndApplyLiveOptions(t *testing.T) {
 		}
 	}
 	s := tb.brainMgr.Get("main").settings.Load()
-	if s.dataDir != boot.DataDir || s.dbPath != boot.DBPath || s.mediaDir != boot.MediaDir || s.credsDir != boot.DataDir {
+	if s.DataDir != boot.DataDir || s.DBPath != boot.DBPath || s.MediaDir != boot.MediaDir || s.CredsDir != boot.DataDir {
 		t.Errorf("brain startup paths drifted: %#v", s)
 	}
-	if s.provider != "codex" || s.model != "live-model" || s.maxPending != 31 {
-		t.Errorf("live run options did not apply: provider=%s model=%s queue=%d", s.provider, s.model, s.maxPending)
+	if s.Provider != "codex" || s.Model != "live-model" || s.MaxPending != 31 {
+		t.Errorf("live run options did not apply: provider=%s model=%s queue=%d", s.Provider, s.Model, s.MaxPending)
 	}
 	profile, err := tb.brainMgr.profiler.Profile("main")
 	if err != nil {
@@ -172,7 +172,7 @@ func TestRuntimePathConsumersKeepBootAndApplyLiveOptions(t *testing.T) {
 	if w.Code != http.StatusOK {
 		t.Fatal(w.Body.String())
 	}
-	if tb.google.credsDir() != explicitCreds || tb.plaud.phoneDir() != explicitPhone || tb.plaud.cliHome() != boot.Home || tb.brainMgr.Get("main").settings.Load().credsDir != explicitCreds {
+	if tb.google.credsDir() != explicitCreds || tb.plaud.phoneDir() != explicitPhone || tb.plaud.cliHome() != boot.Home || tb.brainMgr.Get("main").settings.Load().CredsDir != explicitCreds {
 		t.Error("explicit credential/phone paths or Plaud access stopped applying live")
 	}
 

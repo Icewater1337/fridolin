@@ -49,21 +49,21 @@ func TestBrainRunnerPreservesOrderPositionAndSettingsSnapshot(t *testing.T) {
 			t.Fatalf("started callback did not publish the run: %+v", rt.Running)
 		}
 		updated := *original
-		updated.model = "updated-model"
+		updated.Model = "updated-model"
 		br.settings.Store(&updated)
 		for i, text := range []string{"second", "third"} {
 			if _, pos, busy, err := mgr.Submit(dm(text)); !busy || pos != i+1 || err != nil {
 				t.Fatalf("%s submit: busy=%v pos=%d err=%v", text, busy, pos, err)
 			}
 		}
-		if first.Settings != original || first.Settings.model == "updated-model" || first.ID != br.ID() || first.Dir != br.workDir || !strings.Contains(first.Prompt, "first") {
+		if first.Settings != original || first.Settings.Model == "updated-model" || first.ID != br.ID() || first.Dir != br.workDir || !strings.Contains(first.Prompt, "first") {
 			t.Fatalf("the first run lost its snapshot or input: %+v", first)
 		}
 		for _, text := range []string{"second", "third"} {
 			release <- struct{}{}
 			synctest.Wait()
 			next := <-started
-			if next.Settings.model != "updated-model" || !strings.Contains(next.Prompt, text) {
+			if next.Settings.Model != "updated-model" || !strings.Contains(next.Prompt, text) {
 				t.Fatalf("queued run did not take current settings/input: %+v", next)
 			}
 		}

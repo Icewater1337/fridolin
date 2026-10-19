@@ -14,7 +14,7 @@ func TestReplyChatKeepsHeldDMAndRetiredBrainIdentity(t *testing.T) {
 	const owner = "15551234567@s.whatsapp.net"
 	brain := func(id string, handlesDMs bool) *Brain {
 		br := &Brain{id: id}
-		br.settings.Store(&brainSettings{manifest: manifest.Manifest{ID: id, Routing: manifest.Routing{HandlesDMs: handlesDMs, Groups: []string{group}}}})
+		br.settings.Store(&brainSettings{Manifest: manifest.Manifest{ID: id, Routing: manifest.Routing{HandlesDMs: handlesDMs, Groups: []string{group}}}})
 		return br
 	}
 	cfg := &config.Config{AllowedNumbers: []string{"15551234567"}}

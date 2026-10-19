@@ -466,7 +466,7 @@ func TestReloadKeepsRunningBrainAndRetiresRemoved(t *testing.T) {
 	if mgr.Get("a") != a {
 		t.Error("an unchanged brain must keep its *Brain (and its running process)")
 	}
-	if a.settings.Load().model != "new-model" {
+	if a.settings.Load().Model != "new-model" {
 		t.Error("settings were not swapped")
 	}
 	if br := mgr.BrainFor("120363000000000000@g.us", true); br == nil || br.ID() != "c" {
@@ -674,9 +674,9 @@ func TestClaudeArgs(t *testing.T) {
 			[]string{"--setting-sources project,local", "--strict-mcp-config --mcp-config " + mcp}, nil},
 		{"with the instructions above excluded", brainSettings{}, mcp, settings,
 			[]string{"--setting-sources project,local", "--settings " + settings, "--mcp-config " + mcp}, nil},
-		{"inherit_claude_user_config", brainSettings{inheritUser: true}, mcp, settings,
+		{"inherit_claude_user_config", brainSettings{InheritUser: true}, mcp, settings,
 			nil, []string{"--setting-sources", "--strict-mcp-config", "--settings", "--mcp-config"}},
-		{"model, effort, tools, permissions", brainSettings{model: "m", effort: "high", disallowedTools: []string{"WebFetch", "WebSearch"}, dangerously: true}, mcp, settings,
+		{"model, effort, tools, permissions", brainSettings{Model: "m", Effort: "high", DisallowedTools: []string{"WebFetch", "WebSearch"}, Dangerously: true}, mcp, settings,
 			[]string{"--model m", "--effort high", "--disallowed-tools WebFetch,WebSearch", "--dangerously-skip-permissions"}, nil},
 	}
 	for _, tc := range cases {

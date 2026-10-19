@@ -104,35 +104,35 @@ type Brain struct {
 // brainSettings is everything about a brain that can change while it runs.
 // Each run takes one snapshot, so an edit never changes a run half-way.
 type brainSettings struct {
-	name            string
-	manifest        manifest.Manifest
-	claudePath      string
-	provider        string
-	codexPath       string
-	model           string
-	effort          string
-	disallowedTools []string
-	promptFile      string // relative to the folder; see BrainSpec
-	dangerously     bool
-	inheritUser     bool // inherit_claude_user_config
-	otpGuard        bool
-	otpMarkers      []string
-	viewer          bool
-	runTimeout      time.Duration // 0 for none
-	queueMode       string
-	maxPending      int
-	observe         string // BrainManifest.Observe
-	credsDir        string // where per-brain credential files live
-	mediaDir        string // the media folder, which holds the brain's inbox
-	envPassthrough  []string
-	toolsDir        string // the bridge's Python helpers, or ""
-	dataDir         string // the data dir, absolute
-	dbPath          string // the bridge's DB, absolute
-	plaudPATH       string // the PATH to run with when brains may use Plaud's CLI
+	Name            string
+	Manifest        manifest.Manifest
+	ClaudePath      string
+	Provider        string
+	CodexPath       string
+	Model           string
+	Effort          string
+	DisallowedTools []string
+	PromptFile      string // relative to the folder; see BrainSpec
+	Dangerously     bool
+	InheritUser     bool // inherit_claude_user_config
+	OTPGuard        bool
+	OTPMarkers      []string
+	Viewer          bool
+	RunTimeout      time.Duration // 0 for none
+	QueueMode       string
+	MaxPending      int
+	Observe         string // BrainManifest.Observe
+	CredsDir        string // where per-brain credential files live
+	MediaDir        string // the media folder, which holds the brain's inbox
+	EnvPassthrough  []string
+	ToolsDir        string // the bridge's Python helpers, or ""
+	DataDir         string // the data dir, absolute
+	DBPath          string // the bridge's DB, absolute
+	PlaudPATH       string // the PATH to run with when brains may use Plaud's CLI
 	// ownPATH are the folders of the bridge's PATH inside this brain's
 	// folder, which setBridgePATH took out of the bridge's: they go first
 	// on the PATH of this brain's runs, and of no one else's.
-	ownPATH []string
+	OwnPATH []string
 }
 
 // RunInfo summarises the last finished run, for the dashboard.
@@ -183,14 +183,14 @@ var (
 func (br *Brain) ID() string { return br.id }
 
 // Name is the brain's display name.
-func (br *Brain) Name() string { return br.settings.Load().name }
+func (br *Brain) Name() string { return br.settings.Load().Name }
 
 // Dir is the brain's folder.
 func (br *Brain) Dir() string { return br.workDir }
 
 // Manifest returns the immutable manifest snapshot used by current runs.
 // Callers must not mutate its slices or optional nested settings.
-func (br *Brain) Manifest() manifest.Manifest { return br.settings.Load().manifest }
+func (br *Brain) Manifest() manifest.Manifest { return br.settings.Load().Manifest }
 
 // logInbound writes m to the brain's history: a line for each part of a
 // merged message, with its ID, so that one deleted later is taken out
@@ -264,7 +264,7 @@ func (br *Brain) submit(m *Inbound) (pos int, busy bool, err error) {
 	s := br.settings.Load()
 	// Untagged chatter needs nothing more than the history, unless the
 	// brain observes it with runs: the next run in the chat reads it there.
-	queues := !m.Silent || br.input.Observe(s.observe, m.Inbound)
+	queues := !m.Silent || br.input.Observe(s.Observe, m.Inbound)
 
 	// Turned away before anything is written: a message the brain does not
 	// take is not in its history, where the sender's retry after "queue is
@@ -289,7 +289,7 @@ func (br *Brain) submit(m *Inbound) (pos int, busy bool, err error) {
 
 	// The files go into this brain's inbox, the only part of the media
 	// folder its sandbox opens, before the history names where they are.
-	*m = m.withMediaMoved(br.claimMedia(s.mediaDir, br.id, m.Media))
+	*m = m.withMediaMoved(br.claimMedia(s.MediaDir, br.id, m.Media))
 
 	// History first, so that later runs see the message even when it is
 	// merged into a queue that is already moving.
@@ -312,14 +312,14 @@ func (br *Brain) submit(m *Inbound) (pos int, busy bool, err error) {
 	// chatter never interrupts a run. Nor do ingested files interrupt a
 	// request, or get replaced: each is a job of its own, not a correction of
 	// the last one. Observe-only runs are another matter, see below.
-	next, gone, interrupting, err := admit(br.pending, *m, s.queueMode, s.maxPending)
+	next, gone, interrupting, err := admit(br.pending, *m, s.QueueMode, s.MaxPending)
 	br.pending = next
 	defer dropped(gone)
 	if err != nil {
 		br.mu.Unlock()
 		return 0, true, err
 	}
-	_, replaces := supersedes(*m, s.queueMode)
+	_, replaces := supersedes(*m, s.QueueMode)
 	// Work addressed to the brain does not wait for an observe-only run: it
 	// stops the one in flight and goes ahead of those waiting. Their chatter
 	// is in the history, where the next run in its chat reads it.
@@ -445,7 +445,7 @@ func supersedes(m Inbound, mode string) (interrupting bool, replaces func(Inboun
 // or one m makes by what it replaces, or untagged chatter to drop. br.mu is
 // held.
 func (br *Brain) hasRoomLocked(m Inbound, s *brainSettings) bool {
-	_, replaces := supersedes(m, s.queueMode)
+	_, replaces := supersedes(m, s.QueueMode)
 	n, silent := 0, false
 	for _, p := range br.pending {
 		if !replaces(p) {
@@ -453,7 +453,7 @@ func (br *Brain) hasRoomLocked(m Inbound, s *brainSettings) bool {
 			silent = silent || p.Silent
 		}
 	}
-	return n < s.maxPending || silent
+	return n < s.MaxPending || silent
 }
 
 // worker drains the queue one message at a time, each in a run slot (see
@@ -490,7 +490,7 @@ func (br *Brain) worker() {
 		}
 		br.takeTurnLocked(m.JID)
 		s := br.settings.Load()
-		ctx, cancel := runContext(s.runTimeout)
+		ctx, cancel := runContext(s.RunTimeout)
 		run := &brainRun{cancel: cancel, done: make(chan struct{}), msg: m, started: time.Now()}
 		br.current = run
 		br.mu.Unlock()
@@ -901,9 +901,9 @@ type QueuedView struct {
 func (br *Brain) Snapshot() BrainRuntime {
 	s := br.settings.Load()
 	rt := BrainRuntime{
-		ID: br.id, Name: s.name, Dir: br.workDir,
-		Routing: s.manifest.Routing, Model: s.model, Effort: s.effort,
-		Backup: s.manifest.Backup, Manifest: s.manifest, Queue: []QueuedView{},
+		ID: br.id, Name: s.Name, Dir: br.workDir,
+		Routing: s.Manifest.Routing, Model: s.Model, Effort: s.Effort,
+		Backup: s.Manifest.Backup, Manifest: s.Manifest, Queue: []QueuedView{},
 	}
 	br.mu.Lock()
 	defer br.mu.Unlock()
@@ -927,7 +927,7 @@ func (br *Brain) Snapshot() BrainRuntime {
 // which can wait on an Automation consent prompt under launchd, must not
 // hold up the run.
 func (br *Brain) ensureViewer(s *brainSettings) {
-	if !s.viewer {
+	if !s.Viewer {
 		return
 	}
 	br.viewerMu.Lock()
@@ -968,7 +968,7 @@ func (br *Brain) startViewerUnlessAlive(tv *platform.Viewer, s *brainSettings) *
 		return nil
 	}
 	f.Close()
-	nv, err := br.viewerStart("claude-"+br.id, br.StreamLogPath(), br.workDir, s.envPassthrough)
+	nv, err := br.viewerStart("claude-"+br.id, br.StreamLogPath(), br.workDir, s.EnvPassthrough)
 	if err != nil {
 		log.Printf("brain %s: could not start tmux viewer: %v", br.id, err)
 		return nil
@@ -1153,7 +1153,7 @@ func (br *Brain) identities() map[string]string {
 // puts it into words.
 func (br *Brain) buildPrompt(s *brainSettings, m Inbound) string {
 	in := prompttext.Input{Now: time.Now(), BrainID: br.id, Message: m.Inbound, BuildChat: br.input.BuildChat != nil && br.input.BuildChat(m.JID), ObserveOnly: m.Silent}
-	if name := s.promptFile; name != "" {
+	if name := s.PromptFile; name != "" {
 		if data, err := br.readFile(name); err != nil {
 			log.Printf("brain %s: could not read prompt file %s: %v", br.id, name, err)
 		} else {
@@ -1170,7 +1170,7 @@ func (br *Brain) buildPrompt(s *brainSettings, m Inbound) string {
 // with what, so that it can be told from the others and matched to the
 // run the dashboard shows.
 func runHeading(m Inbound, s *brainSettings, pid int) string {
-	model := s.model
+	model := s.Model
 	if model == "" {
 		model = "the CLI's default"
 	}
@@ -1512,7 +1512,7 @@ func (bm *brainManager) SetSink(s brainSink) { bm.sink.target = s }
 
 // apply keeps unchanged brains running and retires removed ones in the
 // background. Resolution and process policy are supplied by the caller.
-func (bm *brainManager) apply(specs []manifest.Spec, globals brainGlobals, options brainApplyOptions) ([]brainOpenFailure, error) {
+func (bm *brainManager) Apply(specs []manifest.Spec, globals brainGlobals, options brainApplyOptions) ([]brainOpenFailure, error) {
 	bm.reloadMu.Lock()
 	defer bm.reloadMu.Unlock()
 
@@ -1554,7 +1554,7 @@ func (bm *brainManager) apply(specs []manifest.Spec, globals brainGlobals, optio
 			workDirs[m.ID] = []string{sp.Path, sp.Dir}
 		}
 		s := mergeBrainSettings(globals, sp)
-		s.ownPATH = append([]string(nil), options.OwnPATH[m.ID]...)
+		s.OwnPATH = append([]string(nil), options.OwnPATH[m.ID]...)
 		br, ok := old[m.ID]
 		if !ok || br.workDir != sp.Dir || !br.holdsFolder(sp.Dir) {
 			root, err := os.OpenRoot(sp.Dir)
@@ -1578,7 +1578,7 @@ func (bm *brainManager) apply(specs []manifest.Spec, globals brainGlobals, optio
 			created = append(created, br)
 		}
 		br.settings.Store(s)
-		if !s.viewer {
+		if !s.Viewer {
 			br.closeViewer() // the viewer setting was turned off
 		}
 
@@ -1603,7 +1603,7 @@ func (bm *brainManager) apply(specs []manifest.Spec, globals brainGlobals, optio
 	if options.SetDirs != nil {
 		options.SetDirs(workDirs)
 	}
-	bm.slots.setLimit(globals.runLimit)
+	bm.slots.setLimit(globals.RunLimit)
 
 	bm.mu.Lock()
 	// KillRuns publishes its latch under this same lock, so its snapshot

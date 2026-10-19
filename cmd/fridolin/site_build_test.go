@@ -223,7 +223,7 @@ func TestLongBuildChatAnswerStaysWhole(t *testing.T) {
 // names its pid to the next run's, never the lines of the runs before it.
 func TestCurrentRunLogIsTheRunsOwn(t *testing.T) {
 	chatJID := Inbound{Inbound: chat.Inbound{JID: buildChatJID("web", 1), Sender: "dashboard"}}
-	s := &brainSettings{model: "sonnet"}
+	s := &brainSettings{Model: "sonnet"}
 	heading := func(pid int) string { return "[10:00:00] " + runHeading(chatJID, s, pid) }
 	twoRuns := []string{
 		heading(101),

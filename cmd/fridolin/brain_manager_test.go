@@ -33,7 +33,7 @@ func TestBrainManagerOpenFailureReservesRoutesAndDeniedFolders(t *testing.T) {
 			t.Fatal("folder callback ran outside the reload lock")
 		}
 	}}
-	failures, err := mgr.apply([]manifest.Spec{active, missing}, brainGlobals{}, options)
+	failures, err := mgr.Apply([]manifest.Spec{active, missing}, brainGlobals{}, options)
 	if err != nil || len(failures) != 1 || failures[0].Spec.Manifest.ID != "missing" || !os.IsNotExist(failures[0].Err) {
 		t.Fatalf("apply = %+v, %v; want the private missing-root failure", failures, err)
 	}
@@ -50,7 +50,7 @@ func TestBrainManagerOpenFailureReservesRoutesAndDeniedFolders(t *testing.T) {
 		t.Fatal(err)
 	}
 	unchanged := mgr.Get("active")
-	if failures, err := mgr.apply([]manifest.Spec{active, missing}, brainGlobals{}, brainApplyOptions{}); err != nil || len(failures) != 0 {
+	if failures, err := mgr.Apply([]manifest.Spec{active, missing}, brainGlobals{}, brainApplyOptions{}); err != nil || len(failures) != 0 {
 		t.Fatalf("restore = %+v, %v", failures, err)
 	}
 	if mgr.Get("active") != unchanged || mgr.DMBrain() != mgr.Get("missing") || mgr.HeldFor("dm", false) != "" {
@@ -64,7 +64,7 @@ func TestBrainManagerRemovedAndReaddedIDUsesNewRuntime(t *testing.T) {
 	t.Cleanup(mgr.Stop)
 	apply := func(specs []manifest.Spec, held []route.Held) {
 		t.Helper()
-		if failures, err := mgr.apply(specs, brainGlobals{}, brainApplyOptions{Held: held}); err != nil || len(failures) != 0 {
+		if failures, err := mgr.Apply(specs, brainGlobals{}, brainApplyOptions{Held: held}); err != nil || len(failures) != 0 {
 			t.Fatalf("apply = %+v, %v", failures, err)
 		}
 	}

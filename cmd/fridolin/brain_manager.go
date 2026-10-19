@@ -71,7 +71,7 @@ func (bm *BrainManager) reload(specs []manifest.Spec, issues []registry.Issue, c
 }
 
 func (bm *BrainManager) reloadLocked(specs []manifest.Spec, issues []registry.Issue, cfg *config.Config, ownPATH map[string][]string) error {
-	failures, err := bm.brainManager.apply(specs, brainGlobalsOf(cfg), brainApplyOptions{
+	failures, err := bm.brainManager.Apply(specs, brainGlobalsOf(cfg), brainApplyOptions{
 		Held: heldBrainRoutes(issues), OwnPATH: ownPATH,
 		SetDirs: func(dirs map[string][]string) { bm.profiler.Update(dirs, cfg) },
 	})
