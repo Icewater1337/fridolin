@@ -31,6 +31,7 @@ type RunOptions struct {
 type Supervisor struct {
 	server      *http.Server
 	connections sync.WaitGroup
+	stopOnce    sync.Once
 }
 
 // Run binds before starting intake and propagates unexpected server failures.

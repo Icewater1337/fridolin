@@ -3,13 +3,14 @@ package app
 import (
 	"context"
 	"fmt"
-	"github.com/Icewater1337/fridolin/internal/config"
-	"github.com/Icewater1337/fridolin/internal/fsx"
-	outboundmsg "github.com/Icewater1337/fridolin/internal/outbound"
 	"log"
 	"slices"
 	"strings"
 	"time"
+
+	"github.com/Icewater1337/fridolin/internal/config"
+	"github.com/Icewater1337/fridolin/internal/fsx"
+	outboundmsg "github.com/Icewater1337/fridolin/internal/outbound"
 )
 
 // RequiredFilesOptions wires the current configuration and delivery owner.

@@ -158,7 +158,7 @@ rollback`.
   (`config.go`), so that a file written before keeps its meaning.
   End-to-end tests drive a dev-mode bridge
   through what it offers from outside with `newHarness`
-  (`harness_test.go`) instead of reaching into the `Bridge`, so
+  (`internal/app/harness_test.go`) instead of reaching into the `Bridge`, so
   they keep working while code moves into packages; `knownbugs_test.go` pins
   bugs that stay as they are for now, and the fix that changes one rewrites
   its test. `cmd/fridolin/testdata/coverage-baseline.txt` is each file's statement
@@ -183,7 +183,8 @@ rollback`.
   tests of the site run it too and skip without its `node_modules`.
 - Build with `make build` (into `bin/`, which git ignores) and try changes in
   dev mode. A build in the checkout never reaches the service; `./setup.sh`
-  installs one. The bridge is the `main` package in `cmd/fridolin`, so a
+  installs one. The entry point is the `main` package in `cmd/fridolin`; `internal/cli`
+  handles commands and `internal/app` owns the runtime. A
   build by hand is `go build -o bin/fridolin ./cmd/fridolin`. The
   repository's root has no Go files: `go build .` there fails with "no Go
   files" instead of building, and leaves a `./fridolin` that an older
