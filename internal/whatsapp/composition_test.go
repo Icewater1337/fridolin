@@ -6,7 +6,6 @@ import (
 	"log"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/Icewater1337/fridolin/internal/logx"
 	mediafiles "github.com/Icewater1337/fridolin/internal/media"
@@ -90,17 +89,7 @@ func (s testQueuedPolls) SentPoll(ctx context.Context, _ string) (SentPoll, erro
 	return s.poll, ctx.Err()
 }
 func (testQueuedPolls) SavePollVote(string, string, []string) error { return nil }
-func waitFor(t *testing.T, timeout time.Duration, what string, cond func() bool) {
-	t.Helper()
-	deadline := time.Now().Add(timeout)
-	for time.Now().Before(deadline) {
-		if cond() {
-			return
-		}
-		time.Sleep(10 * time.Millisecond)
-	}
-	t.Fatalf("timed out waiting for %s", what)
-}
+
 func captureLog(t *testing.T) func() []string {
 	t.Helper()
 	ring := logx.NewRing(50)
