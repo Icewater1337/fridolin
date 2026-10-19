@@ -1772,7 +1772,7 @@ func TestStatusWarnsWhenSandboxDoesNotApply(t *testing.T) {
 				sp.mu.Unlock()
 			}
 			w := tb.do("GET", "/api/status", nil)
-			var st statusResponse
+			var st StatusResponse
 			if err := json.Unmarshal(w.Body.Bytes(), &st); err != nil {
 				t.Fatal(err)
 			}
@@ -1815,7 +1815,7 @@ func TestStatusWarnsWhenBrainsCannotLogIn(t *testing.T) {
 				t.Setenv(name, tc.env[name])
 			}
 			tb := newTestBridge(t, `, "sandbox": {"enabled": `+tc.sandbox+`}`)
-			var st statusResponse
+			var st StatusResponse
 			if err := json.Unmarshal(tb.do("GET", "/api/status", nil).Body.Bytes(), &st); err != nil {
 				t.Fatal(err)
 			}

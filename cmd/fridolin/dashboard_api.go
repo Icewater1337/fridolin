@@ -21,7 +21,6 @@ import (
 	"github.com/Icewater1337/fridolin/internal/access"
 	"github.com/Icewater1337/fridolin/internal/brain"
 
-	"github.com/Icewater1337/fridolin/internal/backup"
 	"github.com/Icewater1337/fridolin/internal/chat"
 	"github.com/Icewater1337/fridolin/internal/claudecli"
 	"github.com/Icewater1337/fridolin/internal/config"
@@ -37,7 +36,7 @@ import (
 func (b *Bridge) apiMux() http.Handler {
 	mux := http.NewServeMux()
 
-	mux.HandleFunc("GET /api/status", b.apiStatus)
+	mux.HandleFunc("GET /api/status", StatusAPI{Snapshot: b.statusSnapshot}.ServeHTTP)
 	mux.HandleFunc("GET /api/whatsapp/qr", b.newConnectionAPI().QR)
 	mux.HandleFunc("POST /api/whatsapp/pair", b.newConnectionAPI().Pair)
 	mux.HandleFunc("GET /api/whatsapp/groups", b.newConnectionAPI().Groups)
@@ -116,44 +115,10 @@ func (b *Bridge) apiMux() http.Handler {
 
 // ── status ───────────────────────────────────────────────────────────────
 
-type statusResponse struct {
-	Version       string            `json:"version"`
-	StartedAt     time.Time         `json:"started_at"`
-	UptimeS       int64             `json:"uptime_s"`
-	ConfigPath    string            `json:"config_path"`
-	DataDir       string            `json:"data_dir"`
-	DevMode       bool              `json:"dev_mode"`
-	Platform      string            `json:"platform"`
-	WhatsApp      waStatus          `json:"whatsapp"`
-	Claude        claudecli.Status  `json:"claude"`
-	AgentProvider string            `json:"agent_provider"`
-	Codex         *claudecli.Status `json:"codex,omitempty"`
-	Sandbox       sandboxStatus     `json:"sandbox"`
-	Brains        []brain.Runtime   `json:"brains"`
-	Issues        []registry.Issue  `json:"issues"`
-	Warnings      []string          `json:"warnings"`
-	Backup        backup.Summary    `json:"backup"`
-	Ingest        bool              `json:"ingest"`
-	Pending       int               `json:"debouncing"`
-	// Settings saved since the start that only apply after a restart. The
-	// dashboard shows its restart banner from this, in every tab.
-	RestartRequired []string `json:"restart_required"`
-}
-
-type waStatus struct {
-	chat.LinkState
-	QRAvailable bool `json:"qr_available"`
-}
-
-type sandboxStatus struct {
-	Enabled   bool `json:"enabled"`
-	Supported bool `json:"supported"`
-}
-
-func (b *Bridge) apiStatus(w http.ResponseWriter, r *http.Request) {
+func (b *Bridge) statusSnapshot(ctx context.Context) StatusResponse {
 	cfg := runtimeConfig(b.cfgs)
 	wa := b.wa.State()
-	resp := statusResponse{
+	resp := StatusResponse{
 		Version:       version.String(),
 		StartedAt:     b.started,
 		UptimeS:       int64(time.Since(b.started).Seconds()),
@@ -161,10 +126,10 @@ func (b *Bridge) apiStatus(w http.ResponseWriter, r *http.Request) {
 		DataDir:       cfg.DataDir,
 		DevMode:       b.dev != nil,
 		Platform:      runtime.GOOS,
-		WhatsApp:      waStatus{LinkState: wa, QRAvailable: wa.QRCode != ""},
+		WhatsApp:      WhatsAppStatus{LinkState: wa, QRAvailable: wa.QRCode != ""},
 		Claude:        claudeInfo(cfg.ClaudePath, cfg.ChildEnvPassthrough),
 		AgentProvider: cfg.AgentProvider,
-		Sandbox:       sandboxStatus{Enabled: cfg.Sandbox.Enabled, Supported: runtime.GOOS == "darwin"},
+		Sandbox:       SandboxStatus{Enabled: cfg.Sandbox.Enabled, Supported: runtime.GOOS == "darwin"},
 		Issues:        nonNil(b.brainIssues(cfg)),
 		Warnings:      nonNil(b.Warnings()),
 		Backup:        b.backup.Summary(),
@@ -187,7 +152,7 @@ func (b *Bridge) apiStatus(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 	}
-	resp.Warnings = append(resp.Warnings, b.outboxWarnings(r.Context())...)
+	resp.Warnings = append(resp.Warnings, b.outboxWarnings(ctx)...)
 	if bad := badAllowedNumbers(cfg.AllowedNumbers); len(bad) > 0 {
 		resp.Warnings = append(resp.Warnings, fmt.Sprintf("allowed_numbers holds %q, which lets nobody in: each entry must be a phone number, digits with the country code. Fix it under Chats → Allowed numbers.", bad))
 	}
@@ -221,7 +186,7 @@ func (b *Bridge) apiStatus(w http.ResponseWriter, r *http.Request) {
 		resp.Brains = append(resp.Brains, br.Snapshot())
 	}
 	resp.Brains = nonNil(resp.Brains)
-	httpapi.WriteJSON(w, http.StatusOK, resp)
+	return resp
 }
 
 // tokenWarnings says when the dashboard token does not keep brains out of

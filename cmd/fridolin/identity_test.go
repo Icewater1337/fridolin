@@ -84,7 +84,7 @@ func TestLoadConfigNormalisesAllowedNumbers(t *testing.T) {
 // The Overview says when allowed_numbers holds an entry that lets nobody in.
 func TestStatusWarnsAboutAnAllowedNumberThatIsNone(t *testing.T) {
 	tb := newTestBridge(t, `, "allowed_numbers": ["15551234567", "my phone"]`)
-	var st statusResponse
+	var st StatusResponse
 	if err := json.Unmarshal(tb.do("GET", "/api/status", nil).Body.Bytes(), &st); err != nil {
 		t.Fatal(err)
 	}
