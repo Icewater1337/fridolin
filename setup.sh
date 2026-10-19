@@ -209,7 +209,7 @@ if [ -n "$OLD_DATA_DIR" ]; then
   warn "DATA_DIR is ignored; set FRIDOLIN_DATA_DIR to choose the data folder of a new config."
 fi
 
-if ! $SKIP_TESTS && confirm "Run the test suite before installing (recommended, about a minute)?" y; then
+if ! $SKIP_TESTS && confirm "Run the test suite before installing (recommended; may take several minutes)?" y; then
   # A name of its own: two runs, or another user's file in a shared /tmp,
   # must not meet.
   TEST_LOG="$(mktemp "${TMPDIR:-/tmp}/fridolin-setup-tests.XXXXXX")"
