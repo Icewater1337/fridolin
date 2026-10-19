@@ -52,7 +52,7 @@ func (m *BackupManager) Status() map[string]any {
 		"connect":               copyOf(m.connect),
 		"settings":              cfg,
 		"include_bridge_config": cfg.IncludeBridgeConfig,
-		"secret_excludes":       backupSecretExcludes,
+		"secret_excludes":       BackupSecretExcludes,
 		"brains":                rows,
 		"bridge":                copyOf(m.state.Bridge),
 		"job":                   job,
@@ -174,7 +174,7 @@ func (m *BackupManager) Cancel() error {
 
 // Versions lists a brain's saved versions in the dashboard's existing order.
 func (m *BackupManager) Versions(ctx context.Context, id string) ([]string, error) {
-	if !backupNameOK(id) {
+	if !BackupNameOK(id) {
 		return nil, apperr.New(apperr.Invalid, "invalid brain")
 	}
 	if !m.connected() {
@@ -186,7 +186,7 @@ func (m *BackupManager) Versions(ctx context.Context, id string) ([]string, erro
 	if err != nil {
 		return nil, apperr.New(apperr.Unknown, "listing versions failed: "+err.Error())
 	}
-	sortVersions(versions)
+	BackupSortVersions(versions)
 	return versions, nil
 }
 
@@ -207,7 +207,7 @@ func (m *BackupManager) Restore(req BackupRestoreRequest, overlapCheck func(stri
 	if req.Version == "" {
 		req.Version = "current"
 	}
-	if !backupNameOK(req.Brain) || !restoreVersionRe.MatchString(req.Version) {
+	if !BackupNameOK(req.Brain) || !BackupVersionOK(req.Version) {
 		return "", errBackupRestoreRequest
 	}
 	if !m.connected() {

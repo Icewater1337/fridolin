@@ -31,86 +31,6 @@ import (
 	"github.com/Icewater1337/fridolin/internal/testutil"
 )
 
-func TestFilterLines(t *testing.T) {
-	got := filterLines([]string{"node_modules/", "*.log", " /work/ ", "", "+ /sneaky", "- already-prefixed"})
-	want := "- node_modules/**\n- *.log\n- /work/**\n- already-prefixed\n"
-	if got != want {
-		t.Errorf("filterLines =\n%q\nwant\n%q", got, want)
-	}
-}
-
-// TestNextDue is the daily schedule: today's run is due at daily_at unless
-// it already ran today or the schedule was switched on or moved after that
-// time, and a run missed while the machine slept is due as soon as it is
-// awake.
-func TestNextDue(t *testing.T) {
-	zurich, err := time.LoadLocation("Europe/Zurich")
-	if err != nil {
-		t.Fatal(err)
-	}
-	at := func(y int, mo time.Month, d, h, mi int) time.Time { return time.Date(y, mo, d, h, mi, 0, 0, zurich) }
-	day := at(2026, 3, 10, 0, 0)
-	cases := []struct {
-		name    string
-		now     time.Time
-		dailyAt string
-		lastRun string
-		armed   time.Time
-		wantDue time.Time
-		wantNow bool
-	}{
-		{"before the time", at(2026, 3, 10, 2, 0), "03:30", "", time.Time{}, at(2026, 3, 10, 3, 30), false},
-		{"at the time", at(2026, 3, 10, 3, 30), "03:30", "", time.Time{}, at(2026, 3, 10, 3, 30), true},
-		{"after the time: missed while asleep", at(2026, 3, 10, 9, 0), "03:30", "2026-03-09", day.AddDate(0, 0, -5), at(2026, 3, 10, 3, 30), true},
-		{"already ran today", at(2026, 3, 10, 9, 0), "03:30", "2026-03-10", time.Time{}, at(2026, 3, 11, 3, 30), false},
-		{"ran yesterday, later today", at(2026, 3, 10, 9, 0), "23:15", "2026-03-09", time.Time{}, at(2026, 3, 10, 23, 15), false},
-		{"switched on after the time", at(2026, 3, 10, 9, 0), "03:30", "", at(2026, 3, 10, 8, 59), at(2026, 3, 11, 3, 30), false},
-		{"switched on before the time", at(2026, 3, 10, 9, 0), "10:00", "", at(2026, 3, 10, 8, 59), at(2026, 3, 10, 10, 0), false},
-		{"moved to a time already past", at(2026, 3, 10, 15, 0), "14:00", "2026-03-09", at(2026, 3, 10, 14, 30), at(2026, 3, 11, 14, 0), false},
-		{"switched on in the due minute", at(2026, 3, 10, 3, 30), "03:30", "", at(2026, 3, 10, 3, 30).Add(20 * time.Second), at(2026, 3, 11, 3, 30), false},
-		{"end of the month", at(2026, 3, 31, 9, 0), "03:30", "2026-03-31", time.Time{}, at(2026, 4, 1, 3, 30), false},
-		// 2026-03-29: the clocks jump from 02:00 to 03:00.
-		{"a time the clocks skip", at(2026, 3, 29, 1, 0), "02:30", "", time.Time{}, at(2026, 3, 29, 3, 30), false},
-		{"a time the clocks skip, once it came", at(2026, 3, 29, 3, 31), "02:30", "", time.Time{}, at(2026, 3, 29, 3, 30), true},
-		{"the day before the clocks skip it", at(2026, 3, 28, 9, 0), "02:30", "2026-03-28", time.Time{}, at(2026, 3, 29, 3, 30), false},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			due, now := nextDue(tc.now, tc.dailyAt, tc.lastRun, tc.armed)
-			if !due.Equal(tc.wantDue) || now != tc.wantNow {
-				t.Errorf("nextDue = %v, %v; want %v, %v", due, now, tc.wantDue, tc.wantNow)
-			}
-		})
-	}
-
-	// 2026-10-25: the clocks go back from 03:00 to 02:00, so 02:30 comes
-	// twice. The run is due once.
-	t.Run("a time that comes twice", func(t *testing.T) {
-		first := time.Date(2026, 10, 25, 0, 30, 0, 0, time.UTC).In(zurich)  // 02:30 summer time
-		second := time.Date(2026, 10, 25, 1, 30, 0, 0, time.UTC).In(zurich) // 02:30 winter time
-		ranAt := time.Time{}
-		for _, now := range []time.Time{first, second} {
-			if _, runNow := nextDue(now, "02:30", ranOn(ranAt), time.Time{}); runNow {
-				if !ranAt.IsZero() {
-					t.Fatalf("due again at %v after running at %v", now, ranAt)
-				}
-				ranAt = now
-			}
-		}
-		if ranAt.IsZero() {
-			t.Error("never due")
-		}
-	})
-}
-
-// ranOn is the LastScheduledDay of a run at t, "" for none.
-func ranOn(t time.Time) string {
-	if t.IsZero() {
-		return ""
-	}
-	return t.Format(dayLayout)
-}
-
 // TestBackupScheduleIsArmedOnlyBySavedChanges: switching the schedule on or
 // moving it marks when, so that neither starts a backup at once, and only
 // once the change is saved. One the config refuses changes nothing.
@@ -138,7 +58,7 @@ func TestBackupScheduleIsArmedOnlyBySavedChanges(t *testing.T) {
 	if a := armed(); !a.Equal(clock) {
 		t.Errorf("armed at %v, want %v", a, clock)
 	}
-	if _, runNow := nextDue(clock.Add(time.Minute), "03:30", "", armed()); runNow {
+	if _, runNow := BackupDue(clock.Add(time.Minute), "03:30", "", armed()); runNow {
 		t.Error("switching on after today's time starts a backup at once")
 	}
 	clock = clock.Add(time.Hour)
@@ -204,8 +124,8 @@ func TestBackupSchedulerTicks(t *testing.T) {
 		m.mu.Lock()
 		res, last := m.state.Brains["notes"], m.state.LastScheduledDay
 		m.mu.Unlock()
-		if res == nil || !res.OK || res.Trigger != "scheduled" || last != start.Format(dayLayout) {
-			t.Errorf("result %+v, last scheduled day %q; want a scheduled run on %s", res, last, start.Format(dayLayout))
+		if res == nil || !res.OK || res.Trigger != "scheduled" || last != start.Format(BackupDayLayout) {
+			t.Errorf("result %+v, last scheduled day %q; want a scheduled run on %s", res, last, start.Format(BackupDayLayout))
 		}
 		m.Stop()
 	})
@@ -238,21 +158,10 @@ func TestBackupNextRun(t *testing.T) {
 		t.Errorf("next run = %v, want now (today's is due)", n)
 	}
 	m.mu.Lock()
-	m.state.LastScheduledDay = clock.Format(dayLayout)
+	m.state.LastScheduledDay = clock.Format(BackupDayLayout)
 	m.mu.Unlock()
 	if n, want := next(), time.Date(2026, 10, 19, 3, 30, 0, 0, time.Local); n == nil || !n.Equal(want) {
 		t.Errorf("next run = %v, want %v", n, want)
-	}
-}
-
-func TestRcloneSection(t *testing.T) {
-	conf := "[other]\ntype = s3\n\n[brain-gdrive]\ntype = drive\nscope = drive.file\ntoken = {\"x\":1}\n"
-	s := rcloneSection(conf, "brain-gdrive")
-	if s["type"] != "drive" || s["token"] == "" {
-		t.Errorf("section = %v", s)
-	}
-	if rcloneSection(conf, "missing") != nil {
-		t.Error("missing section should be nil")
 	}
 }
 
@@ -621,33 +530,6 @@ func TestBackupRoundTripWithRealRclone(t *testing.T) {
 	})
 }
 
-func TestExpiredVersions(t *testing.T) {
-	now := time.Date(2026, 10, 17, 12, 0, 0, 0, time.Local)
-	stamp := func(days int) string { return versionName(now.AddDate(0, 0, -days)) }
-	cases := []struct {
-		name  string
-		names []string
-		days  int
-		want  []string
-	}{
-		{"older than the window", []string{stamp(31), stamp(29)}, 30, []string{stamp(31)}},
-		{"exactly on the cutoff stays", []string{stamp(30)}, 30, nil},
-		{"one day window", []string{stamp(2), stamp(0)}, 1, []string{stamp(2)}},
-		{"names that are not version stamps stay", []string{"keep-me", "2025", "20250101-0000", "20250101-000000X", stamp(90)}, 30, []string{stamp(90)}},
-		// Folders named before the names were in UTC are in local time.
-		{"local-time names", []string{now.AddDate(0, 0, -31).Format(legacyVersionLayout), now.AddDate(0, 0, -29).Format(legacyVersionLayout)}, 30,
-			[]string{now.AddDate(0, 0, -31).Format(legacyVersionLayout)}},
-	}
-	for _, c := range cases {
-		t.Run(c.name, func(t *testing.T) {
-			got := expiredVersions(c.names, now, c.days)
-			if fmt.Sprint(got) != fmt.Sprint(c.want) {
-				t.Errorf("expiredVersions = %v, want %v", got, c.want)
-			}
-		})
-	}
-}
-
 // TestBackupVersionsNewestFirst lists version folders by the time in their
 // names, with anything else after them.
 func TestBackupVersionsNewestFirst(t *testing.T) {
@@ -667,33 +549,6 @@ func TestBackupVersionsNewestFirst(t *testing.T) {
 	want := []string{"20261016-080000Z", "20261015-080000", "20261001-120000", "20250101-000000", "manual-copy"}
 	if fmt.Sprint(resp.Versions) != fmt.Sprint(want) {
 		t.Errorf("versions = %v, want %v", resp.Versions, want)
-	}
-}
-
-// TestVersionNamesKeepTheirOrderWhenClocksGoBack: version folders are
-// named in UTC, so a run in the hour the clocks go back sorts after the run
-// an hour of local time "later" that came before it, and neither name can
-// come twice.
-func TestVersionNamesKeepTheirOrderWhenClocksGoBack(t *testing.T) {
-	zurich, err := time.LoadLocation("Europe/Zurich")
-	if err != nil {
-		t.Fatal(err)
-	}
-	// 2026-10-25: 02:30 summer time, then 02:15 winter time 45 minutes later.
-	first := time.Date(2026, 10, 25, 0, 30, 0, 0, time.UTC).In(zurich)
-	second := first.Add(45 * time.Minute)
-	names := []string{versionName(first), versionName(second)}
-	sortVersions(names)
-	if names[0] != versionName(second) {
-		t.Errorf("versions = %v, want the later run first", names)
-	}
-	for _, n := range names {
-		if !restoreVersionRe.MatchString(n) {
-			t.Errorf("%s cannot be restored", n)
-		}
-		if got, ok := parseVersion(n); !ok || !(got.Equal(first) || got.Equal(second)) {
-			t.Errorf("parseVersion(%s) = %v, %v", n, got, ok)
-		}
 	}
 }
 
@@ -822,8 +677,8 @@ func TestBackupPruneKeepsVersionsByRunDate(t *testing.T) {
 		_ = os.MkdirAll(filepath.Dir(p), 0o700)
 		_ = os.WriteFile(p, []byte("older"), 0o600)
 	}
-	expired := versionName(time.Now().AddDate(0, 0, -40))
-	recent := versionName(time.Now().AddDate(0, 0, -10))
+	expired := BackupVersionName(time.Now().AddDate(0, 0, -40))
+	recent := BackupVersionName(time.Now().AddDate(0, 0, -10))
 	seed(expired)
 	seed(recent)
 	seed("not-a-version")
@@ -857,8 +712,8 @@ func TestBackupPruneKeepsVersionsByRunDate(t *testing.T) {
 // never filters files by their age.
 func TestPrunePurgesExpiredVersionFolders(t *testing.T) {
 	tb := newTestBridge(t, `, "backup": {"keep_versions_days": 30}`)
-	expired := versionName(time.Now().AddDate(0, 0, -31))
-	recent := versionName(time.Now().AddDate(0, 0, -29))
+	expired := BackupVersionName(time.Now().AddDate(0, 0, -31))
+	recent := BackupVersionName(time.Now().AddDate(0, 0, -29))
 	var mu sync.Mutex
 	var calls [][]string
 	tb.backup.runner = func(_ context.Context, args []string, stderr io.Writer) ([]byte, error) {
@@ -896,8 +751,8 @@ func TestPrunePurgesExpiredVersionFolders(t *testing.T) {
 // one prune all use the config it started with, and a cancelled job stops
 // it at once instead of trying (and logging) every remaining id.
 func TestPruneKeepsItsConfigAndStopsWhenCancelled(t *testing.T) {
-	listing := []byte(`[{"Name":"` + versionName(time.Now().AddDate(0, 0, -31)) + `"},` +
-		`{"Name":"` + versionName(time.Now().AddDate(0, 0, -60)) + `"}]`)
+	listing := []byte(`[{"Name":"` + BackupVersionName(time.Now().AddDate(0, 0, -31)) + `"},` +
+		`{"Name":"` + BackupVersionName(time.Now().AddDate(0, 0, -60)) + `"}]`)
 	brains := []*Brain{{id: "notes"}, {id: "work"}}
 
 	t.Run("backup.root changed mid-run", func(t *testing.T) {
@@ -2429,9 +2284,9 @@ func TestBackupLeavesSecretsOut(t *testing.T) {
 		{"include_secret_files", []string{"*.log"}, true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			filter := brainFilter(tc.excludes, tc.includeSecrets)
+			filter := BackupBrainFilter(tc.excludes, tc.includeSecrets)
 			lines := strings.Split(strings.TrimSpace(filter), "\n")
-			for _, p := range backupSecretExcludes {
+			for _, p := range BackupSecretExcludes {
 				if got := slices.Contains(lines, "- "+p); got == tc.includeSecrets {
 					t.Errorf("filter has - %s: %v, want %v:\n%s", p, got, !tc.includeSecrets, filter)
 				}
@@ -2441,7 +2296,7 @@ func TestBackupLeavesSecretsOut(t *testing.T) {
 					t.Errorf("filter includes %q", l)
 				}
 			}
-			if !tc.includeSecrets && lines[0] != "- "+backupSecretExcludes[0] {
+			if !tc.includeSecrets && lines[0] != "- "+BackupSecretExcludes[0] {
 				t.Errorf("filter starts with %q, want the secret files first", lines[0])
 			}
 		})
@@ -2472,7 +2327,7 @@ func TestBackupSecretExcludesAreDocumented(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, p := range backupSecretExcludes {
+	for _, p := range BackupSecretExcludes {
 		if !strings.Contains(string(doc), "`"+p+"`") {
 			t.Errorf("docs/BACKUP.md does not name %s", p)
 		}

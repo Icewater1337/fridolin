@@ -244,7 +244,7 @@ func FuzzDecodeManifest(f *testing.F) {
 		if !filepath.IsLocal(m.PromptFile) {
 			t.Errorf("prompt file %q is not inside the folder", m.PromptFile)
 		}
-		for _, line := range strings.SplitAfter(filterLines(m.Backup.Exclude), "\n") {
+		for _, line := range strings.SplitAfter(BackupFilterLines(m.Backup.Exclude), "\n") {
 			if line != "" && (!strings.HasPrefix(line, "- ") || !strings.HasSuffix(line, "\n")) {
 				t.Errorf("excludes %q gave the filter line %q", m.Backup.Exclude, line)
 			}
