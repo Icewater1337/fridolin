@@ -19,6 +19,9 @@ for compatibility.
 
 ### Changed
 
+- Plaud retry-exhaustion notices keep raw provider errors on the dashboard
+  instead of sending stderr into the destination chat.
+
 - Saving restart-only data, database, media or listener settings now keeps all
   running components on their startup paths until restart. Backup and OAuth
   files, Plaud state, OTP handoffs, attachment inboxes, brain/site state and

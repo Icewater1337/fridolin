@@ -1088,6 +1088,7 @@ func (p *Manager) runEnded(id string) func(error) {
 		}
 		defer p.bg.Done()
 		var gaveUp *plaudGivenUp
+		var noticeReason string
 		var brain string
 		err := p.update(func(st *plaudState) error {
 			cur := st.Pending[id]
@@ -1121,6 +1122,7 @@ func (p *Manager) runEnded(id string) func(error) {
 					st.GivenUp = st.GivenUp[len(st.GivenUp)-plaudGivenUpKeep:]
 				}
 				gaveUp = &g
+				noticeReason = fmt.Sprintf("the brain's run failed %d times — details on the bridge dashboard", cur.Runs)
 				log.Printf("plaud %s: brain %s's run failed %d times, giving up", id, brain, cur.Runs)
 			}
 			delete(st.Pending, id)
@@ -1136,7 +1138,7 @@ func (p *Manager) runEnded(id string) func(error) {
 			go func() {
 				defer p.bg.Done()
 				if _, jid, err := p.destination(p.cfg()); err == nil {
-					p.noticeGivenUp(brain, jid, cmp.Or(gaveUp.Name, id), gaveUp.Reason)
+					p.noticeGivenUp(brain, jid, cmp.Or(gaveUp.Name, id), noticeReason)
 				}
 			}()
 		}

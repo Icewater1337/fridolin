@@ -369,7 +369,7 @@ func TestPlaudRecordingIsSeenOnlyOnceItsRunEnds(t *testing.T) {
 		{"stopped while it ran", stop[:1], true, "stopped", 1, false},
 		{"dropped before it ran", stop[1:], true, "stopped", 1, false},
 		{"failed once", []error{errors.New("claude exited: exit status 1"), nil}, true, "done", 2, false},
-		{"failed every time", []error{errors.New("e1"), errors.New("e2"), errors.New("e3")}, true, "failed", 3, true},
+		{"failed every time", []error{errors.New("e1"), errors.New("e2"), errors.New("private provider stderr")}, true, "failed", 3, true},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			tb, fp := plaudBridge(t, "")
@@ -421,7 +421,7 @@ func TestPlaudRecordingIsSeenOnlyOnceItsRunEnds(t *testing.T) {
 			}
 			if c.givenUp {
 				testutil.WaitFor(t, 5*time.Second, "the notice", func() bool { return len(tb.dev.Outbox()) == 1 })
-				if m := tb.dev.Outbox()[0]; !strings.Contains(m.Text, "the brain's run failed 3 times (e3)") {
+				if m := tb.dev.Outbox()[0]; !strings.Contains(m.Text, "the brain's run failed 3 times — details on the bridge dashboard") || strings.Contains(m.Text, "private provider stderr") {
 					t.Errorf("notice = %q", m.Text)
 				}
 			}
