@@ -199,7 +199,7 @@ func NewBridge(cfgs *ConfigStore, opts BridgeOptions) (_ *Bridge, err error) {
 	)
 
 	if opts.NoWhatsApp {
-		b.dev = &devMessenger{cfg: cfgs.Get}
+		b.dev = newDevMessenger(func(text string) []string { return ChunkMessage(text, cfgs.Get().MaxChunkSize) })
 		b.wa = b.dev
 	} else {
 		wa, err := NewWhatsAppClient(cfgs.Get, store, b.handleInbound, b.recordIgnored)

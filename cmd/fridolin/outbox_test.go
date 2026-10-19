@@ -40,7 +40,7 @@ type flakyMessenger struct {
 }
 
 func newFlakyMessenger(cfg func() *Config, online bool) *flakyMessenger {
-	f := &flakyMessenger{devMessenger: &devMessenger{cfg: cfg}, online: make(chan struct{}), dropAfter: -1}
+	f := &flakyMessenger{devMessenger: newDevMessenger(func(text string) []string { return ChunkMessage(text, cfg().MaxChunkSize) }), online: make(chan struct{}), dropAfter: -1}
 	if online {
 		close(f.online)
 	}
