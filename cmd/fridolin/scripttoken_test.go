@@ -129,14 +129,14 @@ func TestAuthorizeReadsTheBearerScheme(t *testing.T) {
 	scripts := auth.scripts.Value()
 	cases := []struct {
 		name, header string
-		want         principalKind
+		want         PrincipalKind
 		bad          bool
 	}{
-		{"none", "", callerAnonymous, false},
-		{"Bearer", "Bearer " + scripts, callerScript, false},
-		{"lower case", "bearer " + scripts, callerScript, false},
-		{"upper case, extra spaces", "BEARER   " + scripts + " ", callerScript, false},
-		{"a brain's run's", "Bearer " + run, callerBrain, false},
+		{"none", "", CallerAnonymous, false},
+		{"Bearer", "Bearer " + scripts, CallerScript, false},
+		{"lower case", "bearer " + scripts, CallerScript, false},
+		{"upper case, extra spaces", "BEARER   " + scripts + " ", CallerScript, false},
+		{"a brain's run's", "Bearer " + run, CallerBrain, false},
 		{"another scheme", "Basic " + scripts, 0, true},
 		{"no scheme", scripts, 0, true},
 		{"no token", "Bearer ", 0, true},
@@ -154,7 +154,7 @@ func TestAuthorizeReadsTheBearerScheme(t *testing.T) {
 				}
 				return
 			}
-			if err != nil || who.kind != c.want {
+			if err != nil || who.Kind != c.want {
 				t.Fatalf("authorize = %+v, %v; want kind %d", who, err, c.want)
 			}
 		})

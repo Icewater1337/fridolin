@@ -29,35 +29,6 @@ import (
 // Like the dashboard token, the scripts token keeps brains out only while
 // they cannot read the data dir, which takes the macOS sandbox.
 
-// principalKind says who called the script API.
-type principalKind int
-
-const (
-	// callerAnonymous sent no token.
-	callerAnonymous principalKind = iota
-	// callerScript sent the scripts token.
-	callerScript
-	// callerBrain sent a brain's token.
-	callerBrain
-)
-
-// principal is who called the script API.
-type principal struct {
-	kind  principalKind
-	brain string // for callerBrain
-}
-
-// via is how a message the caller sent is marked in history.
-func (p principal) via() string {
-	switch p.kind {
-	case callerScript:
-		return "script"
-	case callerBrain:
-		return "brain"
-	}
-	return "api"
-}
-
 // errTokenRequired answers a request without a token where one is needed.
 var errTokenRequired = errors.New("a token is required: send the one in <data_dir>/scripts.token as Authorization: Bearer …")
 
@@ -85,26 +56,26 @@ func newScriptAuth(dataDir string, brainOf func(tok string) string, exists func(
 }
 
 // authorize says who sent r, from its Authorization header. No header is
-// callerAnonymous; a token the bridge did not give out, one of a run that
+// CallerAnonymous; a token the bridge did not give out, one of a run that
 // is over or one of a brain that is gone, is errBadToken rather than a
 // fall back to anonymous.
-func (a *scriptAuth) authorize(r *http.Request) (principal, error) {
+func (a *scriptAuth) authorize(r *http.Request) (Principal, error) {
 	h := r.Header.Get("Authorization")
 	if h == "" {
-		return principal{kind: callerAnonymous}, nil
+		return Principal{Kind: CallerAnonymous}, nil
 	}
 	// The scheme is case-insensitive (RFC 7235): some clients send "bearer".
 	scheme, tok, _ := strings.Cut(strings.TrimSpace(h), " ")
 	tok = strings.TrimSpace(tok)
 	if !strings.EqualFold(scheme, "Bearer") || tok == "" {
-		return principal{}, errBadToken
+		return Principal{}, errBadToken
 	}
 	if a.scripts.Matches(tok) {
-		return principal{kind: callerScript}, nil
+		return Principal{Kind: CallerScript}, nil
 	}
 	id := a.brainOf(tok)
 	if id == "" || !a.exists(id) {
-		return principal{}, errBadToken
+		return Principal{}, errBadToken
 	}
-	return principal{kind: callerBrain, brain: id}, nil
+	return Principal{Kind: CallerBrain, Brain: id}, nil
 }

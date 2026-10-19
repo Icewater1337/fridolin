@@ -191,3 +191,31 @@ func TestDebounceDrain(t *testing.T) {
 		t.Error("a message added after Drain did not flush at once")
 	}
 }
+
+// A deletion or an edit of a message the debouncer still holds reaches
+// the brain with the batch: the deleted part is gone, the edited one has
+// its new text.
+func TestDebouncerAppliesChanges(t *testing.T) {
+	d, f := newTestDebouncer(80*time.Millisecond, time.Second)
+	base := brain.Inbound{Inbound: chat.Inbound{JID: "15551234567@s.whatsapp.net", Sender: "15551234567"}}
+	only := base
+	only.Text, only.ID = "a secret", "A"
+	d.Add(only)
+	if !d.Change(chat.Change{Kind: chat.ChangeRevoke, Chat: "15551234567@s.whatsapp.net", Sender: "15551234567", Target: "A"}) {
+		t.Fatal("the deletion did not find the message")
+	}
+	if d.Pending() != 0 {
+		t.Errorf("%d batches wait, want the emptied one dropped", d.Pending())
+	}
+
+	first, second := base, base
+	first.Text, first.ID = "book Tuesday", "B"
+	second.Text, second.ID = "for four", "C"
+	d.Add(first)
+	d.Add(second)
+	d.Change(chat.Change{Kind: chat.ChangeEdit, Chat: "15551234567@s.whatsapp.net", Sender: "15551234567", Target: "B", Text: "book Wednesday"})
+	testutil.WaitFor(t, 2*time.Second, "the flush", func() bool { return f.n() == 1 })
+	if got := f.got[0]; got.Text != "book Wednesday\n\nfor four" {
+		t.Errorf("flushed %q, want the edited batch", got.Text)
+	}
+}
