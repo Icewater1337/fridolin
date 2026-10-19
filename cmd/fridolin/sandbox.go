@@ -2,20 +2,14 @@ package main
 
 import (
 	"bufio"
-	"cmp"
 	"errors"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"regexp"
-	"runtime"
 	"slices"
 	"sort"
 	"strings"
-	"sync"
-
-	"github.com/Icewater1337/fridolin/internal/config"
 
 	"github.com/Icewater1337/fridolin/internal/textx"
 
@@ -24,45 +18,6 @@ import (
 
 // sandboxExecPath is the macOS sandbox wrapper used for brain spawns.
 const sandboxExecPath = "/usr/bin/sandbox-exec"
-
-// SandboxProfiler generates a macOS sandbox-exec profile per brain.
-//
-// Writing is denied by default: a brain may write only its own folder, its
-// own media inbox, and its own state the bridge keeps for it (a Claude
-// Code config dir, TMPDIR and caches; see brainState). Everything else
-// your user may write stays closed, so a prompt-injected brain cannot plant
-// code that runs outside its sandbox: in ~/.claude, which your own sessions
-// load, in a LaunchAgent, a shell startup file, your apps' preferences, a
-// program on PATH or the bridge's own install. Reading is allowed by
-// default, with an explicit denylist: the other brains' folders, the
-// bridge's own files, your Claude Code setup and instructions, the
-// keychains, and the usual home-directory hotspots (keys, mail, browser
-// data). That is a containment measure, not a jail: "What the sandbox does
-// not cover" in docs/CONFIGURATION.md lists what it leaves open. Add
-// anything else that must stay unreadable to sandbox.deny_paths in
-// config.json.
-type SandboxProfiler struct {
-	mu sync.RWMutex
-
-	enabled bool
-
-	// workDirs maps brain id → its folder, by the real path the bridge runs
-	// the brain in and by the path as configured where that differs (see
-	// BrainSpec.Path), so that each profile allows its own folder and
-	// denies the others' both ways.
-	workDirs map[string][]string
-
-	sandboxPolicy
-
-	// configFile is the config.json the bridge runs with; see SetConfigFile.
-	configFile string
-
-	// execPath is sandboxExecPath; tests point it at a missing file.
-	execPath string
-
-	// bridgeExe is the running bridge binary; tests point it elsewhere.
-	bridgeExe string
-}
 
 // sandboxPolicy is what the profiles take from the config, with its paths
 // made absolute.
@@ -93,148 +48,18 @@ type sandboxPolicy struct {
 	// Code keeps its setup and state instead of ~/.claude, or "".
 	claudeDir string
 
-	// claudePath, rclonePath, plaudCLIPath and viewer name the programs the
-	// bridge itself runs outside the sandbox; see bridgeProgramsOf.
-	claudePath, codexPath, rclonePath, plaudCLIPath string
-	viewer                                          bool
-
 	// inbox and state name what the bridge keeps for brain id outside its
 	// folder, the only places there the brain may write: its media inbox
 	// (see mediaInbox) and its own state (see brainStateOf). Each is nil
 	// without a media or data folder. The bridge creates them before a run
 	// (see prepareBrainState); the profile only names them.
-	inbox func(id string) string
-	state func(id string) brainState
+	tokens func(id string) string
+	inbox  func(id string) string
+	state  func(id string) sandboxStatePaths
 
 	// extraDeny and extraAllow come from config.
 	extraDeny  []string
 	extraAllow []string
-
-	// brainDirs are the configured brain folders, as configured and by
-	// their real paths: the bridge runs nothing from a folder of its PATH
-	// inside one (see setBridgePATH).
-	brainDirs []string
-}
-
-// sandboxPolicyOf takes the profiles' settings from cfg.
-func sandboxPolicyOf(cfg *config.Config) sandboxPolicy {
-	// These may be relative, and the bridge opens them relative to its
-	// working directory; the comparisons need them absolute.
-	p := sandboxPolicy{
-		dataDir:      absPath(cfg.DataDir),
-		dbPath:       absPath(cfg.DBPath),
-		mediaDir:     absPath(cfg.MediaDir),
-		credsDir:     cfg.Sandbox.CredentialsDir,
-		gitConfig:    cfg.Sandbox.GitConfig,
-		plaudShared:  cfg.Plaud.BrainAccess,
-		inheritUser:  cfg.InheritClaudeUserConfig,
-		claudePath:   cfg.ClaudePath,
-		codexPath:    cfg.CodexPath,
-		rclonePath:   cfg.Backup.RclonePath,
-		plaudCLIPath: cfg.Plaud.CLIPath,
-		viewer:       cfg.Viewer,
-		extraDeny:    append([]string(nil), cfg.Sandbox.DenyPaths...),
-		extraAllow:   append([]string(nil), cfg.Sandbox.AllowPaths...),
-	}
-	if p.mediaDir == "" && p.dataDir != "" {
-		p.mediaDir = filepath.Join(p.dataDir, "media")
-	}
-	if media := p.mediaDir; media != "" {
-		p.inbox = func(id string) string { return mediaInboxAt(media).Path(id) }
-	}
-	if data := p.dataDir; data != "" {
-		p.state = func(id string) brainState { return brainStateOf(data, id) }
-	}
-	if dir := os.Getenv("CLAUDE_CONFIG_DIR"); filepath.IsAbs(dir) {
-		p.claudeDir = filepath.Clean(dir)
-	}
-	for _, o := range pathOwners(cfg) {
-		p.brainDirs = append(p.brainDirs, o.dirs...)
-	}
-	return p
-}
-
-// NewSandboxProfiler builds a profiler for the configured brains.
-func NewSandboxProfiler(workDirs map[string][]string, cfg *config.Config) *SandboxProfiler {
-	sp := &SandboxProfiler{execPath: sandboxExecPath}
-	if exe, err := os.Executable(); err == nil {
-		sp.bridgeExe = exe
-	}
-	sp.Update(workDirs, cfg)
-	return sp
-}
-
-// Update replaces the brain set and settings. Profiles are built per run,
-// so the next run of every brain picks the change up.
-func (sp *SandboxProfiler) Update(workDirs map[string][]string, cfg *config.Config) {
-	wd := make(map[string][]string, len(workDirs))
-	for k, v := range workDirs {
-		// Made absolute, "" would be the bridge's working directory.
-		wd[k] = slices.DeleteFunc(slices.Clone(v), func(d string) bool { return d == "" })
-	}
-	sp.mu.Lock()
-	defer sp.mu.Unlock()
-	sp.enabled = cfg.Sandbox.Enabled
-	sp.workDirs = wd
-	sp.sandboxPolicy = sandboxPolicyOf(cfg)
-	for _, dirs := range wd {
-		sp.brainDirs = append(sp.brainDirs, dirs...)
-	}
-}
-
-// SetConfigFile names the config.json the bridge runs with. It lives in the
-// data dir by default, but --config or FRIDOLIN_CONFIG can put it anywhere,
-// so the profile denies it, its .bak, the temp file each save writes, and
-// the .env files older versions read: the one next to it and the one in the
-// working directory.
-func (sp *SandboxProfiler) SetConfigFile(path string) {
-	sp.mu.Lock()
-	defer sp.mu.Unlock()
-	sp.configFile = absPath(path)
-}
-
-// Enabled reports whether brain spawns should be sandboxed.
-func (sp *SandboxProfiler) Enabled() bool {
-	sp.mu.RLock()
-	defer sp.mu.RUnlock()
-	return sp.enabled
-}
-
-// sitePaths returns what the site's sandbox keeps from module code as well
-// (site_sandbox.go), beyond the data dir and the usual secrets: deny, the
-// DB, the config file and its companions, the credentials dir and the
-// sandbox.deny_paths entries; noWrite, the bridge binary and its install
-// folder or checkout.
-func (sp *SandboxProfiler) sitePaths() (deny, noWrite []string) {
-	sp.mu.RLock()
-	defer sp.mu.RUnlock()
-	if sp.dataDir != "" {
-		deny = append(deny, sp.dataDir)
-	}
-	if sp.dbPath != "" {
-		for _, suffix := range []string{"", "-wal", "-shm", "-journal"} {
-			deny = append(deny, sp.dbPath+suffix)
-		}
-	}
-	if sp.configFile != "" {
-		deny = append(deny, sp.configFile, sp.configFile+".bak", config.DotEnvPath(sp.configFile))
-	}
-	if sp.credsDir != "" {
-		deny = append(deny, absPath(sp.credsDir))
-	}
-	for _, p := range sp.extraDeny {
-		deny = append(deny, absPath(p))
-	}
-	if sp.bridgeExe != "" {
-		noWrite = append(noWrite, sp.bridgeExe)
-		l := layoutOf(sp.bridgeExe)
-		for _, dir := range []string{l.Dir, l.Source} {
-			if dir != "" {
-				noWrite = append(noWrite, dir)
-			}
-		}
-	}
-	return deny, noWrite
 }
 
 // defaultDenySubpaths are home-relative directories no brain may read.
@@ -424,10 +249,8 @@ var launchers = []string{"/bin/launchctl", "/usr/bin/open", "/usr/bin/osascript"
 //     brain may fill but not move, remove or swap for a symlink.
 //  7. Starting code outside the sandbox: launchd, LaunchServices, Apple
 //     events, and the unix sockets of programs that run commands.
-func (sp *SandboxProfiler) Profile(brainID string) (string, error) {
-	sp.mu.RLock()
-	defer sp.mu.RUnlock()
-	home := config.HomeDir()
+func (sp sandboxProfile) profile(brainID string) (string, error) {
+	home := sp.context.home
 	if !filepath.IsAbs(home) {
 		// Every home-relative deny would silently become a relative path.
 		return "", fmt.Errorf("HOME %q is not an absolute path", home)
@@ -448,11 +271,8 @@ func (sp *SandboxProfiler) Profile(brainID string) (string, error) {
 		}
 	}
 	own := sp.workDirs[brainID]
-	var layout bridgeLayout
-	if sp.bridgeExe != "" {
-		layout = layoutOf(sp.bridgeExe)
-	}
-	protected := sp.protected(home, layout)
+	layout := sp.layout
+	protected := sp.protected(sp.context, layout, sp.programs)
 	for id, dirs := range sp.workDirs {
 		if id != brainID {
 			for _, dir := range dirs {
@@ -461,12 +281,12 @@ func (sp *SandboxProfiler) Profile(brainID string) (string, error) {
 		}
 	}
 	for _, dir := range own {
-		if p, ok := protectedIn(dir, protected); ok {
+		if p, ok := protectedPathIn(sp.context, dir, protected); ok {
 			return "", fmt.Errorf("brain %s: its folder %s %s, which the sandbox keeps from brains; give the brain a folder of its own", brainID, dir, p)
 		}
 	}
 
-	var b profileBuilder
+	b := profileBuilder{cwd: sp.context.cwd, cwdErr: sp.context.cwdErr}
 	b.creatable = b.spellings(sp.userClaudeDir(home), true)
 	b.trustRoot(home)
 	for _, dir := range []string{sp.dataDir, sp.credsDir, sp.mediaDir} {
@@ -536,7 +356,7 @@ func (sp *SandboxProfiler) Profile(brainID string) (string, error) {
 	// folder itself open to this brain and closes it to every other.
 	var innerDeny []string
 	for _, p := range sp.extraDeny {
-		if withinAny(absPath(p), own) || withinAny(fsx.Resolve(absPath(p)), own) {
+		if withinAny(sp.context.absPath(p), own) || withinAny(fsx.Resolve(sp.context.absPath(p)), own) {
 			innerDeny = append(innerDeny, p)
 			continue
 		}
@@ -598,7 +418,7 @@ func (sp *SandboxProfiler) Profile(brainID string) (string, error) {
 	// folder the brain needs (HOME or above, a temp dir), where denying it
 	// would take the brain's home or scratch space away.
 	dbFiles := sp.dbFiles()
-	if dir := sp.dbFolder(home); dir != "" {
+	if dir := sp.dbFolder(home, sp.context.tempDir); dir != "" {
 		b.deny("file-read*", "subpath", dir)
 		b.deny("file-write*", "subpath", dir)
 	}
@@ -612,8 +432,8 @@ func (sp *SandboxProfiler) Profile(brainID string) (string, error) {
 	// working directory when there was none there. The bridge reads
 	// neither any more, but either may still hold settings and secrets.
 	if sp.configFile != "" {
-		for _, f := range []string{sp.configFile, sp.configFile + ".bak", config.DotEnvPath(sp.configFile), ".env"} {
-			if abs, err := filepath.Abs(f); err == nil && !withinAny(abs, dataDirs) {
+		for _, f := range []string{sp.configFile, sp.configFile + ".bak", sp.configEnvFile, ".env"} {
+			if abs, err := sp.context.absolute(f); err == nil && !withinAny(abs, dataDirs) {
 				b.deny("file-read*", "literal", abs)
 				b.deny("file-write*", "literal", abs)
 			}
@@ -654,7 +474,7 @@ func (sp *SandboxProfiler) Profile(brainID string) (string, error) {
 			b.deny("file-read*", "literal", filepath.Join(dir, "CLAUDE.md"))
 			b.deny("file-read*", "subpath", filepath.Join(dir, "rules"))
 		}
-		for _, dir := range foldersAbove(own...) {
+		for _, dir := range foldersAbove(sp.context, own...) {
 			for _, f := range instructionFiles {
 				b.deny("file-read*", "literal", filepath.Join(dir, f))
 			}
@@ -684,7 +504,7 @@ func (sp *SandboxProfiler) Profile(brainID string) (string, error) {
 	// next time the bridge starts it. A PATH folder that holds one of this
 	// brain's own places (HOME on PATH, say) keeps only what the default
 	// deny gives it, or the brain could not write its own folder.
-	progs := sp.bridgeProgramsOf(home)
+	progs := sp.programs
 	for _, f := range progs.files {
 		b.deny("file-write*", "literal", f)
 	}
@@ -715,12 +535,12 @@ func (sp *SandboxProfiler) Profile(brainID string) (string, error) {
 		b.allow("file-read*", "subpath", inbox)
 		pins = append(pins, b.allow("file-write*", "subpath", inbox)...)
 	}
-	var state brainState
+	var state sandboxStatePaths
 	if sp.state != nil {
 		state = sp.state(brainID)
 		b.allow("file-read*", "subpath", state.dir)
 		pins = append(pins, b.allow("file-write*", "subpath", state.dir)...)
-		for _, f := range state.folders() {
+		for _, f := range state.folders {
 			pins = append(pins, b.spellings(f, true)...)
 		}
 	}
@@ -729,7 +549,7 @@ func (sp *SandboxProfiler) Profile(brainID string) (string, error) {
 	// brain reads its calendar token: the bridge makes its calendar calls
 	// (google_calendar.go), so the files stay with the bridge.
 	if sp.dataDir != "" {
-		b.allow("file-read*", "subpath", runTokenDir(sp.dataDir, brainID))
+		b.allow("file-read*", "subpath", sp.tokens(brainID))
 	}
 	// plaud.brain_access shares your Plaud login with brains, and the Plaud
 	// CLI rewrites it in place when it refreshes a login about to expire,
@@ -756,7 +576,7 @@ func (sp *SandboxProfiler) Profile(brainID string) (string, error) {
 	// real paths too, which foldersAbove may not give (it names a folder
 	// once, ~/assistant for ~/Documents/assistant), and which is safe to
 	// resolve here: the brain can change none of these folders.
-	for _, dir := range foldersAbove(places...) {
+	for _, dir := range foldersAbove(sp.context, places...) {
 		b.allow("file-read-metadata", "literal", dir)
 		if real := fsx.Resolve(dir); real != dir {
 			b.allow("file-read-metadata", "literal", real)
@@ -786,7 +606,7 @@ func (sp *SandboxProfiler) Profile(brainID string) (string, error) {
 	// An allow_paths entry inside one opens it for reading again, as it
 	// does with a deny_paths entry anywhere else.
 	for _, p := range sp.extraAllow {
-		if withinAny(absPath(p), innerDeny) {
+		if withinAny(sp.context.absPath(p), innerDeny) {
 			b.allow("file-read*", "subpath", p)
 		}
 	}
@@ -840,8 +660,8 @@ func (sp *SandboxProfiler) Profile(brainID string) (string, error) {
 	// socket. The brain's own folder and state stay open: the CLI talks to
 	// itself over a socket in its TMPDIR.
 	b.emitSocket("deny", home)
-	b.emitSocket("deny", filepath.Join(cmp.Or(os.Getenv("TMUX_TMPDIR"), "/tmp"), fmt.Sprintf("tmux-%d", os.Getuid())))
-	b.emitSocket("deny", os.TempDir())
+	b.emitSocket("deny", sp.context.tmuxSocket)
+	b.emitSocket("deny", sp.context.tempDir)
 	for _, dir := range own {
 		b.emitSocket("allow", dir)
 	}
@@ -858,7 +678,7 @@ func (sp *SandboxProfiler) Profile(brainID string) (string, error) {
 // sharedClaudeDirRules writes the rules for a config dir brains share with
 // you (inherit_claude_user_config), after the allow that lets them write the
 // CLI's state there.
-func (sp *SandboxProfiler) sharedClaudeDirRules(b *profileBuilder, home string) {
+func (sp sandboxProfile) sharedClaudeDirRules(b *profileBuilder, home string) {
 	dir := sp.userClaudeDir(home)
 	for _, sub := range claudeConfigSubpaths {
 		b.deny("file-write*", "subpath", filepath.Join(dir, sub))
@@ -899,7 +719,7 @@ func (sp *SandboxProfiler) sharedClaudeDirRules(b *profileBuilder, home string) 
 
 // userClaudeDir is the config dir of your own Claude Code: the bridge's
 // CLAUDE_CONFIG_DIR, or ~/.claude.
-func (sp *SandboxProfiler) userClaudeDir(home string) string {
+func (sp sandboxProfile) userClaudeDir(home string) string {
 	if sp.claudeDir != "" {
 		return sp.claudeDir
 	}
@@ -908,7 +728,7 @@ func (sp *SandboxProfiler) userClaudeDir(home string) string {
 
 // userClaudeDirs is ~/.claude, and the bridge's CLAUDE_CONFIG_DIR when it
 // names another folder: both can hold your setup.
-func (sp *SandboxProfiler) userClaudeDirs(home string) []string {
+func (sp sandboxProfile) userClaudeDirs(home string) []string {
 	dirs := []string{filepath.Join(home, ".claude")}
 	if sp.claudeDir != "" && sp.claudeDir != dirs[0] {
 		dirs = append(dirs, sp.claudeDir)
@@ -918,7 +738,7 @@ func (sp *SandboxProfiler) userClaudeDirs(home string) []string {
 
 // dataDirs is the data dir and both names it has had in HOME.
 func (p sandboxPolicy) dataDirs(home string) []string {
-	dirs := []string{filepath.Join(home, config.DataDirName), filepath.Join(home, config.LegacyDataDirName)}
+	dirs := []string{filepath.Join(home, ".fridolin"), filepath.Join(home, ".whatsapp-claude-bridge")}
 	if p.dataDir != "" && !slices.Contains(dirs, filepath.Clean(p.dataDir)) {
 		dirs = append(dirs, p.dataDir)
 	}
@@ -940,11 +760,11 @@ func (p sandboxPolicy) dbFiles() []string {
 // dbFolder is the folder of a database outside the data dir, which the
 // profile denies with it, or "": it is left open when it is HOME or above,
 // or a temp dir, which a brain needs.
-func (p sandboxPolicy) dbFolder(home string) string {
+func (p sandboxPolicy) dbFolder(home, tempDir string) string {
 	if p.dbPath == "" || withinAny(p.dbPath, p.dataDirs(home)) {
 		return ""
 	}
-	if dir := filepath.Dir(p.dbPath); !sharedDir(dir, home) {
+	if dir := filepath.Dir(p.dbPath); !sharedDir(dir, home, tempDir) {
 		return dir
 	}
 	return ""
@@ -953,11 +773,11 @@ func (p sandboxPolicy) dbFolder(home string) string {
 // bridgeDirs are the folder the bridge was installed in and the checkout it
 // was built from: launchd runs the bridge outside any sandbox, it runs its
 // tools from there, and setup.sh builds what is in the checkout.
-func (sp *SandboxProfiler) bridgeDirs() []string {
+func (sp sandboxProfile) bridgeDirs() []string {
 	if sp.bridgeExe == "" {
 		return nil
 	}
-	l := layoutOf(sp.bridgeExe)
+	l := sp.layout
 	var out []string
 	for _, d := range []string{l.Dir, l.Source} {
 		if d != "" && !slices.Contains(out, d) {
@@ -980,11 +800,12 @@ type protectedPath struct {
 
 // protected lists the protected paths for brain folders in HOME home, with
 // l the layout of the bridge's own files.
-func (p sandboxPolicy) protected(home string, l bridgeLayout) []protectedPath {
+func (p sandboxPolicy) protected(ctx sandboxContext, l sandboxInstallLayout, progs bridgePrograms) []protectedPath {
+	home := ctx.home
 	var out []protectedPath
 	add := func(path string, inside bool, what string) {
 		if path != "" {
-			out = append(out, protectedPath{filepath.Clean(absPath(path)), inside, what})
+			out = append(out, protectedPath{filepath.Clean(ctx.absPath(path)), inside, what})
 		}
 	}
 	for _, sub := range defaultDenySubpaths {
@@ -1009,10 +830,9 @@ func (p sandboxPolicy) protected(home string, l bridgeLayout) []protectedPath {
 	add(p.mediaDir, true, "the media folder")
 	add(p.credsDir, true, "the credentials folder")
 	add(p.dbPath, true, "the database")
-	add(p.dbFolder(home), true, "the database's folder")
+	add(p.dbFolder(home, ctx.tempDir), true, "the database's folder")
 	add(l.Source, true, "the bridge's source checkout")
 	add(l.Dir, true, "the folder the bridge is installed in")
-	progs := p.bridgeProgramsOf(home)
 	for _, f := range progs.files {
 		add(f, false, "the program "+f+" the bridge runs")
 	}
@@ -1048,86 +868,11 @@ type bridgePrograms struct {
 	path []string
 }
 
-// bridgeProgramsOf finds the bridge's programs as it would find them now.
-func (p sandboxPolicy) bridgeProgramsOf(home string) bridgePrograms {
-	var found []string
-	if c, err := exec.LookPath(cmp.Or(p.claudePath, "claude")); err == nil {
-		found = append(found, c)
-	}
-	if c, err := exec.LookPath(cmp.Or(p.codexPath, "codex")); err == nil {
-		found = append(found, c)
-	}
-	if r, err := findRclone(p.rclonePath); err == nil {
-		found = append(found, r)
-	}
-	plaud, plaudErr := findPlaudCLI(p.plaudCLIPath)
-	if plaudErr == nil {
-		found = append(found, plaud)
-	}
-	if p.viewer {
-		if t := findTmux(); t != "" {
-			found = append(found, t)
-		}
-	}
-	var out bridgePrograms
-	var path []string
-	path = append(path, filepath.SplitList(os.Getenv("PATH"))...)
-	if plaudErr == nil {
-		path = append(path, filepath.SplitList(plaudPATH(plaud))...)
-	}
-	// A folder of the bridge's PATH inside a brain folder is one it runs
-	// nothing from: setBridgePATH takes it out, and only that brain's runs
-	// get it. Before it has (the brain is being added, say), it still
-	// counts as out. The folders the bridge falls back on, and those of
-	// the programs it found, count wherever they are.
-	fromPATH := map[string]bool{}
-	for _, d := range filepath.SplitList(os.Getenv("PATH")) {
-		fromPATH[filepath.Clean(d)] = true
-	}
-	path = slices.DeleteFunc(path, func(d string) bool {
-		d = filepath.Clean(d)
-		return fromPATH[d] && filepath.IsAbs(d) && (withinAny(d, p.brainDirs) || withinAny(fsx.Resolve(d), p.brainDirs))
-	})
-	path = append(path, toolFallbackDirs()...)
-	if n, err := findNode(); err == nil {
-		// The site's processes run with node's folder first on PATH.
-		found = append(found, n)
-		path = append(path, filepath.Dir(n))
-	}
-	for _, f := range found {
-		abs := absPath(f)
-		out.files = append(out.files, abs, fsx.Resolve(abs))
-		if pkg := nodePackage(fsx.Resolve(abs)); pkg != "" {
-			out.dirs = append(out.dirs, pkg)
-			// #!/usr/bin/env node: the bridge runs the Plaud CLI with its
-			// own folder first on PATH, everything else with its own PATH.
-			for _, pp := range []string{plaudPATH(abs), os.Getenv("PATH")} {
-				if node := lookPathIn("node", pp); node != "" {
-					out.files = append(out.files, node, fsx.Resolve(node))
-				}
-			}
-		}
-	}
-	out.files = append(out.files, rcloneFallbacks()...)
-	out.dirs = append(out.dirs, filepath.Join(home, nvmNodeVersions))
-	for _, d := range path {
-		// exec.LookPath skips relative entries.
-		if d = filepath.Clean(d); filepath.IsAbs(d) {
-			out.path = append(out.path, d)
-		}
-	}
-	for _, s := range []*[]string{&out.files, &out.dirs, &out.path} {
-		slices.Sort(*s)
-		*s = slices.Compact(*s)
-	}
-	return out
-}
-
 // protectedIn reports the first protected path that dir is, holds or (for
 // one marked inside) lies in, by either spelling, described for an error.
-func protectedIn(dir string, protected []protectedPath) (string, bool) {
+func protectedPathIn(ctx sandboxContext, dir string, protected []protectedPath) (string, bool) {
 	spell := func(p string) []string {
-		return slices.Compact([]string{filepath.Clean(absPath(p)), fsx.Resolve(absPath(p))})
+		return slices.Compact([]string{filepath.Clean(ctx.absPath(p)), fsx.Resolve(ctx.absPath(p))})
 	}
 	for _, pp := range protected {
 		for _, d := range spell(dir) {
@@ -1150,12 +895,12 @@ func protectedIn(dir string, protected []protectedPath) (string, bool) {
 // path as given and along its real path, each folder once: the CLI walks
 // up from the real path of its working directory, which differs below a
 // symlink (a brains folder linked from another volume).
-func foldersAbove(dirs ...string) []string {
+func foldersAbove(ctx sandboxContext, dirs ...string) []string {
 	seen := map[string]bool{}
 	var out []string
 	var starts []string
 	for _, dir := range dirs {
-		starts = append(starts, absPath(dir), fsx.Resolve(absPath(dir)))
+		starts = append(starts, ctx.absPath(dir), fsx.Resolve(ctx.absPath(dir)))
 	}
 	for _, start := range starts {
 		for d := filepath.Dir(filepath.Clean(start)); ; d = filepath.Dir(d) {
@@ -1190,37 +935,11 @@ func nodePackage(p string) string {
 	return p[:i+len(nm)] + strings.Join(rest[:n], "/")
 }
 
-// lookPathIn is exec.LookPath for name in the list of folders path.
-func lookPathIn(name, path string) string {
-	for _, dir := range filepath.SplitList(path) {
-		if dir == "" {
-			continue
-		}
-		p := filepath.Join(dir, name)
-		if st, err := os.Stat(p); err == nil && !st.IsDir() && st.Mode()&0o111 != 0 {
-			return p
-		}
-	}
-	return ""
-}
-
-// absPath is p made absolute against the working directory, or p itself
-// when it is empty or that fails.
-func absPath(p string) string {
-	if p == "" {
-		return ""
-	}
-	if abs, err := filepath.Abs(p); err == nil {
-		return abs
-	}
-	return p
-}
-
 // sharedDir reports whether dir is HOME or a temp dir, or a folder above
 // one of them: a folder that holds much more than the bridge's files.
-func sharedDir(dir, home string) bool {
+func sharedDir(dir, home, tempDir string) bool {
 	real := fsx.Resolve(dir)
-	for _, d := range []string{home, os.TempDir(), "/tmp"} {
+	for _, d := range []string{home, tempDir, "/tmp"} {
 		if fsx.Within(fsx.Resolve(d), real) {
 			return true
 		}
@@ -1237,6 +956,8 @@ func withinAny(p string, dirs []string) bool {
 // one is quoted and canonicalized the same way; the first path that cannot be
 // written is kept in err and fails the whole profile.
 type profileBuilder struct {
+	cwd    string
+	cwdErr error
 	strings.Builder
 	err error
 	// roots are folders a brain cannot replace, with their real paths.
@@ -1474,7 +1195,7 @@ func (b *profileBuilder) absolute(path string) (string, bool) {
 	}
 	// A relative rule compiles and matches nothing. The bridge itself
 	// resolves such a path against its working directory, so do the same.
-	wd, err := os.Getwd()
+	wd, err := b.cwd, b.cwdErr
 	if err != nil {
 		b.fail(fmt.Errorf("resolving sandbox path %q: %w", path, err))
 		return "", false
@@ -1669,31 +1390,41 @@ func gitConfigValue(v string) string {
 	return b.String()[:keep]
 }
 
-// Available reports why brain runs cannot be sandboxed on this machine, or
-// nil when they can.
-func (sp *SandboxProfiler) Available() error {
-	if runtime.GOOS != "darwin" {
-		return fmt.Errorf("sandbox-exec is macOS-only, got %s", runtime.GOOS)
-	}
-	if _, err := os.Stat(sp.execPath); err != nil {
-		return fmt.Errorf("%s not available: %w", sp.execPath, err)
-	}
-	return nil
+// sandboxContext contains process inputs; the rule builder never reads them
+// from the environment. CwdErr preserves a failed cwd lookup for relative rules.
+type sandboxContext struct {
+	home, cwd, tempDir, tmuxSocket string
+	cwdErr                         error
+}
+type sandboxInstallLayout struct{ Dir, Source string }
+type sandboxStatePaths struct {
+	dir     string
+	folders []string
+}
+type sandboxProfile struct {
+	sandboxPolicy
+	context                              sandboxContext
+	workDirs                             map[string][]string
+	configFile, configEnvFile, bridgeExe string
+	layout                               sandboxInstallLayout
+	programs                             bridgePrograms
 }
 
-// Command returns the program and arguments that run prog with args as
-// brain brainID under its profile. The profile goes inline (-p): a profile
-// file in a shared TMPDIR could be swapped by another brain between being
-// written and being read, and a brain that made TMPDIR unwritable broke
-// the sandbox. The caller creates the brain's own state first, which the
-// profile pins, and points the run at it (see prepareBrainState).
-func (sp *SandboxProfiler) Command(brainID, prog string, args []string) (string, []string, error) {
-	if err := sp.Available(); err != nil {
-		return "", nil, err
+func (c sandboxContext) absolute(p string) (string, error) {
+	if filepath.IsAbs(p) {
+		return filepath.Clean(p), nil
 	}
-	profile, err := sp.Profile(brainID)
-	if err != nil {
-		return "", nil, err
+	if c.cwdErr != nil {
+		return "", c.cwdErr
 	}
-	return sp.execPath, append([]string{"-p", profile, prog}, args...), nil
+	return filepath.Join(c.cwd, p), nil
+}
+func (c sandboxContext) absPath(p string) string {
+	if p == "" {
+		return ""
+	}
+	if a, err := c.absolute(p); err == nil {
+		return a
+	}
+	return p
 }
