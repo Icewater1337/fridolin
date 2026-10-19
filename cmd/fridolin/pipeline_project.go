@@ -25,6 +25,10 @@ func (b *Bridge) newMessagePipeline() *pipeline.Workflow {
 		Notice:      func(ctx context.Context, jid, text string) error { return b.wa.SendMessage(ctx, jid, text) },
 		SendChunked: func(ctx context.Context, jid, text string) error { return b.wa.SendChunked(ctx, jid, text) },
 		AppendSent:  b.appendHTTPMessageToHistory,
+		ResolveMedia: func(id string, paths []string, scoped bool) ([]string, error) {
+			return mediaInboxAt(b.cfgs.Boot().MediaDir).Resolve(id, paths, scoped)
+		},
+		HandOff:     b.handOff,
 		HandOffCode: b.handOffCode,
 		Chats:       chatJIDs,
 		ReplyChat: func(br *brain.Brain, ownerDM string) string {

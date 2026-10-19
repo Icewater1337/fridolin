@@ -266,7 +266,7 @@ func (b *Bridge) httpIngest(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	jid, err := b.ingestTarget(who, br, req.Paths, req.Sender, req.Text, ownerChat(cfg))
+	jid, err := b.pipeline.Ingest(who, br, req.Paths, req.Sender, req.Text, ownerChat(cfg))
 	if err != nil {
 		httpapi.WriteErr(w, http.StatusBadRequest, err.Error())
 		return

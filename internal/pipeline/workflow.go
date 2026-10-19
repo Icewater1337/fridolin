@@ -24,15 +24,17 @@ type Settings struct {
 // Workflow owns message decisions independently of bridge lifecycle.
 // The command intake wrapper still owns admission and persistence on shutdown.
 type Workflow struct {
-	Brains      *brainruntime.Manager
-	Debouncer   *Debouncer
-	Settings    func() Settings
-	Notice      func(context.Context, string, string) error
-	HandOffCode func(*brainruntime.Brain, brainruntime.Inbound, brainruntime.OTPCatch)
-	Chats       func(brainruntime.Inbound) []string
-	ReplyChat   func(*brainruntime.Brain, string) string
-	SendChunked func(context.Context, string, string) error
-	AppendSent  func(chat.Principal, string, string, string)
+	Brains       *brainruntime.Manager
+	Debouncer    *Debouncer
+	Settings     func() Settings
+	Notice       func(context.Context, string, string) error
+	HandOffCode  func(*brainruntime.Brain, brainruntime.Inbound, brainruntime.OTPCatch)
+	Chats        func(brainruntime.Inbound) []string
+	ReplyChat    func(*brainruntime.Brain, string) string
+	SendChunked  func(context.Context, string, string) error
+	AppendSent   func(chat.Principal, string, string, string)
+	ResolveMedia func(string, []string, bool) ([]string, error)
+	HandOff      func(*brainruntime.Brain, string, string, string, []string)
 }
 
 // handleInbound is the entry point for every allowed message. Access control
