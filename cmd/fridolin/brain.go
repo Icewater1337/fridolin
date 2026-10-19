@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	outboundmsg "github.com/Icewater1337/fridolin/internal/outbound"
 	"io"
 	"io/fs"
 	"log"
@@ -68,7 +69,7 @@ func parseIdentityMap(data []byte) map[string]string {
 		}
 		// A cell like "+" or "@lid" holds no number to look up. A number
 		// is read however it was written: "+1 555 123 4567" is 15551234567.
-		number := identityKey(jid)
+		number := chat.IdentityKey(jid)
 		if number == "" {
 			continue
 		}
@@ -1590,7 +1591,7 @@ func (br *Brain) invoke(run *brainRun, ctx context.Context, s *brainSettings, m 
 			// Untagged (silent) messages never produce a visible reply, so they
 			// must not produce a visible "working" notice either.
 			if !m.Silent && br.hooks != nil && br.hooks.Notice != nil {
-				br.hooks.Notice(m.JID, workingNotice)
+				br.hooks.Notice(m.JID, outboundmsg.WorkingNotice)
 			}
 		case <-resultIn:
 			// The answer is in, and the CLI exits right after it, unless
@@ -1871,7 +1872,7 @@ func (s *runSink) Log(line string) {
 // produce a visible reply, so they must not ask anything either.
 func (s *runSink) Question(text string) bool {
 	h := s.br.hooks
-	return !s.m.Silent && h != nil && h.Question != nil && h.Question(s.br, s.m.JID, questionPrefix+text)
+	return !s.m.Silent && h != nil && h.Question != nil && h.Question(s.br, s.m.JID, outboundmsg.QuestionPrefix+text)
 }
 
 func (s *runSink) Result(res RunResult) {

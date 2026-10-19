@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/Icewater1337/fridolin/internal/devchat"
 	"io"
 	"maps"
 	"net/url"
@@ -1313,7 +1314,7 @@ func TestScheduledRefusalIsToldOnWhatsApp(t *testing.T) {
 	if jid == "" {
 		t.Fatal("the test brain has no chat")
 	}
-	sent := func() []DevMessage { return tb.dev.Outbox() }
+	sent := func() []devchat.Message { return tb.dev.Outbox() }
 	told := func() bool {
 		tb.backup.mu.Lock()
 		defer tb.backup.mu.Unlock()
