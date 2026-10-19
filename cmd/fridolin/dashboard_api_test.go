@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"github.com/Icewater1337/fridolin/internal/registry"
+	"github.com/Icewater1337/fridolin/internal/whatsapp"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -906,10 +907,9 @@ func TestFailedAddRemovesTheScaffold(t *testing.T) {
 // button, with ?fresh=1, has the client ask WhatsApp again.
 func TestGroupsAskWhatsAppOnlyWhenFresh(t *testing.T) {
 	tb := newTestBridge(t, "")
-	tw := newTestWhatsApp(t)
 	fl := &fakeLister{}
-	tw.lister = fl
-	tb.wa = tw.WhatsAppClient
+	tw := newTestWhatsApp(t, func(opts *whatsapp.Options) { opts.Groups = fl })
+	tb.wa = tw.Client
 	steps := []struct {
 		path    string
 		queries int32 // asked of WhatsApp so far

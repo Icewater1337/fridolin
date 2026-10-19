@@ -24,12 +24,14 @@ import (
 // edge is a change to this table, made and reviewed in the same pull
 // request. Imports from outside the module are not checked here.
 var imports = map[string][]string{
-	"cmd/fridolin":      {"examples", "internal/activity", "internal/chat", "internal/config", "internal/fsx", "internal/history", "internal/httpapi", "internal/jsonx", "internal/logx", "internal/manifest", "internal/media", "internal/otp", "internal/platform", "internal/registry", "internal/route", "internal/store", "internal/textx", "internal/trigger", "internal/version", "site", "web"},
+	"cmd/fridolin":      {"examples", "internal/access", "internal/activity", "internal/chat", "internal/config", "internal/devchat", "internal/fsx", "internal/history", "internal/httpapi", "internal/jsonx", "internal/logx", "internal/manifest", "internal/media", "internal/otp", "internal/outbound", "internal/platform", "internal/registry", "internal/route", "internal/store", "internal/textx", "internal/trigger", "internal/version", "internal/whatsapp", "site", "web"},
 	"examples":          nil,
+	"internal/access":   {"internal/chat", "internal/trigger"},
 	"internal/activity": {"internal/history", "internal/textx"},
 	"internal/archtest": nil,
 	"internal/chat":     nil,
 	"internal/config":   {"internal/chat", "internal/fsx", "internal/jsonx", "internal/manifest", "internal/textx", "internal/trigger"},
+	"internal/devchat":  {"internal/chat", "internal/textx"},
 	"internal/fsx":      nil,
 	"internal/jsonx":    nil,
 	"internal/history":  {"internal/fsx"},
@@ -40,11 +42,13 @@ var imports = map[string][]string{
 	"internal/media":    {"internal/fsx", "internal/textx"},
 	"internal/platform": nil,
 	"internal/registry": {"internal/config", "internal/fsx", "internal/manifest", "internal/route"},
+	"internal/outbound": {"internal/store", "internal/textx"},
 	"internal/route":    {"internal/fsx", "internal/manifest"},
 	"internal/store":    {"internal/fsx", "internal/logx"},
 	"internal/textx":    nil,
 	"internal/trigger":  nil,
 	"internal/version":  nil,
+	"internal/whatsapp": {"internal/access", "internal/media", "internal/logx", "internal/platform", "internal/chat", "internal/textx", "internal/trigger"},
 	"site":              nil,
 	"web":               nil,
 }
