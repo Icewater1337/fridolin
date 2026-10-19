@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"github.com/Icewater1337/fridolin/internal/registry"
 	"github.com/Icewater1337/fridolin/internal/whatsapp"
 	"io"
 	"maps"
@@ -345,10 +346,10 @@ func (h *harness) Approved() map[string]manifest.Manifest {
 }
 
 // Issues returns the problems with brains that GET /api/status reports.
-func (h *harness) Issues() []BrainIssue {
+func (h *harness) Issues() []registry.Issue {
 	h.t.Helper()
 	var st struct {
-		Issues []BrainIssue `json:"issues"`
+		Issues []registry.Issue `json:"issues"`
 	}
 	if w := h.Do("GET", "/api/status", nil); w.Code != http.StatusOK || json.Unmarshal(w.Body.Bytes(), &st) != nil {
 		h.t.Fatalf("GET /api/status: %d %s", w.Code, w.Body.String())

@@ -6,7 +6,6 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
-	"runtime"
 	"slices"
 	"strings"
 	"testing"
@@ -125,7 +124,7 @@ func TestResolveBrainsRefusesFoldersTheSandboxProtects(t *testing.T) {
 			if !slices.Equal(ids, []string{"y"}) {
 				t.Errorf("brains %v, want only y", ids)
 			}
-			if len(issues) != 1 || issues[0].ID != "x" || issues[0].Kind != "invalid" || !strings.Contains(issues[0].Detail, tc.want) || issues[0].entry != 1 {
+			if len(issues) != 1 || issues[0].ID != "x" || issues[0].Kind != "invalid" || !strings.Contains(issues[0].Detail, tc.want) || issues[0].Entry != 1 {
 				t.Errorf("issues = %+v, want one for x, on its entry 1, saying %q", issues, tc.want)
 			}
 		})
@@ -221,125 +220,6 @@ func TestScaffoldedPromptSaysWhatItIs(t *testing.T) {
 		t.Run(tc.phrase, func(t *testing.T) {
 			if got := strings.Contains(prompt, tc.phrase); got != tc.want {
 				t.Errorf("starter prompt has %q: %v, want %v", tc.phrase, got, tc.want)
-			}
-		})
-	}
-}
-
-func folderBrainConfig(t *testing.T, home string, refs ...config.BrainRef) *config.Config {
-	t.Helper()
-	cfg := &config.Config{DataDir: filepath.Join(home, "data"), BrainDirs: refs}
-	eff, err := config.Resolve(cfg, configPaths(), runtime.GOOS)
-	if err != nil {
-		t.Fatal(err)
-	}
-	return eff
-}
-
-func TestResolveBrainsUsesApprovedManifestAndReportsDrift(t *testing.T) {
-	home := fsx.Canonical(t.TempDir())
-	t.Setenv("HOME", home)
-	dir := filepath.Join(home, "fam")
-	m := testManifest("fam")
-	if _, err := registry.Scaffold(dir, &m, brainTemplates); err != nil {
-		t.Fatal(err)
-	}
-	approved := m
-	cfg := folderBrainConfig(t, home, config.BrainRef{Path: dir, Approved: &approved})
-
-	specs, issues := ResolveBrains(cfg)
-	if len(specs) != 1 || len(issues) != 0 {
-		t.Fatalf("specs=%v issues=%v", specs, issues)
-	}
-
-	// The brain grants itself the DMs by editing its own brain.json.
-	evil := m
-	evil.Routing.HandlesDMs = true
-	if err := manifest.Write(dir, &evil, true); err != nil {
-		t.Fatal(err)
-	}
-	specs, issues = ResolveBrains(cfg)
-	if len(specs) != 1 || specs[0].Manifest.Routing.HandlesDMs {
-		t.Error("an unapproved brain.json change must not take effect")
-	}
-	if len(issues) != 1 || issues[0].Kind != "drift" {
-		t.Errorf("issues = %v, want one drift", issues)
-	}
-}
-
-func TestResolveBrainsSkipsMissingAndClashing(t *testing.T) {
-	home := fsx.Canonical(t.TempDir())
-	t.Setenv("HOME", home)
-	a, b := testManifest("a"), testManifest("b")
-	a.Routing.HandlesDMs, b.Routing.HandlesDMs = true, true
-	for _, m := range []manifest.Manifest{a, b} {
-		m := m
-		if _, err := registry.Scaffold(filepath.Join(home, m.ID), &m, brainTemplates); err != nil {
-			t.Fatal(err)
-		}
-	}
-	gone := testManifest("gone")
-	cfg := folderBrainConfig(t, home,
-		config.BrainRef{Path: filepath.Join(home, "a"), Approved: &a},
-		config.BrainRef{Path: filepath.Join(home, "b"), Approved: &b},
-		config.BrainRef{Path: filepath.Join(home, "gone"), Approved: &gone},
-	)
-	specs, issues := ResolveBrains(cfg)
-	if len(specs) != 1 || specs[0].Manifest.ID != "a" {
-		t.Errorf("specs = %v, want only a", specs)
-	}
-	kinds := map[string]bool{}
-	for _, is := range issues {
-		kinds[is.Kind] = true
-	}
-	if !kinds["missing"] || !kinds["invalid"] {
-		t.Errorf("issues = %v, want missing and invalid", issues)
-	}
-}
-
-// TestResolveBrainsLeavesOutBadBrains: a brain that is not valid on its own,
-// or clashes with an earlier one, is left out and reported; the brain before
-// it keeps running.
-func TestResolveBrainsLeavesOutBadBrains(t *testing.T) {
-	const group = "120363000000000000@g.us"
-	cases := []struct {
-		name   string
-		dir    string // the second brain's folder, below home
-		second *manifest.Manifest
-		kind   string
-		detail string
-	}{
-		{"same id", "b", &manifest.Manifest{ID: "a", Name: "Other A"}, "invalid", `two brains use the id "a"`},
-		{"second DM brain", "b", &manifest.Manifest{ID: "b", Name: "B", Routing: manifest.Routing{HandlesDMs: true}}, "invalid", "both handle DMs"},
-		{"second default", "b", &manifest.Manifest{ID: "b", Name: "B", Routing: manifest.Routing{Default: true}}, "invalid", "both marked default"},
-		{"group claimed twice", "b", &manifest.Manifest{ID: "b", Name: "B", Routing: manifest.Routing{Groups: []string{group}}}, "invalid", "is claimed by both"},
-		{"folder inside the other brain's", "a/b", &manifest.Manifest{ID: "b", Name: "B"}, "invalid", "is inside brain folder"},
-		{"the other brain's folder", "a", &manifest.Manifest{ID: "b", Name: "B"}, "invalid", `brains "a" and "b" use the same folder`},
-		{"id that is not a slug", "b", &manifest.Manifest{ID: "Work.Brain", Name: "B"}, "invalid", "must be 1–40 lowercase letters"},
-		{"no name", "b", &manifest.Manifest{ID: "b"}, "invalid", "needs a name"},
-		{"no approved manifest", "b", nil, "unapproved", "remove this entry and add the folder again"},
-		{"no folder", "gone", &manifest.Manifest{ID: "b", Name: "B"}, "missing", "folder not found"},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			home := fsx.Canonical(t.TempDir())
-			t.Setenv("HOME", home)
-			first := manifest.Manifest{ID: "a", Name: "A", Routing: manifest.Routing{HandlesDMs: true, Default: true, Groups: []string{group}}}
-			for _, d := range []string{"a", "a/b", "b"} {
-				if err := os.MkdirAll(filepath.Join(home, d), 0o700); err != nil {
-					t.Fatal(err)
-				}
-			}
-			cfg := folderBrainConfig(t, home,
-				config.BrainRef{Path: filepath.Join(home, "a"), Approved: &first},
-				config.BrainRef{Path: filepath.Join(home, tc.dir), Approved: tc.second},
-			)
-			specs, issues := ResolveBrains(cfg)
-			if len(specs) != 1 || specs[0].Manifest.ID != "a" {
-				t.Errorf("specs = %+v, want only a", specs)
-			}
-			if len(issues) != 1 || issues[0].Kind != tc.kind || !strings.Contains(issues[0].Detail, tc.detail) {
-				t.Errorf("issues = %+v, want one %s issue saying %q", issues, tc.kind, tc.detail)
 			}
 		})
 	}

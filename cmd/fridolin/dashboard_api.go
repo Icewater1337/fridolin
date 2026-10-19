@@ -164,24 +164,24 @@ func etagListed(header, etag string) bool {
 // ── status ───────────────────────────────────────────────────────────────
 
 type statusResponse struct {
-	Version       string         `json:"version"`
-	StartedAt     time.Time      `json:"started_at"`
-	UptimeS       int64          `json:"uptime_s"`
-	ConfigPath    string         `json:"config_path"`
-	DataDir       string         `json:"data_dir"`
-	DevMode       bool           `json:"dev_mode"`
-	Platform      string         `json:"platform"`
-	WhatsApp      waStatus       `json:"whatsapp"`
-	Claude        claudeStatus   `json:"claude"`
-	AgentProvider string         `json:"agent_provider"`
-	Codex         *claudeStatus  `json:"codex,omitempty"`
-	Sandbox       sandboxStatus  `json:"sandbox"`
-	Brains        []BrainRuntime `json:"brains"`
-	Issues        []BrainIssue   `json:"issues"`
-	Warnings      []string       `json:"warnings"`
-	Backup        backupSummary  `json:"backup"`
-	Ingest        bool           `json:"ingest"`
-	Pending       int            `json:"debouncing"`
+	Version       string           `json:"version"`
+	StartedAt     time.Time        `json:"started_at"`
+	UptimeS       int64            `json:"uptime_s"`
+	ConfigPath    string           `json:"config_path"`
+	DataDir       string           `json:"data_dir"`
+	DevMode       bool             `json:"dev_mode"`
+	Platform      string           `json:"platform"`
+	WhatsApp      waStatus         `json:"whatsapp"`
+	Claude        claudeStatus     `json:"claude"`
+	AgentProvider string           `json:"agent_provider"`
+	Codex         *claudeStatus    `json:"codex,omitempty"`
+	Sandbox       sandboxStatus    `json:"sandbox"`
+	Brains        []BrainRuntime   `json:"brains"`
+	Issues        []registry.Issue `json:"issues"`
+	Warnings      []string         `json:"warnings"`
+	Backup        backupSummary    `json:"backup"`
+	Ingest        bool             `json:"ingest"`
+	Pending       int              `json:"debouncing"`
 	// Settings saved since the start that only apply after a restart. The
 	// dashboard shows its restart banner from this, in every tab.
 	RestartRequired []string `json:"restart_required"`
@@ -833,7 +833,7 @@ type brainView struct {
 	Status   string             `json:"status"` // ok, drift, missing, invalid, unapproved
 	Manifest *manifest.Manifest `json:"manifest"`
 	Disk     *manifest.Manifest `json:"disk_manifest,omitempty"`
-	Issues   []BrainIssue       `json:"issues"`
+	Issues   []registry.Issue   `json:"issues"`
 	Runtime  *BrainRuntime      `json:"runtime,omitempty"`
 	// Fallback marks the brain that takes the chats no other brain
 	// claims (BrainManager.Fallback). Without a default brain that is the
@@ -846,10 +846,10 @@ type brainView struct {
 // drift shows as soon as a brain.json changes, plus the folders the brain
 // manager could not open when it last loaded the brains, which only it
 // knows of.
-func (b *Bridge) brainIssues(cfg *config.Config) []BrainIssue {
+func (b *Bridge) brainIssues(cfg *config.Config) []registry.Issue {
 	_, issues := ResolveBrains(cfg)
 	for _, is := range b.brainMgr.Issues() {
-		if is.atLoad {
+		if is.AtLoad {
 			issues = append(issues, is)
 		}
 	}
@@ -858,14 +858,14 @@ func (b *Bridge) brainIssues(cfg *config.Config) []BrainIssue {
 
 func (b *Bridge) brainViews() []brainView {
 	cfg := b.cfgs.Get()
-	byEntry := map[int][]BrainIssue{}
+	byEntry := map[int][]registry.Issue{}
 	for _, is := range b.brainIssues(cfg) {
 		// One found at load is about the entry it had then; skip it if the
 		// entries changed since.
-		if is.atLoad && (is.entry >= len(cfg.BrainDirs) || fsx.Canonical(cfg.BrainDirs[is.entry].Path) != fsx.Canonical(is.Path)) {
+		if is.AtLoad && (is.Entry >= len(cfg.BrainDirs) || fsx.Canonical(cfg.BrainDirs[is.Entry].Path) != fsx.Canonical(is.Path)) {
 			continue
 		}
-		byEntry[is.entry] = append(byEntry[is.entry], is)
+		byEntry[is.Entry] = append(byEntry[is.Entry], is)
 	}
 	fallback := b.brainMgr.Fallback()
 	var out []brainView
@@ -883,7 +883,7 @@ func (b *Bridge) brainViews() []brainView {
 		out[i].Issues = nonNil(byEntry[i])
 		for _, is := range out[i].Issues {
 			if out[i].Status == "ok" || is.Kind != "drift" {
-				out[i].Status = is.Kind
+				out[i].Status = string(is.Kind)
 			}
 		}
 		if br := b.brainMgr.Get(out[i].ID); br != nil && fsx.Canonical(br.Dir()) == fsx.Canonical(out[i].Path) {
@@ -1283,8 +1283,8 @@ func checkSet(before, after *config.Config) error {
 }
 
 // issueKey tells brain issues apart for checkSet.
-func issueKey(is BrainIssue) string {
-	return is.ID + "\x00" + is.Kind + "\x00" + is.Detail
+func issueKey(is registry.Issue) string {
+	return is.ID + "\x00" + string(is.Kind) + "\x00" + is.Detail
 }
 
 // errReviewedManifestChanged refuses an approval of a brain.json that is no

@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	outboundmsg "github.com/Icewater1337/fridolin/internal/outbound"
+	"github.com/Icewater1337/fridolin/internal/registry"
 	"io"
 	"io/fs"
 	"log"
@@ -2084,9 +2085,9 @@ type BrainManager struct {
 	byGroup  map[string]*Brain
 	dmBrain  *Brain // brain with handles_dms; nil falls through to fallback
 	fallback *Brain // brain marked default, else the first brain
-	issues   []BrainIssue
+	issues   []registry.Issue
 	// held routes what an approved brain left out (see
-	// BrainIssue.leavesOut) would take to that brain's id, so that no
+	// registry.Issue.leavesOut) would take to that brain's id, so that no
 	// other brain gets it meanwhile: your DMs from a DM brain whose
 	// folder has a problem went to the default brain. See heldRoutes.
 	held heldRoutes
@@ -2126,7 +2127,7 @@ func (bm *BrainManager) Apply(cfg *config.Config) error {
 
 // reload runs the brains specs, with issues the problems ResolveBrains
 // found and ownPATH each brain's own PATH folders (see setBridgePATH).
-func (bm *BrainManager) reload(specs []manifest.Spec, issues []BrainIssue, cfg *config.Config, ownPATH map[string][]string) error {
+func (bm *BrainManager) reload(specs []manifest.Spec, issues []registry.Issue, cfg *config.Config, ownPATH map[string][]string) error {
 	bm.reloadMu.Lock()
 	defer bm.reloadMu.Unlock()
 
@@ -2173,7 +2174,7 @@ func (bm *BrainManager) reload(specs []manifest.Spec, issues []BrainIssue, cfg *
 			root, err := os.OpenRoot(sp.Dir)
 			if err != nil {
 				log.Printf("brain %s: leaving it out: %v", m.ID, err)
-				issues = append(issues, BrainIssue{ID: m.ID, Path: sp.Dir, Kind: "missing", Detail: "the folder cannot be opened: " + err.Error(), atLoad: true, entry: sp.Entry, routing: m.Routing})
+				issues = append(issues, registry.Issue{ID: m.ID, Path: sp.Dir, Kind: "missing", Detail: "the folder cannot be opened: " + err.Error(), AtLoad: true, Entry: sp.Entry, Routing: m.Routing})
 				continue
 			}
 			br = &Brain{
@@ -2379,21 +2380,21 @@ type heldRoutes struct {
 
 // heldRoutesOf returns what the brains issues leaves out would take, of
 // what no brain that runs (dm, the DM brain, and byGroup) takes instead.
-func heldRoutesOf(issues []BrainIssue, dm *Brain, byGroup map[string]*Brain) heldRoutes {
+func heldRoutesOf(issues []registry.Issue, dm *Brain, byGroup map[string]*Brain) heldRoutes {
 	h := heldRoutes{groups: map[string]string{}}
 	for _, is := range issues {
-		if !is.leavesOut() {
+		if !is.LeavesOut() {
 			continue
 		}
-		if is.routing.HandlesDMs && dm == nil && h.dms == "" {
+		if is.Routing.HandlesDMs && dm == nil && h.dms == "" {
 			h.dms = is.ID
 		}
-		for _, g := range is.routing.Groups {
+		for _, g := range is.Routing.Groups {
 			if _, ok := byGroup[g]; !ok && h.groups[g] == "" {
 				h.groups[g] = is.ID
 			}
 		}
-		if is.routing.Default && h.fallback == "" {
+		if is.Routing.Default && h.fallback == "" {
 			h.fallback = is.ID
 		}
 	}
@@ -2424,7 +2425,7 @@ func (bm *BrainManager) BrainFor(jid string, isGroup bool) *Brain {
 	return bm.fallback
 }
 
-// HeldFor returns the id of the brain left out (see BrainIssue.leavesOut)
+// HeldFor returns the id of the brain left out (see registry.Issue.leavesOut)
 // that would handle the given chat, which therefore goes to no brain, or
 // "" when BrainFor answers for it.
 func (bm *BrainManager) HeldFor(jid string, isGroup bool) string {
@@ -2480,10 +2481,10 @@ func (bm *BrainManager) Brains() []*Brain {
 }
 
 // Issues returns the problems found the last time the brains were loaded.
-func (bm *BrainManager) Issues() []BrainIssue {
+func (bm *BrainManager) Issues() []registry.Issue {
 	bm.mu.RLock()
 	defer bm.mu.RUnlock()
-	return append([]BrainIssue(nil), bm.issues...)
+	return append([]registry.Issue(nil), bm.issues...)
 }
 
 // Route returns the brain that handles m: the brain it names, else the one
