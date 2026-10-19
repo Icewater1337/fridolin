@@ -346,6 +346,11 @@ because they are on disk or because scripts rely on them:
 
 From earlier versions of the bridge:
 
+- Malformed configuration and brain manifest JSON keeps the Go type names
+  shown before those types moved into packages, including manifests nested
+  in configuration or dashboard requests. This preserves the existing
+  diagnostics during the refactor without changing decoder error metadata.
+
 - A `config.json` without `version`, version 1, which is read with its
   retired keys `model`, `work_dir` and `brains` folded in. It stays, as
   every migration of `config.json` does, so that a config of any earlier

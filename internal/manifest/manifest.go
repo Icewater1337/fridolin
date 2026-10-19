@@ -213,7 +213,7 @@ func Read(dir string) (*Manifest, error) {
 func Decode(data []byte) (*Manifest, error) {
 	m := &Manifest{}
 	if err := json.Unmarshal(data, m); err != nil {
-		return nil, err
+		return nil, JSONError(err)
 	}
 	if err := checkManifestVersion(m.Version); err != nil {
 		return nil, err

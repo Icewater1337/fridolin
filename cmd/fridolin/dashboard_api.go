@@ -1155,7 +1155,7 @@ func (b *Bridge) apiUpdateBrain(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		Manifest manifest.Manifest `json:"manifest"`
 	}
-	if err := httpapi.DecodeJSON(r, &req); err != nil {
+	if err := manifest.JSONError(httpapi.DecodeJSON(r, &req)); err != nil {
 		httpapi.WriteErr(w, http.StatusBadRequest, err.Error())
 		return
 	}
@@ -1224,7 +1224,7 @@ func (b *Bridge) apiApproveBrain(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		Manifest *manifest.Manifest `json:"manifest"`
 	}
-	if err := httpapi.DecodeJSON(r, &req); err != nil {
+	if err := manifest.JSONError(httpapi.DecodeJSON(r, &req)); err != nil {
 		httpapi.WriteErr(w, http.StatusBadRequest, err.Error())
 		return
 	}
