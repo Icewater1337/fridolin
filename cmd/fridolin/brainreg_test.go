@@ -459,7 +459,7 @@ func TestLeftOutBrainsKeepTheirChats(t *testing.T) {
 		}
 		mgr := newTestManager(t, cfg)
 		t.Cleanup(mgr.Stop)
-		br, _, err := (&PlaudManager{brains: mgr}).destination(cfg)
+		br, _, err := (&PlaudManager{brains: mgr}).destination(plaudSnapshotOf(cfg))
 		if br != nil || err == nil || !strings.Contains(err.Error(), "brain personal, which gets Plaud recordings, cannot run") {
 			t.Errorf("recordings go to %v (%v), want them to wait for brain personal", br, err)
 		}

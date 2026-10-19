@@ -2118,7 +2118,7 @@ func TestPlaudPagesBackToTheLastKnownRecording(t *testing.T) {
 // leaves half of a small queue for your own messages.
 func TestPlaudBacklogTricklesInAsRunsEnd(t *testing.T) {
 	for _, c := range []struct{ maxPending, want int }{{10, plaudHandedMax}, {100, plaudHandedMax}, {6, 3}, {3, 1}, {1, 1}} {
-		if got := plaudHandedLimit(&config.Config{Queue: config.QueueConfig{MaxPending: c.maxPending}}); got != c.want {
+		if got := plaudHandedLimit(c.maxPending); got != c.want {
 			t.Errorf("limit with queue.max_pending %d = %d, want %d", c.maxPending, got, c.want)
 		}
 	}
@@ -2173,7 +2173,7 @@ func TestPlaudBacklogLeavesRoomInTheBrainsQueue(t *testing.T) {
 	for _, id := range backlog {
 		fp.recording(id, true)
 	}
-	limit := plaudHandedLimit(tb.cfgs.Get())
+	limit := plaudHandedLimit(tb.cfgs.Get().Queue.MaxPending)
 	for i := range 4 {
 		if err := tb.plaud.Poll(context.Background()); err != nil {
 			t.Fatalf("check %d: %v", i+1, err)
