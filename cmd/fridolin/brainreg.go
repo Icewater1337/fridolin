@@ -73,8 +73,8 @@ func updateManifest(cs *config.Store, id string, mutate func(m *manifest.Manifes
 }
 
 // registryFor supplies command-owned dependencies at their existing read points.
-func registryFor(cs *config.Store) *brainRegistry {
-	return newBrainRegistry(cs, brainRegistryOptions{Home: homeDir, CheckDir: checkBrainDir, Templates: brainTemplates, HistoryFile: history.FileName})
+func registryFor(cs *config.Store) *registry.Registry {
+	return registry.New(cs, registry.Options{Home: homeDir, CheckDir: checkBrainDir, Templates: brainTemplates, HistoryFile: history.FileName})
 }
 
 func checkSet(before, after *config.Config) error { return registryFor(nil).CheckSet(before, after) }

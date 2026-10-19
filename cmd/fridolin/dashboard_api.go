@@ -782,7 +782,7 @@ func (b *Bridge) apiRestart(w http.ResponseWriter, r *http.Request) {
 // ── brains ───────────────────────────────────────────────────────────────
 
 type brainView struct {
-	brainRegistryView
+	registry.View
 	Runtime *BrainRuntime `json:"runtime,omitempty"`
 	// Fallback marks the brain that takes the chats no other brain
 	// claims (BrainManager.Fallback). Without a default brain that is the
@@ -809,10 +809,10 @@ func (b *Bridge) brainViews() []brainView {
 	cfg := b.cfgs.Get()
 	issues := b.brainIssues(cfg)
 	fallback := b.brainMgr.Fallback()
-	base := registryViews(cfg, issues)
+	base := registry.Views(cfg, issues)
 	out := make([]brainView, len(base))
 	for i, v := range base {
-		out[i].brainRegistryView = v
+		out[i].View = v
 
 		if br := b.brainMgr.Get(out[i].ID); br != nil && fsx.Canonical(br.Dir()) == fsx.Canonical(out[i].Path) {
 			rt := br.Snapshot()
@@ -903,7 +903,7 @@ func (b *Bridge) apiAddBrain(w http.ResponseWriter, r *http.Request) {
 		_ = json.Unmarshal(req.Manifest, &keys)
 		backupGiven = keys["backup"] != nil && string(keys["backup"]) != "null"
 	}
-	result, err := b.registry.Add(brainAddInput{Path: req.Path, Manifest: m, BackupGiven: backupGiven, CreateDir: req.CreateDir, UseExisting: req.UseExisting})
+	result, err := b.registry.Add(registry.AddInput{Path: req.Path, Manifest: m, BackupGiven: backupGiven, CreateDir: req.CreateDir, UseExisting: req.UseExisting})
 	if err != nil {
 		status := http.StatusUnprocessableEntity
 		switch apperr.KindOf(err) {
@@ -956,7 +956,7 @@ func (b *Bridge) apiApproveBrain(w http.ResponseWriter, r *http.Request) {
 	}
 	err := b.registry.Approve(id, *req.Manifest)
 	switch {
-	case errors.Is(err, errReviewedManifestChanged):
+	case errors.Is(err, registry.ErrReviewedManifestChanged):
 		httpapi.WriteErr(w, http.StatusConflict, err.Error())
 		return
 	case err != nil:

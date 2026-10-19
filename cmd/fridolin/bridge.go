@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/Icewater1337/fridolin/internal/registry"
 	"log"
 	"net"
 	"net/http"
@@ -98,7 +99,7 @@ type Bridge struct {
 	intake intake
 
 	// registry owns the brain workflows, including add serialization.
-	registry *brainRegistry
+	registry *registry.Registry
 	// applyMu keeps reading the configuration and applying it to the
 	// brains together, see the config subscriber in NewBridge.
 	applyMu sync.Mutex
