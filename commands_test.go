@@ -71,8 +71,9 @@ func (tb *testBridge) whatsApp() *WhatsAppClient {
 }
 
 // whatsAppOffline is whatsApp with a whatsmeow client that never connected,
-// which the group path needs: its group lookup fails at once, without
-// reaching the network. dev is the bridge account's device store.
+// on dev, the bridge account's device store, whose JIDs and LIDs the group
+// path reads; what it would ask WhatsApp fails at once, without reaching
+// the network.
 func (tb *testBridge) whatsAppOffline(dev *store.Device) *WhatsAppClient {
 	wa := tb.whatsApp()
 	wa.client = whatsmeow.NewClient(dev, waLog.Noop)

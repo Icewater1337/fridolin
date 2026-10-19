@@ -12,7 +12,12 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"go.mau.fi/whatsmeow"
+	"go.mau.fi/whatsmeow/proto/waE2E"
+	"go.mau.fi/whatsmeow/store"
 	"go.mau.fi/whatsmeow/types"
+	"go.mau.fi/whatsmeow/types/events"
+	waLog "go.mau.fi/whatsmeow/util/log"
 )
 
 func TestExtractPolls(t *testing.T) {
@@ -365,6 +370,110 @@ func TestPollVoteBecomesAHistoryEvent(t *testing.T) {
 			}
 			if p, err := tb.store.Poll(context.Background(), "3EB0POLL"); err != nil || p.TotalVoters != 1 {
 				t.Errorf("stored poll = %+v, %v; want one voter", p, err)
+			}
+		})
+	}
+}
+
+// Who voted for what goes to the debug log only: the main log, which is
+// kept and sent along with bug reports, names no voter and no choice.
+func TestPollVoteIsLoggedAtDebug(t *testing.T) {
+	hash := func(s string) []byte { h := sha256.Sum256([]byte(s)); return h[:] }
+	logged := captureLog(t)
+	tb, _ := newMainBridge(t, "")
+	if err := tb.store.SavePoll("3EB0POLL", testGroup, "main", "When should we meet?", []string{"Monday 2pm", "Tuesday 3pm"}); err != nil {
+		t.Fatal(err)
+	}
+	wa := tb.whatsApp()
+	rec := &testWhatsApp{}
+	wa.log = testWaLogger{rec}
+	wa.recordVote("3EB0POLL", types.NewJID(otherNumber, types.DefaultUserServer), [][]byte{hash("Tuesday 3pm")})
+	if got := strings.Join(logged(), "\n"); strings.Contains(got, otherNumber) || strings.Contains(got, "Tuesday 3pm") {
+		t.Errorf("main log %q names the voter or the choice", got)
+	}
+	rec.mu.Lock()
+	defer rec.mu.Unlock()
+	if !slices.ContainsFunc(rec.logs, func(l string) bool {
+		return strings.HasPrefix(l, "DEBUG Poll vote recorded") && strings.Contains(l, otherNumber) && strings.Contains(l, "Tuesday 3pm")
+	}) {
+		t.Errorf("debug log %q, want the vote", rec.logs)
+	}
+}
+
+// pollSecrets is whatsmeow's store of message secrets, as far as it keeps
+// key as every poll's. Like the SQL store, it fails under a context that
+// ended.
+type pollSecrets struct {
+	store.MsgSecretStore
+	key []byte
+}
+
+func (s pollSecrets) GetMessageSecret(ctx context.Context, _, sender types.JID, _ types.MessageID) ([]byte, types.JID, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, types.EmptyJID, err
+	}
+	return s.key, sender, nil
+}
+
+// pollVoteEvent is voter's vote for options in the poll the bridge sent
+// voter as pollID, encrypted with key the way the voter's phone does.
+func pollVoteEvent(t *testing.T, key []byte, voter types.JID, pollID string, options ...string) *events.Message {
+	t.Helper()
+	phone := whatsmeow.NewClient(&store.Device{ID: &voter, MsgSecrets: pollSecrets{key: key}}, waLog.Noop)
+	// The poll as the phone has it: in the chat with the bridge, from it.
+	poll := types.MessageInfo{MessageSource: types.MessageSource{Chat: bridgeAccount, Sender: bridgeAccount}, ID: types.MessageID(pollID)}
+	vote, err := phone.EncryptPollVote(context.Background(), &poll, &waE2E.PollVoteMessage{SelectedOptions: whatsmeow.HashPollOptions(options)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	src := types.MessageSource{Chat: voter, Sender: voter}
+	return &events.Message{Info: types.MessageInfo{MessageSource: src, ID: "3EB0VOTE", Timestamp: time.Now()}, Message: &waE2E.Message{PollUpdateMessage: vote}}
+}
+
+// A vote that cannot be decrypted or saved is logged as an error, the
+// voter masked there too, in what whatsmeow says as well.
+func TestPollVoteFailuresMaskTheVoter(t *testing.T) {
+	voter := types.NewJID(otherNumber, types.DefaultUserServer)
+	cases := []struct {
+		name string
+		vote func(t *testing.T, tb *testBridge, wa *WhatsAppClient)
+		want string
+	}{
+		{"not decrypted", func(t *testing.T, _ *testBridge, wa *WhatsAppClient) {
+			// The bridge keeps another secret than the phone used.
+			wa.client = whatsmeow.NewClient(&store.Device{MsgSecrets: pollSecrets{key: make([]byte, 32)}}, waLog.Noop)
+			wa.handlePollVote(pollVoteEvent(t, []byte("0123456789abcdef0123456789abcdef"), voter, "3EB0POLL", "Tuesday 3pm"))
+		}, "ERROR Failed to decrypt poll vote from " + maskPhone(otherNumber) + "@s.whatsapp.net: "},
+		{"not saved", func(t *testing.T, tb *testBridge, wa *WhatsAppClient) {
+			if _, err := tb.store.db.Exec(`CREATE TRIGGER refuse_votes BEFORE INSERT ON poll_votes BEGIN SELECT RAISE(ABORT, 'the disk is full'); END`); err != nil {
+				t.Fatal(err)
+			}
+			hash := sha256.Sum256([]byte("Tuesday 3pm"))
+			wa.recordVote("3EB0POLL", voter, [][]byte{hash[:]})
+		}, "ERROR Failed to save poll vote from " + maskPhone(otherNumber) + "@s.whatsapp.net: "},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			logged := captureLog(t)
+			tb, _ := newMainBridge(t, "")
+			if err := tb.store.SavePoll("3EB0POLL", voter.String(), "main", "When should we meet?", []string{"Monday 2pm", "Tuesday 3pm"}); err != nil {
+				t.Fatal(err)
+			}
+			wa := tb.whatsApp()
+			rec := &testWhatsApp{}
+			wa.log = testWaLogger{rec}
+			c.vote(t, tb, wa)
+			// The debug log may name the voter; nothing else may.
+			got := logged()
+			rec.mu.Lock()
+			defer rec.mu.Unlock()
+			for _, l := range rec.logs {
+				if !strings.HasPrefix(l, "DEBUG ") {
+					got = append(got, l)
+				}
+			}
+			if s := strings.Join(got, "\n"); !strings.Contains(s, c.want) || strings.Contains(s, otherNumber) {
+				t.Errorf("log %q, want %q and the voter masked", s, c.want)
 			}
 		})
 	}

@@ -268,8 +268,14 @@ func isTerminal(f *os.File) bool {
 	return err == nil && st.Mode()&os.ModeCharDevice != 0
 }
 
+// intakeDrainWarning is when Disconnect warns about a slow drain.
+const intakeDrainWarning = 5 * time.Second
+
 // Disconnect disconnects the client for good: it also ends the attachment
-// downloads still running and a pairing.
+// downloads still running, the group lookups and a pairing. The messages
+// that came before are still handed on: the one whose download it cut
+// off with its text, without the file. It joins every worker before the
+// bridge closes its store, warning after intakeDrainWarning if needed.
 func (wa *WhatsAppClient) Disconnect() {
 	wa.cancel()
 	wa.mu.Lock()
@@ -277,7 +283,10 @@ func (wa *WhatsAppClient) Disconnect() {
 		wa.retry.Stop()
 	}
 	wa.mu.Unlock()
+	// First the connection, so that no more messages come; then the
+	// queues hand on what they hold.
 	wa.cl().Disconnect()
+	wa.intake.close(intakeDrainWarning)
 }
 
 // connectionEvent follows the connection's events into the state.

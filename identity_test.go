@@ -158,6 +158,24 @@ func (personLIDs) GetLIDForPN(_ context.Context, pn types.JID) (types.JID, error
 	return types.EmptyJID, nil
 }
 
+// storedLIDs is personLIDs as whatsmeow's SQL store answers: a lookup
+// under a context that ended fails, as the query under it does.
+type storedLIDs struct{ personLIDs }
+
+func (s storedLIDs) GetPNForLID(ctx context.Context, lid types.JID) (types.JID, error) {
+	if err := ctx.Err(); err != nil {
+		return types.EmptyJID, err
+	}
+	return s.personLIDs.GetPNForLID(ctx, lid)
+}
+
+func (s storedLIDs) GetLIDForPN(ctx context.Context, pn types.JID) (types.JID, error) {
+	if err := ctx.Err(); err != nil {
+		return types.EmptyJID, err
+	}
+	return s.personLIDs.GetLIDForPN(ctx, pn)
+}
+
 // /send to a person's LID goes to, and is recorded under, their number,
 // the JID the chat's runs read its history by.
 func TestHTTPSendToALIDUsesTheNumber(t *testing.T) {
@@ -206,6 +224,22 @@ func TestCanonicalUser(t *testing.T) {
 				t.Errorf("canonicalUser(%v, %v) = %v, want %v", c.jid, c.alt, got, c.want)
 			}
 		})
+	}
+}
+
+// A LID the store fails to look up stays a LID, and the log names it
+// masked: the log goes along with bug reports.
+func TestCanonicalUserLogsAFailedLookupMasked(t *testing.T) {
+	logged := captureLog(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	lid := types.NewJID(personLID, types.HiddenUserServer)
+	if got := canonicalUser(ctx, storedLIDs{}, lid, types.EmptyJID); got != lid {
+		t.Errorf("canonicalUser = %v, want %v as it is", got, lid)
+	}
+	got := strings.Join(logged(), "\n")
+	if !strings.Contains(got, "could not look up the number of …17@lid: context canceled") || strings.Contains(got, personLID) {
+		t.Errorf("log %q, want the failure with the LID masked", got)
 	}
 }
 

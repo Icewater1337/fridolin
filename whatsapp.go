@@ -84,10 +84,18 @@ type WhatsAppClient struct {
 	lister     groupLister            // nil: the client; tests set a fake
 	notify     func(jid, text string) // sendNotice; tests record instead
 
-	// ctx ends when the client disconnects for good. Attachment downloads
-	// run under it, so shutting down does not wait for them.
+	// ctx ends when the client disconnects for good. Attachment downloads,
+	// group lookups and what the handlers send run under it, so shutting
+	// down does not wait for them. What is only read from the disk runs
+	// under storeCtx instead.
 	ctx    context.Context
 	cancel context.CancelFunc
+
+	// intake holds each chat's message events until its worker handles
+	// them, in the order they came (see chatQueues); downloads bounds the
+	// attachments downloaded at once.
+	intake    chatQueues
+	downloads downloadSlots
 
 	// pairMu serialises pairing; pairing is set while a pairing session's
 	// codes are followed (see StartPairing).
@@ -146,6 +154,14 @@ func NewWhatsAppClient(cfg func() *Config, store *Store, handler InboundHandler,
 	client.AddEventHandler(wa.eventHandler)
 	return wa, nil
 }
+
+// storeCtx is ctx without its end, for what is only read from the disk:
+// whatsmeow's map between LIDs and numbers and its message secrets, and
+// the polls the bridge sent. Disconnect ends ctx to cut the downloads off,
+// and then still has the chats' workers hand on the messages they hold;
+// those reads must not fail then, and they take too little time to be
+// worth cutting off.
+func (wa *WhatsAppClient) storeCtx() context.Context { return context.WithoutCancel(wa.ctx) }
 
 // cl returns the whatsmeow client.
 func (wa *WhatsAppClient) cl() *whatsmeow.Client {
@@ -310,27 +326,72 @@ func (wa *WhatsAppClient) JoinedGroups(ctx context.Context) ([]GroupInfo, error)
 	})
 }
 
-// eventHandler handles all whatsmeow events: messages here, the
-// connection's in connectionEvent. The group list sees each first, as
-// group and connection events are what drop it.
+// eventHandler handles all whatsmeow events, on whatsmeow's one event
+// goroutine, which must not wait: a message, an edit, a deletion or a
+// poll vote goes onto its chat's queue, whose worker handles it (see
+// chatQueues); the connection's events go to connectionEvent. The group
+// list sees each first, as group and connection events are what drop it.
 func (wa *WhatsAppClient) eventHandler(rawEvt interface{}) {
 	wa.groups.observe(rawEvt)
 	if evt, ok := rawEvt.(*events.Message); ok {
-		if evt.Message.GetPollUpdateMessage() != nil {
-			wa.handlePollVote(evt)
-		} else {
-			wa.handleMessage(evt)
-		}
+		wa.enqueue(evt)
 		return
 	}
 	wa.connectionEvent(rawEvt)
 }
 
+// enqueue puts evt on its chat's queue. One in no chat the bridge handles
+// (see incomingChat) is dropped at once, which costs nothing.
+func (wa *WhatsAppClient) enqueue(evt *events.Message) {
+	chat, ok := wa.queueChat(evt.Info.MessageSource)
+	if !ok {
+		wa.handleMessage(evt)
+		return
+	}
+	if err := wa.intake.add(chat, func() { wa.handleEvent(evt) }); errors.Is(err, errIntakeClosed) {
+		wa.log.Debugf("Dropped message %s: the client is disconnecting", evt.Info.ID)
+	}
+}
+
+// queueChat is the queue src's message goes on: its chat, as incomingChat
+// finds it. Resolve a LID through the number WhatsApp sent along or the
+// local identity store before choosing the queue, just as the worker
+// chooses the message's chat. Otherwise a LID-only photo and text sent by
+// number could overtake each other. This lookup never contacts WhatsApp;
+// downloads and group queries stay on the workers. ok is false for a
+// message in no chat the bridge handles.
+func (wa *WhatsAppClient) queueChat(src types.MessageSource) (string, bool) {
+	chat, ok := incomingChat(src)
+	if !ok {
+		return "", false
+	}
+	chat = chat.ToNonAD()
+	if chat.Server == types.HiddenUserServer {
+		alt := types.EmptyJID
+		if !src.IsFromMe && (src.Sender.IsEmpty() || src.Sender.ToNonAD() == chat) {
+			alt = src.SenderAlt
+		}
+		chat = canonicalUser(wa.storeCtx(), wa.lidStore(), chat, alt)
+	}
+	return chat.String(), true
+}
+
+// handleEvent handles a message event, on its chat's worker.
+func (wa *WhatsAppClient) handleEvent(evt *events.Message) {
+	if evt.Message.GetPollUpdateMessage() != nil {
+		wa.handlePollVote(evt)
+		return
+	}
+	wa.handleMessage(evt)
+}
+
 // handlePollVote decrypts a poll vote and records it (see recordVote).
 func (wa *WhatsAppClient) handlePollVote(evt *events.Message) {
-	pollVote, err := wa.cl().DecryptPollVote(wa.ctx, evt)
+	pollVote, err := wa.cl().DecryptPollVote(wa.storeCtx(), evt)
 	if err != nil {
-		wa.log.Errorf("Failed to decrypt poll vote from %s: %v", evt.Info.Sender, err)
+		// Masked, in whatsmeow's error too, which names the voter: the
+		// main log names no voter (see recordVote).
+		wa.log.Errorf("Failed to decrypt poll vote from %s: %v", maskJID(evt.Info.Sender.User, "", evt.Info.Sender.Server), (&redactor{}).text(err.Error()))
 		return
 	}
 	pollMsgID := evt.Message.GetPollUpdateMessage().GetPollCreationMessageKey().GetID()
@@ -340,7 +401,7 @@ func (wa *WhatsAppClient) handlePollVote(evt *events.Message) {
 	}
 	// One voter, however WhatsApp addressed them: a vote changed later
 	// must replace the first, not count as a second voter's.
-	voter := canonicalUser(wa.ctx, wa.lidStore(), evt.Info.Sender, evt.Info.SenderAlt)
+	voter := canonicalUser(wa.storeCtx(), wa.lidStore(), evt.Info.Sender, evt.Info.SenderAlt)
 	wa.recordVote(pollMsgID, voter, pollVote.GetSelectedOptions())
 }
 
@@ -348,16 +409,18 @@ func (wa *WhatsAppClient) handlePollVote(evt *events.Message) {
 // as WhatsApp sends it, the hashes of the chosen options, and tells
 // onVote. A vote for a poll the bridge did not keep is dropped.
 func (wa *WhatsAppClient) recordVote(pollMsgID string, voter types.JID, hashes [][]byte) {
-	poll, err := wa.store.SentPoll(wa.ctx, pollMsgID)
+	poll, err := wa.store.SentPoll(wa.storeCtx(), pollMsgID)
 	if err != nil {
 		// Not necessarily an error: the poll may predate vote tracking.
 		log.Printf("Poll vote for unknown poll %s (not in DB) — skipping", pollMsgID)
 		return
 	}
 	selected := matchVote(hashes, poll.Options)
-	log.Printf("Poll vote recorded: poll=%s voter=%s options=%v", pollMsgID, voter, selected)
+	// Who chose what is for the debug log only: the main log is kept, and
+	// sent along with bug reports.
+	wa.log.Debugf("Poll vote recorded: poll=%s voter=%s options=%v", pollMsgID, voter, selected)
 	if err := wa.store.SavePollVote(pollMsgID, voter.String(), selected); err != nil {
-		wa.log.Errorf("Failed to save poll vote from %s: %v", voter, err)
+		wa.log.Errorf("Failed to save poll vote from %s: %v", maskJID(voter.User, "", voter.Server), err)
 		return
 	}
 	if wa.onVote != nil {
@@ -426,12 +489,17 @@ func (wa *WhatsAppClient) handleMessage(msg *events.Message) {
 		src.Sender = src.Chat
 	}
 	sender, resolved := wa.senderOf(src)
+	// Masked, as a refused group member is: anyone may write to the
+	// bridge's number, and the dashboard, which offers to allow them,
+	// shows it whole. A LID nothing resolves is no number allowed_numbers
+	// lists, so its line is followed by the one that ignores it.
+	who := groupSender{Number: sender.User, Resolved: resolved, Server: sender.Server}.masked()
 	if !resolved {
-		log.Printf("DM: could not resolve %s to a phone number (using it as it is)", sender)
+		log.Printf("DM: could not resolve %s to a phone number (using it as it is)", who)
 	}
 
 	if !wa.isAllowed(sender.User) {
-		log.Printf("DM from %s: ignored (not in allowed_numbers)", sender.User)
+		log.Printf("DM from %s: ignored (not in allowed_numbers)", who)
 		if wa.onIgnored != nil {
 			wa.onIgnored("dm", sender.String(), "", sender.User, msg.Info.PushName)
 		}
@@ -476,13 +544,13 @@ func (wa *WhatsAppClient) handleDMMessage(msg *events.Message, sender types.JID)
 	// may be under the LID WhatsApp addressed them by.
 	alt := msg.Info.Chat.ToNonAD()
 	if alt == sender {
-		alt = lidOf(wa.ctx, wa.lidStore(), sender)
+		alt = lidOf(wa.storeCtx(), wa.lidStore(), sender)
 	}
 	senderNumber := sender.User
 	text := extractText(msg.Message)
 	quoted := wa.quoteOf(msg.Message)
 
-	mediaPath, caption, notice := wa.downloadAttachment(msg, chatJID)
+	mediaPath, caption, notice := wa.fetchAttachment(msg, chatJID)
 	if notice != "" {
 		go wa.notify(chatJID, notice)
 	}
@@ -505,7 +573,9 @@ func (wa *WhatsAppClient) handleDMMessage(msg *events.Message, sender types.JID)
 	if !alt.IsEmpty() {
 		m.ChatAlt = alt.String()
 	}
-	go wa.handler(context.Background(), m)
+	// On the chat's worker, so the chat's messages reach the bridge in
+	// the order they came.
+	wa.handler(wa.ctx, m)
 }
 
 func mediaList(p string) []string {
@@ -531,6 +601,7 @@ func (wa *WhatsAppClient) handleGroupMessage(msg *events.Message) {
 	// identity map and group_members know them by.
 	sender, resolved := wa.senderOf(msg.Info.MessageSource)
 	senderNumber := sender.User
+	who := groupSender{Number: senderNumber, Resolved: resolved, Server: sender.Server, FromMe: msg.Info.IsFromMe}
 
 	// Unknown groups are logged and offered on the dashboard: that is how you
 	// find a group's JID to allow it. Both checks read the one snapshot cfg:
@@ -538,7 +609,7 @@ func (wa *WhatsAppClient) handleGroupMessage(msg *events.Message) {
 	// that neither config admits.
 	if !isAllowedGroup(cfg, groupJID) {
 		groupName := wa.groupName(msg.Info.Chat)
-		log.Printf("Group message from %s (%q) by %s: ignored (not in allowed_groups)", groupJID, groupName, senderNumber)
+		log.Printf("Group message from %s by %s: ignored (not in allowed_groups)", groupLabel(groupJID, groupName), who.masked())
 		if wa.onIgnored != nil {
 			wa.onIgnored("group", groupJID, groupName, senderNumber, msg.Info.PushName)
 		}
@@ -547,7 +618,6 @@ func (wa *WhatsAppClient) handleGroupMessage(msg *events.Message) {
 	// A member group_members does not admit is not read at all: no run,
 	// no command, no download, no edit, not even a line in the history.
 	// The group is allowed, so it is not offered on the dashboard again.
-	who := groupSender{Number: senderNumber, Resolved: resolved, Server: sender.Server, FromMe: msg.Info.IsFromMe}
 	if !groupSenderAllowed(cfg, groupJID, who) {
 		// A reaction or a sticker would not have been read anyway, and a
 		// busy group sends many: they go to the debug log, as they would
@@ -559,7 +629,8 @@ func (wa *WhatsAppClient) handleGroupMessage(msg *events.Message) {
 		log.Printf("Group message in %s by %s: ignored (not admitted by group_members)", groupJID, who.masked())
 		return
 	}
-	groupName := wa.groupName(msg.Info.Chat)
+	// Only for the log line: an allowed group's name is never looked up.
+	groupName := wa.groups.names.cached(groupJID)
 
 	own := wa.ownMentionJIDs()
 	kind, target, content := classify(msg)
@@ -611,7 +682,7 @@ func (wa *WhatsAppClient) handleGroupMessage(msg *events.Message) {
 			caption = att.caption
 		}
 	} else {
-		mediaPath, caption, notice = wa.downloadAttachment(msg, groupJID)
+		mediaPath, caption, notice = wa.fetchAttachment(msg, groupJID)
 	}
 	if notice != "" {
 		go wa.notify(groupJID, notice)
@@ -630,11 +701,28 @@ func (wa *WhatsAppClient) handleGroupMessage(msg *events.Message) {
 		return
 	}
 
-	log.Printf("Group message from %s (%q) by %s: processing (silent=%v)", groupJID, groupName, senderNumber, silent)
-	go wa.handler(context.Background(), Inbound{
+	log.Printf("Group message from %s by %s: processing (silent=%v)", groupLabel(groupJID, groupName), senderNumber, silent)
+	wa.handler(wa.ctx, Inbound{
 		JID: groupJID, Sender: senderNumber, Text: text, Media: mediaList(mediaPath),
 		Quoted: quoted, Silent: silent, Source: sourceWhatsApp, At: msg.Info.Timestamp, ID: string(msg.Info.ID),
 	})
+}
+
+// fetchAttachment is downloadAttachment once one of the download slots
+// all chats share is free (see maxDownloads). A message without a file
+// needs none, and nor does one whose file declares more than max_media_mb:
+// it is refused before any download, and its sender need not wait for
+// the downloads of others to be told so. One that waits while the client
+// disconnects goes on without a slot: its download fails at once, and the
+// message goes on without the file and without a notice, as one the
+// disconnect cut off.
+func (wa *WhatsAppClient) fetchAttachment(msg *events.Message, chatJID string) (path, caption, notice string) {
+	if att, ok := attachmentOf(msg.Message, msg.Info.ID); ok && att.size <= uint64(wa.cfg().MaxMediaBytes()) {
+		if release, ok := wa.downloads.acquire(wa.ctx); ok {
+			defer release()
+		}
+	}
+	return wa.downloadAttachment(msg, chatJID)
 }
 
 // downloadAttachment saves whichever attachment the message carries and
@@ -678,8 +766,8 @@ func (wa *WhatsAppClient) sendNotice(jid, text string) {
 }
 
 // mediaDownloadTimeout bounds one attachment download. Downloads run on
-// whatsmeow's event goroutine, so a stalled one holds up every message
-// behind it.
+// their chat's worker, so a stalled one holds up the messages its chat
+// sent after it, and one of the maxDownloads slots.
 const mediaDownloadTimeout = 2 * time.Minute
 
 // mediaDownloader is what saveAttachment needs from whatsmeow.Client; tests
@@ -998,7 +1086,7 @@ func (wa *WhatsAppClient) ownMentionJIDs() []types.JID {
 		return nil
 	}
 	if lid.User == "" {
-		lid = lidOf(wa.ctx, wa.lidStore(), own)
+		lid = lidOf(wa.storeCtx(), wa.lidStore(), own)
 	}
 	out := []types.JID{own}
 	if lid.User != "" && lid != own {
@@ -1039,17 +1127,34 @@ func stripMentions(text string, jids []types.JID) string {
 // resolved is false for a LID nothing maps to a number, whose digits are
 // WhatsApp's internal id and must match no number on a list.
 func (wa *WhatsAppClient) senderOf(src types.MessageSource) (sender types.JID, resolved bool) {
-	sender = canonicalUser(wa.ctx, wa.lidStore(), src.Sender, src.SenderAlt)
+	sender = canonicalUser(wa.storeCtx(), wa.lidStore(), src.Sender, src.SenderAlt)
 	return sender, sender.Server == types.DefaultUserServer
 }
 
-// groupName is the group's subject as WhatsApp has it, or "" when it
-// cannot be looked up.
-func (wa *WhatsAppClient) groupName(jid types.JID) string {
-	if info, err := wa.cl().GetGroupInfo(context.Background(), jid); err == nil && info != nil {
-		return info.Name
+// groupLabel is how the log names a group: by its JID, and by its name
+// too when the bridge knows one, which it may not for long, or ever when
+// nobody opens the dashboard's group list.
+func groupLabel(jid, name string) string {
+	if name == "" {
+		return jid
 	}
-	return ""
+	return fmt.Sprintf("%s (%q)", jid, name)
+}
+
+// groupName is the group's subject as WhatsApp has it, or "" when it
+// cannot be looked up: from the names kept (see groupNameCache), or else
+// asked for on the chat's worker, never on whatsmeow's event goroutine.
+func (wa *WhatsAppClient) groupName(jid types.JID) string {
+	return wa.groups.names.lookup(wa.ctx, jid.String(), func(ctx context.Context) (string, error) {
+		info, err := wa.groupsFrom().GetGroupInfo(ctx, jid)
+		if err != nil {
+			return "", err
+		}
+		if info == nil {
+			return "", errors.New("WhatsApp sent no group info")
+		}
+		return info.Name, nil
+	})
 }
 
 // lidStore is whatsmeow's map between LIDs and phone numbers, or nil
@@ -1071,7 +1176,7 @@ func (wa *WhatsAppClient) quoteOf(msg *waE2E.Message) *Quote {
 	}
 	p, err := types.ParseJID(msg.GetExtendedTextMessage().GetContextInfo().GetParticipant())
 	if err == nil && p.Server == types.HiddenUserServer {
-		q.From = canonicalUser(wa.ctx, wa.lidStore(), p, types.EmptyJID).User
+		q.From = canonicalUser(wa.storeCtx(), wa.lidStore(), p, types.EmptyJID).User
 	}
 	return q
 }
