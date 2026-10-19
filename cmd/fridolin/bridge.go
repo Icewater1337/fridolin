@@ -9,7 +9,6 @@ import (
 	"net/http"
 	"path/filepath"
 	"slices"
-	"strings"
 	"sync"
 	"time"
 
@@ -48,6 +47,7 @@ type Bridge struct {
 	dev      *devchat.Messenger // non-nil in --no-whatsapp mode
 	brainMgr *BrainManager
 	deb      *pipeline.Debouncer
+	pipeline *pipeline.Workflow
 	logs     *logx.Ring
 	activity *activity.Feed
 	token    *httpapi.Token
@@ -188,11 +188,13 @@ func NewBridge(cfgs *config.Store, opts BridgeOptions) (_ *Bridge, err error) {
 	}
 	logDMAccess(nil, cfg)
 
+	b.pipeline = b.newMessagePipeline()
 	b.deb = pipeline.NewDebouncer(
 		func() time.Duration { return time.Duration(b.cfgs.Get().DebounceQuietMS()) * time.Millisecond },
 		func() time.Duration { return time.Duration(b.cfgs.Get().DebounceMaxWaitMS()) * time.Millisecond },
-		b.dispatch,
+		b.pipeline.Dispatch,
 	)
+	b.pipeline.Debouncer = b.deb
 
 	if opts.NoWhatsApp {
 		b.dev = devchat.New(func(text string) []string { return outboundmsg.Chunk(text, cfgs.Get().MaxChunkSize) })
@@ -663,132 +665,7 @@ func (b *Bridge) handleInbound(ctx context.Context, m brainruntime.Inbound) {
 		return
 	}
 	defer b.intake.leave()
-	m.Text = strings.TrimSpace(m.Text)
-	cfg := b.cfgs.Get()
-
-	// Commands come from a chat. A message handed to a brain (/ingest, Plaud,
-	// a dev message that names one) carries none: its text is for that brain.
-	// A command must also be addressed to the bridge. In a group, an untagged
-	// "!stop" is someone talking to the others: it must not stop anything,
-	// and the bridge must not answer it.
-	if m.Source != chat.SourceIngest && m.Brain == "" && !m.Silent && b.handleCommand(ctx, m, cfg) {
-		return
-	}
-	if m.Text == "" && len(m.Media) == 0 && m.Quoted == nil {
-		return
-	}
-
-	// Resolved like the run itself (BrainManager.Submit), so the OTP guard
-	// checks the brain that would read the message.
-	br := b.brainMgr.Route(m)
-	if br == nil && m.Brain != "" {
-		log.Printf("brain %s is not configured; dropping the message for %s", m.Brain, m.JID)
-		return
-	}
-	if br == nil {
-		reply := outboundmsg.NoBrainNotice
-		if id := b.brainMgr.HeldFor(m.JID, m.IsGroup()); id != "" {
-			// Not the default brain instead: what was meant for this
-			// brain, your DMs say, must not land in another one.
-			log.Printf("brain %s, which handles %s, cannot run (see its issue on the Brains page); the message goes to no other brain", id, m.JID)
-			reply = outboundmsg.HeldBrainNotice
-		} else {
-			log.Printf("No brain configured for %s — add one in the dashboard", m.JID)
-		}
-		if !m.Silent && m.Source != chat.SourceIngest {
-			_ = b.wa.SendMessage(ctx, m.JID, reply)
-		}
-		return
-	}
-	// The OTP guard runs before anything is written to history, so a
-	// two-factor code the chat was asked for is neither logged nor sent to
-	// the model. Whoever sent it is told, unless it was untagged chatter,
-	// which the bridge never answers: a code that vanished without a word
-	// looks lost.
-	if code, ok := br.CatchesCode(m, time.Now()); ok {
-		log.Printf("brain %s: kept a one-time code out of the conversation (OTP guard)", br.ID())
-		b.handOffCode(br, m, code)
-		if !m.Silent {
-			_ = b.wa.SendMessage(ctx, m.JID, outboundmsg.OtpCaughtNotice)
-		}
-		return
-	}
-
-	b.deb.Add(m)
-}
-
-// handleCommand runs !help, !reset and !stop. It reports whether text was one.
-func (b *Bridge) handleCommand(ctx context.Context, m brainruntime.Inbound, cfg *config.Config) bool {
-	switch strings.ToLower(m.Text) {
-	case "!reset":
-		// A reset stops what !stop stops for the chat, hand-offs from other
-		// brains included, and starts the chat afresh: a brain run never
-		// resumes a session, each starts from the chat's recent history,
-		// which the next one reads only from the reset on. Say only what
-		// happened: the brain's memory files stay, and a chat no brain
-		// answers has no history to start afresh.
-		b.stopChat(m)
-		_ = b.wa.SendMessage(ctx, m.JID, outboundmsg.ResetReply(b.resetChat(m)))
-		return true
-
-	case "!stop":
-		_ = b.wa.SendMessage(ctx, m.JID, outboundmsg.StopReply(b.stopChat(m)))
-		return true
-
-	case "!help":
-		trigger := ""
-		if m.IsGroup() {
-			trigger = cfg.Triggers.First()
-		}
-		_ = b.wa.SendMessage(ctx, m.JID, outboundmsg.HelpReply(trigger))
-		return true
-	}
-	return false
-}
-
-// stopChat stops what is going on for m's chat, for !stop and !reset. It
-// reports whether a run was stopped and how many waiting messages were
-// dropped.
-func (b *Bridge) stopChat(m brainruntime.Inbound) (stopped bool, dropped int) {
-	// Only this chat's work: a brain serves several chats, and one chat must
-	// not cancel what another asked for. A DM goes by two JIDs (see
-	// chatJIDs), and its run may have come in under either.
-	chats := chatJIDs(m)
-	for _, jid := range chats {
-		b.deb.Drop(jid)
-	}
-	if br := b.brainMgr.BrainFor(m.JID, m.IsGroup()); br != nil {
-		for _, jid := range chats {
-			s, d := br.StopChat(jid)
-			stopped, dropped = stopped || s, dropped+d
-		}
-	}
-	// A file or recording handed to another brain may answer here too, and
-	// the chat's own brain knows nothing about it. What waits for one counts
-	// as this chat's, for the reply.
-	for _, jid := range chats {
-		s, d := b.brainMgr.StopHandOffs(jid)
-		stopped, dropped = stopped || s, dropped+d
-	}
-	return stopped, dropped
-}
-
-// resetChat starts m's chat afresh (Brain.ResetChat) in the brain that
-// answers there and in every brain whose reply chat it is, which answers
-// files handed to it there: !reset is about the chat, whichever brain
-// speaks in it. It reports whether any brain does.
-func (b *Bridge) resetChat(m brainruntime.Inbound) bool {
-	cfg := b.cfgs.Get()
-	chats := chatJIDs(m)
-	owner := b.brainMgr.BrainFor(m.JID, m.IsGroup())
-	reset := false
-	for _, br := range b.brainMgr.Brains() {
-		if br == owner || slices.Contains(chats, b.replyChatFor(br, cfg)) {
-			br.ResetChat(chats, m.Sender)
-			reset = true
-		}
-	}
-	return reset
+	b.pipeline.Handle(ctx, m)
 }
 
 // chatJIDs lists the JIDs m's chat goes by: the chat and, for a DM, its
@@ -807,31 +684,6 @@ func chatJIDs(m brainruntime.Inbound) []string {
 		}
 	}
 	return jids
-}
-
-// dispatch hands a (debounced) message to its brain.
-func (b *Bridge) dispatch(m brainruntime.Inbound) {
-	ctx := context.Background()
-	cfg := b.cfgs.Get()
-	br, pos, busy, err := b.brainMgr.Submit(m)
-	switch {
-	case errors.Is(err, brainruntime.ErrQueueFull):
-		log.Printf("brain %s: queue full, rejecting message from %s", br.ID(), m.Sender)
-		if !m.Silent {
-			// !stop drops only this chat's work, and in a group it needs the
-			// trigger like any command.
-			stop := "!stop"
-			if t := cfg.Triggers.First(); m.IsGroup() && t != "" {
-				stop = t + " !stop"
-			}
-			_ = b.wa.SendMessage(ctx, m.JID, outboundmsg.QueueFullNotice(stop))
-		}
-	case err != nil:
-		log.Printf("routing message for %s: %v", m.JID, err)
-	case busy && !m.Silent && cfg.QueueNotify():
-		// Interrupt mode queues too: behind other chats and other people.
-		_ = b.wa.SendMessage(ctx, m.JID, outboundmsg.QueuedNotice(pos))
-	}
 }
 
 // deliver sends a finished brain run's answer.
