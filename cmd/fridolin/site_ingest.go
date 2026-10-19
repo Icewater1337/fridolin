@@ -205,10 +205,10 @@ func (m *SiteManager) takeSpoolEntry(root *os.Root, entry string) error {
 	if len(req.Files) == 0 && strings.TrimSpace(req.Text) == "" {
 		return errors.New("no files and no text")
 	}
-	if m.hooks.ingest == nil || m.hooks.mediaDir == nil {
+	if m.hooks.Ingest == nil || m.hooks.MediaDir == nil {
 		return errors.New("this Fridolin cannot hand files to brains")
 	}
-	media := m.hooks.mediaDir()
+	media := m.hooks.MediaDir()
 	if err := os.MkdirAll(media, 0o700); err != nil {
 		return err
 	}
@@ -238,7 +238,7 @@ func (m *SiteManager) takeSpoolEntry(root *os.Root, entry string) error {
 	if text == "" {
 		text = "New files were uploaded on the site."
 	}
-	return m.hooks.ingest(req.Brain, sender, text, paths)
+	return m.hooks.Ingest(req.Brain, sender, text, paths)
 }
 
 // spoolTake copies a spool file into the media folder, as a new file, and
@@ -306,10 +306,10 @@ func (m *SiteManager) takeDeviceEntry(root *os.Root, entry string) (map[string]a
 			return nil, err
 		}
 	}
-	if m.hooks.device == nil {
+	if m.hooks.Device == nil {
 		return nil, errors.New("this Fridolin takes no requests from phones")
 	}
-	return m.hooks.device(req.Op, req.Assertion, body)
+	return m.hooks.Device(req.Op, req.Assertion, body)
 }
 
 // ── ctx.search ────────────────────────────────────────────────────────────
@@ -354,7 +354,7 @@ func (m *SiteManager) runSpoolSearch(ctx context.Context, root *os.Root, entry s
 	if strings.TrimSpace(req.Prompt) == "" || len(req.Prompt) > 20000 {
 		return errors.New("the prompt must be 1 to 20000 characters")
 	}
-	if m.hooks.search == nil {
+	if m.hooks.Search == nil {
 		return errors.New("this Fridolin cannot run searches")
 	}
 	select {
@@ -387,7 +387,7 @@ func (m *SiteManager) runSpoolSearch(ctx context.Context, root *os.Root, entry s
 			}
 		}
 	}()
-	err = m.hooks.search(ctx, req.Brain, req.Prompt, out)
+	err = m.hooks.Search(ctx, req.Brain, req.Prompt, out)
 	if errors.Is(ctx.Err(), context.DeadlineExceeded) {
 		return fmt.Errorf("the search took longer than %v", spoolSearchTimeout)
 	}

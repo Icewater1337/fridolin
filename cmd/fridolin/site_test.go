@@ -30,8 +30,8 @@ import (
 // checkout a link would lead to.
 func newTestSite(t *testing.T) *SiteManager {
 	t.Helper()
-	m := NewSiteManager(t.TempDir(), func() string { return "" })
-	m.npmInstall = func(ctx context.Context, dir string, prod bool) error {
+	opts := SiteOptions{DataDir: t.TempDir(), GoogleClient: func() string { return "" }}
+	opts.NPMInstall = func(ctx context.Context, dir string, prod bool) error {
 		src := filepath.Join(repoDir, "site", "node_modules")
 		if !fsx.Exists(src) {
 			return nil
@@ -41,7 +41,7 @@ func newTestSite(t *testing.T) *SiteManager {
 		}
 		return nil
 	}
-	return m
+	return NewSiteManager(opts)
 }
 
 func gitT(t *testing.T, dir string, args ...string) string {
@@ -214,7 +214,7 @@ func TestSiteAccounts(t *testing.T) {
 	}
 
 	// Reloaded from disk.
-	again := NewSiteManager(m.dataDir, nil)
+	again := NewSiteManager(SiteOptions{DataDir: m.dataDir})
 	if len(again.Users()) != 1 || again.Users()[0].Email != "owner@example.com" {
 		t.Errorf("reloaded users = %+v", again.Users())
 	}

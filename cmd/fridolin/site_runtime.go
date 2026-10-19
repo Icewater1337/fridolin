@@ -17,15 +17,15 @@ import (
 )
 
 // siteBuilderHooks connect the site to this bridge's brains and sandbox.
-func (b *Bridge) siteBuilderHooks() builderHooks {
-	return builderHooks{
-		brainDir: func(id string) string {
+func (b *Bridge) siteBuilderHooks() SiteBuilderHooks {
+	return SiteBuilderHooks{
+		BrainDir: func(id string) string {
 			if br := b.brainMgr.Get(id); br != nil {
 				return br.Dir()
 			}
 			return ""
 		},
-		sandbox: func(brainID, bin string, args []string) (string, []string, []string, error) {
+		Sandbox: func(brainID, bin string, args []string) (string, []string, []string, error) {
 			sp := b.brainMgr.profiler
 			if sp == nil || !sp.Enabled() {
 				return bin, args, nil, nil
@@ -38,15 +38,15 @@ func (b *Bridge) siteBuilderHooks() builderHooks {
 			sbBin, sbArgs, err := sp.Command(brainID, bin, args)
 			return sbBin, sbArgs, env, err
 		},
-		bridgeURL: func() string { return "http://" + b.cfgs.Boot().HTTPListen },
-		executable: func() (string, error) {
+		BridgeURL: func() string { return "http://" + b.cfgs.Boot().HTTPListen },
+		Executable: func() (string, error) {
 			exe, err := os.Executable()
 			if err != nil {
 				return "", err
 			}
 			return filepath.EvalSymlinks(exe)
 		},
-		siteLimits: func() sandbox.SiteLimits {
+		SiteLimits: func() sandbox.SiteLimits {
 			var l sandbox.SiteLimits
 			if sp := b.brainMgr.profiler; sp != nil {
 				l.Deny, l.NoWrite = sp.sitePaths()
@@ -58,12 +58,12 @@ func (b *Bridge) siteBuilderHooks() builderHooks {
 			}
 			return l
 		},
-		mediaDir: func() string { return b.cfgs.Boot().MediaDir },
-		search:   b.runBrainSearch,
-		device:   b.plaud.DeviceRequest,
+		MediaDir: func() string { return b.cfgs.Boot().MediaDir },
+		Search:   b.runBrainSearch,
+		Device:   b.plaud.DeviceRequest,
 		// As /ingest: the brain's reply chat gets the answer, and the brain
 		// must take the files now (its queue is not full).
-		ingest: func(brainID, sender, text string, files []string) error {
+		Ingest: func(brainID, sender, text string, files []string) error {
 			cfg := runtimeConfig(b.cfgs)
 			if !cfg.Ingest.Enabled {
 				return errors.New("ingest is turned off (ingest.enabled)")

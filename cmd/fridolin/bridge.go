@@ -278,8 +278,7 @@ func NewBridge(cfgs *config.Store, opts BridgeOptions) (_ *Bridge, err error) {
 		}
 		return ""
 	})
-	b.site = NewSiteManager(cfg.DataDir, b.google.ClientPath)
-	b.site.hooks = b.siteBuilderHooks()
+	b.site = NewSiteManager(SiteOptions{DataDir: cfg.DataDir, GoogleClient: b.google.ClientPath, Builder: b.siteBuilderHooks()})
 	// What builder brains say in the Build page's chats goes there, not to WhatsApp.
 	b.wa = siteChatMessenger{Messenger: b.wa, chats: b.site.chats}
 	pace := outboundmsg.OutboxPace

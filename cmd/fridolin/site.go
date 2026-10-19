@@ -103,8 +103,8 @@ type SiteManager struct {
 	dataDir      string
 	googleClient func() string // path of Fridolin's shared Google OAuth client file
 
-	// Swappable for tests: installing npm dependencies into a folder, and
-	// into a builder brain's workspace (as that brain).
+	// Selected at construction: installing npm dependencies into a folder,
+	// and into a builder brain's workspace (as that brain).
 	npmInstall       func(ctx context.Context, dir string, prod bool) error
 	workspaceInstall func(ctx context.Context, brainID, dir string) error
 	// sandboxExec runs the live site under its profile (site_sandbox.go).
@@ -120,7 +120,7 @@ type SiteManager struct {
 	deploy   *siteJob
 	previews map[string]*sitePreview
 	tokens   map[string]string // builder token → brain id
-	hooks    builderHooks
+	hooks    SiteBuilderHooks
 	chats    *siteChats
 	// searchSlots limits the searches the bridge runs for the site at once.
 	searchSlots chan struct{}
@@ -129,18 +129,28 @@ type SiteManager struct {
 	warnNoSandbox sync.Once
 }
 
-// NewSiteManager loads the site's settings and accounts from dataDir/site.
-func NewSiteManager(dataDir string, googleClient func() string) *SiteManager {
+// NewSiteManager loads the site's settings and accounts from opts.DataDir/site.
+func NewSiteManager(opts SiteOptions) *SiteManager {
 	m := &SiteManager{
-		dataDir:      dataDir,
-		googleClient: googleClient,
+		dataDir:      opts.DataDir,
+		googleClient: opts.GoogleClient,
+		hooks:        opts.Builder,
 		previews:     map[string]*sitePreview{},
 		site:         newSiteProc("site"),
 		tunnel:       newSiteProc("tunnel"),
-		sandboxExec:  sandbox.ExecPath,
+		sandboxExec:  opts.SandboxExec,
 	}
-	m.npmInstall = m.runNpmInstall
-	m.workspaceInstall = m.npmInstallAsBrain
+	if m.sandboxExec == "" {
+		m.sandboxExec = sandbox.ExecPath
+	}
+	m.npmInstall = opts.NPMInstall
+	if m.npmInstall == nil {
+		m.npmInstall = m.runNpmInstall
+	}
+	m.workspaceInstall = opts.WorkspaceInstall
+	if m.workspaceInstall == nil {
+		m.workspaceInstall = m.npmInstallAsBrain
+	}
 	m.chats = &siteChats{m: m}
 	m.searchSlots = make(chan struct{}, spoolSearchLimit)
 	m.settings = m.loadSettings()

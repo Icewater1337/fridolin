@@ -20,7 +20,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"log"
 	"net"
 	"os"
@@ -33,7 +32,6 @@ import (
 
 	"github.com/Icewater1337/fridolin/internal/fsx"
 	"github.com/Icewater1337/fridolin/internal/platform"
-	"github.com/Icewater1337/fridolin/internal/sandbox"
 	"github.com/Icewater1337/fridolin/internal/textx"
 	"github.com/Icewater1337/fridolin/site"
 )
@@ -48,39 +46,10 @@ type SiteProposal struct {
 	At      string `json:"at"`
 }
 
-// builderHooks connect the site to the brains. Set by the bridge.
-type builderHooks struct {
-	// brainDir returns a brain's folder, or "" for no such brain.
-	brainDir func(id string) string
-	// sandbox wraps bin+args to run under the brain's sandbox profile (or
-	// returns them unchanged when sandboxing is off), with the variables
-	// that point the command at the brain's own TMPDIR and caches, the only
-	// places outside its folder it may write.
-	sandbox func(brainID, bin string, args []string) (string, []string, []string, error)
-	// bridgeURL is the bridge's own HTTP address, for the MCP server.
-	bridgeURL func() string
-	// executable is the fridolin binary the MCP server runs from.
-	executable func() (string, error)
-	// siteLimits is what the live site's sandbox keeps from module code
-	// beyond its own list: the bridge's files (SandboxProfiler.sitePaths)
-	// and its HTTP port.
-	siteLimits func() sandbox.SiteLimits
-	// ingest hands files (already in the media folder) to a brain, as
-	// /ingest does; mediaDir is that folder (site_ingest.go).
-	ingest   func(brainID, sender, text string, files []string) error
-	mediaDir func() string
-	// search runs a read-only Claude agent in a brain's folder, its
-	// stream-json output to out (site_ingest.go).
-	search func(ctx context.Context, brainID, prompt string, out io.Writer) error
-	// device answers a phone's request the site passed on, which the
-	// bridge checks itself (plaud_app.go, site_ingest.go).
-	device func(op, assertion string, body []byte) (map[string]any, error)
-}
-
 func (m *SiteManager) builderBase(brainID string) string {
 	dir := ""
-	if m.hooks.brainDir != nil {
-		dir = m.hooks.brainDir(brainID)
+	if m.hooks.BrainDir != nil {
+		dir = m.hooks.BrainDir(brainID)
 	}
 	if dir == "" {
 		return ""
@@ -142,13 +111,13 @@ func (m *SiteManager) CodexBuilder(brainID string) ([]string, []string, string, 
 	if !m.IsBuilder(brainID) {
 		return nil, nil, "", nil
 	}
-	if m.hooks.executable == nil || m.hooks.bridgeURL == nil {
+	if m.hooks.Executable == nil || m.hooks.BridgeURL == nil {
 		return nil, nil, "", errors.New("site builder is missing its bridge connection")
 	}
 	if err := m.ensureBuilder(m.baseContext(), brainID); err != nil {
 		return nil, nil, "", err
 	}
-	exe, err := m.hooks.executable()
+	exe, err := m.hooks.Executable()
 	if err != nil {
 		return nil, nil, "", err
 	}
@@ -157,7 +126,7 @@ func (m *SiteManager) CodexBuilder(brainID string) ([]string, []string, string, 
 		"-c", `mcp_servers.fridolin-site.args=["mcp-site"]`,
 		"-c", `mcp_servers.fridolin-site.env_vars=["FRIDOLIN_BUILDER_URL","FRIDOLIN_BUILDER_TOKEN"]`,
 	}
-	env := []string{"FRIDOLIN_BUILDER_URL=" + m.hooks.bridgeURL(), "FRIDOLIN_BUILDER_TOKEN=" + m.builderToken(brainID)}
+	env := []string{"FRIDOLIN_BUILDER_URL=" + m.hooks.BridgeURL(), "FRIDOLIN_BUILDER_TOKEN=" + m.builderToken(brainID)}
 	var prompt strings.Builder
 	for _, skill := range []string{"fridolin-site-platform", "site-builder", "site-modules"} {
 		data, err := site.FS.ReadFile("builder/skills/" + skill + "/SKILL.md")
@@ -202,15 +171,15 @@ func (m *SiteManager) ensureBuilder(ctx context.Context, brainID string) error {
 
 func (m *SiteManager) writeMCPConfig(brainID string) error {
 	exe := ""
-	if m.hooks.executable != nil {
+	if m.hooks.Executable != nil {
 		var err error
-		if exe, err = m.hooks.executable(); err != nil {
+		if exe, err = m.hooks.Executable(); err != nil {
 			return err
 		}
 	}
 	url := ""
-	if m.hooks.bridgeURL != nil {
-		url = m.hooks.bridgeURL()
+	if m.hooks.BridgeURL != nil {
+		url = m.hooks.BridgeURL()
 	}
 	cfg := map[string]any{"mcpServers": map[string]any{
 		"fridolin-site": map[string]any{
@@ -275,10 +244,10 @@ func (m *SiteManager) ensureBuilderShell(ctx context.Context, brainID string) er
 
 // sandboxed runs a command as the brain: under its sandbox, in dir.
 func (m *SiteManager) sandboxed(ctx context.Context, brainID, dir string, timeout time.Duration, bin string, args ...string) (string, error) {
-	if m.hooks.sandbox == nil {
+	if m.hooks.Sandbox == nil {
 		return "", errors.New("no sandbox hook")
 	}
-	sbBin, sbArgs, sbEnv, err := m.hooks.sandbox(brainID, bin, args)
+	sbBin, sbArgs, sbEnv, err := m.hooks.Sandbox(brainID, bin, args)
 	if err != nil {
 		return "", fmt.Errorf("the brain's sandbox is not available: %w", err)
 	}
@@ -690,7 +659,7 @@ func (m *SiteManager) BuilderPreview(ctx context.Context, brainID string) (map[s
 		if err != nil {
 			return nil, err
 		}
-		bin, args, sbEnv, err := m.hooks.sandbox(brainID, node, []string{"--import", "tsx/esm", filepath.Join(shell, "server", "main.ts")})
+		bin, args, sbEnv, err := m.hooks.Sandbox(brainID, node, []string{"--import", "tsx/esm", filepath.Join(shell, "server", "main.ts")})
 		if err != nil {
 			return nil, err
 		}

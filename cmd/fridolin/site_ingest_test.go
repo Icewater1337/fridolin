@@ -75,7 +75,7 @@ func TestSiteSpoolHandoff(t *testing.T) {
 	m := newTestSite(t)
 	media := t.TempDir()
 	var got ingestCalls
-	m.hooks.ingest, m.hooks.mediaDir = got.hook, func() string { return media }
+	m.hooks.Ingest, m.hooks.MediaDir = got.hook, func() string { return media }
 
 	// A live commit whose "inbox" module may hand files to brain web.
 	commit := strings.Repeat("a", 40)
@@ -166,8 +166,8 @@ func TestSiteModuleDataAndIngest(t *testing.T) {
 	media := filepath.Join(m.dataDir, "media")
 	os.MkdirAll(media, 0o700)
 	var got ingestCalls
-	m.hooks.ingest, m.hooks.mediaDir = got.hook, func() string { return media }
-	m.hooks.search = func(ctx context.Context, brainID, prompt string, out io.Writer) error {
+	m.hooks.Ingest, m.hooks.MediaDir = got.hook, func() string { return media }
+	m.hooks.Search = func(ctx context.Context, brainID, prompt string, out io.Writer) error {
 		_, err := io.WriteString(out, `{"type":"assistant","message":{"content":[{"type":"text","text":"`+brainID+` answers: `+prompt+`"}]}}`+"\n")
 		return err
 	}
@@ -189,9 +189,9 @@ export default (ctx) => express.Router().get('/probe', async (_req, res) => {
   const upload = join(ctx.dataDir, 'Rechnung.pdf')
   res.json({
     data: await attempt(() => (writeFileSync(join(ctx.dataDir, 'state.json'), 'kept'), readFileSync(join(ctx.dataDir, 'state.json'), 'utf8'))),
-    ingest: await attempt(async () => { writeFileSync(upload, 'pdf'); return (await ctx.ingest({ brain: 'web', files: [upload], text: 'file it', sender: 'sam' })).status }),
+    Ingest: await attempt(async () => { writeFileSync(upload, 'pdf'); return (await ctx.ingest({ brain: 'web', files: [upload], text: 'file it', sender: 'sam' })).status }),
     otherBrain: await attempt(() => ctx.ingest({ brain: 'private', files: [], text: 'x' })),
-    search: await attempt(async () => { let s = ''; for await (const e of ctx.search({ brain: 'web', prompt: 'wo ist der Brief?' })) s += e.message.content[0].text; return s }),
+    Search: await attempt(async () => { let s = ''; for await (const e of ctx.search({ brain: 'web', prompt: 'wo ist der Brief?' })) s += e.message.content[0].text; return s }),
     media: await attempt(() => readdirSync(`+jsString(media)+`).length),
   })
 })
@@ -269,7 +269,7 @@ func TestSiteSpoolSearch(t *testing.T) {
 
 	var mu sync.Mutex
 	var prompts []string
-	m.hooks.search = func(ctx context.Context, brainID, prompt string, out io.Writer) error {
+	m.hooks.Search = func(ctx context.Context, brainID, prompt string, out io.Writer) error {
 		mu.Lock()
 		prompts = append(prompts, brainID+": "+prompt)
 		mu.Unlock()
