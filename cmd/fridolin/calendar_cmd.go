@@ -6,7 +6,6 @@ import (
 	"errors"
 	"flag"
 	"fmt"
-	"github.com/Icewater1337/fridolin/internal/google"
 	"net/url"
 	"path/filepath"
 	"regexp"
@@ -15,6 +14,8 @@ import (
 	"strings"
 	"time"
 	_ "time/tzdata" // a timezone by name even where the system has no zoneinfo
+
+	"github.com/Icewater1337/fridolin/internal/google"
 )
 
 // `fridolin calendar` is the brain's Google Calendar. It asks the bridge,

@@ -372,6 +372,7 @@ func (b *Bridge) brainCalendarEvents(ctx context.Context, r *http.Request, cals 
 	return b.google.EventsOf(ctx, tok, calendars, from, to, q.Get("time_zone"), limit)
 }
 
+// sendUpdatesValues are what the Calendar API takes as sendUpdates.
 var sendUpdatesValues = []string{"all", "externalOnly", "none"}
 
 // brainCalendarCreate answers POST /brain/calendar/events: a NewEvent,

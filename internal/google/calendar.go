@@ -376,8 +376,6 @@ func (e NewEvent) Body() (map[string]any, error) {
 	return body, nil
 }
 
-// sendUpdatesValues are what the Calendar API takes as sendUpdates.
-
 // InsertEvent creates an event in calendar.
 func (g *Auth) InsertEvent(ctx context.Context, tok *Token, calendar string, body map[string]any, sendUpdates string) (CalendarEvent, error) {
 	var created googleEvent
