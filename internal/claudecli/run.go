@@ -109,14 +109,18 @@ func Run(ctx context.Context, spec Invocation, callbacks Callbacks) Result {
 				parseDone <- Result{Err: ErrPanicked}
 			}
 		}()
-		sink, closeStream := callbacks.OpenStream(pid, func(res Result) {
-			resultOnce.Do(func() {
-				recordedResult = res
-				close(resultSeen)
+		parseDone <- func() Result {
+			sink, closeStream := callbacks.OpenStream(pid, func(res Result) {
+				resultOnce.Do(func() {
+					recordedResult = res
+					close(resultSeen)
+				})
 			})
-		})
-		defer closeStream()
-		parseDone <- ParseProvider(stdout, sink, spec.Provider)
+			// Close the runtime's log before publishing completion, as the
+			// original readAgentStream did before returning its result.
+			defer closeStream()
+			return ParseProvider(stdout, sink, spec.Provider)
+		}()
 	}()
 
 	notice := time.NewTimer(spec.NoticeAfter)
