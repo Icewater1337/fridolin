@@ -142,7 +142,7 @@ rollback`.
   arguments, `fridolin check` and `init`, a new brain's folder, backup files,
   the service's launchd agent and systemd unit, the replies of `/send` and
   `/ingest`, and every message the bridge itself sends into chats, which
-  live in `internal/app/messages.go`. Times, temp paths, PIDs and the version are
+  live in `internal/outbound/messages.go`. Times, temp paths, PIDs and the version are
   masked, so a second run writes the same bytes. A change meant to change
   one rewrites it with `go test -run 'TestName' -update ./internal/app`, and
   the pull request says why. A new setting also goes into
