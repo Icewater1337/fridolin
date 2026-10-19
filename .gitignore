@@ -21,6 +21,8 @@ transcripts/
 # ── build output ──────────────────────────────────────────────────────────
 /bin/
 /fridolin
+# what a plain `go build` writes in the main package's folder
+/cmd/fridolin/fridolin
 /whatsapp-claude-bridge
 /bridge
 dist/

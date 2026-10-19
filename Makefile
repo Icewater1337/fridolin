@@ -9,15 +9,15 @@
 #   make check        what CI's build, lint and test jobs run
 #   make help         every target
 
-# The main package is at the repo root or in ./cmd/fridolin; build whichever
-# this checkout has.
-MAIN_PKG := $(if $(wildcard cmd/fridolin/*.go),./cmd/fridolin,.)
+# The main package. The repository's root has no Go files (root-check).
+MAIN_PKG := ./cmd/fridolin
 BINARY   ?= bin/fridolin
 # The version `fridolin version` and the log's first line report; without
 # git (a checkout from an archive) it is "dev".
 VERSION  ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
 # Lazy (=), so only a target that builds runs git describe.
-VERSION_LDFLAGS = -X main.version=$(VERSION)
+# The variable is version in internal/version.
+VERSION_LDFLAGS = -X github.com/Icewater1337/fridolin/internal/version.version=$(VERSION)
 
 GO     ?= go
 PYTHON ?= python3
@@ -32,17 +32,11 @@ NODE   ?= node
 PREFIX ?= $(HOME)/.local
 BINDIR ?= $(PREFIX)/bin
 
-# The linters, pinned so a local run and CI report the same findings. The
-# Go ones run through `go run`, so nothing needs installing; ruff comes from
+# Go linters are pinned: staticcheck is a go.mod tool so Dependabot sees it;
+# actionlint remains an explicit version here. ruff comes from
 # tools/requirements-dev.txt and shellcheck from your package manager.
-# Dependabot does not see these two pins, so move them by hand until they
-# become tool directives in go.mod, which it does update. staticcheck
-# 2026.2.2 was pinned before it was a week old, the wait Dependabot keeps:
-# it is the first release that reads Go 1.27.2's export data, and 2026.2.1
-# stops with an internal error on the standard library.
-STATICCHECK_VERSION := 2026.2.2
 ACTIONLINT_VERSION  := v1.7.12
-STATICCHECK ?= $(GO) run honnef.co/go/tools/cmd/staticcheck@$(STATICCHECK_VERSION)
+STATICCHECK ?= $(GO) tool staticcheck
 ACTIONLINT  ?= $(GO) run github.com/rhysd/actionlint/cmd/actionlint@$(ACTIONLINT_VERSION)
 RUFF        ?= ruff
 SHELLCHECK  ?= shellcheck
@@ -51,7 +45,7 @@ SHELLCHECK  ?= shellcheck
 FUZZTIME ?= 10s
 
 .DEFAULT_GOAL := build
-.PHONY: help build install test race race-shard vet fmt fmt-check tidy-check \
+.PHONY: help build install test race race-shard vet fmt fmt-check tidy-check root-check \
 	notices notices-check \
 	lint lint-go lint-sh lint-py lint-actions lint-web \
 	test-py test-web test-sh smoke fuzz-short check clean
@@ -97,6 +91,16 @@ notices: ## write THIRD_PARTY_NOTICES from the modules the binary links
 
 notices-check: ## fail if THIRD_PARTY_NOTICES is out of date
 	GO="$(GO)" scripts/third-party-notices.sh --check
+
+# With a Go file at the root, `go build -o fridolin .` there would build
+# (a non-main package into an ar archive) over the ./fridolin a service
+# set up by an older setup.sh still runs. With none it must fail, and with
+# "no Go files". -o /dev/null: should it build, nothing is written.
+root-check: ## fail unless go build at the repo root refuses to build
+	@if out="$$($(GO) build -o /dev/null . 2>&1)"; then \
+	  echo "go build . at the repository's root built a package: Go code belongs in cmd/fridolin or internal/"; exit 1; \
+	fi; \
+	case "$$out" in *"no Go files"*) ;; *) printf 'go build . at the root failed, but not for want of Go files:\n%s\n' "$$out"; exit 1 ;; esac
 
 lint: lint-go lint-sh lint-py lint-actions lint-web ## every linter
 
@@ -146,6 +150,7 @@ test-sh: ## tests for the personal-data, action-pin, notices and release scripts
 	scripts/test-third-party-notices.sh
 	scripts/test-build-release.sh
 	scripts/test-makefile.sh
+	scripts/test-test-shard.sh
 
 # A temp dir, not the binary: a check must not replace a build in use.
 # -race makes a data race at start or shutdown fail the run. The build is
@@ -171,7 +176,7 @@ fuzz-short: ## run every fuzz target for FUZZTIME (default 10s)
 
 # No build: smoke compiles the binary into a temp dir, and bin/fridolin stays
 # as it was.
-check: fmt-check vet tidy-check notices-check race lint test-py test-web test-sh smoke ## what CI's build, lint and test jobs run
+check: fmt-check vet tidy-check notices-check root-check race lint test-py test-web test-sh smoke ## what CI's build, lint and test jobs run
 
 clean: ## remove the binary
 	rm -f "$(BINARY)"

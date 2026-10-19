@@ -717,7 +717,10 @@ folders of their own rather than your home directory, and
 
 ## How it works
 
-`main.go` loads config; `bridge.go` wires everything together.
+The Go code is the `main` package in `cmd/fridolin`, where the files
+below are, and the packages below `internal/` it is being split into
+([docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) has the layout and its
+rules): `main.go` loads config; `bridge.go` wires everything together.
 
 **`whatsapp.go`** — [whatsmeow](https://github.com/tulir/whatsmeow) client.
 Handles pairing, allowlists, trigger matching, attachment downloads, and poll
@@ -907,10 +910,11 @@ target). staticcheck and actionlint run through `go run` at pinned
 versions, and ESLint through `npx` at a pinned version, which it fetches
 the first time; ruff comes from `pip install -r tools/requirements-dev.txt`,
 shellcheck from your package manager. `make check` builds into a temp dir.
-`make build` writes `bin/fridolin`, and `make install` also copies it to
-`~/.local/bin` (set `PREFIX` or `BINDIR` to change that) to run by hand.
-Neither changes the service, which runs its own copy in
-`~/.local/lib/fridolin/`: `./setup.sh` installs one.
+`make build` writes `bin/fridolin` (it builds `./cmd/fridolin`; the
+repository's root has no Go files, so `go build .` there fails), and
+`make install` also copies it to `~/.local/bin` (set `PREFIX` or `BINDIR`
+to change that) to run by hand. Neither changes the service, which runs
+its own copy in `~/.local/lib/fridolin/`: `./setup.sh` installs one.
 
 CI also installs the site's npm packages and runs its own tests
 (`cd site && npm install && npm test`; [docs/SITE.md](docs/SITE.md));

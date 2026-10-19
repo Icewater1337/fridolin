@@ -1530,7 +1530,7 @@ release, `BRIDGE_BRAIN_ID`, `BRIDGE_CALENDARS` and
 in `tools/` reads any of these any more. `BRIDGE_CREDENTIALS_DIR`, which
 named the folder of the calendar tokens, is not set any more. What the
 bridge's own environment has under these names does not reach brains. The
-list lives in one place, `childEnvAllowlist` in `childenv.go`.
+list lives in one place, `childEnvAllowlist` in `cmd/fridolin/childenv.go`.
 
 A brain whose folder holds folders of the bridge's `PATH` gets them first
 on its `PATH` (see [writing](#writing)); no other brain's run, and nothing
