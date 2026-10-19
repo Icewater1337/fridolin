@@ -53,39 +53,6 @@ type SiteAPI struct {
 	BuildRoutes  func(*http.ServeMux)
 }
 
-func (a *SiteAPI) Register(mux *http.ServeMux) {
-	mux.HandleFunc("GET /api/site", a.Status)
-	mux.HandleFunc("PUT /api/site/settings", a.Settings)
-	mux.HandleFunc("POST /api/site/restart", a.Restart)
-	mux.HandleFunc("POST /api/site/deploy-key", a.DeployKey)
-	mux.HandleFunc("POST /api/site/deploy-key/github", a.DeployKeyGH)
-	mux.HandleFunc("POST /api/site/github-repo", a.CreateGitHubRepo)
-	mux.HandleFunc("PUT /api/site/repo", a.Connect)
-	mux.HandleFunc("DELETE /api/site/repo", a.Disconnect)
-	mux.HandleFunc("POST /api/site/repo/starter", a.Starter)
-	mux.HandleFunc("POST /api/site/fetch", a.Fetch)
-	mux.HandleFunc("POST /api/site/deploy", a.Deploy)
-	mux.HandleFunc("GET /api/site/users", a.Users)
-	mux.HandleFunc("POST /api/site/users", a.AddUser)
-	mux.HandleFunc("PUT /api/site/users/{id}", a.UpdateUser)
-	mux.HandleFunc("DELETE /api/site/users/{id}", a.RemoveUser)
-	mux.HandleFunc("PUT /api/site/roles", a.Roles)
-	mux.HandleFunc("PUT /api/site/tunnel", a.Tunnel)
-	mux.HandleFunc("PUT /api/site/google-client", a.GoogleClient)
-	mux.HandleFunc("DELETE /api/site/google-client", a.GoogleClientDelete)
-	mux.HandleFunc("GET /api/site/secrets", a.Secrets)
-	mux.HandleFunc("PUT /api/site/secrets/{module}/{name}", a.SetSecret)
-	mux.HandleFunc("DELETE /api/site/secrets/{module}/{name}", a.RemoveSecret)
-
-	mux.HandleFunc("GET /api/site/builders", a.Builders)
-	mux.HandleFunc("PUT /api/site/builders/{id}", a.SetBuilder)
-	mux.HandleFunc("GET /api/site/proposals", a.Proposals)
-	mux.HandleFunc("POST /api/site/proposals/{id}/merge", a.MergeProposal)
-	mux.HandleFunc("DELETE /api/site/proposals/{id}", a.DiscardProposal)
-	mux.HandleFunc("POST /api/site/previews/{id}", a.StartPreview)
-	a.BuildRoutes(mux)
-}
-
 func (a *SiteAPI) Status(w http.ResponseWriter, r *http.Request) {
 	WriteJSON(w, http.StatusOK, a.StatusView())
 }

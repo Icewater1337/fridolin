@@ -16,13 +16,6 @@ type BuildChatAPI struct {
 	StopCurrent func(*brain.Brain) bool
 }
 
-func (a *BuildChatAPI) Register(mux *http.ServeMux) {
-	mux.HandleFunc("GET /api/site/build/{id}", a.Chat)
-	mux.HandleFunc("POST /api/site/build/{id}", a.Send)
-	mux.HandleFunc("POST /api/site/build/{id}/new", a.New)
-	mux.HandleFunc("POST /api/site/build/{id}/stop", a.Stop)
-}
-
 // buildBrain returns the builder brain a build request names.
 func (a *BuildChatAPI) buildBrain(w http.ResponseWriter, r *http.Request) *brain.Brain {
 	id := r.PathValue("id")

@@ -31,21 +31,6 @@ type BrainAPI struct {
 	Google        func() BrainCalendarService
 }
 
-// brainAPIHandler serves /brain/.
-func (a *BrainAPI) Handler() http.Handler {
-	mux := http.NewServeMux()
-	mux.HandleFunc("GET /brain/polls", a.brainCall(a.brainPolls))
-	mux.HandleFunc("GET /brain/calendar/calendars", a.brainCall(a.calendarCall(a.brainCalendarList)))
-	mux.HandleFunc("GET /brain/calendar/events", a.brainCall(a.calendarCall(a.brainCalendarEvents)))
-	mux.HandleFunc("POST /brain/calendar/events", a.brainCall(a.calendarCall(a.brainCalendarCreate)))
-	mux.HandleFunc("DELETE /brain/calendar/events/{id}", a.brainCall(a.calendarCall(a.brainCalendarDelete)))
-	mux.HandleFunc("POST /brain/calendar/freebusy", a.brainCall(a.calendarCall(a.brainCalendarBusy)))
-	mux.HandleFunc("/brain/", func(w http.ResponseWriter, r *http.Request) {
-		WriteErr(w, http.StatusNotFound, "no such brain API call: "+r.Method+" "+r.URL.Path)
-	})
-	return mux
-}
-
 // brainCall authenticates a brain API call by the run's token and hands
 // the brain it belongs to on to fn.
 func (a *BrainAPI) brainCall(fn func(w http.ResponseWriter, r *http.Request, br *brainruntime.Brain)) http.HandlerFunc {
