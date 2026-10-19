@@ -252,7 +252,7 @@ func pairingState(item whatsmeow.QRChannelItem) (mode, detail string, ok bool) {
 // ignored chats, the outbox) stays.
 func (wa *WhatsAppClient) newSession() *whatsmeow.Client {
 	cli := whatsmeow.NewClient(wa.container.NewDevice(), wa.log)
-	cli.AddEventHandler(wa.eventHandler)
+	cli.AddEventHandler(wa.HandleEvent)
 	wa.mu.Lock()
 	old := wa.client
 	wa.client = cli

@@ -124,7 +124,7 @@ func newTestWhatsApp(t *testing.T) *testWhatsApp {
 	tw.WhatsAppClient = &WhatsAppClient{
 		cfg:      whatsAppSettings(func() *Config { return tw.cfg() }),
 		chunks:   ChunkMessage,
-		outbound: whatsAppOutbound(), text: whatsAppText(), inbox: mediaInboxAt,
+		identity: whatsAppIdentity(), intake: chatQueues{mask: maskChatJID}, outbound: whatsAppOutbound(), text: whatsAppText(), inbox: mediaInboxAt,
 		log:     testWaLogger{tw},
 		ctx:     ctx,
 		cancel:  cancel,
@@ -1234,7 +1234,7 @@ func TestIgnoredSendersAreMaskedInTheLog(t *testing.T) {
 func (tw *testWhatsApp) feed(evts ...*events.Message) {
 	go func() {
 		for _, evt := range evts {
-			tw.eventHandler(evt)
+			tw.HandleEvent(evt)
 		}
 	}()
 }
@@ -1309,7 +1309,7 @@ func TestAllowedGroupNameIsNeverLookedUp(t *testing.T) {
 		t.Errorf("log %q, want the group by its JID", got)
 	}
 	// The group is named once a rename (or the group list) told its name.
-	tw.eventHandler(&events.GroupInfo{JID: types.NewJID("120363000000000000", types.GroupServer), Name: &types.GroupName{Name: "Family"}})
+	tw.HandleEvent(&events.GroupInfo{JID: types.NewJID("120363000000000000", types.GroupServer), Name: &types.GroupName{Name: "Family"}})
 	tw.feed(groupMessage(member, types.EmptyJID, groupTrigger()), groupMessage(member, types.EmptyJID, groupChatter()))
 	arrive(2)
 	if n := fl.infoCalls.Load(); n != 0 {
@@ -1482,10 +1482,10 @@ func TestFloodingGroupIsDropped(t *testing.T) {
 		tw.lister = fl
 		offered := ignoredGroupNames(tw)
 		stranger := types.NewJID(otherNumber, types.DefaultUserServer)
-		tw.eventHandler(groupMessage(stranger, types.EmptyJID, groupChatter()))
+		tw.HandleEvent(groupMessage(stranger, types.EmptyJID, groupChatter()))
 		synctest.Wait() // the first message's lookup hangs, its queue empty
 		for range chatQueueLimit + 49 {
-			tw.eventHandler(groupMessage(stranger, types.EmptyJID, groupChatter()))
+			tw.HandleEvent(groupMessage(stranger, types.EmptyJID, groupChatter()))
 		}
 		synctest.Wait()
 		if lines := logged(); len(lines) != 1 || !strings.Contains(lines[0], testGroup+" sent more than") {
@@ -1548,7 +1548,7 @@ func TestDisconnectHandsOnWhatIsQueued(t *testing.T) {
 			t.Errorf("told the sender %q while shutting down", n)
 		case <-time.After(100 * time.Millisecond):
 		}
-		tw.eventHandler(dmEvent("3EB0LATE", textMsg("late")))
+		tw.HandleEvent(dmEvent("3EB0LATE", textMsg("late")))
 		time.Sleep(50 * time.Millisecond)
 		if slices.Contains(a.list(), "3EB0LATE") {
 			t.Error("a message after Disconnect was handed on")
@@ -1640,7 +1640,7 @@ func TestDisconnectDrainsPastTheWarning(t *testing.T) {
 			delivered <- m.ID
 		}
 		for _, id := range []string{"3EB0A", "3EB0B", "3EB0C"} {
-			tw.eventHandler(dmEvent(id, textMsg("hello")))
+			tw.HandleEvent(dmEvent(id, textMsg("hello")))
 		}
 		synctest.Wait()
 		done := make(chan struct{})
@@ -1783,7 +1783,7 @@ func TestStoredLIDMessagesShareThePhoneQueue(t *testing.T) {
 				first := dmEvent("3EB0PHOTO", photoMsg("look"))
 				first.Info.Chat = types.NewJID(personLID, types.HiddenUserServer)
 				first.Info.Sender = first.Info.Chat
-				tw.eventHandler(first)
+				tw.HandleEvent(first)
 				synctest.Wait()
 				second := dmEvent("3EB0TEXT", textMsg("what is this?"))
 				want := []string{"3EB0PHOTO", "3EB0TEXT"}
@@ -1791,7 +1791,7 @@ func TestStoredLIDMessagesShareThePhoneQueue(t *testing.T) {
 					second = dmEvent("3EB0EDIT", editMsg("3EB0PHOTO", "new caption"))
 					want[1] = "edit 3EB0PHOTO"
 				}
-				tw.eventHandler(second)
+				tw.HandleEvent(second)
 				synctest.Wait()
 				if got := a.list(); len(got) != 0 {
 					t.Errorf("later event overtook the LID photo: %v", got)

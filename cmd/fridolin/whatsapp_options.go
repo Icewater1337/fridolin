@@ -57,9 +57,14 @@ type waOptions struct {
 	GroupRules func(string) waGroupRules
 	Log        waLog.Logger
 	Chunks     func(string, int) []string
+	Identity   waIdentity
 	Outbound   waOutbound
 	Text       waText
 	Inbox      func(string) mediafiles.Inbox
+	// Optional I/O consumers use the current WhatsApp client when nil.
+	Downloader mediaDownloader
+	Groups     groupLister
+	Notify     func(jid, text string)
 }
 
 // waOutbound preserves the shared recipient errors and partial-send contract
@@ -77,5 +82,13 @@ type waText struct {
 	MediaTooLarge         func(int64) string
 	MaskSender            func(string, bool, string) string
 	MaskJID               func(string, string) string
+	MaskChat              func(string) string
 	Redact                func(string) string
+}
+
+// waIdentity keeps resolution shared with the command's /send path. It reads
+// the same supplied device store and context as the transport did directly.
+type waIdentity struct {
+	Canonical func(context.Context, wastore.LIDStore, types.JID, types.JID) types.JID
+	LID       func(context.Context, wastore.LIDStore, types.JID) types.JID
 }
