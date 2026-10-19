@@ -656,7 +656,7 @@ func checkReport(w io.Writer, path string, cfg *config.Config, o checkOptions) e
 	if len(o.routes) == 0 && o.sandboxFor == "" {
 		return leftOutError(issues)
 	}
-	mgr := &BrainManager{brains: map[string]*Brain{}, byGroup: map[string]*Brain{}, profiler: NewSandboxProfiler(nil, cfg), hooks: &BrainHooks{}}
+	mgr := newCommandBrainManager(cfg)
 	mgr.profiler.SetConfigFile(path)
 	if err := mgr.reload(specs, issues, cfg, ownPATH); err != nil {
 		return err

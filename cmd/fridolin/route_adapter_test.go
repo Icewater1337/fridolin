@@ -6,6 +6,7 @@ import (
 	"github.com/Icewater1337/fridolin/internal/config"
 
 	"github.com/Icewater1337/fridolin/internal/manifest"
+	"github.com/Icewater1337/fridolin/internal/route"
 )
 
 func TestReplyChatKeepsHeldDMAndRetiredBrainIdentity(t *testing.T) {
@@ -35,7 +36,15 @@ func TestReplyChatKeepsHeldDMAndRetiredBrainIdentity(t *testing.T) {
 			if tc.retired {
 				selected = brain("a", tc.handlesDMs)
 			}
-			mgr := &BrainManager{fallback: current, held: heldRoutes{dms: tc.heldDM}}
+			var held []route.Held
+			if tc.heldDM != "" {
+				held = []route.Held{{ID: tc.heldDM, Routing: manifest.Routing{HandlesDMs: true}}}
+			}
+			routes, err := route.BuildWithHeld([]manifest.Spec{{Manifest: manifest.Manifest{ID: "a"}}}, held)
+			if err != nil {
+				t.Fatal(err)
+			}
+			mgr := &BrainManager{brainManager: &brainManager{brains: map[string]*Brain{"a": current}, routes: routes}}
 			b := &Bridge{brainMgr: mgr}
 			if got := b.replyChatFor(selected, cfg); got != tc.want {
 				t.Fatalf("reply chat = %q, want %q", got, tc.want)

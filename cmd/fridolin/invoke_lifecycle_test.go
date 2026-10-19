@@ -375,7 +375,7 @@ func TestCancellationKeepsTheRecordedResult(t *testing.T) {
 func TestKillRunsWaitsForProcessCancellation(t *testing.T) {
 	var runs []*brainRun
 	var contexts []context.Context
-	mgr := &BrainManager{}
+	mgr := &brainManager{}
 	for range 2 {
 		ctx, cancel := context.WithCancel(context.Background())
 		t.Cleanup(cancel)
@@ -431,7 +431,7 @@ func TestKillRunsPreventsALateProcess(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	run := &brainRun{cancel: cancel, done: make(chan struct{})}
-	mgr := &BrainManager{order: []*Brain{{current: run}}}
+	mgr := &brainManager{order: []*Brain{{current: run}}}
 	mgr.KillRuns()
 	// An independent context deliberately tests the startup barrier,
 	// rather than relying on os/exec noticing the cancelled run context.
@@ -465,7 +465,7 @@ func TestKillRunsAfterCLIExit(t *testing.T) {
 	if err := proc.Wait(); err != nil {
 		t.Fatal(err)
 	}
-	mgr := &BrainManager{order: []*Brain{{current: run}}}
+	mgr := &brainManager{order: []*Brain{{current: run}}}
 	stopped := make(chan struct{})
 	go func() { mgr.KillRuns(); close(stopped) }()
 	select {
@@ -481,7 +481,7 @@ func TestKillRunsIncludesRetiringBrains(t *testing.T) {
 	proc := &fakeProcessStop{stopped: make(chan struct{})}
 	proc.acknowledgeStop()
 	old := &Brain{current: &brainRun{cancel: cancel, process: proc}}
-	mgr := &BrainManager{retired: map[*Brain]struct{}{old: {}}}
+	mgr := &brainManager{retired: map[*Brain]struct{}{old: {}}}
 	mgr.KillRuns()
 	if ctx.Err() == nil {
 		t.Fatal("force-exit missed the run removed from the current brain set")
@@ -576,6 +576,13 @@ func TestKillRunsRejectsReloadAlreadyInProgress(t *testing.T) {
 		}
 		return true
 	})
+	readIssues := make(chan struct{})
+	go func() { mgr.Issues(); close(readIssues) }()
+	select {
+	case <-readIssues:
+	case <-time.After(5 * time.Second):
+		t.Fatal("reading diagnostics waited for a blocked reload")
+	}
 	stopped := make(chan struct{})
 	go func() { mgr.KillRuns(); close(stopped) }()
 	select {
