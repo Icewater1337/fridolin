@@ -65,3 +65,9 @@ func commandBrainInputRules() brainInputRules {
 		BuildChat: isBuildChat,
 	}
 }
+
+// claimBrainMedia retains the process migration lifecycle and resolves the
+// working directory when the message is accepted, before history is written.
+func claimBrainMedia(mediaDir, brainID string, paths []string) map[string]string {
+	return mediaInboxAt(mediaDir).Claim(brainID, paths)
+}

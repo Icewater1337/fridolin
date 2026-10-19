@@ -104,7 +104,7 @@ func bareBrain(t testing.TB) *Brain {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { root.Close() })
-	return &Brain{id: "a", workDir: dir, root: root, viewerStart: startBrainViewer, input: commandBrainInputRules()}
+	return &Brain{id: "a", workDir: dir, root: root, viewerStart: startBrainViewer, input: commandBrainInputRules(), claimMedia: claimBrainMedia}
 }
 
 // plant replaces path with a symlink to target.

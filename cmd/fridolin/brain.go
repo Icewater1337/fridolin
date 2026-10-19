@@ -59,10 +59,11 @@ type Brain struct {
 	// rather than the path, which could lead elsewhere by then.
 	root *os.Root
 
-	settings atomic.Pointer[brainSettings]
-	runner   brainRunner
-	input    brainInputRules
-	sink     *brainSinkRef
+	settings   atomic.Pointer[brainSettings]
+	runner     brainRunner
+	input      brainInputRules
+	claimMedia func(mediaDir, brainID string, paths []string) map[string]string
+	sink       *brainSinkRef
 	// slots are the run slots all brains share (max_concurrent_runs); nil
 	// for no limit.
 	slots *runSlots
@@ -293,7 +294,7 @@ func (br *Brain) submit(m *Inbound) (pos int, busy bool, err error) {
 
 	// The files go into this brain's inbox, the only part of the media
 	// folder its sandbox opens, before the history names where they are.
-	*m = m.withMediaMoved(mediaInboxAt(s.mediaDir).Claim(br.id, m.Media))
+	*m = m.withMediaMoved(br.claimMedia(s.mediaDir, br.id, m.Media))
 
 	// History first, so that later runs see the message even when it is
 	// merged into a queue that is already moving.
@@ -1585,6 +1586,7 @@ func (bm *BrainManager) reload(specs []manifest.Spec, issues []registry.Issue, c
 				runner:      &commandRunner{sandbox: bm.profiler, hooks: bm.hooks},
 				viewerStart: startBrainViewer,
 				input:       commandBrainInputRules(),
+				claimMedia:  claimBrainMedia,
 				sink:        bm.sink,
 				slots:       bm.slots,
 			}
