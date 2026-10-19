@@ -1,17 +1,14 @@
 package main
 
 import (
-	"context"
 	"errors"
 	"io/fs"
-	"log"
 	"net/http"
 	"os"
 	"path/filepath"
-	"slices"
 	"strings"
-	"time"
 
+	"github.com/Icewater1337/fridolin/internal/apperr"
 	"github.com/Icewater1337/fridolin/internal/config"
 	"github.com/Icewater1337/fridolin/internal/fsx"
 	"github.com/Icewater1337/fridolin/internal/httpapi"
@@ -19,157 +16,33 @@ import (
 )
 
 func (b *Bridge) apiBackupStatus(w http.ResponseWriter, r *http.Request) {
-	m := b.backup
-	cfg := b.cfgs.Get()
-	rc := map[string]any{"found": false, "install_hint": rcloneInstallHint()}
-	if p, err := m.rclonePath(); err == nil {
-		rc["found"], rc["path"], rc["version"] = true, p, rcloneVersion(p, m.rcloneEnv(anyChild))
-	} else if !errors.Is(err, errRcloneMissing) {
-		rc["error"] = err.Error() // backup.rclone_path names one that does not work
-	}
-	// The response is built under the lock and written after it: a client
-	// that reads slowly must not hold up the backup job.
-	m.mu.Lock()
-	type brainRow struct {
-		ID      string        `json:"id"`
-		Name    string        `json:"name"`
-		Dir     string        `json:"dir"`
-		Enabled bool          `json:"enabled"`
-		Exclude []string      `json:"exclude"`
-		Last    *BackupResult `json:"last"`
-	}
-	rows := []brainRow{}
-	for _, br := range b.brainMgr.Brains() {
-		s := br.settings.Load()
-		rows = append(rows, brainRow{ID: br.ID(), Name: s.name, Dir: br.Dir(), Enabled: s.manifest.Backup.Enabled,
-			Exclude: nonNil(s.manifest.Backup.Exclude), Last: copyOf(m.state.Brains[br.ID()])})
-	}
-	var job map[string]any
-	if j := m.job; j != nil {
-		job = map[string]any{"kind": j.kind, "started": j.started, "current": j.current,
-			"queue": slices.Clone(j.queue), "done": slices.Clone(j.done)}
-		if j.kind == jobRestore {
-			job["brain"], job["target"] = j.brain, j.target
-		}
-	}
-	connected := m.connected()
-	resp := map[string]any{
-		"rclone":                rc,
-		"connected":             connected,
-		"connect":               copyOf(m.connect),
-		"settings":              cfg.Backup,
-		"include_bridge_config": cfg.Backup.IncludeBridge(),
-		"secret_excludes":       backupSecretExcludes,
-		"brains":                rows,
-		"bridge":                copyOf(m.state.Bridge),
-		"job":                   job,
-		"last_restore":          copyOf(m.state.LastRestore),
-	}
-	if next := m.nextRunLocked(cfg, connected); next != nil {
-		resp["next_run"] = *next
-	}
-	m.mu.Unlock()
-	httpapi.WriteJSON(w, http.StatusOK, resp)
+	httpapi.WriteJSON(w, http.StatusOK, b.backup.Status())
 }
 
 func (b *Bridge) apiBackupConnect(w http.ResponseWriter, r *http.Request) {
-	m := b.backup
-	if _, err := m.rclonePath(); err != nil {
-		httpapi.WriteErr(w, http.StatusPreconditionFailed, rcloneMissingHint(err))
-		return
-	}
-	// Connecting starts by deleting the remote, so it would throw away a
-	// working link, for good if the new sign-in is then abandoned, and a
-	// backup running on it would fail half-way. Disconnect comes first.
-	if m.connected() {
-		httpapi.WriteErr(w, http.StatusConflict, "Google Drive is already connected — disconnect it first to connect another account")
-		return
-	}
-	m.mu.Lock()
-	if m.connect != nil && m.connect.State == "running" {
-		m.mu.Unlock()
-		httpapi.WriteErr(w, http.StatusConflict, "already connecting — finish in the browser tab rclone opened")
-		return
-	}
-	if m.job != nil {
-		m.mu.Unlock()
-		httpapi.WriteErr(w, http.StatusConflict, "a backup or restore is running — wait for it or cancel it first")
-		return
-	}
-	if m.disconnecting {
-		m.mu.Unlock()
-		httpapi.WriteErr(w, http.StatusConflict, errDisconnecting.Error())
-		return
-	}
-	ctx, cancel := context.WithTimeout(context.Background(), connectTimeout)
-	job := &connectJob{State: "running", cancel: cancel, done: make(chan struct{})}
-	err := m.goLocked(func() {
-		defer close(job.done)
-		defer cancel()
-		err := m.connectDrive(ctx, job)
-		m.mu.Lock()
-		defer m.mu.Unlock()
-		if err != nil {
-			job.State, job.Error = "error", err.Error()
-			log.Printf("backup: connecting Google Drive failed: %v", err)
-			return
+	if err := b.backup.Connect(); err != nil {
+		status := http.StatusInternalServerError
+		switch apperr.KindOf(err) {
+		case apperr.Precondition:
+			status = http.StatusPreconditionFailed
+		case apperr.Conflict:
+			status = http.StatusConflict
+		case apperr.Unavailable:
+			status = http.StatusServiceUnavailable
 		}
-		job.State, job.AuthURL = "done", ""
-		log.Printf("backup: Google Drive connected")
-	})
-	if err != nil {
-		m.mu.Unlock()
-		cancel()
-		httpapi.WriteErr(w, http.StatusServiceUnavailable, err.Error())
+		httpapi.WriteErr(w, status, err.Error())
 		return
 	}
-	m.connect = job
-	m.mu.Unlock()
 	httpapi.WriteJSON(w, http.StatusAccepted, map[string]string{"status": "connecting"})
 }
 
 func (b *Bridge) apiBackupDisconnect(w http.ResponseWriter, r *http.Request) {
-	m := b.backup
-	m.mu.Lock()
-	switch {
-	case m.job != nil:
-		m.mu.Unlock()
-		httpapi.WriteErr(w, http.StatusConflict, "a backup or restore is running — wait for it or cancel it first")
-		return
-	case m.disconnecting:
-		m.mu.Unlock()
-		httpapi.WriteErr(w, http.StatusConflict, errDisconnecting.Error())
-		return
-	}
-	m.disconnecting = true
-	job := m.connect
-	m.mu.Unlock()
-	defer func() {
-		m.mu.Lock()
-		m.disconnecting = false
-		m.mu.Unlock()
-	}()
-	// A sign-in still running writes its token into the config when it
-	// ends. It has to be gone before the delete, or a token written after it
-	// would leave Drive connected behind the dashboard's back. It stays
-	// m.connect until it has ended, so that one that does not stop still
-	// shows on the status page and keeps another from starting next to it.
-	if job != nil && job.cancel != nil {
-		job.cancel()
-		select {
-		case <-job.done:
-		case <-time.After(backupStopWait):
-			httpapi.WriteErr(w, http.StatusInternalServerError, "the Google Drive sign-in did not stop — try again in a moment")
-			return
+	if err := b.backup.Disconnect(r.Context()); err != nil {
+		status := http.StatusInternalServerError
+		if apperr.KindOf(err) == apperr.Conflict {
+			status = http.StatusConflict
 		}
-	}
-	m.mu.Lock()
-	if m.connect == job {
-		m.connect = nil
-	}
-	m.mu.Unlock()
-	if _, err := m.runner(r.Context(), []string{"config", "delete", b.cfgs.Get().Backup.Remote}, nil); err != nil {
-		httpapi.WriteErr(w, http.StatusInternalServerError, "removing the Google Drive link failed: "+err.Error())
+		httpapi.WriteErr(w, status, err.Error())
 		return
 	}
 	httpapi.WriteJSON(w, http.StatusOK, map[string]string{"status": "disconnected"})
@@ -257,14 +130,8 @@ func (b *Bridge) apiBackupRun(w http.ResponseWriter, r *http.Request) {
 }
 
 func (b *Bridge) apiBackupCancel(w http.ResponseWriter, r *http.Request) {
-	b.backup.mu.Lock()
-	job := b.backup.job
-	if job != nil {
-		job.cancel()
-	}
-	b.backup.mu.Unlock()
-	if job == nil {
-		httpapi.WriteErr(w, http.StatusConflict, "no backup is running")
+	if err := b.backup.Cancel(); err != nil {
+		httpapi.WriteErr(w, http.StatusConflict, err.Error())
 		return
 	}
 	httpapi.WriteJSON(w, http.StatusOK, map[string]string{"status": "cancelling"})
@@ -272,22 +139,18 @@ func (b *Bridge) apiBackupCancel(w http.ResponseWriter, r *http.Request) {
 
 func (b *Bridge) apiBackupVersions(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
-	if !backupNameOK(id) {
-		httpapi.WriteErr(w, http.StatusBadRequest, "invalid brain")
-		return
-	}
-	if !b.backup.connected() {
-		httpapi.WriteErr(w, http.StatusPreconditionFailed, "Google Drive is not connected")
-		return
-	}
-	ctx, cancel := context.WithTimeout(r.Context(), 60*time.Second)
-	defer cancel()
-	versions, err := b.backup.listVersions(ctx, backupPath(b.cfgs.Get().Backup, id, "versions"))
+	versions, err := b.backup.Versions(r.Context(), id)
 	if err != nil {
-		httpapi.WriteErr(w, http.StatusBadGateway, "listing versions failed: "+err.Error())
+		status := http.StatusBadGateway
+		switch apperr.KindOf(err) {
+		case apperr.Invalid:
+			status = http.StatusBadRequest
+		case apperr.Precondition:
+			status = http.StatusPreconditionFailed
+		}
+		httpapi.WriteErr(w, status, err.Error())
 		return
 	}
-	sortVersions(versions)
 	httpapi.WriteJSON(w, http.StatusOK, map[string]any{"brain": id, "versions": versions})
 }
 
@@ -360,56 +223,21 @@ func (b *Bridge) apiBackupRestore(w http.ResponseWriter, r *http.Request) {
 		httpapi.WriteErr(w, http.StatusBadRequest, "invalid brain or version")
 		return
 	}
-	m := b.backup
-	if !m.connected() {
-		httpapi.WriteErr(w, http.StatusPreconditionFailed, "Google Drive is not connected")
-		return
-	}
-	target, err := b.restoreTarget(req.Target)
+	target, err := b.backup.Restore(BackupRestoreRequest{Brain: req.Brain, Version: req.Version, Target: req.Target}, b.restoreTarget)
 	if err != nil {
-		httpapi.WriteErr(w, http.StatusUnprocessableEntity, err.Error())
+		status := http.StatusInternalServerError
+		switch apperr.KindOf(err) {
+		case apperr.Precondition:
+			status = http.StatusPreconditionFailed
+		case apperr.Invalid:
+			status = http.StatusUnprocessableEntity
+		case apperr.Conflict:
+			status = http.StatusConflict
+		case apperr.Unavailable:
+			status = http.StatusServiceUnavailable
+		}
+		httpapi.WriteErr(w, status, err.Error())
 		return
 	}
-	src := backupPath(b.cfgs.Get().Backup, req.Brain, "current")
-	if req.Version != "current" {
-		src = backupPath(b.cfgs.Get().Backup, req.Brain, "versions", req.Version)
-	}
-	m.mu.Lock()
-	if m.job != nil {
-		m.mu.Unlock()
-		httpapi.WriteErr(w, http.StatusConflict, "a backup or restore is already running")
-		return
-	}
-	if m.disconnecting {
-		m.mu.Unlock()
-		httpapi.WriteErr(w, http.StatusConflict, errDisconnecting.Error())
-		return
-	}
-	// Made here, so that a folder that cannot be made is the request's
-	// error rather than a restore that fails out of sight.
-	if err := os.MkdirAll(target, 0o700); err != nil {
-		m.mu.Unlock()
-		httpapi.WriteErr(w, http.StatusInternalServerError, "creating the restore folder failed: "+err.Error())
-		return
-	}
-	ctx, cancel := context.WithCancel(context.Background())
-	job := &backupJob{kind: jobRestore, started: time.Now(), cancel: cancel, brain: req.Brain, target: target}
-	err = m.goLocked(func() {
-		defer cancel()
-		res := m.restore(ctx, src, req.Brain, req.Version, target)
-		m.mu.Lock()
-		m.state.LastRestore = res
-		m.saveStateLocked()
-		m.job = nil
-		m.mu.Unlock()
-	})
-	if err != nil {
-		m.mu.Unlock()
-		cancel()
-		httpapi.WriteErr(w, http.StatusServiceUnavailable, err.Error())
-		return
-	}
-	m.job = job
-	m.mu.Unlock()
 	httpapi.WriteJSON(w, http.StatusAccepted, map[string]string{"status": "restoring", "target": target})
 }
