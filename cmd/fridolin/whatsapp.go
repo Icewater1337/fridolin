@@ -50,6 +50,7 @@ type WhatsAppClient struct {
 	container waDeviceContainer
 	polls     waPollStore
 	chunks    func(string, int) []string
+	identity  waIdentity
 	outbound  waOutbound
 	text      waText
 	inbox     func(string) mediafiles.Inbox
@@ -120,6 +121,8 @@ func newWhatsAppClient(opts waOptions) (*WhatsAppClient, error) {
 		container:  opts.Container,
 		polls:      opts.Polls,
 		chunks:     opts.Chunks,
+		identity:   opts.Identity,
+		intake:     chatQueues{mask: opts.Text.MaskChat},
 		outbound:   opts.Outbound,
 		text:       opts.Text,
 		inbox:      opts.Inbox,
@@ -269,7 +272,7 @@ func (wa *WhatsAppClient) queueChat(src types.MessageSource) (string, bool) {
 		if !src.IsFromMe && (src.Sender.IsEmpty() || src.Sender.ToNonAD() == chatJID) {
 			alt = src.SenderAlt
 		}
-		chatJID = canonicalUser(wa.storeCtx(), wa.lidStore(), chatJID, alt)
+		chatJID = wa.identity.Canonical(wa.storeCtx(), wa.lidStore(), chatJID, alt)
 	}
 	return chatJID.String(), true
 }
@@ -299,7 +302,7 @@ func (wa *WhatsAppClient) handlePollVote(evt *events.Message) {
 	}
 	// One voter, however WhatsApp addressed them: a vote changed later
 	// must replace the first, not count as a second voter's.
-	voter := canonicalUser(wa.storeCtx(), wa.lidStore(), evt.Info.Sender, evt.Info.SenderAlt)
+	voter := wa.identity.Canonical(wa.storeCtx(), wa.lidStore(), evt.Info.Sender, evt.Info.SenderAlt)
 	wa.recordVote(pollMsgID, voter, pollVote.GetSelectedOptions())
 }
 
@@ -449,7 +452,7 @@ func (wa *WhatsAppClient) handleDMMessage(msg *events.Message, sender types.JID,
 	// may be under the LID WhatsApp addressed them by.
 	alt := msg.Info.Chat.ToNonAD()
 	if alt == sender {
-		alt = lidOf(wa.storeCtx(), wa.lidStore(), sender)
+		alt = wa.identity.LID(wa.storeCtx(), wa.lidStore(), sender)
 	}
 	senderNumber := sender.User
 	text := extractText(msg.Message)
@@ -756,7 +759,7 @@ func (wa *WhatsAppClient) ownMentionJIDs() []types.JID {
 		return nil
 	}
 	if lid.User == "" {
-		lid = lidOf(wa.storeCtx(), wa.lidStore(), own)
+		lid = wa.identity.LID(wa.storeCtx(), wa.lidStore(), own)
 	}
 	out := []types.JID{own}
 	if lid.User != "" && lid != own {
@@ -781,7 +784,7 @@ func stripMentions(text string, jids []types.JID) string {
 // resolved is false for a LID nothing maps to a number, whose digits are
 // WhatsApp's internal id and must match no number on a list.
 func (wa *WhatsAppClient) senderOf(src types.MessageSource) (sender types.JID, resolved bool) {
-	sender = canonicalUser(wa.storeCtx(), wa.lidStore(), src.Sender, src.SenderAlt)
+	sender = wa.identity.Canonical(wa.storeCtx(), wa.lidStore(), src.Sender, src.SenderAlt)
 	return sender, sender.Server == types.DefaultUserServer
 }
 
@@ -830,7 +833,7 @@ func (wa *WhatsAppClient) quoteOf(msg *waE2E.Message) *chat.Quote {
 	}
 	p, err := types.ParseJID(msg.GetExtendedTextMessage().GetContextInfo().GetParticipant())
 	if err == nil && p.Server == types.HiddenUserServer {
-		q.From = canonicalUser(wa.storeCtx(), wa.lidStore(), p, types.EmptyJID).User
+		q.From = wa.identity.Canonical(wa.storeCtx(), wa.lidStore(), p, types.EmptyJID).User
 	}
 	return q
 }

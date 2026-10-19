@@ -17,7 +17,7 @@ import (
 func TestChatQueuesOrder(t *testing.T) {
 	t.Run("one chat's jobs in order", func(t *testing.T) {
 		synctest.Test(t, func(t *testing.T) {
-			var q chatQueues
+			q := chatQueues{mask: maskChatJID}
 			var mu sync.Mutex
 			var ran []int
 			for i := range 20 {
@@ -44,7 +44,7 @@ func TestChatQueuesOrder(t *testing.T) {
 	})
 
 	t.Run("a stuck chat holds up only itself", func(t *testing.T) {
-		var q chatQueues
+		q := chatQueues{mask: maskChatJID}
 		stuck := make(chan struct{})
 		defer close(stuck)
 		if err := q.add("a", func() { <-stuck }); err != nil {
@@ -72,7 +72,7 @@ func TestChatQueuesOrder(t *testing.T) {
 
 	t.Run("a job that panics leaves the chat's next one", func(t *testing.T) {
 		logged := captureLog(t)
-		var q chatQueues
+		q := chatQueues{mask: maskChatJID}
 		if err := q.add("15551234567@s.whatsapp.net", func() { panic("boom") }); err != nil {
 			t.Fatal(err)
 		}
@@ -96,7 +96,7 @@ func TestChatQueuesOrder(t *testing.T) {
 // left, so idle chats cost nothing; the chat's next job starts another.
 func TestChatQueuesWorkerEndsWhenIdle(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
-		var q chatQueues
+		q := chatQueues{mask: maskChatJID}
 		var runs atomic.Int32
 		for range 3 {
 			if err := q.add("a", func() { runs.Add(1) }); err != nil {
@@ -122,7 +122,7 @@ func TestChatQueuesWorkerEndsWhenIdle(t *testing.T) {
 func TestChatQueuesFullQueueDrops(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		logged := captureLog(t)
-		var q chatQueues
+		q := chatQueues{mask: maskChatJID}
 		stuck := make(chan struct{})
 		chat := "120363000000000000@g.us"
 		var ran atomic.Int32
@@ -169,7 +169,7 @@ func TestChatQueuesFullQueueDrops(t *testing.T) {
 // the drain takes longer than expected.
 func TestChatQueuesClose(t *testing.T) {
 	t.Run("the jobs held run before it returns", func(t *testing.T) {
-		var q chatQueues
+		q := chatQueues{mask: maskChatJID}
 		var ran atomic.Int32
 		gate := make(chan struct{})
 		if err := q.add("a", func() { <-gate }); err != nil {
@@ -192,7 +192,7 @@ func TestChatQueuesClose(t *testing.T) {
 
 	t.Run("a slow worker does not lose the remaining jobs", func(t *testing.T) {
 		synctest.Test(t, func(t *testing.T) {
-			var q chatQueues
+			q := chatQueues{mask: maskChatJID}
 			stuck := make(chan struct{})
 			if err := q.add("a", func() { <-stuck }); err != nil {
 				t.Fatal(err)

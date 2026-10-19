@@ -380,34 +380,8 @@ func newHTTPServer(h http.Handler) *http.Server {
 	}
 }
 
-// Connection retries: the first after connectFirstRetry, doubling up to
-// connectMaxRetry.
-const (
-	connectFirstRetry = 5 * time.Second
-	connectMaxRetry   = 2 * time.Minute
-)
-
-// connectLoop connects to WhatsApp, retrying while the network is down.
-// Once connected, whatsmeow reconnects by itself. An error that another
-// try cannot fix ends it: the dashboard's state says what to do.
-func (b *Bridge) connectLoop(ctx context.Context) {
-	for delay := connectFirstRetry; ctx.Err() == nil; delay = min(2*delay, connectMaxRetry) {
-		err := b.wa.Connect()
-		if err == nil {
-			return
-		}
-		if errors.Is(err, wastore.ErrDeviceDeleted) || errors.Is(err, errPairingLive) {
-			log.Printf("WhatsApp connect failed: %v", err)
-			return
-		}
-		log.Printf("WhatsApp connect failed: %v — retrying in %v", err, delay)
-		select {
-		case <-ctx.Done():
-			return
-		case <-time.After(delay):
-		}
-	}
-}
+// connectLoop retains the bridge's ownership of the connection goroutine.
+func (b *Bridge) connectLoop(ctx context.Context) { runConnectLoop(ctx, b.wa.Connect) }
 
 // Stop shuts everything down in dependency order, once: a restart and a
 // signal that come together, or a test and its cleanup, stop the bridge

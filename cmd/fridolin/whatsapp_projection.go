@@ -54,7 +54,7 @@ func (s whatsAppPollStore) SentPoll(ctx context.Context, id string) (waSentPoll,
 func NewWhatsAppClient(cfg func() *Config, s *store.Store, handler InboundHandler, onIgnored IgnoredHandler) (*WhatsAppClient, error) {
 	// Keep the initial log-level read before loading the device.
 	logger := logx.NewWaLogger("WhatsApp", cfg().LogLevel)
-	return newWhatsAppClient(waOptions{Settings: whatsAppSettings(cfg), Container: s.Container, Polls: whatsAppPollStore{s}, OnInbound: whatsAppInboundHandler(handler), OnIgnored: onIgnored, Log: logger, Chunks: ChunkMessage, Outbound: whatsAppOutbound(), Text: whatsAppText(), Inbox: mediaInboxAt})
+	return newWhatsAppClient(waOptions{Settings: whatsAppSettings(cfg), Container: s.Container, Polls: whatsAppPollStore{s}, OnInbound: whatsAppInboundHandler(handler), OnIgnored: onIgnored, Log: logger, Chunks: ChunkMessage, Identity: whatsAppIdentity(), Outbound: whatsAppOutbound(), Text: whatsAppText(), Inbox: mediaInboxAt})
 }
 
 func whatsAppOutbound() waOutbound {
@@ -68,8 +68,9 @@ func whatsAppText() waText {
 		MaskSender: func(number string, resolved bool, server string) string {
 			return (groupSender{Number: number, Resolved: resolved, Server: server}).masked()
 		},
-		MaskJID: func(user, server string) string { return maskJID(user, "", server) },
-		Redact:  func(text string) string { return (&redactor{}).text(text) },
+		MaskJID:  func(user, server string) string { return maskJID(user, "", server) },
+		MaskChat: maskChatJID,
+		Redact:   func(text string) string { return (&redactor{}).text(text) },
 	}
 }
 
@@ -77,4 +78,8 @@ func whatsAppText() waText {
 // a supplied inbox directly, without reading process state itself.
 func saveAttachment(ctx context.Context, dl mediaDownloader, dir string, att attachment, maxBytes int64) (string, error) {
 	return saveAttachmentTo(ctx, dl, mediaInboxAt(dir), att, maxBytes)
+}
+
+func whatsAppIdentity() waIdentity {
+	return waIdentity{Canonical: canonicalUser, LID: lidOf}
 }

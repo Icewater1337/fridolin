@@ -7,8 +7,6 @@ import (
 	"runtime/debug"
 	"sync"
 	"time"
-
-	"go.mau.fi/whatsmeow/types"
 )
 
 // whatsmeow hands the bridge every event on one goroutine and waits for
@@ -38,8 +36,9 @@ var (
 
 // chatQueues runs jobs one after another per chat, each chat on a worker
 // of its own that starts with the chat's first job and ends once the chat
-// has none left. The zero value is ready.
+// has none left. Its mask function is supplied before accepting jobs.
 type chatQueues struct {
+	mask   func(string) string
 	mu     sync.Mutex
 	chats  map[string]*chatQueue // the chats whose worker runs
 	closed bool
@@ -75,7 +74,7 @@ func (q *chatQueues) add(chat string, job func()) error {
 		go q.work(chat, c)
 	}
 	if len(c.jobs) >= chatQueueLimit {
-		c.drop(chat)
+		c.drop(chat, q.mask)
 		return errChatQueueFull
 	}
 	c.jobs = append(c.jobs, job)
@@ -85,13 +84,13 @@ func (q *chatQueues) add(chat string, job func()) error {
 // drop counts a job dropped from c, chat's full queue, and logs it: the
 // first of a flood at once, then once every chatDropLogEvery with how many
 // more went, so that a flood does not flood the log too.
-func (c *chatQueue) drop(chat string) {
+func (c *chatQueue) drop(chat string, mask func(string) string) {
 	c.dropped++
 	switch {
 	case c.loggedAt.IsZero():
-		log.Printf("WhatsApp: %s sent more than %d messages the bridge has not handled yet; dropping what it sends until it catches up", maskChatJID(chat), chatQueueLimit)
+		log.Printf("WhatsApp: %s sent more than %d messages the bridge has not handled yet; dropping what it sends until it catches up", mask(chat), chatQueueLimit)
 	case time.Since(c.loggedAt) >= chatDropLogEvery:
-		log.Printf("WhatsApp: dropped %d more messages from %s, whose queue is still full", c.dropped, maskChatJID(chat))
+		log.Printf("WhatsApp: dropped %d more messages from %s, whose queue is still full", c.dropped, mask(chat))
 	default:
 		return
 	}
@@ -114,15 +113,15 @@ func (q *chatQueues) work(chat string, c *chatQueue) {
 		c.jobs[0] = nil
 		c.jobs = c.jobs[1:]
 		q.mu.Unlock()
-		runJob(chat, job)
+		runJob(chat, job, q.mask)
 	}
 }
 
 // runJob runs one of chat's jobs, and logs a panic in it.
-func runJob(chat string, job func()) {
+func runJob(chat string, job func(), mask func(string) string) {
 	defer func() {
 		if r := recover(); r != nil {
-			log.Printf("WhatsApp: handling a message from %s panicked: %v\n%s", maskChatJID(chat), r, debug.Stack())
+			log.Printf("WhatsApp: handling a message from %s panicked: %v\n%s", mask(chat), r, debug.Stack())
 		}
 	}()
 	job()
@@ -150,19 +149,6 @@ func (q *chatQueues) close(warnAfter time.Duration) {
 		log.Printf("WhatsApp: still draining accepted messages after %v; waiting before closing the store", warnAfter)
 	}
 	<-done
-}
-
-// maskChatJID is chat, a queue's JID, for the log: a group's as the rest
-// of the log names it, a person's masked as a sender is.
-func maskChatJID(chat string) string {
-	jid, err := types.ParseJID(chat)
-	switch {
-	case err != nil:
-		return maskDigits(chat, 0)
-	case jid.Server == types.GroupServer:
-		return chat
-	}
-	return maskJID(jid.User, "", jid.Server)
 }
 
 // maxDownloads is how many attachments are downloaded at once, all chats
