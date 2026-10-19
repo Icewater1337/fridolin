@@ -185,7 +185,7 @@ type SignInResponse struct {
 }
 
 type SiteProposalsResponse struct {
-	Proposals []map[string]any `json:"proposals"`
+	Proposals []site.ProposalSnapshot `json:"proposals"`
 }
 
 type SiteRolesResponse struct {
