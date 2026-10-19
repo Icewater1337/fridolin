@@ -507,7 +507,7 @@ func (in Inbox) Resolve(id string, requested []string, ownOnly bool) ([]string, 
 		if !filepath.IsAbs(p) || err != nil || !fsx.Within(resolved, media) {
 			return nil, errors.New("every path must be an existing file inside the media directory")
 		}
-		if st, err := os.Stat(resolved); err != nil || !st.Mode().IsRegular() {
+		if st, err := statResolved(media, resolved); err != nil || !st.Mode().IsRegular() {
 			return nil, errors.New("not a regular file: " + filepath.Base(p))
 		}
 		// The brain takes the file into its inbox (see Inbox.Claim), and a
@@ -529,4 +529,20 @@ func (in Inbox) Resolve(id string, requested []string, ownOnly bool) ([]string, 
 	}
 
 	return paths, nil
+}
+
+// statResolved checks a previously resolved path through the media root. A
+// directory or file below that root may have become a symlink since
+// EvalSymlinks checked it; the metadata lookup must not follow it outside.
+func statResolved(media, resolved string) (os.FileInfo, error) {
+	root, err := os.OpenRoot(media)
+	if err != nil {
+		return nil, err
+	}
+	defer root.Close()
+	rel, err := filepath.Rel(media, resolved)
+	if err != nil {
+		return nil, err
+	}
+	return root.Stat(rel)
 }
