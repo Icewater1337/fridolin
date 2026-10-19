@@ -380,7 +380,7 @@ func nonNil[T any](s []T) []T {
 }
 
 func (b *Bridge) apiMux() http.Handler {
-	return NewAPIMux(APIDeps{
+	return httpapi.NewAPIMux(httpapi.APIDeps{
 		Status:   httpapi.StatusAPI{Snapshot: b.statusSnapshot}.ServeHTTP,
 		Activity: b.apiActivity, Logs: b.apiLogs, Restart: b.apiRestart,
 		Site: b.siteAPI, DevMode: b.dev != nil,

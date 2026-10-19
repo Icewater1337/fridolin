@@ -1,7 +1,6 @@
-package main
+package httpapi
 
 import (
-	"github.com/Icewater1337/fridolin/internal/httpapi"
 	"net/http"
 )
 
@@ -12,17 +11,17 @@ type APIDeps struct {
 	Restart    http.HandlerFunc
 	Site       func(*http.ServeMux)
 	DevMode    bool
-	Connection func() *httpapi.ConnectionAPI
-	Chats      func() *httpapi.ChatsAPI
-	Config     func() *httpapi.ConfigAPI
-	Brains     func() *httpapi.BrainsAPI
-	Filesystem func() *httpapi.FilesystemAPI
-	Backup     func() *httpapi.BackupAPI
-	Google     func() *httpapi.GoogleAPI
-	Plaud      func() *httpapi.PlaudAPI
-	PlaudApp   func() *httpapi.PlaudAppAPI
-	Auth       func() *httpapi.DashboardAuth
-	Dev        func() *httpapi.DevAPI
+	Connection func() *ConnectionAPI
+	Chats      func() *ChatsAPI
+	Config     func() *ConfigAPI
+	Brains     func() *BrainsAPI
+	Filesystem func() *FilesystemAPI
+	Backup     func() *BackupAPI
+	Google     func() *GoogleAPI
+	Plaud      func() *PlaudAPI
+	PlaudApp   func() *PlaudAppAPI
+	Auth       func() *DashboardAuth
+	Dev        func() *DevAPI
 }
 
 func NewAPIMux(d APIDeps) http.Handler {
